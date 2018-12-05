@@ -107,6 +107,9 @@ always-y += $(hostprogs-always-y) $(hostprogs-always-m)
 userprogs += $(userprogs-always-y) $(userprogs-always-m)
 always-y += $(userprogs-always-y) $(userprogs-always-m)
 
+# Overlay targets
+extra-y                                += $(dtbo-y) $(scr-y) $(dtbotxt-y)
+
 # Add subdir path
 
 ifneq ($(obj),.)
