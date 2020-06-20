@@ -8,6 +8,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/leds/common.h>
+#include "rk3328-dram-default-timing.dtsi"
 #include "rk3328.dtsi"
 
 / {
@@ -83,6 +84,33 @@
 		regulator-boot-on;
 		vin-supply = <&vcc_sys>;
 	};
+
+	/delete-node/ dmc-opp-table;
+
+	dmc_opp_table: dmc_opp_table {
+		compatible = "operating-points-v2";
+
+		opp-786000000 {
+			opp-hz = /bits/ 64 <786000000>;
+			opp-microvolt = <1075000 1075000 1200000>;
+		};
+		opp-798000000 {
+			opp-hz = /bits/ 64 <798000000>;
+			opp-microvolt = <1075000 1075000 1200000>;
+		};
+		opp-840000000 {
+			opp-hz = /bits/ 64 <840000000>;
+			opp-microvolt = <1075000 1075000 1200000>;
+		};
+		opp-924000000 {
+			opp-hz = /bits/ 64 <924000000>;
+			opp-microvolt = <1100000 1100000 1200000>;
+		};
+		opp-1056000000 {
+			opp-hz = /bits/ 64 <1056000000>;
+			opp-microvolt = <1175000 1175000 1200000>;
+		};
+	};
 };
 
 &cpu0 {
@@ -105,6 +133,16 @@
 	status = "disabled";
 };
 
+&dfi {
+	status = "okay";
+};
+
+&dmc {
+	center-supply = <&vdd_log>;
+	ddr_timing = <&ddr_timing>;
+	status = "okay";
+};
+
 &gmac2io {
 	assigned-clocks = <&cru SCLK_MAC2IO>, <&cru SCLK_MAC2IO_EXT>;
 	assigned-clock-parents = <&gmac_clk>, <&gmac_clk>;
@@ -118,6 +156,10 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 	};
+};
+
+&i2c0 {
+	status = "okay";
 };
 
 &i2c1 {
@@ -149,6 +191,7 @@
 				regulator-name = "vdd_log";
 				regulator-always-on;
 				regulator-boot-on;
+				regulator-init-microvolt = <1075000>;
 				regulator-min-microvolt = <712500>;
 				regulator-max-microvolt = <1450000>;
 				regulator-ramp-delay = <12500>;
@@ -163,6 +206,7 @@
 				regulator-name = "vdd_arm";
 				regulator-always-on;
 				regulator-boot-on;
+				regulator-init-microvolt = <1225000>;
 				regulator-min-microvolt = <712500>;
 				regulator-max-microvolt = <1450000>;
 				regulator-ramp-delay = <12500>;
@@ -344,6 +388,7 @@
 	rtl8153: device@2 {
 		compatible = "usbbda,8153";
 		reg = <2>;
+		realtek,led-data = <0x87>;
 	};
 };
 
