@@ -1,18 +1,15 @@
-#include <linux/threads.h>
-#include <linux/cpumask.h>
-#include <linux/string.h>
-#include <linux/kernel.h>
-#include <linux/ctype.h>
-#include <linux/dmar.h>
+// SPDX-License-Identifier: GPL-2.0
 
-#include <asm/smp.h>
-#include <asm/x2apic.h>
+#include <linux/cpumask.h>
+#include <linux/acpi.h>
+
+#include "local.h"
 
 int x2apic_phys;
 
 static struct apic apic_x2apic_phys;
 
-static int set_x2apic_phys_mode(char *arg)
+static int __init set_x2apic_phys_mode(char *arg)
 {
 	x2apic_phys = 1;
 	return 0;
@@ -78,12 +75,12 @@ static void
 
 static void x2apic_send_IPI_allbutself(int vector)
 {
-	__x2apic_send_IPI_mask(cpu_online_mask, vector, APIC_DEST_ALLBUT);
+	__x2apic_send_IPI_shorthand(vector, APIC_DEST_ALLBUT);
 }
 
 static void x2apic_send_IPI_all(int vector)
 {
-	__x2apic_send_IPI_mask(cpu_online_mask, vector, APIC_DEST_ALLINC);
+	__x2apic_send_IPI_shorthand(vector, APIC_DEST_ALLINC);
 }
 
 static void init_x2apic_ldr(void)
@@ -98,6 +95,51 @@ static int x2apic_phys_probe(void)
 	return apic == &apic_x2apic_phys;
 }
 
+/* Common x2apic functions, also used by x2apic_cluster */
+int x2apic_apic_id_valid(u32 apicid)
+{
+	return 1;
+}
+
+int x2apic_apic_id_registered(void)
+{
+	return 1;
+}
+
+void __x2apic_send_IPI_dest(unsigned int apicid, int vector, unsigned int dest)
+{
+	unsigned long cfg = __prepare_ICR(0, vector, dest);
+	native_x2apic_icr_write(cfg, apicid);
+}
+
+void __x2apic_send_IPI_shorthand(int vector, u32 which)
+{
+	unsigned long cfg = __prepare_ICR(which, vector, 0);
+
+	x2apic_wrmsr_fence();
+	native_x2apic_icr_write(cfg, 0);
+}
+
+unsigned int x2apic_get_apic_id(unsigned long id)
+{
+	return id;
+}
+
+u32 x2apic_set_apic_id(unsigned int id)
+{
+	return id;
+}
+
+int x2apic_phys_pkg_id(int initial_apicid, int index_msb)
+{
+	return initial_apicid >> index_msb;
+}
+
+void x2apic_send_IPI_self(int vector)
+{
+	apic_write(APIC_SELF_IPI, vector);
+}
+
 static struct apic apic_x2apic_phys __ro_after_init = {
 
 	.name				= "physical x2apic",
@@ -109,12 +151,10 @@ static struct apic apic_x2apic_phys __ro_after_init = {
 	.irq_delivery_mode		= dest_Fixed,
 	.irq_dest_mode			= 0, /* physical */
 
-	.target_cpus			= online_target_cpus,
 	.disable_esr			= 0,
 	.dest_logical			= 0,
 	.check_apicid_used		= NULL,
 
-	.vector_allocation_domain	= default_vector_allocation_domain,
 	.init_apic_ldr			= init_x2apic_ldr,
 
 	.ioapic_phys_id_map		= NULL,
@@ -127,7 +167,7 @@ static struct apic apic_x2apic_phys __ro_after_init = {
 	.get_apic_id			= x2apic_get_apic_id,
 	.set_apic_id			= x2apic_set_apic_id,
 
-	.cpu_mask_to_apicid_and		= default_cpu_mask_to_apicid_and,
+	.calc_dest_apicid		= apic_default_calc_apicid,
 
 	.send_IPI			= x2apic_send_IPI,
 	.send_IPI_mask			= x2apic_send_IPI_mask,

@@ -1,27 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef __SOUND_CONTROL_H
 #define __SOUND_CONTROL_H
 
 /*
  *  Header file for control interface
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
+#include <linux/wait.h>
 #include <linux/nospec.h>
 #include <sound/asound.h>
 
@@ -250,6 +236,11 @@ int snd_ctl_add_vmaster_hook(struct snd_kcontrol *kctl,
 			     void *private_data);
 void snd_ctl_sync_vmaster(struct snd_kcontrol *kctl, bool hook_only);
 #define snd_ctl_sync_vmaster_hook(kctl)	snd_ctl_sync_vmaster(kctl, true)
+int snd_ctl_apply_vmaster_slaves(struct snd_kcontrol *kctl,
+				 int (*func)(struct snd_kcontrol *vslave,
+					     struct snd_kcontrol *slave,
+					     void *arg),
+				 void *arg);
 
 /*
  * Helper functions for jack-detection controls

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (c) 2008-2014 STMicroelectronics Limited
  *
@@ -6,9 +7,6 @@
  *          Lee Jones <lee.jones@linaro.org>
  *
  *  SPI master mode controller driver, used in STMicroelectronics devices.
- *
- *  May be copied or modified under the terms of the GNU General Public
- *  License Version 2.0 only.  See linux/COPYING for more information.
  */
 
 #include <linux/clk.h>
@@ -229,42 +227,42 @@ static int spi_st_setup(struct spi_device *spi)
 		"setting baudrate:target= %u hz, actual= %u hz, sscbrg= %u\n",
 		hz, spi_st->baud, sscbrg);
 
-	 /* Set SSC_CTL and enable SSC */
-	 var = readl_relaxed(spi_st->base + SSC_CTL);
-	 var |= SSC_CTL_MS;
+	/* Set SSC_CTL and enable SSC */
+	var = readl_relaxed(spi_st->base + SSC_CTL);
+	var |= SSC_CTL_MS;
 
-	 if (spi->mode & SPI_CPOL)
+	if (spi->mode & SPI_CPOL)
 		var |= SSC_CTL_PO;
-	 else
+	else
 		var &= ~SSC_CTL_PO;
 
-	 if (spi->mode & SPI_CPHA)
+	if (spi->mode & SPI_CPHA)
 		var |= SSC_CTL_PH;
-	 else
+	else
 		var &= ~SSC_CTL_PH;
 
-	 if ((spi->mode & SPI_LSB_FIRST) == 0)
+	if ((spi->mode & SPI_LSB_FIRST) == 0)
 		var |= SSC_CTL_HB;
-	 else
+	else
 		var &= ~SSC_CTL_HB;
 
-	 if (spi->mode & SPI_LOOP)
+	if (spi->mode & SPI_LOOP)
 		var |= SSC_CTL_LPB;
-	 else
+	else
 		var &= ~SSC_CTL_LPB;
 
-	 var &= ~SSC_CTL_DATA_WIDTH_MSK;
-	 var |= (spi->bits_per_word - 1);
+	var &= ~SSC_CTL_DATA_WIDTH_MSK;
+	var |= (spi->bits_per_word - 1);
 
-	 var |= SSC_CTL_EN_TX_FIFO | SSC_CTL_EN_RX_FIFO;
-	 var |= SSC_CTL_EN;
+	var |= SSC_CTL_EN_TX_FIFO | SSC_CTL_EN_RX_FIFO;
+	var |= SSC_CTL_EN;
 
-	 writel_relaxed(var, spi_st->base + SSC_CTL);
+	writel_relaxed(var, spi_st->base + SSC_CTL);
 
-	 /* Clear the status register */
-	 readl_relaxed(spi_st->base + SSC_RBUF);
+	/* Clear the status register */
+	readl_relaxed(spi_st->base + SSC_RBUF);
 
-	 return 0;
+	return 0;
 
 out_free_gpio:
 	gpio_free(cs);
@@ -300,7 +298,6 @@ static int spi_st_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct spi_master *master;
-	struct resource *res;
 	struct spi_st *spi_st;
 	int irq, ret = 0;
 	u32 var;
@@ -333,8 +330,7 @@ static int spi_st_probe(struct platform_device *pdev)
 	init_completion(&spi_st->done);
 
 	/* Get resources */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	spi_st->base = devm_ioremap_resource(&pdev->dev, res);
+	spi_st->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(spi_st->base)) {
 		ret = PTR_ERR(spi_st->base);
 		goto clk_disable;
@@ -385,6 +381,7 @@ static int spi_st_probe(struct platform_device *pdev)
 	return 0;
 
 clk_disable:
+	pm_runtime_disable(&pdev->dev);
 	clk_disable_unprepare(spi_st->clk);
 put_master:
 	spi_master_put(master);
@@ -395,6 +392,8 @@ static int spi_st_remove(struct platform_device *pdev)
 {
 	struct spi_master *master = platform_get_drvdata(pdev);
 	struct spi_st *spi_st = spi_master_get_devdata(master);
+
+	pm_runtime_disable(&pdev->dev);
 
 	clk_disable_unprepare(spi_st->clk);
 

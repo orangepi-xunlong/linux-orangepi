@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * A test for the patch "Allow compaction of unevictable pages".
@@ -14,6 +15,8 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
+
+#include "../kselftest.h"
 
 #define MAP_SIZE 1048576
 
@@ -168,7 +171,7 @@ int main(int argc, char **argv)
 		printf("Either the sysctl compact_unevictable_allowed is not\n"
 		       "set to 1 or couldn't read the proc file.\n"
 		       "Skipping the test\n");
-		return 0;
+		return KSFT_SKIP;
 	}
 
 	lim.rlim_cur = RLIM_INFINITY;

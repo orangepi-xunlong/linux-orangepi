@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _PARISC_BITOPS_H
 #define _PARISC_BITOPS_H
 
@@ -187,7 +188,7 @@ static __inline__ int ffs(int x)
  * fls(0) = 0, fls(1) = 1, fls(0x80000000) = 32.
  */
 
-static __inline__ int fls(int x)
+static __inline__ int fls(unsigned int x)
 {
 	int ret;
 	if (!x)

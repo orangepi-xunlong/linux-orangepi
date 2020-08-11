@@ -1,5 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _BTRFS_CTREE_H_
 #define _BTRFS_CTREE_H_
+
+#include <linux/btrfs.h>
+#include <linux/types.h>
 
 /*
  * This header contains the structure definitions and constants used
@@ -296,13 +300,17 @@
 #define BTRFS_CSUM_SIZE 32
 
 /* csum types */
-#define BTRFS_CSUM_TYPE_CRC32	0
+enum btrfs_csum_type {
+	BTRFS_CSUM_TYPE_CRC32	= 0,
+};
 
 /*
  * flags definitions for directory entry item type
  *
  * Used by:
  * struct btrfs_dir_item.type
+ *
+ * Values 0..7 must match common file type values in fs_types.h.
  */
 #define BTRFS_FT_UNKNOWN	0
 #define BTRFS_FT_REG_FILE	1
@@ -453,6 +461,8 @@ struct btrfs_free_space_header {
 #define BTRFS_SUPER_FLAG_SEEDING	(1ULL << 32)
 #define BTRFS_SUPER_FLAG_METADUMP	(1ULL << 33)
 #define BTRFS_SUPER_FLAG_METADUMP_V2	(1ULL << 34)
+#define BTRFS_SUPER_FLAG_CHANGING_FSID	(1ULL << 35)
+#define BTRFS_SUPER_FLAG_CHANGING_FSID_V2 (1ULL << 36)
 
 
 /*
@@ -730,6 +740,7 @@ struct btrfs_balance_item {
 #define BTRFS_FILE_EXTENT_INLINE 0
 #define BTRFS_FILE_EXTENT_REG 1
 #define BTRFS_FILE_EXTENT_PREALLOC 2
+#define BTRFS_FILE_EXTENT_TYPES	2
 
 struct btrfs_file_extent_item {
 	/*
@@ -797,11 +808,6 @@ struct btrfs_dev_stats_item {
 
 #define BTRFS_DEV_REPLACE_ITEM_CONT_READING_FROM_SRCDEV_MODE_ALWAYS	0
 #define BTRFS_DEV_REPLACE_ITEM_CONT_READING_FROM_SRCDEV_MODE_AVOID	1
-#define BTRFS_DEV_REPLACE_ITEM_STATE_NEVER_STARTED	0
-#define BTRFS_DEV_REPLACE_ITEM_STATE_STARTED		1
-#define BTRFS_DEV_REPLACE_ITEM_STATE_SUSPENDED		2
-#define BTRFS_DEV_REPLACE_ITEM_STATE_FINISHED		3
-#define BTRFS_DEV_REPLACE_ITEM_STATE_CANCELED		4
 
 struct btrfs_dev_replace_item {
 	/*
@@ -856,6 +862,8 @@ enum btrfs_raid_types {
 					 BTRFS_BLOCK_GROUP_RAID10)
 #define BTRFS_BLOCK_GROUP_RAID56_MASK	(BTRFS_BLOCK_GROUP_RAID5 |   \
 					 BTRFS_BLOCK_GROUP_RAID6)
+
+#define BTRFS_BLOCK_GROUP_RAID1_MASK	(BTRFS_BLOCK_GROUP_RAID1)
 
 /*
  * We need a bit for restriper to be able to tell when chunks of type

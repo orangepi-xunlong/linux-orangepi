@@ -67,8 +67,11 @@
 		ranges;
 
 		prcm: prcm@48180000 {
-			compatible = "ti,dm816-prcm";
+			compatible = "ti,dm816-prcm", "simple-bus";
 			reg = <0x48180000 0x4000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges = <0 0x48180000 0x4000>;
 
 			prcm_clocks: clocks {
 				#address-cells = <1>;
@@ -84,6 +87,7 @@
 			reg = <0x48140000 0x21000>;
 			#address-cells = <1>;
 			#size-cells = <1>;
+			#pinctrl-cells = <1>;
 			ranges = <0 0x48140000 0x21000>;
 
 			dm816x_pinmux: pinmux@800 {
@@ -91,6 +95,7 @@
 				reg = <0x800 0x50a>;
 				#address-cells = <1>;
 				#size-cells = <0>;
+				#pinctrl-cells = <1>;
 				pinctrl-single,register-width = <16>;
 				pinctrl-single,function-mask = <0xf>;
 			};
@@ -143,7 +148,7 @@
 		};
 
 		elm: elm@48080000 {
-			compatible = "ti,816-elm";
+			compatible = "ti,am3352-elm";
 			ti,hwmods = "elm";
 			reg = <0x48080000 0x2000>;
 			interrupts = <4>;
@@ -291,6 +296,13 @@
 			phy-handle = <&phy1>;
 		};
 
+		sata: sata@4a140000 {
+			compatible = "ti,dm816-ahci";
+			reg = <0x4a140000 0x10000>;
+			interrupts = <16>;
+			ti,hwmods = "sata";
+		};
+
 		mcspi1: spi@48030000 {
 			compatible = "ti,omap4-mcspi";
 			reg = <0x48030000 0x1000>;
@@ -322,6 +334,8 @@
 			interrupts = <67>;
 			ti,hwmods = "timer1";
 			ti,timer-alwon;
+			clocks = <&timer1_fck>;
+			clock-names = "fck";
 		};
 
 		timer2: timer@48040000 {
@@ -329,6 +343,8 @@
 			reg = <0x48040000 0x2000>;
 			interrupts = <68>;
 			ti,hwmods = "timer2";
+			clocks = <&timer2_fck>;
+			clock-names = "fck";
 		};
 
 		timer3: timer@48042000 {

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_MICROBLAZE_FUTEX_H
 #define _ASM_MICROBLAZE_FUTEX_H
 
@@ -70,7 +71,7 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	int ret = 0, cmp;
 	u32 prev;
 
-	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
+	if (!access_ok(uaddr, sizeof(u32)))
 		return -EFAULT;
 
 	__asm__ __volatile__ ("1:	lwx	%1, %3, r0;		\

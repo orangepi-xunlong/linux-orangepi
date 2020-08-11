@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _RTL871X_RECV_H_
 #define _RTL871X_RECV_H_
 
@@ -74,12 +75,12 @@ struct rx_pkt_attrib {
 };
 
 /*
-accesser of recv_priv: recv_entry(dispatch / passive level);
-recv_thread(passive) ; returnpkt(dispatch)
-; halt(passive) ;
-
-using enter_critical section to protect
-*/
+ * accesser of recv_priv: recv_entry(dispatch / passive level);
+ * recv_thread(passive) ; returnpkt(dispatch)
+ * ; halt(passive) ;
+ *
+ * using enter_critical section to protect
+ */
 struct recv_priv {
 	spinlock_t lock;
 	struct  __queue	free_recv_queue;
@@ -127,7 +128,7 @@ struct sta_recv_priv {
 
 /* get a free recv_frame from pfree_recv_queue */
 union recv_frame *r8712_alloc_recvframe(struct  __queue *pfree_recv_queue);
-int r8712_free_recvframe(union recv_frame *precvframe,
+void r8712_free_recvframe(union recv_frame *precvframe,
 			  struct  __queue *pfree_recv_queue);
 void r8712_free_recvframe_queue(struct  __queue *pframequeue,
 				 struct  __queue *pfree_recv_queue);

@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- *
- */
+/* SPDX-License-Identifier: GPL-2.0-only */
 
 #ifndef __KVM_TYPES_H__
 #define __KVM_TYPES_H__
@@ -32,7 +18,7 @@ struct kvm_memslots;
 
 enum kvm_mr_change;
 
-#include <asm/types.h>
+#include <linux/types.h>
 
 /*
  * Address types:
@@ -61,6 +47,13 @@ struct gfn_to_hva_cache {
 	unsigned long hva;
 	unsigned long len;
 	struct kvm_memory_slot *memslot;
+};
+
+struct gfn_to_pfn_cache {
+	u64 generation;
+	gfn_t gfn;
+	kvm_pfn_t pfn;
+	bool dirty;
 };
 
 #endif /* __KVM_TYPES_H__ */

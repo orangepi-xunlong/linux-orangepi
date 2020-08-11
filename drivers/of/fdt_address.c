@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * FDT Address translation based on u-boot fdt_support.c which in turn was
  * based on the kernel unflattened DT address translation code.
@@ -6,11 +7,6 @@
  * Gerald Van Baren, Custom IDEAS, vanbaren@cideas.com
  *
  * Copyright 2010-2011 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
  */
 
 #define pr_fmt(fmt)	"OF: fdt: " fmt
@@ -164,7 +160,7 @@ static int __init fdt_translate_one(const void *blob, int parent,
  * that can be mapped to a cpu physical address). This is not really specified
  * that way, but this is traditionally the way IBM at least do things
  */
-static u64 __init fdt_translate_address(const void *blob, int node_offset)
+u64 __init fdt_translate_address(const void *blob, int node_offset)
 {
 	int parent, len;
 	const struct of_bus *bus, *pbus;

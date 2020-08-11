@@ -1,13 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * dwarf-regs.c : Mapping of DWARF debug register numbers into register names.
  *
  * Written by: Masami Hiramatsu <mhiramat@kernel.org>
  */
 
-#include <util.h>
 #include <debug.h>
 #include <dwarf-regs.h>
 #include <elf.h>
+#include <linux/kernel.h>
 
 #ifndef EM_AARCH64
 #define EM_AARCH64	183  /* ARM 64 bit */

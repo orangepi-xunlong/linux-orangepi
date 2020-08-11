@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AM824 format in Audio and Music Data Transmission Protocol (IEC 61883-6)
  *
  * Copyright (c) Clemens Ladisch <clemens@ladisch.de>
  * Copyright (c) 2015 Takashi Sakamoto <o-takashi@sakamocchi.jp>
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include <linux/slab.h>
@@ -37,10 +36,6 @@ struct amdtp_am824 {
 
 	u8 pcm_positions[AM824_MAX_CHANNELS_FOR_PCM];
 	u8 midi_position;
-
-	void (*transfer_samples)(struct amdtp_stream *s,
-				 struct snd_pcm_substream *pcm,
-				 __be32 *buffer, unsigned int frames);
 
 	unsigned int frame_multiplier;
 };
@@ -87,7 +82,8 @@ int amdtp_am824_set_parameters(struct amdtp_stream *s, unsigned int rate,
 	if (err < 0)
 		return err;
 
-	s->fdf = AMDTP_FDF_AM824 | s->sfc;
+	if (s->direction == AMDTP_OUT_STREAM)
+		s->ctx_data.rx.fdf = AMDTP_FDF_AM824 | s->sfc;
 
 	p->pcm_channels = pcm_channels;
 	p->midi_ports = midi_ports;
@@ -151,19 +147,24 @@ void amdtp_am824_set_midi_position(struct amdtp_stream *s,
 }
 EXPORT_SYMBOL_GPL(amdtp_am824_set_midi_position);
 
-static void write_pcm_s32(struct amdtp_stream *s,
-			  struct snd_pcm_substream *pcm,
-			  __be32 *buffer, unsigned int frames)
+static void write_pcm_s32(struct amdtp_stream *s, struct snd_pcm_substream *pcm,
+			  __be32 *buffer, unsigned int frames,
+			  unsigned int pcm_frames)
 {
 	struct amdtp_am824 *p = s->protocol;
+	unsigned int channels = p->pcm_channels;
 	struct snd_pcm_runtime *runtime = pcm->runtime;
-	unsigned int channels, remaining_frames, i, c;
+	unsigned int pcm_buffer_pointer;
+	int remaining_frames;
 	const u32 *src;
+	int i, c;
 
-	channels = p->pcm_channels;
+	pcm_buffer_pointer = s->pcm_buffer_pointer + pcm_frames;
+	pcm_buffer_pointer %= runtime->buffer_size;
+
 	src = (void *)runtime->dma_area +
-			frames_to_bytes(runtime, s->pcm_buffer_pointer);
-	remaining_frames = runtime->buffer_size - s->pcm_buffer_pointer;
+				frames_to_bytes(runtime, pcm_buffer_pointer);
+	remaining_frames = runtime->buffer_size - pcm_buffer_pointer;
 
 	for (i = 0; i < frames; ++i) {
 		for (c = 0; c < channels; ++c) {
@@ -177,45 +178,24 @@ static void write_pcm_s32(struct amdtp_stream *s,
 	}
 }
 
-static void write_pcm_s16(struct amdtp_stream *s,
-			  struct snd_pcm_substream *pcm,
-			  __be32 *buffer, unsigned int frames)
+static void read_pcm_s32(struct amdtp_stream *s, struct snd_pcm_substream *pcm,
+			 __be32 *buffer, unsigned int frames,
+			 unsigned int pcm_frames)
 {
 	struct amdtp_am824 *p = s->protocol;
+	unsigned int channels = p->pcm_channels;
 	struct snd_pcm_runtime *runtime = pcm->runtime;
-	unsigned int channels, remaining_frames, i, c;
-	const u16 *src;
-
-	channels = p->pcm_channels;
-	src = (void *)runtime->dma_area +
-			frames_to_bytes(runtime, s->pcm_buffer_pointer);
-	remaining_frames = runtime->buffer_size - s->pcm_buffer_pointer;
-
-	for (i = 0; i < frames; ++i) {
-		for (c = 0; c < channels; ++c) {
-			buffer[p->pcm_positions[c]] =
-					cpu_to_be32((*src << 8) | 0x42000000);
-			src++;
-		}
-		buffer += s->data_block_quadlets;
-		if (--remaining_frames == 0)
-			src = (void *)runtime->dma_area;
-	}
-}
-
-static void read_pcm_s32(struct amdtp_stream *s,
-			 struct snd_pcm_substream *pcm,
-			 __be32 *buffer, unsigned int frames)
-{
-	struct amdtp_am824 *p = s->protocol;
-	struct snd_pcm_runtime *runtime = pcm->runtime;
-	unsigned int channels, remaining_frames, i, c;
+	unsigned int pcm_buffer_pointer;
+	int remaining_frames;
 	u32 *dst;
+	int i, c;
 
-	channels = p->pcm_channels;
+	pcm_buffer_pointer = s->pcm_buffer_pointer + pcm_frames;
+	pcm_buffer_pointer %= runtime->buffer_size;
+
 	dst  = (void *)runtime->dma_area +
-			frames_to_bytes(runtime, s->pcm_buffer_pointer);
-	remaining_frames = runtime->buffer_size - s->pcm_buffer_pointer;
+				frames_to_bytes(runtime, pcm_buffer_pointer);
+	remaining_frames = runtime->buffer_size - pcm_buffer_pointer;
 
 	for (i = 0; i < frames; ++i) {
 		for (c = 0; c < channels; ++c) {
@@ -240,43 +220,6 @@ static void write_pcm_silence(struct amdtp_stream *s,
 		buffer += s->data_block_quadlets;
 	}
 }
-
-/**
- * amdtp_am824_set_pcm_format - set the PCM format
- * @s: the AMDTP stream to configure
- * @format: the format of the ALSA PCM device
- *
- * The sample format must be set after the other parameters (rate/PCM channels/
- * MIDI) and before the stream is started, and must not be changed while the
- * stream is running.
- */
-void amdtp_am824_set_pcm_format(struct amdtp_stream *s, snd_pcm_format_t format)
-{
-	struct amdtp_am824 *p = s->protocol;
-
-	if (WARN_ON(amdtp_stream_pcm_running(s)))
-		return;
-
-	switch (format) {
-	default:
-		WARN_ON(1);
-		/* fall through */
-	case SNDRV_PCM_FORMAT_S16:
-		if (s->direction == AMDTP_OUT_STREAM) {
-			p->transfer_samples = write_pcm_s16;
-			break;
-		}
-		WARN_ON(1);
-		/* fall through */
-	case SNDRV_PCM_FORMAT_S32:
-		if (s->direction == AMDTP_OUT_STREAM)
-			p->transfer_samples = write_pcm_s32;
-		else
-			p->transfer_samples = read_pcm_s32;
-		break;
-	}
-}
-EXPORT_SYMBOL_GPL(amdtp_am824_set_pcm_format);
 
 /**
  * amdtp_am824_add_pcm_hw_constraints - add hw constraints for PCM substream
@@ -314,7 +257,7 @@ void amdtp_am824_midi_trigger(struct amdtp_stream *s, unsigned int port,
 	struct amdtp_am824 *p = s->protocol;
 
 	if (port < p->midi_ports)
-		ACCESS_ONCE(p->midi[port]) = midi;
+		WRITE_ONCE(p->midi[port], midi);
 }
 EXPORT_SYMBOL_GPL(amdtp_am824_midi_trigger);
 
@@ -352,7 +295,7 @@ static void midi_rate_use_one_byte(struct amdtp_stream *s, unsigned int port)
 }
 
 static void write_midi_messages(struct amdtp_stream *s, __be32 *buffer,
-				unsigned int frames)
+			unsigned int frames, unsigned int data_block_counter)
 {
 	struct amdtp_am824 *p = s->protocol;
 	unsigned int f, port;
@@ -361,7 +304,7 @@ static void write_midi_messages(struct amdtp_stream *s, __be32 *buffer,
 	for (f = 0; f < frames; f++) {
 		b = (u8 *)&buffer[p->midi_position];
 
-		port = (s->data_block_counter + f) % 8;
+		port = (data_block_counter + f) % 8;
 		if (f < MAX_MIDI_RX_BLOCKS &&
 		    midi_ratelimit_per_packet(s, port) &&
 		    p->midi[port] != NULL &&
@@ -379,16 +322,20 @@ static void write_midi_messages(struct amdtp_stream *s, __be32 *buffer,
 	}
 }
 
-static void read_midi_messages(struct amdtp_stream *s,
-			       __be32 *buffer, unsigned int frames)
+static void read_midi_messages(struct amdtp_stream *s, __be32 *buffer,
+			unsigned int frames, unsigned int data_block_counter)
 {
 	struct amdtp_am824 *p = s->protocol;
-	unsigned int f, port;
 	int len;
 	u8 *b;
+	int f;
 
 	for (f = 0; f < frames; f++) {
-		port = (s->data_block_counter + f) % 8;
+		unsigned int port = f;
+
+		if (!(s->flags & CIP_UNALIGHED_DBC))
+			port += data_block_counter;
+		port %= 8;
 		b = (u8 *)&buffer[p->midi_position];
 
 		len = b[0] - 0x80;
@@ -399,43 +346,60 @@ static void read_midi_messages(struct amdtp_stream *s,
 	}
 }
 
-static unsigned int process_rx_data_blocks(struct amdtp_stream *s, __be32 *buffer,
-					   unsigned int data_blocks, unsigned int *syt)
+static unsigned int process_it_ctx_payloads(struct amdtp_stream *s,
+					    const struct pkt_desc *descs,
+					    unsigned int packets,
+					    struct snd_pcm_substream *pcm)
 {
 	struct amdtp_am824 *p = s->protocol;
-	struct snd_pcm_substream *pcm = ACCESS_ONCE(s->pcm);
-	unsigned int pcm_frames;
+	unsigned int pcm_frames = 0;
+	int i;
 
-	if (pcm) {
-		p->transfer_samples(s, pcm, buffer, data_blocks);
-		pcm_frames = data_blocks * p->frame_multiplier;
-	} else {
-		write_pcm_silence(s, buffer, data_blocks);
-		pcm_frames = 0;
+	for (i = 0; i < packets; ++i) {
+		const struct pkt_desc *desc = descs + i;
+		__be32 *buf = desc->ctx_payload;
+		unsigned int data_blocks = desc->data_blocks;
+
+		if (pcm) {
+			write_pcm_s32(s, pcm, buf, data_blocks, pcm_frames);
+			pcm_frames += data_blocks * p->frame_multiplier;
+		} else {
+			write_pcm_silence(s, buf, data_blocks);
+		}
+
+		if (p->midi_ports) {
+			write_midi_messages(s, buf, data_blocks,
+					    desc->data_block_counter);
+		}
 	}
-
-	if (p->midi_ports)
-		write_midi_messages(s, buffer, data_blocks);
 
 	return pcm_frames;
 }
 
-static unsigned int process_tx_data_blocks(struct amdtp_stream *s, __be32 *buffer,
-					   unsigned int data_blocks, unsigned int *syt)
+static unsigned int process_ir_ctx_payloads(struct amdtp_stream *s,
+					    const struct pkt_desc *descs,
+					    unsigned int packets,
+					    struct snd_pcm_substream *pcm)
 {
 	struct amdtp_am824 *p = s->protocol;
-	struct snd_pcm_substream *pcm = ACCESS_ONCE(s->pcm);
-	unsigned int pcm_frames;
+	unsigned int pcm_frames = 0;
+	int i;
 
-	if (pcm) {
-		p->transfer_samples(s, pcm, buffer, data_blocks);
-		pcm_frames = data_blocks * p->frame_multiplier;
-	} else {
-		pcm_frames = 0;
+	for (i = 0; i < packets; ++i) {
+		const struct pkt_desc *desc = descs + i;
+		__be32 *buf = desc->ctx_payload;
+		unsigned int data_blocks = desc->data_blocks;
+
+		if (pcm) {
+			read_pcm_s32(s, pcm, buf, data_blocks, pcm_frames);
+			pcm_frames += data_blocks * p->frame_multiplier;
+		}
+
+		if (p->midi_ports) {
+			read_midi_messages(s, buf, data_blocks,
+					   desc->data_block_counter);
+		}
 	}
-
-	if (p->midi_ports)
-		read_midi_messages(s, buffer, data_blocks);
 
 	return pcm_frames;
 }
@@ -451,15 +415,14 @@ static unsigned int process_tx_data_blocks(struct amdtp_stream *s, __be32 *buffe
 int amdtp_am824_init(struct amdtp_stream *s, struct fw_unit *unit,
 		     enum amdtp_stream_direction dir, enum cip_flags flags)
 {
-	amdtp_stream_process_data_blocks_t process_data_blocks;
+	amdtp_stream_process_ctx_payloads_t process_ctx_payloads;
 
 	if (dir == AMDTP_IN_STREAM)
-		process_data_blocks = process_tx_data_blocks;
+		process_ctx_payloads = process_ir_ctx_payloads;
 	else
-		process_data_blocks = process_rx_data_blocks;
+		process_ctx_payloads = process_it_ctx_payloads;
 
 	return amdtp_stream_init(s, unit, dir, flags, CIP_FMT_AM,
-				 process_data_blocks,
-				 sizeof(struct amdtp_am824));
+			process_ctx_payloads, sizeof(struct amdtp_am824));
 }
 EXPORT_SYMBOL_GPL(amdtp_am824_init);

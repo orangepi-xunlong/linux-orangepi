@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Based on arch/arm/mm/context.c
  *
  * Copyright (C) 2002-2003 Deep Blue Solutions Ltd, all rights reserved.
  * Copyright (C) 2012 ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/bitops.h>
@@ -88,19 +77,13 @@ void verify_cpu_asid_bits(void)
 	}
 }
 
-static void flush_context(unsigned int cpu)
+static void flush_context(void)
 {
 	int i;
 	u64 asid;
 
 	/* Update the list of reserved ASIDs and the ASID bitmap. */
 	bitmap_clear(asid_map, 0, NUM_USER_ASIDS);
-
-	/*
-	 * Ensure the generation bump is observed before we xchg the
-	 * active_asids.
-	 */
-	smp_wmb();
 
 	for_each_possible_cpu(i) {
 		asid = atomic64_xchg_relaxed(&per_cpu(active_asids, i), 0);
@@ -117,11 +100,11 @@ static void flush_context(unsigned int cpu)
 		per_cpu(reserved_asids, i) = asid;
 	}
 
-	/* Queue a TLB invalidate and flush the I-cache if necessary. */
+	/*
+	 * Queue a TLB invalidation for each CPU to perform on next
+	 * context-switch
+	 */
 	cpumask_setall(&tlb_flush_pending);
-
-	if (icache_is_aivivt())
-		__flush_icache_all();
 }
 
 static bool check_update_reserved_asid(u64 asid, u64 newasid)
@@ -148,7 +131,7 @@ static bool check_update_reserved_asid(u64 asid, u64 newasid)
 	return hit;
 }
 
-static u64 new_context(struct mm_struct *mm, unsigned int cpu)
+static u64 new_context(struct mm_struct *mm)
 {
 	static u32 cur_idx = 1;
 	u64 asid = atomic64_read(&mm->context.id);
@@ -186,7 +169,7 @@ static u64 new_context(struct mm_struct *mm, unsigned int cpu)
 	/* We're out of ASIDs, so increment the global generation count */
 	generation = atomic64_add_return_relaxed(ASID_FIRST_VERSION,
 						 &asid_generation);
-	flush_context(cpu);
+	flush_context();
 
 	/* We have more ASIDs than CPUs, so this will always succeed */
 	asid = find_next_zero_bit(asid_map, NUM_USER_ASIDS, 1);
@@ -200,26 +183,39 @@ set_asid:
 void check_and_switch_context(struct mm_struct *mm, unsigned int cpu)
 {
 	unsigned long flags;
-	u64 asid;
+	u64 asid, old_active_asid;
+
+	if (system_supports_cnp())
+		cpu_set_reserved_ttbr0();
 
 	asid = atomic64_read(&mm->context.id);
 
 	/*
-	 * The memory ordering here is subtle. We rely on the control
-	 * dependency between the generation read and the update of
-	 * active_asids to ensure that we are synchronised with a
-	 * parallel rollover (i.e. this pairs with the smp_wmb() in
-	 * flush_context).
+	 * The memory ordering here is subtle.
+	 * If our active_asids is non-zero and the ASID matches the current
+	 * generation, then we update the active_asids entry with a relaxed
+	 * cmpxchg. Racing with a concurrent rollover means that either:
+	 *
+	 * - We get a zero back from the cmpxchg and end up waiting on the
+	 *   lock. Taking the lock synchronises with the rollover and so
+	 *   we are forced to see the updated generation.
+	 *
+	 * - We get a valid ASID back from the cmpxchg, which means the
+	 *   relaxed xchg in flush_context will treat us as reserved
+	 *   because atomic RmWs are totally ordered for a given location.
 	 */
-	if (!((asid ^ atomic64_read(&asid_generation)) >> asid_bits)
-	    && atomic64_xchg_relaxed(&per_cpu(active_asids, cpu), asid))
+	old_active_asid = atomic64_read(&per_cpu(active_asids, cpu));
+	if (old_active_asid &&
+	    !((asid ^ atomic64_read(&asid_generation)) >> asid_bits) &&
+	    atomic64_cmpxchg_relaxed(&per_cpu(active_asids, cpu),
+				     old_active_asid, asid))
 		goto switch_mm_fastpath;
 
 	raw_spin_lock_irqsave(&cpu_asid_lock, flags);
 	/* Check that our ASID belongs to the current generation. */
 	asid = atomic64_read(&mm->context.id);
 	if ((asid ^ atomic64_read(&asid_generation)) >> asid_bits) {
-		asid = new_context(mm, cpu);
+		asid = new_context(mm);
 		atomic64_set(&mm->context.id, asid);
 	}
 
@@ -259,7 +255,7 @@ static int asids_init(void)
 	 */
 	WARN_ON(NUM_USER_ASIDS - 1 <= num_possible_cpus());
 	atomic64_set(&asid_generation, ASID_FIRST_VERSION);
-	asid_map = kzalloc(BITS_TO_LONGS(NUM_USER_ASIDS) * sizeof(*asid_map),
+	asid_map = kcalloc(BITS_TO_LONGS(NUM_USER_ASIDS), sizeof(*asid_map),
 			   GFP_KERNEL);
 	if (!asid_map)
 		panic("Failed to allocate bitmap for %lu ASIDs\n",

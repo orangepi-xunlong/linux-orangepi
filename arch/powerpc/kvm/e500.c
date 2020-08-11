@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2008-2011 Freescale Semiconductor, Inc. All rights reserved.
  *
@@ -6,10 +7,6 @@
  * Description:
  * This file is derived from arch/powerpc/kvm/44x.c,
  * by Hollis Blanchard <hollisb@us.ibm.com>.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kvm_host.h>
@@ -21,7 +18,6 @@
 
 #include <asm/reg.h>
 #include <asm/cputable.h>
-#include <asm/tlbflush.h>
 #include <asm/kvm_ppc.h>
 
 #include "../mm/mmu_decl.h"
@@ -444,6 +440,9 @@ static struct kvm_vcpu *kvmppc_core_vcpu_create_e500(struct kvm *kvm,
 	struct kvm_vcpu *vcpu;
 	int err;
 
+	BUILD_BUG_ON_MSG(offsetof(struct kvmppc_vcpu_e500, vcpu) != 0,
+		"struct kvm_vcpu must be at offset 0 for arch usercopy region");
+
 	vcpu_e500 = kmem_cache_zalloc(kvm_vcpu_cache, GFP_KERNEL);
 	if (!vcpu_e500) {
 		err = -ENOMEM;
@@ -455,16 +454,20 @@ static struct kvm_vcpu *kvmppc_core_vcpu_create_e500(struct kvm *kvm,
 	if (err)
 		goto free_vcpu;
 
-	if (kvmppc_e500_id_table_alloc(vcpu_e500) == NULL)
+	if (kvmppc_e500_id_table_alloc(vcpu_e500) == NULL) {
+		err = -ENOMEM;
 		goto uninit_vcpu;
+	}
 
 	err = kvmppc_e500_tlb_init(vcpu_e500);
 	if (err)
 		goto uninit_id;
 
 	vcpu->arch.shared = (void*)__get_free_page(GFP_KERNEL|__GFP_ZERO);
-	if (!vcpu->arch.shared)
+	if (!vcpu->arch.shared) {
+		err = -ENOMEM;
 		goto uninit_tlb;
+	}
 
 	return vcpu;
 

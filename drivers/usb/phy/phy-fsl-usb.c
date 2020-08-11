@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2007,2008 Freescale semiconductor, Inc.
  *
@@ -5,20 +6,6 @@
  *         Jerry Huang <Chang-Ming.Huang@freescale.com>
  *
  * Initialization based on code from Shlomi Gridish.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the  GNU General Public License along
- * with this program; if not, write  to the Free Software Foundation, Inc.,
- * 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/module.h>
@@ -43,6 +30,13 @@
 #include <asm/unaligned.h>
 
 #include "phy-fsl-usb.h"
+
+#ifdef VERBOSE
+#define VDBG(fmt, args...) pr_debug("[%s]  " fmt, \
+				 __func__, ## args)
+#else
+#define VDBG(stuff...)	do {} while (0)
+#endif
 
 #define DRIVER_VERSION "Rev. 1.55"
 #define DRIVER_AUTHOR "Jerry Huang/Li Yang"
@@ -71,7 +65,7 @@ struct fsl_otg_timer *b_data_pulse_tmr, *b_vbus_pulse_tmr, *b_srp_fail_tmr,
 
 static struct list_head active_timers;
 
-static struct fsl_otg_config fsl_otg_initdata = {
+static const struct fsl_otg_config fsl_otg_initdata = {
 	.otg_port = 1,
 };
 
@@ -642,17 +636,6 @@ static int fsl_otg_set_peripheral(struct usb_otg *otg,
 	return 0;
 }
 
-/* Set OTG port power, only for B-device */
-static int fsl_otg_set_power(struct usb_phy *phy, unsigned mA)
-{
-	if (!fsl_otg_dev)
-		return -ENODEV;
-	if (phy->otg->state == OTG_STATE_B_PERIPHERAL)
-		pr_info("FSL OTG: Draw %d mA\n", mA);
-
-	return 0;
-}
-
 /*
  * Delayed pin detect interrupt processing.
  *
@@ -821,7 +804,6 @@ static int fsl_otg_conf(struct platform_device *pdev)
 	/* initialize the otg structure */
 	fsl_otg_tc->phy.label = DRIVER_DESC;
 	fsl_otg_tc->phy.dev = &pdev->dev;
-	fsl_otg_tc->phy.set_power = fsl_otg_set_power;
 
 	fsl_otg_tc->phy.otg->usb_phy = &fsl_otg_tc->phy;
 	fsl_otg_tc->phy.otg->set_host = fsl_otg_set_host;
@@ -879,6 +861,7 @@ int usb_otg_start(struct platform_device *pdev)
 	if (pdata->init && pdata->init(pdev) != 0)
 		return -EINVAL;
 
+#ifdef CONFIG_PPC32
 	if (pdata->big_endian_mmio) {
 		_fsl_readl = _fsl_readl_be;
 		_fsl_writel = _fsl_writel_be;
@@ -886,6 +869,7 @@ int usb_otg_start(struct platform_device *pdev)
 		_fsl_readl = _fsl_readl_le;
 		_fsl_writel = _fsl_writel_le;
 	}
+#endif
 
 	/* request irq */
 	p_otg->irq = platform_get_irq(pdev, 0);
@@ -976,7 +960,7 @@ int usb_otg_start(struct platform_device *pdev)
 /*
  * state file in sysfs
  */
-static int show_fsl_usb2_otg_state(struct device *dev,
+static ssize_t show_fsl_usb2_otg_state(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
 	struct otg_fsm *fsm = &fsl_otg_dev->fsm;
@@ -1059,6 +1043,11 @@ static int show_fsl_usb2_otg_state(struct device *dev,
 
 static DEVICE_ATTR(fsl_usb2_otg_state, S_IRUGO, show_fsl_usb2_otg_state, NULL);
 
+static struct attribute *fsl_otg_attrs[] = {
+	&dev_attr_fsl_usb2_otg_state.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(fsl_otg);
 
 /* Char driver interface to control some OTG input */
 
@@ -1148,10 +1137,6 @@ static int fsl_otg_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = device_create_file(&pdev->dev, &dev_attr_fsl_usb2_otg_state);
-	if (ret)
-		dev_warn(&pdev->dev, "Can't register sysfs attribute\n");
-
 	return ret;
 }
 
@@ -1168,8 +1153,6 @@ static int fsl_otg_remove(struct platform_device *pdev)
 	kfree(fsl_otg_dev->phy.otg);
 	kfree(fsl_otg_dev);
 
-	device_remove_file(&pdev->dev, &dev_attr_fsl_usb2_otg_state);
-
 	unregister_chrdev(FSL_OTG_MAJOR, FSL_OTG_NAME);
 
 	if (pdata->exit)
@@ -1184,6 +1167,7 @@ struct platform_driver fsl_otg_driver = {
 	.driver = {
 		.name = driver_name,
 		.owner = THIS_MODULE,
+		.dev_groups = fsl_otg_groups,
 	},
 };
 

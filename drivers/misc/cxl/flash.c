@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/semaphore.h>
@@ -91,8 +92,8 @@ static int update_property(struct device_node *dn, const char *name,
 
 	val = (u32 *)new_prop->value;
 	rc = cxl_update_properties(dn, new_prop);
-	pr_devel("%s: update property (%s, length: %i, value: %#x)\n",
-		  dn->name, name, vd, be32_to_cpu(*val));
+	pr_devel("%pOFn: update property (%s, length: %i, value: %#x)\n",
+		  dn, name, vd, be32_to_cpu(*val));
 
 	if (rc) {
 		kfree(new_prop->name);
@@ -343,7 +344,7 @@ static int transfer_image(struct cxl *adapter, int operation,
 			return rc;
 		}
 		if (rc == 0) {
-			pr_devel("remove curent afu\n");
+			pr_devel("remove current afu\n");
 			for (afu = 0; afu < adapter->slices; afu++)
 				cxl_guest_remove_afu(adapter->afu[afu]);
 

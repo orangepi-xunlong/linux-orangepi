@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * ALPS touchpad PS/2 mouse driver
  *
  * Copyright (c) 2003 Peter Osterlund <petero2@telia.com>
  * Copyright (c) 2005 Vojtech Pavlik <vojtech@suse.cz>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #ifndef _ALPS_H
@@ -23,6 +20,7 @@
 #define ALPS_PROTO_V6		0x600
 #define ALPS_PROTO_V7		0x700	/* t3btl t4s */
 #define ALPS_PROTO_V8		0x800	/* SS4btl SS4s */
+#define ALPS_PROTO_V9		0x900	/* ss3btl */
 
 #define MAX_TOUCHES	4
 
@@ -64,7 +62,15 @@ enum SS4_PACKET_ID {
 				 ((_b[2]) == 0x28)		\
 				)
 
-#define SS4_1F_X_V2(_b)		((_b[0] & 0x0007) |		\
+#define SS4_IS_IDLE_V2(_b)	(((_b[0]) == 0x18) &&		\
+				 ((_b[1]) == 0x10) &&		\
+				 ((_b[2]) == 0x00) &&		\
+				 ((_b[3] & 0x88) == 0x08) &&	\
+				 ((_b[4]) == 0x10) &&		\
+				 ((_b[5]) == 0x00)		\
+				)
+
+#define SS4_1F_X_V2(_b)		(((_b[0]) & 0x0007) |		\
 				 ((_b[1] << 3) & 0x0078) |	\
 				 ((_b[1] << 2) & 0x0380) |	\
 				 ((_b[2] << 5) & 0x1C00)	\
@@ -119,6 +125,18 @@ enum SS4_PACKET_ID {
 #define SS4_IS_MF_CONTINUE(_b)	((_b[2] & 0x10) == 0x10)
 #define SS4_IS_5F_DETECTED(_b)	((_b[2] & 0x10) == 0x10)
 
+#define SS4_TS_X_V2(_b)		(s8)(				\
+				 ((_b[0] & 0x01) << 7) |	\
+				 (_b[1] & 0x7F)		\
+				)
+
+#define SS4_TS_Y_V2(_b)		-(s8)(				\
+				 ((_b[3] & 0x01) << 7) |	\
+				 (_b[2] & 0x7F)		\
+				)
+
+#define SS4_TS_Z_V2(_b)		(s8)(_b[4] & 0x7F)
+
 
 #define SS4_MFPACKET_NO_AX		8160	/* X-Coordinate value */
 #define SS4_MFPACKET_NO_AY		4080	/* Y-Coordinate value */
@@ -162,11 +180,7 @@ struct alps_protocol_info {
 /**
  * struct alps_model_info - touchpad ID table
  * @signature: E7 response string to match.
- * @command_mode_resp: For V3/V4 touchpads, the final byte of the EC response
- *   (aka command mode response) identifies the firmware minor version.  This
- *   can be used to distinguish different hardware models which are not
- *   uniquely identifiable through their E7 responses.
- * @protocol_info: information about protcol used by the device.
+ * @protocol_info: information about protocol used by the device.
  *
  * Many (but not all) ALPS touchpads can be identified by looking at the
  * values returned in the "E7 report" and/or the "EC report."  This table
@@ -174,7 +188,6 @@ struct alps_protocol_info {
  */
 struct alps_model_info {
 	u8 signature[3];
-	u8 command_mode_resp;
 	struct alps_protocol_info protocol_info;
 };
 
@@ -310,18 +323,7 @@ struct alps_data {
 
 #define ALPS_QUIRK_TRACKSTICK_BUTTONS	1 /* trakcstick buttons in trackstick packet */
 
-#ifdef CONFIG_MOUSE_PS2_ALPS
 int alps_detect(struct psmouse *psmouse, bool set_properties);
 int alps_init(struct psmouse *psmouse);
-#else
-inline int alps_detect(struct psmouse *psmouse, bool set_properties)
-{
-	return -ENOSYS;
-}
-inline int alps_init(struct psmouse *psmouse)
-{
-	return -ENOSYS;
-}
-#endif /* CONFIG_MOUSE_PS2_ALPS */
 
 #endif

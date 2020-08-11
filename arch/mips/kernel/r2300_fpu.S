@@ -12,7 +12,9 @@
  * Copyright (c) 1998 Harald Koerfgen
  */
 #include <asm/asm.h>
+#include <asm/asmmacro.h>
 #include <asm/errno.h>
+#include <asm/export.h>
 #include <asm/fpregdef.h>
 #include <asm/mipsregs.h>
 #include <asm/asm-offsets.h>
@@ -31,8 +33,26 @@
 	PTR	9b+4,bad_stack;					\
 	.previous
 
-	.set	noreorder
 	.set	mips1
+
+/*
+ * Save a thread's fp context.
+ */
+LEAF(_save_fp)
+EXPORT_SYMBOL(_save_fp)
+	fpu_save_single a0, t1			# clobbers t1
+	jr	ra
+	END(_save_fp)
+
+/*
+ * Restore a thread's fp context.
+ */
+LEAF(_restore_fp)
+	fpu_restore_single a0, t1		# clobbers t1
+	jr	ra
+	END(_restore_fp)
+
+	.set	noreorder
 
 /**
  * _save_fp_context() - save FP context from the FPU

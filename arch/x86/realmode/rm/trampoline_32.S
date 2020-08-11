@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *
  *	Trampoline.S	Derived from Setup.S by Linus Torvalds
@@ -39,9 +40,6 @@ ENTRY(trampoline_start)
 	cli			# We should be safe anyway
 
 	movl	tr_start, %eax	# where we need to go
-
-	movl	$0xA5A5A5A5, trampoline_status
-				# write marker for master knows we're running
 
 	/*
 	 * GDT tables in non default location kernel can be beyond 16MB and

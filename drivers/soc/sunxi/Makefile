@@ -1,5 +1,2 @@
-obj-$(CONFIG_SUNXI_SRAM)          += sunxi_sram.o
-obj-y                             += sunxi-sid.o
-
-obj-$(CONFIG_PM)                  += pm.o
-obj-$(CONFIG_SUNXI_ARISC)         += arisc/
+# SPDX-License-Identifier: GPL-2.0-only
+obj-$(CONFIG_SUNXI_SRAM) +=	sunxi_sram.o

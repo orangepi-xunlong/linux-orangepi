@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ALPHA_PGTABLE_H
 #define _ALPHA_PGTABLE_H
 
@@ -357,11 +358,6 @@ extern inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
 extern void paging_init(void);
 
 #include <asm-generic/pgtable.h>
-
-/*
- * No page table caches to initialise
- */
-#define pgtable_cache_init()	do { } while (0)
 
 /* We have our own get_unmapped_area to cope with ADDR_LIMIT_32BIT.  */
 #define HAVE_ARCH_UNMAPPED_AREA

@@ -32,9 +32,6 @@
 NESTED(except_vec3_generic, 0, sp)
 	.set	push
 	.set	noat
-#if R5432_CP0_INTERRUPT_WAR
-	mfc0	k0, CP0_INDEX
-#endif
 	mfc0	k1, CP0_CAUSE
 	andi	k1, k1, 0x7c
 #ifdef CONFIG_64BIT
@@ -150,6 +147,7 @@ LEAF(__r4k_wait)
 	.align	5
 BUILD_ROLLBACK_PROLOGUE handle_int
 NESTED(handle_int, PT_SIZE, sp)
+	.cfi_signal_frame
 #ifdef CONFIG_TRACE_IRQFLAGS
 	/*
 	 * Check to see if the interrupted code has just disabled
@@ -181,7 +179,7 @@ NESTED(handle_int, PT_SIZE, sp)
 1:
 	.set pop
 #endif
-	SAVE_ALL
+	SAVE_ALL docfi=1
 	CLI
 	TRACE_IRQS_OFF
 
@@ -269,8 +267,8 @@ NESTED(except_vec_ejtag_debug, 0, sp)
  */
 BUILD_ROLLBACK_PROLOGUE except_vec_vi
 NESTED(except_vec_vi, 0, sp)
-	SAVE_SOME
-	SAVE_AT
+	SAVE_SOME docfi=1
+	SAVE_AT docfi=1
 	.set	push
 	.set	noreorder
 	PTR_LA	v1, except_vec_vi_handler
@@ -353,16 +351,56 @@ NESTED(ejtag_debug_handler, PT_SIZE, sp)
 	sll	k0, k0, 30	# Check for SDBBP.
 	bgez	k0, ejtag_return
 
+#ifdef CONFIG_SMP
+1:	PTR_LA	k0, ejtag_debug_buffer_spinlock
+	ll	k0, 0(k0)
+	bnez	k0, 1b
+	PTR_LA	k0, ejtag_debug_buffer_spinlock
+	sc	k0, 0(k0)
+	beqz	k0, 1b
+# ifdef CONFIG_WEAK_REORDERING_BEYOND_LLSC
+	sync
+# endif
+
 	PTR_LA	k0, ejtag_debug_buffer
 	LONG_S	k1, 0(k0)
+
+	ASM_CPUID_MFC0 k1, ASM_SMP_CPUID_REG
+	PTR_SRL	k1, SMP_CPUID_PTRSHIFT
+	PTR_SLL	k1, LONGLOG
+	PTR_LA	k0, ejtag_debug_buffer_per_cpu
+	PTR_ADDU k0, k1
+
+	PTR_LA	k1, ejtag_debug_buffer
+	LONG_L	k1, 0(k1)
+	LONG_S	k1, 0(k0)
+
+	PTR_LA	k0, ejtag_debug_buffer_spinlock
+	sw	zero, 0(k0)
+#else
+	PTR_LA	k0, ejtag_debug_buffer
+	LONG_S	k1, 0(k0)
+#endif
+
 	SAVE_ALL
 	move	a0, sp
 	jal	ejtag_exception_handler
 	RESTORE_ALL
+
+#ifdef CONFIG_SMP
+	ASM_CPUID_MFC0 k1, ASM_SMP_CPUID_REG
+	PTR_SRL	k1, SMP_CPUID_PTRSHIFT
+	PTR_SLL	k1, LONGLOG
+	PTR_LA	k0, ejtag_debug_buffer_per_cpu
+	PTR_ADDU k0, k1
+	LONG_L	k1, 0(k0)
+#else
 	PTR_LA	k0, ejtag_debug_buffer
 	LONG_L	k1, 0(k0)
+#endif
 
 ejtag_return:
+	back_to_back_c0_hazard
 	MFC0	k0, CP0_DESAVE
 	.set	mips32
 	deret
@@ -376,6 +414,12 @@ ejtag_return:
 	.data
 EXPORT(ejtag_debug_buffer)
 	.fill	LONGSIZE
+#ifdef CONFIG_SMP
+EXPORT(ejtag_debug_buffer_spinlock)
+	.fill	LONGSIZE
+EXPORT(ejtag_debug_buffer_per_cpu)
+	.fill	LONGSIZE * NR_CPUS
+#endif
 	.previous
 
 	__INIT
@@ -396,6 +440,7 @@ NESTED(except_vec_nmi, 0, sp)
 	__FINIT
 
 NESTED(nmi_handler, PT_SIZE, sp)
+	.cfi_signal_frame
 	.set	push
 	.set	noat
 	/*
@@ -429,20 +474,20 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	.endm
 
 	.macro	__build_clear_fpe
+	CLI
+	TRACE_IRQS_OFF
 	.set	push
 	/* gas fails to assemble cfc1 for some archs (octeon).*/ \
 	.set	mips1
 	SET_HARDFLOAT
 	cfc1	a1, fcr31
 	.set	pop
-	CLI
-	TRACE_IRQS_OFF
 	.endm
 
 	.macro	__build_clear_msa_fpe
-	_cfcmsa	a1, MSA_CSR
 	CLI
 	TRACE_IRQS_OFF
+	_cfcmsa	a1, MSA_CSR
 	.endm
 
 	.macro	__build_clear_ade
@@ -478,6 +523,7 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	.macro	__BUILD_HANDLER exception handler clear verbose ext
 	.align	5
 	NESTED(handle_\exception, PT_SIZE, sp)
+	.cfi_signal_frame
 	.set	noat
 	SAVE_ALL
 	FEXPORT(handle_\exception\ext)
@@ -485,8 +531,8 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	.set	at
 	__BUILD_\verbose \exception
 	move	a0, sp
-	PTR_LA	ra, ret_from_exception
-	j	do_\handler
+	jal	do_\handler
+	j	ret_from_exception
 	END(handle_\exception)
 	.endm
 
@@ -504,7 +550,9 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	BUILD_HANDLER ov ov sti silent			/* #12 */
 	BUILD_HANDLER tr tr sti silent			/* #13 */
 	BUILD_HANDLER msa_fpe msa_fpe msa_fpe silent	/* #14 */
+#ifdef CONFIG_MIPS_FP_SUPPORT
 	BUILD_HANDLER fpe fpe fpe silent		/* #15 */
+#endif
 	BUILD_HANDLER ftlb ftlb none silent		/* #16 */
 	BUILD_HANDLER msa msa sti silent		/* #21 */
 	BUILD_HANDLER mdmx mdmx sti silent		/* #22 */
@@ -601,9 +649,10 @@ isrdhwr:
 	ori	k1, _THREAD_MASK
 	xori	k1, _THREAD_MASK
 	LONG_L	v1, TI_TP_VALUE(k1)
+	.set	push
 	.set	arch=r4000
 	eret
-	.set	mips0
+	.set	pop
 #endif
 	.set	pop
 	END(handle_ri_rdhwr)

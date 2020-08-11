@@ -1,0 +1,349 @@
+/*
+ * Copyright 2019 Ondrej Jirman <megous@megous.com>
+ */
+
+/dts-v1/;
+#include "sun5i-a13.dtsi"
+#include "sunxi-common-regulators.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pwm/pwm.h>
+
+/ {
+	model = "PocketBook Touch Lux 3";
+	compatible = "pocketbook,touch-lux-3", "allwinner,sun5i-a13";
+
+	aliases {
+		serial0 = &uart1;
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c2 = &i2c2;
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm 0 50000 PWM_POLARITY_INVERTED>;
+		enable-gpios = <&pio 1 4 GPIO_ACTIVE_HIGH>; /* PB4 */
+		brightness-levels = <0 10 20 30 40 50 60 70 80 90 100>;
+		default-brightness-level = <8>;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		power {
+			gpios = <&pio 4 8 GPIO_ACTIVE_LOW>; /* PE8 */
+			default-state = "on";
+		};
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		autorepeat;
+		label = "GPIO Keys";
+
+		key-right {
+			label = "Right";
+			linux,code = <KEY_RIGHT>;
+			gpios = <&pio 6 9 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* PG9 */
+		};
+
+		key-left {
+			label = "Left";
+			linux,code = <KEY_LEFT>;
+			gpios = <&pio 6 10 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* PG10 */
+		};
+	};
+
+	regulator-eink {
+		compatible = "custom,reg-userspace-consumer";
+		controlled-supply = <&tp65185x>;
+	};
+
+	reg_1v8: regulator-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd-1v8-nor-ctp";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&pio 2 15 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	reg_1v8_nor: regulator-nor {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd-nor";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&pio 2 14 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&reg_1v8>;
+	};
+
+	reg_1v8_ctp: regulator-ctp {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd-ctp";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&pio 2 13 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&reg_1v8>;
+	};
+};
+
+&pio {
+	eink_pins_active: eink-pins-lcd {
+		pins = "PD3", "PD4", "PD5", "PD6", "PD7", "PD10", "PD11", "PD12",
+			"PD13", "PD15", "PD20", "PD21", "PD22", "PD23", "PD24";
+		function = "lcd0";
+	};
+
+	eink_pins_idle: eink-pins-gpio {
+		pins = "PD3", "PD4", "PD5", "PD6", "PD7", "PD10", "PD11", "PD12",
+			"PD13", "PD15", "PD20", "PD21", "PD22", "PD23", "PD24";
+		function = "gpio_out";
+	};
+};
+
+&soc {
+	display-controller@1c0c000 {
+		pinctrl-names = "idle", "active";
+		pinctrl-0 = <&eink_pins_idle>;
+		pinctrl-1 = <&eink_pins_active>;
+
+		all-gpios = <&pio 3 3 GPIO_ACTIVE_HIGH>,
+			<&pio 3 4 GPIO_ACTIVE_HIGH>,
+			<&pio 3 5 GPIO_ACTIVE_HIGH>,
+			<&pio 3 6 GPIO_ACTIVE_HIGH>,
+			<&pio 3 7 GPIO_ACTIVE_HIGH>,
+			<&pio 3 10 GPIO_ACTIVE_HIGH>,
+			<&pio 3 11 GPIO_ACTIVE_HIGH>,
+			<&pio 3 12 GPIO_ACTIVE_HIGH>,
+			<&pio 3 13 GPIO_ACTIVE_HIGH>,
+			<&pio 3 15 GPIO_ACTIVE_HIGH>,
+			<&pio 3 20 GPIO_ACTIVE_HIGH>,
+			<&pio 3 21 GPIO_ACTIVE_HIGH>,
+			<&pio 3 22 GPIO_ACTIVE_HIGH>,
+			<&pio 3 23 GPIO_ACTIVE_HIGH>,
+			<&pio 3 24 GPIO_ACTIVE_HIGH>;
+
+		compatible = "custom,pocketbook-touch-lux-3-tcon0-ed060xd4-display";
+		reg = <0x01c0c000 0x1000>, // TCON0 regs
+			<0x01e60000 0x10000>; // DEBE regs
+
+		interrupts = <44>; // TCON interrupt
+
+		resets = <&ccu RST_LCD>, <&ccu RST_DE_BE>;
+		reset-names = "tcon", "be";
+
+		clocks = <&ccu CLK_AHB_LCD>, <&ccu CLK_TCON_CH0>,
+			 <&ccu CLK_AHB_DE_BE>, <&ccu CLK_DE_BE>,
+			 <&ccu CLK_DRAM_DE_BE>;
+		clock-names = "tcon_bus", "tcon_mod",
+			      "be_bus", "be_mod",
+			      "be_ram";
+
+		assigned-clocks = <&ccu CLK_DE_BE>;
+		assigned-clock-rates = <300000000>;
+
+		interconnects = <&mbus 18>;
+		interconnect-names = "dma-mem";
+
+		panel-supply = <&tp65185x>;
+		control-device-name = "eink-panel";
+	};
+};
+
+&cpu0 {
+	cpu-supply = <&reg_dcdc2>;
+};
+
+&ehci0 {
+	status = "okay";
+};
+
+&ohci0 {
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+	//XXX: bsp has pullup on PB0/PB1 pins enabled, but it works without it
+
+	axp209: pmic@34 {
+		reg = <0x34>;
+		interrupts = <0>;
+	};
+};
+
+#include "axp209.dtsi"
+
+&i2c1 {
+	status = "okay";
+
+	pcf8563: rtc@51 {
+		compatible = "nxp,pcf8563";
+		reg = <0x51>;
+	};
+
+	// hacky PMIC driver for eInk display
+	tp65185x: regulator@68 {
+		compatible = "tp,tp65185x";
+		reg = <0x68>;
+
+		regulator-min-microvolt = <3120000>;
+		regulator-max-microvolt = <3120000>;
+		regulator-name = "eink-vcom";
+
+		//XXX: we don't use interrupts in the driver right now
+		//interrupt-parent = <&pio>;
+		//interrupts = <1 10 IRQ_TYPE_LEVEL_LOW>; /* PB10 */
+
+		wakeup-gpios = <&pio 3 18 GPIO_ACTIVE_HIGH>; /* PD18 */
+		powerup-gpios = <&pio 4 7 GPIO_ACTIVE_HIGH>; /* PE7 */
+		vcom-gpios = <&pio 3 19 GPIO_ACTIVE_HIGH>; /* PD19 */
+		//XXX: not a pullup on BSP (might have an external resistor)
+		powergood-gpios = <&pio 4 6 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>; /* PE6 */
+	};
+};
+
+&i2c2 {
+	status = "okay";
+
+	touchpanel@24 {
+		compatible = "cypress,cyttsp4_i2c_adapter";
+		reg = <0x24>;
+
+		interrupt-parent = <&pio>;
+		interrupts = <6 11 IRQ_TYPE_EDGE_FALLING>; /* PG11 */
+
+		vdd-supply = <&reg_1v8_ctp>;
+		power-gpios = <&pio 4 5 GPIO_ACTIVE_LOW>; /* PE5 */
+		reset-gpios = <&pio 1 3 GPIO_ACTIVE_LOW>; /* PB3 */
+	};
+};
+
+&lradc {
+	vref-supply = <&reg_ldo2>;
+	status = "okay";
+
+	button-200 {
+		label = "Home";
+		linux,code = <KEY_HOME>;
+		channel = <0>;
+		voltage = <200000>;
+	};
+
+	button-400 {
+		label = "Menu";
+		linux,code = <KEY_MENU>;
+		channel = <0>;
+		voltage = <400000>;
+	};
+};
+
+&mmc0 {
+	vmmc-supply = <&reg_vcc3v3>;
+	bus-width = <4>;
+	cd-gpios = <&pio 6 0 GPIO_ACTIVE_LOW>; /* PG0 */
+	enable-gpios = <&pio 4 4 GPIO_ACTIVE_LOW>; /* PE4 */
+	status = "okay";
+};
+
+&mmc2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc2_4bit_pc_pins>;
+	vmmc-supply = <&reg_vcc3v3>;
+	bus-width = <4>;
+	non-removable;
+	status = "okay";
+};
+
+&otg_sram {
+	status = "okay";
+};
+
+&pwm {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm0_pin>;
+	status = "okay";
+};
+
+&reg_dcdc2 {
+	regulator-always-on;
+	regulator-min-microvolt = <1000000>;
+	regulator-max-microvolt = <1400000>;
+	regulator-name = "vdd-cpu";
+};
+
+&reg_dcdc3 {
+	regulator-always-on;
+	regulator-min-microvolt = <1200000>;
+	regulator-max-microvolt = <1200000>;
+	regulator-name = "vdd-int-pll";
+};
+
+&reg_ldo1 {
+	regulator-name = "vdd-rtc";
+};
+
+&reg_ldo2 {
+	regulator-always-on;
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+	regulator-name = "avcc";
+};
+
+&reg_ldo3 {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-name = "vcc-wifi";
+	/* We need this otherwise the LDO3 would overload */
+	regulator-soft-start;
+	regulator-ramp-delay = <1600>;
+};
+
+&spi2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi2_pe_pins>, <&spi2_cs0_pe_pin>;
+	status = "okay";
+
+	epd_flash: flash@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "macronix,mx25u4033", "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <4000000>;
+		vdd-supply = <&reg_1v8_nor>;
+	};
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_pg_pins>;
+	status = "okay";
+};
+
+&usb_otg {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usbphy {
+	//XXX: might not work, need to test
+	usb0_vbus_det-gpios = <&pio 6 1 GPIO_ACTIVE_HIGH>; /* PG1 */
+	usb1_vbus-supply = <&reg_ldo3>;
+	status = "okay";
+};
+
+&usb_power_supply {
+	status = "okay";
+};
+
+&battery_power_supply {
+	status = "okay";
+};

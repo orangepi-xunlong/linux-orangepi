@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #if defined(CONFIG_SERIAL_EFM32_UART_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
 #define SUPPORT_SYSRQ
 #endif
@@ -488,7 +489,7 @@ static int efm32_uart_verify_port(struct uart_port *port,
 	return ret;
 }
 
-static struct uart_ops efm32_uart_pops = {
+static const struct uart_ops efm32_uart_pops = {
 	.tx_empty = efm32_uart_tx_empty,
 	.set_mctrl = efm32_uart_set_mctrl,
 	.get_mctrl = efm32_uart_get_mctrl,

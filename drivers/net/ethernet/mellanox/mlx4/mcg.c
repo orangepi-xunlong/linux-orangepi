@@ -162,7 +162,7 @@ static int new_steering_entry(struct mlx4_dev *dev, u8 port,
 		return -EINVAL;
 
 	s_steer = &mlx4_priv(dev)->steer[port - 1];
-	new_entry = kzalloc(sizeof *new_entry, GFP_KERNEL);
+	new_entry = kzalloc(sizeof(*new_entry), GFP_KERNEL);
 	if (!new_entry)
 		return -ENOMEM;
 
@@ -175,7 +175,7 @@ static int new_steering_entry(struct mlx4_dev *dev, u8 port,
 	 */
 	pqp = get_promisc_qp(dev, port, steer, qpn);
 	if (pqp) {
-		dqp = kmalloc(sizeof *dqp, GFP_KERNEL);
+		dqp = kmalloc(sizeof(*dqp), GFP_KERNEL);
 		if (!dqp) {
 			err = -ENOMEM;
 			goto out_alloc;
@@ -274,7 +274,7 @@ static int existing_steering_entry(struct mlx4_dev *dev, u8 port,
 	}
 
 	/* add the qp as a duplicate on this index */
-	dqp = kmalloc(sizeof *dqp, GFP_KERNEL);
+	dqp = kmalloc(sizeof(*dqp), GFP_KERNEL);
 	if (!dqp)
 		return -ENOMEM;
 	dqp->qpn = qpn;
@@ -443,7 +443,7 @@ static int add_promisc_qp(struct mlx4_dev *dev, u8 port,
 		goto out_mutex;
 	}
 
-	pqp = kmalloc(sizeof *pqp, GFP_KERNEL);
+	pqp = kmalloc(sizeof(*pqp), GFP_KERNEL);
 	if (!pqp) {
 		err = -ENOMEM;
 		goto out_mutex;
@@ -514,7 +514,7 @@ static int add_promisc_qp(struct mlx4_dev *dev, u8 port,
 	/* add the new qpn to list of promisc qps */
 	list_add_tail(&pqp->list, &s_steer->promisc_qps[steer]);
 	/* now need to add all the promisc qps to default entry */
-	memset(mgm, 0, sizeof *mgm);
+	memset(mgm, 0, sizeof(*mgm));
 	members_count = 0;
 	list_for_each_entry(dqp, &s_steer->promisc_qps[steer], list) {
 		if (members_count == dev->caps.num_qp_per_mgm) {
@@ -1144,7 +1144,7 @@ int mlx4_qp_attach_common(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16],
 		index += dev->caps.num_mgms;
 
 		new_entry = 1;
-		memset(mgm, 0, sizeof *mgm);
+		memset(mgm, 0, sizeof(*mgm));
 		memcpy(mgm->gid, gid, 16);
 	}
 
@@ -1412,6 +1412,7 @@ int mlx4_multicast_attach(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16],
 	case MLX4_STEERING_MODE_A0:
 		if (prot == MLX4_PROT_ETH)
 			return 0;
+		/* fall through */
 
 	case MLX4_STEERING_MODE_B0:
 		if (prot == MLX4_PROT_ETH)
@@ -1441,6 +1442,7 @@ int mlx4_multicast_detach(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16],
 	case MLX4_STEERING_MODE_A0:
 		if (prot == MLX4_PROT_ETH)
 			return 0;
+		/* fall through */
 
 	case MLX4_STEERING_MODE_B0:
 		if (prot == MLX4_PROT_ETH)
@@ -1490,7 +1492,7 @@ int mlx4_flow_steer_promisc_add(struct mlx4_dev *dev, u8 port,
 	rule.port = port;
 	rule.qpn = qpn;
 	INIT_LIST_HEAD(&rule.list);
-	mlx4_err(dev, "going promisc on %x\n", port);
+	mlx4_info(dev, "going promisc on %x\n", port);
 
 	return  mlx4_flow_attach(dev, &rule, regid_p);
 }

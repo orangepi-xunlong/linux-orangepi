@@ -1,5 +1,6 @@
 /*
  * Copyright 2008-2015 Freescale Semiconductor Inc.
+ * Copyright 2020 NXP
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,11 +35,14 @@
 #define __FM_H
 
 #include <linux/io.h>
+#include <linux/interrupt.h>
+#include <linux/of_irq.h>
 
 /* FM Frame descriptor macros  */
 /* Frame queue Context Override */
 #define FM_FD_CMD_FCO                   0x80000000
 #define FM_FD_CMD_RPD                   0x40000000  /* Read Prepended Data */
+#define FM_FD_CMD_UPD			0x20000000  /* Update Prepended Data */
 #define FM_FD_CMD_DTC                   0x10000000  /* Do L4 Checksum */
 
 /* TX-Port: Unsupported Format */
@@ -134,14 +138,14 @@ enum fman_exceptions {
 struct fman_prs_result {
 	u8 lpid;		/* Logical port id */
 	u8 shimr;		/* Shim header result  */
-	u16 l2r;		/* Layer 2 result */
-	u16 l3r;		/* Layer 3 result */
+	__be16 l2r;		/* Layer 2 result */
+	__be16 l3r;		/* Layer 3 result */
 	u8 l4r;		/* Layer 4 result */
 	u8 cplan;		/* Classification plan id */
-	u16 nxthdr;		/* Next Header  */
-	u16 cksum;		/* Running-sum */
+	__be16 nxthdr;		/* Next Header  */
+	__be16 cksum;		/* Running-sum */
 	/* Flags&fragment-offset field of the last IP-header */
-	u16 flags_frag_off;
+	__be16 flags_frag_off;
 	/* Routing type field of a IPV6 routing extension header */
 	u8 route_type;
 	/* Routing Extension Header Present; last bit is IP valid */
@@ -274,6 +278,81 @@ struct fman_intr_src {
 	void *src_handle;
 };
 
+/** fman_exceptions_cb
+ * fman         - Pointer to FMan
+ * exception    - The exception.
+ *
+ * Exceptions user callback routine, will be called upon an exception
+ * passing the exception identification.
+ *
+ * Return: irq status
+ */
+typedef irqreturn_t (fman_exceptions_cb)(struct fman *fman,
+					 enum fman_exceptions exception);
+/** fman_bus_error_cb
+ * fman         - Pointer to FMan
+ * port_id      - Port id
+ * addr         - Address that caused the error
+ * tnum         - Owner of error
+ * liodn        - Logical IO device number
+ *
+ * Bus error user callback routine, will be called upon bus error,
+ * passing parameters describing the errors and the owner.
+ *
+ * Return: IRQ status
+ */
+typedef irqreturn_t (fman_bus_error_cb)(struct fman *fman, u8 port_id,
+					u64 addr, u8 tnum, u16 liodn);
+
+/* Structure that holds information received from device tree */
+struct fman_dts_params {
+	void __iomem *base_addr;                /* FMan virtual address */
+	struct resource *res;                   /* FMan memory resource */
+	u8 id;                                  /* FMan ID */
+
+	int err_irq;                            /* FMan Error IRQ */
+
+	u16 clk_freq;                           /* FMan clock freq (In Mhz) */
+
+	u32 qman_channel_base;                  /* QMan channels base */
+	u32 num_of_qman_channels;               /* Number of QMan channels */
+
+	struct resource muram_res;              /* MURAM resource */
+};
+
+struct fman {
+	struct device *dev;
+	void __iomem *base_addr;
+	struct fman_intr_src intr_mng[FMAN_EV_CNT];
+
+	struct fman_fpm_regs __iomem *fpm_regs;
+	struct fman_bmi_regs __iomem *bmi_regs;
+	struct fman_qmi_regs __iomem *qmi_regs;
+	struct fman_dma_regs __iomem *dma_regs;
+	struct fman_hwp_regs __iomem *hwp_regs;
+	struct fman_kg_regs __iomem *kg_regs;
+	fman_exceptions_cb *exception_cb;
+	fman_bus_error_cb *bus_error_cb;
+	/* Spinlock for FMan use */
+	spinlock_t spinlock;
+	struct fman_state_struct *state;
+
+	struct fman_cfg *cfg;
+	struct muram_info *muram;
+	struct fman_keygen *keygen;
+	/* cam section in muram */
+	unsigned long cam_offset;
+	size_t cam_size;
+	/* Fifo in MURAM */
+	unsigned long fifo_offset;
+	size_t fifo_size;
+
+	u32 liodn_base[64];
+	u32 liodn_offset[64];
+
+	struct fman_dts_params dts_params;
+};
+
 /* Structure for port-FM communication during fman_port_init. */
 struct fman_port_init_params {
 	u8 port_id;			/* port Id */
@@ -319,6 +398,10 @@ struct resource *fman_get_mem_region(struct fman *fman);
 u16 fman_get_max_frm(void);
 
 int fman_get_rx_extra_headroom(void);
+
+#ifdef CONFIG_DPAA_ERRATUM_A050385
+bool fman_has_errata_a050385(void);
+#endif
 
 struct fman *fman_bind(struct device *dev);
 

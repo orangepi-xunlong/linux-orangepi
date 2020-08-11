@@ -1,16 +1,11 @@
-/* arch/arm/plat-samsung/watchdog-reset.c
- *
- * Copyright (c) 2008 Simtec Electronics
- *	Ben Dooks <ben@simtec.co.uk>
- *
- * Copyright (c) 2013 Tomasz Figa <tomasz.figa@gmail.com>
- *
- * Watchdog reset support for Samsung SoCs.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
-*/
+// SPDX-License-Identifier: GPL-2.0
+//
+// Copyright (c) 2008 Simtec Electronics
+//	Ben Dooks <ben@simtec.co.uk>
+//
+// Copyright (c) 2013 Tomasz Figa <tomasz.figa@gmail.com>
+//
+// Watchdog reset support for Samsung SoCs.
 
 #include <linux/clk.h>
 #include <linux/err.h>
@@ -67,6 +62,7 @@ void samsung_wdt_reset(void)
 #ifdef CONFIG_OF
 static const struct of_device_id s3c2410_wdt_match[] = {
 	{ .compatible = "samsung,s3c2410-wdt" },
+	{ .compatible = "samsung,s3c6410-wdt" },
 	{},
 };
 

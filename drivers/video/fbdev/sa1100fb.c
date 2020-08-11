@@ -323,13 +323,11 @@ sa1100fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 		 * according to the RGB bitfield information.
 		 */
 		if (regno < 16) {
-			u32 *pal = fbi->fb.pseudo_palette;
-
 			val  = chan_to_field(red, &fbi->fb.var.red);
 			val |= chan_to_field(green, &fbi->fb.var.green);
 			val |= chan_to_field(blue, &fbi->fb.var.blue);
 
-			pal[regno] = val;
+			fbi->pseudo_palette[regno] = val;
 			ret = 0;
 		}
 		break;
@@ -976,35 +974,10 @@ static void sa1100fb_task(struct work_struct *w)
  */
 static unsigned int sa1100fb_min_dma_period(struct sa1100fb_info *fbi)
 {
-#if 0
-	unsigned int min_period = (unsigned int)-1;
-	int i;
-
-	for (i = 0; i < MAX_NR_CONSOLES; i++) {
-		struct display *disp = &fb_display[i];
-		unsigned int period;
-
-		/*
-		 * Do we own this display?
-		 */
-		if (disp->fb_info != &fbi->fb)
-			continue;
-
-		/*
-		 * Ok, calculate its DMA period
-		 */
-		period = sa1100fb_display_dma_period(&disp->var);
-		if (period < min_period)
-			min_period = period;
-	}
-
-	return min_period;
-#else
 	/*
 	 * FIXME: we need to verify _all_ consoles.
 	 */
 	return sa1100fb_display_dma_period(&fbi->fb.var);
-#endif
 }
 
 /*
@@ -1028,31 +1001,6 @@ sa1100fb_freq_transition(struct notifier_block *nb, unsigned long val,
 		pcd = get_pcd(fbi, fbi->fb.var.pixclock);
 		fbi->reg_lccr3 = (fbi->reg_lccr3 & ~0xff) | LCCR3_PixClkDiv(pcd);
 		set_ctrlr_state(fbi, C_ENABLE_CLKCHANGE);
-		break;
-	}
-	return 0;
-}
-
-static int
-sa1100fb_freq_policy(struct notifier_block *nb, unsigned long val,
-		     void *data)
-{
-	struct sa1100fb_info *fbi = TO_INF(nb, freq_policy);
-	struct cpufreq_policy *policy = data;
-
-	switch (val) {
-	case CPUFREQ_ADJUST:
-		dev_dbg(fbi->dev, "min dma period: %d ps, "
-			"new clock %d kHz\n", sa1100fb_min_dma_period(fbi),
-			policy->max);
-		/* todo: fill in min/max values */
-		break;
-	case CPUFREQ_NOTIFY:
-		do {} while(0);
-		/* todo: panic if min/max values aren't fulfilled 
-		 * [can't really happen unless there's a bug in the
-		 * CPU policy verififcation process *
-		 */
 		break;
 	}
 	return 0;
@@ -1132,12 +1080,10 @@ static struct sa1100fb_info *sa1100fb_init_fbinfo(struct device *dev)
 	struct sa1100fb_info *fbi;
 	unsigned i;
 
-	fbi = kmalloc(sizeof(struct sa1100fb_info) + sizeof(u32) * 16,
-		      GFP_KERNEL);
+	fbi = devm_kzalloc(dev, sizeof(struct sa1100fb_info), GFP_KERNEL);
 	if (!fbi)
 		return NULL;
 
-	memset(fbi, 0, sizeof(struct sa1100fb_info));
 	fbi->dev = dev;
 
 	strcpy(fbi->fb.fix.id, SA1100_NAME);
@@ -1159,7 +1105,7 @@ static struct sa1100fb_info *sa1100fb_init_fbinfo(struct device *dev)
 	fbi->fb.fbops		= &sa1100fb_ops;
 	fbi->fb.flags		= FBINFO_DEFAULT;
 	fbi->fb.monspecs	= monspecs;
-	fbi->fb.pseudo_palette	= (fbi + 1);
+	fbi->fb.pseudo_palette	= fbi->pseudo_palette;
 
 	fbi->rgb[RGB_4]		= &rgb_4;
 	fbi->rgb[RGB_8]		= &rgb_8;
@@ -1218,47 +1164,41 @@ static int sa1100fb_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0 || !res)
+	if (irq < 0)
 		return -EINVAL;
 
-	if (!request_mem_region(res->start, resource_size(res), "LCD"))
-		return -EBUSY;
-
 	fbi = sa1100fb_init_fbinfo(&pdev->dev);
-	ret = -ENOMEM;
 	if (!fbi)
-		goto failed;
+		return -ENOMEM;
 
-	fbi->clk = clk_get(&pdev->dev, NULL);
-	if (IS_ERR(fbi->clk)) {
-		ret = PTR_ERR(fbi->clk);
-		fbi->clk = NULL;
-		goto failed;
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	fbi->base = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(fbi->base))
+		return PTR_ERR(fbi->base);
+
+	fbi->clk = devm_clk_get(&pdev->dev, NULL);
+	if (IS_ERR(fbi->clk))
+		return PTR_ERR(fbi->clk);
+
+	ret = devm_request_irq(&pdev->dev, irq, sa1100fb_handle_irq, 0,
+			       "LCD", fbi);
+	if (ret) {
+		dev_err(&pdev->dev, "request_irq failed: %d\n", ret);
+		return ret;
 	}
 
-	fbi->base = ioremap(res->start, resource_size(res));
-	if (!fbi->base)
-		goto failed;
+	if (machine_is_shannon()) {
+		ret = devm_gpio_request_one(&pdev->dev, SHANNON_GPIO_DISP_EN,
+			GPIOF_OUT_INIT_LOW, "display enable");
+		if (ret)
+			return ret;
+	}
 
 	/* Initialize video memory */
 	ret = sa1100fb_map_video_memory(fbi);
 	if (ret)
-		goto failed;
-
-	ret = request_irq(irq, sa1100fb_handle_irq, 0, "LCD", fbi);
-	if (ret) {
-		dev_err(&pdev->dev, "request_irq failed: %d\n", ret);
-		goto failed;
-	}
-
-	if (machine_is_shannon()) {
-		ret = gpio_request_one(SHANNON_GPIO_DISP_EN,
-			GPIOF_OUT_INIT_LOW, "display enable");
-		if (ret)
-			goto err_free_irq;
-	}
+		return ret;
 
 	/*
 	 * This makes sure that our colour bitfield
@@ -1269,32 +1209,19 @@ static int sa1100fb_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, fbi);
 
 	ret = register_framebuffer(&fbi->fb);
-	if (ret < 0)
-		goto err_reg_fb;
+	if (ret < 0) {
+		dma_free_wc(fbi->dev, fbi->map_size, fbi->map_cpu,
+			    fbi->map_dma);
+		return ret;
+	}
 
 #ifdef CONFIG_CPU_FREQ
 	fbi->freq_transition.notifier_call = sa1100fb_freq_transition;
-	fbi->freq_policy.notifier_call = sa1100fb_freq_policy;
 	cpufreq_register_notifier(&fbi->freq_transition, CPUFREQ_TRANSITION_NOTIFIER);
-	cpufreq_register_notifier(&fbi->freq_policy, CPUFREQ_POLICY_NOTIFIER);
 #endif
 
 	/* This driver cannot be unloaded at the moment */
 	return 0;
-
- err_reg_fb:
-	if (machine_is_shannon())
-		gpio_free(SHANNON_GPIO_DISP_EN);
- err_free_irq:
-	free_irq(irq, fbi);
- failed:
-	if (fbi)
-		iounmap(fbi->base);
-	if (fbi->clk)
-		clk_put(fbi->clk);
-	kfree(fbi);
-	release_mem_region(res->start, resource_size(res));
-	return ret;
 }
 
 static struct platform_driver sa1100fb_driver = {

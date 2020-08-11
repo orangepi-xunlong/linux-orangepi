@@ -1,15 +1,19 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NF_QUEUE_H
 #define _NF_QUEUE_H
 
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/jhash.h>
+#include <linux/netfilter.h>
+#include <linux/skbuff.h>
 
 /* Each queued (to userspace) skbuff has one of these. */
 struct nf_queue_entry {
 	struct list_head	list;
 	struct sk_buff		*skb;
 	unsigned int		id;
+	unsigned int		hook_index;	/* index in hook_entries->hook[] */
 
 	struct nf_hook_state	state;
 	u16			size; /* sizeof(entry) + saved route keys */
@@ -23,8 +27,7 @@ struct nf_queue_entry {
 struct nf_queue_handler {
 	int		(*outfn)(struct nf_queue_entry *entry,
 				 unsigned int queuenum);
-	void		(*nf_hook_drop)(struct net *net,
-					const struct nf_hook_entry *hooks);
+	void		(*nf_hook_drop)(struct net *net);
 };
 
 void nf_register_queue_handler(struct net *net, const struct nf_queue_handler *qh);
@@ -117,5 +120,8 @@ nfqueue_hash(const struct sk_buff *skb, u16 queue, u16 queues_total, u8 family,
 
 	return queue;
 }
+
+int nf_queue(struct sk_buff *skb, struct nf_hook_state *state,
+	     unsigned int index, unsigned int verdict);
 
 #endif /* _NF_QUEUE_H */

@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * This file is based on code from OCTEON SDK by Cavium Networks.
  *
  * Copyright (c) 2003-2007 Cavium Networks
- *
- * This file is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, Version 2, as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -13,17 +10,9 @@
 #include <linux/interrupt.h>
 #include <net/dst.h>
 
-#include <asm/octeon/octeon.h>
-
-#include "ethernet-defines.h"
 #include "octeon-ethernet.h"
+#include "ethernet-defines.h"
 #include "ethernet-util.h"
-
-#include <asm/octeon/cvmx-spi.h>
-
-#include <asm/octeon/cvmx-npi-defs.h>
-#include <asm/octeon/cvmx-spxx-defs.h>
-#include <asm/octeon/cvmx-stxx-defs.h>
 
 static int number_spi_ports;
 static int need_retrain[2] = { 0, 0 };

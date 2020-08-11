@@ -1,7 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016 Qualcomm Atheros, Inc
- *
- * GPL v2
  *
  * Based on net/sched/sch_fq_codel.c
  */
@@ -70,7 +69,7 @@ struct fq {
 	struct list_head backlogs;
 	spinlock_t lock;
 	u32 flows_cnt;
-	u32 perturbation;
+	siphash_key_t	perturbation;
 	u32 limit;
 	u32 memory_limit;
 	u32 memory_usage;
@@ -89,6 +88,13 @@ typedef void fq_skb_free_t(struct fq *,
 			   struct fq_tin *,
 			   struct fq_flow *,
 			   struct sk_buff *);
+
+/* Return %true to filter (drop) the frame. */
+typedef bool fq_skb_filter_t(struct fq *,
+			     struct fq_tin *,
+			     struct fq_flow *,
+			     struct sk_buff *,
+			     void *);
 
 typedef struct fq_flow *fq_flow_get_default_t(struct fq *,
 					      struct fq_tin *,

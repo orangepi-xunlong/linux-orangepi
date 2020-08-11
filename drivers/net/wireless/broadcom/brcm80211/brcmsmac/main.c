@@ -507,7 +507,7 @@ brcms_c_attach_malloc(uint unit, uint *err, uint devid)
 	wlc->hw->wlc = wlc;
 
 	wlc->hw->bandstate[0] =
-		kzalloc(sizeof(struct brcms_hw_band) * MAXBANDS, GFP_ATOMIC);
+		kcalloc(MAXBANDS, sizeof(struct brcms_hw_band), GFP_ATOMIC);
 	if (wlc->hw->bandstate[0] == NULL) {
 		*err = 1006;
 		goto fail;
@@ -521,7 +521,8 @@ brcms_c_attach_malloc(uint unit, uint *err, uint devid)
 	}
 
 	wlc->modulecb =
-		kzalloc(sizeof(struct modulecb) * BRCMS_MAXMODULES, GFP_ATOMIC);
+		kcalloc(BRCMS_MAXMODULES, sizeof(struct modulecb),
+			GFP_ATOMIC);
 	if (wlc->modulecb == NULL) {
 		*err = 1009;
 		goto fail;
@@ -553,7 +554,7 @@ brcms_c_attach_malloc(uint unit, uint *err, uint devid)
 	}
 
 	wlc->bandstate[0] =
-		kzalloc(sizeof(struct brcms_band)*MAXBANDS, GFP_ATOMIC);
+		kcalloc(MAXBANDS, sizeof(struct brcms_band), GFP_ATOMIC);
 	if (wlc->bandstate[0] == NULL) {
 		*err = 1025;
 		goto fail;
@@ -5247,15 +5248,7 @@ int brcms_c_set_gmode(struct brcms_c_info *wlc, u8 gmode, bool config)
 	/* Default to 54g Auto */
 	/* Advertise and use shortslot (-1/0/1 Auto/Off/On) */
 	s8 shortslot = BRCMS_SHORTSLOT_AUTO;
-	bool shortslot_restrict = false; /* Restrict association to stations
-					  * that support shortslot
-					  */
 	bool ofdm_basic = false;	/* Make 6, 12, and 24 basic rates */
-	/* Advertise and use short preambles (-1/0/1 Auto/Off/On) */
-	int preamble = BRCMS_PLCP_LONG;
-	bool preamble_restrict = false;	/* Restrict association to stations
-					 * that support short preambles
-					 */
 	struct brcms_band *band;
 
 	/* if N-support is enabled, allow Gmode set as long as requested
@@ -5296,16 +5289,11 @@ int brcms_c_set_gmode(struct brcms_c_info *wlc, u8 gmode, bool config)
 
 	case GMODE_ONLY:
 		ofdm_basic = true;
-		preamble = BRCMS_PLCP_SHORT;
-		preamble_restrict = true;
 		break;
 
 	case GMODE_PERFORMANCE:
 		shortslot = BRCMS_SHORTSLOT_ON;
-		shortslot_restrict = true;
 		ofdm_basic = true;
-		preamble = BRCMS_PLCP_SHORT;
-		preamble_restrict = true;
 		break;
 
 	default:
@@ -7092,9 +7080,9 @@ prep_mac80211_status(struct brcms_c_info *wlc, struct d11rxhdr *rxh,
 	rspec = brcms_c_compute_rspec(rxh, plcp);
 	if (is_mcs_rate(rspec)) {
 		rx_status->rate_idx = rspec & RSPEC_RATE_MASK;
-		rx_status->flag |= RX_FLAG_HT;
+		rx_status->encoding = RX_ENC_HT;
 		if (rspec_is40mhz(rspec))
-			rx_status->flag |= RX_FLAG_40MHZ;
+			rx_status->bw = RATE_INFO_BW_40;
 	} else {
 		switch (rspec2rate(rspec)) {
 		case BRCM_RATE_1M:
@@ -7149,9 +7137,9 @@ prep_mac80211_status(struct brcms_c_info *wlc, struct d11rxhdr *rxh,
 		/* Determine short preamble and rate_idx */
 		if (is_cck_rate(rspec)) {
 			if (rxh->PhyRxStatus_0 & PRXS0_SHORTH)
-				rx_status->flag |= RX_FLAG_SHORTPRE;
+				rx_status->enc_flags |= RX_ENC_FLAG_SHORTPRE;
 		} else if (is_ofdm_rate(rspec)) {
-			rx_status->flag |= RX_FLAG_SHORTPRE;
+			rx_status->enc_flags |= RX_ENC_FLAG_SHORTPRE;
 		} else {
 			brcms_err(wlc->hw->d11core, "%s: Unknown modulation\n",
 				  __func__);
@@ -7159,7 +7147,7 @@ prep_mac80211_status(struct brcms_c_info *wlc, struct d11rxhdr *rxh,
 	}
 
 	if (plcp3_issgi(plcp[3]))
-		rx_status->flag |= RX_FLAG_SHORT_GI;
+		rx_status->enc_flags |= RX_ENC_FLAG_SHORT_GI;
 
 	if (rxh->RxStatus1 & RXS_DECERR) {
 		rx_status->flag |= RX_FLAG_FAILED_PLCP_CRC;

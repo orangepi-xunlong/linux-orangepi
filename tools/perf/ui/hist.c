@@ -1,11 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0
+#include <inttypes.h>
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include <linux/compiler.h>
 
+#include "../util/callchain.h"
+#include "../util/debug.h"
 #include "../util/hist.h"
-#include "../util/util.h"
 #include "../util/sort.h"
 #include "../util/evsel.h"
 #include "../util/evlist.h"
+#include "../perf.h"
 
 /* hist period print (hpp) functions */
 
@@ -22,7 +28,7 @@ static int __hpp__fmt(struct perf_hpp *hpp, struct hist_entry *he,
 {
 	int ret;
 	struct hists *hists = he->hists;
-	struct perf_evsel *evsel = hists_to_evsel(hists);
+	struct evsel *evsel = hists_to_evsel(hists);
 	char *buf = hpp->buf;
 	size_t size = hpp->size;
 
@@ -40,7 +46,7 @@ static int __hpp__fmt(struct perf_hpp *hpp, struct hist_entry *he,
 	if (perf_evsel__is_group_event(evsel)) {
 		int prev_idx, idx_delta;
 		struct hist_entry *pair;
-		int nr_members = evsel->nr_members;
+		int nr_members = evsel->core.nr_members;
 
 		prev_idx = perf_evsel__group_idx(evsel);
 
@@ -150,7 +156,7 @@ static int __hpp__sort(struct hist_entry *a, struct hist_entry *b,
 {
 	s64 ret;
 	int i, nr_members;
-	struct perf_evsel *evsel;
+	struct evsel *evsel;
 	struct hist_entry *pair;
 	u64 *fields_a, *fields_b;
 
@@ -162,7 +168,7 @@ static int __hpp__sort(struct hist_entry *a, struct hist_entry *b,
 	if (!perf_evsel__is_group_event(evsel))
 		return ret;
 
-	nr_members = evsel->nr_members;
+	nr_members = evsel->core.nr_members;
 	fields_a = calloc(nr_members, sizeof(*fields_a));
 	fields_b = calloc(nr_members, sizeof(*fields_b));
 
@@ -205,10 +211,12 @@ static int __hpp__sort_acc(struct hist_entry *a, struct hist_entry *b,
 		if (ret)
 			return ret;
 
-		if (a->thread != b->thread || !symbol_conf.use_callchain)
+		if (a->thread != b->thread || !hist_entry__has_callchains(a) || !symbol_conf.use_callchain)
 			return 0;
 
 		ret = b->callchain->max_depth - a->callchain->max_depth;
+		if (callchain_param.order == ORDER_CALLER)
+			ret = -ret;
 	}
 	return ret;
 }
@@ -218,10 +226,10 @@ static int hpp__width_fn(struct perf_hpp_fmt *fmt,
 			 struct hists *hists)
 {
 	int len = fmt->user_len ?: fmt->len;
-	struct perf_evsel *evsel = hists_to_evsel(hists);
+	struct evsel *evsel = hists_to_evsel(hists);
 
 	if (symbol_conf.event_group)
-		len = max(len, evsel->nr_members * fmt->len);
+		len = max(len, evsel->core.nr_members * fmt->len);
 
 	if (len < (int)strlen(fmt->name))
 		len = strlen(fmt->name);
@@ -529,7 +537,7 @@ void perf_hpp_list__prepend_sort_field(struct perf_hpp_list *list,
 
 void perf_hpp__column_unregister(struct perf_hpp_fmt *format)
 {
-	list_del(&format->list);
+	list_del_init(&format->list);
 }
 
 void perf_hpp__cancel_cumulate(void)
@@ -603,6 +611,13 @@ next:
 
 static void fmt_free(struct perf_hpp_fmt *fmt)
 {
+	/*
+	 * At this point fmt should be completely
+	 * unhooked, if not it's a bug.
+	 */
+	BUG_ON(!list_empty(&fmt->list));
+	BUG_ON(!list_empty(&fmt->sort_list));
+
 	if (fmt->free)
 		fmt->free(fmt);
 }
@@ -648,7 +663,7 @@ unsigned int hists__sort_list_width(struct hists *hists)
 		ret += fmt->width(fmt, &dummy_hpp, hists);
 	}
 
-	if (verbose && hists__has(hists, sym)) /* Addr + origin */
+	if (verbose > 0 && hists__has(hists, sym)) /* Addr + origin */
 		ret += 3 + BITS_PER_LONG / 4;
 
 	return ret;
@@ -783,9 +798,9 @@ static int add_hierarchy_fmt(struct hists *hists, struct perf_hpp_fmt *fmt)
 }
 
 int perf_hpp__setup_hists_formats(struct perf_hpp_list *list,
-				  struct perf_evlist *evlist)
+				  struct evlist *evlist)
 {
-	struct perf_evsel *evsel;
+	struct evsel *evsel;
 	struct perf_hpp_fmt *fmt;
 	struct hists *hists;
 	int ret;

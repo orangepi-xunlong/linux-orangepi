@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Early boot support code for BootX bootloader
  *
  *  Copyright (C) 2005 Ben. Herrenschmidt (benh@kernel.crashing.org)
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -519,7 +515,7 @@ void __init bootx_init(unsigned long r3, unsigned long r4)
 			;
 	}
 	if (bi->architecture != BOOT_ARCH_PCI) {
-		bootx_printf(" !!! WARNING - Usupported machine"
+		bootx_printf(" !!! WARNING - Unsupported machine"
 			     " architecture !\n");
 		for (;;)
 			;

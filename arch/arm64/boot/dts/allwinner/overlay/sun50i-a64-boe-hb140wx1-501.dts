@@ -1,0 +1,71 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    fragment {
+        target = <&anx6345>;
+        __overlay__ {
+            edid = [
+                /* Header */
+                00 ff ff ff ff ff ff 00
+                /* ID Manufacturer Name */
+                09 e5
+                /* ID Product Code */
+                37 00
+                /* 32-bit serial No. */
+                00 00 00 00
+                /* Week of manufacture */
+                01
+                /* Year of manufacture */
+                16
+                /* EDID Structure Ver. */
+                01
+                /* EDID revision # */
+                04
+                /* Video input definition */
+                80
+                /* Max H image size */
+                1f
+                /* Max V image size */
+                11
+                /* Display Gamma */
+                78
+                /* Feature support */
+                0a
+                /* Color bits */
+                b0 90 97 58 54 92 26 1d 50 54
+                /* Established timings */
+                00 00 00
+                /* Standard timings */
+                01 01
+                01 01
+                01 01
+                01 01
+                01 01
+                01 01
+                01 01
+                01 01
+                /* Detailed timing/monitor descriptor #1 */
+                3e 1c 56 a0 50 00 16 30
+                30 20 36 00 35 ad 10 00
+                00 1a
+                /* Detailed timing/monitor descriptor #2 */
+                3e 1c 56 a0 50 00 16 30
+                30 20 36 00 35 ad 10 00
+                00 1a
+                /* Detailed timing/monitor descriptor #3 */
+                00 00 00 fe 00 42 4f 45
+                20 48 46 0a 20 20 20 20
+                20 20
+                /* Detailed timing/monitor descriptor #4 */
+                00 00 00 fe 00 48 42 31
+                34 30 57 58 31 2d 35 30
+                31 0a
+                /* Extension flag */
+                00
+                /* Checksum */
+                81
+            ];
+        };
+    };
+};

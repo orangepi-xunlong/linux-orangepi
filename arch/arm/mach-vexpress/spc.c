@@ -69,7 +69,7 @@
 #define A7_PERFVAL_BASE		0xC30
 
 /* Config interface control bits */
-#define SYSCFG_START		(1 << 31)
+#define SYSCFG_START		BIT(31)
 #define SYSCFG_SCC		(6 << 20)
 #define SYSCFG_STAT		(14 << 20)
 
@@ -162,7 +162,7 @@ void ve_spc_cpu_wakeup_irq(u32 cluster, u32 cpu, bool set)
 	if (cluster >= MAX_CLUSTERS)
 		return;
 
-	mask = 1 << cpu;
+	mask = BIT(cpu);
 
 	if (!cluster_is_a15(cluster))
 		mask <<= 4;
@@ -403,7 +403,7 @@ static int ve_spc_populate_opps(uint32_t cluster)
 	uint32_t data = 0, off, ret, idx;
 	struct ve_spc_opp *opps;
 
-	opps = kzalloc(sizeof(*opps) * MAX_OPPS, GFP_KERNEL);
+	opps = kcalloc(MAX_OPPS, sizeof(*opps), GFP_KERNEL);
 	if (!opps)
 		return -ENOMEM;
 
@@ -451,10 +451,8 @@ int __init ve_spc_init(void __iomem *baseaddr, u32 a15_clusid, int irq)
 {
 	int ret;
 	info = kzalloc(sizeof(*info), GFP_KERNEL);
-	if (!info) {
-		pr_err(SPCLOG "unable to allocate mem\n");
+	if (!info)
 		return -ENOMEM;
-	}
 
 	info->baseaddr = baseaddr;
 	info->a15_clusid = a15_clusid;
@@ -535,10 +533,8 @@ static struct clk *ve_spc_clk_register(struct device *cpu_dev)
 	struct clk_spc *spc;
 
 	spc = kzalloc(sizeof(*spc), GFP_KERNEL);
-	if (!spc) {
-		pr_err("could not allocate spc clk\n");
+	if (!spc)
 		return ERR_PTR(-ENOMEM);
-	}
 
 	spc->hw.init = &init;
 	spc->cluster = topology_physical_package_id(cpu_dev->id);
@@ -555,8 +551,9 @@ static struct clk *ve_spc_clk_register(struct device *cpu_dev)
 
 static int __init ve_spc_clk_init(void)
 {
-	int cpu;
+	int cpu, cluster;
 	struct clk *clk;
+	bool init_opp_table[MAX_CLUSTERS] = { false };
 
 	if (!info)
 		return 0; /* Continue only if SPC is initialised */
@@ -582,8 +579,17 @@ static int __init ve_spc_clk_init(void)
 			continue;
 		}
 
+		cluster = topology_physical_package_id(cpu_dev->id);
+		if (init_opp_table[cluster])
+			continue;
+
 		if (ve_init_opp_table(cpu_dev))
 			pr_warn("failed to initialise cpu%d opp table\n", cpu);
+		else if (dev_pm_opp_set_sharing_cpus(cpu_dev,
+			 topology_core_cpumask(cpu_dev->id)))
+			pr_warn("failed to mark OPPs shared for cpu%d\n", cpu);
+		else
+			init_opp_table[cluster] = true;
 	}
 
 	platform_device_register_simple("vexpress-spc-cpufreq", -1, NULL, 0);

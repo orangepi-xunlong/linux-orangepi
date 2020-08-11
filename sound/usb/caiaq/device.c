@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * caiaq.c: ALSA driver for caiaq/NativeInstruments devices
  *
  *   Copyright (c) 2007 Daniel Mack <daniel@caiaq.de>
  *                      Karsten Wiese <fzu@wemgehoertderstaat.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
 */
 
 #include <linux/moduleparam.h>
@@ -81,7 +68,7 @@ enum {
 	DEPTH_32	= 3
 };
 
-static struct usb_device_id snd_usb_id_table[] = {
+static const struct usb_device_id snd_usb_id_table[] = {
 	{
 		.match_flags =	USB_DEVICE_ID_MATCH_DEVICE,
 		.idVendor =	USB_VID_NATIVEINSTRUMENTS,
@@ -200,6 +187,7 @@ static void usb_ep1_command_reply_dispatch (struct urb* urb)
 			break;
 		}
 #ifdef CONFIG_SND_USB_CAIAQ_INPUT
+		/* fall through */
 	case EP1_CMD_READ_ERP:
 	case EP1_CMD_READ_ANALOG:
 		snd_usb_caiaq_input_dispatch(cdev, buf, urb->actual_length);
@@ -460,6 +448,13 @@ static int init_card(struct snd_usb_caiaqdev *cdev)
 			  usb_sndbulkpipe(usb_dev, 0x1),
 			  cdev->midi_out_buf, EP1_BUFSIZE,
 			  snd_usb_caiaq_midi_output_done, cdev);
+
+	/* sanity checks of EPs before actually submitting */
+	if (usb_urb_ep_type_check(&cdev->ep1_in_urb) ||
+	    usb_urb_ep_type_check(&cdev->midi_out_urb)) {
+		dev_err(dev, "invalid EPs\n");
+		return -EINVAL;
+	}
 
 	init_waitqueue_head(&cdev->ep1_wait_queue);
 	init_waitqueue_head(&cdev->prepare_wait_queue);

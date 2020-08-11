@@ -1,13 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * LED Flash class interface
  *
  * Copyright (C) 2015 Samsung Electronics Co., Ltd.
  * Author: Jacek Anaszewski <j.anaszewski@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 #ifndef __LINUX_FLASH_LEDS_H_INCLUDED
 #define __LINUX_FLASH_LEDS_H_INCLUDED
@@ -90,15 +86,20 @@ static inline struct led_classdev_flash *lcdev_to_flcdev(
 }
 
 /**
- * led_classdev_flash_register - register a new object of led_classdev class
- *				 with support for flash LEDs
- * @parent: the flash LED to register
+ * led_classdev_flash_register_ext - register a new object of LED class with
+ *				     init data and with support for flash LEDs
+ * @parent: LED flash controller device this flash LED is driven by
  * @fled_cdev: the led_classdev_flash structure for this device
+ * @init_data: the LED class flash device initialization data
  *
  * Returns: 0 on success or negative error value on failure
  */
-extern int led_classdev_flash_register(struct device *parent,
-				struct led_classdev_flash *fled_cdev);
+extern int led_classdev_flash_register_ext(struct device *parent,
+					struct led_classdev_flash *fled_cdev,
+					struct led_init_data *init_data);
+
+#define led_classdev_flash_register(parent, fled_cdev)		\
+	led_classdev_flash_register_ext(parent, fled_cdev, NULL)
 
 /**
  * led_classdev_flash_unregister - unregisters an object of led_classdev class
@@ -121,6 +122,8 @@ extern void led_classdev_flash_unregister(struct led_classdev_flash *fled_cdev);
 static inline int led_set_flash_strobe(struct led_classdev_flash *fled_cdev,
 					bool state)
 {
+	if (!fled_cdev)
+		return -EINVAL;
 	return fled_cdev->ops->strobe_set(fled_cdev, state);
 }
 
@@ -136,6 +139,8 @@ static inline int led_set_flash_strobe(struct led_classdev_flash *fled_cdev,
 static inline int led_get_flash_strobe(struct led_classdev_flash *fled_cdev,
 					bool *state)
 {
+	if (!fled_cdev)
+		return -EINVAL;
 	if (fled_cdev->ops->strobe_get)
 		return fled_cdev->ops->strobe_get(fled_cdev, state);
 

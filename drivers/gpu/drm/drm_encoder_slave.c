@@ -43,7 +43,7 @@
  * &drm_encoder_slave. The @slave_funcs field will be initialized with
  * the hooks provided by the slave driver.
  *
- * If @info->platform_data is non-NULL it will be used as the initial
+ * If @info.platform_data is non-NULL it will be used as the initial
  * slave config.
  *
  * Returns 0 on success or a negative errno on failure, in particular,
@@ -84,7 +84,7 @@ int drm_i2c_encoder_init(struct drm_device *dev,
 
 	err = encoder_drv->encoder_init(client, dev, encoder);
 	if (err)
-		goto fail_unregister;
+		goto fail_module_put;
 
 	if (info->platform_data)
 		encoder->slave_funcs->set_config(&encoder->base,
@@ -92,9 +92,10 @@ int drm_i2c_encoder_init(struct drm_device *dev,
 
 	return 0;
 
+fail_module_put:
+	module_put(module);
 fail_unregister:
 	i2c_unregister_device(client);
-	module_put(module);
 fail:
 	return err;
 }

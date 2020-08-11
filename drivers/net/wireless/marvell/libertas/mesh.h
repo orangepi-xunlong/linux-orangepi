@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Contains all definitions needed for the Libertas' MESH implementation.
  */
@@ -23,8 +24,7 @@ void lbs_remove_mesh(struct lbs_private *priv);
 
 static inline bool lbs_mesh_activated(struct lbs_private *priv)
 {
-	/* Mesh SSID is only programmed after successful init */
-	return priv->mesh_ssid_len != 0;
+	return !!priv->mesh_tlv;
 }
 
 int lbs_mesh_set_channel(struct lbs_private *priv, u8 channel);

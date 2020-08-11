@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Entropy functions used on early boot for KASLR base and memory
  * randomization. The base randomization is done in the compressed
@@ -9,7 +10,7 @@
 #include <asm/kaslr.h>
 #include <asm/msr.h>
 #include <asm/archrandom.h>
-#include <asm/e820.h>
+#include <asm/e820/api.h>
 #include <asm/io.h>
 
 /*
@@ -35,8 +36,8 @@ static inline u16 i8254(void)
 	u16 status, timer;
 
 	do {
-		outb(I8254_PORT_CONTROL,
-		     I8254_CMD_READBACK | I8254_SELECT_COUNTER0);
+		outb(I8254_CMD_READBACK | I8254_SELECT_COUNTER0,
+		     I8254_PORT_CONTROL);
 		status = inb(I8254_PORT_COUNTER0);
 		timer  = inb(I8254_PORT_COUNTER0);
 		timer |= inb(I8254_PORT_COUNTER0) << 8;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
 /*
  * Copyright (C) ST-Ericsson 2010-2012
  * Contact: Alexey Orishko <alexey.orishko@stericsson.com>
@@ -118,6 +119,9 @@ struct cdc_ncm_ctx {
 	u32 tx_curr_frame_num;
 	u32 rx_max;
 	u32 tx_max;
+	u32 tx_curr_size;
+	u32 tx_low_mem_max_cnt;
+	u32 tx_low_mem_val;
 	u32 max_datagram_size;
 	u16 tx_max_datagrams;
 	u16 tx_remainder;

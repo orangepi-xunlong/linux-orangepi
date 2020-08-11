@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  inode.c - part of tracefs, a pseudo file system for activating tracing
  *
@@ -5,12 +6,7 @@
  *
  *  Copyright (C) 2014 Red Hat Inc, author: Steven Rostedt <srostedt@redhat.com>
  *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License version
- *	2 as published by the Free Software Foundation.
- *
  * tracefs is the file system that is used by the tracing infrastructure.
- *
  */
 
 #include <linux/module.h>
@@ -20,6 +16,7 @@
 #include <linux/namei.h>
 #include <linux/tracefs.h>
 #include <linux/fsnotify.h>
+#include <linux/security.h>
 #include <linux/seq_file.h>
 #include <linux/parser.h>
 #include <linux/magic.h>
@@ -53,7 +50,7 @@ static const struct file_operations tracefs_file_operations = {
 static struct tracefs_dir_ops {
 	int (*mkdir)(const char *name);
 	int (*rmdir)(const char *name);
-} tracefs_ops;
+} tracefs_ops __ro_after_init;
 
 static char *get_dname(struct dentry *dentry)
 {
@@ -266,11 +263,9 @@ static const struct super_operations tracefs_super_operations = {
 
 static int trace_fill_super(struct super_block *sb, void *data, int silent)
 {
-	static struct tree_descr trace_files[] = {{""}};
+	static const struct tree_descr trace_files[] = {{""}};
 	struct tracefs_fs_info *fsi;
 	int err;
-
-	save_mount_options(sb, data);
 
 	fsi = kzalloc(sizeof(struct tracefs_fs_info), GFP_KERNEL);
 	sb->s_fs_info = fsi;
@@ -396,6 +391,9 @@ struct dentry *tracefs_create_file(const char *name, umode_t mode,
 	struct dentry *dentry;
 	struct inode *inode;
 
+	if (security_locked_down(LOCKDOWN_TRACEFS))
+		return NULL;
+
 	if (!(mode & S_IFMT))
 		mode |= S_IFREG;
 	BUG_ON(!S_ISREG(mode));
@@ -480,7 +478,8 @@ struct dentry *tracefs_create_dir(const char *name, struct dentry *parent)
  *
  * Returns the dentry of the instances directory.
  */
-struct dentry *tracefs_create_instance_dir(const char *name, struct dentry *parent,
+__init struct dentry *tracefs_create_instance_dir(const char *name,
+					  struct dentry *parent,
 					  int (*mkdir)(const char *name),
 					  int (*rmdir)(const char *name))
 {
@@ -510,9 +509,12 @@ static int __tracefs_remove(struct dentry *dentry, struct dentry *parent)
 			switch (dentry->d_inode->i_mode & S_IFMT) {
 			case S_IFDIR:
 				ret = simple_rmdir(parent->d_inode, dentry);
+				if (!ret)
+					fsnotify_rmdir(parent->d_inode, dentry);
 				break;
 			default:
 				simple_unlink(parent->d_inode, dentry);
+				fsnotify_unlink(parent->d_inode, dentry);
 				break;
 			}
 			if (!ret)

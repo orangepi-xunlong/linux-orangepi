@@ -29,8 +29,8 @@
 #include <linux/irq.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
-#include <linux/i2c/twl.h>
-#include <linux/i2c-omap.h>
+#include <linux/mfd/twl.h>
+#include <linux/platform_data/i2c-omap.h>
 #include <linux/reboot.h>
 #include <linux/irqchip/irq-omap-intc.h>
 
@@ -43,6 +43,9 @@
 #include "usb.h"
 
 #define OMAP_INTC_START		NR_IRQS
+
+extern int (*omap_pm_soc_init)(void);
+int omap_pm_nop_init(void);
 
 #if defined(CONFIG_PM) && defined(CONFIG_ARCH_OMAP2)
 int omap2_pm_init(void);
@@ -77,10 +80,11 @@ static inline int omap4_pm_init_early(void)
 }
 #endif
 
-#ifdef CONFIG_OMAP_MUX
-int omap_mux_late_init(void);
+#if defined(CONFIG_PM) && (defined(CONFIG_SOC_AM33XX) || \
+	defined(CONFIG_SOC_AM43XX))
+int amx3_common_pm_init(void);
 #else
-static inline int omap_mux_late_init(void)
+static inline int amx3_common_pm_init(void)
 {
 	return 0;
 }
@@ -124,14 +128,10 @@ void am43xx_init_early(void);
 void am43xx_init_late(void);
 void omap4430_init_early(void);
 void omap5_init_early(void);
-void omap3_init_late(void);	/* Do not use this one */
+void omap3_init_late(void);
 void omap4430_init_late(void);
 void omap2420_init_late(void);
 void omap2430_init_late(void);
-void omap3430_init_late(void);
-void omap35xx_init_late(void);
-void omap3630_init_late(void);
-void am35xx_init_late(void);
 void ti81xx_init_late(void);
 void am33xx_init_late(void);
 void omap5_init_late(void);
@@ -234,7 +234,6 @@ extern struct device *omap2_get_iva_device(void);
 extern struct device *omap2_get_l3_device(void);
 extern struct device *omap4_get_dsp_device(void);
 
-unsigned int omap4_xlate_irq(unsigned int hwirq);
 void omap_gic_of_init(void);
 
 #ifdef CONFIG_CACHE_L2X0
@@ -274,6 +273,8 @@ extern int omap4_cpu_kill(unsigned int cpu);
 
 extern const struct smp_operations omap4_smp_ops;
 #endif
+
+extern u32 omap4_get_cpu1_ns_pa_addr(void);
 
 #if defined(CONFIG_SMP) && defined(CONFIG_PM)
 extern int omap4_mpuss_init(void);
@@ -335,6 +336,15 @@ static inline void omap5_secondary_hyp_startup(void)
 }
 #endif
 
+#ifdef CONFIG_SOC_DRA7XX
+extern int dra7xx_pciess_reset(struct omap_hwmod *oh);
+#else
+static inline int dra7xx_pciess_reset(struct omap_hwmod *oh)
+{
+	return 0;
+}
+#endif
+
 void pdata_quirks_init(const struct of_device_id *);
 void omap_auxdata_legacy_init(struct device *dev);
 void omap_pcs_legacy_init(int irq, void (*rearm)(void));
@@ -350,9 +360,6 @@ extern int omap_dss_reset(struct omap_hwmod *);
 
 /* SoC specific clock initializer */
 int omap_clk_init(void);
-
-int __init omapdss_init_of(void);
-void __init omapdss_early_init_of(void);
 
 #endif /* __ASSEMBLER__ */
 #endif /* __ARCH_ARM_MACH_OMAP2PLUS_COMMON_H */

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SuperH EHCI host controller driver
  *
  * Copyright (C) 2010  Paul Mundt
  *
  * Based on ohci-sh.c and ehci-atmel.c.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/platform_device.h>
 #include <linux/clk.h>
@@ -36,7 +33,7 @@ static const struct hc_driver ehci_sh_hc_driver = {
 	 * generic hardware linkage
 	 */
 	.irq				= ehci_irq,
-	.flags				= HCD_USB2 | HCD_MEMORY | HCD_BH,
+	.flags				= HCD_USB2 | HCD_DMA | HCD_MEMORY | HCD_BH,
 
 	/*
 	 * basic lifecycle operations
@@ -88,9 +85,6 @@ static int ehci_hcd_sh_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq <= 0) {
-		dev_err(&pdev->dev,
-			"Found HC with no IRQ. Check %s setup!\n",
-			dev_name(&pdev->dev));
 		ret = -ENODEV;
 		goto fail_create_hcd;
 	}

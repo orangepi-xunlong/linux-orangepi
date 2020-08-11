@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/iio/light/tsl2563.c
  *
@@ -8,20 +9,6 @@
  *
  * Converted to IIO driver
  * Amit Kucheria <amit.kucheria@verdurent.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/module.h>
@@ -697,13 +684,11 @@ static int tsl2563_read_interrupt_config(struct iio_dev *indio_dev,
 }
 
 static const struct iio_info tsl2563_info_no_irq = {
-	.driver_module = THIS_MODULE,
 	.read_raw = &tsl2563_read_raw,
 	.write_raw = &tsl2563_write_raw,
 };
 
 static const struct iio_info tsl2563_info = {
-	.driver_module = THIS_MODULE,
 	.read_raw = &tsl2563_read_raw,
 	.write_raw = &tsl2563_write_raw,
 	.read_event_value = &tsl2563_read_thresh,
@@ -884,9 +869,19 @@ static const struct i2c_device_id tsl2563_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, tsl2563_id);
 
+static const struct of_device_id tsl2563_of_match[] = {
+	{ .compatible = "amstaos,tsl2560" },
+	{ .compatible = "amstaos,tsl2561" },
+	{ .compatible = "amstaos,tsl2562" },
+	{ .compatible = "amstaos,tsl2563" },
+	{}
+};
+MODULE_DEVICE_TABLE(of, tsl2563_of_match);
+
 static struct i2c_driver tsl2563_i2c_driver = {
 	.driver = {
 		.name	 = "tsl2563",
+		.of_match_table = tsl2563_of_match,
 		.pm	= TSL2563_PM_OPS,
 	},
 	.probe		= tsl2563_probe,

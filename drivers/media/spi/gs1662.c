@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * GS1662 device registration.
  *
  * Copyright (C) 2015-2016 Nexvision
  * Author: Charles-Antoine Couret <charles-antoine.couret@nexvision.fr>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -462,7 +458,6 @@ static int gs_remove(struct spi_device *spi)
 static struct spi_driver gs_driver = {
 	.driver = {
 		.name		= "gs1662",
-		.owner		= THIS_MODULE,
 	},
 
 	.probe		= gs_probe,

@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2011 Instituto Nokia de Tecnologia
  *
  * Authors:
  *    Lauro Ramos Venancio <lauro.venancio@openbossa.org>
  *    Aloisio Almeida Jr <aloisio.almeida@openbossa.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": %s: " fmt, __func__
@@ -1015,9 +1003,9 @@ exit:
 	device_unlock(&dev->dev);
 }
 
-static void nfc_check_pres_timeout(unsigned long data)
+static void nfc_check_pres_timeout(struct timer_list *t)
 {
-	struct nfc_dev *dev = (struct nfc_dev *)data;
+	struct nfc_dev *dev = from_timer(dev, t, check_pres_timer);
 
 	schedule_work(&dev->check_pres_work);
 }
@@ -1094,10 +1082,7 @@ struct nfc_dev *nfc_allocate_device(struct nfc_ops *ops,
 	dev->targets_generation = 1;
 
 	if (ops->check_presence) {
-		init_timer(&dev->check_pres_timer);
-		dev->check_pres_timer.data = (unsigned long)dev;
-		dev->check_pres_timer.function = nfc_check_pres_timeout;
-
+		timer_setup(&dev->check_pres_timer, nfc_check_pres_timeout, 0);
 		INIT_WORK(&dev->check_pres_work, nfc_check_pres_work);
 	}
 

@@ -79,32 +79,20 @@ enum loongson_machine_type {
  */
 #define  MACH_INGENIC_JZ4730	0	/* JZ4730 SOC		*/
 #define  MACH_INGENIC_JZ4740	1	/* JZ4740 SOC		*/
+#define  MACH_INGENIC_JZ4770	2	/* JZ4770 SOC		*/
+#define  MACH_INGENIC_JZ4780	3	/* JZ4780 SOC		*/
+#define  MACH_INGENIC_X1000		4	/* X1000 SOC		*/
 
 extern char *system_type;
 const char *get_system_type(void);
 
 extern unsigned long mips_machtype;
 
-#define BOOT_MEM_MAP_MAX	32
 #define BOOT_MEM_RAM		1
 #define BOOT_MEM_ROM_DATA	2
 #define BOOT_MEM_RESERVED	3
 #define BOOT_MEM_INIT_RAM	4
-
-/*
- * A memory map that's built upon what was determined
- * or specified on the command line.
- */
-struct boot_mem_map {
-	int nr_map;
-	struct boot_mem_map_entry {
-		phys_addr_t addr;	/* start of memory segment */
-		phys_addr_t size;	/* size of memory segment */
-		long type;		/* type of memory segment */
-	} map[BOOT_MEM_MAP_MAX];
-};
-
-extern struct boot_mem_map boot_mem_map;
+#define BOOT_MEM_NOMAP		5
 
 extern void add_memory_region(phys_addr_t start, phys_addr_t size, long type);
 extern void detect_memory_region(phys_addr_t start, phys_addr_t sz_min,  phys_addr_t sz_max);
@@ -164,6 +152,19 @@ static inline void plat_swiotlb_setup(void) {}
  * Return: Pointer to the flattened device tree blob.
  */
 extern void *plat_get_fdt(void);
+
+#ifdef CONFIG_RELOCATABLE
+
+/**
+ * plat_fdt_relocated() - Update platform's information about relocated dtb
+ *
+ * This function provides a platform-independent API to set platform's
+ * information about relocated DTB if it needs to be moved due to kernel
+ * relocation occurring at boot.
+ */
+void plat_fdt_relocated(void *new_location);
+
+#endif /* CONFIG_RELOCATABLE */
 #endif /* CONFIG_USE_OF */
 
 #endif /* _ASM_BOOTINFO_H */

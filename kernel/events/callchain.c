@@ -1,16 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Performance events callchain code, extracted from core.c:
  *
  *  Copyright (C) 2008 Thomas Gleixner <tglx@linutronix.de>
  *  Copyright (C) 2008-2011 Red Hat, Inc., Ingo Molnar
  *  Copyright (C) 2008-2011 Red Hat, Inc., Peter Zijlstra
- *  Copyright  ©  2009 Paul Mackerras, IBM Corp. <paulus@au1.ibm.com>
- *
- * For licensing details see kernel-base/COPYING
+ *  Copyright  Â©  2009 Paul Mackerras, IBM Corp. <paulus@au1.ibm.com>
  */
 
 #include <linux/perf_event.h>
 #include <linux/slab.h>
+#include <linux/sched/task_stack.h>
+
 #include "internal.h"
 
 struct callchain_cpus_entries {
@@ -171,21 +172,6 @@ static void
 put_callchain_entry(int rctx)
 {
 	put_recursion_context(this_cpu_ptr(callchain_recursion), rctx);
-}
-
-struct perf_callchain_entry *
-perf_callchain(struct perf_event *event, struct pt_regs *regs)
-{
-	bool kernel = !event->attr.exclude_callchain_kernel;
-	bool user   = !event->attr.exclude_callchain_user;
-	/* Disallow cross-task user callchains. */
-	bool crosstask = event->ctx->task && event->ctx->task != current;
-	const u32 max_stack = event->attr.sample_max_stack;
-
-	if (!kernel && !user)
-		return NULL;
-
-	return get_perf_callchain(regs, 0, kernel, user, max_stack, crosstask, true);
 }
 
 struct perf_callchain_entry *

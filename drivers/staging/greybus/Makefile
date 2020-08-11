@@ -1,29 +1,6 @@
-# Greybus core
-greybus-y :=	core.o		\
-		debugfs.o	\
-		hd.o		\
-		manifest.o	\
-		module.o	\
-		interface.o	\
-		bundle.o	\
-		connection.o	\
-		control.o	\
-		svc.o		\
-		svc_watchdog.o	\
-		operation.o	\
-		timesync.o	\
-		timesync_platform.o
-
-obj-$(CONFIG_GREYBUS)		+= greybus.o
-
+# SPDX-License-Identifier: GPL-2.0
 # needed for trace events
 ccflags-y += -I$(src)
-
-
-# Greybus Host controller drivers
-gb-es2-y := es2.o
-
-obj-$(CONFIG_GREYBUS_ES2)	+= gb-es2.o
 
 # Greybus class drivers
 gb-bootrom-y		:= bootrom.o
@@ -93,4 +70,4 @@ obj-$(CONFIG_GREYBUS_USB)		+= gb-usb.o
 # Greybus Platform driver
 gb-arche-y	:= arche-platform.o arche-apb-ctrl.o
 
-obj-$(CONFIG_USB_HSIC_USB3613)	+= gb-arche.o
+obj-$(CONFIG_GREYBUS_ARCHE)	+= gb-arche.o

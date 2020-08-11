@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AD5446 SPI DAC driver
  *
  * Copyright 2010 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/interrupt.h>
@@ -212,7 +211,6 @@ static int ad5446_write_raw(struct iio_dev *indio_dev,
 static const struct iio_info ad5446_info = {
 	.read_raw = ad5446_read_raw,
 	.write_raw = ad5446_write_raw,
-	.driver_module = THIS_MODULE,
 };
 
 static int ad5446_probe(struct device *dev, const char *name,
@@ -329,6 +327,7 @@ enum ad5446_supported_spi_device_ids {
 	ID_AD5541A,
 	ID_AD5512A,
 	ID_AD5553,
+	ID_AD5600,
 	ID_AD5601,
 	ID_AD5611,
 	ID_AD5621,
@@ -381,6 +380,10 @@ static const struct ad5446_chip_info ad5446_spi_chip_info[] = {
 	},
 	[ID_AD5553] = {
 		.channel = AD5446_CHANNEL(14, 16, 0),
+		.write = ad5446_write,
+	},
+	[ID_AD5600] = {
+		.channel = AD5446_CHANNEL(16, 16, 0),
 		.write = ad5446_write,
 	},
 	[ID_AD5601] = {
@@ -450,6 +453,7 @@ static const struct spi_device_id ad5446_spi_ids[] = {
 	{"ad5542a", ID_AD5541A}, /* ad5541a and ad5542a are compatible */
 	{"ad5543", ID_AD5541A}, /* ad5541a and ad5543 are compatible */
 	{"ad5553", ID_AD5553},
+	{"ad5600", ID_AD5600},
 	{"ad5601", ID_AD5601},
 	{"ad5611", ID_AD5611},
 	{"ad5621", ID_AD5621},
@@ -461,9 +465,21 @@ static const struct spi_device_id ad5446_spi_ids[] = {
 	{"ad5660-2500", ID_AD5660_2500},
 	{"ad5660-1250", ID_AD5660_1250},
 	{"ad5662", ID_AD5662},
+	{"dac081s101", ID_AD5300}, /* compatible Texas Instruments chips */
+	{"dac101s101", ID_AD5310},
+	{"dac121s101", ID_AD5320},
+	{"dac7512", ID_AD5320},
 	{}
 };
 MODULE_DEVICE_TABLE(spi, ad5446_spi_ids);
+
+#ifdef CONFIG_OF
+static const struct of_device_id ad5446_of_ids[] = {
+	{ .compatible = "ti,dac7512" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, ad5446_of_ids);
+#endif
 
 static int ad5446_spi_probe(struct spi_device *spi)
 {
@@ -481,6 +497,7 @@ static int ad5446_spi_remove(struct spi_device *spi)
 static struct spi_driver ad5446_spi_driver = {
 	.driver = {
 		.name	= "ad5446",
+		.of_match_table = of_match_ptr(ad5446_of_ids),
 	},
 	.probe		= ad5446_spi_probe,
 	.remove		= ad5446_spi_remove,
@@ -616,6 +633,6 @@ static void __exit ad5446_exit(void)
 }
 module_exit(ad5446_exit);
 
-MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");
+MODULE_AUTHOR("Michael Hennerich <michael.hennerich@analog.com>");
 MODULE_DESCRIPTION("Analog Devices AD5444/AD5446 DAC");
 MODULE_LICENSE("GPL v2");

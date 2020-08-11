@@ -1,10 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _PROBE_FINDER_H
 #define _PROBE_FINDER_H
 
 #include <stdbool.h>
-#include "util.h"
 #include "intlist.h"
 #include "probe-event.h"
+#include <linux/ctype.h>
 
 #define MAX_PROBE_BUFFER	1024
 #define MAX_PROBES		 128
