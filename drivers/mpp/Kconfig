@@ -1,0 +1,11 @@
+#
+# SUNXI MPP drivers
+#
+
+config SUNXI_MPP
+	bool "SUNXI MPP support"
+	depends on ARCH_SUNXI && DEBUG_FS
+	help
+	  This adds the mpp driver for the Allwinner SUNXI SoC.
+
+	  If in doubt, say N.

@@ -1,0 +1,5 @@
+if WLAN || ETHERNET
+config SUNXI_ADDR_MGT
+	def_bool y
+endif
+

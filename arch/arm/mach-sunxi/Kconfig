@@ -1,0 +1,220 @@
+if ARCH_SUNXI
+
+choice
+	prompt "Select the architecture of SoC"
+	default ARCH_SUN8I
+	help
+	  Select the architecture for SoC
+	  sunxi
+	  `-- sun8i ----- Cortex-A7 based Family SoCs
+
+config ARCH_SUN8I
+	bool "Allwinner A7 smp SoCs"
+	select ARM_GIC
+	select CPU_V7
+	select HAVE_SMP
+	select HAVE_ARM_ARCH_TIMER
+	select SUN4I_TIMER
+	select MIGHT_HAVE_CACHE_L2X0
+	select PINCTRL
+	select PINCTRL_SUNXI
+	select ARCH_REQUIRE_GPIOLIB
+	select COMMON_CLK
+	select CLKDEV_LOOKUP
+	select CLKSRC_MMIO
+	select CLKSRC_OF
+	select GENERIC_CLOCKEVENTS
+	select GENERIC_IRQ_CHIP
+	select SPARSE_IRQ
+	select GENERIC_ALLOCATOR
+	help
+	  Allwinner A7 smp SoCs(sun8i)
+endchoice
+
+# Select the wafer with sun8i
+
+if ARCH_SUN8I
+choice
+	prompt "Select the wafer with arch sun8i"
+	default ARCH_SUN8IW11
+	help
+	  Select the wafer with arch sun8i
+
+config ARCH_SUN8IW11
+        bool "Allwinner sun8iw11 SoCs"
+	select HAVE_UNSTABLE_SCHED_CLOCK
+        help
+          Allwinner sun8iw11 SoCs
+
+config ARCH_SUN8IW12
+        bool "Allwinner sun8iw12 SoCs"
+        help
+          Allwinner sun8iw12 SoCs
+config ARCH_SUN8IW15
+        bool "Allwinner sun8iw15 SoCs"
+        help
+          Allwinner sun8iw15 SoCs
+config ARCH_SUN8IW17
+        bool "Allwinner sun8iw17 SoCs"
+        help
+          Allwinner sun8iw17 SoCs
+config ARCH_SUN8IW7
+        bool "Allwinner sun8iw7 SoCs"
+        help
+          Allwinner sun8iw7 SoCs
+config ARCH_SUN8IW6
+        bool "Allwinner sun8iw6 SoCs"
+        help
+          Allwinner sun8iw6 SoCs
+config ARCH_SUN8IW18
+        bool "Allwinner sun8iw18 SoCs"
+        help
+          Allwinner sun8iw18 SoCs
+endchoice
+endif
+
+# Select the SoC with specific arch and wafer
+
+if ARCH_SUN8IW11
+choice
+	prompt "Select the SoC with wafer sun8iw11"
+	default ARCH_SUN8IW11P1
+	help
+	 Select the SoC with wafer sun8iw11
+
+config ARCH_SUN8IW11P1
+	bool "Allwinner sun8iw11p1 SoC"
+	help
+	  Allwinner sun8iw11p1 SoC
+endchoice
+endif
+
+if ARCH_SUN8IW12
+choice
+	prompt "Select the SoC with wafer sun8iw12"
+	default ARCH_SUN8IW12P1
+	help
+	 Select the SoC with wafer sun8iw12
+
+config ARCH_SUN8IW12P1
+	bool "Allwinner sun8iw12p1 SoC"
+	help
+	  Allwinner sun8iw12p1 SoC
+endchoice
+endif
+
+if ARCH_SUN8IW15
+choice
+	prompt "Select the SoC with wafer sun8iw15"
+	default ARCH_SUN8IW15P1
+	help
+	 Select the SoC with wafer sun8iw15
+
+config ARCH_SUN8IW15P1
+	bool "Allwinner sun8iw15p1 SoC"
+	help
+	  Allwinner sun8iw15p1 SoC
+endchoice
+endif
+
+if ARCH_SUN8IW17
+choice
+	prompt "Select the SoC with wafer sun8iw17"
+	default ARCH_SUN8IW17P1
+	help
+	 Select the SoC with wafer sun8iw17
+
+config ARCH_SUN8IW17P1
+	bool "Allwinner sun8iw17p1 SoC"
+	help
+	  Allwinner sun8iw17p1 SoC
+endchoice
+endif
+
+if ARCH_SUN8IW7
+choice
+	prompt "Select the SoC with wafer sun8iw7"
+	default ARCH_SUN8IW7P1
+	help
+	 Select the SoC with wafer sun8iw7
+
+config ARCH_SUN8IW7P1
+	bool "Allwinner sun8iw7p1 SoC"
+	help
+	  Allwinner sun8iw7p1 SoC
+endchoice
+endif
+
+if ARCH_SUN8IW6
+choice
+	prompt "Select the SoC with wafer sun8iw6"
+	default ARCH_SUN8IW6P1
+	help
+	 Select the SoC with wafer sun8iw7
+
+config ARCH_SUN8IW6P1
+	bool "Allwinner sun8iw6p1 SoC"
+	help
+	  Allwinner sun8iw6p1 SoC
+endchoice
+endif
+
+if ARCH_SUN8IW18
+choice
+	prompt "Select the SoC with wafer sun8iw18"
+	default ARCH_SUN8IW18P1
+	help
+	 Select the SoC with wafer sun8iw18
+
+config ARCH_SUN8IW18P1
+	bool "Allwinner sun8iw18p1 SoC"
+	help
+	  Allwinner sun8iw18p1 SoC
+endchoice
+endif
+
+
+config SUNXI_GIC_ACCESS_SS
+    bool "Enable Sunxi GIC Access SS Protect"
+    depends on ARCH_SUN8IW6
+    default n
+    help
+        Support for Sunxi GIC Access SS Protect
+
+config SUN8I_CCI
+	bool "Cache Coherent Interconnect support"
+	depends on ARCH_SUN8IW6 || ARCH_SUN8IW17
+	default n
+	help
+	  Enable Cache Coherent Interconnect support
+
+# Select the board between FPGA and EVB
+
+choice
+	prompt "Allwinner development Board"
+	depends on ARCH_SUNXI
+	default FPGA_V4_PLATFORM
+
+config FPGA_V4_PLATFORM
+       bool "FPGAv4 board"
+       help
+         Support for Allwinner's FPGAv4 board
+
+config FPGA_V7_PLATFORM
+       bool "FPGAv7 board"
+       help
+         Support for Allwinner's FPGAv4 board
+
+config EVB_PLATFORM
+       bool "EVB board"
+       help
+         Support for Allwinner's EVB board
+endchoice
+
+config SUNXI_SOC_NAME
+	string "The name of Sunxi SoC"
+	default ""
+	help
+	  Used for /proc/cpuinfo and /sys/.../sysinfo.
+
+endif

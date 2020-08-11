@@ -1,0 +1,7 @@
+config FILE_INTEGRITY
+	tristate "File Integrity Check"
+	depends on SECURITYFS
+	default n
+	help
+	  This selects off-line file integrity module , which help to verify
+	  the system file integrity on run-time

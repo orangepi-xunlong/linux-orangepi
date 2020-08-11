@@ -1,0 +1,10 @@
+#
+# sunxi emce driver configuration.
+#
+config SUNXI_EMCE
+	tristate "sunxi emce driver"
+	depends on ARCH_SUNXI && CRYPTO_SHA256
+	help
+	  Sunxi emce driver support sunxi family SOCs.
+	  Set y here to support the sunxi emce driver.
+	  If unsure, set N.

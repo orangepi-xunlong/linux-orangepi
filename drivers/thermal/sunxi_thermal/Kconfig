@@ -1,0 +1,7 @@
+menu "allwinner(SUNXI) thermal cooling device drivers"
+source "drivers/thermal/sunxi_thermal/sunxi_cooling_device/Kconfig"
+endmenu
+
+menu "allwinner(SUNXI) thermal sensor drivers"
+source "drivers/thermal/sunxi_thermal/sunxi_thermal_sensor/Kconfig"
+endmenu

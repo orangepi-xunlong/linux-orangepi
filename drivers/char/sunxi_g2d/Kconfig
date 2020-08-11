@@ -1,0 +1,8 @@
+
+config SUNXI_G2D
+	depends on (ARCH_SUNXI)
+	tristate "sunxi g2d driver"
+	default N
+	help
+
+

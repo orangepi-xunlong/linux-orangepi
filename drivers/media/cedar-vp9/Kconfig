@@ -1,0 +1,8 @@
+config VIDEO_GOOGLE_VP9_DECODER_SUNXI
+	tristate "google video vp9 decoder support"
+    select DMA_SHARED_BUFFER
+	default y
+	---help---
+	  This is the driver for google video decoder, including vp9
+	  To compile this driver as a module, choose M here: the
+	  module will be called google_vp9.

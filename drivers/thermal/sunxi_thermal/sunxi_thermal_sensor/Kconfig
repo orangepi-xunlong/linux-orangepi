@@ -1,0 +1,12 @@
+config SUNXI_THERMAL_SENSOR
+	tristate "Thermal sensor driver"
+	depends on ARCH_SUNXI
+	help
+	  Thermal sensor on SUNXI platform.
+
+config SUNXI_THS_DRIVER
+	tristate "Thermal sensor driver for SUNXI platform"
+	depends on SUNXI_THERMAL_SENSOR
+	help
+	  Temperature sensor on SUNXI platform. The thermal sensor driver used to
+	  get temp. It call the thermal driver core interface.

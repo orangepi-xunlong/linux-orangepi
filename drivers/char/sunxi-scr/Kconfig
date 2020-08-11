@@ -1,0 +1,7 @@
+
+config SUNXI_SCR
+	tristate "allwinnertech smartcard driver"
+	default n
+	help
+	  allwinnertech smart card driver
+

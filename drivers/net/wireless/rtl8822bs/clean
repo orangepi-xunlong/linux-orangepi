@@ -1,0 +1,3 @@
+#!/bin/bash
+rmmod 8822bs
+rmmod 88x2bs
