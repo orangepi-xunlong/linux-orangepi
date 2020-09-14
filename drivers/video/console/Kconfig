@@ -165,7 +165,7 @@ config FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER
 config BOOTSPLASH
 	bool "Bootup splash screen"
 	depends on FRAMEBUFFER_CONSOLE
-	---help---
+	help
 	  This option enables the Linux bootsplash screen.
 
 	  The bootsplash is a full-screen logo or animation indicating a

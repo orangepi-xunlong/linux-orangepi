@@ -60,6 +60,9 @@ dtbo-$(CONFIG_MACH_SUN7I) += \
 dtbo-$(CONFIG_MACH_SUN8I) += \
 	sun8i-h3-analog-codec.dtbo \
 	sun8i-h3-cir.dtbo \
+	sun8i-h3-cpu-clock-1.2GHz-1.3v.dtbo \
+	sun8i-h3-cpu-clock-1.368GHz-1.3v.dtbo \
+	sun8i-h3-cpu-clock-1.3GHz-1.3v.dtbo \
 	sun8i-h3-i2c0.dtbo \
 	sun8i-h3-i2c1.dtbo \
 	sun8i-h3-i2c2.dtbo \
