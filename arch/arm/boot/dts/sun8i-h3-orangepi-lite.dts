@@ -166,3 +166,59 @@
 	/* USB VBUS is always on */
 	status = "okay";
 };
+
+&csi {
+	status = "okay";
+	
+	port {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		
+		/* Parallel bus endpoint */
+		csi_from_ov5640: endpoint {
+			remote-endpoint = <&ov5640_to_csi>;
+			bus-width = <8>;
+			data-shift = <2>;
+			hsync-active = <1>; /* Active high */
+			vsync-active = <0>; /* Active low */
+			data-active = <1>;  /* Active high */
+			pclk-sample = <1>;  /* Rising */
+		};
+	};
+};
+
+&i2c2 {
+	status = "okay";
+
+	ov5640: camera@3c {
+		compatible = "ovti,ov5640";
+		reg = <0x3c>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&csi_mclk_pin>;
+		clocks = <&ccu CLK_CSI_MCLK>;
+		clock-names = "xclk";
+		reset-gpios = <&pio 4 14 GPIO_ACTIVE_LOW>;
+		csien-gpios = <&pio 6 11 GPIO_ACTIVE_HIGH>;
+		poweren-gpios = <&pio 0 17 GPIO_ACTIVE_HIGH>;
+		powerdown-gpios = <&pio 4 15 GPIO_ACTIVE_HIGH>;
+		AVDD-supply = <&reg_cam_avdd>;
+		DOVDD-supply = <&reg_cam_dovdd>;
+		DVDD-supply = <&reg_cam_dvdd>;
+
+		port {
+			ov5640_to_csi: endpoint {
+				remote-endpoint = <&csi_from_ov5640>;
+				bus-width = <8>;
+				data-shift = <2>;
+				hsync-active = <1>; /* Active high */
+				vsync-active = <0>; /* Active low */
+				data-active = <1>;  /* Active high */
+				pclk-sample = <1>;  /* Rising */
+				};
+		};
+	};
+};
+
+&i2c2_pins {
+	bias-pull-up;
+};

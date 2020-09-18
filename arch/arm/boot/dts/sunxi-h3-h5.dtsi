@@ -579,6 +579,12 @@
 				pins = "PA15", "PA16";
 				function = "uart3";
 			};
+
+			csi_mclk_pin: csi-mclk-pin {
+				pins = "PE1";
+				function = "csi";
+			};
+
 		};
 
 		timer@1c20c00 {

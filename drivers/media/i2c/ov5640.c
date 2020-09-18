@@ -227,6 +227,8 @@ struct ov5640_dev {
 	struct regulator_bulk_data supplies[OV5640_NUM_SUPPLIES];
 	struct gpio_desc *reset_gpio;
 	struct gpio_desc *pwdn_gpio;
+	struct gpio_desc  *pwen_gpio;
+	struct gpio_desc  *csien_gpio;
 	bool   upside_down;
 
 	/* lock to protect all members below */
@@ -3022,6 +3024,16 @@ static int ov5640_probe(struct i2c_client *client)
 			sensor->xclk_freq);
 		return -EINVAL;
 	}
+
+	sensor->csien_gpio = devm_gpiod_get_optional(dev, "csien",
+						     GPIOD_OUT_HIGH);
+	if (IS_ERR(sensor->csien_gpio))
+		return PTR_ERR(sensor->csien_gpio);
+
+	sensor->pwen_gpio = devm_gpiod_get_optional(dev, "poweren",
+						    GPIOD_OUT_HIGH);
+	if (IS_ERR(sensor->pwen_gpio))
+		return PTR_ERR(sensor->pwen_gpio);
 
 	/* request optional power down pin */
 	sensor->pwdn_gpio = devm_gpiod_get_optional(dev, "powerdown",
