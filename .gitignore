@@ -146,3 +146,11 @@ x509.genkey
 
 # Clang's compilation database file
 /compile_commands.json
+
+*.dtbo
+*.scr
+
+fs/aufs/conf.str
+fs/aufs/conf.str.tmp
+net/wireguard/crypto/zinc/chacha20/chacha20-arm.S
+net/wireguard/crypto/zinc/poly1305/poly1305-arm.S
