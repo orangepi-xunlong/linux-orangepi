@@ -84,7 +84,8 @@
 		status_led {
 			label = "orangepi:red:status";
 			gpios = <&pio 0 17 GPIO_ACTIVE_HIGH>;
-			linux,default-trigger = "heartbeat";
+			default-state = "off";
+			/*linux,default-trigger = "heartbeat";*/
 		};
 	};
 
