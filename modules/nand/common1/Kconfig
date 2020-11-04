@@ -1,0 +1,11 @@
+choice
+	prompt "choice spinand or rawnand"
+	depends on (SUNXI_NAND)
+
+	config SUNXI_RAWNAND
+		bool "sunxi raw nand driver"
+
+	config	SUNXI_SPINAND
+		bool "sunxi spi nand driver"
+
+endchoice

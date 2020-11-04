@@ -1,0 +1,20 @@
+
+config SUNXI_G2D
+	depends on (ARCH_SUNXI)
+	tristate "SUNXI G2D Driver"
+	default n
+	help
+
+config SUNXI_G2D_MIXER
+	depends on (SUNXI_G2D)
+	bool "sunxi g2d mixer module"
+	default n
+	help
+     Choose Y to enable mixer module of g2d
+
+config SUNXI_G2D_ROTATE
+	depends on (SUNXI_G2D)
+	bool "sunxi g2d rotate module"
+	default n
+	help
+     Choose Y to enable rotate module of g2d

@@ -1,0 +1,80 @@
+/*
+ * Copyright:
+ * ----------------------------------------------------------------------------
+ * This confidential and proprietary software may be used only as authorized
+ * by a licensing agreement from ARM Limited.
+ *      (C) COPYRIGHT 2016-2019 ARM Limited, ALL RIGHTS RESERVED
+ * The entire notice above must be reproduced on all authorized copies and
+ * copies may only be made to the extent permitted by a licensing agreement
+ * from ARM Limited.
+ * ----------------------------------------------------------------------------
+ */
+
+bob_install_group {
+    name: "IG_kernel_modules",
+    android: {
+        install_path: "{{.module_path}}",
+    },
+    linux: {
+        install_path: "{{.install_dir}}/{{.module_path}}",
+    },
+}
+
+bob_defaults {
+    name: "kernel_defaults",
+    enabled: false,
+    exclude_srcs: [
+        "**/*.mod.c",
+    ],
+    local_include_dirs: [
+        "include",
+    ],
+    build_kernel_modules: {
+        enabled: true,
+        kernel_dir: "{{.kernel_dir}}",
+        kernel_cross_compile: "{{.kernel_compiler}}",
+        kernel_cc: "{{.kernel_cc}}",
+        kernel_hostcc: "{{.kernel_hostcc}}",
+        kernel_clang_triple: "{{.kernel_clang_triple}}",
+    },
+    install_group: "IG_kernel_modules",
+    cflags: [
+        "-Wall",
+    ],
+    werror: {
+        cflags: ["-Werror"],
+    },
+    allow_android_tags: {
+        tags: [
+            "eng",
+            "optional",
+        ],
+    },
+}
+
+bob_defaults {
+    name: "kutf_includes",
+    local_include_dirs: [
+        "drivers/gpu/arm/midgard/tests/include",
+    ],
+}
+
+bob_defaults {
+    name: "kernel_test_includes",
+    defaults: ["kutf_includes"],
+    local_include_dirs: [
+        "drivers/gpu/arm",
+        "drivers/gpu/arm/midgard",
+        "drivers/gpu/arm/midgard/backend/gpu",
+    ],
+}
+
+bob_alias {
+    name: "kernel",
+    srcs: [
+        "dma-buf-test-exporter",
+        "smc_protected_mode_switcher",
+        "memory_group_manager",
+        "mali_kbase",
+    ],
+}

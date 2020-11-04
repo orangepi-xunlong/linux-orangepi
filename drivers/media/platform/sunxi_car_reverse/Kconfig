@@ -1,0 +1,32 @@
+#
+# Platform drivers
+#	All drivers here are currently for webcam support
+
+config VIDEO_SUNXI_CAR_REVERSE
+	tristate "sunxi fast car reverse driver"
+	depends on ARCH_SUN8IW11 || ARCH_SUN8IW17 || ARCH_SUN50IW9
+	default n
+
+config SUPPORT_BIRDVIEW
+	tristate "Support car oview"
+	depends on VIDEO_SUNXI_CAR_REVERSE
+	default n
+	help
+	  Support for the car reverse.
+
+config SUPPORT_AUXILIARY_LINE
+	bool "support auxiliary line display"
+	depends on VIDEO_SUNXI_CAR_REVERSE
+	default n
+
+config VIDEO_SUNXI_VIN_SPECIAL
+	bool "support vin special"
+	depends on VIDEO_SUNXI_CAR_REVERSE
+	default n
+
+config VIDEO_SUNXI_TVD_SPECIAL
+	bool "support tvd special"
+	depends on VIDEO_SUNXI_CAR_REVERSE
+	default n
+
+

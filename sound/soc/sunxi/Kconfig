@@ -1,0 +1,301 @@
+# Embedded Codec and Affiliated
+config SND_SUNXI_SOC_RWFUNC
+	bool
+
+config SND_SUNXI_SOC_INTER_I2S
+	bool
+
+# CPU DAI module
+config SND_SUNXI_SOC_CPUDAI
+	bool
+
+# HDMI Module
+config SND_SUNXI_SOC_HDMI
+	bool
+
+# Digital Audio(I2S/PCM/TDM)
+config SND_SUNXI_SOC_DAUDIO
+	tristate
+
+# SPDIF Audio Interface
+config SND_SUNXI_SOC_SPDIF
+    tristate
+
+# DMIC Audio Interface
+config SND_SUNXI_SOC_DMIC
+    tristate
+
+# SUNXI Platform DMA
+config SND_SUNXI_SOC
+    bool
+
+# SUNXI Codec Embedded
+config SND_SUN50IW1_CODEC
+	tristate
+
+config SND_SUN50IW3_CODEC
+	tristate
+
+config SND_SUN50IW8_CODEC
+	tristate
+
+config SND_SUN50IW9_CODEC
+	tristate
+
+config SND_SUN50IW10_CODEC
+	tristate
+
+config SND_SUN8IW7_CODEC
+        bool
+
+config SND_SUN8IW11_CODEC
+	tristate
+
+config SND_SUN8IW15_CODEC
+	tristate
+
+config SND_SUN8IW17_CODEC
+    tristate
+
+# for AHUB design should use pll_auio * 4
+config AHUB_FREQ_REQ
+	bool
+
+menu "Allwinner SoC Audio support"
+	depends on ARCH_SUNXI || COMPILE_TEST
+
+# MAD module support for sun50iw8
+config SND_SUNXI_MAD
+	tristate "Allwinner Sun50iw8 Mad Support"
+	select REGMAP_MMIO
+	depends on ARCH_SUN50IW8
+	help
+	  Say Y or M if you want to using mad module.
+
+# Card Machine Select
+config SND_SUN4I_CODEC
+	tristate "Allwinner A10 Codec Support"
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	depends on ARCH_SUN4IW1
+    help
+        Select Y or M to add support for the Codec embedded in the Allwinner
+        SUN4IW1 and affiliated SoCs.
+
+config SND_SUNXI_SOC_SUN50IW1_CODEC
+	tristate "Allwinner Sun50iw1 Codec Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	select SND_SUN50IW1_CODEC
+	select SND_SUNXI_SOC_RWFUNC
+	select SND_SUNXI_SOC_INTER_I2S
+	depends on ARCH_SUN50IW1
+    help
+        Select Y or M to add support for the Codec embedded in the Allwinner
+        SUN50IW1 and affiliated SoCs.
+
+config SND_SUNXI_SOC_SUN50IW3_CODEC
+	tristate "Allwinner Sun50iw3 Codec Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	select SND_SUN50IW3_CODEC
+	select SND_SUNXI_SOC_RWFUNC
+	select SND_SUNXI_SOC_INTER_I2S
+	depends on ARCH_SUN50IW3
+    help
+        Select Y or M to add support for the Codec embedded in the Allwinner
+        SUN50IW3 and affiliated SoCs.
+
+config SND_SUNXI_SOC_SUN50IW8_CODEC
+	tristate "Allwinner Sun50iw8 Codec Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	select SND_SUN50IW8_CODEC
+	select SND_SUNXI_SOC_RWFUNC
+	select SND_SUNXI_SOC_INTER_I2S
+	depends on ARCH_SUN50IW8
+    help
+        Select Y or M to add support for the Codec embedded in the Allwinner
+        SUN50IW8 and affiliated SoCs.
+
+config SND_SUNXI_SOC_SUN50IW9_CODEC
+	tristate "Allwinner Sun50iw9 Codec Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	select SND_SUN50IW9_CODEC
+	select SND_SUNXI_SOC_RWFUNC
+        select SND_SUNXI_SOC_CPUDAI
+	depends on ARCH_SUN50IW9
+    help
+        Select Y or M to add support for the Codec embedded in the Allwinner
+        SUN50IW9 and affiliated SoCs.
+
+config SND_SUNXI_SOC_SUN50IW10_CODEC
+	tristate "Allwinner Sun50iw10 Codec Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	select SND_SUN50IW10_CODEC
+	select SND_SUNXI_SOC_RWFUNC
+	depends on ARCH_SUN50IW10
+   help
+	Select Y or M to add support for the Codec embedded in the Allwinner
+	SUN50IW10 and affiliated SoCs.
+
+config SND_SUNXI_SOC_SUN50IW10_JACK
+	bool "Allwinner sun50iw10 jack support"
+	depends on SND_SUNXI_SOC_SUN50IW10_CODEC
+	default y
+	help
+	  Say Y to add support SUN50IW10 jack.
+
+config SND_SUNXI_SOC_SUN8IW7_CODEC
+        tristate "Allwinner Sun8iw7 Codec Support"
+        select SND_SUNXI_SOC
+        select SND_SOC_GENERIC_DMAENGINE_PCM
+        select REGMAP_MMIO
+        select SND_SUN8IW7_CODEC
+        select SND_SUNXI_SOC_CPUDAI
+        select SND_SUNXI_SOC_RWFUNC
+	depends on ARCH_SUN8IW7
+        help
+          Select Y or M to add support for the Codec embedded in the Allwinner
+          SUN8IW7 and affiliated SoCs.
+					...
+					...
+config SND_SUNXI_SOC_SUN8IW11_CODEC
+	tristate "Allwinner Sun8iw11 Codec Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	select SND_SUN8IW11_CODEC
+	select SND_SUNXI_SOC_RWFUNC
+	depends on ARCH_SUN8IW11
+    help
+        Select Y or M to add support for the Codec embedded in the Allwinner
+        SUN8IW11 and affiliated SoCs.
+
+config SND_SUNXI_SOC_SUN8IW15_CODEC
+	tristate "Allwinner Sun8iw15 Codec Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	select SND_SUN8IW15_CODEC
+	select SND_SUNXI_SOC_RWFUNC
+	select SND_SUNXI_SOC_INTER_I2S
+	depends on ARCH_SUN8IW15
+    help
+        Select Y or M to add support for the Codec embedded in the Allwinner
+        SUN8IW15 and affiliated SoCs.
+
+config SND_SUNXI_SOC_SUN8IW17_CODEC
+	tristate "Allwinner Sun8iw17 Codec Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	select SND_SUNXI_SOC_RWFUNC
+    select SND_SUN8IW17_CODEC
+	depends on ARCH_SUN8IW17
+    help
+        Select Y or M to add support for the Codec embedded in the Allwinner
+        SUN8IW17 and affiliated SoCs.
+
+config SND_SUNXI_SOC_CODEC_CPU_DAI
+    tristate "Asoc support for internal-codec cpudai"
+    depends on ARCH_SUN50IW2 || ARCH_SUN50IW9 || ARCH_SUN8IW7 || ARCH_SUN8IW10 || ARCH_SUN8IW11 || ARCH_SUN8IW17
+
+    select SND_SUNXI_SOC_RWFUNC
+    help
+        Say Y or M if you want to add cpudai for internal codec
+
+# HDMI Machine Select
+config SND_SUNXI_SOC_SUNXI_HDMIAUDIO
+    tristate "Allwinner HDMI Audio Support"
+	select SND_SUNXI_SOC
+    	select SND_SOC_GENERIC_DMAENGINE_PCM
+    	select SND_SUNXI_SOC_DAUDIO if !SND_SUNXI_SOC_AHUB
+    	select SND_SUNXI_SOC_HDMI
+	select REGMAP_MMIO
+    depends on ARCH_SUN50IW1 || ARCH_SUN50IW6 || ARCH_SUN50IW9 || ARCH_SUN8IW6 || ARCH_SUN8IW7 || ARCH_SUN8IW11 || ARCH_SUN8IW12
+    help
+        Select Y or M to add support for the HDMI Audio Module in the Allwinner
+        SoCs.
+
+# Daudio Machine Select
+config SND_SUN4I_I2S
+	tristate "Allwinner A10 I2S Support"
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+    depends on ARCH_SUN4IW1
+    help
+        Select Y or M to add support for I2S/PCM/TDM Module in the
+        Allwinner SoCs.
+
+config SND_SUNXI_SOC_SUNXI_DAUDIO
+	tristate "Allwinner Digital Audio Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SUNXI_SOC_DAUDIO if !SND_SUNXI_SOC_AHUB
+	select REGMAP_MMIO
+    depends on ARCH_SUN50IW1 || ARCH_SUN50IW3 || ARCH_SUN50IW6 || ARCH_SUN50IW8 || ARCH_SUN50IW9 || ARCH_SUN50IW10 || ARCH_SUN8IW7 || ARCH_SUN8IW11 || ARCH_SUN8IW15 || ARCH_SUN8IW17
+    help
+        Select Y or M to add support for I2S/PCM/TDM Module in the
+        Allwinner SoCs.
+
+# SPDIF Machine Select
+config SND_SUN4I_SPDIF
+	tristate "Allwinner A10 SPDIF Support"
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select REGMAP_MMIO
+	depends on ARCH_SUN4IW1
+    help
+        Select Y or M to add support SPDIF Module in Allwinner
+        SoCs.
+
+config SND_SUNXI_SOC_SUNXI_SPDIF
+	tristate "Allwinner SPDIF Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SUNXI_SOC_SPDIF
+	select REGMAP_MMIO
+	depends on ARCH_SUN50IW1 || ARCH_SUN50IW6 || ARCH_SUN50IW8 || ARCH_SUN50IW9 || ARCH_SUN50IW10 || ARCH_SUN8IW7 || ARCH_SUN8IW11 || ARCH_SUN8IW17
+    help
+        Select Y or M to add support SPDIF Module in Allwinner
+        SoCs.
+
+# DMIC Machine Select
+config SND_SUNXI_SOC_SUNXI_DMIC
+	tristate "Allwinner DMIC Support"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SUNXI_SOC_DMIC
+	select REGMAP_MMIO
+	select SND_SOC_DMIC
+	depends on ARCH_SUN50IW3 || ARCH_SUN50IW6 || ARCH_SUN50IW8 || ARCH_SUN50IW9 || ARCH_SUN50IW10 || ARCH_SUN8IW15 || ARCH_SUN8IW17
+    help
+        Select Y or M to add support DMIC Module in Allwinner
+        SoCs.
+
+config SND_SUNXI_SOC_AHUB
+	tristate "Allwinner Audio Hub Support for ASoc"
+	select SND_SUNXI_SOC
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+    select AHUB_FREQ_REQ
+	select REGMAP_MMIO
+	depends on ARCH_SUN50IW6 || ARCH_SUN50IW9
+	help
+	  Say Y or M if you want to using ahub module.
+
+# SUNXI Debug Select
+config SUNXI_AUDIO_DEBUG
+	bool "Allwinner Audio Debug Support"
+	depends on SND_SUNXI_SOC
+	help
+	  Select Y to enable debug information of allwinner audio driver
+	  If you not sure, Just not select it.
+
+endmenu

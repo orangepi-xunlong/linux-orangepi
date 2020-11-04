@@ -1,0 +1,51 @@
+Allwinner RGB LED Driver
+
+The Allwinner LEDC is an high-efficiency RGB LED driver
+which is integrated in the SoCs of Allwinner.
+
+Required properties:
+	- compatible: "allwinner,sunxi-leds"
+	- reg: LEDC registers address.
+	- interrupts: the interrupt information for LEDC.
+	- interrupt-names: the interrupt name.
+	- clocks: the clocks.
+	- clock-names: the clock name.
+	- pinctrl-names: the pinctrl names.
+	- pinctrl-0: the pinctrl which stays in <platform name>-pinctrl.dtsi.
+
+Optional properties:
+	- led_count: LED count.
+	- output_mode: the mode LEDC output R, G, B data, e.g. if
+			the output mode is GRB, LEDC will output
+			G data, then R data, and finally B data.
+	- trans_mode: the mode that transport R, G, B data from DDR
+			to LEDC FIFO, there are two ways: CPU and DMA.
+	- reset_ns: the LED reset time in nanoseconds.
+	- t1h_ns: 1 code, high level time in nanoseconds.
+	- t1l_ns: 1 code, low level time in nanoseconds.
+	- t0h_ns: 0 code, high level time in nanoseconds.
+	- t0l_ns: 0 code, low level time in nanoseconds.
+	- wait_time0_ns: the waiting time in nanoseconds between two LED data.
+	- wait_time1_ns: the waiting time in nanoseconds between two frames.
+	- wait_data_time_ns: the threshold time that LEDC waiting for the input
+			data after LEDC is enabled.
+
+----------------------------Note-------------------------
+	Any time parameter has its default value which is
+initialized by LEDC hardware, if not assigned in dts, it
+will come into the default value got from registers.
+---------------------------------------------------------
+
+Example:
+
+sunxi_leds: leds@6 {
+	compatible = "allwinner,sunxi-leds";
+	reg = <0x0 0x06700000 0x0 0x4c>;
+	interrupts = <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "ledcirq";
+	clocks = <&clk_ledc>, <&clk_cpuapb>;
+	clock-names = "clk_ledc", "clk_cpuapb";
+	pinctrl-names = "default";
+	pinctrl-0 = <&ledc_pins_a>;
+	led_count = <0x20>;
+}

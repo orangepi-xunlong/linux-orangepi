@@ -1,0 +1,12 @@
+choice
+	depends on CSI_CCI
+	prompt "select cci or cci to twi"
+	default CCI
+
+config CCI
+	bool "use internal cci"
+
+config CCI_TO_TWI
+	bool "chenge cci to twi"
+
+endchoice

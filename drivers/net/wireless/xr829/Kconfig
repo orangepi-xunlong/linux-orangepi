@@ -1,0 +1,9 @@
+config XR829_WLAN
+	tristate "XR829 WLAN support"
+	default n
+	select CFG80211
+	select AVERAGE
+	select CRYPTO
+	select CRYPTO_ARC4
+	---help---
+	  To compile this code as a module, choose M here.

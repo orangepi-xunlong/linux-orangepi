@@ -1,0 +1,14 @@
+/*
+ * Allwinner Technology CO., Ltd. sun8iw7p1 soc board.
+ *
+ */
+
+/dts-v1/;
+
+#include "sun8iw7p1.dtsi"
+
+/{
+
+	soc@01c00000 {
+	};
+};

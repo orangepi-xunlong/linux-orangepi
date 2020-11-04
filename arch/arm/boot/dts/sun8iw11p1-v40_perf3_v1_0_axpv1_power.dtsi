@@ -1,0 +1,148 @@
+/*
+ * Allwinner Technology CO., Ltd. sun8iw11p1 power tree.
+ *
+ */
+
+&twi0 {
+	axp22x: pmu@0x34{
+		compatible = "x-powers,axp221";
+		reg = <0x34>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+};
+
+#include "axp22x.dtsi"
+
+&reg_dcdc1 {
+	regulator-name = "axp22x_dcdc1";
+	regulator-min-microvolt = <1600000>;
+	regulator-max-microvolt = <3400000>;
+	regulator-always-on;
+};
+
+&reg_dcdc2 {
+	regulator-name = "axp22x_dcdc2";
+	regulator-min-microvolt = <600000>;
+	regulator-max-microvolt = <1540000>;
+	regulator-always-on;
+};
+
+&reg_dcdc3 {
+	regulator-name = "axp22x_dcdc3";
+	regulator-min-microvolt = <600000>;
+	regulator-max-microvolt = <1860000>;
+	regulator-always-on;
+};
+
+&reg_dcdc4 {
+	regulator-name = "axp22x_dcdc4";
+	regulator-min-microvolt = <600000>;
+	regulator-max-microvolt = <1540000>;
+};
+
+&reg_dcdc5 {
+	regulator-name = "axp22x_dcdc5";
+	regulator-min-microvolt = <1000000>;
+	regulator-max-microvolt = <2550000>;
+	regulator-always-on;
+};
+
+&reg_rtc_ldo {
+	regulator-name = "axp22x_rtc";
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+};
+
+&reg_aldo1 {
+	regulator-name = "axp22x_aldo1";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_aldo2 {
+	regulator-name = "axp22x_aldo2";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_aldo3 {
+	regulator-name = "axp22x_aldo3";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-always-on;
+};
+
+&reg_dldo1 {
+	regulator-name = "axp22x_dldo1";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_dldo2 {
+	regulator-name = "axp22x_dldo2";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_dldo3 {
+	regulator-name = "axp22x_dldo3";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_dldo4 {
+	regulator-name = "axp22x_dldo4";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_eldo1 {
+	regulator-name = "axp22x_eldo1";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_eldo2 {
+	regulator-name = "axp22x_eldo2";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_eldo3 {
+	regulator-name = "axp22x_eldo3";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_ldo_io0 {
+	regulator-name = "axp22x_ldoio0";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_ldo_io1 {
+	regulator-name = "axp22x_ldoio1";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&reg_dc1sw {
+	regulator-name = "axp22x_dc1sw";
+};
+
+&reg_dc5ldo {
+	regulator-name = "axp22x_dc5ldo";
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <1400000>;
+};
+
+&ir0 {
+	ir0-supply = <&reg_dcdc1>;
+};
+
+&ir1 {
+	ir1-supply = <&reg_dcdc1>;
+};
