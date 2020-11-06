@@ -46,16 +46,6 @@
 		regulator-max-microvolt = <5000000>;
 		regulator-always-on;
 	};
-	
-	reg_ddc: ddc-io {
-		compatible = "regulator-fixed";
-		regulator-name = "ddc-io";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		enable-active-high;
-		gpio = <&pio 7 2 GPIO_ACTIVE_HIGH>; /* PH2 */
-	};
-	
 };
 
 &cpu0 {

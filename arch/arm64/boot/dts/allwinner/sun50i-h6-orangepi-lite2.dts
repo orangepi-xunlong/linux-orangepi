@@ -25,7 +25,7 @@
 	connector {
 		compatible = "hdmi-connector";
 		type = "a";
-		ddc-supply = <&reg_ddc>;
+		ddc-en-gpios = <&pio 7 2 GPIO_ACTIVE_HIGH>; /* PH2 */
 
 		port {
 			hdmi_con_in: endpoint {
@@ -48,15 +48,6 @@
 			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
 			default-state = "on";
 		};
-	};
-
-	reg_ddc: ddc-io {
-		compatible = "regulator-fixed";
-		regulator-name = "ddc-io";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		enable-active-high;
-		gpio = <&pio 7 2 GPIO_ACTIVE_HIGH>; /* PH2 */
 	};
 
 	reg_vcc5v: vcc5v {
