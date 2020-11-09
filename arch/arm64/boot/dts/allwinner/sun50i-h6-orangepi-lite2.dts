@@ -336,3 +336,7 @@
 &dwc3 {
 	status = "okay";
 };
+
+&r_ir {
+        status = "okay";
+};
