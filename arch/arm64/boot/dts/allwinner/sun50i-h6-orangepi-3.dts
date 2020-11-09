@@ -386,3 +386,7 @@
 &usb3phy {
 	status = "okay";
 };
+
+&r_ir {
+        status = "okay";
+};
