@@ -50,6 +50,17 @@
 		};
 	};
 
+        rfkill_bt {
+                compatible = "rfkill-gpio";
+                pinctrl-names = "default";
+                pinctrl-0 = <&bt_pwr_pin>;
+                reset-gpios = <&r_pio 1 4 GPIO_ACTIVE_HIGH>; /* PM4 */
+                clocks = <&rtc 1>;
+                clock-names = "ext_clock";
+                rfkill-name = "sunxi-bt";
+                rfkill-type = "bluetooth";
+        };
+
 	reg_vcc5v: vcc5v {
 		/* board wide 5V supply directly from the DC jack */
 		compatible = "regulator-fixed";
@@ -124,6 +135,13 @@
 	vcc-pc-supply = <&reg_bldo2>;
 	vcc-pd-supply = <&reg_cldo1>;
 	vcc-pg-supply = <&reg_bldo3>;
+};
+
+&pio {
+        bt_pwr_pin: bt_pwr_pin@0 {
+                pins = "PM4";
+                function = "gpio_out";
+        };
 };
 
 &r_i2c {
@@ -276,16 +294,6 @@
 	pinctrl-0 = <&uart1_pins>, <&uart1_rts_cts_pins>;
 	uart-has-rtscts;
 	status = "okay";
-
-	bluetooth {
-		compatible = "brcm,bcm4345c5";
-		clocks = <&rtc 1>;
-		clock-names = "lpo";
-		device-wakeup-gpios = <&r_pio 1 2 GPIO_ACTIVE_HIGH>; /* PM2 */
-		host-wakeup-gpios = <&r_pio 1 1 GPIO_ACTIVE_HIGH>; /* PM1 */
-		shutdown-gpios = <&r_pio 1 4 GPIO_ACTIVE_HIGH>; /* PM4 */
-		max-speed = <1500000>;
-	};
 };
 
 &uart3 {
