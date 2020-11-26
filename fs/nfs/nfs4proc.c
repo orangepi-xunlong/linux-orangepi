@@ -541,15 +541,8 @@ nfs4_async_handle_exception(struct rpc_task *task, struct nfs_server *server,
 		ret = -EIO;
 	return ret;
 out_retry:
-	if (ret == 0) {
+	if (ret == 0)
 		exception->retry = 1;
-		/*
-		 * For NFS4ERR_MOVED, the client transport will need to
-		 * be recomputed after migration recovery has completed.
-		 */
-		if (errorcode == -NFS4ERR_MOVED)
-			rpc_task_release_transport(task);
-	}
 	return ret;
 }
 
@@ -2539,15 +2532,11 @@ static void nfs41_check_delegation_stateid(struct nfs4_state *state)
 	}
 
 	nfs4_stateid_copy(&stateid, &delegation->stateid);
-	if (test_bit(NFS_DELEGATION_REVOKED, &delegation->flags)) {
+	if (test_bit(NFS_DELEGATION_REVOKED, &delegation->flags) ||
+		!test_and_clear_bit(NFS_DELEGATION_TEST_EXPIRED,
+			&delegation->flags)) {
 		rcu_read_unlock();
 		nfs_finish_clear_delegation_stateid(state, &stateid);
-		return;
-	}
-
-	if (!test_and_clear_bit(NFS_DELEGATION_TEST_EXPIRED,
-				&delegation->flags)) {
-		rcu_read_unlock();
 		return;
 	}
 
@@ -2748,8 +2737,7 @@ static int _nfs4_open_and_get_state(struct nfs4_opendata *opendata,
 			nfs4_schedule_stateid_recovery(server, state);
 	}
 out:
-	if (!opendata->cancelled)
-		nfs4_sequence_free_slot(&opendata->o_res.seq_res);
+	nfs4_sequence_free_slot(&opendata->o_res.seq_res);
 	return ret;
 }
 

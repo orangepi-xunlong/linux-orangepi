@@ -2,13 +2,13 @@
  * Broadcom Dongle Host Driver (DHD), common DHD core.
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -208,7 +208,7 @@ bool ap_fw_loaded = FALSE;
 const char dhd_version[] = "Dongle Host Driver, version " EPI_VERSION_STR;
 #else
 const char dhd_version[] = "\nDongle Host Driver, version " EPI_VERSION_STR;
-#endif
+#endif 
 char fw_version[FW_VER_STR_LEN] = "\0";
 char clm_version[CLM_VER_STR_LEN] = "\0";
 
@@ -275,7 +275,7 @@ enum {
 #endif /* DHD_WMF */
 #if defined(TRAFFIC_MGMT_DWM)
 	IOV_TRAFFIC_MGMT_DWM,
-#endif
+#endif 
 	IOV_AP_ISOLATE,
 #ifdef DHD_L2_FILTER
 	IOV_DHCP_UNICAST,
@@ -372,7 +372,7 @@ const bcm_iovar_t dhd_iovars[] = {
 #endif /* DHD_WMF */
 #if defined(TRAFFIC_MGMT_DWM)
 	{"trf_mgmt_filters_add", IOV_TRAFFIC_MGMT_DWM, (0), 0, IOVT_BUFFER, 0},
-#endif
+#endif 
 #ifdef DHD_L2_FILTER
 	{"dhcp_unicast", IOV_DHCP_UNICAST, (0), 0, IOVT_BOOL, 0 },
 #endif /* DHD_L2_FILTER */
@@ -650,11 +650,7 @@ void* dhd_get_fwdump_buf(dhd_pub_t *dhd_pub, uint32 length)
 int
 dhd_common_socram_dump(dhd_pub_t *dhdp)
 {
-#ifdef BCMDBUS
-	return 0;
-#else
 	return dhd_socram_dump(dhdp->bus);
-#endif /* BCMDBUS */
 }
 
 static int
@@ -1042,7 +1038,7 @@ dhd_iovar_parse_bssidx(dhd_pub_t *dhd_pub, const char *params, uint32 *idx, cons
 	return BCME_OK;
 }
 
-#if defined(DHD_DEBUG) && defined(BCMDBUS)
+#if defined(DHD_DEBUG) && defined(BCMDHDUSB)
 /* USB Device console input function */
 int dhd_bus_console_in(dhd_pub_t *dhd, uchar *msg, uint msglen)
 {
@@ -1051,7 +1047,7 @@ int dhd_bus_console_in(dhd_pub_t *dhd, uchar *msg, uint msglen)
 	return dhd_iovar(dhd, 0, "cons", msg, msglen, NULL, 0, TRUE);
 
 }
-#endif /* DHD_DEBUG && BCMDBUS  */
+#endif /* DHD_DEBUG && BCMDHDUSB  */
 
 #ifdef DHD_DEBUG
 int
@@ -1267,12 +1263,10 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 		bcopy(&int_val, arg, val_size);
 		break;
 
-#ifndef BCMDBUS
 	case IOV_GVAL(IOV_WDTICK):
 		int_val = (int32)dhd_watchdog_ms;
 		bcopy(&int_val, arg, val_size);
 		break;
-#endif /* !BCMDBUS */
 
 	case IOV_SVAL(IOV_WDTICK):
 		if (!dhd_pub->up) {
@@ -1291,7 +1285,6 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 		bcmerror = dhd_dump(dhd_pub, arg, len);
 		break;
 
-#ifndef BCMDBUS
 	case IOV_GVAL(IOV_DCONSOLE_POLL):
 		int_val = (int32)dhd_console_ms;
 		bcopy(&int_val, arg, val_size);
@@ -1305,7 +1298,6 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 		if (len > 0)
 			bcmerror = dhd_bus_console_in(dhd_pub, arg, len - 1);
 		break;
-#endif /* !BCMDBUS */
 
 	case IOV_SVAL(IOV_CLEARCOUNTS):
 		dhd_pub->tx_packets = dhd_pub->rx_packets = 0;
@@ -1431,9 +1423,9 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 
 	case IOV_GVAL(IOV_BUS_TYPE):
 		/* The dhd application queries the driver to check if its usb or sdio.  */
-#ifdef BCMDBUS
+#ifdef BCMDHDUSB
 		int_val = BUS_TYPE_USB;
-#endif /* BCMDBUS */
+#endif
 #ifdef BCMSDIO
 		int_val = BUS_TYPE_SDIO;
 #endif
@@ -1634,7 +1626,7 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 			bcmerror = traffic_mgmt_add_dwm_filter(dhd_pub, trf_mgmt_filter_list, len);
 		}
 		break;
-#endif
+#endif 
 
 #ifdef DHD_L2_FILTER
 	case IOV_GVAL(IOV_DHCP_UNICAST): {
@@ -1903,7 +1895,7 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 		}
 		break;
 	}
-#endif
+#endif 
 
 #ifdef SHOW_LOGTRACE
 	case IOV_GVAL(IOV_DUMP_TRACE_LOG): {
@@ -1960,8 +1952,6 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 		break;
 	}
 #endif /* REPORT_FATAL_TIMEOUTS */
-#ifdef DHD_DEBUG
-#if defined(BCMSDIO) || defined(BCMPCIE)
 	case IOV_GVAL(IOV_DONGLE_TRAP_TYPE):
 		if (dhd_pub->dongle_trap_occured)
 			int_val = ltoh32(dhd_pub->last_trap_info.type);
@@ -1981,6 +1971,8 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 		dhd_bus_dump_trap_info(dhd_pub->bus, &strbuf);
 		break;
 	}
+#ifdef DHD_DEBUG
+#if defined(BCMSDIO) || defined(BCMPCIE)
 
 	case IOV_GVAL(IOV_BPADDR):
 		{
@@ -2828,14 +2820,12 @@ dngl_host_event_process(dhd_pub_t *dhdp, bcm_dngl_event_t *event,
 #ifdef DHD_FW_COREDUMP
 	dhdp->memdump_type = DUMP_TYPE_DONGLE_HOST_EVENT;
 #endif /* DHD_FW_COREDUMP */
-#ifndef BCMDBUS
 	if (dhd_socram_dump(dhdp->bus)) {
 		DHD_ERROR(("%s: socram dump failed\n", __FUNCTION__));
 	} else {
 		/* Notify framework */
 		dhd_dbg_send_urgent_evt(dhdp, p, datalen);
 	}
-#endif /* !BCMDBUS */
 }
 #endif /* DNGL_EVENT_SUPPORT */
 
@@ -3109,7 +3099,7 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 	case WLC_E_PFN_BEST_BATCHING:
 		dhd_pno_event_handler(dhd_pub, event, (void *)event_data);
 		break;
-#endif
+#endif 
 #if defined(RTT_SUPPORT)
 	case WLC_E_PROXD:
 		dhd_rtt_event_handler(dhd_pub, event, (void *)event_data);
@@ -3123,7 +3113,6 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 			dhd_ifname2idx(dhd_pub->info, event->ifname),
 			&event->addr.octet);
 		break;
-#ifndef BCMDBUS
 #if defined(DHD_FW_COREDUMP)
 	case WLC_E_PSM_WATCHDOG:
 		DHD_ERROR(("%s: WLC_E_PSM_WATCHDOG event received : \n", __FUNCTION__));
@@ -3132,7 +3121,6 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 		}
 	break;
 #endif
-#endif /* !BCMDBUS */
 #ifdef DHD_WMF
 	case WLC_E_PSTA_PRIMARY_INTF_IND:
 		dhd_update_psta_interface_for_sta(dhd_pub, event->ifname,
@@ -3199,14 +3187,6 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 
 	default:
 		*ifidx = dhd_ifname2idx(dhd_pub->info, event->ifname);
-#ifdef DHD_UPDATE_INTF_MAC
-		if ((WLC_E_LINK == type) && (WLC_EVENT_MSG_LINK & flags)) {
-			dhd_event_ifchange(dhd_pub->info,
-			(struct wl_event_data_if *)event,
-			event->ifname,
-			event->addr.octet);
-		}
-#endif /* DHD_UPDATE_INTF_MAC */
 		/* push up to external supp/auth */
 		dhd_event(dhd_pub->info, (char *)pvt_data, evlen, *ifidx);
 		DHD_TRACE(("%s: MAC event %d, flags %x, status %x\n",
@@ -3600,7 +3580,7 @@ dhd_pktfilter_offload_set(dhd_pub_t * dhd, char *arg)
 					htod16(WL_PKT_FILTER_MFLAG_NEG);
 				(argv[i])++;
 			}
-			if (*argv[i] == '\0') {
+			if (argv[i] == '\0') {
 				printf("Pattern not provided\n");
 				goto fail;
 			}
@@ -4611,7 +4591,7 @@ wl_iw_parse_channel_list(char** list_str, uint16* channel_list, int channel_num)
 	return num;
 }
 
-#endif
+#endif 
 
 #if defined(TRAFFIC_MGMT_DWM)
 static int traffic_mgmt_add_dwm_filter(dhd_pub_t *dhd,
@@ -4660,7 +4640,7 @@ static int traffic_mgmt_add_dwm_filter(dhd_pub_t *dhd,
 	}
 	return ret;
 }
-#endif
+#endif 
 
 /* Given filename and download type,  returns a buffer pointer and length
  * for download to f/w. Type can be FW or NVRAM.
@@ -4887,7 +4867,7 @@ dhd_apply_default_clm(dhd_pub_t *dhd, char *clm_path)
 	char iovbuf[WLC_IOCTL_SMLEN] = {0};
 	int status = FALSE;
 
-	if (clm_path && clm_path[0] != '\0') {
+	if (clm_path[0] != '\0') {
 		if (strlen(clm_path) > MOD_PARAM_PATHLEN) {
 			DHD_ERROR(("clm path exceeds max len\n"));
 			return BCME_ERROR;
@@ -4997,13 +4977,9 @@ void dhd_free_download_buffer(dhd_pub_t	*dhd, void *buffer, int length)
 #define EAP_PRINT(str) \
 	DHD_ERROR(("ETHER_TYPE_802_1X[%s] [%s]: " str "\n", \
 	ifname, direction ? "TX" : "RX"));
-#else
-#define EAP_PRINT(str)
-#endif /* DHD_8021X_DUMP */
 /* Parse EAPOL 4 way handshake messages */
 void
-dhd_dump_eapol_4way_message(dhd_pub_t *dhd, char *ifname,
-	char *dump_data, bool direction)
+dhd_dump_eapol_4way_message(char *ifname, char *dump_data, bool direction)
 {
 	unsigned char type;
 	int pair, ack, mic, kerr, req, sec, install;
@@ -5012,43 +4988,31 @@ dhd_dump_eapol_4way_message(dhd_pub_t *dhd, char *ifname,
 	type = dump_data[15];
 	if (type == 0) {
 		if ((dump_data[22] == 1) && (dump_data[18] == 1)) {
-			dhd->conf->eapol_status = EAPOL_STATUS_WPS_REQID;
 			EAP_PRINT("EAP Packet, Request, Identity");
 		} else if ((dump_data[22] == 1) && (dump_data[18] == 2)) {
-			dhd->conf->eapol_status = EAPOL_STATUS_WPS_RSPID;
 			EAP_PRINT("EAP Packet, Response, Identity");
 		} else if (dump_data[22] == 254) {
 			if (dump_data[30] == 1) {
-				dhd->conf->eapol_status = EAPOL_STATUS_WPS_WSC_START;
 				EAP_PRINT("EAP Packet, WSC Start");
 			} else if (dump_data[30] == 4) {
 				if (dump_data[41] == 4) {
-					dhd->conf->eapol_status = EAPOL_STATUS_WPS_M1;
 					EAP_PRINT("EAP Packet, WPS M1");
 				} else if (dump_data[41] == 5) {
-					dhd->conf->eapol_status = EAPOL_STATUS_WPS_M2;
 					EAP_PRINT("EAP Packet, WPS M2");
 				} else if (dump_data[41] == 7) {
-					dhd->conf->eapol_status = EAPOL_STATUS_WPS_M3;
 					EAP_PRINT("EAP Packet, WPS M3");
 				} else if (dump_data[41] == 8) {
-					dhd->conf->eapol_status = EAPOL_STATUS_WPS_M4;
 					EAP_PRINT("EAP Packet, WPS M4");
 				} else if (dump_data[41] == 9) {
-					dhd->conf->eapol_status = EAPOL_STATUS_WPS_M5;
 					EAP_PRINT("EAP Packet, WPS M5");
 				} else if (dump_data[41] == 10) {
-					dhd->conf->eapol_status = EAPOL_STATUS_WPS_M6;
 					EAP_PRINT("EAP Packet, WPS M6");
 				} else if (dump_data[41] == 11) {
-					dhd->conf->eapol_status = EAPOL_STATUS_WPS_M7;
 					EAP_PRINT("EAP Packet, WPS M7");
 				} else if (dump_data[41] == 12) {
-					dhd->conf->eapol_status = EAPOL_STATUS_WPS_M8;
 					EAP_PRINT("EAP Packet, WPS M8");
 				}
 			} else if (dump_data[30] == 5) {
-				dhd->conf->eapol_status = EAPOL_STATUS_WPS_DONE;
 				EAP_PRINT("EAP Packet, WSC Done");
 			}
 		} else {
@@ -5067,16 +5031,12 @@ dhd_dump_eapol_4way_message(dhd_pub_t *dhd, char *ifname,
 		install  = 0 != (us_tmp & 0x40);
 
 		if (!sec && !mic && ack && !install && pair && !kerr && !req) {
-			dhd->conf->eapol_status = EAPOL_STATUS_WPA_M1;
 			EAP_PRINT("EAPOL Packet, 4-way handshake, M1");
 		} else if (pair && !install && !ack && mic && !sec && !kerr && !req) {
-			dhd->conf->eapol_status = EAPOL_STATUS_WPA_M2;
 			EAP_PRINT("EAPOL Packet, 4-way handshake, M2");
 		} else if (pair && ack && mic && sec && !kerr && !req) {
-			dhd->conf->eapol_status = EAPOL_STATUS_WPA_M3;
 			EAP_PRINT("EAPOL Packet, 4-way handshake, M3");
 		} else if (pair && !install && !ack && mic && sec && !req && !kerr) {
-			dhd->conf->eapol_status = EAPOL_STATUS_WPA_M4;
 			EAP_PRINT("EAPOL Packet, 4-way handshake, M4");
 		} else {
 			DHD_ERROR(("ETHER_TYPE_802_1X[%s] [%s]: ver %d, type %d, replay %d\n",
@@ -5089,6 +5049,7 @@ dhd_dump_eapol_4way_message(dhd_pub_t *dhd, char *ifname,
 			dump_data[14], dump_data[15], dump_data[30]));
 	}
 }
+#endif /* DHD_8021X_DUMP */
 
 #ifdef REPORT_FATAL_TIMEOUTS
 void init_dhd_timeouts(dhd_pub_t *pub)

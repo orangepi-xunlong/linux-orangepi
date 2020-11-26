@@ -624,11 +624,8 @@ static void ahci_pci_save_initial_config(struct pci_dev *pdev,
 static int ahci_pci_reset_controller(struct ata_host *host)
 {
 	struct pci_dev *pdev = to_pci_dev(host->dev);
-	int rc;
 
-	rc = ahci_reset_controller(host);
-	if (rc)
-		return rc;
+	ahci_reset_controller(host);
 
 	if (pdev->vendor == PCI_VENDOR_ID_INTEL) {
 		struct ahci_host_priv *hpriv = host->private_data;

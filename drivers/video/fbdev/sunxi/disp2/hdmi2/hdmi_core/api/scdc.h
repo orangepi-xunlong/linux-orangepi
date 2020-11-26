@@ -20,7 +20,7 @@
 #include "core/irq.h"
 #include "core/frame_composer_reg.h"
 
-#ifndef SUPPORT_ONLY_HDMI14
+
 /* SCDC Registers */
 #define SCDC_SLAVE_ADDRESS	0x54
 
@@ -60,6 +60,7 @@ int scdc_read(hdmi_tx_dev_t *dev, u8 address, u8 size, u8 *data);
 int scdc_write(hdmi_tx_dev_t *dev, u8 address, u8 size, u8 *data);
 
 void scrambling(hdmi_tx_dev_t *dev, u8 enable);
+void scrambling_Enable(hdmi_tx_dev_t *dev, u8 bit);
 u8 scrambling_state(hdmi_tx_dev_t *dev);
-#endif
+int ddc_read_hdcp2Version(hdmi_tx_dev_t *dev, u8 *data);
 #endif	/* SCDC_H_ */

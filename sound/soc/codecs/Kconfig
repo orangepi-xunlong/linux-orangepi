@@ -1100,13 +1100,3 @@ config SND_SOC_ACX00
         help
           ACX00 now used as SUN50IW6 internal Codec, Connect Through I2S0.
           Say Y or M if you want to add support internal audio codec.
-
-# Sunxi add AC107
-config SND_SOC_AC107
-        tristate "AC107 Codec"
-	select MFD_AC107
-        depends on ARCH_SUN50IW9
-        default n
-        help
-          AC107 now used as SUN50IW9 internal Codec, Connect Through I2S0.
-          Say Y or M if you want to add support internal audio codec.

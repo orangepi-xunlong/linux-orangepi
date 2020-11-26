@@ -47,7 +47,7 @@ int rtw_fw_ps_state(PADAPTER padapter)
 		ret = _SUCCESS;
 	} else {
 		pdbgpriv->dbg_poll_fail_cnt++;
-		RTW_INFO("%s: fw_ps_state=%04x\n", __func__, fw_ps_state);
+		RTW_INFO("%s: fw_ps_state=%04x\n", __FUNCTION__, fw_ps_state);
 	}
 	#else
 	rtw_hal_set_hwreg(padapter, HW_VAR_SET_REQ_FW_PS, (u8 *)&dont_care);
@@ -65,7 +65,7 @@ int rtw_fw_ps_state(PADAPTER padapter)
 			ret = _SUCCESS;
 		else {
 			pdbgpriv->dbg_poll_fail_cnt++;
-			RTW_INFO("%s: fw_ps_state=%04x\n", __func__, fw_ps_state);
+			RTW_INFO("%s: fw_ps_state=%04x\n", __FUNCTION__, fw_ps_state);
 		}
 	}
 	#endif
@@ -296,7 +296,7 @@ void rtw_ps_processor(_adapter *padapter)
 
 	if (pwrpriv->bInSuspend == _TRUE) { /* system suspend or autosuspend */
 		pdbgpriv->dbg_ps_insuspend_cnt++;
-		RTW_INFO("%s, pwrpriv->bInSuspend == _TRUE ignore this process\n", __func__);
+		RTW_INFO("%s, pwrpriv->bInSuspend == _TRUE ignore this process\n", __FUNCTION__);
 		return;
 	}
 
@@ -315,7 +315,7 @@ void rtw_ps_processor(_adapter *padapter)
 					pwrpriv->ps_flag = _TRUE;
 
 				rfpwrstate = RfOnOffDetect(padapter);
-				RTW_INFO("@@@@- #1  %s==> rfstate:%s\n", __func__, (rfpwrstate == rf_on) ? "rf_on" : "rf_off");
+				RTW_INFO("@@@@- #1  %s==> rfstate:%s\n", __FUNCTION__, (rfpwrstate == rf_on) ? "rf_on" : "rf_off");
 				if (rfpwrstate != pwrpriv->rf_pwrstate) {
 					if (rfpwrstate == rf_off) {
 						pwrpriv->change_rfpwrstate = rf_off;
@@ -331,7 +331,7 @@ void rtw_ps_processor(_adapter *padapter)
 #endif /* CONFIG_AUTOSUSPEND */
 		{
 			rfpwrstate = RfOnOffDetect(padapter);
-			RTW_INFO("@@@@- #2  %s==> rfstate:%s\n", __func__, (rfpwrstate == rf_on) ? "rf_on" : "rf_off");
+			RTW_INFO("@@@@- #2  %s==> rfstate:%s\n", __FUNCTION__, (rfpwrstate == rf_on) ? "rf_on" : "rf_off");
 
 			if (rfpwrstate != pwrpriv->rf_pwrstate) {
 				if (rfpwrstate == rf_off) {
@@ -356,7 +356,7 @@ void rtw_ps_processor(_adapter *padapter)
 		goto exit;
 
 	if ((pwrpriv->rf_pwrstate == rf_on) && ((pwrpriv->pwr_state_check_cnts % 4) == 0)) {
-		RTW_INFO("==>%s .fw_state(%x)\n", __func__, get_fwstate(pmlmepriv));
+		RTW_INFO("==>%s .fw_state(%x)\n", __FUNCTION__, get_fwstate(pmlmepriv));
 #if defined(CONFIG_BT_COEXIST) && defined (CONFIG_AUTOSUSPEND)
 #else
 		pwrpriv->change_rfpwrstate = rf_off;
@@ -371,10 +371,10 @@ void rtw_ps_processor(_adapter *padapter)
 
 #if defined(CONFIG_BT_COEXIST) && defined (CONFIG_AUTOSUSPEND)
 			if (_TRUE == pwrpriv->bInternalAutoSuspend)
-				RTW_INFO("<==%s .pwrpriv->bInternalAutoSuspend)(%x)\n", __func__, pwrpriv->bInternalAutoSuspend);
+				RTW_INFO("<==%s .pwrpriv->bInternalAutoSuspend)(%x)\n", __FUNCTION__, pwrpriv->bInternalAutoSuspend);
 			else {
 				pwrpriv->change_rfpwrstate = rf_off;
-				RTW_INFO("<==%s .pwrpriv->bInternalAutoSuspend)(%x) call autosuspend_enter\n", __func__, pwrpriv->bInternalAutoSuspend);
+				RTW_INFO("<==%s .pwrpriv->bInternalAutoSuspend)(%x) call autosuspend_enter\n", __FUNCTION__, pwrpriv->bInternalAutoSuspend);
 				autosuspend_enter(padapter);
 			}
 #else
@@ -615,7 +615,7 @@ u8 rtw_set_rpwm(PADAPTER padapter, u8 pslv)
 
 #ifdef CONFIG_LPS_RPWM_TIMER
 	if (pwrpriv->brpwmtimeout == _TRUE)
-		RTW_INFO("%s: RPWM timeout, force to set RPWM(0x%02X) again!\n", __func__, pslv);
+		RTW_INFO("%s: RPWM timeout, force to set RPWM(0x%02X) again!\n", __FUNCTION__, pslv);
 	else
 #endif /* CONFIG_LPS_RPWM_TIMER */
 	{
@@ -792,11 +792,11 @@ void rtw_set_fw_in_ips_mode(PADAPTER padapter, u8 enable)
 		if (val8 == 0) {
 			/* ser rpwm to enter 32k */
 			rtw_hal_get_hwreg(padapter, HW_VAR_RPWM_TOG, &val8);
-			RTW_INFO("%s: read rpwm=%02x\n", __func__, val8);
+			RTW_INFO("%s: read rpwm=%02x\n", __FUNCTION__, val8);
 			val8 += 0x80;
 			val8 |= BIT(0);
 			rtw_hal_set_hwreg(padapter, HW_VAR_SET_RPWM, (u8 *)(&val8));
-			RTW_INFO("%s: write rpwm=%02x\n", __func__, val8);
+			RTW_INFO("%s: write rpwm=%02x\n", __FUNCTION__, val8);
 			adapter_to_pwrctl(padapter)->tog = (val8 + 0x80) & 0x80;
 			cnt = val8 = 0;
 			if (parm[1] == 0 || parm[2] == 0) {
@@ -828,7 +828,7 @@ void rtw_set_fw_in_ips_mode(PADAPTER padapter, u8 enable)
 		val8 += 0x80;
 		val8 |= BIT(6);
 		rtw_hal_set_hwreg(padapter, HW_VAR_SET_RPWM, (u8 *)(&val8));
-		RTW_INFO("%s: write rpwm=%02x\n", __func__, val8);
+		RTW_INFO("%s: write rpwm=%02x\n", __FUNCTION__, val8);
 		adapter_to_pwrctl(padapter)->tog = (val8 + 0x80) & 0x80;
 
 		/* do polling cpwm */
@@ -842,7 +842,7 @@ void rtw_set_fw_in_ips_mode(PADAPTER padapter, u8 enable)
 				break;
 
 			if (rtw_get_passing_time_ms(start_time) > 100) {
-				RTW_INFO("%s: polling cpwm timeout when leaving IPS in FWLPS state\n", __func__);
+				RTW_INFO("%s: polling cpwm timeout when leaving IPS in FWLPS state\n", __FUNCTION__);
 				break;
 			}
 		} while (1);
@@ -979,7 +979,7 @@ void rtw_set_ps_mode(PADAPTER padapter, u8 ps_mode, u8 smart_ps, u8 bcn_ant_mode
 					}
 					if (rtw_get_passing_time_ms(start_time) > delay_ms) {
 						RTW_INFO("%s: Wait for FW 32K leave more than %u ms!!!\n",
-							__func__, delay_ms);
+							__FUNCTION__, delay_ms);
 						pdbgpriv->dbg_wow_leave_ps_fail_cnt++;
 						break;
 					}
@@ -1248,7 +1248,7 @@ void LeaveAllPowerSaveModeDirect(PADAPTER Adapter)
 #endif /* CONFIG_DETECT_CPWM_BY_POLLING */
 	u8 rpwm;
 
-	RTW_INFO("%s.....\n", __func__);
+	RTW_INFO("%s.....\n", __FUNCTION__);
 
 	if (rtw_is_surprise_removed(Adapter)) {
 		RTW_INFO(FUNC_ADPT_FMT ": bSurpriseRemoved=_TRUE Skip!\n", FUNC_ADPT_ARG(Adapter));
@@ -1258,7 +1258,7 @@ void LeaveAllPowerSaveModeDirect(PADAPTER Adapter)
 	if (rtw_mi_check_status(Adapter, MI_LINKED)) { /*connect*/
 
 		if (pwrpriv->pwr_mode == PS_MODE_ACTIVE) {
-			RTW_INFO("%s: Driver Already Leave LPS\n", __func__);
+			RTW_INFO("%s: Driver Already Leave LPS\n", __FUNCTION__);
 			return;
 		}
 
@@ -1322,7 +1322,7 @@ void LeaveAllPowerSaveMode(IN PADAPTER Adapter)
 	int i;
 
 
-	/* RTW_INFO("%s.....\n",__func__); */
+	/* RTW_INFO("%s.....\n",__FUNCTION__); */
 
 	if (_FALSE == Adapter->bup) {
 		RTW_INFO(FUNC_ADPT_FMT ": bup=%d Skip!\n",
@@ -1484,7 +1484,7 @@ static void cpwm_event_callback(struct work_struct *work)
 	_adapter *adapter = dvobj_get_primary_adapter(dvobj);
 	struct reportpwrstate_parm report;
 
-	/* RTW_INFO("%s\n",__func__); */
+	/* RTW_INFO("%s\n",__FUNCTION__); */
 
 	report.state = PS_STATE_S2;
 	cpwm_int_hdl(adapter, &report);
@@ -2267,7 +2267,7 @@ static void resume_workitem_callback(struct work_struct *work)
 	struct dvobj_priv *dvobj = pwrctl_to_dvobj(pwrpriv);
 	_adapter *adapter = dvobj_get_primary_adapter(dvobj);
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	rtw_resume_process(adapter);
 
@@ -2311,7 +2311,7 @@ extern int rtw_resume_process(_adapter *padapter);
 static void rtw_early_suspend(struct early_suspend *h)
 {
 	struct pwrctrl_priv *pwrpriv = container_of(h, struct pwrctrl_priv, early_suspend);
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	rtw_set_do_late_resume(pwrpriv, _FALSE);
 }
@@ -2322,7 +2322,7 @@ static void rtw_late_resume(struct early_suspend *h)
 	struct dvobj_priv *dvobj = pwrctl_to_dvobj(pwrpriv);
 	_adapter *adapter = dvobj_get_primary_adapter(dvobj);
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	if (pwrpriv->do_late_resume) {
 		rtw_set_do_late_resume(pwrpriv, _FALSE);
@@ -2332,7 +2332,7 @@ static void rtw_late_resume(struct early_suspend *h)
 
 void rtw_register_early_suspend(struct pwrctrl_priv *pwrpriv)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	/* jeff: set the early suspend level before blank screen, so we wll do late resume after scree is lit */
 	pwrpriv->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN - 20;
@@ -2345,7 +2345,7 @@ void rtw_register_early_suspend(struct pwrctrl_priv *pwrpriv)
 
 void rtw_unregister_early_suspend(struct pwrctrl_priv *pwrpriv)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	rtw_set_do_late_resume(pwrpriv, _FALSE);
 
@@ -2364,7 +2364,7 @@ void rtw_unregister_early_suspend(struct pwrctrl_priv *pwrpriv)
 static void rtw_early_suspend(android_early_suspend_t *h)
 {
 	struct pwrctrl_priv *pwrpriv = container_of(h, struct pwrctrl_priv, early_suspend);
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	rtw_set_do_late_resume(pwrpriv, _FALSE);
 }
@@ -2375,7 +2375,7 @@ static void rtw_late_resume(android_early_suspend_t *h)
 	struct dvobj_priv *dvobj = pwrctl_to_dvobj(pwrpriv);
 	_adapter *adapter = dvobj_get_primary_adapter(dvobj);
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 	if (pwrpriv->do_late_resume) {
 #if defined(CONFIG_USB_HCI) || defined(CONFIG_SDIO_HCI) || defined(CONFIG_GSPI_HCI)
 		rtw_set_do_late_resume(pwrpriv, _FALSE);
@@ -2386,7 +2386,7 @@ static void rtw_late_resume(android_early_suspend_t *h)
 
 void rtw_register_early_suspend(struct pwrctrl_priv *pwrpriv)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	/* jeff: set the early suspend level before blank screen, so we wll do late resume after scree is lit */
 	pwrpriv->early_suspend.level = ANDROID_EARLY_SUSPEND_LEVEL_BLANK_SCREEN - 20;
@@ -2397,7 +2397,7 @@ void rtw_register_early_suspend(struct pwrctrl_priv *pwrpriv)
 
 void rtw_unregister_early_suspend(struct pwrctrl_priv *pwrpriv)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	rtw_set_do_late_resume(pwrpriv, _FALSE);
 
@@ -2537,7 +2537,7 @@ int _rtw_pwr_wakeup(_adapter *padapter, u32 ips_deffer_ms, const char *caller)
 			ret = _FAIL;
 			goto exit;
 		} else if (padapter->registrypriv.usbss_enable) {
-			RTW_INFO("%s call autoresume_enter....\n", __func__);
+			RTW_INFO("%s call autoresume_enter....\n", __FUNCTION__);
 			if (_FAIL ==  autoresume_enter(padapter)) {
 				RTW_INFO("======> autoresume fail.............\n");
 				ret = _FAIL;
@@ -2548,7 +2548,7 @@ int _rtw_pwr_wakeup(_adapter *padapter, u32 ips_deffer_ms, const char *caller)
 #endif
 		{
 #ifdef CONFIG_IPS
-			RTW_INFO("%s call ips_leave....\n", __func__);
+			RTW_INFO("%s call ips_leave....\n", __FUNCTION__);
 			if (_FAIL ==  ips_leave(padapter)) {
 				RTW_INFO("======> ips_leave fail.............\n");
 				ret = _FAIL;
@@ -2618,11 +2618,11 @@ int rtw_pm_set_ips(_adapter *padapter, u8 mode)
 
 	if (mode == IPS_NORMAL || mode == IPS_LEVEL_2) {
 		rtw_ips_mode_req(pwrctrlpriv, mode);
-		RTW_INFO("%s %s\n", __func__, mode == IPS_NORMAL ? "IPS_NORMAL" : "IPS_LEVEL_2");
+		RTW_INFO("%s %s\n", __FUNCTION__, mode == IPS_NORMAL ? "IPS_NORMAL" : "IPS_LEVEL_2");
 		return 0;
 	} else if (mode == IPS_NONE) {
 		rtw_ips_mode_req(pwrctrlpriv, mode);
-		RTW_INFO("%s %s\n", __func__, "IPS_NONE");
+		RTW_INFO("%s %s\n", __FUNCTION__, "IPS_NONE");
 		if (!rtw_is_surprise_removed(padapter) && (_FAIL == rtw_pwr_wakeup(padapter)))
 			return -EFAULT;
 	} else

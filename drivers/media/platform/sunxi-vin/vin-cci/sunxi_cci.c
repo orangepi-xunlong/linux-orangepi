@@ -20,20 +20,15 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 
+#include "bsp_cci.h"
 #include "sunxi_cci.h"
 #include "../platform/platform_cfg.h"
-
-#if defined(CONFIG_CCI_MODULE) || defined(CONFIG_CCI) || defined(CONFIG_CCI_TO_TWI)
-#define USED_TO_CCI_OR_TWI
-#endif
-
-#ifdef USED_TO_CCI_OR_TWI
-#include "bsp_cci.h"
 
 #define CCI_MODULE_NAME "vin_cci"
 
 static LIST_HEAD(cci_drv_list);
 
+#ifdef CCI_IRQ
 static irqreturn_t cci_irq_handler(int this_irq, void *dev)
 {
 	unsigned long flags = 0;
@@ -44,7 +39,7 @@ static irqreturn_t cci_irq_handler(int this_irq, void *dev)
 	spin_unlock_irqrestore(&cci->slock, flags);
 	return IRQ_HANDLED;
 }
-
+#endif
 
 static int __cci_clk_get(struct cci_dev *dev)
 {
@@ -61,7 +56,7 @@ static int __cci_clk_get(struct cci_dev *dev)
 static int __cci_clk_enable(struct cci_dev *dev, int enable)
 {
 #ifndef FPGA_VER
-	if (!IS_ERR_OR_NULL(dev->clock)) {
+	if (dev->clock) {
 		if (enable) {
 			if (clk_prepare_enable(dev->clock)) {
 				vin_err("cci clk enable error!\n");
@@ -102,7 +97,7 @@ static int __cci_pin_config(struct cci_dev *dev, int enable)
 		vin_err("cci%d request pinctrl handle failed!\n", dev->id);
 		return -EINVAL;
 	}
-	usleep_range(1000, 1200);
+	usleep_range(100, 120);
 #endif
 	return 0;
 }
@@ -115,99 +110,6 @@ static int __cci_pin_release(struct cci_dev *dev)
 #endif
 	return 0;
 }
-
-static struct cci_dev *cci_dev_get(int id)
-{
-	struct cci_dev *cci;
-
-	list_for_each_entry(cci, &cci_drv_list, cci_list) {
-		if (cci->id == id)
-			return cci;
-	}
-	return NULL;
-}
-
-void cci_s_power(unsigned int sel, int on_off)
-{
-	struct cci_dev *cci = cci_dev_get(sel);
-
-	if (cci == NULL) {
-		vin_err("cci is NULL!\n");
-		return;
-	}
-	vin_log(VIN_LOG_CCI, "%s, %d!\n", __func__, on_off);
-
-	if (on_off && (cci->use_cnt)++ > 0)
-		return;
-	else if (!on_off && (cci->use_cnt == 0 || --(cci->use_cnt) > 0))
-		return;
-
-	__cci_pin_config(cci, on_off);
-
-	if (on_off) {
-		__cci_clk_enable(cci, 1);
-		bsp_csi_cci_init_helper(sel);
-	} else {
-		bsp_csi_cci_exit(sel);
-		__cci_clk_enable(cci, 0);
-	}
-}
-
-#if defined(CONFIG_CCI_TO_TWI)
-static int
-sunxi_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
-{
-	struct cci_dev *cci = (struct cci_dev *)adap->algo_data;
-	struct cci_msg cci_msg;
-	unsigned char *buf;
-	int i;
-	if (num == 1) {                          /*write*/
-		cci_msg.bus_fmt.saddr_7bit = msgs->addr;
-		cci_msg.bus_fmt.wr_flag = 0;
-		cci_msg.bus_fmt.rs_start = START_WITH_ID_W;
-		cci_msg.bus_fmt.rs_mode = STOP_START;
-		if (msgs->len == 0) {
-			cci_msg.bus_fmt.addr_len = 0;
-			cci_msg.bus_fmt.data_len = 0;
-		} else {
-			cci_msg.bus_fmt.addr_len = 1;
-			cci_msg.bus_fmt.data_len = msgs->len - 1;
-		}
-		cci_msg.pkt_buf = msgs->buf;
-		cci_msg.pkt_num = 1;
-
-		bsp_cci_tx_start_wait_done(cci->id, &cci_msg);
-		return 1;
-	} else if (num == 2) {			/*read*/
-		buf = kzalloc(1 + msgs[1].len, GFP_KERNEL);
-		buf[0] = msgs[0].buf[0];
-		cci_msg.bus_fmt.saddr_7bit = msgs[0].addr;
-		cci_msg.bus_fmt.wr_flag = 1;
-		cci_msg.bus_fmt.rs_start = START_WITH_ID_W;
-		cci_msg.bus_fmt.rs_mode = STOP_START;
-		cci_msg.bus_fmt.addr_len = 1;
-		cci_msg.bus_fmt.data_len = msgs[1].len;
-		cci_msg.pkt_buf = buf;
-		cci_msg.pkt_num = 1;
-
-		bsp_cci_tx_start_wait_done(cci->id, &cci_msg);
-		for (i = 0; i < cci_msg.bus_fmt.data_len; i++)
-			msgs[1].buf[i] = buf[i+1];
-		kfree(buf);
-		return i;
-	}
-}
-
-static unsigned int sunxi_i2c_functionality(struct i2c_adapter *adap)
-{
-	return I2C_FUNC_I2C|I2C_FUNC_10BIT_ADDR|I2C_FUNC_SMBUS_EMUL;
-};
-
-static const struct i2c_algorithm sunxi_i2c_algorithm = {
-	.master_xfer	  = sunxi_i2c_xfer,
-	.functionality	  = sunxi_i2c_functionality,
-};
-#endif
 
 static int cci_probe(struct platform_device *pdev)
 {
@@ -251,35 +153,14 @@ static int cci_probe(struct platform_device *pdev)
 	list_add_tail(&cci->cci_list, &cci_drv_list);
 	init_waitqueue_head(&cci->wait);
 
-#if defined(CONFIG_CCI_TO_TWI)
-	cci->adap.owner   = THIS_MODULE;
-	cci->adap.nr      = cci->id + 4;
-	cci->adap.retries = 3;
-	cci->adap.timeout = 5*HZ;
-	cci->adap.class   = I2C_CLASS_HWMON | I2C_CLASS_SPD;
-	snprintf(cci->adap.name, sizeof(cci->adap.name),
-				"twi""%u", cci->adap.nr);
-	pdev->dev.init_name = cci->adap.name;
-
-	cci->adap.algo = &sunxi_i2c_algorithm;
-#endif
+#ifdef CCI_IRQ
 	ret = request_irq(irq, cci_irq_handler,
 				IRQF_SHARED, CCI_MODULE_NAME, cci);
 	if (ret) {
 		vin_err("[CCI%d] requeset irq failed!\n", cci->id);
 		goto unmap;
 	}
-#if defined(CONFIG_CCI_TO_TWI)
-	cci->adap.algo_data  = cci;
-	cci->adap.dev.parent = &pdev->dev;
-	cci->adap.dev.of_node = pdev->dev.of_node;
-
-	ret = i2c_add_numbered_adapter(&cci->adap);
-	if (ret < 0) {
-		vin_err("[i2c%d] failed to add adapter\n", cci->id);
-	}
 #endif
-
 	ret = bsp_csi_cci_set_base_addr(cci->id, (unsigned long)cci->base);
 	if (ret < 0)
 		goto freeirq;
@@ -288,16 +169,17 @@ static int cci_probe(struct platform_device *pdev)
 		vin_err("cci clock get failed!\n");
 		goto freeirq;
 	}
-#if defined(CONFIG_CCI_TO_TWI)
-	cci_s_power(cci->id, 1);
-#endif
+
 	platform_set_drvdata(pdev, cci);
 	vin_log(VIN_LOG_CCI, "cci probe end cci_sel = %d!\n", cci->id);
 
 	return 0;
+
 freeirq:
+#ifdef CCI_IRQ
 	free_irq(irq, cci);
 unmap:
+#endif
 	iounmap(cci->base);
 freedev:
 	kfree(cci);
@@ -314,7 +196,9 @@ static int cci_remove(struct platform_device *pdev)
 
 	__cci_pin_release(cci);
 	__cci_clk_release(cci);
+#ifdef CCI_IRQ
 	free_irq(cci->irq, cci);
+#endif
 	if (cci->base)
 		iounmap(cci->base);
 	list_del(&cci->cci_list);
@@ -339,11 +223,45 @@ static struct platform_driver cci_platform_driver = {
 		   },
 };
 
-#endif
-
-int sunxi_cci_platform_register(void)
+static struct cci_dev *cci_dev_get(int id)
 {
-#ifdef USED_TO_CCI_OR_TWI
+	struct cci_dev *cci;
+
+	list_for_each_entry(cci, &cci_drv_list, cci_list) {
+		if (cci->id == id)
+			return cci;
+	}
+	return NULL;
+}
+
+void cci_s_power(unsigned int sel, int on_off)
+{
+	struct cci_dev *cci = cci_dev_get(sel);
+
+	if (cci == NULL) {
+		vin_err("cci is NULL!\n");
+		return;
+	}
+	vin_log(VIN_LOG_CCI, "%s, %d!\n", __func__, on_off);
+
+	if (on_off && (cci->use_cnt)++ > 0)
+		return;
+	else if (!on_off && (cci->use_cnt == 0 || --(cci->use_cnt) > 0))
+		return;
+
+	__cci_pin_config(cci, on_off);
+
+	if (on_off) {
+		__cci_clk_enable(cci, 1);
+		bsp_csi_cci_init_helper(sel);
+	} else {
+		bsp_csi_cci_exit(sel);
+		__cci_clk_enable(cci, 0);
+	}
+}
+
+static int __init cci_init(void)
+{
 	int ret;
 
 	ret = platform_driver_register(&cci_platform_driver);
@@ -352,15 +270,18 @@ int sunxi_cci_platform_register(void)
 		return ret;
 	}
 	vin_log(VIN_LOG_CCI, "cci_init end\n");
-#endif
 	return 0;
 }
 
-void sunxi_cci_platform_unregister(void)
+static void __exit cci_exit(void)
 {
-#ifdef USED_TO_CCI_OR_TWI
 	platform_driver_unregister(&cci_platform_driver);
 	vin_log(VIN_LOG_CCI, "cci_exit end\n");
-#endif
 }
 
+module_init(cci_init);
+module_exit(cci_exit);
+
+MODULE_AUTHOR("yangfeng");
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_DESCRIPTION("Camera CCI DRIVER for sunxi");

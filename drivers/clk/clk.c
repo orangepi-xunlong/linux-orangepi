@@ -1798,10 +1798,8 @@ static int clk_core_set_parent(struct clk_core *core, struct clk_core *parent)
 	/* prevent racing with updates to the clock topology */
 	clk_prepare_lock();
 
-	/*
 	if (core->parent == parent)
 		goto out;
-	*/
 
 	/* verify ops for for multi-parent clks */
 	if ((core->num_parents > 1) && (!core->ops->set_parent)) {
@@ -2999,15 +2997,20 @@ int clk_notifier_unregister(struct clk *clk, struct notifier_block *nb)
 		if (cn->clk == clk)
 			break;
 
-	ret = srcu_notifier_chain_unregister(&cn->notifier_head, nb);
+	if (cn->clk == clk) {
+		ret = srcu_notifier_chain_unregister(&cn->notifier_head, nb);
 
-	clk->core->notifier_count--;
+		clk->core->notifier_count--;
 
-	/* XXX the notifier code should handle this better */
-	if (!cn->notifier_head.head) {
-		srcu_cleanup_notifier_head(&cn->notifier_head);
-		list_del(&cn->node);
-		kfree(cn);
+		/* XXX the notifier code should handle this better */
+		if (!cn->notifier_head.head) {
+			srcu_cleanup_notifier_head(&cn->notifier_head);
+			list_del(&cn->node);
+			kfree(cn);
+		}
+
+	} else {
+		ret = -ENOENT;
 	}
 
 	clk_prepare_unlock();

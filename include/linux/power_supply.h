@@ -257,7 +257,6 @@ struct power_supply {
 	spinlock_t changed_lock;
 	bool changed;
 	bool initialized;
-	bool removing;
 	atomic_t use_cnt;
 #ifdef CONFIG_THERMAL
 	struct thermal_zone_device *tzd;

@@ -20,14 +20,12 @@
 #include <linux/extcon.h>
 #endif
 #include <linux/sunxi-sid.h>
-#include <linux/poll.h>
 
 static u32 io_enable_count;
 
 static struct semaphore *run_sem;
 static struct task_struct *HDMI_task;
 static struct task_struct *cec_task;
-static struct task_struct *HDMI_register_task;
 static bool hdmi_cec_support;
 static char hdmi_power[25];
 static char hdmi_io_regulator[25];
@@ -58,23 +56,6 @@ static struct cdev *my_cdev;
 static dev_t devid;
 static struct class *hdmi_class;
 hdmi_info_t ghdmi;
-
-#ifdef CONFIG_HDMI_CEC_STANDARD
-static LIST_HEAD(cec_tx_list);
-static LIST_HEAD(cec_rx_list);
-
-spinlock_t cectx_list_lock;
-spinlock_t cecrx_list_lock;
-struct mutex file_ops_lock;
-
-static wait_queue_head_t cec_poll_queue;
-static wait_queue_head_t cec_send_queue;
-
-static unsigned int rx_list_count;
-struct hdmi_cec_drv gcec;
-#endif
-
-u8 hdcp_encrypt_status;
 
 void hdmi_delay_ms(unsigned long ms)
 {
@@ -170,8 +151,6 @@ static int hdmi_clk_config(u32 vic)
 	index = hdmi_core_get_video_info(vic);
 
 	if (hdmi_clk) {
-		if (hdmi_clk_parent)
-			clk_set_parent(hdmi_clk, hdmi_clk_parent);
 		clk_set_rate(hdmi_clk, video_timing[index].pixel_clk);
 		pr_info("pixel_clk:%d\n", video_timing[index].pixel_clk);
 	}
@@ -502,7 +481,6 @@ static s32 hdmi_get_input_csc(void)
 
 static int hdmi_run_thread(void *parg)
 {
-	int status = 0;
 	while (1) {
 		if (kthread_should_stop())
 			break;
@@ -513,14 +491,6 @@ static int hdmi_run_thread(void *parg)
 			b_hdmi_suspend_pre = b_hdmi_suspend;
 			mutex_unlock(&mlock);
 			hdmi_core_loop();
-			if (hdmi_core_get_hdcp_enable() && hdmi_get_HPD_status()) {
-				status = bsp_hdmi_hdcp_err_check();
-				if (status == 0) {
-					hdcp_encrypt_status = HDCP_SUCCESS;
-				} else if (status == -1) {
-					hdcp_encrypt_status = HDCP_FAILED;
-				}
-			}
 
 			if (false == b_hdmi_suspend) {
 				if (hdmi_get_hdcp_enable() == 1)
@@ -555,56 +525,15 @@ void cec_msg_sent(char *buf)
 static int cec_thread(void *parg)
 {
 	int ret = 0;
-#ifdef CONFIG_HDMI_CEC_STANDARD
-	struct hdmi_cec *tx_msg, *rx_msg, *n;
-	struct cec_msg temp_msg;
-#else
 	char buf[CEC_BUF_SIZE];
 	unsigned char msg;
-#endif
+
 	while (1) {
-	if (kthread_should_stop())
-		break;
+		if (kthread_should_stop())
+			break;
 
 		mutex_lock(&mlock);
 		ret = -1;
-
-#ifdef CONFIG_HDMI_CEC_STANDARD
-		/*For sending cec message*/
-		spin_lock(&cectx_list_lock);
-		if (!list_empty(&cec_tx_list)) {
-			list_for_each_entry_safe(tx_msg, n, &cec_tx_list, list) {
-				spin_unlock(&cectx_list_lock);
-
-				hdmi_core_cec_send_msg(&tx_msg->msg);
-
-				spin_lock(&cectx_list_lock);
-				list_del(&tx_msg->list);
-				spin_unlock(&cectx_list_lock);
-
-				wake_up(&cec_send_queue);
-
-				spin_lock(&cectx_list_lock);
-			}
-		}
-		spin_unlock(&cectx_list_lock);
-
-		if (false == b_hdmi_suspend)
-			ret = hdmi_core_cec_get_msg(&temp_msg);
-		mutex_unlock(&mlock);
-		if (ret == 0) {
-			rx_msg = vmalloc(sizeof(struct hdmi_cec));
-			memcpy(&rx_msg->msg, &temp_msg, sizeof(struct cec_msg));
-
-			spin_lock(&cecrx_list_lock);
-			if (rx_list_count < CEC_RXMSG_MAX) {
-				INIT_LIST_HEAD(&rx_msg->list);
-				list_add_tail(&rx_msg->list, &cec_rx_list);
-				rx_list_count++;
-			}
-			spin_unlock(&cecrx_list_lock);
-		}
-#else
 		if (false == b_hdmi_suspend)
 			ret = hdmi_core_cec_get_simple_msg(&msg);
 		mutex_unlock(&mlock);
@@ -613,8 +542,6 @@ static int cec_thread(void *parg)
 			snprintf(buf, sizeof(buf), "CEC_MSG=0x%x", msg);
 			cec_msg_sent(buf);
 		}
-#endif
-
 		hdmi_delay_ms(10);
 	}
 
@@ -782,261 +709,13 @@ exit:
 	return  0;
 }
 
-#ifdef CONFIG_HDMI_CEC_STANDARD
-bool hdmi_cec_msg_poll(struct file *filp)
-{
-	spin_lock(&cecrx_list_lock);
-	if (!list_empty(&cec_rx_list)) {
-		spin_unlock(&cecrx_list_lock);
-		return true;
-	} else {
-		spin_unlock(&cecrx_list_lock);
-		return false;
-	}
-	spin_unlock(&cecrx_list_lock);
-	return false;
-}
-
-int hdmi_cec_msg_receive(struct hdmi_cec *cec_msg)
-{
-	unsigned int ret = 0;
-	struct hdmi_cec *rx_msg, *n;
-
-	spin_lock(&cecrx_list_lock);
-	if (!list_empty(&cec_rx_list)) {
-		list_for_each_entry_safe(rx_msg, n, &cec_rx_list, list) {
-		spin_unlock(&cecrx_list_lock);
-
-		memcpy(&cec_msg->msg, &rx_msg->msg, sizeof(struct cec_msg));
-
-		spin_lock(&cecrx_list_lock);
-		list_del(&rx_msg->list);
-		rx_list_count--;
-		spin_unlock(&cecrx_list_lock);
-
-		vfree(rx_msg);
-
-		spin_lock(&cecrx_list_lock);
-		}
-	} else {
-		pr_err("Error:%s : Rx List is empty\n", __func__);
-		ret = -1;
-	}
-	spin_unlock(&cecrx_list_lock);
-
-	return ret;
-}
-
-static int cec_open(struct inode *inode, struct file *filp)
-{
-	return 0;
-}
-
-static int cec_release(struct inode *inode, struct file *filp)
-{
-	return 0;
-}
-
-unsigned int cec_poll(struct file *filp, struct poll_table_struct *wait)
-{
-	unsigned int mask = 0;
-
-	mutex_lock(&file_ops_lock);
-	poll_wait(filp, &cec_poll_queue, wait);
-	if (hdmi_cec_msg_poll(filp))
-		mask |= POLLIN | POLLRDNORM;
-	mutex_unlock(&file_ops_lock);
-
-	return mask;
-}
-
-static long cec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
-{
-	unsigned long p_arg[3];
-	unsigned int phy_addr;
-	unsigned char log_addr;
-	struct hdmi_cec rx_msg, *tx_msg;
-	int ret = 0;
-
-	mutex_lock(&file_ops_lock);
-	if (copy_from_user((void *)p_arg,
-			(void __user *)arg,
-		3 * sizeof(unsigned long))) {
-		pr_warn("copy_from_user fail\n");
-		goto err_exit;
-	}
-
-	switch (cmd) {
-	case CEC_S_PHYS_ADDR:
-		break;
-	case CEC_G_PHYS_ADDR:
-		phy_addr = (unsigned int)hdmi_core_cec_get_phyaddr();
-		if (phy_addr > 0) {
-			if (copy_to_user((void __user *)p_arg[0],
-				&phy_addr, sizeof(unsigned int))) {
-				pr_err("copy_to_user fail\n");
-				goto err_exit;
-			}
-		}
-		mutex_unlock(&file_ops_lock);
-		return (long)phy_addr;
-
-	case CEC_S_LOG_ADDR:
-		if (copy_from_user((void *)&log_addr,
-			(void __user *)p_arg[0],
-			sizeof(unsigned char))) {
-			pr_err("copy_from_user fail\n");
-			goto err_exit;
-		}
-
-		if ((log_addr >= 0) && (log_addr <= 0x0f)) {
-			printk("[cec kernel] set logaddr:0x%x\n", log_addr);
-			hdmi_core_cec_set_logaddr(log_addr);
-		} else {
-			pr_err("ERROR: invalid cec logcal address:0x%x\n", log_addr);
-			goto err_exit;
-		}
-		break;
-
-	case CEC_G_LOG_ADDR:
-		log_addr = hdmi_core_cec_get_logaddr();
-		if (copy_to_user((void __user *)p_arg[0],
-			&log_addr, sizeof(unsigned char))) {
-			pr_err("copy_to_user fail\n");
-			goto err_exit;
-		}
-		mutex_unlock(&file_ops_lock);
-		return (long)log_addr;
-
-	case CEC_TRANSMIT:
-		tx_msg = vmalloc(sizeof(struct hdmi_cec));
-		if (!tx_msg)
-			goto err_exit;
-		if (copy_from_user((void *)&tx_msg->msg,
-				(void __user *)p_arg[0],
-				sizeof(struct cec_msg))) {
-			pr_warn("copy_from_user fail\n");
-			goto err_exit;
-		};
-
-		spin_lock(&cectx_list_lock);
-		INIT_LIST_HEAD(&tx_msg->list);
-		list_add_tail(&tx_msg->list, &cec_tx_list);
-		spin_unlock(&cectx_list_lock);
-
-		tx_msg->msg.tx_status = 0;
-		ret = wait_event_interruptible_timeout(cec_send_queue,
-					tx_msg->msg.tx_status > 0,
-				msecs_to_jiffies(tx_msg->msg.timeout));
-		if (ret < 0) {
-			pr_err("wait_event_interruptible_timeout failed\n");
-			if (!list_empty(&cec_tx_list))
-				list_del(&tx_msg->list);
-			vfree(tx_msg);
-			goto err_exit;
-		} else if (ret == 0) { /*Send msg timeout*/
-			pr_err("cec send wait timeout\n");
-			spin_lock(&cectx_list_lock);
-			if (!list_empty(&cec_tx_list))
-				list_del(&tx_msg->list);
-			spin_unlock(&cectx_list_lock);
-			tx_msg->msg.tx_status = CEC_TX_STATUS_ERROR;
-		}
-
-		if (copy_to_user((void __user *)p_arg[0],
-					&tx_msg->msg,
-				sizeof(struct cec_msg))) {
-			pr_info("copy_to_user fail\n");
-			vfree(tx_msg);
-			goto err_exit;
-		}
-		vfree(tx_msg);
-		mutex_unlock(&file_ops_lock);
-		return 0;
-
-	case CEC_RECEIVE:
-		ret = hdmi_cec_msg_receive(&rx_msg);
-		if (ret >= 0) {
-			if (copy_to_user((void __user *)p_arg[0], &rx_msg.msg,
-					sizeof(struct cec_msg))) {
-				pr_err("copy_to_user fail\n");
-				goto err_exit;
-			}
-			mutex_unlock(&file_ops_lock);
-
-			return rx_msg.msg.len;
-		} else {
-			pr_info("Error:There is NOT a CEC MSG received!\n");
-			goto err_exit;
-		}
-
-	default:
-		break;
-	}
-	mutex_unlock(&file_ops_lock);
-	return 0;
-
-err_exit:
-	mutex_unlock(&file_ops_lock);
-	return -1;
-}
-
-#ifdef CONFIG_COMPAT
-static long cec_compat_ioctl(struct file *file, unsigned int cmd,
-					unsigned long arg)
-{
-	return 0;
-}
-#endif
-
-static const struct file_operations cec_fops = {
-	.owner		= THIS_MODULE,
-	.open		= cec_open,
-	.release	= cec_release,
-	.poll		= cec_poll,
-	.unlocked_ioctl	= cec_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl	= cec_compat_ioctl,
-#endif
-};
-
-void hdmi_cec_init(void)
-{
-	int err;
-
-	spin_lock_init(&cectx_list_lock);
-	spin_lock_init(&cecrx_list_lock);
-	mutex_init(&file_ops_lock);
-
-	init_waitqueue_head(&cec_poll_queue);
-	init_waitqueue_head(&cec_send_queue);
-
-	rx_list_count = 0;
-
-	/*Create and add a character device*/
-	alloc_chrdev_region(&gcec.cec_devid, 0, 1, "cec");
-	gcec.cec_cdev = cdev_alloc();
-	cdev_init(gcec.cec_cdev, &cec_fops);
-	gcec.cec_cdev->owner = THIS_MODULE;
-
-	err = cdev_add(gcec.cec_cdev, gcec.cec_devid, 1);
-	if (err)
-		pr_err("Error: CEC cdev_add fail.\n");
-
-	/*Create a path: sys/class/cec*/
-	gcec.cec_class = class_create(THIS_MODULE, "cec");
-	if (IS_ERR(gcec.cec_class))
-		pr_err("Error:cec class_create fail\n");
-	gcec.cec_dev = device_create(gcec.cec_class, NULL,
-			     gcec.cec_devid, NULL, "cec");
-}
-#endif
-
 #if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
 extern void audio_set_hdmi_func(__audio_hdmi_func *hdmi_func);
 #endif
+/* extern s32 disp_set_hdmi_func(struct disp_device_func *func); */
+/* extern unsigned int disp_boot_para_parse(const char *name); */
 
-static int hdmi_register_thread(void *parg)
+s32 hdmi_init(struct platform_device *pdev)
 {
 #if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
 	__audio_hdmi_func audio_func;
@@ -1044,51 +723,9 @@ static int hdmi_register_thread(void *parg)
 	__audio_hdmi_func audio_func_muti;
 #endif
 #endif
-	struct disp_device_func disp_func;
-
-	while (1) {
-		if (kthread_should_stop())
-			break;
-		if (hdmi_core_hpd_check() || boot_hdmi == false) {
-#if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
-			audio_func.hdmi_audio_enable = hdmi_audio_enable;
-			audio_func.hdmi_set_audio_para = hdmi_set_audio_para;
-			audio_set_hdmi_func(&audio_func);
-#if defined(CONFIG_SND_SUNXI_SOC_AUDIOHUB_INTERFACE)
-			audio_func_muti.hdmi_audio_enable = hdmi_audio_enable;
-			audio_func_muti.hdmi_set_audio_para =
-			    hdmi_set_audio_para;
-			audio_set_muti_hdmi_func(&audio_func_muti);
-#endif
-#endif
-			memset(&disp_func, 0, sizeof(struct disp_device_func));
-			disp_func.enable = hdmi_enable;
-			disp_func.disable = hdmi_disable;
-			disp_func.set_mode = hdmi_set_display_mode;
-			disp_func.mode_support = hdmi_mode_support;
-			disp_func.get_HPD_status = hdmi_get_HPD_status;
-			disp_func.get_input_csc = hdmi_get_input_csc;
-			disp_func.get_video_timing_info =
-			    hdmi_get_video_timming_info;
-			disp_func.suspend = hdmi_suspend;
-			disp_func.resume = hdmi_resume;
-			disp_set_hdmi_func(&disp_func);
-			break;
-		}
-
-		hdmi_delay_ms(50);
-	}
-
-	HDMI_register_task = NULL;
-	return 0;
-}
-/* extern s32 disp_set_hdmi_func(struct disp_device_func *func); */
-/* extern unsigned int disp_boot_para_parse(const char *name); */
-
-s32 hdmi_init(struct platform_device *pdev)
-{
 	unsigned int value, output_type0, output_mode0;
 	unsigned int output_type1, output_mode1;
+	struct disp_device_func disp_func;
 	int ret = 0;
 	uintptr_t reg_base;
 
@@ -1096,7 +733,6 @@ s32 hdmi_init(struct platform_device *pdev)
 	b_hdmi_suspend_pre = b_hdmi_suspend = false;
 	hdmi_power_used = 0;
 	hdmi_used = 1;
-	hdcp_encrypt_status = HDCP_DISABLE;
 
 	/*  parse boot para */
 	value = disp_boot_para_parse("boot_disp");
@@ -1225,6 +861,9 @@ s32 hdmi_init(struct platform_device *pdev)
 					&value, 1);
 	if (ret == 1)
 		hdmi_core_set_cts_enable(value);
+	ret = disp_sys_script_get_item("hdmi", "hdmi_hdcp_enable", &value, 1);
+	if (ret == 1)
+		hdmi_core_set_hdcp_enable(value);
 
 	ret = disp_sys_script_get_item("hdmi", "hdmi_hpd_mask", &value, 1);
 	if (ret == 1)
@@ -1238,20 +877,12 @@ s32 hdmi_init(struct platform_device *pdev)
 
 	hdmi_core_initial(boot_hdmi);
 
-	ret = disp_sys_script_get_item("hdmi", "hdmi_hdcp_enable", &value, 1);
-	if (ret == 1)
-	/*	hdmi_core_set_hdcp_enable(value); */
-
 	run_sem = kmalloc(sizeof(struct semaphore), GFP_KERNEL | __GFP_ZERO);
 	if (!run_sem) {
 		dev_err(&pdev->dev, "fail to kmalloc memory for run_sem\n");
 		goto err_sem;
 	}
 	sema_init((struct semaphore *)run_sem, 0);
-
-#ifdef CONFIG_HDMI_CEC_STANDARD
-    hdmi_cec_init();
-#endif
 
 	HDMI_task = kthread_create(hdmi_run_thread, (void *)0, "hdmi proc");
 	if (IS_ERR(HDMI_task)) {
@@ -1280,19 +911,27 @@ s32 hdmi_init(struct platform_device *pdev)
 		wake_up_process(cec_task);
 	}
 
-	HDMI_register_task = kthread_create(hdmi_register_thread, (void *)0, "hdmi register proc");
-	if (IS_ERR(HDMI_register_task)) {
-		s32 err = 0;
-
-		dev_err(&pdev->dev,
-			"Unable to start kernel thread %s.\n\n",
-			"cec proc");
-		err = PTR_ERR(HDMI_register_task);
-		HDMI_register_task = NULL;
-		goto err_thread;
-	}
-	wake_up_process(HDMI_register_task);
-
+#if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
+	audio_func.hdmi_audio_enable = hdmi_audio_enable;
+	audio_func.hdmi_set_audio_para = hdmi_set_audio_para;
+	audio_set_hdmi_func(&audio_func);
+#if defined(CONFIG_SND_SUNXI_SOC_AUDIOHUB_INTERFACE)
+	audio_func_muti.hdmi_audio_enable = hdmi_audio_enable;
+	audio_func_muti.hdmi_set_audio_para = hdmi_set_audio_para;
+	audio_set_muti_hdmi_func(&audio_func_muti);
+#endif
+#endif
+	memset(&disp_func, 0, sizeof(struct disp_device_func));
+	disp_func.enable = hdmi_enable;
+	disp_func.disable = hdmi_disable;
+	disp_func.set_mode = hdmi_set_display_mode;
+	disp_func.mode_support = hdmi_mode_support;
+	disp_func.get_HPD_status = hdmi_get_HPD_status;
+	disp_func.get_input_csc = hdmi_get_input_csc;
+	disp_func.get_video_timing_info = hdmi_get_video_timming_info;
+	disp_func.suspend = hdmi_suspend;
+	disp_func.resume = hdmi_resume;
+	disp_set_hdmi_func(&disp_func);
 
 	return 0;
 
@@ -1320,10 +959,6 @@ s32 hdmi_exit(void)
 		if (HDMI_task) {
 			kthread_stop(HDMI_task);
 			HDMI_task = NULL;
-		}
-		if (HDMI_register_task) {
-			kthread_stop(HDMI_register_task);
-			HDMI_register_task = NULL;
 		}
 
 		if (hdmi_cec_support && cec_task) {
@@ -1585,16 +1220,6 @@ static ssize_t hdmi_edid_store(struct device *dev,
 static DEVICE_ATTR(edid, S_IRUGO|S_IWUSR|S_IWGRP,
 		hdmi_edid_show, hdmi_edid_store);
 
-static ssize_t hdmi_hdcp_status_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%d\n", hdcp_encrypt_status);
-}
-
-static DEVICE_ATTR(hdcp_status, S_IRUGO|S_IWUSR|S_IWGRP,
-		hdmi_hdcp_status_show, NULL);
-
-
 static ssize_t hdmi_hdcp_enable_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1614,7 +1239,6 @@ static ssize_t hdmi_hdcp_enable_store(struct device *dev,
 	} else {
 		if (hdmi_core_get_hdcp_enable() != 0)
 			hdmi_core_set_hdcp_enable(0);
-			hdcp_encrypt_status = HDCP_DISABLE;
 	}
 
 	return count;
@@ -1698,13 +1322,13 @@ static const struct file_operations hdmi_fops = {
 };
 
 static struct attribute *hdmi_attributes[] = {
+
 	&dev_attr_debug.attr,
 	&dev_attr_state.attr,
 	&dev_attr_rgb_only.attr,
 	&dev_attr_hpd_mask.attr,
 	&dev_attr_edid.attr,
 	&dev_attr_hdcp_enable.attr,
-	&dev_attr_hdcp_status.attr,
 #if defined(HDMI_ENABLE_DUMP_WRITE)
 	&dev_attr_dump.attr,
 	&dev_attr_write.attr,

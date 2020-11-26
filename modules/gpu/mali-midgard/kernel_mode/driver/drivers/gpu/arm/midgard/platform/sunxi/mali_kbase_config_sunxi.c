@@ -28,8 +28,6 @@
 #define GPU_DEFAULT_FREQ (624 * 1000 * 1000) /* Hz */
 #define GPU_DEFAULT_VOL (900 * 1000) /* uV */
 
-#define INVALID_VOL -1
-
 #define SMC_REG_BASE 0x3007000
 #define SMC_GPU_DRM_REG (SMC_REG_BASE) + 0x54
 #define GPU_POWEROFF_GATING_REG (0x07010000 + 0x0254)
@@ -54,9 +52,9 @@ static struct sunxi_regs *sunxi_regs;
 static struct sunxi_clks *sunxi_clks;
 static struct sunxi_levels *sunxi_levels;
 static struct sunxi_vf_table *sunxi_vf_table;
-#ifdef CONFIG_REGULATOR
+#if defined(CONFIG_REGULATOR)
 static struct regulator *sunxi_regulator;
-#endif /* CONFIG_REGULATOR */
+#endif
 #ifdef CONFIG_DEBUG_FS
 static struct sunxi_debug *sunxi_debug;
 static struct dentry *sunxi_debugfs;
@@ -69,7 +67,8 @@ static bool sunxi_idle_enabled;
 static bool sunxi_scenectrl_enabled;
 #ifdef CONFIG_MALI_DEVFREQ
 static bool sunxi_dvfs_enabled;
-#endif /* CONFIG_MALI_DEVFREQ */
+#endif
+static bool independent_power;
 
 static enum scene_ctrl_cmd sunxi_scenectrl_cmd;
 
@@ -268,7 +267,7 @@ static int set_gpu_freq_unsafe(unsigned long freq /* Hz */)
 
 #ifdef CONFIG_MALI_DEVFREQ
 	sunxi_kbdev->current_freq = clk_get_rate(sunxi_clks->pll);
-#endif /* CONFIG_MALI_DEVFREQ */
+#endif
 
 	return err;
 }
@@ -286,7 +285,7 @@ static int set_gpu_freq_safe(unsigned long freq /* Hz */)
 	return err;
 }
 
-#ifdef CONFIG_REGULATOR
+#if defined(CONFIG_REGULATOR)
 static int get_gpu_power(void)
 {
 	sunxi_regulator = regulator_get(NULL, "vdd-gpu");
@@ -340,7 +339,7 @@ static int disable_gpu_power(void)
 	POINTER_IS_NULL(sunxi_regulator);
 
 	/* If GPU is not initialized, regulator_disable must not be used. */
-	if (!sunxi_initialized)
+	if (!sunxi_initialized || !independent_power)
 		return 0;
 
 	if (!regulator_is_enabled(sunxi_regulator))
@@ -365,7 +364,7 @@ static int set_gpu_voltage_unsafe(int vol /* uV */)
 	POINTER_IS_NULL(sunxi_kbdev);
 	POINTER_IS_NULL(sunxi_regulator);
 
-	current_vol = get_current_gpu_voltage();
+	current_vol = regulator_get_voltage(sunxi_regulator);
 	if (vol == current_vol)
 		return 0;
 
@@ -377,8 +376,8 @@ static int set_gpu_voltage_unsafe(int vol /* uV */)
 	}
 
 #ifdef CONFIG_MALI_DEVFREQ
-	sunxi_kbdev->current_voltage = get_current_gpu_voltage();
-#endif /* CONFIG_MALI_DEVFREQ */
+	sunxi_kbdev->current_voltage = regulator_get_voltage(sunxi_regulator);
+#endif
 
 	return err;
 }
@@ -397,18 +396,9 @@ static int set_gpu_voltage_safe(int vol /* uV */)
 }
 #endif /* CONFIG_REGULATOR */
 
-static int get_current_gpu_voltage(void)
-{
-#ifdef CONFIG_REGULATOR
-	return regulator_get_voltage(sunxi_regulator);
-#else /* CONFIG_REGULATOR */
-	return INVALID_VOL;
-#endif /* CONFIG_REGULATOR */
-}
-
 static int find_the_current_level(void)
 {
-	int vol, current_vol;
+	int vol, current_vol = 1000000;
 	unsigned long freq, current_freq;
 	int top_level, mid_level, bot_level;
 
@@ -416,14 +406,15 @@ static int find_the_current_level(void)
 	POINTER_IS_NULL(sunxi_levels);
 #ifdef CONFIG_REGULATOR
 	POINTER_IS_NULL(sunxi_regulator);
-#endif /* CONFIG_REGULATOR */
+#endif
 	POINTER_IS_NULL(sunxi_vf_table);
 
 	top_level = sunxi_levels->max_level;
 	bot_level = 0;
 
-	current_vol  = get_current_gpu_voltage();
-
+#ifdef CONFIG_REGULATOR
+	current_vol  = regulator_get_voltage(sunxi_regulator);
+#endif
 	current_freq = clk_get_rate(sunxi_clks->pll);
 
 	vol  = sunxi_vf_table[top_level].vol;
@@ -472,14 +463,14 @@ int revise_current_level(void)
 	int vol = 0;
 	unsigned long freq = 0;
 	int level, current_level;
-	int current_vol;
+	int current_vol = 1000000;
 	unsigned long current_freq;
 
 	POINTER_IS_NULL(sunxi_clks);
 	POINTER_IS_NULL(sunxi_levels);
 #ifdef CONFIG_REGULATOR
 	POINTER_IS_NULL(sunxi_regulator);
-#endif /* CONFIG_REGULATOR */
+#endif
 	POINTER_IS_NULL(sunxi_vf_table);
 
 	current_level = sunxi_levels->current_level;
@@ -493,7 +484,9 @@ int revise_current_level(void)
 	if (vol <= 0 || freq <= 0)
 		return 0;
 
-	current_vol  = get_current_gpu_voltage();
+#ifdef CONFIG_REGULATOR
+	current_vol  = regulator_get_voltage(sunxi_regulator);
+#endif
 	current_freq = clk_get_rate(sunxi_clks->pll);
 
 	if (vol != current_vol || freq != current_freq)
@@ -525,15 +518,11 @@ static int dvfs_change(int level)
 	freq = sunxi_vf_table[level].freq;
 
 	if (level > sunxi_levels->current_level) {
-#ifdef CONFIG_REGULATOR
 		set_gpu_voltage_unsafe(vol);
-#endif /* CONFIG_REGULATOR */
 		set_gpu_freq_unsafe(freq);
 	} else {
 		set_gpu_freq_unsafe(freq);
-#ifdef CONFIG_REGULATOR
 		set_gpu_voltage_unsafe(vol);
-#endif /* CONFIG_REGULATOR */
 	}
 
 	sunxi_levels->current_level = level;
@@ -599,9 +588,7 @@ static ssize_t write_write(struct file *filp, const char __user *buf,
 		if (val == 0 || val == 1) {
 			sunxi_debug->voltage = val ? true : false;
 		} else {
-#ifdef CONFIG_REGULATOR
 			set_gpu_voltage_safe(val * 1000);
-#endif /* CONFIG_REGULATOR */
 			revise_current_level();
 		}
 	} else if (!strncmp("power", buffer, head_size)) {
@@ -622,7 +609,7 @@ static ssize_t write_write(struct file *filp, const char __user *buf,
 			sunxi_debug->dvfs = val ? true : false;
 		else
 			sunxi_dvfs_enabled = (val - 2) ? true : false;
-#endif /* CONFIG_MALI_DEVFREQ*/
+#endif
 	} else if (!strncmp("level", buffer, head_size)) {
 		if (val == 0 || val == 1)
 			sunxi_debug->level = val ? true : false;
@@ -650,9 +637,7 @@ static int dump_debugfs_show(struct seq_file *s, void *data)
 
 	POINTER_IS_NULL(sunxi_debug);
 	POINTER_IS_NULL(sunxi_clks);
-#ifdef CONFIG_REGULATOR
 	POINTER_IS_NULL(sunxi_regulator);
-#endif /* CONFIG_REGULATOR */
 
 	if (!sunxi_debug->enable)
 		return 0;
@@ -664,14 +649,14 @@ static int dump_debugfs_show(struct seq_file *s, void *data)
 
 #ifdef CONFIG_REGULATOR
 	if (sunxi_debug->voltage) {
-		vol = get_current_gpu_voltage() / 1000;
+		vol = regulator_get_voltage(sunxi_regulator) / 1000;
 		seq_printf(s, "voltage:%dmV;", vol);
 	}
 
 	if (sunxi_debug->power)
 		seq_printf(s, "power:%s;",
 			regulator_is_enabled(sunxi_regulator) ? "on" : "off");
-#endif /* CONFIG_REGULATOR */
+#endif
 
 	if (sunxi_debug->idle)
 		seq_printf(s, "idle:%s;", sunxi_idle_enabled ? "on" : "off");
@@ -684,7 +669,7 @@ static int dump_debugfs_show(struct seq_file *s, void *data)
 	if (sunxi_debug->dvfs)
 		seq_printf(s, "dvfs:%s;",
 			sunxi_dvfs_enabled ? "on" : "off");
-#endif /* CONFIG_MALI_DEVFREQ */
+#endif
 
 #ifdef CONFIG_REGULATOR
 	if (sunxi_debug->level) {
@@ -694,7 +679,7 @@ static int dump_debugfs_show(struct seq_file *s, void *data)
 		seq_printf(s, "\ncurrent_level:%d",
 				sunxi_levels->current_level);
 		seq_puts(s, "\n   level  voltage  frequency\n");
-		current_vol  = get_current_gpu_voltage();
+		current_vol  = regulator_get_voltage(sunxi_regulator);
 		current_freq = clk_get_rate(sunxi_clks->pll);
 		for (i = 0; i <= sunxi_levels->max_level; i++) {
 			vol  = sunxi_vf_table[i].vol;
@@ -710,7 +695,7 @@ static int dump_debugfs_show(struct seq_file *s, void *data)
 		}
 		seq_puts(s, "\n==================");
 	}
-#endif /* CONFIG_REGULATOR */
+#endif
 
 	seq_puts(s, "\n");
 
@@ -893,11 +878,11 @@ int sunxi_update_vf(unsigned long *freq, unsigned long *voltage)
 		return 0;
 
 	*freq = clk_get_rate(sunxi_clks->pll);
-	*voltage = get_current_gpu_voltage();
+	*voltage = regulator_get_voltage(sunxi_regulator);
 
 	return 0;
 }
-#endif /* CONFIG_MALI_DEVFREQ */
+#endif
 
 static int get_u32_from_fex(char *second_key, int *val)
 {
@@ -906,7 +891,7 @@ static int get_u32_from_fex(char *second_key, int *val)
 
 static int parse_dts_and_fex(void)
 {
-	int count = 1;
+	int count = 1, power = 0;
 	struct sunxi_vf_table vf_table[40];
 #ifdef CONFIG_OF
 	int fex_val;
@@ -915,19 +900,16 @@ static int parse_dts_and_fex(void)
 	int nr;
 	const __be32 *val;
 	const struct property *prop;
-#endif /* CONFIG_OF */
+#endif
 
 	POINTER_IS_NULL(sunxi_levels);
 
 	sunxi_levels->max_normal_level = -1;
 
-#ifdef CONFIG_REGULATOR
 	vf_table[0].vol = GPU_DEFAULT_VOL;
-#else /* CONFIG_REGULATOR */
-	vf_table[0].vol = INVALID_VOL;
-#endif /* CONFIG_REGULATOR */
-
 	vf_table[0].freq = GPU_DEFAULT_FREQ;
+	if (!get_u32_from_fex("independent_power", &power))
+		independent_power = !!power;
 
 #ifdef CONFIG_OF
 	err = get_u32_from_fex("gpu_idle", &fex_val);
@@ -936,9 +918,9 @@ static int parse_dts_and_fex(void)
 
 #ifdef CONFIG_MALI_DEVFREQ
 	err = get_u32_from_fex("dvfs_status", &fex_val);
-	if (!err)
+	if (!err && independent_power)
 		sunxi_dvfs_enabled = fex_val ? true : false;
-#endif /* CONFIG_MALI_DEVFREQ */
+#endif
 
 	err = get_u32_from_fex("scene_ctrl_status", &fex_val);
 	if (!err)
@@ -1009,10 +991,10 @@ struct protected_mode_ops sunxi_protected_ops = {
 
 int sunxi_platform_init(struct kbase_device *kbdev)
 {
-	int err;
-#ifdef CONFIG_REGULATOR
+	int err, i, diff;
+#if defined(CONFIG_REGULATOR)
 	int vol;
-#endif /* CONFIG_REGULATOR */
+#endif
 	unsigned long freq;
 
 	sunxi_kbdev = kbdev;
@@ -1033,11 +1015,12 @@ int sunxi_platform_init(struct kbase_device *kbdev)
 	if (err)
 		return err;
 
-#ifdef CONFIG_REGULATOR
-	get_gpu_power();
-
-	vol = sunxi_vf_table[sunxi_levels->max_normal_level].vol;
-	err = set_gpu_voltage_unsafe(vol);
+#if defined(CONFIG_REGULATOR)
+	err = get_gpu_power();
+	if (independent_power) {
+		vol = sunxi_vf_table[sunxi_levels->max_normal_level].vol;
+		err = set_gpu_voltage_unsafe(vol);
+	}
 	if (err)
 		return err;
 #endif /* CONFIG_REGULATOR */
@@ -1047,15 +1030,28 @@ int sunxi_platform_init(struct kbase_device *kbdev)
 	err = get_gpu_clk();
 	if (err)
 		return err;
-
-	freq = sunxi_vf_table[sunxi_levels->max_normal_level].freq;
+	if (independent_power) {
+		freq = sunxi_vf_table[sunxi_levels->max_normal_level].freq;
+	} else {
+		vol = regulator_get_voltage(sunxi_regulator);
+		diff = 10000000;
+		freq = sunxi_vf_table[0].freq;
+		for (i = 0; i <= sunxi_levels->max_level; i++) {
+			if (sunxi_vf_table[i].vol <= vol) {
+				if (diff > vol - sunxi_vf_table[i].vol) {
+					diff = vol - sunxi_vf_table[i].vol;
+					freq = sunxi_vf_table[i].freq;
+				}
+			}
+		}
+	}
 	err = set_gpu_freq_unsafe(freq);
 	if (err)
 		return err;
+	if (independent_power)
+		sunxi_levels->current_level = sunxi_levels->max_normal_level;
 
-	sunxi_levels->current_level = sunxi_levels->max_normal_level;
-
-#ifdef CONFIG_REGULATOR
+#if defined(CONFIG_REGULATOR)
 	err = enable_gpu_power();
 	if (err)
 		return err;
@@ -1081,7 +1077,6 @@ int sunxi_platform_init(struct kbase_device *kbdev)
 	kbdev->protected_mode_support = true;
 
 	sunxi_initialized = true;
-
 	return 0;
 }
 
@@ -1091,8 +1086,9 @@ void sunxi_platform_term(struct kbase_device *kbdev)
 
 	put_gpu_clk();
 
-#ifdef CONFIG_REGULATOR
-	disable_gpu_power();
+#if defined(CONFIG_REGULATOR)
+	if (independent_power)
+		disable_gpu_power();
 
 	put_gpu_power();
 #endif /* CONFIG_REGULATOR */
@@ -1116,10 +1112,12 @@ static int sunxi_power_on(struct kbase_device *kbdev)
 {
 	int err;
 
-#ifdef CONFIG_REGULATOR
-	err = enable_gpu_power();
-	if (err)
-		return err;
+#if defined(CONFIG_REGULATOR)
+	if (sunxi_idle_enabled && independent_power) {
+		err = enable_gpu_power();
+		if (err)
+			return err;
+	}
 #endif /* CONFIG_REGULATOR */
 
 	err = enable_gpu_clk();
@@ -1133,18 +1131,19 @@ static void sunxi_power_off(struct kbase_device *kbdev)
 {
 	disable_gpu_clk();
 
-	if (!sunxi_idle_enabled)
+	if (!sunxi_idle_enabled || !independent_power)
 		return;
 
-#ifdef CONFIG_REGULATOR
+#if defined(CONFIG_REGULATOR)
 	disable_gpu_power();
 #endif /* CONFIG_REGULATOR */
 }
 
 static void sunxi_power_resume(struct kbase_device *kbdev)
 {
-#ifdef CONFIG_REGULATOR
-	enable_gpu_power();
+#if defined(CONFIG_REGULATOR)
+	if (sunxi_idle_enabled && independent_power)
+		enable_gpu_power();
 #endif /* CONFIG_REGULATOR */
 
 	enable_gpu_clk();
@@ -1154,8 +1153,9 @@ static void sunxi_power_suspend(struct kbase_device *kbdev)
 {
 	disable_gpu_clk();
 
-#ifdef CONFIG_REGULATOR
-	disable_gpu_power();
+#if defined(CONFIG_REGULATOR)
+	if (sunxi_idle_enabled && independent_power)
+		disable_gpu_power();
 #endif /* CONFIG_REGULATOR */
 }
 

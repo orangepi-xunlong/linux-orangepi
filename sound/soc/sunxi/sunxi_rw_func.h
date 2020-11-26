@@ -18,9 +18,8 @@
 #include <linux/io.h>
 #include <linux/module.h>
 
-#if defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN50IW8) || \
-defined(CONFIG_ARCH_SUN50IW9) || defined(CONFIG_ARCH_SUN8IW12) || \
-defined(CONFIG_ARCH_SUN8IW15)
+#if defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN8IW12) || \
+defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW8)
 #define ADDR_WIDTH 0x3f
 #else
 #define ADDR_WIDTH 0x1f

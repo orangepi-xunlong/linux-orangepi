@@ -40,33 +40,24 @@
 #include "nand_lib.h"
 #include "nand_boot.h"
 
-extern int flash_type;
-
 extern int NAND_Print(const char *fmt, ...);
 extern int NAND_PhysicLock(void);
 extern int NAND_PhysicUnLock(void);
 
 extern int nand_get_param(void *nand_param);
 extern int nand_get_param_for_uboottail(void *nand_param);
-extern int tnand_get_param(void *nand_param);
+
 extern int nand_read_nboot_data(unsigned char *buf, unsigned int len);
 extern int nand_read_uboot_data(unsigned char *buf, unsigned int len);
 extern int nand_write_nboot_data(unsigned char *buf, unsigned int len);
 extern int nand_write_uboot_data(unsigned char *buf, unsigned int len);
-extern int nand_dragonborad_test_one(unsigned char *buf, unsigned char *oob, unsigned int blk_num);
+extern int nand_dragonborad_test_one(unsigned char *buf, unsigned char *oob,
+				     unsigned int blk_num);
 extern int NAND_IS_Secure_sys(void);
 extern int nand_check_uboot(unsigned char *buf, unsigned int len);
 extern int nand_get_uboot_total_len(void);
 
-extern int nand_read_boot0_data(unsigned char *buf, unsigned int len);
-extern int nand_write_boot0_data(unsigned char *buf, unsigned int len);
-extern int tnand_read_uboot_data(unsigned char *buf, unsigned int len);
-extern int tnand_write_uboot_data(unsigned char *buf, unsigned int len);
-extern int tnand_dragonborad_test_one(unsigned char *buf, unsigned char *oob, unsigned int blk_num);
-extern int tnand_check_uboot(unsigned char *buf, unsigned int len);
-extern int tnand_get_uboot_total_len(void);
-
 int NAND_CheckBoot(void);
-int TNAND_CheckBoot(void);
+
 #endif
 

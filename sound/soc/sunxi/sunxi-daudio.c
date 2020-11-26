@@ -125,10 +125,6 @@ static struct reg_label reg_labels[] = {
 	REG_LABEL(SUNXI_DAUDIO_RXCHSEL),
 	REG_LABEL(SUNXI_DAUDIO_RXCHMAP0),
 	REG_LABEL(SUNXI_DAUDIO_RXCHMAP1),
-#if defined(CONFIG_ARCH_SUN50IW10)
-	REG_LABEL(SUNXI_DAUDIO_RXCHMAP2),
-	REG_LABEL(SUNXI_DAUDIO_RXCHMAP3),
-#endif
 	REG_LABEL(SUNXI_DAUDIO_DEBUG),
 #else
 	REG_LABEL(SUNXI_DAUDIO_TX0CHMAP0),
@@ -616,7 +612,7 @@ static int sunxi_daudio_hw_params(struct snd_pcm_substream *substream,
 	struct sunxi_daudio_info *sunxi_daudio = snd_soc_dai_get_drvdata(dai);
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_card *card = rtd->card;
-	struct sndhdmi_priv *sndhdmi_priv = snd_soc_card_get_drvdata(card);
+	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_card_get_drvdata(card);
 #ifdef SUNXI_HDMI_AUDIO_ENABLE
 	unsigned int reg_val;
 #endif
@@ -631,7 +627,7 @@ static int sunxi_daudio_hw_params(struct snd_pcm_substream *substream,
 		 */
 		if (sunxi_daudio->pdata->daudio_type ==
 				SUNXI_DAUDIO_TDMHDMI_TYPE
-				&& (sndhdmi_priv->hdmi_format > 1)) {
+				&& (sunxi_hdmi->hdmi_format > 1)) {
 			regmap_update_bits(sunxi_daudio->regmap,
 				SUNXI_DAUDIO_FMT0,
 				(SUNXI_DAUDIO_SR_MASK<<SAMPLE_RESOLUTION),
@@ -721,7 +717,7 @@ static int sunxi_daudio_hw_params(struct snd_pcm_substream *substream,
 #ifdef SUNXI_DAUDIO_MODE_B
 			regmap_write(sunxi_daudio->regmap,
 					SUNXI_DAUDIO_TX0CHMAP1, 0x10);
-			if (sndhdmi_priv->hdmi_format > 1) {
+			if (sunxi_hdmi->hdmi_format > 1) {
 				regmap_write(sunxi_daudio->regmap,
 						SUNXI_DAUDIO_TX1CHMAP1, 0x32);
 				regmap_write(sunxi_daudio->regmap,
@@ -752,7 +748,7 @@ static int sunxi_daudio_hw_params(struct snd_pcm_substream *substream,
 #else
 			regmap_write(sunxi_daudio->regmap,
 					SUNXI_DAUDIO_TX0CHMAP0, 0x10);
-			if (sndhdmi_priv->hdmi_format > 1) {
+			if (sunxi_hdmi->hdmi_format > 1) {
 				/* support for HBR */
 				regmap_write(sunxi_daudio->regmap,
 						SUNXI_DAUDIO_TX1CHMAP0, 0x32);
@@ -811,30 +807,10 @@ static int sunxi_daudio_hw_params(struct snd_pcm_substream *substream,
 		}
 	} else {
 #ifdef SUNXI_DAUDIO_MODE_B
-#if defined(CONFIG_ARCH_SUN50IW10)
-		unsigned int SUNXI_DAUDIO_RXCHMAPX = 0;
-		int index = 0;
-
-		for (index = 0; index < 16; index++) {
-			if (index >= 12)
-				SUNXI_DAUDIO_RXCHMAPX = SUNXI_DAUDIO_RXCHMAP0;
-			else if (index >= 8)
-				SUNXI_DAUDIO_RXCHMAPX = SUNXI_DAUDIO_RXCHMAP1;
-			else if (index >= 4)
-				SUNXI_DAUDIO_RXCHMAPX = SUNXI_DAUDIO_RXCHMAP2;
-			else
-				SUNXI_DAUDIO_RXCHMAPX = SUNXI_DAUDIO_RXCHMAP3;
-			regmap_update_bits(sunxi_daudio->regmap,
-				SUNXI_DAUDIO_RXCHMAPX,
-				DAUDIO_RXCHMAP(index),
-				DAUDIO_RXCH_DEF_MAP(index));
-		}
-#else
 		regmap_write(sunxi_daudio->regmap,
 				SUNXI_DAUDIO_RXCHMAP0, SUNXI_DEFAULT_CHMAP0);
 		regmap_write(sunxi_daudio->regmap,
 				SUNXI_DAUDIO_RXCHMAP1, SUNXI_DEFAULT_CHMAP1);
-#endif
 #else
 		regmap_write(sunxi_daudio->regmap,
 				SUNXI_DAUDIO_RXCHMAP, SUNXI_DEFAULT_CHMAP);
@@ -846,6 +822,7 @@ static int sunxi_daudio_hw_params(struct snd_pcm_substream *substream,
 				(SUNXI_DAUDIO_RX_CHSEL_MASK<<RX_CHSEL),
 				((params_channels(params)-1)<<RX_CHSEL));
 	}
+
 #ifdef SUNXI_HDMI_AUDIO_ENABLE
 	/* Special processing for HDMI hub playback to enable hdmi module */
 	if (sunxi_daudio->pdata->daudio_type == SUNXI_DAUDIO_TDMHDMI_TYPE) {

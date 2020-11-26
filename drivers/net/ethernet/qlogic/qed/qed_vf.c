@@ -158,7 +158,6 @@ static int qed_vf_pf_acquire(struct qed_hwfn *p_hwfn)
 	struct pfvf_acquire_resp_tlv *resp = &p_iov->pf2vf_reply->acquire_resp;
 	struct pf_vf_pfdev_info *pfdev_info = &resp->pfdev_info;
 	struct vf_pf_resc_request *p_resc;
-	u8 retry_cnt = VF_ACQUIRE_THRESH;
 	bool resources_acquired = false;
 	struct vfpf_acquire_tlv *req;
 	int rc = 0, attempts = 0;
@@ -204,15 +203,6 @@ static int qed_vf_pf_acquire(struct qed_hwfn *p_hwfn)
 
 		/* send acquire request */
 		rc = qed_send_msg2pf(p_hwfn, &resp->hdr.status, sizeof(*resp));
-
-		/* Re-try acquire in case of vf-pf hw channel timeout */
-		if (retry_cnt && rc == -EBUSY) {
-			DP_VERBOSE(p_hwfn, QED_MSG_IOV,
-				   "VF retrying to acquire due to VPC timeout\n");
-			retry_cnt--;
-			continue;
-		}
-
 		if (rc)
 			goto exit;
 
@@ -305,6 +295,7 @@ static int qed_vf_pf_acquire(struct qed_hwfn *p_hwfn)
 	}
 
 	if (!p_iov->b_pre_fp_hsi &&
+	    ETH_HSI_VER_MINOR &&
 	    (resp->pfdev_info.minor_fp_hsi < ETH_HSI_VER_MINOR)) {
 		DP_INFO(p_hwfn,
 			"PF is using older fastpath HSI; %02x.%02x is configured\n",
@@ -795,7 +786,7 @@ int qed_vf_pf_vport_update(struct qed_hwfn *p_hwfn,
 		resp_size += sizeof(struct pfvf_def_resp_tlv);
 
 		memcpy(p_mcast_tlv->bins, p_params->bins,
-		       sizeof(u32) * ETH_MULTICAST_MAC_BINS_IN_REGS);
+		       sizeof(unsigned long) * ETH_MULTICAST_MAC_BINS_IN_REGS);
 	}
 
 	update_rx = p_params->accept_flags.update_rx_mode_config;
@@ -981,7 +972,7 @@ void qed_vf_pf_filter_mcast(struct qed_hwfn *p_hwfn,
 			u32 bit;
 
 			bit = qed_mcast_bin_from_mac(p_filter_cmd->mac[i]);
-			sp_params.bins[bit / 32] |= 1 << (bit % 32);
+			__set_bit(bit, sp_params.bins);
 		}
 	}
 

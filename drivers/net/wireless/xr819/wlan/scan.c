@@ -665,7 +665,6 @@ void xradio_scan_work(struct work_struct *work)
 		if (hw_priv->scan.scan_failed_cnt >= 3) {
 			printk(KERN_ERR "%s,scan failed restart of fw except", __func__);
 			hw_priv->bh_error = 1 ;
-			hw_priv->scan.scan_failed_cnt = 0;
 		}
 #endif
 		return;

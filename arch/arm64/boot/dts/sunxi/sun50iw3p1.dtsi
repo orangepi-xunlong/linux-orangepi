@@ -786,7 +786,7 @@
 		};
 
 		rtc: rtc@07000000 {
-			compatible = "allwinner,sunxi-rtc";
+			compatible = "allwinner,sun50iw3-rtc";
 			device_type = "rtc";
 			reg = <0x0 0x7000000 0x0 0x220>;
 			interrupts = <GIC_SPI 85 IRQ_TYPE_LEVEL_HIGH>;

@@ -12,6 +12,7 @@
 #define INCLUDE_HDMITX_DEV_H_
 #include "../../config.h"
 
+#if defined(__LINUX_PLAT__)
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/device.h>
@@ -27,7 +28,9 @@
 #include <linux/poll.h>
 #include <linux/fcntl.h>
 #include <linux/workqueue.h>
-
+#else
+#include "../../hdmi_boot.h"
+#endif
 #include "core_api.h"
 
 

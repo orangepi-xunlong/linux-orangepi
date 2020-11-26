@@ -13,7 +13,6 @@
 #include "asm/cacheflush.h"
 #include <linux/clk/sunxi.h>
 #include <linux/sunxi-gpio.h>
-#include "dev_disp.h"
 
 /* cache flush flags */
 #define  CACHE_FLUSH_I_CACHE_REGION       0
@@ -473,15 +472,10 @@ EXPORT_SYMBOL(disp_sys_pin_set_state);
 int disp_sys_power_enable(char *name)
 {
 	int ret = 0;
-#if defined(CONFIG_AW_AXP) || defined(CONFIG_REGULATOR)
+#ifdef CONFIG_AW_AXP
 	struct regulator *regu = NULL;
 
-
-#ifdef CONFIG_SUNXI_REGULATOR_DT
-	regu = regulator_get(g_disp_drv.dev, name);
-#else
 	regu = regulator_get(NULL, name);
-#endif
 	if (IS_ERR(regu)) {
 		__wrn("some error happen, fail to get regulator %s\n", name);
 		goto exit;
@@ -508,14 +502,10 @@ EXPORT_SYMBOL(disp_sys_power_enable);
 int disp_sys_power_disable(char *name)
 {
 	int ret = 0;
-#if defined(CONFIG_AW_AXP) || defined(CONFIG_REGULATOR)
+#ifdef CONFIG_AW_AXP
 	struct regulator *regu = NULL;
 
-#ifdef CONFIG_SUNXI_REGULATOR_DT
-	regu = regulator_get(g_disp_drv.dev, name);
-#else
 	regu = regulator_get(NULL, name);
-#endif
 	if (IS_ERR(regu)) {
 		__wrn("some error happen, fail to get regulator %s\n", name);
 		goto exit;

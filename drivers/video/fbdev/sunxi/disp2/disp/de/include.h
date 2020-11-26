@@ -240,8 +240,7 @@ enum disp_manager_dirty_flags {
 	MANAGER_COLOR_RANGE_DIRTY = 0x00000010,
 	MANAGER_COLOR_SPACE_DIRTY = 0x00000020,
 	MANAGER_BLANK_DIRTY = 0x00000040,
-	MANAGER_KSC_DIRTY = 0x00000080,
-	MANAGER_ALL_DIRTY = 0x000000ff,
+	MANAGER_ALL_DIRTY = 0x0000007f,
 };
 
 /* disp_atw_info_inner - asynchronous time wrap infomation
@@ -304,23 +303,6 @@ struct disp_fb_info_inner {
 	unsigned long long       metadata_buf;
 	unsigned int             metadata_size;
 	unsigned int             metadata_flag;
-	struct dma_buf           *metadata_dmabuf;
-	struct sunxi_metadata    *p_metadata;
-	struct afbc_header       *p_afbc_header;
-};
-
-/**
- * disp_snr_info
- */
-struct disp_snr_info_inner {
-	unsigned char en;
-	unsigned char demo_en;
-	struct disp_rect demo_win;
-	unsigned char y_strength;
-	unsigned char u_strength;
-	unsigned char v_strength;
-	unsigned char th_ver_line;
-	unsigned char th_hor_line;
 };
 
 /* disp_layer_info_inner - layer info on the inside
@@ -356,10 +338,6 @@ struct disp_layer_info_inner {
 
 	unsigned int              id;
 	struct disp_atw_info_inner atw;
-#if defined(DE_VERSION_V33X)
-	int transform;
-	struct disp_snr_info_inner snr;
-#endif
 };
 
 /* disp_layer_config_inner - layer config on the inside
@@ -409,8 +387,6 @@ struct disp_manager_info {
 	u32 de_freq;
 	enum disp_eotf eotf; /* sdr/hdr10/hlg */
 	enum disp_data_bits data_bits;
-	u32 device_fps;
-	struct disp_ksc_info ksc;
 };
 
 struct disp_manager_data {
@@ -572,8 +548,8 @@ struct disp_capture_info_inner {
  * @flags: caputre flags
  */
 struct disp_capture_config {
-	struct disp_s_frame_inner in_frame;	/* only format/size/crop valid */
-	struct disp_s_frame_inner out_frame;
+	struct disp_s_frame in_frame;	/* only format/size/crop valid */
+	struct disp_s_frame out_frame;
 	u32 disp;		/* which disp channel to be capture */
 	enum disp_capture_dirty_flags flags;
 };
@@ -776,10 +752,10 @@ struct disp_panel_para {
 	unsigned int lcd_dsi_dphy_timing_en;
 	struct __disp_dsi_dphy_timing_t *lcd_dsi_dphy_timing_p;
 
-	unsigned int lcd_fsync_en;
-	unsigned int lcd_fsync_act_time;
-	unsigned int lcd_fsync_dis_time;
-	unsigned int lcd_fsync_pol;
+	unsigned int lcd_edp_rate;	/* 1(1.62G); 2(2.7G); 3(5.4G) */
+	unsigned int lcd_edp_lane;	/* 1/2/4lane */
+	unsigned int lcd_edp_colordepth;/* color depth, 0:8bit; 1:6bit */
+	unsigned int lcd_edp_fps;
 
 	unsigned int lcd_dclk_freq;
 	unsigned int lcd_x;	/* horizontal resolution */
@@ -825,13 +801,7 @@ struct disp_panel_para {
 
 enum disp_mod_id {
 	DISP_MOD_DE = 0,
-#if defined(CONFIG_ARCH_SUN50IW10)
-	DISP_MOD_DE1,
-#endif
 	DISP_MOD_DEVICE,	/* for timing controller common module */
-#if defined(CONFIG_ARCH_SUN50IW10)
-	DISP_MOD_DEVICE1,
-#endif
 	DISP_MOD_LCD0,
 	DISP_MOD_LCD1,
 	DISP_MOD_LCD2,
@@ -845,10 +815,6 @@ enum disp_mod_id {
 	DISP_MOD_EINK,
 	DISP_MOD_EDMA,
 	DISP_MOD_VDPO,
-#if defined(CONFIG_ARCH_SUN50IW10)
-	DISP_MOD_DPSS0,
-	DISP_MOD_DPSS1,
-#endif
 	DISP_MOD_NUM,
 };
 
@@ -898,7 +864,6 @@ struct disp_bsp_init_para {
 	s32 (*capture_event)(u32 sel);
 	s32 (*shadow_protect)(u32 sel, bool protect);
 	struct disp_bootloader_info boot_info;
-	struct disp_feat_init feat_init;
 };
 
 typedef void (*LCD_FUNC) (unsigned int sel);
@@ -1162,9 +1127,6 @@ struct disp_manager {
 
 	/* debug interface, dump manager info */
 	s32 (*dump)(struct disp_manager *mgr, char *buf);
-	s32 (*reg_protect)(struct disp_manager *mgr, bool protect);
-	s32 (*set_ksc_para)(struct disp_manager *mgr,
-				      struct disp_ksc_info *pinfo);
 };
 
 struct disp_layer {
@@ -1361,7 +1323,6 @@ struct rect_size {
 	u32 align;
 };
 
-#if defined(CONFIG_EINK_PANEL_USED)
 struct area_info {
 	unsigned int x_top;
 	unsigned int y_top;
@@ -1497,5 +1458,5 @@ struct format_manager {
 			      unsigned int layer_num,
 			      struct image_format *dest);
 };
-#endif
+
 #endif

@@ -554,11 +554,12 @@ void vfp_flush_hwstate(struct thread_info *thread)
  * Save the current VFP state into the provided structures and prepare
  * for entry into a new function (signal handler).
  */
-int vfp_preserve_user_clear_hwstate(struct user_vfp *ufp,
-				    struct user_vfp_exc *ufp_exc)
+int vfp_preserve_user_clear_hwstate(struct user_vfp __user *ufp,
+				    struct user_vfp_exc __user *ufp_exc)
 {
 	struct thread_info *thread = current_thread_info();
 	struct vfp_hard_struct *hwstate = &thread->vfpstate.hard;
+	int err = 0;
 
 	/* Ensure that the saved hwstate is up-to-date. */
 	vfp_sync_hwstate(thread);
@@ -567,19 +568,22 @@ int vfp_preserve_user_clear_hwstate(struct user_vfp *ufp,
 	 * Copy the floating point registers. There can be unused
 	 * registers see asm/hwcap.h for details.
 	 */
-	memcpy(&ufp->fpregs, &hwstate->fpregs, sizeof(hwstate->fpregs));
-
+	err |= __copy_to_user(&ufp->fpregs, &hwstate->fpregs,
+			      sizeof(hwstate->fpregs));
 	/*
 	 * Copy the status and control register.
 	 */
-	ufp->fpscr = hwstate->fpscr;
+	__put_user_error(hwstate->fpscr, &ufp->fpscr, err);
 
 	/*
 	 * Copy the exception registers.
 	 */
-	ufp_exc->fpexc = hwstate->fpexc;
-	ufp_exc->fpinst = hwstate->fpinst;
-	ufp_exc->fpinst2 = hwstate->fpinst2;
+	__put_user_error(hwstate->fpexc, &ufp_exc->fpexc, err);
+	__put_user_error(hwstate->fpinst, &ufp_exc->fpinst, err);
+	__put_user_error(hwstate->fpinst2, &ufp_exc->fpinst2, err);
+
+	if (err)
+		return -EFAULT;
 
 	/* Ensure that VFP is disabled. */
 	vfp_flush_hwstate(thread);
@@ -593,11 +597,13 @@ int vfp_preserve_user_clear_hwstate(struct user_vfp *ufp,
 }
 
 /* Sanitise and restore the current VFP state from the provided structures. */
-int vfp_restore_user_hwstate(struct user_vfp *ufp, struct user_vfp_exc *ufp_exc)
+int vfp_restore_user_hwstate(struct user_vfp __user *ufp,
+			     struct user_vfp_exc __user *ufp_exc)
 {
 	struct thread_info *thread = current_thread_info();
 	struct vfp_hard_struct *hwstate = &thread->vfpstate.hard;
 	unsigned long fpexc;
+	int err = 0;
 
 	/* Disable VFP to avoid corrupting the new thread state. */
 	vfp_flush_hwstate(thread);
@@ -606,16 +612,17 @@ int vfp_restore_user_hwstate(struct user_vfp *ufp, struct user_vfp_exc *ufp_exc)
 	 * Copy the floating point registers. There can be unused
 	 * registers see asm/hwcap.h for details.
 	 */
-	memcpy(&hwstate->fpregs, &ufp->fpregs, sizeof(hwstate->fpregs));
+	err |= __copy_from_user(&hwstate->fpregs, &ufp->fpregs,
+				sizeof(hwstate->fpregs));
 	/*
 	 * Copy the status and control register.
 	 */
-	hwstate->fpscr = ufp->fpscr;
+	__get_user_error(hwstate->fpscr, &ufp->fpscr, err);
 
 	/*
 	 * Sanitise and restore the exception registers.
 	 */
-	fpexc = ufp_exc->fpexc;
+	__get_user_error(fpexc, &ufp_exc->fpexc, err);
 
 	/* Ensure the VFP is enabled. */
 	fpexc |= FPEXC_EN;
@@ -624,10 +631,10 @@ int vfp_restore_user_hwstate(struct user_vfp *ufp, struct user_vfp_exc *ufp_exc)
 	fpexc &= ~(FPEXC_EX | FPEXC_FP2V);
 	hwstate->fpexc = fpexc;
 
-	hwstate->fpinst = ufp_exc->fpinst;
-	hwstate->fpinst2 = ufp_exc->fpinst2;
+	__get_user_error(hwstate->fpinst, &ufp_exc->fpinst, err);
+	__get_user_error(hwstate->fpinst2, &ufp_exc->fpinst2, err);
 
-	return 0;
+	return err ? -EFAULT : 0;
 }
 
 /*

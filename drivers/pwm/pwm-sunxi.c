@@ -357,9 +357,9 @@ static int sunxi_pwm_set_polarity(struct pwm_chip *chip,
 	reg_shift = pc->config[pwm->pwm - chip->base].reg_polarity_shift;
 	temp = sunxi_pwm_readl(chip, reg_offset);
 	if (polarity == PWM_POLARITY_NORMAL)
-		temp = SET_BITS(reg_shift, 1, temp, 0);
-	else
 		temp = SET_BITS(reg_shift, 1, temp, 1);
+	else
+		temp = SET_BITS(reg_shift, 1, temp, 0);
 
 	sunxi_pwm_writel(chip, reg_offset, temp);
 

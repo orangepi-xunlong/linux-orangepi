@@ -68,7 +68,7 @@ static int ss_copy_from_user(void *to, struct scatterlist *from, u32 size)
 		return -1;
 	}
 
-	SS_DBG("vaddr = 0x%p, sg_addr = 0x%p, size = %d\n", vaddr, from, size);
+	SS_DBG("vaddr = %p, sg_addr = 0x%p, size = %d\n", vaddr, from, size);
 	memcpy(to, vaddr + from->offset, size);
 	kunmap(ppage);
 	return 0;
@@ -85,7 +85,7 @@ static int ss_copy_to_user(struct scatterlist *to, void *from, u32 size)
 		return -1;
 	}
 
-	SS_DBG("vaddr = 0x%p, sg_addr = 0x%p, size = %d\n", vaddr, to, size);
+	SS_DBG("vaddr = %p, sg_addr = 0x%p, size = %d\n", vaddr, to, size);
 	memcpy(vaddr+to->offset, from, size);
 	kunmap(ppage);
 	return 0;
@@ -103,13 +103,13 @@ static int ss_sg_config(ce_scatter_t *scatter,
 			WARN(1, "Too many scatter: %d\n", cnt);
 			return -1;
 		}
-		info->mapping[cnt].virt_addr = (void *)sg_dma_address(cur);
-		scatter[cnt].addr = (sg_dma_address(cur) >> WORD_ALGIN) & 0xffffffff;
-		scatter[cnt].len = sg_dma_len(cur) >> 2;
+
+		scatter[cnt].addr = sg_dma_address(cur);
+		scatter[cnt].len = sg_dma_len(cur)/4;
 		info->last_sg = cur;
 		last_sg_len = sg_dma_len(cur);
 		SS_DBG("%d cur: 0x%p, scatter: addr 0x%x, len %d (%d)\n",
-				cnt, cur, (scatter[cnt].addr << WORD_ALGIN),
+				cnt, cur, scatter[cnt].addr,
 				scatter[cnt].len, sg_dma_len(cur));
 		cnt++;
 		cur = sg_next(cur);
@@ -117,7 +117,7 @@ static int ss_sg_config(ce_scatter_t *scatter,
 
 #ifdef SS_HASH_HW_PADDING
 	if (CE_METHOD_IS_HMAC(type)) {
-		scatter[cnt-1].len += (tail+3) >> 2;
+		scatter[cnt-1].len += (tail+3)/4;
 		info->has_padding = 0;
 		return 0;
 	}
@@ -130,7 +130,7 @@ static int ss_sg_config(ce_scatter_t *scatter,
 	}
 
 	if (CE_METHOD_IS_HASH(type)) {
-		scatter[cnt-1].len -= tail >> 2;
+		scatter[cnt-1].len -= tail/4;
 		return 0;
 	}
 
@@ -144,11 +144,11 @@ static int ss_sg_config(ce_scatter_t *scatter,
 	}
 	SS_DBG("AES(%d)-%d padding: 0x%p, tail = %d/%d, cnt = %d\n",
 		type, mode, info->padding, tail, last_sg_len, cnt);
-	info->mapping[cnt - 1].virt_addr = info->padding;
-	scatter[cnt-1].addr = (virt_to_phys(info->padding) >> WORD_ALGIN) & 0xffffffff;
+
+	scatter[cnt-1].addr = virt_to_phys(info->padding);
 	ss_copy_from_user(info->padding,
 		info->last_sg, last_sg_len - ss_aes_align_size(0, mode) + tail);
-	scatter[cnt-1].len = last_sg_len >> 2;
+	scatter[cnt-1].len = last_sg_len/4;
 
 	info->has_padding = 1;
 	return 0;
@@ -185,9 +185,10 @@ static void ss_aes_map_padding(ce_scatter_t *scatter,
 		return;
 
 	len = scatter[index].len * 4;
-	SS_DBG("AES padding: 0x%p, len: %d, dir: %d\n",
-		info->mapping[index].virt_addr, len, dir);
-	dma_map_single(&ss_dev->pdev->dev, info->mapping[index].virt_addr, len, dir);
+	SS_DBG("AES padding: 0x%x, len: %d, dir: %d\n",
+		scatter[index].addr, len, dir);
+	dma_map_single(&ss_dev->pdev->dev,
+		phys_to_virt(scatter[index].addr), len, dir);
 	info->dir = dir;
 }
 
@@ -271,9 +272,9 @@ static int ss_aes_start(ss_aes_ctx_t *ctx, ss_aes_req_ctx_t *req_ctx, int len)
 		req_ctx->dir, req_ctx->type, req_ctx->mode, len);
 
 	phy_addr = virt_to_phys(ctx->key);
-	SS_DBG("ctx->key addr, vir = 0x%p, phy = 0x%p\n", ctx->key, (void *)phy_addr);
+	SS_DBG("ctx->key addr, vir = 0x%p, phy = %pa\n", ctx->key, &phy_addr);
 	phy_addr = virt_to_phys(task);
-	SS_DBG("Task addr, vir = 0x%p, phy = 0x%p\n", task, (void *)phy_addr);
+	SS_DBG("Task addr, vir = 0x%p, phy = 0x%pa\n", task, &phy_addr);
 
 #ifdef SS_XTS_MODE_ENABLE
 	SS_DBG("The current Key:\n");
@@ -290,14 +291,14 @@ static int ss_aes_start(ss_aes_ctx_t *ctx, ss_aes_req_ctx_t *req_ctx, int len)
 
 	if (ctx->iv_size > 0) {
 		phy_addr = virt_to_phys(ctx->iv);
-		SS_DBG("ctx->iv vir = 0x%p phy = 0x%p\n", ctx->iv, (void *)phy_addr);
+		SS_DBG("ctx->iv vir = 0x%p, phy = 0x%pa\n", ctx->iv, &phy_addr);
 		ss_iv_set(ctx->iv, ctx->iv_size, task);
 		dma_map_single(&ss_dev->pdev->dev,
 			ctx->iv, ctx->iv_size, DMA_MEM_TO_DEV);
 
 		phy_addr = virt_to_phys(ctx->next_iv);
-		SS_DBG("ctx->next_iv addr, vir = 0x%p, phy = 0x%p\n",
-			ctx->next_iv, (void *)phy_addr);
+		SS_DBG("ctx->next_iv addr, vir = 0x%p, phy = 0x%pa\n",
+			ctx->next_iv, &phy_addr);
 		ss_cnt_set(ctx->next_iv, ctx->iv_size, task);
 		dma_map_single(&ss_dev->pdev->dev,
 			ctx->next_iv, ctx->iv_size, DMA_DEV_TO_MEM);
@@ -351,7 +352,7 @@ static int ss_aes_start(ss_aes_ctx_t *ctx, ss_aes_req_ctx_t *req_ctx, int len)
 		ss_data_len_set(src_len * 8, task);
 		task->ctr_addr = task->key_addr;
 		task->reserved[0] = src_len * 8;
-		task->key_addr = (virt_to_phys(&task->reserved[0]) >> WORD_ALGIN) & 0xffffffff;
+		task->key_addr = virt_to_phys(&task->reserved[0]);
 	} else if (req_ctx->type == SS_METHOD_RSA)
 		ss_data_len_set(len*3, task);
 	else
@@ -366,7 +367,7 @@ static int ss_aes_start(ss_aes_ctx_t *ctx, ss_aes_req_ctx_t *req_ctx, int len)
 
 	SS_DBG("preCE, COMM: 0x%08x, SYM: 0x%08x, ASYM: 0x%08x, data_len:%d\n",
 		task->comm_ctl, task->sym_ctl, task->asym_ctl, task->data_len);
-	/*ss_print_task_info(task);*/
+	ss_print_task_info(task);
 	ss_ctrl_start(task);
 
 	ret = wait_for_completion_timeout(&ss_dev->flows[flow].done,
@@ -377,7 +378,7 @@ static int ss_aes_start(ss_aes_ctx_t *ctx, ss_aes_req_ctx_t *req_ctx, int len)
 		ret = -ETIMEDOUT;
 	}
 	ss_irq_disable(flow);
-	/*ss_print_task_info(task);*/
+	ss_print_task_info(task);
 	dma_unmap_single(&ss_dev->pdev->dev, virt_to_phys(task),
 		sizeof(ce_task_desc_t), DMA_MEM_TO_DEV);
 
@@ -501,7 +502,7 @@ static int ss_rng_start(ss_aes_ctx_t *ctx, u8 *rdata, u32 dlen, u32 trng)
 		ss_method_set(SS_DIR_ENCRYPT, SS_METHOD_PRNG, task);
 
 	phy_addr = virt_to_phys(ctx->key);
-	SS_DBG("ctx->key addr, vir = 0x%p, phy = 0x%p\n", ctx->key, (void *)phy_addr);
+	SS_DBG("ctx->key addr, vir = 0x%p, phy = %pa\n", ctx->key, &phy_addr);
 
 	if (trng == 0) {
 		/* Must set the seed addr in PRNG. */
@@ -511,13 +512,13 @@ static int ss_rng_start(ss_aes_ctx_t *ctx, u8 *rdata, u32 dlen, u32 trng)
 			ctx->key, ctx->key_size, DMA_MEM_TO_DEV);
 	}
 	phy_addr = virt_to_phys(buf);
-	SS_DBG("buf addr, vir = 0x%p, phy = 0x%p\n", buf, (void *)phy_addr);
+	SS_DBG("buf addr, vir = 0x%p, phy = %pa\n", buf, &phy_addr);
 
 	/* Prepare the dst scatterlist */
-	task->dst[0].addr = (virt_to_phys(buf) >> WORD_ALGIN) & 0xffffffff;
-	task->dst[0].len  = rng_len >> 2;
+	task->dst[0].addr = virt_to_phys(buf);
+	task->dst[0].len  = rng_len/4;
 	dma_map_single(&ss_dev->pdev->dev, buf, rng_len, DMA_DEV_TO_MEM);
-	SS_DBG("task->dst_addr = 0x%x\n", task->dst[0].addr);
+
 #ifdef SS_SUPPORT_CE_V3_1
 	ss_data_len_set(rng_len/4, task);
 #else
@@ -527,16 +528,17 @@ static int ss_rng_start(ss_aes_ctx_t *ctx, u8 *rdata, u32 dlen, u32 trng)
 	SS_DBG("Flow: %d, Request: %d, Aligned: %d\n", flow, dlen, rng_len);
 
 	phy_addr = virt_to_phys(task);
-	SS_DBG("Task addr, vir = 0x%p, phy = 0x%p\n", task, (void *)phy_addr);
+	SS_DBG("Task addr, vir = 0x%p, phy = %pa\n", task, &phy_addr);
 
 	/* Start CE controller. */
 	init_completion(&ss_dev->flows[flow].done);
 	dma_map_single(&ss_dev->pdev->dev, task,
 		sizeof(ce_task_desc_t), DMA_MEM_TO_DEV);
 
+	SS_DBG("Before CE, COMM_CTL: 0x%08x, ICR: 0x%08x\n",
+		task->comm_ctl, ss_reg_rd(CE_REG_ICR));
 	ss_ctrl_start(task);
-	SS_DBG("Before CE, COMM_CTL: 0x%08x, TSK: 0x%08x ICR: 0x%08x TLR: 0x%08x\n",
-		task->comm_ctl, ss_reg_rd(CE_REG_TSK), ss_reg_rd(CE_REG_ICR), ss_reg_rd(CE_REG_TLR));
+
 	ret = wait_for_completion_timeout(&ss_dev->flows[flow].done,
 		msecs_to_jiffies(SS_WAIT_TIME));
 	if (ret == 0) {
@@ -640,7 +642,7 @@ u32 ss_hash_start(ss_hash_ctx_t *ctx,
 		req_ctx->dir, req_ctx->type, req_ctx->mode, len, ctx->cnt);
 	SS_DBG("IV address = 0x%p, size = %d\n", ctx->md, ctx->md_size);
 	phy_addr = virt_to_phys(task);
-	SS_DBG("Task addr, vir = 0x%p, phy = 0x%p\n", task, (void *)phy_addr);
+	SS_DBG("Task addr, vir = 0x%p, phy = %pa\n", task, &phy_addr);
 
 	ss_iv_set(ctx->md, ctx->md_size, task);
 	ss_iv_mode_set(CE_HASH_IV_INPUT, task);
@@ -671,17 +673,17 @@ u32 ss_hash_start(ss_hash_ctx_t *ctx,
 		ctx->cnt <<= 3; /* Translate to bits in the last pakcket */
 		dma_map_single(&ss_dev->pdev->dev, &ctx->cnt, 4,
 			DMA_MEM_TO_DEV);
-		task->key_addr = (virt_to_phys(&ctx->cnt) >> WORD_ALGIN) & 0xffffffff;
+		task->key_addr = virt_to_phys(&ctx->cnt);
 	}
 #endif
 
 	/* Prepare the dst scatterlist */
-	task->dst[0].addr = (virt_to_phys(digest) >> WORD_ALGIN) & 0xffffffff;
-	task->dst[0].len  = ctx->md_size  >> 2;
+	task->dst[0].addr = virt_to_phys(digest);
+	task->dst[0].len  = ctx->md_size/4;
 	dma_map_single(&ss_dev->pdev->dev,
 		digest, SHA512_DIGEST_SIZE, DMA_DEV_TO_MEM);
 	phy_addr = virt_to_phys(digest);
-	SS_DBG("digest addr, vir = 0x%p, phy = 0x%p\n", digest, (void *)phy_addr);
+	SS_DBG("digest addr, vir = 0x%p, phy = %pa\n", digest, &phy_addr);
 
 	/* Start CE controller. */
 	init_completion(&ss_dev->flows[flow].done);
@@ -753,7 +755,7 @@ void ss_load_iv(ss_aes_ctx_t *ctx, ss_aes_req_ctx_t *req_ctx,
 	if ((ctx->cnt == 0)
 		|| (CE_IS_AES_MODE(req_ctx->type, req_ctx->mode, CBC))
 		|| (CE_IS_AES_MODE(req_ctx->type, req_ctx->mode, CTS))) {
-		SS_DBG("IV address = 0x%p, size = %d\n", buf, size);
+		SS_DBG("IV address = %p, size = %d\n", buf, size);
 		ctx->iv_size = size;
 		memcpy(ctx->iv, buf, ctx->iv_size);
 	}
@@ -771,7 +773,7 @@ int ss_aes_one_req(sunxi_ss_t *sss, struct ablkcipher_request *req)
 
 	SS_ENTER();
 	if (!req->src || !req->dst) {
-		SS_ERR("Invalid sg: src = 0x%p, dst = 0x%p\n", req->src, req->dst);
+		SS_ERR("Invalid sg: src = %p, dst = %p\n", req->src, req->dst);
 		return -EINVAL;
 	}
 

@@ -972,10 +972,6 @@ struct ieee80211_local {
 	/* device is started */
 	bool started;
 
-
-	/* device is during a HW reconfig */
-	bool in_reconfig;
-
 	/* wowlan is enabled -- don't reconfig on resume */
 	bool wowlan;
 
@@ -1174,8 +1170,6 @@ struct ieee80211_local {
 	struct ieee80211_channel *hw_roc_channel;
 
 	u64 roc_cookie;
-
-	struct ieee80211_sub_if_data __rcu *p2p_sdata;
 };
 
 static inline struct ieee80211_sub_if_data *
@@ -1427,7 +1421,7 @@ void mac80211_iface_exit(void);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 int mac80211_if_add(struct ieee80211_local *local, const char *name,
 		     unsigned char name_assign_type,
-		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
+		     struct net_device **new_dev, enum nl80211_iftype type,
 		     struct vif_params *params);
 #else
 int mac80211_if_add(struct ieee80211_local *local, const char *name,
@@ -1443,8 +1437,6 @@ u32 __mac80211_recalc_idle(struct ieee80211_local *local);
 void mac80211_recalc_idle(struct ieee80211_local *local);
 void mac80211_adjust_monitor_flags(struct ieee80211_sub_if_data *sdata,
 				    const int offset);
-int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up);
-void ieee80211_sdata_stop(struct ieee80211_sub_if_data *sdata);
 
 static inline bool ieee80211_sdata_running(struct ieee80211_sub_if_data *sdata)
 {

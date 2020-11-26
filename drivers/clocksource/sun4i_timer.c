@@ -129,8 +129,7 @@ static int sun4i_clkevt_next_event(unsigned long evt,
 static struct clock_event_device sun4i_clockevent = {
 	.name = "sun4i_tick",
 	.rating = 350,
-	.features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT |
-		    CLOCK_EVT_FEAT_DYNIRQ,
+	.features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT,
 	.set_state_shutdown = sun4i_clkevt_shutdown,
 	.set_state_periodic = sun4i_clkevt_set_periodic,
 	.set_state_oneshot = sun4i_clkevt_set_oneshot,

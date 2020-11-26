@@ -82,7 +82,6 @@ struct tv_screen_t {
 	bool			suspend;
 	bool			used;
 	struct mutex mlock;
-	struct clk *clk_parent;
 };
 
 struct tv_info_t {

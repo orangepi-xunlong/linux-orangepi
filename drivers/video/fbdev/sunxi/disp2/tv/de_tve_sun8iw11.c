@@ -31,22 +31,6 @@ s32 tve_low_set_top_reg_base(void __iomem *address)
 	return 0;
 }
 
-s32 tve_low_sw_init(u32 sel, u32 *dac_no, u32 *dac_type,
-			u32 num)
-{
-	int i = 0;
-
-	for (i = 0; i < TVE_DAC_NUM; i++)
-		dac_type_info[sel][i] = 7;
-
-	for (i = 0; i < num; i++) {
-		dac_info[sel][dac_no[i]] = 1;
-		dac_type_info[sel][dac_no[i]] = dac_type[i];
-	}
-
-	return 0;
-}
-
 s32 tve_low_init(u32 sel, u32 *dac_no, u32 *cali, s32 *offset, u32 *dac_type,
 			u32 num)
 {
@@ -78,15 +62,6 @@ s32 tve_low_init(u32 sel, u32 *dac_no, u32 *cali, s32 *offset, u32 *dac_type,
 
 	for (i = 0; i < TVE_DAC_NUM; i++)
 		dac_type_set |= dac_type_info[sel][i]<<(4+3*i);
-
-	if (num == 1) { /*cvbs*/
-		if (dac_no[0] == 1) {
-			dac_type_set &= 0xffffff80;
-		} else if (dac_no[0] == 2) {
-			dac_type_set &= 0xffff1ff0;
-		}
-	}
-
 	TVE_WUINT32(sel, TVE_008, dac_type_set);
 
 	return 0;
@@ -170,7 +145,7 @@ s32 tve_low_set_tv_mode(u32 sel, enum disp_tv_mode mode, u32 *cali)
 		TVE_CLR_BIT(sel, TVE_000, 0x1<<0);
 		TVE_WUINT32(sel, TVE_130, reg_sync);
 		TVE_WUINT32(sel, TVE_014, 0x00820020);
-		TVE_WUINT32(sel, TVE_130, 0x20050013);
+		TVE_WUINT32(sel, TVE_130, 0x20050000);
 		TVE_WUINT32(sel, TVE_380, (deflick == 0)
 					? 0x00000000 : 0x0<<10 | 0x3<<8);
 		break;
@@ -206,7 +181,7 @@ s32 tve_low_set_tv_mode(u32 sel, enum disp_tv_mode mode, u32 *cali)
 		TVE_WUINT32(sel, TVE_000, 0x00300000);
 		TVE_CLR_BIT(sel, TVE_000, 0x1<<0);
 		TVE_WUINT32(sel, TVE_130, reg_sync);
-		TVE_WUINT32(sel, TVE_130, 0x20050364);
+		TVE_WUINT32(sel, TVE_130, 0x20050370);
 		TVE_WUINT32(sel, TVE_380, (deflick == 0)
 					? 0x00000000 : 0x0<<10 | 0x3<<8);
 		break;
@@ -536,9 +511,6 @@ s32 tve_low_dac_autocheck_enable(u32 sel)
 	TVE_WUINT32(sel, TVE_0F8, 0x00000200);
 	TVE_WUINT32(sel, TVE_0FC, 0x0A3C00FF);	/* 20ms x 10 */
 	TVE_WUINT32(sel, TVE_03C, 0x00009999);
-#if defined(CONFIG_ARCH_SUN50IW9)
-	TVE_SET_BIT(sel, TVE_030, 0x80000000);/* new detect mode */
-#endif
 	for (i = 0; i < TVE_DAC_NUM; i++) {
 		if (dac_info[sel][i] == 1)
 			TVE_SET_BIT(sel, TVE_030, 1<<i);/* detect enable */
@@ -560,17 +532,6 @@ s32 tve_low_dac_autocheck_disable(u32 sel)
 
 u32 tve_low_get_sid(u32 index)
 {
-#if defined(CONFIG_ARCH_SUN50IW9)
-	u32 efuse = 0;
-
-	efuse = (readl(ioremap(0x0300622c, 4)) >> 16) +
-		(readl(ioremap(0x03006230, 4)) << 16);
-
-	if (efuse > 5)
-		efuse -= 5;
-
-	return efuse;
-#else
 	u32 efuse[TVE_DAC_NUM] = {0};
 	char tv_name[20] = {0};
 
@@ -584,26 +545,7 @@ u32 tve_low_get_sid(u32 index)
 		pr_err("get TV%d efuse fail!\n", index);
 	else
 		return efuse[index];
-#endif
-	return 0;
-}
 
-s32 tve_adjust_resync(u32 sel, s32 resync_pixel_num, s32 resync_line_num)
-{
-	u32 temp = 0;
-
-	temp = TVE_RUINT32(sel, TVE_130);
-	if (resync_pixel_num >= 0) {
-		temp &= 0xfffff800;
-		temp |= (resync_pixel_num & 0x000007ff);
-	}
-
-	if (resync_line_num >= 0) {
-		temp &= 0xf800ffff;
-		temp |= ((resync_line_num << 16) & 0x07ff0000);
-	}
-
-	TVE_WUINT32(sel, TVE_130, temp);
 	return 0;
 }
 
@@ -624,21 +566,6 @@ s32 tve_low_enhance(u32 sel, u32 mode)
 		TVE_CLR_BIT(sel, TVE_000, 0xf<<10);
 		TVE_CLR_BIT(sel, TVE_00C, 0x1<<31);
 		TVE_SET_BIT(sel, TVE_00C, 0x1<<16);
-	} else if (mode == 3) {
-		TVE_WUINT32(sel, TVE_380, 0x0<<10 | 0x3<<8);
-		TVE_WUINT32(sel, TVE_3A0, 0x00030001);
-		TVE_WUINT32(sel, TVE_000, 0x00300001);
-		TVE_WUINT32(sel, TVE_120, 0x01e80320);
-	} else if (mode == 4) {
-		TVE_WUINT32(sel, TVE_380, 0x0<<10 | 0x3<<8);
-		TVE_WUINT32(sel, TVE_3A0, 0x0);
-		TVE_WUINT32(sel, TVE_000, 0x00200001); /*108M*/
-		TVE_WUINT32(sel, TVE_120, 0x01e80320);
-	}  else if (mode == 5) {
-		TVE_WUINT32(sel, TVE_380, 0x0<<10 | 0x3<<8);
-		TVE_WUINT32(sel, TVE_3A0, 0x00030000);
-		TVE_WUINT32(sel, TVE_000, 0x00300001);
-		TVE_WUINT32(sel, TVE_120, 0x01e8031d);
 	}
 	return 0;
 }

@@ -114,11 +114,7 @@
 /*Sunxi MMC Host Controller Version*/
 #define SMHC_VERSION_V4P7	0x40700
 #define SMHC_VERSION_V4P9	0x40900
-#define SMHC_VERSION_V4P5P2	0x40502
-
-/* sunxi mmc retry */
-#define  SUNXI_MAX_RETRY_CNT_V4P5X 32
-#define  SUNXI_MAX_RETRY_INTERVAL_V4P5X  2
+#define SMHC_VERSION_V4P9P1	0x40901
 
 #ifdef CONFIG_SUNXI_EMCE
 extern int sunxi_emce_set_task_des(int data_len, int bypass);
@@ -320,7 +316,7 @@ static void sunxi_mmc_set_clk_dly(struct sunxi_mmc_host *host, int clk,
 	rval |= SDXC_DS_DL_SW_EN;
 	mmc_writel(host, REG_DS_DL, rval);
 
-	if (host->sfc_dis == true) {
+	if (host->sfc_en == false) {
 		rval = mmc_readl(host, REG_SFC);
 		rval |= SDXC_SFC_BP;
 		mmc_writel(host, REG_SFC, rval);
@@ -679,66 +675,7 @@ bool sunxi_mmc_opacmd23_v4p9(struct sunxi_mmc_host *host, bool set, u32 arg, u32
 	return set;
 }
 
-static inline void sunxi_mmc_set_ds_dl_raw(struct sunxi_mmc_host *host,
-					 int sunxi_ds_dl)
-{
-	u32 rval;
 
-	rval = mmc_readl(host, REG_DS_DL);
-	rval &= ~SDXC_DS_DL_SW_MASK;
-	rval |= sunxi_ds_dl & SDXC_DS_DL_SW_MASK;
-	rval |= SDXC_DS_DL_SW_EN;
-	mmc_writel(host, REG_DS_DL, rval);
-
-	dev_info(mmc_dev(host->mmc), "RETRY: REG_DS_DL: 0x%08x\n",
-		 mmc_readl(host, REG_DS_DL));
-}
-
-static inline void sunxi_mmc_set_samp_dl_raw(struct sunxi_mmc_host *host,
-					 int sunxi_samp_dl)
-{
-	u32 rval;
-
-	rval = mmc_readl(host, REG_SAMP_DL);
-	rval &= ~SDXC_SAMP_DL_SW_MASK;
-	rval |= sunxi_samp_dl & SDXC_SAMP_DL_SW_MASK;
-	rval |= SDXC_SAMP_DL_SW_EN;
-	mmc_writel(host, REG_SAMP_DL, rval);
-
-	dev_info(mmc_dev(host->mmc), "RETRY: REG_SAMP_DL: 0x%08x\n",
-		 mmc_readl(host, REG_SAMP_DL));
-}
-
-static int sunxi_mmc_judge_retry_v4p6x(struct sunxi_mmc_host *host,
-				       struct mmc_command *cmd, u32 rcnt,
-				       u32 errno, void *other)
-{
-	struct mmc_host *mmc = host->mmc;
-	struct mmc_card *card = mmc->card;
-
-	if (mmc->ios.timing == MMC_TIMING_MMC_HS400) {
-		if (rcnt < SUNXI_MAX_RETRY_CNT_V4P5X) {
-			sunxi_mmc_set_ds_dl_raw(host, (host->sunxi_retry_ds_dl) % 64);
-			host->sunxi_retry_ds_dl += SUNXI_MAX_RETRY_INTERVAL_V4P5X;
-			return 0;
-		}
-
-		/* Reset and disabled mmc_avail_type to switch speed mode to HSDDR */
-		dev_info(mmc_dev(host->mmc), "sunxi v4p5x/v4p6x retry give up, return to HSDDR\n");
-		card->mmc_avail_type &= ~(EXT_CSD_CARD_TYPE_HS200 | EXT_CSD_CARD_TYPE_HS400
-				| EXT_CSD_CARD_TYPE_HS400ES);
-		return -1;
-	} else {
-		if (rcnt < SUNXI_MAX_RETRY_CNT_V4P5X) {
-			sunxi_mmc_set_samp_dl_raw(host, (host->sunxi_retry_samp_dl) % 64);
-			host->sunxi_retry_samp_dl += SUNXI_MAX_RETRY_INTERVAL_V4P5X;
-			return 0;
-		}
-
-		dev_info(mmc_dev(host->mmc), "sunxi v4p5x/v4p6x retry give up!\n");
-		return -1;
-	}
-}
 
 void sunxi_mmc_init_priv_v4p5x(struct sunxi_mmc_host *host,
 			       struct platform_device *pdev, int phy_index)
@@ -813,11 +750,9 @@ void sunxi_mmc_init_priv_v4p5x(struct sunxi_mmc_host *host,
 	host->sunxi_mmc_set_acmda = sunxi_mmc_set_a12a;
 	host->sunxi_mmc_dump_dly_table = sunxi_mmc_dump_dly2;
 	host->phy_index = phy_index;
-	host->sunxi_mmc_judge_retry = sunxi_mmc_judge_retry_v4p6x;
 
 	host->sunxi_mmc_oclk_en = sunxi_mmc_oclk_onoff;
 }
-EXPORT_SYMBOL_GPL(sunxi_mmc_init_priv_v4p5x);
 
 void sunxi_mmc_init_priv_v4p6x(struct sunxi_mmc_host *host,
 			       struct platform_device *pdev, int phy_index)
@@ -892,18 +827,16 @@ void sunxi_mmc_init_priv_v4p6x(struct sunxi_mmc_host *host,
 	host->sunxi_mmc_set_acmda = sunxi_mmc_set_a12a;
 	host->sunxi_mmc_dump_dly_table = sunxi_mmc_dump_dly2;
 	host->phy_index = phy_index;
-	host->sunxi_mmc_judge_retry = sunxi_mmc_judge_retry_v4p6x;
 	if (mmc_readl(host, REG_SMCV) >= SMHC_VERSION_V4P7)
 		host->sunxi_mmc_on_off_emce = sunxi_mmc_on_off_emce_v4p6x;
 	if (mmc_readl(host, REG_SMCV) >= SMHC_VERSION_V4P9) {
 		host->sunxi_mmc_opacmd23 = sunxi_mmc_opacmd23_v4p9;
-		host->sfc_dis = true;
+		host->sfc_en = false;
 	}
-	if (mmc_readl(host, REG_SMCV) == SMHC_VERSION_V4P5P2) {
+	if (mmc_readl(host, REG_SMCV) >= SMHC_VERSION_V4P9P1) {
 		host->des_addr_shift = 2;
 	}
 
 
 	host->sunxi_mmc_oclk_en = sunxi_mmc_oclk_onoff;
 }
-EXPORT_SYMBOL_GPL(sunxi_mmc_init_priv_v4p6x);

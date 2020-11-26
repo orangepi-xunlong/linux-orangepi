@@ -29,11 +29,6 @@ u32	hdmi_print;
 u32 hdmi_hpd_mask;
 static u32 hdmi_detect_time = 200;/* ms */
 static bool hdmi_cec_enable;
-extern u8 hdcp_encrypt_status;
-
-#ifdef CONFIG_HDMI_CEC_STANDARD
-static unsigned char hdmi_cec_logaddr;
-#endif
 
 static s32 video_config(u32 vic);
 
@@ -472,8 +467,6 @@ static void hdmi_para_reset(void)
 static void hdmi_para_init(void)
 {
 	glb_video_para.vic = HDMI720P_50;
-	glb_video_para.hor_sync_polarity = 1;
-	glb_video_para.ver_sync_polarity = 1;
 	glb_video_para.csc = BT601;
 	glb_video_para.is_hdmi = 1;
 	glb_video_para.is_yuv = 0;
@@ -487,7 +480,6 @@ static void hdmi_para_init(void)
 	audio_cfged = false;
 }
 
-#ifndef CONFIG_HDMI_CEC_STANDARD
 static s32 hdmi_core_view_on(void)
 {
 	char buf[2];
@@ -499,7 +491,6 @@ static s32 hdmi_core_view_on(void)
 
 	return 0;
 }
-#endif
 
 s32 hdmi_core_initial(bool sw_only)
 {
@@ -580,10 +571,6 @@ s32 hdmi_core_loop(void)
 				(hdmi_state == HDMI_State_Idle)) {
 			hdmi_inf("plugout\n");
 			hdmi_state = HDMI_State_Idle;
-			if (hdcp_enable) {
-				pr_info("[%s]:hdcp disconfig!\n", __func__);
-				bsp_hdcp_disconfig();
-			}
 			if (video_on == 1)
 				hdmi_clk_disable_prepare();
 			video_on = 0;
@@ -613,10 +600,8 @@ s32 hdmi_core_loop(void)
 			hdmi_inf("plugin\n");
 		} else
 			return 0;
-#ifndef CONFIG_HDMI_CEC_STANDARD
 		if (hdmi_cec_enable)
 			hdmi_core_view_on();
-#endif
 		msleep(200);
 	case HDMI_State_Rx_Sense:
 
@@ -638,10 +623,10 @@ s32 hdmi_core_loop(void)
 		return 0;
 	case HDMI_STATE_SMOOTH_DISPLAY:
 		video_enable = 1;
-#ifndef CONFIG_HDMI_CEC_STANDARD
+		hdmi_state = HDMI_State_HPD_Done;
 		if (HPD && hdmi_cec_enable)
 			hdmi_core_view_on();
-#endif
+
 		if (HPD) {
 			mutex_lock(&hdmi_lock);
 			hdmi_edid_parse();
@@ -650,7 +635,6 @@ s32 hdmi_core_loop(void)
 			if (0 == (hdmi_hpd_mask & 0x100))
 				hdmi_hpd_event();
 		}
-		hdmi_state = HDMI_State_HPD_Done;
 		return 0;
 	default:
 		hdmi_wrn(" unkonwn hdmi state, set to idle\n");
@@ -661,7 +645,7 @@ s32 hdmi_core_loop(void)
 
 s32 hdmi_core_hpd_check(void)
 {
-	if (hdmi_state == HDMI_State_HPD_Done)
+	if (hdmi_state >= HDMI_State_HPD_Done)
 		return 1;
 	else
 		return 0;
@@ -768,7 +752,15 @@ s32 hdmi_core_get_audio_info(s32 sample_rate)
 s32 hdmi_core_set_hdcp_enable(u32 enable)
 {
 	hdcp_enable = enable;
-	bsp_hdcp_enable(hdcp_enable, &glb_video_para);
+	/* change the hdmi state, video will be reconfig
+	 * if it output currently
+	 */
+	hdmi_state = HDMI_State_Idle;
+	if (video_on == 1)
+		hdmi_clk_disable_prepare();
+	video_on = 0;
+	audio_on = 0;
+
 	return 0;
 }
 
@@ -1083,13 +1075,6 @@ s32 hdmi_core_dvi_support(void)
 		return 0;
 }
 
-s32 hdmi_core_update_detect_time(u32 time_val)
-{
-	hdmi_detect_time = time_val;
-
-	return 0;
-}
-
 s32 hdmi_core_cec_enable(bool enable)
 {
 	hdmi_cec_enable = enable;
@@ -1097,42 +1082,13 @@ s32 hdmi_core_cec_enable(bool enable)
 	return 0;
 }
 
-#ifdef CONFIG_HDMI_CEC_STANDARD
-void hdmi_core_cec_set_logaddr(unsigned char addr)
+s32 hdmi_core_update_detect_time(u32 time_val)
 {
-	hdmi_cec_logaddr = addr;
+	hdmi_detect_time = time_val;
+
+	return 0;
 }
 
-unsigned char hdmi_core_cec_get_logaddr(void)
-{
-	return hdmi_cec_logaddr;
-}
-
-unsigned short hdmi_core_cec_get_phyaddr(void)
-{
-	return hdmi_edid_get_phyaddr();
-}
-
-int hdmi_core_cec_get_msg(struct cec_msg *msg)
-{
-	int ret = -1;
-
-	mutex_lock(&hdmi_lock);
-	ret = bsp_hdmi_cec_get_msg(msg, hdmi_core_cec_get_logaddr());
-	mutex_unlock(&hdmi_lock);
-
-	return ret;
-}
-
-int hdmi_core_cec_send_msg(struct cec_msg *msg)
-{
-	int ret = -1;
-
-	ret = bsp_hdmi_cec_send_msg(msg, hdmi_core_cec_get_logaddr());
-
-	return ret;
-}
-#else
 int hdmi_core_cec_get_simple_msg(unsigned char *msg)
 {
 	int ret = -1;
@@ -1143,4 +1099,3 @@ int hdmi_core_cec_get_simple_msg(unsigned char *msg)
 
 	return ret;
 }
-#endif

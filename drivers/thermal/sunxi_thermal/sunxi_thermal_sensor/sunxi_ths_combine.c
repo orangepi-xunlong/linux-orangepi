@@ -389,7 +389,6 @@ static const struct dev_pm_ops sunxi_combine_pm_ops = {
 #endif
 
 static const struct of_device_id of_sunxi_combine_ths_match[] = {
-	{ .compatible = "allwinner,ths_combine" },
 	{ .compatible = "allwinner,ths_combine0" },
 	{ .compatible = "allwinner,ths_combine1" },
 	{ .compatible = "allwinner,ths_combine2" },

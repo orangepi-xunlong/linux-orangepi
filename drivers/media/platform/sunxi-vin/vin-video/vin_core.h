@@ -39,6 +39,8 @@
 #define MIN_HEIGHT      (32)
 #define MAX_WIDTH       (4800)
 #define MAX_HEIGHT      (4800)
+#define DUMP_CSI		(1 << 0)
+#define DUMP_ISP		(1 << 1)
 
 struct vin_status_info {
 	unsigned int width;
@@ -54,7 +56,6 @@ struct vin_status_info {
 	unsigned int frame_internal;
 	unsigned int max_internal;
 	unsigned int min_internal;
-	struct prs_input_para prs_in;
 };
 
 struct vin_coor {
@@ -70,44 +71,44 @@ struct vin_ptn_cfg {
 	__u32 ptn_h;
 	__u32 ptn_mode;
 	__u32 ptn_dw;
-	__u32 ptn_type;
 	struct vin_mm ptn_buf;
 };
 
 struct vin_core {
-	unsigned char is_empty;
-	unsigned char id;
-	unsigned char support_raw;
-	unsigned char total_rx_ch;
-	unsigned char hflip;
-	unsigned char vflip;
-	unsigned char sensor_hflip;
-	unsigned char sensor_vflip;
-	unsigned char stream_idx;
-	unsigned char fps_ds;
-	unsigned char use_timer;
-	unsigned char large_image;/*2:get merge yuv, 1: get pattern raw (save in kernel), 0: normal*/
+	struct platform_device *pdev;
+	unsigned int is_empty;
+	int id;
+	void __iomem *base;
+	/* various device info */
+	struct vin_vid_cap vid_cap;
+	/* about vin channel */
+	unsigned int total_rx_ch;
+	unsigned int cur_ch;
+	/* about some global info */
 	unsigned int rear_sensor;
 	unsigned int front_sensor;
 	unsigned int sensor_sel;
 	unsigned int csi_sel;
 	unsigned int mipi_sel;
 	unsigned int isp_sel;
-	unsigned int tdm_rx_sel;
 	unsigned int vipp_sel;
 	unsigned int isp_tx_ch;
+	unsigned int hflip;
+	unsigned int vflip;
+	unsigned int vflip_delay;
+	unsigned int stream_idx;
 	unsigned int vin_clk;
-	int irq;
-	void __iomem *base;
-	struct platform_device *pdev;
+	unsigned int fps_ds;
+	unsigned int large_image;/*2:get merge yuv, 1: get pattern raw (save in kernel), 0: normal*/
 	struct isp_debug_mode isp_dbg;
 	struct sensor_exp_gain exp_gain;
 	struct v4l2_device *v4l2_dev;
 	const struct vin_pipeline_ops *pipeline_ops;
+	int support_raw;
+	int irq;
 	struct vin_status_info vin_status;
 	struct timer_list timer_for_reset;
 	struct vin_ptn_cfg ptn_cfg;
-	struct vin_vid_cap vid_cap;
 };
 
 static inline struct sensor_instance *get_valid_sensor(struct vin_core *vinc)
@@ -127,6 +128,7 @@ void sunxi_vin_debug_unregister_driver(void);
 int sunxi_vin_core_register_driver(void);
 void sunxi_vin_core_unregister_driver(void);
 struct vin_core *sunxi_vin_core_get_dev(int index);
+void vin_get_fmt_mplane(struct vin_frame *frame, struct v4l2_format *f);
 struct vin_fmt *vin_find_format(const u32 *pixelformat, const u32 *mbus_code,
 				  unsigned int mask, int index, bool have_code);
 #endif /*_VIN_CORE_H_*/

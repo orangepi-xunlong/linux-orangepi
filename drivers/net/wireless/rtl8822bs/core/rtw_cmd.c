@@ -270,7 +270,7 @@ sint _rtw_enqueue_cmd(_queue *queue, struct cmd_obj *obj, bool to_head)
 
 #ifdef DBG_CMD_QUEUE
 	if (dump_cmd_id) {
-		printk("%s===> cmdcode:0x%02x\n", __func__, obj->cmdcode);
+		printk("%s===> cmdcode:0x%02x\n", __FUNCTION__, obj->cmdcode);
 		if (obj->cmdcode == GEN_CMD_CODE(_Set_MLME_EVT)) {
 			if (obj->parmbuf) {
 				struct C2HEvent_Header *pc2h_evt_hdr = (struct C2HEvent_Header *)(obj->parmbuf);
@@ -289,7 +289,7 @@ sint _rtw_enqueue_cmd(_queue *queue, struct cmd_obj *obj, bool to_head)
 		RTW_INFO("[%d] head %p, tail %p, tail->prev->next %p[tail], tail->next %p[head]\n", __LINE__,
 			&queue->queue, queue->queue.prev, queue->queue.prev->prev->next, queue->queue.prev->next);
 
-		RTW_INFO("==========%s============\n", __func__);
+		RTW_INFO("==========%s============\n", __FUNCTION__);
 		RTW_INFO("head:%p,obj_addr:%p\n", &queue->queue, obj);
 		RTW_INFO("padapter: %p\n", obj->padapter);
 		RTW_INFO("cmdcode: 0x%02x\n", obj->cmdcode);
@@ -337,7 +337,7 @@ struct	cmd_obj	*_rtw_dequeue_cmd(_queue *queue)
 
 #ifdef DBG_CMD_QUEUE
 		if (queue->queue.prev->next != &queue->queue) {
-			RTW_INFO("==========%s============\n", __func__);
+			RTW_INFO("==========%s============\n", __FUNCTION__);
 			RTW_INFO("head:%p,obj_addr:%p\n", &queue->queue, obj);
 			RTW_INFO("padapter: %p\n", obj->padapter);
 			RTW_INFO("cmdcode: 0x%02x\n", obj->cmdcode);
@@ -352,7 +352,7 @@ struct	cmd_obj	*_rtw_dequeue_cmd(_queue *queue)
 		}
 
 		if (dump_cmd_id) {
-			RTW_INFO("%s===> cmdcode:0x%02x\n", __func__, obj->cmdcode);
+			RTW_INFO("%s===> cmdcode:0x%02x\n", __FUNCTION__, obj->cmdcode);
 			if (obj->cmdcode == GEN_CMD_CODE(_Set_Drv_Extra)) {
 				if (obj->parmbuf) {
 					struct drvextra_cmd_parm *pdrvextra_cmd_parm = (struct drvextra_cmd_parm *)(obj->parmbuf);
@@ -1487,7 +1487,7 @@ u8 rtw_joinbss_cmd(_adapter  *padapter, struct wlan_network *pnetwork)
 	if ((psecnetwork->Configuration.DSConfig <= 14) &&
 	    (!rtw_is_vht_2g4(padapter))) {
 		RTW_PRINT("%s: Not support VHT rate on 2.4G (ch:%d)\n",
-			  __func__,
+			  __FUNCTION__,
 			  psecnetwork->Configuration.DSConfig);
 		goto skip_vht;
 	}
@@ -1502,7 +1502,7 @@ u8 rtw_joinbss_cmd(_adapter  *padapter, struct wlan_network *pnetwork)
 		if ((psecnetwork->Configuration.DSConfig <= 14) &&
 		    (pvhtpriv->vht_option == _TRUE))
 			RTW_INFO("%s: AP support VHT rate on 2.4G (ch:%d)\n",
-				  __func__,
+				  __FUNCTION__,
 				  psecnetwork->Configuration.DSConfig);
 	}
 skip_vht:
@@ -3079,7 +3079,7 @@ void rtw_iface_dynamic_chk_wk_hdl(_adapter *padapter)
 	#endif
 
 #ifdef CONFIG_RTW_CFGVEDNOR_RSSIMONITOR
-		rtw_cfgvendor_rssi_monitor_evt(padapter);
+        rtw_cfgvendor_rssi_monitor_evt(padapter);
 #endif
 
 
@@ -3924,7 +3924,7 @@ cac_status_chk:
 			u8 doiqk = _TRUE;
 			u8 u_ch, u_bw, u_offset;
 
-			rtw_hal_set_hwreg(adapter, HW_VAR_DO_IQK, &doiqk);
+			rtw_hal_set_hwreg(adapter , HW_VAR_DO_IQK , &doiqk);
 
 			if (rtw_mi_get_ch_setting_union(adapter, &u_ch, &u_bw, &u_offset))
 				set_channel_bwmode(adapter, u_ch, u_offset, u_bw);
@@ -3932,7 +3932,7 @@ cac_status_chk:
 				rtw_warn_on(1);
 
 			doiqk = _FALSE;
-			rtw_hal_set_hwreg(adapter, HW_VAR_DO_IQK, &doiqk);
+			rtw_hal_set_hwreg(adapter , HW_VAR_DO_IQK , &doiqk);
 
 			ResumeTxBeacon(adapter);
 			rtw_mi_tx_beacon_hdl(adapter);

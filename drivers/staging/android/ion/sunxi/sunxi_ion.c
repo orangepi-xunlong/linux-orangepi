@@ -66,6 +66,7 @@ struct device *get_ion_dev(void)
 long sunxi_ion_ioctl(struct ion_client *client, unsigned int cmd, unsigned long arg)
 {
 	long ret = 0;
+	struct ion_handle *ion_handle_get_by_id(struct ion_client *client, int id);
 
 	switch (cmd) {
 	case ION_IOC_SUNXI_PHYS_ADDR:
@@ -75,9 +76,7 @@ long sunxi_ion_ioctl(struct ion_client *client, unsigned int cmd, unsigned long 
 		if (copy_from_user(&data, (void __user *)arg,
 			sizeof(sunxi_phys_data)))
 			return -EFAULT;
-		mutex_lock(&client->lock);
-		handle = ion_handle_get_by_id_nolock(client, data.handle);
-		mutex_unlock(&client->lock);
+		handle = ion_handle_get_by_id(client, data.handle);
 		if (IS_ERR(handle))
 			return PTR_ERR(handle);
 		data.size = 0;
@@ -100,9 +99,7 @@ long sunxi_ion_ioctl(struct ion_client *client, unsigned int cmd, unsigned long 
 				sizeof(sunxi_phys_data)))
 			return -EFAULT;
 
-		mutex_lock(&client->lock);
-		handle = ion_handle_get_by_id_nolock(client, data.handle);
-		mutex_unlock(&client->lock);
+		handle = ion_handle_get_by_id(client, data.handle);
 		if (IS_ERR(handle))
 			return PTR_ERR(handle);
 
@@ -212,6 +209,7 @@ struct ion_client *sunxi_ion_client_create(const char *name)
 
 	return ion_client_create(idev, name);
 }
+
 EXPORT_SYMBOL(sunxi_ion_client_create);
 
 static const struct of_device_id sunxi_ion_match_table[] = {

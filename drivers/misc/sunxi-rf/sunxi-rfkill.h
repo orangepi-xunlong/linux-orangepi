@@ -30,7 +30,6 @@ struct sunxi_bt_platdata {
 	struct regulator *bt_power;
 	struct regulator *io_regulator;
 	struct clk *lpo;
-	struct pinctrl *pctrl;
 	int gpio_bt_rst;
 	char *bt_power_name;
 	char *io_regulator_name;
@@ -41,12 +40,10 @@ struct sunxi_bt_platdata {
 };
 
 struct sunxi_wlan_platdata {
-	unsigned int wakeup_enable;
 	int bus_index;
 	struct regulator *wlan_power;
 	struct regulator *io_regulator;
 	struct clk *lpo;
-	struct pinctrl *pctrl;
 	int gpio_wlan_regon;
 	int gpio_wlan_hostwake;
 	int gpio_power_en;

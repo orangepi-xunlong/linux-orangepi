@@ -130,7 +130,7 @@ static void rtl8822b_set_FwAoacRsvdPage_cmd(PADAPTER adapter, PRSVDPAGE_LOC rsvd
 	} else {
 #ifdef CONFIG_PNO_SUPPORT
 		if (!pwrpriv->wowlan_in_resume) {
-			RTW_INFO("%s: NLO_INFO=%d\n", __func__, rsvdpageloc->LocPNOInfo);
+			RTW_INFO("%s: NLO_INFO=%d\n", __FUNCTION__, rsvdpageloc->LocPNOInfo);
 			AOAC_RSVD_PAGE3_SET_CMD_ID(h2c, CMD_ID_AOAC_RSVD_PAGE3);
 			AOAC_RSVD_PAGE3_SET_CLASS(h2c, CLASS_AOAC_RSVD_PAGE3);
 			AOAC_RSVD_PAGE3_SET_LOC_NLO_INFO(h2c, rsvdpageloc->LocPNOInfo);
@@ -701,8 +701,8 @@ static void ConstructProbeRsp(PADAPTER adapter, u8 *pframe, u32 *pLength, u8 *St
 	_rtw_memcpy(pwlanhdr->addr2, mac, ETH_ALEN);
 	_rtw_memcpy(pwlanhdr->addr3, bssid, ETH_ALEN);
 
-	RTW_INFO("%s FW Mac Addr:" MAC_FMT "\n", __func__, MAC_ARG(mac));
-	RTW_INFO("%s FW IP Addr" IP_FMT "\n", __func__, IP_ARG(StaAddr));
+	RTW_INFO("%s FW Mac Addr:" MAC_FMT "\n", __FUNCTION__, MAC_ARG(mac));
+	RTW_INFO("%s FW IP Addr" IP_FMT "\n", __FUNCTION__, IP_ARG(StaAddr));
 
 	SetSeqNum(pwlanhdr, 0);
 	set_frame_sub_type(fctrl, WIFI_PROBERSP);
@@ -918,7 +918,7 @@ static void SetFwRsvdPagePkt_BTCoex(PADAPTER adapter)
 
 	pcmdframe = rtw_alloc_cmdxmitframe(pxmitpriv);
 	if (pcmdframe == NULL) {
-		RTW_INFO("%s: alloc ReservedPagePacket fail!\n", __func__);
+		RTW_INFO("%s: alloc ReservedPagePacket fail!\n", __FUNCTION__);
 		return;
 	}
 
@@ -1141,7 +1141,7 @@ C2HTxRPTHandler_8822b(
 	struct sta_info *psta = NULL;
 
 	if (!pstapriv->c2h_sta) {
-		RTW_WARN("%s: No corresponding sta_info!\n", __func__);
+		RTW_WARN("%s: No corresponding sta_info!\n", __FUNCTION__);
 		return;
 	}
 	psta = pstapriv->c2h_sta;
@@ -1173,7 +1173,7 @@ C2HSPC_STAT_8822b(
 	u8 idx = C2H_SPECIAL_STATISTICS_GET_STATISTICS_IDX(CmdBuf);
 
 	if (!pstapriv->c2h_sta) {
-		RTW_WARN("%s: No corresponding sta_info!\n", __func__);
+		RTW_WARN("%s: No corresponding sta_info!\n", __FUNCTION__);
 		return;
 	}
 	psta = pstapriv->c2h_sta;
@@ -1202,7 +1202,7 @@ static void process_c2h_event(PADAPTER adapter, u8 *c2h, u32 size)
 
 
 	if (!c2h) {
-		RTW_INFO("%s: c2h buffer is NULL!!\n", __func__);
+		RTW_INFO("%s: c2h buffer is NULL!!\n", __FUNCTION__);
 		return;
 	}
 
@@ -1210,7 +1210,7 @@ static void process_c2h_event(PADAPTER adapter, u8 *c2h, u32 size)
 
 	if (size < desc_size) {
 		RTW_INFO("%s: c2h length(%d) is smaller than RXDESC_SIZE(%d)!!\n",
-			 __func__, size, desc_size);
+			 __FUNCTION__, size, desc_size);
 		return;
 	}
 
@@ -1231,7 +1231,7 @@ static void process_c2h_event(PADAPTER adapter, u8 *c2h, u32 size)
 	switch (id) {
 #ifdef CONFIG_BEAMFORMING
 	case CMD_ID_C2H_SND_TXBF:
-		RTW_INFO("%s: [CMD_ID_C2H_SND_TXBF] len=%d\n", __func__, c2h_payload_len);
+		RTW_INFO("%s: [CMD_ID_C2H_SND_TXBF] len=%d\n", __FUNCTION__, c2h_payload_len);
 		rtw_bf_c2h_handler(adapter, id, pc2h_data, c2h_len);
 		break;
 #endif /* CONFIG_BEAMFORMING */
@@ -1287,7 +1287,7 @@ void rtl8822b_c2h_handler(PADAPTER adapter, u8 *pbuf, u16 length)
 
 		desc_size = rtl8822b_get_rx_desc_size(adapter);
 		RTW_INFO("%s: return because wowolan_mode==TRUE! CMDID=%d\n",
-			 __func__, C2H_GET_CMD_ID(pbuf + desc_size));
+			 __FUNCTION__, C2H_GET_CMD_ID(pbuf + desc_size));
 #endif /* CONFIG_RTW_DEBUG */
 		return;
 	}
@@ -1319,7 +1319,7 @@ void rtl8822b_c2h_handler_no_io(PADAPTER adapter, u8 *pbuf, u16 length)
 	seq = C2H_GET_SEQ(pc2h_content);
 
 	RTW_INFO("%s: C2H, ID=%d seq=%d len=%d\n",
-		 __func__, id, seq, length);
+		 __FUNCTION__, id, seq, length);
 
 	switch (id) {
 	case CMD_ID_C2H_SND_TXBF:
@@ -1344,7 +1344,7 @@ void rtl8822b_c2h_handler_no_io(PADAPTER adapter, u8 *pbuf, u16 length)
 		/* Others may need I/O, run in command thread */
 		res = rtw_c2h_packet_wk_cmd(adapter, pbuf, length);
 		if (res == _FAIL)
-			RTW_ERR("%s: C2H(%d) enqueue FAIL!\n", __func__, id);
+			RTW_ERR("%s: C2H(%d) enqueue FAIL!\n", __FUNCTION__, id);
 		break;
 	}
 }

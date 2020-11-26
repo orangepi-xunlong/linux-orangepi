@@ -37,14 +37,11 @@
 #include <linux/sunxi-sid.h>
 #include <linux/sunxi-gpio.h>
 #include "sunxi-gmac.h"
-#include <linux/phy.h>
 
 #define DMA_DESC_RX	256
 #define DMA_DESC_TX	256
 #define BUDGET		(dma_desc_rx / 4)
 #define TX_THRESH	(dma_desc_tx / 4)
-
-#define RTL_8211F_PHY_ID  0x001cc916
 
 #define HASH_TABLE_SIZE	64
 #define MAX_BUF_SZ	(SZ_2K - 1)
@@ -511,7 +508,6 @@ static int geth_phy_init(struct net_device *ndev)
 			if (phydev_tmp && (phydev_tmp->phy_id != 0x00)) {
 				phydev = phydev_tmp;
 				g_phy_addr = addr;
-				break;
 			}
 		}
 	}
@@ -1738,7 +1734,7 @@ static int geth_hw_init(struct platform_device *pdev)
 			goto clk_err;
 		}
 	}
-#if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW9)
+#if defined(CONFIG_ARCH_SUN8IW12)
 	else {
 		if (!of_property_read_u32(np, "use_ephy25m", &g_use_ephy_clk)
 				&& g_use_ephy_clk) {
@@ -1857,19 +1853,6 @@ static void geth_hw_release(struct platform_device *pdev)
 		clk_put(priv->ephy_clk);
 }
 
-static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
-{
-
-	printk("%s in\n", __func__);
-
-	phy_write(phydev, 31, 0x0d04);
-	phy_write(phydev, 16, 0x2f60);
-	phy_write(phydev, 17, 0x0000);
-	phy_write(phydev,31,0x0000);
-
-	return 0;
-}
-
 /**
  * geth_probe
  * @pdev: platform device pointer
@@ -1950,11 +1933,6 @@ static int geth_probe(struct platform_device *pdev)
 #ifdef CONFIG_PM
 	INIT_WORK(&priv->eth_work, geth_resume_work);
 #endif
-	/* register the PHY board fixup */
-	ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
-        if (ret)
-                dev_warn(&pdev->dev, "Cannot register PHY board fixup.\n");
-
 
 	return 0;
 

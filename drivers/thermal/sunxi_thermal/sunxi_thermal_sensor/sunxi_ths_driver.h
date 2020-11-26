@@ -20,8 +20,7 @@ defined(CONFIG_ARCH_SUN8IW7)
 #define THERMAL_VERSION 2
 #elif defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN50IW6) || \
 defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW15) || \
-defined(CONFIG_ARCH_SUN8IW16) || \
-defined(CONFIG_ARCH_SUN8IW17) || defined(CONFIG_ARCH_SUN8IW18)
+defined(CONFIG_ARCH_SUN8IW17)
 #define THERMAL_VERSION 3
 #endif
 
@@ -285,65 +284,6 @@ struct thermal_reg thermal_reg_init[] = {
 };
 #endif /* CONFIG_ARCH_SUN8IW15 */
 
-
-#if defined(CONFIG_ARCH_SUN8IW16)
-
-#define ENABLE_CLK		(true)
-
-struct temp_calculate_coefficent thermal_cal_coefficent[] = {
-	[0] = {
-		.down_limit = {(-210), (0xfff)},
-		.up_limit = {(250), (0x000)},
-		/*MUL_PARA DIV_PARA MINU_PARA */
-		.nt_para = {
-			{(1000), (14882), (2794000)},
-			{(1000), (14882), (2794000)},
-			{(1000), (14882), (2794000)},
-			{(1000), (14882), (2794000)},
-		}
-	}
-};
-
-
-/**
- *       SUN8IW16  Thermal Sensor Register
- */
-char *id_name_mapping[] = {
-	"cpu",
-	"isp",
-	"ve",
-	"ddr",
-};
-
-struct thermal_reg thermal_reg_init[] = {
-	/* name			        address		value	    reg_type*/
-	{"THS_CTRL_REG",	(0x00),		(0x01df002f),	(NORMAL_REG)},
-	{"THS_EN_REG",		(0x04),		(0x3),		(ENABLE_REG)},
-	{"THS_PER_REG",		(0x08),		(0x3a000),	(NORMAL_REG)},
-	{"THS_DATA_INTC_REG",	(0x10),		(0x0),		(NO_INIT)},
-	{"THS_SHUT_INTC_REG",	(0x14),		(0x3),		(NORMAL_REG)},
-	{"THS_ALARM_INTC_REG",	(0x18),		(0x0),		(NO_INIT)},
-	{"THS_DATA_INTS_REG",	(0x20),		(0x3),		(INT_STA_REG)},
-	{"THS_SHUT_INTS_REG",	(0x24),		(0x3),		(INT_STA_REG)},
-	{"THS_ALARMO_INTS_REG",	(0x28),		(0x3),		(INT_STA_REG)},
-	{"THS_ALARM_INTS_REG",	(0x2C),		(0x3),		(INT_STA_REG)},
-	{"THS_FILT_CTRL_REG",	(0x30),		(0x6),		(NORMAL_REG)},
-	{"THS_0_ALARM_CTL_REG",	(0x40),		(0x0),		(NO_INIT)},
-	{"THS_1_ALARM_CTL_REG",	(0x44),		(0x0),		(NO_INIT)},
-	{"THS_2_ALARM_CTL_REG",	(0x48),		(0x0),		(NO_INIT)},
-	{"THS_3_ALARM_CTL_REG",	(0x4C),		(0x0),		(NO_INIT)},
-	{"THS_01_SHUT_CTL_REG",	(0x80),		(0x0),		(SHT_TMP_REG)},
-	{"THS_23_SHUT_CTL_REG",	(0x84),		(0x0),		(SHT_TMP_REG)},
-	{"THS_01_CDATA_REG",	(0xA0),		(0x0),		(CDATA_REG)},
-	{"THS_23_CDATA_REG",	(0xA4),		(0x0),		(CDATA_REG)},
-	{"THS_0_DATA_REG",	(0xC0),		(0x0),		(TDATA_REG)},
-	{"THS_1_DATA_REG",	(0xC4),		(0x0),		(TDATA_REG)},
-	{"THS_2_DATA_REG",	(0xC8),		(0x0),		(TDATA_REG)},
-	{"THS_3_DATA_REG",	(0xCC),		(0x0),		(TDATA_REG)},
-	{"", (0), (0), (0)}
-};
-#endif /* CONFIG_ARCH_SUN8IW16 */
-
 #if defined(CONFIG_ARCH_SUN8IW17)
 
 #define ENABLE_CLK		(true)
@@ -402,51 +342,6 @@ struct thermal_reg thermal_reg_init[] = {
 
 #endif /* defined(CONFIG_ARCH_SUN8IW17P1)*/
 
-#if defined(CONFIG_ARCH_SUN8IW18)
-
-#define ENABLE_CLK		(true)
-
-struct temp_calculate_coefficent thermal_cal_coefficent[] = {
-	[0] = {
-		.down_limit = {(-210), (0xfff)},
-		.up_limit = {(250), (0x000)},
-		/*MUL_PARA DIV_PARA MINU_PARA */
-		.nt_para = {
-			{(1000), (14882), (2794000)},
-			{(1000), (14882), (2794000)},
-			{(1000), (14882), (2794000)},
-		}
-	}
-};
-
-
-/**
- *       SUN8IW15  Thermal Sensor Register
- */
-char *id_name_mapping[] = {
-	"cpuc0",
-};
-
-struct thermal_reg thermal_reg_init[] = {
-	/* name			        address		value	    reg_type*/
-	{"THS_CTRL_REG",	(0x00),		(0x01df002f),	(NORMAL_REG)},
-	{"THS_EN_REG",		(0x04),		(0x3),		(ENABLE_REG)},
-	{"THS_PER_REG",		(0x08),		(0x3a000),	(NORMAL_REG)},
-	{"THS_DATA_INTC_REG",	(0x10),		(0x0),		(NO_INIT)},
-	{"THS_SHUT_INTC_REG",	(0x14),		(0x3),		(NORMAL_REG)},
-	{"THS_ALARM_INTC_REG",	(0x18),		(0x0),		(NO_INIT)},
-	{"THS_DATA_INTS_REG",	(0x20),		(0x3),		(INT_STA_REG)},
-	{"THS_SHUT_INTS_REG",	(0x24),		(0x3),		(INT_STA_REG)},
-	{"THS_ALARMO_INTS_REG",	(0x28),		(0x3),		(INT_STA_REG)},
-	{"THS_ALARM_INTS_REG",	(0x2C),		(0x3),		(INT_STA_REG)},
-	{"THS_FILT_CTRL_REG",	(0x30),		(0x6),		(NORMAL_REG)},
-	{"THS_0_ALARM_CTL_REG",	(0x40),		(0x0),		(NO_INIT)},
-	{"THS_0_SHUT_CTL_REG",	(0x80),		(0x0),		(SHT_TMP_REG)},
-	{"THS_0_CDATA_REG",	(0xA0),		(0x0),		(CDATA_REG)},
-	{"THS_0_DATA_REG",	(0xC0),		(0x0),		(TDATA_REG)},
-	{"", (0), (0), (0)}
-};
-#endif /* CONFIG_ARCH_SUN8IW18 */
 
 
 #if defined(CONFIG_ARCH_SUN50IW1)

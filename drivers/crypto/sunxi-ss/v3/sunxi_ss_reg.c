@@ -98,8 +98,7 @@ void ss_key_set(char *key, int size, ce_task_desc_t *task)
 
 	ss_keyselect_set(key_sel, task);
 	ss_keysize_set(size, task);
-	task->key_addr = (virt_to_phys(key) >> WORD_ALGIN) & 0xffffffff;
-	SS_DBG("task->key_addr: 0x%x\n", task->key_addr);
+	task->key_addr = virt_to_phys(key);
 }
 
 void ss_pending_clear(int flow)
@@ -138,7 +137,7 @@ void ss_md_get(char *dst, char *src, int size)
 /* iv: phsical address. */
 void ss_iv_set(char *iv, int size, ce_task_desc_t *task)
 {
-	task->iv_addr = (virt_to_phys(iv) >> WORD_ALGIN) & 0xffffffff;
+	task->iv_addr = virt_to_phys(iv);
 }
 
 void ss_iv_mode_set(int mode, ce_task_desc_t *task)
@@ -153,7 +152,7 @@ void ss_cntsize_set(int size, ce_task_desc_t *task)
 
 void ss_cnt_set(char *cnt, int size, ce_task_desc_t *task)
 {
-	task->ctr_addr = (virt_to_phys(cnt) >> WORD_ALGIN) & 0xffffffff;
+	task->ctr_addr = virt_to_phys(cnt);
 
 	ss_cntsize_set(CE_CTR_SIZE_128, task);
 }
@@ -300,24 +299,13 @@ void ss_ecc_op_mode_set(int mode, ce_task_desc_t *task)
 #endif
 }
 
-u32 ss_get_phys_addr(void *buf)
-{
-	phys_addr_t phy_addr = 0;
-	u32 addr = 0;
-
-	phy_addr = virt_to_phys(buf);
-	addr = (phy_addr >> WORD_ALGIN) & 0xffffffff;
-	return addr;
-}
-
 void ss_ctrl_start(ce_task_desc_t *task)
 {
-	u32 addr = 0;
 #ifndef SS_SUPPORT_CE_V3_1
 	u32 method = task->comm_ctl&CE_COMM_CTL_METHOD_MASK;
 #endif
-	addr = ss_get_phys_addr(task);
-	ss_writel(CE_REG_TSK, addr);
+
+	ss_writel(CE_REG_TSK, virt_to_phys(task));
 #ifdef SS_SUPPORT_CE_V3_1
 	ss_writel(CE_REG_TLR, 0x1);
 #else

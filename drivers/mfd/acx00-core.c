@@ -37,9 +37,6 @@ static struct regulator *vcc_ave;
 static char key_name[20] = "ac200";
 static char ave_regulator_name[20] = "vcc-audio-33";
 static int tv_twi_used;
-#if defined(CONFIG_ARCH_SUN50IW9)
-static struct pwm_device *pwm;
-#endif
 
 static int sys_script_get_item(char *main_name, char *sub_name, int value[],
 			       int type);
@@ -190,7 +187,7 @@ static ssize_t acx00_dump_store(struct device *dev,
 	struct acx00 *acx00 = dev_get_drvdata(dev);
 
 	ret = kstrtoint(buf, 16, &val);
-	if (ret != 0) {
+	if (!ret) {
 		dev_err(dev, "kstrtoint fail!\n");
 		return ret;
 	}
@@ -233,7 +230,7 @@ static ssize_t acx00_write_store(struct device *dev,
 	struct acx00 *acx00 = dev_get_drvdata(dev);
 
 	ret = kstrtoint(buf, 16, &val);
-	if (ret != 0) {
+	if (!ret) {
 		dev_err(dev, "kstrtoint fail!\n");
 		return ret;
 	}
@@ -301,30 +298,6 @@ static int acx00_i2c_probe(struct i2c_client *i2c,
 		pr_err("failed to create attr group\n");
 	INIT_WORK(&acx00->init_work, acx00_init_work);
 
-#if defined(CONFIG_ARCH_SUN50IW9)
-	if (!pwm) {
-		pr_err("[ac200] pwm is NULL! Just initialize it.\n");
-		ret = sys_script_get_item(key_name, "tv_pwm_ch", &value, 1);
-		if (ret == 1) {
-			pwm = pwm_request(value, NULL);
-			if (!IS_ERR_OR_NULL(pwm)) {
-				pwm_config(pwm, 205, 410);
-				pwm_enable(pwm);
-				pr_err("[ac200] pwm enable\n");
-
-				acx00->pwm_ac200 = pwm;
-				pr_err("[ac200] pwm is initialized\n");
-			} else {
-				pr_err("[ac200] can't get pwm device\n");
-			}
-		} else {
-			pr_err("[ac200] Get tv_pwm_ch failed\n");
-		}
-	} else {
-		acx00->pwm_ac200 = pwm;
-		pr_err("[ac200] pwm is initialized\n");
-	}
-#else
 	ret = sys_script_get_item(key_name, "tv_pwm_ch", &value, 1);
 	if (ret == 1) {
 		acx00->pwm_ac200 = pwm_request(value, NULL);
@@ -336,7 +309,6 @@ static int acx00_i2c_probe(struct i2c_client *i2c,
 	} else {
 		dev_warn(acx00->dev, "Get tv_pwm_ch failed\n");
 	}
-#endif
 
 	atomic_set(&acx00_en, 0);
 	schedule_work(&acx00->init_work);
@@ -395,11 +367,7 @@ static int acx00_i2c_resume(struct device *dev)
 	}
 
 	if (!IS_ERR_OR_NULL(acx00->pwm_ac200)) {
-#if defined(CONFIG_ARCH_SUN50IW9)
-		pwm_config(acx00->pwm_ac200, 205, 410);
-#else
 		pwm_config(acx00->pwm_ac200, 20, 41);
-#endif
 		pwm_enable(acx00->pwm_ac200);
 	}
 
@@ -518,13 +486,12 @@ static int __init acx00_i2c_init(void)
 		ac200_used = value;
 
 	if (ac200_used) {
-		ret = sys_script_get_item(key_name, "tv_twi_used",
-				&value, 1);
+		ret = sys_script_get_item(key_name, "tv_twi_used", &value, 1);
 		if (ret == 1)
 			tv_twi_used = value;
 		if (tv_twi_used == 1) {
-			ret = sys_script_get_item(key_name, "tv_twi_id",
-					&value, 1);
+			ret = sys_script_get_item(key_name, "tv_twi_id", &value,
+						  1);
 			twi_id = (ret == 1) ? value : twi_id;
 			ret = sys_script_get_item(key_name, "tv_twi_addr",
 						  &value, 1);
@@ -552,25 +519,8 @@ static int __init acx00_i2c_init(void)
 				}
 			}
 		} else {
-			pr_err("[ac200] get ave_regulator_name failed!\n");
+			pr_err("get ave_regulator_name failed!\n");
 		}
-#if defined(CONFIG_ARCH_SUN50IW9)
-		if (!pwm) {
-			ret = sys_script_get_item(key_name, "tv_pwm_ch", &value, 1);
-			if (ret == 1) {
-				pwm = pwm_request(value, NULL);
-				if (!IS_ERR_OR_NULL(pwm)) {
-					pwm_config(pwm, 205, 410);
-					pwm_enable(pwm);
-					pr_err("[ac200] pwm enable\n");
-				} else {
-					pr_err("[ac200] can't get pwm device\n");
-				}
-			} else {
-				pr_err("[ac200] Get tv_pwm_ch failed\n");
-			}
-		}
-#endif
 	}
 
 	return ret;

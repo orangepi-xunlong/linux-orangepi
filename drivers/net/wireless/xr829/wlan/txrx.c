@@ -47,11 +47,11 @@ static const struct ieee80211_rate *xradio_get_tx_rate(
 
 #ifdef SUPPORT_HT40
 
-u32 TxedHtofdmRateMap[4][8] = { {0x0} };
-u32 TxedLegacyRateMap[2][8] = { {0x0} };
+u32 TxedHtofdmRateMap[4][8] = {{0x0} };
+u32 TxedLegacyRateMap[2][8] = {{0x0} };
 
-u32 RxedHtofdmRateMap[4][8] = { {0x0} };
-u32 RxedLegacyRateMap[2][8] = { {0x0} };
+u32 RxedHtofdmRateMap[4][8] = {{0x0} };
+u32 RxedLegacyRateMap[2][8] = {{0x0} };
 
 u8 LegacyRxedRateLut[2][14] = {
 	{
@@ -1728,7 +1728,7 @@ void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	}
 
 	txrx_printk(XRADIO_DBG_MSG, "[TX] TX %d bytes (if_id: %d, "
-			"queue: %d, link_id: %d (%d)).\n",
+			" queue: %d, link_id: %d (%d)).\n",
 			skb->len, priv->if_id, t.queue, t.txpriv.link_id,
 			t.txpriv.raw_link_id);
 
@@ -2104,7 +2104,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 				/* Shedule unjoin work */
 				txrx_printk(XRADIO_DBG_WARN,
 					    "Issue unjoin command(TX) by self.\n");
-				if (cancel_delayed_work(&priv->unjoin_delayed_work)) {
+				if (cancel_delayed_work_sync(&priv->unjoin_delayed_work)) {
 					wsm_lock_tx_async(hw_priv);
 					if (queue_work(hw_priv->workqueue, &priv->unjoin_work) <= 0)
 						wsm_unlock_tx(hw_priv);

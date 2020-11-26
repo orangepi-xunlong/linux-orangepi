@@ -14,6 +14,7 @@
  *
  */
 
+
 #include <linux/platform_device.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -27,7 +28,10 @@
 
 #define SCALER_MODULE_NAME "vin_scaler"
 
-struct scaler_dev *glb_vipp[VIN_MAX_SCALER];
+#define ALIGN_4B(x)	(((x) + (3)) & ~(3))
+#define ALIGN_2B(x)	(((x) + (1)) & ~(1))
+
+static LIST_HEAD(scaler_drv_list);
 
 #define MIN_IN_WIDTH			192
 #define MIN_IN_HEIGHT			128
@@ -39,53 +43,57 @@ struct scaler_dev *glb_vipp[VIN_MAX_SCALER];
 #define MAX_OUT_WIDTH			4224
 #define MAX_OUT_HEIGHT			4224
 
-#define MIN_RATIO			256
-#if !defined CONFIG_ARCH_SUN8IW19P1 && !defined CONFIG_ARCH_SUN50IW10P1
-#define MAX_RATIO			2048
-#else
-#define MAX_RATIO			4096
-#endif
+static struct v4l2_mbus_framefmt *__scaler_get_format(struct scaler_dev *scaler,
+				struct v4l2_subdev_pad_config *cfg,
+				unsigned int pad,
+				enum v4l2_subdev_format_whence which)
+{
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
+		return cfg ? &cfg->try_fmt : NULL;
+	else
+		return &scaler->formats[pad];
+}
+
+static struct v4l2_rect *__scaler_get_crop(struct scaler_dev *scaler,
+					   struct v4l2_subdev_pad_config *cfg,
+					   enum v4l2_subdev_format_whence which)
+{
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
+		return cfg ? &cfg->try_crop : NULL;
+	else
+		return &scaler->crop.request;
+}
 
 static void __scaler_try_crop(const struct v4l2_mbus_framefmt *sink,
 			    const struct v4l2_mbus_framefmt *source,
 			    struct v4l2_rect *crop)
 {
+
+	unsigned int min_width = source->width;
+	unsigned int min_height = source->height;
+	unsigned int max_width = sink->width;
+	unsigned int max_height = sink->height;
+
+	crop->width = clamp_t(u32, crop->width, min_width, max_width);
+	crop->height = clamp_t(u32, crop->height, min_height, max_height);
+
 	/* Crop can not go beyond of the input rectangle */
-	crop->left = clamp_t(u32, crop->left, 0, sink->width - source->width);
-	crop->width = clamp_t(u32, crop->width, source->width, sink->width - crop->left);
-	crop->top = clamp_t(u32, crop->top, 0, sink->height - source->height);
-	crop->height = clamp_t(u32, crop->height, source->height, sink->height - crop->top);
+	crop->left = clamp_t(u32, crop->left, 0, sink->width - MIN_IN_WIDTH);
+	crop->width =
+	    clamp_t(u32, crop->width, MIN_IN_WIDTH, sink->width - crop->left);
+	crop->top = clamp_t(u32, crop->top, 0, sink->height - MIN_IN_HEIGHT);
+	crop->height =
+	    clamp_t(u32, crop->height, MIN_IN_HEIGHT, sink->height - crop->top);
 }
 
 static int __scaler_w_shift(int x_ratio, int y_ratio)
 {
 	int m, n;
 	int sum_weight = 0;
-	int weight_shift;
+	int weight_shift = -8;
 	int xr = (x_ratio >> 8) + 1;
 	int yr = (y_ratio >> 8) + 1;
 
-#if defined CONFIG_ARCH_SUN8IW19P1 || defined CONFIG_ARCH_SUN50IW10P1
-	int weight_shift_bak = 0;
-
-	weight_shift = -9;
-	for (weight_shift = 17; weight_shift > 0; weight_shift--) {
-		sum_weight = 0;
-		for (m = 0; m <= xr; m++) {
-			for (n = 0; n <= yr; n++) {
-				sum_weight += (y_ratio - abs((n << 8) - (yr << 7)))*
-					(x_ratio - abs((m << 8) - (yr << 7))) >> (weight_shift + 8);
-			}
-		}
-		if (sum_weight > 0 && sum_weight < 256)
-			weight_shift_bak = weight_shift;
-		if (sum_weight > 255 && sum_weight < 486)
-			break;
-	}
-	if (weight_shift == 0)
-		weight_shift = weight_shift_bak;
-#else
-	weight_shift = -8;
 	for (m = 0; m <= xr; m++) {
 		for (n = 0; n <= yr; n++) {
 			sum_weight += (y_ratio - abs((n << 8) - (yr << 7)))
@@ -97,7 +105,6 @@ static int __scaler_w_shift(int x_ratio, int y_ratio)
 		weight_shift++;
 		sum_weight >>= 1;
 	}
-#endif
 	return weight_shift;
 }
 
@@ -110,23 +117,23 @@ static void __scaler_calc_ratios(struct scaler_dev *scaler,
 	unsigned int height;
 	unsigned int r_min;
 
-	output->width = clamp_t(u32, output->width, MIN_OUT_WIDTH, input->width);
+	output->width = clamp_t(u32, output->width, MIN_IN_WIDTH, input->width);
 	output->height =
-	    clamp_t(u32, output->height, MIN_OUT_HEIGHT, input->height);
+	    clamp_t(u32, output->height, MIN_IN_HEIGHT, input->height);
 
 	para->xratio = 256 * input->width / output->width;
 	para->yratio = 256 * input->height / output->height;
-	para->xratio = clamp_t(u32, para->xratio, MIN_RATIO, MAX_RATIO);
-	para->yratio = clamp_t(u32, para->yratio, MIN_RATIO, MAX_RATIO);
+	para->xratio = clamp_t(u32, para->xratio, 256, 2048);
+	para->yratio = clamp_t(u32, para->yratio, 256, 2048);
 
 	r_min = min(para->xratio, para->yratio);
 #ifdef CROP_AFTER_SCALER
-	width = ALIGN(256 * input->width / r_min, 4);
-	height = ALIGN(256 * input->height / r_min, 2);
+	width = ALIGN_4B(256 * input->width / r_min);
+	height = ALIGN_2B(256 * input->height / r_min);
 	para->xratio = 256 * input->width / width;
 	para->yratio = 256 * input->height / height;
-	para->xratio = clamp_t(u32, para->xratio, MIN_RATIO, MAX_RATIO);
-	para->yratio = clamp_t(u32, para->yratio, MIN_RATIO, MAX_RATIO);
+	para->xratio = clamp_t(u32, para->xratio, 256, 2048);
+	para->yratio = clamp_t(u32, para->yratio, 256, 2048);
 	para->width = width;
 	para->height = height;
 	vin_log(VIN_LOG_SCALER, "para: xr = %d, yr = %d, w = %d, h = %d\n",
@@ -135,12 +142,12 @@ static void __scaler_calc_ratios(struct scaler_dev *scaler,
 	output->width = width;
 	output->height = height;
 #else
-	width = ALIGN(output->width * r_min / 256, 4);
-	height = ALIGN(output->height * r_min / 256, 2);
+	width = ALIGN_4B(output->width * r_min / 256);
+	height = ALIGN_2B(output->height * r_min / 256);
 	para->xratio = 256 * width / output->width;
 	para->yratio = 256 * height / output->height;
-	para->xratio = clamp_t(u32, para->xratio, MIN_RATIO, MAX_RATIO);
-	para->yratio = clamp_t(u32, para->yratio, MIN_RATIO, MAX_RATIO);
+	para->xratio = clamp_t(u32, para->xratio, 256, 2048);
+	para->yratio = clamp_t(u32, para->yratio, 256, 2048);
 	para->width = output->width;
 	para->height = output->height;
 	vin_log(VIN_LOG_SCALER, "para: xr = %d, yr = %d, w = %d, h = %d\n",
@@ -150,8 +157,8 @@ static void __scaler_calc_ratios(struct scaler_dev *scaler,
 	 */
 	input->left += (input->width - width) / 2;
 	input->top += (input->height - height) / 2;
-	input->left = ALIGN(input->left, 4);
-	input->top = ALIGN(input->top, 2);
+	input->left = ALIGN_4B(input->left);
+	input->top = ALIGN_2B(input->top);
 	input->width = width;
 	input->height = height;
 #endif
@@ -164,7 +171,9 @@ static void __scaler_try_format(struct scaler_dev *scaler,
 			      struct v4l2_mbus_framefmt *fmt,
 			      enum v4l2_subdev_format_whence which)
 {
+	struct v4l2_mbus_framefmt *format;
 	struct scaler_para ratio;
+	struct v4l2_rect crop;
 
 	switch (pad) {
 	case SCALER_PAD_SINK:
@@ -174,10 +183,53 @@ static void __scaler_try_format(struct scaler_dev *scaler,
 		    clamp_t(u32, fmt->height, MIN_IN_HEIGHT, MAX_IN_HEIGHT);
 		break;
 	case SCALER_PAD_SOURCE:
-		fmt->code = scaler->formats[SCALER_PAD_SINK].code;
-		__scaler_calc_ratios(scaler, &scaler->crop.request, fmt, &ratio);
+		format =
+		    __scaler_get_format(scaler, cfg, SCALER_PAD_SINK, which);
+		fmt->code = format->code;
+
+		crop = *__scaler_get_crop(scaler, cfg, which);
+		__scaler_calc_ratios(scaler, &crop, fmt, &ratio);
 		break;
 	}
+}
+
+static int sunxi_scaler_enum_mbus_code(struct v4l2_subdev *sd,
+				       struct v4l2_subdev_pad_config *cfg,
+				       struct v4l2_subdev_mbus_code_enum *code)
+{
+	return 0;
+}
+
+static int sunxi_scaler_enum_frame_size(struct v4l2_subdev *sd,
+					struct v4l2_subdev_pad_config *cfg,
+					struct v4l2_subdev_frame_size_enum *fse)
+{
+	struct scaler_dev *scaler = v4l2_get_subdevdata(sd);
+	struct v4l2_mbus_framefmt format;
+
+	if (fse->index != 0)
+		return -EINVAL;
+
+	format.code = fse->code;
+	format.width = 1;
+	format.height = 1;
+	__scaler_try_format(scaler, cfg, fse->pad, &format,
+			V4L2_SUBDEV_FORMAT_ACTIVE);
+	fse->min_width = format.width;
+	fse->min_height = format.height;
+
+	if (format.code != fse->code)
+		return -EINVAL;
+
+	format.code = fse->code;
+	format.width = -1;
+	format.height = -1;
+	__scaler_try_format(scaler, cfg, fse->pad, &format,
+			V4L2_SUBDEV_FORMAT_ACTIVE);
+	fse->max_width = format.width;
+	fse->max_height = format.height;
+
+	return 0;
 }
 
 static int sunxi_scaler_subdev_get_fmt(struct v4l2_subdev *sd,
@@ -185,9 +237,13 @@ static int sunxi_scaler_subdev_get_fmt(struct v4l2_subdev *sd,
 				       struct v4l2_subdev_format *fmt)
 {
 	struct scaler_dev *scaler = v4l2_get_subdevdata(sd);
+	struct v4l2_mbus_framefmt *format;
 
-	fmt->format = scaler->formats[fmt->pad];
+	format = __scaler_get_format(scaler, cfg, fmt->pad, fmt->which);
+	if (format == NULL)
+		return -EINVAL;
 
+	fmt->format = *format;
 	return 0;
 }
 
@@ -196,8 +252,12 @@ static int sunxi_scaler_subdev_set_fmt(struct v4l2_subdev *sd,
 				       struct v4l2_subdev_format *fmt)
 {
 	struct scaler_dev *scaler = v4l2_get_subdevdata(sd);
-	struct v4l2_mbus_framefmt *format = &scaler->formats[fmt->pad];
+	struct v4l2_mbus_framefmt *format;
+	struct v4l2_rect *crop;
 
+	format = __scaler_get_format(scaler, cfg, fmt->pad, fmt->which);
+	if (format == NULL)
+		return -EINVAL;
 	vin_log(VIN_LOG_FMT, "%s %d*%d %x %d\n", __func__, fmt->format.width,
 		  fmt->format.height, fmt->format.code, fmt->format.field);
 	__scaler_try_format(scaler, cfg, fmt->pad, &fmt->format, fmt->which);
@@ -205,13 +265,15 @@ static int sunxi_scaler_subdev_set_fmt(struct v4l2_subdev *sd,
 
 	if (fmt->pad == SCALER_PAD_SINK) {
 		/* reset crop rectangle */
-		scaler->crop.request.left = 0;
-		scaler->crop.request.top = 0;
-		scaler->crop.request.width = fmt->format.width;
-		scaler->crop.request.height = fmt->format.height;
+		crop = __scaler_get_crop(scaler, cfg, fmt->which);
+		crop->left = 0;
+		crop->top = 0;
+		crop->width = fmt->format.width;
+		crop->height = fmt->format.height;
 
 		/* Propagate the format from sink to source */
-		format = &scaler->formats[SCALER_PAD_SOURCE];
+		format = __scaler_get_format(scaler, cfg, SCALER_PAD_SOURCE,
+						fmt->which);
 		*format = fmt->format;
 		__scaler_try_format(scaler, cfg, SCALER_PAD_SOURCE, format,
 				  fmt->which);
@@ -236,14 +298,17 @@ static int sunxi_scaler_subdev_get_selection(struct v4l2_subdev *sd,
 	struct scaler_dev *scaler = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *format_source;
 	struct v4l2_mbus_framefmt *format_sink;
+	struct scaler_para para;
 
 	vin_log(VIN_LOG_SCALER, "%s\n", __func__);
 
 	if (sel->pad != SCALER_PAD_SINK)
 		return -EINVAL;
 
-	format_sink = &scaler->formats[SCALER_PAD_SINK];
-	format_source = &scaler->formats[SCALER_PAD_SOURCE];
+	format_sink =
+	    __scaler_get_format(scaler, cfg, SCALER_PAD_SINK, sel->which);
+	format_source =
+	    __scaler_get_format(scaler, cfg, SCALER_PAD_SOURCE, sel->which);
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP_BOUNDS:
@@ -252,9 +317,11 @@ static int sunxi_scaler_subdev_get_selection(struct v4l2_subdev *sd,
 		sel->r.width = INT_MAX;
 		sel->r.height = INT_MAX;
 		__scaler_try_crop(format_sink, format_source, &sel->r);
+		__scaler_calc_ratios(scaler, &sel->r, format_source, &para);
 		break;
 	case V4L2_SEL_TGT_CROP:
-		sel->r = scaler->crop.request;
+		sel->r = *__scaler_get_crop(scaler, cfg, sel->which);
+		__scaler_calc_ratios(scaler, &sel->r, format_source, &para);
 		break;
 	default:
 		return -EINVAL;
@@ -270,14 +337,14 @@ static int sunxi_scaler_subdev_set_selection(struct v4l2_subdev *sd,
 	struct scaler_dev *scaler = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *format_sink, *format_source;
 	struct scaler_para para;
-	struct vipp_scaler_config scaler_cfg;
-	struct vipp_crop crop;
 
 	if (sel->target != V4L2_SEL_TGT_CROP || sel->pad != SCALER_PAD_SINK)
 		return -EINVAL;
 
-	format_sink = &scaler->formats[SCALER_PAD_SINK];
-	format_source = &scaler->formats[SCALER_PAD_SOURCE];
+	format_sink =
+	    __scaler_get_format(scaler, cfg, SCALER_PAD_SINK, sel->which);
+	format_source =
+	    __scaler_get_format(scaler, cfg, SCALER_PAD_SOURCE, sel->which);
 
 	vin_log(VIN_LOG_FMT, "%s: L = %d, T = %d, W = %d, H = %d\n", __func__,
 		  sel->r.left, sel->r.top, sel->r.width, sel->r.height);
@@ -287,6 +354,7 @@ static int sunxi_scaler_subdev_set_selection(struct v4l2_subdev *sd,
 		  format_source->width, format_source->height);
 
 	__scaler_try_crop(format_sink, format_source, &sel->r);
+	*__scaler_get_crop(scaler, cfg, sel->which) = sel->r;
 	__scaler_calc_ratios(scaler, &sel->r, format_source, &para);
 
 	if (sel->which == V4L2_SUBDEV_FORMAT_TRY)
@@ -294,24 +362,6 @@ static int sunxi_scaler_subdev_set_selection(struct v4l2_subdev *sd,
 
 	scaler->para = para;
 	scaler->crop.active = sel->r;
-	scaler->crop.request = sel->r;
-
-	/* we need update register when streaming */
-	crop.hor = scaler->crop.active.left;
-	crop.ver = scaler->crop.active.top;
-	crop.width = scaler->crop.active.width;
-	crop.height = scaler->crop.active.height;
-	vipp_set_crop(scaler->id, &crop);
-
-	if (scaler->id < MAX_OSD_NUM)
-		scaler_cfg.sc_out_fmt = YUV422;
-	else
-		scaler_cfg.sc_out_fmt = YUV420;
-	scaler_cfg.sc_x_ratio = scaler->para.xratio;
-	scaler_cfg.sc_y_ratio = scaler->para.yratio;
-	scaler_cfg.sc_w_shift = __scaler_w_shift(scaler->para.xratio, scaler->para.yratio);
-	vipp_scaler_cfg(scaler->id, &scaler_cfg);
-
 	vin_log(VIN_LOG_SCALER, "active crop: l = %d, t = %d, w = %d, h = %d\n",
 		scaler->crop.active.left, scaler->crop.active.top,
 		scaler->crop.active.width, scaler->crop.active.height);
@@ -324,7 +374,9 @@ int sunxi_scaler_subdev_init(struct v4l2_subdev *sd, u32 val)
 
 	vin_log(VIN_LOG_SCALER, "%s, val = %d.\n", __func__, val);
 	if (val) {
-		memset(scaler->vipp_reg.vir_addr, 0, scaler->vipp_reg.size);
+		memset(scaler->vipp_reg.vir_addr, 0, VIPP_REG_SIZE);
+		memset(scaler->osd_para.vir_addr, 0, OSD_PARA_SIZE);
+		memset(scaler->osd_stat.vir_addr, 0, OSD_STAT_SIZE);
 		vipp_set_reg_load_addr(scaler->id, (unsigned long)scaler->vipp_reg.dma_addr);
 		vipp_set_osd_para_load_addr(scaler->id, (unsigned long)scaler->osd_para.dma_addr);
 		vipp_set_osd_stat_load_addr(scaler->id, (unsigned long)scaler->osd_stat.dma_addr);
@@ -332,6 +384,11 @@ int sunxi_scaler_subdev_init(struct v4l2_subdev *sd, u32 val)
 		vipp_set_osd_ov_update(scaler->id, NOT_UPDATED);
 		vipp_set_para_ready(scaler->id, NOT_READY);
 	}
+	return 0;
+}
+
+static int sunxi_scaler_subdev_s_power(struct v4l2_subdev *sd, int enable)
+{
 	return 0;
 }
 
@@ -344,7 +401,6 @@ static int sunxi_scaler_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 	struct vipp_scaler_size scaler_size;
 	struct vipp_crop crop;
 	enum vipp_format out_fmt;
-	enum vipp_format sc_fmt;
 
 	switch (res->res_pix_fmt) {
 	case V4L2_PIX_FMT_SBGGR8:
@@ -390,39 +446,29 @@ static int sunxi_scaler_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		case V4L2_PIX_FMT_NV12:
 		case V4L2_PIX_FMT_NV12M:
 		case V4L2_PIX_FMT_FBC:
-		case V4L2_PIX_FMT_LBC_2_0X:
-		case V4L2_PIX_FMT_LBC_2_5X:
-		case V4L2_PIX_FMT_LBC_1_0X:
-			if (scaler->id < MAX_OSD_NUM) {
-				sc_fmt = YUV422;
-				out_fmt = YUV420;
-				vipp_chroma_ds_en(scaler->id, 1);
-			} else {
-				sc_fmt = YUV420;
-				out_fmt = YUV420;
-			}
+			out_fmt = YUV420;
 			break;
 		case V4L2_PIX_FMT_YUV422P:
 		case V4L2_PIX_FMT_NV16:
 		case V4L2_PIX_FMT_NV61:
 		case V4L2_PIX_FMT_NV61M:
 		case V4L2_PIX_FMT_NV16M:
-			sc_fmt = YUV422;
 			out_fmt = YUV422;
 			break;
 		default:
-			sc_fmt = YUV420;
 			out_fmt = YUV420;
 			break;
 		}
-		scaler_cfg.sc_out_fmt = sc_fmt;
+		if (scaler->is_osd_en)
+			scaler_cfg.sc_out_fmt = YUV422;
+		else
+			scaler_cfg.sc_out_fmt = out_fmt;
 		scaler_cfg.sc_x_ratio = scaler->para.xratio;
 		scaler_cfg.sc_y_ratio = scaler->para.yratio;
 		scaler_cfg.sc_w_shift = __scaler_w_shift(scaler->para.xratio, scaler->para.yratio);
 		vipp_scaler_cfg(scaler->id, &scaler_cfg);
 		vipp_output_fmt_cfg(scaler->id, out_fmt);
 		vipp_scaler_en(scaler->id, 1);
-		vipp_osd_en(scaler->id, 1);
 		vipp_set_para_ready(scaler->id, HAS_READY);
 		vipp_set_osd_ov_update(scaler->id, HAS_UPDATED);
 		vipp_set_osd_cv_update(scaler->id, HAS_UPDATED);
@@ -431,8 +477,6 @@ static int sunxi_scaler_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 	} else {
 		vipp_disable(scaler->id);
 		vipp_top_clk_en(scaler->id, enable);
-		vipp_chroma_ds_en(scaler->id, 0);
-		vipp_osd_en(scaler->id, 0);
 		vipp_scaler_en(scaler->id, 0);
 		vipp_set_para_ready(scaler->id, NOT_READY);
 		vipp_set_osd_ov_update(scaler->id, NOT_UPDATED);
@@ -448,6 +492,7 @@ static int sunxi_scaler_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 }
 
 static const struct v4l2_subdev_core_ops sunxi_scaler_subdev_core_ops = {
+	.s_power = sunxi_scaler_subdev_s_power,
 	.init = sunxi_scaler_subdev_init,
 };
 static const struct v4l2_subdev_video_ops sunxi_scaler_subdev_video_ops = {
@@ -455,6 +500,8 @@ static const struct v4l2_subdev_video_ops sunxi_scaler_subdev_video_ops = {
 };
 /* subdev pad operations */
 static const struct v4l2_subdev_pad_ops sunxi_scaler_subdev_pad_ops = {
+	.enum_mbus_code = sunxi_scaler_enum_mbus_code,
+	.enum_frame_size = sunxi_scaler_enum_frame_size,
 	.get_fmt = sunxi_scaler_subdev_get_fmt,
 	.set_fmt = sunxi_scaler_subdev_set_fmt,
 	.get_selection = sunxi_scaler_subdev_get_selection,
@@ -554,7 +601,11 @@ static int scaler_probe(struct platform_device *pdev)
 		}
 	}
 
+	list_add_tail(&scaler->scaler_list, &scaler_drv_list);
 	__scaler_init_subdev(scaler);
+
+	spin_lock_init(&scaler->slock);
+	init_waitqueue_head(&scaler->wait);
 
 	if (scaler_resource_alloc(scaler) < 0) {
 		ret = -ENOMEM;
@@ -566,8 +617,6 @@ static int scaler_probe(struct platform_device *pdev)
 	vipp_map_osd_para_load_addr(scaler->id, (unsigned long)scaler->osd_para.vir_addr);
 
 	platform_set_drvdata(pdev, scaler);
-
-	glb_vipp[scaler->id] = scaler;
 
 	vin_log(VIN_LOG_SCALER, "scaler%d probe end\n", scaler->id);
 	return 0;
@@ -592,6 +641,7 @@ static int scaler_remove(struct platform_device *pdev)
 	platform_set_drvdata(pdev, NULL);
 	v4l2_device_unregister_subdev(sd);
 	v4l2_set_subdevdata(sd, NULL);
+	list_del(&scaler->scaler_list);
 	if (scaler->base) {
 		if (!scaler->is_empty)
 			iounmap(scaler->base);
@@ -619,12 +669,17 @@ static struct platform_driver scaler_platform_driver = {
 
 struct v4l2_subdev *sunxi_scaler_get_subdev(int id)
 {
-	if (id < VIN_MAX_SCALER && glb_vipp[id])
-		return &glb_vipp[id]->subdev;
-	else
-		return NULL;
+	struct scaler_dev *scaler;
+
+	list_for_each_entry(scaler, &scaler_drv_list, scaler_list) {
+		if (scaler->id == id) {
+			scaler->use_cnt++;
+			return &scaler->subdev;
+		}
+	}
+	return NULL;
 }
-#if defined (CONFIG_ARCH_SUN8IW12P1)
+
 int sunxi_vipp_get_osd_stat(int id, unsigned int *stat)
 {
 	struct v4l2_subdev *sd = sunxi_scaler_get_subdev(id);
@@ -640,7 +695,19 @@ int sunxi_vipp_get_osd_stat(int id, unsigned int *stat)
 
 	return 0;
 }
-#endif
+
+int sunxi_osd_change_sc_fmt(int id, enum vipp_format out_fmt, int en)
+{
+	struct v4l2_subdev *sd = sunxi_scaler_get_subdev(id);
+	struct scaler_dev *vipp = v4l2_get_subdevdata(sd);
+
+	vipp->is_osd_en = en;
+
+	vipp_scaler_output_fmt(id, out_fmt);
+
+	return 0;
+}
+
 int sunxi_scaler_platform_register(void)
 {
 	return platform_driver_register(&scaler_platform_driver);

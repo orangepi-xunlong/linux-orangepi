@@ -658,4 +658,3 @@ void sunxi_clocks_init(struct device_node *node)
 	mipi_ops.get_parent = get_parent_mipi;
 	mipi_ops.set_parent = set_parent_mipi;
 }
-void __init sunxi_cpu_clocks_init(struct device_node *node) {}

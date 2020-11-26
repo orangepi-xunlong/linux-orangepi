@@ -89,6 +89,13 @@ int dtd_fill(hdmi_tx_dev_t *dev, dtd_t *dtd, u32 code, u32 refreshRate);
  */
 u32 dtd_get_refresh_rate(dtd_t *dtd);
 
+/**
+ * @param dtd Pointer to the current DTD parameters
+ * @param tempDtd Pointer to the temp DTD parameters
+ * @return The refresh rate if DTD parameters are correct and 0 if not
+ */
+void dtd_change_horiz_for_ycc420(hdmi_tx_dev_t *dev, dtd_t *tempDtd);
+
 void monitor_range_limits_reset(hdmi_tx_dev_t *dev, monitorRangeLimits_t *mrl);
 
 void colorimetry_data_block_reset(hdmi_tx_dev_t *dev,
@@ -132,6 +139,23 @@ void sad_reset(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
  */
 int sad_parse(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad, u8 *data);
 
+/**
+ *@return the sample rates byte, where bit 7 is always 0
+ *and rates are sorted respectively starting with bit 6:
+ * 192 kHz  176.4 kHz  96 kHz  88.2 kHz  48 kHz  44.1 kHz  32 kHz
+ */
+/* u8 sad_GetSampleRates(hdmi_tx_dev_t *dev, shortAudioDesc_t * sad); */
+
+int sad_support32k(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support44k1(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support48k(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support88k2(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support96k(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support176k4(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support192k(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support16bit(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support20bit(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
+int sad_support24bit(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad);
 int svd_parse(hdmi_tx_dev_t *dev, shortVideoDesc_t *svd, u8 data);
 
 
@@ -140,6 +164,13 @@ void speaker_alloc_data_block_reset(hdmi_tx_dev_t *dev,
 					speakerAllocationDataBlock_t *sadb);
 int speaker_alloc_data_block_parse(hdmi_tx_dev_t *dev,
 				speakerAllocationDataBlock_t *sadb, u8 *data);
+
+/**
+ * @return the Channel Allocation code used
+ *in the Audio Info frame to ease the translation process
+ */
+u8 get_channell_alloc_code(hdmi_tx_dev_t *dev,
+			speakerAllocationDataBlock_t *sadb);
 
 void video_cap_data_block_reset(hdmi_tx_dev_t *dev,
 				videoCapabilityDataBlock_t *vcdb);

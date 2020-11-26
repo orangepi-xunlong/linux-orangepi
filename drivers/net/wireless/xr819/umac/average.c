@@ -42,6 +42,7 @@ void ewma_init(struct ewma *avg, unsigned long factor, unsigned long weight)
 	avg->factor = ilog2(factor);
 	avg->internal = 0;
 }
+EXPORT_SYMBOL(ewma_init);
 
 /**
  * ewma_add() - Exponentially weighted moving average (EWMA)
@@ -58,3 +59,4 @@ struct ewma *ewma_add(struct ewma *avg, unsigned long val)
 		(val << avg->factor);
 	return avg;
 }
+EXPORT_SYMBOL(ewma_add);

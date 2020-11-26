@@ -154,33 +154,6 @@
 
 #define SS_SEED_SIZE			24
 
-#define CE_KEY_SELECT_INPUT			0
-#define CE_KEY_SELECT_SSK			1
-#define CE_KEY_SELECT_HUK			2
-#define CE_KEY_SELECT_RSSK			3
-#define CE_KEY_SELECT_INTERNAL_0	8
-#define CE_KEY_SELECT_INTERNAL_1	9
-#define CE_KEY_SELECT_INTERNAL_2	10
-#define CE_KEY_SELECT_INTERNAL_3	11
-#define CE_KEY_SELECT_INTERNAL_4	12
-#define CE_KEY_SELECT_INTERNAL_5	13
-#define CE_KEY_SELECT_INTERNAL_6	14
-#define CE_KEY_SELECT_INTERNAL_7	15
-
-/* The identification string to indicate the key source. */
-#define CE_KS_SSK			"KEY_SEL_SSK"
-#define CE_KS_HUK			"KEY_SEL_HUK"
-#define CE_KS_RSSK			"KEY_SEL_RSSK"
-#define CE_KS_INTERNAL_0	"KEY_SEL_INTRA_0"
-#define CE_KS_INTERNAL_1	"KEY_SEL_INTRA_1"
-#define CE_KS_INTERNAL_2	"KEY_SEL_INTRA_2"
-#define CE_KS_INTERNAL_3	"KEY_SEL_INTRA_3"
-#define CE_KS_INTERNAL_4	"KEY_SEL_INTRA_4"
-#define CE_KS_INTERNAL_5	"KEY_SEL_INTRA_5"
-#define CE_KS_INTERNAL_6	"KEY_SEL_INTRA_6"
-#define CE_KS_INTERNAL_7	"KEY_SEL_INTRA_7"
-
-
 /* Function declaration */
 
 u32 ss_reg_rd(u32 offset);

@@ -49,7 +49,6 @@ static int api_phy_read(u8 addr, u16 *value)
 	return phy_i2c_read(hdmi_api, addr, value);
 }
 
-#ifndef SUPPORT_ONLY_HDMI14
 static int api_scdc_read(u8 address, u8 size, u8 *data)
 {
 	return scdc_read(hdmi_api, address, size, data);
@@ -60,12 +59,29 @@ static int api_scdc_write(u8 address, u8 size, u8 *data)
 	return scdc_write(hdmi_api, address, size, data);
 }
 
-static u32 api_get_scramble_state(void)
-{
-	return scrambling_state(hdmi_api);
-}
-#endif
 
+#if defined(__LINUX_PLAT__)
+static int get_hdcp_type(void)
+{
+	return (int)hdmi_api->snps_hdmi_ctrl.hdcp_type;
+}
+
+static u8 api_hdcp_event_handler(int *param, u32 irq_stat)
+{
+	return hdcp_event_handler(hdmi_api, param, irq_stat);
+}
+
+static int api_get_hdcp_status(void)
+{
+	return get_hdcp_status(hdmi_api);
+}
+
+static ssize_t api_hdcp_config_dump(char *buf)
+{
+	return hdcp_config_dump(hdmi_api, buf);
+}
+
+#endif
 static void resistor_calibration(u32 reg, u32 data)
 {
 	dev_write(hdmi_api, reg * 4, data);
@@ -96,14 +112,7 @@ static void api_set_hdmi_ctrl(hdmi_tx_dev_t *dev, videoParams_t *video,
 static void api_avmute(hdmi_tx_dev_t *dev, int enable)
 {
 	packets_AvMute(dev, enable);
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
 	hdcp_av_mute(dev, enable);
-#endif
-}
-
-u32 api_get_avmute(void)
-{
-	return packets_get_AvMute(hdmi_api);
 }
 
 static int api_audio_configure(audioParams_t *audio, videoParams_t *video)
@@ -213,6 +222,7 @@ static int api_close(void)
 	return true;
 }
 
+
 static void api_hpd_enable(u8 enable)
 {
 	irq_hpd_sense_enable(hdmi_api, enable);
@@ -222,12 +232,32 @@ static u8 api_dev_hpd_status(void)
 {
 	return phy_hot_plug_state(hdmi_api);
 }
+#if defined(__LINUX_PLAT__)
 
+void api_hdcp_close(void)
+{
+	hdcp_close(hdmi_api);
+}
+
+static void api_hdcp_configure(hdcpParams_t *hdcp, videoParams_t *video)
+{
+	hdmi_api->snps_hdmi_ctrl.hdcp_on = 1;
+	hdcp_configure_new(hdmi_api, hdcp, video);
+}
+
+static void api_hdcp_disconfigure(void)
+{
+	hdmi_api->snps_hdmi_ctrl.hdcp_on = 0;
+	hdcp_disconfigure_new(hdmi_api);
+}
+
+#endif
 static int api_dtd_fill(dtd_t *dtd, u32 code, u32 refreshRate)
 {
 	return dtd_fill(hdmi_api, dtd, code, refreshRate);
 
 }
+#if defined(__LINUX_PLAT__)
 
 static int api_edid_parser_cea_ext_reset(sink_edid_t *edidExt)
 {
@@ -248,10 +278,11 @@ static int api_edid_parser(u8 *buffer, sink_edid_t *edidExt,
 {
 	return edid_parser(hdmi_api, buffer, edidExt, edid_size);
 }
+#endif
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
 int hdcp_configure(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp, videoParams_t *video)
 {
+#if defined(__LINUX_PLAT__)
 	if ((!hdcp) && (!video)) {
 		pr_err("ERROR:There is NULL value arguments: hdcp=%lx\n",
 						(uintptr_t)hdcp);
@@ -267,10 +298,10 @@ int hdcp_configure(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp, videoParams_t *video)
 		hdcp_configure_new(dev, hdcp, video);
 	mc_hdcp_clock_enable(dev, 0);/*enable it*/
 	hdcp_av_mute(dev, false);
+#endif
 
 	return 0;
 }
-#endif
 
 static int api_Configure(videoParams_t *video,
 				audioParams_t *audio, productParams_t *product,
@@ -347,19 +378,21 @@ static int api_Configure(videoParams_t *video,
 
 	mc_enable_all_clocks(dev);
 	snps_sleep(10000);
-
-#ifndef SUPPORT_ONLY_HDMI14
-	if ((dev->snps_hdmi_ctrl.tmds_clk  > 340000)
-		/* && (video->scdc_ability)*/) {
+#if defined(__LINUX_PLAT__)
+	if ((dev->snps_hdmi_ctrl.tmds_clk  > 340000) && (video->scdc_ability)) {
 		scrambling(dev, 1);
 		VIDEO_INF("enable scrambling\n");
 	} else if (video->scdc_ability) {
 		scrambling(dev, 0);
 		VIDEO_INF("disable scrambling\n");
 	}
+#else
+	if (dev->snps_hdmi_ctrl.tmds_clk  > 340000) {
+		scrambling(dev, 1);
+		VIDEO_INF("enable scrambling\n");
+	}
 #endif
 
-#ifndef __FPGA_PLAT__
 	/*add calibrated resistor configuration for all video resolution*/
 	dev_write(dev, 0x40018, 0xc0);
 	dev_write(dev, 0x4001c, 0x80);
@@ -367,7 +400,6 @@ static int api_Configure(videoParams_t *video,
 	success = phy_configure(dev, phy_model);
 	if (success == false)
 		pr_err("ERROR:Could not configure PHY\n");
-#endif
 
 	/* Disable blue screen transmission
 	after turning on all necessary blocks (e.g. HDCP) */
@@ -380,11 +412,12 @@ static int api_Configure(videoParams_t *video,
 	irq_unmute(dev);
 	api_avmute(dev, false);
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
 	hdcp_init(dev);
+#if defined(__LINUX_PLAT__)
 	if (hdcp->use_hdcp && hdcp->hdcp_on)
 		hdcp_configure_new(dev, hdcp, video);
 #endif
+
 	return success;
 }
 
@@ -443,6 +476,19 @@ static u32 api_get_phy_rxsense_state(void)
 static u32 api_get_tmds_mode(void)
 {
 	return fc_video_tmdsMode_get(hdmi_api);
+
+}
+
+
+static u32 api_get_scramble_state(void)
+{
+	return scrambling_state(hdmi_api);
+}
+
+
+static u32 api_get_avmute_state(void)
+{
+	return hdcp_av_mute_state(hdmi_api);
 
 }
 
@@ -520,34 +566,43 @@ void hdmitx_api_init(hdmi_tx_dev_t *dev,
 {
 	struct hdmi_dev_func func;
 	struct hdmi_tx_ctrl *tx_ctrl;
-
 	hdmi_api = dev;
 	memset(hdmi_api, 0, sizeof(hdmi_tx_dev_t));
-	memset(&func, 0, sizeof(struct hdmi_dev_func));
 
 	tx_ctrl = &hdmi_api->snps_hdmi_ctrl;
 	tx_ctrl->csc_on = 1;
 	tx_ctrl->phy_access = PHY_I2C;
 	tx_ctrl->data_enable_polarity = 1;
 	tx_ctrl->phy_access = 1;
+	tx_ctrl->use_hdcp = hdcp->use_hdcp;
+	tx_ctrl->use_hdcp22 = hdcp->use_hdcp22;
 
 	mutex_init(&dev->i2c_lock);
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
-	hdcp_api_init(hdmi_api, hdcp, &func);
-#endif
+	if (hdcp->use_hdcp)
+		hdcp_initial(hdmi_api, hdcp);
+
 	func.main_config = api_Configure;
 	func.audio_config = api_audio_configure;
 	/*func.set_audio_on = api_set_audio_on;*/
+#if defined(__LINUX_PLAT__)
+	func.hdcp_close = api_hdcp_close;
+	func.hdcp_configure = api_hdcp_configure;
+	func.hdcp_disconfigure = api_hdcp_disconfigure;
+	func.get_hdcp_type = get_hdcp_type;
+	func.hdcp_event_handler = api_hdcp_event_handler;
+	func.get_hdcp_status = api_get_hdcp_status;
+	func.hdcp_config_dump = api_hdcp_config_dump;
+#endif
 
 	func.hpd_enable = api_hpd_enable;
 	func.dev_hpd_status = api_dev_hpd_status;
 	func.dtd_fill = api_dtd_fill;
-
+#if defined(__LINUX_PLAT__)
 	func.edid_parser_cea_ext_reset = api_edid_parser_cea_ext_reset;
 	func.edid_read = api_edid_read;
 	func.edid_parser = api_edid_parser;
 	func.edid_extension_read = api_edid_extension_read;
-
+#endif
 	func.fc_drm_up = api_fc_drm_up;
 	func.fc_drm_disable = api_fc_drm_disable;
 	func.set_colorimetry = api_set_colorimetry;
@@ -561,12 +616,8 @@ void hdmitx_api_init(hdmi_tx_dev_t *dev,
 
 	func.phy_write = api_phy_write;
 	func.phy_read = api_phy_read;
-
-#ifndef SUPPORT_ONLY_HDMI14
 	func.scdc_write = api_scdc_write;
 	func.scdc_read = api_scdc_read;
-	func.get_scramble_state       = api_get_scramble_state;
-#endif
 
 	func.get_audio_n              = api_get_audio_n;
 	func.get_audio_layout         = api_get_audio_layout;
@@ -578,6 +629,8 @@ void hdmitx_api_init(hdmi_tx_dev_t *dev,
 	func.get_phy_pll_lock_state   = api_get_phy_pll_lock_state;
 	func.get_phy_power_state      = api_get_phy_power_state;
 	func.get_tmds_mode            = api_get_tmds_mode;
+	func.get_scramble_state       = api_get_scramble_state;
+	func.get_avmute_state         = api_get_avmute_state;
 	func.get_pixelrepetion        = api_get_pixelrepetion;
 	func.get_colorimetry		  = api_get_colorimetry;
 	func.get_pixel_format		  = api_get_pixel_format;
@@ -587,7 +640,6 @@ void hdmitx_api_init(hdmi_tx_dev_t *dev,
 	func.get_vsif                 = api_fc_vsif_get;
 	func.set_vsif                 = api_fc_vsif_set;
 
-	func.get_avmute_state         = api_get_avmute;
 	func.avmute_enable		      = api_avmute_enable;
 	func.phy_power_enable		  = api_phy_power_enable;
 	func.dvimode_enable			  = api_dvimode_enable;
@@ -597,8 +649,7 @@ void hdmitx_api_init(hdmi_tx_dev_t *dev,
 
 void hdmitx_api_exit(void)
 {
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
 	hdcp_exit();
-#endif
 	hdmi_api = NULL;
 }
+

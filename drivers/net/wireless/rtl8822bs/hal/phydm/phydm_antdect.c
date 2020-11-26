@@ -659,7 +659,7 @@ odm_single_dual_antenna_detection_psd(
 	while (odm_get_bb_reg(p_dm, 0xdf4, BIT(6))) {
 		i++;
 		if (i > 1000000) {
-			PHYDM_DBG(p_dm, DBG_ANT_DIV, ("Wait in %s() more than %d times!\n", __func__, i));
+			PHYDM_DBG(p_dm, DBG_ANT_DIV, ("Wait in %s() more than %d times!\n", __FUNCTION__, i));
 			break;
 		}
 	}

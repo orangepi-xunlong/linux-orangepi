@@ -53,7 +53,6 @@ struct ctp_config_info {
 	int revert_x_flag;
 	int revert_y_flag;
 	int exchange_x_y_flag;
-	int ctp_gesture_wakeup;
 	u32 int_number;
 	unsigned char device_detect;
 	const char *ctp_power;

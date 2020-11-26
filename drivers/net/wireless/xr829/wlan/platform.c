@@ -37,8 +37,6 @@ extern void sunxi_wlan_set_power(bool on);
 extern int sunxi_wlan_get_bus_index(void);
 extern int sunxi_wlan_get_oob_irq(void);
 extern int sunxi_wlan_get_oob_irq_flags(void);
-extern void sunxi_bluetooth_set_power(bool on_off);
-
 
 static int wlan_bus_id;
 static u32 gpio_irq_handle;
@@ -72,18 +70,11 @@ int xradio_wlan_power(int on)
 	    ret = xradio_get_syscfg();
 		if (ret < 0)
 			return ret;
-	}
+		}
 	sunxi_wlan_set_power(on);
 	mdelay(100);
 	return ret;
 }
-
-void xradio_bt_power(int on_off)
-{
-	sunxi_bluetooth_set_power(on_off);
-	mdelay(100);
-}
-
 
 void xradio_sdio_detect(int enable)
 {
@@ -112,7 +103,7 @@ int xradio_request_gpio_irq(struct device *dev, void *sbus_priv)
 	ret = devm_request_irq(dev, gpio_irq_handle,
 					(irq_handler_t)xradio_gpio_irq_handler,
 					IRQF_TRIGGER_RISING|IRQF_NO_SUSPEND, "xradio_irq", sbus_priv);
-	if (ret < 0) {
+	if (IS_ERR_VALUE(ret)) {
 			gpio_irq_handle = 0;
 			xradio_dbg(XRADIO_DBG_ERROR, "%s: request_irq FAIL!ret=%d\n",
 					__func__, ret);

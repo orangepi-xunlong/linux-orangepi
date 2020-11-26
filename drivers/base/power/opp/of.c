@@ -779,3 +779,24 @@ unsigned long dev_pm_opp_axi_bus_divide_ratio(struct dev_pm_opp *opp)
 	return f;
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_axi_bus_divide_ratio);
+#ifdef CONFIG_ARM_SUNXI_AVS
+/**
+ * dev_pm_opp_get_pval() - Gets the pval
+ * @opp:	opp for which frequency has to be returned for
+ *
+ */
+unsigned long dev_pm_opp_get_pval(struct dev_pm_opp *opp)
+{
+	struct dev_pm_opp *tmp_opp;
+	u32 f = 0;
+
+	tmp_opp = rcu_dereference(opp);
+	if (IS_ERR_OR_NULL(tmp_opp) || !tmp_opp->available)
+		pr_err("%s: Invalid parameters\n", __func__);
+	else
+		of_property_read_u32(tmp_opp->np, "pval", &f);
+
+	return f;
+}
+EXPORT_SYMBOL_GPL(dev_pm_opp_get_pval);
+#endif

@@ -515,7 +515,6 @@ static void audio_spdif_interrupt_mask(hdmi_tx_dev_t *dev, u8 value)
 			AUD_SPDIFINT_SPDIF_FIFO_EMPTY_MASK_MASK, value);
 }
 
-#if 0
 static void halAudioMultistream_MetaDataPacket_Descriptor_X(hdmi_tx_dev_t *dev,
 		u8 descrNr, audioMetaDataDescriptor_t *mAudioMetaDataDescriptor)
 {
@@ -580,7 +579,7 @@ void halAudioMultistream_MetaDataPacketBody(hdmi_tx_dev_t *dev,
 		cnt++;
 	}
 }
-#endif
+
 
 /**
  * Mute audio.

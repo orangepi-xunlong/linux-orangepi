@@ -116,6 +116,12 @@ void fc_vsd_vendor_OUI(hdmi_tx_dev_t *dev, u32 id);
 u8 fc_vsd_vendor_payload(hdmi_tx_dev_t *dev,
 			const u8 *data, unsigned short length);
 void fc_vsif_enable(hdmi_tx_dev_t *dev, u8 enable);
+/**
+ * Initialize the packets package. Reset local variables.
+ * @param dev Device structure
+ * @return TRUE when successful
+ */
+int packets_Initialize(hdmi_tx_dev_t *dev);
 
 /**
  * Configure Source Product Description, Vendor Specific and Auxiliary
@@ -161,7 +167,6 @@ void packets_IsrcPackets(hdmi_tx_dev_t *dev, u8 initStatus, const u8 *codes,
  * @param enable (TRUE) /disable (FALSE) the AV Mute
  */
 void packets_AvMute(hdmi_tx_dev_t *dev, u8 enable);
-u8 packets_get_AvMute(hdmi_tx_dev_t *dev);
 
 /**
  * Set ISRC status that is changing during play back

@@ -87,10 +87,6 @@ int de_fce_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 	void *memory;
 
 	base = reg_base + (sel + 1) * 0x00100000 + FCE_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel)
-		base = base - 0x00100000;
-#endif
 	/* FIXME  display path offset should be defined */
 	fce_hw_base[sel][chno] = base;
 
@@ -785,7 +781,7 @@ static void auto_bws_model(unsigned int width, unsigned int height,
 
 		/* bright */
 		if (p_hist_data->hist_mean <= 16) {
-			/*slope_black_lmt = slope_black_lmt;*/
+			slope_black_lmt = slope_black_lmt;
 		} else {
 			int step = slope_black_lmt - 256;
 

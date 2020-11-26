@@ -196,19 +196,12 @@ int de_rtmx_init(unsigned int sel, uintptr_t reg_base)
 	apb_base = reg_base + 0x00101000;
 	ovl_base = reg_base + 0x00102000;
 
-	if (sel) {
+	if (sel == 1) {
 		glb_base = reg_base + 0x00200000;
 		apb_base = reg_base + 0x00201000;
 		ovl_base = reg_base + 0x00202000;
 	}
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel) {
-		glb_base = glb_base - 0x00100000;
-		apb_base = apb_base - 0x00100000;
-		ovl_base = ovl_base - 0x00100000;
 
-	}
-#endif
 	memory = kmalloc(sizeof(struct __glb_reg_t), GFP_KERNEL | __GFP_ZERO);
 	if (memory == NULL) {
 		__wrn("malloc rtmx global memory fail! size=0x%x\n",
@@ -870,29 +863,29 @@ int de_rtmx_get_3d_in_single_size(enum de_3d_in_mode inmode,
 
 	switch (inmode) {
 	case DE_3D_SRC_MODE_TB:
-		/*size->w = size->w;*/
+		size->w = size->w;
 		size->h = size->h >> 1;
-		/*size->x = size->x;
-		size->y = size->y;*/
+		size->x = size->x;
+		size->y = size->y;
 		break;
 	case DE_3D_SRC_MODE_SSF:
 	case DE_3D_SRC_MODE_SSH:
 		size->w = size->w >> 1;
-		/*size->h = size->h;
+		size->h = size->h;
 		size->x = size->x;
-		size->y = size->y;*/
+		size->y = size->y;
 		break;
 	case DE_3D_SRC_MODE_LI:
-		/*size->w = size->w;*/
+		size->w = size->w;
 		size->h = size->h >> 1;
-		/*size->x = size->x;*/
+		size->x = size->x;
 		size->y = size->y >> 1;
 		break;
 	case DE_3D_SRC_MODE_FP:
-		/*size->w = size->w;
+		size->w = size->w;
 		size->h = size->h;
 		size->x = size->x;
-		size->y = size->y;*/
+		size->y = size->y;
 		break;
 	default:
 		/* undefine input mode */

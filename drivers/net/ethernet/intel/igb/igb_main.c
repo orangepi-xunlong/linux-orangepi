@@ -7564,11 +7564,9 @@ static int __igb_shutdown(struct pci_dev *pdev, bool *enable_wake,
 	rtnl_unlock();
 
 #ifdef CONFIG_PM
-	if (!runtime) {
-		retval = pci_save_state(pdev);
-		if (retval)
-			return retval;
-	}
+	retval = pci_save_state(pdev);
+	if (retval)
+		return retval;
 #endif
 
 	status = rd32(E1000_STATUS);

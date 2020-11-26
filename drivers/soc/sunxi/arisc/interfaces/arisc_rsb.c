@@ -41,7 +41,7 @@ int arisc_rsb_read_block_data(struct arisc_rsb_block_cfg *cfg)
 	if ((cfg == NULL) || (cfg->devaddr == 0) || (cfg->regaddr == NULL) || (cfg->data == NULL) || (cfg->len > RSB_TRANS_BYTE_MAX) ||
 		((cfg->datatype !=  RSB_DATA_TYPE_BYTE) && (cfg->datatype !=  RSB_DATA_TYPE_HWORD) && (cfg->datatype !=  RSB_DATA_TYPE_WORD)) ||
 		((cfg->msgattr !=  ARISC_MESSAGE_ATTR_HARDSYN) && (cfg->msgattr !=  ARISC_MESSAGE_ATTR_SOFTSYN))) {
-		pr_warn("rsb read reg paras error\n");
+		ARISC_WRN("rsb read reg paras error\n");
 		return -EINVAL;
 	}
 
@@ -97,7 +97,7 @@ int arisc_rsb_write_block_data(struct arisc_rsb_block_cfg *cfg)
 	if ((cfg == NULL) || (cfg->devaddr == 0) || (cfg->regaddr == NULL) || (cfg->data == NULL) || (cfg->len > RSB_TRANS_BYTE_MAX) ||
 		((cfg->datatype !=  RSB_DATA_TYPE_BYTE) && (cfg->datatype !=  RSB_DATA_TYPE_HWORD) && (cfg->datatype !=  RSB_DATA_TYPE_WORD)) ||
 		((cfg->msgattr !=  ARISC_MESSAGE_ATTR_HARDSYN) && (cfg->msgattr !=  ARISC_MESSAGE_ATTR_SOFTSYN))) {
-		pr_warn("rsb write reg paras error\n");
+		ARISC_WRN("rsb write reg paras error\n");
 		return -EINVAL;
 	}
 
@@ -161,7 +161,7 @@ int rsb_bits_ops_sync(struct arisc_rsb_bits_cfg *cfg)
 	if ((cfg == NULL) || (cfg->devaddr == 0) || (cfg->regaddr == NULL) || (cfg->mask == NULL) || (cfg->delay == NULL) || (cfg->len > RSB_TRANS_BYTE_MAX) ||
 		((cfg->datatype !=  RSB_DATA_TYPE_BYTE) && (cfg->datatype !=  RSB_DATA_TYPE_HWORD) && (cfg->datatype !=  RSB_DATA_TYPE_WORD)) ||
 		((cfg->msgattr !=  ARISC_MESSAGE_ATTR_HARDSYN) && (cfg->msgattr !=  ARISC_MESSAGE_ATTR_SOFTSYN))) {
-		pr_warn("rsb clear bits sync paras error\n");
+		ARISC_WRN("rsb clear bits sync paras error\n");
 		return -EINVAL;
 	}
 

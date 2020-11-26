@@ -25,9 +25,6 @@
 #define IOMMU_TLB_ENABLE_REG			0x0060
 #define IOMMU_TLB_PREFETCH_REG			0x0070
 #define IOMMU_TLB_FLUSH_ENABLE_REG		0x0080
-#define IOMMU_TLB_IVLD_MODE_SEL_REG		0x0084
-#define IOMMU_TLB_IVLD_START_ADDR_REG	0x0088
-#define IOMMU_TLB_IVLD_END_ADDR_REG		0x008C
 #define IOMMU_TLB_IVLD_ADDR_REG			0x0090
 #define IOMMU_TLB_IVLD_ADDR_MASK_REG	0x0094
 #define IOMMU_TLB_IVLD_ENABLE_REG		0x0098
@@ -54,14 +51,13 @@
 #define IOMMU_INT_ERR_ADDR_REG4			0x0120
 #define IOMMU_INT_ERR_ADDR_REG5			0x0124
 
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifndef CONFIG_ARCH_SUN8IW15
+#define IOMMU_INT_ERR_ADDR_REG6			0x0130
+#define IOMMU_INT_ERR_ADDR_REG7			0x0134
+#else
 #define IOMMU_INT_ERR_ADDR_REG6			0x0128
 #define IOMMU_INT_ERR_ADDR_REG7			0x0130
 #define IOMMU_INT_ERR_ADDR_REG8			0x0134
-#else
-#define IOMMU_INT_ERR_ADDR_REG6			0x0130
-#define IOMMU_INT_ERR_ADDR_REG7			0x0134
 #endif
 
 #define IOMMU_INT_ERR_DATA_REG0			0x0150
@@ -71,14 +67,13 @@
 #define IOMMU_INT_ERR_DATA_REG4			0x0160
 #define IOMMU_INT_ERR_DATA_REG5			0x0164
 
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifndef CONFIG_ARCH_SUN8IW15
+#define IOMMU_INT_ERR_DATA_REG6			0x0170
+#define IOMMU_INT_ERR_DATA_REG7			0x0174
+#else
 #define IOMMU_INT_ERR_DATA_REG6			0x0168
 #define IOMMU_INT_ERR_DATA_REG7			0x0170
 #define IOMMU_INT_ERR_DATA_REG8			0x0174
-#else
-#define IOMMU_INT_ERR_DATA_REG6			0x0170
-#define IOMMU_INT_ERR_DATA_REG7			0x0174
 #endif
 
 #define IOMMU_L1PG_INT_REG				0x0180
@@ -113,8 +108,16 @@
 #define IOMMU_PMU_HIT_LOW_REG5			0x0288
 #define IOMMU_PMU_HIT_HIGH_REG5			0x028C
 
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifndef CONFIG_ARCH_SUN8IW15
+#define IOMMU_PMU_ACCESS_LOW_REG6		0x02D0
+#define IOMMU_PMU_ACCESS_HIGH_REG6		0x02D4
+#define IOMMU_PMU_HIT_LOW_REG6			0x02D8
+#define IOMMU_PMU_HIT_HIGH_REG6			0x02DC
+#define IOMMU_PMU_ACCESS_LOW_REG7		0x02E0
+#define IOMMU_PMU_ACCESS_HIGH_REG7		0x02E4
+#define IOMMU_PMU_HIT_LOW_REG7			0x02E8
+#define IOMMU_PMU_HIT_HIGH_REG7			0x02EC
+#else
 #define IOMMU_PMU_ACCESS_LOW_REG6		0x0290
 #define IOMMU_PMU_ACCESS_HIGH_REG6		0x0294
 #define IOMMU_PMU_HIT_LOW_REG6			0x0298
@@ -127,65 +130,50 @@
 #define IOMMU_PMU_ACCESS_HIGH_REG8		0x02E4
 #define IOMMU_PMU_HIT_LOW_REG8			0x02E8
 #define IOMMU_PMU_HIT_HIGH_REG8			0x02EC
-#else
-#define IOMMU_PMU_ACCESS_LOW_REG6		0x02D0
-#define IOMMU_PMU_ACCESS_HIGH_REG6		0x02D4
-#define IOMMU_PMU_HIT_LOW_REG6			0x02D8
-#define IOMMU_PMU_HIT_HIGH_REG6			0x02DC
-#define IOMMU_PMU_ACCESS_LOW_REG7		0x02E0
-#define IOMMU_PMU_ACCESS_HIGH_REG7		0x02E4
-#define IOMMU_PMU_HIT_LOW_REG7			0x02E8
-#define IOMMU_PMU_HIT_HIGH_REG7			0x02EC
+
 #endif
 
 
 #define IOMMU_PMU_TL_LOW_REG0			0x0300
 #define IOMMU_PMU_TL_HIGH_REG0			0x0304
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifdef CONFIG_ARCH_SUN8IW15
 #define IOMMU_PMU_ML_REG0				0x0308
 #endif
 
 
 #define IOMMU_PMU_TL_LOW_REG1			0x0310
 #define IOMMU_PMU_TL_HIGH_REG1			0x0314
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifdef CONFIG_ARCH_SUN8IW15
 #define IOMMU_PMU_ML_REG1				0x0318
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG2			0x0320
 #define IOMMU_PMU_TL_HIGH_REG2			0x0324
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifdef CONFIG_ARCH_SUN8IW15
 #define IOMMU_PMU_ML_REG2				0x0328
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG3			0x0330
 #define IOMMU_PMU_TL_HIGH_REG3			0x0334
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifdef CONFIG_ARCH_SUN8IW15
 #define IOMMU_PMU_ML_REG3				0x0338
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG4			0x0340
 #define IOMMU_PMU_TL_HIGH_REG4			0x0344
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifdef CONFIG_ARCH_SUN8IW15
 #define IOMMU_PMU_ML_REG4				0x0348
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG5			0x0350
 #define IOMMU_PMU_TL_HIGH_REG5			0x0354
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifdef CONFIG_ARCH_SUN8IW15
 #define IOMMU_PMU_ML_REG5				0x0358
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG6			0x0360
 #define IOMMU_PMU_TL_HIGH_REG6			0x0364
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifdef CONFIG_ARCH_SUN8IW15
 #define IOMMU_PMU_ML_REG6				0x0368
 #endif
 
@@ -314,9 +302,6 @@
 #define IOVA_PFN(addr)		((addr) >> PAGE_SHIFT)
 #define DMA_32BIT_PFN		IOVA_PFN(DMA_BIT_MASK(32))
 
-/* TLB Invalid ALIGN */
-#define IOVA_4M_ALIGN(iova)	((iova) & (~0x3fffff))
-
 #ifdef CONFIG_ARCH_SUN50IW3
 #define DEFAULT_BYPASS_VALUE     0x3f
 static const u32 master_id_bitmap[] = {0x3, 0x0, 0x0, 0xc, 0x10, 0x20};
@@ -325,12 +310,7 @@ static const u32 master_id_bitmap[] = {0x3, 0x0, 0x0, 0xc, 0x10, 0x20};
 #define DEFAULT_BYPASS_VALUE     0x3f
 static const u32 master_id_bitmap[] = {0x1, 0x0, 0x4, 0xa, 0x10, 0x20};
 #endif
-
-#define SUNXI_PHYS_OFFSET    	0x40000000UL
-#define SUNXI_4G_PHYS_OFFSET    0x100000000UL
-
 /**
- * sun8iw15p1
  *	DE :		masterID 0
  *	E_EDMA:		masterID 1
  *	E_FE:		masterID 2
@@ -338,29 +318,12 @@ static const u32 master_id_bitmap[] = {0x1, 0x0, 0x4, 0xa, 0x10, 0x20};
  *	CSI:		masterID 4
  *	G2D:		masterID 5
  *	E_BE:		masterID 6
- *
- * sun50iw9p1:
- *	DE :		masterID 0
- *	DI:			masterID 1
- *	VE_R:		masterID 2
- *	VE:			masterID 3
- *	CSI0:		masterID 4
- *	CSI1:		masterID 5
- *	G2D:		masterID 6
- * sun8iw19p1:
- *	DE :>--->-------masterID 0
- *	EISE:		masterID 1
- *	AI:		masterID 2
- *	VE:>---->-------masterID 3
- *	CSI:	>-->----masterID 4
- *	ISP:>-->------	masterID 5
- *	G2D:>--->-------masterID 6
  */
-#if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+#ifdef CONFIG_ARCH_SUN8IW15
 #define DEFAULT_BYPASS_VALUE     0x7f
 static const u32 master_id_bitmap[] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40};
 #endif
+
 
 #define sunxi_wait_when(COND, MS) ({ \
 	unsigned long timeout__ = jiffies + msecs_to_jiffies(MS) + 1;	\

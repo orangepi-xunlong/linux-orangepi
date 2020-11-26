@@ -743,8 +743,12 @@ static int axp22x_charger_resume(struct platform_device *dev)
 	struct axp_regmap *map = chg_dev->chip->regmap;
 	int pre_rest_vol;
 
-	axp_suspend_flag = AXP_NOT_SUSPEND;
-	sunxi_nmi_enable();
+	if (axp_suspend_flag == AXP_SUSPEND_WITH_IRQ) {
+		axp_suspend_flag = AXP_NOT_SUSPEND;
+		sunxi_nmi_enable();
+	} else {
+		axp_suspend_flag = AXP_NOT_SUSPEND;
+	}
 
 	pre_rest_vol = chg_dev->rest_vol;
 	axp_charger_resume(chg_dev);

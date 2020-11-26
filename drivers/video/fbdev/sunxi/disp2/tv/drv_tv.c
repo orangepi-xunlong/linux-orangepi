@@ -11,7 +11,7 @@
 #if defined(CONFIG_EXTCON)
 #include <linux/extcon.h>
 #endif
-#include "../disp/disp_sys_intf.h"
+#include <linux/regulator/consumer.h>
 
 static int suspend;
 struct tv_info_t g_tv_info;
@@ -28,8 +28,6 @@ static dev_t tv_devid ;
 static struct class *tv_class;
 static struct device *tv_dev;
 static int tv_fake_detect;
-static int tv_resync_pixel_num = -1;
-static int tv_resync_line_num = -1;
 
 static struct disp_video_timings video_timing[] = {
 	{
@@ -516,6 +514,18 @@ static ssize_t tv_faketv_store(struct device *dev,
 }
 
 
+static DEVICE_ATTR(faketv, 0660,
+			tv_faketv_show, tv_faketv_store);
+
+static struct attribute *tv_attributes[] = {
+	&dev_attr_faketv.attr,
+	NULL
+};
+
+static struct attribute_group tv_attribute_group = {
+  .name = "attr",
+  .attrs = tv_attributes
+};
 
 void tv_report_hpd_work(u32 sel, u32 hpd)
 {
@@ -524,34 +534,22 @@ void tv_report_hpd_work(u32 sel, u32 hpd)
 
 	switch (hpd) {
 	case STATUE_CLOSE:
-		if (extcon_dev[sel] == 0)
-			return;
 		extcon_set_state_sync(extcon_dev[sel], EXTCON_DISP_CVBS,
 				      STATUE_CLOSE);
-		if (is_compatible_cvbs) {
-			if (extcon_cvbs == 0)
-				return;
+		if (is_compatible_cvbs)
 			extcon_set_state_sync(extcon_cvbs, EXTCON_DISP_CVBS,
 					      STATUE_CLOSE);
-		}
 		break;
 
 	case STATUE_OPEN:
-		if (extcon_dev[sel] == 0)
-			return;
 		extcon_set_state_sync(extcon_dev[sel], EXTCON_DISP_CVBS,
 				      STATUE_OPEN);
-		if (is_compatible_cvbs) {
-			if (extcon_cvbs == 0)
-				return;
+		if (is_compatible_cvbs)
 			extcon_set_state_sync(extcon_cvbs, EXTCON_DISP_CVBS,
 					      STATUE_OPEN);
-		}
 		break;
 
 	default:
-		if (extcon_dev[sel] == 0)
-			return;
 		extcon_set_state_sync(extcon_dev[sel], EXTCON_DISP_CVBS,
 				      STATUE_CLOSE);
 		break;
@@ -639,75 +637,7 @@ s32 tv_detect_disable(u32 sel)
 	pr_debug("there is null tv_detect_disable,you need support the extcon class!");
 		return -1;
 }
-static ssize_t tv_faketv_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	return 0;
-}
-
-static ssize_t tv_faketv_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	return count;
-}
 #endif
-
-
-static ssize_t tv_resync_pixel_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	int err;
-	long val;
-
-	err = kstrtol(buf, 10, &val);  /* strict_strtoul */
-	if (err) {
-		TV_ERR("Invalid size\n");
-		return err;
-	}
-	tv_resync_pixel_num = val;
-
-	return count;
-}
-
-static ssize_t tv_resync_line_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	int err;
-	long val;
-
-	err = kstrtol(buf, 10, &val);  /* strict_strtoul */
-	if (err) {
-		TV_ERR("Invalid size\n");
-		return err;
-	}
-	tv_resync_line_num = val;
-
-	return count;
-}
-
-static DEVICE_ATTR(faketv, 0660,
-			tv_faketv_show, tv_faketv_store);
-
-static DEVICE_ATTR(resync_pixel, 0660,
-			NULL, tv_resync_pixel_store);
-
-static DEVICE_ATTR(resync_line, 0660,
-			NULL, tv_resync_line_store);
-
-static struct attribute *tv_attributes[] = {
-	&dev_attr_faketv.attr,
-	&dev_attr_resync_pixel.attr,
-	&dev_attr_resync_line.attr,
-	NULL
-};
-
-static struct attribute_group tv_attribute_group = {
-  .name = "attr",
-  .attrs = tv_attributes
-};
 
 s32 tv_get_video_info(s32 mode)
 {
@@ -733,11 +663,7 @@ s32 tv_set_enhance_mode(u32 sel, u32 mode)
 
 static void tve_clk_init(u32 sel)
 {
-	if (g_tv_info.clk)
-		g_tv_info.clk_parent = clk_get_parent(g_tv_info.clk);
-	if (g_tv_info.screen[sel].clk)
-		g_tv_info.screen[sel].clk_parent =
-		    clk_get_parent(g_tv_info.screen[sel].clk);
+	g_tv_info.clk_parent = clk_get_parent(g_tv_info.clk);
 }
 
 #if defined(TVE_TOP_SUPPORT)
@@ -821,11 +747,6 @@ static void tve_clk_config(u32 sel, u32 tv_mode)
 	ret = tve_get_pixclk(&rate, &tv_mode);
 	if (ret)
 		TV_ERR("%s:tve_get_pixclk fail!\n", __func__);
-	if (g_tv_info.clk_parent)
-		clk_set_parent(g_tv_info.clk, g_tv_info.clk_parent);
-	if (g_tv_info.screen[sel].clk_parent)
-		clk_set_parent(g_tv_info.screen[sel].clk,
-			       g_tv_info.screen[sel].clk_parent);
 
 	round = clk_round_rate(g_tv_info.screen[sel].clk, rate);
 	rate_diff = (long)(round - rate);
@@ -870,9 +791,10 @@ static void tve_clk_config(u32 sel, u32 tv_mode)
 		clk_get_rate(g_tv_info.clk_parent), prate,
 		clk_get_rate(g_tv_info.screen[sel].clk), rate, tv_mode);
 }
-
+#ifdef CONFIG_AW_AXP
 static int tv_power_enable(char *name)
 {
+	struct regulator *regu = NULL;
 	int ret = -1;
 
 	if (tv_power_enable_mask) {
@@ -880,28 +802,71 @@ static int tv_power_enable(char *name)
 		goto exit;
 	}
 
-	ret = disp_sys_power_enable(name);
+	regu = regulator_get(NULL, name);
+	if (IS_ERR(regu)) {
+		TV_ERR("%s: some error happen, fail to get regulator %s\n",
+			__func__, name);
+		goto exit;
+	}
+
+	/* enalbe regulator */
+	ret = regulator_enable(regu);
+	if (0 != ret) {
+		TV_ERR("%s: some error happen, fail to enable regulator %s!\n",
+			__func__, name);
+		goto exit1;
+	}
 
 	tv_power_enable_mask = 1;
 
+exit1:
+	/* put regulater, when module exit */
+	regulator_put(regu);
 exit:
 	return ret;
 }
 
 static int tv_power_disable(char *name)
 {
+	struct regulator *regu = NULL;
 	int ret = 0;
 
 	if (!tv_power_enable_mask) {
 		ret = 0;
 		goto exit;
 	}
-	ret = disp_sys_power_disable(name);
 
+	regu = regulator_get(NULL, name);
+	if (IS_ERR(regu)) {
+		TV_ERR("%s: some error happen, fail to get regulator %s\n",
+			__func__, name);
+		goto exit;
+	}
+
+	/*disalbe regulator*/
+	ret = regulator_disable(regu);
+	if (0 != ret) {
+		TV_ERR("%s: some error happen, fail to disable regulator %s!\n",
+			__func__, name);
+		goto exit1;
+	}
 	tv_power_enable_mask = 0;
+exit1:
+	/*put regulater, when module exit*/
+	regulator_put(regu);
 exit:
 	return ret;
 }
+#else
+static int tv_power_enable(char *name)
+{
+	return 0;
+}
+static int tv_power_disable(char *name)
+{
+	return 0;
+}
+#endif
 
 static s32 __get_offset(struct device_node *node, int i)
 {
@@ -934,16 +899,11 @@ s32 tv_init(struct platform_device *pdev)
 	u32 cali_value = 0, sel = pdev->id;
 	char sub_key[20] = {0};
 	unsigned int value, output_type, output_mode;
-	unsigned int interface = 0, fake_detect = 0;
+	unsigned int interface = 0;
 	unsigned long rate = 0;
 #if defined(CONFIG_ARCH_SUN8IW7)
 	s32 sid_turn = 0;
 #endif
-
-	ret = of_property_read_u32(pdev->dev.of_node, "fake_detect",
-					&fake_detect);
-	if (ret >= 0)
-		tv_fake_detect = fake_detect;
 
 	ret = of_property_read_u32(pdev->dev.of_node, "interface",
 					&interface);
@@ -1097,9 +1057,6 @@ s32 tv_init(struct platform_device *pdev)
 				TV_ERR(
 				    "fail to set rate(%ld) fo tve%d's clock!\n",
 				    rate, sel);
-#if defined(CONFIG_TVE_EMI_ISSUE)
-			clk_set_rate(g_tv_info.screen[sel].clk, 54000000);
-#endif
 		}
 
 		tve_low_set_reg_base(sel, g_tv_info.screen[sel].base_addr);
@@ -1112,10 +1069,6 @@ s32 tv_init(struct platform_device *pdev)
 			&& (output_type != DISP_OUTPUT_TYPE_VGA))
 			tve_low_init(sel, &g_tv_info.screen[sel].dac_no[0],
 					cali, offset,
-					g_tv_info.screen[sel].dac_type,
-					g_tv_info.screen[sel].dac_num);
-		else
-			tve_low_sw_init(sel, &g_tv_info.screen[sel].dac_no[0],
 					g_tv_info.screen[sel].dac_type,
 					g_tv_info.screen[sel].dac_num);
 
@@ -1256,7 +1209,6 @@ s32 tv_enable(u32 sel)
 		tve_low_set_tv_mode(sel, g_tv_info.screen[sel].tv_mode,
 					cali);
 		tve_low_dac_enable(sel);
-		tve_adjust_resync(sel, tv_resync_pixel_num, tv_resync_line_num);
 		tve_low_open(sel);
 		mutex_lock(&g_tv_info.screen[sel].mlock);
 		g_tv_info.screen[sel].enable = 1;
@@ -1275,9 +1227,6 @@ s32 tv_disable(u32 sel)
 		tve_low_close(sel);
 		tve_low_dac_autocheck_enable(sel);
 		g_tv_info.screen[sel].enable = 0;
-#if defined(CONFIG_TVE_EMI_ISSUE)
-		clk_set_rate(g_tv_info.screen[sel].clk, 54000000);
-#endif
 	}
 	mutex_unlock(&g_tv_info.screen[sel].mlock);
 	if (is_vga_mode(g_tv_info.screen[sel].tv_mode))

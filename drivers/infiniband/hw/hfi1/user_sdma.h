@@ -53,11 +53,6 @@
 
 extern uint extended_psn;
 
-enum pkt_q_sdma_state {
-	SDMA_PKT_Q_ACTIVE,
-	SDMA_PKT_Q_DEFERRED,
-};
-
 struct hfi1_user_sdma_pkt_q {
 	struct list_head list;
 	unsigned ctxt;
@@ -70,7 +65,7 @@ struct hfi1_user_sdma_pkt_q {
 	struct user_sdma_request *reqs;
 	unsigned long *req_in_use;
 	struct iowait busy;
-	enum pkt_q_sdma_state state;
+	unsigned state;
 	wait_queue_head_t wait;
 	unsigned long unpinned;
 	struct mmu_rb_handler *handler;

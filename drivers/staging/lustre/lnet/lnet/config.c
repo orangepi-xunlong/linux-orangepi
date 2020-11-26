@@ -354,7 +354,8 @@ lnet_parse_networks(struct list_head *nilist, char *networks)
 				CERROR("Can't allocate net interface name\n");
 				goto failed;
 			}
-			strcpy(ni->ni_interfaces[niface], iface);
+			strncpy(ni->ni_interfaces[niface], iface,
+				strlen(iface));
 			niface++;
 			iface = comma;
 		} while (iface);

@@ -155,5 +155,3 @@ static int __init hi6220_reset_init(void)
 }
 
 postcore_initcall(hi6220_reset_init);
-
-MODULE_LICENSE("GPL v2");

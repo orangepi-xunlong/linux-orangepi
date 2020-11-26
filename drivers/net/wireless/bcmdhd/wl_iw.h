@@ -2,13 +2,13 @@
  * Linux Wireless Extensions support
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -35,8 +35,6 @@
 #include <typedefs.h>
 #include <ethernet.h>
 #include <wlioctl.h>
-#include <dngl_stats.h>
-#include <dhd.h>
 
 #define WL_SCAN_PARAMS_SSID_MAX 	10
 #define GET_SSID			"SSID="
@@ -125,15 +123,14 @@ extern const struct iw_handler_def wl_iw_handler_def;
 extern int wl_iw_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
 extern void wl_iw_event(struct net_device *dev, wl_event_msg_t *e, void* data);
 extern int wl_iw_get_wireless_stats(struct net_device *dev, struct iw_statistics *wstats);
+int wl_iw_attach(struct net_device *dev, void * dhdp);
 int wl_iw_send_priv_event(struct net_device *dev, char *flag);
 #ifdef WL_ESCAN
 int wl_iw_handle_scanresults_ies(char **event_p, char *end,
 	struct iw_request_info *info, wl_bss_info_t *bi);
-#else
-int wl_iw_attach(struct net_device *dev, dhd_pub_t *dhdp);
-void wl_iw_detach(dhd_pub_t *dhdp);
-void wl_iw_down(dhd_pub_t *dhdp);
 #endif
+
+void wl_iw_detach(void);
 
 #define CSCAN_COMMAND				"CSCAN "
 #define CSCAN_TLV_PREFIX 			'S'

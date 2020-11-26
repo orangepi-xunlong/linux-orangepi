@@ -26,20 +26,15 @@ struct sunxi_reg_ops {
 	void (*reg_writel)(u32 val, void __iomem *reg);
 };
 
-#ifdef CONFIG_PM_SLEEP
-extern struct list_head clk_periph_reg_cache_list;
-extern struct list_head clk_factor_reg_cache_list;
-#endif
-
 extern spinlock_t clk_lock;
 extern void __iomem *sunxi_clk_base;
 extern void __iomem *sunxi_clk_cpus_base;
 
 void __init sunxi_clocks_init(struct device_node *node);
-void __init sunxi_cpu_clocks_init(struct device_node *node);
-
 struct factor_init_data *sunxi_clk_get_factor_by_name(const char *name);
 struct periph_init_data *sunxi_clk_get_periph_by_name(const char *name);
+
+
 struct periph_init_data *sunxi_clk_get_periph_cpus_by_name(const char *name);
 
 #endif

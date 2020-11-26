@@ -49,12 +49,6 @@ enum suspend_state {
 #endif
 };
 
-enum suspend_lock_state {
-	XRADIO_SUSPEND_LOCK_IDEL = 0,
-	XRADIO_SUSPEND_LOCK_SUSPEND,
-	XRADIO_SUSPEND_LOCK_OTHERS,
-};
-
 int xradio_pm_init(struct xradio_pm_state *pm, struct xradio_common *priv);
 void xradio_pm_deinit(struct xradio_pm_state *pm);
 void xradio_pm_stay_awake(struct xradio_pm_state *pm, unsigned long tmo);

@@ -13,9 +13,8 @@
 #include "combo_rx_reg_i.h"
 #include "combo_rx_reg.h"
 #include "../../utility/vin_io.h"
-#include "../../platform/platform_cfg.h"
 
-volatile void *cmb_rx_base_addr[VIN_MAX_MIPI];
+volatile void *cmb_rx_base_addr[MAX_MAP_NUM_PHY];
 
 int cmb_rx_set_base_addr(unsigned int sel, unsigned long addr)
 {
@@ -115,19 +114,15 @@ void cmb_rx_phya_ck_pol(unsigned int sel, unsigned int pol)
 {
 }
 
-void cmb_rx_mipi_stl_time(unsigned int sel, unsigned char time_hs)
-{
-}
-
 void cmb_rx_phya_offset(unsigned int sel, unsigned int offset)
 {
 }
 
-void cmb_rx_phya_signal_dly_en(unsigned int sel, unsigned int en)
+void cmb_rx_phya_singal_dly_en(unsigned int sel, unsigned int en)
 {
 }
 
-void cmb_rx_phya_signal_dly_ctr(unsigned int sel, struct phya_signal_dly_ctr *phya_signal_dly)
+void cmb_rx_phya_singal_dly_ctr(unsigned int sel, struct phya_signal_dly_ctr *phya_signal_dly)
 {
 }
 

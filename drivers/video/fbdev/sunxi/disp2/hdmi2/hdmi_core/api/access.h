@@ -17,23 +17,13 @@
 
 #define ADDR_JUMP 4
 
-#ifdef __FPGA_PLAT__
-/* SDL: 100K */
-#define I2C_SFR_CLK 2500
-#define I2CDDC_TIMEOUT 100
-#define I2C_MIN_FS_SCL_HIGH_TIME   61
-#define I2C_MIN_FS_SCL_LOW_TIME    132
-#define I2C_MIN_SS_SCL_HIGH_TIME   4592
-#define I2C_MIN_SS_SCL_LOW_TIME    5102
-#else
-/* SDL: 50K */
 #define I2C_SFR_CLK 2400
 #define I2CDDC_TIMEOUT 200
 #define I2C_MIN_FS_SCL_HIGH_TIME   600/* 61 //63 //75 */
 #define I2C_MIN_FS_SCL_LOW_TIME    1300/* 132 //137 //163 */
 #define I2C_MIN_SS_SCL_HIGH_TIME   9184 /*5333*/ /*4000*//* 4737 //5625 */
 #define I2C_MIN_SS_SCL_LOW_TIME    10204 /*4700*/ /* 5263 //6250 */
-#endif
+
 /*****************************************************************************
  *                                                                           *
  *                              E-DDC Registers                        *
@@ -235,6 +225,13 @@ void dev_write_mask(hdmi_tx_dev_t *dev, u32 addr, u8 mask, u8 data);
  */
 int access_Initialize(hdmi_tx_dev_t *dev);
 
+/**
+ *Close communications with development board and free resources
+ *
+ *@return TRUE  if successful.
+ */
+int access_Standby(hdmi_tx_dev_t *dev);
+
 
 void register_system_functions(struct system_functions *functions);
 
@@ -289,8 +286,5 @@ int ddc_read(hdmi_tx_dev_t *dev, u8 i2cAddr, u8 segment, u8 pointer,
  */
 int ddc_write(hdmi_tx_dev_t *dev, u8 i2cAddr, u8 addr, u8 len, u8 *data);
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
-int ddc_read_hdcp2Version(hdmi_tx_dev_t *dev, u8 *data);
-#endif
 
 #endif				/* ACCESS_H_ */

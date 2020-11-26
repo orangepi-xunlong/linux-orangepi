@@ -1840,7 +1840,7 @@ static struct sta_info *rtw_joinbss_update_stainfo(_adapter *padapter, struct wl
 		psta = rtw_alloc_stainfo(pstapriv, pnetwork->network.MacAddress);
 
 	if (psta) { /* update ptarget_sta */
-		RTW_INFO("%s\n", __func__);
+		RTW_INFO("%s\n", __FUNCTION__);
 
 		psta->cmn.aid  = pnetwork->join_res;
 
@@ -1930,7 +1930,7 @@ static void rtw_joinbss_update_network(_adapter *padapter, struct wlan_network *
 	struct mlme_priv	*pmlmepriv = &(padapter->mlmepriv);
 	struct wlan_network  *cur_network = &(pmlmepriv->cur_network);
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 
 
@@ -2764,7 +2764,7 @@ void rtw_join_timeout_handler(void *ctx)
 
 
 
-	RTW_INFO("%s, fw_state=%x\n", __func__, get_fwstate(pmlmepriv));
+	RTW_INFO("%s, fw_state=%x\n", __FUNCTION__, get_fwstate(pmlmepriv));
 
 	if (RTW_CANNOT_RUN(adapter))
 		return;
@@ -2778,10 +2778,10 @@ void rtw_join_timeout_handler(void *ctx)
 			rtw_dec_to_roam(adapter);
 			if (rtw_to_roam(adapter) != 0) { /* try another */
 				int do_join_r;
-				RTW_INFO("%s try another roaming\n", __func__);
+				RTW_INFO("%s try another roaming\n", __FUNCTION__);
 				do_join_r = rtw_do_join(adapter);
 				if (_SUCCESS != do_join_r) {
-					RTW_INFO("%s roaming do_join return %d\n", __func__ , do_join_r);
+					RTW_INFO("%s roaming do_join return %d\n", __FUNCTION__ , do_join_r);
 					continue;
 				}
 				break;
@@ -2793,7 +2793,7 @@ void rtw_join_timeout_handler(void *ctx)
 					RTW_INFO("change to widi listen\n");
 				}
 #endif /* CONFIG_INTEL_WIDI */
-				RTW_INFO("%s We've try roaming but fail\n", __func__);
+				RTW_INFO("%s We've try roaming but fail\n", __FUNCTION__);
 #ifdef CONFIG_RTW_80211R
 				rtw_clr_ft_flags(adapter, RTW_FT_SUPPORTED|RTW_FT_OVER_DS_SUPPORTED);
 				rtw_reset_ft_status(adapter);
@@ -3382,7 +3382,7 @@ int rtw_select_roaming_candidate(struct mlme_priv *mlme)
 			receive_disconnect(adapter, mlme->cur_network_scanned->network.MacAddress
 								, WLAN_REASON_EXPIRATION_CHK, _FALSE);
 #endif
-		RTW_INFO("%s: return _FAIL(candidate == NULL)\n", __func__);
+		RTW_INFO("%s: return _FAIL(candidate == NULL)\n", __FUNCTION__);
 		ret = _FAIL;
 		goto exit;
 	} else {
@@ -3392,11 +3392,11 @@ int rtw_select_roaming_candidate(struct mlme_priv *mlme)
 
 		rtw_get_rson_struct(&(candidate->network), &rson_curr);
 		rson_score = rtw_cal_rson_score(&rson_curr, candidate->network.Rssi);
-		RTW_INFO("%s: candidate: %s("MAC_FMT", ch:%u) rson_score:%d\n", __func__,
+		RTW_INFO("%s: candidate: %s("MAC_FMT", ch:%u) rson_score:%d\n", __FUNCTION__,
 			candidate->network.Ssid.Ssid, MAC_ARG(candidate->network.MacAddress),
 			 candidate->network.Configuration.DSConfig, rson_score);
 #else
-		RTW_INFO("%s: candidate: %s("MAC_FMT", ch:%u)\n", __func__,
+		RTW_INFO("%s: candidate: %s("MAC_FMT", ch:%u)\n", __FUNCTION__,
 			candidate->network.Ssid.Ssid, MAC_ARG(candidate->network.MacAddress),
 			 candidate->network.Configuration.DSConfig);
 #endif
@@ -3555,14 +3555,14 @@ int rtw_select_and_join_from_scanned_queue(struct mlme_priv *pmlmepriv)
 	}
 
 	if (candidate == NULL) {
-		RTW_INFO("%s: return _FAIL(candidate == NULL)\n", __func__);
+		RTW_INFO("%s: return _FAIL(candidate == NULL)\n", __FUNCTION__);
 #ifdef CONFIG_WOWLAN
 		_clr_fwstate_(pmlmepriv, _FW_LINKED | _FW_UNDER_LINKING);
 #endif
 		ret = _FAIL;
 		goto exit;
 	} else {
-		RTW_INFO("%s: candidate: %s("MAC_FMT", ch:%u)\n", __func__,
+		RTW_INFO("%s: candidate: %s("MAC_FMT", ch:%u)\n", __FUNCTION__,
 			candidate->network.Ssid.Ssid, MAC_ARG(candidate->network.MacAddress),
 			 candidate->network.Configuration.DSConfig);
 		goto candidate_exist;
@@ -3572,11 +3572,11 @@ candidate_exist:
 
 	/* check for situation of  _FW_LINKED */
 	if (check_fwstate(pmlmepriv, _FW_LINKED) == _TRUE) {
-		RTW_INFO("%s: _FW_LINKED while ask_for_joinbss!!!\n", __func__);
+		RTW_INFO("%s: _FW_LINKED while ask_for_joinbss!!!\n", __FUNCTION__);
 
 #if 0 /* for WPA/WPA2 authentication, wpa_supplicant will expect authentication from AP, it is needed to reconnect AP... */
 		if (is_same_network(&pmlmepriv->cur_network.network, &candidate->network)) {
-			RTW_INFO("%s: _FW_LINKED and is same network, it needn't join again\n", __func__);
+			RTW_INFO("%s: _FW_LINKED and is same network, it needn't join again\n", __FUNCTION__);
 
 			rtw_indicate_connect(adapter);/* rtw_indicate_connect again */
 
@@ -4436,7 +4436,7 @@ unsigned int rtw_restructure_ht_ie(_adapter *padapter, u8 *in_ie, u8 *out_ie, ui
 		rtw_hal_get_def_var(padapter, HAL_DEF_RX_PACKET_OFFSET, &rx_packet_offset);
 		rtw_hal_get_def_var(padapter, HAL_DEF_MAX_RECVBUF_SZ, &max_recvbuf_sz);
 		if (max_recvbuf_sz - rx_packet_offset >= (8191 - 256)) {
-			RTW_INFO("%s IEEE80211_HT_CAP_MAX_AMSDU is set\n", __func__);
+			RTW_INFO("%s IEEE80211_HT_CAP_MAX_AMSDU is set\n", __FUNCTION__);
 			ht_capie.cap_info = ht_capie.cap_info | IEEE80211_HT_CAP_MAX_AMSDU;
 		}
 	}
@@ -4662,7 +4662,7 @@ void rtw_update_ht_cap(_adapter *padapter, u8 *pie, uint ie_len, u8 channel)
 		for (i = 0; i < 16; i++)
 			pmlmeinfo->HT_caps.HT_cap_element.MCS_rate[i] &= MCS_rate_1R[i];
 #endif
-		RTW_INFO("%s(): WLAN_HT_CAP_SM_PS_STATIC\n", __func__);
+		RTW_INFO("%s(): WLAN_HT_CAP_SM_PS_STATIC\n", __FUNCTION__);
 	}
 
 	/*  */
@@ -4692,7 +4692,7 @@ void rtw_issue_addbareq_cmd_tdls(_adapter *padapter, struct xmit_frame *pxmitfra
 				issued |= (phtpriv->candidate_tid_bitmap >> priority) & 0x1;
 
 				if (0 == issued) {
-					RTW_INFO("[%s], p=%d\n", __func__, priority);
+					RTW_INFO("[%s], p=%d\n", __FUNCTION__, priority);
 					ptdls_sta->htpriv.candidate_tid_bitmap |= BIT((u8)priority);
 					rtw_addbareq_cmd(padapter, (u8)priority, pattrib->dst);
 				}
@@ -4838,7 +4838,7 @@ void _rtw_roaming(_adapter *padapter, struct wlan_network *tgt_network)
 				if (rtw_to_roam(padapter) > 0)
 					continue;
 				else {
-					RTW_INFO("%s(%d) -to roaming fail, indicate_disconnect\n", __func__, __LINE__);
+					RTW_INFO("%s(%d) -to roaming fail, indicate_disconnect\n", __FUNCTION__, __LINE__);
 #ifdef CONFIG_RTW_80211R
 					rtw_clr_ft_flags(padapter, RTW_FT_SUPPORTED|RTW_FT_OVER_DS_SUPPORTED);
 					rtw_reset_ft_status(padapter);

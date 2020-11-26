@@ -486,8 +486,7 @@ config PWM_SUNXI
 config PWM_SUNXI_NEW
 	tristate "Sunxi Enhance PWM support"
 	depends on PWM && ARCH_SUNXI && (ARCH_SUN8IW10 || ARCH_SUN8IW11 || \
-			ARCH_SUN8IW12 || ARCH_SUN50IW8 || ARCH_SUN8IW17 || \
-			ARCH_SUN50IW9 || ARCH_SUN50IW10) || \
+			ARCH_SUN8IW12 || ARCH_SUN50IW8 || ARCH_SUN8IW17) || \
 			ARCH_SUN8IW18
 	help
 	  Enhance PWM framework driver for sunxi.

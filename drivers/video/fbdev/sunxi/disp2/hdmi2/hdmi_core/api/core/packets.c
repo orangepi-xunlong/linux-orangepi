@@ -161,12 +161,10 @@ void fc_OutPixelRepetition(hdmi_tx_dev_t *dev, u8 pr)
 	dev_write_mask(dev, FC_PRCONF, FC_PRCONF_OUTPUT_PR_FACTOR_MASK, pr);
 }
 
-#if 0
 u32 fc_GetInfoFrameSatus(hdmi_tx_dev_t *dev)
 {
 	return dev_read(dev, FC_AVICONF0);
 }
-#endif
 
 void fc_avi_config(hdmi_tx_dev_t *dev, videoParams_t *videoParams)
 {
@@ -219,8 +217,14 @@ void fc_avi_config(hdmi_tx_dev_t *dev, videoParams_t *videoParams)
 		else
 			fc_VideoCode(dev, 0);
 	}*/
-
+#if defined(__LINUX_PLAT__)
 	fc_VideoCode(dev, videoParams->mCea_code);
+#else
+	if (dtd->mCode != (u8) (-1)) {
+		fc_VideoCode(dev, dtd->mCode);
+	} else
+		fc_VideoCode(dev, 0);
+#endif
 	if (videoParams->mColorimetry == EXTENDED_COLORIMETRY) {
 		/* ext colorimetry valid */
 		if (videoParams->mExtColorimetry != (u8) (-1)) {
@@ -405,7 +409,6 @@ void fc_isrc_isrc2_codes(hdmi_tx_dev_t *dev, u8 *codes, u8 length)
 		dev_write(dev, FC_ISCR2_0 - c, codes[c]);
 }
 
-#if 0
 void fc_packets_QueuePriorityHigh(hdmi_tx_dev_t *dev, u8 value)
 {
 	LOG_TRACE1(value);
@@ -418,7 +421,6 @@ void fc_packets_QueuePriorityLow(hdmi_tx_dev_t *dev, u8 value)
 	LOG_TRACE1(value);
 	dev_write_mask(dev, FC_CTRLQLOW, FC_CTRLQLOW_ONLOWATTENDED_MASK, value);
 }
-#endif
 
 void fc_packets_MetadataFrameInterpolation(hdmi_tx_dev_t *dev, u8 value)
 {
@@ -510,6 +512,7 @@ int fc_spd_config(hdmi_tx_dev_t *dev, fc_spd_info_t *spd_data)
 	fc_packets_AutoSend(dev, 0, SPD_TX);/*prevent sending half the info.*/
 
 	if (spd_data->vName == 0) {
+		error_set(ERR_INVALID_PARAM_VENDOR_NAME);
 		pr_err("Error:invalid parameter\n");
 		return FALSE;
 	}
@@ -518,6 +521,7 @@ int fc_spd_config(hdmi_tx_dev_t *dev, fc_spd_info_t *spd_data)
 		pr_err("Error:vendor name truncated\n");
 	}
 	if (spd_data->pName == 0) {
+		error_set(ERR_INVALID_PARAM_PRODUCT_NAME);
 		pr_err("Error:invalid parameter\n");
 		return FALSE;
 	}
@@ -573,14 +577,12 @@ void fc_vsif_enable(hdmi_tx_dev_t *dev, u8 enable)
 	dev_write_mask(dev, FC_PACKET_TX_EN, FC_PACKET_TX_EN_AUT_TX_EN_MASK, enable);
 }
 
-#if 0
 int packets_Initialize(hdmi_tx_dev_t *dev)
 {
 	LOG_TRACE();
 	packets_DisableAllPackets(dev);
 	return TRUE;
 }
-#endif
 
 /*packets configure is the same as infoframe configure*/
 int packets_Configure(hdmi_tx_dev_t *dev, videoParams_t *video,
@@ -614,6 +616,7 @@ int packets_Configure(hdmi_tx_dev_t *dev, videoParams_t *video,
 							sizeof(data), 1);
 			fc_vsif_enable(dev, 1);
 		} else {
+			error_set(ERR_3D_STRUCT_NOT_SUPPORTED);
 			pr_err("Error:3D structure not supported %d\n",
 							 struct_3d);
 			return FALSE;
@@ -751,11 +754,6 @@ void packets_AvMute(hdmi_tx_dev_t *dev, u8 enable)
 	dev_write_mask(dev, FC_GCP, FC_GCP_CLEAR_AVMUTE_MASK, (enable ? 0 : 1));
 }
 
-u8 packets_get_AvMute(hdmi_tx_dev_t *dev)
-{
-	return dev_read_mask(dev, FC_GCP, FC_GCP_SET_AVMUTE_MASK);
-}
-
 void packets_IsrcStatus(hdmi_tx_dev_t *dev, u8 status)
 {
 	LOG_TRACE();
@@ -817,7 +815,6 @@ int packets_VendorSpecificInfoFrame(hdmi_tx_dev_t *dev, u32 oui,
 	return TRUE;
 }
 
-#if 0
 u8 packets_AudioMetaDataPacket(hdmi_tx_dev_t *dev,
 				audioMetaDataPacket_t *audioMetaDataPckt)
 {
@@ -825,7 +822,6 @@ u8 packets_AudioMetaDataPacket(hdmi_tx_dev_t *dev,
 	halAudioMultistream_MetaDataPacketBody(dev, audioMetaDataPckt);
 	return TRUE;
 }
-#endif
 
 void packets_colorimetry_config(hdmi_tx_dev_t *dev, videoParams_t *video)
 {

@@ -173,13 +173,6 @@ config DMA_SUNXI
 	  Support for the DMA engine found on Sunxi family SOCs.
 	  This DMA engine can only be used with on-chip devices.
 
-config DMA_SUNXI_SUPPORT_4G
-	tristate "Support sunxi SOC DMA to access 4G address"
-	select DMA_SUNXI
-	help
-	  Support for the DMA engine found on Sunxi family SOCs
-	  to access 4G address.
-
 config EP93XX_DMA
 	bool "Cirrus Logic EP93xx DMA support"
 	depends on ARCH_EP93XX || COMPILE_TEST

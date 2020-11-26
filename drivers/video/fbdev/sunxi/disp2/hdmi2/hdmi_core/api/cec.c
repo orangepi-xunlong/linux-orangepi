@@ -7,9 +7,13 @@
  * License version 2.  This program is licensed "as is" without any
  * warranty of any kind, whether express or implied.
  */
-#include <linux/delay.h>
+
 #include "cec.h"
 #include "core/irq.h"
+#if defined(__LINUX_PLAT__)
+#include <linux/delay.h>
+
+
 
 /******************************************************************************
  *
@@ -35,7 +39,6 @@ static int cec_msgRx(hdmi_tx_dev_t *dev, char *buf, unsigned size,
 	return retval;
 }
 
-extern u32 hdmi_enable_mask;
 /**
  * Send a message (retry in case of failure)
  * @param dev:   address and device information
@@ -47,16 +50,13 @@ extern u32 hdmi_enable_mask;
 static int cec_msgTx(hdmi_tx_dev_t *dev, char *buf, unsigned size,
 		 unsigned retry)
 {
-	int timeout = 10;
+	int timeout = 40;
 	u8 status = 0;
 	int i, retval = -1;
 
 	if (size > 0) {
 		if (cec_CfgTxBuf(dev, buf, size) == (int)size) {
 			for (i = 0; i < (int)retry; i++) {
-				if (!hdmi_enable_mask)
-					return 0;
-
 				if (cec_CfgSignalFreeTime(dev, i ? 3 : 5))
 					break;
 
@@ -65,26 +65,19 @@ static int cec_msgTx(hdmi_tx_dev_t *dev, char *buf, unsigned size,
 						| CEC_MASK_ARB_LOST_MASK
 						| CEC_MASK_ERROR_INITIATOR_MASK);
 				cec_SetSend(dev);
-				msleep(1);
-
-				timeout = 10;
+				udelay(100);
 				while (cec_GetSend(dev) != 0 && timeout) {
 					msleep(10);
 					timeout--;
 				}
 
-				if (timeout == 0) {
-					pr_err("cec config err, can NOT send cec\n");
-					return 0;
-				}
-
-				msleep(1);
+				//msleep(100);
 				status = dev_read(dev, IH_CEC_STAT0);
 				dev_write(dev, IH_CEC_STAT0, status);
 				if ((status & CEC_MASK_ARB_LOST_MASK)
 					|| (status & CEC_MASK_ERROR_INITIATOR_MASK)
 					|| (status & CEC_MASK_ERROR_FLOW_MASK)) {
-					CEC_INF("CEC Send error: IH Status: 0x%02x\n", status);
+					pr_info("CEC Send error: IH Status: 0x%02x\n", status);
 					continue;
 				} else if (status & CEC_MASK_NACK_MASK) {
 					retval = 1;
@@ -93,10 +86,10 @@ static int cec_msgTx(hdmi_tx_dev_t *dev, char *buf, unsigned size,
 					retval = 0;
 					break;
 				}
+
 			}
 		}
 	}
-
 	return retval;
 }
 
@@ -474,8 +467,7 @@ int cec_ctrlReceiveFrame(hdmi_tx_dev_t *dev, char *buf, unsigned size)
  * @param size: request size [byte] (must be less than 15)
  * @param src:  initiator logical address
  * @param dst:  destination logical address
- * @return error code:
- *    -1:ERROR     0: send OK     1: NACK
+ * @return error code or request size [byte]
  */
 int cec_ctrlSendFrame(hdmi_tx_dev_t *dev, char *buf, unsigned size,
 		  unsigned src, unsigned dst)
@@ -495,3 +487,4 @@ int cec_ctrlSendFrame(hdmi_tx_dev_t *dev, char *buf, unsigned size,
 
 	return cec_msgTx(dev, tmp, size + 1, 5);
 }
+#endif

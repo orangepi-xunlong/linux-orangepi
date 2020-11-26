@@ -227,9 +227,9 @@ void gtp_set_io_int(void)
 		config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC,0xFFFF);
 	    pin_config_get(SUNXI_PINCTRL,irq_pin_name,&config);
 
-		if (6 != SUNXI_PINCFG_UNPACK_VALUE(config)) {
-		      config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 6);
-			  pin_config_set(SUNXI_PINCTRL, irq_pin_name, config);
+		if (4 != SUNXI_PINCFG_UNPACK_VALUE(config)){		
+		      config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC,4);		 
+			  pin_config_set(SUNXI_PINCTRL,irq_pin_name,config);
 	    }
         
 }
@@ -1287,44 +1287,32 @@ static void goodix_ts_late_resume(struct early_suspend *h)
 static int goodix_ts_suspend(struct device *dev)
 {
 	struct goodix_ts_data *ts = dev_get_drvdata(dev);
-	s8 ret = -1;
-
-	printk("%s goodix_ts_suspend\n", goodix_ts_name);
+        s8 ret = -1;	
+        printk("%s goodix_ts_suspend\n", goodix_ts_name);
 #if GTP_ESD_PROTECT
-	ts->gtp_is_suspend = 1;
-	cancel_delayed_work_sync(&gtp_esd_check_work);
+        ts->gtp_is_suspend = 1;
+        cancel_delayed_work_sync(&gtp_esd_check_work);
 #endif
 
-	/*
-	ret = input_set_int_enable(&(config_info.input_type), 0);
-	if (ret < 0)
+        ret = input_set_int_enable(&(config_info.input_type), 0);
+	    if (ret < 0)
 		dprintk(DEBUG_SUSPEND,"%s irq disable failed\n", goodix_ts_name);
-	*/
-	gtp_irq_disable(ts);
-	cancel_work_sync(&goodix_resume_work);
-	flush_workqueue(goodix_resume_wq);
-	ret = cancel_work_sync(&ts->work);
-	flush_workqueue(goodix_wq);
-
-	ret = gtp_enter_sleep(ts);
-	if (ret < 0) {
-		printk("GTP suspend failed.");
-	}
-
-	msleep(58);
-
-	input_set_power_enable(&(config_info.input_type), 0);
-	__gpio_set_value(config_info.wakeup_gpio.gpio, 0);
+        cancel_work_sync(&goodix_resume_work);
+    	flush_workqueue(goodix_resume_wq);
+        ret = cancel_work_sync(&ts->work);
+        flush_workqueue(goodix_wq);
+    
+	   ret = gtp_enter_sleep(ts);
+        if (ret < 0) {
+                printk("GTP suspend failed.");
+        }
 	return 0;
 }
 
 static int goodix_ts_resume(struct device *dev)
 {
 	printk("%s goodix_ts_resume\n", goodix_ts_name);
-	__gpio_set_value(config_info.wakeup_gpio.gpio, 1);
-	input_set_power_enable(&(config_info.input_type), 1);
-	msleep(10);
-	queue_work(goodix_resume_wq, &goodix_resume_work);//gandy
+        queue_work(goodix_resume_wq, &goodix_resume_work);//gandy
 
 #if GTP_ESD_PROTECT
 	struct goodix_ts_data *ts = dev_get_drvdata(dev);

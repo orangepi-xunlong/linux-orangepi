@@ -16,7 +16,6 @@
 #include <linux/etherdevice.h>
 #include <linux/miscdevice.h>
 #include <linux/capability.h>
-#include <linux/pm_wakeirq.h>
 
 #include "sunxi-rfkill.h"
 
@@ -110,7 +109,7 @@ int sunxi_wlan_get_oob_irq(void)
 	pdev = wlan_data->pdev;
 
 	host_oob_irq = gpio_to_irq(wlan_data->gpio_wlan_hostwake);
-	if (host_oob_irq < 0)
+	if (IS_ERR_VALUE(host_oob_irq))
 		dev_err(&pdev->dev, "map gpio [%d] to virq failed, errno = %d\n",
 			wlan_data->gpio_wlan_hostwake, host_oob_irq);
 
@@ -234,9 +233,13 @@ static ssize_t power_state_store(struct device *dev,
 	if (state > 1)
 		return -EINVAL;
 
+	mutex_lock(&sunxi_wlan_mutex);
 	if (state != wlan_data->power_state) {
-		sunxi_wlan_set_power(state);
+		err = sunxi_wlan_on(wlan_data, state);
+		if (err)
+			dev_err(dev, "set power failed\n");
 	}
+	mutex_unlock(&sunxi_wlan_mutex);
 
 	return count;
 }
@@ -254,6 +257,8 @@ static ssize_t scan_device_store(struct device *dev,
 	err = kstrtoul(buf, 0, &state);
 	if (err)
 		return err;
+
+	sunxi_wl_chipen_set(WL_DEV_WIFI, state);
 
 	dev_info(dev, "start scan device on bus_index: %d\n",
 			wlan_data->bus_index);
@@ -294,8 +299,6 @@ static int sunxi_wlan_probe(struct platform_device *pdev)
 	u32 val;
 	const char *power, *io_regulator;
 	int ret = 0;
-	char *pctrl_name = PINCTRL_STATE_DEFAULT;
-	struct pinctrl_state *pctrl_state = NULL;
 
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (!dev)
@@ -310,7 +313,6 @@ static int sunxi_wlan_probe(struct platform_device *pdev)
 		case 0:
 		case 1:
 		case 2:
-		case 3:
 			data->bus_index = val;
 			break;
 		default:
@@ -443,7 +445,7 @@ static int sunxi_wlan_probe(struct platform_device *pdev)
 			return ret;
 		}
 
-		ret = gpio_direction_input(data->gpio_wlan_hostwake);
+		gpio_direction_input(data->gpio_wlan_hostwake);
 		if (ret < 0) {
 			dev_err(dev,
 				"can't request input direction wlan_hostwake gpio %d\n",
@@ -451,28 +453,11 @@ static int sunxi_wlan_probe(struct platform_device *pdev)
 			return ret;
 		}
 
-		/*
-		 * wakeup_source relys on wlan_hostwake, if wlan_hostwake gpio
-		 * isn't configured, then whether wakeup_source is configured
-		 * or not is unmeaningful.
-		 */
-		if (!of_property_read_u32(np, "wakeup_source",
-			&data->wakeup_enable) && (data->wakeup_enable == 0)) {
-			dev_warn(dev, "wakeup source is disabled!\n");
-		} else {
-			ret = device_init_wakeup(dev, true);
-			if (ret < 0) {
-				dev_err(dev, "device init wakeup failed!\n");
-				return ret;
-			}
-
-			ret = dev_pm_set_wake_irq(dev, gpio_to_irq(data->gpio_wlan_hostwake));
-			if (ret < 0) {
-				dev_err(dev, "can't enable wakeup src for wlan_hostwake %d\n",
-					data->gpio_wlan_hostwake);
-				return ret;
-			}
-			data->wakeup_enable = 1;
+		ret = enable_gpio_wakeup_src(data->gpio_wlan_hostwake);
+		if (ret < 0) {
+			dev_err(dev, "can't enable wakeup src for wlan_hostwake %d\n",
+				data->gpio_wlan_hostwake);
+			return ret;
 		}
 	}
 
@@ -483,23 +468,6 @@ static int sunxi_wlan_probe(struct platform_device *pdev)
 		ret = clk_prepare_enable(data->lpo);
 		if (ret < 0)
 			dev_warn(dev, "can't enable clk\n");
-	}
-
-	data->pctrl = devm_pinctrl_get(dev);
-	if (IS_ERR(data->pctrl)) {
-		dev_warn(dev, "devm_pinctrl_get() failed!\n");
-	} else {
-		pctrl_state = pinctrl_lookup_state(data->pctrl, pctrl_name);
-		if (IS_ERR(pctrl_state)) {
-			dev_warn(dev, "pinctrl_lookup_state(%s) failed! return %p \n",
-					pctrl_name, pctrl_state);
-		} else {
-			ret = pinctrl_select_state(data->pctrl, pctrl_state);
-			if (ret < 0) {
-				dev_warn(dev, "pinctrl_select_state(%s) failed! return %d \n",
-						pctrl_name, ret);
-			}
-		}
 	}
 
 	ret = misc_register(&sunxi_wlan_dev);
@@ -527,12 +495,6 @@ static int sunxi_wlan_remove(struct platform_device *pdev)
 
 	if (!IS_ERR_OR_NULL(wlan_data->lpo))
 		clk_disable_unprepare(wlan_data->lpo);
-
-	if (wlan_data->wakeup_enable) {
-		dev_info(&pdev->dev, "Deinit wakeup source");
-		device_init_wakeup(&pdev->dev, false);
-		dev_pm_clear_wake_irq(&pdev->dev);
-	}
 
 	return 0;
 }

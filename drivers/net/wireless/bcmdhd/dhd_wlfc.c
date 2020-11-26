@@ -2,13 +2,13 @@
  * DHD PROP_TXSTATUS Module.
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -1617,7 +1617,7 @@ _dhd_wlfc_pktq_flush(athost_wl_status_info_t* ctx, struct pktq *pq,
 		ASSERT(pq->len == 0);
 } /* _dhd_wlfc_pktq_flush */
 
-#ifndef BCMDBUS
+
 /** !BCMDBUS specific function. Dequeues a packet from the caller supplied queue. */
 static void*
 _dhd_wlfc_pktq_pdeq_with_fn(struct pktq *pq, int prec, f_processpkt_t fn, void *arg)
@@ -1723,7 +1723,6 @@ _dhd_wlfc_cleanup_txq(dhd_pub_t *dhd, f_processpkt_t fn, void *arg)
 		PKTFREE(wlfc->osh, pkt, TRUE);
 	}
 } /* _dhd_wlfc_cleanup_txq */
-#endif /* !BCMDBUS */
 
 /** called during eg detach */
 void
@@ -1742,10 +1741,8 @@ _dhd_wlfc_cleanup(dhd_pub_t *dhd, f_processpkt_t fn, void *arg)
 	/*
 	*  flush sequence should be txq -> psq -> hanger/afq, hanger has to be last one
 	*/
-#ifndef BCMDBUS
 	/* flush bus->txq */
 	_dhd_wlfc_cleanup_txq(dhd, fn, arg);
-#endif /* !BCMDBUS */
 
 	/* flush psq, search all entries, include nodes as well as interfaces */
 	total_entries = sizeof(wlfc->destination_entries)/sizeof(wlfc_mac_descriptor_t);
@@ -2468,7 +2465,7 @@ _dhd_wlfc_fifocreditback_indicate(dhd_pub_t *dhd, uint8* credits)
 	return BCME_OK;
 } /* _dhd_wlfc_fifocreditback_indicate */
 
-#ifndef BCMDBUS
+
 /** !BCMDBUS specific function */
 static void
 _dhd_wlfc_suppress_txq(dhd_pub_t *dhd, f_processpkt_t fn, void *arg)
@@ -2547,7 +2544,6 @@ _dhd_wlfc_suppress_txq(dhd_pub_t *dhd, f_processpkt_t fn, void *arg)
 		_dhd_wlfc_fifocreditback_indicate(dhd, credits);
 	}
 } /* _dhd_wlfc_suppress_txq */
-#endif /* !BCMDBUS */
 
 static int
 _dhd_wlfc_dbg_senum_check(dhd_pub_t *dhd, uint8 *value)
@@ -3076,12 +3072,10 @@ dhd_wlfc_parse_header_info(dhd_pub_t *dhd, void* pktbuf, int tlv_hdr_len, uchar 
 				_dhd_wlfc_interface_update(dhd, value, type);
 			}
 
-#ifndef BCMDBUS
 			if (entry && WLFC_GET_REORDERSUPP(dhd->wlfc_mode)) {
 				/* suppress all packets for this mac entry from bus->txq */
 				_dhd_wlfc_suppress_txq(dhd, _dhd_wlfc_entrypkt_fn, entry);
 			}
-#endif /* !BCMDBUS */
 		} /* while */
 
 		if (remainder != 0 && wlfc) {
@@ -3413,15 +3407,6 @@ dhd_wlfc_commit_packets(dhd_pub_t *dhdp, f_commitpkt_t fcommit, void* commit_ctx
 
 	ctx = (athost_wl_status_info_t*)dhdp->wlfc_state;
 
-#ifdef BCMDBUS
-	if (!dhdp->up || (dhdp->busstate == DHD_BUS_DOWN)) {
-		if (pktbuf) {
-			PKTFREE(ctx->osh, pktbuf, TRUE);
-			rc = BCME_OK;
-		}
-		goto exit;
-	}
-#endif /* BCMDBUS */
 
 	if (dhdp->proptxstatus_module_ignore) {
 		if (pktbuf) {
@@ -3608,17 +3593,10 @@ dhd_wlfc_init(dhd_pub_t *dhd)
 		DHD_ERROR(("%s: query wlfc_mode succeed, fw_caps=0x%x\n", __FUNCTION__, fw_caps));
 
 		if (WLFC_IS_OLD_DEF(fw_caps)) {
-#ifdef BCMDBUS
-			mode = WLFC_MODE_HANGER;
-#else
 			/* enable proptxtstatus v2 by default */
 			mode = WLFC_MODE_AFQ;
-#endif /* BCMDBUS */
 		} else {
 			WLFC_SET_AFQ(mode, WLFC_GET_AFQ(fw_caps));
-#ifdef BCMDBUS
-			WLFC_SET_AFQ(mode, 0);
-#endif /* BCMDBUS */
 			WLFC_SET_REUSESEQ(mode, WLFC_GET_REUSESEQ(fw_caps));
 			WLFC_SET_REORDERSUPP(mode, WLFC_GET_REORDERSUPP(fw_caps));
 		}
@@ -3701,9 +3679,7 @@ dhd_wlfc_cleanup_txq(dhd_pub_t *dhd, f_processpkt_t fn, void *arg)
 		return WLFC_UNSUPPORTED;
 	}
 
-#ifndef BCMDBUS
 	_dhd_wlfc_cleanup_txq(dhd, fn, arg);
-#endif /* !BCMDBUS */
 
 	dhd_os_wlfc_unblock(dhd);
 

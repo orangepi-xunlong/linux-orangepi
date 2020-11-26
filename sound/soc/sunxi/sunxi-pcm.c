@@ -255,10 +255,10 @@ static int sunxi_pcm_hdmi_hw_params(struct snd_pcm_substream *substream,
 	struct dma_chan *chan = snd_dmaengine_pcm_get_chan(substream);
 	struct dma_slave_config slave_config;
 	struct sunxi_dma_params *dmap;
-	struct sndhdmi_priv *sndhdmi_priv = snd_soc_card_get_drvdata(card);
+	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_card_get_drvdata(card);
 	int ret;
 
-	raw_flag = sndhdmi_priv->hdmi_format;
+	raw_flag = sunxi_hdmi->hdmi_format;
 	pr_info("raw_flag value is %u\n", raw_flag);
 	dmap = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
 
@@ -451,15 +451,6 @@ static int sunxi_pcm_copy(struct snd_pcm_substream *substream, int a,
 	return ret;
 }
 
-/* For passthrough mode: using no_residue */
-snd_pcm_uframes_t sunxi_dmaengine_pcm_pointer(struct snd_pcm_substream *substream)
-{
-	if (raw_flag > 1)
-		return snd_dmaengine_pcm_pointer_no_residue(substream);
-	else
-		return snd_dmaengine_pcm_pointer(substream);
-}
-
 static struct snd_pcm_ops sunxi_pcm_ops = {
 	.open		= sunxi_pcm_open,
 	.close		= snd_dmaengine_pcm_close_release_chan,
@@ -478,11 +469,10 @@ static struct snd_pcm_ops sunxi_pcm_ops_no_residue = {
 	.hw_params	= sunxi_pcm_hdmi_hw_params,
 	.hw_free	= sunxi_pcm_hdmi_hw_free,
 	.trigger	= sunxi_pcm_trigger,
-	.pointer	= sunxi_dmaengine_pcm_pointer,
+	.pointer	= snd_dmaengine_pcm_pointer_no_residue,
 	.mmap		= sunxi_pcm_mmap,
 	.copy		= sunxi_pcm_copy,
 };
-
 static int sunxi_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
 {
 	struct snd_pcm_substream *substream = pcm->streams[stream].substream;

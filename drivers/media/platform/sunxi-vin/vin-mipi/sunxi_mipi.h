@@ -36,10 +36,20 @@ struct combo_format {
 };
 
 struct mipi_dev {
+	int use_cnt;
 	struct v4l2_subdev subdev;
 	struct media_pad mipi_pads[MIPI_PAD_NUM];
 	struct platform_device *pdev;
+	struct list_head mipi_list;
+	unsigned int id;
+	spinlock_t slock;
 	struct mutex subdev_lock;
+	void __iomem *base;
+	char if_name[20];
+	unsigned int if_type;
+	unsigned int cmb_mode;
+	unsigned int pyha_offset;
+	unsigned int terminal_resistance;
 	struct mipi_para csi2_cfg;
 	struct mipi_fmt_cfg csi2_fmt;
 	struct combo_config cmb_cfg;
@@ -48,15 +58,7 @@ struct mipi_dev {
 	struct combo_lane_map lvds_map;
 	struct combo_wdr_cfg wdr_cfg;
 	struct v4l2_mbus_framefmt format;
-	void __iomem *base;
-	char if_name[20];
-	unsigned char id;
-	unsigned char if_type;
-	unsigned char cmb_mode;
-	unsigned char pyha_offset;
-	unsigned char time_hs;
-	unsigned char terminal_resistance;
-	unsigned char sensor_flags; /*0 means choose phy0,1 means choose phy1*/
+	unsigned int sensor_flags; /*0 means choose phy0,1 means choose phy1*/
 };
 
 void sunxi_combo_set_sync_code(struct v4l2_subdev *sd,

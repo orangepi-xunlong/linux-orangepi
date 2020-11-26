@@ -377,7 +377,7 @@ config XILINX_HWICAP
 
 config R3964
 	tristate "Siemens R3964 line discipline"
-	depends on TTY && BROKEN
+	depends on TTY
 	---help---
 	  This driver allows synchronous communication with devices using the
 	  Siemens R3964 packet protocol. Unless you are dealing with special
@@ -599,6 +599,6 @@ source "drivers/char/timer_test/Kconfig"
 source "drivers/char/sunxi_tr/Kconfig"
 source "drivers/char/sunxi-di/Kconfig"
 source "drivers/char/sunxi_g2d/Kconfig"
-source "drivers/char/tda7729/Kconfig"
+
 endmenu
 

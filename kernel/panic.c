@@ -13,7 +13,6 @@
 #include <linux/kmsg_dump.h>
 #include <linux/kallsyms.h>
 #include <linux/notifier.h>
-#include <linux/vt_kern.h>
 #include <linux/module.h>
 #include <linux/random.h>
 #include <linux/ftrace.h>
@@ -30,7 +29,6 @@
 #include <linux/arisc/arisc.h>
 #include <asm/cacheflush.h>
 #include <linux/bug.h>
-#include <linux/sunxi-dump.h>
 
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
@@ -45,13 +43,6 @@ int panic_on_warn __read_mostly;
 
 int panic_timeout = CONFIG_PANIC_TIMEOUT;
 EXPORT_SYMBOL_GPL(panic_timeout);
-
-#ifdef CONFIG_SUNXI_DUMP
-int sunxi_dump = 1;
-#else
-int sunxi_dump;
-#endif
-EXPORT_SYMBOL_GPL(sunxi_dump);
 
 ATOMIC_NOTIFIER_HEAD(panic_notifier_list);
 
@@ -241,10 +232,7 @@ void panic(const char *fmt, ...)
 	if (_crash_kexec_post_notifiers)
 		__crash_kexec(NULL);
 
-#ifdef CONFIG_VT
-	unblank_screen();
-#endif
-	console_unblank();
+	bust_spinlocks(0);
 
 	/*
 	 * We may have ended up stopping the CPU holding the lock (in
@@ -302,33 +290,25 @@ void panic(const char *fmt, ...)
 #endif
 	pr_emerg("---[ end Kernel panic - not syncing: %s\n", buf);
 
-	if (sunxi_dump) {
-		unsigned int i, count;
-
-		pr_emerg("sunxi dump enabled\n");
-		sunxi_dump_group_dump();
-		pr_emerg("dump regs done\n");
-		flush_cache_all();
-		pr_emerg("flush cache done\n");
+#if defined(CONFIG_SUNXI_DUMP)
+	flush_cache_all();
+	{
+		unsigned int i;
 
 		for (i = 0; i < num_possible_cpus(); i++) {
-			count = 500;
 			if (i == smp_processor_id())
 				continue;
 
-			while (count) {
+			while (1) {
 				if (!cpu_online(i))
 					break;
 				mdelay(10);
-				count--;
 			}
-			if (count == 0)
-				pr_emerg("wait cpu%d stopped timeout 5s\n", i);
 		}
 		pr_emerg("crashdump enter\n");
 		arisc_set_crashdump_mode();
 	}
-
+#endif
 	local_irq_enable();
 	for (i = 0; ; i += PANIC_TIMER_STEP) {
 		touch_softlockup_watchdog();
@@ -639,7 +619,7 @@ EXPORT_SYMBOL(warn_slowpath_null);
  */
 __visible void __stack_chk_fail(void)
 {
-	panic("stack-protector: Kernel stack is corrupted in: %pB\n",
+	panic("stack-protector: Kernel stack is corrupted in: %p\n",
 		__builtin_return_address(0));
 }
 EXPORT_SYMBOL(__stack_chk_fail);

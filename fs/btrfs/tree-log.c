@@ -3016,12 +3016,9 @@ static void free_log_tree(struct btrfs_trans_handle *trans,
 	};
 
 	ret = walk_log_tree(trans, log, &wc);
-	if (ret) {
-		if (trans)
-			btrfs_abort_transaction(trans, ret);
-		else
-			btrfs_handle_fs_error(log->fs_info, ret, NULL);
-	}
+	/* I don't think this can happen but just in case */
+	if (ret)
+		btrfs_abort_transaction(trans, ret);
 
 	while (1) {
 		ret = find_first_extent_bit(&log->dirty_log_pages,
@@ -3343,16 +3340,9 @@ static noinline int log_dir_items(struct btrfs_trans_handle *trans,
 	}
 	btrfs_release_path(path);
 
-	/*
-	 * Find the first key from this transaction again.  See the note for
-	 * log_new_dir_dentries, if we're logging a directory recursively we
-	 * won't be holding its i_mutex, which means we can modify the directory
-	 * while we're logging it.  If we remove an entry between our first
-	 * search and this search we'll not find the key again and can just
-	 * bail.
-	 */
+	/* find the first key from this transaction again */
 	ret = btrfs_search_slot(NULL, root, &min_key, path, 0, 0);
-	if (ret != 0)
+	if (WARN_ON(ret != 0))
 		goto done;
 
 	/*
@@ -5380,33 +5370,9 @@ static int btrfs_log_all_parents(struct btrfs_trans_handle *trans,
 
 			dir_inode = btrfs_iget(root->fs_info->sb, &inode_key,
 					       root, NULL);
-			/*
-			 * If the parent inode was deleted, return an error to
-			 * fallback to a transaction commit. This is to prevent
-			 * getting an inode that was moved from one parent A to
-			 * a parent B, got its former parent A deleted and then
-			 * it got fsync'ed, from existing at both parents after
-			 * a log replay (and the old parent still existing).
-			 * Example:
-			 *
-			 * mkdir /mnt/A
-			 * mkdir /mnt/B
-			 * touch /mnt/B/bar
-			 * sync
-			 * mv /mnt/B/bar /mnt/A/bar
-			 * mv -T /mnt/A /mnt/B
-			 * fsync /mnt/B/bar
-			 * <power fail>
-			 *
-			 * If we ignore the old parent B which got deleted,
-			 * after a log replay we would have file bar linked
-			 * at both parents and the old parent B would still
-			 * exist.
-			 */
-			if (IS_ERR(dir_inode)) {
-				ret = PTR_ERR(dir_inode);
-				goto out;
-			}
+			/* If parent inode was deleted, skip it. */
+			if (IS_ERR(dir_inode))
+				continue;
 
 			if (ctx)
 				ctx->log_new_dentries = false;

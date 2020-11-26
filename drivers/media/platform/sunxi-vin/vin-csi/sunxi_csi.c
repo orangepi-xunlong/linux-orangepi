@@ -14,6 +14,21 @@
  *
  */
 
+/*
+ ******************************************************************************
+ *
+ * sunxi_csi.c
+ *
+ * Hawkview ISP - sunxi_csi.c module
+ *
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version          Author         Date          Description
+ *
+ *   3.0         Yang Feng      2015/02/27    ISP Tuning Tools Support
+ *
+ ******************************************************************************
+ */
 #include <linux/platform_device.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -26,14 +41,16 @@
 
 #include "parser_reg.h"
 #include "sunxi_csi.h"
-#include "../vin-video/vin_core.h"
 #include "../platform/platform_cfg.h"
 
 #define CSI_MODULE_NAME "vin_csi"
 
 #define IS_FLAG(x, y) (((x)&(y)) == y)
 
-struct csi_dev *glb_parser[VIN_MAX_CSI];
+static LIST_HEAD(csi_drv_list);
+
+#define CSI_MAX_WIDTH		0xffff
+#define CSI_MAX_HEIGHT		0xffff
 
 static struct csi_format sunxi_csi_formats[] = {
 	{
@@ -132,9 +149,6 @@ static int __csi_pin_config(struct csi_dev *dev, int enable)
 #ifndef FPGA_VER
 	char pinctrl_names[10] = "";
 
-	if (dev->bus_info.bus_if == V4L2_MBUS_CSI2)
-		return 0;
-
 	if (!IS_ERR_OR_NULL(dev->pctrl))
 		devm_pinctrl_put(dev->pctrl);
 
@@ -145,7 +159,7 @@ static int __csi_pin_config(struct csi_dev *dev, int enable)
 
 	dev->pctrl = devm_pinctrl_get_select(&dev->pdev->dev, pinctrl_names);
 	if (IS_ERR_OR_NULL(dev->pctrl)) {
-		vin_err("csi%d request pinctrl handle failed!\n", dev->id);
+		vin_log(VIN_LOG_CSI, "csi%d request pinctrl handle failed!\n", dev->id);
 		return -EINVAL;
 	}
 	usleep_range(100, 120);
@@ -168,7 +182,6 @@ static int __csi_set_fmt_hw(struct csi_dev *csi)
 	struct prs_ncsi_bt656_header bt656_header;
 	struct prs_mcsi_if_cfg mcsi_if;
 	struct prs_cap_mode mode;
-	struct mbus_framefmt_res *res = (void *)mf->reserved;
 	int i;
 
 	memset(&bt656_header, 0, sizeof(bt656_header));
@@ -235,10 +248,6 @@ static int __csi_set_fmt_hw(struct csi_dev *csi)
 				csi->ncsi_if.intf = PRS_IF_BT1120_2CH;
 			else if (csi->bus_info.ch_total_num == 4)
 				csi->ncsi_if.intf = PRS_IF_BT1120_4CH;
-			if (csi->ncsi_if.ddr_sample == 1)
-				csic_prs_set_pclk_dly(csi->id, 0xb);
-			else
-				csic_prs_set_pclk_dly(csi->id, 0x9);
 		} else {
 			if (csi->bus_info.ch_total_num == 1)
 				csi->ncsi_if.intf = PRS_IF_BT656_1CH;
@@ -246,8 +255,6 @@ static int __csi_set_fmt_hw(struct csi_dev *csi)
 				csi->ncsi_if.intf = PRS_IF_BT656_2CH;
 			else if (csi->bus_info.ch_total_num == 4)
 				csi->ncsi_if.intf = PRS_IF_BT656_4CH;
-			if (csi->ncsi_if.ddr_sample == 1)
-				csic_prs_set_pclk_dly(csi->id, 0x9);
 		}
 		csic_prs_mode(csi->id, PRS_NCSI);
 		bt656_header.ch0_id = 0;
@@ -292,42 +299,22 @@ static int __csi_set_fmt_hw(struct csi_dev *csi)
 		csic_prs_output_size_cfg(csi->id, i, &csi->out_size);
 	}
 
-	if (res->res_wdr_mode == ISP_SEHDR_MODE)
-		csic_prs_ch_en(csi->id, 1);
-
-	csic_prs_fps_ds(csi->id, &csi->prs_fps_ds);
 	csic_prs_capture_start(csi->id, csi->bus_info.ch_total_num, &mode);
 	return 0;
 }
 
-#ifdef SUPPORT_ISP_TDM
-static int __sunxi_csi_tdm_off(struct csi_dev *csi)
+static int sunxi_csi_subdev_s_power(struct v4l2_subdev *sd, int enable)
 {
-	struct vin_md *vind = dev_get_drvdata(csi->subdev.v4l2_dev->dev);
-	struct vin_core *vinc = NULL;
-	int i, j;
+	struct csi_dev *csi = v4l2_get_subdevdata(sd);
 
-	for (i = 0; i < VIN_MAX_DEV; i++) {
-		if (vind->vinc[i] == NULL)
-			continue;
-		if (!vin_streaming(&vind->vinc[i]->vid_cap))
-			continue;
-		vinc = vind->vinc[i];
-		for (j = 0; j < VIN_MAX_CSI; j++) {
-			if (vinc->csi_sel == j)
-				return -1;
-		}
-	}
+	__csi_pin_config(csi, enable);
 	return 0;
 }
-#endif
-
 static int sunxi_csi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct csi_dev *csi = v4l2_get_subdevdata(sd);
-	__maybe_unused int i;
+	struct v4l2_mbus_framefmt *mf = &csi->mf;
 
-	__csi_pin_config(csi, enable);
 	csic_prs_pclk_en(csi->id, enable);
 	if (enable) {
 		csic_prs_enable(csi->id);
@@ -335,7 +322,6 @@ static int sunxi_csi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		csic_prs_enable(csi->id);
 		__csi_set_fmt_hw(csi);
 	} else {
-#ifndef SUPPORT_ISP_TDM
 		switch (csi->bus_info.bus_if) {
 		case V4L2_MBUS_PARALLEL:
 		case V4L2_MBUS_BT656:
@@ -347,24 +333,15 @@ static int sunxi_csi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		default:
 			return -1;
 		}
-#endif
 		csic_prs_capture_stop(csi->id);
-#ifndef SUPPORT_ISP_TDM
 		csic_prs_disable(csi->id);
-#else
-		if (__sunxi_csi_tdm_off(csi) == 0) {
-			for (i = 0; i < VIN_MAX_CSI; i++)
-				csic_prs_disable(i);
-		} else
-			vin_warn("ISP is used in TDM mode, PARSER%d cannot be closing when other isp is used!\n", csi->id);
-#endif
 	}
 
 	vin_log(VIN_LOG_FMT, "parser%d %s, %d*%d hoff: %d voff: %d code: %x field: %d\n",
 		csi->id, enable ? "stream on" : "stream off",
 		csi->out_size.hor_len, csi->out_size.ver_len,
 		csi->out_size.hor_start, csi->out_size.ver_start,
-		csi->mf.code, csi->mf.field);
+		mf->code, mf->field);
 
 	return 0;
 }
@@ -377,22 +354,47 @@ static int sunxi_csi_subdev_s_parm(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static struct csi_format *__csi_try_format(struct v4l2_mbus_framefmt *mf)
+static int sunxi_csi_enum_mbus_code(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_pad_config *cfg,
+				    struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct csi_format *csi_fmt = NULL;
+	return 0;
+}
+
+static struct csi_format *__csi_find_format(
+	struct v4l2_mbus_framefmt *mf)
+{
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(sunxi_csi_formats); i++)
 		if (mf->code == sunxi_csi_formats[i].code)
-			csi_fmt = &sunxi_csi_formats[i];
+			return &sunxi_csi_formats[i];
+	return NULL;
+}
 
+static struct csi_format *__csi_try_format(
+	struct v4l2_mbus_framefmt *mf)
+{
+	struct csi_format *csi_fmt;
+
+	csi_fmt = __csi_find_format(mf);
 	if (csi_fmt == NULL)
 		csi_fmt = &sunxi_csi_formats[0];
 
 	mf->code = csi_fmt->code;
-	v4l_bound_align_image(&mf->width, 1, 0xffff, 1, &mf->height, 1, 0xffff, 1, 0);
-
+	v4l_bound_align_image(&mf->width, 1, CSI_MAX_WIDTH, csi_fmt->wd_align,
+			      &mf->height, 1, CSI_MAX_HEIGHT, 1, 0);
 	return csi_fmt;
+}
+
+static struct v4l2_mbus_framefmt *__csi_get_format(
+		struct csi_dev *csi, struct v4l2_subdev_pad_config *cfg,
+		enum v4l2_subdev_format_whence which)
+{
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
+		return cfg ? &cfg->try_fmt : NULL;
+
+	return &csi->mf;
 }
 
 static int sunxi_csi_subdev_set_fmt(struct v4l2_subdev *sd,
@@ -407,7 +409,7 @@ static int sunxi_csi_subdev_set_fmt(struct v4l2_subdev *sd,
 		fmt->format.width, fmt->format.height,
 		fmt->format.code, fmt->format.field);
 
-	mf = &csi->mf;
+	mf = __csi_get_format(csi, cfg, fmt->which);
 
 	if (fmt->pad == CSI_PAD_SOURCE) {
 		if (mf) {
@@ -434,13 +436,22 @@ static int sunxi_csi_subdev_get_fmt(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_format *fmt)
 {
 	struct csi_dev *csi = v4l2_get_subdevdata(sd);
+	struct v4l2_mbus_framefmt *mf;
+
+	mf = __csi_get_format(csi, cfg, fmt->which);
+	if (!mf)
+		return -EINVAL;
 
 	mutex_lock(&csi->subdev_lock);
-	fmt->format = csi->mf;
+	fmt->format = *mf;
 	mutex_unlock(&csi->subdev_lock);
 	return 0;
 }
 
+int sunxi_csi_subdev_init(struct v4l2_subdev *sd, u32 val)
+{
+	return 0;
+}
 static int sunxi_csi_subdev_set_selection(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_pad_config *cfg,
 			    struct v4l2_subdev_selection *sel)
@@ -489,17 +500,12 @@ static int sunxi_csi_s_mbus_config(struct v4l2_subdev *sd,
 				csi->bus_info.bus_tmg.vref_pol = ACTIVE_LOW;
 				csi->ncsi_if.vref = REF_NEGATIVE;
 			}
-			if (IS_FLAG(cfg->flags, V4L2_MBUS_PCLK_SAMPLE_RISING) &&
-					IS_FLAG(cfg->flags, V4L2_MBUS_PCLK_SAMPLE_FALLING)) {
-				csi->ncsi_if.ddr_sample = 1;
-			} else if (IS_FLAG(cfg->flags, V4L2_MBUS_PCLK_SAMPLE_RISING)) {
+			if (IS_FLAG(cfg->flags, V4L2_MBUS_PCLK_SAMPLE_RISING)) {
 				csi->bus_info.bus_tmg.pclk_sample = RISING;
 				csi->ncsi_if.clk = CLK_RISING;
-				csi->ncsi_if.ddr_sample = 0;
 			} else {
 				csi->bus_info.bus_tmg.pclk_sample = FALLING;
 				csi->ncsi_if.clk = CLK_FALLING;
-				csi->ncsi_if.ddr_sample = 0;
 			}
 			if (IS_FLAG(cfg->flags, V4L2_MBUS_FIELD_EVEN_HIGH)) {
 				csi->bus_info.bus_tmg.field_even_pol = ACTIVE_HIGH;
@@ -534,23 +540,30 @@ static int sunxi_csi_s_mbus_config(struct v4l2_subdev *sd,
 			csi->arrange.column = 1;
 			csi->arrange.row = 1;
 		}
-		if (IS_FLAG(cfg->flags, V4L2_MBUS_PCLK_SAMPLE_RISING) &&
-				IS_FLAG(cfg->flags, V4L2_MBUS_PCLK_SAMPLE_FALLING)) {
-			csi->ncsi_if.ddr_sample = 1;
-		} else if (IS_FLAG(cfg->flags, V4L2_MBUS_PCLK_SAMPLE_RISING)) {
+		if (IS_FLAG(cfg->flags, V4L2_MBUS_PCLK_SAMPLE_RISING)) {
 			csi->bus_info.bus_tmg.pclk_sample = RISING;
 			csi->ncsi_if.clk = CLK_RISING;
-			csi->ncsi_if.ddr_sample = 0;
 		} else {
 			csi->bus_info.bus_tmg.pclk_sample = FALLING;
 			csi->ncsi_if.clk = CLK_FALLING;
-			csi->ncsi_if.ddr_sample = 0;
 		}
 	}
 	vin_log(VIN_LOG_CSI, "csi%d total ch = %d\n", csi->id, csi->bus_info.ch_total_num);
 
 	return 0;
 }
+
+static long sunxi_csi_subdev_ioctl(struct v4l2_subdev *sd, unsigned int cmd,
+				   void *arg)
+{
+	return 0;
+}
+
+static const struct v4l2_subdev_core_ops sunxi_csi_core_ops = {
+	.s_power = sunxi_csi_subdev_s_power,
+	.init = sunxi_csi_subdev_init,
+	.ioctl = sunxi_csi_subdev_ioctl,
+};
 
 static const struct v4l2_subdev_video_ops sunxi_csi_subdev_video_ops = {
 	.s_stream = sunxi_csi_subdev_s_stream,
@@ -559,12 +572,14 @@ static const struct v4l2_subdev_video_ops sunxi_csi_subdev_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops sunxi_csi_subdev_pad_ops = {
+	.enum_mbus_code = sunxi_csi_enum_mbus_code,
 	.set_selection = sunxi_csi_subdev_set_selection,
 	.get_fmt = sunxi_csi_subdev_get_fmt,
 	.set_fmt = sunxi_csi_subdev_set_fmt,
 };
 
 static struct v4l2_subdev_ops sunxi_csi_subdev_ops = {
+	.core = &sunxi_csi_core_ops,
 	.video = &sunxi_csi_subdev_video_ops,
 	.pad = &sunxi_csi_subdev_pad_ops,
 };
@@ -619,6 +634,7 @@ static int csi_probe(struct platform_device *pdev)
 	}
 	csi->id = pdev->id;
 	csi->pdev = pdev;
+	csi->cur_ch = 0;
 
 	/*just for test because the csi1 is virtual node*/
 	csi->base = of_iomap(np, 0);
@@ -631,12 +647,12 @@ static int csi_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto unmap;
 
-	mutex_init(&csi->reset_lock);
+	spin_lock_init(&csi->slock);
+	init_waitqueue_head(&csi->wait);
+	list_add_tail(&csi->csi_list, &csi_drv_list);
 	__csi_init_subdev(csi);
 
 	platform_set_drvdata(pdev, csi);
-	glb_parser[csi->id] = csi;
-
 	vin_log(VIN_LOG_CSI, "csi%d probe end!\n", csi->id);
 
 	return 0;
@@ -661,8 +677,7 @@ static int csi_remove(struct platform_device *pdev)
 	mutex_destroy(&csi->subdev_lock);
 	if (csi->base)
 		iounmap(csi->base);
-	mutex_destroy(&csi->reset_lock);
-	media_entity_cleanup(&csi->subdev.entity);
+	list_del(&csi->csi_list);
 	kfree(csi);
 	return 0;
 }
@@ -682,12 +697,42 @@ static struct platform_driver csi_platform_driver = {
 		   },
 };
 
+void sunxi_csi_dump_regs(struct v4l2_subdev *sd)
+{
+	struct csi_dev *csi = v4l2_get_subdevdata(sd);
+	int i = 0;
+
+	pr_info("VIN dump CSI regs :\n");
+	for (i = 0; i < 0xb0; i = i + 4) {
+		if (i % 0x10 == 0)
+			pr_info("0x%08x:    ", i);
+		pr_info("0x%08x, ", readl(csi->base + i));
+		if (i % 0x10 == 0xc)
+			pr_info("\n");
+	}
+}
+
+void sunxi_csi_get_input_wh(int id, int *w, int *h)
+{
+	struct prs_input_para para;
+
+	csic_prs_input_para_get(id, 0, &para);
+
+	*w = para.input_ht;
+	*h = para.input_vt;
+}
+
 struct v4l2_subdev *sunxi_csi_get_subdev(int id)
 {
-	if (id < VIN_MAX_CSI && glb_parser[id])
-		return &glb_parser[id]->subdev;
-	else
-		return NULL;
+	struct csi_dev *csi;
+
+	list_for_each_entry(csi, &csi_drv_list, csi_list) {
+		if (csi->id == id) {
+			csi->use_cnt++;
+			return &csi->subdev;
+		}
+	}
+	return NULL;
 }
 
 int sunxi_csi_platform_register(void)

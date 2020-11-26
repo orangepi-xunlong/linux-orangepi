@@ -133,6 +133,7 @@ void mac80211_send_bar(struct ieee80211_vif *vif, u8 *ra, u16 tid, u16 ssn)
 	IEEE80211_SKB_CB(skb)->flags |= IEEE80211_TX_INTFL_DONT_ENCRYPT;
 	ieee80211_tx_skb(sdata, skb);
 }
+EXPORT_SYMBOL(mac80211_send_bar);
 
 void mac80211_assign_tid_tx(struct sta_info *sta, int tid,
 			     struct tid_ampdu_tx *tid_tx)
@@ -510,6 +511,7 @@ int mac80211_start_tx_ba_session(struct ieee80211_sta *pubsta, u16 tid,
 	spin_unlock_bh(&sta->lock);
 	return ret;
 }
+EXPORT_SYMBOL(mac80211_start_tx_ba_session);
 
 static void ieee80211_agg_tx_operational(struct ieee80211_local *local,
 					 struct sta_info *sta, u16 tid)
@@ -613,6 +615,7 @@ void mac80211_start_tx_ba_cb_irqsafe(struct ieee80211_vif *vif,
 	skb_queue_tail(&sdata->skb_queue, skb);
 	mac80211_queue_work(&local->hw, &sdata->work);
 }
+EXPORT_SYMBOL(mac80211_start_tx_ba_cb_irqsafe);
 
 int __mac80211_stop_tx_ba_session(struct sta_info *sta, u16 tid,
 				   enum ieee80211_back_parties initiator,
@@ -666,6 +669,7 @@ int mac80211_stop_tx_ba_session(struct ieee80211_sta *pubsta, u16 tid)
 	spin_unlock_bh(&sta->lock);
 	return ret;
 }
+EXPORT_SYMBOL(mac80211_stop_tx_ba_session);
 
 void mac80211_stop_tx_ba_cb(struct ieee80211_vif *vif, u8 *ra, u8 tid)
 {
@@ -763,6 +767,8 @@ void mac80211_stop_tx_ba_cb_irqsafe(struct ieee80211_vif *vif,
 	skb_queue_tail(&sdata->skb_queue, skb);
 	mac80211_queue_work(&local->hw, &sdata->work);
 }
+EXPORT_SYMBOL(mac80211_stop_tx_ba_cb_irqsafe);
+
 
 void mac80211_process_addba_resp(struct ieee80211_local *local,
 				  struct sta_info *sta,

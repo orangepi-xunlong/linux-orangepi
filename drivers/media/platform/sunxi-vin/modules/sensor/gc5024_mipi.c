@@ -18,76 +18,64 @@
 
 #include "camera.h"
 #include "sensor_helper.h"
-
 MODULE_AUTHOR("lwj");
 MODULE_DESCRIPTION("A low-level driver for GC5024 sensors");
 MODULE_LICENSE("GPL");
-
 #define MCLK              (24*1000*1000)
 #define V4L2_IDENT_SENSOR 0x5024
-
 #define I2C_ADDR 0x6e
-
-#define SENSOR_NAME "gc5024_mipi"
-
-
+#define SENSOR_NAME "gc5024"
 //define the voltage level of control signal
-#define CSI_STBY_ON     1
-#define CSI_STBY_OFF    0
-#define CSI_RST_ON      0
-#define CSI_RST_OFF     1
-#define CSI_PWR_ON      1
-#define CSI_PWR_OFF     0
+#define CSI_STBY_ON	1
+#define CSI_STBY_OFF	0
+#define CSI_RST_ON	0
+#define CSI_RST_OFF	1
+#define CSI_PWR_ON	1
+#define CSI_PWR_OFF	0
 
 //define the registers
-#define EXP_HIGH		0xff
-#define EXP_MID			0x03
-#define EXP_LOW			0x04
-#define GAIN_HIGH		0xff
-#define GAIN_LOW		0x24
+#define EXP_HIGH	0xff
+#define EXP_MID	0x03
+#define EXP_LOW	0x04
+#define GAIN_HIGH	0xff
+#define GAIN_LOW	0x24
 //#define FRACTION_EXP
-#define ID_REG_HIGH		0xf0
-#define ID_REG_LOW		0xf1
-#define ID_VAL_HIGH		((V4L2_IDENT_SENSOR) >> 8)
-#define ID_VAL_LOW		((V4L2_IDENT_SENSOR) & 0xff)
-
-
+#define ID_REG_HIGH	0xf0
+#define ID_REG_LOW	0xf1
+#define ID_VAL_HIGH	((V4L2_IDENT_SENSOR) >> 8)
+#define ID_VAL_LOW	((V4L2_IDENT_SENSOR) & 0xff)
 #define IMAGE_V_MIRROR
-
 #ifdef IMAGE_NORMAL_MIRROR
-#define MIRROR		  0xd4
-#define PH_SWITCH	  0x1b
-#define BLK_VAL_H	  0x3c
-#define BLK_VAL_L	  0x00
-#define STARTX		  0x0d
-#define STARTY		  0x03
+#define MIRROR	0xd4
+#define PH_SWITCH	0x1b
+#define BLK_VAL_H	0x3c
+#define BLK_VAL_L	0x00
+#define STARTX	0x0d
+#define STARTY	0x03
 #endif
-
 #ifdef IMAGE_H_MIRROR
-#define MIRROR		  0xd5
-#define PH_SWITCH	  0x1a
-#define BLK_VAL_H	  0x3c
-#define BLK_VAL_L	  0x00
-#define STARTX		  0x02
-#define STARTY		  0x03
+#define MIRROR	0xd5
+#define PH_SWITCH	0x1a
+#define BLK_VAL_H	0x3c
+#define BLK_VAL_L	0x00
+#define STARTX	0x02
+#define STARTY	0x03
 #endif
-
 #ifdef IMAGE_V_MIRROR
-#define MIRROR		  0xd6
-#define PH_SWITCH	  0x1b
-#define BLK_VAL_H	  0x00
-#define BLK_VAL_L	  0x3c
-#define STARTX		  0x0d
-#define STARTY		  0x02
+#define MIRROR	0xd6
+#define PH_SWITCH	0x1b
+#define BLK_VAL_H	0x00
+#define BLK_VAL_L	0x3c
+#define STARTX	0x0d
+#define STARTY	0x02
 #endif
-
 #ifdef IMAGE_HV_MIRROR
-#define MIRROR		  0xd7
-#define PH_SWITCH	  0x1a
-#define BLK_VAL_H	  0x00
-#define BLK_VAL_L	  0x3c
-#define STARTX		  0x02
-#define STARTY		  0x02
+#define MIRROR	0xd7
+#define PH_SWITCH	0x1a
+#define BLK_VAL_H	0x00
+#define BLK_VAL_L	0x3c
+#define STARTX	0x02
+#define STARTY	0x02
 #endif
 
 
@@ -105,34 +93,27 @@ static int sensor_s_exp(struct v4l2_subdev *sd, unsigned int exp_val)
 	unsigned char explow, expmid, exphigh;
 	unsigned int all_exp;
 	struct sensor_info *info = to_state(sd);
-
 	all_exp = exp_val >> 4;
-
 	if (all_exp > 0x3fff)
 		all_exp = 0x3fff;
 	if (all_exp < 7)
 		all_exp = 7;
-
-
 	if (all_exp <= 20) {
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x32, 0x09);
 		sensor_write(sd, 0xb0, 0x53);
-	} else {
+	} else{
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x32, 0x49);
 		sensor_write(sd, 0xb0, 0x4b);
 	}
-
 	exphigh = 0;
-	expmid  = (unsigned char)((0x003f00&all_exp)>>8);
-	explow  = (unsigned char)((0x0000ff&all_exp));
-
+	expmid  = (unsigned char) ((0x003f00&all_exp)>>8);
+	explow  = (unsigned char) ((0x0000ff&all_exp));
 	sensor_write(sd, 0xfe, 0x00);
 	sensor_write(sd, EXP_HIGH, exphigh);
 	sensor_write(sd, EXP_MID, expmid);
 	sensor_write(sd, EXP_LOW, explow);
-
 	info->exp = all_exp;
 	return 0;
 }
@@ -159,10 +140,9 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 	unsigned int All_gain;
 
 	All_gain = gain_val*4;
-
 	if (All_gain < 0x40)
 		All_gain = 0x40;
-	else if ((All_gain >= ANALOG_GAIN_1) && (All_gain < ANALOG_GAIN_2)) {
+	if ((ANALOG_GAIN_1 <= All_gain) && (All_gain < ANALOG_GAIN_2)) {
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x21, 0x0f);
 		sensor_write(sd, 0x29, 0x0f);
@@ -178,7 +158,7 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 		tmp = All_gain;
 		sensor_write(sd, 0xb1, tmp>>6);
 		sensor_write(sd, 0xb2, (tmp<<2)&0xfc);
-	} else if ((All_gain >= ANALOG_GAIN_2) && (All_gain < ANALOG_GAIN_3)) {
+	} else if ((ANALOG_GAIN_2 <= All_gain) && (All_gain < ANALOG_GAIN_3)) {
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x21, 0x0f);
 		sensor_write(sd, 0x29, 0x0f);
@@ -190,11 +170,11 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 		sensor_write(sd, 0xed, 0x01);
 		sensor_write(sd, 0xee, 0x02);
 		sensor_write(sd, 0xef, 0x02);
-		sensor_write(sd, 0xb6,	0x01);
+		sensor_write(sd, 0xb6, 0x01);
 		tmp = 64*All_gain/ANALOG_GAIN_2;
 		sensor_write(sd, 0xb1, tmp>>6);
 		sensor_write(sd, 0xb2, (tmp<<2)&0xfc);
-	} else if ((All_gain >= ANALOG_GAIN_3) && (All_gain < ANALOG_GAIN_4)) {
+	} else if ((ANALOG_GAIN_3 <= All_gain) && (All_gain < ANALOG_GAIN_4)) {
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x21, 0x0b);
 		sensor_write(sd, 0x29, 0x1b);
@@ -206,12 +186,11 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 		sensor_write(sd, 0xed, 0x01);
 		sensor_write(sd, 0xee, 0x02);
 		sensor_write(sd, 0xef, 0x02);
-
 		sensor_write(sd, 0xb6,	0x02);
 		tmp = 64*All_gain/ANALOG_GAIN_3;
-		sensor_write(sd, 0xb1, tmp>>6);
-		sensor_write(sd, 0xb2, (tmp<<2)&0xfc);
-	} else if ((All_gain >= ANALOG_GAIN_4) && (All_gain < ANALOG_GAIN_5)) {
+		sensor_write(sd, 0xb1, tmp >> 6);
+		sensor_write(sd, 0xb2, (tmp << 2) & 0xfc);
+	} else if ((ANALOG_GAIN_4 <= All_gain) && (All_gain < ANALOG_GAIN_5)) {
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x21, 0x0d);
 		sensor_write(sd, 0x29, 0x1d);
@@ -227,7 +206,7 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 		tmp = 64*All_gain/ANALOG_GAIN_4;
 		sensor_write(sd, 0xb1, tmp>>6);
 		sensor_write(sd, 0xb2, (tmp<<2)&0xfc);
-	} else if ((All_gain >= ANALOG_GAIN_5) && (All_gain < ANALOG_GAIN_6)) {
+	} else if ((ANALOG_GAIN_5 <= All_gain) && (All_gain < ANALOG_GAIN_6)) {
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x21, 0x08);
 		sensor_write(sd, 0x29, 0x38);
@@ -243,7 +222,7 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 		tmp = 64*All_gain/ANALOG_GAIN_5;
 		sensor_write(sd, 0xb1, tmp>>6);
 		sensor_write(sd, 0xb2, (tmp<<2)&0xfc);
-	} else if ((All_gain >= ANALOG_GAIN_6) && (All_gain < ANALOG_GAIN_7)) {
+	} else if ((ANALOG_GAIN_6 <= All_gain) && (All_gain < ANALOG_GAIN_7)) {
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x21, 0x08);
 		sensor_write(sd, 0x29, 0x38);
@@ -259,7 +238,7 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 		tmp = 64*All_gain/ANALOG_GAIN_6;
 		sensor_write(sd, 0xb1, tmp>>6);
 		sensor_write(sd, 0xb2, (tmp<<2)&0xfc);
-	} else {
+	} else{
 		sensor_write(sd, 0xfe, 0x00);
 		sensor_write(sd, 0x21, 0x08);
 		sensor_write(sd, 0x29, 0x38);
@@ -279,10 +258,8 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 	}
 
 	info->gain = All_gain;
-
 	return 0;
 }
-
 
 
 static int sensor_s_exp_gain(struct v4l2_subdev *sd,
@@ -291,28 +268,22 @@ static int sensor_s_exp_gain(struct v4l2_subdev *sd,
 	int exp_val, gain_val;
 	struct sensor_info *info = to_state(sd);
 
-
 	exp_val = exp_gain->exp_val;
 	gain_val = exp_gain->gain_val;
 
 	if (gain_val < 1*16)
 		gain_val = 16;
-
 	if (gain_val > 64*16-1)
 		gain_val = 64*16-1;
 
 	if (exp_val > 0xfffff)
 		exp_val = 0xfffff;
 
-	if (exp_val < 7)
-		exp_val = 7;
-
 	sensor_s_exp(sd, exp_val);
 	sensor_s_gain(sd, gain_val);
 
 	info->exp = exp_val;
 	info->gain = gain_val;
-
 	return 0;
 }
 
@@ -321,17 +292,16 @@ static int sensor_s_exp_gain(struct v4l2_subdev *sd,
  */
 static int sensor_power(struct v4l2_subdev *sd, int on)
 {
-	int ret = 0;
-
 	switch (on) {
 	case STBY_ON:
-		if (ret < 0)
-			usleep_range(10000, 12000);
+		sensor_print("CSI_SUBDEV_STBY_ON!\n");
+		usleep_range(10000, 12000);
 		cci_lock(sd);
 		vin_gpio_write(sd, PWDN, CSI_STBY_ON);
 		cci_unlock(sd);
 		break;
 	case STBY_OFF:
+		sensor_print("CSI_SUBDEV_STBY_OFF!\n");
 		cci_lock(sd);
 		vin_set_mclk_freq(sd, MCLK);
 		vin_set_mclk(sd, ON);
@@ -342,7 +312,7 @@ static int sensor_power(struct v4l2_subdev *sd, int on)
 		usleep_range(10000, 12000);
 		break;
 	case PWR_ON:
-		sensor_dbg("PWR_ON!\n");
+		sensor_print("PWR_ON!\n");
 		cci_lock(sd);
 		vin_gpio_set_status(sd, PWDN, 1);
 		vin_gpio_set_status(sd, RESET, 1);
@@ -367,7 +337,7 @@ static int sensor_power(struct v4l2_subdev *sd, int on)
 		cci_unlock(sd);
 		break;
 	case PWR_OFF:
-		sensor_dbg("PWR_OFF!\n");
+		sensor_print("PWR_OFF!\n");
 		cci_lock(sd);
 		vin_set_mclk(sd, OFF);
 		vin_gpio_write(sd, PWDN, CSI_PWR_OFF);
@@ -408,8 +378,7 @@ static int sensor_reset(struct v4l2_subdev *sd, u32 val)
 
 static int sensor_detect(struct v4l2_subdev *sd)
 {
-	data_type val = 0;
-
+	data_type val;
 	sensor_read(sd, ID_REG_HIGH, &val);
 	if (val != ID_VAL_HIGH)
 		return -ENODEV;
@@ -424,7 +393,7 @@ static int sensor_init(struct v4l2_subdev *sd, u32 val)
 	int ret;
 	struct sensor_info *info = to_state(sd);
 
-	sensor_dbg("sensor_init\n");
+	sensor_print("sensor_init\n");
 
 	/*Make sure it is a target sensor */
 	ret = sensor_detect(sd);
@@ -511,20 +480,20 @@ static struct regval_list sensor_default_regs[] = {
 
 static struct sensor_win_size sensor_win_sizes[] = {
 	{
-	 .width = QSXGA_WIDTH,
-	 .height = QSXGA_HEIGHT,
-	 .hoffset = 0,
-	 .voffset = 4,
-	 .hts = 1000,
-	 .vts = 1984,
-	 .pclk = 45*1000*1000,
-	 .mipi_bps = 720*1000*1000,
+	.width = QSXGA_WIDTH,
+	.height = QSXGA_HEIGHT,
+	.hoffset = 0,
+	.voffset = 4,
+	.hts = 1000,
+	.vts = 1984,
+	.pclk = 45*1000*1000,
+	.mipi_bps = 720*1000*1000,
 	.fps_fixed = 30,
-	 .bin_factor = 0,
-	 .intg_min = 4 << 4,
-	 .intg_max = (1984)<<4,
-	 .gain_min = 1 << 4,
-	 .gain_max = 20<<4,
+	.bin_factor = 0,
+	.intg_min = 4 << 4,
+	.intg_max = (1984)<<4,
+	.gain_min = 1 << 4,
+	.gain_max = 20<<4,
 	.regs       = sensor_default_regs,
 	.regs_size  = ARRAY_SIZE(sensor_default_regs),
 	.set_size   = NULL,
@@ -545,7 +514,7 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd,
 static int sensor_g_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct sensor_info *info =
-		container_of(ctrl->handler, struct sensor_info, handler);
+			container_of(ctrl->handler, struct sensor_info, handler);
 	struct v4l2_subdev *sd = &info->sd;
 
 	switch (ctrl->id) {
@@ -560,7 +529,7 @@ static int sensor_g_ctrl(struct v4l2_ctrl *ctrl)
 static int sensor_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct sensor_info *info =
-		container_of(ctrl->handler, struct sensor_info, handler);
+			container_of(ctrl->handler, struct sensor_info, handler);
 	struct v4l2_subdev *sd = &info->sd;
 
 	switch (ctrl->id) {
@@ -580,7 +549,7 @@ static int sensor_reg_init(struct sensor_info *info)
 	struct sensor_win_size *wsize = info->current_wins;
 	struct sensor_exp_gain exp_gain;
 
-	sensor_dbg("sensor_reg_init\n");
+	sensor_print("sensor_reg_init\n");
 
 	sensor_write_array(sd, sensor_fmt->regs, sensor_fmt->regs_size);
 
@@ -609,7 +578,6 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0xfe, 0x00);
 	sensor_write(sd, 0x88, 0x03);
 	sensor_write(sd, 0xe7, 0xc0);
-
 	sensor_write(sd, 0xfe, 0x00);
 	sensor_write(sd, 0xfe, 0x00);
 	sensor_write(sd, 0xfe, 0x00);
@@ -625,7 +593,6 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0x0e, 0xa8);
 	sensor_write(sd, 0x0f, 0x0a);
 	sensor_write(sd, 0x10, 0x40);
-
 	sensor_write(sd, 0x11, 0x31);
 	sensor_write(sd, 0x12, 0x28);
 	sensor_write(sd, 0x13, 0x10);
@@ -641,7 +608,6 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0x2d, 0x16);
 	sensor_write(sd, 0x2f, 0x16);
 	sensor_write(sd, 0x32, 0x49);
-
 	sensor_write(sd, 0xcd, 0xaa);
 	sensor_write(sd, 0xd0, 0xc2);
 	sensor_write(sd, 0xd1, 0xc4);
@@ -652,7 +618,6 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0xe2, 0x20);
 	sensor_write(sd, 0xe4, 0x78);
 	sensor_write(sd, 0xe6, 0x08);
-
 	/*ISP*/
 	sensor_write(sd, 0x80, 0x50);
 	sensor_write(sd, 0x8d, 0x07);
@@ -663,7 +628,6 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0x96, 0x98);
 	sensor_write(sd, 0x97, 0x0a);
 	sensor_write(sd, 0x98, 0x20);
-
 	/*Gain*/
 	sensor_write(sd, 0x99, 0x01);
 	sensor_write(sd, 0x9a, 0x02);
@@ -676,7 +640,6 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0xb1, 0x01);
 	sensor_write(sd, 0xb2, 0x00);
 	sensor_write(sd, 0xb6, 0x00);
-
 	/*BLK*/
 	sensor_write(sd, 0x40, 0x22);
 	sensor_write(sd, 0x4e, 0x3c);
@@ -686,14 +649,12 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0xfe, 0x02);
 	sensor_write(sd, 0xa4, 0x30);
 	sensor_write(sd, 0xa5, 0x00);
-
 	/*Dark Sun*/
-	sensor_write(sd, 0x40, 0x00); //96 20160527
+	sensor_write(sd, 0x40, 0x00);
 	sensor_write(sd, 0x42, 0x0f);
 	sensor_write(sd, 0x45, 0xca);
 	sensor_write(sd, 0x47, 0xff);
 	sensor_write(sd, 0x48, 0xc8);
-
 	/*DD*/
 	sensor_write(sd, 0x80, 0x98);
 	sensor_write(sd, 0x81, 0x50);
@@ -704,10 +665,8 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0x87, 0x20);
 	sensor_write(sd, 0x88, 0x10);
 	sensor_write(sd, 0x89, 0x04);
-
 	/*Degrid*/
 	sensor_write(sd, 0x8a, 0x0a);
-
 	/*MIPI*/
 	sensor_write(sd, 0xfe, 0x03);
 	sensor_write(sd, 0xfe, 0x03);
@@ -737,8 +696,7 @@ static int sensor_reg_init(struct sensor_info *info)
 	sensor_write(sd, 0x43, 0x0a);
 	sensor_write(sd, 0x10, 0x91);
 	sensor_write(sd, 0xfe, 0x00);
-
-	sensor_dbg("s_fmt set width = %d, height = %d\n", wsize->width,
+	sensor_print("s_fmt set width = %d, height = %d\n", wsize->width,
 				wsize->height);
 
 	return 0;
@@ -748,7 +706,7 @@ static int sensor_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct sensor_info *info = to_state(sd);
 
-	sensor_dbg("%s on = %d, %d*%d fps: %d code: %x\n", __func__, enable,
+	sensor_print("%s on = %d, %d*%d fps: %d code: %x\n", __func__, enable,
 			info->current_wins->width, info->current_wins->height,
 			info->current_wins->fps_fixed, info->fmt->mbus_code);
 
@@ -802,8 +760,7 @@ static struct cci_driver cci_drv = {
 		.data_width = CCI_BITS_8,
 };
 
-static int sensor_init_controls(struct v4l2_subdev *sd,
-					const struct v4l2_ctrl_ops *ops)
+static int sensor_init_controls(struct v4l2_subdev *sd, const struct v4l2_ctrl_ops *ops)
 {
 	struct sensor_info *info = to_state(sd);
 	struct v4l2_ctrl_handler *handler = &info->handler;

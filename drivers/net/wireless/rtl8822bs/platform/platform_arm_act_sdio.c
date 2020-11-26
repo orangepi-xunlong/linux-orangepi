@@ -36,7 +36,7 @@ int platform_wifi_power_on(void)
 #ifdef CONFIG_PLATFORM_ACTIONS_ATM705X
 	ret = acts_wifi_init();
 	if (unlikely(ret < 0)) {
-		pr_err("%s Failed to register the power control driver.\n", __func__);
+		pr_err("%s Failed to register the power control driver.\n", __FUNCTION__);
 		goto exit;
 	}
 #endif

@@ -18,5 +18,8 @@ struct cpufreq_dvfs_table {
 	u32 freq;
 	u32 voltage;
 	u32 axi_div;
+#ifdef CONFIG_ARM_SUNXI_AVS
+	u32 pval;
+#endif
 };
 #endif /* _LINUX_SUNXI_CPUFREQ_H*/

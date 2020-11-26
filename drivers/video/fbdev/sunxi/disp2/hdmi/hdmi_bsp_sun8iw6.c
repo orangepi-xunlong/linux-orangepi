@@ -343,64 +343,6 @@ void bsp_hdmi_set_video_en(unsigned char enable)
 #endif
 }
 
-int bsp_hdcp_enable(u32 enable, struct video_para *video)
-{
-	unsigned int id = get_vid(video->vic);
-
-	pr_info("[%s]: en [%d]\n", __func__, enable);
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-	if (enable) {
-		hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x02);/*_DisableEncryption*/
-		hdmi_write(0x0081, hdmi_read(0x0081) | 0x40);/*mc_hdcp_clock_enable*/
-		hdmi_write(0x0040, hdmi_read(0x0040) | 0x80);/*fc_video_hdcp_keepout*/
-		hdmi_write(0x00C0, video->is_hdmi ? (hdmi_read(0x00C0) | 0x01) : (hdmi_read(0x00C0) & 0xfe));/*hdmi mode*/
-	/*	hdmi_write(0x40C1, hdmi_read(0x40C1) | 0x02);_HSyncPolarity*/
-	/*	hdmi_write(0x40C1, hdmi_read(0x40C1) | 0x08);_VSyncPolarity*/
-		hdmi_write(0x40C1, (ptbl[id].para[3] < 96) ? 0x10 : 0x1a);
-	/*	hdmi_write(0x40C1, hdmi_read(0x40C1) | 0x10);_DataEnablePolarity*/
-		hdmi_write(0x8081, hdmi_read(0x8081) & 0xdf);/*bypass hdcp_block*/
-		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xfd);/*_EnableFeature11*/
-		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xef);/*_RiCheck*/
-		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xbf);/*_EnableI2cFastMode*/
-		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0x7f);/*_EnhancedLinkVerification*/
-		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xf7);/*_EnableAvmute*/
-		hdmi_write(0x40C1, hdmi_read(0x40C1) | 0x40);/*_UnencryptedVideoColor*/
-		hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x04);/*_EncodingPacketHeader*/
-		hdmi_write(0xC0C0, 0x40);/*_OessWindowSize*/
-		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xdf);/*_BypassEncryption*/
-		hdmi_write(0x00C1, hdmi_read(0x00C1) & 0xfe);/*hdcp_sw_reset*/
-		hdmi_write(0x00C0, hdmi_read(0x00C0) | 0x04);/*hdcp_rxdetect*/
-		hdmi_write(0x80C2, 0xff);/*_InterruptClear*/
-		hdmi_write(0x40C0, 0x00);/*_InterruptMask*/
-		hdmi_write(0x0081, hdmi_read(0x0081) & 0xbf);/*mc_hdcp_clock_enable*/
-	} else {
-		hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x02);/*_DisableEncryption(true)*/
-		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xfb);/*hdcp_rxdetect(flase)*/
-		hdmi_write(0x0081, hdmi_read(0x0081) | 0x40);/*mc_hdcp_clock_enable(disable)*/
-	}
-
-	return 0;
-}
-
-int bsp_hdcp_disconfig(void)
-{
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-	hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x02);/*_DisableEncryption(true)*/
-	hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xfb);/*hdcp_rxdetect(flase)*/
-	hdmi_write(0x0081, hdmi_read(0x0081) | 0x40);/*mc_hdcp_clock_enable(disable)*/
-	hdmi_write(0x10010, 0x52);
-	hdmi_write(0x10011, 0x54);
-	hdmi_write(0x10012, 0x41);
-	hdmi_write(0x10013, 0x57);
-	return 0;
-}
-
 int bsp_hdmi_video(struct video_para *video)
 {
 	unsigned int id = get_vid(video->vic);
@@ -490,19 +432,30 @@ int bsp_hdmi_video(struct video_para *video)
 		hdmi_write(0x4046, ((ptbl[id].para[0] & 0x100) == 0x100) ?
 			   0x00 : (ptbl[id].para[0] & 0x7f));
 	}
-
+	if (video->is_hcts) {
+		hdmi_write(0x00C0, video->is_hdmi ? 0x91 : 0x90);
+		hdmi_write(0x00C1, 0x05);
+		hdmi_write(0x40C1, (ptbl[id].para[3] < 96) ? 0x10 : 0x1a);
+		hdmi_write(0x80C2, 0xff);
+		hdmi_write(0x40C0, 0xfd);
+		hdmi_write(0xC0C0, 0x40);
+		hdmi_write(0x00C1, 0x04);
+		hdmi_write(0x10010, 0x45);
+		hdmi_write(0x10011, 0x45);
+		hdmi_write(0x10012, 0x52);
+		hdmi_write(0x10013, 0x54);
+		hdmi_write(0x0040, hdmi_read(0x0040) | 0x80);
+		hdmi_write(0x00C0, video->is_hdmi ? 0x95 : 0x94);
+		hdmi_write(0x10010, 0x52);
+		hdmi_write(0x10011, 0x54);
+		hdmi_write(0x10012, 0x41);
+		hdmi_write(0x10013, 0x57);
+	}
 	hdmi_write(0x0082, 0x00);
 	hdmi_write(0x0081, 0x00);
 	if (hdmi_phy_set(video) != 0)
 		return -1;
 	hdmi_write(0x0840, 0x00);
-
-	if (video->is_hcts) {
-		bsp_hdcp_enable(1, video);
-	} else {
-		bsp_hdcp_enable(0, video);
-	}
-
 	return 0;
 }
 
@@ -671,414 +624,26 @@ void bsp_hdmi_standby(void)
 
 void bsp_hdmi_hrst(void)
 {
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-	hdmi_write(0x00C1, 0x04);/*5001*/
-	hdmi_write(0x0081, 0x40);/*4001*/
-	hdmi_write(0x10010, 0x52);
-	hdmi_write(0x10011, 0x54);
-	hdmi_write(0x10012, 0x41);
-	hdmi_write(0x10013, 0x57);
+	hdmi_write(0x00C1, 0x04);
+	hdmi_write(0x0081, 0x40);
 }
 
 void bsp_hdmi_hdl(void)
 {
 
 }
-
-static void _MemoryAccessRequest(u8 en)
-{
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-
-	if (en)
-		hdmi_write(0x80c6, hdmi_read(0x80c6) | 0x01);/*5016*/
-	else
-		hdmi_write(0x80c6, hdmi_read(0x80c6) & 0xfe);
-
-	hdmi_write(0x10010, 0x52);
-	hdmi_write(0x10011, 0x54);
-	hdmi_write(0x10012, 0x41);
-	hdmi_write(0x10013, 0x57);
-	return;
-}
-
-static u8 _MemoryAccessGranted(void)
-{
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-	return (u8)((hdmi_read(0x80c6) & 0x02) >> 1);
-}
-
-static u16 _BStatusRead(void)
-{
-	u16 bstatus = 0;
-
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-	bstatus	= hdmi_read(0x20c0);/*20c0 5020*/
-	bstatus	|= hdmi_read(0x20c1) << 8;/*5021*/
-	return bstatus;
-}
-
-static u32 bsp_reg_mapping(u32 reg)
-{
-	int i = 0;
-	u32 reg_map = 0;
-	unsigned int offset[16] = {1, 3, 5, 7, 9, 11, 13, 15, 14, 12, 10, 8, 6, 4, 2, 0};
-
-	for (i = 0; i < 16; i++)
-		reg_map |= ((((reg >> offset[i]) & 0x1)) << (15 - i));
-
-	return reg_map;
-}
-
-static void sha_reset(sha_t *sha)
-{
-	size_t i = 0;
-
-	sha->mIndex = 0;
-	sha->mComputed = FALSE;
-	sha->mCorrupted = FALSE;
-	for (i = 0; i < sizeof(sha->mLength); i++)
-		sha->mLength[i] = 0;
-
-	sha->mDigest[0] = 0x67452301;
-	sha->mDigest[1] = 0xEFCDAB89;
-	sha->mDigest[2] = 0x98BADCFE;
-	sha->mDigest[3] = 0x10325476;
-	sha->mDigest[4] = 0xC3D2E1F0;
-}
-
-static void sha_process_block(sha_t *sha)
-{
-	#define shaCircularShift(bits, word) ((((word) << (bits)) & 0xFFFFFFFF) | ((word) >> (32-(bits))))
-	const unsigned K[] = {	/* constants defined in SHA-1 */
-		0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6
-	};
-	unsigned W[80];		/* word sequence */
-	unsigned A, B, C, D, E;	/* word buffers */
-	unsigned temp = 0;
-	int t = 0;
-
-	/* Initialize the first 16 words in the array W */
-	for (t = 0; t < 80; t++) {
-		if (t < 16) {
-			W[t] = ((unsigned)sha->mBlock[t * 4 + 0]) << 24;
-			W[t] |= ((unsigned)sha->mBlock[t * 4 + 1]) << 16;
-			W[t] |= ((unsigned)sha->mBlock[t * 4 + 2]) << 8;
-			W[t] |= ((unsigned)sha->mBlock[t * 4 + 3]) << 0;
-		} else {
-			W[t] =
-			    shaCircularShift(1,
-					     W[t - 3] ^ W[t - 8] ^ W[t -
-							14] ^ W[t - 16]);
-		}
-	}
-
-	A = sha->mDigest[0];
-	B = sha->mDigest[1];
-	C = sha->mDigest[2];
-	D = sha->mDigest[3];
-	E = sha->mDigest[4];
-
-	for (t = 0; t < 80; t++) {
-		temp = shaCircularShift(5, A);
-		if (t < 20)
-			temp += ((B & C) | ((~B) & D)) + E + W[t] + K[0];
-		else if (t < 40)
-			temp += (B ^ C ^ D) + E + W[t] + K[1];
-		else if (t < 60)
-			temp += ((B & C) | (B & D) | (C & D)) + E + W[t] + K[2];
-		else
-			temp += (B ^ C ^ D) + E + W[t] + K[3];
-
-		E = D;
-		D = C;
-		C = shaCircularShift(30, B);
-		B = A;
-		A = (temp & 0xFFFFFFFF);
-	}
-
-	sha->mDigest[0] = (sha->mDigest[0] + A) & 0xFFFFFFFF;
-	sha->mDigest[1] = (sha->mDigest[1] + B) & 0xFFFFFFFF;
-	sha->mDigest[2] = (sha->mDigest[2] + C) & 0xFFFFFFFF;
-	sha->mDigest[3] = (sha->mDigest[3] + D) & 0xFFFFFFFF;
-	sha->mDigest[4] = (sha->mDigest[4] + E) & 0xFFFFFFFF;
-
-	sha->mIndex = 0;
-}
-
-static void sha_input(sha_t *sha, const u8 *data, size_t size)
-{
-	int i = 0;
-	unsigned j = 0;
-	int rc = TRUE;
-
-	if (data == 0 || size == 0) {
-		pr_err("invalid input data\n");
-		return;
-	}
-	if (sha->mComputed == TRUE || sha->mCorrupted == TRUE) {
-		sha->mCorrupted = TRUE;
-		return;
-	}
-	while (size-- && sha->mCorrupted == FALSE) {
-		sha->mBlock[sha->mIndex++] = *data;
-
-		for (i = 0; i < 8; i++) {
-			rc = TRUE;
-			for (j = 0; j < sizeof(sha->mLength); j++) {
-				sha->mLength[j]++;
-				if (sha->mLength[j] != 0) {
-					rc = FALSE;
-					break;
-				}
-			}
-			sha->mCorrupted = (sha->mCorrupted == TRUE
-					   || rc == TRUE) ? TRUE : FALSE;
-		}
-		/* if corrupted then message is too long */
-		if (sha->mIndex == 64)
-			sha_process_block(sha);
-
-		data++;
-	}
-}
-
-static void sha_pad_message(sha_t *sha)
-{
-	/*
-	 *  Check to see if the current message block is too small to hold
-	 *  the initial padding bits and length.  If so, we will pad the
-	 *  block, process it, and then continue padding into a second
-	 *  block.
-	 */
-	if (sha->mIndex > 55) {
-		sha->mBlock[sha->mIndex++] = 0x80;
-		while (sha->mIndex < 64)
-			sha->mBlock[sha->mIndex++] = 0;
-
-		sha_process_block(sha);
-		while (sha->mIndex < 56)
-			sha->mBlock[sha->mIndex++] = 0;
-
-	} else {
-		sha->mBlock[sha->mIndex++] = 0x80;
-		while (sha->mIndex < 56)
-			sha->mBlock[sha->mIndex++] = 0;
-	}
-
-	/* Store the message length as the last 8 octets */
-	sha->mBlock[56] = sha->mLength[7];
-	sha->mBlock[57] = sha->mLength[6];
-	sha->mBlock[58] = sha->mLength[5];
-	sha->mBlock[59] = sha->mLength[4];
-	sha->mBlock[60] = sha->mLength[3];
-	sha->mBlock[61] = sha->mLength[2];
-	sha->mBlock[62] = sha->mLength[1];
-	sha->mBlock[63] = sha->mLength[0];
-
-	sha_process_block(sha);
-}
-
-static int sha_result(sha_t *sha)
-{
-	if (sha->mCorrupted == TRUE)
-		return FALSE;
-
-	if (sha->mComputed == FALSE) {
-		sha_pad_message(sha);
-		sha->mComputed = TRUE;
-	}
-	return TRUE;
-}
-
-static int bsp_hdcp_verify_ksv(const u8 *data, size_t size)
-{
-	size_t i = 0;
-	sha_t sha;
-
-	if (data == 0 || size < (HEADER + SHAMAX)) {
-		pr_err("invalid input data\n");
-		return FALSE;
-	}
-	sha_reset(&sha);
-	sha_input(&sha, data, size - SHAMAX);
-
-	if (sha_result(&sha) == FALSE) {
-		pr_err("cannot process SHA digest\n");
-		return FALSE;
-	}
-
-	for (i = 0; i < SHAMAX; i++) {
-		if (data[size - SHAMAX + i] !=
-				(u8) (sha.mDigest[i / 4] >> ((i % 4) * 8))) {
-			pr_err("SHA digest does not match\n");
-			return FALSE;
-		}
-	}
-	return TRUE;
-}
-
-static void _UpdateKsvListState(u8 en)
-{
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-	if (en)
-		hdmi_write(0x80c6, hdmi_read(0x80c6) | 0x08);/*5016*/
-	else
-		hdmi_write(0x80c6, hdmi_read(0x80c6) & 0xf7);
-
-	hdmi_write(0x80c6, hdmi_read(0x80c6) | 0x04);
-	hdmi_write(0x80c6, hdmi_read(0x80c6) & 0xfb);
-}
-
-static u8 bsp_read_ksv_list(void)
-{
-	int timeout = 1000;
-	u16 bstatus = 0;
-	u16 deviceCount = 0;
-	int valid = HDCP_DISABLE;
-	int size = 0;
-	int i = 0;
-	unsigned int map_reg = 0, tmp_reg = 0;
-
-	u8 *hdcp_ksv_list_buffer = NULL;/*dev->hdcp.mKsvListBuffer;*/
-
-	hdcp_ksv_list_buffer = kzalloc(sizeof(u8) * 670, GFP_KERNEL);
-
-	/* 1 - Wait for an interrupt to be triggered
-		(a_apiintstat.KSVSha1calcint) */
-	/* This is called from the INT_KSV_SHA1 irq
-		so nothing is required for this step */
-
-	/* 2 - Request access to KSV memory through
-		setting a_ksvmemctrl.KSVMEMrequest to 1'b1 and */
-	/* pool a_ksvmemctrl.KSVMEMaccess until
-		this value is 1'b1 (access granted). */
-	_MemoryAccessRequest(1);
-	while (_MemoryAccessGranted() == 0 && timeout--)
-		asm volatile ("nop");
-
-	if (_MemoryAccessGranted() == 0) {
-		_MemoryAccessRequest(0);
-		pr_err("KSV List memory access denied");
-		kfree(hdcp_ksv_list_buffer);
-		return -1;
-	}
-
-	/* 3 - Read VH', M0, Bstatus, and the KSV FIFO.
-	The data is stored in the revocation memory, as */
-	/* provided in the "Address Mapping for Maximum Memory Allocation"
-	table in the databook. */
-	bstatus = _BStatusRead();
-	deviceCount = bstatus & BSTATUS_DEVICE_COUNT_MASK;
-
-	if (deviceCount > 128) {
-		pr_err("[%s]:depth exceeds KSV List memory", __func__);
-		kfree(hdcp_ksv_list_buffer);
-		return -1;
-	}
-
-	size = deviceCount * KSV_LEN + HEADER + SHAMAX;
-
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-
-	for (i = 0; i < size; i++) {
-		tmp_reg = 0x5020 + i;
-		map_reg = bsp_reg_mapping(tmp_reg);
-
-		if (i < HEADER) { /* BSTATUS & M0 */
-			hdcp_ksv_list_buffer[(deviceCount * KSV_LEN) + i] =
-			(u8)hdmi_read(map_reg);
-		} else if (i < (HEADER + (deviceCount * KSV_LEN))) { /* KSV list */
-			hdcp_ksv_list_buffer[i - HEADER] =
-			(u8)hdmi_read(map_reg);
-		} else { /* SHA */
-			hdcp_ksv_list_buffer[i] = (u8)hdmi_read(map_reg);
-		}
-	}
-
-	/* 4 - Calculate the SHA-1 checksum (VH) over M0,
-		Bstatus, and the KSV FIFO. */
-	if (bsp_hdcp_verify_ksv(hdcp_ksv_list_buffer, size) == TRUE) {
-		valid = HDCP_KSV_LIST_READY;
-		pr_info("HDCP_KSV_LIST_READY");
-	} else{
-		valid = HDCP_ERR_KSV_LIST_NOT_VALID;
-		pr_info("HDCP_ERR_KSV_LIST_NOT_VALID");
-	}
-
-	/* 5 - If the calculated VH equals the VH',
-	set a_ksvmemctrl.SHA1fail to 0 and set */
-	/* a_ksvmemctrl.KSVCTRLupd to 1.
-	If the calculated VH is different from VH' then set */
-	/* a_ksvmemctrl.SHA1fail to 1 and set a_ksvmemctrl.KSVCTRLupd to 1,
-	forcing the controller */
-	/* to re-authenticate from the beginning. */
-	_MemoryAccessRequest(0);
-	_UpdateKsvListState((valid == HDCP_KSV_LIST_READY) ? 0 : 1);
-
-	return valid;
-}
-
 int bsp_hdmi_hdcp_err_check(void)
 {
 	int ret = 0;
-	u8 hdcp_status = 0;
 
 	hdmi_write(0x10010, 0x45);
 	hdmi_write(0x10011, 0x45);
 	hdmi_write(0x10012, 0x52);
 	hdmi_write(0x10013, 0x54);
-	hdcp_status = hdmi_read(0x80c3); /*5007 get hdcp interrupt status*/
-
-#if 0
-	if (hdcp_status) {
-		pr_info("[%s]:hdcp_status = 0x%x\n", __func__, hdcp_status);
-	}
-#endif
-	hdmi_write(0x80c2, hdcp_status); /*clear flag*/
-	if (hdcp_status & 0x10) {
-		pr_err("[%s]:i2c nack error interrupt\n", __func__);
+	if ((hdmi_read(0x80c0) & 0xfe) != 0x40) {
+		hdmi_write(0x00c1, hdmi_read(0x00c1) & 0xfe);
 		ret = -1;
-		goto err_status;
 	}
-
-	if (hdcp_status & 0x02) {
-		pr_err("[%s]:KSV_SHA1 interrupt\n", __func__);
-		ret = bsp_read_ksv_list();
-		goto err_status;
-	}
-
-	if (hdcp_status & 0x40) {
-		pr_err("[%s]:HDCP_FAILED interrupt\n", __func__);
-		hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x02); /*_DisableEncryption(dev, true);*/
-		ret = -1;
-		goto err_status;
-	}
-
-	if (hdcp_status & 0x80) {
-		pr_info("[%s]:HDCP_ENGAGED interrupt\n", __func__);
-		hdmi_write(0x00C1, hdmi_read(0x00C1) & 0xfd); /*_DisableEncryption(dev, false);*/
-		ret = 0;
-	}
-
-err_status:
 	hdmi_write(0x10010, 0x52);
 	hdmi_write(0x10011, 0x54);
 	hdmi_write(0x10012, 0x41);

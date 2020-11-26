@@ -32,7 +32,7 @@ int arisc_ap_read_data(char *data, int length)
 	int result;
 
 	if ((data == NULL) || (length == 0)) {
-		pr_warn("ap read data paras error\n");
+		ARISC_WRN("ap read data paras error\n");
 		return -EINVAL;
 	}
 
@@ -57,7 +57,7 @@ int arisc_ap_write_data(char *data, int length)
 	int result;
 
 	if ((data == NULL) || (length == 0)) {
-		pr_warn("ap write data paras error\n");
+		ARISC_WRN("ap write data paras error\n");
 		return -EINVAL;
 	}
 
@@ -94,12 +94,12 @@ int arisc_set_msgbox_receiver_int(unsigned int channel, unsigned int user,
 	int result;
 
 	if ((channel < 0) || (channel >= 8)) {
-		pr_warn("channel number error\n");
+		ARISC_WRN("channel number error\n");
 		return -EINVAL;
 	}
 
 	if ((user != 0) && (user != 1)) {
-		pr_warn("channel user error\n");
+		ARISC_WRN("channel user error\n");
 		return -EINVAL;
 	}
 
@@ -122,12 +122,12 @@ int arisc_get_msgbox_receiver_pend(unsigned int channel, unsigned int user)
 	int result;
 
 	if ((channel < 0) || (channel >= 8)) {
-		pr_warn("channel number error\n");
+		ARISC_WRN("channel number error\n");
 		return -EINVAL;
 	}
 
 	if ((user != 0) && (user != 1)) {
-		pr_warn("channel user error\n");
+		ARISC_WRN("channel user error\n");
 		return -EINVAL;
 	}
 
@@ -150,12 +150,12 @@ int arisc_clear_msgbox_receiver_pend(unsigned int channel, unsigned int user)
 	int result;
 
 	if ((channel < 0) || (channel >= 8)) {
-		pr_warn("channel number error\n");
+		ARISC_WRN("channel number error\n");
 		return -EINVAL;
 	}
 
 	if ((user != 0) && (user != 1)) {
-		pr_warn("channel user error\n");
+		ARISC_WRN("channel user error\n");
 		return -EINVAL;
 	}
 

@@ -1,5 +1,7 @@
 /*
- * linux-3.10/drivers/video/sunxi/disp2/hdmi2/hdmi_core/corDEFINE_MUTEX( * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
+ * linux-3.10/drivers/video/sunxi/disp2/hdmi2/hdmi_core/core_cec.c
+ *
+ * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -14,6 +16,8 @@
 #include "hdmi_core.h"
 #include "api/api.h"
 #include "api/cec.h"
+
+#if defined(__LINUX_PLAT__)
 
 #include <linux/clk.h>
 #include <linux/mutex.h>
@@ -39,8 +43,8 @@ DEFINE_MUTEX(send_lock);
 
 DEFINE_MUTEX(logaddr_lock);
 DEFINE_MUTEX(file_ops_lock);
-DEFINE_MUTEX(cectx_list_lock);
-DEFINE_MUTEX(cecrx_list_lock);
+spinlock_t cectx_list_lock;
+spinlock_t cecrx_list_lock;
 #endif
 
 static int cec_active;
@@ -148,10 +152,9 @@ bool cec_get_local_standby(void)
 	return cec_local_standby;
 }
 
-static s32 hdmi_cec_get_simple_msg(unsigned char *msg, unsigned int size)
+static s32 hdmi_cec_get_simple_msg(unsigned char *msg, unsigned size)
 {
 	struct hdmi_tx_core *core = get_platform();
-
 	return cec_ctrlReceiveFrame(&core->hdmi_tx, msg, size);
 }
 
@@ -161,13 +164,7 @@ u16 cec_core_get_phyaddr(void)
 
 	if (core->mode.sink_cap && core->mode.edid_done)
 		return core->mode.sink_cap->edid_mHdmivsdb.mPhysicalAddress;
-	return 0x1000;
-}
-
-static void cec_msleep(unsigned int ms)
-{
-	set_current_state(TASK_INTERRUPTIBLE);
-	schedule_timeout(msecs_to_jiffies(ms));
+	return 0;
 }
 
 #ifdef CONFIG_HDMI2_CEC_USER
@@ -207,24 +204,14 @@ int cec_core_msg_transmit(struct cec_msg *msg)
 		goto _cec_send_out;
 	}
 
-#ifdef TCON_PAN_SEL
-	if (!hdmi_get_ddc_analog()) {
-		pr_err("TCON pad is NOT set!\n");
-		return 0;
-	}
-#endif
-
-	mutex_lock(&ddc_analog_lock);
 	ret = cec_ctrlSendFrame(&core->hdmi_tx, &msg->msg[1],
 						msg->len - 1,
 						(msg->msg[0] >> 4) & 0x0f,
 						msg->msg[0] & 0x0f);
-	mutex_unlock(&ddc_analog_lock);
-
 	if (ret == 0) {
 		msg->tx_status = CEC_TX_STATUS_OK;
 	} else if (ret < 0) {
-		CEC_INF("CEC send error, error code:%d\n", ret);
+		pr_err("CEC send error, error code:%d\n", ret);
 		msg->tx_status = CEC_TX_STATUS_ERROR;
 	} else if (ret == 1) {
 		msg->tx_status = CEC_TX_STATUS_NACK;
@@ -243,42 +230,41 @@ int cec_core_msg_receive(struct cec_msg *msg)
 	unsigned int ret = 0;
 	struct cec_msg_rx *rx_msg = NULL, *n;
 
-	mutex_lock(&cecrx_list_lock);
+	spin_lock(&cecrx_list_lock);
 	if (!list_empty(&cec_rx_list)) {
 		list_for_each_entry_safe(rx_msg, n, &cec_rx_list, list) {
-			mutex_unlock(&cecrx_list_lock);
+			spin_unlock(&cecrx_list_lock);
 			memcpy(msg, &rx_msg->msg, sizeof(struct cec_msg));
 
-			mutex_lock(&cecrx_list_lock);
+			spin_lock(&cecrx_list_lock);
 			list_del(&rx_msg->list);
 			rx_list_count--;
-			mutex_unlock(&cecrx_list_lock);
+			spin_unlock(&cecrx_list_lock);
 
 			vfree(rx_msg);
 
-			mutex_lock(&cecrx_list_lock);
-			break;
+			spin_lock(&cecrx_list_lock);
 		}
 	} else {
 		pr_err("Error:%s : Rx List is empty\n", __func__);
 		ret = -1;
 	}
-	mutex_unlock(&cecrx_list_lock);
+	spin_unlock(&cecrx_list_lock);
 
 	return ret;
 }
 
 bool cec_core_msg_poll(struct file *filp)
 {
-	mutex_lock(&cecrx_list_lock);
+	spin_lock(&cecrx_list_lock);
 	if (!list_empty(&cec_rx_list)) {
-		mutex_unlock(&cecrx_list_lock);
+		spin_unlock(&cecrx_list_lock);
 		return true;
 	} else {
-		mutex_unlock(&cecrx_list_lock);
+		spin_unlock(&cecrx_list_lock);
 		return false;
 	}
-	mutex_unlock(&cecrx_list_lock);
+	spin_unlock(&cecrx_list_lock);
 	return false;
 }
 #endif
@@ -298,6 +284,7 @@ static void hdmi_printf_cec_info(char *buf, int count, int type)
 
 	if (count <= 0) {
 		pr_err("Error: No valid print count\n");
+		pr_err("a cec message transmit or receive failed\n");
 		return;
 	}
 
@@ -334,23 +321,22 @@ static void hdmi_printf_cec_info(char *buf, int count, int type)
 	CEC_INF("\n\n");
 }
 
-/*void hdmi_cec_set_phyaddr_to_cpus(void)
+void hdmi_cec_set_phyaddr_to_cpus(void)
 {
-	unsigned int phyaddr = (unsigned int)cec_core_get_phyaddr();
+	/*unsigned int phyaddr = (unsigned int)cec_core_get_phyaddr();
 
 	if (phyaddr)
 		arisc_set_hdmi_cec_phyaddr(phyaddr);
 	else
-		pr_warn("[HDMI CEC]Warning: cec physical address is 0\n");
-}*/
+		pr_warn("[HDMI CEC]Warning: cec physical address is 0\n");*/
+}
 
-static s32 hdmi_cec_send_with_allocated_srclogic(char *buf, unsigned int size,
-							 unsigned int dst)
+static s32 hdmi_cec_send_with_allocated_srclogic(char *buf, unsigned size,
+							 unsigned dst)
 {
-	unsigned int src = src_logic;
+	unsigned src = src_logic;
 	int retval;
 	struct hdmi_tx_core *core = get_platform();
-
 	if (!cec_active) {
 		pr_err("cec NOT enable now!\n");
 		retval = -1;
@@ -424,14 +410,14 @@ static void hdmi_cec_send_request_active_source(void)
 	}
 }
 
-s32 hdmi_cec_send_inactive_source(void)
+void hdmi_cec_send_inactive_source(void)
 {
 	int i;
 	char active[4];
 	u16 addr = cec_core_get_phyaddr();
 
 	if (!active_src)
-		return -1;
+		return;
 
 	active[0] = INACTIVE_SOURCE;
 	active[1] = (addr >> 8) & 0xff;
@@ -444,8 +430,6 @@ s32 hdmi_cec_send_inactive_source(void)
 		else
 			break;
 	}
-
-	return 0;
 }
 
 /*static void hdmi_cec_send_routing_info(void)
@@ -495,8 +479,6 @@ static int hdmi_cec_send_phyaddr(void)
 	u16 addr = cec_core_get_phyaddr();
 	int ret = 0;
 
-	if (!addr)
-		addr = 1000;
 	phyaddr[0] = REPORT_PHYSICAL_ADDRESS;
 	phyaddr[1] = (addr >> 8) & 0xff;
 	phyaddr[2] = addr & 0xff;
@@ -551,7 +533,7 @@ static int hdmi_cec_send_power_status(char st, char dst)
 	return ret;
 }
 
-s32 hdmi_cec_send_one_touch_play(void)
+int hdmi_cec_send_one_touch_paly(void)
 {
 	int temp = cec_active;
 
@@ -674,7 +656,7 @@ void hdmi_cec_wakup_request(void)
 	mutex_unlock(&thread_lock);
 }
 
-s32 hdmi_cec_standby_request(void)
+void hdmi_cec_standby_request(void)
 {
 	struct hdmi_tx_core *core = get_platform();
 
@@ -684,8 +666,6 @@ s32 hdmi_cec_standby_request(void)
 		CEC_INF("cec standby boardcast send\n");
 	}
 	mutex_unlock(&thread_lock);
-
-	return 0;
 }
 
 static char *string_append(char *dest, const char *src)
@@ -836,8 +816,8 @@ static void rx_msg_process(struct device *pdev, unsigned char *msg, int count)
 }
 
 #else
-s32 hdmi_cec_standby_request(void){return 0; }
-s32 hdmi_cec_send_one_touch_paly(void){return 0; }
+void hdmi_cec_standby_request(void){; }
+int hdmi_cec_send_one_touch_paly(void){return 0; }
 
 static void rx_msg_process(struct cec_msg *msg)
 {
@@ -858,6 +838,7 @@ static int cec_thread(void *param)
 #ifndef CONFIG_HDMI2_CEC_USER
 	struct device *pdev = (struct device *)param;
 #else
+	int i;
 	struct cec_msg_tx *tx_msg = NULL, *n;
 	struct cec_msg_rx *rx_msg = NULL;
 #endif
@@ -867,41 +848,40 @@ static int cec_thread(void *param)
 			break;
 		}
 
-		if (!hdmi_enable_mask) {
-			cec_msleep(10);
-			continue;
-		}
-
 #ifdef CONFIG_HDMI2_CEC_USER
 	/*Send CEC msg*/
-	mutex_lock(&cectx_list_lock);
+	spin_lock(&cectx_list_lock);
 	if (!list_empty(&cec_tx_list)) {
 		list_for_each_entry_safe(tx_msg, n, &cec_tx_list, list) {
-			/*int i;
-			for (i = 0; i < 6; i++) {*/
+			spin_unlock(&cectx_list_lock);
+
+			for (i = 0; i < 5; i++) {
 				ret = cec_core_msg_transmit(&tx_msg->msg);
-				/*if ((ret == 1) && (tx_msg->msg.len >= 2))
+				if ((ret == 1) && (tx_msg->msg.len >= 2))
 					continue;
 				else
-					break;*/
-			/*}*/
+					break;
+			}
 
+			spin_lock(&cectx_list_lock);
 			list_del(&tx_msg->list);
+			spin_unlock(&cectx_list_lock);
 
 			if (tx_msg->trans_type == BLOCK_SEND) {
 				wake_up(&cec_send_queue);
 			} else if (tx_msg->trans_type == NON_BLOCK_SEND) {
 				/*add the successfully sending msg to cec_rx_list*/
-				mutex_lock(&cecrx_list_lock);
+				spin_lock(&cecrx_list_lock);
 				INIT_LIST_HEAD(&tx_msg->list);
 				list_add_tail(&tx_msg->list, &cec_rx_list);
 				rx_list_count++;
-				mutex_unlock(&cecrx_list_lock);
+				spin_unlock(&cecrx_list_lock);
 			}
 
+			spin_lock(&cectx_list_lock);
 		}
 	}
-	mutex_unlock(&cectx_list_lock);
+	spin_unlock(&cectx_list_lock);
 #endif
 
 	/*Get cec MSG*/
@@ -925,18 +905,17 @@ static int cec_thread(void *param)
 				pr_err("Error: vmalloc for rx_msg failed\n");
 				goto next_loop;
 			}
-
 			memset(rx_msg, 0, sizeof(struct cec_msg_rx));
 			rx_msg->msg.len = ret;
 			memcpy(rx_msg->msg.msg, msg, sizeof(msg));
 			rx_msg->msg.rx_status = CEC_RX_STATUS_OK;
 			rx_msg_process(&rx_msg->msg);
 
-			mutex_lock(&cecrx_list_lock);
+			spin_lock(&cecrx_list_lock);
 			INIT_LIST_HEAD(&rx_msg->list);
 			list_add_tail(&rx_msg->list, &cec_rx_list);
 			rx_list_count++;
-			mutex_unlock(&cecrx_list_lock);
+			spin_unlock(&cecrx_list_lock);
 #endif
 			}
 		}
@@ -945,7 +924,7 @@ static int cec_thread(void *param)
 next_loop:
 #endif
 		mutex_unlock(&thread_lock);
-		cec_msleep(10);
+		msleep(10);
 	}
 
 	return 0;
@@ -1003,7 +982,7 @@ static long cec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	struct cec_msg_tx *tx_msg;
 	unsigned int phy_addr;
 	unsigned char log_addr;
-	int ret = 0, i;
+	int ret = 0;
 
 	if (copy_from_user((void *)p_arg, (void __user *)arg,
 					3 * sizeof(unsigned long))) {
@@ -1052,15 +1031,6 @@ static long cec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return (long)log_addr;
 
 	case CEC_TRANSMIT:
-#ifdef TCON_PAN_SEL
-		CEC_INF("T:HDMI PAD:%d\n", hdmi_get_ddc_analog());
-#endif
-		if (!cec_active || !hdmi_enable_mask) {
-			CEC_INF("cec_active:%d hdmi_enable:%d\n",
-				cec_active, hdmi_enable_mask);
-			break;
-		}
-
 		tx_msg = vmalloc(sizeof(struct cec_msg_tx));
 		if (!tx_msg)
 			goto err_exit;
@@ -1072,45 +1042,40 @@ static long cec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 
 		tx_msg->msg.tx_status = 0;
-		if (!tx_msg->msg.timeout)
-			tx_msg->msg.timeout = 1000;
 		tx_msg->trans_type = (filp->f_flags & O_NONBLOCK) ?
 					NON_BLOCK_SEND : BLOCK_SEND;
 
-		CEC_INF("CEC start transmitting, para: ""len:%d timeout:%d  sequence:%d tx_status:%d rx_status:%d\n",
+		CEC_INF("Trans para: ""len:%d  timeout:%d  sequence:%d "
+			"tx_status:%d rx_status:%d msg[0]:0x%x  msg[1]:0x%x\n",
 						tx_msg->msg.len,
 						tx_msg->msg.timeout,
 						tx_msg->msg.sequence,
 						tx_msg->msg.tx_status,
-						tx_msg->msg.rx_status);
-		for (i = 0; i < tx_msg->msg.len; i++)
-			CEC_INF("msg[%d]:0x%x ", i, tx_msg->msg.msg[i]);
+						tx_msg->msg.rx_status,
+						tx_msg->msg.msg[0],
+						tx_msg->msg.msg[1]);
 
-		CEC_INF("\n");
-
-		mutex_lock(&cectx_list_lock);
+		spin_lock(&cectx_list_lock);
 		INIT_LIST_HEAD(&tx_msg->list);
 		list_add_tail(&tx_msg->list, &cec_tx_list);
-		mutex_unlock(&cectx_list_lock);
+		spin_unlock(&cectx_list_lock);
 
 		if (tx_msg->trans_type == BLOCK_SEND) {
 			ret = wait_event_interruptible_timeout(cec_send_queue,
 						tx_msg->msg.tx_status > 0,
 					msecs_to_jiffies(tx_msg->msg.timeout));
-			CEC_INF("CEC sending finish, tx_status:%d\n",
-						tx_msg->msg.tx_status);
-			mutex_lock(&cectx_list_lock);
 			if (ret < 0) {
 				pr_err("wait_event_interruptible_timeout failed\n");
 				if (!list_empty(&cec_tx_list))
 					list_del(&tx_msg->list);
 				vfree(tx_msg);
-				mutex_unlock(&cectx_list_lock);
 				goto err_exit;
 			} else if (ret == 0) { /*Send msg timeout*/
 				pr_err("cec send wait timeout\n");
+				spin_lock(&cectx_list_lock);
 				if (!list_empty(&cec_tx_list))
 					list_del(&tx_msg->list);
+				spin_unlock(&cectx_list_lock);
 				tx_msg->msg.tx_status = CEC_TX_STATUS_ERROR;
 			}
 
@@ -1118,21 +1083,14 @@ static long cec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 						&tx_msg->msg,
 					sizeof(struct cec_msg))) {
 				pr_info("copy_to_user fail\n");
-				if (!list_empty(&cec_tx_list))
-					list_del(&tx_msg->list);
 				vfree(tx_msg);
-				mutex_unlock(&cectx_list_lock);
 				goto err_exit;
 			}
 			vfree(tx_msg);
-			mutex_unlock(&cectx_list_lock);
 		}
 
 		break;
 	case CEC_RECEIVE:
-#ifdef TCON_PAN_SEL
-		CEC_INF("R:HDMI PAD:%d\n", hdmi_get_ddc_analog());
-#endif
 		ret = cec_core_msg_receive(&msg);
 		if (ret >= 0) {
 			if (copy_to_user((void __user *)p_arg[0], &msg,
@@ -1140,18 +1098,6 @@ static long cec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 				pr_info("copy_to_user fail\n");
 				goto err_exit;
 			}
-
-			CEC_INF("Receive para: ""len:%d  timeout:%d  sequence:%d tx_status:%d rx_status:%d\n",
-						msg.len,
-						msg.timeout,
-						msg.sequence,
-						msg.tx_status,
-						msg.rx_status);
-		for (i = 0; i < msg.len; i++)
-			CEC_INF("msg[%d]:0x%x ", i, msg.msg[i]);
-
-		CEC_INF("\n");
-			break;
 		} else {
 			pr_info("Error:There is NOT a CEC MSG received!\n");
 			goto err_exit;
@@ -1232,6 +1178,8 @@ void hdmi_cec_init(void)
 
 	init_waitqueue_head(&cec_poll_queue);
 	init_waitqueue_head(&cec_send_queue);
+	spin_lock_init(&cectx_list_lock);
+	spin_lock_init(&cecrx_list_lock);
 	rx_list_count = 0;
 }
 
@@ -1334,6 +1282,7 @@ ssize_t cec_dump_core(char *buf)
 #ifndef CONFIG_HDMI2_CEC_USER
 	n += sprintf(buf + n, "Tx Current logical address:%s\n",
 							logic_addr[(unsigned char)src_logic]);
+
 	n += sprintf(buf + n, "Rx Current logical address:%s\n",
 							logic_addr[(unsigned char)dst_logic]);
 #else
@@ -1347,43 +1296,4 @@ ssize_t cec_dump_core(char *buf)
 	return n;
 }
 
-int cec_tansmit_msg_test(enum cec_test_cmd cmd)
-{
-	struct cec_msg_rx *rx_msg = NULL;
-	unsigned char msg[16];
-
-	rx_msg = vmalloc(sizeof(*rx_msg));
-	if (!rx_msg)
-		return -1;
-	memset(rx_msg, 0, sizeof(struct cec_msg_rx));
-
-	switch (cmd) {
-	case SET_LANGUAGE_CH:
-		rx_msg->msg.len = 5; /* Chinese */
-		msg[0] = 0x0F;
-		msg[1] = 0x32;
-		msg[2] = 0x7a;
-		msg[3] = 0x68;
-		msg[4] = 0x6f;
-		break;
-	case SET_LANGUAGE_EN:
-		rx_msg->msg.len = 5; /* English */
-		msg[0] = 0x0F;
-		msg[1] = 0x32;
-		msg[2] = 0x65;
-		msg[3] = 0x6e;
-		msg[4] = 0x67;
-		break;
-	}
-
-	memcpy(rx_msg->msg.msg, msg, sizeof(msg));
-	rx_msg->msg.rx_status = CEC_RX_STATUS_OK;
-
-	mutex_lock(&cecrx_list_lock);
-	INIT_LIST_HEAD(&rx_msg->list);
-	list_add_tail(&rx_msg->list, &cec_rx_list);
-	rx_list_count++;
-	mutex_unlock(&cecrx_list_lock);
-
-	return 0;
-}
+#endif

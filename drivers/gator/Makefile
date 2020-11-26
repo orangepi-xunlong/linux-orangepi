@@ -3,11 +3,6 @@ ifneq ($(KERNELRELEASE),)
 # Uncomment the following line to enable kernel stack unwinding within gator, or update gator_backtrace.c
 # EXTRA_CFLAGS +=   -DGATOR_KERNEL_STACK_UNWINDING
 
-GATOR_SRC_MD5 := $(shell ls $(srctree)/$(src)/*.c $(srctree)/$(src)/*.h $(srctree)/$(src)/mali/*.h | \
-                   grep -Ev '(gator_src_md5\.h|gator\.mod\.c)$$' | LC_ALL=C sort | xargs cat | \
-                   md5sum | awk '{print $$1}')
-EXTRA_CFLAGS += -DGATOR_SRC_MD5="\"$(GATOR_SRC_MD5)\""
-
 CONFIG_GATOR ?= m
 obj-$(CONFIG_GATOR) := gator.o
 
@@ -79,6 +74,10 @@ gator-$(CONFIG_ARM) +=  gator_events_l2c-310.o
 
 gator-$(CONFIG_ARM64) +=
 
+$(obj)/gator_main.o: $(obj)/gator_src_md5.h
+
+clean-files := gator_src_md5.h
+
 # Note, in the recipe below we use "cd $(srctree) && cd $(src)" rather than
 # "cd $(srctree)/$(src)" because under DKMS $(src) is an absolute path, and we
 # can't just use $(src) because for normal kernel builds this is relative to
@@ -87,6 +86,9 @@ gator-$(CONFIG_ARM64) +=
        chk_events.h = :
  quiet_chk_events.h = echo '  CHK     $@'
 silent_chk_events.h = :
+$(obj)/gator_src_md5.h: FORCE
+	@$($(quiet)chk_events.h)
+	$(Q)cd $(srctree) && cd $(src) ; $(CONFIG_SHELL) -c "echo 'static char *gator_src_md5 = \"'\`ls *.c *.h mali/*.h | grep -Ev '^(gator_src_md5\.h|gator\.mod\.c)$$' | LC_ALL=C sort | xargs cat | md5sum | cut -b 1-32\`'\";'" > $(abspath $@)
 
 else
 

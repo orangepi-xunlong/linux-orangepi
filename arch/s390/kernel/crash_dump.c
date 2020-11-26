@@ -401,13 +401,11 @@ static void *get_vmcoreinfo_old(unsigned long *size)
 	if (copy_oldmem_kernel(nt_name, addr + sizeof(note),
 			       sizeof(nt_name) - 1))
 		return NULL;
-	if (strcmp(nt_name, VMCOREINFO_NOTE_NAME) != 0)
+	if (strcmp(nt_name, "VMCOREINFO") != 0)
 		return NULL;
 	vmcoreinfo = kzalloc_panic(note.n_descsz);
-	if (copy_oldmem_kernel(vmcoreinfo, addr + 24, note.n_descsz)) {
-		kfree(vmcoreinfo);
+	if (copy_oldmem_kernel(vmcoreinfo, addr + 24, note.n_descsz))
 		return NULL;
-	}
 	*size = note.n_descsz;
 	return vmcoreinfo;
 }
@@ -417,20 +415,15 @@ static void *get_vmcoreinfo_old(unsigned long *size)
  */
 static void *nt_vmcoreinfo(void *ptr)
 {
-	const char *name = VMCOREINFO_NOTE_NAME;
 	unsigned long size;
 	void *vmcoreinfo;
 
 	vmcoreinfo = os_info_old_entry(OS_INFO_VMCOREINFO, &size);
-	if (vmcoreinfo)
-		return nt_init_name(ptr, 0, vmcoreinfo, size, name);
-
-	vmcoreinfo = get_vmcoreinfo_old(&size);
+	if (!vmcoreinfo)
+		vmcoreinfo = get_vmcoreinfo_old(&size);
 	if (!vmcoreinfo)
 		return ptr;
-	ptr = nt_init_name(ptr, 0, vmcoreinfo, size, name);
-	kfree(vmcoreinfo);
-	return ptr;
+	return nt_init_name(ptr, 0, vmcoreinfo, size, "VMCOREINFO");
 }
 
 /*

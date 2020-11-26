@@ -3342,10 +3342,11 @@ static int ibmvscsis_probe(struct vio_dev *vdev,
 		 vscsi->dds.window[LOCAL].liobn,
 		 vscsi->dds.window[REMOTE].liobn);
 
-	snprintf(vscsi->eye, sizeof(vscsi->eye), "VSCSI %s", vdev->name);
+	strcpy(vscsi->eye, "VSCSI ");
+	strncat(vscsi->eye, vdev->name, MAX_EYE);
 
 	vscsi->dds.unit_id = vdev->unit_address;
-	strscpy(vscsi->dds.partition_name, partition_name,
+	strncpy(vscsi->dds.partition_name, partition_name,
 		sizeof(vscsi->dds.partition_name));
 	vscsi->dds.partition_num = partition_number;
 

@@ -20,15 +20,9 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
 #include "../vin-video/vin_core.h"
-#if defined CONFIG_ARCH_SUN8IW16P1
-#include "isp520/isp520_reg_cfg.h"
-#elif defined CONFIG_ARCH_SUN8IW19P1
-#include "isp521/isp521_reg_cfg.h"
-#elif defined CONFIG_ARCH_SUN50IW10P1
-#include "isp522/isp522_reg_cfg.h"
-#else
-#include "isp500/isp500_reg_cfg.h"
-#endif
+#include "sun8iw12p1/sun8iw12p1_isp_reg_cfg.h"
+
+#include "../vin-stat/vin_ispstat.h"
 #include "../vin-stat/vin_h3a.h"
 
 enum isp_pad {
@@ -41,7 +35,28 @@ enum isp_pad {
 struct isp_pix_fmt {
 	u32 mbus_code;
 	enum isp_input_seq infmt;
+	char *name;
 	u32 fourcc;
+	u32 color;
+	u16 memplanes;
+	u16 colplanes;
+	u32 depth[VIDEO_MAX_PLANES];
+	u16 mdataplanes;
+	u16 flags;
+};
+
+struct isp_table_addr {
+	void *isp_lsc_tbl_vaddr;
+	void *isp_lsc_tbl_dma_addr;
+	void *isp_gamma_tbl_vaddr;
+	void *isp_gamma_tbl_dma_addr;
+	void *isp_linear_tbl_vaddr;
+	void *isp_linear_tbl_dma_addr;
+
+	void *isp_drc_tbl_vaddr;
+	void *isp_drc_tbl_dma_addr;
+	void *isp_saturation_tbl_vaddr;
+	void *isp_saturation_tbl_dma_addr;
 };
 
 struct sunxi_isp_ctrls {
@@ -52,65 +67,62 @@ struct sunxi_isp_ctrls {
 	struct v4l2_ctrl *af_win[4];	/* af win cluster */
 };
 
+struct isp_stat_to_user {
+	/* v4l2 drivers fill */
+	void *ae_buf;
+	void *af_buf;
+	void *awb_buf;
+	void *hist_buf;
+	void *afs_buf;
+	void *pltm_buf;
+};
+
 struct isp_dev {
+	int use_cnt;
 	struct v4l2_subdev subdev;
 	struct media_pad isp_pads[ISP_PAD_NUM];
 	struct v4l2_event event;
 	struct platform_device *pdev;
+	struct list_head isp_list;
 	struct sunxi_isp_ctrls ctrls;
+	int capture_mode;
+	int use_isp;
+	int irq;
+	unsigned int is_empty;
+	unsigned int load_flag;
+	unsigned int f1_after_librun;/*fisrt frame after server run*/
+	unsigned int have_init;
+	unsigned int wdr_mode;
+	unsigned int large_image;/*2:get merge yuv, 1: get pattern raw (save in kernel), 0: normal*/
+	unsigned int left_right;/*0: process left, 1: process right*/
+	unsigned int id;
+	spinlock_t slock;
 	struct mutex subdev_lock;
+	struct work_struct isp_isr_bh_task;
+	void __iomem *base;
+	char load_shadow[ISP_LOAD_REG_SIZE];
 	struct vin_mm isp_stat;
 	struct vin_mm isp_load;
 	struct vin_mm isp_save;
 	struct vin_mm isp_lut_tbl;
 	struct vin_mm isp_drc_tbl;
-	struct vin_mm d3d_pingpong[3];
-	struct vin_mm wdr_pingpong[2];
-#if defined CONFIG_ARCH_SUN8IW19P1
-	struct isp_lbc_cfg wdr_raw_lbc;
-	struct isp_lbc_cfg d3d_k_lbc;
-	struct isp_lbc_cfg d3d_raw_lbc;
-#endif
-	struct isp_size err_size;
 	struct isp_debug_mode isp_dbg;
+	struct isp_table_addr isp_tbl;
+	struct isp_stat_to_user *stat_buf;
 	struct isp_pix_fmt *isp_fmt;
 	struct isp_size_settings isp_ob;
 	struct v4l2_mbus_framefmt mf;
 	struct isp_stat h3a_stat;
-	spinlock_t slock;
-	void __iomem *base;
-	struct work_struct s_sensor_stby_task;
-	int irq;
-	unsigned int ptn_isp_cnt;
-	unsigned int event_lost_cnt;
-	unsigned int hb_max;
-	unsigned int hb_min;
-	unsigned char id;
-	char is_empty;
-	char use_isp;
-	char runtime_flag;
-	bool nosend_ispoff;
-	char have_init;
-	char load_flag;
-	char f1_after_librun;/*fisrt frame after server run*/
-	char left_right;/*0: process left, 1: process right*/
-	char use_cnt;
-	char capture_mode;
-	char wdr_mode;
-	char sensor_lp_mode;
-	char ptn_type;
-	char large_image;/*2:get merge yuv, 1: get pattern raw (save in kernel), 0: normal*/
-#ifdef SUPPORT_PTN
-	char load_shadow[ISP_LOAD_DRAM_SIZE*3];
-#else
-	char load_shadow[ISP_LOAD_DRAM_SIZE];
-#endif
+	struct vin_mm d3d_pingpong[2];
+	struct vin_mm wdr_pingpong[2];
 };
 
+void isp_isr_bh_handle(struct work_struct *work);
+
 void sunxi_isp_sensor_type(struct v4l2_subdev *sd, int use_isp);
-void sunxi_isp_sensor_fps(struct v4l2_subdev *sd, int fps);
+void sunxi_isp_dump_regs(struct v4l2_subdev *sd);
 void sunxi_isp_debug(struct v4l2_subdev *sd, struct isp_debug_mode *isp_debug);
-void sunxi_isp_ptn(struct v4l2_subdev *sd, unsigned int ptn_type);
+void sunxi_isp_vsync_isr(struct v4l2_subdev *sd);
 void sunxi_isp_frame_sync_isr(struct v4l2_subdev *sd);
 struct v4l2_subdev *sunxi_isp_get_subdev(int id);
 struct v4l2_subdev *sunxi_stat_get_subdev(int id);

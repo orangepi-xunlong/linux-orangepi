@@ -462,4 +462,3 @@ void sunxi_mmc_init_priv_v4p00x(struct sunxi_mmc_host *host,
 	host->sunxi_mmc_judge_retry = sunxi_mmc_judge_retry_v4p00x;
 	/*sunxi_of_parse_clk_dly(host);*/
 }
-EXPORT_SYMBOL_GPL(sunxi_mmc_init_priv_v4p00x);

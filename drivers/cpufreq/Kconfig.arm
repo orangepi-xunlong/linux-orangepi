@@ -7,6 +7,14 @@ config ARM_SUNXI_IKS_CPUFREQ
 	help
 	  This adds the CPUFreq driver for sunxi big.little soc.
 	  If in doubt, say N.
+config ARM_SUNXI_AVS
+	bool "Use adaptive voltage scaling"
+	depends on CPU_FREQ && SUNXI_ARISC && (ARCH_SUN8IW16P1 || ARCH_SUN50IW6)
+	default n
+	help
+	  use adaptive voltage scaling to reduce power consumption.
+
+
 
 # big LITTLE core layer and glue drivers
 config ARM_BIG_LITTLE_CPUFREQ
@@ -264,19 +272,6 @@ config ACPI_CPPC_CPUFREQ
 	  support for its operation.
 
 	  If in doubt, say N.
-
-config ARM_ALLWINNER_SUN50I_CPUFREQ_NVMEM
-	tristate "Allwinner nvmem based SUN50I CPUFreq driver"
-	depends on ARCH_SUNXI
-	depends on NVMEM
-	select PM_OPP
-	help
-	  This adds the nvmem based CPUFreq driver for Allwinner
-	  h6 SoC.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called sun50i-cpufreq-nvmem.
-
 config ARM_SUNXI_CPUFREQ
 	bool "SUNXI CPUFreq support"
 	select PM_OPP

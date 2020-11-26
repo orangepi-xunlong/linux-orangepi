@@ -276,7 +276,6 @@ rm -f /$installed_image_path
 else
 ln -sf $(basename $installed_image_path) /boot/$image_name || mv /$installed_image_path /boot/$image_name
 fi
-touch /boot/.next
 exit 0
 EOT
 ##

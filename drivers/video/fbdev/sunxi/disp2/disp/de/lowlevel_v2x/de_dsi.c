@@ -15,7 +15,7 @@
 #if defined(SUPPORT_DSI)
 
 static volatile struct __de_dsi_dev_t *dsi_dev[DEVICE_DSI_NUM];
-static volatile struct __de_dsi_dphy_dev_t *dphy_dev[DEVICE_DSI_NUM];
+static volatile struct __de_dsi_dphy_dev_t *dphy_dev[1];
 
 u32 dsi_pixel_bits[4] = { 24, 24, 18, 16 };
 u32 dsi_lane_den[4] = { 0x1, 0x3, 0x7, 0xf };
@@ -1132,20 +1132,6 @@ u16 dsi_crc_pro_pd_repeat(u8 pd, u32 pd_bytes)
 		}
 	}
 	return crc;
-}
-
-s32 dsi_turn_on_peripheral_command(__u32 sel)
-{
-	volatile __u8 *p = (__u8 *)dsi_dev[sel]->dsi_cmd_tx;
-	while (dsi_inst_busy(sel))
-		;
-
-	*(p++) = DSI_DT_TURN_ON;
-	*(p++) = 0x00;
-	*(p++) = 0x00;
-	*(p++) = dsi_ecc_pro(dsi_dev[sel]->dsi_cmd_tx[0].dwval);
-	dsi_start(sel, DSI_START_LPTX);
-	return 0;
 }
 
 #endif

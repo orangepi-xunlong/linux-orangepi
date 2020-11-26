@@ -10,13 +10,12 @@
 
 #include "scdc.h"
 
-#ifndef SUPPORT_ONLY_HDMI14
 /*static void scdc_enable_rr(hdmi_tx_dev_t *dev, u8 enable);*/
 /*static int scdc_scrambling_status(hdmi_tx_dev_t *dev);*/
 static int scdc_scrambling_enable_flag(hdmi_tx_dev_t *dev, u8 flag);
 /*static void scdc_set_rr_flag(hdmi_tx_dev_t *dev, u8 enable);*/
 /*static int scdc_get_rr_flag(hdmi_tx_dev_t *dev, u8 *flag);*/
-static void scrambling_Enable(hdmi_tx_dev_t *dev, u8 bit);
+
 
 int scdc_read(hdmi_tx_dev_t *dev, u8 address, u8 size, u8 *data)
 {
@@ -172,4 +171,12 @@ u8 scrambling_state(hdmi_tx_dev_t *dev)
 	return dev_read_mask(dev, FC_SCRAMBLER_CTRL,
 			FC_SCRAMBLER_CTRL_SCRAMBLER_ON_MASK);
 }
-#endif
+
+int ddc_read_hdcp2Version(hdmi_tx_dev_t *dev, u8 *data)
+{
+	if (ddc_read(dev, 0x3A, 0, 0, 0x50, 1, data)) {
+		pr_info("%s: DDC Read hdcp2Version fail!\n", __func__);
+		return -1;
+	}
+	return 0;
+}

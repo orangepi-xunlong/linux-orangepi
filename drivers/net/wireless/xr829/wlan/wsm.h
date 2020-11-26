@@ -519,9 +519,6 @@ struct xradio_common;
 /*some hardware information*/
 #define WSM_MIB_ID_HW_INFO	        0x1043
 
-/*use for changing mac address of interface*/
-#define WSM_MIB_ID_CHANGE_MAC		0x1046
-
 /*epta status information*/
 #define WSM_MIB_ID_EPTA_STAT		0x1060
 #define WSM_MIB_ID_EPTA_STAT_CTRL	0x1061
@@ -3058,36 +3055,6 @@ static inline u8 wsm_queue_id_to_wsm(u8 queueId)
 		3, 2, 0, 1
 	};
 	return queue_mapping[queueId];
-}
-
-/***********WSM API**************/
-
-/*
- * return the length of wsm frame
- */
-static inline u16 wsm_get_len(struct wsm_hdr *wsm)
-{
-	return wsm->len;
-}
-
-/*
- * return the id of wsm frame
- */
-static inline u16 wsm_get_id(struct wsm_hdr *wsm)
-{
-	return ((wsm->id) & WSM_MSG_ID_MASK);
-}
-
-/*
- * return the 80211 frame ptr in wsm tx frame
- * only use it in a complete wsm tx frame.
- */
-static inline u8 *wsm_get_80211_frame(struct wsm_hdr *wsm)
-{
-	struct wsm_tx *wsm_frame = (struct wsm_tx *)wsm;
-
-	/*Todo: When HT40 is undefine, how to get frame?*/
-	return (u8 *)wsm_frame + wsm_frame->DataOffset;
 }
 
 #endif /* XRADIO_HWIO_H_INCLUDED */

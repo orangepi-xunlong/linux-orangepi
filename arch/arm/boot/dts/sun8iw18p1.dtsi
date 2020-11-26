@@ -1922,10 +1922,10 @@
 		sunxi_thermal_sensor:thermal_sensor{
 			compatible = "allwinner,thermal_sensor";
 			reg = <0x0 0x05070400 0x0 0x100>;
-			interrupts = <GIC_SPI 49 IRQ_TYPE_NONE>;
+			interrupts = <GIC_SPI 1 IRQ_TYPE_NONE>;
 			clocks = <&clk_hosc>,<&clk_ths>;
-			sensor_num = <1>;
-			combine_num = <1>;
+			sensor_num = <2>;
+			combine_num = <2>;
 			alarm_temp = <100000>;
 			shut_temp= <110000>;
 			status = "okay";
@@ -1937,6 +1937,15 @@
 				combine_sensor_type = "CPU";
 				combine_sensor_temp_type = "max";
 				combine_sensor_id = <0>;
+			};
+
+			ths_combine1:ths_combine1{
+				compatible = "allwinner,ths_combine1";
+				#thermal-sensor-cells = <1>;
+				combine_sensor_num = <1>;
+				combine_sensor_type = "GPU";
+				combine_sensor_temp_type = "max";
+				combine_sensor_id = <1>;
 			};
 		};
 

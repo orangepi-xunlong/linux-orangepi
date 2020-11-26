@@ -43,9 +43,6 @@ struct sunxi_ahub_daudio_priv {
 	struct device *dev;
 	struct regmap *regmap;
 	struct clk *pllclk;
-#ifdef AHUB_PLL_AUDIO_X4
-	struct clk *pllclkx4;
-#endif
 	struct clk *moduleclk;
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *pinstate;
@@ -342,18 +339,11 @@ static int sunxi_ahub_daudio_init(
 			SUNXI_AHUB_I2S_OUT_CH3MAP0(id), 0x76543210);
 	regmap_write(sunxi_ahub_daudio->regmap,
 			SUNXI_AHUB_I2S_OUT_CH3MAP1(id), 0xFEDCBA98);
-#if defined(CONFIG_ARCH_SUN50IW9)
-	/* change the I2S CHMAP for ac107 capture success */
-	regmap_write(sunxi_ahub_daudio->regmap,
-			SUNXI_AHUB_I2S_IN_CHMAP0(id), 0x03020100);
-	regmap_write(sunxi_ahub_daudio->regmap,
-			SUNXI_AHUB_I2S_IN_CHMAP1(id), 0x00000000);
-#else
 	regmap_write(sunxi_ahub_daudio->regmap,
 			SUNXI_AHUB_I2S_IN_CHMAP0(id), 0x76543210);
 	regmap_write(sunxi_ahub_daudio->regmap,
 			SUNXI_AHUB_I2S_IN_CHMAP1(id), 0xFEDCBA98);
-#endif
+
 	regmap_update_bits(sunxi_ahub_daudio->regmap, SUNXI_AHUB_I2S_FMT0(id),
 			(1<<I2S_FMT0_LRCK_WIDTH),
 			(sunxi_ahub_daudio->frame_type<<I2S_FMT0_LRCK_WIDTH));
@@ -425,7 +415,7 @@ static int sunxi_ahub_daudio_hw_params(struct snd_pcm_substream *substream,
 					snd_soc_dai_get_drvdata(dai);
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_card *card = rtd->card;
-	struct sndhdmi_priv *sunxi_hdmi = snd_soc_card_get_drvdata(card);
+	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_card_get_drvdata(card);
 
 	/* default setting the daudio fmt */
 	sunxi_ahub_daudio_init_fmt(sunxi_ahub_daudio,
@@ -604,23 +594,10 @@ static int sunxi_ahub_daudio_set_sysclk(struct snd_soc_dai *dai,
 	struct sunxi_ahub_daudio_priv *sunxi_ahub_daudio =
 					snd_soc_dai_get_drvdata(dai);
 
-#ifdef AHUB_PLL_AUDIO_X4
-	if (clk_set_rate(sunxi_ahub_daudio->pllclkx4, freq)) {
-		dev_err(sunxi_ahub_daudio->dev, "set pllclkx4 rate failed\n");
-		return -EBUSY;
-	}
-
-	if (clk_set_rate(sunxi_ahub_daudio->moduleclk, freq)) {
-		dev_err(sunxi_ahub_daudio->dev, "set moduleclk rate failed\n");
-		return -EBUSY;
-	}
-#else
 	if (clk_set_rate(sunxi_ahub_daudio->pllclk, freq)) {
 		dev_err(sunxi_ahub_daudio->dev, "set pllclk rate failed\n");
 		return -EBUSY;
 	}
-#endif
-
 	return 0;
 }
 
@@ -743,7 +720,6 @@ static int sunxi_ahub_daudio_probe(struct snd_soc_dai *dai)
 
 	mutex_init(&sunxi_ahub_daudio->mutex);
 	sunxi_ahub_daudio_init(sunxi_ahub_daudio, (sunxi_ahub_daudio->tdm_num));
-
 	return 0;
 }
 
@@ -761,10 +737,8 @@ static int sunxi_ahub_daudio_suspend(struct snd_soc_dai *dai)
 	pr_debug("Enter %s\n", __func__);
 
 	clk_disable_unprepare(sunxi_ahub_daudio->moduleclk);
-#ifdef AHUB_PLL_AUDIO_X4
-	clk_disable_unprepare(sunxi_ahub_daudio->pllclkx4);
-#endif
 	clk_disable_unprepare(sunxi_ahub_daudio->pllclk);
+
 
 	if (sunxi_ahub_daudio->pinconfig) {
 		ret = pinctrl_select_state(sunxi_ahub_daudio->pinctrl,
@@ -795,13 +769,6 @@ static int sunxi_ahub_daudio_resume(struct snd_soc_dai *dai)
 		dev_err(sunxi_ahub_daudio->dev, "pllclk resume failed\n");
 		return -EBUSY;
 	}
-
-#ifdef AHUB_PLL_AUDIO_X4
-	if (clk_prepare_enable(sunxi_ahub_daudio->pllclkx4)) {
-		dev_err(sunxi_ahub_daudio->dev, "pllclkx4 resume failed\n");
-		return -EBUSY;
-	}
-#endif
 
 	if (clk_prepare_enable(sunxi_ahub_daudio->moduleclk)) {
 		dev_err(sunxi_ahub_daudio->dev, "moduleclk resume failed\n");
@@ -877,31 +844,6 @@ static int sunxi_ahub_daudio_dev_probe(struct platform_device *pdev)
 		goto err_cpudai_kfree;
 	}
 
-#ifdef AHUB_PLL_AUDIO_X4
-	sunxi_ahub_daudio->pllclkx4 = of_clk_get(np, 1);
-	if (IS_ERR_OR_NULL(sunxi_ahub_daudio->pllclkx4)) {
-		dev_err(&pdev->dev, "pllclkx4 get failed\n");
-		ret = PTR_ERR(sunxi_ahub_daudio->pllclkx4);
-		goto err_cpudai_kfree;
-	}
-
-	sunxi_ahub_daudio->moduleclk = of_clk_get(np, 2);
-	if (IS_ERR_OR_NULL(sunxi_ahub_daudio->moduleclk)) {
-		dev_err(&pdev->dev, "moduleclk get failed\n");
-		ret = PTR_ERR(sunxi_ahub_daudio->moduleclk);
-		goto err_pllclk_put;
-	}
-
-	if (clk_set_parent(sunxi_ahub_daudio->moduleclk,
-				sunxi_ahub_daudio->pllclkx4)) {
-		dev_err(&pdev->dev, "set parent of moduleclk to pllclkx4 fail\n");
-		ret = -EBUSY;
-		goto err_moduleclk_put;
-	}
-	clk_prepare_enable(sunxi_ahub_daudio->pllclk);
-	clk_prepare_enable(sunxi_ahub_daudio->pllclkx4);
-	clk_prepare_enable(sunxi_ahub_daudio->moduleclk);
-#else
 	sunxi_ahub_daudio->moduleclk = of_clk_get(np, 1);
 	if (IS_ERR_OR_NULL(sunxi_ahub_daudio->moduleclk)) {
 		dev_err(&pdev->dev, "moduleclk get failed\n");
@@ -917,7 +859,6 @@ static int sunxi_ahub_daudio_dev_probe(struct platform_device *pdev)
 	}
 	clk_prepare_enable(sunxi_ahub_daudio->pllclk);
 	clk_prepare_enable(sunxi_ahub_daudio->moduleclk);
-#endif
 
 	ret = of_property_read_u32(np, "tdm_num", &temp_val);
 	if (ret < 0) {
@@ -1040,9 +981,6 @@ static int __exit sunxi_ahub_daudio_dev_remove(struct platform_device *pdev)
 
 	snd_soc_unregister_component(&pdev->dev);
 	clk_put(sunxi_ahub_daudio->moduleclk);
-#ifdef AHUB_PLL_AUDIO_X4
-	clk_put(sunxi_ahub_daudio->pllclkx4);
-#endif
 	clk_put(sunxi_ahub_daudio->pllclk);
 	return 0;
 }

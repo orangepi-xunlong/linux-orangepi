@@ -1214,6 +1214,7 @@ int mac80211_sta_ps_transition(struct ieee80211_sta *sta, bool start)
 
 	return 0;
 }
+EXPORT_SYMBOL(mac80211_sta_ps_transition);
 
 static ieee80211_rx_result debug_noinline
 ieee80211_rx_h_uapsd_and_pspoll(struct ieee80211_rx_data *rx)
@@ -2915,7 +2916,8 @@ static int prepare_for_handlers(struct ieee80211_rx_data *rx,
 			if (compare_ether_addr(sdata->vif.addr,
 					       hdr->addr1))
 				return 0;
-		} else if (!ieee80211_bssid_match(bssid, sdata->vif.addr)) {
+		} else if (!ieee80211_bssid_match(bssid,
+					sdata->vif.addr)) {
 			if (ieee80211_is_beacon(hdr->frame_control))
 				status->rx_flags |= IEEE80211_RX_ERP_BEACON;
 			else if (!(status->rx_flags & IEEE80211_RX_IN_SCAN) &&
@@ -2932,15 +2934,6 @@ static int prepare_for_handlers(struct ieee80211_rx_data *rx,
 			return 0;
 		if (compare_ether_addr(sdata->u.wds.remote_addr, hdr->addr2))
 			return 0;
-		break;
-	case NL80211_IFTYPE_P2P_DEVICE:
-		if (!ieee80211_is_public_action(hdr, skb->len) &&
-			!ieee80211_is_probe_req(hdr->frame_control) &&
-			!ieee80211_is_probe_resp(hdr->frame_control) &&
-			!ieee80211_is_beacon(hdr->frame_control))
-			return 0;
-		if (!multicast && !ether_addr_equal(sdata->vif.addr, hdr->addr1))
-			status->rx_flags &= ~IEEE80211_RX_RA_MATCH;
 		break;
 	default:
 		/* should never get here */
@@ -3130,10 +3123,6 @@ void mac80211_rx(struct ieee80211_hw *hw, struct sk_buff *skb)
 	if (unlikely(local->quiescing || local->suspended))
 		goto drop;
 
-	/* We might be during a HW reconfig, prevent Rx for the same reason */
-	if (unlikely(local->in_reconfig))
-		goto drop;
-
 	/*
 	 * The same happens when we're not even started,
 	 * but that's worth a warning.
@@ -3206,6 +3195,12 @@ void mac80211_rx(struct ieee80211_hw *hw, struct sk_buff *skb)
  drop:
 	kfree_skb(skb);
 }
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32))
+EXPORT_SYMBOL(mac80211_rx);
+#else
+EXPORT_SYMBOL(mac80211_ieee80211_rx);
+#endif
+
 
 /* This is a version of the rx handler that can be called from hard irq
  * context. Post the skb on the queue and schedule the tasklet */
@@ -3219,3 +3214,4 @@ void mac80211_rx_irqsafe(struct ieee80211_hw *hw, struct sk_buff *skb)
 	skb_queue_tail(&local->skb_queue, skb);
 	tasklet_schedule(&local->tasklet);
 }
+EXPORT_SYMBOL(mac80211_rx_irqsafe);

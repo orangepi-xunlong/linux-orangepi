@@ -62,43 +62,17 @@ int bsp_disp_feat_is_support_enhance(unsigned int disp)
 	return de_feat_is_support_vep(disp);
 }
 
-int disp_init_feat(struct disp_feat_init *feat_init)
+int disp_init_feat(void)
 {
-#ifdef DE_VERSION_V33X
-	struct de_feat_init de_feat;
-	de_feat.chn_cfg_mode = feat_init->chn_cfg_mode;
-	return de_feat_init_config(&de_feat);
-#else
 	return de_feat_init();
-#endif
 }
 
 int disp_exit_feat(void)
 {
-#ifdef DE_VERSION_V33X
-	return 0;
-#else
 	return de_feat_exit();
-#endif
 }
 
 unsigned int bsp_disp_feat_get_num_vdpo(void)
 {
 	return de_feat_get_number_of_vdpo();
-}
-
-int disp_feat_is_using_rcq(unsigned int disp)
-{
-#if defined(DE_VERSION_V33X)
-       return de_feat_is_using_rcq(disp);
-#endif
-       return 0;
-}
-
-int disp_feat_is_using_wb_rcq(unsigned int wb)
-{
-#if defined(DE_VERSION_V33X)
-       return de_feat_is_using_wb_rcq(wb);
-#endif
-       return 0;
 }

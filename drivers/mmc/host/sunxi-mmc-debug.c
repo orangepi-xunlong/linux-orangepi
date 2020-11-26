@@ -36,7 +36,6 @@
 #include "sunxi-mmc-debug.h"
 #include "sunxi-mmc-export.h"
 #include "sunxi-mmc-sun50iw1p1-2.h"
-#include "sunxi-mmc-panic.h"
 
 
 #define GPIO_BASE_ADDR	0x1c20800
@@ -99,44 +98,6 @@ void sunxi_mmc_dump_des(struct sunxi_mmc_host *host, char *base, int len)
 	}
 	pr_cont("\n");
 }
-
-static unsigned int sunxi_mmc_get_rate(uint64_t bytes, uint64_t time_us)
-{
-	uint64_t ns;
-
-	ns = time_us * 1000;
-	bytes *= 1000000000;
-
-	while (ns > UINT_MAX) {
-		bytes >>= 1;
-		ns >>= 1;
-	}
-
-	if (!ns)
-		return 0;
-
-	do_div(bytes, (uint32_t)ns);
-
-	return bytes;
-}
-
-static void sunxi_mmc_filter_rate(struct sunxi_mmc_host *host, struct mmc_data *data, int64_t bytes, uint64_t time_us)
-{
-	unsigned int rate = 0;
-
-	if (!(host->filter_sector)
-		|| !(host->filter_speed))
-		return;
-
-	if ((data->blocks) >= (host->filter_sector)) {
-		rate = sunxi_mmc_get_rate(bytes, time_us);
-		if (rate < (host->filter_speed))
-			printk("c=%u,a=0x%8x,""bs=%5u,""t=%9lluus,""sp=%7uKB/s\n",
-			data->mrq->cmd->opcode, data->mrq->cmd->arg,
-			data->blocks, time_us, rate/1024);
-	}
-}
-
 
 static ssize_t maual_insert_show(struct device *dev,
 				 struct device_attribute *attr, char *buf)
@@ -473,7 +434,6 @@ int sunxi_mmc_uperf_stat(struct sunxi_mmc_host *host,
 						data->bytes_xfered;
 					host->perf.wtime =
 					ktime_add(host->perf.wtime, diff);
-					sunxi_mmc_filter_rate(host, data, data->bytes_xfered, ktime_to_us(diff));
 				}
 				host->perf.wbytestran += data->bytes_xfered;
 				host->perf.wtimetran =
@@ -487,12 +447,10 @@ int sunxi_mmc_uperf_stat(struct sunxi_mmc_host *host,
 			diff = ktime_sub(ktime_get(), host->perf.start);
 			host->perf.wbytes += mrq_busy->data->bytes_xfered;
 			host->perf.wtime = ktime_add(host->perf.wtime, diff);
-			sunxi_mmc_filter_rate(host, data, data->bytes_xfered, ktime_to_us(diff));
 		}
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(sunxi_mmc_uperf_stat);
 
 static ssize_t
 sunxi_mmc_show_perf(struct device *dev, struct device_attribute *attr, char *buf)
@@ -538,7 +496,7 @@ sunxi_mmc_set_perf(struct device *dev, struct device_attribute *attr,
 
 	sscanf(buf, "%lld", &value);
 	printk("set perf value %lld\n", value);
-
+;
 	mmc_claim_host(mmc);
 	if (!value) {
 		memset(&host->perf, 0, sizeof(host->perf));
@@ -550,63 +508,6 @@ sunxi_mmc_set_perf(struct device *dev, struct device_attribute *attr,
 
 	return count;
 }
-
-static ssize_t
-sunxi_mmc_show_filter_sector(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct mmc_host	*mmc = platform_get_drvdata(pdev);
-	struct sunxi_mmc_host *host = mmc_priv(mmc);
-
-	return snprintf(buf, PAGE_SIZE, "filter speed %d\n", host->filter_sector);
-}
-
-static ssize_t
-sunxi_mmc_set_filter_sector(struct device *dev, struct device_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct mmc_host	*mmc = platform_get_drvdata(pdev);
-	struct sunxi_mmc_host *host = mmc_priv(mmc);
-	int64_t value;
-
-	sscanf(buf, "%lld", &value);
-	printk("get filter sector %lld\n", value);
-	host->filter_sector = value;
-
-	return count;
-}
-
-
-static ssize_t
-sunxi_mmc_show_filter_speed(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct mmc_host	*mmc = platform_get_drvdata(pdev);
-	struct sunxi_mmc_host *host = mmc_priv(mmc);
-
-	return snprintf(buf, PAGE_SIZE, "filter speed %d\n", host->filter_speed);
-}
-
-static ssize_t
-sunxi_mmc_set_filter_speed(struct device *dev, struct device_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct mmc_host	*mmc = platform_get_drvdata(pdev);
-	struct sunxi_mmc_host *host = mmc_priv(mmc);
-	int64_t value;
-
-	sscanf(buf, "%lld", &value);
-	printk("get filter speed %lld\n", value);
-	host->filter_speed = value;
-
-	return count;
-}
-
-
-
-
 
 int mmc_create_sys_fs(struct sunxi_mmc_host *host, struct platform_device *pdev)
 {
@@ -624,30 +525,9 @@ int mmc_create_sys_fs(struct sunxi_mmc_host *host, struct platform_device *pdev)
 	host->host_perf.show = sunxi_mmc_show_perf;
 	host->host_perf.store = sunxi_mmc_set_perf;
 	sysfs_attr_init(&(host->host_perf.attr));
-	host->host_perf.attr.mode = S_IRUGO | S_IWUSR;
 	host->host_perf.attr.name = "sunxi_host_perf";
+	host->host_perf.attr.mode = S_IRUGO | S_IWUSR;
 	ret = device_create_file(&pdev->dev, &host->host_perf);
-	if (ret)
-		return ret;
-
-	host->filter_sector_perf.show = sunxi_mmc_show_filter_sector;
-	host->filter_sector_perf.store = sunxi_mmc_set_filter_sector;
-	sysfs_attr_init(&(host->filter_sector_perf.attr));
-	host->filter_sector_perf.attr.name = "sunxi_host_filter_w_sector";
-	host->filter_sector_perf.attr.mode = S_IRUGO | S_IWUSR;
-	ret = device_create_file(&pdev->dev, &host->filter_sector_perf);
-	if (ret)
-		return ret;
-
-	host->filter_speed_perf.show = sunxi_mmc_show_filter_speed;;
-	host->filter_speed_perf.store = sunxi_mmc_set_filter_speed;;
-	sysfs_attr_init(&(host->filter_speed_perf.attr));
-	host->filter_speed_perf.attr.name = "sunxi_host_filter_w_speed";
-	host->filter_speed_perf.attr.mode = S_IRUGO | S_IWUSR;
-	ret = device_create_file(&pdev->dev, &host->filter_speed_perf);
-	if (ret)
-		return ret;
-
 
 	host->dump_register = dump_register;
 	host->dump_register[0].show = dump_host_reg_show;
@@ -682,28 +562,16 @@ int mmc_create_sys_fs(struct sunxi_mmc_host *host, struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	host->host_mwr.show = sunxi_mmc_panic_rtest;
-	host->host_mwr.store = sunxi_mmc_pancic_wrtest;
-	sysfs_attr_init(&(host->host_mwr.attr));
-	host->host_mwr.attr.name = "sunxi_host_panic_wr";
-	host->host_mwr.attr.mode = S_IRUGO | S_IWUSR;
-	ret = device_create_file(&pdev->dev, &host->host_mwr);
-
 	return ret;
 }
-EXPORT_SYMBOL_GPL(mmc_create_sys_fs);
 
 void mmc_remove_sys_fs(struct sunxi_mmc_host *host,
 		       struct platform_device *pdev)
 {
-	device_remove_file(&pdev->dev, &host->host_mwr);
 	device_remove_file(&pdev->dev, &host->host_perf);
 	device_remove_file(&pdev->dev, &host->maual_insert);
 	device_remove_file(&pdev->dev, &host->dump_register[0]);
 	device_remove_file(&pdev->dev, &host->dump_register[1]);
 	device_remove_file(&pdev->dev, &host->dump_register[2]);
 	device_remove_file(&pdev->dev, &host->dump_clk_dly);
-	device_remove_file(&pdev->dev, &host->filter_sector_perf);
-	device_remove_file(&pdev->dev, &host->filter_speed_perf);
 }
-EXPORT_SYMBOL_GPL(mmc_remove_sys_fs);

@@ -16,7 +16,6 @@
 
 #include <linux/power_supply.h>
 
-#include <linux/sunxi-gpio.h>
 #ifdef CONFIG_ARCH_SUN8IW15P1
 //#define TYPE_C
 #ifndef CONFIG_AW_AXP22X
@@ -225,10 +224,6 @@ struct axp_usb_info {
 	int (*get_usb_vhold)(struct axp_charger_dev *cdev);
 	int (*set_usb_ihold)(struct axp_charger_dev *cdev, int cur);
 	int (*get_usb_ihold)(struct axp_charger_dev *cdev);
-#ifdef CONFIG_TYPE_C
-	int (*get_cc_mode)(struct axp_charger_dev *cdev);
-	int (*set_sel_mode)(struct axp_charger_dev *cdev, int mode);
-#endif
 };
 
 struct axp_battery_info {
@@ -260,16 +255,40 @@ struct axp_battery_info {
 	int (*pos_time_set)(struct axp_charger_dev *cdev, int min);
 };
 
+#ifdef CONFIG_TYPE_C
+struct axp_tc_info {
+int det_bit;
+int det_offset;
+int valid_bit;
+int valid_offset;
+int det_unused;
+int tc_vol;
+int tc_cur;
+int (*get_tc_vol)(struct axp_charger_dev *cdev);
+int (*get_tc_cur)(struct axp_charger_dev *cdev);
+int (*set_tc_vhold)(struct axp_charger_dev *cdev, int vol);
+int (*get_tc_vhold)(struct axp_charger_dev *cdev);
+int (*set_tc_ihold)(struct axp_charger_dev *cdev, int cur);
+int (*get_tc_ihold)(struct axp_charger_dev *cdev);
+
+};
+#endif
 struct axp_supply_info {
 	struct axp_ac_info *ac;
 	struct axp_usb_info *usb;
 	struct axp_battery_info *batt;
+#ifdef CONFIG_TYPE_C
+	struct axp_tc_info *tc;
+#endif
 };
 
 struct axp_charger_dev {
 	struct power_supply *batt;
 	struct power_supply *ac;
 	struct power_supply *usb;
+#ifdef CONFIG_TYPE_C
+	struct power_supply *tc;
+#endif
 	struct power_supply_info *battery_info;
 	struct axp_supply_info *spy_info;
 	struct device *dev;
@@ -286,7 +305,8 @@ struct axp_charger_dev {
 	int ac_vol;
 	int ac_cur;
 #ifdef CONFIG_TYPE_C
-	struct gpio_config pmu_type_c_sel;
+	int tc_vol;
+	int tc_cur;
 #endif
 	int bat_vol;
 	int bat_cur;
@@ -298,6 +318,10 @@ struct axp_charger_dev {
 	bool usb_det;
 	bool ac_valid;
 	bool usb_valid;
+#ifdef CONFIG_TYPE_C
+	bool tc_det;
+	bool tc_valid;
+#endif
 	bool ext_valid;
 	bool in_short;
 	bool charging;

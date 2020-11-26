@@ -61,10 +61,6 @@ int de_lti_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 
 	/* FIXME  display path offset should be defined */
 	base = reg_base + (sel + 1) * 0x00100000 + LTI_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel)
-		base = base - 0x00100000;
-#endif
 	__inf("sel %d, lti_base[%d]=0x%p\n", sel, chno, (void *)base);
 
 	memory = kmalloc(sizeof(struct __lti_reg_t), GFP_KERNEL | __GFP_ZERO);

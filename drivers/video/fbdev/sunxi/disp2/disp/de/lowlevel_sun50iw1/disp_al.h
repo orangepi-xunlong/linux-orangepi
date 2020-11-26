@@ -23,46 +23,6 @@
 #include "de_clock.h"
 #include "de_rtmx.h"
 
-enum de_irq_flag {
-	DE_IRQ_FLAG_FRAME_END  = 0x1 << 4,
-	DE_IRQ_FLAG_ERROR      = 0,
-	DE_IRQ_FLAG_RCQ_FINISH = 0x1 << 6,
-	DE_IRQ_FLAG_RCQ_ACCEPT = 0x1 << 7,
-	DE_IRQ_FLAG_MASK =
-		DE_IRQ_FLAG_FRAME_END
-		| DE_IRQ_FLAG_ERROR
-		| DE_IRQ_FLAG_RCQ_FINISH
-		| DE_IRQ_FLAG_RCQ_ACCEPT,
-};
-
-enum de_irq_state {
-	DE_IRQ_STATE_FRAME_END  = 0x1 << 0,
-	DE_IRQ_STATE_ERROR      = 0,
-	DE_IRQ_STATE_RCQ_FINISH = 0x1 << 2,
-	DE_IRQ_STATE_RCQ_ACCEPT = 0x1 << 3,
-	DE_IRQ_STATE_MASK =
-		DE_IRQ_STATE_FRAME_END
-		| DE_IRQ_STATE_ERROR
-		| DE_IRQ_STATE_RCQ_FINISH
-		| DE_IRQ_STATE_RCQ_ACCEPT,
-};
-
-enum de_wb_irq_flag {
-	DE_WB_IRQ_FLAG_RCQ_FINISH = 0x1 << 6,
-	DE_WB_IRQ_FLAG_RCQ_ACCEPT = 0x1 << 7,
-	DE_WB_IRQ_FLAG_MASK =
-		DE_WB_IRQ_FLAG_RCQ_FINISH
-		| DE_WB_IRQ_FLAG_RCQ_ACCEPT,
-};
-
-enum de_wb_irq_state {
-	DE_WB_IRQ_STATE_RCQ_FINISH = 0x1 << 2,
-	DE_WB_IRQ_STATE_RCQ_ACCEPT = 0x1 << 3,
-	DE_WB_IRQ_STATE_MASK =
-		DE_WB_IRQ_STATE_RCQ_FINISH
-		| DE_WB_IRQ_STATE_RCQ_ACCEPT,
-};
-
 struct lcd_clk_info {
 	enum disp_lcd_if lcd_if;
 	int tcon_div;
@@ -140,28 +100,5 @@ int disp_al_device_get_status(u32 screen_id);
 int disp_al_get_fb_info(unsigned int sel, struct disp_layer_info *info);
 int disp_al_get_display_size(unsigned int screen_id, unsigned int *width, unsigned int *height);
 void disp_al_show_builtin_patten(u32 hwdev_index, u32 patten);
-
-static inline s32 disp_al_capture_set_rcq_update(u32 disp, u32 en) { return 0; }
-
-static inline u32 disp_al_capture_query_irq_state(u32 disp, u32 irq_state) { return 0; }
-
-static inline s32 disp_al_capture_set_all_rcq_head_dirty(u32 disp, u32 dirty) { return 0; }
-
-static inline s32 disp_al_capture_set_irq_enable(u32 disp, u32 irq_flag, u32 en) { return 0; }
-
-static inline s32 disp_al_manager_set_rcq_update(u32 disp, u32 en) { return 0; }
-
-static inline s32 disp_al_manager_set_all_rcq_head_dirty(u32 disp, u32 dirty) { return 0; }
-
-static inline s32 disp_al_manager_set_irq_enable(u32 disp, u32 irq_flag, u32 en) { return 0; }
-
-static inline u32 disp_al_manager_query_irq_state(u32 disp, u32 irq_state) { return 0; }
-
-static inline int disp_al_device_set_de_id(u32 screen_id, u32 de_id) { return 0; }
-
-static inline int disp_al_device_set_de_use_rcq(u32 screen_id, u32 use_rcq) { return 0; }
-
-static inline int disp_al_device_set_output_type(u32 screen_id, u32 output_type) { return 0; }
-
 
 #endif

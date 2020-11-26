@@ -762,4 +762,3 @@ void __init sunxi_clocks_init(struct device_node *node)
 	sunxi_clk_factor_initlimits();
 	sunxi_set_clocks_priv_ops();
 }
-void __init sunxi_cpu_clocks_init(struct device_node *node) {}

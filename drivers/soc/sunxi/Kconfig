@@ -28,6 +28,14 @@ config SUNXI_SUSPEND_NONARISC
 	help
 	  Say y here to enter standby without arisc.
 
+config SUNXI_FAKE_POWEROFF
+       bool "support ir fake poweroff"
+       depends on SUNXI_ARISC && RTC_DRV_SUNXI
+       default y
+       help
+         support ir bootup feature.
+         but must has the module known as "ar100" or "cpus".
+         the feature is support power up with ir when poweroff.
 
 source "drivers/soc/sunxi/arisc/Kconfig"
 endif # SOC_SUNXI

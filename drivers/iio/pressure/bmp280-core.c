@@ -347,9 +347,10 @@ static int bmp280_read_humid(struct bmp280_data *data, int *val, int *val2)
 	adc_humidity = be16_to_cpu(tmp);
 	comp_humidity = bmp280_compensate_humidity(data, adc_humidity);
 
-	*val = comp_humidity * 1000 / 1024;
+	*val = comp_humidity;
+	*val2 = 1024;
 
-	return IIO_VAL_INT;
+	return IIO_VAL_FRACTIONAL;
 }
 
 static int bmp280_read_raw(struct iio_dev *indio_dev,

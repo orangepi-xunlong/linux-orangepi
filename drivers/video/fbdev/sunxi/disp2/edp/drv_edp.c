@@ -73,9 +73,6 @@ static s32 edp_clk_enable(u32 sel, bool en)
 
 	if (g_edp_info[sel].clk) {
 		ret = 0;
-		if (g_edp_info[sel].clk_parent)
-			clk_set_parent(g_edp_info[sel].clk,
-				       g_edp_info[sel].clk_parent);
 		if (en)
 			ret = clk_prepare_enable(g_edp_info[sel].clk);
 		else
@@ -625,8 +622,6 @@ static s32 edp_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "fail to get clk for edp%d!\n", pdev->id);
 		goto ERR_IOMAP;
 	}
-	g_edp_info[pdev->id].clk_parent =
-	    clk_get_parent(g_edp_info[pdev->id].clk);
 
 	ret = edp_clk_enable(pdev->id, true);
 	if (ret) {

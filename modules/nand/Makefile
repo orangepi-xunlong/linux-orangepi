@@ -10,15 +10,15 @@
 
 ifneq ($(LICHEE_KDIR),)
 SOC=$(shell \
-	sed -n 's/^CONFIG_ARCH_\(SUN.*P1\)=y/\1/p' $(LICHEE_KDIR)/.config 2>/dev/null | sed 's/[A-Z]/\l&/g')
+	sed -n 's/^CONFIG_ARCH_\(SUN.*P1\)=y/\1/p' $(LICHEE_KDIR)/.config | sed 's/[A-Z]/\l&/g')
 else
 SOC=$(shell \
-	sed -n 's/^CONFIG_ARCH_\(SUN.*P1\)=y/\1/p' .config 2>/dev/null | sed 's/[A-Z]/\l&/g')
+	sed -n 's/^CONFIG_ARCH_\(SUN.*P1\)=y/\1/p' .config | sed 's/[A-Z]/\l&/g')
 endif
 
 obj-$(CONFIG_SUNXI_NAND) += $(SOC)/
 
-.PHONY: install build clean build_rr
+.PHONY: install build clean
 
 install:
 	@if cat $(LICHEE_KDIR)/.config|grep "CONFIG_SUNXI_NAND=m" >/dev/null 2>&1;then \
@@ -32,11 +32,3 @@ clean:
 build:
 	@make -C ${SOC}/lib clean 2>/dev/null
 	@make -C ${SOC}/lib install
-
-build_rr:
-	@make -C ${SOC}/phy-nand/physic_v2/rr_lib clean 2>/dev/null
-	@make -C ${SOC}/phy-nand/physic_v2/rr_lib
-
-build_3d:
-	@make -C ${SOC}/lib-3d clean 2>/dev/null
-	@make -C ${SOC}/lib-3d install

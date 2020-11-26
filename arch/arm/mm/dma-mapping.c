@@ -2390,7 +2390,6 @@ static void arm_teardown_iommu_dma_ops(struct device *dev) { }
 
 #endif	/* CONFIG_ARM_DMA_USE_IOMMU */
 
-EXPORT_SYMBOL(v7_dma_flush_range);
 static struct dma_map_ops *arm_get_dma_map_ops(bool coherent)
 {
 	return coherent ? &arm_coherent_dma_ops : &arm_dma_ops;
@@ -2414,3 +2413,5 @@ void arch_teardown_dma_ops(struct device *dev)
 {
 	arm_teardown_iommu_dma_ops(dev);
 }
+
+EXPORT_SYMBOL(v7_dma_flush_range);

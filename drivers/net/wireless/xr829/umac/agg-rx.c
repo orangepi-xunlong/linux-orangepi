@@ -122,6 +122,7 @@ void mac80211_stop_rx_ba_session(struct ieee80211_vif *vif, u16 ba_rx_bitmap,
 	mac80211_queue_work(&sta->local->hw, &sta->ampdu_mlme.work);
 	rcu_read_unlock();
 }
+EXPORT_SYMBOL(mac80211_stop_rx_ba_session);
 
 /*
  * After accepting the AddBA Request we activated a timer,

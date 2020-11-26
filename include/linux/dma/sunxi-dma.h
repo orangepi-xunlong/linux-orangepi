@@ -48,10 +48,6 @@
 #include "sunxi/dma-sun8iw18.h"
 #elif defined(CONFIG_ARCH_SUN50IW5T)
 #include "sunxi/dma-sun50iw5t.h"
-#elif defined(CONFIG_ARCH_SUN50IW9)
-#include "sunxi/dma-sun50iw9.h"
-#elif defined(CONFIG_ARCH_SUN50IW10)
-#include "sunxi/dma-sun50iw10.h"
 #else
 
 #define DRQSRC_SRAM		0
@@ -74,13 +70,13 @@
 #define DRQSRC_NAND0		5
 #endif
 
-#define DRQSRC_UART0_RX		6
-#define DRQSRC_UART1_RX 	7
-#define DRQSRC_UART2_RX		8
+#define DRQSRC_UART0RX		6
+#define DRQSRC_UART1RX 		7
+#define DRQSRC_UART2RX		8
 
 #ifndef CONFIG_ARCH_SUN8IW8
-#define DRQSRC_UART3_RX		9
-#define DRQSRC_UART4_RX		10
+#define DRQSRC_UART3RX		9
+#define DRQSRC_UART4RX		10
 #endif
 /* #define DRQSRC_RESEVER		11 */
 /* #define DRQSRC_RESEVER		12 */
@@ -122,7 +118,7 @@
 
 #if defined(CONFIG_ARCH_SUN8IW1) \
 	|| defined(CONFIG_ARCH_SUN9I)
-#define DRQSRC_UART5_RX		22
+#define DRQSRC_UART5RX		22
 #endif
 
 #define DRQSRC_SPI0_RX		23
@@ -176,13 +172,13 @@
 #define DRQDST_NAND0		5
 #endif
 
-#define DRQDST_UART0_TX		6
-#define DRQDST_UART1_TX 	7
-#define DRQDST_UART2_TX		8
+#define DRQDST_UART0TX		6
+#define DRQDST_UART1TX 		7
+#define DRQDST_UART2TX		8
 
 #if !defined(CONFIG_ARCH_SUN8IW8)
-#define DRQDST_UART3_TX		9
-#define DRQDST_UART4_TX		10
+#define DRQDST_UART3TX		9
+#define DRQDST_UART4TX		10
 #endif
 
 #if defined(CONFIG_ARCH_SUN8IW3) \
@@ -229,7 +225,7 @@
 
 #if defined(CONFIG_ARCH_SUN8IW1) \
 	|| defined(CONFIG_ARCH_SUN9I)
-#define DRQDST_UART5_TX		22
+#define DRQDST_UART5TX		22
 #endif
 
 #define DRQDST_SPI0_TX		23

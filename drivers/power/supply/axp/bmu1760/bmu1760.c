@@ -292,7 +292,7 @@ static int bmu1760_probe(struct platform_device *pdev)
 			}
 		}
 	} else {
-		pr_err("BMU1760 device tree err!\n");
+		pr_err("AXP22x device tree err!\n");
 		return -EBUSY;
 	}
 

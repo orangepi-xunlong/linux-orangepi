@@ -24,7 +24,7 @@ void boot_fail_check(esm_instance_t *esm)
 ESM_STATUS ESM_GetStatusRegister(esm_instance_t *esm, esm_status_t *status,
 							uint8_t clear)
 {
-	ESM_STATUS err = -1;
+	ESM_STATUS err;
 	uint32_t reg0 = 0;
 	uint32_t clr = 0, clr1 = 0;
 

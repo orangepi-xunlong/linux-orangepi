@@ -14,6 +14,22 @@
  *
  */
 
+/*
+ ******************************************************************************
+ *
+ * vin_os.h
+ *
+ * Hawkview ISP - vin_os.h module
+ *
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version         Author         Date           Description
+ *
+ *   3.0        Yang Feng      2015/12/02      ISP Tuning Tools Support
+ *
+ ******************************************************************************
+ */
+
 #ifndef __VIN__OS__H__
 #define __VIN__OS__H__
 
@@ -23,18 +39,11 @@
 #include <linux/interrupt.h>
 #include "../platform/platform_cfg.h"
 
-#ifdef SUNXI_MEM
-#include <linux/ion.h>      /*for all "ion api"*/
-#include <../drivers/staging/android/ion/ion_priv.h>
-#include <linux/ion_sunxi.h>    /*for import "sunxi_ion_client_create"*/
-#include <linux/dma-mapping.h>  /*just include "PAGE_SIZE" macro*/
-#else
 #include <linux/dma-mapping.h>
-#endif
 
 #define IS_FLAG(x, y) (((x)&(y)) == y)
 
-#define VIN_LOG_MD				(1 << 0)	/*0x1 */
+#define VIN_LOG_MD				(1 << 0)	/*0x0 */
 #define VIN_LOG_FLASH				(1 << 1)	/*0x2 */
 #define VIN_LOG_CCI				(1 << 2)	/*0x4 */
 #define VIN_LOG_CSI				(1 << 3)	/*0x8 */
@@ -46,10 +55,9 @@
 #define VIN_LOG_CONFIG				(1 << 9)	/*0x200*/
 #define VIN_LOG_VIDEO				(1 << 10)	/*0x400*/
 #define VIN_LOG_FMT				(1 << 11)	/*0x800*/
-#define VIN_LOG_TDM				(1 << 12)	/*0x1000*/
 
 extern unsigned int vin_log_mask;
-#if defined CONFIG_VIN_LOG
+
 #define vin_log(flag, arg...) do { \
 	if (flag & vin_log_mask) { \
 		switch (flag) { \
@@ -89,18 +97,13 @@ extern unsigned int vin_log_mask;
 		case VIN_LOG_FMT: \
 			printk(KERN_DEBUG "[VIN_LOG_FMT]" arg); \
 			break; \
-		case VIN_LOG_TDM: \
-			printk(KERN_DEBUG "[VIN_LOG_TDM]" arg); \
-			break; \
 		default: \
 			printk(KERN_DEBUG "[VIN_LOG]" arg); \
 			break; \
 		} \
 	} \
 } while (0)
-#else
-#define vin_log(flag, arg...) do { } while (0)
-#endif
+
 #define vin_err(x, arg...) pr_err("[VIN_ERR]"x, ##arg)
 #define vin_warn(x, arg...) pr_warn("[VIN_WARN]"x, ##arg)
 #define vin_print(x, arg...) pr_info("[VIN]"x, ##arg)

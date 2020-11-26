@@ -81,14 +81,7 @@
 #define TIANJU_FILTER
 
 #define sc7660_REG_CTRL	    		0x20
-#define sc7660_REG_CTRL_RANGE 		0x23
-#define sc7660_REG_DATA 			0x00
-
-#define sc7660_MEASURING_RANGE      0x30
-#define sc7660_MEASURING_RANGE_2G   0x0
-#define sc7660_MEASURING_RANGE_4G   0x10
-#define sc7660_MEASURING_RANGE_8G   0x20
-#define sc7660_MEASURING_RANGE_16G  0x30
+#define sc7660_REG_DATA		  		0x00
 
 /* sc7660 control bit */
 #define sc7660_CTRL_PWRON		    0x47	/* power on */
@@ -1255,20 +1248,13 @@ static ssize_t sc7660_delay_store(struct device *dev,
 		data = POLL_INTERVAL_MAX;
 
         mutex_lock(&sc7660->interval_mutex);
-		// if the sensor sample rate is too fast, the real report rate
-		// maybe lower than sample rate when system is busy. reduce the sample
-		// time to raise report rate.
         sc7660->pollDev->poll_interval = data;
         mutex_unlock(&sc7660->interval_mutex);
 
 		if (atomic_read(&sc7660_data.enable)) {
-			if (sc7660->pollDev->poll_interval <= 10) {
-				sc7660_data.ktime = ktime_set(0, sc7660->pollDev->poll_interval * NSEC_PER_MSEC - NSEC_PER_MSEC / 2);
-			} else {
-				sc7660_data.ktime = ktime_set(0, sc7660->pollDev->poll_interval * NSEC_PER_MSEC);
-			}
+			sc7660_data.ktime = ktime_set(0, sc7660->pollDev->poll_interval * NSEC_PER_MSEC);
 			hrtimer_start(&sc7660_data.hr_timer, sc7660_data.ktime, HRTIMER_MODE_REL);
-		}
+			}
 
 	return count;
 }
@@ -1290,7 +1276,6 @@ static ssize_t sc7660_enable_store(struct device *dev,
 		const char *buf, size_t count)
 {
 	unsigned long data;
-	s32 val = 0;
 	int error;
 
 	struct i2c_client *client       = sc7660_i2c_client;
@@ -1312,18 +1297,8 @@ static ssize_t sc7660_enable_store(struct device *dev,
 		error = i2c_smbus_write_byte_data(sc7660_i2c_client, sc7660_REG_CTRL,sc7660_CTRL_PWRON);
 		atomic_set(&sc7660_data.enable, 1);
 		assert(error==0);
-		// set sensor max range is 4G,because cts 10_r1 request
-		val = i2c_smbus_read_byte_data(sc7660_i2c_client, sc7660_REG_CTRL + 3);
-		val &= ~(sc7660_MEASURING_RANGE);
-		error = i2c_smbus_write_byte_data(sc7660_i2c_client, sc7660_REG_CTRL_RANGE, val | sc7660_MEASURING_RANGE_4G);
-		assert(error == 0);
 		//
 		printk(KERN_INFO "%s: sc7660 delay %d\n", __func__, sc7660->pollDev->poll_interval);
-		if (sc7660->pollDev->poll_interval <= 10) {
-			sc7660_data.ktime = ktime_set(0, sc7660->pollDev->poll_interval * NSEC_PER_MSEC - NSEC_PER_MSEC / 2);
-		} else {
-			sc7660_data.ktime = ktime_set(0, sc7660->pollDev->poll_interval * NSEC_PER_MSEC);
-		}
 		sc7660_data.ktime = ktime_set(0, sc7660->pollDev->poll_interval * NSEC_PER_MSEC);
 		hrtimer_start(&sc7660_data.hr_timer, ktime_set(0, 0), HRTIMER_MODE_REL);
 		//sc7660_idev->input->open(sc7660_idev->input);
@@ -1756,7 +1731,7 @@ static void wq_func_hrtimer(struct work_struct *work)
 	z = xyz[5];
 
 	if (x == 0 && y == 0 && z == 0) {
-		printk("sc7660 gsensor x y z all 0!!!\n");
+		pr_err("sc7660 gsensor x y z all 0!!!\n");
 		sc7660_reset();
 		return;
 	}

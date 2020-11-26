@@ -85,13 +85,13 @@ wait:
 	return status;
 }
 
-static void sig_handler(int signum)
+static void alarm_handler(int signum)
 {
-	/* Just wake us up from waitpid */
+	/* Jut wake us up from waitpid */
 }
 
-static struct sigaction sig_action = {
-	.sa_handler = sig_handler,
+static struct sigaction alarm_action = {
+	.sa_handler = alarm_handler,
 };
 
 void test_harness_set_timeout(uint64_t time)
@@ -106,14 +106,8 @@ int test_harness(int (test_function)(void), char *name)
 	test_start(name);
 	test_set_git_version(GIT_VERSION);
 
-	if (sigaction(SIGINT, &sig_action, NULL)) {
-		perror("sigaction (sigint)");
-		test_error(name);
-		return 1;
-	}
-
-	if (sigaction(SIGALRM, &sig_action, NULL)) {
-		perror("sigaction (sigalrm)");
+	if (sigaction(SIGALRM, &alarm_action, NULL)) {
+		perror("sigaction");
 		test_error(name);
 		return 1;
 	}

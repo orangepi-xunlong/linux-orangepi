@@ -463,6 +463,7 @@ void mac80211_chswitch_done(struct ieee80211_vif *vif, bool success)
 
 	mac80211_queue_work(&sdata->local->hw, &ifmgd->chswitch_work);
 }
+EXPORT_SYMBOL(mac80211_chswitch_done);
 
 static void ieee80211_chswitch_timer(unsigned long data)
 {
@@ -576,6 +577,7 @@ void mac80211_enable_dyn_ps(struct ieee80211_vif *vif)
 	sdata->disable_dynamic_ps = false;
 	conf->dynamic_ps_timeout = sdata->dynamic_ps_user_timeout;
 }
+EXPORT_SYMBOL(mac80211_enable_dyn_ps);
 
 void mac80211_disable_dyn_ps(struct ieee80211_vif *vif)
 {
@@ -593,6 +595,7 @@ void mac80211_disable_dyn_ps(struct ieee80211_vif *vif)
 	mac80211_queue_work(&local->hw,
 			     &sdata->dynamic_ps_enable_work);
 }
+EXPORT_SYMBOL(mac80211_disable_dyn_ps);
 
 /* powersave */
 static void ieee80211_enable_ps(struct ieee80211_local *local,
@@ -1508,6 +1511,7 @@ struct sk_buff *mac80211_ap_probereq_get(struct ieee80211_hw *hw,
 
 	return skb;
 }
+EXPORT_SYMBOL(mac80211_ap_probereq_get);
 
 static void __mac80211_connection_loss(struct ieee80211_sub_if_data *sdata)
 {
@@ -1564,6 +1568,7 @@ void mac80211_beacon_loss(struct ieee80211_vif *vif)
 	WARN_ON(hw->flags & IEEE80211_HW_CONNECTION_MONITOR);
 	mac80211_queue_work(hw, &sdata->u.mgd.beacon_connection_loss_work);
 }
+EXPORT_SYMBOL(mac80211_beacon_loss);
 
 void mac80211_connection_loss(struct ieee80211_vif *vif)
 {
@@ -1575,6 +1580,8 @@ void mac80211_connection_loss(struct ieee80211_vif *vif)
 	WARN_ON(!(hw->flags & IEEE80211_HW_CONNECTION_MONITOR));
 	mac80211_queue_work(hw, &sdata->u.mgd.beacon_connection_loss_work);
 }
+EXPORT_SYMBOL(mac80211_connection_loss);
+
 
 static enum rx_mgmt_action __must_check
 ieee80211_rx_mgmt_deauth(struct ieee80211_sub_if_data *sdata,
@@ -2298,7 +2305,6 @@ void mac80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 			       sdata->name, mgmt->bssid,
 			       le16_to_cpu(mgmt->u.deauth.reason_code));
 
-			xrmac_sta_info_destroy_addr(sdata, mgmt->bssid);
 			list_del_rcu(&wk->list);
 			xrmac_free_work(wk);
 			break;
@@ -3104,6 +3110,7 @@ void mac80211_cqm_rssi_notify(struct ieee80211_vif *vif,
 
 	cfg80211_cqm_rssi_notify(sdata->dev, rssi_event, gfp);
 }
+EXPORT_SYMBOL(mac80211_cqm_rssi_notify);
 #if 0
 void ieee80211_cqm_beacon_miss_notify(struct ieee80211_vif *vif,
 				      gfp_t gfp)
@@ -3112,6 +3119,7 @@ void ieee80211_cqm_beacon_miss_notify(struct ieee80211_vif *vif,
 
 	cfg80211_cqm_beacon_miss_notify(sdata->dev, gfp);
 }
+EXPORT_SYMBOL(ieee80211_cqm_beacon_miss_notify);
 
 void ieee80211_cqm_tx_fail_notify(struct ieee80211_vif *vif,
 				      gfp_t gfp)
@@ -3120,6 +3128,7 @@ void ieee80211_cqm_tx_fail_notify(struct ieee80211_vif *vif,
 
 	cfg80211_cqm_tx_fail_notify(sdata->dev, gfp);
 }
+EXPORT_SYMBOL(ieee80211_cqm_tx_fail_notify);
 
 void ieee80211_p2p_noa_notify(struct ieee80211_vif *vif,
 			      struct cfg80211_p2p_ps *p2p_ps,
@@ -3129,6 +3138,7 @@ void ieee80211_p2p_noa_notify(struct ieee80211_vif *vif,
 
 	cfg80211_p2p_noa_notify(sdata->dev, p2p_ps, gfp);
 }
+EXPORT_SYMBOL(ieee80211_p2p_noa_notify);
 
 void ieee80211_driver_hang_notify(struct ieee80211_vif *vif,
 					gfp_t gfp)
@@ -3137,6 +3147,7 @@ void ieee80211_driver_hang_notify(struct ieee80211_vif *vif,
 
 	cfg80211_driver_hang_notify(sdata->dev, gfp);
 }
+EXPORT_SYMBOL(ieee80211_driver_hang_notify);
 #endif
 
 unsigned char mac80211_get_operstate(struct ieee80211_vif *vif)
@@ -3144,3 +3155,4 @@ unsigned char mac80211_get_operstate(struct ieee80211_vif *vif)
 	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
 	return sdata->dev->operstate;
 }
+EXPORT_SYMBOL(mac80211_get_operstate);

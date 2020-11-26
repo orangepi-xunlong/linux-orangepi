@@ -299,8 +299,8 @@ static int sensor_s_exp_gain(struct v4l2_subdev *sd,
 	if (gain_val > 64*16-1)
 		gain_val = 64*16-1;
 
-	if (exp_val > 506*16)
-		exp_val = 506*16;
+	if (exp_val > 0xfff*16)
+		exp_val = 0xfff*16;
 	if (exp_val < 6*16)
 		exp_val = 6*16;
 

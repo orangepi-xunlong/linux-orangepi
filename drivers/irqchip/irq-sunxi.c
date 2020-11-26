@@ -27,16 +27,26 @@
 #include <linux/cpu.h>
 #include <linux/notifier.h>
 #include <linux/cpu_pm.h>
-#include <linux/arisc/arisc.h>
+#include <asm/cacheflush.h>
 
 #define GIC_SUPPORT_IRQS 1024
 
+static void __iomem *wakeupgen_base;
+unsigned int wakeupgen_size;
+static DEFINE_SPINLOCK(irq_wake_lock);
+
 static int sunxi_irq_set_wake(struct irq_data *d, unsigned int on)
 {
-	if (on)
-		arisc_set_wakeup_source(SET_ROOT_WAKEUP_SOURCE(d->hwirq));
-	else
-		arisc_clear_wakeup_source(SET_ROOT_WAKEUP_SOURCE(d->hwirq));
+	unsigned int idx = d->hwirq / 32;
+	u32 mask, tmp;
+
+	spin_lock(&irq_wake_lock);
+	mask = 1 << d->hwirq % 32;
+	tmp = readl_relaxed(wakeupgen_base + idx * 4);
+	tmp = on ? tmp | mask : tmp & ~mask;
+	writel_relaxed(tmp, wakeupgen_base + idx * 4);
+	__dma_flush_area(wakeupgen_base, wakeupgen_size);
+	spin_unlock(&irq_wake_lock);
 	/*
 	 * Do *not* call into the parent, as the GIC doesn't have any
 	 * wake-up facility...
@@ -46,8 +56,6 @@ static int sunxi_irq_set_wake(struct irq_data *d, unsigned int on)
 
 static struct irq_chip wakeupgen_chip = {
 	.name			= "wakeupgen",
-	.irq_enable		= irq_chip_enable_parent,
-	.irq_disable		= irq_chip_disable_parent,
 	.irq_eoi		= irq_chip_eoi_parent,
 	.irq_mask		= irq_chip_mask_parent,
 	.irq_unmask		= irq_chip_unmask_parent,
@@ -118,6 +126,8 @@ static int __init wakeupgen_init(struct device_node *node,
 			       struct device_node *parent)
 {
 	struct irq_domain *parent_domain, *domain;
+	unsigned int value[2] = { 0, 0 };
+	int i, ret;
 
 	if (!parent) {
 		pr_err("%s: no parent, giving up\n", node->full_name);
@@ -130,13 +140,31 @@ static int __init wakeupgen_init(struct device_node *node,
 		return -ENXIO;
 	}
 
+	ret = of_property_read_u32_array(node, "space1", value,
+				ARRAY_SIZE(value));
+	if (ret) {
+		pr_err("get sunxi_irq_space1 err.\n");
+		return -EINVAL;
+	}
+
+	pr_err("%s, 0x%x, 0x%x\n", __func__,
+			value[0], value[1]);
+
+	wakeupgen_base = phys_to_virt(value[0]);
+	wakeupgen_size = value[1];
+
 	domain = irq_domain_add_hierarchy(parent_domain, 0, GIC_SUPPORT_IRQS,
 					  node, &sunxi_domain_ops,
 					  NULL);
 	if (!domain) {
-		pr_err("%s: failed to allocated domain\n", node->full_name);
+		iounmap(wakeupgen_base);
 		return -ENOMEM;
 	}
+
+	/* Initially mask all interrupts */
+	for (i = 0; i < SZ_2K / sizeof(int); i++)
+		writel_relaxed(0, wakeupgen_base + i * sizeof(int));
+	__dma_flush_area(wakeupgen_base, wakeupgen_size);
 
 	return 0;
 }

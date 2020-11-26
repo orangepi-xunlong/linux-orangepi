@@ -183,6 +183,7 @@ void mac80211_get_tkip_p1k_iv(struct ieee80211_key_conf *keyconf,
 	memcpy(p1k, ctx->p1k, sizeof(ctx->p1k));
 	spin_unlock_irqrestore(&key->u.tkip.txlock, flags);
 }
+EXPORT_SYMBOL(mac80211_get_tkip_p1k_iv);
 
 void mac80211_get_tkip_rx_p1k(struct ieee80211_key_conf *keyconf,
 				const u8 *ta, u32 iv32, u16 *p1k)
@@ -193,6 +194,7 @@ void mac80211_get_tkip_rx_p1k(struct ieee80211_key_conf *keyconf,
 	tkip_mixing_phase1(tk, &ctx, ta, iv32);
 	memcpy(p1k, ctx.p1k, sizeof(ctx.p1k));
 }
+EXPORT_SYMBOL(mac80211_get_tkip_rx_p1k);
 
 void mac80211_get_tkip_p2k(struct ieee80211_key_conf *keyconf,
 			    struct sk_buff *skb, u8 *p2k)
@@ -212,6 +214,7 @@ void mac80211_get_tkip_p2k(struct ieee80211_key_conf *keyconf,
 	tkip_mixing_phase2(tk, ctx, iv16, p2k);
 	spin_unlock_irqrestore(&key->u.tkip.txlock, flags);
 }
+EXPORT_SYMBOL(mac80211_get_tkip_p2k);
 
 /*
  * Encrypt packet payload with TKIP using @key. @pos is a pointer to the

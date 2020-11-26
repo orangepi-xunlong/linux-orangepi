@@ -76,13 +76,6 @@ config ARM_MVEBU_V7_CPUIDLE
 	help
 	  Select this to enable cpuidle on Armada 370, 38x and XP processors.
 
-config SUNXI_CPU0IDLE
-	bool "Allow CPU0 Enter C1/C2 Idle"
-	default n
-	depends on ARCH_SUNXI && ARM_CPUIDLE && !ARM_SUNXI_CPUIDLE
-	help
-	  Select this to allow CPU0 to enter c1/c2.
-
 config ARM_SUNXI_CPUIDLE
 	bool "Cpu Idle Config for sunxi soc"
 	default n

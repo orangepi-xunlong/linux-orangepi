@@ -72,7 +72,6 @@ CONFIG_APPEND_VENDOR_IE_ENABLE = n
 CONFIG_RTW_NAPI = y
 CONFIG_RTW_GRO = y
 CONFIG_RTW_WIFI_HAL = y
-CONFIG_IP_R_Monitor = y #arp VOQ and high rate
 ########################## Debug ###########################
 CONFIG_RTW_DEBUG = y
 # default log level is _DRV_INFO_ = 4,
@@ -897,7 +896,7 @@ EXTRA_CFLAGS += -DEFUSE_MAP_PATH=\"/vendor/etc/wifi/wifi_efuse_$(MODULE_NAME).ma
 endif
 
 #WIFIMAC_PATH
-USER_WIFIMAC_PATH ?=
+USER_WIFIMAC_PATH ?= "/data/misc/wifi/wifimac.txt"
 ifneq ($(USER_WIFIMAC_PATH),)
 EXTRA_CFLAGS += -DWIFIMAC_PATH=\"$(USER_WIFIMAC_PATH)\"
 else
@@ -1037,10 +1036,6 @@ endif
 
 ifeq ($(CONFIG_RTW_GRO), y)
 EXTRA_CFLAGS += -DCONFIG_RTW_GRO
-endif
-
-ifeq ($(CONFIG_IP_R_Monitor), y)
-EXTRA_CFLAGS += -DCONFIG_IP_R_Monitor
 endif
 
 ifeq ($(CONFIG_RTW_WIFI_HAL), y)

@@ -36,8 +36,7 @@ static u32 suspend_prestep = 3;
 static u32 power_status_init;
 
 /* static unsigned int gbuffer[4096]; */
-static struct info_mm g_disp_mm[DISP_MEM_NUM];
-static int g_disp_mem_id = -1;
+static struct info_mm g_disp_mm[10];
 
 static struct cdev *my_cdev;
 static dev_t devid;
@@ -56,7 +55,6 @@ struct disp_layer_config lyr_cfg[16];
 struct disp_layer_config2 lyr_cfg2[16];
 struct disp_layer_config2 lyr_cfg2_1[16];
 static spinlock_t sync_finish_lock;
-unsigned int bright_csc = 50, contrast_csc = 50, satuation_csc = 50;
 
 #ifndef CONFIG_OF
 static struct sunxi_disp_mod disp_mod[] = {
@@ -160,12 +158,6 @@ static ssize_t disp_sys_show(struct device *dev,
 			count += sprintf(buf + count,
 					 "\tvdpo output mode(%d)\tfps:%d.%d",
 					 mode, fps / 10, fps % 10);
-		}  else if (dispdev->type == DISP_OUTPUT_TYPE_RTWB) {
-			int mode = dispdev->get_mode(dispdev);
-
-			count += sprintf(buf + count,
-					 "\trtwb output mode(%d)\tfps:%d.%d",
-					 mode, fps / 10, fps % 10);
 		} else if (dispdev->type == DISP_OUTPUT_TYPE_EDP) {
 			count += sprintf(
 			    buf + count, "\tEDP output(%s) \tfps:%d.%d",
@@ -265,8 +257,7 @@ static ssize_t disp_enhance_mode_store(struct device *dev,
 {
 	int err;
 	unsigned long val;
-	/*3:demo vivid is larger than size of _csc_enhance_setting*/
-	unsigned long real_mode = g_enhance_mode;
+
 	err = kstrtoul(buf, 10, &val);
 	if (err) {
 		pr_warn("Invalid size\n");
@@ -276,7 +267,7 @@ static ssize_t disp_enhance_mode_store(struct device *dev,
 	/*
 	 * mode: 0: standard; 1: vivid; 2: soft; 3: demo vivid
 	 */
-	if (val > 3 || val < 0)
+	if (val > 3)
 		pr_warn("Invalid value, 0~3 is expected!\n");
 	else {
 		int num_screens = 2;
@@ -295,13 +286,15 @@ static ssize_t disp_enhance_mode_store(struct device *dev,
 				enhance = mgr->enhance;
 				if (enhance && enhance->set_mode)
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW1)
-					real_mode = (g_enhance_mode >= 2) ? 1 : g_enhance_mode;
-					enhance->set_mode(enhance, real_mode);
+					enhance->set_mode(enhance,
+							 (g_enhance_mode == 2) ?
+							 1 : g_enhance_mode);
 					if (g_enhance_mode == 2)
 						g_enhance_mode = 3;
 #else
-					real_mode = (g_enhance_mode >= 3) ? 1 : g_enhance_mode;
-					enhance->set_mode(enhance, real_mode);
+					enhance->set_mode(enhance,
+							 (g_enhance_mode == 3) ?
+							 1 : g_enhance_mode);
 #endif
 
 				if (enhance && enhance->demo_enable
@@ -311,7 +304,6 @@ static ssize_t disp_enhance_mode_store(struct device *dev,
 					else
 						enhance->demo_disable(enhance);
 				}
-				g_enhance_mode = real_mode;
 			}
 		}
 	}
@@ -321,12 +313,6 @@ static ssize_t disp_enhance_mode_store(struct device *dev,
 
 static DEVICE_ATTR(enhance_mode, 0660,
 		   disp_enhance_mode_show, disp_enhance_mode_store);
-int __attribute__ ((weak))
-_csc_enhance_setting[3][4] = {
-	{50, 50, 50, 50},
-	{50, 50, 50, 50},
-	{50, 40, 50, 50},
-};
 
 static ssize_t disp_enhance_bright_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -346,7 +332,7 @@ static ssize_t disp_enhance_bright_show(struct device *dev,
 			value = enhance->get_bright(enhance);
 	}
 
-	return sprintf(buf, "%d %d\n", _csc_enhance_setting[g_enhance_mode][0], value);
+	return sprintf(buf, "%d\n", value);
 }
 
 static ssize_t disp_enhance_bright_store(struct device *dev,
@@ -371,14 +357,8 @@ static ssize_t disp_enhance_bright_store(struct device *dev,
 
 	if (mgr) {
 		enhance = mgr->enhance;
-		if (enhance && enhance->set_bright) {
-			_csc_enhance_setting[g_enhance_mode][0] = value;
+		if (enhance && enhance->set_bright)
 			enhance->set_bright(enhance, value);
-		}
-		if (enhance && enhance->set_mode) {
-			enhance->set_mode(enhance, g_enhance_mode ? 0 : 1);
-			enhance->set_mode(enhance, g_enhance_mode);
-		}
 	}
 
 	return count;
@@ -404,7 +384,7 @@ static ssize_t disp_enhance_saturation_show(struct device *dev,
 			value = enhance->get_saturation(enhance);
 	}
 
-	return sprintf(buf, "%d %d\n", value, _csc_enhance_setting[g_enhance_mode][2]);
+	return sprintf(buf, "%d\n", value);
 }
 
 static ssize_t disp_enhance_saturation_store(struct device *dev,
@@ -429,14 +409,8 @@ static ssize_t disp_enhance_saturation_store(struct device *dev,
 
 	if (mgr) {
 		enhance = mgr->enhance;
-		if (enhance && enhance->set_saturation) {
-			_csc_enhance_setting[g_enhance_mode][2] = value;
+		if (enhance && enhance->set_saturation)
 			enhance->set_saturation(enhance, value);
-		}
-		if (enhance && enhance->set_mode) {
-			enhance->set_mode(enhance, g_enhance_mode ? 0 : 1);
-			enhance->set_mode(enhance, g_enhance_mode);
-		}
 	}
 
 	return count;
@@ -462,7 +436,7 @@ static ssize_t disp_enhance_contrast_show(struct device *dev,
 			value = enhance->get_contrast(enhance);
 	}
 
-	return sprintf(buf, "%d %d\n", value, _csc_enhance_setting[g_enhance_mode][1]);
+	return sprintf(buf, "%d\n", value);
 }
 
 static ssize_t disp_enhance_contrast_store(struct device *dev,
@@ -487,14 +461,8 @@ static ssize_t disp_enhance_contrast_store(struct device *dev,
 
 	if (mgr) {
 		enhance = mgr->enhance;
-		if (enhance && enhance->set_contrast) {
-			_csc_enhance_setting[g_enhance_mode][1] = value;
+		if (enhance && enhance->set_contrast)
 			enhance->set_contrast(enhance, value);
-		}
-		if (enhance && enhance->set_mode) {
-			enhance->set_mode(enhance, g_enhance_mode ? 0 : 1);
-			enhance->set_mode(enhance, g_enhance_mode);
-		}
 	}
 
 	return count;
@@ -670,19 +638,23 @@ static ssize_t disp_cvbs_enhance_store(struct device *dev,
 {
 	int err;
 	unsigned long val;
-	int num_screens = 0;
-	unsigned int disp;
-	struct disp_device *ptv = NULL;
 
 	err = kstrtoul(buf, 10, &val);
+	if (val > 2) {
+		pr_warn("Invalid value, 0/1/2 is expected!\n");
+	} else {
+		int num_screens = 0;
+		unsigned int disp;
+		struct disp_device *ptv = NULL;
 
-	g_cvbs_enhance_mode = val;
-	num_screens = bsp_disp_feat_get_num_screens();
+		g_cvbs_enhance_mode = val;
+		num_screens = bsp_disp_feat_get_num_screens();
 
-	for (disp = 0; disp < num_screens; disp++) {
-		ptv = disp_device_find(disp, DISP_OUTPUT_TYPE_TV);
-		if (ptv && ptv->set_enhance_mode)
-			ptv->set_enhance_mode(ptv, g_cvbs_enhance_mode);
+		for (disp = 0; disp < num_screens; disp++) {
+			ptv = disp_device_find(disp, DISP_OUTPUT_TYPE_TV);
+			if (ptv && ptv->set_enhance_mode)
+				ptv->set_enhance_mode(ptv, g_cvbs_enhance_mode);
+		}
 	}
 
 	return count;
@@ -1189,10 +1161,6 @@ static s32 parser_disp_init_para(const struct device_node *np,
 	}
 	init_para->b_init = value;
 
-	if (of_property_read_u32(np, "chn_cfg_mode", &value) < 0)
-		value = 0;
-	init_para->chn_cfg_mode = value;
-
 	if (of_property_read_u32(np, "disp_mode", &value) < 0) {
 		__wrn("of_property_read disp_init.disp_mode fail\n");
 		return -1;
@@ -1218,8 +1186,6 @@ static s32 parser_disp_init_para(const struct device_node *np,
 		init_para->output_type[0] = DISP_OUTPUT_TYPE_VDPO;
 	} else if (value == 6) {
 		init_para->output_type[0] = DISP_OUTPUT_TYPE_EDP;
-	} else if (value == 7) {
-		init_para->output_type[0] = DISP_OUTPUT_TYPE_RTWB;
 	} else {
 		__wrn("invalid screen0_output_type %d\n",
 		      init_para->output_type[0]);
@@ -1313,8 +1279,6 @@ static s32 parser_disp_init_para(const struct device_node *np,
 			init_para->output_type[1] = DISP_OUTPUT_TYPE_VDPO;
 		} else if (value == 6) {
 			init_para->output_type[1] = DISP_OUTPUT_TYPE_EDP;
-		} else if (value == 7) {
-			init_para->output_type[1] = DISP_OUTPUT_TYPE_RTWB;
 		} else {
 			__wrn("invalid screen1_output_type %d\n",
 			      init_para->output_type[1]);
@@ -1773,11 +1737,6 @@ int disp_device_set_config(struct disp_init_para *init,
 {
 	struct disp_device_config config;
 
-	if (screen_id >= DISP_SCREEN_NUM) {
-		__wrn("Out of range of screen index\n");
-		return -1;
-	}
-
 	memset(&config, 0, sizeof(struct disp_device_config));
 	config.type = init->output_type[screen_id];
 	config.mode = init->output_mode[screen_id];
@@ -1815,6 +1774,8 @@ static void start_work(struct work_struct *work)
 			int disp_mode = g_disp_drv.disp_init.disp_mode;
 			int output_type =
 			    g_disp_drv.disp_init.output_type[screen_id];
+			int output_mode =
+			    g_disp_drv.disp_init.output_mode[screen_id];
 			int lcd_registered =
 			    bsp_disp_get_lcd_registered(screen_id);
 			int hdmi_registered = bsp_disp_get_hdmi_registered();
@@ -1831,8 +1792,7 @@ static void start_work(struct work_struct *work)
 					if (lcd_registered &&
 					    bsp_disp_get_output_type(screen_id)
 					    != DISP_OUTPUT_TYPE_LCD) {
-						disp_device_set_config(
-								       &g_disp_drv.disp_init, screen_id);
+						bsp_disp_device_switch(screen_id, output_type, output_mode);
 						suspend_output_type[screen_id] =
 						    output_type;
 					}
@@ -1842,14 +1802,14 @@ static void start_work(struct work_struct *work)
 					    bsp_disp_get_output_type(screen_id)
 					    != DISP_OUTPUT_TYPE_HDMI) {
 						msleep(600);
-						disp_device_set_config(
-								       &g_disp_drv.disp_init, screen_id);
+						bsp_disp_device_switch(screen_id, output_type, output_mode);
 						suspend_output_type[screen_id] =
 						    output_type;
 					}
 				} else {
-					disp_device_set_config(
-					    &g_disp_drv.disp_init, screen_id);
+					bsp_disp_device_switch(screen_id,
+							       output_type,
+							       output_mode);
 					suspend_output_type[screen_id] =
 					    output_type;
 				}
@@ -1871,7 +1831,7 @@ static void start_work(struct work_struct *work)
 static s32 start_process(void)
 {
 	flush_work(&g_disp_drv.start_work);
-#if !defined(CONFIG_EINK_PANEL_USED) && !defined(CONFIG_EINK200_SUNXI)
+#if !defined(CONFIG_EINK_PANEL_USED)
 	schedule_work(&g_disp_drv.start_work);
 #endif
 	return 0;
@@ -2058,7 +2018,7 @@ s32 disp_unregister_compat_ioctl_func(unsigned int cmd)
 }
 
 #ifdef CONFIG_COMPAT
-static __attribute__((unused)) s32 disp_compat_ioctl_extend(unsigned int cmd, unsigned long arg)
+static s32 disp_compat_ioctl_extend(unsigned int cmd, unsigned long arg)
 {
 	struct ioctl_list *ptr;
 
@@ -2212,8 +2172,8 @@ static s32 disp_init(struct platform_device *pdev)
 		g_disp_drv.disp_init.output_aspect_ratio[para->boot_info.disp];
 
 	if (para->boot_info.sync == 1) {
-		__wrn("smooth display screen:%d type:%d mode:%d\n", para->boot_info.disp,
-		      para->boot_info.type, para->boot_info.mode);
+		__wrn("smooth display screen:%d type:%d", para->boot_info.disp,
+		      para->boot_info.type);
 		g_disp_drv.disp_init.disp_mode = para->boot_info.disp;
 		g_disp_drv.disp_init.output_type[para->boot_info.disp] =
 		    output_type;
@@ -2232,8 +2192,6 @@ static s32 disp_init(struct platform_device *pdev)
 		sunxi_enable_device_iommu(DE_MASTOR_ID, true);
 #endif
 	}
-
-	para->feat_init.chn_cfg_mode = g_disp_drv.disp_init.chn_cfg_mode;
 
 	bsp_disp_init(para);
 
@@ -2270,23 +2228,6 @@ static s32 disp_exit(void)
 
 static int disp_mem_request(int sel, u32 size)
 {
-
-#if defined(CONFIG_SUNXI_IOMMU) && defined(CONFIG_ION_SUNXI)
-	if (sel >= DISP_MEM_NUM || !size) {
-		__wrn("invalid param\n");
-		return -EINVAL;
-	}
-	g_disp_mm[sel].p_ion_mem = disp_ion_malloc(size, (u32 *)(&g_disp_mm[sel].mem_start));
-	if (g_disp_mm[sel].p_ion_mem) {
-		g_disp_mm[sel].info_base = (char __iomem *)g_disp_mm[sel].p_ion_mem->vaddr;
-		g_disp_mm[sel].mem_len = size;
-		g_disp_mem_id = sel;
-		return 0;
-	} else {
-		return -ENOMEM;
-	}
-#else
-
 #ifndef FB_RESERVED_MEM
 	unsigned map_size = 0;
 	struct page *page;
@@ -2315,7 +2256,6 @@ static int disp_mem_request(int sel, u32 size)
 		__inf("pa=0x%p va=0x%p size:0x%x\n",
 		      (void *)g_disp_mm[sel].mem_start,
 		      g_disp_mm[sel].info_base, size);
-		g_disp_mem_id = sel;
 		return 0;
 	}
 
@@ -2338,7 +2278,6 @@ static int disp_mem_request(int sel, u32 size)
 		__inf("pa=0x%p va=0x%p size:0x%x\n",
 		      (void *)g_disp_mm[sel].mem_start,
 		      g_disp_mm[sel].info_base, size);
-		g_disp_mem_id = sel;
 
 		return 0;
 	}
@@ -2346,20 +2285,10 @@ static int disp_mem_request(int sel, u32 size)
 	__wrn("disp_malloc fail!\n");
 	return -ENOMEM;
 #endif
-#endif /*end of define CONFIG_SUNXI_IOMMU*/
 }
 
 static int disp_mem_release(int sel)
 {
-#if defined (CONFIG_SUNXI_IOMMU) && defined(CONFIG_ION_SUNXI)
-	if (!g_disp_mm[sel].info_base) {
-		__wrn("invalid param\n");
-		return -EINVAL;
-	}
-	disp_ion_free((void *__force)g_disp_mm[sel].info_base,
-		      (void *)g_disp_mm[sel].mem_start, g_disp_mm[sel].mem_len);
-#else
-
 #ifndef FB_RESERVED_MEM
 	unsigned map_size;
 	unsigned page_size;
@@ -2385,9 +2314,24 @@ static int disp_mem_release(int sel)
 		  (void *)g_disp_mm[sel].mem_start, g_disp_mm[sel].mem_len);
 	memset(&g_disp_mm[sel], 0, sizeof(struct info_mm));
 #endif
-#endif
-	g_disp_mem_id = -1;
 	return 0;
+}
+
+static bool disp_mem_check_valid(unsigned long pgoff)
+{
+	unsigned int i;
+	bool ret = false;
+	unsigned long mem_start = pgoff << PAGE_SHIFT;
+
+	for (i = 0; i < DISP_MEM_NUM; i++) {
+		if ((g_disp_mm[i].info_base != NULL) &&
+		    (g_disp_mm[i].mem_start == mem_start)) {
+			ret = true;
+			break;
+		}
+	}
+
+	return ret;
 }
 
 int sunxi_disp_get_source_ops(struct sunxi_disp_source_ops *src_ops)
@@ -2427,35 +2371,20 @@ int sunxi_disp_get_source_ops(struct sunxi_disp_source_ops *src_ops)
 
 int disp_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	unsigned long mypfn = vma->vm_pgoff;
+	unsigned long vmsize = vma->vm_end - vma->vm_start;
 
-	unsigned int off = vma->vm_pgoff << PAGE_SHIFT;
-
-	int mem_id = g_disp_mem_id;
-	if (mem_id >= DISP_MEM_NUM || mem_id < 0 ||
-	    !g_disp_mm[mem_id].info_base) {
-		__wrn("invalid param\n");
+	if (!disp_mem_check_valid(mypfn))
 		return -EINVAL;
-	}
 
-	if (off < g_disp_mm[mem_id].mem_len) {
-/*#if defined(CONFIG_SUNXI_IOMMU)
-		if (g_disp_mm[mem_id].p_ion_mem) {
-			ion_set_dmabuf_flag(
-			    g_disp_mm[mem_id].p_ion_mem->p_item->buf, 0);
+	vma->vm_pgoff = 0;
 
-			return g_disp_mm[mem_id]
-			    .p_ion_mem->p_item->buf->ops->mmap(
-				g_disp_mm[mem_id].p_ion_mem->p_item->buf, vma);
-		} else
-			return -EINVAL;
+	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+	if (remap_pfn_range
+	    (vma, vma->vm_start, mypfn, vmsize, vma->vm_page_prot))
+		return -EAGAIN;
 
-#endif */
-		return dma_mmap_writecombine(
-		    g_disp_drv.dev, vma, g_disp_mm[mem_id].info_base,
-		    g_disp_mm[mem_id].mem_start, g_disp_mm[mem_id].mem_len);
-	}
-
-	return -EINVAL;
+	return 0;
 }
 
 int disp_open(struct inode *inode, struct file *file)
@@ -2505,16 +2434,6 @@ static int disp_probe(struct platform_device *pdev)
 	}
 	counter++;
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-	g_disp_drv.reg_base[DISP_MOD_DE1] =
-	    (uintptr_t __force) of_iomap(pdev->dev.of_node, counter);
-	if (!g_disp_drv.reg_base[DISP_MOD_DE1]) {
-		dev_err(&pdev->dev, "unable to map de registers\n");
-		ret = -EINVAL;
-		goto err_iomap;
-	}
-	counter++;
-#endif
 #if defined(HAVE_DEVICE_COMMON_MODULE)
 	g_disp_drv.reg_base[DISP_MOD_DEVICE] =
 	    (uintptr_t __force) of_iomap(pdev->dev.of_node, counter);
@@ -2525,17 +2444,6 @@ static int disp_probe(struct platform_device *pdev)
 		goto err_iomap;
 	}
 	counter++;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	g_disp_drv.reg_base[DISP_MOD_DEVICE1] =
-	    (uintptr_t __force) of_iomap(pdev->dev.of_node, counter);
-	if (!g_disp_drv.reg_base[DISP_MOD_DEVICE1]) {
-		dev_err(&pdev->dev,
-			"unable to map device common module registers\n");
-		ret = -EINVAL;
-		goto err_iomap;
-	}
-	counter++;
-#endif
 #endif
 
 	for (i = 0; i < DISP_DEVICE_NUM; i++) {
@@ -2577,18 +2485,7 @@ static int disp_probe(struct platform_device *pdev)
 
 	/* parse and map irq */
 	/* lcd0/1/2.. - dsi */
-	/* get de irq for rcq update and eink */
 	counter = 0;
-
-#ifdef DE_VERSION_V33X
-	g_disp_drv.irq_no[DISP_MOD_DE] =
-	    irq_of_parse_and_map(pdev->dev.of_node, counter);
-	if (!g_disp_drv.irq_no[DISP_MOD_DE]) {
-		dev_err(&pdev->dev, "irq_of_parse_and_map de irq fail\n");
-	}
-	++counter;
-#endif
-
 	for (i = 0; i < DISP_DEVICE_NUM; i++) {
 		g_disp_drv.irq_no[DISP_MOD_LCD0 + i] =
 		    irq_of_parse_and_map(pdev->dev.of_node, counter);
@@ -2621,6 +2518,13 @@ static int disp_probe(struct platform_device *pdev)
 #endif /*endif SUPPORT_VDPO */
 
 #if defined(SUPPORT_EINK)
+	g_disp_drv.irq_no[DISP_MOD_DE] =
+	    irq_of_parse_and_map(pdev->dev.of_node, counter);
+	if (!g_disp_drv.irq_no[DISP_MOD_DE])
+		dev_err(&pdev->dev,
+			"irq_of_parse_and_map de irq %d fail for de\n", i);
+	counter++;
+
 	g_disp_drv.irq_no[DISP_MOD_EINK] =
 	    irq_of_parse_and_map(pdev->dev.of_node, counter);
 	if (!g_disp_drv.irq_no[DISP_MOD_EINK])
@@ -2637,12 +2541,6 @@ static int disp_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "fail to get clk for de\n");
 	counter++;
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-	g_disp_drv.mclk[DISP_MOD_DE1] = of_clk_get(pdev->dev.of_node, counter);
-	if (IS_ERR(g_disp_drv.mclk[DISP_MOD_DE1]))
-		dev_err(&pdev->dev, "fail to get clk for de1\n");
-	counter++;
-#endif
 #if defined(HAVE_DEVICE_COMMON_MODULE)
 	g_disp_drv.mclk[DISP_MOD_DEVICE] =
 	    of_clk_get(pdev->dev.of_node, counter);
@@ -2650,16 +2548,6 @@ static int disp_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev,
 			"fail to get clk for device common module\n");
 	counter++;
-#endif
-#if defined(CONFIG_ARCH_SUN50IW10)
-	for (i = 0; i < DISP_DEVICE_NUM; i++) {
-		g_disp_drv.mclk[DISP_MOD_DPSS0 + i] =
-			of_clk_get(pdev->dev.of_node, counter);
-		if (IS_ERR(g_disp_drv.mclk[DISP_MOD_DPSS0 + i]))
-			dev_err(&pdev->dev,
-					"fail to get clk for DPSS%d\n", i);
-		counter++;
-	}
 #endif
 
 	for (i = 0; i < DISP_DEVICE_NUM; i++) {
@@ -3040,6 +2928,17 @@ int disp_resume(struct device *dev)
 	struct disp_eink_manager *eink_manager = NULL;
 #endif
 #if defined(CONFIG_PM_RUNTIME)
+	struct disp_device *dispdev = NULL;
+	struct list_head *disp_list = NULL;
+
+	if (dev->power.runtime_status == RPM_ACTIVE)
+		goto late_resume;
+
+	disp_list = disp_device_get_list_head();
+	list_for_each_entry(dispdev, disp_list, list) {
+		if (dispdev->resume)
+			dispdev->resume(dispdev);
+	}
 	memset(&config, 0, sizeof(struct disp_device_config));
 	if (g_pm_runtime_enable) {
 		for (screen_id = 0; screen_id < num_screens; screen_id++) {
@@ -3051,6 +2950,24 @@ int disp_resume(struct device *dev)
 			    DISP_OUTPUT_TYPE_LCD) {
 				schedule_work(&g_disp_drv.
 					      resume_work[screen_id]);
+				if (!mgr->device->is_enabled(mgr->device)) {
+					mgr->device->enable(mgr->device);
+				} else {
+					mgr->device->pwm_enable(mgr->device);
+					mgr->device->backlight_enable(mgr->device);
+				}
+			} else if (suspend_output_type[screen_id] !=
+						DISP_OUTPUT_TYPE_NONE) {
+				if (mgr->device->set_static_config &&
+					mgr->device->get_static_config) {
+					mgr->device->get_static_config(mgr->device,
+									&config);
+
+					mgr->device->set_static_config(mgr->device,
+									&config);
+				}
+				if (!mgr->device->is_enabled(mgr->device))
+					mgr->device->enable(mgr->device);
 			}
 		}
 		if (g_pm_runtime_enable) {
@@ -3064,14 +2981,6 @@ int disp_resume(struct device *dev)
 			}
 		}
 	} else {
-		struct disp_device *dispdev = NULL;
-		struct list_head *disp_list = NULL;
-
-		disp_list = disp_device_get_list_head();
-		list_for_each_entry(dispdev, disp_list, list) {
-			if (dispdev->resume)
-				dispdev->resume(dispdev);
-		}
 		for (screen_id = 0; screen_id < num_screens; screen_id++) {
 			mgr = g_disp_drv.mgr[screen_id];
 			if (!mgr || !mgr->device)
@@ -3121,6 +3030,7 @@ int disp_resume(struct device *dev)
 	disp_resume_cb();
 #endif
 
+late_resume:
 	suspend_status &= (~DISPLAY_DEEP_SLEEP);
 	suspend_prestep = 2;
 
@@ -3613,51 +3523,6 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	}
 
-	case DISP_RTWB_COMMIT:
-	{
-#if defined(SUPPORT_RTWB)
-		struct disp_layer_config2 *pLyr_cfg2;
-		struct disp_capture_info2 info2;
-		unsigned int i = 0;
-		const unsigned int lyr_cfg_size =
-			ARRAY_SIZE(lyr_cfg2);
-
-		/* adapt to multi thread call in case of disp 0 & 1 work together*/
-		if (ubuffer[0] == 0)
-			pLyr_cfg2 = lyr_cfg2;
-		else
-			pLyr_cfg2 = lyr_cfg2_1;
-
-		if (copy_from_user(pLyr_cfg2,
-		    (void __user *)ubuffer[1],
-		    sizeof(struct disp_layer_config2) * ubuffer[2])) {
-			__wrn("copy_from_user fail\n");
-
-			return  -EFAULT;
-		}
-
-		if (copy_from_user(&info2,
-		    (void __user *)ubuffer[3],
-		    sizeof(struct disp_capture_info2))) {
-			__wrn("copy_from_user  disp_capture_info2 fail\n");
-
-			return  -EFAULT;
-		}
-
-
-		for (i = 0; (i < lyr_cfg_size) && (i < ubuffer[2]); ++i) {
-			if (pLyr_cfg2[i].enable == 0) {
-				memset(&(pLyr_cfg2[i].info), 0,
-					sizeof(pLyr_cfg2[i].info));
-			}
-		}
-
-		if (mgr)
-			ret = disp_mgr_set_rtwb_layer(mgr, pLyr_cfg2, &info2, ubuffer[2]);
-#endif
-		break;
-	}
-
 	case DISP_LAYER_GET_CONFIG2:
 	{
 		if (copy_from_user(lyr_cfg2,
@@ -3933,59 +3798,6 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 #endif /*endif SUPPORT_VDPO*/
 
-	case DISP_LCD_CHECK_OPEN_FINISH:
-		{
-			if (mgr && mgr->device) {
-				if (mgr->device->is_enabled)
-					return mgr->device->is_enabled(mgr->device);
-				else
-					return -1;
-			} else
-					return -1;
-		}
-
-	case DISP_LCD_BACKLIGHT_ENABLE:
-		{
-			if (mgr && mgr->device) {
-				if (mgr->device->pwm_enable)
-					mgr->device->pwm_enable(mgr->device);
-				if (mgr->device->backlight_enable)
-					mgr->device->backlight_enable(mgr->device);
-
-				return 0;
-			}
-			return -1;
-			break;
-		}
-	case DISP_LCD_BACKLIGHT_DISABLE:
-		{
-			if (mgr && mgr->device) {
-				if (mgr->device->pwm_disable)
-					mgr->device->pwm_disable(mgr->device);
-				if (mgr->device->backlight_disable)
-					mgr->device->backlight_disable(mgr->device);
-				return 0;
-			}
-			return -1;
-			break;
-		}
-	case DISP_SET_KSC_PARA:
-		{
-
-			struct disp_ksc_info ksc;
-
-			if (copy_from_user(&ksc, (void __user *)ubuffer[1],
-					   sizeof(struct disp_ksc_info))) {
-				__wrn("copy_from_user fail\n");
-				return  -EFAULT;
-			}
-			if (mgr && mgr->set_ksc_para)
-				ret = mgr->set_ksc_para(mgr, &ksc);
-
-			break;
-		}
-
-
 	default:
 		ret = disp_ioctl_extend(cmd, (unsigned long)ubuffer);
 		break;
@@ -4018,10 +3830,8 @@ static long disp_compat_ioctl(struct file *file, unsigned int cmd,
 		return -EFAULT;
 	}
 
-	/*
 	if (cmd == DISP_HWC_COMMIT)
 		return disp_compat_ioctl_extend(cmd, (unsigned long)ubuffer);
-	*/
 
 	return disp_ioctl(file, cmd, (unsigned long)ubuffer);
 }
@@ -4150,11 +3960,7 @@ static void __exit disp_module_exit(void)
 	cdev_del(my_cdev);
 }
 
-#ifdef CONFIG_ARCH_SUN50IW9P1
-subsys_initcall_sync(disp_module_init);
-#else
 module_init(disp_module_init);
-#endif
 module_exit(disp_module_exit);
 
 MODULE_AUTHOR("tan");

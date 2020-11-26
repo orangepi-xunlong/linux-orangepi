@@ -112,7 +112,7 @@
 	#define PHYDM_PRINT2BUF				snprintf
 #else
 	#define dbg_print	panic_printk
-	/*#define RT_PRINTK(fmt, args...)	dbg_print("%s(): " fmt, __func__, ## args);*/
+	/*#define RT_PRINTK(fmt, args...)	dbg_print("%s(): " fmt, __FUNCTION__, ## args);*/
 	#define RT_PRINTK(args...)	dbg_print(args)
 	#define PHYDM_PRINT2BUF				snprintf
 #endif

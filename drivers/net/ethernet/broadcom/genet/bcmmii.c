@@ -167,14 +167,8 @@ void bcmgenet_mii_setup(struct net_device *dev)
 static int bcmgenet_fixed_phy_link_update(struct net_device *dev,
 					  struct fixed_phy_status *status)
 {
-	struct bcmgenet_priv *priv;
-	u32 reg;
-
-	if (dev && dev->phydev && status) {
-		priv = netdev_priv(dev);
-		reg = bcmgenet_umac_readl(priv, UMAC_MODE);
-		status->link = !!(reg & MODE_LINK_STATUS);
-	}
+	if (dev && dev->phydev && status)
+		status->link = dev->phydev->link;
 
 	return 0;
 }
@@ -483,7 +477,7 @@ static int bcmgenet_mii_of_init(struct bcmgenet_priv *priv)
 	if (!compat)
 		return -ENOMEM;
 
-	priv->mdio_dn = of_get_compatible_child(dn, compat);
+	priv->mdio_dn = of_find_compatible_node(dn, NULL, compat);
 	kfree(compat);
 	if (!priv->mdio_dn) {
 		dev_err(kdev, "unable to find MDIO bus node\n");

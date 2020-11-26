@@ -924,7 +924,7 @@ u8 *rtw_get_wps_ie_from_scan_queue(u8 *in_ie, uint in_len, u8 *wps_ie, uint *wps
 {
 	u8	*wps = NULL;
 
-	RTW_INFO("[%s] frame_type = %d\n", __func__, frame_type);
+	RTW_INFO("[%s] frame_type = %d\n", __FUNCTION__, frame_type);
 	switch (frame_type) {
 	case BSS_TYPE_BCN:
 	case BSS_TYPE_PROB_RSP: {
@@ -1030,7 +1030,7 @@ u8 *rtw_get_wps_attr(u8 *wps_ie, uint wps_ielen, u16 target_attr_id , u8 *buf_at
 		u16 attr_data_len = RTW_GET_BE16(attr_ptr + 2);
 		u16 attr_len = attr_data_len + 4;
 
-		/* RTW_INFO("%s attr_ptr:%p, id:%u, length:%u\n", __func__, attr_ptr, attr_id, attr_data_len); */
+		/* RTW_INFO("%s attr_ptr:%p, id:%u, length:%u\n", __FUNCTION__, attr_ptr, attr_id, attr_data_len); */
 		if (attr_id == target_attr_id) {
 			target_attr_ptr = attr_ptr;
 
@@ -1378,7 +1378,7 @@ int rtw_get_mac_addr_intel(unsigned char *buf)
 	char fname[] = "/config/wifi/mac.txt";
 	int jj, kk;
 
-	RTW_INFO("%s Enter\n", __func__);
+	RTW_INFO("%s Enter\n", __FUNCTION__);
 
 	ret = rtw_retrieve_from_file(fname, c_mac, MAC_ADDRESS_LEN);
 	if (ret < MAC_ADDRESS_LEN)
@@ -1388,7 +1388,7 @@ int rtw_get_mac_addr_intel(unsigned char *buf)
 		buf[jj] = key_2char2num(c_mac[kk], c_mac[kk + 1]);
 
 	RTW_INFO("%s: read from file mac address: "MAC_FMT"\n",
-		 __func__, MAC_ARG(buf));
+		 __FUNCTION__, MAC_ARG(buf));
 
 	return 0;
 }
@@ -1589,7 +1589,7 @@ void dump_ies(void *sel, u8 *buf, u32 buf_len)
 		id = *pos;
 		len = *(pos + 1);
 
-		RTW_PRINT_SEL(sel, "%s ID:%u, LEN:%u\n", __func__, id, len);
+		RTW_PRINT_SEL(sel, "%s ID:%u, LEN:%u\n", __FUNCTION__, id, len);
 #ifdef CONFIG_80211N_HT
 		dump_ht_cap_ie(sel, pos, len + 2);
 		dump_ht_op_ie(sel, pos, len + 2);
@@ -2689,7 +2689,7 @@ u8	rtw_ht_mcsset_to_nss(u8 *supp_mcs_set)
 		nss = 1;
 	else
 		RTW_INFO("%s,%d, warning! supp_mcs_set is zero\n", __func__, __LINE__);
-	/* RTW_INFO("%s HT: %dSS\n", __func__, nss); */
+	/* RTW_INFO("%s HT: %dSS\n", __FUNCTION__, nss); */
 	return nss;
 }
 

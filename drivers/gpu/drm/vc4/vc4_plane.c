@@ -327,9 +327,6 @@ static int vc4_plane_setup_clipping_and_scaling(struct drm_plane_state *state)
 	vc4_state->y_scaling[0] = vc4_get_scaling_mode(vc4_state->src_h[0],
 						       vc4_state->crtc_h);
 
-	vc4_state->is_unity = (vc4_state->x_scaling[0] == VC4_SCALING_NONE &&
-			       vc4_state->y_scaling[0] == VC4_SCALING_NONE);
-
 	if (num_planes > 1) {
 		vc4_state->is_yuv = true;
 
@@ -345,19 +342,23 @@ static int vc4_plane_setup_clipping_and_scaling(struct drm_plane_state *state)
 			vc4_get_scaling_mode(vc4_state->src_h[1],
 					     vc4_state->crtc_h);
 
-		/* YUV conversion requires that horizontal scaling be enabled
-		 * on the UV plane even if vc4_get_scaling_mode() returned
-		 * VC4_SCALING_NONE (which can happen when the down-scaling
-		 * ratio is 0.5). Let's force it to VC4_SCALING_PPF in this
-		 * case.
+		/* YUV conversion requires that scaling be enabled,
+		 * even on a plane that's otherwise 1:1.  Choose TPZ
+		 * for simplicity.
 		 */
-		if (vc4_state->x_scaling[1] == VC4_SCALING_NONE)
-			vc4_state->x_scaling[1] = VC4_SCALING_PPF;
+		if (vc4_state->x_scaling[0] == VC4_SCALING_NONE)
+			vc4_state->x_scaling[0] = VC4_SCALING_TPZ;
+		if (vc4_state->y_scaling[0] == VC4_SCALING_NONE)
+			vc4_state->y_scaling[0] = VC4_SCALING_TPZ;
 	} else {
-		vc4_state->is_yuv = false;
 		vc4_state->x_scaling[1] = VC4_SCALING_NONE;
 		vc4_state->y_scaling[1] = VC4_SCALING_NONE;
 	}
+
+	vc4_state->is_unity = (vc4_state->x_scaling[0] == VC4_SCALING_NONE &&
+			       vc4_state->y_scaling[0] == VC4_SCALING_NONE &&
+			       vc4_state->x_scaling[1] == VC4_SCALING_NONE &&
+			       vc4_state->y_scaling[1] == VC4_SCALING_NONE);
 
 	/* No configuring scaling on the cursor plane, since it gets
 	   non-vblank-synced updates, and scaling requires requires
@@ -613,10 +614,7 @@ static int vc4_plane_mode_set(struct drm_plane *plane,
 		vc4_dlist_write(vc4_state, SCALER_CSC2_ITR_R_601_5);
 	}
 
-	if (vc4_state->x_scaling[0] != VC4_SCALING_NONE ||
-	    vc4_state->x_scaling[1] != VC4_SCALING_NONE ||
-	    vc4_state->y_scaling[0] != VC4_SCALING_NONE ||
-	    vc4_state->y_scaling[1] != VC4_SCALING_NONE) {
+	if (!vc4_state->is_unity) {
 		/* LBM Base Address. */
 		if (vc4_state->y_scaling[0] != VC4_SCALING_NONE ||
 		    vc4_state->y_scaling[1] != VC4_SCALING_NONE) {

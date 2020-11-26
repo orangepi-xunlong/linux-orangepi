@@ -83,7 +83,8 @@
 #define L2TP_SLFLAG_S	   0x40000000
 #define L2TP_SL_SEQ_MASK   0x00ffffff
 
-#define L2TP_HDR_SIZE_MAX		14
+#define L2TP_HDR_SIZE_SEQ		10
+#define L2TP_HDR_SIZE_NOSEQ		6
 
 /* Default trace flags */
 #define L2TP_DEFAULT_DEBUG_FLAGS	0
@@ -738,7 +739,7 @@ discard:
  */
 void l2tp_recv_common(struct l2tp_session *session, struct sk_buff *skb,
 		      unsigned char *ptr, unsigned char *optr, u16 hdrflags,
-		      int length)
+		      int length, int (*payload_hook)(struct sk_buff *skb))
 {
 	struct l2tp_tunnel *tunnel = session->tunnel;
 	int offset;
@@ -795,8 +796,10 @@ void l2tp_recv_common(struct l2tp_session *session, struct sk_buff *skb,
 				 "%s: recv data ns=%u, session nr=%u\n",
 				 session->name, ns, session->nr);
 		}
-		ptr += 4;
 	}
+
+	/* Advance past L2-specific header, if present */
+	ptr += session->l2specific_len;
 
 	if (L2TP_SKB_CB(skb)->has_seq) {
 		/* Received a packet with sequence numbers. If we're the LNS,
@@ -842,8 +845,10 @@ void l2tp_recv_common(struct l2tp_session *session, struct sk_buff *skb,
 		}
 	}
 
-	/* Session data offset is defined only for L2TPv2 and is
-	 * indicated by an optional 16-bit value in the header.
+	/* Session data offset is handled differently for L2TPv2 and
+	 * L2TPv3. For L2TPv2, there is an optional 16-bit value in
+	 * the header. For L2TPv3, the offset is negotiated using AVPs
+	 * in the session setup control protocol.
 	 */
 	if (tunnel->version == L2TP_HDR_VER_2) {
 		/* If offset bit set, skip it. */
@@ -851,13 +856,21 @@ void l2tp_recv_common(struct l2tp_session *session, struct sk_buff *skb,
 			offset = ntohs(*(__be16 *)ptr);
 			ptr += 2 + offset;
 		}
-	}
+	} else
+		ptr += session->offset;
 
 	offset = ptr - optr;
 	if (!pskb_may_pull(skb, offset))
 		goto discard;
 
 	__skb_pull(skb, offset);
+
+	/* If caller wants to process the payload before we queue the
+	 * packet, do so now.
+	 */
+	if (payload_hook)
+		if ((*payload_hook)(skb))
+			goto discard;
 
 	/* Prepare skb for adding to the session's reorder_q.  Hold
 	 * packets for max reorder_timeout or 1 second if not
@@ -918,7 +931,8 @@ EXPORT_SYMBOL_GPL(l2tp_session_queue_purge);
  * Returns 1 if the packet was not a good data packet and could not be
  * forwarded.  All such packets are passed up to userspace to deal with.
  */
-static int l2tp_udp_recv_core(struct l2tp_tunnel *tunnel, struct sk_buff *skb)
+static int l2tp_udp_recv_core(struct l2tp_tunnel *tunnel, struct sk_buff *skb,
+			      int (*payload_hook)(struct sk_buff *skb))
 {
 	struct l2tp_session *session = NULL;
 	unsigned char *ptr, *optr;
@@ -933,7 +947,7 @@ static int l2tp_udp_recv_core(struct l2tp_tunnel *tunnel, struct sk_buff *skb)
 	__skb_pull(skb, sizeof(struct udphdr));
 
 	/* Short packet? */
-	if (!pskb_may_pull(skb, L2TP_HDR_SIZE_MAX)) {
+	if (!pskb_may_pull(skb, L2TP_HDR_SIZE_SEQ)) {
 		l2tp_info(tunnel, L2TP_MSG_DATA,
 			  "%s: recv short packet (len=%d)\n",
 			  tunnel->name, skb->len);
@@ -1012,11 +1026,7 @@ static int l2tp_udp_recv_core(struct l2tp_tunnel *tunnel, struct sk_buff *skb)
 		goto error;
 	}
 
-	if (tunnel->version == L2TP_HDR_VER_3 &&
-	    l2tp_v3_ensure_opt_in_linear(session, skb, &ptr, &optr))
-		goto error;
-
-	l2tp_recv_common(session, skb, ptr, optr, hdrflags, length);
+	l2tp_recv_common(session, skb, ptr, optr, hdrflags, length, payload_hook);
 	l2tp_session_dec_refcount(session);
 
 	return 0;
@@ -1045,7 +1055,7 @@ int l2tp_udp_encap_recv(struct sock *sk, struct sk_buff *skb)
 	l2tp_dbg(tunnel, L2TP_MSG_DATA, "%s: received %d bytes\n",
 		 tunnel->name, skb->len);
 
-	if (l2tp_udp_recv_core(tunnel, skb))
+	if (l2tp_udp_recv_core(tunnel, skb, tunnel->recv_payload_hook))
 		goto pass_up_put;
 
 	sock_put(sk);
@@ -1115,21 +1125,24 @@ static int l2tp_build_l2tpv3_header(struct l2tp_session *session, void *buf)
 		memcpy(bufp, &session->cookie[0], session->cookie_len);
 		bufp += session->cookie_len;
 	}
-	if (session->l2specific_type == L2TP_L2SPECTYPE_DEFAULT) {
-		u32 l2h = 0;
+	if (session->l2specific_len) {
+		if (session->l2specific_type == L2TP_L2SPECTYPE_DEFAULT) {
+			u32 l2h = 0;
+			if (session->send_seq) {
+				l2h = 0x40000000 | session->ns;
+				session->ns++;
+				session->ns &= 0xffffff;
+				l2tp_dbg(session, L2TP_MSG_SEQ,
+					 "%s: updated ns to %u\n",
+					 session->name, session->ns);
+			}
 
-		if (session->send_seq) {
-			l2h = 0x40000000 | session->ns;
-			session->ns++;
-			session->ns &= 0xffffff;
-			l2tp_dbg(session, L2TP_MSG_SEQ,
-				 "%s: updated ns to %u\n",
-				 session->name, session->ns);
+			*((__be32 *) bufp) = htonl(l2h);
 		}
-
-		*((__be32 *)bufp) = htonl(l2h);
-		bufp += 4;
+		bufp += session->l2specific_len;
 	}
+	if (session->offset)
+		bufp += session->offset;
 
 	return bufp - optr;
 }
@@ -1226,7 +1239,7 @@ int l2tp_xmit_skb(struct l2tp_session *session, struct sk_buff *skb, int hdr_len
 
 	/* Get routing info from the tunnel socket */
 	skb_dst_drop(skb);
-	skb_dst_set(skb, sk_dst_check(sk, 0));
+	skb_dst_set(skb, dst_clone(__sk_dst_check(sk, 0)));
 
 	inet = inet_sk(sk);
 	fl = &inet->cork.fl;
@@ -1805,7 +1818,7 @@ int l2tp_session_delete(struct l2tp_session *session)
 EXPORT_SYMBOL_GPL(l2tp_session_delete);
 
 /* We come here whenever a session's send_seq, cookie_len or
- * l2specific_type parameters are set.
+ * l2specific_len parameters are set.
  */
 void l2tp_session_set_header_len(struct l2tp_session *session, int version)
 {
@@ -1814,8 +1827,7 @@ void l2tp_session_set_header_len(struct l2tp_session *session, int version)
 		if (session->send_seq)
 			session->hdr_len += 4;
 	} else {
-		session->hdr_len = 4 + session->cookie_len;
-		session->hdr_len += l2tp_get_l2specific_len(session);
+		session->hdr_len = 4 + session->cookie_len + session->l2specific_len + session->offset;
 		if (session->tunnel->encap == L2TP_ENCAPTYPE_UDP)
 			session->hdr_len += 4;
 	}
@@ -1866,6 +1878,7 @@ struct l2tp_session *l2tp_session_create(int priv_size, struct l2tp_tunnel *tunn
 			session->recv_seq = cfg->recv_seq;
 			session->lns_mode = cfg->lns_mode;
 			session->reorder_timeout = cfg->reorder_timeout;
+			session->offset = cfg->offset;
 			session->l2specific_type = cfg->l2specific_type;
 			session->l2specific_len = cfg->l2specific_len;
 			session->cookie_len = cfg->cookie_len;

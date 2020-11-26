@@ -14,22 +14,48 @@
  *
  */
 
+/*
+ ******************************************************************************
+ *
+ * cci_helper.c
+ *
+ * Hawkview ISP - cci_helper.c module
+ *
+ * Copyright (c) 2014 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version         Author         Date           Description
+ *
+ *   2.0         Yang Feng     2014/06/05       Second Version
+ *
+ ******************************************************************************
+ */
+
 #include <linux/module.h>
 #include "cci_helper.h"
+#include "bsp_cci.h"
 #include "../platform/platform_cfg.h"
 #include "../modules/sensor/sensor_helper.h"
 #include "../modules/sensor/camera.h"
 
 #if defined(CONFIG_CCI_MODULE) || defined(CONFIG_CCI)
-#include "bsp_cci.h"
 #define USE_SPECIFIC_CCI
 #endif
 
+int cci_dbg_en;
+int cci_dbg_lv = 1;
 #ifdef USE_SPECIFIC_CCI
 #define cci_print(x, arg...) pr_info("[VIN_DEV_CCI]"x, ##arg)
+#define cci_dbg(l, x, arg...) { \
+	if (cci_dbg_en && l <= cci_dbg_lv) \
+	printk(KERN_DEBUG"[VIN_DEV_CCI_DBG]"x, ##arg); \
+}
 #define cci_err(x, arg...) pr_err("[VIN_DEV_CCI_ERR]"x, ##arg)
 #else
 #define cci_print(x, arg...) pr_info("[VIN_DEV_I2C]"x, ##arg)
+#define cci_dbg(l, x, arg...) { \
+	if (cci_dbg_en && l <= cci_dbg_lv) \
+	printk(KERN_DEBUG"[VIN_DEV_I2C_DBG]"x, ##arg);\
+}
 #define cci_err(x, arg...) pr_err("[VIN_DEV_I2C_ERR]"x, ##arg)
 #endif
 
@@ -159,9 +185,7 @@ static int sensor_registered(struct v4l2_subdev *sd)
 	mutex_lock(&info->lock);
 
 	v4l2_subdev_call(sd, core, s_power, PWR_ON);
-	sd->entity.use_count++;
 	ret = v4l2_subdev_call(sd, core, init, 0);
-	sd->entity.use_count--;
 	v4l2_subdev_call(sd, core, s_power, PWR_OFF);
 
 	mutex_unlock(&info->lock);
@@ -179,6 +203,7 @@ static int cci_dev_num_id;
 static void cci_subdev_init(struct v4l2_subdev *sd, struct cci_driver *drv_data,
 		     const struct v4l2_subdev_ops *ops)
 {
+	cci_dbg(0, "cci_subdev_init!\n");
 	v4l2_subdev_init(sd, ops);
 	/* initialize name */
 	snprintf(sd->name, sizeof(sd->name), "%s", drv_data->name);
@@ -189,6 +214,8 @@ static void cci_subdev_init(struct v4l2_subdev *sd, struct cci_driver *drv_data,
 
 	list_add(&drv_data->cci_list, &cci_drv_list);
 	cci_dev_num_id++;
+	cci_dbg(0, "cci_dev_num_id = %d, name = %s, cci_subdev_init,sd = %p!\n",
+		cci_dev_num_id, drv_data->name, drv_data->sd);
 }
 
 static void cci_subdev_remove(struct cci_driver *cci_drv_p)
@@ -215,14 +242,22 @@ struct v4l2_subdev *cci_bus_match(char *name, unsigned short cci_id,
 	struct cci_driver *cci_drv;
 
 	list_for_each_entry(cci_drv, &cci_drv_list, cci_list) {
+		cci_dbg(0, "try cci dev name =%s!\n", cci_drv->name);
 		if (cci_drv->is_registerd == 1 && cci_drv->is_matched == 0) {
+			cci_dbg(0, "cci_drv->name = %s, check name = %s\n",
+				cci_drv->name, name);
 			if (!strcmp(cci_drv->name, name)) {
+				cci_dbg(0, "cci_bus_match name matched!\n");
 				cci_drv->cci_id = cci_id;
 				cci_drv->cci_saddr = cci_saddr;
 				cci_drv->is_matched = 1;
+				cci_dbg(0, "id = %d, saddr = %x, name = %s\n",
+					cci_drv->cci_id,
+					cci_drv->cci_saddr, cci_drv->name);
 				return cci_drv->sd;
 			}
 		}
+		cci_dbg(0, "try cci dev name =%s failed!\n", cci_drv->name);
 	}
 	return NULL;
 }
@@ -289,6 +324,7 @@ EXPORT_SYMBOL_GPL(cci_unlock);
 int cci_dev_init_helper(struct i2c_driver *sensor_driver)
 {
 #ifdef USE_SPECIFIC_CCI
+	cci_dbg(0, "cci init device\n");
 	return sensor_driver->probe(NULL, NULL);
 #else
 	return i2c_add_driver(sensor_driver);
@@ -300,6 +336,7 @@ EXPORT_SYMBOL_GPL(cci_dev_init_helper);
 void cci_dev_exit_helper(struct i2c_driver *sensor_driver)
 {
 #ifdef USE_SPECIFIC_CCI
+	cci_dbg(0, "cci exit device\n");
 	sensor_driver->remove(NULL);
 #else
 	i2c_del_driver(sensor_driver);
@@ -339,10 +376,10 @@ int cci_dev_probe_helper(struct v4l2_subdev *sd, struct i2c_client *client,
 		/*change sd name to sensor driver name*/
 		snprintf(sd->name, sizeof(sd->name), "%s", cci_drv->name);
 		cci_drv->sd = sd;
+		v4l2_set_subdev_hostdata(sd, cci_drv);
 	} else {
 		cci_subdev_init(sd, cci_drv, sensor_ops);
 	}
-	v4l2_set_subdev_hostdata(sd, cci_drv);
 	sd->grp_id = VIN_GRP_ID_SENSOR;
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	if (cci_drv->type != CCI_TYPE_ACT)
@@ -359,19 +396,25 @@ struct v4l2_subdev *cci_dev_remove_helper(struct i2c_client *client,
 {
 	struct v4l2_subdev *sd;
 
-	if (client)
+	if (client) {
 		sd = i2c_get_clientdata(client);
-	else {
+		if (sd->entity.use_count > 0) {
+			vin_err("%s is in using, cannot be removed!\n", sd->name);
+			v4l2_subdev_call(sd, core, s_power, PWR_OFF);
+		}
+		cci_dbg(0, "sd = %p\n", sd);
+		v4l2_set_subdev_hostdata(sd, NULL);
+		cci_dbg(0, "sd = %p\n", sd);
+	} else {
 		sd = cci_drv->sd;
+		if (sd->entity.use_count > 0) {
+			vin_err("%s is in using, cannot be removed!\n", sd->name);
+			v4l2_subdev_call(sd, core, s_power, PWR_OFF);
+		}
+		cci_dbg(0, "sd = %p, cci_drv = %p\n", sd, cci_drv);
 		cci_subdev_remove(cci_drv);
+		cci_dbg(0, "sd = %p\n", sd);
 	}
-	if (sd->entity.use_count > 0) {
-		sd->entity.use_count = 0;
-		sd->entity.stream_count = 0;
-		vin_err("%s is in using, cannot be removed!\n", sd->name);
-		v4l2_subdev_call(sd, core, s_power, PWR_OFF);
-	}
-	v4l2_set_subdev_hostdata(sd, NULL);
 	v4l2_device_unregister_subdev(sd);
 	cci_sys_unregister(cci_drv);
 	return sd;
@@ -565,6 +608,12 @@ int cci_read_a16_d8(struct v4l2_subdev *sd, unsigned short addr,
 }
 EXPORT_SYMBOL_GPL(cci_read_a16_d8);
 
+int cci_transfer_helper(unsigned short reg, unsigned char data,
+			unsigned char slv)
+{
+	return 0;
+}
+
 int cci_write_a16_d8(struct v4l2_subdev *sd, unsigned short addr,
 		     unsigned char value)
 {
@@ -737,7 +786,8 @@ int cci_write_a16_d8_continuous_helper(struct v4l2_subdev *sd,
 #ifdef USE_SPECIFIC_CCI
 	struct cci_driver *cci_drv = v4l2_get_subdevdata(sd);
 
-	return cci_wr_a16_d8_continuous(cci_drv->cci_id, addr, vals, cci_drv->cci_saddr, size);
+	return cci_wr_a16_d8_continuous(cci_drv->cci_id, addr, vals,
+					cci_drv->cci_saddr, size);
 #else
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct i2c_msg msg;
@@ -774,89 +824,19 @@ int cci_write_a16_d8_continuous_helper(struct v4l2_subdev *sd,
 }
 EXPORT_SYMBOL_GPL(cci_write_a16_d8_continuous_helper);
 
-#if 0
-#define MAX_TWI_DEPTH 127
-int twi_write_ndata_by_dma(struct v4l2_subdev *sd, struct regval_list *regs, int array_size)
-{
-	struct cci_driver *cci_drv = v4l2_get_subdev_hostdata(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct i2c_msg *msg = kzalloc(MAX_TWI_DEPTH * sizeof(struct i2c_msg), GFP_KERNEL);
-	unsigned char data[MAX_TWI_DEPTH][4];
-	int ret = 0, i, len, valid_len = 0;
-
-	if (!regs || !array_size)
-		return -EINVAL;
-
-	while (array_size > 0) {
-		len = array_size > MAX_TWI_DEPTH ? MAX_TWI_DEPTH : array_size;
-		valid_len = 0;
-		for (i = 0; i < len; i++) {
-			if (regs->addr == REG_DLY) {
-				usleep_range(regs->data * 1000, regs->data * 1000 + 100);
-				regs++;
-				array_size--;
-				break;
-			}
-			if (8 == cci_drv->addr_width && 8 == cci_drv->data_width) {
-				data[valid_len][0] = regs->addr;
-				data[valid_len][1] = regs->data;
-				msg[valid_len].len = 2;
-			} else if (8 == cci_drv->addr_width && 16 == cci_drv->data_width) {
-				data[valid_len][0] = regs->addr;
-				data[valid_len][1] = (regs->data & 0xff00) >> 8;
-				data[valid_len][2] = (regs->data & 0x00ff);
-				msg[valid_len].len = 3;
-			} else if (16 == cci_drv->addr_width && 8 == cci_drv->data_width) {
-				data[valid_len][0] = (regs->addr & 0xff00) >> 8;
-				data[valid_len][1] = (regs->addr & 0x00ff);
-				data[valid_len][2] = regs->data;
-				msg[valid_len].len = 3;
-			} else if (16 == cci_drv->addr_width && 16 == cci_drv->data_width) {
-				data[valid_len][0] = (regs->addr & 0xff00) >> 8;
-				data[valid_len][1] = (regs->addr & 0x00ff);
-				data[valid_len][2] = (regs->data & 0xff00) >> 8;
-				data[valid_len][3] = (regs->data & 0x00ff);
-				msg[valid_len].len = 4;
-			} else {
-				kfree(msg);
-				return -1;
-			}
-
-			msg[valid_len].addr = client->addr;
-			msg[valid_len].flags = 0;
-			msg[valid_len].buf = &data[valid_len][0];
-			valid_len++;
-
-			regs++;
-			array_size--;
-		}
-		if (valid_len == 0)
-			continue;
-
-		usleep_range(2000, 3000);
-		cci_print("%s: write %d i2c_msg one time!\n", __func__, valid_len);
-
-		ret = i2c_transfer(client->adapter, msg, valid_len);
-		if (ret >= 0)
-			ret = 0;
-		else
-			break;
-	}
-
-	kfree(msg);
-
-	return ret;
-}
-#endif
-
 int cci_write(struct v4l2_subdev *sd, addr_type addr, data_type value)
 {
+#ifdef USE_SPECIFIC_CCI
+	struct cci_driver *cci_drv = v4l2_get_subdevdata(sd);
+#else
 	struct cci_driver *cci_drv = v4l2_get_subdev_hostdata(sd);
+#endif
 	int addr_width = cci_drv->addr_width;
 	int data_width = cci_drv->data_width;
 
 	if (8 == addr_width && 8 == data_width) {
-		return cci_write_a8_d8(sd, (unsigned char)addr, (unsigned char)value);
+		return cci_write_a8_d8(sd, (unsigned char)addr,
+				       (unsigned char)value);
 	} else if (8 == addr_width && 16 == data_width) {
 		return cci_write_a8_d16(sd, (unsigned char)addr, value);
 	} else if (16 == addr_width && 8 == data_width) {
@@ -866,7 +846,8 @@ int cci_write(struct v4l2_subdev *sd, addr_type addr, data_type value)
 	} else if (0 == addr_width && 16 == data_width) {
 		return cci_write_a0_d16(sd, value);
 	} else {
-		cci_err("at %s error, addr_width = %d , data_width = %d!\n ", __func__, addr_width, data_width);
+		cci_err("at %s error, addr_width = %d , data_width = %d!\n ",
+			__func__, addr_width, data_width);
 		return -1;
 	}
 }
@@ -874,13 +855,18 @@ EXPORT_SYMBOL_GPL(cci_write);
 
 int cci_read(struct v4l2_subdev *sd, addr_type addr, data_type *value)
 {
+#ifdef USE_SPECIFIC_CCI
+	struct cci_driver *cci_drv = v4l2_get_subdevdata(sd);
+#else
 	struct cci_driver *cci_drv = v4l2_get_subdev_hostdata(sd);
+#endif
 	int addr_width = cci_drv->addr_width;
 	int data_width = cci_drv->data_width;
 
 	*value = 0;
 	if (8 == addr_width && 8 == data_width) {
-		return cci_read_a8_d8(sd, (unsigned char)addr, (unsigned char *)value);
+		return cci_read_a8_d8(sd, (unsigned char)addr,
+				      (unsigned char *)value);
 	} else if (8 == addr_width && 16 == data_width) {
 		return cci_read_a8_d16(sd, (unsigned char)addr, value);
 	} else if (16 == addr_width && 8 == data_width) {
@@ -890,7 +876,8 @@ int cci_read(struct v4l2_subdev *sd, addr_type addr, data_type *value)
 	} else if (0 == addr_width && 16 == data_width) {
 		return cci_read_a0_d16(sd, value);
 	} else {
-		cci_err("%s error! addr_width = %d , data_width = %d!\n ", __func__, addr_width, data_width);
+		cci_err("%s error! addr_width = %d , data_width = %d!\n ",
+			__func__, addr_width, data_width);
 		return -1;
 	}
 }
@@ -903,18 +890,13 @@ int sensor_read(struct v4l2_subdev *sd, addr_type reg, data_type *value)
 {
 	int ret = 0, cnt = 0;
 
-	if (!sd || !sd->entity.use_count) {
-		cci_err("%s error! sensor is not used!\n", __func__);
-		return -1;
-	}
-
 	ret = cci_read(sd, reg, value);
 	while ((ret != 0) && (cnt < 2)) {
 		ret = cci_read(sd, reg, value);
 		cnt++;
 	}
 	if (cnt > 0)
-		cci_print("%s sensor read retry = %d\n", sd->name, cnt);
+		pr_info("%s sensor read retry = %d\n", sd->name, cnt);
 
 	return ret;
 }
@@ -924,18 +906,13 @@ int sensor_write(struct v4l2_subdev *sd, addr_type reg, data_type value)
 {
 	int ret = 0, cnt = 0;
 
-	if (!sd || !sd->entity.use_count) {
-		cci_err("%s error! sensor is not used!\n", __func__);
-		return -1;
-	}
-
 	ret = cci_write(sd, reg, value);
 	while ((ret != 0) && (cnt < 2)) {
 		ret = cci_write(sd, reg, value);
 		cnt++;
 	}
 	if (cnt > 0)
-		cci_print("%s sensor write retry = %d\n", sd->name, cnt);
+		pr_info("%s sensor write retry = %d\n", sd->name, cnt);
 
 	return ret;
 }
@@ -944,44 +921,24 @@ EXPORT_SYMBOL_GPL(sensor_write);
 /*
  * Write a list of register settings;
  */
-int sensor_write_array(struct v4l2_subdev *sd, struct regval_list *regs, int array_size)
+int sensor_write_array(struct v4l2_subdev *sd, struct regval_list *regs,
+		       int array_size)
 {
-	struct cci_driver *cci_drv = v4l2_get_subdev_hostdata(sd);
-	int ret = 0, i = 0, len = 1;
-	unsigned char data[32] = {0};
+	int ret = 0, i = 0;
 
 	if (!regs)
 		return -EINVAL;
 
 	while (i < array_size) {
-		len = 1;
 		if (regs->addr == REG_DLY) {
-			usleep_range(regs->data * 1000, regs->data * 1000 + 100);
+			msleep(regs->data);
 		} else {
-			if (cci_drv->addr_width == CCI_BITS_16 && cci_drv->data_width == CCI_BITS_8) {
-				while (regs[len-1].addr == (regs[len].addr - 1)) {
-					data[len-1] = regs[len-1].data;
-					len++;
-					if (len-1 >= 31)
-						break;
-				}
-				data[len-1] = regs[len-1].data;
-				ret = cci_write_a16_d8_continuous_helper(sd, regs[0].addr, data, len);
-			} else {
-#if 0 && defined (CONFIG_ARCH_SUN8IW16P1)
-				len = array_size - i;
-				ret = twi_write_ndata_by_dma(sd, regs, len);
-#else
-				ret = sensor_write(sd, regs->addr, regs->data);
-#endif
-			}
-			if (ret < 0) {
-				cci_err("%s sensor write array error, array_size %d!\n", sd->name, array_size);
-				return -1;
-			}
+			ret = sensor_write(sd, regs->addr, regs->data);
+			if (ret < 0)
+				pr_info("%s sensor write array error!\n", sd->name);
 		}
-		i += len;
-		regs += len;
+		i++;
+		regs++;
 	}
 	return 0;
 }

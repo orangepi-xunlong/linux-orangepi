@@ -28,7 +28,6 @@
 #include <media/v4l2-device.h>
 #include <linux/media-bus-format.h>
 #include <media/v4l2-ctrls.h>
-#include <media/videobuf2-v4l2.h>
 #include "bsp_tvd.h"
 #include <linux/clk-provider.h>
 
@@ -67,7 +66,7 @@ struct tvd_buffer {
 };
 
 struct vin_buffer {
-	struct vb2_v4l2_buffer vb;
+	struct vb2_buffer vb;
 	struct list_head list;
 	void *paddr;
 	enum vb2_buffer_state	state;

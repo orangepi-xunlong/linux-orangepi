@@ -14,18 +14,59 @@
 
 #define I2C_TIMEOUT				100
 
-#ifdef SUPPORT_PHY_JTAG
 static void phy_jtag_reset(hdmi_tx_dev_t *dev);
 static void phy_jtag_slave_address(hdmi_tx_dev_t *dev, u8 jtag_addr);
-#endif
 static void phy_interrupt_mask(hdmi_tx_dev_t *dev, u8 mask);
-
+static void phy_interrupt_unmask(hdmi_tx_dev_t *dev, u8 mask);
 static int phy_phase_lock_loop_state(hdmi_tx_dev_t *dev);
 static int phy_reconfigure_interface(hdmi_tx_dev_t *dev);
 static int phy_slave_address(hdmi_tx_dev_t *dev, u8 value);
 
 
-#if 0
+static void phy_power_down(hdmi_tx_dev_t *dev, u8 bit)
+{
+	LOG_TRACE1(bit);
+	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_SPARES_2_MASK, (bit ? 1 : 0));
+}
+
+static void phy_enable_tmds(hdmi_tx_dev_t *dev, u8 bit)
+{
+	LOG_TRACE1(bit);
+	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_SPARES_1_MASK, (bit ? 1 : 0));
+}
+
+static void phy_gen2_pddq(hdmi_tx_dev_t *dev, u8 bit)
+{
+	LOG_TRACE1(bit);
+	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_PDDQ_MASK, (bit ? 1 : 0));
+}
+
+static void phy_gen2_tx_power_on(hdmi_tx_dev_t *dev, u8 bit)
+{
+	LOG_TRACE1(bit);
+	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_TXPWRON_MASK, (bit ? 1 : 0));
+}
+
+static void phy_gen2_en_hpd_rx_sense(hdmi_tx_dev_t *dev, u8 bit)
+{
+	LOG_TRACE1(bit);
+	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_ENHPDRXSENSE_MASK,
+					(bit ? 1 : 0));
+}
+
+static void phy_data_enable_polarity(hdmi_tx_dev_t *dev, u8 bit)
+{
+	LOG_TRACE1(bit);
+	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_SELDATAENPOL_MASK,
+					(bit ? 1 : 0));
+}
+
+static void phy_interface_control(hdmi_tx_dev_t *dev, u8 bit)
+{
+	LOG_TRACE1(bit);
+	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_SELDIPIF_MASK, (bit ? 1 : 0));
+}
+
 void phy_test_clear(hdmi_tx_dev_t *dev, u8 bit)
 {
 	LOG_TRACE1(bit);
@@ -79,183 +120,6 @@ u8 phy_interrupt_polarity_status(hdmi_tx_dev_t *dev, u8 mask)
 	LOG_TRACE1(mask);
 	return dev_read(dev, PHY_POL0) & mask;
 }
-#endif
-
-#if 0
-static int phy301_configure_supported(hdmi_tx_dev_t *dev, u32 pClk,
-				color_depth_t color, pixel_repetition_t pixel)
-{
-	int i   = 0;
-
-	/* Color resolution 0 is 8 bit color depth */
-	if (color == 0)
-		color = COLOR_DEPTH_8;
-
-	pClk = phy301_get_freq(pClk);
-
-	for (i = 0; phy301[i].clock != 0; i++) {
-		if ((pClk == phy301[i].clock) &&
-				(color == phy301[i].color) &&
-				(pixel == phy301[i].pixel)) {
-			return TRUE;
-		}
-	}
-
-	return FALSE;
-}
-
-static int phy303_configure_supported(hdmi_tx_dev_t *dev, u32 pClk,
-			color_depth_t color, pixel_repetition_t pixel)
-{
-	int i   = 0;
-
-	/* Color resolution 0 is 8 bit color depth */
-	if (color == 0)
-		color = COLOR_DEPTH_8;
-
-	pClk = phy303_get_freq(pClk);
-
-	for (i = 0; phy303[i].clock != 0; i++) {
-		if ((pClk == phy303[i].clock) &&
-				(color == phy303[i].color) &&
-				(pixel == phy303[i].pixel)) {
-			return TRUE;
-		}
-	}
-
-	return FALSE;
-}
-#endif
-
-#if 0
-int phy_configuration_supported(hdmi_tx_dev_t *dev, u16 phy_model)
-{
-	if (phy_model == PHY_MODEL_301) {
-		return phy301_configure_supported(dev,
-					dev->snps_hdmi_ctrl.pixel_clock,
-					dev->snps_hdmi_ctrl.color_resolution,
-					dev->snps_hdmi_ctrl.pixel_repetition);
-	}
-	if (phy_model == PHY_MODEL_303) {
-		return phy303_configure_supported(dev,
-					dev->snps_hdmi_ctrl.pixel_clock,
-					dev->snps_hdmi_ctrl.color_resolution,
-					dev->snps_hdmi_ctrl.pixel_repetition);
-	}
-	pr_err("****** PHY not supported %d *******\n", phy_model);
-	return FALSE;
-
-}
-#endif
-
-#if 0
-int phy_hot_plug_detected(hdmi_tx_dev_t *dev)
-{
-	/* MASK         STATUS          POLARITY        INTERRUPT        HPD
-	 *   0             0                 0               1             0
-	 *   0             1                 0               0             1
-	 *   0             0                 1               0             0
-	 *   0             1                 1               1             1
-	 *   1             x                 x               0             x
-	 */
-
-	int hpd_polarity = dev_read_mask(dev, PHY_POL0, PHY_POL0_HPD_MASK);
-	int hpd = dev_read_mask(dev, PHY_STAT0, PHY_STAT0_HPD_MASK);
-
-	/* Mask interrupt */
-	phy_interrupt_mask(dev, PHY_MASK0_HPD_MASK);
-
-	if (hpd_polarity == hpd) {
-		dev_write_mask(dev, PHY_POL0, PHY_POL0_HPD_MASK, !hpd_polarity);
-
-		/* Un-mask interrupts */
-		phy_interrupt_unmask(dev, PHY_MASK0_HPD_MASK);
-
-		return hpd_polarity;
-	}
-
-	/* Un-mask interrupts */
-	phy_interrupt_unmask(dev, PHY_MASK0_HPD_MASK);
-
-	return !hpd_polarity;
-}
-
-
-int phy_interrupt_enable(hdmi_tx_dev_t *dev, u8 value)
-{
-	LOG_TRACE1(value);
-	dev_write(dev, PHY_MASK0, value);
-	return TRUE;
-}
-#endif
-
-#if 0
-int phy_test_control(hdmi_tx_dev_t *dev, u8 value)
-{
-	LOG_TRACE1(value);
-	phy_test_data_in(dev, value);
-	phy_test_enable(dev, 1);
-	phy_test_clock(dev, 1);
-	phy_test_clock(dev, 0);
-	phy_test_enable(dev, 0);
-	return TRUE;
-}
-
-int phy_test_data(hdmi_tx_dev_t *dev, u8 value)
-{
-	LOG_TRACE1(value);
-	phy_test_data_in(dev, value);
-	phy_test_enable(dev, 0);
-	phy_test_clock(dev, 1);
-	phy_test_clock(dev, 0);
-	return TRUE;
-}
-#endif
-
-static void phy_power_down(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_SPARES_2_MASK, (bit ? 1 : 0));
-}
-
-static void phy_enable_tmds(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_SPARES_1_MASK, (bit ? 1 : 0));
-}
-
-static void phy_gen2_pddq(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_PDDQ_MASK, (bit ? 1 : 0));
-}
-
-static void phy_gen2_tx_power_on(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_TXPWRON_MASK, (bit ? 1 : 0));
-}
-
-static void phy_gen2_en_hpd_rx_sense(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_ENHPDRXSENSE_MASK,
-					(bit ? 1 : 0));
-}
-
-static void phy_data_enable_polarity(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_SELDATAENPOL_MASK,
-					(bit ? 1 : 0));
-}
-
-static void phy_interface_control(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, PHY_CONF0, PHY_CONF0_SELDIPIF_MASK, (bit ? 1 : 0));
-}
-
 
 
 void phy_i2c_fast_mode(hdmi_tx_dev_t *dev, u8 bit)
@@ -360,7 +224,6 @@ int phy_i2c_read(hdmi_tx_dev_t *dev, u8 addr, u16 *value)
 	return -1;
 }
 
-#ifdef SUPPORT_PHY_JTAG
 static void _send_data_pulse(hdmi_tx_dev_t *dev, u8 tms, u8 tdi)
 {
 	u8 in_value = 0;
@@ -450,6 +313,7 @@ static u16 _send_value_shift_dr(hdmi_tx_dev_t *dev, u8 cmd, u16 data_in)
 	return data_out;
 }
 
+
 static int phy_jtag_init(hdmi_tx_dev_t *dev, u8 jtag_addr)
 {
 	dev_write(dev, JTAG_PHY_ADDR, jtag_addr);
@@ -513,15 +377,17 @@ static void phy_jtag_reset(hdmi_tx_dev_t *dev)
 	dev_write(dev, JTAG_PHY_CONFIG, 1); /* enable interface to JTAG */
 	_send_data_pulse(dev, 0, 0);
 }
-#endif
+
+
+/*************************************************************
+ * External functions
+ *************************************************************/
 
 static int phy_write(hdmi_tx_dev_t *dev, u8 addr, u16 data)
 {
 	switch (dev->snps_hdmi_ctrl.phy_access) {
-#ifdef SUPPORT_PHY_JTAG
 	case PHY_JTAG:
 		return phy_jtag_write(dev, addr, data);
-#endif
 	case PHY_I2C:
 		return phy_i2c_write(dev, addr, data);
 	default:
@@ -533,10 +399,8 @@ static int phy_write(hdmi_tx_dev_t *dev, u8 addr, u16 data)
 static int phy_read(hdmi_tx_dev_t *dev, u8 addr, u16 *value)
 {
 	switch (dev->snps_hdmi_ctrl.phy_access) {
-#ifdef SUPPORT_PHY_JTAG
 	case PHY_JTAG:
 		return phy_jtag_read(dev, addr, value);
-#endif
 	case PHY_I2C:
 		return phy_i2c_read(dev, addr, value);
 	default:
@@ -580,11 +444,7 @@ static struct phy_config phy301[] = {
 	{25175, PIXEL_REPETITION_OFF, COLOR_DEPTH_10, HDMI_14, 0x2153, 0x0, 0x0, 0x4, 0x232, 0x8009},
 	{25175, PIXEL_REPETITION_OFF, COLOR_DEPTH_12, HDMI_14, 0x40F3, 0x0, 0x0, 0x4, 0x232, 0x8009},
 	{25175, PIXEL_REPETITION_OFF, COLOR_DEPTH_16, HDMI_14, 0x60B2, 0x8, 0x1, 0x4, 0x232, 0x8009},
-#ifdef CONFIG_ARCH_SUN8IW16
-	{27000, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x00B3, 0x12, 0x0, 0x7, 0x2b0, 0x8039},
-#else
 	{27000, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x00B3, 0x12, 0x0, 0x7, 0x2b0, 0x8009},
-#endif
 	{27000, PIXEL_REPETITION_OFF, COLOR_DEPTH_10, HDMI_14, 0x2153, 0x0, 0x0, 0x4, 0x2b0, 0x8009},
 	{27000, PIXEL_REPETITION_OFF, COLOR_DEPTH_12, HDMI_14, 0x40F3, 0x0, 0x0, 0x4, 0x232, 0x8009},
 	{27000, PIXEL_REPETITION_OFF, COLOR_DEPTH_16, HDMI_14, 0x60B2, 0x8, 0x1, 0x4, 0x232, 0x8009},
@@ -652,13 +512,7 @@ static struct phy_config phy301[] = {
 	{72000, PIXEL_REPETITION_2, COLOR_DEPTH_12, HDMI_14, 0x40E4, 0x32, 0x3, 0x4, 0x232, 0x8009},
 	{72000, PIXEL_REPETITION_2, COLOR_DEPTH_16, HDMI_20, 0x7AA0, 0x001B, 0x3, 0x4, 0x14A, 0x8039},
 	{73250, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x72, 0x8, 0x1, 0x4, 0x232, 0x8009},
-#ifdef CONFIG_ARCH_SUN8IW16
-	{74250, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x72, 0x13, 0x1, 0x6, 0x2b0, 0x8039},
-#elif CONFIG_ARCH_SUN50IW9
-	{74250, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x72, 0x13, 0x1, 0x4, 0x290, 0x8019},
-#else
 	{74250, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x72, 0x13, 0x1, 0x6, 0x22d, 0x8009},
-#endif
 	{74250, PIXEL_REPETITION_OFF, COLOR_DEPTH_10, HDMI_14, 0x2145, 0x0013, 0x1, 0x6, 0x270, 0x8029},
 	{74250, PIXEL_REPETITION_OFF, COLOR_DEPTH_12, HDMI_14, 0x4061, 0x0013, 0x1, 0x6, 0x270, 0x8029},
 	{74250, PIXEL_REPETITION_OFF, COLOR_DEPTH_16, HDMI_14, 0x6071, 0x001A, 0x2, 0x4, 0x230, 0x8009},
@@ -714,13 +568,7 @@ static struct phy_config phy301[] = {
 	{144000, PIXEL_REPETITION_OFF, COLOR_DEPTH_16, HDMI_14, 0x6050, 0x35, 0x3, 0x4, 0x273, 0x8009},
 	{146250, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x51, 0x001B, 0x2, 0x4, 0x232, 0x8009},
 	{148250, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x51, 0x001B, 0x2, 0x4, 0x232, 0x8009},
-#ifdef CONFIG_ARCH_SUN8IW16
-	{148500, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x51, 0x0019, 0x2, 0x6, 0x2b0, 0x8039},
-#elif CONFIG_ARCH_SUN50IW9
-	{148500, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x51, 0x0019, 0x2, 0x4, 0x290, 0x8019},
-#else
 	{148500, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x51, 0x0019, 0x2, 0x6, 0x270, 0x8029},
-#endif
 	{148500, PIXEL_REPETITION_OFF, COLOR_DEPTH_10, HDMI_14, 0x214C, 0x19, 0x2, 0x5, 0x1ab, 0x8039},
 	{148500, PIXEL_REPETITION_OFF, COLOR_DEPTH_12, HDMI_14, 0x4064, 0x19, 0x2, 0x5, 0x1ab, 0x8039},
 	{148500, PIXEL_REPETITION_OFF, COLOR_DEPTH_16, HDMI_14, 0x6050, 0x35, 0x3, 0x4, 0x273, 0x8029},
@@ -777,13 +625,7 @@ static struct phy_config phy301[] = {
 	{288000, PIXEL_REPETITION_OFF, COLOR_DEPTH_10, HDMI_20, 0x3B4C, 0x001B, 0x3, 0x4, 0x14A, 0x8039},
 	{288000, PIXEL_REPETITION_OFF, COLOR_DEPTH_12, HDMI_20, 0x5A64, 0x001B, 0x3, 0x4, 0x14A, 0x8039},
 	{288000, PIXEL_REPETITION_OFF, COLOR_DEPTH_16, HDMI_20, 0x7A50, 0x003D, 0x3, 0x4, 0x14A, 0x8039},
-#ifdef CONFIG_ARCH_SUN8IW16
-	{297000, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x40, 0x19, 0x3, 0x5, 0x210, 0x803d},
-#elif CONFIG_ARCH_SUN50IW9
-	{297000, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x40, 0x19, 0x3, 0x4, 0x22b, 0x8039},
-#else
 	{297000, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_14, 0x40, 0x19, 0x3, 0x5, 0x1ab, 0x8039},
-#endif
 	{297000, PIXEL_REPETITION_OFF, COLOR_DEPTH_10, HDMI_20, 0x3B4C, 0x001B, 0x3, 0x0, 0x16A, 0x8019},
 	{297000, PIXEL_REPETITION_OFF, COLOR_DEPTH_12, HDMI_20, 0x5A64, 0x0019, 0x3, 0x0, 0x8A, 0x8029},
 	{297000, PIXEL_REPETITION_OFF, COLOR_DEPTH_16, HDMI_20, 0x7A50, 0x003D, 0x3, 0x4, 0x14A, 0x8039},
@@ -816,7 +658,6 @@ static struct phy_config phy301[] = {
 	{0, PIXEL_REPETITION_OFF, COLOR_DEPTH_INVALID, HDMI_14, 0, 0, 0, 0, 0, 0}
 };
 
-#ifdef SUPPORT_PHY303
 static struct phy_config303 phy303[] = {
 	{13500, PIXEL_REPETITION_1, COLOR_DEPTH_8, HDMI_14, 0x133, 0x18, 0x0, 0x4, 0x232, 0x8009},
 	{13500, PIXEL_REPETITION_1, COLOR_DEPTH_10, HDMI_14, 0x2173, 0x18, 0x0, 0x4, 0x232, 0x8009},
@@ -1068,7 +909,6 @@ static struct phy_config303 phy303[] = {
 	{594000, PIXEL_REPETITION_OFF, COLOR_DEPTH_8, HDMI_20, 0x1A40, 0x8, 0x3, 0x4, 0x14A, 0x8039},
 	{0,  PIXEL_REPETITION_OFF, COLOR_DEPTH_INVALID, HDMI_14, 0, 0, 0, 0, 0, 0}
 };
-#endif
 
 static u32 phy301_get_freq(u32 pClk)
 {
@@ -1302,7 +1142,6 @@ static u32 phy301_get_freq(u32 pClk)
 	return 1000;
 }
 
-#ifdef SUPPORT_PHY303
 u32 phy303_get_freq(u32 pClk)
 {
 	if (((pClk >= 25175) && (pClk <= 25180)) ||
@@ -1534,7 +1373,53 @@ u32 phy303_get_freq(u32 pClk)
 	}
 	return 1000;
 }
-#endif
+
+
+
+static int phy301_configure_supported(hdmi_tx_dev_t *dev, u32 pClk,
+				color_depth_t color, pixel_repetition_t pixel)
+{
+	int i   = 0;
+
+	/* Color resolution 0 is 8 bit color depth */
+	if (color == 0)
+		color = COLOR_DEPTH_8;
+
+	pClk = phy301_get_freq(pClk);
+
+	for (i = 0; phy301[i].clock != 0; i++) {
+		if ((pClk == phy301[i].clock) &&
+				(color == phy301[i].color) &&
+				(pixel == phy301[i].pixel)) {
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+static int phy303_configure_supported(hdmi_tx_dev_t *dev, u32 pClk,
+			color_depth_t color, pixel_repetition_t pixel)
+{
+	int i   = 0;
+
+	/* Color resolution 0 is 8 bit color depth */
+	if (color == 0)
+		color = COLOR_DEPTH_8;
+
+	pClk = phy303_get_freq(pClk);
+
+	for (i = 0; phy303[i].clock != 0; i++) {
+		if ((pClk == phy303[i].clock) &&
+				(color == phy303[i].color) &&
+				(pixel == phy303[i].pixel)) {
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
 
 static struct phy_config *phy301_get_configs(u32 pClk, color_depth_t color,
 		pixel_repetition_t pixel)
@@ -1557,7 +1442,6 @@ static struct phy_config *phy301_get_configs(u32 pClk, color_depth_t color,
 	return NULL;
 }
 
-#ifdef SUPPORT_PHY303
 static struct phy_config303 *phy303_get_configs(u32 pClk, color_depth_t color,
 		pixel_repetition_t pixel)
 {
@@ -1577,7 +1461,7 @@ static struct phy_config303 *phy303_get_configs(u32 pClk, color_depth_t color,
 
 	return NULL;
 }
-#endif
+
 
 static int phy301_configure(hdmi_tx_dev_t *dev, u32 pClk, color_depth_t color,
 						pixel_repetition_t pixel)
@@ -1625,19 +1509,10 @@ static int phy301_configure(hdmi_tx_dev_t *dev, u32 pClk, color_depth_t color,
 		pr_err("Error:PLLCURRCTRL Mismatch Write 0x%04x Read 0x%04x\n",
 				config->pllcurrctrl, phyRead);
 
-#ifdef CONFIG_ARCH_SUN50IW9
-	phy_write(dev, PLLGMPCTRL, 3);
-	phy_read(dev, PLLGMPCTRL, &phyRead);
-	if (phyRead != 3)
-		pr_err("Error:PLLGMPCTRL Mismatch Write 0x%04x Read 0x%04x\n",
-				config->pllgmpctrl, phyRead);
-#else
 	phy_write(dev, PLLGMPCTRL, config->pllgmpctrl);
-	phy_read(dev, PLLGMPCTRL, &phyRead);
-	if (phyRead != config->pllgmpctrl)
+	if (phy_read(dev, PLLGMPCTRL, &phyRead) || (phyRead != config->pllgmpctrl))
 		pr_err("Error:PLLGMPCTRL Mismatch Write 0x%04x Read 0x%04x\n",
-				config->pllgmpctrl, phyRead);
-#endif
+					config->pllgmpctrl, phyRead);
 
 	phy_write(dev, TXTERM, config->txterm);
 	if (phy_read(dev, TXTERM, &phyRead) || (phyRead != config->txterm))
@@ -1676,11 +1551,11 @@ static int phy301_configure(hdmi_tx_dev_t *dev, u32 pClk, color_depth_t color,
 		}
 	}
 
+	error_set(ERR_PHY_NOT_LOCKED);
 	pr_err("PHY PLL not locked\n");
 	return FALSE;
 }
 
-#ifdef SUPPORT_PHY303
 static int phy303_configure(hdmi_tx_dev_t *dev, u32 pClk, color_depth_t color,
 						pixel_repetition_t pixel)
 {
@@ -1776,10 +1651,12 @@ static int phy303_configure(hdmi_tx_dev_t *dev, u32 pClk, color_depth_t color,
 		}
 	}
 
+	error_set(ERR_PHY_NOT_LOCKED);
 	pr_err("PHY PLL not locked\n");
 	return FALSE;
 }
-#endif
+
+
 
 static int phy_set_interface(hdmi_tx_dev_t *dev, phy_access_t interface)
 {
@@ -1796,11 +1673,9 @@ static int phy_set_interface(hdmi_tx_dev_t *dev, phy_access_t interface)
 	}
 
 	switch (interface) {
-#ifdef SUPPORT_PHY_JTAG
 	case PHY_JTAG:
 		phy_jtag_init(dev, 0xD4);
 		break;
-#endif
 	case PHY_I2C:
 		dev_write(dev, JTAG_PHY_CONFIG, JTAG_PHY_CONFIG_I2C_JTAGZ_MASK);
 		phy_slave_address(dev, PHY_I2C_SLAVE_ADDR);
@@ -1818,11 +1693,9 @@ static int phy_set_interface(hdmi_tx_dev_t *dev, phy_access_t interface)
 static int phy_reconfigure_interface(hdmi_tx_dev_t *dev)
 {
 	switch (dev->snps_hdmi_ctrl.phy_access) {
-#ifdef SUPPORT_PHY_JTAG
 	case PHY_JTAG:
 		phy_jtag_init(dev, 0xD4);
 		break;
-#endif
 	case PHY_I2C:
 		dev_write(dev, JTAG_PHY_CONFIG, JTAG_PHY_CONFIG_I2C_JTAGZ_MASK);
 		phy_slave_address(dev, PHY_I2C_SLAVE_ADDR);
@@ -1840,11 +1713,9 @@ static int phy_reconfigure_interface(hdmi_tx_dev_t *dev)
 static int phy_slave_address(hdmi_tx_dev_t *dev, u8 value)
 {
 	switch (dev->snps_hdmi_ctrl.phy_access) {
-#ifdef SUPPORT_PHY_JTAG
 	case PHY_JTAG:
 		phy_jtag_slave_address(dev, 0xD4);
 		return 0;
-#endif
 	case PHY_I2C:
 		phy_i2c_slave_address(dev, value);
 		return 0;
@@ -1859,10 +1730,13 @@ int phy_initialize(hdmi_tx_dev_t *dev, u16 phy_model)
 {
 	LOG_TRACE1(dev->snps_hdmi_ctrl.data_enable_polarity);
 
+	/* board_ZcalReset(1); */
+	/* board_ZcalReset(0); */
+#if 0
 	if (phy_set_interface(dev, PHY_I2C) < 0)
 		return FALSE;
 
-#if 0
+#else
 	if (phy_set_interface(dev, PHY_JTAG) < 0)
 			return FALSE;
 
@@ -1917,6 +1791,25 @@ int phy_initialize(hdmi_tx_dev_t *dev, u16 phy_model)
 	return TRUE;
 }
 
+int phy_configuration_supported(hdmi_tx_dev_t *dev, u16 phy_model)
+{
+	if (phy_model == PHY_MODEL_301) {
+		return phy301_configure_supported(dev,
+					dev->snps_hdmi_ctrl.pixel_clock,
+					dev->snps_hdmi_ctrl.color_resolution,
+					dev->snps_hdmi_ctrl.pixel_repetition);
+	}
+	if (phy_model == PHY_MODEL_303) {
+		return phy303_configure_supported(dev,
+					dev->snps_hdmi_ctrl.pixel_clock,
+					dev->snps_hdmi_ctrl.color_resolution,
+					dev->snps_hdmi_ctrl.pixel_repetition);
+	}
+	pr_err("****** PHY not supported %d *******\n", phy_model);
+	return FALSE;
+
+}
+
 int phy_configure(hdmi_tx_dev_t *dev, u16 phy_model)
 {
 	LOG_TRACE();
@@ -1925,16 +1818,12 @@ int phy_configure(hdmi_tx_dev_t *dev, u16 phy_model)
 					dev->snps_hdmi_ctrl.color_resolution,
 					dev->snps_hdmi_ctrl.pixel_repetition);
 	}
-
-#ifdef SUPPORT_PHY303
 	if (phy_model == PHY_MODEL_303) {
 		return phy303_configure(dev, dev->snps_hdmi_ctrl.pixel_clock,
 					dev->snps_hdmi_ctrl.color_resolution,
 					dev->snps_hdmi_ctrl.pixel_repetition);
 	}
-#endif
-	pr_err("PHY not supported %d\n", phy_model);
-
+	pr_err("****** PHY not supported %d *******\n", phy_model);
 	return FALSE;
 }
 
@@ -1971,7 +1860,43 @@ int phy_disable_hpd_sense(hdmi_tx_dev_t *dev)
 	return TRUE;
 }
 
+int phy_hot_plug_detected(hdmi_tx_dev_t *dev)
+{
+	/* MASK         STATUS          POLARITY        INTERRUPT        HPD
+	 *   0             0                 0               1             0
+	 *   0             1                 0               0             1
+	 *   0             0                 1               0             0
+	 *   0             1                 1               1             1
+	 *   1             x                 x               0             x
+	 */
 
+	int hpd_polarity = dev_read_mask(dev, PHY_POL0, PHY_POL0_HPD_MASK);
+	int hpd = dev_read_mask(dev, PHY_STAT0, PHY_STAT0_HPD_MASK);
+
+	/* Mask interrupt */
+	phy_interrupt_mask(dev, PHY_MASK0_HPD_MASK);
+
+	if (hpd_polarity == hpd) {
+		dev_write_mask(dev, PHY_POL0, PHY_POL0_HPD_MASK, !hpd_polarity);
+
+		/* Un-mask interrupts */
+		phy_interrupt_unmask(dev, PHY_MASK0_HPD_MASK);
+
+		return hpd_polarity;
+	}
+
+	/* Un-mask interrupts */
+	phy_interrupt_unmask(dev, PHY_MASK0_HPD_MASK);
+
+	return !hpd_polarity;
+}
+
+int phy_interrupt_enable(hdmi_tx_dev_t *dev, u8 value)
+{
+	LOG_TRACE1(value);
+	dev_write(dev, PHY_MASK0, value);
+	return TRUE;
+}
 
 static int phy_phase_lock_loop_state(hdmi_tx_dev_t *dev)
 {
@@ -1986,18 +1911,37 @@ static void phy_interrupt_mask(hdmi_tx_dev_t *dev, u8 mask)
 	dev_write_mask(dev, PHY_MASK0, mask, 0xff);
 }
 
-#if 0
 static void phy_interrupt_unmask(hdmi_tx_dev_t *dev, u8 mask)
 {
 	LOG_TRACE1(mask);
 	/* Mask will determine which bits will be enabled */
 	dev_write_mask(dev, PHY_MASK0, mask, 0x0);
 }
-#endif
 
 u8 phy_hot_plug_state(hdmi_tx_dev_t *dev)
 {
 	return dev_read_mask(dev, (PHY_STAT0), PHY_STAT0_HPD_MASK);
+}
+
+int phy_test_control(hdmi_tx_dev_t *dev, u8 value)
+{
+	LOG_TRACE1(value);
+	phy_test_data_in(dev, value);
+	phy_test_enable(dev, 1);
+	phy_test_clock(dev, 1);
+	phy_test_clock(dev, 0);
+	phy_test_enable(dev, 0);
+	return TRUE;
+}
+
+int phy_test_data(hdmi_tx_dev_t *dev, u8 value)
+{
+	LOG_TRACE1(value);
+	phy_test_data_in(dev, value);
+	phy_test_enable(dev, 0);
+	phy_test_clock(dev, 1);
+	phy_test_clock(dev, 0);
+	return TRUE;
 }
 
 u8 phy_rxsense_state(hdmi_tx_dev_t *dev)

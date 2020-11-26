@@ -104,10 +104,6 @@ static int bcm_sysport_set_rx_csum(struct net_device *dev,
 
 	priv->rx_chk_en = !!(wanted & NETIF_F_RXCSUM);
 	reg = rxchk_readl(priv, RXCHK_CONTROL);
-	/* Clear L2 header checks, which would prevent BPDUs
-	 * from being received.
-	 */
-	reg &= ~RXCHK_L2_HDR_DIS;
 	if (priv->rx_chk_en)
 		reg |= RXCHK_EN;
 	else
@@ -382,6 +378,7 @@ static void bcm_sysport_get_wol(struct net_device *dev,
 				struct ethtool_wolinfo *wol)
 {
 	struct bcm_sysport_priv *priv = netdev_priv(dev);
+	u32 reg;
 
 	wol->supported = WAKE_MAGIC | WAKE_MAGICSECURE;
 	wol->wolopts = priv->wolopts;
@@ -389,7 +386,11 @@ static void bcm_sysport_get_wol(struct net_device *dev,
 	if (!(priv->wolopts & WAKE_MAGICSECURE))
 		return;
 
-	memcpy(wol->sopass, priv->sopass, sizeof(priv->sopass));
+	/* Return the programmed SecureOn password */
+	reg = umac_readl(priv, UMAC_PSW_MS);
+	put_unaligned_be16(reg, &wol->sopass[0]);
+	reg = umac_readl(priv, UMAC_PSW_LS);
+	put_unaligned_be32(reg, &wol->sopass[2]);
 }
 
 static int bcm_sysport_set_wol(struct net_device *dev,
@@ -405,8 +406,13 @@ static int bcm_sysport_set_wol(struct net_device *dev,
 	if (wol->wolopts & ~supported)
 		return -EINVAL;
 
-	if (wol->wolopts & WAKE_MAGICSECURE)
-		memcpy(priv->sopass, wol->sopass, sizeof(priv->sopass));
+	/* Program the SecureOn password */
+	if (wol->wolopts & WAKE_MAGICSECURE) {
+		umac_writel(priv, get_unaligned_be16(&wol->sopass[0]),
+			    UMAC_PSW_MS);
+		umac_writel(priv, get_unaligned_be32(&wol->sopass[2]),
+			    UMAC_PSW_LS);
+	}
 
 	/* Flag the device and relevant IRQ as wakeup capable */
 	if (wol->wolopts) {
@@ -822,21 +828,13 @@ static void bcm_sysport_resume_from_wol(struct bcm_sysport_priv *priv)
 {
 	u32 reg;
 
+	/* Stop monitoring MPD interrupt */
+	intrl2_0_mask_set(priv, INTRL2_0_MPD);
+
 	/* Clear the MagicPacket detection logic */
 	reg = umac_readl(priv, UMAC_MPD_CTRL);
 	reg &= ~MPD_EN;
 	umac_writel(priv, reg, UMAC_MPD_CTRL);
-
-	reg = intrl2_0_readl(priv, INTRL2_CPU_STATUS);
-	if (reg & INTRL2_0_MPD)
-		netdev_info(priv->netdev, "Wake-on-LAN (MPD) interrupt!\n");
-
-	if (reg & INTRL2_0_BRCM_MATCH_TAG) {
-		reg = rxchk_readl(priv, RXCHK_BRCM_TAG_MATCH_STATUS) &
-				  RXCHK_BRCM_TAG_MATCH_MASK;
-		netdev_info(priv->netdev,
-			    "Wake-on-LAN (filters 0x%02x) interrupt!\n", reg);
-	}
 
 	netif_dbg(priv, wol, priv->netdev, "resumed from WOL\n");
 }
@@ -869,6 +867,11 @@ static irqreturn_t bcm_sysport_rx_isr(int irq, void *dev_id)
 	 */
 	if (priv->irq0_stat & INTRL2_0_TX_RING_FULL)
 		bcm_sysport_tx_reclaim_all(priv);
+
+	if (priv->irq0_stat & INTRL2_0_MPD) {
+		netdev_info(priv->netdev, "Wake-on-LAN interrupt!\n");
+		bcm_sysport_resume_from_wol(priv);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1869,17 +1872,12 @@ static int bcm_sysport_suspend_to_wol(struct bcm_sysport_priv *priv)
 	unsigned int timeout = 1000;
 	u32 reg;
 
+	/* Password has already been programmed */
 	reg = umac_readl(priv, UMAC_MPD_CTRL);
 	reg |= MPD_EN;
 	reg &= ~PSW_EN;
-	if (priv->wolopts & WAKE_MAGICSECURE) {
-		/* Program the SecureOn password */
-		umac_writel(priv, get_unaligned_be16(&priv->sopass[0]),
-			    UMAC_PSW_MS);
-		umac_writel(priv, get_unaligned_be32(&priv->sopass[2]),
-			    UMAC_PSW_LS);
+	if (priv->wolopts & WAKE_MAGICSECURE)
 		reg |= PSW_EN;
-	}
 	umac_writel(priv, reg, UMAC_MPD_CTRL);
 
 	/* Make sure RBUF entered WoL mode as result */
@@ -1902,6 +1900,9 @@ static int bcm_sysport_suspend_to_wol(struct bcm_sysport_priv *priv)
 
 	/* UniMAC receive needs to be turned on */
 	umac_enable_set(priv, CMD_RX_EN, 1);
+
+	/* Enable the interrupt wake-up source */
+	intrl2_0_mask_clear(priv, INTRL2_0_MPD);
 
 	netif_dbg(priv, wol, ndev, "entered WOL mode\n");
 

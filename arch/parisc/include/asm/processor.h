@@ -323,8 +323,6 @@ extern int _parisc_requires_coherency;
 #define parisc_requires_coherency()	(0)
 #endif
 
-extern int running_on_qemu;
-
 #endif /* __ASSEMBLY__ */
 
 #endif /* __ASM_PARISC_PROCESSOR_H */

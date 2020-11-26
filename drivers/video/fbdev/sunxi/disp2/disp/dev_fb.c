@@ -17,19 +17,17 @@
 #include "de/disp_edp.h"
 #endif /*endif defined(SUPPORT_EDP) */
 #include <linux/ion_sunxi.h>
-#include <linux/dma-buf.h>
 
 #define VSYNC_NUM 4
-#define SUNXI_FB_MAX 1
 struct fb_info_t {
 	struct device *dev;
 
-	bool fb_enable[SUNXI_FB_MAX];
-	enum disp_fb_mode fb_mode[SUNXI_FB_MAX];
-	u32 layer_hdl[SUNXI_FB_MAX][2];	/* channel, layer_id */
-	struct fb_info *fbinfo[SUNXI_FB_MAX];
-	struct disp_fb_create_info fb_para[SUNXI_FB_MAX];
-	u32 pseudo_palette[SUNXI_FB_MAX][16];
+	bool fb_enable[FB_MAX];
+	enum disp_fb_mode fb_mode[FB_MAX];
+	u32 layer_hdl[FB_MAX][2];	/* channel, layer_id */
+	struct fb_info *fbinfo[FB_MAX];
+	struct disp_fb_create_info fb_para[FB_MAX];
+	u32 pseudo_palette[FB_MAX][16];
 	wait_queue_head_t wait[3];
 	unsigned long wait_count[3];
 	struct task_struct *vsync_task[3];
@@ -38,11 +36,10 @@ struct fb_info_t {
 	ktime_t vsync_timestamp[DISP_SCREEN_NUM][VSYNC_NUM];
 	u32 vsync_timestamp_head[DISP_SCREEN_NUM];
 	u32 vsync_timestamp_tail[DISP_SCREEN_NUM];
-	int mem_cache_flag[SUNXI_FB_MAX];
+	int mem_cache_flag[8];
 
 	int blank[3];
-	struct disp_ion_mem *mem[SUNXI_FB_MAX];
-	struct disp_layer_config config[SUNXI_FB_MAX];
+	struct disp_ion_mem *mem[8];
 };
 
 static struct fb_info_t g_fbi;
@@ -162,8 +159,7 @@ static int fb_map_video_memory(struct fb_info *info)
 #if defined(CONFIG_ION_SUNXI)
 	g_fbi.mem[info->node] =
 	    disp_ion_malloc(info->fix.smem_len, (u32 *)(&info->fix.smem_start));
-	if (g_fbi.mem[info->node])
-		info->screen_base = (char __iomem *)g_fbi.mem[info->node]->vaddr;
+	info->screen_base = (char __iomem *)g_fbi.mem[info->node]->vaddr;
 #else
 	info->screen_base =
 	    (char __iomem *)disp_malloc(info->fix.smem_len,
@@ -278,19 +274,16 @@ int disp_reserve_mem(bool reserve)
 
 static int __init early_disp_reserve(char *str)
 {
-	u32 temp[3] = {0};
-
+	u32 arch_mem_end;
 	if (!str)
 		return -EINVAL;
 
-	get_options(str, 3, temp);
-
-	disp_reserve_size = temp[1];
-	disp_reserve_base = temp[2];
-	if (temp[0] != 2 || disp_reserve_size <= 0)
+	disp_reserve_size = memparse(str, &str);
+	if (disp_reserve_size <= 0)
 		return -EINVAL;
 
-	/*arch_mem_end = memblock_end_of_DRAM();*/
+	arch_mem_end = memblock_end_of_DRAM();
+	disp_reserve_base = arch_mem_end - disp_reserve_size;
 	disp_reserve_mem(true);
 	pr_info("disp reserve base 0x%x ,size 0x%x\n",
 					disp_reserve_base, disp_reserve_size);
@@ -688,6 +681,7 @@ static int sunxi_fb_pan_display(struct fb_var_screeninfo *var,
 
 	num_screens = bsp_disp_feat_get_num_screens();
 
+
 	for (sel = 0; sel < num_screens; sel++) {
 		if (sel == g_fbi.fb_mode[info->node]) {
 			u32 buffer_num = 1;
@@ -771,6 +765,46 @@ static int sunxi_fb_check_var(struct fb_var_screeninfo *var,
 	return 0;
 }
 
+static int sunxi_fb_set_par(struct fb_info *info)
+{
+	u32 sel = 0;
+	u32 num_screens;
+
+	num_screens = bsp_disp_feat_get_num_screens();
+
+	__inf("sunxi_fb_set_par\n");
+
+	for (sel = 0; sel < num_screens; sel++) {
+		if (sel == g_fbi.fb_mode[info->node]) {
+			struct fb_var_screeninfo *var = &info->var;
+			struct fb_fix_screeninfo *fix = &info->fix;
+			u32 buffer_num = 1;
+			u32 y_offset = 0;
+			s32 chan = g_fbi.layer_hdl[info->node][0];
+			s32 layer_id = g_fbi.layer_hdl[info->node][1];
+			struct disp_layer_config config;
+			struct disp_manager *mgr = g_disp_drv.mgr[sel];
+
+			if (mgr && mgr->get_layer_config
+			    && mgr->set_layer_config) {
+				config.channel = chan;
+				config.layer_id = layer_id;
+				mgr->get_layer_config(mgr, &config, 1);
+			}
+
+			var_to_disp_fb(&(config.info.fb), var, fix);
+			config.info.fb.crop.x = var->xoffset;
+			config.info.fb.crop.y = var->yoffset + y_offset;
+			config.info.fb.crop.width = var->xres;
+			config.info.fb.crop.height = var->yres / buffer_num;
+			if (mgr && mgr->get_layer_config
+			    && mgr->set_layer_config)
+				mgr->set_layer_config(mgr, &config, 1);
+		}
+	}
+	return 0;
+}
+
 static int sunxi_fb_blank(int blank_mode, struct fb_info *info)
 {
 	u32 sel = 0;
@@ -793,16 +827,17 @@ static int sunxi_fb_blank(int blank_mode, struct fb_info *info)
 					config.channel = chan;
 					config.layer_id = layer_id;
 					mgr->get_layer_config(mgr, &config, 1);
-					memcpy(
-					    &g_fbi.config[sel], &config,
-					    sizeof(struct disp_layer_config));
 					config.enable = 0;
 					mgr->set_layer_config(mgr, &config, 1);
 				}
 			} else {
 				if (mgr && mgr->get_layer_config
 				    && mgr->set_layer_config) {
-					mgr->set_layer_config(mgr, &g_fbi.config[sel], 1);
+					config.channel = chan;
+					config.layer_id = layer_id;
+					mgr->get_layer_config(mgr, &config, 1);
+					config.enable = 1;
+					mgr->set_layer_config(mgr, &config, 1);
 				}
 			}
 		}
@@ -1077,223 +1112,9 @@ static int sunxi_fb_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 	return 0;
 }
 
-struct fb_dmabuf_export {
-	int fd;
-	__u32 flags;
-};
-
 /*custom ioctl command here*/
 #define FBIO_CACHE_SYNC         0x4630
 #define FBIO_ENABLE_CACHE       0x4631
-#define FBIOGET_DMABUF         _IOR('F', 0x21, struct fb_dmabuf_export)
-
-#if !defined(CONFIG_ION_SUNXI)
-
-struct sunxi_dmabuf_info {
-	struct sg_table *s_sg_table;
-	struct fb_info *info;
-	struct kref ref;
-	void *ker_addr;
-};
-
-static struct sunxi_dmabuf_info *sunxi_info[SUNXI_FB_MAX];
-
-void sunxi_info_free(struct kref *kref)
-{
-	struct sunxi_dmabuf_info *s_info;
-	struct fb_info *f_info;
-
-	s_info = container_of(kref, struct sunxi_dmabuf_info, ref);
-	f_info = s_info->info;
-
-	if (!lock_fb_info(f_info))
-		return ;
-
-	sg_free_table(s_info->s_sg_table);
-	Fb_unmap_kernel(s_info->ker_addr);
-	kfree(s_info->s_sg_table);
-	kfree(s_info);
-	sunxi_info[f_info->node%SUNXI_FB_MAX] = NULL;
-
-	unlock_fb_info(f_info);
-}
-
-static struct sg_table *sunxi_map_dma_buf(struct dma_buf_attachment *attachment,
-					enum dma_data_direction direction)
-{
-	struct sunxi_dmabuf_info *s_info;
-	s_info = (struct sunxi_dmabuf_info *)attachment->dmabuf->priv;
-
-	kref_get(&s_info->ref);
-
-	return s_info->s_sg_table;
-}
-
-static void sunxi_unmap_dma_buf(struct dma_buf_attachment *attachment,
-						struct sg_table *sg_tab,
-						enum dma_data_direction direction)
-{
-	struct sunxi_dmabuf_info *s_info;
-	s_info = (struct sunxi_dmabuf_info *)attachment->dmabuf->priv;
-
-	kref_put(&s_info->ref, sunxi_info_free);
-}
-
-static int sunxi_user_mmap(struct dma_buf *buff, struct vm_area_struct *vma)
-{
-	struct sunxi_dmabuf_info *s_info = (struct sunxi_dmabuf_info *)buff->priv;
-	struct sg_table *table = s_info->s_sg_table;
-	unsigned long addr = vma->vm_start;
-	unsigned long offset = vma->vm_pgoff * PAGE_SIZE;
-	struct scatterlist *sg;
-	int i;
-	int ret;
-
-	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
-	for_each_sg(table->sgl, sg, table->nents, i) {
-		struct page *page = sg_page(sg);
-		unsigned long remainder = vma->vm_end - addr;
-		unsigned long len = sg->length;
-
-		if (offset >= sg->length) {
-			offset -= sg->length;
-			continue;
-		} else if (offset) {
-			page += offset / PAGE_SIZE;
-			len = sg->length - offset;
-			offset = 0;
-		}
-		len = min(len, remainder);
-		ret = remap_pfn_range(vma, addr, page_to_pfn(page), len,
-				      vma->vm_page_prot);
-		if (ret)
-			return ret;
-		addr += len;
-		if (addr >= vma->vm_end)
-			return 0;
-	}
-
-	return 0;
-}
-
-static void sunxi_dma_buf_release(struct dma_buf *buff)
-{
-	struct sunxi_dmabuf_info *s_info;
-	s_info = (struct sunxi_dmabuf_info *)buff->priv;
-
-	kref_put(&s_info->ref, sunxi_info_free);
-}
-
-static int sunxi_dma_buf_attach(struct dma_buf *buff, struct device *dev,
-			struct dma_buf_attachment *attachment)
-{
-	struct sunxi_dmabuf_info *s_info;
-	s_info = (struct sunxi_dmabuf_info *)buff->priv;
-	attachment->priv = (void *)s_info;
-
-	kref_get(&s_info->ref);
-	return 0;
-}
-
-static void sunxi_dma_buf_detach(struct dma_buf *buff, struct dma_buf_attachment *attachment)
-{
-	struct sunxi_dmabuf_info *s_info;
-	s_info = (struct sunxi_dmabuf_info *)buff->priv;
-
-	attachment->priv = NULL;
-
-	kref_put(&s_info->ref, sunxi_info_free);
-}
-
-static void *sunxi_dma_buf_kmap(struct dma_buf *buff, unsigned long page_num)
-{
-	struct sunxi_dmabuf_info *s_info;
-	s_info = (struct sunxi_dmabuf_info *)buff->priv;
-
-	return s_info->ker_addr + page_num * PAGE_SIZE;
-}
-
-static void sunxi_dma_buf_kunmap(struct dma_buf *buff, unsigned long page_num,
-			       void *ptr)
-{
-
-}
-
-static struct dma_buf_ops sunxi_dma_buf_ops = {
-	.attach = sunxi_dma_buf_attach,
-	.detach = sunxi_dma_buf_detach,
-	.map_dma_buf = sunxi_map_dma_buf,
-	.unmap_dma_buf = sunxi_unmap_dma_buf,
-	.mmap = sunxi_user_mmap,
-	.release = sunxi_dma_buf_release,
-	.kmap_atomic = sunxi_dma_buf_kmap,
-	.kunmap_atomic = sunxi_dma_buf_kunmap,
-	.kmap = sunxi_dma_buf_kmap,
-	.kunmap = sunxi_dma_buf_kunmap,
-};
-#endif
-
-static struct dma_buf *sunxi_share_dma_buf(struct fb_info *info)
-{
-	struct dma_buf *dmabuf = NULL;
-#if !defined(CONFIG_ION_SUNXI)
-	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
-	struct sunxi_dmabuf_info *s_info;
-#else
-	struct ion_handle *handle;
-#endif
-	if (info->fix.smem_start == 0 || info->fix.smem_len == 0)
-		return NULL;
-
-#if defined(CONFIG_ION_SUNXI)
-	handle = g_fbi.mem[info->node%SUNXI_FB_MAX]->handle;
-	dmabuf = ion_share_dma_buf(g_disp_drv.ion_mgr.client, handle);
-#else
-	s_info = sunxi_info[info->node%SUNXI_FB_MAX];
-	if (s_info == NULL) {
-		s_info = kzalloc(sizeof(struct sunxi_dmabuf_info), GFP_KERNEL);
-		if (s_info == NULL)
-			goto ret_err;
-		s_info->s_sg_table = kzalloc(sizeof(struct sg_table), GFP_KERNEL);
-		if (!s_info->s_sg_table) {
-			kfree(s_info);
-			goto ret_err;
-		}
-		if (sg_alloc_table(s_info->s_sg_table, 1, GFP_KERNEL)) {
-			kfree(s_info->s_sg_table);
-			kfree(s_info);
-			goto ret_err;
-		}
-		sg_set_page(s_info->s_sg_table->sgl, pfn_to_page(PFN_DOWN(info->fix.smem_start)),
-				info->fix.smem_len, info->fix.smem_start&PAGE_MASK);
-		s_info->info = info;
-		kref_init(&s_info->ref);
-		s_info->ker_addr = (void *)((unsigned long)Fb_map_kernel(info->fix.smem_start, info->fix.smem_len)
-						+ (info->fix.smem_start&PAGE_MASK));
-		sunxi_info[info->node%SUNXI_FB_MAX] = s_info;
-	} else {
-		kref_get(&s_info->ref);
-	}
-	exp_info.ops = &sunxi_dma_buf_ops;
-	exp_info.size = info->fix.smem_len;
-	exp_info.flags = O_RDWR;
-	exp_info.priv = s_info;
-
-	dmabuf = dma_buf_export(&exp_info);
-	if (IS_ERR_OR_NULL(dmabuf)) {
-		kref_put(&s_info->ref, sunxi_info_free);
-		return dmabuf;
-	}
-#endif
-	return dmabuf;
-#if !defined(CONFIG_ION_SUNXI)
-ret_err:
-	__wrn("%s, alloc mem err...\n", __func__);
-
-	return -ENOMEM;
-#endif
-}
-
 static int sunxi_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			  unsigned long arg)
 {
@@ -1408,29 +1229,7 @@ static int sunxi_fb_ioctl(struct fb_info *info, unsigned int cmd,
 #endif
 		break;
 	}
-	case FBIOGET_DMABUF:
-	{
-		struct dma_buf *dmabuf;
-		struct fb_dmabuf_export k_ret = {-1, 0};
 
-		ret = -1;
-
-		dmabuf = sunxi_share_dma_buf(info);
-		if (IS_ERR_OR_NULL(dmabuf))
-			return PTR_ERR(dmabuf);
-
-		k_ret.fd = dma_buf_fd(dmabuf, O_CLOEXEC);
-		if (k_ret.fd < 0) {
-			dma_buf_put(dmabuf);
-			break;
-		}
-
-		if (copy_to_user(argp, &k_ret, sizeof(struct fb_dmabuf_export))) {
-			__wrn("%s, copy to user err\n", __func__);
-		}
-		ret = 0;
-		break;
-	}
 	default:
 		break;
 	}
@@ -1447,6 +1246,7 @@ static struct fb_ops dispfb_ops = {
 #endif
 	.fb_ioctl = sunxi_fb_ioctl,
 	.fb_check_var = sunxi_fb_check_var,
+	.fb_set_par = sunxi_fb_set_par,
 	.fb_blank = sunxi_fb_blank,
 	.fb_cursor = sunxi_fb_cursor,
 	.fb_mmap = sunxi_fb_mmap,
@@ -1947,7 +1747,7 @@ static s32 display_fb_request(u32 fb_id, struct disp_fb_create_info *fb_para)
 			    (void *)g_fbi.mem[info->node]->vaddr,
 			    g_fbi.mem[info->node]->size);
 #endif
-#if (!defined(CONFIG_EINK_PANEL_USED)) && (!defined(CONFIG_EINK200_SUNXI))
+#if !defined(CONFIG_EINK_PANEL_USED)
 			if (mgr && mgr->set_layer_config)
 				mgr->set_layer_config(mgr, &config, 1);
 #endif
@@ -2010,7 +1810,7 @@ s32 Display_set_fb_timming(u32 sel)
 {
 	u8 fb_id = 0;
 
-	for (fb_id = 0; fb_id < SUNXI_FB_MAX; fb_id++) {
+	for (fb_id = 0; fb_id < FB_MAX; fb_id++) {
 		if (g_fbi.fb_enable[fb_id]) {
 			if (sel == g_fbi.fb_mode[fb_id]) {
 				struct disp_video_timings tt;
@@ -2057,7 +1857,7 @@ unsigned long fb_get_address_info(u32 fb_id, u32 phy_virt_flag)
 	unsigned long phy_addr = 0;
 	unsigned long virt_addr = 0;
 
-	if (fb_id >= SUNXI_FB_MAX)
+	if (fb_id >= FB_MAX)
 		return 0;
 
 	info = g_fbi.fbinfo[fb_id];
@@ -2077,12 +1877,6 @@ s32 fb_init(struct platform_device *pdev)
 	struct disp_fb_create_info fb_para;
 	unsigned long i;
 	u32 num_screens;
-	s32 ret = 0;
-#ifdef CONFIG_EINK200_SUNXI
-	s32 value = 0;
-	char primary_key[20];
-	sprintf(primary_key, "eink");
-#endif
 	/* struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 }; */
 
 	g_fbi.dev = &pdev->dev;
@@ -2115,7 +1909,7 @@ s32 fb_init(struct platform_device *pdev)
 	init_waitqueue_head(&g_fbi.wait[2]);
 	disp_register_sync_finish_proc(DRV_disp_int_process);
 
-	for (i = 0; i < SUNXI_FB_MAX; i++) {
+	for (i = 0; i < 8; i++) {
 		g_fbi.fbinfo[i] = framebuffer_alloc(0, g_fbi.dev);
 		g_fbi.fbinfo[i]->fbops = &dispfb_ops;
 		g_fbi.fbinfo[i]->flags = 0;
@@ -2161,9 +1955,11 @@ s32 fb_init(struct platform_device *pdev)
 	}
 
 	if (g_disp_drv.disp_init.b_init) {
+		u32 fb_num = 0;
 		struct disp_init_para *disp_init = &g_disp_drv.disp_init;
 
-		for (i = 0; i < SUNXI_FB_MAX; i++) {
+		fb_num = 1;
+		for (i = 0; i < fb_num; i++) {
 			u32 screen_id = g_disp_drv.disp_init.disp_mode;
 
 			if (g_disp_drv.para.boot_info.sync)
@@ -2201,25 +1997,12 @@ s32 fb_init(struct platform_device *pdev)
 			     disp_init->output_mode[screen_id]);
 			fb_para.fb_mode = screen_id;
 
-#if (defined(SUPPORT_EINK) && defined(CONFIG_EINK_PANEL_USED))
+#if defined(SUPPORT_EINK) && defined(CONFIG_EINK_PANEL_USED)
 			fb_para.output_width = fb_para.width;
 			fb_para.output_height = fb_para.height;
-#elif defined(CONFIG_EINK200_SUNXI)
-			ret = disp_sys_script_get_item(primary_key, "eink_width", &value, 1);
-			if (ret == 1)
-				fb_para.output_width = value;
-			ret = disp_sys_script_get_item(primary_key, "eink_height", &value, 1);
-			if (ret == 1)
-				fb_para.output_height = value;
-			pr_info("%s:fb width = %d, height = %d\n", __func__,
-					fb_para.output_width, fb_para.output_height);
-			fb_para.width = fb_para.output_width;
-			fb_para.height = fb_para.output_height;
 #endif
 
-			ret = display_fb_request(i, &fb_para);
-			if (ret)
-				break;
+			display_fb_request(i, &fb_para);
 #if defined(CONFIG_DISP2_SUNXI_BOOT_COLORBAR)
 			fb_draw_colorbar((char *__force)g_fbi.fbinfo[i]->
 					 screen_base, fb_para.width,
@@ -2227,11 +2010,11 @@ s32 fb_init(struct platform_device *pdev)
 					 &(g_fbi.fbinfo[i]->var));
 #endif
 		}
-		for (i = 0; i < SUNXI_FB_MAX; i++)
+		for (i = 0; i < 8; i++)
 			register_framebuffer(g_fbi.fbinfo[i]);
 	}
 
-	return ret;
+	return 0;
 }
 
 s32 fb_exit(void)
@@ -2250,7 +2033,7 @@ s32 fb_exit(void)
 		}
 	}
 
-	for (fb_id = 0; fb_id < SUNXI_FB_MAX; fb_id++) {
+	for (fb_id = 0; fb_id < 8; fb_id++) {
 		if (g_fbi.fbinfo[fb_id]) {
 			fb_dealloc_cmap(&g_fbi.fbinfo[fb_id]->cmap);
 			display_fb_release(fb_id);

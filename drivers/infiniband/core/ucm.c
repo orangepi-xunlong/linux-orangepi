@@ -46,8 +46,6 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 
-#include <linux/nospec.h>
-
 #include <asm/uaccess.h>
 
 #include <rdma/ib.h>
@@ -1117,7 +1115,6 @@ static ssize_t ib_ucm_write(struct file *filp, const char __user *buf,
 
 	if (hdr.cmd >= ARRAY_SIZE(ucm_cmd_table))
 		return -EINVAL;
-	hdr.cmd = array_index_nospec(hdr.cmd, ARRAY_SIZE(ucm_cmd_table));
 
 	if (hdr.in + sizeof(hdr) > len)
 		return -EINVAL;

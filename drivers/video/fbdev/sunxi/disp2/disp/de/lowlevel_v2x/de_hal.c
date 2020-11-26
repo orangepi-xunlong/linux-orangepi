@@ -352,12 +352,6 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 	struct disp_rect dispsize[CHN_NUM] = { {0} };
 	struct disp_layer_config_data *data1;
 	unsigned int color = 0xff000000;
- #if EINK_DEBUG
-	u32 count = 0;
-	u32 kcon = 0;
-	char buf[256] = {0};
-	struct disp_layer_config_data data_print;
-#endif
 
 	data1 = data;
 
@@ -366,9 +360,12 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 	layno = LAYER_MAX_NUM_PER_CHN;
 
 #if EINK_DEBUG
+	u32 count = 0;
+	u32 kcon = 0;
+	char buf[256] = {0};
+	struct disp_layer_config_data data_print;
+
 	for (kcon = 0; kcon < layer_num; kcon++) {
-		if (data[kcon].config.enable == false)
-			continue;
 		memcpy(&data_print, &data[kcon],
 			sizeof(struct disp_layer_config_data));
 		memset(buf, 0, sizeof(buf));
@@ -378,34 +375,34 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 			"BUF" : "COLOR");
 		count += sprintf(buf + count, " %8s ",
 			(data_print.config.enable == 1) ? "enable" : "disable");
-		count += sprintf(buf + count, "ch[%1u] ",
+		count += sprintf(buf + count, "ch[%1d] ",
 						data_print.config.channel);
-		count += sprintf(buf + count, "lyr[%1u] ",
+		count += sprintf(buf + count, "lyr[%1d] ",
 						data_print.config.layer_id);
-		count += sprintf(buf + count, "z[%1u] ",
+		count += sprintf(buf + count, "z[%1d] ",
 						data_print.config.info.zorder);
 		count += sprintf(buf + count, "prem[%1s] ",
 			(data_print.config.info.fb.pre_multiply) ? "Y" : "N");
-		count += sprintf(buf + count, "a[%5s %3u] ",
+		count += sprintf(buf + count, "a[%5s %3d] ",
 			(data_print.config.info.alpha_mode) ? "globl" : "pixel",
 			data_print.config.info.alpha_value);
 		count += sprintf(buf + count,
 				"fmt[%3d] ",
 				data_print.config.info.fb.format);
-		count += sprintf(buf + count, "fb[%4u,%4u;%4u,%4u;%4u,%4u] ",
+		count += sprintf(buf + count, "fb[%4d,%4d;%4d,%4d;%4d,%4d] ",
 				data_print.config.info.fb.size[0].width,
 				data_print.config.info.fb.size[0].height,
-				data_print.config.info.fb.size[1].width,
-				data_print.config.info.fb.size[1].height,
-				data_print.config.info.fb.size[2].width,
-				data_print.config.info.fb.size[2].height);
-		count += sprintf(buf + count, "crop[%4u,%4u,%4u,%4u] ",
-			(unsigned int)(data_print.config.info.fb.crop.x>>32),
-			(unsigned int)(data_print.config.info.fb.crop.y>>32),
-			(unsigned int)(data_print.config.info.fb.crop.width>>32),
-			(unsigned int)(data_print.config.info.fb.crop.height>>32));
+				data_print.config.info.fb.size[0].width,
+				data_print.config.info.fb.size[0].height,
+				data_print.config.info.fb.size[0].width,
+				data_print.config.info.fb.size[0].height);
+		count += sprintf(buf + count, "crop[%4lu,%4lu,%4lu,%4lu] ",
+				(data_print.config.info.fb.crop.x>>32),
+				(data_print.config.info.fb.crop.y>>32),
+				(data_print.config.info.fb.crop.width>>32),
+				(data_print.config.info.fb.crop.height>>32));
 
-		count += sprintf(buf + count, "frame[%4d,%4d,%4u,%4u] ",
+		count += sprintf(buf + count, "frame[%4d,%4d,%4d,%4d] ",
 				data_print.config.info.screen_win.x,
 				data_print.config.info.screen_win.y,
 				data_print.config.info.screen_win.width,
@@ -807,19 +804,12 @@ int de_al_init(struct disp_bsp_init_para *para)
 	int i;
 	int num_screens = de_feat_get_num_screens();
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-	for (i = 0; i < num_screens; i++) {
-		de_rtmx_init(i, para->reg_base[DISP_MOD_DE + i]);
-		de_vsu_init(i, para->reg_base[DISP_MOD_DE + i]);
-		de_gsu_init(i, para->reg_base[DISP_MOD_DE + i]);
-	}
-#else
 	for (i = 0; i < num_screens; i++) {
 		de_rtmx_init(i, para->reg_base[DISP_MOD_DE]);
 		de_vsu_init(i, para->reg_base[DISP_MOD_DE]);
 		de_gsu_init(i, para->reg_base[DISP_MOD_DE]);
 	}
-#endif
+
 	return 0;
 }
 

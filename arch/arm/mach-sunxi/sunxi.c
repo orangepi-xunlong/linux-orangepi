@@ -105,6 +105,20 @@ static struct map_desc sunxi_io_desc[] __initdata = {
 		.length  = SUNXI_SRAM_C_SIZE,
 		.type    = MT_MEMORY_RWX_ITCM,
 	},
+#elif defined(CONFIG_ARCH_SUN8IW11P1)
+	{
+		.virtual = (unsigned long)IO_ADDRESS(SUNXI_SRAM_A_PBASE),
+		.pfn     = __phys_to_pfn(SUNXI_SRAM_A_PBASE),
+		.length  = SUNXI_SRAM_A_SIZE,
+		.type    = MT_MEMORY_RWX_ITCM,
+	},
+#elif defined(CONFIG_ARCH_SUN8IW7P1)
+	{
+		.virtual = (unsigned long)IO_ADDRESS(SUNXI_SRAM_A2_PBASE),
+		.pfn     = __phys_to_pfn(SUNXI_SRAM_A2_PBASE),
+		.length  = SUNXI_SRAM_A2_SIZE,
+		.type    = MT_MEMORY_RWX_ITCM,
+	},
 #endif
 #if defined(CONFIG_ARCH_SUN8IW6P1)
 	{
@@ -228,7 +242,7 @@ static void __init sunxi_cpuscfg_init(void)
 }
 #endif
 
-static __attribute__((unused)) void __init sunxi_init_early(void)
+static void __init sunxi_init_early(void)
 {
 	sunxi_cpucfg_init();
 	sunxi_sysctl_init();
@@ -285,8 +299,9 @@ DT_MACHINE_START(SUN8I_DT, CONFIG_SUNXI_SOC_NAME)
 	.map_io		= sunxi_map_io,
 #ifdef CONFIG_ARCH_SUN8IW6P1
 	.smp_init       = smp_init_ops(mcpm_smp_set_ops),
+#else
+	.init_early	= sunxi_init_early,
 #endif
-	.init_early	= NULL,
 	.init_late	= sunxi_init_late,
 	.dt_compat	= sun8i_board_dt_compat,
 MACHINE_END

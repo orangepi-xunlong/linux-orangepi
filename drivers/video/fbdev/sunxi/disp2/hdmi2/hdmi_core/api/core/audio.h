@@ -160,6 +160,11 @@ u8 audio_iec_word_length(hdmi_tx_dev_t *dev, audioParams_t *params);
  */
 u8 audio_is_channel_en(hdmi_tx_dev_t *dev, audioParams_t *params, u8 channel);
 
+void halAudioMultistream_MetaDataPacket_Header(hdmi_tx_dev_t *dev,
+				audioMetaDataPacket_t *mAudioMetaDataPckt);
+void halAudioMultistream_MetaDataPacketBody(hdmi_tx_dev_t *dev,
+				audioMetaDataPacket_t *mAudioMetaDataPacket);
+
 int audio_mute(hdmi_tx_dev_t *dev, u8 state);
 int audio_Initialize(hdmi_tx_dev_t *dev);
 

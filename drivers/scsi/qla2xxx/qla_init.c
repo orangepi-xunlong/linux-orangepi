@@ -329,10 +329,11 @@ qla2x00_async_tm_cmd(fc_port_t *fcport, uint32_t flags, uint32_t lun,
 
 	wait_for_completion(&tm_iocb->u.tmf.comp);
 
-	rval = tm_iocb->u.tmf.data;
+	rval = tm_iocb->u.tmf.comp_status == CS_COMPLETE ?
+	    QLA_SUCCESS : QLA_FUNCTION_FAILED;
 
-	if (rval != QLA_SUCCESS) {
-		ql_log(ql_log_warn, vha, 0x8030,
+	if ((rval != QLA_SUCCESS) || tm_iocb->u.tmf.data) {
+		ql_dbg(ql_dbg_taskm, vha, 0x8030,
 		    "TM IOCB failed (%x).\n", rval);
 	}
 
@@ -368,8 +369,8 @@ qla24xx_abort_sp_done(void *data, void *ptr, int res)
 	srb_t *sp = (srb_t *)ptr;
 	struct srb_iocb *abt = &sp->u.iocb_cmd;
 
-	if (del_timer(&sp->u.iocb_cmd.timer))
-		complete(&abt->u.abt.comp);
+	del_timer(&sp->u.iocb_cmd.timer);
+	complete(&abt->u.abt.comp);
 }
 
 static int
@@ -4894,7 +4895,7 @@ qla2x00_abort_isp(scsi_qla_host_t *vha)
 					 * The next call disables the board
 					 * completely.
 					 */
-					qla2x00_abort_isp_cleanup(vha);
+					ha->isp_ops->reset_adapter(vha);
 					vha->flags.online = 0;
 					clear_bit(ISP_ABORT_RETRY,
 					    &vha->dpc_flags);

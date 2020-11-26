@@ -43,6 +43,7 @@
 #define  KEY_USB_REGULATOR_ID_VBUS		"usb_regulator_id_vbus"
 #define  KEY_USB_REGULATOR_ID_VBUS_VOL		"usb_regulator_id_vbus_vol"
 
+#define  KEY_USB_HOST_INIT_STATE		"usb_host_init_state"
 #define  KEY_USB_WAKEUP_SUSPEND		        "usb_wakeup_suspend"
 
 /* USB config info */
@@ -108,6 +109,11 @@ typedef struct usb_port_info {
 	__u32 voltage;				/* usb port number(?) */
 	__u32 capacity;				/* usb port number(?) */
 
+	/**
+	 * usb controller initial state.
+	 * 0 - not work, 1 - work
+	 */
+	__u32 host_init_state;
 	int id_irq_num;				/* id gpio irq num */
 
 #if defined(CONFIG_DUAL_ROLE_USB_INTF)

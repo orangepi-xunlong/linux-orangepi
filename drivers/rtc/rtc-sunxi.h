@@ -14,7 +14,6 @@
 #define _RTC_SUNXI_H_
 
 #define SUNXI_LOSC_CTRL				0x0000
-#define SUNXI_LOSC_CTRL_RTC_ALARM_ACC		BIT(9)
 #define SUNXI_LOSC_CTRL_RTC_HMS_ACC		BIT(8)
 #define SUNXI_LOSC_CTRL_RTC_YMD_ACC		BIT(7)
 #define REG_LOSCCTRL_MAGIC			0x16aa0000
@@ -29,33 +28,14 @@
  * while alarm1 can't, so alarm1 is not used.
  */
 /* #define SUNXI_ALARM1_USED */
-#if (defined CONFIG_ARCH_SUN8IW16) \
-	|| (defined CONFIG_ARCH_SUN50IW9) \
-	|| (defined CONFIG_ARCH_SUN50IW10)
-#define SUNXI_SIMPLIFIED_TIMER
-#endif
 
-#if defined CONFIG_ARCH_SUN8IW15 || (defined CONFIG_ARCH_SUN50IW9)
-#define SUNXI_RTC_CALI_REG		0x0c
-#define REG_CLK32K_CALI_FUNC_EN		BIT(0)
-#define REG_CLK32K_CALI_EN		BIT(1)
-#define SUNXI_RTC_XO_CTRL		0x160
-#define REG_DC_XO_EN			BIT(1)
-#define SUNXI_RTC_VDD_REG		0x190
-#define REG_V_SEL			BIT(4)
-#endif	/*end of CONFIG_ARCH_SUN8IW15 || CONFIG_ARCH_SUN50IW9 */
-
-#if (defined CONFIG_ARCH_SUN8IW7) || (defined CONFIG_ARCH_SUN8IW11) \
-				|| (defined CONFIG_ARCH_SUN8IW12) \
+#if (defined CONFIG_ARCH_SUN8IW11) || (defined CONFIG_ARCH_SUN8IW12) \
 				|| (defined CONFIG_ARCH_SUN8IW15) \
-				|| (defined CONFIG_ARCH_SUN8IW16) \
 				|| (defined CONFIG_ARCH_SUN8IW17) \
 				|| (defined CONFIG_ARCH_SUN50IW1) \
 				|| (defined CONFIG_ARCH_SUN50IW3) \
 				|| (defined CONFIG_ARCH_SUN50IW6) \
-				|| (defined CONFIG_ARCH_SUN50IW8) \
-				|| (defined CONFIG_ARCH_SUN50IW9) \
-				|| (defined CONFIG_ARCH_SUN50IW10)
+				|| (defined CONFIG_ARCH_SUN50IW8)
 #define SUNXI_RTC_YMD				0x0010
 
 #define SUNXI_RTC_HMS				0x0014
@@ -75,10 +55,8 @@
 
 #else
 
-#define SUNXI_ALRM_DAY				0X0020
 #define SUNXI_ALRM_COUNTER                      0x0020
 #define SUNXI_ALRM_CURRENT                      0x0024
-#define SUNXI_ALRM_HMS				0X0024
 
 #define SUNXI_ALRM_EN                           0x0028
 #define SUNXI_ALRM_EN_CNT_EN                    BIT(0)

@@ -99,8 +99,6 @@ static s32 vga_clk_config(struct disp_device *vga)
 		DE_WRN("device hdl is NULL!\n");
 		return DIS_FAIL;
 	}
-	if (vgap->clk_parent && vgap->clk)
-		clk_set_parent(vgap->clk, vgap->clk_parent);
 
 	return clk_set_rate(vgap->clk, vga->timings.pixel_clk);
 }

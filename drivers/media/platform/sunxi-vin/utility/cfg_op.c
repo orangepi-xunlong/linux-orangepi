@@ -14,7 +14,21 @@
  *
  */
 
-#ifdef CONFIG_SENSOR_LIST_MODULE
+/*
+ ******************************************************************************
+ *
+ * cfg_op.c
+ *
+ * Hawkview ISP - cfg_op.c module
+ *
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version          Author         Date      Description
+ *
+ *   3.0          Yang Feng     2015/12/16   VIDEO INPUT
+ *
+ *****************************************************************************
+ */
 
 #include <linux/kernel.h>
 #include <linux/fs.h>
@@ -646,5 +660,4 @@ int cfg_get_one_subkey(struct cfg_section *cs, char *main, char *sub,
 	}
 	return -1;
 }
-#endif
 

@@ -389,10 +389,8 @@ ssize_t vfs_iter_write(struct file *file, struct iov_iter *iter, loff_t *ppos)
 	iter->type |= WRITE;
 	ret = file->f_op->write_iter(&kiocb, iter);
 	BUG_ON(ret == -EIOCBQUEUED);
-	if (ret > 0) {
+	if (ret > 0)
 		*ppos = kiocb.ki_pos;
-		fsnotify_modify(file);
-	}
 	return ret;
 }
 EXPORT_SYMBOL(vfs_iter_write);
@@ -1196,9 +1194,6 @@ COMPAT_SYSCALL_DEFINE5(preadv64v2, unsigned long, fd,
 		const struct compat_iovec __user *,vec,
 		unsigned long, vlen, loff_t, pos, int, flags)
 {
-	if (pos == -1)
-		return do_compat_readv(fd, vec, vlen, flags);
-
 	return do_compat_preadv64(fd, vec, vlen, pos, flags);
 }
 #endif
@@ -1305,9 +1300,6 @@ COMPAT_SYSCALL_DEFINE5(pwritev64v2, unsigned long, fd,
 		const struct compat_iovec __user *,vec,
 		unsigned long, vlen, loff_t, pos, int, flags)
 {
-	if (pos == -1)
-		return do_compat_writev(fd, vec, vlen, flags);
-
 	return do_compat_pwritev64(fd, vec, vlen, pos, flags);
 }
 #endif

@@ -21,11 +21,6 @@ enum sensor_pad {
 	SENSOR_PAD_NUM,
 };
 
-enum sensor_type_t {
-	SENSOR_YUV = 0,
-	SENSOR_RAW = 1,
-};
-
 typedef enum tag_CAMERA_IO_CMD {
 	GET_CURRENT_WIN_CFG,
 	SET_FPS,
@@ -37,7 +32,6 @@ typedef enum tag_CAMERA_IO_CMD {
 	GET_COMBO_SYNC_CODE,
 	GET_COMBO_LANE_MAP,
 	GET_COMBO_WDR_CFG,
-	SET_SENSOR_STANDBY,
 } __camera_cmd_t;
 
 struct sensor_exif_attribute {
@@ -63,7 +57,6 @@ struct sensor_win_size {
 	unsigned int fps_fixed;	/*fps mode 1=fixed fps              */
 	unsigned int if_mode;	/*interface mode, normal = 0, wdr != 0  */
 	unsigned int wdr_mode; /*wdr mode, normal = 0, dol = 1, command = 2  */
-	unsigned int lp_mode; /*0 = continuous 1 = discontinuous*/
 	unsigned int bin_factor;/*binning factor                    */
 	unsigned int intg_min;	/*integration min, unit: line, Q4   */
 	unsigned int intg_max;	/*integration max, unit: line, Q4   */
@@ -73,10 +66,6 @@ struct sensor_win_size {
 	unsigned int height_input; /*isp height input, after isp crop*/
 	unsigned int vipp_hoff;	/*vipp crop hoffset */
 	unsigned int vipp_voff;	/*vipp crop voffset */
-	unsigned int vipp_w;	/*vipp crop width */
-	unsigned int vipp_h;	/*vipp crop height */
-	unsigned long top_clk;
-	unsigned long isp_clk;
 
 	void *regs;		/* Regs to tweak */
 	int regs_size;

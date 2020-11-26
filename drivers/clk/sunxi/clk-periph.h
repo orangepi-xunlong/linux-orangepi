@@ -95,24 +95,6 @@ struct sunxi_clk_comgate {
 	u8              res;
 };
 
-#ifdef CONFIG_PM_SLEEP
-struct sunxi_periph_clk_reg_cache {
-	struct list_head node;
-	void __iomem *mux_reg;
-	u32	mux_value;
-	void __iomem *divider_reg;
-	u32 divider_value;
-	void __iomem *gate_enable_reg;
-	u32 gate_enable_value;
-	void __iomem *gate_reset_reg;
-	u32 gate_reset_value;
-	void __iomem *gate_bus_reg;
-	u32 gate_bus_value;
-	void __iomem *gate_dram_reg;
-	u32 gate_dram_value;
-};
-#endif
-
 #define BUS_GATE_SHARE  0x01
 #define RST_GATE_SHARE  0x02
 #define MBUS_GATE_SHARE 0x04
@@ -172,8 +154,6 @@ static inline void periph_writel(struct sunxi_clk_periph *periph, unsigned int v
 		? periph->priv_regops->reg_writel(val, reg) \
 		: writel(val, reg));
 }
-
-extern const struct clk_ops sunxi_clk_periph_ops;
 
 struct clk *sunxi_clk_register_periph(struct periph_init_data *pd,
 					void __iomem  *base);

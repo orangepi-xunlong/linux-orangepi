@@ -3,8 +3,6 @@
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
  * may be copied, distributed, and modified under those terms.
@@ -16,27 +14,24 @@
  *
  */
 
+
+/*
+ * vin platform config header file
+ *
+ * Copyright (c) 2017 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+
 #ifndef __PLATFORM_CFG__H__
 #define __PLATFORM_CFG__H__
 
 /*#define FPGA_VER*/
-#define SUNXI_MEM
-#define disp_sync_video 1
-
-#if defined (CONFIG_ARCH_SUN8IW15P1) || defined (CONFIG_ARCH_SUN8IW17P1) || defined (CONFIG_ARCH_SUN50IW3P1) || defined (CONFIG_ARCH_SUN50IW6P1)
-#define NO_SUPPROT_CCU_PLATDORM
-#define NO_SUPPROT_HARDWARE_CALCULATE
-#else
-#if defined(CONFIG_BUF_AUTO_UPDATE)
-#define BUF_AUTO_UPDATE
-#endif
-#endif
-
-#if defined (CONFIG_ARCH_SUN50IW10P1)
-#if defined (CONFIG_SUPPORT_ISP_TDM)
-#define SUPPORT_ISP_TDM
-#endif
-#endif
+/* #define SUNXI_MEM */
 
 #ifndef FPGA_VER
 #include <linux/clk.h>
@@ -66,44 +61,32 @@
 #define DPHY_CLK (150*1000*1000)
 #endif
 
-enum isp_platform {
-	ISP500 =  0,
-	ISP520,
-	ISP521,
-	ISP_VERSION_NUM,
-};
-
 #if defined CONFIG_ARCH_SUN50IW3P1
 #include "sun50iw3p1_vin_cfg.h"
 #define CROP_AFTER_SCALER
 #elif defined CONFIG_ARCH_SUN50IW6P1
 #include "sun50iw6p1_vin_cfg.h"
 #define CROP_AFTER_SCALER
-#elif defined CONFIG_ARCH_SUN50IW9P1
-#include "sun50iw9p1_vin_cfg.h"
-#elif defined CONFIG_ARCH_SUN50IW10P1
-#include "sun50iw10p1_vin_cfg.h"
 #elif defined CONFIG_ARCH_SUN8IW12P1
 #include "sun8iw12p1_vin_cfg.h"
 #elif defined CONFIG_ARCH_SUN8IW15P1
 #include "sun8iw15p1_vin_cfg.h"
-#elif defined CONFIG_ARCH_SUN8IW16P1
-#include "sun8iw16p1_vin_cfg.h"
 #elif defined CONFIG_ARCH_SUN8IW17P1
 #include "sun8iw12p1_vin_cfg.h"
-#elif defined CONFIG_ARCH_SUN8IW19P1
-#include "sun8iw19p1_vin_cfg.h"
 #endif
 
-#define MOV_ROUND_UP(x, n)	(((x) + (1 << (n)) - 1) >> (n))
+#define ALIGN_4K(x)	(((x) + (4095)) & ~(4095))
+#define ALIGN_32B(x)	(((x) + (31)) & ~(31))
+#define ALIGN_16B(x)	(((x) + (15)) & ~(15))
+#define MAX(a, b)	(((a) > (b)) ? (a) : (b))
+#define MIN(a, b)	(((a) < (b)) ? (a) : (b))
+#define CLIP(a, i, s)	(((a) > (s)) ? (s) : MAX(a, i))
 
 struct mbus_framefmt_res {
 	u32 res_pix_fmt;
 	u32 res_mipi_bps;
 	u8 res_combo_mode;
 	u8 res_wdr_mode;
-	u8 res_time_hs;
-	u8 res_lp_mode;
 };
 
 enum steam_on_seq {
@@ -128,7 +111,6 @@ enum steam_on_seq {
 #define VIN_GRP_ID_SCALER	(1 << 12)
 #define VIN_GRP_ID_CAPTURE	(1 << 13)
 #define VIN_GRP_ID_STAT		(1 << 14)
-#define VIN_GRP_ID_TDM_RX	(1 << 15)
 
 #define VIN_ALIGN_WIDTH 16
 #define VIN_ALIGN_HEIGHT 16

@@ -32,6 +32,8 @@
 			clock-frequency = <1000000000>;
 			cci-control-port = <&cci_control0>;
 			operating-points-v2 = <&cluster_a7_opp_table>;
+			cooling-min-level = <0>;
+			cooling-max-level = <11>;
 			#cooling-cells = <2>; /* min followed by max */
 		};
 
@@ -42,6 +44,8 @@
 			clock-frequency = <1000000000>;
 			cci-control-port = <&cci_control0>;
 			operating-points-v2 = <&cluster_a7_opp_table>;
+			cooling-min-level = <0>;
+			cooling-max-level = <11>;
 			#cooling-cells = <2>; /* min followed by max */
 		};
 
@@ -52,6 +56,8 @@
 			clock-frequency = <1000000000>;
 			cci-control-port = <&cci_control0>;
 			operating-points-v2 = <&cluster_a7_opp_table>;
+			cooling-min-level = <0>;
+			cooling-max-level = <11>;
 			#cooling-cells = <2>; /* min followed by max */
 		};
 
@@ -62,6 +68,8 @@
 			clock-frequency = <1000000000>;
 			cci-control-port = <&cci_control0>;
 			operating-points-v2 = <&cluster_a7_opp_table>;
+			cooling-min-level = <0>;
+			cooling-max-level = <11>;
 			#cooling-cells = <2>; /* min followed by max */
 		};
 
@@ -73,6 +81,8 @@
 			clock-frequency = <1800000000>;
 			cci-control-port = <&cci_control1>;
 			operating-points-v2 = <&cluster_a15_opp_table>;
+			cooling-min-level = <0>;
+			cooling-max-level = <15>;
 			#cooling-cells = <2>; /* min followed by max */
 		};
 
@@ -83,6 +93,8 @@
 			clock-frequency = <1800000000>;
 			cci-control-port = <&cci_control1>;
 			operating-points-v2 = <&cluster_a15_opp_table>;
+			cooling-min-level = <0>;
+			cooling-max-level = <15>;
 			#cooling-cells = <2>; /* min followed by max */
 		};
 
@@ -93,6 +105,8 @@
 			clock-frequency = <1800000000>;
 			cci-control-port = <&cci_control1>;
 			operating-points-v2 = <&cluster_a15_opp_table>;
+			cooling-min-level = <0>;
+			cooling-max-level = <15>;
 			#cooling-cells = <2>; /* min followed by max */
 		};
 
@@ -103,6 +117,8 @@
 			clock-frequency = <1800000000>;
 			cci-control-port = <&cci_control1>;
 			operating-points-v2 = <&cluster_a15_opp_table>;
+			cooling-min-level = <0>;
+			cooling-max-level = <15>;
 			#cooling-cells = <2>; /* min followed by max */
 		};
 	};

@@ -1429,8 +1429,7 @@ nr_pages_store(struct device *dev, struct device_attribute *attr,
 		if (!end)
 			break;
 
-		/* consume the number and the following comma, hence +1 */
-		len -= end - p + 1;
+		len -= end - p;
 		p = end + 1;
 	} while (len);
 

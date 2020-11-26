@@ -187,9 +187,17 @@ int sr_do_ioctl(Scsi_CD *cd, struct packet_command *cgc)
 	struct scsi_device *SDev;
 	struct scsi_sense_hdr sshdr;
 	int result, err = 0, retries = 0;
-	unsigned char sense_buffer[SCSI_SENSE_BUFFERSIZE];
+	struct request_sense *sense = cgc->sense;
 
 	SDev = cd->device;
+
+	if (!sense) {
+		sense = kmalloc(SCSI_SENSE_BUFFERSIZE, GFP_KERNEL);
+		if (!sense) {
+			err = -ENOMEM;
+			goto out;
+		}
+	}
 
       retry:
 	if (!scsi_block_when_processing_errors(SDev)) {
@@ -197,15 +205,12 @@ int sr_do_ioctl(Scsi_CD *cd, struct packet_command *cgc)
 		goto out;
 	}
 
-	memset(sense_buffer, 0, sizeof(sense_buffer));
+	memset(sense, 0, sizeof(*sense));
 	result = scsi_execute(SDev, cgc->cmd, cgc->data_direction,
-			      cgc->buffer, cgc->buflen, sense_buffer,
+			      cgc->buffer, cgc->buflen, (char *)sense,
 			      cgc->timeout, IOCTL_RETRIES, 0, NULL);
 
-	scsi_normalize_sense(sense_buffer, sizeof(sense_buffer), &sshdr);
-
-	if (cgc->sense)
-		memcpy(cgc->sense, sense_buffer, sizeof(*cgc->sense));
+	scsi_normalize_sense((char *)sense, sizeof(*sense), &sshdr);
 
 	/* Minimal error checking.  Ignore cases we know about, and report the rest. */
 	if (driver_byte(result) != 0) {
@@ -256,6 +261,8 @@ int sr_do_ioctl(Scsi_CD *cd, struct packet_command *cgc)
 
 	/* Wake up a process waiting for device */
       out:
+	if (!cgc->sense)
+		kfree(sense);
 	cgc->stat = err;
 	return err;
 }

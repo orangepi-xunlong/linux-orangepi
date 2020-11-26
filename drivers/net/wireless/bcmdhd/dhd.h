@@ -5,13 +5,13 @@
  * DHD OS, bus, and protocol modules.
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -19,7 +19,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -517,7 +517,7 @@ typedef struct {
 	uint8 dhd_dwm_enabled;
 	uint8 dhd_dwm_tbl[DHD_DWM_TBL_SIZE];
 } dhd_trf_mgmt_dwm_tbl_t;
-#endif
+#endif 
 
 #define DHD_NULL_CHK_AND_RET(cond) \
 	if (!cond) { \
@@ -604,7 +604,7 @@ extern char *dhd_log_dump_get_timestamp(void);
 #define DHD_COMMON_DUMP_PATH	"/data/misc/wifi/"
 #else
 #define DHD_COMMON_DUMP_PATH	"/installmedia/"
-#endif
+#endif 
 
 struct cntry_locales_custom {
 	char iso_abbrev[WLC_CNTRY_BUF_SZ];      /* ISO 3166-1 country abbreviation */
@@ -675,9 +675,6 @@ typedef struct dhd_pub {
 	 * please do NOT merge it back from other branches !!!
 	 */
 
-#ifdef BCMDBUS
-	struct dbus_pub *dbus;
-#endif /* BCMDBUS */
 
 	/* Internal dhd items */
 	bool up;		/* Driver up/down (to OS) */
@@ -774,7 +771,7 @@ typedef struct dhd_pub {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 	struct mutex 	wl_start_stop_lock; /* lock/unlock for Android start/stop */
 	struct mutex 	wl_softap_lock;		 /* lock/unlock for any SoftAP/STA settings */
-#endif
+#endif 
 
 #ifdef PROP_TXSTATUS
 	bool	wlfc_enabled;
@@ -914,7 +911,7 @@ typedef struct dhd_pub {
 #endif /* DHD_WMF */
 #if defined(TRAFFIC_MGMT_DWM)
 	dhd_trf_mgmt_dwm_tbl_t dhd_tm_dwm_tbl;
-#endif
+#endif 
 #ifdef DHD_L2_FILTER
 	unsigned long l2_filter_cnt;	/* for L2_FILTER ARP table timeout */
 #endif /* DHD_L2_FILTER */
@@ -1036,23 +1033,9 @@ typedef struct dhd_pub {
 #if defined(STAT_REPORT)
 	void *stat_report_info;
 #endif
-	char *clm_path;		/* module_param: path to clm vars file */
-	char *conf_path;		/* module_param: path to config vars file */
+	char		*clm_path;		/* module_param: path to clm vars file */
+	char		*conf_path;		/* module_param: path to config vars file */
 	struct dhd_conf *conf;	/* Bus module handle */
-	void *adapter;			/* adapter information, interrupt, fw path etc. */
-#ifdef BCMDBUS
-	bool dhd_remove;
-#endif /* BCMDBUS */
-#if defined(WL_WIRELESS_EXT)
-#if defined(WL_ESCAN)
-	void *escan;
-#else
-	void *iscan;
-#endif
-#endif
-#ifdef WL_EXT_IAPSTA
-	void *iapsta_params;
-#endif
 } dhd_pub_t;
 
 typedef struct {
@@ -1372,36 +1355,12 @@ typedef enum dhd_ioctl_recieved_status
  */
 void dhd_net_if_lock(struct net_device *dev);
 void dhd_net_if_unlock(struct net_device *dev);
-#if defined(MULTIPLE_SUPPLICANT)
-extern void wl_android_post_init(void); // terence 20120530: fix critical section in dhd_open and dhdsdio_probe
-#endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) && defined(MULTIPLE_SUPPLICANT)
-extern struct mutex _dhd_mutex_lock_;
-#define DHD_MUTEX_IS_LOCK_RETURN() \
-	if (mutex_is_locked(&_dhd_mutex_lock_) != 0) { \
-		printf("%s : probe is already running! return.\n", __FUNCTION__); \
-		return 0; \
-	}
-#define DHD_MUTEX_LOCK() \
-	do { \
-		if (mutex_is_locked(&_dhd_mutex_lock_) == 0) { \
-			printf("%s : no mutex held. set lock\n", __FUNCTION__); \
-		} else { \
-			printf("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__); \
-		} \
-		mutex_lock(&_dhd_mutex_lock_); \
-	} while (0)
-#define DHD_MUTEX_UNLOCK() \
-	do { \
-		mutex_unlock(&_dhd_mutex_lock_); \
-		printf("%s : the lock is released.\n", __FUNCTION__); \
-	} while (0)
-#else
-#define DHD_MUTEX_IS_LOCK_RETURN(a)	do {} while (0)
-#define DHD_MUTEX_LOCK(a)	do {} while (0)
-#define DHD_MUTEX_UNLOCK(a)	do {} while (0)
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) && 1
+extern struct mutex _dhd_sdio_mutex_lock_;
 #endif
+#endif /* MULTIPLE_SUPPLICANT */
 
 typedef enum dhd_attach_states
 {
@@ -1435,11 +1394,7 @@ typedef enum dhd_attach_states
  * Returned structure should have bus and prot pointers filled in.
  * bus_hdrlen specifies required headroom for bus module header.
  */
-extern dhd_pub_t *dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
-#ifdef BCMDBUS
-	, void *adapter
-#endif
-);
+extern dhd_pub_t *dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen);
 #if defined(WLP2P) && defined(WL_CFG80211)
 /* To allow attach/detach calls corresponding to p2p0 interface  */
 extern int dhd_attach_p2p(dhd_pub_t *);
@@ -1753,9 +1708,6 @@ extern int dhd_event_ifdel(struct dhd_info *dhd, struct wl_event_data_if *ifeven
 	char *name, uint8 *mac);
 extern int dhd_event_ifchange(struct dhd_info *dhd, struct wl_event_data_if *ifevent,
        char *name, uint8 *mac);
-#ifdef DHD_UPDATE_INTF_MAC
-extern int dhd_op_if_update(dhd_pub_t *dhdpub, int ifidx);
-#endif /* DHD_UPDATE_INTF_MAC */
 extern struct net_device* dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 	uint8 *mac, uint8 bssidx, bool need_rtnl_lock, const char *dngl_name);
 extern int dhd_remove_if(dhd_pub_t *dhdpub, int ifidx, bool need_rtnl_lock);
@@ -1877,9 +1829,6 @@ extern uint dhd_console_ms;
 extern uint android_msg_level;
 extern uint config_msg_level;
 extern uint sd_msglevel;
-#ifdef BCMDBUS
-extern uint dbus_msglevel;
-#endif /* BCMDBUS */
 #ifdef WL_WIRELESS_EXT
 extern uint iw_msg_level;
 #endif
@@ -2045,7 +1994,7 @@ extern uint dhd_force_tx_queueing;
 #define DEFAULT_BCN_TIMEOUT            8
 #else
 #define DEFAULT_BCN_TIMEOUT            4
-#endif
+#endif 
 
 #ifndef CUSTOM_BCN_TIMEOUT
 #define CUSTOM_BCN_TIMEOUT             DEFAULT_BCN_TIMEOUT
@@ -2090,9 +2039,7 @@ extern char fw_path2[MOD_PARAM_PATHLEN];
 
 /* Flag to indicate if we should download firmware on driver load */
 extern uint dhd_download_fw_on_driverload;
-#ifndef BCMDBUS
 extern int allow_delay_fwdl;
-#endif /* !BCMDBUS */
 
 extern int dhd_process_cid_mac(dhd_pub_t *dhdp, bool prepost);
 extern int dhd_write_file(const char *filepath, char *buf, int buf_len);
@@ -2118,7 +2065,7 @@ static INLINE int dhd_check_module_mac(dhd_pub_t *dhdp) { return 0; }
 
 #if defined(READ_MACADDR) || defined(WRITE_MACADDR) || defined(GET_MAC_FROM_OTP)
 #define DHD_USE_CISINFO
-#endif
+#endif 
 
 #ifdef DHD_USE_CISINFO
 int dhd_read_cis(dhd_pub_t *dhdp);
@@ -2287,12 +2234,6 @@ extern void dhd_os_general_spin_unlock(dhd_pub_t *pub, unsigned long flags);
 
 extern void dhd_dump_to_kernelog(dhd_pub_t *dhdp);
 
-#ifdef BCMDBUS
-extern uint dhd_get_rxsz(dhd_pub_t *pub);
-extern void dhd_set_path(dhd_pub_t *pub);
-extern void dhd_bus_dump(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf);
-extern void dhd_bus_clearcounts(dhd_pub_t *dhdp);
-#endif /* BCMDBUS */
 
 #ifdef DHD_L2_FILTER
 extern int dhd_get_parp_status(dhd_pub_t *dhdp, uint32 idx);
@@ -2342,7 +2283,7 @@ void custom_rps_map_clear(struct netdev_rx_queue *queue);
 #define RPS_CPUS_MASK_P2P "6"
 #define RPS_CPUS_MASK_IBSS "6"
 #endif /* CONFIG_MACH_UNIVERSAL5433 || CONFIG_MACH_UNIVERSAL7420 || CONFIG_SOC_EXYNOS8890 */
-#endif
+#endif 
 
 int dhd_get_download_buffer(dhd_pub_t	*dhd, char *file_path, download_type_t component,
 	char ** buffer, int *length);

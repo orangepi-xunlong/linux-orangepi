@@ -2,13 +2,13 @@
  * Linux OS Independent Layer
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -74,7 +74,7 @@
 #if defined(STB)
 #include <linux/spinlock.h>
 extern spinlock_t l2x0_reg_lock;
-#endif
+#endif 
 
 #ifdef BCM_OBJECT_TRACE
 #include <bcmutils.h>
@@ -656,7 +656,7 @@ osl_flag_clr(osl_t *osh, uint32 mask)
 inline bool BCMFASTPATH
 #else
 bool
-#endif
+#endif 
 osl_is_flag_set(osl_t *osh, uint32 mask)
 {
 	return (osh->flags & mask);
@@ -698,7 +698,7 @@ osl_prefetch(const void *ptr)
 	__asm__ __volatile__("pld\t%0" :: "o"(*(char *)ptr) : "cc");
 }
 
-#endif
+#endif 
 
 /*
  * To avoid ACP latency, a fwder buf will be sent directly to DDR using
@@ -980,7 +980,7 @@ osl_pkt_frmfwder(osl_t *osh, void *skbs, int skb_cnt)
 #if defined(BCMDBG_CTRACE)
 	int i;
 	struct sk_buff *skb;
-#endif
+#endif 
 
 #if defined(BCMDBG_CTRACE)
 	if (skb_cnt > 1) {
@@ -999,7 +999,7 @@ osl_pkt_frmfwder(osl_t *osh, void *skbs, int skb_cnt)
 		ADD_CTRACE(osh, skb, file, line);
 #endif /* BCMDBG_CTRACE */
 	}
-#endif
+#endif 
 
 	atomic_add(skb_cnt, &osh->cmn->pktalloced);
 }
@@ -1928,7 +1928,7 @@ osl_assert(const char *exp, const char *file, int line)
 		break;
 	}
 }
-#endif
+#endif 
 
 void
 osl_delay(uint usec)
@@ -2222,7 +2222,7 @@ inline void osl_pcie_rreg(osl_t *osh, ulong addr, void *v, uint size)
 	if (pci_access && acp_war_enab)
 		spin_unlock_irqrestore(&l2x0_reg_lock, flags);
 }
-#endif
+#endif 
 
 #ifdef BCM_SECURE_DMA
 static void *
@@ -2689,14 +2689,12 @@ osl_pkt_orphan_partial(struct sk_buff *skb, int tsq)
 #else
 	atomic_sub(fraction, &skb->sk->sk_wmem_alloc);
 #endif /* LINUX_VERSION >= 4.13.0 */
-	skb_orphan(skb);
 }
 #endif /* LINUX_VERSION >= 3.6.0 && TSQ_MULTIPLIER */
 
 /* timer apis */
 /* Note: All timer api's are thread unsafe and should be protected with locks by caller */
 
-#ifdef REPORT_FATAL_TIMEOUTS
 osl_timer_t *
 osl_timer_init(osl_t *osh, const char *name, void (*fn)(void *arg), void *arg)
 {
@@ -2781,4 +2779,3 @@ osl_timer_del(osl_t *osh, osl_timer_t *t)
 	}
 	return (TRUE);
 }
-#endif

@@ -542,4 +542,3 @@ void sunxi_mmc_init_priv_v4p10x(struct sunxi_mmc_host *host,
 	host->sunxi_mmc_hw_busy = sunxi_mmc_hw_busy_v4p10x;
 	/*sunxi_of_parse_clk_dly(host);*/
 }
-EXPORT_SYMBOL_GPL(sunxi_mmc_init_priv_v4p10x);

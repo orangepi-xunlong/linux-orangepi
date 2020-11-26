@@ -138,6 +138,7 @@ struct rhashtable_params {
 /**
  * struct rhashtable - Hash table handle
  * @tbl: Bucket table
+ * @nelems: Number of elements in table
  * @key_len: Key length for hashfn
  * @elasticity: Maximum chain length before rehash
  * @p: Configuration parameters
@@ -145,10 +146,10 @@ struct rhashtable_params {
  * @run_work: Deferred worker to expand/shrink asynchronously
  * @mutex: Mutex to protect current/future table swapping
  * @lock: Spin lock to protect walker list
- * @nelems: Number of elements in table
  */
 struct rhashtable {
 	struct bucket_table __rcu	*tbl;
+	atomic_t			nelems;
 	unsigned int			key_len;
 	unsigned int			elasticity;
 	struct rhashtable_params	p;
@@ -156,7 +157,6 @@ struct rhashtable {
 	struct work_struct		run_work;
 	struct mutex                    mutex;
 	spinlock_t			lock;
-	atomic_t			nelems;
 };
 
 /**

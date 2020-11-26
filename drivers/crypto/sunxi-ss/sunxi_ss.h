@@ -34,18 +34,9 @@
 #define SS_FLAG_AES				BIT(16)
 #define SS_FLAG_HASH			BIT(17)
 
-/*ss no support aes-gcm,so use kernel*/
-#ifdef CONFIG_ARCH_SUN8IW15
-#define SOFT_CTR_MODE_ENABLE	1
-#define NET_VPN_CRYPTO_ENABLE	1
-#endif
-
 /* Define the capability of SS controller. */
 #ifdef CONFIG_ARCH_SUN8IW6
 #define SS_CTR_MODE_ENABLE		1
-#ifndef NET_VPN_CRYPTO_ENABLE
-#define SS_CBC_MODE_ENABLE		1
-#endif
 #define SS_CTS_MODE_ENABLE		1
 #define SS_SHA224_ENABLE		1
 #define SS_SHA256_ENABLE		1
@@ -71,14 +62,12 @@
 /*ss no support aes-gcm,so use kernel*/
 #ifdef CONFIG_ARCH_SUN8IW15
 #define SOFT_CTR_MODE_ENABLE	1
-#define NET_VPN_CRYPTO_ENABLE	1
 #endif
 
 #if defined(CONFIG_ARCH_SUN50I) || defined(CONFIG_ARCH_SUN8IW11) \
 	|| defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW15) \
 	|| defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN50IW8) \
-	|| defined(CONFIG_ARCH_SUN8IW17) || defined(CONFIG_ARCH_SUN8IW18) \
-	|| defined(CONFIG_ARCH_SUN8IW16) || defined(CONFIG_ARCH_SUN8IW19)
+	|| defined(CONFIG_ARCH_SUN8IW17)
 #ifndef SOFT_CTR_MODE_ENABLE
 #define SS_CTR_MODE_ENABLE		1
 #endif
@@ -115,7 +104,7 @@
 #define SS_RSA_MAX_SIZE			(2048/8) /* in Bytes. 2048 bits */
 #endif
 
-#if defined(CONFIG_ARCH_SUN50IW8) || defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_ARCH_SUN50IW8)
 #define SS_GCM_MODE_ENABLE	1
 #define SS_DRBG_MODE_ENABLE	1
 #endif
@@ -137,13 +126,10 @@
 #endif /**/
 
 #if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW12) \
-	|| defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN8IW17)\
-	|| defined(CONFIG_ARCH_SUN8IW18)
+	|| defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN8IW17)
 #define SS_CFB_MODE_ENABLE		1
 #define SS_OFB_MODE_ENABLE		1
-#ifndef NET_VPN_CRYPTO_ENABLE
-#define SS_CBC_MODE_ENABLE		1
-#endif
+
 #define SS_SHA384_ENABLE		1
 #define SS_SHA512_ENABLE		1
 #define SS_SUPPORT_CE_V3_1		1
@@ -154,15 +140,10 @@
 #endif
 
 #if defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN50IW6) || \
-	defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW8) || \
-	defined(CONFIG_ARCH_SUN8IW16) || defined(CONFIG_ARCH_SUN50IW9) || \
-	defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW8)
 #define SS_XTS_MODE_ENABLE		1
 #define SS_CFB_MODE_ENABLE		1
 #define SS_OFB_MODE_ENABLE		1
-#ifndef NET_VPN_CRYPTO_ENABLE
-#define SS_CBC_MODE_ENABLE		1
-#endif
 #define SS_HASH_HW_PADDING		1
 #define SS_HASH_HW_PADDING_ALIGN_CASE	1
 
@@ -214,13 +195,6 @@
 #endif
 
 #define SS_ALG_PRIORITY		260
-
-#if defined(CONFIG_ARCH_SUN50IW9)
-#define WORD_ALGIN		(2)
-#else
-#define WORD_ALGIN		(0)
-#endif
-
 
 /* For debug */
 #define SS_DBG(fmt, arg...) pr_debug("%s()%d - "fmt, __func__, __LINE__, ##arg)
@@ -283,10 +257,6 @@ typedef struct ce_new_task_desc {
 } ce_new_task_desc_t;
 
 #endif
-struct ce_scatter_mapping {
-	void *virt_addr;
-	u32 data_len;
-};
 
 typedef struct {
 	u32 dir;
@@ -300,7 +270,6 @@ typedef struct {
 	u32 has_padding;
 	u8 *padding;
 	struct scatterlist *last_sg;
-	struct ce_scatter_mapping mapping[CE_SCATTERS_PER_TASK];
 #endif
 } ss_dma_info_t;
 

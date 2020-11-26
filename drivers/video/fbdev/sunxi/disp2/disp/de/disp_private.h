@@ -12,9 +12,7 @@
 #define _DISP_PRIVATE_H_
 
 #include "disp_features.h"
-#if defined(DE_VERSION_V33X) || defined(CONFIG_ARCH_SUN50IW9)
-#include "./lowlevel_v33x/disp_al.h"
-#elif defined(CONFIG_ARCH_SUN50IW1)
+#if defined(CONFIG_ARCH_SUN50IW1)
 #include "./lowlevel_sun50iw1/disp_al.h"
 #elif defined(CONFIG_ARCH_SUN50IW2)
 #include "./lowlevel_v2x/disp_al.h"
@@ -28,13 +26,9 @@
 #include "./lowlevel_v2x/disp_al.h"
 #elif defined(CONFIG_ARCH_SUN8IW15)
 #include "./lowlevel_v2x/disp_al.h"
-#elif defined(CONFIG_ARCH_SUN50IW10)
-#include "./lowlevel_v2x/disp_al.h"
 #elif defined(CONFIG_ARCH_SUN8IW6)
 #include "./lowlevel_v2x/disp_al.h"
-#elif defined(CONFIG_ARCH_SUN8IW7)
-#include "./lowlevel_sun8iw7/disp_al.h"
-#elif defined(CONFIG_ARCH_SUN8IW17)
+#elif defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN8IW17)
 #include "./lowlevel_v2x/disp_al.h"
 #elif defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN50IW6)
 #include "./lowlevel_v3x/disp_al.h"
@@ -118,14 +112,6 @@ struct disp_format_attr {
 	unsigned int div;
 };
 
-struct disp_irq_info {
-	u32 sel; /* select id of disp or wb */
-	u32 irq_flag;
-	void *ptr;
-	s32 (*irq_handler)(u32 sel, u32 irq_flag, void *ptr);
-};
-
-
 extern struct disp_device *disp_get_lcd(u32 disp);
 
 extern struct disp_device *disp_get_hdmi(u32 disp);
@@ -156,7 +142,7 @@ extern s32 disp_exit_vga(void);
 extern s32 disp_init_vdpo(struct disp_bsp_init_para *para);
 extern s32 disp_init_edp(struct disp_bsp_init_para *para);
 
-extern s32 disp_init_feat(struct disp_feat_init *feat_init);
+extern s32 disp_init_feat(void);
 extern s32 disp_exit_feat(void);
 extern s32 disp_init_mgr(struct disp_bsp_init_para *para);
 extern s32 disp_exit_mgr(void);
@@ -167,7 +153,6 @@ extern s32 disp_exit_smbl(void);
 extern s32 disp_init_capture(struct disp_bsp_init_para *para);
 extern s32 disp_exit_capture(void);
 
-#ifdef CONFIG_EINK_PANEL_USED
 extern s32 disp_init_eink(struct disp_bsp_init_para *para);
 extern s32 disp_exit_eink(void);
 extern s32 write_edma(struct disp_eink_manager *manager);
@@ -176,7 +161,6 @@ extern void disp_exit_format_convert_manager(void);
 
 extern struct disp_eink_manager *disp_get_eink_manager(unsigned int disp);
 extern int eink_display_one_frame(struct disp_eink_manager *manager);
-#endif
 extern void sync_event_proc(u32 disp, bool timeout);
 
 #include "disp_device.h"
@@ -189,11 +173,4 @@ struct dmabuf_item *disp_dma_map(int fd);
 void disp_dma_unmap(struct dmabuf_item *item);
 s32 disp_set_fb_info(struct fb_address_transfer *fb, bool left_eye);
 s32 disp_set_fb_base_on_depth(struct fb_address_transfer *fb);
-extern s32 disp_init_rotation_sw(struct disp_bsp_init_para *para);
-extern struct disp_rotation_sw *disp_get_rotation_sw(u32 disp);
-
-s32 disp_init_irq_util(u32 irq_no);
-s32 disp_register_irq(u32 id, struct disp_irq_info *irq_info);
-s32 disp_unregister_irq(u32 id, struct disp_irq_info *irq_info);
-
 #endif

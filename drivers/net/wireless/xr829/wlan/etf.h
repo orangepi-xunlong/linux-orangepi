@@ -25,9 +25,6 @@
 #define  ETF_QUEUEMODE  1
 #define  ETF_QUEUE_TIMEOUT 50 /* about 2s.*/
 
-int xradio_set_etfcli_data(int value, int index);
-int xradio_etfcli_data_init(void);
-
 #define  ADAPTER_RX_BUF_LEN  (528*3) /* pay respect for SDIO_BLOCK_SIZE*/
 #if (ETF_QUEUEMODE)
 #define  ADAPTER_ITEM_MAX    (32)
@@ -87,37 +84,6 @@ struct etf_sdd_req {
 	u32    sdd_cmd;
 };
 
-typedef enum
-{
-    ETF_CHANNEL_BANDWIDTH_20MHz,
-    ETF_CHANNEL_BANDWIDTH_10MHz,
-    ETF_CHANNEL_BANDWIDTH_40MHz
-} ETF_CHANNEL_BANDWIDTH_T;
-
-typedef enum
-{
-    ETF_SUB_CHANNEL_UPPER,
-    ETF_SUB_CHANNEL_LOWER
-} ETF_SUB_CHANNEL_T;
-
-typedef struct ETFCLI_PAR_S {
-	int g_iRateIndex;       //0
-	int g_iGnModeForce;     //1
-	int channel;            //3
-	int mode;               //4
-	int reat;               //5
-	int bandwidth;          //6
-	int subchannel;         //7
-} ETFCLI_PAR_T;
-
-typedef struct CLI_PARAM_SAVE_REQ {
-	u16 Msglen;
-	u16 MsgID;
-	int result;
-	int value;
-	int index;
-} CLI_PARAM_SAVE_T;
-
 /* ETF driver cmd defines */
 #define  ETF_DRIVER_CMD_START_ID  (ETF_REQ_BASE + 0x03F0)
 #define  ETF_GET_API_CONTEXT_ID   (ETF_REQ_BASE + 0x03F8)
@@ -130,8 +96,6 @@ typedef struct CLI_PARAM_SAVE_REQ {
 #define  ETF_SOFT_RESET_REQ_ID    (ETF_REQ_BASE + 0x03FF)
 #define  ETF_DRIVER_IND_ID        (ETF_IND_BASE + 0x03FF)
 #define  ETF_GET_SDD_POWER_DEFT   (ETF_REQ_BASE + 0x1FFF)
-#define  ETF_SET_CLI_PAR_DEFT     (ETF_REQ_BASE + 0x03E2)
-#define  ETF_GET_CLI_PAR_DEFT     (ETF_REQ_BASE + 0x03E1)
 
 #define  FLAG_GET_SDD_ALL         0x1
 struct get_sdd_param_req {
@@ -146,19 +110,6 @@ struct get_sdd_result {
 	u32    result;
 	u32    length;
 	/* sdd data follow */
-};
-
-struct get_cli_data_req {
-	u16    len;
-	u16    id;
-	u32    result;
-};
-
-struct get_cli_data_result {
-	u16          len;
-	u16          id;
-	u32          result;
-	u32          length;
 };
 
 struct etf_api_context_req {

@@ -30,27 +30,24 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/clk/sunxi.h>
 #include <linux/pm_runtime.h>
-#include <linux/dma-mapping.h>
-#include <linux/dmaengine.h>
-#include <linux/dmapool.h>
-#include <asm/uaccess.h>
-#include <linux/time.h>
+
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 
 #include "i2c-sunxi.h"
-#include <linux/regulator/consumer.h>
 
 /* For debug */
-#define I2C_ERR(fmt, arg...) pr_err("%s()%d - "fmt, __func__, __LINE__, ##arg)
+#define I2C_EXIT()	pr_debug("%s()%d - %s\n", __func__, __LINE__, "Exit")
+#define I2C_ENTER()	pr_debug("%s()%d - %s\n", __func__, __LINE__, "Enter ...")
+#define I2C_DBG(fmt, arg...)	pr_debug("%s()%d - "fmt, __func__, __LINE__, ##arg)
+#define I2C_ERR(fmt, arg...)	pr_warn("%s()%d - "fmt, __func__, __LINE__, ##arg)
 
-static u32 debug_mask = 1;
-#define dprintk(level_mask, fmt, arg...)				\
-do {									\
-	if (unlikely(debug_mask & level_mask))				\
-		pr_warn("%s()%d - "fmt, __func__, __LINE__, ##arg);	\
-} while (0)
+#ifndef CONFIG_SUNXI_I2C_PRINT_TRANSFER_INFO
+static int bus_transfer_dbg = -1;
+module_param_named(transfer_debug, bus_transfer_dbg,
+			int, S_IRUGO | S_IWUSR | S_IWGRP);
+#endif
 
 #define SUNXI_I2C_OK      0
 #define SUNXI_I2C_FAIL   -1
@@ -58,9 +55,7 @@ do {									\
 #define SUNXI_I2C_SFAIL  -3  /* start fail */
 #define SUNXI_I2C_TFAIL  -4  /* stop  fail */
 
-#define DMA_THRESHOLD	32
-#define MAX_FIFO	32
-#define DMA_TIMEOUT	1000
+static int twi_used_mask;
 
 /* I2C transfer status */
 enum {
@@ -69,16 +64,7 @@ enum {
 	I2C_XFER_RUNNING = 0x4,
 };
 
-struct sunxi_i2c_dma {
-	struct dma_chan		*chan;
-	dma_addr_t		dma_buf;
-	unsigned int		dma_len;
-	enum dma_transfer_direction dma_transfer_dir;
-	enum dma_data_direction dma_data_dir;
-};
-
 struct sunxi_i2c {
-	struct platform_device *pdev;
 	int			bus_num;
 	unsigned int		status; /* start, running, idle */
 	struct i2c_adapter	adap;
@@ -86,7 +72,6 @@ struct sunxi_i2c {
 
 	spinlock_t		lock; /* syn */
 	wait_queue_head_t	wait;
-	struct completion	cmd_complete;
 
 	struct i2c_msg		*msg;
 	unsigned int		msg_num;
@@ -99,42 +84,10 @@ struct sunxi_i2c {
 	int			irq;
 	unsigned int		debug_state; /* log the twi machine state */
 
-	struct resource		*res;
 	void __iomem		*base_addr;
 
 	struct pinctrl		*pctrl;
-	unsigned int		twi_drv_used;
-	unsigned int		no_suspend;
-	unsigned int		pkt_interval;
-
-	unsigned char		result;
-	struct sunxi_i2c_dma	*dma_tx;
-	struct sunxi_i2c_dma	*dma_rx;
-	struct sunxi_i2c_dma	*dma_using;
-
 };
-
-#if (!defined(CONFIG_ARCH_SUN8IW16) && !defined(CONFIG_ARCH_SUN8IW19))
-void dump_reg(struct sunxi_i2c *i2c, u32 offset, u32 len)
-{
-	u32 i;
-	u8 buf[64], cnt = 0;
-
-	for (i = 0; i < len; i = i + REG_INTERVAL) {
-		if (i%HEXADECIMAL == 0)
-			cnt += sprintf(buf + cnt, "0x%08x: ",
-					(u32)(i2c->res->start + offset + i));
-
-		cnt += sprintf(buf + cnt, "%08x ",
-				readl(i2c->base_addr + offset + i));
-
-		if (i%HEXADECIMAL == REG_CL) {
-			pr_warn("%s\n", buf);
-			cnt = 0;
-		}
-	}
-}
-#endif
 
 /* clear the interrupt flag */
 static inline void twi_clear_irq_flag(void __iomem *base_addr)
@@ -203,28 +156,21 @@ static inline void twi_disable_irq(void __iomem *base_addr)
 	writel(reg_val, base_addr + TWI_CTL_REG);
 }
 
-static inline void
-twi_disable(void __iomem *base_addr, unsigned int reg, unsigned int mask)
+static inline void twi_disable_bus(void __iomem *base_addr)
 {
-	unsigned int reg_val = readl(base_addr + reg);
+	unsigned int reg_val = readl(base_addr + TWI_CTL_REG);
 
-	reg_val &= ~mask;
-	writel(reg_val, base_addr + reg);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", reg,
-			readl(base_addr + reg));
+	reg_val &= ~TWI_CTL_BUSEN;
+	writel(reg_val, base_addr + TWI_CTL_REG);
 }
 
-static inline void
-twi_enable(void __iomem *base_addr, unsigned int reg, unsigned int mask)
+static inline void twi_enable_bus(void __iomem *base_addr)
 {
-	unsigned int reg_val = readl(base_addr + reg);
+	unsigned int reg_val = readl(base_addr + TWI_CTL_REG);
 
-	reg_val |= mask;
-	writel(reg_val, base_addr + reg);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", reg,
-			readl(base_addr + reg));
+	reg_val |= TWI_CTL_BUSEN;
+	writel(reg_val, base_addr + TWI_CTL_REG);
 }
-
 
 /* trigger start signal, the start bit will be cleared automatically */
 static inline void twi_set_start(void __iomem *base_addr)
@@ -304,47 +250,15 @@ static inline unsigned int twi_query_irq_status(void __iomem *base_addr)
  * clk_n: clock divider factor n
  * clk_m: clock divider factor m
  */
-static void twi_clk_write_reg(struct sunxi_i2c *i2c, unsigned int reg_clk,
-		unsigned int sclk_freq,
-		unsigned char clk_m, unsigned char clk_n,
-		unsigned int mask_clk_m, unsigned int mask_clk_n)
+static inline void twi_clk_write_reg(unsigned int clk_n, unsigned int clk_m,
+						void __iomem *base_addr)
 {
-	unsigned int reg_val = readl(i2c->base_addr + reg_clk);
-#if defined(CONFIG_ARCH_SUN50IW10)
-	unsigned int duty;
-#endif
-	dprintk(DEBUG_INFO2, "[i2c%d] reg_clk = 0x%x, clk_m = %u, clk_n = %u,"
-			"mask_clk_m = %x, mask_clk_n = %x\n", i2c->bus_num,
-			reg_clk, clk_m, clk_n, mask_clk_m, mask_clk_n);
-	if (reg_clk == TWI_DRIVER_BUSC) {
-		reg_val &= ~(mask_clk_m | mask_clk_n);
-		reg_val |= ((clk_m | (clk_n << 4)) << 8);
-#if defined(CONFIG_ARCH_SUN50IW10)
-		duty = TWI_DRV_CLK_DUTY;
-		if (sclk_freq > STANDDARD_FREQ)
-			reg_val |= duty;
-		else
-			reg_val &= ~duty;
-#endif
-		writel(reg_val, i2c->base_addr + reg_clk);
-		dprintk(DEBUG_INFO2, "[i2c%d] reg: 0x%x value: 0x%x\n",
-				i2c->bus_num, reg_clk,
-				readl(i2c->base_addr + reg_clk));
-	} else {
-		reg_val &= ~(mask_clk_m | mask_clk_n);
-		reg_val |= ((clk_m  << 3) | clk_n);
-#if defined(CONFIG_ARCH_SUN50IW10)
-		duty = TWI_CLK_DUTY;
-		if (sclk_freq > STANDDARD_FREQ)
-			reg_val |= duty;
-		else
-			reg_val &= ~duty;
-#endif
-		writel(reg_val, i2c->base_addr + reg_clk);
-		dprintk(DEBUG_INFO2, "[i2c%d] reg: 0x%x value: 0x%x\n",
-				i2c->bus_num, reg_clk,
-				readl(i2c->base_addr + reg_clk));
-	}
+	unsigned int reg_val = readl(base_addr + TWI_CLK_REG);
+
+	I2C_DBG("%s: clk_n = %d, clk_m = %d\n", __func__, clk_n, clk_m);
+	reg_val &= ~(TWI_CLK_DIV_M | TWI_CLK_DIV_N);
+	reg_val |= (clk_n | (clk_m << 3));
+	writel(reg_val, base_addr + TWI_CLK_REG);
 }
 
 /*
@@ -355,20 +269,16 @@ static void twi_clk_write_reg(struct sunxi_i2c *i2c, unsigned int reg_clk,
 * Foscl is clock SCL;100KHz or 400KHz
 *
 * clk_in: apb clk clock
-* sclk_freq: freqence to set in HZ
+* sclk_req: freqence to set in HZ
 */
-static int twi_set_clock(struct sunxi_i2c *i2c, unsigned int reg_clk,
-		unsigned int clk_in, unsigned int sclk_freq,
-		unsigned int mask_clk_m, unsigned int mask_clk_n)
+static int twi_set_clock(unsigned int clk_in, unsigned int sclk_req,
+						void __iomem *base_addr)
 {
-	/*
 	unsigned int clk_m = 0;
 	unsigned int clk_n = 0;
 	unsigned int _2_pow_clk_n = 1;
-	*/
-	unsigned char clk_m = 0, clk_n = 0, _2_pow_clk_n = 1;
 	unsigned int src_clk      = clk_in/10;
-	unsigned int divider      = src_clk/sclk_freq;  /* 400khz or 100khz */
+	unsigned int divider      = src_clk/sclk_req;  /* 400khz or 100khz */
 	unsigned int sclk_real    = 0;      /* the real clock frequency */
 
 	if (divider == 0) {
@@ -387,7 +297,7 @@ static int twi_set_clock(struct sunxi_i2c *i2c, unsigned int reg_clk,
 		while (clk_m < 16) { /* 4bits max value is 16 */
 			/* src_clk/((m+1)*2^n) */
 			sclk_real = src_clk/(clk_m + 1)/_2_pow_clk_n;
-			if (sclk_real <= sclk_freq)
+			if (sclk_real <= sclk_req)
 				goto set_clk;
 			 else
 				clk_m++;
@@ -397,18 +307,18 @@ static int twi_set_clock(struct sunxi_i2c *i2c, unsigned int reg_clk,
 	}
 
 set_clk:
-	twi_clk_write_reg(i2c, reg_clk, sclk_freq, clk_m, clk_n, mask_clk_m, mask_clk_n);
+	twi_clk_write_reg(clk_n, clk_m, base_addr);
+
 	return 0;
 }
 
 /* soft reset twi */
-static inline void
-twi_soft_reset(void __iomem *base_addr, unsigned int reg, unsigned int mask)
+static inline void twi_soft_reset(void __iomem *base_addr)
 {
-	unsigned int reg_val = readl(base_addr + reg);
+	unsigned int reg_val = readl(base_addr + TWI_SRST_REG);
 
-	reg_val |= mask;
-	writel(reg_val, base_addr + reg);
+	reg_val |= TWI_SRST_SRST;
+	writel(reg_val, base_addr + TWI_SRST_REG);
 }
 
 /* Enhanced Feature Register */
@@ -425,6 +335,11 @@ static inline void twi_set_efr(void __iomem *base_addr, unsigned int efr)
 static int sunxi_i2c_xfer_complete(struct sunxi_i2c *i2c, int code);
 static int
 sunxi_i2c_do_xfer(struct sunxi_i2c *i2c, struct i2c_msg *msgs, int num);
+
+static int twi_chan_is_enable(int _ch)
+{
+	return twi_used_mask & SUNXI_TWI_CHAN_MASK(_ch);
+}
 
 static int twi_select_gpio_state(struct pinctrl *pctrl, char *name, u32 no)
 {
@@ -448,12 +363,15 @@ static int twi_select_gpio_state(struct pinctrl *pctrl, char *name, u32 no)
 
 static int twi_request_gpio(struct sunxi_i2c *i2c)
 {
-	dprintk(DEBUG_INIT, "[i2c%d] init name: %s\n", i2c->bus_num,
-			i2c->adap.dev.parent->init_name);
+	I2C_DBG("Pinctrl init %d ... [%s]\n",
+			i2c->bus_num, i2c->adap.dev.parent->init_name);
+
+	if (!twi_chan_is_enable(i2c->bus_num))
+		return -1;
 
 	i2c->pctrl = devm_pinctrl_get(i2c->adap.dev.parent);
 	if (IS_ERR(i2c->pctrl)) {
-		I2C_ERR("[i2c%d] pinctrl_get failed, return %ld\n",
+		I2C_ERR("TWI%d devm_pinctrl_get() failed! return %ld\n",
 				i2c->bus_num, PTR_ERR(i2c->pctrl));
 		return -1;
 	}
@@ -519,7 +437,7 @@ static int twi_stop(void __iomem *base_addr, int bus_num)
 		&& (--timeout))
 		;
 	if (timeout == 0) {
-		I2C_ERR("[i2c%d] i2c state(0x%0x) isn't idle(0xf8)\n",
+		I2C_ERR("[i2c%d] i2c state(0x%08x) isn't idle(0xf8)\n",
 				bus_num, readl(base_addr + TWI_STAT_REG));
 		return SUNXI_I2C_TFAIL;
 	}
@@ -531,7 +449,7 @@ static int twi_stop(void __iomem *base_addr, int bus_num)
 		;
 
 	if (timeout == 0) {
-		I2C_ERR("[i2c%d] i2c lcr(0x%0x) isn't idle(0x3a)\n",
+		I2C_ERR("[i2c%d] i2c lcr(0x%08x) isn't idle(0x3a)\n",
 				bus_num, readl(base_addr + TWI_LCR_REG));
 		return SUNXI_I2C_TFAIL;
 	}
@@ -550,7 +468,7 @@ static unsigned int twi_get_sda(void __iomem *base_addr)
 }
 
 /* set SCL level(high/low), only when SCL enable */
-static void twi_set_scl(void __iomem *base_addr, unsigned char hi_lo)
+static void twi_set_scl(void __iomem *base_addr, unsigned int hi_lo)
 {
 	unsigned int reg_val = readl(base_addr + TWI_LCR_REG);
 
@@ -561,7 +479,7 @@ static void twi_set_scl(void __iomem *base_addr, unsigned char hi_lo)
 }
 
 /* enable SDA or SCL */
-static void twi_enable_lcr(void __iomem *base_addr, unsigned char sda_scl)
+static void twi_enable_lcr(void __iomem *base_addr, unsigned int sda_scl)
 {
 	unsigned int reg_val = readl(base_addr + TWI_LCR_REG);
 
@@ -575,7 +493,7 @@ static void twi_enable_lcr(void __iomem *base_addr, unsigned char sda_scl)
 }
 
 /* disable SDA or SCL */
-static void twi_disable_lcr(void __iomem *base_addr, unsigned char sda_scl)
+static void twi_disable_lcr(void __iomem *base_addr, unsigned int sda_scl)
 {
 	unsigned int reg_val = readl(base_addr + TWI_LCR_REG);
 
@@ -591,7 +509,10 @@ static void twi_disable_lcr(void __iomem *base_addr, unsigned char sda_scl)
 /* send 9 clock to release sda */
 static int twi_send_clk_9pulse(void __iomem *base_addr, int bus_num)
 {
-	char twi_scl = 1, low = 0, high = 1, cycle = 0;
+	int twi_scl = 1;
+	int low = 0;
+	int high = 1;
+	int cycle = 0;
 	unsigned char status;
 
 	/* enable scl control */
@@ -625,21 +546,10 @@ static int twi_send_clk_9pulse(void __iomem *base_addr, int bus_num)
 	return status;
 }
 
-static int twi_regulator_request(struct sunxi_i2c_platform_data *pdata,
-			struct device *dev)
+static int twi_regulator_request(struct sunxi_i2c_platform_data *pdata)
 {
 	struct regulator *regu = NULL;
 
-	if (pdata->regulator != NULL)
-		return 0;
-
-#ifdef CONFIG_SUNXI_REGULATOR_DT
-	regu = regulator_get(dev, "twi");
-	if (IS_ERR(regu)) {
-		I2C_ERR("[i2c%d] get supply failed!\n", pdata->bus_num);
-		return -EPROBE_DEFER;
-	}
-#else
 	/* Consider "n*" as nocare. Support "none", "nocare", "null", "" etc. */
 	if ((pdata->regulator_id[0] == 'n') || (pdata->regulator_id[0] == 0))
 		return 0;
@@ -650,7 +560,6 @@ static int twi_regulator_request(struct sunxi_i2c_platform_data *pdata,
 				pdata->bus_num, pdata->regulator_id);
 		return -1;
 	}
-#endif
 	pdata->regulator = regu;
 
 	return 0;
@@ -666,871 +575,6 @@ static int twi_regulator_release(struct sunxi_i2c_platform_data *pdata)
 
 	return 1;
 }
-
-static unsigned int twi_drv_query_irq_status(void __iomem *base_addr)
-{
-	unsigned int reg_val = readl(base_addr + TWI_DRIVER_INTC);
-
-	return (reg_val & TWI_DRV_STAT_MASK);
-}
-
-static void twi_drv_clear_irq_flag(u32 pending_bit, void __iomem *base_addr)
-{
-	u32 reg_val = readl(base_addr + TWI_DRIVER_INTC);
-
-	pending_bit &= TWI_DRV_STAT_MASK;
-	reg_val |= pending_bit;
-	writel(reg_val, base_addr + TWI_DRIVER_INTC);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_INTC,
-			readl(base_addr + TWI_DRIVER_INTC));
-}
-
-static void i2c_drv_clear_pending(void __iomem *base_addr)
-{
-	u32 reg_val = readl(base_addr + TWI_DRIVER_INTC);
-
-	reg_val |= TWI_DRV_STAT_MASK;
-	writel(reg_val, base_addr + TWI_DRIVER_INTC);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_INTC,
-			readl(base_addr + TWI_DRIVER_INTC));
-}
-
-/* start i2c transfer */
-static void i2c_start_xfer(void __iomem *base_addr)
-{
-	u32 reg_val = readl(base_addr + TWI_DRIVER_CTRL);
-
-	reg_val |= START_TRAN;
-	writel(reg_val, base_addr + TWI_DRIVER_CTRL);
-}
-
-/*
- * send DMA RX Req when the data byte number in RECV_FIFO reaches RX_TRIG
- * or Read Packet Tansmission completed with RECV_FIFO not empty
- */
-static void i2c_set_rx_trig_level(u32 val, void __iomem *base_addr)
-{
-	u32 mask = TRIG_MASK;
-	u32 reg_val = readl(base_addr + TWI_DRIVER_DMAC);
-
-	val = (val & mask) << 16;
-	reg_val &= ~(mask << 16);
-	reg_val |= val;
-	writel(reg_val, base_addr + TWI_DRIVER_DMAC);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_DMAC,
-			readl(base_addr + TWI_DRIVER_DMAC));
-}
-
-/* bytes be send as slave device reg address */
-static void i2c_set_packet_addr_byte(u32 val, void __iomem *base_addr)
-{
-	u32 mask = ADDR_BYTE;
-	u32 reg_val = readl(base_addr + TWI_DRIVER_FMT);
-
-	reg_val &= ~mask;
-	val = (val << 16) & mask;
-	reg_val |= val;
-	writel(reg_val, base_addr + TWI_DRIVER_FMT);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_FMT,
-			readl(base_addr + TWI_DRIVER_FMT));
-}
-
-/* bytes be send/received as data */
-static void i2c_set_packet_data_byte(u32 val, void __iomem *base_addr)
-{
-	u32 mask = DATA_BYTE;
-	u32 reg_val = readl(base_addr + TWI_DRIVER_FMT);
-
-	reg_val &= ~mask;
-	val &= mask;
-	reg_val |= val;
-	writel(reg_val, base_addr + TWI_DRIVER_FMT);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_FMT,
-			readl(base_addr + TWI_DRIVER_FMT));
-
-}
-
-/* interval between each packet in 32*Fscl cycles */
-static void i2c_set_packet_interval(u32 val, void __iomem *base_addr)
-{
-	u32 mask = INTERVAL_MASK;
-	u32 reg_val = readl(base_addr + TWI_DRIVER_CFG);
-
-	reg_val &= ~mask;
-	val <<= 16;
-	val &= mask;
-	reg_val |= val;
-	writel(reg_val, base_addr + TWI_DRIVER_CFG);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_CFG,
-			readl(base_addr + TWI_DRIVER_CFG));
-}
-
-/* FIFO data be transmitted as PACKET_CNT packets in current format */
-static void i2c_set_packet_cnt(u32 val, void __iomem *base_addr)
-{
-	u32 mask = PACKET_MASK;
-	u32 reg_val = readl(base_addr + TWI_DRIVER_CFG);
-
-	reg_val &= ~mask;
-	val &= mask;
-	reg_val |= val;
-	writel(reg_val, base_addr + TWI_DRIVER_CFG);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_CFG,
-			readl(base_addr + TWI_DRIVER_CFG));
-}
-
-/* do not send slave_id +W */
-static void i2c_enable_read_tran_mode(void __iomem *base_addr)
-{
-	u32 mask = READ_TRAN;
-	u32 reg_val = readl(base_addr + TWI_DRIVER_CTRL);
-
-	reg_val |= mask;
-	writel(reg_val, base_addr + TWI_DRIVER_CTRL);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_CTRL,
-			readl(base_addr + TWI_DRIVER_CTRL));
-
-}
-
-/* send slave_id + W */
-static void i2c_disable_read_tran_mode(void __iomem *base_addr)
-{
-	u32 mask = READ_TRAN;
-	u32 reg_val = readl(base_addr + TWI_DRIVER_CTRL);
-
-	reg_val &= ~mask;
-	writel(reg_val, base_addr + TWI_DRIVER_CTRL);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_CTRL,
-			readl(base_addr + TWI_DRIVER_CTRL));
-
-}
-
-static void i2c_drv_enable_tran_irq(u32 bitmap, void __iomem *base_addr)
-{
-	u32 reg_val = readl(base_addr + TWI_DRIVER_INTC);
-
-	reg_val |= bitmap;
-	reg_val &= ~TWI_DRV_STAT_MASK;
-	writel(reg_val, base_addr + TWI_DRIVER_INTC);
-
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_INTC,
-			readl(base_addr + TWI_DRIVER_INTC));
-
-}
-
-static void i2c_drv_disable_tran_irq(u32 bitmap, void __iomem *base_addr)
-{
-	u32 reg_val = readl(base_addr + TWI_DRIVER_INTC);
-
-	reg_val &= ~bitmap;
-	reg_val &= ~TWI_DRV_STAT_MASK;
-	writel(reg_val, base_addr + TWI_DRIVER_INTC);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_INTC,
-			readl(base_addr + TWI_DRIVER_INTC));
-}
-
-static void i2c_drv_enable_dma_irq(u32 bitmap, void __iomem *base_addr)
-{
-	u32 reg_val = readl(base_addr + TWI_DRIVER_DMAC);
-
-	bitmap &= I2C_DRQEN_MASK;
-	reg_val |= bitmap;
-	writel(reg_val, base_addr + TWI_DRIVER_DMAC);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_DMAC,
-			readl(base_addr + TWI_DRIVER_DMAC));
-}
-
-static void i2c_drv_disable_dma_irq(u32 bitmap, void __iomem *base_addr)
-{
-	u32 reg_val = readl(base_addr + TWI_DRIVER_DMAC);
-
-	bitmap &= I2C_DRQEN_MASK;
-	reg_val &= ~bitmap;
-	writel(reg_val, base_addr + TWI_DRIVER_DMAC);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_DMAC,
-			readl(base_addr + TWI_DRIVER_DMAC));
-}
-
-static void
-sunxi_i2c_drv_slave_addr(struct sunxi_i2c *i2c, struct i2c_msg *msgs)
-{
-	unsigned int val = 0, cmd = 0;
-
-	/* read, default value is write */
-	if (msgs->flags & I2C_M_RD)
-		cmd = SLV_RD_CMD;
-
-	if (msgs->flags & I2C_M_TEN) {
-		/* SLV_ID | CMD | SLV_ID_X */
-		val = ((0x78 | ((msgs->addr >> 8) & 0x03)) << 9) | cmd
-			| (msgs->addr & 0xff);
-		dprintk(DEBUG_INFO2, "10bit addr\n");
-	} else {
-		val = ((msgs->addr & 0x7f) << 9) | cmd;
-		dprintk(DEBUG_INFO2, "7bit addr\n");
-	}
-
-	writel(val, i2c->base_addr + TWI_DRIVER_SLV);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_SLV,
-			readl(i2c->base_addr + TWI_DRIVER_SLV));
-
-}
-
-/* the number of data in SEND_FIFO */
-static int i2c_query_txfifo(void __iomem *base_addr)
-{
-	unsigned int reg_val;
-
-	reg_val = readl(base_addr + TWI_DRIVER_FIFOC) & SEND_FIFO_CONT;
-
-	return reg_val;
-}
-
-/* the number of data in RECV_FIFO */
-static int i2c_query_rxfifo(void __iomem *base_addr)
-{
-	unsigned int reg_val;
-
-	reg_val = readl(base_addr + TWI_DRIVER_FIFOC) & RECV_FIFO_CONT;
-	reg_val >>= 16;
-
-	return reg_val;
-}
-
-static void i2c_clear_txfifo(void __iomem *base_addr)
-{
-	unsigned int reg_val;
-
-	reg_val = readl(base_addr + TWI_DRIVER_FIFOC);
-	reg_val |= SEND_FIFO_CLEAR;
-	writel(reg_val, base_addr + TWI_DRIVER_FIFOC);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_FIFOC,
-			readl(base_addr + TWI_DRIVER_FIFOC));
-}
-
-static void i2c_clear_rxfifo(void __iomem *base_addr)
-{
-	unsigned int reg_val;
-
-	reg_val = readl(base_addr + TWI_DRIVER_FIFOC);
-	reg_val |= RECV_FIFO_CLEAR;
-	writel(reg_val, base_addr + TWI_DRIVER_FIFOC);
-	dprintk(DEBUG_INFO2, "offset: 0x%x value: 0x%x\n", TWI_DRIVER_FIFOC,
-			readl(base_addr + TWI_DRIVER_FIFOC));
-}
-
-static int i2c_sunxi_send_msgs(struct sunxi_i2c *i2c, struct i2c_msg *msgs)
-{
-	u16 i;
-	u8 time = 0xff;
-
-	dprintk(DEBUG_INFO, "[i2c%d] msgs->len = %d\n",
-			i2c->bus_num, msgs->len);
-
-	for (i = 0; i < msgs->len; i++) {
-		while ((i2c_query_txfifo(i2c->base_addr) >= MAX_FIFO) && time--)
-			;
-		if (time) {
-			writeb(msgs->buf[i], i2c->base_addr + TWI_DRIVER_SENDF);
-			dprintk(DEBUG_INFO2, "[i2c%d] writeb: Byte[%u] = 0x%x,"
-					"fifo len = %d\n",
-					i2c->bus_num, i, msgs->buf[i],
-					i2c_query_txfifo(i2c->base_addr));
-		} else {
-			I2C_ERR("[i2c%d] SEND FIFO overflow. timeout\n",
-					i2c->bus_num);
-			return -EINVAL;
-		}
-	}
-
-	return 0;
-}
-
-static unsigned int
-i2c_sunxi_recv_msgs(struct sunxi_i2c *i2c, struct i2c_msg *msgs)
-{
-	u16 i;
-	u8 time = 0xff;
-
-	dprintk(DEBUG_INFO, "[i2c%d] msgs->len = %d\n",
-			i2c->bus_num, msgs->len);
-
-	for (i = 0; i < msgs->len; i++) {
-		while (!i2c_query_rxfifo(i2c->base_addr) && time--)
-			;
-		if (time) {
-			msgs->buf[i] = readb(i2c->base_addr + TWI_DRIVER_RECVF);
-			dprintk(DEBUG_INFO1, "[i2c%d] readb: Byte[%d] = 0x%x\n",
-					i2c->bus_num, i, msgs->buf[i]);
-		} else
-			return 0;
-	}
-	return msgs->len;
-}
-
-static int sunxi_i2c_drv_core_process(struct sunxi_i2c *i2c)
-{
-	void __iomem *base_addr = i2c->base_addr;
-	unsigned long flags = 0;
-	unsigned int status, code;
-
-	spin_lock_irqsave(&i2c->lock, flags);
-
-	status = twi_drv_query_irq_status(base_addr);
-	twi_drv_clear_irq_flag(status, base_addr);
-	dprintk(DEBUG_INFO, "[i2c%d] irq status = 0x%x\n",
-			i2c->bus_num, status);
-
-	if (status & TRAN_COM_PD) {
-		i2c_drv_disable_tran_irq(TRAN_COM_INT, i2c->base_addr);
-		i2c->result = RESULT_COMPLETE;
-		wake_up(&i2c->wait);
-		dprintk(DEBUG_INFO, "[i2c%d] packet transmission completed\n",
-				i2c->bus_num);
-
-		if ((status & RX_REQ_PD) && (i2c->msg->len < DMA_THRESHOLD)) {
-			i2c_sunxi_recv_msgs(i2c, i2c->msg);
-		}
-	}
-
-	if (status & TRAN_ERR_PD) {
-		i2c_drv_disable_tran_irq(TRAN_ERR_INT, i2c->base_addr);
-		code = readl(base_addr + TWI_DRIVER_CTRL);
-		code = (code & TWI_DRV_STA) >> 16;
-		switch (code) {
-		case 0x00:
-			I2C_ERR("[i2c%d] bus error\n", i2c->bus_num);
-			break;
-		case 0x01:
-			I2C_ERR("[i2c%d] Timeout when sending 9th SCL clk\n",
-					i2c->bus_num);
-			break;
-		case 0x20:
-			I2C_ERR("[i2c%d] Address + Write bit transmitted,"
-					"ACK not received\n", i2c->bus_num);
-			break;
-		case 0x30:
-			I2C_ERR("[i2c%d] Data byte transmitted in master mode,"
-					"ACK not received\n", i2c->bus_num);
-			break;
-		case 0x38:
-			I2C_ERR("[i2c%d] Arbitration lost in address"
-					"or data byte\n", i2c->bus_num);
-			break;
-		case 0x48:
-			I2C_ERR("[i2c%d] Address + Read bit transmitted,"
-					"ACK not received\\n", i2c->bus_num);
-			break;
-		case 0x58:
-			I2C_ERR("[i2c%d] Data byte received in master mode,"
-					"ACK not received\n", i2c->bus_num);
-			break;
-		default:
-			I2C_ERR("[i2c%d] unknown error\n",
-					i2c->bus_num);
-			break;
-		}
-		i2c->msg_idx = code;
-		i2c->result = RESULT_ERR;
-		dprintk(DEBUG_INFO, "[i2c%d] packet transmission failed\n",
-				i2c->bus_num);
-		wake_up(&i2c->wait);
-		spin_unlock_irqrestore(&i2c->lock, flags);
-		return code;
-	}
-
-	spin_unlock_irqrestore(&i2c->lock, flags);
-	return 0;
-}
-
-/* Functions for DMA support */
-static void sunxi_i2c_dma_request(struct sunxi_i2c *i2c,
-						dma_addr_t phy_addr)
-{
-	struct sunxi_i2c_dma *dma_tx, *dma_rx;
-	struct dma_slave_config dma_sconfig;
-	struct device *dev = &i2c->adap.dev;
-	dma_cap_mask_t mask_tx, mask_rx;
-	int ret;
-
-	dma_tx = devm_kzalloc(dev, sizeof(*dma_tx), GFP_KERNEL);
-	dma_rx = devm_kzalloc(dev, sizeof(*dma_rx), GFP_KERNEL);
-	if (IS_ERR_OR_NULL(dma_tx) || IS_ERR_OR_NULL(dma_rx))
-		return;
-
-	dma_cap_zero(mask_tx);
-	dma_cap_set(DMA_SLAVE, mask_tx);
-	dma_tx->chan = dma_request_channel(mask_tx, NULL, NULL);
-
-	if (!dma_tx->chan) {
-		I2C_ERR("[i2c%d] can't request DMA tx channel\n", i2c->bus_num);
-		goto fail_al;
-	}
-
-	dma_sconfig.dst_addr = phy_addr + TWI_DRIVER_SENDF;
-	dma_sconfig.src_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
-	dma_sconfig.dst_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
-	dma_sconfig.src_maxburst = 16;
-	dma_sconfig.dst_maxburst = 16;
-#if defined(CONFIG_ARCH_SUN8IW16) || defined(CONFIG_ARCH_SUN8IW18)
-	dma_sconfig.slave_id = sunxi_slave_id(SUNXI_TWI_DRQ_TX(i2c->bus_num),
-			DRQSRC_SDRAM);
-#endif
-	dma_sconfig.direction = DMA_MEM_TO_DEV;
-	ret = dmaengine_slave_config(dma_tx->chan, &dma_sconfig);
-	if (ret < 0) {
-		I2C_ERR("[i2c%d] can't configure tx channel\n", i2c->bus_num);
-		goto fail_tx;
-	}
-	i2c->dma_tx = dma_tx;
-
-	dma_cap_zero(mask_rx);
-	dma_cap_set(DMA_SLAVE, mask_rx);
-	dma_rx->chan = dma_request_channel(mask_rx, NULL, NULL);
-
-	if (!dma_rx->chan) {
-		I2C_ERR("[i2c%d] can't request DMA rx channel\n", i2c->bus_num);
-		goto fail_tx;
-	}
-
-	dma_sconfig.src_addr = phy_addr + TWI_DRIVER_RECVF;
-	dma_sconfig.src_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
-	dma_sconfig.dst_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
-	dma_sconfig.src_maxburst = 16;
-	dma_sconfig.dst_maxburst = 16;
-#if defined(CONFIG_ARCH_SUN8IW16) || defined(CONFIG_ARCH_SUN8IW18)
-	dma_sconfig.slave_id = sunxi_slave_id(DRQDST_SDRAM,
-			SUNXI_TWI_DRQ_RX(i2c->bus_num));
-#endif
-	dma_sconfig.direction = DMA_DEV_TO_MEM;
-	ret = dmaengine_slave_config(dma_rx->chan, &dma_sconfig);
-	if (ret < 0) {
-		I2C_ERR("[i2c%d] can't configure rx channel\n", i2c->bus_num);
-		goto fail_rx;
-	}
-	i2c->dma_rx = dma_rx;
-
-
-	init_completion(&i2c->cmd_complete);
-	dprintk(DEBUG_INIT, "[i2c%d] using %s (tx) and %s (rx)"
-			"for DMA transfers\n", i2c->bus_num,
-			dma_chan_name(i2c->dma_tx->chan),
-			dma_chan_name(i2c->dma_rx->chan));
-
-	return;
-
-fail_rx:
-	dma_release_channel(i2c->dma_rx->chan);
-fail_tx:
-	dma_release_channel(i2c->dma_tx->chan);
-fail_al:
-	devm_kfree(dev, dma_tx);
-	devm_kfree(dev, dma_rx);
-	dprintk(DEBUG_INIT, "[i2c%d] can't use DMA, using PIO instead\n",
-			i2c->bus_num);
-}
-
-static void sunxi_i2c_dma_callback(void *arg)
-{
-	struct sunxi_i2c *i2c = (struct sunxi_i2c *)arg;
-
-	if (i2c->dma_using == i2c->dma_tx)
-		dprintk(DEBUG_INFO, "[i2c%d] dma write data end\n",
-				i2c->bus_num);
-	else if (i2c->dma_using == i2c->dma_rx)
-		dprintk(DEBUG_INFO, "[i2c%d] dma read data end\n",
-				i2c->bus_num);
-	dma_unmap_single(i2c->dma_using->chan->device->dev,
-			i2c->dma_using->dma_buf,
-			i2c->dma_using->dma_len, i2c->dma_using->dma_data_dir);
-	complete(&i2c->cmd_complete);
-}
-
-static void sunxi_i2c_dma_free(struct sunxi_i2c_dma *dma)
-{
-	dma->dma_buf = 0;
-	dma->dma_len = 0;
-	dma_release_channel(dma->chan);
-	dma->chan = NULL;
-}
-
-static int i2c_sunxi_drv_complete(struct sunxi_i2c *i2c)
-{
-	unsigned long flags = 0;
-	unsigned long timeout = 0;
-
-	timeout = wait_event_timeout(i2c->wait, i2c->result, i2c->adap.timeout);
-	if (timeout == 0) {
-		I2C_ERR("[i2c%d] twi driver xfer timeout (dev addr:0x%x)\n",
-				i2c->bus_num, i2c->msg->addr);
-#if (!defined(CONFIG_ARCH_SUN8IW16) && !defined(CONFIG_ARCH_SUN8IW19))
-		dump_reg(i2c, 0x200, 0x20);
-#endif
-		i2c_drv_disable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT
-				| RX_REQ_INT | TX_REQ_INT, i2c->base_addr);
-		i2c_drv_disable_dma_irq(DMA_TX | DMA_RX, i2c->base_addr);
-		return -ETIME;
-	} else if (i2c->result == RESULT_ERR) {
-/*		I2C_ERR("[i2c%d] incomplete xfer"
-				"(status: 0x%x, dev addr: 0x%x)\n",
-				i2c->bus_num, i2c->msg_idx, i2c->msg->addr); */
-#if (!defined(CONFIG_ARCH_SUN8IW16) && !defined(CONFIG_ARCH_SUN8IW19))
-		dump_reg(i2c, 0x200, 0x20);
-#endif
-		i2c_drv_disable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT
-				| RX_REQ_INT | TX_REQ_INT, i2c->base_addr);
-		i2c_drv_disable_dma_irq(DMA_TX | DMA_RX, i2c->base_addr);
-		return -ECOMM;
-	}
-
-	dprintk(DEBUG_INFO, "[i2c%d] xfer complete\n", i2c->bus_num);
-
-	spin_lock_irqsave(&i2c->lock, flags);
-	i2c->result = 0;
-	spin_unlock_irqrestore(&i2c->lock, flags);
-
-	return 0;
-}
-
-static int i2c_sunxi_dma_xfer(struct sunxi_i2c *i2c, unsigned char *buf)
-{
-	unsigned long time_left;
-	struct sunxi_i2c_dma *dma = i2c->dma_using;
-	struct dma_async_tx_descriptor *dma_desc;
-	struct device *chan_dev = dma->chan->device->dev;
-
-	dma->dma_buf = dma_map_single(chan_dev, buf,
-					dma->dma_len, dma->dma_data_dir);
-	if (dma_mapping_error(chan_dev, dma->dma_buf)) {
-		I2C_ERR("DMA mapping failed\n");
-		goto err_map;
-	}
-	dma_desc = dmaengine_prep_slave_single(dma->chan, dma->dma_buf,
-					dma->dma_len, dma->dma_transfer_dir,
-					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
-	if (!dma_desc) {
-		I2C_ERR("Not able to get desc for DMA xfer\n");
-		goto err_desc;
-	}
-	dma_desc->callback = sunxi_i2c_dma_callback;
-	dma_desc->callback_param = i2c;
-	if (dma_submit_error(dmaengine_submit(dma_desc))) {
-		I2C_ERR("[i2c%d] DMA submit failed\n", i2c->bus_num);
-		goto err_submit;
-	}
-
-	reinit_completion(&i2c->cmd_complete);
-	dma_async_issue_pending(dma->chan);
-	dprintk(DEBUG_INFO1, "[i2c%d] dma issue pending\n", i2c->bus_num);
-
-	time_left = wait_for_completion_timeout(
-				&i2c->cmd_complete,
-				msecs_to_jiffies(DMA_TIMEOUT));
-	dprintk(DEBUG_INFO1, "[i2c%d] time_left = %lu\n",
-			i2c->bus_num, time_left);
-
-	return 0;
-
-err_submit:
-err_desc:
-	dma_unmap_single(chan_dev, dma->dma_buf,
-			dma->dma_len, dma->dma_data_dir);
-err_map:
-	return -EINVAL;
-}
-
-static int sunxi_i2c_drv_write(struct sunxi_i2c *i2c, struct i2c_msg *msgs)
-{
-
-	i2c->msg = msgs;
-
-	sunxi_i2c_drv_slave_addr(i2c, msgs);
-	if (msgs->len == 1) {
-		i2c_set_packet_addr_byte(0, i2c->base_addr);
-		i2c_set_packet_data_byte(msgs->len, i2c->base_addr);
-	} else {
-		i2c_set_packet_addr_byte(1, i2c->base_addr);
-		i2c_set_packet_data_byte(msgs->len - 1, i2c->base_addr);
-	}
-	i2c_set_packet_cnt(1, i2c->base_addr);
-
-	i2c_drv_clear_pending(i2c->base_addr);
-	i2c_drv_enable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT, i2c->base_addr);
-	i2c_start_xfer(i2c->base_addr);
-
-	i2c_sunxi_send_msgs(i2c, msgs);
-
-	return 0;
-}
-
-static int sunxi_i2c_drv_dma_write(struct sunxi_i2c *i2c, struct i2c_msg *msgs)
-{
-	int ret = 0;
-
-	i2c->msg = msgs;
-
-	sunxi_i2c_drv_slave_addr(i2c, msgs);
-	i2c_set_packet_addr_byte(1, i2c->base_addr);
-	i2c_set_packet_data_byte(msgs->len - 1, i2c->base_addr);
-	i2c_set_packet_cnt(1, i2c->base_addr);
-
-	i2c_drv_clear_pending(i2c->base_addr);
-	i2c_drv_enable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT, i2c->base_addr);
-	i2c_drv_enable_dma_irq(DMA_TX, i2c->base_addr);
-	i2c_start_xfer(i2c->base_addr);
-
-	i2c->dma_using = i2c->dma_tx;
-	i2c->dma_using->dma_transfer_dir = DMA_MEM_TO_DEV;
-	i2c->dma_using->dma_data_dir = DMA_TO_DEVICE;
-	i2c->dma_using->dma_len = msgs->len;
-
-	ret = i2c_sunxi_dma_xfer(i2c, msgs->buf);
-
-	return ret;
-}
-
-static int
-sunxi_i2c_drv_mulpk_write(struct sunxi_i2c *i2c, struct i2c_msg *msgs, int num)
-{
-	u16 i;
-
-	i2c->msg = msgs;
-
-	sunxi_i2c_drv_slave_addr(i2c, msgs);
-	i2c_set_packet_addr_byte(1, i2c->base_addr);
-	i2c_set_packet_data_byte(msgs->len - 1, i2c->base_addr);
-	i2c_set_packet_interval(i2c->pkt_interval, i2c->base_addr);
-	i2c_set_packet_cnt(num, i2c->base_addr);
-
-	i2c_drv_clear_pending(i2c->base_addr);
-	i2c_drv_enable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT, i2c->base_addr);
-	i2c_start_xfer(i2c->base_addr);
-
-	for (i = 0; i < num; i++)
-		i2c_sunxi_send_msgs(i2c, msgs + i);
-
-	return 0;
-}
-
-static int
-sunxi_i2c_drv_dma_mulpk_write(struct sunxi_i2c *i2c, struct i2c_msg *msgs,
-		int num)
-{
-	u16 i;
-	int ret = 0;
-	unsigned char *buf;
-	unsigned int tlen = num * msgs->len;
-
-	i2c->msg = msgs;
-
-	sunxi_i2c_drv_slave_addr(i2c, msgs);
-	i2c_set_packet_addr_byte(1, i2c->base_addr);
-	i2c_set_packet_data_byte(msgs->len - 1, i2c->base_addr);
-	i2c_set_packet_interval(i2c->pkt_interval, i2c->base_addr);
-	i2c_set_packet_cnt(num, i2c->base_addr);
-
-	buf = kzalloc(tlen, GFP_KERNEL);
-	if (IS_ERR_OR_NULL(buf)) {
-		I2C_ERR("[i2c%d] kzalloc failed\n", i2c->bus_num);
-		return -ENOMEM;
-	}
-
-	for (i = 0; i < num; i++) {
-		memcpy(buf + (i * (msgs->len)), (msgs + i)->buf, msgs->len);
-	}
-
-	i2c_drv_clear_pending(i2c->base_addr);
-	i2c_drv_enable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT, i2c->base_addr);
-	i2c_drv_enable_dma_irq(DMA_TX, i2c->base_addr);
-	i2c_start_xfer(i2c->base_addr);
-
-	i2c->dma_using = i2c->dma_tx;
-	i2c->dma_using->dma_transfer_dir = DMA_MEM_TO_DEV;
-	i2c->dma_using->dma_data_dir = DMA_TO_DEVICE;
-	i2c->dma_using->dma_len = tlen;
-
-	ret = i2c_sunxi_dma_xfer(i2c, buf);
-
-	kfree(buf);
-	buf = NULL;
-
-	return ret;
-}
-
-static int
-sunxi_i2c_drv_read(struct sunxi_i2c *i2c, struct i2c_msg *msgs, int num)
-{
-	struct i2c_msg *wmsgs = msgs, *rmsgs = msgs;
-
-	if (num == 1) {
-		wmsgs = NULL;
-		rmsgs = msgs;
-	} else if (num == 2) {
-		wmsgs = msgs;
-		rmsgs = msgs + 1;
-	}
-
-	i2c->msg = rmsgs;
-
-	sunxi_i2c_drv_slave_addr(i2c, rmsgs);
-	i2c_set_packet_cnt(1, i2c->base_addr);
-	i2c_set_packet_data_byte(rmsgs->len, i2c->base_addr);
-	if (rmsgs->len > MAX_FIFO)
-		i2c_set_rx_trig_level(MAX_FIFO, i2c->base_addr);
-	else
-		i2c_set_rx_trig_level(rmsgs->len, i2c->base_addr);
-	if (i2c_query_rxfifo(i2c->base_addr))
-		i2c_clear_rxfifo(i2c->base_addr);
-
-	i2c_drv_clear_pending(i2c->base_addr);
-	i2c_drv_enable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT, i2c->base_addr);
-	i2c_start_xfer(i2c->base_addr);
-
-	if (wmsgs)
-		i2c_sunxi_send_msgs(i2c, wmsgs);
-
-	return 0;
-}
-
-static int
-sunxi_i2c_drv_dma_read(struct sunxi_i2c *i2c, struct i2c_msg *msgs, int num)
-{
-	int ret = 0;
-	struct i2c_msg *wmsgs = msgs, *rmsgs = msgs;
-
-	if (num == 1) {
-		wmsgs = NULL;
-		rmsgs = msgs;
-	} else if (num == 2) {
-		wmsgs = msgs;
-		rmsgs = msgs + 1;
-	}
-
-	i2c->msg = rmsgs;
-
-	sunxi_i2c_drv_slave_addr(i2c, rmsgs);
-	i2c_set_packet_data_byte(rmsgs->len, i2c->base_addr);
-	i2c_set_packet_cnt(1, i2c->base_addr);
-	i2c_set_rx_trig_level(MAX_FIFO/2, i2c->base_addr);
-	if (i2c_query_rxfifo(i2c->base_addr))
-		i2c_clear_rxfifo(i2c->base_addr);
-
-	i2c_drv_clear_pending(i2c->base_addr);
-	i2c_drv_enable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT, i2c->base_addr);
-	i2c_drv_enable_dma_irq(DMA_RX, i2c->base_addr);
-	i2c_start_xfer(i2c->base_addr);
-	if (wmsgs)
-		i2c_sunxi_send_msgs(i2c, wmsgs);
-
-	i2c->dma_using = i2c->dma_rx;
-	i2c->dma_using->dma_transfer_dir = DMA_DEV_TO_MEM;
-	i2c->dma_using->dma_data_dir = DMA_FROM_DEVICE;
-	i2c->dma_using->dma_len = rmsgs->len;
-
-	ret = i2c_sunxi_dma_xfer(i2c, rmsgs->buf);
-
-	return ret;
-}
-
-/**
- * sunxi_i2c_drv_do_xfer - twi driver transmission control
- * @i2c: struct of sunxi_i2c
- * @msgs: One or more messages to execute before STOP is issued to
- *	terminate the operation; each message begins with a START.
- * @num: Number of messages to be executed.
- *
- * Returns negative errno, else the number of messages executed.
- */
-static int
-sunxi_i2c_drv_do_xfer(struct sunxi_i2c *i2c, struct i2c_msg *msgs, int num)
-{
-	int ret;
-	unsigned long flags = 0;
-
-	spin_lock_irqsave(&i2c->lock, flags);
-	i2c->result = 0;
-	spin_unlock_irqrestore(&i2c->lock, flags);
-
-	i2c_drv_clear_pending(i2c->base_addr);
-	i2c_drv_disable_tran_irq(TRAN_COM_INT | TRAN_ERR_INT
-			| RX_REQ_INT | TX_REQ_INT, i2c->base_addr);
-	i2c_drv_disable_dma_irq(DMA_TX | DMA_RX, i2c->base_addr);
-	if (i2c_query_txfifo(i2c->base_addr))
-		i2c_clear_txfifo(i2c->base_addr);
-
-	if (num == 1) {
-		if (msgs->flags & I2C_M_RD) {
-			/* 1 msgs read */
-			i2c_enable_read_tran_mode(i2c->base_addr);
-			i2c_set_packet_addr_byte(0, i2c->base_addr);
-
-			if (i2c->dma_rx && (msgs->len >= DMA_THRESHOLD)) {
-				dprintk(DEBUG_INFO, "[i2c%d] master dma read\n",
-						i2c->bus_num);
-				ret =  sunxi_i2c_drv_dma_read(i2c, msgs, num);
-			} else {
-				dprintk(DEBUG_INFO, "[i2c%d] master cpu read\n",
-						i2c->bus_num);
-				ret = sunxi_i2c_drv_read(i2c, msgs, num);
-			}
-		} else {
-			/* 1 msgs write */
-			i2c_disable_read_tran_mode(i2c->base_addr);
-
-			if (i2c->dma_tx && (msgs->len >= DMA_THRESHOLD)) {
-				dprintk(DEBUG_INFO,
-						"[i2c%d] master dma write\n",
-						i2c->bus_num);
-				ret =  sunxi_i2c_drv_dma_write(i2c, msgs);
-			} else {
-				dprintk(DEBUG_INFO,
-						"[i2c%d] master cpu write\n",
-						i2c->bus_num);
-				ret = sunxi_i2c_drv_write(i2c, msgs);
-			}
-		}
-	} else if ((num == 2) && ((msgs + 1)->flags & I2C_M_RD)) {
-		/* 2 msgs read */
-		i2c_disable_read_tran_mode(i2c->base_addr);
-		i2c_set_packet_addr_byte(msgs->len, i2c->base_addr);
-
-		if (i2c->dma_rx && ((msgs + 1)->len >= DMA_THRESHOLD)) {
-			dprintk(DEBUG_INFO, "[i2c%d] master dma read\n",
-					i2c->bus_num);
-			ret =  sunxi_i2c_drv_dma_read(i2c, msgs, num);
-		} else {
-			dprintk(DEBUG_INFO, "[i2c%d] master cpu read\n",
-					i2c->bus_num);
-			ret = sunxi_i2c_drv_read(i2c, msgs, num);
-		}
-	} else {
-		/* multiple write with the same format packet */
-		i2c_disable_read_tran_mode(i2c->base_addr);
-		i2c_set_packet_addr_byte(1, i2c->base_addr);
-
-		if (i2c->dma_tx && ((num * msgs->len) >= DMA_THRESHOLD)) {
-			dprintk(DEBUG_INFO,
-				"[i2c%d] master dma multiple packet write\n",
-				i2c->bus_num);
-			ret = sunxi_i2c_drv_dma_mulpk_write(i2c, msgs, num);
-		} else {
-			dprintk(DEBUG_INFO,
-				"[i2c%d] master cpu multiple packet write\n",
-				i2c->bus_num);
-			ret = sunxi_i2c_drv_mulpk_write(i2c, msgs, num);
-		}
-	}
-	if (ret)
-		return ret;
-
-	ret = i2c_sunxi_drv_complete(i2c);
-
-	if (ret)
-		return ret;
-	else
-		return num;
-}
-
 
 /*
  ****************************************************************************
@@ -1569,13 +613,26 @@ static void sunxi_i2c_addr_byte(struct sunxi_i2c *i2c)
 	if (i2c->msg[i2c->msg_idx].flags & I2C_M_RD)
 		addr |= 1;
 
-	if (i2c->msg[i2c->msg_idx].flags & I2C_M_TEN) {
-		dprintk(DEBUG_INFO1, "[i2c%d] first part of 10bits = 0x%x\n",
-				i2c->bus_num, addr);
-	} else
-		dprintk(DEBUG_INFO1, "[i2c%d] 7bits+r/w = 0x%x\n",
-				i2c->bus_num, addr);
+#ifdef CONFIG_SUNXI_I2C_PRINT_TRANSFER_INFO
+	if (i2c->bus_num == CONFIG_SUNXI_I2C_PRINT_TRANSFER_INFO_WITH_BUS_NUM) {
+		if (i2c->msg[i2c->msg_idx].flags & I2C_M_TEN)
+			I2C_DBG("[i2c%d] first part of 10bits = 0x%x\n",
+					i2c->bus_num, addr);
 
+		I2C_DBG("[i2c%d] 7bits+r/w = 0x%x\n", i2c->bus_num, addr);
+	}
+#else
+	if (unlikely(bus_transfer_dbg != -1)) {
+		if (i2c->bus_num == bus_transfer_dbg) {
+			if (i2c->msg[i2c->msg_idx].flags & I2C_M_TEN)
+				I2C_DBG("[i2c%d] first part of 10bits = 0x%x\n",
+						i2c->bus_num, addr);
+
+			I2C_DBG("[i2c%d] 7bits+r/w = 0x%x\n",
+				i2c->bus_num, addr);
+		}
+	}
+#endif
 	/* send 7bits+r/w or the first part of 10bits */
 	twi_put_byte(i2c->base_addr, &addr);
 }
@@ -1593,8 +650,21 @@ static int sunxi_i2c_core_process(struct sunxi_i2c *i2c)
 	state = twi_query_irq_status(base_addr);
 
 	spin_lock_irqsave(&i2c->lock, flags);
-	dprintk(DEBUG_INFO, "[i2c%d][slave address = (0x%x), state = (0x%x)]\n",
-			i2c->bus_num, i2c->msg->addr, state);
+
+#ifdef CONFIG_SUNXI_I2C_PRINT_TRANSFER_INFO
+	if (i2c->bus_num == CONFIG_SUNXI_I2C_PRINT_TRANSFER_INFO_WITH_BUS_NUM)
+		I2C_DBG("[i2c%d][slave address = (0x%x), state = (0x%x)]\n",
+				i2c->bus_num, i2c->msg->addr, state);
+
+#else
+	if (unlikely(bus_transfer_dbg != -1)) {
+		if (i2c->bus_num == bus_transfer_dbg)
+			I2C_DBG("[i2c%d][slave address = (0x%x), state = (0x%x)]\n",
+					i2c->bus_num, i2c->msg->addr, state);
+
+	}
+#endif
+
 	if (i2c->msg == NULL) {
 		I2C_ERR("[i2c%d] i2c message is NULL, err_code = 0xfe\n",
 				i2c->bus_num);
@@ -1751,27 +821,21 @@ static irqreturn_t sunxi_i2c_handler(int this_irq, void *dev_id)
 {
 	struct sunxi_i2c *i2c = (struct sunxi_i2c *)dev_id;
 
-	if (i2c->twi_drv_used)
-		sunxi_i2c_drv_core_process(i2c);
-	else {
-		if (!twi_query_irq_flag(i2c->base_addr)) {
-			I2C_ERR("unknown interrupt!\n");
-			return IRQ_NONE;
-		}
-
-		/* disable irq */
-		twi_disable_irq(i2c->base_addr);
-
-		/* twi core process */
-		sunxi_i2c_core_process(i2c);
-
-		/*
-		 * enable irq only when twi is transferring,
-		 * otherwise disable irq
-		 */
-		if (i2c->status != I2C_XFER_IDLE)
-			twi_enable_irq(i2c->base_addr);
+	if (!twi_query_irq_flag(i2c->base_addr)) {
+		I2C_ERR("unknown interrupt!\n");
+		return IRQ_NONE;
 	}
+
+	/* disable irq */
+	twi_disable_irq(i2c->base_addr);
+
+	/* twi core process */
+	sunxi_i2c_core_process(i2c);
+
+	/* enable irq only when twi is transferring, otherwise disable irq */
+	if (i2c->status != I2C_XFER_IDLE)
+		twi_enable_irq(i2c->base_addr);
+
 	return IRQ_HANDLED;
 }
 
@@ -1789,11 +853,9 @@ static int sunxi_i2c_xfer_complete(struct sunxi_i2c *i2c, int code)
 		I2C_ERR("[i2c%d] Maybe Logic Error, debug it!\n", i2c->bus_num);
 		i2c->msg_idx = code;
 		ret = SUNXI_I2C_FAIL;
-		i2c->result = RESULT_ERR;
 	} else if (code != SUNXI_I2C_OK) {
 		i2c->msg_idx = code;
 		ret = SUNXI_I2C_FAIL;
-		i2c->result = RESULT_COMPLETE;
 	}
 
 	wake_up(&i2c->wait);
@@ -1806,65 +868,26 @@ sunxi_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 {
 	struct sunxi_i2c *i2c = (struct sunxi_i2c *)adap->algo_data;
 	int ret = SUNXI_I2C_FAIL;
-	unsigned char i = 0;
-	unsigned long diff_time;
-	struct timeval start, end;
-	u16 n, m;
+	int i   = 0;
 
-	if (IS_ERR_OR_NULL(msgs) || (num <= 0)) {
-		I2C_ERR("[i2c%d] invalid argument\n", i2c->bus_num);
-		return -EINVAL;
-	}
-
-	dprintk(DEBUG_INFO, "[i2c%d] num = %d\n", i2c->bus_num, num);
-
-	if (debug_mask & DEBUG_INFO2) {
-		for (n = 0; n < num; n++) {
-			printk("num: %d, data: ", n);
-			if ((msgs + n)->buf) {
-				for (m = 0; m < (msgs + n)->len; m++)
-					printk("%02x ", *((msgs + n)->buf + m));
-				printk("\n");
-			} else
-				printk("null\n");
-		}
-	}
-
-	do_gettimeofday(&start);
 	ret = pm_runtime_get_sync(i2c->dev);
 	if (ret < 0)
 		goto out;
-	if (i2c->twi_drv_used) {
-		dprintk(DEBUG_INFO1, "[i2c%d] twi driver xfer\n", i2c->bus_num);
-		ret = sunxi_i2c_drv_do_xfer(i2c, msgs, num);
 
-	} else {
-		dprintk(DEBUG_INFO1, "[i2c%d] twi engine xfer\n", i2c->bus_num);
-		for (i = 1; i <= adap->retries; i++) {
-			ret = sunxi_i2c_do_xfer(i2c, msgs, num);
+	for (i = 1; i <= adap->retries; i++) {
+		ret = sunxi_i2c_do_xfer(i2c, msgs, num);
 
-			if (ret != SUNXI_I2C_RETRY)
-				goto out;
+		if (ret != SUNXI_I2C_RETRY)
+			goto out;
 
-			dprintk(DEBUG_INFO,
-					"[i2c%d] Retrying transmission %d\n",
-					i2c->adap.nr, i);
-			udelay(100);
-		}
-
-		ret = -EREMOTEIO;
+		I2C_DBG("[i2c%d] Retrying transmission %d\n", i2c->adap.nr, i);
+		udelay(100);
 	}
 
+	ret = -EREMOTEIO;
 out:
 	pm_runtime_mark_last_busy(i2c->dev);
 	pm_runtime_put_autosuspend(i2c->dev);
-
-	do_gettimeofday(&end);
-	diff_time = 1000000 * (end.tv_sec - start.tv_sec) + end.tv_usec
-		- start.tv_usec;
-	dprintk(DEBUG_INFO2, "[i2c%d] diff_time = %ld us\n", i2c->bus_num,
-			diff_time);
-
 	return ret;
 }
 
@@ -1875,14 +898,14 @@ sunxi_i2c_do_xfer(struct sunxi_i2c *i2c, struct i2c_msg *msgs, int num)
 	int ret = SUNXI_I2C_FAIL;
 	unsigned long flags = 0;
 
-	twi_soft_reset(i2c->base_addr, TWI_SRST_REG, TWI_SRST_SRST);
+	twi_soft_reset(i2c->base_addr);
 	udelay(100);
 
 	/* test the bus is free,already protect by the semaphore at DEV layer */
 	while (twi_query_irq_status(i2c->base_addr) != TWI_STAT_IDLE &&
 		twi_query_irq_status(i2c->base_addr) != TWI_STAT_BUS_ERR &&
 		twi_query_irq_status(i2c->base_addr) != TWI_STAT_ARBLOST_SLAR_ACK) {
-		dprintk(DEBUG_INFO, "[i2c%d] bus is busy, status = %x\n",
+		I2C_DBG("[i2c%d] bus is busy, status = %x\n",
 			i2c->bus_num, twi_query_irq_status(i2c->base_addr));
 		if (twi_send_clk_9pulse(i2c->base_addr, i2c->bus_num) != SUNXI_I2C_OK) {
 			ret = SUNXI_I2C_RETRY;
@@ -1910,7 +933,7 @@ sunxi_i2c_do_xfer(struct sunxi_i2c *i2c, struct i2c_msg *msgs, int num)
 		I2C_ERR("[i2c%d] twi_regulator: %s\n",
 			i2c->bus_num,
 			((struct sunxi_i2c_platform_data *)(i2c->adap.dev.parent->platform_data))->regulator_id);
-		twi_soft_reset(i2c->base_addr, TWI_SRST_REG, TWI_SRST_SRST);
+		twi_soft_reset(i2c->base_addr);
 		twi_disable_irq(i2c->base_addr);  /* disable irq */
 		i2c->status  = I2C_XFER_IDLE;
 		ret = SUNXI_I2C_RETRY;
@@ -1931,8 +954,8 @@ sunxi_i2c_do_xfer(struct sunxi_i2c *i2c, struct i2c_msg *msgs, int num)
 		spin_unlock_irqrestore(&i2c->lock, flags);
 		ret = -ETIME;
 	} else if (ret != num) {
-/*		I2C_ERR("[i2c%d] incomplete xfer (status: 0x%x, dev addr: 0x%x)\n",
-				i2c->bus_num, ret, msgs->addr);*/
+		I2C_ERR("[i2c%d] incomplete xfer (status: 0x%x, dev addr: 0x%x)\n",
+				i2c->bus_num, ret, msgs->addr);
 		ret = -ECOMM;
 	}
 out:
@@ -1959,8 +982,10 @@ static int sunxi_i2c_clk_init(struct sunxi_i2c *i2c)
 		return -1;
 	}
 
-	sunxi_periph_reset_assert(i2c->mclk);
-	sunxi_periph_reset_deassert(i2c->mclk);
+	/* sunxi_periph_reset_deassert(i2c->mclk); */
+
+	/* enable twi bus */
+	twi_enable_bus(i2c->base_addr);
 
 	/* set twi module clock */
 	apb_clk  =  clk_get_rate(i2c->mclk);
@@ -1969,37 +994,18 @@ static int sunxi_i2c_clk_init(struct sunxi_i2c *i2c)
 				i2c->bus_num);
 		return -1;
 	}
-
-	/* enable twi engine or twi driver */
-	if (i2c->twi_drv_used) {
-		twi_set_clock(i2c, TWI_DRIVER_BUSC, 24000000, i2c->bus_freq,
-				TWI_DRV_CLK_M, TWI_DRV_CLK_N);
-		dprintk(DEBUG_INFO1, "[i2c%d] set twi driver clock\n",
-				i2c->bus_num);
-		twi_enable(i2c->base_addr, TWI_DRIVER_CTRL, TWI_DRV_EN);
-	} else {
 #ifdef CONFIG_EVB_PLATFORM
-		twi_set_clock(i2c, TWI_CLK_REG, apb_clk, i2c->bus_freq,
-				TWI_CLK_DIV_M, TWI_CLK_DIV_N);
+	twi_set_clock(apb_clk, i2c->bus_freq, i2c->base_addr);
 #else
-		twi_set_clock(i2c, TWI_CLK_REG, 24000000, i2c->bus_freq,
-				TWI_CLK_DIV_M, TWI_CLK_DIV_N);
+	twi_set_clock(24000000, i2c->bus_freq, i2c->base_addr);
 #endif
-		dprintk(DEBUG_INFO1, "[i2c%d] set twi engine clock\n",
-				i2c->bus_num);
-		twi_enable(i2c->base_addr, TWI_CTL_REG, TWI_CTL_BUSEN);
-	}
-
 	return 0;
 }
 
 static int sunxi_i2c_clk_exit(struct sunxi_i2c *i2c)
 {
 	/* disable twi bus */
-	if (i2c->twi_drv_used) {
-		twi_disable(i2c->base_addr, TWI_DRIVER_CTRL, TWI_DRV_EN);
-	} else
-		twi_disable(i2c->base_addr, TWI_CTL_REG, TWI_CTL_BUSEN);
+	twi_disable_bus(i2c->base_addr);
 
 	/* disable clk */
 	if (!IS_ERR_OR_NULL(i2c->mclk))
@@ -2014,20 +1020,20 @@ static int sunxi_i2c_clk_exit(struct sunxi_i2c *i2c)
 }
 
 static int sunxi_i2c_hw_init(struct sunxi_i2c *i2c,
-		struct sunxi_i2c_platform_data *pdata, struct device *dev)
+		struct sunxi_i2c_platform_data *pdata)
 {
 	int ret = 0;
 
-	ret = twi_regulator_request(pdata, dev);
+	ret = twi_regulator_request(pdata);
 	if (ret < 0) {
 		I2C_ERR("[i2c%d] request regulator failed!\n", i2c->bus_num);
-		return ret;
+		return -1;
 	}
 
 	ret = twi_request_gpio(i2c);
 	if (ret < 0) {
 		I2C_ERR("[i2c%d] request i2c gpio failed!\n", i2c->bus_num);
-		return ret;
+		return -1;
 	}
 
 	if (sunxi_i2c_clk_init(i2c)) {
@@ -2035,8 +1041,7 @@ static int sunxi_i2c_hw_init(struct sunxi_i2c *i2c,
 		return -1;
 	}
 
-	if (!(i2c->twi_drv_used))
-		twi_soft_reset(i2c->base_addr, TWI_SRST_REG, TWI_SRST_SRST);
+	twi_soft_reset(i2c->base_addr);
 
 	return ret;
 }
@@ -2055,10 +1060,9 @@ static void sunxi_i2c_hw_exit(struct sunxi_i2c *i2c,
 
 static void sunxi_i2c_release(struct device *dev)
 {
-	dprintk(DEBUG_INIT, "release\n");
+	I2C_ENTER();
 }
 
-#if (!defined(CONFIG_ARCH_SUN8IW16) && !defined(CONFIG_ARCH_SUN8IW19))
 static ssize_t sunxi_i2c_info_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -2129,7 +1133,6 @@ static void sunxi_i2c_sysfs(struct platform_device *_pdev)
 	device_create_file(&_pdev->dev, &sunxi_i2c_info_attr);
 	device_create_file(&_pdev->dev, &sunxi_i2c_status_attr);
 }
-#endif
 
 static int sunxi_i2c_probe(struct platform_device *pdev)
 {
@@ -2138,9 +1141,8 @@ static int sunxi_i2c_probe(struct platform_device *pdev)
 	struct resource *mem_res = NULL;
 	struct sunxi_i2c_platform_data *pdata = NULL;
 	int ret, irq;
-	unsigned int int_flag = 0;
+	unsigned long int_flag = 0;
 	const char *str_vcc_twi;
-	dma_addr_t phy_addr;
 
 	if (np == NULL) {
 		I2C_ERR("I2C failed to get of node\n");
@@ -2187,7 +1189,6 @@ static int sunxi_i2c_probe(struct platform_device *pdev)
 		ret = -EIO;
 		goto eiomap;
 	}
-	i2c->res = mem_res;
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
@@ -2203,16 +1204,18 @@ static int sunxi_i2c_probe(struct platform_device *pdev)
 		goto eiomap;
 	}
 
-	ret = of_property_read_string(np, "twi_regulator", &str_vcc_twi);
+	ret = of_property_read_string(np, "twi_regulator",
+			&str_vcc_twi);
 	if (ret)
-		I2C_ERR("[i2c%d] warning: failed to get regulator id\n",
-				pdev->id);
-	else if (strlen(str_vcc_twi) >= sizeof(pdata->regulator_id))
-		I2C_ERR("[i2c%d] illegal regulator id\n", pdev->id);
+		I2C_ERR("[i2c%d] failed to get regulator id\n", pdev->id);
 	else {
-		strcpy(pdata->regulator_id, str_vcc_twi);
-		pr_info("[i2c%d] twi_regulator: %s\n", pdev->id,
+		if (strlen(str_vcc_twi) >= sizeof(pdata->regulator_id))
+			I2C_ERR("[i2c%d] illegal regulator id\n", pdev->id);
+		else {
+			strcpy(pdata->regulator_id, str_vcc_twi);
+			pr_info("[i2c%d] twi_regulator: %s\n", pdev->id,
 					pdata->regulator_id);
+		}
 	}
 
 	pdev->dev.release = sunxi_i2c_release;
@@ -2242,18 +1245,10 @@ static int sunxi_i2c_probe(struct platform_device *pdev)
 	i2c->adap.algo = &sunxi_i2c_algorithm;
 
 #ifndef CONFIG_SUNXI_ARISC
-#if (!defined(CONFIG_ARCH_SUN50IW9) && !defined(CONFIG_ARCH_SUN8IW19) \
-		&& !defined(CONFIG_ARCH_SUN50IW10))
 	/* SUNXI_ARISC will only use twi0, enable gic interrupt when suspend */
 	if (i2c->adap.nr == 0)
 		int_flag |= IRQF_NO_SUSPEND;
 #endif
-#endif
-	if (of_property_read_u32(np, "no_suspend", &i2c->no_suspend))
-		i2c->no_suspend = 0;
-	else
-		int_flag |= IRQF_NO_SUSPEND;
-
 	ret = request_irq(irq, sunxi_i2c_handler, int_flag,
 					i2c->adap.name, i2c);
 	if (ret) {
@@ -2264,35 +1259,16 @@ static int sunxi_i2c_probe(struct platform_device *pdev)
 	i2c->adap.algo_data  = i2c;
 	i2c->adap.dev.parent = &pdev->dev;
 	i2c->adap.dev.of_node = pdev->dev.of_node;
+	twi_used_mask |= SUNXI_TWI_CHAN_MASK(pdev->id);
 
-	if (of_property_read_u32(np, "twi_drv_used", &i2c->twi_drv_used))
-		i2c->twi_drv_used = 0;
-	dprintk(DEBUG_INIT, "[i2c%d] twi_drv_used = %d\n", i2c->bus_num,
-			i2c->twi_drv_used);
-	if (of_property_read_u32(np, "twi_pkt_interval", &i2c->pkt_interval))
-		i2c->pkt_interval = 0;
-	dprintk(DEBUG_INIT, "[i2c%d] twi_pkt_interval = %d\n",
-			i2c->bus_num, i2c->pkt_interval);
-
-	ret = sunxi_i2c_hw_init(i2c, pdata, &pdev->dev);
-	if (ret != 0) {
-		I2C_ERR("[i2c%d] hw init failed!\n", i2c->bus_num);
-		if (ret == -EPROBE_DEFER) {
-			I2C_ERR("[i2c%d] regulator init try again!\n",
-					i2c->bus_num);
-		} else
-			ret = -EINVAL;
+	if (sunxi_i2c_hw_init(i2c, pdata)) {
+		ret = -EIO;
 		goto ehwinit;
 	}
-
-	pm_runtime_set_active(i2c->dev);
-	if (i2c->no_suspend) {
-		pm_runtime_get_noresume(i2c->dev);
-	}
+	pm_runtime_enable(i2c->dev);
 	pm_runtime_set_autosuspend_delay(i2c->dev, AUTOSUSPEND_TIMEOUT);
 	pm_runtime_use_autosuspend(i2c->dev);
-	pm_runtime_enable(i2c->dev);
-
+	pm_runtime_set_active(i2c->dev);
 	ret = i2c_add_numbered_adapter(&i2c->adap);
 	if (ret < 0) {
 		I2C_ERR("[i2c%d] failed to add adapter\n", i2c->bus_num);
@@ -2301,19 +1277,21 @@ static int sunxi_i2c_probe(struct platform_device *pdev)
 		goto eadapt;
 	}
 
-	phy_addr = (dma_addr_t)mem_res->start;
-
-	/* Init DMA config if supported */
-	if (i2c->twi_drv_used)
-		sunxi_i2c_dma_request(i2c, phy_addr);
-
-	i2c->pdev = pdev;
-
 	platform_set_drvdata(pdev, i2c);
 
-#if (!defined(CONFIG_ARCH_SUN8IW16) && !defined(CONFIG_ARCH_SUN8IW19))
 	sunxi_i2c_sysfs(pdev);
-#endif
+
+	I2C_DBG("I2C: %s: sunxi I2C adapter\n", dev_name(&i2c->adap.dev));
+	I2C_DBG("TWI_CTL  0x%p: 0x%08x\n", i2c->base_addr + 0x0c,
+						readl(i2c->base_addr + 0x0c));
+	I2C_DBG("TWI_STAT 0x%p: 0x%08x\n", i2c->base_addr + 0x10,
+						readl(i2c->base_addr + 0x10));
+	I2C_DBG("TWI_CLK  0x%p: 0x%08x\n", i2c->base_addr + 0x14,
+						readl(i2c->base_addr + 0x14));
+	I2C_DBG("TWI_SRST 0x%p: 0x%08x\n", i2c->base_addr + 0x18,
+						readl(i2c->base_addr + 0x18));
+	I2C_DBG("TWI_EFR  0x%p: 0x%08x\n", i2c->base_addr + 0x1c,
+						readl(i2c->base_addr + 0x1c));
 
 	return 0;
 
@@ -2346,12 +1324,7 @@ static int sunxi_i2c_remove(struct platform_device *pdev)
 {
 	struct sunxi_i2c *i2c = platform_get_drvdata(pdev);
 
-	dprintk(DEBUG_INIT, "[i2c%d] remove\n", i2c->bus_num);
-
-	if (i2c->dma_tx)
-		sunxi_i2c_dma_free(i2c->dma_tx);
-	if (i2c->dma_rx)
-		sunxi_i2c_dma_free(i2c->dma_rx);
+	I2C_DBG("[i2c.%d] remove ...\n", i2c->bus_num);
 
 	platform_set_drvdata(pdev, NULL);
 	i2c_del_adapter(&i2c->adap);
@@ -2369,9 +1342,10 @@ static int sunxi_i2c_remove(struct platform_device *pdev)
 	}
 
 	iounmap(i2c->base_addr);
-	release_mem_region(i2c->res->start, resource_size(i2c->res));
 	kfree(i2c);
 	kfree(pdev->dev.platform_data);
+
+	I2C_EXIT();
 
 	return 0;
 }
@@ -2409,12 +1383,9 @@ static int sunxi_i2c_runtime_suspend(struct device *dev)
 	struct sunxi_i2c *i2c = platform_get_drvdata(pdev);
 
 #ifndef CONFIG_SUNXI_ARISC
-#if (!defined(CONFIG_ARCH_SUN50IW9) && !defined(CONFIG_ARCH_SUN8IW19) \
-		&& !defined(CONFIG_ARCH_SUN50IW10))
 	/* SUNXI_ARISC will only use twi0 */
 	if (i2c->adap.nr == 0)
 		return 0;
-#endif
 #endif
 
 	if (sunxi_i2c_clk_exit(i2c)) {
@@ -2424,7 +1395,7 @@ static int sunxi_i2c_runtime_suspend(struct device *dev)
 
 	twi_select_gpio_state(i2c->pctrl, PINCTRL_STATE_SLEEP, i2c->bus_num);
 	twi_regulator_disable(dev->platform_data);
-	dprintk(DEBUG_SUSPEND, "[i2c%d] runtime suspend finish\n", i2c->bus_num);
+	I2C_DBG("[i2c%d] finish\n", i2c->bus_num);
 
 	return 0;
 }
@@ -2435,12 +1406,9 @@ static int sunxi_i2c_runtime_resume(struct device *dev)
 	struct sunxi_i2c *i2c = platform_get_drvdata(pdev);
 
 #ifndef CONFIG_SUNXI_ARISC
-#if (!defined(CONFIG_ARCH_SUN50IW9) && !defined(CONFIG_ARCH_SUN8IW19) \
-		&& !defined(CONFIG_ARCH_SUN50IW10))
 	/* SUNXI_ARISC will only use twi0 */
 	if (i2c->adap.nr == 0)
 		return 0;
-#endif
 #endif
 
 	twi_regulator_enable(dev->platform_data);
@@ -2451,10 +1419,8 @@ static int sunxi_i2c_runtime_resume(struct device *dev)
 		return -1;
 	}
 
-	if (!(i2c->twi_drv_used))
-		twi_soft_reset(i2c->base_addr, TWI_SRST_REG, TWI_SRST_SRST);
-
-	dprintk(DEBUG_SUSPEND, "[i2c%d] runtime resume  finish\n", i2c->bus_num);
+	twi_soft_reset(i2c->base_addr);
+	I2C_DBG("[i2c%d] finish\n", i2c->bus_num);
 
 	return 0;
 }
@@ -2464,13 +1430,15 @@ static int sunxi_i2c_suspend_noirq(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_i2c *i2c = platform_get_drvdata(pdev);
 
-	if (i2c->no_suspend) {
-		dprintk(DEBUG_SUSPEND, "[i2c%d] dosen't need to  suspend\n", i2c->bus_num);
-		return 0;
+	if (!pm_runtime_status_suspended(dev)) {
+		sunxi_i2c_runtime_suspend(dev);
+		I2C_DBG("[i2c%d] finish\n", i2c->bus_num);
+
+		pm_runtime_disable(dev);
+		pm_runtime_set_suspended(dev);
+		pm_runtime_enable(dev);
 	}
-
-	return pm_runtime_force_suspend(dev);
-
+	return 0;
 }
 
 static int sunxi_i2c_resume_noirq(struct device *dev)
@@ -2478,13 +1446,16 @@ static int sunxi_i2c_resume_noirq(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_i2c *i2c = platform_get_drvdata(pdev);
 
-	if (i2c->no_suspend) {
-		dprintk(DEBUG_SUSPEND, "[i2c%d] doesn't need to resume\n", i2c->bus_num);
-		return 0;
+	if (pm_runtime_active(dev)) {
+		sunxi_i2c_runtime_resume(dev);
+		I2C_DBG("[i2c%d] finish\n", i2c->bus_num);
+
+		pm_runtime_disable(dev);
+		pm_runtime_set_active(dev);
+		pm_runtime_enable(dev);
 	}
 
-	return pm_runtime_force_resume(dev);
-
+	return 0;
 }
 
 static const struct dev_pm_ops sunxi_i2c_dev_pm_ops = {
@@ -2519,26 +1490,21 @@ static struct platform_driver sunxi_i2c_driver = {
 
 static int __init sunxi_i2c_adap_init(void)
 {
-	dprintk(DEBUG_INIT, "init\n");
+	I2C_DBG("Sunxi I2C adapt init\n");
 
 	return platform_driver_register(&sunxi_i2c_driver);
 }
 
 static void __exit sunxi_i2c_adap_exit(void)
 {
-	dprintk(DEBUG_INIT, "exit\n");
+
+	I2C_ENTER();
 
 	platform_driver_unregister(&sunxi_i2c_driver);
 }
 
-#ifdef CONFIG_SUNXI_REGULATOR_DT
-subsys_initcall(sunxi_i2c_adap_init);
-#else
 fs_initcall(sunxi_i2c_adap_init);
-#endif
-
 module_exit(sunxi_i2c_adap_exit);
-module_param_named(debug, debug_mask, int, 0664);
 
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:i2c-sunxi");

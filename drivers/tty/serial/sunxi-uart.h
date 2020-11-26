@@ -84,8 +84,8 @@ struct sw_uart_port {
 	struct sw_uart_dma *dma;
 	struct hrtimer rx_hrtimer;
 	u32 rx_last_pos;
-#define SUNXI_UART_DRQ_RX(ch)		(DRQSRC_UART0_RX + ch)
-#define SUNXI_UART_DRQ_TX(ch)		(DRQDST_UART0_TX + ch)
+#define SUNXI_UART_DRQ_RX(ch)		(DRQSRC_UART0RX + ch)
+#define SUNXI_UART_DRQ_TX(ch)		(DRQSRC_UART0RX + ch)
 #endif
 
 	/* for debug */
@@ -97,7 +97,6 @@ struct sw_uart_port {
 
 	struct pinctrl *pctrl;
 	struct serial_rs485 rs485conf;
-	bool card_print;
 };
 
 /* register offset define */
@@ -218,11 +217,10 @@ struct sw_uart_port {
 #define SUNXI_UART_NUM			3
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_ARCH_SUN8IW11)
 #define SUNXI_UART_NUM			8
 #endif
-#if defined(CONFIG_ARCH_SUN8IW10) || defined(CONFIG_ARCH_SUN50IW1) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
+#if defined(CONFIG_ARCH_SUN8IW10) || defined(CONFIG_ARCH_SUN50IW1)
 #define SUNXI_UART_NUM			6
 #endif
 #if defined(CONFIG_ARCH_SUN8IW12) \
@@ -259,8 +257,7 @@ struct sw_uart_port {
 	|| defined(CONFIG_ARCH_SUN50IW3) \
 	|| defined(CONFIG_ARCH_SUN50IW6) \
 	|| defined(CONFIG_ARCH_SUN50IW8) \
-	|| defined(CONFIG_ARCH_SUN8IW17) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
+	|| defined(CONFIG_ARCH_SUN8IW17)
 #define SUNXI_UART_FIFO_SIZE		256
 #elif defined(CONFIG_ARCH_SUN3IW1)
 #define SUNXI_UART_FIFO_SIZE		32

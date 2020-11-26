@@ -23,7 +23,6 @@
 #include "vin-isp/sunxi_isp.h"
 #include "vin-vipp/sunxi_scaler.h"
 #include "vin-mipi/sunxi_mipi.h"
-#include "vin-tdm/vin_tdm.h"
 #include "platform/platform_cfg.h"
 #include "top_reg.h"
 
@@ -39,15 +38,7 @@ enum {
 	VIN_MIPI_MAX_CLK,
 };
 
-enum {
-	VIN_ISP_CLK = 0,
-	VIN_ISP_CLK_SRC,
-	VIN_ISP_MAX_CLK,
-};
-
-
 #define VIN_CLK_RATE (432*1000*1000)
-#define ISP_CLK_RATE (300*1000*1000)
 
 #define NO_VALID_SENSOR (-1)
 
@@ -73,16 +64,6 @@ struct vin_cci_info {
 
 struct vin_isp_info {
 	struct v4l2_subdev *sd;
-	int id;
-};
-
-struct vin_tdm_rx_info{
-	struct v4l2_subdev *sd;
-	int id;
-};
-
-struct vin_tdm_info {
-	struct vin_tdm_rx_info tdm_rx[TDM_RX_NUM];
 	int id;
 };
 
@@ -204,25 +185,18 @@ struct vin_md {
 	struct vin_mipi_info mipi[VIN_MAX_MIPI];
 	struct vin_cci_info cci[VIN_MAX_CCI];
 	struct vin_isp_info isp[VIN_MAX_ISP];
-	struct vin_tdm_info tdm[VIN_MAX_TDM];
 	struct vin_stat_info stat[VIN_MAX_ISP];
 	struct vin_scaler_info scaler[VIN_MAX_SCALER];
 	struct vin_core *vinc[VIN_MAX_DEV];
 	struct vin_clk_info clk[VIN_MAX_CLK];
 	struct vin_clk_info mipi_clk[VIN_MIPI_MAX_CLK];
 	struct vin_mclk_info mclk[VIN_MAX_CCI];
-	struct vin_clk_info isp_clk[VIN_ISP_MAX_CLK];
+	struct vin_clk_info isp_clk;
 	struct modules_config modules[VIN_MAX_DEV];
-	struct csic_feature_list csic_fl;
-	struct csic_version csic_ver;
-	unsigned int isp_ver_major;
-	unsigned int isp_ver_minor;
 	unsigned int is_empty;
 	unsigned int id;
-	unsigned int irq;
 	int use_count;
 	void __iomem *base;
-	void __iomem *ccu_base;
 	struct media_device media_dev;
 	struct v4l2_device v4l2_dev;
 	struct platform_device *pdev;

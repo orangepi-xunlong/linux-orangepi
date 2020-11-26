@@ -44,15 +44,6 @@ extern struct _nftl_blk *get_nftl_need_read_claim(struct _nftl_blk *start_blk);
 extern int read_reclaim(struct _nftl_blk *start_blk, struct _nftl_blk *nftl_blk,
 			uchar *buf);
 
-extern int tsector_read(uint32 sector, uint32 len, uchar *buf);
-extern int tsector_write(uint32 sector, uint32 len, uchar *buf);
-extern uint32 tflush_write_cache(void);
-extern int tlinux_sector_write(struct scatterlist_ftl *sg, int nents);
-extern int tlinux_sector_read(struct scatterlist_ftl *sg, int nents);
-
-int _dev_nand_read_sg(struct _nand_dev *nand_dev, struct scatterlist_ftl *sg_info, int count);
-int _dev_nand_write_sg(struct _nand_dev *nand_dev, struct scatterlist_ftl *sg_info, int count);
-
 int _dev_nand_read(struct _nand_dev *nand_dev, __u32 start_sector, __u32 len,
 		   unsigned char *buf);
 int _dev_nand_write(struct _nand_dev *nand_dev, __u32 start_sector, __u32 len,

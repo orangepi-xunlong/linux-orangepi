@@ -101,13 +101,6 @@ no_karaook_handle:
 				(1<<I2S1_GAT), (1<<I2S1_GAT));
 		sunxi_ahub_update_bits(SUNXI_AHUB_I2S_CTL(1),
 				(1<<I2S_CTL_TXEN), (1<<I2S_CTL_TXEN));
-
-		sunxi_ahub_update_bits(SUNXI_AHUB_RST,
-				(1<<I2S0_RST), (1<<I2S0_RST));
-		sunxi_ahub_update_bits(SUNXI_AHUB_GAT,
-				(1<<I2S0_GAT), (1<<I2S0_GAT));
-		sunxi_ahub_update_bits(SUNXI_AHUB_I2S_CTL(0),
-				(1<<I2S_CTL_TXEN), (1<<I2S_CTL_TXEN));
 		break;
 	case 1:
 		/* operation CVBS module */
@@ -159,8 +152,6 @@ static int sunxi_ahub_i2s_playback_route_disable(
 			/* operation HDMI I2S module */
 			sunxi_ahub_update_bits(SUNXI_AHUB_I2S_CTL(1),
 					(1<<I2S_CTL_TXEN), (0<<I2S_CTL_TXEN));
-			sunxi_ahub_update_bits(SUNXI_AHUB_I2S_CTL(0),
-					(1<<I2S_CTL_TXEN), (0<<I2S_CTL_TXEN));
 			break;
 		case 1:
 			/* operation CVBS module */
@@ -199,13 +190,6 @@ static int sunxi_ahub_i2s_capture_route_enable(
 			(1<<I2S0_GAT), (1<<I2S0_GAT));
 		sunxi_ahub_update_bits(SUNXI_AHUB_I2S_CTL(0),
 			(1<<I2S_CTL_RXEN), (1<<I2S_CTL_RXEN));
-#if defined(CONFIG_ARCH_SUN50IW9)
-		/* special enable the i2s0 SDI0 for ac107 capture success */
-		sunxi_ahub_update_bits(SUNXI_AHUB_I2S_CTL(0),
-				(1<<I2S_CTL_SDI0_EN), (1<<I2S_CTL_SDI0_EN));
-		/* add the delay to anti pop noise when it start capture */
-		mdelay(100);
-#endif
 	}
 
 	if (reg_val == (1 << i2s1_cap_bit)) {
@@ -252,12 +236,6 @@ static int sunxi_ahub_i2s_capture_route_disable(
 	if (reg_val == (1<<i2s0_cap_bit)) {
 		sunxi_ahub_update_bits(SUNXI_AHUB_I2S_CTL(0),
 			(1<<I2S_CTL_RXEN), (0<<I2S_CTL_RXEN));
-#if defined(CONFIG_ARCH_SUN50IW9)
-		/* special enable the i2s0 SDI0 for ac107 capture success */
-		sunxi_ahub_update_bits(SUNXI_AHUB_I2S_CTL(0),
-				(1<<I2S_CTL_SDI0_EN), (0<<I2S_CTL_SDI0_EN));
-#endif
-
 	}
 
 	if (reg_val == (1 << i2s1_cap_bit)) {

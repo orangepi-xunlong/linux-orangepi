@@ -12,7 +12,6 @@ Contents:
    :maxdepth: 2
 
    kernel-documentation
-   l1tf
    development-process/index
    dev-tools/tools
    driver-api/index

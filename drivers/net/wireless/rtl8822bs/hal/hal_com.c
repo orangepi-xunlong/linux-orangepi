@@ -207,7 +207,7 @@ void rtw_hal_config_rftype(PADAPTER  padapter)
 		pHalData->NumTotalRFPath = 1;
 	}
 
-	RTW_INFO("%s RF_Type is %d TotalTxPath is %d\n", __func__, pHalData->rf_type, pHalData->NumTotalRFPath);
+	RTW_INFO("%s RF_Type is %d TotalTxPath is %d\n", __FUNCTION__, pHalData->rf_type, pHalData->NumTotalRFPath);
 }
 
 #define	EEPROM_CHANNEL_PLAN_BY_HW_MASK	0x80
@@ -3747,7 +3747,7 @@ void rtw_hal_set_output_gpio(_adapter *padapter, u8 index, u8 outputval)
 		}
 	} else {
 		RTW_INFO("%s: invalid GPIO%d=%d\n",
-			 __func__, index, outputval);
+			 __FUNCTION__, index, outputval);
 	}
 }
 void rtw_hal_set_input_gpio(_adapter *padapter, u8 index)
@@ -5144,7 +5144,7 @@ static int update_hidden_ssid(u8 *ies, u32 ies_len, u8 hidden_ssid_mode)
 
 	ssid_ie = rtw_get_ie(ies,  WLAN_EID_SSID, &ssid_len_ori, ies_len);
 
-	/* RTW_INFO("%s hidden_ssid_mode:%u, ssid_ie:%p, ssid_len_ori:%d\n", __func__, hidden_ssid_mode, ssid_ie, ssid_len_ori); */
+	/* RTW_INFO("%s hidden_ssid_mode:%u, ssid_ie:%p, ssid_len_ori:%d\n", __FUNCTION__, hidden_ssid_mode, ssid_ie, ssid_len_ori); */
 
 	if (ssid_ie && ssid_len_ori > 0) {
 		switch (hidden_ssid_mode) {
@@ -5198,7 +5198,7 @@ static void rtw_hal_construct_P2PBeacon(_adapter *padapter, u8 *pframe, u32 *pLe
 	u8 *dbgbuf = pframe;
 	u8 dbgbufLen = 0, index = 0;
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 	/* #if defined (CONFIG_AP_MODE) && defined (CONFIG_NATIVEAP_MLME) */
 	/*	_enter_critical_bh(&pmlmepriv->bcn_update_lock, &irqL);
 	 * #endif */ /* #if defined (CONFIG_AP_MODE) && defined (CONFIG_NATIVEAP_MLME) */
@@ -5478,7 +5478,7 @@ static void rtw_hal_construct_P2PProbeRsp(_adapter *padapter, u8 *pframe, u32 *p
 	u8 *dbgbuf = pframe;
 	u8 dbgbufLen = 0, index = 0;
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
 	mac = adapter_mac_addr(padapter);
@@ -5805,7 +5805,7 @@ static void rtw_hal_construct_P2PNegoRsp(_adapter *padapter, u8 *pframe, u32 *pL
 	u8 *dbgbuf = pframe;
 	u8 dbgbufLen = 0, index = 0;
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
 	fctrl = &(pwlanhdr->frame_ctl);
@@ -6204,7 +6204,7 @@ static void rtw_hal_construct_P2PInviteRsp(_adapter *padapter, u8 *pframe, u32 *
 	u8 dbgbufLen = 0, index = 0;
 
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
 	fctrl = &(pwlanhdr->frame_ctl);
@@ -6448,7 +6448,7 @@ static void rtw_hal_construct_P2PProvisionDisRsp(_adapter *padapter, u8 *pframe,
 	u8 *dbgbuf = pframe;
 	u8 dbgbufLen = 0, index = 0;
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
@@ -6613,7 +6613,7 @@ static void rtw_hal_construct_beacon(_adapter *padapter,
 	u8	bc_addr[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
 
-	/* RTW_INFO("%s\n", __func__); */
+	/* RTW_INFO("%s\n", __FUNCTION__); */
 
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
@@ -6695,7 +6695,7 @@ _ConstructBeacon:
 
 	*pLength = pktlen;
 
-	/* RTW_INFO("%s bcn_sz=%d\n", __func__, pktlen); */
+	/* RTW_INFO("%s bcn_sz=%d\n", __FUNCTION__, pktlen); */
 
 }
 
@@ -6708,7 +6708,7 @@ static void rtw_hal_construct_PSPoll(_adapter *padapter,
 	struct mlme_ext_priv	*pmlmeext = &(padapter->mlmeextpriv);
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
 
-	/* RTW_INFO("%s\n", __func__); */
+	/* RTW_INFO("%s\n", __FUNCTION__); */
 
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
@@ -6749,7 +6749,7 @@ void rtw_hal_construct_NullFunctionData(
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
 
 
-	/* RTW_INFO("%s:%d\n", __func__, bForcePowerSave); */
+	/* RTW_INFO("%s:%d\n", __FUNCTION__, bForcePowerSave); */
 
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
@@ -6811,7 +6811,7 @@ void rtw_hal_construct_ProbeRsp(_adapter *padapter, u8 *pframe, u32 *pLength,
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
 	WLAN_BSSID_EX  *cur_network = &(pmlmeinfo->network);
 
-	/*RTW_INFO("%s\n", __func__);*/
+	/*RTW_INFO("%s\n", __FUNCTION__);*/
 
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
@@ -6911,7 +6911,7 @@ static void rtw_hal_construct_ARPRsp(
 	/* for TKIP Cal MIC */
 	u8	*payload = pframe;
 	u8	EncryptionHeadOverhead = 0, arp_offset = 0;
-	/* RTW_INFO("%s:%d\n", __func__, bForcePowerSave); */
+	/* RTW_INFO("%s:%d\n", __FUNCTION__, bForcePowerSave); */
 
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
@@ -7001,9 +7001,9 @@ static void rtw_hal_construct_ARPRsp(
 				    get_my_bssid(&(pmlmeinfo->network)));
 		SET_ARP_PKT_TARGET_IP_ADDR(pARPRspPkt,
 					   pIPAddress);
-		RTW_INFO("%s Target Mac Addr:" MAC_FMT "\n", __func__,
+		RTW_INFO("%s Target Mac Addr:" MAC_FMT "\n", __FUNCTION__,
 			 MAC_ARG(get_my_bssid(&(pmlmeinfo->network))));
-		RTW_INFO("%s Target IP Addr" IP_FMT "\n", __func__,
+		RTW_INFO("%s Target IP Addr" IP_FMT "\n", __FUNCTION__,
 			 IP_ARG(pIPAddress));
 	}
 
@@ -7045,7 +7045,7 @@ static void rtw_hal_construct_na_message(_adapter *padapter,
 	/* for TKIP Cal MIC */
 	u8 *payload = pframe;
 	u8 EncryptionHeadOverhead = 0, na_msg_offset = 0;
-	/* RTW_INFO("%s:%d\n", __func__, bForcePowerSave); */
+	/* RTW_INFO("%s:%d\n", __FUNCTION__, bForcePowerSave); */
 
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
@@ -7394,7 +7394,7 @@ static void rtw_hal_construct_GTKRsp(
 	static u8	GTKbody_a[11] = {0x01, 0x03, 0x00, 0x5F, 0x02, 0x03, 0x12, 0x00, 0x10, 0x42, 0x0B};
 	u8	*pGTKRspPkt = pframe;
 	u8	EncryptionHeadOverhead = 0;
-	/* RTW_INFO("%s:%d\n", __func__, bForcePowerSave); */
+	/* RTW_INFO("%s:%d\n", __FUNCTION__, bForcePowerSave); */
 
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 
@@ -7723,7 +7723,7 @@ void rtw_hal_set_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 		}
 
 		RTW_INFO("%s(): HW_VAR_SET_TX_CMD: KEK KCK %p %d\n",
-			 __func__, &pframe[index - tx_desc],
+			 __FUNCTION__, &pframe[index - tx_desc],
 			 (tx_desc + RTW_KCK_LEN + RTW_KEK_LEN));
 #endif
 
@@ -7754,7 +7754,7 @@ void rtw_hal_set_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 		}
 
 		RTW_INFO("%s(): HW_VAR_SET_TX_CMD: GTK RSP %p %d\n",
-			 __func__, &pframe[index - tx_desc],
+			 __FUNCTION__, &pframe[index - tx_desc],
 			 (tx_desc + GTKLength));
 #endif
 
@@ -8978,7 +8978,7 @@ void rtw_hal_set_p2p_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 
 #if 0
 	RTW_INFO("%s(): HW_VAR_SET_TX_CMD: PROBE RSP %p %d\n",
-		__func__, &pframe[index - tx_desc], (P2PBCNLength + tx_desc));
+		__FUNCTION__, &pframe[index - tx_desc], (P2PBCNLength + tx_desc));
 #endif
 
 	CurtPktPageNum = (u8)PageNum(tx_desc + P2PBCNLength, page_size);
@@ -8998,7 +8998,7 @@ void rtw_hal_set_p2p_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 				 P2PProbeRspLength, _FALSE, _FALSE, _FALSE);
 
 	/* RTW_INFO("%s(): HW_VAR_SET_TX_CMD: PROBE RSP %p %d\n",  */
-	/*	__func__, &pframe[index-tx_desc], (P2PProbeRspLength+tx_desc)); */
+	/*	__FUNCTION__, &pframe[index-tx_desc], (P2PProbeRspLength+tx_desc)); */
 
 	CurtPktPageNum = (u8)PageNum(tx_desc + P2PProbeRspLength, page_size);
 
@@ -9017,7 +9017,7 @@ void rtw_hal_set_p2p_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 				 P2PNegoRspLength, _FALSE, _FALSE, _FALSE);
 
 	/* RTW_INFO("%s(): HW_VAR_SET_TX_CMD: QOS NULL DATA %p %d\n",  */
-	/*	__func__, &pframe[index-tx_desc], (NegoRspLength+tx_desc)); */
+	/*	__FUNCTION__, &pframe[index-tx_desc], (NegoRspLength+tx_desc)); */
 
 	CurtPktPageNum = (u8)PageNum(tx_desc + P2PNegoRspLength, page_size);
 
@@ -9036,7 +9036,7 @@ void rtw_hal_set_p2p_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 				 P2PInviteRspLength, _FALSE, _FALSE, _FALSE);
 
 	/* RTW_INFO("%s(): HW_VAR_SET_TX_CMD: QOS NULL DATA %p %d\n",  */
-	/* __func__, &pframe[index-tx_desc], (InviteRspLength+tx_desc)); */
+	/* __FUNCTION__, &pframe[index-tx_desc], (InviteRspLength+tx_desc)); */
 
 	CurtPktPageNum = (u8)PageNum(tx_desc + P2PInviteRspLength, page_size);
 
@@ -9056,7 +9056,7 @@ void rtw_hal_set_p2p_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 				 P2PPDRspLength, _FALSE, _FALSE, _FALSE);
 
 	/* RTW_INFO("%s(): HW_VAR_SET_TX_CMD: QOS NULL DATA %p %d\n",  */
-	/*	__func__, &pframe[index-tx_desc], (PDRspLength+tx_desc)); */
+	/*	__FUNCTION__, &pframe[index-tx_desc], (PDRspLength+tx_desc)); */
 
 	CurtPktPageNum = (u8)PageNum(tx_desc + P2PPDRspLength, page_size);
 
@@ -9370,7 +9370,7 @@ static void _rtw_hal_set_fw_rsvd_page(_adapter *adapter, bool finished, u8 *page
 	if (page_num) {
 		ReservedPagePacket = rtw_zmalloc(MAX_CMDBUF_SZ);
 		if (!ReservedPagePacket) {
-			RTW_WARN("%s: alloc ReservedPagePacket fail!\n", __func__);
+			RTW_WARN("%s: alloc ReservedPagePacket fail!\n", __FUNCTION__);
 			*page_num = 0xFF;
 			return;
 		}
@@ -9392,7 +9392,7 @@ static void _rtw_hal_set_fw_rsvd_page(_adapter *adapter, bool finished, u8 *page
 
 		pcmdframe = rtw_alloc_cmdxmitframe(pxmitpriv);
 		if (pcmdframe == NULL) {
-			RTW_ERR("%s: alloc ReservedPagePacket fail!\n", __func__);
+			RTW_ERR("%s: alloc ReservedPagePacket fail!\n", __FUNCTION__);
 			return;
 		}
 
@@ -9608,7 +9608,7 @@ download_page:
 
 	if (TotalPacketLen > MaxRsvdPageBufSize) {
 		RTW_ERR("%s : rsvd page size is not enough!!TotalPacketLen %d, MaxRsvdPageBufSize %d\n",
-			 __func__, TotalPacketLen, MaxRsvdPageBufSize);
+			 __FUNCTION__, TotalPacketLen, MaxRsvdPageBufSize);
 		rtw_warn_on(1);
 		goto error;
 	} else {
@@ -10008,9 +10008,7 @@ void rtw_lps_state_chk(_adapter *adapter, u8 ps_mode)
 
 		if (ps_ready == _FALSE) {
 			RTW_ERR(FUNC_ADPT_FMT" PS_MODE_ACTIVE check failed\n", FUNC_ADPT_ARG(adapter));
-			/*
 			rtw_warn_on(1);
-			*/
 		}
 	}
 }
@@ -10345,7 +10343,7 @@ SetHalDefVar(_adapter *adapter, HAL_DEF_VARIABLE variable, void *value)
 		hal_data->bDisableTXPowerTraining = *((u8 *)value);
 		break;
 	default:
-		RTW_PRINT("%s: [WARNING] HAL_DEF_VARIABLE(%d) not defined!\n", __func__, variable);
+		RTW_PRINT("%s: [WARNING] HAL_DEF_VARIABLE(%d) not defined!\n", __FUNCTION__, variable);
 		bResult = _FAIL;
 		break;
 	}
@@ -10449,7 +10447,7 @@ GetHalDefVar(_adapter *adapter, HAL_DEF_VARIABLE variable, void *value)
 		break;
 #endif
 	default:
-		RTW_PRINT("%s: [WARNING] HAL_DEF_VARIABLE(%d) not defined!\n", __func__, variable);
+		RTW_PRINT("%s: [WARNING] HAL_DEF_VARIABLE(%d) not defined!\n", __FUNCTION__, variable);
 		bResult = _FAIL;
 		break;
 	}
@@ -10728,7 +10726,7 @@ void linked_info_dump(_adapter *padapter, u8 benable)
 	if (padapter->bLinkInfoDump == benable)
 		return;
 
-	RTW_INFO("%s %s\n", __func__, (benable) ? "enable" : "disable");
+	RTW_INFO("%s %s\n", __FUNCTION__, (benable) ? "enable" : "disable");
 
 	if (benable) {
 #ifdef CONFIG_LPS
@@ -10892,7 +10890,7 @@ void rtw_store_phy_info(_adapter *padapter, union recv_frame *prframe)
 	psample_pkt_rssi->data_rate = pattrib->data_rate;
 	ptr = prframe->u.hdr.rx_data;
 	dframe_type = GetFrameType(ptr);
-	/*RTW_INFO("=>%s\n", __func__);*/
+	/*RTW_INFO("=>%s\n", __FUNCTION__);*/
 
 
 	if (precvpriv->store_law_data_flag) {
@@ -10912,14 +10910,14 @@ void rtw_store_phy_info(_adapter *padapter, union recv_frame *prframe)
 #ifdef DBG_RX_DFRAME_RAW_DATA
 		if ((dframe_type == WIFI_DATA_TYPE) || (dframe_type == WIFI_QOS_DATA_TYPE) || (padapter->registrypriv.mp_mode == 1)) {
 
-			/*RTW_INFO("=>%s WIFI_DATA_TYPE or WIFI_QOS_DATA_TYPE\n", __func__);*/
+			/*RTW_INFO("=>%s WIFI_DATA_TYPE or WIFI_QOS_DATA_TYPE\n", __FUNCTION__);*/
 			if (psta) {
 				if (IS_MCAST(get_ra(get_recvframe_data(prframe))))
 					psta_dframe_info = &psta->sta_dframe_info_bmc;
 				else
 					psta_dframe_info = &psta->sta_dframe_info;
 				/*RTW_INFO("=>%s psta->cmn.mac_addr="MAC_FMT" !\n",
-					__func__, MAC_ARG(psta->cmn.mac_addr));*/
+					__FUNCTION__, MAC_ARG(psta->cmn.mac_addr));*/
 				if ((_rtw_memcmp(psta->cmn.mac_addr, bc_addr, ETH_ALEN) != _TRUE) || (padapter->registrypriv.mp_mode == 1)) {
 					psta_dframe_info->sta_data_rate = pattrib->data_rate;
 					psta_dframe_info->sta_sgi = pattrib->sgi;
@@ -11638,7 +11636,7 @@ u8 rtw_hal_get_gpio(_adapter *adapter, u8 gpio_num)
 		value =  (rtw_read8(adapter, gpio_pin_input_val) & BIT(gpio_num_to_set)) >> gpio_num_to_set;
 
 	rtw_ps_deny_cancel(adapter, PS_DENY_IOCTL);
-	RTW_INFO("%s direction=%d value=%d\n", __func__, direction, value);
+	RTW_INFO("%s direction=%d value=%d\n", __FUNCTION__, direction, value);
 
 	return value;
 }
@@ -11674,10 +11672,10 @@ int  rtw_hal_set_gpio_output_value(_adapter *adapter, u8 gpio_num, bool isHigh)
 		else
 			rtw_write8(adapter, gpio_pin_output_val, rtw_read8(adapter, gpio_pin_output_val) & ~BIT(gpio_num_to_set));
 
-		RTW_INFO("%s Set gpio %x[%d]=%d\n", __func__, REG_GPIO_PIN_CTRL + 1, gpio_num, isHigh);
+		RTW_INFO("%s Set gpio %x[%d]=%d\n", __FUNCTION__, REG_GPIO_PIN_CTRL + 1, gpio_num, isHigh);
 		res = 0;
 	} else {
-		RTW_INFO("%s The gpio is input,not be set!\n", __func__);
+		RTW_INFO("%s The gpio is input,not be set!\n", __FUNCTION__);
 		res = -1;
 	}
 
@@ -11693,7 +11691,7 @@ int rtw_hal_config_gpio(_adapter *adapter, u8 gpio_num, bool isOutput)
 	if (rtw_hal_gpio_func_check(adapter, gpio_num) == _FAIL)
 		return -1;
 
-	RTW_INFO("%s gpio_num =%d direction=%d\n", __func__, gpio_num, isOutput);
+	RTW_INFO("%s gpio_num =%d direction=%d\n", __FUNCTION__, gpio_num, isOutput);
 
 	rtw_ps_deny(adapter, PS_DENY_IOCTL);
 
@@ -11723,7 +11721,7 @@ int rtw_hal_register_gpio_interrupt(_adapter *adapter, int gpio_num, void(*callb
 
 	if (IS_HARDWARE_TYPE_8188E(adapter)) {
 		if (gpio_num > 7 || gpio_num < 4) {
-			RTW_PRINT("%s The gpio number does not included 4~7.\n", __func__);
+			RTW_PRINT("%s The gpio number does not included 4~7.\n", __FUNCTION__);
 			return -1;
 		}
 	}
@@ -11735,7 +11733,7 @@ int rtw_hal_register_gpio_interrupt(_adapter *adapter, int gpio_num, void(*callb
 	/* Read GPIO direction */
 	direction = (rtw_read8(adapter, REG_GPIO_PIN_CTRL + 2) & BIT(gpio_num)) >> gpio_num;
 	if (direction) {
-		RTW_PRINT("%s Can't register output gpio as interrupt.\n", __func__);
+		RTW_PRINT("%s Can't register output gpio as interrupt.\n", __FUNCTION__);
 		return -1;
 	}
 
@@ -11768,7 +11766,7 @@ int rtw_hal_disable_gpio_interrupt(_adapter *adapter, int gpio_num)
 
 	if (IS_HARDWARE_TYPE_8188E(adapter)) {
 		if (gpio_num > 7 || gpio_num < 4) {
-			RTW_INFO("%s The gpio number does not included 4~7.\n", __func__);
+			RTW_INFO("%s The gpio number does not included 4~7.\n", __FUNCTION__);
 			return -1;
 		}
 	}
@@ -12022,7 +12020,7 @@ void rtw_dump_phy_rxcnts_preprocess(_adapter *padapter, u8 rx_cnt_mode)
 
 	if ((!(padapter->dump_rx_cnt_mode & DUMP_PHY_RX_COUNTER)) && (rx_cnt_mode & DUMP_PHY_RX_COUNTER)) {
 		rtw_hal_get_odm_var(padapter, HAL_ODM_INITIAL_GAIN, &initialgain, NULL);
-		RTW_INFO("%s CurIGValue:0x%02x\n", __func__, initialgain);
+		RTW_INFO("%s CurIGValue:0x%02x\n", __FUNCTION__, initialgain);
 		rtw_hal_set_odm_var(padapter, HAL_ODM_INITIAL_GAIN, &initialgain, _FALSE);
 		/*disable dynamic functions, such as high power, DIG*/
 		rtw_phydm_ability_backup(padapter);
@@ -12061,8 +12059,8 @@ void rtw_dump_rx_counters(_adapter *padapter)
 	if (padapter->dump_rx_cnt_mode & DUMP_PHY_RX_COUNTER) {
 		_rtw_memset(&rx_counter, 0, sizeof(struct dbg_rx_counter));
 		rtw_dump_phy_rx_counters(padapter, &rx_counter);
-		/* RTW_INFO("%s: OFDM_FA =%d\n", __func__, rx_counter.rx_ofdm_fa); */
-		/* RTW_INFO("%s: CCK_FA =%d\n", __func__, rx_counter.rx_cck_fa); */
+		/* RTW_INFO("%s: OFDM_FA =%d\n", __FUNCTION__, rx_counter.rx_ofdm_fa); */
+		/* RTW_INFO("%s: CCK_FA =%d\n", __FUNCTION__, rx_counter.rx_cck_fa); */
 		RTW_INFO("Phy Received packet OK:%d CRC error:%d FA Counter: %d\n", rx_counter.rx_pkt_ok, rx_counter.rx_pkt_crc_error,
 			 rx_counter.rx_ofdm_fa + rx_counter.rx_cck_fa);
 		rtw_reset_phy_rx_counters(padapter);

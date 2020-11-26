@@ -21,14 +21,13 @@
 #include "bsp_mipi_csi.h"
 #include "combo_rx/combo_rx_reg.h"
 #include "combo_rx/combo_rx_reg_i.h"
-#include "combo_csi/combo_csi_reg.h"
 #include "sunxi_mipi.h"
 #include "../platform/platform_cfg.h"
 #define MIPI_MODULE_NAME "vin_mipi"
 
 #define IS_FLAG(x, y) (((x)&(y)) == y)
 
-struct mipi_dev *glb_mipi[VIN_MAX_MIPI];
+static LIST_HEAD(mipi_drv_list);
 
 static struct combo_format sunxi_mipi_formats[] = {
 	{
@@ -80,18 +79,6 @@ static struct combo_format sunxi_mipi_formats[] = {
 		.code = MEDIA_BUS_FMT_YVYU8_2X8,
 		.bit_width = YUV8,
 	}, {
-		.code = MEDIA_BUS_FMT_UYVY8_1X16,
-		.bit_width = YUV8,
-	}, {
-		.code = MEDIA_BUS_FMT_VYUY8_1X16,
-		.bit_width = YUV8,
-	}, {
-		.code = MEDIA_BUS_FMT_YUYV8_1X16,
-		.bit_width = YUV8,
-	}, {
-		.code = MEDIA_BUS_FMT_YVYU8_1X16,
-		.bit_width = YUV8,
-	}, {
 		.code = MEDIA_BUS_FMT_UYVY10_2X10,
 		.bit_width = YUV10,
 	}, {
@@ -106,7 +93,6 @@ static struct combo_format sunxi_mipi_formats[] = {
 	}
 };
 
-#if defined CONFIG_ARCH_SUN8IW16P1
 void combo_rx_mipi_init(struct v4l2_subdev *sd)
 {
 	struct mipi_dev *mipi = v4l2_get_subdevdata(sd);
@@ -137,7 +123,6 @@ void combo_rx_mipi_init(struct v4l2_subdev *sd)
 
 	cmb_rx_mode_sel(mipi->id, D_PHY);
 	cmb_rx_app_pixel_out(mipi->id, TWO_PIXEL);
-	cmb_rx_mipi_stl_time(mipi->id, mipi->time_hs);
 	cmb_rx_mipi_ctr(mipi->id, &mipi_ctr);
 	cmb_rx_mipi_dphy_mapping(mipi->id, &mipi_map);
 }
@@ -262,12 +247,11 @@ void combo_rx_init(struct v4l2_subdev *sd)
 		cmb_rx_phya_b_ck_en(mipi->id, 1);
 		cmb_rx_phya_c_ck_en(mipi->id, 1);
 	}
-	cmb_rx_phya_signal_dly_en(mipi->id, 1);
+	cmb_rx_phya_singal_dly_en(mipi->id, 0);
 	cmb_rx_phya_offset(mipi->id, mipi->pyha_offset);
 
 	switch (mipi->if_type) {
 	case V4L2_MBUS_PARALLEL:
-	case V4L2_MBUS_BT656:
 		cmb_rx_mode_sel(mipi->id, CMOS);
 		cmb_rx_app_pixel_out(mipi->id, ONE_PIXEL);
 		break;
@@ -290,36 +274,7 @@ void combo_rx_init(struct v4l2_subdev *sd)
 
 	cmb_rx_enable(mipi->id);
 }
-#elif defined CONFIG_ARCH_SUN50IW10P1
-void combo_csi_init(struct v4l2_subdev *sd)
-{
-	struct mipi_dev *mipi = v4l2_get_subdevdata(sd);
 
-	cmb_phy_power_enable(mipi->id);
-
-	cmb_phy0_ibias_en(mipi->id, 1);
-	cmb_phy_lane_num_enable(mipi->id);
-	cmb_phy0_term_dly(mipi->id, 0x1);
-	cmb_phy0_hs_dly(mipi->id, 0x2);
-	cmb_phy0_s2p_width(mipi->id, 0x2);
-	cmb_phy0_s2p_dly(mipi->id, 0x3);
-	cmb_phy_mipi_lpnum_enable(mipi->id);
-	cmb_phy0_mipilp_dbc_en(mipi->id, 1);
-	cmb_phy0_en(mipi->id, 1);
-
-	cmb_port_lane_num(mipi->id, 0x4);
-	cmb_port_out_num(mipi->id, 0x1);
-	cmb_port_lane_map(mipi->id);
-	cmb_port_mipi_enpack_enable(mipi->id);
-	cmb_port_mipi_yuv_seq(mipi->id, 0x2);
-	cmb_port_mipi_ch0_dt(mipi->id, 0x2b);
-	cmb_port_mipi_ch_trig_en(mipi->id, 1);
-	cmb_port_enable(mipi->id);
-
-	cmb_phy_top_enable(mipi->id);
-
-}
-#endif
 static enum pkt_fmt get_pkt_fmt(u32 code)
 {
 	switch (code) {
@@ -371,7 +326,10 @@ static unsigned int data_formats_type(u32 code)
 		return RAW;
 	}
 }
-
+static int sunxi_mipi_subdev_s_power(struct v4l2_subdev *sd, int enable)
+{
+	return 0;
+}
 static int sunxi_mipi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct mipi_dev *mipi = v4l2_get_subdevdata(sd);
@@ -394,17 +352,10 @@ static int sunxi_mipi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 	mipi->cmb_mode = res->res_combo_mode & 0xf;
 	mipi->terminal_resistance = res->res_combo_mode & CMB_TERMINAL_RES;
 	mipi->pyha_offset = (res->res_combo_mode & 0x70) >> 4;
-	if (res->res_time_hs)
-		mipi->time_hs = res->res_time_hs;
-	else
-		mipi->time_hs = 0x30;
 
 	if (enable) {
-#if defined CONFIG_ARCH_SUN8IW16P1
 		combo_rx_init(sd);
-#elif defined CONFIG_ARCH_SUN50IW10P1
-		combo_csi_init(sd);
-#else
+
 		bsp_mipi_csi_dphy_init(mipi->id);
 		mipi_dphy_cfg_1data(mipi->id, 0x75, 0xa0);
 		bsp_mipi_csi_set_para(mipi->id, &mipi->csi2_cfg);
@@ -415,17 +366,12 @@ static int sunxi_mipi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		bsp_mipi_csi_dphy_disable(mipi->id, mipi->sensor_flags);
 		bsp_mipi_csi_dphy_enable(mipi->id, mipi->sensor_flags);
 		bsp_mipi_csi_protocol_enable(mipi->id);
-#endif
 	} else {
-#if defined CONFIG_ARCH_SUN8IW16P1
 		cmb_rx_disable(mipi->id);
-#elif defined CONFIG_ARCH_SUN50IW10P1
-		cmb_phy_top_disable(mipi->id);
-#else
+
 		bsp_mipi_csi_dphy_disable(mipi->id, mipi->sensor_flags);
 		bsp_mipi_csi_protocol_disable(mipi->id);
 		bsp_mipi_csi_dphy_exit(mipi->id);
-#endif
 	}
 
 	vin_log(VIN_LOG_FMT, "%s%d %s, lane_num %d, code: %x field: %d\n",
@@ -435,6 +381,23 @@ static int sunxi_mipi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 	return 0;
 }
 
+static int sunxi_mipi_enum_mbus_code(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_pad_config *cfg,
+				     struct v4l2_subdev_mbus_code_enum *code)
+{
+	return 0;
+}
+
+static struct v4l2_mbus_framefmt *__mipi_get_format(
+		struct mipi_dev *mipi, struct v4l2_subdev_pad_config *cfg,
+		enum v4l2_subdev_format_whence which)
+{
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
+		return cfg ? &cfg->try_fmt : NULL;
+
+	return &mipi->format;
+}
+
 static int sunxi_mipi_subdev_get_fmt(struct v4l2_subdev *sd,
 				     struct v4l2_subdev_pad_config *cfg,
 				     struct v4l2_subdev_format *fmt)
@@ -442,7 +405,7 @@ static int sunxi_mipi_subdev_get_fmt(struct v4l2_subdev *sd,
 	struct mipi_dev *mipi = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *mf;
 
-	mf = &mipi->format;
+	mf = __mipi_get_format(mipi, cfg, fmt->which);
 	if (!mf)
 		return -EINVAL;
 
@@ -452,15 +415,22 @@ static int sunxi_mipi_subdev_get_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static struct combo_format *__mipi_try_format(struct v4l2_mbus_framefmt *mf)
+static struct combo_format *__mipi_find_format(
+	struct v4l2_mbus_framefmt *mf)
 {
-	struct combo_format *mipi_fmt = NULL;
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(sunxi_mipi_formats); i++)
 		if (mf->code == sunxi_mipi_formats[i].code)
-			mipi_fmt = &sunxi_mipi_formats[i];
+			return &sunxi_mipi_formats[i];
+	return NULL;
+}
 
+static struct combo_format *__mipi_try_format(struct v4l2_mbus_framefmt *mf)
+{
+	struct combo_format *mipi_fmt;
+
+	mipi_fmt = __mipi_find_format(mf);
 	if (mipi_fmt == NULL)
 		mipi_fmt = &sunxi_mipi_formats[0];
 
@@ -481,7 +451,7 @@ static int sunxi_mipi_subdev_set_fmt(struct v4l2_subdev *sd,
 		fmt->format.width, fmt->format.height,
 		fmt->format.code, fmt->format.field);
 
-	mf = &mipi->format;
+	mf = __mipi_get_format(mipi, cfg, fmt->which);
 
 	if (fmt->pad == MIPI_PAD_SOURCE) {
 		if (mf) {
@@ -501,6 +471,11 @@ static int sunxi_mipi_subdev_set_fmt(struct v4l2_subdev *sd,
 		mutex_unlock(&mipi->subdev_lock);
 	}
 
+	return 0;
+}
+
+int sunxi_mipi_subdev_init(struct v4l2_subdev *sd, u32 val)
+{
 	return 0;
 }
 
@@ -591,17 +566,24 @@ static int sunxi_mipi_s_mbus_config(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static const struct v4l2_subdev_core_ops sunxi_mipi_core_ops = {
+	.s_power = sunxi_mipi_subdev_s_power,
+	.init = sunxi_mipi_subdev_init,
+};
+
 static const struct v4l2_subdev_video_ops sunxi_mipi_subdev_video_ops = {
 	.s_stream = sunxi_mipi_subdev_s_stream,
 	.s_mbus_config = sunxi_mipi_s_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops sunxi_mipi_subdev_pad_ops = {
+	.enum_mbus_code = sunxi_mipi_enum_mbus_code,
 	.get_fmt = sunxi_mipi_subdev_get_fmt,
 	.set_fmt = sunxi_mipi_subdev_set_fmt,
 };
 
 static struct v4l2_subdev_ops sunxi_mipi_subdev_ops = {
+	.core = &sunxi_mipi_core_ops,
 	.video = &sunxi_mipi_subdev_video_ops,
 	.pad = &sunxi_mipi_subdev_pad_ops,
 };
@@ -662,14 +644,14 @@ static int mipi_probe(struct platform_device *pdev)
 	mipi->id = pdev->id;
 	mipi->pdev = pdev;
 
-#if defined CONFIG_ARCH_SUN8IW16P1
+	spin_lock_init(&mipi->slock);
+
 	cmb_rx_set_base_addr(mipi->id, (unsigned long)mipi->base);
-#elif defined CONFIG_ARCH_SUN50IW10P1
-	cmb_csi_set_base_addr(mipi->id, (unsigned long)mipi->base);
-#else
+
 	bsp_mipi_csi_set_base_addr(mipi->id, (unsigned long)mipi->base);
 	bsp_mipi_dphy_set_base_addr(mipi->id, (unsigned long)mipi->base + 0x1000);
-#endif
+
+	list_add_tail(&mipi->mipi_list, &mipi_drv_list);
 
 	ret = __mipi_init_subdev(mipi);
 	if (ret < 0) {
@@ -678,8 +660,6 @@ static int mipi_probe(struct platform_device *pdev)
 	}
 
 	platform_set_drvdata(pdev, mipi);
-	glb_mipi[mipi->id] = mipi;
-
 	vin_log(VIN_LOG_MIPI, "mipi%d probe end!\n", mipi->id);
 	return 0;
 
@@ -701,7 +681,7 @@ static int mipi_remove(struct platform_device *pdev)
 	v4l2_set_subdevdata(sd, NULL);
 	if (mipi->base)
 		iounmap(mipi->base);
-	media_entity_cleanup(&mipi->subdev.entity);
+	list_del(&mipi->mipi_list);
 	kfree(mipi);
 	return 0;
 }
@@ -750,10 +730,15 @@ void sunxi_combo_wdr_config(struct v4l2_subdev *sd,
 
 struct v4l2_subdev *sunxi_mipi_get_subdev(int id)
 {
-	if (id < VIN_MAX_MIPI && glb_mipi[id])
-		return &glb_mipi[id]->subdev;
-	else
-		return NULL;
+	struct mipi_dev *mipi;
+
+	list_for_each_entry(mipi, &mipi_drv_list, mipi_list) {
+		if (mipi->id == id) {
+			mipi->use_cnt++;
+			return &mipi->subdev;
+		}
+	}
+	return NULL;
 }
 
 int sunxi_mipi_platform_register(void)

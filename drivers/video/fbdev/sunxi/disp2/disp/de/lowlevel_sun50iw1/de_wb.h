@@ -24,24 +24,6 @@
 
 #include "de_rtmx.h"
 
-enum wb_irq_flag {
-	WB_IRQ_FLAG_INTR = 1 << 0,
-	WB_IRQ_FLAG_MASK = WB_IRQ_FLAG_INTR,
-};
-
-enum wb_irq_state {
-	WB_IRQ_STATE_PROC_END = 1 << 0,
-	WB_IRQ_STATE_FINISH   = 1 << 4,
-	WB_IRQ_STATE_OVERFLOW = 1 << 5,
-	WB_IRQ_STATE_TIMEOUT  = 1 << 6,
-	WB_IRQ_STATE_MASK =
-		WB_IRQ_STATE_PROC_END
-		| WB_IRQ_STATE_FINISH
-		| WB_IRQ_STATE_OVERFLOW
-		| WB_IRQ_STATE_TIMEOUT,
-};
-
-
 s32 WB_EBIOS_Set_Reg_Base(u32 sel, uintptr_t base);
 uintptr_t WB_EBIOS_Get_Reg_Base(u32 sel);
 s32 WB_EBIOS_Init(struct disp_bsp_init_para *para);

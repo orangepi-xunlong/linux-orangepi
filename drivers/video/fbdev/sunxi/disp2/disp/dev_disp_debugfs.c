@@ -824,60 +824,6 @@ static ssize_t dispdbg_info_write(struct file *file, const char __user *buf,
 		dispdbg_priv.info[count] = 0;
 	return count;
 }
-
-static ssize_t dispdbg_debug_level_write(struct file *file, const char __user *buf,
-				  size_t count, loff_t *ppos)
-{
-	char tmp_buf[20] = {0};
-
-	if (copy_from_user(tmp_buf, buf, count)) {
-		pr_warn("copy_from_user fail\n");
-		return 0;
-	}
-	printk("set debug level = %s\n", tmp_buf);
-
-	if (tmp_buf[0] >= '0' && tmp_buf[0] <= '9') {
-		bsp_disp_set_print_level((tmp_buf[0] - '0'));
-	} else {
-		printk("please set debug level in 0~9 range\n");
-		return 0;
-	}
-
-	printk(KERN_WARNING "get debug level = %d\n", bsp_disp_get_print_level());
-	return count;
-}
-
-static ssize_t dispdbg_debug_level_read(struct file *file, char __user *buf,
-				 size_t count, loff_t *ppos)
-{
-	char tmp_buf[20] = {0};
-	unsigned int debug_level = 0;
-	int len = 0;
-
-	debug_level = bsp_disp_get_print_level();
-	snprintf(tmp_buf, 20, "%d", debug_level);
-	len = strlen(tmp_buf);
-
-	if (copy_to_user
-	    ((void __user *)buf, (const void *)tmp_buf,
-	     (unsigned long)len)) {
-		pr_warn("copy_to_user fail\n");
-		return 0;
-	}
-
-	return count;
-}
-
-static int dispdbg_debug_level_open(struct inode *inode, struct file *file)
-{
-	return 0;
-}
-static int dispdbg_debug_level_release(struct inode *inode, struct file *file)
-{
-	return 0;
-}
-
-
 static const struct file_operations command_ops = {
 	.write = dispdbg_command_write,
 	.read = dispdbg_command_read,
@@ -908,12 +854,6 @@ static const struct file_operations info_ops = {
 	.read = dispdbg_info_read,
 	.open = dispdbg_info_open,
 	.release = dispdbg_info_release,
-};
-static const struct file_operations dbglvl_ops = {
-	.write = dispdbg_debug_level_write,
-	.read = dispdbg_debug_level_read,
-	.open = dispdbg_debug_level_open,
-	.release = dispdbg_debug_level_release,
 };
 
 #if defined(CONFIG_SUNXI_MPP)
@@ -1048,9 +988,6 @@ int dispdbg_init(void)
 		goto Fail;
 	if (!debugfs_create_file
 	    ("info", 0644, my_dispdbg_root, NULL, &info_ops))
-		goto Fail;
-	if (!debugfs_create_file
-		("dbglvl", 0644, my_dispdbg_root, NULL, &dbglvl_ops))
 		goto Fail;
 #if defined(CONFIG_SUNXI_MPP)
 	if (debugfs_mpp_root) {

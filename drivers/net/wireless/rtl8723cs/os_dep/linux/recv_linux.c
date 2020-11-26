@@ -721,12 +721,6 @@ int rtw_recv_indicatepkt(_adapter *padapter, union recv_frame *precv_frame)
 	_pkt *skb;
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
 	struct rx_pkt_attrib *pattrib;
-#ifdef DBG_IP_R_Monitor
-	int i;
-	struct wlan_network *cur_network = &(pmlmepriv->cur_network);
-	u8 *ehdr_pos = get_recvframe_data(precv_frame);
-	int pkt_len = get_recvframe_len(precv_frame);
-#endif/*DBG_IP_R_Monitor*/
 
 	if (NULL == precv_frame)
 		goto _recv_indicatepkt_drop;
@@ -763,23 +757,6 @@ int rtw_recv_indicatepkt(_adapter *padapter, union recv_frame *precv_frame)
 
 	if (pattrib->eth_type == 0x888e)
 		RTW_PRINT("recv eapol packet\n");
-
-#ifdef DBG_IP_R_Monitor
-	#define LEN_ARP_OP_HDR 7 /*ARP OERATION */
-	if ((pattrib->eth_type) == ETH_P_ARP) {
-		if (check_fwstate(pmlmepriv, WIFI_ASOC_STATE) == _TRUE) {
-			if (_rtw_memcmp(pattrib->src, cur_network->network.MacAddress, ETH_ALEN)) {
-				if (ehdr_pos[ETHERNET_HEADER_SIZE+LEN_ARP_OP_HDR] == 2) {
-					RTW_INFO("%s,[DBG_ARP] Rx ARP RSP Packet with Dst= "MAC_FMT" ;SeqNum = %d !\n",
-						__FUNCTION__, MAC_ARG(pattrib->dst), pattrib->seq_num);
-					for (i = 0; i < (pkt_len -ETHERNET_HEADER_SIZE); i++)
-						RTW_INFO("0x%x ", ehdr_pos[i+ETHERNET_HEADER_SIZE]);
-					RTW_INFO("\n");
-				}
-			}
-		}
-	}
-#endif/*DBG_IP_R_Monitor*/
 
 #ifdef CONFIG_AUTO_AP_MODE
 #if 1 /* for testing */

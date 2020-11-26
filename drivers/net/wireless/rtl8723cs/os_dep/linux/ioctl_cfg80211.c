@@ -2949,15 +2949,13 @@ static int cfg80211_rtw_join_ibss(struct wiphy *wiphy, struct net_device *ndev,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
 	struct cfg80211_chan_def *pch_def;
 #endif
-	struct ieee80211_channel *pch = NULL;
+	struct ieee80211_channel *pch;
 	int ret = 0;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
 	pch_def = (struct cfg80211_chan_def *)(&params->chandef);
 	pch = (struct ieee80211_channel *) pch_def->chan;
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31))
-	pch = (struct ieee80211_channel *)(params->channel);
-#else
 	pch = (struct ieee80211_channel *)(params->channel);
 #endif
 
@@ -6837,13 +6835,6 @@ static void rtw_cfg80211_preinit_wiphy(_adapter *adapter, struct wiphy *wiphy)
 								#endif
 #endif
 								;
-
-#if defined(CONFIG_ANDROID) && !defined(RTW_SINGLE_WIPHY)
-	if (is_primary_adapter(adapter)) {
-		wiphy->interface_modes &= ~(BIT(NL80211_IFTYPE_P2P_GO) | BIT(NL80211_IFTYPE_P2P_CLIENT));
-		RTW_INFO("%s primary- don't set p2p capability\n", __func__);
-	}
-#endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
 #ifdef CONFIG_AP_MODE

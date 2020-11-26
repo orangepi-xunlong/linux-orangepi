@@ -615,7 +615,7 @@ union recv_frame *decryptor(_adapter *padapter, union recv_frame *precv_frame)
 
 #ifdef DBG_RX_DECRYPTOR
 		RTW_INFO("[%s] %d:prxstat->bdecrypted:%d,  prxattrib->encrypt:%d,  Setting psecuritypriv->hw_decrypted = %d\n",
-			 __func__,
+			 __FUNCTION__,
 			 __LINE__,
 			 prxattrib->bdecrypted,
 			 prxattrib->encrypt,
@@ -666,7 +666,7 @@ union recv_frame *decryptor(_adapter *padapter, union recv_frame *precv_frame)
 			psecuritypriv->hw_decrypted = _TRUE;
 #ifdef DBG_RX_DECRYPTOR
 			RTW_INFO("[%s] %d:prxstat->bdecrypted:%d,  prxattrib->encrypt:%d,  Setting psecuritypriv->hw_decrypted = %d\n",
-				 __func__,
+				 __FUNCTION__,
 				 __LINE__,
 				 prxattrib->bdecrypted,
 				 prxattrib->encrypt,
@@ -678,7 +678,7 @@ union recv_frame *decryptor(_adapter *padapter, union recv_frame *precv_frame)
 		DBG_COUNTER(padapter->rx_logs.core_rx_post_decrypt_unknown);
 #ifdef DBG_RX_DECRYPTOR
 		RTW_INFO("[%s] %d:prxstat->bdecrypted:%d,  prxattrib->encrypt:%d,  Setting psecuritypriv->hw_decrypted = %d\n",
-			 __func__,
+			 __FUNCTION__,
 			 __LINE__,
 			 prxattrib->bdecrypted,
 			 prxattrib->encrypt,
@@ -1192,7 +1192,7 @@ sint sta2sta_data_frame(
 #endif
 
 
-	/* RTW_INFO("[%s] %d, seqnum:%d\n", __func__, __LINE__, pattrib->seq_num); */
+	/* RTW_INFO("[%s] %d, seqnum:%d\n", __FUNCTION__, __LINE__, pattrib->seq_num); */
 
 	if ((check_fwstate(pmlmepriv, WIFI_ADHOC_STATE) == _TRUE) ||
 	    (check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE) == _TRUE)) {
@@ -2935,7 +2935,7 @@ int amsdu_to_msdu(_adapter *padapter, union recv_frame *prframe)
 
 		sub_pkt = rtw_os_alloc_msdu_pkt(prframe, nSubframe_Length, pdata);
 		if (sub_pkt == NULL) {
-			RTW_INFO("%s(): allocate sub packet fail !!!\n", __func__);
+			RTW_INFO("%s(): allocate sub packet fail !!!\n", __FUNCTION__);
 			break;
 		}
 

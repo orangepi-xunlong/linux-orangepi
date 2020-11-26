@@ -20,7 +20,6 @@
 #define DE_LCD_CLK "lcd0"
 #define DE_LCD_CLK_SRC "pll_video0"
 static struct clk *tv_clk;
-static struct clk *parent;
 static char modules_name[32] = "tv_ac200";
 /* static char key_name[20] = "tv_ac200_para"; */
 static enum disp_tv_mode g_tv_mode = DISP_TV_MOD_PAL;
@@ -257,8 +256,8 @@ static s32 tv_power_on(u32 on_off)
 
 static s32 tv_clk_init(void)
 {
-	if (tv_clk)
-		parent = clk_get_parent(tv_clk);
+	/* disp_sys_clk_set_parent(DE_LCD_CLK, DE_LCD_CLK_SRC); */
+
 	return 0;
 }
 
@@ -273,6 +272,7 @@ static s32 tv_clk_config(u32 mode)
 	unsigned long pixel_clk, pll_rate, lcd_rate, dclk_rate;
 	unsigned long pll_rate_set, lcd_rate_set, dclk_rate_set;
 	u32 pixel_repeat, tcon_div, lcd_div;
+	struct clk *parent = NULL;
 
 	if (mode == 11) {
 		pixel_clk = tv_video_timing[1].pixel_clk;
@@ -287,10 +287,9 @@ static s32 tv_clk_config(u32 mode)
 	lcd_rate = dclk_rate * tcon_div;
 	pll_rate = lcd_rate * lcd_div;
 
-	if (parent && tv_clk) {
-		clk_set_parent(tv_clk, parent);
+	parent = clk_get_parent(tv_clk);
+	if (parent)
 		clk_set_rate(parent, pll_rate);
-	}
 	pll_rate_set = clk_get_rate(parent);
 	lcd_rate_set = pll_rate_set / lcd_div;
 	clk_set_rate(tv_clk, lcd_rate_set);

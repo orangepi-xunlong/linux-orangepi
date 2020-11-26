@@ -58,6 +58,7 @@ int mac80211_rate_control_register(struct rate_control_ops *ops)
 
 	return 0;
 }
+EXPORT_SYMBOL(mac80211_rate_control_register);
 
 void mac80211_rate_control_unregister(struct rate_control_ops *ops)
 {
@@ -73,6 +74,7 @@ void mac80211_rate_control_unregister(struct rate_control_ops *ops)
 	}
 	mutex_unlock(&rate_ctrl_mutex);
 }
+EXPORT_SYMBOL(mac80211_rate_control_unregister);
 
 static struct rate_control_ops *
 ieee80211_try_rate_control_ops_get(const char *name)
@@ -289,6 +291,7 @@ bool xrmac_rate_control_send_low(struct ieee80211_sta *sta,
 	}
 	return false;
 }
+EXPORT_SYMBOL(xrmac_rate_control_send_low);
 
 static void rate_idx_match_mask(struct ieee80211_tx_rate *rate,
 				int n_bitrates, u32 mask)

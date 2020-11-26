@@ -505,7 +505,7 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	rdsdebug("conn %p pd %p cq %p %p\n", conn, ic->i_pd,
 		 ic->i_send_cq, ic->i_recv_cq);
 
-	goto out;
+	return ret;
 
 sends_out:
 	vfree(ic->i_sends);
@@ -530,7 +530,6 @@ send_cq_out:
 		ic->i_send_cq = NULL;
 rds_ibdev_out:
 	rds_ib_remove_conn(rds_ibdev, conn);
-out:
 	rds_ib_dev_put(rds_ibdev);
 
 	return ret;

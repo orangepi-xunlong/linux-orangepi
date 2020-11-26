@@ -1801,22 +1801,17 @@ static int ethtool_get_strings(struct net_device *dev, void __user *useraddr)
 
 	gstrings.len = ret;
 
-	if (gstrings.len) {
-		data = kcalloc(gstrings.len, ETH_GSTRING_LEN, GFP_USER);
-		if (!data)
-			return -ENOMEM;
+	data = kcalloc(gstrings.len, ETH_GSTRING_LEN, GFP_USER);
+	if (!data)
+		return -ENOMEM;
 
-		__ethtool_get_strings(dev, gstrings.string_set, data);
-	} else {
-		data = NULL;
-	}
+	__ethtool_get_strings(dev, gstrings.string_set, data);
 
 	ret = -EFAULT;
 	if (copy_to_user(useraddr, &gstrings, sizeof(gstrings)))
 		goto out;
 	useraddr += sizeof(gstrings);
-	if (gstrings.len &&
-	    copy_to_user(useraddr, data, gstrings.len * ETH_GSTRING_LEN))
+	if (copy_to_user(useraddr, data, gstrings.len * ETH_GSTRING_LEN))
 		goto out;
 	ret = 0;
 
@@ -1904,21 +1899,17 @@ static int ethtool_get_stats(struct net_device *dev, void __user *useraddr)
 		return -EFAULT;
 
 	stats.n_stats = n_stats;
-	if (n_stats) {
-		data = kmalloc(n_stats * sizeof(u64), GFP_USER);
-		if (!data)
-			return -ENOMEM;
+	data = kmalloc(n_stats * sizeof(u64), GFP_USER);
+	if (!data)
+		return -ENOMEM;
 
-		ops->get_ethtool_stats(dev, &stats, data);
-	} else {
-		data = NULL;
-	}
+	ops->get_ethtool_stats(dev, &stats, data);
 
 	ret = -EFAULT;
 	if (copy_to_user(useraddr, &stats, sizeof(stats)))
 		goto out;
 	useraddr += sizeof(stats);
-	if (n_stats && copy_to_user(useraddr, data, n_stats * sizeof(u64)))
+	if (copy_to_user(useraddr, data, stats.n_stats * sizeof(u64)))
 		goto out;
 	ret = 0;
 
@@ -1947,23 +1938,19 @@ static int ethtool_get_phy_stats(struct net_device *dev, void __user *useraddr)
 		return -EFAULT;
 
 	stats.n_stats = n_stats;
-	if (n_stats) {
-		data = kmalloc_array(n_stats, sizeof(u64), GFP_USER);
-		if (!data)
-			return -ENOMEM;
+	data = kmalloc_array(n_stats, sizeof(u64), GFP_USER);
+	if (!data)
+		return -ENOMEM;
 
-		mutex_lock(&phydev->lock);
-		phydev->drv->get_stats(phydev, &stats, data);
-		mutex_unlock(&phydev->lock);
-	} else {
-		data = NULL;
-	}
+	mutex_lock(&phydev->lock);
+	phydev->drv->get_stats(phydev, &stats, data);
+	mutex_unlock(&phydev->lock);
 
 	ret = -EFAULT;
 	if (copy_to_user(useraddr, &stats, sizeof(stats)))
 		goto out;
 	useraddr += sizeof(stats);
-	if (n_stats && copy_to_user(useraddr, data, n_stats * sizeof(u64)))
+	if (copy_to_user(useraddr, data, stats.n_stats * sizeof(u64)))
 		goto out;
 	ret = 0;
 
@@ -2410,16 +2397,12 @@ roll_back:
 	return ret;
 }
 
-static int ethtool_set_per_queue(struct net_device *dev,
-				 void __user *useraddr, u32 sub_cmd)
+static int ethtool_set_per_queue(struct net_device *dev, void __user *useraddr)
 {
 	struct ethtool_per_queue_op per_queue_opt;
 
 	if (copy_from_user(&per_queue_opt, useraddr, sizeof(per_queue_opt)))
 		return -EFAULT;
-
-	if (per_queue_opt.sub_command != sub_cmd)
-		return -EINVAL;
 
 	switch (per_queue_opt.sub_command) {
 	case ETHTOOL_GCOALESCE:
@@ -2686,7 +2669,7 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 		rc = ethtool_get_phy_stats(dev, useraddr);
 		break;
 	case ETHTOOL_PERQUEUE:
-		rc = ethtool_set_per_queue(dev, useraddr, sub_cmd);
+		rc = ethtool_set_per_queue(dev, useraddr);
 		break;
 	case ETHTOOL_GLINKSETTINGS:
 		rc = ethtool_get_link_ksettings(dev, useraddr);

@@ -2,13 +2,13 @@
  * DHD Bus Module for PCIE
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -993,9 +993,6 @@ dhdpcie_dongle_attach(dhd_bus_t *bus)
 			break;
 		case BCM4347_CHIP_GRPID:
 			bus->dongle_ram_base = CR4_4347_RAM_BASE;
-			break;
-		case BCM4362_CHIP_ID:
-			bus->dongle_ram_base = CR4_4362_RAM_BASE;
 			break;
 		default:
 			bus->dongle_ram_base = 0;
@@ -3172,32 +3169,72 @@ dhd_bus_rx_frame(struct dhd_bus *bus, void* pkt, int ifidx, uint pkt_count)
 void
 dhdpcie_bus_wtcm8(dhd_bus_t *bus, ulong offset, uint8 data)
 {
+#ifdef CUSTOMER_HW_ALLWINNER
+	struct pci_page page;
+
+	page = sunxi_pcie_bus_cutpage_config(bus->dev, 2, offset);
+	*(volatile uint8 *)(page.mem_base + page.offset) = (uint8)data;
+	sunxi_pcie_bus_cutpage_config(bus->dev, 0, 0xff);
+#else
 	W_REG(bus->dhd->osh, (volatile uint8 *)(bus->tcm + offset), data);
+#endif
 }
 
 uint8
 dhdpcie_bus_rtcm8(dhd_bus_t *bus, ulong offset)
 {
 	volatile uint8 data;
+#ifdef CUSTOMER_HW_ALLWINNER
+	struct pci_page page;
+
+	page = sunxi_pcie_bus_cutpage_config(bus->dev, 2, offset);
+	data = *(volatile uint8 *)(page.mem_base + page.offset);
+	sunxi_pcie_bus_cutpage_config(bus->dev, 0, 0xff);
+#else
 	data = R_REG(bus->dhd->osh, (volatile uint8 *)(bus->tcm + offset));
+#endif
 	return data;
 }
 
 void
 dhdpcie_bus_wtcm32(dhd_bus_t *bus, ulong offset, uint32 data)
 {
+#ifdef CUSTOMER_HW_ALLWINNER
+	struct pci_page page;
+
+	page = sunxi_pcie_bus_cutpage_config(bus->dev, 2, offset);
+	*(volatile uint32 *)(page.mem_base + page.offset) = (uint32)data;
+	sunxi_pcie_bus_cutpage_config(bus->dev, 0, 0xff);
+#else
 	W_REG(bus->dhd->osh, (volatile uint32 *)(bus->tcm + offset), data);
+#endif
 }
 void
 dhdpcie_bus_wtcm16(dhd_bus_t *bus, ulong offset, uint16 data)
 {
+#ifdef CUSTOMER_HW_ALLWINNER
+	struct pci_page page;
+
+	page = sunxi_pcie_bus_cutpage_config(bus->dev, 2, offset);
+	*(volatile uint16 *)(page.mem_base + page.offset) = (uint16)data;
+	sunxi_pcie_bus_cutpage_config(bus->dev, 0, 0xff);
+#else
 	W_REG(bus->dhd->osh, (volatile uint16 *)(bus->tcm + offset), data);
+#endif
 }
 #ifdef DHD_SUPPORT_64BIT
 void
 dhdpcie_bus_wtcm64(dhd_bus_t *bus, ulong offset, uint64 data)
 {
+#ifdef CUSTOMER_HW_ALLWINNER
+	struct pci_page page;
+
+	page = sunxi_pcie_bus_cutpage_config(bus->dev, 2, offset);
+	*(volatile uint64 *)(page.mem_base + page.offset) = (uint64)data;
+	sunxi_pcie_bus_cutpage_config(bus->dev, 0, 0xff);
+#else
 	W_REG(bus->dhd->osh, (volatile uint64 *)(bus->tcm + offset), data);
+#endif
 }
 #endif /* DHD_SUPPORT_64BIT */
 
@@ -3205,7 +3242,15 @@ uint16
 dhdpcie_bus_rtcm16(dhd_bus_t *bus, ulong offset)
 {
 	volatile uint16 data;
+#ifdef CUSTOMER_HW_ALLWINNER
+	struct pci_page page;
+
+	page = sunxi_pcie_bus_cutpage_config(bus->dev, 2, offset);
+	data = *(volatile uint16 *)(page.mem_base + page.offset);
+	sunxi_pcie_bus_cutpage_config(bus->dev, 0, 0xff);
+#else
 	data = R_REG(bus->dhd->osh, (volatile uint16 *)(bus->tcm + offset));
+#endif
 	return data;
 }
 
@@ -3213,7 +3258,15 @@ uint32
 dhdpcie_bus_rtcm32(dhd_bus_t *bus, ulong offset)
 {
 	volatile uint32 data;
+#ifdef CUSTOMER_HW_ALLWINNER
+	struct pci_page page;
+
+	page = sunxi_pcie_bus_cutpage_config(bus->dev, 2, offset);
+	data = *(volatile uint32 *)(page.mem_base + page.offset);
+	sunxi_pcie_bus_cutpage_config(bus->dev, 0, 0xff);
+#else
 	data = R_REG(bus->dhd->osh, (volatile uint32 *)(bus->tcm + offset));
+#endif
 	return data;
 }
 
@@ -3222,7 +3275,15 @@ uint64
 dhdpcie_bus_rtcm64(dhd_bus_t *bus, ulong offset)
 {
 	volatile uint64 data;
+#ifdef CUSTOMER_HW_ALLWINNER
+	struct pci_page page;
+
+	page = sunxi_pcie_bus_cutpage_config(bus->dev, 2, offset);
+	data = *(volatile uint64 *)(page.mem_base + page.offset);
+	sunxi_pcie_bus_cutpage_config(bus->dev, 0, 0xff);
+#else
 	data = R_REG(bus->dhd->osh, (volatile uint64 *)(bus->tcm + offset));
+#endif
 	return data;
 }
 #endif /* DHD_SUPPORT_64BIT */
@@ -7091,11 +7152,6 @@ dhdpcie_chipmatch(uint16 vendor, uint16 device)
 	if ((device == BCM4361_D11AC_ID) || (device == BCM4361_D11AC2G_ID) ||
 		(device == BCM4361_D11AC5G_ID) || (device == BCM4361_CHIP_ID))
 		return 0;
-
-	if ((device == BCM4362_D11AX_ID) || (device == BCM4362_D11AX2G_ID) ||
-		(device == BCM4362_D11AX5G_ID) || (device == BCM4362_CHIP_ID)) {
-		return 0;
-	}
 
 	if ((device == BCM4365_D11AC_ID) || (device == BCM4365_D11AC2G_ID) ||
 		(device == BCM4365_D11AC5G_ID) || (device == BCM4365_CHIP_ID))

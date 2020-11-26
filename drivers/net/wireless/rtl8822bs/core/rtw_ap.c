@@ -660,7 +660,7 @@ void rtw_ap_update_sta_ra_info(_adapter *padapter, struct sta_info *psta)
 	psta->wireless_mode = sta_band;
 	rtw_hal_update_sta_wset(padapter, psta);
 	RTW_INFO("%s=> mac_id:%d , tx_ra_bitmap:0x%016llx, networkType:0x%02x\n",
-			__func__, psta->cmn.mac_id, tx_ra_bitmap, psta->wireless_mode);
+			__FUNCTION__, psta->cmn.mac_id, tx_ra_bitmap, psta->wireless_mode);
 }
 
 #ifdef CONFIG_BMC_TX_RATE_SELECT
@@ -931,7 +931,7 @@ void update_sta_info_apmode(_adapter *padapter, struct sta_info *psta)
 	/* set intf_tag to if1 */
 	/* psta->intf_tag = 0; */
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	/*alloc macid when call rtw_alloc_stainfo(),release macid when call rtw_free_stainfo()*/
 
@@ -1253,7 +1253,7 @@ static void update_hw_ht_param(_adapter *padapter)
 	struct mlme_ext_priv	*pmlmeext = &padapter->mlmeextpriv;
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 
 	/* handle A-MPDU parameter field */
@@ -1280,7 +1280,7 @@ static void update_hw_ht_param(_adapter *padapter)
 		for (i = 0; i < 16; i++)
 			pmlmeinfo->HT_caps.HT_cap_element.MCS_rate[i] &= MCS_rate_1R[i];
 #endif
-		RTW_INFO("%s(): WLAN_HT_CAP_SM_PS_STATIC\n", __func__);
+		RTW_INFO("%s(): WLAN_HT_CAP_SM_PS_STATIC\n", __FUNCTION__);
 	}
 
 	/*  */
@@ -1686,7 +1686,7 @@ int rtw_check_beacon_data(_adapter *padapter, u8 *pbuf,  int len)
 	/* ht_capab, ht_oper */
 	/* WPS IE */
 
-	RTW_INFO("%s, len=%d\n", __func__, len);
+	RTW_INFO("%s, len=%d\n", __FUNCTION__, len);
 
 	if (!MLME_IS_AP(padapter) && !MLME_IS_MESH(padapter))
 		return _FAIL;
@@ -2391,7 +2391,7 @@ static int rtw_ap_set_key(_adapter *padapter, u8 *key, u8 alg, int keyid, u8 set
 	struct cmd_priv	*pcmdpriv = &(padapter->cmdpriv);
 	int res = _SUCCESS;
 
-	/* RTW_INFO("%s\n", __func__); */
+	/* RTW_INFO("%s\n", __FUNCTION__); */
 
 	pcmd = (struct cmd_obj *)rtw_zmalloc(sizeof(struct cmd_obj));
 	if (pcmd == NULL) {
@@ -2449,7 +2449,7 @@ exit:
 
 int rtw_ap_set_group_key(_adapter *padapter, u8 *key, u8 alg, int keyid)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	return rtw_ap_set_key(padapter, key, alg, keyid, 1);
 }
@@ -2469,7 +2469,7 @@ int rtw_ap_set_wep_key(_adapter *padapter, u8 *key, u8 keylen, int keyid, u8 set
 		alg = _NO_PRIVACY_;
 	}
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	return rtw_ap_set_key(padapter, key, alg, keyid, set_tx);
 }
@@ -2649,7 +2649,7 @@ static void update_bcn_erpinfo_ie(_adapter *padapter)
 	unsigned char *p, *ie = pnetwork->IEs;
 	u32 len = 0;
 
-	RTW_INFO("%s, ERP_enable=%d\n", __func__, pmlmeinfo->ERP_enable);
+	RTW_INFO("%s, ERP_enable=%d\n", __FUNCTION__, pmlmeinfo->ERP_enable);
 
 	if (!pmlmeinfo->ERP_enable)
 		return;
@@ -2676,7 +2676,7 @@ static void update_bcn_erpinfo_ie(_adapter *padapter)
 
 static void update_bcn_htcap_ie(_adapter *padapter)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 }
 
@@ -2701,7 +2701,7 @@ static void update_bcn_htinfo_ie(_adapter *padapter)
 
 
 	RTW_INFO("%s current operation mode=0x%X\n",
-		 __func__, pmlmepriv->ht_op_mode);
+		 __FUNCTION__, pmlmepriv->ht_op_mode);
 
 	RTW_INFO("num_sta_40mhz_intolerant(%d), 20mhz_width_req(%d), intolerant_ch_rpt(%d), olbc(%d)\n",
 		pmlmepriv->num_sta_40mhz_intolerant, pmlmepriv->ht_20mhz_width_req, pmlmepriv->ht_intolerant_ch_reported, ATOMIC_READ(&pmlmepriv->olbc));
@@ -2726,7 +2726,7 @@ static void update_bcn_htinfo_ie(_adapter *padapter)
 				beacon_updated = _TRUE;
 				*/
 
-				RTW_INFO("%s:switching to 20Mhz\n", __func__);
+				RTW_INFO("%s:switching to 20Mhz\n", __FUNCTION__);
 
 				/*TODO : cur_bwmode/cur_ch_offset switches to 20Mhz*/
 			}
@@ -2749,7 +2749,7 @@ static void update_bcn_htinfo_ie(_adapter *padapter)
 					beacon_updated = _TRUE;
 					*/
 
-					RTW_INFO("%s:switching back to 40Mhz\n", __func__);
+					RTW_INFO("%s:switching back to 40Mhz\n", __FUNCTION__);
 				}
 			}
 		}
@@ -2765,19 +2765,19 @@ static void update_bcn_htinfo_ie(_adapter *padapter)
 
 static void update_bcn_rsn_ie(_adapter *padapter)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 }
 
 static void update_bcn_wpa_ie(_adapter *padapter)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 }
 
 static void update_bcn_wmm_ie(_adapter *padapter)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 }
 
@@ -2793,7 +2793,7 @@ static void update_bcn_wps_ie(_adapter *padapter)
 	u32 ielen = pnetwork->IELength;
 
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	pwps_ie = rtw_get_wps_ie(ie + _FIXED_IE_LENGTH_, ielen - _FIXED_IE_LENGTH_, NULL, &wps_ielen);
 
@@ -2855,7 +2855,7 @@ static void update_bcn_p2p_ie(_adapter *padapter)
 
 static void update_bcn_vendor_spec_ie(_adapter *padapter, u8 *oui)
 {
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 
 	if (_rtw_memcmp(RTW_WPA_OUI, oui, 4))
 		update_bcn_wpa_ie(padapter);
@@ -3061,7 +3061,7 @@ int rtw_ht_operation_update(_adapter *padapter)
 		return 0;*/
 
 	RTW_INFO("%s current operation mode=0x%X\n",
-		 __func__, pmlmepriv->ht_op_mode);
+		 __FUNCTION__, pmlmepriv->ht_op_mode);
 
 	if (!(pmlmepriv->ht_op_mode & HT_INFO_OPERATION_MODE_NON_GF_DEVS_PRESENT)
 	    && pmlmepriv->num_sta_ht_no_gf) {
@@ -3112,7 +3112,7 @@ int rtw_ht_operation_update(_adapter *padapter)
 	}
 
 	RTW_INFO("%s new operation mode=0x%X changes=%d\n",
-		 __func__, pmlmepriv->ht_op_mode, op_mode_changes);
+		 __FUNCTION__, pmlmepriv->ht_op_mode, op_mode_changes);
 
 	return op_mode_changes;
 
@@ -3279,7 +3279,7 @@ void bss_cap_update_on_sta_join(_adapter *padapter, struct sta_info *psta)
 			}
 			RTW_INFO("%s STA " MAC_FMT " - no "
 				 "greenfield, num of non-gf stations %d\n",
-				 __func__, MAC_ARG(psta->cmn.mac_addr),
+				 __FUNCTION__, MAC_ARG(psta->cmn.mac_addr),
 				 pmlmepriv->num_sta_ht_no_gf);
 		}
 
@@ -3290,7 +3290,7 @@ void bss_cap_update_on_sta_join(_adapter *padapter, struct sta_info *psta)
 			}
 			RTW_INFO("%s STA " MAC_FMT " - 20 MHz HT, "
 				 "num of 20MHz HT STAs %d\n",
-				 __func__, MAC_ARG(psta->cmn.mac_addr),
+				 __FUNCTION__, MAC_ARG(psta->cmn.mac_addr),
 				 pmlmepriv->num_sta_ht_20mhz);
 		}
 
@@ -3302,7 +3302,7 @@ void bss_cap_update_on_sta_join(_adapter *padapter, struct sta_info *psta)
 		if (pmlmepriv->htpriv.ht_option == _TRUE) {
 			RTW_INFO("%s STA " MAC_FMT
 				 " - no HT, num of non-HT stations %d\n",
-				 __func__, MAC_ARG(psta->cmn.mac_addr),
+				 __FUNCTION__, MAC_ARG(psta->cmn.mac_addr),
 				 pmlmepriv->num_sta_no_ht);
 		}
 	}

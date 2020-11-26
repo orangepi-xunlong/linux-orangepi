@@ -18,5 +18,3 @@ obj-$(CONFIG_VDPO_DISP2_SUNXI) += disp2/vdpo/
 
 obj-$(CONFIG_EDP_DISP2_SUNXI) += disp2/edp/
 
-obj-$(CONFIG_EINK200_SUNXI) += disp2/eink200/
-

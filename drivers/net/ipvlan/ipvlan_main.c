@@ -63,52 +63,32 @@ static int ipvlan_set_port_mode(struct ipvl_port *port, u16 nval)
 {
 	struct ipvl_dev *ipvlan;
 	struct net_device *mdev = port->dev;
-	unsigned int flags;
-	int err;
+	int err = 0;
 
 	ASSERT_RTNL();
 	if (port->mode != nval) {
-		list_for_each_entry(ipvlan, &port->ipvlans, pnode) {
-			flags = ipvlan->dev->flags;
-			if (nval == IPVLAN_MODE_L3 || nval == IPVLAN_MODE_L3S) {
-				err = dev_change_flags(ipvlan->dev,
-						       flags | IFF_NOARP);
-			} else {
-				err = dev_change_flags(ipvlan->dev,
-						       flags & ~IFF_NOARP);
-			}
-			if (unlikely(err))
-				goto fail;
-		}
 		if (nval == IPVLAN_MODE_L3S) {
 			/* New mode is L3S */
 			err = ipvlan_register_nf_hook();
 			if (!err) {
 				mdev->l3mdev_ops = &ipvl_l3mdev_ops;
-				mdev->priv_flags |= IFF_L3MDEV_RX_HANDLER;
+				mdev->priv_flags |= IFF_L3MDEV_MASTER;
 			} else
-				goto fail;
+				return err;
 		} else if (port->mode == IPVLAN_MODE_L3S) {
 			/* Old mode was L3S */
-			mdev->priv_flags &= ~IFF_L3MDEV_RX_HANDLER;
+			mdev->priv_flags &= ~IFF_L3MDEV_MASTER;
 			ipvlan_unregister_nf_hook();
 			mdev->l3mdev_ops = NULL;
 		}
+		list_for_each_entry(ipvlan, &port->ipvlans, pnode) {
+			if (nval == IPVLAN_MODE_L3 || nval == IPVLAN_MODE_L3S)
+				ipvlan->dev->flags |= IFF_NOARP;
+			else
+				ipvlan->dev->flags &= ~IFF_NOARP;
+		}
 		port->mode = nval;
 	}
-	return 0;
-
-fail:
-	/* Undo the flags changes that have been done so far. */
-	list_for_each_entry_continue_reverse(ipvlan, &port->ipvlans, pnode) {
-		flags = ipvlan->dev->flags;
-		if (port->mode == IPVLAN_MODE_L3 ||
-		    port->mode == IPVLAN_MODE_L3S)
-			dev_change_flags(ipvlan->dev, flags | IFF_NOARP);
-		else
-			dev_change_flags(ipvlan->dev, flags & ~IFF_NOARP);
-	}
-
 	return err;
 }
 
@@ -158,7 +138,7 @@ static void ipvlan_port_destroy(struct net_device *dev)
 
 	dev->priv_flags &= ~IFF_IPVLAN_MASTER;
 	if (port->mode == IPVLAN_MODE_L3S) {
-		dev->priv_flags &= ~IFF_L3MDEV_RX_HANDLER;
+		dev->priv_flags &= ~IFF_L3MDEV_MASTER;
 		ipvlan_unregister_nf_hook();
 		dev->l3mdev_ops = NULL;
 	}
@@ -463,12 +443,7 @@ static int ipvlan_nl_changelink(struct net_device *dev,
 	struct ipvl_port *port = ipvlan_port_get_rtnl(ipvlan->phy_dev);
 	int err = 0;
 
-	if (!data)
-		return 0;
-	if (!ns_capable(dev_net(ipvlan->phy_dev)->user_ns, CAP_NET_ADMIN))
-		return -EPERM;
-
-	if (data[IFLA_IPVLAN_MODE]) {
+	if (data && data[IFLA_IPVLAN_MODE]) {
 		u16 nmode = nla_get_u16(data[IFLA_IPVLAN_MODE]);
 
 		err = ipvlan_set_port_mode(port, nmode);
@@ -535,8 +510,6 @@ static int ipvlan_link_new(struct net *src_net, struct net_device *dev,
 		struct ipvl_dev *tmp = netdev_priv(phy_dev);
 
 		phy_dev = tmp->phy_dev;
-		if (!ns_capable(dev_net(phy_dev)->user_ns, CAP_NET_ADMIN))
-			return -EPERM;
 	} else if (!netif_is_ipvlan_port(phy_dev)) {
 		err = ipvlan_port_create(phy_dev);
 		if (err < 0)

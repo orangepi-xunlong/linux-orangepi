@@ -187,37 +187,27 @@ long compat_ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case COMPAT_ION_IOC_SUNXI_FLUSH_RANGE:
 	{
 		compat_sunxi_cache_range data;
-		unsigned long start, end, size;
-		struct vm_area_struct *vma = NULL;
 
 		if (copy_from_user(&data, (void __user *)arg,
 				sizeof(compat_sunxi_cache_range)))
 			return -EFAULT;
 
-		start = (unsigned long)(unsigned int)data.start;
-		end = (unsigned long)(unsigned int)data.end;
-		size = end - start;
-
-		if (IS_ERR((void *)start) || IS_ERR((void *)end)) {
-			pr_err("flush 0x%lx, size 0x%lx fault user virt address!\n",
-			       start, end);
+		if (IS_ERR((void *)(unsigned long)data.start) ||
+				IS_ERR((void *)(unsigned long)data.end)) {
+			pr_err("flush 0x%x, size 0x%x fault user virt address!\n",
+			       (u32)data.start, (u32)data.end);
 			return -EFAULT;
 		}
 
 		pr_debug("compat flush range start:%lx end:%lx size:%lx\n",
-			 start, end, (end - start));
-
-		vma = find_vma(current->mm, start);
-		if (!vma || start < vma->vm_start || end > vma->vm_end) {
-			pr_err("comm:%s,compat flush range start:%lx end:%lx \
-			size:%lx\n", current->comm, start, end, (end - start));
-			return -EFAULT;
-		}
-
+			 (unsigned long)(unsigned int)data.start, (unsigned long)(unsigned int)data.end,
+			 (unsigned long)(unsigned int)(data.end - data.start));
 #ifdef CONFIG_ARM64
-		__dma_flush_range((void *)start, size);
+		__dma_flush_range((void *)(unsigned long)(unsigned int)data.start,
+			(unsigned long)(unsigned int)(data.end - data.start));
 #else
-		dmac_flush_range((void *)start, (void *)end);
+		dmac_flush_range((void *)(unsigned long)(unsigned int)data.start,
+			(void *)(unsigned long)(unsigned int)data.end);
 #endif
 
 		if (copy_to_user((void __user *)arg, &data, sizeof(data)))

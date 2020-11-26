@@ -31,6 +31,10 @@ unsigned long dev_pm_opp_get_voltage(struct dev_pm_opp *opp);
 
 unsigned long dev_pm_opp_get_freq(struct dev_pm_opp *opp);
 
+#ifdef CONFIG_ARM_SUNXI_AVS
+unsigned long dev_pm_opp_get_pval(struct dev_pm_opp *opp);
+#endif
+
 bool dev_pm_opp_is_turbo(struct dev_pm_opp *opp);
 
 int dev_pm_opp_get_opp_count(struct device *dev);

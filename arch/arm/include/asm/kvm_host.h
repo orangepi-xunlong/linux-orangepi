@@ -21,7 +21,6 @@
 
 #include <linux/types.h>
 #include <linux/kvm_types.h>
-#include <asm/cputype.h>
 #include <asm/kvm.h>
 #include <asm/kvm_asm.h>
 #include <asm/kvm_mmio.h>
@@ -324,17 +323,8 @@ static inline int kvm_arm_vcpu_arch_has_attr(struct kvm_vcpu *vcpu,
 
 static inline bool kvm_arm_harden_branch_predictor(void)
 {
-	switch(read_cpuid_part()) {
-#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
-	case ARM_CPU_PART_BRAHMA_B15:
-	case ARM_CPU_PART_CORTEX_A12:
-	case ARM_CPU_PART_CORTEX_A15:
-	case ARM_CPU_PART_CORTEX_A17:
-		return true;
-#endif
-	default:
-		return false;
-	}
+	/* No way to detect it yet, pretend it is not there. */
+	return false;
 }
 
 #define KVM_SSBD_UNKNOWN		-1

@@ -239,7 +239,7 @@ static int pctrltest_request_all_resource(void)
 		gpio_cfg = &gpio_list[gpio_index];
 
 		/*check function config */
-		config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFFFF);
+		config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFF);
 		pin_config_get(SUNXI_PINCTRL, gpio_cfg->name, &config);
 		if (gpio_cfg->mulsel != SUNXI_PINCFG_UNPACK_VALUE(config)) {
 			pr_warn("failed! mul value isn't equal as dt.\n");
@@ -248,7 +248,7 @@ static int pctrltest_request_all_resource(void)
 
 		/*check pull config */
 		if (gpio_cfg->pull != GPIO_PULL_DEFAULT) {
-			config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_PUD, 0xFFFFFF);
+			config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_PUD, 0xFFFF);
 			pin_config_get(SUNXI_PINCTRL, gpio_cfg->name, &config);
 			if (gpio_cfg->pull != SUNXI_PINCFG_UNPACK_VALUE(config)) {
 				pr_warn("failed! pull value isn't equal as dt.\n");
@@ -896,7 +896,7 @@ static int pctrltest_direction_input(void)
 	}
 
 	pr_warn("step3: Get pin mux value and check.\n");
-	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFFFF);
+	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFF);
 	pin_config_get(SUNXI_PINCTRL, pin_name, &config);
 	if (SUNXI_PINCFG_UNPACK_VALUE(config) != 0) {
 		pr_warn("check: set pin direction input failed !\n");
@@ -944,7 +944,7 @@ static int pctrltest_direction_output(void)
 	}
 
 	pr_warn("step3: Get pin mux value and check.\n");
-	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFFFF);
+	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFF);
 	pin_config_get(SUNXI_PINCTRL, pin_name, &config);
 	if (SUNXI_PINCFG_UNPACK_VALUE(config) != 1) {
 		pr_warn("check: set pinctrl gpio direction output failed !\n");
@@ -1234,7 +1234,7 @@ static int gpiotest_gpiolib(void)
 	}
 
 	pr_warn("step3: get gpio mux value and check.\n");
-	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFFFF);
+	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFF);
 	pin_config_get(SUNXI_PINCTRL, pin_name, &config);
 	if (SUNXI_PINCFG_UNPACK_VALUE(config) != 0) {
 		pr_warn("test gpio set direction input failed !\n");
@@ -1265,7 +1265,7 @@ static int gpiotest_gpiolib(void)
 	}
 
 	pr_warn("step3: get gpio mux value and check.\n");
-	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFFFF);
+	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, 0xFFFF);
 	pin_config_get(SUNXI_PINCTRL, pin_name, &config);
 	if (SUNXI_PINCFG_UNPACK_VALUE(config) != 1) {
 		pr_warn("faile!FUNC value not the same as expectation.\n");
@@ -1273,7 +1273,7 @@ static int gpiotest_gpiolib(void)
 	}
 
 	pr_warn("step4: get gpio data value and check.\n");
-	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DAT, 0xFFFFFF);
+	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DAT, 0xFFFF);
 	pin_config_get(SUNXI_PINCTRL, pin_name, &config);
 	if (SUNXI_PINCFG_UNPACK_VALUE(config) != 1) {
 		pr_warn("failed!DATA value not the same as expectation(1).\n");
@@ -1288,7 +1288,7 @@ static int gpiotest_gpiolib(void)
 	}
 
 	pr_warn("step6: get gpio data value and check.\n");
-	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DAT, 0xFFFFFF);
+	config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DAT, 0xFFFF);
 	pin_config_get(SUNXI_PINCTRL, pin_name, &config);
 	if (SUNXI_PINCFG_UNPACK_VALUE(config) != 0) {
 		pr_warn("failed!DATA value not the same as expectation(0).\n");
@@ -1650,8 +1650,6 @@ static int sunxi_pctrltest_probe(struct platform_device *pdev)
 
 static int sunxi_pctrltest_remove(struct platform_device *pdev)
 {
-	platform_set_drvdata(pdev, NULL);
-	pdev->dev.class = NULL;
 	class_unregister(&sunxi_pctrltest_class);
 	return 0;
 }

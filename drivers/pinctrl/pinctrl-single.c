@@ -630,7 +630,7 @@ static int pcs_pinconf_set(struct pinctrl_dev *pctldev,
 	struct pcs_device *pcs = pinctrl_dev_get_drvdata(pctldev);
 	struct pcs_function *func;
 	unsigned offset = 0, shift = 0, i, data, ret;
-	u32 arg;
+	u16 arg;
 	int j;
 
 	ret = pcs_get_function(pctldev, pin, &func);

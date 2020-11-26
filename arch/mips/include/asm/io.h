@@ -141,14 +141,14 @@ static inline void * phys_to_virt(unsigned long address)
 /*
  * ISA I/O bus memory addresses are 1:1 with the physical address.
  */
-static inline unsigned long isa_virt_to_bus(volatile void *address)
+static inline unsigned long isa_virt_to_bus(volatile void * address)
 {
-	return virt_to_phys(address);
+	return (unsigned long)address - PAGE_OFFSET;
 }
 
-static inline void *isa_bus_to_virt(unsigned long address)
+static inline void * isa_bus_to_virt(unsigned long address)
 {
-	return phys_to_virt(address);
+	return (void *)(address + PAGE_OFFSET);
 }
 
 #define isa_page_to_bus page_to_phys

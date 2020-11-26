@@ -922,8 +922,10 @@ static int hip04_mac_probe(struct platform_device *pdev)
 	}
 
 	ret = register_netdev(ndev);
-	if (ret)
+	if (ret) {
+		free_netdev(ndev);
 		goto alloc_fail;
+	}
 
 	return 0;
 

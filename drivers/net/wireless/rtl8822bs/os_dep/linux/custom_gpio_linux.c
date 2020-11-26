@@ -105,7 +105,7 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 	switch (onoff) {
 	case WLAN_PWDN_OFF:
 		RTW_INFO("%s: call customer specific GPIO(%d) to set wifi power down pin to 0\n",
-			 __func__, GPIO_WIFI_RESET);
+			 __FUNCTION__, GPIO_WIFI_RESET);
 
 #ifndef CONFIG_DONT_BUS_SCAN
 		if (GPIO_WIFI_RESET > 0)
@@ -115,7 +115,7 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 
 	case WLAN_PWDN_ON:
 		RTW_INFO("%s: callc customer specific GPIO(%d) to set wifi power down pin to 1\n",
-			 __func__, GPIO_WIFI_RESET);
+			 __FUNCTION__, GPIO_WIFI_RESET);
 
 		if (GPIO_WIFI_RESET > 0)
 			gpio_direction_output(GPIO_WIFI_RESET , 1);
@@ -131,7 +131,7 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 	case WLAN_BT_PWDN_OFF:
 		if (rtw_mp_mode == 1) {
 			RTW_INFO("%s: call customer specific GPIO to set wifi power down pin to 0\n",
-				 __func__);
+				 __FUNCTION__);
 			if (GPIO_BT_RESET > 0)
 				gpio_direction_output(GPIO_BT_RESET , 0);
 		}
@@ -140,7 +140,7 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 	case WLAN_BT_PWDN_ON:
 		if (rtw_mp_mode == 1) {
 			RTW_INFO("%s: callc customer specific GPIO to set wifi power down pin to 1 %x\n",
-				 __func__, GPIO_BT_RESET);
+				 __FUNCTION__, GPIO_BT_RESET);
 
 			if (GPIO_BT_RESET > 0)
 				gpio_direction_output(GPIO_BT_RESET , 1);
@@ -184,7 +184,7 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 	switch (onoff) {
 	case WLAN_PWDN_OFF:
 		RTW_INFO("%s: call customer specific GPIO to set wifi power down pin to 0\n",
-			 __func__);
+			 __FUNCTION__);
 		if (sprd_3rdparty_gpio_wifi_pwd > 0)
 			gpio_set_value(sprd_3rdparty_gpio_wifi_pwd, 0);
 
@@ -196,7 +196,7 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 
 	case WLAN_PWDN_ON:
 		RTW_INFO("%s: callc customer specific GPIO to set wifi power down pin to 1\n",
-			 __func__);
+			 __FUNCTION__);
 		if (sprd_3rdparty_gpio_wifi_pwd == 60) {
 			RTW_INFO("%s: turn on VSIM2 2.8V\n", __func__);
 			LDO_SetVoltLevel(LDO_LDO_SIM2, LDO_VOLT_LEVEL0);
@@ -209,15 +209,15 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 	case WLAN_POWER_OFF:
 #ifdef CONFIG_RTL8188E
 #ifdef CONFIG_WIF1_LDO
-		RTW_INFO("%s: turn off VDD-WIFI0 1.2V\n", __func__);
+		RTW_INFO("%s: turn off VDD-WIFI0 1.2V\n", __FUNCTION__);
 		LDO_TurnOffLDO(LDO_LDO_WIF1);
 #endif /* CONFIG_WIF1_LDO */
 
-		RTW_INFO("%s: turn off VDD-WIFI0 3.3V\n", __func__);
+		RTW_INFO("%s: turn off VDD-WIFI0 3.3V\n", __FUNCTION__);
 		LDO_TurnOffLDO(LDO_LDO_WIF0);
 
 		RTW_INFO("%s: call customer specific GPIO(%d) to turn off wifi power\n",
-			 __func__, sprd_3rdparty_gpio_wifi_power);
+			 __FUNCTION__, sprd_3rdparty_gpio_wifi_power);
 		if (sprd_3rdparty_gpio_wifi_power != 65535)
 			gpio_set_value(sprd_3rdparty_gpio_wifi_power, 0);
 #endif
@@ -226,11 +226,11 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 	case WLAN_POWER_ON:
 #ifdef CONFIG_RTL8188E
 		RTW_INFO("%s: call customer specific GPIO(%d) to turn on wifi power\n",
-			 __func__, sprd_3rdparty_gpio_wifi_power);
+			 __FUNCTION__, sprd_3rdparty_gpio_wifi_power);
 		if (sprd_3rdparty_gpio_wifi_power != 65535)
 			gpio_set_value(sprd_3rdparty_gpio_wifi_power, 1);
 
-		RTW_INFO("%s: turn on VDD-WIFI0 3.3V\n", __func__);
+		RTW_INFO("%s: turn on VDD-WIFI0 3.3V\n", __FUNCTION__);
 		LDO_TurnOnLDO(LDO_LDO_WIF0);
 		LDO_SetVoltLevel(LDO_LDO_WIF0, LDO_VOLT_LEVEL1);
 
@@ -244,7 +244,7 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 
 	case WLAN_BT_PWDN_OFF:
 		RTW_INFO("%s: call customer specific GPIO to set bt power down pin to 0\n",
-			 __func__);
+			 __FUNCTION__);
 #if defined(CONFIG_RTL8723B)
 		if (sprd_3rdparty_gpio_bt_reset > 0)
 			gpio_set_value(sprd_3rdparty_gpio_bt_reset, 0);
@@ -253,7 +253,7 @@ void rtw_wifi_gpio_wlan_ctrl(int onoff)
 
 	case WLAN_BT_PWDN_ON:
 		RTW_INFO("%s: callc customer specific GPIO to set bt power down pin to 1\n",
-			 __func__);
+			 __FUNCTION__);
 #if defined(CONFIG_RTL8723B)
 		if (sprd_3rdparty_gpio_bt_reset > 0)
 			gpio_set_value(sprd_3rdparty_gpio_bt_reset, 1);

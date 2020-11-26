@@ -2,13 +2,13 @@
  * DHD Linux header file (dhd_linux exports for cfg80211 and other components)
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -51,21 +51,7 @@
 #include <linux/earlysuspend.h>
 #endif /* defined(CONFIG_HAS_EARLYSUSPEND) && defined(DHD_USE_EARLYSUSPEND) */
 
-/* dongle status */
-enum wifi_adapter_status {
-	WIFI_STATUS_POWER_ON = 0,
-	WIFI_STATUS_ATTACH,
-	WIFI_STATUS_FW_READY,
-	WIFI_STATUS_DETTACH
-};
-#define wifi_chk_adapter_status(adapter, stat) (test_bit(stat, &(adapter)->status))
-#define wifi_get_adapter_status(adapter, stat) (test_bit(stat, &(adapter)->status))
-#define wifi_set_adapter_status(adapter, stat) (set_bit(stat, &(adapter)->status))
-#define wifi_clr_adapter_status(adapter, stat) (clear_bit(stat, &(adapter)->status))
-#define wifi_chg_adapter_status(adapter, stat) (change_bit(stat, &(adapter)->status))
-
 #define DHD_REGISTRATION_TIMEOUT  12000  /* msec : allowed time to finished dhd registration */
-#define DHD_FW_READY_TIMEOUT  5000  /* msec : allowed time to finished fw download */
 
 typedef struct wifi_adapter_info {
 	const char	*name;
@@ -79,8 +65,6 @@ typedef struct wifi_adapter_info {
 	uint		bus_type;
 	uint		bus_num;
 	uint		slot_num;
-	wait_queue_head_t status_event;
-	unsigned long status;
 #if defined(BT_OVER_SDIO)
 	const char	*btfw_path;
 #endif /* defined (BT_OVER_SDIO) */
@@ -136,9 +120,7 @@ typedef dhd_sta_t dhd_sta_pool_t;
 
 int dhd_wifi_platform_register_drv(void);
 void dhd_wifi_platform_unregister_drv(void);
-wifi_adapter_info_t *dhd_wifi_platform_attach_adapter(uint32 bus_type,
-	uint32 bus_num, uint32 slot_num, unsigned long status);
-wifi_adapter_info_t *dhd_wifi_platform_get_adapter(uint32 bus_type, uint32 bus_num,
+wifi_adapter_info_t* dhd_wifi_platform_get_adapter(uint32 bus_type, uint32 bus_num,
 	uint32 slot_num);
 int wifi_platform_set_power(wifi_adapter_info_t *adapter, bool on, unsigned long msec);
 int wifi_platform_bus_enumerate(wifi_adapter_info_t *adapter, bool device_present);

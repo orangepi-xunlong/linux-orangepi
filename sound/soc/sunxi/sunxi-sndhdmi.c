@@ -26,7 +26,7 @@
 
 #include "sunxi-pcm.h"
 
-static struct sndhdmi_priv sunxi_tdmhdmi;
+static struct sunxi_hdmi_priv sunxi_tdmhdmi;
 
 /*
  * sun8iw6 sound machine:

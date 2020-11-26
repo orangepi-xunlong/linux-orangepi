@@ -71,7 +71,7 @@ static bool dev_init;
 static struct mutex id_lock;
 static struct device *dmabuf_dev;
 
-u32 dbg_inf;
+u32 dbg_info;
 
 /* #define struct sunxi_trdev *to_sunxi_trdev(dev)
  * container_of(dev, struct sunxi_trdev, dev)
@@ -96,7 +96,7 @@ static struct resource tr_resource[] = {
 static ssize_t tr_debug_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "debug=%d\n", dbg_inf);
+	return sprintf(buf, "debug=%d\n", dbg_info);
 }
 
 static ssize_t tr_debug_store(struct device *dev,
@@ -104,9 +104,9 @@ static ssize_t tr_debug_store(struct device *dev,
 			      const char *buf, size_t count)
 {
 	if (strncasecmp(buf, "1", 1) == 0)
-		dbg_inf = 1;
+		dbg_info = 1;
 	else if (strncasecmp(buf, "0", 1) == 0)
-		dbg_inf = 0;
+		dbg_info = 0;
 	else
 		pr_err("Error input!\n");
 

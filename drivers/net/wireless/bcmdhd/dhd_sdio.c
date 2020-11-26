@@ -2,13 +2,13 @@
  * DHD Bus Module for SDIO
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -113,7 +113,6 @@ static int dhdsdio_resume(void *context);
 #define MAX_MEMBLOCK  (32 * 1024)	/* Block size used for downloading of dongle image */
 
 #define MAX_DATA_BUF	(64 * 1024)	/* Must be large enough to hold biggest possible glom */
-#define MAX_MEM_BUF	4096
 
 #ifndef DHD_FIRSTREAD
 #define DHD_FIRSTREAD   32
@@ -181,6 +180,12 @@ DHD_SPINWAIT_SLEEP_INIT(sdioh_spinwait_sleep);
 
 #ifdef PKT_STATICS
 pkt_statics_t tx_statics = {0};
+#endif
+
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+DEFINE_MUTEX(_dhd_sdio_mutex_lock_);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
 #endif
 
 #ifdef SUPPORT_MULTIPLE_BOARD_REV_FROM_HW
@@ -437,7 +442,6 @@ typedef struct dhd_bus {
 #endif /* defined (BT_OVER_SDIO) */
 	uint		txglomframes;	/* Number of tx glom frames (superframes) */
 	uint		txglompkts;		/* Number of packets from tx glom frames */
-	uint8		*membuf;		/* Buffer for dhdsdio_membytes */
 } dhd_bus_t;
 
 
@@ -879,8 +883,7 @@ dhdsdio_sr_cap(dhd_bus_t *bus)
 		(bus->sih->chip == BCM4371_CHIP_ID) ||
 		(BCM4349_CHIP(bus->sih->chip))		||
 		(bus->sih->chip == BCM4350_CHIP_ID) ||
-		(bus->sih->chip == BCM43012_CHIP_ID) ||
-		(bus->sih->chip == BCM4362_CHIP_ID)) {
+		(bus->sih->chip == BCM43012_CHIP_ID)) {
 		core_capext = TRUE;
 	} else {
 		core_capext = bcmsdh_reg_read(bus->sdh,
@@ -976,8 +979,7 @@ dhdsdio_sr_init(dhd_bus_t *bus)
 	if (CHIPID(bus->sih->chip) == BCM43430_CHIP_ID ||
 		CHIPID(bus->sih->chip) == BCM43018_CHIP_ID ||
 		CHIPID(bus->sih->chip) == BCM4339_CHIP_ID ||
-		CHIPID(bus->sih->chip) == BCM43012_CHIP_ID ||
-		CHIPID(bus->sih->chip) == BCM4362_CHIP_ID)
+		CHIPID(bus->sih->chip) == BCM43012_CHIP_ID)
 		dhdsdio_devcap_set(bus, SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC);
 
 	if (bus->sih->chip == BCM43012_CHIP_ID) {
@@ -1949,7 +1951,7 @@ dhd_enable_oob_intr(struct dhd_bus *bus, bool enable)
 	dhdsdio_clkctl(bus, CLK_SDONLY, FALSE);
 #endif /* !defined(HW_OOB) */
 }
-#endif
+#endif 
 
 int
 dhd_bus_txdata(struct dhd_bus *bus, void *pkt)
@@ -1990,7 +1992,7 @@ dhd_bus_txdata(struct dhd_bus *bus, void *pkt)
 	    (!DATAOK(bus)) || (bus->flowcontrol & NBITVAL(prec)) ||
 	    (bus->clkstate != CLK_AVAIL)) {
 		bool deq_ret;
-		int pkq_len = 0;
+		int pkq_len;
 
 		DHD_TRACE(("%s: deferring pktq len %d\n", __FUNCTION__, pktq_len(&bus->txq)));
 		bus->fcqueued++;
@@ -2019,12 +2021,10 @@ dhd_bus_txdata(struct dhd_bus *bus, void *pkt)
 		} else
 			ret = BCME_OK;
 
-		if (dhd_doflow) {
-			dhd_os_sdlock_txq(bus->dhd);
-			pkq_len = pktq_len(&bus->txq);
-			dhd_os_sdunlock_txq(bus->dhd);
-		}
-		if (dhd_doflow && pkq_len >= FCHI) {
+		dhd_os_sdlock_txq(bus->dhd);
+		pkq_len = pktq_len(&bus->txq);
+		dhd_os_sdunlock_txq(bus->dhd);
+		if (pkq_len >= FCHI) {
 			bool wlfc_enabled = FALSE;
 #ifdef PROP_TXSTATUS
 			wlfc_enabled = (dhd_wlfc_flowcontrol(bus->dhd, ON, FALSE) !=
@@ -2356,14 +2356,14 @@ static int dhdsdio_txpkt_preprocess(dhd_bus_t *bus, void *pkt, int chan, int txs
 			real_pad = pkt_len - act_len;
 
 			if (PKTTAILROOM(osh, pkt) < real_pad) {
-				DHD_INFO(("%s : insufficient tailroom %d for %d real_pad\n",
+				DHD_INFO(("%s : insufficient tailroom %d for %d real_pad\n", 
 					__func__, (int)PKTTAILROOM(osh, pkt), real_pad));
 				if (PKTPADTAILROOM(osh, pkt, real_pad)) {
 					DHD_ERROR(("CHK1: padding error size %d\n", real_pad));
 				} else
 					frame = (uint8 *)PKTDATA(osh, pkt);
 			}
-		} else
+		} else 
 #endif
 		{
 			swhdr_offset += SDPCM_HWEXT_LEN;
@@ -2666,11 +2666,9 @@ dhdsdio_sendfromq(dhd_bus_t *bus, uint maxframes)
 
 	}
 
-	if (dhd_doflow) {
-		dhd_os_sdlock_txq(bus->dhd);
-		txpktqlen = pktq_len(&bus->txq);
-		dhd_os_sdunlock_txq(bus->dhd);
-	}
+	dhd_os_sdlock_txq(bus->dhd);
+	txpktqlen = pktq_len(&bus->txq);
+	dhd_os_sdunlock_txq(bus->dhd);
 
 	/* Do flow-control if needed */
 	if (dhd->up && (dhd->busstate == DHD_BUS_DATA) && (txpktqlen < FCLOW)) {
@@ -2762,15 +2760,13 @@ dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 
 
 	/* Need to lock here to protect txseq and SDIO tx calls */
-	dhd_os_sdlock(bus->dhd);
 	if (bus->dhd->conf->txctl_tmo_fix > 0 && !TXCTLOK(bus)) {
 		bus->ctrl_wait = TRUE;
-		dhd_os_sdunlock(bus->dhd);
 		wait_event_interruptible_timeout(bus->ctrl_tx_wait, TXCTLOK(bus),
 			msecs_to_jiffies(bus->dhd->conf->txctl_tmo_fix));
-		dhd_os_sdlock(bus->dhd);
 		bus->ctrl_wait = FALSE;
 	}
+	dhd_os_sdlock(bus->dhd);
 
 	BUS_WAKE(bus);
 
@@ -3363,7 +3359,6 @@ dhdsdio_membytes(dhd_bus_t *bus, bool write, uint32 address, uint8 *data, uint s
 	int bcmerror = 0;
 	uint32 sdaddr;
 	uint dsize;
-	uint8 *pdata;
 
 	/* In remap mode, adjust address beyond socram and redirect
 	 * to devram at SOCDEVRAM_BP_ADDR since remap address > orig_ramsize
@@ -3392,20 +3387,10 @@ dhdsdio_membytes(dhd_bus_t *bus, bool write, uint32 address, uint8 *data, uint s
 		DHD_INFO(("%s: %s %d bytes at offset 0x%08x in window 0x%08x\n",
 		          __FUNCTION__, (write ? "write" : "read"), dsize, sdaddr,
 		          (address & SBSDIO_SBWINDOW_MASK)));
-		if (dsize <= MAX_MEM_BUF) {
-			pdata = bus->membuf;
-			if (write)
-				memcpy(bus->membuf, data, dsize);
-		} else {
-			pdata = data;
-		}
-		bcmerror = bcmsdh_rwdata(bus->sdh, write, sdaddr, pdata, dsize);
-		if (bcmerror) {
+		if ((bcmerror = bcmsdh_rwdata(bus->sdh, write, sdaddr, data, dsize))) {
 			DHD_ERROR(("%s: membytes transfer failed\n", __FUNCTION__));
 			break;
 		}
-		if (dsize <= MAX_MEM_BUF && !write)
-			memcpy(data, bus->membuf, dsize);
 
 		/* Adjust for next transfer (if any) */
 		if ((size -= dsize)) {
@@ -3958,7 +3943,7 @@ dhd_serialconsole(dhd_bus_t *bus, bool set, bool enable, int *bcmerror)
 
 	return (int_val & uart_enab);
 }
-#endif
+#endif 
 
 static int
 dhdsdio_doiovar(dhd_bus_t *bus, const bcm_iovar_t *vi, uint32 actionid, const char *name,
@@ -4346,7 +4331,7 @@ dhdsdio_doiovar(dhd_bus_t *bus, const bcm_iovar_t *vi, uint32 actionid, const ch
 		bcmsdh_cfg_write(bus->sdh, SDIO_FUNC_1, SBSDIO_FUNC1_MESBUSYCTRL,
 			((uint8)mesbusyctrl | 0x80), NULL);
 		break;
-#endif
+#endif 
 
 
 	case IOV_GVAL(IOV_DONGLEISOLATION):
@@ -5846,7 +5831,8 @@ dhdsdio_readframes(dhd_bus_t *bus, uint maxframes, bool *finished)
 			dhdsdio_sendpendctl(bus);
 		} else if (bus->dotxinrx && (bus->clkstate == CLK_AVAIL) &&
 			!bus->fcstate && DATAOK(bus) &&
-			(pktq_mlen(&bus->txq, ~bus->flowcontrol) > bus->txinrx_thres)) {
+			(pktq_mlen(&bus->txq, ~bus->flowcontrol) > bus->txinrx_thres) &&
+			bus->dhd->conf->tx_in_rx) {
 			dhdsdio_sendfromq(bus, dhd_txbound);
 #ifdef DHDTCPACK_SUPPRESS
 			/* In TCPACK_SUP_DELAYTX mode, do txinrx only if
@@ -6733,8 +6719,7 @@ clkwait:
 	 * or clock availability.  (Allows tx loop to check ipend if desired.)
 	 * (Unless register access seems hosed, as we may not be able to ACK...)
 	 */
-	if (bus->intr && bus->intdis && !bcmsdh_regfail(sdh) &&
-			!(bus->dhd->conf->oob_enabled_later && !bus->ctrl_frame_stat)) {
+	if (!bus->dhd->conf->oob_enabled_later && bus->intr && bus->intdis && !bcmsdh_regfail(sdh)) {
 		DHD_INTR(("%s: enable SDIO interrupts, rxdone %d framecnt %d\n",
 		          __FUNCTION__, rxdone, framecnt));
 		bus->intdis = FALSE;
@@ -6792,7 +6777,7 @@ clkwait:
 	}
 	/* Resched the DPC if ctrl cmd is pending on bus credit */
 	if (bus->ctrl_frame_stat) {
-		if (bus->dhd->conf->txctl_tmo_fix) {
+		if (bus->dhd->conf->txctl_tmo_fix > 0) {
 			set_current_state(TASK_INTERRUPTIBLE);
 			if (!kthread_should_stop())
 				schedule_timeout(1);
@@ -6840,8 +6825,7 @@ exit:
 		 * or clock availability.  (Allows tx loop to check ipend if desired.)
 		 * (Unless register access seems hosed, as we may not be able to ACK...)
 		 */
-		if (bus->intr && bus->intdis && !bcmsdh_regfail(sdh) &&
-				(bus->dhd->conf->oob_enabled_later && !bus->ctrl_frame_stat)) {
+		if (bus->dhd->conf->oob_enabled_later && bus->intr && bus->intdis && !bcmsdh_regfail(sdh)) {
 			DHD_INTR(("%s: enable SDIO interrupts, rxdone %d framecnt %d\n",
 					  __FUNCTION__, rxdone, framecnt));
 			bus->intdis = FALSE;
@@ -7552,11 +7536,6 @@ dhd_bus_console_in(dhd_pub_t *dhdp, uchar *msg, uint msglen)
 	if ((rv = dhdsdio_membytes(bus, TRUE, addr, (uint8 *)&val, sizeof(val))) < 0)
 		goto done;
 
-	if (!DATAOK(bus)) {
-		rv = BCME_NOTREADY;
-		goto done;
-	}
-
 	/* Bump dongle by sending an empty packet on the event channel.
 	 * sdpcm_sendup (RX) checks for virtual console input.
 	 */
@@ -7666,11 +7645,13 @@ dhdsdio_chipmatch(uint16 chipid)
 
 	if (chipid == BCM43012_CHIP_ID)
 		return TRUE;
-	if (chipid == BCM4362_CHIP_ID)
-		return TRUE;
 
 	return FALSE;
 }
+
+#if defined(MULTIPLE_SUPPLICANT)
+extern void wl_android_post_init(void); // terence 20120530: fix critical section in dhd_open and dhdsdio_probe
+#endif
 
 static void *
 dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
@@ -7682,7 +7663,17 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 	struct ether_addr ea_addr;
 #endif
 
-	DHD_MUTEX_LOCK();
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	if (mutex_is_locked(&_dhd_sdio_mutex_lock_) == 0) {
+		DHD_ERROR(("%s : no mutex held. set lock\n", __FUNCTION__));
+	}
+	else {
+		DHD_ERROR(("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__));
+	}
+	mutex_lock(&_dhd_sdio_mutex_lock_);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
+#endif 
 
 	/* Init global variables at run-time, not as part of the declaration.
 	 * This is required to support init/de-init of the driver. Initialization
@@ -7863,8 +7854,11 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 
 #if defined(MULTIPLE_SUPPLICANT)
 	wl_android_post_init(); // terence 20120530: fix critical section in dhd_open and dhdsdio_probe
-#endif /* MULTIPLE_SUPPLICANT */
-	DHD_MUTEX_UNLOCK();
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	mutex_unlock(&_dhd_sdio_mutex_lock_);
+	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
+#endif 
 
 	return bus;
 
@@ -7872,7 +7866,12 @@ fail:
 	dhdsdio_release(bus, osh);
 
 forcereturn:
-	DHD_MUTEX_UNLOCK();
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	mutex_unlock(&_dhd_sdio_mutex_lock_);
+	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
+#endif 
 
 	return NULL;
 }
@@ -7926,7 +7925,7 @@ dhdsdio_probe_attach(struct dhd_bus *bus, osl_t *osh, void *sdh, void *regsva,
 	bcmsdh_cfg_write(sdh, SDIO_FUNC_1, SBSDIO_FUNC1_CHIPCLKCSR,
 	                 DHD_INIT_CLKCTL2, &err);
 	OSL_DELAY(200);
-
+	
 	if (DHD_INFO_ON()) {
 		for (fn = 0; fn <= numfn; fn++) {
 			if (!(cis[fn] = MALLOC(osh, SBSDIO_CIS_SIZE_LIMIT))) {
@@ -8067,9 +8066,6 @@ dhdsdio_probe_attach(struct dhd_bus *bus, osl_t *osh, void *sdh, void *regsva,
 			case BCM4347_CHIP_GRPID:
 				bus->dongle_ram_base = CR4_4347_RAM_BASE;
 				break;
-			case BCM4362_CHIP_ID:
-				bus->dongle_ram_base = CR4_4362_RAM_BASE;
-				break;
 			default:
 				bus->dongle_ram_base = 0;
 				DHD_ERROR(("%s: WARNING: Using default ram base at 0x%x\n",
@@ -8155,23 +8151,6 @@ dhdsdio_probe_malloc(dhd_bus_t *bus, osl_t *osh, void *sdh)
 			DHD_OS_PREFREE(bus->dhd, bus->rxbuf, bus->rxblen);
 		goto fail;
 	}
-	/* Allocate buffer to membuf */
-	bus->membuf = MALLOC(osh, MAX_MEM_BUF);
-	if (bus->membuf == NULL) {
-		DHD_ERROR(("%s: MALLOC of %d-byte membuf failed\n",
-			__FUNCTION__, MAX_MEM_BUF));
-		if (bus->databuf) {
-#ifndef CONFIG_DHD_USE_STATIC_BUF
-			MFREE(osh, bus->databuf, MAX_DATA_BUF);
-#endif
-			bus->databuf = NULL;
-		}
-		/* release rxbuf which was already located as above */
-		if (!bus->rxblen)
-			DHD_OS_PREFREE(bus->dhd, bus->rxbuf, bus->rxblen);
-		goto fail;
-	}
-	memset(bus->membuf, 0, MAX_MEM_BUF);
 
 	/* Align the buffer */
 	if ((uintptr)bus->databuf % DHD_SDALIGN)
@@ -8448,11 +8427,6 @@ dhdsdio_release_malloc(dhd_bus_t *bus, osl_t *osh)
 		bus->databuf = NULL;
 	}
 
-	if (bus->membuf) {
-		MFREE(osh, bus->membuf, MAX_DATA_BUF);
-		bus->membuf = NULL;
-	}
-
 	if (bus->vars && bus->varsz) {
 		MFREE(osh, bus->vars, bus->varsz);
 		bus->vars = NULL;
@@ -8500,14 +8474,33 @@ dhdsdio_disconnect(void *ptr)
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
-	DHD_MUTEX_LOCK();
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	if (mutex_is_locked(&_dhd_sdio_mutex_lock_) == 0) {
+		DHD_ERROR(("%s : no mutex held. set lock\n", __FUNCTION__));
+	}
+	else {
+		DHD_ERROR(("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__));
+	}
+	mutex_lock(&_dhd_sdio_mutex_lock_);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
+#endif 
+
+
 	if (bus) {
 		ASSERT(bus->dhd);
 		/* Advertise bus remove during rmmod */
 		dhdsdio_advertise_bus_remove(bus->dhd);
 		dhdsdio_release(bus, bus->dhd->osh);
 	}
-	DHD_MUTEX_UNLOCK();
+
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	mutex_unlock(&_dhd_sdio_mutex_lock_);
+	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
+#endif /* LINUX */
+
 
 	DHD_TRACE(("%s: Disconnected\n", __FUNCTION__));
 }
@@ -8606,7 +8599,7 @@ dhdsdio_resume(void *context)
 #if defined(OOB_INTR_ONLY)
 	if (dhd_os_check_if_up(bus->dhd))
 		bcmsdh_oob_intr_set(bus->sdh, TRUE);
-#endif
+#endif 
 
 	DHD_LINUX_GENERAL_LOCK(bus->dhd, flags);
 	DHD_BUS_BUSY_CLEAR_RESUME_IN_PROGRESS(bus->dhd);
@@ -9330,7 +9323,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 			dhd_enable_oob_intr(bus, FALSE);
 			bcmsdh_oob_intr_set(bus->sdh, FALSE);
 			bcmsdh_oob_intr_unregister(bus->sdh);
-#endif
+#endif 
 
 			/* Clean tx/rx buffer pointers, detach from the dongle */
 			dhdsdio_release_dongle(bus, bus->dhd->osh, TRUE, TRUE);
@@ -9381,7 +9374,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 						bcmsdh_oob_intr_set(bus->sdh, TRUE);
 #elif defined(FORCE_WOWLAN)
 						dhd_enable_oob_intr(bus, TRUE);
-#endif
+#endif 
 
 						bus->dhd->dongle_reset = FALSE;
 						bus->dhd->up = TRUE;
@@ -9389,7 +9382,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 #if !defined(IGNORE_ETH0_DOWN)
 						/* Restore flow control  */
 						dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, OFF);
-#endif
+#endif 
 						dhd_os_wd_timer(dhdp, dhd_watchdog_ms);
 
 						DHD_TRACE(("%s: WLAN ON DONE\n", __FUNCTION__));
@@ -10008,7 +10001,7 @@ dhd_bus_ulp_reinit_fw(dhd_bus_t *bus)
 #if defined(OOB_INTR_ONLY)
 			dhd_enable_oob_intr(bus, TRUE);
 			bcmsdh_oob_intr_set(bus->sdh, TRUE);
-#endif
+#endif 
 #ifdef DHD_DEBUG
 		/* Re-enable the console messages on FW redownload to default value */
 		dhd_ulp_restore_console_interval(bus->dhd);

@@ -1619,7 +1619,7 @@ u32	rtw_aes_encrypt(_adapter *padapter, u8 *pxmitframe)
 				struct	sta_info		*ptdls_sta;
 				ptdls_sta = rtw_get_stainfo(&padapter->stapriv , &pattrib->dst[0]);
 				if ((ptdls_sta != NULL) && (ptdls_sta->tdls_sta_state & TDLS_LINKED_STATE)) {
-					RTW_INFO("[%s] for tdls link\n", __func__);
+					RTW_INFO("[%s] for tdls link\n", __FUNCTION__);
 					prwskey = &ptdls_sta->tpk.tk[0];
 				}
 			}
@@ -3062,7 +3062,7 @@ int tdls_verify_mic(u8 *kck, u8 trans_seq,
 	}
 
 	/* Invalid MIC */
-	RTW_INFO("[%s] Invalid MIC\n", __func__);
+	RTW_INFO("[%s] Invalid MIC\n", __FUNCTION__);
 	return _FAIL;
 
 }

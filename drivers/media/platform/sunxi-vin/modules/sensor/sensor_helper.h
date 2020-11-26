@@ -30,12 +30,6 @@ struct regval_list {
 	data_type data;
 };
 
-struct sensor_helper_dev {
-	struct regulator *pmic[MAX_POW_NUM];
-	unsigned int id;
-	const char *name;
-};
-
 #define DEV_DBG_EN   0
 #if (DEV_DBG_EN == 1)
 #define sensor_dbg(x, arg...) printk(KERN_DEBUG "[%s]"x, SENSOR_NAME, ##arg)
@@ -61,8 +55,7 @@ extern struct sensor_info *to_state(struct v4l2_subdev *sd);
 extern void sensor_cfg_req(struct v4l2_subdev *sd, struct sensor_config *cfg);
 extern void sensor_isp_input(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf);
 extern unsigned int sensor_get_exp(struct v4l2_subdev *sd);
-extern unsigned int sensor_get_clk(struct v4l2_subdev *sd, struct v4l2_mbus_config *cfg,
-			unsigned long *top_clk, unsigned long *isp_clk);
+
 extern int sensor_enum_mbus_code(struct v4l2_subdev *sd,
 				struct v4l2_subdev_pad_config *cfg,
 				struct v4l2_subdev_mbus_code_enum *code);
@@ -79,7 +72,6 @@ extern int sensor_g_parm(struct v4l2_subdev *sd,
 			struct v4l2_streamparm *parms);
 extern int sensor_s_parm(struct v4l2_subdev *sd,
 			struct v4l2_streamparm *parms);
-extern int sensor_try_ctrl(struct v4l2_ctrl *ctrl);
 
 extern int actuator_init(struct v4l2_subdev *sd, struct actuator_para *range);
 extern int actuator_set_code(struct v4l2_subdev *sd, struct actuator_ctrl *pos);

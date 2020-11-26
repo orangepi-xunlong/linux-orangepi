@@ -37,7 +37,6 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/gpio.h>
 #include "nand_blk.h"
-#include "nand_dev.h"
 #include <linux/regulator/consumer.h>
 #include <linux/of.h>
 #include <linux/sunxi-sid.h>
@@ -76,7 +75,6 @@ void *dma_map_addr;
 extern void *NDFC0_BASE_ADDR;
 extern void *NDFC1_BASE_ADDR;
 extern struct device *ndfc_dev;
-extern int flash_type;
 
 struct dma_chan *dma_hdl;
 __u32 NAND_Print_level(void);

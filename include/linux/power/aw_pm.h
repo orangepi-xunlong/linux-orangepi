@@ -473,6 +473,9 @@ struct super_standby_para {
 	/* kernel cpu_resume entry */
 	unsigned int cpu_resume_entry;
 #endif
+#if (defined CONFIG_ARCH_SUN50IW6P1)
+	unsigned int hdmi_cec_phyaddr;
+#endif
 	/* wakeup after timeout seconds */
 	unsigned int timeout;
 	unsigned int gpio_enable_bitmap;

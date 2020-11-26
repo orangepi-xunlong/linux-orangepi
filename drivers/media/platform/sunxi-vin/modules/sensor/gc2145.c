@@ -1,4 +1,3 @@
-
 /*
  * A V4L2 driver for gc2145 YUV cameras.
  *

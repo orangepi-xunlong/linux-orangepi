@@ -28,20 +28,12 @@
 
 #include "sunxi-pcm.h"
 
-#if defined(CONFIG_ARCH_SUN50IW9)
-#include "sun50iw9-codec.h"
-#endif
-
 #if defined(CONFIG_ARCH_SUN8IW11)
 #include "sun8iw11-codec.h"
 #endif
 
 #if defined(CONFIG_ARCH_SUN8IW17)
 #include "sun8iw17-codec.h"
-#endif
-
-#if defined(CONFIG_ARCH_SUN8IW7)
-#include "sun8iw7-codec.h"
 #endif
 
 #define DRV_NAME "sunxi-internal-cpudai"

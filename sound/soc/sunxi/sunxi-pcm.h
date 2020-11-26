@@ -22,7 +22,7 @@ struct sunxi_dma_params {
 	u8 dma_drq_type_num;
 };
 
-struct sndhdmi_priv {
+struct sunxi_hdmi_priv {
 	unsigned int hdmi_format;
 };
 

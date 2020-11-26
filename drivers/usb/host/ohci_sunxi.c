@@ -99,6 +99,7 @@ static ssize_t ohci_enable_store(struct device *dev,
 		return 0;
 	}
 
+	sunxi_ohci->host_init_state = 0;
 	ohci_first_probe[sunxi_ohci->usbc_no] = 0;
 
 	err = kstrtoint(buf, 10, &value);
@@ -255,18 +256,6 @@ static int sunxi_insmod_ohci(struct platform_device *pdev)
 
 	sunxi_ohci->ohci_reg_length = SUNXI_USB_OHCI_LEN;
 
-	/* not init ohci, when driver probe */
-	if (sunxi_ohci->usbc_no == HCI0_USBC_NO) {
-		if (sunxi_ohci->port_type != USB_PORT_TYPE_HOST) {
-			if (ohci_first_probe[sunxi_ohci->usbc_no]) {
-				ohci_first_probe[sunxi_ohci->usbc_no] = 0;
-				DMSG_INFO("[%s%d]: Not init ohci0\n",
-					  ohci_name, sunxi_ohci->usbc_no);
-				return 0;
-			}
-		}
-	}
-
 	/* creat a usb_hcd for the ohci controller */
 	hcd = usb_create_hcd(&sunxi_ohci_hc_driver, &pdev->dev, ohci_name);
 	if (!hcd) {
@@ -305,6 +294,14 @@ static int sunxi_insmod_ohci(struct platform_device *pdev)
 	if (!sunxi_ohci->wakeup_suspend)
 		INIT_WORK(&sunxi_ohci->resume_work, sunxi_ohci_resume_work);
 #endif
+
+	/* Disable ohci, when driver probe */
+	if (sunxi_ohci->host_init_state == 0) {
+		if (ohci_first_probe[sunxi_ohci->usbc_no]) {
+			sunxi_usb_disable_ohci(sunxi_ohci->usbc_no);
+			ohci_first_probe[sunxi_ohci->usbc_no] = 0;
+		}
+	}
 
 	return 0;
 
@@ -396,8 +393,6 @@ static int sunxi_ohci_hcd_remove(struct platform_device *pdev)
 {
 	struct sunxi_hci_hcd *sunxi_ohci = NULL;
 
-	int ret = 0;
-
 	if (pdev == NULL) {
 		DMSG_PANIC("ERR: %s, Argment is invalid\n", __func__);
 		return -1;
@@ -412,13 +407,9 @@ static int sunxi_ohci_hcd_remove(struct platform_device *pdev)
 	if (ohci_enable[sunxi_ohci->usbc_no] == 0)
 		device_remove_file(&pdev->dev, &dev_attr_ohci_enable);
 
-	if (sunxi_ohci->probe == 1) {
-		ret = sunxi_rmmod_ohci(pdev);
-		if (ret == 0)
-			exit_sunxi_hci(sunxi_ohci);
-
-		return ret;
-	} else
+	if (sunxi_ohci->probe == 1)
+		return sunxi_rmmod_ohci(pdev);
+	else
 		return 0;
 }
 
@@ -493,8 +484,8 @@ static int sunxi_ohci_hcd_suspend(struct device *dev)
 		return 0;
 	}
 
-	if (sunxi_ohci->wakeup_suspend == USB_STANDBY) {
-		DMSG_INFO("[%s]: usb suspend\n", sunxi_ohci->hci_name);
+	if (sunxi_ohci->wakeup_suspend) {
+		DMSG_INFO("[%s]: not suspend\n", sunxi_ohci->hci_name);
 		val = ohci_readl(ohci, &ohci->regs->control);
 		val |= OHCI_CTRL_RWE;
 		ohci_writel(ohci, val,  &ohci->regs->control);
@@ -508,29 +499,14 @@ static int sunxi_ohci_hcd_suspend(struct device *dev)
 		val = ohci_readl(ohci, &ohci->regs->control);
 		val |= OHCI_USB_SUSPEND;
 		ohci_writel(ohci, val, &ohci->regs->control);
-		/*remote enable*/
-		sunxi_hci_set_wakeup_ctrl(sunxi_ohci, 1);
-		/*clean siddq*/
+		sunxi_hci_set_wakeup_ctrl(sunxi_ohci);
 		sunxi_hci_set_siddq(sunxi_ohci);
 #endif
-		if (sunxi_ohci->clk_usbohci12m && sunxi_ohci->clk_losc)
-			clk_set_parent(sunxi_ohci->clk_usbohci12m,
-					sunxi_ohci->clk_losc);
-
-	} else if (sunxi_ohci->wakeup_suspend == NORMAL_STANDBY) {
-		DMSG_INFO("[%s]: not suspend\n", sunxi_ohci->hci_name);
-		val = ohci_readl(ohci, &ohci->regs->control);
-		val |= OHCI_CTRL_RWE;
-		ohci_writel(ohci, val,  &ohci->regs->control);
-
-		val = ohci_readl(ohci, &ohci->regs->intrenable);
-		val |= OHCI_INTR_RD;
-		val |= OHCI_INTR_MIE;
-		ohci_writel(ohci, val, &ohci->regs->intrenable);
 
 		if (sunxi_ohci->clk_usbohci12m && sunxi_ohci->clk_losc)
 			clk_set_parent(sunxi_ohci->clk_usbohci12m,
 					sunxi_ohci->clk_losc);
+
 	} else {
 		DMSG_INFO("[%s]: sunxi_ohci_hcd_suspend\n", sunxi_ohci->hci_name);
 		atomic_add(1, &g_sunxi_usb_super_standby);
@@ -605,7 +581,7 @@ static int sunxi_ohci_hcd_resume(struct device *dev)
 		return 0;
 	}
 
-	if (sunxi_ohci->wakeup_suspend == USB_STANDBY) {
+	if (sunxi_ohci->wakeup_suspend) {
 		DMSG_INFO("[%s]: controller not suspend, need not resume\n",
 			sunxi_ohci->hci_name);
 
@@ -618,14 +594,6 @@ static int sunxi_ohci_hcd_resume(struct device *dev)
 		val &= ~(OHCI_USB_SUSPEND);
 		ohci_writel(ohci, val, &ohci->regs->control);
 #endif
-	} else if (sunxi_ohci->wakeup_suspend == NORMAL_STANDBY) {
-		DMSG_INFO("[%s]: normal standby controller not suspend, need not resume\n",
-			sunxi_ohci->hci_name);
-
-		if (sunxi_ohci->clk_usbohci12m && sunxi_ohci->clk_hoscx2)
-			clk_set_parent(sunxi_ohci->clk_usbohci12m,
-					sunxi_ohci->clk_hoscx2);
-
 	} else {
 		DMSG_INFO("[%s]: sunxi_ohci_hcd_resume\n",
 			sunxi_ohci->hci_name);

@@ -47,7 +47,7 @@
 
 #include  "sunxi_hci.h"
 
-static u64 sunxi_hci_dmamask = DMA_BIT_MASK(64);
+static u64 sunxi_hci_dmamask = DMA_BIT_MASK(32);
 static DEFINE_MUTEX(usb_passby_lock);
 static DEFINE_MUTEX(usb_vbus_lock);
 static DEFINE_MUTEX(usb_clock_lock);
@@ -230,64 +230,9 @@ int usb_phyx_tp_write(struct sunxi_hci_hcd *sunxi_hci,
 	}
 
 	USBC_Writel(reg_temp, (sunxi_hci->otg_vbase + SUNXI_OTG_PHY_CFG));
-
 	return 0;
 }
 EXPORT_SYMBOL(usb_phyx_tp_write);
-
-int usb_phyx_write(struct sunxi_hci_hcd *sunxi_hci, int data)
-{
-	int reg_value = 0;
-	int temp = 0;
-	int dtmp = 0;
-	int ptmp = 0;
-
-	temp = data;
-	dtmp = data;
-	ptmp = data;
-
-	reg_value = USBC_Readl(sunxi_hci->usb_vbase + SUNXI_HCI_PHY_TUNE);
-
-	/*TXVREFTUNE + TXRISETUNE + TXPREEMPAMPTUNE + TXRESTUNE*/
-	reg_value &= ~((0xf << 8) | (0x3 << 4) | (0xf << 0));
-	temp &= ~((0xf << 4) | (0x3 << 8));
-	reg_value |= temp << 8;
-	dtmp &= ~((0xf << 6) | (0xf << 0));
-	reg_value |= dtmp;
-	data &= ~((0x3 << 4) | (0xf << 0));
-	reg_value |= data >> 6;
-
-	USBC_Writel(reg_value, (sunxi_hci->usb_vbase + SUNXI_HCI_PHY_TUNE));
-
-	return 0;
-}
-EXPORT_SYMBOL(usb_phyx_write);
-
-int usb_phyx_read(struct sunxi_hci_hcd *sunxi_hci)
-{
-	int reg_value = 0;
-	int temp = 0;
-	int ptmp = 0;
-	int ret = 0;
-
-	reg_value = USBC_Readl(sunxi_hci->usb_vbase + SUNXI_HCI_PHY_TUNE);
-	reg_value &= 0xf3f;
-	ptmp = reg_value;
-
-	temp = reg_value >> 8;
-	ptmp &= ~((0xf << 8) | (0xf << 4));
-	ptmp <<= 6;
-	reg_value &= ~((0xf << 8) | (0xf << 0));
-
-	ret = reg_value | ptmp | temp;
-
-	DMSG_INFO("bit[3:0]VREF = 0x%x; bit[5:4]RISE = 0x%x; bit[7:6]PREEMPAMP = 0x%x; bit[9:8]RES = 0x%x\n",
-		temp, reg_value >> 4, (ptmp >> 6) & 0x3,
-		((ptmp >> 6)  & 0xc) >> 2);
-
-	return ret;
-}
-EXPORT_SYMBOL(usb_phyx_read);
 
 int usb_phyx_tp_read(struct sunxi_hci_hcd *sunxi_hci, int addr, int len)
 {
@@ -335,19 +280,16 @@ int usb_phyx_tp_read(struct sunxi_hci_hcd *sunxi_hci, int addr, int len)
 }
 EXPORT_SYMBOL(usb_phyx_tp_read);
 
-#if defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN8IW12) \
-	|| defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN50IW9)
-static void usb_hci_utmi_phy_tune(struct sunxi_hci_hcd *sunxi_hci, int mask,
-				  int offset, int val)
+#if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW3) \
+	|| defined(CONFIG_ARCH_SUN50IW6)
+static void usb_hci_phy_txtune(struct sunxi_hci_hcd *sunxi_hci)
 {
 	int reg_value = 0;
 
 	reg_value = USBC_Readl(sunxi_hci->usb_vbase + SUNXI_HCI_PHY_TUNE);
-	reg_value &= ~mask;
-	val = val << offset;
-	val &= mask;
-	reg_value |= val;
+	reg_value |= 0x03 << 2;	/* TXRESTUNE */
+	reg_value &= ~(0xf << 8);
+	reg_value |= 0xc << 8;	/* TXVREFTUNE */
 	USBC_Writel(reg_value, (sunxi_hci->usb_vbase + SUNXI_HCI_PHY_TUNE));
 }
 #endif
@@ -383,55 +325,13 @@ void sunxi_hci_set_siddq(struct sunxi_hci_hcd *sunxi_hci)
 	USBC_Writel(reg_value, (sunxi_hci->usb_vbase + SUNXI_HCI_PHY_CTRL));
 }
 
-void sunxi_hci_set_wakeup_ctrl(struct sunxi_hci_hcd *sunxi_hci, int is_on)
+void sunxi_hci_set_wakeup_ctrl(struct sunxi_hci_hcd *sunxi_hci)
 {
 	int reg_value = 0;
 
 	reg_value = USBC_Readl(sunxi_hci->usb_vbase + SUNXI_HCI_CTRL_3);
-
-	if (is_on)
-		reg_value |= 0x01 << SUNXI_HCI_CTRL_3_REMOTE_WAKEUP;
-	else
-		reg_value &= ~(0x01 << SUNXI_HCI_CTRL_3_REMOTE_WAKEUP);
-
+	reg_value |= 0x01 << SUNXI_HCI_CTRL_3_REMOTE_WAKEUP;
 	USBC_Writel(reg_value, (sunxi_hci->usb_vbase + SUNXI_HCI_CTRL_3));
-}
-
-void sunxi_hci_set_rc_clk(struct sunxi_hci_hcd *sunxi_hci, int is_on)
-{
-	int reg_value = 0;
-
-	reg_value = USBC_Readl(sunxi_hci->usb_vbase + SUNXI_USB_PMU_IRQ_ENABLE);
-
-	if (is_on)
-		reg_value |= 0x01 << SUNXI_HCI_RC16M_CLK_ENBALE;
-	else
-		reg_value &= ~(0x01 << SUNXI_HCI_RC16M_CLK_ENBALE);
-
-	USBC_Writel(reg_value, (sunxi_hci->usb_vbase + SUNXI_USB_PMU_IRQ_ENABLE));
-}
-
-void sunxi_hci_set_standby_irq(struct sunxi_hci_hcd *sunxi_hci, int is_on)
-{
-	int reg_value = 0;
-
-	reg_value = USBC_Readl(sunxi_hci->usb_vbase + SUNXI_USB_EHCI_TIME_INT);
-
-	if (is_on)
-		reg_value |= 0x01 << SUNXI_USB_EHCI_STANDBY_IRQ;
-	else
-		reg_value &= ~(0x01 << SUNXI_USB_EHCI_STANDBY_IRQ);
-
-	USBC_Writel(reg_value, (sunxi_hci->usb_vbase + SUNXI_USB_EHCI_TIME_INT));
-}
-
-void sunxi_hci_clean_standby_irq(struct sunxi_hci_hcd *sunxi_hci)
-{
-	int reg_value = 0;
-
-	reg_value = USBC_Readl(sunxi_hci->usb_vbase + SUNXI_USB_EHCI_TIME_INT);
-	reg_value |= 0x01 << SUNXI_USB_EHCI_STANDBY_IRQ_STATUS;
-	USBC_Writel(reg_value, (sunxi_hci->usb_vbase + SUNXI_USB_EHCI_TIME_INT));
 }
 #endif
 
@@ -452,16 +352,7 @@ static int open_clock(struct sunxi_hci_hcd *sunxi_hci, u32 ohci)
 	/* To fix hardware design issue. */
 #if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW3) \
 	|| defined(CONFIG_ARCH_SUN50IW6)
-	usb_hci_utmi_phy_tune(sunxi_hci, SUNXI_TX_RES_TUNE, SUNXI_TX_RES_TUNE_OFFSET, 0x3);
-	usb_hci_utmi_phy_tune(sunxi_hci, SUNXI_TX_VREF_TUNE, SUNXI_TX_VREF_TUNE_OFFSET, 0xc);
-#endif
-
-#if defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN8IW15)
-	usb_hci_utmi_phy_tune(sunxi_hci, SUNXI_TX_VREF_TUNE, SUNXI_TX_VREF_TUNE_OFFSET, 0x4);
-#endif
-
-#if defined(CONFIG_ARCH_SUN50IW9)
-	usb_hci_utmi_phy_tune(sunxi_hci, SUNXI_TX_PREEMPAMP_TUNE, SUNXI_TX_PREEMPAMP_TUNE_OFFSET, 0x2);
+	usb_hci_phy_txtune(sunxi_hci);
 #endif
 
 	if (sunxi_hci->ahb &&
@@ -521,8 +412,7 @@ static int open_clock(struct sunxi_hci_hcd *sunxi_hci, u32 ohci)
 	USBC_Clean_SIDDP(sunxi_hci);
 #if !defined(CONFIG_ARCH_SUN8IW12) && !defined(CONFIG_ARCH_SUN50IW3) \
 	&& !defined(CONFIG_ARCH_SUN8IW6) && !defined(CONFIG_ARCH_SUN50IW6) \
-	&& !defined(CONFIG_ARCH_SUN8IW15) && !defined(CONFIG_ARCH_SUN50IW8) \
-	&& !defined(CONFIG_ARCH_SUN50IW9)
+	&& !defined(CONFIG_ARCH_SUN8IW15) && !defined(CONFIG_ARCH_SUN50IW8)
 	usb_phyx_tp_write(sunxi_hci, 0x2a, 3, 2);
 #endif
 	mutex_unlock(&usb_clock_lock);
@@ -1051,13 +941,12 @@ static int get_usb_cfg(struct platform_device *pdev,
 		 sunxi_hci->used = 0;
 	}
 
-	/* usbc port type */
-	if (sunxi_hci->usbc_no == HCI0_USBC_NO) {
-		ret = of_property_read_u32(usbc_np,
-						KEY_USB_PORT_TYPE,
-						&sunxi_hci->port_type);
-		if (ret)
-			DMSG_INFO("get usb_port_type is fail, %d\n", -ret);
+	/* usbc init_state */
+	ret = of_property_read_u32(usbc_np,
+			KEY_USB_HOST_INIT_STATE, &sunxi_hci->host_init_state);
+	if (ret) {
+		DMSG_PRINT("get %s init_state is fail, %d\n",
+			sunxi_hci->hci_name, -ret);
 	}
 
 	sunxi_hci->hsic_flag = 0;
@@ -1227,19 +1116,7 @@ static int get_usb_cfg(struct platform_device *pdev,
 			DMSG_PRINT("get %s, regulator_io is no nocare\n",
 				sunxi_hci->hci_name);
 			sunxi_hci->regulator_io = NULL;
-		} else {
-			DMSG_PRINT("get %s, regulator_io is %s.\n",
-				sunxi_hci->hci_name, sunxi_hci->regulator_io);
 		}
-	}
-
-	/* wakeup-source */
-	if (of_property_read_bool(usbc_np, KEY_WAKEUP_SOURCE)) {
-		sunxi_hci->wakeup_source_flag = 1;
-	} else {
-		DMSG_PRINT("get %s wakeup-source is fail.\n",
-				sunxi_hci->hci_name);
-		sunxi_hci->wakeup_source_flag = 0;
 	}
 
 	return 0;
@@ -1276,19 +1153,6 @@ static int sunxi_get_hci_irq_no(struct platform_device *pdev,
 	return 0;
 }
 
-static int hci_wakeup_source_init(struct platform_device *pdev,
-		struct sunxi_hci_hcd *sunxi_hci)
-{
-	if (sunxi_hci->wakeup_source_flag) {
-		device_init_wakeup(&pdev->dev, true);
-		dev_pm_set_wake_irq(&pdev->dev, sunxi_hci->irq_no);
-	} else {
-		DMSG_INFO("sunxi %s don't init wakeup source\n", sunxi_hci->hci_name);
-	}
-
-	return 0;
-}
-
 static int sunxi_get_hci_resource(struct platform_device *pdev,
 		struct sunxi_hci_hcd *sunxi_hci, int usbc_no)
 {
@@ -1311,7 +1175,6 @@ static int sunxi_get_hci_resource(struct platform_device *pdev,
 	sunxi_get_hci_base(pdev, sunxi_hci);
 	sunxi_get_hci_clock(pdev, sunxi_hci);
 	sunxi_get_hci_irq_no(pdev, sunxi_hci);
-	hci_wakeup_source_init(pdev, sunxi_hci);
 
 	request_usb_regulator_io(sunxi_hci);
 	sunxi_hci->open_clock	= open_clock;
@@ -1331,7 +1194,6 @@ int exit_sunxi_hci(struct sunxi_hci_hcd *sunxi_hci)
 	free_pin(sunxi_hci);
 	return 0;
 }
-EXPORT_SYMBOL(exit_sunxi_hci);
 
 int init_sunxi_hci(struct platform_device *pdev, int usbc_type)
 {
@@ -1342,7 +1204,7 @@ int init_sunxi_hci(struct platform_device *pdev, int usbc_type)
 
 #ifdef CONFIG_OF
 	pdev->dev.dma_mask = &sunxi_hci_dmamask;
-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(64);
+	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 #endif
 
 	hci_num = sunxi_get_hci_num(pdev);

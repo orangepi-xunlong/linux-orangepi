@@ -2340,10 +2340,6 @@ sub process {
 			}
 			$found_file = 1;
 		}
-# donot check markdown
-		if ($realfile =~ /\.md$/) {
-		    next;
-		}
 
 #make up the handle for any error we report on this line
 		if ($showfile) {

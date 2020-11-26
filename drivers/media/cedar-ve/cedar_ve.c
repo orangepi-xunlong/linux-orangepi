@@ -490,7 +490,6 @@ int disable_cedar_hw_clk(void)
 
 	if (clk_status == 0) {
 		res = 0;
-		spin_unlock_irqrestore(&cedar_spin_lock, flags);
 		goto out;
 	}
 	clk_status = 0;
@@ -502,8 +501,7 @@ int disable_cedar_hw_clk(void)
 		sunxi_periph_reset_assert(ve_moduleclk);
 		res = 0;
 	}
-	spin_unlock_irqrestore(&cedar_spin_lock, flags);
-	mutex_lock(&cedar_devp->lock_mem);
+
 	aw_mem_list_for_each_safe(pos, q, &cedar_devp->list) {
 		struct cedarv_iommu_buffer *tmp;
 
@@ -511,13 +509,13 @@ int disable_cedar_hw_clk(void)
 		aw_mem_list_del(pos);
 		kfree(tmp);
 	}
-	mutex_unlock(&cedar_devp->lock_mem);
 
 #ifdef CEDAR_DEBUG
 	printk("%s,%d\n", __func__, __LINE__);
 #endif
 
 out:
+	spin_unlock_irqrestore(&cedar_spin_lock, flags);
 	return res;
 }
 
@@ -974,8 +972,6 @@ static long compat_cedardev_ioctl(struct file *filp, unsigned int cmd, unsigned 
 			{
 				struct VE_PROC_INFO ve_info;
 				unsigned char channel_id = 0;
-				if (ve_debugfs_root == NULL)
-					return 0;
 
 				mutex_lock(&ve_debug_proc_info.lock_proc);
 				if (copy_from_user(&ve_info, (void __user *)arg, sizeof(struct VE_PROC_INFO))) {
@@ -1001,8 +997,6 @@ static long compat_cedardev_ioctl(struct file *filp, unsigned int cmd, unsigned 
 			case IOCTL_COPY_PROC_INFO:
 			{
 				unsigned char channel_id;
-				if (ve_debugfs_root == NULL)
-					return 0;
 
 				channel_id = ve_debug_proc_info.cur_channel_id;
 				if (copy_from_user(ve_debug_proc_info.proc_buf[channel_id],
@@ -1018,8 +1012,6 @@ static long compat_cedardev_ioctl(struct file *filp, unsigned int cmd, unsigned 
 			case IOCTL_STOP_PROC_INFO:
 			{
 				unsigned char channel_id;
-				if (ve_debugfs_root == NULL)
-					return 0;
 
 				channel_id = arg;
 				ve_debug_proc_info.proc_buf[channel_id] = NULL;
@@ -1183,7 +1175,6 @@ RELEASE_DMA_BUF:
 				VE_LOGE("IOCTL_FREE_IOMMU_ADDR copy_from_user error");
 				return -EFAULT;
 			}
-			mutex_lock(&cedar_devp->lock_mem);
 			aw_mem_list_for_each_entry(pVeIommuBuf, &cedar_devp->list, i_list) {
 				if (pVeIommuBuf->fd == sUserIommuParam.fd &&
 						pVeIommuBuf->p_id == current->tgid) {
@@ -1218,12 +1209,13 @@ RELEASE_DMA_BUF:
 						dma_buf_put(pVeIommuBuf->dma_buf);
 					}
 
+					mutex_lock(&cedar_devp->lock_mem);
 					aw_mem_list_del(&pVeIommuBuf->i_list);
 					kfree(pVeIommuBuf);
+					mutex_unlock(&cedar_devp->lock_mem);
 					break;
 				}
 			}
-			mutex_unlock(&cedar_devp->lock_mem);
 			break;
 		}
 		default:
@@ -1738,8 +1730,7 @@ static int cedardev_init(struct platform_device *pdev)
 	val &= 0xefffffff;
 	writel(val, cedar_devp->sram_bass_vir+1);
 #else
-	#if (defined CONFIG_ARCH_SUN8IW12P1 || defined CONFIG_ARCH_SUN8IW17P1 || \
-		defined CONFIG_ARCH_SUN8IW15P1 || defined CONFIG_ARCH_SUN50IW9P1)
+	#if (defined CONFIG_ARCH_SUN8IW12P1 || defined CONFIG_ARCH_SUN8IW17P1 || defined CONFIG_ARCH_SUN8IW15P1)
 		/*remapping SRAM to MACC for codec test*/
 		val = readl(cedar_devp->sram_bass_vir);
 		val |= 0x7fffffff;

@@ -3423,8 +3423,8 @@ static int regulator_set_voltage_unlocked(struct regulator *regulator,
 	 * should be a noop (some cpufreq implementations use the same
 	 * voltage for multiple frequencies, for example).
 	 */
-	/* if (regulator->min_uV == min_uV && regulator->max_uV == max_uV)
-		goto out; */
+	if (regulator->min_uV == min_uV && regulator->max_uV == max_uV)
+		goto out;
 
 	/* If we're trying to set a range that overlaps the current voltage,
 	 * return successfully even though the regulator does not support
@@ -4610,13 +4610,13 @@ regulator_register(const struct regulator_desc *regulator_desc,
 	    !rdev->desc->fixed_uV)
 		rdev->is_switch = true;
 
-	dev_set_drvdata(&rdev->dev, rdev);
 	ret = device_register(&rdev->dev);
 	if (ret != 0) {
 		put_device(&rdev->dev);
 		goto unset_supplies;
 	}
 
+	dev_set_drvdata(&rdev->dev, rdev);
 	rdev_init_debugfs(rdev);
 
 	/* try to resolve regulators supply since a new one was registered */

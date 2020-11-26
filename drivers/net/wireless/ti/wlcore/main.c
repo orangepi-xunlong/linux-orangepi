@@ -1058,11 +1058,8 @@ static int wl12xx_chip_wakeup(struct wl1271 *wl, bool plt)
 		goto out;
 
 	ret = wl12xx_fetch_firmware(wl, plt);
-	if (ret < 0) {
-		kfree(wl->fw_status);
-		kfree(wl->raw_fw_status);
-		kfree(wl->tx_res_if);
-	}
+	if (ret < 0)
+		goto out;
 
 out:
 	return ret;

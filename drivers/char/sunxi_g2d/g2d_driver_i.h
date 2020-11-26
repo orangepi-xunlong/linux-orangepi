@@ -34,7 +34,7 @@
 	pr_warn("%s: " format, "G2D", ## args)
 #define INFO(format, args...) pr_info("%s: " format, "G2D", ## args)
 
-#define MAX_G2D_MEM_INDEX	10
+#define MAX_G2D_MEM_INDEX	1000
 #define	INTC_IRQNO_DE_MIX	SUNXI_IRQ_MP
 
 #define G2DALIGN(value, align) ((align == 0) ? \
@@ -42,10 +42,7 @@
 				(((value) + ((align) - 1)) & ~((align) - 1)))
 
 #if ((defined CONFIG_ARCH_SUN8IW12P1) || (defined CONFIG_ARCH_SUN8IW15P1) || \
-					(defined CONFIG_ARCH_SUN8IW17P1) || \
-					(defined CONFIG_ARCH_SUN50IW9P1) || \
-					(defined CONFIG_ARCH_SUN8IW16P1) || \
-					(defined CONFIG_ARCH_SUN50IW10P1))
+					(defined CONFIG_ARCH_SUN8IW17P1))
 #define G2D_V2X_SUPPORT
 #endif
 
@@ -65,7 +62,6 @@ typedef struct {
 	struct clk *clk;
 	bool opened;
 	__u32 user_cnt;
-	struct clk *clk_parent;
 } __g2d_info_t;
 
 typedef struct {
@@ -121,7 +117,5 @@ int g2d_stretchblit(g2d_stretchblt *para);
 /* int g2d_set_palette_table(g2d_palette *para); */
 int g2d_wait_cmd_finish(void);
 int g2d_cmdq(unsigned int para);
-static int g2d_suspend(struct device *dev);
-static int g2d_resume(struct device *dev);
 
 #endif /* __G2D_DRIVER_I_H */

@@ -41,7 +41,7 @@ static int shash_setkey_unaligned(struct crypto_shash *tfm, const u8 *key,
 	int err;
 
 	absize = keylen + (alignmask & ~(crypto_tfm_ctx_alignment() - 1));
-	buffer = kmalloc(absize, GFP_ATOMIC);
+	buffer = kmalloc(absize, GFP_KERNEL);
 	if (!buffer)
 		return -ENOMEM;
 
@@ -50,13 +50,6 @@ static int shash_setkey_unaligned(struct crypto_shash *tfm, const u8 *key,
 	err = shash->setkey(tfm, alignbuffer, keylen);
 	kzfree(buffer);
 	return err;
-}
-
-static void shash_set_needkey(struct crypto_shash *tfm, struct shash_alg *alg)
-{
-	if (crypto_shash_alg_has_setkey(alg) &&
-	    !(alg->base.cra_flags & CRYPTO_ALG_OPTIONAL_KEY))
-		crypto_shash_set_flags(tfm, CRYPTO_TFM_NEED_KEY);
 }
 
 int crypto_shash_setkey(struct crypto_shash *tfm, const u8 *key,
@@ -71,10 +64,8 @@ int crypto_shash_setkey(struct crypto_shash *tfm, const u8 *key,
 	else
 		err = shash->setkey(tfm, key, keylen);
 
-	if (unlikely(err)) {
-		shash_set_needkey(tfm, shash);
+	if (err)
 		return err;
-	}
 
 	crypto_shash_clear_flags(tfm, CRYPTO_TFM_NEED_KEY);
 	return 0;
@@ -376,8 +367,7 @@ int crypto_init_shash_ops_async(struct crypto_tfm *tfm)
 	crt->final = shash_async_final;
 	crt->finup = shash_async_finup;
 	crt->digest = shash_async_digest;
-	if (crypto_shash_alg_has_setkey(alg))
-		crt->setkey = shash_async_setkey;
+	crt->setkey = shash_async_setkey;
 
 	crypto_ahash_set_flags(crt, crypto_shash_get_flags(shash) &
 				    CRYPTO_TFM_NEED_KEY);
@@ -399,7 +389,9 @@ static int crypto_shash_init_tfm(struct crypto_tfm *tfm)
 
 	hash->descsize = alg->descsize;
 
-	shash_set_needkey(hash, alg);
+	if (crypto_shash_alg_has_setkey(alg) &&
+	    !(alg->base.cra_flags & CRYPTO_ALG_OPTIONAL_KEY))
+		crypto_shash_set_flags(hash, CRYPTO_TFM_NEED_KEY);
 
 	return 0;
 }

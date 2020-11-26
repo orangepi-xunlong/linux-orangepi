@@ -486,9 +486,6 @@ struct xradio_common;
 /*some hardware information*/
 #define WSM_MIB_ID_HW_INFO	        0x1043
 
-/*use for changing mac address of interface*/
-#define WSM_MIB_ID_CHANGE_MAC		0x1046
-
 /* 4.21 BlockAckPolicy */
 #define WSM_MIB_ID_BLOCK_ACK_POLICY		0x100E
 

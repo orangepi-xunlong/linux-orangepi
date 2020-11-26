@@ -684,7 +684,7 @@ static void mma865x_early_suspend(struct early_suspend *h)
 		if ((atomic_read(&pdata->active)) == MMA_ACTIVED)
 			mma865x_device_stop(mma865x_i2c_client);
 
-		if (!IS_ERR(gsensor_info.sensor_power_ldo)) {
+		if (gsensor_info.sensor_power_ldo != NULL) {
 			err = regulator_disable(gsensor_info.sensor_power_ldo);
 			if (err)
 				printk("bma865x power down failed\n");
@@ -702,7 +702,7 @@ static void mma865x_late_resume(struct early_suspend *h)
 		container_of(h, struct mma865x_data, early_suspend);
 	
 	dprintk(DEBUG_SUSPEND, "mma865x late resume %d\n", (atomic_read(&pdata->active)));
-		if (!IS_ERR(gsensor_info.sensor_power_ldo)) {
+		if (gsensor_info.sensor_power_ldo != NULL) {
 		val = regulator_enable(gsensor_info.sensor_power_ldo);
 		msleep(100);
 		}
@@ -735,7 +735,7 @@ static int mma865x_resume(struct device *dev)
 	int val = 0;
 	dprintk(DEBUG_SUSPEND, "mma865x resume %d\n", (atomic_read(&pdata->active)));
 
-	if (!IS_ERR(gsensor_info.sensor_power_ldo)) {
+	if (gsensor_info.sensor_power_ldo != NULL) {
 		val = regulator_enable(gsensor_info.sensor_power_ldo);
 		msleep(100);
 		}
@@ -780,7 +780,7 @@ static int mma865x_suspend(struct device *dev, pm_message_t mesg)
 		if ((atomic_read(&pdata->active)) == MMA_ACTIVED)
 			mma865x_device_stop(mma865x_i2c_client);
 
-		if (!IS_ERR(gsensor_info.sensor_power_ldo)) {
+		if (gsensor_info.sensor_power_ldo != NULL) {
 			err = regulator_disable(gsensor_info.sensor_power_ldo);
 			/* msleep(500); */
 		}
@@ -835,7 +835,7 @@ static int __init mma865x_init(void)
 	}
 	twi_id = gsensor_info.twi_id;
 
-	if (!IS_ERR(gsensor_info.sensor_power_ldo)) {
+	if (gsensor_info.sensor_power_ldo != NULL) {
 		err = regulator_enable(gsensor_info.sensor_power_ldo);
 		if (err) {
 			printk("%s: gsensor-mma865x regulator_enable err.\n", __func__);

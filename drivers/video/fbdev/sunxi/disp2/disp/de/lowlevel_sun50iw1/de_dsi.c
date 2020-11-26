@@ -14,8 +14,8 @@
 extern s32 disp_delay_us(u32 us);
 extern s32 disp_delay_ms(u32 ms);
 
-static volatile __de_dsi_dev_t *dsi_dev[DEVICE_DSI_NUM];
-static volatile	__de_dsi_dphy_dev_t	*dphy_dev[DEVICE_DSI_NUM];
+static volatile __de_dsi_dev_t *dsi_dev[2];
+static volatile	__de_dsi_dphy_dev_t	*dphy_dev[1];
 
 u32  dsi_pixel_bits[4] = {24, 24, 18, 16};
 u32  dsi_lane_den[4] = {0x1, 0x3, 0x7, 0xf};

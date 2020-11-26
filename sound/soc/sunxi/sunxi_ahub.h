@@ -20,20 +20,6 @@
 #include <linux/regmap.h>
 #include <linux/module.h>
 
-/* select pll_audiox4 as clock source */
-#if defined(CONFIG_ARCH_SUN50IW9)
-#define AHUB_PLL_AUDIO_X4
-#else
-#undef AHUB_PLL_AUDIO_X4
-#endif
-
-/* ahub loopback func for sun50iw9 */
-#if defined(CONFIG_ARCH_SUN50IW9)
-//#define LOOPBACK_FOR_DAUDIO
-//#else
-#undef LOOPBACK_FOR_DAUDIO
-#endif
-
 /* SUNXI Audio Hub registers list */
 #define SUNXI_AHUB_CTL		0x00
 #define SUNXI_AHUB_VER		0x04
@@ -203,19 +189,6 @@
 #define APBIF_RX_DAM1_TXDIF		15
 
 /* SUNXI_AHUB_I2S_CTL */
-//sun50iw9 change loopback bit and SDI_EN
-#ifdef CONFIG_ARCH_SUN50IW9
-#define I2S_CTL_LOOP3			23
-#define I2S_CTL_LOOP2			22
-#define I2S_CTL_LOOP1			21
-#define I2S_CTL_LOOP0			20
-#define I2S_CTL_SDI3_EN			15
-#define I2S_CTL_SDI2_EN			14
-#define I2S_CTL_SDI1_EN			13
-#define I2S_CTL_SDI0_EN			12
-#else
-#define I2S_CTL_LOOP			3
-#endif
 #define I2S_CTL_CLK_OUT			18
 #define I2S_CTL_SDO3_EN			11
 #define I2S_CTL_SDO2_EN			10
@@ -223,6 +196,7 @@
 #define I2S_CTL_SDO0_EN			8
 #define I2S_CTL_OUT_MUTE		6
 #define I2S_CTL_MODE			4
+#define I2S_CTL_LOOP			3
 #define I2S_CTL_TXEN			2
 #define I2S_CTL_RXEN			1
 #define I2S_CTL_GEN			0
@@ -304,10 +278,7 @@
 #define DAM_RX_DAM1_TXDIF		15
 
 /* For sun50iw6, if others should redefine */
-#define SUNXI_AHUB_I2S0_ID			0
 #define SUNXI_AHUB_HDMI_ID			1
-#define SUNXI_AHUB_I2S2_ID			2
-#define SUNXI_AHUB_I2S3_ID			3
 
 extern struct regmap *sunxi_ahub_regmap_init(struct platform_device *pdev);
 extern unsigned int sunxi_ahub_read(unsigned int reg);

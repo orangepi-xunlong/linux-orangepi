@@ -56,7 +56,7 @@ int platform_wifi_power_on(void)
 		mdelay(100);
 		sunxi_mmc_rescan_card(wlan_bus_index);
 #endif
-		RTW_INFO("%s: power up, rescan card.\n", __func__);
+		RTW_INFO("%s: power up, rescan card.\n", __FUNCTION__);
 
 #ifdef CONFIG_GPIO_WAKEUP
 #if defined(CONFIG_PLATFORM_ARM_SUN50IW1P1)
@@ -81,6 +81,6 @@ void platform_wifi_power_off(void)
 	mdelay(100);
 	sunxi_wlan_set_power(0);
 #endif
-	RTW_INFO("%s: remove card, power off.\n", __func__);
+	RTW_INFO("%s: remove card, power off.\n", __FUNCTION__);
 #endif /* CONFIG_MMC */
 }

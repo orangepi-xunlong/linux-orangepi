@@ -2428,9 +2428,6 @@ struct ieee80211_ops {
 				struct ieee80211_vif *vif,
 				void *data,
 				int len);
-	int (*change_mac)(struct ieee80211_hw *hw,
-				struct ieee80211_vif *vif,
-				struct sockaddr *sa);
 };
 
 /**
@@ -2643,8 +2640,6 @@ void mac80211_napi_schedule(struct ieee80211_hw *hw);
  * @hw: the hardware to stop polling
  */
 void mac80211_napi_complete(struct ieee80211_hw *hw);
-
-int mac80211_ifdev_move(struct ieee80211_hw *hw, struct device *new_parent, int dpm_order);
 
 /**
  * ieee80211_rx - receive frame

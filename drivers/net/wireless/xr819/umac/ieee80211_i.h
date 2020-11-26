@@ -630,69 +630,6 @@ enum ieee80211_sdata_state_bits {
 	SDATA_STATE_OFFCHANNEL,
 };
 
-/**
- * enum ieee80211_4way_state - the state of 4-way handshake
- * @SDATA_4WAY_STATE_NONE:the sta don't send any 4-way handshake EAPOL-KEY
- * @SDATA_4WAY_STATE_FINISH2:the sta has send second frame(acked) ,it means begin
- * 4-way handshake.
- * @SDATA_4WAY_STATE_FINISH4:the sta has send fourth frame(acked),it means
- * 4-way handshake finish.
- *
- */
-enum ieee80211_4way_state{
-	SDATA_4WAY_STATE_NONE,
-	SDATA_4WAY_STATE_FINISH2,
-	SDATA_4WAY_STATE_FINISH4,
-};
-
-/* IEEE 802.11, 8.5.2 EAPOL-Key frames */
-#define IEEE80211_KEY_INFO_TYPE_MASK ((u16) (BIT(0) | BIT(1) | BIT(2)))
-#define IEEE80211_KEY_INFO_TYPE_AKM_DEFINED 0
-#define IEEE80211_KEY_INFO_TYPE_HMAC_MD5_RC4 BIT(0)
-#define IEEE80211_KEY_INFO_TYPE_HMAC_SHA1_AES BIT(1)
-#define IEEE80211_KEY_INFO_TYPE_AES_128_CMAC 3
-#define IEEE80211_KEY_INFO_KEY_TYPE BIT(3) /* 1 = Pairwise, 0 = Group key */
-/* bit4..5 is used in WPA, but is reserved in IEEE 802.11i/RSN */
-#define IEEE80211_KEY_INFO_KEY_INDEX_MASK (BIT(4) | BIT(5))
-#define IEEE80211_KEY_INFO_KEY_INDEX_SHIFT 4
-#define IEEE80211_KEY_INFO_INSTALL BIT(6) /* pairwise */
-#define IEEE80211_KEY_INFO_TXRX BIT(6) /* group */
-#define IEEE80211_KEY_INFO_ACK BIT(7)
-#define IEEE80211_KEY_INFO_MIC BIT(8)
-#define IEEE80211_KEY_INFO_SECURE BIT(9)
-#define IEEE80211_KEY_INFO_ERROR BIT(10)
-#define IEEE80211_KEY_INFO_REQUEST BIT(11)
-#define IEEE80211_KEY_INFO_ENCR_KEY_DATA BIT(12) /* IEEE 802.11i/RSN only */
-#define IEEE80211_KEY_INFO_SMK_MESSAGE BIT(13)
-
-
-#define IEEE80211_801X_REPLAY_COUNTER_LEN 8
-#define IEEE80211_801X_NONCE_LEN 32
-#define IEEE80211_801X_KEY_RSC_LEN 8
-
-struct ieee80211_eapol_key {
-	u8 type;
-	/* Note: key_info, key_length, and key_data_length are unaligned */
-	u8 key_info[2]; /* big endian */
-	u8 key_length[2]; /* big endian */
-	u8 replay_counter[IEEE80211_801X_REPLAY_COUNTER_LEN];
-	u8 key_nonce[IEEE80211_801X_NONCE_LEN];
-	u8 key_iv[16];
-	u8 key_rsc[IEEE80211_801X_KEY_RSC_LEN];
-	u8 key_id[8]; /* Reserved in IEEE 802.11i/RSN */
-	u8 key_mic[16];
-	u8 key_data_length[2]; /* big endian */
-	/* followed by key_data_length bytes of key_data */
-} __attribute__ ((packed));
-
-struct ieee802_1x_hdr {
-	u8 version;
-	u8 type;
-	u16 length;
-	/* followed by length octets of data */
-} __attribute__ ((packed));
-
-
 struct ieee80211_sub_if_data {
 	struct list_head list;
 
@@ -754,8 +691,6 @@ struct ieee80211_sub_if_data {
 	u16 sequence_number;
 	__be16 control_port_protocol;
 	bool control_port_no_encrypt;
-	wait_queue_head_t setkey_wq;
-	enum ieee80211_4way_state fourway_state;
 
 	struct ieee80211_tx_queue_params tx_conf[IEEE80211_NUM_ACS];
 
@@ -971,9 +906,6 @@ struct ieee80211_local {
 	/* device is started */
 	bool started;
 
-	/* device is during a HW reconfig */
-	bool in_reconfig;
-
 	/* wowlan is enabled -- don't reconfig on resume */
 	bool wowlan;
 
@@ -1172,8 +1104,6 @@ struct ieee80211_local {
 	struct ieee80211_channel *hw_roc_channel;
 
 	u64 roc_cookie;
-
-	struct ieee80211_sub_if_data __rcu *p2p_sdata;
 };
 
 static inline struct ieee80211_sub_if_data *
@@ -1281,41 +1211,6 @@ static inline int ieee80211_bssid_match(const u8 *raddr, const u8 *addr)
 	       is_broadcast_ether_addr(raddr);
 }
 
-/**
- * ieee80211_is_8021x - check if frame payload is a 8021x frame
- * @frame: frame
- */
-unsigned int __attribute_const__ ieee80211_hdrlen(__le16 fc);
-
-#define ETH_P_PAE 0x888E
-
-static inline int ieee80211_is_8021x(struct ieee80211_hdr *frame)
-{
-	const int LLC_TYPE_OFF = 6;
-
-	if (ieee80211_is_data(frame->frame_control)) {
-		const unsigned int machdrlen = ieee80211_hdrlen(frame->frame_control);
-		u8 *llc_data = (u8 *)frame + machdrlen;
-		return (bool)(*(u16 *)(llc_data+LLC_TYPE_OFF) == cpu_to_be16(ETH_P_PAE));
-	}
-	return false;
-}
-
-/**
- * ieee80211_is_8021x - check if frame payload is a 8021x eapol key frame
- * @frame: frame
- */
-static inline int ieee80211_is_eapol_key(struct ieee80211_hdr *frame)
-{
-	const int LLC_TYPE_OFF = 6;
-
-	if (ieee80211_is_8021x(frame)) {
-		const unsigned int machdrlen = ieee80211_hdrlen(frame->frame_control);
-		u8 *eapol_frame = (u8 *)frame + machdrlen + LLC_TYPE_OFF;
-		return eapol_frame[3] == 3;
-	}
-	return false;
-}
 
 void ieee80211_notify_channel_change(struct ieee80211_local *local,
 				     struct ieee80211_sub_if_data *sdata);
@@ -1427,7 +1322,7 @@ void mac80211_iface_exit(void);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 int mac80211_if_add(struct ieee80211_local *local, const char *name,
 		     unsigned char name_assign_type,
-		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
+		     struct net_device **new_dev, enum nl80211_iftype type,
 		     struct vif_params *params);
 #else
 int mac80211_if_add(struct ieee80211_local *local, const char *name,
@@ -1443,8 +1338,6 @@ u32 __mac80211_recalc_idle(struct ieee80211_local *local);
 void mac80211_recalc_idle(struct ieee80211_local *local);
 void mac80211_adjust_monitor_flags(struct ieee80211_sub_if_data *sdata,
 				    const int offset);
-int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up);
-void ieee80211_sdata_stop(struct ieee80211_sub_if_data *sdata);
 
 static inline bool ieee80211_sdata_running(struct ieee80211_sub_if_data *sdata)
 {

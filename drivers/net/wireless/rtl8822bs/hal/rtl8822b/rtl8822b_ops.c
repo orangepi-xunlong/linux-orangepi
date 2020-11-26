@@ -545,7 +545,7 @@ static void Hal_EfuseParsePABias(PADAPTER adapter)
 
 	ret = rtw_efuse_access(adapter, 0, 0x3D7, 2, data);
 	if (_FAIL == ret) {
-		RTW_ERR("%s: Fail to read PA Bias from eFuse!\n", __func__);
+		RTW_ERR("%s: Fail to read PA Bias from eFuse!\n", __FUNCTION__);
 		return;
 	}
 
@@ -609,7 +609,7 @@ u8 rtl8822b_read_efuse(PADAPTER adapter)
 #ifdef CONFIG_EFUSE_CONFIG_FILE
 	if (check_phy_efuse_tx_power_info_valid(adapter) == _FALSE) {
 		if (Hal_readPGDataFromConfigFile(adapter) != _SUCCESS)
-			RTW_WARN("%s: invalid phy efuse and read from file fail, will use driver default!!\n", __func__);
+			RTW_WARN("%s: invalid phy efuse and read from file fail, will use driver default!!\n", __FUNCTION__);
 	}
 #endif /* CONFIG_EFUSE_CONFIG_FILE */
 
@@ -831,7 +831,7 @@ static void xmit_status_check(PADAPTER p)
 
 	txdma_status = rtw_read32(p, REG_TXDMA_STATUS_8822B);
 	if (txdma_status != 0x00) {
-		RTW_INFO("%s REG_TXDMA_STATUS:0x%08x\n", __func__, txdma_status);
+		RTW_INFO("%s REG_TXDMA_STATUS:0x%08x\n", __FUNCTION__, txdma_status);
 		psrtpriv->tx_dma_status_cnt++;
 		psrtpriv->self_dect_case = 4;
 		rtw_hal_sreset_reset(p);
@@ -852,7 +852,7 @@ static void xmit_status_check(PADAPTER p)
 
 					ability = rtw_phydm_ability_get(p);
 
-					RTW_INFO("%s tx hang %s\n", __func__,
+					RTW_INFO("%s tx hang %s\n", __FUNCTION__,
 						(ability & ODM_BB_ADAPTIVITY) ? "ODM_BB_ADAPTIVITY" : "");
 
 					if (!(ability & ODM_BB_ADAPTIVITY)) {
@@ -915,7 +915,7 @@ static void linked_status_check(PADAPTER p)
 
 	rx_dma_status = rtw_read32(p, REG_RXDMA_STATUS_8822B);
 	if (rx_dma_status != 0x00) {
-		RTW_INFO("%s REG_RXDMA_STATUS:0x%08x\n", __func__, rx_dma_status);
+		RTW_INFO("%s REG_RXDMA_STATUS:0x%08x\n", __FUNCTION__, rx_dma_status);
 		psrtpriv->rx_dma_status_cnt++;
 		psrtpriv->self_dect_case = 5;
 #ifdef CONFIG_USB_HCI
@@ -1741,7 +1741,7 @@ static void hw_var_set_sec_dk_cfg(PADAPTER adapter, u8 enable)
 
 	rtw_write8(adapter, REG_SECCFG_8822B, reg_scr);
 
-	RTW_INFO("%s: [HW_VAR_SEC_DK_CFG] 0x%x=0x%08x\n", __func__,
+	RTW_INFO("%s: [HW_VAR_SEC_DK_CFG] 0x%x=0x%08x\n", __FUNCTION__,
 		 REG_SECCFG_8822B, rtw_read32(adapter, REG_SECCFG_8822B));
 }
 
@@ -3412,7 +3412,7 @@ void rtl8822b_prepare_mp_txdesc(PADAPTER adapter, struct mp_priv *pmp_priv)
 		SET_TX_DESC_DATA_BW_8822B(desc, pmp_priv->bandwidth);
 	else {
 		RTW_ERR("%s: unknown bandwidth %d, use 20M\n",
-			 __func__, pmp_priv->bandwidth);
+			 __FUNCTION__, pmp_priv->bandwidth);
 		SET_TX_DESC_DATA_BW_8822B(desc, CHANNEL_WIDTH_20);
 	}
 
@@ -3585,22 +3585,22 @@ static void fill_default_txdesc(struct xmit_frame *pxmitframe, u8 *pbuf)
 		/* CCX-TXRPT ack for xmit mgmt frames. */
 		if (pxmitframe->ack_report) {
 #ifdef DBG_CCX
-			RTW_INFO("%s set spe_rpt\n", __func__);
+			RTW_INFO("%s set spe_rpt\n", __FUNCTION__);
 #endif
 			SET_TX_DESC_SPE_RPT_8822B(pbuf, 1);
 			SET_TX_DESC_SW_DEFINE_8822B(pbuf, (u8)(GET_PRIMARY_ADAPTER(adapter)->xmitpriv.seq_no));
 		}
 #endif /* CONFIG_XMIT_ACK */
 	} else if (pxmitframe->frame_tag == TXAGG_FRAMETAG)
-		RTW_INFO("%s: TXAGG_FRAMETAG\n", __func__);
+		RTW_INFO("%s: TXAGG_FRAMETAG\n", __FUNCTION__);
 #ifdef CONFIG_MP_INCLUDED
 	else if (pxmitframe->frame_tag == MP_FRAMETAG) {
-		RTW_DBG("%s: MP_FRAMETAG\n", __func__);
+		RTW_DBG("%s: MP_FRAMETAG\n", __FUNCTION__);
 		fill_txdesc_for_mp(adapter, pbuf);
 	}
 #endif
 	else {
-		RTW_INFO("%s: frame_tag=0x%x\n", __func__, pxmitframe->frame_tag);
+		RTW_INFO("%s: frame_tag=0x%x\n", __FUNCTION__, pxmitframe->frame_tag);
 
 		SET_TX_DESC_MACID_8822B(pbuf, pattrib->mac_id);
 		SET_TX_DESC_RATE_ID_8822B(pbuf, pattrib->raid);

@@ -94,17 +94,8 @@ extern s32 hdmi_core_enter_lp(void);
 extern s32 hdmi_core_exit_lp(void);
 extern u32 hdmi_core_get_csc_type(void);
 extern s32 hdmi_core_update_detect_time(u32 time_val);
-
 extern s32 hdmi_core_cec_enable(bool enable);
-#ifdef CONFIG_HDMI_CEC_STANDARD
-int hdmi_core_cec_send_msg(struct cec_msg *msg);
-int hdmi_core_cec_get_msg(struct cec_msg *msg);
-void hdmi_core_cec_set_logaddr(unsigned char addr);
-unsigned char hdmi_core_cec_get_logaddr(void);
-unsigned short hdmi_core_cec_get_phyaddr(void);
-#else
 extern int hdmi_core_cec_get_simple_msg(unsigned char *msg);
-#endif
 
 s32 hdmi_core_get_list_num(void);
 

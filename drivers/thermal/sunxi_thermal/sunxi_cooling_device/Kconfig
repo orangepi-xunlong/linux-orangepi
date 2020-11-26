@@ -4,8 +4,6 @@
 config SUNXI_BUDGET_COOLING
 	tristate "sunxi budget cooling"
 	depends on ARCH_SUNXI
-	depends on CPU_FREQ
-	depends on !CPU_THERMAL
 	help
 	  Adds sunxi cpu budget cooling devices, and these cooling devices can be
 	  bound to thermal zone trip points. When a trip point reached, the
@@ -31,6 +29,7 @@ config SUNXI_BUDGET_COOLING_HOTPLUG
 config SUNXI_GPU_COOLING
 	tristate "sunxi gpu cooling"
 	depends on THERMAL_OF
+	depends on SUNXI_BUDGET_COOLING
 	help
 	  Adds sunxi gpu cooling devices, and these cooling devices can be
 	  bound to thermal zone trip points. When a trip point reached, the

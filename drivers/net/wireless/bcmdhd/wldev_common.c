@@ -2,13 +2,13 @@
  * Common function shared by Linux WEXT, cfg80211 and p2p drivers
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -34,9 +34,7 @@
 
 #include <wldev_common.h>
 #include <bcmutils.h>
-#ifdef WL_CFG80211
 #include <wl_cfg80211.h>
-#endif
 #include <dhd_config.h>
 
 #define htod32(i) (i)
@@ -479,11 +477,10 @@ int wldev_set_country(
 	wl_country_t cspec = {{0}, 0, {0}};
 	wl_country_t cur_cspec = {{0}, 0, {0}};	/* current ccode */
 	scb_val_t scbval;
-#ifdef WL_CFG80211
+	char smbuf[WLC_IOCTL_SMLEN];
 	struct wireless_dev *wdev = ndev_to_wdev(dev);
 	struct wiphy *wiphy = wdev->wiphy;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-#endif
 
 	if (!country_code)
 		return error;
@@ -498,7 +495,7 @@ int wldev_set_country(
 	cspec.rev = revinfo;
 	memcpy(cspec.country_abbrev, country_code, WLC_CNTRY_BUF_SZ);
 	memcpy(cspec.ccode, country_code, WLC_CNTRY_BUF_SZ);
-	error = dhd_conf_map_country_list(dhd_get_pub(dev), &cspec);
+	error = dhd_conf_map_country_list(dhd_get_pub(dev), &cspec, 0);
 	if (error)
 		dhd_get_customized_country_code(dev, (char *)&cspec.country_abbrev, &cspec);
 
@@ -509,11 +506,7 @@ int wldev_set_country(
 		dhd_force_country_change(dev) ||
 	    (strncmp(cspec.ccode, cur_cspec.ccode, WLC_CNTRY_BUF_SZ) != 0)) {
 
-		if ((user_enforced)
-#ifdef WL_CFG80211
-			&& (wl_get_drv_status(cfg, CONNECTED, dev))
-#endif
-		) {
+		if ((user_enforced) && (wl_get_drv_status(cfg, CONNECTED, dev))) {
 			bzero(&scbval, sizeof(scb_val_t));
 			error = wldev_ioctl_set(dev, WLC_DISASSOC,
 			                        &scbval, sizeof(scb_val_t));
@@ -524,7 +517,8 @@ int wldev_set_country(
 			}
 		}
 
-		error = dhd_conf_set_country(dhd_get_pub(dev), &cspec);
+		error = wldev_iovar_setbuf(dev, "country", &cspec, sizeof(cspec),
+			smbuf, sizeof(smbuf), NULL);
 		if (error < 0) {
 			WLDEV_ERROR(("%s: set country for %s as %s rev %d failed\n",
 				__FUNCTION__, country_code, cspec.ccode, cspec.rev));

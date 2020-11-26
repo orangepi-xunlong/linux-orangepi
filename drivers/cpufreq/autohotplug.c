@@ -57,7 +57,7 @@ static spinlock_t cpumask_lock;
 static atomic_t hotplug_lock   = ATOMIC_INIT(0);
 static atomic_t g_hotplug_lock = ATOMIC_INIT(0);
 
-static unsigned int hotplug_enable;
+static unsigned int hotplug_enable = 1;
 static unsigned int boost_all_online;
 static unsigned int hotplug_period_us = 200000;
 static unsigned int hotplug_sample_us = 20000;

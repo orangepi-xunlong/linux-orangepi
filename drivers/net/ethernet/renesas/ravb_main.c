@@ -457,7 +457,7 @@ static int ravb_dmac_init(struct net_device *ndev)
 		   RCR_EFFS | RCR_ENCF | RCR_ETS0 | RCR_ESF | 0x18000000, RCR);
 
 	/* Set FIFO size */
-	ravb_write(ndev, TGC_TQP_AVBMODE1 | 0x00112200, TGC);
+	ravb_write(ndev, TGC_TQP_AVBMODE1 | 0x00222200, TGC);
 
 	/* Timestamp enable */
 	ravb_write(ndev, TCCR_TFEN, TCCR);
@@ -717,11 +717,10 @@ static void ravb_error_interrupt(struct net_device *ndev)
 	u32 eis, ris2;
 
 	eis = ravb_read(ndev, EIS);
-	ravb_write(ndev, ~(EIS_QFS | EIS_RESERVED), EIS);
+	ravb_write(ndev, ~EIS_QFS, EIS);
 	if (eis & EIS_QFS) {
 		ris2 = ravb_read(ndev, RIS2);
-		ravb_write(ndev, ~(RIS2_QFF0 | RIS2_RFFF | RIS2_RESERVED),
-			   RIS2);
+		ravb_write(ndev, ~(RIS2_QFF0 | RIS2_RFFF), RIS2);
 
 		/* Receive Descriptor Empty int */
 		if (ris2 & RIS2_QFF0)
@@ -774,7 +773,7 @@ static bool ravb_timestamp_interrupt(struct net_device *ndev)
 	u32 tis = ravb_read(ndev, TIS);
 
 	if (tis & TIS_TFUF) {
-		ravb_write(ndev, ~(TIS_TFUF | TIS_RESERVED), TIS);
+		ravb_write(ndev, ~TIS_TFUF, TIS);
 		ravb_get_tx_tstamp(ndev);
 		return true;
 	}
@@ -909,7 +908,7 @@ static int ravb_poll(struct napi_struct *napi, int budget)
 		/* Processing RX Descriptor Ring */
 		if (ris0 & mask) {
 			/* Clear RX interrupt */
-			ravb_write(ndev, ~(mask | RIS0_RESERVED), RIS0);
+			ravb_write(ndev, ~mask, RIS0);
 			if (ravb_rx(ndev, &quota, q))
 				goto out;
 		}
@@ -917,7 +916,7 @@ static int ravb_poll(struct napi_struct *napi, int budget)
 		if (tis & mask) {
 			spin_lock_irqsave(&priv->lock, flags);
 			/* Clear TX interrupt */
-			ravb_write(ndev, ~(mask | TIS_RESERVED), TIS);
+			ravb_write(ndev, ~mask, TIS);
 			ravb_tx_free(ndev, q, true);
 			netif_wake_subqueue(ndev, q);
 			mmiowb();
@@ -956,13 +955,6 @@ static void ravb_adjust_link(struct net_device *ndev)
 	struct ravb_private *priv = netdev_priv(ndev);
 	struct phy_device *phydev = ndev->phydev;
 	bool new_state = false;
-	unsigned long flags;
-
-	spin_lock_irqsave(&priv->lock, flags);
-
-	/* Disable TX and RX right over here, if E-MAC change is ignored */
-	if (priv->no_avb_link)
-		ravb_rcv_snd_disable(ndev);
 
 	if (phydev->link) {
 		if (phydev->duplex != priv->duplex) {
@@ -980,20 +972,17 @@ static void ravb_adjust_link(struct net_device *ndev)
 			ravb_modify(ndev, ECMR, ECMR_TXF, 0);
 			new_state = true;
 			priv->link = phydev->link;
+			if (priv->no_avb_link)
+				ravb_rcv_snd_enable(ndev);
 		}
 	} else if (priv->link) {
 		new_state = true;
 		priv->link = 0;
 		priv->speed = 0;
 		priv->duplex = -1;
+		if (priv->no_avb_link)
+			ravb_rcv_snd_disable(ndev);
 	}
-
-	/* Enable TX and RX right over here, if E-MAC change is ignored */
-	if (priv->no_avb_link && phydev->link)
-		ravb_rcv_snd_enable(ndev);
-
-	mmiowb();
-	spin_unlock_irqrestore(&priv->lock, flags);
 
 	if (new_state && netif_msg_link(priv))
 		phy_print_status(phydev);
@@ -1096,18 +1085,52 @@ static int ravb_get_link_ksettings(struct net_device *ndev,
 static int ravb_set_link_ksettings(struct net_device *ndev,
 				   const struct ethtool_link_ksettings *cmd)
 {
+	struct ravb_private *priv = netdev_priv(ndev);
+	unsigned long flags;
+	int error;
+
 	if (!ndev->phydev)
 		return -ENODEV;
 
-	return phy_ethtool_ksettings_set(ndev->phydev, cmd);
+	spin_lock_irqsave(&priv->lock, flags);
+
+	/* Disable TX and RX */
+	ravb_rcv_snd_disable(ndev);
+
+	error = phy_ethtool_ksettings_set(ndev->phydev, cmd);
+	if (error)
+		goto error_exit;
+
+	if (cmd->base.duplex == DUPLEX_FULL)
+		priv->duplex = 1;
+	else
+		priv->duplex = 0;
+
+	ravb_set_duplex(ndev);
+
+error_exit:
+	mdelay(1);
+
+	/* Enable TX and RX */
+	ravb_rcv_snd_enable(ndev);
+
+	mmiowb();
+	spin_unlock_irqrestore(&priv->lock, flags);
+
+	return error;
 }
 
 static int ravb_nway_reset(struct net_device *ndev)
 {
+	struct ravb_private *priv = netdev_priv(ndev);
 	int error = -ENODEV;
+	unsigned long flags;
 
-	if (ndev->phydev)
+	if (ndev->phydev) {
+		spin_lock_irqsave(&priv->lock, flags);
 		error = phy_start_aneg(ndev->phydev);
+		spin_unlock_irqrestore(&priv->lock, flags);
+	}
 
 	return error;
 }

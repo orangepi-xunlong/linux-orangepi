@@ -3,8 +3,6 @@
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
  * may be copied, distributed, and modified under those terms.
@@ -16,6 +14,21 @@
  *
  */
 
+/*
+ ******************************************************************************
+ *
+ * dma_reg_i.h
+ *
+ * CSIC - dma_reg_i.h module
+ *
+ * Copyright (c) 2016 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version         Author         Date          Description
+ *
+ *   1.0         Zhao Wei     2016/06/13       First Version
+ *
+ ******************************************************************************
+ */
 #ifndef __CSIC__DMA__REG__I__H__
 #define __CSIC__DMA__REG__I__H__
 
@@ -35,22 +48,12 @@
 #define	CSIC_DMA_EN_MASK			(0X1 << CSIC_DMA_EN)
 #define	CSIC_FRAME_CNT_EN			5
 #define	CSIC_FRAME_CNT_EN_MASK			(0X1 << CSIC_FRAME_CNT_EN)
-#define	CSIC_BUF_ADDR_MODE			7
-#define	CSIC_BUF_ADDR_MODE_MASK  		(0X1 << CSIC_BUF_ADDR_MODE)
-#define	CSIC_LBC_EN				8
-#define	CSIC_LBC_EN_MASK			(0X1 << CSIC_LBC_EN)
-#define	CSIC_FLIP_SIZE_CFG_MODE 		28
-#define	CSIC_FLIP_SIZE_CFG_MODE_MASK    	(0X1 << CSIC_FLIP_SIZE_CFG_MODE)
-#define	CSIC_BUF_LENGTH_CFG_MODE		29
-#define	CSIC_BUF_LENGTH_CFG_MODE_MASK   	(0X1 << CSIC_BUF_LENGTH_CFG_MODE)
-#define	CSIC_VFLIP_BUF_ADDR_CFG_MODE    	30
-#define	CSIC_VFLIP_BUF_ADDR_CFG_MODE_MASK	(0X1 << CSIC_VFLIP_BUF_ADDR_CFG_MODE)
 
 #define	CSIC_DMA_CFG_REG_OFF			0X004
 #define	MIN_SDR_WR_SIZE				0
 #define	MIN_SDR_WR_SIZE_MASK			(0X3 << MIN_SDR_WR_SIZE)
 #define	FPS_DS					6
-#define	FPS_DS_MASK				(0XFF << FPS_DS)
+#define	FPS_DS_MASK				(0X3 << FPS_DS)
 #define	FIELD_SEL				10
 #define	FIELD_SEL_MASK				(0X3 << FIELD_SEL)
 #define	HFLIP_EN				12
@@ -59,8 +62,6 @@
 #define	VFLIP_EN_MASK				(0X1 << VFLIP_EN)
 #define	OUTPUT_FMT				16
 #define	OUTPUT_FMT_MASK				(0XF << OUTPUT_FMT)
-#define	ENABLE_10BIT_CUT2_8BIT  		21
-#define	ENABLE_10BIT_CUT2_8BIT_MASK		(0X1 << ENABLE_10BIT_CUT2_8BIT)
 #define	PAD_VAL					24
 #define	PAD_VAL_MASK				(0XFF << PAD_VAL)
 
@@ -129,12 +130,6 @@
 #define	FBC_OVHD_WRDDR_FULL_INT_EN_MASK		(0X1 << FBC_OVHD_WRDDR_FULL_INT_EN)
 #define	FBC_DATA_WRDDR_FULL_INT_EN		9
 #define	FBC_DATA_WRDDR_FULL_INT_EN_MASK		(0X1 << FBC_DATA_WRDDR_FULL_INT_EN)
-#define	BUF_ADDR_FIFO_INT_EN			13
-#define	BUF_ADDR_FIFO_INT_EN_MASK  		(0X1 << BUF_ADDR_FIFO_INT_EN)
-#define	STORED_FRM_CNT_INT_EN   		14
-#define	STORED_FRM_CNT_INT_EN_MASK		(0X1 << STORED_FRM_CNT_INT_EN)
-#define	FRM_LOST_INT_EN 			15
-#define	FRM_LOST_INT_EN_MASK			(0X1 << FRM_LOST_INT_EN)
 
 #define	CSIC_DMA_INT_STA_REG_OFF		0X054
 #define	CD_PD					0
@@ -153,12 +148,6 @@
 #define	HB_OF_PD_MASK				(0X1 << HB_OF_PD)
 #define	VS_PD					7
 #define	VS_PD_MASK				(0X1 << VS_PD)
-#define	BUF_ADDR_FIFO_INT_PD			13
-#define	BUF_ADDR_FIFO_INT_PD_MASK  		(0X1 << BUF_ADDR_FIFO_INT_PD)
-#define	STORED_FRM_CNT_INT_PD   		14
-#define	STORED_FRM_CNT_INT_PD_MASK		(0X1 << STORED_FRM_CNT_INT_PD)
-#define	FRM_LOST_INT_PD 			15
-#define	FRM_LOST_INT_PD_MASK			(0X1 << FRM_LOST_INT_PD)
 
 #define	CSIC_DMA_LINE_CNT_REG_OFF		0X058
 #define	LINE_CNT_NUM				0
@@ -195,71 +184,5 @@
 #define	PCLK_CNT_LINE_MIN_MASK			(0XFFF << PCLK_CNT_LINE_MIN)
 #define	PCLK_CNT_LINE_MAX			16
 #define	PCLK_CNT_LINE_MAX_MASK			(0XFF << PCLK_CNT_LINE_MAX)
-
-#define	CSIC_DMA_BUFA_F0_ENTRY_REG_OFF  	0X080
-#define	BUFA_F0_ENTRY				0
-#define	BUFA_F0_ENTRY_MASK			(0XFFFFFFFF << BUFA_F0_ENTRY)
-
-#define	CSIC_DMA_BUFA_F1_ENTRY_REG_OFF  	0X084
-#define	BUFA_F1_ENTRY				0
-#define	BUFA_F1_ENTRY_MASK			(0XFFFFFFFF << BUFA_F1_ENTRY)
-
-#define	CSIC_DMA_BUFA_F2_ENTRY_REG_OFF  	0X088
-#define	BUFA_F1_ENTRY				0
-#define	BUFA_F1_ENTRY_MASK			(0XFFFFFFFF << BUFA_F1_ENTRY)
-
-#define	CSIC_DMA_BUF_THRESHOLD_REG_OFF  	0X08c
-#define	DMA_BUFA_FIFO_THRESHOLD 		0
-#define	DMA_BUFA_FIFO_THRESHOLD_MASK    	(0x3F << DMA_BUFA_FIFO_THRESHOLD)
-#define	DMA_STORED_FRM_THRESHOLD		16
-#define	DMA_STORED_FRM_THRESHOLD_MASK   	(0x3F << DMA_STORED_FRM_THRESHOLD)
-
-#define	CSIC_DMA_STORED_FRM_CNT_REG_OFF  	0X094
-#define	DMA_STORED_FRM_CNT			0
-#define	DMA_STORED_FRM_CNT_MASK 		(0xFF << DMA_STORED_FRM_CNT)
-
-#define	CSIC_LBC_CONFIGURE_REG_OFF		0X100
-#define	LIMIT_QP_MIM				0
-#define	LIMIT_QP_MIM_MASK  			(0X7 << LIMIT_QP_MIM)
-#define	LIMIT_QP_ENABLE 			3
-#define	LIMIT_QP_ENABLE_MASK 			(0X1 << LIMIT_QP_ENABLE)
-#define	UPDATE_ADVANTURE_RATIO  		16
-#define	UPDATE_ADVANTURE_RATIO_MASK     	(0X1F << UPDATE_ADVANTURE_RATIO)
-#define	UPDATE_ADVANTURE_ENABLE 		21
-#define	UPDATE_ADVANTURE_ENABLE_MASK    	(0X1 << UPDATE_ADVANTURE_ENABLE)
-#define	MSQ_ENABLE				24
-#define	MSQ_ENABLE_MASK  			(0X1 << MSQ_ENABLE)
-#define	OTS_ENABLE				25
-#define	OTS_ENABLE_MASK  			(0X1 << OTS_ENABLE)
-#define	DTS_ENABLE				26
-#define	DTS_ENABLE_MASK  			(0X1 << DTS_ENABLE)
-#define	GLB_ENABLE				27
-#define	GLB_ENABLE_MASK  			(0X1 << GLB_ENABLE)
-#define	WHETHER_LOSSY_ENABLE			31
-#define	WHETHER_LOSSY_ENABLE_MASK 		(0X1 << WHETHER_LOSSY_ENABLE)
-
-#define	CSIC_LBC_LINE_TARGET_BIT0_REG_OFF	0X104
-#define	CMP_TRG_BIT_FOR_EVEN_LINE		0
-#define	CMP_TRG_BIT_FOR_EVEN_LINE_MASK   	(0XFFFFF << CMP_TRG_BIT_FOR_EVEN_LINE)
-
-#define	CSIC_LBC_LINE_TARGET_BIT1_REG_OFF	0X108
-#define	CMP_TRG_BIT_FOR_ODD_LINE		0
-#define	CMP_TRG_BIT_FOR_ODD_LINE_MASK   	(0XFFFFF << CMP_TRG_BIT_FOR_ODD_LINE)
-
-#define	CSIC_LBC_RC_ADV_REG_OFF  		0X10C
-#define	RATE_CONTROL_ADVANTURE_0		0
-#define	RATE_CONTROL_ADVANTURE_0_MASK   	(0XFF << RATE_CONTROL_ADVANTURE_0)
-#define	RATE_CONTROL_ADVANTURE_1		8
-#define	RATE_CONTROL_ADVANTURE_1_MASK   	(0XFF << RATE_CONTROL_ADVANTURE_1)
-#define	RATE_CONTROL_ADVANTURE_2		16
-#define	RATE_CONTROL_ADVANTURE_2_MASK   	(0XFF << RATE_CONTROL_ADVANTURE_2)
-#define	RATE_CONTROL_ADVANTURE_3		24
-#define	RATE_CONTROL_ADVANTURE_3_MASK   	(0XFF << RATE_CONTROL_ADVANTURE_3)
-
-#define	CSIC_LBC_MB_MIN_REG_OFF  		0X110
-#define	MACROBLOCK_MIN_BITS0			0
-#define	MACROBLOCK_MIN_BITS0_MASK  		(0XFF << MACROBLOCK_MIN_BITS0)
-#define	MACROBLOCK_MIN_BITS1			16
-#define	MACROBLOCK_MIN_BITS1_MASK  		(0XFF << MACROBLOCK_MIN_BITS1)
 
 #endif /*__CSIC__DMA__REG__I__H__*/

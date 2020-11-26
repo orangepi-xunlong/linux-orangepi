@@ -1060,7 +1060,6 @@ xradio_tx_h_wsm(struct xradio_vif *priv, struct xradio_txinfo *t)
 	if (wsm->hdr.len > hw_priv->wsm_caps.sizeInpChBuf) {
 		txrx_printk(XRADIO_DBG_ERROR, "%s,msg length too big=%d\n",
 			    __func__, wsm->hdr.len);
-		skb_pull(t->skb, sizeof(struct wsm_tx));  //skb revert.
 		wsm = NULL;
 	}
 
@@ -1468,22 +1467,16 @@ void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 
 	xradio_tx_h_ba_stat(priv, &t);
 	spin_lock_bh(&priv->ps_state_lock);
-	tid_update = xradio_tx_h_pm_state(priv, &t);
-	SYS_BUG(xradio_queue_put(&hw_priv->tx_queue[t.queue],
-			t.skb, &t.txpriv));
+	{
+		tid_update = xradio_tx_h_pm_state(priv, &t);
+		SYS_BUG(xradio_queue_put(&hw_priv->tx_queue[t.queue],
+				t.skb, &t.txpriv));
 #ifdef ROC_DEBUG
-	txrx_printk(XRADIO_DBG_ERROR, "QPUT %x, %pM, if_id - %d\n",
-		t.hdr->frame_control, t.da, priv->if_id);
+		txrx_printk(XRADIO_DBG_ERROR, "QPUT %x, %pM, if_id - %d\n",
+			t.hdr->frame_control, t.da, priv->if_id);
 #endif
+	}
 	spin_unlock_bh(&priv->ps_state_lock);
-
-	/* To improve tcp tx in linux4.9
-	 * skb_orphan will tell tcp that driver has processed this skb,
-	 * so tcp can send other skb to driver.
-	 * If this is a retransmitted frame by umac, driver do not skb_orphan it again.
-	 */
-	if (!(t.tx_info->flags & IEEE80211_TX_INTFL_RETRANSMISSION))
-		skb_orphan(skb);
 
 #if defined(CONFIG_XRADIO_USE_EXTENSIONS)
 	if (tid_update && sta)
@@ -1500,9 +1493,7 @@ void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 drop:
 	txrx_printk(XRADIO_DBG_WARN, "drop=%d, fctl=0x%04x.\n",
 		    ret, frame->frame_control);
-	if (!(t.tx_info->flags & IEEE80211_TX_INTFL_RETRANSMISSION))
-		skb_orphan(skb);
-	xradio_skb_post_gc(hw_priv, skb, &t.txpriv);
+	xradio_skb_dtor(hw_priv, skb, &t.txpriv);
 	return;
 }
 
@@ -1720,11 +1711,9 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 				/* Shedule unjoin work */
 				txrx_printk(XRADIO_DBG_WARN,
 					    "Issue unjoin command(TX) by self.\n");
-				if (cancel_delayed_work(&priv->unjoin_delayed_work)) {
-					wsm_lock_tx_async(hw_priv);
-					if (queue_work(hw_priv->workqueue, &priv->unjoin_work) <= 0)
-						wsm_unlock_tx(hw_priv);
-				}
+				wsm_lock_tx_async(hw_priv);
+				if (queue_work(hw_priv->workqueue, &priv->unjoin_work) <= 0)
+					wsm_unlock_tx(hw_priv);
 			}
 		}
 
@@ -2566,12 +2555,11 @@ void xradio_rx_cb(struct xradio_vif *priv,
 		ds_ie = xradio_get_ie(ies, ies_len, WLAN_EID_DS_PARAMS);
 		if (ds_ie && (ds_ie[1] == 1)) {
 			ds_ie_partms_chan = ds_ie[2];
-			if (ds_ie_partms_chan != hw_priv->join_chan) {
-				txrx_printk(XRADIO_DBG_WARN, "***ap changes channel by beacon with ds ie,"
-					"then station reconnects to ap, %d -> %d\n",
-					hw_priv->join_chan, ds_ie_partms_chan);
-				wsm_send_disassoc_to_self(hw_priv, priv);
-			}
+		}
+		if (ds_ie_partms_chan != hw_priv->join_chan) {
+			txrx_printk(XRADIO_DBG_ERROR, "***ap changes channel by beacon with ds ie,"
+				"then station reconnects to ap\n");
+			wsm_send_disassoc_to_self(hw_priv, priv);
 		}
 	}
 

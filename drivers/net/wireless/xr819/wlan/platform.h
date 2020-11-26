@@ -43,6 +43,11 @@ extern void sw_mci_rescan_card(unsigned id, unsigned insert);
 extern int sw_mci_check_r1_ready(struct mmc_host* mmc, unsigned ms);
 #endif
 
+#ifdef CONFIG_CUSTOM_MAC_ADDRESS
+extern void sunxi_wlan_custom_mac_address(u8 *mac);
+extern void sunxi_wlan_chipid_mac_address(u8 *mac);
+#endif /* CONFIG_CUSTOM_MAC_ADDRESS */
+
 int xradio_get_syscfg(void);
 
 /* platform interfaces */

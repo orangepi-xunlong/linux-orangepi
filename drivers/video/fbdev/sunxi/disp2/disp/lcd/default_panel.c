@@ -113,25 +113,6 @@ static void LCD_power_on(u32 sel)
 	/* config lcd_power pin to open lcd power0 */
 	sunxi_lcd_power_enable(sel, 0);
 	sunxi_lcd_pin_cfg(sel, 1);
-
-/*#if defined(CONFIG_FPGA_V7_PLATFORM) || defined(CONFIG_FPGA_V4_PLATFORM)*/
-	/*struct disp_panel_para *panel_info =*/
-	    /*kmalloc(sizeof(struct disp_panel_para), GFP_KERNEL | __GFP_ZERO);*/
-
-	/*bsp_disp_get_panel_info(sel, panel_info);*/
-	/*if (panel_info->lcd_if == LCD_IF_HV) {*/
-		/*writel(0x22222222, ioremap(0x0300b06c, 4));*/
-		/*writel(0x22222222, ioremap(0x0300b070, 4));*/
-		/*writel(0x22222222, ioremap(0x0300b074, 4));*/
-		/*writel(0x22222222, ioremap(0x0300b078, 4));*/
-	/*} else if(panel_info->lcd_if == LCD_IF_LVDS) {*/
-		/*writel(0x33333333, ioremap(0x0300b06c, 4));*/
-		/*writel(0x33333333, ioremap(0x0300b070, 4));*/
-		/*writel(0x33333333, ioremap(0x0300b074, 4));*/
-		/*writel(0x33333333, ioremap(0x0300b078, 4));*/
-	/*}*/
-	/*kfree(panel_info);*/
-/*#endif*/
 }
 
 static void LCD_power_off(u32 sel)

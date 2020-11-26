@@ -46,8 +46,6 @@ static long soc_info_ioctl(struct file *file, unsigned int ioctl_num,
 	int ret = 0;
 	char id[17] = "";
 
-	memset(id, 0, sizeof(id));
-
 	pr_debug("IOCTRL cmd: %#x, param: %#lx\n", ioctl_num, ioctl_param);
 	switch (ioctl_num) {
 	case CHECK_SOC_SECURE_ATTR:
@@ -71,16 +69,6 @@ static long soc_info_ioctl(struct file *file, unsigned int ioctl_num,
 		ret = copy_to_user((void __user *)ioctl_param, id, 16);
 		pr_debug("soc chipid:%s\n", id);
 		break;
-	case CHECK_SOC_FT_ZONE:
-		sunxi_get_soc_ft_zone_str(id);
-		ret = copy_to_user((void __user *)ioctl_param, id, 8);
-		pr_debug("ft zone:%s\n", id);
-		break;
-	case CHECK_SOC_ROTPK_STATUS:
-		sunxi_get_soc_rotpk_status_str(id);
-		ret = copy_to_user((void __user *)ioctl_param, id, 8);
-		pr_debug("rotpk status:%s\n", id);
-		break;
 	default:
 		pr_err("Unsupported cmd:%d\n", ioctl_num);
 		ret = -EINVAL;
@@ -89,23 +77,10 @@ static long soc_info_ioctl(struct file *file, unsigned int ioctl_num,
 	return ret;
 }
 
-#ifdef CONFIG_COMPAT
-static long soc_info_compat_ioctl(struct file *filp, unsigned int cmd,
-		unsigned long arg)
-{
-	unsigned long translated_arg = (unsigned long)compat_ptr(arg);
-
-	return soc_info_ioctl(filp, cmd, translated_arg);
-}
-#endif
-
 static const struct file_operations soc_info_ops = {
 	.owner   = THIS_MODULE,
 	.open    = soc_info_open,
 	.release = soc_info_release,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl   = soc_info_compat_ioctl,
-#endif
 	.unlocked_ioctl = soc_info_ioctl,
 };
 
@@ -129,30 +104,17 @@ static ssize_t sys_info_show(struct class *class,
 
 	/* secure */
 	size += sprintf(buf + size, "sunxi_secure      : ");
-	if (sunxi_soc_is_secure()) {
+	if (sunxi_soc_is_secure())
 		size += sprintf(buf + size, "%s\n", "secure");
-		/* rotpk status */
-		memset(tmpbuf, 0x0, sizeof(tmpbuf));
-		sunxi_get_soc_rotpk_status_str(tmpbuf);
-		size += sprintf(buf + size, "sunxi_rotpk       : %s\n", tmpbuf);
-	} else
+	else
 		size += sprintf(buf + size, "%s\n", "normal");
 
-#ifdef CONFIG_SUNXI_QA_TEST
 	/* chipid */
-	sunxi_get_soc_chipid((u8 *)databuf);
-
-	for (i = 0; i < 4; i++)
-		sprintf(tmpbuf + i*8, "%08x", databuf[i]);
-	tmpbuf[128] = 0;
-	size += sprintf(buf + size, "sunxi_chipid      : %s\n", tmpbuf);
-#endif
-	/* serial */
 	sunxi_get_serial((u8 *)databuf);
 	for (i = 0; i < 4; i++)
 		sprintf(tmpbuf + i*8, "%08x", databuf[i]);
 	tmpbuf[128] = 0;
-	size += sprintf(buf + size, "sunxi_serial      : %s\n", tmpbuf);
+	size += sprintf(buf + size, "sunxi_chipid      : %s\n", tmpbuf);
 
 	/* chiptype */
 	sunxi_get_soc_chipid_str(tmpbuf);

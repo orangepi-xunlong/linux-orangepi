@@ -94,8 +94,6 @@ s32 bsp_disp_hdmi_check_support_mode(u32 disp, enum disp_output_type mode);
 s32 bsp_disp_hdmi_set_detect(bool hpd);
 s32 bsp_disp_hdmi_cec_standby_request(void);
 s32 bsp_disp_hdmi_cec_send_one_touch_play(void);
-s32 bsp_disp_hdmi_get_color_format(void);
-
 s32 bsp_disp_tv_register(struct disp_tv_func *func);
 s32 bsp_disp_tv_set_hpd(u32 state);
 

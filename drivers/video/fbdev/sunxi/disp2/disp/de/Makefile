@@ -14,17 +14,13 @@ MIPI_DSI_IP_VERSION := 28
 sub_dir = lowlevel_v2x
 endif
 
-ifeq ($(CONFIG_ARCH_SUN50IW10),y)
-MIPI_DSI_IP_VERSION := 28
-sub_dir = lowlevel_v2x
-endif
 ifeq ($(CONFIG_ARCH_SUN8IW6),y)
 sub_dir = lowlevel_v2x
 MIPI_DSI_IP_VERSION := 28
 endif
 
 ifeq ($(CONFIG_ARCH_SUN8IW7),y)
-sub_dir = lowlevel_sun8iw7
+sub_dir = lowlevel_v2x
 endif
 
 ifeq ($(CONFIG_ARCH_SUN50IW1),y)
@@ -38,7 +34,6 @@ endif
 
 ifeq ($(CONFIG_ARCH_SUN50IW6),y)
 sub_dir = lowlevel_v3x
-MIPI_DSI_IP_VERSION := 28
 endif
 
 
@@ -50,16 +45,6 @@ ifeq ($(CONFIG_ARCH_SUN8IW17),y)
 sub_dir = lowlevel_v2x
 endif
 
-
-ifeq ($(CONFIG_ARCH_SUN50IW5T),y)
-sub_dir = lowlevel_v33x
-MIPI_DSI_IP_VERSION := 28
-endif
-
-ifeq ($(CONFIG_ARCH_SUN50IW9),y)
-sub_dir = lowlevel_v33x
-MIPI_DSI_IP_VERSION := 28
-endif
 
 ifneq ($(sub_dir),)
 -include $(obj)/de/$(sub_dir)/Makefile

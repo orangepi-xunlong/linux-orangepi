@@ -38,7 +38,7 @@ struct pcm_config {
 static struct pcm_config pcm[AHUB_MAX_DEVICE][2];
 
 static int event_bind_id;
-static struct sndhdmi_priv sunxi_ahubhdmi;
+static struct sunxi_hdmi_priv sunxi_ahubhdmi;
 
 static int sunxi_ahubhdmi_set_audio_mode(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)

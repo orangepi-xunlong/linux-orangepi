@@ -559,7 +559,7 @@ static unsigned long calc_rate_pll_audio(u32 parent_rate, struct clk_factors_val
 	}
 }
 
-static const char *mipi_parents[] = {"pll_video1", ""};
+static const char *mipi_parents[] = {"pll_video0", ""};
 static const char *hosc_parents[] = {"hosc"};
 struct clk_ops pll_mipi_ops;
 struct factor_init_data sunxi_factos[] = {
@@ -1080,7 +1080,7 @@ static int clk_enable_pll_mipi(struct clk_hw *hw)
 		reg = SET_BITS(config->sdmshift, config->sdmwidth, reg, 1);
 	}
 
-	reg |= 0x7 << 21;
+	reg |= 0x3 << 22;
 	writel(reg, factor->reg);
 	udelay(100);
 
@@ -1209,4 +1209,3 @@ void sunxi_clocks_init(struct device_node *node)
 	pll_mipi_ops.disable = clk_disable_pll_mipi;
 	sunxi_set_clk_priv_ops("mipi_rx", set_mipi_rx_priv_ops);
 }
-void __init sunxi_cpu_clocks_init(struct device_node *node) {}

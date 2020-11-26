@@ -135,16 +135,11 @@ EXPORT_SYMBOL_GPL(devm_reset_controller_register);
  * @rstc: reset controller
  *
  * Calling this on a shared reset controller is an error.
- *
- * If rstc is NULL it is an optional reset and the function will just
- * return 0.
  */
 int reset_control_reset(struct reset_control *rstc)
 {
-	if (!rstc)
-		return 0;
-
-	if (WARN_ON(IS_ERR(rstc)))
+	if (WARN_ON(IS_ERR_OR_NULL(rstc)) ||
+	    WARN_ON(rstc->shared))
 		return -EINVAL;
 
 	if (rstc->rcdev->ops->reset)
@@ -164,16 +159,10 @@ EXPORT_SYMBOL_GPL(reset_control_reset);
  *
  * For shared reset controls a driver cannot expect the hw's registers and
  * internal state to be reset, but must be prepared for this to happen.
- *
- * If rstc is NULL it is an optional reset and the function will just
- * return 0.
  */
 int reset_control_assert(struct reset_control *rstc)
 {
-	if (!rstc)
-		return 0;
-
-	if (WARN_ON(IS_ERR(rstc)))
+	if (WARN_ON(IS_ERR_OR_NULL(rstc)))
 		return -EINVAL;
 
 	if (!rstc->rcdev->ops->assert)
@@ -196,16 +185,10 @@ EXPORT_SYMBOL_GPL(reset_control_assert);
  * @rstc: reset controller
  *
  * After calling this function, the reset is guaranteed to be deasserted.
- *
- * If rstc is NULL it is an optional reset and the function will just
- * return 0.
  */
 int reset_control_deassert(struct reset_control *rstc)
 {
-	if (!rstc)
-		return 0;
-
-	if (WARN_ON(IS_ERR(rstc)))
+	if (WARN_ON(IS_ERR_OR_NULL(rstc)))
 		return -EINVAL;
 
 	if (!rstc->rcdev->ops->deassert)
@@ -223,15 +206,12 @@ EXPORT_SYMBOL_GPL(reset_control_deassert);
 /**
  * reset_control_status - returns a negative errno if not supported, a
  * positive value if the reset line is asserted, or zero if the reset
- * line is not asserted or if the desc is NULL (optional reset).
+ * line is not asserted.
  * @rstc: reset controller
  */
 int reset_control_status(struct reset_control *rstc)
 {
-	if (!rstc)
-		return 0;
-
-	if (WARN_ON(IS_ERR(rstc)))
+	if (WARN_ON(IS_ERR_OR_NULL(rstc)))
 		return -EINVAL;
 
 	if (rstc->rcdev->ops->status)
@@ -241,7 +221,7 @@ int reset_control_status(struct reset_control *rstc)
 }
 EXPORT_SYMBOL_GPL(reset_control_status);
 
-static struct reset_control *__reset_control_get_internal(
+static struct reset_control *__reset_control_get(
 				struct reset_controller_dev *rcdev,
 				unsigned int index, int shared)
 {
@@ -274,7 +254,7 @@ static struct reset_control *__reset_control_get_internal(
 	return rstc;
 }
 
-static void __reset_control_put_internal(struct reset_control *rstc)
+static void __reset_control_put(struct reset_control *rstc)
 {
 	lockdep_assert_held(&reset_list_mutex);
 
@@ -288,8 +268,7 @@ static void __reset_control_put_internal(struct reset_control *rstc)
 }
 
 struct reset_control *__of_reset_control_get(struct device_node *node,
-				     const char *id, int index, bool shared,
-				     bool optional)
+				     const char *id, int index, int shared)
 {
 	struct reset_control *rstc;
 	struct reset_controller_dev *r, *rcdev;
@@ -303,18 +282,14 @@ struct reset_control *__of_reset_control_get(struct device_node *node,
 	if (id) {
 		index = of_property_match_string(node,
 						 "reset-names", id);
-		if (index == -EILSEQ)
-			return ERR_PTR(index);
 		if (index < 0)
-			return optional ? NULL : ERR_PTR(-ENOENT);
+			return ERR_PTR(-ENOENT);
 	}
 
 	ret = of_parse_phandle_with_args(node, "resets", "#reset-cells",
 					 index, &args);
-	if (ret == -EINVAL)
-		return ERR_PTR(ret);
 	if (ret)
-		return optional ? NULL : ERR_PTR(ret);
+		return ERR_PTR(ret);
 
 	mutex_lock(&reset_list_mutex);
 	rcdev = NULL;
@@ -343,24 +318,13 @@ struct reset_control *__of_reset_control_get(struct device_node *node,
 	}
 
 	/* reset_list_mutex also protects the rcdev's reset_control list */
-	rstc = __reset_control_get_internal(rcdev, rstc_id, shared);
+	rstc = __reset_control_get(rcdev, rstc_id, shared);
 
 	mutex_unlock(&reset_list_mutex);
 
 	return rstc;
 }
 EXPORT_SYMBOL_GPL(__of_reset_control_get);
-
-struct reset_control *__reset_control_get(struct device *dev, const char *id,
-					  int index, bool shared, bool optional)
-{
-	if (dev->of_node)
-		return __of_reset_control_get(dev->of_node, id, index, shared,
-					      optional);
-
-	return optional ? NULL : ERR_PTR(-EINVAL);
-}
-EXPORT_SYMBOL_GPL(__reset_control_get);
 
 /**
  * reset_control_put - free the reset controller
@@ -369,11 +333,11 @@ EXPORT_SYMBOL_GPL(__reset_control_get);
 
 void reset_control_put(struct reset_control *rstc)
 {
-	if (IS_ERR_OR_NULL(rstc))
+	if (IS_ERR(rstc))
 		return;
 
 	mutex_lock(&reset_list_mutex);
-	__reset_control_put_internal(rstc);
+	__reset_control_put(rstc);
 	mutex_unlock(&reset_list_mutex);
 }
 EXPORT_SYMBOL_GPL(reset_control_put);
@@ -384,8 +348,7 @@ static void devm_reset_control_release(struct device *dev, void *res)
 }
 
 struct reset_control *__devm_reset_control_get(struct device *dev,
-				     const char *id, int index, bool shared,
-				     bool optional)
+				     const char *id, int index, int shared)
 {
 	struct reset_control **ptr, *rstc;
 
@@ -394,7 +357,8 @@ struct reset_control *__devm_reset_control_get(struct device *dev,
 	if (!ptr)
 		return ERR_PTR(-ENOMEM);
 
-	rstc = __reset_control_get(dev, id, index, shared, optional);
+	rstc = __of_reset_control_get(dev ? dev->of_node : NULL,
+				      id, index, shared);
 	if (!IS_ERR(rstc)) {
 		*ptr = rstc;
 		devres_add(dev, ptr);
@@ -410,18 +374,17 @@ EXPORT_SYMBOL_GPL(__devm_reset_control_get);
  * device_reset - find reset controller associated with the device
  *                and perform reset
  * @dev: device to be reset by the controller
- * @optional: whether it is optional to reset the device
  *
- * Convenience wrapper for __reset_control_get() and reset_control_reset().
+ * Convenience wrapper for reset_control_get() and reset_control_reset().
  * This is useful for the common case of devices with single, dedicated reset
  * lines.
  */
-int __device_reset(struct device *dev, bool optional)
+int device_reset(struct device *dev)
 {
 	struct reset_control *rstc;
 	int ret;
 
-	rstc = __reset_control_get(dev, NULL, 0, 0, optional);
+	rstc = reset_control_get(dev, NULL);
 	if (IS_ERR(rstc))
 		return PTR_ERR(rstc);
 
@@ -431,4 +394,4 @@ int __device_reset(struct device *dev, bool optional)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(__device_reset);
+EXPORT_SYMBOL_GPL(device_reset);

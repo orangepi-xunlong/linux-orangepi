@@ -22,6 +22,12 @@
 #include <linux/arm-smccc.h>
 #include <linux/bitops.h>
 
+#include <asm/cacheflush.h>
+#include <asm/mmu_context.h>
+#include <asm/pgtable.h>
+#include <asm/pgalloc.h>
+#include <linux/slab.h>
+
 #ifndef OPTEE_SMC_STD_CALL_VAL
 #define OPTEE_SMC_STD_CALL_VAL(func_num) \
 	ARM_SMCCC_CALL_VAL(ARM_SMCCC_STD_CALL, ARM_SMCCC_SMC_32, \
@@ -118,6 +124,8 @@ phys_addr_t sunxi_smc_get_teeaddr_paras(phys_addr_t resumeaddr)
 	return res.a0;
 }
 /*optee smc*/
+#define ARM_SMCCC_TYPE_SHIFT		31
+
 #define ARM_SMCCC_SMC_32		0
 #define ARM_SMCCC_SMC_64		1
 #define ARM_SMCCC_CALL_CONV_SHIFT	30
@@ -151,9 +159,42 @@ phys_addr_t sunxi_smc_get_teeaddr_paras(phys_addr_t resumeaddr)
 	OPTEE_SMC_FAST_CALL_VAL(OPTEE_SMC_FUNCID_CRYPT)
 
 #define TEESMC_RSSK_DECRYPT      5
+#define TEESMC_LOAD_HDCPKEY      16
+
 int sunxi_smc_refresh_hdcp(void)
 {
 	return invoke_smc_fn(OPTEE_SMC_CRYPT, TEESMC_RSSK_DECRYPT, 0, 0);
 }
 EXPORT_SYMBOL(sunxi_smc_refresh_hdcp);
 
+int sunxi_smc_load_hdcp_key(void *hdcp_buff, size_t size)
+{
+	/*
+	 * this buffer is share memory for optee and linux, alloc at first
+	 * time and not free
+	 *
+	 */
+	static char *share_buff;
+	static int  init_flag = -1;
+
+	if (init_flag == -1) {
+		share_buff = kmalloc(1024, GFP_KERNEL | __GFP_ZERO);
+		init_flag = 1;
+	}
+
+	if (size > 1024) {
+		printk(KERN_ERR "error: the hdcp size too large:%zd\n", size);
+		return -1;
+	}
+
+	memcpy(share_buff, hdcp_buff, size);
+#ifdef CONFIG_ARM64
+	__flush_dcache_area(share_buff, size);
+#else
+	flush_dcache_page(virt_to_page(share_buff));
+#endif
+
+	return invoke_smc_fn(OPTEE_SMC_CRYPT, TEESMC_LOAD_HDCPKEY,
+			virt_to_phys(share_buff), size);
+}
+EXPORT_SYMBOL(sunxi_smc_load_hdcp_key);

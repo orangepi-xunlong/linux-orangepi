@@ -80,8 +80,6 @@ s32 bsp_disp_get_output_type(u32 disp);
 s32 bsp_disp_device_switch(int disp, enum disp_output_type output_type,
 			   enum disp_output_type mode);
 s32 bsp_disp_device_set_config(int disp, struct disp_device_config *config);
-
-#ifdef CONFIG_EINK_PANEL_USED
 s32 bsp_disp_eink_update(struct disp_eink_manager *manager,
 			 struct disp_layer_config_inner *config,
 			 unsigned int layer_num, enum eink_update_mode mode,
@@ -91,7 +89,6 @@ s32 bsp_disp_eink_set_temperature(struct disp_eink_manager *manager,
 				  unsigned int temp);
 s32 bsp_disp_eink_get_temperature(struct disp_eink_manager *manager);
 s32 bsp_disp_eink_op_skip(struct disp_eink_manager *manager, unsigned int en);
-#endif
 
 s32 bsp_disp_set_hdmi_func(struct disp_device_func *func);
 s32 bsp_disp_hdmi_check_support_mode(u32 disp, enum disp_output_type mode);

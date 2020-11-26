@@ -1,10 +1,9 @@
 /*
  * sound\soc\sunxi\sunxi-dmic.c
- * (C) Copyright 2014-2018
+ * (C) Copyright 2014-2016
  * AllWinner Technology Co., Ltd. <www.allwinnertech.com>
  * wolfgang huang <huangjinhui@allwinnerrecg.com>
  * huangxin <huangxin@allwinnertech.com>
- * yumingfeng <yumingfeng@allwinnertech.com>
  *
  * some simple description for this code
  *
@@ -37,23 +36,20 @@
 #include <sound/initval.h>
 #include "sunxi-pcm.h"
 #include "sunxi-dmic.h"
-#include "sunxi-snddmic.h"
 #ifdef CONFIG_SND_SUNXI_MAD
 #include "sunxi-mad.h"
 #endif
 
 #define	DRV_NAME	"sunxi-dmic"
 
-#define SUNXI_DMIC_RX_SYNC_EN (0)
 #if defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN8IW15) || \
-defined(CONFIG_ARCH_SUN8IW16) || defined(CONFIG_ARCH_SUN8IW17) ||\
-defined(CONFIG_ARCH_SUN8IW18)
+defined(CONFIG_ARCH_SUN50IW8)
 #undef	DMIC_AUDIO_DEMAND
 #else
 #define DMIC_AUDIO_DEMAND
 #endif
 
-#define SUNXI_DMIC_DEBUG
+#define SUNXI_DMIC_DEBUG 1
 
 struct dmic_rate {
 	unsigned int samplerate;
@@ -65,7 +61,29 @@ struct dmic_chmap {
 	unsigned int chan_bit;
 };
 
-struct sunxi_dmic_info *sunxi_dmic;
+struct sunxi_dmic_info {
+	struct regmap   *regmap;
+	struct regulator *power_supply;
+	struct clk *pllclk;
+	struct clk *moduleclk;
+	struct clk *dmic_rst;
+	struct device *dev;
+	struct snd_soc_dai_driver dai;
+	struct sunxi_dma_params capture_dma_param;
+	struct pinctrl *pinctrl;
+	struct pinctrl_state  *pinstate;
+	struct pinctrl_state  *pinstate_sleep;
+#ifdef CONFIG_SND_SUNXI_MAD
+	struct resource res;
+	unsigned int mad_bind;
+	unsigned int lpsd_chan_sel;
+	unsigned int mad_standby_chan_sel;
+	unsigned int audio_src_chan_num;
+#endif
+	u32 chanmap;
+};
+
+static void __iomem *sunxi_dmic_membase;
 
 static const struct dmic_rate dmic_rate_s[] = {
 	{44100, 0x0},
@@ -80,26 +98,26 @@ static const struct dmic_rate dmic_rate_s[] = {
 	{8000, 0x5},
 };
 
-static struct sunxi_dmic_reg_label reg_labels[] = {
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_EN),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_SR),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_CTR),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_INTC),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_INTS),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_FIFO_CTR),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_FIFO_STA),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_CH_NUM),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_CH_MAP),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_CNT),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_DATA0_1_VOL),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_DATA2_3_VOL),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_HPF_CTRL),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_HPF_COEF),
-	SUNXI_DMIC_REG_LABEL(SUNXI_DMIC_HPF_GAIN),
-	SUNXI_DMIC_REG_LABEL_END,
+static struct label reg_labels[] = {
+	LABEL(SUNXI_DMIC_EN),
+	LABEL(SUNXI_DMIC_SR),
+	LABEL(SUNXI_DMIC_CTR),
+	LABEL(SUNXI_DMIC_INTC),
+	LABEL(SUNXI_DMIC_INTS),
+	LABEL(SUNXI_DMIC_FIFO_CTR),
+	LABEL(SUNXI_DMIC_FIFO_STA),
+	LABEL(SUNXI_DMIC_CH_NUM),
+	LABEL(SUNXI_DMIC_CH_MAP),
+	LABEL(SUNXI_DMIC_CNT),
+	LABEL(SUNXI_DMIC_DATA0_1_VOL),
+	LABEL(SUNXI_DMIC_DATA2_3_VOL),
+	LABEL(SUNXI_DMIC_HPF_CTRL),
+	LABEL(SUNXI_DMIC_HPF_COEF),
+	LABEL(SUNXI_DMIC_HPF_GAIN),
+	LABEL_END,
 };
 
-#ifdef SUNXI_DMIC_DEBUG
+#if SUNXI_DMIC_DEBUG
 /*
  * ex:
  * param 1: 0 read;1 write
@@ -131,9 +149,9 @@ static ssize_t dmic_class_debug_store(struct class *class,
 	if (ret == 3 || ret == 2) {
 		if (rw_flag) {
 			writel(input_reg_val,
-				sunxi_dmic->membase + input_reg_offset);
+				sunxi_dmic_membase + input_reg_offset);
 		}
-		reg_val_read = readl(sunxi_dmic->membase + input_reg_offset);
+		reg_val_read = readl(sunxi_dmic_membase + input_reg_offset);
 		pr_err("\n\n Reg[0x%x] : 0x%x\n\n",
 			input_reg_offset, reg_val_read);
 	} else {
@@ -159,70 +177,18 @@ static ssize_t dmic_class_debug_show(struct class *class,
 	while (reg_labels[i].name != NULL) {
 		count += sprintf(buf + count, "%s 0x%p: 0x%x\n",
 			reg_labels[i].name,
-			(sunxi_dmic->membase + reg_labels[i].value),
-			readl(sunxi_dmic->membase + reg_labels[i].value));
+			(sunxi_dmic_membase + reg_labels[i].value),
+			readl(sunxi_dmic_membase + reg_labels[i].value));
 		i++;
 	}
 
 	return count;
 }
 
-#ifdef CONFIG_SND_SUNXI_MAD
-static unsigned int input_mad_resume;
-/*
- * ex:
- * param 1: 0 suspend;1 resume
- * write:
- *	echo 1 > dmic_mad_debug
- *	echo 0 > dmic_mad_debug
- */
-static ssize_t dmic_mad_debug_store(struct class *class,
-		struct class_attribute *attr, const char *buf, size_t count)
-{
-	int ret;
-
-	ret = sscanf(buf, "%u", &input_mad_resume);
-
-	pr_err("[%s] input_mad_resume: %d\n", __func__, input_mad_resume);
-
-	return count;
-}
-
-static ssize_t dmic_mad_debug_show(struct class *class,
-			struct class_attribute *attr, char *buf)
-{
-	int count = 0;
-
-	count += sprintf(buf, "Dump dmic info:\n");
-
-	if (input_mad_resume == 1) {
-		if (sunxi_dmic->mad_bind == 1) {
-			sunxi_mad_resume_external();
-			count += sprintf(buf + count,
-				"mad resume succeed %s\n", __func__);
-		}
-	} else {
-		if (sunxi_dmic->mad_bind == 1) {
-			sunxi_mad_suspend_external();
-			count += sprintf(buf + count,
-				"mad suspend succeed %s\n", __func__);
-		}
-	}
-
-	return count;
-}
-#endif
-
 static struct class_attribute dmic_class_attrs[] = {
-	__ATTR(dmic_reg_debug, 0644,
-		dmic_class_debug_show, dmic_class_debug_store),
-#ifdef CONFIG_SND_SUNXI_MAD
-	__ATTR(dmic_mad_debug, 0644,
-		dmic_mad_debug_show, dmic_mad_debug_store),
-#endif
-	__ATTR_NULL,
+	__ATTR(dmic_reg_debug, S_IRUGO|S_IWUSR, dmic_class_debug_show, dmic_class_debug_store),
+	__ATTR_NULL
 };
-
 static struct class dmic_class = {
 	.name = "dmic",
 	.class_attrs = dmic_class_attrs,
@@ -233,60 +199,22 @@ static struct class dmic_class = {
 /*
  * Configure DMA , Chan enable & Global enable
  */
-static void sunxi_dmic_enable(struct sunxi_dmic_info *sunxi_dmic, bool enable)
+static void sunxi_dmic_enable(struct sunxi_dmic_info *sunxi_dmic, int enable)
 {
 	if (enable) {
-#ifdef CONFIG_SND_SUNXI_MAD
-		/*enable dmic*/
-		if (sunxi_dmic->mad_bind == 1) {
-			sunxi_mad_dma_type(SUNXI_MAD_DMA_IO);
-
-			regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-				(0x1 << DMIC_MAD_DATA_EN),
-				(0x1 << DMIC_MAD_DATA_EN));
-
-			sunxi_mad_dma_enable(true);
-		} else
-#endif
-		{
-			regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_INTC,
-			(0x1 << FIFO_DRQ_EN), (0x1 << FIFO_DRQ_EN));
-		}
-
+		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_INTC,
+			(1<<FIFO_DRQ_EN), (1<<FIFO_DRQ_EN));
 		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-				(0xFF<<DATA_CH_EN),
-				((sunxi_dmic->chanmap)<<DATA_CH_EN));
-
+			(0xFF<<DATA_CH_EN), ((sunxi_dmic->chanmap)<<DATA_CH_EN));
 		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-				(0x1 << GLOBE_EN), (0x1 << GLOBE_EN));
-		#if SUNXI_DMIC_RX_SYNC_EN
-		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-				(0x1 << DMIC_RX_EN_MUX), (0x1 << DMIC_RX_EN_MUX));
-		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-				(0x1 << DMIC_RX_SYNC_EN), (0x1 << DMIC_RX_SYNC_EN));
-		#endif
+			(1<<GLOBE_EN), (1<<GLOBE_EN));
 	} else {
-#ifdef CONFIG_SND_SUNXI_MAD
-		if (sunxi_dmic->mad_bind == 1)
-			sunxi_mad_dma_enable(false);
-		else
-#endif
-		{
-			regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-					(0x1 << GLOBE_EN), (0x0 << GLOBE_EN));
-			regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-					(0xFF << DATA_CH_EN),
-					(0x0 << DATA_CH_EN));
-			regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_INTC,
-					(0x1 << FIFO_DRQ_EN),
-					(0x0 << FIFO_DRQ_EN));
-			#if SUNXI_DMIC_RX_SYNC_EN
-			regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-					(0x1 << DMIC_RX_EN_MUX), (0x0 << DMIC_RX_EN_MUX));
-			regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-					(0x1 << DMIC_RX_SYNC_EN), (0x0 << DMIC_RX_SYNC_EN));
-			#endif
-		}
+		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
+					(1<<GLOBE_EN), (0<<GLOBE_EN));
+		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
+					(0xFF<<DATA_CH_EN), (0<<DATA_CH_EN));
+		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_INTC,
+					(1<<FIFO_DRQ_EN), (0<<FIFO_DRQ_EN));
 	}
 }
 
@@ -312,29 +240,21 @@ static int sunxi_dmic_hw_params(struct snd_pcm_substream *substream,
 #ifdef CONFIG_SND_SUNXI_MAD
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_card *card = rtd->card;
-	struct sunxi_snddmic_priv *snddmic_priv = snd_soc_card_get_drvdata(card);
-	sunxi_dmic->mad_bind = snddmic_priv->mad_priv.mad_bind;
+	struct sunxi_mad_priv *sunxi_dmic_priv = snd_soc_card_get_drvdata(card);
+	sunxi_dmic->mad_bind = sunxi_dmic_priv->mad_bind;
 #endif
-	/* if clk rst */
+
 	sunxi_dmic_init(sunxi_dmic);
 
 	/* sample resolution & sample fifo format */
 	switch (params_format(params)) {
-	case SNDRV_PCM_FORMAT_S16_LE:
+	case	SNDRV_PCM_FORMAT_S16_LE:
 		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_FIFO_CTR,
-				(0x1 << DMIC_SAMPLE_RESOLUTION),
-				(0x0 << DMIC_SAMPLE_RESOLUTION));
-		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_FIFO_CTR,
-				(0x1 << DMIC_FIFO_MODE),
-				(0x1 << DMIC_FIFO_MODE));
+				(3<<SAMPLE_RESOLUTION), (/*2*/0<<SAMPLE_RESOLUTION));
 		break;
-	case SNDRV_PCM_FORMAT_S24_LE:
+	case	SNDRV_PCM_FORMAT_S24_LE:
 		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_FIFO_CTR,
-				(0x1 << DMIC_SAMPLE_RESOLUTION),
-				(0x1 << DMIC_SAMPLE_RESOLUTION));
-		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_FIFO_CTR,
-				(0x1 << DMIC_FIFO_MODE),
-				(0x0 << DMIC_FIFO_MODE));
+				(3<<SAMPLE_RESOLUTION), (1<<SAMPLE_RESOLUTION));
 		break;
 	default:
 		dev_err(sunxi_dmic->dev, "Invalid format set\n");
@@ -376,28 +296,16 @@ static int sunxi_dmic_hw_params(struct snd_pcm_substream *substream,
 		}
 		if ((params_rate(params) == 16000) ||
 			(params_rate(params) == 48000)) {
-#ifdef MAD_CLK_ALWAYS_ON
-			sunxi_mad_module_clk_enable(false);
-#endif
-			sunxi_mad_module_clk_enable(true);
-
-			sunxi_mad_open();
-			/* mad config */
-			sunxi_mad_hw_params(params_channels(params),
-					params_rate(params));
-
+			printk("config mad !\n");
+			sunxi_mad_init();
+			sunxi_mad_audio_source_sel(3, 1); /*path_sel: dmic-3*/
+			sunxi_mad_hw_params(params_channels(params), params_rate(params));
 			sunxi_dmic->audio_src_chan_num = params_channels(params);
-			sunxi_mad_audio_src_chan_num(sunxi_dmic->audio_src_chan_num);
-			sunxi_lpsd_chan_sel(sunxi_dmic->lpsd_chan_sel);
-			sunxi_mad_standby_chan_sel(sunxi_dmic->mad_standby_chan_sel);
-			sunxi_sram_ahb1_threshole_init();
+			/*enable mad*/
 			sunxi_sram_dma_config(&sunxi_dmic->capture_dma_param);
-			sunxi_mad_sram_init();
-			/*
-			 * should set it after sram reset.
-			 * path_sel: dmic-3
-			 */
-			sunxi_mad_audio_source_sel(MAD_PATH_DMIC, 1);
+			/*enable dmic*/
+			//regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
+			//	(1<<MAD_DATA_EN), (1<<MAD_DATA_EN));
 		} else {
 			dev_err(sunxi_dmic->dev, "unsupported mad rate\n");
 			return -EINVAL;
@@ -417,12 +325,21 @@ static int sunxi_dmic_trigger(struct snd_pcm_substream *substream,
 	case	SNDRV_PCM_TRIGGER_START:
 	case	SNDRV_PCM_TRIGGER_RESUME:
 	case	SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		sunxi_dmic_enable(sunxi_dmic, true);
+		sunxi_dmic_enable(sunxi_dmic, 1);
+		/*enable dmic*/
+		if (sunxi_dmic->mad_bind == 1) {
+			regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
+				(1<<MAD_DATA_EN), (1<<MAD_DATA_EN));
+			mad_dma_en(1);
+		}
 		break;
 	case	SNDRV_PCM_TRIGGER_STOP:
 	case	SNDRV_PCM_TRIGGER_SUSPEND:
 	case	SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		sunxi_dmic_enable(sunxi_dmic, false);
+		sunxi_dmic_enable(sunxi_dmic, 0);
+		if (sunxi_dmic->mad_bind == 1) {
+			mad_dma_en(0);
+		}
 		break;
 	default:
 		ret = -EINVAL;
@@ -466,30 +383,12 @@ static int sunxi_dmic_set_sysclk(struct snd_soc_dai *dai, int clk_id,
 {
 	struct sunxi_dmic_info *sunxi_dmic = snd_soc_dai_get_drvdata(dai);
 
-#ifdef DMIC_PLL_AUDIO_X4
-	if (clk_set_rate(sunxi_dmic->pllclkx4, freq)) {
-		dev_err(sunxi_dmic->dev, "set pllclkx4 %u failed\n", freq);
-		return -EINVAL;
-	}
-
-	if (clk_set_rate(sunxi_dmic->moduleclk, freq / 4)) {
-		dev_err(sunxi_dmic->dev, "set moduleclk %u failed\n", freq);
-		return -EINVAL;
-	}
-#else
 	if (clk_set_rate(sunxi_dmic->pllclk, freq)) {
-		dev_err(sunxi_dmic->dev, "set pllclk %u failed\n", freq);
+		dev_err(sunxi_dmic->dev, "Freq : %u not support\n", freq);
 		return -EINVAL;
 	}
-#endif
-
-#if defined(ARCH_SUN50IW3) || defined(ARCH_SUN8IW15) || defined(ARCH_SUN8IW17)
-	if (sunxi_dmic->moduleclk) {
+	if (sunxi_dmic->moduleclk)
 		clk_prepare_enable(sunxi_dmic->moduleclk);
-		sunxi_dmic->moduleclk_en = 1;
-	}
-#endif
-
 	return 0;
 }
 
@@ -507,15 +406,16 @@ static int sunxi_dmic_suspend(struct snd_soc_dai *cpu_dai)
 	u32 ret = 0;
 	struct sunxi_dmic_info *sunxi_dmic = snd_soc_dai_get_drvdata(cpu_dai);
 
-	pr_debug("[DMIC]Enter %s\n", __func__);
-
 #ifdef CONFIG_SND_SUNXI_MAD
 	if (sunxi_dmic->mad_bind == 1) {
-		sunxi_mad_suspend_external();
+		sunxi_mad_suspend_external(sunxi_dmic->lpsd_chan_sel,
+		sunxi_dmic->mad_standby_chan_sel);
 		pr_debug("mad suspend succeed %s\n", __func__);
 		return 0;
 	}
 #endif
+
+	pr_debug("[DMIC]Enter %s\n", __func__);
 
 	if (sunxi_dmic->pinstate_sleep != NULL) {
 		ret = pinctrl_select_state(sunxi_dmic->pinctrl,
@@ -525,25 +425,19 @@ static int sunxi_dmic_suspend(struct snd_soc_dai *cpu_dai)
 			return ret;
 		}
 	}
-
 	if (sunxi_dmic->pinctrl != NULL)
 		devm_pinctrl_put(sunxi_dmic->pinctrl);
 	sunxi_dmic->pinctrl = NULL;
 	sunxi_dmic->pinstate = NULL;
 	sunxi_dmic->pinstate_sleep = NULL;
-
-	if ((sunxi_dmic->moduleclk != NULL) && (sunxi_dmic->moduleclk_en == 1))
+#if 0
+	if (sunxi_dmic->moduleclk != NULL)
 		clk_disable(sunxi_dmic->moduleclk);
-
-#ifdef DMIC_PLL_AUDIO_X4
-	if (sunxi_dmic->pllclkx4 != NULL)
-		clk_disable(sunxi_dmic->pllclkx4);
 #endif
 	if (sunxi_dmic->pllclk != NULL)
 		clk_disable(sunxi_dmic->pllclk);
 
 	pr_debug("[DMIC]End %s\n", __func__);
-
 	return 0;
 }
 
@@ -552,39 +446,33 @@ static int sunxi_dmic_resume(struct snd_soc_dai *cpu_dai)
 	s32 ret = 0;
 	struct sunxi_dmic_info *sunxi_dmic = snd_soc_dai_get_drvdata(cpu_dai);
 
-	pr_debug("[DMIC]Enter %s\n", __func__);
 #ifdef CONFIG_SND_SUNXI_MAD
 	if (sunxi_dmic->mad_bind == 1) {
-		sunxi_mad_resume_external();
+		sunxi_mad_resume_external(sunxi_dmic->mad_standby_chan_sel,
+				sunxi_dmic->audio_src_chan_num);
 		pr_debug("mad resume succeed %s\n", __func__);
 		return 0;
 	}
 #endif
+
+	pr_debug("[DMIC]Enter %s\n", __func__);
 
 	if (sunxi_dmic->pllclk != NULL) {
 		if (clk_prepare_enable(sunxi_dmic->pllclk)) {
 			pr_err("enable sunxi_dmic->pllclk failed!\n");
 		}
 	}
-
-#ifdef DMIC_PLL_AUDIO_X4
-	if (sunxi_dmic->pllclkx4 != NULL) {
-		if (clk_prepare_enable(sunxi_dmic->pllclkx4)) {
-			pr_err("enable sunxi_dmic->pllclkx4 failed!\n");
+#if 0
+	if (sunxi_dmic->moduleclk != NULL) {
+		if (clk_prepare_enable(sunxi_dmic->moduleclk)) {
+			pr_err("[dmic] enable sunxi_dmic->moduleclk failed!\n");
 		}
 	}
 #endif
-
-	if ((sunxi_dmic->moduleclk != NULL) &&
-		(sunxi_dmic->moduleclk_en == 1)) {
-		if (clk_prepare_enable(sunxi_dmic->moduleclk))
-			pr_err("[dmic] enable sunxi_dmic->moduleclk failed!\n");
-	}
-
 	if (!sunxi_dmic->pinctrl) {
 		sunxi_dmic->pinctrl = devm_pinctrl_get(cpu_dai->dev);
 		if (IS_ERR_OR_NULL(sunxi_dmic->pinctrl)) {
-			pr_warn("[dmic] request pinctrl handle failed\n");
+			pr_warn("[dmic]request pinctrl handle for audio failed\n");
 			return -EINVAL;
 		}
 	}
@@ -614,9 +502,9 @@ static int sunxi_dmic_resume(struct snd_soc_dai *cpu_dai)
 		return ret;
 	}
 
-	if (sunxi_dmic->moduleclk_en == 1)
-		sunxi_dmic_init(sunxi_dmic);
-
+#if 0
+	sunxi_dmic_init(sunxi_dmic);
+#endif
 	pr_debug("[DMIC]End %s\n", __func__);
 	return 0;
 }
@@ -629,40 +517,18 @@ static void sunxi_dmic_shutdown(struct snd_pcm_substream *substream,
 #ifdef CONFIG_SND_SUNXI_MAD
 	if (sunxi_dmic->mad_bind == 1) {
 		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-				(0x1 << DMIC_MAD_DATA_EN),
-				(0x0 << DMIC_MAD_DATA_EN));
-		sunxi_mad_audio_source_sel(MAD_PATH_DMIC, 0);
-
-		/* should close the GLOBE_EN */
-		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-				(0x1 << GLOBE_EN), (0x0 << GLOBE_EN));
-
-		regmap_update_bits(sunxi_dmic->regmap, SUNXI_DMIC_EN,
-				(0xFF << DATA_CH_EN),
-				(0x0 << DATA_CH_EN));
-
-		sunxi_mad_close();
-		sunxi_dmic->mad_bind = 0;
-#ifndef MAD_CLK_ALWAYS_ON
-		sunxi_mad_module_clk_enable(false);
-#endif
-
+				(1<<MAD_DATA_EN), (0<<MAD_DATA_EN));
+		sunxi_mad_audio_source_sel(3, 0);
 		/*if not use mad again*/
 		sunxi_dmic->capture_dma_param.dma_addr =
 				sunxi_dmic->res.start + SUNXI_DMIC_DATA;
 		sunxi_dmic->capture_dma_param.dma_drq_type_num = DRQSRC_DMIC;
 	}
 #endif
-
-#if defined(ARCH_SUN50IW3) || defined(ARCH_SUN8IW15) || defined(ARCH_SUN8IW17)
-	/* dmic:Gating and reset should be disabled after shutdown */
-	if (sunxi_dmic->moduleclk) {
+	/* IC:Gating and reset should be disabled after shutdown */
+	if (sunxi_dmic->moduleclk)
 		clk_disable(sunxi_dmic->moduleclk);
-		sunxi_dmic->moduleclk_en = 0;
-	}
-#endif
 
-	pr_debug("[%s] moduleclk_en:%d\n", __func__, sunxi_dmic->moduleclk_en);
 }
 
 #ifdef CONFIG_SND_SUNXI_MAD
@@ -676,8 +542,6 @@ static int sunxi_dmic_set_lpsd_chan(struct snd_kcontrol *kcontrol,
 			snd_soc_codec_get_drvdata(codec);
 
 	sunxi_dmic->lpsd_chan_sel = ucontrol->value.integer.value[0];
-	sunxi_lpsd_chan_sel(sunxi_dmic->lpsd_chan_sel);
-
 	return 0;
 }
 
@@ -693,9 +557,9 @@ static int sunxi_dmic_get_lpsd_chan(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static const char * const lpsd_chan_sel_function[] = {"0th_chan", "1st_chan",
-		"2nd_chan", "3rd_chan", "4th_chan", "5th_chan",
-		"6th_chan", "7th_chan", "8th_chan"};
+
+static const char *lpsd_chan_sel_function[] = {"NULL", "1st_chan", "2nd_chan", "3rd_chan",
+	"4th_chan", "5th_chan", "6th_chan", "7th_chan", "8th_chan"};
 
 static const struct soc_enum lpsd_chan_sel_enum[] = {
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(lpsd_chan_sel_function),
@@ -712,8 +576,6 @@ static int sunxi_dmic_set_mad_standby_chan(struct snd_kcontrol *kcontrol,
 			snd_soc_codec_get_drvdata(codec);
 
 	sunxi_dmic->mad_standby_chan_sel = ucontrol->value.integer.value[0];
-	sunxi_mad_standby_chan_sel(sunxi_dmic->mad_standby_chan_sel);
-
 	return 0;
 }
 
@@ -729,9 +591,7 @@ static int sunxi_dmic_get_mad_standby_chan(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static const char * const mad_standby_chan_sel_function[] = {
-	"Zero_Chan", "Two_Chan", "Four_Chan",
-};
+static const char *mad_standby_chan_sel_function[] = {"Zero chan", "Two chan", "Four chan"};
 
 static const struct soc_enum mad_standby_chan_sel_enum[] = {
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(mad_standby_chan_sel_function),
@@ -740,12 +600,10 @@ static const struct soc_enum mad_standby_chan_sel_enum[] = {
 
 /* dmic kcontrols */
 static const struct snd_kcontrol_new sunxi_dmic_controls[] = {
-	SOC_ENUM_EXT("lpsd channel sel function", lpsd_chan_sel_enum[0],
+	SOC_ENUM_EXT("lpsd channel sel Function", lpsd_chan_sel_enum[0],
 		sunxi_dmic_get_lpsd_chan, sunxi_dmic_set_lpsd_chan),
-	SOC_ENUM_EXT("mad standby channel sel function",
-		mad_standby_chan_sel_enum[0],
-		sunxi_dmic_get_mad_standby_chan,
-		sunxi_dmic_set_mad_standby_chan),
+	SOC_ENUM_EXT("mad_standby channel sel Function", mad_standby_chan_sel_enum[0],
+		sunxi_dmic_get_mad_standby_chan, sunxi_dmic_set_mad_standby_chan),
 };
 #endif
 
@@ -790,8 +648,9 @@ static const struct regmap_config sunxi_dmic_regmap_config = {
 
 static int sunxi_dmic_dev_probe(struct platform_device *pdev)
 {
-	struct resource res;
+	struct resource res, *memregion;
 	struct device_node *np = pdev->dev.of_node;
+	struct sunxi_dmic_info *sunxi_dmic;
 	int ret;
 
 	sunxi_dmic = devm_kzalloc(&pdev->dev, sizeof(struct sunxi_dmic_info), GFP_KERNEL);
@@ -833,29 +692,29 @@ static int sunxi_dmic_dev_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_SND_SUNXI_MAD
 	sunxi_dmic->mad_bind = 0;
-	sunxi_dmic->lpsd_chan_sel = 1;
-	sunxi_dmic->mad_standby_chan_sel = 1;
+	sunxi_dmic->lpsd_chan_sel = 2;
+	sunxi_dmic->mad_standby_chan_sel = 2;
 	sunxi_dmic->res.start = res.start;
 #endif
 
-	sunxi_dmic->memregion = devm_request_mem_region(&pdev->dev, res.start,
+	memregion = devm_request_mem_region(&pdev->dev, res.start,
 					    resource_size(&res), DRV_NAME);
-	if (!sunxi_dmic->memregion) {
+	if (!memregion) {
 		dev_err(&pdev->dev, "sunxi dmic memory region already claimed\n");
 		ret = -EBUSY;
 		goto err_regulator_put;
 	}
 
-	sunxi_dmic->membase = devm_ioremap(&pdev->dev,
+	sunxi_dmic_membase = devm_ioremap(&pdev->dev,
 					res.start, resource_size(&res));
-	if (!sunxi_dmic->membase) {
+	if (!sunxi_dmic_membase) {
 		dev_err(&pdev->dev, "sunxi dmic ioremap failed\n");
 		ret = -ENOMEM;
-		goto err_devm_free_memregion;
+		goto err_regulator_put;
 	}
 
 	sunxi_dmic->regmap = devm_regmap_init_mmio(&pdev->dev,
-				sunxi_dmic->membase, &sunxi_dmic_regmap_config);
+				sunxi_dmic_membase, &sunxi_dmic_regmap_config);
 	if (IS_ERR_OR_NULL(sunxi_dmic->regmap)) {
 		dev_err(&pdev->dev, "sunxi dmic registers regmap failed\n");
 		ret = -ENOMEM;
@@ -897,81 +756,45 @@ static int sunxi_dmic_dev_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "pin select state failed\n");
 		goto err_pinctrl_put;
 	}
-
 	sunxi_dmic->pllclk = of_clk_get(np, 0);
-	if (IS_ERR(sunxi_dmic->pllclk)) {
-		dev_err(&pdev->dev, "Can't get dmic pll clocks\n");
-		ret = PTR_ERR(sunxi_dmic->pllclk);
-		goto err_pinctrl_put;
-	}
-
-#ifdef DMIC_PLL_AUDIO_X4
-	sunxi_dmic->pllclkx4 = of_clk_get(np, 1);
-	if (IS_ERR(sunxi_dmic->pllclkx4)) {
-		dev_err(&pdev->dev, "Can't get pll_audo clk clocks!\n");
-		ret = PTR_ERR(sunxi_dmic->pllclkx4);
-		goto err_pllclk_put;
-	}
-
-	sunxi_dmic->moduleclk = of_clk_get(np, 2);
-	if (IS_ERR(sunxi_dmic->moduleclk)) {
-		dev_err(&pdev->dev, "Can't get spdif clocks\n");
-		ret = PTR_ERR(sunxi_dmic->moduleclk);
-		goto err_pllclkx4_put;
-	} else {
-		if (clk_set_parent(sunxi_dmic->moduleclk,
-			sunxi_dmic->pllclkx4)) {
-			dev_err(&pdev->dev,
-				"set parent of moduleclk to pllclkx4 failed!\n");
-			ret = -EINVAL;
-			goto err_moduleclk_put;
-		}
-	}
-#else
 	sunxi_dmic->moduleclk = of_clk_get(np, 1);
-	if (IS_ERR(sunxi_dmic->moduleclk)) {
-		ret = PTR_ERR(sunxi_dmic->moduleclk);
+	if (IS_ERR(sunxi_dmic->pllclk) || IS_ERR(sunxi_dmic->moduleclk)) {
+		dev_err(&pdev->dev, "Can't get dmic pll clocks\n");
+		if (IS_ERR(sunxi_dmic->pllclk)) {
+			ret = PTR_ERR(sunxi_dmic->pllclk);
+			goto err_pinctrl_put;
+		} else {
+			ret = PTR_ERR(sunxi_dmic->moduleclk);
+			goto err_pllclk_put;
+		}
+	} else {
+		if (clk_set_parent(sunxi_dmic->moduleclk, sunxi_dmic->pllclk))
+			pr_err("try to set moduleclk parent failed!\n");
+
+		clk_prepare_enable(sunxi_dmic->pllclk);
+		/*
+		 * The moduleclk should enable at startup
+		 * and disable at shutdown
+		 */
+		/*clk_prepare_enable(sunxi_dmic->moduleclk);*/
+
+	}
+
+#if 0
+	/*
+	 * only for dmic reset test.
+	 * (clk driver should support it and the dts)
+	 * It need to enable at start_up, and disable at shutdown.
+	 */
+	sunxi_dmic->dmic_rst = of_clk_get(np, 2);
+	if (IS_ERR(sunxi_dmic->dmic_rst)) {
+		dev_err(&pdev->dev, "Can't get dmic rst\n");
+		ret = PTR_ERR(sunxi_dmic->dmic_rst);
 		goto err_pllclk_put;
 	} else {
-		if (clk_set_parent(sunxi_dmic->moduleclk, sunxi_dmic->pllclk)) {
-			dev_err(&pdev->dev, "Can't set moduleclk parent clocks\n");
-			goto err_moduleclk_put;
-		}
+		/*clk_prepare_enable(sunxi_dmic->dmic_rst);*/
 	}
 #endif
-	if (clk_prepare_enable(sunxi_dmic->pllclk)) {
-		dev_err(&pdev->dev, "pllclk enable failed\n");
-		ret = -EBUSY;
-		goto err_moduleclk_put;
-	}
-
-#ifdef DMIC_PLL_AUDIO_X4
-	if (clk_prepare_enable(sunxi_dmic->pllclkx4)) {
-		dev_err(&pdev->dev, "pllclkx4 enable failed\n");
-		ret = -EBUSY;
-		goto err_pllclk_disable;
-	}
-#endif
-
-#if defined(ARCH_SUN50IW3) || defined(ARCH_SUN8IW15) || defined(ARCH_SUN8IW17)
-	/*
-	 * The moduleclk should enable at startup
-	 * and disable at shutdown
-	 */
-	sunxi_dmic->moduleclk_en = 0;
-#else
-	if (clk_prepare_enable(sunxi_dmic->moduleclk)) {
-		dev_err(&pdev->dev, "moduleclk enable failed\n");
-		ret = -EBUSY;
-#ifdef DMIC_PLL_AUDIO_X4
-		goto err_pllclkx4_disable;
-#else
-		goto err_pllclk_disable;
-#endif
-	}
-	sunxi_dmic->moduleclk_en = 1;
-#endif
-
 	/* FIXME */
 	sunxi_dmic->capture_dma_param.dma_addr = res.start + SUNXI_DMIC_DATA;
 	sunxi_dmic->capture_dma_param.dma_drq_type_num = DRQSRC_DMIC;
@@ -983,7 +806,7 @@ static int sunxi_dmic_dev_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register DAI: %d\n", ret);
 		ret = -ENOMEM;
-		goto err_moduleclk_disable;
+		goto err_pllclk_put;
 	}
 
 	ret = asoc_dma_platform_register(&pdev->dev, 0);
@@ -993,7 +816,7 @@ static int sunxi_dmic_dev_probe(struct platform_device *pdev)
 		goto err_unregister_component;
 	}
 
-#ifdef SUNXI_DMIC_DEBUG
+#if SUNXI_DMIC_DEBUG
 	ret = class_register(&dmic_class);
 	if (ret)
 		pr_warn("daudio: Failed to create debugfs directory\n");
@@ -1003,33 +826,16 @@ static int sunxi_dmic_dev_probe(struct platform_device *pdev)
 
 err_unregister_component:
 	snd_soc_unregister_component(&pdev->dev);
-err_moduleclk_disable:
-#if defined(ARCH_SUN50IW3) || defined(ARCH_SUN8IW15) || defined(ARCH_SUN8IW17)
-	/* do nothing */
-#else
-	clk_disable_unprepare(sunxi_dmic->moduleclk);
-#endif
-#ifdef DMIC_PLL_AUDIO_X4
-err_pllclkx4_disable:
-	clk_disable_unprepare(sunxi_dmic->pllclkx4);
-#endif
-err_pllclk_disable:
-	clk_disable_unprepare(sunxi_dmic->pllclk);
+#if 0
 err_moduleclk_put:
 	clk_put(sunxi_dmic->moduleclk);
-#ifdef DMIC_PLL_AUDIO_X4
-err_pllclkx4_put:
-	clk_put(sunxi_dmic->pllclkx4);
 #endif
 err_pllclk_put:
 	clk_put(sunxi_dmic->pllclk);
 err_pinctrl_put:
 	devm_pinctrl_put(sunxi_dmic->pinctrl);
 err_iounmap:
-	iounmap(sunxi_dmic->membase);
-err_devm_free_memregion:
-	devm_release_mem_region(&pdev->dev, sunxi_dmic->memregion->start,
-				resource_size(sunxi_dmic->memregion));
+	iounmap(sunxi_dmic_membase);
 err_regulator_put:
 #ifdef DMIC_AUDIO_DEMAND
 	regulator_put(sunxi_dmic->power_supply);
@@ -1043,27 +849,7 @@ err_node_put:
 
 static int __exit sunxi_dmic_dev_remove(struct platform_device *pdev)
 {
-#ifdef SUNXI_DMIC_DEBUG
-	class_unregister(&dmic_class);
-#endif
-#if defined(ARCH_SUN50IW3) || defined(ARCH_SUN8IW15) || defined(ARCH_SUN8IW17)
-	/* do nothing */
-#else
-	clk_disable_unprepare(sunxi_dmic->moduleclk);
-#endif
-	clk_put(sunxi_dmic->moduleclk);
-#ifdef DMIC_PLL_AUDIO_X4
-	clk_disable_unprepare(sunxi_dmic->pllclkx4);
-	clk_put(sunxi_dmic->pllclkx4);
-#endif
-	clk_disable_unprepare(sunxi_dmic->pllclk);
-	clk_put(sunxi_dmic->pllclk);
-
 	snd_soc_unregister_component(&pdev->dev);
-
-	devm_release_mem_region(&pdev->dev, sunxi_dmic->memregion->start,
-				resource_size(sunxi_dmic->memregion));
-
 	platform_set_drvdata(pdev, NULL);
 	return 0;
 }

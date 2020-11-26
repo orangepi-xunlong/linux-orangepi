@@ -43,7 +43,7 @@
 #endif
 
 #if !defined(SUNXI_UART_PBASE)
-#if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW7)
+#if defined(CONFIG_ARCH_SUN8IW11)
 #define SUNXI_UART_PBASE		UL(0x01c28000)
 #else
 #define SUNXI_UART_PBASE		UL(0x05000000)

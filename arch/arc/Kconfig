@@ -105,7 +105,7 @@ endmenu
 
 choice
 	prompt "ARC Instruction Set"
-	default ISA_ARCV2
+	default ISA_ARCOMPACT
 
 config ISA_ARCOMPACT
 	bool "ARCompact ISA"

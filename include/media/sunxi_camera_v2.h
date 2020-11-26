@@ -29,10 +29,7 @@
 #define V4L2_MODE_PREVIEW		0x0004
 
 /*  for yuv420 FBC mode*/
-#define V4L2_PIX_FMT_FBC           v4l2_fourcc('F', 'C', '2', '1')
-#define V4L2_PIX_FMT_LBC_2_0X      v4l2_fourcc('L', 'C', '2', '1')
-#define V4L2_PIX_FMT_LBC_2_5X      v4l2_fourcc('L', 'C', '2', '2')
-#define V4L2_PIX_FMT_LBC_1_0X      v4l2_fourcc('L', 'C', '2', '3')
+#define V4L2_PIX_FMT_FBC   v4l2_fourcc('F', 'C', '2', '1')
 
 /*
  *	USER CIDS
@@ -207,16 +204,6 @@ struct vin_pattern_config {
 	__u32 ptn_type;
 };
 
-struct vin_reset_time {
-	__u32 reset_time;
-};
-
-struct parser_fps_ds {
-	__u32 ch0_fps_ds;
-	__u32 ch1_fps_ds;
-	__u32 ch2_fps_ds;
-	__u32 ch3_fps_ds;
-};
 
 #define VIDIOC_ISP_AE_STAT_REQ \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct isp_stat_buf)
@@ -240,10 +227,6 @@ struct parser_fps_ds {
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 10, struct isp_debug_mode)
 #define VIDIOC_VIN_PTN_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 11, struct vin_pattern_config)
-#define VIDIOC_VIN_RESET_TIME \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 12, struct vin_reset_time)
-#define VIDIOC_SET_PARSER_FPS \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 13, struct parser_fps_ds)
 
 /*
  * Events
@@ -380,9 +363,6 @@ struct actuator_para {
 
 #define VIDIOC_VIN_ISP_TABLE2_MAP \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 72, struct isp_table_reg_map)
-
-#define VIDIOC_VIN_GET_SENSOR_CODE \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 73, int)
 
 #endif /*_SUNXI_CAMERA_H_*/
 

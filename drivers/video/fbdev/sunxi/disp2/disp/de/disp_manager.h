@@ -27,9 +27,4 @@ extern s32 __disp_config2_transfer2inner(
 	struct disp_layer_config_inner *config_inner,
 	struct disp_layer_config2 *config);
 
-s32 disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
-			    struct disp_layer_config2 *config,
-			    struct disp_capture_info2 *p_cptr_info,
-			    unsigned int layer_num);
-
 #endif

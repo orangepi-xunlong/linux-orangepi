@@ -13,15 +13,15 @@
 #include "nand_osal_for_linux.h"
 
 #define  NAND_DRV_VERSION_0		0x03
-#define  NAND_DRV_VERSION_1		0x6013
-#define  NAND_DRV_DATE			0x20171208
+#define  NAND_DRV_VERSION_1		0x6016
+#define  NAND_DRV_DATE			0x20181219
 #define  NAND_DRV_TIME			0x17191449
 /*
  *1719--AW1917--A63
  *14--uboot2014
  *49--linux4.9
 */
-
+#define GPIO_BASE_ADDR			0x0300B000
 
 int NAND_Print(const char *fmt, ...)
 {
@@ -285,6 +285,36 @@ __s32 NAND_PIORequest(__u32 nand_index)
 		return -1;
 	}
 
+	return 0;
+}
+
+__s32 NAND_3DNand_Request(void)
+{
+	u32 cfg;
+	void __iomem *gpio_ptr = ioremap(GPIO_BASE_ADDR, 0x400);
+
+	cfg = *((volatile __u32 *)gpio_ptr + 0x340 / 4);
+	cfg |= 0x4;
+	*((volatile __u32 *)gpio_ptr + 0x340 / 4) = cfg;
+	NAND_Print("Change PC_Power Mode Select to 1.8V\n");
+
+	iounmap(gpio_ptr);
+	return 0;
+}
+
+__s32 NAND_Check_3DNand(void)
+{
+	u32 cfg;
+	void __iomem *gpio_ptr = ioremap(GPIO_BASE_ADDR, 0x400);
+
+	cfg = *((volatile __u32 *)gpio_ptr + 0x340 / 4);
+	if ((cfg >> 2) == 0) {
+		cfg |= 0x4;
+		*((volatile __u32 *)gpio_ptr + 0x340 / 4) = cfg;
+		NAND_Print("Change PC_Power Mode Select to 1.8V\n");
+	}
+
+	iounmap(gpio_ptr);
 	return 0;
 }
 

@@ -836,6 +836,7 @@ void xradio_etf_to_wlan(u32 change)
 	}
 	up(&etf_priv.etf_lock);
 }
+EXPORT_SYMBOL_GPL(xradio_etf_to_wlan);
 
 int xradio_etf_suspend(void)
 {

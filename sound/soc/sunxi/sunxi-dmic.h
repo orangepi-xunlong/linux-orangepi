@@ -16,12 +16,6 @@
 #ifndef __SUNXI_DMIC_H
 #define __SUNXI_DMIC_H
 
-#if defined(CONFIG_ARCH_SUN8IW18) || defined(CONFIG_ARCH_SUN50IW9)
-#define DMIC_PLL_AUDIO_X4
-#else
-#undef DMIC_PLL_AUDIO_X4
-#endif
-
 /*------------------DMIC register definition--------------------*/
 #define SUNXI_DMIC_EN			0x00
 #define SUNXI_DMIC_SR			0x04
@@ -40,13 +34,10 @@
 #define	SUNXI_DMIC_HPF_COEF		0x3C
 #define	SUNXI_DMIC_HPF_GAIN		0x40
 #define SUNXI_DMIC_REV			0x50
-
 /*0x00:SUNXI_DMIC_EN*/
 #ifdef CONFIG_SND_SUNXI_MAD
-#define DMIC_MAD_DATA_EN		31
+#define MAD_DATA_EN             31
 #endif
-#define DMIC_RX_SYNC_EN			29
-#define DMIC_RX_EN_MUX			28
 #define GLOBE_EN			8
 #define DATA3_CHR_EN			7
 #define DATA3_CHL_EN			6
@@ -84,13 +75,13 @@
 
 /*SUNXI_DMIC_FIFO_CTR:0x1c*/
 #define DMIC_FIFO_FLUSH			31
-#define DMIC_FIFO_MODE			9
-#define DMIC_SAMPLE_RESOLUTION		8
+#define FIFO_MODE			9
+#define SAMPLE_RESOLUTION		8
 #define FIFO_TRG_LEVEL			0
 
 /*SUNXI_DMIC_FIFO_STA:0x20*/
 #ifdef CONFIG_SND_SUNXI_MAD
-#define DMIC_MAD_DATA_ALIGN		8
+#define MAD_DATA_ALIGN			8
 #endif
 #define DMIC_DATA_CNT			0
 
@@ -123,64 +114,19 @@
 #define DATA2R_VOL			0
 #define	DMIC_DEFAULT_VOL		0xB0B0B0B0
 
-/*SUNXI_DMIC_HPF_EN_CTR:0x38*/
-#define HPF_DATA3_CHR_EN		7
-#define HPF_DATA3_CHL_EN		6
-#define HPF_DATA2_CHR_EN		5
-#define HPF_DATA2_CHL_EN		4
-#define HPF_DATA1_CHR_EN		3
-#define HPF_DATA1_CHL_EN		2
-#define HPF_DATA0_CHR_EN		1
-#define HPF_DATA0_CHL_EN		0
-
-/*SUNXI_DMIC_HPF_COEF:0x3C*/
-#define HPF_COEF			0
-
-/*SUNXI_DMIC_HPF_GAIN:0x40*/
-#define HPF_GAIN			0
-
-struct sunxi_dmic_reg_label {
+struct label {
 	const char *name;
 	int value;
 };
 
-#define SUNXI_DMIC_REG_LABEL(constant)				\
+#define LABEL(constant)				\
 {						\
 	#constant, constant			\
 }
 
-#define SUNXI_DMIC_REG_LABEL_END				\
+#define LABEL_END				\
 {						\
 	NULL, -1				\
 }
-
-struct sunxi_dmic_info {
-	void __iomem *membase;
-	struct resource *memregion;
-	struct regmap   *regmap;
-	struct regulator *power_supply;
-	struct clk *pllclk;
-#ifdef DMIC_PLL_AUDIO_X4
-	struct clk *pllclkx4;
-#endif
-	struct clk *moduleclk;
-	int moduleclk_en;
-	struct device *dev;
-	struct snd_soc_dai_driver dai;
-	struct sunxi_dma_params capture_dma_param;
-	struct pinctrl *pinctrl;
-	struct pinctrl_state  *pinstate;
-	struct pinctrl_state  *pinstate_sleep;
-	bool capture_en;
-#ifdef CONFIG_SND_SUNXI_MAD
-	struct resource res;
-	unsigned int mad_bind;
-	unsigned int mad_suspend;
-	unsigned int lpsd_chan_sel;
-	unsigned int mad_standby_chan_sel;
-	unsigned int audio_src_chan_num;
-#endif
-	u32 chanmap;
-};
 
 #endif /* SUNXI_DMIC_H */

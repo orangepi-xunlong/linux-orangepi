@@ -1,19 +1,17 @@
 /*
- * Based on drivers/input/keyboard/sunxi-keyboard.c
- *
- * Copyright (C) 2015 Allwinnertech Ltd.
- *
  * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (c) 2014
+ *
+ * ChangeLog
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -63,7 +61,6 @@ struct sunxi_key_data {
 	u8 key_code;
 	char key_name[16];
 	u8 key_cnt;
-	int wakeup;
 };
 
 static struct sunxi_adc_disc disc_1350 = {
@@ -103,6 +100,7 @@ static void sunxi_keyboard_ctrl_set(void __iomem *reg_base,
 
 	if (para != 0)
 		ctrl_reg = readl(reg_base + LRADC_CTRL);
+
 	if (CONCERT_DLY_SET & key_mode)
 		ctrl_reg |= (FIRST_CONCERT_DLY & para);
 	if (ADC_CHAN_SET & key_mode)
@@ -111,12 +109,8 @@ static void sunxi_keyboard_ctrl_set(void __iomem *reg_base,
 		ctrl_reg |= (KEY_MODE_SELECT & para);
 	if (LRADC_HOLD_SET & key_mode)
 		ctrl_reg |= (LRADC_HOLD_EN & para);
-	if (LEVELB_VOL_SET & key_mode) {
+	if (LEVELB_VOL_SET & key_mode)
 		ctrl_reg |= (LEVELB_VOL & para);
-#if defined(CONFIG_ARCH_SUN8IW18)
-		ctrl_reg &= ~(u32)(3 << 4);
-#endif
-	}
 	if (LRADC_SAMPLE_SET & key_mode)
 		ctrl_reg |= (LRADC_SAMPLE_250HZ & para);
 	if (LRADC_EN_SET & key_mode)
@@ -173,21 +167,14 @@ static int sunxi_keyboard_suspend(struct device *dev)
 	struct sunxi_key_data *key_data = platform_get_drvdata(pdev);
 
 	pr_debug("[%s] enter standby\n", __func__);
+	disable_irq_nosync(key_data->irq_num);
 
-	if (device_may_wakeup(dev)) {
-		if (key_data->wakeup)
-			enable_irq_wake(key_data->irq_num);
-	} else {
-		disable_irq_nosync(key_data->irq_num);
+	sunxi_keyboard_ctrl_set(key_data->reg_base, 0, 0);
 
-		sunxi_keyboard_ctrl_set(key_data->reg_base, 0, 0);
-
-		if (IS_ERR_OR_NULL(key_data->mclk))
-			pr_warn("%s apb1_keyadc mclk handle is invalid!\n",
-					__func__);
-		else
-			clk_disable_unprepare(key_data->mclk);
-	}
+	if (IS_ERR_OR_NULL(key_data->mclk))
+		pr_warn("%s apb1_keyadc mclk handle is invalid!\n", __func__);
+	else
+		clk_disable_unprepare(key_data->mclk);
 
 	return 0;
 }
@@ -199,31 +186,21 @@ static int sunxi_keyboard_resume(struct device *dev)
 	unsigned long mode, para;
 
 	pr_debug("[%s] return from standby\n", __func__);
+	if (IS_ERR_OR_NULL(key_data->mclk))
+		pr_warn("%s apb1_keyadc mclk handle is invalid!\n", __func__);
+	else
+		clk_prepare_enable(key_data->mclk);
 
-	if (device_may_wakeup(dev)) {
-		if (key_data->wakeup)
-			disable_irq_wake(key_data->irq_num);
-	} else {
-		if (IS_ERR_OR_NULL(key_data->mclk))
-			pr_warn("%s apb1_keyadc mclk handle is invalid!\n",
-					__func__);
-		else
-			clk_prepare_enable(key_data->mclk);
+	mode = ADC0_DOWN_INT_SET | ADC0_UP_INT_SET | ADC0_DATA_INT_SET;
+	para = LRADC_ADC0_DOWN_EN | LRADC_ADC0_UP_EN | LRADC_ADC0_DATA_EN;
+	sunxi_keyboard_int_set(key_data->reg_base, mode, para);
+	mode = CONCERT_DLY_SET | ADC_CHAN_SET | KEY_MODE_SET | LRADC_HOLD_SET
+			| LEVELB_VOL_SET | LRADC_SAMPLE_SET | LRADC_EN_SET;
+	para = FIRST_CONCERT_DLY|LEVELB_VOL|KEY_MODE_SELECT|LRADC_HOLD_EN
+			|ADC_CHAN_SELECT|LRADC_SAMPLE_250HZ|LRADC_EN;
+	sunxi_keyboard_ctrl_set(key_data->reg_base, mode, para);
 
-		mode = ADC0_DOWN_INT_SET | ADC0_UP_INT_SET | ADC0_DATA_INT_SET;
-		para = LRADC_ADC0_DOWN_EN | LRADC_ADC0_UP_EN
-			| LRADC_ADC0_DATA_EN;
-		sunxi_keyboard_int_set(key_data->reg_base, mode, para);
-		mode = CONCERT_DLY_SET | ADC_CHAN_SET | KEY_MODE_SET
-			| LRADC_HOLD_SET | LEVELB_VOL_SET
-			| LRADC_SAMPLE_SET | LRADC_EN_SET;
-		para = FIRST_CONCERT_DLY | LEVELB_VOL|KEY_MODE_SELECT
-			| LRADC_HOLD_EN	| ADC_CHAN_SELECT
-			| LRADC_SAMPLE_250HZ|LRADC_EN;
-		sunxi_keyboard_ctrl_set(key_data->reg_base, mode, para);
-
-		enable_irq(key_data->irq_num);
-	}
+	enable_irq(key_data->irq_num);
 
 	return 0;
 }
@@ -259,8 +236,6 @@ static irqreturn_t sunxi_isr_key(int irq, void *dummy)
 	}
 
 	if (reg_val & LRADC_ADC0_UPPEND) {
-		if (key_data->wakeup)
-			pm_wakeup_event(key_data->input_dev->dev.parent, 0);
 		pr_debug("report data:%8d key_val:%8d\n",
 				key_data->scankeycodes[key_data->key_code],
 				key_val);
@@ -306,7 +281,7 @@ static int sunxi_keyboard_startup(struct sunxi_key_data *key_data,
 	 */
 	key_data->mclk = of_clk_get(np, 0);
 	if (IS_ERR_OR_NULL(key_data->mclk)) {
-		pr_err("%s: keyboard has no clk.\n", __func__);
+		pr_debug("%s: keyboard has no clk.\n", __func__);
 	} else{
 		if (clk_prepare_enable(key_data->mclk)) {
 			pr_err("%s enable apb1_keyadc clock failed!\n",
@@ -361,9 +336,6 @@ static int sunxikbd_key_init(struct sunxi_key_data *key_data,
 			j++;
 		keypad_mapindex[i] = j;
 	}
-
-	key_data->wakeup = of_property_read_bool(np, "wakeup-source");
-	device_init_wakeup(&pdev->dev, key_data->wakeup);
 
 	return 0;
 }
@@ -420,10 +392,8 @@ static int sunxi_keyboard_probe(struct platform_device *pdev)
 	sunxikbd_dev->evbit[0] = BIT_MASK(EV_KEY);
 #endif
 
-	for (i = 0; i < KEY_MAX_CNT; i++) {
-		if (key_data->scankeycodes[i] <  KEY_MAX)
-			set_bit(key_data->scankeycodes[i], sunxikbd_dev->keybit);
-	}
+	for (i = 0; i < KEY_MAX_CNT; i++)
+		set_bit(key_data->scankeycodes[i], sunxikbd_dev->keybit);
 	key_data->input_dev = sunxikbd_dev;
 	platform_set_drvdata(pdev, key_data);
 #ifdef ONE_CHANNEL
@@ -469,7 +439,6 @@ static int sunxi_keyboard_remove(struct platform_device *pdev)
 
 	free_irq(key_data->irq_num, key_data);
 	input_unregister_device(key_data->input_dev);
-	device_init_wakeup(&pdev->dev, 0);
 	kfree(key_data);
 	return 0;
 }

@@ -30,20 +30,11 @@ extern void set_capacity_level(struct _nand_info *nand_info,
 extern __u32 nand_wait_rb_mode(void);
 extern __u32 nand_wait_dma_mode(void);
 extern void do_nand_interrupt(unsigned int no);
-extern void tdo_nand_interrupt(unsigned int no);
-
 extern void print_nftl_zone(void *zone);
 extern int NAND_get_storagetype(void);
 extern int NAND_Get_Dragonboard_Flag(void);
 extern int nand_thread(void *arg);
 extern int NAND_CheckBoot(void);
-extern int TNAND_CheckBoot(void);
-extern int tlc_nand_thread(void *arg);
-
-
-extern int tnftl_struct_init(void);
-extern uint32 tflush_write_cache(void);
-extern int tnftl_exit(void);
 
 int test_mbr(uchar *data);
 extern int NAND_Print_DBG(const char *fmt, ...);

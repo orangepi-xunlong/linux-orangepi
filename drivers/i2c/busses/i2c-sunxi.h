@@ -19,17 +19,10 @@
 #define _SUNXI_I2C_H_
 
 #include <linux/regulator/consumer.h>
-#include <linux/dma/sunxi-dma.h>
-#include <asm/ioctl.h>
 
 #define TWI_MODULE_NUM    (5)
-#define HEXADECIMAL	(0x10)
-#define REG_INTERVAL	(0x04)
-#define REG_CL		(0x0c)
-#define REG_RANGE	(0x20)
 
 #define AUTOSUSPEND_TIMEOUT 5000
-#define STANDDARD_FREQ 100000
 
 /* TWI Register Offset */
 #define TWI_ADDR_REG		(0x00)	/*  31:8bit reserved,7-1bit for slave addr,0 bit for GCE */
@@ -42,21 +35,6 @@
 #define TWI_EFR_REG		(0x1C)	/*  31:2bit reserved,1:0 bit data byte follow read command */
 #define TWI_LCR_REG		(0x20)	/*  31:6bits reserved  5:0bit for sda&scl control*/
 #define TWI_DVFS_REG		(0x24)	/*  31:3bits reserved  2:0bit for dvfs control. only A10 support. */
-#define TWI_DRIVER_CTRL		(0x200)
-#define TWI_DRIVER_CFG		(0x204)
-#define TWI_DRIVER_SLV		(0x208)
-#define TWI_DRIVER_FMT		(0x20C)
-#define TWI_DRIVER_BUSC		(0x210)
-#define TWI_DRIVER_INTC		(0x214)
-#define TWI_DRIVER_DMAC		(0x218)
-#define TWI_DRIVER_FIFOC	(0x21C)
-#define TWI_DRIVER_SENDF	(0x300)
-#define TWI_DRIVER_RECVF	(0x304)
-
-#if defined(CONFIG_ARCH_SUN8IW16) || defined(CONFIG_ARCH_SUN8IW18)
-#define SUNXI_TWI_DRQ_RX(ch)	(DRQSRC_TWI0_RX + ch)
-#define SUNXI_TWI_DRQ_TX(ch)	(DRQDST_TWI0_TX + ch)
-#endif
 
 /* TWI address register */
 /* general call address enable for slave mode */
@@ -99,8 +77,8 @@
  * Foscl = F1/10 = Fin/(2^CLK_N * (CLK_M+1)*10);
  * Foscl is clock SCL;standard mode:100KHz or fast mode:400KHz
  */
-#define TWI_CLK_DUTY		(0x1<<7)	/* 7bit  */
-#define TWI_CLK_DIV_M		(0xf<<3)	/* 6:3bit  */
+
+#define TWI_CLK_DIV_M		(0xF<<3)	/* 6:3bit  */
 #define TWI_CLK_DIV_N		(0x7<<0)	/* 2:0bit */
 
 
@@ -228,120 +206,21 @@
  *--------------------------------------------------------------------------
  */
 
-
-/* Offset:0x0200. Twi driver control register(Default Value:0x00F8_0000) */
-#define TWI_DRV_EN	(0x01<<0)
-#define TWI_DRV_RST	(0x01<<1)
-#define TWI_DRV_STA	(0xff<<16)
-#define TRAN_RESULT	(0x0f<<24)
-#define READ_TRAN	(0x01<<28)
-#define START_TRAN	(0x01<<31)
-#define TRAN_OK		0x00
-#define TRAN_FAIL	0x01
-
-
-/*
- * Offset:0x0204.
- * Twi driver transmission configuration register(Default Value:0x1000_0001)
- */
-#define PACKET_MASK	(0xffff<<0)
-#define INTERVAL_MASK	(0xff<<16)
-
-
-/* Offset:0x0208. Twi driver slave id register(Default Value:0x0000_0000) */
-#define SLV_ID_X	(0xff<<0)
-#define SLV_RD_CMD	(0x01<<8)
-#define SLV_ID		(0x7f<<9)
-
-
-/*
- * Offset:0x020C.
- * Twi driver packet format register(Default Value:0x0001_0001)
- */
-#define DATA_BYTE	0xffff
-#define ADDR_BYTE	(0xff<<16)
-
-
-/* Offset:0x0210. Twi driver bus control register(Default Value:0x0000_00C0) */
-#define TWI_DRV_CLK_DUTY	(0x01<<16)
-#define TWI_DRV_CLK_M		(0x0f<<8)
-#define TWI_DRV_CLK_N		(0x07<<12)
-
-
-/*
- * Offset:0x0214.
- * Twi driver interrupt control register(Default Value:0x0000_0000)
- */
-#define TRAN_COM_PD	(0x1<<0)
-#define TRAN_ERR_PD	(0x1<<1)
-#define TX_REQ_PD	(0x1<<2)
-#define RX_REQ_PD	(0x1<<3)
-#define TRAN_COM_INT	(0x1<<16)
-#define TRAN_ERR_INT	(0x1<<17)
-#define TX_REQ_INT	(0x1<<18)
-#define RX_REQ_INT	(0x1<<19)
-#define TWI_DRV_INT_MASK	(0x0f<<16)
-#define TWI_DRV_STAT_MASK	(0x0f<<0)
-
-
-/*
- * Offset:0x0218.
- * Twi driver DMA configure register(Default Value:0x0010_0010)
- */
-#define TRIG_DEFAULT	0x10
-#define TRIG_MASK	0x3f
-#define DMA_TX		(0x01<<8)
-#define DMA_RX		(0x01<<24)
-#define I2C_DRQEN_MASK	(DMA_TX | DMA_RX)
-
-
-/* Offset:0x021C. Twi driver FIFO content register(Default Value:0x0000_0000) */
-#define SEND_FIFO_CONT	(0x3f<<0)
-#define SEND_FIFO_CLEAR	(0x01<<6)
-#define RECV_FIFO_CONT	(0x3f<<16)
-#define RECV_FIFO_CLEAR	(0x01<<22)
-
-
-/*
- * Offset:0x0300.
- * Twi driver send data FIFO access register(Default Value:0x0000_0000)
- */
-#define SEND_DATA_FIFO	(0xff<<0)
-
-
-/*
- * Offset:0x0304.
- * Twi driver receive data FIFO access register(Default Value:0x0000_0000)
- */
-#define RECV_DATA_FIFO	(0xff<<0)
-
-
-/* TWI driver result */
-#define RESULT_COMPLETE	1
-#define RESULT_ERR	2
-
-
 /* TWI mode select */
+
 #define TWI_MASTER_MODE		(1)
 #define TWI_SLAVE_MODE		(0)	/* seldom use */
 
 /* The global infor of TWI channel. */
-#define SUNXI_TWI_DEV_NAME		"twi"
 
+#define SUNXI_TWI_DEV_NAME		"twi"
+#define SUNXI_TWI_CHAN_MASK(ch)		(1<<ch)
 
 struct sunxi_i2c_platform_data {
 	int		bus_num;
 	unsigned int	frequency;
 	char		regulator_id[16];
 	struct		regulator *regulator;
-};
-
-enum {
-	DEBUG_INIT    = 1U << 0,
-	DEBUG_SUSPEND = 1U << 1,
-	DEBUG_INFO    = 1U << 2,
-	DEBUG_INFO1   = 1U << 3,
-	DEBUG_INFO2   = 1U << 4,
 };
 
 #endif /* end of _SUNXI_I2C_H_ */

@@ -53,10 +53,6 @@
 #define DRQSRC_OTG_EP4      33
 #define DRQSRC_OTG_EP5      34
 #define DRQSRC_MAD_RX       44
-#define DRQSRC_TWI0_RX		43
-#define DRQSRC_TWI1_RX		44
-#define DRQSRC_TWI2_RX		45
-#define DRQSRC_TWI3_RX		46
 
 /*
  * The destination DRQ type and port corresponding relation
@@ -97,10 +93,6 @@
 #define DRQDST_OTG_EP4          33
 #define DRQDST_OTG_EP5          34
 #define DRQSRC_MAD_TX           44
-#define DRQDST_TWI0_TX		43
-#define DRQDST_TWI1_TX          44
-#define DRQDST_TWI2_TX          45
-#define DRQDST_TWI3_TX          46
 
 
 #endif /*__DMA_SUN8IW18__  */

@@ -2,13 +2,13 @@
  * Linux cfg80211 Vendor Extension Code
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -2318,21 +2318,14 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 
 	COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].retries, wlc_cnt->txretry);
 
-	macstat_cnt = bcm_get_data_from_xtlv_buf(((wl_cnt_info_t *)iovar_buf)->data,
+	if ((macstat_cnt = bcm_get_data_from_xtlv_buf(((wl_cnt_info_t *)iovar_buf)->data,
 			((wl_cnt_info_t *)iovar_buf)->datalen,
 			WL_CNT_XTLV_CNTV_LE10_UCODE, NULL,
-			BCM_XTLV_OPTION_ALIGN32);
-	if (macstat_cnt == NULL) {
+			BCM_XTLV_OPTION_ALIGN32)) == NULL) {
 		macstat_cnt = bcm_get_data_from_xtlv_buf(((wl_cnt_info_t *)iovar_buf)->data,
 				((wl_cnt_info_t *)iovar_buf)->datalen,
 				WL_CNT_XTLV_GE40_UCODE_V1, NULL,
 				BCM_XTLV_OPTION_ALIGN32);
-		if (macstat_cnt == NULL) {
-			macstat_cnt = bcm_get_data_from_xtlv_buf(((wl_cnt_info_t *)iovar_buf)->data,
-				((wl_cnt_info_t *)iovar_buf)->datalen,
-				WL_CNT_XTLV_LT40_UCODE_V1, NULL,
-				BCM_XTLV_OPTION_ALIGN32);
-		}
 	}
 
 	if (macstat_cnt == NULL) {

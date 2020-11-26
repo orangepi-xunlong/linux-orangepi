@@ -18,7 +18,6 @@
 #include <linux/sched.h>
 #include <linux/atomic.h>
 #include <net/mac80211.h>
-#include <asm/bitops.h>
 
 /*Macroses for Driver parameters.*/
 #define XRWL_MAX_QUEUE_SZ    (128)
@@ -139,7 +138,7 @@
 #define XRADIO_WORKQUEUE   "xradio_wq"
 #define XRADIO_SPARE_WORKQUEUE   "xradio_spare_wq"
 #define WIFI_CONF_PATH    "/data/vendor/wifi/xr_wifi.conf"
-#define XRADIO_HWINFO_FILE  "/data/vendor/wifi/hwinfo.bin"
+#define XRADIO_HWINFO_FILE  "/data/vendir/wifi/hwinfo.bin"
 
 extern char *drv_version;
 extern char *drv_buildtime;
@@ -248,11 +247,6 @@ struct xradio_common {
 
 	struct platform_device  *plat_device;
 	struct ieee80211_hw		*hw;
-	/*
-	 * 0 for sta or ap
-	 * 1 for p2p device
-	 * 2 for p2p interface
-	 */
 	struct mac_address		addresses[XRWL_MAX_VIFS];
 
 	/*Will be a pointer to a list of VIFs - Dynamically allocated */
@@ -362,13 +356,11 @@ struct xradio_common {
 	 * FW issue with sleeping/waking up. */
 	atomic_t            recent_scan;
 	atomic_t            suspend_state;
-	atomic_t            suspend_lock_state;
 	wait_queue_head_t		wsm_wakeup_done;
 #ifdef HW_RESTART
 	bool                exit_sync;
 	int			hw_restart_work_running;
 	bool                hw_restart;
-	bool				hw_cant_wakeup;
 	struct work_struct  hw_restart_work;
 #endif
 

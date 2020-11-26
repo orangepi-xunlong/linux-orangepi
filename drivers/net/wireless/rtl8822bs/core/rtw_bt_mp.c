@@ -479,7 +479,7 @@ MPTBT_FwC2hBtMpCtrl(
 	_cancel_timer_ex(&pMptCtx->MPh2c_timeout_timer);
 
 	for (i = 0; i < length; i++)
-		RTW_INFO("[MPT], %s, buf[%d]=0x%02x ", __func__, i, tmpBuf[i]);
+		RTW_INFO("[MPT], %s, buf[%d]=0x%02x ", __FUNCTION__, i, tmpBuf[i]);
 	RTW_INFO("[MPT], pExtC2h->extendId=0x%x\n", pExtC2h->extendId);
 
 	switch (pExtC2h->extendId) {

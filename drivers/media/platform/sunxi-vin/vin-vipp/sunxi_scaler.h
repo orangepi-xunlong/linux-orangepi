@@ -14,6 +14,22 @@
  *
  */
 
+/*
+ ******************************************************************************
+ *
+ * sunxi_scaler.h
+ *
+ * Hawkview ISP - sunxi_scaler.h module
+ *
+ * Copyright (c) 2014 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version         Author         Date         Description
+ *
+ *   3.0         Zhao Wei     2014/12/11     ISP Tuning Tools Support
+ *
+ ******************************************************************************
+ */
+
 #ifndef _SUNXI_SCALER_H_
 #define _SUNXI_SCALER_H_
 #include <linux/videodev2.h>
@@ -36,11 +52,19 @@ struct scaler_para {
 };
 
 struct scaler_dev {
+	int use_cnt;
 	struct v4l2_subdev subdev;
 	struct media_pad scaler_pads[SCALER_PAD_NUM];
+	struct v4l2_event event;
 	struct v4l2_mbus_framefmt formats[SCALER_PAD_NUM];
 	struct platform_device *pdev;
+	unsigned int is_empty;
+	unsigned int is_osd_en;
+	unsigned int id;
+	spinlock_t slock;
 	struct mutex subdev_lock;
+	wait_queue_head_t wait;
+	void __iomem *base;
 	struct vin_mm vipp_reg;
 	struct vin_mm osd_para;
 	struct vin_mm osd_stat;
@@ -49,13 +73,12 @@ struct scaler_dev {
 		struct v4l2_rect active;
 	} crop;
 	struct scaler_para para;
-	void __iomem *base;
-	unsigned char is_empty;
-	unsigned char id;
+	struct list_head scaler_list;
 };
 
 struct v4l2_subdev *sunxi_scaler_get_subdev(int id);
 int sunxi_vipp_get_osd_stat(int id, unsigned int *stat);
+int sunxi_osd_change_sc_fmt(int id, enum vipp_format out_fmt, int en);
 int sunxi_scaler_platform_register(void);
 void sunxi_scaler_platform_unregister(void);
 

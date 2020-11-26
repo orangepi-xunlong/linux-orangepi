@@ -76,7 +76,7 @@ int sunxi_gpio_to_name(int port, int port_num, char *name)
 #define PL_BASE  (352)
 #define AXP_BASE (1024)
 
-void sunxi_dt_update_gpio_group(struct dt_info *dti,
+void sunxi_dt_update_gpio_group(struct boot_info *bi,
 				   struct node *node,
 				   struct script_entry *ep,
 				   struct script_gpio_entry *entry)
@@ -106,12 +106,12 @@ void sunxi_dt_update_gpio_group(struct dt_info *dti,
 	if (axp_pin) {
 		for (i = 0; i < 3; i++) {
 			pinctrl_name = axp_pin_name[i];
-			pinctrl_node = sunxi_get_node(dti->dt, pinctrl_name);
+			pinctrl_node = sunxi_get_node(bi->dt, pinctrl_name);
 			if (pinctrl_node)
 				break;
 		}
 	} else {
-		pinctrl_node = sunxi_get_node(dti->dt, pinctrl_name);
+		pinctrl_node = sunxi_get_node(bi->dt, pinctrl_name);
 	}
 
 	if (!pinctrl_node) {
@@ -121,7 +121,7 @@ void sunxi_dt_update_gpio_group(struct dt_info *dti,
 
 	string = malloc(7 * sizeof(unsigned int));
 	/*set gpio control */
-	phandle = get_node_phandle(dti->dt, pinctrl_node);
+	phandle = get_node_phandle(bi->dt, pinctrl_node);
 	val32 = cpu_to_fdt32(phandle);
 	memcpy(string, (char *)&val32, sizeof(val32));
 
@@ -159,7 +159,7 @@ void sunxi_dt_update_gpio_group(struct dt_info *dti,
 }
 
 int sunxi_dt_init_pinconf_prop(struct script_section *section,
-				  struct dt_info *dti,
+				  struct boot_info *bi,
 				  struct node *node,
 				  int sleep_state)
 {
@@ -193,7 +193,7 @@ int sunxi_dt_init_pinconf_prop(struct script_section *section,
 				cp = (cell_t *)prop->val.val;
 				for (i = 0; i < len; i++) {
 					phandle = fdt32_to_cpu(*cp++);
-					p_node = get_node_by_phandle(dti->dt, phandle);
+					p_node = get_node_by_phandle(bi->dt, phandle);
 					delete_node(p_node);
 				}
 				delete_property(prop);
@@ -220,7 +220,7 @@ cell_t sunxi_dt_add_new_node_to_pinctrl(struct node *pinctrl_node,
 					   const char *pname,
 					   char *gpio_name,
 					   int gpio_value[],
-					   struct dt_info *dti)
+					   struct boot_info *bi)
 {
 	cell_t  phandle;
 	int  i, value_32, len, str_len;
@@ -239,7 +239,7 @@ cell_t sunxi_dt_add_new_node_to_pinctrl(struct node *pinctrl_node,
 	for (i = 0; i < 8; i++) {
 		label[str_len-2] = (char)(i+'a');
 		label[str_len-1] = '\0';
-		temp_node = sunxi_get_node(dti->dt, label);
+		temp_node = sunxi_get_node(bi->dt, label);
 		if (temp_node)
 			continue;
 		else
@@ -268,7 +268,7 @@ cell_t sunxi_dt_add_new_node_to_pinctrl(struct node *pinctrl_node,
 	child->fullpath = join_path(pinctrl_node->fullpath, child->name);
 
 	/*set phandle*/
-	phandle = get_node_phandle(dti->dt, child);
+	phandle = get_node_phandle(bi->dt, child);
 	add_child(pinctrl_node, child);
 
 	/*add property of pins */
@@ -312,7 +312,7 @@ cell_t sunxi_dt_add_new_node_to_pinctrl(struct node *pinctrl_node,
 
 }
 int insert_pinconf_node(const char *section_name,
-			 struct dt_info *dti,
+			 struct boot_info *bi,
 			 struct node *node,
 			 struct script_entry *ep,
 			 const char *prop_name)
@@ -342,7 +342,7 @@ int insert_pinconf_node(const char *section_name,
 
 	for (i = 0; i < phandle_count; i++) {
 		phandle = fdt32_to_cpu(*cp++);
-		pin_node = get_node_by_phandle(dti->dt, phandle);
+		pin_node = get_node_by_phandle(bi->dt, phandle);
 
 		if (pin_node) {
 			/* if find a pinctrl node, check config*/
@@ -405,7 +405,7 @@ int insert_pinconf_node(const char *section_name,
 }
 
 void create_pinconf_node(const char *section_name,
-			   struct dt_info *dti,
+			   struct boot_info *bi,
 			   struct node *node,
 			   struct script_entry *ep,
 			   struct property *prop)
@@ -425,11 +425,11 @@ void create_pinconf_node(const char *section_name,
 	value[3] = entry->data[3] < 0 ? 0xFFFFFFFF : entry->data[3];
 
 	if (entry->port * 32 < PL_BASE)
-		pinctrl = sunxi_get_node(dti->dt, "pio");
+		pinctrl = sunxi_get_node(bi->dt, "pio");
 	else if (entry->port * 32 >= PL_BASE && entry->port < AXP_BASE)
-		pinctrl = sunxi_get_node(dti->dt, "r_pio");
+		pinctrl = sunxi_get_node(bi->dt, "r_pio");
 
-	phandle = sunxi_dt_add_new_node_to_pinctrl(pinctrl, section_name, ep->name, gpio_name, value, dti);
+	phandle = sunxi_dt_add_new_node_to_pinctrl(pinctrl, section_name, ep->name, gpio_name, value, bi);
 	if (phandle) {
 		d_pinctrl_x = data_append_cell(prop->val, phandle);
 		propname = malloc(strlen(prop->name));
@@ -441,7 +441,7 @@ void create_pinconf_node(const char *section_name,
 }
 
 void sunxi_dt_update_pin_group_sleep(const char *section_name,
-				  struct dt_info *dti,
+				  struct boot_info *bi,
 				  struct node *node,
 				  struct script_entry *ep)
 {
@@ -454,14 +454,14 @@ void sunxi_dt_update_pin_group_sleep(const char *section_name,
 	sunxi_gpio_to_name(entry->port, entry->port_num, gpio_name);
 	prop = get_property(node, "pinctrl-1");
 
-	ret = insert_pinconf_node(section_name, dti, node, ep, "pinctrl-1");
+	ret = insert_pinconf_node(section_name, bi, node, ep, "pinctrl-1");
 	if (ret)
-		create_pinconf_node(section_name, dti, node, ep, prop);
+		create_pinconf_node(section_name, bi, node, ep, prop);
 }
 
 
 void sunxi_dt_update_pin_group_default(const char *section_name,
-				  struct dt_info *dti,
+				  struct boot_info *bi,
 				  struct node *node,
 				  struct script_entry *ep)
 {
@@ -475,9 +475,9 @@ void sunxi_dt_update_pin_group_default(const char *section_name,
 	sunxi_gpio_to_name(entry->port, entry->port_num, gpio_name);
 	prop = get_property(node, "pinctrl-0");
 
-	ret = insert_pinconf_node(section_name, dti, node, ep, "pinctrl-0");
+	ret = insert_pinconf_node(section_name, bi, node, ep, "pinctrl-0");
 	if (ret)
-		create_pinconf_node(section_name, dti, node, ep, prop);
+		create_pinconf_node(section_name, bi, node, ep, prop);
 }
 
 /*end process pinconf */
@@ -582,7 +582,7 @@ void sunxi_dt_update_propval_empty(const char *section_name,
 void sunxi_dt_update_propval_gpio(const char *section_name,
 				     struct script_entry *ep,
 				     struct node *node,
-				     struct dt_info *dti,
+				     struct boot_info *bi,
 				     int sleep_state)
 {
 	struct script_gpio_entry *entry;
@@ -592,7 +592,7 @@ void sunxi_dt_update_propval_gpio(const char *section_name,
 	case 0:
 	case 1:
 	case 6:
-		sunxi_dt_update_gpio_group(dti, node, ep, entry);
+		sunxi_dt_update_gpio_group(bi, node, ep, entry);
 		break;
 	case 2:
 	case 3:
@@ -600,9 +600,9 @@ void sunxi_dt_update_propval_gpio(const char *section_name,
 	case 5:
 	case 7:
 		if (sleep_state)
-			sunxi_dt_update_pin_group_sleep(section_name, dti, node, ep);
+			sunxi_dt_update_pin_group_sleep(section_name, bi, node, ep);
 		else
-			sunxi_dt_update_pin_group_default(section_name, dti, node, ep);
+			sunxi_dt_update_pin_group_default(section_name, bi, node, ep);
 		break;
 	}
 
@@ -618,12 +618,12 @@ struct node *sunxi_get_node(struct node *tree, const char *string)
 	return nd;
 }
 
-int sunxi_build_new_node(struct dt_info *dti, char pnode_name[], char node_name[])
+int sunxi_build_new_node(struct boot_info *bi, char pnode_name[], char node_name[])
 {
 	char *label;
 	struct  node *child, *parent;
 
-	parent = sunxi_get_node(dti->dt, pnode_name);
+	parent = sunxi_get_node(bi->dt, pnode_name);
 	child = build_node(NULL, NULL);
 	if (!child)
 		printf("build node faile[%s]\n", node_name);
@@ -645,7 +645,7 @@ int process_mainkey(char *mainkey, char parent_name[], char child_name[], int *s
 	char *temp_buf;
 
 	if (buf != NULL) {
-		sscanf(mainkey, "%31[^/]/%31[^@]", parent_name, child_name);
+		sscanf(mainkey, "%[^/]/%[^@]", parent_name, child_name);
 	} else {
 		strcpy(parent_name, "soc");
 		strcpy(child_name, mainkey);
@@ -662,7 +662,7 @@ int process_mainkey(char *mainkey, char parent_name[], char child_name[], int *s
 	return 0;
 }
 
-int dt_update_source(const char *fexname, FILE *f, struct dt_info *dti)
+int dt_update_source(const char *fexname, FILE *f, struct boot_info *bi)
 {
 
 	int ret = 0;
@@ -695,16 +695,16 @@ int dt_update_source(const char *fexname, FILE *f, struct dt_info *dti)
 		process_mainkey(section->name, p_key, c_key, &sleep_state);
 		printf("p=%s c=%s state=%d\n", p_key, c_key, sleep_state);
 
-		parent_node = sunxi_get_node(dti->dt, p_key);
+		parent_node = sunxi_get_node(bi->dt, p_key);
 		if (!parent_node) {
 			printf("[SCRIPT_TO_DTS]Can not get parent node.\n");
 			exit(1);
 		}
 
-		sub_node = sunxi_get_node(dti->dt, c_key);
+		sub_node = sunxi_get_node(bi->dt, c_key);
 		if (!sub_node) {
-			sunxi_build_new_node(dti, p_key, c_key);
-			sub_node = sunxi_get_node(dti->dt, c_key);
+			sunxi_build_new_node(bi, p_key, c_key);
+			sub_node = sunxi_get_node(bi->dt, c_key);
 		}
 
 		device_type_prop = get_property(sub_node, "device_type");
@@ -714,7 +714,7 @@ int dt_update_source(const char *fexname, FILE *f, struct dt_info *dti)
 			add_property(sub_node, new_prop);
 		}
 
-		sunxi_dt_init_pinconf_prop(section, dti, sub_node, sleep_state);
+		sunxi_dt_init_pinconf_prop(section, bi, sub_node, sleep_state);
 		for_each_entry_in_section(section->entries, o) {
 			ep = container_of(o, struct script_entry,  entries);
 			switch (ep->type) {
@@ -726,7 +726,7 @@ int dt_update_source(const char *fexname, FILE *f, struct dt_info *dti)
 				sunxi_dt_update_propval_string(c_key, ep, sub_node);
 				break;
 			case 5:
-				sunxi_dt_update_propval_gpio(c_key, ep, sub_node, dti, sleep_state);
+				sunxi_dt_update_propval_gpio(c_key, ep, sub_node, bi, sleep_state);
 				break;
 			case 6:
 				/*empty property */

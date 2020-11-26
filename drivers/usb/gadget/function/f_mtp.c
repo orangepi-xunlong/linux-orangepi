@@ -557,14 +557,13 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 		goto done;
 	}
 	spin_lock_irq(&dev->lock);
-	if (dev->ep_out->desc && cdev) {
+	if (dev->ep_out->desc) {
 		len = usb_ep_align_maybe(cdev->gadget, dev->ep_out, count);
 		if (len > MTP_BULK_BUFFER_SIZE) {
 			spin_unlock_irq(&dev->lock);
 			return -EINVAL;
 		}
-	} else
-		len = count;
+	}
 
 	if (dev->state == STATE_CANCELED) {
 		/* report cancelation to userspace */
@@ -751,11 +750,6 @@ static void send_file_work(struct work_struct *data)
 	offset = dev->xfer_file_offset;
 	count = dev->xfer_file_length;
 
-	if (count < 0) {
-		dev->xfer_result = -EINVAL;
-		return;
-	}
-
 	DBG(cdev, "send_file_work(%lld %lld)\n", offset, count);
 
 	if (dev->xfer_send_header) {
@@ -867,11 +861,6 @@ static void receive_file_work(struct work_struct *data)
 	offset = dev->xfer_file_offset;
 	count = dev->xfer_file_length;
 
-	if (count < 0) {
-		dev->xfer_result = -EINVAL;
-		return;
-	}
-
 	DBG(cdev, "receive_file_work(%lld)\n", count);
 
 	while (count > 0 || write_req) {
@@ -885,7 +874,8 @@ static void receive_file_work(struct work_struct *data)
 
 			/* Use inner dma to transport. */
 #if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-			read_req->dma_flag = 1;
+			if (count != 0xFFFFFFFF)
+				read_req->dma_flag = 1;
 #endif
 			dev->rx_done = 0;
 			ret = usb_ep_queue(dev->ep_out, read_req, GFP_KERNEL);
@@ -937,23 +927,11 @@ static void receive_file_work(struct work_struct *data)
 				count = 0;
 			}
 
+			write_req = read_req;
+			/* disable dma_flag when a transfer finished. */
 #if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-			/*
-			 * if the file size is > 4 gig, we must force dma to stop
-			 * manually and signal EOF here
-			 */
-			if (count == 0xFFFFFFFF && read_req->dma_flag == 1
-					&& read_req->actual == read_req->length
-					&& read_req->length < MTP_BULK_BUFFER_SIZE) {
-				DBG(cdev, "dma is forced to stop\n");
-				count = 0;
-			}
-			/*
-			 * deassert dma_flag when a transfer finished
-			 */
 			read_req->dma_flag = 0;
 #endif
-			write_req = read_req;
 			read_req = NULL;
 		}
 	}
@@ -1126,7 +1104,7 @@ struct mtp_event32 {
 static long mtp_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	__u32 data;
-	int err = -1;
+	int err;
 
 	switch (cmd) {
 	case MTP_SEND_FILE:

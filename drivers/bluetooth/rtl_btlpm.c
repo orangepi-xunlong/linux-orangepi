@@ -38,7 +38,6 @@
 #include <linux/gpio.h>
 #include <linux/sunxi-gpio.h>
 #include <linux/of_gpio.h>
-#include <linux/pm_wakeirq.h>
 
 #include <net/bluetooth/bluetooth.h>
 
@@ -71,7 +70,6 @@ static void bluesleep_stop(void);
 static int bluesleep_start(void);
 
 struct bluesleep_info {
-	unsigned int wakeup_enable;
 	unsigned host_wake;
 	unsigned ext_wake;
 	unsigned host_wake_irq;
@@ -130,6 +128,7 @@ static spinlock_t rw_lock;
 
 
 struct proc_dir_entry *bluetooth_dir, *sleep_dir;
+extern int enable_gpio_wakeup_src(int para);
 
 /*
  * Local functions
@@ -395,10 +394,6 @@ static void bluesleep_stop(void)
 	wake_lock_timeout(&bsi->wake_lock, HZ / 2);
 }
 
-static int assert_level = -1;
-module_param(assert_level, int, S_IRUGO);
-MODULE_PARM_DESC(assert_level, "BT_LPM hostwake/btwake assert level");
-
 static int __init bluesleep_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -429,10 +424,6 @@ static int __init bluesleep_probe(struct platform_device *pdev)
 
 	/* set host_wake_assert */
 	bsi->host_wake_assert = config.data;
-	if (assert_level != -1) {
-		bsi->host_wake_assert = (assert_level & 0x02) > 0;
-		BT_DBG("override host_wake assert with to module_para assert_level");
-	}
 
 	ret = devm_gpio_request(dev, bsi->host_wake, "bt_hostwake");
 	if (ret < 0) {
@@ -447,22 +438,11 @@ static int __init bluesleep_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	if (!of_property_read_u32(np, "wakeup_source", &bsi->wakeup_enable) &&
-		(bsi->wakeup_enable == 0)) {
-		BT_DBG("wakeup source is disabled!\n");
-	} else {
-		ret = device_init_wakeup(dev, true);
-		if (ret < 0) {
-			BT_ERR("device init wakeup failed!\n");
-			return ret;
-		}
-		ret = dev_pm_set_wake_irq(dev, gpio_to_irq(bsi->host_wake));
-		if (ret < 0) {
-			BT_ERR("can't enable wakeup src for bt_hostwake %d\n",
-				bsi->host_wake);
-			return ret;
-		}
-		bsi->wakeup_enable = 1;
+	ret = enable_gpio_wakeup_src(bsi->host_wake);
+	if (ret < 0) {
+		BT_ERR("can't enable wakeup src for bt_hostwake %d\n",
+			bsi->host_wake);
+		return ret;
 	}
 
 	bsi->ext_wake = of_get_named_gpio_flags(np, "bt_wake",
@@ -489,10 +469,6 @@ static int __init bluesleep_probe(struct platform_device *pdev)
 
 	/* set ext_wake_assert */
 	bsi->ext_wake_assert = config.data;
-	if (assert_level != -1) {
-		bsi->ext_wake_assert = (assert_level & 0x01) > 0;
-		BT_DBG("override ext_wake assert with to module_para assert_level");
-	}
 
 	/* 1.set bt_wake as output and the level is assert, assert bt wake */
 	ret = gpio_direction_output(bsi->ext_wake, bsi->ext_wake_assert);
@@ -504,7 +480,7 @@ static int __init bluesleep_probe(struct platform_device *pdev)
 
 	/* 2.get bt_host_wake gpio irq */
 	bsi->host_wake_irq = gpio_to_irq(bsi->host_wake);
-	if (bsi->host_wake_irq < 0) {
+	if (IS_ERR_VALUE(bsi->host_wake_irq)) {
 		BT_ERR("map gpio [%d] to virq failed, errno = %d\n",
 				bsi->host_wake, bsi->host_wake_irq);
 		ret = -ENODEV;
@@ -540,12 +516,6 @@ static int bluesleep_remove(struct platform_device *pdev)
 	}
 
 	wake_lock_destroy(&bsi->wake_lock);
-	if (bsi->wakeup_enable) {
-		BT_DBG("Deinit wakeup source");
-		device_init_wakeup(&pdev->dev, false);
-		dev_pm_clear_wake_irq(&pdev->dev);
-	}
-
 	return 0;
 }
 

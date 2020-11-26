@@ -34,16 +34,6 @@ __s32 rgb2Ycbcr_709[12] = {
 __s32 Ycbcr2rgb_709[12] = {
 	0x04a8, 0x0, 0x072c, 0xFFFC1F7D, 0x04a8, 0xFFFFFF26, 0xFFFFFDDD,
 	0x133F8, 0x04a8, 0x0876, 0, 0xFFFB7AA0, };
-
-__s32 rgb2Ycbcr_601[12] = {
-	0x0107, 0x0204, 0x064, 0x4200,
-	0xFFFFFF68, 0xFFFFFED6, 0x01c2, 0x20200,
-	0x01c2, 0xFFFFFE87, 0xFFFFFFB7, 0x20200,};
-__s32 Ycbcr2rgb_601[12] = {
-	0x04a8, 0x0, 0x0662, 0xFFFC865A,
-	0x04a8, 0xFFFFFE70, 0xFFFFFCBF, 0x21FF4,
-	0x04a8, 0x0812, 0x0, 0xFFFBAE4A,};
-
 __s32 lan2coefftab32_full[512] = {
 	0x00004000, 0x000140ff, 0x00033ffe, 0x00043ffd, 0x00063efc, 0xff083dfc,
 	0x000a3bfb, 0xff0d39fb, 0xff0f37fb, 0xff1136fa, 0xfe1433fb,
@@ -415,16 +405,14 @@ __s32 g2d_csc_reg_set(__u32 csc_no, g2d_csc_sel csc_sel)
 		break;
 	case G2D_RGB2YUV_601:
 		for (i = 0; i < 12; i++)
-			write_wvalue(csc_base_addr + (i << 2),
-				      rgb2Ycbcr_601[i]);
+			;
 
 /* write_wvalue(csc_base_addr + (i<<2), */
 /* rgb2Ycbcr_601[i]); */
 		    break;
 	case G2D_YUV2RGB_601:
 		for (i = 0; i < 12; i++)
-			write_wvalue(csc_base_addr + (i << 2),
-				      Ycbcr2rgb_601[i]);
+			;
 
 /* write_wvalue(csc_base_addr + (i<<2), */
 /* Ycbcr2rgb_601[i]); */
@@ -1873,11 +1861,6 @@ __s32 mixer_blt(g2d_blt *para, enum g2d_scan_order scan_order)
 		/* ROT case */
 		switch (para->flag) {
 		case G2D_BLT_NONE:
-			if ((dst->width == src->width) &&
-					(dst->height == src->height)) {
-				result = g2d_bsp_bitblt(src, dst, G2D_ROT_0);
-				return result;
-			}
 			if (scan_order == G2D_SM_DTLR)
 				result = g2d_bsp_bitblt(src, dst,
 						G2D_BLT_NONE | G2D_SM_DTLR_1);
@@ -1954,14 +1937,10 @@ __s32 g2d_bsp_bitblt(g2d_image_enh *src, g2d_image_enh *dst, __u32 flag)
 	__s32 result;
 
 	g2d_bsp_reset();
-	if (dst == NULL) {
-		pr_err("[G2D]dst image is NULL!\n");
+	if (dst == NULL)
 		return -1;
-	}
-	if (src == NULL) {
-		pr_err("[G2D]src image is NULL!\n");
+	if (src == NULL)
 		return -2;
-	}
 	G2D_INFO_MSG("BITBLT_flag:  0x%x\n", flag);
 	if (G2D_BLT_NONE == (flag & 0x0fffffff)) {
 		G2D_INFO_MSG("Input info:---------------------------------\n");
@@ -2015,17 +1994,11 @@ __s32 g2d_bsp_bitblt(g2d_image_enh *src, g2d_image_enh *dst, __u32 flag)
 		}
 		if ((src->format <= G2D_FORMAT_BGRA1010102) &&
 		      (dst->format > G2D_FORMAT_BGRA1010102)) {
-			if (dst->clip_rect.w <= 1280 && dst->clip_rect.h <= 720)
-				g2d_csc_reg_set(2, G2D_RGB2YUV_601);
-			else
-				g2d_csc_reg_set(2, G2D_RGB2YUV_709);
+			g2d_csc_reg_set(2, G2D_RGB2YUV_709);
 		}
 		if ((src->format > G2D_FORMAT_BGRA1010102) &&
 		      (dst->format <= G2D_FORMAT_BGRA1010102)) {
-			if (dst->clip_rect.w <= 1280 && dst->clip_rect.h <= 720)
-				g2d_csc_reg_set(2, G2D_YUV2RGB_601);
-			else
-				g2d_csc_reg_set(2, G2D_YUV2RGB_709);
+			g2d_csc_reg_set(2, G2D_YUV2RGB_709);
 		}
 		g2d_wb_set(dst);
 	}

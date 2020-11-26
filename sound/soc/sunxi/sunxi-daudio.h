@@ -16,11 +16,10 @@
 #ifndef	__SUNXI_DAUDIO_H_
 #define	__SUNXI_DAUDIO_H_
 /*
- * Platfprm	I2S_count   HDMI_seq(index is 0 to i)    MODE
+ * I2S_count   HDMI_seq(index is 0 to i)     MODE
  * sun50iw1       3           2                           A(TDM:8-channel)
  * sun50iw3       3           NONE                        B(TDM:16-channel)
  * sun50iw8       3           NONE                        B(TDM:16-channels)
- * sun50iw10      4           NONE                        B(TDM:16-channels)
  */
 
 #if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW7) || \
@@ -72,16 +71,7 @@ defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN8IW17)
 #define	SUNXI_DAUDIO_RXCHSEL	0x64
 #define	SUNXI_DAUDIO_RXCHMAP0	0x68
 #define	SUNXI_DAUDIO_RXCHMAP1	0x6C
-
-#if defined(CONFIG_ARCH_SUN50IW10)
-#define	SUNXI_DAUDIO_RXCHMAP2	0x70
-#define	SUNXI_DAUDIO_RXCHMAP3	0x74
-#define	SUNXI_DAUDIO_DEBUG	0x78
-#define	SUNXI_DAUDIO_REV	0x7c
-#else
 #define	SUNXI_DAUDIO_DEBUG	0x70
-#endif
-
 #else
 #define	SUNXI_DAUDIO_TX0CHMAP0	0x44
 #define	SUNXI_DAUDIO_TX1CHMAP0	0x48
@@ -312,20 +302,8 @@ defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN8IW17)
 #define	SUNXI_DAUDIO_RX_CHSEL_MASK		7
 #endif
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-#define DAUDIO_RXCH_DEF_MAP(x) (x << ((x%4)<<3))
-#define DAUDIO_RXCHMAP(x) (0x1f << ((x%4)<<3))
-#endif
-
-/*
- * For other define.
- */
 #define	SND_SOC_DAIFMT_SIG_SHIFT		8
 #define	SND_SOC_DAIFMT_MASTER_SHIFT		12
-
-#if defined(CONFIG_ARCH_SUN50IW10)
-#define USE_ASOC_FMT_SETTING
-#endif
 
 /* define for HDMI audio drq type number */
 #if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW7) || \
@@ -340,8 +318,7 @@ defined(CONFIG_ARCH_SUN50IW1) || defined(CONFIG_ARCH_SUN8IW17)
  * so make the 3rd channel define as NULL for codec compile
  */
 #if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW12) || \
-defined(CONFIG_ARCH_SUN50IW8) || defined(CONFIG_ARCH_SUN8IW17) ||\
-defined(CONFIG_ARCH_SUN8IW7)
+defined(CONFIG_ARCH_SUN50IW8) || defined(CONFIG_ARCH_SUN8IW17)
 #define DRQDST_DAUDIO_3_TX	0
 #define DRQSRC_DAUDIO_3_RX	0
 #define DAUDIO_NUM_MAX		3

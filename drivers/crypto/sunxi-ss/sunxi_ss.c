@@ -188,7 +188,8 @@ static int ss_aes_ecb_decrypt(struct ablkcipher_request *req)
 	return ss_aes_crypt(req,
 		SS_DIR_DECRYPT, SS_METHOD_AES, SS_AES_MODE_ECB);
 }
-#ifdef SS_CBC_MODE_ENABLE
+
+#if 0
 static int ss_aes_cbc_encrypt(struct ablkcipher_request *req)
 {
 	return ss_aes_crypt(req,
@@ -201,6 +202,7 @@ static int ss_aes_cbc_decrypt(struct ablkcipher_request *req)
 		SS_DIR_DECRYPT, SS_METHOD_AES, SS_AES_MODE_CBC);
 }
 #endif
+
 #ifdef SS_CTR_MODE_ENABLE
 static int ss_aes_ctr_encrypt(struct ablkcipher_request *req)
 {
@@ -827,9 +829,7 @@ static struct aead_alg sunxi_aes_gcm_alg = {
 
 static struct crypto_alg sunxi_ss_algs[] = {
 	DECLARE_SS_AES_ALG(AES, aes, ecb, AES_BLOCK_SIZE, 0),
-#ifdef SS_CBC_MODE_ENABLE
-	DECLARE_SS_AES_ALG(AES, aes, cbc, AES_BLOCK_SIZE, AES_MIN_KEY_SIZE),
-#endif
+//	DECLARE_SS_AES_ALG(AES, aes, cbc, AES_BLOCK_SIZE, AES_MIN_KEY_SIZE),
 #ifdef SS_CTR_MODE_ENABLE
 	DECLARE_SS_AES_ALG(AES, aes, ctr, 1, AES_MIN_KEY_SIZE),
 #endif
@@ -1309,7 +1309,7 @@ static void sunxi_ss_sysfs_remove(struct platform_device *_pdev)
 	device_remove_file(&_pdev->dev, &sunxi_ss_status_attr);
 }
 
-static u64 sunxi_ss_dma_mask = DMA_BIT_MASK(64);
+static u64 sunxi_ss_dma_mask = DMA_BIT_MASK(32);
 
 static int sunxi_ss_probe(struct platform_device *pdev)
 {
@@ -1324,7 +1324,7 @@ static int sunxi_ss_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_OF
 	pdev->dev.dma_mask = &sunxi_ss_dma_mask;
-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(64);
+	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 #endif
 
 	snprintf(sss->dev_name, sizeof(sss->dev_name), SUNXI_SS_DEV_NAME);

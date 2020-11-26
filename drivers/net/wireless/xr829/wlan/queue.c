@@ -546,7 +546,7 @@ int xradio_queue_get(struct xradio_queue *queue,
 	} else {/*add debug info for warning*/
 		struct xradio_queue_item *item_tmp;
 		txrx_printk(XRADIO_DBG_WARN,
-			"%s, if_id=%d, link_id_map=%08x, queued=%zu, pending=%zu\n",
+			"%s, if_id=%d, link_id_map=%08x, queued=%d, pending=%d\n",
 			__func__, if_id, link_id_map, queue->num_queued_vif[if_id],
 			queue->num_pending_vif[if_id]);
 		list_for_each_entry(item_tmp, &queue->queue, head) {

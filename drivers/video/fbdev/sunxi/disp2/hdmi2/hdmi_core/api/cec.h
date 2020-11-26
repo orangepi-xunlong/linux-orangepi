@@ -10,9 +10,9 @@
 
 #ifndef CEC_H
 #define CEC_H
-
+#if defined(__LINUX_PLAT__)
 #include <linux/delay.h>
-
+#endif
 #include "hdmitx_dev.h"
 #include "log.h"
 #include "access.h"

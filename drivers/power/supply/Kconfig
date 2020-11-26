@@ -59,11 +59,7 @@ config TYPE_C
 	depends on AW_BMU1760
 	help
 	  To use Type-C cc logic function
-config TYPE_C_AUDIO
-	bool "Support Type-C Audio logic"
-	depends on TYPE_C
-	help
-	  To use Type-C Audio logic function
+
 config AW_AXP259
 	bool "AXP259 driver"
 	depends on ARCH_SUN8IW11 || ARCH_SUN8IW12
@@ -91,6 +87,13 @@ config AW_AXP803
 	depends on ARCH_SUN50IW1 || ARCH_SUN50IW3 || ARCH_SUN8IW6
 	help
 	  AXP803 driver
+
+config AW_AXPDUMMY
+	bool "AXPDUMMY driver"
+	depends on ARCH_SUN50IW2 || ARCH_SUN50IW6
+	depends on SUNXI_ARISC
+	help
+	  AXPDUMMY driver
 
 endif # AW_AXP
 

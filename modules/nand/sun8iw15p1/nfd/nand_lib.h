@@ -78,14 +78,6 @@ struct _nftl_blk {
 				unsigned int num);
 };
 
-struct scatterlist_ftl {
-	unsigned long  addr;
-	unsigned long  len;
-	//unsigned long  encrypt;
-	unsigned char *buf;
-};
-
-
 extern __s32 PHY_SimpleErase(struct boot_physical_param *eraseop);
 extern __s32 PHY_SimpleErase_2CH(struct boot_physical_param *eraseop);
 extern __s32 PHY_SimpleErase_CurCH(struct boot_physical_param *eraseop);
@@ -110,9 +102,6 @@ extern __s32 NFC_LSBExit(__u32 read_retry_type);
 extern __u32 NAND_GetChannelCnt(void);
 
 extern void ClearNandStruct(void);
-#define NAND_STORAGE_TYPE_NULL 0
-#define NAND_STORAGE_TYPE_RAWNAND 1
-#define NAND_STORAGE_TYPE_SPINAND 2
 extern __u32 get_storage_type(void);
 
 
@@ -123,7 +112,6 @@ extern __u32 NAND_GetNandVersion(void);
 extern __s32 NAND_GetFlashInfo(boot_flash_info_t *info);
 
 extern __s32 NAND_DragonboardTest(void);
-extern __s32 TNAND_DragonboardTest(void);
 
 struct _nand_info *NandHwInit(void);
 __s32 NandHwExit(void);
@@ -132,16 +120,6 @@ __s32 NandHwSuperResume(void);
 __s32 NandHwNormalStandby(void);
 __s32 NandHwNormalResume(void);
 __s32 NandHwShutDown(void);
-
-void *TNandHwInit(void);
-__s32 TNandHwExit(void);
-__s32 TNandHwSuperStandby(void);
-__s32 TNandHwSuperResume(void);
-__s32 TNandHwNormalStandby(void);
-__s32 TNandHwNormalResume(void);
-__s32 TNandHwShutDown(void);
-
-extern uint32 tlc_nand_read_reclaim(void);
 
 /*for NFTL*/
 int nftl_initialize(struct _nftl_blk *nftl_blk, int no);

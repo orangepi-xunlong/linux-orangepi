@@ -144,14 +144,12 @@ int xradio_start(struct ieee80211_hw *dev)
 		return -ETIMEDOUT;
 	}
 
-#ifdef CONFIG_PM
 	if (wait_event_interruptible_timeout(hw_priv->wsm_wakeup_done,
 				XRADIO_RESUME == atomic_read(&hw_priv->suspend_state), 3*HZ) <= 0) {
 		sta_printk(XRADIO_DBG_ERROR,
 				   "%s:driver is suspending \n", __func__);
 		return -ETIMEDOUT;
 	}
-#endif /*CONFIG_PM*/
 
 	down(&hw_priv->conf_lock);
 
@@ -161,8 +159,8 @@ int xradio_start(struct ieee80211_hw *dev)
 	memset(&hw_priv->tsm_info, 0, sizeof(struct xradio_tsm_info));
 	spin_unlock_bh(&hw_priv->tsm_lock);
 #endif /*CONFIG_XRADIO_TESTMODE */
-	hw_priv->softled_state = 0;
 	memcpy(hw_priv->mac_addr, dev->wiphy->perm_addr, ETH_ALEN);
+	hw_priv->softled_state = 0;
 
 	ret = xradio_setup_mac(hw_priv);
 	if (SYS_WARN(ret)) {
@@ -249,7 +247,6 @@ int xradio_add_interface(struct ieee80211_hw *dev, struct ieee80211_vif *vif)
 #endif
 
 	if (atomic_read(&hw_priv->num_vifs) >= XRWL_MAX_VIFS) {
-		WARN_ON(1);
 		sta_printk(XRADIO_DBG_ERROR, "%s:Too many interfaces=%d\n",
 			__func__, atomic_read(&hw_priv->num_vifs));
 		return -EOPNOTSUPP;
@@ -422,11 +419,6 @@ void xradio_remove_interface(struct ieee80211_hw *dev,
 
 	down(&hw_priv->conf_lock);
 	atomic_set(&priv->enabled, 0);
-
-	cancel_work_sync(&priv->link_id_work);
-	cancel_delayed_work_sync(&priv->link_id_gc_work);
-	cancel_delayed_work_sync(&priv->link_id_gc_work);
-
 	xradio_tx_queues_lock(hw_priv);
 	wsm_lock_tx(hw_priv);
 	switch (priv->join_status) {
@@ -929,8 +921,7 @@ int xradio_conf_tx(struct ieee80211_hw *dev, struct ieee80211_vif *vif,
 			goto out;
 		}
 
-		if (priv->mode == NL80211_IFTYPE_STATION ||
-			priv->mode == NL80211_IFTYPE_P2P_DEVICE) {
+		if (priv->mode == NL80211_IFTYPE_STATION) {
 			ret = xradio_set_uapsd_param(priv, &priv->edca);
 			if (!ret && priv->setbssparams_done &&
 			    (priv->join_status == XRADIO_JOIN_STATUS_STA) &&
@@ -1402,8 +1393,6 @@ int xradio_remain_on_channel(struct ieee80211_hw *hw,
 	struct timeval TES_P2P_0002_tmval;
 #endif
 	sta_printk(XRADIO_DBG_TRC, "%s\n", __func__);
-	if (if_id == 0)
-		return 0;
 
 #ifdef	TES_P2P_0002_ROC_RESTART
 	do_gettimeofday(&TES_P2P_0002_tmval);
@@ -1850,14 +1839,6 @@ int xradio_setup_mac(struct xradio_common *hw_priv)
 		hw_priv->sdd = NULL;
 	}
 
-	/*
-	 * It will be different after reinit. So we reset it.
-	 * Cause only mac_address of if0 will be changed, we reset it only.
-	 */
-	if (compare_ether_addr(hw_priv->mac_addr, hw_priv->addresses[0].addr) != 0)
-		wsm_write_mib(hw_priv, WSM_MIB_ID_CHANGE_MAC,
-			hw_priv->addresses[0].addr, ETH_ALEN, 0);
-
 	/* BUG:TX output power is not set untill config_xradio is called.
 	 * This would lead to 0 power set in fw and would effect scan & p2p-find
 	 * Setting to default value here from sdd which would be overwritten when
@@ -2295,18 +2276,6 @@ void xradio_unjoin_work(struct work_struct *work)
 	wsm_unlock_tx(hw_priv);
 }
 
-void xradio_unjoin_delayed_work(struct work_struct *work)
-{
-	struct xradio_vif *priv =
-		container_of(work, struct xradio_vif, unjoin_delayed_work.work);
-
-	struct xradio_common *hw_priv = xrwl_vifpriv_to_hwpriv(priv);
-
-	wsm_lock_tx_async(hw_priv);
-	xradio_unjoin_work(&priv->unjoin_work);
-}
-
-
 int xradio_enable_listening(struct xradio_vif *priv,
 				struct ieee80211_channel *chan)
 {
@@ -2495,7 +2464,6 @@ int xradio_vif_setup(struct xradio_vif *priv)
 	INIT_WORK(&priv->join_work, xradio_join_work);
 	INIT_DELAYED_WORK(&priv->join_timeout, xradio_join_timeout);
 	INIT_WORK(&priv->unjoin_work, xradio_unjoin_work);
-	INIT_DELAYED_WORK(&priv->unjoin_delayed_work, xradio_unjoin_delayed_work);
 	INIT_WORK(&priv->wep_key_work, xradio_wep_key_work);
 	INIT_WORK(&priv->offchannel_work, xradio_offchannel_work);
 	INIT_DELAYED_WORK(&priv->bss_loss_work, xradio_bss_loss_work);
@@ -2551,8 +2519,8 @@ int xradio_vif_setup(struct xradio_vif *priv)
 	priv->powersave_mode.apPsmChangePeriod = 200;	/*100ms */
 	priv->powersave_mode.minAutoPsPollPeriod = 0;	/*disable*/
 
-	sta_printk(XRADIO_DBG_ALWY, "!!!%s: id=%d, type=%d, p2p=%d, addr=%pM\n",
-			__func__, priv->if_id, priv->vif->type, priv->vif->p2p, priv->vif->addr);
+	sta_printk(XRADIO_DBG_ALWY, "!!!%s: id=%d, type=%d, p2p=%d\n",
+			__func__, priv->if_id, priv->vif->type, priv->vif->p2p);
 
 	atomic_set(&priv->enabled, 1);
 
@@ -2763,55 +2731,6 @@ int xradio_set_macaddrfilter(struct xradio_common *hw_priv,
 	kfree(mac_addr_filter);
 exit_p:
 	return ret;
-}
-
-int xradio_change_mac(struct ieee80211_hw *hw,
-			 struct ieee80211_vif *vif, struct sockaddr *sa)
-{
-	struct xradio_common *hw_priv = (struct xradio_common *) hw->priv;
-	struct xradio_vif *priv = xrwl_get_vif_from_ieee80211(vif);
-	int address_id = 0;
-	int ret = 0;
-
-	if (atomic_read(&priv->enabled)) {
-		sta_printk(XRADIO_DBG_ERROR, "%s:vif%d is opened(type = %d, p2p = %d)\n",
-				__func__, priv->if_id, vif->type, vif->p2p);
-		return -EBUSY;
-	}
-
-	if (priv->if_id == 1) {
-		sta_printk(XRADIO_DBG_ERROR, "%s:Can not change p2p interface mac address\n",
-				__func__);
-		return -EINVAL;
-	}
-
-	if (!is_valid_ether_addr(sa->sa_data)) {
-		sta_printk(XRADIO_DBG_ERROR, "%s:Can not set multicaset or zero addr:%pM\n",
-				__func__, sa->sa_data);
-		return -EADDRNOTAVAIL;
-	}
-
-	/*
-	 * address_id: 0 for sta\ap; 1 for p2p device; 2 for p2p interface
-	 * if_id: 0 for sta\ap; 1 for p2p interface; 2 for p2p device
-	 * It is different between address_id and if_id in 1 and 2
-	 */
-	address_id = priv->if_id;
-	if (address_id == 2)
-		address_id = 1;
-
-	sta_printk(XRADIO_DBG_MSG, "old mac_address:%pM, new mac_address:%pM\n",
-			hw_priv->addresses[address_id].addr, sa->sa_data);
-
-	/*Change mac in fw*/
-	ret = wsm_write_mib(hw_priv, WSM_MIB_ID_CHANGE_MAC,
-		sa->sa_data, ETH_ALEN, address_id);
-	if (ret)
-		return ret;
-
-	memcpy(hw_priv->addresses[address_id].addr, sa->sa_data, ETH_ALEN);
-
-	return 0;
 }
 
 #if 0
@@ -3029,8 +2948,7 @@ int xradio_set_arpreply(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 	framehdrlen += encrypthdr;
 	/* Filling the 802.11 Hdr */
 	dot11hdr->frame_control = cpu_to_le16(IEEE80211_FTYPE_DATA);
-	if (priv->vif->type == NL80211_IFTYPE_STATION ||
-		priv->vif->type == NL80211_IFTYPE_P2P_DEVICE)
+	if (priv->vif->type == NL80211_IFTYPE_STATION)
 		dot11hdr->frame_control |= cpu_to_le16(IEEE80211_FCTL_TODS);
 	else
 		dot11hdr->frame_control |= cpu_to_le16(IEEE80211_FCTL_FROMDS);
@@ -3196,8 +3114,7 @@ int xradio_set_na(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 
 	/* Filling the 802.11 Hdr */
 	dot11hdr->frame_control = cpu_to_le16(IEEE80211_FTYPE_DATA);
-	if (priv->vif->type == NL80211_IFTYPE_STATION ||
-		priv->vif->type == NL80211_IFTYPE_P2P_DEVICE)
+	if (priv->vif->type == NL80211_IFTYPE_STATION)
 		dot11hdr->frame_control |= cpu_to_le16(IEEE80211_FCTL_TODS);
 	else
 		dot11hdr->frame_control |= cpu_to_le16(IEEE80211_FCTL_FROMDS);

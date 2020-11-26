@@ -14,6 +14,23 @@
  *
  */
 
+
+/*
+ ******************************************************************************
+ *
+ * cfg_op.h
+ *
+ * Hawkview ISP - cfg_op.h module
+ *
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version           Author         Date         Description
+ *
+ *   3.0           Yang Feng    2015/12/02  ISP Tuning Tools Support
+ *
+ ******************************************************************************
+ */
+
 #ifndef __CFG__OP__H__
 #define __CFG__OP__H__
 #include <linux/vmalloc.h>

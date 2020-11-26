@@ -11,9 +11,6 @@
 #include "de_clock.h"
 
 static void __iomem *de_base;
-#if defined(CONFIG_ARCH_SUN50IW10)
-static void __iomem *de1_base;
-#endif
 
 static struct de_clk_para de_clk_tbl[] = {
 	{
@@ -73,19 +70,6 @@ static s32 de_clk_set_div(u32 clk_no, u32 div)
 	u32 reg_val;
 	u32 len = sizeof(de_clk_tbl) / sizeof(struct de_clk_para);
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-	for (i = 0; i < len; i++) {
-		if (de_clk_tbl[i].clk_no == clk_no) {
-			reg_val = readl(de_clk_tbl[i].mod_div_adr + de1_base);
-			reg_val =
-			    SET_BITS(de_clk_tbl[i].mod_div_shift,
-				     de_clk_tbl[i].mod_div_width, reg_val,
-				     (div - 1));
-			writel(reg_val, de_clk_tbl[i].mod_div_adr + de1_base);
-			break;
-		}
-	}
-#endif
 	for (i = 0; i < len; i++) {
 		if (de_clk_tbl[i].clk_no == clk_no) {
 			reg_val = readl(de_clk_tbl[i].mod_div_adr + de_base);
@@ -229,27 +213,13 @@ static s32 __de_clk_disable(u32 clk_no)
 
 s32 de_clk_enable(u32 clk_no)
 {
-#if defined(CONFIG_ARCH_SUN50IW10)
-	void __iomem *tmp = de_base;
-	de_base = de1_base;
-	__de_clk_enable(clk_no);
-	de_base = tmp;
-#endif
 	return __de_clk_enable(clk_no);
 }
-EXPORT_SYMBOL(de_clk_enable);
 
 s32 de_clk_disable(u32 clk_no)
 {
-#if defined(CONFIG_ARCH_SUN50IW10)
-	void __iomem *tmp = de_base;
-	de_base = de1_base;
-	__de_clk_disable(clk_no);
-	de_base = tmp;
-#endif
 	return __de_clk_disable(clk_no);
 }
-EXPORT_SYMBOL(de_clk_disable);
 
 s32 de_clk_set_reg_base(uintptr_t reg_base)
 {
@@ -257,10 +227,3 @@ s32 de_clk_set_reg_base(uintptr_t reg_base)
 
 	return 0;
 }
-#if defined(CONFIG_ARCH_SUN50IW10)
-s32 de1_clk_set_reg_base(uintptr_t reg_base)
-{
-	de1_base = (void __iomem *)reg_base;
-	return 0;
-}
-#endif

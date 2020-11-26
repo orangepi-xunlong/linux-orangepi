@@ -46,7 +46,6 @@ static struct sync_file *sync_file_alloc(void)
 	init_waitqueue_head(&sync_file->wq);
 
 	INIT_LIST_HEAD(&sync_file->cb.node);
-	sync_file->cb.func = NULL;
 
 	return sync_file;
 
@@ -280,7 +279,8 @@ static void sync_file_free(struct kref *kref)
 	struct sync_file *sync_file = container_of(kref, struct sync_file,
 						     kref);
 
-	fence_remove_callback(sync_file->fence, &sync_file->cb);
+	if (test_bit(POLL_ENABLED, &sync_file->flags))
+		fence_remove_callback(sync_file->fence, &sync_file->cb);
 	fence_put(sync_file->fence);
 	kfree(sync_file);
 }
@@ -296,22 +296,11 @@ static int sync_file_release(struct inode *inode, struct file *file)
 static unsigned int sync_file_poll(struct file *file, poll_table *wait)
 {
 	struct sync_file *sync_file = file->private_data;
-	unsigned long flags;
-	bool add = 0;
 
 	poll_wait(file, &sync_file->wq, wait);
 
-	/* JetCui: if you modify it think about the gpu source code,
-	 * if not the kernel original, tell gpu department
-	 */
-	spin_lock_irqsave(sync_file->fence->lock, flags);
-	if (sync_file->cb.func == NULL) {
-		sync_file->cb.func = fence_check_cb_func;
-		add = 1;
-	}
-	spin_unlock_irqrestore(sync_file->fence->lock, flags);
-
-	if (add) {
+	if (list_empty(&sync_file->cb.node) &&
+	    !test_and_set_bit(POLL_ENABLED, &sync_file->flags)) {
 		if (fence_add_callback(sync_file->fence, &sync_file->cb,
 					   fence_check_cb_func) < 0)
 			wake_up_all(&sync_file->wq);

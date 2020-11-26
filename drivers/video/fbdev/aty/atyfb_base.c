@@ -3093,18 +3093,17 @@ static int atyfb_setup_sparc(struct pci_dev *pdev, struct fb_info *info,
 		/*
 		 * PLL Reference Divider M:
 		 */
-		M = pll_regs[PLL_REF_DIV];
+		M = pll_regs[2];
 
 		/*
 		 * PLL Feedback Divider N (Dependent on CLOCK_CNTL):
 		 */
-		N = pll_regs[VCLK0_FB_DIV + (clock_cntl & 3)];
+		N = pll_regs[7 + (clock_cntl & 3)];
 
 		/*
 		 * PLL Post Divider P (Dependent on CLOCK_CNTL):
 		 */
-		P = aty_postdividers[((pll_regs[VCLK_POST_DIV] >> ((clock_cntl & 3) << 1)) & 3) |
-		                     ((pll_regs[PLL_EXT_CNTL] >> (2 + (clock_cntl & 3))) & 4)];
+		P = 1 << (pll_regs[6] >> ((clock_cntl & 3) << 1));
 
 		/*
 		 * PLL Divider Q:

@@ -260,32 +260,22 @@ static int pm8xxx_pin_config_get(struct pinctrl_dev *pctldev,
 
 	switch (param) {
 	case PIN_CONFIG_BIAS_DISABLE:
-		if (pin->bias != PM8XXX_GPIO_BIAS_NP)
-			return -EINVAL;
-		arg = 1;
+		arg = pin->bias == PM8XXX_GPIO_BIAS_NP;
 		break;
 	case PIN_CONFIG_BIAS_PULL_DOWN:
-		if (pin->bias != PM8XXX_GPIO_BIAS_PD)
-			return -EINVAL;
-		arg = 1;
+		arg = pin->bias == PM8XXX_GPIO_BIAS_PD;
 		break;
 	case PIN_CONFIG_BIAS_PULL_UP:
-		if (pin->bias > PM8XXX_GPIO_BIAS_PU_1P5_30)
-			return -EINVAL;
-		arg = 1;
+		arg = pin->bias <= PM8XXX_GPIO_BIAS_PU_1P5_30;
 		break;
 	case PM8XXX_QCOM_PULL_UP_STRENGTH:
 		arg = pin->pull_up_strength;
 		break;
 	case PIN_CONFIG_BIAS_HIGH_IMPEDANCE:
-		if (!pin->disable)
-			return -EINVAL;
-		arg = 1;
+		arg = pin->disable;
 		break;
 	case PIN_CONFIG_INPUT_ENABLE:
-		if (pin->mode != PM8XXX_GPIO_MODE_INPUT)
-			return -EINVAL;
-		arg = 1;
+		arg = pin->mode == PM8XXX_GPIO_MODE_INPUT;
 		break;
 	case PIN_CONFIG_OUTPUT:
 		if (pin->mode & PM8XXX_GPIO_MODE_OUTPUT)
@@ -300,14 +290,10 @@ static int pm8xxx_pin_config_get(struct pinctrl_dev *pctldev,
 		arg = pin->output_strength;
 		break;
 	case PIN_CONFIG_DRIVE_PUSH_PULL:
-		if (pin->open_drain)
-			return -EINVAL;
-		arg = 1;
+		arg = !pin->open_drain;
 		break;
 	case PIN_CONFIG_DRIVE_OPEN_DRAIN:
-		if (!pin->open_drain)
-			return -EINVAL;
-		arg = 1;
+		arg = pin->open_drain;
 		break;
 	default:
 		return -EINVAL;

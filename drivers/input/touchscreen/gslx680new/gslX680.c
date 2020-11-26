@@ -76,7 +76,6 @@
 #include "gsl1680e_86OGS.h"
 #include "gsl1680e_86pgpcd.h"
 #include "gslX680_3676.h"
-#include "gsl1680_7inch_863.h"
 
 /* open for debug */
 /*
@@ -113,7 +112,6 @@ struct gslX680_fw_array {
 	{"gslX680_a63_t1_25601600", ARRAY_SIZE(GSL3692_FW_F1P0B_ONDA_OGS), GSL3692_FW_F1P0B_ONDA_OGS},
 	{"gsl1680e_86pgpcd", ARRAY_SIZE(GSL1680E_86PGPCD_FW), GSL1680E_86PGPCD_FW},
 	{"gslX680_3676", ARRAY_SIZE(GSLX680_FW), GSLX680_FW},
-	{"gsl1680_7inch_863", ARRAY_SIZE(GSL1680_7INCH_FW_863), GSL1680_7INCH_FW_863},
 };
 
 unsigned int *gslX680_config_data[] = {
@@ -140,7 +138,6 @@ unsigned int *gslX680_config_data[] = {
 	gsl_config_data_id_F1P0B_ONDA_OGS,
 	gsl_config_data_id_86PGPCD,
 	gsl_config_data_id_3676,
-	gsl_config_data_id_1680_7inch_863,
 };
 
 
@@ -1161,6 +1158,9 @@ static void process_gslX680_data(struct gsl_ts *ts)
 	}
 #ifndef REPORT_DATA_ANDROID_4_0
 	if (touches == 0) {
+		input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR, 0);
+		input_report_abs(ts->input, ABS_MT_WIDTH_MAJOR, 0);
+		input_mt_sync(ts->input);
 	#ifdef HAVE_TOUCH_KEY
 		if (key_state_flag) {
 			input_report_key(ts->input, key, 0);
@@ -1439,13 +1439,13 @@ static int gsl_ts_resume(struct device *dev)
 {
 	struct gsl_ts *ts = dev_get_drvdata(dev);
 
+	input_set_power_enable(&(config_info.input_type), 1);
+
 	if (ts->is_runtime_suspend && ts->is_suspended) {
 		pr_debug("do resume\n");
 		ts->is_suspended = false;
 		return 0;
 	}
-
-	input_set_power_enable(&(config_info.input_type), 1);
 
 	pr_debug("I'am in gsl_ts_resume() start\n");
 	cancel_work_sync(&ts->work);

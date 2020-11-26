@@ -2,9 +2,10 @@
  * Allwinner Technology CO., Ltd. sun8iw11p1 platform
  *
  * fpga support
- * modify base on juno.dts & sun8iw11
+ * modify base on juno.dts & sun8iw10
  */
 /* kernel used */
+/memreserve/ 0x43000000 0x00000800; /* super standby range        : [0x43000000~0x43000800], size = 2K  */
 /memreserve/ 0x48000000 0x01000000; /* atf                        : [0x48000000~0x49000000], size = 16M */
 
 #include <dt-bindings/interrupt-controller/arm-gic.h>
@@ -14,7 +15,7 @@
 / {
 	model = "sun8iw11p1";
 	compatible = "allwinner,sun8iw11p1";
-	interrupt-parent = <&wakeupgen>;
+	interrupt-parent = <&gic>;
 	#address-cells = <2>;
 	#size-cells = <2>;
 
@@ -58,7 +59,6 @@
 		hdmi = &hdmi;
 		tvd = &tvd;
 		boot_disp = &boot_disp;
-		pmu0 = &pmu0;
 		charger0 = &charger0;
 		regulator0 = &regulator0;
 	};
@@ -73,26 +73,38 @@
 		android {
 			compatible = "android,firmware";
 			name = "android";
-			boot_devices = "soc/sdc0,soc/sdc2,soc";
-			vbmeta {
-				compatible = "android,vbmeta";
-				parts = "vbmeta,vbmeta_system,vbmeta_vendor,boot,super,recovery";
+			fstab {
+				compatible = "android,fstab";
+				name = "fstab";
+				vendor {
+					compatible = "android,vendor";
+					dev = "/dev/block/by-name/vendor";
+					fsmgr_flags = "wait";
+					mnt_flags = "ro,barrier=1";
+					name = "vendor";
+					status = "ok";
+					type = "ext4";
+				};
+				system {
+					compatible = "android,system";
+					dev = "/dev/block/by-name/system";
+					fsmgr_flags = "wait";
+					mnt_flags = "ro,barrier=1";
+					name = "system";
+					status = "ok";
+					type = "ext4";
+				};
 			};
-		};
-		optee {
-			compatible = "linaro,optee-tz";
-			method = "smc";
 		};
 	};
 
 	cpus {
-		enable-method = "allwinner,sun8iw11p1";
 		#address-cells = <1>;
 		#size-cells = <0>;
 
 		cpu@0 {
 			device_type = "cpu";
-			compatible = "arm,cortex-a7","arm,armv7";
+			compatible = "arm,cortex-a7";
 			reg = <0x0>;
 			enable-method = "psci";
 			clocks = <&clk_pll_cpu>;
@@ -113,7 +125,7 @@
 		};
 		cpu@1 {
 			device_type = "cpu";
-			compatible = "arm,cortex-a7","arm,armv7";
+			compatible = "arm,cortex-a7";
 			reg = <0x1>;
 			enable-method = "psci";
 			clocks = <&clk_pll_cpu>;
@@ -124,7 +136,7 @@
 		};
 		cpu@2 {
 			device_type = "cpu";
-			compatible = "arm,cortex-a7","arm,armv7";
+			compatible = "arm,cortex-a7";
 			reg = <0x2>;
 			enable-method = "psci";
 			clocks = <&clk_pll_cpu>;
@@ -135,7 +147,7 @@
 		};
 		cpu@3 {
 			device_type = "cpu";
-			compatible = "arm,cortex-a7","arm,armv7";
+			compatible = "arm,cortex-a7";
 			reg = <0x3>;
 			enable-method = "psci";
 			clocks = <&clk_pll_cpu>;
@@ -229,7 +241,6 @@
 			heap-size  = <0x0>;
 			heap-type  = "ion_system";
 		};
-		/*
 		heap_sys_contig@0{
 			compatible = "allwinner,sys_contig";
 			heap-name  = "sys_contig";
@@ -237,7 +248,7 @@
 			heap-base  = <0x0>;
 			heap-size  = <0x0>;
 			heap-type  = "ion_contig";
-		};*/
+		};
 		heap_cma@0{
 			compatible = "allwinner,cma";
 			heap-name  = "cma";
@@ -246,7 +257,6 @@
 			heap-size  = <0x0>;
 			heap-type  = "ion_cma";
 		};
-		/*
 		heap_secure@0{
 			compatible = "allwinner,secure";
 			heap-name  = "secure";
@@ -254,7 +264,7 @@
 			heap-base  = <0x0>;
 			heap-size  = <0x0>;
 			heap-type  = "ion_secure";
-		};*/
+		};
 	};
 
 	dram: dram {
@@ -303,13 +313,6 @@
 			  <0x0 0x01c84000 0 0x2000>, /* GIC VCPU Control */
 			  <0x0 0x01c86000 0 0x2000>; /* GIC VCPU */
 		interrupts = <GIC_PPI 9 0xf04>; /* GIC Maintenence IRQ */
-		interrupt-parent = <&gic>;
-	};
-	wakeupgen: interrupt-controller@0 {
-		compatible = "allwinner,sunxi-wakeupgen";
-		interrupt-controller;
-		#interrupt-cells = <3>;
-		interrupt-parent = <&gic>;
 	};
 
 	sid: sunxi-sid@1c1B000 {
@@ -326,12 +329,9 @@
 
 	timer_arch {
 		compatible = "arm,armv7-timer";
-		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>, /* Secure Phys IRQ */
-			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>; /* Non-secure Phys IRQ */
+		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>, /* Secure Phys IRQ */
+			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>; /* Non-secure Phys IRQ */
 		clock-frequency = <24000000>;
-		arm,cpu-registers-not-fw-configured;
-		interrupt-parent = <&gic>;
-		arm,no-tick-in-suspend;
 	};
 
 	wdt: watchdog@01c20ca0 {
@@ -340,11 +340,11 @@
 	 };
 
 	pmu {
-		compatible = "arm,cortex-a7-pmu";
-		interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
+		compatible = "arm,armv8-pmuv3";
+		interrupts = <GIC_SPI 120 4>,
+			     <GIC_SPI 121 4>,
+			     <GIC_SPI 122 4>,
+			     <GIC_SPI 123 4>;
 	};
 
 	dvfs_table: dvfs_table {
@@ -421,7 +421,7 @@
 		reg = <0x0 0x01c62000 0x0 0x1000>,
 				<0x0 0x01c63000 0x0 0x1000>,
 				<0x0 0x01c20000 0x0 0x800>;
-		interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <GIC_SPI 66 0x4>;
 		clocks = <&clk_pll_ddr0>,<&clk_pll_ddr1>,<&clk_ahb1>;
 		status = "okay";
 	};
@@ -432,12 +432,7 @@
 	gpu_mali400_0: gpu@0x01c40000 {
 		compatible = "arm,mali-400", "arm,mali-utgard";
 		reg = <0x0 0x01c40000 0x0 0x10000>;
-		interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <GIC_SPI 69 4>, <GIC_SPI 70 4>, <GIC_SPI 71 4>, <GIC_SPI 72 4>, <GIC_SPI 74 4>, <GIC_SPI 75 4>;
 		interrupt-names = "IRQGP", "IRQGPMMU", "IRQPP0", "IRQPPMMU0", "IRQPP1", "IRQPPMMU1";
 		clocks = <&clk_pll_gpu>, <&clk_gpu>;
 	};
@@ -490,7 +485,7 @@
 		dma0:dma-controller@01c02000 {
 			compatible = "allwinner,sun50i-dma";
 			reg = <0x0 0x01c02000 0x0 0x1000>;
-			interrupts = <GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 27 4>;
 			clocks = <&clk_dma>;
 			#dma-cells = <1>;
 		};
@@ -501,19 +496,19 @@
 			#mbus-cells = <1>;
 		};
 
-		arisc {
-			compatible = "allwinner,sunxi-arisc";
+		standby_space {
+			compatible = "allwinner,standby_space";
+			/* num    dst        offset     size						*/
+			space1 = <0x43000000 0x00000000 0x00000800>; /* super standby para space        */
 		};
 
 		soc_timer0: timer@1c20c00 {
-			compatible = "allwinner,sun4i-a10-timer";
+			compatible = "allwinner,sunxi-timer";
 			device_type = "timer";
 			reg = <0x0 0x01c20c00 0x0 0x90>;
 			interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>;
-			/* On FPGA, timer can only use the losc.
-			 * On IC, timer should use the hosc.
-			 */
-			clocks = <&clk_hosc>, <&clk_losc>;
+			clock-frequency = <24000000>;
+			timer-prescale = <16>;
 		};
 
 		rtc: rtc@01c20400 {
@@ -522,7 +517,6 @@
 			device_type = "rtc";
 			reg = <0x0 0x01c20400 0x0 0x1FC>;
 			interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
-			wakeup-source;
 			gpr_offset = <0x100>;
 			gpr_len	   = <8>;
 			gpr_cur_pos = <6>;
@@ -557,7 +551,7 @@
 			reg = <0x0 0x01c0e000 0x0 0x1000>,
 					<0x0 0x01c00000 0x0 0x10>,
 					<0x0 0x01c20000 0x0 0x800>;
-			interrupts = <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 53 4>;
 			clocks = <&clk_pll_ve>,
 							<&clk_ve>;
 
@@ -715,23 +709,6 @@
 
 				regulator0: regulator@0{
 					status = "okay";
-
-					regulator1 {
-						regulator-name = "vcc-io";
-					};
-
-					regulator2 {
-						regulator-name = "vdd-cpua";
-					};
-
-					regulator3 {
-						regulator-name = "vdd-sys";
-					};
-
-					regulator9 {
-						regulator-name = "vcc-pll";
-					};
-
 				};
 
 				axp_gpio0: axp_gpio@0{
@@ -1074,7 +1051,7 @@
 		};
 		sndcodec:sound@0 {
 			compatible = "allwinner,sunxi-codec-machine";
-			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 28 4>;
 			sunxi,cpudai-controller = <&cpudai>;
 			sunxi,audio-codec = <&codec>;
 			hp_detect_case = <0x00>;
@@ -1107,7 +1084,7 @@
 			compatible = "allwinner,sunxi-mmc-v4p5x";
 			device_type = "sdc2";
 			reg = <0x0 0x01C11000 0x0 0x1000>;
-			interrupts = <GIC_SPI 34 IRQ_TYPE_LEVEL_HIGH>;  /*  */
+			interrupts = <GIC_SPI 34 0x0104>;  /*  */
 			clocks = <&clk_hosc>,<&clk_pll_periph1x2>,<&clk_sdmmc2_mod>,<&clk_sdmmc2_bus>,<&clk_sdmmc2_rst>;
 	    clock-names = "osc24m","pll_periph","mmc","ahb","rst";
       pinctrl-names = "default","sleep";
@@ -1166,7 +1143,7 @@
 			compatible = "allwinner,sunxi-mmc-v4p1x";
 			device_type = "sdc0";
 			reg = <0x0 0x01c0f000 0x0 0x1000>; /* only sdmmc0 */
-			interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;  /*  */
+			interrupts = <GIC_SPI 32 0x0104>;  /*  */
 			clocks = <&clk_hosc>,<&clk_pll_periph1x2>,<&clk_sdmmc0_mod>,<&clk_sdmmc0_bus>,<&clk_sdmmc0_rst>;
 			clock-names = "osc24m","pll_periph","mmc","ahb","rst";
 			pinctrl-names = "default","sleep";
@@ -1210,7 +1187,7 @@
 			compatible = "allwinner,sunxi-mmc-v4p1x";
 			device_type = "sdc1";
 			reg = <0x0 0x1C10000 0x0 0x1000>;
-			interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;  /*  */
+			interrupts = <GIC_SPI 33 0x0104>;  /*  */
 			clocks = <&clk_hosc>,<&clk_pll_periph1x2>,<&clk_sdmmc1_mod>,<&clk_sdmmc1_bus>,<&clk_sdmmc1_rst>;
 			clock-names = "osc24m","pll_periph","mmc","ahb","rst";
 			pinctrl-names = "default","sleep";
@@ -1258,7 +1235,7 @@
 			compatible = "allwinner,sunxi-mmc-v4p1x";
 			device_type = "sdc3";
 			reg = <0x0 0x01C12000 0x0 0x1000>;
-			interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;  /*  */
+			interrupts = <GIC_SPI 35 0x0104>;  /*  */
 			clocks = <&clk_hosc>,<&clk_pll_periph1x2>,<&clk_sdmmc3_mod>,<&clk_sdmmc3_bus>,<&clk_sdmmc3_rst>;
 			clock-names = "osc24m","pll_periph","mmc","ahb","rst";
 			pinctrl-names = "default","sleep";
@@ -1267,6 +1244,8 @@
 			max-frequency = <50000000>;
 			bus-width = <4>;
 			cap-sd-highspeed;
+			no-sdio;
+			no-mmc;
 
 			/*broken-cd;*/
 			/*cd-inverted*/
@@ -1309,9 +1288,9 @@
 				<0x0 0x01c73000 0x0 0xfff>,/*tcon2*/
 				<0x0 0x01c74000 0x0 0xfff>,/*tcon3*/
 				<0x0 0x01ca0000 0x0 0x10fc>;/*dsi*/
-			interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>,
-				<GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>,
-				<GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;/* for dsi */
+			interrupts = <GIC_SPI 44 0x0104>, <GIC_SPI 45 0x0104>,
+				<GIC_SPI 51 0x0104>, <GIC_SPI 52 0x0104>,
+				<GIC_SPI 57 0x0104>;/* for dsi */
 			clocks = <&clk_de>,<&clk_tcon_top>,
 						<&clk_tcon0>,<&clk_tcon1>,
 						<&clk_tcon_tv0>,<&clk_tcon_tv1>,<&clk_lvds>,<&clk_mipidsi>;
@@ -1364,7 +1343,7 @@
 			compatible = "allwinner,sunxi-tvd";
 			reg = <0x0 0x01c30000 0x0 0x00010000>;/*tvd_top*/
 			clocks = <&clk_tvd_top>;
-			interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 61 0x0104>;
 			tvd-number = <4>;
 			tvds = <&tvd0>, <&tvd1>, <&tvd2>, <&tvd3>;
 			status = "okay";
@@ -1373,7 +1352,7 @@
 		tvd0: tvd0@01c31000 {
 			compatible = "allwinner,sunxi-tvd0";
 			reg = <0x0 0x01c31000 0x0 0x00010000>;
-			interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 97 0x0104>;
 			clocks = <&clk_tvd0>;
 			tvd_used = <1>;
 			tvd_if = <0>;
@@ -1383,7 +1362,7 @@
 		tvd1: tvd1@01c32000 {
 			compatible = "allwinner,sunxi-tvd1";
 			reg = <0x0 0x01c32000 0x0 0x00010000>;
-			interrupts = <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 98 0x0104>;
 			clocks = <&clk_tvd1>;
 			tvd_used = <1>;
 			tvd_if = <0>;
@@ -1393,7 +1372,7 @@
 		tvd2: tvd2@01c33000 {
 			compatible = "allwinner,sunxi-tvd2";
 			reg = <0x0 0x01c33000 0x0 0x00010000>;
-			interrupts = <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 99 0x0104>;
 			clocks = <&clk_tvd2>;
 			tvd_used = <1>;
 			tvd_if = <0>;
@@ -1403,7 +1382,7 @@
 		tvd3: tvd3@01c34000 {
 			compatible = "allwinner,sunxi-tvd3";
 			reg = <0x0 0x01c34000 0x0 0x00010000>;
-			interrupts = <GIC_SPI 100 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 100 0x0104>;
 			clocks = <&clk_tvd3>;
 			tvd_used = <1>;
 			tvd_if = <0>;
@@ -1419,14 +1398,14 @@
 				  <0x0 0x01c34000 0x0 0x00010000>;/*tvd3*/
 			clocks = <&clk_tvd_top>, <&clk_tvd0>, <&clk_tvd1>,
 					 <&clk_tvd2>, <&clk_tvd3>;
-			interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 97 0x0104>;
 			status = "okay";
 		};
 
 		soc_tr: tr@01000000 {
 			compatible = "allwinner,sun8iw11-tr";
 			reg = <0x0 0x01000000 0x0 0x000200bc>;
-			interrupts = <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 96 0x0104>;
 			clocks = <&clk_de>;
 			status = "okay";
 		};
@@ -1434,7 +1413,7 @@
 		g2d: g2d@01e80000 {
 			compatible = "allwinner,sunxi-g2d";
 			reg = <0x0 0x01e80000 0x0 0x800>;
-			interrupts = <GIC_SPI 46 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 46 0x0104>;
 			clocks = <&clk_de_mp>;
 			status = "okay";
 		};
@@ -1632,7 +1611,7 @@
 		csi_cci0:cci@0x01cb3000 {
 			compatible = "allwinner,sunxi-csi_cci";
 			reg = <0x0 0x01cb3000 0x0 0x1000>;	/*0x01cb3000--0x01cb4000*/
-			interrupts = <GIC_SPI 85 IRQ_TYPE_LEVEL_HIGH>;/*SUNXI_IRQ_CSI0_CCI (SUNXI_GIC_START + 85) = 117*/
+			interrupts = <GIC_SPI 85 4>;/*SUNXI_IRQ_CSI0_CCI (SUNXI_GIC_START + 85) = 117*/
 			status = "disabled";
 		};
 		csi_res0:csi_res@0x01c09000 {
@@ -1654,7 +1633,7 @@
 		csi0:vfe@0 {
 			device_type= "csi0";
 			compatible = "allwinner,sunxi-vfe";
-			interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;/*SUNXI_IRQ_CSI0 (SUNXI_GIC_START + 42 ) = 74*/
+			interrupts = <GIC_SPI 42 4>;/*SUNXI_IRQ_CSI0 (SUNXI_GIC_START + 42 ) = 74*/
 			pinctrl-names 		= "default","sleep";
 			pinctrl-0 		= <&csi0_pins_a>;
 			pinctrl-1 		= <&csi0_pins_b>;
@@ -1699,7 +1678,7 @@
 		csi1:vfe@1 {
 			device_type= "csi1";
 			compatible = "allwinner,sunxi-vfe";
-			interrupts = <GIC_SPI 43 IRQ_TYPE_LEVEL_HIGH>;/*SUNXI_IRQ_CSI1 (SUNXI_GIC_START + 43 ) = 75*/
+			interrupts = <GIC_SPI 43 4>;/*SUNXI_IRQ_CSI1 (SUNXI_GIC_START + 43 ) = 75*/
 			pinctrl-names 		= "default","sleep";
 			pinctrl-0 		= <&csi1_pins_a>;
 			pinctrl-1 		= <&csi1_pins_b>;
@@ -1793,7 +1772,7 @@
 			compatible = "allwinner,sun8iw11-nand";
 			device_type = "nand0";
 			reg = <0x0 0x01c03000 0x0 0x1000>; /* nand0 */
-			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 37 0x04>;
 			clocks = <&clk_pll_periph0>,<&clk_nand>;
 			pinctrl-names = "default", "sleep";
 			pinctrl-0 = <&nand0_pins_a &nand0_pins_b>;
@@ -1844,7 +1823,6 @@
 
 		cpu_budget_cooling:cpu_budget_cool{
 			compatible = "allwinner,budget_cooling";
-			device_type = "cpu_budget_cooling";
 			#cooling-cells = <2>;
 			status = "okay";
 			state_cnt = <7>;

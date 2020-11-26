@@ -30,6 +30,5 @@ extern s32 hdmi_edid_parse(void);
 extern u32 hdmi_edid_is_hdmi(void);
 extern u32 hdmi_edid_is_yuv(void);
 extern uintptr_t hdmi_edid_get_data(void);
-unsigned short hdmi_edid_get_phyaddr(void);
 
 #endif /* __HDMI_EDID_H_ */

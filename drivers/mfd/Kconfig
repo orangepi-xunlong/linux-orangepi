@@ -135,23 +135,6 @@ config MFD_AC100
 	  This driver include only the core APIs. You have to select individual
 	  components like codecs or RTC under the corresponding menus.
 
-config MFD_AXP2101
-	tristate
-	select MFD_CORE
-	select REGMAP_IRQ
-
-config MFD_AXP2101_I2C
-	tristate "X-Powers AXP2101 PMICs with I2C"
-	select MFD_AXP2101
-	select REGMAP_I2C
-	depends on I2C
-	help
-	  If you say Y here you get support for the X-Powers AXP2101 power
-	  management ICs (PMICs) controlled with I2C.
-	  This driver include only the core APIs. You have to select individual
-	  components like regulators or the PEK (Power Enable Key) under the
-	  corresponding menus.
-
 config MFD_AXP20X
 	tristate
 	select MFD_CORE

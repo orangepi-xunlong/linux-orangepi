@@ -578,8 +578,6 @@ enum mlx5_pci_status {
 };
 
 struct mlx5_td {
-	/* protects tirs list changes while tirs refresh */
-	struct mutex     list_lock;
 	struct list_head tirs_list;
 	u32              tdn;
 };
@@ -788,7 +786,7 @@ void mlx5_unmap_free_uar(struct mlx5_core_dev *mdev, struct mlx5_uar *uar);
 void mlx5_health_cleanup(struct mlx5_core_dev *dev);
 int mlx5_health_init(struct mlx5_core_dev *dev);
 void mlx5_start_health_poll(struct mlx5_core_dev *dev);
-void mlx5_stop_health_poll(struct mlx5_core_dev *dev, bool disable_health);
+void mlx5_stop_health_poll(struct mlx5_core_dev *dev);
 void mlx5_drain_health_wq(struct mlx5_core_dev *dev);
 void mlx5_drain_health_recovery(struct mlx5_core_dev *dev);
 int mlx5_buf_alloc_node(struct mlx5_core_dev *dev, int size,

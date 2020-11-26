@@ -145,7 +145,7 @@
 #define  USBC_REG_o_DMA_CHAN_CFN(n)	(0x0540 + (0x10 * n))
 #define  USBC_REG_o_DMA_SDRAM_ADD(n)	(0x0544 + (0x10 * n))
 #define  USBC_REG_o_DMA_BC(n)		(0x0548 + (0x10 * n))
-#define  USBC_REG_o_DMA_RESIDUAL_BC(n)	(0x054c + (0x10 * n))
+#define  USBC_REG_o_DMA_RESIDUAL_BC(n)	(0x0548 + (0x10 * n))
 
 /* registers */
 #define  USBC_REG_FADDR(usbc_base_addr)		((usbc_base_addr) \
@@ -821,9 +821,6 @@ __s32 USBC_Dev_WriteDataStatus(__hdle hUSB, __u32 ep_type, __u32 complete);
 __s32 USBC_Dev_ReadDataStatus(__hdle hUSB, __u32 ep_type, __u32 complete);
 __s32 USBC_Dev_IsoUpdateEnable(__hdle hUSB);
 void USBC_Dev_FlushFifo(__hdle hUSB, __u32 ep_type);
-void USBC_Phyx_Write(__hdle hUSB, __u32 data);
-__u32 USBC_Phyx_Read(__hdle hUSB);
-
 
 /* usb common ops */
 

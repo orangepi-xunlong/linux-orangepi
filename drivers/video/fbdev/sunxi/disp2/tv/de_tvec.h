@@ -15,32 +15,25 @@
 #define TVE_DEVICE_NUM 2
 #define TVE_TOP_DEVIVE_NUM 1
 #define TVE_DAC_NUM 4
-#define USE_V40_DRIVER
 #elif defined(CONFIG_ARCH_SUN50IW2)
 /* #define TVE_TOP_SUPPORT */
 #define TVE_DEVICE_NUM 1
 #define TVE_TOP_DEVIVE_NUM 1
 #define TVE_DAC_NUM 1
-#elif defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW9)
+#elif defined(CONFIG_ARCH_SUN8IW12)
 #define TVE_TOP_SUPPORT
 #define TVE_DEVICE_NUM 1
 #define TVE_TOP_DEVIVE_NUM 1
 #define TVE_DAC_NUM 1
-#define USE_V40_DRIVER
 #elif defined(CONFIG_ARCH_SUN8IW17)
 #define TVE_TOP_SUPPORT
 #define TVE_DEVICE_NUM          1
 #define TVE_TOP_DEVIVE_NUM      1
 #define TVE_DAC_NUM             1
-#define USE_V40_DRIVER
 #else
 #define TVE_DEVICE_NUM 1
 #define TVE_TOP_DEVIVE_NUM 1
 #define TVE_DAC_NUM 1
-#endif
-
-#ifdef CONFIG_ARCH_SUN50IW9
-#define CONFIG_TVE_EMI_ISSUE
 #endif
 
 /* tv encoder registers offset */
@@ -137,15 +130,5 @@ s32 tve_low_dac_autocheck_disable(u32 sel);
 u32 tve_low_get_sid(u32 index);
 s32 tve_low_enhance(u32 sel, u32 mode);
 s32 tve_low_dac_enable(u32 sel);
-
-#ifdef USE_V40_DRIVER
-s32 tve_low_sw_init(u32 sel, u32 *dac_no, u32 *dac_type,
-			u32 num);
-s32 tve_adjust_resync(u32 sel, s32 resync_pixel_num, s32 resync_line_num);
-#else
-static inline s32 tve_low_sw_init(u32 sel, u32 *dac_no, u32 *dac_type,
-			u32 num) { return 0; }
-static inline s32 tve_adjust_resync(u32 sel, s32 resync_pixel_num, s32 resync_line_num) { return 0; }
-#endif
 
 #endif

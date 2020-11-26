@@ -12,8 +12,8 @@
  * the License, or (at your option) any later version.
  */
 
-#include <linux/init.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/input.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
@@ -44,7 +44,7 @@ static struct vol_reg     vol_para;
 static struct sr_reg      sr_para;
 static struct filter_reg  filter_para;
 u32 key_vol[VOL_NUM];
-u8 filter_cnt = 5;
+u8 filter_cnt = 4;
 
 static unsigned char keypad_mapindex[128] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0,		/* key 1, 0-8 */
@@ -70,8 +70,7 @@ u32 sunxi_gpadc_sample_rate_read(void __iomem *reg_base, u32 clk_in)
 
 
 /* clk_in: source clock, round_clk: sample rate */
-void sunxi_gpadc_sample_rate_set(void __iomem *reg_base, u32 clk_in,
-		u32 round_clk)
+void sunxi_gpadc_sample_rate_set(void __iomem *reg_base, u32 clk_in, u32 round_clk)
 {
 	u32 div, reg_val;
 	if (round_clk > clk_in)
@@ -540,21 +539,6 @@ static void sunxi_ch_irq_clear_flags(void __iomem *reg_base, u32 flags)
 	writel(flags, reg_base + GP_DATA_INTS_REG);
 }
 
-static u32 sunxi_gpadc_read_ch_lowirq_enable(void __iomem *reg_base)
-{
-	return readl(reg_base + GP_DATAL_INTC_REG);
-}
-
-static u32 sunxi_gpadc_read_ch_higirq_enable(void __iomem *reg_base)
-{
-	return readl(reg_base + GP_DATAH_INTC_REG);
-}
-
-static u32 sunxi_gpadc_read_ch_irq_enable(void __iomem *reg_base)
-{
-	return readl(reg_base + GP_DATA_INTC_REG);
-}
-
 static u32 sunxi_gpadc_read_data(void __iomem *reg_base, enum gp_channel_id id)
 {
 	switch (id) {
@@ -583,16 +567,10 @@ static int sunxi_gpadc_input_event_set(struct input_dev *input_dev, enum gp_chan
 
 	switch (id) {
 	case GP_CH_0:
-#ifdef CONFIG_ARCH_SUN8IW18
-	case GP_CH_3:
 		input_dev->evbit[0] = BIT_MASK(EV_KEY);
-#else
-		input_dev->evbit[0] = BIT_MASK(EV_KEY)|BIT_MASK(EV_REP);
-#endif
 		for (i = 0; i < KEY_MAX_CNT; i++)
 			set_bit(sunxi_gpadc->scankeycodes[i], input_dev->keybit);
 		break;
-
 	case GP_CH_1:
 		input_dev->evbit[0] = BIT_MASK(EV_MSC);
 		set_bit(EV_MSC, input_dev->evbit);
@@ -603,9 +581,7 @@ static int sunxi_gpadc_input_event_set(struct input_dev *input_dev, enum gp_chan
 		set_bit(EV_MSC, input_dev->evbit);
 		set_bit(MSC_SCAN, input_dev->mscbit);
 		break;
-#ifndef CONFIG_ARCH_SUN8IW18
 	case GP_CH_3:
-#endif
 		input_dev->evbit[0] = BIT_MASK(EV_MSC);
 		set_bit(EV_MSC, input_dev->evbit);
 		set_bit(MSC_SCAN, input_dev->mscbit);
@@ -677,7 +653,7 @@ static int sunxi_key_init(struct sunxi_gpadc *sunxi_gpadc, struct platform_devic
 {
 	struct device_node *np = NULL;
 	unsigned char i, j = 0;
-	u32 vol, val;
+	u32 vol, val, gap = 0, half_gap = 0, cnt = 0;
 	u32 set_vol[VOL_NUM];
 
 	np = pdev->dev.of_node;
@@ -711,9 +687,14 @@ static int sunxi_key_init(struct sunxi_gpadc *sunxi_gpadc, struct platform_devic
 	}
 	key_vol[sunxi_gpadc->key_num] = MAXIMUM_INPUT_VOLTAGE;
 
-	for (i = 0; i < sunxi_gpadc->key_num; i++) {
-		set_vol[i] = key_vol[i] + (key_vol[i+1] - key_vol[i])/2;
+	for (i = sunxi_gpadc->key_num - 1; i > 0; i--) {
+		gap = gap + (key_vol[i] - key_vol[i-1]);
+		cnt++;
 	}
+	half_gap = gap/cnt/2;
+	for (i = 0; i < sunxi_gpadc->key_num; i++)
+		set_vol[i] = key_vol[i] + half_gap;
+
 	for (i = 0; i < 128; i++) {
 		if (i * SCALE_UNIT > set_vol[j])
 			j++;
@@ -863,10 +844,9 @@ static int sunxi_gpadc_hw_exit(struct sunxi_gpadc *sunxi_gpadc)
 	return 0;
 }
 
-static u32 sunxi_gpadc_key_xfer(struct sunxi_gpadc *sunxi_gpadc, u32 data, u32 reg_low)
+static u32 sunxi_gpadc_key_xfer(struct sunxi_gpadc *sunxi_gpadc, u32 data)
 {
 	u32 vol_data;
-	u8 ch_num;
 
 	dprintk(DEBUG_RUN, "data=%4d cnt=%1d ", data, sunxi_gpadc->key_cnt);
 	data = ((VOL_RANGE / 4096)*data);	/* 12bits sample rate */
@@ -879,37 +859,17 @@ static u32 sunxi_gpadc_key_xfer(struct sunxi_gpadc *sunxi_gpadc, u32 data, u32 r
 				sunxi_gpadc->compare_before,
 				sunxi_gpadc->compare_later);
 
-		if (sunxi_gpadc->compare_before >= sunxi_gpadc->compare_later - 1
-			&& sunxi_gpadc->compare_before <= sunxi_gpadc->compare_later + 1)
+		if (sunxi_gpadc->compare_before == sunxi_gpadc->compare_later)
 			sunxi_gpadc->key_cnt++;
 		else
 			sunxi_gpadc->key_cnt = 0;
+
 		sunxi_gpadc->compare_later = sunxi_gpadc->compare_before;
 		if (sunxi_gpadc->key_cnt >= filter_cnt) {
 			sunxi_gpadc->compare_later = sunxi_gpadc->compare_before;
 			sunxi_gpadc->key_code = keypad_mapindex[sunxi_gpadc->compare_before];
-
-			switch (reg_low) {
-			case GP_CH0_LOW:
-				ch_num = GP_CH_0;
-				break;
-			case GP_CH1_LOW:
-				ch_num = GP_CH_1;
-				break;
-			case GP_CH2_LOW:
-				ch_num = GP_CH_2;
-				break;
-			case GP_CH3_LOW:
-				ch_num = GP_CH_3;
-				break;
-			default:
-				pr_err("%s, invalid channel id!", __func__);
-				return -EINVAL;
-			}
-			if (sunxi_gpadc->key_code != sunxi_gpadc->key_num) {
-				input_report_key(sunxi_gpadc->input_gpadc[ch_num], sunxi_gpadc->scankeycodes[sunxi_gpadc->key_code], 1);
-				input_sync(sunxi_gpadc->input_gpadc[ch_num]);
-			}
+			input_report_key(sunxi_gpadc->input_gpadc[GP_CH_0], sunxi_gpadc->scankeycodes[sunxi_gpadc->key_code], 1);
+			input_sync(sunxi_gpadc->input_gpadc[GP_CH_0]);
 			sunxi_gpadc->compare_later = 0;
 			sunxi_gpadc->key_cnt = 0;
 		}
@@ -927,15 +887,20 @@ extern  wait_queue_head_t ir_cut_queue;
 static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 {
 	struct sunxi_gpadc *sunxi_gpadc = (struct sunxi_gpadc *)dev_id;
+	struct sunxi_config *gpadc_config = &sunxi_gpadc->gpadc_config;
 	u32  reg_val, reg_low, reg_hig;
-	u32  reg_enable_val, reg_enable_low, reg_enable_hig;
 	u32 data, i;
 
-	reg_enable_val = sunxi_gpadc_read_ch_irq_enable(sunxi_gpadc->reg_base);
-	reg_enable_low = sunxi_gpadc_read_ch_lowirq_enable(
-			sunxi_gpadc->reg_base);
-	reg_enable_hig = sunxi_gpadc_read_ch_higirq_enable(
-			sunxi_gpadc->reg_base);
+
+	for (i = 0; i < sunxi_gpadc->channel_num; i++) {
+		if (gpadc_config->channel_select & sunxi_gpadc_channel_id(i)) {
+			if (gpadc_config->channel_data_select &
+					sunxi_gpadc_channel_id(i))
+				sunxi_enable_irq_ch_select(
+						sunxi_gpadc->reg_base, i);
+		}
+	}
+
 
 	reg_val = sunxi_ch_irq_status(sunxi_gpadc->reg_base);
 	sunxi_ch_irq_clear_flags(sunxi_gpadc->reg_base, reg_val);
@@ -954,37 +919,31 @@ static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 		input_sync(sunxi_gpadc->input_gpadc[GP_CH_1]);
 	}
 
-	if (reg_low & GP_CH0_LOW & reg_enable_low) {
-		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_0);
-		sunxi_gpadc_key_xfer(sunxi_gpadc, data, reg_low);
-		sunxi_enable_higirq_ch_select(sunxi_gpadc->reg_base, GP_CH_0);
+	if (reg_val & GP_CH2_DATA) {
+		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_2);
+		input_event(sunxi_gpadc->input_gpadc[GP_CH_2], EV_MSC, MSC_SCAN, 1);
+		input_sync(sunxi_gpadc->input_gpadc[GP_CH_2]);
 	}
 
-	if (reg_hig & GP_CH0_HIG & reg_enable_hig) {
+	if (reg_val & GP_CH3_DATA) {
+		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_3);
+		input_event(sunxi_gpadc->input_gpadc[GP_CH_3], EV_MSC, MSC_SCAN, data);
+		input_sync(sunxi_gpadc->input_gpadc[GP_CH_3]);
+	}
+
+	if (reg_low & GP_CH0_LOW) {
+		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_0);
+		sunxi_gpadc_key_xfer(sunxi_gpadc, data);
+	}
+
+	if (reg_hig & GP_CH0_HIG) {
 		input_report_key(sunxi_gpadc->input_gpadc[GP_CH_0],
 			sunxi_gpadc->scankeycodes[sunxi_gpadc->key_code], 0);
 		input_sync(sunxi_gpadc->input_gpadc[GP_CH_0]);
 		sunxi_gpadc->compare_later = 0;
 		sunxi_gpadc->key_cnt = 0;
-		sunxi_disable_higirq_ch_select(sunxi_gpadc->reg_base, GP_CH_0);
 	}
 
-#ifdef CONFIG_ARCH_SUN8IW18
-	if (reg_low & GP_CH3_LOW & reg_enable_low) {
-		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_3);
-		sunxi_gpadc_key_xfer(sunxi_gpadc, data, reg_low);
-		sunxi_enable_higirq_ch_select(sunxi_gpadc->reg_base, GP_CH_3);
-	}
-
-	if (reg_hig & GP_CH3_HIG & reg_enable_hig) {
-		input_report_key(sunxi_gpadc->input_gpadc[GP_CH_3],
-			sunxi_gpadc->scankeycodes[sunxi_gpadc->key_code], 0);
-		input_sync(sunxi_gpadc->input_gpadc[GP_CH_3]);
-		sunxi_gpadc->compare_later = 0;
-		sunxi_gpadc->key_cnt = 0;
-		sunxi_disable_higirq_ch_select(sunxi_gpadc->reg_base, GP_CH_3);
-	}
-#endif
 
 	if (reg_low & GP_CH1_LOW)
 		pr_debug("channel 1 low pend\n");
@@ -1002,50 +961,35 @@ static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 		pr_debug("channel 1 hight pend\n");
 	}
 
-#ifndef CONFIG_ARCH_SUN8IW18
-	for (i = 1; i < sunxi_gpadc->channel_num; i++) {
-		if (reg_val & reg_enable_val & (1 << i)) {
-			data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, i);
-			input_event(sunxi_gpadc->input_gpadc[i],
-					EV_MSC, MSC_SCAN, data);
-			input_sync(sunxi_gpadc->input_gpadc[i]);
-			pr_debug("channel %d data pend\n", i);
-		}
-		if (reg_enable_low & reg_enable_hig & (1 << i)) {
-			if (reg_low & reg_hig & (1 << i)) {
-				data = sunxi_gpadc_read_data(
-						sunxi_gpadc->reg_base, i);
-				input_event(sunxi_gpadc->input_gpadc[i],
-						EV_MSC, MSC_SCAN, data);
-				input_sync(sunxi_gpadc->input_gpadc[i]);
-				pr_debug("channel %d low and hig pend\n", i);
-			} else
-				pr_debug("invalid range\n");
-		} else {
-			if (reg_low & reg_enable_low & ~reg_enable_hig
-					& (1 << i)) {
-				data = sunxi_gpadc_read_data(
-						sunxi_gpadc->reg_base, i);
-				input_event(sunxi_gpadc->input_gpadc[i],
-						EV_MSC, MSC_SCAN, data);
-				input_sync(sunxi_gpadc->input_gpadc[i]);
-				pr_debug("channel %d low pend\n", i);
-			} else {
-				if (reg_hig & reg_enable_hig & ~reg_enable_low
-					& (1 << i)) {
-					data = sunxi_gpadc_read_data(
-							sunxi_gpadc->reg_base,
-							i);
-					input_event(sunxi_gpadc->input_gpadc[i],
-							EV_MSC, MSC_SCAN, data);
-					input_sync(sunxi_gpadc->input_gpadc[i]);
-					pr_debug("channel %d hig pend\n", i);
-				}
-			}
+	if (reg_hig & GP_CH2_HIG) {
+#if defined(CONFIG_SUNXI_IR_CUT)
+		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_2);
+		if (data > 0x200) {
+			ir_cut_data = ((VOL_RANGE / 4096)*data); /* 12bits sample rate */
+			ir_cut_volt_data = ir_cut_data / 1000;
 
+			ir_cut_condition = 1;
+			wake_up_interruptible(&ir_cut_queue);
+		}
+		input_event(sunxi_gpadc->input_gpadc[GP_CH_2], EV_MSC, MSC_SCAN, data);
+		input_sync(sunxi_gpadc->input_gpadc[GP_CH_2]);
+#endif
+		pr_debug("channel 2 hight pend\n");
+
+	}
+
+	if (reg_hig & GP_CH3_HIG)
+		pr_debug("channel 3 hight pend\n");
+
+	for (i = 0; i < sunxi_gpadc->channel_num; i++) {
+		if (gpadc_config->channel_select & sunxi_gpadc_channel_id(i)) {
+			if (gpadc_config->channel_data_select &
+					sunxi_gpadc_channel_id(i))
+				sunxi_disable_irq_ch_select(
+						sunxi_gpadc->reg_base, i);
 		}
 	}
-#endif
+
 
 	return IRQ_HANDLED;
 }
@@ -1390,6 +1334,21 @@ static struct class gpadc_class = {
 	.class_attrs	= gpadc_class_attrs,
 };
 
+static int __init gpadc_class_init(void)
+{
+	int status;
+
+	status = class_register(&gpadc_class);
+	if (status < 0)
+		pr_err("%s,%d err, status:%d\n", __func__, __LINE__, status);
+	else
+		pr_info("%s,%d, success\n", __func__, __LINE__);
+
+	return status;
+}
+postcore_initcall(gpadc_class_init);
+
+
 int sunxi_gpadc_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -1524,31 +1483,7 @@ static struct platform_driver sunxi_gpadc_driver = {
 	},
 };
 module_param_named(debug_mask, debug_mask, int, 0644);
-
-static int __init sunxi_gpadc_init(void)
-{
-	int ret;
-
-	ret = class_register(&gpadc_class);
-	if (ret < 0)
-		pr_err("%s,%d err, ret:%d\n", __func__, __LINE__, ret);
-	else
-		pr_info("%s,%d, success\n", __func__, __LINE__);
-
-	ret = platform_driver_register(&sunxi_gpadc_driver);
-	if (ret != 0)
-		class_unregister(&gpadc_class);
-
-	return ret;
-}
-module_init(sunxi_gpadc_init);
-
-static void __exit sunxi_gpadc_exit(void)
-{
-	platform_driver_unregister(&sunxi_gpadc_driver);
-	class_unregister(&gpadc_class);
-}
-module_exit(sunxi_gpadc_exit);
+module_platform_driver(sunxi_gpadc_driver);
 
 MODULE_AUTHOR("Fuzhaoke");
 MODULE_DESCRIPTION("sunxi-gpadc driver");

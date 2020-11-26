@@ -7039,7 +7039,7 @@ static int bma2x2_suspend(struct device *dev, pm_message_t mesg)
 #endif
 	}
 	mutex_unlock(&data->enable_mutex);
-	if (!IS_ERR(gsensor_info.sensor_power_ldo)) {
+	if (gsensor_info.sensor_power_ldo != NULL) {
 		err = regulator_disable(gsensor_info.sensor_power_ldo);
 		if (err)
 			printk("bma2x2 power down failed\n");
@@ -7053,7 +7053,7 @@ static int bma2x2_resume(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bma2x2_data *data = i2c_get_clientdata(client);
 	int err;
-	if (!IS_ERR(gsensor_info.sensor_power_ldo)) {
+	if (gsensor_info.sensor_power_ldo != NULL) {
 		err = regulator_enable(gsensor_info.sensor_power_ldo);
 		if (err)
 			printk("bma2x2 power on failed\n");
@@ -7185,14 +7185,14 @@ static int __init BMA2X2_init(void)
 	}
 	twi_id = gsensor_info.twi_id;
 
-	if (!IS_ERR(gsensor_info.sensor_power_ldo)) {
+	if (gsensor_info.sensor_power_ldo != NULL) {
 		err = regulator_enable(gsensor_info.sensor_power_ldo);
 		if (err) {
 			printk("bma2x2 power on failed\n");
 			return err;
 		}
 		/*msleep(500);*/
-	}
+		}
 
 	err = class_register(&bst_class);
 	if (err) {

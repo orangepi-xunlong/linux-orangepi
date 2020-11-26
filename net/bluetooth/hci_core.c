@@ -810,9 +810,8 @@ static int __hci_init(struct hci_dev *hdev)
 		return 0;
 
 	err = __hci_req_sync(hdev, hci_init3_req, 0, HCI_INIT_TIMEOUT, NULL);
-	if (err < 0) {
-		pr_err("%s(%d), err = %d, EINVAL.\n", __func__, __LINE__, err);
-	}
+	if (err < 0)
+		return err;
 
 	err = __hci_req_sync(hdev, hci_init4_req, 0, HCI_INIT_TIMEOUT, NULL);
 	if (err < 0) {

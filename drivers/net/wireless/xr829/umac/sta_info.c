@@ -1069,7 +1069,7 @@ void xrmac_sta_info_init(struct ieee80211_local *local)
 
 void xrmac_sta_info_stop(struct ieee80211_local *local)
 {
-	del_timer_sync(&local->sta_cleanup);
+	del_timer(&local->sta_cleanup);
 	xrmac_sta_info_flush(local, NULL);
 }
 
@@ -1141,6 +1141,7 @@ struct ieee80211_sta *mac80211_find_sta_by_ifaddr(struct ieee80211_hw *hw,
 
 	return NULL;
 }
+EXPORT_SYMBOL_GPL(mac80211_find_sta_by_ifaddr);
 
 struct ieee80211_sta *mac80211_find_sta(struct ieee80211_vif *vif,
 					 const u8 *addr)
@@ -1159,6 +1160,7 @@ struct ieee80211_sta *mac80211_find_sta(struct ieee80211_vif *vif,
 
 	return &sta->sta;
 }
+EXPORT_SYMBOL(mac80211_find_sta);
 
 static void clear_sta_ps_flags(void *_sta)
 {
@@ -1527,6 +1529,7 @@ void mac80211_sta_block_awake(struct ieee80211_hw *hw,
 	else if (test_sta_flag(sta, WLAN_STA_PS_DRIVER))
 		mac80211_queue_work(hw, &sta->drv_unblock_wk);
 }
+EXPORT_SYMBOL(mac80211_sta_block_awake);
 
 void mac80211_sta_eosp_irqsafe(struct ieee80211_sta *pubsta)
 {
@@ -1551,6 +1554,7 @@ void mac80211_sta_eosp_irqsafe(struct ieee80211_sta *pubsta)
 	skb_queue_tail(&local->skb_queue, skb);
 	tasklet_schedule(&local->tasklet);
 }
+EXPORT_SYMBOL(mac80211_sta_eosp_irqsafe);
 
 void mac80211_sta_set_buffered(struct ieee80211_sta *pubsta,
 				u8 tid, bool buffered)
@@ -1567,3 +1571,4 @@ void mac80211_sta_set_buffered(struct ieee80211_sta *pubsta,
 
 	xrmac_sta_info_recalc_tim(sta);
 }
+EXPORT_SYMBOL(mac80211_sta_set_buffered);

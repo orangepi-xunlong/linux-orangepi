@@ -40,9 +40,6 @@ struct sunxi_spdif_info {
 	struct regmap *regmap;
 	struct mutex mutex;
 	struct clk *pllclk;
-#ifdef SPDIF_PLL_AUDIO_X4
-	struct clk *pllclkx4;
-#endif
 	struct clk *moduleclk;
 	struct snd_soc_dai_driver dai;
 	struct sunxi_dma_params playback_dma_param;
@@ -399,28 +396,12 @@ static int sunxi_spdif_dai_set_sysclk(struct snd_soc_dai *dai, int clk_id,
 	mutex_lock(&sunxi_spdif->mutex);
 	if (sunxi_spdif->active == 0) {
 		pr_debug("active: %u\n", sunxi_spdif->active);
-#ifdef SPDIF_PLL_AUDIO_X4
-		if (clk_set_rate(sunxi_spdif->pllclkx4, freq)) {
-			dev_err(sunxi_spdif->dev,
-				"pllclkx4 set rate to %uHz failed\n", freq);
-			mutex_unlock(&sunxi_spdif->mutex);
-			return -EBUSY;
-		}
-
-		if (clk_set_rate(sunxi_spdif->moduleclk, freq / 4)) {
-			dev_err(sunxi_spdif->dev,
-				"moduleclk set rate to %uHz failed\n", freq);
-			mutex_unlock(&sunxi_spdif->mutex);
-			return -EBUSY;
-		}
-#else
 		if (clk_set_rate(sunxi_spdif->pllclk, freq)) {
 			dev_err(sunxi_spdif->dev,
 				"pllclk set rate to %uHz failed\n", freq);
 			mutex_unlock(&sunxi_spdif->mutex);
 			return -EBUSY;
 		}
-#endif
 	}
 	sunxi_spdif->active++;
 	mutex_unlock(&sunxi_spdif->mutex);
@@ -609,15 +590,8 @@ static int sunxi_spdif_suspend(struct snd_soc_dai *dai)
 	sunxi_spdif->pinctrl = NULL;
 	sunxi_spdif->pinstate = NULL;
 	sunxi_spdif->pinstate_sleep = NULL;
-
 	if (sunxi_spdif->moduleclk != NULL)
 		clk_disable_unprepare(sunxi_spdif->moduleclk);
-
-#ifdef SPDIF_PLL_AUDIO_X4
-	if (sunxi_spdif->pllclkx4 != NULL)
-		clk_disable_unprepare(sunxi_spdif->pllclkx4);
-#endif
-
 	if (sunxi_spdif->pllclk != NULL)
 		clk_disable_unprepare(sunxi_spdif->pllclk);
 
@@ -635,12 +609,6 @@ static int sunxi_spdif_resume(struct snd_soc_dai *dai)
 
 	if (sunxi_spdif->pllclk != NULL)
 		ret = clk_prepare_enable(sunxi_spdif->pllclk);
-
-#ifdef SPDIF_PLL_AUDIO_X4
-	if (sunxi_spdif->pllclkx4 != NULL)
-		ret = clk_prepare_enable(sunxi_spdif->pllclkx4);
-#endif
-
 	if (sunxi_spdif->moduleclk != NULL)
 		clk_prepare_enable(sunxi_spdif->moduleclk);
 
@@ -784,80 +752,25 @@ static int  sunxi_spdif_dev_probe(struct platform_device *pdev)
 	}
 
 	sunxi_spdif->pllclk = of_clk_get(node, 0);
-	if (IS_ERR(sunxi_spdif->pllclk)) {
-		dev_err(&pdev->dev, "Can't get pll_audo clk clocks!\n");
-		ret = PTR_ERR(sunxi_spdif->pllclk);
-		goto err_iounmap;
-	}
-
-#ifdef SPDIF_PLL_AUDIO_X4
-	sunxi_spdif->pllclkx4 = of_clk_get(node, 1);
-	if (IS_ERR(sunxi_spdif->pllclkx4)) {
-		dev_err(&pdev->dev, "Can't get pll_audiox4 clk clocks!\n");
-		ret = PTR_ERR(sunxi_spdif->pllclkx4);
-		goto err_pllclk_put;
-	}
-
-	sunxi_spdif->moduleclk = of_clk_get(node, 2);
-	if (IS_ERR(sunxi_spdif->moduleclk)) {
-		dev_err(&pdev->dev, "Can't get spdif clocks\n");
-		ret = PTR_ERR(sunxi_spdif->moduleclk);
-		goto err_pllclkx4_put;
-	} else {
-		if (clk_set_parent(sunxi_spdif->moduleclk,
-			sunxi_spdif->pllclkx4)) {
-			dev_err(&pdev->dev,
-				"set parent of moduleclk to pllclk failed!\n");
-			ret = -EINVAL;
-			goto err_moduleclk_put;
-		}
-	}
-
-	if (clk_prepare_enable(sunxi_spdif->pllclk)) {
-		dev_err(&pdev->dev, "pllclk enable failed\n");
-		ret = -EBUSY;
-		goto err_moduleclk_put;
-	}
-
-	if (clk_prepare_enable(sunxi_spdif->pllclkx4)) {
-		dev_err(&pdev->dev, "pllclkx4 enable failed\n");
-		ret = -EBUSY;
-		goto err_pllclk_disable;
-	}
-
-	if (clk_prepare_enable(sunxi_spdif->moduleclk)) {
-		dev_err(&pdev->dev, "moduleclk enable failed\n");
-		ret = -EBUSY;
-		goto err_pllclkx4_disable;
-	}
-#else
 	sunxi_spdif->moduleclk = of_clk_get(node, 1);
-	if (IS_ERR(sunxi_spdif->moduleclk)) {
+	if (IS_ERR(sunxi_spdif->pllclk) || IS_ERR(sunxi_spdif->moduleclk)) {
 		dev_err(&pdev->dev, "Can't get spdif clocks\n");
-		ret = PTR_ERR(sunxi_spdif->moduleclk);
-		goto err_pllclk_put;
+		if (IS_ERR(sunxi_spdif->pllclk)) {
+			ret = PTR_ERR(sunxi_spdif->pllclk);
+			goto err_iounmap;
+		} else {
+			ret = PTR_ERR(sunxi_spdif->moduleclk);
+			goto err_pllclk_put;
+		}
 	} else {
 		if (clk_set_parent(sunxi_spdif->moduleclk,
-			sunxi_spdif->pllclk)) {
+				sunxi_spdif->pllclk)) {
 			dev_err(&pdev->dev,
 				"set parent of moduleclk to pllclk failed!\n");
-			ret = -EINVAL;
-			goto err_moduleclk_put;
 		}
+		clk_prepare_enable(sunxi_spdif->pllclk);
+		clk_prepare_enable(sunxi_spdif->moduleclk);
 	}
-
-	if (clk_prepare_enable(sunxi_spdif->pllclk)) {
-		dev_err(&pdev->dev, "pllclk enable failed\n");
-		ret = -EBUSY;
-		goto err_moduleclk_put;
-	}
-
-	if (clk_prepare_enable(sunxi_spdif->moduleclk)) {
-		dev_err(&pdev->dev, "moduleclk enable failed\n");
-		ret = -EBUSY;
-		goto err_pllclk_disable;
-	}
-#endif
 
 	sunxi_spdif->playback_dma_param.dma_addr =
 					res.start + SUNXI_SPDIF_TXFIFO;
@@ -932,18 +845,8 @@ err_unregister_component:
 	snd_soc_unregister_component(&pdev->dev);
 err_pinctrl_put:
 	devm_pinctrl_put(sunxi_spdif->pinctrl);
-#ifdef SPDIF_PLL_AUDIO_X4
-err_pllclkx4_disable:
-	clk_disable_unprepare(sunxi_spdif->pllclkx4);
-#endif
-err_pllclk_disable:
-	clk_disable_unprepare(sunxi_spdif->pllclk);
 err_moduleclk_put:
 	clk_put(sunxi_spdif->moduleclk);
-#ifdef SPDIF_PLL_AUDIO_X4
-err_pllclkx4_put:
-	clk_put(sunxi_spdif->pllclkx4);
-#endif
 err_pllclk_put:
 	clk_put(sunxi_spdif->pllclk);
 err_iounmap:
@@ -960,13 +863,7 @@ static int __exit sunxi_spdif_dev_remove(struct platform_device *pdev)
 	struct sunxi_spdif_info *sunxi_spdif = dev_get_drvdata(&pdev->dev);
 
 	snd_soc_unregister_component(&pdev->dev);
-
 	clk_put(sunxi_spdif->moduleclk);
-
-#ifdef SPDIF_PLL_AUDIO_X4
-	clk_put(sunxi_spdif->pllclkx4);
-#endif
-
 	clk_put(sunxi_spdif->pllclk);
 	devm_kfree(&pdev->dev, sunxi_spdif);
 	return 0;

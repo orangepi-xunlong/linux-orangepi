@@ -10,6 +10,7 @@
 #ifndef __INCLUDES_H__
 #define __INCLUDES_H__
 #include "config.h"
+#if defined(__LINUX_PLAT__)
 
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -35,25 +36,17 @@
 #include <linux/clk-provider.h>
 #include <linux/clk/clk-conf.h>
 #include <linux/clkdev.h>
-
+#endif
 #include "hdmi_core/hdmi_core.h"
 #include "hdmi_core/core_cec.h"
 
 #define FUNC_NAME __func__
-#define POWER_CNT	4
-#define POWER_NAME	20
-
-struct hdmi_hdcp_info {
-	unsigned int hdcp_type;
-	unsigned int hdcp_status;
-};
 
 enum hdmi_ioctl_cmd {
 	CMD_NONE = 0,
-	HDCP22_LOAD_FIRMWARE = 1,
-	HDMI_HDCP_ENABLE = 2,
-	HDMI_HDCP_DISABLE = 3,
-	HDMI_HDCP_INFO = 4,
+	HDCP_LOAD_FIRMWARE,
+	HDCP_LOAD_FIRMWARE_COMPLETED,
+	HDCP_LOAD_KEY,
 	CMD_NUM,
 };
 
@@ -61,11 +54,13 @@ enum hdmi_ioctl_cmd {
  * @short Main structures to instantiate the driver
  */
 struct hdmi_tx_drv {
+#if defined(__LINUX_PLAT__)
+
 	struct platform_device		*pdev;
 	/* Device node */
 	struct device			*parent_dev;
 	struct input_dev		*cec_input_dev;
-
+#endif
 	/* Device list */
 	struct list_head		devlist;
 
@@ -74,9 +69,10 @@ struct hdmi_tx_drv {
 
 	/* HDMI TX Controller */
 	uintptr_t			reg_base;
+#if defined(__LINUX_PLAT__)
 
 	struct pinctrl			*pctl;
-
+#endif
 /* hardware require, a gpio have to be set when plugin or out
 * in order to enhance the ability of reading edid
 */
@@ -88,10 +84,8 @@ struct hdmi_tx_drv {
 
 	int				is_cts;
 
-	u8				support_hdcp;
-
-	char		power[POWER_CNT][POWER_NAME];
-	u32		power_count;
+	char				power[20];
+	u8				power_use;
 
 	struct clk			*hdmi_clk;
 	struct clk			*hdmi_ddc_clk;
@@ -121,11 +115,9 @@ extern int of_get_named_gpio_flags(struct device_node *np, const char *propname,
 extern uintptr_t disp_getprop_regbase(
 	char *main_name, char *sub_name, u32 index);
 extern int arisc_query_wakeup_source(unsigned int *event);
+extern int sunxi_smc_refresh_hdcp(void);
+
 #ifdef CONFIG_SUNXI_SMC
 extern int sunxi_smc_load_hdcp_key(void *hdcp_buff, size_t size);
 #endif
-extern int sunxi_smc_refresh_hdcp(void);
-extern void disp_hdmi_pad_sel(unsigned int pad_sel);
-extern void disp_hdmi_pad_release(void);
-
 #endif /* __INCLUDES_H__ */

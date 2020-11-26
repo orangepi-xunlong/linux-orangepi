@@ -41,7 +41,11 @@
 #define EPHY_CTRL 0x6000
 #define EPHY_SID 0x8004
 
-#define WAIT_MAX_COUNT 200
+/* Register bits */
+#define EXTEPHY_CTRL0_RESET_INVALID	(0x1 << 0)
+#define EXTEPHY_CTRL0_SYSCLK_GATING	(0x1 << 1)
+#define EXTEPHY_CTRL1_IO_EN_BITS	(0xf)
+#define EPHY_CTRL_DEFAULT		(0x5)
 
 atomic_t ephy_en;
 
@@ -67,7 +71,7 @@ EXPORT_SYMBOL_GPL(ephy_is_enable);
  * @param[OUT]	p_ephy_cali: ephy calibration value
  * @return	return 0 if success,-value if fail
  */
-static __attribute__((unused)) s32 ephy_read_sid(u16 *p_ephy_cali)
+static s32 ephy_read_sid(u16 *p_ephy_cali)
 {
 	s32 ret = 0;
 	u8 buf[6];
@@ -152,7 +156,7 @@ static int ephy_config_init(struct phy_device *phydev)
 	phy_write(phydev, 0x18, 0x0000);	/* PHYAFE TRX optimization */
 
 	phy_write(phydev, 0x1f, 0x0600);	/* Switch to Page 6 */
-	phy_write(phydev, 0x14, 0x708b);	/* PHYAFE TX optimization */
+	phy_write(phydev, 0x14, 0x708f);	/* PHYAFE TX optimization */
 	phy_write(phydev, 0x13, 0xF000);	/* PHYAFE RX optimization */
 	phy_write(phydev, 0x15, 0x1530);
 
@@ -216,18 +220,13 @@ static void sunxi_ephy_enable(struct ephy_res *priv)
 {
 #ifdef CONFIG_MFD_ACX00
 	int value;
-	unsigned char i = 0;
-#if defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN50IW9)
+#if defined(CONFIG_ARCH_SUN50IW6)
 	u16 ephy_cali = 0;
 #endif
 
 	if (!acx00_enable()) {
-		for (i = 0; i < WAIT_MAX_COUNT; i++) {
-			msleep(10);
-			if (acx00_enable())
-				break;
-		}
-		if (i == WAIT_MAX_COUNT) {
+		msleep(50);
+		if (!acx00_enable()) {
 			pr_err("acx00 is no enable, and sunxi_ephy_enable is fail\n");
 			return;
 		}
@@ -237,12 +236,7 @@ static void sunxi_ephy_enable(struct ephy_res *priv)
 	value |= 0x03;
 	acx00_reg_write(priv->acx, EXTEPHY_CTRL0, value);
 	value = acx00_reg_read(priv->acx, EXTEPHY_CTRL1);
-#if defined(CONFIG_ARCH_SUN50IW9)
-	/* disable link led to avoid conflict with twi2 */
-	value |= 0x09;
-#else
 	value |= 0x0f;
-#endif
 	acx00_reg_write(priv->acx, EXTEPHY_CTRL1, value);
 	acx00_reg_write(priv->acx, EPHY_CTRL, 0x06);
 
@@ -250,7 +244,7 @@ static void sunxi_ephy_enable(struct ephy_res *priv)
 	value = acx00_reg_read(priv->acx, EPHY_CTRL);
 	value &= ~(0xf << 12);
 
-#if defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN50IW9)
+#if defined(CONFIG_ARCH_SUN50IW6)
 	ephy_read_sid(&ephy_cali);
 	value |= (0x0F & (0x03 + ephy_cali)) << 12;
 #else
@@ -261,21 +255,6 @@ static void sunxi_ephy_enable(struct ephy_res *priv)
 
 	atomic_set(&ephy_en, 1);
 #endif
-}
-
-static void sunxi_ephy_disable(struct ephy_res *priv)
-{
-	int value;
-
-	/* reset ephy */
-	value = acx00_reg_read(priv->acx, EXTEPHY_CTRL0);
-	value &= ~0x01;
-	acx00_reg_write(priv->acx, EXTEPHY_CTRL0, value);
-
-	/* shutdown ephy */
-	value = acx00_reg_read(priv->acx, EPHY_CTRL);
-	value |= 0x01;
-	acx00_reg_write(priv->acx, EPHY_CTRL, value);
 }
 
 static struct phy_driver ephy_driver = {
@@ -327,8 +306,21 @@ static int ephy_plat_remove(struct platform_device *pdev)
 
 static int sunxi_phy_suspend(struct device *dev)
 {
-	sunxi_ephy_disable(&ephy_priv);
+	int value;
+	struct ephy_res *priv = &ephy_priv;
+
 	atomic_set(&ephy_en, 0);
+
+	/* reset regs values to the original state */
+	value = acx00_reg_read(priv->acx, EXTEPHY_CTRL0);
+	value &= ~(EXTEPHY_CTRL0_RESET_INVALID | EXTEPHY_CTRL0_SYSCLK_GATING);
+	acx00_reg_write(priv->acx, EXTEPHY_CTRL0, value);
+	value = acx00_reg_read(priv->acx, EXTEPHY_CTRL1);
+	value &= ~(EXTEPHY_CTRL1_IO_EN_BITS);
+	acx00_reg_write(priv->acx, EXTEPHY_CTRL1, value);
+	value = acx00_reg_read(priv->acx, EPHY_CTRL);
+	value = EPHY_CTRL_DEFAULT;	/* default value due to spec */
+	acx00_reg_write(priv->acx, EPHY_CTRL, value);
 
 	return 0;
 }

@@ -233,7 +233,7 @@ struct property_entry {
 #define PROPERTY_ENTRY_STRING(_name_, _val_)		\
 (struct property_entry) {				\
 	.name = _name_,					\
-	.length = sizeof(const char *),			\
+	.length = sizeof(_val_),			\
 	.is_string = true,				\
 	{ .value = { .str = _val_ } },			\
 }

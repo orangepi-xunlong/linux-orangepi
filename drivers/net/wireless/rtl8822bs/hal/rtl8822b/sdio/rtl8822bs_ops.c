@@ -182,7 +182,7 @@ static void disable_interrupt(PADAPTER adapter)
 	hal = GET_HAL_DATA(adapter);
 
 	update_himr(adapter, 0);
-	RTW_INFO("%s: update SDIO HIMR=0\n", __func__);
+	RTW_INFO("%s: update SDIO HIMR=0\n", __FUNCTION__);
 }
 
 static void _run_thread(PADAPTER adapter)
@@ -194,7 +194,7 @@ static void _run_thread(PADAPTER adapter)
 		RTW_INFO(FUNC_ADPT_FMT " start RTWHALXT\n", FUNC_ADPT_ARG(adapter));
 		xmitpriv->SdioXmitThread = kthread_run(rtl8822bs_xmit_thread, adapter, "RTWHALXT");
 		if (IS_ERR(xmitpriv->SdioXmitThread)) {
-			RTW_ERR("%s: start rtl8822bs_xmit_thread FAIL!!\n", __func__);
+			RTW_ERR("%s: start rtl8822bs_xmit_thread FAIL!!\n", __FUNCTION__);
 			xmitpriv->SdioXmitThread = NULL;
 		}
 	}
@@ -368,7 +368,7 @@ void rtl8822bs_set_hal_ops(PADAPTER adapter)
 
 	err = rtl8822bs_halmac_init_adapter(adapter);
 	if (err) {
-		RTW_INFO("%s: [ERROR]HALMAC initialize FAIL!\n", __func__);
+		RTW_INFO("%s: [ERROR]HALMAC initialize FAIL!\n", __FUNCTION__);
 		return;
 	}
 
@@ -422,12 +422,12 @@ void rtl8822bs_disable_interrupt_but_cpwm2(PADAPTER adapter)
 	u32 himr, tmp;
 
 	tmp = rtw_read32(adapter, REG_SDIO_HIMR);
-	RTW_INFO("%s: Read SDIO_REG_HIMR: 0x%08x\n", __func__, tmp);
+	RTW_INFO("%s: Read SDIO_REG_HIMR: 0x%08x\n", __FUNCTION__, tmp);
 
 	himr = BIT_SDIO_CPWM2_MSK;
 	update_himr(adapter, himr);
 
 	tmp = rtw_read32(adapter, REG_SDIO_HIMR);
-	RTW_INFO("%s: Read again SDIO_REG_HIMR: 0x%08x\n", __func__, tmp);
+	RTW_INFO("%s: Read again SDIO_REG_HIMR: 0x%08x\n", __FUNCTION__, tmp);
 }
 #endif /* CONFIG_WOWLAN */

@@ -29,7 +29,6 @@
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
 #include <linux/etherdevice.h>
-#include <linux/pci.h>
 #include <linux/skbuff.h>
 #include <linux/if_vlan.h>
 #include <linux/in.h>
@@ -593,14 +592,6 @@ void netvsc_linkstatus_callback(struct hv_device *device_obj,
 	schedule_delayed_work(&ndev_ctx->dwork, 0);
 }
 
-static void netvsc_comp_ipcsum(struct sk_buff *skb)
-{
-	struct iphdr *iph = (struct iphdr *)skb->data;
-
-	iph->check = 0;
-	iph->check = ip_fast_csum(iph, iph->ihl);
-}
-
 static struct sk_buff *netvsc_alloc_recv_skb(struct net_device *net,
 				struct hv_netvsc_packet *packet,
 				struct ndis_tcp_ip_checksum_info *csum_info,
@@ -624,17 +615,9 @@ static struct sk_buff *netvsc_alloc_recv_skb(struct net_device *net,
 	/* skb is already created with CHECKSUM_NONE */
 	skb_checksum_none_assert(skb);
 
-	/* Incoming packets may have IP header checksum verified by the host.
-	 * They may not have IP header checksum computed after coalescing.
-	 * We compute it here if the flags are set, because on Linux, the IP
-	 * checksum is always checked.
-	 */
-	if (csum_info && csum_info->receive.ip_checksum_value_invalid &&
-	    csum_info->receive.ip_checksum_succeeded &&
-	    skb->protocol == htons(ETH_P_IP))
-		netvsc_comp_ipcsum(skb);
-
-	/* Do L4 checksum offload if enabled and present.
+	/*
+	 * In Linux, the IP checksum is always checked.
+	 * Do L4 checksum offload if enabled and present.
 	 */
 	if (csum_info && (net->features & NETIF_F_RXCSUM)) {
 		if (csum_info->receive.tcp_checksum_succeeded ||
@@ -1245,13 +1228,9 @@ static int netvsc_register_vf(struct net_device *vf_netdev)
 {
 	struct net_device *ndev;
 	struct net_device_context *net_device_ctx;
-	struct device *pdev = vf_netdev->dev.parent;
 	struct netvsc_device *netvsc_dev;
 
 	if (vf_netdev->addr_len != ETH_ALEN)
-		return NOTIFY_DONE;
-
-	if (!pdev || !dev_is_pci(pdev) || dev_is_pf(pdev))
 		return NOTIFY_DONE;
 
 	/*

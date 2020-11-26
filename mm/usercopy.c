@@ -61,11 +61,12 @@ static noinline int check_stack_object(const void *obj, unsigned long len)
 	return GOOD_STACK;
 }
 
-static void report_usercopy(unsigned long len, bool to_user, const char *type)
+static void report_usercopy(const void *ptr, unsigned long len,
+			    bool to_user, const char *type)
 {
-	pr_emerg("kernel memory %s attempt detected %s '%s' (%lu bytes)\n",
+	pr_emerg("kernel memory %s attempt detected %s %p (%s) (%lu bytes)\n",
 		to_user ? "exposure" : "overwrite",
-		to_user ? "from" : "to", type ? : "unknown", len);
+		to_user ? "from" : "to", ptr, type ? : "unknown", len);
 	/*
 	 * For greater effect, it would be nice to do do_group_exit(),
 	 * but BUG() actually hooks all the lock-breaking and per-arch
@@ -274,6 +275,6 @@ void __check_object_size(const void *ptr, unsigned long n, bool to_user)
 		return;
 
 report:
-	report_usercopy(n, to_user, err);
+	report_usercopy(ptr, n, to_user, err);
 }
 EXPORT_SYMBOL(__check_object_size);

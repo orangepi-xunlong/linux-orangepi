@@ -87,14 +87,6 @@ static inline unsigned long shadow_to_ptr(const struct cfi_shadow *s,
 	return (s->r.min_page + s->shadow[index]) << PAGE_SHIFT;
 }
 
-static inline unsigned long shadow_to_page(const struct cfi_shadow *s,
-	int index)
-{
-	BUG_ON(index < 0 || index >= SHADOW_SIZE);
-
-	return (s->r.min_page + index) << PAGE_SHIFT;
-}
-
 static void prepare_next_shadow(const struct cfi_shadow __rcu *prev,
 		struct cfi_shadow *next)
 {
@@ -117,7 +109,7 @@ static void prepare_next_shadow(const struct cfi_shadow __rcu *prev,
 		if (prev->shadow[i] == SHADOW_INVALID)
 			continue;
 
-		index = ptr_to_shadow(next, shadow_to_page(prev, i));
+		index = ptr_to_shadow(next, shadow_to_ptr(prev, i));
 		if (index < 0)
 			continue;
 
@@ -228,6 +220,7 @@ static inline cfi_check_fn ptr_to_check_fn(const struct cfi_shadow __rcu *s,
 	unsigned long ptr)
 {
 	int index;
+	unsigned long check;
 
 	if (unlikely(!s))
 		return NULL; /* No shadow available */

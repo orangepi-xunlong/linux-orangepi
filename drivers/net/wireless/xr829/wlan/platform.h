@@ -52,6 +52,5 @@ void  xradio_sdio_detect(int enable);
 int  xradio_request_gpio_irq(struct device *dev, void *sbus_priv);
 void xradio_free_gpio_irq(struct device *dev, void *sbus_priv);
 int  xradio_wlan_power(int on);
-void xradio_bt_power(int on);
 
 #endif /* XRADIO_PLAT_H_INCLUDED */

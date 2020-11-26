@@ -549,6 +549,7 @@ static inline struct sk_buff *ip_check_defrag(struct net *net, struct sk_buff *s
 	return skb;
 }
 #endif
+int ip_frag_mem(struct net *net);
 
 /*
  *	Functions provided by ip_forward.c
@@ -571,8 +572,6 @@ static inline int ip_options_echo(struct ip_options *dopt, struct sk_buff *skb)
 }
 
 void ip_options_fragment(struct sk_buff *skb);
-int __ip_options_compile(struct net *net, struct ip_options *opt,
-			 struct sk_buff *skb, __be32 *info);
 int ip_options_compile(struct net *net, struct ip_options *opt,
 		       struct sk_buff *skb);
 int ip_options_get(struct net *net, struct ip_options_rcu **optp,
@@ -581,7 +580,7 @@ int ip_options_get_from_user(struct net *net, struct ip_options_rcu **optp,
 			     unsigned char __user *data, int optlen);
 void ip_options_undo(struct ip_options *opt);
 void ip_forward_options(struct sk_buff *skb);
-int ip_options_rcv_srr(struct sk_buff *skb, struct net_device *dev);
+int ip_options_rcv_srr(struct sk_buff *skb);
 
 /*
  *	Functions provided by ip_sockglue.c

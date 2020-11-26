@@ -368,6 +368,14 @@ static int gpio_sw_remove(struct platform_device *dev)
 	return 0;
 }
 
+static void sunxi_gpio_sysfs(struct device *dev)
+{
+	device_create_file(dev, &gpio_sw_class_attrs[0]);
+	device_create_file(dev, &gpio_sw_class_attrs[1]);
+	device_create_file(dev, &gpio_sw_class_attrs[2]);
+	device_create_file(dev, &gpio_sw_class_attrs[3]);
+}
+
 int
 gpio_sw_classdev_register(struct device *parent,
 			  struct gpio_sw_classdev *gpio_sw_cdev)
@@ -379,6 +387,9 @@ gpio_sw_classdev_register(struct device *parent,
 					  gpio_sw_cdev->name);
 	if (IS_ERR(gpio_sw_cdev->dev))
 		return PTR_ERR(gpio_sw_cdev->dev);
+
+	sunxi_gpio_sysfs(gpio_sw_cdev->dev);
+
 	if (easy_light_used && strlen(pdata->link)) {
 		if (sysfs_create_file(&gpio_sw_cdev->dev->kobj, &easy_light_attr.attr))
 			pr_err("gpio_sw: sysfs_create_file fail\n");
@@ -537,7 +548,6 @@ static int gpio_sw_probe(struct platform_device *dev)
 	sw_gpio_entry->class.gpio_sw_drv_get = gpio_sw_drv_get;
 	sw_gpio_entry->class.gpio_sw_data_set = gpio_sw_data_set;
 	sw_gpio_entry->class.gpio_sw_data_get = gpio_sw_data_get;
-
 
 	/* init the gpio form sys_config */
 	gpio_sw_cfg_set(&sw_gpio_entry->class,

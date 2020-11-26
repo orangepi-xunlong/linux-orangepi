@@ -63,12 +63,7 @@ static int sunxi_sndspdif_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 
 	clk_div = freq/params_rate(params);
-#ifdef SPDIF_PLL_AUDIO_X4
-/* clk_source -> pll_audiox4: 90/98M, moduleclk: 20/24M */
-	clk_div = clk_div>>9;
-#else
 	clk_div = clk_div>>7;
-#endif
 
 	ret = snd_soc_dai_set_clkdiv(cpu_dai, 0, clk_div);
 	if (ret < 0)

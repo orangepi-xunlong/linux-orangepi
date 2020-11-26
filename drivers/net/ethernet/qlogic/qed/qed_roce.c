@@ -1059,16 +1059,23 @@ static void qed_rdma_copy_gids(struct qed_rdma_qp *qp, __le32 *src_gid,
 
 static enum roce_flavor qed_roce_mode_to_flavor(enum roce_mode roce_mode)
 {
+	enum roce_flavor flavor;
+
 	switch (roce_mode) {
 	case ROCE_V1:
-		return PLAIN_ROCE;
+		flavor = PLAIN_ROCE;
+		break;
 	case ROCE_V2_IPV4:
-		return RROCE_IPV4;
+		flavor = RROCE_IPV4;
+		break;
 	case ROCE_V2_IPV6:
-		return RROCE_IPV6;
+		flavor = ROCE_V2_IPV6;
+		break;
 	default:
-		return MAX_ROCE_FLAVOR;
+		flavor = MAX_ROCE_MODE;
+		break;
 	}
+	return flavor;
 }
 
 static int qed_roce_alloc_cid(struct qed_hwfn *p_hwfn, u16 *cid)

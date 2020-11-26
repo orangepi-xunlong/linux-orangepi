@@ -25,10 +25,8 @@
 #define BMU1760_VHTF_CHARGE              (0x85)
 #define BMU1760_VLTF_WORK                (0x86)
 #define BMU1760_VHTF_WORK		 (0x87)
-#define BMU1760_CHARGE_CONTROL2		 (0x8b)
-#define BMU1760_CHARGE_CONTROL3		 (0x8c)
-#define BMU1760_CHARGE_CONTROL4		 (0x8d)
-#define CHARGE_DONE                      (0x05)
+#define BMU1760_CHARGE_CONTROL2		 (0x8c)
+
 #define BMU1760_ADC_CONTROL              (0x80)
 #define BMU1760_ADC_BATVOL_ENABLE        (1 << 4)
 #define BMU1760_ADC_BATCUR_ENABLE        (1 << 6)

@@ -115,21 +115,9 @@ int xradio_sta_remove(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	    (struct xradio_sta_priv *)&sta->drv_priv;
 	struct xradio_vif *priv = xrwl_get_vif_from_ieee80211(vif);
 	struct xradio_link_entry *entry;
-	int suspend_lock_state;
 
 	ap_printk(XRADIO_DBG_TRC, "%s\n", __func__);
-	suspend_lock_state = atomic_cmpxchg(&hw_priv->suspend_lock_state,
-								XRADIO_SUSPEND_LOCK_IDEL, XRADIO_SUSPEND_LOCK_OTHERS);
-	if (suspend_lock_state == XRADIO_SUSPEND_LOCK_SUSPEND) {
-		sta_printk(XRADIO_DBG_WARN,
-				"%s:refuse because of suspend\n", __func__);
-		return -EBUSY;
-	}
-	down(&hw_priv->conf_lock);
-	atomic_set(&hw_priv->suspend_lock_state, XRADIO_SUSPEND_LOCK_IDEL);
-
 	if (!atomic_read(&priv->enabled)) {
-		up(&hw_priv->conf_lock);
 		ap_printk(XRADIO_DBG_NIY, "%s vif(type=%d) is not enable!\n",
 				__func__, vif->type);
 		return 0;
@@ -140,7 +128,6 @@ int xradio_sta_remove(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 #endif
 
 	if (priv->mode != NL80211_IFTYPE_AP || !sta_priv->link_id) {
-		up(&hw_priv->conf_lock);
 		ap_printk(XRADIO_DBG_NIY, "no station to remove\n");
 		return 0;
 	}
@@ -153,7 +140,6 @@ int xradio_sta_remove(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	if (queue_work(hw_priv->workqueue, &priv->link_id_work) <= 0)
 		wsm_unlock_tx(hw_priv);
 	spin_unlock_bh(&priv->ps_state_lock);
-	up(&hw_priv->conf_lock);
 	flush_workqueue(hw_priv->workqueue);
 	flush_workqueue(hw_priv->spare_workqueue);
 
@@ -371,8 +357,7 @@ void xradio_set_cts_work(struct work_struct *work)
 			       &use_cts_prot, sizeof(use_cts_prot),
 			       priv->if_id));
 	/* If STA Mode update_ie is not required */
-	if (priv->mode != NL80211_IFTYPE_STATION &&
-		priv->mode != NL80211_IFTYPE_P2P_DEVICE) {
+	if (priv->mode != NL80211_IFTYPE_STATION) {
 		SYS_WARN(wsm_update_ie(hw_priv, &update_ie, priv->if_id));
 	}
 
@@ -392,8 +377,7 @@ static int xradio_set_btcoexinfo(struct xradio_vif *priv)
 
 	ap_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
-	if (priv->mode == NL80211_IFTYPE_STATION ||
-		priv->mode == NL80211_IFTYPE_P2P_DEVICE) {
+	if (priv->mode == NL80211_IFTYPE_STATION) {
 		/* Plumb PSPOLL and NULL template */
 		SYS_WARN(xradio_upload_pspoll(priv));
 		SYS_WARN(xradio_upload_null(priv));
@@ -508,7 +492,6 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 {
 	struct xradio_common *hw_priv = dev->priv;
 	struct xradio_vif *priv = xrwl_get_vif_from_ieee80211(vif);
-	int suspend_lock_state;
 
 	ap_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
@@ -522,17 +505,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 	if (priv->if_id == XRWL_GENERIC_IF_ID)
 		return;
 #endif
-
-	suspend_lock_state = atomic_cmpxchg(&hw_priv->suspend_lock_state,
-								XRADIO_SUSPEND_LOCK_IDEL, XRADIO_SUSPEND_LOCK_OTHERS);
-	if (suspend_lock_state == XRADIO_SUSPEND_LOCK_SUSPEND) {
-		ap_printk(XRADIO_DBG_WARN,
-			   "%s:refuse because of suspend\n", __func__);
-		return;
-	}
-
 	down(&hw_priv->conf_lock);
-	atomic_set(&hw_priv->suspend_lock_state, XRADIO_SUSPEND_LOCK_IDEL);
 
 	/*We do somethings first which is not of priv.*/
 	if (changed & BSS_CHANGED_RETRY_LIMITS) {
@@ -594,8 +567,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 			  info->arp_filter_enabled, info->arp_addr_cnt);
 
 		if (info->arp_filter_enabled) {
-			if (vif->type == NL80211_IFTYPE_STATION ||
-				vif->type == NL80211_IFTYPE_P2P_DEVICE)
+			if (vif->type == NL80211_IFTYPE_STATION)
 				filter.enable =
 				    (u32) XRADIO_ENABLE_ARP_FILTER_OFFLOAD;
 			else if (priv->join_status == XRADIO_JOIN_STATUS_AP)
@@ -678,8 +650,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 			  info->ndp_filter_enabled, info->ndp_addr_cnt);
 
 		if (info->ndp_filter_enabled) {
-			if (vif->type == NL80211_IFTYPE_STATION ||
-				vif->type == NL80211_IFTYPE_P2P_DEVICE)
+			if (vif->type == NL80211_IFTYPE_STATION)
 				filter.enable =
 				    (u32) XRADIO_ENABLE_NDP_FILTER_OFFLOAD;
 			else if ((vif->type == NL80211_IFTYPE_AP))
@@ -1096,9 +1067,8 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 					 priv->if_id));
 				wsm_unlock_tx(hw_priv);
 			}
-			if (priv->filter4.enable || !(priv->powersave_mode.pmMode&WSM_PSM_PS)) {
-				xradio_set_pm(priv, &priv->powersave_mode);
-			}
+
+			xradio_set_pm(priv, &priv->powersave_mode);
 			if (priv->vif->p2p) {
 				ap_printk(XRADIO_DBG_NIY,
 					  "[STA] Setting p2p powersave configuration.\n");
@@ -1109,8 +1079,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 #endif
 			}
 
-			if (priv->mode == NL80211_IFTYPE_STATION ||
-				priv->mode == NL80211_IFTYPE_P2P_DEVICE)
+			if (priv->mode == NL80211_IFTYPE_STATION)
 				SYS_WARN(xradio_upload_qosnull(priv));
 
 			if (hw_priv->is_BT_Present)

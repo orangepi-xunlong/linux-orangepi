@@ -287,7 +287,6 @@ enum wb_output_fmt {
 	WB_FORMAT_YUV420_SP_UVUV = 0xd,
 };
 
-#if defined(CONFIG_EINK_PANEL_USED)
 typedef struct {
 	int width;
 	int height;
@@ -314,5 +313,4 @@ extern int wb_eink_get_status(unsigned int sel);
 extern int wb_eink_enableint(unsigned int sel);
 extern int wb_eink_disableint(unsigned int sel);
 extern int wb_eink_clearint(unsigned int sel);
-#endif
 #endif

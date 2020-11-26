@@ -703,7 +703,7 @@ static int ns2_pin_get_enable(struct pinctrl_dev *pctrldev, unsigned int pin)
 }
 
 static int ns2_pin_set_slew(struct pinctrl_dev *pctrldev, unsigned int pin,
-			    u32 slew)
+			    u16 slew)
 {
 	struct ns2_pinctrl *pinctrl = pinctrl_dev_get_drvdata(pctrldev);
 	struct ns2_pin *pin_data = pctrldev->desc->pins[pin].drv_data;
@@ -793,7 +793,7 @@ static void ns2_pin_get_pull(struct pinctrl_dev *pctrldev,
 }
 
 static int ns2_pin_set_strength(struct pinctrl_dev *pctrldev, unsigned int pin,
-				u32 strength)
+				u16 strength)
 {
 	struct ns2_pinctrl *pinctrl = pinctrl_dev_get_drvdata(pctrldev);
 	struct ns2_pin *pin_data = pctrldev->desc->pins[pin].drv_data;
@@ -904,7 +904,7 @@ static int ns2_pin_config_set(struct pinctrl_dev *pctrldev, unsigned int pin,
 	struct ns2_pin *pin_data = pctrldev->desc->pins[pin].drv_data;
 	enum pin_config_param param;
 	unsigned int i;
-	u32 arg;
+	u16 arg;
 	int ret = -ENOTSUPP;
 
 	if (pin_data->pin_conf.base == -1)

@@ -71,10 +71,6 @@ int de_peak_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 
 	/* FIXME: chno is not considered */
 	base = reg_base + (sel + 1) * 0x00100000 + PEAK_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel)
-		base = base - 0x00100000;
-#endif
 	__inf("sel %d, peak_base[%d]=0x%p\n", sel, chno, (void *)base);
 
 	memory = kmalloc(sizeof(struct __peak_reg_t), GFP_KERNEL | __GFP_ZERO);

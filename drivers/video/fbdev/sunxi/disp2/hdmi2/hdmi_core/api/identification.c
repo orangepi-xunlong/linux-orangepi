@@ -10,7 +10,6 @@
 
 #include "identification.h"
 
-#if 0
 u8 id_design(hdmi_tx_dev_t *dev)
 {
 	return dev_read(dev, DESIGN_ID);
@@ -61,4 +60,3 @@ int id_phy(hdmi_tx_dev_t *dev)
 {
 	return dev_read(dev, CONFIG2_ID);
 }
-#endif

@@ -157,6 +157,14 @@ typedef struct super_standby_para {
 	unsigned int resume_code_length;
 	/* cpux resume entry */
 	unsigned int resume_entry;
+#if (defined CONFIG_ARCH_SUN8IW12P1) ||\
+	(defined CONFIG_ARCH_SUN8IW15)
+		/* kernel cpu_resume entry */
+	unsigned int cpu_resume_entry;
+	#endif
+#if (defined CONFIG_ARCH_SUN50IW6P1)
+	unsigned int hdmi_cec_phyaddr;
+#endif
 	/* wakeup after timeout seconds */
 	unsigned int timeout;
 	unsigned int gpio_enable_bitmap;

@@ -76,7 +76,6 @@ void sunxi_mmc_reg_ex_res_inter(struct sunxi_mmc_host *host, u32 phy_id)
 	}
 	sunxi_hosts[phy_id] = host;
 }
-EXPORT_SYMBOL_GPL(sunxi_mmc_reg_ex_res_inter);
 
 int sunxi_mmc_check_r1_ready(struct mmc_host *mmc, unsigned ms)
 {

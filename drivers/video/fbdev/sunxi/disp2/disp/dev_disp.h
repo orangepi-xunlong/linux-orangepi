@@ -35,7 +35,6 @@ struct info_mm {
 	uintptr_t mem_start;	/* Start of frame buffer mem */
 	/* (physical address) */
 	u32 mem_len;		/* Length of frame buffer mem */
-	struct disp_ion_mem *p_ion_mem;
 };
 
 struct proc_list {
@@ -60,8 +59,8 @@ struct disp_init_para {
 	enum disp_init_mode disp_mode;
 
 	/* for screen0/1/2 */
-	enum disp_output_type output_type[8];
-	unsigned int output_mode[8];
+	enum disp_output_type output_type[DISP_SCREEN_NUM];
+	unsigned int output_mode[DISP_SCREEN_NUM];
 	enum disp_csc_type      output_format[DISP_SCREEN_NUM];
 	enum disp_data_bits     output_bits[DISP_SCREEN_NUM];
 	enum disp_eotf          output_eotf[DISP_SCREEN_NUM];

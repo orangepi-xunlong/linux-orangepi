@@ -56,18 +56,15 @@ DEFINE_EVENT(preemptirq_template, preempt_enable,
 
 #include <trace/define_trace.h>
 
-#endif /* !CONFIG_PREEMPTIRQ_EVENTS */
+#else /* !CONFIG_PREEMPTIRQ_EVENTS */
 
-#if !defined(CONFIG_PREEMPTIRQ_EVENTS) || defined(CONFIG_PROVE_LOCKING)
 #define trace_irq_enable(...)
 #define trace_irq_disable(...)
-#define trace_irq_enable_rcuidle(...)
-#define trace_irq_disable_rcuidle(...)
-#endif
-
-#if !defined(CONFIG_PREEMPTIRQ_EVENTS) || !defined(CONFIG_DEBUG_PREEMPT)
 #define trace_preempt_enable(...)
 #define trace_preempt_disable(...)
+#define trace_irq_enable_rcuidle(...)
+#define trace_irq_disable_rcuidle(...)
 #define trace_preempt_enable_rcuidle(...)
 #define trace_preempt_disable_rcuidle(...)
+
 #endif

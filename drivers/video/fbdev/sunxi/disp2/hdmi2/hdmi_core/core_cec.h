@@ -74,11 +74,6 @@ enum cec_power_status {
 	CEC_ON_TO_STANDBY = 3,
 };
 
-enum cec_test_cmd {
-	SET_LANGUAGE_CH = 0,
-	SET_LANGUAGE_EN = 1,
-};
-
 enum cec_logic_addr {
 	TV_DEV = 0,
 	RD_DEV_1,
@@ -139,7 +134,6 @@ void hdmi_cec_soft_disable(void);
 void cec_set_local_standby(bool enable);
 bool cec_get_local_standby(void);
 ssize_t cec_dump_core(char *buf);
-int cec_tansmit_msg_test(enum cec_test_cmd cmd);
 
 void hdmi_cec_init(void);
 void hdmi_cec_exit(void);
@@ -147,17 +141,14 @@ void hdmi_cec_exit(void);
 
 #ifndef CONFIG_HDMI2_CEC_USER
 void hdmi_cec_wakup_request(void);
-s32 hdmi_cec_standby_request(void);
-s32 hdmi_cec_send_inactive_source(void);
+void hdmi_cec_standby_request(void);
+void hdmi_cec_send_inactive_source(void);
 void hdmi_cec_send_active_source(void);
-int hdmi_cec_send_one_touch_play(void);
+int hdmi_cec_send_one_touch_paly(void);
 void hdmi_cec_set_phyaddr_to_cpus(void);
 
 #endif
 
-extern struct mutex ddc_analog_lock;
-
-extern unsigned char hdmi_get_ddc_analog(void);
 
 extern u32 hdmi_enable_mask;
 extern u32 hdmi_suspend_mask;

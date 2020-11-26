@@ -301,10 +301,6 @@ void mac80211_bss_info_change_notify(struct ieee80211_sub_if_data *sdata,
 		sdata->vif.bss_conf.bssid = NULL;
 	else if (ieee80211_vif_is_mesh(&sdata->vif)) {
 		sdata->vif.bss_conf.bssid = zero;
-	} else if (sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE) {
-		sdata->vif.bss_conf.bssid = sdata->vif.addr;
-		WARN_ONCE(changed & ~(BSS_CHANGED_IDLE),
-			  "P2P Device BSS changed %#x", changed);
 	} else {
 		WARN_ON(1);
 		return;
@@ -443,15 +439,9 @@ void mac80211_restart_hw(struct ieee80211_hw *hw)
 	mac80211_stop_queues_by_reason(hw,
 		IEEE80211_QUEUE_STOP_REASON_SUSPEND);
 
-	/*
-	 * Stop all Rx during the reconfig. We don't want state changes
-	 * or driver callbacks while this is in progress.
-	 */
-	local->in_reconfig = true;
-	barrier();
-
-	queue_work(system_freezable_wq, &local->restart_work);
+	schedule_work(&local->restart_work);
 }
+EXPORT_SYMBOL(mac80211_restart_hw);
 
 int mac80211_ifdev_move(struct ieee80211_hw *hw,
 			struct device *new_parent, int dpm_order)
@@ -461,14 +451,13 @@ int mac80211_ifdev_move(struct ieee80211_hw *hw,
 	int ret;
 
 	list_for_each_entry(sdata, &local->interfaces, list) {
-		if (sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE)
-			continue;
 		ret = device_move(&sdata->dev->dev, new_parent, dpm_order);
 		if (ret < 0)
 			return ret;
 	}
 	return 0;
 }
+EXPORT_SYMBOL(mac80211_ifdev_move);
 
 static void mac80211_recalc_smps_work(struct work_struct *work)
 {
@@ -719,12 +708,6 @@ ieee80211_default_mgmt_stypes[NUM_NL80211_IFTYPES] = {
 			BIT(IEEE80211_STYPE_AUTH >> 4) |
 			BIT(IEEE80211_STYPE_DEAUTH >> 4),
 	},
-	[NL80211_IFTYPE_P2P_DEVICE] = {
-		.tx = 0xffff,
-		.rx = BIT(IEEE80211_STYPE_ACTION >> 4) |
-			BIT(IEEE80211_STYPE_PROBE_REQ >> 4),
-	},
-
 };
 
 struct ieee80211_hw *mac80211_alloc_hw(size_t priv_data_len,
@@ -856,6 +839,7 @@ struct ieee80211_hw *mac80211_alloc_hw(size_t priv_data_len,
 
 	return local_to_hw(local);
 }
+EXPORT_SYMBOL(mac80211_alloc_hw);
 
 int mac80211_register_hw(struct ieee80211_hw *hw)
 {
@@ -1123,7 +1107,7 @@ int mac80211_register_hw(struct ieee80211_hw *hw)
 		if (result)
 			wiphy_warn(local->hw.wiphy,
 				   "Failed to add default virtual iface\n");
-#ifdef OLD_P2P_MODE
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 		result = mac80211_if_add(local, "p2p%d", NET_NAME_ENUM, NULL,
 							  NL80211_IFTYPE_STATION, NULL);
@@ -1134,8 +1118,6 @@ int mac80211_register_hw(struct ieee80211_hw *hw)
 		if (result)
 			wiphy_warn(local->hw.wiphy,
 				   "Failed to add default virtual p2p iface\n");
-#endif
-
 	}
 
 	rtnl_unlock();
@@ -1189,6 +1171,7 @@ int mac80211_register_hw(struct ieee80211_hw *hw)
 	kfree(local->int_scan_req);
 	return result;
 }
+EXPORT_SYMBOL(mac80211_register_hw);
 
 void mac80211_unregister_hw(struct ieee80211_hw *hw)
 {
@@ -1255,6 +1238,7 @@ void mac80211_unregister_hw(struct ieee80211_hw *hw)
 	ieee80211_led_exit(local);
 	kfree(local->int_scan_req);
 }
+EXPORT_SYMBOL(mac80211_unregister_hw);
 
 void mac80211_free_hw(struct ieee80211_hw *hw)
 {
@@ -1268,8 +1252,9 @@ void mac80211_free_hw(struct ieee80211_hw *hw)
 
 	wiphy_free(local->hw.wiphy);
 }
+EXPORT_SYMBOL(mac80211_free_hw);
 
-int __init ieee80211_init(void)
+static int __init ieee80211_init(void)
 {
 	struct sk_buff *skb;
 	int ret;
@@ -1305,7 +1290,7 @@ int __init ieee80211_init(void)
 	return ret;
 }
 
-void ieee80211_exit(void)
+static void __exit ieee80211_exit(void)
 {
 	xrmac_rc80211_pid_exit();
 	xrmac_rc80211_minstrel_ht_exit();
@@ -1322,6 +1307,10 @@ void ieee80211_exit(void)
 
 	rcu_barrier();
 }
+
+
+device_initcall(ieee80211_init);
+module_exit(ieee80211_exit);
 
 MODULE_DESCRIPTION("IEEE 802.11 subsystem");
 MODULE_LICENSE("GPL");

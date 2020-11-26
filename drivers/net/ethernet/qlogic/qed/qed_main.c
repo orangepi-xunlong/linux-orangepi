@@ -502,16 +502,8 @@ static irqreturn_t qed_single_int(int irq, void *dev_instance)
 		/* Fastpath interrupts */
 		for (j = 0; j < 64; j++) {
 			if ((0x2ULL << j) & status) {
-				struct qed_simd_fp_handler *p_handler =
-					&hwfn->simd_proto_handler[j];
-
-				if (p_handler->func)
-					p_handler->func(p_handler->token);
-				else
-					DP_NOTICE(hwfn,
-						  "Not calling fastpath handler as it is NULL [handler #%d, status 0x%llx]\n",
-						  j, status);
-
+				hwfn->simd_proto_handler[j].func(
+					hwfn->simd_proto_handler[j].token);
 				status &= ~(0x2ULL << j);
 				rc = IRQ_HANDLED;
 			}
@@ -1395,9 +1387,9 @@ static int qed_drain(struct qed_dev *cdev)
 			return -EBUSY;
 		}
 		rc = qed_mcp_drain(hwfn, ptt);
-		qed_ptt_release(hwfn, ptt);
 		if (rc)
 			return rc;
+		qed_ptt_release(hwfn, ptt);
 	}
 
 	return 0;

@@ -15,7 +15,6 @@
 #include <linux/lockdep.h>
 #include <linux/export.h>
 #include <linux/sysctl.h>
-#include <linux/suspend.h>
 #include <linux/utsname.h>
 #include <trace/events/sched.h>
 
@@ -31,7 +30,7 @@ int __read_mostly sysctl_hung_task_check_count = PID_MAX_LIMIT;
  * is disabled during the critical section. It also controls the size of
  * the RCU grace period. So it needs to be upper-bound.
  */
-#define HUNG_TASK_LOCK_BREAK (HZ / 10)
+#define HUNG_TASK_BATCHING 1024
 
 /*
  * Zero means infinite timeout - no checking done:
@@ -159,7 +158,7 @@ static bool rcu_lock_break(struct task_struct *g, struct task_struct *t)
 static void check_hung_uninterruptible_tasks(unsigned long timeout)
 {
 	int max_count = sysctl_hung_task_check_count;
-	unsigned long last_break = jiffies;
+	int batch_count = HUNG_TASK_BATCHING;
 	struct task_struct *g, *t;
 
 	/*
@@ -173,10 +172,10 @@ static void check_hung_uninterruptible_tasks(unsigned long timeout)
 	for_each_process_thread(g, t) {
 		if (!max_count--)
 			goto unlock;
-		if (time_after(jiffies, last_break + HUNG_TASK_LOCK_BREAK)) {
+		if (!--batch_count) {
+			batch_count = HUNG_TASK_BATCHING;
 			if (!rcu_lock_break(g, t))
 				goto unlock;
-			last_break = jiffies;
 		}
 		/* use "==" to skip the TASK_KILLABLE tasks waiting on NFS */
 		if (t->state == TASK_UNINTERRUPTIBLE)
@@ -222,28 +221,6 @@ void reset_hung_task_detector(void)
 }
 EXPORT_SYMBOL_GPL(reset_hung_task_detector);
 
-static bool hung_detector_suspended;
-
-static int hungtask_pm_notify(struct notifier_block *self,
-			      unsigned long action, void *hcpu)
-{
-	switch (action) {
-	case PM_SUSPEND_PREPARE:
-	case PM_HIBERNATION_PREPARE:
-	case PM_RESTORE_PREPARE:
-		hung_detector_suspended = true;
-		break;
-	case PM_POST_SUSPEND:
-	case PM_POST_HIBERNATION:
-	case PM_POST_RESTORE:
-		hung_detector_suspended = false;
-		break;
-	default:
-		break;
-	}
-	return NOTIFY_OK;
-}
-
 /*
  * kthread which checks for tasks stuck in D state
  */
@@ -258,8 +235,7 @@ static int watchdog(void *dummy)
 		long t = hung_timeout_jiffies(hung_last_checked, timeout);
 
 		if (t <= 0) {
-			if (!atomic_xchg(&reset_hung_task, 0) &&
-			    !hung_detector_suspended)
+			if (!atomic_xchg(&reset_hung_task, 0))
 				check_hung_uninterruptible_tasks(timeout);
 			hung_last_checked = jiffies;
 			continue;
@@ -273,10 +249,6 @@ static int watchdog(void *dummy)
 static int __init hung_task_init(void)
 {
 	atomic_notifier_chain_register(&panic_notifier_list, &panic_block);
-
-	/* Disable hung task detector on suspend */
-	pm_notifier(hungtask_pm_notify, 0);
-
 	watchdog_task = kthread_run(watchdog, NULL, "khungtaskd");
 
 	return 0;

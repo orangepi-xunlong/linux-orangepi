@@ -223,9 +223,6 @@ snd-soc-tas2552-objs := tas2552.o
 #Wolfgang add acx00
 snd-soc-acx00-objs := acx00.o
 
-#Sunxi add ac107
-snd-soc-ac107-objs := ac107.o
-
 obj-$(CONFIG_SND_SOC_88PM860X)	+= snd-soc-88pm860x.o
 obj-$(CONFIG_SND_SOC_AB8500_CODEC)	+= snd-soc-ab8500-codec.o
 obj-$(CONFIG_SND_SOC_AC97_CODEC)	+= snd-soc-ac97.o
@@ -447,6 +444,3 @@ obj-$(CONFIG_SND_SOC_MAX98504)	+= snd-soc-max98504.o
 obj-$(CONFIG_SND_SOC_TPA6130A2)	+= snd-soc-tpa6130a2.o
 # Wolfgang add ACX00
 obj-$(CONFIG_SND_SOC_ACX00)	+= snd-soc-acx00.o
-
-# Sunxi add AC107
-obj-$(CONFIG_SND_SOC_AC107)	+= snd-soc-ac107.o

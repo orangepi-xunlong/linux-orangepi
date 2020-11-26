@@ -23,7 +23,6 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
-#include <linux/pm_wakeirq.h>
 #ifdef CONFIG_SUNXI_ARISC
 #include <linux/arisc/arisc.h>
 #endif
@@ -38,7 +37,7 @@ int axp_dev_register_count;
 struct work_struct axp_irq_work;
 /* used for mark whether a pwr_dm belongs to sys_pwr_dm or not. */
 static u32 axp_sys_pwr_dm_mask;
-u32 axp_power_tree[VCC_MAX_INDEX] = {0};
+static u32 axp_power_tree[VCC_MAX_INDEX] = {0};
 static DEFINE_SPINLOCK(axp_pwr_data_lock);
 int axp_usb_connect;
 
@@ -1197,19 +1196,6 @@ void axp_irq_chip_unregister(int irq, struct axp_irq_chip_data *irq_data)
 	sunxi_nmi_disable();
 }
 EXPORT_SYMBOL_GPL(axp_irq_chip_unregister);
-
-struct wakeup_source *axp_wakeup_source_init(struct device *dev, int irq)
-{
-#ifdef CONFIG_PM_SLEEP
-	device_init_wakeup(dev, true);
-	dev_pm_set_wake_irq(dev, irq);
-
-	return dev->power.wakeup;
-#else
-	return NULL;
-#endif
-}
-EXPORT_SYMBOL_GPL(axp_wakeup_source_init);
 
 int axp_request_irq(struct axp_dev *adev, int irq_no,
 				irq_handler_t handler, void *data)

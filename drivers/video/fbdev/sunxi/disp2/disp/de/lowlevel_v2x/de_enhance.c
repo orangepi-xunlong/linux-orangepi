@@ -390,24 +390,6 @@ int de_enhance_init(struct disp_bsp_init_para *para)
 
 	for (screen_id = 0; screen_id < device_num; screen_id++)
 		for (ch_id = 0; ch_id < vep_num[screen_id]; ch_id++) {
-#if defined(CONFIG_ARCH_SUN50IW10)
-			de_fce_init(screen_id, ch_id,
-				    para->reg_base[DISP_MOD_DE + screen_id]);
-#ifdef LTI_EXIST
-			de_lti_init(screen_id, ch_id,
-				    para->reg_base[DISP_MOD_DE + screen_id]);
-#endif
-			de_peak_init(screen_id, ch_id,
-				     para->reg_base[DISP_MOD_DE + screen_id]);
-#ifdef ASE_EXIST
-			de_ase_init(screen_id, ch_id,
-				    para->reg_base[DISP_MOD_DE + screen_id]);
-#endif
-#ifdef FCC_EXIST
-			de_fcc_init(screen_id, ch_id,
-				    para->reg_base[DISP_MOD_DE + screen_id]);
-#endif
-#else/*for CONFIG_ARCH_SUN50IW10*/
 			de_fce_init(screen_id, ch_id,
 				    para->reg_base[DISP_MOD_DE]);
 #ifdef LTI_EXIST
@@ -423,7 +405,6 @@ int de_enhance_init(struct disp_bsp_init_para *para)
 #ifdef FCC_EXIST
 			de_fcc_init(screen_id, ch_id,
 				    para->reg_base[DISP_MOD_DE]);
-#endif
 #endif
 		}
 

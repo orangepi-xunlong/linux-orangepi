@@ -248,7 +248,6 @@ static const struct ieee80211_ops xradio_ops = {
 #ifdef CONFIG_XRADIO_TESTMODE
 	.testmode_cmd      = xradio_testmode_cmd,
 #endif /* CONFIG_XRADIO_TESTMODE */
-	.change_mac 	   = xradio_change_mac,
 };
 
 struct xradio_common *g_hw_priv;
@@ -567,7 +566,7 @@ static int xradio_device_init(struct xradio_common *hw_priv)
 		hw_priv->plat_device = NULL;
 		return ret;
 	}
-
+	hw_priv->pdev = &hw_priv->plat_device->dev;
 	return 0;
 
 }
@@ -666,8 +665,7 @@ struct ieee80211_hw *xradio_init_common(size_t hw_priv_data_len)
 				     BIT(NL80211_IFTYPE_AP)         |
 				     BIT(NL80211_IFTYPE_MESH_POINT) |
 				     BIT(NL80211_IFTYPE_P2P_CLIENT) |
-				     BIT(NL80211_IFTYPE_P2P_GO)     |
-				     BIT(NL80211_IFTYPE_P2P_DEVICE);
+				     BIT(NL80211_IFTYPE_P2P_GO);
 
 	/* Support only for limited wowlan functionalities */
 #ifdef CONFIG_PM
@@ -750,7 +748,6 @@ struct ieee80211_hw *xradio_init_common(size_t hw_priv_data_len)
 #endif /*ROAM_OFFLOAD*/
 	INIT_DELAYED_WORK(&hw_priv->scan.probe_work, xradio_probe_work);
 	INIT_DELAYED_WORK(&hw_priv->scan.timeout, xradio_scan_timeout);
-	hw_priv->scan.scan_failed_cnt = 0;
 	INIT_DELAYED_WORK(&hw_priv->rem_chan_timeout, xradio_rem_chan_timeout);
 	INIT_WORK(&hw_priv->tx_policy_upload_work, tx_policy_upload_work);
 	atomic_set(&hw_priv->upload_count, 0);
@@ -935,19 +932,11 @@ void xradio_unregister_common(struct ieee80211_hw *dev)
 }
 
 #ifdef HW_RESTART
-static int xradio_find_rfkill(struct device *dev, void *data)
-{
-	if (dev_name(dev)[0] == 'r' && dev_name(dev)[1] == 'f')
-		return true;
-	return false;
-}
-
 int xradio_core_reinit(struct xradio_common *hw_priv)
 {
 	int ret = 0;
 	u16 ctrl_reg;
 	int i = 0;
-	struct device *rfkill;
 	struct xradio_vif *priv = NULL;
 	struct wsm_operational_mode mode = {
 		.power_mode = wsm_power_mode_quiescent,
@@ -1007,18 +996,6 @@ int xradio_core_reinit(struct xradio_common *hw_priv)
 	hw_priv->query_packetID = 0;
 	tx_policy_init(hw_priv);
 
-	/*move parent to plat_device*/
-	ret = device_move(&hw_priv->hw->wiphy->dev, &hw_priv->plat_device->dev, 0);
-	if (ret < 0) {
-		xradio_dbg(XRADIO_DBG_ERROR, "%s:device move parent to plat_device failed\n", __func__);
-		goto exit;
-	}
-	ret = mac80211_ifdev_move(hw_priv->hw, &hw_priv->plat_device->dev, 0);
-	if (ret < 0) {
-		xradio_dbg(XRADIO_DBG_ERROR, "%s:net_device move parent to plat_device failed\n", __func__);
-		goto exit;
-	}
-
 	/*reinit sdio sbus. */
 	sbus_sdio_deinit();
 	hw_priv->pdev = sbus_sdio_init((struct sbus_ops **)&hw_priv->sbus_ops,
@@ -1028,23 +1005,6 @@ int xradio_core_reinit(struct xradio_common *hw_priv)
 		ret = -ETIMEDOUT;
 		goto exit;
 	}
-
-	/*move parent to sdio device*/
-	ret = device_move(&hw_priv->hw->wiphy->dev, hw_priv->pdev, 1);
-	if (ret < 0) {
-		xradio_dbg(XRADIO_DBG_ERROR, "%s:device move parent to sdio failed\n", __func__);
-		goto exit;
-	}
-	SET_IEEE80211_DEV(hw_priv->hw, hw_priv->pdev);
-	ret = mac80211_ifdev_move(hw_priv->hw, hw_priv->pdev, 1);
-	if (ret < 0) {
-		xradio_dbg(XRADIO_DBG_ERROR, "%s:net_device move parent to sdio failed\n", __func__);
-		goto exit;
-	}
-
-	rfkill = device_find_child(&hw_priv->hw->wiphy->dev, NULL, xradio_find_rfkill);
-	device_move(rfkill, &hw_priv->hw->wiphy->dev, 1);
-	put_device(rfkill);
 
 	/*wake up bh thread. */
 	if (hw_priv->bh_thread == NULL) {
@@ -1200,9 +1160,8 @@ int xradio_core_init(void)
 	}
 
 	/*init sdio sbus */
-	hw_priv->pdev = sbus_sdio_init((struct sbus_ops **)&hw_priv->sbus_ops,
-				&hw_priv->sbus_priv);
-	if (!hw_priv->pdev) {
+	if (!sbus_sdio_init((struct sbus_ops **)&hw_priv->sbus_ops,
+				&hw_priv->sbus_priv)) {
 		err = -ETIMEDOUT;
 		xradio_dbg(XRADIO_DBG_ERROR, "sbus_sdio_init failed\n");
 		goto err1;
@@ -1306,6 +1265,7 @@ err1:
 	xradio_free_common(dev);
 	return err;
 }
+EXPORT_SYMBOL_GPL(xradio_core_init);
 
 void xradio_core_deinit(void)
 {
@@ -1339,9 +1299,10 @@ void xradio_core_deinit(void)
 	}
 	return;
 }
+EXPORT_SYMBOL_GPL(xradio_core_deinit);
 
 /* Init Module function -> Called by insmod */
-int __init xradio_core_entry(void)
+static int __init xradio_core_entry(void)
 {
 	int ret = 0;
 	xradio_dbg(XRADIO_DBG_TRC, "%s\n", __func__);
@@ -1369,7 +1330,7 @@ int __init xradio_core_entry(void)
 }
 
 /* Called at Driver Unloading */
-void xradio_core_exit(void)
+static void __exit xradio_core_exit(void)
 {
 #ifdef CONFIG_XRADIO_ETF
 	xradio_etf_deinit();
@@ -1378,4 +1339,7 @@ void xradio_core_exit(void)
 	xradio_plat_deinit();
 	xradio_dbg(XRADIO_DBG_TRC, "%s\n", __func__);
 }
+
+module_init(xradio_core_entry);
+module_exit(xradio_core_exit);
 

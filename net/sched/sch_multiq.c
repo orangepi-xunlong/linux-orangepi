@@ -234,7 +234,7 @@ static int multiq_tune(struct Qdisc *sch, struct nlattr *opt)
 static int multiq_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct multiq_sched_data *q = qdisc_priv(sch);
-	int i;
+	int i, err;
 
 	q->queues = NULL;
 
@@ -249,7 +249,12 @@ static int multiq_init(struct Qdisc *sch, struct nlattr *opt)
 	for (i = 0; i < q->max_bands; i++)
 		q->queues[i] = &noop_qdisc;
 
-	return multiq_tune(sch, opt);
+	err = multiq_tune(sch, opt);
+
+	if (err)
+		kfree(q->queues);
+
+	return err;
 }
 
 static int multiq_dump(struct Qdisc *sch, struct sk_buff *skb)

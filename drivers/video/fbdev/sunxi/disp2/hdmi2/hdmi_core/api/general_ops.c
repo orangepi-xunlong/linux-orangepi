@@ -8,6 +8,7 @@
  * warranty of any kind, whether express or implied.
  */
 #include "../../config.h"
+#if defined(__LINUX_PLAT__)
 
 #include <linux/gpio.h>
 #include <linux/regulator/consumer.h>
@@ -20,8 +21,10 @@
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 #include <linux/compat.h>
-
+#endif
 #include "general_ops.h"
+
+static errorType_t errorCode = NO_ERROR;
 
 u16 concat_bits(u8 bHi, u8 oHi, u8 nHi, u8 bLo, u8 oLo, u8 nLo)
 {
@@ -48,3 +51,18 @@ u32 byte_to_dword(u8 b3, u8 b2, u8 b1, u8 b0)
 	retval |= b3 << (3 * 8);
 	return retval;
 }
+
+void error_set(errorType_t err)
+{
+	if ((err > NO_ERROR) && (err < ERR_UNDEFINED_HTX))
+		errorCode = err;
+}
+
+errorType_t error_Get(void)
+{
+	errorType_t tmpErr = errorCode;
+
+	errorCode = NO_ERROR;
+	return tmpErr;
+}
+

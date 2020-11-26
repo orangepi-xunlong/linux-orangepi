@@ -31,12 +31,12 @@
 #include "../vin-vipp/sunxi_scaler.h"
 #include "dma_reg.h"
 
+#define USE_BIG_PIPELINE 0
+
 /* buffer for one video frame */
 struct vin_buffer {
 	struct vb2_v4l2_buffer vb;
 	struct list_head list;
-	void *paddr;
-	enum vb2_buffer_state state;
 };
 
 #define VIN_SD_PAD_SINK		0
@@ -50,7 +50,6 @@ enum vin_subdev_ind {
 	VIN_IND_ISP,
 	VIN_IND_SCALER,
 	VIN_IND_CAPTURE,
-	VIN_IND_TDM_RX,
 	VIN_IND_ACTUATOR,
 	VIN_IND_FLASH,
 	VIN_IND_STAT,
@@ -59,12 +58,18 @@ enum vin_subdev_ind {
 
 enum vin_state_flags {
 	VIN_LPM,
+
+	VIN_RUN,
+	VIN_PEND,
+	VIN_SUSPENDED,
 	VIN_STREAM,
+	VIN_SHUT,
 	VIN_BUSY,
-	VIN_STATE_MAX,
+	VIN_APPLY_CFG,
 };
 
-#define vin_lpm(dev) test_bit(VIN_LPM, &(dev)->state)
+#define vin_running(dev) test_bit(VIN_RUN, &(dev)->state)
+#define vin_pending(dev) test_bit(VIN_PEND, &(dev)->state)
 #define vin_busy(dev) test_bit(VIN_BUSY, &(dev)->state)
 #define vin_streaming(dev) test_bit(VIN_STREAM, &(dev)->state)
 #define CEIL_EXP(a, b) (((a)>>(b)) + (((a)&((1<<(b))-1)) ? 1 : 0))
@@ -73,6 +78,14 @@ struct vin_pipeline {
 	struct media_pipeline pipe;
 	struct v4l2_subdev *sd[VIN_IND_MAX];
 };
+#if USE_BIG_PIPELINE
+/*
+ * valid only when pipe streamon, where
+ * media_entity_pipeline_start is called.
+ */
+#define to_vin_pipeline(e) (((e)->pipe == NULL) ? NULL : \
+	container_of((e)->pipe, struct vin_pipeline, pipe))
+#endif
 
 enum vin_fmt_flags {
 	VIN_FMT_YUV = (1 << 0),
@@ -105,6 +118,15 @@ struct vin_addr {
 	u32	cr;
 };
 
+struct vin_dma_offset {
+	int	y_h;
+	int	y_v;
+	int	cb_h;
+	int	cb_v;
+	int	cr_h;
+	int	cr_v;
+};
+
 struct vin_frame {
 	u32	o_width;
 	u32	o_height;
@@ -115,36 +137,28 @@ struct vin_frame {
 	unsigned long		payload[VIDEO_MAX_PLANES];
 	unsigned long		bytesperline[VIDEO_MAX_PLANES];
 	struct vin_addr	paddr;
+	struct vin_dma_offset	dma_offset;
 	struct vin_fmt	fmt;
 };
 
 /* osd settings */
 struct vin_osd {
-	u8 is_set;
-	u8 ov_set_cnt;
-	u8 overlay_en;
-	u8 cover_en;
-	u8 orl_en;
-	u8 overlay_cnt;
-	u8 cover_cnt;
-	u8 orl_cnt;
-	u8 inv_th;
-	u8 inverse_close[MAX_OVERLAY_NUM];
-	u8 inv_w_rgn[MAX_OVERLAY_NUM];
-	u8 inv_h_rgn[MAX_OVERLAY_NUM];
-	u8 global_alpha[MAX_OVERLAY_NUM];
-	u8 y_bmp_avp[MAX_OVERLAY_NUM];
-	u8 yuv_cover[3][MAX_COVER_NUM];
-	u8 yuv_orl[3][MAX_ORL_NUM];
-	u8 orl_width;
+	int is_set;
+	int ov_set_cnt;
+	int overlay_en;
+	int cover_en;
+	int overlay_cnt;
+	int cover_cnt;
 	int chromakey;
+	int inverse_close[MAX_OVERLAY_NUM];
 	enum vipp_osd_argb overlay_fmt;
 	struct vin_mm ov_mask[2];	/* bitmap addr */
+	int y_bmp_avp[MAX_OVERLAY_NUM];
+	int global_alpha[MAX_OVERLAY_NUM];
 	struct v4l2_rect ov_win[MAX_OVERLAY_NUM];	/* position */
 	struct v4l2_rect cv_win[MAX_COVER_NUM];	/* position */
-	struct v4l2_rect orl_win[MAX_ORL_NUM];	/* position */
 	int rgb_cover[MAX_COVER_NUM];
-	int rgb_orl[MAX_ORL_NUM];
+	u8 yuv_cover[3][MAX_COVER_NUM];
 	struct vin_fmt *fmt;
 };
 
@@ -156,13 +170,11 @@ struct vin_vid_cap {
 	struct vb2_queue vb_vidq;
 	struct device *dev;
 	struct list_head vidq_active;
-	struct list_head vidq_done;
 	unsigned int isp_wdr_mode;
 	unsigned int capture_mode;
 	unsigned int buf_byte_size; /* including main and thumb buffer */
 	/*working state */
-	bool registered;
-	bool special_active;
+	unsigned long registered;
 	struct mutex lock;
 	unsigned int first_flag; /* indicate the first time triggering irq */
 	struct timeval ts;
@@ -179,12 +191,11 @@ struct vin_vid_cap {
 	struct work_struct s_stream_task;
 	struct work_struct pipeline_reset_task;
 	unsigned long state;
-	struct dma_lbc_cmp lbc_cmp;
-	struct dma_bufa_threshold threshold;
-	void (*vin_buffer_process)(int id);
 };
 
-#if defined CONFIG_ARCH_SUN8IW12P1
+#define pipe_to_vin_video(p) \
+		container_of(p, struct vin_vid_cap, pipe)
+
 static inline int vin_cmp(const void *a, const void *b)
 {
 	return *(int *)a - *(int *)b;
@@ -209,15 +220,10 @@ static inline int vin_unique(int *a, int number)
 	}
 	return k + 1;
 }
-#endif
+
 int vin_set_addr(struct vin_core *vinc, struct vb2_buffer *vb,
 		      struct vin_frame *frame, struct vin_addr *paddr);
-int vin_timer_init(struct vin_core *vinc);
-void vin_timer_del(struct vin_core *vinc);
-void vin_timer_update(struct vin_core *vinc, int ms);
-int sensor_flip_option(struct vin_vid_cap *cap, struct v4l2_control c);
-void vin_set_next_buf_addr(struct vin_core *vinc);
-void vin_get_rest_buf_cnt(struct vin_core *vinc);
+
 int vin_initialize_capture_subdev(struct vin_core *vinc);
 void vin_cleanup_capture_subdev(struct vin_core *vinc);
 

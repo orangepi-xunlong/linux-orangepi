@@ -1,20 +1,3 @@
-/*
- * Based on drivers/input/keyboard/sunxi-keyboard.h
- *
- * Copyright (C) 2015 Allwinnertech Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
 #ifndef SUNXI_KEYBOARD_H
 #define SUNXI_KEYBOARD_H
 
@@ -33,9 +16,8 @@
 #define ADC_CHAN_SELECT         (CHAN<<22)
 #define LRADC_KEY_MODE          (0)
 #define KEY_MODE_SELECT         (LRADC_KEY_MODE<<12)
-#define LRADC_HOLD_KEY_EN	(0<<7)
-#define LRADC_HOLD_EN        (1<<6)
 #define LEVELB_VOL              (0<<4)
+#define LRADC_HOLD_EN           (1<<6)
 #define LRADC_SAMPLE_32HZ       (3<<2)
 #define LRADC_SAMPLE_62HZ       (2<<2)
 #define LRADC_SAMPLE_125HZ      (1<<2)

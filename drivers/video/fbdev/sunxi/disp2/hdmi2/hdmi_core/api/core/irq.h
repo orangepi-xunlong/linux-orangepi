@@ -216,14 +216,50 @@ typedef enum irq_sources {
 #define IH_MUTE_MUTE_ALL_INTERRUPT_MASK  0x00000001 /* When set to 1, mutes the main interrupt line (where all interrupts are ORed) */
 #define IH_MUTE_MUTE_WAKEUP_INTERRUPT_MASK  0x00000002 /* When set to 1, mutes the main interrupt output port */
 
+int irq_read_stat(hdmi_tx_dev_t *dev, irq_sources_t irq_source, u8 *stat);
+
+int irq_clear_source(hdmi_tx_dev_t *dev, irq_sources_t irq_source);
+int irq_clear_bit(hdmi_tx_dev_t *dev, irq_sources_t irq_source, u8 bit_mask);
+
 int irq_mute_source(hdmi_tx_dev_t *dev, irq_sources_t irq_source);
 int irq_unmute_source(hdmi_tx_dev_t *dev, irq_sources_t irq_source);
 
 void irq_mute(hdmi_tx_dev_t *dev);
 void irq_unmute(hdmi_tx_dev_t *dev);
 
+void irq_clear_all(hdmi_tx_dev_t *dev);
 void irq_mask_all(hdmi_tx_dev_t *dev);
 
+int irq_mask_bit(hdmi_tx_dev_t *dev, irq_sources_t irq_source, u8 bit_mask);
+int irq_unmask_bit(hdmi_tx_dev_t *dev, irq_sources_t irq_source, u8 bit_mask);
+
+
 extern void irq_hpd_sense_enable(hdmi_tx_dev_t *dev, u8 enable);
+
+void irq_scdc_read_request(hdmi_tx_dev_t *dev, int enable);
+
+/**
+ * Decode functions
+ */
+u32 read_interrupt_decode(hdmi_tx_dev_t *dev);
+
+int decode_is_fc_stat0(u32 decode);
+
+int decode_is_fc_stat1(u32 decode);
+
+int decode_is_fc_stat2_vp(u32 decode);
+
+int decode_is_as_stat0(u32 decode);
+
+int decode_is_phy(u32 decode);
+
+int decode_is_phy_lock(u32 decode);
+
+int decode_is_phy_hpd(u32 decode);
+
+int decode_is_i2c_stat0(u32 decode);
+
+int decode_is_cec_stat0(u32 decode);
+
 
 #endif	/* HALINTERRUPT_H_ */

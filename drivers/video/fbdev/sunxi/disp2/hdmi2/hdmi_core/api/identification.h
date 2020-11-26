@@ -15,7 +15,6 @@
 #include "log.h"
 #include "access.h"
 
-#if 0
 #define PRODUCT_HDMI_TX  0xA0
 
 /*****************************************************************************
@@ -108,6 +107,7 @@ int id_hdcp14_support(hdmi_tx_dev_t *dev);
 int id_hdcp22_support(hdmi_tx_dev_t *dev);
 
 int id_phy(hdmi_tx_dev_t *dev);
-#endif
 
 #endif /* INCLUDE_IDENTIFICATION_IDENTIFICATION_H_ */
+
+

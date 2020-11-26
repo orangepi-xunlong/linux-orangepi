@@ -98,11 +98,6 @@ size_t xradio_queue_get_num_queued(struct xradio_vif *priv,
 				   u32 link_id_map);
 int xradio_queue_put(struct xradio_queue *queue,
 		     struct sk_buff *skb, struct xradio_txpriv *txpriv);
-
-void xradio_skb_post_gc(struct xradio_common *hw_priv,
-		     struct sk_buff *skb,
-		     const struct xradio_txpriv *txpriv);
-
 int xradio_queue_get(struct xradio_queue *queue,
 		     int if_id, u32 link_id_map,
 		     struct wsm_tx **tx,

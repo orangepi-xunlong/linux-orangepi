@@ -16,16 +16,6 @@
 
 #ifndef _CONFIG_H_
 #define  _CONFIG_H_
-
-/*__FPGA_PLAT__*/
-
-#ifdef CONFIG_ARCH_SUN8IW16
-#define SUPPORT_ONLY_HDMI14
-#define USE_CSC
-#define TCON_PAN_SEL
-
-#elif CONFIG_ARCH_SUN50IW9
-#define TCON_PAN_SEL
-#endif
+#define __LINUX_PLAT__
 
 #endif

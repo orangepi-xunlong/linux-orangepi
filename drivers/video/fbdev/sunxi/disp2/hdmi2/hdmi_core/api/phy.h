@@ -256,6 +256,19 @@ struct phy_config303 {
 int phy_initialize(hdmi_tx_dev_t *dev, u16 phy_model);
 
 /**
+ * Check if PHY configuration is supported
+ * @param dev device structure
+ * return always TRUE
+ *
+ * Note: This function uses data from dev so make sure this is updated
+ * with the current configuration. Data used:
+ *  - dev->snps_hdmi_ctrl.pixel_clock
+ *  - dev->snps_hdmi_ctrl.color_resolution
+ *  - dev->snps_hdmi_ctrl.pixel_repetition
+ */
+int phy_configuration_supported(hdmi_tx_dev_t *dev, u16 phy_model);
+
+/**
  * Bring up PHY and start sending media for a specified pixel clock, pixel
  * repetition and color resolution (to calculate TMDS) - this fields must
  * be configured in the dev->snps_hdmi_ctrl variables
@@ -283,6 +296,32 @@ int phy_enable_hpd_sense(hdmi_tx_dev_t *dev);
  */
 int phy_disable_hpd_sense(hdmi_tx_dev_t *dev);
 
+/**
+ * Detects the signal on the HPD line and
+ * upon change, it inverts polarity of the interrupt
+ * bit so that interrupt raises only on change
+ * @param dev device structure
+ * @return TRUE the HPD line is asserted
+ */
+int phy_hot_plug_detected(hdmi_tx_dev_t *dev);
+
+/**
+ * @param dev device structure
+ * @param value of mask of interrupt register
+ */
+int phy_interrupt_enable(hdmi_tx_dev_t *dev, u8 value);
+
+/**
+ * @param baseAddr of controller
+ * @param value
+ */
+int phy_test_control(hdmi_tx_dev_t *dev, u8 value);
+
+/**
+ * @param dev device structure
+ * @param value
+ */
+int phy_test_data(hdmi_tx_dev_t *dev, u8 value);
 int phy_i2c_read(hdmi_tx_dev_t *dev, u8 addr, u16 *value);
 int phy_i2c_write(hdmi_tx_dev_t *dev, u8 addr, u16 data);
 

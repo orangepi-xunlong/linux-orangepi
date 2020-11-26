@@ -57,7 +57,7 @@ u8 sd_f0_read8(struct intf_hdl *pintfhdl, u32 addr, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return v;
 	}
 
@@ -90,7 +90,7 @@ void sd_f0_write8(struct intf_hdl *pintfhdl, u32 addr, u8 v, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return;
 	}
 
@@ -126,7 +126,7 @@ s32 _sd_cmd52_read(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, u8 *pdata)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return err;
 	}
 
@@ -164,7 +164,7 @@ s32 sd_cmd52_read(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, u8 *pdata)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return err;
 	}
 
@@ -200,7 +200,7 @@ s32 _sd_cmd52_write(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, u8 *pdata)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return err;
 	}
 
@@ -238,7 +238,7 @@ s32 sd_cmd52_write(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, u8 *pdata)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return err;
 	}
 
@@ -269,7 +269,7 @@ u8 _sd_read8(struct intf_hdl *pintfhdl, u32 addr, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return v;
 	}
 
@@ -299,7 +299,7 @@ u8 sd_read8(struct intf_hdl *pintfhdl, u32 addr, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return v;
 	}
 
@@ -333,7 +333,7 @@ u16 sd_read16(struct intf_hdl *pintfhdl, u32 addr, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return v;
 	}
 
@@ -366,7 +366,7 @@ u32 _sd_read32(struct intf_hdl *pintfhdl, u32 addr, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return v;
 	}
 
@@ -426,7 +426,7 @@ u32 sd_read32(struct intf_hdl *pintfhdl, u32 addr, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return v;
 	}
 
@@ -493,7 +493,7 @@ void sd_write8(struct intf_hdl *pintfhdl, u32 addr, u8 v, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return ;
 	}
 
@@ -524,7 +524,7 @@ void sd_write16(struct intf_hdl *pintfhdl, u32 addr, u16 v, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return ;
 	}
 
@@ -554,7 +554,7 @@ void _sd_write32(struct intf_hdl *pintfhdl, u32 addr, u32 v, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return ;
 	}
 
@@ -607,7 +607,7 @@ void sd_write32(struct intf_hdl *pintfhdl, u32 addr, u32 v, s32 *err)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return ;
 	}
 
@@ -685,7 +685,7 @@ s32 _sd_read(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, void *pdata)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return err;
 	}
 
@@ -745,7 +745,7 @@ s32 sd_read(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, void *pdata)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return err;
 	}
 	func = psdio->func;
@@ -789,7 +789,7 @@ s32 _sd_write(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, void *pdata)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return err;
 	}
 
@@ -847,7 +847,7 @@ s32 sd_write(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, void *pdata)
 	psdio = &psdiodev->intf_data;
 
 	if (rtw_is_surprise_removed(padapter)) {
-		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__func__); */
+		/* RTW_INFO(" %s (padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n",__FUNCTION__); */
 		return err;
 	}
 

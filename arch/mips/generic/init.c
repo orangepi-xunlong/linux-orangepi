@@ -159,7 +159,6 @@ void __init arch_init_irq(void)
 					    "mti,cpu-interrupt-controller");
 	if (!cpu_has_veic && !intc_node)
 		mips_cpu_irq_init();
-	of_node_put(intc_node);
 
 	irqchip_init();
 }

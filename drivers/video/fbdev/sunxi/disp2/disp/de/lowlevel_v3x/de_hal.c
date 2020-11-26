@@ -368,20 +368,45 @@ int de_get_layer_config(struct disp_layer_config_data *data,
 {
 	unsigned char i, j, k;
 	int ret;
-	struct sunxi_metadata *smtdt = NULL;
-	struct afbc_header *metadata = NULL;
 
 	for (j = 0, k = 0; j < chn; j++) {
 		/* add afbc1.0*/
 		if ((data[k].config.info.fb.fbd_en) &&
 		    (data[k].config.info.fb.metadata_flag & (0x1 << 4))) {
 			void *vaddr;
-			smtdt = data[k].config.info.fb.p_metadata;
-			metadata = data[k].config.info.fb.p_afbc_header;
-			if (!smtdt || !metadata) {
-				__wrn("afbc metadata null pointer k=%d j=%d\n", k, j);
+			struct sunxi_metadata *smtdt = 0;
+			struct afbc_header *metadata = 0;
+			struct dma_buf *dmabuf =
+				dma_buf_get(data[k].config.info.fb.metadata_fd);
+			/*unsigned long start;*/
+
+			if (IS_ERR(dmabuf)) {
+				__wrn("dma_buf_get failed, fd=%d\n",
+				      data[k].config.info.fb.metadata_fd);
 				break;
 			}
+
+			smtdt = (struct sunxi_metadata *)0;
+			metadata = &(smtdt->afbc_head);
+			/*start = (unsigned long)metadata - (unsigned long)smtdt;*/
+			/*FIXME:not support range base any more use ioctl */
+			 /*DMA_BUF_IOCTL_SYNC instead*/
+			ret = dma_buf_begin_cpu_access(dmabuf, DMA_FROM_DEVICE);
+			if (ret) {
+				dma_buf_put(dmabuf);
+				__wrn("dmabuf cpu aceess failed\n");
+				break;
+			}
+			vaddr = dma_buf_kmap(dmabuf, 0);
+			if (!vaddr) {
+				__wrn("dma_buf_kmap failed\n");
+				dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+				dma_buf_put(dmabuf);
+				break;
+			}
+
+			smtdt = (struct sunxi_metadata *)vaddr;
+			metadata = &(smtdt->afbc_head);
 
 			cfg[k].fmt = afbc_get_fmt(metadata);
 			cfg[k].layer.w = metadata->width;
@@ -391,6 +416,9 @@ int de_get_layer_config(struct disp_layer_config_data *data,
 			cfg[k].top_crop = metadata->top_crop;
 			cfg[k].left_crop = metadata->left_crop;
 			cfg[k].yuv_trans = metadata->yuv_transform;
+			dma_buf_kunmap(dmabuf, 0, vaddr);
+			dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+			dma_buf_put(dmabuf);
 		}
 		for (i = 0; i < layno;) {
 			cfg[k].fbd_en = data[k].config.info.fb.fbd_en;

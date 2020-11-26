@@ -36,6 +36,7 @@ static wait_queue_head_t               esm_wait;
 static struct workqueue_struct 		   *hdcp22_workqueue;
 static struct work_struct			   hdcp22_work;
 static esm_instance_t *esm;
+static int esm_state;
 
 static void hdcp22_authenticate_work(struct work_struct *work);
 static int esm_encrypt_status_check(void);
@@ -159,6 +160,7 @@ int esm_tx_initial(unsigned long esm_hpi_base,
 	esm_enable = 0;
 	esm_set_cap = 0;
 	authenticate_state = 0;
+	esm_state = -1;
 	memset(pairdata, 0, PAIRDATA_SIZE);
 
 	esm = kmalloc(sizeof(esm_instance_t), GFP_KERNEL | __GFP_ZERO);
@@ -197,14 +199,12 @@ int esm_tx_open(void)
 		goto set_capability;
 	}
 	esm_on = 1;
+	esm_state = -1;
 
 	if ((esm->driver != NULL) && esm->driver->vir_data_base)
 		memset((void *)esm->driver->vir_data_base, 0, esm->driver->data_size);
 
 	memset(&esm_config, 0, sizeof(esm_config_t));
-
-	esm_check_print(esm->driver->code_base, esm->driver->vir_code_base, esm->driver->code_size,
-			esm->driver->data_base, esm->driver->vir_data_base, esm->driver->data_size);
 	err = ESM_Initialize(esm,
 			esm->driver->code_base,
 			esm->driver->code_size,
@@ -253,6 +253,7 @@ static int hdcp22_set_authenticate(void)
 	ESM_STATUS err;
 
 	mutex_lock(&authen_mutex);
+	esm_state = -1;
 	err = ESM_Authenticate(esm, 1, 1, 0);
 	if (err != 0) {
 		authenticate_state = 0;
@@ -401,22 +402,25 @@ int esm_encrypt_status_check_and_handle(void)
 		hdcp22_data_enable(0);
 		msleep(25);
 		if (!hdcp22_set_authenticate()) {
+			esm_state = 1;
 			mutex_unlock(&esm_ctrl);
 			return 1;
 		} else {
+			esm_state = -1;
 			mutex_unlock(&esm_ctrl);
 			return -1;
 		}
 	} else if (encrypt_status == -2) {
 		mutex_unlock(&esm_ctrl);
-		return -2;
+		return esm_state;
 	} else if (encrypt_status == 0) {
 		hdcp22_data_enable(1);
+		esm_state = 0;
 		mutex_unlock(&esm_ctrl);
 		return 0;
 	}
 	mutex_unlock(&esm_ctrl);
-	return -2;
+	return esm_state;
 }
 
 ssize_t hdcp22_dump(char *buf)

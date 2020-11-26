@@ -2,13 +2,13 @@
  * IP Packet Parser Module.
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -287,20 +287,10 @@ static void _tdata_psh_info_pool_deinit(dhd_pub_t *dhdp,
 	return;
 }
 
-static void dhd_tcpack_send(
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-	struct timer_list *t
-#else
-	ulong data
-#endif
-)
+static void dhd_tcpack_send(ulong data)
 {
 	tcpack_sup_module_t *tcpack_sup_mod;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-	tcpack_info_t *cur_tbl = from_timer(cur_tbl, t, timer);
-#else
 	tcpack_info_t *cur_tbl = (tcpack_info_t *)data;
-#endif
 	dhd_pub_t *dhdp;
 	int ifidx;
 	void* pkt;
@@ -378,8 +368,8 @@ int dhd_tcpack_suppress_set(dhd_pub_t *dhdp, uint8 mode)
 		goto exit;
 	}
 
-	printf("%s: TCP ACK Suppress mode %d -> mode %d\n",
-		__FUNCTION__, dhdp->tcpack_sup_mode, mode);
+	DHD_TRACE(("%s: TCP ACK Suppress mode %d -> mode %d\n",
+		__FUNCTION__, dhdp->tcpack_sup_mode, mode));
 
 	/* Pre-process routines to change a new mode as per previous mode */
 	switch (prev_mode) {
@@ -474,13 +464,9 @@ int dhd_tcpack_suppress_set(dhd_pub_t *dhdp, uint8 mode)
 				tcpack_info_t *tcpack_info_tbl =
 					&tcpack_sup_module->tcpack_info_tbl[i];
 				tcpack_info_tbl->dhdp = dhdp;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-				timer_setup(&tcpack_info_tbl->timer, dhd_tcpack_send, 0);
-#else
 				init_timer(&tcpack_info_tbl->timer);
 				tcpack_info_tbl->timer.data = (ulong)tcpack_info_tbl;
 				tcpack_info_tbl->timer.function = dhd_tcpack_send;
-#endif
 			}
 			break;
 	}

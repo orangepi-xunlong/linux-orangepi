@@ -128,11 +128,8 @@ void xradio_irq_handler(struct xradio_common *hw_priv)
 void xradio_bh_wakeup(struct xradio_common *hw_priv)
 {
 	bh_printk(XRADIO_DBG_MSG, "%s\n", __func__);
-	if (hw_priv->bh_error) {
-		bh_printk(XRADIO_DBG_ERROR, "%s bh_error=%d\n",
-			__func__, hw_priv->bh_error);
+	if (SYS_WARN(hw_priv->bh_error))
 		return;
-	}
 #ifdef BH_USE_SEMAPHORE
 	atomic_add(1, &hw_priv->bh_tx);
 	if (atomic_add_return(1, &hw_priv->bh_wk) == 1) {
@@ -154,11 +151,6 @@ int xradio_bh_suspend(struct xradio_common *hw_priv)
 #endif
 
 	bh_printk(XRADIO_DBG_MSG, "%s\n", __func__);
-
-	if (hw_priv->bh_thread == NULL) {
-		return 0;
-	}
-
 	if (hw_priv->bh_error) {
 		return -EINVAL;
 	}

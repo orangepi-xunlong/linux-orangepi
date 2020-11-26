@@ -90,7 +90,5 @@ extern struct __lcd_panel inet_dsi_panel;
 extern struct __lcd_panel lq101r1sx03_panel;
 extern struct __lcd_panel WilliamLcd_panel;
 extern struct __lcd_panel fx070_panel;
-extern struct __lcd_panel FX070_DHM18BOEL2_1024X600_mipi_panel;
-extern struct __lcd_panel bp101wx1_panel;
 
 #endif

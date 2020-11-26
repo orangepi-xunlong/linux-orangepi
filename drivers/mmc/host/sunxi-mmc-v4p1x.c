@@ -47,11 +47,7 @@
 /*dma triger level setting*/
 #define SUNXI_DMA_TL_SDMMC_V4P1X	((0x2<<28)|(7<<16)|248)
 /*one dma des can transfer data size = 1<<SUNXI_DES_SIZE_SDMMC*/
-#if defined(CONFIG_ARCH_SUN50IW10)
-#define SUNXI_DES_SIZE_SDMMC_V4P1X	(12)
-#else
 #define SUNXI_DES_SIZE_SDMMC_V4P1X	(15)
-#endif
 
 /*reg*/
 /*SMHC eMMC4.5 DDR Start Bit Detection Control Register */
@@ -714,8 +710,7 @@ void sunxi_mmc_init_priv_v4p1x(struct sunxi_mmc_host *host,
 	host->sunxi_mmc_oclk_en = sunxi_mmc_oclk_onoff;
 	host->sunxi_mmc_judge_retry = sunxi_mmc_judge_retry_v4p1x;
 	/*sunxi_of_parse_clk_dly(host); */
-#if (defined(CONFIG_ARCH_SUN50IW9P1) || defined(CONFIG_ARCH_SUN50IW10))
+#ifdef CONFIG_ARCH_SUN50IW9P1
 	host->des_addr_shift = 2;
 #endif
 }
-EXPORT_SYMBOL_GPL(sunxi_mmc_init_priv_v4p1x);

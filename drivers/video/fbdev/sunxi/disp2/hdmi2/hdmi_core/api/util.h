@@ -13,6 +13,7 @@
 
 #include "../../config.h"
 
+#if defined(__LINUX_PLAT__)
 #include <linux/gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/pwm.h>
@@ -24,6 +25,9 @@
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 #include <linux/compat.h>
+#else
+#include "../../hdmi_boot.h"
+#endif
 
 /* *************************************************************************
  * Data Manipulation and Access

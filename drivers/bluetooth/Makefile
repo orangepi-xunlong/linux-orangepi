@@ -33,6 +33,7 @@ obj-$(CONFIG_BCM_BT_LPM)        += bcm_btlpm.o
 obj-$(CONFIG_RTL_BT_LPM)     	+= rtl_btlpm.o
 
 obj-$(CONFIG_XR_BT_LPM)		+= xradio_btlpm.o
+obj-$(CONFIG_XR_BT_FDI)		+= xradio_btfdi.o
 
 hci_uart-y				:= hci_ldisc.o
 hci_uart-$(CONFIG_BT_HCIUART_H4)	+= hci_h4.o

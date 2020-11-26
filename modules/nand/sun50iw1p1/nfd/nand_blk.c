@@ -451,7 +451,7 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 	struct nand_blk_dev *dev = bdev->bd_disk->private_data;
 	struct nand_blk_ops *nandr = dev->nandr;
 	struct burn_param_t burn_param;
-	struct secblc_op_t sec_op_st;
+	struct secblc_op_t *sec_op;
 	int ret = 0;
 	unsigned char *buf_secure = NULL;
 
@@ -582,21 +582,16 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 		nand_dbg_err("start secure read ...\n");
 		down(&nandr->nand_ops_mutex);
 		IS_IDLE = 0;
-		if (copy_from_user(&sec_op_st,
-			(struct secblc_op_t __user *)arg,
-			sizeof(sec_op_st))) {
-			nand_dbg_err("nand_ioctl input arg err\n");
-			return -EINVAL;
-		}
-		buf_secure = kmalloc(sec_op_st.len, GFP_KERNEL);
+		sec_op = (struct secblc_op_t *)arg;
+		buf_secure = kmalloc(sec_op->len, GFP_KERNEL);
 		if (buf_secure == NULL) {
 			nand_dbg_err("buf_secure malloc fail!\n");
 			return -1;
 		}
 		ret =
-		    nand_secure_storage_read(sec_op_st.item, buf_secure,
-					     sec_op_st.len);
-		if (copy_to_user(sec_op_st.buf, buf_secure, sec_op_st.len))
+		    nand_secure_storage_read(sec_op->item, buf_secure,
+					     sec_op->len);
+		if (copy_to_user(sec_op->buf, buf_secure, sec_op->len))
 			ret = -EFAULT;
 		kfree(buf_secure);
 		up(&(nandr->nand_ops_mutex));
@@ -608,23 +603,18 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 		nand_dbg_err("start secure write ...\n");
 		down(&nandr->nand_ops_mutex);
 		IS_IDLE = 0;
-		if (copy_from_user(&sec_op_st,
-			(struct secblc_op_t __user *)arg,
-			sizeof(sec_op_st))) {
-			nand_dbg_err("nand_ioctl input arg err\n");
-			return -EINVAL;
-		}
-		buf_secure = kmalloc(sec_op_st.len, GFP_KERNEL);
+		sec_op = (struct secblc_op_t *)arg;
+		buf_secure = kmalloc(sec_op->len, GFP_KERNEL);
 		if (buf_secure == NULL) {
 			nand_dbg_err("buf_secure malloc fail!\n");
 			return -1;
 		}
 		if (copy_from_user
-		    (buf_secure, (const void *)sec_op_st.buf, sec_op_st.len))
+		    (buf_secure, (const void *)sec_op->buf, sec_op->len))
 			ret = -EFAULT;
 		ret =
-		    nand_secure_storage_write(sec_op_st.item, buf_secure,
-					      sec_op_st.len);
+		    nand_secure_storage_write(sec_op->item, buf_secure,
+					      sec_op->len);
 		kfree(buf_secure);
 		up(&(nandr->nand_ops_mutex));
 		IS_IDLE = 1;

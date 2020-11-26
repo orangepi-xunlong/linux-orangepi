@@ -1030,7 +1030,7 @@ int xradio_realloc_resv_skb(struct xradio_common *hw_priv,
 	/* spin_lock(&hw_priv->cache_lock); */
 	if (!hw_priv->skb_reserved && hw_priv->skb_resv_len) {
 		hw_priv->skb_reserved = xr_alloc_skb(hw_priv->skb_resv_len);
-		if (!hw_priv->skb_reserved && (flags & ITEM_F_RESERVE)) {
+		if (!hw_priv->skb_reserved && (flags &ITEM_F_RESERVE)) {
 			hw_priv->skb_reserved = skb;
 			skb_reserve(hw_priv->skb_reserved,
 				WSM_TX_EXTRA_HEADROOM + 8 /* TKIP IV */
@@ -1062,7 +1062,7 @@ static inline int xradio_put_resv_skb(struct xradio_common *hw_priv,
 {
 	/* spin_lock(&hw_priv->cache_lock); */
 	if (!hw_priv->skb_reserved && hw_priv->skb_resv_len &&
-	    (flags & ITEM_F_RESERVE)) {
+	    (flags &ITEM_F_RESERVE)) {
 		hw_priv->skb_reserved = skb;
 		/* spin_unlock(&hw_priv->cache_lock); */
 		return 0;
@@ -1194,7 +1194,6 @@ static int xradio_device_wakeup(struct xradio_common *hw_priv, u16 *ctrl_reg_ptr
 	} else {
 		bh_printk(XRADIO_DBG_ERROR, "Device cannot wakeup in %dms.\n",
 				DEV_WAKEUP_MAX_TIME*1000/HZ);
-		hw_priv->hw_cant_wakeup = true;
 		return -1;
 	}
 }
@@ -1202,16 +1201,16 @@ static int xradio_device_wakeup(struct xradio_common *hw_priv, u16 *ctrl_reg_ptr
 #ifdef BH_COMINGRX_FORECAST
 static bool xradio_comingrx_update(struct xradio_common *hw_priv)
 {
-	static bool is_full;
+	static int is_full;
 	static unsigned long tmo;
 	if (hw_priv->hw_bufs_used >= (hw_priv->wsm_caps.numInpChBufs-1)) {
-		if (is_full == false) {
+		if (is_full == 0) {
 			tmo = jiffies + (HZ/166);/*1/166s = 6ms*/
 		}
-		is_full = true;
+		is_full = 1;
 	} else {
 		tmo = jiffies - 1;
-		is_full = false;
+		is_full = 0;
 	}
 
 	if (time_before(jiffies, tmo))
@@ -1946,7 +1945,7 @@ tx:
 		}
 		/*if no rx, we check tx again.*/
 		if (tx + atomic_xchg(&hw_priv->bh_tx, 0)) {
-			if (hw_priv->hw_bufs_used < (hw_priv->wsm_caps.numInpChBufs - 1)) {
+			if (hw_priv->hw_bufs_used < (hw_priv->wsm_caps.numInpChBufs -1)) {
 				tx = 1;
 				goto data_proc;
 			} else { /*if no tx buffer, we check rx reg.*/
@@ -1968,26 +1967,13 @@ tx:
 				tx = 1;
 				goto data_proc;
 			}
-		} else {
-			PERF_INFO_GETTIME(&sdio_reg_time);
-			atomic_xchg(&hw_priv->bh_rx, 0);
-			xradio_bh_read_ctrl_reg(hw_priv, &ctrl_reg);
-			++reg_read;
-			++sdio_reg_cnt1;
-			PERF_INFO_STAMP(&sdio_reg_time, &sdio_reg, 4);
-			if (ctrl_reg & HIF_CTRL_NEXT_LEN_MASK) {
-				DBG_INT_ADD(fix_miss_cnt);
-				rx = 1;
-				goto data_proc;
-			} else {
-				++sdio_reg_cnt5;
-			}
 		}
+
 
 #if 0
 		/*One more to check rx if reg has not be read. */
 		if (!reg_read && hw_priv->hw_bufs_used >=
-			(hw_priv->wsm_caps.numInpChBufs - 1)) {
+			(hw_priv->wsm_caps.numInpChBufs -1)) {
 			atomic_xchg(&hw_priv->bh_rx, 0);
 			PERF_INFO_GETTIME(&sdio_reg_time);
 			xradio_bh_read_ctrl_reg(hw_priv, &ctrl_reg);
@@ -2009,7 +1995,7 @@ tx:
 
 #if 0
 		if (hw_priv->wsm_caps.numInpChBufs - hw_priv->hw_bufs_used > 1 &&
-		    atomic_read(&hw_priv->bh_tx) == 0 && pending_tx == 0 &&
+			atomic_read(&hw_priv->bh_tx) == 0 && pending_tx == 0 &&
 			!tx && atomic_read(&hw_priv->tx_lock) == 0) {
 			int i = 0;
 			for (i = 0; i < 4; ++i) {

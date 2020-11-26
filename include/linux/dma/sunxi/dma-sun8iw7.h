@@ -1,11 +1,3 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- */
-
 #ifndef __DMA_SUN8IW7__
 #define __DMA_SUN8IW7__
 
@@ -22,12 +14,12 @@
 #define DRQSRC_DAI1_RX		DRQSRC_DAUDIO_1_RX
 /*#define DRQSRC_AC97		5*/
 /*#define DRQSRC_DAUDIO_2_RX	6*/
-#define DRQSRC_DAUDIO_2_RX	27
+#define DRQSRC_DAI2_RX		DRQSRC_DAUDIO_2_RX
 #define DRQSRC_NAND0		5
-#define DRQSRC_UART0_RX		6
-#define DRQSRC_UART1_RX		7
-#define DRQSRC_UART2_RX		8
-#define DRQSRC_UART3_RX		9
+#define DRQSRC_UART0RX		6
+#define DRQSRC_UART1RX		7
+#define DRQSRC_UART2RX		8
+#define DRQSRC_UART3RX		9
 #define DRQSRC_SS_RX		16
 #define DRQSRC_OTG_EP1		17
 /* #define DRQSRC_RESEVER	18 */
@@ -62,13 +54,12 @@
 #define DRQDST_DAI1_TX		DRQDST_DAUDIO_1_TX
 /*#define DRQDST_AC97		5*/
 /*#define DRQDST_DAUDIO_2_TX	6*/
-#define DRQDST_DAUDIO_2_TX	27
 #define DRQDST_DAI2_TX		DRQDST_DAUDIO_2_TX
 #define DRQDST_NAND0		5
-#define DRQDST_UART0_TX		6
-#define DRQDST_UART1_TX		7
-#define DRQDST_UART2_TX		8
-#define DRQDST_UART3_TX		9
+#define DRQDST_UART0TX		6
+#define DRQDST_UART1TX		7
+#define DRQDST_UART2TX		8
+#define DRQDST_UART3TX		9
 #define DRQDST_SS_TX		16
 #define DRQDST_OTG_EP1		17
 /* #define DRQDST_RESEVER	18 */

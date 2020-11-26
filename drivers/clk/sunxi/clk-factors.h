@@ -196,16 +196,6 @@ struct sunxi_clk_pat_item {
 	char *patname;
 };
 
-#ifdef CONFIG_PM_SLEEP
-struct sunxi_factor_clk_reg_cache {
-	struct list_head node;
-	void __iomem *config_reg;
-	u32	config_value;
-	void __iomem *sdmpat_reg;
-	u32 sdmpat_value;
-};
-#endif
-
 static inline u32 factor_readl(struct sunxi_clk_factors *factor, void __iomem *reg)
 {
 	return ((unsigned long *)factor->priv_regops)

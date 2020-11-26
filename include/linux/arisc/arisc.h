@@ -34,10 +34,7 @@
 #define ARISC_CPU_OP_REQ                (ARISC_MESSAGE_BASE + 0x12)  /* cpu operations         (ac327 to arisc) */
 #define ARISC_QUERY_WAKEUP_SRC_REQ      (ARISC_MESSAGE_BASE + 0x13)  /* query wakeup source    (ac327 to arisc) */
 #define ARISC_SYS_OP_REQ                (ARISC_MESSAGE_BASE + 0x14)  /* system operations      (ac327 to arisc) */
-#define ARISC_CLEAR_WAKEUP_SRC_REQ      (ARISC_MESSAGE_BASE + 0x15)  /* query wakeup source    (ac327 to arisc) */
-/*set wakeup source (ac327 to arisc)*/
-#define ARISC_SET_WAKEUP_SRC_REQ  (ARISC_MESSAGE_BASE + 0x16)
-
+#define ARISC_SET_WAKEUP_SRC_REQ        (ARISC_MESSAGE_BASE + 0x16)
 /* dvfs commands */
 #define ARISC_CPUX_DVFS_REQ              (ARISC_MESSAGE_BASE + 0x20)  /* request dvfs           (ac327 to arisc) */
 #define ARISC_CPUX_DVFS_CFG_VF_REQ       (ARISC_MESSAGE_BASE + 0x21)  /* request config dvfs v-f table(ac327 to arisc) */
@@ -261,12 +258,23 @@ typedef enum power_voltage_type {
 	AW1657_POWER_CLDO3,
 	AW1657_POWER_DC1SW,
 	AW1657_POWER_MAX,
+#ifdef CONFIG_ARCH_SUN50IW6P1
+	DUMMY_REGULATOR1,   /* 17, VCC-CPUA */
+	DUMMY_REGULATOR2,   /* 18, VCC-SYS  */
+	DUMMY_REGULATOR3,   /* 19, VCC-DRAM */
+	DUMMY_REGULATOR4,   /* 20, VCC-PL/VCC-WIFI */
+	DUMMY_REGULATOR5,   /* 21, VCC-5V */
+	DUMMY_REGULATOR6,   /* 22, VCC-RTC/VCC-LPDDR */
+	DUMMY_REGULATOR7,   /* 23, VCC-PL */
+#else
+
 	DUMMY_REGULATOR1, /* AVCC/VCC3V3-PLL/VCC3V3-TV */
 	DUMMY_REGULATOR2, /* DRAM */
 	DUMMY_REGULATOR3, /* SYSTEM */
 	DUMMY_REGULATOR4, /* VCC-CPUX */
 	DUMMY_REGULATOR5, /* WIFI */
 	DUMMY_REGULATOR6, /* VCC-IO */
+#endif
 	DUMMY_REGULATOR_MAX,
 } power_voltage_type_e;
 
@@ -289,8 +297,37 @@ typedef enum arisc_rsb_bits_ops {
 	RSB_SET_BITS
 } arisc_rsb_bits_ops_e;
 
+typedef enum arisc_audio_mode {
+	AUDIO_PLAY,                   /* play    mode */
+	AUDIO_CAPTURE                 /* capture mode */
+} arisc_audio_mode_e;
+
+typedef struct arisc_audio_mem {
+	unsigned int mode;
+	unsigned int sram_base_addr;
+	unsigned int buffer_size;
+	unsigned int period_size;
+} arisc_audio_mem_t;
+
+
+typedef struct arisc_audio_tdm {
+	unsigned int mode;
+	unsigned int samplerate;
+	unsigned int channum;
+} arisc_audio_tdm_t;
+
 /* arisc call-back */
 typedef int (*arisc_cb_t)(void *arg);
+
+/* sunxi_perdone_cbfn
+ *
+ * period done callback routine type
+*/
+/* audio callback struct */
+typedef struct audio_cb {
+	arisc_cb_t	handler;	/* dma callback fuction */
+	void 		*arg;		/* args of func         */
+} audio_cb_t;
 
 /*
  * @len :       number of read registers, max len:4;
@@ -343,6 +380,18 @@ typedef struct nmi_isr {
 extern nmi_isr_t nmi_isr_node[2];
 
 /*
+ * cpu: cpu num
+ * level: idle level
+ * resume_addr: run address when idle exit
+ */
+struct sunxi_idle_para {
+	unsigned int cpu;
+	unsigned int level;
+	void *resume_addr;
+};
+
+
+/*
  * @len :       number of read registers, max len:8;
  * @msgattr:    message attribute, 0:async, 1:soft sync, 2:hard aync
  * @addr:       point of registers address;
@@ -374,6 +423,22 @@ typedef struct arisc_twi_bits_cfg {
 
 struct super_standby_para;
 struct standby_info_para;
+
+
+#define SET_ROOT_WAKEUP_SOURCE(root_irq)  (root_irq)
+#define SET_SEC_WAKEUP_SOURCE(root_irq, secondary_irq)  \
+	((1 << 30) | ((secondary_irq) << 10) | (root_irq))
+#define SET_THIRD_WAKEUP_SOURCE(root_irq, secondary_irq, third_irq)  \
+	((2 << 30) | ((third_irq) << 20) ((secondary_irq) << 10) | (root_irq))
+#define SET_WAKEUP_TIME_MS(ms)  ((3 << 30) | (ms))
+/**
+ * set wakeup source.
+ * @para:  wakeup source irq.
+ *
+ * return: result, 0 - set successed,
+ *                    !0 - set failed;
+ */
+int arisc_set_wakeup_source(u32 wakeup_irq);
 /* ====================================dvfs interface==================================== */
 /*
  * set specific pll target frequency.
@@ -407,30 +472,33 @@ int arisc_dvfs_cfg_vf_table(unsigned int cluster, unsigned int vf_num,
  */
 int arisc_query_wakeup_source(u32 *event);
 
-#define SET_ROOT_WAKEUP_SOURCE(root_irq)  (root_irq)
-#define SET_SEC_WAKEUP_SOURCE(root_irq, secondary_irq)  \
-	((1 << 30) | ((secondary_irq) << 10) | (root_irq))
-#define SET_THIRD_WAKEUP_SOURCE(root_irq, secondary_irq, third_irq)  \
-	((2 << 30) | ((third_irq) << 20) ((secondary_irq) << 10) | (root_irq))
-#define SET_WAKEUP_TIME_MS(ms)  ((3 << 30) | (ms))
+extern int arisc_query_set_standby_info(struct standby_info_para *para, arisc_rw_type_e op);
 
-/**
- * set wakeup source.
- * @para:  wakeup source irq.
+/*
+ * query config of standby power state and consumer.
+ * @para:  point of buffer to store power informations.
  *
- * return: result, 0 - set successed,
- *                    !0 - set failed;
+ * return: result, 0 - query successed, !0 - query failed;
  */
-int arisc_set_wakeup_source(u32 wakeup_irq);
+extern int arisc_query_standby_power_cfg(struct standby_info_para *para);
 
-/**
- * clear wakeup source.
- * @para:  wakeup source irq.
+/*
+ * set config of standby power state and consumer.
+ * @para:  point of buffer to store power informations.
  *
- * return: result, 0 - set successed,
- *                    !0 - set failed;
+ * return: result, 0 - set successed, !0 - set failed;
  */
-int arisc_clear_wakeup_source(u32 wakeup_irq);
+#define arisc_set_standby_power_cfg(para) \
+	arisc_query_set_standby_info(para, ARISC_WRITE)
+
+/*
+ * query standby power state and consumer.
+ * @para:  point of buffer to store power informations.
+ *
+ * return: result, 0 - query successed, !0 - query failed;
+ */
+#define arisc_query_standby_power(para) \
+	arisc_query_set_standby_info(para, ARISC_READ)
 
 /**
  * query super-standby dram crc result.

@@ -11,29 +11,17 @@
 
 
 #include "nand_osal_for_linux.h"
-#include "nand_panic.h"
 
 #define  NAND_DRV_VERSION_0		0x03
-#define  NAND_DRV_VERSION_1		0x6035
-#define  NAND_DRV_DATE			0x20190916
-#define  NAND_DRV_TIME			0x0849
-
-
-
-#define  TLC_NAND_DRV_VERSION_0		0x04
-#define  TLC_NAND_DRV_VERSION_1		0x0012
-#define  TLC_NAND_DRV_DATE			0x20181228
-#define  TLC_NAND_DRV_TIME			0x1026
-
-
+#define  NAND_DRV_VERSION_1		0x6014
+#define  NAND_DRV_DATE			0x20180912
+#define  NAND_DRV_TIME			0x1026
 
 int nand_type;
 
 #define GPIO_BASE_ADDR			0x0300B000
-#define PIO_POWER_MODE_SEL               (0x0340)
-#define PIO_POWER_VAL			(0x0348)
-#define PIO_PC_POWER_MODE_SEL            (1 << 2)
-#define PIO_PC_POWER_VALUE		(1 << 2)
+
+
 
 int NAND_Print(const char *fmt, ...)
 {
@@ -64,7 +52,7 @@ int NAND_Print_DBG(const char *fmt, ...)
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	rtn = printk(KERN_DEBUG "%pV", &vaf);
+	rtn = printk(KERN_ERR "%pV", &vaf);
 
 	va_end(args);
 
@@ -137,7 +125,6 @@ int NAND_ClkRequest(__u32 nand_index)
 
 void NAND_ClkRelease(__u32 nand_index)
 {
-	NAND_Print_DBG("NAND_ClkRelease\n");
 	if (nand_index == 0) {
 		if (nand0_dclk && !IS_ERR(nand0_dclk)) {
 			clk_disable_unprepare(nand0_dclk);
@@ -155,7 +142,7 @@ void NAND_ClkRelease(__u32 nand_index)
 			}
 		}
 	} else
-		NAND_Print("NAND_ClkRelease, nand_index error: 0x%x\n", nand_index);
+		NAND_Print("NAND_ClkRequest, nand_index error: 0x%x\n", nand_index);
 
 	if (pll6 && !IS_ERR(pll6)) {
 		clk_put(pll6);
@@ -246,14 +233,12 @@ void *NAND_DMASingleMap(__u32 rw, void *buff_addr, __u32 len)
 {
 	void *mem_addr;
 
-	if (is_on_panic())
-		return (void *)nand_panic_dma_map(rw, buff_addr, len);
 	if (rw == 1) {
 		mem_addr = (void *)dma_map_single(ndfc_dev, (void *)buff_addr,
 						len, DMA_TO_DEVICE);
 	} else {
 		mem_addr = (void *)dma_map_single(ndfc_dev, (void *)buff_addr,
-						len, DMA_FROM_DEVICE);
+						len, DMA_BIDIRECTIONAL);
 	}
 	if (dma_mapping_error(ndfc_dev, (dma_addr_t) mem_addr))
 		NAND_Print("dma mapping error\n");
@@ -265,16 +250,12 @@ void *NAND_DMASingleUnmap(__u32 rw, void *buff_addr, __u32 len)
 {
 	void *mem_addr = buff_addr;
 
-	if (is_on_panic()) {
-		nand_panic_dma_unmap(rw, (dma_addr_t)buff_addr, len);
-		return mem_addr;
-	}
 	if (rw == 1) {
 		dma_unmap_single(ndfc_dev, (dma_addr_t) mem_addr, len,
 				 DMA_TO_DEVICE);
 	} else {
 		dma_unmap_single(ndfc_dev, (dma_addr_t) mem_addr, len,
-				 DMA_FROM_DEVICE);
+				 DMA_BIDIRECTIONAL);
 	}
 
 	return mem_addr;
@@ -283,20 +264,6 @@ void *NAND_DMASingleUnmap(__u32 rw, void *buff_addr, __u32 len)
 void *NAND_VA_TO_PA(void *buff_addr)
 {
 	return (void *)(__pa((void *)buff_addr));
-}
-
-__s32 nand_set_power_mode(void)
-{
-	u32 cfg;
-	void __iomem *gpio_ptr = ioremap(GPIO_BASE_ADDR, 0x400);
-
-	cfg = *((volatile __u32 *)gpio_ptr + (0x340/4));
-	cfg |= 0x4;
-	*((volatile __u32 *)gpio_ptr + (0x340/4)) = cfg;
-	NAND_Print("Change PC_Power Mode Select to 1.8V ...\n");
-
-	iounmap(gpio_ptr);
-	return 0;
 }
 
 __s32 NAND_PIORequest(__u32 nand_index)
@@ -310,8 +277,6 @@ __s32 NAND_PIORequest(__u32 nand_index)
 		NAND_Print("NAND_PIORequest: set nand0 pin error!\n");
 		return -1;
 	}
-	if (flash_type == 2)
-		nand_set_power_mode();
 
 	return 0;
 }
@@ -324,7 +289,7 @@ __s32 NAND_3DNand_Request(void)
 	cfg = *((volatile __u32 *)gpio_ptr + 208);
 	cfg |= 0x4;
 	*((volatile __u32 *)gpio_ptr + 208) = cfg;
-	NAND_Print("%s: Change PC_Power Mode Select to 1.8V\n", __func__);
+	NAND_Print("Change PC_Power Mode Select to 1.8V\n");
 
 	iounmap(gpio_ptr);
 	return 0;
@@ -339,7 +304,7 @@ __s32 NAND_Check_3DNand(void)
 	if ((cfg >> 2) == 0) {
 		cfg |= 0x4;
 		*((volatile __u32 *)gpio_ptr + 208) = cfg;
-		NAND_Print("%s: Change PC_Power Mode Select to 1.8V\n", __func__);
+		NAND_Print("Change PC_Power Mode Select to 1.8V\n");
 	}
 
 	iounmap(gpio_ptr);
@@ -376,18 +341,6 @@ void NAND_Free(void *pAddr, unsigned int Size)
 {
 	kfree(pAddr);
 }
-void *phy_malloc(uint32 size)
-{
-	if (size > 0x180000)
-		NAND_Print("[NE]malloc size too large %d!\n", size);
-	return NAND_Malloc(size);
-}
-
-void phy_free(const void *ptr)
-{
-	NAND_Free((void *)ptr, 0);
-}
-
 
 void *NAND_IORemap(void *base_addr, unsigned int size)
 {
@@ -410,16 +363,12 @@ int NAND_PhysicLockInit(void)
 
 int NAND_PhysicLock(void)
 {
-	if (is_on_panic())
-		return 0;
 	down(&nand_physic_mutex);
 	return 0;
 }
 
 int NAND_PhysicUnLock(void)
 {
-	if (is_on_panic())
-		return 0;
 	up(&nand_physic_mutex);
 	return 0;
 }
@@ -589,8 +538,6 @@ int NAND_WaitDmaFinish(__u32 tx_flag, __u32 rx_flag)
 	__u32 timeout = 2000;
 	__u32 timeout_flag = 0;
 
-	if (is_on_panic())
-		return 0;
 	if (tx_flag || rx_flag) {
 		timeout_flag = wait_for_completion_timeout(&spinand_dma_done, msecs_to_jiffies(timeout));
 		if (!timeout_flag) {
@@ -849,26 +796,6 @@ __u32 NAND_GetNdfcVersion(void)
 *Return       :
 *Note         :
 *****************************************************************************/
-void *TNAND_GetIOBaseAddrCH0(void)
-{
-	return NDFC0_BASE_ADDR;
-}
-
-void *TNAND_GetIOBaseAddrCH1(void)
-{
-	return NDFC1_BASE_ADDR;
-}
-
-void *NAND_GetIOBaseAddrCH0(void)
-{
-	return NDFC0_BASE_ADDR;
-}
-
-void *NAND_GetIOBaseAddrCH1(void)
-{
-	return NDFC1_BASE_ADDR;
-}
-
 void *RAWNAND_GetIOBaseAddrCH0(void)
 {
 	return NDFC0_BASE_ADDR;
@@ -1119,17 +1046,6 @@ void NAND_Print_Version(void)
 	       val[1], val[2], val[3]);
 }
 
-void TNAND_Print_Version(void)
-{
-	int val[4] = {0};
-
-	val[0] = TLC_NAND_DRV_VERSION_0;
-	val[1] = TLC_NAND_DRV_VERSION_1;
-	val[2] = TLC_NAND_DRV_DATE;
-	val[3] = TLC_NAND_DRV_TIME;
-	NAND_Print("uboot: nand version: %x %x %x %x\n", val[0], val[1], val[2], val[3]);
-}
-
 int NAND_Get_Version(void)
 {
 	return NAND_DRV_DATE;
@@ -1150,42 +1066,4 @@ __u32 get_storage_type(void)
 		ret = 2;
 
 	return ret;
-}
-
-
-int nand_set_gpio_power_1p8v(void)
-{
-	u32 cfg;
-	void __iomem *gpio_ptr = ioremap(GPIO_BASE_ADDR, 0x400);
-
-	cfg = readl(gpio_ptr + PIO_POWER_VAL);
-	if (cfg & PIO_PC_POWER_VALUE) {
-		cfg = readl(gpio_ptr + PIO_POWER_MODE_SEL);
-		cfg |= PIO_PC_POWER_MODE_SEL;
-		writel(cfg, gpio_ptr + PIO_POWER_MODE_SEL);
-		NAND_Print("%s %d swtich PC power to 1.8V\n", __func__, __LINE__);
-	} else
-		NAND_Print("%s %d default PC power 3.3V\n", __func__, __LINE__);
-
-	iounmap(gpio_ptr);
-
-	return 0;
-}
-
-int nand_set_gpio_power_3p3v(void)
-{
-	u32 cfg;
-	void __iomem *gpio_ptr = ioremap(GPIO_BASE_ADDR, 0x400);
-
-	cfg = *((volatile __u32 *)gpio_ptr + PIO_POWER_MODE_SEL / sizeof(__u32)) ;
-
-
-	cfg &= ~PIO_PC_POWER_MODE_SEL;
-	*((volatile __u32 *)gpio_ptr + PIO_POWER_MODE_SEL / sizeof(__u32)) = cfg;
-
-	NAND_Print("%s %d swtich PC power to 3.3V\n",__func__,__LINE__);
-
-	iounmap(gpio_ptr);
-
-	return 0;
 }

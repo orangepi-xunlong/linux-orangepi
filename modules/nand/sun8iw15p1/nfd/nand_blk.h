@@ -215,20 +215,15 @@ struct nand_blk_ops {
 
 /*****************************************************************************/
 extern int get_nand_secure_storage_max_item(void);
-extern int nand_secure_data_read(int item, unsigned char *buf, unsigned int len);
-extern int nand_secure_data_write(int item, unsigned char *buf, unsigned int len);
-extern int tnand_secure_data_read(int item, unsigned char *buf, unsigned int len);
-extern int tnand_secure_data_write(int item, unsigned char *buf, unsigned int len);
-extern int tget_nand_secure_storage_max_item(void);
+extern int nand_secure_storage_read(int item, unsigned char *buf,
+				    unsigned int len);
+extern int nand_secure_storage_write(int item, unsigned char *buf,
+				     unsigned int len);
 
 extern int NAND_ReadBoot0(unsigned int length, void *buf);
 extern int NAND_ReadBoot1(unsigned int length, void *buf);
 extern int NAND_BurnBoot0(unsigned int length, void *buf);
 extern int NAND_BurnBoot1(unsigned int length, void *buf);
-extern int TNAND_ReadBoot0(unsigned int length, void *buf);
-extern int TNAND_ReadBoot1(unsigned int length, void *buf);
-extern int TNAND_BurnBoot0(unsigned int length, void *buf);
-extern int TNAND_BurnBoot1(unsigned int length, void *buf);
 
 extern struct _nand_info *p_nand_info;
 

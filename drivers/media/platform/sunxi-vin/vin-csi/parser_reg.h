@@ -3,8 +3,6 @@
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
  * may be copied, distributed, and modified under those terms.
@@ -23,6 +21,7 @@
 #include <linux/types.h>
 #include <media/v4l2-mediabus.h>
 
+#define MAX_CSIC_PRS_NUM 4
 #define MAX_CH_NUM 4
 
 
@@ -215,7 +214,7 @@ struct prs_ncsi_if_cfg {
 	enum refer_pol href;
 	enum clk_pol clk;
 	enum field_dt_mode field_dt;
-	bool ddr_sample;
+	unsigned int ddr_sample;
 	enum seq_8plus2 seq_8_2;
 	enum if_data_width dw;
 	enum input_seq seq;
@@ -256,21 +255,16 @@ struct prs_input_para {
 	unsigned int src_type;
 	unsigned int input_vt;
 	unsigned int input_ht;
+	unsigned int input_vb;
 	unsigned int input_hb;
-	unsigned int input_hs;
+	unsigned int input_y;
+	unsigned int input_x;
 };
 
 struct prs_int_status {
 	bool input_src_pd0;
 	bool input_src_pd1;
 	bool mul_err_pd;
-};
-
-struct prs_fps_ds {
-	unsigned int ch0_fps_ds;
-	unsigned int ch1_fps_ds;
-	unsigned int ch2_fps_ds;
-	unsigned int ch3_fps_ds;
 };
 
 int csic_prs_set_base_addr(unsigned int sel, unsigned long addr);
@@ -280,13 +274,12 @@ void csic_prs_mode(unsigned int sel, enum prs_mode mode);
 void csic_prs_pclk_en(unsigned int sel, unsigned int en);
 void csic_prs_ncsi_en(unsigned int sel, unsigned int en);
 void csic_prs_mcsi_en(unsigned int sel, unsigned int en);
-void csic_prs_ch_en(unsigned int sel, unsigned int en);
+
 void csic_prs_ncsi_if_cfg(unsigned int sel, struct prs_ncsi_if_cfg *if_cfg);
 void csic_prs_mcsi_if_cfg(unsigned int sel, struct prs_mcsi_if_cfg *if_cfg);
 void csic_prs_capture_start(unsigned int sel, unsigned int ch_total_num,
 				struct prs_cap_mode *mode);
 void csic_prs_capture_stop(unsigned int sel);
-void csic_prs_fps_ds(unsigned int sel, struct prs_fps_ds *prs_fps_ds);
 void csic_prs_signal_status(unsigned int sel,
 				struct prs_signal_status *status);
 void csic_prs_ncsi_bt656_header_cfg(unsigned int sel,
@@ -295,7 +288,6 @@ void csic_prs_input_fmt_cfg(unsigned int sel, unsigned int ch,
 				enum prs_input_fmt fmt);
 void csic_prs_output_size_cfg(unsigned int sel, unsigned int ch,
 				struct prs_output_size *size);
-void csic_prs_set_pclk_dly(unsigned int sel, unsigned int pclk_dly);
 /*for csic sync*/
 void csic_prs_sync_en_cfg(unsigned int sel, struct csi_sync_ctrl *sync);
 void csic_prs_sync_en(unsigned int sel, struct csi_sync_ctrl *sync);

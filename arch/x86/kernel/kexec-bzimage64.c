@@ -529,7 +529,7 @@ static int bzImage64_cleanup(void *loader_data)
 static int bzImage64_verify_sig(const char *kernel, unsigned long kernel_len)
 {
 	return verify_pefile_signature(kernel, kernel_len,
-				       VERIFY_USE_SECONDARY_KEYRING,
+				       NULL,
 				       VERIFYING_KEXEC_PE_SIGNATURE);
 }
 #endif

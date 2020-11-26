@@ -148,14 +148,14 @@ smb2_wait_mtu_credits(struct TCP_Server_Info *server, unsigned int size,
 
 			scredits = server->credits;
 			/* can deadlock with reopen */
-			if (scredits <= 8) {
+			if (scredits == 1) {
 				*num = SMB2_MAX_BUFFER_SIZE;
 				*credits = 0;
 				break;
 			}
 
-			/* leave some credits for reopen and other ops */
-			scredits -= 8;
+			/* leave one credit for a possible reopen */
+			scredits--;
 			*num = min_t(unsigned int, size,
 				     scredits * SMB2_MAX_BUFFER_SIZE);
 
@@ -894,13 +894,6 @@ smb3_set_integrity(const unsigned int xid, struct cifs_tcon *tcon,
 
 }
 
-/* GMT Token is @GMT-YYYY.MM.DD-HH.MM.SS Unicode which is 48 bytes + null */
-#define GMT_TOKEN_SIZE 50
-
-/*
- * Input buffer contains (empty) struct smb_snapshot array with size filled in
- * For output see struct SRV_SNAPSHOT_ARRAY in MS-SMB2 section 2.2.32.2
- */
 static int
 smb3_enum_snapshots(const unsigned int xid, struct cifs_tcon *tcon,
 		   struct cifsFileInfo *cfile, void __user *ioc_buf)
@@ -929,27 +922,14 @@ smb3_enum_snapshots(const unsigned int xid, struct cifs_tcon *tcon,
 			kfree(retbuf);
 			return rc;
 		}
+		if (snapshot_in.snapshot_array_size < sizeof(struct smb_snapshot_array)) {
+			rc = -ERANGE;
+			kfree(retbuf);
+			return rc;
+		}
 
-		/*
-		 * Check for min size, ie not large enough to fit even one GMT
-		 * token (snapshot).  On the first ioctl some users may pass in
-		 * smaller size (or zero) to simply get the size of the array
-		 * so the user space caller can allocate sufficient memory
-		 * and retry the ioctl again with larger array size sufficient
-		 * to hold all of the snapshot GMT tokens on the second try.
-		 */
-		if (snapshot_in.snapshot_array_size < GMT_TOKEN_SIZE)
-			ret_data_len = sizeof(struct smb_snapshot_array);
-
-		/*
-		 * We return struct SRV_SNAPSHOT_ARRAY, followed by
-		 * the snapshot array (of 50 byte GMT tokens) each
-		 * representing an available previous version of the data
-		 */
-		if (ret_data_len > (snapshot_in.snapshot_array_size +
-					sizeof(struct smb_snapshot_array)))
-			ret_data_len = snapshot_in.snapshot_array_size +
-					sizeof(struct smb_snapshot_array);
+		if (ret_data_len > snapshot_in.snapshot_array_size)
+			ret_data_len = snapshot_in.snapshot_array_size;
 
 		if (copy_to_user(ioc_buf, retbuf, ret_data_len))
 			rc = -EFAULT;
@@ -989,7 +969,7 @@ smb2_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 	}
 
 	srch_inf->entries_in_buffer = 0;
-	srch_inf->index_of_last_entry = 2;
+	srch_inf->index_of_last_entry = 0;
 
 	rc = SMB2_query_directory(xid, tcon, fid->persistent_fid,
 				  fid->volatile_fid, 0, srch_inf);
@@ -1377,15 +1357,6 @@ smb2_downgrade_oplock(struct TCP_Server_Info *server,
 }
 
 static void
-smb21_downgrade_oplock(struct TCP_Server_Info *server,
-		       struct cifsInodeInfo *cinode, bool set_level2)
-{
-	server->ops->set_oplock_level(cinode,
-				      set_level2 ? SMB2_LEASE_READ_CACHING_HE :
-				      0, 0, NULL);
-}
-
-static void
 smb2_set_oplock_level(struct cifsInodeInfo *cinode, __u32 oplock,
 		      unsigned int epoch, bool *purge_cache)
 {
@@ -1690,7 +1661,7 @@ struct smb_version_operations smb21_operations = {
 	.print_stats = smb2_print_stats,
 	.is_oplock_break = smb2_is_valid_oplock_break,
 	.handle_cancelled_mid = smb2_handle_cancelled_mid,
-	.downgrade_oplock = smb21_downgrade_oplock,
+	.downgrade_oplock = smb2_downgrade_oplock,
 	.need_neg = smb2_need_neg,
 	.negotiate = smb2_negotiate,
 	.negotiate_wsize = smb2_negotiate_wsize,
@@ -1774,7 +1745,7 @@ struct smb_version_operations smb30_operations = {
 	.dump_share_caps = smb2_dump_share_caps,
 	.is_oplock_break = smb2_is_valid_oplock_break,
 	.handle_cancelled_mid = smb2_handle_cancelled_mid,
-	.downgrade_oplock = smb21_downgrade_oplock,
+	.downgrade_oplock = smb2_downgrade_oplock,
 	.need_neg = smb2_need_neg,
 	.negotiate = smb2_negotiate,
 	.negotiate_wsize = smb2_negotiate_wsize,
@@ -1864,7 +1835,7 @@ struct smb_version_operations smb311_operations = {
 	.dump_share_caps = smb2_dump_share_caps,
 	.is_oplock_break = smb2_is_valid_oplock_break,
 	.handle_cancelled_mid = smb2_handle_cancelled_mid,
-	.downgrade_oplock = smb21_downgrade_oplock,
+	.downgrade_oplock = smb2_downgrade_oplock,
 	.need_neg = smb2_need_neg,
 	.negotiate = smb2_negotiate,
 	.negotiate_wsize = smb2_negotiate_wsize,

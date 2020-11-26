@@ -14,6 +14,22 @@
  *
  */
 
+/*
+ ******************************************************************************
+ *
+ * bsp_cci.c
+ *
+ * Hawkview ISP - bsp_cci.c module
+ *
+ * Copyright (c) 2014 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version         Author         Date         Description
+ *
+ *   2.0         Yang Feng     2014/04/23     Second Version
+ *
+ ******************************************************************************
+ */
+
 #include "bsp_cci.h"
 #include "../platform/platform_cfg.h"
 #include <linux/delay.h>
@@ -22,14 +38,12 @@
 #include <linux/semaphore.h>
 
 wait_queue_head_t wait[MAX_CSIC_CCI_NUM];
-bool status_err_flag[MAX_CSIC_CCI_NUM] = { 0 };
-bool register_flag[MAX_CSIC_CCI_NUM] = { 0 };
+static int status_err_flag[MAX_CSIC_CCI_NUM] = { 0 };
 struct mutex cci_mutex[MAX_CSIC_CCI_NUM];
 struct semaphore cci_sema[MAX_CSIC_CCI_NUM];
 
 int bsp_csi_cci_set_base_addr(unsigned int sel, unsigned long addr)
 {
-	register_flag[sel] = 1;
 	init_waitqueue_head(&wait[sel]);
 	mutex_init(&cci_mutex[sel]);
 	sema_init(&cci_sema[sel], 1);
@@ -86,9 +100,16 @@ void bsp_csi_cci_init(unsigned int sel)
 
 void bsp_csi_cci_exit(unsigned int sel)
 {
-	cci_int_disable(sel, CCI_INT_ALL);
+	bsp_cci_int_disable(sel, CCI_INT_ALL);
 	csi_cci_reset(sel);
 	csi_cci_disable(sel);
+}
+
+void bsp_cci_set_tx_mode(unsigned int sel, struct cci_tx_mode *tx_mode)
+{
+	csi_cci_set_tx_buf_mode(sel, &tx_mode->tx_buf_mode);
+	csi_cci_set_trig_mode(sel, &tx_mode->tx_trig_mode);
+	csi_cci_set_trig_line_cnt(sel, tx_mode->tx_trig_line_cnt);
 }
 
 void bsp_cci_tx_start(unsigned int sel, struct cci_msg *msg)
@@ -101,11 +122,10 @@ void bsp_cci_tx_start(unsigned int sel, struct cci_msg *msg)
 	buf = msg->pkt_buf;
 	pkt_num = msg->pkt_num;
 	pkt_len = msg->bus_fmt.addr_len + msg->bus_fmt.data_len;
-	if (pkt_len != 0)
-		max_pkt_num = FIFO_DEPTH / pkt_len;
+	max_pkt_num = FIFO_DEPTH / pkt_len;
 
 	while (pkt_num != 0) {
-		if (pkt_num < max_pkt_num || pkt_len == 0) {
+		if (pkt_num < max_pkt_num) {
 			j = pkt_num;
 			pkt_num = 0;
 		} else {
@@ -153,44 +173,74 @@ void bsp_cci_tx_data_rb(unsigned int sel, struct cci_msg *msg)
 static void bsp_cci_error_process(unsigned int sel)
 {
 	cci_int_clear_status(sel, CCI_INT_ERROR);
-	cci_stop(sel);
-	cci_sck_cycles(sel, 16);
+	bsp_cci_bus_error_process(sel);
 	bsp_csi_cci_exit(sel);
 	bsp_csi_cci_init_helper(sel);
 }
 static int bsp_cci_tx_start_wait_done_unlocked(unsigned int sel,
 					       struct cci_msg *msg)
 {
+#ifdef CCI_IRQ
 	int ret = 0;
 	unsigned long timeout = 0;
 
 	bsp_cci_tx_start(sel, msg);
 #ifdef FPGA_VER
-	timeout = wait_event_timeout(wait[sel], csi_cci_get_trans_done(sel) == 0, HZ / 50);
+	timeout =
+	    wait_event_timeout(wait[sel], csi_cci_get_trans_done(sel) == 0,
+			       HZ / 50);
 #else
-	timeout = wait_event_timeout(wait[sel], csi_cci_get_trans_done(sel) == 0, HZ);
+	timeout =
+	    wait_event_timeout(wait[sel], csi_cci_get_trans_done(sel) == 0, HZ);
 	if (timeout == 0) {
-		pr_err("[VIN CCI_%d ERR] timeout error at addr_8bit = %x, wr_flag = %d, val = %x\n",
-		     sel, msg->bus_fmt.saddr_7bit << 1, msg->bus_fmt.wr_flag, *(int *)msg->pkt_buf);
+		pr_info("[VIN CCI_%d ERR] timeout error at addr_8bit = %x, wr_flag = %d, val = %x\n",
+		     sel, msg->bus_fmt.saddr_7bit << 1, msg->bus_fmt.wr_flag,
+		     *(int *)msg->pkt_buf);
 		ret = -1;
 	}
 #endif
 	if (status_err_flag[sel] == 1) {
-		pr_err("[VIN CCI_%d ERR] Status error at addr_8bit = %x, wr_flag = %d, val = %x\n",
-		     sel, msg->bus_fmt.saddr_7bit << 1, msg->bus_fmt.wr_flag, *(int *)msg->pkt_buf);
+		pr_info("[VIN CCI_%d ERR] Status error at addr_8bit = %x, wr_flag = %d, val = %x\n",
+		     sel, msg->bus_fmt.saddr_7bit << 1, msg->bus_fmt.wr_flag,
+		     *(int *)msg->pkt_buf);
 		ret = -1;
 	}
 	if (msg->bus_fmt.wr_flag == 1)
 		bsp_cci_tx_data_rb(sel, msg);
 	return ret;
+#else
+	struct cci_int_status status;
+	int ret = 0;
+
+	bsp_cci_tx_start(sel, msg);
+	usleep_range(100, 120);
+	while (1) {
+		if (csi_cci_get_trans_done(sel) == 0)
+			break;
+		else
+			usleep_range(80, 100);
+	};
+	cci_int_get_status(sel, &status);
+	if (status.error) {
+		cci_int_clear_status(sel, CCI_INT_ERROR);
+		pr_info("[VIN CCI_%d ERR] Status error at addr_8bit = %x, wr_flag = %d\n",
+		     sel, msg->bus_fmt.saddr_7bit << 1, msg->bus_fmt.wr_flag);
+		bsp_cci_bus_error_process(sel);
+		bsp_csi_cci_exit(sel);
+		bsp_csi_cci_init_helper(sel);
+		ret = -1;
+	}
+	if (status.complete)
+		cci_int_clear_status(sel, CCI_INT_FINISH);
+	if (msg->bus_fmt.wr_flag == 1)
+		bsp_cci_tx_data_rb(sel, msg);
+	return ret;
+#endif
 }
 
 int bsp_cci_tx_start_wait_done(unsigned int sel, struct cci_msg *msg)
 {
 	int ret = -1;
-
-	if (!register_flag[sel])
-		return ret;
 
 	mutex_lock(&cci_mutex[sel]);
 	if (down_trylock(&cci_sema[sel])) {
@@ -201,6 +251,33 @@ int bsp_cci_tx_start_wait_done(unsigned int sel, struct cci_msg *msg)
 	up(&cci_sema[sel]);
 	mutex_unlock(&cci_mutex[sel]);
 	return ret;
+}
+
+void bsp_cci_int_enable(unsigned int sel, enum cci_int_sel interrupt)
+{
+	cci_int_enable(sel, interrupt);
+}
+
+void bsp_cci_int_disable(unsigned int sel, enum cci_int_sel interrupt)
+{
+	cci_int_disable(sel, interrupt);
+}
+
+void CCI_INLINE bsp_cci_int_get_status(unsigned int sel,
+					struct cci_int_status *status)
+{
+	cci_int_get_status(sel, status);
+}
+
+void CCI_INLINE bsp_cci_int_clear_status(unsigned int sel,
+					enum cci_int_sel interrupt)
+{
+	cci_int_clear_status(sel, interrupt);
+}
+
+enum cci_bus_status CCI_INLINE bsp_cci_get_bus_status(unsigned int sel)
+{
+	return cci_get_bus_status(sel);
 }
 
 int bsp_cci_irq_process(unsigned int sel)
@@ -222,6 +299,12 @@ int bsp_cci_irq_process(unsigned int sel)
 	return ret;
 }
 
+void bsp_cci_bus_error_process(unsigned int sel)
+{
+	cci_stop(sel);
+	cci_sck_cycles(sel, 16);
+}
+
 void bsp_csi_cci_init_helper(unsigned int sel)
 {
 	struct cci_tx_mode tx_mode;
@@ -233,11 +316,9 @@ void bsp_csi_cci_init_helper(unsigned int sel)
 	tx_mode.tx_trig_mode.trig_src = NO_TRIG;
 	tx_mode.tx_trig_mode.trig_con = TRIG_DEFAULT;
 	tx_mode.tx_trig_line_cnt = 0;
-	csi_cci_set_tx_buf_mode(sel, &tx_mode.tx_buf_mode);
-	csi_cci_set_trig_mode(sel, &tx_mode.tx_trig_mode);
-	csi_cci_set_trig_line_cnt(sel, tx_mode.tx_trig_line_cnt);
-	cci_int_clear_status(sel, CCI_INT_ALL);
-	cci_int_enable(sel, CCI_INT_ALL);
+	bsp_cci_set_tx_mode(sel, &tx_mode);
+	bsp_cci_int_clear_status(sel, CCI_INT_ALL);
+	bsp_cci_int_enable(sel, CCI_INT_ALL);
 }
 
 int cci_wr_8_8(unsigned int sel, unsigned char reg, unsigned char data,
@@ -499,4 +580,3 @@ int cci_wr_a16_d8_continuous(unsigned int sel, unsigned short reg,
 	}
 	return ret;
 }
-

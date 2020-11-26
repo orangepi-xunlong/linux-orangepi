@@ -128,12 +128,6 @@ config GPIO_AXP209
 	help
 	  Say yes to enable GPIO support for the AXP209 PMIC
 
-config GPIO_AXP858
-	tristate "X-Powers AXP858 PMIC GPIO Support"
-	depends on MFD_AXP2101
-	help
-	  Say yes to enable GPIO support for the AXP858 PMIC
-
 config GPIO_SUNXI
 	tristate "SUNXI GPIO Support"
 	help

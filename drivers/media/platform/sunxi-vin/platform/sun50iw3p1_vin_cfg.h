@@ -50,7 +50,6 @@
 #define VIN_MAX_DEV			2
 #define VIN_MAX_CSI			1
 #define VIN_MAX_CCI			1
-#define VIN_MAX_TDM			0
 #define VIN_MAX_MIPI			0
 #define VIN_MAX_ISP			1
 #define VIN_MAX_SCALER			2

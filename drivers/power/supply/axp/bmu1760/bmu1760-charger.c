@@ -26,7 +26,7 @@
 #include "../axp-core.h"
 #include "../axp-charger.h"
 #include "bmu1760-charger.h"
-#include <linux/of_gpio.h>
+
 static int bmu1760_get_ac_voltage(struct axp_charger_dev *cdev)
 {
 	return 0;
@@ -123,11 +123,6 @@ static int bmu1760_set_usb_ihold(struct axp_charger_dev *cdev, int cur)
 			pr_err("set usb limit current, %d mA\n",
 						bmu1760_config.pmu_ac_cur);
 		}
-		if (cur <= 500) {
-			axp_regmap_update(map, BMU1760_CHARGE_CONTROL4, 0x00<<3, 0x78);
-		} else {
-			axp_regmap_update(map, BMU1760_CHARGE_CONTROL4, 0x02<<3, 0x78);
-		}
 	} else {
 		/*axp_regmap_clr_bits(map, 0xff,0x60);*/
 	}
@@ -142,38 +137,7 @@ static int bmu1760_get_usb_ihold(struct axp_charger_dev *cdev)
 	axp_regmap_read(map, 0x10, &tmp);
 	return (tmp*50 + 100);
 }
-#ifdef CONFIG_TYPE_C
-static int bmu1760_get_cc_mode(struct axp_charger_dev *cdev)
-{
-	u8 tmp;
-	struct axp_regmap *map = cdev->chip->regmap;
 
-	axp_regmap_read(map, BMU1760_CC_STATUS0, &tmp);
-	tmp &= 0x0f;
-	AXP_DEBUG(AXP_SPLY, cdev->chip->pmu_num,
-		"get_cc_mode = %x\n", tmp);
-	if (tmp == 0x03) {
-		return ATTACH_SNK;
-	} else if (tmp == 0x06) {
-		return ATTACH_SRC;
-	} else if (tmp == 0x07) {
-		return AUDIO_ACSY;
-	} else {
-		return ATTACH_RESERVER;
-	}
-}
-static int bmu1760_set_sel_mode(struct axp_charger_dev *cdev, int mode)
-{
-	if (mode) {
-		gpio_set_value(cdev->pmu_type_c_sel.gpio, 1);
-	} else {
-		gpio_set_value(cdev->pmu_type_c_sel.gpio, 0);
-	}
-	AXP_DEBUG(AXP_SPLY, cdev->chip->pmu_num,
-		"set_sel_mode = %x\n", mode);
-	return 0;
-}
-#endif
 static struct axp_usb_info bmu1760_usb_info = {
 	.det_bit         = 1,
 	.det_offset      = 0,
@@ -185,10 +149,6 @@ static struct axp_usb_info bmu1760_usb_info = {
 	.get_usb_vhold   = bmu1760_get_usb_vhold,
 	.set_usb_ihold   = bmu1760_set_usb_ihold,
 	.get_usb_ihold   = bmu1760_get_usb_ihold,
-#ifdef CONFIG_TYPE_C
-	.get_cc_mode     = bmu1760_get_cc_mode,
-	.set_sel_mode    = bmu1760_set_sel_mode,
-#endif
 };
 
 static int bmu1760_get_rest_cap(struct axp_charger_dev *cdev)
@@ -349,10 +309,18 @@ static struct power_supply_info battery_data = {
 	.voltage_min_design = 3500000,
 	.use_for_apm = 1,
 };
+#ifdef CONFIG_TYPE_C
+static struct axp_tc_info bmu1760_tc_info = {
+	.det_bit   = 2,			/*2--4*/
+};
+#endif
 static struct axp_supply_info bmu1760_spy_info = {
 	.ac   = &bmu1760_ac_info,
 	.usb  = &bmu1760_usb_info,
 	.batt = &bmu1760_batt_info,
+#ifdef CONFIG_TYPE_C
+	.tc	= &bmu1760_tc_info,
+#endif
 };
 
 static int bmu1760_charger_init(struct axp_dev *axp_dev)
@@ -428,7 +396,7 @@ static int bmu1760_charger_init(struct axp_dev *axp_dev)
 	if (val > 0x30)
 		val = 0x30;
 	val <<= 2;
-	axp_regmap_update(map, BMU1760_CHARGE_CONTROL3, val, 0xfc);
+	axp_regmap_update(map, BMU1760_CHARGE_CONTROL2, val, 0xfc);
 
 	ocv_cap[0]  = bmu1760_config.pmu_bat_para1;
 	ocv_cap[1]  = bmu1760_config.pmu_bat_para2;
@@ -526,16 +494,6 @@ static int bmu1760_charger_init(struct axp_dev *axp_dev)
 		axp_regmap_write(map, BMU1760_VHTF_WORK,
 				bmu1760_config.pmu_bat_shutdown_htf * 10 / 128);
 	}
-	if (bmu1760_config.pmu_cou_en == 1) {
-		/* use ocv and cou */
-		axp_regmap_set_bits(map, BMU1760_COULOMB_CTL, 0x80);
-		axp_regmap_set_bits(map, BMU1760_COULOMB_CTL, 0x40);
-
-	} else if (bmu1760_config.pmu_cou_en == 0) {
-		/* only use ocv */
-		axp_regmap_set_bits(map, BMU1760_COULOMB_CTL, 0x80);
-		axp_regmap_clr_bits(map, BMU1760_COULOMB_CTL, 0x40);
-	}
 	/*enable fast charge */
 	axp_regmap_update(map, 0x31, 0x04, 0x04);
 	/*set POR time as 16s*/
@@ -557,13 +515,9 @@ static int bmu1760_charger_init(struct axp_dev *axp_dev)
 
 	/*type-c cc logic init*/
 #ifdef CONFIG_TYPE_C
-
 	axp_regmap_update(map, BMU1760_CC_EN, 0x02, 0x02);
 	axp_regmap_clr_bits(map, BMU1760_CC_LOW_POWER_CTRL, 0x04);
 	axp_regmap_update(map, BMU1760_CC_MODE_CTRL, 0x03, 0x03);
-#ifdef CONFIG_TYPE_C_AUDIO
-	axp_regmap_set_bits(map, BMU1760_CC_GLOBAL_CTRL, 0x20);
-#endif
 #endif
 
 	return 0;
@@ -703,7 +657,7 @@ static int bmu1760_charger_probe(struct platform_device *pdev)
 			return -EINVAL;
 		}
 	} else {
-		pr_err("bmu1760 charger device tree err!\n");
+		pr_err("axp22 charger device tree err!\n");
 		return -EBUSY;
 	}
 
@@ -731,28 +685,7 @@ static int bmu1760_charger_probe(struct platform_device *pdev)
 	chg_dev->private_debug = bmu1760_private_debug;
 	chg_dev->pmic_temp_offset = 0x56;
 	chg_dev->spy_info->batt->bat_temp_offset = 0x58;
-#ifdef CONFIG_TYPE_C_AUDIO
-	chg_dev->pmu_type_c_sel.gpio =
-		of_get_named_gpio(pdev->dev.of_node, "pmu_type_c_sel", 0);
-	if (!gpio_is_valid(chg_dev->pmu_type_c_sel.gpio)) {
-		pr_err("get gpio rst failed\n");
-	} else {
-		ret = gpio_request(
-			chg_dev->pmu_type_c_sel.gpio,
-			"pmu_type_c_sel");
-		if (ret != 0) {
-			pr_err("ERR: pmu_type_c_sel request failed\n");
-			return -EINVAL;
-		}
-		ret = gpio_direction_output(chg_dev->pmu_type_c_sel.gpio, 0);
-		if (ret < 0) {
-			pr_err("can't request output direction pmu_type_c_sel %d\n",
-					chg_dev->pmu_type_c_sel.gpio);
-			return ret;
-		}
-	}
 
-#endif
 	for (i = 0; i < ARRAY_SIZE(bmu1760_charger_irq); i++) {
 		irq = platform_get_irq_byname(pdev, bmu1760_charger_irq[i].name);
 		if (irq < 0)
@@ -836,6 +769,7 @@ static int bmu1760_charger_resume(struct platform_device *dev)
 				pre_rest_vol, chg_dev->rest_vol);
 		/*axp_regmap_write(map, 0x05, chg_dev->rest_vol | 0x80);*/
 	}
+
 	return 0;
 }
 

@@ -5,4 +5,3 @@ config SUNXI_NAND
 	  The nand used on the platform.
 
 	  If unsure, say m.
-source "modules/nand/common1/Kconfig"

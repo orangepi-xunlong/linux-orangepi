@@ -518,9 +518,10 @@ CPU_LE(	bic	x0, x0, #(3 << 24)	)	// Clear the EE and E0E bits for EL1
 #endif
 
 	/* Hyp configuration. */
-	mov_q	x0, HCR_HOST_NVHE_FLAGS
+	mov	x0, #HCR_RW			// 64-bit EL1
 	cbz	x2, set_hcr
-	mov_q	x0, HCR_HOST_VHE_FLAGS
+	orr	x0, x0, #HCR_TGE		// Enable Host Extensions
+	orr	x0, x0, #HCR_E2H
 set_hcr:
 	msr	hcr_el2, x0
 	isb
@@ -535,7 +536,8 @@ set_hcr:
 	/* GICv3 system register access */
 	mrs	x0, id_aa64pfr0_el1
 	ubfx	x0, x0, #24, #4
-	cbz	x0, 3f
+	cmp	x0, #1
+	b.ne	3f
 
 	mrs_s	x0, ICC_SRE_EL2
 	orr	x0, x0, #ICC_SRE_EL2_SRE	// Set ICC_SRE_EL2.SRE==1

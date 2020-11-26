@@ -80,6 +80,9 @@ void mc_disable_all_clocks(hdmi_tx_dev_t *dev);
 void mc_clocks_standby(hdmi_tx_dev_t *dev);
 
 void mc_enable_all_clocks(hdmi_tx_dev_t *dev);
+void mc_enable_clocks_resume(hdmi_tx_dev_t *dev);
+
+void mc_rst_all_clocks(hdmi_tx_dev_t *dev);
 void mc_audio_sampler_clock_enable(hdmi_tx_dev_t *dev, u8 bit);
 
 void mc_tmds_clock_reset(hdmi_tx_dev_t *dev, u8 bit);

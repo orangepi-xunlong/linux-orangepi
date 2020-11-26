@@ -13,9 +13,7 @@
 struct sunxi_lcd_drv g_lcd_drv;
 
 struct __lcd_panel *panel_array[] = {
-#ifdef CONFIG_EINK_PANEL_USED
 	&default_eink,
-#endif
 	&default_panel,
 	&lt070me05000_panel,
 	&wtq05027d01_panel,
@@ -31,8 +29,6 @@ struct __lcd_panel *panel_array[] = {
 	/* add new panel below */
 	&WilliamLcd_panel,
 	&fx070_panel,
-	&FX070_DHM18BOEL2_1024X600_mipi_panel,
-	&bp101wx1_panel,
 	NULL,
 };
 

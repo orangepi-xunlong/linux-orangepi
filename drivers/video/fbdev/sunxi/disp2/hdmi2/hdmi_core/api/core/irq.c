@@ -30,7 +30,6 @@ static irq_vector_t irq_vec[] = {
 	{0, 0, 0},
 };
 
-#if 0
 int irq_read_stat(hdmi_tx_dev_t *dev, irq_sources_t irq_source, u8 *stat)
 {
 	int i = 0;
@@ -83,7 +82,6 @@ int irq_clear_bit(hdmi_tx_dev_t *dev, irq_sources_t irq_source, u8 bit_mask)
 	pr_err("Error:IRQ source [%d] is not supported\n", irq_source);
 	return FALSE;
 }
-#endif
 
 /*******************************************************************
  * Mute IRQ miscellaneous
@@ -121,7 +119,7 @@ int irq_unmute_source(hdmi_tx_dev_t *dev, irq_sources_t irq_source)
 	return FALSE;
 }
 
-#if 0
+
 int irq_mask_bit(hdmi_tx_dev_t *dev, irq_sources_t irq_source, u8 bit_mask)
 {
 	int i = 0;
@@ -154,7 +152,9 @@ int irq_unmask_bit(hdmi_tx_dev_t *dev, irq_sources_t irq_source, u8 bit_mask)
 	return FALSE;
 }
 
-#endif
+/*******************************************************************
+ *
+ */
 
 void irq_mute(hdmi_tx_dev_t *dev)
 {
@@ -168,7 +168,6 @@ void irq_unmute(hdmi_tx_dev_t *dev)
 	dev_write(dev, IH_MUTE,  0x0);
 }
 
-#if 0
 void irq_clear_all(hdmi_tx_dev_t *dev)
 {
 	LOG_TRACE();
@@ -183,7 +182,6 @@ void irq_clear_all(hdmi_tx_dev_t *dev)
 	irq_clear_source(dev, I2C_PHY);
 	irq_clear_source(dev, AUDIO_DMA);
 }
-#endif
 
 void irq_mask_all(hdmi_tx_dev_t *dev)
 {
@@ -201,7 +199,6 @@ void irq_mask_all(hdmi_tx_dev_t *dev)
 	irq_mute_source(dev, AUDIO_DMA);
 }
 
-#if 0
 void irq_scdc_read_request(hdmi_tx_dev_t *dev, int enable)
 {
 	if (enable)
@@ -223,7 +220,6 @@ void un_mask_i2c_interrupt(hdmi_tx_dev_t *dev)
 	/* I2Cmastererror */
 	irq_unmask_bit(dev, I2C_DDC, IH_MUTE_I2CM_STAT0_SCDC_READREQ_MASK);
 }
-#endif
 
 void irq_hpd_sense_enable(hdmi_tx_dev_t *dev, u8 enable)
 {
@@ -239,7 +235,6 @@ void irq_hpd_sense_enable(hdmi_tx_dev_t *dev, u8 enable)
 	}
 }
 
-#if 0
 u32 read_interrupt_decode(hdmi_tx_dev_t *dev)
 {
 	return dev_read(dev, IH_DECODE) & 0xFF;
@@ -289,4 +284,3 @@ int decode_is_cec_stat0(u32 decode)
 {
 	return (decode & IH_DECODE_IH_CEC_STAT0_MASK) ? 1 : 0;
 }
-#endif

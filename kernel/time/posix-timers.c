@@ -355,17 +355,6 @@ static __init int init_posix_timers(void)
 
 __initcall(init_posix_timers);
 
-/*
- * The siginfo si_overrun field and the return value of timer_getoverrun(2)
- * are of type int. Clamp the overrun value to INT_MAX
- */
-static inline int timer_overrun_to_int(struct k_itimer *timr, int baseval)
-{
-	s64 sum = timr->it_overrun_last + (s64)baseval;
-
-	return sum > (s64)INT_MAX ? INT_MAX : (int)sum;
-}
-
 static void schedule_next_timer(struct k_itimer *timr)
 {
 	struct hrtimer *timer = &timr->it.real.timer;
@@ -373,11 +362,12 @@ static void schedule_next_timer(struct k_itimer *timr)
 	if (timr->it.real.interval.tv64 == 0)
 		return;
 
-	timr->it_overrun += hrtimer_forward(timer, timer->base->get_time(),
-					    timr->it.real.interval);
+	timr->it_overrun += (unsigned int) hrtimer_forward(timer,
+						timer->base->get_time(),
+						timr->it.real.interval);
 
 	timr->it_overrun_last = timr->it_overrun;
-	timr->it_overrun = -1LL;
+	timr->it_overrun = -1;
 	++timr->it_requeue_pending;
 	hrtimer_restart(timer);
 }
@@ -406,7 +396,7 @@ void do_schedule_next_timer(struct siginfo *info)
 		else
 			schedule_next_timer(timr);
 
-		info->si_overrun = timer_overrun_to_int(timr, info->si_overrun);
+		info->si_overrun += timr->it_overrun_last;
 	}
 
 	if (timr)
@@ -501,7 +491,8 @@ static enum hrtimer_restart posix_timer_fn(struct hrtimer *timer)
 					now = ktime_add(now, kj);
 			}
 #endif
-			timr->it_overrun += hrtimer_forward(timer, now,
+			timr->it_overrun += (unsigned int)
+				hrtimer_forward(timer, now,
 						timr->it.real.interval);
 			ret = HRTIMER_RESTART;
 			++timr->it_requeue_pending;
@@ -642,7 +633,7 @@ SYSCALL_DEFINE3(timer_create, const clockid_t, which_clock,
 	it_id_set = IT_ID_SET;
 	new_timer->it_id = (timer_t) new_timer_id;
 	new_timer->it_clock = which_clock;
-	new_timer->it_overrun = -1LL;
+	new_timer->it_overrun = -1;
 
 	if (timer_event_spec) {
 		if (copy_from_user(&event, timer_event_spec, sizeof (event))) {
@@ -771,7 +762,7 @@ common_timer_get(struct k_itimer *timr, struct itimerspec *cur_setting)
 	 */
 	if (iv.tv64 && (timr->it_requeue_pending & REQUEUE_PENDING ||
 			timr->it_sigev_notify == SIGEV_NONE))
-		timr->it_overrun += hrtimer_forward(timer, now, iv);
+		timr->it_overrun += (unsigned int) hrtimer_forward(timer, now, iv);
 
 	remaining = __hrtimer_expires_remaining_adjusted(timer, now);
 	/* Return 0 only, when the timer is expired and not pending */
@@ -833,7 +824,7 @@ SYSCALL_DEFINE1(timer_getoverrun, timer_t, timer_id)
 	if (!timr)
 		return -EINVAL;
 
-	overrun = timer_overrun_to_int(timr, 0);
+	overrun = timr->it_overrun_last;
 	unlock_timer(timr, flags);
 
 	return overrun;

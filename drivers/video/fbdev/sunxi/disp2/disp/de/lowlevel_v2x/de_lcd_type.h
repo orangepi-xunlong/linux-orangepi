@@ -689,8 +689,7 @@ union tcon_clk_gate_reg_t {
 		u32 vdpo1_clk_gate:1;
 		u32 res4:14;
 		u32 dsi_clk_gate:1;
-		u32 lcd1_dsi_clk_gate:1;
-		u32 res3:2;
+		u32 res3:3;
 		u32 tv0_clk_gate:1;
 		u32 res2:3;
 		u32 tv1_clk_gate:1;

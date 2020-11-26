@@ -76,7 +76,7 @@ static bool dentry_connected(struct dentry *dentry)
 		struct dentry *parent = dget_parent(dentry);
 
 		dput(dentry);
-		if (dentry == parent) {
+		if (IS_ROOT(dentry)) {
 			dput(parent);
 			return false;
 		}

@@ -27,6 +27,7 @@
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 #include <linux/sunxi-sid.h>
+/*#include <mach/sunxi-smc.h>*/
 
 #include "sunxi_ths.h"
 #include "sunxi_ths_core.h"
@@ -132,21 +133,6 @@ static int reg_to_temp_version_2_3(u32 reg_data, u16 id,
 	return t;
 }
 
-/*
- * @interface name: reg_to_temp_x10_version_2_3
- * @function: change the value what read from register to the temp for thermal
- * version 2 or 3.
- * return: temperature * 10
- */
-static int reg_to_temp_x10_version_2_3(u32 reg_data, u16 id,
-				struct temp_calculate_coefficent *para)
-{
-	int t = 0;
-
-	t = (int)(para->nt_para[id].MINU_PARA) - (int)(reg_data * (para->nt_para[id].MUL_PARA));
-	t = (10 * t) / (int)para->nt_para[id].DIV_PARA;
-	return t;
-}
 static u32 ths_driver_temp_to_reg(int temp, u16 id,
 			       struct temp_calculate_coefficent *para)
 {
@@ -156,6 +142,21 @@ static u32 ths_driver_temp_to_reg(int temp, u16 id,
 		(temp * para->nt_para[id].DIV_PARA));
 	reg = reg / para->nt_para[id].MUL_PARA;
 	return (u32) reg;
+}
+
+/*
+ * @interface name: ths_round
+ * @function: si she wu ru.
+ */
+static s32 ths_round(s32 integer, s32 decimal)
+{
+	if ((decimal > 4) && (decimal <= 9)) {
+		if (integer > 0)
+			return ++integer;
+		else
+			return --integer;
+	}
+	return integer;
 }
 
 static int get_ths_driver_version(struct sunxi_ths_data *ths_data)
@@ -303,6 +304,15 @@ static int ths_driver_reg_to_temp(u32 reg_data, u16 id,
 }
 
 /*
+ * calcular_num_to_dec_int:make the num devide two part integer and decimal
+ */
+static void calcular_num_to_dec_int(s32 num, s32 *integer, s32 *decimal)
+{
+	*decimal = num % 10;
+	*integer = num / 10;
+}
+
+/*
  * @interface name: reg_to_temp_to_reg_efuse
  * @function: change the value what read from register to the temp for thermal
  * version 3. we use float type, because we need to calcula calibration efuse
@@ -311,14 +321,17 @@ static int ths_driver_reg_to_temp(u32 reg_data, u16 id,
 static u32 reg_to_temp_to_reg_efuse(u32 reg_data, u16 id, u16 environment_temp, struct temp_calculate_coefficent *para)
 {
 	u32 t = 0;
+	s32 integer, decimal;
 	u32 write_reg_data;
 	s32 reg_to_temp;
 	u16 envir_temp;
 
 	envir_temp = (u16)environment_temp;
-	reg_to_temp = reg_to_temp_x10_version_2_3(reg_data, id, para);
+	calcular_num_to_dec_int(envir_temp, &integer, &decimal);
+	integer = ths_round(integer, decimal);
+	reg_to_temp = reg_to_temp_version_2_3(reg_data, id, para);
 
-	t = ((reg_to_temp - envir_temp) * CONST_DIV) / SENSOR_CP_EUFSE_PER_REG_TO_TEMP;
+	t = ((reg_to_temp - integer) * CONST_DIV) / SENSOR_CP_EUFSE_PER_REG_TO_TEMP;
 
 	write_reg_data = THS_EFUSE_DEFAULT_VALUE - t;
 	if ((write_reg_data & (~THS_EFUSE_ENVIRONMENT_MASK)) != 0) {
@@ -532,7 +545,7 @@ static void ths_driver_write_efuse_to_reg(struct sunxi_ths_data *ths_data,
 					  int cal_reg_num,
 					  struct thermal_reg *reg)
 {
-	u8 efuse_key_size = ths_data->sensor_cnt / 2 + 1;
+	u8 efuse_key_size = (ths_data->sensor_cnt + 1) / 2;
 	u32 ths_cal_data[efuse_key_size];
 	int ret;
 	int ths_drv_ver;

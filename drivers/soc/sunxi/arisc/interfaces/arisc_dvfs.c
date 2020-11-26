@@ -18,6 +18,7 @@
  */
 
 #include "../arisc_i.h"
+#include "linux/sunxi-cpufreq.h"
 
 /*
  * set specific pll target frequency.
@@ -34,13 +35,14 @@ int arisc_dvfs_set_cpufreq(unsigned int freq, unsigned int pll, unsigned int mod
 {
 	int                   ret = 0;
 
+	ARISC_INF("arisc dvfs request : %d\n", freq);
 	ret = invoke_scp_fn_smc(ARM_SVC_ARISC_CPUX_DVFS_REQ, freq, pll, mode);
 	if (ret) {
 		if (cb == NULL) {
-			pr_warn("callback not install\n");
+			ARISC_WRN("callback not install\n");
 		} else {
 			/* call callback function */
-			pr_warn("call the callback function\n");
+			ARISC_WRN("call the callback function\n");
 			(*(cb))(cb_arg);
 		}
 	}

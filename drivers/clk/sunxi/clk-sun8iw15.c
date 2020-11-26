@@ -504,7 +504,7 @@ SUNXI_CLK_PERIPH(cpurapbs2_pll,  0,               0,       0,            CPUS_AP
 SUNXI_CLK_PERIPH(cpurapbs2,      CPUS_APBS2_CFG,  24,      2,            CPUS_APBS2_CFG,     0,         0,          8,          2,          0,          0,               0,               0,             0,             0,          0,          0,             0,             &clk_lock, NULL,             0);
 SUNXI_CLK_PERIPH(losc_out,       0,               0,       0,            0,                  0,         0,          0,          0,          0,          0,               0,               LOSC_OUT_GATE, 0,             0,          0,          0,             0,             &clk_lock, NULL,             0);
 SUNXI_CLK_PERIPH(cpurpio,        0,               0,       0,            0,                  0,         0,          0,          0,          0,          0,               0,               0,             0,             0,          0,          0,             0,             &clk_lock, NULL,             0);
-SUNXI_CLK_PERIPH(spwm,           CPUS_PWM_CFG,    24,      2,            0,                  0,         0,          0,          0,          0,          CPUS_PWM_CFG,    CPUS_PWM_GATE,   CPUS_PWM_GATE, 0,             31,        16,         0,             0,             &clk_lock, NULL,             0);
+SUNXI_CLK_PERIPH(spwm,           CPUS_PWM_CFG,    24,      2,            0,                  0,         0,          0,          0,          0,          CPUS_PWM_GATE,   CPUS_PWM_GATE,   CPUS_PWM_GATE, 0,             31,        16,         0,             0,             &clk_lock, NULL,             0);
 
 struct periph_init_data sunxi_periphs_init[] = {
 	{"cpu",            CLK_GET_RATE_NOCACHE, cpu_parents,            ARRAY_SIZE(cpu_parents),            &sunxi_clk_periph_cpu              },
@@ -675,4 +675,3 @@ void __init sunxi_clocks_init(struct device_node *node)
 	/*do some initialize arguments here*/
 	sunxi_clk_factor_initlimits();
 }
-void __init sunxi_cpu_clocks_init(struct device_node *node) {}

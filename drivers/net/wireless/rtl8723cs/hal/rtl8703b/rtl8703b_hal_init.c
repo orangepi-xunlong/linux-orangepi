@@ -4381,16 +4381,10 @@ static void rtl8703b_fill_default_txdesc(
 			SET_TX_DESC_USE_RATE_8703B(pbuf, 1);
 			if (pmlmeinfo->preamble_mode == PREAMBLE_SHORT)
 				SET_TX_DESC_DATA_SHORT_8703B(pbuf, 1);
-#ifdef CONFIG_IP_R_MONITOR
-			if ((pattrib->ether_type == ETH_P_ARP) &&
-				(IsSupportedTxOFDM(padapter->registrypriv.wireless_mode)))
-				SET_TX_DESC_TX_RATE_8703B(pbuf, MRateToHwRate(IEEE80211_OFDM_RATE_6MB));
-			 else
-#endif/*CONFIG_IP_R_MONITOR*/
 			SET_TX_DESC_TX_RATE_8703B(pbuf, MRateToHwRate(pmlmeext->tx_rate));
 
-			RTW_INFO(FUNC_ADPT_FMT ": SP Packet(0x%04X) rate=0x%x SeqNum = %d\n",
-				FUNC_ADPT_ARG(padapter), pattrib->ether_type, MRateToHwRate(pmlmeext->tx_rate), pattrib->seqnum);
+			RTW_INFO(FUNC_ADPT_FMT ": SP Packet(0x%04X) rate=0x%x\n",
+				FUNC_ADPT_ARG(padapter), pattrib->ether_type, MRateToHwRate(pmlmeext->tx_rate));
 		}
 
 #if defined(CONFIG_USB_TX_AGGREGATION) || defined(CONFIG_SDIO_HCI) || defined(CONFIG_GSPI_HCI)

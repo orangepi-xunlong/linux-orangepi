@@ -13,6 +13,7 @@
 #define PLATFORM_H_
 #include "../config.h"
 
+#if defined(__LINUX_PLAT__)
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/device.h>
@@ -31,6 +32,9 @@
 #include <linux/types.h>
 #include <video/sunxi_display2.h>
 #include <video/drv_hdmi.h>
+#else
+#include "../hdmi_boot.h"
+#endif
 
 #include "core_edid.h"
 #include "core_cec.h"
@@ -221,20 +225,25 @@ void hdmitx_write(uintptr_t addr, u32 data);
 u32 hdmitx_read(uintptr_t addr);
 
 void core_init_audio(struct hdmi_mode *cfg);
-
+void core_init_hdcp(struct hdmi_mode *cfg, hdcpParams_t *hdcp);
 
 int hdmi_tx_core_init(struct hdmi_tx_core *core,
-					int phy,
-					videoParams_t *Video,
-					audioParams_t *audio,
-					hdcpParams_t  *hdcp);
+							int phy,
+							videoParams_t *Video,
+							audioParams_t *audio,
+							hdcpParams_t  *hdcp);
 void hdmi_core_exit(struct hdmi_tx_core *core);
+
+int get_hdcp_type_core(struct hdmi_tx_core *core);
+int get_hdcp_status_core(void);
 
 void resistor_calibration_core(struct hdmi_tx_core *core, u32 reg, u32 data);
 void hdmi_configure_core(struct hdmi_tx_core *core);
 
 
 /****************************IRQ handler********************************/
+void hdcp_handler_core(void);
+
 void hdmi_core_set_base_addr(uintptr_t reg_base);
 uintptr_t hdmi_core_get_base_addr(void);
 
@@ -252,9 +261,10 @@ int hdmi_mode_blacklist_check(u8 *sink_edid);
 void hdmi_reconfig_format_by_blacklist(struct disp_device_config *config);
 s32 set_static_config(struct disp_device_config *config);
 s32 get_static_config(struct disp_device_config *config);
+#if defined(__LINUX_PLAT__)
 s32 set_dynamic_config(struct disp_device_dynamic_config *config);
 s32 get_dynamic_config(struct disp_device_dynamic_config *config);
-
+#endif
 s32 hdmi_set_display_mode(u32 mode);
 s32 hdmi_mode_support(u32 mode);
 s32 hdmi_get_HPD_status(void);
@@ -265,19 +275,23 @@ s32 hdmi_enable_core(void);
 s32 hdmi_smooth_enable_core(void);
 s32 hdmi_disable_core(void);
 
+/*******************HDCP*****************************/
+void hdcp_enable_core(struct hdmi_tx_core *core, u8 enable);
+
+
 /*************************audio***************************/
 #if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
 s32 hdmi_set_audio_para(hdmi_audio_t *audio_para);
 s32 hdmi_core_audio_enable(u8 mode, u8 channel);
 #endif
 
+
+
 u32 hdmi_core_get_rxsense_state(void);
 u32 hdmi_core_get_phy_pll_lock_state(void);
 u32 hdmi_core_get_phy_power_state(void);
 u32 hdmi_core_get_tmds_mode(void);
-#ifndef SUPPORT_ONLY_HDMI14
 u32 hdmi_core_get_scramble_state(void);
-#endif
 u32 hdmi_core_get_avmute_state(void);
 u32 hdmi_core_get_color_depth(void);
 u32 hdmi_core_get_pixelrepetion(void);
@@ -293,5 +307,7 @@ u32 hdmi_core_get_audio_n(void);
 void hdmi_core_avmute_enable(u8 enable);
 void hdmi_core_phy_power_enable(u8 enable);
 void hdmi_core_dvimode_enable(u8 enable);
+
+ssize_t hdcp_dump_core(char *buf);
 
 #endif /* PLATFORM_H_ */

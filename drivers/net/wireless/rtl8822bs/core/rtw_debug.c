@@ -373,7 +373,7 @@ void rtw_sink_rtp_seq_dbg(_adapter *adapter, u8 *ehdr_pos)
 			precvpriv->pre_rtp_rxseq = precvpriv->cur_rtp_rxseq;
 			precvpriv->cur_rtp_rxseq = be16_to_cpu(*((u16 *)(ehdr_pos + 0x2C)));
 			if (precvpriv->pre_rtp_rxseq + 1 != precvpriv->cur_rtp_rxseq)
-				RTW_INFO("%s : RTP Seq num from %d to %d\n", __func__, precvpriv->pre_rtp_rxseq, precvpriv->cur_rtp_rxseq);
+				RTW_INFO("%s : RTP Seq num from %d to %d\n", __FUNCTION__, precvpriv->pre_rtp_rxseq, precvpriv->cur_rtp_rxseq);
 		}
 	}
 }
@@ -618,7 +618,7 @@ void dump_sec_cam(void *sel, _adapter *adapter)
 	dump_sec_cam_ent_title(sel, 1);
 	for (i = 0; i < cam_ctl->num; i++) {
 		rtw_sec_read_cam_ent(adapter, i, (u8 *)(&ent.ctrl), ent.mac, ent.key);
-		dump_sec_cam_ent(sel, &ent, i);
+		dump_sec_cam_ent(sel , &ent, i);
 	}
 }
 
@@ -877,19 +877,19 @@ int proc_get_sec_info(struct seq_file *m, void *v)
 
 #ifdef DBG_SW_SEC_CNT
 	RTW_PRINT_SEL(m, "wep_sw_enc_cnt=%llu, %llu, %llu\n"
-		, sec->wep_sw_enc_cnt_bc, sec->wep_sw_enc_cnt_mc, sec->wep_sw_enc_cnt_uc);
+		, sec->wep_sw_enc_cnt_bc , sec->wep_sw_enc_cnt_mc, sec->wep_sw_enc_cnt_uc);
 	RTW_PRINT_SEL(m, "wep_sw_dec_cnt=%llu, %llu, %llu\n"
-		, sec->wep_sw_dec_cnt_bc, sec->wep_sw_dec_cnt_mc, sec->wep_sw_dec_cnt_uc);
+		, sec->wep_sw_dec_cnt_bc , sec->wep_sw_dec_cnt_mc, sec->wep_sw_dec_cnt_uc);
 
 	RTW_PRINT_SEL(m, "tkip_sw_enc_cnt=%llu, %llu, %llu\n"
-		, sec->tkip_sw_enc_cnt_bc, sec->tkip_sw_enc_cnt_mc, sec->tkip_sw_enc_cnt_uc);
+		, sec->tkip_sw_enc_cnt_bc , sec->tkip_sw_enc_cnt_mc, sec->tkip_sw_enc_cnt_uc);
 	RTW_PRINT_SEL(m, "tkip_sw_dec_cnt=%llu, %llu, %llu\n"
-		, sec->tkip_sw_dec_cnt_bc, sec->tkip_sw_dec_cnt_mc, sec->tkip_sw_dec_cnt_uc);
+		, sec->tkip_sw_dec_cnt_bc , sec->tkip_sw_dec_cnt_mc, sec->tkip_sw_dec_cnt_uc);
 
 	RTW_PRINT_SEL(m, "aes_sw_enc_cnt=%llu, %llu, %llu\n"
-		, sec->aes_sw_enc_cnt_bc, sec->aes_sw_enc_cnt_mc, sec->aes_sw_enc_cnt_uc);
+		, sec->aes_sw_enc_cnt_bc , sec->aes_sw_enc_cnt_mc, sec->aes_sw_enc_cnt_uc);
 	RTW_PRINT_SEL(m, "aes_sw_dec_cnt=%llu, %llu, %llu\n"
-		, sec->aes_sw_dec_cnt_bc, sec->aes_sw_dec_cnt_mc, sec->aes_sw_dec_cnt_uc);
+		, sec->aes_sw_dec_cnt_bc , sec->aes_sw_dec_cnt_mc, sec->aes_sw_dec_cnt_uc);
 #endif /* DBG_SW_SEC_CNT */
 
 	return 0;
@@ -4636,13 +4636,13 @@ ssize_t proc_set_ps_info(struct file *file, const char __user *buffer, size_t co
 
 	num = sscanf(tmp, "%d %d", &mode, &en);
 	if (num >  2) {
-		RTW_ERR("%s: invalid parameter!\n", __func__);
+		RTW_ERR("%s: invalid parameter!\n", __FUNCTION__);
 		goto exit;
 	}
 
 	if (num == 1 && mode == 0) {
 		/* back to original LPS/IPS Mode */
-		RTW_INFO("%s: back to original LPS/IPS Mode\n", __func__);
+		RTW_INFO("%s: back to original LPS/IPS Mode\n", __FUNCTION__);
 
 		rtw_pm_set_lps(adapter, adapter->registrypriv.power_mgnt);
 
@@ -4653,17 +4653,17 @@ ssize_t proc_set_ps_info(struct file *file, const char __user *buffer, size_t co
 
 	if (mode == 1) {
 		/* LPS */
-		RTW_INFO("%s: LPS: %s, en=%d\n", __func__, (en == 0) ? "disable":"enable", en);
+		RTW_INFO("%s: LPS: %s, en=%d\n", __FUNCTION__, (en == 0) ? "disable":"enable", en);
 		if (rtw_pm_set_lps(adapter, en) != 0 )
-			RTW_ERR("%s: invalid parameter, mode=%d, level=%d\n", __func__, mode, en);
+			RTW_ERR("%s: invalid parameter, mode=%d, level=%d\n", __FUNCTION__, mode, en);
 
 	} else if (mode == 2) {
 		/* IPS */
-		RTW_INFO("%s: IPS: %s, en=%d\n", __func__, (en == 0) ? "disable":"enable", en);
+		RTW_INFO("%s: IPS: %s, en=%d\n", __FUNCTION__, (en == 0) ? "disable":"enable", en);
 		if (rtw_pm_set_ips(adapter, en) != 0 )
-			RTW_ERR("%s: invalid parameter, mode=%d, level=%d\n", __func__, mode, en);
+			RTW_ERR("%s: invalid parameter, mode=%d, level=%d\n", __FUNCTION__, mode, en);
 	} else
-		RTW_ERR("%s: invalid parameter, mode = %d!\n", __func__, mode);
+		RTW_ERR("%s: invalid parameter, mode = %d!\n", __FUNCTION__, mode);
 
 exit:
 	return count;

@@ -796,6 +796,16 @@ config SUNXI_SST_STORAGE
 	  To compile this driver as a module, choose M here: the
 	  module will be called sunxi_storage.
 
+config SUNXI_SST_BLKDEV_DIR
+	tristate "secure storage blk dir"
+	depends on SUNXI_SST_STORAGE
+	default n
+	help
+	  Say Y here if you have a vibrator on your board.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sunxi_storage.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"

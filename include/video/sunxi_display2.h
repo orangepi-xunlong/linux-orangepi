@@ -187,7 +187,6 @@ enum disp_output_type {
 	DISP_OUTPUT_TYPE_VGA = 8,
 	DISP_OUTPUT_TYPE_VDPO = 16,
 	DISP_OUTPUT_TYPE_EDP    = 32, /*16 for vdpo*/
-	DISP_OUTPUT_TYPE_RTWB    = 64,
 };
 
 enum disp_tv_mode {
@@ -317,17 +316,6 @@ struct disp_output {
 	unsigned int mode;
 };
 
-enum disp_transform {
-	DISP_TRANSFORM_ROT_0         = 0x00,
-	DISP_TRANSFORM_ROT_90        = 0x01,
-	DISP_TRANSFORM_ROT_180       = 0x02,
-	DISP_TRANSFORM_ROT_270       = 0x03,
-	DISP_TRANSFORM_FLIP_H        = 0x04,
-	DISP_TRANSFORM_ROT_90_FLIP_H = 0x05,
-	DISP_TRANSFORM_FLIP_V        = 0x06,
-	DISP_TRANSFORM_ROT_90_FLIP_V = 0x07,
-};
-
 struct disp_rect64 {
 	long long x;
 	long long y;
@@ -447,20 +435,6 @@ struct disp_fb_info2 {
 	unsigned int             metadata_flag;
 };
 
-/**
- * disp_snr_info
- */
-struct disp_snr_info {
-	unsigned char en;
-	unsigned char demo_en;
-	struct disp_rect demo_win;
-	unsigned char y_strength;
-	unsigned char u_strength;
-	unsigned char v_strength;
-	unsigned char th_ver_line;
-	unsigned char th_hor_line;
-};
-
 /* disp_layer_info2 - layer info v2
  *
  * @mode: buffer/clolor mode, when in color mode, the layer is widthout buffer
@@ -494,8 +468,6 @@ struct disp_layer_info2 {
 
 	unsigned int              id;
 	struct disp_atw_info      atw;
-	enum disp_transform transform;
-	struct disp_snr_info snr;
 };
 
 /* disp_layer_config2 - layer config v2
@@ -851,8 +823,6 @@ enum tag_DISP_CMD {
 	DISP_HWC_CUSTOM = 0x13,
 	DISP_DEVICE_SET_CONFIG = 0x14,
 	DISP_DEVICE_GET_CONFIG = 0x15,
-	DISP_SET_KSC_PARA = 0x16,
-	DISP_RTWB_COMMIT = 0x17,
 
 	/* ----layer---- */
 	DISP_LAYER_ENABLE = 0x40,
@@ -938,35 +908,6 @@ enum tag_DISP_CMD {
 	DISP_EINK_GET_TEMP = 0x404,
 	DISP_EINK_OVERLAP_SKIP = 0x405,
 	DISP_EINK_UPDATE2 = 0x406,
-};
-
-enum {
-	ROTATION_SW_0 = 0,
-	ROTATION_SW_90 = 1,
-	ROTATION_SW_180 = 2,
-	ROTATION_SW_270 = 3,
-};
-
-/* struct disp_ksc_info - keystone correction struct
- *
- * @enable: 1:enable; 0:disable
- * @first_line_width: the width in pixel of first line you want
- * @ration: ration is 12-bit Fixed point decimal with 5-bit interger (<= 256)
- *	    direction = 0:
- *	    last_line_width = first_line_width + (lcd_y-1)*ration_double
- *	    ration_double = (last_line_width - first_line_width) / (lcd_y -1)
- *	    direction = 1:
- *	    last_line_width = first_line_width - (lcd_y-1)*ration_double
- *	    ration_double = (first_line_width - last_line_width) / (lcd_y -1)
- *	    ration = int(ration_double * pow(2, 12))
- * @direction: see above
- *
- */
-struct disp_ksc_info {
-	unsigned int enable;
-	unsigned int first_line_width;
-	unsigned int ration;
-	unsigned int direction;
 };
 
 #define FBIOGET_LAYER_HDL_0 0x4700

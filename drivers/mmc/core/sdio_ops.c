@@ -161,14 +161,9 @@ int mmc_io_rw_extended(struct mmc_card *card, int write, unsigned fn,
 		data.sg_len = nents;
 
 		for_each_sg(data.sg, sg_ptr, data.sg_len, i) {
-			if (virt_addr_valid(buf))
-				sg_set_page(sg_ptr, virt_to_page(buf + (i * seg_size)),
-						min(seg_size, left_size),
-						offset_in_page(buf + (i * seg_size)));
-			else
-				sg_set_page(sg_ptr, vmalloc_to_page(buf + (i * seg_size)),
-						min(seg_size, left_size),
-						offset_in_page(buf + (i * seg_size)));
+			sg_set_page(sg_ptr, virt_to_page(buf + (i * seg_size)),
+					min(seg_size, left_size),
+					offset_in_page(buf + (i * seg_size)));
 			left_size = left_size - seg_size;
 		}
 	} else {

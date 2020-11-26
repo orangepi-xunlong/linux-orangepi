@@ -16,7 +16,6 @@ u32 is_exp;
 u32 rgb_only;
 static u8 EDID_Buf[HDMI_EDID_LEN];
 u8 Device_Support_VIC[512];
-static unsigned short hdmi_edid_phyaddr;
 
 static u8 exp0[16] = {
 
@@ -29,11 +28,6 @@ static u8 exp1[16] = {
 	0x2d, 0xee, 0x4b, 0x4f, 0x4e, 0x41, 0x4b, 0x20,
 	0x54, 0x56, 0x0a, 0x20, 0x20, 0x20, 0x20, 0xa5
 };
-
-unsigned short hdmi_edid_get_phyaddr(void)
-{
-	return hdmi_edid_phyaddr;
-}
 
 static void ddc_init(void)
 {
@@ -240,22 +234,14 @@ static s32 edid_parse_vsdb(u8 *pbuf, u8 size)
 	u8 i;
 
 	/* check if it's HDMI VSDB */
-	if (((pbuf[0] == 0x03) && (pbuf[1] == 0x0c) && (pbuf[2] == 0x00))
-		|| ((pbuf[0] == 0xd8) && (pbuf[1] == 0x5d) && (pbuf[2] == 0xc4))) {
+	if ((pbuf[0] == 0x03) && (pbuf[1] == 0x0c) && (pbuf[2] == 0x00)) {
 		is_hdmi = 1;
-		hdmi_inf("Find HDMI1.4 Vendor Specific DataBlock\n");
-	} else if ((pbuf[0] == 0xd8) && (pbuf[1] == 0x5d) && (pbuf[2] == 0xc4)) {
-		is_hdmi = 1;
-		hdmi_inf("Find HDMI2.0 Vendor Specific DataBlock\n");
+		hdmi_inf("Find HDMI Vendor Specific DataBlock\n");
 	} else {
-		pr_warn("vsdb ERROR IEEE Rigistar Identifier\n");
-		hdmi_inf("%s:wrong input!\n", __func__);
 		is_hdmi = 0;
 		is_yuv = 0;
 		return 0;
 	}
-
-	hdmi_edid_phyaddr = (((unsigned short)pbuf[3]) << 8) | pbuf[4];
 
 	if (size <= 8)
 		return 0;
@@ -326,7 +312,6 @@ s32 hdmi_edid_parse(void)
 	/* collect the EDID ucdata of segment 0 */
 	u8 BlockCount;
 	u32 i, offset;
-	bool find_audio = false;
 
 	hdmi_inf("hdmi_edid_parse\n");
 
@@ -361,7 +346,6 @@ s32 hdmi_edid_parse(void)
 	}
 
 	if (BlockCount == 0) {
-		hdmi_inf("[%s]:BlockCount is 0\n", __func__);
 		is_hdmi = 0;
 		is_yuv = 0;
 		return 0;
@@ -407,7 +391,6 @@ s32 hdmi_edid_parse(void)
 						if (tag == 1) {
 							/* ADB */
 							edid_parse_audiodata_block(EDID_Buf+0x80*i+bsum+1, len);
-							find_audio = true;
 						} else if (tag == 2) {
 							/* VDB */
 							edid_parse_videodata_block(EDID_Buf+0x80*i+bsum+1, len);
@@ -436,10 +419,6 @@ s32 hdmi_edid_parse(void)
 		}
 	}
 
-	if ((!is_yuv) && (!find_audio)) {
-		pr_info("[%s]:set DVI mode\n", __func__);
-		is_hdmi = 0;
-	}
 	return 0;
 
 }

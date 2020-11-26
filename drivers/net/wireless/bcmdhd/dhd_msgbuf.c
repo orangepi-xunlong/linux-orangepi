@@ -4,13 +4,13 @@
  * DHD OS, bus, and protocol modules.
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -18,7 +18,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -1179,7 +1179,7 @@ static void dhd_pktid_map_fini(dhd_pub_t *dhd, dhd_pktid_map_handle_t *map);
 #define IOCTLRESP_USE_CONSTMEM
 static void free_ioctl_return_buffer(dhd_pub_t *dhd, dhd_dma_buf_t *retbuf);
 static int  alloc_ioctl_return_buffer(dhd_pub_t *dhd, dhd_dma_buf_t *retbuf);
-#endif
+#endif 
 
 /* Determine number of pktids that are available */
 static INLINE uint32 dhd_pktid_map_avail_cnt(dhd_pktid_map_handle_t *handle);
@@ -2910,7 +2910,7 @@ dhd_lb_tx_compl_handler(unsigned long data)
 		DMA_UNMAP(dhd->osh, pa, pa_len, DMA_RX, 0, 0);
 #if defined(BCMPCIE)
 		dhd_txcomplete(dhd, pkt, true);
-#endif
+#endif 
 
 		PKTFREE(dhd->osh, pkt, TRUE);
 		count++;
@@ -3247,10 +3247,10 @@ static INLINE void * BCMFASTPATH
 dhd_prot_packet_get(dhd_pub_t *dhd, uint32 pktid, uint8 pkttype, bool free_pktid)
 {
 	void *PKTBUF;
-	dmaaddr_t pa;
-	uint32 len;
-	void *dmah;
-	void *secdma;
+	dmaaddr_t pa = NULL;
+	uint32 len = 0;
+	void *dmah = NULL;
+	void *secdma = NULL;
 
 #ifdef DHD_PCIE_PKTID
 	if (free_pktid) {
@@ -4339,7 +4339,7 @@ dhd_prot_process_msgbuf_rxcpl(dhd_pub_t *dhd, uint bound)
 				dhd_rx_mon_pkt(dhd, msg, pkt, ifidx);
 				continue;
 			}
-#endif
+#endif 
 
 			if (!pktqhead) {
 				pktqhead = prevpkt = pkt;
@@ -4900,9 +4900,9 @@ dhd_prot_txstatus_process(dhd_pub_t *dhd, void *msg)
 	unsigned long flags;
 	uint32 pktid;
 	void *pkt;
-	dmaaddr_t pa;
-	uint32 len;
-	void *dmah;
+	dmaaddr_t pa = NULL;
+	uint32 len = 0;
+	void *dmah = NULL;
 	void *secdma;
 	bool pkt_fate;
 #ifdef DEVICE_TX_STUCK_DETECT
@@ -4949,8 +4949,8 @@ dhd_prot_txstatus_process(dhd_pub_t *dhd, void *msg)
 		int elem_ix;
 		void **elem;
 		bcm_workq_t *workq;
-		dmaaddr_t pa;
-		uint32 pa_len;
+		dmaaddr_t pa = NULL;
+		uint32 pa_len = 0;
 
 		pkt = DHD_PKTID_TO_NATIVE(dhd, dhd->prot->pktid_tx_map,
 			pktid, pa, pa_len, dmah, secdma, PKTTYPE_DATA_TX);
@@ -5031,7 +5031,7 @@ workq_ring_full:
 #endif /* DBG_PKT_MON || DHD_PKT_LOGGING */
 #if defined(BCMPCIE)
 		dhd_txcomplete(dhd, pkt, pkt_fate);
-#endif
+#endif 
 
 #if DHD_DBG_SHOW_METADATA
 		if (dhd->prot->metadata_dbg &&
@@ -6064,7 +6064,6 @@ dhd_msgbuf_wait_ioctl_cmplt(dhd_pub_t *dhd, uint32 len, void *buf)
 			if (intstatus) {
 				DHD_ERROR(("%s: reschedule dhd_dpc, cnt=%d, intstatus=0x%x, intmask=0x%x\n",
 					__FUNCTION__, cnt, intstatus, intmask));
-				dhd->bus->intstatus = intstatus;
 				dhd->bus->ipend = TRUE;
 				dhd->bus->dpc_sched = TRUE;
 				dhd_sched_dpc(dhd);

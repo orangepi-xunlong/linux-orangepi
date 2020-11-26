@@ -595,10 +595,11 @@ static int collect_config(const char *var, const char *value,
 	}
 
 	ret = set_value(item, value);
+	return ret;
 
 out_free:
 	free(key);
-	return ret;
+	return -1;
 }
 
 static int perf_config_set__init(struct perf_config_set *set)

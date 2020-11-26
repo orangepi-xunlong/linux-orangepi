@@ -407,7 +407,6 @@ int xradio_wow_suspend(struct ieee80211_hw *hw,
 	struct xradio_common *hw_priv = hw->priv;
 	struct xradio_vif *priv;
 	int i, ret = 0;
-	int suspend_lock_state;
 	pm_printk(XRADIO_DBG_NIY, "%s, Activetime=%dms\n", __func__,
 			  xradio_realtime_interval(&resume_time, &suspend_time));
 
@@ -420,27 +419,21 @@ int xradio_wow_suspend(struct ieee80211_hw *hw,
 		pm_printk(XRADIO_DBG_WARN, "%s num_vifs=0\n", __func__);
 
 #ifdef HW_RESTART
-	if (hw_priv->hw_restart == true) {
+	if (cancel_work_sync(&hw_priv->hw_restart_work)) {
+		ret = schedule_work(&hw_priv->hw_restart_work);
+		if (ret <= 0)
+			pm_printk(XRADIO_DBG_ERROR,
+				"%s restart_work failed!ret = %d\n",
+				__func__, ret);
 		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
-			   "because of hw_restart is working.\n");
+			   "because of hw_restart is pending.\n");
 		return -EBUSY;
 	}
 
-	if (work_pending(&hw_priv->hw_restart_work)) {
-		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
-				"because of hw_restart_work prepare to worked.\n");
-		return -EBUSY;
-	}
-
-	if (hw_priv->hw_restart_work_running == true) {
-		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
-				"because of hw_restart_work is working.\n");
-		return -EBUSY;
-	}
 #endif
 	if (work_pending(&hw_priv->query_work)) {
 		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
-				"because of query_work is working.\n");
+			   "because of query_work is working.\n");
 		return -EBUSY;
 	}
 
@@ -477,26 +470,20 @@ int xradio_wow_suspend(struct ieee80211_hw *hw,
 		return -EBUSY;
 	}
 #endif
-	suspend_lock_state = atomic_cmpxchg(&hw_priv->suspend_lock_state,
-									XRADIO_SUSPEND_LOCK_IDEL, XRADIO_SUSPEND_LOCK_SUSPEND);
-	if (suspend_lock_state == XRADIO_SUSPEND_LOCK_OTHERS) {
-		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
-			   "because others are waiting for lock.\n");
-		goto revertm1;
-	}
 
 	/* Make sure there is no configuration requests in progress. */
 	if (down_trylock(&hw_priv->conf_lock)) {
 		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
 			   "because of configuration requests.\n");
-		goto revertm1;
+		return -EBUSY;
 	}
 
 	/* Make sure there is no wsm_oper_lock in progress. */
 	if (down_trylock(&hw_priv->wsm_oper_lock)) {
 		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
 			   "because of wsm_oper_lock.\n");
-		goto revert0;
+		up(&hw_priv->conf_lock);
+		return -EBUSY;
 	}
 
 	/* Do not suspend when scanning or ROC*/
@@ -616,9 +603,7 @@ revert2:
 	up(&hw_priv->scan.lock);
 revert1:
 	up(&hw_priv->wsm_oper_lock);
-revert0:
 	up(&hw_priv->conf_lock);
-revertm1:
 	return -EBUSY;
 }
 
@@ -792,8 +777,6 @@ int xradio_wow_resume(struct ieee80211_hw *hw)
 		 */
 		return 1;
 	}
-
-	atomic_set(&hw_priv->suspend_lock_state, XRADIO_SUSPEND_LOCK_IDEL);
 
 #ifdef CONFIG_XRADIO_SUSPEND_POWER_OFF
 	if (XRADIO_POWEROFF_SUSP == atomic_read(&hw_priv->suspend_state)) {

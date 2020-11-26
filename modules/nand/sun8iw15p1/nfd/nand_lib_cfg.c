@@ -13,7 +13,7 @@
 
 #define   PHY_WAIT_RB_BEFORE                1
 #define   PHY_WAIT_RB_INTERRUPT            1
-#define   PHY_WAIT_DMA_INTERRUPT           0
+#define   PHY_WAIT_DMA_INTERRUPT           1
 
 /*****************************************************************************
 *Single channel needs to be affixed to the same kind of flash

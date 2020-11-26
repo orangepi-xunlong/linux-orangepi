@@ -25,6 +25,7 @@
 
 
 bool sensor_has_inited_flag;
+EXPORT_SYMBOL_GPL(sensor_has_inited_flag);
 
 /***************************CTP************************************/
 
@@ -114,11 +115,6 @@ static int sunxi_ctp_startup(enum input_sensor_type *ctp_type)
 	else
 		data->int_number = data->irq_gpio.gpio;
 
-	ret = of_property_read_u32(np, "ctp_gesture_wakeup", &(data->ctp_gesture_wakeup));
-	if (ret) {
-		 pr_err("get ctp_gesture_wakeup fail, no gesture wakeup\n");
-	}
-
 #ifdef TOUCH_KEY_LIGHT_SUPPORT
 
 	data->key_light_gpio.gpio = of_get_named_gpio(np, "ctp_light", 0);
@@ -167,20 +163,6 @@ static int sunxi_ctp_init(enum input_sensor_type *ctp_type)
 	struct ctp_config_info *data = container_of(ctp_type,
 					struct ctp_config_info, input_type);
 
-	data->ctp_power_ldo = NULL;
-#ifdef CONFIG_SUNXI_REGULATOR_DT
-	data->ctp_power_ldo = regulator_get(data->dev, "ctp");
-	if (!IS_ERR(data->ctp_power_ldo)) {
-		regulator_set_voltage(data->ctp_power_ldo,
-				(int)(data->ctp_power_vol)*1000,
-				(int)(data->ctp_power_vol)*1000);
-	} else if (gpio_is_valid(data->ctp_power_io.gpio)) {
-		if (gpio_request(data->ctp_power_io.gpio, NULL) != 0)
-			pr_err("ctp_power_io gpio_request is failed, check if ctp independent power supply by gpio, ignore firstly\n");
-		else
-			gpio_direction_output(data->ctp_power_io.gpio, 1);
-	}
-#else
 	if (data->ctp_power) {
 		data->ctp_power_ldo = regulator_get(NULL, data->ctp_power);
 		if (IS_ERR(data->ctp_power_ldo)) {
@@ -197,7 +179,6 @@ static int sunxi_ctp_init(enum input_sensor_type *ctp_type)
 		else
 			gpio_direction_output(data->ctp_power_io.gpio, 1);
 	}
-#endif
 	if (gpio_request(data->wakeup_gpio.gpio, NULL) != 0) {
 		pr_err("wakeup gpio_request is failed\n");
 		return ret;
@@ -255,7 +236,7 @@ static int sunxi_gsensor_init(enum input_sensor_type *gsensor_type)
 	if (data->sensor_power) {
 		data->sensor_power_ldo = regulator_get(NULL,
 							data->sensor_power);
-		if (IS_ERR(data->sensor_power_ldo)) {
+		if (!data->sensor_power_ldo) {
 			pr_err("%s: could not get ctp ldo '%s' ,check"
 					, __func__, data->sensor_power);
 			pr_err("if ctp independent power supply by ldo,ignore firstly\n");
@@ -510,11 +491,10 @@ static int sunxi_ls_init(enum input_sensor_type *ls_type)
 	/* enalbe ldo if it exist */
 	if (data->sensor_power) {
 		data->sensor_power_ldo = regulator_get(NULL, data->sensor_power);
-		if (IS_ERR(data->sensor_power_ldo)) {
+		if (!data->sensor_power_ldo) {
 			pr_err("%s: could not get sensor power ldo '%s' in probe,",
 							__func__, data->sensor_power);
 			pr_err("maybe config error, ignore firstly !!!!!!!\n");
-			return -1;
 		}
 		/*regulator_set_voltage(ldo, 3000000, 3000000);*/
 		if (0 != regulator_enable(data->sensor_power_ldo))
@@ -723,7 +703,7 @@ int input_set_power_enable(enum input_sensor_type *input_type, u32 enable)
 	if ((enable != 0) && (enable != 1))
 		return ret;
 
-	if (!IS_ERR(ldo)) {
+	if (ldo) {
 		if (enable) {
 			if (regulator_enable(ldo) != 0)
 				pr_err("%s: enable ldo error!\n", __func__);

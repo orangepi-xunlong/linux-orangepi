@@ -13,7 +13,23 @@
  * GNU General Public License for more details.
  *
  */
-#if 0
+
+/*
+ ******************************************************************************
+ *
+ * bsp_common.c
+ *
+ * Hawkview ISP - bsp_common.c module
+ *
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version    Author              Date          Description
+ *
+ *   3.0         Yang Feng     2015/12/02     ISP Tuning Tools Support
+ *
+ ******************************************************************************
+ */
+
 #include "bsp_common.h"
 
 enum bus_pixeltype find_bus_type(u32 code)
@@ -199,4 +215,4 @@ enum pixel_fmt_type find_pixel_fmt_type(unsigned int pix_fmt)
 		return BAYER_RGB;
 	}
 }
-#endif
+

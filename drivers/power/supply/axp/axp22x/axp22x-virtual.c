@@ -28,11 +28,8 @@ struct axp_virtual_dev_mapping axp22x_mapping[] = {
 	{"reg-22-cs-aldo3",   "axp22x_aldo3"},
 	{"reg-22-cs-dldo1",   "axp22x_dldo1"},
 	{"reg-22-cs-dldo2",   "axp22x_dldo2"},
-#ifdef CONFIG_AW_AXP233
-#else
 	{"reg-22-cs-dldo3",   "axp22x_dldo3"},
 	{"reg-22-cs-dldo4",   "axp22x_dldo4"},
-#endif
 	{"reg-22-cs-eldo1",   "axp22x_eldo1"},
 	{"reg-22-cs-eldo2",   "axp22x_eldo2"},
 	{"reg-22-cs-eldo3",   "axp22x_eldo3"},
@@ -43,10 +40,6 @@ struct axp_virtual_dev_mapping axp22x_mapping[] = {
 	{"reg-22-cs-dcdc5",   "axp22x_dcdc5"},
 	{"reg-22-cs-ldoio0", "axp22x_ldoio0"},
 	{"reg-22-cs-ldoio1", "axp22x_ldoio1"},
-#ifdef CONFIG_AW_AXP233
-	{"reg-22-cs-sw0",       "axp22x_sw0"},
-	{"reg-22-cs-dc1sw",   "axp22x_dc1sw"},
-#endif
 	{"reg-22-cs-dc5ldo", "axp22x_dc5ldo"},
 };
 

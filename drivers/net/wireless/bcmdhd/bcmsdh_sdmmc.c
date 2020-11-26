@@ -2,13 +2,13 @@
  * BCMSDH Function Driver for the native SDIO/MMC driver in the Linux Kernel
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -1079,7 +1079,7 @@ sdioh_request_word(sdioh_info_t *sd, uint cmd_type, uint rw, uint func, uint add
 #ifdef CUSTOMER_HW_ALLWINNER
 				//AW judge sdio read write timeout, 1s
 				if (sunxi_mmc_check_r1_ready(sd->func[func]->card->host, 1000) != 0)
-					printk("%s data timeout, SDIO_CCCR_IOABORT.\n", __FUNCTION__);
+					printk("%s data timeout, SDIO_CCCR_IOABORT.\n", __FUNCTION__);	
 #endif
 				sdio_release_host(sd->func[0]);
 			}
@@ -1250,10 +1250,10 @@ sdioh_request_packet_chain(sdioh_info_t *sd, uint fix_inc, uint write, uint func
 					goto txglomfail;
 				}
 			}
-
+			
 			bcopy(buf, (localbuf + local_plen), pkt_len);
 			local_plen += pkt_len;
-			if (PKTNEXT(sd->osh, pnext))
+			if (PKTNEXT(sd->osh, pnext)) 	
 				continue;
 
 			buf = localbuf;
@@ -1314,8 +1314,8 @@ txglomfail:
 
 	if (sd_msglevel & SDH_COST_VAL) {
 		getnstimeofday(&now);
-		sd_cost(("%s: rw=%d, ttl_len=%d, cost=%lds %luus\n", __FUNCTION__,
-			write, ttl_len, now.tv_sec-before.tv_sec, now.tv_nsec/1000-before.tv_nsec/1000));
+		sd_cost(("%s: rw=%d, cost=%lds %luus\n", __FUNCTION__,
+			write, now.tv_sec-before.tv_sec, now.tv_nsec/1000-before.tv_nsec/1000));
 	}
 
 	sd_trace(("%s: Exit\n", __FUNCTION__));
@@ -1744,7 +1744,7 @@ sdioh_gpio_init(sdioh_info_t *sd)
 uint
 sdmmc_get_clock_rate(sdioh_info_t *sd)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)) || (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 	return 0;
 #else
 	struct sdio_func *sdio_func = sd->func[0];
@@ -1757,7 +1757,7 @@ sdmmc_get_clock_rate(sdioh_info_t *sd)
 void
 sdmmc_set_clock_rate(sdioh_info_t *sd, uint hz)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)) || (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 	return;
 #else
 	struct sdio_func *sdio_func = sd->func[0];

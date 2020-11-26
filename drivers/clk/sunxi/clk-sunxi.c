@@ -21,13 +21,6 @@
 #include "clk-sunxi.h"
 #include "clk-factors.h"
 #include "clk-periph.h"
-#include "clk-cpu.h"
-
-#ifdef CONFIG_PM_SLEEP
-/*list head use for standby*/
-LIST_HEAD(clk_periph_reg_cache_list);
-LIST_HEAD(clk_factor_reg_cache_list);
-#endif
 
 /*
  * of_sunxi_clocks_init() - Clocks initialize
@@ -153,15 +146,6 @@ static void __init of_sunxi_periph_clk_setup(struct device_node *node)
 		of_clk_add_provider(node, of_clk_src_simple_get, clk);
 	}
 }
-
-/*
- * of_sunxi_cpu_clk_setup() - Setup function for cpu clk
- */
-static void __init of_sunxi_cpu_clk_setup(struct device_node *node)
-{
-	sunxi_cpu_clocks_init(node);
-}
-
 /**
  * of_periph_cpus_clk_setup() - Setup function for periph cpus clk
  */
@@ -185,8 +169,7 @@ void of_sunxi_periph_cpus_clk_setup(struct device_node *node)
 
 	/* register clk */
 	if (!strcmp(clk_name, "losc_out") ||
-				!strcmp(clk_name, "dcxo_out") ||
-				!strcmp(clk_name, "hosc32k")) {
+				!strcmp(clk_name, "dcxo_out")) {
 		clk = sunxi_clk_register_periph(periph, 0);
 	} else
 		clk = sunxi_clk_register_periph(periph,
@@ -205,6 +188,5 @@ CLK_OF_DECLARE(sunxi_clocks_init, "allwinner,clk-init", of_sunxi_clocks_init);
 CLK_OF_DECLARE(sunxi_fixed_clk, "allwinner,fixed-clock", of_sunxi_fixed_clk_setup);
 CLK_OF_DECLARE(sunxi_pll_clk, "allwinner,pll-clock", of_sunxi_pll_clk_setup);
 CLK_OF_DECLARE(sunxi_fixed_factor_clk, "allwinner,fixed-factor-clock", of_sunxi_fixed_factor_clk_setup);
-CLK_OF_DECLARE(sunxi_cpu_clk, "allwinner,cpu-clock", of_sunxi_cpu_clk_setup);
 CLK_OF_DECLARE(sunxi_periph_clk, "allwinner,periph-clock", of_sunxi_periph_clk_setup);
 CLK_OF_DECLARE(periph_cpus_clk, "allwinner,periph-cpus-clock", of_sunxi_periph_cpus_clk_setup);

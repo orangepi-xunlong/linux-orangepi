@@ -44,8 +44,7 @@
 #if defined(CONFIG_ARCH_SUN8IW1) \
 	|| defined(CONFIG_ARCH_SUN8IW11) \
 	|| defined(CONFIG_ARCH_SUN50IW6)\
-	|| defined(CONFIG_ARCH_SUN8IW12) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
+	|| defined(CONFIG_ARCH_SUN8IW12)
 #define NR_MAX_CHAN	16			/* total of channels */
 #elif defined(CONFIG_ARCH_SUN8IW7) \
 	|| defined(CONFIG_ARCH_SUN50IW2) \
@@ -68,9 +67,7 @@
 	|| defined(CONFIG_ARCH_SUN50I)\
 	|| defined(CONFIG_ARCH_SUN8IW12) \
 	|| defined(CONFIG_ARCH_SUN8IW15) \
-	|| defined(CONFIG_ARCH_SUN8IW17) \
-	|| defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW17)
 #define DMA_SECU	0x20			/* DMA security register */
 #endif
 
@@ -159,9 +156,7 @@
 	|| defined(CONFIG_ARCH_SUN8IW15)\
 	|| defined(CONFIG_ARCH_SUN50IW8)\
 	|| defined(CONFIG_ARCH_SUN8IW17)\
-	|| defined(CONFIG_ARCH_SUN50IW5T)\
-	|| defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN50IW5T)
 #define SRC_IO_MODE	(0x01 << 8)
 #define SRC_LINEAR_MODE	(0x00 << 8)
 #else
@@ -188,9 +183,7 @@
 	|| defined(CONFIG_ARCH_SUN8IW15)\
 	|| defined(CONFIG_ARCH_SUN50IW8)\
 	|| defined(CONFIG_ARCH_SUN8IW17)\
-	|| defined(CONFIG_ARCH_SUN50IW5T)\
-	|| defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN50IW5T)
 #define DST_IO_MODE	(0x01 << 24)
 #define DST_LINEAR_MODE	(0x00 << 24)
 #else
@@ -206,9 +199,6 @@
 
 #define NORMAL_WAIT	(8 << 0)
 
-#define SET_DST_HIGH_ADDR(x) (((x >> 31) & 0x3UL) << 18)
-#define SET_SRC_HIGH_ADDR(x) (((x >> 31) & 0x3UL) << 16)
-#define SET_DESC_HIGH_ADDR(x) (((x >> 32) & 0x3UL) | (x & 0xFFFFFFFC))
 /*
  * struct sunxi_dma_lli - linked list ltem, the DMA block descriptor
  * @cfg:	DMA configuration
@@ -229,7 +219,7 @@ struct sunxi_dma_lli {
 	u32	p_lln;
 	struct sunxi_dma_lli *v_lln;
 #ifdef DEBUG
-	dma_addr_t	this_phy;
+	u32	this_phy;
 	#define set_this_phy(li, addr)	\
 		((li)->this_phy = (addr))
 #else
@@ -267,7 +257,6 @@ struct sunxi_chan {
 };
 
 static u64 sunxi_dma_mask = DMA_BIT_MASK(32);
-static u32 sunxi_dma_channel_bitmap;
 
 static inline struct sunxi_dmadev *to_sunxi_dmadev(struct dma_device *d)
 {
@@ -607,12 +596,8 @@ void *sunxi_alloc_lli(struct sunxi_dmadev *sdev, u32 *phy_addr)
 		return NULL;
 
 	l_item = dma_pool_alloc(sdev->lli_pool, GFP_ATOMIC, &phy);
-#ifdef CONFIG_DMA_SUNXI_SUPPORT_4G
-	*phy_addr = (u32)SET_DESC_HIGH_ADDR(phy);
-#else
 	*phy_addr = (u32)phy;
-#endif
-	set_this_phy(l_item, phy);
+	set_this_phy(l_item, *phy_addr);
 
 	return l_item;
 }
@@ -627,10 +612,10 @@ static inline void sunxi_dump_lli(struct sunxi_chan *schan,
 {
 #ifdef	DEBUG
 	dev_dbg(chan2dev(&schan->vc.chan),
-			"\n\tdesc:   p - 0x%p v - 0x%p\n"
+			"\n\tdesc:   p - 0x%08x v - 0x%08x\n"
 			"\t\tc - 0x%08x s - 0x%08x d - 0x%08x\n"
 			"\t\tl - 0x%08x p - 0x%08x n - 0x%08x\n",
-			(void *)lli->this_phy, lli,
+			lli->this_phy, (u32)lli,
 			lli->cfg, lli->src, lli->dst,
 			lli->len, lli->para, lli->p_lln);
 #endif
@@ -677,13 +662,8 @@ static inline void sunxi_cfg_lli(struct sunxi_dma_lli *lli, dma_addr_t src,
 	lli->src = (u32)src;
 	lli->dst = (u32)dst;
 	lli->len = len;
-#ifdef CONFIG_DMA_SUNXI_SUPPORT_4G
-	lli->para = SET_DST_HIGH_ADDR(dst)
-			| SET_SRC_HIGH_ADDR(src)
-			| NORMAL_WAIT;
-#else
 	lli->para = NORMAL_WAIT;
-#endif
+
 }
 
 
@@ -1111,11 +1091,9 @@ out:
 static int sunxi_alloc_chan_resources(struct dma_chan *chan)
 {
 	struct sunxi_chan *schan = to_sunxi_chan(chan);
-	u32 chan_num = schan->vc.chan.chan_id;
 
 	dev_dbg(chan2parent(chan), "%s: Now alloc chan resources!\n", __func__);
 	schan->cyclic = false;
-	sunxi_dma_channel_bitmap |= 1 << chan_num;
 
 	return 0;
 }
@@ -1127,9 +1105,6 @@ static int sunxi_alloc_chan_resources(struct dma_chan *chan)
 static void sunxi_free_chan_resources(struct dma_chan *chan)
 {
 	struct sunxi_chan *schan = to_sunxi_chan(chan);
-	u32 chan_num = schan->vc.chan.chan_id;
-
-	sunxi_dma_channel_bitmap &= ~(1 << chan_num);
 
 	vchan_free_chan_resources(&schan->vc);
 
@@ -1155,8 +1130,11 @@ static inline void sunxi_chan_free(struct sunxi_dmadev *sdev)
 
 }
 
-static void sunxi_dma_hw_init(struct sunxi_dmadev *sunxi_dev)
+static void sunxi_dma_hw_init(struct sunxi_dmadev *dev)
 {
+	struct sunxi_dmadev *sunxi_dev = dev;
+
+	clk_prepare_enable(sunxi_dev->ahb_clk);
 #if defined(CONFIG_SUNXI_SMC)
 	sunxi_smc_writel(0xff, sunxi_dev->pbase + DMA_SECU);
 #endif
@@ -1273,8 +1251,6 @@ static int sunxi_probe(struct platform_device *pdev)
 	}
 
 	/* All is ok, and open the clock */
-	clk_prepare_enable(sunxi_dev->ahb_clk);
-	/* init hw dma */
 	sunxi_dma_hw_init(sunxi_dev);
 
 	return 0;
@@ -1324,8 +1300,7 @@ static int sunxi_suspend_noirq(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_dmadev *sunxi_dev = platform_get_drvdata(pdev);
 
-	if (!sunxi_dma_channel_bitmap)
-		clk_disable_unprepare(sunxi_dev->ahb_clk);
+	clk_disable_unprepare(sunxi_dev->ahb_clk);
 	return 0;
 }
 
@@ -1334,8 +1309,6 @@ static int sunxi_resume_noirq(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_dmadev *sunxi_dev = platform_get_drvdata(pdev);
 
-	if (!sunxi_dma_channel_bitmap)
-		clk_prepare_enable(sunxi_dev->ahb_clk);
 	sunxi_dma_hw_init(sunxi_dev);
 	return 0;
 }

@@ -15,7 +15,6 @@
 #include "config.h"
 #include "../platform/platform_cfg.h"
 
-#ifdef CONFIG_SENSOR_LIST_MODULE
 static void set_used(struct sensor_list *sensors,
 		void *value, int len)
 {
@@ -300,7 +299,7 @@ static int parse_sensor_list_info(struct sensor_list *sl, char *pos)
 		return -EINVAL;
 	}
 
-	sprintf(sensor_list_cfg, "/vendor/etc/hawkview/sensor_list_cfg.ini");
+	sprintf(sensor_list_cfg, "/system/etc/hawkview/sensor_list_cfg.ini");
 	vin_log(VIN_LOG_CONFIG, "Fetch %s sensor list form\"%s\"\n", pos, sensor_list_cfg);
 
 	cfg_section_init(&section);
@@ -319,12 +318,7 @@ parse_sensor_list_info_end:
 	vin_log(VIN_LOG_CONFIG, "fetch %s sensor list info end!\n", pos);
 	return ret;
 }
-#else
-static int parse_sensor_list_info(struct sensor_list *sl, char *pos)
-{
-	return 0;
-}
-#endif
+
 static int get_value_int(struct device_node *np, const char *name,
 			  u32 *value)
 {
@@ -468,8 +462,6 @@ static int get_dvdd_vol(struct device_node *np, const char *name,
 {
 	return get_value_int(np, name, &sc->power[DVDD].power_vol);
 }
-
-#ifdef CONFIG_ACTUATOR_MODULE
 static int get_afvdd(struct device_node *np, const char *name,
 		     struct sensor_list *sc)
 {
@@ -480,8 +472,6 @@ static int get_afvdd_vol(struct device_node *np, const char *name,
 {
 	return get_value_int(np, name, &sc->power[AFVDD].power_vol);
 }
-#endif
-
 static int get_power_en(struct device_node *np, const char *name,
 			struct sensor_list *sc)
 {
@@ -507,8 +497,6 @@ static int get_sm_vs(struct device_node *np, const char *name,
 {
 	return get_gpio_info(np, name, &sc->gpio[SM_VS]);
 }
-
-#ifdef CONFIG_FLASH_MODULE
 static int get_flash_en(struct device_node *np, const char *name,
 			struct sensor_list *sc)
 {
@@ -529,9 +517,7 @@ static int get_flvdd_vol(struct device_node *np, const char *name,
 {
 	return get_value_int(np, name, &sc->power[FLVDD].power_vol);
 }
-#endif
 
-#ifdef CONFIG_ACTUATOR_MODULE
 static int get_act_bus_type(struct device_node *np, const char *name,
 			struct sensor_list *sc)
 {
@@ -565,7 +551,6 @@ static int get_act_slave(struct device_node *np, const char *name,
 {
 	return get_value_int(np, name, &sc->inst[0].act_addr);
 }
-#endif
 
 struct FetchFunArr {
 	char *sub;
@@ -600,16 +585,13 @@ static struct FetchFunArr fetch_camera[] = {
 	{"sm_vs", 1, get_sm_vs,},
 };
 
-#ifdef CONFIG_FLASH_MODULE
 static struct FetchFunArr fetch_flash[] = {
 	{"en", 1, get_flash_en,},
 	{"mode", 1, get_flash_mode,},
 	{"flvdd", 1, get_flvdd,},
 	{"flvdd_vol", 1, get_flvdd_vol,},
 };
-#endif
 
-#ifdef CONFIG_ACTUATOR_MODULE
 static struct FetchFunArr fetch_actuator[] = {
 	{"name", 0, get_act_name,},
 	{"slave", 0, get_act_slave,},
@@ -620,22 +602,19 @@ static struct FetchFunArr fetch_actuator[] = {
 	{"afvdd", 1, get_afvdd,},
 	{"afvdd_vol", 1, get_afvdd_vol,},
 };
-#endif
 
 int parse_modules_from_device_tree(struct vin_md *vind)
 {
 #ifdef FPGA_VER
-	unsigned int i, j;
-	struct modules_config *module;
-	struct sensor_list *sensors;
-	struct sensor_instance *inst;
-	unsigned int sensor_uses = 2; /*1/2 mean use one/two sensor*/
-	struct sensor_list sensors_def[2] = {
-		{
+	unsigned int j;
+	struct modules_config *module = &vind->modules[0];
+	struct sensor_list *sensors = &module->sensors;
+	struct sensor_instance *inst = &sensors->inst[0];
+	struct sensor_list sensors_def = {
 		.used = 1,
 		.csi_sel = 0,
 		.device_sel = 0,
-		.sensor_bus_sel = 0,
+		.twi_cci_id = 0,
 		.power_set = 1,
 		.detect_num = 1,
 		.sensor_pos = "rear",
@@ -656,11 +635,11 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 			 },
 		.inst = {
 				[0] = {
-				       .cam_name = "ar0238",
-				       .cam_addr = 0x20,
+				       .cam_name = "ov5640",
+				       .cam_addr = 0x78,
 				       .cam_type = 0,
-				       .is_isp_used = 1,
-				       .is_bayer_raw = 1,
+				       .is_isp_used = 0,
+				       .is_bayer_raw = 0,
 				       .vflip = 0,
 				       .hflip = 0,
 				       .act_name = "ad5820_act",
@@ -668,104 +647,57 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 				       .isp_cfg_name = "",
 				       },
 			},
-		}, {
-		.used = 1,
-		.csi_sel = 1,
-		.device_sel = 1,
-		.sensor_bus_sel = 1,
-		.power_set = 1,
-		.detect_num = 1,
-		.sensor_pos = "front",
-		.power = {
-			  [IOVDD] = {NULL, 2800000, ""},
-			  [AVDD] = {NULL, 2800000, ""},
-			  [DVDD] = {NULL, 1500000, ""},
-			  [AFVDD] = {NULL, 2800000, ""},
-			  [FLVDD] = {NULL, 3300000, ""},
-			  },
-		.gpio = {
-			 [RESET] = {GPIOE(14), 1, 0, 1, 0,},
-			 [PWDN] = {GPIOE(15), 1, 0, 1, 0,},
-			 [POWER_EN] = {GPIO_INDEX_INVALID, 0, 0, 0, 0,},
-			 [FLASH_EN] = {GPIO_INDEX_INVALID, 0, 0, 0, 0,},
-			 [FLASH_MODE] = {GPIO_INDEX_INVALID, 0, 0, 0, 0,},
-			 [AF_PWDN] = {GPIO_INDEX_INVALID, 0, 0, 0, 0,},
-			 },
-		.inst = {
-				[0] = {
-				       .cam_name = "ar0238_2",
-				       .cam_addr = 0x20,
-				       .cam_type = 0,
-				       .is_isp_used = 1,
-				       .is_bayer_raw = 1,
-				       .vflip = 0,
-				       .hflip = 0,
-				       .act_name = "ad5820_act",
-				       .act_addr = 0x18,
-				       .isp_cfg_name = "",
-				       },
-			},
-		}
 	};
 
-	for (i = 0; i < sensor_uses; i++) {
-		module = &vind->modules[i];
-		sensors = &module->sensors;
-		inst = &sensors->inst[0];
-
-		sensors->use_sensor_list = 0;
-		sensors->sensor_bus_sel = sensors_def[i].sensor_bus_sel;
-		/*when insmod without parm*/
-		if (inst->cam_addr == 0xff) {
-			strcpy(inst->cam_name, sensors_def[i].inst[0].cam_name);
-			strcpy(inst->isp_cfg_name, sensors_def[i].inst[0].cam_name);
-			inst->cam_addr = sensors_def[i].inst[0].cam_addr;
-		}
-		inst->is_isp_used = sensors_def[i].inst[0].is_isp_used;
-		inst->is_bayer_raw = sensors_def[i].inst[0].is_bayer_raw;
-		inst->vflip = sensors_def[i].inst[0].vflip;
-		inst->hflip = sensors_def[i].inst[0].hflip;
-		for (j = 0; j < MAX_POW_NUM; j++) {
-			strcpy(sensors->power[j].power_str,
-			       sensors_def[i].power[j].power_str);
-			sensors->power[j].power_vol = sensors_def[i].power[j].power_vol;
-		}
-		module->flash_used = 0;
-		module->act_used = 0;
-		/*when insmod without parm*/
-		if (inst->act_addr == 0xff) {
-			strcpy(inst->act_name, sensors_def[i].inst[0].act_name);
-			inst->act_addr = sensors_def[i].inst[0].act_addr;
-		}
-
-		for (j = 0; j < MAX_GPIO_NUM; j++) {
-			sensors->gpio[j].gpio = sensors_def[i].gpio[j].gpio;
-			sensors->gpio[j].mul_sel = sensors_def[i].gpio[j].mul_sel;
-			sensors->gpio[j].pull = sensors_def[i].gpio[j].pull;
-			sensors->gpio[j].drv_level = sensors_def[i].gpio[j].drv_level;
-			sensors->gpio[j].data = sensors_def[i].gpio[j].data;
-		}
-
-		sensors->detect_num = sensors_def[i].detect_num;
-		vin_log(VIN_LOG_CONFIG, "vin cci_sel is %d\n", sensors->sensor_bus_sel);
+	sensors->use_sensor_list = 0;
+	sensors->sensor_bus_sel = sensors_def.sensor_bus_sel;
+	/*when insmod without parm*/
+	if (inst->cam_addr == 0xff) {
+		strcpy(inst->cam_name, sensors_def.inst[0].cam_name);
+		strcpy(inst->isp_cfg_name, sensors_def.inst[0].cam_name);
+		inst->cam_addr = sensors_def.inst[0].cam_addr;
 	}
+	inst->is_isp_used = sensors_def.inst[0].is_isp_used;
+	inst->is_bayer_raw = sensors_def.inst[0].is_bayer_raw;
+	inst->vflip = sensors_def.inst[0].vflip;
+	inst->hflip = sensors_def.inst[0].hflip;
+	for (j = 0; j < MAX_POW_NUM; j++) {
+		strcpy(sensors->power[j].power_str,
+		       sensors_def.power[j].power_str);
+		sensors->power[j].power_vol = sensors_def.power[j].power_vol;
+	}
+	module->flash_used = 0;
+	module->act_used = 0;
+	/*when insmod without parm*/
+	if (inst->act_addr == 0xff) {
+		strcpy(inst->act_name, sensors_def.inst[0].act_name);
+		inst->act_addr = sensors_def.inst[0].act_addr;
+	}
+
+	for (j = 0; j < MAX_GPIO_NUM; j++) {
+		sensors->gpio[j].gpio = sensors_def.gpio[j].gpio;
+		sensors->gpio[j].mul_sel = sensors_def.gpio[j].mul_sel;
+		sensors->gpio[j].pull = sensors_def.gpio[j].pull;
+		sensors->gpio[j].drv_level = sensors_def.gpio[j].drv_level;
+		sensors->gpio[j].data = sensors_def.gpio[j].data;
+	}
+
+	sensors->detect_num = sensors_def.detect_num;
+	vin_log(VIN_LOG_CONFIG, "vin cci_sel is %d\n", sensors->sensor_bus_sel);
 #else
-	int i = 0, j = 0;
+	int i = 0, j = 0, size = 0;
 	struct device_node *parent = vind->pdev->dev.of_node;
-	struct device_node *cam = NULL, *child;
+	struct device_node *cam = NULL, *act, *flash, *child;
 	char property[32] = { 0 };
+	const __be32 *list;
 	struct modules_config *module = NULL;
 	struct sensor_list *sensors = NULL;
-#ifdef CONFIG_ACTUATOR_MODULE
-	int size = 0;
-	const __be32 *list;
-#endif
 
 	for_each_available_child_of_node(parent, child) {
 		if (!strcmp(child->name, "sensor")) {
 			cam = child;
 			sscanf(cam->type, "sensor%d", &i);
-			vin_log(VIN_LOG_CONFIG, "get sensor%d config for device tree\n", i);
+			vin_log(VIN_LOG_CONFIG, "get sensor%d cnnfig for device tree\n", i);
 			module = &vind->modules[i];
 			sensors = &module->sensors;
 		} else {
@@ -787,7 +719,6 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 				property, sensors);
 		}
 
-#ifdef CONFIG_ACTUATOR_MODULE
 		/*get actuator node */
 		sprintf(property, "%s", "act_handle");
 		list = of_get_property(cam, property, &size);
@@ -796,7 +727,7 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 				property, cam->name);
 			module->act_used = 0;
 		} else {
-			struct device_node *act = of_find_node_by_phandle(be32_to_cpup(list));
+			act = of_find_node_by_phandle(be32_to_cpup(list));
 			if (!act) {
 				vin_warn("%s invalid phandle\n", property);
 			} else if (of_device_is_available(act)) {
@@ -817,15 +748,6 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 			}
 		}
 
-		if (!sensors->act_separate) {
-			sensors->act_bus_sel = sensors->sensor_bus_sel;
-			sensors->act_bus_type = sensors->sensor_bus_type;
-		}
-#else
-		module->act_used = 0;
-#endif
-
-#ifdef CONFIG_FLASH_MODULE
 		/*get flash node */
 		sprintf(property, "%s", "flash_handle");
 		list = of_get_property(cam, property, &size);
@@ -834,7 +756,7 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 				property, cam->name);
 			module->flash_used = 0;
 		} else {
-			struct device_node *flash = of_find_node_by_phandle(be32_to_cpup(list));
+			flash = of_find_node_by_phandle(be32_to_cpup(list));
 			if (!flash) {
 				vin_warn("%s invalid phandle\n", property);
 			} else if (of_device_is_available(flash)) {
@@ -852,10 +774,12 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 						&module->modules.flash.id);
 			}
 		}
-#else
-		module->flash_used = 0;
-#endif
+
 		sensors->detect_num = 1;
+		if (!sensors->act_separate) {
+			sensors->act_bus_sel = sensors->sensor_bus_sel;
+			sensors->act_bus_type = sensors->sensor_bus_type;
+		}
 	}
 
 	for_each_available_child_of_node(parent, child) {

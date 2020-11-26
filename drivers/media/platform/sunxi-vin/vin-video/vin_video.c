@@ -34,6 +34,7 @@
 #endif
 
 #include "../utility/config.h"
+#include "../utility/sensor_info.h"
 #include "../modules/sensor/sensor_helper.h"
 #include "../utility/vin_io.h"
 #include "../vin-csi/sunxi_csi.h"
@@ -49,15 +50,11 @@
 #define VIN_VERSION \
 		KERNEL_VERSION(VIN_MAJOR_VERSION, VIN_MINOR_VERSION, VIN_RELEASE)
 
-extern struct vin_core *vin_core_gbl[VIN_MAX_DEV];
-
 void __vin_s_stream_handle(struct work_struct *work)
 {
 	int ret = 0;
 	struct vin_vid_cap *cap =
 			container_of(work, struct vin_vid_cap, s_stream_task);
-
-	vin_timer_init(cap->vinc);
 	ret = vin_pipeline_call(cap->vinc, set_stream, &cap->pipe, cap->vinc->stream_idx);
 	if (ret < 0) {
 		vin_err("%s error!\n", __func__);
@@ -72,118 +69,51 @@ void __vin_s_stream_handle(struct work_struct *work)
 	vin_log(VIN_LOG_VIDEO, "%s done, id = %d!\n", __func__, cap->vinc->id);
 }
 
-#ifdef CONFIG_PIPELINE_RESET
-static void __vin_pipeline_reset_handle(struct work_struct *work)
+void __vin_pipeline_reset_handle(struct work_struct *work)
 {
-	unsigned int i;
-	unsigned int reset_count = 0;
-	bool reset_all = true;
-	struct vin_vid_cap *vid_cap;
-	struct vin_vid_cap *cap = container_of(work, struct vin_vid_cap, pipeline_reset_task);
-	struct csi_dev *csi = container_of(cap->pipe.sd[VIN_IND_CSI], struct csi_dev, subdev);
-	struct isp_dev *isp = container_of(cap->pipe.sd[VIN_IND_ISP], struct isp_dev, subdev);
+	int ret = 0;
+	struct vin_vid_cap *cap =
+			container_of(work, struct vin_vid_cap, pipeline_reset_task);
+	struct v4l2_subdev *sd	= cap->pipe.sd[VIN_IND_SENSOR];
 
-	if (!mutex_trylock(&csi->reset_lock)) {
-		mutex_lock(&csi->reset_lock);
-		reset_all = false;
-	}
-	vin_warn("video%d pipeline reset after interrupt timeout, reset_all %d!\n", cap->vinc->id, reset_all);
+	if (cap->capture_mode != V4L2_MODE_IMAGE) {
+		mutex_lock(&cap->lock);
+		cap->first_flag = 0;
+		cap->vinc->vin_status.frame_cnt = 0;
+		cap->vinc->vin_status.err_cnt = 0;
+		cap->vinc->vin_status.lost_cnt = 0;
 
-	mutex_lock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	if (!cap->pipe.sd[VIN_IND_SENSOR]->entity.use_count) {
-		vin_err("%s is not used, video%d cannot be resetted!\n", cap->pipe.sd[VIN_IND_SENSOR]->name, cap->vinc->id);
-		mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-		mutex_unlock(&csi->reset_lock);
-		return;
-	}
+		vin_pipeline_call(cap->vinc, set_stream, &cap->pipe, 0);
 
-	if (!vin_streaming(cap) || !vin_busy(cap)) {
-		vin_err("video%d have been steaming off, cannot reset!\n", cap->vinc->id);
-		mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-		mutex_unlock(&csi->reset_lock);
-		return;
-	}
+		v4l2_subdev_call(sd, core, s_power, 0);
+		usleep_range(100, 120);
+		v4l2_subdev_call(sd, core, s_power, 1);
 
-	if (reset_all) {
-		/*reset all complete pipeline at the same of csi_sel*/
-		for (i = 0; i < VIN_MAX_DEV; i++) {
-			vid_cap = &vin_core_gbl[i]->vid_cap;
-			if (!vin_core_gbl[i] || csi->id != vin_core_gbl[i]->csi_sel)
-				continue;
-			if (!vin_streaming(vid_cap))
-				continue;
-
-			reset_count++;
-
-			isp->nosend_ispoff = 1;
-			vin_pipeline_call(vin_core_gbl[i], set_stream, &vid_cap->pipe, 0);
-
-			vin_pipeline_call(vin_core_gbl[i], close, &vid_cap->pipe);
-
-			v4l2_subdev_call(vid_cap->pipe.sd[VIN_IND_ISP], core, init, 0);
-			isp->nosend_ispoff = 0;
+		ret = vin_pipeline_call(cap->vinc, set_stream, &cap->pipe, cap->vinc->stream_idx);
+		if (ret < 0) {
+			vin_err("%s error!\n", __func__);
+			return;
 		}
+		vin_warn("vin pipiline reset after interrupt timeout!\n");
 
-		/*ensure all reset at the same time*/
-		if (reset_count >= 2)
-			msleep((2 + csi->reset_time) * 1000);
-
-		for (i = 0; i < VIN_MAX_DEV; i++) {
-			vid_cap = &vin_core_gbl[i]->vid_cap;
-			if (!vin_core_gbl[i] || csi->id != vin_core_gbl[i]->csi_sel)
-				continue;
-			if (!vin_streaming(vid_cap))
-				continue;
-
-			vin_pipeline_call(vin_core_gbl[i], open, &vid_cap->pipe, &vid_cap->vdev.entity, true);
-
-			v4l2_subdev_call(vid_cap->pipe.sd[VIN_IND_ISP], core, init, 1);
-
-			v4l2_subdev_call(vid_cap->pipe.sd[VIN_IND_SCALER], core, init, 1);
-
-			vin_pipeline_call(vin_core_gbl[i], set_stream, &vid_cap->pipe, vin_core_gbl[i]->stream_idx);
-		}
+		mod_timer(&cap->vinc->timer_for_reset, jiffies + 3*HZ);
+		mutex_unlock(&cap->lock);
 	}
-	mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	mutex_unlock(&csi->reset_lock);
-
-	vin_timer_update(cap->vinc, 2000);
-
-	vin_warn("video%d pipeline reset end!\n", cap->vinc->id);
 }
-#endif
 
 /* The color format (colplanes, memplanes) must be already configured. */
 int vin_set_addr(struct vin_core *vinc, struct vb2_buffer *vb,
 		      struct vin_frame *frame, struct vin_addr *paddr)
 {
 	u32 pix_size, depth, y_stride, u_stride, v_stride;
-	struct vb2_v4l2_buffer *vb2_v4l2;
-	struct vin_buffer *buf;
 
-	vb2_v4l2 = container_of(vb, struct vb2_v4l2_buffer, vb2_buf);
-	buf = container_of(vb2_v4l2, struct vin_buffer, vb);
+	if (vb == NULL || frame == NULL)
+		return -EINVAL;
 
-	if (vinc->vid_cap.special_active == 1) {
-		if (buf == NULL || buf->paddr == NULL)
-			return -EINVAL;
-	} else {
-		if (vb == NULL || frame == NULL)
-			return -EINVAL;
-	}
-
-#if 1
 	pix_size = ALIGN(frame->o_width, VIN_ALIGN_WIDTH) * frame->o_height;
-#else
-	pix_size = ALIGN(frame->o_width, VIN_ALIGN_WIDTH) * ALIGN(frame->o_height, VIN_ALIGN_HEIGHT);
-#endif
 	depth = frame->fmt.depth[0] + frame->fmt.depth[1] + frame->fmt.depth[2];
 
-	if (vinc->vid_cap.special_active == 1) {
-		paddr->y = (dma_addr_t)buf->paddr;
-		frame->fmt.memplanes = 1;
-	} else
-		paddr->y = vb2_dma_contig_plane_dma_addr(vb, 0);
+	paddr->y = vb2_dma_contig_plane_dma_addr(vb, 0);
 
 	if (frame->fmt.memplanes == 1) {
 		switch (frame->fmt.colplanes) {
@@ -195,11 +125,7 @@ int vin_set_addr(struct vin_core *vinc, struct vb2_buffer *vb,
 			/* decompose Y into Y/Cb */
 
 			if (frame->fmt.fourcc == V4L2_PIX_FMT_FBC) {
-#if defined CONFIG_ARCH_SUN8IW12P1
 				paddr->cb = (u32)(paddr->y + CEIL_EXP(frame->o_width, 7) * CEIL_EXP(frame->o_height, 5) * 96);
-#else
-				paddr->cb = paddr->y + ALIGN(DIV_ROUND_UP(frame->o_width, 128) * DIV_ROUND_UP(frame->o_height, 32) * 96, 64);
-#endif
 				paddr->cr = 0;
 
 			} else {
@@ -226,7 +152,6 @@ int vin_set_addr(struct vin_core *vinc, struct vb2_buffer *vb,
 			paddr->cr = vb2_dma_contig_plane_dma_addr(vb, 2);
 	}
 
-#ifdef NO_SUPPROT_HARDWARE_CALCULATE
 	if ((vinc->vflip == 1) && (frame->fmt.fourcc == V4L2_PIX_FMT_FBC)) {
 		paddr->y += CEIL_EXP(frame->o_width, 7) * (CEIL_EXP(frame->o_height, 5) - 1) *  96;
 		paddr->cb += CEIL_EXP(frame->o_width, 4) * (CEIL_EXP(frame->o_height, 2) - 1) * 96;
@@ -261,7 +186,7 @@ int vin_set_addr(struct vin_core *vinc, struct vb2_buffer *vb,
 			return -EINVAL;
 		}
 	}
-#endif
+
 	if ((vinc->large_image == 2) && (vinc->vin_status.frame_cnt % 2)) {
 		if (frame->fmt.colplanes == 3) {
 			if (depth == 12) {
@@ -298,109 +223,6 @@ int vin_set_addr(struct vin_core *vinc, struct vb2_buffer *vb,
 	return 0;
 }
 
-void vin_set_next_buf_addr(struct vin_core *vinc)
-{
-	struct vin_vid_cap *cap = &vinc->vid_cap;
-	struct vin_buffer *buf;
-	__maybe_unused struct list_head *buf_next;
-	__maybe_unused int i;
-
-	if (vinc->large_image == 1)
-		return;
-
-	vinc->vid_cap.first_flag = 0;
-	vinc->vin_status.frame_cnt = 0;
-	vinc->vin_status.err_cnt = 0;
-	vinc->vin_status.lost_cnt = 0;
-
-#ifndef BUF_AUTO_UPDATE
-	buf = list_entry(cap->vidq_active.next, struct vin_buffer, list);
-	vin_set_addr(vinc, &buf->vb.vb2_buf, &vinc->vid_cap.frame, &vinc->vid_cap.frame.paddr);
-#else
-	vin_get_rest_buf_cnt(vinc);
-	cap->threshold.bufa_fifo_threshold = 1;
-	cap->threshold.stored_frm_threshold = 2;
-	cap->threshold.bufa_fifo_total = vinc->vin_status.buf_rest;
-	csic_buf_addr_fifo_en(vinc->vipp_sel, 1);
-	csic_set_threshold_for_bufa_mode(vinc->vipp_sel, &cap->threshold);
-	buf_next = cap->vidq_active.next;
-	for (i = 0; i < cap->threshold.bufa_fifo_total; i++) {
-		buf = list_entry(buf_next, struct vin_buffer, list);
-		vin_set_addr(vinc, &buf->vb.vb2_buf, &vinc->vid_cap.frame, &vinc->vid_cap.frame.paddr);
-		buf_next = buf_next->next;
-	}
-#endif
-}
-
-static int lbc_mode_select(struct dma_lbc_cmp *lbc_cmp, unsigned int fourcc)
-{
-	switch (fourcc) {
-	case V4L2_PIX_FMT_LBC_2_0X: /* 2x */
-		lbc_cmp->is_lossy = 1;
-		lbc_cmp->bit_depth = 8;
-		lbc_cmp->glb_enable = 1;
-		lbc_cmp->dts_enable = 1;
-		lbc_cmp->ots_enable = 1;
-		lbc_cmp->msq_enable = 1;
-		lbc_cmp->cmp_ratio_even = 600;
-		lbc_cmp->cmp_ratio_odd  = 450;
-		lbc_cmp->mb_mi_bits[0]  = 55;
-		lbc_cmp->mb_mi_bits[1]  = 110;
-		lbc_cmp->rc_adv[0] = 60;
-		lbc_cmp->rc_adv[1] = 30;
-		lbc_cmp->rc_adv[2] = 15;
-		lbc_cmp->rc_adv[3] = 8;
-		lbc_cmp->lmtqp_en  = 1;
-		lbc_cmp->lmtqp_min = 1;
-		lbc_cmp->updata_adv_en = 1;
-		lbc_cmp->updata_adv_ratio = 2;
-		break;
-	case V4L2_PIX_FMT_LBC_2_5X: /* 2.5x */
-		lbc_cmp->is_lossy = 1;
-		lbc_cmp->bit_depth = 8;
-		lbc_cmp->glb_enable = 1;
-		lbc_cmp->dts_enable = 1;
-		lbc_cmp->ots_enable = 1;
-		lbc_cmp->msq_enable = 1;
-		lbc_cmp->cmp_ratio_even = 440;
-		lbc_cmp->cmp_ratio_odd  = 380;
-		lbc_cmp->mb_mi_bits[0]  = 55;
-		lbc_cmp->mb_mi_bits[1]  = 94;
-		lbc_cmp->rc_adv[0] = 60;
-		lbc_cmp->rc_adv[1] = 30;
-		lbc_cmp->rc_adv[2] = 15;
-		lbc_cmp->rc_adv[3] = 8;
-		lbc_cmp->lmtqp_en  = 1;
-		lbc_cmp->lmtqp_min = 1;
-		lbc_cmp->updata_adv_en = 1;
-		lbc_cmp->updata_adv_ratio = 2;
-		break;
-	case V4L2_PIX_FMT_LBC_1_0X: /* lossless */
-		lbc_cmp->is_lossy = 0;
-		lbc_cmp->bit_depth = 8;
-		lbc_cmp->glb_enable = 1;
-		lbc_cmp->dts_enable = 1;
-		lbc_cmp->ots_enable = 1;
-		lbc_cmp->msq_enable = 1;
-		lbc_cmp->cmp_ratio_even = 1000;
-		lbc_cmp->cmp_ratio_odd  = 1000;
-		lbc_cmp->mb_mi_bits[0]  = 55;
-		lbc_cmp->mb_mi_bits[1]  = 94;
-		lbc_cmp->rc_adv[0] = 60;
-		lbc_cmp->rc_adv[1] = 30;
-		lbc_cmp->rc_adv[2] = 15;
-		lbc_cmp->rc_adv[3] = 8;
-		lbc_cmp->lmtqp_en  = 1;
-		lbc_cmp->lmtqp_min = 1;
-		lbc_cmp->updata_adv_en = 1;
-		lbc_cmp->updata_adv_ratio = 2;
-		break;
-	default:
-		return -1;
-	}
-	return 0;
-}
-
 /*
  * Videobuf operations
  */
@@ -411,45 +233,18 @@ static int queue_setup(struct vb2_queue *vq,
 	struct vin_vid_cap *cap = vb2_get_drv_priv(vq);
 	unsigned int size;
 	int buf_max_flag = 0;
-	int wth;
 	int i;
 
 	cap->frame.bytesperline[0] = cap->frame.o_width * cap->frame.fmt.depth[0] / 8;
 	cap->frame.bytesperline[1] = cap->frame.o_width * cap->frame.fmt.depth[1] / 8;
 	cap->frame.bytesperline[2] = cap->frame.o_width * cap->frame.fmt.depth[2] / 8;
 
-#if 0
 	size = cap->frame.o_width * cap->frame.o_height;
-#else
-	size = roundup(cap->frame.o_width, VIN_ALIGN_WIDTH) * roundup(cap->frame.o_height, VIN_ALIGN_WIDTH);
-#endif
-	switch (cap->frame.fmt.fourcc) {
-	case V4L2_PIX_FMT_FBC:
-#if defined CONFIG_ARCH_SUN8IW12P1
+	if (cap->frame.fmt.fourcc == V4L2_PIX_FMT_FBC) {
 		cap->frame.payload[0] = (CEIL_EXP(cap->frame.o_width, 7) * CEIL_EXP(cap->frame.o_height, 5) +
 			CEIL_EXP(cap->frame.o_width, 4) * CEIL_EXP(cap->frame.o_height, 2)) * 96;
-#else
-		cap->frame.payload[0] = (ALIGN(cap->frame.o_width / 16 * 96, 64) * (cap->frame.o_height / 4)) +
-			ALIGN(DIV_ROUND_UP(cap->frame.o_width, 128) * DIV_ROUND_UP(cap->frame.o_height, 32) * 96, 64);
-#endif
-		break;
-	case V4L2_PIX_FMT_LBC_2_0X:
-	case V4L2_PIX_FMT_LBC_2_5X:
-	case V4L2_PIX_FMT_LBC_1_0X:
-		lbc_mode_select(&cap->lbc_cmp, cap->frame.fmt.fourcc);
-		wth = roundup(cap->frame.o_width, 32);
-		if (cap->lbc_cmp.is_lossy) {
-			cap->lbc_cmp.line_tar_bits[0] = roundup(cap->lbc_cmp.cmp_ratio_even * wth * cap->lbc_cmp.bit_depth/1000, 512);
-			cap->lbc_cmp.line_tar_bits[1] = roundup(cap->lbc_cmp.cmp_ratio_odd * wth * cap->lbc_cmp.bit_depth/500, 512);
-		} else {
-			cap->lbc_cmp.line_tar_bits[0] = roundup(wth * cap->lbc_cmp.bit_depth * 1 + (wth * 1 / 16 * 2), 512);
-			cap->lbc_cmp.line_tar_bits[1] = roundup(wth * cap->lbc_cmp.bit_depth * 2 + (wth * 2 / 16 * 2), 512);
-		}
-		cap->frame.payload[0] = (cap->lbc_cmp.line_tar_bits[0] + cap->lbc_cmp.line_tar_bits[1]) * cap->frame.o_height/2/8;
-		break;
-	default:
+	} else {
 		cap->frame.payload[0] = size * cap->frame.fmt.depth[0] / 8;
-		break;
 	}
 	cap->frame.payload[1] = size * cap->frame.fmt.depth[1] / 8;
 	cap->frame.payload[2] = size * cap->frame.fmt.depth[2] / 8;
@@ -482,14 +277,8 @@ static int queue_setup(struct vb2_queue *vq,
 			}
 		} else {
 			if (*nbuffers < 3) {
-#ifdef CONFIG_DISPPLAY_SYNC
-				if (cap->vinc->id != disp_sync_video)
-					*nbuffers = 3;
-				vin_warn("buffer count is %d\n", *nbuffers);
-#else
 				*nbuffers = 3;
 				vin_err("buffer count is invalid, set to 3\n");
-#endif
 			}
 		}
 	}
@@ -542,14 +331,14 @@ static void buffer_queue(struct vb2_buffer *vb)
 
 	spin_lock_irqsave(&cap->slock, flags);
 	list_add_tail(&buf->list, &cap->vidq_active);
-#ifdef BUF_AUTO_UPDATE
-	vin_set_addr(cap->vinc, &buf->vb.vb2_buf, &cap->frame, &cap->frame.paddr);
-#endif
 	spin_unlock_irqrestore(&cap->slock, flags);
 }
 
 static int start_streaming(struct vb2_queue *vq, unsigned int count)
 {
+	struct vin_vid_cap *cap = vb2_get_drv_priv(vq);
+
+	set_bit(VIN_STREAM, &cap->state);
 	return 0;
 }
 
@@ -559,12 +348,15 @@ static void stop_streaming(struct vb2_queue *vq)
 	struct vin_vid_cap *cap = vb2_get_drv_priv(vq);
 	unsigned long flags = 0;
 
+	clear_bit(VIN_STREAM, &cap->state);
+
 	spin_lock_irqsave(&cap->slock, flags);
 	/* Release all active buffers */
 	while (!list_empty(&cap->vidq_active)) {
 		struct vin_buffer *buf;
 
-		buf = list_entry(cap->vidq_active.next, struct vin_buffer, list);
+		buf =
+		    list_entry(cap->vidq_active.next, struct vin_buffer, list);
 		list_del(&buf->list);
 		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 		vin_log(VIN_LOG_VIDEO, "buf %d stop\n", buf->vb.vb2_buf.index);
@@ -629,7 +421,6 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,
 				enum_frame_size, NULL, &fse);
 	if (ret < 0)
 		return -1;
-	fsize->type = V4L2_FRMSIZE_TYPE_CONTINUOUS;
 	fsize->stepwise.max_width = fse.max_width;
 	fsize->stepwise.max_height = fse.max_height;
 	fsize->stepwise.min_width = fse.min_width;
@@ -640,21 +431,10 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,
 static int vidioc_g_fmt_vid_cap_mplane(struct file *file, void *priv,
 				       struct v4l2_format *f)
 {
-	struct vin_core *vinc = video_drvdata(file);
-	struct v4l2_pix_format_mplane *pixm = &f->fmt.pix_mp;
-	int i;
+	struct vin_vid_cap *cap =
+	    container_of(video_devdata(file), struct vin_vid_cap, vdev);
 
-	pixm->width = vinc->vid_cap.frame.o_width;
-	pixm->height = vinc->vid_cap.frame.o_height;
-	pixm->field = V4L2_FIELD_NONE;
-	pixm->pixelformat = vinc->vid_cap.frame.fmt.fourcc;
-	pixm->colorspace = vinc->vid_cap.frame.fmt.color;/*V4L2_COLORSPACE_JPEG;*/
-	pixm->num_planes = vinc->vid_cap.frame.fmt.memplanes;
-
-	for (i = 0; i < pixm->num_planes; ++i) {
-		pixm->plane_fmt[i].bytesperline = vinc->vid_cap.frame.bytesperline[i];
-		pixm->plane_fmt[i].sizeimage = vinc->vid_cap.frame.payload[i];
-	}
+	vin_get_fmt_mplane(&cap->frame, f);
 	return 0;
 }
 
@@ -718,9 +498,6 @@ static int vin_pipeline_try_format(struct vin_core *vinc,
 				break;
 			case VIN_GRP_ID_CSI:
 				sd_ind = VIN_IND_CSI;
-				break;
-			case VIN_GRP_ID_TDM_RX:
-				sd_ind = VIN_IND_TDM_RX;
 				break;
 			case VIN_GRP_ID_ISP:
 				sd_ind = VIN_IND_ISP;
@@ -821,7 +598,6 @@ static int vin_pipeline_set_mbus_config(struct vin_core *vinc)
 	csi = v4l2_get_subdevdata(pipe->sd[VIN_IND_CSI]);
 	vinc->total_rx_ch = csi->bus_info.ch_total_num;
 	vinc->vid_cap.frame.fmt.mbus_type = mcfg.type;
-#ifdef SUPPORT_PTN
 	if (vinc->ptn_cfg.ptn_en) {
 		csi->bus_info.bus_if = V4L2_MBUS_PARALLEL;
 		switch (vinc->ptn_cfg.ptn_dw) {
@@ -839,7 +615,7 @@ static int vin_pipeline_set_mbus_config(struct vin_core *vinc)
 			break;
 		}
 	}
-#endif
+
 	return 0;
 out:
 	return ret;
@@ -867,7 +643,7 @@ static int vidioc_try_fmt_vid_cap_mplane(struct file *file, void *priv,
 
 	f->fmt.pix_mp.width = mf.width;
 	f->fmt.pix_mp.height = mf.height;
-	f->fmt.pix_mp.colorspace = mf.colorspace;
+	f->fmt.pix_mp.colorspace = V4L2_COLORSPACE_JPEG;
 	return 0;
 }
 
@@ -897,7 +673,6 @@ static int __vin_set_fmt(struct vin_core *vinc, struct v4l2_format *f)
 	mf.width = f->fmt.pix_mp.width;
 	mf.height = f->fmt.pix_mp.height;
 	mf.field = f->fmt.pix_mp.field;
-	mf.colorspace = f->fmt.pix_mp.colorspace;
 	mf.code = ffmt->mbus_code;
 	res->res_pix_fmt = f->fmt.pix_mp.pixelformat;
 	ret = vin_pipeline_try_format(vinc, &mf, &ffmt, true);
@@ -907,12 +682,9 @@ static int __vin_set_fmt(struct vin_core *vinc, struct v4l2_format *f)
 	}
 	cap->frame.fmt.mbus_code = mf.code;
 	cap->frame.fmt.field = mf.field;
-	cap->frame.fmt.color = mf.colorspace;
 
-	f->fmt.pix_mp.colorspace = mf.colorspace;
-
-	vin_log(VIN_LOG_FMT, "pipeline try fmt %d*%d code %x field %d colorspace %d\n",
-		mf.width, mf.height, mf.code, mf.field, mf.colorspace);
+	vin_log(VIN_LOG_FMT, "vin_pipeline_try_format %d*%d %x %d\n",
+		mf.width, mf.height, mf.code, mf.field);
 
 	vin_pipeline_set_mbus_config(vinc);
 
@@ -923,8 +695,6 @@ static int __vin_set_fmt(struct vin_core *vinc, struct v4l2_format *f)
 	if (ret == 0) {
 		struct v4l2_subdev_pad_config cfg;
 		struct v4l2_subdev_selection sel;
-
-		sunxi_isp_sensor_fps(cap->pipe.sd[VIN_IND_ISP], win_cfg.fps_fixed);
 
 		vinc->vin_status.width = win_cfg.width;
 		vinc->vin_status.height = win_cfg.height;
@@ -945,15 +715,11 @@ static int __vin_set_fmt(struct vin_core *vinc, struct v4l2_format *f)
 
 		/*vipp crop*/
 		if ((win_cfg.vipp_hoff != 0) || (win_cfg.vipp_voff != 0)) {
-			if ((win_cfg.vipp_w + win_cfg.vipp_hoff > win_cfg.width_input) || (win_cfg.vipp_w == 0))
-				win_cfg.vipp_w = win_cfg.width_input - win_cfg.vipp_hoff;
-			if ((win_cfg.vipp_h + win_cfg.vipp_voff > win_cfg.height_input) || (win_cfg.vipp_h == 0))
-				win_cfg.vipp_h = win_cfg.height_input - win_cfg.vipp_voff;
 			sel.target = V4L2_SEL_TGT_CROP;
 			sel.pad = SCALER_PAD_SINK;
 			sel.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-			sel.r.width = win_cfg.vipp_w;
-			sel.r.height = win_cfg.vipp_h;
+			sel.r.width = win_cfg.width_input - 2 * win_cfg.vipp_hoff;
+			sel.r.height = win_cfg.height_input - 2 * win_cfg.vipp_voff;
 			sel.r.left = win_cfg.vipp_hoff;
 			sel.r.top = win_cfg.vipp_voff;
 			ret = v4l2_subdev_call(cap->pipe.sd[VIN_IND_SCALER],
@@ -1039,7 +805,33 @@ static int vidioc_s_fmt_vid_cap_mplane(struct file *file, void *priv,
 	return __vin_set_fmt(vinc, f);
 }
 
-int vidioc_s_selection(struct file *file, void *fh,
+int vidioc_g_crop(struct file *file, void *fh,
+				struct v4l2_crop *a)
+{
+	struct vin_core *vinc = video_drvdata(file);
+
+	a->c.left = vinc->vid_cap.frame.offs_h;
+	a->c.top = vinc->vid_cap.frame.offs_v;
+	a->c.width = vinc->vid_cap.frame.o_width;
+	a->c.height = vinc->vid_cap.frame.o_height;
+
+	return 0;
+}
+
+int vidioc_s_crop(struct file *file, void *fh,
+				const struct v4l2_crop *a)
+{
+	struct vin_core *vinc = video_drvdata(file);
+
+	vinc->vid_cap.frame.offs_h = a->c.left;
+	vinc->vid_cap.frame.offs_v = a->c.top;
+	vinc->vid_cap.frame.o_width = a->c.width;
+	vinc->vid_cap.frame.o_height = a->c.height;
+
+	return 0;
+}
+
+int vidioc_g_selection(struct file *file, void *fh,
 				struct v4l2_selection *s)
 {
 	struct vin_core *vinc = video_drvdata(file);
@@ -1057,7 +849,7 @@ int vidioc_s_selection(struct file *file, void *fh,
 		vin_err("v4l2 sub device scaler set_selection error!\n");
 	return ret;
 }
-int vidioc_g_selection(struct file *file, void *fh,
+int vidioc_s_selection(struct file *file, void *fh,
 				struct v4l2_selection *s)
 {
 	struct vin_core *vinc = video_drvdata(file);
@@ -1121,13 +913,8 @@ static void __osd_win_check(struct v4l2_window *win)
 		if (win->clipcount > MAX_OVERLAY_NUM)
 			win->clipcount = MAX_OVERLAY_NUM;
 	} else {
-		if (MAX_ORL_NUM) {
-			if (win->clipcount > MAX_ORL_NUM)
-				win->clipcount = MAX_ORL_NUM;
-		} else {
-			if (win->clipcount > MAX_COVER_NUM)
-				win->clipcount = MAX_COVER_NUM;
-		}
+		if (win->clipcount > MAX_COVER_NUM)
+			win->clipcount = MAX_COVER_NUM;
 	}
 }
 
@@ -1141,7 +928,6 @@ static int vidioc_try_fmt_vid_overlay(struct file *file, void *__fh,
 
 void __osd_bitmap2dram(struct vin_osd *osd, void *databuf)
 {
-#if defined CONFIG_ARCH_SUN8IW12P1
 	int i, j, k, m = 0, n = 0;
 	int kend = 0, idx = 0, ww = 0, ysn = 0;
 	int y_num = 0, *y_temp = NULL;
@@ -1223,9 +1009,6 @@ void __osd_bitmap2dram(struct vin_osd *osd, void *databuf)
 	y_temp = NULL;
 	hor_index = NULL;
 	hor_num = NULL;
-#else
-	memcpy(osd->ov_mask[osd->ov_set_cnt % 2].vir_addr, databuf, osd->ov_mask[osd->ov_set_cnt % 2].size);
-#endif
 }
 
 static void __osd_rgb_to_yuv(u8 r, u8 g, u8 b, u8 *y, u8 *u, u8 *v)
@@ -1242,21 +1025,21 @@ static void __osd_rgb_to_yuv(u8 r, u8 g, u8 b, u8 *y, u8 *u, u8 *v)
 	int jc9 = 0x00000000;
 	int jc10 = 0x00000080;
 	int jc11 = 0x00000080;
-	u32 y_tmp, u_tmp, v_tmp;
+	int y_tmp, u_tmp, v_tmp;
 
 	y_tmp = (((jc0 * r >> 6) + (jc1 * g >> 6) + (jc2 * b >> 6)) >> 4) + jc9;
-	*y = clamp_val(y_tmp, 0, 255);
+	*y = CLIP(y_tmp, 0, 255);
 
 	u_tmp = (((jc3 * r >> 6) + (jc4 * g >> 6) + (jc5 * b >> 6)) >> 4) + jc10;
-	*u = clamp_val(u_tmp, 0, 255);
+	*u = CLIP(u_tmp, 0, 255);
 
 	v_tmp = (((jc6 * r >> 6) + (jc7 * g >> 6) + (jc8 * b >> 6)) >> 4) + jc11;
-	*v = clamp_val(v_tmp, 0, 255);
+	*v = CLIP(v_tmp, 0, 255);
 }
 
 static void __osd_bmp_to_yuv(struct vin_osd *osd, void *databuf)
 {
-#if defined CONFIG_ARCH_SUN8IW12P1
+
 	u8 alpha, r, g, b, y, u, v;
 	int i, j, y_sum, bmp;
 
@@ -1314,7 +1097,6 @@ static void __osd_bmp_to_yuv(struct vin_osd *osd, void *databuf)
 		}
 		osd->y_bmp_avp[i] = y_sum / valid_pix;
 	}
-#endif
 }
 
 static int vidioc_s_fmt_vid_overlay(struct file *file, void *__fh,
@@ -1336,14 +1118,8 @@ static int vidioc_s_fmt_vid_overlay(struct file *file, void *__fh,
 			osd->overlay_en = 0;
 			goto osd_reset;
 		} else {
-			if (MAX_OVERLAY_NUM) {
-				osd->overlay_en = 1;
-				osd->overlay_cnt = f->fmt.win.clipcount;
-			} else {
-				osd->overlay_en = 0;
-				vin_err("VIPP overlay is not exist!!\n");
-				goto osd_reset;
-			}
+			osd->overlay_en = 1;
+			osd->overlay_cnt = f->fmt.win.clipcount;
 		}
 
 		clip = vmalloc(sizeof(struct v4l2_clip) * osd->overlay_cnt * 2);
@@ -1365,10 +1141,7 @@ static int vidioc_s_fmt_vid_overlay(struct file *file, void *__fh,
 				osd->global_alpha[i] = clamp_val(clip[i + osd->overlay_cnt].c.top, 0, 16);
 			else
 				osd->global_alpha[i] = clamp_val(f->fmt.win.global_alpha, 0, 16);
-			osd->inverse_close[i] = clip[i + osd->overlay_cnt].c.left & 0xff;
-			osd->inv_th = (clip[i + osd->overlay_cnt].c.left >> 8) & 0xff;
-			osd->inv_w_rgn[i] = clamp_val(clip[i + osd->overlay_cnt].c.width, 0, 15);
-			osd->inv_h_rgn[i] = clamp_val(clip[i + osd->overlay_cnt].c.height, 0, 15);
+			osd->inverse_close[i] = clip[i + osd->overlay_cnt].c.left;
 		}
 		vfree(clip);
 
@@ -1428,74 +1201,39 @@ static int vidioc_s_fmt_vid_overlay(struct file *file, void *__fh,
 	} else {
 		if (f->fmt.win.clipcount <= 0) {
 			osd->cover_en = 0;
-			osd->orl_en = 0;
 			goto osd_reset;
+		} else {
+			osd->cover_en = 1;
+			osd->cover_cnt = f->fmt.win.clipcount;
 		}
 
-		clip = vmalloc(sizeof(struct v4l2_clip) * f->fmt.win.clipcount * 2);
+		clip = vmalloc(sizeof(struct v4l2_clip) * osd->cover_cnt * 2);
 		if (clip == NULL) {
 			vin_err("%s - Alloc of clip mask failed\n", __func__);
 			return -ENOMEM;
 		}
 		if (copy_from_user(clip, f->fmt.win.clips,
-			sizeof(struct v4l2_clip) * f->fmt.win.clipcount * 2)) {
+			sizeof(struct v4l2_clip) * osd->cover_cnt * 2)) {
 			vfree(clip);
 			return -EFAULT;
 		}
 
 		/*save rgb in the win top for diff cover*/
-		osd->orl_width = clip[f->fmt.win.clipcount].c.width;
-		if (osd->orl_width) {
-			if (MAX_ORL_NUM) {
-				osd->orl_en = 1;
-				osd->orl_cnt = f->fmt.win.clipcount;
-			} else {
-				osd->orl_en = 0;
-				vin_err("VIPP orl is not exist!!\n");
-				goto osd_reset;
-			}
-		} else {
-			if (MAX_COVER_NUM) {
-				osd->cover_en = 1;
-				osd->cover_cnt = f->fmt.win.clipcount;
-			} else {
-				osd->cover_en = 0;
-				vin_err("VIPP cover is not exist!!\n");
-				goto osd_reset;
-			}
-		}
-
-		if (osd->orl_en) {
-			for (i = 0; i < osd->orl_cnt; i++) {
-				u8 r, g, b;
-
-				osd->orl_win[i] = clip[i].c;
-				osd->rgb_orl[i] = clip[i + osd->orl_cnt].c.top;
-
-				r = (osd->rgb_orl[i] >> 16) & 0xff;
-				g = (osd->rgb_orl[i] >> 8) & 0xff;
-				b = osd->rgb_orl[i] & 0xff;
-				__osd_rgb_to_yuv(r, g, b, &osd->yuv_orl[0][i],
-					&osd->yuv_orl[1][i], &osd->yuv_orl[2][i]);
-			}
-		}
-
-		if (osd->cover_en) {
-			for (i = 0; i < osd->cover_cnt; i++) {
-				u8 r, g, b;
-
-				osd->cv_win[i] = clip[i].c;
-				osd->rgb_cover[i] = clip[i + osd->cover_cnt].c.top;
-
-				r = (osd->rgb_cover[i] >> 16) & 0xff;
-				g = (osd->rgb_cover[i] >> 8) & 0xff;
-				b = osd->rgb_cover[i] & 0xff;
-				__osd_rgb_to_yuv(r, g, b, &osd->yuv_cover[0][i],
-					&osd->yuv_cover[1][i], &osd->yuv_cover[2][i]);
-
-			}
+		for (i = 0; i < osd->cover_cnt; i++) {
+			osd->cv_win[i] = clip[i].c;
+			osd->rgb_cover[i] = clip[i + osd->cover_cnt].c.top;
 		}
 		vfree(clip);
+
+		for (i = 0; i < osd->cover_cnt; i++) {
+			u8 r, g, b;
+
+			r = (osd->rgb_cover[i] >> 16) & 0xff;
+			g = (osd->rgb_cover[i] >> 8) & 0xff;
+			b = osd->rgb_cover[i] & 0xff;
+			__osd_rgb_to_yuv(r, g, b, &osd->yuv_cover[0][i],
+				&osd->yuv_cover[1][i], &osd->yuv_cover[2][i]);
+		}
 	}
 osd_reset:
 	osd->is_set = 0;
@@ -1503,7 +1241,7 @@ osd_reset:
 	return ret;
 }
 
-static int __osd_reg_setup(struct vin_core *vinc, struct vin_osd *osd)
+static int __osd_reg_setup(int id, struct vin_osd *osd)
 {
 	struct vipp_osd_config *osd_cfg = NULL;
 	struct vipp_osd_para_config *para = NULL;
@@ -1521,9 +1259,7 @@ static int __osd_reg_setup(struct vin_core *vinc, struct vin_osd *osd)
 		.jc10 = 0x00000080,
 		.jc11 = 0x00000080,
 	};
-	int id = vinc->vipp_sel;
 	int i;
-	int act_width;
 
 	osd_cfg = kzalloc(sizeof(struct vipp_osd_config), GFP_KERNEL);
 	if (osd_cfg == NULL) {
@@ -1544,88 +1280,36 @@ static int __osd_reg_setup(struct vin_core *vinc, struct vin_osd *osd)
 		osd_cfg->osd_ov_en = 1;
 		osd_cfg->osd_stat_en = 1;
 		for (i = 0; i < osd->overlay_cnt; i++) {
-			if (vinc->hflip)
-				para->overlay_cfg[i].h_start = vinc->vid_cap.frame.o_width - osd->ov_win[i].width - osd->ov_win[i].left;
-			else
-				para->overlay_cfg[i].h_start = osd->ov_win[i].left;
-			para->overlay_cfg[i].h_end = para->overlay_cfg[i].h_start + osd->ov_win[i].width - 1;
-
-			if (vinc->vflip)
-				para->overlay_cfg[i].v_start = vinc->vid_cap.frame.o_height - osd->ov_win[i].height - osd->ov_win[i].top;
-			else
-				para->overlay_cfg[i].v_start = osd->ov_win[i].top;
-			para->overlay_cfg[i].v_end = para->overlay_cfg[i].v_start + osd->ov_win[i].height - 1;
-
+			para->overlay_cfg[i].h_start = osd->ov_win[i].left;
+			para->overlay_cfg[i].h_end = osd->ov_win[i].left
+				+ osd->ov_win[i].width - 1;
+			para->overlay_cfg[i].v_start = osd->ov_win[i].top;
+			para->overlay_cfg[i].v_end = osd->ov_win[i].top
+				+ osd->ov_win[i].height - 1;
 			para->overlay_cfg[i].alpha = osd->global_alpha[i];
-			para->overlay_cfg[i].inv_en = !osd->inverse_close[i];
-			para->overlay_cfg[i].inv_th = osd->inv_th;
-			para->overlay_cfg[i].inv_w_rgn = osd->inv_w_rgn[i];
-			para->overlay_cfg[i].inv_h_rgn = osd->inv_h_rgn[i];
 		}
 		vipp_set_osd_bm_load_addr(id, (unsigned long)osd->ov_mask[osd->ov_set_cnt % 2].dma_addr);
-	} else {
-		osd_cfg->osd_ov_num = -1;
 	}
 
 	if (osd->cover_en == 1) {
 		osd_cfg->osd_cv_num = osd->cover_cnt - 1;
 		osd_cfg->osd_cv_en = 1;
 		for (i = 0; i < osd->cover_cnt; i++) {
-			if (vinc->hflip)
-				para->cover_cfg[i].h_start = vinc->vid_cap.frame.o_width - osd->cv_win[i].width - osd->cv_win[i].left;
-			else
-				para->cover_cfg[i].h_start = osd->cv_win[i].left;
-			para->cover_cfg[i].h_end = para->cover_cfg[i].h_start + osd->cv_win[i].width - 1;
-
-			if (vinc->vflip)
-				para->cover_cfg[i].v_start = vinc->vid_cap.frame.o_height - osd->cv_win[i].height - osd->cv_win[i].top;
-			else
-				para->cover_cfg[i].v_start = osd->cv_win[i].top;
-			para->cover_cfg[i].v_end = para->cover_cfg[i].v_start + osd->cv_win[i].height - 1;
-
+			para->cover_cfg[i].h_start = osd->cv_win[i].left;
+			para->cover_cfg[i].h_end = osd->cv_win[i].left
+				+ osd->cv_win[i].width - 1;
+			para->cover_cfg[i].v_start = osd->cv_win[i].top;
+			para->cover_cfg[i].v_end = osd->cv_win[i].top
+				+ osd->cv_win[i].height - 1;
 			para->cover_data[i].y = osd->yuv_cover[0][i];
 			para->cover_data[i].u = osd->yuv_cover[1][i];
 			para->cover_data[i].v = osd->yuv_cover[2][i];
 		}
-	} else {
-		osd_cfg->osd_cv_num = -1;
-	}
-
-	if (osd->orl_en == 1) {
-		osd_cfg->osd_orl_num = osd->orl_cnt - 1;
-		osd_cfg->osd_orl_en = 1;
-		osd_cfg->osd_orl_width = osd->orl_width;
-		act_width = 2 * (osd_cfg->osd_orl_width + 1);
-		for (i = 0; i < osd->orl_cnt; i++) {
-			if (osd->orl_win[i].height < 2 * act_width)
-				osd->orl_win[i].height = 2 * act_width;
-			if (osd->orl_win[i].width < 2 * act_width)
-				osd->orl_win[i].width = 2 * act_width;
-
-			if (vinc->hflip)
-				para->orl_cfg[i].h_start = vinc->vid_cap.frame.o_width - osd->orl_win[i].width - osd->orl_win[i].left;
-			else
-				para->orl_cfg[i].h_start = osd->orl_win[i].left;
-			para->orl_cfg[i].h_end = para->orl_cfg[i].h_start + osd->orl_win[i].width - 1;
-
-			if (vinc->vflip)
-				para->orl_cfg[i].v_start = vinc->vid_cap.frame.o_height - osd->orl_win[i].height - osd->orl_win[i].top;
-			else
-				para->orl_cfg[i].v_start = osd->orl_win[i].top;
-			para->orl_cfg[i].v_end = para->orl_cfg[i].v_start + osd->orl_win[i].height - 1;
-
-			para->orl_data[i].y = osd->yuv_orl[0][i];
-			para->orl_data[i].u = osd->yuv_orl[1][i];
-			para->orl_data[i].v = osd->yuv_orl[2][i];
-		}
-	} else {
-		osd_cfg->osd_orl_num = -1;
 	}
 
 	vipp_osd_cfg(id, osd_cfg);
 	vipp_osd_rgb2yuv(id, &rgb2yuv_def);
 	vipp_osd_para_cfg(id, para, osd_cfg);
-	vipp_osd_hvflip(id, vinc->hflip, vinc->vflip);
 	kfree(osd_cfg);
 	kfree(para);
 	return 0;
@@ -1649,71 +1333,76 @@ static int vidioc_overlay(struct file *file, void *__fh, unsigned int on)
 		osd->ov_set_cnt = 0;
 		osd->overlay_en = 0;
 		osd->cover_en = 0;
-		osd->orl_en = 0;
+		vipp_chroma_ds_en(vinc->vipp_sel, 0);
+		vipp_osd_en(vinc->vipp_sel, 0);
+		switch (vinc->vid_cap.frame.fmt.fourcc) {
+		case V4L2_PIX_FMT_YUV420:
+		case V4L2_PIX_FMT_YUV420M:
+		case V4L2_PIX_FMT_YVU420:
+		case V4L2_PIX_FMT_YVU420M:
+		case V4L2_PIX_FMT_NV21:
+		case V4L2_PIX_FMT_NV21M:
+		case V4L2_PIX_FMT_NV12:
+		case V4L2_PIX_FMT_NV12M:
+		case V4L2_PIX_FMT_FBC:
+			sunxi_osd_change_sc_fmt(vinc->vipp_sel, YUV420, on);
+			break;
+		default:
+			break;
+		}
+		goto para_ready;
 	} else {
 		if (osd->is_set)
 			return ret;
+		ret = __osd_reg_setup(vinc->vipp_sel, osd);
+		/*when osd enable scaler down outfmt must be YUV422*/
+		sunxi_osd_change_sc_fmt(vinc->vipp_sel, YUV422, on);
+		vipp_osd_en(vinc->vipp_sel, 1);
+		switch (vinc->vid_cap.frame.fmt.fourcc) {
+		case V4L2_PIX_FMT_YUV420:
+		case V4L2_PIX_FMT_YUV420M:
+		case V4L2_PIX_FMT_YVU420:
+		case V4L2_PIX_FMT_YVU420M:
+		case V4L2_PIX_FMT_NV21:
+		case V4L2_PIX_FMT_NV21M:
+		case V4L2_PIX_FMT_NV12:
+		case V4L2_PIX_FMT_NV12M:
+		case V4L2_PIX_FMT_FBC:
+			vipp_chroma_ds_en(vinc->vipp_sel, 1);
+			break;
+		default:
+			break;
+		}
 	}
 
-	ret = __osd_reg_setup(vinc, osd);
+para_ready:
 	osd->is_set = 1;
 	return ret;
 }
 
 void vin_pipeline_reset(unsigned long data)
 {
-#ifdef CONFIG_PIPELINE_RESET
 	struct vin_core *vinc = (struct vin_core *)data;
 
 	schedule_work(&vinc->vid_cap.pipeline_reset_task);
-#endif
 }
 
 int vin_timer_init(struct vin_core *vinc)
 {
-#ifdef CONFIG_PIPELINE_RESET
 	INIT_WORK(&vinc->vid_cap.pipeline_reset_task, __vin_pipeline_reset_handle);
 	init_timer(&vinc->timer_for_reset);
 	vinc->timer_for_reset.data = (unsigned long)vinc;
-	vinc->timer_for_reset.expires = jiffies + 2*HZ;
+	vinc->timer_for_reset.expires = jiffies + 3*HZ;
 	vinc->timer_for_reset.function = vin_pipeline_reset;
 	add_timer(&vinc->timer_for_reset);
-	vinc->use_timer = 1;
-
-	vin_log(VIN_LOG_VIDEO, "timer function address is 0x%p, name is %pf\n",
-		vinc->timer_for_reset.function, *(vinc->timer_for_reset.function));
-#endif
 	return 0;
-}
-
-void vin_timer_del(struct vin_core *vinc)
-{
-#ifdef CONFIG_PIPELINE_RESET
-	unsigned long flags = 0;
-
-	spin_lock_irqsave(&vinc->vid_cap.slock, flags);
-	vinc->use_timer = 0;
-	del_timer_sync(&vinc->timer_for_reset);
-	spin_unlock_irqrestore(&vinc->vid_cap.slock, flags);
-
-	cancel_work_sync(&vinc->vid_cap.pipeline_reset_task);
-#endif
-}
-
-void vin_timer_update(struct vin_core *vinc, int ms)
-{
-#ifdef CONFIG_PIPELINE_RESET
-	struct csi_dev *csi = container_of(vinc->vid_cap.pipe.sd[VIN_IND_CSI], struct csi_dev, subdev);
-
-	if (vinc->use_timer && csi != NULL)
-		mod_timer(&vinc->timer_for_reset, jiffies + csi->reset_time * HZ + ms * HZ / 1000);
-#endif
 }
 
 static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
 {
 	struct vin_core *vinc = video_drvdata(file);
 	struct vin_vid_cap *cap = &vinc->vid_cap;
+	struct vin_buffer *buf;
 	int ret = 0;
 
 	if (i != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
@@ -1722,17 +1411,33 @@ static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
 	}
 
 	if (vin_streaming(cap)) {
-		vin_err("video%d has already stream on\n", vinc->id);
+		vin_err("stream has been already on\n");
 		ret = -1;
 		goto streamon_error;
 	}
-
+#if USE_BIG_PIPELINE
+	/*
+	 * when media_entity_pipeline_start is called, the diffrent video
+	 * output which have same input maybe in the same pipeline. this
+	 * situation is not good for our design. furthermore in our design
+	 * the same subdev would in diffrent pipeline, which is not allow
+	 * in media_entity_pipeline_start, so we give up it.
+	 */
+	 /*the big pipeline would use it*/
+	ret = media_entity_pipeline_start(&cap->vdev.entity, &vinc->vid_cap.pipe.pipe);
+	if (ret < 0)
+		goto streamon_error;
+#endif
 	ret = vb2_ioctl_streamon(file, priv, i);
 	if (ret)
 		goto streamon_error;
 
+	vinc->vid_cap.first_flag = 0;
+	vinc->vin_status.frame_cnt = 0;
+	vinc->vin_status.err_cnt = 0;
+	vinc->vin_status.lost_cnt = 0;
+
 	if (vinc->large_image == 1) {
-#ifdef SUPPORT_PTN
 		vinc->ptn_cfg.ptn_w = cap->frame.o_width;
 		vinc->ptn_cfg.ptn_h = cap->frame.o_height;
 		vinc->ptn_cfg.ptn_mode = 12;
@@ -1743,26 +1448,14 @@ static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
 			return -ENOMEM;
 		}
 		csic_dma_buffer_address(vinc->vipp_sel, CSI_BUF_0_A, (unsigned long)vinc->ptn_cfg.ptn_buf.dma_addr);
-#endif
+	} else {
+		buf = list_entry(cap->vidq_active.next, struct vin_buffer, list);
+		vin_set_addr(vinc, &buf->vb.vb2_buf, &vinc->vid_cap.frame, &vinc->vid_cap.frame.paddr);
 	}
-#if 0
+
 	schedule_work(&vinc->vid_cap.s_stream_task);
-#else
-	mutex_lock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	vin_timer_init(cap->vinc);
-	ret = vin_pipeline_call(cap->vinc, set_stream, &cap->pipe, cap->vinc->stream_idx);
-	if (ret < 0)
-		vin_err("video%d %s error!\n", vinc->id, __func__);
-	set_bit(VIN_STREAM, &cap->state);
-	/*set saved exp and gain for reopen, you can call the api in sensor_reg_init*/
-	/*
-	if (cap->vinc->exp_gain.exp_val && cap->vinc->exp_gain.gain_val) {
-		v4l2_subdev_call(cap->pipe.sd[VIN_IND_SENSOR], core, ioctl,
-			VIDIOC_VIN_SENSOR_EXP_GAIN, &cap->vinc->exp_gain);
-	}
-	*/
-	mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-#endif
+	vin_timer_init(vinc);
+
 streamon_error:
 
 	return ret;
@@ -1775,15 +1468,14 @@ static int vidioc_streamoff(struct file *file, void *priv, enum v4l2_buf_type i)
 	int ret = 0;
 
 	if (!vin_streaming(cap)) {
-		vin_err("video%d has already stream off\n", vinc->id);
+		vin_err("video%d has been already streaming off\n", vinc->id);
+		ret = 0;
 		goto streamoff_error;
 	}
-	vin_timer_del(vinc);
 
-	mutex_lock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	clear_bit(VIN_STREAM, &cap->state);
 	vin_pipeline_call(vinc, set_stream, &cap->pipe, 0);
-	mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
+	del_timer(&vinc->timer_for_reset);
+	flush_work(&vinc->vid_cap.pipeline_reset_task);
 
 	if (i != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		ret = -EINVAL;
@@ -1795,6 +1487,9 @@ static int vidioc_streamoff(struct file *file, void *priv, enum v4l2_buf_type i)
 		vin_err("video%d stream off error!\n", vinc->id);
 		goto streamoff_error;
 	}
+#if USE_BIG_PIPELINE
+	media_entity_pipeline_stop(&cap->vdev.entity);
+#endif
 streamoff_error:
 
 	return ret;
@@ -1827,10 +1522,7 @@ static int __vin_sensor_setup_link(struct modules_config *module,
 	if (en)
 		ret = media_entity_setup_link(link, MEDIA_LNK_FL_ENABLED);
 	else
-		ret = __media_entity_setup_link(link, 0);
-		/*When the this function is called by the close
-		function, the mutex conflicts with the close mutex,
-		so the function without the mutex is used.*/
+		ret = media_entity_setup_link(link, 0);
 
 	if (ret) {
 		vin_warn("%s setup link %s fail!\n", sensor->name,
@@ -1967,13 +1659,9 @@ static int vidioc_s_input(struct file *file, void *priv, unsigned int i)
 			return ret;
 		}
 	}
-	clear_bit(VIN_LPM, &cap->state);
 
 	/*setup the current ctrl value*/
-	/*
 	v4l2_ctrl_handler_setup(&vinc->vid_cap.ctrl_handler);
-	v4l2_ctrl_handler_setup(cap->pipe.sd[VIN_IND_SENSOR]->ctrl_handler);
-	*/
 
 	vinc->hflip = inst->hflip;
 	vinc->vflip = inst->vflip;
@@ -2039,6 +1727,40 @@ static int vidioc_s_parm(struct file *file, void *priv,
 	return ret;
 }
 
+static int isp_exif_req(struct file *file, struct v4l2_fh *fh,
+			struct isp_exif_attribute *exif_attr)
+{
+	struct vin_core *vinc = video_drvdata(file);
+	struct sensor_instance *inst = get_valid_sensor(vinc);
+	struct v4l2_subdev *sd = vinc->vid_cap.pipe.sd[VIN_IND_SENSOR];
+	struct sensor_exif_attribute exif;
+
+	if (inst->is_bayer_raw)
+		return 0;
+	if (v4l2_subdev_call(sd, core, ioctl, GET_SENSOR_EXIF, &exif)) {
+		exif_attr->fnumber = 240;
+		exif_attr->focal_length = 180;
+		exif_attr->brightness = 128;
+		exif_attr->flash_fire = 0;
+		exif_attr->iso_speed = 200;
+		exif_attr->exposure_time.numerator = 1;
+		exif_attr->exposure_time.denominator = 20;
+		exif_attr->shutter_speed.numerator = 1;
+		exif_attr->shutter_speed.denominator = 24;
+	} else {
+		exif_attr->fnumber = exif.fnumber;
+		exif_attr->focal_length = exif.focal_length;
+		exif_attr->brightness = exif.brightness;
+		exif_attr->flash_fire = exif.flash_fire;
+		exif_attr->iso_speed = exif.iso_speed;
+		exif_attr->exposure_time.numerator = exif.exposure_time_num;
+		exif_attr->exposure_time.denominator = exif.exposure_time_den;
+		exif_attr->shutter_speed.numerator = exif.exposure_time_num;
+		exif_attr->shutter_speed.denominator = exif.exposure_time_den;
+	}
+	return 0;
+}
+
 static int __vin_sensor_line2time(struct v4l2_subdev *sd, u32 exp_line)
 {
 	struct sensor_info *info = to_state(sd);
@@ -2098,6 +1820,28 @@ static int __vin_sensor_set_ae_win(struct vin_vid_cap *cap)
 				core, ioctl, SET_AUTO_EXPOSURE_WIN, &ae_win);
 	return ret;
 }
+int vidioc_hdr_ctrl(struct file *file, struct v4l2_fh *fh,
+		    struct isp_hdr_ctrl *hdr)
+{
+	struct vin_core *vinc = video_drvdata(file);
+	struct v4l2_event ev;
+	struct vin_isp_hdr_event_data *ed = (void *)ev.u.data;
+	struct sensor_instance *inst = get_valid_sensor(vinc);
+
+	memset(&ev, 0, sizeof(ev));
+	ev.type = V4L2_EVENT_VIN_CLASS;
+	if (inst->is_bayer_raw) {
+		if (hdr->flag == HDR_CTRL_SET) {
+			ed->cmd = HDR_CTRL_SET;
+			ed->hdr = *hdr;
+		} else {
+			ed->cmd = HDR_CTRL_GET;
+		}
+		v4l2_event_queue(video_devdata(file), &ev);
+		return 0;
+	}
+	return -EINVAL;
+}
 
 int vidioc_sync_ctrl(struct file *file, struct v4l2_fh *fh,
 			struct csi_sync_ctrl *sync)
@@ -2153,7 +1897,6 @@ static int vidioc_set_isp_debug(struct file *file, struct v4l2_fh *fh,
 static int vidioc_vin_ptn_config(struct file *file, struct v4l2_fh *fh,
 			struct vin_pattern_config *ptn)
 {
-#ifdef SUPPORT_PTN
 	struct vin_core *vinc = video_drvdata(file);
 	struct csi_dev *csi = v4l2_get_subdevdata(vinc->vid_cap.pipe.sd[VIN_IND_CSI]);
 	int ret = 0;
@@ -2167,8 +1910,7 @@ static int vidioc_vin_ptn_config(struct file *file, struct v4l2_fh *fh,
 		vinc->ptn_cfg.ptn_h = ptn->ptn_h;
 		vinc->ptn_cfg.ptn_mode = 12;
 		vinc->ptn_cfg.ptn_buf.size = ptn->ptn_size;
-		vinc->ptn_cfg.ptn_type = ptn->ptn_type;
-		sunxi_isp_ptn(vinc->vid_cap.pipe.sd[VIN_IND_ISP], vinc->ptn_cfg.ptn_type);
+
 		switch (ptn->ptn_fmt) {
 		case V4L2_PIX_FMT_SBGGR8:
 		case V4L2_PIX_FMT_SGBRG8:
@@ -2216,31 +1958,6 @@ static int vidioc_vin_ptn_config(struct file *file, struct v4l2_fh *fh,
 		vinc->ptn_cfg.ptn_en = 0;
 		os_mem_free(&vinc->pdev->dev, &vinc->ptn_cfg.ptn_buf);
 	}
-#endif
-	return 0;
-}
-
-static int vidioc_vin_set_reset_time(struct file *file, struct v4l2_fh *fh,
-			struct vin_reset_time *time)
-{
-	struct vin_core *vinc = video_drvdata(file);
-	struct csi_dev *csi = v4l2_get_subdevdata(vinc->vid_cap.pipe.sd[VIN_IND_CSI]);
-
-	csi->reset_time = time->reset_time;
-
-	return 0;
-}
-
-static int vidioc_set_parser_fps(struct file *file, struct v4l2_fh *fh,
-			struct parser_fps_ds *parser_fps_ds)
-{
-	struct vin_core *vinc = video_drvdata(file);
-	struct csi_dev *csi = v4l2_get_subdevdata(vinc->vid_cap.pipe.sd[VIN_IND_CSI]);
-
-	csi->prs_fps_ds.ch0_fps_ds = parser_fps_ds->ch0_fps_ds & 0xf;
-	csi->prs_fps_ds.ch1_fps_ds = parser_fps_ds->ch1_fps_ds & 0xf;
-	csi->prs_fps_ds.ch2_fps_ds = parser_fps_ds->ch2_fps_ds & 0xf;
-	csi->prs_fps_ds.ch3_fps_ds = parser_fps_ds->ch3_fps_ds & 0xf;
 
 	return 0;
 }
@@ -2253,6 +1970,10 @@ static long vin_param_handler(struct file *file, void *priv,
 
 	switch (cmd) {
 	case VIDIOC_ISP_EXIF_REQ:
+		ret = isp_exif_req(file, fh, param);
+		break;
+	case VIDIOC_HDR_CTRL:
+		ret = vidioc_hdr_ctrl(file, fh, param);
 		break;
 	case VIDIOC_SYNC_CTRL:
 		ret = vidioc_sync_ctrl(file, fh, param);
@@ -2269,12 +1990,6 @@ static long vin_param_handler(struct file *file, void *priv,
 	case VIDIOC_VIN_PTN_CFG:
 		ret = vidioc_vin_ptn_config(file, fh, param);
 		break;
-	case VIDIOC_VIN_RESET_TIME:
-		ret = vidioc_vin_set_reset_time(file, fh, param);
-		break;
-	case VIDIOC_SET_PARSER_FPS:
-		ret = vidioc_set_parser_fps(file, fh, param);
-		break;
 	default:
 		ret = -ENOTTY;
 	}
@@ -2290,17 +2005,21 @@ static int vin_subscribe_event(struct v4l2_fh *fh,
 		return v4l2_event_subscribe(fh, sub, 1, NULL);
 }
 
+static int vin_unsubscribe_event(struct v4l2_fh *fh,
+	const struct v4l2_event_subscription *sub)
+{
+	return v4l2_event_unsubscribe(fh, sub);
+}
+
 static int vin_open(struct file *file)
 {
 	struct vin_core *vinc = video_drvdata(file);
 	struct vin_vid_cap *cap = &vinc->vid_cap;
 
 	if (vin_busy(cap)) {
-		vin_err("video%d open busy\n", vinc->id);
+		vin_err("device open busy\n");
 		return -EBUSY;
 	}
-	mutex_lock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	set_bit(VIN_LPM, &cap->state);
 	set_bit(VIN_BUSY, &cap->state);
 	v4l2_fh_open(file);/* create event queue */
 
@@ -2309,7 +2028,6 @@ static int vin_open(struct file *file)
 #endif
 
 	vin_log(VIN_LOG_VIDEO, "video%d open\n", vinc->id);
-	mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
 	return 0;
 }
 
@@ -2323,30 +2041,23 @@ static int vin_close(struct file *file)
 	int ret;
 
 	if (!vin_busy(cap)) {
-		vin_warn("video%d have been closed!\n", vinc->id);
+		vin_warn("video%d device have been closed!\n", vinc->id);
 		return 0;
 	}
-
-	if (vin_streaming(cap))
-		vin_timer_del(vinc);
-
-	mutex_lock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	if (!cap->pipe.sd[VIN_IND_SENSOR]->entity.use_count) {
-		vin_err("%s is not used, video%d cannot be close!\n", cap->pipe.sd[VIN_IND_SENSOR]->name, vinc->id);
-		mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-		return -1;
-	}
-
 	if (vin_streaming(cap)) {
 		clear_bit(VIN_STREAM, &cap->state);
 		vin_pipeline_call(vinc, set_stream, &cap->pipe, 0);
+		del_timer(&vinc->timer_for_reset);
+		flush_work(&vinc->vid_cap.pipeline_reset_task);
 		vb2_ioctl_streamoff(file, NULL, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
 	}
 
 	if (cap->pipe.sd[VIN_IND_ACTUATOR] != NULL) {
 		ret = __vin_actuator_set_power(cap->pipe.sd[VIN_IND_ACTUATOR], 0);
-		if (ret < 0)
+		if (ret < 0) {
 			vin_err("actutor power off failed (%d)!\n", ret);
+			return ret;
+		}
 	}
 
 	ret = vin_pipeline_call(vinc, close, &cap->pipe);
@@ -2354,35 +2065,23 @@ static int vin_close(struct file *file)
 		vin_err("vin pipeline close failed!\n");
 
 	v4l2_subdev_call(cap->pipe.sd[VIN_IND_ISP], core, init, 0);
-	set_bit(VIN_LPM, &cap->state);
-	clear_bit(VIN_BUSY, &cap->state);
-#ifdef SUPPORT_PTN
+
 	if ((vinc->large_image == 2) && vinc->ptn_cfg.ptn_en) {
 		os_mem_free(&vinc->pdev->dev, &vinc->ptn_cfg.ptn_buf);
 		vinc->ptn_cfg.ptn_en = 0;
 	}
-#endif
+
 	/*software*/
+	del_timer(&vinc->timer_for_reset);
 	vb2_fop_release(file); /*vb2_queue_release(&cap->vb_vidq);*/
+	clear_bit(VIN_BUSY, &cap->state);
 	__vin_sensor_setup_link(module, valid_idx, 0);
 
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_WITH_SOFT_NOTIFY
 	dramfreq_master_access(MASTER_CSI, false);
 #endif
 	vin_log(VIN_LOG_VIDEO, "video%d close\n", vinc->id);
-	mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
 	return 0;
-}
-
-static unsigned int vin_poll(struct file *file, poll_table *wait)
-{
-	struct vin_core *vinc = video_drvdata(file);
-	struct vin_vid_cap *cap = &vinc->vid_cap;
-
-	if (!vin_streaming(cap))
-		return 0;
-
-	return vb2_fop_poll(file, wait);
 }
 
 static int vin_try_ctrl(struct v4l2_ctrl *ctrl)
@@ -2481,47 +2180,6 @@ static int vin_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	return ret;
 }
 
-int sensor_flip_option(struct vin_vid_cap *cap, struct v4l2_control c)
-{
-	struct v4l2_subdev *isp = cap->pipe.sd[VIN_IND_ISP];
-	struct v4l2_subdev *sensor = cap->pipe.sd[VIN_IND_SENSOR];
-	struct isp_dev *isp_device = v4l2_get_subdevdata(isp);
-	int input_seq;
-	int sensor_fmt_code;
-	int ret;
-
-	ret = v4l2_s_ctrl(NULL, sensor->ctrl_handler, &c);
-	v4l2_subdev_call(sensor, core, ioctl, VIDIOC_VIN_GET_SENSOR_CODE, &sensor_fmt_code);
-	switch (sensor_fmt_code) {
-	case MEDIA_BUS_FMT_SBGGR8_1X8:
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
-	case MEDIA_BUS_FMT_SBGGR12_1X12:
-		input_seq = ISP_BGGR;
-		break;
-	case MEDIA_BUS_FMT_SGBRG8_1X8:
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-	case MEDIA_BUS_FMT_SGBRG12_1X12:
-		input_seq = ISP_GBRG;
-		break;
-	case MEDIA_BUS_FMT_SGRBG8_1X8:
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-	case MEDIA_BUS_FMT_SGRBG12_1X12:
-		input_seq = ISP_GRBG;
-		break;
-	case MEDIA_BUS_FMT_SRGGB8_1X8:
-	case MEDIA_BUS_FMT_SRGGB10_1X10:
-	case MEDIA_BUS_FMT_SRGGB12_1X12:
-		input_seq = ISP_RGGB;
-		break;
-	default:
-		input_seq = ISP_BGGR;
-		break;
-	}
-	bsp_isp_set_input_fmt(isp_device->id, input_seq);
-
-	return ret;
-}
-
 static int vin_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct vin_vid_cap *cap = container_of(ctrl->handler, struct vin_vid_cap, ctrl_handler);
@@ -2530,72 +2188,26 @@ static int vin_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct v4l2_subdev *flash = cap->pipe.sd[VIN_IND_FLASH];
 	struct v4l2_subdev *act = cap->pipe.sd[VIN_IND_ACTUATOR];
 	struct v4l2_subdev *isp = cap->pipe.sd[VIN_IND_ISP];
+	struct csic_dma_flip flip;
 	struct actuator_ctrl_word_t vcm_ctrl;
 	struct v4l2_control c;
-#ifndef CONFIG_ENABLE_SENSOR_FLIP_OPTION
-	struct csic_dma_flip flip;
-#endif
 	int ret = 0;
 
 	c.id = ctrl->id;
 	c.value = ctrl->val;
 
 	switch (ctrl->id) {
-#ifdef CONFIG_ENABLE_SENSOR_FLIP_OPTION
 	case V4L2_CID_VFLIP:
-		if (vin_lpm(cap)) {
-			vin_err("cannot set flip before power on!\n");
-			return -1;
-		}
-		cap->vinc->sensor_vflip = c.value;
-		ret = sensor_flip_option(cap, c);
-		return ret;
-	case V4L2_CID_HFLIP:
-		if (vin_lpm(cap)) {
-			vin_err("cannot set flip before power on!\n");
-			return -1;
-		}
-		cap->vinc->sensor_hflip = c.value;
-		ret = sensor_flip_option(cap, c);
-		return ret;
-#else
-	case V4L2_CID_VFLIP:
-		if (cap->frame.fmt.fourcc == V4L2_PIX_FMT_LBC_2_0X ||
-		    cap->frame.fmt.fourcc == V4L2_PIX_FMT_LBC_2_5X ||
-		    cap->frame.fmt.fourcc == V4L2_PIX_FMT_LBC_1_0X) {
-			vin_warn("when out fmt is LBC, FLIP is not support!\n");
-			return -1;
-		}
+		if (cap->first_flag)
+			cap->vinc->vflip_delay = 2;
 		cap->vinc->vflip = c.value;
-		if (!vin_lpm(cap)) {
-			flip.hflip_en = cap->vinc->hflip;
-			flip.vflip_en = cap->vinc->vflip;
-			csic_dma_flip_en(cap->vinc->vipp_sel, &flip);
-			__osd_reg_setup(cap->vinc, &cap->osd);
-			return 0;
-		} else {
-			vin_err("cannot set vflip before s_input, in low power mode!\n");
-			return -1;
-		}
+		return ret;
 	case V4L2_CID_HFLIP:
-		if (cap->frame.fmt.fourcc == V4L2_PIX_FMT_LBC_2_0X ||
-		    cap->frame.fmt.fourcc == V4L2_PIX_FMT_LBC_2_5X ||
-		    cap->frame.fmt.fourcc == V4L2_PIX_FMT_LBC_1_0X) {
-			vin_warn("when out fmt is LBC, FLIP is not support!\n");
-			return -1;
-		}
 		cap->vinc->hflip = c.value;
-		if (!vin_lpm(cap)) {
-			flip.hflip_en = cap->vinc->hflip;
-			flip.vflip_en = cap->vinc->vflip;
-			csic_dma_flip_en(cap->vinc->vipp_sel, &flip);
-			__osd_reg_setup(cap->vinc, &cap->osd);
-			return 0;
-		} else {
-			vin_err("cannot set hflip before s_input, in low power mode!\n");
-			return -1;
-		}
-#endif
+		flip.hflip_en = cap->vinc->hflip;
+		flip.vflip_en = cap->vinc->vflip;
+		csic_dma_flip_en(cap->vinc->vipp_sel, &flip);
+		return ret;
 	default:
 		break;
 	}
@@ -2725,7 +2337,7 @@ static const struct v4l2_file_operations vin_fops = {
 	.open = vin_open,
 	.release = vin_close,
 	.read = vb2_fop_read,
-	.poll = vin_poll,
+	.poll = vb2_fop_poll,
 	.unlocked_ioctl = video_ioctl2,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl32 = vin_compat_ioctl32,
@@ -2757,310 +2369,14 @@ static const struct v4l2_ioctl_ops vin_ioctl_ops = {
 	.vidioc_streamoff = vidioc_streamoff,
 	.vidioc_g_parm = vidioc_g_parm,
 	.vidioc_s_parm = vidioc_s_parm,
+	.vidioc_g_crop = vidioc_g_crop,
+	.vidioc_s_crop = vidioc_s_crop,
 	.vidioc_g_selection = vidioc_g_selection,
 	.vidioc_s_selection = vidioc_s_selection,
 	.vidioc_default = vin_param_handler,
 	.vidioc_subscribe_event = vin_subscribe_event,
-	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
+	.vidioc_unsubscribe_event = vin_unsubscribe_event,
 };
-
-#ifdef CONFIG_VIDEO_SUNXI_VIN_SPECIAL
-int vin_open_special(int id)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-	struct list_head *active = &vinc->vid_cap.vidq_active;
-	struct list_head *done = &vinc->vid_cap.vidq_done;
-
-	INIT_LIST_HEAD(active);
-	INIT_LIST_HEAD(done);
-	vinc->vid_cap.special_active = 1;
-
-	if (vin_busy(&vinc->vid_cap)) {
-		vin_err("device open busy\n");
-		return -EBUSY;
-	}
-	set_bit(VIN_BUSY, &vinc->vid_cap.state);
-
-#ifdef CONFIG_DEVFREQ_DRAM_FREQ_WITH_SOFT_NOTIFY
-	dramfreq_master_access(MASTER_CSI, true);
-#endif
-	return 0;
-}
-EXPORT_SYMBOL(vin_open_special);
-
-int vin_s_input_special(int id, int i)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-	struct vin_md *vind = dev_get_drvdata(vinc->v4l2_dev->dev);
-	struct vin_vid_cap *cap = &vinc->vid_cap;
-	struct modules_config *module = NULL;
-	struct sensor_instance *inst = NULL;
-	struct sensor_info *info = NULL;
-
-	int valid_idx = -1;
-	int ret;
-
-	i = i > 1 ? 0 : i;
-
-	if (i == 0)
-		vinc->sensor_sel = vinc->rear_sensor;
-	else
-		vinc->sensor_sel = vinc->front_sensor;
-
-	module = &vind->modules[vinc->sensor_sel];
-	valid_idx = module->sensors.valid_idx;
-
-	if (valid_idx == NO_VALID_SENSOR) {
-		vin_err("there is no valid sensor\n");
-		return -EINVAL;
-	}
-
-	if (__vin_sensor_setup_link(module, valid_idx, 1) < 0) {
-		vin_err("sensor setup link failed\n");
-		return -EINVAL;
-	}
-	inst = &module->sensors.inst[valid_idx];
-
-	sunxi_isp_sensor_type(cap->pipe.sd[VIN_IND_ISP], inst->is_isp_used);
-	vinc->support_raw = inst->is_isp_used;
-
-	ret = vin_pipeline_call(vinc, open, &cap->pipe, &cap->vdev.entity, true);
-	if (ret < 0) {
-		vin_err("vin pipeline open failed (%d)!\n", ret);
-		return ret;
-	}
-
-	ret = v4l2_subdev_call(cap->pipe.sd[VIN_IND_ISP], core, init, 1);
-	if (ret < 0) {
-		vin_err("ISP init error at %s\n", __func__);
-		return ret;
-	}
-
-	ret = v4l2_subdev_call(cap->pipe.sd[VIN_IND_SCALER], core, init, 1);
-	if (ret < 0) {
-		vin_err("SCALER init error at %s\n", __func__);
-		return ret;
-	}
-
-	/*save exp and gain for reopen, sensor init may reset gain to 0, so save before init!*/
-	info = container_of(cap->pipe.sd[VIN_IND_SENSOR], struct sensor_info, sd);
-	if (info) {
-		vinc->exp_gain.exp_val = info->exp;
-		vinc->exp_gain.gain_val = info->gain;
-		vinc->stream_idx = info->stream_seq + 1;
-	}
-
-	ret = v4l2_subdev_call(cap->pipe.sd[VIN_IND_SENSOR], core, init, 1);
-	if (ret) {
-		vin_err("sensor initial error when selecting target device!\n");
-		return ret;
-	}
-
-	vinc->hflip = inst->hflip;
-	vinc->vflip = inst->vflip;
-
-	return ret;
-}
-EXPORT_SYMBOL(vin_s_input_special);
-
-int vin_close_special(int id)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-	struct vin_md *vind = dev_get_drvdata(vinc->v4l2_dev->dev);
-	struct vin_vid_cap *cap = &vinc->vid_cap;
-	struct list_head *active = &vinc->vid_cap.vidq_active;
-	struct list_head *done = &vinc->vid_cap.vidq_done;
-	struct modules_config *module = &vind->modules[vinc->sensor_sel];
-	int valid_idx = module->sensors.valid_idx;
-	int ret;
-
-	INIT_LIST_HEAD(active);
-	INIT_LIST_HEAD(done);
-	vinc->vid_cap.special_active = 0;
-
-	if (!vin_busy(cap)) {
-		vin_warn("video%d device have been closed!\n", vinc->id);
-		return 0;
-	}
-
-	mutex_lock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	if (!cap->pipe.sd[VIN_IND_SENSOR]->entity.use_count) {
-		vin_err("%s is not used, video%d cannot be close!\n", cap->pipe.sd[VIN_IND_SENSOR]->name, vinc->id);
-		mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-		return -1;
-	}
-
-	if (vin_streaming(cap)) {
-		clear_bit(VIN_STREAM, &cap->state);
-		vin_pipeline_call(vinc, set_stream, &cap->pipe, 0);
-	}
-
-	ret = vin_pipeline_call(vinc, close, &cap->pipe);
-	if (ret)
-		vin_err("vin pipeline close failed!\n");
-
-	ret = v4l2_subdev_call(cap->pipe.sd[VIN_IND_ISP], core, init, 0);
-
-	/*software*/
-	clear_bit(VIN_BUSY, &cap->state);
-	mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	__vin_sensor_setup_link(module, valid_idx, 0);
-#ifdef CONFIG_DEVFREQ_DRAM_FREQ_WITH_SOFT_NOTIFY
-	dramfreq_master_access(MASTER_CSI, false);
-#endif
-	vin_log(VIN_LOG_VIDEO, "video%d close\n", vinc->id);
-	return 0;
-}
-EXPORT_SYMBOL(vin_close_special);
-
-int vin_s_fmt_special(int id, struct v4l2_format *f)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-
-	return __vin_set_fmt(vinc, f);
-}
-EXPORT_SYMBOL(vin_s_fmt_special);
-
-int vin_g_fmt_special(int id, struct v4l2_format *f)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-
-	f->fmt.pix.width        = vinc->vid_cap.frame.width;
-	f->fmt.pix.height       = vinc->vid_cap.frame.height;
-	f->fmt.pix.field        = vinc->vid_cap.frame.fmt.field;
-	f->fmt.pix.pixelformat  = vinc->vid_cap.frame.fmt.mbus_code;
-
-	return 0;
-}
-EXPORT_SYMBOL(vin_g_fmt_special);
-
-int vin_dqbuffer_special(int id, struct vin_buffer **buf)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-	struct list_head *done = &vinc->vid_cap.vidq_done;
-	struct vin_vid_cap *cap = &vinc->vid_cap;
-
-	int ret = 0;
-	unsigned long flags = 0;
-
-	spin_lock_irqsave(&cap->slock, flags);
-	/* Release all active buffers */
-	if (!list_empty(done)) {
-		*buf = list_first_entry(done, struct vin_buffer, list);
-		list_del(&((*buf)->list));
-		(*buf)->state = VB2_BUF_STATE_DEQUEUED;
-	} else {
-		ret = -1;
-	}
-	spin_unlock_irqrestore(&cap->slock, flags);
-
-	return ret;
-}
-EXPORT_SYMBOL(vin_dqbuffer_special);
-
-int vin_qbuffer_special(int id, struct vin_buffer *buf)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-	struct vin_vid_cap *cap  = &vinc->vid_cap;
-	unsigned long flags = 0;
-	int ret = 0;
-
-	if (buf == NULL) {
-		vin_err("buf is NULL, cannot qbuf\n");
-		return -1;
-	}
-
-	spin_lock_irqsave(&cap->slock, flags);
-	list_add_tail(&buf->list, &cap->vidq_active);
-	buf->state = VB2_BUF_STATE_QUEUED;
-	spin_unlock_irqrestore(&cap->slock, flags);
-
-	return ret;
-}
-EXPORT_SYMBOL(vin_qbuffer_special);
-
-int vin_streamon_special(int id, enum v4l2_buf_type i)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-	struct vin_vid_cap *cap = &vinc->vid_cap;
-	int ret = 0;
-
-	if (i != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
-		ret = -EINVAL;
-	goto streamon_error;
-	}
-
-	if (vin_streaming(cap)) {
-		vin_err("stream has been already on\n");
-		ret = -1;
-		goto streamon_error;
-	}
-
-#if 0
-	schedule_work(&vinc->vid_cap.s_stream_task);
-#else
-	mutex_lock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	ret = vin_pipeline_call(cap->vinc, set_stream, &cap->pipe, cap->vinc->stream_idx);
-	if (ret < 0)
-		vin_err("video%d %s error!\n", vinc->id, __func__);
-	set_bit(VIN_STREAM, &cap->state);
-	/*set saved exp and gain for reopen, you can call the api in sensor_reg_init*/
-	/*
-	if (cap->vinc->exp_gain.exp_val && cap->vinc->exp_gain.gain_val) {
-		v4l2_subdev_call(cap->pipe.sd[VIN_IND_SENSOR], core, ioctl,
-		VIDIOC_VIN_SENSOR_EXP_GAIN, &cap->vinc->exp_gain);
-	}
-	*/
-	mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-#endif
-
-streamon_error:
-	return ret;
-}
-EXPORT_SYMBOL(vin_streamon_special);
-
-int vin_streamoff_special(int id, enum v4l2_buf_type i)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-	struct vin_vid_cap *cap = &vinc->vid_cap;
-	int ret = 0;
-
-	if (!vin_streaming(cap)) {
-		vin_err("video%d has been already streaming off\n", vinc->id);
-		goto streamoff_error;
-	}
-
-	mutex_lock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-	clear_bit(VIN_STREAM, &cap->state);
-	vin_pipeline_call(vinc, set_stream, &cap->pipe, 0);
-	mutex_unlock(&cap->vdev.entity.graph_obj.mdev->graph_mutex);
-
-	if (i != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
-		ret = -EINVAL;
-		goto streamoff_error;
-	}
-
-streamoff_error:
-	return ret;
-}
-EXPORT_SYMBOL(vin_streamoff_special);
-
-void vin_register_buffer_done_callback(int id, void *func)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-
-	vinc->vid_cap.vin_buffer_process = func;
-}
-EXPORT_SYMBOL(vin_register_buffer_done_callback);
-
-struct device *vin_get_dev(int id)
-{
-	struct vin_core *vinc = vin_core_gbl[id];
-
-	return get_device(&vinc->pdev->dev);
-}
-EXPORT_SYMBOL(vin_get_dev);
-#endif
 
 static const struct v4l2_ctrl_config ae_win_ctrls[] = {
 	{
@@ -3370,8 +2686,8 @@ int vin_init_video(struct v4l2_device *v4l2_dev, struct vin_vid_cap *cap)
 	cap->vinc->pdev->dev.dma_mask = &vin_dma_mask;
 	cap->vinc->pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 	cap->dev = &cap->vinc->pdev->dev;
-	vb2_dma_contig_set_max_seg_size(&cap->vinc->pdev->dev, DMA_BIT_MASK(32));
-	if (IS_ERR(cap->dev->dma_parms)) {
+	vb2_dma_contig_set_max_seg_size(&cap->vinc->pdev->dev, 0);
+	if (IS_ERR(cap->dev)) {
 		vin_err("Failed to get the context\n");
 		return -1;
 	}
@@ -3423,15 +2739,48 @@ static const struct media_entity_operations vin_sd_media_ops = {
 	.link_setup = vin_link_setup,
 };
 
+static int vin_subdev_enum_mbus_code(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_pad_config *cfg,
+				     struct v4l2_subdev_mbus_code_enum *code)
+{
+	return 0;
+}
+
+static int vin_subdev_get_fmt(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_pad_config *cfg,
+			      struct v4l2_subdev_format *fmt)
+{
+	return 0;
+}
+
+static int vin_subdev_set_fmt(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_pad_config *cfg,
+			      struct v4l2_subdev_format *fmt)
+{
+	return 0;
+}
+
+static int vin_subdev_get_selection(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_pad_config *cfg,
+				    struct v4l2_subdev_selection *sel)
+{
+	return 0;
+}
+
+static int vin_subdev_set_selection(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_pad_config *cfg,
+				    struct v4l2_subdev_selection *sel)
+{
+	return 0;
+}
 static int vin_video_core_s_power(struct v4l2_subdev *sd, int on)
 {
 	struct vin_core *vinc = v4l2_get_subdevdata(sd);
 
-	if (on) {
-		pm_runtime_get_sync(&vinc->pdev->dev);/* call pm_runtime resume */
-	} else {
-		pm_runtime_put_sync(&vinc->pdev->dev);/* call pm_runtime suspend */
-	}
+	if (on)
+		pm_runtime_get_sync(&vinc->pdev->dev);/*call pm_runtime resume*/
+	else
+		pm_runtime_put_sync(&vinc->pdev->dev);/*call pm_runtime suspend*/
 	return 0;
 }
 
@@ -3446,6 +2795,11 @@ static int vin_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 	struct dma_flip_size flip_size;
 	int flag = 0;
 	int flip_mul = 2;
+
+	vin_log(VIN_LOG_FMT, "csic_dma%d %s, %d*%d hoff: %d voff: %d\n",
+		vinc->id, enable ? "stream on" : "stream off",
+		cap->frame.o_width, cap->frame.o_height,
+		cap->frame.offs_h, cap->frame.offs_v);
 
 	if (enable) {
 		memset(&cfg, 0, sizeof(cfg));
@@ -3482,13 +2836,6 @@ static int vin_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 			buf_len.buf_len_y = cap->frame.o_width;
 			buf_len.buf_len_c = buf_len.buf_len_y;
 			break;
-		case V4L2_PIX_FMT_LBC_2_0X:
-		case V4L2_PIX_FMT_LBC_2_5X:
-		case V4L2_PIX_FMT_LBC_1_0X:
-			cfg.fmt = LBC_MODE_OUTPUT;
-			buf_len.buf_len_y = cap->lbc_cmp.line_tar_bits[1] >> 3;
-			buf_len.buf_len_c = cap->lbc_cmp.line_tar_bits[0] >> 3;
-			break;
 		case V4L2_PIX_FMT_NV21:
 		case V4L2_PIX_FMT_NV21M:
 			cfg.fmt = flag ? FRAME_VU_CB_YUV420 : FIELD_VU_CB_YUV420;
@@ -3501,10 +2848,6 @@ static int vin_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 			cfg.fmt = flag ? FRAME_PLANAR_YUV420 : FIELD_PLANAR_YUV420;
 			buf_len.buf_len_y = cap->frame.o_width;
 			buf_len.buf_len_c = buf_len.buf_len_y >> 1;
-			break;
-		case V4L2_PIX_FMT_GREY:
-			cfg.fmt = flag ? FRAME_CB_YUV400 : FIELD_CB_YUV400;
-			buf_len.buf_len_y = cap->frame.o_width;
 			break;
 		case V4L2_PIX_FMT_YUV422P:
 			cfg.fmt = flag ? FRAME_PLANAR_YUV422 : FIELD_PLANAR_YUV422;
@@ -3562,7 +2905,23 @@ static int vin_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 			buf_len.buf_len_c = 0;
 		}
 
-		cfg.ds = vinc->fps_ds;
+		switch (vinc->fps_ds) {
+		case 0:
+			cfg.ds = FPS_NO_DS;
+			break;
+		case 1:
+			cfg.ds = FPS_2_DS;
+			break;
+		case 2:
+			cfg.ds = FPS_3_DS;
+			break;
+		case 3:
+			cfg.ds = FPS_4_DS;
+			break;
+		default:
+			cfg.ds = FPS_NO_DS;
+			break;
+		}
 
 		csic_dma_config(vinc->vipp_sel, &cfg);
 		size.hor_len = vinc->isp_dbg.debug_en ? 0 : cap->frame.o_width;
@@ -3580,78 +2939,30 @@ static int vin_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		}
 
 		csic_dma_output_size_cfg(vinc->vipp_sel, &size);
-		/* csic_dma_10bit_cut2_8bit_enable(vinc->vipp_sel); */
-
-		switch (cap->frame.fmt.fourcc) {
-		case V4L2_PIX_FMT_FBC:
-			csic_dma_buf_length_software_enable(vinc->vipp_sel, 0);
-			csi_dam_flip_software_enable(vinc->vipp_sel, 0);
-			csic_dma_flip_en(vinc->vipp_sel, &flip);
-			csic_fbc_enable(vinc->vipp_sel);
-			break;
-		case V4L2_PIX_FMT_LBC_2_0X:
-		case V4L2_PIX_FMT_LBC_2_5X:
-		case V4L2_PIX_FMT_LBC_1_0X:
-			csi_dam_flip_software_enable(vinc->vipp_sel, 1);
-#if defined CONFIG_ARCH_SUN8IW16P1
-			csic_dma_buf_length_software_enable(vinc->vipp_sel, 1);
-#else
-			csic_dma_buf_length_software_enable(vinc->vipp_sel, 0);
-#endif
-			csic_lbc_enable(vinc->vipp_sel);
-			csic_lbc_cmp_ratio(vinc->vipp_sel, &cap->lbc_cmp);
-			break;
-		default:
-			csic_dma_buf_length_software_enable(vinc->vipp_sel, 0);
-			csi_dam_flip_software_enable(vinc->vipp_sel, 0);
-			csic_dma_flip_en(vinc->vipp_sel, &flip);
-			csic_dma_enable(vinc->vipp_sel);
-			break;
-		}
-
 		csic_dma_buffer_length(vinc->vipp_sel, &buf_len);
 		csic_dma_flip_size(vinc->vipp_sel, &flip_size);
-
-		/* give up line_cnt interrupt. process in vsync and frame_done isr.*/
+		csic_dma_flip_en(vinc->vipp_sel, &flip);
+		/* give up line_cut interrupt. process in vsync and frame_done isr.*/
 		/*csic_dma_line_cnt(vinc->vipp_sel, cap->frame.o_height / 16 * 12);*/
 		csic_frame_cnt_enable(vinc->vipp_sel);
-
-		csic_dma_top_enable(vinc->vipp_sel);
-		vin_set_next_buf_addr(vinc);
-
+		if (cap->frame.fmt.fourcc == V4L2_PIX_FMT_FBC)
+			csic_fbc_enable(vinc->vipp_sel);
+		else
+			csic_dma_enable(vinc->vipp_sel);
 		csic_dma_int_clear_status(vinc->vipp_sel, DMA_INT_ALL);
-#ifndef BUF_AUTO_UPDATE
-		csic_dma_int_enable(vinc->vipp_sel, DMA_INT_BUF_0_OVERFLOW | DMA_INT_BUF_1_OVERFLOW |
-			DMA_INT_BUF_2_OVERFLOW | DMA_INT_HBLANK_OVERFLOW | DMA_INT_VSYNC_TRIG |
-			DMA_INT_CAPTURE_DONE | DMA_INT_FRAME_DONE);
-#else
-		csic_dma_int_enable(vinc->vipp_sel, DMA_INT_BUF_0_OVERFLOW | DMA_INT_BUF_1_OVERFLOW |
-			DMA_INT_BUF_2_OVERFLOW | DMA_INT_HBLANK_OVERFLOW | DMA_INT_VSYNC_TRIG |
-			DMA_INT_CAPTURE_DONE | DMA_INT_STORED_FRM_CNT | DMA_INT_FRM_LOST);
-#endif
+		if (vinc->isp_dbg.debug_en)
+			csic_dma_int_enable(vinc->vipp_sel, DMA_INT_ALL & ~(DMA_INT_FBC_OVHD_WRDDR_FULL));
+		else
+			csic_dma_int_enable(vinc->vipp_sel, DMA_INT_ALL);
+		csic_dma_int_disable(vinc->vipp_sel, DMA_INT_LINE_CNT);
 	} else {
-		csic_dma_top_disable(vinc->vipp_sel);
 		csic_dma_int_disable(vinc->vipp_sel, DMA_INT_ALL);
 		csic_dma_int_clear_status(vinc->vipp_sel, DMA_INT_ALL);
-		switch (cap->frame.fmt.fourcc) {
-		case V4L2_PIX_FMT_FBC:
+		if (cap->frame.fmt.fourcc == V4L2_PIX_FMT_FBC)
 			csic_fbc_disable(vinc->vipp_sel);
-			break;
-		case V4L2_PIX_FMT_LBC_2_0X:
-		case V4L2_PIX_FMT_LBC_2_5X:
-		case V4L2_PIX_FMT_LBC_1_0X:
-			csic_lbc_disable(vinc->vipp_sel);
-			break;
-		default:
+		else
 			csic_dma_disable(vinc->vipp_sel);
-			break;
-		}
 	}
-
-	vin_log(VIN_LOG_FMT, "csic_dma%d %s, %d*%d hoff: %d voff: %d\n",
-		vinc->id, enable ? "stream on" : "stream off",
-		cap->frame.o_width, cap->frame.o_height,
-		cap->frame.offs_h, cap->frame.offs_v);
 
 	return 0;
 }
@@ -3664,9 +2975,18 @@ static const struct v4l2_subdev_video_ops vin_subdev_video_ops = {
 	.s_stream = vin_subdev_s_stream,
 };
 
+static struct v4l2_subdev_pad_ops vin_subdev_pad_ops = {
+	.enum_mbus_code = vin_subdev_enum_mbus_code,
+	.get_selection = vin_subdev_get_selection,
+	.set_selection = vin_subdev_set_selection,
+	.get_fmt = vin_subdev_get_fmt,
+	.set_fmt = vin_subdev_set_fmt,
+};
+
 static struct v4l2_subdev_ops vin_subdev_ops = {
 	.core = &vin_subdev_core_ops,
 	.video = &vin_subdev_video_ops,
+	.pad = &vin_subdev_pad_ops,
 };
 
 static int vin_capture_subdev_registered(struct v4l2_subdev *sd)
@@ -3704,10 +3024,10 @@ static void vin_capture_subdev_unregistered(struct v4l2_subdev *sd)
 		sysfs_remove_link(&vinc->vid_cap.vdev.dev.kobj, "vin_dbg");
 		vin_log(VIN_LOG_VIDEO, "unregistering %s\n",
 			video_device_node_name(&vinc->vid_cap.vdev));
-		media_entity_cleanup(&vinc->vid_cap.vdev.entity);
-		if (vinc->vid_cap.dev->dma_parms)
-			vb2_dma_contig_clear_max_seg_size(vinc->vid_cap.dev);
 		video_unregister_device(&vinc->vid_cap.vdev);
+		vb2_dma_contig_clear_max_seg_size(vinc->vid_cap.dev);
+		media_entity_cleanup(&vinc->vid_cap.vdev.entity);
+		flush_work(&vinc->vid_cap.s_stream_task);
 		mutex_destroy(&vinc->vid_cap.lock);
 	}
 	v4l2_ctrl_handler_free(&vinc->vid_cap.ctrl_handler);

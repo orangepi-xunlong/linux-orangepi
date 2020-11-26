@@ -33,20 +33,12 @@
 #if defined(CONFIG_ARCH_SUN8IW12P1) \
 	|| defined(CONFIG_ARCH_SUN8IW15P1) \
 	|| defined(CONFIG_ARCH_SUN50IW6P1) \
-	|| defined(CONFIG_ARCH_SUN50IW9P1) \
 	|| defined(CONFIG_ARCH_SUN50IW3P1)
 #define CONFIG_SUNXI_PIO_POWER_MODE
 #define GPIO_POW_MODE_SEL  0x0340
 #define GPIO_POW_MODE_VAL  0x0348
 #define GPIO_POW_MODE_MASK  0xFFF
 #endif
-#if defined(CONFIG_ARCH_SUN8IW16P1) \
-	|| defined(CONFIG_ARCH_SUN8IW19P1) \
-	|| defined(CONFIG_ARCH_SUN50IW9P1)
-#define CONFIG_SUNXI_PIO_POWER_SEL
-#define GPIO_POW_VOL_SEL   0x0350
-#endif
-
 
 #define SUNXI_PINCTRL_PIN(bank, pin)		\
 	PINCTRL_PIN(P ## bank ## _BASE + (pin), "P" #bank #pin)
@@ -88,7 +80,6 @@
 #define IRQ_DEBOUNCE_REG		0x218
 
 #define IRQ_MEM_SIZE		0x20
-#define IRQ_CFG_SIZE		0x10
 
 #define IRQ_EDGE_RISING		0x00
 #define IRQ_EDGE_FALLING	0x01
@@ -99,13 +90,6 @@
 #define SUN4I_FUNC_INPUT	0
 #define SUN4I_FUNC_OUTPUT	1
 #define SUN4I_FUNC_IRQ		6
-
-#define SYSCFG_PROP_DEFAULT_VAL 0xFFFFFFFF
-
-#define SUNXI_PINCTRL_NO_PULL	0
-#define SUNXI_PINCTRL_PULL_UP	1
-#define SUNXI_PINCTRL_PULL_DOWN	2
-
 
 struct sunxi_desc_function {
 	const char	*name;
@@ -123,12 +107,9 @@ struct sunxi_pinctrl_desc {
 	const struct sunxi_desc_pin	*pins;
 	int				npins;
 	unsigned			pin_base;
-	unsigned int			banks;
-	const unsigned int		*bank_base;
 	unsigned			irq_banks;
-	const unsigned int		*irq_bank_base;
+	const unsigned			*irq_bank_base;
 	bool				irq_read_needs_mux;
-	bool				disable_strict_mode;
 };
 
 struct sunxi_pinctrl_function {
@@ -155,11 +136,8 @@ struct sunxi_pinctrl {
 	unsigned			ngroups;
 	int				*irq;
 	unsigned			*irq_array;
-	u32				*wake_mask;
-	u32				*cur_mask;
-	raw_spinlock_t			lock;
+	spinlock_t			lock;
 	struct pinctrl_dev		*pctl_dev;
-	u32				*regs_backup;
 };
 
 #define SUNXI_PIO_BANK_BASE(pin, irq_bank) \
@@ -337,7 +315,5 @@ static inline u32 sunxi_irq_debounce_reg(u16 irq, unsigned bank_base)
 
 int sunxi_pinctrl_init(struct platform_device *pdev,
 		       const struct sunxi_pinctrl_desc *desc);
-
-extern const struct dev_pm_ops sunxi_pinctrl_pm_ops;
 
 #endif /* __PINCTRL_SUNXI_H */

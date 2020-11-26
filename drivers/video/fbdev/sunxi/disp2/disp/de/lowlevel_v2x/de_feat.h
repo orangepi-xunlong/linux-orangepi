@@ -114,36 +114,6 @@
 
 /* #define LVDS_REVERT */
 
-#elif defined(CONFIG_ARCH_SUN50IW10)
-/* features for sun50iw10 */
-
-#define DEVICE_NUM	2
-#define DE_NUM	2
-#define CHN_NUM		4
-#define VI_CHN_NUM	2
-#define UI_CHN_NUM	(CHN_NUM - VI_CHN_NUM)
-#define LAYER_NUM_PER_CHN_PER_VI_CHN	4
-#define LAYER_NUM_PER_CHN_PER_UI_CHN	4
-#define LAYER_MAX_NUM_PER_CHN 4
-
-#define SUPPORT_DSI
-#define DSI_VERSION_28
-#define CLK_NUM_PER_DSI 2
-#define DEVICE_DSI_NUM 1
-#ifdef CONFIG_DISP2_SUNXI_SUPPORT_SMBL
-#define SUPPORT_SMBL
-#endif
-#define HAVE_DEVICE_COMMON_MODULE
-#define SUPPORT_LVDS
-/*#define DE_WB_RESET_SHARE*/
-
-/* #define SUPPORT_EINK */
-/* #define EINK_PANEL_USED */
-/* #define SUPPORT_WB */
-/* #define EINK_DMABUF_USED */
-
-/* #define LVDS_REVERT */
-
 #elif defined(CONFIG_ARCH_SUN50IW1)
 
 /* features for sun50iw1 */

@@ -1334,21 +1334,21 @@
 			      <0x0 0x06511000 0x0 0x1000>,/*tcon0*/
 			      <0x0 0x06512000 0x0 0x1000>,/*tcon1*/
 			      <0x0 0x06540000 0x0 0x1000>,/*edp*/
-			      <0x0 0x06504000 0x0 0x2000>;/*dsi0*/
-			interrupts = <GIC_SPI 87 0x0104>, /*DE*/
-			<GIC_SPI 83 0x0104>, /*tcon0*/
-				   <GIC_SPI 82 0x0104>, /*tcon1*/
-				   <GIC_SPI 85 0x0104>, /*edp*/
-				   <GIC_SPI 89 0x0104>, /*dsi0*/
-				   <GIC_SPI 90 0x0104>; /*dsi1*/
+			      <0x0 0x06504000 0x0 0x2000>,/*dsi0*/
+			      <0x0 0x06506000 0x0 0x2000>;/*dsi1*/
+			interrupts = <GIC_SPI 54 0x0104>, /*tcon0*/
+				   <GIC_SPI 55 0x0104>, /*tcon1*/
+				   <GIC_SPI 56 0x0104>, /*edp*/
+				   <GIC_SPI 52 0x0104>, /*dsi0*/
+				   <GIC_SPI 53 0x0104>; /*dsi1*/
 			clocks = <&clk_de>,
 				 <&clk_display_top>,
 				 <&clk_tcon_lcd0>,
-				 <&clk_tcon_tv>,
-				 <&clk_lvds0>,
 				 <&clk_edp>,
 				 <&clk_mipi_dphy0>,
-				 <&clk_mipi_host0>;
+				 <&clk_mipi_host0>,
+				 <&clk_mipi_dphy1>,
+				 <&clk_mipi_host1>;
 			boot_disp = <0>;
 			fb_base = <0>;
 			/*iommus = <&mmu_aw 0 0>;*/

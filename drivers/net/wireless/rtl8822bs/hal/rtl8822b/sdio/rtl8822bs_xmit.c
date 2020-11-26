@@ -96,7 +96,7 @@ s32 rtl8822bs_xmit_buf_handler(PADAPTER adapter)
 
 	ret = _rtw_down_sema(&pxmitpriv->xmit_sema);
 	if (_FAIL == ret) {
-		RTW_ERR("%s: down SdioXmitBufSema fail!\n", __func__);
+		RTW_ERR("%s: down SdioXmitBufSema fail!\n", __FUNCTION__);
 		return _FAIL;
 	}
 
@@ -211,9 +211,9 @@ static s32 xmit_xmitframes(PADAPTER adapter, struct xmit_priv *pxmitpriv)
 			sta_plist = get_next(sta_plist);
 
 #ifdef DBG_XMIT_BUF
-			RTW_INFO("%s idx:%d hwxmit_pkt_num:%d ptxservq_pkt_num:%d\n", __func__, idx, phwxmit->accnt, ptxservq->qcnt);
+			RTW_INFO("%s idx:%d hwxmit_pkt_num:%d ptxservq_pkt_num:%d\n", __FUNCTION__, idx, phwxmit->accnt, ptxservq->qcnt);
 			RTW_INFO("%s free_xmit_extbuf_cnt=%d free_xmitbuf_cnt=%d free_xmitframe_cnt=%d\n",
-				__func__, pxmitpriv->free_xmit_extbuf_cnt, pxmitpriv->free_xmitbuf_cnt,
+				__FUNCTION__, pxmitpriv->free_xmit_extbuf_cnt, pxmitpriv->free_xmitbuf_cnt,
 				 pxmitpriv->free_xmitframe_cnt);
 #endif
 			pframe_queue = &ptxservq->sta_pending;
@@ -257,7 +257,7 @@ static s32 xmit_xmitframes(PADAPTER adapter, struct xmit_priv *pxmitpriv)
 					pxmitbuf = rtw_alloc_xmitbuf(pxmitpriv);
 					if (pxmitbuf == NULL) {
 #if 0
-						RTW_ERR("%s: xmit_buf is not enough!\n", __func__);
+						RTW_ERR("%s: xmit_buf is not enough!\n", __FUNCTION__);
 #endif
 						err = -2;
 #ifdef CONFIG_SDIO_TX_ENABLE_AVAL_INT
@@ -273,7 +273,7 @@ static s32 xmit_xmitframes(PADAPTER adapter, struct xmit_priv *pxmitpriv)
 				if (MLME_IS_AP(adapter) || MLME_IS_MESH(adapter)) {
 					if ((pxmitframe->attrib.psta->state & WIFI_SLEEP_STATE)
 					    && (pxmitframe->attrib.triggered == 0)) {
-						RTW_INFO("%s: one not triggered pkt in queue when this STA sleep, break and goto next sta\n", __func__);
+						RTW_INFO("%s: one not triggered pkt in queue when this STA sleep, break and goto next sta\n", __FUNCTION__);
 						break;
 					}
 				}
@@ -293,7 +293,7 @@ static s32 xmit_xmitframes(PADAPTER adapter, struct xmit_priv *pxmitpriv)
 
 				ret = rtw_xmitframe_coalesce(adapter, pxmitframe->pkt, pxmitframe);
 				if (ret == _FAIL) {
-					RTW_ERR("%s: coalesce FAIL!", __func__);
+					RTW_ERR("%s: coalesce FAIL!", __FUNCTION__);
 					/* Todo: error handler */
 				} else {
 					k++;
@@ -389,7 +389,7 @@ static s32 xmit_handler(PADAPTER adapter)
 wait:
 	ret = _rtw_down_sema(&pxmitpriv->SdioXmitSema);
 	if (_FAIL == ret) {
-		RTW_ERR("%s: down sema fail!\n", __func__);
+		RTW_ERR("%s: down sema fail!\n", __FUNCTION__);
 		return _FAIL;
 	}
 
@@ -589,7 +589,7 @@ s32 rtl8822bs_hal_xmit(PADAPTER adapter, struct xmit_frame *pxmitframe)
 	ret = rtl8822bs_hal_xmit_enqueue(adapter, pxmitframe);
 	_exit_critical_bh(&pxmitpriv->lock, &irql);
 	if (ret != _TRUE) {
-		RTW_INFO("%s: enqueue xmitframe FAIL!\n", __func__);
+		RTW_INFO("%s: enqueue xmitframe FAIL!\n", __FUNCTION__);
 		return _TRUE;
 	}
 

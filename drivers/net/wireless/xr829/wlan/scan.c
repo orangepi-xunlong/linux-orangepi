@@ -166,7 +166,6 @@ int xradio_hw_scan(struct ieee80211_hw *hw,
 	int ret = 0;
 	u16 advance_scan_req_channel;
 #endif
-	int suspend_lock_state;
 	scan_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
 	/* Scan when P2P_GO corrupt firmware MiniAP mode */
@@ -230,19 +229,10 @@ int xradio_hw_scan(struct ieee80211_hw *hw,
 		return -EINVAL;
 	}
 
-	suspend_lock_state = atomic_cmpxchg(&hw_priv->suspend_lock_state,
-								XRADIO_SUSPEND_LOCK_IDEL, XRADIO_SUSPEND_LOCK_OTHERS);
-	if (suspend_lock_state == XRADIO_SUSPEND_LOCK_SUSPEND) {
-		scan_printk(XRADIO_DBG_WARN,
-			   "%s:refuse because of suspend\n", __func__);
-		return -EBUSY;
-	}
-
 	frame.skb = mac80211_probereq_get(hw, vif, NULL, 0, req->ie, req->ie_len);
 	if (!frame.skb) {
 		scan_printk(XRADIO_DBG_ERROR, "%s: mac80211_probereq_get failed!\n",
 			__func__);
-		atomic_set(&hw_priv->suspend_lock_state, XRADIO_SUSPEND_LOCK_IDEL);
 		return -ENOMEM;
 	}
 
@@ -289,7 +279,6 @@ int xradio_hw_scan(struct ieee80211_hw *hw,
 	/* will be unlocked in xradio_scan_work() */
 	down(&hw_priv->scan.lock);
 	down(&hw_priv->conf_lock);
-	atomic_set(&hw_priv->suspend_lock_state, XRADIO_SUSPEND_LOCK_IDEL);
 
 #ifdef CONFIG_XRADIO_TESTMODE
 	/* Active Scan - Serving Channel Request Handling */

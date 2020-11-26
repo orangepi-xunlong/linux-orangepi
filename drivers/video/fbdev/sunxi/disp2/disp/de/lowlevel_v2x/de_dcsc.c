@@ -46,28 +46,27 @@ static int de_dcsc_set_reg_base(unsigned int sel, void *base)
 	return 0;
 }
 
-int _csc_enhance_setting[CSC_ENHANCE_MODE_NUM][4] = {
-    {50, 50, 50, 50},
-    /* normal */
-    {50, 50, 50, 50},
-    /* vivid */
-    {50, 40, 50, 50},
-    /* soft */
-};
-
 int de_dcsc_apply(unsigned int sel, struct disp_csc_config *config)
 {
 	int csc_coeff[12];
 	unsigned int enhance_mode;
+	int csc_enhance_setting[CSC_ENHANCE_MODE_NUM][4] = {
+		{50, 50, 50, 50},
+		/* normal */
+		{50, 50, 50, 50},
+		/* vivid */
+		{50, 40, 50, 50},
+		/* soft */
+	};
 
 	config->enhance_mode =
 	    (config->enhance_mode > CSC_ENHANCE_MODE_NUM - 1)
 	     ? g_dcsc_config[sel].enhance_mode : config->enhance_mode;
 	enhance_mode = config->enhance_mode;
-	config->brightness = _csc_enhance_setting[enhance_mode][0];
-	config->contrast = _csc_enhance_setting[enhance_mode][1];
-	config->saturation = _csc_enhance_setting[enhance_mode][2];
-	config->hue = _csc_enhance_setting[enhance_mode][3];
+	config->brightness = csc_enhance_setting[enhance_mode][0];
+	config->contrast = csc_enhance_setting[enhance_mode][1];
+	config->saturation = csc_enhance_setting[enhance_mode][2];
+	config->hue = csc_enhance_setting[enhance_mode][3];
 
 	__inf("sel=%d, in_fmt=%d, mode=%d, out_fmt=%d, mode=%d, range=%d\n",
 	      sel, config->in_fmt, config->in_mode, config->out_fmt,
@@ -165,15 +164,9 @@ int de_dcsc_init(struct disp_bsp_init_para *para)
 	for (screen_id = 0; screen_id < device_num; screen_id++) {
 		is_in_smbl[screen_id] = de_feat_is_support_smbl(screen_id);
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-		base = para->reg_base[DISP_MOD_DE + screen_id]
-		    + (screen_id + 1) * 0x00100000 + DCSC_OFST;
-		if (screen_id)
-			base = base - 0x00100000;
-#else
 		base = para->reg_base[DISP_MOD_DE]
 		    + (screen_id + 1) * 0x00100000 + DCSC_OFST;
-#endif
+
 		__inf("sel %d, Dcsc_base=0x%p\n", screen_id, (void *)base);
 
 		if (is_in_smbl[screen_id]) {

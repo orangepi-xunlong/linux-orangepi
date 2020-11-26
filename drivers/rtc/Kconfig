@@ -1442,15 +1442,6 @@ config RTC_DRV_SUNXI
 	  If you say Y here you will get support for the RTC found on
 	  Allwinner sun8i/sun50i.
 
-config SUNXI_FAKE_POWEROFF
-       bool "support ir fake poweroff"
-       depends on RTC_DRV_SUNXI
-       default n
-       help
-         support ir bootup feature.
-         but must has the module known as "ar100" or "cpus".
-         the feature is support power up with ir when poweroff.
-
 config SUNXI_BOOTUP_EXTEND
         depends on RTC_DRV_SUNXI
         bool "Sunxi rtc reboot Feature"

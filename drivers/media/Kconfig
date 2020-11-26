@@ -221,5 +221,4 @@ source "drivers/media/tuners/Kconfig"
 source "drivers/media/dvb-frontends/Kconfig"
 source "drivers/media/cedar-ve/Kconfig"
 source "drivers/media/cedar-vp9/Kconfig"
-source "drivers/media/tsc/Kconfig"
 endif # MEDIA_SUPPORT

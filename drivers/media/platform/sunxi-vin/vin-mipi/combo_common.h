@@ -67,12 +67,6 @@ enum isp_wdr_mode {
 	ISP_NORMAL_MODE,
 	ISP_DOL_WDR_MODE,
 	ISP_COMANDING_MODE,
-	ISP_SEHDR_MODE,
-};
-
-enum sensor_lp_mode {
-	SENSOR_LP_CONTINUOUS,
-	SENSOR_LP_DISCONTINUOUS,
 };
 
 struct combo_wdr_cfg {

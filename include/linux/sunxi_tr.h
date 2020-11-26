@@ -15,11 +15,11 @@
 #ifndef __SUNXI_TR_H__
 #define __SUNXI_TR_H__
 
-extern u32 dbg_inf;
+extern u32 dbg_info;
 
 #define TR_INFO_MSG(fmt, args...) \
 	do {\
-		if (dbg_inf)\
+		if (dbg_info)\
 		pr_info("[TR-%s] line:%d: " fmt, __func__, __LINE__, ##args);\
 	} while (0)
 

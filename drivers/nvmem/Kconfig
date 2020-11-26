@@ -80,24 +80,6 @@ config ROCKCHIP_EFUSE
 	  This driver can also be built as a module. If so, the module
 	  will be called nvmem_rockchip_efuse.
 
-config NVMEM_AXP
-	tristate "AXP NVMEM support"
-	depends on ARCH_SUNXI
-	help
-	  This is a simple drive to dump specified values of AXP from eFuse.
-
-	  This driver can also be built as a module.
-
-config NVMEM_SUN50I_SID
-	tristate "Allwinner SoCs SID support V1"
-	depends on ARCH_SUN50I
-	help
-	  This is a driver for the 'security ID' available on various Allwinner
-	  devices.
-
-	  This driver can also be built as a module. If so, the module
-	  will be called nvmem_sunxi_sid.
-
 config NVMEM_SUNXI_SID
 	tristate "Allwinner SoCs SID support"
 	depends on ARCH_SUNXI

@@ -24,7 +24,6 @@ struct seq_file;
 struct vm_area_struct;
 struct super_block;
 struct file_system_type;
-struct poll_table_struct;
 
 struct kernfs_open_node;
 struct kernfs_iattrs;
@@ -47,7 +46,6 @@ enum kernfs_node_flag {
 	KERNFS_SUICIDAL		= 0x0400,
 	KERNFS_SUICIDED		= 0x0800,
 	KERNFS_EMPTY_DIR	= 0x1000,
-	KERNFS_HAS_RELEASE	= 0x2000,
 };
 
 /* @flags for kernfs_create_root() */
@@ -177,7 +175,6 @@ struct kernfs_open_file {
 	/* published fields */
 	struct kernfs_node	*kn;
 	struct file		*file;
-	struct seq_file		*seq_file;
 	void			*priv;
 
 	/* private fields, do not use outside kernfs proper */
@@ -189,18 +186,10 @@ struct kernfs_open_file {
 
 	size_t			atomic_write_len;
 	bool			mmapped;
-	bool			released:1;
 	const struct vm_operations_struct *vm_ops;
 };
 
 struct kernfs_ops {
-	/*
-	 * Optional open/release methods.  Both are called with
-	 * @of->seq_file populated.
-	 */
-	int (*open)(struct kernfs_open_file *of);
-	void (*release)(struct kernfs_open_file *of);
-
 	/*
 	 * Read is handled by either seq_file or raw_read().
 	 *
@@ -238,9 +227,6 @@ struct kernfs_ops {
 	bool prealloc;
 	ssize_t (*write)(struct kernfs_open_file *of, char *buf, size_t bytes,
 			 loff_t off);
-
-	unsigned int (*poll)(struct kernfs_open_file *of,
-			     struct poll_table_struct *pt);
 
 	int (*mmap)(struct kernfs_open_file *of, struct vm_area_struct *vma);
 
@@ -329,8 +315,6 @@ int kernfs_remove_by_name_ns(struct kernfs_node *parent, const char *name,
 int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 		     const char *new_name, const void *new_ns);
 int kernfs_setattr(struct kernfs_node *kn, const struct iattr *iattr);
-unsigned int kernfs_generic_poll(struct kernfs_open_file *of,
-				 struct poll_table_struct *pt);
 void kernfs_notify(struct kernfs_node *kn);
 
 const void *kernfs_super_ns(struct super_block *sb);

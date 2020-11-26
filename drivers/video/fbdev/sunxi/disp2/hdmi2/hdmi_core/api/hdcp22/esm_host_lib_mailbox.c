@@ -24,7 +24,7 @@ ELP_STATUS esm_hostlib_mb_cmd(esm_instance_t *esm, uint32_t cmd_req,
 				uint32_t *resp_param, int32_t cmd_timeout)
 {
 	uint32_t reg = 0;
-	ESM_STATUS err = -1;
+	ESM_STATUS err;
 
 	if (esm == NULL)
 		return ESM_HL_NO_INSTANCE;
@@ -109,7 +109,7 @@ ELP_STATUS esm_hostlib_mb_cmd(esm_instance_t *esm, uint32_t cmd_req,
 ELP_STATUS esm_hostlib_wait_mb_response(esm_instance_t *esm, uint32_t cmd_tmo)
 {
 	uint32_t i;
-	uint32_t err = -1;
+	uint32_t err;
 	uint32_t reg0 = 0;
 
 	if (esm == 0)
@@ -159,7 +159,7 @@ static ESM_STATUS esm_hostlib_read_mb_response(esm_instance_t *esm,
 							char *msg,
 							uint32_t *response)
 {
-	ESM_STATUS err = -1;
+	ESM_STATUS err;
 
 	if (esm == 0)
 		return ESM_HL_NO_INSTANCE;

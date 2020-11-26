@@ -180,18 +180,6 @@ static void xradio_queue_gc(unsigned long arg)
 		queue_work(queue->stats->hw_priv->workqueue, &queue->stats->gc_work);
 }
 
-void xradio_skb_post_gc(struct xradio_common *hw_priv,
-		     struct sk_buff *skb,
-		     const struct xradio_txpriv *txpriv)
-{
-	struct xradio_queue_item skb_drop;
-	skb_drop.skb = skb;
-	skb_drop.txpriv = *txpriv;
-	xradio_queue_register_post_gc(&hw_priv->tx_queue_stats, &skb_drop);
-	queue_work(hw_priv->workqueue, &hw_priv->tx_queue_stats.gc_work);
-}
-
-
 void xradio_queue_gc_work(struct work_struct *work)
 {
 	struct xradio_queue_stats *stats =
@@ -276,38 +264,29 @@ int xradio_queue_clear(struct xradio_queue *queue, int if_id)
 {
 	int i, cnt, iter;
 	struct xradio_queue_stats *stats = queue->stats;
-	struct xradio_queue_item *item = NULL, *tmp = NULL;
 
 	cnt = 0;
 	spin_lock_bh(&queue->lock);
 	queue->generation++;
 	queue->generation &= 0xf;
-	//list_splice_tail_init(&queue->queue, &queue->pending);
-	list_for_each_entry_safe(item, tmp, &queue->queue, head) {
+	list_splice_tail_init(&queue->queue, &queue->pending);
+	while (!list_empty(&queue->pending)) {
+		struct xradio_queue_item *item = list_first_entry(
+			&queue->pending, struct xradio_queue_item, head);
 		SYS_WARN(!item->skb);
 		if (XRWL_ALL_IFS == if_id || item->txpriv.if_id == if_id) {
 			xradio_queue_register_post_gc(stats, item);
 			item->skb = NULL;
 			list_move_tail(&item->head, &queue->free_pool);
-			--queue->num_queued;
+			cnt++;
 		}
 	}
-	list_for_each_entry_safe(item, tmp, &queue->pending, head) {
-		SYS_WARN(!item->skb);
-		if (XRWL_ALL_IFS == if_id || item->txpriv.if_id == if_id) {
-			xradio_queue_register_post_gc(stats, item);
-			item->skb = NULL;
-			list_move_tail(&item->head, &queue->free_pool);
-			--queue->num_pending;
-			--queue->num_queued;
-		}
-	}
+	queue->num_queued -= cnt;
+	queue->num_pending = 0;
 	if (XRWL_ALL_IFS != if_id) {
 		queue->num_queued_vif[if_id] = 0;
 		queue->num_pending_vif[if_id] = 0;
 	} else {
-		queue->num_queued = 0;
-		queue->num_pending = 0;
 		for (iter = 0; iter < XRWL_MAX_VIFS; iter++) {
 			queue->num_queued_vif[iter] = 0;
 			queue->num_pending_vif[iter] = 0;
@@ -335,11 +314,8 @@ int xradio_queue_clear(struct xradio_queue *queue, int if_id)
 	}
 	spin_unlock_bh(&stats->lock);
 	if (unlikely(queue->overfull)) {
-		if (queue->num_queued <= ((stats->hw_priv->vif0_throttle +
-			stats->hw_priv->vif1_throttle+2)>>1)) {
-			queue->overfull = false;
-			__xradio_queue_unlock(queue);
-		}
+		queue->overfull = false;
+		__xradio_queue_unlock(queue);
 	}
 	spin_unlock_bh(&queue->lock);
 	wake_up(&stats->wait_link_id_empty);
@@ -538,16 +514,6 @@ int xradio_queue_get(struct xradio_queue *queue,
 		stats->link_map_cache[item->txpriv.if_id]
 		[item->txpriv.link_id]);
 #endif
-	} else {/*add debug info for warning*/
-		struct xradio_queue_item *item_tmp;
-		txrx_printk(XRADIO_DBG_WARN,
-			"%s, if_id=%d, link_id_map=%08x, queued=%zu, pending=%zu\n",
-			__func__, if_id, link_id_map, queue->num_queued_vif[if_id],
-			queue->num_pending_vif[if_id]);
-		list_for_each_entry(item_tmp, &queue->queue, head) {
-			txrx_printk(XRADIO_DBG_WARN, "%s, item_if_id=%d, item_link_id=%d\n",
-				__func__, item_tmp->txpriv.if_id, item_tmp->txpriv.link_id);
-		}
 	}
 	spin_unlock_bh(&queue->lock);
 	if (wakeup_stats)

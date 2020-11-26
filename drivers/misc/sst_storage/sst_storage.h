@@ -19,10 +19,14 @@
 #define _SST_STORAGE_H_
 
 struct sst_storage_data{
-	int32_t id;
-	uint32_t buf;
-	uint32_t len;
-	uint32_t offset;
+	int id;
+#ifdef CONFIG_COMPAT
+	compat_uptr_t buf;
+#else
+    unsigned char *buf;
+#endif
+	unsigned int len;
+	unsigned int offset;
 };
 
 struct fcrypt {

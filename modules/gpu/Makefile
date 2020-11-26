@@ -57,10 +57,6 @@ GPU_BUILD_DIR = mali-midgard/kernel_mode/driver
 GPU_KO_NAME   = $(GPU_BUILD_DIR)/drivers/gpu/arm/midgard/mali_kbase.ko
 GPU_KO_NAME  += $(GPU_BUILD_DIR)/drivers/base/kds/kds.ko
 GPU_KO_NAME  += $(GPU_BUILD_DIR)/drivers/base/dma_buf_test_exporter/dma-buf-test-exporter.ko
-else ifeq ($(strip $(GPU_TYPE)), $(filter $(GPU_TYPE), "mali-g31"))
-GPU_BUILD_DIR = mali-bifrost/driver
-GPU_KO_NAME   = $(GPU_BUILD_DIR)/drivers/gpu/arm/midgard/mali_kbase.ko
-GPU_KO_NAME  += $(GPU_BUILD_DIR)/drivers/base/dma_buf_test_exporter/dma-buf-test-exporter.ko
 else ifeq ($(GPU_TYPE), "sgx544")
 GPU_BUILD_DIR = sgx544/$(WINDOW_SYSTEM_TYPE)/kernel_mode/eurasia_km/eurasiacon/build/linux2/sunxi_$(WINDOW_SYSTEM_TYPE)
 GPU_KO_NAME   = sgx544/$(WINDOW_SYSTEM_TYPE)/kernel_mode/eurasia_km/eurasiacon/binary2_sunxi_$(WINDOW_SYSTEM_TYPE)_$(GPU_BUILD_TYPE)/target/pvrsrvkm.ko

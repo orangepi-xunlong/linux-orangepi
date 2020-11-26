@@ -1,11 +1,3 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- */
-
 #ifndef __DMA_sun50iw3__
 #define __DMA_sun50iw3__
 
@@ -33,10 +25,10 @@
 /* #define DRQSRC_RESEVER	11 */
 #define DRQSRC_GPADC		12
 /* #define DRQSRC_RESEVER	13 */
-#define DRQSRC_UART0_RX		14
-#define DRQSRC_UART1_RX		15
-#define DRQSRC_UART2_RX		16
-#define DRQSRC_UART3_RX		17
+#define DRQSRC_UART0RX		14
+#define DRQSRC_UART1RX		15
+#define DRQSRC_UART2RX		16
+#define DRQSRC_UART3RX		17
 /* #define DRQSRC_RESEVER	18 */
 /* #define DRQSRC_RESEVER	19 */
 /* #define DRQSRC_RESEVER	20 */
@@ -79,10 +71,10 @@
 /* #define DRQDST_RESEVER	11 */
 /* #define DRQDST_RESEVER	12 */
 /* #define DRQDST_RESEVER	13 */
-#define DRQDST_UART0_TX		14
-#define DRQDST_UART1_TX 	15
-#define DRQDST_UART2_TX		16
-#define DRQDST_UART3_TX		17
+#define DRQDST_UART0TX		14
+#define DRQDST_UART1TX 		15
+#define DRQDST_UART2TX		16
+#define DRQDST_UART3TX		17
 /* #define DRQDST_RESEVER	18 */
 /* #define DRQDST_RESEVER	19 */
 /* #define DRQDST_RESEVER	20 */

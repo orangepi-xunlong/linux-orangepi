@@ -103,7 +103,7 @@ int xradio_request_gpio_irq(struct device *dev, void *sbus_priv)
 	ret = devm_request_irq(dev, gpio_irq_handle,
 		            (irq_handler_t)xradio_gpio_irq_handler,
 		            IRQF_TRIGGER_RISING|IRQF_NO_SUSPEND, "xradio_irq", sbus_priv);
-	if (ret < 0) {
+	if (IS_ERR_VALUE(ret)) {
 			gpio_irq_handle = 0;
 			xradio_dbg(XRADIO_DBG_ERROR, "%s: request_irq FAIL!ret=%d\n",
 		           __func__, ret);

@@ -211,14 +211,10 @@ static int batadv_interface_tx(struct sk_buff *skb,
 
 	netif_trans_update(soft_iface);
 	vid = batadv_get_vid(skb, 0);
-
-	skb_reset_mac_header(skb);
 	ethhdr = eth_hdr(skb);
 
 	switch (ntohs(ethhdr->h_proto)) {
 	case ETH_P_8021Q:
-		if (!pskb_may_pull(skb, sizeof(*vhdr)))
-			goto dropped;
 		vhdr = vlan_eth_hdr(skb);
 
 		/* drop batman-in-batman packets to prevent loops */
@@ -569,20 +565,15 @@ int batadv_softif_create_vlan(struct batadv_priv *bat_priv, unsigned short vid)
 	struct batadv_softif_vlan *vlan;
 	int err;
 
-	spin_lock_bh(&bat_priv->softif_vlan_list_lock);
-
 	vlan = batadv_softif_vlan_get(bat_priv, vid);
 	if (vlan) {
 		batadv_softif_vlan_put(vlan);
-		spin_unlock_bh(&bat_priv->softif_vlan_list_lock);
 		return -EEXIST;
 	}
 
 	vlan = kzalloc(sizeof(*vlan), GFP_ATOMIC);
-	if (!vlan) {
-		spin_unlock_bh(&bat_priv->softif_vlan_list_lock);
+	if (!vlan)
 		return -ENOMEM;
-	}
 
 	vlan->bat_priv = bat_priv;
 	vlan->vid = vid;
@@ -590,22 +581,16 @@ int batadv_softif_create_vlan(struct batadv_priv *bat_priv, unsigned short vid)
 
 	atomic_set(&vlan->ap_isolation, 0);
 
+	err = batadv_sysfs_add_vlan(bat_priv->soft_iface, vlan);
+	if (err) {
+		kfree(vlan);
+		return err;
+	}
+
+	spin_lock_bh(&bat_priv->softif_vlan_list_lock);
 	kref_get(&vlan->refcount);
 	hlist_add_head_rcu(&vlan->list, &bat_priv->softif_vlan_list);
 	spin_unlock_bh(&bat_priv->softif_vlan_list_lock);
-
-	/* batadv_sysfs_add_vlan cannot be in the spinlock section due to the
-	 * sleeping behavior of the sysfs functions and the fs_reclaim lock
-	 */
-	err = batadv_sysfs_add_vlan(bat_priv->soft_iface, vlan);
-	if (err) {
-		/* ref for the function */
-		batadv_softif_vlan_put(vlan);
-
-		/* ref for the list */
-		batadv_softif_vlan_put(vlan);
-		return err;
-	}
 
 	/* add a new TT local entry. This one will be marked with the NOPURGE
 	 * flag

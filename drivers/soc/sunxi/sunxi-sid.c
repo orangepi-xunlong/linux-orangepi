@@ -112,48 +112,11 @@ static struct soc_ver_reg soc_ver_regs[] = {
 	{EFUSE_SID_BASE,        0x100, 0xF, 0},
 	{EFUSE_SID_BASE,        0xA0,  0x1, 0},
 };
-#elif defined(CONFIG_ARCH_SUN8IW16)
-
-#define SUNXI_SOC_ID_IN_SID
-static struct soc_ver_map soc_ver[] = {
-		{0, {SUN8IW16P1_REV_A, SUN8IW16P1_REV_B} },
-		{0xFF, {0} },
-	};
-static struct soc_ver_reg soc_ver_regs[] = {
-	{"allwinner,sram_ctrl", 0x24,  0x7, 0},
-	{EFUSE_SID_BASE,        0x100, 0xF, 0},
-	{"",                    0x0,   0x0, 0},
-};
-
-#elif defined(CONFIG_ARCH_SUN8IW19)
-
-#define SUNXI_SOC_ID_IN_SID
-static struct soc_ver_map soc_ver[] = {
-		{0, {SUN8IW19P1_REV_A, 0} },
-		{0xFF, {0} },
-	};
-static struct soc_ver_reg soc_ver_regs[] = {
-	{"allwinner,sram_ctrl", 0x24,  0x7, 0},
-	{EFUSE_SID_BASE,        0x100, 0xF, 0},
-};
-
 #elif defined(CONFIG_ARCH_SUN8IW17)
 
 static struct soc_ver_map soc_ver[] = {
 		{0, {SUN8IW17P1_REV_A} },
 		{0xFF, {0} },
-};
-#elif defined(CONFIG_ARCH_SUN8IW18)
-
-static struct soc_ver_map soc_ver[] = {
-		{0, {SUN8IW18P1_REV_A} },
-		{0xFF, {0} },
-};
-
-static struct soc_ver_reg soc_ver_regs[] = {
-	{"allwinner,sram_ctrl", 0x24,  0x7, 0},
-	{EFUSE_SID_BASE,        0x100, 0x7, 0},
-	{EFUSE_SID_BASE,        0xA0,  0xf, 0},
 };
 #elif defined(CONFIG_ARCH_SUN8IW5)
 
@@ -193,31 +156,6 @@ static struct soc_ver_map soc_ver[] = {
 		{0xFF, {0} },
 };
 
-#elif defined(CONFIG_ARCH_SUN50IW9)
-#define SUNXI_SOC_ID_IN_SID
-static struct soc_ver_map soc_ver[] = {
-		{0, {SUN50IW9P1_REV_A, 0} },
-		{1, {SUN50IW9P1_REV_B, 0} },
-		{0xFF, {0} },
-	};
-static struct soc_ver_reg soc_ver_regs[] = {
-	{"allwinner,sram_ctrl", 0x24,  0x7, 0},
-	{EFUSE_CHIPID_BASE,     0x0,   0x1, 22},
-	{EFUSE_SID_BASE,        0xA0,  0xF, 0},
-};
-
-#elif defined(CONFIG_ARCH_SUN50IW10)
-
-static struct soc_ver_map soc_ver[] = {
-		{0, {SUN50IW10P1_REV_A, 0} },
-		{0xFF, {0} },
-};
-static struct soc_ver_reg soc_ver_regs[] = {
-	{"allwinner,sram_ctrl", 0x24, 0x7, 0},
-	{"",			0,	0, 0},
-	{EFUSE_SID_BASE,	0xA0, 0x1, 0},
-};
-
 #else
 
 static struct soc_ver_map soc_ver[] = {
@@ -255,7 +193,7 @@ static struct soc_ver_reg soc_ver_regs[] = {
 static struct soc_ver_reg soc_ver_regs[] = {
 	{"allwinner,sram_ctrl", 0x24,  0x7, 0},
 	{EFUSE_SID_BASE,        0x100, 0x7, 0},
-	{EFUSE_SID_BASE,        0xA0,  0x1, 0},
+	{"",                    0,     0,   0},
 };
 #define SUNXI_SOC_ID_IN_SID
 
@@ -282,12 +220,10 @@ static struct soc_ver_reg soc_bin_regs[] = {
 #endif
 
 static unsigned int sunxi_soc_chipid[4];
-static unsigned int sunxi_soc_ftzone[4];
 static unsigned int sunxi_serial[4];
 static int sunxi_soc_secure;
 static unsigned int sunxi_soc_bin;
 static unsigned int sunxi_soc_ver;
-static unsigned int sunxi_soc_rotpk_status;
 
 static s32 sid_get_vir_base(struct device_node **pnode, void __iomem **base,
 		s8 *compatible)
@@ -350,8 +286,13 @@ static u32 sid_readl(void __iomem *base, u32 sec)
 {
 	if (sec == 0)
 		return readl(base);
-	else
+
+#ifdef CONFIG_SUNXI_SMC
+	SID_DBG("Read(%p), Sec %d\n", base, sec);
+	if (sunxi_soc_is_secure())
 		return sunxi_smc_readl((phys_addr_t)base);
+#endif
+		return readl(base);
 }
 
 #ifdef SID_REG_READ
@@ -558,32 +499,11 @@ static void sid_chipid_init(void)
 	init_flag = 1;
 }
 
-void sid_ft_zone_init(void)
-{
-	static s32 init_flag;
-
-	if (init_flag == 1) {
-		SID_DBG("It's already inited.\n");
-		return;
-	}
-
-	sunxi_soc_ftzone[0] = sid_rd_bits(EFUSE_CHIPID_BASE, 0x20,
-		0, 0xFFFFFFFF, sunxi_soc_is_secure());
-	sunxi_soc_ftzone[1] = sid_rd_bits(EFUSE_CHIPID_BASE, 0x24,
-		0, 0xFFFFFFFF, sunxi_soc_is_secure());
-	sunxi_soc_ftzone[2] = sid_rd_bits(EFUSE_CHIPID_BASE, 0x28,
-		0, 0xFFFFFFFF, sunxi_soc_is_secure());
-	sunxi_soc_ftzone[3] = sid_rd_bits(EFUSE_CHIPID_BASE, 0x2c,
-		0, 0xFFFFFFFF, sunxi_soc_is_secure());
-
-	init_flag = 1;
-
-}
-
 void sid_rd_soc_secure_status(void)
 {
 #if defined(CONFIG_TEE) && \
-	(defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN8IW6))
+	(defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN50IW1) \
+	 || defined(CONFIG_ARCH_SUN8IW6))
 	sunxi_soc_secure = 1;
 #else
 	static s32 init_flag;
@@ -596,31 +516,14 @@ void sid_rd_soc_secure_status(void)
 		return;
 	}
 
-	if (sid_get_base(&node, &base, reg->compatile, 1))
+	if (sid_get_base(&node, &base, reg->compatile, 0))
 		return;
 
-	sunxi_soc_secure = ((sunxi_smc_readl((phys_addr_t)(base + reg->offset)))
-			>> reg->shift) & reg->mask;
+	sunxi_soc_secure = ((readl(base + reg->offset))>>reg->shift)&reg->mask;
 
-	sid_put_base(node, base, 1);
+	sid_put_base(node, base, 0);
 	init_flag = 1;
 #endif
-}
-
-void sid_rotpk_status_init(void)
-{
-	static s32 init_flag;
-
-	if (init_flag == 1) {
-		SID_DBG("It's already inited.\n");
-		return;
-	}
-
-	sunxi_soc_rotpk_status = sid_rd_bits(EFUSE_SID_BASE, 0x140,
-		0, 0xFFFFFFFF, sunxi_soc_is_secure());
-
-	init_flag = 1;
-
 }
 
 s32 sunxi_get_platform(s8 *buf, s32 size)
@@ -659,40 +562,10 @@ int sunxi_get_soc_chipid_str(char *serial)
 	size_t size;
 
 	sid_chipid_init();
-#if defined(CONFIG_ARCH_SUN50IW9) || defined(CONFIG_ARCH_SUN50IW10)
-	size = sprintf(serial, "%08x", sunxi_soc_chipid[0] & 0xffff);
-#else
 	size = sprintf(serial, "%08x", sunxi_soc_chipid[0] & 0x0ff);
-#endif
 	return size;
 }
 EXPORT_SYMBOL(sunxi_get_soc_chipid_str);
-
-/**
- * soc ft zone str:
- */
-int sunxi_get_soc_ft_zone_str(char *serial)
-{
-	size_t size;
-
-	sid_ft_zone_init();
-	size = sprintf(serial, "%08x", (sunxi_soc_ftzone[0] & 0xff000000) >> 24);
-	return size;
-}
-EXPORT_SYMBOL(sunxi_get_soc_ft_zone_str);
-
-/**
- * soc rotpk status str:
- */
-int sunxi_get_soc_rotpk_status_str(char *status)
-{
-	size_t size;
-
-	sid_rotpk_status_init();
-	size = sprintf(status, "%d", (sunxi_soc_rotpk_status & 0x3) >> 1);
-	return size;
-}
-EXPORT_SYMBOL(sunxi_get_soc_rotpk_status_str);
 
 /**
  * soc chipid:

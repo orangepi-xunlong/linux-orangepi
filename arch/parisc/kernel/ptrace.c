@@ -311,29 +311,15 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 
 long do_syscall_trace_enter(struct pt_regs *regs)
 {
-	if (test_thread_flag(TIF_SYSCALL_TRACE)) {
-		int rc = tracehook_report_syscall_entry(regs);
-
+	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
+	    tracehook_report_syscall_entry(regs)) {
 		/*
-		 * As tracesys_next does not set %r28 to -ENOSYS
-		 * when %r20 is set to -1, initialize it here.
+		 * Tracing decided this syscall should not happen or the
+		 * debugger stored an invalid system call number. Skip
+		 * the system call and the system call restart handling.
 		 */
-		regs->gr[28] = -ENOSYS;
-
-		if (rc) {
-			/*
-			 * A nonzero return code from
-			 * tracehook_report_syscall_entry() tells us
-			 * to prevent the syscall execution.  Skip
-			 * the syscall call and the syscall restart handling.
-			 *
-			 * Note that the tracer may also just change
-			 * regs->gr[20] to an invalid syscall number,
-			 * that is handled by tracesys_next.
-			 */
-			regs->gr[20] = -1UL;
-			return -1;
-		}
+		regs->gr[20] = -1UL;
+		goto out;
 	}
 
 	/* Do the secure computing check after ptrace. */
@@ -357,6 +343,7 @@ long do_syscall_trace_enter(struct pt_regs *regs)
 			regs->gr[24] & 0xffffffff,
 			regs->gr[23] & 0xffffffff);
 
+out:
 	/*
 	 * Sign extend the syscall number to 64bit since it may have been
 	 * modified by a compat ptrace call

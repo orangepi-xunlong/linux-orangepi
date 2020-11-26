@@ -548,7 +548,7 @@ static int sunxi_clk_periph_set_rate(struct clk_hw *hw, unsigned long rate, unsi
 	return ret;
 }
 
-const struct clk_ops sunxi_clk_periph_ops = {
+static const struct clk_ops sunxi_clk_periph_ops = {
 
 	.get_parent = sunxi_clk_periph_get_parent,
 	.set_parent = sunxi_clk_periph_set_parent,
@@ -573,19 +573,8 @@ struct clk *sunxi_clk_register_periph(struct periph_init_data *pd,
 	struct clk *clk;
 	struct clk_init_data init;
 	struct sunxi_clk_periph *periph;
-#ifdef CONFIG_PM_SLEEP
-	struct sunxi_periph_clk_reg_cache *periph_clk_reg;
-#endif
 
 	BUG_ON((pd == NULL) && (pd->periph == NULL));
-
-#ifdef CONFIG_PM_SLEEP
-	periph_clk_reg = kzalloc(sizeof(struct sunxi_periph_clk_reg_cache), GFP_KERNEL);
-	if (!periph_clk_reg) {
-		pr_err("%s: could not allocate periph clk reg\n", __func__);
-		return ERR_PTR(-ENOMEM);
-	}
-#endif
 
 #ifdef __SUNXI_ALL_CLK_IGNORE_UNUSED__
 	pd->flags |= CLK_IGNORE_UNUSED;
@@ -625,23 +614,6 @@ struct clk *sunxi_clk_register_periph(struct periph_init_data *pd,
 	periph->gate.dram = periph->gate.dram ? (base
 			+ (unsigned long __force)periph->gate.dram) : NULL;
 
-#ifdef CONFIG_PM_SLEEP
-	if (!strcmp(init.name, "cpu")  || !strcmp(init.name, "axi") ||
-		 !strcmp(init.name, "cpuapb") || !strcmp(init.name, "psi") ||
-		  !strcmp(init.name, "ahb1") || !strcmp(init.name, "ahb2") ||
-		   !strcmp(init.name, "ahb3") || !strcmp(init.name, "apb1") ||
-		   !strcmp(init.name, "apb2")) {
-		kfree(periph_clk_reg);
-	} else {
-		periph_clk_reg->mux_reg = periph->mux.reg ? periph->mux.reg : NULL;
-		periph_clk_reg->divider_reg = periph->divider.reg ? periph->divider.reg : NULL;
-		periph_clk_reg->gate_enable_reg = periph->gate.enable ? periph->gate.enable : NULL;
-		periph_clk_reg->gate_reset_reg = periph->gate.reset ? periph->gate.reset : NULL;
-		periph_clk_reg->gate_bus_reg = periph->gate.bus ? periph->gate.bus : NULL;
-		periph_clk_reg->gate_dram_reg = periph->gate.dram ? periph->gate.dram : NULL;
-		list_add_tail(&periph_clk_reg->node, &clk_periph_reg_cache_list);
-	}
-#endif
 	clk = clk_register(NULL, &periph->hw);
 	if (IS_ERR(clk))
 		return clk;

@@ -12,6 +12,8 @@
 #include "core_edid.h"
 #include "hdmi_core.h"
 
+#if defined(__LINUX_PLAT__)
+
 static void edid_init_sink_cap(sink_edid_t *sink)
 {
 	memset(sink, 0, sizeof(sink_edid_t));
@@ -20,28 +22,24 @@ static void edid_init_sink_cap(sink_edid_t *sink)
 void edid_read_cap(void)
 {
 	struct hdmi_tx_core *core = get_platform();
-	struct edid  *edid;
-	u8  *edid_ext;
+	struct edid  *edid = core->mode.edid;
+	u8  *edid_ext = core->mode.edid_ext;
 	sink_edid_t *sink = core->mode.sink_cap;
 	int edid_ok = 0;
 	int edid_tries = 3;
-	int edid_ext_cnt = 0;
 
 	LOG_TRACE();
-	if ((!core) || (!sink)) {
+	if ((!core) || (!edid) || (!edid_ext) || (!sink)) {
 		pr_err("Could not get core structure\n");
 		return;
 	}
 
-	core->mode.edid = kzalloc(sizeof(struct edid), GFP_KERNEL);
-	edid = core->mode.edid;
-	if (!edid)
-		pr_err("kzalloc for edid failed\n");
-
+	mutex_lock(&core->hdmi_tx.i2c_lock);
+	memset(edid, 0, sizeof(struct edid));
+	memset(edid_ext, 0, 128);
 	memset(sink, 0, sizeof(sink_edid_t));
 	core->blacklist_sink = -1;
 
-	mutex_lock(&core->hdmi_tx.i2c_lock);
 	edid_init_sink_cap(sink);
 	core->dev_func.edid_parser_cea_ext_reset(sink);
 
@@ -77,21 +75,13 @@ void edid_read_cap(void)
 	if (edid->extensions == 0) {
 		core->mode.edid_done = 1;
 	} else {
-		core->mode.edid_ext = kzalloc(128 * edid->extensions, GFP_KERNEL);
-		edid_ext = core->mode.edid_ext;
-		if (!edid_ext) {
-			mutex_unlock(&core->hdmi_tx.i2c_lock);
-			pr_err("kzalloc for edid extension failed\n");
-			return;
-		}
+		int edid_ext_cnt = 1;
 
-		edid_ext_cnt = 1;
 		while (edid_ext_cnt <= edid->extensions) {
 			EDID_INF("EDID Extension %d\n", edid_ext_cnt);
 			edid_tries = 3;
 			do {
-				edid_ok = core->dev_func.edid_extension_read(edid_ext_cnt,
-								edid_ext + (edid_ext_cnt - 1) * 128);
+				edid_ok = core->dev_func.edid_extension_read(edid_ext_cnt, edid_ext);
 				if (edid_ok)
 					continue;
 
@@ -113,24 +103,6 @@ void edid_read_cap(void)
 	mutex_unlock(&core->hdmi_tx.i2c_lock);
 }
 
-void hdmi_edid_release(void)
-{
-	struct hdmi_tx_core *core = get_platform();
-
-	if (!core)
-		return;
-
-	if (core->mode.edid) {
-		kfree(core->mode.edid);
-		core->mode.edid = NULL;
-	}
-
-	if (core->mode.edid_ext) {
-		kfree(core->mode.edid_ext);
-		core->mode.edid_ext = NULL;
-	}
-}
-
 int edid_sink_supports_vic_code(u32 vic_code)
 {
 	int i = 0;
@@ -139,7 +111,7 @@ int edid_sink_supports_vic_code(u32 vic_code)
 	sink_edid_t *edid_exten = p_core->mode.sink_cap;
 	struct detailed_timing *dt_ext = edid_exten->detailed_timings;
 	struct edid *edid_block0 = p_core->mode.edid;
-	struct detailed_timing *dt;
+	struct detailed_timing *dt = edid_block0->detailed_timings;
 
 	if (p_core == NULL)
 		return false;
@@ -166,7 +138,6 @@ int edid_sink_supports_vic_code(u32 vic_code)
 			return true;
 		} else {
 			pr_warn("Do not support any basic 3d video format\n");
-			return false;
 		}
 	}
 
@@ -175,9 +146,6 @@ int edid_sink_supports_vic_code(u32 vic_code)
 		return false;
 	}
 
-	if (!edid_block0)
-		return false;
-	dt = edid_block0->detailed_timings;
 	/*Check EDID Block0 detailed timing block*/
 	for (i = 0; i < 2; i++) {
 		if ((dtd.mPixelClock * (dtd.mPixelRepetitionInput + 1) == dt[i].pixel_clock * 10)
@@ -299,6 +267,8 @@ void edid_correct_hardware_config(void)
 	}
 }
 
+#endif
+
 void videoParams_SetYcc420Support(dtd_t *paramsDtd, shortVideoDesc_t *paramsSvd)
 {
 	paramsDtd->mLimitedToYcc420 = paramsSvd->mLimitedToYcc420;
@@ -310,8 +280,10 @@ static void edid_set_video_prefered(sink_edid_t *sink_cap, videoParams_t *pVideo
 	/* Configure using Native SVD or HDMI_VIC */
 	int i = 0;
 	int hdmi_vic = 0;
+#if defined(__LINUX_PLAT__)
 	bool cea_vic_support = false;
 	bool hdmi_vic_support = false;
+#endif
 	unsigned int vic_index = 0;
 	struct hdmi_tx_core *core = get_platform();
 
@@ -320,7 +292,7 @@ static void edid_set_video_prefered(sink_edid_t *sink_cap, videoParams_t *pVideo
 		pr_err("Error:Have NULL params\n");
 		return;
 	}
-
+#if defined(__LINUX_PLAT__)
 	if (!core->mode.edid_done) {
 		pVideo->mCea_code = pVideo->mDtd.mCode;
 		return;
@@ -341,7 +313,7 @@ static void edid_set_video_prefered(sink_edid_t *sink_cap, videoParams_t *pVideo
 		pVideo->mHdmi_code = 0;
 		return;
 	}
-
+#endif
 	pVideo->mHdmi20 = 0;
 	pVideo->mHdmi20 = sink_cap->edid_m20Sink;
 
@@ -355,7 +327,7 @@ static void edid_set_video_prefered(sink_edid_t *sink_cap, videoParams_t *pVideo
 
 	videoParams_SetYcc420Support(&pVideo->mDtd,
 					&sink_cap->edid_mSvd[vic_index]);
-
+#if defined(__LINUX_PLAT__)
 	if (videoParams_GetHdmiVicCode(pVideo->mDtd.mCode) > 0)
 		hdmi_vic_support = get_hdmi_vic_support(videoParams_GetHdmiVicCode(pVideo->mDtd.mCode));
 	if (hdmi_vic_support)
@@ -410,6 +382,24 @@ static void edid_set_video_prefered(sink_edid_t *sink_cap, videoParams_t *pVideo
 	}
 
 	pVideo->scdc_ability = sink_cap->edid_mHdmiForumvsdb.mSCDC_Present;
+#else
+
+	hdmi_vic = videoParams_GetHdmiVicCode(pVideo->mDtd.mCode);
+	if (hdmi_vic > 0) {
+		core->mode.pProduct.mOUI = 0x000c03;
+		core->mode.pProduct.mVendorPayload[0] = 0x20;
+		core->mode.pProduct.mVendorPayload[1] = hdmi_vic;
+		core->mode.pProduct.mVendorPayloadLength = 2;
+
+		pVideo->mDtd.mCode = 0;
+	} else {
+		core->mode.pProduct.mOUI = 0x000c03;
+		core->mode.pProduct.mVendorPayload[0] = 0x0;
+		core->mode.pProduct.mVendorPayload[1] = 0;
+		core->mode.pProduct.mVendorPayloadLength = 2;
+	}
+
+#endif
 }
 
 
@@ -417,11 +407,12 @@ static void edid_set_video_prefered(sink_edid_t *sink_cap, videoParams_t *pVideo
 void edid_set_video_prefered_core(void)
 {
 	struct hdmi_tx_core *core = get_platform();
-
+#if defined(__LINUX_PLAT__)
 	if (core->mode.sink_cap == NULL)
 		pr_info("%s: sink cap is NULL!\n", __func__);
 	else
-		edid_set_video_prefered(core->mode.sink_cap,
+#endif
+	edid_set_video_prefered(core->mode.sink_cap,
 				&core->mode.pVideo);
 }
 

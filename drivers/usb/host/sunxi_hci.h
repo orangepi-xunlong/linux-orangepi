@@ -24,8 +24,6 @@
 #include <linux/of_gpio.h>
 #include <linux/sunxi-gpio.h>
 
-#include <linux/pm_wakeirq.h>
-
 extern int usb_disabled(void);
 
 #if defined(CONFIG_AW_AXP)
@@ -52,12 +50,8 @@ extern s32 axp_usb_vbus_output(int high);
 /*
  * Support Low-power mode USB standby.
  */
-#if defined(CONFIG_ARCH_SUN8IW15) | defined(CONFIG_ARCH_SUN50IW9)
+#if defined(CONFIG_ARCH_SUN8IW15)
 #define SUNXI_USB_STANDBY_LOW_POW_MODE
-#endif
-/*no cpus*/
-#if defined(CONFIG_ARCH_SUN50IW9)
-#define SUNXI_USB_STANDBY_NEW_MODE
 #endif
 
 #if 0
@@ -103,29 +97,24 @@ extern s32 axp_usb_vbus_output(int high);
 #define SUNXI_USB_EHCI_LEN                      0x58
 #define SUNXI_USB_OHCI_LEN                      0x58
 
-#define SUNXI_USB_EHCI_TIME_INT			0x30
-#define SUNXI_USB_EHCI_STANDBY_IRQ_STATUS	1
-#define SUNXI_USB_EHCI_STANDBY_IRQ		2
-
 #define SUNXI_USB_PMU_IRQ_ENABLE                0x800
 #define SUNXI_HCI_CTRL_3			0X808
 #define SUNXI_HCI_PHY_CTRL                      0x810
 #define SUNXI_HCI_PHY_TUNE                      0x818
 #define SUNXI_HCI_UTMI_PHY_STATUS               0x824
 #define SUNXI_HCI_CTRL_3_REMOTE_WAKEUP		3
-#define SUNXI_HCI_RC16M_CLK_ENBALE		2
 #if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW6) \
 	|| defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN8IW15) \
-	|| defined(CONFIG_ARCH_SUN50IW8) || defined(CONFIG_ARCH_SUN50IW9)
+	|| defined(CONFIG_ARCH_SUN50IW8)
 #define SUNXI_HCI_PHY_CTRL_SIDDQ                3
 #else
 #define SUNXI_HCI_PHY_CTRL_SIDDQ                1
 #endif
 
-#define SUNXI_OTG_PHY_CTRL	0x410
-#define SUNXI_OTG_PHY_CFG	0x420
-#define SUNXI_OTG_PHY_STATUS	0x424
-#define SUNXI_USBC_REG_INTUSBE	0x0050
+#define SUNXI_OTG_PHY_CTRL                      0x410
+#define SUNXI_OTG_PHY_CFG                       0x420
+#define SUNXI_OTG_PHY_STATUS                    0x424
+#define SUNXI_USBC_REG_INTUSBE                  0x0050
 
 #define EHCI_CAP_OFFSET		(0x00)
 #define EHCI_CAP_LEN		(0x10)
@@ -157,47 +146,46 @@ extern s32 axp_usb_vbus_output(int high);
  */
 
 /* Port Test Control bits */
-#define EHCI_PORTSC_PTC_MASK	(0xf<<16)
-#define EHCI_PORTSC_PTC_DIS	(0x0<<16)
-#define EHCI_PORTSC_PTC_J	(0x1<<16)
-#define EHCI_PORTSC_PTC_K	(0x2<<16)
-#define EHCI_PORTSC_PTC_SE0NAK	(0x3<<16)
-#define EHCI_PORTSC_PTC_PACKET	(0x4<<16)
-#define EHCI_PORTSC_PTC_FORCE	(0x5<<16)
+#define EHCI_PORTSC_PTC_MASK		(0xf<<16)
+#define EHCI_PORTSC_PTC_DIS			(0x0<<16)
+#define EHCI_PORTSC_PTC_J			(0x1<<16)
+#define EHCI_PORTSC_PTC_K			(0x2<<16)
+#define EHCI_PORTSC_PTC_SE0NAK		(0x3<<16)
+#define EHCI_PORTSC_PTC_PACKET		(0x4<<16)
+#define EHCI_PORTSC_PTC_FORCE		(0x5<<16)
 
-#define EHCI_PORTSC_OWNER	(0x1<<13)
-#define EHCI_PORTSC_POWER	(0x1<<12)
+#define EHCI_PORTSC_OWNER			(0x1<<13)
+#define EHCI_PORTSC_POWER			(0x1<<12)
 
-#define EHCI_PORTSC_LS_MASK	(0x3<<10)
-#define EHCI_PORTSC_LS_SE0	(0x0<<10)
-#define EHCI_PORTSC_LS_J	(0x2<<10)
-#define EHCI_PORTSC_LS_K	(0x1<<10)
-#define EHCI_PORTSC_LS_UDF	(0x3<<10)
+#define EHCI_PORTSC_LS_MASK			(0x3<<10)
+#define EHCI_PORTSC_LS_SE0			(0x0<<10)
+#define EHCI_PORTSC_LS_J			(0x2<<10)
+#define EHCI_PORTSC_LS_K			(0x1<<10)
+#define EHCI_PORTSC_LS_UDF			(0x3<<10)
 
-#define EHCI_PORTSC_RESET	(0x1<<8)
-#define EHCI_PORTSC_SUSPEND	(0x1<<7)
-#define EHCI_PORTSC_RESUME	(0x1<<6)
-#define EHCI_PORTSC_OCC		(0x1<<5)
-#define EHCI_PORTSC_OC		(0x1<<4)
-#define EHCI_PORTSC_PEC		(0x1<<3)
-#define EHCI_PORTSC_PE		(0x1<<2)
-#define EHCI_PORTSC_CSC		(0x1<<1)
-#define EHCI_PORTSC_CCS		(0x1<<0)
+#define EHCI_PORTSC_RESET			(0x1<<8)
+#define EHCI_PORTSC_SUSPEND			(0x1<<7)
+#define EHCI_PORTSC_RESUME			(0x1<<6)
+#define EHCI_PORTSC_OCC				(0x1<<5)
+#define EHCI_PORTSC_OC				(0x1<<4)
+#define EHCI_PORTSC_PEC				(0x1<<3)
+#define EHCI_PORTSC_PE				(0x1<<2)
+#define EHCI_PORTSC_CSC				(0x1<<1)
+#define EHCI_PORTSC_CCS				(0x1<<0)
 
-#define	EHCI_PORTSC_CHANGE	(EHCI_PORTSC_OCC | EHCI_PORTSC_PEC | EHCI_PORTSC_CSC)
+#define	EHCI_PORTSC_CHANGE			(EHCI_PORTSC_OCC | EHCI_PORTSC_PEC | EHCI_PORTSC_CSC)
 
 #define  SUNXI_USB_HCI_DEBUG
 
-#define  KEY_USB_DRVVBUS_GPIO		"usb_drv_vbus_gpio"
-#define  KEY_USB_REGULATOR_IO		"usb_regulator_io"
-#define  KEY_USB_REGULATOR_IO_VOL	"usb_regulator_vol"
-#define  KEY_USB_WAKEUP_SUSPEND         "usb_wakeup_suspend"
-#define  KEY_USB_HSIC_USBED             "usb_hsic_used"
-#define  KEY_USB_HSIC_CTRL              "usb_hsic_ctrl"
-#define  KEY_USB_HSIC_RDY_GPIO          "usb_hsic_rdy_gpio"
-#define  KEY_USB_HSIC_REGULATOR_IO	"usb_hsic_regulator_io"
-#define  KEY_WAKEUP_SOURCE              "wakeup-source"
-#define  KEY_USB_PORT_TYPE		"usb_port_type"
+#define  KEY_USB_DRVVBUS_GPIO			"usb_drv_vbus_gpio"
+#define  KEY_USB_REGULATOR_IO			"usb_regulator_io"
+#define  KEY_USB_REGULATOR_IO_VOL		"usb_regulator_vol"
+#define  KEY_USB_HOST_INIT_STATE		"usb_host_init_state"
+#define  KEY_USB_WAKEUP_SUSPEND                 "usb_wakeup_suspend"
+#define  KEY_USB_HSIC_USBED                     "usb_hsic_used"
+#define  KEY_USB_HSIC_CTRL                      "usb_hsic_ctrl"
+#define  KEY_USB_HSIC_RDY_GPIO                  "usb_hsic_rdy_gpio"
+#define  KEY_USB_HSIC_REGULATOR_IO		"usb_hsic_regulator_io"
 
 /* xHCI */
 #define XHCI_RESOURCES_NUM	2
@@ -228,19 +216,19 @@ extern s32 axp_usb_vbus_output(int high);
 /* Bit fields */
 
 /* Global Configuration Register */
-#define SUNXI_GCTL_PRTCAPDIR(n)		((n) << 12)
-#define SUNXI_GCTL_PRTCAP_HOST		1
+#define SUNXI_GCTL_PRTCAPDIR(n)	((n) << 12)
+#define SUNXI_GCTL_PRTCAP_HOST	1
 #define SUNXI_GCTL_PRTCAP_DEVICE	2
-#define SUNXI_GCTL_PRTCAP_OTG		3
-#define SUNXI_GCTL_SOFITPSYNC		(0x01 << 10)
+#define SUNXI_GCTL_PRTCAP_OTG	3
+#define SUNXI_GCTL_SOFITPSYNC	(0x01 << 10)
 #define SUNXI_GCTL_CORESOFTRESET	(1 << 11)
 
 /* Global USB2 PHY Configuration Register n */
-#define SUNXI_USB2PHYCFG_SUSPHY		(0x01 << 6)
-#define SUNXI_USB2PHYCFG_PHYSOFTRST	(1 << 31)
+#define SUNXI_USB2PHYCFG_SUSPHY	(0x01 << 6)
+#define SUNXI_USB2PHYCFG_PHYSOFTRST (1 << 31)
 
 /* Global USB3 PIPE Control Register */
-#define SUNXI_USB3PIPECTL_PHYSOFTRST	(1 << 31)
+#define SUNXI_USB3PIPECTL_PHYSOFTRST (1 << 31)
 
 /* USB2.0 Interface Status and Control Register */
 #define SUNXI_APP_FOCE_VBUS	(0x03 << 12)
@@ -255,20 +243,10 @@ extern s32 axp_usb_vbus_output(int high);
 
 /* PHY Tune High Register */
 #define SUNXI_TX_DEEMPH_3P5DB(n)	((n) << 19)
-#define SUNXI_TX_DEEMPH_6DB(n)		((n) << 13)
-#define SUNXI_TX_SWING_FULL(n)		((n) << 6)
+#define SUNXI_TX_DEEMPH_6DB(n)	((n) << 13)
+#define SUNXI_TX_SWING_FULL(n)	((n) << 6)
 #define SUNXI_LOS_BIAS(n)		((n) << 3)
 #define SUNXI_TXVBOOSTLVL(n)		((n) << 0)
-
-/* HCI UTMI PHY TUNE */
-#define SUNXI_TX_VREF_TUNE_OFFSET	8
-#define SUNXI_TX_RISE_TUNE_OFFSET	4
-#define SUNXI_TX_RES_TUNE_OFFSET	2
-#define SUNXI_TX_PREEMPAMP_TUNE_OFFSET	0
-#define SUNXI_TX_VREF_TUNE		(0xf << SUNXI_TX_VREF_TUNE_OFFSET)
-#define SUNXI_TX_RISE_TUNE		(0x3 << SUNXI_TX_RISE_TUNE_OFFSET)
-#define SUNXI_TX_RES_TUNE		(0x3 << SUNXI_TX_RES_TUNE_OFFSET)
-#define SUNXI_TX_PREEMPAMP_TUNE		(0x3 << SUNXI_TX_PREEMPAMP_TUNE_OFFSET)
 
 #if defined(CONFIG_FPGA_V4_PLATFORM) || defined(CONFIG_FPGA_V7_PLATFORM)
 #define SUNXI_USB_FPGA
@@ -285,19 +263,6 @@ enum usb_drv_vbus_type {
 	USB_DRV_VBUS_TYPE_NULL = 0,
 	USB_DRV_VBUS_TYPE_GIPO,
 	USB_DRV_VBUS_TYPE_AXP,
-};
-
-/* 0: device only; 1: host only; 2: otg */
-enum usb_port_type {
-	USB_PORT_TYPE_DEVICE = 0,
-	USB_PORT_TYPE_HOST,
-	USB_PORT_TYPE_OTG,
-};
-
-enum usb_wakeup_source_type {
-	SUPER_STANDBY = 0,
-	USB_STANDBY,
-	NORMAL_STANDBY,
 };
 
 struct sunxi_hci_hcd {
@@ -372,10 +337,8 @@ struct sunxi_hci_hcd {
 
 	int used;                              /* flag. in use or not */
 	__u8 probe;                             /* hc initialize */
-	enum usb_port_type port_type;		/* usb port type */
+	int host_init_state;                   /* usb hc initialize state, 0: not work, 1: work */
 	int wakeup_suspend;                       /* flag. not suspend */
-
-	int wakeup_source_flag;
 
 	/* HSIC device susport */
 	u32 hsic_flag;                         /* flag. hsic usbed */
@@ -433,17 +396,12 @@ void sunxi_set_host_hisc_rdy(struct sunxi_hci_hcd *sunxi_hci, int is_on);
 void sunxi_set_host_vbus(struct sunxi_hci_hcd *sunxi_hci, int is_on);
 int usb_phyx_tp_write(struct sunxi_hci_hcd *sunxi_hci,
 		int addr, int data, int len);
-int usb_phyx_write(struct sunxi_hci_hcd *sunxi_hci, int data);
-int usb_phyx_read(struct sunxi_hci_hcd *sunxi_hci);
 int usb_phyx_tp_read(struct sunxi_hci_hcd *sunxi_hci, int addr, int len);
 int sunxi_usb_enable_xhci(void);
 int sunxi_usb_disable_xhci(void);
 #ifdef SUNXI_USB_STANDBY_LOW_POW_MODE
 void sunxi_hci_set_siddq(struct sunxi_hci_hcd *sunxi_hci);
-void sunxi_hci_set_wakeup_ctrl(struct sunxi_hci_hcd *sunxi_hci, int is_on);
-void sunxi_hci_set_rc_clk(struct sunxi_hci_hcd *sunxi_hci, int is_on);
-void sunxi_hci_set_standby_irq(struct sunxi_hci_hcd *sunxi_hci, int is_on);
-void sunxi_hci_clean_standby_irq(struct sunxi_hci_hcd *sunxi_hci);
+void sunxi_hci_set_wakeup_ctrl(struct sunxi_hci_hcd *sunxi_hci);
 #endif
 
 #endif /* __SUNXI_HCI_SUNXI_H__ */

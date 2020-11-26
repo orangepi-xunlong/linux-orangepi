@@ -59,10 +59,6 @@ static s32 disp_enhance_sync(struct disp_enhance *enhance)
 		return -1;
 	}
 
-	if (disp_feat_is_using_rcq(enhance->disp))
-		return 0;
-
-
 	enhance->update_regs(enhance);
 	if (enhancep->enabled)
 		disp_al_enhance_sync(enhance->disp);

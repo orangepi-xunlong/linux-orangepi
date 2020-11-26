@@ -23,7 +23,6 @@
 #include <linux/mutex.h>
 #include <linux/proc_fs.h>
 
-
 #include "platform.h"
 #include "xradio.h"
 #include "txrx.h"
@@ -35,7 +34,6 @@
 #include "ap.h"
 #include "scan.h"
 #include "pm.h"
-#include "vendor.h"
 #include "xr_version.h"
 
 MODULE_AUTHOR("XRadioTech");
@@ -305,7 +303,6 @@ static const struct ieee80211_ops xradio_ops = {
 #ifdef CONFIG_XRADIO_TESTMODE
 	.testmode_cmd      = xradio_testmode_cmd,
 #endif /* CONFIG_XRADIO_TESTMODE */
-	.change_mac        = xradio_change_mac,
 };
 
 struct xradio_common *g_hw_priv;
@@ -726,8 +723,7 @@ struct ieee80211_hw *xradio_init_common(size_t hw_priv_data_len)
 				     BIT(NL80211_IFTYPE_AP)         |
 				     BIT(NL80211_IFTYPE_MESH_POINT) |
 				     BIT(NL80211_IFTYPE_P2P_CLIENT) |
-				     BIT(NL80211_IFTYPE_P2P_GO)		|
-					 BIT(NL80211_IFTYPE_P2P_DEVICE);
+				     BIT(NL80211_IFTYPE_P2P_GO);
 
 	/* Support only for limited wowlan functionalities */
 #ifdef CONFIG_PM
@@ -790,8 +786,6 @@ struct ieee80211_hw *xradio_init_common(size_t hw_priv_data_len)
 	hw->wiphy->max_scan_ssids = WSM_SCAN_MAX_NUM_OF_SSIDS;
 	hw->wiphy->max_scan_ie_len = IEEE80211_MAX_DATA_LEN;
 	SET_IEEE80211_PERM_ADDR(hw, hw_priv->addresses[0].addr);
-
-	xradio_vendor_init(hw->wiphy);
 
 	/* Initialize locks. */
 	spin_lock_init(&hw_priv->vif_list_lock);
@@ -881,12 +875,10 @@ struct ieee80211_hw *xradio_init_common(size_t hw_priv_data_len)
 	atomic_set(&hw_priv->query_cnt, 0);
 	INIT_WORK(&hw_priv->query_work, wsm_query_work);
 	atomic_set(&hw_priv->suspend_state, XRADIO_RESUME);
-	atomic_set(&hw_priv->suspend_lock_state, XRADIO_SUSPEND_LOCK_IDEL);
 
 #ifdef HW_RESTART
 	hw_priv->exit_sync  = false;
 	hw_priv->hw_restart = false;
-	hw_priv->hw_cant_wakeup = false;
 	INIT_WORK(&hw_priv->hw_restart_work, xradio_restart_work);
 #endif
 
@@ -981,7 +973,6 @@ int xradio_register_common(struct ieee80211_hw *dev)
 	xradio_dbg(XRADIO_DBG_MSG, "is registered as '%s'\n",
 		   wiphy_name(dev->wiphy));
 	xradio_debug_init_common(hw_priv);
-	device_disable_async_suspend(&dev->wiphy->dev);
 
 #if (SUPPORT_EPTA)
 	SYS_WARN(wsm_set_epta_stat_dbg_ctrl(hw_priv, epta_stat_dbg_ctrl));
@@ -1018,7 +1009,7 @@ static int xradio_find_rfkill(struct device *dev, void *data)
 	return false;
 }
 
-int xradio_core_reinit(struct xradio_common *hw_priv, int count)
+int xradio_core_reinit(struct xradio_common *hw_priv)
 {
 	int ret = 0;
 	u16 ctrl_reg;
@@ -1114,15 +1105,6 @@ restart:
 		goto exit;
 	}
 
-
-	/*
-	 * If the wlan device can't wake up, we need to
-	 * close the bt device to restart the wlan&bt device
-	 */
-	if (hw_priv->hw_cant_wakeup && count > 1)
-		xradio_bt_power(false);
-
-
 	/*reinit sdio sbus. */
 	sbus_sdio_deinit();
 	hw_priv->pdev = sbus_sdio_init((struct sbus_ops **)&hw_priv->sbus_ops,
@@ -1179,7 +1161,6 @@ restart:
 			   __func__, ret);
 		goto exit;
 	}
-	hw_priv->hw_cant_wakeup = false;
 
 	/* Set sdio blocksize. */
 	hw_priv->sbus_ops->lock(hw_priv->sbus_priv);
@@ -1269,32 +1250,23 @@ exit:
 
 	return ret;
 }
-
-#define RESTARTS_TIMES_LIMIT	5
 void xradio_restart_work(struct work_struct *work)
 {
 	struct xradio_common *hw_priv =
 		container_of(work, struct xradio_common, hw_restart_work);
-	int i = 0;
-	int ret = 0;
 	xradio_dbg(XRADIO_DBG_ALWY, "%s\n", __func__);
 
 	hw_priv->hw_restart_work_running = 1;
 	if (hw_priv->bh_error) {
 		xradio_unregister_bh(hw_priv);
 	}
-
-	for (i = 0; i < RESTARTS_TIMES_LIMIT; i++) {
-		ret = xradio_core_reinit(hw_priv, i);
-		if (!ret)
-			break;
-		xradio_dbg(XRADIO_DBG_ALWY, "%s again, count = %d!\n", __func__, i);
+	if (unlikely(xradio_core_reinit(hw_priv))) {
+		xradio_dbg(XRADIO_DBG_ALWY, "%s again!\n", __func__);
 		down(&hw_priv->wsm_cmd_sema);
 		hw_priv->hw_restart = true;
 		up(&hw_priv->wsm_cmd_sema);
 		if (hw_priv->bh_thread != NULL)
 			xradio_unregister_bh(hw_priv);
-
 #ifdef ERROR_HANG_DRIVER
 		if (error_hang_driver) {
 			/*it will arrive here if error occurs in poweroff resume.*/
@@ -1304,7 +1276,7 @@ void xradio_restart_work(struct work_struct *work)
 			return ;
 		}
 #endif
-
+		xradio_core_reinit(hw_priv);
 	}
 	hw_priv->hw_restart_work_running = 0;
 }
@@ -1485,6 +1457,7 @@ err1:
 	xradio_free_common(dev);
 	return err;
 }
+EXPORT_SYMBOL_GPL(xradio_core_init);
 
 void xradio_core_deinit(void)
 {
@@ -1496,7 +1469,7 @@ void xradio_core_deinit(void)
 		up(&g_hw_priv->wsm_cmd_sema);
 		cancel_work_sync(&g_hw_priv->hw_restart_work);
 #endif
-		xradio_vendor_close_mkeep_alive();
+
 #ifdef ERROR_HANG_DRIVER
 		/*we hang driver here before unregister.*/
 		xradio_hang_driver_for_debug(g_hw_priv, g_hw_priv->bh_error);
@@ -1526,6 +1499,7 @@ void xradio_core_deinit(void)
 	}
 	return;
 }
+EXPORT_SYMBOL_GPL(xradio_core_deinit);
 
 static int hwinfo_proc_show(struct seq_file *m, void *v)
 {
@@ -1541,8 +1515,7 @@ static int hwinfo_proc_show(struct seq_file *m, void *v)
 	/* single_ can only show once */
 	if (unlikely(hwinfo_size >= size)) {
 		/* if buffer is not enough, seq will double it and try again */
-		xradio_dbg(XRADIO_DBG_WARN,
-				   "hwinfo file size is over than seq buffer, try expand and try again\n");
+		xradio_dbg(XRADIO_DBG_WARN, "hwinfo file size is over than seq buffer, try expand and try again\n");
 		/* set seq overflowed like seq_set_overflow() */
 		seq_commit(m, size);
 		goto out;
@@ -1624,7 +1597,7 @@ static struct file_operations hwinfo_proc_op = {
 };
 
 /* Init Module function -> Called by insmod */
-int __init xradio_core_entry(void)
+static int __init xradio_core_entry(void)
 {
 	int ret = 0;
 	xradio_dbg(XRADIO_DBG_TRC, "%s\n", __func__);
@@ -1658,7 +1631,7 @@ int __init xradio_core_entry(void)
 }
 
 /* Called at Driver Unloading */
-void xradio_core_exit(void)
+static void __exit xradio_core_exit(void)
 {
 	remove_proc_entry("hwinfo", hwinfo_proc_dir);
 	remove_proc_entry("xradio", NULL);
@@ -1675,4 +1648,7 @@ void xradio_core_exit(void)
 	xradio_plat_deinit();
 	xradio_dbg(XRADIO_DBG_TRC, "%s\n", __func__);
 }
+
+module_init(xradio_core_entry);
+module_exit(xradio_core_exit);
 

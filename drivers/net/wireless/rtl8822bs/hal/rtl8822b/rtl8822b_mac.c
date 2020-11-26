@@ -32,17 +32,17 @@ inline u8 rtl8822b_rcr_config(PADAPTER p, u32 rcr)
 	if (v32) {
 		v32 = rcr & BIT_APP_PHYSTS_8822B;
 		RTW_INFO("%s: runtime %s rx phy status!\n",
-			 __func__, v32 ? "ENABLE" : "DISABLE");
+			 __FUNCTION__, v32 ? "ENABLE" : "DISABLE");
 		if (v32) {
 			err = rtw_halmac_config_rx_info(adapter_to_dvobj(p), HALMAC_DRV_INFO_PHY_STATUS);
 			if (err) {
-				RTW_INFO("%s: Enable rx phy status FAIL!!", __func__);
+				RTW_INFO("%s: Enable rx phy status FAIL!!", __FUNCTION__);
 				rcr &= ~BIT_APP_PHYSTS_8822B;
 			}
 		} else {
 			err = rtw_halmac_config_rx_info(adapter_to_dvobj(p), HALMAC_DRV_INFO_NONE);
 			if (err) {
-				RTW_INFO("%s: Disable rx phy status FAIL!!", __func__);
+				RTW_INFO("%s: Disable rx phy status FAIL!!", __FUNCTION__);
 				rcr |= BIT_APP_PHYSTS_8822B;
 			}
 		}
@@ -120,12 +120,12 @@ s32 rtl8822b_fw_dl(PADAPTER adapter, u8 wowlan)
 		rtw_get_phy_file_path(adapter, MAC_FILE_FW_NIC);
 
 	if (rtw_is_file_readable(rtw_phy_para_file_path) == _TRUE) {
-		RTW_INFO("%s acquire FW from file:%s\n", __func__, rtw_phy_para_file_path);
+		RTW_INFO("%s acquire FW from file:%s\n", __FUNCTION__, rtw_phy_para_file_path);
 		fw_bin = _TRUE;
 	} else
 #endif /* CONFIG_FILE_FWIMG */
 	{
-		RTW_INFO("%s fw source from array\n", __func__);
+		RTW_INFO("%s fw source from array\n", __FUNCTION__);
 		fw_bin = _FALSE;
 	}
 
@@ -146,14 +146,14 @@ s32 rtl8822b_fw_dl(PADAPTER adapter, u8 wowlan)
 	if (!err) {
 		hal->bFWReady = _TRUE;
 		hal->fw_ractrl = _TRUE;
-		RTW_INFO("%s Download Firmware from %s success\n", __func__, (fw_bin) ? "file" : "array");
+		RTW_INFO("%s Download Firmware from %s success\n", __FUNCTION__, (fw_bin) ? "file" : "array");
 		RTW_INFO("%s FW Version:%d SubVersion:%d FW size:%d\n", (wowlan) ? "WOW" : "NIC",
 			hal->firmware_version, hal->firmware_sub_version, hal->firmware_size);
 		return _SUCCESS;
 	} else {
 		hal->bFWReady = _FALSE;
 		hal->fw_ractrl = _FALSE;
-		RTW_ERR("%s Download Firmware from %s failed\n", __func__, (fw_bin) ? "file" : "array");
+		RTW_ERR("%s Download Firmware from %s failed\n", __FUNCTION__, (fw_bin) ? "file" : "array");
 		return _FAIL;
 	}
 }

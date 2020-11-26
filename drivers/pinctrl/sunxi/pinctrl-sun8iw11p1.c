@@ -1219,24 +1219,11 @@ static const struct sunxi_desc_pin sun8iw11p1_pins[] = {
 
 #define IRQ_BANK_NUM 1
 static const unsigned sun8iw11p1_irq_bank_base[IRQ_BANK_NUM] = {0};
-static const unsigned sun8iw11p1_bank_base[] = {
-	SUNXI_PIO_BANK_BASE(PA_BASE, 0),
-	SUNXI_PIO_BANK_BASE(PB_BASE, 1),
-	SUNXI_PIO_BANK_BASE(PC_BASE, 2),
-	SUNXI_PIO_BANK_BASE(PD_BASE, 3),
-	SUNXI_PIO_BANK_BASE(PE_BASE, 4),
-	SUNXI_PIO_BANK_BASE(PF_BASE, 5),
-	SUNXI_PIO_BANK_BASE(PG_BASE, 6),
-	SUNXI_PIO_BANK_BASE(PH_BASE, 7),
-	SUNXI_PIO_BANK_BASE(PI_BASE, 8),
-};
 
 static const struct sunxi_pinctrl_desc sun8iw11p1_pinctrl_data = {
 	.pins = sun8iw11p1_pins,
 	.npins = ARRAY_SIZE(sun8iw11p1_pins),
 	.pin_base = 0,
-	.banks = ARRAY_SIZE(sun8iw11p1_bank_base),
-	.bank_base = sun8iw11p1_bank_base,
 	.irq_banks = IRQ_BANK_NUM,
 	.irq_bank_base = sun8iw11p1_irq_bank_base,
 };
@@ -1258,7 +1245,6 @@ static struct platform_driver sun8iw11p1_pinctrl_driver = {
 	.driver	= {
 		.name		= "sun8iw11p1-pinctrl",
 		.owner		= THIS_MODULE,
-		.pm		= &sunxi_pinctrl_pm_ops,
 		.of_match_table	= sun8iw11p1_pinctrl_match,
 	},
 };

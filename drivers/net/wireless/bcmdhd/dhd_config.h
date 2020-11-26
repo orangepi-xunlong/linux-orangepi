@@ -8,27 +8,36 @@
 #include <wlioctl.h>
 #include <802.11.h>
 
-#define FW_TYPE_STA     0
-#define FW_TYPE_APSTA   1
-#define FW_TYPE_P2P     2
-#define FW_TYPE_MESH    3
-#define FW_TYPE_ES      4
-#define FW_TYPE_MFG     5
-#define FW_TYPE_G       0
-#define FW_TYPE_AG      1
-
 #define FW_PATH_AUTO_SELECT 1
 //#define CONFIG_PATH_AUTO_SELECT
 extern char firmware_path[MOD_PARAM_PATHLEN];
-#if defined(BCMSDIO) || defined(BCMPCIE)
 extern uint dhd_rxbound;
 extern uint dhd_txbound;
-#endif
 #ifdef BCMSDIO
 #define TXGLOM_RECV_OFFSET 8
 extern uint dhd_doflow;
 extern uint dhd_slpauto;
+
+#define BCM43362A0_CHIP_REV     0
+#define BCM43362A2_CHIP_REV     1
+#define BCM43430A0_CHIP_REV     0
+#define BCM43430A1_CHIP_REV     1
+#define BCM43430A2_CHIP_REV     2
+#define BCM43013B0_CHIP_REV     1
+#define BCM4330B2_CHIP_REV      4
+#define BCM4334B1_CHIP_REV      3
+#define BCM43341B0_CHIP_REV     2
+#define BCM43241B4_CHIP_REV     5
+#define BCM4335A0_CHIP_REV      2
+#define BCM4339A0_CHIP_REV      1
+#define BCM43455C0_CHIP_REV     6
+#define BCM43456C5_CHIP_REV     9
+#define BCM4354A1_CHIP_REV      1
+#define BCM4359B1_CHIP_REV      5
 #endif
+#define BCM4356A2_CHIP_REV      2
+#define BCM4358A3_CHIP_REV      3
+#define BCM4359C0_CHIP_REV      9
 
 typedef struct wl_mac_range {
 	uint32 oui;
@@ -101,52 +110,17 @@ typedef struct mchan_params {
 	int miracast_mode;
 } mchan_params_t;
 
-enum in4way_flags {
-	NO_SCAN_IN4WAY	= (1 << (0)),
-	NO_BTC_IN4WAY	= (1 << (1)),
-	DONT_DELETE_GC_AFTER_WPS	= (1 << (2)),
-	WAIT_DISCONNECTED	= (1 << (3)),
-};
-
-enum in_suspend_flags {
-	NO_EVENT_IN_SUSPEND	= (1 << (0)),
-	NO_TXDATA_IN_SUSPEND	= (1 << (1)),
-	AP_DOWN_IN_SUSPEND	= (1 << (2)),
-	ROAM_OFFLOAD_IN_SUSPEND	= (1 << (3)),
-};
-
-enum eapol_status {
-	EAPOL_STATUS_NONE = 0,
-	EAPOL_STATUS_WPS_REQID,
-	EAPOL_STATUS_WPS_RSPID,
-	EAPOL_STATUS_WPS_WSC_START,
-	EAPOL_STATUS_WPS_M1,
-	EAPOL_STATUS_WPS_M2,
-	EAPOL_STATUS_WPS_M3,
-	EAPOL_STATUS_WPS_M4,
-	EAPOL_STATUS_WPS_M5,
-	EAPOL_STATUS_WPS_M6,
-	EAPOL_STATUS_WPS_M7,
-	EAPOL_STATUS_WPS_M8,
-	EAPOL_STATUS_WPS_DONE,
-	EAPOL_STATUS_WPA_START,
-	EAPOL_STATUS_WPA_M1,
-	EAPOL_STATUS_WPA_M2,
-	EAPOL_STATUS_WPA_M3,
-	EAPOL_STATUS_WPA_M4,
-	EAPOL_STATUS_WPA_END
-};
-
 typedef struct dhd_conf {
 	uint chip;
 	uint chiprev;
-	int fw_type;
 	wl_mac_list_ctrl_t fw_by_mac;
 	wl_mac_list_ctrl_t nv_by_mac;
 	wl_chip_nv_path_list_ctrl_t nv_by_chip;
 	conf_country_list_t country_list;
+	conf_country_list_t country_list_nodfs;
 	int band;
-	int bw_cap[2];
+	int bw_cap_2g;
+	int bw_cap_5g;
 	wl_country_t cspec;
 	wl_channel_list_t channels;
 	uint roam_off;
@@ -183,6 +157,7 @@ typedef struct dhd_conf {
 	int tx_max_offset;
 	uint txglomsize;
 	int txctl_tmo_fix;
+	bool tx_in_rx;
 	bool txglom_mode;
 	uint deferred_tx_len;
 	/*txglom_bucket_size:
@@ -210,9 +185,12 @@ typedef struct dhd_conf {
 	uint8 tcpack_sup_mode;
 #endif
 	int pktprio8021x;
-	uint insuspend;
-	bool suspended;
+	int num_different_channels;
+	int xmit_in_suspend;
+	int ap_in_suspend;
 #ifdef SUSPEND_EVENT
+	bool suspend_eventmask_enable;
+	char suspend_eventmask[WL_EVENTING_MASK_LEN];
 	char resume_eventmask[WL_EVENTING_MASK_LEN];
 #endif
 #ifdef IDHCP
@@ -223,19 +201,16 @@ typedef struct dhd_conf {
 	struct ipv4_addr dhcpd_ip_start;
 	struct ipv4_addr dhcpd_ip_end;
 #endif
-#ifdef ISAM_PREINIT
-	char isam_init[50];
-	char isam_config[300];
-	char isam_enable[50];
+#ifdef IAPSTA_PREINIT
+	char iapsta_init[50];
+	char iapsta_config[300];
+	char iapsta_enable[50];
 #endif
 	int ctrl_resched;
 	int dhd_ioctl_timeout_msec;
 	struct mchan_params mchan[MCHAN_MAX_NUM];
 	char *wl_preinit;
 	int tsq;
-	uint eapol_status;
-	uint in4way;
-	uint max_wait_gc_time;
 } dhd_conf_t;
 
 #ifdef BCMSDIO
@@ -256,13 +231,15 @@ void dhd_conf_set_path(dhd_pub_t *dhd, char *dst_name, char *dst_path, char *src
 void dhd_conf_set_conf_name_by_chip(dhd_pub_t *dhd, char *conf_path);
 #endif
 int dhd_conf_set_intiovar(dhd_pub_t *dhd, uint cmd, char *name, int val, int def, bool down);
+int dhd_conf_get_iovar(dhd_pub_t *dhd, int cmd, char *name, char *buf, int len, int ifidx);
+int dhd_conf_set_bufiovar(dhd_pub_t *dhd, uint cmd, char *name, char *buf, int len, bool down);
 uint dhd_conf_get_band(dhd_pub_t *dhd);
 int dhd_conf_set_country(dhd_pub_t *dhd, wl_country_t *cspec);
 int dhd_conf_get_country(dhd_pub_t *dhd, wl_country_t *cspec);
-int dhd_conf_map_country_list(dhd_pub_t *dhd, wl_country_t *cspec);
+int dhd_conf_map_country_list(dhd_pub_t *dhd, wl_country_t *cspec, int nodfs);
 int dhd_conf_fix_country(dhd_pub_t *dhd);
 bool dhd_conf_match_channel(dhd_pub_t *dhd, uint32 channel);
-void dhd_conf_set_wme(dhd_pub_t *dhd, int ifidx, int mode);
+void dhd_conf_set_wme(dhd_pub_t *dhd, int mode);
 void dhd_conf_set_mchan_bw(dhd_pub_t *dhd, int go, int source);
 void dhd_conf_add_pkt_filter(dhd_pub_t *dhd);
 bool dhd_conf_del_pkt_filter(dhd_pub_t *dhd, uint32 id);
@@ -272,12 +249,11 @@ int dhd_conf_set_chiprev(dhd_pub_t *dhd, uint chip, uint chiprev);
 uint dhd_conf_get_chip(void *context);
 uint dhd_conf_get_chiprev(void *context);
 int dhd_conf_get_pm(dhd_pub_t *dhd);
-
 #ifdef PROP_TXSTATUS
 int dhd_conf_get_disable_proptx(dhd_pub_t *dhd);
 #endif
-uint dhd_conf_get_insuspend(dhd_pub_t *dhd);
-int dhd_conf_set_suspend_resume(dhd_pub_t *dhd, int suspend);
+int dhd_conf_get_ap_mode_in_suspend(dhd_pub_t *dhd);
+int dhd_conf_set_ap_in_suspend(dhd_pub_t *dhd, int suspend);
 void dhd_conf_postinit_ioctls(dhd_pub_t *dhd);
 int dhd_conf_preinit(dhd_pub_t *dhd);
 int dhd_conf_reset(dhd_pub_t *dhd);

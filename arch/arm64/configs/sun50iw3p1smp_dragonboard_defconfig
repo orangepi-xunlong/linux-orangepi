@@ -2493,7 +2493,7 @@ CONFIG_VIDEO_GOOGLE_VP9_DECODER_SUNXI=y
 #
 # GPU support for sunxi
 #
-CONFIG_SUNXI_GPU_TYPE="mali-t760"
+CONFIG_SUNXI_GPU_TYPE="None"
 # CONFIG_DRM is not set
 
 #

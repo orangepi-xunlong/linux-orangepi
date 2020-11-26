@@ -30,27 +30,23 @@ static struct wireless_dev *ieee80211_add_iface(struct wiphy *wiphy,
 {
 	struct ieee80211_local *local = wiphy_priv(wiphy);
 	struct net_device *dev;
-	static struct wireless_dev *wdev;
+	struct wireless_dev *wdev;
 	struct ieee80211_sub_if_data *sdata;
 	int err;
-	(void)dev;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
-	err = mac80211_if_add(local, name, name_assign_type, &wdev, type, params);
-	if (err)
-		return ERR_PTR(err);
-	sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
+		err = mac80211_if_add(local, name, name_assign_type, &dev, type, params);
 #else
-	err = mac80211_if_add(local, name, &dev, type, params);
+		err = mac80211_if_add(local, name, &dev, type, params);
+#endif
+
 	if (err)
 		return ERR_PTR(err);
 	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
-	wdev = &sdata->wdev;
-#endif
 	if (type == NL80211_IFTYPE_MONITOR && flags) {
 		sdata->u.mntr_flags = *flags;
 	}
-
+	wdev = &sdata->wdev;
 	return wdev;
 }
 
@@ -113,18 +109,6 @@ static int ieee80211_change_iface(struct wiphy *wiphy,
 	return 0;
 }
 
-static int ieee80211_start_p2p_device(struct wiphy *wiphy,
-				struct wireless_dev *wdev)
-{
-	return ieee80211_do_open(wdev, true);
-}
-
-static void ieee80211_stop_p2p_device(struct wiphy *wiphy,
-				struct wireless_dev *wdev)
-{
-	ieee80211_sdata_stop(IEEE80211_WDEV_TO_SUB_IF(wdev));
-}
-
 static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
 			     u8 key_idx, bool pairwise, const u8 *mac_addr,
 			     struct key_params *params)
@@ -156,23 +140,6 @@ static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
 
 	if (pairwise)
 		key->conf.flags |= IEEE80211_KEY_FLAG_PAIRWISE;
-
-	if (pairwise && sdata->vif.type == NL80211_IFTYPE_STATION) {
-		int ret = 0;
-		/*
-		 * Fix a bug that in some case Add_key is before
-		 * 4-way handshake fourth frame sending while will cause 4-way handshake failed.
-		 * If and only if the sta has associated the ap and
-		 * start 4-way handshake but no finish(FINISH2), Add_key will
-		 * be delay until 4-way handshake finish(FINISH4)
-		 */
-		ret = wait_event_timeout(sdata->setkey_wq,
-				!((sdata->u.mgd.associated != NULL) && (sdata->fourway_state == SDATA_4WAY_STATE_FINISH2)), 0.5 * HZ);
-		if (ret == 0) {
-			sdata->fourway_state = SDATA_4WAY_STATE_NONE;
-			printk(KERN_WARNING "[XRADIO]4-Way Handshake timeout.\n");
-		}
-	}
 
 	mutex_lock(&sdata->local->sta_mtx);
 
@@ -1937,7 +1904,6 @@ static int ieee80211_scan(struct wiphy *wiphy,
 	case NL80211_IFTYPE_ADHOC:
 	case NL80211_IFTYPE_MESH_POINT:
 	case NL80211_IFTYPE_P2P_CLIENT:
-	case NL80211_IFTYPE_P2P_DEVICE:
 		break;
 	case NL80211_IFTYPE_P2P_GO:
 		if (sdata->local->ops->hw_scan)
@@ -2785,7 +2751,6 @@ static int ieee80211_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 		break;
 	case NL80211_IFTYPE_STATION:
 	case NL80211_IFTYPE_P2P_CLIENT:
-	case NL80211_IFTYPE_P2P_DEVICE:
 		break;
 	default:
 		return -EOPNOTSUPP;
@@ -3285,8 +3250,6 @@ struct cfg80211_ops xrmac_config_ops = {
 	.add_virtual_intf = ieee80211_add_iface,
 	.del_virtual_intf = ieee80211_del_iface,
 	.change_virtual_intf = ieee80211_change_iface,
-	.start_p2p_device = ieee80211_start_p2p_device,
-	.stop_p2p_device = ieee80211_stop_p2p_device,
 	.add_key = ieee80211_add_key,
 	.del_key = ieee80211_del_key,
 	.get_key = ieee80211_get_key,

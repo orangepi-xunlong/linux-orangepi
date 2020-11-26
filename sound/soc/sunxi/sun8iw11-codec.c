@@ -754,21 +754,20 @@ static int sunxi_codec_trigger(struct snd_pcm_substream *substream,
 				int cmd, struct snd_soc_dai *dai)
 {
 	struct snd_soc_codec *codec = dai->codec;
-	struct sunxi_codec *sunxi_codec = snd_soc_codec_get_drvdata(codec);
 
 	switch (cmd) {
 	case	SNDRV_PCM_TRIGGER_START:
 	case	SNDRV_PCM_TRIGGER_RESUME:
 	case	SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			regmap_update_bits(sunxi_codec->regmap, SUNXI_DAC_PA_SRC,
+			snd_soc_update_bits(codec, SUNXI_DAC_PA_SRC,
 				0x1 << LHPPAMUTE, 0x1 << LHPPAMUTE);
-			regmap_update_bits(sunxi_codec->regmap, SUNXI_DAC_PA_SRC,
+			snd_soc_update_bits(codec, SUNXI_DAC_PA_SRC,
 				0x1 << RHPPAMUTE, 0x1 << RHPPAMUTE);
-			regmap_update_bits(sunxi_codec->regmap, SUNXI_DAC_FIFO_CTR,
+			snd_soc_update_bits(codec, SUNXI_DAC_FIFO_CTR,
 					(1<<DAC_DRQ_EN), (1<<DAC_DRQ_EN));
 		} else
-			regmap_update_bits(sunxi_codec->regmap, SUNXI_ADC_FIFO_CTR,
+			snd_soc_update_bits(codec, SUNXI_ADC_FIFO_CTR,
 					(1<<ADC_DRQ_EN), (1<<ADC_DRQ_EN));
 		break;
 	case	SNDRV_PCM_TRIGGER_STOP:
@@ -779,14 +778,14 @@ static int sunxi_codec_trigger(struct snd_pcm_substream *substream,
 			 * when disable the DAC_DRQ_EN,
 			 * it will occuse to pop or click sound.
 			 */
-			regmap_update_bits(sunxi_codec->regmap, SUNXI_DAC_PA_SRC,
+			snd_soc_update_bits(codec, SUNXI_DAC_PA_SRC,
 				0x1 << LHPPAMUTE, 0x0 << LHPPAMUTE);
-			regmap_update_bits(sunxi_codec->regmap, SUNXI_DAC_PA_SRC,
+			snd_soc_update_bits(codec, SUNXI_DAC_PA_SRC,
 				0x1 << RHPPAMUTE, 0x0 << RHPPAMUTE);
-			regmap_update_bits(sunxi_codec->regmap, SUNXI_DAC_FIFO_CTR,
+			snd_soc_update_bits(codec, SUNXI_DAC_FIFO_CTR,
 					(1<<DAC_DRQ_EN), (0<<DAC_DRQ_EN));
 		} else
-			regmap_update_bits(sunxi_codec->regmap, SUNXI_ADC_FIFO_CTR,
+			snd_soc_update_bits(codec, SUNXI_ADC_FIFO_CTR,
 					(1<<ADC_DRQ_EN), (0<<ADC_DRQ_EN));
 		break;
 	default:

@@ -43,6 +43,7 @@
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
+
 #include "sunxi-uart.h"
 
 /* #define CONFIG_SW_UART_DUMP_DATA */
@@ -87,7 +88,7 @@ static void sw_uart_release_dma_rx(struct sw_uart_port *sw_uport);
 static int sw_uart_init_dma_rx(struct sw_uart_port *sw_uport);
 static int sw_uart_start_dma_rx(struct sw_uart_port *sw_uport);
 static void sw_uart_update_rb_addr(struct sw_uart_port *sw_uport);
-static enum hrtimer_restart  sw_uart_report_dma_rx(struct hrtimer *rx_hrtimer);
+static void sw_uart_report_dma_rx(unsigned long uart);
 #endif
 
 #ifdef CONFIG_SW_UART_DUMP_DATA
@@ -157,10 +158,8 @@ static inline bool sw_is_console_port(struct uart_port *port)
 
 static inline void sw_uart_reset(struct sw_uart_port *sw_uport)
 {
-#ifdef CONFIG_EVB_PLATFORM
 	sunxi_periph_reset_assert(sw_uport->mclk);
 	sunxi_periph_reset_deassert(sw_uport->mclk);
-#endif
 }
 
 static inline void sw_uart_enable_ier_thri(struct uart_port *port)
@@ -194,8 +193,8 @@ static unsigned int sw_uart_handle_rx(struct sw_uart_port *sw_uport, unsigned in
 #ifdef CONFIG_SERIAL_SUNXI_DMA
 	if ((sw_uport->dma->use_dma & RX_DMA)) {
 		if (lsr & SUNXI_UART_LSR_RXFIFOE) {
-			dev_info(sw_uport->port.dev, "error:lsr=0x%x\n", lsr);
 			lsr = serial_in(&sw_uport->port, SUNXI_UART_LSR);
+			dev_info(sw_uport->port.dev, "error:lsr=0x%x\n", lsr);
 			return lsr;
 		}
 	}
@@ -543,7 +542,7 @@ static int sw_uart_start_dma_tx(struct sw_uart_port *sw_uport)
 	count -= count%16;
 	if (count >= DMA_TX_TRRIGE_LEVEL) {
 		uart_dma->tx_bytes = count;
-		sg_init_one(sgl, phys_to_virt(uart_dma->tx_phy_addr) + xmit->tail, count);
+		sg_init_one(sgl, uart_dma->tx_buffer + xmit->tail, count);
 		ret = dma_map_sg(port->dev, sgl, 1, DMA_TO_DEVICE);
 
 		if (ret == 0) {
@@ -574,7 +573,7 @@ static void sw_uart_stop_dma_rx(struct sw_uart_port *sw_uport)
 	struct sw_uart_dma *uart_dma = sw_uport->dma;
 
 	if (uart_dma && uart_dma->rx_dma_used) {
-		hrtimer_cancel(&sw_uport->rx_hrtimer);
+		del_timer(&uart_dma->rx_timer);
 		dmaengine_terminate_all(uart_dma->dma_chan_rx);
 		uart_dma->rb_tail = 0;
 		uart_dma->rx_dma_used = 0;
@@ -670,8 +669,8 @@ static int sw_uart_start_dma_rx(struct sw_uart_port *sw_uport)
 
 	uart_dma->rx_dma_used = 1;
 	if (uart_dma->use_timer == 1) {
-		hrtimer_start(&sw_uport->rx_hrtimer,
-			ns_to_ktime(uart_dma->rx_timeout), HRTIMER_MODE_REL);
+		mod_timer(&uart_dma->rx_timer,
+			jiffies + msecs_to_jiffies(uart_dma->rx_timeout));
 	}
 	return 1;
 }
@@ -692,16 +691,15 @@ static void sw_uart_update_rb_addr(struct sw_uart_port *sw_uport)
 	}
 }
 
-static enum hrtimer_restart sw_uart_report_dma_rx(struct hrtimer *rx_hrtimer)
+static void sw_uart_report_dma_rx(unsigned long uart)
 {
 	int count, flip = 0;
-	struct sw_uart_port *sw_uport = container_of(rx_hrtimer,
-						struct sw_uart_port, rx_hrtimer);
+	struct sw_uart_port *sw_uport = (struct sw_uart_port *)uart;
 	struct uart_port *port = &sw_uport->port;
 	struct sw_uart_dma *uart_dma = sw_uport->dma;
 
 	if (!uart_dma->rx_dma_used || !port->state->port.tty)
-		return HRTIMER_NORESTART;
+		return;
 
 	sw_uart_update_rb_addr(sw_uport);
 	while (1) {
@@ -717,12 +715,9 @@ static enum hrtimer_restart sw_uart_report_dma_rx(struct hrtimer *rx_hrtimer)
 			(uart_dma->rb_tail + count) & (uart_dma->rb_size - 1);
 	}
 
-	if (uart_dma->use_timer == 1) {
-		hrtimer_forward_now(&sw_uport->rx_hrtimer,
-				ns_to_ktime(uart_dma->rx_timeout));
-	}
-
-	return HRTIMER_RESTART;
+	if (uart_dma->use_timer == 1)
+		mod_timer(&uart_dma->rx_timer,
+			jiffies + msecs_to_jiffies(uart_dma->rx_timeout));
 }
 
 #endif
@@ -1152,32 +1147,15 @@ static void sw_uart_set_termios(struct uart_port *port, struct ktermios *termios
 	if ((termios->c_cflag & CREAD) == 0)
 		port->ignore_status_mask |= SUNXI_UART_LSR_DR;
 
-	if (baud <= 9600)
-		sw_uport->fcr = SUNXI_UART_FCR_RXTRG_1CH
-				| SUNXI_UART_FCR_TXTRG_1_2
-				| SUNXI_UART_FCR_FIFO_EN;
-	else
-		sw_uport->fcr = SUNXI_UART_FCR_RXTRG_1_2
-				| SUNXI_UART_FCR_TXTRG_1_2
-				| SUNXI_UART_FCR_FIFO_EN;
-
+	sw_uport->fcr = SUNXI_UART_FCR_RXTRG_1_2 | SUNXI_UART_FCR_TXTRG_1_2
+			| SUNXI_UART_FCR_FIFO_EN;
 	serial_out(port, sw_uport->fcr, SUNXI_UART_FCR);
-
-	/*
-	 * if lcr & baud are changed, reset controller to disable transfer
-	 */
-	if (lcr != sw_uport->lcr || dll != sw_uport->dll || dlh != sw_uport->dlh) {
-		/*SERIAL_DBG("LCR & BAUD changed, reset controller...\n");*/
-		sw_uart_reset(sw_uport);
-	}
 
 	sw_uport->lcr = lcr;
 	sw_uport->dll = dll;
 	sw_uport->dlh = dlh;
 	sw_uart_force_lcr(sw_uport, 50);
 
-	/* clear rxfifo after set lcr & baud to discard redundant data */
-	serial_out(port, sw_uport->fcr|SUNXI_UART_FCR_RXFIFO_RST, SUNXI_UART_FCR);
 	port->ops->set_mctrl(port, port->mctrl);
 
 	sw_uport->ier = SUNXI_UART_IER_RLSI | SUNXI_UART_IER_RDI;
@@ -1246,9 +1224,6 @@ static int sw_uart_select_gpio_state(struct pinctrl *pctrl, char *name, u32 no)
 
 static int sw_uart_request_gpio(struct sw_uart_port *sw_uport)
 {
-	if (sw_uport->card_print)
-		return 0;
-
 	sw_uport->pctrl = devm_pinctrl_get(sw_uport->port.dev);
 
 	if (IS_ERR_OR_NULL(sw_uport->pctrl)) {
@@ -1261,9 +1236,6 @@ static int sw_uart_request_gpio(struct sw_uart_port *sw_uport)
 
 static void sw_uart_release_gpio(struct sw_uart_port *sw_uport)
 {
-	if (sw_uport->card_print)
-		return;
-
 	devm_pinctrl_put(sw_uport->pctrl);
 	sw_uport->pctrl = NULL;
 }
@@ -1499,9 +1471,9 @@ static ssize_t sunxi_uart_dev_info_show(struct device *dev,
 	struct sw_uart_pdata *pdata = (struct sw_uart_pdata *)dev->platform_data;
 
 	return snprintf(buf, PAGE_SIZE,
-		"id     = %u \n"
+		"id     = %d \n"
 		"name   = %s \n"
-		"irq    = %u \n"
+		"irq    = %d \n"
 		"io_num = %u \n"
 		"port->mapbase = %pa \n"
 		"port->membase = 0x%p \n"
@@ -1824,8 +1796,6 @@ static int sw_uart_probe(struct platform_device *pdev)
 	char uart_para[16] = {0};
 	const char *uart_string;
 	int ret = -1;
-	struct device_node *apk_np = of_find_node_by_name(NULL, "auto_print");
-	const char *apk_sta = NULL;
 #ifdef CONFIG_SERIAL_SUNXI_DMA
 	int use_dma = 0;
 #endif
@@ -1949,12 +1919,6 @@ static int sw_uart_probe(struct platform_device *pdev)
 	if (of_property_read_bool(np, "linux,rs485-enabled-at-boot-time"))
 		sw_uport->rs485conf.flags |= SER_RS485_ENABLED;
 
-	if (apk_np && !of_property_read_string(apk_np, "status", &apk_sta)
-						&& !strcmp(apk_sta, "okay"))
-		sw_uport->card_print = true;
-	else
-		sw_uport->card_print = false;
-
 	pdata->used = 1;
 	port->iotype = UPIO_MEM;
 	port->type = PORT_SUNXI;
@@ -1969,27 +1933,30 @@ static int sw_uart_probe(struct platform_device *pdev)
 	if (sw_uport->dma->use_dma & RX_DMA) {
 		/* timer */
 		sw_uport->dma->use_timer = UART_USE_TIMER;
-		sw_uport->dma->rx_timeout = 2000000;
-		hrtimer_init(&sw_uport->rx_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-		sw_uport->rx_hrtimer.function = sw_uart_report_dma_rx;
+		sw_uport->dma->rx_timer.function = sw_uart_report_dma_rx;
+		sw_uport->dma->rx_timer.data = (unsigned long)sw_uport;
+		sw_uport->dma->rx_timeout = 5;
+		sw_uport->dma->rx_timer.expires =
+			jiffies + msecs_to_jiffies(sw_uport->dma->rx_timeout);
+		init_timer(&sw_uport->dma->rx_timer);
 
 		/* rx buffer */
 		sw_uport->dma->rb_size = DMA_SERIAL_BUFFER_SIZE;
 		sw_uport->dma->rx_buffer = dma_alloc_coherent(
 				sw_uport->port.dev, sw_uport->dma->rb_size,
-				&sw_uport->dma->rx_phy_addr, GFP_KERNEL);
+				&sw_uport->dma->rx_phy_addr, DMA_MEMORY_MAP);
 		sw_uport->dma->rb_tail = 0;
 
 		if (!sw_uport->dma->rx_buffer) {
-			dev_err(sw_uport->port.dev,
+			dev_info(sw_uport->port.dev,
 				"dmam_alloc_coherent dma_rx_buffer fail\n");
-			return -ENOMEM;
 		} else {
 			dev_info(sw_uport->port.dev,
 				"dma_rx_buffer %p\n", sw_uport->dma->rx_buffer);
 			dev_info(sw_uport->port.dev,
 		"dma_rx_phy 0x%08x\n", (unsigned)sw_uport->dma->rx_phy_addr);
 		}
+
 		sw_uart_init_dma_rx(sw_uport);
 	}
 
@@ -2051,9 +2018,7 @@ static int sw_uart_suspend(struct device *dev)
 		uart_suspend_port(&sw_uart_driver, port);
 
 		if (SW_UART_NEED_SUSPEND(port)) {
-			if (!sw_uport->card_print)
-				sw_uart_select_gpio_state(sw_uport->pctrl,
-					PINCTRL_STATE_SLEEP, sw_uport->id);
+			sw_uart_select_gpio_state(sw_uport->pctrl, PINCTRL_STATE_SLEEP, sw_uport->id);
 			sw_uart_regulator_disable(dev->platform_data);
 		}
 	}
@@ -2072,9 +2037,7 @@ static int sw_uart_resume(struct device *dev)
 	if (port) {
 		if (SW_UART_NEED_SUSPEND(port)) {
 			sw_uart_regulator_enable(dev->platform_data);
-			if (!sw_uport->card_print)
-				sw_uart_select_gpio_state(sw_uport->pctrl,
-					PINCTRL_STATE_DEFAULT, sw_uport->id);
+			sw_uart_select_gpio_state(sw_uport->pctrl, PINCTRL_STATE_DEFAULT, sw_uport->id);
 		}
 #ifdef CONFIG_EVB_PLATFORM
 		/* It's used only in super-standby mode.

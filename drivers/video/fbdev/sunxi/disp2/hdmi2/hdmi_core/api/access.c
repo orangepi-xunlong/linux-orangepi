@@ -60,6 +60,20 @@ static int dev_initialize(hdmi_tx_dev_t *dev)
 	return -1;
 }
 
+
+/**
+ *Close communications with development board and free resources
+ *@return TRUE  if successful.
+ */
+static int dev_standby(hdmi_tx_dev_t *dev)
+{
+	if (device_bsp)
+		return device_bsp->disable();
+
+	pr_err("Error:BSP functions not registered\n");
+	return -1;
+}
+
 u32 dev_read(hdmi_tx_dev_t *dev, u32 addr)
 {
 	if (dev && device_bsp && device_bsp->read)
@@ -100,6 +114,12 @@ int access_Initialize(hdmi_tx_dev_t *dev)
 {
 	return dev_initialize(dev);
 }
+
+int access_Standby(hdmi_tx_dev_t *dev)
+{
+	return dev_standby(dev);
+}
+
 
 void register_system_functions(struct system_functions *functions)
 {
@@ -360,13 +380,3 @@ int ddc_read(hdmi_tx_dev_t *dev, u8 i2cAddr, u8 segment,
 	return 0;
 }
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
-int ddc_read_hdcp2Version(hdmi_tx_dev_t *dev, u8 *data)
-{
-	if (ddc_read(dev, 0x3A, 0, 0, 0x50, 1, data)) {
-		pr_info("%s: DDC Read hdcp2Version fail!\n", __func__);
-		return -1;
-	}
-	return 0;
-}
-#endif

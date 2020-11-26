@@ -185,32 +185,6 @@ static int xlat_status(struct nvdimm *nvdimm, void *buf, unsigned int cmd,
 	return 0;
 }
 
-static int cmd_to_func(struct nfit_mem *nfit_mem, unsigned int cmd,
-		struct nd_cmd_pkg *call_pkg)
-{
-	if (call_pkg) {
-		int i;
-
-		if (nfit_mem->family != call_pkg->nd_family)
-			return -ENOTTY;
-
-		for (i = 0; i < ARRAY_SIZE(call_pkg->nd_reserved2); i++)
-			if (call_pkg->nd_reserved2[i])
-				return -EINVAL;
-		return call_pkg->nd_command;
-	}
-
-	/* Linux ND commands == NVDIMM_FAMILY_INTEL function numbers */
-	if (nfit_mem->family == NVDIMM_FAMILY_INTEL)
-		return cmd;
-
-	/*
-	 * Force function number validation to fail since 0 is never
-	 * published as a valid function in dsm_mask.
-	 */
-	return 0;
-}
-
 int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 		unsigned int cmd, void *buf, unsigned int buf_len, int *cmd_rc)
 {
@@ -223,11 +197,15 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 	unsigned long cmd_mask, dsm_mask;
 	u32 offset, fw_status = 0;
 	acpi_handle handle;
+	unsigned int func;
 	const u8 *uuid;
-	int func, rc, i;
+	int rc, i;
 
-	if (cmd_rc)
-		*cmd_rc = -EINVAL;
+	func = cmd;
+	if (cmd == ND_CMD_CALL) {
+		call_pkg = buf;
+		func = call_pkg->nd_command;
+	}
 
 	if (nvdimm) {
 		struct nfit_mem *nfit_mem = nvdimm_provider_data(nvdimm);
@@ -235,12 +213,9 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 
 		if (!adev)
 			return -ENOTTY;
+		if (call_pkg && nfit_mem->family != call_pkg->nd_family)
+			return -ENOTTY;
 
-		if (cmd == ND_CMD_CALL)
-			call_pkg = buf;
-		func = cmd_to_func(nfit_mem, cmd, call_pkg);
-		if (func < 0)
-			return func;
 		dimm_name = nvdimm_name(nvdimm);
 		cmd_name = nvdimm_cmd_name(cmd);
 		cmd_mask = nvdimm_cmd_mask(nvdimm);
@@ -251,7 +226,6 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 	} else {
 		struct acpi_device *adev = to_acpi_dev(acpi_desc);
 
-		func = cmd;
 		cmd_name = nvdimm_bus_cmd_name(cmd);
 		cmd_mask = nd_desc->cmd_mask;
 		dsm_mask = cmd_mask;
@@ -264,13 +238,7 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 	if (!desc || (cmd && (desc->out_num + desc->in_num == 0)))
 		return -ENOTTY;
 
-	/*
-	 * Check for a valid command.  For ND_CMD_CALL, we also have to
-	 * make sure that the DSM function is supported.
-	 */
-	if (cmd == ND_CMD_CALL && !test_bit(func, &dsm_mask))
-		return -ENOTTY;
-	else if (!test_bit(cmd, &cmd_mask))
+	if (!test_bit(cmd, &cmd_mask) || !test_bit(func, &dsm_mask))
 		return -ENOTTY;
 
 	in_obj.type = ACPI_TYPE_PACKAGE;
@@ -307,13 +275,6 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 		return -EINVAL;
 	}
 
-	if (out_obj->type != ACPI_TYPE_BUFFER) {
-		dev_dbg(dev, "%s unexpected output object type cmd: %s type: %d\n",
-				dimm_name, cmd_name, out_obj->type);
-		rc = -EINVAL;
-		goto out;
-	}
-
 	if (call_pkg) {
 		call_pkg->nd_fw_size = out_obj->buffer.length;
 		memcpy(call_pkg->nd_payload + call_pkg->nd_size_in,
@@ -327,9 +288,14 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 		 * If we return an error (like elsewhere) then caller wouldn't
 		 * be able to rely upon data returned to make calculation.
 		 */
-		if (cmd_rc)
-			*cmd_rc = 0;
 		return 0;
+	}
+
+	if (out_obj->package.type != ACPI_TYPE_BUFFER) {
+		dev_dbg(dev, "%s:%s unexpected output object type cmd: %s type: %d\n",
+				__func__, dimm_name, cmd_name, out_obj->type);
+		rc = -EINVAL;
+		goto out;
 	}
 
 	if (IS_ENABLED(CONFIG_ACPI_NFIT_DEBUG)) {
@@ -1462,13 +1428,6 @@ static int acpi_nfit_add_dimm(struct acpi_nfit_desc *acpi_desc,
 		/* DSMs are optional, continue loading the driver... */
 		return 0;
 	}
-
-	/*
-	 * Function 0 is the command interrogation function, don't
-	 * export it to potential userspace use, and enable it to be
-	 * used as an error value in acpi_nfit_ctl().
-	 */
-	dsm_mask &= ~1UL;
 
 	uuid = to_nfit_uuid(nfit_mem->family);
 	for_each_set_bit(i, &dsm_mask, BITS_PER_LONG)

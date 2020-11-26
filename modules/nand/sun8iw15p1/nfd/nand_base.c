@@ -9,7 +9,6 @@
  * warranty of any kind, whether express or implied.
  */
 #include "nand_base.h"
-#include "nand_panic.h"
 /*****************************************************************************/
 
 static unsigned int channel0;
@@ -21,7 +20,7 @@ struct platform_device *plat_dev_nand;
 __u32 exit_probe_flag;
 void *SPIC0_IO_BASE;
 struct completion spinand_dma_done;
-int boot_cnt;
+
 /*****************************************************************************
 *Name         :
 *Description  :
@@ -30,7 +29,7 @@ int boot_cnt;
 *Note         :
 *****************************************************************************/
 spinlock_t nand_int_lock;
-int flash_type;
+
 static irqreturn_t nand_interrupt(int irq, void *channel)
 {
 	unsigned int no;
@@ -38,11 +37,7 @@ static irqreturn_t nand_interrupt(int irq, void *channel)
 
 	spin_lock_irqsave(&nand_int_lock, iflags);
 	no = *((unsigned int *)channel);
-	if (flash_type == 1) {
-		do_nand_interrupt(no);
-	} else {
-		tdo_nand_interrupt(no);
-	}
+	do_nand_interrupt(no);
 	spin_unlock_irqrestore(&nand_int_lock, iflags);
 	return IRQ_HANDLED;
 }
@@ -108,12 +103,7 @@ static int nand_suspend(struct platform_device *plat_dev, pm_message_t state)
 	nand_dbg_err("[NAND] nand_suspend ok\n");
 #else
 	nand_dbg_err("[NAND] nand_suspend\n");
-	if (flash_type == 1) {
-		NandHwSuperStandby();
-	} else {
-		TNandHwSuperStandby();
-	}
-
+	NandHwSuperStandby();
 	nand_dbg_err("[NAND] nand_suspend ok\n");
 #endif
 	return 0;
@@ -140,12 +130,7 @@ static int nand_resume(struct platform_device *plat_dev)
 	nand_dbg_err("[NAND] nand_resume ok\n");
 #else
 	nand_dbg_err("[NAND] nand_resume\n");
-	if (flash_type == 1) {
-		NandHwSuperResume();
-	} else {
-		TNandHwSuperResume();
-	}
-
+	NandHwSuperResume();
 	nand_dbg_err("[NAND] nand_resume ok\n");
 #endif
 	return 0;
@@ -256,12 +241,10 @@ uint32 shutdown_flush_write_cache(void)
 	while (nftl_blk != NULL) {
 		nand_dbg_err("shutdown_flush_write_cache\n");
 		mutex_lock(nftl_blk->blk_lock);
-		if (flash_type == 1) {
-			nftl_blk->flush_write_cache(nftl_blk, 0xffff);
-			print_nftl_zone(nftl_blk->nftl_zone);
-		} else if (flash_type == 2) {
-			tflush_write_cache();
-		}
+		nftl_blk->flush_write_cache(nftl_blk, 0xffff);
+
+		print_nftl_zone(nftl_blk->nftl_zone);
+
 		nftl_blk = nftl_blk->nftl_blk_next;
 
 	}
@@ -277,19 +260,8 @@ uint32 shutdown_flush_write_cache(void)
 *****************************************************************************/
 void nand_shutdown(struct platform_device *plat_dev)
 {
-	struct _nftl_blk *nftl_blk;
-	struct nand_blk_ops *tr = &mytr;
-
-	if (flash_type == 1) {
-		shutdown_flush_write_cache();
-		NandHwShutDown();
-	} else if (flash_type == 2) {
-		nftl_blk = tr->nftl_blk_head.nftl_blk_next;
-		mutex_lock(nftl_blk->blk_lock);
-		tnftl_exit();
-		TNandHwShutDown();
-	}
-
+	shutdown_flush_write_cache();
+	NandHwShutDown();
 	nand_dbg_err("[NAND]shutdown end\n");
 }
 
@@ -318,8 +290,8 @@ static struct platform_driver nand_driver = {
 		   }
 };
 
-static const struct of_device_id of_spinand_id = {
-	.compatible = "allwinner,sunxi-spinand",
+static const struct of_device_id of_spinand_id = {.compatible =
+	    "allwinner,sunxi-spinand",
 };
 
 static struct platform_driver spinand_driver = {
@@ -351,13 +323,10 @@ int __init nand_init(void)
 	int dragonboard_flag = 0;
 	struct device_node *np = NULL;
 	const char *sta;
-	uchar *data = kmalloc(0x400, GFP_KERNEL);
-	void *tp_nand_info;
 
 	exit_probe_flag = 0;
-	nand_type = NAND_STORAGE_TYPE_NULL;
 
-	/*raw-nand*/
+	/*row-nand*/
 	np = of_find_node_by_type(NULL, "nand0");
 	if (!np) {
 		nand_dbg_err("get raw-nand node failed\n");
@@ -365,44 +334,35 @@ int __init nand_init(void)
 		np = of_find_node_by_type(NULL, "spinand");
 		if (!np) {
 			nand_dbg_err("get spi-nand node failed\n");
-			kfree(data);
 			return 0;
 		} else {
 			ret = of_property_read_string(np, "status", &sta);
 			if (ret)
-				nand_dbg_err("ERROR! get spi-nand status failed, %d\n", -ret);
+				nand_dbg_err("get spiN stat fail,%d\n", -ret);
+
 			if (!strcasecmp(sta, "okay"))
-				nand_type = NAND_STORAGE_TYPE_SPINAND;
+				nand_type = 2;
+			else
+				nand_type = 0;
 		}
 	} else {
 		ret = of_property_read_string(np, "status", &sta);
 		if (ret)
-			nand_dbg_err("ERROR! get raw-nand status failed, %d\n", -ret);
+			nand_dbg_err("get rawN stat fail,%d\n", -ret);
+
 		if (!strcasecmp(sta, "okay"))
-			nand_type = NAND_STORAGE_TYPE_RAWNAND;
-		}
-	if (get_storage_type() == NAND_STORAGE_TYPE_NULL) {
-		nand_dbg_err("[NE] Not found valid nand node on dts\n");
-		return -EINVAL;
+			nand_type = 1;
+		else
+			nand_type = 0;
 	}
 
-	/*
-	 * panic nand is a enhanced function for nand
-	 * it's ok to do not support panic.
-	 */
-	ret = nand_support_panic();
-	if (ret)
-		nand_dbg_err("NOT support panic nand\n");
-	else
-		nand_dbg_err("support panic nand\n");
-	if (get_storage_type() == NAND_STORAGE_TYPE_RAWNAND)
+	if (get_storage_type() == 1)
 		platform_driver_register(&nand_driver);
-	else if (get_storage_type() == NAND_STORAGE_TYPE_SPINAND)
+	else if (get_storage_type() == 2)
 		platform_driver_register(&spinand_driver);
 
 	if (exit_probe_flag == 0) {
 		nand_dbg_err("Failed to insmod nand!!!\n");
-		kfree(data);
 		return 0;
 	}
 
@@ -449,49 +409,19 @@ int __init nand_init(void)
 
 		p_nand_info = NandHwInit();
 		if (p_nand_info == NULL) {
-		NandHwExit();
-
-		flash_type = 2;
-			tp_nand_info = TNandHwInit();
-			if (tp_nand_info == NULL) {
-
-			    TNandHwExit();
-				kfree(data);
-			flash_type = 0;
-				return -EAGAIN;
-			}
-		} else {
-			flash_type = 1;
+			return -EAGAIN;
 		}
 
-		if (flash_type == 1) {
-			set_cache_level(p_nand_info, nand_cache_level);
-			set_capacity_level(p_nand_info, nand_capacity_level);
-			ret = nand_info_init(p_nand_info, 0, 8, NULL);
-			if (ret != 0) {
-				nand_dbg_err("nand_info_init error\n");
-				return ret;
-			}
-		} else if (flash_type == 2) {
-			ret = tnftl_struct_init();
-			if (ret != 0) {
-				nand_dbg_err("tnftl_struct_init error\n");
-				return ret;
-			}
-		} else {
-			nand_dbg_err("flash_type is error\n");
-			return -1;
+		set_cache_level(p_nand_info, nand_cache_level);
+		set_capacity_level(p_nand_info, nand_capacity_level);
+		ret = nand_info_init(p_nand_info, 0, 8, NULL);
+		if (ret != 0) {
+			nand_dbg_err("nand_info_init error\n");
+			return ret;
 		}
 
-		kfree(data);
-
-		if (flash_type == 1) {
-			if (NAND_CheckBoot() != 0)
-				nand_dbg_err("nand CheckBoot error\n");
-		} else {
-			if (TNAND_CheckBoot() != 0)
-				nand_dbg_err("tnand CheckBoot error\n");
-		}
+		if (NAND_CheckBoot() != 0)
+			nand_dbg_err("nand CheckBoot error\n");
 
 		init_blklayer();
 	} else {
@@ -501,12 +431,8 @@ int __init nand_init(void)
 		init_blklayer_for_dragonboard();
 		return 0;
 	}
-	if (flash_type == 1) {
-		kthread_run(nand_thread, &mytr, "%sd", "nand_rc");
-		nand_panic_init(mytr.nftl_blk_head.nftl_blk_next);
-	} else {
-		kthread_run(tlc_nand_thread, &mytr, "%sd", "tlc_nand_rc");
-	}
+	kthread_run(nand_thread, &mytr, "%sd", "nand_rc");
+
 	nand_dbg_err("nand init end\n");
 	return 0;
 }
@@ -520,8 +446,6 @@ int __init nand_init(void)
 *****************************************************************************/
 void __exit nand_exit(void)
 {
-	if (flash_type == 2)
-		tnftl_exit();
 	exit_blklayer();
 
 	if (get_storage_type() == 1)

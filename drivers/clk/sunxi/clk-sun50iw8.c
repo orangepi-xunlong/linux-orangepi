@@ -555,4 +555,3 @@ void __init sunxi_clocks_init(struct device_node *node)
 	/*do some initialize arguments here*/
 	sunxi_clk_factor_initlimits();
 }
-void __init sunxi_cpu_clocks_init(struct device_node *node) {}

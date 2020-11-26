@@ -15,6 +15,8 @@
 #ifndef __COMBO_RX_REG__H__
 #define __COMBO_RX_REG__H__
 
+#define MAX_MAP_NUM_PHY  8
+
 enum combo_rx_mode_sel {
 	D_PHY      = 0x2,
 	SUB_LVDS   = 0x3,
@@ -565,8 +567,8 @@ void cmb_rx_phya_b_ck_en(unsigned int sel, unsigned int en);
 void cmb_rx_phya_c_ck_en(unsigned int sel, unsigned int en);
 void cmb_rx_te_auto_disable(unsigned int sel, unsigned int en);
 
-void cmb_rx_phya_signal_dly_en(unsigned int sel, unsigned int en);
-void cmb_rx_phya_signal_dly_ctr(unsigned int sel, struct phya_signal_dly_ctr *phya_signal_dly);
+void cmb_rx_phya_singal_dly_en(unsigned int sel, unsigned int en);
+void cmb_rx_phya_singal_dly_ctr(unsigned int sel, struct phya_signal_dly_ctr *phya_signal_dly);
 
 void cmb_rx_phya_config(unsigned int sel);
 void cmb_rx_phya_ck_mode(unsigned int sel, unsigned int mode);
@@ -582,7 +584,7 @@ void cmb_rx_mode_sel(unsigned int sel, enum combo_rx_mode_sel mode);
 void cmb_rx_app_pixel_out(unsigned int sel, enum combo_rx_pix_num pix_num);
 
 void cmb_rx_mipi_ctr(unsigned int sel, struct mipi_ctr *mipi_ctr);
-void cmb_rx_mipi_stl_time(unsigned int sel, unsigned char time_hs);
+
 void cmb_rx_mipi_dphy_mapping(unsigned int sel, struct mipi_lane_map *mipi_map);
 
 void cmb_rx_mipi_csi2_status(unsigned int sel, unsigned int *mipi_csi2_status);

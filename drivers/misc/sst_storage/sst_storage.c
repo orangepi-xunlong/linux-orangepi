@@ -34,6 +34,10 @@
 
 #include "sst_storage.h"
 
+#ifdef OEM_STORE_IN_FS
+#define EMMC_SEC_STORE	"/data/oem_secure_store"
+#endif
+
 #define SEC_BLK_SIZE						(4096)
 #define MAX_SECURE_STORAGE_MAX_ITEM          (32)
 static unsigned int  secure_storage_inited;
@@ -44,17 +48,20 @@ static unsigned int  secure_storage_inited;
 #define SDMMC_SECTOR_SIZE				(512)
 #define SDMMC_SECURE_STORAGE_START_ADD  (6*1024*1024/512)
 #define SDMMC_ITEM_SIZE               	(4*1024/512)
-static char *sd_oem_path = "/dev/block/mmcblk0";
-static char *sd_oem_path_for_linux = "/dev/mmcblk0";
 
+#if defined(CONFIG_SUNXI_SST_BLKDEV_DIR)
+static char *sd_oem_path = "/dev/mmcblk0";
+#else
+static char *sd_oem_path = "/dev/block/mmcblk0";
+#endif
 /*
  * Nand parameters
  */
-static char *nand_oem_path = "/dev/block/nand0";
-static char *nand_oem_path_for_linux = "/dev/nand0";
-
-static char *nand_oem_path2 = "/dev/block/nanda";
-static char *nand_oem_path2_for_linux = "/dev/nanda";
+#if defined(CONFIG_SUNXI_SST_BLKDEV_DIR)
+static char *nand_oem_path = "/dev/by-name/bootloader";
+#else
+static char *nand_oem_path = "/dev/block/by-name/bootloader";
+#endif
 
 static struct secblc_op_t secblk_op;
 static fcry_pt nfcr;
@@ -84,7 +91,7 @@ static int flash_boot_type = FLASH_TYPE_UNKNOW;
 
 extern char *saved_command_line;
 
-void mem_dump(void *addr, unsigned int size)
+void sunxi_dump(void *addr, unsigned int size)
 {
 	int j;
 	char *buf = (char *)addr;
@@ -117,7 +124,7 @@ int _sst_user_ioctl(char *filename, int ioctl, void *param)
 	fd = filp_open(filename, O_WRONLY|O_CREAT, 0666);
 
 	if (IS_ERR(fd)) {
-		pr_err(" -file open fail\n");
+		pr_err(" -file open fail:%s\n", filename);
 		return -1;
 	}
 	do {
@@ -157,7 +164,7 @@ int _sst_user_read(char *filename, char *buf, ssize_t len, int offset)
 
 	fd = filp_open(filename, O_RDONLY, 0);
 	if (IS_ERR(fd)) {
-		pr_err(" -file open fail\n");
+		pr_err(" -file open fail:%s\n", filename);
 		return -1;
 	}
 	if (fd->f_op == NULL) {
@@ -274,8 +281,6 @@ static int get_flash_type(void)
 /*nand secure storage read/write*/
 static int _nand_read(int id, char *buf, ssize_t len)
 {
-	int ret;
-
 	if (!buf) {
 		pr_err("-buf NULL\n");
 		return -1;
@@ -288,22 +293,11 @@ static int _nand_read(int id, char *buf, ssize_t len)
 	secblk_op.buf = buf;
 	secblk_op.len = len;
 
-	ret = _sst_user_ioctl(nand_oem_path, SECBLK_READ, &secblk_op);
-	if (ret) {
-		ret = _sst_user_ioctl(nand_oem_path_for_linux, SECBLK_READ, &secblk_op);
-		if (ret) {
-			ret = _sst_user_ioctl(nand_oem_path2, SECBLK_READ, &secblk_op);
-			if (ret)
-				ret = _sst_user_ioctl(nand_oem_path2_for_linux, SECBLK_READ, &secblk_op);
-		}
-	}
-	return ret;
+	return  _sst_user_ioctl(nand_oem_path, SECBLK_READ, &secblk_op);
 }
 
 static int _nand_write(int	id, char *buf, ssize_t len)
 {
-	int ret;
-
 	if (!buf) {
 		pr_err("- buf NULL\n");
 		return -1;
@@ -317,16 +311,7 @@ static int _nand_write(int	id, char *buf, ssize_t len)
 	secblk_op.buf = buf;
 	secblk_op.len = len;
 
-	ret = _sst_user_ioctl(nand_oem_path, SECBLK_WRITE, &secblk_op);
-	if (ret) {
-		ret = _sst_user_ioctl(nand_oem_path_for_linux, SECBLK_WRITE, &secblk_op);
-		if (ret) {
-			ret = _sst_user_ioctl(nand_oem_path2, SECBLK_WRITE, &secblk_op);
-			if (ret)
-				ret = _sst_user_ioctl(nand_oem_path2_for_linux, SECBLK_WRITE, &secblk_op);
-		}
-	}
-	return ret;
+	return  _sst_user_ioctl(nand_oem_path, SECBLK_WRITE, &secblk_op);
 }
 
 /*emmc secure storage read/write*/
@@ -336,12 +321,9 @@ static int _sd_read(char *buf, int len, int offset)
 
 	ret =  _sst_user_read(sd_oem_path, buf, len, offset);
 	if (ret != len) {
-		ret =  _sst_user_read(sd_oem_path_for_linux, buf, len, offset);
-		if (ret != len) {
-			pr_err("_sst_user_read: read request len 0x%x, actual read 0x%x\n",
+		pr_err("_sst_user_read: read request len 0x%x, actual read 0x%x\n",
 				len, ret);
-			return -1;
-		}
+		return -1;
 	}
 	return 0 ;
 }
@@ -352,12 +334,9 @@ static int _sd_write(char *buf, int len, int offset)
 
 	ret =  _sst_user_write(sd_oem_path, buf, len, offset);
 	if (ret != len) {
-		ret =  _sst_user_write(sd_oem_path_for_linux, buf, len, offset);
-		if (ret != len) {
-			pr_err("_sst_user_write: write request len 0x%x, actual write 0x%x\n",
+		pr_err("_sst_user_write: write request len 0x%x, actual write 0x%x\n",
 				len, ret);
-			return -1;
-		}
+		return -1;
 	}
 	return 0 ;
 }

@@ -2,13 +2,13 @@
  * Linux cfg80211 driver
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -45,7 +45,6 @@
 #include <dngl_stats.h>
 #include <dhd.h>
 #include <wl_cfgp2p.h>
-#include <wl_android.h>
 struct wl_conf;
 struct wl_iface;
 struct bcm_cfg80211;
@@ -206,11 +205,6 @@ do {									\
 #define IEEE80211_BAND_5GHZ NL80211_BAND_5GHZ
 #define IEEE80211_NUM_BANDS NUM_NL80211_BANDS
 #endif
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 8, 0))
-#ifdef WLMESH
-#undef WLMESH
-#endif
-#endif
 
 #define WL_SCAN_RETRY_MAX	3
 #define WL_NUM_PMKIDS_MAX	MAXPMKID
@@ -345,10 +339,7 @@ enum wl_status {
 enum wl_mode {
 	WL_MODE_BSS,
 	WL_MODE_IBSS,
-	WL_MODE_AP,
-#ifdef WLMESH
-	WL_MODE_MESH
-#endif
+	WL_MODE_AP
 };
 
 /* driver profile list */
@@ -744,9 +735,9 @@ struct bcm_cfg80211 {
 	bool pwr_save;
 	bool roam_on;		/* on/off switch for self-roaming */
 	bool scan_tried;	/* indicates if first scan attempted */
-#if defined(BCMSDIO) || defined(BCMDBUS)
+#if defined(BCMSDIO) || defined(BCMPCIE)
 	bool wlfc_on;
-#endif
+#endif 
 	bool vsdb_mode;
 #define WL_ROAM_OFF_ON_CONCURRENT 	0x0001
 #define WL_ROAM_REVERT_STATUS		0x0002
@@ -855,27 +846,8 @@ struct bcm_cfg80211 {
 #ifdef STAT_REPORT
 	void *stat_report_info;
 #endif
-#ifdef WLMESH
-	char sae_password[SAE_MAX_PASSWD_LEN];
-	uint sae_password_len;
-#endif /* WLMESH */
-#if defined(RSSIAVG)
-	wl_rssi_cache_ctrl_t g_rssi_cache_ctrl;
-	wl_rssi_cache_ctrl_t g_connected_rssi_cache_ctrl;
-#endif
-#if defined(BSSCACHE)
-	wl_bss_cache_ctrl_t g_bss_cache_ctrl;
-#endif
 	int p2p_disconnected; // terence 20130703: Fix for wrong group_capab (timing issue)
 	struct ether_addr disconnected_bssid;
-	int autochannel;
-	int best_2g_ch;
-	int best_5g_ch;
-	uint handshaking;
-	bool wps_done;
-	wait_queue_head_t wps_done_event;
-	struct mutex in4way_sync;
-	ulong disconnected_jiffies;
 };
 
 #if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == \
@@ -1490,9 +1462,6 @@ extern s32 wl_cfg80211_set_wps_p2p_ie(struct net_device *net, char *buf, int len
 extern s32 wl_cfg80211_set_p2p_ps(struct net_device *net, char* buf, int len);
 extern s32 wl_cfg80211_set_p2p_ecsa(struct net_device *net, char* buf, int len);
 extern s32 wl_cfg80211_increase_p2p_bw(struct net_device *net, char* buf, int len);
-#ifdef WLMESH
-extern s32 wl_cfg80211_set_sae_password(struct net_device *net, char *buf, int len);
-#endif
 #ifdef WL11ULB
 extern s32 wl_cfg80211_set_ulb_mode(struct net_device *dev, int mode);
 extern s32 wl_cfg80211_set_ulb_bw(struct net_device *dev,
@@ -1683,5 +1652,4 @@ int wl_cfg80211_iface_count(struct net_device *dev);
 struct net_device* wl_get_ap_netdev(struct bcm_cfg80211 *cfg, char *ifname);
 struct net_device* wl_get_netdev_by_name(struct bcm_cfg80211 *cfg, char *ifname);
 int wl_cfg80211_get_vndr_ouilist(struct bcm_cfg80211 *cfg, uint8 *buf, int max_cnt);
-s32 wl_cfg80211_autochannel(struct net_device *dev, char *command, int total_len);
 #endif /* _wl_cfg80211_h_ */

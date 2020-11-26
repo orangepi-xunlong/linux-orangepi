@@ -2,13 +2,13 @@
  * Linux DHD Bus Module for PCIE
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -177,6 +177,12 @@ dhdpcie_pci_remove(struct pci_dev *pdev);
 static int dhdpcie_init(struct pci_dev *pdev);
 static irqreturn_t dhdpcie_isr(int irq, void *arg);
 /* OS Routine functions for PCI suspend/resume */
+
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+DEFINE_MUTEX(_dhd_sdio_mutex_lock_);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
+#endif
 
 static int dhdpcie_set_suspend_resume(dhd_bus_t *bus, bool state);
 static int dhdpcie_resume_host_dev(dhd_bus_t *bus);
@@ -812,7 +818,7 @@ int dhdpcie_pci_suspend_resume(dhd_bus_t *bus, bool state)
 			bus->dhd->hang_reason = HANG_REASON_PCIE_RC_LINK_UP_FAIL;
 			dhd_os_send_hang_message(bus->dhd);
 		}
-#endif
+#endif 
 	}
 	return rc;
 }
@@ -884,12 +890,13 @@ dhdpcie_bus_unregister(void)
 int __devinit
 dhdpcie_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
-	DHD_MUTEX_LOCK();
+#ifdef BUS_POWER_RESTORE
+	wifi_adapter_info_t *adapter = NULL;
+#endif
 
 	if (dhdpcie_chipmatch (pdev->vendor, pdev->device)) {
 		DHD_ERROR(("%s: chipmatch failed!!\n", __FUNCTION__));
-		DHD_MUTEX_UNLOCK();
-		return -ENODEV;
+			return -ENODEV;
 	}
 	printf("PCI_PROBE:  bus %X, slot %X,vendor %X, device %X"
 		"(good PCI location)\n", pdev->bus->number,
@@ -897,7 +904,6 @@ dhdpcie_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	if (dhdpcie_init (pdev)) {
 		DHD_ERROR(("%s: PCIe Enumeration failed\n", __FUNCTION__));
-		DHD_MUTEX_UNLOCK();
 		return -ENODEV;
 	}
 
@@ -906,8 +912,15 @@ dhdpcie_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	device_disable_async_suspend(&pdev->dev);
 #endif /* BCMPCIE_DISABLE_ASYNC_SUSPEND */
 
+#ifdef BUS_POWER_RESTORE
+	adapter = dhd_wifi_platform_get_adapter(PCI_BUS, pdev->bus->number,
+						PCI_SLOT(pdev->devfn));
+
+	if (adapter != NULL)
+		adapter->pci_dev = pdev;
+#endif
+
 	DHD_TRACE(("%s: PCIe Enumeration done!!\n", __FUNCTION__));
-	DHD_MUTEX_UNLOCK();
 	return 0;
 }
 
@@ -935,7 +948,17 @@ dhdpcie_pci_remove(struct pci_dev *pdev)
 
 	DHD_TRACE(("%s Enter\n", __FUNCTION__));
 
-	DHD_MUTEX_LOCK();
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	if (mutex_is_locked(&_dhd_sdio_mutex_lock_) == 0) {
+		DHD_ERROR(("%s : no mutex held. set lock\n", __FUNCTION__));
+	}
+	else {
+		DHD_ERROR(("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__));
+	}
+	mutex_lock(&_dhd_sdio_mutex_lock_);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
+#endif 
 
 	pch = pci_get_drvdata(pdev);
 	bus = pch->bus;
@@ -983,7 +1006,12 @@ dhdpcie_pci_remove(struct pci_dev *pdev)
 
 	dhdpcie_init_succeeded = FALSE;
 
-	DHD_MUTEX_UNLOCK();
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	mutex_unlock(&_dhd_sdio_mutex_lock_);
+	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
+#endif /* LINUX */
 
 	DHD_TRACE(("%s Exit\n", __FUNCTION__));
 
@@ -1210,6 +1238,10 @@ void dhdpcie_linkdown_cb(struct_pcie_notify *noti)
 	*/
 #endif /* SUPPORT_LINKDOWN_RECOVERY */
 
+#if defined(MULTIPLE_SUPPLICANT)
+extern void wl_android_post_init(void); // terence 20120530: fix critical section in dhd_open and dhdsdio_probe
+#endif
+
 int dhdpcie_init(struct pci_dev *pdev)
 {
 
@@ -1224,6 +1256,18 @@ int dhdpcie_init(struct pci_dev *pdev)
 	dhdpcie_smmu_info_t	*dhdpcie_smmu_info = NULL;
 #endif /* USE_SMMU_ARCH_MSM */
 
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	if (mutex_is_locked(&_dhd_sdio_mutex_lock_) == 0) {
+		DHD_ERROR(("%s : no mutex held. set lock\n", __FUNCTION__));
+	}
+	else {
+		DHD_ERROR(("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__));
+	}
+	mutex_lock(&_dhd_sdio_mutex_lock_);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
+#endif
+
 	do {
 		/* osl attach */
 		if (!(osh = osl_attach(pdev, PCI_BUS, FALSE))) {
@@ -1234,12 +1278,9 @@ int dhdpcie_init(struct pci_dev *pdev)
 		/* initialize static buffer */
 		adapter = dhd_wifi_platform_get_adapter(PCI_BUS, pdev->bus->number,
 			PCI_SLOT(pdev->devfn));
-		if (adapter != NULL) {
+		if (adapter != NULL)
 			DHD_ERROR(("%s: found adapter info '%s'\n", __FUNCTION__, adapter->name));
-#ifdef BUS_POWER_RESTORE
-			adapter->pci_dev = pdev;
-#endif
-		} else
+		else
 			DHD_ERROR(("%s: can't find adapter info for this chip\n", __FUNCTION__));
 		osl_static_mem_init(osh, adapter);
 
@@ -1409,7 +1450,11 @@ int dhdpcie_init(struct pci_dev *pdev)
 
 #if defined(MULTIPLE_SUPPLICANT)
 		wl_android_post_init(); // terence 20120530: fix critical section in dhd_open and dhdsdio_probe
-#endif /* MULTIPLE_SUPPLICANT */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+		mutex_unlock(&_dhd_sdio_mutex_lock_);
+		DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
+#endif 
 
 		DHD_TRACE(("%s:Exit - SUCCESS \n", __FUNCTION__));
 		return 0;  /* return  SUCCESS  */
@@ -1440,6 +1485,12 @@ int dhdpcie_init(struct pci_dev *pdev)
 		osl_detach(osh);
 
 	dhdpcie_init_succeeded = FALSE;
+#if defined(MULTIPLE_SUPPLICANT)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
+	mutex_unlock(&_dhd_sdio_mutex_lock_);
+	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
+#endif 
 
 	DHD_TRACE(("%s:Exit - FAILURE \n", __FUNCTION__));
 
@@ -1543,7 +1594,7 @@ dhdpcie_enable_irq(dhd_bus_t *bus)
 bool
 dhdpcie_irq_enabled(dhd_bus_t *bus)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
 	struct irq_desc *desc = irq_to_desc(bus->dev->irq);
 	/* depth will be zero, if enabled */
 	if (!desc->depth) {
@@ -2260,7 +2311,6 @@ bool dhdpcie_is_resume_done(dhd_pub_t *dhdp)
 	return bus->runtime_resume_done;
 }
 #endif /* DHD_PCIE_RUNTIMEPM */
-
 struct device * dhd_bus_to_dev(dhd_bus_t *bus)
 {
 	struct pci_dev *pdev;
@@ -2271,7 +2321,6 @@ struct device * dhd_bus_to_dev(dhd_bus_t *bus)
 	else
 		return NULL;
 }
-
 #ifdef HOFFLOAD_MODULES
 void
 dhd_free_module_memory(struct dhd_bus *bus, struct module_metadata *hmem)

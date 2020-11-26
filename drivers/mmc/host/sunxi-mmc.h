@@ -42,7 +42,7 @@
 #define __SUNXI_MMC_H__
 
 #define DRIVER_NAME "sunxi-mmc"
-#define DRIVER_RIVISION "v3.35 2019-12-11 14:29"
+#define DRIVER_RIVISION "v3.19 2019-1-16 18:56"
 #define DRIVER_VERSION "SD/MMC/SDIO Host Controller Driver(" DRIVER_RIVISION ")"
 
 #if defined CONFIG_FPGA_V4_PLATFORM || defined CONFIG_FPGA_V7_PLATFORM
@@ -80,9 +80,6 @@
 #define SDXC_REG_IDIE	(0x8C)	/* SMC IDMAC Interrupt Enable Register */
 #define SDXC_REG_CHDA	(0x90)
 #define SDXC_REG_CBDA	(0x94)
-
-
-#define SDXC_REG_FIFO	(0x200)
 
 #define mmc_readl(host, reg) \
 	readl((host)->reg_base + SDXC_##reg)
@@ -367,19 +364,11 @@ struct sunxi_mmc_host {
 	int (*sunxi_mmc_judge_retry)(struct sunxi_mmc_host *host,
 				      struct mmc_command *cmd, u32 rcnt,
 				      u32 errno, void *other);
-	int sunxi_retry_samp_dl;
-	int sunxi_retry_ds_dl;
 	/*only use for MMC_CAP_NEEDS_POLL and SUNXI_DIS_KER_NAT_CD is on*/
 	u32 present;
-
 	bool perf_enable;
 	struct device_attribute host_perf;
 	struct sunxi_mmc_host_perf perf;
-	struct device_attribute filter_sector_perf;
-	struct device_attribute filter_speed_perf;
-	unsigned int filter_sector;
-	unsigned int filter_speed;
-	struct device_attribute host_mwr;
 
 	void *version_priv_dat;
 
@@ -387,23 +376,12 @@ struct sunxi_mmc_host {
 	/*set auto cmd 23 val and enable bit,or get respose*/
 	bool (*sunxi_mmc_opacmd23)(struct sunxi_mmc_host *host, bool set, u32 arg, u32 *rep);
 	/*sample fifo contral */
-	bool sfc_dis;
+	bool sfc_en;
 
 	/*des phy address shift,use for over 4G phy ddrest*/
 	size_t des_addr_shift;
-	char name[32];
 };
 
-/*the struct as the the kernel version changes,which copy form core/slot-gpio.c*/
-struct mmc_gpio {
-	struct gpio_desc *ro_gpio;
-	struct gpio_desc *cd_gpio;
-	bool override_ro_active_level;
-	bool override_cd_active_level;
-	irqreturn_t (*cd_gpio_isr)(int irq, void *dev_id);
-	char *ro_label;
-	char cd_label[0];
-};
 
 /*use to check ddr mode,not include hs400*/
 #define sunxi_mmc_ddr_timing(it)	\

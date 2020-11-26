@@ -1013,4 +1013,3 @@ void __init sunxi_clocks_init(struct device_node *node)
 	pr_info("%s : sunxi_clk_base[0x%lx]\n", __func__,
 			(unsigned long)sunxi_clk_base);
 }
-void __init sunxi_cpu_clocks_init(struct device_node *node) {}

@@ -43,9 +43,6 @@ struct sunxi_ahub_priv {
 	void __iomem *membase;
 	struct regmap *regmap;
 	struct clk *pllclk;
-#ifdef AHUB_PLL_AUDIO_X4
-	struct clk *pllclkx4;
-#endif
 	struct clk *moduleclk;
 } sunxi_ahub_dev;
 
@@ -255,49 +252,10 @@ static int sunxi_ahub_mod_event(struct snd_soc_dapm_widget *w,
 }
 
 static const struct snd_kcontrol_new ahub_controls[] = {
-#ifdef LOOPBACK_FOR_DAUDIO
-	//Loopback test:SDO0 --> SDI0 1 2 3 --> Enable
-	SOC_SINGLE("I2S0 SD0 to SDI0 Loopback Debug", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_LOOP0, 1, 0),
-	SOC_SINGLE("I2S0 SD0 to SDI1 Loopback Debug", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_LOOP1, 1, 0),
-	SOC_SINGLE("I2S0 SD0 to SDI2 Loopback Debug", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_LOOP2, 1, 0),
-	SOC_SINGLE("I2S0 SD0 to SDI3 Loopback Debug", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_LOOP3, 1, 0),
-	SOC_SINGLE("I2S0 SDI0 Enable", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_SDI0_EN, 1, 0),
-	SOC_SINGLE("I2S0 SDI1 Enable", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_SDI1_EN, 1, 0),
-	SOC_SINGLE("I2S0 SDI2 Enable", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_SDI2_EN, 1, 0),
-	SOC_SINGLE("I2S0 SDI3 Enable", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_SDI3_EN, 1, 0),
-	//Loopback test:SDO0 --> SDI0 1 2 3 --> Enable
-	SOC_SINGLE("I2S1 SD0 to SDI0 Loopback Debug", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_LOOP0, 1, 0),
-	SOC_SINGLE("I2S1 SD0 to SDI1 Loopback Debug", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_LOOP1, 1, 0),
-	SOC_SINGLE("I2S1 SD0 to SDI2 Loopback Debug", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_LOOP2, 1, 0),
-	SOC_SINGLE("I2S1 SD0 to SDI3 Loopback Debug", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_LOOP3, 1, 0),
-	SOC_SINGLE("I2S1 SDI0 Enable", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_SDI0_EN, 1, 0),
-	SOC_SINGLE("I2S1 SDI1 Enable", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_SDI1_EN, 1, 0),
-	SOC_SINGLE("I2S1 SDI2 Enable", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_SDI2_EN, 1, 0),
-	SOC_SINGLE("I2S1 SDI3 Enable", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_SDI3_EN, 1, 0),
-	//Loopback test:SDO0 --> SDI0 1 2 3 --> Enable
-	SOC_SINGLE("I2S2 SD0 to SDI0 Loopback Debug", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_LOOP0, 1, 0),
-	SOC_SINGLE("I2S2 SD0 to SDI1 Loopback Debug", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_LOOP1, 1, 0),
-	SOC_SINGLE("I2S2 SD0 to SDI2 Loopback Debug", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_LOOP2, 1, 0),
-	SOC_SINGLE("I2S2 SD0 to SDI3 Loopback Debug", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_LOOP3, 1, 0),
-	SOC_SINGLE("I2S2 SDI0 Enable", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_SDI0_EN, 1, 0),
-	SOC_SINGLE("I2S2 SDI1 Enable", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_SDI1_EN, 1, 0),
-	SOC_SINGLE("I2S2 SDI2 Enable", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_SDI2_EN, 1, 0),
-	SOC_SINGLE("I2S2 SDI3 Enable", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_SDI3_EN, 1, 0),
-	//Loopback test:SDO0 --> SDI0 1 2 3 --> Enable
-	SOC_SINGLE("I2S3 SD0 to SDI0 Loopback Debug", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_LOOP0, 1, 0),
-	SOC_SINGLE("I2S3 SD0 to SDI1 Loopback Debug", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_LOOP1, 1, 0),
-	SOC_SINGLE("I2S3 SD0 to SDI2 Loopback Debug", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_LOOP2, 1, 0),
-	SOC_SINGLE("I2S3 SD0 to SDI3 Loopback Debug", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_LOOP3, 1, 0),
-	SOC_SINGLE("I2S3 SDI0 Enable", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_SDI0_EN, 1, 0),
-	SOC_SINGLE("I2S3 SDI1 Enable", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_SDI1_EN, 1, 0),
-	SOC_SINGLE("I2S3 SDI2 Enable", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_SDI2_EN, 1, 0),
-	SOC_SINGLE("I2S3 SDI3 Enable", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_SDI3_EN, 1, 0),
-#elif defined(CONFIG_ARCH_SUN50IW6)
 	SOC_SINGLE("I2S0 Loopback Debug", SUNXI_AHUB_I2S_CTL(0), I2S_CTL_LOOP, 1, 0),
 	SOC_SINGLE("I2S1 Loopback Debug", SUNXI_AHUB_I2S_CTL(1), I2S_CTL_LOOP, 1, 0),
 	SOC_SINGLE("I2S2 Loopback Debug", SUNXI_AHUB_I2S_CTL(2), I2S_CTL_LOOP, 1, 0),
 	SOC_SINGLE("I2S3 Loopback Debug", SUNXI_AHUB_I2S_CTL(3), I2S_CTL_LOOP, 1, 0),
-#endif
 };
 
 static const struct snd_soc_dapm_widget sunxi_ahub_codec_dapm_widgets[] = {
@@ -369,114 +327,94 @@ static const struct snd_soc_dapm_route sunxi_ahub_codec_dapm_routes[] = {
 	{"APBIF0 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"APBIF1 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"APBIF2 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
-
 	{"I2S0 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"I2S1 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"I2S2 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"I2S3 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
-
 	{"DAM0Chan0 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"DAM0Chan1 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"DAM0Chan2 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"DAM1Chan0 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"DAM1Chan1 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
 	{"DAM1Chan2 Src Select", "APBIF_TXDIF0", "APBIF0 DAC"},
-
 	/* APBIF1 from DMA to RX Mux routes */
 	{"APBIF0 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"APBIF1 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"APBIF2 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
-
 	{"I2S0 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"I2S1 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"I2S2 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"I2S3 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
-
 	{"DAM0Chan0 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"DAM0Chan1 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"DAM0Chan2 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"DAM1Chan0 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"DAM1Chan1 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
 	{"DAM1Chan2 Src Select", "APBIF_TXDIF1", "APBIF1 DAC"},
-
 	/* APBIF2 from DMA to RX Mux routes */
 	{"APBIF0 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"APBIF1 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"APBIF2 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
-
 	{"I2S0 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"I2S1 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"I2S2 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"I2S3 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
-
 	{"DAM0Chan0 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"DAM0Chan1 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"DAM0Chan2 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"DAM1Chan0 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"DAM1Chan1 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
 	{"DAM1Chan2 Src Select", "APBIF_TXDIF2", "APBIF2 DAC"},
-
 	/* I2S0 to RX Mux routes */
 	{"APBIF0 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"APBIF1 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"APBIF2 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
-
 	{"I2S0 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"I2S1 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"I2S2 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"I2S3 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
-
 	{"DAM0Chan0 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"DAM0Chan1 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"DAM0Chan2 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"DAM1Chan0 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"DAM1Chan1 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
 	{"DAM1Chan2 Src Select", "I2S0_TXDIF", "I2S0 DAC"},
-
 	/* I2S1 to RX Mux routes */
 	{"APBIF0 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"APBIF1 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"APBIF2 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
-
 	{"I2S0 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"I2S1 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"I2S2 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"I2S3 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
-
 	{"DAM0Chan0 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"DAM0Chan1 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"DAM0Chan2 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"DAM1Chan0 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"DAM1Chan1 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
 	{"DAM1Chan2 Src Select", "I2S1_TXDIF", "I2S1 DAC"},
-
 	/* I2S2 to RX Mux routes */
 	{"APBIF0 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"APBIF1 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"APBIF2 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
-
 	{"I2S0 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"I2S1 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"I2S2 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"I2S3 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
-
 	{"DAM0Chan0 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"DAM0Chan1 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"DAM0Chan2 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"DAM1Chan0 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"DAM1Chan1 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
 	{"DAM1Chan2 Src Select", "I2S2_TXDIF", "I2S2 DAC"},
-
 	/* I2S3 to RX Mux routes */
 	{"APBIF0 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
 	{"APBIF1 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
 	{"APBIF2 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
-
 	{"I2S0 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
 	{"I2S1 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
 	{"I2S2 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
 	{"I2S3 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
-
 	{"DAM0Chan0 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
 	{"DAM0Chan1 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
 	{"DAM0Chan2 Src Select", "I2S3_TXDIF", "I2S3 DAC"},
@@ -496,29 +434,24 @@ static const struct snd_soc_dapm_route sunxi_ahub_codec_dapm_routes[] = {
 	{"APBIF0 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"APBIF1 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"APBIF2 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
-
 	{"I2S0 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"I2S1 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"I2S2 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"I2S3 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
-
 	{"DAM0Chan0 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"DAM0Chan1 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"DAM0Chan2 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"DAM1Chan0 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"DAM1Chan1 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
 	{"DAM1Chan2 Src Select", "DAM0_TXDIF", "DAM0 Mixer"},
-
 	/* DAM1 Audio Mixer output route */
 	{"APBIF0 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
 	{"APBIF1 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
 	{"APBIF2 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
-
 	{"I2S0 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
 	{"I2S1 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
 	{"I2S2 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
 	{"I2S3 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
-
 	{"DAM0Chan0 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
 	{"DAM0Chan1 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
 	{"DAM0Chan2 Src Select", "DAM1_TXDIF", "DAM1 Mixer"},
@@ -530,23 +463,20 @@ static const struct snd_soc_dapm_route sunxi_ahub_codec_dapm_routes[] = {
 	{"APBIF0 ADC", NULL, "APBIF0 Src Select"},
 	{"APBIF1 ADC", NULL, "APBIF1 Src Select"},
 	{"APBIF2 ADC", NULL, "APBIF2 Src Select"},
-
 	/* Mixer to I2S OUT(as ahub side says) */
 	{"I2S0 ADC", NULL, "I2S0 Src Select"},
 	{"I2S1 ADC", NULL, "I2S1 Src Select"},
 	{"I2S2 ADC", NULL, "I2S2 Src Select"},
 	{"I2S3 ADC", NULL, "I2S3 Src Select"},
-
 	{"DAM0 Mixer", NULL, "DAM0 INPUT"},
 	{"DAM1 Mixer", NULL, "DAM1 INPUT"},
-
 	{"DAM0 OUTPUT", NULL, "DAM0Chan0 Src Select"},
 	{"DAM0 OUTPUT", NULL, "DAM0Chan1 Src Select"},
-	{"DAM0 OUTPUT", NULL, "DAM0Chan2 Src Select"},
+	{"DAM0 OUTPUT", NULL, "DAM0Chan1 Src Select"},
 
 	{"DAM1 OUTPUT", NULL, "DAM1Chan0 Src Select"},
 	{"DAM1 OUTPUT", NULL, "DAM1Chan1 Src Select"},
-	{"DAM1 OUTPUT", NULL, "DAM1Chan2 Src Select"},
+	{"DAM1 OUTPUT", NULL, "DAM1Chan1 Src Select"},
 };
 
 static void sunxi_ahub_codec_init(struct snd_soc_codec *codec)
@@ -602,7 +532,7 @@ static int sunxi_ahub_codec_dai_hw_params(struct snd_pcm_substream *substream,
 				snd_soc_codec_get_drvdata(dai->codec);
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_card *card = rtd->card;
-	struct sndhdmi_priv *sunxi_hdmi = snd_soc_card_get_drvdata(card);
+	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_card_get_drvdata(card);
 
 	switch (params_format(params)) {
 	case	SNDRV_PCM_FORMAT_S16_LE:
@@ -687,7 +617,6 @@ static int sunxi_ahub_codec_dai_hw_params(struct snd_pcm_substream *substream,
 	 * stream type(playback or capture). so we can't make it done on demand,
 	 * so we just make all dam rx channel number as the sunxi_ahub->channel.
 	 */
-
 	regmap_update_bits(sunxi_ahub->regmap, SUNXI_AHUB_DAM_CTL(0),
 			(0xf<<DAM_CTL_RX0_NUM),
 			((params_channels(params)-1)<<DAM_CTL_RX0_NUM));
@@ -744,23 +673,10 @@ static int sunxi_ahub_codec_dai_set_sysclk(struct snd_soc_dai *dai,
 {
 	struct sunxi_ahub_priv *sunxi_ahub = snd_soc_dai_get_drvdata(dai);
 
-#ifdef AHUB_PLL_AUDIO_X4
-	if (clk_set_rate(sunxi_ahub->pllclkx4, freq)) {
-		dev_err(sunxi_ahub->dev, "set pllclkx4 rate failed\n");
-		return -EINVAL;
-	}
-
-	if (clk_set_rate(sunxi_ahub->moduleclk, freq)) {
-		dev_err(sunxi_ahub->dev, "set moduleclk rate failed\n");
-		return -EINVAL;
-	}
-#else
 	if (clk_set_rate(sunxi_ahub->pllclk, freq)) {
 		dev_err(sunxi_ahub->dev, "set pllclk rate failed\n");
 		return -EINVAL;
 	}
-#endif
-
 	return 0;
 }
 
@@ -897,9 +813,6 @@ static int sunxi_ahub_codec_suspend(struct snd_soc_codec *codec)
 	pr_debug("Enter %s\n", __func__);
 
 	clk_disable_unprepare(sunxi_ahub->moduleclk);
-#ifdef AHUB_PLL_AUDIO_X4
-	clk_disable_unprepare(sunxi_ahub->pllclkx4);
-#endif
 	clk_disable_unprepare(sunxi_ahub->pllclk);
 
 	pr_debug("End %s\n", __func__);
@@ -917,13 +830,6 @@ static int sunxi_ahub_codec_resume(struct snd_soc_codec *codec)
 		dev_err(sunxi_ahub->dev, "pllclk resume failed\n");
 		return -EBUSY;
 	}
-
-#ifdef AHUB_PLL_AUDIO_X4
-	if (clk_prepare_enable(sunxi_ahub->pllclkx4)) {
-		dev_err(sunxi_ahub->dev, "pllclkx4 resume failed\n");
-		return -EBUSY;
-	}
-#endif
 
 	if (clk_prepare_enable(sunxi_ahub->moduleclk)) {
 		dev_err(sunxi_ahub->dev, "moduleclk resume failed\n");
@@ -960,31 +866,6 @@ static int sunxi_ahub_dev_probe(struct platform_device *pdev)
 		goto err_node_put;
 	}
 
-#ifdef AHUB_PLL_AUDIO_X4
-	sunxi_ahub->pllclkx4 = of_clk_get(np, 1);
-	if (IS_ERR_OR_NULL(sunxi_ahub->pllclkx4)) {
-		dev_err(&pdev->dev, "pllclkx4 get failed\n");
-		ret = PTR_ERR(sunxi_ahub->pllclkx4);
-		goto err_node_put;
-	}
-
-	sunxi_ahub->moduleclk = of_clk_get(np, 2);
-	if (IS_ERR_OR_NULL(sunxi_ahub->moduleclk)) {
-		dev_err(&pdev->dev, "moduleclk get failed\n");
-		ret = PTR_ERR(sunxi_ahub->moduleclk);
-		goto err_pllclk_put;
-	}
-
-	if (clk_set_parent(sunxi_ahub->moduleclk, sunxi_ahub->pllclkx4)) {
-		dev_err(&pdev->dev, "set parent of moduleclk to pllclkx4 fail\n");
-		ret = -EBUSY;
-		goto err_moduleclk_put;
-	}
-
-	clk_prepare_enable(sunxi_ahub->pllclk);
-	clk_prepare_enable(sunxi_ahub->pllclkx4);
-	clk_prepare_enable(sunxi_ahub->moduleclk);
-#else
 	sunxi_ahub->moduleclk = of_clk_get(np, 1);
 	if (IS_ERR_OR_NULL(sunxi_ahub->moduleclk)) {
 		dev_err(&pdev->dev, "moduleclk get failed\n");
@@ -997,10 +878,8 @@ static int sunxi_ahub_dev_probe(struct platform_device *pdev)
 		ret = -EBUSY;
 		goto err_moduleclk_put;
 	}
-
 	clk_prepare_enable(sunxi_ahub->pllclk);
 	clk_prepare_enable(sunxi_ahub->moduleclk);
-#endif
 
 	sunxi_ahub->regmap = sunxi_ahub_regmap_init(pdev);
 	if (!sunxi_ahub->regmap) {
@@ -1035,9 +914,6 @@ static int __exit sunxi_ahub_dev_remove(struct platform_device *pdev)
 
 	snd_soc_unregister_component(&pdev->dev);
 	clk_put(sunxi_ahub->moduleclk);
-#ifdef AHUB_PLL_AUDIO_X4
-	clk_put(sunxi_ahub->pllclkx4);
-#endif
 	clk_put(sunxi_ahub->pllclk);
 	return 0;
 }

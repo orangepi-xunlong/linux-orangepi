@@ -28,8 +28,11 @@ bool hdcp22_enable;
 static u32 hdcp14_auth_enable;
 static u32 hdcp14_auth_complete;
 
-static u8 hdcp_status;
-static u32 hdcp_engaged_count;
+static u32 hdcp14_state;
+
+#if defined(__LINUX_PLAT__)
+
+
 #define KSV_LEN  5 /* KSV value size */
 
 
@@ -45,18 +48,48 @@ static u32 hdcp_engaged_count;
 
 static void sha_process_block(hdmi_tx_dev_t *dev, sha_t *sha);
 static void sha_pad_message(hdmi_tx_dev_t *dev, sha_t *sha);
+static int hdcp_array_add(hdmi_tx_dev_t *dev, u8 *r, const u8 *a,
+						const u8 *b, size_t n);
+static int hdcp_array_cmp(hdmi_tx_dev_t *dev, const u8 *a,
+						const u8 *b, size_t n);
+static int hdcp_array_mac(hdmi_tx_dev_t *dev, u8 *r, const u8 *M,
+						const u8 m, size_t n);
+static int hdcp_array_mul(hdmi_tx_dev_t *dev, u8 *r, const u8 *M,
+						const u8 *m, size_t n);
+static void hdcp_array_set(hdmi_tx_dev_t *dev, u8 *dst,
+						const u8 src, size_t n);
+static int hdcp_array_usb(hdmi_tx_dev_t *dev, u8 *r, const u8 *a,
+						const u8 *b, size_t n);
+static void hdcp_array_swp(hdmi_tx_dev_t *dev, u8 *r, size_t n);
+static int hdcp_array_tst(hdmi_tx_dev_t *dev, const u8 *a,
+						const u8 b, size_t n);
+static int hdcp_compute_exp(hdmi_tx_dev_t *dev, u8 *c, const u8 *M,
+				const u8 *e, const u8 *p, size_t n, size_t nE);
+static int hdcp_compute_inv(hdmi_tx_dev_t *dev, u8 *out, const u8 *z,
+						const u8 *a, size_t n);
+static int hdcp_compute_mod(hdmi_tx_dev_t *dev, u8 *dst,
+					const u8 *src, const u8 *p, size_t n);
+static int hdcp_compute_mul(hdmi_tx_dev_t *dev, u8 *p,
+			const u8 *a, const u8 *b, const u8 *m, size_t n);
 static int hdcp_verify_ksv(hdmi_tx_dev_t *dev, const u8 *data, size_t size);
-
-static int hdcp_interrupt_clear(hdmi_tx_dev_t *dev, u8 value);
-static u8 hdcp_interrupt_status(hdmi_tx_dev_t *dev);
-static u8 hdcp_event_handler(hdmi_tx_dev_t *dev, int *param,
-								u32 irq_stat);
+static void hdcp_array_cpy(hdmi_tx_dev_t *dev, u8 *dst,
+						const u8 *src, size_t n);
+static int hdcp_array_div(hdmi_tx_dev_t *dev, u8 *r, const u8 *D,
+						const u8 *d, size_t n);
 
 static void hdcp14_authenticate_work(struct work_struct *work);
 static void hdcp14_disconfigure(hdmi_tx_dev_t *dev);
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 static void hdcp22_disconfigure(hdmi_tx_dev_t *dev);
-#endif
+
+void _setDeviceMode(hdmi_tx_dev_t *dev, video_mode_t mode)
+{
+	u8 set_mode;
+
+	LOG_TRACE1(mode);
+
+	set_mode = (mode == HDMI ? 1 : 0);  /* 1 - HDMI : 0 - DVI */
+	dev_write_mask(dev, A_HDCPCFG0, A_HDCPCFG0_HDMIDVI_MASK, set_mode);
+}
 
 static void _EnableFeature11(hdmi_tx_dev_t *dev, u8 bit)
 {
@@ -64,11 +97,13 @@ static void _EnableFeature11(hdmi_tx_dev_t *dev, u8 bit)
 	dev_write_mask(dev, A_HDCPCFG0, A_HDCPCFG0_EN11FEATURE_MASK, bit);
 }
 
-static void hdcp_rxdetect(hdmi_tx_dev_t *dev, u8 enable)
+void hdcp_rxdetect(hdmi_tx_dev_t *dev, u8 enable)
 {
 	LOG_TRACE1(enable);
 	dev_write_mask(dev, A_HDCPCFG0, A_HDCPCFG0_RXDETECT_MASK, enable);
 }
+
+
 
 static void _RiCheck(hdmi_tx_dev_t *dev, u8 bit)
 {
@@ -94,7 +129,7 @@ static void _EnhancedLinkVerification(hdmi_tx_dev_t *dev, u8 bit)
 	dev_write_mask(dev, A_HDCPCFG0, A_HDCPCFG0_ELVENA_MASK, bit);
 }
 
-static void hdcp_sw_reset(hdmi_tx_dev_t *dev)
+void hdcp_sw_reset(hdmi_tx_dev_t *dev)
 {
 	LOG_TRACE();
 	/* Software reset signal, active by writing a zero
@@ -102,7 +137,7 @@ static void hdcp_sw_reset(hdmi_tx_dev_t *dev)
 	dev_write_mask(dev, A_HDCPCFG1, A_HDCPCFG1_SWRESET_MASK, 0);
 }
 
-static void _DisableEncryption(hdmi_tx_dev_t *dev, u8 bit)
+void _DisableEncryption(hdmi_tx_dev_t *dev, u8 bit)
 {
 	LOG_TRACE1(bit);
 	dev_write_mask(dev, A_HDCPCFG1, A_HDCPCFG1_ENCRYPTIONDISABLE_MASK, bit);
@@ -187,6 +222,13 @@ static void _UpdateKsvListState(hdmi_tx_dev_t *dev, u8 bit)
 	dev_write_mask(dev, A_KSVMEMCTRL, A_KSVMEMCTRL_KSVCTRLUPD_MASK, 0);
 }
 
+u8 _ksv_sha1_status(hdmi_tx_dev_t *dev)
+{
+	LOG_TRACE();
+	return (u8)((dev_read(dev, A_KSVMEMCTRL)
+		& A_KSVMEMCTRL_KSVSHA1STATUS_MASK) >> 4);
+}
+
 static u16 _BStatusRead(hdmi_tx_dev_t *dev)
 {
 	u16 bstatus = 0;
@@ -195,6 +237,30 @@ static u16 _BStatusRead(hdmi_tx_dev_t *dev)
 	bstatus	|= dev_read(dev, HDCP_BSTATUS + ADDR_JUMP) << 8;
 	return bstatus;
 }
+
+void _M0Read(hdmi_tx_dev_t *dev, u8 *data)
+{
+	u8 i = 0;
+
+	for (i = 0; i < HDCP_M0_SIZE; i++)
+		data[i] = dev_read(dev, HDCP_M0 + (i * ADDR_JUMP));
+}
+#if 0
+int _KsvListRead(hdmi_tx_dev_t *dev, u16 size, u8 *data)
+{
+	u8 i = 0;
+
+	if (size > HDCP_KSV_SIZE) {
+		/* LOGGER(SNPS_ERROR,"Invalid number of devices"); */
+		return -1;
+	}
+
+	for (i = 0; i < size; i++)
+		data[i] = dev_read(dev, HDCP_KSV + (i * ADDR_JUMP));
+
+	return 0;
+}
+#endif
 
 /*chose hdcp22_ovr_val to designed which hdcp version to be configured*/
 static void hdcp22_ovr_val_1p4(hdmi_tx_dev_t *dev)
@@ -205,7 +271,6 @@ static void hdcp22_ovr_val_1p4(hdmi_tx_dev_t *dev)
 		HDCP22REG_CTRL_HDCP22_OVR_EN_MASK, 1);
 }
 
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 /*chose which way to enable hdcp22
 * @enable: 0-chose to enable hdcp22 by dwc_hdmi inner signal ist_hdcp_capable
 *              1-chose to enable hdcp22 by hdcp22_ovr_val bit
@@ -236,7 +301,7 @@ static void hdcp22_hpd_ovr_enable(hdmi_tx_dev_t *dev, u8 val, u8 enable)
 	dev_write_mask(dev, (HDCP22REG_CTRL),
 		HDCP22REG_CTRL_HPD_OVR_EN_MASK, enable);
 }
-#endif
+
 /*lock hdcp22_ovr_en and hdcp22_ovr_val*/
 /*static void hdcp22_switch_lck(hdmi_tx_dev_t *dev, u8 lck)
 {
@@ -419,6 +484,285 @@ static void sha_pad_message(hdmi_tx_dev_t *dev, sha_t *sha)
 	sha_process_block(dev, sha);
 }
 
+static int hdcp_array_add(hdmi_tx_dev_t *dev, u8 *r,
+			const u8 *a, const u8 *b, size_t n)
+{
+	u8 c = 0;
+	size_t i = 0;
+
+	for (i = 0; i < n; i++) {
+		u16 s = a[i] + b[i] + c;
+
+		c = (u8) (s >> 8);
+		r[i] = (u8) s;
+	}
+	return c;
+}
+
+static int hdcp_array_cmp(hdmi_tx_dev_t *dev, const u8 *a,
+						const u8 *b, size_t n)
+{
+	int i = 0;
+
+	for (i = n; i > 0; i--) {
+		if (a[i - 1] > b[i - 1])
+			return 1;
+		else if (a[i - 1] < b[i - 1])
+			return -1;
+	}
+	return 0;
+}
+
+static void hdcp_array_cpy(hdmi_tx_dev_t *dev, u8 *dst, const u8 *src, size_t n)
+{
+	size_t i = 0;
+
+	for (i = 0; i < n; i++)
+		dst[i] = src[i];
+}
+
+static int hdcp_array_mac(hdmi_tx_dev_t *dev, u8 *r, const u8 *M,
+							const u8 m, size_t n)
+{
+	u16 c = 0;
+	size_t i = 0;
+
+	for (i = 0; i < n; i++) {
+		u16 p = (M[i] * m) + c + r[i];
+
+		c = p >> 8;
+		r[i] = (u8) p;
+	}
+	return (u8) c;
+}
+
+static int hdcp_array_mul(hdmi_tx_dev_t *dev, u8 *r,
+				const u8 *M, const u8 *m, size_t n)
+{
+	size_t i = 0;
+
+	if (r == M || r == m) {
+		pr_err("invalid input data\n");
+		return FALSE;
+	}
+	hdcp_array_set(dev, r, 0, n);
+	for (i = 0; i < n; i++) {
+		if (m[i] == 0)
+			continue;
+		else if (m[i] == 1)
+			hdcp_array_add(dev, &r[i], &r[i], M, n - i);
+		else
+			hdcp_array_mac(dev, &r[i], M, m[i], n - i);
+	}
+	return TRUE;
+}
+
+static void hdcp_array_set(hdmi_tx_dev_t *dev, u8 *dst, const u8 src, size_t n)
+{
+	size_t i = 0;
+
+	for (i = 0; i < n; i++)
+		dst[i] = src;
+}
+
+static int hdcp_array_usb(hdmi_tx_dev_t *dev, u8 *r,
+				const u8 *a, const u8 *b, size_t n)
+{
+	u8 c = 1;
+	size_t i = 0;
+
+	for (i = 0; i < n; i++) {
+		u16 s = ((u8) a[i] + (u8) (~b[i])) + c;
+
+		c = (u8) (s >> 8);
+		r[i] = (u8) s;
+	}
+	return c;
+}
+
+static void hdcp_array_swp(hdmi_tx_dev_t *dev, u8 *r, size_t n)
+{
+	size_t i = 0;
+
+	for (i = 0; i < (n / 2); i++) {
+		u8 tmp = r[i];
+
+		r[i] = r[n - 1 - i];
+		r[n - 1 - i] = tmp;
+	}
+}
+
+static int hdcp_array_tst(hdmi_tx_dev_t *dev, const u8 *a, const u8 b, size_t n)
+{
+	size_t i = 0;
+
+	for (i = 0; i < n; i++) {
+		if (a[i] != b)
+			return FALSE;
+	}
+	return TRUE;
+}
+
+static int hdcp_array_div(hdmi_tx_dev_t *dev, u8 *r,
+				const u8 *D, const u8 *d, size_t n)
+{
+	int i = 0;
+
+	if (r == D || r == d || ((!hdcp_array_tst(dev, d, 0, n)) == TRUE)) {
+		pr_err("invalid input data\n");
+		return FALSE;
+	}
+	hdcp_array_set(dev, &r[n], 0, n);
+	hdcp_array_cpy(dev, r, D, n);
+	for (i = n; i > 0; i--) {
+		r[i - 1 + n] = 0;
+		while (hdcp_array_cmp(dev, &r[i - 1], d, n) >= 0) {
+			hdcp_array_usb(dev, &r[i - 1], &r[i - 1], d, n);
+			r[i - 1 + n] += 1;
+		}
+	}
+	return TRUE;
+}
+
+static int hdcp_compute_exp(hdmi_tx_dev_t *dev, u8 *c, const u8 *M,
+						const u8 *e, const u8 *p,
+			  size_t n, size_t nE)
+{
+	int i = 8 * nE - 1;
+	int rc = TRUE;
+
+	/* LR Binary Method */
+	if ((e[i / 8] & (1 << (i % 8))) != 0) {
+		hdcp_array_cpy(dev, c, M, n);
+	} else {
+		hdcp_array_set(dev, c, 0, n);
+		c[0] = 1;
+	}
+	for (i -= 1; i >= 0; i--) {
+		rc |= hdcp_compute_mul(dev, c, c, c, p, n);
+		if ((e[i / 8] & (1 << (i % 8))) != 0)
+			rc &= hdcp_compute_mul(dev, c, c, M, p, n);
+
+	}
+	return rc;
+}
+
+static int hdcp_compute_inv(hdmi_tx_dev_t *dev, u8 *out,
+				const u8 *z, const u8 *a, size_t n)
+{
+	u8 w[2][SIZE];
+	u8 x[2][SIZE];
+	u8 y[2][SIZE];
+	u8 r[2 * SIZE];
+	u8 *i, *j, *q, *t;
+	u8 *x1, *x2;
+	u8 *y1, *y2;
+
+	if ((n > SIZE) || (hdcp_array_tst(dev, z, 0, n) == TRUE)
+	    || (hdcp_array_tst(dev, a, 0, n) == TRUE)
+	    || (hdcp_array_cmp(dev, z, a, n) >= 0)) {
+		pr_err("invalid input data\n");
+		return FALSE;
+	}
+
+	hdcp_array_cpy(dev, w[0], a, n);
+	hdcp_array_cpy(dev, w[1], z, n);
+	i = w[0];
+	j = w[1];
+
+	hdcp_array_set(dev, x[1], 0, n);
+	x[1][0] = 1;
+	hdcp_array_set(dev, x[0], 0, n);
+	x2 = x[1];
+	x1 = x[0];
+
+	hdcp_array_set(dev, y[1], 0, n);
+	hdcp_array_set(dev, y[0], 0, n);
+	y[0][0] = 1;
+	y2 = y[1];
+	y1 = y[0];
+
+	do {
+		hdcp_array_div(dev, r, i, j, n);
+		hdcp_array_cpy(dev, i, r, n);
+		q = &r[n];
+		t = i;		/* swap i <-> j */
+		i = j;
+		j = t;
+
+		hdcp_array_mul(dev, r, x1, q, n);
+		hdcp_array_usb(dev, x2, x2, r, n);
+		t = x2;		/* swap x1 <-> x2 */
+		x2 = x1;
+		x1 = t;
+
+		hdcp_array_mul(dev, r, y1, q, n);
+		hdcp_array_usb(dev, y2, y2, r, n);
+		t = y2;		/* swap y1 <-> y2 */
+		y2 = y1;
+		y1 = t;
+
+	} while (hdcp_array_tst(dev, j, 0, n) == FALSE);
+
+	j[0] = 1;
+	if (hdcp_array_cmp(dev, i, j, n) != 0) {
+		pr_err("i != 1\n");
+		return FALSE;
+	}
+	hdcp_array_cpy(dev, out, y2, n);
+	return TRUE;
+}
+
+static int hdcp_compute_mod(hdmi_tx_dev_t *dev, u8 *dst,
+				const u8 *src, const u8 *p, size_t n)
+{
+	u8 aux[KSIZE];
+	u8 ext[SIZE + 1];
+	u8 tmp[2 * (KSIZE + 1)];
+	int i = 0;
+
+	if (n > SIZE) {
+		pr_err("invalid input data\n");
+		return FALSE;
+	}
+	hdcp_array_cpy(dev, aux, src, sizeof(aux));
+	hdcp_array_cpy(dev, ext, p, n);
+	ext[n] = 0;
+	for (i = sizeof(aux) - n - 1; i >= 0; i--) {
+		hdcp_array_div(dev, tmp, &aux[i], ext, n + 1);
+		hdcp_array_cpy(dev, &aux[i], tmp, n + 1);
+	}
+	hdcp_array_cpy(dev, dst, aux, n);
+	return TRUE;
+}
+
+static int hdcp_compute_mul(hdmi_tx_dev_t *dev, u8 *p,
+			const u8 *a, const u8 *b, const u8 *m, size_t n)
+{
+	u8 aux[2 * KSIZE + 1];
+	u8 ext[KSIZE + 1];
+	u8 tmp[2 * (KSIZE + 1)];
+	size_t i = 0;
+	int j = 0;
+
+	if (n > KSIZE) {
+		pr_err("Error:invalid input data\n");
+		return FALSE;
+	}
+	hdcp_array_set(dev, aux, 0, sizeof(aux));
+	for (i = 0; i < n; i++)
+		aux[n + i] = hdcp_array_mac(dev, &aux[i], a, b[i], n);
+
+	hdcp_array_cpy(dev, ext, m, n);
+	ext[n] = 0;
+	for (j = n; j >= 0; j--) {
+		hdcp_array_div(dev, tmp, &aux[j], ext, n + 1);
+		hdcp_array_cpy(dev, &aux[j], tmp, n + 1);
+	}
+	hdcp_array_cpy(dev, p, aux, n);
+	return TRUE;
+}
+
 static int hdcp_verify_ksv(hdmi_tx_dev_t *dev, const u8 *data, size_t size)
 {
 	size_t i = 0;
@@ -446,6 +790,147 @@ static int hdcp_verify_ksv(hdmi_tx_dev_t *dev, const u8 *data, size_t size)
 		}
 	}
 	return TRUE;
+}
+
+
+int hdcp_verify_dsa(hdmi_tx_dev_t *dev, const u8 *M, size_t n,
+					const u8 *r, const u8 *s)
+{
+	int i = 0;
+	sha_t sha;
+	static const u8 q[] = {
+		0xE7, 0x08, 0xC7, 0xF9, 0x4D, 0x3F, 0xEF, 0x97, 0xE2, 0x14, 0x6D,
+		0xCD, 0x6A, 0xB5, 0x6D, 0x5E, 0xCE, 0xF2, 0x8A, 0xEE
+	};
+	static const u8 p[] = {
+		0x27, 0x75, 0x28, 0xF3, 0x2B, 0x80, 0x59, 0x8C, 0x11, 0xC2, 0xED,
+		0x46, 0x1C, 0x95, 0x39, 0x2A, 0x54, 0x19, 0x89, 0x96, 0xFD, 0x49,
+		0x8A, 0x02, 0x3B, 0x73, 0x75, 0x32, 0x14, 0x9C, 0x7B, 0x5C, 0x49,
+		0x20, 0x98, 0xB9, 0x07, 0x32, 0x3F, 0xA7, 0x30, 0x15, 0x72, 0xB3,
+		0x09, 0x55, 0x71, 0x10, 0x3A, 0x4C, 0x97, 0xD1, 0xBC, 0xA0, 0x04,
+		0xF4, 0x35, 0xCF, 0x47, 0x54, 0x0E, 0xA7, 0x2B, 0xE5, 0x83, 0xB9,
+		0xC6, 0xD4, 0x47, 0xC7, 0x44, 0xB8, 0x67, 0x76, 0x7C, 0xAE, 0x0C,
+		0xDC, 0x34, 0x4F, 0x4B, 0x9E, 0x96, 0x1D, 0x82, 0x84, 0xD2, 0xA0,
+		0xDC, 0xE0, 0x00, 0xF5, 0x64, 0xA1, 0x7F, 0x8E, 0xFF, 0x58, 0x70,
+		0x6A, 0xC3, 0x4F, 0xA2, 0xA1, 0xB8, 0xC7, 0x52, 0x5A, 0x35, 0x5B,
+		0x39, 0x17, 0x6B, 0x78, 0x43, 0x93, 0xF7, 0x75, 0x8D, 0x01, 0xB7,
+		0x61, 0x17, 0xFD, 0xB2, 0xF5, 0xC3, 0xD3
+	};
+	static const u8 g[] = {
+		0xD9, 0x0B, 0xBA, 0xC2, 0x42, 0x24, 0x46, 0x69, 0x5B, 0x40, 0x67,
+		0x2F, 0x5B, 0x18, 0x3F, 0xB9, 0xE8, 0x6F, 0x21, 0x29, 0xAC, 0x7D,
+		0xFA, 0x51, 0xC2, 0x9D, 0x4A, 0xAB, 0x8A, 0x9B, 0x8E, 0xC9, 0x42,
+		0x42, 0xA5, 0x1D, 0xB2, 0x69, 0xAB, 0xC8, 0xE3, 0xA5, 0xC8, 0x81,
+		0xBE, 0xB6, 0xA0, 0xB1, 0x7F, 0xBA, 0x21, 0x2C, 0x64, 0x35, 0xC8,
+		0xF7, 0x5F, 0x58, 0x78, 0xF7, 0x45, 0x29, 0xDD, 0x92, 0x9E, 0x79,
+		0x3D, 0xA0, 0x0C, 0xCD, 0x29, 0x0E, 0xA9, 0xE1, 0x37, 0xEB, 0xBF,
+		0xC6, 0xED, 0x8E, 0xA8, 0xFF, 0x3E, 0xA8, 0x7D, 0x97, 0x62, 0x51,
+		0xD2, 0xA9, 0xEC, 0xBD, 0x4A, 0xB1, 0x5D, 0x8F, 0x11, 0x86, 0x27,
+		0xCD, 0x66, 0xD7, 0x56, 0x5D, 0x31, 0xD7, 0xBE, 0xA9, 0xAC, 0xDE,
+		0xAF, 0x02, 0xB5, 0x1A, 0xDE, 0x45, 0x24, 0x3E, 0xE4, 0x1A, 0x13,
+		0x52, 0x4D, 0x6A, 0x1B, 0x5D, 0xF8, 0x92
+	};
+#ifndef FACSIMILE
+	static const u8 y[] = {
+		0x99, 0x37, 0xE5, 0x36, 0xFA, 0xF7, 0xA9, 0x62, 0x83, 0xFB, 0xB3,
+		0xE9, 0xF7, 0x9D, 0x8F, 0xD8, 0xCB, 0x62, 0xF6, 0x66, 0x8D, 0xDC,
+		0xC8, 0x95, 0x10, 0x24, 0x6C, 0x88, 0xBD, 0xFF, 0xB7, 0x7B, 0xE2,
+		0x06, 0x52, 0xFD, 0xF7, 0x5F, 0x43, 0x62, 0xE6, 0x53, 0x65, 0xB1,
+		0x38, 0x90, 0x25, 0x87, 0x8D, 0xA4, 0x9E, 0xFE, 0x56, 0x08, 0xA7,
+		0xA2, 0x0D, 0x4E, 0xD8, 0x43, 0x3C, 0x97, 0xBA, 0x27, 0x6C, 0x56,
+		0xC4, 0x17, 0xA4, 0xB2, 0x5C, 0x8D, 0xDB, 0x04, 0x17, 0x03, 0x4F,
+		0xE1, 0x22, 0xDB, 0x74, 0x18, 0x54, 0x1B, 0xDE, 0x04, 0x68, 0xE1,
+		0xBD, 0x0B, 0x4F, 0x65, 0x48, 0x0E, 0x95, 0x56, 0x8D, 0xA7, 0x5B,
+		0xF1, 0x55, 0x47, 0x65, 0xE7, 0xA8, 0x54, 0x17, 0x8A, 0x65, 0x76,
+		0x0D, 0x4F, 0x0D, 0xFF, 0xAC, 0xA3, 0xE0, 0xFB, 0x80, 0x3A, 0x86,
+		0xB0, 0xA0, 0x6B, 0x52, 0x00, 0x06, 0xC7
+	};
+#else
+	static const u8 y[] = {
+		0x46, 0xB9, 0xC2, 0xE5, 0xBE, 0x57, 0x3B, 0xA6,
+		0x22, 0x7B, 0xAA, 0x83, 0x81, 0xA9, 0xD2, 0x0F,
+		0x03, 0x2E, 0x0B, 0x70, 0xAC, 0x96, 0x42, 0x85,
+		0x4E, 0x78, 0x8A, 0xDF, 0x65, 0x35, 0x97, 0x6D,
+		0xE1, 0x8D, 0xD1, 0x7E, 0xA3, 0x83, 0xCA, 0x0F,
+		0xB5, 0x8E, 0xA4, 0x11, 0xFA, 0x14, 0x6D, 0xB1,
+		0x0A, 0xCC, 0x5D, 0xFF, 0xC0, 0x8C, 0xD8, 0xB1,
+		0xE6, 0x95, 0x72, 0x2E, 0xBD, 0x7C, 0x85, 0xDE,
+		0xE8, 0x52, 0x69, 0x92, 0xA0, 0x22, 0xF7, 0x01,
+		0xCD, 0x79, 0xAF, 0x94, 0x83, 0x2E, 0x01, 0x1C,
+		0xD7, 0xEF, 0x86, 0x97, 0xA3, 0xBB, 0xCB, 0x64,
+		0xA6, 0xC7, 0x08, 0x5E, 0x8E, 0x5F, 0x11, 0x0B,
+		0xC0, 0xE8, 0xD8, 0xDE, 0x47, 0x2E, 0x75, 0xC7,
+		0xAA, 0x8C, 0xDC, 0xB7, 0x02, 0xC4, 0xDF, 0x95,
+		0x31, 0x74, 0xB0, 0x3E, 0xEB, 0x95, 0xDB, 0xB0,
+		0xCE, 0x11, 0x0E, 0x34, 0x9F, 0xE1, 0x13, 0x8D
+	};
+#endif
+
+	u8 w[SIZE];
+	u8 z[SIZE];
+	u8 u1[SIZE];
+	u8 u2[SIZE];
+	u8 gu1[KSIZE];
+	u8 yu2[KSIZE];
+	u8 pro[KSIZE];
+	u8 v[SIZE];
+
+	/* adapt to the expected format by aritmetic functions */
+	u8 r1[SIZE];
+	u8 s1[SIZE];
+
+	sha_reset(dev, &sha);
+	hdcp_array_cpy(dev, r1, r, sizeof(r1));
+	hdcp_array_cpy(dev, s1, s, sizeof(s1));
+	hdcp_array_swp(dev, r1, sizeof(r1));
+	hdcp_array_swp(dev, s1, sizeof(s1));
+
+	hdcp_compute_inv(dev, w, s1, q, sizeof(w));
+	sha_input(dev, &sha, M, n);
+	if (sha_result(dev, &sha) == TRUE) {
+		for (i = 0; i < 5; i++) {
+			z[i * 4 + 0] = sha.mDigest[i] >> 24;
+			z[i * 4 + 1] = sha.mDigest[i] >> 16;
+			z[i * 4 + 2] = sha.mDigest[i] >> 8;
+			z[i * 4 + 3] = sha.mDigest[i] >> 0;
+		}
+		hdcp_array_swp(dev, z, sizeof(z));
+	} else {
+		pr_err("Error:cannot digest message\n");
+		return FALSE;
+	}
+	if (hdcp_compute_mul(dev, u1, z, w, q, sizeof(u1)) == FALSE)
+		return FALSE;
+
+	if (hdcp_compute_mul(dev, u2, r1, w, q, sizeof(u2)) == FALSE)
+		return FALSE;
+
+	if (hdcp_compute_exp(dev, gu1, g, u1, p, sizeof(gu1), sizeof(u1)) ==
+	    FALSE)
+		return FALSE;
+
+	if (hdcp_compute_exp(dev, yu2, y, u2, p, sizeof(yu2), sizeof(u2)) ==
+	    FALSE)
+		return FALSE;
+
+	if (hdcp_compute_mul(dev, pro, gu1, yu2, p, sizeof(pro)) == FALSE)
+		return FALSE;
+
+	if (hdcp_compute_mod(dev, v, pro, q, sizeof(v)) == FALSE)
+		return FALSE;
+	return (hdcp_array_cmp(dev, v, r1, sizeof(v)) == 0);
+}
+
+int hdcp_verify_srm(hdmi_tx_dev_t *dev, const u8 *data, size_t size)
+{
+	LOG_TRACE1((int)size);
+	if (data == 0 || size < (VRL_HEADER + VRL_NUMBER + 2 * DSAMAX)) {
+		pr_err("invalid input data\n");
+		return FALSE;
+	}
+	/* M, n, r, s */
+	return hdcp_verify_dsa(dev, data, size - 2 * DSAMAX,
+			&data[(int)size - 2 * DSAMAX], &data[size - DSAMAX]);
 }
 
 
@@ -484,18 +969,15 @@ static int read_sink_hdcp_type(hdmi_tx_dev_t *dev)
 	return ret;
 }
 
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 void hdcp22_data_enable(u8 enable)
 {
 	mc_hdcp_clock_enable(hdmi_dev, enable ? 0 : 1);
 	hdcp22_avmute_ovr_enable(hdmi_dev, enable ? 0 : 1, 1);
 }
-#endif
 
 static void hdcp_1p4_configure(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
 {
 	LOG_TRACE();
-	hdcp_status = HDCP_FAILED;
 	hdcp14_authenticate_work(NULL);
 
 	hdcp14_enable = true;
@@ -510,10 +992,8 @@ static void hdcp14_disconfigure(hdmi_tx_dev_t *dev)
 	hdcp14_enable = false;
 	hdcp14_auth_enable = 0;
 	hdcp14_auth_complete = 0;
-	hdcp_status = HDCP_FAILED;
 }
 
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 /*configure hdcp2.2 and enable hdcp2.2 encrypt*/
 static void hdcp22_configure(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp, videoParams_t *video)
 {
@@ -567,7 +1047,6 @@ static void hdcp22_disconfigure(hdmi_tx_dev_t *dev)
 
 	hdcp22_enable = false;
 }
-#endif
 
 void hdcp_configure_new(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp, videoParams_t *video)
 {
@@ -595,17 +1074,12 @@ void hdcp_configure_new(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp, videoParams_t *v
 	if (!hdcp->use_hdcp22) {
 		hdcp_1p4_configure(dev, hdcp);
 		dev->snps_hdmi_ctrl.hdcp_type = HDCP14;
-		pr_info("NOT use hdcp2.2, Configure hdcp1.4\n");
 	} else {
 		hdcp_type = read_sink_hdcp_type(dev);
 		if (hdcp_type == 1) {
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
-			pr_info("The HDMI RX support hdcp2.2\n");
 			hdcp22_configure(dev, hdcp, video);
-#endif
 			dev->snps_hdmi_ctrl.hdcp_type = HDCP22;
 		} else {
-			pr_info("The HDMI RX Only support hdcp1.4\n");
 			hdcp_1p4_configure(dev, hdcp);
 			dev->snps_hdmi_ctrl.hdcp_type = HDCP14;
 		}
@@ -621,10 +1095,9 @@ void hdcp_disconfigure_new(hdmi_tx_dev_t *dev)
 		return;
 	}
 	/*fc_video_hdcp_keepout(dev, false);*/
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
+
 	if (hdcp22_enable)
 		hdcp22_disconfigure(dev);
-#endif
 	if (hdcp14_enable)
 		hdcp14_disconfigure(dev);
 
@@ -632,18 +1105,16 @@ void hdcp_disconfigure_new(hdmi_tx_dev_t *dev)
 	dev->snps_hdmi_ctrl.hdcp_enable = 0;
 }
 
-static void hdcp_close(hdmi_tx_dev_t *dev)
+void hdcp_close(hdmi_tx_dev_t *dev)
 {
 	dev->snps_hdmi_ctrl.hdcp_enable = 0;
 	dev->snps_hdmi_ctrl.hdcp_type = HDCP_UNDEFINED;
 
 	hdcp14_disconfigure(dev);
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 	if (dev->snps_hdmi_ctrl.use_hdcp22) {
 		hdcp22_disconfigure(dev);
 		esm_tx_close();
 	}
-#endif
 }
 
 static u8 get_hdcp14_status(hdmi_tx_dev_t *dev)
@@ -667,6 +1138,7 @@ static int hdcp14_encrypt_status_check_and_handle(hdmi_tx_dev_t *dev)
 	hdcp_interrupt_clear(dev, hdcp14_status);
 
 	ret = hdcp_event_handler(dev, &param, (u32)hdcp14_status);
+	hdcp14_state = ret;
 	if ((ret != HDCP_ERR_KSV_LIST_NOT_VALID) && (ret != HDCP_FAILED))
 			return 0;
 	else
@@ -678,17 +1150,12 @@ static int hdcp14_encrypt_status_check_and_handle(hdmi_tx_dev_t *dev)
  *               0-indicate that hdcp authenticate is sucessful
  *              -1-indicate that hdcp authenticate is failed
  * */
-static int get_hdcp_status(hdmi_tx_dev_t *dev)
+int get_hdcp_status(hdmi_tx_dev_t *dev)
 {
 
 	LOG_TRACE();
-
 	if (hdcp22_enable)
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 		return esm_encrypt_status_check_and_handle();
-#else
-		return 0;
-#endif
 	else if (hdcp14_enable)
 		return hdcp14_encrypt_status_check_and_handle(dev);
 	else
@@ -742,7 +1209,7 @@ static void hdcp14_authenticate_work(struct work_struct *work)
 	/* 9 - Set encryption */
 	_OessWindowSize(hdmi_dev, 64);
 	_BypassEncryption(hdmi_dev, FALSE);
-	//_DisableEncryption(hdmi_dev, FALSE);
+	_DisableEncryption(hdmi_dev, FALSE);
 
 	/* 10 - Reset the HDCP 1.4 engine */
 	hdcp_sw_reset(hdmi_dev);
@@ -773,15 +1240,14 @@ static void hdcp14_authenticate_work(struct work_struct *work)
 }
 
 
-static void hdcp14_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
+void hdcp14_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
 {
 	LOG_TRACE();
 	hdcp14_auth_enable = 0;
 	hdcp14_auth_complete = 0;
 }
 
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
-static void hdcp22_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
+void hdcp22_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
 {
 	if (esm_tx_initial(hdcp->esm_hpi_base,
 			 (u32)hdcp->esm_firm_phy_addr,
@@ -792,22 +1258,20 @@ static void hdcp22_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
 			 hdcp->esm_data_size))
 		pr_err("ERROR: esm_tx_initial failed\n");
 }
-#endif
 
 static void hdcp14_exit(void)
 {
 	LOG_TRACE();
 }
 
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 static void hdcp22_exit(void)
 {
 	esm_tx_exit();
 }
-#endif
 
-static void hdcp_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
+void hdcp_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
 {
+	hdcp14_state = HDCP_FAILED;
 	i2cddc_fast_mode(dev, 0);
 	i2cddc_clk_config(dev, I2C_SFR_CLK,
 				I2C_MIN_SS_SCL_LOW_TIME,
@@ -818,14 +1282,13 @@ static void hdcp_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp)
 	mc_hdcp_clock_enable(dev, 1);/*0:enable   1:disable*/
 	_DisableEncryption(dev, TRUE);
 	hdcp14_initial(dev, hdcp);
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 	if (hdcp->use_hdcp22)
 		hdcp22_initial(dev, hdcp);
-#endif
 }
 
 void hdcp_init(hdmi_tx_dev_t *dev)
 {
+	hdcp14_state = HDCP_FAILED;
 	_OessWindowSize(dev, 64);
 	fc_video_hdcp_keepout(dev, true);
 	_BypassEncryption(dev, TRUE);
@@ -837,9 +1300,7 @@ void hdcp_init(hdmi_tx_dev_t *dev)
 void hdcp_exit(void)
 {
 	hdcp14_exit();
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 	hdcp22_exit();
-#endif
 }
 
 /* SHA-1 calculation by Software */
@@ -925,18 +1386,7 @@ static u8 _read_ksv_list(hdmi_tx_dev_t *dev, int *param)
 	return valid;
 }
 
-/*do nor encry until stabilizing successful authentication */
-static void check_hdcp14_engaged(hdmi_tx_dev_t *dev)
-{
-	if ((hdcp_status == HDCP_ENGAGED)
-		&& (hdcp_engaged_count >= 20)) {
-		_DisableEncryption(dev, false);
-		hdcp_engaged_count = 0;
-		pr_info("HDCP Encryption\n");
-	}
-}
-
-static u8 hdcp_event_handler(hdmi_tx_dev_t *dev, int *param, u32 irq_stat)
+u8 hdcp_event_handler(hdmi_tx_dev_t *dev, int *param, u32 irq_stat)
 {
 	u8 interrupt_status = 0;
 	int valid = HDCP_IDLE;
@@ -948,36 +1398,22 @@ static u8 hdcp_event_handler(hdmi_tx_dev_t *dev, int *param, u32 irq_stat)
 		HDCP_INF("hdcp_interrupt_status 0x%x\n", interrupt_status);
 
 	if (interrupt_status == 0) {
-		if (hdcp_engaged_count && (hdcp_status == HDCP_ENGAGED)) {
-			hdcp_engaged_count++;
-			check_hdcp14_engaged(dev);
-		}
-
-		return hdcp_status;
+		return hdcp14_state;
 	}
 
 	if ((interrupt_status & A_APIINTSTAT_KEEPOUTERRORINT_MASK) != 0) {
 		pr_info("keep out error interrupt\n");
-		hdcp_status = HDCP_FAILED;
-
-		hdcp_engaged_count = 0;
-		return HDCP_FAILED;
+		return HDCP_IDLE;
 	}
 
 	if ((interrupt_status & A_APIINTSTAT_LOSTARBITRATION_MASK) != 0) {
 		pr_info("lost arbitration error interrupt\n");
-		hdcp_status = HDCP_FAILED;
-
-		hdcp_engaged_count = 0;
-		return HDCP_FAILED;
+		return HDCP_IDLE;
 	}
 
 	if ((interrupt_status & A_APIINTSTAT_I2CNACK_MASK) != 0) {
 		pr_info("i2c nack error interrupt\n");
-		hdcp_status = HDCP_FAILED;
-
-		hdcp_engaged_count = 0;
-		return HDCP_FAILED;
+		return HDCP_IDLE;
 	}
 
 	if (interrupt_status & INT_KSV_SHA1) {
@@ -989,9 +1425,6 @@ static u8 hdcp_event_handler(hdmi_tx_dev_t *dev, int *param, u32 irq_stat)
 		*param = 0;
 		pr_info("HDCP_FAILED\n");
 		_DisableEncryption(dev, true);
-		hdcp_status = HDCP_FAILED;
-
-		hdcp_engaged_count = 0;
 		return HDCP_FAILED;
 	}
 
@@ -999,26 +1432,30 @@ static u8 hdcp_event_handler(hdmi_tx_dev_t *dev, int *param, u32 irq_stat)
 		*param = 1;
 		pr_info("HDCP_ENGAGED\n");
 
-		hdcp_status = HDCP_ENGAGED;
-		hdcp_engaged_count = 1;
-
+		_DisableEncryption(dev, false);
 		return HDCP_ENGAGED;
 	}
 
 	return valid;
 }
 
-static u8 hdcp_interrupt_status(hdmi_tx_dev_t *dev)
+void hdcp_disable_encryption(hdmi_tx_dev_t *dev, int disable)
+{
+	LOG_TRACE1(disable);
+	_DisableEncryption(dev,	(disable == TRUE) ? 1 : 0);
+}
+
+u8 hdcp_interrupt_status(hdmi_tx_dev_t *dev)
 {
 	return _InterruptStatus(dev);
 }
 
-static int hdcp_interrupt_clear(hdmi_tx_dev_t *dev, u8 value)
+int hdcp_interrupt_clear(hdmi_tx_dev_t *dev, u8 value)
 {
 	_InterruptClear(dev, value);
 	return TRUE;
 }
-
+#endif
 static void _EnableAvmute(hdmi_tx_dev_t *dev, u8 bit)
 {
 	LOG_TRACE1(bit);
@@ -1033,11 +1470,17 @@ void hdcp_av_mute(hdmi_tx_dev_t *dev, int enable)
 			(enable == TRUE) ? 1 : 0);
 }
 
-static u8 hdcp_av_mute_state(hdmi_tx_dev_t *dev)
+u8 hdcp_av_mute_state(hdmi_tx_dev_t *dev)
 {
 	LOG_TRACE();
 	return dev_read_mask(dev, A_HDCPCFG0, A_HDCPCFG0_AVMUTE_MASK);
 
+}
+
+void set_avmute(u8 enable)
+{
+	packets_AvMute(hdmi_dev, enable);
+	hdcp_av_mute(hdmi_dev, enable);
 }
 
 ssize_t hdcp_config_dump(hdmi_tx_dev_t *dev, char *buf)
@@ -1062,75 +1505,12 @@ ssize_t hdcp_config_dump(hdmi_tx_dev_t *dev, char *buf)
 
 	if (hdcp14_enable)
 		n += sprintf(buf + n, "hdcp1.4 enable\n");
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
+
 	if (hdcp22_enable) {
 		n += sprintf(buf + n, "hdcp2.2 enable\n");
 		n += hdcp22_dump(buf);
 	}
-#endif
+
 	return n;
 }
 
-void api_hdcp_close(void)
-{
-	hdcp_close(hdmi_dev);
-}
-
-static void api_hdcp_configure(hdcpParams_t *hdcp, videoParams_t *video)
-{
-	hdmi_dev->snps_hdmi_ctrl.hdcp_on = 1;
-	hdcp_configure_new(hdmi_dev, hdcp, video);
-}
-
-static void api_hdcp_disconfigure(void)
-{
-	hdmi_dev->snps_hdmi_ctrl.hdcp_on = 0;
-	hdcp_disconfigure_new(hdmi_dev);
-}
-
-static int get_hdcp_type(void)
-{
-	return (int)hdmi_dev->snps_hdmi_ctrl.hdcp_type;
-}
-
-static u8 api_hdcp_event_handler(int *param, u32 irq_stat)
-{
-	return hdcp_event_handler(hdmi_dev, param, irq_stat);
-}
-
-static u32 api_get_hdcp_avmute(void)
-{
-	return hdcp_av_mute_state(hdmi_dev);
-
-}
-
-static int    api_get_hdcp_status(void)
-{
-	return get_hdcp_status(hdmi_dev);
-}
-
-static ssize_t api_hdcp_config_dump(char *buf)
-{
-	return hdcp_config_dump(hdmi_dev, buf);
-}
-
-void hdcp_api_init(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp,
-					struct hdmi_dev_func *func)
-{
-	hdmi_dev = dev;
-
-	hdmi_dev->snps_hdmi_ctrl.use_hdcp = hdcp->use_hdcp;
-	hdmi_dev->snps_hdmi_ctrl.use_hdcp22 = hdcp->use_hdcp22;
-
-	if (hdcp->use_hdcp)
-		hdcp_initial(dev, hdcp);
-
-	func->hdcp_close = api_hdcp_close;
-	func->hdcp_configure = api_hdcp_configure;
-	func->hdcp_disconfigure = api_hdcp_disconfigure;
-	func->get_hdcp_type = get_hdcp_type;
-	func->hdcp_event_handler = api_hdcp_event_handler;
-	func->get_hdcp_status = api_get_hdcp_status;
-	func->hdcp_config_dump = api_hdcp_config_dump;
-	func->get_hdcp_avmute = api_get_hdcp_avmute;
-}

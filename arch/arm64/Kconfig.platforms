@@ -58,16 +58,6 @@ config ARCH_SUN50IW8
 	help
 	  Support for Allwinner SUN50IW8 SoC family
 
-config ARCH_SUN50IW9
-	bool "Allwinner SUN50IW9 SoCs"
-	help
-	  Support for Allwinner SUN50IW9 SoC family
-
-config ARCH_SUN50IW10
-	bool "Allwinner SUN50IW10 SoCs"
-	help
-	  Support for Allwinner SUN50IW10 SoC family
-
 config ARCH_SUN50IW5T
 	bool "Allwinner SUN50IW5T SoCs"
 	help
@@ -140,34 +130,6 @@ choice
 
 config ARCH_SUN50IW8P1
 	bool "Allwinner SUN50IW8P1"
-#	Will not use smc in FPGA stage
-#	select SUNXI_SMC
-endchoice
-endif
-
-if ARCH_SUN50IW9
-choice
-	prompt "Select the SoC with wafer ARCH_SUN50IW9"
-	default ARCH_SUN50IW9P1
-	help
-	  Select the SoC with wafer ARCH_SUN50IW9
-
-config ARCH_SUN50IW9P1
-	bool "Allwinner SUN50IW9P1"
-#	Will not use smc in FPGA stage
-#	select SUNXI_SMC
-endchoice
-endif
-
-if ARCH_SUN50IW10
-choice
-	prompt "Select the SoC with wafer ARCH_SUN50IW10"
-	default ARCH_SUN50IW10P1
-	help
-	  Select the SoC with wafer ARCH_SUN50IW10
-
-config ARCH_SUN50IW10P1
-	bool "Allwinner SUN50IW10P1"
 #	Will not use smc in FPGA stage
 #	select SUNXI_SMC
 endchoice
@@ -318,7 +280,6 @@ config ARCH_ROCKCHIP
 	select GPIOLIB
 	select PINCTRL
 	select PINCTRL_ROCKCHIP
-	select PM
 	select ROCKCHIP_TIMER
 	help
 	  This enables support for the ARMv8 based Rockchip chipsets,

@@ -1615,10 +1615,8 @@ int ubi_wl_init(struct ubi_device *ubi, struct ubi_attach_info *ai)
 		cond_resched();
 
 		e = kmem_cache_alloc(ubi_wl_entry_slab, GFP_KERNEL);
-		if (!e) {
-			err = -ENOMEM;
+		if (!e)
 			goto out_free;
-		}
 
 		e->pnum = aeb->pnum;
 		e->ec = aeb->ec;
@@ -1637,10 +1635,8 @@ int ubi_wl_init(struct ubi_device *ubi, struct ubi_attach_info *ai)
 			cond_resched();
 
 			e = kmem_cache_alloc(ubi_wl_entry_slab, GFP_KERNEL);
-			if (!e) {
-				err = -ENOMEM;
+			if (!e)
 				goto out_free;
-			}
 
 			e->pnum = aeb->pnum;
 			e->ec = aeb->ec;

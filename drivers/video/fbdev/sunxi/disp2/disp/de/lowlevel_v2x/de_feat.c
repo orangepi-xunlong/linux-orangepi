@@ -692,114 +692,6 @@ static const struct de_feat sun8iw15_de_features = {
 };
 #endif /*endif  */
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-static const int sun50iw10_de_num_chns[] = {
-	/* DISP0 */
-	4,
-	/* DISP1 */
-	3,
-};
-
-static const int sun50iw10_de_num_vi_chns[] = {
-	/* DISP0 */
-	2,
-	/* DISP1 */
-	1,
-};
-
-static const int sun50iw10_de_num_layers[] = {
-	/* DISP0 CH0 */
-	4,
-	/* DISP0 CH1 */
-	4,
-	/* DISP0 CH2 */
-	4,
-	/* DISP0 CH3 */
-	4,
-	/* DISP1 CH0 */
-	4,
-	/* DISP1 CH1 */
-	4,
-	/* DISP1 CH2 */
-	4,
-};
-
-static const int sun50iw10_de_is_support_vep[] = {
-	/* DISP0 CH0 */
-	1,
-	/* DISP0 CH1 */
-	0,
-	/* DISP0 CH2 */
-	0,
-	/* DISP0 CH3 */
-	0,
-	/* DISP1 CH0 */
-	0,
-	/* DISP1 CH1 */
-	0,
-	/* DISP1 CH2 */
-	0,
-};
-
-static const int sun50iw10_de_is_support_smbl[] = {
-	/* CH0 */
-	1,
-	/* CH1 */
-	0,
-};
-
-static const int sun50iw10_de_supported_output_types[] = {
-	/* tcon0 */
-	DE_OUTPUT_TYPE_LCD,
-	/* tcon1 */
-	DE_OUTPUT_TYPE_LCD,
-};
-
-static const int sun50iw10_de_is_support_wb[] = {
-	/* DISP0 */
-	1,
-	/* DISP1 */
-	1,
-};
-
-static const int sun50iw10_de_is_support_scale[] = {
-	/* DISP0 CH0 */
-	1,
-	/* DISP0 CH1 */
-	1,
-	/* DISP0 CH2 */
-	1,
-	/* DISP0 CH3 */
-	1,
-	/* DISP1 CH0 */
-	1,
-	/* DISP1 CH1 */
-	1,
-	/* DISP1 CH2 */
-	1,
-};
-
-static const int sun50iw10_de_scale_line_buffer[] = {
-	/* DISP0 */
-	2560,
-	/* DISP1 */
-	2048,
-};
-
-static const struct de_feat sun50iw10_de_features = {
-	.num_screens = DE_NUM,
-	.num_devices = DEVICE_NUM,
-	.num_chns = sun50iw10_de_num_chns,
-	.num_vi_chns = sun50iw10_de_num_vi_chns,
-	.num_layers = sun50iw10_de_num_layers,
-	.is_support_vep = sun50iw10_de_is_support_vep,
-	.is_support_smbl = sun50iw10_de_is_support_smbl,
-	.is_support_wb = sun50iw10_de_is_support_wb,
-	.supported_output_types = sun50iw10_de_supported_output_types,
-	.is_support_scale = sun50iw10_de_is_support_scale,
-	.scale_line_buffer = sun50iw10_de_scale_line_buffer,
-};
-#endif /*~ CONFIG_ARCH_SUN50I10*/
 static const int sun8iw12_de_num_chns[] = {
 	/* DISP0 */
 	4,
@@ -1291,8 +1183,6 @@ int de_feat_init(void)
 	de_cur_features = &sun8iw11_de_features;
 #elif defined(CONFIG_ARCH_SUN8IW12)
 	de_cur_features = &sun8iw12_de_features;
-#elif defined(CONFIG_ARCH_SUN50IW10)
-	de_cur_features = &sun50iw10_de_features;
 #elif defined(CONFIG_ARCH_SUN8IW15)
 	de_cur_features = &sun8iw15_de_features;
 #elif defined(CONFIG_ARCH_SUN8IW6)

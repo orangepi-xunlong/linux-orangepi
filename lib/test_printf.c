@@ -24,8 +24,8 @@
 #define PAD_SIZE 16
 #define FILL_CHAR '$'
 
-#define PTR1 ((void *)0x01234567)
-#define PTR2 ((void *)(long)0xfedcba98)
+#define PTR1 ((void*)0x01234567)
+#define PTR2 ((void*)(long)(int)0xfedcba98)
 
 #if BITS_PER_LONG == 64
 #define PTR1_ZEROES "000000000"

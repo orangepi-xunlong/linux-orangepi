@@ -481,65 +481,6 @@ static void xradio_etf_disconnect(void)
 	etf_printk(XRADIO_DBG_ALWY, "%s end.\n", __func__);
 }
 
-ETFCLI_PAR_T g_etfcli_par;
-
-int xradio_etfcli_data_init(void)
-{
-	g_etfcli_par.bandwidth = ETF_CHANNEL_BANDWIDTH_20MHz;
-	g_etfcli_par.channel = 7;
-	g_etfcli_par.g_iGnModeForce = 0;
-	g_etfcli_par.g_iRateIndex = 16;
-	g_etfcli_par.mode = 0;
-	g_etfcli_par.reat = 0;
-	g_etfcli_par.subchannel = ETF_SUB_CHANNEL_UPPER;
-	return 0;
-}
-
-int xradio_set_etfcli_data(int value, int index)
-{
-	xradio_dbg(XRADIO_DBG_MSG, "value = %d, index = %d\n", value, index);
-
-	switch (index) {
-	case 0:
-		g_etfcli_par.g_iRateIndex = value;
-		break;
-
-	case 1:
-		g_etfcli_par.g_iGnModeForce = value;
-		break;
-
-	case 3:
-		g_etfcli_par.channel = value;
-		break;
-
-	case 4:
-		g_etfcli_par.mode = value;
-		break;
-
-	case 5:
-		g_etfcli_par.reat = value;
-		break;
-
-	case 6:
-		g_etfcli_par.bandwidth = value;
-		break;
-
-	case 7:
-		g_etfcli_par.subchannel = value;
-		break;
-
-	default:
-		{
-			etf_printk(XRADIO_DBG_ERROR,
-				"%s This setting is not supported.\n", __func__);
-			return -1;
-		}
-		break;
-	}
-
-	return 0;
-}
-
 #if DGB_XRADIO_HWT
 //HWT
 extern u8  hwt_testing;
@@ -861,35 +802,6 @@ static int xradio_etf_proc(void *data, int len)
 			}
 		}
 		break;
-	case ETF_SET_CLI_PAR_DEFT:
-		{
-			CLI_PARAM_SAVE_T *hdr_data = (CLI_PARAM_SAVE_T *)hdr_rev;
-
-			etf_printk(XRADIO_DBG_MSG, "%s ETF_GET_CLI_PAR_DEFT!\n", __func__);
-			hdr_rev->id  = hdr_rev->id + ETF_CNF_BASE;
-			if(hdr_data)
-				ret = xradio_set_etfcli_data(hdr_data->value, hdr_data->index);
-			hdr_data->result = ret;
-			xradio_adapter_send(hdr_data, sizeof(*hdr_data));
-		}
-		break;
-	case ETF_GET_CLI_PAR_DEFT:
-		{
-			struct get_cli_data_req *param_req;
-			struct get_cli_data_result *param_ret;
-
-			param_req = (struct get_cli_data_req *)hdr_rev;
-			param_ret = (struct get_cli_data_result *)param_req;
-			etf_printk(XRADIO_DBG_MSG,"%s ETF_GET_CLI_PAR_DEFT!\n", __func__);
-
-			hdr_rev->id  = hdr_rev->id + ETF_CNF_BASE;
-			param_ret->result	= 0;
-			param_ret->length	= sizeof(g_etfcli_par);
-			hdr_rev->len = sizeof(*param_ret) + param_ret->length;
-			xradio_adapter_send_pkg(param_ret, sizeof(*param_ret),
-					(void *)&g_etfcli_par, param_ret->length);
-		}
-		break;
 	default:
 		etf_printk(XRADIO_DBG_NIY, "%s: passed cmd=0x%04x, len=%d",
 					__func__, MSG_ID(hdr_rev->id), hdr_rev->len);
@@ -1000,6 +912,7 @@ void xradio_etf_to_wlan(u32 change)
 	}
 	up(&etf_priv.etf_lock);
 }
+EXPORT_SYMBOL_GPL(xradio_etf_to_wlan);
 
 int xradio_etf_suspend(void)
 {
@@ -1033,7 +946,6 @@ int xradio_etf_init(void)
 	etf_priv.etf_state = ETF_STAT_NULL;
 	etf_priv.fw_path  = XR829_ETF_FIRMWARE;
 	etf_priv.sdd_path = XR829_SDD_FILE;
-	xradio_etfcli_data_init();
 	etf_priv.adapter = xradio_adapter_init(&xradio_etf_proc);
 	return ret;
 }

@@ -10,7 +10,6 @@
 
 #include "disp_private.h"
 #include "../dev_disp.h"
-#include "../disp_trace.h"
 
 extern struct disp_drv_info g_disp_drv;
 
@@ -245,7 +244,6 @@ struct dmabuf_item *disp_dma_map(int fd)
 #if defined(__LINUX_PLAT__)
 	struct dmabuf_item *item = NULL;
 
-	DISP_TRACE_BEGIN("disp_dma_map");
 	item = kmalloc(sizeof(struct dmabuf_item),
 			      GFP_KERNEL | __GFP_ZERO);
 
@@ -260,7 +258,6 @@ struct dmabuf_item *disp_dma_map(int fd)
 	}
 
 exit:
-	DISP_TRACE_END("disp_dma_map");
 	return item;
 #else
 
@@ -271,10 +268,8 @@ exit:
 void disp_dma_unmap(struct dmabuf_item *item)
 {
 #if defined(__LINUX_PLAT__)
-	DISP_TRACE_BEGIN("disp_dma_unmap");
 	disp_dma_unmap_core(item);
 	kfree(item);
-	DISP_TRACE_END("disp_dma_unmap");
 #endif
 }
 
@@ -421,7 +416,6 @@ s32 disp_set_fb_info(struct fb_address_transfer *fb, bool left_eye)
 exit:
 	return ret;
 }
-EXPORT_SYMBOL(disp_set_fb_info);
 
 s32 disp_set_fb_base_on_depth(struct fb_address_transfer *fb)
 {
@@ -470,107 +464,3 @@ s32 disp_set_fb_base_on_depth(struct fb_address_transfer *fb)
 exit:
 	return ret;
 }
-
-/* *********************** disp irq util begin ********************* */
-struct disp_irq_util {
-	s32 num;
-	u32 irq_no;
-	u32 irq_en;
-	struct disp_irq_info *irq_info[DISP_SCREEN_NUM + DISP_WB_NUM + DISP_SCREEN_NUM];
-};
-
-static struct disp_irq_util s_irq_util;
-static DEFINE_SPINLOCK(s_irq_lock);
-
-s32 disp_init_irq_util(u32 irq_no)
-{
-	s_irq_util.irq_no = irq_no;
-	return 0;
-}
-
-static s32 disp_irq_handler(int irq, void *parg)
-{
-	unsigned long flags;
-	const u32 total_num = sizeof(s_irq_util.irq_info)
-		/ sizeof(s_irq_util.irq_info[0]);
-	u32 id;
-
-	for (id = 0; id < total_num; id++) {
-		struct disp_irq_info *irq_info;
-
-		spin_lock_irqsave(&s_irq_lock, flags);
-		irq_info = s_irq_util.irq_info[id];
-		spin_unlock_irqrestore(&s_irq_lock, flags);
-
-		if (irq_info)
-			irq_info->irq_handler(irq_info->sel,
-				irq_info->irq_flag, irq_info->ptr);
-	}
-
-	return DISP_IRQ_RETURN;
-}
-
-s32 disp_register_irq(u32 id, struct disp_irq_info *irq_info)
-{
-	/*unsigned long flags;*/
-	const u32 max_id = sizeof(s_irq_util.irq_info)
-		/ sizeof(s_irq_util.irq_info[0]);
-
-	if ((irq_info == NULL) || (id >= max_id)) {
-		__wrn("invalid pare: irq_info=%p, id=%d\n",
-			irq_info, id);
-		return -1;
-	}
-
-	__inf("id=%d, irq_info:sel=%d,irq_flag=0x%x\n", id,
-		irq_info->sel, irq_info->irq_flag);
-
-	/*spin_lock_irqsave(&s_irq_lock, flags);*/
-	if (s_irq_util.irq_info[id] == NULL) {
-		s_irq_util.irq_info[id] = irq_info;
-		s_irq_util.num++;
-		if ((s_irq_util.num > 0)
-			&& (s_irq_util.irq_en == 0)) {
-			disp_sys_register_irq(s_irq_util.irq_no, 0,
-				disp_irq_handler, NULL, 0, 0);
-			disp_sys_enable_irq(s_irq_util.irq_no);
-			s_irq_util.irq_en = 1;
-		}
-	} else {
-		__wrn("irq for %d already registered\n", id);
-	}
-	/*spin_unlock_irqrestore(&s_irq_lock, flags);*/
-
-	return 0;
-}
-
-s32 disp_unregister_irq(u32 id, struct disp_irq_info *irq_info)
-{
-	/*unsigned long flags;*/
-	const u32 max_id = sizeof(s_irq_util.irq_info)
-		/ sizeof(s_irq_util.irq_info[0]);
-
-	if ((irq_info == NULL) || (id >= max_id)) {
-		__wrn("invalid pare: irq_info=%p, id=%d\n",
-			irq_info, id);
-		return -1;
-	}
-
-	/*spin_lock_irqsave(&s_irq_lock, flags);*/
-	if (s_irq_util.irq_info[id] == irq_info) {
-		s_irq_util.irq_info[id] = NULL;
-		s_irq_util.num--;
-		if ((s_irq_util.num == 0)
-			&& (s_irq_util.irq_en != 0)) {
-			disp_sys_disable_irq(s_irq_util.irq_no);
-			disp_sys_unregister_irq(s_irq_util.irq_no,
-				disp_irq_handler, NULL);
-			s_irq_util.irq_en = 0;
-		}
-	} else {
-		__wrn("irq for %d already unregistered\n", id);
-	}
-	/*spin_unlock_irqrestore(&s_irq_lock, flags);*/
-	return 0;
-}
-/* *********************** disp irq util end ********************** */

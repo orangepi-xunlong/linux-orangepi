@@ -257,6 +257,35 @@ int videoParams_GetHdmiVicCode(int cea_code);
  */
 void video_params_reset(hdmi_tx_dev_t *dev, videoParams_t *params);
 
+/**
+ * @param params pointer to the video parameters structure
+ * @return the custom csc coefficients A
+ */
+u16 *videoParams_GetCscA(hdmi_tx_dev_t *dev, videoParams_t *params);
+
+void videoParams_SetCscA(hdmi_tx_dev_t *dev,
+				videoParams_t *params, u16 value[4]);
+
+/**
+ * @param params pointer to the video parameters structure
+ * @return the custom csc coefficients B
+ */
+u16 *videoParams_GetCscB(hdmi_tx_dev_t *dev, videoParams_t *params);
+
+void videoParams_SetCscB(hdmi_tx_dev_t *dev,
+			videoParams_t *params, u16 value[4]);
+
+/**
+ * @param params pointer to the video parameters structure
+ * @return the custom csc coefficients C
+ */
+u16 *videoParams_GetCscC(hdmi_tx_dev_t *dev, videoParams_t *params);
+
+void videoParams_SetCscC(hdmi_tx_dev_t *dev, videoParams_t *params,
+							u16 value[4]);
+
+void videoParams_SetCscScale(hdmi_tx_dev_t *dev, videoParams_t *params,
+							u16 value);
 
 /**
  * @param params pointer to the video parameters structure
@@ -317,6 +346,17 @@ void vp_PixelPackingDefaultPhase(hdmi_tx_dev_t *dev, u8 bit);
 void vp_PixelRepetitionFactor(hdmi_tx_dev_t *dev, u8 value);
 void vp_Ycc422RemapSize(hdmi_tx_dev_t *dev, u8 value);
 void vp_OutputSelector(hdmi_tx_dev_t *dev, u8 value);
+
+
+/**
+ * Initializes and configures the video blocks to transmit a blue screen
+ * @param baseAddr Base Address of module
+ * @param params VideoParams
+ * @param dataEnablePolarity data enable polarity (1 = enable, 0 not)
+ * @return TRUE if successful
+ */
+int video_Initialize(hdmi_tx_dev_t *dev, videoParams_t *params,
+		     u8 dataEnablePolarity);
 
 /**
  * Configures the video blocks to do any video processing and to

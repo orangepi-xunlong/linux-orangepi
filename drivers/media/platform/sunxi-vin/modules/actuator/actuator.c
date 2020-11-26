@@ -39,7 +39,6 @@
 long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 			unsigned int cmd, void *arg)
 {
-#ifdef CONFIG_ACTUATOR_MODULE
 	long ret = 0;
 
 	struct actuator_ctrl_t *act_ctrl;
@@ -149,9 +148,6 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	mutex_unlock(act_ctrl->actuator_mutex);
 
 	return ret;
-#else
-	return 0;
-#endif
 }
 EXPORT_SYMBOL_GPL(sunxi_actuator_ioctl);
 

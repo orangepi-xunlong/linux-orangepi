@@ -118,6 +118,7 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	struct thread_info *ti = task_thread_info(p);
 	struct pt_regs *childregs, *regs = current_pt_regs();
 	unsigned long childksp;
+	p->set_child_tid = p->clear_child_tid = NULL;
 
 	childksp = (unsigned long)task_stack_page(p) + THREAD_SIZE - 32;
 
@@ -212,7 +213,7 @@ static inline int is_ra_save_ins(union mips_instruction *ip, int *poff)
 			if (ip->mm16_r5_format.rt != 31)
 				return 0;
 
-			*poff = ip->mm16_r5_format.imm;
+			*poff = ip->mm16_r5_format.simmediate;
 			*poff = (*poff << 2) / sizeof(ulong);
 			return 1;
 
@@ -344,9 +345,8 @@ static inline int is_sp_move_ins(union mips_instruction *ip)
 static int get_frame_info(struct mips_frame_info *info)
 {
 	bool is_mmips = IS_ENABLED(CONFIG_CPU_MICROMIPS);
-	union mips_instruction insn, *ip;
+	union mips_instruction insn, *ip, *ip_end;
 	const unsigned int max_insns = 128;
-	unsigned int last_insn_size = 0;
 	unsigned int i;
 
 	info->pc_offset = -1;
@@ -356,20 +356,17 @@ static int get_frame_info(struct mips_frame_info *info)
 	if (!ip)
 		goto err;
 
-	for (i = 0; i < max_insns; i++) {
-		ip = (void *)ip + last_insn_size;
+	ip_end = (void *)ip + info->func_size;
 
+	for (i = 0; i < max_insns && ip < ip_end; i++, ip++) {
 		if (is_mmips && mm_insn_16bit(ip->halfword[0])) {
 			insn.halfword[0] = 0;
 			insn.halfword[1] = ip->halfword[0];
-			last_insn_size = 2;
 		} else if (is_mmips) {
 			insn.halfword[0] = ip->halfword[1];
 			insn.halfword[1] = ip->halfword[0];
-			last_insn_size = 4;
 		} else {
 			insn.word = ip->word;
-			last_insn_size = 4;
 		}
 
 		if (is_jump_ins(&insn))
@@ -391,6 +388,8 @@ static int get_frame_info(struct mips_frame_info *info)
 						tmp = (ip->halfword[0] >> 1);
 						info->frame_size = -(signed short)(tmp & 0xf);
 					}
+					ip = (void *) &ip->halfword[1];
+					ip--;
 				} else
 #endif
 				info->frame_size = - ip->i_format.simmediate;

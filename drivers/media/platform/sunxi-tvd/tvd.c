@@ -69,20 +69,20 @@
 	KERNEL_VERSION(TVD_MAJOR_VERSION, TVD_MINOR_VERSION, TVD_RELEASE)
 
 /*v4l2_format's raw_data index*/
-#define RAW_DATA_INTERFACE   104
-#define RAW_DATA_SYSTEM      105
-#define RAW_DATA_FORMAT      106
-#define RAW_DATA_PIXELFORMAT 107
-#define RAW_DATA_ROW         108
-#define RAW_DATA_COLUMN      109
-#define RAW_DATA_CH0_INDEX   110
-#define RAW_DATA_CH1_INDEX   111
-#define RAW_DATA_CH2_INDEX   112
-#define RAW_DATA_CH3_INDEX   113
-#define RAW_DATA_CH0_STATUS  114
-#define RAW_DATA_CH1_STATUS  115
-#define RAW_DATA_CH2_STATUS  116
-#define RAW_DATA_CH3_STATUS  117
+#define RAW_DATA_INTERFACE   1
+#define RAW_DATA_SYSTEM      2
+#define RAW_DATA_FORMAT      3
+#define RAW_DATA_PIXELFORMAT 4
+#define RAW_DATA_ROW         5
+#define RAW_DATA_COLUMN      6
+#define RAW_DATA_CH0_INDEX   7
+#define RAW_DATA_CH1_INDEX   8
+#define RAW_DATA_CH2_INDEX   9
+#define RAW_DATA_CH3_INDEX   10
+#define RAW_DATA_CH0_STATUS  11
+#define RAW_DATA_CH1_STATUS  12
+#define RAW_DATA_CH2_STATUS  13
+#define RAW_DATA_CH3_STATUS  14
 
 static unsigned int tvd_dbg_en;
 static unsigned int tvd_dbg_sel;
@@ -385,11 +385,9 @@ static int __tvd_clk_init(struct tvd_dev *dev)
 	tvd_dbg("%s: dev->interface = %d, dev->system = %d\n", __func__,
 		dev->interface, dev->system);
 
-
+	dev->parent = clk_get_parent(dev->clk);
 	if (IS_ERR_OR_NULL(dev->parent) || IS_ERR_OR_NULL(dev->clk))
 		return -EINVAL;
-
-	clk_set_parent(dev->clk, dev->parent);
 
 	/* parent is 297M */
 	ret = clk_set_rate(dev->parent, p);
@@ -1059,7 +1057,6 @@ static int vidioc_g_fmt_vid_cap(struct file *file, void *priv,
 	__get_status(dev, &locked, &system);
 
 	if (dev->mulit_channel_mode) {
-		tvd_dbg("%s: mulit_channel_mode.\n", __func__);
 		f->fmt.raw_data[RAW_DATA_INTERFACE] = dev->interface;
 		f->fmt.raw_data[RAW_DATA_SYSTEM] = system;
 		f->fmt.raw_data[RAW_DATA_FORMAT] = dev->format;
@@ -3140,7 +3137,6 @@ static int __tvd_multi_ch_probe_init(struct platform_device *pdev)
 	}
 
 	dev->clk = tvd_clk[dev->sel]; /*need to be updated*/
-	dev->parent = clk_get_parent(dev->clk);
 
 	/* register v4l2 device */
 	sprintf(dev->v4l2_dev.name, "multich_v4l2_dev");
@@ -3310,7 +3306,6 @@ static int __tvd_probe_init(int sel, struct platform_device *pdev)
 		tvd_wrn("get tvd clk error!\n");
 		goto iomap_tvd_err;
 	}
-	dev->parent = clk_get_parent(dev->clk);
 
 	/* register v4l2 device */
 	sprintf(dev->v4l2_dev.name, "tvd_v4l2_dev%d", dev->id);

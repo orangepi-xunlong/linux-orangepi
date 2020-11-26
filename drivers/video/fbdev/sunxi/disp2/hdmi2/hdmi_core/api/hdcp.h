@@ -285,13 +285,39 @@ typedef struct {
 } sha_t;
 
 
+void hdcp_initial(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp);
 void hdcp_init(hdmi_tx_dev_t *dev);
 void hdcp_exit(void);
 void hdcp22_data_enable(u8 enable);
-void hdcp_configure_new(hdmi_tx_dev_t *dev,
-					hdcpParams_t *hdcp,
-					videoParams_t *video);
 
+void hdcp_configure_new(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp, videoParams_t *video);
+void hdcp_disconfigure_new(hdmi_tx_dev_t *dev);
+void hdcp_close(hdmi_tx_dev_t *dev);
+
+int get_hdcp_status(hdmi_tx_dev_t *dev);
+
+/**
+ * The method handles DONE and ERROR events.
+ * A DONE event will trigger the retrieving the read byte, and sending a request to read the following byte. The EDID is read until the block is done and then the reading moves to the next block.
+ *  When the block is successfully read, it is sent to be parsed.
+ * @param dev Device structure
+ * @param hpd on or off
+ * @param state of the HDCP engine interrupts
+ * @param param to be returned to application:
+ *		no of KSVs in KSV LIST if KSV_LIST_EVENT
+ *		1 (engaged) 0 (fail) if HDCP_EGNAGED_EVENT
+ * @return the state of which the event was handled (FALSE for fail)
+ */
+/* @param ksvHandler Handler to call when KSV list is ready*/
+u8 hdcp_event_handler(hdmi_tx_dev_t *dev, int *param, u32 irq_stat);
+
+
+/**
+ * Enable/disable HDCP 1.4
+ * @param dev Device structure
+ * @param enable
+ */
+void hdcp_rxdetect(hdmi_tx_dev_t *dev, u8 enable);
 
 /**
  * Enter or exit AV mute mode
@@ -300,6 +326,38 @@ void hdcp_configure_new(hdmi_tx_dev_t *dev,
  */
 void hdcp_av_mute(hdmi_tx_dev_t *dev, int enable);
 
-void hdcp_api_init(hdmi_tx_dev_t *dev, hdcpParams_t *hdcp,
-					struct hdmi_dev_func *func);
+/**
+ * Bypass data encryption stage
+ * @param dev Device structure
+ * @param bypass the HDCP AV mute
+ */
+/* void hdcp_BypassEncryption(hdmi_tx_dev_t *dev, int bypass); */
+
+void hdcp_sw_reset(hdmi_tx_dev_t *dev);
+
+
+/**
+ *@param dev Device structure
+ * @param disable the HDCP encrption
+ */
+void hdcp_disable_encryption(hdmi_tx_dev_t *dev, int disable);
+
+/**
+ * @param baseAddr base address of HDCP module registers
+ * @return HDCP interrupts state
+ */
+u8 hdcp_interrupt_status(hdmi_tx_dev_t *dev);
+
+/**
+ * Clear HDCP interrupts
+ * @param dev Device structure
+ * @param value mask of interrupts to clear
+ * @return TRUE if successful
+ */
+int hdcp_interrupt_clear(hdmi_tx_dev_t *dev, u8 value);
+
+u8 hdcp_av_mute_state(hdmi_tx_dev_t *dev);
+void set_avmute(u8 enable);
+
+ssize_t hdcp_config_dump(hdmi_tx_dev_t *dev, char *buf);
 #endif	/* API_HDCP_H_ */

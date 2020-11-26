@@ -14,6 +14,22 @@
  *
  */
 
+/*
+ ******************************************************************************
+ *
+ * flash.h
+ *
+ * Hawkview ISP - flash.h module
+ *
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version        Author         Date        Description
+ *
+ *   3.0          Zhao Wei     2015/12/02   ISP Tuning Tools Support
+ *
+ ******************************************************************************
+ */
+
 #ifndef __FLASH_H__
 #define __FLASH_H__
 

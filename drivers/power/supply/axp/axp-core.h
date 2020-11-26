@@ -92,6 +92,11 @@ struct axp_platform_ops {
 	struct axp_dev * (*get_pmu_dev)(void);
 	int (*pmu_regulator_save)(void);
 	void (*pmu_regulator_restore)(void);
+	char *powerkey_name[8];
+	char *regulator_name[8];
+	char *charger_name[8];
+	char *gpio_name[8];
+
 };
 
 struct axp_interrupts {
@@ -146,7 +151,6 @@ struct axp_irq_chip_data *axp_irq_chip_register(struct axp_regmap *map,
 	int irq, int irq_flags, struct axp_regmap_irq_chip *irq_chip,
 	void (*wakeup_event)(void));
 void axp_irq_chip_unregister(int irq, struct axp_irq_chip_data *irq_data);
-struct wakeup_source *axp_wakeup_source_init(struct device *dev, int irq);
 
 int axp_regmap_write(struct axp_regmap *map, s32 reg, u8 val);
 int axp_regmap_writes(struct axp_regmap *map, s32 reg, s32 len, u8 *val);

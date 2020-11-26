@@ -22,8 +22,6 @@
 #include "clk-factors.h"
 #include "clk-periph.h"
 #include "clk-debugfs.h"
-
-static struct dentry *my_ccudbg_root;
 static struct testclk_data testclk_priv;
 static void clktest_reg_dump(void)
 {
@@ -72,34 +70,34 @@ static void clktest_reg_dump(void)
 				sprintf(
 				    dumpline, "[Reg %08x] %08x %08x %08x %08x ",
 				    i,
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i)),
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i + 4)),
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i + 8)),
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i + 12)));
 			else if (i + 8 <= cpus_clk_maxreg)
 				sprintf(
 				    dumpline, "[Reg %08x] %08x %08x %08x ", i,
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i)),
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i + 4)),
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i + 8)));
 			else if (i + 4 <= cpus_clk_maxreg)
 				sprintf(
 				    dumpline, "[Reg %08x] %08x %08x ", i,
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i)),
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i + 4)));
 			else
 				sprintf(
 				    dumpline, "[Reg %08x] %08x ", i,
-				    *((unsigned int *)((char *)sunxi_clk_cpus_base +
+				    *((unsigned int *)((char *)sunxi_clk_base +
 						       i)));
 			pr_info("%s\n", dumpline);
 			i = i + 16;

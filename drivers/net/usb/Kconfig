@@ -607,11 +607,4 @@ config USB_NET_CH9200
 	  To compile this driver as a module, choose M here: the
 	  module will be called ch9200.
 
-config USB_NET_QUECTEL
-	tristate "Quectel ECxx qcqmi ethernet devices"
-	depends on USB_USBNET
-	help
-	  This option adds support for Quectel ECxx
-	  qcqmi Ethernet adapters.
-
 endif # USB_NET_DRIVERS

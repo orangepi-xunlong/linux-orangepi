@@ -329,6 +329,16 @@ config XR_BT_LPM
 	  Say Y here to compile support for bluesleep support into the kernel
 	  or say M to compile it as module (bluesleep).
 
+config XR_BT_FDI
+	tristate "Xradio Bluetooth farmware debug interface support"
+	help
+	  Bluetooth Bluetooth sleep Driver.
+	  This driver provides the dynamic active power saving mechanism for
+	  bluetooth radio devices.
+
+	  Say Y here to compile support for bluesleep support into the kernel
+	  or say M to compile it as module (bluesleep).
+
 config BT_MRVL
 	tristate "Marvell Bluetooth driver support"
 	help

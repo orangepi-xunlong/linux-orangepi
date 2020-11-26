@@ -13,10 +13,8 @@
 #include "de_rtmx.h"
 #include "de_scaler.h"
 #include "de_csc.h"
-#if defined(CONFIG_EINK_PANEL_USED)
 #include "de_eink.h"
 #include "de_wb_type.h"
-#endif
 
 extern int de_al_mgr_apply(unsigned int screen_id,
 			   struct disp_manager_data *data);
@@ -30,7 +28,7 @@ extern int de_al_lyr_apply(unsigned int screen_id,
 extern int de_al_mgr_sync(unsigned int screen_id);
 extern int de_al_mgr_update_regs(unsigned int screen_id);
 extern int de_al_query_irq(unsigned int screen_id);
-extern int de_al_enable_irq(unsigned int screen_id, unsigned int en);
+extern int de_al_enable_irq(unsigned int screen_id, unsigned en);
 int de_update_device_fps(unsigned int sel, u32 fps);
 int de_update_clk_rate(u32 rate);
 int de_get_clk_rate(void);

@@ -19,7 +19,6 @@
 #include <dt-bindings/gpio/gpio.h>
 #include "sun8iw15p1-clk.dtsi"
 #include "sun8iw15p1-pinctrl.dtsi"
-#include <dt-bindings/thermal/thermal.h>
 / {
 	model = "sun8iw15";
 	compatible = "allwinner,sun8iw15p1";
@@ -67,9 +66,18 @@
 			compatible = "android,firmware";
 			name = "android";
 			boot_devices = "soc/sdc0,soc/sdc2,soc";
-			vbmeta {
-				compatible = "android,vbmeta";
-				parts = "vbmeta,vbmeta_system,vbmeta_vendor,boot,super,recovery";
+			fstab {
+				compatible = "android,fstab";
+				name = "fstab";
+				vendor {
+					compatible = "android,vendor";
+					dev = "/dev/block/by-name/vendor";
+					fsmgr_flags = "wait,recoveryonly";
+					mnt_flags = "ro,barrier=1";
+					name = "vendor";
+					status = "ok";
+					type = "squashfs";
+				};
 			};
 		};
 		optee {
@@ -83,7 +91,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		cpu0: cpu@0 {
+		cpu@0 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a7","arm,armv7";
 			reg = <0x0>;
@@ -93,13 +101,9 @@
 			clock-frequency = <1008000000>;
 			operating-points-v2 = <&cpu_opp_l_table0>;
 			cpu-idle-states = <&CPU_SLEEP_0 &CLUSTER_SLEEP_0 &SYS_SLEEP_0>;
-			cooling-min-level = <7>;
-			cooling-max-level = <0>;
-			#cooling-cells = <2>; /* min followed by max */
-			dynamic-power-coefficient = <185>;
 		};
 
-		cpu1: cpu@1 {
+		cpu@1 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a7","arm,armv7";
 			reg = <0x1>;
@@ -110,7 +114,7 @@
 			cpu-idle-states = <&CPU_SLEEP_0 &CLUSTER_SLEEP_0 &SYS_SLEEP_0>;
 		};
 
-		cpu2: cpu@2 {
+		cpu@2 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a7","arm,armv7";
 			reg = <0x2>;
@@ -121,7 +125,7 @@
 			cpu-idle-states = <&CPU_SLEEP_0 &CLUSTER_SLEEP_0 &SYS_SLEEP_0>;
 		};
 
-		cpu3: cpu@3 {
+		cpu@3 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a7","arm,armv7";
 			reg = <0x3>;
@@ -556,7 +560,6 @@
 			gpr_offset = <0x100>;
 			gpr_len	   = <8>;
 			gpr_cur_pos = <6>;
-			wakeup-source;
 		};
 
 		wdt: watchdog@030090a0 {
@@ -998,10 +1001,9 @@
 				 <&clk_sdmmc0_bus>,
 				 <&clk_sdmmc0_rst>;
 			clock-names = "osc24m","pll_periph","mmc","ahb","rst";
-			pinctrl-names = "default","sleep","uart_jtag";
+			pinctrl-names = "default","sleep";
 			pinctrl-0 = <&sdc0_pins_a>;
 			pinctrl-1 = <&sdc0_pins_b>;
-			pinctrl-2 = <&sdc0_pins_c>;
 			max-frequency = <50000000>;
 			bus-width = <4>;
 			/*non-removable;*/
@@ -1554,7 +1556,7 @@
 				combine_sensor_num = <1>;
 				combine_sensor_type = "CPU";
 				combine_sensor_temp_type = "max";
-				combine_sensor_id = <1>;
+				combine_sensor_id = <0>;
 			};
 
 			ths_combine1:ths_combine1{
@@ -1563,8 +1565,24 @@
 				combine_sensor_num = <1>;
 				combine_sensor_type = "GPU";
 				combine_sensor_temp_type = "max";
-				combine_sensor_id = <0>;
+				combine_sensor_id = <1>;
 			};
+		};
+
+		cpu_budget_cooling:cpu_budget_cool{
+			compatible = "allwinner,budget_cooling";
+			device_type = "cpu_budget_cooling";
+			#cooling-cells = <2>;
+			status = "okay";
+			state_cnt = <7>;
+			cluster_num = <1>;
+			state0 = <1800000 4>;
+			state1 = <1512000 4>;
+			state2 = <1416000 4>;
+			state3 = <1200000 4>;
+			state4 = <1008000 3>;
+			state5 = <1008000 2>;
+			state6 = <1008000 1>;
 		};
 
 		gpu_cooling:gpu_cooling{
@@ -1582,48 +1600,82 @@
 
 		thermal-zones{
 			cpu_thermal_zone{
-				polling-delay-passive = <500>;
-				polling-delay = <500>;
-				sustainable-power = <1494>;
-				policy = "power_allocator";
-				k_po = <50>;
-				k_pu = <100>;
-				k_i = <0>;
+
+				polling-delay-passive = <1000>;
+				polling-delay = <2000>;
 				thermal-sensors = <&ths_combine0 0>;
 
 				trips{
-					cpu_threshold: trip-point@0 {
-						temperature = <60000>;
+					cpu_trip0:t0{
+						temperature = <65000>;
 						type = "passive";
 						hysteresis = <0>;
 					};
-					cpu_target: trip-point@1 {
-						temperature = <70000>;
+					cpu_trip1:t1{
+						temperature = <75000>;
 						type = "passive";
 						hysteresis = <0>;
 					};
-					cpu_crit: cpu_crit@0 {
+					cpu_trip2:t2{
+						temperature = <85000>;
+						type = "passive";
+						hysteresis = <0>;
+					};
+					cpu_trip3:t3{
+						temperature = <95000>;
+						type = "passive";
+						hysteresis = <0>;
+					};
+					cpu_trip4:t4{
+						temperature = <105000>;
+						type = "passive";
+						hysteresis = <0>;
+					};
+					crt_trip:t8{
 						temperature = <110000>;
 						type = "critical";
 						hysteresis = <0>;
 					};
 				};
 
-				cooling-maps {
-					map0 {
-						trip = <&cpu_target>;
-						cooling-device = <&cpu0
-						THERMAL_NO_LIMIT
-						THERMAL_NO_LIMIT>;
-						contribution = <1024>;
+				cooling-maps{
+					bind0{
+						contribution = <0>;
+						trip = <&cpu_trip0>;
+						cooling-device
+						= <&cpu_budget_cooling 1 1>;
+					};
+					bind1{
+						contribution = <0>;
+						trip = <&cpu_trip1>;
+						cooling-device
+						= <&cpu_budget_cooling 2 2>;
+					};
+					bind2{
+						contribution = <0>;
+						trip = <&cpu_trip2>;
+						cooling-device
+						= <&cpu_budget_cooling 3 4>;
+					};
+					bind3{
+						contribution = <0>;
+						trip = <&cpu_trip3>;
+						cooling-device
+						= <&cpu_budget_cooling 5 5>;
+					};
+					bind4{
+						contribution = <0>;
+						trip = <&cpu_trip4>;
+						cooling-device
+						= <&cpu_budget_cooling 6 6>;
 					};
 				};
 			};
 
 			gpu_thermal_zone{
+
 				polling-delay-passive = <1000>;
-				polling-delay = <1000>;
-				policy = "step_wise";
+				polling-delay = <10000>;
 				thermal-sensors = <&ths_combine1 1>;
 
 				trips{
@@ -1699,13 +1751,6 @@
 			record-size  = <0x00020000>;
 			console-size = <0x00020000>;
 			pmsg-size    = <0x00020000>;
-		};
-
-		sunxi-dump@0 {
-			compatible = "sunxi-dump";
-			reg = <0x0 0x03001000 0x0 0x1000>,
-			      <0x0 0x03021000 0x0 0x400>;
-			group-names = "ccmu", "gic-dist";
 		};
 
 		gmac0: eth@01c30000 {

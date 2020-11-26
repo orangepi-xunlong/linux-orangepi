@@ -24,24 +24,15 @@ endif
 ifdef CONFIG_ARCH_SUN8IW7
 	SUNXI_SS_VER = v3
 endif
-ifdef CONFIG_ARCH_SUN8IW18
-	SUNXI_SS_VER = v3
-endif
+
 ifdef CONFIG_ARCH_SUN50I
 	SUNXI_SS_VER = v3
 endif
-ifdef CONFIG_ARCH_SUN8IW16
-	SUNXI_SS_VER = v3
-endif
-ifdef CONFIG_ARCH_SUN8IW19
-	SUNXI_SS_VER = v3
-endif
+
 ifdef CONFIG_ARCH_SUN50IW8
 	SUNXI_SS_VER = v4
 endif
-ifdef CONFIG_ARCH_SUN50IW10
-	SUNXI_SS_VER = v4
-endif
+
 ss-y +=  $(SUNXI_SS_VER)/sunxi_ss_reg.o $(SUNXI_SS_VER)/sunxi_ss_proc.o
 
 ccflags-y += -Idrivers/crypto/sunxi-ss/$(SUNXI_SS_VER)

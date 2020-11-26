@@ -100,8 +100,6 @@ static s32 vdevice_clk_config(struct disp_device *vdevice)
 
 	lcd_rate = dclk_rate * clk_info.tcon_div;
 	pll_rate = lcd_rate * clk_info.lcd_div;
-	if (vdevicep->clk_parent && vdevicep->clk)
-		clk_set_parent(vdevicep->clk, vdevicep->clk_parent);
 
 	/* set the rate of parent */
 	clk_set_rate(vdevicep->clk_parent, pll_rate);

@@ -342,6 +342,8 @@ void mac80211_scan_completed(struct ieee80211_hw *hw,
 	mac80211_queue_delayed_work(&local->hw, &local->scan_work, 0);
 }
 
+EXPORT_SYMBOL(mac80211_scan_completed);
+
 static int ieee80211_start_sw_scan(struct ieee80211_local *local)
 {
 	/*
@@ -968,6 +970,7 @@ void mac80211_sched_scan_results(struct ieee80211_hw *hw)
 
 	cfg80211_sched_scan_results(hw->wiphy);
 }
+EXPORT_SYMBOL(mac80211_sched_scan_results);
 
 void mac80211_sched_scan_stopped_work(struct work_struct *work)
 {
@@ -1001,3 +1004,4 @@ void mac80211_sched_scan_stopped(struct ieee80211_hw *hw)
 
 	mac80211_queue_work(&local->hw, &local->sched_scan_stopped_work);
 }
+EXPORT_SYMBOL(mac80211_sched_scan_stopped);

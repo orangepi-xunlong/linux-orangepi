@@ -243,7 +243,7 @@ static struct axp_usb_info axp803_usb_info = {
 
 static int axp803_get_rest_cap(struct axp_charger_dev *cdev)
 {
-	u8 val, temp_val[2], batt_max_cap_val[2];
+	u8 val, temp_val[2];
 	int batt_max_cap, coulumb_counter;
 	int rest_vol = 0;
 	int ocv_vol = 0;

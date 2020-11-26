@@ -284,12 +284,8 @@ static int ipddp_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
                 case SIOCFINDIPDDPRT:
 			spin_lock_bh(&ipddp_route_lock);
 			rp = __ipddp_find_route(&rcp);
-			if (rp) {
-				memset(&rcp2, 0, sizeof(rcp2));
-				rcp2.ip    = rp->ip;
-				rcp2.at    = rp->at;
-				rcp2.flags = rp->flags;
-			}
+			if (rp)
+				memcpy(&rcp2, rp, sizeof(rcp2));
 			spin_unlock_bh(&ipddp_route_lock);
 
 			if (rp) {

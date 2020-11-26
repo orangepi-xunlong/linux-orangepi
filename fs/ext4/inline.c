@@ -716,11 +716,8 @@ int ext4_try_to_write_inline_data(struct address_space *mapping,
 
 	if (!PageUptodate(page)) {
 		ret = ext4_read_inline_page(inode, page);
-		if (ret < 0) {
-			unlock_page(page);
-			put_page(page);
+		if (ret < 0)
 			goto out_up_read;
-		}
 	}
 
 	ret = 1;
@@ -877,7 +874,7 @@ int ext4_da_write_inline_data_begin(struct address_space *mapping,
 	handle_t *handle;
 	struct page *page;
 	struct ext4_iloc iloc;
-	int retries = 0;
+	int retries;
 
 	ret = ext4_get_inode_loc(inode, &iloc);
 	if (ret)
@@ -906,11 +903,11 @@ retry_journal:
 	flags |= AOP_FLAG_NOFS;
 
 	if (ret == -ENOSPC) {
-		ext4_journal_stop(handle);
 		ret = ext4_da_convert_inline_data_to_extent(mapping,
 							    inode,
 							    flags,
 							    fsdata);
+		ext4_journal_stop(handle);
 		if (ret == -ENOSPC &&
 		    ext4_should_retry_alloc(inode->i_sb, &retries))
 			goto retry_journal;
@@ -1771,7 +1768,6 @@ bool empty_inline_dir(struct inode *dir, int *has_inline_data)
 {
 	int err, inline_size;
 	struct ext4_iloc iloc;
-	size_t inline_len;
 	void *inline_pos;
 	unsigned int offset;
 	struct ext4_dir_entry_2 *de;
@@ -1799,9 +1795,8 @@ bool empty_inline_dir(struct inode *dir, int *has_inline_data)
 		goto out;
 	}
 
-	inline_len = ext4_get_inline_size(dir);
 	offset = EXT4_INLINE_DOTDOT_SIZE;
-	while (offset < inline_len) {
+	while (offset < dir->i_size) {
 		de = ext4_get_inline_entry(dir, &iloc, offset,
 					   &inline_pos, &inline_size);
 		if (ext4_check_dir_entry(dir, NULL, de,
@@ -1873,13 +1868,49 @@ int ext4_inline_data_fiemap(struct inode *inode,
 	physical += (char *)ext4_raw_inode(&iloc) - iloc.bh->b_data;
 	physical += offsetof(struct ext4_inode, i_block);
 
-	brelse(iloc.bh);
-out:
-	up_read(&EXT4_I(inode)->xattr_sem);
 	if (physical)
 		error = fiemap_fill_next_extent(fieinfo, start, physical,
 						inline_len, flags);
+	brelse(iloc.bh);
+out:
+	up_read(&EXT4_I(inode)->xattr_sem);
 	return (error < 0 ? error : 0);
+}
+
+/*
+ * Called during xattr set, and if we can sparse space 'needed',
+ * just create the extent tree evict the data to the outer block.
+ *
+ * We use jbd2 instead of page cache to move data to the 1st block
+ * so that the whole transaction can be committed as a whole and
+ * the data isn't lost because of the delayed page cache write.
+ */
+int ext4_try_to_evict_inline_data(handle_t *handle,
+				  struct inode *inode,
+				  int needed)
+{
+	int error;
+	struct ext4_xattr_entry *entry;
+	struct ext4_inode *raw_inode;
+	struct ext4_iloc iloc;
+
+	error = ext4_get_inode_loc(inode, &iloc);
+	if (error)
+		return error;
+
+	raw_inode = ext4_raw_inode(&iloc);
+	entry = (struct ext4_xattr_entry *)((void *)raw_inode +
+					    EXT4_I(inode)->i_inline_off);
+	if (EXT4_XATTR_LEN(entry->e_name_len) +
+	    EXT4_XATTR_SIZE(le32_to_cpu(entry->e_value_size)) < needed) {
+		error = -ENOSPC;
+		goto out;
+	}
+
+	error = ext4_convert_inline_data_nolock(handle, inode, &iloc);
+out:
+	brelse(iloc.bh);
+	return error;
 }
 
 void ext4_inline_data_truncate(struct inode *inode, int *has_inline)

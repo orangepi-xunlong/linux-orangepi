@@ -3,8 +3,6 @@
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
  * may be copied, distributed, and modified under those terms.
@@ -16,6 +14,21 @@
  *
  */
 
+/*
+ ******************************************************************************
+ *
+ * parser_reg_i.h
+ *
+ * CSIC - parser_reg_i.h module
+ *
+ * Copyright (c) 2016 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version         Author         Date        Description
+ *
+ *   1.0         Zhao Wei    2016/06/13      First Version
+ *
+ ******************************************************************************
+ */
 #ifndef __CSIC__PARSER__REG__I__H__
 #define __CSIC__PARSER__REG__I__H__
 
@@ -27,8 +40,6 @@
 #define PRS_EN_REG_PRS_EN_MASK     (0X1 << PRS_EN_REG_PRS_EN)
 #define PRS_EN_REG_PRS_MODE         1
 #define PRS_EN_REG_PRS_MODE_MASK   (0X1 << PRS_EN_REG_PRS_MODE)
-#define PRS_CH_PRS_MODE       	    2
-#define PRS_CH_PRS_MODE_MASK       (0X1 << PRS_CH_PRS_MODE)
 #define PRS_EN_REG_PCLK_EN          15
 #define PRS_EN_REG_PCLK_EN_MASK    (0X1 << PRS_EN_REG_PCLK_EN)
 #define PRS_EN_REG_NCSIC_EN         16
@@ -74,25 +85,29 @@
 
 #define PRS_CAP_REG_OFF         0X00C
 #define CH0_SCAP_ON             0
+#define CH0_SCAP_ON_MASK       (0X1 << CH0_SCAP_ON)
 #define CH0_VCAP_ON             1
-#define CH0_SV_ON_MASK         (0X3 << CH0_SCAP_ON)
-#define CH0_FPS_DS              2
-#define CH0_FPS_DS_MASK        (0XF << CH0_FPS_DS)
+#define CH0_VCAP_ON_MASK       (0X1 << CH0_VCAP_ON)
+#define CH0_CAP_MASK            2
+#define CH0_CAP_MASK_MASK      (0XF << CH0_CAP_MASK)
 #define CH1_SCAP_ON             8
+#define CH1_SCAP_ON_MASK       (0X1 << CH1_SCAP_ON)
 #define CH1_VCAP_ON             9
-#define CH1_SV_ON_MASK         (0X3 << CH1_SCAP_ON)
-#define CH1_FPS_DS              10
-#define CH1_FPS_DS_MASK        (0XF << CH1_FPS_DS)
+#define CH1_VCAP_ON_MASK       (0X1 << CH1_VCAP_ON)
+#define CH1_CAP_MASK            10
+#define CH1_CAP_MASK_MASK      (0XF << CH1_CAP_MASK)
 #define CH2_SCAP_ON             16
+#define CH2_SCAP_ON_MASK       (0X1 << CH2_SCAP_ON)
 #define CH2_VCAP_ON             17
-#define CH2_SV_ON_MASK         (0X3 << CH2_SCAP_ON)
-#define CH2_FPS_DS              18
-#define CH2_FPS_DS_MASK        (0XF << CH2_FPS_DS)
+#define CH2_VCAP_ON_MASK       (0X1 << CH2_VCAP_ON)
+#define CH2_CAP_MASK            18
+#define CH2_CAP_MASK_MASK      (0XF << CH2_CAP_MASK)
 #define CH3_SCAP_ON             24
+#define CH3_SCAP_ON_MASK       (0X1 << CH3_SCAP_ON)
 #define CH3_VCAP_ON             25
-#define CH3_SV_ON_MASK         (0X3 << CH3_SCAP_ON)
-#define CH3_FPS_DS             26
-#define CH3_FPS_DS_MASK        (0XF << CH3_FPS_DS)
+#define CH3_VCAP_ON_MASK       (0X1 << CH3_VCAP_ON)
+#define CH3_CAP_MASK            26
+#define CH3_CAP_MASK_MASK      (0XF << CH3_CAP_MASK)
 
 #define PRS_SIGNAL_STA_REG_OFF   0X010
 #define DATA_STA                 0
@@ -171,12 +186,6 @@
 #define PRS_CH0_MUL_ERR_PD               2
 #define PRS_CH0_MUL_ERR_PD_MASK         (0X1 << PRS_CH0_MUL_ERR_PD)
 
-#define PRS_CH0_LINE_TIME_REG_OFF	0X048
-#define PRS_CH0_INPUT_HSYN		0
-#define PRS_CH0_INPUT_HSYN_MASK 	(0XFFFF << PRS_CH0_INPUT_HSYN)
-#define PRS_CH0_INPUT_HBLK		16
-#define PRS_CH0_INPUT_HBLK_MASK 	(0XFFFF << PRS_CH0_INPUT_HBLK)
-
 #define PRS_NCSIC_RX_SIGNAL0_DLY_ADJ_REG_OFF  0X500
 #define PRS_PCLK_DLY                0
 #define PRS_PCLK_DLY_MASK          (0X1F << PRS_PCLK_DLY)
@@ -184,8 +193,6 @@
 #define PRS_HSYNC_DLY_MASK         (0X1F << PRS_HSYNC_DLY)
 #define PRS_VSYNC_DLY               16
 #define PRS_VSYNC_DLY_MASK         (0X1F << PRS_VSYNC_DLY)
-#define PRS_FILED_DLY               24
-#define PRS_FILED_DLY_MASK         (0X1F << PRS_FILED_DLY)
 
 #define PRS_NCSIC_RX_SIGNAL1_DLY_ADJ_REG_OFF  0X504
 #define PRS_D20_DLY                 0

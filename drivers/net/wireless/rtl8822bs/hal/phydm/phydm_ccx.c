@@ -32,7 +32,7 @@ phydm_hw_divider(
 	u32	reg_devider_rpt;
 	u8	i;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 		reg_devider_input =  0x1cbc;
@@ -94,12 +94,12 @@ phydm_fahm_set_valid_cnt(
 	struct _CCX_INFO			*ccx_info = &p_dm->dm_ccx_info;
 	u32		fahm_reg1;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if ((ccx_info->fahm_nume_sel == numerator_sel) &&
 		(ccx_info->fahm_denum_sel == denumerator_sel)) {
 
-		PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("no need to update\n", __func__));
+		PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("no need to update\n", __FUNCTION__));
 		return;
 	}
 
@@ -131,7 +131,7 @@ phydm_get_fahm_result(
 	boolean	is_ready = false;
 	u8		i;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 		reg_rpt =  0x1f80;
@@ -197,7 +197,7 @@ phydm_set_fahm_th_by_igi(
 	u8	th_gap = 2 * IGI_TO_NHM_TH_MULTIPLIER;	/*beacuse unit is 0.5dB for FAHM*/
 	u8	i;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if (ccx_info->env_mntr_igi == igi) {
 		PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("No need to update FAHM_th, IGI=0x%x\n", ccx_info->env_mntr_igi));
@@ -244,7 +244,7 @@ phydm_fahm_init(
 	struct _CCX_INFO			*ccx_info = &p_dm->dm_ccx_info;
 	u32	fahm_reg1;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("IGI=0x%x\n", p_dm->dm_dig_table.cur_ig_value));
 
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
@@ -395,7 +395,7 @@ phydm_cal_nhm_cnt(
 	u8						i;
 	boolean					noisy = false, clean = true;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if (!(p_dm->support_ability & ODM_BB_ENV_MONITOR))
 		return noisy;
@@ -436,7 +436,7 @@ phydm_nhm_setting(
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	struct _CCX_INFO	*ccx_info = &p_dm->dm_ccx_info;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("IGI=0x%x\n", ccx_info->echo_igi));
@@ -605,7 +605,7 @@ phydm_nhm_trigger(
 {
 	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 
@@ -738,7 +738,7 @@ phydm_store_nhm_setting(
 {
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 
@@ -802,7 +802,7 @@ phydm_clm_trigger(
 {
 	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 		odm_set_bb_reg(p_dm, ODM_REG_CLM_11AC, BIT(0), 0x0);	/*Trigger CLM*/
@@ -909,7 +909,7 @@ phydm_ccx_monitor_trigger(
 	if (!(p_dm->support_ability & ODM_BB_ENV_MONITOR))
 		return;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	if (monitor_time == 0)
 		return;
@@ -1047,7 +1047,7 @@ phydm_ccx_monitor(
 	if (!(p_dm->support_ability & ODM_BB_ENV_MONITOR))
 		return;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	phydm_ccx_monitor_result(p_dm);
 	phydm_ccx_monitor_trigger(p_dm, 262);	/*monitor 262ms*/
@@ -1061,7 +1061,7 @@ phydm_nhm_init(
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	struct _CCX_INFO		*ccx_info = &p_dm->dm_ccx_info;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("cur_ig_value=0x%x\n", p_dm->dm_dig_table.cur_ig_value));
 
 	phydm_set_nhm_th_by_igi(p_dm, p_dm->dm_dig_table.cur_ig_value);
@@ -1081,7 +1081,7 @@ phydm_clm_init(
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	struct _CCX_INFO		*ccx_info = &p_dm->dm_ccx_info;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	ccx_info->clm_mntr_mode = CLM_DRIVER_MNTR;
 	ccx_info->clm_period = 65535;
@@ -1099,7 +1099,7 @@ phydm_env_monitor_init(
 	if (!(p_dm->support_ability & ODM_BB_ENV_MONITOR))
 		return;
 
-	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
 	phydm_nhm_init(p_dm);
 	phydm_clm_init(p_dm);

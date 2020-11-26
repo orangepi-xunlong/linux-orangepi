@@ -39,11 +39,11 @@ int arisc_nmi_cb_register(u32 type, arisc_cb_t func, void *para)
 {
 	if (nmi_isr_node[type].handler) {
 		if (func == nmi_isr_node[type].handler) {
-			pr_warn("nmi interrupt handler register already\n");
+			ARISC_WRN("nmi interrupt handler register already\n");
 			return 0;
 		}
 		/* just output warning message, overlay handler */
-		pr_warn("nmi interrupt handler register already\n");
+		ARISC_WRN("nmi interrupt handler register already\n");
 		return -EINVAL;
 	}
 	nmi_isr_node[type].handler = func;
@@ -63,7 +63,7 @@ void arisc_nmi_cb_unregister(u32 type, arisc_cb_t func)
 {
 	if ((nmi_isr_node[type].handler) != (func)) {
 		/* invalid handler */
-		pr_warn("invalid handler for unreg\n\n");
+		ARISC_WRN("invalid handler for unreg\n\n");
 		return ;
 	}
 	nmi_isr_node[type].handler = NULL;
@@ -169,6 +169,35 @@ int arisc_set_pwr_tree(u32 *pwr_tree)
 	return result;
 }
 EXPORT_SYMBOL(arisc_set_pwr_tree);
+
+int arisc_axp_int_notify(struct arisc_message *pmessage)
+{
+	u32 type = pmessage->paras[0];
+	u32 ret = 0;
+
+	if (type & NMI_INT_TYPE_PMU_OFFSET) {
+		/* call pmu interrupt handler */
+		if (nmi_isr_node[NMI_INT_TYPE_PMU].handler == NULL) {
+			ARISC_WRN("pmu irq handler not install\n");
+			return 1;
+		}
+
+		ARISC_INF("call pmu interrupt handler\n");
+		ret |= (*(nmi_isr_node[NMI_INT_TYPE_PMU].handler))(nmi_isr_node[NMI_INT_TYPE_PMU].arg);
+	}
+	if (type & NMI_INT_TYPE_RTC_OFFSET) {
+		/* call rtc interrupt handler */
+		if (nmi_isr_node[NMI_INT_TYPE_RTC].handler == NULL) {
+			ARISC_WRN("rtc irq handler not install\n");
+			return 1;
+		}
+
+		ARISC_INF("call rtc interrupt handler\n");
+		ret |= (*(nmi_isr_node[NMI_INT_TYPE_RTC].handler))(nmi_isr_node[NMI_INT_TYPE_RTC].arg);
+	}
+
+	return ret;
+}
 
 int arisc_pmu_set_voltage(u32 type, u32 voltage)
 {

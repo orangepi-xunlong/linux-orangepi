@@ -137,8 +137,6 @@ static bool gtp_gesture_wakeup;
 static bool gtp_power_ctrl_sleep;
 static bool g_suspend_flag;
 
-struct work_struct  init_work;
-
 typedef enum {
     DOZE_DISABLED = 0,
     DOZE_ENABLED = 1,
@@ -164,8 +162,7 @@ static int revert_y_flag;
 static int exchange_x_y_flag;
 static __u32 twi_id;
 static char irq_pin_name[8];
-//static u32 debug_mask = 0x1;
-static u32 debug_mask;
+static u32 debug_mask = 0x1;
 enum {
 	DEBUG_INIT = 1U << 0,
 	DEBUG_SUSPEND = 1U << 1,
@@ -2712,13 +2709,13 @@ static int goodix_ts_probe(struct i2c_client *client, const struct i2c_device_id
         }
     }
 #endif
-#if GTP_I2C_TEST
+
     ret = gtp_i2c_test(client);
     if (ret < 0)
     {
         printk("I2C communication ERROR!");
     }
-#endif
+
     ret = gtp_read_version(client, &version_info);
     if (ret < 0)
     {
@@ -3380,15 +3377,6 @@ static int ctp_get_system_config(void)
         return 1;
 }
 
-static void goodix_ts_init_work(struct work_struct *work)
-{
-	sunxi_gpio_to_name(CTP_IRQ_NUMBER, irq_pin_name);
-	gtp_io_init(20);
-
-	goodix_ts_driver.detect = ctp_detect;
-	i2c_add_driver(&goodix_ts_driver);
-}
-
 /*******************************************************
 Function:
     Driver Install function.
@@ -3400,6 +3388,8 @@ Output:
 static int goodix_ts_init(void)
 {
     s32 ret = -1;
+	int val = 0;
+    struct device_node *np = NULL;
 
     dprintk(DEBUG_INIT,"GTP driver init\n");
 	if (!input_sensor_startup(&(config_info.input_type))) {
@@ -3413,13 +3403,24 @@ static int goodix_ts_init(void)
 				pr_err("%s: input_ctp_startup err.\n", __func__);
 				return 0;
 	}
-    if (config_info.ctp_used == 0) {
+    if(config_info.ctp_used == 0){
         printk("*** ctp_used set to 0 !\n");
         printk("*** if use ctp,please put the sys_config.fex ctp_used set to 1. \n");
         return 0;
 	}
 
-    if (config_info.ctp_gesture_wakeup == 1) {
+	np = of_find_node_by_name(NULL, "ctp");
+	if (!np) {
+		 pr_err("ERROR! get ctp node failed, func:%s, line:%d\n",__FUNCTION__, __LINE__);
+		 return -1;
+	}
+
+	ret = of_property_read_u32(np, "ctp_gesture_wakeup", &val);
+	if (ret) {
+		 pr_err("get ctp_screen_max_x is fail, %d\n", ret);
+	}
+
+    if (val == 1){
 		gtp_gesture_wakeup = 1;
         dprintk(DEBUG_INIT,"GTP driver gesture wakeup is used!\n");
 	}
@@ -3427,10 +3428,15 @@ static int goodix_ts_init(void)
     if(!gtp_gesture_wakeup)
 		gtp_power_ctrl_sleep = 1;
 
+    msleep(10);
+
     if(!ctp_get_system_config()){
             printk("%s:read config fail!\n",__func__);
             return ret;
     }
+
+    sunxi_gpio_to_name(CTP_IRQ_NUMBER,irq_pin_name);
+    gtp_io_init(20);
 
     goodix_wq = create_singlethread_workqueue("goodix_wq");
     if (!goodix_wq)
@@ -3442,9 +3448,8 @@ static int goodix_ts_init(void)
     INIT_DELAYED_WORK(&gtp_esd_check_work, gtp_esd_check_func);
     gtp_esd_check_workqueue = create_workqueue("gtp_esd_check");
 #endif
-    INIT_WORK(&init_work, goodix_ts_init_work);
-    queue_work(goodix_wq, &init_work);
-
+	goodix_ts_driver.detect = ctp_detect;
+    ret = i2c_add_driver(&goodix_ts_driver);
     return ret;
 }
 
@@ -3464,8 +3469,8 @@ static void __exit goodix_ts_exit(void)
     {
         destroy_workqueue(goodix_wq);
     }
-	input_set_power_enable(&(config_info.input_type), 0);
 	input_sensor_free(&(config_info.input_type));
+	input_set_power_enable(&(config_info.input_type), 0);
 }
 
 late_initcall(goodix_ts_init);

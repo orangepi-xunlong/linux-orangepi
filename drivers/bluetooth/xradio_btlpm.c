@@ -29,7 +29,6 @@
 #include <linux/gpio.h>
 #include <linux/sunxi-gpio.h>
 #include <linux/of_gpio.h>
-#include <linux/pm_wakeirq.h>
 #include <linux/serial_core.h>
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
@@ -53,7 +52,6 @@
 #define XRADIO_ETF_RFKILL		1
 
 struct xr_btsleep_info {
-	unsigned int wakeup_enable;
 	unsigned int host_wake;
 	unsigned int ext_wake;
 	unsigned int host_wake_irq;
@@ -542,6 +540,10 @@ static ssize_t bluedroid_write_proc_btwake(struct file *file, const char __user 
 	} else if (buf[0] == '1') {
 		BT_SLEEP_DBG("wakeup bt device");
 		gpio_set_value(bsi->ext_wake, bsi->bt_wake_polarity);
+	} else if (buf[0] == '2') {
+		wake_lock(&bsi->wake_lock);
+	} else if (buf[0] == '3') {
+		wake_unlock(&bsi->wake_lock);
 	} else {
 		kfree(buf);
 		return -EINVAL;
@@ -588,10 +590,7 @@ static const struct file_operations btwake_fops = {
 };
 
 extern struct platform_device *sw_uart_get_pdev(int uart_id);
-
-static int assert_level = -1;
-module_param(assert_level, int, S_IRUGO);
-MODULE_PARM_DESC(assert_level, "BT_LPM hostwake/btwake assert level");
+extern int enable_gpio_wakeup_src(int para);
 
 static int bluesleep_probe(struct platform_device *pdev)
 {
@@ -613,11 +612,6 @@ static int bluesleep_probe(struct platform_device *pdev)
 	}
 
 	bsi->bt_wake_polarity = config.data;
-	if (assert_level != -1) {
-		bsi->bt_wake_polarity = (assert_level & 0x01) > 0;
-		BT_SLEEP_DBG("override bt_wake polarity with to module_para assert_level");
-	}
-
 	BT_SLEEP_DBG("bt_wake polarity: %d", bsi->bt_wake_polarity);
 
 	ret = devm_gpio_request(dev, bsi->ext_wake, "bt_wake");
@@ -640,11 +634,6 @@ static int bluesleep_probe(struct platform_device *pdev)
 	}
 
 	bsi->host_wake_polarity = config.data;
-	if (assert_level != -1) {
-		bsi->host_wake_polarity = (assert_level & 0x02) > 0;
-		BT_SLEEP_DBG("override host_wake polarity with to module_para assert_level");
-	}
-
 	BT_SLEEP_DBG("host_wake polarity: %d", bsi->host_wake_polarity);
 
 	ret = devm_gpio_request(dev, bsi->host_wake, "bt_hostwake");
@@ -659,22 +648,11 @@ static int bluesleep_probe(struct platform_device *pdev)
 			bsi->host_wake);
 		goto free_bsi;
 	}
-	if (!of_property_read_u32(np, "wakeup_source", &bsi->wakeup_enable) &&
-		(bsi->wakeup_enable == 0)) {
-		BT_SLEEP_DBG("wakeup source is disabled!\n");
-	} else {
-		ret = device_init_wakeup(dev, true);
-		if (ret < 0) {
-			BT_ERR("device init wakeup failed!\n");
-			return ret;
-		}
-		ret = dev_pm_set_wake_irq(dev, gpio_to_irq(bsi->host_wake));
-		if (ret < 0) {
-			BT_ERR("can't enable wakeup src for bt_hostwake %d\n",
-				bsi->host_wake);
-			return ret;
-		}
-		bsi->wakeup_enable = 1;
+	ret = enable_gpio_wakeup_src(bsi->host_wake);
+	if (ret < 0) {
+		BT_ERR("can't enable wakeup src for bt_hostwake %d\n",
+			bsi->host_wake);
+		return ret;
 	}
 	if (!of_property_read_u32(np, "uart_index", &val)) {
 		BT_SLEEP_DBG("uart_index(%u)", val);
@@ -689,7 +667,7 @@ static int bluesleep_probe(struct platform_device *pdev)
 	//2.get bt_host_wake gpio irq
 #ifdef AW1732_BT
 	bsi->host_wake_irq = gpio_to_irq(bsi->host_wake);
-	if (bsi->host_wake_irq < 0) {
+	if (IS_ERR_VALUE(bsi->host_wake_irq)) {
 		BT_ERR("map gpio [%d] to virq failed, errno = %d\n", bsi->host_wake, bsi->host_wake_irq);
 		ret = -ENODEV;
 		goto free_bt_ext_wake;
@@ -724,12 +702,6 @@ static int bluesleep_remove(struct platform_device *pdev)
 	gpio_free(bsi->host_wake);
 	gpio_free(bsi->ext_wake);
 	wake_lock_destroy(&bsi->wake_lock);
-	if (bsi->wakeup_enable) {
-		BT_SLEEP_DBG("Deinit wakeup source");
-		device_init_wakeup(&pdev->dev, false);
-		dev_pm_clear_wake_irq(&pdev->dev);
-	}
-
 	return 0;
 }
 
@@ -862,7 +834,6 @@ rm_sleep_dir:
 #ifdef XRADIO_ETF_RFKILL
 rm_power_dir:
 	remove_proc_entry("state", power_dir);
-	remove_proc_entry("power", bluetooth_dir);
 #endif
 rm_bt_dir:
 	remove_proc_entry("bluetooth", 0);
@@ -880,10 +851,6 @@ static void __exit btsleep_exit(void)
 	remove_proc_entry("btwrite", sleep_dir);
 	remove_proc_entry("lpm", sleep_dir);
 	remove_proc_entry("sleep", bluetooth_dir);
-#ifdef XRADIO_ETF_RFKILL
-	remove_proc_entry("state", power_dir);
-	remove_proc_entry("power", bluetooth_dir);
-#endif
 	remove_proc_entry("bluetooth", 0);
 }
 

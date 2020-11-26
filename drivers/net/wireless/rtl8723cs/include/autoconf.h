@@ -300,4 +300,3 @@
 #define DBG_CHECK_FW_PS_STATE_H2C
 /* #define CONFIG_FW_C2H_DEBUG */
 #define	DBG_RX_DFRAME_RAW_DATA
-/*#define DBG_IP_R_Monitor*//*Android IpReachabilityMonitor*/

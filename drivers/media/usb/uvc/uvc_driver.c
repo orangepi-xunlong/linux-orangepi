@@ -1019,19 +1019,11 @@ static int uvc_parse_standard_control(struct uvc_device *dev,
 			return -EINVAL;
 		}
 
-		/*
-		 * Reject invalid terminal types that would cause issues:
-		 *
-		 * - The high byte must be non-zero, otherwise it would be
-		 *   confused with a unit.
-		 *
-		 * - Bit 15 must be 0, as we use it internally as a terminal
-		 *   direction flag.
-		 *
-		 * Other unknown types are accepted.
+		/* Make sure the terminal type MSB is not null, otherwise it
+		 * could be confused with a unit.
 		 */
 		type = get_unaligned_le16(&buffer[4]);
-		if ((type & 0x7f00) == 0 || (type & 0x8000) != 0) {
+		if ((type & 0xff00) == 0) {
 			uvc_trace(UVC_TRACE_DESCR, "device %d videocontrol "
 				"interface %d INPUT_TERMINAL %d has invalid "
 				"type 0x%04x, skipping\n", udev->devnum,

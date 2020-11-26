@@ -55,6 +55,8 @@ struct clk {
 	unsigned long max_rate;
 	struct hlist_node clks_node;
 };
+static struct dentry *my_ccudbg_root;
+static int __init debugfs_test_init(void);
 
 struct testclk_data {
 	char command[32];

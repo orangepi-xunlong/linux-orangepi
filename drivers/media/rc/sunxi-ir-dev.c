@@ -25,12 +25,12 @@
 #include <linux/of_address.h>
 #include <media/rc-core.h>
 #include <linux/arisc/arisc.h>
+#include <linux/power/aw_pm.h>
 #include <linux/delay.h>
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
 #include "sunxi-ir-rx.h"
 #include "rc-core-priv.h"
-#include "linux/power/aw_pm.h"
 
 #define SUNXI_IR_DRIVER_NAME	"sunxi-rc-recv"
 /*compatible*/
@@ -53,6 +53,7 @@ static u32 threshold_high = 2*RC5_UNIT + RC5_UNIT/2;
 static bool pluse_pre;
 static char protocol;
 static bool boot_code;
+struct rc_dev *sunxi_rcdev;
 
 static inline u8 ir_get_data(void __iomem *reg_base)
 {
@@ -148,7 +149,6 @@ static irqreturn_t sunxi_ir_recv_irq(int irq, void *dev_id)
 	u32 i = 0;
 	u32 reg_data;
 
-
 	pr_debug("IR RX IRQ Serve\n");
 
 	intsta = ir_get_intsta(ir_data->reg_base);
@@ -184,9 +184,6 @@ static irqreturn_t sunxi_ir_recv_irq(int irq, void *dev_id)
 		is_receiving = 0;
 		boot_code = 0;
 		pluse_pre = false;
-
-		if (ir_data->wakeup)
-			pm_wakeup_event(ir_data->rcdev->input_dev->dev.parent, 0);
 	}
 
 	if (intsta & IR_RXINTS_RXOF) {
@@ -196,7 +193,6 @@ static irqreturn_t sunxi_ir_recv_irq(int irq, void *dev_id)
 		boot_code = 0;
 		pluse_pre = false;
 	}
-
 
 	return IRQ_HANDLED;
 }
@@ -325,7 +321,7 @@ static void ir_reg_cfg(void __iomem *reg_base)
 	 * use IR_HIGH_PULSE_MODE mode, but some ICs don't support this function
 	 * therefor use IR_BOTH_PULSE_MODE mode as default
 	 */
-	ir_mode_set(reg_base, IR_HIGH_PULSE_MODE);
+	ir_mode_set(reg_base, IR_BOTH_PULSE_MODE);
 	/* Enable IR Module */
 	ir_mode_set(reg_base, IR_MODULE_ENABLE);
 }
@@ -452,16 +448,13 @@ static int sunxi_ir_startup(struct platform_device *pdev,
 				struct sunxi_ir_data *ir_data)
 {
 	struct device_node *np = NULL;
-	struct device *dev = NULL;
 	int ret = 0;
-	__maybe_unused char ir_supply[16] = {0};
-	__maybe_unused const char *name = NULL;
+	const char *name = NULL;
 #ifdef CONFIG_ANDROID
 	int i = 0;
 	char addr_name[MAX_ADDR_NUM];
 #endif
 	np = pdev->dev.of_node;
-	dev = &pdev->dev;
 
 	ir_data->reg_base = of_iomap(np, 0);
 	if (ir_data->reg_base == NULL) {
@@ -525,16 +518,6 @@ if (ir_data->ir_protocols == NEC) {
 	}
 }
 #endif
-
-#ifdef CONFIG_SUNXI_REGULATOR_DT
-	pr_debug("%s: cir try dt way to get regulator\n", __func__);
-	snprintf(ir_supply, sizeof(ir_supply), "ir%d", pdev->id);
-	ir_data->suply = regulator_get(dev, ir_supply);
-	if (IS_ERR(ir_data->suply)) {
-		pr_err("%s: cir get supply err\n", __func__);
-		ir_data->suply = NULL;
-	}
-#else
 	if (of_property_read_u32(np, "supply_vol", &ir_data->suply_vol))
 		pr_debug("%s: get cir supply_vol failed", __func__);
 
@@ -548,22 +531,15 @@ if (ir_data->ir_protocols == NEC) {
 			ir_data->suply = NULL;
 		}
 	}
-#endif
-
 #ifdef CONFIG_ANDROID
 	if (sunxi_get_ir_protocol())
 		pr_err("%s: get_ir_protocol failed.\n", __func__);
 #endif
-
-	ir_data->wakeup = of_property_read_bool(np, "wakeup-source");
-	device_init_wakeup(&pdev->dev, ir_data->wakeup);
-
 	return ret;
 }
 
 static int sunxi_ir_recv_probe(struct platform_device *pdev)
 {
-	struct rc_dev *sunxi_rcdev;
 	int rc;
 	char const ir_dev_name[] = "s_cir_rx";
 
@@ -573,16 +549,10 @@ static int sunxi_ir_recv_probe(struct platform_device *pdev)
 		pr_err("ir_data: not enough memory for ir data\n");
 		return -ENOMEM;
 	}
-	if (pdev->dev.of_node) {
-		pdev->id = of_alias_get_id(pdev->dev.of_node, "ir");
-		if (pdev->id < 0) {
-			pr_err("sunxi ir failed to get alias id\n");
-			return -EINVAL;
-		}
-
+	if (pdev->dev.of_node)
 		/* get dt and sysconfig */
 		rc = sunxi_ir_startup(pdev, ir_data);
-	} else {
+	else {
 		pr_err("sunxi ir device tree err!\n");
 		return -EBUSY;
 	}
@@ -700,22 +670,18 @@ static int sunxi_ir_recv_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_ir_data *ir_data = platform_get_drvdata(pdev);
 
-	if (device_may_wakeup(dev)) {
-		if (ir_data->wakeup)
-			enable_irq_wake(ir_data->irq_num);
-	} else {
-		pr_debug("enter: sunxi_ir_rx_suspend.\n");
+	pr_debug("enter: sunxi_ir_rx_suspend.\n");
 
-		disable_irq_nosync(ir_data->irq_num);
+	disable_irq_nosync(ir_data->irq_num);
 
-		if (NULL == ir_data->mclk || IS_ERR(ir_data->mclk)) {
-			pr_err("ir_clk handle is invalid, just return!\n");
-			return -1;
-		}
-		clk_disable_unprepare(ir_data->mclk);
-
-		ir_select_gpio_state(ir_data->pctrl, PINCTRL_STATE_SLEEP);
+	if (NULL == ir_data->mclk || IS_ERR(ir_data->mclk)) {
+		pr_err("ir_clk handle is invalid, just return!\n");
+		return -1;
 	}
+	clk_disable_unprepare(ir_data->mclk);
+
+	ir_select_gpio_state(ir_data->pctrl, PINCTRL_STATE_SLEEP);
+
 	return 0;
 }
 
@@ -723,50 +689,31 @@ static int sunxi_ir_recv_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_ir_data *ir_data = platform_get_drvdata(pdev);
-	unsigned int ir_event;
+	unsigned int wakeup_event = 0;
 
 	pr_debug("enter: sunxi_ir_rx_resume.\n");
 
-	if (device_may_wakeup(dev)) {
-		if (ir_data->wakeup)
-			disable_irq_wake(ir_data->irq_num);
-	} else {
-		arisc_query_wakeup_source(&ir_event);
-		if (CPUS_WAKEUP_IR & ir_event) {
-			rc_keydown(ir_data->rcdev, RC_TYPE_NEC,
-					(ir_data->ir_addr[0] << 8) | ir_data->ir_powerkey[0],
-					0);
-			rc_keyup(ir_data->rcdev);
-		}
-
-		clk_prepare_enable(ir_data->mclk);
-		enable_irq(ir_data->irq_num);
-
-		if (ir_setup(ir_data))
-			return -1;
+#if defined(CONFIG_SUNXI_ARISC)
+	arisc_query_wakeup_source(&wakeup_event);
+#endif
+	if (wakeup_event & CPUS_WAKEUP_IR) {
+		rc_keydown(sunxi_rcdev, (sunxi_rcdev->allowed_protocols &\
+			RC_BIT_NEC) ? RC_TYPE_NEC : RC_TYPE_RC5,\
+			(ir_data->ir_addr[0] << 8) | ir_data->ir_powerkey[0], 0);
+		msleep(1);
+		rc_keyup(sunxi_rcdev);
 	}
-	return 0;
-}
 
-static int sunxi_ir_recv_resume_noirq(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct sunxi_ir_data *ir_data = platform_get_drvdata(pdev);
-	u32 intsta;
+	clk_prepare_enable(ir_data->mclk);
+	enable_irq(ir_data->irq_num);
 
-	intsta = ir_get_intsta(ir_data->reg_base);
-	ir_clr_intsta(ir_data->reg_base, intsta);
+	if (ir_setup(ir_data))
+		return -1;
 
-	if (intsta & IR_RXINTS_RXPE) {
-		rc_keydown(ir_data->rcdev, RC_TYPE_NEC,
-				(ir_data->ir_addr[0] << 8) | ir_data->ir_powerkey[0], 0);
-		rc_keyup(ir_data->rcdev);
-	}
 	return 0;
 }
 
 static const struct dev_pm_ops sunxi_ir_recv_pm_ops = {
-	.resume_noirq	= sunxi_ir_recv_resume_noirq,
 	.suspend        = sunxi_ir_recv_suspend,
 	.resume         = sunxi_ir_recv_resume,
 };

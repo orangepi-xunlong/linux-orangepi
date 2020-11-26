@@ -27,11 +27,11 @@
 #include <linux/module.h>
 #include <linux/power/axp_depend.h>
 #include <linux/notifier.h>
+#if defined(CONFIG_SUNXI_ARISC)
 #include <linux/arisc/arisc.h>
+#endif
 #include "axp-core.h"
 #include "axp-regulator.h"
-
-extern u32 axp_power_tree[VCC_MAX_INDEX];
 
 /* pwr_dm_bitmap -> pwr_dm_name */
 struct bitmap_name_mapping pwr_dm_bitmap_name_mapping[] = {
@@ -79,6 +79,9 @@ static struct ldo_type_name_mapping mapping_list[] = {
 	{DUMMY_REGULATOR4, "axpdummy_ldo4"},
 	{DUMMY_REGULATOR5, "axpdummy_ldo5"},
 	{DUMMY_REGULATOR6, "axpdummy_ldo6"},
+#ifdef CONFIG_ARCH_SUN50IW6P1
+	{DUMMY_REGULATOR7, "axpdummy_ldo7"},
+#endif
 };
 
 static enum power_voltage_type get_ldo_type_by_name(const char *name)
@@ -123,7 +126,7 @@ static s32 axp_set_voltage(struct regulator_dev *rdev,
 	struct axp_regulator_info *info = rdev_get_drvdata(rdev);
 	struct axp_regmap *regmap = info->regmap;
 	u8 val, mask;
-	s32 ret = -1, switch_val, new_level_val;
+	s32 ret = -1;
 	int i, flag = 0;
 	struct axp_dev *cur_axp_dev;
 
@@ -135,6 +138,12 @@ static s32 axp_set_voltage(struct regulator_dev *rdev,
 		flag++;
 		if (cur_axp_dev->is_dummy) {
 #if defined(CONFIG_AW_AXPDUMMY) && defined(CONFIG_SUNXI_ARISC)
+#ifdef CONFIG_ARCH_SUN50IW6P1
+			if (!strcmp(rdev->constraints->name,
+						"axpdummy_ldo2"))
+				return 0;
+#endif
+
 			return arisc_pmu_set_voltage(
 				get_ldo_type_by_name(rdev->constraints->name),
 				min_uv / 1000);
@@ -152,22 +161,15 @@ static s32 axp_set_voltage(struct regulator_dev *rdev,
 		return -EINVAL;
 	}
 
-	if (info->step1_uv != 0)
-		switch_val = ((info->switch_uv - info->min_uv
-			+ info->step1_uv - 1) / info->step1_uv);
-	else
-		switch_val = 0;
-
-	if (info->new_level_uv != 0)
-		new_level_val = switch_val + 1;
-	else
-		new_level_val = 0;
-
 	if ((info->switch_uv != 0) && (info->step2_uv != 0) &&
 		(info->new_level_uv != 0) && (min_uv > info->switch_uv)) {
-		val = new_level_val;
-		if (min_uv > info->new_level_uv) {
+		val = (info->switch_uv - info->min_uv + info->step1_uv - 1)
+				/ info->step1_uv;
+		if (min_uv <= info->new_level_uv) {
+			val += 1;
+		} else {
 			val += (min_uv - info->new_level_uv) / info->step2_uv;
+			val += 1;
 		}
 		mask = ((1 << info->vol_nbits) - 1)  << info->vol_shift;
 	} else if ((info->switch_uv != 0) && (info->step2_uv != 0)
@@ -224,7 +226,7 @@ static s32 axp_get_voltage(struct regulator_dev *rdev)
 	struct axp_regulator_info *info = rdev_get_drvdata(rdev);
 	struct axp_regmap *regmap = info->regmap;
 	u8 val, mask;
-	s32 ret, switch_val, new_level_val, vol;
+	s32 ret, switch_val, vol;
 	int i, flag = 0;
 	struct axp_dev *cur_axp_dev;
 
@@ -258,16 +260,11 @@ static s32 axp_get_voltage(struct regulator_dev *rdev)
 	else
 		switch_val = 0;
 
-	if (info->new_level_uv != 0)
-		new_level_val = switch_val + 1;
-	else
-		new_level_val = 0;
-
 	val = (val & mask) >> info->vol_shift;
 
 	if ((info->switch_uv != 0) && (info->step2_uv != 0) &&
 		(val > switch_val) && (info->new_level_uv != 0)) {
-		val -= new_level_val;
+		val -= switch_val;
 		vol = info->new_level_uv + info->step2_uv * val;
 	} else if ((info->switch_uv != 0)
 			&& (info->step2_uv != 0)
@@ -686,7 +683,9 @@ static s32 regu_device_tree_do_parse(struct device_node *node,
 		}
 	}
 
-	ret = arisc_set_pwr_tree(axp_power_tree);
+	ret = __raw_notifier_call_chain(&axp_regu_notifier, AXP_READY,
+					NULL, -1, NULL);
+
 	return notifier_to_errno(ret);
 }
 

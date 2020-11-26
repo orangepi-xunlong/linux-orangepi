@@ -2,13 +2,13 @@
  * Fundamental types and constants relating to WPA
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -128,12 +128,6 @@ typedef BWL_PRE_PACKED_STRUCT struct
 #define WPA_CIPHER_AES_GCM	8	/* AES (GCM) */
 #define WPA_CIPHER_AES_GCM256	9	/* AES (GCM256) */
 
-#ifdef BCMWAPI_WAI
-#define WAPI_CIPHER_NONE	WPA_CIPHER_NONE
-#define WAPI_CIPHER_SMS4	11
-
-#define WAPI_CSE_WPI_SMS4	1
-#endif /* BCMWAPI_WAI */
 
 #define IS_WPA_CIPHER(cipher)	((cipher) == WPA_CIPHER_NONE || \
 				 (cipher) == WPA_CIPHER_WEP_40 || \
@@ -145,17 +139,6 @@ typedef BWL_PRE_PACKED_STRUCT struct
 				 (cipher) == WPA_CIPHER_AES_GCM256 || \
 				 (cipher) == WPA_CIPHER_TPK)
 
-#ifdef BCMWAPI_WAI
-#define IS_WAPI_CIPHER(cipher)	((cipher) == WAPI_CIPHER_NONE || \
-				 (cipher) == WAPI_CSE_WPI_SMS4)
-
-/* convert WAPI_CSE_WPI_XXX to WAPI_CIPHER_XXX */
-#define WAPI_CSE_WPI_2_CIPHER(cse) ((cse) == WAPI_CSE_WPI_SMS4 ? \
-				WAPI_CIPHER_SMS4 : WAPI_CIPHER_NONE)
-
-#define WAPI_CIPHER_2_CSE_WPI(cipher) ((cipher) == WAPI_CIPHER_SMS4 ? \
-				WAPI_CSE_WPI_SMS4 : WAPI_CIPHER_NONE)
-#endif /* BCMWAPI_WAI */
 
 /* WPA TKIP countermeasures parameters */
 #define WPA_TKIP_CM_DETECT	60	/* multiple MIC failure window (seconds) */
@@ -197,19 +180,6 @@ typedef BWL_PRE_PACKED_STRUCT struct
 
 #define WPA2_PMKID_COUNT_LEN	2
 
-#ifdef BCMWAPI_WAI
-#define WAPI_CAP_PREAUTH		RSN_CAP_PREAUTH
-
-/* Other WAI definition */
-#define WAPI_WAI_REQUEST		0x00F1
-#define WAPI_UNICAST_REKEY		0x00F2
-#define WAPI_STA_AGING			0x00F3
-#define WAPI_MUTIL_REKEY		0x00F4
-#define WAPI_STA_STATS			0x00F5
-
-#define WAPI_USK_REKEY_COUNT		0x4000000 /* 0xA00000 */
-#define WAPI_MSK_REKEY_COUNT		0x4000000 /* 0xA00000 */
-#endif /* BCMWAPI_WAI */
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

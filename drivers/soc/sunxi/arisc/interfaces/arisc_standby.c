@@ -44,13 +44,7 @@ int arisc_query_wakeup_source(u32 *event)
 }
 EXPORT_SYMBOL(arisc_query_wakeup_source);
 
-/**
- * set wakeup source.
- * @para:  wakeup source irq.
- *
- * return: result, 0 - set successed,
- *                !0 - set failed;
- */
+
 int arisc_set_wakeup_source(u32 wakeup_irq)
 {
 	int result;
@@ -62,25 +56,60 @@ int arisc_set_wakeup_source(u32 wakeup_irq)
 	return result;
 }
 EXPORT_SYMBOL(arisc_set_wakeup_source);
-
-/**
- * clear wakeup source.
- * @para:  wakeup source irq.
+/*
+ * query super-standby infoation.
+ * @para:  point of array to store power states informations during sst.
+ * @op: 0:read, 1:set
  *
- * return: result, 0 - set successed,
- *                !0 - set failed;
+ * return: result, 0 - query successed,
+ *                !0 - query failed;
  */
-int arisc_clear_wakeup_source(u32 wakeup_irq)
+int arisc_query_standby_power_cfg(struct standby_info_para *para)
+{
+	memcpy((void *)para, (void *)&arisc_powchk_back, sizeof(struct standby_info_para));
+
+	return 0;
+}
+EXPORT_SYMBOL(arisc_query_standby_power_cfg);
+
+/*
+ * query super-standby infoation.
+ * @para:  point of array to store power states informations during sst.
+ * @op: 0:read, 1:set
+ *
+ * return: result, 0 - query successed,
+ *                !0 - query failed;
+ */
+int arisc_query_set_standby_info(struct standby_info_para *para, arisc_rw_type_e op)
 {
 	int result;
+	volatile u32 temp_paras[22];
+
+	/* check standby_info_para size valid or not */
+	if (sizeof(struct standby_info_para) > sizeof(temp_paras)) {
+		ARISC_ERR("standby info parameters number too long\n");
+		return -EINVAL;
+	}
+
+	/* initialize message */
+	if (ARISC_WRITE == op) {
+		memcpy((void *)temp_paras, (const void *)para, sizeof(struct standby_info_para));
+		memcpy((void *)&arisc_powchk_back, (const void *)para, sizeof(struct standby_info_para));
+		/* send query sst info request to arisc */
+		/* FIXME: if the runtime sever enable the mmu & dcache,
+		* should not use flush cache here.
+		*/
+	}
 
 	/* send message use hwmsgbox */
-	result = invoke_scp_fn_smc(ARM_SVC_ARISC_CLEAR_WAKEUP_SRC_REQ,
-				wakeup_irq, 0, 0);
+	result = invoke_scp_fn_smc(ARM_SVC_ARISC_STANDBY_INFO_REQ, virt_to_phys(temp_paras), op, 0);
+	if (ARISC_READ == op) {
+		memcpy((void *)para, (void *)temp_paras, sizeof(struct standby_info_para));
+	}
 
 	return result;
 }
-EXPORT_SYMBOL(arisc_clear_wakeup_source);
+EXPORT_SYMBOL(arisc_query_set_standby_info);
 
 /*
  * query super-standby dram crc result.

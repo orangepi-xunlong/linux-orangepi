@@ -59,10 +59,6 @@ int de_ase_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 	void *memory;
 
 	base = reg_base + (sel + 1) * 0x00100000 + ASE_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel)
-		base = base - 0x00100000;
-#endif
 	/*FIXME  display path offset should be defined*/
 	__inf("sel %d, ase_base[%d]=0x%p\n", sel, chno, (void *)base);
 

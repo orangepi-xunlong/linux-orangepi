@@ -93,7 +93,7 @@ static struct axp_regulator_info axp22x_regulator_info[] = {
 	AXP22X_DCDC(3,   600, 1860,  20,  DCDC3, 0, 6,  DCDC3EN, 0x08, 0x08,
 			0x00,     0,    0,   0,   0x80,  0x04, 0x3B, 0x27, 3, 0),
 	AXP22X_DCDC(4,   600, 2600,  20,  DCDC4, 0, 6,  DCDC4EN, 0x10, 0x10,
-			0x00,   1540,  100,  1800, 0x80, 0x08, 0x3B,    0, 0, 0),
+			0x00,   1800,  100,   0,   0x80, 0x08, 0x3B,    0, 0, 0),
 	AXP22X_DCDC(5,  1000, 2550,  50,  DCDC5, 0, 5,  DCDC5EN, 0x20, 0x20,
 			0x00,     0,    0,   0,   0x80,  0x10, 0x3B,    0, 0, 0),
 #else
@@ -141,9 +141,9 @@ static struct axp_regulator_info axp22x_regulator_info[] = {
 	AXP22X_LDO(11,   700, 3300, 100,  LDO11, 0, 5,  LDO11EN, 0x04, 0x04,
 			0x00,     0,    0,   0,      0, 0, 0, 0, 0),
 	AXP22X_LDO(IO0,  700, 3300, 100, LDOIO0, 0, 5, LDOIO0EN, 0x07, 0x03,
-			0x04,     0,    0,   0,      0, 0, 0, 0, 0),
+			0x00,     0,    0,   0,      0, 0, 0, 0, 0),
 	AXP22X_LDO(IO1,  700, 3300, 100, LDOIO1, 0, 5, LDOIO1EN, 0x07, 0x03,
-			0x04,     0,    0,   0,      0, 0, 0, 0, 0),
+			0x00,     0,    0,   0,      0, 0, 0, 0, 0),
 #ifdef CONFIG_AW_AXP233
 	AXP22X_SW(0,    3300, 3300, 100,  SW0, 0, 0,  SW0EN, 0x40, 0x40,
 			0x00,     0,    0,   0,      0, 0, 0, 0, 0),
@@ -183,9 +183,6 @@ static struct regulator_init_data axp22x_regulator_init_data[] = {
 			.max_uV = 1860000,
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE
 				| REGULATOR_CHANGE_STATUS,
-#ifdef CONFIG_ARCH_SUN8IW11
-			.always_on = 1,
-#endif
 		},
 	},
 	[VCC_DCDC4] = {

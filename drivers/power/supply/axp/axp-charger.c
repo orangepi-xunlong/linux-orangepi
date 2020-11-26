@@ -27,6 +27,7 @@
 #include <linux/interrupt.h>
 #include "axp-core.h"
 #include "axp-charger.h"
+
 static int axp_power_key;
 static enum AW_CHARGE_TYPE axp_usbcurflag = CHARGE_AC;
 static enum AW_CHARGE_TYPE axp_usbvolflag = CHARGE_AC;
@@ -205,6 +206,9 @@ void axp_charger_update_state(struct axp_charger_dev *chg_dev)
 	struct axp_usb_info *usb = chg_dev->spy_info->usb;
 	struct axp_battery_info *batt = chg_dev->spy_info->batt;
 	struct axp_regmap *map = chg_dev->chip->regmap;
+#ifdef CONFIG_TYPE_C
+	struct axp_tc_info *tc = chg_dev->spy_info->tc;
+#endif
 	/*sleep 10ms for adapter stable*/
 	msleep(10);
 	axp_regmap_read(map, batt->det_offset, &val);
@@ -250,15 +254,35 @@ void axp_charger_update_state(struct axp_charger_dev *chg_dev)
 	} else if (usb->det_unused == 1) {
 		chg_dev->usb_valid = 0;
 	}
-
+#ifdef CONFIG_TYPE_C
+	if (tc->det_unused == 0) {
+		axp_regmap_read(map, tc->det_offset, &val);
+		mutex_lock(&chg_dev->charger_lock);
+		chg_dev->tc_det = (val & 1 << tc->det_bit) ? 1 : 0;
+		mutex_unlock(&chg_dev->charger_lock);
+	} else if (tc->det_unused == 1) {
+		chg_dev->tc_det = 0;
+	}
+	if (tc->det_unused == 0) {
+		axp_regmap_read(map, tc->valid_offset, &val);
+		mutex_lock(&chg_dev->charger_lock);
+		chg_dev->tc_valid = (val & 1 << tc->valid_bit) ? 1 : 0;
+		mutex_unlock(&chg_dev->charger_lock);
+	} else if (tc->det_unused == 1) {
+		chg_dev->tc_valid = 0;
+	}
+	chg_dev->ext_valid = (chg_dev->ac_det ||
+				chg_dev->usb_det || chg_dev->tc_det);
+#else
 	chg_dev->ext_valid = (chg_dev->ac_det || chg_dev->usb_det);
+#endif
 
 	axp_regmap_read(map, ac->in_short_offset, &val);
 	mutex_lock(&chg_dev->charger_lock);
 #ifdef AXP2585
-	chg_dev->in_short = 1;
-#else
 	chg_dev->in_short = (val & 1 << ac->in_short_bit) ? 1 : 0;
+#else
+	chg_dev->in_short = 1;
 #endif
 	if (!chg_dev->in_short)
 		chg_dev->ac_charging = chg_dev->ac_valid;
@@ -290,7 +314,11 @@ void axp_charger_update_value(struct axp_charger_dev *chg_dev)
 	struct axp_usb_info *usb = chg_dev->spy_info->usb;
 	struct axp_battery_info *batt = chg_dev->spy_info->batt;
 	int bat_vol, bat_cur, bat_discur, ac_vol, ac_cur, usb_vol, usb_cur;
-
+#ifdef CONFIG_TYPE_C
+/*	struct axp_tc_info *tc = chg_dev->spy_info->tc;
+	int tc_vol, tc_cur;
+*/
+#endif
 
 	bat_vol = batt->get_vbat(chg_dev);
 	bat_cur = batt->get_ibat(chg_dev);
@@ -299,6 +327,10 @@ void axp_charger_update_value(struct axp_charger_dev *chg_dev)
 	ac_cur  = ac->get_ac_current(chg_dev);
 	usb_vol = usb->get_usb_voltage(chg_dev);
 	usb_cur = usb->get_usb_current(chg_dev);
+#ifdef CONFIG_TYPE_C
+/*tc_vol  = tc->get_tc_voltage(chg_dev);
+tc_cur  = tc->get_tc_current(chg_dev);*/
+#endif
 
 	mutex_lock(&chg_dev->charger_lock);
 	chg_dev->bat_vol = bat_vol;
@@ -308,6 +340,11 @@ void axp_charger_update_value(struct axp_charger_dev *chg_dev)
 	chg_dev->ac_cur  = ac_cur;
 	chg_dev->usb_vol = usb_vol;
 	chg_dev->usb_cur = usb_cur;
+#ifdef CONFIG_TYPE_C
+/*	chg_dev->tc_vol  = tc_vol;
+	chg_dev->tc_cur  = tc_cur;
+*/
+#endif
 	mutex_unlock(&chg_dev->charger_lock);
 }
 
@@ -534,14 +571,27 @@ static enum power_supply_property axp_usb_props[] = {
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 };
 
+#ifdef CONFIG_TYPE_C
+static enum power_supply_property axp_tc_props[] = {
+	POWER_SUPPLY_PROP_MODEL_NAME,
+	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_CURRENT_NOW,
+};
+#endif
 
 static void axp_battery_check_status(struct axp_charger_dev *chg_dev,
 					union power_supply_propval *val)
 {
 	if (chg_dev->bat_det) {
 		if (chg_dev->ac_charging || chg_dev->usb_pc_charging || chg_dev->usb_adapter_charging) {
+#ifdef CONFIG_TYPE_C
+			if (chg_dev->rest_vol == 96)
+#else
 			if (chg_dev->rest_vol == 100)
-				val->intval = POWER_SUPPLY_STATUS_FULL;
+#endif
+			val->intval = POWER_SUPPLY_STATUS_FULL;
 			else if (chg_dev->charging)
 				val->intval = POWER_SUPPLY_STATUS_CHARGING;
 			else
@@ -684,6 +734,36 @@ static s32 axp_usb_get_property(struct power_supply *psy,
 	return ret;
 }
 
+#ifdef CONFIG_TYPE_C
+static s32 axp_tc_get_property(struct power_supply *psy,
+					enum power_supply_property psp,
+					union power_supply_propval *val)
+{
+	struct axp_charger_dev *chg_dev = power_supply_get_drvdata(psy);
+	s32 ret = 0;
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_MODEL_NAME:
+		val->strval = psy->desc->name;
+		break;
+	case POWER_SUPPLY_PROP_PRESENT:
+	case POWER_SUPPLY_PROP_ONLINE:
+		val->intval = chg_dev->tc_valid;
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		val->intval = chg_dev->tc_vol * 1000;
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+		val->intval = chg_dev->tc_cur * 1000;
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+	return ret;
+}
+#endif
 
 static char *supply_list[] = {
 	"battery",
@@ -713,6 +793,15 @@ static const struct power_supply_desc usb_desc = {
 	.num_properties = ARRAY_SIZE(axp_usb_props),
 };
 
+#ifdef CONFIG_TYPE_C
+static const struct power_supply_desc tc_desc = {
+	.name = "tc",
+	.type = POWER_SUPPLY_TYPE_USB_TYPE_C,
+	.get_property = axp_tc_get_property,
+	.properties = axp_tc_props,
+	.num_properties = ARRAY_SIZE(axp_tc_props),
+};
+#endif
 static struct power_supply_config psy_cfg = {
 	.supplied_to = supply_list,
 	.num_supplicants = ARRAY_SIZE(supply_list),
@@ -724,7 +813,6 @@ static void axp_charging_monitor(struct work_struct *work)
 					struct axp_charger_dev, work.work);
 	struct power_supply_config psy_cfg = {};
 	static s32 pre_rest_vol;
-	static s32 pre_bat_temp;
 	static bool pre_bat_curr_dir;
 	static int pre_axp_usbvolflag;
 	axp_charger_update_state(chg_dev);
@@ -768,10 +856,10 @@ static void axp_charging_monitor(struct work_struct *work)
 			chg_dev->bat_current_direction);
 	AXP_DEBUG(AXP_SPLY, chg_dev->chip->pmu_num,
 			"charger->ext_valid = %d\n", chg_dev->ext_valid);
-	axp_battery_update_vol(chg_dev);
+	chg_dev->private_debug(chg_dev);
 	if (!plug_debounce) {
 		if (chg_dev->private_debug)
-			chg_dev->private_debug(chg_dev);
+			axp_battery_update_vol(chg_dev);
 	} else {
 		plug_debounce = 0;
 	}
@@ -787,13 +875,6 @@ static void axp_charging_monitor(struct work_struct *work)
 		pre_rest_vol = chg_dev->rest_vol;
 		pre_bat_curr_dir = chg_dev->bat_current_direction;
 		power_supply_changed(chg_dev->batt);
-	}
-	 if (chg_dev->bat_temp != pre_bat_temp) {
-		 AXP_DEBUG(AXP_SPLY, chg_dev->chip->pmu_num,
-				"battery temp change: %d->%d\n",
-				pre_bat_temp, chg_dev->bat_temp);
-		 pre_bat_temp = chg_dev->bat_temp;
-		 power_supply_changed(chg_dev->batt);
 	}
 	/*if axp_usbvolflag change,inform event*/
 	if (axp_usbvolflag != pre_axp_usbvolflag) {
@@ -862,7 +943,6 @@ void axp_usbac_out(struct axp_charger_dev *chg_dev)
 	 * do not finished detecting,
 	 * the charger type is error!So delay the charger type report 2s
 	*/
-	axp_charger_update_state(chg_dev);
 	mod_timer(&chg_dev->usb_status_timer,
 					jiffies + msecs_to_jiffies(2000));
 	axp_usb_ac_check_status(chg_dev);
@@ -983,51 +1063,23 @@ irqreturn_t axp_low_warning2_isr(int irq, void *data)
 }
 
 #ifdef CONFIG_TYPE_C
-#ifdef CONFIG_TYPE_C_AUDIO
-extern struct blocking_notifier_head type_c_chain_head;
-static int call_notifier_call_chain(unsigned long val)
-{
-	int ret = blocking_notifier_call_chain(&type_c_chain_head, val, NULL);
-	return notifier_to_errno(ret);
-}
-#endif
 irqreturn_t axp_tc_in_isr(int irq, void *data)
 {
 	struct axp_charger_dev *chg_dev = data;
-#ifdef CONFIG_TYPE_C_AUDIO
-	struct axp_usb_info *usb = chg_dev->spy_info->usb;
-	u8 cc_mode = 0;
-	/*axp_usbac_in(chg_dev);*/
-	cc_mode = usb->get_cc_mode(chg_dev);
-	if (cc_mode == AUDIO_ACSY) {
-		usb->set_sel_mode(chg_dev, 1);
-		call_notifier_call_chain(1);
-	} else {
-		usb->set_sel_mode(chg_dev, 0);
-		call_notifier_call_chain(0);
-	}
-#endif
+
 	axp_change(chg_dev);
+	/*axp_usbac_in(chg_dev);*/
+
 	return IRQ_HANDLED;
 }
 
 irqreturn_t axp_tc_out_isr(int irq, void *data)
 {
 	struct axp_charger_dev *chg_dev = data;
-#ifdef CONFIG_TYPE_C_AUDIO
-	struct axp_usb_info *usb = chg_dev->spy_info->usb;
-	u8 cc_mode = 0;
 
-	/*axp_usbac_out(chg_dev);*/
-	if (cc_mode == AUDIO_ACSY) {
-		usb->set_sel_mode(chg_dev, 1);
-		call_notifier_call_chain(1);
-	} else {
-		usb->set_sel_mode(chg_dev, 0);
-		call_notifier_call_chain(0);
-	}
-#endif
 	axp_change(chg_dev);
+	/*axp_usbac_out(chg_dev);*/
+
 	return IRQ_HANDLED;
 }
 #endif
@@ -1062,8 +1114,7 @@ void axp_charger_resume(struct axp_charger_dev *chg_dev)
 	power_supply_changed(chg_dev->usb);
 
 	if (chg_dev->bat_det) {
-		if (battery_initialized)
-			power_supply_changed(chg_dev->batt);
+		power_supply_changed(chg_dev->batt);
 		schedule_delayed_work(&chg_dev->work, chg_dev->interval);
 		schedule_delayed_work(&chg_dev->usbwork,
 					msecs_to_jiffies(7 * 1000));
@@ -1134,6 +1185,22 @@ struct axp_charger_dev *axp_power_supply_register(struct device *dev,
 			goto err_ps_register;
 		}
 	}
+#ifdef CONFIG_TYPE_C
+	chg_dev->tc = power_supply_register(dev, &tc_desc, &psy_cfg);
+	if (IS_ERR(chg_dev->tc)) {
+		power_supply_unregister(chg_dev->ac);
+		power_supply_unregister(chg_dev->usb);
+		chg_dev->ac = NULL;
+		chg_dev->usb = NULL;
+		if (chg_dev->bat_det) {
+			power_supply_unregister(chg_dev->batt);
+			chg_dev->batt = NULL;
+			goto err_ps_register;
+		}
+	}
+	if (info->tc->tc_vol && info->tc->set_tc_vhold)
+		info->tc->set_tc_vhold(chg_dev, info->tc->tc_vol);
+#endif
 
 	if (info->ac->ac_vol && info->ac->set_ac_vhold)
 		info->ac->set_ac_vhold(chg_dev, info->ac->ac_vol);

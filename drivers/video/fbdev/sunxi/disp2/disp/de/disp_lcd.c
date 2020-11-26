@@ -47,14 +47,12 @@ struct disp_lcd_private_data {
 	struct clk *clk;
 	struct clk *lvds_clk;
 	struct clk *dsi_clk[CLK_DSI_NUM];
+	struct clk *edp_clk;
 	struct clk *clk_parent;
-	struct clk *dsi_clk_parent[CLK_DSI_NUM];
-	struct clk *lvds_clk_parent;
 	/*0:no reset process;1:reset request;2:resetting*/
 	atomic_t lcd_resetting;
 	struct work_struct reflush_work;
 	struct disp_lcd_esd_info esd_inf;
-	struct mutex enable_lock;
 };
 static spinlock_t lcd_data_lock;
 
@@ -267,24 +265,23 @@ static s32 lcd_parse_panel_para(u32 disp, struct disp_panel_para *info)
 	if (ret == 1)
 		info->lcd_tcon_en_odd_even = value;
 
-
-	ret = disp_sys_script_get_item(primary_key, "lcd_fsync_en", &value, 1);
+	ret = disp_sys_script_get_item(primary_key, "lcd_edp_rate", &value, 1);
 	if (ret == 1)
-		info->lcd_fsync_en = value;
+		info->lcd_edp_rate = value;
 
-	ret = disp_sys_script_get_item(primary_key, "lcd_fsync_act_time", &value, 1);
+	ret = disp_sys_script_get_item(primary_key, "lcd_edp_lane", &value, 1);
 	if (ret == 1)
-		info->lcd_fsync_act_time = value;
-
-	ret = disp_sys_script_get_item(primary_key, "lcd_fsync_dis_time", &value, 1);
-	if (ret == 1)
-		info->lcd_fsync_dis_time = value;
+		info->lcd_edp_lane = value;
 
 	ret =
-	    disp_sys_script_get_item(primary_key, "lcd_fsync_pol", &value,
+	    disp_sys_script_get_item(primary_key, "lcd_edp_colordepth", &value,
 				     1);
 	if (ret == 1)
-		info->lcd_fsync_pol = value;
+		info->lcd_edp_colordepth = value;
+
+	ret = disp_sys_script_get_item(primary_key, "lcd_edp_fps", &value, 1);
+	if (ret == 1)
+		info->lcd_edp_fps = value;
 
 	ret =
 	    disp_sys_script_get_item(primary_key, "lcd_hv_clk_phase", &value,
@@ -479,7 +476,6 @@ static void lcd_get_sys_config(u32 disp, struct disp_lcd_cfg *lcd_cfg)
 static s32 lcd_clk_init(struct disp_device *lcd)
 {
 	struct disp_lcd_private_data *lcdp = disp_lcd_get_priv(lcd);
-	s32 i = 0;
 
 	if ((lcd == NULL) || (lcdp == NULL)) {
 		DE_WRN("NULL hdl!\n");
@@ -489,10 +485,6 @@ static s32 lcd_clk_init(struct disp_device *lcd)
 	DE_INF("lcd %d clk init\n", lcd->disp);
 
 	lcdp->clk_parent = clk_get_parent(lcdp->clk);
-	lcdp->lvds_clk_parent = clk_get_parent(lcdp->lvds_clk);
-	for (i = 0; i < CLK_DSI_NUM; ++i) {
-		lcdp->dsi_clk_parent[i] = clk_get_parent(lcdp->dsi_clk[i]);
-	}
 
 	return DIS_SUCCESS;
 }
@@ -605,17 +597,9 @@ static s32 lcd_clk_config(struct disp_device *lcd)
 	}
 	dsi_rate = pll_rate / clk_info.dsi_div;
 
-	if (lcdp->clk_parent && lcdp->clk) {
-		clk_set_parent(lcdp->clk, lcdp->clk_parent);
+	if (lcdp->clk_parent) {
 		clk_set_rate(lcdp->clk_parent, pll_rate);
 		pll_rate_set = clk_get_rate(lcdp->clk_parent);
-	}
-	if (lcdp->lvds_clk_parent && lcdp->lvds_clk)
-		clk_set_parent(lcdp->lvds_clk, lcdp->lvds_clk_parent);
-	for (i = 0; i < CLK_DSI_NUM; ++i) {
-		if (lcdp->dsi_clk_parent[i] && lcdp->dsi_clk[i])
-			clk_set_parent(lcdp->dsi_clk[i],
-				       lcdp->dsi_clk_parent[i]);
 	}
 
 	if (clk_info.lcd_div)
@@ -720,6 +704,12 @@ static s32 lcd_clk_enable(struct disp_device *lcd)
 			if (j == dsi_num)
 				break;
 		}
+	} else if (lcdp->panel_info.lcd_if == LCD_IF_EDP) {
+		ret = clk_prepare_enable(lcdp->edp_clk);
+		if (ret != 0) {
+			DE_WRN("fail enable edp's clock!\n");
+			goto exit;
+		}
 	}
 
 exit:
@@ -752,6 +742,8 @@ static s32 lcd_clk_disable(struct disp_device *lcd)
 			if (j == dsi_num)
 				break;
 		}
+	} else if (lcdp->panel_info.lcd_if == LCD_IF_EDP) {
+		clk_disable(lcdp->edp_clk);
 	}
 
 	if (__clk_get_enable_count(lcdp->clk))
@@ -776,6 +768,10 @@ static int lcd_calc_judge_line(struct disp_device *lcd)
 		 *               = 1 / (dclk * 1000000 / vt / ht) / vt * 1000000
 		 *               = ht / dclk(Mhz)
 		 */
+		lcdp->frame_per_sec =
+		    DIV_ROUND_CLOSEST(panel_info->lcd_dclk_freq * 1000000 *
+					  (panel_info->lcd_interlace + 1),
+				      panel_info->lcd_ht * panel_info->lcd_vt);
 		lcdp->usec_per_line = panel_info->lcd_ht
 		    / panel_info->lcd_dclk_freq;
 	}
@@ -1502,54 +1498,27 @@ static void disp_lcd_reflush_work(struct work_struct *work)
 }
 #endif
 
-static s32 disp_lcd_cal_fps(struct disp_device *lcd)
-{
-	s32 ret = -1;
-	struct disp_lcd_private_data *lcdp = NULL;
-	struct disp_panel_para *panel_info = NULL;
-
-	if (!lcd)
-		 goto OUT;
-	lcdp = disp_lcd_get_priv(lcd);
-	if (!lcdp)
-		goto OUT;
-	panel_info = &lcdp->panel_info;
-
-
-	lcdp->frame_per_sec =
-	    DIV_ROUND_CLOSEST(panel_info->lcd_dclk_freq * 1000000 *
-				  (panel_info->lcd_interlace + 1),
-			      panel_info->lcd_ht * panel_info->lcd_vt);
-
-	ret = 0;
-OUT:
-	return ret;
-}
-
 /* lcd enable except for backlight */
 static s32 disp_lcd_fake_enable(struct disp_device *lcd)
 {
+	unsigned long flags;
 	struct disp_lcd_private_data *lcdp = disp_lcd_get_priv(lcd);
-	int i, ret = DIS_FAIL;
+	int i, ret;
 	struct disp_manager *mgr = NULL;
 
 	if ((lcd == NULL) || (lcdp == NULL)) {
 		DE_WRN("NULL hdl!\n");
-		return ret;
+		return DIS_FAIL;
 	}
-	mutex_lock(&lcdp->enable_lock);
 	DE_INF("lcd %d\n", lcd->disp);
 	mgr = lcd->manager;
 	if (mgr == NULL) {
 		DE_WRN("mgr is NULL!\n");
-		goto OUT;
+		return DIS_FAIL;
 	}
-	if (disp_lcd_is_enabled(lcd) == 1) {
-		ret = 0;
-		goto OUT;
-	}
+	if (disp_lcd_is_enabled(lcd) == 1)
+		return 0;
 
-	disp_lcd_cal_fps(lcd);
 	if (mgr->enable)
 		mgr->enable(mgr);
 
@@ -1580,8 +1549,10 @@ static s32 disp_lcd_fake_enable(struct disp_device *lcd)
 				      (void *)lcd, 0, 0);
 		disp_sys_enable_irq(lcdp->irq_no);
 	}
+	spin_lock_irqsave(&lcd_data_lock, flags);
 	lcdp->enabling = 1;
 	lcdp->bl_need_enabled = 0;
+	spin_unlock_irqrestore(&lcd_data_lock, flags);
 	disp_lcd_gpio_init(lcd);
 	lcd_clk_enable(lcd);
 	ret = cal_real_frame_period(lcd);
@@ -1605,16 +1576,15 @@ static s32 disp_lcd_fake_enable(struct disp_device *lcd)
 				disp_delay_ms(lcdp->open_flow.func[i].delay);
 		}
 	}
+	spin_lock_irqsave(&lcd_data_lock, flags);
 	lcdp->enabled = 1;
 	lcdp->enabling = 0;
+	spin_unlock_irqrestore(&lcd_data_lock, flags);
 #if defined(CONFIG_DISP2_LCD_ESD_DETECT)
 	atomic_set(&lcdp->lcd_resetting, 0);
 #endif
-	ret = 0;
 
-OUT:
-	mutex_unlock(&lcdp->enable_lock);
-	return ret;
+	return 0;
 }
 
 #if defined(SUPPORT_EINK) && defined(CONFIG_EINK_PANEL_USED)
@@ -1740,30 +1710,26 @@ static s32 disp_lcd_disable(struct disp_device *lcd)
 #else
 static s32 disp_lcd_enable(struct disp_device *lcd)
 {
+	unsigned long flags;
 	struct disp_lcd_private_data *lcdp = disp_lcd_get_priv(lcd);
 	int i;
 	struct disp_manager *mgr = NULL;
 	unsigned bl;
-	int ret = DIS_FAIL;
+	int ret;
 
 	if ((lcd == NULL) || (lcdp == NULL)) {
 		DE_WRN("NULL hdl!\n");
-		return ret;
+		return DIS_FAIL;
 	}
-
-	mutex_lock(&lcdp->enable_lock);
 	__inf("lcd %d\n", lcd->disp);
 	mgr = lcd->manager;
 	if (mgr == NULL) {
 		DE_WRN("mgr is NULL!\n");
-		goto OUT;
+		return DIS_FAIL;
 	}
-	if (disp_lcd_is_enabled(lcd) == 1) {
-		ret = 0;
-		goto OUT;
-	}
+	if (disp_lcd_is_enabled(lcd) == 1)
+		return 0;
 
-	disp_lcd_cal_fps(lcd);
 	if (mgr->enable)
 		mgr->enable(mgr);
 
@@ -1792,15 +1758,16 @@ static s32 disp_lcd_enable(struct disp_device *lcd)
 				      (void *)lcd, 0, 0);
 		disp_sys_enable_irq(lcdp->irq_no);
 	}
+	spin_lock_irqsave(&lcd_data_lock, flags);
 	lcdp->enabling = 1;
 	lcdp->bl_need_enabled = 0;
+	spin_unlock_irqrestore(&lcd_data_lock, flags);
 
 	lcdp->panel_extend_info.lcd_gamma_en = lcdp->panel_info.lcd_gamma_en;
 	disp_lcd_gpio_init(lcd);
 	ret = lcd_clk_enable(lcd);
 	if (ret != 0)
-		goto OUT;
-
+		return DIS_FAIL;
 	ret = cal_real_frame_period(lcd);
 	if (ret)
 		DE_WRN("cal_real_frame_period fail:%d\n", ret);
@@ -1836,46 +1803,45 @@ static s32 disp_lcd_enable(struct disp_device *lcd)
 		}
 	}
 
+	spin_lock_irqsave(&lcd_data_lock, flags);
 	lcdp->enabled = 1;
 	lcdp->enabling = 0;
+	spin_unlock_irqrestore(&lcd_data_lock, flags);
 	bl = disp_lcd_get_bright(lcd);
 	disp_lcd_set_bright(lcd, bl);
 #if defined(CONFIG_DISP2_LCD_ESD_DETECT)
 	atomic_set(&lcdp->lcd_resetting, 0);
 #endif
-	ret = 0;
 
-OUT:
-	mutex_unlock(&lcdp->enable_lock);
-	return ret;
+	return 0;
 }
 
 static s32 disp_lcd_disable(struct disp_device *lcd)
 {
+	unsigned long flags;
 	struct disp_lcd_private_data *lcdp = disp_lcd_get_priv(lcd);
 	struct disp_manager *mgr = NULL;
-	int i = 0, ret = DIS_FAIL;
+	int i;
 
 	if ((lcd == NULL) || (lcdp == NULL)) {
 		DE_WRN("NULL hdl!\n");
-		return ret;
+		return DIS_FAIL;
 	}
-	mutex_lock(&lcdp->enable_lock);
 	DE_INF("lcd %d\n", lcd->disp);
 	mgr = lcd->manager;
 	if (mgr == NULL) {
 		DE_WRN("mgr is NULL!\n");
-		goto OUT;
+		return DIS_FAIL;
 	}
-	if (disp_lcd_is_enabled(lcd) == 0) {
-		ret = 0;
-		goto OUT;
-	}
+	if (disp_lcd_is_enabled(lcd) == 0)
+		return 0;
 
 #if defined(CONFIG_DISP2_LCD_ESD_DETECT)
 	atomic_set(&lcdp->lcd_resetting, 2);
 #endif
+	spin_lock_irqsave(&lcd_data_lock, flags);
 	lcdp->enabled = 0;
+	spin_unlock_irqrestore(&lcd_data_lock, flags);
 
 	lcdp->bl_need_enabled = 0;
 	lcdp->close_flow.func_num = 0;
@@ -1926,10 +1892,7 @@ static s32 disp_lcd_disable(struct disp_device *lcd)
 	if (mgr->disable)
 		mgr->disable(mgr);
 
-	ret = 0;
-OUT:
-	mutex_unlock(&lcdp->enable_lock);
-	return ret;
+	return 0;
 }
 #endif
 static s32 disp_lcd_sw_enable(struct disp_device *lcd)
@@ -1951,7 +1914,6 @@ static s32 disp_lcd_sw_enable(struct disp_device *lcd)
 		DE_WRN("mgr is NULL!\n");
 		return DIS_FAIL;
 	}
-	disp_lcd_cal_fps(lcd);
 	if (mgr->sw_enable)
 		mgr->sw_enable(mgr);
 
@@ -2015,9 +1977,6 @@ static s32 disp_lcd_sw_enable(struct disp_device *lcd)
 
 	if (lcdp->panel_info.lcd_pwm_used && lcdp->pwm_info.dev) {
 		pwm_dev = (struct pwm_device *)lcdp->pwm_info.dev;
-		pwm_dev->state.period = lcdp->pwm_info.period_ns;
-		pwm_dev->state.duty_cycle = lcdp->pwm_info.duty_ns;
-		disp_sys_pwm_set_polarity(lcdp->pwm_info.dev, lcdp->pwm_info.polarity);
 		pwm_dev->state.enabled = true;
 	}
 
@@ -2546,8 +2505,6 @@ static s32 disp_lcd_init(struct disp_device *lcd)
 	}
 	DE_INF("lcd %d\n", lcd->disp);
 
-
-	mutex_init(&lcdp->enable_lock);
 	lcd_get_sys_config(lcd->disp, &lcdp->lcd_cfg);
 	if (disp_lcd_is_used(lcd)) {
 		struct disp_video_timings *timmings;
@@ -2614,7 +2571,6 @@ static s32 disp_lcd_init(struct disp_device *lcd)
 						  lcdp->pwm_info.polarity);
 			lcdp->pwm_info.duty_ns = duty_ns;
 			lcdp->pwm_info.period_ns = period_ns;
-			disp_sys_pwm_config(lcdp->pwm_info.dev, duty_ns, period_ns);
 		}
 		lcd_clk_init(lcd);
 		for (i = 0; i < 256; i++) {
@@ -2727,9 +2683,6 @@ s32 disp_init_lcd(struct disp_bsp_init_para *para)
 #endif
 	char primary_key[20];
 	int ret = 0, value = 1;
-#if defined(CONFIG_ARCH_SUN8IW17P1)
-	s32 use_dsi_flag = 0;
-#endif
 
 	DE_INF("disp_init_lcd\n");
 
@@ -2778,21 +2731,10 @@ s32 disp_init_lcd(struct disp_bsp_init_para *para)
 
 		sprintf(lcd->name, "lcd%d", disp);
 		lcd->disp = disp;
-#if defined(CONFIG_ARCH_SUN8IW17P1)
-		value = 0;
-		ret = disp_sys_script_get_item(primary_key, "lcd_if", &value,
-					       1);
-		if (value == 4) {
-			lcd->hwdev_index = 1;
-			use_dsi_flag = 1;
-		} else
-			lcd->hwdev_index = (use_dsi_flag == 1) ? 0 : hwdev_index;
-#else
 		lcd->hwdev_index = hwdev_index;
-#endif
 		lcd->type = DISP_OUTPUT_TYPE_LCD;
-		lcdp->irq_no = para->irq_no[DISP_MOD_LCD0 + lcd->hwdev_index];
-		lcdp->clk = para->mclk[DISP_MOD_LCD0 + lcd->hwdev_index];
+		lcdp->irq_no = para->irq_no[DISP_MOD_LCD0 + hwdev_index];
+		lcdp->clk = para->mclk[DISP_MOD_LCD0 + hwdev_index];
 		lcdp->lvds_clk = para->mclk[DISP_MOD_LVDS];
 #if defined(SUPPORT_DSI)
 		lcdp->irq_no_dsi = para->irq_no[DISP_MOD_DSI0 + disp];

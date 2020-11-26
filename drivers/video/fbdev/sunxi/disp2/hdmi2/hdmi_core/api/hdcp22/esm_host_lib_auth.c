@@ -156,7 +156,7 @@ ESM_STATUS ESM_Authenticate(esm_instance_t *esm, uint32_t Cmd,
 
 ESM_STATUS ESM_SetCapability(esm_instance_t *esm)
 {
-	ESM_STATUS err = -1;
+	ESM_STATUS err;
 
 	LOG_TRACE();
 	if (esm == 0) {

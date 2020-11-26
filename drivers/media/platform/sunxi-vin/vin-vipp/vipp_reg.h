@@ -3,8 +3,6 @@
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
  * may be copied, distributed, and modified under those terms.
@@ -16,42 +14,19 @@
  *
  */
 
+
 #ifndef __VIPP__REG__H__
 #define __VIPP__REG__H__
 
 #include <linux/types.h>
 
-#if defined CONFIG_ARCH_SUN8IW16P1
-#define MAX_OVERLAY_NUM 8
-#define OSD_PARA_SIZE 0
-#define OSD_STAT_SIZE (2048 * 8)
-#define MAX_OSD_NUM 2
-#define MAX_COVER_NUM 8
-#define MAX_ORL_NUM 0
-#elif defined CONFIG_ARCH_SUN8IW19P1
-#define MAX_OVERLAY_NUM 0
-#define OSD_PARA_SIZE 0
-#define OSD_STAT_SIZE 0
-#define MAX_OSD_NUM 2
-#define MAX_COVER_NUM 0
-#define MAX_ORL_NUM 16
-#elif defined CONFIG_ARCH_SUN8IW12P1
+#define MAX_VIPP_NUM 8
 #define MAX_OVERLAY_NUM 64
-#define OSD_PARA_SIZE (MAX_OVERLAY_NUM * 8 + MAX_COVER_NUM * 8 + MAX_COVER_NUM * 8)
-#define OSD_STAT_SIZE (MAX_OVERLAY_NUM * 8)
-#define MAX_OSD_NUM VIN_MAX_SCALER
 #define MAX_COVER_NUM 8
-#define MAX_ORL_NUM 0
-#else
-#define MAX_OVERLAY_NUM 0
-#define OSD_PARA_SIZE 0
-#define OSD_STAT_SIZE 0
-#define MAX_OSD_NUM 0
-#define MAX_COVER_NUM 0
-#define MAX_ORL_NUM 0
-#endif
 
 #define VIPP_REG_SIZE 0X400
+#define OSD_PARA_SIZE (MAX_OVERLAY_NUM * 8 + MAX_COVER_NUM * 8 + MAX_COVER_NUM * 8)
+#define OSD_STAT_SIZE (MAX_OVERLAY_NUM * 8)
 
 /*register value*/
 enum vipp_ready_flag {
@@ -89,7 +64,7 @@ struct vipp_version {
 };
 
 struct vipp_feature_list {
-	unsigned int yuv422to420;
+	unsigned int fbc_exit;
 	unsigned int osd_exit;
 };
 
@@ -111,15 +86,12 @@ struct vipp_scaler_size {
 };
 
 struct vipp_osd_config {
-	unsigned char osd_ov_en;
-	unsigned char osd_cv_en;
-	unsigned char osd_orl_en;
+	unsigned int osd_ov_en;
+	unsigned int osd_cv_en;
 	enum vipp_osd_argb osd_argb_mode;
-	unsigned char osd_stat_en;
-	unsigned int osd_orl_width;
-	short osd_ov_num;
-	short osd_cv_num;
-	short osd_orl_num;
+	unsigned int osd_stat_en;
+	unsigned int osd_ov_num;
+	unsigned int osd_cv_num;
 };
 
 struct vipp_rgb2yuv_factor {
@@ -150,10 +122,7 @@ struct vipp_osd_overlay_cfg {
 	unsigned int v_start;
 	unsigned int v_end;
 	unsigned int alpha;
-	unsigned int inv_en;
-	unsigned int inv_th;
-	unsigned int inv_w_rgn;
-	unsigned int inv_h_rgn;
+	unsigned int inverse_en;
 };
 
 struct vipp_osd_cover_cfg {
@@ -173,8 +142,6 @@ struct vipp_osd_para_config {
 	struct vipp_osd_overlay_cfg overlay_cfg[MAX_OVERLAY_NUM];
 	struct vipp_osd_cover_cfg cover_cfg[MAX_COVER_NUM];
 	struct vipp_osd_cover_data cover_data[MAX_COVER_NUM];
-	struct vipp_osd_cover_cfg orl_cfg[MAX_ORL_NUM];
-	struct vipp_osd_cover_data orl_data[MAX_ORL_NUM];
 };
 
 int vipp_set_base_addr(unsigned int id, unsigned long addr);
@@ -185,8 +152,11 @@ void vipp_ver_en(unsigned int id, unsigned int en);
 void vipp_version_get(unsigned int id, struct vipp_version *v);
 void vipp_feature_list_get(unsigned int id, struct vipp_feature_list *fl);
 
+int vipp_get_para_ready(unsigned int id);
 void vipp_set_para_ready(unsigned int id, enum vipp_ready_flag flag);
+int vipp_get_osd_ov_update(unsigned int id);
 void vipp_set_osd_ov_update(unsigned int id, enum vipp_update_flag flag);
+int vipp_get_osd_cv_update(unsigned int id);
 void vipp_set_osd_cv_update(unsigned int id, enum vipp_update_flag flag);
 void vipp_set_osd_para_load_addr(unsigned int id, unsigned long dma_addr);
 int vipp_map_osd_para_load_addr(unsigned int id, unsigned long vaddr);
@@ -208,7 +178,6 @@ void vipp_output_fmt_cfg(unsigned int id, enum vipp_format fmt);
 void vipp_osd_cfg(unsigned int id, struct vipp_osd_config *cfg);
 void vipp_osd_rgb2yuv(unsigned int id, struct vipp_rgb2yuv_factor *factor);
 void vipp_set_crop(unsigned int id, struct vipp_crop *crop);
-void vipp_osd_hvflip(unsigned int id, int hflip, int vflip);
 void vipp_osd_inverse(unsigned int id, int *inverse, int cnt);
 void vipp_osd_para_cfg(unsigned int id, struct vipp_osd_para_config *para,
 				struct vipp_osd_config *cfg);

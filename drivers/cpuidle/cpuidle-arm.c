@@ -37,7 +37,6 @@
 static int arm_enter_idle_state(struct cpuidle_device *dev,
 				struct cpuidle_driver *drv, int idx)
 {
-#if !defined(CONFIG_SUNXI_CPU0IDLE)
 	/*
 	 * FIXME:may delete this code when sunxi cpuidle is ok.
 	 */
@@ -48,7 +47,6 @@ static int arm_enter_idle_state(struct cpuidle_device *dev,
 		cpu_do_idle();
 		return idx;
 	}
-#endif
 	/*
 	 * Pass idle state index to arm_cpuidle_suspend which in turn
 	 * will call the CPU ops suspend protocol with idle index as a

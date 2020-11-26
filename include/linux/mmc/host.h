@@ -321,7 +321,6 @@ struct mmc_host {
 #define MMC_CAP2_NO_MMC		(1 << 22)	/* Do not send (e)MMC commands during initialization */
 
 #define MMC_SUNXI_CAP3_DAT3_DET	(1 << 0)
-#define MMC_SUNXI_CAP3_CD_USED_24M	(1 << 1)
 	u32		sunxi_caps3;
 
 

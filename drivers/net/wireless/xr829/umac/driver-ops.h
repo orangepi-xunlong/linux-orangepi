@@ -736,14 +736,4 @@ drv_set_data_filter(struct ieee80211_local *local,
 
 	trace_drv_return_void(local);
 }
-
-static inline int drv_change_mac(struct ieee80211_local *local,
-				struct ieee80211_sub_if_data *sdata, struct sockaddr *sa)
-{
-	int ret = 0;
-	if (local->ops->change_mac)
-		ret = local->ops->change_mac(&local->hw, &sdata->vif, sa);
-
-	return ret;
-}
 #endif /* __MAC80211_DRIVER_OPS */

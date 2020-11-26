@@ -432,8 +432,7 @@ const struct malidp_hw_device malidp_device[MALIDP_MAX_DEVICES] = {
 				.vsync_irq = MALIDP500_DE_IRQ_VSYNC,
 			},
 			.se_irq_map = {
-				.irq_mask = MALIDP500_SE_IRQ_CONF_MODE |
-					    MALIDP500_SE_IRQ_GLOBAL,
+				.irq_mask = MALIDP500_SE_IRQ_CONF_MODE,
 				.vsync_irq = 0,
 			},
 			.dc_irq_map = {

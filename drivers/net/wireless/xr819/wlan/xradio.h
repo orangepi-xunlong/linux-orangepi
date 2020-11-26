@@ -502,7 +502,6 @@ struct xradio_vif {
 	struct work_struct	join_work;
 	struct delayed_work	join_timeout;
 	struct work_struct	unjoin_work;
-	struct delayed_work	unjoin_delayed_work;
 	struct work_struct	offchannel_work;
 	int			join_dtim_period;
 	atomic_t	delayed_unjoin;

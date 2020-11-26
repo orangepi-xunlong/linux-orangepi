@@ -837,7 +837,6 @@ struct hdmi_dev_func {
 	void (*hdcp_disconfigure)(void);
 	u8 (*hdcp_event_handler)(int *param, u32 irq_stat);
 	int (*get_hdcp_status)(void);
-	u32 (*get_hdcp_avmute)(void);
 	int (*get_hdcp_type)(void);
 	ssize_t (*hdcp_config_dump)(char *buf);
 
@@ -863,16 +862,15 @@ struct hdmi_dev_func {
 
 	int (*phy_write)(u8 addr, u16 data);
 	int (*phy_read)(u8 addr, u16 *value);
-#ifndef SUPPORT_ONLY_HDMI14
 	int (*scdc_read)(u8 address, u8 size, u8 *data);
 	int (*scdc_write)(u8 address, u8 size, u8 *data);
-	u32 (*get_scramble_state)(void);
-#endif
+
 
 	u32 (*get_phy_rxsense_state)(void);
 	u32 (*get_phy_pll_lock_state)(void);
 	u32 (*get_phy_power_state)(void);
 	u32 (*get_tmds_mode)(void);
+	u32 (*get_scramble_state)(void);
 	u32 (*get_avmute_state)(void);
 	u32 (*get_pixelrepetion)(void);
 	u32 (*get_colorimetry)(void);

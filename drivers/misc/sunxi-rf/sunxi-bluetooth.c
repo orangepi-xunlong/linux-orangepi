@@ -159,8 +159,6 @@ static int sunxi_bt_probe(struct platform_device *pdev)
 	struct gpio_config config;
 	const char *power, *io_regulator;
 	int ret = 0;
-	char *pctrl_name = PINCTRL_STATE_DEFAULT;
-	struct pinctrl_state *pctrl_state = NULL;
 
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (!dev)
@@ -223,23 +221,6 @@ static int sunxi_bt_probe(struct platform_device *pdev)
 		ret = clk_prepare_enable(data->lpo);
 		if (ret < 0)
 			dev_warn(dev, "can't enable clk\n");
-	}
-
-	data->pctrl = devm_pinctrl_get(dev);
-	if (IS_ERR(data->pctrl)) {
-		dev_warn(dev, "devm_pinctrl_get() failed!\n");
-	} else {
-		pctrl_state = pinctrl_lookup_state(data->pctrl,  pctrl_name);
-		if (IS_ERR(pctrl_state)) {
-			dev_warn(dev, "pinctrl_lookup_state(%s) failed! return %p \n",
-					pctrl_name, pctrl_state);
-		} else {
-			ret = pinctrl_select_state(data->pctrl, pctrl_state);
-			if (ret < 0) {
-				dev_warn(dev, "pinctrl_select_state(%s) failed! return %d \n",
-						pctrl_name, ret);
-			}
-		}
 	}
 
 	data->rfkill = rfkill_alloc("sunxi-bt", dev, RFKILL_TYPE_BLUETOOTH,

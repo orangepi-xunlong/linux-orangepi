@@ -1655,7 +1655,13 @@ isdn_ioctl(struct file *file, uint cmd, ulong arg)
 			} else
 				return -EINVAL;
 		case IIOCDBGVAR:
-			return -EINVAL;
+			if (arg) {
+				if (copy_to_user(argp, &dev, sizeof(ulong)))
+					return -EFAULT;
+				return 0;
+			} else
+				return -EINVAL;
+			break;
 		default:
 			if ((cmd & IIOCDRVCTL) == IIOCDRVCTL)
 				cmd = ((cmd >> _IOC_NRSHIFT) & _IOC_NRMASK) & ISDN_DRVIOCTL_MASK;

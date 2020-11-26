@@ -29,16 +29,12 @@
 #include <sound/soc-dapm.h>
 #include "sun8iw15-codec.h"
 #include <linux/delay.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/notifier.h>
 
 #include "sunxi_rw_func.h"
 
 #ifdef CONFIG_SND_SOC_HUB
 #include "sunxi_hub.h"
 #endif
-
 
 static int mdata_threshold = 0x10;
 module_param(mdata_threshold, int, 0644);
@@ -51,9 +47,6 @@ typedef enum {
 } _jack_irq_times;
 
 struct mc_private {
-#ifdef CONFIG_TYPE_C_AUDIO
-	struct notifier_block type_c_chain_nb;
-#endif
 	struct delayed_work hs_init_work;
 	struct delayed_work hs_detect_work;
 	struct delayed_work hs_button_work;
@@ -74,7 +67,6 @@ struct mc_private {
 	u32 key_volup;
 	u32 key_voldown;
 	u32 key_hook;
-	u32 key_voiceassist;
 	u32 hp_detect_case;
 };
 
@@ -379,14 +371,11 @@ static irqreturn_t jack_interrupt(int irq, void *dev_id)
 		if (abs(tv.tv_sec - ctx->tv_headset_plugin.tv_sec) > 2) {
 			tempdata = snd_soc_read(ctx->codec, SUNXI_HMIC_STS);
 			tempdata = (tempdata & 0x1f00) >> 8;
-			pr_err("[%s]: KEY tempdata: %d\n", __func__, tempdata);
 			pr_debug("headset key debug tempdata : 0x%x.\n",
 				 tempdata);
-
 			if (tempdata == 2) {
 				ctx->key_hook = 0;
 				ctx->key_voldown = 0;
-				ctx->key_voiceassist = 0;
 				ctx->key_volup++;
 				if (ctx->key_volup == 1) {
 					pr_debug("Volume ++\n");
@@ -401,7 +390,6 @@ static irqreturn_t jack_interrupt(int irq, void *dev_id)
 			} else if ((tempdata == 5) || tempdata == 4) {
 				ctx->key_volup = 0;
 				ctx->key_hook = 0;
-				ctx->key_voiceassist = 0;
 				ctx->key_voldown++;
 				if (ctx->key_voldown == 1) {
 					pr_debug("Volume --\n");
@@ -413,26 +401,9 @@ static irqreturn_t jack_interrupt(int irq, void *dev_id)
 					snd_jack_report(ctx->jack.jack,
 							ctx->switch_status);
 				}
-			/* add KEY_VOICECOMMAND for voice assistant */
-			} else if (tempdata == 1) {
-				ctx->key_volup = 0;
-				ctx->key_hook = 0;
-				ctx->key_voldown = 0;
-				ctx->key_voiceassist++;
-				if (ctx->key_voiceassist == 1) {
-					pr_debug("Voice Assistant Open\n");
-					ctx->key_voiceassist = 0;
-					ctx->switch_status |= SND_JACK_BTN_3;
-					snd_jack_report(ctx->jack.jack,
-							ctx->switch_status);
-					ctx->switch_status &= ~SND_JACK_BTN_3;
-					snd_jack_report(ctx->jack.jack,
-							ctx->switch_status);
-				}
 			} else if (tempdata == 0x0) {
 				ctx->key_volup = 0;
 				ctx->key_voldown = 0;
-				ctx->key_voiceassist = 0;
 				ctx->key_hook++;
 				if (ctx->key_hook >= 1) {
 					ctx->key_hook = 0;
@@ -456,7 +427,6 @@ static irqreturn_t jack_interrupt(int irq, void *dev_id)
 				ctx->key_volup = 0;
 				ctx->key_voldown = 0;
 				ctx->key_hook = 0;
-				ctx->key_voiceassist = 0;
 			}
 		} else {
 		}
@@ -496,7 +466,7 @@ static int sunxi_audio_init(struct snd_soc_pcm_runtime *runtime)
 	ret = snd_soc_card_jack_new(runtime->card, "sunxi Audio Jack",
 			       SND_JACK_HEADSET | SND_JACK_HEADPHONE |
 				   SND_JACK_BTN_0 | SND_JACK_BTN_1 |
-				   SND_JACK_BTN_2 | SND_JACK_BTN_3,
+				   SND_JACK_BTN_2,
 			       &ctx->jack, NULL, 0);
 	if (ret) {
 		pr_err("jack creation failed\n");
@@ -506,7 +476,6 @@ static int sunxi_audio_init(struct snd_soc_pcm_runtime *runtime)
 	snd_jack_set_key(ctx->jack.jack, SND_JACK_BTN_0, KEY_MEDIA);
 	snd_jack_set_key(ctx->jack.jack, SND_JACK_BTN_1, KEY_VOLUMEUP);
 	snd_jack_set_key(ctx->jack.jack, SND_JACK_BTN_2, KEY_VOLUMEDOWN);
-	snd_jack_set_key(ctx->jack.jack, SND_JACK_BTN_3, KEY_VOICECOMMAND);
 
 	snd_soc_dapm_disable_pin(dapm, "HPOUTR");
 	snd_soc_dapm_disable_pin(dapm, "HPOUTL");
@@ -885,37 +854,7 @@ static struct snd_soc_dai_driver voice_dai[] = {
 static const struct snd_soc_component_driver voice_component = {
 	.name		= "bb-voice",
 };
-#ifdef CONFIG_TYPE_C_AUDIO
 
-BLOCKING_NOTIFIER_HEAD(type_c_chain_head);
-EXPORT_SYMBOL_GPL(type_c_chain_head);
-int register_type_c_notifier(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_register(&type_c_chain_head, nb);
-}
-
-int unregister_type_c_notifier(struct  notifier_block *nb)
-{
-	return blocking_notifier_chain_unregister(&type_c_chain_head, nb);
-}
-
-static int type_c_chain_notify(struct notifier_block *nb, unsigned long mode, void *_unused)
-{
-	struct mc_private *ctx = container_of(nb, struct mc_private, type_c_chain_nb);
-
-	if (mode) {
-		ctx->detect_state = PLUG_IN;
-		printk("%s PLUG_IN", __func__);
-	} else {
-		ctx->detect_state = PLUG_OUT;
-		printk("%s PLUG_OUT", __func__);
-	}
-
-	schedule_delayed_work(&ctx->hs_detect_work,
-				msecs_to_jiffies(10));
-	return 0;
-}
-#endif
 static int sunxi_machine_probe(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -1068,14 +1007,10 @@ static int sunxi_machine_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&ctx->hs_init_work, sunxi_hs_init_work);
 	INIT_DELAYED_WORK(&ctx->hs_checkplug_work, sunxi_check_hs_plug);
 	mutex_init(&ctx->jack_mlock);
-#ifdef CONFIG_TYPE_C_AUDIO
-	ctx->type_c_chain_nb.notifier_call = type_c_chain_notify;
-	ret = register_type_c_notifier(&ctx->type_c_chain_nb);
-	if (ret)
-		goto err_notifier;
-#endif
+
 	ret = request_irq(ctx->jackirq, jack_interrupt,
 		   0, "audio jack irq", ctx);
+
 	sunxi_hs_reg_init(ctx);
 	pr_debug("[%s] 0x310:0x%X,0x314:0x%X,0x318:0x%X,0x1C:0x%X,0x1D:0x%X\n",
 			__func__, snd_soc_read(ctx->codec, 0x310),
@@ -1089,11 +1024,6 @@ err1:
 	snd_soc_unregister_component(&pdev->dev);
 err0:
 	return ret;
-#ifdef CONFIG_TYPE_C_AUDIO
-err_notifier:
-	unregister_type_c_notifier(&ctx->type_c_chain_nb);
-	return ret;
-#endif
 }
 
 static void snd_sunxi_unregister_jack(struct mc_private *ctx)

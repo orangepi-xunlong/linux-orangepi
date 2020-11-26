@@ -274,10 +274,8 @@ static s32 vdpo_clk_config(struct disp_device *p_vdpo)
 		return DIS_FAIL;
 	}
 
-	if (p_vdpop->clk_parent && p_vdpop->clk) {
-		clk_set_parent(p_vdpop->clk, p_vdpop->clk_parent);
+	if (p_vdpop->clk_parent)
 		clk_set_rate(p_vdpop->clk_parent, 297000000);
-	}
 
 	rate = p_vdpo->timings.pixel_clk * 4; /*tcon_dvi==4*/
 	if (p_vdpop->clk)
@@ -483,6 +481,8 @@ static s32 disp_vdpo_exit(struct disp_device *p_vdpo)
 	vdpo_clk_exit(p_vdpo);
 	kfree(p_vdpo);
 	kfree(p_vdpop);
+	p_vdpo = NULL;
+	p_vdpop = NULL;
 	return 0;
 }
 

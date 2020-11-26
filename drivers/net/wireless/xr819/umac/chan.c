@@ -23,9 +23,6 @@ __mac80211_get_channel_mode(struct ieee80211_local *local,
 		if (sdata->vif.type == NL80211_IFTYPE_MONITOR)
 			continue;
 
-		if (sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE)
-			continue;
-
 		if (sdata->vif.type == NL80211_IFTYPE_STATION &&
 		    !sdata->u.mgd.associated)
 			continue;

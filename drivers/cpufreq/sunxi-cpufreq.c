@@ -19,7 +19,6 @@
 #include <linux/module.h>
 #include <linux/cpufreq.h>
 #include <linux/cpu.h>
-#include <linux/cpu_cooling.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/clk.h>
@@ -49,10 +48,27 @@ static struct {
 } sunxi_cpufreq;
 #endif
 
-static struct thermal_cooling_device *cdev;
-
 /* cpufreq_dvfs_table is global default dvfs table */
 static struct cpufreq_dvfs_table cpufreq_dvfs_table[DVFS_VF_TABLE_MAX] = {
+#ifdef CONFIG_ARM_SUNXI_AVS
+	/* freq         voltage     axi_div pval*/
+	{900000000,     1200,       3,	1300},
+	{600000000,     1200,       3,	1300},
+	{420000000,     1200,       3,	1300},
+	{360000000,     1200,       3,	1300},
+	{300000000,     1200,       3,	1300},
+	{240000000,     1200,       3,	1300},
+	{120000000,     1200,       3,  1300},
+	{60000000,      1200,       3,	1300},
+	{0,             1200,       3,	1300},
+	{0,             1200,       3,	1300},
+	{0,             1200,       3,	1300},
+	{0,             1200,       3,	1300},
+	{0,             1200,       3,	1300},
+	{0,             1200,       3,	1300},
+	{0,             1200,       3,	1300},
+	{0,             1200,       3,	1300},
+#else
 	/*
 	 * cluster0
 	 * cpu0 vdd is 1.20v if cpu freq is (600Mhz, 1008Mhz]
@@ -81,6 +97,7 @@ static struct cpufreq_dvfs_table cpufreq_dvfs_table[DVFS_VF_TABLE_MAX] = {
 	{0,             1200,       3},
 	{0,             1200,       3},
 	{0,             1200,       3}
+#endif
 };
 
 #ifdef CONFIG_ARM_SUNXI_PSENSOR_BIN
@@ -261,6 +278,10 @@ static int sunxi_cpufreq_set_vf(struct cpufreq_frequency_table *table,
 		cpufreq_dvfs_table[num].freq = dev_pm_opp_get_freq(opp);
 		cpufreq_dvfs_table[num].axi_div =
 				dev_pm_opp_axi_bus_divide_ratio(opp);
+#ifdef CONFIG_ARM_SUNXI_AVS
+		cpufreq_dvfs_table[num].pval =
+				dev_pm_opp_get_pval(opp);
+#endif
 		rcu_read_unlock();
 		CPUFREQ_DBG("num:%d, volatge:%d, freq:%d, axi_div:%d ,%s\n",
 				num, cpufreq_dvfs_table[num].voltage,
@@ -527,41 +548,6 @@ static int sunxi_cpufreq_exit(struct cpufreq_policy *policy)
 	return 0;
 }
 
-int sunxi_get_static_power(cpumask_t *cpumask, int interval,
-					unsigned long voltage, u32 *power)
-{
-	*power = 1;
-	return 0;
-}
-
-static void sunxi_cpufreq_ready(struct cpufreq_policy *policy)
-{
-	struct device *cpu_dev = get_cpu_device(policy->cpu);
-	struct device_node *np;
-
-	np = of_node_get(cpu_dev->of_node);
-	if (WARN_ON(!np))
-		return;
-
-	if (of_find_property(np, "#cooling-cells", NULL)) {
-		u32 power_coefficient = 0;
-
-		of_property_read_u32(np, "dynamic-power-coefficient",
-				     &power_coefficient);
-
-		cdev = of_cpufreq_power_cooling_register(np,
-				policy->related_cpus,
-				power_coefficient, &sunxi_get_static_power);
-		if (IS_ERR(cdev)) {
-			dev_err(cpu_dev,
-				"running cpufreq without cooling device: %ld\n",
-				PTR_ERR(cdev));
-			cdev = NULL;
-		}
-	}
-	of_node_put(np);
-}
-
 static struct freq_attr *sunxi_cpufreq_attr[] = {
 	 &cpufreq_freq_attr_scaling_available_freqs,
 	 NULL,
@@ -575,7 +561,6 @@ static struct cpufreq_driver sunxi_cpufreq_driver = {
 	.get          = sunxi_cpufreq_get,
 	.target_index = sunxi_cpufreq_target_index,
 	.exit         = sunxi_cpufreq_exit,
-	.ready        = sunxi_cpufreq_ready,
 	.verify       = cpufreq_generic_frequency_table_verify,
 	.suspend      = cpufreq_generic_suspend,
 };

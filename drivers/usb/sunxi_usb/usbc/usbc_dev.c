@@ -389,10 +389,6 @@ static void __USBC_Dev_Rx_ConfigEp(void __iomem *usbc_base_addr,
 		USBC_REG_RXCSR(usbc_base_addr));
 	}
 
-	if (ts_type == USBC_TS_TYPE_INT)
-		USBC_Writew(1 << USBC_BP_RXCSR_D_DISABLE_NYET,
-		USBC_REG_RXCSR(usbc_base_addr));
-
 	/* --<2>--config tx ep max packet */
 	reg_val = USBC_Readw(USBC_REG_RXMAXP(usbc_base_addr));
 	temp    = ep_MaxPkt & ((1 << USBC_BP_RXMAXP_PACKET_COUNT) - 1);
@@ -1265,61 +1261,3 @@ void USBC_Dev_FlushFifo(__hdle hUSB, __u32 ep_type)
 	}
 }
 EXPORT_SYMBOL(USBC_Dev_FlushFifo);
-
-__u32 USBC_Phyx_Read(__hdle hUSB)
-{
-	__u32 reg_value = 0;
-	__u32 temp = 0;
-	__u32 ptmp = 0;
-	__u32 ret = 0;
-
-	__usbc_otg_t *usbc_otg = (__usbc_otg_t *)hUSB;
-
-	if (usbc_otg == NULL) {
-		DMSG_PANIC("ERR: usbc_otg is null!");
-		return -1;
-	}
-
-	reg_value = USBC_Readl(usbc_otg->base_addr + USBC_REG_o_PHYTUNE);
-	reg_value &= 0xf3f;
-	ptmp = reg_value;
-
-	temp = reg_value >> 8;
-	ptmp &= ~((0xf << 8) | (0xf << 4));
-	ptmp <<= 6;
-	reg_value &= ~((0xf << 8) | (0xf << 0));
-	ret = reg_value | ptmp | temp;
-	DMSG_INFO("bit[3:0]VREF = 0x%x; bit[5:4]RISE = 0x%x; bit[7:6]PREEMPAMP = 0x%x; bit[9:8]RES = 0x%x\n",
-			temp, reg_value >> 4, (ptmp >> 6) & 0x3,
-			((ptmp >> 6)  & 0xc) >> 2);
-
-	return ret;
-}
-EXPORT_SYMBOL(USBC_Phyx_Read);
-
-
-void USBC_Phyx_Write(__hdle hUSB, __u32 data)
-{
-	__u32 reg_value = 0;
-	__u32 temp = 0;
-	__u32 dtmp = 0;
-
-	__usbc_otg_t *usbc_otg = (__usbc_otg_t *)hUSB;
-
-	if (usbc_otg == NULL)
-		return;
-
-	temp = dtmp  = data;
-	reg_value = USBC_Readl(usbc_otg->base_addr + USBC_REG_o_PHYTUNE);
-	/*TXVREFTUNE + TXRISETUNE + TXPREEMPAMPTUNE + TXRESTUNE*/
-	reg_value &= ~((0xf << 8) | (0x3 << 4) | (0xf << 0));
-	temp &= ~((0xf << 4) | (0x3 << 8) | (0x1 << 10));
-	reg_value |= temp << 8;
-	dtmp &= ~((0xf << 6) | (0xf << 0) | (0x1 << 10));
-	reg_value |= dtmp;
-	data &= ~((0x3 << 4) | (0xf << 0) | (0x1 << 10));
-	reg_value |= data >> 6;
-
-	USBC_Writel(reg_value, (usbc_otg->base_addr + USBC_REG_o_PHYTUNE));
-}
-EXPORT_SYMBOL(USBC_Phyx_Write);

@@ -19,8 +19,6 @@
 #ifndef __G2D_DRIVER_H
 #define __G2D_DRIVER_H
 
-#include <linux/types.h>
-#include <linux/ioctl.h>
 
 
 /* data format */
@@ -326,7 +324,6 @@ typedef struct {
 	__u8		 alpha;
 	g2d_alpha_mode_enh mode;
 	int		 fd;
-	__u32 use_phy_addr;
 } g2d_image_enh;
 
 /*
@@ -450,36 +447,6 @@ typedef struct {
 } g2d_bld;			/* blending enhance */
 
 typedef enum {
-	OP_FILLRECT = 0x1,
-	OP_BITBLT = 0x2,
-	OP_BLEND = 0x4,
-	OP_MASK = 0x8,
-	OP_SPLIT_MEM = 0x10,
-} g2d_operation_flag;
-
-/**
- * mixer_para
- */
-struct mixer_para {
-	g2d_operation_flag op_flag;
-	g2d_blt_flags_h flag_h;
-	g2d_rop3_cmd_flag back_flag;
-	g2d_rop3_cmd_flag fore_flag;
-	g2d_bld_cmd_flag bld_cmd;
-	g2d_image_enh src_image_h;
-	g2d_image_enh dst_image_h;
-	g2d_image_enh ptn_image_h;
-	g2d_image_enh mask_image_h;
-	g2d_ck ck_para;
-};
-
-#define SUNXI_G2D_IOC_MAGIC 'G'
-#define SUNXI_G2D_IO(nr)          _IO(SUNXI_G2D_IOC_MAGIC, nr)
-#define SUNXI_G2D_IOR(nr, size)   _IOR(SUNXI_G2D_IOC_MAGIC, nr, size)
-#define SUNXI_G2D_IOW(nr, size)   _IOW(SUNXI_G2D_IOC_MAGIC, nr, size)
-#define SUNXI_G2D_IOWR(nr, size)  _IOWR(SUNXI_G2D_IOC_MAGIC, nr, size)
-
-typedef enum {
 	G2D_CMD_BITBLT			=	0x50,
 	G2D_CMD_FILLRECT		=	0x51,
 	G2D_CMD_STRETCHBLT		=	0x52,
@@ -496,12 +463,6 @@ typedef enum {
 	G2D_CMD_MEM_SELIDX		=	0x5C,
 	G2D_CMD_MEM_FLUSH_CACHE		=	0x5D,
 	G2D_CMD_INVERTED_ORDER		=	0x5E,
-	G2D_CMD_MIXER_TASK = 0x5F,
-	G2D_CMD_CREATE_TASK = SUNXI_G2D_IOW(0x1, struct mixer_para),
-	G2D_CMD_TASK_APPLY = SUNXI_G2D_IOW(0x2, struct mixer_para),
-	G2D_CMD_TASK_DESTROY = SUNXI_G2D_IOW(0x3, unsigned int),
-	G2D_CMD_TASK_GET_PARA = SUNXI_G2D_IOR(0x4, struct mixer_para),
-
 } g2d_cmd;
 
 #endif	/* __G2D_DRIVER_H */

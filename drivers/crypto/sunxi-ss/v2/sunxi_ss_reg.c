@@ -124,37 +124,7 @@ void ss_irq_disable(int flow)
 /* key: phsical address. */
 void ss_key_set(char *key, int size)
 {
-	int i = 0;
-	int key_sel = CE_KEY_SELECT_INPUT;
-	struct {
-		int type;
-		char desc[AES_MIN_KEY_SIZE];
-	} key_select[] = {
-		{CE_KEY_SELECT_SSK,			CE_KS_SSK},
-		{CE_KEY_SELECT_HUK,			CE_KS_HUK},
-		{CE_KEY_SELECT_RSSK,		CE_KS_RSSK},
-		{CE_KEY_SELECT_INTERNAL_0,	CE_KS_INTERNAL_0},
-		{CE_KEY_SELECT_INTERNAL_1,	CE_KS_INTERNAL_1},
-		{CE_KEY_SELECT_INTERNAL_2,	CE_KS_INTERNAL_2},
-		{CE_KEY_SELECT_INTERNAL_3,	CE_KS_INTERNAL_3},
-		{CE_KEY_SELECT_INTERNAL_4,	CE_KS_INTERNAL_4},
-		{CE_KEY_SELECT_INTERNAL_5,	CE_KS_INTERNAL_5},
-		{CE_KEY_SELECT_INTERNAL_6,	CE_KS_INTERNAL_6},
-		{CE_KEY_SELECT_INTERNAL_7,	CE_KS_INTERNAL_7},
-		{CE_KEY_SELECT_INPUT, ""}
-	};
-
-	while (key_select[i].type != CE_KEY_SELECT_INPUT) {
-		if (strncasecmp(key, key_select[i].desc, AES_MIN_KEY_SIZE) == 0) {
-			key_sel = key_select[i].type;
-			memset(key, 0, size);
-			break;
-		}
-		i++;
-	}
-	SS_DBG("The key select: %d\n", key_sel);
-
-	ss_keyselect_set(key_sel);
+	ss_keyselect_set(SS_KEY_SELECT_INPUT);
 	ss_keysize_set(size);
 	ss_writel(SS_REG_KEY_L, virt_to_phys(key));
 }

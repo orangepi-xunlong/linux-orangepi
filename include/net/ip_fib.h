@@ -242,7 +242,7 @@ int fib_table_insert(struct net *, struct fib_table *, struct fib_config *);
 int fib_table_delete(struct net *, struct fib_table *, struct fib_config *);
 int fib_table_dump(struct fib_table *table, struct sk_buff *skb,
 		   struct netlink_callback *cb);
-int fib_table_flush(struct net *net, struct fib_table *table, bool flush_all);
+int fib_table_flush(struct net *net, struct fib_table *table);
 struct fib_table *fib_trie_unmerge(struct fib_table *main_tb);
 void fib_table_flush_external(struct fib_table *table);
 void fib_free_table(struct fib_table *tb);
@@ -363,7 +363,6 @@ int ip_fib_check_default(__be32 gw, struct net_device *dev);
 int fib_sync_down_dev(struct net_device *dev, unsigned long event, bool force);
 int fib_sync_down_addr(struct net_device *dev, __be32 local);
 int fib_sync_up(struct net_device *dev, unsigned int nh_flags);
-void fib_sync_mtu(struct net_device *dev, u32 orig_mtu);
 
 extern u32 fib_multipath_secret __read_mostly;
 

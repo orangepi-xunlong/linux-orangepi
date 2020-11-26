@@ -34,11 +34,9 @@
 #define _SUNXI_CCI_H_
 
 #include "../platform/platform_cfg.h"
-#include <linux/i2c.h>
 
 struct cci_dev {
 	struct platform_device *pdev;
-	struct i2c_adapter adap;
 	unsigned int id;
 	spinlock_t slock;
 	int irq;
@@ -51,8 +49,5 @@ struct cci_dev {
 	struct pinctrl *pctrl;
 	struct clk *clock;
 };
-
-int sunxi_cci_platform_register(void);
-void sunxi_cci_platform_unregister(void);
 
 #endif /*_SUNXI_CCI_H_*/

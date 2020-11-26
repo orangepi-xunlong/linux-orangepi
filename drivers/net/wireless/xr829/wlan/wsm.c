@@ -27,7 +27,7 @@
 
 #ifdef SUPPORT_FW_DBG_INF
 #include "fw_dbg_inf.h"
-#endif /*SUPPORT_FW_DBG_INF*/
+#endif
 
 
 /* With respect to interrupt loss, timeout in FW is 2s in some cases. */
@@ -3062,7 +3062,6 @@ static bool wsm_handle_tx_data(struct xradio_vif *priv,
 
 	switch (priv->mode) {
 	case NL80211_IFTYPE_STATION:
-	case NL80211_IFTYPE_P2P_DEVICE:
 		if (unlikely(priv->bss_loss_status == XRADIO_BSS_LOSS_CHECKING &&
 				 priv->join_status     == XRADIO_JOIN_STATUS_STA) &&
 				 ieee80211_is_data(fctl)) {

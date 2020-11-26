@@ -345,17 +345,10 @@ static int sdio_suspend(struct device *dev)
  * keep sdio working.The better way is register sdio device as the father device of wifi device,
  * so it will suspend wifi device first
  */
-extern struct xradio_common *g_hw_priv;
 static int sdio_suspend(struct device *dev)
 {
 	int ret = 0;
 	sbus_printk(XRADIO_DBG_NIY, "%s\n", __func__);
-
-	if (g_hw_priv && (g_hw_priv->exit_sync == true)) {
-		sbus_printk(XRADIO_DBG_WARN, "Don't suspend because xradio is exiting\n");
-		return -EBUSY;
-	}
-
 #ifdef CONFIG_XRADIO_ETF
 	ret = xradio_etf_suspend();
 	if (!ret) {
@@ -462,7 +455,7 @@ retry:	xradio_sdio_detect(0);
 			sbus_printk(XRADIO_DBG_ERROR, "%s remove timeout!\n", __func__);
 
 			if (++retrycnt <= 2)
-				goto retry;
+			goto retry;
 		}
 		sdio_unregister_driver(&sdio_driver);
 		memset(&sdio_self, 0, sizeof(sdio_self));

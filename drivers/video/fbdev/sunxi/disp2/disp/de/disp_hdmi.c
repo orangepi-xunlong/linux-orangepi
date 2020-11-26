@@ -138,8 +138,6 @@ static s32 hdmi_clk_config(struct disp_device *hdmi)
 	    DE_WRN("hdmi clk init null hdl!\n");
 	    return DIS_FAIL;
 	}
-	if (hdmip->parent_clk)
-		clk_set_parent(hdmip->clk, hdmip->parent_clk);
 
 	parent_clk =  clk_get_parent(hdmip->clk);
 	if (!parent_clk) {
@@ -187,7 +185,7 @@ static s32 hdmi_clk_enable(struct disp_device *hdmi)
 	}
 
 	hdmi_clk_config(hdmi);
-	if (hdmip->clk && (!__clk_get_enable_count(hdmip->clk))) {
+	if (hdmip->clk) {
 		ret = clk_prepare_enable(hdmip->clk);
 		if (ret != 0)
 			DE_WRN("fail enable hdmi's clock!\n");
@@ -205,57 +203,11 @@ static s32 hdmi_clk_disable(struct disp_device *hdmi)
 		return DIS_FAIL;
 	}
 
-	if (hdmip->clk && (__clk_get_enable_count(hdmip->clk)))
+	if (hdmip->clk)
 		clk_disable_unprepare(hdmip->clk);
 
 	return 0;
 }
-
-void disp_hdmi_pad_sel(unsigned int pad_sel)
-{
-#ifdef USE_CEC_DDC_PAD
-	struct disp_device_private_data *hdmip
-				= disp_hdmi_get_priv(hdmis);
-	if (!hdmis)
-		return;
-	if (!hdmip->clk)
-		return;
-	if (!__clk_get_enable_count(hdmip->clk))
-		clk_prepare_enable(hdmip->clk);
-	disp_al_hdmi_pad_sel(hdmis->hwdev_index, pad_sel);
-#endif
-}
-EXPORT_SYMBOL(disp_hdmi_pad_sel);
-
-void disp_hdmi_pad_release(void)
-{
-#ifdef USE_CEC_DDC_PAD
-	/*struct disp_device_private_data *hdmip
-				= disp_hdmi_get_priv(hdmis);*/
-	if (!hdmis)
-		return;
-
-	disp_al_hdmi_pad_sel(hdmis->hwdev_index, 0);
-
-	/*if (!hdmip->clk)
-		return;
-
-	if (__clk_get_enable_count(hdmip->clk))
-		clk_disable_unprepare(hdmip->clk);*/
-#endif
-}
-EXPORT_SYMBOL(disp_hdmi_pad_release);
-
-u32 disp_hdmi_pad_get(void)
-{
-	u32 ret = 0;
-
-#ifdef USE_CEC_DDC_PAD
-	ret = tcon_pad_get(hdmis->hwdev_index);
-#endif
-	return ret;
-}
-EXPORT_SYMBOL(disp_hdmi_pad_get);
 
 static s32 hdmi_calc_judge_line(struct disp_device *hdmi)
 {
@@ -355,7 +307,6 @@ static s32 disp_hdmi_init(struct disp_device *hdmi)
 	}
 
 	hdmi_clk_init(hdmi);
-
 	return 0;
 }
 
@@ -538,25 +489,8 @@ static s32 disp_hdmi_sw_enable(struct disp_device *hdmi)
 	disp_al_hdmi_irq_enable(hdmi->hwdev_index);
 
 #if !defined(CONFIG_COMMON_CLK_ENABLE_SYNCBOOT)
-#ifdef CONFIG_HDMI2_FREQ_SPREAD_SPECTRUM
-	/*if (!__clk_get_enable_count(hdmip->clk)) {
-		if (hdmi_clk_enable(hdmi) != 0)
-			return -1;
-	}*/
-
-	clk_set_rate(clk_get_parent(hdmip->clk),
-		clk_hw_get_rate(
-		__clk_get_hw(clk_get_parent(hdmip->clk))));
-	clk_prepare_enable(clk_get_parent(hdmip->clk));
-
-	clk_set_rate(hdmip->clk,
-		clk_hw_get_rate(
-		__clk_get_hw(hdmip->clk)));
-	clk_prepare_enable(hdmip->clk);
-#else
 	if (hdmi_clk_enable(hdmi) != 0)
 		return -1;
-#endif
 #endif
 
 	if (0 != cal_real_frame_period(hdmi))

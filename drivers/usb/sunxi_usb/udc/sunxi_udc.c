@@ -65,7 +65,7 @@ static struct wake_lock udc_wake_lock;
 static const char	gadget_name[] = "sunxi_usb_udc";
 static const char	driver_desc[] = DRIVER_DESC;
 
-static u64 sunxi_udc_mask = DMA_BIT_MASK(64);
+static u64 sunxi_udc_mask = DMA_BIT_MASK(32);
 
 static struct sunxi_udc	*the_controller;
 static u32 usbd_port_no;
@@ -143,44 +143,6 @@ static ssize_t ed_test(struct device *dev,
 }
 
 static DEVICE_ATTR(otg_ed_test, 0644, show_ed_test, ed_test);
-
-static ssize_t show_phy_range(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf, "rate:0x%x\n",
-			USBC_Phyx_Read(g_sunxi_udc_io.usb_bsp_hdle));
-}
-
-static ssize_t udc_phy_range(struct device *dev, struct device_attribute *attr,
-		const char *buf, size_t count)
-{
-	int val = 0;
-	int err;
-
-	if (dev == NULL) {
-		DMSG_PANIC("ERR: Argment is invalid\n");
-		return 0;
-	}
-
-	err = kstrtoint(buf, 16, &val);
-	if (err != 0)
-		return -EINVAL;
-
-	if ((val >= 0x0) && (val <= 0x3ff)) {
-		USBC_Phyx_Write(g_sunxi_udc_io.usb_bsp_hdle, val);
-	} else {
-		DMSG_PANIC("adjust PHY's paraments 0x%x is fail! value:0x0~0x3ff\n", val);
-		return count;
-	}
-
-	DMSG_INFO("adjust succeed, PHY's paraments:0x%x.\n",
-		USBC_Phyx_Read(g_sunxi_udc_io.usb_bsp_hdle));
-
-	return count;
-}
-
-static DEVICE_ATTR(otg_phy_range, 0644, show_phy_range, udc_phy_range);
-
 
 static ssize_t show_udc_debug(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -846,89 +808,11 @@ static int dma_read_fifo(struct sunxi_udc_ep *ep, struct sunxi_udc_request *req)
 	return 0;
 }
 
-/*
- * If dma is working, RxPktRdy should be clear automatically.
- * If not, we consider a short packet comes in and we will
- * deal with it then.
- *
- * FIXME: The longest time to confirm is up to (5us * 1000).
- */
-static int sunxi_udc_confirm_rx_ready(void)
-{
-	int i = 0;
-	int rx_ready_flag = 1;
-
-	for (i = 0; i < 1000; i++) {
-		if (!USBC_Dev_IsReadDataReady(g_sunxi_udc_io.usb_bsp_hdle, USBC_EP_TYPE_RX)) {
-			rx_ready_flag = 0;
-			break;
-		}
-		udelay(5);
-	}
-	DMSG_DBG_UDC("[confirm rx ready] rx_ready_flag = %d, i = %d\n",
-			rx_ready_flag, i);
-
-	return rx_ready_flag;
-}
-
-static int dma_got_short_pkt(struct sunxi_udc_ep *ep, struct sunxi_udc_request *req)
-{
-	dma_channel_t *pchan = NULL;
-	int dma_bc = 0;
-	int dma_r_bc = 0;
-	int fifo_count = 0;
-	unsigned long flags = 0;
-
-	pchan = (dma_channel_t *)ep->dev->dma_hdle;
-	if (pchan == NULL) {
-		DMSG_DBG_UDC("[dma_got_short_pkt] dma_hdle is NULL!\n");
-		return 0;
-	}
-
-	dma_bc = USBC_Readw(USBC_REG_DMA_BC(pchan->reg_base, pchan->channel_num));
-	dma_r_bc = USBC_Readw(USBC_REG_DMA_RESIDUAL_BC(pchan->reg_base, pchan->channel_num));
-	fifo_count = USBC_ReadLenFromFifo(g_sunxi_udc_io.usb_bsp_hdle, USBC_EP_TYPE_RX);
-
-	DMSG_DBG_UDC("read_fifo: dma_working... rx_cnt = %d, dma_channel = %d, dma_bc = %d, dma_r_bc = %d\n",
-			fifo_count, pchan->channel_num, dma_bc, dma_r_bc);
-
-	if (!sunxi_udc_confirm_rx_ready())
-		return 0;
-
-	/*
-	 * rx fifo got a short packet, reassign the transfer len
-	 */
-	if (fifo_count > 0 && fifo_count < ep->ep.maxpacket) {
-		req->req.length = dma_bc - dma_r_bc + fifo_count;
-		ep->dma_transfer_len = dma_bc - dma_r_bc;
-		DMSG_DBG_UDC("reassign: req.length = %d, req.actual = %d, ep->dma_transfer_len = %d\n",
-				req->req.length, req->req.actual, ep->dma_transfer_len);
-
-		/*
-		 * we need to stop dma manually
-		 */
-		sunxi_udc_dma_chan_disable((dm_hdl_t)ep->dev->dma_hdle);
-		sunxi_udc_dma_release((dm_hdl_t)ep->dev->dma_hdle);
-		ep->dev->dma_hdle = NULL;
-
-		spin_unlock_irqrestore(&ep->dev->lock, flags);
-		sunxi_udc_dma_completion(ep->dev, ep, req);
-		spin_lock_irqsave(&ep->dev->lock, flags);
-
-		return 1;
-	}
-
-	return 0;
-}
-
 /* return: 0 = still running, 1 = completed, negative = errno */
 static int sunxi_udc_read_fifo(struct sunxi_udc_ep *ep,
 		struct sunxi_udc_request *req)
 {
 	if (ep->dma_working) {
-		if (dma_got_short_pkt(ep, req))
-			return 1;
-
 		if (g_dma_debug) {
 			struct sunxi_udc_request *req_next = NULL;
 
@@ -2345,7 +2229,7 @@ static struct usb_request *sunxi_udc_alloc_request(
 		return NULL;
 	}
 
-	req = kzalloc(sizeof(struct sunxi_udc_request), mem_flags | GFP_ATOMIC);
+	req = kzalloc(sizeof(struct sunxi_udc_request), mem_flags);
 	if (!req) {
 		DMSG_PANIC("ERR: kzalloc failed\n");
 		return NULL;
@@ -3325,7 +3209,7 @@ int sunxi_usb_device_enable(void)
 
 #ifdef CONFIG_OF
 	udc->controller->dma_mask = &sunxi_udc_mask;
-	udc->controller->coherent_dma_mask = DMA_BIT_MASK(64);
+	udc->controller->coherent_dma_mask = DMA_BIT_MASK(32);
 #endif
 
 	if (is_udc_support_dma()) {
@@ -3495,7 +3379,7 @@ static int sunxi_udc_probe_otg(struct platform_device *pdev)
 
 #ifdef CONFIG_OF
 	udc->gadget.dev.dma_mask = &sunxi_udc_mask;
-	udc->gadget.dev.coherent_dma_mask = DMA_BIT_MASK(64);
+	udc->gadget.dev.coherent_dma_mask = DMA_BIT_MASK(32);
 #endif
 	retval = sunxi_get_udc_resource(pdev, &g_sunxi_udc_io);
 	if (retval != 0) {
@@ -3518,7 +3402,6 @@ static int sunxi_udc_probe_otg(struct platform_device *pdev)
 	}
 
 	device_create_file(&pdev->dev, &dev_attr_otg_ed_test);
-	device_create_file(&pdev->dev, &dev_attr_otg_phy_range);
 	device_create_file(&pdev->dev, &dev_attr_queue_debug);
 	device_create_file(&pdev->dev, &dev_attr_dma_debug);
 	device_create_file(&pdev->dev, &dev_attr_write_debug);
@@ -3526,10 +3409,6 @@ static int sunxi_udc_probe_otg(struct platform_device *pdev)
 	device_create_file(&pdev->dev, &dev_attr_irq_debug);
 	device_create_file(&pdev->dev, &dev_attr_msc_read_debug);
 	device_create_file(&pdev->dev, &dev_attr_msc_write_debug);
-
-#if !IS_ENABLED(CONFIG_USB_SUNXI_USB_MANAGER)
-	sunxi_usb_device_enable();
-#endif
 
 	return 0;
 
@@ -3539,6 +3418,8 @@ static int sunxi_udc_remove_otg(struct platform_device *pdev)
 {
 	struct sunxi_udc *udc = NULL;
 
+	g_udc_pdev = NULL;
+
 	udc = platform_get_drvdata(pdev);
 	if (udc->driver) {
 		DMSG_PANIC("ERR: invalid argment, udc->driver(0x%p)\n",
@@ -3547,7 +3428,6 @@ static int sunxi_udc_remove_otg(struct platform_device *pdev)
 	}
 
 	device_remove_file(&pdev->dev, &dev_attr_otg_ed_test);
-	device_remove_file(&pdev->dev, &dev_attr_otg_phy_range);
 	device_remove_file(&pdev->dev, &dev_attr_queue_debug);
 	device_remove_file(&pdev->dev, &dev_attr_dma_debug);
 	device_remove_file(&pdev->dev, &dev_attr_write_debug);
@@ -3555,12 +3435,6 @@ static int sunxi_udc_remove_otg(struct platform_device *pdev)
 	device_remove_file(&pdev->dev, &dev_attr_irq_debug);
 	device_remove_file(&pdev->dev, &dev_attr_msc_read_debug);
 	device_remove_file(&pdev->dev, &dev_attr_msc_write_debug);
-
-#if !IS_ENABLED(CONFIG_USB_SUNXI_USB_MANAGER)
-	sunxi_usb_device_disable();
-#endif
-
-	g_udc_pdev = NULL;
 
 	usb_del_gadget_udc(&udc->gadget);
 
@@ -3747,6 +3621,7 @@ static int udc_init(void)
 	}
 	ret = get_para_from_cmdline(saved_command_line, ANDROIDBOOT_MODE, g_androidboot_mode, sizeof(g_androidboot_mode));
 	if (ret <= 0) {
+		printk("get androidboot.mode fail\n");
 		Is_Charger_Mode = 0;
 	} else {
 		pr_debug("%s,%s\n",  __func__, g_androidboot_mode);

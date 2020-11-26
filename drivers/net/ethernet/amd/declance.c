@@ -1030,7 +1030,6 @@ static int dec_lance_probe(struct device *bdev, const int type)
 	int i, ret;
 	unsigned long esar_base;
 	unsigned char *esar;
-	const char *desc;
 
 	if (dec_lance_debug && version_printed++ == 0)
 		printk(version);
@@ -1216,20 +1215,19 @@ static int dec_lance_probe(struct device *bdev, const int type)
 	 */
 	switch (type) {
 	case ASIC_LANCE:
-		desc = "IOASIC onboard LANCE";
+		printk("%s: IOASIC onboard LANCE", name);
 		break;
 	case PMAD_LANCE:
-		desc = "PMAD-AA";
+		printk("%s: PMAD-AA", name);
 		break;
 	case PMAX_LANCE:
-		desc = "PMAX onboard LANCE";
+		printk("%s: PMAX onboard LANCE", name);
 		break;
 	}
 	for (i = 0; i < 6; i++)
 		dev->dev_addr[i] = esar[i * 4];
 
-	printk("%s: %s, addr = %pM, irq = %d\n",
-	       name, desc, dev->dev_addr, dev->irq);
+	printk(", addr = %pM, irq = %d\n", dev->dev_addr, dev->irq);
 
 	dev->netdev_ops = &lance_netdev_ops;
 	dev->watchdog_timeo = 5*HZ;

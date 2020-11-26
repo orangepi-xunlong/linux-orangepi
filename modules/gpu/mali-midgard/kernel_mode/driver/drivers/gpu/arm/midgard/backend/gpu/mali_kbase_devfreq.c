@@ -84,7 +84,7 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	unsigned long nominal_freq;
 	unsigned long freq = 0;
 	unsigned long voltage;
-	int err;
+	int err = 0;
 	u64 core_mask;
 
 	freq = *target_freq;
@@ -114,42 +114,9 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 
 	nominal_freq = freq;
 
-#ifdef CONFIG_REGULATOR
-	if (kbdev->regulator && kbdev->current_voltage != voltage
-			&& kbdev->current_freq < freq) {
-		err = regulator_set_voltage(kbdev->regulator, voltage, voltage);
-		if (err) {
-			dev_err(dev, "Failed to increase voltage (%d)\n", err);
-			return err;
-		}
-	}
-#endif
-
-	err = clk_set_rate(kbdev->clock, freq);
-	if (err) {
-		dev_err(dev, "Failed to set clock %lu (target %lu)\n",
-				freq, *target_freq);
-		return err;
-	}
-
-#ifdef CONFIG_REGULATOR
-	if (kbdev->regulator && kbdev->current_voltage != voltage
-			&& kbdev->current_freq > freq) {
-		err = regulator_set_voltage(kbdev->regulator, voltage, voltage);
-		if (err) {
-			dev_err(dev, "Failed to decrease voltage (%d)\n", err);
-			return err;
-		}
-	}
-#endif
-
 	if (kbdev->pm.backend.ca_current_policy->id ==
 			KBASE_PM_CA_POLICY_ID_DEVFREQ)
 		kbase_devfreq_set_core_mask(kbdev, core_mask);
-
-#ifdef CONFIG_ARCH_SUNXI
-	revise_current_level();
-#endif
 
 	*target_freq = nominal_freq;
 	kbdev->current_voltage = voltage;

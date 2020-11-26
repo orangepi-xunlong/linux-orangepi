@@ -62,7 +62,6 @@
 #define VIN_MAX_DEV			8
 #define VIN_MAX_CSI			4
 #define VIN_MAX_CCI			4
-#define VIN_MAX_TDM			0
 #define VIN_MAX_MIPI			2
 #define VIN_MAX_ISP			4
 #define VIN_MAX_SCALER			8

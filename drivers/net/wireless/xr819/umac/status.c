@@ -38,6 +38,7 @@ void mac80211_tx_status_irqsafe(struct ieee80211_hw *hw,
 	}
 	tasklet_schedule(&local->tasklet);
 }
+EXPORT_SYMBOL(mac80211_tx_status_irqsafe);
 
 static void ieee80211_handle_filtered_frame(struct ieee80211_local *local,
 					    struct sta_info *sta,
@@ -213,35 +214,6 @@ static void ieee80211_frame_acked(struct sta_info *sta, struct sk_buff *skb)
 		}
 
 		mac80211_queue_work(&local->hw, &local->recalc_smps);
-	}
-}
-
-static inline u16 IEEE_GET_BE16(const u8 *a)
-{
-	return (a[0] << 8) | a[1];
-}
-static void ieee80211_4way_frame_acked (struct sta_info *sta, struct ieee80211_hdr *hdr)
-{
-	const unsigned int machdrlen = ieee80211_hdrlen(hdr->frame_control);
-	const int LLC_TYPE_OFF = 6;
-	const int ETHERNET_TYPE_LEN = 2;
-
-	u8 *eapol_frame = (u8 *)hdr + machdrlen + LLC_TYPE_OFF + ETHERNET_TYPE_LEN;
-	struct ieee80211_eapol_key *key_data =
-		(struct ieee80211_eapol_key *) (eapol_frame + sizeof(struct ieee802_1x_hdr));
-	u16 key_info = IEEE_GET_BE16(key_data->key_info);
-
-	if (!!(key_info & IEEE80211_KEY_INFO_KEY_TYPE) == 1) {
-		if (!!(key_info & IEEE80211_KEY_INFO_ACK) == 0) {
-			if (!!(key_info & IEEE80211_KEY_INFO_SECURE) == 1) {
-				if (sta->sdata->fourway_state == SDATA_4WAY_STATE_FINISH2) {
-					sta->sdata->fourway_state = SDATA_4WAY_STATE_FINISH4;
-					wake_up(&sta->sdata->setkey_wq);
-				 }
-			} else {
-				sta->sdata->fourway_state = SDATA_4WAY_STATE_FINISH2;
-			}
-		}
 	}
 }
 
@@ -482,12 +454,6 @@ void mac80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
 		    (local->hw.flags & IEEE80211_HW_REPORTS_TX_ACK_STATUS))
 			mac80211_sta_tx_notify(sta->sdata, (void *) skb->data, acked);
 
-		if ((sta->sdata->vif.type == NL80211_IFTYPE_STATION) &&
-			sta->sdata->u.mgd.associated != NULL &&
-			(ieee80211_is_eapol_key(hdr))) {
-			ieee80211_4way_frame_acked(sta, hdr);
-		}
-
 		if (local->hw.flags & IEEE80211_HW_REPORTS_TX_ACK_STATUS) {
 			if (info->flags & IEEE80211_TX_STAT_ACK) {
 				if (sta->lost_packets)
@@ -553,29 +519,17 @@ void mac80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
 
 	if (info->flags & IEEE80211_TX_INTFL_NL80211_FRAME_TX) {
 		u64 cookie = (unsigned long)skb;
-		acked = !!(info->flags & IEEE80211_TX_STAT_ACK);
 		/*
 		printk(KERN_ERR "%s,sdata1=%p,&sdata->wdev1=%p\n",__func__,
 			IEEE80211_DEV_TO_SUB_IF(skb->dev),&(IEEE80211_DEV_TO_SUB_IF(skb->dev))->wdev);
 		*/
-		if (skb->dev) {
-			cfg80211_mgmt_tx_status(
-				&(IEEE80211_DEV_TO_SUB_IF(skb->dev))->wdev, cookie, skb->data, skb->len,
-				!!(info->flags & IEEE80211_TX_STAT_ACK), GFP_ATOMIC);
-		} else {
-			struct ieee80211_sub_if_data *p2p_sdata;
-
-			rcu_read_lock();
-
-			p2p_sdata = rcu_dereference(local->p2p_sdata);
-			if (p2p_sdata) {
-				cfg80211_mgmt_tx_status(
-					&p2p_sdata->wdev, cookie, skb->data,
-					skb->len, acked, GFP_ATOMIC);
-			}
-			rcu_read_unlock();
-		}
+		cfg80211_mgmt_tx_status(
+			&(IEEE80211_DEV_TO_SUB_IF(skb->dev))->wdev, cookie, skb->data, skb->len,
+			!!(info->flags & IEEE80211_TX_STAT_ACK), GFP_ATOMIC);
 	}
+
+	/* this was a transmitted frame, but now we want to reuse it */
+	skb_orphan(skb);
 
 	/* Need to make a copy before skb->cb gets cleared */
 	send_to_cooked = !!(info->flags & IEEE80211_TX_CTL_INJECTED) ||
@@ -635,6 +589,7 @@ void mac80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
 	rcu_read_unlock();
 	dev_kfree_skb(skb);
 }
+EXPORT_SYMBOL(mac80211_tx_status);
 
 void mac80211_report_low_ack(struct ieee80211_sta *pubsta, u32 num_packets)
 {
@@ -642,3 +597,4 @@ void mac80211_report_low_ack(struct ieee80211_sta *pubsta, u32 num_packets)
 	cfg80211_cqm_pktloss_notify(sta->sdata->dev, sta->sta.addr,
 				    num_packets, GFP_ATOMIC);
 }
+EXPORT_SYMBOL(mac80211_report_low_ack);

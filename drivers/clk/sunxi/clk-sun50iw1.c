@@ -956,5 +956,4 @@ void __init sunxi_clocks_init(struct device_node *node)
 	pll_mipi_ops.disable = clk_disable_pll_mipi;
 	sunxi_set_clocks_priv_ops();
 }
-void __init sunxi_cpu_clocks_init(struct device_node *node) {}
 #endif

@@ -1281,10 +1281,6 @@ static void ft5x_report_multitouch(void)
 		return;
 	}
 #endif
-	if (event->touch_point)
-		input_report_key(data->input_dev, BTN_TOUCH, 1);
-	else
-		input_report_key(data->input_dev, BTN_TOUCH, 0);
 
 	switch(event->touch_point) {
 	case 5:
@@ -1332,6 +1328,11 @@ static void ft5x_report_multitouch(void)
 		dprintk(DEBUG_X_Y_INFO,"report data:==touch_point default =\n");
 		break;
 	}
+
+	if(event->touch_point)
+		input_report_key(data->input_dev, BTN_TOUCH, 1);
+	else
+		input_report_key(data->input_dev, BTN_TOUCH, 0);
 
 	input_sync(data->input_dev);
 	return;

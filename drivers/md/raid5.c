@@ -4207,12 +4207,6 @@ static void analyse_stripe(struct stripe_head *sh, struct stripe_head_state *s)
 			s->failed++;
 			if (rdev && !test_bit(Faulty, &rdev->flags))
 				do_recovery = 1;
-			else if (!rdev) {
-				rdev = rcu_dereference(
-				    conf->disks[i].replacement);
-				if (rdev && !test_bit(Faulty, &rdev->flags))
-					do_recovery = 1;
-			}
 		}
 	}
 	if (test_bit(STRIPE_SYNCING, &sh->state)) {
@@ -6977,8 +6971,6 @@ static int raid5_run(struct mddev *mddev)
 		set_bit(MD_RECOVERY_RUNNING, &mddev->recovery);
 		mddev->sync_thread = md_register_thread(md_do_sync, mddev,
 							"reshape");
-		if (!mddev->sync_thread)
-			goto abort;
 	}
 
 	/* Ok, everything is just fine now */

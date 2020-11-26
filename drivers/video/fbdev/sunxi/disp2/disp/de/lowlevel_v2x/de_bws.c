@@ -90,10 +90,6 @@ int de_bws_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 	void *memory;
 
 	base = reg_base + (sel + 1) * 0x00100000 + BWS_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel)
-		base = base - 0x00100000;
-#endif
 	/* FIXME  display path offset should be defined */
 	bws_hw_base[sel][chno] = base;
 

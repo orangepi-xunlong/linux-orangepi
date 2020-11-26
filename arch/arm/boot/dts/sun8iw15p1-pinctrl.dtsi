@@ -12,7 +12,7 @@
 			device_type = "r_pio";
 			gpio-controller;
 			interrupt-controller;
-			#interrupt-cells = <3>;
+			#interrupt-cells = <2>;
 			#size-cells = <0>;
 			#gpio-cells = <6>;
 
@@ -68,7 +68,7 @@
 			clocks = <&clk_pio>;
 			gpio-controller;
 			interrupt-controller;
-			#interrupt-cells = <3>;
+			#interrupt-cells = <2>;
 			#size-cells = <0>;
 			#gpio-cells = <6>;
 
@@ -407,15 +407,6 @@
 				allwinner,pull = <1>;
 			};
 
-			sdc0_pins_c: sdc0@2 {
-				allwinner,pins = "PF0", "PF1", "PF2",
-						 "PF3", "PF4", "PF5";
-				allwinner,function = "uart0_jtag";
-				allwinner,muxsel = <3>;
-				allwinner,drive = <1>;
-				allwinner,pull = <1>;
-			};
-
 			sdc1_pins_a: sdc1@0 {
 				allwinner,pins = "PG0", "PG1", "PG2",
 						 "PG3", "PG4", "PG5";
@@ -547,6 +538,7 @@
 				allwinner,muxsel = <2>;
 				allwinner,drive = <1>;
 				allwinner,pull = <0>;
+				allwinner,data = <0>;
 			};
 			csi_mclk0_pins_b: csi_mck0@1 {
 				allwinner,pins = "PE0";
@@ -555,6 +547,7 @@
 				allwinner,muxsel = <7>;
 				allwinner,drive = <1>;
 				allwinner,pull = <0>;
+				allwinner,data = <0>;
 			};
 			csi_cci0_pins_a: csi_cci0@0 {
 				allwinner,pins = "PE1", "PE2";
@@ -563,6 +556,7 @@
 				allwinner,muxsel = <2>;
 				allwinner,drive = <1>;
 				allwinner,pull = <0>;
+				allwinner,data = <0>;
 			};
 			csi_cci0_pins_b: csi_cci0@1 {
 				allwinner,pins = "PE1", "PE2";
@@ -571,6 +565,7 @@
 				allwinner,muxsel = <7>;
 				allwinner,drive = <1>;
 				allwinner,pull = <0>;
+				allwinner,data = <0>;
 			};
 
 			scr0_pins_a: scr0@0 {

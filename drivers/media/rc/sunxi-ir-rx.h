@@ -62,8 +62,6 @@
 
 #define MAX_ADDR_NUM		(32)
 
-#define RTC_108				0x07000108
-
 #define RC_MAP_SUNXI "rc_map_sunxi"
 
 enum {
@@ -117,7 +115,6 @@ struct sunxi_ir_data {
 	u32 ir_addr_cnt;
 	u32 ir_addr[MAX_ADDR_NUM];
 	u32 ir_powerkey[MAX_ADDR_NUM];
-	int wakeup;
 };
 
 int init_sunxi_ir_map(void);

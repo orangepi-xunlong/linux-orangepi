@@ -15,7 +15,6 @@
  */
 
 #include "disp_display.h"
-#include "disp_rtwb.h"
 
 struct disp_dev_t gdisp;
 
@@ -26,7 +25,7 @@ s32 bsp_disp_init(struct disp_bsp_init_para *para)
 	memset(&gdisp, 0x00, sizeof(struct disp_dev_t));
 	memcpy(&gdisp.init_para, para, sizeof(struct disp_bsp_init_para));
 	para->shadow_protect = bsp_disp_shadow_protect;
-	disp_init_feat(&para->feat_init);
+	disp_init_feat();
 
 	num_screens = bsp_disp_feat_get_num_screens();
 	for (disp = 0; disp < num_screens; disp++) {
@@ -37,9 +36,6 @@ s32 bsp_disp_init(struct disp_bsp_init_para *para)
 
 	bsp_disp_set_print_level(DEFAULT_PRINT_LEVLE);
 	disp_init_al(para);
-#if defined (DE_VERSION_V33X)
-	disp_al_init_tcon(para);
-#endif
 	disp_init_lcd(para);
 #if defined(SUPPORT_HDMI)
 	disp_init_hdmi(para);
@@ -47,17 +43,10 @@ s32 bsp_disp_init(struct disp_bsp_init_para *para)
 #if defined(SUPPORT_TV)
 	disp_init_tv_para(para);
 #endif
-#if defined(SUPPORT_RTWB)
-	disp_init_rtwb(para);
-#endif
 
 #if defined(SUPPORT_EDP)
 	disp_init_edp(para);
 #endif /*endif SUPPORT_EDP */
-
-#if defined (DE_VERSION_V33X)
-	disp_init_irq_util(para->irq_no[DISP_MOD_DE]);
-#endif
 
 #if defined(SUPPORT_VDPO)
 	disp_init_vdpo(para);
@@ -295,29 +284,23 @@ s32 bsp_disp_device_switch(int disp, enum disp_output_type output_type,
 			DISP_CSC_TYPE_RGB : DISP_CSC_TYPE_YUV444;
 	config.bits = DISP_DATA_8BITS;
 	config.eotf = DISP_EOTF_GAMMA22;
-
-	if (config.type == DISP_OUTPUT_TYPE_HDMI) {
-		if (config.mode >= DISP_TV_MOD_720P_50HZ)
-			config.cs = DISP_BT709;
-		else
-			config.cs = DISP_BT601;
-
-		config.eotf = DISP_EOTF_GAMMA22;
-	}
-
+	if (output_type == DISP_OUTPUT_TYPE_HDMI)
+		config.cs = DISP_BT709;
+	else
+		config.cs = DISP_UNDEF;
 	config.dvi_hdmi = DISP_HDMI;
 	config.range = DISP_COLOR_RANGE_16_235;
 	config.scan = DISP_SCANINFO_NO_DATA;
 	config.aspect_ratio = 8;
 
 	ret = disp_device_attached_and_enable(disp, disp, &config);
-	if (ret != 0) {
+	if (0 != ret) {
 		num_screens = bsp_disp_feat_get_num_screens();
 		for (disp_dev = 0; disp_dev < num_screens; disp_dev++) {
 			ret = disp_device_attached_and_enable(disp,
 							      disp_dev,
 							      &config);
-			if (ret == 0)
+			if (0 == ret)
 				break;
 		}
 	}
@@ -339,25 +322,14 @@ s32 bsp_disp_device_set_config(int disp, struct disp_device_config *config)
 		config->scan = 0;
 	if (!config->aspect_ratio)
 		config->aspect_ratio = 8;
-	if ((config->type == DISP_OUTPUT_TYPE_HDMI)
-		&& (!config->cs)) {
-		if (config->mode >= DISP_TV_MOD_720P_50HZ)
-			config->cs = DISP_BT709;
-		else
-			config->cs = DISP_BT601;
-
-		if (!config->eotf)
-			config->eotf = DISP_EOTF_GAMMA22;
-	}
-
 	ret = disp_device_attached_and_enable(disp, disp, config);
-	if (ret != 0) {
+	if (0 != ret) {
 		num_screens = bsp_disp_feat_get_num_screens();
 		for (disp_dev = 0; disp_dev < num_screens; disp_dev++) {
 			ret = disp_device_attached_and_enable(disp,
 							      disp_dev,
 							      config);
-			if (ret == 0)
+			if (0 == ret)
 				break;
 		}
 	}
@@ -365,7 +337,6 @@ s32 bsp_disp_device_set_config(int disp, struct disp_device_config *config)
 	return ret;
 }
 
-#ifdef CONFIG_EINK_PANEL_UESD
 s32 bsp_disp_eink_update(struct disp_eink_manager *manager,
 			struct disp_layer_config_inner *config,
 			unsigned int layer_num,
@@ -422,7 +393,6 @@ s32 bsp_disp_eink_op_skip(struct disp_eink_manager *manager, unsigned int skip)
 
 	return ret;
 }
-#endif
 
 s32 disp_init_connections(struct disp_bsp_init_para *para)
 {
@@ -688,8 +658,6 @@ s32 bsp_disp_shadow_protect(u32 disp, bool protect)
 	return DIS_SUCCESS;
 }
 
-EXPORT_SYMBOL(bsp_disp_shadow_protect);
-
 s32 bsp_disp_vsync_event_enable(u32 disp, bool enable)
 {
 	gdisp.screen[disp].vsync_event_en = enable;
@@ -770,60 +738,37 @@ void sync_event_proc(u32 disp, bool timeout)
 	int ret;
 	unsigned long flags;
 
+	if (!timeout)
+		disp_sync_checkin(disp);
+	else
+		gdisp.screen[disp].health_info.skip_cnt++;
+
 	gdisp.screen[disp].health_info.irq_cnt++;
 
-	if (!disp_feat_is_using_rcq(disp)) {
-		if (!timeout)
-			disp_sync_checkin(disp);
-		else
-			gdisp.screen[disp].health_info.skip_cnt++;
+	spin_lock_irqsave(&gdisp.screen[disp].flag_lock, flags);
+	if ((bsp_disp_cfg_get(disp) == 0) && (!timeout)) {
+		gdisp.screen[disp].have_cfg_reg = true;
+		spin_unlock_irqrestore(&gdisp.screen[disp].flag_lock, flags);
 
-
-		spin_lock_irqsave(&gdisp.screen[disp].flag_lock, flags);
-		if ((bsp_disp_cfg_get(disp) == 0) && (!timeout)) {
-			gdisp.screen[disp].have_cfg_reg = true;
-			spin_unlock_irqrestore(&gdisp.screen[disp].flag_lock, flags);
-
-			disp_sync_all(disp, true);
-			gdisp.screen[disp].have_cfg_reg = false;
-			if (gdisp.init_para.disp_int_process)
-				gdisp.init_para.disp_int_process(disp);
-
-		} else {
-			spin_unlock_irqrestore(&gdisp.screen[disp].flag_lock, flags);
-			disp_sync_all(disp, false);
-		}
-
-		if (gdisp.screen[disp].vsync_event_en && gdisp.init_para.vsync_event) {
-			ret = gdisp.init_para.vsync_event(disp);
-			if (ret == 0)
-				gdisp.screen[disp].health_info.vsync_cnt++;
-			else
-				gdisp.screen[disp].health_info.vsync_skip_cnt++;
-
-		}
-		tasklet_schedule(&gdisp.screen[disp].tasklet);
-	} else {
-		struct disp_manager *mgr;
-
-		mgr = disp_get_layer_manager(disp);
-		if (!timeout)
-			disp_sync_checkin(disp);
-
-
+		disp_sync_all(disp, true);
+		gdisp.screen[disp].have_cfg_reg = false;
 		if (gdisp.init_para.disp_int_process)
 			gdisp.init_para.disp_int_process(disp);
 
-		if (gdisp.screen[disp].vsync_event_en && gdisp.init_para.vsync_event) {
-			ret = gdisp.init_para.vsync_event(disp);
-			if (ret == 0)
-				gdisp.screen[disp].health_info.vsync_cnt++;
-			else
-				gdisp.screen[disp].health_info.vsync_skip_cnt++;
-
-		}
-		tasklet_schedule(&gdisp.screen[disp].tasklet);
+	} else {
+		spin_unlock_irqrestore(&gdisp.screen[disp].flag_lock, flags);
+		disp_sync_all(disp, false);
 	}
+
+	if (gdisp.screen[disp].vsync_event_en && gdisp.init_para.vsync_event) {
+		ret = gdisp.init_para.vsync_event(disp);
+		if (ret == 0)
+			gdisp.screen[disp].health_info.vsync_cnt++;
+		else
+			gdisp.screen[disp].health_info.vsync_skip_cnt++;
+
+	}
+	tasklet_schedule(&gdisp.screen[disp].tasklet);
 }
 
 s32 bsp_disp_get_output_type(u32 disp)
@@ -1048,7 +993,6 @@ s32 bsp_disp_get_screen_width_from_output_type(u32 disp, u32 output_type,
 	} else if ((output_type == DISP_OUTPUT_TYPE_HDMI)
 		   || (output_type == DISP_OUTPUT_TYPE_TV)
 		   || (output_type == DISP_OUTPUT_TYPE_VGA)
-		   || (output_type == DISP_OUTPUT_TYPE_RTWB)
 		   || (output_type == DISP_OUTPUT_TYPE_VDPO)) {
 		switch (output_mode) {
 		case DISP_TV_MOD_NTSC:
@@ -1177,7 +1121,6 @@ s32 bsp_disp_get_screen_height_from_output_type(u32 disp, u32 output_type,
 	} else if ((output_type == DISP_OUTPUT_TYPE_HDMI)
 		   || (output_type == DISP_OUTPUT_TYPE_TV)
 		   || (output_type == DISP_OUTPUT_TYPE_VGA)
-		   || (output_type == DISP_OUTPUT_TYPE_RTWB)
 		   || (output_type == DISP_OUTPUT_TYPE_VDPO)) {
 		switch (output_mode) {
 		case DISP_TV_MOD_NTSC:
@@ -1454,27 +1397,6 @@ s32 bsp_disp_hdmi_cec_send_one_touch_play(void)
 	}
 
 	return ret;
-}
-
-s32 bsp_disp_hdmi_get_color_format(void)
-{
-	u32 num_screens = 0;
-	s32 ret = 0;
-	u32 disp;
-
-	num_screens = bsp_disp_feat_get_num_screens();
-	for (disp = 0; disp < num_screens; disp++) {
-		struct disp_device *hdmi;
-
-		hdmi = disp_device_find(disp, DISP_OUTPUT_TYPE_HDMI);
-		if (hdmi && hdmi->get_input_csc) {
-			ret = hdmi->get_input_csc(hdmi);
-			break;
-		}
-	}
-
-	return ret;
-
 }
 
 s32 bsp_disp_tv_set_hpd(u32 state)

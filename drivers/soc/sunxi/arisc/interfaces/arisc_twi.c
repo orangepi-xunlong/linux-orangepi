@@ -35,7 +35,7 @@ int arisc_twi_read_block_data(struct arisc_twi_block_cfg *cfg)
 		(cfg->len > TWI_TRANS_BYTE_MAX) ||
 		((cfg->msgattr !=  ARISC_MESSAGE_ATTR_HARDSYN) &&
 		(cfg->msgattr !=  ARISC_MESSAGE_ATTR_SOFTSYN))) {
-		pr_warn("twi read reg paras error\n");
+		ARISC_WRN("twi read reg paras error\n");
 		return -EINVAL;
 	}
 
@@ -90,7 +90,7 @@ int arisc_twi_write_block_data(struct arisc_twi_block_cfg *cfg)
 		(cfg->len > TWI_TRANS_BYTE_MAX) ||
 		((cfg->msgattr !=  ARISC_MESSAGE_ATTR_HARDSYN) &&
 		(cfg->msgattr !=  ARISC_MESSAGE_ATTR_SOFTSYN))) {
-		pr_warn("twi write reg paras error\n");
+		ARISC_WRN("twi write reg paras error\n");
 		return -EINVAL;
 	}
 
@@ -153,7 +153,7 @@ int twi_bits_ops_sync(struct arisc_twi_bits_cfg *cfg)
 		(cfg->delay == NULL) || (cfg->len > TWI_TRANS_BYTE_MAX) ||
 		((cfg->msgattr !=  ARISC_MESSAGE_ATTR_HARDSYN) &&
 		(cfg->msgattr !=  ARISC_MESSAGE_ATTR_SOFTSYN))) {
-		pr_warn("twi clear bits sync paras error\n");
+		ARISC_WRN("twi clear bits sync paras error\n");
 		return -EINVAL;
 	}
 

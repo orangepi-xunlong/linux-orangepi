@@ -13,13 +13,12 @@
 #include "combo_rx_reg_i.h"
 #include "combo_rx_reg.h"
 #include "../../utility/vin_io.h"
-#include "../../platform/platform_cfg.h"
 
-volatile void *cmb_rx_base_addr[VIN_MAX_MIPI];
+volatile void *cmb_rx_base_addr[MAX_MAP_NUM_PHY];
 
 int cmb_rx_set_base_addr(unsigned int sel, unsigned long addr)
 {
-	if (sel > VIN_MAX_MIPI - 1)
+	if (sel > MAX_MAP_NUM_PHY - 1)
 		return -1;
 	cmb_rx_base_addr[sel] = (volatile void *)addr;
 
@@ -28,33 +27,20 @@ int cmb_rx_set_base_addr(unsigned int sel, unsigned long addr)
 
 void cmb_rx_enable(unsigned int sel)
 {
-	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_PWDN_MASK, 1 << CMB_PHYA_PWDN);
-		vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_ENABLE_MASK, 1 << CMB_PHYA_ENABLE);
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_MODE_SEL_REG_OFF,
 		CMB_MODULE_EN_MASK, 1 << CMB_MODULE_EN);
 }
 
 void cmb_rx_disable(unsigned int sel)
 {
-	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_PWDN_MASK, 0 << CMB_PHYA_PWDN);
-		vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_ENABLE_MASK, 0 << CMB_PHYA_ENABLE);
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_MODE_SEL_REG_OFF,
 		CMB_MODULE_EN_MASK, 0 << CMB_MODULE_EN);
 }
 
 void cmb_rx_mode_sel(unsigned int sel, enum combo_rx_mode_sel mode)
 {
-#if defined CONFIG_ARCH_SUN8IW12P1
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_MODE_SEL_REG_OFF,
 		CMB_MODE_SEL_MASK, mode << CMB_MODE_SEL);
-#else
-	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CFG_REG_OFF,
-		CMB_MODE_SEL_MASK, mode << CMB_MODE_SEL);
-#endif
 }
 
 void cmb_rx_app_pixel_out(unsigned int sel, enum combo_rx_pix_num pix_num)
@@ -161,8 +147,8 @@ void cmb_rx_te_auto_disable(unsigned int sel, unsigned int en)
 
 void cmb_rx_phya_config(unsigned int sel)
 {
-	/* vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_PWDN_MASK, 1 << CMB_PHYA_PWDN); */
+	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
+		CMB_PHYA_PWDN_MASK, 1 << CMB_PHYA_PWDN);
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
 		CMB_PHYA_CKIN_MODE_SEL_MASK, 1 << CMB_PHYA_CKIN_MODE_SEL); /*mipi 0, lvds 1*/
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
@@ -170,7 +156,7 @@ void cmb_rx_phya_config(unsigned int sel)
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
 		CMB_PHYA_OUT_CLK_POL_MASK, ((sel+1)%2) << CMB_PHYA_OUT_CLK_POL);
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_IN_CLK_POL_MASK, 1 << CMB_PHYA_IN_CLK_POL);
+		CMB_PHYA_IN_CLK_POL_MASK, 0 << CMB_PHYA_IN_CLK_POL);
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
 		CMB_PHYA_IRM_MASK, 0 << CMB_PHYA_IRM);
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
@@ -180,13 +166,11 @@ void cmb_rx_phya_config(unsigned int sel)
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
 		CMB_PHYA_LP_VOL_LH_MASK, 0 << CMB_PHYA_LP_VOL_LH);
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_OFFSET_SEL_MASK, 0 << CMB_PHYA_OFFSET_SEL); /* V5:mipi 3, lvds 0; V5200:mipi 1, lvds 0 */
+		CMB_PHYA_OFFSET_SEL_MASK, 3 << CMB_PHYA_OFFSET_SEL); /*mipi 3, lvds 0*/
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
 		CMB_PHYA_RESET_SEL_MASK, 0 << CMB_PHYA_RESET_SEL);
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
 		CMB_PHYA_SB_SEL_MASK, 0 << CMB_PHYA_SB_SEL);
-	/*vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_ENABLE_MASK, 1 << CMB_PHYA_ENABLE);*/
 }
 
 void cmb_rx_phya_ck_mode(unsigned int sel, unsigned int mode)
@@ -204,18 +188,16 @@ void cmb_rx_phya_ck_pol(unsigned int sel, unsigned int pol)
 void cmb_rx_phya_offset(unsigned int sel, unsigned int offset)
 {
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_CTR_REG_OFF,
-		CMB_PHYA_OFFSET_SEL_MASK, offset << CMB_PHYA_OFFSET_SEL); /* V5:mipi 3, lvds 0; V5V200:mipi 1, lvds 0 */
+		CMB_PHYA_OFFSET_SEL_MASK, offset << CMB_PHYA_OFFSET_SEL); /*mipi 3, lvds 0*/
 }
 
-void cmb_rx_phya_signal_dly_en(unsigned int sel, unsigned int en)
+void cmb_rx_phya_singal_dly_en(unsigned int sel, unsigned int en)
 {
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_DLY_CTR0_REG_OFF,
 		CMB_PHYA_DLY_EN_MASK, en << CMB_PHYA_DLY_EN);
-	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_DLY_CTR0_REG_OFF,
-		CMB_PHYA_A_CLK_DLY_SET_MASK, 0x1 << CMB_PHYA_A_CLK_DLY_SET);
 }
 
-void cmb_rx_phya_signal_dly_ctr(unsigned int sel, struct phya_signal_dly_ctr *phya_signal_dly)
+void cmb_rx_phya_singal_dly_ctr(unsigned int sel, struct phya_signal_dly_ctr *phya_signal_dly)
 {
 	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_PHYA_DLY_CTR0_REG_OFF,
 		CMB_PHYA_A_CLK_DLY_SET_MASK, phya_signal_dly->a_clk_dly << CMB_PHYA_A_CLK_DLY_SET);
@@ -278,15 +260,6 @@ void cmb_rx_mipi_ctr(unsigned int sel, struct mipi_ctr *mipi_ctr)
 		CMB_MIPI_VC3_HIGHT_MASK, mipi_ctr->mipi_ch3_height << CMB_MIPI_VC3_HIGHT);
 }
 
-void cmb_rx_mipi_stl_time(unsigned int sel, unsigned char time_hs)
-{
-	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_MIPI_DPHY_CTR_REG_OFF,
-		CMB_DPHY_HS_DLY_OFF_MASK, 0 << CMB_DPHY_HS_DLY_OFF);
-	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_MIPI_DPHY_CTR_REG_OFF,
-		CMB_DPHY_P0_TIME_HS_ON_MASK, time_hs << CMB_DPHY_P0_TIME_HS_ON);
-	vin_reg_clr_set(cmb_rx_base_addr[sel] + CMB_MIPI_DPHY_CTR_REG_OFF,
-		CMB_DPHY_P0_TIME_DT_ON_MASK, 1 << CMB_DPHY_P0_TIME_DT_ON);
-}
 
 void cmb_rx_mipi_dphy_mapping(unsigned int sel, struct mipi_lane_map *mipi_map)
 {

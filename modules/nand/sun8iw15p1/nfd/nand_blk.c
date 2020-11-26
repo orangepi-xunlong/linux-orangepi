@@ -12,7 +12,7 @@
 #include <linux/uaccess.h>
 #include "nand_blk.h"
 #include "nand_dev.h"
-#include <linux/string.h>
+
 /*****************************************************************************/
 
 #define REMAIN_SPACE 0
@@ -27,12 +27,6 @@
 
 #define NAND_IO_RESPONSE_TEST
 static unsigned int dragonboard_test_flag;
-extern int flash_type;
-struct scatterlist *sg;
-
-struct scatterlist_ftl sg_info[128];
-
-
 struct secblc_op_t {
 	int item;
 	unsigned char *buf;
@@ -129,20 +123,6 @@ int end_time(int data, int time, int par)
 	return 0;
 }
 
-static struct scatterlist *nand_alloc_sg(int sg_len, int *err)
-{
-	struct scatterlist *sg;
-
-	sg = kmalloc(sizeof(struct scatterlist)*sg_len, GFP_KERNEL);
-	if (!sg)
-		*err = -ENOMEM;
-	else {
-		*err = 0;
-		sg_init_table(sg, sg_len);
-	}
-
-	return sg;
-}
 /*****************************************************************************
 *Name         :
 *Description  :
@@ -156,18 +136,15 @@ static int do_blktrans_request(struct nand_blk_ops *tr,
 	int ret = 0;
 	unsigned int block, nsect;
 	char *buf;
-	struct scatterlist *sglist = NULL;
-	int nsegs;
-	u32 i = 0, sg_count = 0;
-	u64 cnt;
-
 	struct _nand_dev *nand_dev;
 
 	nand_dev = (struct _nand_dev *)dev->priv;
 
-	nsegs = blk_rq_map_sg(tr->rq, req, sg);
+	block = blk_rq_pos(req) << 9 >> tr->blkshift;
+	nsect = blk_rq_cur_bytes(req) >> tr->blkshift;
 
-	cnt = blk_rq_pos(req) << 9;
+	buf = bio_data(req->bio);
+
 	if (req->cmd_type != REQ_TYPE_FS) {
 		nand_dbg_err(KERN_NOTICE "not type fs\n");
 		return -EIO;
@@ -191,73 +168,33 @@ static int do_blktrans_request(struct nand_blk_ops *tr,
 	case READ:
 		if (debug_data == 10) {
 			nand_dbg_err("read_addr: %d nsect: %d buf: %p\n", block,
-					nsect, buf);
-		}
-		for_each_sg(sg, sglist, nsegs, i) {
-			sg_info[sg_count].len = sglist->length >> tr->blkshift;
-			sg_info[sg_count].addr = cnt >> tr->blkshift;
-			sg_info[sg_count].buf = kmap(sg_page(sglist)) + sglist->offset;
-
-			sg_count++;
-			cnt += sglist->length;
+				     nsect, buf);
 		}
 
-		if (flash_type == 1) {
-			for (i = 0; i < sg_count; i++) {
-				nand_dev->read_data(nand_dev, sg_info[i].addr, sg_info[i].len, sg_info[i].buf);
-			}
-
-		} else {
-			_dev_nand_read_sg(nand_dev, &sg_info[0], sg_count);
-		}
-
-		i = 0;
-		for_each_sg(sg, sglist, nsegs, i) {
-			kunmap(sg_page(sglist));
-		}
+		nand_dev->read_data(nand_dev, block, nsect, buf);
 		rq_flush_dcache_pages(req);
 		ret = 0;
 		goto request_exit;
 
 	case WRITE:
+		rq_flush_dcache_pages(req);
+
 		if (debug_data == 10) {
 			nand_dbg_err("write_addr: %d nsect: %d buf: %p\n",
-			     block, nsect, buf);
+				     block, nsect, buf);
 		}
-		rq_flush_dcache_pages(req);
-		for_each_sg(sg, sglist, nsegs, i) {
-			sg_info[sg_count].len = sglist->length >> tr->blkshift;
-			sg_info[sg_count].addr = cnt >> tr->blkshift;
-			sg_info[sg_count].buf = kmap(sg_page(sglist)) + sglist->offset;
+		nand_dev->write_data(nand_dev, block, nsect, buf);
 
-			sg_count++;
-			cnt += sglist->length;
-		}
-
-		if (flash_type == 1) {
-
-			for (i = 0; i < sg_count; i++) {
-				nand_dev->write_data(nand_dev, sg_info[i].addr, sg_info[i].len, sg_info[i].buf);
-			}
-
-		} else {
-			_dev_nand_write_sg(nand_dev, &sg_info[0], sg_count);
-		}
-
-		i = 0;
-		for_each_sg(sg, sglist, nsegs, i) {
-			kunmap(sg_page(sglist));
-		}
 		ret = 0;
-		goto request_exit;
 
+		goto request_exit;
 	default:
 		nand_dbg_err("Unknown request %u\n", rq_data_dir(req));
 		ret = -EIO;
 		goto request_exit;
 	}
 
-	request_exit:
+request_exit:
 	return ret;
 }
 
@@ -303,11 +240,13 @@ static int mtd_blktrans_thread(void *arg)
 		tr->rq_null = 0;
 		mutex_lock(&dev->lock);
 		res = do_blktrans_request(tr, dev, req);
-		cond_resched();
 		mutex_unlock(&dev->lock);
-		if (!blk_end_request(req, res, blk_rq_bytes(req)))
-			req = NULL;
+
 		spin_lock_irq(rq->queue_lock);
+
+		if (!__blk_end_request_cur(req, res))
+			req = NULL;
+
 		background_done = 0;
 	}
 
@@ -344,7 +283,7 @@ static void mtd_blktrans_request(struct request_queue *rq)
 
 static void null_for_dragonboard(struct request_queue *rq)
 {
-	return;
+
 }
 
 /*****************************************************************************
@@ -428,8 +367,6 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 	int ret = 0;
 	unsigned char *buf_secure = NULL;
 
-	//burn_param = (struct burn_param_t *)arg;
-
 	switch (cmd) {
 	case BLKFLSBUF:
 		if (nandr->flush)
@@ -488,10 +425,7 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 		}
 		down(&nandr->nand_ops_mutex);
 		IS_IDLE = 0;
-		if (flash_type == 1)
-			ret = NAND_ReadBoot0(burn_param.length, burn_param.buffer);
-		else
-			ret = TNAND_ReadBoot0(burn_param.length, burn_param.buffer);
+		ret = NAND_ReadBoot0(burn_param.length, burn_param.buffer);
 		if (ret != 0)
 			nand_dbg_err("BLKREADBOOT0 failed\n");
 		up(&(nandr->nand_ops_mutex));
@@ -510,10 +444,7 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 
 		down(&nandr->nand_ops_mutex);
 		IS_IDLE = 0;
-		if (flash_type == 1)
-			ret = NAND_ReadBoot1(burn_param.length, burn_param.buffer);
-		else
-			ret = TNAND_ReadBoot1(burn_param.length, burn_param.buffer);
+		ret = NAND_ReadBoot1(burn_param.length, burn_param.buffer);
 		if (ret != 0)
 			nand_dbg_err("BLKREADBOOT1 failed\n");
 		up(&(nandr->nand_ops_mutex));
@@ -532,12 +463,7 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 
 		down(&nandr->nand_ops_mutex);
 		IS_IDLE = 0;
-		if (flash_type == 1) {
-			ret = NAND_BurnBoot0(burn_param.length, burn_param.buffer);
-
-		} else {
-			ret = TNAND_BurnBoot0(burn_param.length, burn_param.buffer);
-		}
+		ret = NAND_BurnBoot0(burn_param.length, burn_param.buffer);
 		if (ret != 0)
 			nand_dbg_err("BLKBURNBOOT0 failed\n");
 		up(&(nandr->nand_ops_mutex));
@@ -555,10 +481,7 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 		}
 		down(&nandr->nand_ops_mutex);
 		IS_IDLE = 0;
-		if (flash_type == 1)
-			ret = NAND_BurnBoot1(burn_param.length, burn_param.buffer);
-		else
-			ret = TNAND_BurnBoot1(burn_param.length, burn_param.buffer);
+		ret = NAND_BurnBoot1(burn_param.length, burn_param.buffer);
 		if (ret != 0)
 			nand_dbg_err("BLKBURNBOOT1 failed\n");
 		up(&(nandr->nand_ops_mutex));
@@ -577,10 +500,9 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 			nand_dbg_err("buf_secure malloc fail!\n");
 			return -1;
 		}
-		if (flash_type == 1)
-			ret = nand_secure_data_read(sec_op->item, buf_secure, sec_op->len);
-		else
-			ret = tnand_secure_data_read(sec_op->item, buf_secure, sec_op->len);
+		ret =
+		    nand_secure_storage_read(sec_op->item, buf_secure,
+					     sec_op->len);
 		if (copy_to_user(sec_op->buf, buf_secure, sec_op->len))
 			ret = -EFAULT;
 		kfree(buf_secure);
@@ -602,11 +524,9 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 		if (copy_from_user
 		    (buf_secure, (const void *)sec_op->buf, sec_op->len))
 			ret = -EFAULT;
-		if (flash_type == 1)
-			ret = nand_secure_data_write(sec_op->item, buf_secure, sec_op->len);
-		else
-			ret = tnand_secure_data_write(sec_op->item, buf_secure, sec_op->len);
-
+		ret =
+		    nand_secure_storage_write(sec_op->item, buf_secure,
+					      sec_op->len);
 		kfree(buf_secure);
 		up(&(nandr->nand_ops_mutex));
 		IS_IDLE = 1;
@@ -617,10 +537,7 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 		nand_dbg_err("start secure get item...\n");
 		down(&nandr->nand_ops_mutex);
 		IS_IDLE = 0;
-		if (flash_type == 1)
-			ret = get_nand_secure_storage_max_item();
-		else
-			ret = tget_nand_secure_storage_max_item();
+		ret = get_nand_secure_storage_max_item();
 		up(&(nandr->nand_ops_mutex));
 		IS_IDLE = 1;
 		return ret;
@@ -630,10 +547,7 @@ static int nand_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
 		nand_dbg_err("start dragonborad test...\n");
 		down(&(nandr->nand_ops_mutex));
 		IS_IDLE = 0;
-		if (flash_type == 1)
-			ret = NAND_DragonboardTest();
-		else
-			ret = TNAND_DragonboardTest();
+		ret = NAND_DragonboardTest();
 		up(&(nandr->nand_ops_mutex));
 		IS_IDLE = 1;
 		return ret;
@@ -919,7 +833,7 @@ static int nand_getgeo(struct nand_blk_dev *dev, struct hd_geometry *geo)
 struct nand_blk_ops mytr = {
 	.name = "nand",
 	.major = 93,
-	.minorbits = 7,
+	.minorbits = 4,
 	.blksize = 512,
 	.blkshift = 9,
 	.open = nand_blk_open,
@@ -1024,7 +938,7 @@ added:
 
 	gd->private_data = dev;
 	dev->disk = gd;
-	/*tr->rq->bypass_depth++;*/
+	tr->rq->bypass_depth++;
 	gd->queue = tr->rq;
 
 	dev->disable_access = 0;
@@ -1121,12 +1035,6 @@ int nand_blk_register(struct nand_blk_ops *tr)
 	init_waitqueue_head(&tr->thread_wq);
 	sema_init(&tr->nand_ops_mutex, 1);
 
-    sg = nand_alloc_sg(128, &ret);
-	if (ret) {
-		nand_dbg_err("malloc sg fail\n");
-		return -1;
-	}
-
 	tr->rq = blk_init_queue(mtd_blktrans_request, &tr->queue_lock);
 	if (!tr->rq) {
 		unregister_blkdev(tr->major, tr->name);
@@ -1142,7 +1050,7 @@ int nand_blk_register(struct nand_blk_ops *tr)
 #endif
 	tr->rq->queuedata = tr;
 	blk_queue_logical_block_size(tr->rq, tr->blksize);
-	blk_queue_max_hw_sectors(tr->rq, 256);
+	blk_queue_max_hw_sectors(tr->rq, 128);
 
 	tr->thread = kthread_run(mtd_blktrans_thread, tr, "%s", tr->name);
 	if (IS_ERR(tr->thread)) {
@@ -1159,18 +1067,14 @@ int nand_blk_register(struct nand_blk_ops *tr)
 	INIT_LIST_HEAD(&tr->devs);
 	tr->nftl_blk_head.nftl_blk_next = NULL;
 	tr->nand_dev_head.nand_dev_next = NULL;
-	if (flash_type == 1) {
-		phy_partition = get_head_phy_partition_from_nand_info(p_nand_info);
-		while (phy_partition != NULL) {
-			tr->add_dev(tr, phy_partition);
-			phy_partition = get_next_phy_partition(phy_partition);
-		}
-		/*tr->rq->bypass_depth--;*/
 
-	} else {
+	phy_partition = get_head_phy_partition_from_nand_info(p_nand_info);
+
+	while (phy_partition != NULL) {
 		tr->add_dev(tr, phy_partition);
-		/*tr->rq->bypass_depth--;*/
+		phy_partition = get_next_phy_partition(phy_partition);
 	}
+	tr->rq->bypass_depth--;
 	up(&nand_mutex);
 
 	return 0;
@@ -1198,8 +1102,6 @@ void nand_blk_unregister(struct nand_blk_ops *tr)
 	unregister_blkdev(tr->major, tr->name);
 	blk_cleanup_queue(tr->rq);
 	up(&nand_mutex);
-
-	kfree(sg);
 
 	if (!list_empty(&tr->devs))
 		BUG();

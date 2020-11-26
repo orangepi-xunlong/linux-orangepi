@@ -146,9 +146,6 @@ static s32 disp_smbl_sync(struct disp_smbl *smbl)
 		return -1;
 	}
 
-	if (disp_feat_is_using_rcq(smbl->disp))
-		return 0;
-
 	disp_smbl_update_regs(smbl);
 
 	return 0;
@@ -252,16 +249,12 @@ static s32 disp_smbl_disable(struct disp_smbl *smbl)
 s32 disp_smbl_shadow_protect(struct disp_smbl *smbl, bool protect)
 {
 	struct disp_smbl_private_data *smblp = disp_smbl_get_priv(smbl);
-	struct disp_manager *mgr;
 
 	if ((smbl == NULL) || (smblp == NULL)) {
 		DE_INF("NULL hdl!\n");
 		return -1;
 	}
 
-	mgr = smbl->manager;
-	if (mgr && mgr->reg_protect)
-		return mgr->reg_protect(mgr, protect);
 	if (smblp->shadow_protect)
 		return smblp->shadow_protect(smbl->disp, protect);
 
@@ -496,3 +489,4 @@ s32 disp_exit_smbl(void)
 
 	return 0;
 }
+

@@ -70,6 +70,7 @@ static s32 disp_tv_event_proc(void *parg)
 	return DISP_IRQ_RETURN;
 }
 
+#if defined(CONFIG_ARCH_SUN8IW6)
 static s32 tv_clk_init(struct disp_device *ptv)
 {
 	struct disp_device_private_data *ptvp = disp_tv_get_priv(ptv);
@@ -83,8 +84,6 @@ static s32 tv_clk_init(struct disp_device *ptv)
 
 	return 0;
 }
-
-#if defined(CONFIG_ARCH_SUN8IW6)
 
 static s32 tv_clk_exit(struct disp_device *ptv)
 {
@@ -120,8 +119,6 @@ static s32 tv_clk_enable(struct disp_device *ptv)
 		DE_WRN("tv init null hdl!\n");
 		return DIS_FAIL;
 	}
-	if (ptvp->clk_parent && ptvp->clk)
-		clk_set_parent(ptvp->clk, ptvp->clk_parent);
 
 	return clk_prepare_enable(ptvp->clk);
 
@@ -483,7 +480,9 @@ static s32 disp_tv_init(struct disp_device *ptv)
 		DE_WRN("tv init null hdl!\n");
 		return DIS_FAIL;
 	}
+#if defined(CONFIG_ARCH_SUN8IW6)
 	tv_clk_init(ptv);
+#endif
 	return 0;
 }
 

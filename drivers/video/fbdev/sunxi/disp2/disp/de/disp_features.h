@@ -12,13 +12,11 @@
 #define _DISP_FEATURES_H_
 
 /* #include "include.h" */
-#if defined(DE_VERSION_V33X) || defined(CONFIG_ARCH_SUN50IW9)
-#include "./lowlevel_v33x/de330/de_feat.h"
-#include "./lowlevel_v33x/tcon_feat.h"
-#elif defined(CONFIG_ARCH_SUN8IW6)
+
+#if defined(CONFIG_ARCH_SUN8IW6)
 #include "lowlevel_v2x/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN8IW7)
-#include "./lowlevel_sun8iw7/de_feat.h"
+#include "lowlevel_v2x/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN8IW8)
 #include "lowlevel_sun8iw8/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN8IW9)
@@ -37,8 +35,6 @@
 #include "./lowlevel_v2x/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN8IW17)
 #include "./lowlevel_v2x/de_feat.h"
-#elif defined(CONFIG_ARCH_SUN50IW10)
-#include "./lowlevel_v2x/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN50IW6)
 #include "./lowlevel_v3x/de_feat.h"
 #else
@@ -47,7 +43,6 @@
 
 #define DISP_DEVICE_NUM DEVICE_NUM
 #define DISP_SCREEN_NUM DE_NUM
-#define DISP_WB_NUM DE_NUM
 
 struct disp_features {
 	const int num_screens;
@@ -55,10 +50,6 @@ struct disp_features {
 	const int *num_layers;
 	const int *is_support_capture;
 	const int *supported_output_types;
-};
-
-struct disp_feat_init {
-	unsigned int chn_cfg_mode;
 };
 
 int bsp_disp_feat_get_num_screens(void);
@@ -72,9 +63,7 @@ int bsp_disp_feat_is_support_capture(unsigned int disp);
 int bsp_disp_feat_is_support_smbl(unsigned int disp);
 int bsp_disp_feat_is_support_enhance(unsigned int disp);
 unsigned int bsp_disp_feat_get_num_vdpo(void);
-int disp_init_feat(struct disp_feat_init *feat_init);
+int disp_init_feat(void);
 int disp_exit_feat(void);
-int disp_feat_is_using_rcq(unsigned int disp);
-int disp_feat_is_using_wb_rcq(unsigned int wb);
 
 #endif

@@ -8,12 +8,14 @@
  * warranty of any kind, whether express or implied.
  */
 #include "hdmi_core.h"
-#include "core_hdcp.h"
 #include "api/api.h"
-
+#if defined(__LINUX_PLAT__)
 #include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
 #include <video/sunxi_metadata.h>
+#endif
+
+static u32 hdcp_irq;
 
 static uintptr_t hdmi_reg_base;
 static struct hdmi_tx_core *p_core;
@@ -43,11 +45,12 @@ static struct disp_hdmi_mode hdmi_mode_tbl[] = {
 	{DISP_TV_MOD_4096_2160P_25HZ,	  HDMI_VIC_4096x2160P25, },
 	{DISP_TV_MOD_4096_2160P_30HZ,	  HDMI_VIC_4096x2160P30, },
 
+#if defined(__LINUX_PLAT__)
 	{DISP_TV_MOD_3840_2160P_50HZ,     HDMI_VIC_3840x2160P50,},
 	{DISP_TV_MOD_4096_2160P_50HZ,     HDMI_VIC_4096x2160P50,},
+#endif
 	{DISP_TV_MOD_3840_2160P_60HZ,     HDMI_VIC_3840x2160P60, },
 	{DISP_TV_MOD_4096_2160P_60HZ,     HDMI_VIC_4096x2160P60, },
-
 	{DISP_TV_MOD_2560_1440P_60HZ,     HDMI_VIC_2560x1440P60, },
 	{DISP_TV_MOD_1440_2560P_70HZ,     HDMI_VIC_1440x2560P70, },
 	{DISP_TV_MOD_1080_1920P_60HZ,     HDMI_VIC_1080x1920P60, },
@@ -109,36 +112,47 @@ struct hdmi_tx_core *get_platform(void)
 
 void hdmitx_write(uintptr_t addr, u32 data)
 {
-	if (hdmi_clk_enable_mask == 0) {
-		VIDEO_INF("ERROR: hdmi register(0x%lx) write data(0x%x) error\n",
-			addr >> 2, data);
-		VIDEO_INF("reason: hdmi clk is NOT enable\n");
+	if (hdmi_clk_enable_mask == 0)
 		return;
-	}
-
 	asm volatile("dsb st");
 	*((volatile u8 *)(hdmi_core_get_base_addr() + (addr >> 2))) = data;
 }
 
 u32 hdmitx_read(uintptr_t addr)
 {
-	if (hdmi_clk_enable_mask == 0) {
-		VIDEO_INF("ERROR: hdmi register(0x%lx) read error\n", addr >> 2);
-		VIDEO_INF("reason: hdmi clk is NOT enable\n");
+	if (hdmi_clk_enable_mask == 0)
 		return 0;
-	}
 
 	return *((volatile u8 *)(hdmi_core_get_base_addr() + (addr >> 2)));
 }
+#if defined(__LINUX_PLAT__)
 
+/************************HDCP*******************************/
+int get_hdcp_type_core(struct hdmi_tx_core *core)
+{
+	if ((!core->mode.pHdcp.use_hdcp) ||
+		(!core->mode.pHdcp.hdcp_on))
+		return -1;
+
+	return  core->dev_func.get_hdcp_type();
+}
+
+/* return 0: hdcp encrypting status is good
+* return -1: hdcp encrypt failed
+*/
+int get_hdcp_status_core(void)
+{
+	struct hdmi_tx_core *core = get_platform();
+
+	return core->dev_func.get_hdcp_status();
+}
+#endif
+
+/************************HDCP*******************************/
 
 void resistor_calibration_core(struct hdmi_tx_core *core, u32 reg, u32 data)
 {
-	if (!core || !core->dev_func.resistor_calibration) {
-		pr_err("HDMI ERROR: %s, null handle\n", __func__);
-		return;
-	}
-	hdmitx_sleep(1000);
+	 hdmitx_sleep(1000);
 	core->dev_func.resistor_calibration(reg, data);
 }
 
@@ -165,6 +179,33 @@ static  int hdmitx_set_phy(struct hdmi_tx_core *core, int phy)
 	core->hdmi_tx_phy = phy;
 	return 0;
 }
+#if defined(__LINUX_PLAT__)
+
+void core_init_hdcp(struct hdmi_mode *cfg, hdcpParams_t *hdcp)
+{
+	hdcpParams_t *pHdcp = &(cfg->pHdcp);
+
+	pHdcp->hdcp_on = 0;
+	pHdcp->mEnable11Feature = -1;
+	pHdcp->mRiCheck = -1;
+	pHdcp->mI2cFastMode = -1;
+	pHdcp->mEnhancedLinkVerification = -1;
+	pHdcp->maxDevices = 0;
+	pHdcp->mKsvListBuffer = NULL;
+	pHdcp->mAksv = NULL;
+	pHdcp->mKeys = NULL;
+	pHdcp->mSwEncKey = NULL;
+
+	pHdcp->use_hdcp = hdcp->use_hdcp;
+	pHdcp->use_hdcp22 = hdcp->use_hdcp22;
+	pHdcp->esm_hpi_base = hdcp->esm_hpi_base;
+	pHdcp->esm_firm_phy_addr = hdcp->esm_firm_phy_addr;
+	pHdcp->esm_firm_vir_addr = hdcp->esm_firm_vir_addr;
+	pHdcp->esm_firm_size = hdcp->esm_firm_size;
+	pHdcp->esm_data_phy_addr = hdcp->esm_data_phy_addr;
+	pHdcp->esm_data_vir_addr = hdcp->esm_data_vir_addr;
+	pHdcp->esm_data_size = hdcp->esm_data_size;
+}
 
 /*static void core_init_video(struct hdmi_mode *cfg)
 {
@@ -189,7 +230,7 @@ static  int hdmitx_set_phy(struct hdmi_tx_core *core, int phy)
 	video->mDtd.mVBorder = 0xFFFF;
 	video->mDtd.mVSyncPolarity = 0xFF;
 }*/
-
+#endif
 void core_init_audio(struct hdmi_mode *cfg)
 {
 	audioParams_t *audio = &(cfg->pAudio);
@@ -221,10 +262,10 @@ static int _api_init(struct hdmi_tx_core *core)
 }
 
 int hdmi_tx_core_init(struct hdmi_tx_core *core,
-					int phy,
-					videoParams_t *Video,
-					audioParams_t *audio,
-					hdcpParams_t  *hdcp)
+							int phy,
+							videoParams_t *Video,
+							audioParams_t *audio,
+							hdcpParams_t  *hdcp)
 {
 
 	core->hdmi_tx_phy = phy;
@@ -232,18 +273,38 @@ int hdmi_tx_core_init(struct hdmi_tx_core *core,
 	/* Set global variable */
 	set_platform(core);
 
+	/* Data allocation */
+	core->mode.edid = kzalloc(sizeof(struct edid), GFP_KERNEL);
+	if (!core->mode.edid) {
+		pr_info("Could not allocated hdmi_tx_core\n");
+		return -1;
+	}
+	memset(core->mode.edid, 0, sizeof(struct edid));
+
+	core->mode.edid_ext = kzalloc(128, GFP_KERNEL);
+	if (!core->mode.edid_ext) {
+		kfree(core->mode.edid);
+		pr_info("Could not allocated edid_ext\n");
+		return -1;
+	}
+	memset(core->mode.edid_ext, 0, 128);
+
 	core->mode.sink_cap = kzalloc(sizeof(sink_edid_t), GFP_KERNEL);
 	if (!core->mode.sink_cap) {
+		kfree(core->mode.edid);
+		kfree(core->mode.edid_ext);
 		pr_info("Could not allocated sink\n");
 		return -1;
 	}
 	memset(core->mode.sink_cap, 0, sizeof(sink_edid_t));
 
 	/* set device access functions */
+	strcpy(core->dev_access.name, "HDMI TX Device Access");
 	core->dev_access.read = hdmitx_read;
 	core->dev_access.write = hdmitx_write;
 
 	/* set system abstraction functions */
+	strcpy(core->sys_functions.name, "HDMI TX System Functions");
 	core->sys_functions.sleep = hdmitx_sleep;
 
 	if (hdmitx_set_phy(core, phy)) {
@@ -251,9 +312,7 @@ int hdmi_tx_core_init(struct hdmi_tx_core *core,
 		return -1;
 	}
 	core_init_audio(&core->mode);
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
 	core_init_hdcp(&core->mode, hdcp);
-#endif
 	_api_init(core);
 	return 0;
 }
@@ -265,6 +324,28 @@ void hdmi_core_exit(struct hdmi_tx_core *core)
 	kfree(core->mode.sink_cap);
 	kfree(core);
 	hdmitx_api_exit();
+}
+
+/********************************************************/
+/********************HDCP HANDLE***************************/
+/********************************************************/
+void hdcp_handler_core(void)
+{
+	struct hdmi_tx_core *p_core = get_platform();
+	int temp = 0;
+	int hdcp_type = 0;
+
+	LOG_TRACE();
+	hdcp_type = get_hdcp_type_core(p_core);
+	if (hdcp_type == 0)
+		p_core->dev_func.hdcp_event_handler(&temp, hdcp_irq);
+	else
+		pr_info("Process hdcp2.2 event\n");
+}
+
+u8 get_hdcp22_status_core(void)
+{
+	return 0;
 }
 
 void hdmi_configure_core(struct hdmi_tx_core *core)
@@ -429,14 +510,6 @@ void video_apply(struct hdmi_tx_core *core)
 			&core->mode.pHdcp, core->hdmi_tx_phy)) {
 		pr_info("Error: video apply failed\n");
 	}
-
-	print_audioinfo(&(p_core->mode.pAudio));
-	if (!p_core->dev_func.audio_config(&p_core->mode.pAudio,
-						&p_core->mode.pVideo)) {
-		pr_err("Error:Audio Configure failed\n");
-		return;
-	}
-	pr_info("HDMI Audio Enable Successfully\n");
 }
 
 static u32 hdmi_check_updated(struct hdmi_tx_core *core,
@@ -475,12 +548,12 @@ s32 set_static_config(struct disp_device_config *config)
 	LOG_TRACE();
 
 	hdmi_reconfig_format_by_blacklist(config);
+#if defined(__LINUX_PLAT__)
 
-	pr_info("[HDMI receive params]: tv mode: 0x%x format:0x%x data bits:0x%x eotf:0x%x cs:0x%x "
-				"dvi_hdmi:%x range:%x scan:%x aspect_ratio:%x\n",
+	pr_info("[HDMI receive params]: tv mode: 0x%x format:0x%x data bits:0x%x eotf:0x%x cs:0x%x dvi_hdmi:%x range:%x scan:%x aspect_ratio:%x\n",
 				config->mode, config->format, config->bits, config->eotf, config->cs,
 				config->dvi_hdmi, config->range, config->scan, config->aspect_ratio);
-
+#endif
 	memset(pVideo, 0, sizeof(videoParams_t));
 	pVideo->update = hdmi_check_updated(core, config);
 	/*set vic mode and dtd*/
@@ -489,12 +562,6 @@ s32 set_static_config(struct disp_device_config *config)
 	/*set encoding mode*/
 	pVideo->mEncodingIn = config->format;
 	pVideo->mEncodingOut = config->format;
-#ifdef USE_CSC
-	if (config->format == (u8)YCC422) {
-		pVideo->mEncodingIn = YCC444;
-		pVideo->mEncodingOut = YCC422;
-	}
-#endif
 
 	/*set data bits*/
 	if ((config->bits >= 0) && (config->bits < 3))
@@ -571,6 +638,7 @@ s32 set_static_config(struct disp_device_config *config)
 		break;
 	}
 
+#if defined(__LINUX_PLAT__)
 	/*set output mode: hdmi or avi*/
 	switch (config->dvi_hdmi) {
 	case DISP_DVI_HDMI_UNDEFINED:
@@ -612,7 +680,9 @@ s32 set_static_config(struct disp_device_config *config)
 		pVideo->mActiveFormatAspectRatio = 8;
 	else
 		pVideo->mActiveFormatAspectRatio = config->aspect_ratio;
-
+#else
+	pVideo->mHdmi = HDMI;
+#endif
 	memcpy(&core->config, config, sizeof(struct disp_device_config));
 	return 0;
 }
@@ -683,6 +753,8 @@ s32 get_static_config(struct disp_device_config *config)
 	return 0;
 }
 
+
+#if defined(__LINUX_PLAT__)
 s32 set_dynamic_config(struct disp_device_dynamic_config *config)
 {
 	void *hdr_buff_addr;
@@ -790,7 +862,7 @@ s32 get_dynamic_config(struct disp_device_dynamic_config *config)
 	LOG_TRACE();
 	return 0;
 }
-
+#endif
 s32 hdmi_set_display_mode(u32 mode)
 {
 	u32 hdmi_mode;
@@ -1117,6 +1189,32 @@ s32 hdmi_disable_core(void)
 	return 0;
 }
 
+
+/***********************************************************/
+/*************************HDCP******************************/
+/**********************************************************/
+void hdcp_enable_core(struct hdmi_tx_core *core, u8 enable)
+{
+	if (enable) {
+		if (core->mode.pHdcp.hdcp_on) {
+			pr_info("hdcp has been on\n");
+			return;
+		}
+		core->mode.pHdcp.hdcp_on = 1;
+		if (get_drv_hpd_state())
+			core->dev_func.hdcp_configure(&core->mode.pHdcp,
+					&core->mode.pVideo);
+	} else {
+		if (!core->mode.pHdcp.hdcp_on) {
+			pr_info("hdcp has been close\n");
+			return;
+		}
+
+		core->mode.pHdcp.hdcp_on = 0;
+		core->dev_func.hdcp_disconfigure();
+	}
+}
+
 /***********************************************************/
 /*************************Audio******************************/
 /**********************************************************/
@@ -1203,14 +1301,12 @@ u32 hdmi_core_get_tmds_mode(void)
 	return core->dev_func.get_tmds_mode();
 }
 
-#ifndef SUPPORT_ONLY_HDMI14
 u32 hdmi_core_get_scramble_state(void)
 {
 	struct hdmi_tx_core *core = get_platform();
 
 	return core->dev_func.get_scramble_state();
 }
-#endif
 
 u32 hdmi_core_get_avmute_state(void)
 {
@@ -1319,4 +1415,32 @@ void hdmi_core_dvimode_enable(u8 enable)
 	struct hdmi_tx_core *core = get_platform();
 
 	core->dev_func.dvimode_enable(enable);
+}
+
+ssize_t hdcp_dump_core(char *buf)
+{
+	ssize_t n = 0;
+	struct hdmi_tx_core *core = get_platform();
+	hdcpParams_t *hdcp = &core->mode.pHdcp;
+	videoParams_t *video = &core->mode.pVideo;
+
+	LOG_TRACE();
+	sprintf(buf + n, "Core Level Part:\n");
+	n += sprintf(buf + n, "%s\n",
+		hdcp->use_hdcp ? "Tx use hdcp 1.4" : "Tx do NOT use hdcp");
+	n += sprintf(buf + n, "%s\n",
+		hdcp->use_hdcp22 ? "Tx use hdcp 2.2" : "Tx do NOT use hdcp 2.2");
+	n += sprintf(buf + n, "%s\n",
+		hdcp->hdcp_on ? "Enable HDCP" : "Disable HDCP");
+	if (hdcp->hdcp_on)
+		n += sprintf(buf + n, "HDMI MODE: %s\n",
+			video->mHdmi == DVI ? "DVI" : "HDMI");
+	if (hdcp->use_hdcp22) {
+		n += sprintf(buf + n, "esm firmware addr:0x%llx  size:0x%x\n",
+					hdcp->esm_firm_phy_addr, hdcp->esm_firm_size);
+		n += sprintf(buf + n, "esm data addr:0x%llx  size:0x%x\n",
+					hdcp->esm_firm_phy_addr, hdcp->esm_data_size);
+	}
+
+	return n;
 }

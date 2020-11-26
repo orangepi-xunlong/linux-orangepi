@@ -79,3 +79,4 @@ $(obj)/lkdtm_rodata_objcopy.o: $(obj)/lkdtm_rodata.o FORCE
 obj-$(CONFIG_SUNXI_RFKILL)      += sunxi-rf/
 obj-$(CONFIG_SUNXI_ADDR_MGT)    += sunxi-addr-mgt/
 obj-$(CONFIG_SUNXI_BOOTEVENT)   += sunxi-bootevent/
+obj-m				+= power_key.o

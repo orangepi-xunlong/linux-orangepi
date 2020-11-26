@@ -778,15 +778,8 @@ void xprt_connect(struct rpc_task *task)
 			return;
 		if (xprt_test_and_set_connecting(xprt))
 			return;
-		/* Race breaker */
-		if (!xprt_connected(xprt)) {
-			xprt->stat.connect_start = jiffies;
-			xprt->ops->connect(xprt, task);
-		} else {
-			xprt_clear_connecting(xprt);
-			task->tk_status = 0;
-			rpc_wake_up_queued_task(&xprt->pending, task);
-		}
+		xprt->stat.connect_start = jiffies;
+		xprt->ops->connect(xprt, task);
 	}
 	xprt_release_write(xprt, task);
 }

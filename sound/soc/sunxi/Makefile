@@ -20,27 +20,18 @@ obj-$(CONFIG_SND_SUNXI_SOC_INTER_I2S) += snd-soc-sunxi-inter-i2s.o
 # SUNXI Codec Embedded Support
 obj-$(CONFIG_SND_SUN50IW1_CODEC) += sun50iw1-codec.o
 obj-$(CONFIG_SND_SUN50IW3_CODEC) += sun50iw3-codec.o
-obj-$(CONFIG_SND_SUN50IW8_CODEC) += sun50iw8-codec.o
-obj-$(CONFIG_SND_SUN50IW9_CODEC) += sun50iw9-codec.o
-obj-$(CONFIG_SND_SUN50IW10_CODEC) += sun50iw10-codec.o
-
-obj-$(CONFIG_SND_SUN8IW7_CODEC)  += sun8iw7-codec.o
 obj-$(CONFIG_SND_SUN8IW11_CODEC) += sun8iw11-codec.o
 obj-$(CONFIG_SND_SUN8IW15_CODEC) += sun8iw15-codec.o
 obj-$(CONFIG_SND_SUN8IW17_CODEC) += sun8iw17-codec.o
+obj-$(CONFIG_SND_SUN50IW8_CODEC) += sun50iw8-codec.o
 
 # SUNXI Machine Support
 obj-$(CONFIG_SND_SUNXI_SOC_SUN50IW1_CODEC) += sun50iw1-sndcodec.o
 obj-$(CONFIG_SND_SUNXI_SOC_SUN50IW3_CODEC) += sun50iw3-sndcodec.o
-obj-$(CONFIG_SND_SUNXI_SOC_SUN50IW8_CODEC) += sun50iw8-sndcodec.o
-obj-$(CONFIG_SND_SUNXI_SOC_SUN50IW9_CODEC) += sun50iw9-sndcodec.o
-obj-$(CONFIG_SND_SUNXI_SOC_SUN50IW10_CODEC) += sun50iw10-sndcodec.o
-
-obj-$(CONFIG_SND_SUNXI_SOC_SUN8IW7_CODEC)  += sun8iw7-sndcodec.o
 obj-$(CONFIG_SND_SUNXI_SOC_SUN8IW11_CODEC) += sun8iw11-sndcodec.o
 obj-$(CONFIG_SND_SUNXI_SOC_SUN8IW15_CODEC) += sun8iw15-sndcodec.o
 obj-$(CONFIG_SND_SUNXI_SOC_SUN8IW17_CODEC) += sun8iw17-sndcodec.o
-
+obj-$(CONFIG_SND_SUNXI_SOC_SUN50IW8_CODEC) += sun50iw8-sndcodec.o
 obj-$(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO) += sunxi-sndhdmi.o
 obj-$(CONFIG_SND_SUNXI_SOC_SUNXI_DAUDIO) += sunxi-snddaudio.o
 obj-$(CONFIG_SND_SUNXI_SOC_SUNXI_SPDIF) += sunxi-sndspdif.o

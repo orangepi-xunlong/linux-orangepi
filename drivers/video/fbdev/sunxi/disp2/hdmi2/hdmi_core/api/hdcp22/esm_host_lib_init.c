@@ -324,6 +324,8 @@ void esm_image_read_base_config(uint8_t *ptr, esm_hdmi_hdcp_controls *i_hdcp_c)
 
 	hdcp_c->c_int.cee_enable_ctls = (uint8_t)ELP_BYTE_GET(pc, sizeof(hdcp_c->c_int.cee_enable_ctls));
 	pc += sizeof(hdcp_c->c_int.cee_enable_ctls);
+
+	ptr = pc;
 }
 
 ELP_STATUS esm_image_read_tx(uint8_t *config_table, void *app_c, uint32_t *offset)
@@ -405,7 +407,7 @@ static ESM_STATUS esm_init_mem(esm_instance_t *esm, unsigned int image,
 {
 	uint32_t data = 0;
 	u32 addr = 0;
-	ESM_STATUS err = -1;
+	ESM_STATUS err;
 
 	LOG_TRACE();
 	if (esm == 0)
@@ -522,7 +524,7 @@ static ESM_STATUS esm_init_mem(esm_instance_t *esm, unsigned int image,
 /* Retrieves the configuration from the data memory. */
 ESM_STATUS esm_get_configuration(esm_instance_t *esm, esm_config_t *returned_config)
 {
-	ESM_STATUS err = -1;
+	ESM_STATUS err;
 	uint32_t offset = 0;
 	uint8_t config[ESM_CONFIG_MAX_SIZE];
 	uint32_t fw_version = 0;

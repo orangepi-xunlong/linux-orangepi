@@ -680,7 +680,6 @@ int xradio_load_firmware(struct xradio_common *hw_priv)
 	ret = xradio_reg_bit_operate(hw_priv, HIF_CONTROL_REG_ID, HIF_CTRL_WUP_BIT, 0);
 	if (ret < 0) {
 		xradio_dbg(XRADIO_DBG_ERROR, "%s: device wake up failed.\n", __func__);
-		hw_priv->hw_cant_wakeup = true;
 		goto out;
 	}
 
@@ -700,7 +699,6 @@ int xradio_load_firmware(struct xradio_common *hw_priv)
 	if ((val16 & HIF_CTRL_RDY_BIT) == 0) {
 		xradio_dbg(XRADIO_DBG_ERROR, "%s: Wait for wakeup:"
 			   "device is not responding.\n", __func__);
-		hw_priv->hw_cant_wakeup = true;
 #ifdef BOOT_NOT_READY_FIX
 		hw_priv->boot_not_ready_cnt++;
 		hw_priv->boot_not_ready = 1;
@@ -718,7 +716,6 @@ int xradio_load_firmware(struct xradio_common *hw_priv)
 		goto out;
 	} else {
 		xradio_dbg(XRADIO_DBG_NIY, "WLAN device is ready.\n");
-		hw_priv->hw_cant_wakeup = false;
 	}
 
 	/* Checking for access mode and download firmware. */

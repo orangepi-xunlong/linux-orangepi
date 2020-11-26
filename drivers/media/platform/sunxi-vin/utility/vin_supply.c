@@ -20,10 +20,7 @@
 #include "../platform/platform_cfg.h"
 #include "../vin-csi/sunxi_csi.h"
 #include "../vin-cci/cci_helper.h"
-#include "../modules/sensor/sensor_helper.h"
 #include "../vin.h"
-
-extern struct sensor_helper_dev *glb_sensor_helper[VIN_MAX_CSI];
 
 /*
  * called by subdev in power on/off sequency
@@ -52,25 +49,6 @@ struct modules_config *sd_to_modules(struct v4l2_subdev *sd)
 }
 EXPORT_SYMBOL_GPL(sd_to_modules);
 
-#ifdef CONFIG_SUNXI_REGULATOR_DT
-static int find_power_pmic(struct v4l2_subdev *sd, struct vin_power *power, enum pmic_channel pmic_ch)
-{
-	int i;
-
-	for (i = 0; i < VIN_MAX_CSI; i++) {
-		if (glb_sensor_helper[i] && (!strcmp(glb_sensor_helper[i]->name, sd->name))) {
-			if (glb_sensor_helper[i]->pmic[pmic_ch] == NULL)
-				return -1;
-			power[pmic_ch].pmic = glb_sensor_helper[i]->pmic[pmic_ch];
-			return 0;
-		}
-	}
-
-	power[pmic_ch].pmic = NULL;
-	vin_err("%s cannot find the match sensor_helper\n", sd->name);
-	return -1;
-}
-#endif
 /*
  *enable/disable pmic channel
  */
@@ -92,35 +70,38 @@ int vin_set_pmu_channel(struct v4l2_subdev *sd, enum pmic_channel pmic_ch,
 		if (power[pmic_ch].pmic == NULL)
 			return 0;
 		ret = regulator_disable(power[pmic_ch].pmic);
-#ifndef CONFIG_SUNXI_REGULATOR_DT
-		regulator_put(power[pmic_ch].pmic);
-#endif
-		power[pmic_ch].pmic = NULL;
-		vin_log(VIN_LOG_POWER, "regulator_is already disabled\n");
-	} else {
-#ifndef CONFIG_SUNXI_REGULATOR_DT
-		if (strcmp(power[pmic_ch].power_str, "")) {
-			power[pmic_ch].pmic = regulator_get(NULL,
-						  power[pmic_ch].power_str);
-			if (IS_ERR_OR_NULL(power[pmic_ch].pmic)) {
-				vin_err("get regulator %s error!\n", power[pmic_ch].power_str);
-				power[pmic_ch].pmic = NULL;
-				return -1;
-			}
-		} else {
+		if (!regulator_is_enabled(power[pmic_ch].pmic)) {
+			vin_log(VIN_LOG_POWER, "regulator_is already disabled\n");
+			regulator_put(power[pmic_ch].pmic);
 			power[pmic_ch].pmic = NULL;
-			return 0;
 		}
-#else
-		ret = find_power_pmic(sd, power, pmic_ch);
-		if (ret)
-			return ret;
-#endif
-		ret = regulator_set_voltage(power[pmic_ch].pmic,
+	} else {
+		if (power[pmic_ch].pmic
+		    && regulator_is_enabled(power[pmic_ch].pmic)) {
+			vin_log(VIN_LOG_POWER, "regulator_is already enabled\n");
+		} else {
+			if (strcmp(power[pmic_ch].power_str, "")) {
+				power[pmic_ch].pmic =
+				    regulator_get(NULL,
+						  power[pmic_ch].power_str);
+				if (IS_ERR_OR_NULL(power[pmic_ch].pmic)) {
+					vin_err("get regulator %s error!\n",
+						power[pmic_ch].power_str);
+					power[pmic_ch].pmic = NULL;
+					return -1;
+				}
+			} else {
+				power[pmic_ch].pmic = NULL;
+				return 0;
+			}
+		}
+		ret =
+		    regulator_set_voltage(power[pmic_ch].pmic,
 					  power[pmic_ch].power_vol,
 					  def_vol[pmic_ch]);
 		vin_log(VIN_LOG_POWER, "set regulator %s = %d,return %x\n",
-			power[pmic_ch].power_str, power[pmic_ch].power_vol, ret);
+			power[pmic_ch].power_str, power[pmic_ch].power_vol,
+			ret);
 		ret = regulator_enable(power[pmic_ch].pmic);
 	}
 #endif
@@ -142,10 +123,14 @@ int vin_set_mclk(struct v4l2_subdev *sd, enum on_off on_off)
 	if (modules == NULL)
 		return -1;
 
+#if defined(CONFIG_CCI_MODULE) || defined(CONFIG_CCI)
+	mclk_id = modules->sensors.sensor_bus_sel;
+#else
 	if (modules->sensors.mclk_id == -1)
 		mclk_id = modules->sensors.csi_sel;
 	else
 		mclk_id = modules->sensors.mclk_id;
+#endif
 	if (mclk_id < 0) {
 		vin_err("get mclk id failed\n");
 		return -1;
@@ -222,10 +207,14 @@ int vin_set_mclk_freq(struct v4l2_subdev *sd, unsigned long freq)
 	if (modules == NULL)
 		return -1;
 
+#if defined(CONFIG_CCI_MODULE) || defined(CONFIG_CCI)
+	mclk_id = modules->sensors.sensor_bus_sel;
+#else
 	if (modules->sensors.mclk_id == -1)
 		mclk_id = modules->sensors.csi_sel;
 	else
 		mclk_id = modules->sensors.mclk_id;
+#endif
 	if (mclk_id < 0) {
 		vin_err("get mclk id failed\n");
 		return -1;
@@ -361,12 +350,10 @@ int vin_gpio_write(struct v4l2_subdev *sd, enum gpio_type gpio_id,
 
 	gc = &modules->sensors.gpio[gpio_id];
 
-/*
 #ifndef CONFIG_ARCH_SUN8IW17P1
 	if ((gpio_id == PWDN) || (gpio_id == RESET))
 		force_value_flag = 0;
 #endif
-*/
 
 	return os_gpio_write(gc->gpio, out_value, force_value_flag);
 #endif

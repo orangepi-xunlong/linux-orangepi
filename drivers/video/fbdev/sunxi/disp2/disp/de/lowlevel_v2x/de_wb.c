@@ -104,9 +104,6 @@ uintptr_t wb_ebios_get_reg_base(u32 sel)
 s32 wb_ebios_init(struct disp_bsp_init_para *para)
 {
 	wb_ebios_set_reg_base(0, para->reg_base[DISP_MOD_DE]);
-#if defined(CONFIG_ARCH_SUN50IW10)
-	wb_ebios_set_reg_base(1, para->reg_base[DISP_MOD_DE1]);
-#endif
 	/* FIXME, need */
 	/* memset((void*)wb_dev[0], 0, sizeof(struct __wb_reg_t)); */
 	return 0;

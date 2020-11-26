@@ -2428,9 +2428,6 @@ struct ieee80211_ops {
 				struct ieee80211_vif *vif,
 				void *data,
 				int len);
-	int (*change_mac)(struct ieee80211_hw *hw,
-				struct ieee80211_vif *vif,
-				struct sockaddr *sa);
 };
 
 /**

@@ -75,8 +75,6 @@ void xradio_set_data_filter(struct ieee80211_hw *hw,
 							struct ieee80211_vif *vif,
 							void *data,
 							int len);
-int xradio_change_mac(struct ieee80211_hw *hw,
-			 struct ieee80211_vif *vif, struct sockaddr *sa);
 
 /* ******************************************************************** */
 /* WSM callbacks							*/

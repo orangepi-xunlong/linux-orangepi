@@ -154,7 +154,8 @@ static supported_dtd_t _dtd[] = {
 	{0.0, {  0, 0, 0, 0,      0, 0,    0,    0, 0,  0,    0,   0, 0,    0,  0, 0, 0,  0,  0, 0} },
 };
 
-#if 0
+#if defined(__LINUX_PLAT__)
+
 static speaker_alloc_code_t alloc_codes[] = {
 		{1,  0},
 		{3,  1},
@@ -190,7 +191,7 @@ static speaker_alloc_code_t alloc_codes[] = {
 		{47, 31},
 		{0, 0}
 };
-#endif
+
 
 int dtd_parse(hdmi_tx_dev_t *dev, dtd_t *dtd, u8 data[18])
 {
@@ -234,7 +235,7 @@ int dtd_parse(hdmi_tx_dev_t *dev, dtd_t *dtd, u8 data[18])
 	dtd->mHSyncPolarity = bit_field(data[17], 1, 1) == 1;
 	return true;
 }
-
+#endif
 /**
  * @short Get the DTD structure that contains the video parameters
  * @param[in] code VIC code to search for
@@ -290,6 +291,7 @@ u32 dtd_get_refresh_rate(dtd_t *dtd)
 	}
 	return 0;
 }
+#if defined(__LINUX_PLAT__)
 
 void monitor_range_limits_reset(hdmi_tx_dev_t *dev, monitorRangeLimits_t *mrl)
 {
@@ -660,7 +662,6 @@ int sad_parse(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad, u8 *data)
 	return FALSE;
 }
 
-#if 0
 int sad_support32k(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad)
 {
 	return (bit_field(sad->mSampleRates, 0, 1) == 1) ? TRUE : FALSE;
@@ -721,7 +722,6 @@ int sad_support24bit(hdmi_tx_dev_t *dev, shortAudioDesc_t *sad)
 	pr_err("%s:Information is not valid for this format\n", __func__);
 	return FALSE;
 }
-#endif
 
 void svd_reset(hdmi_tx_dev_t *dev, shortVideoDesc_t *svd)
 {
@@ -761,7 +761,6 @@ int speaker_alloc_data_block_parse(hdmi_tx_dev_t *dev,
 	return FALSE;
 }
 
-#if 0
 u8 get_channell_alloc_code(hdmi_tx_dev_t *dev,
 			speakerAllocationDataBlock_t *sadb)
 {
@@ -773,7 +772,6 @@ u8 get_channell_alloc_code(hdmi_tx_dev_t *dev,
 	}
 	return (u8)-1;
 }
-#endif
 
 void video_cap_data_block_reset(hdmi_tx_dev_t *dev,
 					videoCapabilityDataBlock_t *vcdb)
@@ -817,18 +815,14 @@ int _edid_checksum(u8 *edid)
 	return checksum % 256; /* CEA-861 Spec */
 }
 
-
-u16 i2c_min_ss_scl_low_time = I2C_MIN_SS_SCL_LOW_TIME;
-u16 i2c_min_ss_scl_high_time = I2C_MIN_SS_SCL_HIGH_TIME;
-
 int edid_read(hdmi_tx_dev_t *dev, struct edid *edid)
 {
 	int error = 0;
 	const u8 header[] = {0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00};
 
 	i2cddc_fast_mode(dev, 0);
-	i2cddc_clk_config(dev, I2C_SFR_CLK, i2c_min_ss_scl_low_time,
-			i2c_min_ss_scl_high_time, I2C_MIN_FS_SCL_LOW_TIME,
+	i2cddc_clk_config(dev, I2C_SFR_CLK, I2C_MIN_SS_SCL_LOW_TIME,
+			I2C_MIN_SS_SCL_HIGH_TIME, I2C_MIN_FS_SCL_LOW_TIME,
 			I2C_MIN_FS_SCL_HIGH_TIME);
 	/* i2cddc_clk_config(dev, 5000, I2C_MIN_SS_SCL_LOW_TIME,
 		I2C_MIN_SS_SCL_HIGH_TIME, I2C_MIN_FS_SCL_LOW_TIME,
@@ -1171,3 +1165,4 @@ int edid_parser(hdmi_tx_dev_t *dev, u8 *buffer, sink_edid_t *edidExt,
 
 	return false;
 }
+#endif

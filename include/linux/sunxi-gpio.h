@@ -18,7 +18,6 @@
 
 #define SUNXI_PINCTRL	"pio"
 #define SUNXI_R_PINCTRL	"r_pio"
-#include <linux/pinctrl/pinconf-generic.h>
 
 /* pin group base number name space,
  * the max pin number : 26*32=832.
@@ -126,14 +125,28 @@ enum sunxi_pin_int_source_clk {
 	SUNXI_PIN_INT_SRC_CLK_24M = 0x1
 };
 
+/**
+ * enum sunxi_pincfg_type - possible pin configuration types supported.
+ * @SUNXI_PINCFG_TYPE_FUNC: Function configuration.
+ * @SUNXI_PINCFG_TYPE_DAT : Pin value configuration.
+ * @SUNXI_PINCFG_TYPE_PUD : Pull up/down configuration.
+ * @SUNXI_PINCFG_TYPE_DRV : Drive strength configuration.
+ */
+enum sunxi_pincfg_type {
+	SUNXI_PINCFG_TYPE_FUNC,
+	SUNXI_PINCFG_TYPE_DAT,
+	SUNXI_PINCFG_TYPE_PUD,
+	SUNXI_PINCFG_TYPE_DRV
+};
+
 /*
  * pin configuration (pull up/down and drive strength) type and its value are
- * packed together into a 32-bits. The lower 8-bits represent the configuration
- * type and the upper 24-bits hold the value of the configuration type.
+ * packed together into a 32-bits. The upper 16-bits represent the configuration
+ * type and the lower 16-bits hold the value of the configuration type.
  */
-#define SUNXI_PINCFG_PACK(type, value)	(((value) << 8) | (type & 0xFF))
-#define SUNXI_PINCFG_UNPACK_TYPE(cfg)	((cfg) & 0xFF)
-#define SUNXI_PINCFG_UNPACK_VALUE(cfg)	(((cfg) & 0xFFFFFF00) >> 8)
+#define SUNXI_PINCFG_PACK(type, value)	(((value) << 16) | (type & 0xFFFF))
+#define SUNXI_PINCFG_UNPACK_TYPE(cfg)	((cfg) & 0xFFFF)
+#define SUNXI_PINCFG_UNPACK_VALUE(cfg)	(((cfg) & 0xFFFF0000) >> 16)
 
 static inline int sunxi_gpio_to_name(int gpio, char *name)
 {

@@ -2,13 +2,13 @@
  * Broadcom device-specific manifest constants.
  *
  * Copyright (C) 1999-2017, Broadcom Corporation
- *
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -280,10 +280,6 @@
 #define BCM4361_D11AC2G_ID	0x4420		/* 4361 802.11ac 2.4G device */
 #define BCM4361_D11AC5G_ID	0x4421		/* 4361 802.11ac 5G device */
 
-#define BCM4362_D11AX_ID	0x4490		/* 4362 802.11ax dualband device */
-#define BCM4362_D11AX2G_ID	0x4491		/* 4362 802.11ax 2.4G device */
-#define BCM4362_D11AX5G_ID	0x4492		/* 4362 802.11ax 5G device */
-
 #define BCM4364_D11AC_ID	0x4464		/* 4364 802.11ac dualband device */
 #define BCM4364_D11AC2G_ID	0x446a		/* 4364 802.11ac 2.4G device */
 #define BCM4364_D11AC5G_ID	0x446b		/* 4364 802.11ac 5G device */
@@ -505,7 +501,6 @@
 #define BCM4347_CHIP_ID		0x4347          /* 4347 chipcommon chipid */
 #define BCM4357_CHIP_ID		0x4357          /* 4357 chipcommon chipid */
 #define BCM4361_CHIP_ID		0x4361          /* 4361 chipcommon chipid */
-#define BCM4362_CHIP_ID		0x4362          /* 4362 chipcommon chipid */
 #define BCM4347_CHIP(chipid)	((CHIPID(chipid) == BCM4347_CHIP_ID) || \
 				(CHIPID(chipid) == BCM4357_CHIP_ID) || \
 				(CHIPID(chipid) == BCM4361_CHIP_ID))

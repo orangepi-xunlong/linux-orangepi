@@ -28,7 +28,6 @@ module_param_named(time_to_wakeup_ms, time_to_wakeup_ms,
 
 static super_standby_t *super_standby_para;
 static unsigned int standby_space_size;
-static unsigned int regular_standby_flag ;
 static DEFINE_SPINLOCK(data_lock);
 
 int enable_gpio_wakeup_src(int para)
@@ -92,26 +91,22 @@ static int sunxi_suspend_valid(suspend_state_t state)
 
 static int __sunxi_suspend_enter(void)
 {
-	if (regular_standby_flag == 0) {
-		super_standby_para->event |= CPUS_MEM_WAKEUP;
-		if (time_to_wakeup_ms > 0) {
-			super_standby_para->event |= CPUS_WAKEUP_TIMEOUT;
-			super_standby_para->timeout = time_to_wakeup_ms;
-		} else {
-			super_standby_para->event &= ~CPUS_WAKEUP_TIMEOUT;
-			super_standby_para->timeout = time_to_wakeup_ms;
-		}
-#ifdef CONFIG_AW_AXP
-		if (unlikely(axp_regulator_debug & 0x02)) {
-			pr_info("power status as follow:");
-			axp_regulator_dump();
-		}
-#endif
-		pr_info("enter standby, wakesrc:0x%x, timeout: %d\n",
-			super_standby_para->event,
-			super_standby_para->timeout);
-		__dma_flush_area(super_standby_para, standby_space_size);
+	super_standby_para->event |= CPUS_MEM_WAKEUP;
+
+	if (time_to_wakeup_ms > 0) {
+		super_standby_para->event |= CPUS_WAKEUP_TIMEOUT;
+		super_standby_para->timeout = time_to_wakeup_ms;
 	}
+#ifdef CONFIG_AW_AXP
+	if (unlikely(axp_regulator_debug & 0x02)) {
+		printk(KERN_INFO "power status as follow:");
+		axp_regulator_dump();
+	}
+#endif
+	pr_info("enter standby, wakesrc:0x%x, timeout: %d\n",
+		super_standby_para->event,
+		super_standby_para->timeout);
+	__dma_flush_area(super_standby_para, standby_space_size);
 	arm_cpuidle_suspend(3);
 
 	return 0;
@@ -301,6 +296,7 @@ static extended_standby_t sun50iw6_usbstandby = {
 		BIT(VCC_IO_BIT) |
 		BIT(VCC_PLL_BIT),
 	.soc_pwr_dm_state.volt[0] = 0x0,
+	.soc_pwr_dm_state.volt[VDD_SYS_BIT] = 810,
 	.cpux_clk_state.osc_en =
 		BIT(OSC_LOSC_BIT) |
 		BIT(OSC_HOSC_BIT) |
@@ -407,40 +403,6 @@ static extended_standby_t sun8iw17_usbstandby = {
 	.soc_io_state.hold_flag = 0x0,
 };
 
-static extended_standby_t sun8iw7_superstandby = {
-	.id = (1 << 3), /* super standby id */
-	.soc_pwr_dm_state.state =
-		BIT(VCC_DRAM_BIT) |
-		BIT(VDD_CPUS_BIT) |
-		BIT(VCC_LPDDR_BIT) |
-		BIT(VCC_PL_BIT),
-	.soc_pwr_dm_state.volt[0]      = 0x0,
-	.cpux_clk_state.osc_en         = 0x0,
-	.cpux_clk_state.init_pll_dis   = BIT(PM_PLL_DRAM),
-	.cpux_clk_state.exit_pll_en    = 0x0,
-	.cpux_clk_state.pll_change     = 0x0,
-	.cpux_clk_state.bus_change     = 0x0,
-	.soc_dram_state.selfresh_flag = 0x1,
-	.soc_io_state.hold_flag = 0x1,
-};
-
-static extended_standby_t sun8iw7_usbstandby = {
-	.id = (1 << 1), /* usb standby flag */
-	.soc_pwr_dm_state.state =
-		BIT(VCC_DRAM_BIT) |
-		BIT(VDD_CPUS_BIT) |
-		BIT(VCC_LPDDR_BIT) |
-		BIT(VCC_PL_BIT),
-	.soc_pwr_dm_state.volt[0]      = 0x0,
-	.cpux_clk_state.osc_en         = 0x0,
-	.cpux_clk_state.init_pll_dis   = BIT(PM_PLL_DRAM),
-	.cpux_clk_state.exit_pll_en    = 0x0,
-	.cpux_clk_state.pll_change     = 0x0,
-	.cpux_clk_state.bus_change     = 0x0,
-	.soc_dram_state.selfresh_flag = 0x1,
-	.soc_io_state.hold_flag = 0x1,
-};
-
 static const struct of_device_id pm_of_match[] __initconst = {
 	{
 		.compatible = "allwinner,sun50iw1-superstandby",
@@ -482,14 +444,6 @@ static const struct of_device_id pm_of_match[] __initconst = {
 		.compatible = "allwinner,sun8iw17-usbstandby",
 		.data = (extended_standby_t *)&sun8iw17_usbstandby,
 	},
-	{
-		.compatible = "allwinner,sun8iw7-usbstandby",
-		.data = (extended_standby_t *)&sun8iw7_usbstandby,
-	},
-	{
-		.compatible = "allwinner,sun8iw7-superstandby",
-		.data = (extended_standby_t *)&sun8iw7_superstandby,
-	},
 	{},
 };
 
@@ -499,7 +453,7 @@ static int __init sunxi_suspend_init(void)
 	const struct of_device_id *matched_np;
 	const extended_standby_t *extended_standby_info;
 	extended_standby_t *extend_standby_para;
-	int ret = 0;
+	int ret = 0, standby_stay_cpu = 0;
 	unsigned int value[3] = { 0, 0, 0 };
 
 	pr_debug("%s\n", __func__);
@@ -507,8 +461,8 @@ static int __init sunxi_suspend_init(void)
 	np = of_find_matching_node_and_match(NULL, pm_of_match,
 				&matched_np);
 	if (IS_ERR_OR_NULL(np)) {
-		regular_standby_flag = 1;
-		goto set_suspend;
+		pr_err("get [allwinner,standby_space] device node error\n");
+		return -ENODEV;
 	}
 
 	extended_standby_info = (extended_standby_t *)matched_np->data;
@@ -518,6 +472,12 @@ static int __init sunxi_suspend_init(void)
 	if (ret) {
 		pr_err("get standby_space1 err.\n");
 		return -EINVAL;
+	}
+
+	if (of_property_read_u32(np, "standby_stay_cpu", &standby_stay_cpu)) {
+		pr_err("%s: get standby_stay_cpu failed, default to close\
+				vcc-cpu when standby!\n", __func__);
+		standby_stay_cpu = 0;
 	}
 
 	pr_err("%s, 0x%x, 0x%x, 0x%x\n", __FUNCTION__,
@@ -538,8 +498,13 @@ static int __init sunxi_suspend_init(void)
 	standby_space_size = value[2];
 	super_standby_para->event = 0;
 
-set_suspend:
+	if (standby_stay_cpu == 1) {
+		extend_standby_para->soc_pwr_dm_state.state |=
+			(VDD_CPUA_BIT | VDD_CPUB_BIT);
+	}
 	suspend_set_ops(&sunxi_suspend_ops);
+
+	arisc_set_wakeup_source(SET_WAKEUP_TIME_MS(time_to_wakeup_ms));
 
 	return ret;
 }

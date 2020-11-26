@@ -56,7 +56,7 @@ phydm_update_power_training_state(
 		return;
 	}
 
-	PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("%s ======>\n", __func__));
+	PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("%s ======>\n", __FUNCTION__));
 
 	if (p_pow_train_t->force_power_training_state == DISABLE_POW_TRAIN) {
 

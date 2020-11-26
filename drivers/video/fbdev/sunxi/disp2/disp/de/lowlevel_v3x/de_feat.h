@@ -83,6 +83,7 @@
 #define DEVICE_LCD_NUM 1
 
 /* #define SUPPORT_DSI */
+#define SUPPORT_SMBL
 #define SUPPORT_DE_NOISE
 #define SUPPORT_YUV_BLEND
 /* CDC: color space & dynamic range convert */

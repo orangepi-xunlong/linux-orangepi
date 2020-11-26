@@ -39,18 +39,18 @@ void ss_print_hex(char *_data, int _len, void *_addr)
 #ifdef SS_SCATTER_ENABLE
 void ss_print_task_info(ce_task_desc_t *task)
 {
-	void *src_ptr = phys_to_virt(task->src[0].addr << WORD_ALGIN);
+	void *src_ptr = phys_to_virt(task->src[0].addr);
 	unsigned int src_len = task->src[0].len << 2;
-	void *dst_ptr = phys_to_virt(task->dst[0].addr << WORD_ALGIN);
+	void *dst_ptr = phys_to_virt(task->dst[0].addr);
 	unsigned int dst_len = task->dst[0].len << 2;
 
 	pr_debug("---------------------task_info--------------------\n");
 	ss_print_hex((char *)task, sizeof(*task), task);
-	dma_sync_single_for_cpu(&ss_dev->pdev->dev, task->src[0].addr << WORD_ALGIN,
+	dma_sync_single_for_cpu(&ss_dev->pdev->dev, task->src[0].addr,
 					  src_len, DMA_FROM_DEVICE);
 	pr_debug("--------------src_len = 0x%x-------------\n", src_len);
 	ss_print_hex(src_ptr, src_len, src_ptr);
-	dma_sync_single_for_cpu(&ss_dev->pdev->dev, task->dst[0].addr << WORD_ALGIN,
+	dma_sync_single_for_cpu(&ss_dev->pdev->dev, task->dst[0].addr,
 					  dst_len, DMA_FROM_DEVICE);
 	pr_debug("--------------dst_len = 0x%x-------------\n", dst_len);
 	ss_print_hex(dst_ptr, dst_len, dst_ptr);

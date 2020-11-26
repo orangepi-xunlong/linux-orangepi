@@ -29,7 +29,6 @@
 
 #include "flash.h"
 
-#ifdef CONFIG_FLASH_MODULE
 static LIST_HEAD(flash_drv_list);
 
 #define FLASH_MODULE_NAME "vin_flash"
@@ -399,34 +398,3 @@ void sunxi_flash_platform_unregister(void)
 	platform_driver_unregister(&flash_platform_driver);
 	vin_log(VIN_LOG_FLASH, "flash_exit end\n");
 }
-#else
-int io_set_flash_ctrl(struct v4l2_subdev *sd, enum sunxi_flash_ctrl ctrl)
-{
-	return 0;
-}
-
-int sunxi_flash_check_to_start(struct v4l2_subdev *sd,
-			       enum sunxi_flash_ctrl ctrl)
-{
-	return 0;
-}
-
-int sunxi_flash_stop(struct v4l2_subdev *sd)
-{
-	return 0;
-}
-
-struct v4l2_subdev *sunxi_flash_get_subdev(int id)
-{
-	return NULL;
-}
-
-int sunxi_flash_platform_register(void)
-{
-	return 0;
-}
-
-void sunxi_flash_platform_unregister(void)
-{
-}
-#endif

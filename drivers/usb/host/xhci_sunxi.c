@@ -90,6 +90,8 @@ static ssize_t xhci_enable_store(struct device *dev,
 		return count;
 	}
 
+	sunxi_xhci->host_init_state = 0;
+
 	ret = kstrtoint(buf, 10, &value);
 	if (ret != 0)
 		return -EINVAL;
@@ -309,8 +311,8 @@ static int sunxi_core_open_phy(void __iomem *regs)
 	reg_val |= SUNXI_APP_FOCE_VBUS; /* open PIPE clock */
 	USBC_Writel(reg_val, regs + (SUNXI_APP - SUNXI_GLOBALS_REGS_START));
 
-	/* It is set 0x0047fc87 on bare-metal.*/
-	USBC_Writel(0x0047fc57, regs + (SUNXI_PHY_TUNE_LOW - SUNXI_GLOBALS_REGS_START));
+	/* It is set 0x0047fc87 on bare-metal. */
+	USBC_Writel(0x0047fc87, regs + (SUNXI_PHY_TUNE_LOW - SUNXI_GLOBALS_REGS_START));
 
 	reg_val = USBC_Readl(regs + (SUNXI_PHY_TUNE_HIGH - SUNXI_GLOBALS_REGS_START));
 	reg_val |= SUNXI_TXVBOOSTLVL(0x7);

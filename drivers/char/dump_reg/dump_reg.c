@@ -32,9 +32,7 @@
 #define SUNXI_IO_PHYS_BASE	0x01000000
 #if defined(CONFIG_ARCH_SUN50IW3) \
 	|| defined(CONFIG_ARCH_SUN50IW6) \
-	|| defined(CONFIG_ARCH_SUN50IW8) \
-	|| defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN50IW8)
 #define SUNXI_IO_SIZE		(SZ_128M + SZ_16M)
 #else
 #define SUNXI_IO_SIZE		SZ_16M	/* 16MB(Max) */

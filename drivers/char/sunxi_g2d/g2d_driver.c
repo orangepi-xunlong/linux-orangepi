@@ -27,7 +27,10 @@ __g2d_drv_t g2d_ext_hd;
 __g2d_info_t para;
 
 u32 dbg_info;
-u32 time_info;
+
+#if (defined CONFIG_ARCH_SUN8IW15P1) || (defined CONFIG_ARCH_SUN8IW17P1)
+#define USE_DMA_BUF
+#endif
 
 struct dmabuf_item {
 	struct list_head list;
@@ -78,51 +81,8 @@ static ssize_t g2d_debug_store(struct device *dev,
 static DEVICE_ATTR(debug, 0660,
 		   g2d_debug_show, g2d_debug_store);
 
-static ssize_t g2d_func_runtime_show(struct device *dev,
-			     struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf, "func_runtime=%d\n", time_info);
-}
-
-static ssize_t g2d_func_runtime_store(struct device *dev,
-			      struct device_attribute *attr,
-			      const char *buf, size_t count)
-{
-	if (strncasecmp(buf, "1", 1) == 0)
-		time_info = 1;
-	else if (strncasecmp(buf, "0", 1) == 0)
-		time_info = 0;
-	else
-		WARNING("Error input!\n");
-
-	return count;
-}
-
-static DEVICE_ATTR(func_runtime, 0660,
-		   g2d_func_runtime_show, g2d_func_runtime_store);
-
-static ssize_t g2d_standby_store(struct device *dev,
-			      struct device_attribute *attr,
-			      const char *buf, size_t count)
-{
-	if (strncasecmp(buf, "suspend", 7) == 0) {
-		pr_info("[G2D]:self suspend\n");
-		g2d_suspend(NULL);
-	} else if (strncasecmp(buf, "resume", 6) == 0) {
-		pr_info("[G2D]:self resume\n");
-		g2d_resume(NULL);
-	} else
-		WARNING("Error input!\n");
-
-	return count;
-}
-
-static DEVICE_ATTR(standby, 0660, NULL, g2d_standby_store);
-
 static struct attribute *g2d_attributes[] = {
 	&dev_attr_debug.attr,
-	&dev_attr_func_runtime.attr,
-	&dev_attr_standby.attr,
 	NULL
 };
 
@@ -131,7 +91,7 @@ static struct attribute_group g2d_attribute_group = {
 	.attrs = g2d_attributes
 };
 
-#ifdef G2D_V2X_SUPPORT
+#ifdef USE_DMA_BUF
 static int g2d_dma_map(int fd, struct dmabuf_item *item)
 {
 	struct dma_buf *dmabuf;
@@ -225,7 +185,6 @@ static void g2d_dma_unmap(struct dmabuf_item *item)
 	dma_buf_detach(item->buf, item->attachment);
 	dma_buf_put(item->buf);
 }
-#endif
 
 static struct g2d_format_attr fmt_attr_tbl[] = {
 	/*
@@ -301,8 +260,8 @@ s32 g2d_set_info(g2d_image_enh *g2d_img, struct dmabuf_item *item)
 	for (i = 0; i < len; ++i) {
 
 		if (fmt_attr_tbl[i].format == g2d_img->format) {
-			y_width = g2d_img->width;
-			y_height = g2d_img->height;
+			y_width = g2d_img->clip_rect.w;
+			y_height = g2d_img->clip_rect.h;
 			u_width = y_width/fmt_attr_tbl[i].hor_rsample_u;
 			u_height = y_height/fmt_attr_tbl[i].ver_rsample_u;
 
@@ -332,6 +291,7 @@ exit:
 	return ret;
 
 }
+#endif
 
 __s32 drv_g2d_init(void)
 {
@@ -346,7 +306,7 @@ __s32 drv_g2d_init(void)
 	return 0;
 }
 
-void *g2d_malloc(__u32 bytes_num, uintptr_t *phy_addr)
+void *g2d_malloc(__u32 bytes_num, __u32 *phy_addr)
 {
 	void *address = NULL;
 
@@ -354,7 +314,7 @@ void *g2d_malloc(__u32 bytes_num, uintptr_t *phy_addr)
 	u32 actual_bytes;
 
 	if (bytes_num != 0) {
-		actual_bytes = G2D_BYTE_ALIGN(bytes_num);
+		actual_bytes = PAGE_ALIGN(bytes_num);
 
 		address = dma_alloc_coherent(para.dev, actual_bytes,
 					     (dma_addr_t *) phy_addr,
@@ -430,7 +390,7 @@ int g2d_mem_request(__u32 size)
 {
 	__s32 sel;
 	unsigned long ret = 0;
-	uintptr_t phy_addr;
+	__u32 phy_addr;
 
 	sel = g2d_get_free_mem_index();
 	if (sel < 0) {
@@ -483,16 +443,13 @@ int g2d_mmap(struct file *file, struct vm_area_struct *vma)
 	return 0;
 }
 
-int g2d_open(struct inode *inode, struct file *file)
+static int g2d_open(struct inode *inode, struct file *file)
 {
 	mutex_lock(&para.mutex);
 	para.user_cnt++;
 	if (para.user_cnt == 1) {
-		if (para.clk) {
-			if (para.clk_parent)
-				clk_set_parent(para.clk, para.clk_parent);
+		if (para.clk)
 			clk_prepare_enable(para.clk);
-		}
 		para.opened = true;
 #ifdef G2D_V2X_SUPPORT
 		g2d_bsp_open();
@@ -502,9 +459,8 @@ int g2d_open(struct inode *inode, struct file *file)
 	mutex_unlock(&para.mutex);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(g2d_open);
 
-int g2d_release(struct inode *inode, struct file *file)
+static int g2d_release(struct inode *inode, struct file *file)
 {
 	mutex_lock(&para.mutex);
 	para.user_cnt--;
@@ -525,7 +481,6 @@ int g2d_release(struct inode *inode, struct file *file)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(g2d_release);
 
 irqreturn_t g2d_handle_irq(int irq, void *dev_id)
 {
@@ -583,7 +538,7 @@ int g2d_wait_cmd_finish(void)
 	timeout = wait_event_timeout(g2d_ext_hd.queue,
 				     g2d_ext_hd.finish_flag == 1,
 				     msecs_to_jiffies(timeout));
-	if (timeout <= 0) {
+	if (timeout == 0) {
 #ifdef G2D_V2X_SUPPORT
 		g2d_bsp_reset();
 #else
@@ -679,7 +634,6 @@ int g2d_blit(g2d_blt *para)
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(g2d_blit);
 
 int g2d_fill(g2d_fillrect *para)
 {
@@ -718,7 +672,6 @@ int g2d_fill(g2d_fillrect *para)
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(g2d_fill);
 
 int g2d_stretchblit(g2d_stretchblt *para)
 {
@@ -795,24 +748,22 @@ int g2d_stretchblit(g2d_stretchblt *para)
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(g2d_stretchblit);
 
 #ifdef G2D_V2X_SUPPORT
 int g2d_fill_h(g2d_fillrect_h *para)
 {
 	__s32 ret = 0;
+#ifdef USE_DMA_BUF
 	struct dmabuf_item *dst_item = NULL;
 
-	if (!para->dst_image_h.use_phy_addr) {
-
-		dst_item = kmalloc(sizeof(struct dmabuf_item),
-				   GFP_KERNEL | __GFP_ZERO);
-		if (dst_item == NULL) {
-			pr_err("[G2D]malloc memory of size %u fail!\n",
-				(unsigned int)sizeof(struct dmabuf_item));
-			goto EXIT;
-		}
+	dst_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (dst_item == NULL) {
+		pr_err("[G2D]malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto EXIT;
 	}
+#endif
 	/* check the parameter valid */
 	if (((para->dst_image_h.clip_rect.x < 0) &&
 	     ((-para->dst_image_h.clip_rect.x) >
@@ -863,56 +814,55 @@ int g2d_fill_h(g2d_fillrect_h *para)
 
 	g2d_ext_hd.finish_flag = 0;
 
-	if (!para->dst_image_h.use_phy_addr) {
-		ret = g2d_dma_map(para->dst_image_h.fd, dst_item);
-		if (ret != 0) {
-			pr_err("[G2D]map cur_item fail!\n");
-			goto FREE_DST;
-		}
-
-		g2d_set_info(&para->dst_image_h, dst_item);
+#ifdef USE_DMA_BUF
+	ret = g2d_dma_map(para->dst_image_h.fd, dst_item);
+	if (ret != 0) {
+		pr_err("[G2D]map cur_item fail!\n");
+		goto FREE_DST;
 	}
+
+	g2d_set_info(&para->dst_image_h, dst_item);
+#endif
 
 	ret = g2d_fillrectangle(&para->dst_image_h, para->dst_image_h.color);
 
 	if (ret)
 		pr_warn("G2D FILLRECTANGLE Failed!\n");
-	if (!para->dst_image_h.use_phy_addr)
-		g2d_dma_unmap(dst_item);
+#ifdef USE_DMA_BUF
+	g2d_dma_unmap(dst_item);
 FREE_DST:
-	if (!para->dst_image_h.use_phy_addr)
-		kfree(dst_item);
+	kfree(dst_item);
 EXIT:
 	return ret;
+#else
+	return ret;
+#endif
 }
-EXPORT_SYMBOL_GPL(g2d_fill_h);
 
 int g2d_blit_h(g2d_blt_h *para)
 {
 	__s32 ret = 0;
+
+#ifdef USE_DMA_BUF
 	struct dmabuf_item *src_item = NULL;
 	struct dmabuf_item *dst_item = NULL;
 
-	if (!para->src_image_h.use_phy_addr) {
-
-		src_item = kmalloc(sizeof(struct dmabuf_item),
-				   GFP_KERNEL | __GFP_ZERO);
-		if (src_item == NULL) {
-			pr_err("[G2D]malloc memory of size %u fail!\n",
-			       (unsigned int)sizeof(struct dmabuf_item));
-			goto EXIT;
-		}
+	src_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (src_item == NULL) {
+		pr_err("[G2D]malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto EXIT;
+	}
+	dst_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (dst_item == NULL) {
+		pr_err("[G2D]malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto FREE_SRC;
 	}
 
-	if (!para->dst_image_h.use_phy_addr) {
-		dst_item = kmalloc(sizeof(struct dmabuf_item),
-				   GFP_KERNEL | __GFP_ZERO);
-		if (dst_item == NULL) {
-			pr_err("[G2D]malloc memory of size %u fail!\n",
-			       (unsigned int)sizeof(struct dmabuf_item));
-			goto FREE_SRC;
-		}
-	}
+#endif
 	/* check the parameter valid */
 	if (((para->src_image_h.clip_rect.x < 0) &&
 	     ((-para->src_image_h.clip_rect.x) >
@@ -1008,72 +958,66 @@ int g2d_blit_h(g2d_blt_h *para)
 	para->dst_image_h.bbuff = 1;
 	para->dst_image_h.gamut = G2D_BT709;
 
-	if (!para->src_image_h.use_phy_addr) {
-		ret = g2d_dma_map(para->src_image_h.fd, src_item);
-		if (ret != 0) {
-			pr_err("[G2D]map cur_item fail!\n");
-			goto FREE_DST;
-		}
-		g2d_set_info(&para->src_image_h, src_item);
+#ifdef USE_DMA_BUF
+	ret = g2d_dma_map(para->src_image_h.fd, src_item);
+	if (ret != 0) {
+		pr_err("[G2D]map cur_item fail!\n");
+		goto FREE_DST;
+	}
+	ret = g2d_dma_map(para->dst_image_h.fd, dst_item);
+	if (ret != 0) {
+		pr_err("[G2D]map dst_item fail!\n");
+		goto SRC_DMA_UNMAP;
 	}
 
-	if (!para->dst_image_h.use_phy_addr) {
-		ret = g2d_dma_map(para->dst_image_h.fd, dst_item);
-		if (ret != 0) {
-			pr_err("[G2D]map dst_item fail!\n");
-			goto SRC_DMA_UNMAP;
-		}
-		g2d_set_info(&para->dst_image_h, dst_item);
-	}
-
+	g2d_set_info(&para->src_image_h, src_item);
+	g2d_set_info(&para->dst_image_h, dst_item);
+#endif
 	ret = g2d_bsp_bitblt(&para->src_image_h,
 					&para->dst_image_h, para->flag_h);
 
 	if (ret)
 		pr_warn("G2D BITBLT Failed!\n");
 
-	if (!para->dst_image_h.use_phy_addr)
-		g2d_dma_unmap(dst_item);
+#ifdef USE_DMA_BUF
+	g2d_dma_unmap(dst_item);
 SRC_DMA_UNMAP:
-	if (!para->src_image_h.use_phy_addr)
-		g2d_dma_unmap(src_item);
+	g2d_dma_unmap(src_item);
 FREE_DST:
-	if (!para->dst_image_h.use_phy_addr)
-		kfree(dst_item);
+	kfree(dst_item);
 FREE_SRC:
-	if (!para->src_image_h.use_phy_addr)
-		kfree(src_item);
+	kfree(src_item);
 EXIT:
 	return ret;
+#else
+	return ret;
+#endif
 }
-EXPORT_SYMBOL_GPL(g2d_blit_h);
 
 int g2d_bld_h(g2d_bld *para)
 {
 	__s32 ret = 0;
+
+#ifdef USE_DMA_BUF
 	struct dmabuf_item *src_item = NULL;
 	struct dmabuf_item *dst_item = NULL;
 
-	if (!para->src_image_h.use_phy_addr) {
-
-		src_item = kmalloc(sizeof(struct dmabuf_item),
-				   GFP_KERNEL | __GFP_ZERO);
-		if (src_item == NULL) {
-			pr_err("malloc memory of size %u fail!\n",
-			       (unsigned int)sizeof(struct dmabuf_item));
-			goto EXIT;
-		}
+	src_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (src_item == NULL) {
+		pr_err("malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto EXIT;
 	}
-	if (!para->dst_image_h.use_phy_addr) {
-		dst_item = kmalloc(sizeof(struct dmabuf_item),
-				   GFP_KERNEL | __GFP_ZERO);
-		if (dst_item == NULL) {
-			pr_err("malloc memory of size %u fail!\n",
-			       (unsigned int)sizeof(struct dmabuf_item));
-			goto FREE_SRC;
-		}
+	dst_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (dst_item == NULL) {
+		pr_err("malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto FREE_SRC;
 	}
 
+#endif
 	/* check the parameter valid */
 	if (((para->src_image_h.clip_rect.x < 0) &&
 	     ((-para->src_image_h.clip_rect.x) >
@@ -1134,85 +1078,83 @@ int g2d_bld_h(g2d_bld *para)
 
 	g2d_ext_hd.finish_flag = 0;
 
-	if (!para->src_image_h.use_phy_addr) {
-		ret = g2d_dma_map(para->src_image_h.fd, src_item);
-		if (ret != 0) {
-			pr_err("[G2D]map src_item fail!\n");
-			goto FREE_DST;
-		}
-		g2d_set_info(&para->src_image_h, src_item);
+#ifdef USE_DMA_BUF
+	ret = g2d_dma_map(para->src_image_h.fd, src_item);
+	if (ret != 0) {
+		pr_err("[G2D]map src_item fail!\n");
+		goto FREE_DST;
 	}
-	if (!para->dst_image_h.use_phy_addr) {
-		ret = g2d_dma_map(para->dst_image_h.fd, dst_item);
-		if (ret != 0) {
-			pr_err("[G2D]map dst_item fail!\n");
-			goto SRC_DMA_UNMAP;
-		}
-		g2d_set_info(&para->dst_image_h, dst_item);
+	ret = g2d_dma_map(para->dst_image_h.fd, dst_item);
+	if (ret != 0) {
+		pr_err("[G2D]map dst_item fail!\n");
+		goto SRC_DMA_UNMAP;
 	}
+
+	g2d_set_info(&para->src_image_h, src_item);
+	g2d_set_info(&para->dst_image_h, dst_item);
+#endif
 	ret = g2d_bsp_bld(&para->src_image_h, &para->dst_image_h,
 						para->bld_cmd, &para->ck_para);
 
 	if (ret)
 		pr_warn("G2D BITBLT Failed!\n");
 
-	if (!para->dst_image_h.use_phy_addr)
-		g2d_dma_unmap(dst_item);
+#ifdef USE_DMA_BUF
+	g2d_dma_unmap(dst_item);
 SRC_DMA_UNMAP:
-	if (!para->src_image_h.use_phy_addr)
-		g2d_dma_unmap(src_item);
+	g2d_dma_unmap(src_item);
 FREE_DST:
-	if (!para->dst_image_h.use_phy_addr)
-		kfree(dst_item);
+	kfree(dst_item);
 FREE_SRC:
-	if (!para->src_image_h.use_phy_addr)
-		kfree(src_item);
+	kfree(src_item);
 EXIT:
 	return ret;
+#else
+	return ret;
+#endif
 }
-EXPORT_SYMBOL_GPL(g2d_bld_h);
 
 int g2d_maskblt_h(g2d_maskblt *para)
 {
 	__s32 ret = 0;
+
+#ifdef USE_DMA_BUF
 	struct dmabuf_item *src_item = NULL;
 	struct dmabuf_item *ptn_item = NULL;
 	struct dmabuf_item *mask_item = NULL;
 	struct dmabuf_item *dst_item = NULL;
 
-	if (!para->src_image_h.use_phy_addr) {
-
-		src_item = kmalloc(sizeof(struct dmabuf_item),
-				   GFP_KERNEL | __GFP_ZERO);
-		if (src_item == NULL) {
-			pr_err("malloc memory of size %u fail!\n",
-			       (unsigned int)sizeof(struct dmabuf_item));
-			goto EXIT;
-		}
-		ptn_item = kmalloc(sizeof(struct dmabuf_item),
-				   GFP_KERNEL | __GFP_ZERO);
-		if (ptn_item == NULL) {
-			pr_err("malloc memory of size %u fail!\n",
-			       (unsigned int)sizeof(struct dmabuf_item));
-			goto FREE_SRC;
-		}
-
-		mask_item = kmalloc(sizeof(struct dmabuf_item),
-				    GFP_KERNEL | __GFP_ZERO);
-		if (mask_item == NULL) {
-			pr_err("malloc memory of size %u fail!\n",
-			       (unsigned int)sizeof(struct dmabuf_item));
-			goto FREE_PTN;
-		}
-		dst_item = kmalloc(sizeof(struct dmabuf_item),
-				   GFP_KERNEL | __GFP_ZERO);
-		if (dst_item == NULL) {
-			pr_err("malloc memory of size %u fail!\n",
-			       (unsigned int)(unsigned int)sizeof(
-				   struct dmabuf_item));
-			goto FREE_MASK;
-		}
+	src_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (src_item == NULL) {
+		pr_err("malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto EXIT;
 	}
+	ptn_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (ptn_item == NULL) {
+		pr_err("malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto FREE_SRC;
+	}
+
+	mask_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (mask_item == NULL) {
+		pr_err("malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto FREE_PTN;
+	}
+	dst_item = kmalloc(sizeof(struct dmabuf_item),
+			      GFP_KERNEL | __GFP_ZERO);
+	if (dst_item == NULL) {
+		pr_err("malloc memory of size %u fail!\n",
+		       sizeof(struct dmabuf_item));
+		goto FREE_MASK;
+	}
+
+#endif
 	/* check the parameter valid */
 	if (((para->dst_image_h.clip_rect.x < 0) &&
 	     ((-para->dst_image_h.clip_rect.x) >
@@ -1257,33 +1199,33 @@ int g2d_maskblt_h(g2d_maskblt *para)
 			para->dst_image_h.clip_rect.y;
 	}
 
-	if (!para->src_image_h.use_phy_addr) {
-		ret = g2d_dma_map(para->src_image_h.fd, src_item);
-		if (ret != 0) {
-			pr_err("[G2D]map src_item fail!\n");
-			goto FREE_DST;
-		}
-		ret = g2d_dma_map(para->ptn_image_h.fd, ptn_item);
-		if (ret != 0) {
-			pr_err("[G2D]map ptn_item fail!\n");
-			goto SRC_DMA_UNMAP;
-		}
-		ret = g2d_dma_map(para->mask_image_h.fd, mask_item);
-		if (ret != 0) {
-			pr_err("[G2D]map mask_item fail!\n");
-			goto PTN_DMA_UNMAP;
-		}
-		ret = g2d_dma_map(para->dst_image_h.fd, dst_item);
-		if (ret != 0) {
-			pr_err("[G2D]map dst_item fail!\n");
-			goto MASK_DMA_UNMAP;
-		}
-
-		g2d_set_info(&para->src_image_h, src_item);
-		g2d_set_info(&para->ptn_image_h, ptn_item);
-		g2d_set_info(&para->mask_image_h, mask_item);
-		g2d_set_info(&para->dst_image_h, dst_item);
+#ifdef USE_DMA_BUF
+	ret = g2d_dma_map(para->src_image_h.fd, src_item);
+	if (ret != 0) {
+		pr_err("[G2D]map src_item fail!\n");
+		goto FREE_DST;
 	}
+	ret = g2d_dma_map(para->ptn_image_h.fd, ptn_item);
+	if (ret != 0) {
+		pr_err("[G2D]map ptn_item fail!\n");
+		goto SRC_DMA_UNMAP;
+	}
+	ret = g2d_dma_map(para->mask_image_h.fd, mask_item);
+	if (ret != 0) {
+		pr_err("[G2D]map mask_item fail!\n");
+		goto PTN_DMA_UNMAP;
+	}
+	ret = g2d_dma_map(para->dst_image_h.fd, dst_item);
+	if (ret != 0) {
+		pr_err("[G2D]map dst_item fail!\n");
+		goto MASK_DMA_UNMAP;
+	}
+
+	g2d_set_info(&para->src_image_h, src_item);
+	g2d_set_info(&para->ptn_image_h, ptn_item);
+	g2d_set_info(&para->mask_image_h, mask_item);
+	g2d_set_info(&para->dst_image_h, dst_item);
+#endif
 
 	para->src_image_h.bbuff = 1;
 	para->src_image_h.gamut = G2D_BT709;
@@ -1306,33 +1248,28 @@ int g2d_maskblt_h(g2d_maskblt *para)
 
 	if (ret)
 		pr_warn("G2D MASKBLT Failed!\n");
-	if (!para->src_image_h.use_phy_addr)
-		g2d_dma_unmap(dst_item);
+#ifdef USE_DMA_BUF
+	g2d_dma_unmap(dst_item);
 MASK_DMA_UNMAP:
-	if (!para->src_image_h.use_phy_addr)
-		g2d_dma_unmap(mask_item);
+	g2d_dma_unmap(mask_item);
 PTN_DMA_UNMAP:
-	if (!para->src_image_h.use_phy_addr)
-		g2d_dma_unmap(ptn_item);
+	g2d_dma_unmap(ptn_item);
 SRC_DMA_UNMAP:
-	if (!para->src_image_h.use_phy_addr)
-		g2d_dma_unmap(src_item);
+	g2d_dma_unmap(src_item);
 FREE_DST:
-	if (!para->src_image_h.use_phy_addr)
-		kfree(dst_item);
+	kfree(dst_item);
 FREE_MASK:
-	if (!para->src_image_h.use_phy_addr)
-		kfree(mask_item);
+	kfree(mask_item);
 FREE_PTN:
-	if (!para->src_image_h.use_phy_addr)
-		kfree(ptn_item);
+	kfree(ptn_item);
 FREE_SRC:
-	if (!para->src_image_h.use_phy_addr)
-		kfree(src_item);
+	kfree(src_item);
 EXIT:
 	return ret;
+#else
+	return ret;
+#endif
 }
-EXPORT_SYMBOL_GPL(g2d_maskblt_h);
 #endif
 
 /*
@@ -1363,29 +1300,9 @@ int g2d_cmdq(unsigned int para)
 }
 */
 
-void g2d_ioctl_mutex_lock(void)
-{
-	if (!mutex_trylock(&para.mutex))
-		mutex_lock(&para.mutex);
-}
-EXPORT_SYMBOL_GPL(g2d_ioctl_mutex_lock);
-
-void g2d_ioctl_mutex_unlock(void)
-{
-	mutex_unlock(&para.mutex);
-}
-EXPORT_SYMBOL_GPL(g2d_ioctl_mutex_unlock);
-
 long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	__s32 ret = 0;
-	unsigned int size;
-	unsigned int sel;
-	struct timeval test_start, test_end;
-	unsigned int runtime;
-
-	if (time_info == 1)
-		do_gettimeofday(&test_start);
 
 	if (!mutex_trylock(&para.mutex))
 		mutex_lock(&para.mutex);
@@ -1397,6 +1314,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			if (copy_from_user(&blit_para, (g2d_blt *) arg,
 					   sizeof(g2d_blt))) {
+				kfree(&blit_para);
 				ret = -EFAULT;
 				goto err_noput;
 			}
@@ -1408,6 +1326,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			if (copy_from_user(&fill_para, (g2d_fillrect *) arg,
 					   sizeof(g2d_fillrect))) {
+				kfree(&fill_para);
 				ret = -EFAULT;
 				goto err_noput;
 			}
@@ -1419,6 +1338,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			if (copy_from_user(&stre_para, (g2d_stretchblt *) arg,
 					   sizeof(g2d_stretchblt))) {
+				kfree(&stre_para);
 				ret = -EFAULT;
 				goto err_noput;
 			}
@@ -1430,6 +1350,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		if (copy_from_user(&pale_para, (g2d_palette *)arg,
 					sizeof(g2d_palette))) {
+			kfree(&pale_para);
 			ret = -EFAULT;
 			goto err_noput;
 		}
@@ -1441,6 +1362,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		if (copy_from_user(&cmdq_addr,
 				(unsigned int *)arg, sizeof(unsigned int))) {
+			kfree(&cmdq_addr);
 			ret = -EFAULT;
 			goto err_noput;
 		}
@@ -1453,7 +1375,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			g2d_blt_h blit_para;
 			if (copy_from_user(&blit_para, (g2d_blt_h *) arg,
 					   sizeof(g2d_blt_h))) {
-				pr_err("[G2D]BITBLT copy from user failed!\n");
+				kfree(&blit_para);
 				ret = -EFAULT;
 				goto err_noput;
 			}
@@ -1465,6 +1387,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			if (copy_from_user(&fill_para, (g2d_fillrect_h *) arg,
 					   sizeof(g2d_fillrect_h))) {
+				kfree(&fill_para);
 				ret = -EFAULT;
 				goto err_noput;
 			}
@@ -1476,6 +1399,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			if (copy_from_user(&bld_para, (g2d_bld *) arg,
 					   sizeof(g2d_bld))) {
+				kfree(&bld_para);
 				ret = -EFAULT;
 				goto err_noput;
 			}
@@ -1487,6 +1411,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			if (copy_from_user(&mask_para, (g2d_maskblt *) arg,
 					   sizeof(g2d_maskblt))) {
+				kfree(&mask_para);
 				ret = -EFAULT;
 				goto err_noput;
 			}
@@ -1496,24 +1421,20 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 #endif
 		/* just management memory for test */
 	case G2D_CMD_MEM_REQUEST:
-		get_user(size, (unsigned int __user *)arg);
-		ret = g2d_mem_request(size);
+		ret = g2d_mem_request(arg);
 		break;
 
 	case G2D_CMD_MEM_RELEASE:
-		get_user(sel, (unsigned int __user *)arg);
-		ret = g2d_mem_release(sel);
+		ret = g2d_mem_release(arg);
 		break;
 
 	case G2D_CMD_MEM_SELIDX:
-		get_user(sel, (unsigned int __user *)arg);
-		g2d_mem_sel = sel;
+		g2d_mem_sel = arg;
 		break;
 
 	case G2D_CMD_MEM_GETADR:
-		get_user(sel, (unsigned int __user *)arg);
-		if (g2d_mem[sel].b_used) {
-			ret = g2d_mem[sel].phy_addr;
+		if (g2d_mem[arg].b_used) {
+			ret = g2d_mem[arg].phy_addr;
 		} else {
 			ERR("mem not used in G2D_CMD_MEM_GETADR\n");
 			ret = -1;
@@ -1542,12 +1463,6 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 err_noput:
 	mutex_unlock(&para.mutex);
 
-	if (time_info == 1) {
-		do_gettimeofday(&test_end);
-		runtime = (test_end.tv_sec - test_start.tv_sec) * 1000000 +
-			(test_end.tv_usec - test_start.tv_usec);
-		pr_info("%s:use %u us!\n", __func__, runtime);
-	}
 	return ret;
 }
 
@@ -1556,9 +1471,6 @@ static const struct file_operations g2d_fops = {
 	.open = g2d_open,
 	.release = g2d_release,
 	.unlocked_ioctl = g2d_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl   = g2d_ioctl,
-#endif
 	.mmap = g2d_mmap,
 };
 
@@ -1635,8 +1547,6 @@ static int g2d_probe(struct platform_device *pdev)
 	info->clk = of_clk_get(pdev->dev.of_node, 0);
 	if (IS_ERR(info->clk))
 		ERR("fail to get clk\n");
-	else
-		info->clk_parent = clk_get_parent(info->clk);
 #endif
 
 	drv_g2d_init();
@@ -1675,7 +1585,7 @@ static int g2d_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int g2d_suspend(struct device *dev)
+static int g2d_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	INFO("%s.\n", __func__);
 	mutex_lock(&para.mutex);
@@ -1692,16 +1602,13 @@ static int g2d_suspend(struct device *dev)
 	return 0;
 }
 
-static int g2d_resume(struct device *dev)
+static int g2d_resume(struct platform_device *pdev)
 {
 	INFO("%s.\n", __func__);
 	mutex_lock(&para.mutex);
 	if (para.opened) {
-		if (para.clk) {
-			if (para.clk_parent)
-				clk_set_parent(para.clk, para.clk_parent);
+		if (para.clk)
 			clk_prepare_enable(para.clk);
-		}
 #ifdef G2D_V2X_SUPPORT
 		g2d_bsp_open();
 #endif
@@ -1712,10 +1619,6 @@ static int g2d_resume(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops g2d_pm_ops = {
-	.suspend = g2d_suspend,
-	.resume = g2d_resume,
-};
 #if !defined(CONFIG_OF)
 struct platform_device g2d_device = {
 
@@ -1737,11 +1640,12 @@ static const struct of_device_id sunxi_g2d_match[] = {
 static struct platform_driver g2d_driver = {
 	.probe = g2d_probe,
 	.remove = g2d_remove,
+	.suspend = g2d_suspend,
+	.resume = g2d_resume,
 	.driver = {
 
 		   .owner = THIS_MODULE,
 		   .name = "g2d",
-		   .pm   = &g2d_pm_ops,
 		   .of_match_table = sunxi_g2d_match,
 		   },
 };
@@ -1780,7 +1684,7 @@ int __init g2d_module_init(void)
 static void __exit g2d_module_exit(void)
 {
 	INFO("g2d_module_exit\n");
-	/* kfree(g2d_ext_hd.g2d_finished_sem); */
+	kfree(g2d_ext_hd.g2d_finished_sem);
 
 	platform_driver_unregister(&g2d_driver);
 #if !defined(CONFIG_OF)
@@ -1791,11 +1695,8 @@ static void __exit g2d_module_exit(void)
 
 	cdev_del(g2d_cdev);
 }
-#ifdef CONFIG_ARCH_SUN8IW11P1
-subsys_initcall(g2d_module_init);
-#else
+
 module_init(g2d_module_init);
-#endif
 module_exit(g2d_module_exit);
 
 MODULE_AUTHOR("yupu_tang");

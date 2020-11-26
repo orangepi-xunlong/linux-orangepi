@@ -89,16 +89,9 @@
  * @PIN_CONFIG_SLEW_RATE: if the pin can select slew rate, the argument to
  *	this parameter (on a custom format) tells the driver which alternative
  *	slew rate to use.
-*  @SUNXI_PINCFG_TYPE_***:possible pin configuration types supported
- * @SUNXI_PINCFG_TYPE_FUNC: Function configuration.
- * @SUNXI_PINCFG_TYPE_DAT : Pin value configuration.
- * @SUNXI_PINCFG_TYPE_PUD : Pull up/down configuration.
- * @SUNXI_PINCFG_TYPE_DRV : Drive strength configuration.
  * @PIN_CONFIG_END: this is the last enumerator for pin configurations, if
  *	you need to pass in custom configurations to the pin controller, use
  *	PIN_CONFIG_END+1 as the base offset.
- * @PIN_CONFIG_MAX: this is the maximum configuration value that can be
- *	presented using the packed format.
  */
 enum pin_config_param {
 	PIN_CONFIG_BIAS_BUS_HOLD,
@@ -119,12 +112,7 @@ enum pin_config_param {
 	PIN_CONFIG_OUTPUT,
 	PIN_CONFIG_POWER_SOURCE,
 	PIN_CONFIG_SLEW_RATE,
-	SUNXI_PINCFG_TYPE_FUNC,
-	SUNXI_PINCFG_TYPE_DAT,
-	SUNXI_PINCFG_TYPE_PUD,
-	SUNXI_PINCFG_TYPE_DRV,
-	PIN_CONFIG_END = 0x7F,
-	PIN_CONFIG_MAX = 0xFF,
+	PIN_CONFIG_END = 0x7FFF,
 };
 
 #ifdef CONFIG_DEBUG_FS
@@ -142,27 +130,27 @@ struct pin_config_item {
 /*
  * Helpful configuration macro to be used in tables etc.
  */
-#define PIN_CONF_PACKED(p, a) ((a << 8) | ((unsigned long) p & 0xffUL))
+#define PIN_CONF_PACKED(p, a) ((a << 16) | ((unsigned long) p & 0xffffUL))
 
 /*
  * The following inlines stuffs a configuration parameter and data value
  * into and out of an unsigned long argument, as used by the generic pin config
- * system. We put the parameter in the lower 8 bits and the argument in the
- * upper 24 bits.
+ * system. We put the parameter in the lower 16 bits and the argument in the
+ * upper 16 bits.
  */
 
 static inline enum pin_config_param pinconf_to_config_param(unsigned long config)
 {
-	return (enum pin_config_param) (config & 0xffUL);
+	return (enum pin_config_param) (config & 0xffffUL);
 }
 
-static inline u32 pinconf_to_config_argument(unsigned long config)
+static inline u16 pinconf_to_config_argument(unsigned long config)
 {
-	return (u32) ((config >> 8) & 0xffffffUL);
+	return (enum pin_config_param) ((config >> 16) & 0xffffUL);
 }
 
 static inline unsigned long pinconf_to_config_packed(enum pin_config_param param,
-						     u32 argument)
+						     u16 argument)
 {
 	return PIN_CONF_PACKED(param, argument);
 }

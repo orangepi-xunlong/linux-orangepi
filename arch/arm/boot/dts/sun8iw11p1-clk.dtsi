@@ -532,7 +532,6 @@ clocks {
 			compatible = "allwinner,periph-clock";
 			clock-output-names = "mipidsi";
 			assigned-clocks = <&clk_mipidsi>;
-			assigned-clock-parents = <&clk_pll_periph0>;
 		};
 		clk_tve_top: tve_top {
 			#clock-cells = <0>;

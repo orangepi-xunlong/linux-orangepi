@@ -477,13 +477,7 @@ static int axp22x_probe(struct platform_device *pdev)
 	if (!pm_power_off)
 		pm_power_off = axp22x_power_off;
 
-	/* wakeup-source process */
-#ifndef CONFIG_AXP_TWI_USED
-	if (of_property_read_bool(node, "wakeup-source"))
-		axp22x_ws = axp_wakeup_source_init(axp22x->dev, axp22x->irq);
-	else
-#endif
-		axp22x_ws = wakeup_source_register("axp22_wakeup_source");
+	axp22x_ws = wakeup_source_register("axp22_wakeup_source");
 
 	return 0;
 }

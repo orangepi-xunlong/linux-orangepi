@@ -2071,11 +2071,11 @@ static int btreg_parse_str(char const *input, u8 *type, u16 *addr, u16 *val)
 
 	num = sscanf(input, "%s %x %x", str, &a, &v);
 	if (num < 2) {
-		RTW_INFO("%s: INVALID input!(%s)\n", __func__, input);
+		RTW_INFO("%s: INVALID input!(%s)\n", __FUNCTION__, input);
 		return -EINVAL;
 	}
 	if ((num < 3) && val) {
-		RTW_INFO("%s: INVALID input!(%s)\n", __func__, input);
+		RTW_INFO("%s: INVALID input!(%s)\n", __FUNCTION__, input);
 		return -EINVAL;
 	}
 
@@ -2091,7 +2091,7 @@ static int btreg_parse_str(char const *input, u8 *type, u16 *addr, u16 *val)
 		}
 	}
 	if (i == n) {
-		RTW_INFO("%s: unknown type(%s)!\n", __func__, str);
+		RTW_INFO("%s: unknown type(%s)!\n", __FUNCTION__, str);
 		return -EINVAL;
 	}
 
@@ -2100,7 +2100,7 @@ static int btreg_parse_str(char const *input, u8 *type, u16 *addr, u16 *val)
 		/* RF */
 		if (a & 0xFFFFFF80) {
 			RTW_INFO("%s: INVALID address(0x%X) for type %s(%d)!\n",
-				 __func__, a, btreg_type[t], t);
+				 __FUNCTION__, a, btreg_type[t], t);
 			return -EINVAL;
 		}
 		break;
@@ -2108,7 +2108,7 @@ static int btreg_parse_str(char const *input, u8 *type, u16 *addr, u16 *val)
 		/* Modem */
 		if (a & 0xFFFFFE00) {
 			RTW_INFO("%s: INVALID address(0x%X) for type %s(%d)!\n",
-				 __func__, a, btreg_type[t], t);
+				 __FUNCTION__, a, btreg_type[t], t);
 			return -EINVAL;
 		}
 		break;
@@ -2116,7 +2116,7 @@ static int btreg_parse_str(char const *input, u8 *type, u16 *addr, u16 *val)
 		/* Others(Bluewize, Vendor, LE) */
 		if (a & 0xFFFFF000) {
 			RTW_INFO("%s: INVALID address(0x%X) for type %s(%d)!\n",
-				 __func__, a, btreg_type[t], t);
+				 __FUNCTION__, a, btreg_type[t], t);
 			return -EINVAL;
 		}
 		break;
@@ -2124,7 +2124,7 @@ static int btreg_parse_str(char const *input, u8 *type, u16 *addr, u16 *val)
 
 	if (val) {
 		if (v & 0xFFFF0000) {
-			RTW_INFO("%s: INVALID value(0x%x)!\n", __func__, v);
+			RTW_INFO("%s: INVALID value(0x%x)!\n", __FUNCTION__, v);
 			return -EINVAL;
 		}
 		*val = (u16)v;
@@ -2657,7 +2657,7 @@ static ssize_t proc_set_napi_th(struct file *file, const char __user *buffer, si
 		return -EFAULT;
 	}
 
-	RTW_INFO("%s: Last threshold = %d Mbps\n", __func__, registry->napi_threshold);
+	RTW_INFO("%s: Last threshold = %d Mbps\n", __FUNCTION__, registry->napi_threshold);
 
 	if (buffer && !copy_from_user(tmp, buffer, count)) {
 		num = sscanf(tmp, "%d", &thrshld);
@@ -2666,9 +2666,9 @@ static ssize_t proc_set_napi_th(struct file *file, const char __user *buffer, si
 				registry->napi_threshold = thrshld;
 		}
 	}
-	RTW_INFO("%s: New threshold = %d Mbps\n", __func__, registry->napi_threshold);
+	RTW_INFO("%s: New threshold = %d Mbps\n", __FUNCTION__, registry->napi_threshold);
 	RTW_INFO("%s: Current RX throughput = %d Mbps\n",
-		 __func__, adapter_to_dvobj(adapter)->traffic_stat.cur_rx_tp);
+		 __FUNCTION__, adapter_to_dvobj(adapter)->traffic_stat.cur_rx_tp);
 
 	return count;
 }
@@ -2755,15 +2755,15 @@ static ssize_t proc_set_vht_2g4(struct file *file, const char __user *buffer,
 
 	num = sscanf(tmp, "%d", &enable);
 	if (num !=  1) {
-		RTW_ERR("%s: invalid parameter!\n", __func__);
+		RTW_ERR("%s: invalid parameter!\n", __FUNCTION__);
 		goto exit;
 	}
 
 	RTW_PRINT("%s: Original state of use VHT rate on 2.4G: %s\n",
-		  __func__, VHT_2G4_STATUS_STR(a));
+		  __FUNCTION__, VHT_2G4_STATUS_STR(a));
 	rtw_set_vht_2g4(a, enable);
 	RTW_PRINT("%s: New state of use VHT rate on 2.4G: %s\n",
-		  __func__, VHT_2G4_STATUS_STR(a));
+		  __FUNCTION__, VHT_2G4_STATUS_STR(a));
 
 exit:
 	return count;
@@ -2800,14 +2800,14 @@ static ssize_t proc_set_scan_deny(struct file *file, const char __user *buffer,
 
 	num = sscanf(tmp, "%d", &enable);
 	if (num !=  1) {
-		RTW_ERR("%s: invalid parameter!\n", __func__);
+		RTW_ERR("%s: invalid parameter!\n", __FUNCTION__);
 		goto exit;
 	}
 
 	dvobj->scan_deny = enable ? _TRUE : _FALSE;
 
 	RTW_PRINT("%s: scan_deny is %s\n",
-		  __func__, (dvobj->scan_deny == _TRUE) ? "enable":"disable");
+		  __FUNCTION__, (dvobj->scan_deny == _TRUE) ? "enable":"disable");
 
 exit:
 	return count;
@@ -2919,7 +2919,7 @@ static ssize_t proc_set_tpt_mode(struct file *file, const char __user *buffer,
 
 	num = sscanf(tmp, "%d", &mode);
 	if (num !=  1) {
-		RTW_ERR("%s: invalid parameter!\n", __func__);
+		RTW_ERR("%s: invalid parameter!\n", __FUNCTION__);
 		goto exit;
 	}
 
@@ -2927,10 +2927,10 @@ static ssize_t proc_set_tpt_mode(struct file *file, const char __user *buffer,
 		mode = 0;
 
 	RTW_PRINT("%s: previous mode =  %d\n",
-		  __func__, dvobj->tpt_mode);
+		  __FUNCTION__, dvobj->tpt_mode);
 
 	RTW_PRINT("%s: enabled mode = %d\n",
-		  __func__, mode);
+		  __FUNCTION__, mode);
 
 	dvobj->tpt_mode = mode;
 

@@ -50,10 +50,6 @@ int de_fcc_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 	void *memory;
 
 	fcc_base = reg_base + (sel + 1) * 0x00100000 + FCC_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel)
-		fcc_base = fcc_base - 0x00100000;
-#endif
 	/* FIXME  display path offset should be defined */
 
 	memory = kmalloc(sizeof(struct __fcc_reg_t), GFP_KERNEL | __GFP_ZERO);

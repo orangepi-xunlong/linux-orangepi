@@ -14,11 +14,7 @@
 
 static volatile struct __de_lcd_dev_t *lcd_dev[DEVICE_NUM];
 #if defined(HAVE_DEVICE_COMMON_MODULE)
-#if defined(CONFIG_ARCH_SUN50IW10)
-static volatile struct __de_lcd_top_dev_t *lcd_top[DEVICE_NUM];
-#else
 static volatile struct __de_lcd_top_dev_t *lcd_top[1];
-#endif
 #endif
 
 #if defined(HAVE_DEVICE_COMMON_MODULE)
@@ -33,17 +29,10 @@ static volatile struct __de_lcd_top_dev_t *lcd_top[1];
  */
 s32 vdpo_src_sel(u32 sel, u32 src)
 {
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel == 0)
-		lcd_top[0]->vdpo_src_select.bits.vdpo0_src_sel = src;
-	else
-		lcd_top[1]->vdpo_src_select.bits.vdpo1_src_sel = src;
-#else
 	if (sel == 0)
 		lcd_top[0]->vdpo_src_select.bits.vdpo0_src_sel = src;
 	else
 		lcd_top[0]->vdpo_src_select.bits.vdpo1_src_sel = src;
-#endif
 	return 0;
 }
 
@@ -58,17 +47,10 @@ s32 dsi_src_sel(u32 sel, u32 src)
 {
 	if (sel >= DEVICE_DSI_NUM || src > 1)
 		return -1;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel == 0)
-		lcd_top[0]->dsi_src_select.bits.dsi0_src_sel = src;
-	else
-		lcd_top[1]->dsi_src_select.bits.dsi1_src_sel = src;
-#else
 	if (sel == 0)
 		lcd_top[0]->dsi_src_select.bits.dsi0_src_sel = src;
 	else
 		lcd_top[0]->dsi_src_select.bits.dsi1_src_sel = src;
-#endif
 	return 0;
 }
 /* sel: the index of timing controller */
@@ -179,17 +161,10 @@ s32 tcon1_hdmi_clk_enable(u32 sel, u32 en)
  */
 s32 tcon_vdpo_clk_enable(u32 sel, u32 en)
 {
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (sel == 0)
-		lcd_top[0]->tcon_clk_gate.bits.vdpo0_clk_gate = en;
-	else
-		lcd_top[1]->tcon_clk_gate.bits.vdpo1_clk_gate = en;
-#else
 	if (sel == 0)
 		lcd_top[0]->tcon_clk_gate.bits.vdpo0_clk_gate = en;
 	else
 		lcd_top[0]->tcon_clk_gate.bits.vdpo1_clk_gate = en;
-#endif
 	return 0;
 }
 
@@ -203,12 +178,8 @@ s32 tcon_vdpo_clk_enable(u32 sel, u32 en)
 s32 tcon0_dsi_clk_enable(u32 sel, u32 en)
 {
 	/* only tcon0 support dsi on sun8iw11 platform */
-#if defined(CONFIG_ARCH_SUN8IW17P1)
-	lcd_top[0]->tcon_clk_gate.bits.lcd1_dsi_clk_gate = en;
-#else
 	if (sel == 0)
 		lcd_top[0]->tcon_clk_gate.bits.dsi_clk_gate = en;
-#endif
 
 	return 0;
 }
@@ -238,17 +209,10 @@ s32 tcon_de_attach(u32 tcon_index, u32 de_index)
 		if (tcon_real_index > 2)
 			tcon_real_index += 2;
 	}
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (de_index == 0)
-		lcd_top[0]->tcon_de_perh.bits.de_port0_perh = tcon_real_index;
-	else if (de_index == 1)
-		lcd_top[1]->tcon_de_perh.bits.de_port1_perh = tcon_real_index;
-#else
 	if (de_index == 0)
 		lcd_top[0]->tcon_de_perh.bits.de_port0_perh = tcon_real_index;
 	else if (de_index == 1)
 		lcd_top[0]->tcon_de_perh.bits.de_port1_perh = tcon_real_index;
-#endif
 
 	return 0;
 }
@@ -264,21 +228,13 @@ s32 get_tcon_type_by_de_index(u32 de_index)
 {
 	s32 tcon_index = 0;
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (de_index == 0)
-		tcon_index = lcd_top[0]->tcon_de_perh.bits.de_port0_perh;
-	else if (de_index == 1)
-		tcon_index = lcd_top[1]->tcon_de_perh.bits.de_port1_perh;
-	else
-		return -1;
-#else
 	if (de_index == 0)
 		tcon_index = lcd_top[0]->tcon_de_perh.bits.de_port0_perh;
 	else if (de_index == 1)
 		tcon_index = lcd_top[0]->tcon_de_perh.bits.de_port1_perh;
 	else
 		return -1;
-#endif
+
 	return ((tcon_index / 2) % 2 != 0) ? 1 : 0;
 }
 /**
@@ -292,17 +248,11 @@ s32 tcon_get_attach_by_de_index(u32 de_index)
 {
 	s32 tcon_index = 0;
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (de_index == 0)
-		tcon_index = lcd_top[0]->tcon_de_perh.bits.de_port0_perh;
-	else if (de_index == 1)
-		tcon_index = lcd_top[1]->tcon_de_perh.bits.de_port1_perh;
-#else
 	if (de_index == 0)
 		tcon_index = lcd_top[0]->tcon_de_perh.bits.de_port0_perh;
 	else if (de_index == 1)
 		tcon_index = lcd_top[0]->tcon_de_perh.bits.de_port1_perh;
-#endif
+
 	return tcon_index;
 }
 

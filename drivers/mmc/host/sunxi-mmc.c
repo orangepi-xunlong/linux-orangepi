@@ -45,7 +45,7 @@
 #include <linux/mmc/core.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/slot-gpio.h>
-#include <linux/sunxi-sid.h>
+
 #include "sunxi-mmc.h"
 #include "sunxi-mmc-sun50iw1p1-2.h"
 #include "sunxi-mmc-sun50iw1p1-0.h"
@@ -54,12 +54,9 @@
 #include "sunxi-mmc-v4p10x.h"
 #include "sunxi-mmc-v4p00x.h"
 #include "sunxi-mmc-v4p5x.h"
-#include "sunxi-mmc-v5p3x.h"
-
 
 #include "sunxi-mmc-debug.h"
 #include "sunxi-mmc-export.h"
-#include "sunxi-mmc-panic.h"
 
 /**default retry times ****/
 #define SUNXI_DEF_RETRY_TIMES		6
@@ -196,7 +193,6 @@ void sunxi_mmc_set_a12a(struct sunxi_mmc_host *host)
 {
 	mmc_writel(host, REG_A12A, 0);
 }
-EXPORT_SYMBOL_GPL(sunxi_mmc_set_a12a);
 
 static int sunxi_mmc_init_host(struct mmc_host *mmc)
 {
@@ -909,8 +905,6 @@ retry_giveup:
 		dev_err(mmc_dev(host->mmc), "retry:give up\n");
 		spin_lock_irqsave(&host->lock, iflags);
 		host->mrq_retry = NULL;
-		/**clear retry count if retry giveup*/
-		host->retry_cnt = 0;
 		cmd->error = -ETIMEDOUT;
 		if (mrq_retry->sbc)
 			mrq_retry->cmd->error = -ETIMEDOUT;
@@ -1555,13 +1549,12 @@ static int sunxi_mmc_regulator_get_supply(struct mmc_host *mmc)
 {
 	struct device *dev = mmc_dev(mmc);
 	int ret = 0;
-#ifndef CONFIG_SUNXI_REGULATOR_DT
-	static const char * const pwr_str[] = { "vmmc", "vqmmc", "vdmmc",
-						"vdmmc33sw", "vdmmc18sw",
-						"vqmmc33sw", "vqmmc18sw"};
 	int i = 0;
 	struct device_node *np = NULL;
 	struct property *prop = NULL;
+	static const char * const pwr_str[] = { "vmmc", "vqmmc", "vdmmc",
+						"vdmmc33sw", "vdmmc18sw",
+						"vqmmc33sw", "vqmmc18sw"};
 	const char *reg_str[ARRAY_SIZE(pwr_str)] = { NULL };
 
 	if (!mmc->parent || !mmc->parent->of_node) {
@@ -1623,15 +1616,6 @@ static int sunxi_mmc_regulator_get_supply(struct mmc_host *mmc)
 	mmc->supply.vdmmc18sw = regulator_get(NULL, reg_str[4]);
 	mmc->supply.vqmmc33sw = regulator_get(NULL, reg_str[5]);
 	mmc->supply.vqmmc18sw = regulator_get(NULL, reg_str[6]);
-#else
-	mmc->supply.vmmc = regulator_get_optional(dev, "vmmc");
-	mmc->supply.vqmmc = regulator_get_optional(dev, "vqmmc");
-	mmc->supply.vdmmc = regulator_get_optional(dev, "vdmmc");
-	mmc->supply.vdmmc33sw = regulator_get_optional(dev, "vdmmc33sw");
-	mmc->supply.vdmmc18sw = regulator_get_optional(dev, "vdmmc18sw");
-	mmc->supply.vqmmc33sw = regulator_get_optional(dev, "vqmmc33sw");
-	mmc->supply.vqmmc18sw = regulator_get_optional(dev, "vqmmc18sw");
-#endif
 	if (IS_ERR(mmc->supply.vmmc)) {
 		dev_info(dev, "No vmmc regulator found\n");
 	} else {
@@ -1746,7 +1730,6 @@ static const struct of_device_id sunxi_mmc_of_match[] = {
 	{.compatible = "allwinner,sunxi-mmc-v4p00x",},
 	{.compatible = "allwinner,sunxi-mmc-v4p5x",},
 	{.compatible = "allwinner,sunxi-mmc-v4p6x",},
-	{.compatible = "allwinner,sunxi-mmc-v5p3x",},
 	{ /* sentinel */ }
 };
 
@@ -2219,31 +2202,12 @@ static int sunxi_mmc_resource_request(struct sunxi_mmc_host *host,
 		else
 			dev_err(&pdev->dev, "No sdmmc device,check dts\n");
 		sunxi_mmc_init_priv_v4p6x(host, pdev, phy_index);
-	} else if (of_device_is_compatible(np, "allwinner,sunxi-mmc-v5p3x")) {
-		int phy_index = 0;
-		if (of_property_match_string(np, "device_type", "sdc0") == 0) {
-			phy_index = 0;
-		} else if (of_property_match_string(np, "device_type", "sdc1")
-			   == 0) {
-			phy_index = 1;
-		} else if (of_property_match_string(np, "device_type", "sdc2")
-			   == 0) {
-			phy_index = 2;
-		} else if (of_property_match_string(np, "device_type", "sdc3")
-			   == 0) {
-			phy_index = 3;
-		} else {
-			dev_err(&pdev->dev, "No sdmmc device,check dts\n");
-		}
-		sunxi_mmc_init_priv_v5p3x(host, pdev, phy_index);
 	}
 
 	host->irq = platform_get_irq(pdev, 0);
-	snprintf(host->name, sizeof(host->name), "sunxi-mmc%d",
-		 host->phy_index);
 	ret = devm_request_threaded_irq(&pdev->dev, host->irq, sunxi_mmc_irq,
 					sunxi_mmc_handle_bottom_half, 0,
-					host->name, host);
+					"sunxi-mmc", host);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to request irq %d\n", ret);
 		goto error_disable_clk_mmc;
@@ -2304,7 +2268,6 @@ static int sunxi_mmc_extra_of_parse(struct mmc_host *mmc)
 	unsigned long config_set;
 	struct gpio_config gpio_flags;
 	int gpio;
-	int perf_enable = 0;
 	if (!mmc->parent || !mmc->parent->of_node)
 		return 0;
 
@@ -2361,47 +2324,6 @@ static int sunxi_mmc_extra_of_parse(struct mmc_host *mmc)
 		mmc->caps2 |= MMC_CAP2_PACKED_WR;
 	if (of_property_read_bool(np, "mmc-cache-ctrl"))
 		mmc->caps2 |= MMC_CAP2_CACHE_CTRL;
-	if (of_property_read_bool(np, "cd-used-24M"))
-		mmc->sunxi_caps3 |= MMC_SUNXI_CAP3_CD_USED_24M;
-	if (of_property_read_bool(np, "sdio-used-1v8")) {
-		if (sunxi_sel_pio_mode(host->pinctrl, MMC_SIGNAL_VOLTAGE_180))
-			dev_warn(mmc_dev(mmc), "Cannot select 1.8v pio mode\n");
-	}
-#ifdef CONFIG_ARCH_SUN8IW16P1
-	if (sunxi_get_soc_ver() ==  SUN8IW16P1_REV_A) {
-		if (host->phy_index == 0) {
-		mmc->caps &= ~(MMC_CAP_UHS_SDR12|MMC_CAP_UHS_SDR25|
-				MMC_CAP_UHS_SDR50|MMC_CAP_UHS_SDR104|
-				MMC_CAP_UHS_DDR50);
-		}
-	}
-#endif
-
-
-	if (of_property_read_u32(np,
-			"filter_speed", &(host->filter_speed)) < 0) {
-		dev_dbg(mmc->parent,
-			"filter speed is missing, function is no used\n");
-	} else {
-		dev_info(mmc->parent, "filter speed is %d B/s\n", host->filter_speed);
-	}
-
-	if (of_property_read_u32(np,
-			"filter_sector", &(host->filter_sector)) < 0) {
-		dev_dbg(mmc->parent,
-			"filter sector is missing, function is no used\n");
-	} else {
-		dev_info(mmc->parent, "filter sector is %d sector\n", host->filter_sector);
-	}
-
-	if (of_property_read_u32(np,
-			"perf_enable", &perf_enable) < 0) {
-		dev_dbg(mmc->parent,
-			"perf_enable is missing, function is no used\n");
-	} else {
-		dev_info(mmc->parent, "Perf function is enable\n");
-		host->perf_enable = true;
-	}
 
 
 	return 0;
@@ -2411,7 +2333,6 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 {
 	struct sunxi_mmc_host *host;
 	struct mmc_host *mmc;
-	struct mmc_gpio *ctx;
 	int ret;
 
 	dev_info(&pdev->dev, "%s\n", DRIVER_VERSION);
@@ -2429,14 +2350,10 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 	ret = sunxi_mmc_resource_request(host, pdev);
 	if (ret)
 		goto error_free_host;
-#if (defined CONFIG_ARCH_SUN50IW9) || (defined CONFIG_ARCH_SUN50IW10)
-	host->dma_mask = DMA_BIT_MASK(64);
-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(64);
-#else
+
 	host->dma_mask = DMA_BIT_MASK(32);
-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
-#endif
 	pdev->dev.dma_mask = &host->dma_mask;
+	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 	host->sg_cpu = dma_alloc_coherent(&pdev->dev, SUNXI_REQ_PAGE_SIZE,
 					  &host->sg_dma, GFP_KERNEL);
 	if (!host->sg_cpu) {
@@ -2454,6 +2371,7 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 	/* 400kHz ~ 50MHz */
 	mmc->f_min = 400000;
 	mmc->f_max = 50000000;
+
 
 	if (sunxi_mmc_chk_hr1b_cap(host)) {
 		mmc->max_busy_timeout = SUNXI_DEF_MAX_R1B_TIMEOUT_MS;
@@ -2474,15 +2392,6 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 	sunxi_mmc_extra_of_parse(mmc);
 	if (mmc->sunxi_caps3 & MMC_SUNXI_CAP3_DAT3_DET)
 		host->dat3_imask = SDXC_CARD_INSERT | SDXC_CARD_REMOVE;
-	if (mmc->sunxi_caps3 & MMC_SUNXI_CAP3_CD_USED_24M) {
-		ctx = (struct mmc_gpio *)mmc->slot.handler_priv;
-		if (ctx  && ctx->cd_gpio) {
-			ret = gpiod_set_debounce(ctx->cd_gpio, 1);
-			if (ret < 0) {
-				dev_info(&pdev->dev, "set cd-gpios as 24M fail\n");
-			}
-		}
-	}
 
 	dev_dbg(&pdev->dev, "base:0x%p irq:%u\n", host->reg_base, host->irq);
 	platform_set_drvdata(pdev, mmc);
@@ -2498,7 +2407,6 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 		goto error_free_dma;
 	}
 
-	sunxi_mmc_panic_init_ps(NULL);
 
 	return 0;
 

@@ -14,7 +14,6 @@
 * GNU General Public License for more details.
 */
 
-#ifdef CONFIG_ARCH_SUN8IW10P1
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -1748,5 +1747,3 @@ MODULE_DESCRIPTION("Allwinner's SD/MMC Card Controller Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("David Lanzend�rfer <david.lanzendoerfer@o2s.ch>");
 MODULE_ALIAS("platform:sunxi-mmc");
-
-#endif

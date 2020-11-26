@@ -97,11 +97,6 @@ static void modify_msg(struct usb_msg *msg)
 
 static void insmod_host_driver(struct usb_msg_center_info *center_info)
 {
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	struct usb_cfg *cfg = &g_usb_cfg;
-	struct dual_role_phy_instance *dual_role = cfg->port.dual_role;
-#endif
 	DMSG_INFO("\ninsmod_host_driver\n\n");
 
 	set_usb_role(center_info, USB_ROLE_HOST);
@@ -120,19 +115,10 @@ static void insmod_host_driver(struct usb_msg_center_info *center_info)
 	#endif
 #endif
 
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	dual_role_instance_changed(dual_role);
-#endif
-
 }
 
 static void rmmod_host_driver(struct usb_msg_center_info *center_info)
 {
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	struct usb_cfg *cfg = &g_usb_cfg;
-	struct dual_role_phy_instance *dual_role = cfg->port.dual_role;
-#endif
 	DMSG_INFO("\nrmmod_host_driver\n\n");
 
 #if defined(CONFIG_ARCH_SUN8IW6)
@@ -157,11 +143,6 @@ static void rmmod_host_driver(struct usb_msg_center_info *center_info)
 	#endif
 #endif
 	set_usb_role(center_info, USB_ROLE_NULL);
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	dual_role_instance_changed(dual_role);
-#endif
-
 }
 
 static void insmod_device_driver(struct usb_msg_center_info *center_info)

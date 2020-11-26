@@ -190,6 +190,9 @@ struct fadump_crash_info_header {
 	struct cpumask	online_mask;
 };
 
+/* Crash memory ranges */
+#define INIT_CRASHMEM_RANGES	(INIT_MEMBLOCK_REGIONS + 2)
+
 struct fad_crash_memory_ranges {
 	unsigned long long	base;
 	unsigned long long	size;

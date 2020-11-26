@@ -616,22 +616,21 @@ void hv_kvp_onchannelcallback(void *context)
 		     NEGO_IN_PROGRESS,
 		     NEGO_FINISHED} host_negotiatied = NEGO_NOT_STARTED;
 
-	if (kvp_transaction.state < HVUTIL_READY) {
+	if (host_negotiatied == NEGO_NOT_STARTED &&
+	    kvp_transaction.state < HVUTIL_READY) {
 		/*
 		 * If userspace daemon is not connected and host is asking
 		 * us to negotiate we need to delay to not lose messages.
 		 * This is important for Failover IP setting.
 		 */
-		if (host_negotiatied == NEGO_NOT_STARTED) {
-			host_negotiatied = NEGO_IN_PROGRESS;
-			schedule_delayed_work(&kvp_host_handshake_work,
+		host_negotiatied = NEGO_IN_PROGRESS;
+		schedule_delayed_work(&kvp_host_handshake_work,
 				      HV_UTIL_NEGO_TIMEOUT * HZ);
-		}
 		return;
 	}
 	if (kvp_transaction.state > HVUTIL_READY)
 		return;
-recheck:
+
 	vmbus_recvpacket(channel, recv_buffer, PAGE_SIZE * 4, &recvlen,
 			 &requestid);
 
@@ -708,8 +707,6 @@ recheck:
 				       VM_PKT_DATA_INBAND, 0);
 
 		host_negotiatied = NEGO_FINISHED;
-
-		goto recheck;
 	}
 
 }

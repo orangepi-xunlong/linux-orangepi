@@ -13,7 +13,7 @@ of a virtual machine.  The ioctls belong to three classes
 
  - VM ioctls: These query and set attributes that affect an entire virtual
    machine, for example memory layout.  In addition a VM ioctl is used to
-   create virtual cpus (vcpus) and devices.
+   create virtual cpus (vcpus).
 
    Only run VM ioctls from the same process (address space) that was used
    to create the VM.
@@ -24,11 +24,6 @@ of a virtual machine.  The ioctls belong to three classes
    Only run vcpu ioctls from the same thread that was used to create the
    vcpu.
 
- - device ioctls: These query and set attributes that control the operation
-   of a single device.
-
-   device ioctls must be issued from the same process (address space) that
-   was used to create the VM.
 
 2. File descriptors
 -------------------
@@ -37,11 +32,10 @@ The kvm API is centered around file descriptors.  An initial
 open("/dev/kvm") obtains a handle to the kvm subsystem; this handle
 can be used to issue system ioctls.  A KVM_CREATE_VM ioctl on this
 handle will create a VM file descriptor which can be used to issue VM
-ioctls.  A KVM_CREATE_VCPU or KVM_CREATE_DEVICE ioctl on a VM fd will
-create a virtual cpu or device and return a file descriptor pointing to
-the new resource.  Finally, ioctls on a vcpu or device fd can be used
-to control the vcpu or device.  For vcpus, this includes the important
-task of actually running guest code.
+ioctls.  A KVM_CREATE_VCPU ioctl on a VM fd will create a virtual cpu
+and return a file descriptor pointing to it.  Finally, ioctls on a vcpu
+fd can be used to control the vcpu, including the important task of
+actually running guest code.
 
 In general file descriptors can be migrated among processes by means
 of fork() and the SCM_RIGHTS facility of unix domain socket.  These
@@ -128,15 +122,14 @@ KVM_CAP_S390_UCONTROL and use the flag KVM_VM_S390_UCONTROL as
 privileged user (CAP_SYS_ADMIN).
 
 
-4.3 KVM_GET_MSR_INDEX_LIST, KVM_GET_MSR_FEATURE_INDEX_LIST
+4.3 KVM_GET_MSR_INDEX_LIST
 
-Capability: basic, KVM_CAP_GET_MSR_FEATURES for KVM_GET_MSR_FEATURE_INDEX_LIST
+Capability: basic
 Architectures: x86
-Type: system ioctl
+Type: system
 Parameters: struct kvm_msr_list (in/out)
 Returns: 0 on success; -1 on error
 Errors:
-  EFAULT:    the msr index list cannot be read from or written to
   E2BIG:     the msr index list is to be to fit in the array specified by
              the user.
 
@@ -145,22 +138,15 @@ struct kvm_msr_list {
 	__u32 indices[0];
 };
 
-The user fills in the size of the indices array in nmsrs, and in return
-kvm adjusts nmsrs to reflect the actual number of msrs and fills in the
-indices array with their numbers.
-
-KVM_GET_MSR_INDEX_LIST returns the guest msrs that are supported.  The list
-varies by kvm version and host processor, but does not change otherwise.
+This ioctl returns the guest msrs that are supported.  The list varies
+by kvm version and host processor, but does not change otherwise.  The
+user fills in the size of the indices array in nmsrs, and in return
+kvm adjusts nmsrs to reflect the actual number of msrs and fills in
+the indices array with their numbers.
 
 Note: if kvm indicates supports MCE (KVM_CAP_MCE), then the MCE bank MSRs are
 not returned in the MSR list, as different vcpus can have a different number
 of banks, as set via the KVM_X86_SETUP_MCE ioctl.
-
-KVM_GET_MSR_FEATURE_INDEX_LIST returns the list of MSRs that can be passed
-to the KVM_GET_MSRS system ioctl.  This lets userspace probe host capabilities
-and processor features that are exposed via MSRs (e.g., VMX capabilities).
-This list also varies by kvm version and host processor, but does not change
-otherwise.
 
 
 4.4 KVM_CHECK_EXTENSION
@@ -488,22 +474,14 @@ Support for this has been removed.  Use KVM_SET_GUEST_DEBUG instead.
 
 4.18 KVM_GET_MSRS
 
-Capability: basic (vcpu), KVM_CAP_GET_MSR_FEATURES (system)
+Capability: basic
 Architectures: x86
-Type: system ioctl, vcpu ioctl
+Type: vcpu ioctl
 Parameters: struct kvm_msrs (in/out)
-Returns: number of msrs successfully returned;
-        -1 on error
+Returns: 0 on success, -1 on error
 
-When used as a system ioctl:
-Reads the values of MSR-based features that are available for the VM.  This
-is similar to KVM_GET_SUPPORTED_CPUID, but it returns MSR indices and values.
-The list of msr-based features can be obtained using KVM_GET_MSR_FEATURE_INDEX_LIST
-in a system ioctl.
-
-When used as a vcpu ioctl:
 Reads model-specific registers from the vcpu.  Supported msr indices can
-be obtained using KVM_GET_MSR_INDEX_LIST in a system ioctl.
+be obtained using KVM_GET_MSR_INDEX_LIST.
 
 struct kvm_msrs {
 	__u32 nmsrs; /* number of msrs in entries */

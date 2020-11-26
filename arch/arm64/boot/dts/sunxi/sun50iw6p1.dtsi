@@ -71,9 +71,18 @@
 			compatible = "android,firmware";
 			name = "android";
 			boot_devices = "soc/sdc0,soc/sdc2,soc";
-			vbmeta {
-				compatible = "android,vbmeta";
-				parts = "vbmeta,vbmeta_system,vbmeta_vendor,boot,super,recovery";
+			fstab {
+				compatible = "android,fstab";
+				name = "fstab";
+				vendor {
+					compatible = "android,vendor";
+					dev = "/dev/block/by-name/vendor";
+					fsmgr_flags = "wait,recoveryonly";
+					mnt_flags = "ro,barrier=1";
+					name = "vendor";
+					status = "ok";
+					type = "ext4";
+				};
 			};
 		};
 		optee {
@@ -322,6 +331,7 @@
 			   <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
 			   <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
 		clock-frequency = <24000000>;
+		arm,no-tick-in-suspend;
 	};
 
 	pmu {
@@ -346,48 +356,49 @@
 				opp-microvolt = <880000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp01 {
 				opp-hz = /bits/ 64 <720000000>;
 				opp-microvolt = <880000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp02 {
 				opp-hz = /bits/ 64 <816000000>;
 				opp-microvolt = <880000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp03 {
 				opp-hz = /bits/ 64 <888000000>;
-				opp-microvolt = <940000>;
+				opp-microvolt = <880000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp04 {
 				opp-hz = /bits/ 64 <1080000000>;
-				opp-microvolt = <1060000>;
+				opp-microvolt = <940000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <3100>;
 			};
 			opp05 {
 				opp-hz = /bits/ 64 <1320000000>;
-				opp-microvolt = <1160000>;
+				opp-microvolt = <1000000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <3650>;
 			};
 			opp06 {
 				opp-hz = /bits/ 64 <1488000000>;
-				opp-microvolt = <1160000>;
+				opp-microvolt = <1060000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
-			};
-			opp07 {
-				opp-hz = /bits/ 64 <1800000000>;
-				opp-microvolt = <1160000>;
-				axi-bus-divide-ratio = <3>;
-				clock-latency-ns = <2000000>;
+				pval = <3950>;
 			};
 		};
 
@@ -401,48 +412,49 @@
 				opp-microvolt = <820000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp01 {
 				opp-hz = /bits/ 64 <720000000>;
 				opp-microvolt = <820000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp02 {
 				opp-hz = /bits/ 64 <816000000>;
 				opp-microvolt = <820000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp03 {
 				opp-hz = /bits/ 64 <888000000>;
 				opp-microvolt = <820000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp04 {
 				opp-hz = /bits/ 64 <1080000000>;
 				opp-microvolt = <880000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <3100>;
 			};
 			opp05 {
 				opp-hz = /bits/ 64 <1320000000>;
 				opp-microvolt = <940000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <3650>;
 			};
 			opp06 {
 				opp-hz = /bits/ 64 <1488000000>;
 				opp-microvolt = <1000000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
-			};
-			opp07 {
-				opp-hz = /bits/ 64 <1800000000>;
-				opp-microvolt = <1100000>;
-				axi-bus-divide-ratio = <3>;
-				clock-latency-ns = <2000000>;
+				pval = <3950>;
 			};
 		};
 
@@ -456,48 +468,49 @@
 				opp-microvolt = <800000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp01 {
 				opp-hz = /bits/ 64 <720000000>;
 				opp-microvolt = <800000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp02 {
 				opp-hz = /bits/ 64 <816000000>;
 				opp-microvolt = <800000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp03 {
 				opp-hz = /bits/ 64 <888000000>;
 				opp-microvolt = <800000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <2800>;
 			};
 			opp04 {
 				opp-hz = /bits/ 64 <1080000000>;
 				opp-microvolt = <840000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <3100>;
 			};
 			opp05 {
 				opp-hz = /bits/ 64 <1320000000>;
 				opp-microvolt = <900000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
+				pval = <3650>;
 			};
 			opp06 {
 				opp-hz = /bits/ 64 <1488000000>;
 				opp-microvolt = <960000>;
 				axi-bus-divide-ratio = <3>;
 				clock-latency-ns = <2000000>;
-			};
-			opp07 {
-				opp-hz = /bits/ 64 <1800000000>;
-				opp-microvolt = <1060000>;
-				axi-bus-divide-ratio = <3>;
-				clock-latency-ns = <2000000>;
+				pval = <3950>;
 			};
 		};
 
@@ -569,7 +582,7 @@
 			space4 = <0x48105000 0x00000000 0x00001000>; /* msgpool space     */
 		};
 
-		standby_space {
+		standby_space: standby_space@040020000 {
 			compatible = "allwinner,sun50iw6-usbstandby";
 			/* num    dst        offset     size						*/
 			space1 = <0x40020000 0x00000000 0x00000800>; /* super standby para space        */
@@ -651,7 +664,7 @@
 		};
 
 		rtc: rtc@07000000 {
-			compatible = "allwinner,sunxi-rtc";
+			compatible = "allwinner,sun50iw6-rtc";
 			device_type = "rtc";
 			reg = <0x0 0x07000000 0x0 0x200>;
 			interrupts = <GIC_SPI 101 IRQ_TYPE_LEVEL_HIGH>;
@@ -1282,9 +1295,10 @@
 				 <&clk_sdmmc0_bus>,
 				 <&clk_sdmmc0_rst>;
 			clock-names = "osc24m","pll_periph","mmc","ahb","rst";
-			pinctrl-names = "default","sleep";
+			pinctrl-names = "default","sleep" ,"uart_jtag";
 			pinctrl-0 = <&sdc0_pins_a>;
 			pinctrl-1 = <&sdc0_pins_b>;
+			pinctrl-2 = <&sdc0_pins_c>;
 			max-frequency = <50000000>;
 			bus-width = <4>;
 			/*non-removable;*/
@@ -1559,7 +1573,7 @@
 			pinctrl-names = "mclk0-default","mclk0-sleep";
 			pinctrl-0 = <&csi_mclk0_pins_a>;
 			pinctrl-1 = <&csi_mclk0_pins_b>;
-			status = "okay";
+			status = "disabled";
 
 			csi_cci0:cci@0x0662e000 {
 				compatible = "allwinner,sunxi-csi_cci";
@@ -1570,7 +1584,7 @@
 				pinctrl-0 		= <&csi_cci0_pins_a>;
 				pinctrl-1 		= <&csi_cci0_pins_b>;
 				device_id = <0>;
-				status = "okay";
+				status = "disabled";
 			};
 			csi0:csi@0x06621000 {
 				device_type = "csi0";
@@ -1582,7 +1596,7 @@
 				pinctrl-1 = <&csi0_pins_b>;
 				device_id = <0>;
 				iommus = <&mmu_aw 4 1>;
-				status = "okay";
+				status = "disabled";
 			};
 			csi1:csi@1 {
 				device_type = "csi1";
@@ -1607,7 +1621,7 @@
 				interrupts = <GIC_SPI 86 4>;
 				device_id = <0>;
 				iommus = <&mmu_aw 4 1>;
-				status = "okay";
+				status = "disabled";
 			};
 			isp1:isp@1 {
 				compatible = "allwinner,sunxi-isp";
@@ -1621,14 +1635,14 @@
 				reg = <0x0 0x02101000 0x0 0x400>;
 				device_id = <0>;
 				iommus = <&mmu_aw 4 1>;
-				status = "okay";
+				status = "disabled";
 			};
 			scaler1:scaler@0x02101400 {
 				compatible = "allwinner,sunxi-scaler";
 				reg = <0x0 0x02101400 0x0 0x400>;
 				device_id = <1>;
 				iommus = <&mmu_aw 4 1>;
-				status = "okay";
+				status = "disabled";
 			};
 			scaler2:scaler@2 {
 				compatible = "allwinner,sunxi-scaler";
@@ -1685,7 +1699,7 @@
 				sensor0_pwdn = <&pio PE 16 1 0 1 0>;
 				flash_handle = <&flash0>;
 				act_handle = <&actuator0>;
-				status	= "okay";
+				status = "disabled";
 			};
 			sensor1:sensor@1 {
 				device_type = "sensor1";
@@ -1709,7 +1723,7 @@
 				sensor1_pwdn = <&pio PE 15 1 0 1 0>;
 				flash_handle = <>;
 				act_handle = <>;
-				status	= "okay";
+				status = "disabled";
 			};
 			vinc0:vinc@0x06623000 {
 				device_type = "vinc0";
@@ -1725,7 +1739,7 @@
 				sensor_handle = <&sensor0 &sensor1>;
 				device_id = <0>;
 				iommus = <&mmu_aw 4 1>;
-				status = "okay";
+				status = "disabled";
 			};
 			vinc1:vinc@0x06623100 {
 				device_type = "vinc1";
@@ -1741,7 +1755,7 @@
 				sensor_handle = <&sensor0 &sensor1>;
 				device_id = <1>;
 				iommus = <&mmu_aw 4 1>;
-				status = "okay";
+				status = "disabled";
 			};
 		};
 
@@ -1871,7 +1885,7 @@
 			nand0_p1 = <0x55aaaa55>;
 			nand0_p2 = <0x55aaaa55>;
 			nand0_p3 = <0x55aaaa55>;
-			status = "okay";
+			status = "disabled";
 		};
 
 		ts0:ts0@05060000 {
