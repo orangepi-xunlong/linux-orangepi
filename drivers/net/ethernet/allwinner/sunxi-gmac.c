@@ -149,6 +149,7 @@ struct geth_priv {
 	struct regulator *gmac_power[POWER_CHAN_NUM];
 	bool is_suspend;
 	int phyrst;
+	int gmac_en;
 	u8  rst_active_low;
 	/* definition spinlock */
 	spinlock_t lock;
@@ -1780,6 +1781,16 @@ static int geth_hw_init(struct platform_device *pdev)
 
 	if (!of_property_read_u32(np, "rx-delay", &value))
 		rx_delay = value;
+
+	priv->gmac_en = of_get_named_gpio_flags(np, "gmac_en", 0, (enum of_gpio_flags *)&cfg);
+	if (gpio_is_valid(priv->gmac_en)) {
+		if (gpio_request(priv->gmac_en, "gmac_en") < 0) {
+			pr_err("gmac_en gpio request fail!\n");
+			ret = -EINVAL;
+			goto pin_err;
+		}
+	}
+	gpio_direction_output(priv->gmac_en, 1);
 
 	/* config pinctrl */
 	if (EXT_PHY == priv->phy_ext) {
