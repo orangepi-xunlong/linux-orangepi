@@ -845,12 +845,12 @@ static int sunxi_fb_blank(int blank_mode, struct fb_info *info)
 	return 0;
 }
 
-static int sunxi_fb_cursor(struct fb_info *info, struct fb_cursor *cursor)
+/*static int sunxi_fb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 {
 	__inf("sunxi_fb_cursor\n");
 
 	return 0;
-}
+}*/
 
 static int sunxi_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
@@ -1248,7 +1248,7 @@ static struct fb_ops dispfb_ops = {
 	.fb_check_var = sunxi_fb_check_var,
 	.fb_set_par = sunxi_fb_set_par,
 	.fb_blank = sunxi_fb_blank,
-	.fb_cursor = sunxi_fb_cursor,
+	/*.fb_cursor = sunxi_fb_cursor,*/
 	.fb_mmap = sunxi_fb_mmap,
 #if defined(CONFIG_FB_CONSOLE_SUNXI)
 	.fb_fillrect = cfb_fillrect,
