@@ -146,7 +146,7 @@ static const struct consw fb_con;
 
 static int fbcon_set_origin(struct vc_data *);
 
-static int fbcon_cursor_noblink;
+static int fbcon_cursor_noblink = 1;
 
 #define divides(a, b)	((!(a) || (b)%(a)) ? 0 : 1)
 
