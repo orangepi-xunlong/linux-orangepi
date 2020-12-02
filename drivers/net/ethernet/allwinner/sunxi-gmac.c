@@ -1983,6 +1983,20 @@ static int geth_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void geth_shutdown(struct platform_device *pdev)
+{
+	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct geth_priv *priv = netdev_priv(ndev);
+
+	device_remove_file(&pdev->dev, &dev_attr_gphy_test);
+
+	netif_napi_del(&priv->napi);
+	unregister_netdev(ndev);
+	geth_hw_release(pdev);
+	platform_set_drvdata(pdev, NULL);
+	free_netdev(ndev);
+}
+
 static const struct of_device_id geth_of_match[] = {
 	{.compatible = "allwinner,sunxi-gmac",},
 	{},
@@ -1992,6 +2006,7 @@ MODULE_DEVICE_TABLE(of, geth_of_match);
 static struct platform_driver geth_driver = {
 	.probe	= geth_probe,
 	.remove = geth_remove,
+	.shutdown = geth_shutdown,
 	.driver = {
 		   .name = "sunxi-gmac",
 		   .owner = THIS_MODULE,
