@@ -45,7 +45,8 @@ module_param(debug, ulong, 0);
 MODULE_PARM_DESC(debug, "override device debug level");
 
 #ifdef CONFIG_HAS_DMA
-static bool dma = true;
+//static bool dma = true;
+static bool dma = 0;
 module_param(dma, bool, 0);
 MODULE_PARM_DESC(dma, "Use DMA buffer");
 #endif
