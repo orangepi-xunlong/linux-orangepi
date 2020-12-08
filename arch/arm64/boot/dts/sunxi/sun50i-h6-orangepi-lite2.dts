@@ -2639,7 +2639,7 @@
 			frametype = <0x0>;
 			tdm_num = <0x0>;
 			mclk_div = <0x0>;
-			status = "okay";
+			status = "disabled";
 			linux,phandle = <0x61>;
 			phandle = <0x61>;
 			device_type = "daudio0";
@@ -2854,7 +2854,7 @@
 			compatible = "allwinner,sunxi-daudio0-machine";
 			sunxi,daudio-controller = <0x61>;
 			sunxi,cpudai-controller = <0x62>;
-			status = "okay";
+			status = "disabled";
 			device_type = "snddaudio0";
 		};
 
