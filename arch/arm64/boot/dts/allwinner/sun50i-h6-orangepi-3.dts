@@ -45,7 +45,7 @@
 		};
 
 		status {
-			label = "orangepi:green:status";
+			label = "orangepi:yellow:status";
 			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
 			default-state = "on";
 		};
