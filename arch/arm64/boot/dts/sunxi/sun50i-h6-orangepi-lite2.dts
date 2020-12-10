@@ -4938,6 +4938,14 @@
 				clock-latency-ns = <0x1e8480>;
 				pval = <0xf6e>;
 			};
+
+			opp07 {
+			        opp-hz = <0x0 1800000000>;
+			        opp-microvolt = <1160000>;
+			        axi-bus-divide-ratio = <0x3>;
+			        clock-latency-ns = <244144>;
+			        pval = <0xf6e>;
+			};
 		};
 
 		opp_l_table1 {
@@ -5002,6 +5010,14 @@
 				clock-latency-ns = <0x1e8480>;
 				pval = <0xf6e>;
 			};
+
+			opp07 {
+			        opp-hz = <0x0 1800000000>;
+			        opp-microvolt = <1160000>;
+			        axi-bus-divide-ratio = <0x3>;
+			        clock-latency-ns = <244144>;
+			        pval = <0xf6e>;
+			};
 		};
 
 		opp_l_table2 {
@@ -5065,6 +5081,14 @@
 				axi-bus-divide-ratio = <0x3>;
 				clock-latency-ns = <0x1e8480>;
 				pval = <0xf6e>;
+			};
+
+			opp07 {
+			        opp-hz = <0x0 1800000000>;
+			        opp-microvolt = <1160000>;
+			        axi-bus-divide-ratio = <0x3>;
+			        clock-latency-ns = <244144>;
+			        pval = <0xf6e>;
 			};
 		};
 	};
