@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2012 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 #ifndef __HAL_INTF_H__
@@ -17,7 +9,7 @@
 
 #include <osdep_service.h>
 #include <drv_types.h>
-#include <Hal8188EPhyCfg.h>
+#include <hal8188e_phy_cfg.h>
 
 enum RTL871X_HCI_TYPE {
 	RTW_PCIE	= BIT(0),
@@ -57,7 +49,6 @@ enum hw_variables {
 	HW_VAR_ACK_PREAMBLE,
 	HW_VAR_SEC_CFG,
 	HW_VAR_BCN_VALID,
-	HW_VAR_RF_TYPE,
 	HW_VAR_DM_FUNC_OP,
 	HW_VAR_DM_FUNC_SET,
 	HW_VAR_DM_FUNC_CLR,
@@ -97,9 +88,11 @@ enum hw_variables {
 	HW_VAR_FIFO_CLEARN_UP,
 	HW_VAR_CHECK_TXBUF,
 	HW_VAR_APFM_ON_MAC, /* Auto FSM to Turn On, include clock, isolation,
-			     * power control for MAC only */
+			     * power control for MAC only
+			     */
 	/*  The valid upper nav range for the HW updating, if the true value is
-	 *  larger than the upper range, the HW won't update it. */
+	 *  larger than the upper range, the HW won't update it.
+	 */
 	/*  Unit in microsecond. 0 means disable this function. */
 	HW_VAR_NAV_UPPER,
 	HW_VAR_RPT_TIMER_SETTING,
@@ -190,8 +183,9 @@ void rtw_hal_set_odm_var(struct adapter *padapter,
 
 u32	rtw_hal_inirp_init(struct adapter *padapter);
 void	rtw_hal_inirp_deinit(struct adapter *padapter);
+void usb_intf_stop(struct adapter *padapter);
 
-s32	rtw_hal_xmit(struct adapter *padapter, struct xmit_frame *pxmitframe);
+bool rtw_hal_xmit(struct adapter *padapter, struct xmit_frame *pxmitframe);
 s32	rtw_hal_mgnt_xmit(struct adapter *padapter,
 			  struct xmit_frame *pmgntframe);
 
@@ -205,7 +199,7 @@ void	rtw_hal_add_ra_tid(struct adapter *adapt, u32 bitmap, u8 arg, u8 level);
 void	rtw_hal_clone_data(struct adapter *dst_adapt,
 			   struct adapter *src_adapt);
 
-void rtw_hal_bcn_related_reg_setting(struct adapter *padapter);
+void beacon_timing_control(struct adapter *padapter);
 
 u32	rtw_hal_read_rfreg(struct adapter *padapter, enum rf_radio_path eRFPath,
 			   u32 RegAddr, u32 BitMask);
@@ -215,7 +209,7 @@ void	rtw_hal_set_bwmode(struct adapter *padapter,
 void	rtw_hal_set_chan(struct adapter *padapter, u8 channel);
 void	rtw_hal_dm_watchdog(struct adapter *padapter);
 
-u8	rtw_hal_antdiv_before_linked(struct adapter *padapter);
+bool rtw_hal_antdiv_before_linked(struct adapter *padapter);
 void	rtw_hal_antdiv_rssi_compared(struct adapter *padapter,
 				     struct wlan_bssid_ex *dst,
 				     struct wlan_bssid_ex *src);

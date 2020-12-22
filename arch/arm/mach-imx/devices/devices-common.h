@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2009-2010 Pengutronix
  * Uwe Kleine-Koenig <u.kleine-koenig@pengutronix.de>
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the
- * Free Software Foundation.
  */
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
@@ -292,6 +289,6 @@ struct platform_device *__init imx_add_spi_imx(
 		const struct spi_imx_master *pdata);
 
 struct platform_device *imx_add_imx_dma(char *name, resource_size_t iobase,
-					int irq, int irq_err);
+					int irq);
 struct platform_device *imx_add_imx_sdma(char *name,
 	resource_size_t iobase, int irq, struct sdma_platform_data *pdata);

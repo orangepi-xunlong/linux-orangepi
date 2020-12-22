@@ -10,12 +10,15 @@
 #include "builtin.h"
 #include "perf.h"
 #include "util/build-id.h"
-#include "util/cache.h"
 #include "util/debug.h"
+#include "util/dso.h"
+#include <subcmd/pager.h>
 #include <subcmd/parse-options.h>
 #include "util/session.h"
 #include "util/symbol.h"
 #include "util/data.h"
+#include <errno.h>
+#include <linux/err.h>
 
 static int sysfs__fprintf_build_id(FILE *fp)
 {
@@ -49,7 +52,7 @@ static bool dso__skip_buildid(struct dso *dso, int with_hits)
 static int perf_session__list_build_ids(bool force, bool with_hits)
 {
 	struct perf_session *session;
-	struct perf_data_file file = {
+	struct perf_data data = {
 		.path  = input_name,
 		.mode  = PERF_DATA_MODE_READ,
 		.force = force,
@@ -62,15 +65,15 @@ static int perf_session__list_build_ids(bool force, bool with_hits)
 	if (filename__fprintf_build_id(input_name, stdout) > 0)
 		goto out;
 
-	session = perf_session__new(&file, false, &build_id__mark_dso_hit_ops);
-	if (session == NULL)
-		return -1;
+	session = perf_session__new(&data, false, &build_id__mark_dso_hit_ops);
+	if (IS_ERR(session))
+		return PTR_ERR(session);
 
 	/*
 	 * We take all buildids when the file contains AUX area tracing data
 	 * because we do not decode the trace because it would take too long.
 	 */
-	if (!perf_data_file__is_pipe(&file) &&
+	if (!perf_data__is_pipe(&data) &&
 	    perf_header__has_feat(&session->header, HEADER_AUXTRACE))
 		with_hits = false;
 
@@ -78,7 +81,7 @@ static int perf_session__list_build_ids(bool force, bool with_hits)
 	 * in pipe-mode, the only way to get the buildids is to parse
 	 * the record stream. Buildids are stored as RECORD_HEADER_BUILD_ID
 	 */
-	if (with_hits || perf_data_file__is_pipe(&file))
+	if (with_hits || perf_data__is_pipe(&data))
 		perf_session__process_events(session);
 
 	perf_session__fprintf_dsos_buildid(session, stdout, dso__skip_buildid, with_hits);
@@ -87,8 +90,7 @@ out:
 	return 0;
 }
 
-int cmd_buildid_list(int argc, const char **argv,
-		     const char *prefix __maybe_unused)
+int cmd_buildid_list(int argc, const char **argv)
 {
 	bool show_kernel = false;
 	bool with_hits = false;

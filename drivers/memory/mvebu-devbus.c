@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Marvell EBU SoC Device Bus Controller
  * (memory controller for NOR/NAND/SRAM/FPGA devices)
  *
  * Copyright (C) 2013-2014 Marvell
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #include <linux/kernel.h>
@@ -105,8 +93,8 @@ static int get_timing_param_ps(struct devbus *devbus,
 
 	err = of_property_read_u32(node, name, &time_ps);
 	if (err < 0) {
-		dev_err(devbus->dev, "%s has no '%s' property\n",
-			name, node->full_name);
+		dev_err(devbus->dev, "%pOF has no '%s' property\n",
+			node, name);
 		return err;
 	}
 
@@ -127,8 +115,8 @@ static int devbus_get_timing_params(struct devbus *devbus,
 	err = of_property_read_u32(node, "devbus,bus-width", &r->bus_width);
 	if (err < 0) {
 		dev_err(devbus->dev,
-			"%s has no 'devbus,bus-width' property\n",
-			node->full_name);
+			"%pOF has no 'devbus,bus-width' property\n",
+			node);
 		return err;
 	}
 
@@ -180,8 +168,8 @@ static int devbus_get_timing_params(struct devbus *devbus,
 					   &w->sync_enable);
 		if (err < 0) {
 			dev_err(devbus->dev,
-				"%s has no 'devbus,sync-enable' property\n",
-				node->full_name);
+				"%pOF has no 'devbus,sync-enable' property\n",
+				node);
 			return err;
 		}
 	}
@@ -279,7 +267,6 @@ static int mvebu_devbus_probe(struct platform_device *pdev)
 	struct devbus_read_params r;
 	struct devbus_write_params w;
 	struct devbus *devbus;
-	struct resource *res;
 	struct clk *clk;
 	unsigned long rate;
 	int err;
@@ -289,8 +276,7 @@ static int mvebu_devbus_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	devbus->dev = dev;
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	devbus->base = devm_ioremap_resource(&pdev->dev, res);
+	devbus->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(devbus->base))
 		return PTR_ERR(devbus->base);
 

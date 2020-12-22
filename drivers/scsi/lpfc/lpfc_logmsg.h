@@ -1,9 +1,11 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
+ * Copyright (C) 2017-2018 Broadcom. All Rights Reserved. The term *
+ * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.     *
  * Copyright (C) 2004-2009 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
- * www.emulex.com                                                  *
+ * www.broadcom.com                                                *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
  * modify it under the terms of version 2 of the GNU General       *
@@ -38,7 +40,28 @@
 #define LOG_FIP		0x00020000	/* FIP events */
 #define LOG_FCP_UNDER	0x00040000	/* FCP underruns errors */
 #define LOG_SCSI_CMD	0x00080000	/* ALL SCSI commands */
+#define LOG_NVME	0x00100000	/* NVME general events. */
+#define LOG_NVME_DISC   0x00200000      /* NVME Discovery/Connect events. */
+#define LOG_NVME_ABTS   0x00400000      /* NVME ABTS events. */
+#define LOG_NVME_IOERR  0x00800000      /* NVME IO Error events. */
 #define LOG_ALL_MSG	0xffffffff	/* LOG all messages */
+
+/* generate message by verbose log setting or severity */
+#define lpfc_vlog_msg(vport, level, mask, fmt, arg...) \
+{ if (((mask) & (vport)->cfg_log_verbose) || (level[1] <= '4')) \
+	dev_printk(level, &((vport)->phba->pcidev)->dev, "%d:(%d):" \
+		   fmt, (vport)->phba->brd_no, vport->vpi, ##arg); }
+
+#define lpfc_log_msg(phba, level, mask, fmt, arg...) \
+do { \
+	{ uint32_t log_verbose = (phba)->pport ? \
+				 (phba)->pport->cfg_log_verbose : \
+				 (phba)->cfg_log_verbose; \
+	if (((mask) & log_verbose) || (level[1] <= '4')) \
+		dev_printk(level, &((phba)->pcidev)->dev, "%d:" \
+			   fmt, phba->brd_no, ##arg); \
+	} \
+} while (0)
 
 #define lpfc_printf_vlog(vport, level, mask, fmt, arg...) \
 do { \

@@ -1,14 +1,9 @@
-/* linux/arch/arm/mach-s3c2443/s3c2443.c
- *
- * Copyright (c) 2007 Simtec Electronics
- *   Ben Dooks <ben@simtec.co.uk>
- *
- * Samsung S3C2443 Mobile CPU support
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
-*/
+// SPDX-License-Identifier: GPL-2.0
+//
+// Copyright (c) 2007 Simtec Electronics
+//   Ben Dooks <ben@simtec.co.uk>
+//
+// Samsung S3C2443 Mobile CPU support
 
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -96,7 +91,7 @@ void __init s3c2443_map_io(void)
 	s3c24xx_gpiocfg_default.get_pull = s3c2443_gpio_getpull;
 
 	/* initialize device information early */
-	s3c64xx_spi_setname("s3c2443-spi");
+	s3c24xx_spi_setname("s3c2443-spi");
 
 	iotable_init(s3c2443_iodesc, ARRAY_SIZE(s3c2443_iodesc));
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* ptrace.c */
 /* By Ross Biro 1/23/92 */
 /* edited by Linus Torvalds */
@@ -6,6 +7,7 @@
 
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/sched/task_stack.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/errno.h>
@@ -16,8 +18,7 @@
 #include <linux/tracehook.h>
 #include <linux/audit.h>
 
-#include <asm/uaccess.h>
-#include <asm/pgtable.h>
+#include <linux/uaccess.h>
 #include <asm/fpu.h>
 
 #include "proto.h"

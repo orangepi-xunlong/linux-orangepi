@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /* Applied Micro X-Gene SoC MDIO Driver
  *
  * Copyright (c) 2016, Applied Micro Circuits Corporation
  * Author: Iyappan Subramanian <isubramanian@apm.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/acpi.h>
@@ -34,76 +22,73 @@
 
 static bool xgene_mdio_status;
 
-static u32 xgene_enet_rd_mac(void __iomem *base_addr, u32 rd_addr)
+u32 xgene_mdio_rd_mac(struct xgene_mdio_pdata *pdata, u32 rd_addr)
 {
 	void __iomem *addr, *rd, *cmd, *cmd_done;
 	u32 done, rd_data = BUSY_MASK;
 	u8 wait = 10;
 
-	addr = base_addr + MAC_ADDR_REG_OFFSET;
-	rd = base_addr + MAC_READ_REG_OFFSET;
-	cmd = base_addr + MAC_COMMAND_REG_OFFSET;
-	cmd_done = base_addr + MAC_COMMAND_DONE_REG_OFFSET;
+	addr = pdata->mac_csr_addr + MAC_ADDR_REG_OFFSET;
+	rd = pdata->mac_csr_addr + MAC_READ_REG_OFFSET;
+	cmd = pdata->mac_csr_addr + MAC_COMMAND_REG_OFFSET;
+	cmd_done = pdata->mac_csr_addr + MAC_COMMAND_DONE_REG_OFFSET;
 
+	spin_lock(&pdata->mac_lock);
 	iowrite32(rd_addr, addr);
 	iowrite32(XGENE_ENET_RD_CMD, cmd);
 
-	while (wait--) {
-		done = ioread32(cmd_done);
-		if (done)
-			break;
+	while (!(done = ioread32(cmd_done)) && wait--)
 		udelay(1);
-	}
 
-	if (!done)
-		return rd_data;
+	if (done)
+		rd_data = ioread32(rd);
 
-	rd_data = ioread32(rd);
 	iowrite32(0, cmd);
+	spin_unlock(&pdata->mac_lock);
 
 	return rd_data;
 }
+EXPORT_SYMBOL(xgene_mdio_rd_mac);
 
-static void xgene_enet_wr_mac(void __iomem *base_addr, u32 wr_addr, u32 wr_data)
+void xgene_mdio_wr_mac(struct xgene_mdio_pdata *pdata, u32 wr_addr, u32 data)
 {
 	void __iomem *addr, *wr, *cmd, *cmd_done;
 	u8 wait = 10;
 	u32 done;
 
-	addr = base_addr + MAC_ADDR_REG_OFFSET;
-	wr = base_addr + MAC_WRITE_REG_OFFSET;
-	cmd = base_addr + MAC_COMMAND_REG_OFFSET;
-	cmd_done = base_addr + MAC_COMMAND_DONE_REG_OFFSET;
+	addr = pdata->mac_csr_addr + MAC_ADDR_REG_OFFSET;
+	wr = pdata->mac_csr_addr + MAC_WRITE_REG_OFFSET;
+	cmd = pdata->mac_csr_addr + MAC_COMMAND_REG_OFFSET;
+	cmd_done = pdata->mac_csr_addr + MAC_COMMAND_DONE_REG_OFFSET;
 
+	spin_lock(&pdata->mac_lock);
 	iowrite32(wr_addr, addr);
-	iowrite32(wr_data, wr);
+	iowrite32(data, wr);
 	iowrite32(XGENE_ENET_WR_CMD, cmd);
 
-	while (wait--) {
-		done = ioread32(cmd_done);
-		if (done)
-			break;
+	while (!(done = ioread32(cmd_done)) && wait--)
 		udelay(1);
-	}
 
 	if (!done)
 		pr_err("MCX mac write failed, addr: 0x%04x\n", wr_addr);
 
 	iowrite32(0, cmd);
+	spin_unlock(&pdata->mac_lock);
 }
+EXPORT_SYMBOL(xgene_mdio_wr_mac);
 
 int xgene_mdio_rgmii_read(struct mii_bus *bus, int phy_id, int reg)
 {
-	void __iomem *addr = (void __iomem *)bus->priv;
+	struct xgene_mdio_pdata *pdata = (struct xgene_mdio_pdata *)bus->priv;
 	u32 data, done;
 	u8 wait = 10;
 
 	data = SET_VAL(PHY_ADDR, phy_id) | SET_VAL(REG_ADDR, reg);
-	xgene_enet_wr_mac(addr, MII_MGMT_ADDRESS_ADDR, data);
-	xgene_enet_wr_mac(addr, MII_MGMT_COMMAND_ADDR, READ_CYCLE_MASK);
+	xgene_mdio_wr_mac(pdata, MII_MGMT_ADDRESS_ADDR, data);
+	xgene_mdio_wr_mac(pdata, MII_MGMT_COMMAND_ADDR, READ_CYCLE_MASK);
 	do {
 		usleep_range(5, 10);
-		done = xgene_enet_rd_mac(addr, MII_MGMT_INDICATORS_ADDR);
+		done = xgene_mdio_rd_mac(pdata, MII_MGMT_INDICATORS_ADDR);
 	} while ((done & BUSY_MASK) && wait--);
 
 	if (done & BUSY_MASK) {
@@ -111,8 +96,8 @@ int xgene_mdio_rgmii_read(struct mii_bus *bus, int phy_id, int reg)
 		return -EBUSY;
 	}
 
-	data = xgene_enet_rd_mac(addr, MII_MGMT_STATUS_ADDR);
-	xgene_enet_wr_mac(addr, MII_MGMT_COMMAND_ADDR, 0);
+	data = xgene_mdio_rd_mac(pdata, MII_MGMT_STATUS_ADDR);
+	xgene_mdio_wr_mac(pdata, MII_MGMT_COMMAND_ADDR, 0);
 
 	return data;
 }
@@ -120,17 +105,17 @@ EXPORT_SYMBOL(xgene_mdio_rgmii_read);
 
 int xgene_mdio_rgmii_write(struct mii_bus *bus, int phy_id, int reg, u16 data)
 {
-	void __iomem *addr = (void __iomem *)bus->priv;
+	struct xgene_mdio_pdata *pdata = (struct xgene_mdio_pdata *)bus->priv;
 	u32 val, done;
 	u8 wait = 10;
 
 	val = SET_VAL(PHY_ADDR, phy_id) | SET_VAL(REG_ADDR, reg);
-	xgene_enet_wr_mac(addr, MII_MGMT_ADDRESS_ADDR, val);
+	xgene_mdio_wr_mac(pdata, MII_MGMT_ADDRESS_ADDR, val);
 
-	xgene_enet_wr_mac(addr, MII_MGMT_CONTROL_ADDR, data);
+	xgene_mdio_wr_mac(pdata, MII_MGMT_CONTROL_ADDR, data);
 	do {
 		usleep_range(5, 10);
-		done = xgene_enet_rd_mac(addr, MII_MGMT_INDICATORS_ADDR);
+		done = xgene_mdio_rd_mac(pdata, MII_MGMT_INDICATORS_ADDR);
 	} while ((done & BUSY_MASK) && wait--);
 
 	if (done & BUSY_MASK) {
@@ -174,8 +159,8 @@ static int xgene_enet_ecc_init(struct xgene_mdio_pdata *pdata)
 
 static void xgene_gmac_reset(struct xgene_mdio_pdata *pdata)
 {
-	xgene_enet_wr_mac(pdata->mac_csr_addr, MAC_CONFIG_1_ADDR, SOFT_RESET);
-	xgene_enet_wr_mac(pdata->mac_csr_addr, MAC_CONFIG_1_ADDR, 0);
+	xgene_mdio_wr_mac(pdata, MAC_CONFIG_1_ADDR, SOFT_RESET);
+	xgene_mdio_wr_mac(pdata, MAC_CONFIG_1_ADDR, 0);
 }
 
 static int xgene_mdio_reset(struct xgene_mdio_pdata *pdata)
@@ -343,7 +328,6 @@ static int xgene_mdio_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct mii_bus *mdio_bus;
 	const struct of_device_id *of_id;
-	struct resource *res;
 	struct xgene_mdio_pdata *pdata;
 	void __iomem *csr_base;
 	int mdio_id = 0, ret = 0;
@@ -370,13 +354,15 @@ static int xgene_mdio_probe(struct platform_device *pdev)
 	pdata->mdio_id = mdio_id;
 	pdata->dev = dev;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	csr_base = devm_ioremap_resource(dev, res);
+	csr_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(csr_base))
 		return PTR_ERR(csr_base);
 	pdata->mac_csr_addr = csr_base;
 	pdata->mdio_csr_addr = csr_base + BLOCK_XG_MDIO_CSR_OFFSET;
 	pdata->diag_csr_addr = csr_base + BLOCK_DIAG_CSR_OFFSET;
+
+	if (mdio_id == XGENE_MDIO_RGMII)
+		spin_lock_init(&pdata->mac_lock);
 
 	if (dev->of_node) {
 		pdata->clk = devm_clk_get(dev, NULL);
@@ -401,7 +387,7 @@ static int xgene_mdio_probe(struct platform_device *pdev)
 	if (mdio_id == XGENE_MDIO_RGMII) {
 		mdio_bus->read = xgene_mdio_rgmii_read;
 		mdio_bus->write = xgene_mdio_rgmii_write;
-		mdio_bus->priv = (void __force *)pdata->mac_csr_addr;
+		mdio_bus->priv = (void __force *)pdata;
 		snprintf(mdio_bus->id, MII_BUS_ID_SIZE, "%s",
 			 "xgene-mii-rgmii");
 	} else {

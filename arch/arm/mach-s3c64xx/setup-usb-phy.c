@@ -1,13 +1,7 @@
-/*
- * Copyright (C) 2011 Samsung Electronics Co.Ltd
- * Author: Joonyoung Shim <jy0922.shim@samsung.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// Copyright (C) 2011 Samsung Electronics Co.Ltd
+// Author: Joonyoung Shim <jy0922.shim@samsung.com>
 
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -20,6 +14,11 @@
 
 #include "regs-sys.h"
 #include "regs-usb-hsotg-phy.h"
+
+enum samsung_usb_phy_type {
+	USB_PHY_TYPE_DEVICE,
+	USB_PHY_TYPE_HOST,
+};
 
 static int s3c_usb_otgphy_init(struct platform_device *pdev)
 {
@@ -74,7 +73,7 @@ static int s3c_usb_otgphy_exit(struct platform_device *pdev)
 	return 0;
 }
 
-int s5p_usb_phy_init(struct platform_device *pdev, int type)
+int s3c_usb_phy_init(struct platform_device *pdev, int type)
 {
 	if (type == USB_PHY_TYPE_DEVICE)
 		return s3c_usb_otgphy_init(pdev);
@@ -82,7 +81,7 @@ int s5p_usb_phy_init(struct platform_device *pdev, int type)
 	return -EINVAL;
 }
 
-int s5p_usb_phy_exit(struct platform_device *pdev, int type)
+int s3c_usb_phy_exit(struct platform_device *pdev, int type)
 {
 	if (type == USB_PHY_TYPE_DEVICE)
 		return s3c_usb_otgphy_exit(pdev);

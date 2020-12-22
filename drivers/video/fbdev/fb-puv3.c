@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Frame Buffer Driver for PKUnity-v3 Unigfx
  * Code specific to PKUnity SoC and UniCore ISA
  *
  *	Maintained by GUAN Xue-tao <gxt@mprc.pku.edu.cn>
  *	Copyright (C) 2001-2010 Guan Xuetao
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -20,8 +17,7 @@
 #include <linux/console.h>
 #include <linux/mm.h>
 
-#include <asm/sizes.h>
-#include <asm/pgtable.h>
+#include <linux/sizes.h>
 #include <mach/hardware.h>
 
 /* Platform_data reserved for unifb registers. */
@@ -69,7 +65,7 @@ static const struct fb_videomode unifb_modes[] = {
 	  0, FB_VMODE_NONINTERLACED, FB_MODE_IS_VESA },
 };
 
-static struct fb_var_screeninfo unifb_default = {
+static const struct fb_var_screeninfo unifb_default = {
 	.xres =		640,
 	.yres =		480,
 	.xres_virtual =	640,
@@ -647,7 +643,7 @@ int unifb_mmap(struct fb_info *info,
 	return vm_iomap_memory(vma, info->fix.smem_start, info->fix.smem_len);
 }
 
-static struct fb_ops unifb_ops = {
+static const struct fb_ops unifb_ops = {
 	.fb_read        = fb_sys_read,
 	.fb_write       = fb_sys_write,
 	.fb_check_var	= unifb_check_var,

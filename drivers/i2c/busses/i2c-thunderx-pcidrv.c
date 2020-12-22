@@ -75,7 +75,7 @@ static const struct i2c_algorithm thunderx_i2c_algo = {
 	.functionality = thunderx_i2c_functionality,
 };
 
-static struct i2c_adapter thunderx_i2c_ops = {
+static const struct i2c_adapter thunderx_i2c_ops = {
 	.owner	= THIS_MODULE,
 	.name	= "ThunderX adapter",
 	.algo	= &thunderx_i2c_algo,
@@ -85,16 +85,22 @@ static void thunder_i2c_clock_enable(struct device *dev, struct octeon_i2c *i2c)
 {
 	int ret;
 
-	i2c->clk = clk_get(dev, NULL);
-	if (IS_ERR(i2c->clk)) {
-		i2c->clk = NULL;
-		goto skip;
-	}
+	if (acpi_disabled) {
+		/* DT */
+		i2c->clk = clk_get(dev, NULL);
+		if (IS_ERR(i2c->clk)) {
+			i2c->clk = NULL;
+			goto skip;
+		}
 
-	ret = clk_prepare_enable(i2c->clk);
-	if (ret)
-		goto skip;
-	i2c->sys_freq = clk_get_rate(i2c->clk);
+		ret = clk_prepare_enable(i2c->clk);
+		if (ret)
+			goto skip;
+		i2c->sys_freq = clk_get_rate(i2c->clk);
+	} else {
+		/* ACPI */
+		device_property_read_u32(dev, "sclk", &i2c->sys_freq);
+	}
 
 skip:
 	if (!i2c->sys_freq)
@@ -112,7 +118,7 @@ static void thunder_i2c_clock_disable(struct device *dev, struct clk *clk)
 static int thunder_i2c_smbus_setup_of(struct octeon_i2c *i2c,
 				      struct device_node *node)
 {
-	u32 type;
+	struct i2c_client *ara;
 
 	if (!node)
 		return -EINVAL;
@@ -121,13 +127,12 @@ static int thunder_i2c_smbus_setup_of(struct octeon_i2c *i2c,
 	if (!i2c->alert_data.irq)
 		return -EINVAL;
 
-	type = irqd_get_trigger_type(irq_get_irq_data(i2c->alert_data.irq));
-	i2c->alert_data.alert_edge_triggered =
-		(type & IRQ_TYPE_LEVEL_MASK) ? 1 : 0;
+	ara = i2c_new_smbus_alert_device(&i2c->adap, &i2c->alert_data);
+	if (IS_ERR(ara))
+		return PTR_ERR(ara);
 
-	i2c->ara = i2c_setup_smbus_alert(&i2c->adap, &i2c->alert_data);
-	if (!i2c->ara)
-		return -ENODEV;
+	i2c->ara = ara;
+
 	return 0;
 }
 
@@ -143,8 +148,7 @@ static int thunder_i2c_smbus_setup(struct octeon_i2c *i2c,
 
 static void thunder_i2c_smbus_remove(struct octeon_i2c *i2c)
 {
-	if (i2c->ara)
-		i2c_unregister_device(i2c->ara);
+	i2c_unregister_device(i2c->ara);
 }
 
 static int thunder_i2c_probe_pci(struct pci_dev *pdev,
@@ -179,7 +183,7 @@ static int thunder_i2c_probe_pci(struct pci_dev *pdev,
 	thunder_i2c_clock_enable(dev, i2c);
 	ret = device_property_read_u32(dev, "clock-frequency", &i2c->twsi_freq);
 	if (ret)
-		i2c->twsi_freq = 100000;
+		i2c->twsi_freq = I2C_MAX_STANDARD_MODE_FREQ;
 
 	init_waitqueue_head(&i2c->queue);
 
@@ -188,11 +192,11 @@ static int thunder_i2c_probe_pci(struct pci_dev *pdev,
 	i2c->hlc_int_enable = thunder_i2c_hlc_int_enable;
 	i2c->hlc_int_disable = thunder_i2c_hlc_int_disable;
 
-	ret = pci_enable_msix(pdev, &i2c->i2c_msix, 1);
-	if (ret)
+	ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_MSIX);
+	if (ret < 0)
 		goto error;
 
-	ret = devm_request_irq(dev, i2c->i2c_msix.vector, octeon_i2c_isr, 0,
+	ret = devm_request_irq(dev, pci_irq_vector(pdev, 0), octeon_i2c_isr, 0,
 			       DRV_NAME, i2c);
 	if (ret)
 		goto error;
@@ -205,6 +209,7 @@ static int thunder_i2c_probe_pci(struct pci_dev *pdev,
 
 	i2c->adap = thunderx_i2c_ops;
 	i2c->adap.retries = 5;
+	i2c->adap.class = I2C_CLASS_HWMON;
 	i2c->adap.bus_recovery_info = &octeon_i2c_recovery_info;
 	i2c->adap.dev.parent = dev;
 	i2c->adap.dev.of_node = pdev->dev.of_node;

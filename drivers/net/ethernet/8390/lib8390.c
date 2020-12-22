@@ -113,7 +113,7 @@ static void __NS8390_init(struct net_device *dev, int startp);
 
 static unsigned version_printed;
 static u32 msg_enable;
-module_param(msg_enable, uint, (S_IRUSR|S_IRGRP|S_IROTH));
+module_param(msg_enable, uint, 0444);
 MODULE_PARM_DESC(msg_enable, "Debug message level (see linux/netdevice.h for bitmap)");
 
 /*
@@ -251,7 +251,7 @@ static int __ei_close(struct net_device *dev)
  * completed (or failed) - i.e. never posted a Tx related interrupt.
  */
 
-static void __ei_tx_timeout(struct net_device *dev)
+static void __ei_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	unsigned long e8390_base = dev->base_addr;
 	struct ei_device *ei_local = netdev_priv(dev);
@@ -975,6 +975,8 @@ static void ethdev_setup(struct net_device *dev)
 	ether_setup(dev);
 
 	spin_lock_init(&ei_local->page_lock);
+
+	ei_local->msg_enable = msg_enable;
 }
 
 /**

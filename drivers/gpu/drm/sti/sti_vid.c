@@ -1,11 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Author: Fabien Dessenne <fabien.dessenne@st.com> for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 #include <linux/seq_file.h>
 
-#include <drm/drmP.h>
+#include <drm/drm_debugfs.h>
+#include <drm/drm_file.h>
+#include <drm/drm_print.h>
 
 #include "sti_plane.h"
 #include "sti_vid.h"
@@ -61,7 +63,7 @@
 static void vid_dbg_ctl(struct seq_file *s, int val)
 {
 	val = val >> 30;
-	seq_puts(s, "\t");
+	seq_putc(s, '\t');
 
 	if (!(val & 1))
 		seq_puts(s, "NOT ");
@@ -114,8 +116,7 @@ static int vid_dbg_show(struct seq_file *s, void *arg)
 	DBGFS_DUMP(VID_BC);
 	DBGFS_DUMP(VID_TINT);
 	DBGFS_DUMP(VID_CSAT);
-	seq_puts(s, "\n");
-
+	seq_putc(s, '\n');
 	return 0;
 }
 
@@ -123,16 +124,16 @@ static struct drm_info_list vid_debugfs_files[] = {
 	{ "vid", vid_dbg_show, 0, NULL },
 };
 
-int vid_debugfs_init(struct sti_vid *vid, struct drm_minor *minor)
+void vid_debugfs_init(struct sti_vid *vid, struct drm_minor *minor)
 {
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(vid_debugfs_files); i++)
 		vid_debugfs_files[i].data = vid;
 
-	return drm_debugfs_create_files(vid_debugfs_files,
-					ARRAY_SIZE(vid_debugfs_files),
-					minor->debugfs_root, minor);
+	drm_debugfs_create_files(vid_debugfs_files,
+				 ARRAY_SIZE(vid_debugfs_files),
+				 minor->debugfs_root, minor);
 }
 
 void sti_vid_commit(struct sti_vid *vid,

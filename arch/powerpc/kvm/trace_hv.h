@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #if !defined(_TRACE_KVM_HV_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_KVM_HV_H
 
@@ -447,7 +448,7 @@ TRACE_EVENT(kvmppc_vcore_wakeup,
 		__entry->tgid   = current->tgid;
 	),
 
-	TP_printk("%s time %lld ns, tgid=%d",
+	TP_printk("%s time %llu ns, tgid=%d",
 		__entry->waited ? "wait" : "poll",
 		__entry->ns, __entry->tgid)
 );
@@ -471,9 +472,9 @@ TRACE_EVENT(kvmppc_run_vcpu_enter,
 );
 
 TRACE_EVENT(kvmppc_run_vcpu_exit,
-	TP_PROTO(struct kvm_vcpu *vcpu, struct kvm_run *run),
+	TP_PROTO(struct kvm_vcpu *vcpu),
 
-	TP_ARGS(vcpu, run),
+	TP_ARGS(vcpu),
 
 	TP_STRUCT__entry(
 		__field(int,		vcpu_id)
@@ -483,7 +484,7 @@ TRACE_EVENT(kvmppc_run_vcpu_exit,
 
 	TP_fast_assign(
 		__entry->vcpu_id  = vcpu->vcpu_id;
-		__entry->exit     = run->exit_reason;
+		__entry->exit     = vcpu->run->exit_reason;
 		__entry->ret      = vcpu->arch.ret;
 	),
 

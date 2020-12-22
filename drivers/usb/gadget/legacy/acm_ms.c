@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * acm_ms.c -- Composite driver, with ACM and mass storage support
  *
@@ -7,11 +8,6 @@
  * Modified: Klaus Schwarzkopf <schwarzkopf@sensortherm.de>
  *
  * Heavily based on multi.c and cdc2.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -109,15 +105,12 @@ static struct usb_function *f_msg;
  */
 static int acm_ms_do_config(struct usb_configuration *c)
 {
-	struct fsg_opts *opts;
 	int	status;
 
 	if (gadget_is_otg(c->cdev->gadget)) {
 		c->descriptors = otg_desc;
 		c->bmAttributes |= USB_CONFIG_ATT_WAKEUP;
 	}
-
-	opts = fsg_opts_from_func_inst(fi_msg);
 
 	f_acm = usb_get_function(f_acm_inst);
 	if (IS_ERR(f_acm))

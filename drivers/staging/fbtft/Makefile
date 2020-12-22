@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 # Core module
 obj-$(CONFIG_FB_TFT)             += fbtft.o
 fbtft-y                          += fbtft-core.o fbtft-sysfs.o fbtft-bus.o fbtft-io.o
@@ -20,6 +21,8 @@ obj-$(CONFIG_FB_TFT_PCD8544)     += fb_pcd8544.o
 obj-$(CONFIG_FB_TFT_RA8875)      += fb_ra8875.o
 obj-$(CONFIG_FB_TFT_S6D02A1)     += fb_s6d02a1.o
 obj-$(CONFIG_FB_TFT_S6D1121)     += fb_s6d1121.o
+obj-$(CONFIG_FB_TFT_SEPS525)     += fb_seps525.o
+obj-$(CONFIG_FB_TFT_SH1106)      += fb_sh1106.o
 obj-$(CONFIG_FB_TFT_SSD1289)     += fb_ssd1289.o
 obj-$(CONFIG_FB_TFT_SSD1305)     += fb_ssd1305.o
 obj-$(CONFIG_FB_TFT_SSD1306)     += fb_ssd1306.o
@@ -34,7 +37,3 @@ obj-$(CONFIG_FB_TFT_UC1611)      += fb_uc1611.o
 obj-$(CONFIG_FB_TFT_UC1701)      += fb_uc1701.o
 obj-$(CONFIG_FB_TFT_UPD161704)   += fb_upd161704.o
 obj-$(CONFIG_FB_TFT_WATTEROTT)   += fb_watterott.o
-obj-$(CONFIG_FB_FLEX)            += flexfb.o
-
-# Device modules
-obj-$(CONFIG_FB_TFT_FBTFT_DEVICE) += fbtft_device.o

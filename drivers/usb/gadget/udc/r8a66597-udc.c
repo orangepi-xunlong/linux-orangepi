@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * R8A66597 UDC (USB gadget)
  *
  * Copyright (C) 2006-2009 Renesas Solutions Corp.
  *
  * Author : Yoshihiro Shimoda <yoshihiro.shimoda.uh@renesas.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
  */
 
 #include <linux/module.h>
@@ -1517,9 +1514,9 @@ static irqreturn_t r8a66597_irq(int irq, void *_r8a66597)
 	return IRQ_HANDLED;
 }
 
-static void r8a66597_timer(unsigned long _r8a66597)
+static void r8a66597_timer(struct timer_list *t)
 {
-	struct r8a66597 *r8a66597 = (struct r8a66597 *)_r8a66597;
+	struct r8a66597 *r8a66597 = from_timer(r8a66597, t, timer);
 	unsigned long flags;
 	u16 tmp;
 
@@ -1706,7 +1703,7 @@ static void r8a66597_fifo_flush(struct usb_ep *_ep)
 	spin_unlock_irqrestore(&ep->r8a66597->lock, flags);
 }
 
-static struct usb_ep_ops r8a66597_ep_ops = {
+static const struct usb_ep_ops r8a66597_ep_ops = {
 	.enable		= r8a66597_enable,
 	.disable	= r8a66597_disable,
 
@@ -1841,7 +1838,7 @@ static int r8a66597_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	char clk_name[8];
-	struct resource *res, *ires;
+	struct resource *ires;
 	int irq;
 	void __iomem *reg = NULL;
 	struct r8a66597 *r8a66597 = NULL;
@@ -1849,8 +1846,7 @@ static int r8a66597_probe(struct platform_device *pdev)
 	int i;
 	unsigned long irq_trigger;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	reg = devm_ioremap_resource(&pdev->dev, res);
+	reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(reg))
 		return PTR_ERR(reg);
 
@@ -1877,9 +1873,7 @@ static int r8a66597_probe(struct platform_device *pdev)
 	r8a66597->gadget.max_speed = USB_SPEED_HIGH;
 	r8a66597->gadget.name = udc_name;
 
-	init_timer(&r8a66597->timer);
-	r8a66597->timer.function = r8a66597_timer;
-	r8a66597->timer.data = (unsigned long)r8a66597;
+	timer_setup(&r8a66597->timer, r8a66597_timer, 0);
 	r8a66597->reg = reg;
 
 	if (r8a66597->pdata->on_chip) {
@@ -1974,7 +1968,7 @@ clean_up2:
 static struct platform_driver r8a66597_driver = {
 	.remove =	r8a66597_remove,
 	.driver		= {
-		.name =	(char *) udc_name,
+		.name =	udc_name,
 	},
 };
 

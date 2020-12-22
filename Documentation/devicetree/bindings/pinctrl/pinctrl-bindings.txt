@@ -97,6 +97,17 @@ For example:
 	};
 
 == Pin controller devices ==
+Required properties: See the pin controller driver specific documentation
+
+Optional properties:
+#pinctrl-cells:	Number of pin control cells in addition to the index within the
+		pin controller device instance
+
+pinctrl-use-default: Boolean. Indicates that the OS can use the boot default
+		pin configuration. This allows using an OS that does not have a
+		driver for the pin controller. This property can be set either
+		globally for the pin controller or in child nodes for individual
+		pin group control.
 
 Pin controller devices should contain the pin configuration nodes that client
 devices reference.
@@ -119,7 +130,8 @@ For example:
 
 The contents of each of those pin configuration child nodes is defined
 entirely by the binding for the individual pin controller device. There
-exists no common standard for this content.
+exists no common standard for this content. The pinctrl framework only
+provides generic helper bindings that the pin controller driver can use.
 
 The pin configuration nodes need not be direct children of the pin controller
 device; they may be grandchildren, for example. Whether this is legal, and
@@ -129,108 +141,8 @@ controller device.
 
 == Generic pin multiplexing node content ==
 
-pin multiplexing nodes:
-
-function		- the mux function to select
-groups			- the list of groups to select with this function
-			  (either this or "pins" must be specified)
-pins			- the list of pins to select with this function (either
-			  this or "groups" must be specified)
-
-Example:
-
-state_0_node_a {
-	uart0 {
-		function = "uart0";
-		groups = "u0rxtx", "u0rtscts";
-	};
-};
-state_1_node_a {
-	spi0 {
-		function = "spi0";
-		groups = "spi0pins";
-	};
-};
-state_2_node_a {
-	function = "i2c0";
-	pins = "mfio29", "mfio30";
-};
+See pinmux-node.yaml
 
 == Generic pin configuration node content ==
 
-Many data items that are represented in a pin configuration node are common
-and generic. Pin control bindings should use the properties defined below
-where they are applicable; not all of these properties are relevant or useful
-for all hardware or binding structures. Each individual binding document
-should state which of these generic properties, if any, are used, and the
-structure of the DT nodes that contain these properties.
-
-Supported generic properties are:
-
-pins			- the list of pins that properties in the node
-			  apply to (either this or "group" has to be
-			  specified)
-group			- the group to apply the properties to, if the driver
-			  supports configuration of whole groups rather than
-			  individual pins (either this or "pins" has to be
-			  specified)
-bias-disable		- disable any pin bias
-bias-high-impedance	- high impedance mode ("third-state", "floating")
-bias-bus-hold		- latch weakly
-bias-pull-up		- pull up the pin
-bias-pull-down		- pull down the pin
-bias-pull-pin-default	- use pin-default pull state
-drive-push-pull		- drive actively high and low
-drive-open-drain	- drive with open drain
-drive-open-source	- drive with open source
-drive-strength		- sink or source at most X mA
-input-enable		- enable input on pin (no effect on output)
-input-disable		- disable input on pin (no effect on output)
-input-schmitt-enable	- enable schmitt-trigger mode
-input-schmitt-disable	- disable schmitt-trigger mode
-input-debounce		- debounce mode with debound time X
-power-source		- select between different power supplies
-low-power-enable	- enable low power mode
-low-power-disable	- disable low power mode
-output-low		- set the pin to output mode with low level
-output-high		- set the pin to output mode with high level
-slew-rate		- set the slew rate
-
-For example:
-
-state_0_node_a {
-	cts_rxd {
-		pins = "GPIO0_AJ5", "GPIO2_AH4"; /* CTS+RXD */
-		bias-pull-up;
-	};
-};
-state_1_node_a {
-	rts_txd {
-		pins = "GPIO1_AJ3", "GPIO3_AH3"; /* RTS+TXD */
-		output-high;
-	};
-};
-state_2_node_a {
-	foo {
-		group = "foo-group";
-		bias-pull-up;
-	};
-};
-
-Some of the generic properties take arguments. For those that do, the
-arguments are described below.
-
-- pins takes a list of pin names or IDs as a required argument. The specific
-  binding for the hardware defines:
-  - Whether the entries are integers or strings, and their meaning.
-
-- bias-pull-up, -down and -pin-default take as optional argument on hardware
-  supporting it the pull strength in Ohm. bias-disable will disable the pull.
-
-- drive-strength takes as argument the target strength in mA.
-
-- input-debounce takes the debounce time in usec as argument
-  or 0 to disable debouncing
-
-More in-depth documentation on these parameters can be found in
-<include/linux/pinctrl/pinconf-generic.h>
+See pincfg-node.yaml

@@ -87,15 +87,15 @@ enum adf_event {
 struct service_hndl {
 	int (*event_hld)(struct adf_accel_dev *accel_dev,
 			 enum adf_event event);
-	unsigned long init_status;
-	unsigned long start_status;
+	unsigned long init_status[ADF_DEVS_ARRAY_SIZE];
+	unsigned long start_status[ADF_DEVS_ARRAY_SIZE];
 	char *name;
 	struct list_head list;
 };
 
 static inline int get_current_node(void)
 {
-	return topology_physical_package_id(smp_processor_id());
+	return topology_physical_package_id(raw_smp_processor_id());
 }
 
 int adf_service_register(struct service_hndl *service);

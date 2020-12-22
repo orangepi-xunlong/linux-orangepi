@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013 Eric Leblond <eric@regit.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Development of this code partly funded by OISF
  * (http://www.openinfosecfoundation.org/)
@@ -43,7 +40,7 @@ static void nft_queue_eval(const struct nft_expr *expr,
 			queue = priv->queuenum + cpu % priv->queues_total;
 		} else {
 			queue = nfqueue_hash(pkt->skb, queue,
-					     priv->queues_total, pkt->pf,
+					     priv->queues_total, nft_pf(pkt),
 					     jhash_initval);
 		}
 	}
@@ -197,7 +194,7 @@ nft_queue_select_ops(const struct nft_ctx *ctx,
 
 static struct nft_expr_type nft_queue_type __read_mostly = {
 	.name		= "queue",
-	.select_ops	= &nft_queue_select_ops,
+	.select_ops	= nft_queue_select_ops,
 	.policy		= nft_queue_policy,
 	.maxattr	= NFTA_QUEUE_MAX,
 	.owner		= THIS_MODULE,
@@ -219,3 +216,4 @@ module_exit(nft_queue_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Eric Leblond <eric@regit.org>");
 MODULE_ALIAS_NFT_EXPR("queue");
+MODULE_DESCRIPTION("Netfilter nftables queue module");

@@ -1,14 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2010-2011,2013-2015 The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * lpass.h - Definitions for the QTi LPASS
  */
@@ -36,6 +28,10 @@ struct lpass_data {
 
 	/* MI2S bit clock (derived from system clock by a divider */
 	struct clk *mi2s_bit_clk[LPASS_MAX_MI2S_PORTS];
+
+	/* MI2S SD lines to use for playback/capture */
+	unsigned int mi2s_playback_sd_mode[LPASS_MAX_MI2S_PORTS];
+	unsigned int mi2s_capture_sd_mode[LPASS_MAX_MI2S_PORTS];
 
 	/* low-power audio interface (LPAIF) registers */
 	void __iomem *lpaif;
@@ -82,7 +78,7 @@ struct lpass_variant {
 	 **/
 	u32	dmactl_audif_start;
 	u32	wrdma_channel_start;
-	/* SOC specific intialization like clocks */
+	/* SOC specific initialization like clocks */
 	int (*init)(struct platform_device *pdev);
 	int (*exit)(struct platform_device *pdev);
 	int (*alloc_dma_channel)(struct lpass_data *data, int direction);
@@ -91,6 +87,8 @@ struct lpass_variant {
 	/* SOC specific dais */
 	struct snd_soc_dai_driver *dai_driver;
 	int num_dai;
+	const char * const *dai_osr_clk_names;
+	const char * const *dai_bit_clk_names;
 };
 
 /* register the platform driver from the CPU DAI driver */

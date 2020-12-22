@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linux/arch/unicore32/mm/mm.h
  *
  * Code specific to PKUnity SoC and UniCore ISA
  *
  * Copyright (C) 2001-2010 GUAN Xue-tao
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <asm/hwdef-copro.h>
 
@@ -16,16 +13,6 @@ extern pmd_t *top_pmd;
 extern int sysctl_overcommit_memory;
 
 #define TOP_PTE(x)	pte_offset_kernel(top_pmd, x)
-
-static inline pmd_t *pmd_off(pgd_t *pgd, unsigned long virt)
-{
-	return pmd_offset((pud_t *)pgd, virt);
-}
-
-static inline pmd_t *pmd_off_k(unsigned long virt)
-{
-	return pmd_off(pgd_offset_k(virt), virt);
-}
 
 struct mem_type {
 	unsigned int prot_pte;

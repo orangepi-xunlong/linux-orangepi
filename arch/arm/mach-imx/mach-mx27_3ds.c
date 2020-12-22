@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
  *
  * Author: Fabio Estevam <fabio.estevam@freescale.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -22,6 +13,7 @@
 
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
+#include <linux/gpio/machine.h>
 #include <linux/irq.h>
 #include <linux/usb/otg.h>
 #include <linux/usb/ulpi.h>
@@ -29,9 +21,6 @@
 #include <linux/mfd/mc13783.h>
 #include <linux/spi/spi.h>
 #include <linux/regulator/machine.h>
-#include <linux/spi/l4f00242t03.h>
-
-#include <media/soc_camera.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -53,8 +42,6 @@
 #define SD1_CD			IMX_GPIO_NR(2, 26)
 #define LCD_RESET		IMX_GPIO_NR(1, 3)
 #define LCD_ENABLE		IMX_GPIO_NR(1, 31)
-#define CSI_PWRDWN		IMX_GPIO_NR(4, 19)
-#define CSI_RESET		IMX_GPIO_NR(3, 6)
 
 static const int mx27pdk_pins[] __initconst = {
 	/* UART1 */
@@ -144,31 +131,11 @@ static const int mx27pdk_pins[] __initconst = {
 	PA30_PF_CONTRAST,
 	LCD_ENABLE | GPIO_GPIO | GPIO_OUT,
 	LCD_RESET | GPIO_GPIO | GPIO_OUT,
-	/* CSI */
-	PB10_PF_CSI_D0,
-	PB11_PF_CSI_D1,
-	PB12_PF_CSI_D2,
-	PB13_PF_CSI_D3,
-	PB14_PF_CSI_D4,
-	PB15_PF_CSI_MCLK,
-	PB16_PF_CSI_PIXCLK,
-	PB17_PF_CSI_D5,
-	PB18_PF_CSI_D6,
-	PB19_PF_CSI_D7,
-	PB20_PF_CSI_VSYNC,
-	PB21_PF_CSI_HSYNC,
-	CSI_PWRDWN | GPIO_GPIO | GPIO_OUT,
-	CSI_RESET | GPIO_GPIO | GPIO_OUT,
 	/* SSI4 */
 	PC16_PF_SSI4_FS,
 	PC17_PF_SSI4_RXD,
 	PC18_PF_SSI4_TXD,
 	PC19_PF_SSI4_CLK,
-};
-
-static struct gpio mx27_3ds_camera_gpios[] = {
-	{ CSI_PWRDWN, GPIOF_OUT_INIT_HIGH, "camera-power" },
-	{ CSI_RESET, GPIOF_OUT_INIT_HIGH, "camera-reset" },
 };
 
 static const struct imxuart_platform_data uart_pdata __initconst = {
@@ -270,7 +237,6 @@ static struct regulator_init_data gpo_init = {
 
 static struct regulator_consumer_supply vmmc1_consumers[] = {
 	REGULATOR_SUPPLY("vcore", "spi0.0"),
-	REGULATOR_SUPPLY("cmos_2v8", "soc-camera-pdrv.0"),
 };
 
 static struct regulator_init_data vmmc1_init = {
@@ -299,22 +265,6 @@ static struct regulator_init_data vgen_init = {
 	.consumer_supplies = vgen_consumers,
 };
 
-static struct regulator_consumer_supply vvib_consumers[] = {
-	REGULATOR_SUPPLY("cmos_vcore", "soc-camera-pdrv.0"),
-};
-
-static struct regulator_init_data vvib_init = {
-	.constraints = {
-		.min_uV = 1300000,
-		.max_uV = 1300000,
-		.apply_uV = 1,
-		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
-				  REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies = ARRAY_SIZE(vvib_consumers),
-	.consumer_supplies = vvib_consumers,
-};
-
 static struct mc13xxx_regulator_init_data mx27_3ds_regulators[] = {
 	{
 		.id = MC13783_REG_VMMC1,
@@ -328,9 +278,6 @@ static struct mc13xxx_regulator_init_data mx27_3ds_regulators[] = {
 	}, {
 		.id = MC13783_REG_GPO3, /* Turn on 3.3V */
 		.init_data = &gpo_init,
-	}, {
-		.id = MC13783_REG_VVIB,  /* Power OV2640 */
-		.init_data = &vvib_init,
 	},
 };
 
@@ -370,51 +317,6 @@ static const struct spi_imx_master spi2_pdata __initconst = {
 	.num_chipselect	= ARRAY_SIZE(spi2_chipselect),
 };
 
-static int mx27_3ds_camera_power(struct device *dev, int on)
-{
-	/* enable or disable the camera */
-	pr_debug("%s: %s the camera\n", __func__, on ? "ENABLE" : "DISABLE");
-	gpio_set_value(CSI_PWRDWN, on ? 0 : 1);
-
-	if (!on)
-		goto out;
-
-	/* If enabled, give a reset impulse */
-	gpio_set_value(CSI_RESET, 0);
-	msleep(20);
-	gpio_set_value(CSI_RESET, 1);
-	msleep(100);
-
-out:
-	return 0;
-}
-
-static struct i2c_board_info mx27_3ds_i2c_camera = {
-	I2C_BOARD_INFO("ov2640", 0x30),
-};
-
-static struct regulator_bulk_data mx27_3ds_camera_regs[] = {
-	{ .supply = "cmos_vcore" },
-	{ .supply = "cmos_2v8" },
-};
-
-static struct soc_camera_link iclink_ov2640 = {
-	.bus_id		= 0,
-	.board_info	= &mx27_3ds_i2c_camera,
-	.i2c_adapter_id	= 0,
-	.power		= mx27_3ds_camera_power,
-	.regulators	= mx27_3ds_camera_regs,
-	.num_regulators	= ARRAY_SIZE(mx27_3ds_camera_regs),
-};
-
-static struct platform_device mx27_3ds_ov2640 = {
-	.name	= "soc-camera-pdrv",
-	.id	= 0,
-	.dev	= {
-		.platform_data = &iclink_ov2640,
-	},
-};
-
 static struct imx_fb_videomode mx27_3ds_modes[] = {
 	{	/* 480x640 @ 60 Hz */
 		.mode = {
@@ -448,9 +350,19 @@ static const struct imx_fb_platform_data mx27_3ds_fb_data __initconst = {
 };
 
 /* LCD */
-static struct l4f00242t03_pdata mx27_3ds_lcd_pdata = {
-	.reset_gpio		= LCD_RESET,
-	.data_enable_gpio	= LCD_ENABLE,
+static struct gpiod_lookup_table mx27_3ds_lcd_gpiod_table = {
+	.dev_id = "spi0.0", /* Bus 0 chipselect 0 */
+	.table = {
+		/*
+		 * The i.MX27 has the i.MX21 GPIO controller, the GPIOs
+		 * numbered IMX_GPIO_NR(1, 3) and IMX_GPIO_NR(1, 31)
+		 * are in "bank 1" which is subtracted by one in the macro
+		 * so these are actually bank 0 on "imx21-gpio.0".
+		 */
+		GPIO_LOOKUP("imx21-gpio.0", 3, "reset", GPIO_ACTIVE_HIGH),
+		GPIO_LOOKUP("imx21-gpio.0", 31, "enable", GPIO_ACTIVE_HIGH),
+		{ },
+	},
 };
 
 static struct spi_board_info mx27_3ds_spi_devs[] __initdata = {
@@ -467,16 +379,7 @@ static struct spi_board_info mx27_3ds_spi_devs[] __initdata = {
 		.max_speed_hz	= 5000000,
 		.bus_num	= 0,
 		.chip_select	= 0, /* SS0 */
-		.platform_data	= &mx27_3ds_lcd_pdata,
 	},
-};
-
-static struct platform_device *devices[] __initdata = {
-	&mx27_3ds_ov2640,
-};
-
-static const struct mx2_camera_platform_data mx27_3ds_cam_pdata __initconst = {
-	.clk = 26000000,
 };
 
 static const struct imxi2c_platform_data mx27_3ds_i2c0_data __initconst = {
@@ -498,7 +401,6 @@ static void __init mx27pdk_init(void)
 	imx27_add_spi_imx0(&spi1_pdata);
 
 	imx27_add_imx_i2c(0, &mx27_3ds_i2c0_data);
-	platform_add_devices(devices, ARRAY_SIZE(devices));
 	imx27_add_imx_fb(&mx27_3ds_fb_data);
 
 	imx27_add_imx_ssi(0, &mx27_3ds_ssi_pdata);
@@ -506,8 +408,6 @@ static void __init mx27pdk_init(void)
 
 static void __init mx27pdk_late_init(void)
 {
-	int ret;
-
 	mx27_3ds_sdhc1_enable_level_translator();
 	imx27_add_mxc_mmc(0, &sdhc1_pdata);
 
@@ -524,6 +424,7 @@ static void __init mx27pdk_late_init(void)
 	if (!otg_mode_host)
 		imx27_add_fsl_usb2_udc(&otg_device_pdata);
 
+	gpiod_add_lookup_table(&mx27_3ds_lcd_gpiod_table);
 	mx27_3ds_spi_devs[0].irq = gpio_to_irq(PMIC_INT);
 	spi_register_board_info(mx27_3ds_spi_devs,
 				ARRAY_SIZE(mx27_3ds_spi_devs));
@@ -531,14 +432,6 @@ static void __init mx27pdk_late_init(void)
 	if (mxc_expio_init(MX27_CS5_BASE_ADDR, IMX_GPIO_NR(3, 28)))
 		pr_warn("Init of the debugboard failed, all devices on the debugboard are unusable.\n");
 
-	ret = gpio_request_array(mx27_3ds_camera_gpios,
-				 ARRAY_SIZE(mx27_3ds_camera_gpios));
-	if (ret) {
-		pr_err("Failed to request camera gpios");
-		iclink_ov2640.power = NULL;
-	}
-
-	imx27_add_mx2_camera(&mx27_3ds_cam_pdata);
 
 	imx_add_platform_device("imx_mc13783", 0, NULL, 0, NULL, 0);
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MAX77620 pin control driver.
  *
@@ -6,10 +7,6 @@
  * Author:
  *	Chaitanya Bandi <bandik@nvidia.com>
  *	Laxman Dewangan <ldewangan@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #include <linux/mfd/max77620.h>
@@ -418,11 +415,9 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 						 MAX77620_REG_GPIO0 + pin,
 						 MAX77620_CNFG_GPIO_DRV_MASK,
 						 val);
-			if (ret < 0) {
-				dev_err(dev, "Reg 0x%02x update failed %d\n",
-					MAX77620_REG_GPIO0 + pin, ret);
-				return ret;
-			}
+			if (ret)
+				goto report_update_failure;
+
 			mpci->pin_info[pin].drv_type = val ?
 				MAX77620_PIN_PP_DRV : MAX77620_PIN_OD_DRV;
 			break;
@@ -433,11 +428,9 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 						 MAX77620_REG_GPIO0 + pin,
 						 MAX77620_CNFG_GPIO_DRV_MASK,
 						 val);
-			if (ret < 0) {
-				dev_err(dev, "Reg 0x%02x update failed %d\n",
-					MAX77620_REG_GPIO0 + pin, ret);
-				return ret;
-			}
+			if (ret)
+				goto report_update_failure;
+
 			mpci->pin_info[pin].drv_type = val ?
 				MAX77620_PIN_PP_DRV : MAX77620_PIN_OD_DRV;
 			break;
@@ -534,6 +527,11 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 	}
 
 	return 0;
+
+report_update_failure:
+	dev_err(dev, "Reg 0x%02x update failed %d\n",
+		MAX77620_REG_GPIO0 + pin, ret);
+	return ret;
 }
 
 static const struct pinconf_ops max77620_pinconf_ops = {

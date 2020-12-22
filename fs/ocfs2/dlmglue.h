@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* -*- mode: c; c-basic-offset: 8; -*-
  * vim: noexpandtab sw=8 ts=8 sts=0:
  *
@@ -6,21 +7,6 @@
  * description here
  *
  * Copyright (C) 2002, 2004 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
 
 
@@ -70,9 +56,33 @@ struct ocfs2_orphan_scan_lvb {
 	__be32	lvb_os_seqno;
 };
 
+#define OCFS2_TRIMFS_LVB_VERSION 1
+
+struct ocfs2_trim_fs_lvb {
+	__u8	lvb_version;
+	__u8	lvb_success;
+	__u8	lvb_reserved[2];
+	__be32	lvb_nodenum;
+	__be64	lvb_start;
+	__be64	lvb_len;
+	__be64	lvb_minlen;
+	__be64	lvb_trimlen;
+};
+
+struct ocfs2_trim_fs_info {
+	u8	tf_valid;	/* lvb is valid, or not */
+	u8	tf_success;	/* trim is successful, or not */
+	u32	tf_nodenum;	/* osb node number */
+	u64	tf_start;	/* trim start offset in clusters */
+	u64	tf_len;		/* trim end offset in clusters */
+	u64	tf_minlen;	/* trim minimum contiguous free clusters */
+	u64	tf_trimlen;	/* trimmed length in bytes */
+};
+
 struct ocfs2_lock_holder {
 	struct list_head oh_list;
 	struct pid *oh_owner_pid;
+	int oh_ex;
 };
 
 /* ocfs2_inode_lock_full() 'arg_flags' flags */
@@ -116,13 +126,14 @@ void ocfs2_lock_res_free(struct ocfs2_lock_res *res);
 int ocfs2_create_new_inode_locks(struct inode *inode);
 int ocfs2_drop_inode_locks(struct inode *inode);
 int ocfs2_rw_lock(struct inode *inode, int write);
+int ocfs2_try_rw_lock(struct inode *inode, int write);
 void ocfs2_rw_unlock(struct inode *inode, int write);
 int ocfs2_open_lock(struct inode *inode);
 int ocfs2_try_open_lock(struct inode *inode, int write);
 void ocfs2_open_unlock(struct inode *inode);
 int ocfs2_inode_lock_atime(struct inode *inode,
 			  struct vfsmount *vfsmnt,
-			  int *level);
+			  int *level, int wait);
 int ocfs2_inode_lock_full_nested(struct inode *inode,
 			 struct buffer_head **ret_bh,
 			 int ex,
@@ -140,6 +151,9 @@ int ocfs2_inode_lock_with_page(struct inode *inode,
 /* 99% of the time we don't want to supply any additional flags --
  * those are for very specific cases only. */
 #define ocfs2_inode_lock(i, b, e) ocfs2_inode_lock_full_nested(i, b, e, 0, OI_LS_NORMAL)
+#define ocfs2_try_inode_lock(i, b, e)\
+		ocfs2_inode_lock_full_nested(i, b, e, OCFS2_META_LOCK_NOQUEUE,\
+		OI_LS_NORMAL)
 void ocfs2_inode_unlock(struct inode *inode,
 		       int ex);
 int ocfs2_super_lock(struct ocfs2_super *osb,
@@ -153,6 +167,12 @@ int ocfs2_rename_lock(struct ocfs2_super *osb);
 void ocfs2_rename_unlock(struct ocfs2_super *osb);
 int ocfs2_nfs_sync_lock(struct ocfs2_super *osb, int ex);
 void ocfs2_nfs_sync_unlock(struct ocfs2_super *osb, int ex);
+void ocfs2_trim_fs_lock_res_init(struct ocfs2_super *osb);
+void ocfs2_trim_fs_lock_res_uninit(struct ocfs2_super *osb);
+int ocfs2_trim_fs_lock(struct ocfs2_super *osb,
+		       struct ocfs2_trim_fs_info *info, int trylock);
+void ocfs2_trim_fs_unlock(struct ocfs2_super *osb,
+			  struct ocfs2_trim_fs_info *info);
 int ocfs2_dentry_lock(struct dentry *dentry, int ex);
 void ocfs2_dentry_unlock(struct dentry *dentry, int ex);
 int ocfs2_file_lock(struct file *file, int ex, int trylock);

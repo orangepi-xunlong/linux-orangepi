@@ -9,7 +9,9 @@
 # Changed by many, many contributors over the years.
 #
 
+# Sanitizer runtimes are unavailable and cannot be linked for early boot code.
 KASAN_SANITIZE			:= n
+KCSAN_SANITIZE			:= n
 OBJECT_FILES_NON_STANDARD	:= y
 
 # Kernel does not boot with kcov instrumentation here.
@@ -45,8 +47,8 @@ setup-y		+= video-vesa.o
 setup-y		+= video-bios.o
 
 targets		+= $(setup-y)
-hostprogs-y	:= tools/build
-hostprogs-$(CONFIG_X86_FEATURE_NAMES) += mkcpustr
+hostprogs	:= tools/build
+hostprogs	+= mkcpustr
 
 HOST_EXTRACFLAGS += -I$(srctree)/tools/include \
 		    -include include/generated/autoconf.h \
@@ -57,16 +59,17 @@ $(obj)/cpu.o: $(obj)/cpustr.h
 
 quiet_cmd_cpustr = CPUSTR  $@
       cmd_cpustr = $(obj)/mkcpustr > $@
-targets += cpustr.h
 $(obj)/cpustr.h: $(obj)/mkcpustr FORCE
 	$(call if_changed,cpustr)
 endif
-clean-files += cpustr.h
+targets += cpustr.h
 
 # ---------------------------------------------------------------------------
 
-KBUILD_CFLAGS	:= $(USERINCLUDE) $(REALMODE_CFLAGS) -D_SETUP
+KBUILD_CFLAGS	:= $(REALMODE_CFLAGS) -D_SETUP
 KBUILD_AFLAGS	:= $(KBUILD_CFLAGS) -D__ASSEMBLY__
+KBUILD_CFLAGS	+= $(call cc-option,-fmacro-prefix-map=$(srctree)/=)
+KBUILD_CFLAGS	+= -fno-asynchronous-unwind-tables
 GCOV_PROFILE := n
 UBSAN_SANITIZE := n
 
@@ -87,7 +90,7 @@ $(obj)/vmlinux.bin: $(obj)/compressed/vmlinux FORCE
 
 SETUP_OBJS = $(addprefix $(obj)/,$(setup-y))
 
-sed-zoffset := -e 's/^\([0-9a-fA-F]*\) [ABCDGRSTVW] \(startup_32\|startup_64\|efi32_stub_entry\|efi64_stub_entry\|efi_pe_entry\|input_data\|_end\|_ehead\|_text\|z_.*\)$$/\#define ZO_\2 0x\1/p'
+sed-zoffset := -e 's/^\([0-9a-fA-F]*\) [a-zA-Z] \(startup_32\|startup_64\|efi32_stub_entry\|efi64_stub_entry\|efi_pe_entry\|efi32_pe_entry\|input_data\|kernel_info\|_end\|_ehead\|_text\|z_.*\)$$/\#define ZO_\2 0x\1/p'
 
 quiet_cmd_zoffset = ZOFFSET $@
       cmd_zoffset = $(NM) $< | sed -n $(sed-zoffset) > $@
@@ -100,7 +103,7 @@ $(obj)/zoffset.h: $(obj)/compressed/vmlinux FORCE
 AFLAGS_header.o += -I$(objtree)/$(obj)
 $(obj)/header.o: $(obj)/zoffset.h
 
-LDFLAGS_setup.elf	:= -T
+LDFLAGS_setup.elf	:= -m elf_i386 -T
 $(obj)/setup.elf: $(src)/setup.ld $(SETUP_OBJS) FORCE
 	$(call if_changed,ld)
 
@@ -123,65 +126,30 @@ image_cmdline = default linux $(FDARGS) $(if $(FDINITRD),initrd=initrd.img,)
 $(obj)/mtools.conf: $(src)/mtools.conf.in
 	sed -e 's|@OBJ@|$(obj)|g' < $< > $@
 
+quiet_cmd_genimage = GENIMAGE $3
+cmd_genimage = sh $(srctree)/$(src)/genimage.sh $2 $3 $(obj)/bzImage \
+			$(obj)/mtools.conf '$(image_cmdline)' $(FDINITRD)
+
+PHONY += bzdisk fdimage fdimage144 fdimage288 isoimage bzlilo install
+
 # This requires write access to /dev/fd0
 bzdisk: $(obj)/bzImage $(obj)/mtools.conf
-	MTOOLSRC=$(obj)/mtools.conf mformat a:			; sync
-	syslinux /dev/fd0					; sync
-	echo '$(image_cmdline)' | \
-		MTOOLSRC=$(src)/mtools.conf mcopy - a:syslinux.cfg
-	if [ -f '$(FDINITRD)' ] ; then \
-		MTOOLSRC=$(obj)/mtools.conf mcopy '$(FDINITRD)' a:initrd.img ; \
-	fi
-	MTOOLSRC=$(obj)/mtools.conf mcopy $(obj)/bzImage a:linux	; sync
+	$(call cmd,genimage,bzdisk,/dev/fd0)
 
 # These require being root or having syslinux 2.02 or higher installed
 fdimage fdimage144: $(obj)/bzImage $(obj)/mtools.conf
-	dd if=/dev/zero of=$(obj)/fdimage bs=1024 count=1440
-	MTOOLSRC=$(obj)/mtools.conf mformat v:			; sync
-	syslinux $(obj)/fdimage					; sync
-	echo '$(image_cmdline)' | \
-		MTOOLSRC=$(obj)/mtools.conf mcopy - v:syslinux.cfg
-	if [ -f '$(FDINITRD)' ] ; then \
-		MTOOLSRC=$(obj)/mtools.conf mcopy '$(FDINITRD)' v:initrd.img ; \
-	fi
-	MTOOLSRC=$(obj)/mtools.conf mcopy $(obj)/bzImage v:linux	; sync
+	$(call cmd,genimage,fdimage144,$(obj)/fdimage)
+	@$(kecho) 'Kernel: $(obj)/fdimage is ready'
 
 fdimage288: $(obj)/bzImage $(obj)/mtools.conf
-	dd if=/dev/zero of=$(obj)/fdimage bs=1024 count=2880
-	MTOOLSRC=$(obj)/mtools.conf mformat w:			; sync
-	syslinux $(obj)/fdimage					; sync
-	echo '$(image_cmdline)' | \
-		MTOOLSRC=$(obj)/mtools.conf mcopy - w:syslinux.cfg
-	if [ -f '$(FDINITRD)' ] ; then \
-		MTOOLSRC=$(obj)/mtools.conf mcopy '$(FDINITRD)' w:initrd.img ; \
-	fi
-	MTOOLSRC=$(obj)/mtools.conf mcopy $(obj)/bzImage w:linux	; sync
+	$(call cmd,genimage,fdimage288,$(obj)/fdimage)
+	@$(kecho) 'Kernel: $(obj)/fdimage is ready'
 
 isoimage: $(obj)/bzImage
-	-rm -rf $(obj)/isoimage
-	mkdir $(obj)/isoimage
-	for i in lib lib64 share end ; do \
-		if [ -f /usr/$$i/syslinux/isolinux.bin ] ; then \
-			cp /usr/$$i/syslinux/isolinux.bin $(obj)/isoimage ; \
-			if [ -f /usr/$$i/syslinux/ldlinux.c32 ]; then \
-				cp /usr/$$i/syslinux/ldlinux.c32 $(obj)/isoimage ; \
-			fi ; \
-			break ; \
-		fi ; \
-		if [ $$i = end ] ; then exit 1 ; fi ; \
-	done
-	cp $(obj)/bzImage $(obj)/isoimage/linux
-	echo '$(image_cmdline)' > $(obj)/isoimage/isolinux.cfg
-	if [ -f '$(FDINITRD)' ] ; then \
-		cp '$(FDINITRD)' $(obj)/isoimage/initrd.img ; \
-	fi
-	mkisofs -J -r -o $(obj)/image.iso -b isolinux.bin -c boot.cat \
-		-no-emul-boot -boot-load-size 4 -boot-info-table \
-		$(obj)/isoimage
-	isohybrid $(obj)/image.iso 2>/dev/null || true
-	rm -rf $(obj)/isoimage
+	$(call cmd,genimage,isoimage,$(obj)/image.iso)
+	@$(kecho) 'Kernel: $(obj)/image.iso is ready'
 
-bzlilo: $(obj)/bzImage
+bzlilo:
 	if [ -f $(INSTALL_PATH)/vmlinuz ]; then mv $(INSTALL_PATH)/vmlinuz $(INSTALL_PATH)/vmlinuz.old; fi
 	if [ -f $(INSTALL_PATH)/System.map ]; then mv $(INSTALL_PATH)/System.map $(INSTALL_PATH)/System.old; fi
 	cat $(obj)/bzImage > $(INSTALL_PATH)/vmlinuz

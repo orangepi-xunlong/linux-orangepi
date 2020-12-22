@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 struct acpi_smb_hc;
 enum acpi_smb_protocol {
 	SMBUS_WRITE_QUICK = 2,
@@ -13,8 +14,6 @@ enum acpi_smb_protocol {
 	SMBUS_PROCESS_CALL = 0xc,
 	SMBUS_BLOCK_PROCESS_CALL = 0xd,
 };
-
-static const u8 SMBUS_PEC = 0x80;
 
 enum acpi_sbs_device_addr {
 	ACPI_SBS_CHARGER = 0x9,

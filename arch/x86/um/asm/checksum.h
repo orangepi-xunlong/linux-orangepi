@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __UM_CHECKSUM_H
 #define __UM_CHECKSUM_H
 
@@ -32,26 +33,6 @@ __wsum csum_partial_copy_nocheck(const void *src, void *dst,
 				       int len, __wsum sum)
 {
 	memcpy(dst, src, len);
-	return csum_partial(dst, len, sum);
-}
-
-/*
- * the same as csum_partial, but copies from src while it
- * checksums, and handles user-space pointer exceptions correctly, when needed.
- *
- * here even more important to align src and dst on a 32-bit (or even
- * better 64-bit) boundary
- */
-
-static __inline__
-__wsum csum_partial_copy_from_user(const void __user *src, void *dst,
-					 int len, __wsum sum, int *err_ptr)
-{
-	if (copy_from_user(dst, src, len)) {
-		*err_ptr = -EFAULT;
-		return (__force __wsum)-1;
-	}
-
 	return csum_partial(dst, len, sum);
 }
 

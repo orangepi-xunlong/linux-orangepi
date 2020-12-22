@@ -33,8 +33,77 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mlx5/driver.h>
-#include <linux/mlx5/cmd.h>
 #include "mlx5_core.h"
+
+/* Scheduling element fw management */
+int mlx5_create_scheduling_element_cmd(struct mlx5_core_dev *dev, u8 hierarchy,
+				       void *ctx, u32 *element_id)
+{
+	u32 out[MLX5_ST_SZ_DW(create_scheduling_element_in)] = {};
+	u32 in[MLX5_ST_SZ_DW(create_scheduling_element_in)] = {};
+	void *schedc;
+	int err;
+
+	schedc = MLX5_ADDR_OF(create_scheduling_element_in, in,
+			      scheduling_context);
+	MLX5_SET(create_scheduling_element_in, in, opcode,
+		 MLX5_CMD_OP_CREATE_SCHEDULING_ELEMENT);
+	MLX5_SET(create_scheduling_element_in, in, scheduling_hierarchy,
+		 hierarchy);
+	memcpy(schedc, ctx, MLX5_ST_SZ_BYTES(scheduling_context));
+
+	err = mlx5_cmd_exec_inout(dev, create_scheduling_element, in, out);
+	if (err)
+		return err;
+
+	*element_id = MLX5_GET(create_scheduling_element_out, out,
+			       scheduling_element_id);
+	return 0;
+}
+
+int mlx5_modify_scheduling_element_cmd(struct mlx5_core_dev *dev, u8 hierarchy,
+				       void *ctx, u32 element_id,
+				       u32 modify_bitmask)
+{
+	u32 in[MLX5_ST_SZ_DW(modify_scheduling_element_in)] = {};
+	void *schedc;
+
+	schedc = MLX5_ADDR_OF(modify_scheduling_element_in, in,
+			      scheduling_context);
+	MLX5_SET(modify_scheduling_element_in, in, opcode,
+		 MLX5_CMD_OP_MODIFY_SCHEDULING_ELEMENT);
+	MLX5_SET(modify_scheduling_element_in, in, scheduling_element_id,
+		 element_id);
+	MLX5_SET(modify_scheduling_element_in, in, modify_bitmask,
+		 modify_bitmask);
+	MLX5_SET(modify_scheduling_element_in, in, scheduling_hierarchy,
+		 hierarchy);
+	memcpy(schedc, ctx, MLX5_ST_SZ_BYTES(scheduling_context));
+
+	return mlx5_cmd_exec_in(dev, modify_scheduling_element, in);
+}
+
+int mlx5_destroy_scheduling_element_cmd(struct mlx5_core_dev *dev, u8 hierarchy,
+					u32 element_id)
+{
+	u32 in[MLX5_ST_SZ_DW(destroy_scheduling_element_in)] = {};
+
+	MLX5_SET(destroy_scheduling_element_in, in, opcode,
+		 MLX5_CMD_OP_DESTROY_SCHEDULING_ELEMENT);
+	MLX5_SET(destroy_scheduling_element_in, in, scheduling_element_id,
+		 element_id);
+	MLX5_SET(destroy_scheduling_element_in, in, scheduling_hierarchy,
+		 hierarchy);
+
+	return mlx5_cmd_exec_in(dev, destroy_scheduling_element, in);
+}
+
+static bool mlx5_rl_are_equal_raw(struct mlx5_rl_entry *entry, void *rl_in,
+				  u16 uid)
+{
+	return (!memcmp(entry->rl_raw, rl_in, sizeof(entry->rl_raw)) &&
+		entry->uid == uid);
+}
 
 /* Finds an entry where we can register the given rate
  * If the rate already exists, return the entry where it is registered,
@@ -42,16 +111,26 @@
  * If the table is full, return NULL
  */
 static struct mlx5_rl_entry *find_rl_entry(struct mlx5_rl_table *table,
-					   u32 rate)
+					   void *rl_in, u16 uid, bool dedicated)
 {
 	struct mlx5_rl_entry *ret_entry = NULL;
 	bool empty_found = false;
 	int i;
 
 	for (i = 0; i < table->max_size; i++) {
-		if (table->rl_entry[i].rate == rate)
-			return &table->rl_entry[i];
-		if (!empty_found && !table->rl_entry[i].rate) {
+		if (dedicated) {
+			if (!table->rl_entry[i].refcount)
+				return &table->rl_entry[i];
+			continue;
+		}
+
+		if (table->rl_entry[i].refcount) {
+			if (table->rl_entry[i].dedicated)
+				continue;
+			if (mlx5_rl_are_equal_raw(&table->rl_entry[i], rl_in,
+						  uid))
+				return &table->rl_entry[i];
+		} else if (!empty_found) {
 			empty_found = true;
 			ret_entry = &table->rl_entry[i];
 		}
@@ -61,16 +140,19 @@ static struct mlx5_rl_entry *find_rl_entry(struct mlx5_rl_table *table,
 }
 
 static int mlx5_set_pp_rate_limit_cmd(struct mlx5_core_dev *dev,
-				   u32 rate, u16 index)
+				      struct mlx5_rl_entry *entry, bool set)
 {
-	u32 in[MLX5_ST_SZ_DW(set_pp_rate_limit_in)]   = {0};
-	u32 out[MLX5_ST_SZ_DW(set_pp_rate_limit_out)] = {0};
+	u32 in[MLX5_ST_SZ_DW(set_pp_rate_limit_in)] = {};
+	void *pp_context;
 
+	pp_context = MLX5_ADDR_OF(set_pp_rate_limit_in, in, ctx);
 	MLX5_SET(set_pp_rate_limit_in, in, opcode,
 		 MLX5_CMD_OP_SET_PP_RATE_LIMIT);
-	MLX5_SET(set_pp_rate_limit_in, in, rate_limit_index, index);
-	MLX5_SET(set_pp_rate_limit_in, in, rate_limit, rate);
-	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
+	MLX5_SET(set_pp_rate_limit_in, in, uid, entry->uid);
+	MLX5_SET(set_pp_rate_limit_in, in, rate_limit_index, entry->index);
+	if (set)
+		memcpy(pp_context, entry->rl_raw, sizeof(entry->rl_raw));
+	return mlx5_cmd_exec_in(dev, set_pp_rate_limit, in);
 }
 
 bool mlx5_rl_is_in_range(struct mlx5_core_dev *dev, u32 rate)
@@ -81,12 +163,24 @@ bool mlx5_rl_is_in_range(struct mlx5_core_dev *dev, u32 rate)
 }
 EXPORT_SYMBOL(mlx5_rl_is_in_range);
 
-int mlx5_rl_add_rate(struct mlx5_core_dev *dev, u32 rate, u16 *index)
+bool mlx5_rl_are_equal(struct mlx5_rate_limit *rl_0,
+		       struct mlx5_rate_limit *rl_1)
+{
+	return ((rl_0->rate == rl_1->rate) &&
+		(rl_0->max_burst_sz == rl_1->max_burst_sz) &&
+		(rl_0->typical_pkt_sz == rl_1->typical_pkt_sz));
+}
+EXPORT_SYMBOL(mlx5_rl_are_equal);
+
+int mlx5_rl_add_rate_raw(struct mlx5_core_dev *dev, void *rl_in, u16 uid,
+			 bool dedicated_entry, u16 *index)
 {
 	struct mlx5_rl_table *table = &dev->priv.rl_table;
 	struct mlx5_rl_entry *entry;
 	int err = 0;
+	u32 rate;
 
+	rate = MLX5_GET(set_pp_rate_limit_context, rl_in, rate_limit);
 	mutex_lock(&table->rl_lock);
 
 	if (!rate || !mlx5_rl_is_in_range(dev, rate)) {
@@ -96,7 +190,7 @@ int mlx5_rl_add_rate(struct mlx5_core_dev *dev, u32 rate, u16 *index)
 		goto out;
 	}
 
-	entry = find_rl_entry(table, rate);
+	entry = find_rl_entry(table, rl_in, uid, dedicated_entry);
 	if (!entry) {
 		mlx5_core_err(dev, "Max number of %u rates reached\n",
 			      table->max_size);
@@ -107,15 +201,24 @@ int mlx5_rl_add_rate(struct mlx5_core_dev *dev, u32 rate, u16 *index)
 		/* rate already configured */
 		entry->refcount++;
 	} else {
+		memcpy(entry->rl_raw, rl_in, sizeof(entry->rl_raw));
+		entry->uid = uid;
 		/* new rate limit */
-		err = mlx5_set_pp_rate_limit_cmd(dev, rate, entry->index);
+		err = mlx5_set_pp_rate_limit_cmd(dev, entry, true);
 		if (err) {
-			mlx5_core_err(dev, "Failed configuring rate: %u (%d)\n",
-				      rate, err);
+			mlx5_core_err(
+				dev,
+				"Failed configuring rate limit(err %d): rate %u, max_burst_sz %u, typical_pkt_sz %u\n",
+				err, rate,
+				MLX5_GET(set_pp_rate_limit_context, rl_in,
+					 burst_upper_bound),
+				MLX5_GET(set_pp_rate_limit_context, rl_in,
+					 typical_packet_size));
 			goto out;
 		}
-		entry->rate = rate;
+
 		entry->refcount = 1;
+		entry->dedicated = dedicated_entry;
 	}
 	*index = entry->index;
 
@@ -123,30 +226,71 @@ out:
 	mutex_unlock(&table->rl_lock);
 	return err;
 }
+EXPORT_SYMBOL(mlx5_rl_add_rate_raw);
+
+void mlx5_rl_remove_rate_raw(struct mlx5_core_dev *dev, u16 index)
+{
+	struct mlx5_rl_table *table = &dev->priv.rl_table;
+	struct mlx5_rl_entry *entry;
+
+	mutex_lock(&table->rl_lock);
+	entry = &table->rl_entry[index - 1];
+	entry->refcount--;
+	if (!entry->refcount)
+		/* need to remove rate */
+		mlx5_set_pp_rate_limit_cmd(dev, entry, false);
+	mutex_unlock(&table->rl_lock);
+}
+EXPORT_SYMBOL(mlx5_rl_remove_rate_raw);
+
+int mlx5_rl_add_rate(struct mlx5_core_dev *dev, u16 *index,
+		     struct mlx5_rate_limit *rl)
+{
+	u8 rl_raw[MLX5_ST_SZ_BYTES(set_pp_rate_limit_context)] = {};
+
+	MLX5_SET(set_pp_rate_limit_context, rl_raw, rate_limit, rl->rate);
+	MLX5_SET(set_pp_rate_limit_context, rl_raw, burst_upper_bound,
+		 rl->max_burst_sz);
+	MLX5_SET(set_pp_rate_limit_context, rl_raw, typical_packet_size,
+		 rl->typical_pkt_sz);
+
+	return mlx5_rl_add_rate_raw(dev, rl_raw,
+				    MLX5_CAP_QOS(dev, packet_pacing_uid) ?
+					MLX5_SHARED_RESOURCE_UID : 0,
+				    false, index);
+}
 EXPORT_SYMBOL(mlx5_rl_add_rate);
 
-void mlx5_rl_remove_rate(struct mlx5_core_dev *dev, u32 rate)
+void mlx5_rl_remove_rate(struct mlx5_core_dev *dev, struct mlx5_rate_limit *rl)
 {
+	u8 rl_raw[MLX5_ST_SZ_BYTES(set_pp_rate_limit_context)] = {};
 	struct mlx5_rl_table *table = &dev->priv.rl_table;
 	struct mlx5_rl_entry *entry = NULL;
 
 	/* 0 is a reserved value for unlimited rate */
-	if (rate == 0)
+	if (rl->rate == 0)
 		return;
 
+	MLX5_SET(set_pp_rate_limit_context, rl_raw, rate_limit, rl->rate);
+	MLX5_SET(set_pp_rate_limit_context, rl_raw, burst_upper_bound,
+		 rl->max_burst_sz);
+	MLX5_SET(set_pp_rate_limit_context, rl_raw, typical_packet_size,
+		 rl->typical_pkt_sz);
+
 	mutex_lock(&table->rl_lock);
-	entry = find_rl_entry(table, rate);
+	entry = find_rl_entry(table, rl_raw,
+			      MLX5_CAP_QOS(dev, packet_pacing_uid) ?
+				MLX5_SHARED_RESOURCE_UID : 0, false);
 	if (!entry || !entry->refcount) {
-		mlx5_core_warn(dev, "Rate %u is not configured\n", rate);
+		mlx5_core_warn(dev, "Rate %u, max_burst_sz %u typical_pkt_sz %u are not configured\n",
+			       rl->rate, rl->max_burst_sz, rl->typical_pkt_sz);
 		goto out;
 	}
 
 	entry->refcount--;
-	if (!entry->refcount) {
+	if (!entry->refcount)
 		/* need to remove rate */
-		mlx5_set_pp_rate_limit_cmd(dev, 0, entry->index);
-		entry->rate = 0;
-	}
+		mlx5_set_pp_rate_limit_cmd(dev, entry, false);
 
 out:
 	mutex_unlock(&table->rl_lock);
@@ -196,9 +340,9 @@ void mlx5_cleanup_rl_table(struct mlx5_core_dev *dev)
 
 	/* Clear all configured rates */
 	for (i = 0; i < table->max_size; i++)
-		if (table->rl_entry[i].rate)
-			mlx5_set_pp_rate_limit_cmd(dev, 0,
-						   table->rl_entry[i].index);
+		if (table->rl_entry[i].refcount)
+			mlx5_set_pp_rate_limit_cmd(dev, &table->rl_entry[i],
+						   false);
 
 	kfree(dev->priv.rl_table.rl_entry);
 }

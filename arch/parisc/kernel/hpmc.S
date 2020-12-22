@@ -1,23 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* 
  * HPMC (High Priority Machine Check) handler.
  *
  * Copyright (C) 1999 Philipp Rumpf <prumpf@tux.org>
  * Copyright (C) 1999 Hewlett-Packard (Frank Rowand)
  * Copyright (C) 2000 Hewlett-Packard (John Marvin)
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2, or (at your option)
- *    any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License
- *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 
@@ -44,6 +31,7 @@
 
 #include <asm/assembly.h>
 #include <asm/pdc.h>
+#include <asm/psw.h>
 
 #include <linux/linkage.h>
 #include <linux/init.h>
@@ -136,7 +124,7 @@ ENTRY(os_hpmc)
 	 * So turn on the Q bit and turn off the M bit.
 	 */
 
-	ldo     8(%r0),%r4                       /* PSW Q on, PSW M off */
+	ldi     PSW_SM_Q,%r4                   /* PSW Q on, PSW M off */
 	mtctl   %r4,ipsw
 	mtctl   %r0,pcsq
 	mtctl   %r0,pcsq
@@ -258,7 +246,7 @@ os_hpmc_5:
 
 	tovirt_r1 %r30      /* make sp virtual */
 
-	rsm 8,%r0           /* Clear Q bit */
+	rsm     PSW_SM_Q,%r0           /* Clear Q bit */
 	ldi     1,%r8       /* Set trap code to "1" for HPMC */
 	load32	PA(intr_save),%r1
 	be      0(%sr7,%r1)

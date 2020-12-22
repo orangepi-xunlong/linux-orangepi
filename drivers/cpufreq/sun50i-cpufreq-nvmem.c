@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
+ * Allwinner CPUFreq nvmem based driver
+ *
  * The sun50i-cpufreq-nvmem driver reads the efuse value from the SoC to
  * provide the OPP framework with required information.
  *
- * Copyright (C) 2020 frank@allwinnertech.com
+ * Copyright (C) 2019 Yangtao Li <tiny.windzz@gmail.com>
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -14,6 +16,11 @@
 #include <linux/platform_device.h>
 #include <linux/pm_opp.h>
 #include <linux/slab.h>
+
+#define MAX_NAME_LEN	7
+
+#define NVMEM_MASK	0x7
+#define NVMEM_SHIFT	5
 
 static struct platform_device *cpufreq_dt_pdev, *sun50i_cpufreq_pdev;
 
@@ -28,7 +35,7 @@ static int sun50i_cpufreq_get_efuse(u32 *versions)
 	struct nvmem_cell *speedbin_nvmem;
 	struct device_node *np;
 	struct device *cpu_dev;
-	u32 *efuse_value;
+	u32 *speedbin, efuse_value;
 	size_t len;
 	int ret;
 
@@ -36,18 +43,18 @@ static int sun50i_cpufreq_get_efuse(u32 *versions)
 	if (!cpu_dev)
 		return -ENODEV;
 
-	np = of_parse_phandle(cpu_dev->of_node, "operating-points-v2", 0);
+	np = dev_pm_opp_of_get_opp_desc_node(cpu_dev);
 	if (!np)
 		return -ENOENT;
 
 	ret = of_device_is_compatible(np,
-				      "allwinner,sun50i-operating-points");
+				      "allwinner,sun50i-h6-operating-points");
 	if (!ret) {
 		of_node_put(np);
 		return -ENOENT;
 	}
 
-	speedbin_nvmem = of_nvmem_cell_get(np, "speed");
+	speedbin_nvmem = of_nvmem_cell_get(np, NULL);
 	of_node_put(np);
 	if (IS_ERR(speedbin_nvmem)) {
 		if (PTR_ERR(speedbin_nvmem) != -EPROBE_DEFER)
@@ -56,35 +63,31 @@ static int sun50i_cpufreq_get_efuse(u32 *versions)
 		return PTR_ERR(speedbin_nvmem);
 	}
 
-	efuse_value = nvmem_cell_read(speedbin_nvmem, &len);
+	speedbin = nvmem_cell_read(speedbin_nvmem, &len);
 	nvmem_cell_put(speedbin_nvmem);
-	if (IS_ERR(efuse_value))
-		return PTR_ERR(efuse_value);
+	if (IS_ERR(speedbin))
+		return PTR_ERR(speedbin);
 
-	switch (*efuse_value) {
-	case 0x2400:
-	case 0x5000:
-	case 0x5400:
-	case 0x6c00:
-	case 0x7400:
-		*versions = 0b0001;
-		break;
-	case 0x2c00:
-	case 0x7c00:
-		*versions = 0b0010;
-		break;
-	case 0x5c00:
-	default:
-		*versions = 0b0100;
-	}
+	efuse_value = (*speedbin >> NVMEM_SHIFT) & NVMEM_MASK;
 
-	kfree(efuse_value);
+	/*
+	 * We treat unexpected efuse values as if the SoC was from
+	 * the slowest bin. Expected efuse values are 1-3, slowest
+	 * to fastest.
+	 */
+	if (efuse_value >= 1 && efuse_value <= 3)
+		*versions = efuse_value - 1;
+	else
+		*versions = 0;
+
+	kfree(speedbin);
 	return 0;
 };
 
 static int sun50i_cpufreq_nvmem_probe(struct platform_device *pdev)
 {
 	struct opp_table **opp_tables;
+	char name[MAX_NAME_LEN];
 	unsigned int cpu;
 	u32 speed = 0;
 	int ret;
@@ -98,6 +101,8 @@ static int sun50i_cpufreq_nvmem_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	snprintf(name, MAX_NAME_LEN, "speed%d", speed);
+
 	for_each_possible_cpu(cpu) {
 		struct device *cpu_dev = get_cpu_device(cpu);
 
@@ -106,10 +111,11 @@ static int sun50i_cpufreq_nvmem_probe(struct platform_device *pdev)
 			goto free_opp;
 		}
 
-		ret = dev_pm_opp_set_supported_hw(cpu_dev, &speed, 1);
-		if (ret) {
-			dev_err(cpu_dev, "Failed to set supported hardware\n");
-			return ret;
+		opp_tables[cpu] = dev_pm_opp_set_prop_name(cpu_dev, name);
+		if (IS_ERR(opp_tables[cpu])) {
+			ret = PTR_ERR(opp_tables[cpu]);
+			pr_err("Failed to set prop name\n");
+			goto free_opp;
 		}
 	}
 
@@ -125,10 +131,9 @@ static int sun50i_cpufreq_nvmem_probe(struct platform_device *pdev)
 
 free_opp:
 	for_each_possible_cpu(cpu) {
-		struct device *cpu_dev = get_cpu_device(cpu);
 		if (IS_ERR_OR_NULL(opp_tables[cpu]))
 			break;
-		dev_pm_opp_put_supported_hw(cpu_dev);
+		dev_pm_opp_put_prop_name(opp_tables[cpu]);
 	}
 	kfree(opp_tables);
 
@@ -142,10 +147,8 @@ static int sun50i_cpufreq_nvmem_remove(struct platform_device *pdev)
 
 	platform_device_unregister(cpufreq_dt_pdev);
 
-	for_each_possible_cpu(cpu) {
-		struct device *cpu_dev = get_cpu_device(cpu);
-		dev_pm_opp_put_supported_hw(cpu_dev);
-	}
+	for_each_possible_cpu(cpu)
+		dev_pm_opp_put_prop_name(opp_tables[cpu]);
 
 	kfree(opp_tables);
 
@@ -161,7 +164,7 @@ static struct platform_driver sun50i_cpufreq_driver = {
 };
 
 static const struct of_device_id sun50i_cpufreq_match_list[] = {
-	{ .compatible = "arm,sun50iw9p1" },
+	{ .compatible = "allwinner,sun50i-h6" },
 	{}
 };
 
@@ -214,5 +217,5 @@ static void __exit sun50i_cpufreq_exit(void)
 }
 module_exit(sun50i_cpufreq_exit);
 
-MODULE_DESCRIPTION("Sun50i cpufreq driver");
+MODULE_DESCRIPTION("Sun50i-h6 cpufreq driver");
 MODULE_LICENSE("GPL v2");

@@ -1,18 +1,10 @@
+/* SPDX-License-Identifier: ISC */
 /*
  * Copyright (c) 2014,2016 Qualcomm Atheros, Inc.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  */
+#ifndef __WIL_FW_H__
+#define __WIL_FW_H__
 
 #define WIL_FW_SIGNATURE (0x36323130) /* '0126' */
 #define WIL_FW_FMT_VERSION (1) /* format version driver supports */
@@ -41,7 +33,7 @@ struct wil_fw_record_head {
  */
 struct wil_fw_record_data { /* type == wil_fw_type_data */
 	__le32 addr;
-	__le32 data[0]; /* [data_size], see above */
+	__le32 data[]; /* [data_size], see above */
 } __packed;
 
 /* fill with constant @value, @size bytes starting from @addr */
@@ -58,21 +50,73 @@ struct wil_fw_record_comment { /* type == wil_fw_type_comment */
 	u8 data[0]; /* free-form data [data_size], see above */
 } __packed;
 
+/* Comment header - common for all comment record types */
+struct wil_fw_record_comment_hdr {
+	__le32 magic;
+};
+
 /* FW capabilities encoded inside a comment record */
 #define WIL_FW_CAPABILITIES_MAGIC (0xabcddcba)
 struct wil_fw_record_capabilities { /* type == wil_fw_type_comment */
 	/* identifies capabilities record */
-	__le32 magic;
+	struct wil_fw_record_comment_hdr hdr;
 	/* capabilities (variable size), see enum wmi_fw_capability */
-	u8 capabilities[0];
-};
+	u8 capabilities[];
+} __packed;
+
+/* FW VIF concurrency encoded inside a comment record
+ * Format is similar to wiphy->iface_combinations
+ */
+#define WIL_FW_CONCURRENCY_MAGIC (0xfedccdef)
+#define WIL_FW_CONCURRENCY_REC_VER	1
+struct wil_fw_concurrency_limit {
+	__le16 max; /* maximum number of interfaces of these types */
+	__le16 types; /* interface types (bit mask of enum nl80211_iftype) */
+} __packed;
+
+struct wil_fw_concurrency_combo {
+	u8 n_limits; /* number of wil_fw_concurrency_limit entries */
+	u8 max_interfaces; /* max number of concurrent interfaces allowed */
+	u8 n_diff_channels; /* total number of different channels allowed */
+	u8 same_bi; /* for APs, 1 if all APs must have same BI */
+	/* keep last - concurrency limits, variable size by n_limits */
+	struct wil_fw_concurrency_limit limits[];
+} __packed;
+
+struct wil_fw_record_concurrency { /* type == wil_fw_type_comment */
+	/* identifies concurrency record */
+	__le32 magic;
+	/* structure version, currently always 1 */
+	u8 version;
+	/* maximum number of supported MIDs _in addition_ to MID 0 */
+	u8 n_mids;
+	/* number of concurrency combinations that follow */
+	__le16 n_combos;
+	/* keep last - combinations, variable size by n_combos */
+	struct wil_fw_concurrency_combo combos[];
+} __packed;
+
+/* brd file info encoded inside a comment record */
+#define WIL_BRD_FILE_MAGIC (0xabcddcbb)
+
+struct brd_info {
+	__le32 base_addr;
+	__le32 max_size_bytes;
+} __packed;
+
+struct wil_fw_record_brd_file { /* type == wil_fw_type_comment */
+	/* identifies brd file record */
+	struct wil_fw_record_comment_hdr hdr;
+	__le32 version;
+	struct brd_info brd_info[];
+} __packed;
 
 /* perform action
  * data_size = @head.size - offsetof(struct wil_fw_record_action, data)
  */
 struct wil_fw_record_action { /* type == wil_fw_type_action */
 	__le32 action; /* action to perform: reset, wait for fw ready etc. */
-	__le32 data[0]; /* action specific, [data_size], see above */
+	__le32 data[]; /* action specific, [data_size], see above */
 } __packed;
 
 /* data block for struct wil_fw_record_direct_write */
@@ -135,7 +179,7 @@ struct wil_fw_record_gateway_data { /* type == wil_fw_type_gateway_data */
 #define WIL_FW_GW_CTL_BUSY	BIT(29) /* gateway busy performing operation */
 #define WIL_FW_GW_CTL_RUN	BIT(30) /* start gateway operation */
 	__le32 command;
-	struct wil_fw_data_gw data[0]; /* total size [data_size], see above */
+	struct wil_fw_data_gw data[]; /* total size [data_size], see above */
 } __packed;
 
 /* 4-dword gateway */
@@ -157,5 +201,7 @@ struct wil_fw_record_gateway_data4 { /* type == wil_fw_type_gateway_data4 */
 	__le32 gateway_cmd_addr;
 	__le32 gateway_ctrl_address; /* same logic as for 1-dword gw */
 	__le32 command;
-	struct wil_fw_data_gw4 data[0]; /* total size [data_size], see above */
+	struct wil_fw_data_gw4 data[]; /* total size [data_size], see above */
 } __packed;
+
+#endif /* __WIL_FW_H__ */

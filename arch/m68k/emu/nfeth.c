@@ -47,10 +47,6 @@ static const char version[] =
 MODULE_AUTHOR("Milan Jurik");
 MODULE_DESCRIPTION("Atari NFeth driver");
 MODULE_LICENSE("GPL");
-/*
-MODULE_PARM(nfeth_debug, "i");
-MODULE_PARM_DESC(nfeth_debug, "nfeth_debug level (1-2)");
-*/
 
 
 static long nfEtherID;
@@ -124,7 +120,6 @@ static inline void recv_packet(struct net_device *dev)
 
 	skb->protocol = eth_type_trans(skb, dev);
 	netif_rx(skb);
-	dev->last_rx = jiffies;
 	dev->stats.rx_packets++;
 	dev->stats.rx_bytes += pktlen;
 
@@ -172,7 +167,7 @@ static int nfeth_xmit(struct sk_buff *skb, struct net_device *dev)
 	return 0;
 }
 
-static void nfeth_tx_timeout(struct net_device *dev)
+static void nfeth_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	dev->stats.tx_errors++;
 	netif_wake_queue(dev);
@@ -184,7 +179,6 @@ static const struct net_device_ops nfeth_netdev_ops = {
 	.ndo_start_xmit		= nfeth_xmit,
 	.ndo_tx_timeout		= nfeth_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address	= eth_mac_addr,
 };
 

@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * transport_class.c - implementation of generic transport classes
  *                     using attribute_containers
  *
  * Copyright (c) 2005 - James Bottomley <James.Bottomley@steeleye.com>
- *
- * This file is licensed under GPLv2
  *
  * The basic idea here is to allow any "device controller" (which
  * would most often be a Host Bus Adapter to use the services of one
@@ -30,6 +29,10 @@
 #include <linux/export.h>
 #include <linux/attribute_container.h>
 #include <linux/transport_class.h>
+
+static int transport_remove_classdev(struct attribute_container *cont,
+				     struct device *dev,
+				     struct device *classdev);
 
 /**
  * transport_class_register - register an initial transport class
@@ -173,10 +176,11 @@ static int transport_add_class_device(struct attribute_container *cont,
  * routine is simply a trigger point used to add the device to the
  * system and register attributes for it.
  */
-
-void transport_add_device(struct device *dev)
+int transport_add_device(struct device *dev)
 {
-	attribute_container_device_trigger(dev, transport_add_class_device);
+	return attribute_container_device_trigger_safe(dev,
+					transport_add_class_device,
+					transport_remove_classdev);
 }
 EXPORT_SYMBOL_GPL(transport_add_device);
 

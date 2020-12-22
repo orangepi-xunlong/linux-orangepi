@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * This file contains definitions and data structures specific
  * to Marvell 802.11 NIC. It contains the Device Information
@@ -57,8 +58,6 @@ struct lbs_private {
 #ifdef CONFIG_LIBERTAS_MESH
 	struct lbs_mesh_stats mstats;
 	uint16_t mesh_tlv;
-	u8 mesh_ssid[IEEE80211_MAX_SSID_LEN + 1];
-	u8 mesh_ssid_len;
 	u8 mesh_channel;
 #endif
 

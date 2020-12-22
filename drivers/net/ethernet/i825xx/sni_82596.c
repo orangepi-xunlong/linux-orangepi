@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * sni_82596.c -- driver for intel 82596 ethernet controller, as
  *  		  used in older SNI RM machines
@@ -23,8 +24,8 @@
 
 static const char sni_82596_string[] = "snirm_82596";
 
-#define DMA_ALLOC                      dma_alloc_coherent
-#define DMA_FREE                       dma_free_coherent
+#define LIB82596_DMA_ATTR	0
+
 #define DMA_WBACK(priv, addr, len)     do { } while (0)
 #define DMA_INV(priv, addr, len)       do { } while (0)
 #define DMA_WBACK_INV(priv, addr, len) do { } while (0)
@@ -90,10 +91,10 @@ static int sni_82596_probe(struct platform_device *dev)
 	idprom = platform_get_resource(dev, IORESOURCE_MEM, 2);
 	if (!res || !ca || !options || !idprom)
 		return -ENODEV;
-	mpu_addr = ioremap_nocache(res->start, 4);
+	mpu_addr = ioremap(res->start, 4);
 	if (!mpu_addr)
 		return -ENOMEM;
-	ca_addr = ioremap_nocache(ca->start, 4);
+	ca_addr = ioremap(ca->start, 4);
 	if (!ca_addr)
 		goto probe_failed_free_mpu;
 
@@ -109,7 +110,7 @@ static int sni_82596_probe(struct platform_device *dev)
 	netdevice->base_addr = res->start;
 	netdevice->irq = platform_get_irq(dev, 0);
 
-	eth_addr = ioremap_nocache(idprom->start, 0x10);
+	eth_addr = ioremap(idprom->start, 0x10);
 	if (!eth_addr)
 		goto probe_failed;
 
@@ -152,8 +153,8 @@ static int sni_82596_driver_remove(struct platform_device *pdev)
 	struct i596_private *lp = netdev_priv(dev);
 
 	unregister_netdev(dev);
-	DMA_FREE(dev->dev.parent, sizeof(struct i596_private),
-		 lp->dma, lp->dma_addr);
+	dma_free_attrs(dev->dev.parent, sizeof(struct i596_private), lp->dma,
+		       lp->dma_addr, LIB82596_DMA_ATTR);
 	iounmap(lp->ca);
 	iounmap(lp->mpu_port);
 	free_netdev (dev);

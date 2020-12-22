@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * linux/drivers/pcmcia/soc_common.h
  *
@@ -87,7 +88,7 @@ struct soc_pcmcia_socket {
 
 struct skt_dev_info {
 	int nskt;
-	struct soc_pcmcia_socket skt[0];
+	struct soc_pcmcia_socket skt[];
 };
 
 struct pcmcia_state {

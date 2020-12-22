@@ -1,19 +1,19 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2002 Roman Zippel <zippel@linux-m68k.org>
- * Released under the terms of the GNU GPL v2.0.
  */
 
-#include <QTextBrowser>
-#include <QTreeWidget>
-#include <QMainWindow>
-#include <QHeaderView>
-#include <qsettings.h>
-#include <QPushButton>
-#include <QSettings>
-#include <QLineEdit>
-#include <QSplitter>
 #include <QCheckBox>
 #include <QDialog>
+#include <QHeaderView>
+#include <QLineEdit>
+#include <QMainWindow>
+#include <QPushButton>
+#include <QSettings>
+#include <QSplitter>
+#include <QTextBrowser>
+#include <QTreeWidget>
+
 #include "expr.h"
 
 class ConfigView;
@@ -45,11 +45,17 @@ class ConfigList : public QTreeWidget {
 public:
 	ConfigList(ConfigView* p, const char *name = 0);
 	void reinit(void);
+	ConfigItem* findConfigItem(struct menu *);
 	ConfigView* parent(void) const
 	{
 		return (ConfigView*)Parent::parent();
 	}
-	ConfigItem* findConfigItem(struct menu *);
+	void setSelected(QTreeWidgetItem *item, bool enable) {
+		for (int i = 0; i < selectedItems().size(); i++)
+			selectedItems().at(i)->setSelected(false);
+
+		item->setSelected(enable);
+	}
 
 protected:
 	void keyPressEvent(QKeyEvent *e);
@@ -71,6 +77,7 @@ public slots:
 signals:
 	void menuChanged(struct menu *menu);
 	void menuSelected(struct menu *menu);
+	void itemSelected(struct menu *menu);
 	void parentSelected(void);
 	void gotFocus(struct menu *);
 
@@ -84,10 +91,6 @@ public:
 	ConfigList* listView()
 	{
 		return this;
-	}
-	ConfigItem* firstChild() const
-	{
-		return (ConfigItem *)children().first();
 	}
 	void addColumn(colIdx idx)
 	{
@@ -249,6 +252,7 @@ public slots:
 	void setInfo(struct menu *menu);
 	void saveSettings(void);
 	void setShowDebug(bool);
+	void clicked (const QUrl &url);
 
 signals:
 	void showDebugChanged(bool);
@@ -291,12 +295,14 @@ protected:
 class ConfigMainWindow : public QMainWindow {
 	Q_OBJECT
 
+	char *configname;
 	static QAction *saveAction;
 	static void conf_changed(void);
 public:
 	ConfigMainWindow(void);
 public slots:
 	void changeMenu(struct menu *);
+	void changeItens(struct menu *);
 	void setMenuLink(struct menu *);
 	void listFocusChanged(void);
 	void goBack(void);

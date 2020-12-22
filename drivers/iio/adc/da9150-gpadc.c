@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * DA9150 GPADC Driver
  *
  * Copyright (c) 2014 Dialog Semiconductor
  *
  * Author: Adam Thomson <Adam.Thomson.Opensource@diasemi.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -249,7 +245,6 @@ static int da9150_gpadc_read_raw(struct iio_dev *indio_dev,
 
 static const struct iio_info da9150_gpadc_info = {
 	.read_raw = &da9150_gpadc_read_raw,
-	.driver_module = THIS_MODULE,
 };
 
 #define DA9150_GPADC_CHANNEL(_id, _hw_id, _type, chan_info,	\
@@ -342,10 +337,8 @@ static int da9150_gpadc_probe(struct platform_device *pdev)
 	init_completion(&gpadc->complete);
 
 	irq = platform_get_irq_byname(pdev, "GPADC");
-	if (irq < 0) {
-		dev_err(dev, "Failed to get IRQ: %d\n", irq);
+	if (irq < 0)
 		return irq;
-	}
 
 	ret = devm_request_threaded_irq(dev, irq, NULL, da9150_gpadc_irq,
 					IRQF_ONESHOT, "GPADC", gpadc);

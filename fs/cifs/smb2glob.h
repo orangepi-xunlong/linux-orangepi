@@ -33,7 +33,7 @@
 
 /*
  * Identifiers for functions that use the open, operation, close pattern
- * in smb2inode.c:smb2_open_op_close()
+ * in smb2inode.c:smb2_compound_op()
  */
 #define SMB2_OP_SET_DELETE 1
 #define SMB2_OP_SET_INFO 2
@@ -45,6 +45,7 @@
 #define SMB2_OP_HARDLINK 8
 #define SMB2_OP_SET_EOF 9
 #define SMB2_OP_RMDIR 10
+#define SMB2_OP_POSIX_QUERY_INFO 11
 
 /* Used when constructing chained read requests. */
 #define CHAINED_REQUEST 1

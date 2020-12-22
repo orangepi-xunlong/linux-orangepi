@@ -25,9 +25,13 @@
  * Jackie Li<yaodong.li@intel.com>
  */
 
+#include <linux/delay.h>
+
+#include <drm/drm_simple_kms_helper.h>
+
 #include "mdfld_dsi_dpi.h"
-#include "mdfld_output.h"
 #include "mdfld_dsi_pkg_sender.h"
+#include "mdfld_output.h"
 #include "psb_drv.h"
 #include "tc35876x-dsi-lvds.h"
 
@@ -991,23 +995,20 @@ struct mdfld_dsi_encoder *mdfld_dsi_dpi_init(struct drm_device *dev,
 	/*create drm encoder object*/
 	connector = &dsi_connector->base.base;
 	encoder = &dpi_output->base.base.base;
-	drm_encoder_init(dev,
-			encoder,
-			p_funcs->encoder_funcs,
-			DRM_MODE_ENCODER_LVDS, NULL);
+	drm_simple_encoder_init(dev, encoder, DRM_MODE_ENCODER_LVDS);
 	drm_encoder_helper_add(encoder,
 				p_funcs->encoder_helper_funcs);
 
 	/*attach to given connector*/
-	drm_mode_connector_attach_encoder(connector, encoder);
+	drm_connector_attach_encoder(connector, encoder);
 
 	/*set possible crtcs and clones*/
 	if (dsi_connector->pipe) {
 		encoder->possible_crtcs = (1 << 2);
-		encoder->possible_clones = (1 << 1);
+		encoder->possible_clones = 0;
 	} else {
 		encoder->possible_crtcs = (1 << 0);
-		encoder->possible_clones = (1 << 0);
+		encoder->possible_clones = 0;
 	}
 
 	dsi_connector->base.encoder = &dpi_output->base.base;

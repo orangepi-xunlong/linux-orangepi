@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 2008 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
  * Copyright (c) 2009 Daniel Mack <daniel@caiaq.de>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
@@ -49,12 +36,12 @@ static const struct ehci_driver_overrides ehci_mxc_overrides __initconst = {
 
 static int ehci_mxc_drv_probe(struct platform_device *pdev)
 {
-	struct mxc_usbh_platform_data *pdata = dev_get_platdata(&pdev->dev);
+	struct device *dev = &pdev->dev;
+	struct mxc_usbh_platform_data *pdata = dev_get_platdata(dev);
 	struct usb_hcd *hcd;
 	struct resource *res;
 	int irq, ret;
 	struct ehci_mxc_priv *priv;
-	struct device *dev = &pdev->dev;
 	struct ehci_hcd *ehci;
 
 	if (!pdata) {
@@ -63,13 +50,15 @@ static int ehci_mxc_drv_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
 
 	hcd = usb_create_hcd(&ehci_mxc_hc_driver, dev, dev_name(dev));
 	if (!hcd)
 		return -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hcd->regs = devm_ioremap_resource(&pdev->dev, res);
+	hcd->regs = devm_ioremap_resource(dev, res);
 	if (IS_ERR(hcd->regs)) {
 		ret = PTR_ERR(hcd->regs);
 		goto err_alloc;
@@ -82,14 +71,14 @@ static int ehci_mxc_drv_probe(struct platform_device *pdev)
 	priv = (struct ehci_mxc_priv *) ehci->priv;
 
 	/* enable clocks */
-	priv->usbclk = devm_clk_get(&pdev->dev, "ipg");
+	priv->usbclk = devm_clk_get(dev, "ipg");
 	if (IS_ERR(priv->usbclk)) {
 		ret = PTR_ERR(priv->usbclk);
 		goto err_alloc;
 	}
 	clk_prepare_enable(priv->usbclk);
 
-	priv->ahbclk = devm_clk_get(&pdev->dev, "ahb");
+	priv->ahbclk = devm_clk_get(dev, "ahb");
 	if (IS_ERR(priv->ahbclk)) {
 		ret = PTR_ERR(priv->ahbclk);
 		goto err_clk_ahb;
@@ -97,12 +86,11 @@ static int ehci_mxc_drv_probe(struct platform_device *pdev)
 	clk_prepare_enable(priv->ahbclk);
 
 	/* "dr" device has its own clock on i.MX51 */
-	priv->phyclk = devm_clk_get(&pdev->dev, "phy");
+	priv->phyclk = devm_clk_get(dev, "phy");
 	if (IS_ERR(priv->phyclk))
 		priv->phyclk = NULL;
 	if (priv->phyclk)
 		clk_prepare_enable(priv->phyclk);
-
 
 	/* call platform specific init function */
 	if (pdata->init) {

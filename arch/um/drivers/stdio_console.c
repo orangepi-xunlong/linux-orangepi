@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /* 
  * Copyright (C) 2000, 2001 Jeff Dike (jdike@karaya.com)
- * Licensed under the GPL
  */
 
 #include <linux/posix_types.h>
@@ -192,6 +192,9 @@ __uml_exitcall(console_exit);
 
 static int console_chan_setup(char *str)
 {
+	if (!strncmp(str, "sole=", 5))	/* console= option specifies tty */
+		return 0;
+
 	line_setup(vt_conf, MAX_TTYS, &def_conf, str, "console");
 	return 1;
 }

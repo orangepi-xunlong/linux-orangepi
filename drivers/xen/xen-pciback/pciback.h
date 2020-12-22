@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * PCI Backend Common Data Structures & Function Declarations
  *
@@ -44,13 +45,14 @@ struct xen_pcibk_dev_data {
 	struct list_head config_fields;
 	struct pci_saved_state *pci_saved_state;
 	unsigned int permissive:1;
+	unsigned int allow_interrupt_control:1;
 	unsigned int warned_on_write:1;
 	unsigned int enable_intx:1;
 	unsigned int isr_on:1; /* Whether the IRQ handler is installed. */
 	unsigned int ack_intr:1; /* .. and ACK-ing */
 	unsigned long handled;
 	unsigned int irq; /* Saved in case device transitions to MSI/MSI-X */
-	char irq_name[0]; /* xen-pcibk[000:04:00.0] */
+	char irq_name[]; /* xen-pcibk[000:04:00.0] */
 };
 
 /* Used by XenBus and xen_pcibk_ops.c */
@@ -183,8 +185,6 @@ void xen_pcibk_do_op(struct work_struct *data);
 
 int xen_pcibk_xenbus_register(void);
 void xen_pcibk_xenbus_unregister(void);
-
-extern int verbose_request;
 
 void xen_pcibk_test_and_schedule_op(struct xen_pcibk_device *pdev);
 #endif

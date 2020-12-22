@@ -1,17 +1,54 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2013 Linaro Ltd;  <roy.franz@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 #include <linux/efi.h>
 #include <asm/efi.h>
 
-efi_status_t check_platform_features(efi_system_table_t *sys_table_arg)
+#include "efistub.h"
+
+static efi_guid_t cpu_state_guid = LINUX_EFI_ARM_CPU_STATE_TABLE_GUID;
+
+struct efi_arm_entry_state *efi_entry_state;
+
+static void get_cpu_state(u32 *cpsr, u32 *sctlr)
 {
+	asm("mrs %0, cpsr" : "=r"(*cpsr));
+	if ((*cpsr & MODE_MASK) == HYP_MODE)
+		asm("mrc p15, 4, %0, c1, c0, 0" : "=r"(*sctlr));
+	else
+		asm("mrc p15, 0, %0, c1, c0, 0" : "=r"(*sctlr));
+}
+
+efi_status_t check_platform_features(void)
+{
+	efi_status_t status;
+	u32 cpsr, sctlr;
 	int block;
+
+	get_cpu_state(&cpsr, &sctlr);
+
+	efi_info("Entering in %s mode with MMU %sabled\n",
+		 ((cpsr & MODE_MASK) == HYP_MODE) ? "HYP" : "SVC",
+		 (sctlr & 1) ? "en" : "dis");
+
+	status = efi_bs_call(allocate_pool, EFI_LOADER_DATA,
+			     sizeof(*efi_entry_state),
+			     (void **)&efi_entry_state);
+	if (status != EFI_SUCCESS) {
+		efi_err("allocate_pool() failed\n");
+		return status;
+	}
+
+	efi_entry_state->cpsr_before_ebs = cpsr;
+	efi_entry_state->sctlr_before_ebs = sctlr;
+
+	status = efi_bs_call(install_configuration_table, &cpu_state_guid,
+			     efi_entry_state);
+	if (status != EFI_SUCCESS) {
+		efi_err("install_configuration_table() failed\n");
+		goto free_state;
+	}
 
 	/* non-LPAE kernels can run anywhere */
 	if (!IS_ENABLED(CONFIG_ARM_LPAE))
@@ -20,15 +57,28 @@ efi_status_t check_platform_features(efi_system_table_t *sys_table_arg)
 	/* LPAE kernels need compatible hardware */
 	block = cpuid_feature_extract(CPUID_EXT_MMFR0, 0);
 	if (block < 5) {
-		pr_efi_err(sys_table_arg, "This LPAE kernel is not supported by your CPU\n");
-		return EFI_UNSUPPORTED;
+		efi_err("This LPAE kernel is not supported by your CPU\n");
+		status = EFI_UNSUPPORTED;
+		goto drop_table;
 	}
 	return EFI_SUCCESS;
+
+drop_table:
+	efi_bs_call(install_configuration_table, &cpu_state_guid, NULL);
+free_state:
+	efi_bs_call(free_pool, efi_entry_state);
+	return status;
+}
+
+void efi_handle_post_ebs_state(void)
+{
+	get_cpu_state(&efi_entry_state->cpsr_after_ebs,
+		      &efi_entry_state->sctlr_after_ebs);
 }
 
 static efi_guid_t screen_info_guid = LINUX_EFI_ARM_SCREEN_INFO_TABLE_GUID;
 
-struct screen_info *alloc_screen_info(efi_system_table_t *sys_table_arg)
+struct screen_info *alloc_screen_info(void)
 {
 	struct screen_info *si;
 	efi_status_t status;
@@ -39,51 +89,48 @@ struct screen_info *alloc_screen_info(efi_system_table_t *sys_table_arg)
 	 * its contents while we hand over to the kernel proper from the
 	 * decompressor.
 	 */
-	status = efi_call_early(allocate_pool, EFI_RUNTIME_SERVICES_DATA,
-				sizeof(*si), (void **)&si);
+	status = efi_bs_call(allocate_pool, EFI_RUNTIME_SERVICES_DATA,
+			     sizeof(*si), (void **)&si);
 
 	if (status != EFI_SUCCESS)
 		return NULL;
 
-	status = efi_call_early(install_configuration_table,
-				&screen_info_guid, si);
+	status = efi_bs_call(install_configuration_table,
+			     &screen_info_guid, si);
 	if (status == EFI_SUCCESS)
 		return si;
 
-	efi_call_early(free_pool, si);
+	efi_bs_call(free_pool, si);
 	return NULL;
 }
 
-void free_screen_info(efi_system_table_t *sys_table_arg, struct screen_info *si)
+void free_screen_info(struct screen_info *si)
 {
 	if (!si)
 		return;
 
-	efi_call_early(install_configuration_table, &screen_info_guid, NULL);
-	efi_call_early(free_pool, si);
+	efi_bs_call(install_configuration_table, &screen_info_guid, NULL);
+	efi_bs_call(free_pool, si);
 }
 
-efi_status_t handle_kernel_image(efi_system_table_t *sys_table,
-				 unsigned long *image_addr,
-				 unsigned long *image_size,
-				 unsigned long *reserve_addr,
-				 unsigned long *reserve_size,
-				 unsigned long dram_base,
-				 efi_loaded_image_t *image)
+static efi_status_t reserve_kernel_base(unsigned long dram_base,
+					unsigned long *reserve_addr,
+					unsigned long *reserve_size)
 {
-	unsigned long nr_pages;
-	efi_status_t status;
-	/* Use alloc_addr to tranlsate between types */
 	efi_physical_addr_t alloc_addr;
+	efi_memory_desc_t *memory_map;
+	unsigned long nr_pages, map_size, desc_size, buff_size;
+	efi_status_t status;
+	unsigned long l;
 
-	/*
-	 * Verify that the DRAM base address is compatible with the ARM
-	 * boot protocol, which determines the base of DRAM by masking
-	 * off the low 27 bits of the address at which the zImage is
-	 * loaded. These assumptions are made by the decompressor,
-	 * before any memory map is available.
-	 */
-	dram_base = round_up(dram_base, SZ_128M);
+	struct efi_boot_memmap map = {
+		.map		= &memory_map,
+		.map_size	= &map_size,
+		.desc_size	= &desc_size,
+		.desc_ver	= NULL,
+		.key_ptr	= NULL,
+		.buff_size	= &buff_size,
+	};
 
 	/*
 	 * Reserve memory for the uncompressed kernel image. This is
@@ -94,46 +141,134 @@ efi_status_t handle_kernel_image(efi_system_table_t *sys_table,
 	 * Do this very early, as prints can cause memory allocations
 	 * that may conflict with this.
 	 */
-	alloc_addr = dram_base;
-	*reserve_size = MAX_UNCOMP_KERNEL_SIZE;
-	nr_pages = round_up(*reserve_size, EFI_PAGE_SIZE) / EFI_PAGE_SIZE;
-	status = sys_table->boottime->allocate_pages(EFI_ALLOCATE_ADDRESS,
-						     EFI_LOADER_DATA,
-						     nr_pages, &alloc_addr);
-	if (status != EFI_SUCCESS) {
-		*reserve_size = 0;
-		pr_efi_err(sys_table, "Unable to allocate memory for uncompressed kernel.\n");
-		return status;
-	}
-	*reserve_addr = alloc_addr;
-
-	/*
-	 * Relocate the zImage, so that it appears in the lowest 128 MB
-	 * memory window.
-	 */
-	*image_size = image->image_size;
-	status = efi_relocate_kernel(sys_table, image_addr, *image_size,
-				     *image_size,
-				     dram_base + MAX_UNCOMP_KERNEL_SIZE, 0);
-	if (status != EFI_SUCCESS) {
-		pr_efi_err(sys_table, "Failed to relocate kernel.\n");
-		efi_free(sys_table, *reserve_size, *reserve_addr);
-		*reserve_size = 0;
-		return status;
+	alloc_addr = dram_base + MAX_UNCOMP_KERNEL_SIZE;
+	nr_pages = MAX_UNCOMP_KERNEL_SIZE / EFI_PAGE_SIZE;
+	status = efi_bs_call(allocate_pages, EFI_ALLOCATE_MAX_ADDRESS,
+			     EFI_BOOT_SERVICES_DATA, nr_pages, &alloc_addr);
+	if (status == EFI_SUCCESS) {
+		if (alloc_addr == dram_base) {
+			*reserve_addr = alloc_addr;
+			*reserve_size = MAX_UNCOMP_KERNEL_SIZE;
+			return EFI_SUCCESS;
+		}
+		/*
+		 * If we end up here, the allocation succeeded but starts below
+		 * dram_base. This can only occur if the real base of DRAM is
+		 * not a multiple of 128 MB, in which case dram_base will have
+		 * been rounded up. Since this implies that a part of the region
+		 * was already occupied, we need to fall through to the code
+		 * below to ensure that the existing allocations don't conflict.
+		 * For this reason, we use EFI_BOOT_SERVICES_DATA above and not
+		 * EFI_LOADER_DATA, which we wouldn't able to distinguish from
+		 * allocations that we want to disallow.
+		 */
 	}
 
 	/*
-	 * Check to see if we were able to allocate memory low enough
-	 * in memory. The kernel determines the base of DRAM from the
-	 * address at which the zImage is loaded.
+	 * If the allocation above failed, we may still be able to proceed:
+	 * if the only allocations in the region are of types that will be
+	 * released to the OS after ExitBootServices(), the decompressor can
+	 * safely overwrite them.
 	 */
-	if (*image_addr + *image_size > dram_base + ZIMAGE_OFFSET_LIMIT) {
-		pr_efi_err(sys_table, "Failed to relocate kernel, no low memory available.\n");
-		efi_free(sys_table, *reserve_size, *reserve_addr);
-		*reserve_size = 0;
-		efi_free(sys_table, *image_size, *image_addr);
-		*image_size = 0;
-		return EFI_LOAD_ERROR;
+	status = efi_get_memory_map(&map);
+	if (status != EFI_SUCCESS) {
+		efi_err("reserve_kernel_base(): Unable to retrieve memory map.\n");
+		return status;
 	}
+
+	for (l = 0; l < map_size; l += desc_size) {
+		efi_memory_desc_t *desc;
+		u64 start, end;
+
+		desc = (void *)memory_map + l;
+		start = desc->phys_addr;
+		end = start + desc->num_pages * EFI_PAGE_SIZE;
+
+		/* Skip if entry does not intersect with region */
+		if (start >= dram_base + MAX_UNCOMP_KERNEL_SIZE ||
+		    end <= dram_base)
+			continue;
+
+		switch (desc->type) {
+		case EFI_BOOT_SERVICES_CODE:
+		case EFI_BOOT_SERVICES_DATA:
+			/* Ignore types that are released to the OS anyway */
+			continue;
+
+		case EFI_CONVENTIONAL_MEMORY:
+			/* Skip soft reserved conventional memory */
+			if (efi_soft_reserve_enabled() &&
+			    (desc->attribute & EFI_MEMORY_SP))
+				continue;
+
+			/*
+			 * Reserve the intersection between this entry and the
+			 * region.
+			 */
+			start = max(start, (u64)dram_base);
+			end = min(end, (u64)dram_base + MAX_UNCOMP_KERNEL_SIZE);
+
+			status = efi_bs_call(allocate_pages,
+					     EFI_ALLOCATE_ADDRESS,
+					     EFI_LOADER_DATA,
+					     (end - start) / EFI_PAGE_SIZE,
+					     &start);
+			if (status != EFI_SUCCESS) {
+				efi_err("reserve_kernel_base(): alloc failed.\n");
+				goto out;
+			}
+			break;
+
+		case EFI_LOADER_CODE:
+		case EFI_LOADER_DATA:
+			/*
+			 * These regions may be released and reallocated for
+			 * another purpose (including EFI_RUNTIME_SERVICE_DATA)
+			 * at any time during the execution of the OS loader,
+			 * so we cannot consider them as safe.
+			 */
+		default:
+			/*
+			 * Treat any other allocation in the region as unsafe */
+			status = EFI_OUT_OF_RESOURCES;
+			goto out;
+		}
+	}
+
+	status = EFI_SUCCESS;
+out:
+	efi_bs_call(free_pool, memory_map);
+	return status;
+}
+
+efi_status_t handle_kernel_image(unsigned long *image_addr,
+				 unsigned long *image_size,
+				 unsigned long *reserve_addr,
+				 unsigned long *reserve_size,
+				 unsigned long dram_base,
+				 efi_loaded_image_t *image)
+{
+	unsigned long kernel_base;
+	efi_status_t status;
+
+	/* use a 16 MiB aligned base for the decompressed kernel */
+	kernel_base = round_up(dram_base, SZ_16M) + TEXT_OFFSET;
+
+	/*
+	 * Note that some platforms (notably, the Raspberry Pi 2) put
+	 * spin-tables and other pieces of firmware at the base of RAM,
+	 * abusing the fact that the window of TEXT_OFFSET bytes at the
+	 * base of the kernel image is only partially used at the moment.
+	 * (Up to 5 pages are used for the swapper page tables)
+	 */
+	status = reserve_kernel_base(kernel_base - 5 * PAGE_SIZE, reserve_addr,
+				     reserve_size);
+	if (status != EFI_SUCCESS) {
+		efi_err("Unable to allocate memory for uncompressed kernel.\n");
+		return status;
+	}
+
+	*image_addr = kernel_base;
+	*image_size = 0;
 	return EFI_SUCCESS;
 }

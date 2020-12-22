@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * trampoline entry and return code for kretprobes.
  */
@@ -60,7 +61,7 @@
 	ldp x28, x29, [sp, #S_X28]
 	.endm
 
-ENTRY(kretprobe_trampoline)
+SYM_CODE_START(kretprobe_trampoline)
 	sub sp, sp, #S_FRAME_SIZE
 
 	save_all_base_regs
@@ -78,4 +79,4 @@ ENTRY(kretprobe_trampoline)
 	add sp, sp, #S_FRAME_SIZE
 	ret
 
-ENDPROC(kretprobe_trampoline)
+SYM_CODE_END(kretprobe_trampoline)

@@ -132,7 +132,6 @@ extern int kdb_state;
 #define KDB_STATE_PAGER		0x00000400	/* pager is available */
 #define KDB_STATE_GO_SWITCH	0x00000800	/* go is switching
 						 * back to initial cpu */
-#define KDB_STATE_PRINTF_LOCK	0x00001000	/* Holds kdb_printf lock */
 #define KDB_STATE_WAIT_IPI	0x00002000	/* Waiting for kdb_ipi() NMI */
 #define KDB_STATE_RECURSE	0x00004000	/* Recursive entry to kdb */
 #define KDB_STATE_IP_ADJUSTED	0x00008000	/* Restart IP has been
@@ -209,8 +208,9 @@ extern unsigned long kdb_task_state(const struct task_struct *p,
 extern void kdb_ps_suppressed(void);
 extern void kdb_ps1(const struct task_struct *p);
 extern void kdb_print_nameval(const char *name, unsigned long val);
-extern void kdb_send_sig_info(struct task_struct *p, struct siginfo *info);
+extern void kdb_send_sig(struct task_struct *p, int sig);
 extern void kdb_meminfo_proc_show(void);
+extern char kdb_getchar(void);
 extern char *kdb_getstr(char *, size_t, const char *);
 extern void kdb_gdb_state_pass(char *buf);
 
@@ -240,8 +240,8 @@ extern void *debug_kmalloc(size_t size, gfp_t flags);
 extern void debug_kfree(void *);
 extern void debug_kusage(void);
 
-extern void kdb_set_current_task(struct task_struct *);
 extern struct task_struct *kdb_current_task;
+extern struct pt_regs *kdb_current_regs;
 
 #ifdef CONFIG_KDB_KEYBOARD
 extern void kdb_kbd_cleanup_state(void);

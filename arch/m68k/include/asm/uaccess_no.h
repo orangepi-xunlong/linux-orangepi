@@ -1,19 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __M68KNOMMU_UACCESS_H
 #define __M68KNOMMU_UACCESS_H
 
 /*
  * User space memory access functions
  */
-#include <linux/sched.h>
-#include <linux/mm.h>
 #include <linux/string.h>
 
 #include <asm/segment.h>
 
-#define VERIFY_READ	0
-#define VERIFY_WRITE	1
-
-#define access_ok(type,addr,size)	_access_ok((unsigned long)(addr),(size))
+#define access_ok(addr,size)	_access_ok((unsigned long)(addr),(size))
 
 /*
  * It is not enough to just have access_ok check for a real RAM address.
@@ -25,25 +21,6 @@ static inline int _access_ok(unsigned long addr, unsigned long size)
 {
 	return 1;
 }
-
-/*
- * The exception table consists of pairs of addresses: the first is the
- * address of an instruction that is allowed to fault, and the second is
- * the address at which the program should continue.  No registers are
- * modified, so it is entirely up to the continuation code to figure out
- * what to do.
- *
- * All the routines below use bits of fixup code that are out of line
- * with the main instruction path.  This means when everything is well,
- * we don't even have to jump over them.  Further, they do not intrude
- * on our cache or tlb entries.
- */
-
-struct exception_table_entry
-{
-	unsigned long insn, fixup;
-};
-
 
 /*
  * These are the main single-value transfer routines.  They automatically
@@ -65,7 +42,7 @@ struct exception_table_entry
 	__put_user_asm(__pu_err, __pu_val, ptr, l);	\
 	break;						\
     case 8:						\
-	memcpy(ptr, &__pu_val, sizeof (*(ptr))); \
+	memcpy((void __force *)ptr, &__pu_val, sizeof(*(ptr))); \
 	break;						\
     default:						\
 	__pu_err = __put_user_bad();			\
@@ -83,7 +60,7 @@ extern int __put_user_bad(void);
  * aliasing issues.
  */
 
-#define __ptr(x) ((unsigned long *)(x))
+#define __ptr(x) ((unsigned long __user *)(x))
 
 #define __put_user_asm(err,x,ptr,bwl)				\
 	__asm__ ("move" #bwl " %0,%1"				\
@@ -93,26 +70,29 @@ extern int __put_user_bad(void);
 #define get_user(x, ptr)					\
 ({								\
     int __gu_err = 0;						\
-    typeof(x) __gu_val = 0;					\
     switch (sizeof(*(ptr))) {					\
     case 1:							\
-	__get_user_asm(__gu_err, __gu_val, ptr, b, "=d");	\
+	__get_user_asm(__gu_err, x, ptr, b, "=d");		\
 	break;							\
     case 2:							\
-	__get_user_asm(__gu_err, __gu_val, ptr, w, "=r");	\
+	__get_user_asm(__gu_err, x, ptr, w, "=r");		\
 	break;							\
     case 4:							\
-	__get_user_asm(__gu_err, __gu_val, ptr, l, "=r");	\
+	__get_user_asm(__gu_err, x, ptr, l, "=r");		\
 	break;							\
-    case 8:							\
-	memcpy((void *) &__gu_val, ptr, sizeof (*(ptr)));	\
+    case 8: {							\
+	union {							\
+	    u64 l;						\
+	    __typeof__(*(ptr)) t;				\
+	} __gu_val;						\
+	memcpy(&__gu_val.l, (const void __force *)ptr, sizeof(__gu_val.l)); \
+	(x) = __gu_val.t;					\
 	break;							\
+    }								\
     default:							\
-	__gu_val = 0;						\
 	__gu_err = __get_user_bad();				\
 	break;							\
     }								\
-    (x) = (typeof(*(ptr))) __gu_val;				\
     __gu_err;							\
 })
 #define __get_user(x, ptr) get_user(x, ptr)
@@ -124,13 +104,21 @@ extern int __get_user_bad(void);
 		 : "=d" (x)					\
 		 : "m" (*__ptr(ptr)))
 
-#define copy_from_user(to, from, n)		(memcpy(to, from, n), 0)
-#define copy_to_user(to, from, n)		(memcpy(to, from, n), 0)
+static inline unsigned long
+raw_copy_from_user(void *to, const void __user *from, unsigned long n)
+{
+	memcpy(to, (__force const void *)from, n);
+	return 0;
+}
 
-#define __copy_from_user(to, from, n) copy_from_user(to, from, n)
-#define __copy_to_user(to, from, n) copy_to_user(to, from, n)
-#define __copy_to_user_inatomic __copy_to_user
-#define __copy_from_user_inatomic __copy_from_user
+static inline unsigned long
+raw_copy_to_user(void __user *to, const void *from, unsigned long n)
+{
+	memcpy((__force void *)to, from, n);
+	return 0;
+}
+#define INLINE_COPY_FROM_USER
+#define INLINE_COPY_TO_USER
 
 /*
  * Copy a null terminated string from userspace.
@@ -155,8 +143,6 @@ static inline long strnlen_user(const char *src, long n)
 {
 	return(strlen(src) + 1); /* DAVIDM make safer */
 }
-
-#define strlen_user(str) strnlen_user(str, 32767)
 
 /*
  * Zero Userspace

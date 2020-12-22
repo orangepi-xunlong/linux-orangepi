@@ -1,40 +1,34 @@
+# SPDX-License-Identifier: GPL-2.0
 # scripts/dtc makefile
 
-hostprogs-y	:= dtc
-always		:= $(hostprogs-y)
+hostprogs			:= dtc
+always-$(CONFIG_DTC)		+= $(hostprogs)
+always-$(CHECK_DT_BINDING)	+= $(hostprogs)
 
-dtc-objs	:= dtc.o flattree.o fstree.o data.o livetree.o treesource.o updatetree.o\
-		   srcpos.o checks.o util.o \
-		   script_parser/iniparser.o \
-		   script_parser/dictionary.o \
-		   script_parser/script.o \
-		   script_parser/script_to_dts.o
+dtc-objs	:= dtc.o flattree.o fstree.o data.o livetree.o treesource.o \
+		   srcpos.o checks.o util.o
 dtc-objs	+= dtc-lexer.lex.o dtc-parser.tab.o
 
 # Source files need to get at the userspace version of libfdt_env.h to compile
+HOST_EXTRACFLAGS += -I $(srctree)/$(src)/libfdt
 
-HOSTCFLAGS_DTC := -I$(src) -I$(src)/libfdt -I$(src)/script_parser
+ifeq ($(shell pkg-config --exists yaml-0.1 2>/dev/null && echo yes),)
+ifneq ($(CHECK_DT_BINDING)$(CHECK_DTBS),)
+$(error dtc needs libyaml for DT schema validation support. \
+	Install the necessary libyaml development package.)
+endif
+HOST_EXTRACFLAGS += -DNO_YAML
+else
+dtc-objs	+= yamltree.o
+# To include <yaml.h> installed in a non-default path
+HOSTCFLAGS_yamltree.o := $(shell pkg-config --cflags yaml-0.1)
+# To link libyaml installed in a non-default path
+HOSTLDLIBS_dtc	:= $(shell pkg-config yaml-0.1 --libs)
+endif
 
-HOSTCFLAGS_checks.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_data.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_dtc.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_flattree.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_fstree.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_livetree.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_srcpos.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_treesource.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_updatetree.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_util.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_iniparser.o :=$(HOSTCFLAGS_DTC)
-HOSTCFLAGS_dictionary.o :=$(HOSTCFLAGS_DTC)
-HOSTCFLAGS_script.o :=$(HOSTCFLAGS_DTC)
-HOSTCFLAGS_script_to_dts.o :=$(HOSTCFLAGS_DTC)
-
-HOSTCFLAGS_dtc-lexer.lex.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_dtc-parser.tab.o := $(HOSTCFLAGS_DTC)
+# Generated files need one more search path to include headers in source tree
+HOSTCFLAGS_dtc-lexer.lex.o := -I $(srctree)/$(src)
+HOSTCFLAGS_dtc-parser.tab.o := -I $(srctree)/$(src)
 
 # dependencies on generated files need to be listed explicitly
 $(obj)/dtc-lexer.lex.o: $(obj)/dtc-parser.tab.h
-
-# generated files need to be cleaned explicitly
-clean-files	:= dtc-lexer.lex.c dtc-parser.tab.c dtc-parser.tab.h

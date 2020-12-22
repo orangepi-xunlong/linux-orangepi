@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/capability.h>
 #include <linux/fs.h>
 #include <linux/posix_acl.h>
@@ -23,7 +24,8 @@ reiserfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 	struct reiserfs_transaction_handle th;
 	size_t jcreate_blocks;
 	int size = acl ? posix_acl_xattr_size(acl->a_count) : 0;
-
+	int update_mode = 0;
+	umode_t mode = inode->i_mode;
 
 	/*
 	 * Pessimism: We can't assume that anything from the xattr root up
@@ -38,12 +40,14 @@ reiserfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 	reiserfs_write_unlock(inode->i_sb);
 	if (error == 0) {
 		if (type == ACL_TYPE_ACCESS && acl) {
-			error = posix_acl_update_mode(inode, &inode->i_mode,
-						      &acl);
+			error = posix_acl_update_mode(inode, &mode, &acl);
 			if (error)
 				goto unlock;
+			update_mode = 1;
 		}
 		error = __reiserfs_set_acl(&th, inode, type, acl);
+		if (!error && update_mode)
+			inode->i_mode = mode;
 unlock:
 		reiserfs_write_lock(inode->i_sb);
 		error2 = journal_end(&th);
@@ -316,10 +320,8 @@ reiserfs_inherit_default_acl(struct reiserfs_transaction_handle *th,
 	 * would be useless since permissions are ignored, and a pain because
 	 * it introduces locking cycles
 	 */
-	if (IS_PRIVATE(dir)) {
-		inode->i_flags |= S_PRIVATE;
+	if (IS_PRIVATE(inode))
 		goto apply_umask;
-	}
 
 	err = posix_acl_create(dir, &inode->i_mode, &default_acl, &acl);
 	if (err)

@@ -23,11 +23,6 @@
 */
 
 #define DRV_NAME		"3c515"
-#define DRV_VERSION		"0.99t-ac"
-#define DRV_RELDATE		"28-Oct-2002"
-
-static char *version =
-DRV_NAME ".c:v" DRV_VERSION " " DRV_RELDATE " becker@scyld.com and others\n";
 
 #define CORKSCREW 1
 
@@ -72,7 +67,7 @@ static int max_interrupt_work = 20;
 #include <linux/ethtool.h>
 #include <linux/bitops.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 
@@ -84,7 +79,6 @@ static int max_interrupt_work = 20;
 MODULE_AUTHOR("Donald Becker <becker@scyld.com>");
 MODULE_DESCRIPTION("3Com 3c515 Corkscrew driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(DRV_VERSION);
 
 /* "Knobs" for adjusting internal parameters. */
 /* Put out somewhat more debugging messages. (0 - no msg, 1 minimal msgs). */
@@ -367,11 +361,11 @@ static struct net_device *corkscrew_scan(int unit);
 static int corkscrew_setup(struct net_device *dev, int ioaddr,
 			    struct pnp_dev *idev, int card_number);
 static int corkscrew_open(struct net_device *dev);
-static void corkscrew_timer(unsigned long arg);
+static void corkscrew_timer(struct timer_list *t);
 static netdev_tx_t corkscrew_start_xmit(struct sk_buff *skb,
 					struct net_device *dev);
 static int corkscrew_rx(struct net_device *dev);
-static void corkscrew_timeout(struct net_device *dev);
+static void corkscrew_timeout(struct net_device *dev, unsigned int txqueue);
 static int boomerang_rx(struct net_device *dev);
 static irqreturn_t corkscrew_interrupt(int irq, void *dev_id);
 static int corkscrew_close(struct net_device *dev);
@@ -418,8 +412,6 @@ int init_module(void)
 	int found = 0;
 	if (debug >= 0)
 		corkscrew_debug = debug;
-	if (corkscrew_debug)
-		pr_debug("%s", version);
 	while (corkscrew_scan(-1))
 		found++;
 	return found ? 0 : -ENODEV;
@@ -429,15 +421,9 @@ int init_module(void)
 struct net_device *tc515_probe(int unit)
 {
 	struct net_device *dev = corkscrew_scan(unit);
-	static int printed;
 
 	if (!dev)
 		return ERR_PTR(-ENODEV);
-
-	if (corkscrew_debug > 0 && !printed) {
-		printed = 1;
-		pr_debug("%s", version);
-	}
 
 	return dev;
 }
@@ -570,7 +556,6 @@ static const struct net_device_ops netdev_ops = {
 	.ndo_tx_timeout		= corkscrew_timeout,
 	.ndo_get_stats		= corkscrew_get_stats,
 	.ndo_set_rx_mode	= set_rx_mode,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -627,6 +612,8 @@ static int corkscrew_setup(struct net_device *dev, int ioaddr,
 	pr_info("%s: 3Com %s at %#3x,", dev->name, vp->product_name, ioaddr);
 
 	spin_lock_init(&vp->lock);
+
+	timer_setup(&vp->timer, corkscrew_timer, 0);
 
 	/* Read the station address from the EEPROM. */
 	EL3WINDOW(0);
@@ -708,6 +695,7 @@ static int corkscrew_open(struct net_device *dev)
 {
 	int ioaddr = dev->base_addr;
 	struct corkscrew_private *vp = netdev_priv(dev);
+	bool armtimer = false;
 	__u32 config;
 	int i;
 
@@ -732,12 +720,7 @@ static int corkscrew_open(struct net_device *dev)
 		if (corkscrew_debug > 1)
 			pr_debug("%s: Initial media type %s.\n",
 			       dev->name, media_tbl[dev->if_port].name);
-
-		init_timer(&vp->timer);
-		vp->timer.expires = jiffies + media_tbl[dev->if_port].wait;
-		vp->timer.data = (unsigned long) dev;
-		vp->timer.function = corkscrew_timer;	/* timer handler */
-		add_timer(&vp->timer);
+		armtimer = true;
 	} else
 		dev->if_port = vp->default_media;
 
@@ -776,6 +759,9 @@ static int corkscrew_open(struct net_device *dev)
 			       vp->product_name, dev)) {
 		return -EAGAIN;
 	}
+
+	if (armtimer)
+		mod_timer(&vp->timer, jiffies + media_tbl[dev->if_port].wait);
 
 	if (corkscrew_debug > 1) {
 		EL3WINDOW(4);
@@ -869,11 +855,11 @@ static int corkscrew_open(struct net_device *dev)
 	return 0;
 }
 
-static void corkscrew_timer(unsigned long data)
+static void corkscrew_timer(struct timer_list *t)
 {
 #ifdef AUTOMEDIA
-	struct net_device *dev = (struct net_device *) data;
-	struct corkscrew_private *vp = netdev_priv(dev);
+	struct corkscrew_private *vp = from_timer(vp, t, timer);
+	struct net_device *dev = vp->our_dev;
 	int ioaddr = dev->base_addr;
 	unsigned long flags;
 	int ok = 0;
@@ -961,7 +947,7 @@ static void corkscrew_timer(unsigned long data)
 #endif				/* AUTOMEDIA */
 }
 
-static void corkscrew_timeout(struct net_device *dev)
+static void corkscrew_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	int i;
 	struct corkscrew_private *vp = netdev_priv(dev);
@@ -1177,7 +1163,7 @@ static irqreturn_t corkscrew_interrupt(int irq, void *dev_id)
 				if (inl(ioaddr + DownListPtr) == isa_virt_to_bus(&lp->tx_ring[entry]))
 					break;	/* It still hasn't been processed. */
 				if (lp->tx_skbuff[entry]) {
-					dev_kfree_skb_irq(lp->tx_skbuff[entry]);
+					dev_consume_skb_irq(lp->tx_skbuff[entry]);
 					lp->tx_skbuff[entry] = NULL;
 				}
 				dirty_tx++;
@@ -1192,7 +1178,7 @@ static irqreturn_t corkscrew_interrupt(int irq, void *dev_id)
 #ifdef VORTEX_BUS_MASTER
 		if (status & DMADone) {
 			outw(0x1000, ioaddr + Wn7_MasterStatus);	/* Ack the event. */
-			dev_kfree_skb_irq(lp->tx_skb);	/* Release the transferred buffer */
+			dev_consume_skb_irq(lp->tx_skb);	/* Release the transferred buffer */
 			netif_wake_queue(dev);
 		}
 #endif
@@ -1370,9 +1356,9 @@ static int boomerang_rx(struct net_device *dev)
 			    (skb = netdev_alloc_skb(dev, pkt_len + 4)) != NULL) {
 				skb_reserve(skb, 2);	/* Align IP on 16 byte boundaries */
 				/* 'skb_put()' points to the start of sk_buff data area. */
-				memcpy(skb_put(skb, pkt_len),
-				       isa_bus_to_virt(vp->rx_ring[entry].
-						   addr), pkt_len);
+				skb_put_data(skb,
+					     isa_bus_to_virt(vp->rx_ring[entry].addr),
+					     pkt_len);
 				rx_copy++;
 			} else {
 				void *temp;
@@ -1427,7 +1413,7 @@ static int corkscrew_close(struct net_device *dev)
 			dev->name, rx_nocopy, rx_copy, queued_packet);
 	}
 
-	del_timer(&vp->timer);
+	del_timer_sync(&vp->timer);
 
 	/* Turn off statistics ASAP.  We update lp->stats below. */
 	outw(StatsDisable, ioaddr + EL3_CMD);
@@ -1521,7 +1507,7 @@ static void update_stats(int ioaddr, struct net_device *dev)
 static void set_rx_mode(struct net_device *dev)
 {
 	int ioaddr = dev->base_addr;
-	short new_mode;
+	unsigned short new_mode;
 
 	if (dev->flags & IFF_PROMISC) {
 		if (corkscrew_debug > 3)
@@ -1540,7 +1526,6 @@ static void netdev_get_drvinfo(struct net_device *dev,
 			       struct ethtool_drvinfo *info)
 {
 	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
 	snprintf(info->bus_info, sizeof(info->bus_info), "ISA 0x%lx",
 		 dev->base_addr);
 }

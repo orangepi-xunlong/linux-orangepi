@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * UART driver for PNX8XXX SoCs
  *
@@ -7,16 +8,7 @@
  *
  * Based on drivers/char/serial.c, by Linus Torvalds, Theodore Ts'o.
  * Copyright (C) 2000 Deep Blue Solutions Ltd.
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2. This program is licensed "as is" without any warranty of
- * any kind, whether express or implied.
- *
  */
-
-#if defined(CONFIG_SERIAL_PNX8XXX_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
 
 #include <linux/module.h>
 #include <linux/ioport.h>
@@ -107,9 +99,9 @@ static void pnx8xxx_mctrl_check(struct pnx8xxx_port *sport)
  * This is our per-port timeout handler, for checking the
  * modem status signals.
  */
-static void pnx8xxx_timeout(unsigned long data)
+static void pnx8xxx_timeout(struct timer_list *t)
 {
-	struct pnx8xxx_port *sport = (struct pnx8xxx_port *)data;
+	struct pnx8xxx_port *sport = from_timer(sport, t, timer);
 	unsigned long flags;
 
 	if (sport->port.state) {
@@ -224,9 +216,7 @@ static void pnx8xxx_rx_chars(struct pnx8xxx_port *sport)
 			else if (status & FIFO_TO_SM(PNX8XXX_UART_FIFO_RXFE))
 				flg = TTY_FRAME;
 
-#ifdef SUPPORT_SYSRQ
 			sport->port.sysrq = 0;
-#endif
 		}
 
 		if (uart_handle_sysrq_char(&sport->port, ch))
@@ -631,7 +621,7 @@ pnx8xxx_verify_port(struct uart_port *port, struct serial_struct *ser)
 	return ret;
 }
 
-static struct uart_ops pnx8xxx_pops = {
+static const struct uart_ops pnx8xxx_pops = {
 	.tx_empty	= pnx8xxx_tx_empty,
 	.set_mctrl	= pnx8xxx_set_mctrl,
 	.get_mctrl	= pnx8xxx_get_mctrl,
@@ -666,9 +656,7 @@ static void __init pnx8xxx_init_ports(void)
 	first = 0;
 
 	for (i = 0; i < NR_PORTS; i++) {
-		init_timer(&pnx8xxx_ports[i].timer);
-		pnx8xxx_ports[i].timer.function = pnx8xxx_timeout;
-		pnx8xxx_ports[i].timer.data     = (unsigned long)&pnx8xxx_ports[i];
+		timer_setup(&pnx8xxx_ports[i].timer, pnx8xxx_timeout, 0);
 		pnx8xxx_ports[i].port.ops = &pnx8xxx_pops;
 	}
 }
@@ -806,6 +794,7 @@ static int pnx8xxx_serial_probe(struct platform_device *pdev)
 			if (pnx8xxx_ports[i].port.mapbase != res->start)
 				continue;
 
+			pnx8xxx_ports[i].port.has_sysrq = IS_ENABLED(CONFIG_SERIAL_PNX8XXX_CONSOLE);
 			pnx8xxx_ports[i].port.dev = &pdev->dev;
 			uart_add_one_port(&pnx8xxx_reg, &pnx8xxx_ports[i].port);
 			platform_set_drvdata(pdev, &pnx8xxx_ports[i]);

@@ -119,17 +119,15 @@ struct ib_qp *mlx5_ib_gsi_create_qp(struct ib_pd *pd,
 	struct mlx5_ib_gsi_qp *gsi;
 	struct ib_qp_init_attr hw_init_attr = *init_attr;
 	const u8 port_num = init_attr->port_num;
-	const int num_pkeys = pd->device->attrs.max_pkeys;
-	const int num_qps = mlx5_ib_deth_sqpn_cap(dev) ? num_pkeys : 0;
+	int num_qps = 0;
 	int ret;
 
-	mlx5_ib_dbg(dev, "creating GSI QP\n");
-
-	if (port_num > ARRAY_SIZE(dev->devr.ports) || port_num < 1) {
-		mlx5_ib_warn(dev,
-			     "invalid port number %d during GSI QP creation\n",
-			     port_num);
-		return ERR_PTR(-EINVAL);
+	if (mlx5_ib_deth_sqpn_cap(dev)) {
+		if (MLX5_CAP_GEN(dev->mdev,
+				 port_type) == MLX5_CAP_PORT_TYPE_IB)
+			num_qps = pd->device->attrs.max_pkeys;
+		else if (dev->lag_active)
+			num_qps = MLX5_MAX_PORTS;
 	}
 
 	gsi = kzalloc(sizeof(*gsi), GFP_KERNEL);
@@ -263,14 +261,14 @@ static struct ib_qp *create_gsi_ud_qp(struct mlx5_ib_gsi_qp *gsi)
 		},
 		.sq_sig_type = gsi->sq_sig_type,
 		.qp_type = IB_QPT_UD,
-		.create_flags = mlx5_ib_create_qp_sqpn_qp1(),
+		.create_flags = MLX5_IB_QP_CREATE_SQPN_QP1,
 	};
 
 	return ib_create_qp(pd, &init_attr);
 }
 
 static int modify_to_rts(struct mlx5_ib_gsi_qp *gsi, struct ib_qp *qp,
-			 u16 qp_index)
+			 u16 pkey_index)
 {
 	struct mlx5_ib_dev *dev = to_mdev(qp->device);
 	struct ib_qp_attr attr;
@@ -279,7 +277,7 @@ static int modify_to_rts(struct mlx5_ib_gsi_qp *gsi, struct ib_qp *qp,
 
 	mask = IB_QP_STATE | IB_QP_PKEY_INDEX | IB_QP_QKEY | IB_QP_PORT;
 	attr.qp_state = IB_QPS_INIT;
-	attr.pkey_index = qp_index;
+	attr.pkey_index = pkey_index;
 	attr.qkey = IB_QP1_QKEY;
 	attr.port_num = gsi->port_num;
 	ret = ib_modify_qp(qp, &attr, mask);
@@ -313,12 +311,17 @@ static void setup_qp(struct mlx5_ib_gsi_qp *gsi, u16 qp_index)
 {
 	struct ib_device *device = gsi->rx_qp->device;
 	struct mlx5_ib_dev *dev = to_mdev(device);
+	int pkey_index = qp_index;
+	struct mlx5_ib_qp *mqp;
 	struct ib_qp *qp;
 	unsigned long flags;
 	u16 pkey;
 	int ret;
 
-	ret = ib_query_pkey(device, gsi->port_num, qp_index, &pkey);
+	if (MLX5_CAP_GEN(dev->mdev,  port_type) != MLX5_CAP_PORT_TYPE_IB)
+		pkey_index = 0;
+
+	ret = ib_query_pkey(device, gsi->port_num, pkey_index, &pkey);
 	if (ret) {
 		mlx5_ib_warn(dev, "unable to read P_Key at port %d, index %d\n",
 			     gsi->port_num, qp_index);
@@ -347,7 +350,10 @@ static void setup_qp(struct mlx5_ib_gsi_qp *gsi, u16 qp_index)
 		return;
 	}
 
-	ret = modify_to_rts(gsi, qp, qp_index);
+	mqp = to_mqp(qp);
+	if (dev->lag_active)
+		mqp->gsi_lag_port = qp_index + 1;
+	ret = modify_to_rts(gsi, qp, pkey_index);
 	if (ret)
 		goto err_destroy_qp;
 
@@ -466,10 +472,14 @@ static int mlx5_ib_gsi_silent_drop(struct mlx5_ib_gsi_qp *gsi,
 static struct ib_qp *get_tx_qp(struct mlx5_ib_gsi_qp *gsi, struct ib_ud_wr *wr)
 {
 	struct mlx5_ib_dev *dev = to_mdev(gsi->rx_qp->device);
+	struct mlx5_ib_ah *ah = to_mah(wr->ah);
 	int qp_index = wr->pkey_index;
 
-	if (!mlx5_ib_deth_sqpn_cap(dev))
+	if (!gsi->num_qps)
 		return gsi->rx_qp;
+
+	if (dev->lag_active && ah->xmit_port)
+		qp_index = ah->xmit_port - 1;
 
 	if (qp_index >= gsi->num_qps)
 		return NULL;
@@ -477,8 +487,8 @@ static struct ib_qp *get_tx_qp(struct mlx5_ib_gsi_qp *gsi, struct ib_ud_wr *wr)
 	return gsi->tx_qps[qp_index];
 }
 
-int mlx5_ib_gsi_post_send(struct ib_qp *qp, struct ib_send_wr *wr,
-			  struct ib_send_wr **bad_wr)
+int mlx5_ib_gsi_post_send(struct ib_qp *qp, const struct ib_send_wr *wr,
+			  const struct ib_send_wr **bad_wr)
 {
 	struct mlx5_ib_gsi_qp *gsi = gsi_qp(qp);
 	struct ib_qp *tx_qp;
@@ -507,8 +517,7 @@ int mlx5_ib_gsi_post_send(struct ib_qp *qp, struct ib_send_wr *wr,
 		ret = ib_post_send(tx_qp, &cur_wr.wr, bad_wr);
 		if (ret) {
 			/* Undo the effect of adding the outstanding wr */
-			gsi->outstanding_pi = (gsi->outstanding_pi - 1) %
-					      gsi->cap.max_send_wr;
+			gsi->outstanding_pi--;
 			goto err;
 		}
 		spin_unlock_irqrestore(&gsi->lock, flags);
@@ -522,8 +531,8 @@ err:
 	return ret;
 }
 
-int mlx5_ib_gsi_post_recv(struct ib_qp *qp, struct ib_recv_wr *wr,
-			  struct ib_recv_wr **bad_wr)
+int mlx5_ib_gsi_post_recv(struct ib_qp *qp, const struct ib_recv_wr *wr,
+			  const struct ib_recv_wr **bad_wr)
 {
 	struct mlx5_ib_gsi_qp *gsi = gsi_qp(qp);
 

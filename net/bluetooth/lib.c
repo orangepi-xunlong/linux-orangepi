@@ -30,10 +30,10 @@
 
 #include <net/bluetooth/bluetooth.h>
 
-void baswap(bdaddr_t *dst, bdaddr_t *src)
+void baswap(bdaddr_t *dst, const bdaddr_t *src)
 {
-	unsigned char *d = (unsigned char *) dst;
-	unsigned char *s = (unsigned char *) src;
+	const unsigned char *s = (const unsigned char *)src;
+	unsigned char *d = (unsigned char *)dst;
 	unsigned int i;
 
 	for (i = 0; i < 6; i++)
@@ -182,6 +182,55 @@ void bt_err(const char *format, ...)
 	va_end(args);
 }
 EXPORT_SYMBOL(bt_err);
+
+#ifdef CONFIG_BT_FEATURE_DEBUG
+static bool debug_enable;
+
+void bt_dbg_set(bool enable)
+{
+	debug_enable = enable;
+}
+
+bool bt_dbg_get(void)
+{
+	return debug_enable;
+}
+
+void bt_dbg(const char *format, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	if (likely(!debug_enable))
+		return;
+
+	va_start(args, format);
+
+	vaf.fmt = format;
+	vaf.va = &args;
+
+	printk(KERN_DEBUG pr_fmt("%pV"), &vaf);
+
+	va_end(args);
+}
+EXPORT_SYMBOL(bt_dbg);
+#endif
+
+void bt_warn_ratelimited(const char *format, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	va_start(args, format);
+
+	vaf.fmt = format;
+	vaf.va = &args;
+
+	pr_warn_ratelimited("%pV", &vaf);
+
+	va_end(args);
+}
+EXPORT_SYMBOL(bt_warn_ratelimited);
 
 void bt_err_ratelimited(const char *format, ...)
 {

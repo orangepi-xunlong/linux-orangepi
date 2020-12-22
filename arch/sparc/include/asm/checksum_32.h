@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __SPARC_CHECKSUM_H
 #define __SPARC_CHECKSUM_H
 
@@ -16,7 +17,7 @@
  */
 
 #include <linux/in6.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /* computes the checksum of a memory block at buff, length len,
  * and adds in "sum" (32-bit)
@@ -59,13 +60,19 @@ csum_partial_copy_nocheck(const void *src, void *dst, int len, __wsum sum)
 }
 
 static inline __wsum
-csum_partial_copy_from_user(const void __user *src, void *dst, int len,
+csum_and_copy_from_user(const void __user *src, void *dst, int len,
 			    __wsum sum, int *err)
   {
 	register unsigned long ret asm("o0") = (unsigned long)src;
 	register char *d asm("o1") = dst;
 	register int l asm("g1") = len;
 	register __wsum s asm("g7") = sum;
+
+	if (unlikely(!access_ok(src, len))) {
+		if (len)
+			*err = -EFAULT;
+		return sum;
+	}
 
 	__asm__ __volatile__ (
 	".section __ex_table,#alloc\n\t"
@@ -82,11 +89,13 @@ csum_partial_copy_from_user(const void __user *src, void *dst, int len,
 	return (__force __wsum)ret;
 }
 
+#define HAVE_CSUM_COPY_USER
+
 static inline __wsum
-csum_partial_copy_to_user(const void *src, void __user *dst, int len,
+csum_and_copy_to_user(const void *src, void __user *dst, int len,
 			  __wsum sum, int *err)
 {
-	if (!access_ok (VERIFY_WRITE, dst, len)) {
+	if (!access_ok(dst, len)) {
 		*err = -EFAULT;
 		return sum;
 	} else {
@@ -111,9 +120,6 @@ csum_partial_copy_to_user(const void *src, void __user *dst, int len,
 		return (__force __wsum)ret;
 	}
 }
-
-#define HAVE_CSUM_COPY_USER
-#define csum_and_copy_to_user csum_partial_copy_to_user
 
 /* ihl is always 5 or greater, almost always is 5, and iph is word aligned
  * the majority of the time.

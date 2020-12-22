@@ -269,7 +269,7 @@ static ssize_t qlcnic_sysfs_read_crb(struct file *filp, struct kobject *kobj,
 				     struct bin_attribute *attr, char *buf,
 				     loff_t offset, size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	int ret;
 
@@ -286,7 +286,7 @@ static ssize_t qlcnic_sysfs_write_crb(struct file *filp, struct kobject *kobj,
 				      struct bin_attribute *attr, char *buf,
 				      loff_t offset, size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	int ret;
 
@@ -315,7 +315,7 @@ static ssize_t qlcnic_sysfs_read_mem(struct file *filp, struct kobject *kobj,
 				     struct bin_attribute *attr, char *buf,
 				     loff_t offset, size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	u64 data;
 	int ret;
@@ -337,7 +337,7 @@ static ssize_t qlcnic_sysfs_write_mem(struct file *filp, struct kobject *kobj,
 				      struct bin_attribute *attr, char *buf,
 				      loff_t offset, size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	u64 data;
 	int ret;
@@ -402,7 +402,7 @@ static ssize_t qlcnic_sysfs_write_pm_config(struct file *filp,
 					    char *buf, loff_t offset,
 					    size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_pm_func_cfg *pm_cfg;
 	u32 id, action, pci_func;
@@ -452,7 +452,7 @@ static ssize_t qlcnic_sysfs_read_pm_config(struct file *filp,
 					   char *buf, loff_t offset,
 					   size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_pm_func_cfg *pm_cfg;
 	u8 pci_func;
@@ -545,7 +545,7 @@ static ssize_t qlcnic_sysfs_write_esw_config(struct file *file,
 					     char *buf, loff_t offset,
 					     size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_esw_func_cfg *esw_cfg;
 	struct qlcnic_npar_info *npar;
@@ -629,7 +629,7 @@ static ssize_t qlcnic_sysfs_read_esw_config(struct file *file,
 					    char *buf, loff_t offset,
 					    size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_esw_func_cfg *esw_cfg;
 	u8 pci_func;
@@ -681,7 +681,7 @@ static ssize_t qlcnic_sysfs_write_npar_config(struct file *file,
 					      char *buf, loff_t offset,
 					      size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_info nic_info;
 	struct qlcnic_npar_func_cfg *np_cfg;
@@ -728,7 +728,7 @@ static ssize_t qlcnic_sysfs_read_npar_config(struct file *file,
 					     char *buf, loff_t offset,
 					     size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_npar_func_cfg *np_cfg;
 	struct qlcnic_info nic_info;
@@ -775,7 +775,7 @@ static ssize_t qlcnic_sysfs_get_port_stats(struct file *file,
 					   char *buf, loff_t offset,
 					   size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_esw_statistics port_stats;
 	int ret;
@@ -810,7 +810,7 @@ static ssize_t qlcnic_sysfs_get_esw_stats(struct file *file,
 					  char *buf, loff_t offset,
 					  size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_esw_statistics esw_stats;
 	int ret;
@@ -845,7 +845,7 @@ static ssize_t qlcnic_sysfs_clear_esw_stats(struct file *file,
 					    char *buf, loff_t offset,
 					    size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	int ret;
 
@@ -875,7 +875,7 @@ static ssize_t qlcnic_sysfs_clear_port_stats(struct file *file,
 					     size_t size)
 {
 
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	int ret;
 
@@ -904,7 +904,7 @@ static ssize_t qlcnic_sysfs_read_pci_config(struct file *file,
 					    char *buf, loff_t offset,
 					    size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 	struct qlcnic_pci_func_cfg *pci_cfg;
 	struct qlcnic_pci_info *pci_info;
@@ -946,7 +946,7 @@ static ssize_t qlcnic_83xx_sysfs_flash_read_handler(struct file *filp,
 {
 	unsigned char *p_read_buf;
 	int  ret, count;
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 
 	if (!size)
@@ -1124,7 +1124,7 @@ static ssize_t qlcnic_83xx_sysfs_flash_write_handler(struct file *filp,
 	int  ret;
 	static int flash_mode;
 	unsigned long data;
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct qlcnic_adapter *adapter = dev_get_drvdata(dev);
 
 	ret = kstrtoul(buf, 16, &data);
@@ -1176,82 +1176,82 @@ static ssize_t qlcnic_83xx_sysfs_flash_write_handler(struct file *filp,
 	return size;
 }
 
-static struct device_attribute dev_attr_bridged_mode = {
-       .attr = {.name = "bridged_mode", .mode = (S_IRUGO | S_IWUSR)},
-       .show = qlcnic_show_bridged_mode,
-       .store = qlcnic_store_bridged_mode,
+static const struct device_attribute dev_attr_bridged_mode = {
+	.attr = { .name = "bridged_mode", .mode = 0644 },
+	.show = qlcnic_show_bridged_mode,
+	.store = qlcnic_store_bridged_mode,
 };
 
-static struct device_attribute dev_attr_diag_mode = {
-	.attr = {.name = "diag_mode", .mode = (S_IRUGO | S_IWUSR)},
+static const struct device_attribute dev_attr_diag_mode = {
+	.attr = { .name = "diag_mode", .mode = 0644 },
 	.show = qlcnic_show_diag_mode,
 	.store = qlcnic_store_diag_mode,
 };
 
-static struct device_attribute dev_attr_beacon = {
-	.attr = {.name = "beacon", .mode = (S_IRUGO | S_IWUSR)},
+static const struct device_attribute dev_attr_beacon = {
+	.attr = { .name = "beacon", .mode = 0644 },
 	.show = qlcnic_show_beacon,
 	.store = qlcnic_store_beacon,
 };
 
-static struct bin_attribute bin_attr_crb = {
-	.attr = {.name = "crb", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_crb = {
+	.attr = { .name = "crb", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_read_crb,
 	.write = qlcnic_sysfs_write_crb,
 };
 
-static struct bin_attribute bin_attr_mem = {
-	.attr = {.name = "mem", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_mem = {
+	.attr = { .name = "mem", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_read_mem,
 	.write = qlcnic_sysfs_write_mem,
 };
 
-static struct bin_attribute bin_attr_npar_config = {
-	.attr = {.name = "npar_config", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_npar_config = {
+	.attr = { .name = "npar_config", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_read_npar_config,
 	.write = qlcnic_sysfs_write_npar_config,
 };
 
-static struct bin_attribute bin_attr_pci_config = {
-	.attr = {.name = "pci_config", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_pci_config = {
+	.attr = { .name = "pci_config", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_read_pci_config,
 	.write = NULL,
 };
 
-static struct bin_attribute bin_attr_port_stats = {
-	.attr = {.name = "port_stats", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_port_stats = {
+	.attr = { .name = "port_stats", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_get_port_stats,
 	.write = qlcnic_sysfs_clear_port_stats,
 };
 
-static struct bin_attribute bin_attr_esw_stats = {
-	.attr = {.name = "esw_stats", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_esw_stats = {
+	.attr = { .name = "esw_stats", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_get_esw_stats,
 	.write = qlcnic_sysfs_clear_esw_stats,
 };
 
-static struct bin_attribute bin_attr_esw_config = {
-	.attr = {.name = "esw_config", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_esw_config = {
+	.attr = { .name = "esw_config", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_read_esw_config,
 	.write = qlcnic_sysfs_write_esw_config,
 };
 
-static struct bin_attribute bin_attr_pm_config = {
-	.attr = {.name = "pm_config", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_pm_config = {
+	.attr = { .name = "pm_config", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_read_pm_config,
 	.write = qlcnic_sysfs_write_pm_config,
 };
 
-static struct bin_attribute bin_attr_flash = {
-	.attr = {.name = "flash", .mode = (S_IRUGO | S_IWUSR)},
+static const struct bin_attribute bin_attr_flash = {
+	.attr = { .name = "flash", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_83xx_sysfs_flash_read_handler,
 	.write = qlcnic_83xx_sysfs_flash_write_handler,
@@ -1278,7 +1278,7 @@ static ssize_t qlcnic_hwmon_show_temp(struct device *dev,
 }
 
 /* hwmon-sysfs attributes */
-static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO,
+static SENSOR_DEVICE_ATTR(temp1_input, 0444,
 			  qlcnic_hwmon_show_temp, NULL, 1);
 
 static struct attribute *qlcnic_hwmon_attrs[] = {

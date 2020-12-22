@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* linux/drivers/media/platform/s5p-jpeg/jpeg-regs.h
  *
  * Register definition file for Samsung JPEG codec driver
@@ -5,12 +6,8 @@
  * Copyright (c) 2011-2014 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
  *
- * Author: Andrzej Pietrasiewicz <andrzej.p@samsung.com>
+ * Author: Andrzej Pietrasiewicz <andrzejtp2010@gmail.com>
  * Author: Jacek Anaszewski <j.anaszewski@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef JPEG_REGS_H_
@@ -124,14 +121,14 @@
 
 /* JPEG timer setting register */
 #define S5P_JPG_TIMER_SE		0x7c
-#define S5P_TIMER_INT_EN_MASK		(0x1 << 31)
-#define S5P_TIMER_INT_EN		(0x1 << 31)
+#define S5P_TIMER_INT_EN_MASK		(0x1UL << 31)
+#define S5P_TIMER_INT_EN		(0x1UL << 31)
 #define S5P_TIMER_INIT_MASK		0x7fffffff
 
 /* JPEG timer status register */
 #define S5P_JPG_TIMER_ST		0x80
 #define S5P_TIMER_INT_STAT_SHIFT	31
-#define S5P_TIMER_INT_STAT_MASK		(0x1 << S5P_TIMER_INT_STAT_SHIFT)
+#define S5P_TIMER_INT_STAT_MASK		(0x1UL << S5P_TIMER_INT_STAT_SHIFT)
 #define S5P_TIMER_CNT_SHIFT		0
 #define S5P_TIMER_CNT_MASK		0x7fffffff
 
@@ -371,7 +368,7 @@
 #define EXYNOS4_NF_SHIFT			16
 #define EXYNOS4_NF_MASK				0xff
 #define EXYNOS4_NF(x)				\
-	(((x) << EXYNOS4_NF_SHIFT) & EXYNOS4_NF_MASK)
+	(((x) & EXYNOS4_NF_MASK) << EXYNOS4_NF_SHIFT)
 
 /* JPEG quantizer table register */
 #define EXYNOS4_QTBL_CONTENT(n)	(0x100 + (n) * 0x40)
@@ -565,13 +562,13 @@
 /* JPEG timer setting register */
 #define EXYNOS3250_TIMER_SE			0x148
 #define EXYNOS3250_TIMER_INT_EN_SHIFT		31
-#define EXYNOS3250_TIMER_INT_EN			(1 << EXYNOS3250_TIMER_INT_EN_SHIFT)
+#define EXYNOS3250_TIMER_INT_EN			(1UL << EXYNOS3250_TIMER_INT_EN_SHIFT)
 #define EXYNOS3250_TIMER_INIT_MASK		0x7fffffff
 
 /* JPEG timer status register */
 #define EXYNOS3250_TIMER_ST			0x14c
 #define EXYNOS3250_TIMER_INT_STAT_SHIFT		31
-#define EXYNOS3250_TIMER_INT_STAT		(1 << EXYNOS3250_TIMER_INT_STAT_SHIFT)
+#define EXYNOS3250_TIMER_INT_STAT		(1UL << EXYNOS3250_TIMER_INT_STAT_SHIFT)
 #define EXYNOS3250_TIMER_CNT_SHIFT		0
 #define EXYNOS3250_TIMER_CNT_MASK		0x7fffffff
 

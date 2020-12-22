@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
 # Runs static keys kernel module tests
 
 # Kselftest framework requirement - SKIP code is 4.

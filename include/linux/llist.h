@@ -1,30 +1,36 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef LLIST_H
 #define LLIST_H
 /*
  * Lock-less NULL terminated single linked list
  *
- * If there are multiple producers and multiple consumers, llist_add
- * can be used in producers and llist_del_all can be used in
- * consumers.  They can work simultaneously without lock.  But
- * llist_del_first can not be used here.  Because llist_del_first
- * depends on list->first->next does not changed if list->first is not
- * changed during its operation, but llist_del_first, llist_add,
- * llist_add (or llist_del_all, llist_add, llist_add) sequence in
- * another consumer may violate that.
+ * Cases where locking is not needed:
+ * If there are multiple producers and multiple consumers, llist_add can be
+ * used in producers and llist_del_all can be used in consumers simultaneously
+ * without locking. Also a single consumer can use llist_del_first while
+ * multiple producers simultaneously use llist_add, without any locking.
  *
- * If there are multiple producers and one consumer, llist_add can be
- * used in producers and llist_del_all or llist_del_first can be used
- * in the consumer.
+ * Cases where locking is needed:
+ * If we have multiple consumers with llist_del_first used in one consumer, and
+ * llist_del_first or llist_del_all used in other consumers, then a lock is
+ * needed.  This is because llist_del_first depends on list->first->next not
+ * changing, but without lock protection, there's no way to be sure about that
+ * if a preemption happens in the middle of the delete operation and on being
+ * preempted back, the list->first is the same as before causing the cmpxchg in
+ * llist_del_first to succeed. For example, while a llist_del_first operation
+ * is in progress in one consumer, then a llist_del_first, llist_add,
+ * llist_add (or llist_del_all, llist_add, llist_add) sequence in another
+ * consumer may cause violations.
  *
- * This can be summarized as follow:
+ * This can be summarized as follows:
  *
  *           |   add    | del_first |  del_all
  * add       |    -     |     -     |     -
  * del_first |          |     L     |     L
  * del_all   |          |           |     -
  *
- * Where "-" stands for no lock is needed, while "L" stands for lock
- * is needed.
+ * Where, a particular row's operation can happen concurrently with a column's
+ * operation, with "-" being no lock needed, while "L" being lock is needed.
  *
  * The list entries deleted via llist_del_all can be traversed with
  * traversing function such as llist_for_each etc.  But the list
@@ -40,19 +46,6 @@
  *
  * Copyright 2010,2011 Intel Corp.
  *   Author: Huang Ying <ying.huang@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/atomic.h>
@@ -122,6 +115,25 @@ static inline void init_llist_head(struct llist_head *list)
 	for ((pos) = (node); pos; (pos) = (pos)->next)
 
 /**
+ * llist_for_each_safe - iterate over some deleted entries of a lock-less list
+ *			 safe against removal of list entry
+ * @pos:	the &struct llist_node to use as a loop cursor
+ * @n:		another &struct llist_node to use as temporary storage
+ * @node:	the first entry of deleted list entries
+ *
+ * In general, some entries of the lock-less list can be traversed
+ * safely only after being deleted from list, so start with an entry
+ * instead of list head.
+ *
+ * If being used on entries deleted from lock-less list directly, the
+ * traverse order is from the newest to the oldest added entry.  If
+ * you want to traverse from the oldest to the newest, you must
+ * reverse the order by yourself before traversing.
+ */
+#define llist_for_each_safe(pos, n, node)			\
+	for ((pos) = (node); (pos) && ((n) = (pos)->next, true); (pos) = (n))
+
+/**
  * llist_for_each_entry - iterate over some deleted entries of lock-less list of given type
  * @pos:	the type * to use as a loop cursor.
  * @node:	the fist entry of deleted list entries.
@@ -174,7 +186,7 @@ static inline void init_llist_head(struct llist_head *list)
  */
 static inline bool llist_empty(const struct llist_head *head)
 {
-	return ACCESS_ONCE(head->first) == NULL;
+	return READ_ONCE(head->first) == NULL;
 }
 
 static inline struct llist_node *llist_next(struct llist_node *node)

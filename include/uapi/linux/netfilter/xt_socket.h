@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _XT_SOCKET_H
 #define _XT_SOCKET_H
 
@@ -25,12 +26,5 @@ struct xt_socket_mtinfo3 {
 #define XT_SOCKET_FLAGS_V3 (XT_SOCKET_TRANSPARENT \
 			   | XT_SOCKET_NOWILDCARD \
 			   | XT_SOCKET_RESTORESKMARK)
-
-struct sock *xt_socket_lookup_slow_v4(struct net *net,
-				      const struct sk_buff *skb,
-				      const struct net_device *indev);
-struct sock *xt_socket_lookup_slow_v6(struct net *net,
-				      const struct sk_buff *skb,
-				      const struct net_device *indev);
 
 #endif /* _XT_SOCKET_H */

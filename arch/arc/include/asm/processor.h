@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * vineetg: March 2009
  *  -Implemented task_pt_regs( )
@@ -17,13 +14,13 @@
 #ifndef __ASSEMBLY__
 
 #include <asm/ptrace.h>
+#include <asm/dsp.h>
+#include <asm/fpu.h>
 
-#ifdef CONFIG_ARC_FPU_SAVE_RESTORE
-/* These DPFP regs need to be saved/restored across ctx-sw */
-struct arc_fpu {
-	struct {
-		unsigned int l, h;
-	} aux_dpfp[2];
+#ifdef CONFIG_ARC_PLAT_EZNPS
+struct eznps_dp {
+	unsigned int eflags;
+	unsigned int gpa1;
 };
 #endif
 
@@ -35,8 +32,14 @@ struct thread_struct {
 	unsigned long ksp;	/* kernel mode stack pointer */
 	unsigned long callee_reg;	/* pointer to callee regs */
 	unsigned long fault_address;	/* dbls as brkpt holder as well */
+#ifdef CONFIG_ARC_DSP_SAVE_RESTORE_REGS
+	struct dsp_callee_regs dsp;
+#endif
 #ifdef CONFIG_ARC_FPU_SAVE_RESTORE
 	struct arc_fpu fpu;
+#endif
+#ifdef CONFIG_ARC_PLAT_EZNPS
+	struct eznps_dp dp;
 #endif
 };
 
@@ -60,19 +63,13 @@ struct task_struct;
 #ifndef CONFIG_EZNPS_MTM_EXT
 
 #define cpu_relax()		barrier()
-#define cpu_relax_lowlatency()	cpu_relax()
 
 #else
 
 #define cpu_relax()     \
 	__asm__ __volatile__ (".word %0" : : "i"(CTOP_INST_SCHD_RW) : "memory")
 
-#define cpu_relax_lowlatency()	barrier()
-
 #endif
-
-#define copy_segments(tsk, mm)      do { } while (0)
-#define release_segments(mm)        do { } while (0)
 
 #define KSTK_EIP(tsk)   (task_pt_regs(tsk)->ret)
 #define KSTK_ESP(tsk)   (task_pt_regs(tsk)->sp)
@@ -89,20 +86,10 @@ struct task_struct;
 #define TSK_K_BLINK(tsk)	TSK_K_REG(tsk, 4)
 #define TSK_K_FP(tsk)		TSK_K_REG(tsk, 0)
 
-#define thread_saved_pc(tsk)	TSK_K_BLINK(tsk)
-
 extern void start_thread(struct pt_regs * regs, unsigned long pc,
 			 unsigned long usp);
 
 extern unsigned int get_wchan(struct task_struct *p);
-
-/*
- * Default implementation of macro that returns current
- * instruction pointer ("program counter").
- * Should the PC register be read instead ? This macro does not seem to
- * be used in many places so this wont be all that bad.
- */
-#define current_text_addr() ({ __label__ _l; _l: &&_l; })
 
 #endif /* !__ASSEMBLY__ */
 

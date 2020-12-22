@@ -19,6 +19,7 @@
 #include <linux/topology.h>
 #include <asm/types.h>
 #include <asm/percpu.h>
+#include <asm/uv/uv.h>
 #include <asm/uv/uv_mmrs.h>
 #include <asm/uv/bios.h>
 #include <asm/irq_vectors.h>
@@ -218,20 +219,6 @@ static inline struct uv_hub_info_s *uv_cpu_hub_info(int cpu)
 	return (struct uv_hub_info_s *)uv_cpu_info_per(cpu)->p_uv_hub_info;
 }
 
-#define	UV_HUB_INFO_VERSION	0x7150
-extern int uv_hub_info_version(void);
-static inline int uv_hub_info_check(int version)
-{
-	if (uv_hub_info_version() == version)
-		return 0;
-
-	pr_crit("UV: uv_hub_info version(%x) mismatch, expecting(%x)\n",
-		uv_hub_info_version(), version);
-
-	BUG();	/* Catastrophic - cannot continue on unknown UV system */
-}
-#define	_uv_hub_info_check()	uv_hub_info_check(UV_HUB_INFO_VERSION)
-
 /*
  * HUB revision ranges for each UV HUB architecture.
  * This is a software convention - NOT the hardware revision numbers in
@@ -241,71 +228,44 @@ static inline int uv_hub_info_check(int version)
 #define UV2_HUB_REVISION_BASE		3
 #define UV3_HUB_REVISION_BASE		5
 #define UV4_HUB_REVISION_BASE		7
+#define UV4A_HUB_REVISION_BASE		8	/* UV4 (fixed) rev 2 */
 
-#ifdef	UV1_HUB_IS_SUPPORTED
 static inline int is_uv1_hub(void)
 {
-	return uv_hub_info->hub_revision < UV2_HUB_REVISION_BASE;
+	return is_uv_hubbed(uv(1));
 }
-#else
-static inline int is_uv1_hub(void)
-{
-	return 0;
-}
-#endif
 
-#ifdef	UV2_HUB_IS_SUPPORTED
 static inline int is_uv2_hub(void)
 {
-	return ((uv_hub_info->hub_revision >= UV2_HUB_REVISION_BASE) &&
-		(uv_hub_info->hub_revision < UV3_HUB_REVISION_BASE));
+	return is_uv_hubbed(uv(2));
 }
-#else
-static inline int is_uv2_hub(void)
-{
-	return 0;
-}
-#endif
 
-#ifdef	UV3_HUB_IS_SUPPORTED
 static inline int is_uv3_hub(void)
 {
-	return ((uv_hub_info->hub_revision >= UV3_HUB_REVISION_BASE) &&
-		(uv_hub_info->hub_revision < UV4_HUB_REVISION_BASE));
+	return is_uv_hubbed(uv(3));
 }
-#else
-static inline int is_uv3_hub(void)
-{
-	return 0;
-}
-#endif
 
-#ifdef	UV4_HUB_IS_SUPPORTED
-static inline int is_uv4_hub(void)
+/* First test "is UV4A", then "is UV4" */
+static inline int is_uv4a_hub(void)
 {
-	return uv_hub_info->hub_revision >= UV4_HUB_REVISION_BASE;
-}
-#else
-static inline int is_uv4_hub(void)
-{
+	if (is_uv_hubbed(uv(4)))
+		return (uv_hub_info->hub_revision == UV4A_HUB_REVISION_BASE);
 	return 0;
 }
-#endif
+
+static inline int is_uv4_hub(void)
+{
+	return is_uv_hubbed(uv(4));
+}
 
 static inline int is_uvx_hub(void)
 {
-	if (uv_hub_info->hub_revision >= UV2_HUB_REVISION_BASE)
-		return uv_hub_info->hub_revision;
-
-	return 0;
+	return (is_uv_hubbed(-2) >= uv(2));
 }
 
 static inline int is_uv_hub(void)
 {
-#ifdef	UV1_HUB_IS_SUPPORTED
-	return uv_hub_info->hub_revision;
-#endif
-	return is_uvx_hub();
+	return is_uv1_hub() || is_uvx_hub();
 }
 
 union uvh_apicid {
@@ -485,15 +445,17 @@ static inline unsigned long uv_soc_phys_ram_to_gpa(unsigned long paddr)
 
 	if (paddr < uv_hub_info->lowmem_remap_top)
 		paddr |= uv_hub_info->lowmem_remap_base;
-	paddr |= uv_hub_info->gnode_upper;
-	if (m_val)
+
+	if (m_val) {
+		paddr |= uv_hub_info->gnode_upper;
 		paddr = ((paddr << uv_hub_info->m_shift)
 						>> uv_hub_info->m_shift) |
 			((paddr >> uv_hub_info->m_val)
 						<< uv_hub_info->n_lshift);
-	else
+	} else {
 		paddr |= uv_soc_phys_ram_to_nasid(paddr)
 						<< uv_hub_info->gpa_shift;
+	}
 	return paddr;
 }
 
@@ -697,7 +659,6 @@ static inline int uv_cpu_blade_processor_id(int cpu)
 {
 	return uv_cpu_info_per(cpu)->blade_cpu_id;
 }
-#define _uv_cpu_blade_processor_id 1	/* indicate function available */
 
 /* Blade number to Node number (UV1..UV4 is 1:1) */
 static inline int uv_blade_to_node(int blade)
@@ -772,24 +733,38 @@ static inline int uv_num_possible_blades(void)
 
 /* Per Hub NMI support */
 extern void uv_nmi_setup(void);
+extern void uv_nmi_setup_hubless(void);
+
+/* BIOS/Kernel flags exchange MMR */
+#define UVH_BIOS_KERNEL_MMR		UVH_SCRATCH5
+#define UVH_BIOS_KERNEL_MMR_ALIAS	UVH_SCRATCH5_ALIAS
+#define UVH_BIOS_KERNEL_MMR_ALIAS_2	UVH_SCRATCH5_ALIAS_2
+
+/* TSC sync valid, set by BIOS */
+#define UVH_TSC_SYNC_MMR	UVH_BIOS_KERNEL_MMR
+#define UVH_TSC_SYNC_SHIFT	10
+#define UVH_TSC_SYNC_SHIFT_UV2K	16	/* UV2/3k have different bits */
+#define UVH_TSC_SYNC_MASK	3	/* 0011 */
+#define UVH_TSC_SYNC_VALID	3	/* 0011 */
+#define UVH_TSC_SYNC_INVALID	2	/* 0010 */
 
 /* BMC sets a bit this MMR non-zero before sending an NMI */
-#define UVH_NMI_MMR		UVH_SCRATCH5
-#define UVH_NMI_MMR_CLEAR	UVH_SCRATCH5_ALIAS
+#define UVH_NMI_MMR		UVH_BIOS_KERNEL_MMR
+#define UVH_NMI_MMR_CLEAR	UVH_BIOS_KERNEL_MMR_ALIAS
 #define UVH_NMI_MMR_SHIFT	63
-#define	UVH_NMI_MMR_TYPE	"SCRATCH5"
+#define UVH_NMI_MMR_TYPE	"SCRATCH5"
 
 /* Newer SMM NMI handler, not present in all systems */
 #define UVH_NMI_MMRX		UVH_EVENT_OCCURRED0
 #define UVH_NMI_MMRX_CLEAR	UVH_EVENT_OCCURRED0_ALIAS
 #define UVH_NMI_MMRX_SHIFT	UVH_EVENT_OCCURRED0_EXTIO_INT0_SHFT
-#define	UVH_NMI_MMRX_TYPE	"EXTIO_INT0"
+#define UVH_NMI_MMRX_TYPE	"EXTIO_INT0"
 
 /* Non-zero indicates newer SMM NMI handler present */
 #define UVH_NMI_MMRX_SUPPORTED	UVH_EXTIO_INT0_BROADCAST
 
 /* Indicates to BIOS that we want to use the newer SMM NMI handler */
-#define UVH_NMI_MMRX_REQ	UVH_SCRATCH5_ALIAS_2
+#define UVH_NMI_MMRX_REQ	UVH_BIOS_KERNEL_MMR_ALIAS_2
 #define UVH_NMI_MMRX_REQ_SHIFT	62
 
 struct uv_hub_nmi_s {
@@ -799,6 +774,8 @@ struct uv_hub_nmi_s {
 	atomic_t	read_mmr_count;	/* count of MMR reads */
 	atomic_t	nmi_count;	/* count of true UV NMIs */
 	unsigned long	nmi_value;	/* last value read from NMI MMR */
+	bool		hub_present;	/* false means UV hubless system */
+	bool		pch_owner;	/* indicates this hub owns PCH */
 };
 
 struct uv_cpu_nmi_s {
@@ -845,26 +822,6 @@ static inline void uv_set_cpu_scir_bits(int cpu, unsigned char value)
 }
 
 extern unsigned int uv_apicid_hibits;
-static unsigned long uv_hub_ipi_value(int apicid, int vector, int mode)
-{
-	apicid |= uv_apicid_hibits;
-	return (1UL << UVH_IPI_INT_SEND_SHFT) |
-			((apicid) << UVH_IPI_INT_APIC_ID_SHFT) |
-			(mode << UVH_IPI_INT_DELIVERY_MODE_SHFT) |
-			(vector << UVH_IPI_INT_VECTOR_SHFT);
-}
-
-static inline void uv_hub_send_ipi(int pnode, int apicid, int vector)
-{
-	unsigned long val;
-	unsigned long dmode = dest_Fixed;
-
-	if (vector == NMI_VECTOR)
-		dmode = dest_NMI;
-
-	val = uv_hub_ipi_value(apicid, vector, dmode);
-	uv_write_global_mmr64(pnode, UVH_IPI_INT, val);
-}
 
 /*
  * Get the minimum revision number of the hub chips within the partition.

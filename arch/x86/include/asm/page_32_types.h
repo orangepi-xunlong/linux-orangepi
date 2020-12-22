@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_PAGE_32_DEFS_H
 #define _ASM_X86_PAGE_32_DEFS_H
 
@@ -21,11 +22,9 @@
 #define THREAD_SIZE_ORDER	1
 #define THREAD_SIZE		(PAGE_SIZE << THREAD_SIZE_ORDER)
 
-#define DOUBLEFAULT_STACK 1
-#define NMI_STACK 0
-#define DEBUG_STACK 0
-#define MCE_STACK 0
-#define N_EXCEPTION_STACKS 1
+#define IRQ_STACK_SIZE		THREAD_SIZE
+
+#define N_EXCEPTION_STACKS	1
 
 #ifdef CONFIG_X86_PAE
 /*

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 1999 Niibe Yutaka
  * Copyright (C) 2003 - 2007 Paul Mundt
@@ -10,7 +11,9 @@
 #ifdef __KERNEL__
 #include <cpu/mmu_context.h>
 #include <asm/tlbflush.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
+#include <linux/mm_types.h>
+
 #include <asm/io.h>
 #include <asm-generic/mm_hooks.h>
 
@@ -45,11 +48,7 @@
  */
 #define MMU_VPN_MASK	0xfffff000
 
-#if defined(CONFIG_SUPERH32)
 #include <asm/mmu_context_32.h>
-#else
-#include <asm/mmu_context_64.h>
-#endif
 
 /*
  * Get MMU context if needed.
@@ -70,14 +69,6 @@ static inline void get_mmu_context(struct mm_struct *mm, unsigned int cpu)
 		 * Flush all TLB and start new cycle.
 		 */
 		local_flush_tlb_all();
-
-#ifdef CONFIG_SUPERH64
-		/*
-		 * The SH-5 cache uses the ASIDs, requiring both the I and D
-		 * cache to be flushed when the ASID is exhausted. Weak.
-		 */
-		flush_cache_all();
-#endif
 
 		/*
 		 * Fix version; Note that we avoid version #0

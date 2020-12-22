@@ -229,7 +229,7 @@ static int mmp_clk_mix_determine_rate(struct clk_hw *hw,
 			parent_rate = clk_hw_get_rate(parent);
 			mix_rate = parent_rate / item->divisor;
 			gap = abs(mix_rate - req->rate);
-			if (parent_best == NULL || gap < gap_best) {
+			if (!parent_best || gap < gap_best) {
 				parent_best = parent;
 				parent_rate_best = parent_rate;
 				mix_rate_best = mix_rate;
@@ -247,7 +247,7 @@ static int mmp_clk_mix_determine_rate(struct clk_hw *hw,
 				div = _get_div(mix, j);
 				mix_rate = parent_rate / div;
 				gap = abs(mix_rate - req->rate);
-				if (parent_best == NULL || gap < gap_best) {
+				if (!parent_best || gap < gap_best) {
 					parent_best = parent;
 					parent_rate_best = parent_rate;
 					mix_rate_best = mix_rate;
@@ -419,12 +419,14 @@ static int mmp_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 	}
 }
 
-static void mmp_clk_mix_init(struct clk_hw *hw)
+static int mmp_clk_mix_init(struct clk_hw *hw)
 {
 	struct mmp_clk_mix *mix = to_clk_mix(hw);
 
 	if (mix->table)
 		_filter_clk_table(mix, mix->table, mix->table_size);
+
+	return 0;
 }
 
 const struct clk_ops mmp_clk_mix_ops = {
@@ -439,7 +441,7 @@ const struct clk_ops mmp_clk_mix_ops = {
 
 struct clk *mmp_clk_register_mix(struct device *dev,
 					const char *name,
-					const char **parent_names,
+					const char * const *parent_names,
 					u8 num_parents,
 					unsigned long flags,
 					struct mmp_clk_mix_config *config,
@@ -451,11 +453,8 @@ struct clk *mmp_clk_register_mix(struct device *dev,
 	size_t table_bytes;
 
 	mix = kzalloc(sizeof(*mix), GFP_KERNEL);
-	if (!mix) {
-		pr_err("%s:%s: could not allocate mmp mix clk\n",
-			__func__, name);
+	if (!mix)
 		return ERR_PTR(-ENOMEM);
-	}
 
 	init.name = name;
 	init.flags = flags | CLK_GET_RATE_NOCACHE;
@@ -467,12 +466,9 @@ struct clk *mmp_clk_register_mix(struct device *dev,
 	if (config->table) {
 		table_bytes = sizeof(*config->table) * config->table_size;
 		mix->table = kmemdup(config->table, table_bytes, GFP_KERNEL);
-		if (!mix->table) {
-			pr_err("%s:%s: could not allocate mmp mix table\n",
-				__func__, name);
-			kfree(mix);
-			return ERR_PTR(-ENOMEM);
-		}
+		if (!mix->table)
+			goto free_mix;
+
 		mix->table_size = config->table_size;
 	}
 
@@ -481,11 +477,8 @@ struct clk *mmp_clk_register_mix(struct device *dev,
 		mix->mux_table = kmemdup(config->mux_table, table_bytes,
 					 GFP_KERNEL);
 		if (!mix->mux_table) {
-			pr_err("%s:%s: could not allocate mmp mix mux-table\n",
-				__func__, name);
 			kfree(mix->table);
-			kfree(mix);
-			return ERR_PTR(-ENOMEM);
+			goto free_mix;
 		}
 	}
 
@@ -509,4 +502,8 @@ struct clk *mmp_clk_register_mix(struct device *dev,
 	}
 
 	return clk;
+
+free_mix:
+	kfree(mix);
+	return ERR_PTR(-ENOMEM);
 }

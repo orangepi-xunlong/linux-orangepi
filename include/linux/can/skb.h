@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause) */
 /*
  * linux/can/skb.h
  *
@@ -33,7 +34,7 @@
 struct can_skb_priv {
 	int ifindex;
 	int skbcnt;
-	struct can_frame cf[0];
+	struct can_frame cf[];
 };
 
 static inline struct can_skb_priv *can_skb_prv(struct sk_buff *skb)

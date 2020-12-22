@@ -1,16 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * This file is based on code from OCTEON SDK by Cavium Networks.
  *
  * Copyright (c) 2003-2007 Cavium Networks
- *
- * This file is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, Version 2, as
- * published by the Free Software Foundation.
  */
-
-#include <asm/octeon/cvmx-pip.h>
-#include <asm/octeon/cvmx-helper.h>
-#include <asm/octeon/cvmx-helper-util.h>
 
 /**
  * cvm_oct_get_buffer_ptr - convert packet data address to pointer
@@ -39,7 +32,7 @@ static inline int INTERFACE(int ipd_port)
 	interface = cvmx_helper_get_interface_num(ipd_port);
 	if (interface >= 0)
 		return interface;
-	panic("Illegal ipd_port %d passed to INTERFACE\n", ipd_port);
+	panic("Illegal ipd_port %d passed to %s\n", ipd_port, __func__);
 }
 
 /**

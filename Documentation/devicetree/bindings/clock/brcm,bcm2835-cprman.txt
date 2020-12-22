@@ -12,11 +12,26 @@ clock generators, but a few (like the ARM or HDMI) will source from
 the PLL dividers directly.
 
 Required properties:
-- compatible:	Should be "brcm,bcm2835-cprman"
+- compatible:	should be one of the following,
+	"brcm,bcm2711-cprman"
+	"brcm,bcm2835-cprman"
 - #clock-cells:	Should be <1>. The permitted clock-specifier values can be
 		  found in include/dt-bindings/clock/bcm2835.h
 - reg:		Specifies base physical address and size of the registers
-- clocks:	The external oscillator clock phandle
+- clocks:	phandles to the parent clocks used as input to the module, in
+		  the following order:
+
+		  - External oscillator
+		  - DSI0 byte clock
+		  - DSI0 DDR2 clock
+		  - DSI0 DDR clock
+		  - DSI1 byte clock
+		  - DSI1 DDR2 clock
+		  - DSI1 DDR clock
+
+		  Only external oscillator is required.  The DSI clocks may
+		  not be present, in which case their children will be
+		  unusable.
 
 Example:
 

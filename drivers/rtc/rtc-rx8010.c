@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for the Epson RTC module RX-8010 SJ
  *
  * Copyright(C) Timesys Corporation 2015
  * Copyright(C) General Electric Company 2015
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/bcd.h>
@@ -24,7 +20,6 @@
 #define RX8010_MDAY    0x14
 #define RX8010_MONTH   0x15
 #define RX8010_YEAR    0x16
-#define RX8010_YEAR    0x16
 #define RX8010_RESV17  0x17
 #define RX8010_ALMIN   0x18
 #define RX8010_ALHOUR  0x19
@@ -36,7 +31,7 @@
 #define RX8010_CTRL    0x1F
 /* 0x20 to 0x2F are user registers */
 #define RX8010_RESV30  0x30
-#define RX8010_RESV31  0x32
+#define RX8010_RESV31  0x31
 #define RX8010_IRQ     0x32
 
 #define RX8010_EXT_WADA  BIT(3)
@@ -58,6 +53,12 @@ static const struct i2c_device_id rx8010_id[] = {
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, rx8010_id);
+
+static const struct of_device_id rx8010_of_match[] = {
+	{ .compatible = "epson,rx8010" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, rx8010_of_match);
 
 struct rx8010_data {
 	struct i2c_client *client;
@@ -133,7 +134,7 @@ static int rx8010_get_time(struct device *dev, struct rtc_time *dt)
 	dt->tm_year = bcd2bin(date[RX8010_YEAR - RX8010_SEC]) + 100;
 	dt->tm_wday = ffs(date[RX8010_WDAY - RX8010_SEC] & 0x7f);
 
-	return rtc_valid_tm(dt);
+	return 0;
 }
 
 static int rx8010_set_time(struct device *dev, struct rtc_time *dt)
@@ -242,7 +243,7 @@ static int rx8010_init_client(struct i2c_client *client)
 
 	rx8010->ctrlreg = (ctrl[1] & ~RX8010_CTRL_TEST);
 
-	return err;
+	return 0;
 }
 
 static int rx8010_read_alarm(struct device *dev, struct rtc_wkalrm *t)
@@ -271,7 +272,7 @@ static int rx8010_read_alarm(struct device *dev, struct rtc_wkalrm *t)
 	t->enabled = !!(rx8010->ctrlreg & RX8010_CTRL_AIE);
 	t->pending = (flagreg & RX8010_FLAG_AF) && t->enabled;
 
-	return err;
+	return 0;
 }
 
 static int rx8010_set_alarm(struct device *dev, struct rtc_wkalrm *t)
@@ -388,9 +389,8 @@ static int rx8010_alarm_irq_enable(struct device *dev,
 
 static int rx8010_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
 {
-	struct i2c_client *client = to_i2c_client(dev);
 	struct rx8010_data *rx8010 = dev_get_drvdata(dev);
-	int ret, tmp;
+	int tmp;
 	int flagreg;
 
 	switch (cmd) {
@@ -399,24 +399,8 @@ static int rx8010_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
 		if (flagreg < 0)
 			return flagreg;
 
-		tmp = !!(flagreg & RX8010_FLAG_VLF);
-		if (copy_to_user((void __user *)arg, &tmp, sizeof(int)))
-			return -EFAULT;
-
-		return 0;
-
-	case RTC_VL_CLR:
-		flagreg = i2c_smbus_read_byte_data(rx8010->client, RX8010_FLAG);
-		if (flagreg < 0) {
-			return flagreg;
-		}
-
-		flagreg &= ~RX8010_FLAG_VLF;
-		ret = i2c_smbus_write_byte_data(client, RX8010_FLAG, flagreg);
-		if (ret < 0)
-			return ret;
-
-		return 0;
+		tmp = flagreg & RX8010_FLAG_VLF ? RTC_VL_DATA_INVALID : 0;
+		return put_user(tmp, (unsigned int __user *)arg);
 
 	default:
 		return -ENOIOCTLCMD;
@@ -432,7 +416,7 @@ static struct rtc_class_ops rx8010_rtc_ops = {
 static int rx8010_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
-	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
+	struct i2c_adapter *adapter = client->adapter;
 	struct rx8010_data *rx8010;
 	int err = 0;
 
@@ -481,12 +465,13 @@ static int rx8010_probe(struct i2c_client *client,
 
 	rx8010->rtc->max_user_freq = 1;
 
-	return err;
+	return 0;
 }
 
 static struct i2c_driver rx8010_driver = {
 	.driver = {
 		.name = "rtc-rx8010",
+		.of_match_table = of_match_ptr(rx8010_of_match),
 	},
 	.probe		= rx8010_probe,
 	.id_table	= rx8010_id,

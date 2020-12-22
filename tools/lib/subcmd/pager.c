@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <sys/select.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -20,6 +21,13 @@ static int pager_columns;
 void pager_init(const char *pager_env)
 {
 	subcmd_config.pager_env = pager_env;
+}
+
+static const char *forced_pager;
+
+void force_pager(const char *pager)
+{
+	forced_pager = pager;
 }
 
 static void pager_preexec(void)
@@ -65,7 +73,9 @@ void setup_pager(void)
 	const char *pager = getenv(subcmd_config.pager_env);
 	struct winsize sz;
 
-	if (!isatty(1))
+	if (forced_pager)
+		pager = forced_pager;
+	if (!isatty(1) && !forced_pager)
 		return;
 	if (ioctl(1, TIOCGWINSZ, &sz) == 0)
 		pager_columns = sz.ws_col;

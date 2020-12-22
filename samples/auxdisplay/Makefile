@@ -1,9 +1,3 @@
-CC := $(CROSS_COMPILE)gcc
-CFLAGS := -I../../usr/include
-
-PROGS := cfag12864b-example
-
-all: $(PROGS)
-
-clean:
-	rm -fr $(PROGS)
+# SPDX-License-Identifier: GPL-2.0
+userprogs := cfag12864b-example
+always-y := $(userprogs)

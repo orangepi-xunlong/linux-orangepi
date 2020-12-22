@@ -1,15 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2010 Pengutronix
  * Uwe Kleine-Koenig <u.kleine-koenig@pengutronix.de>
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the
- * Free Software Foundation.
  */
 #include "devices-common.h"
 
 struct platform_device __init __maybe_unused *imx_add_imx_dma(char *name,
-	resource_size_t iobase, int irq, int irq_err)
+	resource_size_t iobase, int irq)
 {
 	struct resource res[] = {
 		{
@@ -19,10 +16,6 @@ struct platform_device __init __maybe_unused *imx_add_imx_dma(char *name,
 		}, {
 			.start = irq,
 			.end = irq,
-			.flags = IORESOURCE_IRQ,
-		}, {
-			.start = irq_err,
-			.end = irq_err,
 			.flags = IORESOURCE_IRQ,
 		},
 	};

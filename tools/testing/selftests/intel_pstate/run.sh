@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
 #
 # This test runs on Intel x86 based hardware which support the intel_pstate
 # driver.  The test checks the frequency settings from the maximum turbo
@@ -29,13 +30,21 @@
 
 EVALUATE_ONLY=0
 
-max_cpus=$(($(nproc)-1))
+# Kselftest framework requirement - SKIP code is 4.
+ksft_skip=4
 
-# compile programs
-gcc aperf.c -Wall -D_GNU_SOURCE -o aperf  -lm
-[ $? -ne 0 ] && echo "Problem compiling aperf.c." && exit 1
-gcc -o msr msr.c -lm
-[ $? -ne 0 ] && echo "Problem compiling msr.c." && exit 1
+if ! uname -m | sed -e s/i.86/x86/ -e s/x86_64/x86/ | grep -q x86; then
+	echo "$0 # Skipped: Test can only run on x86 architectures."
+	exit $ksft_skip
+fi
+
+msg="skip all tests:"
+if [ $UID != 0 ] && [ $EVALUATE_ONLY == 0 ]; then
+    echo $msg please run this as root >&2
+    exit $ksft_skip
+fi
+
+max_cpus=$(($(nproc)-1))
 
 function run_test () {
 
@@ -92,18 +101,28 @@ done
 
 [ $EVALUATE_ONLY -eq 0 ] && cpupower frequency-set -g powersave --max=${max_freq}MHz >& /dev/null
 
-echo "=============================================================================="
+echo "========================================================================"
 echo "The marketing frequency of the cpu is $mkt_freq MHz"
 echo "The maximum frequency of the cpu is $max_freq MHz"
 echo "The minimum frequency of the cpu is $min_freq MHz"
 
 # make a pretty table
-echo "Target      Actual      Difference     MSR(0x199)     max_perf_pct"
+echo "Target Actual Difference MSR(0x199) max_perf_pct" | tr " " "\n" > /tmp/result.tab
 for freq in `seq $max_freq -100 $min_freq`
 do
 	result_freq=$(cat /tmp/result.${freq} | grep "cpu MHz" | awk ' { print $4 } ' | awk -F "." ' { print $1 } ')
 	msr=$(cat /tmp/result.${freq} | grep "msr" | awk ' { print $3 } ')
 	max_perf_pct=$(cat /tmp/result.${freq} | grep "max_perf_pct" | awk ' { print $2 } ' )
-	echo " $freq        $result_freq          $(($result_freq-$freq))          $msr          $(($max_perf_pct*$max_freq))"
+	cat >> /tmp/result.tab << EOF
+$freq
+$result_freq
+$((result_freq - freq))
+$msr
+$((max_perf_pct * max_freq))
+EOF
 done
+
+# print the table
+pr -aTt -5 < /tmp/result.tab
+
 exit 0

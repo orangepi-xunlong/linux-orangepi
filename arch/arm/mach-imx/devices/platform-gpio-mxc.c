@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2011 Freescale Semiconductor, Inc. All Rights Reserved.
  * Copyright 2011 Linaro Limited
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the
- * Free Software Foundation.
  */
 #include "devices-common.h"
 #include "../common.h"
@@ -27,7 +24,8 @@ struct platform_device *__init mxc_register_gpio(char *name, int id,
 			.flags = IORESOURCE_IRQ,
 		},
 	};
+	unsigned int nres;
 
-	return platform_device_register_resndata(&mxc_aips_bus,
-			name, id, res, ARRAY_SIZE(res), NULL, 0);
+	nres = irq_high ? ARRAY_SIZE(res) : ARRAY_SIZE(res) - 1;
+	return platform_device_register_resndata(&mxc_aips_bus, name, id, res, nres, NULL, 0);
 }

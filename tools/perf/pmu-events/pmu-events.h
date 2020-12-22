@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef PMU_EVENTS_H
 #define PMU_EVENTS_H
 
@@ -10,6 +11,14 @@ struct pmu_event {
 	const char *desc;
 	const char *topic;
 	const char *long_desc;
+	const char *pmu;
+	const char *unit;
+	const char *perpkg;
+	const char *metric_expr;
+	const char *metric_name;
+	const char *metric_group;
+	const char *deprecated;
+	const char *metric_constraint;
 };
 
 /*
@@ -17,7 +26,7 @@ struct pmu_event {
  * Map a CPU to its table of PMU events. The CPU is identified by the
  * cpuid field, which is an arch-specific identifier for the CPU.
  * The identifier specified in tools/perf/pmu-events/arch/xxx/mapfile
- * must match the get_cpustr() in tools/perf/arch/xxx/util/header.c)
+ * must match the get_cpuid_str() in tools/perf/arch/xxx/util/header.c)
  *
  * The  cpuid can contain any character other than the comma.
  */

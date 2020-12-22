@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * mmu_audit.c:
  *
@@ -11,15 +12,11 @@
  *   Avi Kivity   <avi@qumranet.com>
  *   Marcelo Tosatti <mtosatti@redhat.com>
  *   Xiao Guangrong <xiaoguangrong@cn.fujitsu.com>
- *
- * This work is licensed under the terms of the GNU GPL, version 2.  See
- * the COPYING file in the top-level directory.
- *
  */
 
 #include <linux/ratelimit.h>
 
-char const *audit_point_name[] = {
+static char const *audit_point_name[] = {
 	"pre page fault",
 	"post page fault",
 	"pre pte write",
@@ -59,19 +56,19 @@ static void mmu_spte_walk(struct kvm_vcpu *vcpu, inspect_spte_fn fn)
 	int i;
 	struct kvm_mmu_page *sp;
 
-	if (!VALID_PAGE(vcpu->arch.mmu.root_hpa))
+	if (!VALID_PAGE(vcpu->arch.mmu->root_hpa))
 		return;
 
-	if (vcpu->arch.mmu.root_level == PT64_ROOT_LEVEL) {
-		hpa_t root = vcpu->arch.mmu.root_hpa;
+	if (vcpu->arch.mmu->root_level >= PT64_ROOT_4LEVEL) {
+		hpa_t root = vcpu->arch.mmu->root_hpa;
 
 		sp = page_header(root);
-		__mmu_spte_walk(vcpu, sp, fn, PT64_ROOT_LEVEL);
+		__mmu_spte_walk(vcpu, sp, fn, vcpu->arch.mmu->root_level);
 		return;
 	}
 
 	for (i = 0; i < 4; ++i) {
-		hpa_t root = vcpu->arch.mmu.pae_root[i];
+		hpa_t root = vcpu->arch.mmu->pae_root[i];
 
 		if (root && VALID_PAGE(root)) {
 			root &= PT64_BASE_ADDR_MASK;
@@ -103,7 +100,7 @@ static void audit_mappings(struct kvm_vcpu *vcpu, u64 *sptep, int level)
 	sp = page_header(__pa(sptep));
 
 	if (sp->unsync) {
-		if (level != PT_PAGE_TABLE_LEVEL) {
+		if (level != PG_LEVEL_4K) {
 			audit_printk(vcpu->kvm, "unsync sp: %p "
 				     "level = %d\n", sp, level);
 			return;
@@ -122,7 +119,7 @@ static void audit_mappings(struct kvm_vcpu *vcpu, u64 *sptep, int level)
 	hpa =  pfn << PAGE_SHIFT;
 	if ((*sptep & PT64_BASE_ADDR_MASK) != hpa)
 		audit_printk(vcpu->kvm, "levels %d pfn %llx hpa %llx "
-			     "ent %llxn", vcpu->arch.mmu.root_level, pfn,
+			     "ent %llxn", vcpu->arch.mmu->root_level, pfn,
 			     hpa, *sptep);
 }
 
@@ -179,7 +176,7 @@ static void check_mappings_rmap(struct kvm *kvm, struct kvm_mmu_page *sp)
 {
 	int i;
 
-	if (sp->role.level != PT_PAGE_TABLE_LEVEL)
+	if (sp->role.level != PG_LEVEL_4K)
 		return;
 
 	for (i = 0; i < PT64_ENT_PER_PAGE; ++i) {
@@ -203,7 +200,7 @@ static void audit_write_protection(struct kvm *kvm, struct kvm_mmu_page *sp)
 
 	slots = kvm_memslots_for_spte_role(kvm, sp->role);
 	slot = __gfn_to_memslot(slots, sp->gfn);
-	rmap_head = __gfn_to_rmap(sp->gfn, PT_PAGE_TABLE_LEVEL, slot);
+	rmap_head = __gfn_to_rmap(sp->gfn, PG_LEVEL_4K, slot);
 
 	for_each_rmap_spte(rmap_head, &iter, sptep) {
 		if (is_writable_pte(*sptep))

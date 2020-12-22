@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Amit Bhor, Kanika Nema: Codito Technologies 2004
  */
@@ -11,6 +8,9 @@
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/sched/task.h>
+#include <linux/sched/task_stack.h>
+
 #include <linux/mm.h>
 #include <linux/fs.h>
 #include <linux/unistd.h>
@@ -19,6 +19,8 @@
 #include <linux/syscalls.h>
 #include <linux/elf.h>
 #include <linux/tick.h>
+
+#include <asm/fpu.h>
 
 SYSCALL_DEFINE1(arc_settls, void *, user_tls_data_ptr)
 {
@@ -58,7 +60,7 @@ SYSCALL_DEFINE3(arc_usr_cmpxchg, int *, uaddr, int, expected, int, new)
 	/* Z indicates to userspace if operation succeded */
 	regs->status32 &= ~STATUS_Z_MASK;
 
-	ret = access_ok(VERIFY_WRITE, uaddr, sizeof(*uaddr));
+	ret = access_ok(uaddr, sizeof(*uaddr));
 	if (!ret)
 		 goto fail;
 
@@ -88,27 +90,52 @@ fault:
 	if (unlikely(ret != -EFAULT))
 		 goto fail;
 
-	down_read(&current->mm->mmap_sem);
+	mmap_read_lock(current->mm);
 	ret = fixup_user_fault(current, current->mm, (unsigned long) uaddr,
 			       FAULT_FLAG_WRITE, NULL);
-	up_read(&current->mm->mmap_sem);
+	mmap_read_unlock(current->mm);
 
 	if (likely(!ret))
 		 goto again;
 
 fail:
-	force_sig(SIGSEGV, current);
+	force_sig(SIGSEGV);
 	return ret;
 }
 
+#ifdef CONFIG_ISA_ARCV2
+
 void arch_cpu_idle(void)
 {
-	/* sleep, but enable all interrupts before committing */
+	/* Re-enable interrupts <= default irq priority before commiting SLEEP */
+	const unsigned int arg = 0x10 | ARCV2_IRQ_DEF_PRIO;
+
 	__asm__ __volatile__(
 		"sleep %0	\n"
 		:
-		:"I"(ISA_SLEEP_ARG)); /* can't be "r" has to be embedded const */
+		:"I"(arg)); /* can't be "r" has to be embedded const */
 }
+
+#elif defined(CONFIG_EZNPS_MTM_EXT)	/* ARC700 variant in NPS */
+
+void arch_cpu_idle(void)
+{
+	/* only the calling HW thread needs to sleep */
+	__asm__ __volatile__(
+		".word %0	\n"
+		:
+		:"i"(CTOP_INST_HWSCHD_WFT_IE12));
+}
+
+#else	/* ARC700 */
+
+void arch_cpu_idle(void)
+{
+	/* sleep, but enable both set E1/E2 (levels of interrutps) before committing */
+	__asm__ __volatile__("sleep 0x3	\n");
+}
+
+#endif
 
 asmlinkage void ret_from_fork(void);
 
@@ -146,9 +173,8 @@ asmlinkage void ret_from_fork(void);
  * |    user_r25    |
  * ------------------  <===== END of PAGE
  */
-int copy_thread(unsigned long clone_flags,
-		unsigned long usp, unsigned long kthread_arg,
-		struct task_struct *p)
+int copy_thread_tls(unsigned long clone_flags, unsigned long usp,
+	unsigned long kthread_arg, struct task_struct *p, unsigned long tls)
 {
 	struct pt_regs *c_regs;        /* child's pt_regs */
 	unsigned long *childksp;       /* to unwind out of __switch_to() */
@@ -206,7 +232,7 @@ int copy_thread(unsigned long clone_flags,
 		 * set task's userland tls data ptr from 4th arg
 		 * clone C-lib call is difft from clone sys-call
 		 */
-		task_thread_info(p)->thr_ptr = regs->r3;
+		task_thread_info(p)->thr_ptr = tls;
 	} else {
 		/* Normal fork case: set parent's TLS ptr in child */
 		task_thread_info(p)->thr_ptr =
@@ -239,7 +265,7 @@ int copy_thread(unsigned long clone_flags,
 /*
  * Do necessary setup to start up a new user task
  */
-void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long usp)
+void start_thread(struct pt_regs *regs, unsigned long pc, unsigned long usp)
 {
 	regs->sp = usp;
 	regs->ret = pc;
@@ -250,6 +276,12 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long usp)
 	 * Interrupts enabled
 	 */
 	regs->status32 = STATUS_U_MASK | STATUS_L_MASK | ISA_INIT_STATUS_BITS;
+
+#ifdef CONFIG_EZNPS_MTM_EXT
+	regs->eflags = 0;
+#endif
+
+	fpu_init_task(regs);
 
 	/* bogus seed values for debugging */
 	regs->lp_start = 0x10;
@@ -281,7 +313,7 @@ int elf_check_arch(const struct elf32_hdr *x)
 	eflags = x->e_flags;
 	if ((eflags & EF_ARC_OSABI_MSK) != EF_ARC_OSABI_CURRENT) {
 		pr_err("ABI mismatch - you need newer toolchain\n");
-		force_sigsegv(SIGSEGV, current);
+		force_sigsegv(SIGSEGV);
 		return 0;
 	}
 

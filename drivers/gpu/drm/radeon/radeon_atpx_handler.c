@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2010 Red Hat Inc.
  * Author : Dave Airlie <airlied@redhat.com>
- *
- * Licensed under GPLv2
  *
  * ATPX support for both Intel/ATI
  */
@@ -526,7 +525,7 @@ static int radeon_atpx_init(void)
  * look up whether we are the integrated or discrete GPU (all asics).
  * Returns the client id.
  */
-static int radeon_atpx_get_client_id(struct pci_dev *pdev)
+static enum vga_switcheroo_client_id radeon_atpx_get_client_id(struct pci_dev *pdev)
 {
 	if (radeon_atpx_priv.dhandle == ACPI_HANDLE(&pdev->dev))
 		return VGA_SWITCHEROO_IGD;
@@ -577,8 +576,8 @@ static bool radeon_atpx_detect(void)
 
 	if (has_atpx && vga_count == 2) {
 		acpi_get_name(radeon_atpx_priv.atpx.handle, ACPI_FULL_PATHNAME, &buffer);
-		printk(KERN_INFO "vga_switcheroo: detected switching method %s handle\n",
-		       acpi_method_name);
+		pr_info("vga_switcheroo: detected switching method %s handle\n",
+			acpi_method_name);
 		radeon_atpx_priv.atpx_detected = true;
 		radeon_atpx_priv.bridge_pm_usable = d3_supported;
 		radeon_atpx_init();
