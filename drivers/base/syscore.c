@@ -9,9 +9,7 @@
 #include <linux/syscore_ops.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
-#include <linux/suspend.h>
-#include <trace/events/power.h>
-#include <linux/wakeup_reason.h>
+#include <linux/interrupt.h>
 
 static LIST_HEAD(syscore_ops_list);
 static DEFINE_MUTEX(syscore_ops_lock);
@@ -51,12 +49,12 @@ int syscore_suspend(void)
 	struct syscore_ops *ops;
 	int ret = 0;
 
-	trace_suspend_resume(TPS("syscore_suspend"), 0, true);
 	pr_debug("Checking wakeup interrupts\n");
 
 	/* Return error code if there are any wakeup interrupts pending. */
-	if (pm_wakeup_pending())
-		return -EBUSY;
+	ret = check_wakeup_irqs();
+	if (ret)
+		return ret;
 
 	WARN_ONCE(!irqs_disabled(),
 		"Interrupts enabled before system core suspend.\n");
@@ -72,12 +70,9 @@ int syscore_suspend(void)
 				"Interrupts enabled after %pF\n", ops->suspend);
 		}
 
-	trace_suspend_resume(TPS("syscore_suspend"), 0, false);
 	return 0;
 
  err_out:
-	log_suspend_abort_reason("System core suspend callback %pF failed",
-		ops->suspend);
 	pr_err("PM: System core suspend callback %pF failed.\n", ops->suspend);
 
 	list_for_each_entry_continue(ops, &syscore_ops_list, node)
@@ -97,7 +92,6 @@ void syscore_resume(void)
 {
 	struct syscore_ops *ops;
 
-	trace_suspend_resume(TPS("syscore_resume"), 0, true);
 	WARN_ONCE(!irqs_disabled(),
 		"Interrupts enabled before system core resume.\n");
 
@@ -109,7 +103,6 @@ void syscore_resume(void)
 			WARN_ONCE(!irqs_disabled(),
 				"Interrupts enabled after %pF\n", ops->resume);
 		}
-	trace_suspend_resume(TPS("syscore_resume"), 0, false);
 }
 EXPORT_SYMBOL_GPL(syscore_resume);
 #endif /* CONFIG_PM_SLEEP */

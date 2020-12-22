@@ -7,82 +7,8 @@
  *      2 of the License, or (at your option) any later version.
  */
 #include <linux/string.h>
-#include <asm/udbg.h>
 #include <asm/time.h>
 #include "nonstdio.h"
-
-static bool paginating, paginate_skipping;
-static unsigned long paginate_lpp; /* Lines Per Page */
-static unsigned long paginate_pos;
-
-void xmon_start_pagination(void)
-{
-	paginating = true;
-	paginate_skipping = false;
-	paginate_pos = 0;
-}
-
-void xmon_end_pagination(void)
-{
-	paginating = false;
-}
-
-void xmon_set_pagination_lpp(unsigned long lpp)
-{
-	paginate_lpp = lpp;
-}
-
-static int xmon_readchar(void)
-{
-	if (udbg_getc)
-		return udbg_getc();
-	return -1;
-}
-
-static int xmon_write(const char *ptr, int nb)
-{
-	int rv = 0;
-	const char *p = ptr, *q;
-	const char msg[] = "[Hit a key (a:all, q:truncate, any:next page)]";
-
-	if (nb <= 0)
-		return rv;
-
-	if (paginating && paginate_skipping)
-		return nb;
-
-	if (paginate_lpp) {
-		while (paginating && (q = strchr(p, '\n'))) {
-			rv += udbg_write(p, q - p + 1);
-			p = q + 1;
-			paginate_pos++;
-
-			if (paginate_pos >= paginate_lpp) {
-				udbg_write(msg, strlen(msg));
-
-				switch (xmon_readchar()) {
-				case 'a':
-					paginating = false;
-					break;
-				case 'q':
-					paginate_skipping = true;
-					break;
-				default:
-					/* nothing */
-					break;
-				}
-
-				paginate_pos = 0;
-				udbg_write("\r\n", 2);
-
-				if (paginate_skipping)
-					return nb;
-			}
-		}
-	}
-
-	return rv + udbg_write(p, nb - (p - ptr));
-}
 
 int xmon_putchar(int c)
 {
@@ -97,7 +23,34 @@ static char line[256];
 static char *lineptr;
 static int lineleft;
 
-static int xmon_getchar(void)
+int xmon_expect(const char *str, unsigned long timeout)
+{
+	int c;
+	unsigned long t0;
+
+	/* assume 25MHz default timebase if tb_ticks_per_sec not set yet */
+	timeout *= tb_ticks_per_sec? tb_ticks_per_sec: 25000000;
+	t0 = get_tbl();
+	do {
+		lineptr = line;
+		for (;;) {
+			c = xmon_read_poll();
+			if (c == -1) {
+				if (get_tbl() - t0 > timeout)
+					return 0;
+				continue;
+			}
+			if (c == '\n')
+				break;
+			if (c != '\r' && lineptr < &line[sizeof(line) - 1])
+				*lineptr++ = c;
+		}
+		*lineptr = 0;
+	} while (strstr(line, str) == NULL);
+	return 1;
+}
+
+int xmon_getchar(void)
 {
 	int c;
 
@@ -171,19 +124,13 @@ char *xmon_gets(char *str, int nb)
 void xmon_printf(const char *format, ...)
 {
 	va_list args;
+	int n;
 	static char xmon_outbuf[1024];
-	int rc, n;
 
 	va_start(args, format);
 	n = vsnprintf(xmon_outbuf, sizeof(xmon_outbuf), format, args);
 	va_end(args);
-
-	rc = xmon_write(xmon_outbuf, n);
-
-	if (n && rc == 0) {
-		/* No udbg hooks, fallback to printk() - dangerous */
-		printk("%s", xmon_outbuf);
-	}
+	xmon_write(xmon_outbuf, n);
 }
 
 void xmon_puts(const char *str)

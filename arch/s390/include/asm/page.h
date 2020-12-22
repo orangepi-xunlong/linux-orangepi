@@ -1,6 +1,8 @@
 /*
+ *  include/asm-s390/page.h
+ *
  *  S390 version
- *    Copyright IBM Corp. 1999, 2000
+ *    Copyright (C) 1999,2000 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Hartmut Penner (hp@de.ibm.com)
  */
 
@@ -21,7 +23,6 @@
 #define HPAGE_SIZE	(1UL << HPAGE_SHIFT)
 #define HPAGE_MASK	(~(HPAGE_SIZE - 1))
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
-#define HUGE_MAX_HSTATE		2
 
 #define ARCH_HAS_SETCLEAR_HUGE_PTE
 #define ARCH_HAS_HUGE_PTE_TYPE
@@ -31,31 +32,50 @@
 #include <asm/setup.h>
 #ifndef __ASSEMBLY__
 
-void __storage_key_init_range(unsigned long start, unsigned long end);
-
-static inline void storage_key_init_range(unsigned long start, unsigned long end)
+static inline void clear_page(void *page)
 {
-	if (PAGE_DEFAULT_KEY)
-		__storage_key_init_range(start, end);
+	if (MACHINE_HAS_PFMF) {
+		asm volatile(
+			"	.insn	rre,0xb9af0000,%0,%1"
+			: : "d" (0x10000), "a" (page) : "memory", "cc");
+	} else {
+		register unsigned long reg1 asm ("1") = 0;
+		register void *reg2 asm ("2") = page;
+		register unsigned long reg3 asm ("3") = 4096;
+		asm volatile(
+			"	mvcl	2,0"
+			: "+d" (reg2), "+d" (reg3) : "d" (reg1)
+			: "memory", "cc");
+	}
 }
 
-#define clear_page(page)	memset((page), 0, PAGE_SIZE)
-
-/*
- * copy_page uses the mvcl instruction with 0xb0 padding byte in order to
- * bypass caches when copying a page. Especially when copying huge pages
- * this keeps L1 and L2 data caches alive.
- */
 static inline void copy_page(void *to, void *from)
 {
-	register void *reg2 asm ("2") = to;
-	register unsigned long reg3 asm ("3") = 0x1000;
-	register void *reg4 asm ("4") = from;
-	register unsigned long reg5 asm ("5") = 0xb0001000;
-	asm volatile(
-		"	mvcl	2,4"
-		: "+d" (reg2), "+d" (reg3), "+d" (reg4), "+d" (reg5)
-		: : "memory", "cc");
+	if (MACHINE_HAS_MVPG) {
+		register unsigned long reg0 asm ("0") = 0;
+		asm volatile(
+			"	mvpg	%0,%1"
+			: : "a" (to), "a" (from), "d" (reg0)
+			: "memory", "cc");
+	} else
+		asm volatile(
+			"	mvc	0(256,%0),0(%1)\n"
+			"	mvc	256(256,%0),256(%1)\n"
+			"	mvc	512(256,%0),512(%1)\n"
+			"	mvc	768(256,%0),768(%1)\n"
+			"	mvc	1024(256,%0),1024(%1)\n"
+			"	mvc	1280(256,%0),1280(%1)\n"
+			"	mvc	1536(256,%0),1536(%1)\n"
+			"	mvc	1792(256,%0),1792(%1)\n"
+			"	mvc	2048(256,%0),2048(%1)\n"
+			"	mvc	2304(256,%0),2304(%1)\n"
+			"	mvc	2560(256,%0),2560(%1)\n"
+			"	mvc	2816(256,%0),2816(%1)\n"
+			"	mvc	3072(256,%0),3072(%1)\n"
+			"	mvc	3328(256,%0),3328(%1)\n"
+			"	mvc	3584(256,%0),3584(%1)\n"
+			"	mvc	3840(256,%0),3840(%1)\n"
+			: : "a" (to), "a" (from) : "memory");
 }
 
 #define clear_user_page(page, vaddr, pg)	clear_page(page)
@@ -111,14 +131,13 @@ static inline unsigned char page_get_storage_key(unsigned long addr)
 
 static inline int page_reset_referenced(unsigned long addr)
 {
-	int cc;
+	unsigned int ipm;
 
 	asm volatile(
 		"	rrbe	0,%1\n"
 		"	ipm	%0\n"
-		"	srl	%0,28\n"
-		: "=d" (cc) : "a" (addr) : "cc");
-	return cc;
+		: "=d" (ipm) : "a" (addr) : "cc");
+	return !!(ipm & 0x20000000);
 }
 
 /* Bits int the storage key */
@@ -126,6 +145,34 @@ static inline int page_reset_referenced(unsigned long addr)
 #define _PAGE_REFERENCED	0x04	/* HW referenced bit		*/
 #define _PAGE_FP_BIT		0x08	/* HW fetch protection bit	*/
 #define _PAGE_ACC_BITS		0xf0	/* HW access control bits	*/
+
+/*
+ * Test and clear dirty bit in storage key.
+ * We can't clear the changed bit atomically. This is a potential
+ * race against modification of the referenced bit. This function
+ * should therefore only be called if it is not mapped in any
+ * address space.
+ */
+#define __HAVE_ARCH_PAGE_TEST_AND_CLEAR_DIRTY
+static inline int page_test_and_clear_dirty(unsigned long pfn, int mapped)
+{
+	unsigned char skey;
+
+	skey = page_get_storage_key(pfn << PAGE_SHIFT);
+	if (!(skey & _PAGE_CHANGED))
+		return 0;
+	page_set_storage_key(pfn << PAGE_SHIFT, skey & ~_PAGE_CHANGED, mapped);
+	return 1;
+}
+
+/*
+ * Test and clear referenced bit in storage key.
+ */
+#define __HAVE_ARCH_PAGE_TEST_AND_CLEAR_YOUNG
+static inline int page_test_and_clear_young(unsigned long pfn)
+{
+	return page_reset_referenced(pfn << PAGE_SHIFT);
+}
 
 struct page;
 void arch_free_page(struct page *page, int order);
@@ -149,13 +196,13 @@ static inline int devmem_is_allowed(unsigned long pfn)
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 #define page_to_phys(page)	(page_to_pfn(page) << PAGE_SHIFT)
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
-#define pfn_to_virt(pfn)	__va((pfn) << PAGE_SHIFT)
-#define page_to_virt(page)	pfn_to_virt(page_to_pfn(page))
 
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
+
+#define __HAVE_ARCH_GATE_AREA 1
 
 #endif /* _S390_PAGE_H */

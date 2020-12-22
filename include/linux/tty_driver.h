@@ -7,7 +7,7 @@
  * defined; unless noted otherwise, they are optional, and can be
  * filled in with a null pointer.
  *
- * struct tty_struct * (*lookup)(struct tty_driver *self, struct file *, int idx)
+ * struct tty_struct * (*lookup)(struct tty_driver *self, int idx)
  *
  *	Return the tty device corresponding to idx, NULL if there is not
  *	one currently in use and an ERR_PTR value on error. Called under
@@ -35,20 +35,24 @@
  * 	This routine is mandatory; if this routine is not filled in,
  * 	the attempted open will fail with ENODEV.
  *
- *	Required method. Called with tty lock held.
- *
+ *	Required method.
+ *     
  * void (*close)(struct tty_struct * tty, struct file * filp);
  *
  * 	This routine is called when a particular tty device is closed.
- *	Note: called even if the corresponding open() failed.
  *
- *	Required method. Called with tty lock held.
+ *	Required method.
  *
  * void (*shutdown)(struct tty_struct * tty);
  *
- * 	This routine is called under the tty lock when a particular tty device
- *	is closed for the last time. It executes before the tty resources
- *	are freed so may execute while another function holds a tty kref.
+ * 	This routine is called synchronously when a particular tty device
+ *	is closed for the last time freeing up the resources.
+ *	Note that tty_shutdown() is not called if ops->shutdown is defined.
+ *	This means one is responsible to take care of calling ops->remove (e.g.
+ *	via tty_driver_remove_tty) and releasing tty->termios.
+ *	Note that this hook may be called from *all* the contexts where one
+ *	uses tty refcounting (e.g. tty_port_tty_get).
+ *
  *
  * void (*cleanup)(struct tty_struct * tty);
  *
@@ -152,8 +156,6 @@
  * 	This routine notifies the tty driver that it should stop
  * 	outputting characters to the tty device.  
  *
- *	Called with ->flow_lock held. Serialized with start() method.
- *
  *	Optional:
  *
  *	Note: Call stop_tty not this method.
@@ -162,8 +164,6 @@
  *
  * 	This routine notifies the tty driver that it resume sending
  *	characters to the tty device.
- *
- *	Called with ->flow_lock held. Serialized with stop() method.
  *
  *	Optional:
  *
@@ -175,8 +175,6 @@
  * 	tty device.
  *
  *	Optional:
- *
- *	Called with tty lock held.
  *
  * int (*break_ctl)(struct tty_struct *tty, int state);
  *
@@ -250,7 +248,7 @@ struct serial_icounter_struct;
 
 struct tty_operations {
 	struct tty_struct * (*lookup)(struct tty_driver *driver,
-			struct file *filp, int idx);
+			struct inode *inode, int idx);
 	int  (*install)(struct tty_driver *driver, struct tty_struct *tty);
 	void (*remove)(struct tty_driver *driver, struct tty_struct *tty);
 	int  (*open)(struct tty_struct * tty, struct file * filp);
@@ -296,18 +294,18 @@ struct tty_operations {
 struct tty_driver {
 	int	magic;		/* magic number for this structure */
 	struct kref kref;	/* Reference management */
-	struct cdev **cdevs;
+	struct cdev cdev;
 	struct module	*owner;
 	const char	*driver_name;
 	const char	*name;
 	int	name_base;	/* offset of printed name */
 	int	major;		/* major device number */
 	int	minor_start;	/* start of minor device number */
-	unsigned int	num;	/* number of devices allocated */
+	int	num;		/* number of devices allocated */
 	short	type;		/* type of tty driver */
 	short	subtype;	/* subtype of tty driver */
 	struct ktermios init_termios; /* Initial termios */
-	unsigned long	flags;		/* tty driver flags */
+	int	flags;		/* tty driver flags */
 	struct proc_dir_entry *proc_entry; /* /proc fs entry */
 	struct tty_driver *other; /* only used for the PTY driver */
 
@@ -315,7 +313,6 @@ struct tty_driver {
 	 * Pointer to the tty data structures
 	 */
 	struct tty_struct **ttys;
-	struct tty_port **ports;
 	struct ktermios **termios;
 	void *driver_state;
 
@@ -329,8 +326,7 @@ struct tty_driver {
 
 extern struct list_head tty_drivers;
 
-extern struct tty_driver *__tty_alloc_driver(unsigned int lines,
-		struct module *owner, unsigned long flags);
+extern struct tty_driver *__alloc_tty_driver(int lines, struct module *owner);
 extern void put_tty_driver(struct tty_driver *driver);
 extern void tty_set_operations(struct tty_driver *driver,
 			const struct tty_operations *op);
@@ -338,21 +334,7 @@ extern struct tty_driver *tty_find_polling_driver(char *name, int *line);
 
 extern void tty_driver_kref_put(struct tty_driver *driver);
 
-/* Use TTY_DRIVER_* flags below */
-#define tty_alloc_driver(lines, flags) \
-		__tty_alloc_driver(lines, THIS_MODULE, flags)
-
-/*
- * DEPRECATED Do not use this in new code, use tty_alloc_driver instead.
- * (And change the return value checks.)
- */
-static inline struct tty_driver *alloc_tty_driver(unsigned int lines)
-{
-	struct tty_driver *ret = tty_alloc_driver(lines, 0);
-	if (IS_ERR(ret))
-		return NULL;
-	return ret;
-}
+#define alloc_tty_driver(lines) __alloc_tty_driver(lines, THIS_MODULE)
 
 static inline struct tty_driver *tty_driver_kref_get(struct tty_driver *d)
 {
@@ -398,14 +380,6 @@ static inline struct tty_driver *tty_driver_kref_get(struct tty_driver *d)
  *	the requested timeout to the caller instead of using a simple
  *	on/off interface.
  *
- * TTY_DRIVER_DYNAMIC_ALLOC -- do not allocate structures which are
- *	needed per line for this driver as it would waste memory.
- *	The driver will take care.
- *
- * TTY_DRIVER_UNNUMBERED_NODE -- do not create numbered /dev nodes. In
- *	other words create /dev/ttyprintk and not /dev/ttyprintk0.
- *	Applicable only when a driver for a single tty device is
- *	being allocated.
  */
 #define TTY_DRIVER_INSTALLED		0x0001
 #define TTY_DRIVER_RESET_TERMIOS	0x0002
@@ -413,8 +387,6 @@ static inline struct tty_driver *tty_driver_kref_get(struct tty_driver *d)
 #define TTY_DRIVER_DYNAMIC_DEV		0x0008
 #define TTY_DRIVER_DEVPTS_MEM		0x0010
 #define TTY_DRIVER_HARDWARE_BREAK	0x0020
-#define TTY_DRIVER_DYNAMIC_ALLOC	0x0040
-#define TTY_DRIVER_UNNUMBERED_NODE	0x0080
 
 /* tty driver types */
 #define TTY_DRIVER_TYPE_SYSTEM		0x0001

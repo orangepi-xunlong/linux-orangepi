@@ -1,0 +1,11 @@
+#
+# sunxi arisc test configuration.
+#
+
+config SUNXI_ARISC_TEST
+	tristate "sunxi arisc test driver"
+	default m
+	help
+	Nothing help.
+
+	

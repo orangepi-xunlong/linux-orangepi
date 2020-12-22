@@ -55,10 +55,11 @@ unsigned long __xchg8(char x, char *ptr)
 }
 
 
-u64 __cmpxchg_u64(volatile u64 *ptr, u64 old, u64 new)
+#ifdef CONFIG_64BIT
+unsigned long __cmpxchg_u64(volatile unsigned long *ptr, unsigned long old, unsigned long new)
 {
 	unsigned long flags;
-	u64 prev;
+	unsigned long prev;
 
 	_atomic_spin_lock_irqsave(ptr, flags);
 	if ((prev = *ptr) == old)
@@ -66,6 +67,7 @@ u64 __cmpxchg_u64(volatile u64 *ptr, u64 old, u64 new)
 	_atomic_spin_unlock_irqrestore(ptr, flags);
 	return prev;
 }
+#endif
 
 unsigned long __cmpxchg_u32(volatile unsigned int *ptr, unsigned int old, unsigned int new)
 {

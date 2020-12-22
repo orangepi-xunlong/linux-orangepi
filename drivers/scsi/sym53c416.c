@@ -581,7 +581,7 @@ static int sym53c416_test(int base)
 }
 
 
-static struct isapnp_device_id id_table[] = {
+static struct isapnp_device_id id_table[] __devinitdata = {
 	{	ISAPNP_ANY_ID, ISAPNP_ANY_ID,
 		ISAPNP_VENDOR('S','L','I'), ISAPNP_FUNCTION(0x4161), 0 },
 	{	ISAPNP_ANY_ID, ISAPNP_ANY_ID,
@@ -838,6 +838,7 @@ static struct scsi_host_template driver_template = {
 	.can_queue =		1,
 	.this_id =		SYM53C416_SCSI_ID,
 	.sg_tablesize =		32,
+	.cmd_per_lun =		1,
 	.unchecked_isa_dma =	1,
 	.use_clustering =	ENABLE_CLUSTERING,
 };

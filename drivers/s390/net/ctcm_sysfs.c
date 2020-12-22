@@ -1,4 +1,6 @@
 /*
+ * drivers/s390/net/ctcm_sysfs.c
+ *
  * Copyright IBM Corp. 2007, 2007
  * Authors:	Peter Tiedemann (ptiedem@de.ibm.com)
  *
@@ -11,7 +13,6 @@
 #define KMSG_COMPONENT "ctcm"
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
-#include <linux/device.h>
 #include <linux/sysfs.h>
 #include <linux/slab.h>
 #include "ctcm_main.h"
@@ -34,9 +35,8 @@ static ssize_t ctcm_buffer_write(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct net_device *ndev;
-	unsigned int bs1;
+	int bs1;
 	struct ctcm_priv *priv = dev_get_drvdata(dev);
-	int rc;
 
 	ndev = priv->channel[CTCM_READ]->netdev;
 	if (!(priv && priv->channel[CTCM_READ] && ndev)) {
@@ -44,9 +44,7 @@ static ssize_t ctcm_buffer_write(struct device *dev,
 		return -ENODEV;
 	}
 
-	rc = kstrtouint(buf, 0, &bs1);
-	if (rc)
-		goto einval;
+	sscanf(buf, "%u", &bs1);
 	if (bs1 > CTCM_BUFSIZE_LIMIT)
 					goto einval;
 	if (bs1 < (576 + LL_HEADER_LENGTH + 2))
@@ -100,8 +98,8 @@ static void ctcm_print_statistics(struct ctcm_priv *priv)
 		     priv->channel[WRITE]->prof.doios_multi);
 	p += sprintf(p, "  Netto bytes written: %ld\n",
 		     priv->channel[WRITE]->prof.txlen);
-	p += sprintf(p, "  Max. TX IO-time: %u\n",
-		     jiffies_to_usecs(priv->channel[WRITE]->prof.tx_time));
+	p += sprintf(p, "  Max. TX IO-time: %ld\n",
+		     priv->channel[WRITE]->prof.tx_time);
 
 	printk(KERN_INFO "Statistics for %s:\n%s",
 				priv->channel[CTCM_WRITE]->netdev->name, sbuf);
@@ -110,12 +108,10 @@ static void ctcm_print_statistics(struct ctcm_priv *priv)
 }
 
 static ssize_t stats_show(struct device *dev,
-			  struct device_attribute *attr, char *buf)
+				struct device_attribute *attr, char *buf)
 {
-	struct ccwgroup_device *gdev = to_ccwgroupdev(dev);
 	struct ctcm_priv *priv = dev_get_drvdata(dev);
-
-	if (!priv || gdev->state != CCWGROUP_ONLINE)
+	if (!priv)
 		return -ENODEV;
 	ctcm_print_statistics(priv);
 	return sprintf(buf, "0\n");
@@ -146,14 +142,13 @@ static ssize_t ctcm_proto_show(struct device *dev,
 static ssize_t ctcm_proto_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	int value, rc;
+	int value;
 	struct ctcm_priv *priv = dev_get_drvdata(dev);
 
 	if (!priv)
 		return -ENODEV;
-	rc = kstrtoint(buf, 0, &value);
-	if (rc ||
-	    !((value == CTCM_PROTO_S390)  ||
+	sscanf(buf, "%u", &value);
+	if (!((value == CTCM_PROTO_S390)  ||
 	      (value == CTCM_PROTO_LINUX) ||
 	      (value == CTCM_PROTO_MPC) ||
 	      (value == CTCM_PROTO_OS390)))
@@ -195,14 +190,34 @@ static struct attribute *ctcm_attr[] = {
 	&dev_attr_protocol.attr,
 	&dev_attr_type.attr,
 	&dev_attr_buffer.attr,
-	&dev_attr_stats.attr,
 	NULL,
 };
 
 static struct attribute_group ctcm_attr_group = {
 	.attrs = ctcm_attr,
 };
-const struct attribute_group *ctcm_attr_groups[] = {
-	&ctcm_attr_group,
-	NULL,
-};
+
+int ctcm_add_attributes(struct device *dev)
+{
+	int rc;
+
+	rc = device_create_file(dev, &dev_attr_stats);
+
+	return rc;
+}
+
+void ctcm_remove_attributes(struct device *dev)
+{
+	device_remove_file(dev, &dev_attr_stats);
+}
+
+int ctcm_add_files(struct device *dev)
+{
+	return sysfs_create_group(&dev->kobj, &ctcm_attr_group);
+}
+
+void ctcm_remove_files(struct device *dev)
+{
+	sysfs_remove_group(&dev->kobj, &ctcm_attr_group);
+}
+

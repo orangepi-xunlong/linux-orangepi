@@ -16,8 +16,6 @@
 #include <asm/ptrace.h>
 #include <asm/processor.h>
 #include <asm/io.h>
-#include <asm/unwinder.h>
-#include <asm/stacktrace.h>
 
 static u8 regcache[63];
 
@@ -159,7 +157,7 @@ static int lookup_prev_stack_frame(unsigned long fp, unsigned long pc,
 
 			/* Sign extend */
 			regcache[dest] =
-				sign_extend64((((u64)op >> 10) & 0xffff), 9);
+				((((s64)(u64)op >> 10) & 0xffff) << 54) >> 54;
 			break;
 		case (0xd0 >> 2): /* addi */
 		case (0xd4 >> 2): /* addi.l */
@@ -201,11 +199,8 @@ static int lookup_prev_stack_frame(unsigned long fp, unsigned long pc,
 	return 0;
 }
 
-/*
- * Don't put this on the stack since we'll want to call in to
- * sh64_unwinder_dump() when we're close to underflowing the stack
- * anyway.
- */
+/* Don't put this on the stack since we'll want to call sh64_unwind
+ * when we're close to underflowing the stack anyway. */
 static struct pt_regs here_regs;
 
 extern const char syscall_ret;
@@ -213,19 +208,17 @@ extern const char ret_from_syscall;
 extern const char ret_from_exception;
 extern const char ret_from_irq;
 
-static void sh64_unwind_inner(const struct stacktrace_ops *ops,
-			      void *data, struct pt_regs *regs);
+static void sh64_unwind_inner(struct pt_regs *regs);
 
-static inline void unwind_nested(const struct stacktrace_ops *ops, void *data,
-				 unsigned long pc, unsigned long fp)
+static void unwind_nested (unsigned long pc, unsigned long fp)
 {
 	if ((fp >= __MEMORY_START) &&
-	    ((fp & 7) == 0))
-		sh64_unwind_inner(ops, data, (struct pt_regs *)fp);
+	    ((fp & 7) == 0)) {
+		sh64_unwind_inner((struct pt_regs *) fp);
+	}
 }
 
-static void sh64_unwind_inner(const struct stacktrace_ops *ops,
-			      void *data, struct pt_regs *regs)
+static void sh64_unwind_inner(struct pt_regs *regs)
 {
 	unsigned long pc, fp;
 	int ofs = 0;
@@ -239,29 +232,29 @@ static void sh64_unwind_inner(const struct stacktrace_ops *ops,
 		int cond;
 		unsigned long next_fp, next_pc;
 
-		if (pc == ((unsigned long)&syscall_ret & ~1)) {
+		if (pc == ((unsigned long) &syscall_ret & ~1)) {
 			printk("SYSCALL\n");
-			unwind_nested(ops, data, pc, fp);
+			unwind_nested(pc,fp);
 			return;
 		}
 
-		if (pc == ((unsigned long)&ret_from_syscall & ~1)) {
+		if (pc == ((unsigned long) &ret_from_syscall & ~1)) {
 			printk("SYSCALL (PREEMPTED)\n");
-			unwind_nested(ops, data, pc, fp);
+			unwind_nested(pc,fp);
 			return;
 		}
 
 		/* In this case, the PC is discovered by lookup_prev_stack_frame but
 		   it has 4 taken off it to look like the 'caller' */
-		if (pc == ((unsigned long)&ret_from_exception & ~1)) {
+		if (pc == ((unsigned long) &ret_from_exception & ~1)) {
 			printk("EXCEPTION\n");
-			unwind_nested(ops, data, pc, fp);
+			unwind_nested(pc,fp);
 			return;
 		}
 
-		if (pc == ((unsigned long)&ret_from_irq & ~1)) {
+		if (pc == ((unsigned long) &ret_from_irq & ~1)) {
 			printk("IRQ\n");
-			unwind_nested(ops, data, pc, fp);
+			unwind_nested(pc,fp);
 			return;
 		}
 
@@ -270,7 +263,8 @@ static void sh64_unwind_inner(const struct stacktrace_ops *ops,
 
 		pc -= ofs;
 
-		ops->address(data, pc, 1);
+		printk("[<%08lx>] ", pc);
+		print_symbol("%s\n", pc);
 
 		if (first_pass) {
 			/* If the innermost frame is a leaf function, it's
@@ -293,13 +287,10 @@ static void sh64_unwind_inner(const struct stacktrace_ops *ops,
 	}
 
 	printk("\n");
+
 }
 
-static void sh64_unwinder_dump(struct task_struct *task,
-			       struct pt_regs *regs,
-			       unsigned long *sp,
-			       const struct stacktrace_ops *ops,
-			       void *data)
+void sh64_unwind(struct pt_regs *regs)
 {
 	if (!regs) {
 		/*
@@ -329,17 +320,7 @@ static void sh64_unwinder_dump(struct task_struct *task,
 		);
 	}
 
-	sh64_unwind_inner(ops, data, regs);
+	printk("\nCall Trace:\n");
+	sh64_unwind_inner(regs);
 }
 
-static struct unwinder sh64_unwinder = {
-	.name	= "sh64-unwinder",
-	.dump	= sh64_unwinder_dump,
-	.rating	= 150,
-};
-
-static int __init sh64_unwinder_init(void)
-{
-	return unwinder_register(&sh64_unwinder);
-}
-early_initcall(sh64_unwinder_init);

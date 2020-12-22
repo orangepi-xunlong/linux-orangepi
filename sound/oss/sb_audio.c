@@ -102,8 +102,12 @@ void sb_audio_close(int dev)
 	if(devc->duplex
 	   && !devc->fullduplex
 	   && (devc->opened & OPEN_READ) && (devc->opened & OPEN_WRITE))
-		swap(audio_devs[dev]->dmap_out, audio_devs[dev]->dmap_in);
-
+	{
+		struct dma_buffparms *dmap_temp;
+		dmap_temp = audio_devs[dev]->dmap_out;
+		audio_devs[dev]->dmap_out = audio_devs[dev]->dmap_in;
+		audio_devs[dev]->dmap_in = dmap_temp;
+	}
 	audio_devs[dev]->dmap_out->dma = devc->dma8;
 	audio_devs[dev]->dmap_in->dma = ( devc->duplex ) ?
 		devc->dma16 : devc->dma8;
@@ -438,7 +442,7 @@ static int sb201_audio_set_speed(int dev, int speed)
 {
 	sb_devc *devc = audio_devs[dev]->devc;
 	int tmp;
-	int s;
+	int s = speed * devc->channels;
 
 	if (speed > 0)
 	{
@@ -448,7 +452,6 @@ static int sb201_audio_set_speed(int dev, int speed)
 			speed = 44100;
 		if (devc->opened & OPEN_READ && speed > 15000)
 			speed = 15000;
-		s = speed * devc->channels;
 		devc->tconst = (256 - ((1000000 + s / 2) / s)) & 0xff;
 		tmp = 256 - devc->tconst;
 		speed = ((1000000 + tmp / 2) / tmp) / devc->channels;
@@ -572,14 +575,12 @@ static int jazz16_audio_set_speed(int dev, int speed)
 	if (speed > 0)
 	{
 		int tmp;
-		int s;
+		int s = speed * devc->channels;
 
 		if (speed < 5000)
 			speed = 5000;
 		if (speed > 44100)
 			speed = 44100;
-
-		s = speed * devc->channels;
 
 		devc->tconst = (256 - ((1000000 + s / 2) / s)) & 0xff;
 

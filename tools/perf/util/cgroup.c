@@ -1,6 +1,6 @@
 #include "util.h"
 #include "../perf.h"
-#include <subcmd/parse-options.h>
+#include "parse-options.h"
 #include "evsel.h"
 #include "cgroup.h"
 #include "evlist.h"
@@ -81,7 +81,7 @@ static int add_cgroup(struct perf_evlist *evlist, char *str)
 	/*
 	 * check if cgrp is already defined, if so we reuse it
 	 */
-	evlist__for_each_entry(evlist, counter) {
+	list_for_each_entry(counter, &evlist->entries, node) {
 		cgrp = counter->cgrp;
 		if (!cgrp)
 			continue;
@@ -110,32 +110,36 @@ static int add_cgroup(struct perf_evlist *evlist, char *str)
 	 * if add cgroup N, then need to find event N
 	 */
 	n = 0;
-	evlist__for_each_entry(evlist, counter) {
+	list_for_each_entry(counter, &evlist->entries, node) {
 		if (n == nr_cgroups)
 			goto found;
 		n++;
 	}
-	if (atomic_read(&cgrp->refcnt) == 0)
+	if (cgrp->refcnt == 0)
 		free(cgrp);
 
 	return -1;
 found:
-	atomic_inc(&cgrp->refcnt);
+	cgrp->refcnt++;
 	counter->cgrp = cgrp;
 	return 0;
 }
 
 void close_cgroup(struct cgroup_sel *cgrp)
 {
-	if (cgrp && atomic_dec_and_test(&cgrp->refcnt)) {
+	if (!cgrp)
+		return;
+
+	/* XXX: not reentrant */
+	if (--cgrp->refcnt == 0) {
 		close(cgrp->fd);
-		zfree(&cgrp->name);
+		free(cgrp->name);
 		free(cgrp);
 	}
 }
 
-int parse_cgroups(const struct option *opt __maybe_unused, const char *str,
-		  int unset __maybe_unused)
+int parse_cgroups(const struct option *opt __used, const char *str,
+		  int unset __used)
 {
 	struct perf_evlist *evlist = *(struct perf_evlist **)opt->value;
 	const char *p, *e, *eos = str + strlen(str);

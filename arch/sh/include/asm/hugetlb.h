@@ -1,9 +1,7 @@
 #ifndef _ASM_SH_HUGETLB_H
 #define _ASM_SH_HUGETLB_H
 
-#include <asm/cacheflush.h>
 #include <asm/page.h>
-#include <asm-generic/hugetlb.h>
 
 
 static inline int is_hugepage_only_range(struct mm_struct *mm,
@@ -24,6 +22,9 @@ static inline int prepare_hugepage_range(struct file *file,
 	if (addr & ~HPAGE_MASK)
 		return -EINVAL;
 	return 0;
+}
+
+static inline void hugetlb_prefault_arch_hook(struct mm_struct *mm) {
 }
 
 static inline void hugetlb_free_pgd_range(struct mmu_gather *tlb,
@@ -79,9 +80,13 @@ static inline pte_t huge_ptep_get(pte_t *ptep)
 	return *ptep;
 }
 
-static inline void arch_clear_hugepage_flags(struct page *page)
+static inline int arch_prepare_hugepage(struct page *page)
 {
-	clear_bit(PG_dcache_clean, &page->flags);
+	return 0;
+}
+
+static inline void arch_release_hugepage(struct page *page)
+{
 }
 
 #endif /* _ASM_SH_HUGETLB_H */

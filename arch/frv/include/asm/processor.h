@@ -35,9 +35,26 @@
 struct task_struct;
 
 /*
+ *  CPU type and hardware bug flags. Kept separately for each CPU.
+ */
+struct cpuinfo_frv {
+#ifdef CONFIG_MMU
+	unsigned long	*pgd_quick;
+	unsigned long	*pte_quick;
+	unsigned long	pgtable_cache_sz;
+#endif
+} __cacheline_aligned;
+
+extern struct cpuinfo_frv __nongprelbss boot_cpu_data;
+
+#define cpu_data		(&boot_cpu_data)
+#define current_cpu_data	boot_cpu_data
+
+/*
  * Bus types
  */
 #define EISA_bus 0
+#define MCA_bus 0
 
 struct thread_struct {
 	struct pt_regs		*frame;		/* [GR28] exception frame ptr for this thread */
@@ -76,25 +93,37 @@ extern struct task_struct *__kernel_current_task;
 
 /*
  * do necessary setup to start up a newly executed thread.
+ * - need to discard the frame stacked by init() invoking the execve syscall
  */
 #define start_thread(_regs, _pc, _usp)			\
 do {							\
-	_regs->pc	= (_pc);			\
-	_regs->psr	&= ~PSR_S;			\
-	_regs->sp	= (_usp);			\
+	__frame = __kernel_frame0_ptr;			\
+	__frame->pc	= (_pc);			\
+	__frame->psr	&= ~PSR_S;			\
+	__frame->sp	= (_usp);			\
 } while(0)
+
+extern void prepare_to_copy(struct task_struct *tsk);
 
 /* Free all resources held by a thread. */
 static inline void release_thread(struct task_struct *dead_task)
 {
 }
 
+extern asmlinkage int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
 extern asmlinkage void save_user_regs(struct user_context *target);
 extern asmlinkage void *restore_user_regs(const struct user_context *target, ...);
 
 #define copy_segments(tsk, mm)		do { } while (0)
 #define release_segments(mm)		do { } while (0)
 #define forget_segments()		do { } while (0)
+
+/*
+ * Free current thread data structures etc..
+ */
+static inline void exit_thread(void)
+{
+}
 
 /*
  * Return saved PC of a blocked thread.
@@ -106,8 +135,7 @@ unsigned long get_wchan(struct task_struct *p);
 #define	KSTK_EIP(tsk)	((tsk)->thread.frame0->pc)
 #define	KSTK_ESP(tsk)	((tsk)->thread.frame0->sp)
 
-#define cpu_relax() barrier()
-#define cpu_relax_lowlatency() cpu_relax()
+#define cpu_relax()    barrier()
 
 /* data cache prefetch */
 #define ARCH_HAS_PREFETCH

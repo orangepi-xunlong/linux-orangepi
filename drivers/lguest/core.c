@@ -20,10 +20,9 @@
 #include <asm/asm-offsets.h>
 #include "lg.h"
 
-unsigned long switcher_addr;
-struct page **lg_switcher_pages;
-static struct vm_struct *switcher_text_vma;
-static struct vm_struct *switcher_stacks_vma;
+
+static struct vm_struct *switcher_vma;
+static struct page **switcher_page;
 
 /* This One Big lock protects all inter-guest data structures. */
 DEFINE_MUTEX(lguest_lock);
@@ -43,6 +42,7 @@ DEFINE_MUTEX(lguest_lock);
 static __init int map_switcher(void)
 {
 	int i, err;
+	struct page **pagep;
 
 	/*
 	 * Map the Switcher in to high memory.
@@ -52,21 +52,13 @@ static __init int map_switcher(void)
 	 * easy.
 	 */
 
-	/* We assume Switcher text fits into a single page. */
-	if (end_switcher_text - start_switcher_text > PAGE_SIZE) {
-		printk(KERN_ERR "lguest: switcher text too large (%zu)\n",
-		       end_switcher_text - start_switcher_text);
-		return -EINVAL;
-	}
-
 	/*
 	 * We allocate an array of struct page pointers.  map_vm_area() wants
 	 * this, rather than just an array of pages.
 	 */
-	lg_switcher_pages = kmalloc(sizeof(lg_switcher_pages[0])
-				    * TOTAL_SWITCHER_PAGES,
-				    GFP_KERNEL);
-	if (!lg_switcher_pages) {
+	switcher_page = kmalloc(sizeof(switcher_page[0])*TOTAL_SWITCHER_PAGES,
+				GFP_KERNEL);
+	if (!switcher_page) {
 		err = -ENOMEM;
 		goto out;
 	}
@@ -76,94 +68,73 @@ static __init int map_switcher(void)
 	 * so we make sure they're zeroed.
 	 */
 	for (i = 0; i < TOTAL_SWITCHER_PAGES; i++) {
-		lg_switcher_pages[i] = alloc_page(GFP_KERNEL|__GFP_ZERO);
-		if (!lg_switcher_pages[i]) {
+		switcher_page[i] = alloc_page(GFP_KERNEL|__GFP_ZERO);
+		if (!switcher_page[i]) {
 			err = -ENOMEM;
 			goto free_some_pages;
 		}
 	}
 
 	/*
-	 * Copy in the compiled-in Switcher code (from x86/switcher_32.S).
-	 * It goes in the first page, which we map in momentarily.
+	 * First we check that the Switcher won't overlap the fixmap area at
+	 * the top of memory.  It's currently nowhere near, but it could have
+	 * very strange effects if it ever happened.
 	 */
-	memcpy(kmap(lg_switcher_pages[0]), start_switcher_text,
-	       end_switcher_text - start_switcher_text);
-	kunmap(lg_switcher_pages[0]);
+	if (SWITCHER_ADDR + (TOTAL_SWITCHER_PAGES+1)*PAGE_SIZE > FIXADDR_START){
+		err = -ENOMEM;
+		printk("lguest: mapping switcher would thwack fixmap\n");
+		goto free_pages;
+	}
 
 	/*
-	 * We place the Switcher underneath the fixmap area, which is the
-	 * highest virtual address we can get.  This is important, since we
-	 * tell the Guest it can't access this memory, so we want its ceiling
-	 * as high as possible.
+	 * Now we reserve the "virtual memory area" we want: 0xFFC00000
+	 * (SWITCHER_ADDR).  We might not get it in theory, but in practice
+	 * it's worked so far.  The end address needs +1 because __get_vm_area
+	 * allocates an extra guard page, so we need space for that.
 	 */
-	switcher_addr = FIXADDR_START - TOTAL_SWITCHER_PAGES*PAGE_SIZE;
-
-	/*
-	 * Now we reserve the "virtual memory area"s we want.  We might
-	 * not get them in theory, but in practice it's worked so far.
-	 *
-	 * We want the switcher text to be read-only and executable, and
-	 * the stacks to be read-write and non-executable.
-	 */
-	switcher_text_vma = __get_vm_area(PAGE_SIZE, VM_ALLOC|VM_NO_GUARD,
-					  switcher_addr,
-					  switcher_addr + PAGE_SIZE);
-
-	if (!switcher_text_vma) {
+	switcher_vma = __get_vm_area(TOTAL_SWITCHER_PAGES * PAGE_SIZE,
+				     VM_ALLOC, SWITCHER_ADDR, SWITCHER_ADDR
+				     + (TOTAL_SWITCHER_PAGES+1) * PAGE_SIZE);
+	if (!switcher_vma) {
 		err = -ENOMEM;
 		printk("lguest: could not map switcher pages high\n");
 		goto free_pages;
 	}
 
-	switcher_stacks_vma = __get_vm_area(SWITCHER_STACK_PAGES * PAGE_SIZE,
-					    VM_ALLOC|VM_NO_GUARD,
-					    switcher_addr + PAGE_SIZE,
-					    switcher_addr + TOTAL_SWITCHER_PAGES * PAGE_SIZE);
-	if (!switcher_stacks_vma) {
-		err = -ENOMEM;
-		printk("lguest: could not map switcher pages high\n");
-		goto free_text_vma;
-	}
-
 	/*
 	 * This code actually sets up the pages we've allocated to appear at
-	 * switcher_addr.  map_vm_area() takes the vma we allocated above, the
-	 * kind of pages we're mapping (kernel text pages and kernel writable
-	 * pages respectively), and a pointer to our array of struct pages.
+	 * SWITCHER_ADDR.  map_vm_area() takes the vma we allocated above, the
+	 * kind of pages we're mapping (kernel pages), and a pointer to our
+	 * array of struct pages.  It increments that pointer, but we don't
+	 * care.
 	 */
-	err = map_vm_area(switcher_text_vma, PAGE_KERNEL_RX, lg_switcher_pages);
+	pagep = switcher_page;
+	err = map_vm_area(switcher_vma, PAGE_KERNEL_EXEC, &pagep);
 	if (err) {
-		printk("lguest: text map_vm_area failed: %i\n", err);
-		goto free_vmas;
-	}
-
-	err = map_vm_area(switcher_stacks_vma, PAGE_KERNEL,
-			  lg_switcher_pages + SWITCHER_TEXT_PAGES);
-	if (err) {
-		printk("lguest: stacks map_vm_area failed: %i\n", err);
-		goto free_vmas;
+		printk("lguest: map_vm_area failed: %i\n", err);
+		goto free_vma;
 	}
 
 	/*
 	 * Now the Switcher is mapped at the right address, we can't fail!
+	 * Copy in the compiled-in Switcher code (from x86/switcher_32.S).
 	 */
+	memcpy(switcher_vma->addr, start_switcher_text,
+	       end_switcher_text - start_switcher_text);
+
 	printk(KERN_INFO "lguest: mapped switcher at %p\n",
-	       switcher_text_vma->addr);
+	       switcher_vma->addr);
 	/* And we succeeded... */
 	return 0;
 
-free_vmas:
-	/* Undoes map_vm_area and __get_vm_area */
-	vunmap(switcher_stacks_vma->addr);
-free_text_vma:
-	vunmap(switcher_text_vma->addr);
+free_vma:
+	vunmap(switcher_vma->addr);
 free_pages:
 	i = TOTAL_SWITCHER_PAGES;
 free_some_pages:
 	for (--i; i >= 0; i--)
-		__free_pages(lg_switcher_pages[i], 0);
-	kfree(lg_switcher_pages);
+		__free_pages(switcher_page[i], 0);
+	kfree(switcher_page);
 out:
 	return err;
 }
@@ -175,12 +146,11 @@ static void unmap_switcher(void)
 	unsigned int i;
 
 	/* vunmap() undoes *both* map_vm_area() and __get_vm_area(). */
-	vunmap(switcher_text_vma->addr);
-	vunmap(switcher_stacks_vma->addr);
+	vunmap(switcher_vma->addr);
 	/* Now we just need to free the pages we copied the switcher into */
 	for (i = 0; i < TOTAL_SWITCHER_PAGES; i++)
-		__free_pages(lg_switcher_pages[i], 0);
-	kfree(lg_switcher_pages);
+		__free_pages(switcher_page[i], 0);
+	kfree(switcher_page);
 }
 
 /*H:032
@@ -236,14 +206,6 @@ void __lgwrite(struct lg_cpu *cpu, unsigned long addr, const void *b,
  */
 int run_guest(struct lg_cpu *cpu, unsigned long __user *user)
 {
-	/* If the launcher asked for a register with LHREQ_GETREG */
-	if (cpu->reg_read) {
-		if (put_user(*cpu->reg_read, user))
-			return -EFAULT;
-		cpu->reg_read = NULL;
-		return sizeof(*cpu->reg_read);
-	}
-
 	/* We stop running once the Guest is dead. */
 	while (!cpu->lg->dead) {
 		unsigned int irq;
@@ -253,12 +215,21 @@ int run_guest(struct lg_cpu *cpu, unsigned long __user *user)
 		if (cpu->hcall)
 			do_hypercalls(cpu);
 
-		/* Do we have to tell the Launcher about a trap? */
-		if (cpu->pending.trap) {
-			if (copy_to_user(user, &cpu->pending,
-					 sizeof(cpu->pending)))
-				return -EFAULT;
-			return sizeof(cpu->pending);
+		/*
+		 * It's possible the Guest did a NOTIFY hypercall to the
+		 * Launcher.
+		 */
+		if (cpu->pending_notify) {
+			/*
+			 * Does it just needs to write to a registered
+			 * eventfd (ie. the appropriate virtqueue thread)?
+			 */
+			if (!send_notify_to_eventfd(cpu)) {
+				/* OK, we tell the main Laucher. */
+				if (put_user(cpu->pending_notify, user))
+					return -EFAULT;
+				return sizeof(cpu->pending_notify);
+			}
 		}
 
 		/*
@@ -352,10 +323,15 @@ static int __init init(void)
 	if (err)
 		goto out;
 
+	/* Now we set up the pagetable implementation for the Guests. */
+	err = init_pagetables(switcher_page, SHARED_SWITCHER_PAGES);
+	if (err)
+		goto unmap;
+
 	/* We might need to reserve an interrupt vector. */
 	err = init_interrupts();
 	if (err)
-		goto unmap;
+		goto free_pgtables;
 
 	/* /dev/lguest needs to be registered. */
 	err = lguest_device_init();
@@ -370,6 +346,8 @@ static int __init init(void)
 
 free_interrupts:
 	free_interrupts();
+free_pgtables:
+	free_pagetables();
 unmap:
 	unmap_switcher();
 out:
@@ -381,6 +359,7 @@ static void __exit fini(void)
 {
 	lguest_device_remove();
 	free_interrupts();
+	free_pagetables();
 	unmap_switcher();
 
 	lguest_arch_host_fini();

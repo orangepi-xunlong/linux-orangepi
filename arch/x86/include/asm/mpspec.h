@@ -1,11 +1,13 @@
 #ifndef _ASM_X86_MPSPEC_H
 #define _ASM_X86_MPSPEC_H
 
+#include <linux/init.h>
 
 #include <asm/mpspec_def.h>
 #include <asm/x86_init.h>
 #include <asm/apicdef.h>
 
+extern int apic_version[];
 extern int pic_mode;
 
 #ifdef CONFIG_X86_32
@@ -24,6 +26,12 @@ extern int pic_mode;
 
 extern unsigned int def_to_bigsmp;
 
+#ifdef CONFIG_X86_NUMAQ
+extern int mp_bus_id_to_node[MAX_MP_BUSSES];
+extern int mp_bus_id_to_local[MAX_MP_BUSSES];
+extern int quad_local_to_mp_bus_id [NR_CPUS/4][4];
+#endif
+
 #else /* CONFIG_X86_64: */
 
 #define MAX_MP_BUSSES		256
@@ -32,14 +40,15 @@ extern unsigned int def_to_bigsmp;
 
 #endif /* CONFIG_X86_64 */
 
-#ifdef CONFIG_EISA
+#if defined(CONFIG_MCA) || defined(CONFIG_EISA)
 extern int mp_bus_id_to_type[MAX_MP_BUSSES];
 #endif
 
 extern DECLARE_BITMAP(mp_bus_not_pci, MAX_MP_BUSSES);
 
 extern unsigned int boot_cpu_physical_apicid;
-extern u8 boot_cpu_apic_version;
+extern unsigned int max_physical_apicid;
+extern int mpc_default_type;
 extern unsigned long mp_lapic_addr;
 
 #ifdef CONFIG_X86_LOCAL_APIC
@@ -85,8 +94,16 @@ static inline void early_reserve_e820_mpc_new(void) { }
 #define default_get_smp_config x86_init_uint_noop
 #endif
 
-int generic_processor_info(int apicid, int version);
-int __generic_processor_info(int apicid, int version, bool enabled);
+void __cpuinit generic_processor_info(int apicid, int version);
+#ifdef CONFIG_ACPI
+extern void mp_register_ioapic(int id, u32 address, u32 gsi_base);
+extern void mp_override_legacy_irq(u8 bus_irq, u8 polarity, u8 trigger,
+				   u32 gsi);
+extern void mp_config_acpi_legacy_irqs(void);
+struct device;
+extern int mp_register_gsi(struct device *dev, u32 gsi, int edge_level,
+				 int active_high_low);
+#endif /* CONFIG_ACPI */
 
 #define PHYSID_ARRAY_SIZE	BITS_TO_LONGS(MAX_LOCAL_APIC)
 
@@ -150,5 +167,9 @@ static inline void physid_set_mask_of_physid(int physid, physid_mask_t *map)
 #define PHYSID_MASK_NONE	{ {[0 ... PHYSID_ARRAY_SIZE-1] = 0UL} }
 
 extern physid_mask_t phys_cpu_present_map;
+
+extern int generic_mps_oem_check(struct mpc_table *, char *, char *);
+
+extern int default_acpi_madt_oem_check(char *, char *);
 
 #endif /* _ASM_X86_MPSPEC_H */

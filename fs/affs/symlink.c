@@ -14,14 +14,16 @@ static int affs_symlink_readpage(struct file *file, struct page *page)
 {
 	struct buffer_head *bh;
 	struct inode *inode = page->mapping->host;
-	char *link = page_address(page);
+	char *link = kmap(page);
 	struct slink_front *lf;
+	int err;
 	int			 i, j;
 	char			 c;
 	char			 lc;
 
-	pr_debug("get_link(ino=%lu)\n", inode->i_ino);
+	pr_debug("AFFS: follow_link(ino=%lu)\n",inode->i_ino);
 
+	err = -EIO;
 	bh = affs_bread(inode->i_sb, inode->i_ino);
 	if (!bh)
 		goto fail;
@@ -57,12 +59,14 @@ static int affs_symlink_readpage(struct file *file, struct page *page)
 	link[i] = '\0';
 	affs_brelse(bh);
 	SetPageUptodate(page);
+	kunmap(page);
 	unlock_page(page);
 	return 0;
 fail:
 	SetPageError(page);
+	kunmap(page);
 	unlock_page(page);
-	return -EIO;
+	return err;
 }
 
 const struct address_space_operations affs_symlink_aops = {
@@ -71,6 +75,7 @@ const struct address_space_operations affs_symlink_aops = {
 
 const struct inode_operations affs_symlink_inode_operations = {
 	.readlink	= generic_readlink,
-	.get_link	= page_get_link,
+	.follow_link	= page_follow_link_light,
+	.put_link	= page_put_link,
 	.setattr	= affs_notify_change,
 };

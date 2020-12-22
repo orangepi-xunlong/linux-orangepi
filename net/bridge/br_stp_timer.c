@@ -40,9 +40,7 @@ static void br_hello_timer_expired(unsigned long arg)
 	if (br->dev->flags & IFF_UP) {
 		br_config_bpdu_generation(br);
 
-		if (br->stp_enabled == BR_KERNEL_STP)
-			mod_timer(&br->hello_timer,
-				  round_jiffies(jiffies + br->hello_time));
+		mod_timer(&br->hello_timer, round_jiffies(jiffies + br->hello_time));
 	}
 	spin_unlock(&br->lock);
 }
@@ -58,7 +56,7 @@ static void br_message_age_timer_expired(unsigned long arg)
 		return;
 
 	br_info(br, "port %u(%s) neighbor %.2x%.2x.%pM lost\n",
-		(unsigned int) p->port_no, p->dev->name,
+		(unsigned) p->port_no, p->dev->name,
 		id->prio[0], id->prio[1], &id->addr);
 
 	/*
@@ -86,21 +84,20 @@ static void br_forward_delay_timer_expired(unsigned long arg)
 	struct net_bridge *br = p->br;
 
 	br_debug(br, "port %u(%s) forward delay timer\n",
-		 (unsigned int) p->port_no, p->dev->name);
+		 (unsigned) p->port_no, p->dev->name);
 	spin_lock(&br->lock);
 	if (p->state == BR_STATE_LISTENING) {
-		br_set_state(p, BR_STATE_LEARNING);
+		p->state = BR_STATE_LEARNING;
 		mod_timer(&p->forward_delay_timer,
 			  jiffies + br->forward_delay);
 	} else if (p->state == BR_STATE_LEARNING) {
-		br_set_state(p, BR_STATE_FORWARDING);
+		p->state = BR_STATE_FORWARDING;
 		if (br_is_designated_for_some_port(br))
 			br_topology_change_detection(br);
 		netif_carrier_on(br->dev);
 	}
-	rcu_read_lock();
+	br_log_state(p);
 	br_ifinfo_notify(RTM_NEWLINK, p);
-	rcu_read_unlock();
 	spin_unlock(&br->lock);
 }
 
@@ -113,7 +110,7 @@ static void br_tcn_timer_expired(unsigned long arg)
 	if (!br_is_root_bridge(br) && (br->dev->flags & IFF_UP)) {
 		br_transmit_tcn(br);
 
-		mod_timer(&br->tcn_timer, jiffies + br->bridge_hello_time);
+		mod_timer(&br->tcn_timer,jiffies + br->bridge_hello_time);
 	}
 	spin_unlock(&br->lock);
 }
@@ -134,7 +131,7 @@ static void br_hold_timer_expired(unsigned long arg)
 	struct net_bridge_port *p = (struct net_bridge_port *) arg;
 
 	br_debug(p->br, "port %u(%s) hold timer expired\n",
-		 (unsigned int) p->port_no, p->dev->name);
+		 (unsigned) p->port_no, p->dev->name);
 
 	spin_lock(&p->br->lock);
 	if (p->config_pending)
@@ -173,5 +170,5 @@ void br_stp_port_timer_init(struct net_bridge_port *p)
 unsigned long br_timer_value(const struct timer_list *timer)
 {
 	return timer_pending(timer)
-		? jiffies_delta_to_clock_t(timer->expires - jiffies) : 0;
+		? jiffies_to_clock_t(timer->expires - jiffies) : 0;
 }

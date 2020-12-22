@@ -85,7 +85,7 @@ typedef volatile struct bridge_s {
 #define b_wid_llp			b_widget.w_llp_cfg
 #define b_wid_tflush			b_widget.w_tflush
 
-	/* bridge-specific widget configuration 0x000058-0x00007F */
+	/* bridge-specific widget configuration	0x000058-0x00007F */
 	bridgereg_t	    _pad_000058;
 	bridgereg_t	    b_wid_aux_err;		/* 0x00005C */
 	bridgereg_t	    _pad_000060;
@@ -167,8 +167,8 @@ typedef volatile struct bridge_s {
 		bridgereg_t	__pad;			/* 0x0002{80,,,88} */
 		bridgereg_t	reg;			/* 0x0002{84,,,8C} */
 	} b_rrb_map[2];					/* 0x000280 */
-#define b_even_resp	b_rrb_map[0].reg		/* 0x000284 */
-#define b_odd_resp	b_rrb_map[1].reg		/* 0x00028C */
+#define	b_even_resp	b_rrb_map[0].reg		/* 0x000284 */
+#define	b_odd_resp	b_rrb_map[1].reg		/* 0x00028C */
 
 	bridgereg_t	_pad_000290;
 	bridgereg_t	b_resp_status;			/* 0x000294 */
@@ -233,7 +233,7 @@ typedef volatile struct bridge_s {
 	u8	_pad_030007[0x04fff8];			/* 0x030008-0x07FFFF */
 
 	/* External Address Translation Entry RAM 0x080000-0x0FFFFF */
-	bridge_ate_t	b_ext_ate_ram[0x10000];
+	bridge_ate_t    b_ext_ate_ram[0x10000];
 
 	/* Reserved 0x100000-0x1FFFFF */
 	char	_pad_100000[0x200000-0x100000];
@@ -269,16 +269,16 @@ typedef struct bridge_err_cmdword_s {
 	union {
 		u32		cmd_word;
 		struct {
-			u32	didn:4,		/* Destination ID  */
-				sidn:4,		/* Source ID	   */
-				pactyp:4,	/* Packet type	   */
-				tnum:5,		/* Trans Number	   */
-				coh:1,		/* Coh Transaction */
-				ds:2,		/* Data size	   */
-				gbr:1,		/* GBR enable	   */
-				vbpm:1,		/* VBPM message	   */
+			u32	didn:4,		/* Destination ID */
+				sidn:4,		/* Source ID	  */
+				pactyp:4,	/* Packet type	  */
+				tnum:5,		/* Trans Number	  */
+				coh:1,		/* Coh Transacti  */
+				ds:2,		/* Data size	  */
+				gbr:1,		/* GBR enable	  */
+				vbpm:1,		/* VBPM message	  */
 				error:1,	/* Error occurred  */
-				barr:1,		/* Barrier op	   */
+				barr:1,		/* Barrier op	  */
 				rsvd:8;
 		} berr_st;
 	} berr_un;
@@ -400,7 +400,7 @@ typedef struct bridge_err_cmdword_s {
 #define BRIDGE_REV_A			0x1
 #define BRIDGE_REV_B			0x2
 #define BRIDGE_REV_C			0x3
-#define BRIDGE_REV_D			0x4
+#define	BRIDGE_REV_D			0x4
 
 /* Bridge widget status register bits definition */
 
@@ -691,21 +691,21 @@ typedef struct bridge_err_cmdword_s {
 #define BRIDGE_CREDIT	3
 
 /* RRB assignment register */
-#define BRIDGE_RRB_EN	0x8	/* after shifting down */
-#define BRIDGE_RRB_DEV	0x7	/* after shifting down */
-#define BRIDGE_RRB_VDEV 0x4	/* after shifting down */
-#define BRIDGE_RRB_PDEV 0x3	/* after shifting down */
+#define	BRIDGE_RRB_EN	0x8	/* after shifting down */
+#define	BRIDGE_RRB_DEV	0x7	/* after shifting down */
+#define	BRIDGE_RRB_VDEV	0x4	/* after shifting down */
+#define	BRIDGE_RRB_PDEV	0x3	/* after shifting down */
 
 /* RRB status register */
-#define BRIDGE_RRB_VALID(r)	(0x00010000<<(r))
-#define BRIDGE_RRB_INUSE(r)	(0x00000001<<(r))
+#define	BRIDGE_RRB_VALID(r)	(0x00010000<<(r))
+#define	BRIDGE_RRB_INUSE(r)	(0x00000001<<(r))
 
 /* RRB clear register */
-#define BRIDGE_RRB_CLEAR(r)	(0x00000001<<(r))
+#define	BRIDGE_RRB_CLEAR(r)	(0x00000001<<(r))
 
 /* xbox system controller declarations */
-#define XBOX_BRIDGE_WID		8
-#define FLASH_PROM1_BASE	0xE00000 /* To read the xbox sysctlr status */
+#define XBOX_BRIDGE_WID         8
+#define FLASH_PROM1_BASE        0xE00000 /* To read the xbox sysctlr status */
 #define XBOX_RPS_EXISTS		1 << 6	 /* RPS bit in status register */
 #define XBOX_RPS_FAIL		1 << 4	 /* RPS status bit in register */
 
@@ -835,11 +835,10 @@ struct bridge_controller {
 	struct pci_controller	pc;
 	struct resource		mem;
 	struct resource		io;
-	struct resource		busn;
 	bridge_t		*base;
 	nasid_t			nasid;
 	unsigned int		widget_id;
-	unsigned int		irq_cpu;
+	unsigned int 		irq_cpu;
 	u64			baddr;
 	unsigned int		pci_int[8];
 };

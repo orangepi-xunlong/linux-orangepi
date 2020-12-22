@@ -2,30 +2,61 @@
 # USB device configuration
 #
 
-config USB_OHCI_BIG_ENDIAN_DESC
-	bool
+# many non-PCI SOC chips embed OHCI
+config USB_ARCH_HAS_OHCI
+	boolean
+	# ARM:
+	default y if SA1111
+	default y if ARCH_OMAP
+	default y if ARCH_S3C24XX
+	default y if PXA27x
+	default y if PXA3xx
+	default y if ARCH_EP93XX
+	default y if ARCH_AT91
+	default y if ARCH_PNX4008 && I2C
+	default y if MFD_TC6393XB
+	default y if ARCH_W90X900
+	default y if ARCH_DAVINCI_DA8XX
+	default y if ARCH_CNS3XXX
+	default y if PLAT_SPEAR
+	default y if ARCH_EXYNOS
+	default y if ARCH_SUNXI
+	# PPC:
+	default y if STB03xxx
+	default y if PPC_MPC52xx
+	# MIPS:
+	default y if MIPS_ALCHEMY
+	default y if MACH_JZ4740
+	# more:
+	default PCI
 
-config USB_OHCI_BIG_ENDIAN_MMIO
-	bool
-
-config USB_OHCI_LITTLE_ENDIAN
-	bool
-	default n if STB03xxx || PPC_MPC52xx
-	default y
-
-config USB_EHCI_BIG_ENDIAN_MMIO
-	bool
-
-config USB_EHCI_BIG_ENDIAN_DESC
-	bool
-
-config USB_UHCI_BIG_ENDIAN_MMIO
-	bool
+# some non-PCI hcds implement EHCI
+config USB_ARCH_HAS_EHCI
+	boolean
+	default y if FSL_SOC
+	default y if PPC_MPC512x
+	default y if ARCH_IXP4XX
+	default y if ARCH_W90X900
+	default y if ARCH_AT91
+	default y if ARCH_MXC
+	default y if ARCH_OMAP3
+	default y if ARCH_CNS3XXX
+	default y if ARCH_VT8500
+	default y if PLAT_SPEAR
+	default y if PLAT_S5P
+	default y if ARCH_MSM
+	default y if MICROBLAZE
 	default y if SPARC_LEON
+	default y if ARCH_MMP
+	default y if MACH_LOONGSON1
+	default y if ARCH_SUNXI
+	default PCI
 
-config USB_UHCI_BIG_ENDIAN_DESC
-	bool
-	default y if SPARC_LEON
+# some non-PCI HCDs implement xHCI
+config USB_ARCH_HAS_XHCI
+	boolean
+	default y if ARCH_SUNXI
+	default PCI
 
 menuconfig USB_SUPPORT
 	bool "USB support"
@@ -39,15 +70,27 @@ if USB_SUPPORT
 
 config USB_COMMON
 	tristate
+	default y
+	depends on USB || USB_GADGET
 
+# Host-side USB depends on having a host controller
+# NOTE:  dummy_hcd is always an option, but it's ignored here ...
+# NOTE:  SL-811 option should be board-specific ...
 config USB_ARCH_HAS_HCD
-	def_bool y
+	boolean
+	default y if USB_ARCH_HAS_OHCI
+	default y if USB_ARCH_HAS_EHCI
+	default y if USB_ARCH_HAS_XHCI
+	default y if PCMCIA && !M32R			# sl811_cs
+	default y if ARM				# SL-811
+	default y if BLACKFIN				# SL-811
+	default y if SUPERH				# r8a66597-hcd
+	default PCI
 
 # ARM SA1111 chips have a non-PCI based "OHCI-compatible" USB host interface.
 config USB
 	tristate "Support for Host-side USB"
 	depends on USB_ARCH_HAS_HCD
-	select USB_COMMON
 	select NLS  # for UTF-8 strings
 	---help---
 	  Universal Serial Bus (USB) is a specification for a serial bus
@@ -55,7 +98,7 @@ config USB
 	  traditional PC serial port.  The bus supplies power to peripherals
 	  and allows for hot swapping.  Up to 127 USB peripherals can be
 	  connected to a single USB host in a tree structure.
-
+	  
 	  The USB host is the root of the tree, the peripherals are the
 	  leaves and the inner nodes are special USB devices called hubs.
 	  Most PCs now have USB host ports, used to connect peripherals
@@ -81,15 +124,19 @@ config USB
 	  To compile this driver as a module, choose M here: the
 	  module will be called usbcore.
 
-if USB
-
 source "drivers/usb/core/Kconfig"
+
+source "drivers/usb/dwc3/Kconfig"
+
+source "drivers/usb/sunxi_usb/usb3/Kconfig"
 
 source "drivers/usb/mon/Kconfig"
 
 source "drivers/usb/wusbcore/Kconfig"
 
 source "drivers/usb/host/Kconfig"
+
+source "drivers/usb/musb/Kconfig"
 
 source "drivers/usb/renesas_usbhs/Kconfig"
 
@@ -99,27 +146,12 @@ source "drivers/usb/storage/Kconfig"
 
 source "drivers/usb/image/Kconfig"
 
-source "drivers/usb/usbip/Kconfig"
-
-endif
-
-source "drivers/usb/musb/Kconfig"
-
-source "drivers/usb/dwc3/Kconfig"
-
-source "drivers/usb/dwc2/Kconfig"
-
-source "drivers/usb/chipidea/Kconfig"
-
-source "drivers/usb/isp1760/Kconfig"
-
 comment "USB port drivers"
-
-if USB
+	depends on USB
 
 config USB_USS720
 	tristate "USS720 parport driver"
-	depends on PARPORT
+	depends on USB && PARPORT
 	select PARPORT_NOT_PC
 	---help---
 	  This driver is for USB parallel port adapters that use the Lucent
@@ -152,44 +184,10 @@ source "drivers/usb/misc/Kconfig"
 
 source "drivers/usb/atm/Kconfig"
 
-endif # USB
-
-source "drivers/usb/phy/Kconfig"
-
 source "drivers/usb/gadget/Kconfig"
 
+source "drivers/usb/otg/Kconfig"
+
 source "drivers/usb/sunxi_usb/Kconfig"
-
-config USB_LED_TRIG
-	bool "USB LED Triggers"
-	depends on LEDS_CLASS && LEDS_TRIGGERS
-	select USB_COMMON
-	help
-	  This option adds LED triggers for USB host and/or gadget activity.
-
-	  Say Y here if you are working on a system with led-class supported
-	  LEDs and you want to use them as activity indicators for USB host or
-	  gadget.
-
-config USB_ULPI_BUS
-	tristate "USB ULPI PHY interface support"
-	select USB_COMMON
-	help
-	  UTMI+ Low Pin Interface (ULPI) is specification for a commonly used
-	  USB 2.0 PHY interface. The ULPI specification defines a standard set
-	  of registers that can be used to detect the vendor and product which
-	  allows ULPI to be handled as a bus. This module is the driver for that
-	  bus.
-
-	  The ULPI interfaces (the buses) are registered by the drivers for USB
-	  controllers which support ULPI register access and have ULPI PHY
-	  attached to them. The ULPI PHY drivers themselves are normal PHY
-	  drivers.
-
-	  ULPI PHYs provide often functions such as ADP sensing/probing (OTG
-	  protocol) and USB charger detection.
-
-	  To compile this driver as a module, choose M here: the module will
-	  be called ulpi.
 
 endif # USB_SUPPORT

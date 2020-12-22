@@ -18,26 +18,26 @@
 #include <linux/sunxi_timer_test.h>
 
 /* rtc_dev_prepare */
-#define DEV_NAME "timer_test_chrdev"
+#define DEV_NAME 		"timer_test_chrdev"
 
-u32 g_loopcnt[2] = {0}; /* 0 for timer, 1 for hrtimer, so as g_cur_cnt */
-static atomic_t g_cur_cnt[2] = {ATOMIC_INIT(0), ATOMIC_INIT(0)};
-struct timer_list g_timer;
+u32 	g_loopcnt[2] = {0}; /* 0 for timer, 1 for hrtimer, so as g_cur_cnt */
+static atomic_t 	g_cur_cnt[2] = {ATOMIC_INIT(0), ATOMIC_INIT(0)};
+struct timer_list 	g_timer;
 
-static dev_t g_devid;
-static struct cdev *g_ptimer_cdev; /* in /proc/devices */
-static ktime_t g_ktime;
-static struct class *g_timer_class;
+static dev_t 	g_devid ;
+static struct cdev	*g_ptimer_cdev = NULL;	/* in /proc/devices */
+static ktime_t 		g_ktime;
+static struct class *g_timer_class = NULL;
 
 static void timer_handle(unsigned long arg)
 {
 	unsigned long ms = arg;
 	struct timeval tv_cur;
 
-	if (atomic_add_return(1, &g_cur_cnt[0]) >= g_loopcnt[0]) {
+	if(atomic_add_return(1, &g_cur_cnt[0]) >= g_loopcnt[0]) {
 		/* print cur time in sec */
 		do_gettimeofday(&tv_cur);
-		pr_info("%s: cur sec %d\n", __func__, (int)tv_cur.tv_sec);
+		printk("%s: cur sec %d\n", __func__, (int)tv_cur.tv_sec);
 
 		/* clear g_cur_cnt[0] */
 		atomic_set(&g_cur_cnt[0], 0);
@@ -52,46 +52,44 @@ u32 case_timer_function(u32 interv_ms, u32 print_gap_s, u32 total_s)
 	int itemp = -1;
 	struct timeval tv_start, tv_cur;
 
-	pr_info("%s: interv_ms %d, print_gap_s %d, total_s %d\n",
-			__func__, interv_ms, print_gap_s, total_s);
+	printk("%s: interv_ms %d, print_gap_s %d, total_s %d\n", __func__, interv_ms, print_gap_s, total_s);
 
 	g_loopcnt[0] = (print_gap_s * 1000) / interv_ms;
 	atomic_set(&g_cur_cnt[0], 0);
 
 	/* init and add timer */
 	init_timer(&g_timer);
-	g_timer.function = &timer_handle;
-	g_timer.data = interv_ms;
-	g_timer.expires = jiffies + (HZ * interv_ms) / 1000;
+	g_timer.function 	= &timer_handle;
+	g_timer.data		= interv_ms;
+	g_timer.expires 	= jiffies + (HZ * interv_ms) / 1000;
 
 	add_timer(&g_timer);
 
 	/* wait for total_s */
 	do_gettimeofday(&tv_start);
-	pr_info("%s: start sec %d\n", __func__, (int)tv_start.tv_sec);
-	while (do_gettimeofday(&tv_cur),
-			tv_cur.tv_sec - tv_start.tv_sec <= total_s)
+	printk("%s: start sec %d\n", __func__, (int)tv_start.tv_sec);
+	while(do_gettimeofday(&tv_cur), tv_cur.tv_sec - tv_start.tv_sec <= total_s)
 		msleep_interruptible(0);
 
 	/* del timer */
-	pr_info("%s: before del_timer_sync\n", __func__);
-	/* del_timer(&g_timer); */
+	printk("%s: before del_timer_sync\n", __func__);
+	//del_timer(&g_timer);
 	itemp = del_timer_sync(&g_timer);
-	pr_info("%s: after del_timer_sync(return %d)\n", __func__, itemp);
+	printk("%s: after del_timer_sync(return %d)\n", __func__, itemp);
 
 	return 0;
 }
 
-static struct hrtimer g_hrtimer;
+static struct hrtimer 	g_hrtimer;
 
 static enum hrtimer_restart hrtimer_handle(struct hrtimer *cur_timer)
 {
 	struct timeval tv_cur;
 
-	if (atomic_add_return(1, &g_cur_cnt[1]) >= g_loopcnt[1]) {
+	if(atomic_add_return(1, &g_cur_cnt[1]) >= g_loopcnt[1]) {
 		/* print cur time in sec */
 		do_gettimeofday(&tv_cur);
-		pr_info("%s: cur sec %d\n", __func__, (int)tv_cur.tv_sec);
+		printk("%s: cur sec %d\n", __func__, (int)tv_cur.tv_sec);
 
 		/* clear g_cur_cnt[1] */
 		atomic_set(&g_cur_cnt[1], 0);
@@ -104,15 +102,14 @@ static enum hrtimer_restart hrtimer_handle(struct hrtimer *cur_timer)
 
 u32 case_hrtimer_function(u32 interv_us, u32 print_gap_s, u32 total_s)
 {
-	int itemp = -1;
+	int 	itemp = -1;
 	struct timeval tv_start, tv_cur;
 
-	pr_info("%s: interv_us %d, print_gap_s %d, total_s %d\n",
-			__func__, interv_us, print_gap_s, total_s);
+	printk("%s: interv_us %d, print_gap_s %d, total_s %d\n", __func__, interv_us, print_gap_s, total_s);
 
 	g_loopcnt[1] = (print_gap_s * 1000000) / interv_us;
 	atomic_set(&g_cur_cnt[1], 0);
-	pr_info("%s: g_loopcnt %d\n", __func__, g_loopcnt[1]);
+	printk("%s: g_loopcnt %d\n", __func__, g_loopcnt[1]);
 
 	/* init hrtimer */
 	g_ktime = ktime_set(0, interv_us * 1000);
@@ -120,19 +117,18 @@ u32 case_hrtimer_function(u32 interv_us, u32 print_gap_s, u32 total_s)
 	g_hrtimer.function = &hrtimer_handle;
 
 	/* start hrtimer */
-	hrtimer_start(&g_hrtimer, g_ktime, HRTIMER_MODE_REL);
-	pr_info("%s: hrtimer_start\n", __func__);
+	itemp = hrtimer_start(&g_hrtimer, g_ktime, HRTIMER_MODE_REL);
+	printk("%s: hrtimer_start return %d\n", __func__, itemp);
 
 	/* wait for total_s */
 	do_gettimeofday(&tv_start);
-	pr_info("%s: start sec %d\n", __func__, (int)tv_start.tv_sec);
-	while (do_gettimeofday(&tv_cur),
-			tv_cur.tv_sec - tv_start.tv_sec <= total_s)
+	printk("%s: start sec %d\n", __func__, (int)tv_start.tv_sec);
+	while(do_gettimeofday(&tv_cur), tv_cur.tv_sec - tv_start.tv_sec <= total_s)
 		msleep_interruptible(0);
 
 	/* del httimer */
 	itemp = hrtimer_cancel(&g_hrtimer);
-	pr_info("%s: hrtimer_cancel return %d\n", __func__, itemp);
+	printk("%s: hrtimer_cancel return %d\n", __func__, itemp);
 
 	return 0;
 }
@@ -147,27 +143,23 @@ static int timer_test_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static long timer_test_ioctl(struct file *file, unsigned int cmd,
-		unsigned long arg)
+static long timer_test_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	long ret = 0;
+	long 	ret = 0;
 	struct timer_test_para para;
 
 	memset(&para, 0, sizeof(para));
-	if (copy_from_user(&para, (struct timer_test_para *)arg,
-				sizeof(struct timer_test_para)) != 0) {
+	if(0 != copy_from_user(&para, (struct timer_test_para *)arg, sizeof(struct timer_test_para))) {
 		pr_err("%s(%d) err\n", __func__, __LINE__);
 		return __LINE__;
 	}
 
-	switch (cmd) {
+	switch(cmd) {
 	case TIMER_TEST_CMD_FUNC_NORMAL:
-		ret = case_timer_function(para.timer_interv_us / 1000,
-				para.print_gap_s, para.total_test_s);
+		ret = case_timer_function(para.timer_interv_us / 1000, para.print_gap_s, para.total_test_s);
 		break;
 	case TIMER_TEST_CMD_FUNC_HRTIMER:
-		ret = case_hrtimer_function(para.timer_interv_us,
-				para.print_gap_s, para.total_test_s);
+		ret = case_hrtimer_function(para.timer_interv_us, para.print_gap_s, para.total_test_s);
 		break;
 	default:
 		break;
@@ -176,7 +168,7 @@ static long timer_test_ioctl(struct file *file, unsigned int cmd,
 	return ret;
 }
 
-static const struct file_operations timer_test_fops = {
+static struct file_operations timer_test_fops = {
 	.owner			= THIS_MODULE,
 	.open			= timer_test_open,
 	.release		= timer_test_release,
@@ -185,17 +177,17 @@ static const struct file_operations timer_test_fops = {
 
 static int timer_test_cdev_init(void)
 {
-	int itemp = 0;
+	int 	itemp = 0;
 
 	itemp = alloc_chrdev_region(&g_devid, 0, 1, DEV_NAME);
-	if (itemp) {
-		pr_info("%s err, line %d\n", __func__, __LINE__);
+	if(itemp) {
+		printk("%s err, line %d\n", __func__, __LINE__);
 		return -1;
 	}
 
 	g_ptimer_cdev = cdev_alloc();
-	if (g_ptimer_cdev == NULL) {
-		pr_info("%s err, line %d\n", __func__, __LINE__);
+	if(NULL == g_ptimer_cdev) {
+		printk("%s err, line %d\n", __func__, __LINE__);
 		goto err2;
 	}
 
@@ -203,19 +195,19 @@ static int timer_test_cdev_init(void)
 
 	g_ptimer_cdev->owner = THIS_MODULE;
 	itemp = cdev_add(g_ptimer_cdev, g_devid, 1);
-	if (itemp < 0) {
-		pr_info("%s err, line %d\n", __func__, __LINE__);
+	if(itemp < 0) {
+		printk("%s err, line %d\n", __func__, __LINE__);
 		goto err1;
 	}
 
 	g_timer_class = class_create(THIS_MODULE, DEV_NAME);
 	if (IS_ERR(g_timer_class)) {
-		pr_info("%s err, line %d\n", __func__, __LINE__);
+		printk("%s err, line %d\n", __func__, __LINE__);
 		goto err1;
 	}
 	device_create(g_timer_class, NULL, g_devid, 0, DEV_NAME);
 
-	pr_info("%s success\n", __func__);
+	printk("%s success\n", __func__);
 	return 0;
 
 err1:
@@ -241,17 +233,17 @@ static void timer_test_cdev_deinit(void)
  */
 static int __init sunxi_timer_test_init(void)
 {
-	int itemp = 0;
+	int 	itemp = 0;
 
-	pr_info("%s enter\n", __func__);
+	printk("%s enter\n", __func__);
 
 	itemp = timer_test_cdev_init();
-	if (itemp < 0) {
-		pr_err("%s err, line %d\n", __func__, __LINE__);
+	if(itemp < 0) {
+		printk("%s err, line %d\n", __func__, __LINE__);
 		return -1;
 	}
 
-	pr_info("%s success\n", __func__);
+	printk("%s success\n", __func__);
 	return 0;
 }
 
@@ -260,14 +252,14 @@ static int __init sunxi_timer_test_init(void)
  */
 static void __exit sunxi_timer_test_exit(void)
 {
-	pr_info("%s enter\n", __func__);
+	printk("%s enter\n", __func__);
 
 	timer_test_cdev_deinit();
 }
 
 module_init(sunxi_timer_test_init);
 module_exit(sunxi_timer_test_exit);
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("liugang");
-MODULE_DESCRIPTION("sunxi timer test driver code");
+MODULE_LICENSE ("GPL");
+MODULE_AUTHOR ("liugang");
+MODULE_DESCRIPTION ("sunxi timer test driver code");
 

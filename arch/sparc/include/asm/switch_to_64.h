@@ -22,7 +22,7 @@ do {	save_and_clear_fpu();						\
 	/* If you are tempted to conditionalize the following */	\
 	/* so that ASI is only written if it changes, think again. */	\
 	__asm__ __volatile__("wr %%g0, %0, %%asi"			\
-	: : "r" (task_thread_info(next)->current_ds));\
+	: : "r" (__thread_flag_byte_ptr(task_thread_info(next))[TI_FLAG_BYTE_CURRENT_DS]));\
 	trap_block[current_thread_info()->cpu].thread =			\
 		task_thread_info(next);					\
 	__asm__ __volatile__(						\
@@ -48,8 +48,8 @@ do {	save_and_clear_fpu();						\
 	"wrpr	%%g0, 14, %%pil\n\t"					\
 	"brz,pt %%o7, switch_to_pc\n\t"					\
 	" mov	%%g7, %0\n\t"						\
-	"sethi	%%hi(ret_from_fork), %%g1\n\t"				\
-	"jmpl	%%g1 + %%lo(ret_from_fork), %%g0\n\t"			\
+	"sethi	%%hi(ret_from_syscall), %%g1\n\t"			\
+	"jmpl	%%g1 + %%lo(ret_from_syscall), %%g0\n\t"		\
 	" nop\n\t"							\
 	".globl switch_to_pc\n\t"					\
 	"switch_to_pc:\n\t"						\
@@ -65,7 +65,7 @@ do {	save_and_clear_fpu();						\
 	  "o0", "o1", "o2", "o3", "o4", "o5",       "o7");		\
 } while(0)
 
-void synchronize_user_stack(void);
-void fault_in_user_windows(void);
+extern void synchronize_user_stack(void);
+extern void fault_in_user_windows(void);
 
 #endif /* __SPARC64_SWITCH_TO_64_H */

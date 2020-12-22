@@ -11,12 +11,13 @@
 #include <linux/platform_device.h>
 #include <linux/spi/spi.h>
 
+#include <mach/common.h>
+#include <mach/iomux-mx3.h>
+
 #include <asm/mach-types.h>
 
 #include "pcm037.h"
-#include "common.h"
 #include "devices-imx31.h"
-#include "iomux-mx3.h"
 
 static unsigned int pcm037_eet_pins[] = {
 	/* Reserve and hardwire GPIO 57 high - S6E63D6 chipselect */
@@ -159,9 +160,9 @@ static const struct gpio_keys_platform_data
 	.rep		= 0, /* No auto-repeat */
 };
 
-int __init pcm037_eet_init_devices(void)
+static int __init eet_init_devices(void)
 {
-	if (pcm037_variant() != PCM037_EET)
+	if (!machine_is_pcm037() || pcm037_variant() != PCM037_EET)
 		return 0;
 
 	mxc_iomux_setup_multiple_pins(pcm037_eet_pins,
@@ -175,3 +176,4 @@ int __init pcm037_eet_init_devices(void)
 
 	return 0;
 }
+late_initcall(eet_init_devices);

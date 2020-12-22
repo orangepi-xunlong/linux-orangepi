@@ -87,8 +87,7 @@ static void mn10300_cpupic_mask_ack(struct irq_data *d)
 		tmp2 = GxICR(irq);
 
 		irq_affinity_online[irq] =
-			cpumask_any_and(irq_data_get_affinity_mask(d),
-					cpu_online_mask);
+			cpumask_any_and(d->affinity, cpu_online_mask);
 		CROSS_GxICR(irq, irq_affinity_online[irq]) =
 			(tmp & (GxICR_LEVEL | GxICR_ENABLE)) | GxICR_DETECT;
 		tmp = CROSS_GxICR(irq, irq_affinity_online[irq]);
@@ -125,7 +124,7 @@ static void mn10300_cpupic_unmask_clear(struct irq_data *d)
 	} else {
 		tmp = GxICR(irq);
 
-		irq_affinity_online[irq] = cpumask_any_and(irq_data_get_affinity_mask(d),
+		irq_affinity_online[irq] = cpumask_any_and(d->affinity,
 							   cpu_online_mask);
 		CROSS_GxICR(irq, irq_affinity_online[irq]) = (tmp & GxICR_LEVEL) | GxICR_ENABLE | GxICR_DETECT;
 		tmp = CROSS_GxICR(irq, irq_affinity_online[irq]);
@@ -143,11 +142,57 @@ mn10300_cpupic_setaffinity(struct irq_data *d, const struct cpumask *mask,
 			   bool force)
 {
 	unsigned long flags;
+	int err;
 
 	flags = arch_local_cli_save();
-	set_bit(d->irq, irq_affinity_request);
+
+	/* check irq no */
+	switch (d->irq) {
+	case TMJCIRQ:
+	case RESCHEDULE_IPI:
+	case CALL_FUNC_SINGLE_IPI:
+	case LOCAL_TIMER_IPI:
+	case FLUSH_CACHE_IPI:
+	case CALL_FUNCTION_NMI_IPI:
+	case DEBUGGER_NMI_IPI:
+#ifdef CONFIG_MN10300_TTYSM0
+	case SC0RXIRQ:
+	case SC0TXIRQ:
+#ifdef CONFIG_MN10300_TTYSM0_TIMER8
+	case TM8IRQ:
+#elif CONFIG_MN10300_TTYSM0_TIMER2
+	case TM2IRQ:
+#endif /* CONFIG_MN10300_TTYSM0_TIMER8 */
+#endif /* CONFIG_MN10300_TTYSM0 */
+
+#ifdef CONFIG_MN10300_TTYSM1
+	case SC1RXIRQ:
+	case SC1TXIRQ:
+#ifdef CONFIG_MN10300_TTYSM1_TIMER12
+	case TM12IRQ:
+#elif CONFIG_MN10300_TTYSM1_TIMER9
+	case TM9IRQ:
+#elif CONFIG_MN10300_TTYSM1_TIMER3
+	case TM3IRQ:
+#endif /* CONFIG_MN10300_TTYSM1_TIMER12 */
+#endif /* CONFIG_MN10300_TTYSM1 */
+
+#ifdef CONFIG_MN10300_TTYSM2
+	case SC2RXIRQ:
+	case SC2TXIRQ:
+	case TM10IRQ:
+#endif /* CONFIG_MN10300_TTYSM2 */
+		err = -1;
+		break;
+
+	default:
+		set_bit(d->irq, irq_affinity_request);
+		err = 0;
+		break;
+	}
+
 	arch_local_irq_restore(flags);
-	return 0;
+	return err;
 }
 #endif /* CONFIG_SMP */
 
@@ -317,16 +362,15 @@ void migrate_irqs(void)
 	self = smp_processor_id();
 	for (irq = 0; irq < NR_IRQS; irq++) {
 		struct irq_data *data = irq_get_irq_data(irq);
-		struct cpumask *mask = irq_data_get_affinity_mask(data);
 
 		if (irqd_is_per_cpu(data))
 			continue;
 
-		if (cpumask_test_cpu(self, mask) &&
+		if (cpumask_test_cpu(self, &data->affinity) &&
 		    !cpumask_intersects(&irq_affinity[irq], cpu_online_mask)) {
 			int cpu_id;
 			cpu_id = cpumask_first(cpu_online_mask);
-			cpumask_set_cpu(cpu_id, mask);
+			cpumask_set_cpu(cpu_id, &data->affinity);
 		}
 		/* We need to operate irq_affinity_online atomically. */
 		arch_local_cli_save(flags);
@@ -337,7 +381,8 @@ void migrate_irqs(void)
 			GxICR(irq) = x & GxICR_LEVEL;
 			tmp = GxICR(irq);
 
-			new = cpumask_any_and(mask, cpu_online_mask);
+			new = cpumask_any_and(&data->affinity,
+					      cpu_online_mask);
 			irq_affinity_online[irq] = new;
 
 			CROSS_GxICR(irq, new) =

@@ -13,7 +13,6 @@
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <linux/list.h>
 #include <linux/platform_device.h>
 #include <linux/mm.h>
@@ -309,9 +308,11 @@ int dma_extend(unsigned int chan, unsigned long op, void *param)
 }
 EXPORT_SYMBOL(dma_extend);
 
-static int dma_proc_show(struct seq_file *m, void *v)
+static int dma_read_proc(char *buf, char **start, off_t off,
+			 int len, int *eof, void *data)
 {
-	struct dma_info *info = v;
+	struct dma_info *info;
+	char *p = buf;
 
 	if (list_empty(&registered_dmac_list))
 		return 0;
@@ -331,25 +332,13 @@ static int dma_proc_show(struct seq_file *m, void *v)
 			if (!(channel->flags & DMA_CONFIGURED))
 				continue;
 
-			seq_printf(m, "%2d: %14s    %s\n", i,
-				   info->name, channel->dev_id);
+			p += sprintf(p, "%2d: %14s    %s\n", i,
+				     info->name, channel->dev_id);
 		}
 	}
 
-	return 0;
+	return p - buf;
 }
-
-static int dma_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, dma_proc_show, NULL);
-}
-
-static const struct file_operations dma_proc_fops = {
-	.open		= dma_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 int register_dmac(struct dma_info *info)
 {
@@ -423,7 +412,8 @@ EXPORT_SYMBOL(unregister_dmac);
 static int __init dma_api_init(void)
 {
 	printk(KERN_NOTICE "DMA: Registering DMA API.\n");
-	return proc_create("dma", 0, NULL, &dma_proc_fops) ? 0 : -ENOMEM;
+	return create_proc_read_entry("dma", 0, 0, dma_read_proc, 0)
+		    ? 0 : -ENOMEM;
 }
 subsys_initcall(dma_api_init);
 

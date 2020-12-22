@@ -98,7 +98,6 @@ static int level_mask = LOG_ERROR;
 
 module_param(level_mask, int, 0644);
 
-#ifndef MODULE
 static int __init fas216_log_setup(char *str)
 {
 	char *s;
@@ -139,7 +138,6 @@ static int __init fas216_log_setup(char *str)
 }
 
 __setup("fas216_logging=", fas216_log_setup);
-#endif
 
 static inline unsigned char fas216_readb(FAS216_Info *info, unsigned int reg)
 {
@@ -181,7 +179,6 @@ static void print_SCp(struct scsi_pointer *SCp, const char *prefix, const char *
 		SCp->buffers_residual, suffix);
 }
 
-#ifdef CHECK_STRUCTURE
 static void fas216_dumpinfo(FAS216_Info *info)
 {
 	static int used = 0;
@@ -226,6 +223,7 @@ static void fas216_dumpinfo(FAS216_Info *info)
 		info->internal_done, info->magic_end);
 }
 
+#ifdef CHECK_STRUCTURE
 static void __fas216_checkmagic(FAS216_Info *info, const char *func)
 {
 	int corruption = 0;
@@ -310,7 +308,8 @@ static void fas216_log_command(FAS216_Info *info, int level,
 	fas216_do_log(info, '0' + SCpnt->device->id, fmt, args);
 	va_end(args);
 
-	scsi_print_command(SCpnt);
+	printk(" CDB: ");
+	__scsi_print_command(SCpnt->cmnd);
 }
 
 static void
@@ -1822,8 +1821,7 @@ static void fas216_allocate_tag(FAS216_Info *info, struct scsi_cmnd *SCpnt)
 			SCpnt->tag = SCpnt->device->current_tag;
 	} else
 #endif
-		set_bit(SCpnt->device->id * 8 +
-			(u8)(SCpnt->device->lun & 0x7), info->busyluns);
+		set_bit(SCpnt->device->id * 8 + SCpnt->device->lun, info->busyluns);
 
 	info->stats.removes += 1;
 	switch (SCpnt->cmnd[0]) {
@@ -2011,7 +2009,7 @@ static void fas216_rq_sns_done(FAS216_Info *info, struct scsi_cmnd *SCpnt,
 		 * have valid data in the sense buffer that could
 		 * confuse the higher levels.
 		 */
-		memset(SCpnt->sense_buffer, 0, SCSI_SENSE_BUFFERSIZE);
+		memset(SCpnt->sense_buffer, 0, sizeof(SCpnt->sense_buffer));
 //printk("scsi%d.%c: sense buffer: ", info->host->host_no, '0' + SCpnt->device->id);
 //{ int i; for (i = 0; i < 32; i++) printk("%02x ", SCpnt->sense_buffer[i]); printk("\n"); }
 	/*
@@ -2080,12 +2078,14 @@ fas216_std_done(FAS216_Info *info, struct scsi_cmnd *SCpnt, unsigned int result)
 			break;
 
 		default:
-			scmd_printk(KERN_ERR, SCpnt,
-				    "incomplete data transfer detected: res=%08X ptr=%p len=%X\n",
-				    SCpnt->result, info->scsi.SCp.ptr,
-				    info->scsi.SCp.this_residual);
-			scsi_print_command(SCpnt);
-			set_host_byte(SCpnt, DID_ERROR);
+			printk(KERN_ERR "scsi%d.%c: incomplete data transfer "
+				"detected: res=%08X ptr=%p len=%X CDB: ",
+				info->host->host_no, '0' + SCpnt->device->id,
+				SCpnt->result, info->scsi.SCp.ptr,
+				info->scsi.SCp.this_residual);
+			__scsi_print_command(SCpnt->cmnd);
+			SCpnt->result &= ~(255 << 16);
+			SCpnt->result |= DID_BAD_TARGET << 16;
 			goto request_sense;
 		}
 	}
@@ -2157,11 +2157,12 @@ static void fas216_done(FAS216_Info *info, unsigned int result)
 	 * to transfer, we should not have a valid pointer.
 	 */
 	if (info->scsi.SCp.ptr && info->scsi.SCp.this_residual == 0) {
-		scmd_printk(KERN_INFO, SCpnt,
-			    "zero bytes left to transfer, but buffer pointer still valid: ptr=%p len=%08x\n",
-			    info->scsi.SCp.ptr, info->scsi.SCp.this_residual);
+		printk("scsi%d.%c: zero bytes left to transfer, but "
+		       "buffer pointer still valid: ptr=%p len=%08x CDB: ",
+		       info->host->host_no, '0' + SCpnt->device->id,
+		       info->scsi.SCp.ptr, info->scsi.SCp.this_residual);
 		info->scsi.SCp.ptr = NULL;
-		scsi_print_command(SCpnt);
+		__scsi_print_command(SCpnt->cmnd);
 	}
 
 	/*
@@ -2170,8 +2171,7 @@ static void fas216_done(FAS216_Info *info, unsigned int result)
 	 * status.
 	 */
 	info->device[SCpnt->device->id].parity_check = 0;
-	clear_bit(SCpnt->device->id * 8 +
-		  (u8)(SCpnt->device->lun & 0x7), info->busyluns);
+	clear_bit(SCpnt->device->id * 8 + SCpnt->device->lun, info->busyluns);
 
 	fn = (void (*)(FAS216_Info *, struct scsi_cmnd *, unsigned int))SCpnt->host_scribble;
 	fn(info, SCpnt, result);
@@ -2398,8 +2398,7 @@ static enum res_find fas216_find_command(FAS216_Info *info,
 		 * been set.
 		 */
 		info->origSCpnt = NULL;
-		clear_bit(SCpnt->device->id * 8 +
-			  (u8)(SCpnt->device->lun & 0x7), info->busyluns);
+		clear_bit(SCpnt->device->id * 8 + SCpnt->device->lun, info->busyluns);
 		printk("waiting for execution ");
 		res = res_success;
 	} else
@@ -2425,10 +2424,13 @@ int fas216_eh_abort(struct scsi_cmnd *SCpnt)
 
 	info->stats.aborts += 1;
 
-	scmd_printk(KERN_WARNING, SCpnt, "abort command\n");
+	printk(KERN_WARNING "scsi%d: abort command ", info->host->host_no);
+	__scsi_print_command(SCpnt->cmnd);
 
 	print_debug_list();
 	fas216_dumpstate(info);
+
+	printk(KERN_WARNING "scsi%d: abort %p ", info->host->host_no, SCpnt);
 
 	switch (fas216_find_command(info, SCpnt)) {
 	/*
@@ -2437,7 +2439,7 @@ int fas216_eh_abort(struct scsi_cmnd *SCpnt)
 	 * target, or the busylun bit is not set.
 	 */
 	case res_success:
-		scmd_printk(KERN_WARNING, SCpnt, "abort %p success\n", SCpnt);
+		printk("success\n");
 		result = SUCCESS;
 		break;
 
@@ -2447,13 +2449,14 @@ int fas216_eh_abort(struct scsi_cmnd *SCpnt)
 	 * if the bus is free.
 	 */
 	case res_hw_abort:
+		
 
 	/*
 	 * We are unable to abort the command for some reason.
 	 */
 	default:
 	case res_failed:
-		scmd_printk(KERN_WARNING, SCpnt, "abort %p failed\n", SCpnt);
+		printk("failed\n");
 		break;
 	}
 
@@ -2658,7 +2661,8 @@ int fas216_eh_host_reset(struct scsi_cmnd *SCpnt)
 
 	fas216_checkmagic(info);
 
-	fas216_log(info, LOG_ERROR, "resetting host");
+	printk("scsi%d.%c: %s: resetting host\n",
+		info->host->host_no, '0' + SCpnt->device->id, __func__);
 
 	/*
 	 * Reset the SCSI chip.
@@ -2954,9 +2958,9 @@ void fas216_release(struct Scsi_Host *host)
 	queue_free(&info->queues.issue);
 }
 
-void fas216_print_host(FAS216_Info *info, struct seq_file *m)
+int fas216_print_host(FAS216_Info *info, char *buffer)
 {
-	seq_printf(m,
+	return sprintf(buffer,
 			"\n"
 			"Chip    : %s\n"
 			" Address: 0x%p\n"
@@ -2966,9 +2970,11 @@ void fas216_print_host(FAS216_Info *info, struct seq_file *m)
 			info->scsi.irq, info->scsi.dma);
 }
 
-void fas216_print_stats(FAS216_Info *info, struct seq_file *m)
+int fas216_print_stats(FAS216_Info *info, char *buffer)
 {
-	seq_printf(m, "\n"
+	char *p = buffer;
+
+	p += sprintf(p, "\n"
 			"Command Statistics:\n"
 			" Queued     : %u\n"
 			" Issued     : %u\n"
@@ -2985,33 +2991,38 @@ void fas216_print_stats(FAS216_Info *info, struct seq_file *m)
 			info->stats.writes,	 info->stats.miscs,
 			info->stats.disconnects, info->stats.aborts,
 			info->stats.bus_resets,	 info->stats.host_resets);
+
+	return p - buffer;
 }
 
-void fas216_print_devices(FAS216_Info *info, struct seq_file *m)
+int fas216_print_devices(FAS216_Info *info, char *buffer)
 {
 	struct fas216_device *dev;
 	struct scsi_device *scd;
+	char *p = buffer;
 
-	seq_puts(m, "Device/Lun TaggedQ       Parity   Sync\n");
+	p += sprintf(p, "Device/Lun TaggedQ       Parity   Sync\n");
 
 	shost_for_each_device(scd, info->host) {
 		dev = &info->device[scd->id];
-		seq_printf(m, "     %d/%llu   ", scd->id, scd->lun);
+		p += sprintf(p, "     %d/%d   ", scd->id, scd->lun);
 		if (scd->tagged_supported)
-			seq_printf(m, "%3sabled(%3d) ",
+			p += sprintf(p, "%3sabled(%3d) ",
 				     scd->simple_tags ? "en" : "dis",
 				     scd->current_tag);
 		else
-			seq_puts(m, "unsupported   ");
+			p += sprintf(p, "unsupported   ");
 
-		seq_printf(m, "%3sabled ", dev->parity_enabled ? "en" : "dis");
+		p += sprintf(p, "%3sabled ", dev->parity_enabled ? "en" : "dis");
 
 		if (dev->sof)
-			seq_printf(m, "offset %d, %d ns\n",
+			p += sprintf(p, "offset %d, %d ns\n",
 				     dev->sof, dev->period * 4);
 		else
-			seq_puts(m, "async\n");
+			p += sprintf(p, "async\n");
 	}
+
+	return p - buffer;
 }
 
 EXPORT_SYMBOL(fas216_init);

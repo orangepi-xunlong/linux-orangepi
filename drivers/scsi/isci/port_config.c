@@ -57,7 +57,7 @@
 
 #define SCIC_SDS_MPC_RECONFIGURATION_TIMEOUT    (10)
 #define SCIC_SDS_APC_RECONFIGURATION_TIMEOUT    (10)
-#define SCIC_SDS_APC_WAIT_LINK_UP_NOTIFICATION  (1000)
+#define SCIC_SDS_APC_WAIT_LINK_UP_NOTIFICATION  (250)
 
 enum SCIC_SDS_APC_ACTIVITY {
 	SCIC_SDS_APC_SKIP_PHY,
@@ -311,9 +311,9 @@ sci_mpc_agent_validate_phy_configuration(struct isci_host *ihost,
 					      &ihost->phys[phy_index]);
 
 			assigned_phy_mask |= (1 << phy_index);
-			phy_index++;
 		}
 
+		phy_index++;
 	}
 
 	return sci_port_configuration_agent_validate_ports(ihost, port_agent);
@@ -472,9 +472,13 @@ sci_apc_agent_validate_phy_configuration(struct isci_host *ihost,
  * down event or a link up event where we can not yet tell to which a phy
  * belongs.
  */
-static void sci_apc_agent_start_timer(struct sci_port_configuration_agent *port_agent,
-				      u32 timeout)
+static void sci_apc_agent_start_timer(
+	struct sci_port_configuration_agent *port_agent,
+	u32 timeout)
 {
+	if (port_agent->timer_pending)
+		sci_del_timer(&port_agent->timer);
+
 	port_agent->timer_pending = true;
 	sci_mod_timer(&port_agent->timer, timeout);
 }
@@ -686,9 +690,6 @@ static void apc_agent_timeout(unsigned long data)
 						   &ihost->phys[index], false);
 	}
 
-	if (is_controller_start_complete(ihost))
-		sci_controller_transition_to_ready(ihost, SCI_SUCCESS);
-
 done:
 	spin_unlock_irqrestore(&ihost->scic_lock, flags);
 }
@@ -722,11 +723,6 @@ void sci_port_configuration_agent_construct(
 		port_agent->phy_valid_port_range[index].min_index = 0;
 		port_agent->phy_valid_port_range[index].max_index = 0;
 	}
-}
-
-bool is_port_config_apc(struct isci_host *ihost)
-{
-	return ihost->port_agent.link_up_handler == sci_apc_agent_link_up;
 }
 
 enum sci_status sci_port_configuration_agent_initialize(

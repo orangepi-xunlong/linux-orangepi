@@ -18,7 +18,6 @@
 #include <linux/timer.h>
 #include <linux/init.h>
 #include <linux/serial_core.h>
-#include <linux/serial_s3c.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/mtd/partitions.h>
@@ -30,32 +29,33 @@
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 
-#include <video/samsung_fimd.h>
 #include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/mach-types.h>
 
+#include <plat/regs-serial.h>
 #include <mach/regs-gpio.h>
 #include <mach/regs-lcd.h>
 #include <mach/regs-s3c2443-clock.h>
-#include <mach/gpio-samsung.h>
 
-#include <linux/platform_data/leds-s3c24xx.h>
-#include <linux/platform_data/i2c-s3c2410.h>
+#include <mach/idle.h>
+#include <mach/leds-gpio.h>
+#include <plat/iic.h>
 
+#include <plat/s3c2416.h>
 #include <plat/gpio-cfg.h>
+#include <plat/clock.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
-#include <linux/platform_data/mtd-nand-s3c2410.h>
+#include <plat/nand.h>
 #include <plat/sdhci.h>
-#include <linux/platform_data/usb-s3c2410_udc.h>
+#include <plat/udc.h>
 #include <linux/platform_data/s3c-hsudc.h>
-#include <plat/samsung-time.h>
 
+#include <plat/regs-fb-v4.h>
 #include <plat/fb.h>
 
-#include "common.h"
-#include "common-smdk.h"
+#include <plat/common-smdk.h>
 
 static struct map_desc smdk2416_iodesc[] __initdata = {
 	/* ISA IO Space map (memory space selected by A24) */
@@ -148,23 +148,21 @@ static struct s3c24xx_hsudc_platdata smdk2416_hsudc_platdata = {
 
 static struct s3c_fb_pd_win smdk2416_fb_win[] = {
 	[0] = {
+		/* think this is the same as the smdk6410 */
+		.win_mode	= {
+			.pixclock	= 41094,
+			.left_margin	= 8,
+			.right_margin	= 13,
+			.upper_margin	= 7,
+			.lower_margin	= 5,
+			.hsync_len	= 3,
+			.vsync_len	= 1,
+			.xres           = 800,
+			.yres           = 480,
+		},
 		.default_bpp	= 16,
 		.max_bpp	= 32,
-		.xres           = 800,
-		.yres           = 480,
 	},
-};
-
-static struct fb_videomode smdk2416_lcd_timing = {
-	.pixclock	= 41094,
-	.left_margin	= 8,
-	.right_margin	= 13,
-	.upper_margin	= 7,
-	.lower_margin	= 5,
-	.hsync_len	= 3,
-	.vsync_len	= 1,
-	.xres           = 800,
-	.yres           = 480,
 };
 
 static void s3c2416_fb_gpio_setup_24bpp(void)
@@ -189,7 +187,6 @@ static void s3c2416_fb_gpio_setup_24bpp(void)
 
 static struct s3c_fb_platdata smdk2416_fb_platdata = {
 	.win[0]		= &smdk2416_fb_win[0],
-	.vtiming	= &smdk2416_lcd_timing,
 	.setup_gpio	= s3c2416_fb_gpio_setup_24bpp,
 	.vidcon0	= VIDCON0_VIDOUT_RGB | VIDCON0_PNRMODE_RGB,
 	.vidcon1	= VIDCON1_INV_HSYNC | VIDCON1_INV_VSYNC,
@@ -215,20 +212,13 @@ static struct platform_device *smdk2416_devices[] __initdata = {
 	&s3c_device_hsmmc0,
 	&s3c_device_hsmmc1,
 	&s3c_device_usb_hsudc,
-	&s3c2443_device_dma,
 };
-
-static void __init smdk2416_init_time(void)
-{
-	s3c2416_init_clocks(12000000);
-	samsung_timer_init();
-}
 
 static void __init smdk2416_map_io(void)
 {
 	s3c24xx_init_io(smdk2416_iodesc, ARRAY_SIZE(smdk2416_iodesc));
+	s3c24xx_init_clocks(12000000);
 	s3c24xx_init_uarts(smdk2416_uartcfgs, ARRAY_SIZE(smdk2416_uartcfgs));
-	samsung_set_timer_source(SAMSUNG_PWM3, SAMSUNG_PWM4);
 }
 
 static void __init smdk2416_machine_init(void)
@@ -258,8 +248,9 @@ MACHINE_START(SMDK2416, "SMDK2416")
 	/* Maintainer: Yauhen Kharuzhy <jekhor@gmail.com> */
 	.atag_offset	= 0x100,
 
-	.init_irq	= s3c2416_init_irq,
+	.init_irq	= s3c24xx_init_irq,
 	.map_io		= smdk2416_map_io,
 	.init_machine	= smdk2416_machine_init,
-	.init_time	= smdk2416_init_time,
+	.timer		= &s3c24xx_timer,
+	.restart	= s3c2416_restart,
 MACHINE_END

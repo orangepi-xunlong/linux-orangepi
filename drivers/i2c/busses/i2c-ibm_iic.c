@@ -36,13 +36,13 @@
 #include <linux/ioport.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <asm/irq.h>
 #include <linux/io.h>
 #include <linux/i2c.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
 #include <linux/of_platform.h>
+#include <linux/of_i2c.h>
 
 #include "i2c-ibm_iic.h"
 
@@ -99,7 +99,7 @@ static void dump_iic_regs(const char* header, struct ibm_iic_private* dev)
 #endif
 
 /* Bus timings (in ns) for bit-banging */
-static struct ibm_iic_timings {
+static struct i2c_timings {
 	unsigned int hd_sta;
 	unsigned int su_sto;
 	unsigned int low;
@@ -241,7 +241,7 @@ static int iic_dc_wait(volatile struct iic_regs __iomem *iic, u8 mask)
 static int iic_smbus_quick(struct ibm_iic_private* dev, const struct i2c_msg* p)
 {
 	volatile struct iic_regs __iomem *iic = dev->vaddr;
-	const struct ibm_iic_timings *t = &timings[dev->fast_mode ? 1 : 0];
+	const struct i2c_timings* t = &timings[dev->fast_mode ? 1 : 0];
 	u8 mask, v, sda;
 	int i, res;
 
@@ -269,7 +269,7 @@ static int iic_smbus_quick(struct ibm_iic_private* dev, const struct i2c_msg* p)
 	ndelay(t->hd_sta);
 
 	/* Send address */
-	v = i2c_8bit_addr_from_msg(p);
+	v = (u8)((p->addr << 1) | ((p->flags & I2C_M_RD) ? 1 : 0));
 	for (i = 0, mask = 0x80; i < 8; ++i, mask >>= 1){
 		out_8(&iic->directcntl, sda);
 		ndelay(t->low / 2);
@@ -660,7 +660,7 @@ static inline u8 iic_clckdiv(unsigned int opb)
 	return (u8)((opb + 9) / 10 - 1);
 }
 
-static int iic_request_irq(struct platform_device *ofdev,
+static int __devinit iic_request_irq(struct platform_device *ofdev,
 				     struct ibm_iic_private *dev)
 {
 	struct device_node *np = ofdev->dev.of_node;
@@ -691,7 +691,7 @@ static int iic_request_irq(struct platform_device *ofdev,
 /*
  * Register single IIC interface
  */
-static int iic_probe(struct platform_device *ofdev)
+static int __devinit iic_probe(struct platform_device *ofdev)
 {
 	struct device_node *np = ofdev->dev.of_node;
 	struct ibm_iic_private *dev;
@@ -705,7 +705,7 @@ static int iic_probe(struct platform_device *ofdev)
 		return -ENOMEM;
 	}
 
-	platform_set_drvdata(ofdev, dev);
+	dev_set_drvdata(&ofdev->dev, dev);
 
 	dev->vaddr = of_iomap(np, 0);
 	if (dev->vaddr == NULL) {
@@ -751,11 +751,16 @@ static int iic_probe(struct platform_device *ofdev)
 	adap->timeout = HZ;
 
 	ret = i2c_add_adapter(adap);
-	if (ret  < 0)
+	if (ret  < 0) {
+		dev_err(&ofdev->dev, "failed to register i2c adapter\n");
 		goto error_cleanup;
+	}
 
 	dev_info(&ofdev->dev, "using %s mode\n",
 		 dev->fast_mode ? "fast (400 kHz)" : "standard (100 kHz)");
+
+	/* Now register all the child nodes */
+	of_i2c_register_devices(adap);
 
 	return 0;
 
@@ -768,6 +773,7 @@ error_cleanup:
 	if (dev->vaddr)
 		iounmap(dev->vaddr);
 
+	dev_set_drvdata(&ofdev->dev, NULL);
 	kfree(dev);
 	return ret;
 }
@@ -775,9 +781,11 @@ error_cleanup:
 /*
  * Cleanup initialized IIC interface
  */
-static int iic_remove(struct platform_device *ofdev)
+static int __devexit iic_remove(struct platform_device *ofdev)
 {
-	struct ibm_iic_private *dev = platform_get_drvdata(ofdev);
+	struct ibm_iic_private *dev = dev_get_drvdata(&ofdev->dev);
+
+	dev_set_drvdata(&ofdev->dev, NULL);
 
 	i2c_del_adapter(&dev->adap);
 
@@ -796,15 +804,15 @@ static const struct of_device_id ibm_iic_match[] = {
 	{ .compatible = "ibm,iic", },
 	{}
 };
-MODULE_DEVICE_TABLE(of, ibm_iic_match);
 
 static struct platform_driver ibm_iic_driver = {
 	.driver = {
 		.name = "ibm-iic",
+		.owner = THIS_MODULE,
 		.of_match_table = ibm_iic_match,
 	},
 	.probe	= iic_probe,
-	.remove	= iic_remove,
+	.remove	= __devexit_p(iic_remove),
 };
 
 module_platform_driver(ibm_iic_driver);

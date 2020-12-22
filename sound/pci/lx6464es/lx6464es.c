@@ -56,14 +56,14 @@ static const char card_name[] = "LX6464ES";
 
 #define PCI_DEVICE_ID_PLX_LX6464ES		PCI_DEVICE_ID_PLX_9056
 
-static const struct pci_device_id snd_lx6464es_ids[] = {
-	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_LX6464ES,
-			 PCI_VENDOR_ID_DIGIGRAM,
-			 PCI_SUBDEVICE_ID_DIGIGRAM_LX6464ES_SERIAL_SUBSYSTEM),
+static DEFINE_PCI_DEVICE_TABLE(snd_lx6464es_ids) = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_LX6464ES),
+	  .subvendor = PCI_VENDOR_ID_DIGIGRAM,
+	  .subdevice = PCI_SUBDEVICE_ID_DIGIGRAM_LX6464ES_SERIAL_SUBSYSTEM
 	},			/* LX6464ES */
-	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_LX6464ES,
-			 PCI_VENDOR_ID_DIGIGRAM,
-			 PCI_SUBDEVICE_ID_DIGIGRAM_LX6464ES_CAE_SERIAL_SUBSYSTEM),
+	{ PCI_DEVICE(PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_LX6464ES),
+	  .subvendor = PCI_VENDOR_ID_DIGIGRAM,
+	  .subdevice = PCI_SUBDEVICE_ID_DIGIGRAM_LX6464ES_CAE_SERIAL_SUBSYSTEM
 	},			/* LX6464ES-CAE */
 	{ 0, },
 };
@@ -112,16 +112,16 @@ static int lx_hardware_open(struct lx6464es *chip,
 
 	snd_pcm_uframes_t period_size = runtime->period_size;
 
-	dev_dbg(chip->card->dev, "allocating pipe for %d channels\n", channels);
+	snd_printd(LXP "allocating pipe for %d channels\n", channels);
 	err = lx_pipe_allocate(chip, 0, is_capture, channels);
 	if (err < 0) {
-		dev_err(chip->card->dev, LXP "allocating pipe failed\n");
+		snd_printk(KERN_ERR LXP "allocating pipe failed\n");
 		return err;
 	}
 
 	err = lx_set_granularity(chip, period_size);
 	if (err < 0) {
-		dev_err(chip->card->dev, "setting granularity to %ld failed\n",
+		snd_printk(KERN_ERR LXP "setting granularity to %ld failed\n",
 			   period_size);
 		return err;
 	}
@@ -136,24 +136,24 @@ static int lx_hardware_start(struct lx6464es *chip,
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	int is_capture = (substream->stream == SNDRV_PCM_STREAM_CAPTURE);
 
-	dev_dbg(chip->card->dev, "setting stream format\n");
+	snd_printd(LXP "setting stream format\n");
 	err = lx_stream_set_format(chip, runtime, 0, is_capture);
 	if (err < 0) {
-		dev_err(chip->card->dev, "setting stream format failed\n");
+		snd_printk(KERN_ERR LXP "setting stream format failed\n");
 		return err;
 	}
 
-	dev_dbg(chip->card->dev, "starting pipe\n");
+	snd_printd(LXP "starting pipe\n");
 	err = lx_pipe_start(chip, 0, is_capture);
 	if (err < 0) {
-		dev_err(chip->card->dev, "starting pipe failed\n");
+		snd_printk(KERN_ERR LXP "starting pipe failed\n");
 		return err;
 	}
 
-	dev_dbg(chip->card->dev, "waiting for pipe to start\n");
+	snd_printd(LXP "waiting for pipe to start\n");
 	err = lx_pipe_wait_for_start(chip, 0, is_capture);
 	if (err < 0) {
-		dev_err(chip->card->dev, "waiting for pipe failed\n");
+		snd_printk(KERN_ERR LXP "waiting for pipe failed\n");
 		return err;
 	}
 
@@ -167,24 +167,24 @@ static int lx_hardware_stop(struct lx6464es *chip,
 	int err = 0;
 	int is_capture = (substream->stream == SNDRV_PCM_STREAM_CAPTURE);
 
-	dev_dbg(chip->card->dev, "pausing pipe\n");
+	snd_printd(LXP "pausing pipe\n");
 	err = lx_pipe_pause(chip, 0, is_capture);
 	if (err < 0) {
-		dev_err(chip->card->dev, "pausing pipe failed\n");
+		snd_printk(KERN_ERR LXP "pausing pipe failed\n");
 		return err;
 	}
 
-	dev_dbg(chip->card->dev, "waiting for pipe to become idle\n");
+	snd_printd(LXP "waiting for pipe to become idle\n");
 	err = lx_pipe_wait_for_idle(chip, 0, is_capture);
 	if (err < 0) {
-		dev_err(chip->card->dev, "waiting for pipe failed\n");
+		snd_printk(KERN_ERR LXP "waiting for pipe failed\n");
 		return err;
 	}
 
-	dev_dbg(chip->card->dev, "stopping pipe\n");
+	snd_printd(LXP "stopping pipe\n");
 	err = lx_pipe_stop(chip, 0, is_capture);
 	if (err < 0) {
-		dev_err(chip->card->dev, "stopping pipe failed\n");
+		snd_printk(LXP "stopping pipe failed\n");
 		return err;
 	}
 
@@ -198,10 +198,10 @@ static int lx_hardware_close(struct lx6464es *chip,
 	int err = 0;
 	int is_capture = (substream->stream == SNDRV_PCM_STREAM_CAPTURE);
 
-	dev_dbg(chip->card->dev, "releasing pipe\n");
+	snd_printd(LXP "releasing pipe\n");
 	err = lx_pipe_release(chip, 0, is_capture);
 	if (err < 0) {
-		dev_err(chip->card->dev, "releasing pipe failed\n");
+		snd_printk(LXP "releasing pipe failed\n");
 		return err;
 	}
 
@@ -216,7 +216,7 @@ static int lx_pcm_open(struct snd_pcm_substream *substream)
 	int err = 0;
 	int board_rate;
 
-	dev_dbg(chip->card->dev, "->lx_pcm_open\n");
+	snd_printdd("->lx_pcm_open\n");
 	mutex_lock(&chip->setup_mutex);
 
 	/* copy the struct snd_pcm_hardware struct */
@@ -227,18 +227,18 @@ static int lx_pcm_open(struct snd_pcm_substream *substream)
 	err = snd_pcm_hw_constraint_integer(runtime,
 					    SNDRV_PCM_HW_PARAM_PERIODS);
 	if (err < 0) {
-		dev_warn(chip->card->dev, "could not constrain periods\n");
+		snd_printk(KERN_WARNING LXP "could not constrain periods\n");
 		goto exit;
 	}
 #endif
 
 	/* the clock rate cannot be changed */
 	board_rate = chip->board_sample_rate;
-	err = snd_pcm_hw_constraint_single(runtime, SNDRV_PCM_HW_PARAM_RATE,
-					   board_rate);
+	err = snd_pcm_hw_constraint_minmax(runtime, SNDRV_PCM_HW_PARAM_RATE,
+					   board_rate, board_rate);
 
 	if (err < 0) {
-		dev_warn(chip->card->dev, "could not constrain periods\n");
+		snd_printk(KERN_WARNING LXP "could not constrain periods\n");
 		goto exit;
 	}
 
@@ -248,7 +248,7 @@ static int lx_pcm_open(struct snd_pcm_substream *substream)
 					   MICROBLAZE_IBL_MIN,
 					   MICROBLAZE_IBL_MAX);
 	if (err < 0) {
-		dev_warn(chip->card->dev,
+		snd_printk(KERN_WARNING LXP
 			   "could not constrain period size\n");
 		goto exit;
 	}
@@ -263,14 +263,14 @@ exit:
 	runtime->private_data = chip;
 
 	mutex_unlock(&chip->setup_mutex);
-	dev_dbg(chip->card->dev, "<-lx_pcm_open, %d\n", err);
+	snd_printdd("<-lx_pcm_open, %d\n", err);
 	return err;
 }
 
 static int lx_pcm_close(struct snd_pcm_substream *substream)
 {
 	int err = 0;
-	dev_dbg(substream->pcm->card->dev, "->lx_pcm_close\n");
+	snd_printdd("->lx_pcm_close\n");
 	return err;
 }
 
@@ -279,18 +279,19 @@ static snd_pcm_uframes_t lx_pcm_stream_pointer(struct snd_pcm_substream
 {
 	struct lx6464es *chip = snd_pcm_substream_chip(substream);
 	snd_pcm_uframes_t pos;
+	unsigned long flags;
 	int is_capture = (substream->stream == SNDRV_PCM_STREAM_CAPTURE);
 
 	struct lx_stream *lx_stream = is_capture ? &chip->capture_stream :
 		&chip->playback_stream;
 
-	dev_dbg(chip->card->dev, "->lx_pcm_stream_pointer\n");
+	snd_printdd("->lx_pcm_stream_pointer\n");
 
-	mutex_lock(&chip->lock);
+	spin_lock_irqsave(&chip->lock, flags);
 	pos = lx_stream->frame_pos * substream->runtime->period_size;
-	mutex_unlock(&chip->lock);
+	spin_unlock_irqrestore(&chip->lock, flags);
 
-	dev_dbg(chip->card->dev, "stream_pointer at %ld\n", pos);
+	snd_printdd(LXP "stream_pointer at %ld\n", pos);
 	return pos;
 }
 
@@ -300,37 +301,37 @@ static int lx_pcm_prepare(struct snd_pcm_substream *substream)
 	int err = 0;
 	const int is_capture = (substream->stream == SNDRV_PCM_STREAM_CAPTURE);
 
-	dev_dbg(chip->card->dev, "->lx_pcm_prepare\n");
+	snd_printdd("->lx_pcm_prepare\n");
 
 	mutex_lock(&chip->setup_mutex);
 
 	if (chip->hardware_running[is_capture]) {
 		err = lx_hardware_stop(chip, substream);
 		if (err < 0) {
-			dev_err(chip->card->dev, "failed to stop hardware. "
+			snd_printk(KERN_ERR LXP "failed to stop hardware. "
 				   "Error code %d\n", err);
 			goto exit;
 		}
 
 		err = lx_hardware_close(chip, substream);
 		if (err < 0) {
-			dev_err(chip->card->dev, "failed to close hardware. "
+			snd_printk(KERN_ERR LXP "failed to close hardware. "
 				   "Error code %d\n", err);
 			goto exit;
 		}
 	}
 
-	dev_dbg(chip->card->dev, "opening hardware\n");
+	snd_printd(LXP "opening hardware\n");
 	err = lx_hardware_open(chip, substream);
 	if (err < 0) {
-		dev_err(chip->card->dev, "failed to open hardware. "
+		snd_printk(KERN_ERR LXP "failed to open hardware. "
 			   "Error code %d\n", err);
 		goto exit;
 	}
 
 	err = lx_hardware_start(chip, substream);
 	if (err < 0) {
-		dev_err(chip->card->dev, "failed to start hardware. "
+		snd_printk(KERN_ERR LXP "failed to start hardware. "
 			   "Error code %d\n", err);
 		goto exit;
 	}
@@ -353,7 +354,7 @@ static int lx_pcm_hw_params(struct snd_pcm_substream *substream,
 	struct lx6464es *chip = snd_pcm_substream_chip(substream);
 	int err = 0;
 
-	dev_dbg(chip->card->dev, "->lx_pcm_hw_params\n");
+	snd_printdd("->lx_pcm_hw_params\n");
 
 	mutex_lock(&chip->setup_mutex);
 
@@ -388,20 +389,20 @@ static int lx_pcm_hw_free(struct snd_pcm_substream *substream)
 	int err = 0;
 	int is_capture = (substream->stream == SNDRV_PCM_STREAM_CAPTURE);
 
-	dev_dbg(chip->card->dev, "->lx_pcm_hw_free\n");
+	snd_printdd("->lx_pcm_hw_free\n");
 	mutex_lock(&chip->setup_mutex);
 
 	if (chip->hardware_running[is_capture]) {
 		err = lx_hardware_stop(chip, substream);
 		if (err < 0) {
-			dev_err(chip->card->dev, "failed to stop hardware. "
+			snd_printk(KERN_ERR LXP "failed to stop hardware. "
 				   "Error code %d\n", err);
 			goto exit;
 		}
 
 		err = lx_hardware_close(chip, substream);
 		if (err < 0) {
-			dev_err(chip->card->dev, "failed to close hardware. "
+			snd_printk(KERN_ERR LXP "failed to close hardware. "
 				   "Error code %d\n", err);
 			goto exit;
 		}
@@ -412,9 +413,9 @@ static int lx_pcm_hw_free(struct snd_pcm_substream *substream)
 	err = snd_pcm_lib_free_pages(substream);
 
 	if (is_capture)
-		chip->capture_stream.stream = NULL;
+		chip->capture_stream.stream = 0;
 	else
-		chip->playback_stream.stream = NULL;
+		chip->playback_stream.stream = 0;
 
 exit:
 	mutex_unlock(&chip->setup_mutex);
@@ -445,25 +446,25 @@ static void lx_trigger_start(struct lx6464es *chip, struct lx_stream *lx_stream)
 
 		err = lx_buffer_ask(chip, 0, is_capture, &needed, &freed,
 				    size_array);
-		dev_dbg(chip->card->dev, "starting: needed %d, freed %d\n",
+		snd_printdd(LXP "starting: needed %d, freed %d\n",
 			    needed, freed);
 
 		err = lx_buffer_give(chip, 0, is_capture, period_bytes,
 				     lower_32_bits(buf), upper_32_bits(buf),
 				     &buffer_index);
 
-		dev_dbg(chip->card->dev, "starting: buffer index %x on 0x%lx (%d bytes)\n",
-			    buffer_index, (unsigned long)buf, period_bytes);
+		snd_printdd(LXP "starting: buffer index %x on %p (%d bytes)\n",
+			    buffer_index, (void *)buf, period_bytes);
 		buf += period_bytes;
 	}
 
 	err = lx_buffer_ask(chip, 0, is_capture, &needed, &freed, size_array);
-	dev_dbg(chip->card->dev, "starting: needed %d, freed %d\n", needed, freed);
+	snd_printdd(LXP "starting: needed %d, freed %d\n", needed, freed);
 
-	dev_dbg(chip->card->dev, "starting: starting stream\n");
+	snd_printd(LXP "starting: starting stream\n");
 	err = lx_stream_start(chip, 0, is_capture);
 	if (err < 0)
-		dev_err(chip->card->dev, "couldn't start stream\n");
+		snd_printk(KERN_ERR LXP "couldn't start stream\n");
 	else
 		lx_stream->status = LX_STREAM_STATUS_RUNNING;
 
@@ -475,17 +476,17 @@ static void lx_trigger_stop(struct lx6464es *chip, struct lx_stream *lx_stream)
 	const unsigned int is_capture = lx_stream->is_capture;
 	int err;
 
-	dev_dbg(chip->card->dev, "stopping: stopping stream\n");
+	snd_printd(LXP "stopping: stopping stream\n");
 	err = lx_stream_stop(chip, 0, is_capture);
 	if (err < 0)
-		dev_err(chip->card->dev, "couldn't stop stream\n");
+		snd_printk(KERN_ERR LXP "couldn't stop stream\n");
 	else
 		lx_stream->status = LX_STREAM_STATUS_FREE;
 
 }
 
-static void lx_trigger_dispatch_stream(struct lx6464es *chip,
-				       struct lx_stream *lx_stream)
+static void lx_trigger_tasklet_dispatch_stream(struct lx6464es *chip,
+					       struct lx_stream *lx_stream)
 {
 	switch (lx_stream->status) {
 	case LX_STREAM_STATUS_SCHEDULE_RUN:
@@ -501,12 +502,24 @@ static void lx_trigger_dispatch_stream(struct lx6464es *chip,
 	}
 }
 
+static void lx_trigger_tasklet(unsigned long data)
+{
+	struct lx6464es *chip = (struct lx6464es *)data;
+	unsigned long flags;
+
+	snd_printdd("->lx_trigger_tasklet\n");
+
+	spin_lock_irqsave(&chip->lock, flags);
+	lx_trigger_tasklet_dispatch_stream(chip, &chip->capture_stream);
+	lx_trigger_tasklet_dispatch_stream(chip, &chip->playback_stream);
+	spin_unlock_irqrestore(&chip->lock, flags);
+}
+
 static int lx_pcm_trigger_dispatch(struct lx6464es *chip,
 				   struct lx_stream *lx_stream, int cmd)
 {
 	int err = 0;
 
-	mutex_lock(&chip->lock);
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 		lx_stream->status = LX_STREAM_STATUS_SCHEDULE_RUN;
@@ -520,12 +533,9 @@ static int lx_pcm_trigger_dispatch(struct lx6464es *chip,
 		err = -EINVAL;
 		goto exit;
 	}
-
-	lx_trigger_dispatch_stream(chip, &chip->capture_stream);
-	lx_trigger_dispatch_stream(chip, &chip->playback_stream);
+	tasklet_schedule(&chip->trigger_tasklet);
 
 exit:
-	mutex_unlock(&chip->lock);
 	return err;
 }
 
@@ -537,14 +547,14 @@ static int lx_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	struct lx_stream *stream = is_capture ? &chip->capture_stream :
 		&chip->playback_stream;
 
-	dev_dbg(chip->card->dev, "->lx_pcm_trigger\n");
+	snd_printdd("->lx_pcm_trigger\n");
 
 	return lx_pcm_trigger_dispatch(chip, stream, cmd);
 }
 
 static int snd_lx6464es_free(struct lx6464es *chip)
 {
-	dev_dbg(chip->card->dev, "->snd_lx6464es_free\n");
+	snd_printdd("->snd_lx6464es_free\n");
 
 	lx_irq_disable(chip);
 
@@ -568,12 +578,12 @@ static int snd_lx6464es_dev_free(struct snd_device *device)
 }
 
 /* reset the dsp during initialization */
-static int lx_init_xilinx_reset(struct lx6464es *chip)
+static int __devinit lx_init_xilinx_reset(struct lx6464es *chip)
 {
 	int i;
 	u32 plx_reg = lx_plx_reg_read(chip, ePLX_CHIPSC);
 
-	dev_dbg(chip->card->dev, "->lx_init_xilinx_reset\n");
+	snd_printdd("->lx_init_xilinx_reset\n");
 
 	/* activate reset of xilinx */
 	plx_reg &= ~CHIPSC_RESET_XILINX;
@@ -593,8 +603,8 @@ static int lx_init_xilinx_reset(struct lx6464es *chip)
 		msleep(10);
 		reg_mbox3 = lx_plx_reg_read(chip, ePLX_MBOX3);
 		if (reg_mbox3) {
-			dev_dbg(chip->card->dev, "xilinx reset done\n");
-			dev_dbg(chip->card->dev, "xilinx took %d loops\n", i);
+			snd_printd(LXP "xilinx reset done\n");
+			snd_printdd(LXP "xilinx took %d loops\n", i);
 			break;
 		}
 	}
@@ -610,11 +620,11 @@ static int lx_init_xilinx_reset(struct lx6464es *chip)
 	return 0;
 }
 
-static int lx_init_xilinx_test(struct lx6464es *chip)
+static int __devinit lx_init_xilinx_test(struct lx6464es *chip)
 {
 	u32 reg;
 
-	dev_dbg(chip->card->dev, "->lx_init_xilinx_test\n");
+	snd_printdd("->lx_init_xilinx_test\n");
 
 	/* TEST if we have access to Xilinx/MicroBlaze */
 	lx_dsp_reg_write(chip, eReg_CSM, 0);
@@ -622,25 +632,25 @@ static int lx_init_xilinx_test(struct lx6464es *chip)
 	reg = lx_dsp_reg_read(chip, eReg_CSM);
 
 	if (reg) {
-		dev_err(chip->card->dev, "Problem: Reg_CSM %x.\n", reg);
+		snd_printk(KERN_ERR LXP "Problem: Reg_CSM %x.\n", reg);
 
 		/* PCI9056_SPACE0_REMAP */
 		lx_plx_reg_write(chip, ePLX_PCICR, 1);
 
 		reg = lx_dsp_reg_read(chip, eReg_CSM);
 		if (reg) {
-			dev_err(chip->card->dev, "Error: Reg_CSM %x.\n", reg);
+			snd_printk(KERN_ERR LXP "Error: Reg_CSM %x.\n", reg);
 			return -EAGAIN; /* seems to be appropriate */
 		}
 	}
 
-	dev_dbg(chip->card->dev, "Xilinx/MicroBlaze access test successful\n");
+	snd_printd(LXP "Xilinx/MicroBlaze access test successful\n");
 
 	return 0;
 }
 
 /* initialize ethersound */
-static int lx_init_ethersound_config(struct lx6464es *chip)
+static int __devinit lx_init_ethersound_config(struct lx6464es *chip)
 {
 	int i;
 	u32 orig_conf_es = lx_dsp_reg_read(chip, eReg_CONFES);
@@ -651,7 +661,7 @@ static int lx_init_ethersound_config(struct lx6464es *chip)
 		(64 << IOCR_OUTPUTS_OFFSET) |
 		(FREQ_RATIO_SINGLE_MODE << FREQ_RATIO_OFFSET);
 
-	dev_dbg(chip->card->dev, "->lx_init_ethersound\n");
+	snd_printdd("->lx_init_ethersound\n");
 
 	chip->freq_ratio = FREQ_RATIO_SINGLE_MODE;
 
@@ -665,35 +675,35 @@ static int lx_init_ethersound_config(struct lx6464es *chip)
 
 	for (i = 0; i != 1000; ++i) {
 		if (lx_dsp_reg_read(chip, eReg_CSES) & 4) {
-			dev_dbg(chip->card->dev, "ethersound initialized after %dms\n",
+			snd_printd(LXP "ethersound initialized after %dms\n",
 				   i);
 			goto ethersound_initialized;
 		}
 		msleep(1);
 	}
-	dev_warn(chip->card->dev,
+	snd_printk(KERN_WARNING LXP
 		   "ethersound could not be initialized after %dms\n", i);
 	return -ETIMEDOUT;
 
  ethersound_initialized:
-	dev_dbg(chip->card->dev, "ethersound initialized\n");
+	snd_printd(LXP "ethersound initialized\n");
 	return 0;
 }
 
-static int lx_init_get_version_features(struct lx6464es *chip)
+static int __devinit lx_init_get_version_features(struct lx6464es *chip)
 {
 	u32 dsp_version;
 
 	int err;
 
-	dev_dbg(chip->card->dev, "->lx_init_get_version_features\n");
+	snd_printdd("->lx_init_get_version_features\n");
 
 	err = lx_dsp_get_version(chip, &dsp_version);
 
 	if (err == 0) {
 		u32 freq;
 
-		dev_info(chip->card->dev, "DSP version: V%02d.%02d #%d\n",
+		snd_printk(LXP "DSP version: V%02d.%02d #%d\n",
 			   (dsp_version>>16) & 0xff, (dsp_version>>8) & 0xff,
 			   dsp_version & 0xff);
 
@@ -708,9 +718,9 @@ static int lx_init_get_version_features(struct lx6464es *chip)
 		err = lx_dsp_get_clock_frequency(chip, &freq);
 		if (err == 0)
 			chip->board_sample_rate = freq;
-		dev_dbg(chip->card->dev, "actual clock frequency %d\n", freq);
+		snd_printd(LXP "actual clock frequency %d\n", freq);
 	} else {
-		dev_err(chip->card->dev, "DSP corrupted \n");
+		snd_printk(KERN_ERR LXP "DSP corrupted \n");
 		err = -EAGAIN;
 	}
 
@@ -722,7 +732,7 @@ static int lx_set_granularity(struct lx6464es *chip, u32 gran)
 	int err = 0;
 	u32 snapped_gran = MICROBLAZE_IBL_MIN;
 
-	dev_dbg(chip->card->dev, "->lx_set_granularity\n");
+	snd_printdd("->lx_set_granularity\n");
 
 	/* blocksize is a power of 2 */
 	while ((snapped_gran < gran) &&
@@ -735,38 +745,38 @@ static int lx_set_granularity(struct lx6464es *chip, u32 gran)
 
 	err = lx_dsp_set_granularity(chip, snapped_gran);
 	if (err < 0) {
-		dev_warn(chip->card->dev, "could not set granularity\n");
+		snd_printk(KERN_WARNING LXP "could not set granularity\n");
 		err = -EAGAIN;
 	}
 
 	if (snapped_gran != gran)
-		dev_err(chip->card->dev, "snapped blocksize to %d\n", snapped_gran);
+		snd_printk(LXP "snapped blocksize to %d\n", snapped_gran);
 
-	dev_dbg(chip->card->dev, "set blocksize on board %d\n", snapped_gran);
+	snd_printd(LXP "set blocksize on board %d\n", snapped_gran);
 	chip->pcm_granularity = snapped_gran;
 
 	return err;
 }
 
 /* initialize and test the xilinx dsp chip */
-static int lx_init_dsp(struct lx6464es *chip)
+static int __devinit lx_init_dsp(struct lx6464es *chip)
 {
 	int err;
 	int i;
 
-	dev_dbg(chip->card->dev, "->lx_init_dsp\n");
+	snd_printdd("->lx_init_dsp\n");
 
-	dev_dbg(chip->card->dev, "initialize board\n");
+	snd_printd(LXP "initialize board\n");
 	err = lx_init_xilinx_reset(chip);
 	if (err)
 		return err;
 
-	dev_dbg(chip->card->dev, "testing board\n");
+	snd_printd(LXP "testing board\n");
 	err = lx_init_xilinx_test(chip);
 	if (err)
 		return err;
 
-	dev_dbg(chip->card->dev, "initialize ethersound configuration\n");
+	snd_printd(LXP "initialize ethersound configuration\n");
 	err = lx_init_ethersound_config(chip);
 	if (err)
 		return err;
@@ -787,9 +797,8 @@ static int lx_init_dsp(struct lx6464es *chip)
 	return -ETIMEDOUT;
 
 mac_ready:
-	dev_dbg(chip->card->dev, "mac address ready read after: %dms\n", i);
-	dev_info(chip->card->dev,
-		 "mac address: %02X.%02X.%02X.%02X.%02X.%02X\n",
+	snd_printd(LXP "mac address ready read after: %dms\n", i);
+	snd_printk(LXP "mac address: %02X.%02X.%02X.%02X.%02X.%02X\n",
 		   chip->mac_address[0], chip->mac_address[1], chip->mac_address[2],
 		   chip->mac_address[3], chip->mac_address[4], chip->mac_address[5]);
 
@@ -804,7 +813,7 @@ mac_ready:
 	return err;
 }
 
-static const struct snd_pcm_ops lx_ops_playback = {
+static struct snd_pcm_ops lx_ops_playback = {
 	.open      = lx_pcm_open,
 	.close     = lx_pcm_close,
 	.ioctl     = snd_pcm_lib_ioctl,
@@ -815,7 +824,7 @@ static const struct snd_pcm_ops lx_ops_playback = {
 	.pointer   = lx_pcm_stream_pointer,
 };
 
-static const struct snd_pcm_ops lx_ops_capture = {
+static struct snd_pcm_ops lx_ops_capture = {
 	.open      = lx_pcm_open,
 	.close     = lx_pcm_close,
 	.ioctl     = snd_pcm_lib_ioctl,
@@ -826,7 +835,7 @@ static const struct snd_pcm_ops lx_ops_capture = {
 	.pointer   = lx_pcm_stream_pointer,
 };
 
-static int lx_pcm_create(struct lx6464es *chip)
+static int __devinit lx_pcm_create(struct lx6464es *chip)
 {
 	int err;
 	struct snd_pcm *pcm;
@@ -842,8 +851,6 @@ static int lx_pcm_create(struct lx6464es *chip)
 	/* hardcoded device name & channel count */
 	err = snd_pcm_new(chip->card, (char *)card_name, 0,
 			  1, 1, &pcm);
-	if (err < 0)
-		return err;
 
 	pcm->private_data = chip;
 
@@ -851,7 +858,6 @@ static int lx_pcm_create(struct lx6464es *chip)
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &lx_ops_capture);
 
 	pcm->info_flags = 0;
-	pcm->nonatomic = true;
 	strcpy(pcm->name, card_name);
 
 	err = snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
@@ -899,7 +905,7 @@ static int lx_control_playback_put(struct snd_kcontrol *kcontrol,
 	return changed;
 }
 
-static struct snd_kcontrol_new lx_control_playback_switch = {
+static struct snd_kcontrol_new lx_control_playback_switch __devinitdata = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "PCM Playback Switch",
 	.index = 0,
@@ -946,7 +952,7 @@ static void lx_proc_levels_read(struct snd_info_entry *entry,
 	snd_iprintf(buffer, "\n");
 }
 
-static int lx_proc_create(struct snd_card *card, struct lx6464es *chip)
+static int __devinit lx_proc_create(struct snd_card *card, struct lx6464es *chip)
 {
 	struct snd_info_entry *entry;
 	int err = snd_card_proc_new(card, "levels", &entry);
@@ -958,9 +964,9 @@ static int lx_proc_create(struct snd_card *card, struct lx6464es *chip)
 }
 
 
-static int snd_lx6464es_create(struct snd_card *card,
-			       struct pci_dev *pci,
-			       struct lx6464es **rchip)
+static int __devinit snd_lx6464es_create(struct snd_card *card,
+					 struct pci_dev *pci,
+					 struct lx6464es **rchip)
 {
 	struct lx6464es *chip;
 	int err;
@@ -969,7 +975,7 @@ static int snd_lx6464es_create(struct snd_card *card,
 		.dev_free = snd_lx6464es_dev_free,
 	};
 
-	dev_dbg(card->dev, "->snd_lx6464es_create\n");
+	snd_printdd("->snd_lx6464es_create\n");
 
 	*rchip = NULL;
 
@@ -981,10 +987,10 @@ static int snd_lx6464es_create(struct snd_card *card,
 	pci_set_master(pci);
 
 	/* check if we can restrict PCI DMA transfers to 32 bits */
-	err = dma_set_mask(&pci->dev, DMA_BIT_MASK(32));
+	err = pci_set_dma_mask(pci, DMA_BIT_MASK(32));
 	if (err < 0) {
-		dev_err(card->dev,
-			"architecture does not support 32bit PCI busmaster DMA\n");
+		snd_printk(KERN_ERR "architecture does not support "
+			   "32bit PCI busmaster DMA\n");
 		pci_disable_device(pci);
 		return -ENXIO;
 	}
@@ -1000,9 +1006,15 @@ static int snd_lx6464es_create(struct snd_card *card,
 	chip->irq = -1;
 
 	/* initialize synchronization structs */
-	mutex_init(&chip->lock);
-	mutex_init(&chip->msg_lock);
+	spin_lock_init(&chip->lock);
+	spin_lock_init(&chip->msg_lock);
 	mutex_init(&chip->setup_mutex);
+	tasklet_init(&chip->trigger_tasklet, lx_trigger_tasklet,
+		     (unsigned long)chip);
+	tasklet_init(&chip->tasklet_capture, lx_tasklet_capture,
+		     (unsigned long)chip);
+	tasklet_init(&chip->tasklet_playback, lx_tasklet_playback,
+		     (unsigned long)chip);
 
 	/* request resources */
 	err = pci_request_regions(pci, card_name);
@@ -1017,10 +1029,10 @@ static int snd_lx6464es_create(struct snd_card *card,
 	/* dsp port */
 	chip->port_dsp_bar = pci_ioremap_bar(pci, 2);
 
-	err = request_threaded_irq(pci->irq, lx_interrupt, lx_threaded_irq,
-				   IRQF_SHARED, KBUILD_MODNAME, chip);
+	err = request_irq(pci->irq, lx_interrupt, IRQF_SHARED,
+			  KBUILD_MODNAME, chip);
 	if (err) {
-		dev_err(card->dev, "unable to grab IRQ %d\n", pci->irq);
+		snd_printk(KERN_ERR LXP "unable to grab IRQ %d\n", pci->irq);
 		goto request_irq_failed;
 	}
 	chip->irq = pci->irq;
@@ -1031,7 +1043,7 @@ static int snd_lx6464es_create(struct snd_card *card,
 
 	err = lx_init_dsp(chip);
 	if (err < 0) {
-		dev_err(card->dev, "error during DSP initialization\n");
+		snd_printk(KERN_ERR LXP "error during DSP initialization\n");
 		return err;
 	}
 
@@ -1047,6 +1059,8 @@ static int snd_lx6464es_create(struct snd_card *card,
 					     chip));
 	if (err < 0)
 		return err;
+
+	snd_card_set_dev(card, &pci->dev);
 
 	*rchip = chip;
 	return 0;
@@ -1066,15 +1080,15 @@ alloc_failed:
 	return err;
 }
 
-static int snd_lx6464es_probe(struct pci_dev *pci,
-			      const struct pci_device_id *pci_id)
+static int __devinit snd_lx6464es_probe(struct pci_dev *pci,
+					const struct pci_device_id *pci_id)
 {
 	static int dev;
 	struct snd_card *card;
 	struct lx6464es *chip;
 	int err;
 
-	dev_dbg(&pci->dev, "->snd_lx6464es_probe\n");
+	snd_printdd("->snd_lx6464es_probe\n");
 
 	if (dev >= SNDRV_CARDS)
 		return -ENODEV;
@@ -1083,14 +1097,13 @@ static int snd_lx6464es_probe(struct pci_dev *pci,
 		return -ENOENT;
 	}
 
-	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
-			   0, &card);
+	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
 	if (err < 0)
 		return err;
 
 	err = snd_lx6464es_create(card, pci, &chip);
 	if (err < 0) {
-		dev_err(card->dev, "error during snd_lx6464es_create\n");
+		snd_printk(KERN_ERR LXP "error during snd_lx6464es_create\n");
 		goto out_free;
 	}
 
@@ -1110,7 +1123,7 @@ static int snd_lx6464es_probe(struct pci_dev *pci,
 	if (err < 0)
 		goto out_free;
 
-	dev_dbg(chip->card->dev, "initialization successful\n");
+	snd_printdd(LXP "initialization successful\n");
 	pci_set_drvdata(pci, card);
 	dev++;
 	return 0;
@@ -1121,17 +1134,31 @@ out_free:
 
 }
 
-static void snd_lx6464es_remove(struct pci_dev *pci)
+static void __devexit snd_lx6464es_remove(struct pci_dev *pci)
 {
 	snd_card_free(pci_get_drvdata(pci));
+	pci_set_drvdata(pci, NULL);
 }
 
 
-static struct pci_driver lx6464es_driver = {
+static struct pci_driver driver = {
 	.name =     KBUILD_MODNAME,
 	.id_table = snd_lx6464es_ids,
 	.probe =    snd_lx6464es_probe,
-	.remove = snd_lx6464es_remove,
+	.remove = __devexit_p(snd_lx6464es_remove),
 };
 
-module_pci_driver(lx6464es_driver);
+
+/* module initialization */
+static int __init mod_init(void)
+{
+	return pci_register_driver(&driver);
+}
+
+static void __exit mod_exit(void)
+{
+	pci_unregister_driver(&driver);
+}
+
+module_init(mod_init);
+module_exit(mod_exit);

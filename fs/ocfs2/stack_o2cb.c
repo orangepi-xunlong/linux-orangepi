@@ -295,7 +295,7 @@ static int o2cb_cluster_check(void)
 		set_bit(node_num, netmap);
 		if (!memcmp(hbmap, netmap, sizeof(hbmap)))
 			return 0;
-		if (i < O2CB_MAP_STABILIZE_COUNT - 1)
+		if (i < O2CB_MAP_STABILIZE_COUNT)
 			msleep(1000);
 	}
 
@@ -376,7 +376,7 @@ static int o2cb_cluster_connect(struct ocfs2_cluster_connection *conn)
 	dlm_register_eviction_cb(dlm, &priv->op_eviction_cb);
 
 out_free:
-	if (rc)
+	if (rc && conn->cc_private)
 		kfree(conn->cc_private);
 
 out:
@@ -398,8 +398,7 @@ static int o2cb_cluster_disconnect(struct ocfs2_cluster_connection *conn)
 	return 0;
 }
 
-static int o2cb_cluster_this_node(struct ocfs2_cluster_connection *conn,
-				  unsigned int *node)
+static int o2cb_cluster_this_node(unsigned int *node)
 {
 	int node_num;
 

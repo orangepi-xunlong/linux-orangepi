@@ -40,10 +40,10 @@ frag_mt6(const struct sk_buff *skb, struct xt_action_param *par)
 	struct frag_hdr _frag;
 	const struct frag_hdr *fh;
 	const struct ip6t_frag *fraginfo = par->matchinfo;
-	unsigned int ptr = 0;
+	unsigned int ptr;
 	int err;
 
-	err = ipv6_find_hdr(skb, &ptr, NEXTHDR_FRAGMENT, NULL, NULL);
+	err = ipv6_find_hdr(skb, &ptr, NEXTHDR_FRAGMENT, NULL);
 	if (err < 0) {
 		if (err != -ENOENT)
 			par->hotdrop = true;

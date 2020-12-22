@@ -10,7 +10,7 @@
 
 #include "numa_internal.h"
 
-static int emu_nid_to_phys[MAX_NUMNODES];
+static int emu_nid_to_phys[MAX_NUMNODES] __cpuinitdata;
 static char *emu_cmdline __initdata;
 
 void __init numa_emu_cmdline(char *str)
@@ -68,8 +68,8 @@ static int __init emu_setup_memblk(struct numa_meminfo *ei,
 		numa_remove_memblk_from(phys_blk, pi);
 	}
 
-	printk(KERN_INFO "Faking node %d at [mem %#018Lx-%#018Lx] (%LuMB)\n",
-	       nid, eb->start, eb->end - 1, (eb->end - eb->start) >> 20);
+	printk(KERN_INFO "Faking node %d at %016Lx-%016Lx (%LuMB)\n", nid,
+	       eb->start, eb->end, (eb->end - eb->start) >> 20);
 	return 0;
 }
 
@@ -339,11 +339,9 @@ void __init numa_emulation(struct numa_meminfo *numa_meminfo, int numa_dist_cnt)
 	} else {
 		unsigned long n;
 
-		n = simple_strtoul(emu_cmdline, &emu_cmdline, 0);
+		n = simple_strtoul(emu_cmdline, NULL, 0);
 		ret = split_nodes_interleave(&ei, &pi, 0, max_addr, n);
 	}
-	if (*emu_cmdline == ':')
-		emu_cmdline++;
 
 	if (ret < 0)
 		goto no_emu;
@@ -420,9 +418,7 @@ void __init numa_emulation(struct numa_meminfo *numa_meminfo, int numa_dist_cnt)
 			int physj = emu_nid_to_phys[j];
 			int dist;
 
-			if (get_option(&emu_cmdline, &dist) == 2)
-				;
-			else if (physi >= numa_dist_cnt || physj >= numa_dist_cnt)
+			if (physi >= numa_dist_cnt || physj >= numa_dist_cnt)
 				dist = physi == physj ?
 					LOCAL_DISTANCE : REMOTE_DISTANCE;
 			else
@@ -444,7 +440,7 @@ no_emu:
 }
 
 #ifndef CONFIG_DEBUG_PER_CPU_MAPS
-void numa_add_cpu(int cpu)
+void __cpuinit numa_add_cpu(int cpu)
 {
 	int physnid, nid;
 
@@ -462,7 +458,7 @@ void numa_add_cpu(int cpu)
 			cpumask_set_cpu(cpu, node_to_cpumask_map[nid]);
 }
 
-void numa_remove_cpu(int cpu)
+void __cpuinit numa_remove_cpu(int cpu)
 {
 	int i;
 
@@ -470,7 +466,7 @@ void numa_remove_cpu(int cpu)
 		cpumask_clear_cpu(cpu, node_to_cpumask_map[i]);
 }
 #else	/* !CONFIG_DEBUG_PER_CPU_MAPS */
-static void numa_set_cpumask(int cpu, bool enable)
+static void __cpuinit numa_set_cpumask(int cpu, bool enable)
 {
 	int nid, physnid;
 
@@ -490,12 +486,12 @@ static void numa_set_cpumask(int cpu, bool enable)
 	}
 }
 
-void numa_add_cpu(int cpu)
+void __cpuinit numa_add_cpu(int cpu)
 {
 	numa_set_cpumask(cpu, true);
 }
 
-void numa_remove_cpu(int cpu)
+void __cpuinit numa_remove_cpu(int cpu)
 {
 	numa_set_cpumask(cpu, false);
 }

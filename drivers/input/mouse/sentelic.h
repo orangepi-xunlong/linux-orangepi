@@ -65,14 +65,6 @@
 #define	FSP_BIT_SWC1_GST_GRP1	BIT(6)
 #define	FSP_BIT_SWC1_BX_COMPAT	BIT(7)
 
-#define	FSP_PAGE_0B		(0x0b)
-#define	FSP_PAGE_82		(0x82)
-#define	FSP_PAGE_DEFAULT	FSP_PAGE_82
-
-#define	FSP_REG_SN0		(0x40)
-#define	FSP_REG_SN1		(0x41)
-#define	FSP_REG_SN2		(0x42)
-
 /* Finger-sensing Pad packet formating related definitions */
 
 /* absolute packet type */
@@ -123,11 +115,11 @@ struct fsp_data {
 extern int fsp_detect(struct psmouse *psmouse, bool set_properties);
 extern int fsp_init(struct psmouse *psmouse);
 #else
-static inline int fsp_detect(struct psmouse *psmouse, bool set_properties)
+inline int fsp_detect(struct psmouse *psmouse, bool set_properties)
 {
 	return -ENOSYS;
 }
-static inline int fsp_init(struct psmouse *psmouse)
+inline int fsp_init(struct psmouse *psmouse)
 {
 	return -ENOSYS;
 }

@@ -19,6 +19,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <scsi/scsi_host.h>
@@ -1057,10 +1058,21 @@ static struct pci_driver hpt37x_pci_driver = {
 	.remove		= ata_pci_remove_one
 };
 
-module_pci_driver(hpt37x_pci_driver);
+static int __init hpt37x_init(void)
+{
+	return pci_register_driver(&hpt37x_pci_driver);
+}
+
+static void __exit hpt37x_exit(void)
+{
+	pci_unregister_driver(&hpt37x_pci_driver);
+}
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("low-level driver for the Highpoint HPT37x/30x");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, hpt37x);
 MODULE_VERSION(DRV_VERSION);
+
+module_init(hpt37x_init);
+module_exit(hpt37x_exit);

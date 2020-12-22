@@ -1,5 +1,5 @@
 #ifdef __uClinux__
-#include <asm/cacheflush_no.h>
+#include "cacheflush_no.h"
 #else
-#include <asm/cacheflush_mm.h>
+#include "cacheflush_mm.h"
 #endif

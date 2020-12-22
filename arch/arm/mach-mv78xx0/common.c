@@ -13,18 +13,17 @@
 #include <linux/platform_device.h>
 #include <linux/serial_8250.h>
 #include <linux/ata_platform.h>
-#include <linux/clk-provider.h>
 #include <linux/ethtool.h>
-#include <asm/hardware/cache-feroceon-l2.h>
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
-#include <linux/platform_data/usb-ehci-orion.h>
-#include <linux/platform_data/mtd-orion_nand.h>
+#include <mach/mv78xx0.h>
+#include <mach/bridge-regs.h>
+#include <plat/cache-feroceon-l2.h>
+#include <plat/ehci-orion.h>
+#include <plat/orion_nand.h>
 #include <plat/time.h>
 #include <plat/common.h>
 #include <plat/addr-map.h>
-#include "mv78xx0.h"
-#include "bridge-regs.h"
 #include "common.h"
 
 static int get_tclk(void);
@@ -104,24 +103,24 @@ static void get_pclk_l2clk(int hclk, int core_index, int *pclk, int *l2clk)
 
 static int get_tclk(void)
 {
-	int tclk_freq;
+	int tclk;
 
 	/*
 	 * TCLK tick rate is configured by DEV_A[2:0] strap pins.
 	 */
 	switch ((readl(SAMPLE_AT_RESET_HIGH) >> 6) & 7) {
 	case 1:
-		tclk_freq = 166666667;
+		tclk = 166666667;
 		break;
 	case 3:
-		tclk_freq = 200000000;
+		tclk = 200000000;
 		break;
 	default:
 		panic("unknown TCLK PLL setting: %.8x\n",
 			readl(SAMPLE_AT_RESET_HIGH));
 	}
 
-	return tclk_freq;
+	return tclk;
 }
 
 
@@ -130,12 +129,17 @@ static int get_tclk(void)
  ****************************************************************************/
 static struct map_desc mv78xx0_io_desc[] __initdata = {
 	{
-		.virtual	= (unsigned long) MV78XX0_CORE_REGS_VIRT_BASE,
+		.virtual	= MV78XX0_CORE_REGS_VIRT_BASE,
 		.pfn		= 0,
 		.length		= MV78XX0_CORE_REGS_SIZE,
 		.type		= MT_DEVICE,
 	}, {
-		.virtual	= (unsigned long) MV78XX0_REGS_VIRT_BASE,
+		.virtual	= MV78XX0_PCIE_IO_VIRT_BASE(0),
+		.pfn		= __phys_to_pfn(MV78XX0_PCIE_IO_PHYS_BASE(0)),
+		.length		= MV78XX0_PCIE_IO_SIZE * 8,
+		.type		= MT_DEVICE,
+	}, {
+		.virtual	= MV78XX0_REGS_VIRT_BASE,
 		.pfn		= __phys_to_pfn(MV78XX0_REGS_PHYS_BASE),
 		.length		= MV78XX0_REGS_SIZE,
 		.type		= MT_DEVICE,
@@ -160,18 +164,6 @@ void __init mv78xx0_map_io(void)
 	iotable_init(mv78xx0_io_desc, ARRAY_SIZE(mv78xx0_io_desc));
 }
 
-
-/*****************************************************************************
- * CLK tree
- ****************************************************************************/
-static struct clk *tclk;
-
-static void __init clk_init(void)
-{
-	tclk = clk_register_fixed_rate(NULL, "tclk", NULL, 0, get_tclk());
-
-	orion_clkdev_init(tclk);
-}
 
 /*****************************************************************************
  * EHCI
@@ -207,7 +199,7 @@ void __init mv78xx0_ge00_init(struct mv643xx_eth_platform_data *eth_data)
 {
 	orion_ge00_init(eth_data,
 			GE00_PHYS_BASE, IRQ_MV78XX0_GE00_SUM,
-			IRQ_MV78XX0_GE_ERR,
+			IRQ_MV78XX0_GE_ERR, get_tclk(),
 			MV643XX_TX_CSUM_DEFAULT_LIMIT);
 }
 
@@ -219,6 +211,7 @@ void __init mv78xx0_ge01_init(struct mv643xx_eth_platform_data *eth_data)
 {
 	orion_ge01_init(eth_data,
 			GE01_PHYS_BASE, IRQ_MV78XX0_GE01_SUM,
+			NO_IRQ, get_tclk(),
 			MV643XX_TX_CSUM_DEFAULT_LIMIT);
 }
 
@@ -241,7 +234,9 @@ void __init mv78xx0_ge10_init(struct mv643xx_eth_platform_data *eth_data)
 		eth_data->duplex = DUPLEX_FULL;
 	}
 
-	orion_ge10_init(eth_data, GE10_PHYS_BASE, IRQ_MV78XX0_GE10_SUM);
+	orion_ge10_init(eth_data,
+			GE10_PHYS_BASE, IRQ_MV78XX0_GE10_SUM,
+			NO_IRQ, get_tclk());
 }
 
 
@@ -263,7 +258,9 @@ void __init mv78xx0_ge11_init(struct mv643xx_eth_platform_data *eth_data)
 		eth_data->duplex = DUPLEX_FULL;
 	}
 
-	orion_ge11_init(eth_data, GE11_PHYS_BASE, IRQ_MV78XX0_GE11_SUM);
+	orion_ge11_init(eth_data,
+			GE11_PHYS_BASE, IRQ_MV78XX0_GE11_SUM,
+			NO_IRQ, get_tclk());
 }
 
 /*****************************************************************************
@@ -290,7 +287,7 @@ void __init mv78xx0_sata_init(struct mv_sata_platform_data *sata_data)
 void __init mv78xx0_uart0_init(void)
 {
 	orion_uart0_init(UART0_VIRT_BASE, UART0_PHYS_BASE,
-			 IRQ_MV78XX0_UART_0, tclk);
+			 IRQ_MV78XX0_UART_0, get_tclk());
 }
 
 
@@ -300,7 +297,7 @@ void __init mv78xx0_uart0_init(void)
 void __init mv78xx0_uart1_init(void)
 {
 	orion_uart1_init(UART1_VIRT_BASE, UART1_PHYS_BASE,
-			 IRQ_MV78XX0_UART_1, tclk);
+			 IRQ_MV78XX0_UART_1, get_tclk());
 }
 
 
@@ -310,7 +307,7 @@ void __init mv78xx0_uart1_init(void)
 void __init mv78xx0_uart2_init(void)
 {
 	orion_uart2_init(UART2_VIRT_BASE, UART2_PHYS_BASE,
-			 IRQ_MV78XX0_UART_2, tclk);
+			 IRQ_MV78XX0_UART_2, get_tclk());
 }
 
 /*****************************************************************************
@@ -319,7 +316,7 @@ void __init mv78xx0_uart2_init(void)
 void __init mv78xx0_uart3_init(void)
 {
 	orion_uart3_init(UART3_VIRT_BASE, UART3_PHYS_BASE,
-			 IRQ_MV78XX0_UART_3, tclk);
+			 IRQ_MV78XX0_UART_3, get_tclk());
 }
 
 /*****************************************************************************
@@ -328,21 +325,17 @@ void __init mv78xx0_uart3_init(void)
 void __init mv78xx0_init_early(void)
 {
 	orion_time_set_base(TIMER_VIRT_BASE);
-	if (mv78xx0_core_index() == 0)
-		mvebu_mbus_init("marvell,mv78xx0-mbus",
-				BRIDGE_WINS_CPU0_BASE, BRIDGE_WINS_SZ,
-				DDR_WINDOW_CPU0_BASE, DDR_WINDOW_CPU_SZ);
-	else
-		mvebu_mbus_init("marvell,mv78xx0-mbus",
-				BRIDGE_WINS_CPU1_BASE, BRIDGE_WINS_SZ,
-				DDR_WINDOW_CPU1_BASE, DDR_WINDOW_CPU_SZ);
 }
 
-void __ref mv78xx0_timer_init(void)
+static void mv78xx0_timer_init(void)
 {
 	orion_time_init(BRIDGE_VIRT_BASE, BRIDGE_INT_TIMER1_CLR,
 			IRQ_MV78XX0_TIMER_1, get_tclk());
 }
+
+struct sys_timer mv78xx0_timer = {
+	.init = mv78xx0_timer_init,
+};
 
 
 /*****************************************************************************
@@ -387,26 +380,28 @@ void __init mv78xx0_init(void)
 	int hclk;
 	int pclk;
 	int l2clk;
+	int tclk;
 
 	core_index = mv78xx0_core_index();
 	hclk = get_hclk();
 	get_pclk_l2clk(hclk, core_index, &pclk, &l2clk);
+	tclk = get_tclk();
 
 	printk(KERN_INFO "%s ", mv78xx0_id());
 	printk("core #%d, ", core_index);
 	printk("PCLK = %dMHz, ", (pclk + 499999) / 1000000);
 	printk("L2 = %dMHz, ", (l2clk + 499999) / 1000000);
 	printk("HCLK = %dMHz, ", (hclk + 499999) / 1000000);
-	printk("TCLK = %dMHz\n", (get_tclk() + 499999) / 1000000);
+	printk("TCLK = %dMHz\n", (tclk + 499999) / 1000000);
 
-	if (IS_ENABLED(CONFIG_CACHE_FEROCEON_L2))
-		feroceon_l2_init(is_l2_writethrough());
+	mv78xx0_setup_cpu_mbus();
 
-	/* Setup root of clk tree */
-	clk_init();
+#ifdef CONFIG_CACHE_FEROCEON_L2
+	feroceon_l2_init(is_l2_writethrough());
+#endif
 }
 
-void mv78xx0_restart(enum reboot_mode mode, const char *cmd)
+void mv78xx0_restart(char mode, const char *cmd)
 {
 	/*
 	 * Enable soft reset to assert RSTOUTn.

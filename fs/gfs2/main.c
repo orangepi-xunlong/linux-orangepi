@@ -7,8 +7,6 @@
  * of the GNU General Public License version 2.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/completion.h>
@@ -30,9 +28,13 @@
 #include "quota.h"
 #include "recovery.h"
 #include "dir.h"
-#include "glops.h"
 
 struct workqueue_struct *gfs2_control_wq;
+
+static struct shrinker qd_shrinker = {
+	.shrink = gfs2_shrink_qd_memory,
+	.seeks = DEFAULT_SEEKS,
+};
 
 static void gfs2_init_inode_once(void *foo)
 {
@@ -42,10 +44,8 @@ static void gfs2_init_inode_once(void *foo)
 	init_rwsem(&ip->i_rw_mutex);
 	INIT_LIST_HEAD(&ip->i_trunc_list);
 	ip->i_qadata = NULL;
-	memset(&ip->i_res, 0, sizeof(ip->i_res));
-	RB_CLEAR_NODE(&ip->i_res.rs_node);
+	ip->i_res = NULL;
 	ip->i_hash_cache = NULL;
-	gfs2_holder_mark_uninitialized(&ip->i_iopen_gh);
 }
 
 static void gfs2_init_glock_once(void *foo)
@@ -53,7 +53,7 @@ static void gfs2_init_glock_once(void *foo)
 	struct gfs2_glock *gl = foo;
 
 	INIT_HLIST_BL_NODE(&gl->gl_list);
-	spin_lock_init(&gl->gl_lockref.lock);
+	spin_lock_init(&gl->gl_spin);
 	INIT_LIST_HEAD(&gl->gl_holders);
 	INIT_LIST_HEAD(&gl->gl_lru);
 	INIT_LIST_HEAD(&gl->gl_ail_list);
@@ -70,6 +70,16 @@ static void gfs2_init_gl_aspace_once(void *foo)
 	address_space_init_once(mapping);
 }
 
+static void *gfs2_bh_alloc(gfp_t mask, void *data)
+{
+	return alloc_buffer_head(mask);
+}
+
+static void gfs2_bh_free(void *ptr, void *data)
+{
+	return free_buffer_head(ptr);
+}
+
 /**
  * init_gfs2_fs - Register GFS2 as a filesystem
  *
@@ -82,15 +92,10 @@ static int __init init_gfs2_fs(void)
 
 	gfs2_str2qstr(&gfs2_qdot, ".");
 	gfs2_str2qstr(&gfs2_qdotdot, "..");
-	gfs2_quota_hash_init();
 
 	error = gfs2_sys_init();
 	if (error)
 		return error;
-
-	error = list_lru_init(&gfs2_qd_lru);
-	if (error)
-		goto fail_lru;
 
 	error = gfs2_glock_init();
 	if (error)
@@ -115,8 +120,7 @@ static int __init init_gfs2_fs(void)
 	gfs2_inode_cachep = kmem_cache_create("gfs2_inode",
 					      sizeof(struct gfs2_inode),
 					      0,  SLAB_RECLAIM_ACCOUNT|
-						  SLAB_MEM_SPREAD|
-						  SLAB_ACCOUNT,
+					          SLAB_MEM_SPREAD,
 					      gfs2_init_inode_once);
 	if (!gfs2_inode_cachep)
 		goto fail;
@@ -139,15 +143,7 @@ static int __init init_gfs2_fs(void)
 	if (!gfs2_quotad_cachep)
 		goto fail;
 
-	gfs2_qadata_cachep = kmem_cache_create("gfs2_qadata",
-					       sizeof(struct gfs2_qadata),
-					       0, 0, NULL);
-	if (!gfs2_qadata_cachep)
-		goto fail;
-
-	error = register_shrinker(&gfs2_qd_shrinker);
-	if (error)
-		goto fail;
+	register_shrinker(&qd_shrinker);
 
 	error = register_filesystem(&gfs2_fs_type);
 	if (error)
@@ -164,27 +160,20 @@ static int __init init_gfs2_fs(void)
 		goto fail_wq;
 
 	gfs2_control_wq = alloc_workqueue("gfs2_control",
-					  WQ_UNBOUND | WQ_FREEZABLE, 0);
+			       WQ_NON_REENTRANT | WQ_UNBOUND | WQ_FREEZABLE, 0);
 	if (!gfs2_control_wq)
 		goto fail_recovery;
 
-	gfs2_freeze_wq = alloc_workqueue("freeze_workqueue", 0, 0);
-
-	if (!gfs2_freeze_wq)
+	gfs2_bh_pool = mempool_create(1024, gfs2_bh_alloc, gfs2_bh_free, NULL);
+	if (!gfs2_bh_pool)
 		goto fail_control;
-
-	gfs2_page_pool = mempool_create_page_pool(64, 0);
-	if (!gfs2_page_pool)
-		goto fail_freeze;
 
 	gfs2_register_debugfs();
 
-	pr_info("GFS2 installed\n");
+	printk("GFS2 installed\n");
 
 	return 0;
 
-fail_freeze:
-	destroy_workqueue(gfs2_freeze_wq);
 fail_control:
 	destroy_workqueue(gfs2_control_wq);
 fail_recovery:
@@ -194,13 +183,8 @@ fail_wq:
 fail_unregister:
 	unregister_filesystem(&gfs2_fs_type);
 fail:
-	list_lru_destroy(&gfs2_qd_lru);
-fail_lru:
-	unregister_shrinker(&gfs2_qd_shrinker);
+	unregister_shrinker(&qd_shrinker);
 	gfs2_glock_exit();
-
-	if (gfs2_qadata_cachep)
-		kmem_cache_destroy(gfs2_qadata_cachep);
 
 	if (gfs2_quotad_cachep)
 		kmem_cache_destroy(gfs2_quotad_cachep);
@@ -231,20 +215,17 @@ fail_lru:
 
 static void __exit exit_gfs2_fs(void)
 {
-	unregister_shrinker(&gfs2_qd_shrinker);
+	unregister_shrinker(&qd_shrinker);
 	gfs2_glock_exit();
 	gfs2_unregister_debugfs();
 	unregister_filesystem(&gfs2_fs_type);
 	unregister_filesystem(&gfs2meta_fs_type);
 	destroy_workqueue(gfs_recovery_wq);
 	destroy_workqueue(gfs2_control_wq);
-	destroy_workqueue(gfs2_freeze_wq);
-	list_lru_destroy(&gfs2_qd_lru);
 
 	rcu_barrier();
 
-	mempool_destroy(gfs2_page_pool);
-	kmem_cache_destroy(gfs2_qadata_cachep);
+	mempool_destroy(gfs2_bh_pool);
 	kmem_cache_destroy(gfs2_quotad_cachep);
 	kmem_cache_destroy(gfs2_rgrpd_cachep);
 	kmem_cache_destroy(gfs2_bufdata_cachep);

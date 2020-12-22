@@ -8,7 +8,7 @@
 
 #if defined(CONFIG_X86_IO_APIC) && defined(CONFIG_SMP) && defined(CONFIG_PCI)
 
-static void quirk_intel_irqbalance(struct pci_dev *dev)
+static void __devinit quirk_intel_irqbalance(struct pci_dev *dev)
 {
 	u8 config;
 	u16 word;
@@ -354,22 +354,18 @@ static void ati_force_hpet_resume(void)
 
 static u32 ati_ixp4x0_rev(struct pci_dev *dev)
 {
-	int err = 0;
-	u32 d = 0;
-	u8  b = 0;
+	u32 d;
+	u8  b;
 
-	err = pci_read_config_byte(dev, 0xac, &b);
+	pci_read_config_byte(dev, 0xac, &b);
 	b &= ~(1<<5);
-	err |= pci_write_config_byte(dev, 0xac, b);
-	err |= pci_read_config_dword(dev, 0x70, &d);
+	pci_write_config_byte(dev, 0xac, b);
+	pci_read_config_dword(dev, 0x70, &d);
 	d |= 1<<8;
-	err |= pci_write_config_dword(dev, 0x70, d);
-	err |= pci_read_config_dword(dev, 0x8, &d);
+	pci_write_config_dword(dev, 0x70, d);
+	pci_read_config_dword(dev, 0x8, &d);
 	d &= 0xff;
 	dev_printk(KERN_DEBUG, &dev->dev, "SB4X0 revision 0x%x\n", d);
-
-	WARN_ON_ONCE(err);
-
 	return d;
 }
 
@@ -498,24 +494,6 @@ void force_hpet_resume(void)
 }
 
 /*
- * According to the datasheet e6xx systems have the HPET hardwired to
- * 0xfed00000
- */
-static void e6xx_force_enable_hpet(struct pci_dev *dev)
-{
-	if (hpet_address || force_hpet_address)
-		return;
-
-	force_hpet_address = 0xFED00000;
-	force_hpet_resume_type = NONE_FORCE_HPET_RESUME;
-	dev_printk(KERN_DEBUG, &dev->dev, "Force enabled HPET at "
-		"0x%lx\n", force_hpet_address);
-	return;
-}
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_E6XX_CU,
-			 e6xx_force_enable_hpet);
-
-/*
  * HPET MSI on some boards (ATI SB700/SB800) has side effect on
  * floppy DMA. Disable HPET MSI on such platforms.
  * See erratum #27 (Misinterpreted MSI Requests May Result in
@@ -524,7 +502,7 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_E6XX_CU,
  */
 static void force_disable_hpet_msi(struct pci_dev *unused)
 {
-	hpet_msi_disable = true;
+	hpet_msi_disable = 1;
 }
 
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_SBX00_SMBUS,
@@ -534,7 +512,7 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_SBX00_SMBUS,
 
 #if defined(CONFIG_PCI) && defined(CONFIG_NUMA)
 /* Set correct numa_node information for AMD NB functions */
-static void quirk_amd_nb_node(struct pci_dev *dev)
+static void __init quirk_amd_nb_node(struct pci_dev *dev)
 {
 	struct pci_dev *nb_ht;
 	unsigned int devfn;
@@ -588,78 +566,4 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_15H_NB_F4,
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_15H_NB_F5,
 			quirk_amd_nb_node);
 
-#endif
-
-#ifdef CONFIG_PCI
-/*
- * Processor does not ensure DRAM scrub read/write sequence
- * is atomic wrt accesses to CC6 save state area. Therefore
- * if a concurrent scrub read/write access is to same address
- * the entry may appear as if it is not written. This quirk
- * applies to Fam16h models 00h-0Fh
- *
- * See "Revision Guide" for AMD F16h models 00h-0fh,
- * document 51810 rev. 3.04, Nov 2013
- */
-static void amd_disable_seq_and_redirect_scrub(struct pci_dev *dev)
-{
-	u32 val;
-
-	/*
-	 * Suggested workaround:
-	 * set D18F3x58[4:0] = 00h and set D18F3x5C[0] = 0b
-	 */
-	pci_read_config_dword(dev, 0x58, &val);
-	if (val & 0x1F) {
-		val &= ~(0x1F);
-		pci_write_config_dword(dev, 0x58, val);
-	}
-
-	pci_read_config_dword(dev, 0x5C, &val);
-	if (val & BIT(0)) {
-		val &= ~BIT(0);
-		pci_write_config_dword(dev, 0x5c, val);
-	}
-}
-
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_16H_NB_F3,
-			amd_disable_seq_and_redirect_scrub);
-
-#if defined(CONFIG_X86_64) && defined(CONFIG_X86_MCE)
-#include <linux/jump_label.h>
-#include <asm/string_64.h>
-
-/* Ivy Bridge, Haswell, Broadwell */
-static void quirk_intel_brickland_xeon_ras_cap(struct pci_dev *pdev)
-{
-	u32 capid0;
-
-	pci_read_config_dword(pdev, 0x84, &capid0);
-
-	if (capid0 & 0x10)
-		static_branch_inc(&mcsafe_key);
-}
-
-/* Skylake */
-static void quirk_intel_purley_xeon_ras_cap(struct pci_dev *pdev)
-{
-	u32 capid0, capid5;
-
-	pci_read_config_dword(pdev, 0x84, &capid0);
-	pci_read_config_dword(pdev, 0x98, &capid5);
-
-	/*
-	 * CAPID0{7:6} indicate whether this is an advanced RAS SKU
-	 * CAPID5{8:5} indicate that various NVDIMM usage modes are
-	 * enabled, so memory machine check recovery is also enabled.
-	 */
-	if ((capid0 & 0xc0) == 0xc0 || (capid5 & 0x1e0))
-		static_branch_inc(&mcsafe_key);
-
-}
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x0ec3, quirk_intel_brickland_xeon_ras_cap);
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x2fc0, quirk_intel_brickland_xeon_ras_cap);
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6fc0, quirk_intel_brickland_xeon_ras_cap);
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x2083, quirk_intel_purley_xeon_ras_cap);
-#endif
 #endif

@@ -34,14 +34,7 @@
 #ifndef __CVMX_HELPER_BOARD_H__
 #define __CVMX_HELPER_BOARD_H__
 
-#include <asm/octeon/cvmx-helper.h>
-
-enum cvmx_helper_board_usb_clock_types {
-	USB_CLOCK_TYPE_REF_12,
-	USB_CLOCK_TYPE_REF_24,
-	USB_CLOCK_TYPE_REF_48,
-	USB_CLOCK_TYPE_CRYSTAL_12,
-};
+#include "cvmx-helper.h"
 
 typedef enum {
 	set_phy_link_flags_autoneg = 0x1,
@@ -55,7 +48,17 @@ typedef enum {
  * Fake IPD port, the RGMII/MII interface may use different PHY, use
  * this macro to return appropriate MIX address to read the PHY.
  */
-#define CVMX_HELPER_BOARD_MGMT_IPD_PORT	    -10
+#define CVMX_HELPER_BOARD_MGMT_IPD_PORT     -10
+
+/**
+ * cvmx_override_board_link_get(int ipd_port) is a function
+ * pointer. It is meant to allow customization of the process of
+ * talking to a PHY to determine link speed. It is called every
+ * time a PHY must be polled for link status. Users should set
+ * this pointer to a function before calling any cvmx-helper
+ * operations.
+ */
+extern cvmx_helper_link_info_t(*cvmx_override_board_link_get) (int ipd_port);
 
 /**
  * Return the MII PHY address associated with the given IPD
@@ -76,6 +79,26 @@ typedef enum {
 extern int cvmx_helper_board_get_mii_address(int ipd_port);
 
 /**
+ * This function as a board specific method of changing the PHY
+ * speed, duplex, and autonegotiation. This programs the PHY and
+ * not Octeon. This can be used to force Octeon's links to
+ * specific settings.
+ *
+ * @phy_addr:  The address of the PHY to program
+ * @link_flags:
+ *                  Flags to control autonegotiation.  Bit 0 is autonegotiation
+ *                  enable/disable to maintain backware compatibility.
+ * @link_info: Link speed to program. If the speed is zero and autonegotiation
+ *                  is enabled, all possible negotiation speeds are advertised.
+ *
+ * Returns Zero on success, negative on failure
+ */
+int cvmx_helper_board_link_set_phy(int phy_addr,
+				   cvmx_helper_board_set_phy_link_flags_types_t
+				   link_flags,
+				   cvmx_helper_link_info_t link_info);
+
+/**
  * This function is the board specific method of determining an
  * ethernet ports link speed. Most Octeon boards have Marvell PHYs
  * and are handled by the fall through case. This function must be
@@ -88,10 +111,10 @@ extern int cvmx_helper_board_get_mii_address(int ipd_port);
  * enumeration from the bootloader.
  *
  * @ipd_port: IPD input port associated with the port we want to get link
- *		   status for.
+ *                 status for.
  *
  * Returns The ports link status. If the link isn't fully resolved, this must
- *	   return zero.
+ *         return zero.
  */
 extern cvmx_helper_link_info_t __cvmx_helper_board_link_get(int ipd_port);
 
@@ -111,10 +134,10 @@ extern cvmx_helper_link_info_t __cvmx_helper_board_link_get(int ipd_port);
  *
  * @interface: Interface to probe
  * @supported_ports:
- *		    Number of ports Octeon supports.
+ *                  Number of ports Octeon supports.
  *
  * Returns Number of ports the actual board supports. Many times this will
- *	   simple be "support_ports".
+ *         simple be "support_ports".
  */
 extern int __cvmx_helper_board_interface_probe(int interface,
 					       int supported_ports);
@@ -130,7 +153,5 @@ extern int __cvmx_helper_board_interface_probe(int interface,
  * Returns Zero on success, negative on failure
  */
 extern int __cvmx_helper_board_hardware_enable(int interface);
-
-enum cvmx_helper_board_usb_clock_types __cvmx_helper_board_usb_get_clock_type(void);
 
 #endif /* __CVMX_HELPER_BOARD_H__ */

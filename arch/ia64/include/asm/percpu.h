@@ -6,6 +6,8 @@
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  */
 
+#define PERCPU_ENOUGH_ROOM PERCPU_PAGE_SIZE
+
 #ifdef __ASSEMBLY__
 # define THIS_CPU(var)	(var)  /* use this to mark accesses to per-CPU variables... */
 #else /* !__ASSEMBLY__ */
@@ -33,8 +35,8 @@ extern void *per_cpu_init(void);
 
 /*
  * Be extremely careful when taking the address of this variable!  Due to virtual
- * remapping, it is different from the canonical address returned by this_cpu_ptr(&var)!
- * On the positive side, using __ia64_per_cpu_var() instead of this_cpu_ptr() is slightly
+ * remapping, it is different from the canonical address returned by __get_cpu_var(var)!
+ * On the positive side, using __ia64_per_cpu_var() instead of __get_cpu_var() is slightly
  * more efficient.
  */
 #define __ia64_per_cpu_var(var) (*({					\

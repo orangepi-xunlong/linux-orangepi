@@ -72,11 +72,12 @@ void __init prom_setup_cmdline(void)
 	static char cmd_line[COMMAND_LINE_SIZE] __initdata;
 	char *cp, *board;
 	int prom_argc;
-	char **prom_argv;
+	char **prom_argv, **prom_envp;
 	int i;
 
 	prom_argc = fw_arg0;
 	prom_argv = (char **) fw_arg1;
+	prom_envp = (char **) fw_arg2;
 
 	cp = cmd_line;
 		/* Note: it is common that parameters start
@@ -122,8 +123,8 @@ void __init prom_setup_cmdline(void)
 void __init prom_init(void)
 {
 	struct ddr_ram __iomem *ddr;
-	phys_addr_t memsize;
-	phys_addr_t ddrbase;
+	phys_t memsize;
+	phys_t ddrbase;
 
 	ddr = ioremap_nocache(ddr_reg[0].start,
 			ddr_reg[0].end - ddr_reg[0].start);
@@ -133,8 +134,8 @@ void __init prom_init(void)
 		return;
 	}
 
-	ddrbase = (phys_addr_t)&ddr->ddrbase;
-	memsize = (phys_addr_t)&ddr->ddrmask;
+	ddrbase = (phys_t)&ddr->ddrbase;
+	memsize = (phys_t)&ddr->ddrmask;
 	memsize = 0 - memsize;
 
 	prom_setup_cmdline();

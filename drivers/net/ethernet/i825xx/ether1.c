@@ -72,7 +72,7 @@ static void ether1_timeout(struct net_device *dev);
 
 /* ------------------------------------------------------------------------- */
 
-static char version[] = "ether1 ethernet driver (c) 2000 Russell King v1.07\n";
+static char version[] __devinitdata = "ether1 ethernet driver (c) 2000 Russell King v1.07\n";
 
 #define BUS_16 16
 #define BUS_8  8
@@ -250,7 +250,7 @@ ether1_readbuffer (struct net_device *dev, void *data, unsigned int start, unsig
 	} while (thislen);
 }
 
-static int
+static int __devinit
 ether1_ramtest(struct net_device *dev, unsigned char byte)
 {
 	unsigned char *buffer = kmalloc (BUFFER_SIZE, GFP_KERNEL);
@@ -304,7 +304,7 @@ ether1_reset (struct net_device *dev)
 	return BUS_16;
 }
 
-static int
+static int __devinit
 ether1_init_2(struct net_device *dev)
 {
 	int i;
@@ -638,6 +638,12 @@ ether1_txalloc (struct net_device *dev, int size)
 static int
 ether1_open (struct net_device *dev)
 {
+	if (!is_valid_ether_addr(dev->dev_addr)) {
+		printk(KERN_WARNING "%s: invalid ethernet MAC address\n",
+			dev->name);
+		return -EINVAL;
+	}
+
 	if (request_irq(dev->irq, ether1_interrupt, 0, "ether1", dev))
 		return -EAGAIN;
 
@@ -966,7 +972,7 @@ ether1_setmulticastlist (struct net_device *dev)
 
 /* ------------------------------------------------------------------------- */
 
-static void ether1_banner(void)
+static void __devinit ether1_banner(void)
 {
 	static unsigned int version_printed = 0;
 
@@ -985,7 +991,7 @@ static const struct net_device_ops ether1_netdev_ops = {
 	.ndo_set_mac_address	= eth_mac_addr,
 };
 
-static int
+static int __devinit
 ether1_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	struct net_device *dev;
@@ -1046,7 +1052,7 @@ ether1_probe(struct expansion_card *ec, const struct ecard_id *id)
 	return ret;
 }
 
-static void ether1_remove(struct expansion_card *ec)
+static void __devexit ether1_remove(struct expansion_card *ec)
 {
 	struct net_device *dev = ecard_get_drvdata(ec);
 
@@ -1064,7 +1070,7 @@ static const struct ecard_id ether1_ids[] = {
 
 static struct ecard_driver ether1_driver = {
 	.probe		= ether1_probe,
-	.remove		= ether1_remove,
+	.remove		= __devexit_p(ether1_remove),
 	.id_table	= ether1_ids,
 	.drv = {
 		.name	= "ether1",

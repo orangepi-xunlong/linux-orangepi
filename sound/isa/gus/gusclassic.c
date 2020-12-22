@@ -73,14 +73,13 @@ MODULE_PARM_DESC(channels, "GF1 channels for " CRD_NAME " driver.");
 module_param_array(pcm_channels, int, NULL, 0444);
 MODULE_PARM_DESC(pcm_channels, "Reserved PCM channels for " CRD_NAME " driver.");
 
-static int snd_gusclassic_match(struct device *dev, unsigned int n)
+static int __devinit snd_gusclassic_match(struct device *dev, unsigned int n)
 {
 	return enable[n];
 }
 
-static int snd_gusclassic_create(struct snd_card *card,
-				 struct device *dev, unsigned int n,
-				 struct snd_gus_card **rgus)
+static int __devinit snd_gusclassic_create(struct snd_card *card,
+		struct device *dev, unsigned int n, struct snd_gus_card **rgus)
 {
 	static long possible_ports[] = {0x220, 0x230, 0x240, 0x250, 0x260};
 	static int possible_irqs[] = {5, 11, 12, 9, 7, 15, 3, 4, -1};
@@ -124,7 +123,7 @@ static int snd_gusclassic_create(struct snd_card *card,
 	return error;
 }
 
-static int snd_gusclassic_detect(struct snd_gus_card *gus)
+static int __devinit snd_gusclassic_detect(struct snd_gus_card *gus)
 {
 	unsigned char d;
 
@@ -143,13 +142,13 @@ static int snd_gusclassic_detect(struct snd_gus_card *gus)
 	return 0;
 }
 
-static int snd_gusclassic_probe(struct device *dev, unsigned int n)
+static int __devinit snd_gusclassic_probe(struct device *dev, unsigned int n)
 {
 	struct snd_card *card;
 	struct snd_gus_card *gus;
 	int error;
 
-	error = snd_card_new(dev, index[n], id[n], THIS_MODULE, 0, &card);
+	error = snd_card_create(index[n], id[n], THIS_MODULE, 0, &card);
 	if (error < 0)
 		return error;
 
@@ -181,12 +180,12 @@ static int snd_gusclassic_probe(struct device *dev, unsigned int n)
 	if (error < 0)
 		goto out;
 
-	error = snd_gf1_pcm_new(gus, 0, 0);
+	error = snd_gf1_pcm_new(gus, 0, 0, NULL);
 	if (error < 0)
 		goto out;
 
 	if (!gus->ace_flag) {
-		error = snd_gf1_rawmidi_new(gus, 0);
+		error = snd_gf1_rawmidi_new(gus, 0, NULL);
 		if (error < 0)
 			goto out;
 	}
@@ -199,6 +198,8 @@ static int snd_gusclassic_probe(struct device *dev, unsigned int n)
 		sprintf(card->longname + strlen(card->longname),
 			"&%d", gus->gf1.dma2);
 
+	snd_card_set_dev(card, dev);
+
 	error = snd_card_register(card);
 	if (error < 0)
 		goto out;
@@ -210,16 +211,17 @@ out:	snd_card_free(card);
 	return error;
 }
 
-static int snd_gusclassic_remove(struct device *dev, unsigned int n)
+static int __devexit snd_gusclassic_remove(struct device *dev, unsigned int n)
 {
 	snd_card_free(dev_get_drvdata(dev));
+	dev_set_drvdata(dev, NULL);
 	return 0;
 }
 
 static struct isa_driver snd_gusclassic_driver = {
 	.match		= snd_gusclassic_match,
 	.probe		= snd_gusclassic_probe,
-	.remove		= snd_gusclassic_remove,
+	.remove		= __devexit_p(snd_gusclassic_remove),
 #if 0	/* FIXME */
 	.suspend	= snd_gusclassic_suspend,
 	.remove		= snd_gusclassic_remove,
@@ -229,4 +231,15 @@ static struct isa_driver snd_gusclassic_driver = {
 	}
 };
 
-module_isa_driver(snd_gusclassic_driver, SNDRV_CARDS);
+static int __init alsa_card_gusclassic_init(void)
+{
+	return isa_register_driver(&snd_gusclassic_driver, SNDRV_CARDS);
+}
+
+static void __exit alsa_card_gusclassic_exit(void)
+{
+	isa_unregister_driver(&snd_gusclassic_driver);
+}
+
+module_init(alsa_card_gusclassic_init);
+module_exit(alsa_card_gusclassic_exit);

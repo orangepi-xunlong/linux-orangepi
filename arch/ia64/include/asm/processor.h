@@ -19,6 +19,7 @@
 #include <asm/ptrace.h>
 #include <asm/ustack.h>
 
+#define __ARCH_WANT_UNLOCKED_CTXSW
 #define ARCH_HAS_PREFETCH_SWITCH_STACK
 
 #define IA64_NUM_PHYS_STACK_REG	96
@@ -33,7 +34,8 @@
  * each (assuming 8KB page size), for a total of 8TB of user virtual
  * address space.
  */
-#define TASK_SIZE       	DEFAULT_TASK_SIZE
+#define TASK_SIZE_OF(tsk)	((tsk)->thread.task_size)
+#define TASK_SIZE       	TASK_SIZE_OF(current)
 
 /*
  * This decides where the kernel will search for a free chunk of vm
@@ -70,7 +72,6 @@
 #include <linux/compiler.h>
 #include <linux/threads.h>
 #include <linux/types.h>
-#include <linux/bitops.h>
 
 #include <asm/fpu.h>
 #include <asm/page.h>
@@ -279,6 +280,7 @@ struct thread_struct {
 	__u8 pad[3];
 	__u64 ksp;			/* kernel stack pointer */
 	__u64 map_base;			/* base address for get_unmapped_area() */
+	__u64 task_size;		/* limit for task size */
 	__u64 rbs_bot;			/* the base address for the RBS */
 	int last_fph_cpu;		/* CPU that may hold the contents of f32-f127 */
 
@@ -301,6 +303,7 @@ struct thread_struct {
 	.ksp =		0,					\
 	.map_base =	DEFAULT_MAP_BASE,			\
 	.rbs_bot =	STACK_TOP - DEFAULT_USER_STACK_SIZE,	\
+	.task_size =	DEFAULT_TASK_SIZE,			\
 	.last_fph_cpu =  -1,					\
 	INIT_THREAD_PM						\
 	.dbr =		{0, },					\
@@ -339,6 +342,25 @@ struct task_struct;
  * wait().
  */
 #define release_thread(dead_task)
+
+/* Prepare to copy thread state - unlazy all lazy status */
+#define prepare_to_copy(tsk)	do { } while (0)
+
+/*
+ * This is the mechanism for creating a new kernel thread.
+ *
+ * NOTE 1: Only a kernel-only process (ie the swapper or direct
+ * descendants who haven't done an "execve()") should use this: it
+ * will work within a system call from a "real" process, but the
+ * process memory space will not be free'd until both the parent and
+ * the child have exited.
+ *
+ * NOTE 2: This MUST NOT be an inlined function.  Otherwise, we get
+ * into trouble in init/main.c when the child thread returns to
+ * do_basic_setup() and the timing is such that free_initmem() has
+ * been called already.
+ */
+extern pid_t kernel_thread (int (*fn)(void *), void *arg, unsigned long flags);
 
 /* Get wait channel for task P.  */
 extern unsigned long get_wchan (struct task_struct *p);
@@ -547,7 +569,6 @@ ia64_eoi (void)
 }
 
 #define cpu_relax()	ia64_hint(ia64_hint_pause)
-#define cpu_relax_lowlatency() cpu_relax()
 
 static inline int
 ia64_get_irr(unsigned int vector)
@@ -702,9 +723,10 @@ extern unsigned long boot_option_idle_override;
 enum idle_boot_override {IDLE_NO_OVERRIDE=0, IDLE_HALT, IDLE_FORCE_MWAIT,
 			 IDLE_NOMWAIT, IDLE_POLL};
 
+void cpu_idle_wait(void);
 void default_idle(void);
 
-#define ia64_platform_is(x) (strcmp(x, ia64_platform_name) == 0)
+#define ia64_platform_is(x) (strcmp(x, platform_name) == 0)
 
 #endif /* !__ASSEMBLY__ */
 

@@ -10,15 +10,13 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/err.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/workqueue.h>
 #include <linux/spi/spi.h>
 #include <linux/pm.h>
-#include <linux/of.h>
-#include <linux/of_platform.h>
-#include <linux/of_device.h>
 
 #include "lis3lv02d.h"
 
@@ -60,15 +58,7 @@ static int lis3_spi_init(struct lis3lv02d *lis3)
 static union axis_conversion lis3lv02d_axis_normal =
 	{ .as_array = { 1, 2, 3 } };
 
-#ifdef CONFIG_OF
-static const struct of_device_id lis302dl_spi_dt_ids[] = {
-	{ .compatible = "st,lis302dl-spi" },
-	{}
-};
-MODULE_DEVICE_TABLE(of, lis302dl_spi_dt_ids);
-#endif
-
-static int lis302dl_spi_probe(struct spi_device *spi)
+static int __devinit lis302dl_spi_probe(struct spi_device *spi)
 {
 	int ret;
 
@@ -85,21 +75,12 @@ static int lis302dl_spi_probe(struct spi_device *spi)
 	lis3_dev.irq		= spi->irq;
 	lis3_dev.ac		= lis3lv02d_axis_normal;
 	lis3_dev.pdata		= spi->dev.platform_data;
-
-#ifdef CONFIG_OF
-	if (of_match_device(lis302dl_spi_dt_ids, &spi->dev)) {
-		lis3_dev.of_node = spi->dev.of_node;
-		ret = lis3lv02d_init_dt(&lis3_dev);
-		if (ret)
-			return ret;
-	}
-#endif
 	spi_set_drvdata(spi, &lis3_dev);
 
 	return lis3lv02d_init_device(&lis3_dev);
 }
 
-static int lis302dl_spi_remove(struct spi_device *spi)
+static int __devexit lis302dl_spi_remove(struct spi_device *spi)
 {
 	struct lis3lv02d *lis3 = spi_get_drvdata(spi);
 	lis3lv02d_joystick_disable(lis3);
@@ -138,11 +119,11 @@ static SIMPLE_DEV_PM_OPS(lis3lv02d_spi_pm, lis3lv02d_spi_suspend,
 static struct spi_driver lis302dl_spi_driver = {
 	.driver	 = {
 		.name   = DRV_NAME,
+		.owner  = THIS_MODULE,
 		.pm	= &lis3lv02d_spi_pm,
-		.of_match_table = of_match_ptr(lis302dl_spi_dt_ids),
 	},
 	.probe	= lis302dl_spi_probe,
-	.remove	= lis302dl_spi_remove,
+	.remove	= __devexit_p(lis302dl_spi_remove),
 };
 
 module_spi_driver(lis302dl_spi_driver);

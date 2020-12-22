@@ -42,17 +42,11 @@ struct btree_node {
 } __packed;
 
 
-/*
- * Locks a block using the btree node validator.
- */
-int bn_read_lock(struct dm_btree_info *info, dm_block_t b,
-		 struct dm_block **result);
-
 void inc_children(struct dm_transaction_manager *tm, struct btree_node *n,
 		  struct dm_btree_value_type *vt);
 
 int new_block(struct dm_btree_info *info, struct dm_block **result);
-void unlock_block(struct dm_btree_info *info, struct dm_block *b);
+int unlock_block(struct dm_btree_info *info, struct dm_block *b);
 
 /*
  * Spines keep track of the rolling locks.  There are 2 variants, read-only
@@ -70,7 +64,6 @@ struct ro_spine {
 void init_ro_spine(struct ro_spine *s, struct dm_btree_info *info);
 int exit_ro_spine(struct ro_spine *s);
 int ro_step(struct ro_spine *s, dm_block_t new_child);
-void ro_pop(struct ro_spine *s);
 struct btree_node *ro_node(struct ro_spine *s);
 
 struct shadow_spine {

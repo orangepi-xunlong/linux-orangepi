@@ -30,6 +30,7 @@
 #include <asm/rtc.h>
 
 #define DRV_NAME	"sh-rtc"
+#define DRV_VERSION	"0.2.3"
 
 #define RTC_REG(r)	((r) * rtc_reg_size)
 
@@ -481,6 +482,7 @@ static int sh_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *wkalrm)
 	tm->tm_mon	= sh_rtc_read_alarm_value(rtc, RMONAR);
 	if (tm->tm_mon > 0)
 		tm->tm_mon -= 1; /* RTC is 1-12, tm_mon is 0-11 */
+	tm->tm_year     = 0xffff;
 
 	wkalrm->enabled = (readb(rtc->regbase + RCR1) & RCR1_AIE) ? 1 : 0;
 
@@ -499,13 +501,52 @@ static inline void sh_rtc_write_alarm_value(struct sh_rtc *rtc,
 		writeb(bin2bcd(value) | AR_ENB,  rtc->regbase + reg_off);
 }
 
+static int sh_rtc_check_alarm(struct rtc_time *tm)
+{
+	/*
+	 * The original rtc says anything > 0xc0 is "don't care" or "match
+	 * all" - most users use 0xff but rtc-dev uses -1 for the same thing.
+	 * The original rtc doesn't support years - some things use -1 and
+	 * some 0xffff. We use -1 to make out tests easier.
+	 */
+	if (tm->tm_year == 0xffff)
+		tm->tm_year = -1;
+	if (tm->tm_mon >= 0xff)
+		tm->tm_mon = -1;
+	if (tm->tm_mday >= 0xff)
+		tm->tm_mday = -1;
+	if (tm->tm_wday >= 0xff)
+		tm->tm_wday = -1;
+	if (tm->tm_hour >= 0xff)
+		tm->tm_hour = -1;
+	if (tm->tm_min >= 0xff)
+		tm->tm_min = -1;
+	if (tm->tm_sec >= 0xff)
+		tm->tm_sec = -1;
+
+	if (tm->tm_year > 9999 ||
+		tm->tm_mon >= 12 ||
+		tm->tm_mday == 0 || tm->tm_mday >= 32 ||
+		tm->tm_wday >= 7 ||
+		tm->tm_hour >= 24 ||
+		tm->tm_min >= 60 ||
+		tm->tm_sec >= 60)
+		return -EINVAL;
+
+	return 0;
+}
+
 static int sh_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *wkalrm)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sh_rtc *rtc = platform_get_drvdata(pdev);
 	unsigned int rcr1;
 	struct rtc_time *tm = &wkalrm->time;
-	int mon;
+	int mon, err;
+
+	err = sh_rtc_check_alarm(tm);
+	if (unlikely(err < 0))
+		return err;
 
 	spin_lock_irq(&rtc->lock);
 
@@ -552,7 +593,7 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 	char clk_name[6];
 	int clk_id, ret;
 
-	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
+	rtc = kzalloc(sizeof(struct sh_rtc), GFP_KERNEL);
 	if (unlikely(!rtc))
 		return -ENOMEM;
 
@@ -561,8 +602,9 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 	/* get periodic/carry/alarm irqs */
 	ret = platform_get_irq(pdev, 0);
 	if (unlikely(ret <= 0)) {
+		ret = -ENOENT;
 		dev_err(&pdev->dev, "No IRQ resource\n");
-		return -ENOENT;
+		goto err_badres;
 	}
 
 	rtc->periodic_irq = ret;
@@ -571,21 +613,24 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
 	if (unlikely(res == NULL)) {
+		ret = -ENOENT;
 		dev_err(&pdev->dev, "No IO resource\n");
-		return -ENOENT;
+		goto err_badres;
 	}
 
 	rtc->regsize = resource_size(res);
 
-	rtc->res = devm_request_mem_region(&pdev->dev, res->start,
-					rtc->regsize, pdev->name);
-	if (unlikely(!rtc->res))
-		return -EBUSY;
+	rtc->res = request_mem_region(res->start, rtc->regsize, pdev->name);
+	if (unlikely(!rtc->res)) {
+		ret = -EBUSY;
+		goto err_badres;
+	}
 
-	rtc->regbase = devm_ioremap_nocache(&pdev->dev, rtc->res->start,
-					rtc->regsize);
-	if (unlikely(!rtc->regbase))
-		return -EINVAL;
+	rtc->regbase = ioremap_nocache(rtc->res->start, rtc->regsize);
+	if (unlikely(!rtc->regbase)) {
+		ret = -EINVAL;
+		goto err_badmap;
+	}
 
 	clk_id = pdev->id;
 	/* With a single device, the clock id is still "rtc0" */
@@ -594,7 +639,7 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 
 	snprintf(clk_name, sizeof(clk_name), "rtc%d", clk_id);
 
-	rtc->clk = devm_clk_get(&pdev->dev, clk_name);
+	rtc->clk = clk_get(&pdev->dev, clk_name);
 	if (IS_ERR(rtc->clk)) {
 		/*
 		 * No error handling for rtc->clk intentionally, not all
@@ -608,9 +653,8 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 	clk_enable(rtc->clk);
 
 	rtc->capabilities = RTC_DEF_CAPABILITIES;
-	if (dev_get_platdata(&pdev->dev)) {
-		struct sh_rtc_platform_info *pinfo =
-			dev_get_platdata(&pdev->dev);
+	if (pdev->dev.platform_data) {
+		struct sh_rtc_platform_info *pinfo = pdev->dev.platform_data;
 
 		/*
 		 * Some CPUs have special capabilities in addition to the
@@ -621,8 +665,8 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 
 	if (rtc->carry_irq <= 0) {
 		/* register shared periodic/carry/alarm irq */
-		ret = devm_request_irq(&pdev->dev, rtc->periodic_irq,
-				sh_rtc_shared, 0, "sh-rtc", rtc);
+		ret = request_irq(rtc->periodic_irq, sh_rtc_shared,
+				  0, "sh-rtc", rtc);
 		if (unlikely(ret)) {
 			dev_err(&pdev->dev,
 				"request IRQ failed with %d, IRQ %d\n", ret,
@@ -631,8 +675,8 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 		}
 	} else {
 		/* register periodic/carry/alarm irqs */
-		ret = devm_request_irq(&pdev->dev, rtc->periodic_irq,
-				sh_rtc_periodic, 0, "sh-rtc period", rtc);
+		ret = request_irq(rtc->periodic_irq, sh_rtc_periodic,
+				  0, "sh-rtc period", rtc);
 		if (unlikely(ret)) {
 			dev_err(&pdev->dev,
 				"request period IRQ failed with %d, IRQ %d\n",
@@ -640,21 +684,24 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 			goto err_unmap;
 		}
 
-		ret = devm_request_irq(&pdev->dev, rtc->carry_irq,
-				sh_rtc_interrupt, 0, "sh-rtc carry", rtc);
+		ret = request_irq(rtc->carry_irq, sh_rtc_interrupt,
+				  0, "sh-rtc carry", rtc);
 		if (unlikely(ret)) {
 			dev_err(&pdev->dev,
 				"request carry IRQ failed with %d, IRQ %d\n",
 				ret, rtc->carry_irq);
+			free_irq(rtc->periodic_irq, rtc);
 			goto err_unmap;
 		}
 
-		ret = devm_request_irq(&pdev->dev, rtc->alarm_irq,
-				sh_rtc_alarm, 0, "sh-rtc alarm", rtc);
+		ret = request_irq(rtc->alarm_irq, sh_rtc_alarm,
+				  0, "sh-rtc alarm", rtc);
 		if (unlikely(ret)) {
 			dev_err(&pdev->dev,
 				"request alarm IRQ failed with %d, IRQ %d\n",
 				ret, rtc->alarm_irq);
+			free_irq(rtc->carry_irq, rtc);
+			free_irq(rtc->periodic_irq, rtc);
 			goto err_unmap;
 		}
 	}
@@ -667,10 +714,13 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 	sh_rtc_setaie(&pdev->dev, 0);
 	sh_rtc_setcie(&pdev->dev, 0);
 
-	rtc->rtc_dev = devm_rtc_device_register(&pdev->dev, "sh",
+	rtc->rtc_dev = rtc_device_register("sh", &pdev->dev,
 					   &sh_rtc_ops, THIS_MODULE);
 	if (IS_ERR(rtc->rtc_dev)) {
 		ret = PTR_ERR(rtc->rtc_dev);
+		free_irq(rtc->periodic_irq, rtc);
+		free_irq(rtc->carry_irq, rtc);
+		free_irq(rtc->alarm_irq, rtc);
 		goto err_unmap;
 	}
 
@@ -687,6 +737,12 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 
 err_unmap:
 	clk_disable(rtc->clk);
+	clk_put(rtc->clk);
+	iounmap(rtc->regbase);
+err_badmap:
+	release_mem_region(rtc->res->start, rtc->regsize);
+err_badres:
+	kfree(rtc);
 
 	return ret;
 }
@@ -695,12 +751,28 @@ static int __exit sh_rtc_remove(struct platform_device *pdev)
 {
 	struct sh_rtc *rtc = platform_get_drvdata(pdev);
 
+	rtc_device_unregister(rtc->rtc_dev);
 	sh_rtc_irq_set_state(&pdev->dev, 0);
 
 	sh_rtc_setaie(&pdev->dev, 0);
 	sh_rtc_setcie(&pdev->dev, 0);
 
+	free_irq(rtc->periodic_irq, rtc);
+
+	if (rtc->carry_irq > 0) {
+		free_irq(rtc->carry_irq, rtc);
+		free_irq(rtc->alarm_irq, rtc);
+	}
+
+	iounmap(rtc->regbase);
+	release_mem_region(rtc->res->start, rtc->regsize);
+
 	clk_disable(rtc->clk);
+	clk_put(rtc->clk);
+
+	platform_set_drvdata(pdev, NULL);
+
+	kfree(rtc);
 
 	return 0;
 }
@@ -718,7 +790,6 @@ static void sh_rtc_set_irq_wake(struct device *dev, int enabled)
 	}
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int sh_rtc_suspend(struct device *dev)
 {
 	if (device_may_wakeup(dev))
@@ -734,21 +805,36 @@ static int sh_rtc_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(sh_rtc_pm_ops, sh_rtc_suspend, sh_rtc_resume);
+static const struct dev_pm_ops sh_rtc_dev_pm_ops = {
+	.suspend = sh_rtc_suspend,
+	.resume = sh_rtc_resume,
+};
 
 static struct platform_driver sh_rtc_platform_driver = {
 	.driver		= {
 		.name	= DRV_NAME,
-		.pm	= &sh_rtc_pm_ops,
+		.owner	= THIS_MODULE,
+		.pm	= &sh_rtc_dev_pm_ops,
 	},
 	.remove		= __exit_p(sh_rtc_remove),
 };
 
-module_platform_driver_probe(sh_rtc_platform_driver, sh_rtc_probe);
+static int __init sh_rtc_init(void)
+{
+	return platform_driver_probe(&sh_rtc_platform_driver, sh_rtc_probe);
+}
+
+static void __exit sh_rtc_exit(void)
+{
+	platform_driver_unregister(&sh_rtc_platform_driver);
+}
+
+module_init(sh_rtc_init);
+module_exit(sh_rtc_exit);
 
 MODULE_DESCRIPTION("SuperH on-chip RTC driver");
+MODULE_VERSION(DRV_VERSION);
 MODULE_AUTHOR("Paul Mundt <lethal@linux-sh.org>, "
 	      "Jamie Lenehan <lenehan@twibble.org>, "
 	      "Angelo Castello <angelo.castello@st.com>");

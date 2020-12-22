@@ -1,6 +1,8 @@
 /*
+ *  arch/s390/kernel/sys_s390.c
+ *
  *  S390 version
- *    Copyright IBM Corp. 1999, 2000
+ *    Copyright (C) 1999,2000 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com),
  *               Thomas Spatzier (tspat@de.ibm.com)
  *
@@ -76,16 +78,74 @@ SYSCALL_DEFINE5(s390_ipc, uint, call, int, first, unsigned long, second,
 	return sys_ipc(call, first, second, third, ptr, third);
 }
 
+#ifdef CONFIG_64BIT
 SYSCALL_DEFINE1(s390_personality, unsigned int, personality)
 {
 	unsigned int ret;
 
-	if (personality(current->personality) == PER_LINUX32 &&
-	    personality(personality) == PER_LINUX)
-		personality |= PER_LINUX32;
+	if (current->personality == PER_LINUX32 && personality == PER_LINUX)
+		personality = PER_LINUX32;
 	ret = sys_personality(personality);
-	if (personality(ret) == PER_LINUX32)
-		ret &= ~PER_LINUX32;
+	if (ret == PER_LINUX32)
+		ret = PER_LINUX;
 
 	return ret;
 }
+#endif /* CONFIG_64BIT */
+
+/*
+ * Wrapper function for sys_fadvise64/fadvise64_64
+ */
+#ifndef CONFIG_64BIT
+
+SYSCALL_DEFINE5(s390_fadvise64, int, fd, u32, offset_high, u32, offset_low,
+		size_t, len, int, advice)
+{
+	return sys_fadvise64(fd, (u64) offset_high << 32 | offset_low,
+			len, advice);
+}
+
+struct fadvise64_64_args {
+	int fd;
+	long long offset;
+	long long len;
+	int advice;
+};
+
+SYSCALL_DEFINE1(s390_fadvise64_64, struct fadvise64_64_args __user *, args)
+{
+	struct fadvise64_64_args a;
+
+	if ( copy_from_user(&a, args, sizeof(a)) )
+		return -EFAULT;
+	return sys_fadvise64_64(a.fd, a.offset, a.len, a.advice);
+}
+
+/*
+ * This is a wrapper to call sys_fallocate(). For 31 bit s390 the last
+ * 64 bit argument "len" is split into the upper and lower 32 bits. The
+ * system call wrapper in the user space loads the value to %r6/%r7.
+ * The code in entry.S keeps the values in %r2 - %r6 where they are and
+ * stores %r7 to 96(%r15). But the standard C linkage requires that
+ * the whole 64 bit value for len is stored on the stack and doesn't
+ * use %r6 at all. So s390_fallocate has to convert the arguments from
+ *   %r2: fd, %r3: mode, %r4/%r5: offset, %r6/96(%r15)-99(%r15): len
+ * to
+ *   %r2: fd, %r3: mode, %r4/%r5: offset, 96(%r15)-103(%r15): len
+ */
+SYSCALL_DEFINE(s390_fallocate)(int fd, int mode, loff_t offset,
+			       u32 len_high, u32 len_low)
+{
+	return sys_fallocate(fd, mode, offset, ((u64)len_high << 32) | len_low);
+}
+#ifdef CONFIG_HAVE_SYSCALL_WRAPPERS
+asmlinkage long SyS_s390_fallocate(long fd, long mode, loff_t offset,
+				   long len_high, long len_low)
+{
+	return SYSC_s390_fallocate((int) fd, (int) mode, offset,
+				   (u32) len_high, (u32) len_low);
+}
+SYSCALL_ALIAS(sys_s390_fallocate, SyS_s390_fallocate);
+#endif
+
+#endif

@@ -47,19 +47,17 @@ static int ht_print_chan(struct ieee80211_channel *chan,
 		return 0;
 
 	if (chan->flags & IEEE80211_CHAN_DISABLED)
-		return scnprintf(buf + offset,
-				 buf_size - offset,
-				 "%d Disabled\n",
-				 chan->center_freq);
+		return snprintf(buf + offset,
+				buf_size - offset,
+				"%d Disabled\n",
+				chan->center_freq);
 
-	return scnprintf(buf + offset,
-			 buf_size - offset,
-			 "%d HT40 %c%c\n",
-			 chan->center_freq,
-			 (chan->flags & IEEE80211_CHAN_NO_HT40MINUS) ?
-				' ' : '-',
-			 (chan->flags & IEEE80211_CHAN_NO_HT40PLUS) ?
-				' ' : '+');
+	return snprintf(buf + offset,
+			buf_size - offset,
+			"%d HT40 %c%c\n",
+			chan->center_freq,
+			(chan->flags & IEEE80211_CHAN_NO_HT40MINUS) ? ' ' : '-',
+			(chan->flags & IEEE80211_CHAN_NO_HT40PLUS)  ? ' ' : '+');
 }
 
 static ssize_t ht40allow_map_read(struct file *file,
@@ -69,16 +67,16 @@ static ssize_t ht40allow_map_read(struct file *file,
 	struct wiphy *wiphy = file->private_data;
 	char *buf;
 	unsigned int offset = 0, buf_size = PAGE_SIZE, i, r;
-	enum nl80211_band band;
+	enum ieee80211_band band;
 	struct ieee80211_supported_band *sband;
 
 	buf = kzalloc(buf_size, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
-	rtnl_lock();
+	mutex_lock(&cfg80211_mutex);
 
-	for (band = 0; band < NUM_NL80211_BANDS; band++) {
+	for (band = 0; band < IEEE80211_NUM_BANDS; band++) {
 		sband = wiphy->bands[band];
 		if (!sband)
 			continue;
@@ -87,7 +85,7 @@ static ssize_t ht40allow_map_read(struct file *file,
 						buf, buf_size, offset);
 	}
 
-	rtnl_unlock();
+	mutex_unlock(&cfg80211_mutex);
 
 	r = simple_read_from_buffer(user_buf, count, ppos, buf, offset);
 

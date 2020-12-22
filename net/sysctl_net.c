@@ -26,10 +26,14 @@
 #include <linux/if_ether.h>
 #endif
 
+#ifdef CONFIG_TR
+#include <linux/if_tr.h>
+#endif
+
 static struct ctl_table_set *
-net_ctl_header_lookup(struct ctl_table_root *root)
+net_ctl_header_lookup(struct ctl_table_root *root, struct nsproxy *namespaces)
 {
-	return &current->nsproxy->net_ns->sysctls;
+	return &namespaces->net_ns->sysctls;
 }
 
 static int is_seen(struct ctl_table_set *set)
@@ -38,41 +42,34 @@ static int is_seen(struct ctl_table_set *set)
 }
 
 /* Return standard mode bits for table entry. */
-static int net_ctl_permissions(struct ctl_table_header *head,
+static int net_ctl_permissions(struct ctl_table_root *root,
+			       struct nsproxy *nsproxy,
 			       struct ctl_table *table)
 {
-	struct net *net = container_of(head->set, struct net, sysctls);
-
 	/* Allow network administrator to have same access as root. */
-	if (ns_capable_noaudit(net->user_ns, CAP_NET_ADMIN)) {
+	if (capable(CAP_NET_ADMIN)) {
 		int mode = (table->mode >> 6) & 7;
 		return (mode << 6) | (mode << 3) | mode;
 	}
-
 	return table->mode;
-}
-
-static void net_ctl_set_ownership(struct ctl_table_header *head,
-				  struct ctl_table *table,
-				  kuid_t *uid, kgid_t *gid)
-{
-	struct net *net = container_of(head->set, struct net, sysctls);
-	kuid_t ns_root_uid;
-	kgid_t ns_root_gid;
-
-	ns_root_uid = make_kuid(net->user_ns, 0);
-	if (uid_valid(ns_root_uid))
-		*uid = ns_root_uid;
-
-	ns_root_gid = make_kgid(net->user_ns, 0);
-	if (gid_valid(ns_root_gid))
-		*gid = ns_root_gid;
 }
 
 static struct ctl_table_root net_sysctl_root = {
 	.lookup = net_ctl_header_lookup,
 	.permissions = net_ctl_permissions,
-	.set_ownership = net_ctl_set_ownership,
+};
+
+static int net_ctl_ro_header_perms(struct ctl_table_root *root,
+		struct nsproxy *namespaces, struct ctl_table *table)
+{
+	if (net_eq(namespaces->net_ns, &init_net))
+		return table->mode;
+	else
+		return table->mode & ~0222;
+}
+
+static struct ctl_table_root net_sysctl_ro_root = {
+	.permissions = net_ctl_ro_header_perms,
 };
 
 static int __net_init sysctl_net_init(struct net *net)
@@ -91,36 +88,34 @@ static struct pernet_operations sysctl_pernet_ops = {
 	.exit = sysctl_net_exit,
 };
 
-static struct ctl_table_header *net_header;
-__init int net_sysctl_init(void)
+static __init int net_sysctl_init(void)
 {
-	static struct ctl_table empty[1];
-	int ret = -ENOMEM;
-	/* Avoid limitations in the sysctl implementation by
-	 * registering "/proc/sys/net" as an empty directory not in a
-	 * network namespace.
-	 */
-	net_header = register_sysctl("net", empty);
-	if (!net_header)
-		goto out;
+	int ret;
 	ret = register_pernet_subsys(&sysctl_pernet_ops);
 	if (ret)
-		goto out1;
+		goto out;
+	setup_sysctl_set(&net_sysctl_ro_root.default_set, &net_sysctl_ro_root, NULL);
+	register_sysctl_root(&net_sysctl_ro_root);
 	register_sysctl_root(&net_sysctl_root);
 out:
 	return ret;
-out1:
-	unregister_sysctl_table(net_header);
-	net_header = NULL;
-	goto out;
 }
+subsys_initcall(net_sysctl_init);
 
-struct ctl_table_header *register_net_sysctl(struct net *net,
-	const char *path, struct ctl_table *table)
+struct ctl_table_header *register_net_sysctl_table(struct net *net,
+	const struct ctl_path *path, struct ctl_table *table)
 {
-	return __register_sysctl_table(&net->sysctls, path, table);
+	return __register_sysctl_paths(&net->sysctls, path, table);
 }
-EXPORT_SYMBOL_GPL(register_net_sysctl);
+EXPORT_SYMBOL_GPL(register_net_sysctl_table);
+
+struct ctl_table_header *register_net_sysctl_rotable(const
+		struct ctl_path *path, struct ctl_table *table)
+{
+	return __register_sysctl_paths(&net_sysctl_ro_root.default_set,
+					path, table);
+}
+EXPORT_SYMBOL_GPL(register_net_sysctl_rotable);
 
 void unregister_net_sysctl_table(struct ctl_table_header *header)
 {

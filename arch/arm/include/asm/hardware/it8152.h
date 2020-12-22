@@ -106,10 +106,10 @@ extern void __iomem *it8152_base_address;
 struct pci_dev;
 struct pci_sys_data;
 
-extern void it8152_irq_demux(struct irq_desc *desc);
+extern void it8152_irq_demux(unsigned int irq, struct irq_desc *desc);
 extern void it8152_init_irq(void);
 extern int it8152_pci_map_irq(const struct pci_dev *dev, u8 slot, u8 pin);
 extern int it8152_pci_setup(int nr, struct pci_sys_data *sys);
-extern struct pci_ops it8152_ops;
+extern struct pci_bus *it8152_pci_scan_bus(int nr, struct pci_sys_data *sys);
 
 #endif /* __ASM_HARDWARE_IT8152_H */

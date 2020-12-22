@@ -13,7 +13,6 @@
 #include <linux/errno.h>
 #include <linux/iommu-helper.h>
 #include <linux/bitmap.h>
-#include <linux/iommu-common.h>
 
 #ifdef CONFIG_PCI
 #include <linux/pci.h>
@@ -22,7 +21,6 @@
 #include <asm/iommu.h>
 
 #include "iommu_common.h"
-#include "kernel.h"
 
 #define STC_CTXMATCH_ADDR(STC, CTX)	\
 	((STC)->strbuf_ctxmatch_base + ((CTX) << 3))
@@ -46,9 +44,8 @@
 			       "i" (ASI_PHYS_BYPASS_EC_E))
 
 /* Must be invoked under the IOMMU lock. */
-static void iommu_flushall(struct iommu_map_table *iommu_map_table)
+static void iommu_flushall(struct iommu *iommu)
 {
-	struct iommu *iommu = container_of(iommu_map_table, struct iommu, tbl);
 	if (iommu->iommu_flushinv) {
 		iommu_write(iommu->iommu_flushinv, ~(u64)0);
 	} else {
@@ -89,6 +86,94 @@ static inline void iopte_make_dummy(struct iommu *iommu, iopte_t *iopte)
 	iopte_val(*iopte) = val;
 }
 
+/* Based almost entirely upon the ppc64 iommu allocator.  If you use the 'handle'
+ * facility it must all be done in one pass while under the iommu lock.
+ *
+ * On sun4u platforms, we only flush the IOMMU once every time we've passed
+ * over the entire page table doing allocations.  Therefore we only ever advance
+ * the hint and cannot backtrack it.
+ */
+unsigned long iommu_range_alloc(struct device *dev,
+				struct iommu *iommu,
+				unsigned long npages,
+				unsigned long *handle)
+{
+	unsigned long n, end, start, limit, boundary_size;
+	struct iommu_arena *arena = &iommu->arena;
+	int pass = 0;
+
+	/* This allocator was derived from x86_64's bit string search */
+
+	/* Sanity check */
+	if (unlikely(npages == 0)) {
+		if (printk_ratelimit())
+			WARN_ON(1);
+		return DMA_ERROR_CODE;
+	}
+
+	if (handle && *handle)
+		start = *handle;
+	else
+		start = arena->hint;
+
+	limit = arena->limit;
+
+	/* The case below can happen if we have a small segment appended
+	 * to a large, or when the previous alloc was at the very end of
+	 * the available space. If so, go back to the beginning and flush.
+	 */
+	if (start >= limit) {
+		start = 0;
+		if (iommu->flush_all)
+			iommu->flush_all(iommu);
+	}
+
+ again:
+
+	if (dev)
+		boundary_size = ALIGN(dma_get_seg_boundary(dev) + 1,
+				      1 << IO_PAGE_SHIFT);
+	else
+		boundary_size = ALIGN(1UL << 32, 1 << IO_PAGE_SHIFT);
+
+	n = iommu_area_alloc(arena->map, limit, start, npages,
+			     iommu->page_table_map_base >> IO_PAGE_SHIFT,
+			     boundary_size >> IO_PAGE_SHIFT, 0);
+	if (n == -1) {
+		if (likely(pass < 1)) {
+			/* First failure, rescan from the beginning.  */
+			start = 0;
+			if (iommu->flush_all)
+				iommu->flush_all(iommu);
+			pass++;
+			goto again;
+		} else {
+			/* Second failure, give up */
+			return DMA_ERROR_CODE;
+		}
+	}
+
+	end = n + npages;
+
+	arena->hint = end;
+
+	/* Update handle for SG allocations */
+	if (handle)
+		*handle = end;
+
+	return n;
+}
+
+void iommu_range_free(struct iommu *iommu, dma_addr_t dma_addr, unsigned long npages)
+{
+	struct iommu_arena *arena = &iommu->arena;
+	unsigned long entry;
+
+	entry = (dma_addr - iommu->page_table_map_base) >> IO_PAGE_SHIFT;
+
+	bitmap_clear(arena->map, entry, npages);
+}
+
 int iommu_table_init(struct iommu *iommu, int tsbsize,
 		     u32 dma_offset, u32 dma_addr_mask,
 		     int numa_node)
@@ -101,20 +186,22 @@ int iommu_table_init(struct iommu *iommu, int tsbsize,
 	/* Setup initial software IOMMU state. */
 	spin_lock_init(&iommu->lock);
 	iommu->ctx_lowest_free = 1;
-	iommu->tbl.table_map_base = dma_offset;
+	iommu->page_table_map_base = dma_offset;
 	iommu->dma_addr_mask = dma_addr_mask;
 
 	/* Allocate and initialize the free area map.  */
 	sz = num_tsb_entries / 8;
 	sz = (sz + 7UL) & ~7UL;
-	iommu->tbl.map = kmalloc_node(sz, GFP_KERNEL, numa_node);
-	if (!iommu->tbl.map)
+	iommu->arena.map = kmalloc_node(sz, GFP_KERNEL, numa_node);
+	if (!iommu->arena.map) {
+		printk(KERN_ERR "IOMMU: Error, kmalloc(arena.map) failed.\n");
 		return -ENOMEM;
-	memset(iommu->tbl.map, 0, sz);
+	}
+	memset(iommu->arena.map, 0, sz);
+	iommu->arena.limit = num_tsb_entries;
 
-	iommu_tbl_pool_init(&iommu->tbl, num_tsb_entries, IO_PAGE_SHIFT,
-			    (tlb_type != hypervisor ? iommu_flushall : NULL),
-			    false, 1, false);
+	if (tlb_type != hypervisor)
+		iommu->flush_all = iommu_flushall;
 
 	/* Allocate and initialize the dummy page which we
 	 * set inactive IO PTEs to point to.
@@ -147,21 +234,19 @@ out_free_dummy_page:
 	iommu->dummy_page = 0UL;
 
 out_free_map:
-	kfree(iommu->tbl.map);
-	iommu->tbl.map = NULL;
+	kfree(iommu->arena.map);
+	iommu->arena.map = NULL;
 
 	return -ENOMEM;
 }
 
-static inline iopte_t *alloc_npages(struct device *dev,
-				    struct iommu *iommu,
+static inline iopte_t *alloc_npages(struct device *dev, struct iommu *iommu,
 				    unsigned long npages)
 {
 	unsigned long entry;
 
-	entry = iommu_tbl_range_alloc(dev, &iommu->tbl, npages, NULL,
-				      (unsigned long)(-1), 0);
-	if (unlikely(entry == IOMMU_ERROR_CODE))
+	entry = iommu_range_alloc(dev, iommu, npages, NULL);
+	if (unlikely(entry == DMA_ERROR_CODE))
 		return NULL;
 
 	return iommu->page_table + entry;
@@ -196,9 +281,9 @@ static inline void iommu_free_ctx(struct iommu *iommu, int ctx)
 
 static void *dma_4u_alloc_coherent(struct device *dev, size_t size,
 				   dma_addr_t *dma_addrp, gfp_t gfp,
-				   unsigned long attrs)
+				   struct dma_attrs *attrs)
 {
-	unsigned long order, first_page;
+	unsigned long flags, order, first_page;
 	struct iommu *iommu;
 	struct page *page;
 	int npages, nid;
@@ -220,14 +305,16 @@ static void *dma_4u_alloc_coherent(struct device *dev, size_t size,
 
 	iommu = dev->archdata.iommu;
 
+	spin_lock_irqsave(&iommu->lock, flags);
 	iopte = alloc_npages(dev, iommu, size >> IO_PAGE_SHIFT);
+	spin_unlock_irqrestore(&iommu->lock, flags);
 
 	if (unlikely(iopte == NULL)) {
 		free_pages(first_page, order);
 		return NULL;
 	}
 
-	*dma_addrp = (iommu->tbl.table_map_base +
+	*dma_addrp = (iommu->page_table_map_base +
 		      ((iopte - iommu->page_table) << IO_PAGE_SHIFT));
 	ret = (void *) first_page;
 	npages = size >> IO_PAGE_SHIFT;
@@ -245,15 +332,19 @@ static void *dma_4u_alloc_coherent(struct device *dev, size_t size,
 
 static void dma_4u_free_coherent(struct device *dev, size_t size,
 				 void *cpu, dma_addr_t dvma,
-				 unsigned long attrs)
+				 struct dma_attrs *attrs)
 {
 	struct iommu *iommu;
-	unsigned long order, npages;
+	unsigned long flags, order, npages;
 
 	npages = IO_PAGE_ALIGN(size) >> IO_PAGE_SHIFT;
 	iommu = dev->archdata.iommu;
 
-	iommu_tbl_range_free(&iommu->tbl, dvma, npages, IOMMU_ERROR_CODE);
+	spin_lock_irqsave(&iommu->lock, flags);
+
+	iommu_range_free(iommu, dvma, npages);
+
+	spin_unlock_irqrestore(&iommu->lock, flags);
 
 	order = get_order(size);
 	if (order < 10)
@@ -263,7 +354,7 @@ static void dma_4u_free_coherent(struct device *dev, size_t size,
 static dma_addr_t dma_4u_map_page(struct device *dev, struct page *page,
 				  unsigned long offset, size_t sz,
 				  enum dma_data_direction direction,
-				  unsigned long attrs)
+				  struct dma_attrs *attrs)
 {
 	struct iommu *iommu;
 	struct strbuf *strbuf;
@@ -283,8 +374,8 @@ static dma_addr_t dma_4u_map_page(struct device *dev, struct page *page,
 	npages = IO_PAGE_ALIGN(oaddr + sz) - (oaddr & IO_PAGE_MASK);
 	npages >>= IO_PAGE_SHIFT;
 
-	base = alloc_npages(dev, iommu, npages);
 	spin_lock_irqsave(&iommu->lock, flags);
+	base = alloc_npages(dev, iommu, npages);
 	ctx = 0;
 	if (iommu->iommu_ctxflush)
 		ctx = iommu_alloc_ctx(iommu);
@@ -293,7 +384,7 @@ static dma_addr_t dma_4u_map_page(struct device *dev, struct page *page,
 	if (unlikely(!base))
 		goto bad;
 
-	bus_addr = (iommu->tbl.table_map_base +
+	bus_addr = (iommu->page_table_map_base +
 		    ((base - iommu->page_table) << IO_PAGE_SHIFT));
 	ret = bus_addr | (oaddr & ~IO_PAGE_MASK);
 	base_paddr = __pa(oaddr & IO_PAGE_MASK);
@@ -385,7 +476,7 @@ do_flush_sync:
 
 static void dma_4u_unmap_page(struct device *dev, dma_addr_t bus_addr,
 			      size_t sz, enum dma_data_direction direction,
-			      unsigned long attrs)
+			      struct dma_attrs *attrs)
 {
 	struct iommu *iommu;
 	struct strbuf *strbuf;
@@ -404,7 +495,7 @@ static void dma_4u_unmap_page(struct device *dev, dma_addr_t bus_addr,
 	npages = IO_PAGE_ALIGN(bus_addr + sz) - (bus_addr & IO_PAGE_MASK);
 	npages >>= IO_PAGE_SHIFT;
 	base = iommu->page_table +
-		((bus_addr - iommu->tbl.table_map_base) >> IO_PAGE_SHIFT);
+		((bus_addr - iommu->page_table_map_base) >> IO_PAGE_SHIFT);
 	bus_addr &= IO_PAGE_MASK;
 
 	spin_lock_irqsave(&iommu->lock, flags);
@@ -423,15 +514,16 @@ static void dma_4u_unmap_page(struct device *dev, dma_addr_t bus_addr,
 	for (i = 0; i < npages; i++)
 		iopte_make_dummy(iommu, base + i);
 
-	iommu_free_ctx(iommu, ctx);
-	spin_unlock_irqrestore(&iommu->lock, flags);
+	iommu_range_free(iommu, bus_addr, npages);
 
-	iommu_tbl_range_free(&iommu->tbl, bus_addr, npages, IOMMU_ERROR_CODE);
+	iommu_free_ctx(iommu, ctx);
+
+	spin_unlock_irqrestore(&iommu->lock, flags);
 }
 
 static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 			 int nelems, enum dma_data_direction direction,
-			 unsigned long attrs)
+			 struct dma_attrs *attrs)
 {
 	struct scatterlist *s, *outs, *segstart;
 	unsigned long flags, handle, prot, ctx;
@@ -474,7 +566,7 @@ static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 	max_seg_size = dma_get_max_seg_size(dev);
 	seg_boundary_size = ALIGN(dma_get_seg_boundary(dev) + 1,
 				  IO_PAGE_SIZE) >> IO_PAGE_SHIFT;
-	base_shift = iommu->tbl.table_map_base >> IO_PAGE_SHIFT;
+	base_shift = iommu->page_table_map_base >> IO_PAGE_SHIFT;
 	for_each_sg(sglist, s, nelems, i) {
 		unsigned long paddr, npages, entry, out_entry = 0, slen;
 		iopte_t *base;
@@ -488,11 +580,10 @@ static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 		/* Allocate iommu entries for that segment */
 		paddr = (unsigned long) SG_ENT_PHYS_ADDRESS(s);
 		npages = iommu_num_pages(paddr, slen, IO_PAGE_SIZE);
-		entry = iommu_tbl_range_alloc(dev, &iommu->tbl, npages,
-					      &handle, (unsigned long)(-1), 0);
+		entry = iommu_range_alloc(dev, iommu, npages, &handle);
 
 		/* Handle failure */
-		if (unlikely(entry == IOMMU_ERROR_CODE)) {
+		if (unlikely(entry == DMA_ERROR_CODE)) {
 			if (printk_ratelimit())
 				printk(KERN_INFO "iommu_alloc failed, iommu %p paddr %lx"
 				       " npages %lx\n", iommu, paddr, npages);
@@ -502,7 +593,7 @@ static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 		base = iommu->page_table + entry;
 
 		/* Convert entry to a dma_addr_t */
-		dma_addr = iommu->tbl.table_map_base +
+		dma_addr = iommu->page_table_map_base +
 			(entry << IO_PAGE_SHIFT);
 		dma_addr |= (s->offset & ~IO_PAGE_MASK);
 
@@ -562,16 +653,14 @@ iommu_map_failed:
 			vaddr = s->dma_address & IO_PAGE_MASK;
 			npages = iommu_num_pages(s->dma_address, s->dma_length,
 						 IO_PAGE_SIZE);
+			iommu_range_free(iommu, vaddr, npages);
 
-			entry = (vaddr - iommu->tbl.table_map_base)
+			entry = (vaddr - iommu->page_table_map_base)
 				>> IO_PAGE_SHIFT;
 			base = iommu->page_table + entry;
 
 			for (j = 0; j < npages; j++)
 				iopte_make_dummy(iommu, base + j);
-
-			iommu_tbl_range_free(&iommu->tbl, vaddr, npages,
-					     IOMMU_ERROR_CODE);
 
 			s->dma_address = DMA_ERROR_CODE;
 			s->dma_length = 0;
@@ -594,11 +683,10 @@ static unsigned long fetch_sg_ctx(struct iommu *iommu, struct scatterlist *sg)
 	if (iommu->iommu_ctxflush) {
 		iopte_t *base;
 		u32 bus_addr;
-		struct iommu_map_table *tbl = &iommu->tbl;
 
 		bus_addr = sg->dma_address & IO_PAGE_MASK;
 		base = iommu->page_table +
-			((bus_addr - tbl->table_map_base) >> IO_PAGE_SHIFT);
+			((bus_addr - iommu->page_table_map_base) >> IO_PAGE_SHIFT);
 
 		ctx = (iopte_val(*base) & IOPTE_CONTEXT) >> 47UL;
 	}
@@ -607,7 +695,7 @@ static unsigned long fetch_sg_ctx(struct iommu *iommu, struct scatterlist *sg)
 
 static void dma_4u_unmap_sg(struct device *dev, struct scatterlist *sglist,
 			    int nelems, enum dma_data_direction direction,
-			    unsigned long attrs)
+			    struct dma_attrs *attrs)
 {
 	unsigned long flags, ctx;
 	struct scatterlist *sg;
@@ -634,8 +722,9 @@ static void dma_4u_unmap_sg(struct device *dev, struct scatterlist *sglist,
 		if (!len)
 			break;
 		npages = iommu_num_pages(dma_handle, len, IO_PAGE_SIZE);
+		iommu_range_free(iommu, dma_handle, npages);
 
-		entry = ((dma_handle - iommu->tbl.table_map_base)
+		entry = ((dma_handle - iommu->page_table_map_base)
 			 >> IO_PAGE_SHIFT);
 		base = iommu->page_table + entry;
 
@@ -647,8 +736,6 @@ static void dma_4u_unmap_sg(struct device *dev, struct scatterlist *sglist,
 		for (i = 0; i < npages; i++)
 			iopte_make_dummy(iommu, base + i);
 
-		iommu_tbl_range_free(&iommu->tbl, dma_handle, npages,
-				     IOMMU_ERROR_CODE);
 		sg = sg_next(sg);
 	}
 
@@ -682,10 +769,9 @@ static void dma_4u_sync_single_for_cpu(struct device *dev,
 	if (iommu->iommu_ctxflush &&
 	    strbuf->strbuf_ctxflush) {
 		iopte_t *iopte;
-		struct iommu_map_table *tbl = &iommu->tbl;
 
 		iopte = iommu->page_table +
-			((bus_addr - tbl->table_map_base)>>IO_PAGE_SHIFT);
+			((bus_addr - iommu->page_table_map_base)>>IO_PAGE_SHIFT);
 		ctx = (iopte_val(*iopte) & IOPTE_CONTEXT) >> 47UL;
 	}
 
@@ -718,10 +804,9 @@ static void dma_4u_sync_sg_for_cpu(struct device *dev,
 	if (iommu->iommu_ctxflush &&
 	    strbuf->strbuf_ctxflush) {
 		iopte_t *iopte;
-		struct iommu_map_table *tbl = &iommu->tbl;
 
-		iopte = iommu->page_table + ((sglist[0].dma_address -
-			tbl->table_map_base) >> IO_PAGE_SHIFT);
+		iopte = iommu->page_table +
+			((sglist[0].dma_address - iommu->page_table_map_base) >> IO_PAGE_SHIFT);
 		ctx = (iopte_val(*iopte) & IOPTE_CONTEXT) >> 47UL;
 	}
 
@@ -755,23 +840,21 @@ static struct dma_map_ops sun4u_dma_ops = {
 struct dma_map_ops *dma_ops = &sun4u_dma_ops;
 EXPORT_SYMBOL(dma_ops);
 
+extern int pci64_dma_supported(struct pci_dev *pdev, u64 device_mask);
+
 int dma_supported(struct device *dev, u64 device_mask)
 {
 	struct iommu *iommu = dev->archdata.iommu;
 	u64 dma_addr_mask = iommu->dma_addr_mask;
 
-	if (device_mask > DMA_BIT_MASK(32)) {
-		if (iommu->atu)
-			dma_addr_mask = iommu->atu->dma_addr_mask;
-		else
-			return 0;
-	}
+	if (device_mask >= (1UL << 32UL))
+		return 0;
 
 	if ((device_mask & dma_addr_mask) == dma_addr_mask)
 		return 1;
 
 #ifdef CONFIG_PCI
-	if (dev_is_pci(dev))
+	if (dev->bus == &pci_bus_type)
 		return pci64_dma_supported(to_pci_dev(dev), device_mask);
 #endif
 

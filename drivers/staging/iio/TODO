@@ -13,17 +13,6 @@ Would be nice
 3) Expand device set. Lots of other maxim adc's have very
    similar interfaces.
 
-MXS LRADC driver:
-This is a classic MFD device as it combines the following subdevices
- - touchscreen controller (input subsystem related device)
- - general purpose ADC channels
- - battery voltage monitor (power subsystem related device)
- - die temperature monitor (thermal management)
-
-At least the battery voltage and die temperature feature is required in-kernel
-by a driver of the SoC's battery charging unit to avoid any damage to the
-silicon and the battery.
-
 TSL2561
 Would be nice
 1) Open question of userspace vs kernel space balance when
@@ -58,6 +47,14 @@ different requirements.  This one suits mid range
 frequencies (100Hz - 4kHz).
 2) Lots of testing
 
+Periodic Timer trigger
+1) Move to a more general hardware periodic timer request
+subsystem. Current approach is abusing purpose of RTC.
+Initial discussions have taken place, but no actual code
+is in place as yet. This topic will be reopened on lkml
+shortly. I don't really envision this patch being merged
+in anything like its current form.
+
 GPIO trigger
 1) Add control over the type of interrupt etc.  This will
 necessitate a header that is also visible from arch board
@@ -70,7 +67,7 @@ e-mailing the normal IIO list (see below).
 
 Documentation
 1) Lots of cleanup and expansion.
-2) Some device require individual docs.
+2) Some device require indvidual docs.
 
-Contact: Jonathan Cameron <jic23@kernel.org>.
+Contact: Jonathan Cameron <jic23@cam.ac.uk>.
 Mailing list: linux-iio@vger.kernel.org

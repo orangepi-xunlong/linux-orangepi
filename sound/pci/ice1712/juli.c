@@ -23,6 +23,7 @@
  *
  */
 
+#include <asm/io.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
@@ -244,7 +245,7 @@ static void juli_akm_set_rate_val(struct snd_akm4xxx *ak, unsigned int rate)
 	/* AK5385 first, since it requires cold reset affecting both codecs */
 	old_gpio = ice->gpio.get_data(ice);
 	new_gpio =  (old_gpio & ~GPIO_AK5385A_MASK) | ak5385_pins;
-	/* dev_dbg(ice->card->dev, "JULI - ak5385 set_rate_val: new gpio 0x%x\n",
+	/* printk(KERN_DEBUG "JULI - ak5385 set_rate_val: new gpio 0x%x\n",
 		new_gpio); */
 	ice->gpio.set_data(ice, new_gpio);
 
@@ -282,7 +283,7 @@ static const struct snd_akm4xxx_dac_channel juli_dac[] = {
 };
 
 
-static struct snd_akm4xxx akm_juli_dac = {
+static struct snd_akm4xxx akm_juli_dac __devinitdata = {
 	.type = SND_AK4358,
 	.num_dacs = 8,	/* DAC1 - analog out
 			   DAC2 - analog in monitor
@@ -344,7 +345,7 @@ static int juli_mute_put(struct snd_kcontrol *kcontrol,
 			new_gpio =  old_gpio &
 				~((unsigned int) kcontrol->private_value);
 	}
-	/* dev_dbg(ice->card->dev,
+	/* printk(KERN_DEBUG
 		"JULI - mute/unmute: control_value: 0x%x, old_gpio: 0x%x, "
 		"new_gpio 0x%x\n",
 		(unsigned int)ucontrol->value.integer.value[0], old_gpio,
@@ -357,7 +358,7 @@ static int juli_mute_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static struct snd_kcontrol_new juli_mute_controls[] = {
+static struct snd_kcontrol_new juli_mute_controls[] __devinitdata = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Master Playback Switch",
@@ -411,7 +412,7 @@ static struct snd_kcontrol_new juli_mute_controls[] = {
 	},
 };
 
-static char *slave_vols[] = {
+static char *slave_vols[] __devinitdata = {
 	PCM_VOLUME,
 	MONITOR_AN_IN_VOLUME,
 	MONITOR_DIG_IN_VOLUME,
@@ -419,11 +420,11 @@ static char *slave_vols[] = {
 	NULL
 };
 
-static
+static __devinitdata
 DECLARE_TLV_DB_SCALE(juli_master_db_scale, -6350, 50, 1);
 
-static struct snd_kcontrol *ctl_find(struct snd_card *card,
-				     const char *name)
+static struct snd_kcontrol __devinit *ctl_find(struct snd_card *card,
+		const char *name)
 {
 	struct snd_ctl_elem_id sid;
 	memset(&sid, 0, sizeof(sid));
@@ -433,21 +434,20 @@ static struct snd_kcontrol *ctl_find(struct snd_card *card,
 	return snd_ctl_find_id(card, &sid);
 }
 
-static void add_slaves(struct snd_card *card,
-		       struct snd_kcontrol *master,
-		       char * const *list)
+static void __devinit add_slaves(struct snd_card *card,
+				 struct snd_kcontrol *master, char **list)
 {
 	for (; *list; list++) {
 		struct snd_kcontrol *slave = ctl_find(card, *list);
-		/* dev_dbg(card->dev, "add_slaves - %s\n", *list); */
+		/* printk(KERN_DEBUG "add_slaves - %s\n", *list); */
 		if (slave) {
-			/* dev_dbg(card->dev, "slave %s found\n", *list); */
+			/* printk(KERN_DEBUG "slave %s found\n", *list); */
 			snd_ctl_add_slave(master, slave);
 		}
 	}
 }
 
-static int juli_add_controls(struct snd_ice1712 *ice)
+static int __devinit juli_add_controls(struct snd_ice1712 *ice)
 {
 	struct juli_spec *spec = ice->spec;
 	int err;
@@ -475,15 +475,18 @@ static int juli_add_controls(struct snd_ice1712 *ice)
 		return err;
 
 	/* only capture SPDIF over AK4114 */
-	return snd_ak4114_build(spec->ak4114, NULL,
+	err = snd_ak4114_build(spec->ak4114, NULL,
 			ice->pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream);
+	if (err < 0)
+		return err;
+	return 0;
 }
 
 /*
  * suspend/resume
  * */
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int juli_resume(struct snd_ice1712 *ice)
 {
 	struct snd_akm4xxx *ak = ice->akm;
@@ -491,17 +494,15 @@ static int juli_resume(struct snd_ice1712 *ice)
 	/* akm4358 un-reset, un-mute */
 	snd_akm4xxx_reset(ak, 0);
 	/* reinit ak4114 */
-	snd_ak4114_resume(spec->ak4114);
+	snd_ak4114_reinit(spec->ak4114);
 	return 0;
 }
 
 static int juli_suspend(struct snd_ice1712 *ice)
 {
 	struct snd_akm4xxx *ak = ice->akm;
-	struct juli_spec *spec = ice->spec;
 	/* akm4358 reset and soft-mute */
 	snd_akm4xxx_reset(ak, 1);
-	snd_ak4114_suspend(spec->ak4114);
 	return 0;
 }
 #endif
@@ -535,7 +536,7 @@ static void juli_set_rate(struct snd_ice1712 *ice, unsigned int rate)
 
 	old = ice->gpio.get_data(ice);
 	new =  (old & ~GPIO_RATE_MASK) | get_gpio_val(rate);
-	/* dev_dbg(ice->card->dev, "JULI - set_rate: old %x, new %x\n",
+	/* printk(KERN_DEBUG "JULI - set_rate: old %x, new %x\n",
 			old & GPIO_RATE_MASK,
 			new & GPIO_RATE_MASK); */
 
@@ -572,13 +573,13 @@ static void juli_ak4114_change(struct ak4114 *ak4114, unsigned char c0,
 	if (ice->is_spdif_master(ice) && c1) {
 		/* only for SPDIF master mode, rate was changed */
 		rate = snd_ak4114_external_rate(ak4114);
-		/* dev_dbg(ice->card->dev, "ak4114 - input rate changed to %d\n",
+		/* printk(KERN_DEBUG "ak4114 - input rate changed to %d\n",
 				rate); */
 		juli_akm_set_rate_val(ice->akm, rate);
 	}
 }
 
-static int juli_init(struct snd_ice1712 *ice)
+static int __devinit juli_init(struct snd_ice1712 *ice)
 {
 	static const unsigned char ak4114_init_vals[] = {
 		/* AK4117_REG_PWRDN */	AK4114_RST | AK4114_PWN |
@@ -627,7 +628,7 @@ static int juli_init(struct snd_ice1712 *ice)
 #endif
 
 	if (spec->analog) {
-		dev_info(ice->card->dev, "juli@: analog I/O detected\n");
+		printk(KERN_INFO "juli@: analog I/O detected\n");
 		ice->num_total_dacs = 2;
 		ice->num_total_adcs = 2;
 
@@ -651,7 +652,7 @@ static int juli_init(struct snd_ice1712 *ice)
 
 	ice->spdif.ops.open = juli_spdif_in_open;
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	ice->pm_resume = juli_resume;
 	ice->pm_suspend = juli_suspend;
 	ice->pm_suspend_enabled = 1;
@@ -666,7 +667,7 @@ static int juli_init(struct snd_ice1712 *ice)
  * hence the driver needs to sets up it properly.
  */
 
-static unsigned char juli_eeprom[] = {
+static unsigned char juli_eeprom[] __devinitdata = {
 	[ICE_EEP2_SYSCONF]     = 0x2b,	/* clock 512, mpu401, 1xADC, 1xDACs,
 					   SPDIF in */
 	[ICE_EEP2_ACLINK]      = 0x80,	/* I2S */
@@ -685,7 +686,7 @@ static unsigned char juli_eeprom[] = {
 };
 
 /* entry point */
-struct snd_ice1712_card_info snd_vt1724_juli_cards[] = {
+struct snd_ice1712_card_info snd_vt1724_juli_cards[] __devinitdata = {
 	{
 		.subvendor = VT1724_SUBDEVICE_JULI,
 		.name = "ESI Juli@",

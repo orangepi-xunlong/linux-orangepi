@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2016 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -87,6 +87,7 @@ s32 ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
 	int min_credit;
 	int min_multiplier;
 	int min_percent = 100;
+	s32 ret_val = 0;
 	/* Initialization values default for Tx settings */
 	u32 credit_refill       = 0;
 	u32 credit_max          = 0;
@@ -94,8 +95,10 @@ s32 ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
 	u8  bw_percent          = 0;
 	u8  i;
 
-	if (!dcb_config)
-		return DCB_ERR_CONFIG;
+	if (dcb_config == NULL) {
+		ret_val = DCB_ERR_CONFIG;
+		goto out;
+	}
 
 	min_credit = ((max_frame / 2) + DCB_CREDIT_QUANTUM - 1) /
 			DCB_CREDIT_QUANTUM;
@@ -139,11 +142,6 @@ s32 ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
 		/* Calculate credit refill ratio using multiplier */
 		credit_refill = min(link_percentage * min_multiplier,
 				    MAX_CREDIT_REFILL);
-
-		/* Refill at least minimum credit */
-		if (credit_refill < min_credit)
-			credit_refill = min_credit;
-
 		p->data_credits_refill = (u16)credit_refill;
 
 		/* Calculate maximum credit for the TC */
@@ -154,7 +152,7 @@ s32 ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
 		 * of a TC is too small, the maximum credit may not be
 		 * enough to send out a jumbo frame in data plane arbitration.
 		 */
-		if (credit_max < min_credit)
+		if (credit_max && (credit_max < min_credit))
 			credit_max = min_credit;
 
 		if (direction == DCB_TX_CONFIG) {
@@ -176,88 +174,73 @@ s32 ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
 		p->data_credits_max = (u16)credit_max;
 	}
 
-	return 0;
+out:
+	return ret_val;
 }
 
 void ixgbe_dcb_unpack_pfc(struct ixgbe_dcb_config *cfg, u8 *pfc_en)
 {
-	struct tc_configuration *tc_config = &cfg->tc_config[0];
-	int tc;
+	int i;
 
-	for (*pfc_en = 0, tc = 0; tc < MAX_TRAFFIC_CLASS; tc++) {
-		if (tc_config[tc].dcb_pfc != pfc_disabled)
-			*pfc_en |= BIT(tc);
-	}
+	*pfc_en = 0;
+	for (i = 0; i < MAX_TRAFFIC_CLASS; i++)
+		*pfc_en |= !!(cfg->tc_config[i].dcb_pfc & 0xF) << i;
 }
 
 void ixgbe_dcb_unpack_refill(struct ixgbe_dcb_config *cfg, int direction,
 			     u16 *refill)
 {
-	struct tc_configuration *tc_config = &cfg->tc_config[0];
-	int tc;
+	struct tc_bw_alloc *p;
+	int i;
 
-	for (tc = 0; tc < MAX_TRAFFIC_CLASS; tc++)
-		refill[tc] = tc_config[tc].path[direction].data_credits_refill;
+	for (i = 0; i < MAX_TRAFFIC_CLASS; i++) {
+		p = &cfg->tc_config[i].path[direction];
+		refill[i] = p->data_credits_refill;
+	}
 }
 
 void ixgbe_dcb_unpack_max(struct ixgbe_dcb_config *cfg, u16 *max)
 {
-	struct tc_configuration *tc_config = &cfg->tc_config[0];
-	int tc;
+	int i;
 
-	for (tc = 0; tc < MAX_TRAFFIC_CLASS; tc++)
-		max[tc] = tc_config[tc].desc_credits_max;
+	for (i = 0; i < MAX_TRAFFIC_CLASS; i++)
+		max[i] = cfg->tc_config[i].desc_credits_max;
 }
 
 void ixgbe_dcb_unpack_bwgid(struct ixgbe_dcb_config *cfg, int direction,
 			    u8 *bwgid)
 {
-	struct tc_configuration *tc_config = &cfg->tc_config[0];
-	int tc;
+	struct tc_bw_alloc *p;
+	int i;
 
-	for (tc = 0; tc < MAX_TRAFFIC_CLASS; tc++)
-		bwgid[tc] = tc_config[tc].path[direction].bwg_id;
+	for (i = 0; i < MAX_TRAFFIC_CLASS; i++) {
+		p = &cfg->tc_config[i].path[direction];
+		bwgid[i] = p->bwg_id;
+	}
 }
 
 void ixgbe_dcb_unpack_prio(struct ixgbe_dcb_config *cfg, int direction,
 			    u8 *ptype)
 {
-	struct tc_configuration *tc_config = &cfg->tc_config[0];
-	int tc;
+	struct tc_bw_alloc *p;
+	int i;
 
-	for (tc = 0; tc < MAX_TRAFFIC_CLASS; tc++)
-		ptype[tc] = tc_config[tc].path[direction].prio_type;
-}
-
-u8 ixgbe_dcb_get_tc_from_up(struct ixgbe_dcb_config *cfg, int direction, u8 up)
-{
-	struct tc_configuration *tc_config = &cfg->tc_config[0];
-	u8 prio_mask = BIT(up);
-	u8 tc = cfg->num_tcs.pg_tcs;
-
-	/* If tc is 0 then DCB is likely not enabled or supported */
-	if (!tc)
-		return 0;
-
-	/*
-	 * Test from maximum TC to 1 and report the first match we find.  If
-	 * we find no match we can assume that the TC is 0 since the TC must
-	 * be set for all user priorities
-	 */
-	for (tc--; tc; tc--) {
-		if (prio_mask & tc_config[tc].path[direction].up_to_tc_bitmap)
-			break;
+	for (i = 0; i < MAX_TRAFFIC_CLASS; i++) {
+		p = &cfg->tc_config[i].path[direction];
+		ptype[i] = p->prio_type;
 	}
-
-	return tc;
 }
 
 void ixgbe_dcb_unpack_map(struct ixgbe_dcb_config *cfg, int direction, u8 *map)
 {
-	u8 up;
+	int i, up;
+	unsigned long bitmap;
 
-	for (up = 0; up < MAX_USER_PRIORITY; up++)
-		map[up] = ixgbe_dcb_get_tc_from_up(cfg, direction, up);
+	for (i = 0; i < MAX_TRAFFIC_CLASS; i++) {
+		bitmap = cfg->tc_config[i].path[direction].up_to_tc_bitmap;
+		for_each_set_bit(up, &bitmap, MAX_USER_PRIORITY)
+			map[up] = i;
+	}
 }
 
 /**
@@ -268,8 +251,9 @@ void ixgbe_dcb_unpack_map(struct ixgbe_dcb_config *cfg, int direction, u8 *map)
  * Configure dcb settings and enable dcb mode.
  */
 s32 ixgbe_dcb_hw_config(struct ixgbe_hw *hw,
-			struct ixgbe_dcb_config *dcb_config)
+                        struct ixgbe_dcb_config *dcb_config)
 {
+	s32 ret = 0;
 	u8 pfc_en;
 	u8 ptype[MAX_TRAFFIC_CLASS];
 	u8 bwgid[MAX_TRAFFIC_CLASS];
@@ -287,37 +271,37 @@ s32 ixgbe_dcb_hw_config(struct ixgbe_hw *hw,
 
 	switch (hw->mac.type) {
 	case ixgbe_mac_82598EB:
-		return ixgbe_dcb_hw_config_82598(hw, pfc_en, refill, max,
-						 bwgid, ptype);
+		ret = ixgbe_dcb_hw_config_82598(hw, pfc_en, refill, max,
+						bwgid, ptype);
+		break;
 	case ixgbe_mac_82599EB:
 	case ixgbe_mac_X540:
-	case ixgbe_mac_X550:
-	case ixgbe_mac_X550EM_x:
-	case ixgbe_mac_x550em_a:
-		return ixgbe_dcb_hw_config_82599(hw, pfc_en, refill, max,
-						 bwgid, ptype, prio_tc);
+		ret = ixgbe_dcb_hw_config_82599(hw, pfc_en, refill, max,
+						bwgid, ptype, prio_tc);
+		break;
 	default:
 		break;
 	}
-	return 0;
+	return ret;
 }
 
 /* Helper routines to abstract HW specifics from DCB netlink ops */
 s32 ixgbe_dcb_hw_pfc_config(struct ixgbe_hw *hw, u8 pfc_en, u8 *prio_tc)
 {
+	int ret = -EINVAL;
+
 	switch (hw->mac.type) {
 	case ixgbe_mac_82598EB:
-		return ixgbe_dcb_config_pfc_82598(hw, pfc_en);
+		ret = ixgbe_dcb_config_pfc_82598(hw, pfc_en);
+		break;
 	case ixgbe_mac_82599EB:
 	case ixgbe_mac_X540:
-	case ixgbe_mac_X550:
-	case ixgbe_mac_X550EM_x:
-	case ixgbe_mac_x550em_a:
-		return ixgbe_dcb_config_pfc_82599(hw, pfc_en, prio_tc);
+		ret = ixgbe_dcb_config_pfc_82599(hw, pfc_en, prio_tc);
+		break;
 	default:
 		break;
 	}
-	return -EINVAL;
+	return ret;
 }
 
 s32 ixgbe_dcb_hw_ets(struct ixgbe_hw *hw, struct ieee_ets *ets, int max_frame)
@@ -368,9 +352,6 @@ s32 ixgbe_dcb_hw_ets_config(struct ixgbe_hw *hw,
 		break;
 	case ixgbe_mac_82599EB:
 	case ixgbe_mac_X540:
-	case ixgbe_mac_X550:
-	case ixgbe_mac_X550EM_x:
-	case ixgbe_mac_x550em_a:
 		ixgbe_dcb_config_rx_arbiter_82599(hw, refill, max,
 						  bwg_id, prio_type, prio_tc);
 		ixgbe_dcb_config_tx_desc_arbiter_82599(hw, refill, max,
@@ -382,29 +363,4 @@ s32 ixgbe_dcb_hw_ets_config(struct ixgbe_hw *hw,
 		break;
 	}
 	return 0;
-}
-
-static void ixgbe_dcb_read_rtrup2tc_82599(struct ixgbe_hw *hw, u8 *map)
-{
-	u32 reg, i;
-
-	reg = IXGBE_READ_REG(hw, IXGBE_RTRUP2TC);
-	for (i = 0; i < MAX_USER_PRIORITY; i++)
-		map[i] = IXGBE_RTRUP2TC_UP_MASK &
-			(reg >> (i * IXGBE_RTRUP2TC_UP_SHIFT));
-}
-
-void ixgbe_dcb_read_rtrup2tc(struct ixgbe_hw *hw, u8 *map)
-{
-	switch (hw->mac.type) {
-	case ixgbe_mac_82599EB:
-	case ixgbe_mac_X540:
-	case ixgbe_mac_X550:
-	case ixgbe_mac_X550EM_x:
-	case ixgbe_mac_x550em_a:
-		ixgbe_dcb_read_rtrup2tc_82599(hw, map);
-		break;
-	default:
-		break;
-	}
 }

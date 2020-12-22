@@ -127,7 +127,7 @@ static int full_duplex[MAX_UNITS];
 #define NATSEMI_RX_LIMIT	2046	/* maximum supported by hardware */
 
 /* These identify the driver base version and may not be removed. */
-static const char version[] =
+static const char version[] __devinitconst =
   KERN_INFO DRV_NAME " dp8381x driver, version "
       DRV_VERSION ", " DRV_RELDATE "\n"
   "  originally by Donald Becker <becker@scyld.com>\n"
@@ -242,12 +242,12 @@ static struct {
 	const char *name;
 	unsigned long flags;
 	unsigned int eeprom_size;
-} natsemi_pci_info[] = {
+} natsemi_pci_info[] __devinitdata = {
 	{ "Aculab E1/T1 PMXc cPCI carrier card", NATSEMI_FLAG_IGNORE_PHY, 128 },
 	{ "NatSemi DP8381[56]", 0, 24 },
 };
 
-static const struct pci_device_id natsemi_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(natsemi_pci_tbl) = {
 	{ PCI_VENDOR_ID_NS, 0x0020, 0x12d9,     0x000c,     0, 0, 0 },
 	{ PCI_VENDOR_ID_NS, 0x0020, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1 },
 	{ }	/* terminate list */
@@ -547,7 +547,6 @@ struct netdev_private {
 	struct sk_buff *tx_skbuff[TX_RING_SIZE];
 	dma_addr_t tx_dma[TX_RING_SIZE];
 	struct net_device *dev;
-	void __iomem *ioaddr;
 	struct napi_struct napi;
 	/* Media monitoring timer */
 	struct timer_list timer;
@@ -700,9 +699,7 @@ static ssize_t natsemi_set_dspcfg_workaround(struct device *dev,
 
 static inline void __iomem *ns_ioaddr(struct net_device *dev)
 {
-	struct netdev_private *np = netdev_priv(dev);
-
-	return np->ioaddr;
+	return (void __iomem *) dev->base_addr;
 }
 
 static inline void natsemi_irq_enable(struct net_device *dev)
@@ -742,7 +739,7 @@ static void move_int_phy(struct net_device *dev, int addr)
 	udelay(1);
 }
 
-static void natsemi_init_media(struct net_device *dev)
+static void __devinit natsemi_init_media (struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	u32 tmp;
@@ -797,7 +794,8 @@ static const struct net_device_ops natsemi_netdev_ops = {
 #endif
 };
 
-static int natsemi_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit natsemi_probe1 (struct pci_dev *pdev,
+	const struct pci_device_id *ent)
 {
 	struct net_device *dev;
 	struct netdev_private *np;
@@ -862,9 +860,13 @@ static int natsemi_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
 		prev_eedata = eedata;
 	}
 
-	np = netdev_priv(dev);
-	np->ioaddr = ioaddr;
+	/* Store MAC Address in perm_addr */
+	memcpy(dev->perm_addr, dev->dev_addr, ETH_ALEN);
 
+	dev->base_addr = (unsigned long __force) ioaddr;
+	dev->irq = irq;
+
+	np = netdev_priv(dev);
 	netif_napi_add(dev, &np->napi, natsemi_poll, 64);
 	np->dev = dev;
 
@@ -912,6 +914,9 @@ static int natsemi_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	option = find_cnt < MAX_UNITS ? options[find_cnt] : 0;
+	if (dev->mem_start)
+		option = dev->mem_start;
+
 	/* The lower four bits are the media type. */
 	if (option) {
 		if (option & 0x200)
@@ -927,7 +932,7 @@ static int natsemi_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
 	dev->netdev_ops = &natsemi_netdev_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
 
-	dev->ethtool_ops = &ethtool_ops;
+	SET_ETHTOOL_OPS(dev, &ethtool_ops);
 
 	if (mtu)
 		dev->mtu = mtu;
@@ -943,8 +948,8 @@ static int natsemi_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
 	i = register_netdev(dev);
 	if (i)
 		goto err_register_netdev;
-	i = NATSEMI_CREATE_FILE(pdev, dspcfg_workaround);
-	if (i)
+
+	if (NATSEMI_CREATE_FILE(pdev, dspcfg_workaround))
 		goto err_create_file;
 
 	if (netif_msg_drv(np)) {
@@ -970,6 +975,7 @@ static int natsemi_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
 
  err_ioremap:
 	pci_release_regions(pdev);
+	pci_set_drvdata(pdev, NULL);
 
  err_pci_request_regions:
 	free_netdev(dev);
@@ -1526,21 +1532,20 @@ static int netdev_open(struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem * ioaddr = ns_ioaddr(dev);
-	const int irq = np->pci_dev->irq;
 	int i;
 
 	/* Reset the chip, just in case. */
 	natsemi_reset(dev);
 
-	i = request_irq(irq, intr_handler, IRQF_SHARED, dev->name, dev);
+	i = request_irq(dev->irq, intr_handler, IRQF_SHARED, dev->name, dev);
 	if (i) return i;
 
 	if (netif_msg_ifup(np))
 		printk(KERN_DEBUG "%s: netdev_open() irq %d.\n",
-			dev->name, irq);
+			dev->name, dev->irq);
 	i = alloc_ring(dev);
 	if (i < 0) {
-		free_irq(irq, dev);
+		free_irq(dev->irq, dev);
 		return i;
 	}
 	napi_enable(&np->napi);
@@ -1789,7 +1794,6 @@ static void netdev_timer(unsigned long data)
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem * ioaddr = ns_ioaddr(dev);
 	int next_tick = NATSEMI_TIMER_FREQ;
-	const int irq = np->pci_dev->irq;
 
 	if (netif_msg_timer(np)) {
 		/* DO NOT read the IntrStatus register,
@@ -1813,14 +1817,14 @@ static void netdev_timer(unsigned long data)
 				if (netif_msg_drv(np))
 					printk(KERN_NOTICE "%s: possible phy reset: "
 						"re-initializing\n", dev->name);
-				disable_irq(irq);
+				disable_irq(dev->irq);
 				spin_lock_irq(&np->lock);
 				natsemi_stop_rxtx(dev);
 				dump_ring(dev);
 				reinit_ring(dev);
 				init_registers(dev);
 				spin_unlock_irq(&np->lock);
-				enable_irq(irq);
+				enable_irq(dev->irq);
 			} else {
 				/* hurry back */
 				next_tick = HZ;
@@ -1837,10 +1841,10 @@ static void netdev_timer(unsigned long data)
 		spin_unlock_irq(&np->lock);
 	}
 	if (np->oom) {
-		disable_irq(irq);
+		disable_irq(dev->irq);
 		np->oom = 0;
 		refill_rx(dev);
-		enable_irq(irq);
+		enable_irq(dev->irq);
 		if (!np->oom) {
 			writel(RxOn, ioaddr + ChipCmd);
 		} else {
@@ -1881,9 +1885,8 @@ static void ns_tx_timeout(struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem * ioaddr = ns_ioaddr(dev);
-	const int irq = np->pci_dev->irq;
 
-	disable_irq(irq);
+	disable_irq(dev->irq);
 	spin_lock_irq(&np->lock);
 	if (!np->hands_off) {
 		if (netif_msg_tx_err(np))
@@ -1902,9 +1905,9 @@ static void ns_tx_timeout(struct net_device *dev)
 			dev->name);
 	}
 	spin_unlock_irq(&np->lock);
-	enable_irq(irq);
+	enable_irq(dev->irq);
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	dev->stats.tx_errors++;
 	netif_wake_queue(dev);
 }
@@ -1937,12 +1940,6 @@ static void refill_rx(struct net_device *dev)
 				break; /* Better luck next round. */
 			np->rx_dma[entry] = pci_map_single(np->pci_dev,
 				skb->data, buflen, PCI_DMA_FROMDEVICE);
-			if (pci_dma_mapping_error(np->pci_dev,
-						  np->rx_dma[entry])) {
-				dev_kfree_skb_any(skb);
-				np->rx_skbuff[entry] = NULL;
-				break; /* Better luck next round. */
-			}
 			np->rx_ring[entry].addr = cpu_to_le32(np->rx_dma[entry]);
 		}
 		np->rx_ring[entry].cmd_status = cpu_to_le32(np->rx_buf_sz);
@@ -2099,12 +2096,6 @@ static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
 	np->tx_skbuff[entry] = skb;
 	np->tx_dma[entry] = pci_map_single(np->pci_dev,
 				skb->data,skb->len, PCI_DMA_TODEVICE);
-	if (pci_dma_mapping_error(np->pci_dev, np->tx_dma[entry])) {
-		np->tx_skbuff[entry] = NULL;
-		dev_kfree_skb_irq(skb);
-		dev->stats.tx_dropped++;
-		return NETDEV_TX_OK;
-	}
 
 	np->tx_ring[entry].addr = cpu_to_le32(np->tx_dma[entry]);
 
@@ -2479,12 +2470,9 @@ static struct net_device_stats *get_stats(struct net_device *dev)
 #ifdef CONFIG_NET_POLL_CONTROLLER
 static void natsemi_poll_controller(struct net_device *dev)
 {
-	struct netdev_private *np = netdev_priv(dev);
-	const int irq = np->pci_dev->irq;
-
-	disable_irq(irq);
-	intr_handler(irq, dev);
-	enable_irq(irq);
+	disable_irq(dev->irq);
+	intr_handler(dev->irq, dev);
+	enable_irq(dev->irq);
 }
 #endif
 
@@ -2535,9 +2523,8 @@ static int natsemi_change_mtu(struct net_device *dev, int new_mtu)
 	if (netif_running(dev)) {
 		struct netdev_private *np = netdev_priv(dev);
 		void __iomem * ioaddr = ns_ioaddr(dev);
-		const int irq = np->pci_dev->irq;
 
-		disable_irq(irq);
+		disable_irq(dev->irq);
 		spin_lock(&np->lock);
 		/* stop engines */
 		natsemi_stop_rxtx(dev);
@@ -2550,7 +2537,7 @@ static int natsemi_change_mtu(struct net_device *dev, int new_mtu)
 		/* restart engines */
 		writel(RxOn | TxOn, ioaddr + ChipCmd);
 		spin_unlock(&np->lock);
-		enable_irq(irq);
+		enable_irq(dev->irq);
 	}
 	return 0;
 }
@@ -3148,7 +3135,6 @@ static int netdev_close(struct net_device *dev)
 {
 	void __iomem * ioaddr = ns_ioaddr(dev);
 	struct netdev_private *np = netdev_priv(dev);
-	const int irq = np->pci_dev->irq;
 
 	if (netif_msg_ifdown(np))
 		printk(KERN_DEBUG
@@ -3170,14 +3156,14 @@ static int netdev_close(struct net_device *dev)
 	 */
 
 	del_timer_sync(&np->timer);
-	disable_irq(irq);
+	disable_irq(dev->irq);
 	spin_lock_irq(&np->lock);
 	natsemi_irq_disable(dev);
 	np->hands_off = 1;
 	spin_unlock_irq(&np->lock);
-	enable_irq(irq);
+	enable_irq(dev->irq);
 
-	free_irq(irq, dev);
+	free_irq(dev->irq, dev);
 
 	/* Interrupt disabled, interrupt handler released,
 	 * queue stopped, timer deleted, rtnl_lock held
@@ -3221,7 +3207,7 @@ static int netdev_close(struct net_device *dev)
 }
 
 
-static void natsemi_remove1(struct pci_dev *pdev)
+static void __devexit natsemi_remove1 (struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	void __iomem * ioaddr = ns_ioaddr(dev);
@@ -3231,6 +3217,7 @@ static void natsemi_remove1(struct pci_dev *pdev)
 	pci_release_regions (pdev);
 	iounmap(ioaddr);
 	free_netdev (dev);
+	pci_set_drvdata(pdev, NULL);
 }
 
 #ifdef CONFIG_PM
@@ -3269,11 +3256,9 @@ static int natsemi_suspend (struct pci_dev *pdev, pm_message_t state)
 
 	rtnl_lock();
 	if (netif_running (dev)) {
-		const int irq = np->pci_dev->irq;
-
 		del_timer_sync(&np->timer);
 
-		disable_irq(irq);
+		disable_irq(dev->irq);
 		spin_lock_irq(&np->lock);
 
 		natsemi_irq_disable(dev);
@@ -3282,7 +3267,7 @@ static int natsemi_suspend (struct pci_dev *pdev, pm_message_t state)
 		netif_stop_queue(dev);
 
 		spin_unlock_irq(&np->lock);
-		enable_irq(irq);
+		enable_irq(dev->irq);
 
 		napi_disable(&np->napi);
 
@@ -3322,8 +3307,6 @@ static int natsemi_resume (struct pci_dev *pdev)
 	if (netif_device_present(dev))
 		goto out;
 	if (netif_running(dev)) {
-		const int irq = np->pci_dev->irq;
-
 		BUG_ON(!np->hands_off);
 		ret = pci_enable_device(pdev);
 		if (ret < 0) {
@@ -3337,13 +3320,13 @@ static int natsemi_resume (struct pci_dev *pdev)
 
 		natsemi_reset(dev);
 		init_ring(dev);
-		disable_irq(irq);
+		disable_irq(dev->irq);
 		spin_lock_irq(&np->lock);
 		np->hands_off = 0;
 		init_registers(dev);
 		netif_device_attach(dev);
 		spin_unlock_irq(&np->lock);
-		enable_irq(irq);
+		enable_irq(dev->irq);
 
 		mod_timer(&np->timer, round_jiffies(jiffies + 1*HZ));
 	}
@@ -3359,7 +3342,7 @@ static struct pci_driver natsemi_driver = {
 	.name		= DRV_NAME,
 	.id_table	= natsemi_pci_tbl,
 	.probe		= natsemi_probe1,
-	.remove		= natsemi_remove1,
+	.remove		= __devexit_p(natsemi_remove1),
 #ifdef CONFIG_PM
 	.suspend	= natsemi_suspend,
 	.resume		= natsemi_resume,

@@ -69,7 +69,7 @@ void mpi_free_limb_space(mpi_ptr_t a)
 	if (!a)
 		return;
 
-	kzfree(a);
+	kfree(a);
 }
 
 void mpi_assign_limb_space(MPI a, mpi_ptr_t ap, unsigned nlimbs)
@@ -95,7 +95,7 @@ int mpi_resize(MPI a, unsigned nlimbs)
 		if (!p)
 			return -ENOMEM;
 		memcpy(p, a->d, a->alloced * sizeof(mpi_limb_t));
-		kzfree(a->d);
+		kfree(a->d);
 		a->d = p;
 	} else {
 		a->d = kzalloc(nlimbs * sizeof(mpi_limb_t), GFP_KERNEL);
@@ -106,13 +106,20 @@ int mpi_resize(MPI a, unsigned nlimbs)
 	return 0;
 }
 
+void mpi_clear(MPI a)
+{
+	a->nlimbs = 0;
+	a->nbits = 0;
+	a->flags = 0;
+}
+
 void mpi_free(MPI a)
 {
 	if (!a)
 		return;
 
 	if (a->flags & 4)
-		kzfree(a->d);
+		kfree(a->d);
 	else
 		mpi_free_limb_space(a->d);
 
@@ -122,5 +129,83 @@ void mpi_free(MPI a)
 }
 EXPORT_SYMBOL_GPL(mpi_free);
 
-MODULE_DESCRIPTION("Multiprecision maths library");
-MODULE_LICENSE("GPL");
+/****************
+ * Note: This copy function should not interpret the MPI
+ *	 but copy it transparently.
+ */
+int mpi_copy(MPI *copied, const MPI a)
+{
+	size_t i;
+	MPI b;
+
+	*copied = NULL;
+
+	if (a) {
+		b = mpi_alloc(a->nlimbs);
+		if (!b)
+			return -ENOMEM;
+
+		b->nlimbs = a->nlimbs;
+		b->sign = a->sign;
+		b->flags = a->flags;
+		b->nbits = a->nbits;
+
+		for (i = 0; i < b->nlimbs; i++)
+			b->d[i] = a->d[i];
+
+		*copied = b;
+	}
+
+	return 0;
+}
+
+int mpi_set(MPI w, const MPI u)
+{
+	mpi_ptr_t wp, up;
+	mpi_size_t usize = u->nlimbs;
+	int usign = u->sign;
+
+	if (RESIZE_IF_NEEDED(w, (size_t) usize) < 0)
+		return -ENOMEM;
+
+	wp = w->d;
+	up = u->d;
+	MPN_COPY(wp, up, usize);
+	w->nlimbs = usize;
+	w->nbits = u->nbits;
+	w->flags = u->flags;
+	w->sign = usign;
+	return 0;
+}
+
+int mpi_set_ui(MPI w, unsigned long u)
+{
+	if (RESIZE_IF_NEEDED(w, 1) < 0)
+		return -ENOMEM;
+	w->d[0] = u;
+	w->nlimbs = u ? 1 : 0;
+	w->sign = 0;
+	w->nbits = 0;
+	w->flags = 0;
+	return 0;
+}
+
+MPI mpi_alloc_set_ui(unsigned long u)
+{
+	MPI w = mpi_alloc(1);
+	if (!w)
+		return w;
+	w->d[0] = u;
+	w->nlimbs = u ? 1 : 0;
+	w->sign = 0;
+	return w;
+}
+
+void mpi_swap(MPI a, MPI b)
+{
+	struct gcry_mpi tmp;
+
+	tmp = *a;
+	*a = *b;
+	*b = tmp;
+}

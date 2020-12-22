@@ -18,6 +18,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <scsi/scsi_host.h>
@@ -110,16 +111,30 @@ static struct pci_driver ata_tosh_pci_driver = {
 	.id_table	= ata_tosh,
 	.probe 		= ata_tosh_init_one,
 	.remove		= ata_pci_remove_one,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend	= ata_pci_device_suspend,
 	.resume		= ata_pci_device_resume,
 #endif
 };
 
-module_pci_driver(ata_tosh_pci_driver);
+static int __init ata_tosh_init(void)
+{
+	return pci_register_driver(&ata_tosh_pci_driver);
+}
+
+
+static void __exit ata_tosh_exit(void)
+{
+	pci_unregister_driver(&ata_tosh_pci_driver);
+}
+
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("Low level driver for Toshiba Piccolo ATA");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, ata_tosh);
 MODULE_VERSION(DRV_VERSION);
+
+module_init(ata_tosh_init);
+module_exit(ata_tosh_exit);
+

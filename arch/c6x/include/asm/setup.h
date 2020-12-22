@@ -11,10 +11,11 @@
 #ifndef _ASM_C6X_SETUP_H
 #define _ASM_C6X_SETUP_H
 
-#include <uapi/asm/setup.h>
-#include <linux/types.h>
+#define COMMAND_LINE_SIZE   1024
 
 #ifndef __ASSEMBLY__
+extern char c6x_command_line[COMMAND_LINE_SIZE];
+
 extern int c6x_add_memory(phys_addr_t start, unsigned long size);
 
 extern unsigned long ram_start;

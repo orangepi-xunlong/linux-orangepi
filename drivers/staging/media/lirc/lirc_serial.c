@@ -48,8 +48,6 @@
  * Steve Davies <steve@daviesfam.org>  July 2001
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/signal.h>
@@ -59,7 +57,7 @@
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/serial_reg.h>
-#include <linux/ktime.h>
+#include <linux/time.h>
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/wait.h>
@@ -67,12 +65,15 @@
 #include <linux/delay.h>
 #include <linux/poll.h>
 #include <linux/platform_device.h>
-#include <linux/gpio.h>
+
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/fcntl.h>
 #include <linux/spinlock.h>
 
+#ifdef CONFIG_LIRC_SERIAL_NSLU2
+#include <asm/hardware.h>
+#endif
 /* From Intel IXP42X Developer's Manual (#252480-005): */
 /* ftp://download.intel.com/design/network/manuals/25248005.pdf */
 #define UART_IE_IXP42X_UUE   0x40 /* IXP42X UART Unit enable */
@@ -107,10 +108,18 @@ static int io;
 static int irq;
 static bool iommap;
 static int ioshift;
-static bool softcarrier = true;
+static bool softcarrier = 1;
 static bool share_irq;
+static bool debug;
 static int sense = -1;	/* -1 = auto, 0 = active high, 1 = active low */
 static bool txsense;	/* 0 = active high, 1 = active low */
+
+#define dprintk(fmt, args...)					\
+	do {							\
+		if (debug)					\
+			printk(KERN_DEBUG LIRC_DRIVER_NAME ": "	\
+			       fmt, ## args);			\
+	} while (0)
 
 /* forward declarations */
 static long send_pulse_irdeo(unsigned long length);
@@ -120,7 +129,6 @@ static void send_space_homebrew(long length);
 
 static struct lirc_serial hardware[] = {
 	[LIRC_HOMEBREW] = {
-		.lock = __SPIN_LOCK_UNLOCKED(hardware[LIRC_HOMEBREW].lock),
 		.signal_pin        = UART_MSR_DCD,
 		.signal_pin_change = UART_MSR_DDCD,
 		.on  = (UART_MCR_RTS | UART_MCR_OUT2 | UART_MCR_DTR),
@@ -137,7 +145,6 @@ static struct lirc_serial hardware[] = {
 	},
 
 	[LIRC_IRDEO] = {
-		.lock = __SPIN_LOCK_UNLOCKED(hardware[LIRC_IRDEO].lock),
 		.signal_pin        = UART_MSR_DSR,
 		.signal_pin_change = UART_MSR_DDSR,
 		.on  = UART_MCR_OUT2,
@@ -149,7 +156,6 @@ static struct lirc_serial hardware[] = {
 	},
 
 	[LIRC_IRDEO_REMOTE] = {
-		.lock = __SPIN_LOCK_UNLOCKED(hardware[LIRC_IRDEO_REMOTE].lock),
 		.signal_pin        = UART_MSR_DSR,
 		.signal_pin_change = UART_MSR_DDSR,
 		.on  = (UART_MCR_RTS | UART_MCR_DTR | UART_MCR_OUT2),
@@ -161,7 +167,6 @@ static struct lirc_serial hardware[] = {
 	},
 
 	[LIRC_ANIMAX] = {
-		.lock = __SPIN_LOCK_UNLOCKED(hardware[LIRC_ANIMAX].lock),
 		.signal_pin        = UART_MSR_DCD,
 		.signal_pin_change = UART_MSR_DDCD,
 		.on  = 0,
@@ -172,7 +177,6 @@ static struct lirc_serial hardware[] = {
 	},
 
 	[LIRC_IGOR] = {
-		.lock = __SPIN_LOCK_UNLOCKED(hardware[LIRC_IGOR].lock),
 		.signal_pin        = UART_MSR_DSR,
 		.signal_pin_change = UART_MSR_DDSR,
 		.on  = (UART_MCR_RTS | UART_MCR_OUT2 | UART_MCR_DTR),
@@ -187,6 +191,32 @@ static struct lirc_serial hardware[] = {
 		.features    = LIRC_CAN_REC_MODE2
 #endif
 	},
+
+#ifdef CONFIG_LIRC_SERIAL_NSLU2
+	/*
+	 * Modified Linksys Network Storage Link USB 2.0 (NSLU2):
+	 * We receive on CTS of the 2nd serial port (R142,LHS), we
+	 * transmit with a IR diode between GPIO[1] (green status LED),
+	 * and ground (Matthias Goebl <matthias.goebl@goebl.net>).
+	 * See also http://www.nslu2-linux.org for this device
+	 */
+	[LIRC_NSLU2] = {
+		.signal_pin        = UART_MSR_CTS,
+		.signal_pin_change = UART_MSR_DCTS,
+		.on  = (UART_MCR_RTS | UART_MCR_OUT2 | UART_MCR_DTR),
+		.off = (UART_MCR_RTS | UART_MCR_OUT2),
+		.send_pulse = send_pulse_homebrew,
+		.send_space = send_space_homebrew,
+#ifdef CONFIG_LIRC_SERIAL_TRANSMITTER
+		.features    = (LIRC_CAN_SET_SEND_DUTY_CYCLE |
+				LIRC_CAN_SET_SEND_CARRIER |
+				LIRC_CAN_SEND_PULSE | LIRC_CAN_REC_MODE2)
+#else
+		.features    = LIRC_CAN_REC_MODE2
+#endif
+	},
+#endif
+
 };
 
 #define RS_ISR_PASS_LIMIT 256
@@ -204,7 +234,7 @@ static struct lirc_serial hardware[] = {
 
 #define RBUF_LEN 256
 
-static ktime_t lastkt;
+static struct timeval lasttv = {0, 0};
 
 static struct lirc_buffer rbuf;
 
@@ -258,7 +288,7 @@ static unsigned long space_width;
 /* fetch serial input packet (1 byte) from register offset */
 static u8 sinp(int offset)
 {
-	if (iommap)
+	if (iommap != 0)
 		/* the register is memory-mapped */
 		offset <<= ioshift;
 
@@ -268,7 +298,7 @@ static u8 sinp(int offset)
 /* write serial output packet (1 byte) of value to register offset */
 static void soutp(int offset, u8 value)
 {
-	if (iommap)
+	if (iommap != 0)
 		/* the register is memory-mapped */
 		offset <<= ioshift;
 
@@ -277,6 +307,16 @@ static void soutp(int offset, u8 value)
 
 static void on(void)
 {
+#ifdef CONFIG_LIRC_SERIAL_NSLU2
+	/*
+	 * On NSLU2, we put the transmit diode between the output of the green
+	 * status LED and ground
+	 */
+	if (type == LIRC_NSLU2) {
+		gpio_line_set(NSLU2_LED_GRN, IXP4XX_GPIO_LOW);
+		return;
+	}
+#endif
 	if (txsense)
 		soutp(UART_MCR, hardware[type].off);
 	else
@@ -285,6 +325,12 @@ static void on(void)
 
 static void off(void)
 {
+#ifdef CONFIG_LIRC_SERIAL_NSLU2
+	if (type == LIRC_NSLU2) {
+		gpio_line_set(NSLU2_LED_GRN, IXP4XX_GPIO_HIGH);
+		return;
+	}
+#endif
 	if (txsense)
 		soutp(UART_MCR, hardware[type].on);
 	else
@@ -319,6 +365,9 @@ static void safe_udelay(unsigned long usecs)
  * time
  */
 
+/* So send_pulse can quickly convert microseconds to clocks */
+static unsigned long conv_us_to_clocks;
+
 static int init_timing_params(unsigned int new_duty_cycle,
 		unsigned int new_freq)
 {
@@ -333,6 +382,7 @@ static int init_timing_params(unsigned int new_duty_cycle,
 	/* How many clocks in a microsecond?, avoiding long long divide */
 	work = loops_per_sec;
 	work *= 4295;  /* 4295 = 2^32 / 1e6 */
+	conv_us_to_clocks = (work >> 32);
 
 	/*
 	 * Carrier period in clocks, approach good up to 32GHz clock,
@@ -344,9 +394,11 @@ static int init_timing_params(unsigned int new_duty_cycle,
 	/* Derive pulse and space from the period */
 	pulse_width = period * duty_cycle / 100;
 	space_width = period - pulse_width;
-	pr_debug("in init_timing_params, freq=%d, duty_cycle=%d, clk/jiffy=%ld, pulse=%ld, space=%ld, conv_us_to_clocks=%ld\n",
-		 freq, duty_cycle, __this_cpu_read(cpu_info.loops_per_jiffy),
-		 pulse_width, space_width, conv_us_to_clocks);
+	dprintk("in init_timing_params, freq=%d, duty_cycle=%d, "
+		"clk/jiffy=%ld, pulse=%ld, space=%ld, "
+		"conv_us_to_clocks=%ld\n",
+		freq, duty_cycle, __this_cpu_read(cpu_info.loops_per_jiffy),
+		pulse_width, space_width, conv_us_to_clocks);
 	return 0;
 }
 #else /* ! USE_RDTSC */
@@ -368,8 +420,8 @@ static int init_timing_params(unsigned int new_duty_cycle,
 	period = 256 * 1000000L / freq;
 	pulse_width = period * duty_cycle / 100;
 	space_width = period - pulse_width;
-	pr_debug("in init_timing_params, freq=%d pulse=%ld, space=%ld\n",
-		 freq, pulse_width, space_width);
+	dprintk("in init_timing_params, freq=%d pulse=%ld, "
+		"space=%ld\n", freq, pulse_width, space_width);
 	return 0;
 }
 #endif /* USE_RDTSC */
@@ -417,14 +469,63 @@ static long send_pulse_irdeo(unsigned long length)
 	return ret;
 }
 
+#ifdef USE_RDTSC
+/* Version that uses Pentium rdtsc instruction to measure clocks */
+
+/*
+ * This version does sub-microsecond timing using rdtsc instruction,
+ * and does away with the fudged LIRC_SERIAL_TRANSMITTER_LATENCY
+ * Implicitly i586 architecture...  - Steve
+ */
+
+static long send_pulse_homebrew_softcarrier(unsigned long length)
+{
+	int flag;
+	unsigned long target, start, now;
+
+	/* Get going quick as we can */
+	rdtscl(start);
+	on();
+	/* Convert length from microseconds to clocks */
+	length *= conv_us_to_clocks;
+	/* And loop till time is up - flipping at right intervals */
+	now = start;
+	target = pulse_width;
+	flag = 1;
+	/*
+	 * FIXME: This looks like a hard busy wait, without even an occasional,
+	 * polite, cpu_relax() call.  There's got to be a better way?
+	 *
+	 * The i2c code has the result of a lot of bit-banging work, I wonder if
+	 * there's something there which could be helpful here.
+	 */
+	while ((now - start) < length) {
+		/* Delay till flip time */
+		do {
+			rdtscl(now);
+		} while ((now - start) < target);
+
+		/* flip */
+		if (flag) {
+			rdtscl(now);
+			off();
+			target += space_width;
+		} else {
+			rdtscl(now); on();
+			target += pulse_width;
+		}
+		flag = !flag;
+	}
+	rdtscl(now);
+	return ((now - start) - length) / conv_us_to_clocks;
+}
+#else /* ! USE_RDTSC */
 /* Version using udelay() */
 
 /*
  * here we use fixed point arithmetic, with 8
  * fractional bits.  that gets us within 0.1% or so of the right average
  * frequency, albeit with some jitter in pulse length - Steve
- *
- * This should use ndelay instead.
  */
 
 /* To match 8 fractional bits used for pulse/space length */
@@ -433,7 +534,6 @@ static long send_pulse_homebrew_softcarrier(unsigned long length)
 {
 	int flag;
 	unsigned long actual, target, d;
-
 	length <<= 8;
 
 	actual = 0; target = 0; flag = 0;
@@ -457,6 +557,7 @@ static long send_pulse_homebrew_softcarrier(unsigned long length)
 	}
 	return (actual-length) >> 8;
 }
+#endif /* USE_RDTSC */
 
 static long send_pulse_homebrew(unsigned long length)
 {
@@ -465,10 +566,11 @@ static long send_pulse_homebrew(unsigned long length)
 
 	if (softcarrier)
 		return send_pulse_homebrew_softcarrier(length);
-
-	on();
-	safe_udelay(length);
-	return 0;
+	else {
+		on();
+		safe_udelay(length);
+		return 0;
+	}
 }
 
 static void send_space_irdeo(long length)
@@ -491,7 +593,7 @@ static void rbwrite(int l)
 {
 	if (lirc_buffer_full(&rbuf)) {
 		/* no new signals will be accepted */
-		pr_debug("Buffer overrun\n");
+		dprintk("Buffer overrun\n");
 		return;
 	}
 	lirc_buffer_write(&rbuf, (void *)&l);
@@ -540,12 +642,12 @@ static void frbwrite(int l)
 	rbwrite(l);
 }
 
-static irqreturn_t lirc_irq_handler(int i, void *blah)
+static irqreturn_t irq_handler(int i, void *blah)
 {
-	ktime_t kt;
+	struct timeval tv;
 	int counter, dcd;
 	u8 status;
-	ktime_t delkt;
+	long deltv;
 	int data;
 	static int last_dcd = -1;
 
@@ -559,13 +661,14 @@ static irqreturn_t lirc_irq_handler(int i, void *blah)
 		counter++;
 		status = sinp(UART_MSR);
 		if (counter > RS_ISR_PASS_LIMIT) {
-			pr_warn("AIEEEE: We're caught!\n");
+			printk(KERN_WARNING LIRC_DRIVER_NAME ": AIEEEE: "
+			       "We're caught!\n");
 			break;
 		}
 		if ((status & hardware[type].signal_pin_change)
 		    && sense != -1) {
 			/* get current time */
-			kt = ktime_get();
+			do_gettimeofday(&tv);
 
 			/* New mode, written by Trent Piepho
 			   <xyzzy@u.washington.edu>. */
@@ -594,20 +697,37 @@ static irqreturn_t lirc_irq_handler(int i, void *blah)
 			dcd = (status & hardware[type].signal_pin) ? 1 : 0;
 
 			if (dcd == last_dcd) {
-				pr_warn("ignoring spike: %d %d %llx %llx\n",
-					dcd, sense, ktime_to_us(kt),
-					ktime_to_us(lastkt));
+				printk(KERN_WARNING LIRC_DRIVER_NAME
+				": ignoring spike: %d %d %lx %lx %lx %lx\n",
+				dcd, sense,
+				tv.tv_sec, lasttv.tv_sec,
+				tv.tv_usec, lasttv.tv_usec);
 				continue;
 			}
 
-			delkt = ktime_sub(kt, lastkt);
-			if (ktime_compare(delkt, ktime_set(15, 0)) > 0) {
+			deltv = tv.tv_sec-lasttv.tv_sec;
+			if (tv.tv_sec < lasttv.tv_sec ||
+			    (tv.tv_sec == lasttv.tv_sec &&
+			     tv.tv_usec < lasttv.tv_usec)) {
+				printk(KERN_WARNING LIRC_DRIVER_NAME
+				       ": AIEEEE: your clock just jumped "
+				       "backwards\n");
+				printk(KERN_WARNING LIRC_DRIVER_NAME
+				       ": %d %d %lx %lx %lx %lx\n",
+				       dcd, sense,
+				       tv.tv_sec, lasttv.tv_sec,
+				       tv.tv_usec, lasttv.tv_usec);
+				data = PULSE_MASK;
+			} else if (deltv > 15) {
 				data = PULSE_MASK; /* really long time */
 				if (!(dcd^sense)) {
 					/* sanity check */
-					pr_warn("AIEEEE: %d %d %llx %llx\n",
-						dcd, sense, ktime_to_us(kt),
-						ktime_to_us(lastkt));
+					printk(KERN_WARNING LIRC_DRIVER_NAME
+					       ": AIEEEE: "
+					       "%d %d %lx %lx %lx %lx\n",
+					       dcd, sense,
+					       tv.tv_sec, lasttv.tv_sec,
+					       tv.tv_usec, lasttv.tv_usec);
 					/*
 					 * detecting pulse while this
 					 * MUST be a space!
@@ -615,9 +735,11 @@ static irqreturn_t lirc_irq_handler(int i, void *blah)
 					sense = sense ? 0 : 1;
 				}
 			} else
-				data = (int) ktime_to_us(delkt);
+				data = (int) (deltv*1000000 +
+					       tv.tv_usec -
+					       lasttv.tv_usec);
 			frbwrite(dcd^sense ? data : (data|PULSE_BIT));
-			lastkt = kt;
+			lasttv = tv;
 			last_dcd = dcd;
 			wake_up_interruptible(&rbuf.wait_poll);
 		}
@@ -648,7 +770,8 @@ static int hardware_init_port(void)
 	soutp(UART_IER, scratch);
 	if (scratch2 != 0 || scratch3 != 0x0f) {
 		/* we fail, there's nothing here */
-		pr_err("port existence test failed, cannot continue\n");
+		printk(KERN_ERR LIRC_DRIVER_NAME ": port existence test "
+		       "failed, cannot continue\n");
 		return -ENODEV;
 	}
 
@@ -666,6 +789,20 @@ static int hardware_init_port(void)
 	sinp(UART_RX);
 	sinp(UART_IIR);
 	sinp(UART_MSR);
+
+#ifdef CONFIG_LIRC_SERIAL_NSLU2
+	if (type == LIRC_NSLU2) {
+		/* Setup NSLU2 UART */
+
+		/* Enable UART */
+		soutp(UART_IER, sinp(UART_IER) | UART_IE_IXP42X_UUE);
+		/* Disable Receiver data Time out interrupt */
+		soutp(UART_IER, sinp(UART_IER) & ~UART_IE_IXP42X_RTOIE);
+		/* set out2 = interrupt unmask; off() doesn't set MCR
+		   on NSLU2 */
+		soutp(UART_MCR, UART_MCR_RTS|UART_MCR_OUT2);
+	}
+#endif
 
 	/* Set line for power source */
 	off();
@@ -698,18 +835,20 @@ static int hardware_init_port(void)
 	return 0;
 }
 
-static int lirc_serial_probe(struct platform_device *dev)
+static int __devinit lirc_serial_probe(struct platform_device *dev)
 {
 	int i, nlow, nhigh, result;
 
-	result = devm_request_irq(&dev->dev, irq, lirc_irq_handler,
+	result = request_irq(irq, irq_handler,
 			     (share_irq ? IRQF_SHARED : 0),
-			     LIRC_DRIVER_NAME, &hardware);
+			     LIRC_DRIVER_NAME, (void *)&hardware);
 	if (result < 0) {
 		if (result == -EBUSY)
-			dev_err(&dev->dev, "IRQ %d busy\n", irq);
+			printk(KERN_ERR LIRC_DRIVER_NAME ": IRQ %d busy\n",
+			       irq);
 		else if (result == -EINVAL)
-			dev_err(&dev->dev, "Bad irq number or handler\n");
+			printk(KERN_ERR LIRC_DRIVER_NAME
+			       ": Bad irq number or handler\n");
 		return result;
 	}
 
@@ -719,23 +858,26 @@ static int lirc_serial_probe(struct platform_device *dev)
 	 * For memory mapped I/O you *might* need to use ioremap() first,
 	 * for the NSLU2 it's done in boot code.
 	 */
-	if (((iommap)
-	     && (devm_request_mem_region(&dev->dev, iommap, 8 << ioshift,
-					 LIRC_DRIVER_NAME) == NULL))
-	   || ((!iommap)
-	       && (devm_request_region(&dev->dev, io, 8,
-				       LIRC_DRIVER_NAME) == NULL))) {
-		dev_err(&dev->dev, "port %04x already in use\n", io);
-		dev_warn(&dev->dev, "use 'setserial /dev/ttySX uart none'\n");
-		dev_warn(&dev->dev,
-			 "or compile the serial port driver as module and\n");
-		dev_warn(&dev->dev, "make sure this module is loaded first\n");
-		return -EBUSY;
+	if (((iommap != 0)
+	     && (request_mem_region(iommap, 8 << ioshift,
+				    LIRC_DRIVER_NAME) == NULL))
+	   || ((iommap == 0)
+	       && (request_region(io, 8, LIRC_DRIVER_NAME) == NULL))) {
+		printk(KERN_ERR  LIRC_DRIVER_NAME
+		       ": port %04x already in use\n", io);
+		printk(KERN_WARNING LIRC_DRIVER_NAME
+		       ": use 'setserial /dev/ttySX uart none'\n");
+		printk(KERN_WARNING LIRC_DRIVER_NAME
+		       ": or compile the serial port driver as module and\n");
+		printk(KERN_WARNING LIRC_DRIVER_NAME
+		       ": make sure this module is loaded first\n");
+		result = -EBUSY;
+		goto exit_free_irq;
 	}
 
 	result = hardware_init_port();
 	if (result < 0)
-		return result;
+		goto exit_release_region;
 
 	/* Initialize pulse/space widths */
 	init_timing_params(duty_cycle, freq);
@@ -758,14 +900,36 @@ static int lirc_serial_probe(struct platform_device *dev)
 				nhigh++;
 			msleep(40);
 		}
-		sense = nlow >= nhigh ? 1 : 0;
-		dev_info(&dev->dev, "auto-detected active %s receiver\n",
-			 sense ? "low" : "high");
+		sense = (nlow >= nhigh ? 1 : 0);
+		printk(KERN_INFO LIRC_DRIVER_NAME  ": auto-detected active "
+		       "%s receiver\n", sense ? "low" : "high");
 	} else
-		dev_info(&dev->dev, "Manually using active %s receiver\n",
-			 sense ? "low" : "high");
+		printk(KERN_INFO LIRC_DRIVER_NAME  ": Manually using active "
+		       "%s receiver\n", sense ? "low" : "high");
 
-	dev_dbg(&dev->dev, "Interrupt %d, port %04x obtained\n", irq, io);
+	dprintk("Interrupt %d, port %04x obtained\n", irq, io);
+	return 0;
+
+exit_release_region:
+	if (iommap != 0)
+		release_mem_region(iommap, 8 << ioshift);
+	else
+		release_region(io, 8);
+exit_free_irq:
+	free_irq(irq, (void *)&hardware);
+
+	return result;
+}
+
+static int __devexit lirc_serial_remove(struct platform_device *dev)
+{
+	free_irq(irq, (void *)&hardware);
+
+	if (iommap != 0)
+		release_mem_region(iommap, 8 << ioshift);
+	else
+		release_region(io, 8);
+
 	return 0;
 }
 
@@ -774,7 +938,7 @@ static int set_use_inc(void *data)
 	unsigned long flags;
 
 	/* initialize timestamp */
-	lastkt = ktime_get();
+	do_gettimeofday(&lasttv);
 
 	spin_lock_irqsave(&hardware[type].lock, flags);
 
@@ -802,7 +966,7 @@ static void set_use_dec(void *data)
 	spin_unlock_irqrestore(&hardware[type].lock, flags);
 }
 
-static ssize_t lirc_write(struct file *file, const char __user *buf,
+static ssize_t lirc_write(struct file *file, const char *buf,
 			 size_t n, loff_t *ppos)
 {
 	int i, count;
@@ -839,8 +1003,7 @@ static ssize_t lirc_write(struct file *file, const char __user *buf,
 static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
 	int result;
-	u32 __user *uptr = (u32 __user *)arg;
-	u32 value;
+	__u32 value;
 
 	switch (cmd) {
 	case LIRC_GET_SEND_MODE:
@@ -849,7 +1012,7 @@ static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 
 		result = put_user(LIRC_SEND2MODE
 				  (hardware[type].features&LIRC_CAN_SEND_MASK),
-				  uptr);
+				  (__u32 *) arg);
 		if (result)
 			return result;
 		break;
@@ -858,7 +1021,7 @@ static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		if (!(hardware[type].features&LIRC_CAN_SEND_MASK))
 			return -ENOIOCTLCMD;
 
-		result = get_user(value, uptr);
+		result = get_user(value, (__u32 *) arg);
 		if (result)
 			return result;
 		/* only LIRC_MODE_PULSE supported */
@@ -868,30 +1031,33 @@ static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 
 	case LIRC_GET_LENGTH:
 		return -ENOIOCTLCMD;
+		break;
 
 	case LIRC_SET_SEND_DUTY_CYCLE:
-		pr_debug("SET_SEND_DUTY_CYCLE\n");
+		dprintk("SET_SEND_DUTY_CYCLE\n");
 		if (!(hardware[type].features&LIRC_CAN_SET_SEND_DUTY_CYCLE))
 			return -ENOIOCTLCMD;
 
-		result = get_user(value, uptr);
+		result = get_user(value, (__u32 *) arg);
 		if (result)
 			return result;
 		if (value <= 0 || value > 100)
 			return -EINVAL;
 		return init_timing_params(value, freq);
+		break;
 
 	case LIRC_SET_SEND_CARRIER:
-		pr_debug("SET_SEND_CARRIER\n");
+		dprintk("SET_SEND_CARRIER\n");
 		if (!(hardware[type].features&LIRC_CAN_SET_SEND_CARRIER))
 			return -ENOIOCTLCMD;
 
-		result = get_user(value, uptr);
+		result = get_user(value, (__u32 *) arg);
 		if (result)
 			return result;
 		if (value > 500000 || value < 20000)
 			return -EINVAL;
 		return init_timing_params(duty_cycle, value);
+		break;
 
 	default:
 		return lirc_dev_fop_ioctl(filep, cmd, arg);
@@ -963,7 +1129,7 @@ static int lirc_serial_resume(struct platform_device *dev)
 
 	spin_lock_irqsave(&hardware[type].lock, flags);
 	/* Enable Interrupt */
-	lastkt = ktime_get();
+	do_gettimeofday(&lasttv);
 	soutp(UART_IER, sinp(UART_IER)|UART_IER_MSI);
 	off();
 
@@ -976,10 +1142,12 @@ static int lirc_serial_resume(struct platform_device *dev)
 
 static struct platform_driver lirc_serial_driver = {
 	.probe		= lirc_serial_probe,
+	.remove		= __devexit_p(lirc_serial_remove),
 	.suspend	= lirc_serial_suspend,
 	.resume		= lirc_serial_resume,
 	.driver		= {
 		.name	= "lirc_serial",
+		.owner	= THIS_MODULE,
 	},
 };
 
@@ -1040,6 +1208,14 @@ static int __init lirc_serial_init_module(void)
 		io = io ? io : 0x3f8;
 		irq = irq ? irq : 4;
 		break;
+#ifdef CONFIG_LIRC_SERIAL_NSLU2
+	case LIRC_NSLU2:
+		io = io ? io : IRQ_IXP4XX_UART2;
+		irq = irq ? irq : (IXP4XX_UART2_BASE_VIRT + REG_OFFSET);
+		iommap = iommap ? iommap : IXP4XX_UART2_BASE_PHYS;
+		ioshift = ioshift ? ioshift : 2;
+		break;
+#endif
 	default:
 		return -EINVAL;
 	}
@@ -1047,16 +1223,15 @@ static int __init lirc_serial_init_module(void)
 		switch (type) {
 		case LIRC_HOMEBREW:
 		case LIRC_IGOR:
+#ifdef CONFIG_LIRC_SERIAL_NSLU2
+		case LIRC_NSLU2:
+#endif
 			hardware[type].features &=
 				~(LIRC_CAN_SET_SEND_DUTY_CYCLE|
 				  LIRC_CAN_SET_SEND_CARRIER);
 			break;
 		}
 	}
-
-	/* make sure sense is either -1, 0, or 1 */
-	if (sense != -1)
-		sense = !!sense;
 
 	result = lirc_serial_init();
 	if (result)
@@ -1066,7 +1241,8 @@ static int __init lirc_serial_init_module(void)
 	driver.dev = &lirc_serial_dev->dev;
 	driver.minor = lirc_register_driver(&driver);
 	if (driver.minor < 0) {
-		pr_err("register_chrdev failed!\n");
+		printk(KERN_ERR  LIRC_DRIVER_NAME
+		       ": register_chrdev failed!\n");
 		lirc_serial_exit();
 		return driver.minor;
 	}
@@ -1077,7 +1253,7 @@ static void __exit lirc_serial_exit_module(void)
 {
 	lirc_unregister_driver(driver.minor);
 	lirc_serial_exit();
-	pr_debug("cleaned up module\n");
+	dprintk("cleaned up module\n");
 }
 
 
@@ -1116,7 +1292,7 @@ MODULE_PARM_DESC(irq, "Interrupt (4 or 3)");
 module_param(share_irq, bool, S_IRUGO);
 MODULE_PARM_DESC(share_irq, "Share interrupts (0 = off, 1 = on)");
 
-module_param(sense, int, S_IRUGO);
+module_param(sense, bool, S_IRUGO);
 MODULE_PARM_DESC(sense, "Override autodetection of IR receiver circuit"
 		 " (0 = active high, 1 = active low )");
 
@@ -1128,3 +1304,6 @@ MODULE_PARM_DESC(txsense, "Sense of transmitter circuit"
 
 module_param(softcarrier, bool, S_IRUGO);
 MODULE_PARM_DESC(softcarrier, "Software carrier (0 = off, 1 = on, default on)");
+
+module_param(debug, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(debug, "Enable debugging messages");

@@ -73,14 +73,19 @@ static void __init gef_sbc610_init_irq(void)
 static void __init gef_sbc610_setup_arch(void)
 {
 	struct device_node *regs;
+#ifdef CONFIG_PCI
+	struct device_node *np;
+
+	for_each_compatible_node(np, "pci", "fsl,mpc8641-pcie") {
+		fsl_add_bridge(np, 1);
+	}
+#endif
 
 	printk(KERN_INFO "GE Intelligent Platforms SBC610 6U VPX SBC\n");
 
 #ifdef CONFIG_SMP
 	mpc86xx_smp_init();
 #endif
-
-	fsl_pci_assign_primary();
 
 	/* Remap basic board registers */
 	regs = of_find_compatible_node(NULL, NULL, "gef,fpga-regs");
@@ -136,7 +141,7 @@ static void gef_sbc610_show_cpuinfo(struct seq_file *m)
 	seq_printf(m, "SVR\t\t: 0x%x\n", svid);
 }
 
-static void gef_sbc610_nec_fixup(struct pci_dev *pdev)
+static void __init gef_sbc610_nec_fixup(struct pci_dev *pdev)
 {
 	unsigned int val;
 
@@ -166,13 +171,44 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_NEC, PCI_DEVICE_ID_NEC_USB,
  */
 static int __init gef_sbc610_probe(void)
 {
-	if (of_machine_is_compatible("gef,sbc610"))
+	unsigned long root = of_get_flat_dt_root();
+
+	if (of_flat_dt_is_compatible(root, "gef,sbc610"))
 		return 1;
 
 	return 0;
 }
 
-machine_arch_initcall(gef_sbc610, mpc86xx_common_publish_devices);
+static long __init mpc86xx_time_init(void)
+{
+	unsigned int temp;
+
+	/* Set the time base to zero */
+	mtspr(SPRN_TBWL, 0);
+	mtspr(SPRN_TBWU, 0);
+
+	temp = mfspr(SPRN_HID0);
+	temp |= HID0_TBEN;
+	mtspr(SPRN_HID0, temp);
+	asm volatile("isync");
+
+	return 0;
+}
+
+static __initdata struct of_device_id of_bus_ids[] = {
+	{ .compatible = "simple-bus", },
+	{ .compatible = "gianfar", },
+	{},
+};
+
+static int __init declare_of_platform_devices(void)
+{
+	printk(KERN_DEBUG "Probe platform devices\n");
+	of_platform_bus_probe(NULL, of_bus_ids, NULL);
+
+	return 0;
+}
+machine_device_initcall(gef_sbc610, declare_of_platform_devices);
 
 define_machine(gef_sbc610) {
 	.name			= "GE SBC610",
@@ -181,6 +217,7 @@ define_machine(gef_sbc610) {
 	.init_IRQ		= gef_sbc610_init_irq,
 	.show_cpuinfo		= gef_sbc610_show_cpuinfo,
 	.get_irq		= mpic_get_irq,
+	.restart		= fsl_rstcr_restart,
 	.time_init		= mpc86xx_time_init,
 	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= udbg_progress,

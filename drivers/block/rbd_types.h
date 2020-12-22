@@ -15,47 +15,24 @@
 
 #include <linux/types.h>
 
-/* For format version 2, rbd image 'foo' consists of objects
- *   rbd_id.foo		- id of image
- *   rbd_header.<id>	- image metadata
- *   rbd_data.<id>.0000000000000000
- *   rbd_data.<id>.0000000000000001
- *   ...		- data
- * Clients do not access header data directly in rbd format 2.
- */
-
-#define RBD_HEADER_PREFIX      "rbd_header."
-#define RBD_DATA_PREFIX        "rbd_data."
-#define RBD_ID_PREFIX          "rbd_id."
-
-#define RBD_LOCK_NAME          "rbd_lock"
-#define RBD_LOCK_TAG           "internal"
-#define RBD_LOCK_COOKIE_PREFIX "auto"
-
-enum rbd_notify_op {
-	RBD_NOTIFY_OP_ACQUIRED_LOCK      = 0,
-	RBD_NOTIFY_OP_RELEASED_LOCK      = 1,
-	RBD_NOTIFY_OP_REQUEST_LOCK       = 2,
-	RBD_NOTIFY_OP_HEADER_UPDATE      = 3,
-};
-
 /*
- * For format version 1, rbd image 'foo' consists of objects
- *   foo.rbd		- image metadata
- *   rb.<idhi>.<idlo>.00000000
- *   rb.<idhi>.<idlo>.00000001
- *   ...		- data
- * There is no notion of a persistent image id in rbd format 1.
+ * rbd image 'foo' consists of objects
+ *   foo.rbd      - image metadata
+ *   foo.00000000
+ *   foo.00000001
+ *   ...          - data
  */
 
 #define RBD_SUFFIX		".rbd"
-
 #define RBD_DIRECTORY           "rbd_directory"
 #define RBD_INFO                "rbd_info"
 
 #define RBD_DEFAULT_OBJ_ORDER	22   /* 4MB */
 #define RBD_MIN_OBJ_ORDER       16
 #define RBD_MAX_OBJ_ORDER       30
+
+#define RBD_MAX_OBJ_NAME_LEN	96
+#define RBD_MAX_SEG_NAME_LEN	128
 
 #define RBD_COMP_NONE		0
 #define RBD_CRYPT_NONE		0
@@ -71,7 +48,7 @@ struct rbd_image_snap_ondisk {
 
 struct rbd_image_header_ondisk {
 	char text[40];
-	char object_prefix[24];
+	char block_name[24];
 	char signature[4];
 	char version[8];
 	struct {

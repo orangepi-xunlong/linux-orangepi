@@ -12,6 +12,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/input.h>
@@ -47,7 +48,7 @@ static irqreturn_t pcap_keys_handler(int irq, void *_pcap_keys)
 	return IRQ_HANDLED;
 }
 
-static int pcap_keys_probe(struct platform_device *pdev)
+static int __devinit pcap_keys_probe(struct platform_device *pdev)
 {
 	int err = -ENOMEM;
 	struct pcap_keys *pcap_keys;
@@ -103,7 +104,7 @@ fail:
 	return err;
 }
 
-static int pcap_keys_remove(struct platform_device *pdev)
+static int __devexit pcap_keys_remove(struct platform_device *pdev)
 {
 	struct pcap_keys *pcap_keys = platform_get_drvdata(pdev);
 
@@ -118,9 +119,10 @@ static int pcap_keys_remove(struct platform_device *pdev)
 
 static struct platform_driver pcap_keys_device_driver = {
 	.probe		= pcap_keys_probe,
-	.remove		= pcap_keys_remove,
+	.remove		= __devexit_p(pcap_keys_remove),
 	.driver		= {
 		.name	= "pcap-keys",
+		.owner	= THIS_MODULE,
 	}
 };
 module_platform_driver(pcap_keys_device_driver);

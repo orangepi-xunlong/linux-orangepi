@@ -1,4 +1,5 @@
 /*
+ * drivers/s390/char/vmlogrdr.c
  *	character device driver for reading z/VM system service records
  *
  *
@@ -99,8 +100,8 @@ static const struct file_operations vmlogrdr_fops = {
 };
 
 
-static void vmlogrdr_iucv_path_complete(struct iucv_path *, u8 *ipuser);
-static void vmlogrdr_iucv_path_severed(struct iucv_path *, u8 *ipuser);
+static void vmlogrdr_iucv_path_complete(struct iucv_path *, u8 ipuser[16]);
+static void vmlogrdr_iucv_path_severed(struct iucv_path *, u8 ipuser[16]);
 static void vmlogrdr_iucv_message_pending(struct iucv_path *,
 					  struct iucv_message *);
 
@@ -160,7 +161,7 @@ static struct cdev  *vmlogrdr_cdev = NULL;
 static int recording_class_AB;
 
 
-static void vmlogrdr_iucv_path_complete(struct iucv_path *path, u8 *ipuser)
+static void vmlogrdr_iucv_path_complete(struct iucv_path *path, u8 ipuser[16])
 {
 	struct vmlogrdr_priv_t * logptr = path->private;
 
@@ -171,7 +172,7 @@ static void vmlogrdr_iucv_path_complete(struct iucv_path *path, u8 *ipuser)
 }
 
 
-static void vmlogrdr_iucv_path_severed(struct iucv_path *path, u8 *ipuser)
+static void vmlogrdr_iucv_path_severed(struct iucv_path *path, u8 ipuser[16])
 {
 	struct vmlogrdr_priv_t * logptr = path->private;
 	u8 reason = (u8) ipuser[8];
@@ -313,7 +314,7 @@ static int vmlogrdr_open (struct inode *inode, struct file *filp)
 	int ret;
 
 	dev_num = iminor(inode);
-	if (dev_num >= MAXMINOR)
+	if (dev_num > MAXMINOR)
 		return -ENODEV;
 	logptr = &sys_ser[dev_num];
 
@@ -321,7 +322,7 @@ static int vmlogrdr_open (struct inode *inode, struct file *filp)
 	 * only allow for blocking reads to be open
 	 */
 	if (filp->f_flags & O_NONBLOCK)
-		return -EOPNOTSUPP;
+		return -ENOSYS;
 
 	/* Besure this device hasn't already been opened */
 	spin_lock_bh(&logptr->priv_lock);
@@ -338,12 +339,14 @@ static int vmlogrdr_open (struct inode *inode, struct file *filp)
 
 	/* set the file options */
 	filp->private_data = logptr;
+	filp->f_op = &vmlogrdr_fops;
 
 	/* start recording for this service*/
 	if (logptr->autorecording) {
 		ret = vmlogrdr_recording(logptr,1,logptr->autopurge);
 		if (ret)
-			pr_warn("vmlogrdr: failed to start recording automatically\n");
+			pr_warning("vmlogrdr: failed to start "
+				   "recording automatically\n");
 	}
 
 	/* create connection to the system service */
@@ -395,7 +398,8 @@ static int vmlogrdr_release (struct inode *inode, struct file *filp)
 	if (logptr->autorecording) {
 		ret = vmlogrdr_recording(logptr,0,logptr->autopurge);
 		if (ret)
-			pr_warn("vmlogrdr: failed to stop recording automatically\n");
+			pr_warning("vmlogrdr: failed to stop "
+				   "recording automatically\n");
 	}
 	logptr->dev_in_use = 0;
 
@@ -652,32 +656,16 @@ static ssize_t vmlogrdr_recording_status_show(struct device_driver *driver,
 	len = strlen(buf);
 	return len;
 }
+
+
 static DRIVER_ATTR(recording_status, 0444, vmlogrdr_recording_status_show,
 		   NULL);
-static struct attribute *vmlogrdr_drv_attrs[] = {
-	&driver_attr_recording_status.attr,
-	NULL,
-};
-static struct attribute_group vmlogrdr_drv_attr_group = {
-	.attrs = vmlogrdr_drv_attrs,
-};
-static const struct attribute_group *vmlogrdr_drv_attr_groups[] = {
-	&vmlogrdr_drv_attr_group,
-	NULL,
-};
 
 static struct attribute *vmlogrdr_attrs[] = {
 	&dev_attr_autopurge.attr,
 	&dev_attr_purge.attr,
 	&dev_attr_autorecording.attr,
 	&dev_attr_recording.attr,
-	NULL,
-};
-static struct attribute_group vmlogrdr_attr_group = {
-	.attrs = vmlogrdr_attrs,
-};
-static const struct attribute_group *vmlogrdr_attr_groups[] = {
-	&vmlogrdr_attr_group,
 	NULL,
 };
 
@@ -704,13 +692,17 @@ static const struct dev_pm_ops vmlogrdr_pm_ops = {
 	.prepare = vmlogrdr_pm_prepare,
 };
 
+static struct attribute_group vmlogrdr_attr_group = {
+	.attrs = vmlogrdr_attrs,
+};
+
 static struct class *vmlogrdr_class;
 static struct device_driver vmlogrdr_driver = {
 	.name = "vmlogrdr",
 	.bus  = &iucv_bus,
 	.pm = &vmlogrdr_pm_ops,
-	.groups = vmlogrdr_drv_attr_groups,
 };
+
 
 static int vmlogrdr_register_driver(void)
 {
@@ -725,14 +717,21 @@ static int vmlogrdr_register_driver(void)
 	if (ret)
 		goto out_iucv;
 
+	ret = driver_create_file(&vmlogrdr_driver,
+				 &driver_attr_recording_status);
+	if (ret)
+		goto out_driver;
+
 	vmlogrdr_class = class_create(THIS_MODULE, "vmlogrdr");
 	if (IS_ERR(vmlogrdr_class)) {
 		ret = PTR_ERR(vmlogrdr_class);
 		vmlogrdr_class = NULL;
-		goto out_driver;
+		goto out_attr;
 	}
 	return 0;
 
+out_attr:
+	driver_remove_file(&vmlogrdr_driver, &driver_attr_recording_status);
 out_driver:
 	driver_unregister(&vmlogrdr_driver);
 out_iucv:
@@ -746,6 +745,7 @@ static void vmlogrdr_unregister_driver(void)
 {
 	class_destroy(vmlogrdr_class);
 	vmlogrdr_class = NULL;
+	driver_remove_file(&vmlogrdr_driver, &driver_attr_recording_status);
 	driver_unregister(&vmlogrdr_driver);
 	iucv_unregister(&vmlogrdr_iucv_handler, 1);
 }
@@ -758,11 +758,10 @@ static int vmlogrdr_register_device(struct vmlogrdr_priv_t *priv)
 
 	dev = kzalloc(sizeof(struct device), GFP_KERNEL);
 	if (dev) {
-		dev_set_name(dev, "%s", priv->internal_name);
+		dev_set_name(dev, priv->internal_name);
 		dev->bus = &iucv_bus;
 		dev->parent = iucv_root;
 		dev->driver = &vmlogrdr_driver;
-		dev->groups = vmlogrdr_attr_groups;
 		dev_set_drvdata(dev, priv);
 		/*
 		 * The release function could be called after the
@@ -780,6 +779,11 @@ static int vmlogrdr_register_device(struct vmlogrdr_priv_t *priv)
 		return ret;
 	}
 
+	ret = sysfs_create_group(&dev->kobj, &vmlogrdr_attr_group);
+	if (ret) {
+		device_unregister(dev);
+		return ret;
+	}
 	priv->class_device = device_create(vmlogrdr_class, dev,
 					   MKDEV(vmlogrdr_major,
 						 priv->minor_num),
@@ -787,6 +791,7 @@ static int vmlogrdr_register_device(struct vmlogrdr_priv_t *priv)
 	if (IS_ERR(priv->class_device)) {
 		ret = PTR_ERR(priv->class_device);
 		priv->class_device=NULL;
+		sysfs_remove_group(&dev->kobj, &vmlogrdr_attr_group);
 		device_unregister(dev);
 		return ret;
 	}
@@ -799,6 +804,7 @@ static int vmlogrdr_unregister_device(struct vmlogrdr_priv_t *priv)
 {
 	device_destroy(vmlogrdr_class, MKDEV(vmlogrdr_major, priv->minor_num));
 	if (priv->device != NULL) {
+		sysfs_remove_group(&priv->device->kobj, &vmlogrdr_attr_group);
 		device_unregister(priv->device);
 		priv->device=NULL;
 	}
@@ -870,7 +876,7 @@ static int __init vmlogrdr_init(void)
 		goto cleanup;
 
 	for (i=0; i < MAXMINOR; ++i ) {
-		sys_ser[i].buffer = (char *) get_zeroed_page(GFP_KERNEL | GFP_DMA);
+		sys_ser[i].buffer = (char *) get_zeroed_page(GFP_KERNEL);
 		if (!sys_ser[i].buffer) {
 			rc = -ENOMEM;
 			break;

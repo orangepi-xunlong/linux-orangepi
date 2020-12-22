@@ -58,7 +58,7 @@
  * About SOFTNET:
  * Most of the changes were pretty obvious and basically done by HE already.
  *
- * One problem of the isdn net device code is that it uses struct net_device
+ * One problem of the isdn net device code is that is uses struct net_device
  * for masters and slaves. However, only master interface are registered to
  * the network layer, and therefore, it only makes sense to call netif_*
  * functions on them.
@@ -885,7 +885,7 @@ isdn_net_log_skb(struct sk_buff *skb, isdn_net_local *lp)
 
 	addinfo[0] = '\0';
 	/* This check stolen from 2.1.72 dev_queue_xmit_nit() */
-	if (p < skb->data || skb_network_header(skb) >= skb_tail_pointer(skb)) {
+	if (p < skb->data || skb->network_header >= skb->tail) {
 		/* fall back to old isdn_net_log_packet method() */
 		char *buf = skb->data;
 
@@ -1153,7 +1153,7 @@ static void isdn_net_tx_timeout(struct net_device *ndev)
 		 * ever called   --KG
 		 */
 	}
-	netif_trans_update(ndev);
+	ndev->trans_start = jiffies;
 	netif_wake_queue(ndev);
 }
 
@@ -1291,7 +1291,7 @@ isdn_net_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 			}
 		} else {
 			/* Device is connected to an ISDN channel */
-			netif_trans_update(ndev);
+			ndev->trans_start = jiffies;
 			if (!lp->dialstate) {
 				/* ISDN connection is established, try sending */
 				int ret;
@@ -1371,7 +1371,7 @@ isdn_net_type_trans(struct sk_buff *skb, struct net_device *dev)
 	eth = eth_hdr(skb);
 
 	if (*eth->h_dest & 1) {
-		if (ether_addr_equal(eth->h_dest, dev->broadcast))
+		if (memcmp(eth->h_dest, dev->broadcast, ETH_ALEN) == 0)
 			skb->pkt_type = PACKET_BROADCAST;
 		else
 			skb->pkt_type = PACKET_MULTICAST;
@@ -1382,10 +1382,10 @@ isdn_net_type_trans(struct sk_buff *skb, struct net_device *dev)
 	 */
 
 	else if (dev->flags & (IFF_PROMISC /*| IFF_ALLMULTI*/)) {
-		if (!ether_addr_equal(eth->h_dest, dev->dev_addr))
+		if (memcmp(eth->h_dest, dev->dev_addr, ETH_ALEN))
 			skb->pkt_type = PACKET_OTHERHOST;
 	}
-	if (ntohs(eth->h_proto) >= ETH_P_802_3_MIN)
+	if (ntohs(eth->h_proto) >= 1536)
 		return eth->h_proto;
 
 	rawp = skb->data;
@@ -1951,6 +1951,38 @@ static int isdn_net_header(struct sk_buff *skb, struct net_device *dev,
 	return len;
 }
 
+/* We don't need to send arp, because we have point-to-point connections. */
+static int
+isdn_net_rebuild_header(struct sk_buff *skb)
+{
+	struct net_device *dev = skb->dev;
+	isdn_net_local *lp = netdev_priv(dev);
+	int ret = 0;
+
+	if (lp->p_encap == ISDN_NET_ENCAP_ETHER) {
+		struct ethhdr *eth = (struct ethhdr *) skb->data;
+
+		/*
+		 *      Only ARP/IP is currently supported
+		 */
+
+		if (eth->h_proto != htons(ETH_P_IP)) {
+			printk(KERN_WARNING
+			       "isdn_net: %s don't know how to resolve type %d addresses?\n",
+			       dev->name, (int) eth->h_proto);
+			memcpy(eth->h_source, dev->dev_addr, dev->addr_len);
+			return 0;
+		}
+		/*
+		 *      Try to get ARP to resolve the header.
+		 */
+#ifdef CONFIG_INET
+		ret = arp_find(eth->h_dest, skb);
+#endif
+	}
+	return ret;
+}
+
 static int isdn_header_cache(const struct neighbour *neigh, struct hh_cache *hh,
 			     __be16 type)
 {
@@ -1973,6 +2005,7 @@ static void isdn_header_cache_update(struct hh_cache *hh,
 
 static const struct header_ops isdn_header_ops = {
 	.create = isdn_net_header,
+	.rebuild = isdn_net_rebuild_header,
 	.cache = isdn_header_cache,
 	.cache_update = isdn_header_cache_update,
 };
@@ -2555,8 +2588,7 @@ isdn_net_new(char *name, struct net_device *master)
 		printk(KERN_WARNING "isdn_net: Could not allocate net-device\n");
 		return NULL;
 	}
-	netdev->dev = alloc_netdev(sizeof(isdn_net_local), name,
-				   NET_NAME_UNKNOWN, _isdn_setup);
+	netdev->dev = alloc_netdev(sizeof(isdn_net_local), name, _isdn_setup);
 	if (!netdev->dev) {
 		printk(KERN_WARNING "isdn_net: Could not allocate network device\n");
 		kfree(netdev);
@@ -2611,9 +2643,10 @@ isdn_net_newslave(char *parm)
 	char newname[10];
 
 	if (p) {
-		/* Slave-Name MUST not be empty or overflow 'newname' */
-		if (strscpy(newname, p + 1, sizeof(newname)) <= 0)
+		/* Slave-Name MUST not be empty */
+		if (!strlen(p + 1))
 			return NULL;
+		strcpy(newname, p + 1);
 		*p = 0;
 		/* Master must already exist */
 		if (!(n = isdn_net_findif(parm)))
@@ -2884,8 +2917,8 @@ isdn_net_getcfg(isdn_net_ioctl_cfg *cfg)
 			cfg->callback = 2;
 		cfg->cbhup = (lp->flags & ISDN_NET_CBHUP) ? 1 : 0;
 		cfg->dialmode = lp->flags & ISDN_NET_DIALMODE_MASK;
-		cfg->chargehup = (lp->hupflags & ISDN_CHARGEHUP) ? 1 : 0;
-		cfg->ihup = (lp->hupflags & ISDN_INHUP) ? 1 : 0;
+		cfg->chargehup = (lp->hupflags & 4) ? 1 : 0;
+		cfg->ihup = (lp->hupflags & 8) ? 1 : 0;
 		cfg->cbdelay = lp->cbdelay;
 		cfg->dialmax = lp->dialmax;
 		cfg->triggercps = lp->triggercps;

@@ -1,4 +1,4 @@
-/* sysfs.c: Topology sysfs support code for sparc64.
+/* sysfs.c: Toplogy sysfs support code for sparc64.
  *
  * Copyright (C) 2007 David S. Miller <davem@davemloft.net>
  */
@@ -151,7 +151,7 @@ static ssize_t store_mmustat_enable(struct device *s,
 			size_t count)
 {
 	unsigned long val, err;
-	int ret = sscanf(buf, "%lu", &val);
+	int ret = sscanf(buf, "%ld", &val);
 
 	if (ret != 1)
 		return -EINVAL;
@@ -246,7 +246,7 @@ static void unregister_cpu_online(unsigned int cpu)
 }
 #endif
 
-static int sysfs_cpu_notify(struct notifier_block *self,
+static int __cpuinit sysfs_cpu_notify(struct notifier_block *self,
 				      unsigned long action, void *hcpu)
 {
 	unsigned int cpu = (unsigned int)(long)hcpu;
@@ -266,7 +266,7 @@ static int sysfs_cpu_notify(struct notifier_block *self,
 	return NOTIFY_OK;
 }
 
-static struct notifier_block sysfs_cpu_nb = {
+static struct notifier_block __cpuinitdata sysfs_cpu_nb = {
 	.notifier_call	= sysfs_cpu_notify,
 };
 
@@ -300,7 +300,7 @@ static int __init topology_init(void)
 
 	check_mmu_stats();
 
-	cpu_notifier_register_begin();
+	register_cpu_notifier(&sysfs_cpu_nb);
 
 	for_each_possible_cpu(cpu) {
 		struct cpu *c = &per_cpu(cpu_devices, cpu);
@@ -309,10 +309,6 @@ static int __init topology_init(void)
 		if (cpu_online(cpu))
 			register_cpu_online(cpu);
 	}
-
-	__register_cpu_notifier(&sysfs_cpu_nb);
-
-	cpu_notifier_register_done();
 
 	return 0;
 }

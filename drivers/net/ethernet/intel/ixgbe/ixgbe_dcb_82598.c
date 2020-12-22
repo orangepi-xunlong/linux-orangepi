@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2013 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -190,46 +190,53 @@ s32 ixgbe_dcb_config_tx_data_arbiter_82598(struct ixgbe_hw *hw,
  */
 s32 ixgbe_dcb_config_pfc_82598(struct ixgbe_hw *hw, u8 pfc_en)
 {
-	u32 fcrtl, reg;
+	u32 reg;
 	u8  i;
 
-	/* Enable Transmit Priority Flow Control */
-	reg = IXGBE_READ_REG(hw, IXGBE_RMCS);
-	reg &= ~IXGBE_RMCS_TFCE_802_3X;
-	reg |= IXGBE_RMCS_TFCE_PRIORITY;
-	IXGBE_WRITE_REG(hw, IXGBE_RMCS, reg);
+	if (pfc_en) {
+		/* Enable Transmit Priority Flow Control */
+		reg = IXGBE_READ_REG(hw, IXGBE_RMCS);
+		reg &= ~IXGBE_RMCS_TFCE_802_3X;
+		/* correct the reporting of our flow control status */
+		reg |= IXGBE_RMCS_TFCE_PRIORITY;
+		IXGBE_WRITE_REG(hw, IXGBE_RMCS, reg);
 
-	/* Enable Receive Priority Flow Control */
-	reg = IXGBE_READ_REG(hw, IXGBE_FCTRL);
-	reg &= ~(IXGBE_FCTRL_RPFCE | IXGBE_FCTRL_RFCE);
-
-	if (pfc_en)
+		/* Enable Receive Priority Flow Control */
+		reg = IXGBE_READ_REG(hw, IXGBE_FCTRL);
+		reg &= ~IXGBE_FCTRL_RFCE;
 		reg |= IXGBE_FCTRL_RPFCE;
+		IXGBE_WRITE_REG(hw, IXGBE_FCTRL, reg);
 
-	IXGBE_WRITE_REG(hw, IXGBE_FCTRL, reg);
+		/* Configure pause time */
+		for (i = 0; i < (MAX_TRAFFIC_CLASS >> 1); i++)
+			IXGBE_WRITE_REG(hw, IXGBE_FCTTV(i), 0x68006800);
 
-	/* Configure PFC Tx thresholds per TC */
-	for (i = 0; i < MAX_TRAFFIC_CLASS; i++) {
-		if (!(pfc_en & BIT(i))) {
-			IXGBE_WRITE_REG(hw, IXGBE_FCRTL(i), 0);
-			IXGBE_WRITE_REG(hw, IXGBE_FCRTH(i), 0);
-			continue;
-		}
-
-		fcrtl = (hw->fc.low_water[i] << 10) | IXGBE_FCRTL_XONE;
-		reg = (hw->fc.high_water[i] << 10) | IXGBE_FCRTH_FCEN;
-		IXGBE_WRITE_REG(hw, IXGBE_FCRTL(i), fcrtl);
-		IXGBE_WRITE_REG(hw, IXGBE_FCRTH(i), reg);
+		/* Configure flow control refresh threshold value */
+		IXGBE_WRITE_REG(hw, IXGBE_FCRTV, 0x3400);
 	}
 
-	/* Configure pause time */
-	reg = hw->fc.pause_time * 0x00010001;
-	for (i = 0; i < (MAX_TRAFFIC_CLASS / 2); i++)
-		IXGBE_WRITE_REG(hw, IXGBE_FCTTV(i), reg);
+	/*
+	 * Configure flow control thresholds and enable priority flow control
+	 * for each traffic class.
+	 */
+	for (i = 0; i < MAX_TRAFFIC_CLASS; i++) {
+		int enabled = pfc_en & (1 << i);
 
-	/* Configure flow control refresh threshold value */
-	IXGBE_WRITE_REG(hw, IXGBE_FCRTV, hw->fc.pause_time / 2);
+		reg = hw->fc.low_water << 10;
 
+		if (enabled == pfc_enabled_tx ||
+		    enabled == pfc_enabled_full)
+			reg |= IXGBE_FCRTL_XONE;
+
+		IXGBE_WRITE_REG(hw, IXGBE_FCRTL(i), reg);
+
+		reg = hw->fc.high_water[i] << 10;
+		if (enabled == pfc_enabled_tx ||
+		    enabled == pfc_enabled_full)
+			reg |= IXGBE_FCRTH_FCEN;
+
+		IXGBE_WRITE_REG(hw, IXGBE_FCRTH(i), reg);
+	}
 
 	return 0;
 }

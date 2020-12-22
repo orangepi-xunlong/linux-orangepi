@@ -100,16 +100,7 @@ struct thread_struct {
 	.fs	= __KERNEL_DS,						\
 }
 
-/*
- * ColdFire stack format sbould be 0x4 for an aligned usp (will always be
- * true on thread creation). We need to set this explicitly.
- */
-#ifdef CONFIG_COLDFIRE
-#define setframeformat(_regs)	do { (_regs)->format = 0x4; } while(0)
-#else
-#define setframeformat(_regs)	do { } while (0)
-#endif
-
+#ifdef CONFIG_MMU
 /*
  * Do necessary setup to start up a newly executed thread.
  */
@@ -118,18 +109,40 @@ static inline void start_thread(struct pt_regs * regs, unsigned long pc,
 {
 	regs->pc = pc;
 	regs->sr &= ~0x2000;
-	setframeformat(regs);
 	wrusp(usp);
 }
 
-#ifdef CONFIG_MMU
 extern int handle_kernel_fault(struct pt_regs *regs);
+
 #else
+
+/*
+ * Coldfire stacks need to be re-aligned on trap exit, conventional
+ * 68k can handle this case cleanly.
+ */
+#ifdef CONFIG_COLDFIRE
+#define reformat(_regs)		do { (_regs)->format = 0x4; } while(0)
+#else
+#define reformat(_regs)		do { } while (0)
+#endif
+
+#define start_thread(_regs, _pc, _usp)                  \
+do {                                                    \
+	(_regs)->pc = (_pc);                            \
+	((struct switch_stack *)(_regs))[-1].a6 = 0;    \
+	reformat(_regs);                                \
+	if (current->mm)                                \
+		(_regs)->d5 = current->mm->start_data;  \
+	(_regs)->sr &= ~0x2000;                         \
+	wrusp(_usp);                                    \
+} while(0)
+
 static inline  int handle_kernel_fault(struct pt_regs *regs)
 {
 	/* Any fault in kernel is fatal on non-mmu */
 	return 0;
 }
+
 #endif
 
 /* Forward declaration, a strange C thing */
@@ -137,6 +150,18 @@ struct task_struct;
 
 /* Free all resources held by a thread. */
 static inline void release_thread(struct task_struct *dead_task)
+{
+}
+
+/* Prepare to copy thread state - unlazy all lazy status */
+#define prepare_to_copy(tsk)	do { } while (0)
+
+extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
+
+/*
+ * Free current thread data structures etc..
+ */
+static inline void exit_thread(void)
 {
 }
 
@@ -156,6 +181,5 @@ unsigned long get_wchan(struct task_struct *p);
 #define task_pt_regs(tsk)	((struct pt_regs *) ((tsk)->thread.esp0))
 
 #define cpu_relax()	barrier()
-#define cpu_relax_lowlatency() cpu_relax()
 
 #endif

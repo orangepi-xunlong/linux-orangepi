@@ -27,8 +27,7 @@
 #include <linux/io.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
-#include <soc/fsl/qe/qe.h>
-#include <soc/fsl/qe/immap_qe.h>
+#include <asm/qe.h>
 
 #define USB_CLOCK	48000000
 
@@ -174,6 +173,25 @@
 #define USB_E_TXB_MASK		0x0002
 #define USB_E_RXB_MASK		0x0001
 
+/* Freescale USB Host controller registers */
+struct fhci_regs {
+	u8 usb_mod;		/* mode register */
+	u8 usb_addr;		/* address register */
+	u8 usb_comm;		/* command register */
+	u8 reserved1[1];
+	__be16 usb_ep[4];	/* endpoint register */
+	u8 reserved2[4];
+	__be16 usb_event;	/* event register */
+	u8 reserved3[2];
+	__be16 usb_mask;	/* mask register */
+	u8 reserved4[1];
+	u8 usb_status;		/* status register */
+	__be16 usb_sof_tmr;	/* Start Of Frame timer */
+	u8 reserved5[2];
+	__be16 usb_frame_num;	/* frame number register */
+	u8 reserved6[1];
+};
+
 /* Freescale USB HOST */
 struct fhci_pram {
 	__be16 ep_ptr[4];	/* Endpoint porter reg */
@@ -249,7 +267,7 @@ struct fhci_hcd {
 	int gpios[NUM_GPIOS];
 	bool alow_gpios[NUM_GPIOS];
 
-	struct qe_usb_ctlr __iomem *regs; /* I/O memory used to communicate */
+	struct fhci_regs __iomem *regs;	/* I/O memory used to communicate */
 	struct fhci_pram __iomem *pram;	/* Parameter RAM */
 	struct gtm_timer *timer;
 
@@ -338,7 +356,7 @@ struct ed {
 
 	/* read only parameters, should be cleared upon initialization */
 	u8 toggle_carry;	/* toggle carry from the last TD submitted */
-	u16 next_iso;		/* time stamp of next queued ISO transfer */
+	u32 last_iso;		/* time stamp of last queued ISO transfer */
 	struct td *td_head;	/* a pointer to the current TD handled */
 };
 

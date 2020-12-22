@@ -221,7 +221,18 @@ static struct platform_driver gpio_event_driver = {
 	},
 };
 
-module_platform_driver(gpio_event_driver);
+static int __devinit gpio_event_init(void)
+{
+	return platform_driver_register(&gpio_event_driver);
+}
+
+static void __exit gpio_event_exit(void)
+{
+	platform_driver_unregister(&gpio_event_driver);
+}
+
+module_init(gpio_event_init);
+module_exit(gpio_event_exit);
 
 MODULE_DESCRIPTION("GPIO Event Driver");
 MODULE_LICENSE("GPL");

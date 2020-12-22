@@ -12,6 +12,8 @@
 #define cpu_has_3k_cache	0
 #define cpu_has_4k_cache	1
 #define cpu_has_tx39_cache	0
+#define cpu_has_fpu		0
+#define cpu_has_32fpr	0
 #define cpu_has_counter		0
 #define cpu_has_watch		1
 #define cpu_has_divec		1
@@ -32,10 +34,10 @@
 #define cpu_has_ic_fills_f_dc	0
 #define cpu_has_pindexed_dcache 0
 #define cpu_has_mips32r1	1
+#define cpu_has_mips32r2	0
 #define cpu_has_mips64r1	0
 #define cpu_has_mips64r2	0
 #define cpu_has_dsp		0
-#define cpu_has_dsp2		0
 #define cpu_has_mipsmt		0
 #define cpu_has_userlocal	0
 #define cpu_has_nofpuex 0

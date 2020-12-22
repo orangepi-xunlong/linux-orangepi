@@ -32,7 +32,6 @@
 #include <linux/init.h>
 #include <linux/irqnr.h>
 #include <linux/time.h>
-#include <linux/slab.h>
 #include <linux/parport.h>
 #include <linux/pps_kernel.h>
 
@@ -195,7 +194,7 @@ static void parport_detach(struct parport *port)
 	struct pps_client_pp *device;
 
 	/* FIXME: oooh, this is ugly! */
-	if (!pardev || strcmp(pardev->name, KBUILD_MODNAME))
+	if (strcmp(pardev->name, KBUILD_MODNAME))
 		/* not our port */
 		return;
 

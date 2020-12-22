@@ -52,25 +52,15 @@ static inline void *return_address(unsigned int level)
 
 #endif
 
-#define ftrace_return_address(n) return_address(n)
+#define HAVE_ARCH_CALLER_ADDR
 
-#define ARCH_HAS_SYSCALL_MATCH_SYM_NAME
-
-static inline bool arch_syscall_match_sym_name(const char *sym,
-					       const char *name)
-{
-	if (!strcmp(sym, "sys_mmap2"))
-		sym = "sys_mmap_pgoff";
-	else if (!strcmp(sym, "sys_statfs64_wrapper"))
-		sym = "sys_statfs64";
-	else if (!strcmp(sym, "sys_fstatfs64_wrapper"))
-		sym = "sys_fstatfs64";
-	else if (!strcmp(sym, "sys_arm_fadvise64_64"))
-		sym = "sys_fadvise64_64";
-
-	/* Ignore case since sym may start with "SyS" instead of "sys" */
-	return !strcasecmp(sym, name);
-}
+#define CALLER_ADDR0 ((unsigned long)__builtin_return_address(0))
+#define CALLER_ADDR1 ((unsigned long)return_address(1))
+#define CALLER_ADDR2 ((unsigned long)return_address(2))
+#define CALLER_ADDR3 ((unsigned long)return_address(3))
+#define CALLER_ADDR4 ((unsigned long)return_address(4))
+#define CALLER_ADDR5 ((unsigned long)return_address(5))
+#define CALLER_ADDR6 ((unsigned long)return_address(6))
 
 #endif /* ifndef __ASSEMBLY__ */
 

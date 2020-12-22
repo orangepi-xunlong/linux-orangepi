@@ -1,11 +1,29 @@
 #ifndef __INCLUDE_LINUX_OOM_H
 #define __INCLUDE_LINUX_OOM_H
 
+/*
+ * /proc/<pid>/oom_adj is deprecated, see
+ * Documentation/feature-removal-schedule.txt.
+ *
+ * /proc/<pid>/oom_adj set to -17 protects from the oom-killer
+ */
+#define OOM_DISABLE (-17)
+/* inclusive */
+#define OOM_ADJUST_MIN (-16)
+#define OOM_ADJUST_MAX 15
+
+/*
+ * /proc/<pid>/oom_score_adj set to OOM_SCORE_ADJ_MIN disables oom killing for
+ * pid.
+ */
+#define OOM_SCORE_ADJ_MIN	(-1000)
+#define OOM_SCORE_ADJ_MAX	1000
+
+#ifdef __KERNEL__
 
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/nodemask.h>
-#include <uapi/linux/oom.h>
 
 struct zonelist;
 struct notifier_block;
@@ -13,69 +31,43 @@ struct mem_cgroup;
 struct task_struct;
 
 /*
- * Details of the page allocation that triggered the oom killer that are used to
- * determine what should be killed.
+ * Types of limitations to the nodes from which allocations may occur
  */
-struct oom_control {
-	/* Used to determine cpuset */
-	struct zonelist *zonelist;
-
-	/* Used to determine mempolicy */
-	nodemask_t *nodemask;
-
-	/* Memory cgroup in which oom is invoked, or NULL for global oom */
-	struct mem_cgroup *memcg;
-
-	/* Used to determine cpuset and node locality requirement */
-	const gfp_t gfp_mask;
-
-	/*
-	 * order == -1 means the oom kill is required by sysrq, otherwise only
-	 * for display purposes.
-	 */
-	const int order;
-
-	/* Used by oom implementation, do not set */
-	unsigned long totalpages;
-	struct task_struct *chosen;
-	unsigned long chosen_points;
+enum oom_constraint {
+	CONSTRAINT_NONE,
+	CONSTRAINT_CPUSET,
+	CONSTRAINT_MEMORY_POLICY,
+	CONSTRAINT_MEMCG,
 };
 
-extern struct mutex oom_lock;
+extern void compare_swap_oom_score_adj(int old_val, int new_val);
+extern int test_set_oom_score_adj(int new_val);
 
-static inline void set_current_oom_origin(void)
-{
-	current->signal->oom_flag_origin = true;
-}
+extern unsigned int oom_badness(struct task_struct *p, struct mem_cgroup *memcg,
+			const nodemask_t *nodemask, unsigned long totalpages);
 
-static inline void clear_current_oom_origin(void)
-{
-	current->signal->oom_flag_origin = false;
-}
+extern int oom_kills_count(void);
+extern void note_oom_kill(void);
 
-static inline bool oom_task_origin(const struct task_struct *p)
-{
-	return p->signal->oom_flag_origin;
-}
+extern int try_set_zonelist_oom(struct zonelist *zonelist, gfp_t gfp_flags);
+extern void clear_zonelist_oom(struct zonelist *zonelist, gfp_t gfp_flags);
 
-static inline bool tsk_is_oom_victim(struct task_struct * tsk)
-{
-	return tsk->signal->oom_mm;
-}
-
-extern unsigned long oom_badness(struct task_struct *p,
-		struct mem_cgroup *memcg, const nodemask_t *nodemask,
-		unsigned long totalpages);
-
-extern bool out_of_memory(struct oom_control *oc);
-
-extern void exit_oom_victim(void);
-
+extern void out_of_memory(struct zonelist *zonelist, gfp_t gfp_mask,
+		int order, nodemask_t *mask, bool force_kill);
 extern int register_oom_notifier(struct notifier_block *nb);
 extern int unregister_oom_notifier(struct notifier_block *nb);
 
-extern bool oom_killer_disable(signed long timeout);
-extern void oom_killer_enable(void);
+extern bool oom_killer_disabled;
+
+static inline void oom_killer_disable(void)
+{
+	oom_killer_disabled = true;
+}
+
+static inline void oom_killer_enable(void)
+{
+	oom_killer_disabled = false;
+}
 
 extern struct task_struct *find_lock_task_mm(struct task_struct *p);
 
@@ -83,4 +75,5 @@ extern struct task_struct *find_lock_task_mm(struct task_struct *p);
 extern int sysctl_oom_dump_tasks;
 extern int sysctl_oom_kill_allocating_task;
 extern int sysctl_panic_on_oom;
+#endif /* __KERNEL__*/
 #endif /* _INCLUDE_LINUX_OOM_H */

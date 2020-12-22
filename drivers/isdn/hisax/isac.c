@@ -24,11 +24,11 @@
 #define DBUSY_TIMER_VALUE 80
 #define ARCOFI_USE 1
 
-static char *ISACVer[] =
+static char *ISACVer[] __devinitdata =
 {"2086/2186 V1.1", "2085 B1", "2085 B2",
  "2085 V2.3"};
 
-void ISACVersion(struct IsdnCardState *cs, char *s)
+void __devinit ISACVersion(struct IsdnCardState *cs, char *s)
 {
 	int val;
 
@@ -137,7 +137,7 @@ isac_empty_fifo(struct IsdnCardState *cs, int count)
 
 		t += sprintf(t, "isac_empty_fifo cnt %d", count);
 		QuickHex(t, ptr, count);
-		debugl1(cs, "%s", cs->dlog);
+		debugl1(cs, cs->dlog);
 	}
 }
 
@@ -179,7 +179,7 @@ isac_fill_fifo(struct IsdnCardState *cs)
 
 		t += sprintf(t, "isac_fill_fifo cnt %d", count);
 		QuickHex(t, ptr, count);
-		debugl1(cs, "%s", cs->dlog);
+		debugl1(cs, cs->dlog);
 	}
 }
 
@@ -215,11 +215,9 @@ isac_interrupt(struct IsdnCardState *cs, u_char val)
 			if (count == 0)
 				count = 32;
 			isac_empty_fifo(cs, count);
-			count = cs->rcvidx;
-			if (count > 0) {
+			if ((count = cs->rcvidx) > 0) {
 				cs->rcvidx = 0;
-				skb = alloc_skb(count, GFP_ATOMIC);
-				if (!skb)
+				if (!(skb = alloc_skb(count, GFP_ATOMIC)))
 					printk(KERN_WARNING "HiSax: D receive out of memory\n");
 				else {
 					memcpy(skb_put(skb, count), cs->rcvbuf, count);
@@ -253,8 +251,7 @@ isac_interrupt(struct IsdnCardState *cs, u_char val)
 				cs->tx_skb = NULL;
 			}
 		}
-		cs->tx_skb = skb_dequeue(&cs->sq);
-		if (cs->tx_skb) {
+		if ((cs->tx_skb = skb_dequeue(&cs->sq))) {
 			cs->tx_cnt = 0;
 			isac_fill_fifo(cs);
 		} else
@@ -316,8 +313,7 @@ afterXPR:
 #if ARCOFI_USE
 			if (v1 & 0x08) {
 				if (!cs->dc.isac.mon_rx) {
-					cs->dc.isac.mon_rx = kmalloc(MAX_MON_FRAME, GFP_ATOMIC);
-					if (!cs->dc.isac.mon_rx) {
+					if (!(cs->dc.isac.mon_rx = kmalloc(MAX_MON_FRAME, GFP_ATOMIC))) {
 						if (cs->debug & L1_DEB_WARN)
 							debugl1(cs, "ISAC MON RX out of memory!");
 						cs->dc.isac.mocr &= 0xf0;
@@ -347,8 +343,7 @@ afterXPR:
 		afterMONR0:
 			if (v1 & 0x80) {
 				if (!cs->dc.isac.mon_rx) {
-					cs->dc.isac.mon_rx = kmalloc(MAX_MON_FRAME, GFP_ATOMIC);
-					if (!cs->dc.isac.mon_rx) {
+					if (!(cs->dc.isac.mon_rx = kmalloc(MAX_MON_FRAME, GFP_ATOMIC))) {
 						if (cs->debug & L1_DEB_WARN)
 							debugl1(cs, "ISAC MON RX out of memory!");
 						cs->dc.isac.mocr &= 0x0f;
@@ -674,7 +669,8 @@ void clear_pending_isac_ints(struct IsdnCardState *cs)
 	cs->writeisac(cs, ISAC_MASK, 0xFF);
 }
 
-void setup_isac(struct IsdnCardState *cs)
+void __devinit
+setup_isac(struct IsdnCardState *cs)
 {
 	INIT_WORK(&cs->tqueue, isac_bh);
 	cs->dbusytimer.function = (void *) dbusy_timer_handler;

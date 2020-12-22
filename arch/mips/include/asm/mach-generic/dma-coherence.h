@@ -47,39 +47,24 @@ static inline int plat_dma_supported(struct device *dev, u64 mask)
 	return 1;
 }
 
+static inline void plat_extra_sync_for_device(struct device *dev)
+{
+}
+
+static inline int plat_dma_mapping_error(struct device *dev,
+					 dma_addr_t dma_addr)
+{
+	return 0;
+}
+
 static inline int plat_device_is_coherent(struct device *dev)
 {
-#ifdef CONFIG_DMA_PERDEV_COHERENT
-	return dev->archdata.dma_coherent;
-#else
-	switch (coherentio) {
-	default:
-	case IO_COHERENCE_DEFAULT:
-		return hw_coherentio;
-	case IO_COHERENCE_ENABLED:
-		return 1;
-	case IO_COHERENCE_DISABLED:
-		return 0;
-	}
+#ifdef CONFIG_DMA_COHERENT
+	return 1;
+#endif
+#ifdef CONFIG_DMA_NONCOHERENT
+	return 0;
 #endif
 }
-
-#ifndef plat_post_dma_flush
-static inline void plat_post_dma_flush(struct device *dev)
-{
-}
-#endif
-
-#ifdef CONFIG_SWIOTLB
-static inline dma_addr_t phys_to_dma(struct device *dev, phys_addr_t paddr)
-{
-	return paddr;
-}
-
-static inline phys_addr_t dma_to_phys(struct device *dev, dma_addr_t daddr)
-{
-	return daddr;
-}
-#endif
 
 #endif /* __ASM_MACH_GENERIC_DMA_COHERENCE_H */

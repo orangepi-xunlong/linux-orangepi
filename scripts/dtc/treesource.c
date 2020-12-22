@@ -23,19 +23,17 @@
 
 extern FILE *yyin;
 extern int yyparse(void);
-extern YYLTYPE yylloc;
 
-struct dt_info *parser_output;
-bool treesource_error;
+struct boot_info *the_boot_info;
+int treesource_error;
 
-struct dt_info *dt_from_source(const char *fname)
+struct boot_info *dt_from_source(const char *fname)
 {
-	parser_output = NULL;
-	treesource_error = false;
+	the_boot_info = NULL;
+	treesource_error = 0;
 
 	srcfile_push(fname);
 	yyin = current_srcfile->f;
-	yylloc.file = current_srcfile;
 
 	if (yyparse() != 0)
 		die("Unable to parse input tree\n");
@@ -43,7 +41,7 @@ struct dt_info *dt_from_source(const char *fname)
 	if (treesource_error)
 		die("Syntax error parsing input tree\n");
 
-	return parser_output;
+	return the_boot_info;
 }
 
 static void write_prefix(FILE *f, int level)
@@ -54,9 +52,9 @@ static void write_prefix(FILE *f, int level)
 		fputc('\t', f);
 }
 
-static bool isstring(char c)
+static int isstring(char c)
 {
-	return (isprint((unsigned char)c)
+	return (isprint(c)
 		|| (c == '\0')
 		|| strchr("\a\b\t\n\v\f\r", c));
 }
@@ -109,7 +107,7 @@ static void write_propval_string(FILE *f, struct data val)
 			break;
 		case '\0':
 			fprintf(f, "\", ");
-			while (m && (m->offset <= (i + 1))) {
+			while (m && (m->offset < i)) {
 				if (m->type == LABEL) {
 					assert(m->offset == (i+1));
 					fprintf(f, "%s: ", m->ref);
@@ -119,10 +117,10 @@ static void write_propval_string(FILE *f, struct data val)
 			fprintf(f, "\"");
 			break;
 		default:
-			if (isprint((unsigned char)c))
+			if (isprint(c))
 				fprintf(f, "%c", c);
 			else
-				fprintf(f, "\\x%02hhx", (unsigned char)c);
+				fprintf(f, "\\x%02hhx", c);
 		}
 	}
 	fprintf(f, "\"");
@@ -178,7 +176,7 @@ static void write_propval_bytes(FILE *f, struct data val)
 			m = m->next;
 		}
 
-		fprintf(f, "%02hhx", (unsigned char)(*bp++));
+		fprintf(f, "%02hhx", *bp++);
 		if ((const void *)bp >= propend)
 			break;
 		fprintf(f, " ");
@@ -263,13 +261,13 @@ static void write_tree_source_node(FILE *f, struct node *tree, int level)
 }
 
 
-void dt_to_source(FILE *f, struct dt_info *dti)
+void dt_to_source(FILE *f, struct boot_info *bi)
 {
 	struct reserve_info *re;
 
 	fprintf(f, "/dts-v1/;\n\n");
 
-	for (re = dti->reservelist; re; re = re->next) {
+	for (re = bi->reservelist; re; re = re->next) {
 		struct label *l;
 
 		for_each_label(re->labels, l)
@@ -279,6 +277,6 @@ void dt_to_source(FILE *f, struct dt_info *dti)
 			(unsigned long long)re->re.size);
 	}
 
-	write_tree_source_node(f, dti->dt, 0);
+	write_tree_source_node(f, bi->dt, 0);
 }
 

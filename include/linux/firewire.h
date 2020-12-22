@@ -135,24 +135,10 @@ struct fw_card {
 	__be32 maint_utility_register;
 };
 
-static inline struct fw_card *fw_card_get(struct fw_card *card)
-{
-	kref_get(&card->kref);
-
-	return card;
-}
-
-void fw_card_release(struct kref *kref);
-
-static inline void fw_card_put(struct fw_card *card)
-{
-	kref_put(&card->kref, fw_card_release);
-}
-
 struct fw_attribute_group {
 	struct attribute_group *groups[2];
 	struct attribute_group group;
-	struct attribute *attrs[13];
+	struct attribute *attrs[12];
 };
 
 enum fw_device_state {
@@ -252,10 +238,8 @@ struct ieee1394_device_id;
 
 struct fw_driver {
 	struct device_driver driver;
-	int (*probe)(struct fw_unit *unit, const struct ieee1394_device_id *id);
 	/* Called when the parent device sits through a bus reset. */
 	void (*update)(struct fw_unit *unit);
-	void (*remove)(struct fw_unit *unit);
 	const struct ieee1394_device_id *id_table;
 };
 
@@ -268,16 +252,8 @@ typedef void (*fw_transaction_callback_t)(struct fw_card *card, int rcode,
 					  void *data, size_t length,
 					  void *callback_data);
 /*
- * This callback handles an inbound request subaction.  It is called in
- * RCU read-side context, therefore must not sleep.
- *
- * The callback should not initiate outbound request subactions directly.
- * Otherwise there is a danger of recursion of inbound and outbound
- * transactions from and to the local node.
- *
- * The callback is responsible that either fw_send_response() or kfree()
- * is called on the @request, except for FCP registers for which the core
- * takes care of that.
+ * Important note:  Except for the FCP registers, the callback must guarantee
+ * that either fw_send_response() or kfree() is called on the @request.
  */
 typedef void (*fw_address_callback_t)(struct fw_card *card,
 				      struct fw_request *request,
@@ -332,7 +308,7 @@ struct fw_transaction {
 
 struct fw_address_handler {
 	u64 offset;
-	u64 length;
+	size_t length;
 	fw_address_callback_t address_callback;
 	void *callback_data;
 	struct list_head link;
@@ -350,7 +326,6 @@ int fw_core_add_address_handler(struct fw_address_handler *handler,
 void fw_core_remove_address_handler(struct fw_address_handler *handler);
 void fw_send_response(struct fw_card *card,
 		      struct fw_request *request, int rcode);
-int fw_get_request_speed(struct fw_request *request);
 void fw_send_request(struct fw_card *card, struct fw_transaction *t,
 		     int tcode, int destination_id, int generation, int speed,
 		     unsigned long long offset, void *payload, size_t length,
@@ -360,15 +335,11 @@ int fw_cancel_transaction(struct fw_card *card,
 int fw_run_transaction(struct fw_card *card, int tcode, int destination_id,
 		       int generation, int speed, unsigned long long offset,
 		       void *payload, size_t length);
-const char *fw_rcode_string(int rcode);
 
 static inline int fw_stream_packet_destination_id(int tag, int channel, int sy)
 {
 	return tag << 14 | channel << 8 | sy;
 }
-
-void fw_schedule_bus_reset(struct fw_card *card, bool delayed,
-			   bool short_reset);
 
 struct fw_descriptor {
 	struct list_head link;
@@ -421,7 +392,6 @@ struct fw_iso_buffer {
 	enum dma_data_direction direction;
 	struct page **pages;
 	int page_count;
-	int page_count_mapped;
 };
 
 int fw_iso_buffer_init(struct fw_iso_buffer *buffer, struct fw_card *card,

@@ -1,14 +1,13 @@
 /*
+ *  drivers/s390/char/ctrlchar.c
  *  Unified handling of special chars.
  *
- *    Copyright IBM Corp. 2001
+ *    Copyright (C) 2001 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Fritz Elfert <felfert@millenux.com> <elfert@de.ibm.com>
  *
  */
 
 #include <linux/tty.h>
-#include <linux/sysrq.h>
-#include <linux/workqueue.h>
 
 extern unsigned int
 ctrlchar_handle(const unsigned char *buf, int len, struct tty_struct *tty);
@@ -19,13 +18,3 @@ ctrlchar_handle(const unsigned char *buf, int len, struct tty_struct *tty);
 #define CTRLCHAR_SYSRQ (3 << 8)
 
 #define CTRLCHAR_MASK (~0xffu)
-
-
-#ifdef CONFIG_MAGIC_SYSRQ
-struct sysrq_work {
-	int key;
-	struct work_struct work;
-};
-
-void schedule_sysrq_work(struct sysrq_work *sw);
-#endif

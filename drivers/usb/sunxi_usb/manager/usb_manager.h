@@ -13,16 +13,14 @@
  *
  */
 
-#ifndef __USB_MANAGER_H__
-#define __USB_MANAGER_H__
+#ifndef  __USB_MANAGER_H__
+#define  __USB_MANAGER_H__
 
 #if	0
-#define DMSG_DBG_MANAGER	pr_debug
+#define DMSG_DBG_MANAGER     		pr_debug
 #else
 #define DMSG_DBG_MANAGER(...)
 #endif
-__s32 create_node_file(struct platform_device *pdev);
-__s32 remove_node_file(struct platform_device *pdev);
 
-#endif   /* __USB_MANAGER_H__ */
+#endif   //__USB_MANAGER_H__
 

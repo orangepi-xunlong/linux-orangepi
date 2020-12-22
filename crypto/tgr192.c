@@ -612,7 +612,7 @@ static int tgr160_final(struct shash_desc *desc, u8 * out)
 
 	tgr192_final(desc, D);
 	memcpy(out, D, TGR160_DIGEST_SIZE);
-	memzero_explicit(D, TGR192_DIGEST_SIZE);
+	memset(D, 0, TGR192_DIGEST_SIZE);
 
 	return 0;
 }
@@ -623,12 +623,12 @@ static int tgr128_final(struct shash_desc *desc, u8 * out)
 
 	tgr192_final(desc, D);
 	memcpy(out, D, TGR128_DIGEST_SIZE);
-	memzero_explicit(D, TGR192_DIGEST_SIZE);
+	memset(D, 0, TGR192_DIGEST_SIZE);
 
 	return 0;
 }
 
-static struct shash_alg tgr_algs[3] = { {
+static struct shash_alg tgr192 = {
 	.digestsize	=	TGR192_DIGEST_SIZE,
 	.init		=	tgr192_init,
 	.update		=	tgr192_update,
@@ -640,7 +640,9 @@ static struct shash_alg tgr_algs[3] = { {
 		.cra_blocksize	=	TGR192_BLOCK_SIZE,
 		.cra_module	=	THIS_MODULE,
 	}
-}, {
+};
+
+static struct shash_alg tgr160 = {
 	.digestsize	=	TGR160_DIGEST_SIZE,
 	.init		=	tgr192_init,
 	.update		=	tgr192_update,
@@ -652,7 +654,9 @@ static struct shash_alg tgr_algs[3] = { {
 		.cra_blocksize	=	TGR192_BLOCK_SIZE,
 		.cra_module	=	THIS_MODULE,
 	}
-}, {
+};
+
+static struct shash_alg tgr128 = {
 	.digestsize	=	TGR128_DIGEST_SIZE,
 	.init		=	tgr192_init,
 	.update		=	tgr192_update,
@@ -664,21 +668,42 @@ static struct shash_alg tgr_algs[3] = { {
 		.cra_blocksize	=	TGR192_BLOCK_SIZE,
 		.cra_module	=	THIS_MODULE,
 	}
-} };
+};
 
 static int __init tgr192_mod_init(void)
 {
-	return crypto_register_shashes(tgr_algs, ARRAY_SIZE(tgr_algs));
+	int ret = 0;
+
+	ret = crypto_register_shash(&tgr192);
+
+	if (ret < 0) {
+		goto out;
+	}
+
+	ret = crypto_register_shash(&tgr160);
+	if (ret < 0) {
+		crypto_unregister_shash(&tgr192);
+		goto out;
+	}
+
+	ret = crypto_register_shash(&tgr128);
+	if (ret < 0) {
+		crypto_unregister_shash(&tgr192);
+		crypto_unregister_shash(&tgr160);
+	}
+      out:
+	return ret;
 }
 
 static void __exit tgr192_mod_fini(void)
 {
-	crypto_unregister_shashes(tgr_algs, ARRAY_SIZE(tgr_algs));
+	crypto_unregister_shash(&tgr192);
+	crypto_unregister_shash(&tgr160);
+	crypto_unregister_shash(&tgr128);
 }
 
-MODULE_ALIAS_CRYPTO("tgr192");
-MODULE_ALIAS_CRYPTO("tgr160");
-MODULE_ALIAS_CRYPTO("tgr128");
+MODULE_ALIAS("tgr160");
+MODULE_ALIAS("tgr128");
 
 module_init(tgr192_mod_init);
 module_exit(tgr192_mod_fini);

@@ -3,7 +3,7 @@
 #
 
 menuconfig MEMSTICK
-	tristate "Sony MemoryStick card support"
+	tristate "Sony MemoryStick card support (EXPERIMENTAL)"
 	help
 	  Sony MemoryStick is a proprietary storage/extension card protocol.
 

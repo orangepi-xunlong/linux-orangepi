@@ -9,10 +9,8 @@
 #define BITMAP_MAJOR_LO 3
 /* version 4 insists the bitmap is in little-endian order
  * with version 3, it is host-endian which is non-portable
- * Version 5 is currently set only for clustered devices
  */
 #define BITMAP_MAJOR_HI 4
-#define BITMAP_MAJOR_CLUSTERED 5
 #define	BITMAP_MAJOR_HOSTENDIAN 3
 
 /*
@@ -49,8 +47,8 @@
  * When we set a bit, or in the counter (to start a write), if the fields is
  * 0, we first set the disk bit and set the counter to 1.
  *
- * If the counter is 0, the on-disk bit is clear and the stripe is clean
- * Anything that dirties the stripe pushes the counter to 2 (at least)
+ * If the counter is 0, the on-disk bit is clear and the stipe is clean
+ * Anything that dirties the stipe pushes the counter to 2 (at least)
  * and sets the on-disk bit (lazily).
  * If a periodic sweep find the counter at 2, it is decremented to 1.
  * If the sweep find the counter at 1, the on-disk bit is cleared and the
@@ -113,9 +111,9 @@ typedef __u16 bitmap_counter_t;
 
 /* use these for bitmap->flags and bitmap->sb->state bit-fields */
 enum bitmap_state {
-	BITMAP_STALE	   = 1,  /* the bitmap file is out of date or had -EIO */
-	BITMAP_WRITE_ERROR = 2, /* A write error has occurred */
-	BITMAP_HOSTENDIAN  =15,
+	BITMAP_STALE  = 0x002,  /* the bitmap file is out of date or had -EIO */
+	BITMAP_WRITE_ERROR = 0x004, /* A write error has occurred */
+	BITMAP_HOSTENDIAN = 0x8000,
 };
 
 /* the superblock at the front of the bitmap file -- little endian */
@@ -130,11 +128,8 @@ typedef struct bitmap_super_s {
 	__le32 chunksize;    /* 52  the bitmap chunk size in bytes */
 	__le32 daemon_sleep; /* 56  seconds between disk flushes */
 	__le32 write_behind; /* 60  number of outstanding write-behind writes */
-	__le32 sectors_reserved; /* 64 number of 512-byte sectors that are
-				  * reserved for the bitmap. */
-	__le32 nodes;        /* 68 the maximum number of nodes in cluster. */
-	__u8 cluster_name[64]; /* 72 cluster name to which this md belongs */
-	__u8  pad[256 - 136]; /* set to zero */
+
+	__u8  pad[256 - 64]; /* set to zero */
 } bitmap_super_t;
 
 /* notes:
@@ -165,48 +160,35 @@ struct bitmap_page {
 	 */
 	unsigned int hijacked:1;
 	/*
-	 * If any counter in this page is '1' or '2' - and so could be
-	 * cleared then that page is marked as 'pending'
-	 */
-	unsigned int pending:1;
-	/*
 	 * count of dirty bits on the page
 	 */
-	unsigned int  count:30;
+	unsigned int  count:31;
 };
 
 /* the main bitmap structure - one per mddev */
 struct bitmap {
-
-	struct bitmap_counts {
-		spinlock_t lock;
-		struct bitmap_page *bp;
-		unsigned long pages;		/* total number of pages
-						 * in the bitmap */
-		unsigned long missing_pages;	/* number of pages
-						 * not yet allocated */
-		unsigned long chunkshift;	/* chunksize = 2^chunkshift
-						 * (for bitops) */
-		unsigned long chunks;		/* Total number of data
-						 * chunks for the array */
-	} counts;
+	struct bitmap_page *bp;
+	unsigned long pages; /* total number of pages in the bitmap */
+	unsigned long missing_pages; /* number of pages not yet allocated */
 
 	struct mddev *mddev; /* the md device that the bitmap is for */
+
+	/* bitmap chunksize -- how much data does each bit represent? */
+	unsigned long chunkshift; /* chunksize = 2^(chunkshift+9) (for bitops) */
+	unsigned long chunks; /* total number of data chunks for the array */
 
 	__u64	events_cleared;
 	int need_sync;
 
-	struct bitmap_storage {
-		struct file *file;		/* backing disk file */
-		struct page *sb_page;		/* cached copy of the bitmap
-						 * file superblock */
-		struct page **filemap;		/* list of cache pages for
-						 * the file */
-		unsigned long *filemap_attr;	/* attributes associated
-						 * w/ filemap pages */
-		unsigned long file_pages;	/* number of pages in the file*/
-		unsigned long bytes;		/* total bytes in the bitmap */
-	} storage;
+	/* bitmap spinlock */
+	spinlock_t lock;
+
+	struct file *file; /* backing disk file */
+	struct page *sb_page; /* cached copy of the bitmap file superblock */
+	struct page **filemap; /* list of cache pages for the file */
+	unsigned long *filemap_attr; /* attributes associated w/ filemap pages */
+	unsigned long file_pages; /* number of pages in the file */
+	int last_page_size; /* bytes in the last page */
 
 	unsigned long flags;
 
@@ -228,14 +210,13 @@ struct bitmap {
 	wait_queue_head_t overflow_wait;
 	wait_queue_head_t behind_wait;
 
-	struct kernfs_node *sysfs_can_clear;
-	int cluster_slot;		/* Slot offset for clustered env */
+	struct sysfs_dirent *sysfs_can_clear;
 };
 
 /* the bitmap API */
 
 /* these are used only by md/bitmap */
-struct bitmap *bitmap_create(struct mddev *mddev, int slot);
+int  bitmap_create(struct mddev *mddev);
 int bitmap_load(struct mddev *mddev);
 void bitmap_flush(struct mddev *mddev);
 void bitmap_destroy(struct mddev *mddev);
@@ -257,18 +238,10 @@ void bitmap_endwrite(struct bitmap *bitmap, sector_t offset,
 int bitmap_start_sync(struct bitmap *bitmap, sector_t offset, sector_t *blocks, int degraded);
 void bitmap_end_sync(struct bitmap *bitmap, sector_t offset, sector_t *blocks, int aborted);
 void bitmap_close_sync(struct bitmap *bitmap);
-void bitmap_cond_end_sync(struct bitmap *bitmap, sector_t sector, bool force);
-void bitmap_sync_with_cluster(struct mddev *mddev,
-			      sector_t old_lo, sector_t old_hi,
-			      sector_t new_lo, sector_t new_hi);
+void bitmap_cond_end_sync(struct bitmap *bitmap, sector_t sector);
 
 void bitmap_unplug(struct bitmap *bitmap);
 void bitmap_daemon_work(struct mddev *mddev);
-
-int bitmap_resize(struct bitmap *bitmap, sector_t blocks,
-		  int chunksize, int init);
-int bitmap_copy_from_slot(struct mddev *mddev, int slot,
-				sector_t *lo, sector_t *hi, bool clear_bits);
 #endif
 
 #endif

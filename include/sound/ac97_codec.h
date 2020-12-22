@@ -28,9 +28,9 @@
 #include <linux/bitops.h>
 #include <linux/device.h>
 #include <linux/workqueue.h>
-#include <sound/pcm.h>
-#include <sound/control.h>
-#include <sound/info.h>
+#include "pcm.h"
+#include "control.h"
+#include "info.h"
 
 /* maximum number of devices on the AC97 bus */
 #define	AC97_BUS_MAX_DEVICES	4
@@ -417,14 +417,11 @@
 #define AC97_RATES_MIC_ADC	4
 #define AC97_RATES_SPDIF	5
 
-#define AC97_NUM_GPIOS		16
 /*
  *
  */
 
 struct snd_ac97;
-struct snd_ac97_gpio_priv;
-struct snd_pcm_chmap;
 
 struct snd_ac97_build_ops {
 	int (*build_3d) (struct snd_ac97 *ac97);
@@ -531,9 +528,6 @@ struct snd_ac97 {
 	struct delayed_work power_work;
 #endif
 	struct device dev;
-	struct snd_ac97_gpio_priv *gpio_priv;
-
-	struct snd_pcm_chmap *chmaps[2]; /* channel-maps (optional) */
 };
 
 #define to_ac97_t(d) container_of(d, struct snd_ac97, dev)
@@ -587,8 +581,6 @@ static inline int snd_ac97_update_power(struct snd_ac97 *ac97, int reg,
 void snd_ac97_suspend(struct snd_ac97 *ac97);
 void snd_ac97_resume(struct snd_ac97 *ac97);
 #endif
-int snd_ac97_reset(struct snd_ac97 *ac97, bool try_warm, unsigned int id,
-	unsigned int id_mask);
 
 /* quirk types */
 enum {
@@ -613,9 +605,7 @@ struct ac97_quirk {
 	int type;		/* quirk type above */
 };
 
-int snd_ac97_tune_hardware(struct snd_ac97 *ac97,
-			   const struct ac97_quirk *quirk,
-			   const char *override);
+int snd_ac97_tune_hardware(struct snd_ac97 *ac97, struct ac97_quirk *quirk, const char *override);
 int snd_ac97_set_rate(struct snd_ac97 *ac97, int reg, unsigned int rate);
 
 /*

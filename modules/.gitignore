@@ -1,0 +1,3 @@
+*.markers
+*.symvers
+mali/DX910-SW-99002-r3p2-01rel1/driver/src/devicedrv/ump/arch/arch-ca8-virtex820-m400-1

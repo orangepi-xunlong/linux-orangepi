@@ -19,9 +19,6 @@
 #include <linux/radix-tree.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
-#ifdef CONFIG_BLK_DEV_RAM_DAX
-#include <linux/pfn_t.h>
-#endif
 
 #include <asm/uaccess.h>
 
@@ -100,13 +97,13 @@ static struct page *brd_insert_page(struct brd_device *brd, sector_t sector)
 	 * Must use NOIO because we don't want to recurse back into the
 	 * block or filesystem layers from page reclaim.
 	 *
-	 * Cannot support DAX and highmem, because our ->direct_access
-	 * routine for DAX must return memory that is always addressable.
-	 * If DAX was reworked to use pfns and kmap throughout, this
+	 * Cannot support XIP and highmem, because our ->direct_access
+	 * routine for XIP must return memory that is always addressable.
+	 * If XIP was reworked to use pfns and kmap throughout, this
 	 * restriction might be able to be lifted.
 	 */
 	gfp_flags = GFP_NOIO | __GFP_ZERO;
-#ifndef CONFIG_BLK_DEV_RAM_DAX
+#ifndef CONFIG_BLK_DEV_XIP
 	gfp_flags |= __GFP_HIGHMEM;
 #endif
 	page = alloc_page(gfp_flags);
@@ -203,11 +200,11 @@ static int copy_to_brd_setup(struct brd_device *brd, sector_t sector, size_t n)
 
 	copy = min_t(size_t, n, PAGE_SIZE - offset);
 	if (!brd_insert_page(brd, sector))
-		return -ENOSPC;
+		return -ENOMEM;
 	if (copy < n) {
 		sector += copy >> SECTOR_SHIFT;
 		if (!brd_insert_page(brd, sector))
-			return -ENOSPC;
+			return -ENOMEM;
 	}
 	return 0;
 }
@@ -300,20 +297,20 @@ static void copy_from_brd(void *dst, struct brd_device *brd,
  * Process a single bvec of a bio.
  */
 static int brd_do_bvec(struct brd_device *brd, struct page *page,
-			unsigned int len, unsigned int off, bool is_write,
+			unsigned int len, unsigned int off, int rw,
 			sector_t sector)
 {
 	void *mem;
 	int err = 0;
 
-	if (is_write) {
+	if (rw != READ) {
 		err = copy_to_brd_setup(brd, sector, len);
 		if (err)
 			goto out;
 	}
 
 	mem = kmap_atomic(page);
-	if (!is_write) {
+	if (rw == READ) {
 		copy_from_brd(mem + off, brd, sector, len);
 		flush_dcache_page(page);
 	} else {
@@ -326,73 +323,65 @@ out:
 	return err;
 }
 
-static blk_qc_t brd_make_request(struct request_queue *q, struct bio *bio)
+static void brd_make_request(struct request_queue *q, struct bio *bio)
 {
 	struct block_device *bdev = bio->bi_bdev;
 	struct brd_device *brd = bdev->bd_disk->private_data;
-	struct bio_vec bvec;
+	int rw;
+	struct bio_vec *bvec;
 	sector_t sector;
-	struct bvec_iter iter;
+	int i;
+	int err = -EIO;
 
-	sector = bio->bi_iter.bi_sector;
-	if (bio_end_sector(bio) > get_capacity(bdev->bd_disk))
-		goto io_error;
+	sector = bio->bi_sector;
+	if (sector + (bio->bi_size >> SECTOR_SHIFT) >
+						get_capacity(bdev->bd_disk))
+		goto out;
 
-	if (unlikely(bio_op(bio) == REQ_OP_DISCARD)) {
-		if (sector & ((PAGE_SIZE >> SECTOR_SHIFT) - 1) ||
-		    bio->bi_iter.bi_size & ~PAGE_MASK)
-			goto io_error;
-		discard_from_brd(brd, sector, bio->bi_iter.bi_size);
+	if (unlikely(bio->bi_rw & REQ_DISCARD)) {
+		err = 0;
+		discard_from_brd(brd, sector, bio->bi_size);
 		goto out;
 	}
 
-	bio_for_each_segment(bvec, bio, iter) {
-		unsigned int len = bvec.bv_len;
-		int err;
+	rw = bio_rw(bio);
+	if (rw == READA)
+		rw = READ;
 
-		err = brd_do_bvec(brd, bvec.bv_page, len, bvec.bv_offset,
-					op_is_write(bio_op(bio)), sector);
+	bio_for_each_segment(bvec, bio, i) {
+		unsigned int len = bvec->bv_len;
+		err = brd_do_bvec(brd, bvec->bv_page, len,
+					bvec->bv_offset, rw, sector);
 		if (err)
-			goto io_error;
+			break;
 		sector += len >> SECTOR_SHIFT;
 	}
 
 out:
-	bio_endio(bio);
-	return BLK_QC_T_NONE;
-io_error:
-	bio_io_error(bio);
-	return BLK_QC_T_NONE;
+	bio_endio(bio, err);
 }
 
-static int brd_rw_page(struct block_device *bdev, sector_t sector,
-		       struct page *page, bool is_write)
-{
-	struct brd_device *brd = bdev->bd_disk->private_data;
-	int err = brd_do_bvec(brd, page, PAGE_SIZE, 0, is_write, sector);
-	page_endio(page, is_write, err);
-	return err;
-}
-
-#ifdef CONFIG_BLK_DEV_RAM_DAX
-static long brd_direct_access(struct block_device *bdev, sector_t sector,
-			void **kaddr, pfn_t *pfn, long size)
+#ifdef CONFIG_BLK_DEV_XIP
+static int brd_direct_access(struct block_device *bdev, sector_t sector,
+			void **kaddr, unsigned long *pfn)
 {
 	struct brd_device *brd = bdev->bd_disk->private_data;
 	struct page *page;
 
 	if (!brd)
 		return -ENODEV;
+	if (sector & (PAGE_SECTORS-1))
+		return -EINVAL;
+	if (sector + PAGE_SECTORS > get_capacity(bdev->bd_disk))
+		return -ERANGE;
 	page = brd_insert_page(brd, sector);
 	if (!page)
-		return -ENOSPC;
+		return -ENOMEM;
 	*kaddr = page_address(page);
-	*pfn = page_to_pfn_t(page);
+	*pfn = page_to_pfn(page);
 
-	return PAGE_SIZE;
+	return 0;
 }
-#else
-#define brd_direct_access NULL
 #endif
 
 static int brd_ioctl(struct block_device *bdev, fmode_t mode,
@@ -431,26 +420,25 @@ static int brd_ioctl(struct block_device *bdev, fmode_t mode,
 
 static const struct block_device_operations brd_fops = {
 	.owner =		THIS_MODULE,
-	.rw_page =		brd_rw_page,
 	.ioctl =		brd_ioctl,
+#ifdef CONFIG_BLK_DEV_XIP
 	.direct_access =	brd_direct_access,
+#endif
 };
 
 /*
  * And now the modules code and kernel interface.
  */
-static int rd_nr = CONFIG_BLK_DEV_RAM_COUNT;
+static int rd_nr;
+int rd_size = CONFIG_BLK_DEV_RAM_SIZE;
+static int max_part;
+static int part_shift;
 module_param(rd_nr, int, S_IRUGO);
 MODULE_PARM_DESC(rd_nr, "Maximum number of brd devices");
-
-int rd_size = CONFIG_BLK_DEV_RAM_SIZE;
 module_param(rd_size, int, S_IRUGO);
 MODULE_PARM_DESC(rd_size, "Size of each RAM disk in kbytes.");
-
-static int max_part = 1;
 module_param(max_part, int, S_IRUGO);
-MODULE_PARM_DESC(max_part, "Num Minors to reserve between devices");
-
+MODULE_PARM_DESC(max_part, "Maximum number of partitions per RAM disk");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_BLOCKDEV_MAJOR(RAMDISK_MAJOR);
 MODULE_ALIAS("rd");
@@ -487,35 +475,24 @@ static struct brd_device *brd_alloc(int i)
 	brd->brd_queue = blk_alloc_queue(GFP_KERNEL);
 	if (!brd->brd_queue)
 		goto out_free_dev;
-
 	blk_queue_make_request(brd->brd_queue, brd_make_request);
 	blk_queue_max_hw_sectors(brd->brd_queue, 1024);
 	blk_queue_bounce_limit(brd->brd_queue, BLK_BOUNCE_ANY);
 
-	/* This is so fdisk will align partitions on 4k, because of
-	 * direct_access API needing 4k alignment, returning a PFN
-	 * (This is only a problem on very small devices <= 4M,
-	 *  otherwise fdisk will align on 1M. Regardless this call
-	 *  is harmless)
-	 */
-	blk_queue_physical_block_size(brd->brd_queue, PAGE_SIZE);
-
 	brd->brd_queue->limits.discard_granularity = PAGE_SIZE;
-	blk_queue_max_discard_sectors(brd->brd_queue, UINT_MAX);
+	brd->brd_queue->limits.max_discard_sectors = UINT_MAX;
 	brd->brd_queue->limits.discard_zeroes_data = 1;
 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, brd->brd_queue);
-#ifdef CONFIG_BLK_DEV_RAM_DAX
-	queue_flag_set_unlocked(QUEUE_FLAG_DAX, brd->brd_queue);
-#endif
-	disk = brd->brd_disk = alloc_disk(max_part);
+
+	disk = brd->brd_disk = alloc_disk(1 << part_shift);
 	if (!disk)
 		goto out_free_queue;
 	disk->major		= RAMDISK_MAJOR;
-	disk->first_minor	= i * max_part;
+	disk->first_minor	= i << part_shift;
 	disk->fops		= &brd_fops;
 	disk->private_data	= brd;
 	disk->queue		= brd->brd_queue;
-	disk->flags		= GENHD_FL_EXT_DEVT;
+	disk->flags |= GENHD_FL_SUPPRESS_PARTITION_INFO;
 	sprintf(disk->disk_name, "ram%d", i);
 	set_capacity(disk, rd_size * 2);
 
@@ -537,11 +514,10 @@ static void brd_free(struct brd_device *brd)
 	kfree(brd);
 }
 
-static struct brd_device *brd_init_one(int i, bool *new)
+static struct brd_device *brd_init_one(int i)
 {
 	struct brd_device *brd;
 
-	*new = false;
 	list_for_each_entry(brd, &brd_devices, brd_list) {
 		if (brd->brd_number == i)
 			goto out;
@@ -552,7 +528,6 @@ static struct brd_device *brd_init_one(int i, bool *new)
 		add_disk(brd->brd_disk);
 		list_add_tail(&brd->brd_list, &brd_devices);
 	}
-	*new = true;
 out:
 	return brd;
 }
@@ -568,46 +543,70 @@ static struct kobject *brd_probe(dev_t dev, int *part, void *data)
 {
 	struct brd_device *brd;
 	struct kobject *kobj;
-	bool new;
 
 	mutex_lock(&brd_devices_mutex);
-	brd = brd_init_one(MINOR(dev) / max_part, &new);
+	brd = brd_init_one(MINOR(dev) >> part_shift);
 	kobj = brd ? get_disk(brd->brd_disk) : NULL;
 	mutex_unlock(&brd_devices_mutex);
 
-	if (new)
-		*part = 0;
-
+	*part = 0;
 	return kobj;
 }
 
 static int __init brd_init(void)
 {
+	int i, nr;
+	unsigned long range;
 	struct brd_device *brd, *next;
-	int i;
 
 	/*
 	 * brd module now has a feature to instantiate underlying device
 	 * structure on-demand, provided that there is an access dev node.
+	 * However, this will not work well with user space tool that doesn't
+	 * know about such "feature".  In order to not break any existing
+	 * tool, we do the following:
 	 *
-	 * (1) if rd_nr is specified, create that many upfront. else
-	 *     it defaults to CONFIG_BLK_DEV_RAM_COUNT
-	 * (2) User can further extend brd devices by create dev node themselves
-	 *     and have kernel automatically instantiate actual device
-	 *     on-demand. Example:
-	 *		mknod /path/devnod_name b 1 X	# 1 is the rd major
-	 *		fdisk -l /path/devnod_name
-	 *	If (X / max_part) was not already created it will be created
-	 *	dynamically.
+	 * (1) if rd_nr is specified, create that many upfront, and this
+	 *     also becomes a hard limit.
+	 * (2) if rd_nr is not specified, create CONFIG_BLK_DEV_RAM_COUNT
+	 *     (default 16) rd device on module load, user can further
+	 *     extend brd device by create dev node themselves and have
+	 *     kernel automatically instantiate actual device on-demand.
 	 */
+
+	part_shift = 0;
+	if (max_part > 0) {
+		part_shift = fls(max_part);
+
+		/*
+		 * Adjust max_part according to part_shift as it is exported
+		 * to user space so that user can decide correct minor number
+		 * if [s]he want to create more devices.
+		 *
+		 * Note that -1 is required because partition 0 is reserved
+		 * for the whole disk.
+		 */
+		max_part = (1UL << part_shift) - 1;
+	}
+
+	if ((1UL << part_shift) > DISK_MAX_PARTS)
+		return -EINVAL;
+
+	if (rd_nr > 1UL << (MINORBITS - part_shift))
+		return -EINVAL;
+
+	if (rd_nr) {
+		nr = rd_nr;
+		range = rd_nr << part_shift;
+	} else {
+		nr = CONFIG_BLK_DEV_RAM_COUNT;
+		range = 1UL << MINORBITS;
+	}
 
 	if (register_blkdev(RAMDISK_MAJOR, "ramdisk"))
 		return -EIO;
 
-	if (unlikely(!max_part))
-		max_part = 1;
-
-	for (i = 0; i < rd_nr; i++) {
+	for (i = 0; i < nr; i++) {
 		brd = brd_alloc(i);
 		if (!brd)
 			goto out_free;
@@ -619,10 +618,10 @@ static int __init brd_init(void)
 	list_for_each_entry(brd, &brd_devices, brd_list)
 		add_disk(brd->brd_disk);
 
-	blk_register_region(MKDEV(RAMDISK_MAJOR, 0), 1UL << MINORBITS,
+	blk_register_region(MKDEV(RAMDISK_MAJOR, 0), range,
 				  THIS_MODULE, brd_probe, NULL, NULL);
 
-	pr_info("brd: module loaded\n");
+	printk(KERN_INFO "brd: module loaded\n");
 	return 0;
 
 out_free:
@@ -632,21 +631,21 @@ out_free:
 	}
 	unregister_blkdev(RAMDISK_MAJOR, "ramdisk");
 
-	pr_info("brd: module NOT loaded !!!\n");
 	return -ENOMEM;
 }
 
 static void __exit brd_exit(void)
 {
+	unsigned long range;
 	struct brd_device *brd, *next;
+
+	range = rd_nr ? rd_nr << part_shift : 1UL << MINORBITS;
 
 	list_for_each_entry_safe(brd, next, &brd_devices, brd_list)
 		brd_del_one(brd);
 
-	blk_unregister_region(MKDEV(RAMDISK_MAJOR, 0), 1UL << MINORBITS);
+	blk_unregister_region(MKDEV(RAMDISK_MAJOR, 0), range);
 	unregister_blkdev(RAMDISK_MAJOR, "ramdisk");
-
-	pr_info("brd: module unloaded\n");
 }
 
 module_init(brd_init);

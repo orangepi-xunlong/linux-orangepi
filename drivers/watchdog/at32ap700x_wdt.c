@@ -321,12 +321,13 @@ static int __init at32_wdt_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
-	wdt = devm_kzalloc(&pdev->dev, sizeof(struct wdt_at32ap700x),
-			GFP_KERNEL);
-	if (!wdt)
+	wdt = kzalloc(sizeof(struct wdt_at32ap700x), GFP_KERNEL);
+	if (!wdt) {
+		dev_dbg(&pdev->dev, "no memory for wdt structure\n");
 		return -ENOMEM;
+	}
 
-	wdt->regs = devm_ioremap(&pdev->dev, regs->start, resource_size(regs));
+	wdt->regs = ioremap(regs->start, resource_size(regs));
 	if (!wdt->regs) {
 		ret = -ENOMEM;
 		dev_dbg(&pdev->dev, "could not map I/O memory\n");
@@ -341,7 +342,7 @@ static int __init at32_wdt_probe(struct platform_device *pdev)
 		dev_info(&pdev->dev, "CPU must be reset with external "
 				"reset or POR due to silicon errata.\n");
 		ret = -EIO;
-		goto err_free;
+		goto err_iounmap;
 	} else {
 		wdt->users = 0;
 	}
@@ -363,7 +364,7 @@ static int __init at32_wdt_probe(struct platform_device *pdev)
 	ret = misc_register(&wdt->miscdev);
 	if (ret) {
 		dev_dbg(&pdev->dev, "failed to register wdt miscdev\n");
-		goto err_free;
+		goto err_register;
 	}
 
 	dev_info(&pdev->dev,
@@ -372,7 +373,12 @@ static int __init at32_wdt_probe(struct platform_device *pdev)
 
 	return 0;
 
+err_register:
+	platform_set_drvdata(pdev, NULL);
+err_iounmap:
+	iounmap(wdt->regs);
 err_free:
+	kfree(wdt);
 	wdt = NULL;
 	return ret;
 }
@@ -385,7 +391,10 @@ static int __exit at32_wdt_remove(struct platform_device *pdev)
 			at32_wdt_stop();
 
 		misc_deregister(&wdt->miscdev);
+		iounmap(wdt->regs);
+		kfree(wdt);
 		wdt = NULL;
+		platform_set_drvdata(pdev, NULL);
 	}
 	return 0;
 }
@@ -422,12 +431,24 @@ static struct platform_driver at32_wdt_driver = {
 	.resume		= at32_wdt_resume,
 	.driver		= {
 		.name	= "at32_wdt",
+		.owner	= THIS_MODULE,
 	},
 	.shutdown	= at32_wdt_shutdown,
 };
 
-module_platform_driver_probe(at32_wdt_driver, at32_wdt_probe);
+static int __init at32_wdt_init(void)
+{
+	return platform_driver_probe(&at32_wdt_driver, at32_wdt_probe);
+}
+module_init(at32_wdt_init);
+
+static void __exit at32_wdt_exit(void)
+{
+	platform_driver_unregister(&at32_wdt_driver);
+}
+module_exit(at32_wdt_exit);
 
 MODULE_AUTHOR("Hans-Christian Egtvedt <egtvedt@samfundet.no>");
 MODULE_DESCRIPTION("Watchdog driver for Atmel AT32AP700X");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);

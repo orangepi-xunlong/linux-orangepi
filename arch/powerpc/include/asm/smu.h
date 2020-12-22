@@ -132,7 +132,7 @@
   *
   * At this point, the OF driver seems to have a limitation on transfer
   * sizes of 0xd bytes on reads and 0x5 bytes on writes. I do not know
-  * whether this is just an OF limit due to some temporary buffer size
+  * wether this is just an OF limit due to some temporary buffer size
   * or if this is an SMU imposed limit. This driver has the same limitation
   * for now as I use a 0x10 bytes temporary buffer as well
   *
@@ -154,7 +154,7 @@
   *
   * The Darwin I2C driver is less subtle though. On any non-success status
   * from the response command, it waits 5ms and tries again up to 20 times,
-  * it doesn't differentiate between fatal errors or "busy" status.
+  * it doesn't differenciate between fatal errors or "busy" status.
   *
   * This driver provides an asynchronous paramblock based i2c command
   * interface to be used either directly by low level code or by a higher
@@ -185,7 +185,7 @@
  *  x = processor mask
  *  y = op. point index
  *  z = processor freq. step index
- * I haven't yet deciphered result codes
+ * I haven't yet decyphered result codes
  *
  */
 #define SMU_CMD_POWER_COMMAND			0xaa
@@ -236,7 +236,7 @@
  *   3 (optional): enable nmi? [0x00 or 0x01]
  *
  * Returns:
- *   If parameter 2 is 0x00 and parameter 3 is not specified, returns whether
+ *   If parameter 2 is 0x00 and parameter 3 is not specified, returns wether
  *   NMI is enabled. Otherwise unknown.
  */
 #define   SMU_CMD_MISC_df_NMI_OPTION		0x04
@@ -471,7 +471,14 @@ extern int smu_get_rtc_time(struct rtc_time *time, int spinwait);
 extern int smu_set_rtc_time(struct rtc_time *time, int spinwait);
 
 /*
- * Kernel asynchronous i2c interface
+ * SMU command buffer absolute address, exported by pmac_setup,
+ * this is allocated very early during boot.
+ */
+extern unsigned long smu_cmdbuf_abs;
+
+
+/*
+ * Kenrel asynchronous i2c interface
  */
 
 #define SMU_I2C_READ_MAX	0x1d

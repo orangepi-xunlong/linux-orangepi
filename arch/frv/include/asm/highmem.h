@@ -62,6 +62,8 @@ extern void kunmap_high(struct page *page);
 extern void *kmap(struct page *page);
 extern void kunmap(struct page *page);
 
+extern struct page *kmap_atomic_to_page(void *ptr);
+
 #endif /* !__ASSEMBLY__ */
 
 /*
@@ -74,16 +76,15 @@ extern void kunmap(struct page *page);
 
 #ifndef __ASSEMBLY__
 
-#define __kmap_atomic_primary(cached, paddr, ampr)						\
+#define __kmap_atomic_primary(type, paddr, ampr)						\
 ({												\
 	unsigned long damlr, dampr;								\
 												\
 	dampr = paddr | xAMPRx_L | xAMPRx_M | xAMPRx_S | xAMPRx_SS_16Kb | xAMPRx_V;		\
 												\
-	if (!cached)										\
+	if (type != __KM_CACHE)									\
 		asm volatile("movgs %0,dampr"#ampr :: "r"(dampr) : "memory");			\
 	else											\
-		/* cache flush page attachment point */						\
 		asm volatile("movgs %0,iampr"#ampr"\n"						\
 			     "movgs %0,dampr"#ampr"\n"						\
 			     :: "r"(dampr) : "memory"						\
@@ -111,20 +112,29 @@ extern void kunmap(struct page *page);
 	(void *) damlr;										  \
 })
 
-static inline void *kmap_atomic_primary(struct page *page)
+static inline void *kmap_atomic_primary(struct page *page, enum km_type type)
 {
 	unsigned long paddr;
 
 	pagefault_disable();
 	paddr = page_to_phys(page);
 
-        return __kmap_atomic_primary(1, paddr, 2);
+	switch (type) {
+        case 0:		return __kmap_atomic_primary(0, paddr, 2);
+        case 1:		return __kmap_atomic_primary(1, paddr, 3);
+        case 2:		return __kmap_atomic_primary(2, paddr, 4);
+        case 3:		return __kmap_atomic_primary(3, paddr, 5);
+
+	default:
+		BUG();
+		return NULL;
+	}
 }
 
-#define __kunmap_atomic_primary(cached, ampr)				\
+#define __kunmap_atomic_primary(type, ampr)				\
 do {									\
 	asm volatile("movgs gr0,dampr"#ampr"\n" ::: "memory");		\
-	if (cached)							\
+	if (type == __KM_CACHE)						\
 		asm volatile("movgs gr0,iampr"#ampr"\n" ::: "memory");	\
 } while(0)
 
@@ -133,9 +143,17 @@ do {									\
 	asm volatile("tlbpr %0,gr0,#4,#1" : : "r"(vaddr) : "memory");	\
 } while(0)
 
-static inline void kunmap_atomic_primary(void *kvaddr)
+static inline void kunmap_atomic_primary(void *kvaddr, enum km_type type)
 {
-        __kunmap_atomic_primary(1, 2);
+	switch (type) {
+        case 0:		__kunmap_atomic_primary(0, 2);	break;
+        case 1:		__kunmap_atomic_primary(1, 3);	break;
+        case 2:		__kunmap_atomic_primary(2, 4);	break;
+        case 3:		__kunmap_atomic_primary(3, 5);	break;
+
+	default:
+		BUG();
+	}
 	pagefault_enable();
 }
 

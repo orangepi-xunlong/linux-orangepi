@@ -24,7 +24,7 @@
 #include <linux/io.h>
 #include <linux/module.h>
 
-#include "hardware.h"
+#include <mach/hardware.h>
 
 static int mx27_cpu_rev = -1;
 static int mx27_cpu_partnumber;
@@ -39,7 +39,8 @@ static int mx27_read_cpu_rev(void)
 	 * the silicon revision very early we read it here to
 	 * avoid any further hooks
 	*/
-	val = imx_readl(MX27_IO_ADDRESS(MX27_SYSCTRL_BASE_ADDR + SYS_CHIP_ID));
+	val = __raw_readl(MX27_IO_ADDRESS(MX27_SYSCTRL_BASE_ADDR
+				+ SYS_CHIP_ID));
 
 	mx27_cpu_partnumber = (int)((val >> 12) & 0xFFFF);
 

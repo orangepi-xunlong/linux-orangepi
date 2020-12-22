@@ -9,23 +9,22 @@
 #include <linux/proc_fs.h>
 #include <linux/string.h>
 #include <linux/pm.h>
-#include <linux/platform_data/sa11x0-serial.h>
 #include <linux/platform_device.h>
 #include <linux/mfd/ucb1x00.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/io.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 
 #include <mach/hardware.h>
 #include <asm/setup.h>
-#include <asm/irq.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
 #include <asm/mach/map.h>
-#include <linux/platform_data/mfd-mcp-sa11x0.h>
+#include <asm/mach/serial_sa1100.h>
+#include <mach/mcp.h>
 #include <mach/simpad.h>
 #include <mach/irqs.h>
 
@@ -98,8 +97,8 @@ static void cs3_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 static int cs3_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
 	if (offset > 15)
-		return !!(simpad_get_cs3_ro() & (1 << (offset - 16)));
-	return !!(simpad_get_cs3_shadow() & (1 << offset));
+		return simpad_get_cs3_ro() & (1 << (offset - 16));
+	return simpad_get_cs3_shadow() & (1 << offset);
 };
 
 static int cs3_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
@@ -125,7 +124,7 @@ static struct map_desc simpad_io_desc[] __initdata = {
 		.length		= 0x00800000,
 		.type		= MT_DEVICE
 	}, {	/* Simpad CS3 */
-		.virtual	= (unsigned long)CS3_BASE,
+		.virtual	= CS3_BASE,
 		.pfn		= __phys_to_pfn(SA1100_CS3_PHYS),
 		.length		= 0x00100000,
 		.type		= MT_DEVICE
@@ -369,7 +368,7 @@ static int __init simpad_init(void)
 	cs3_gpio.get = cs3_gpio_get;
 	cs3_gpio.direction_input = cs3_gpio_direction_input;
 	cs3_gpio.direction_output = cs3_gpio_direction_output;
-	ret = gpiochip_add_data(&cs3_gpio, NULL);
+	ret = gpiochip_add(&cs3_gpio);
 	if (ret)
 		printk(KERN_WARNING "simpad: Unable to register cs3 GPIO device");
 
@@ -396,7 +395,6 @@ MACHINE_START(SIMPAD, "Simpad")
 	.map_io		= simpad_map_io,
 	.nr_irqs	= SA1100_NR_IRQS,
 	.init_irq	= sa1100_init_irq,
-	.init_late	= sa11x0_init_late,
-	.init_time	= sa1100_timer_init,
+	.timer		= &sa1100_timer,
 	.restart	= sa11x0_restart,
 MACHINE_END

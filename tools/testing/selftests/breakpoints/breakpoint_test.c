@@ -17,8 +17,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include "../kselftest.h"
-
 
 /* Breakpoint access modes */
 enum {
@@ -44,7 +42,7 @@ static void set_breakpoint_addr(void *addr, int n)
 		     offsetof(struct user, u_debugreg[n]), addr);
 	if (ret) {
 		perror("Can't set breakpoint addr\n");
-		ksft_exit_fail();
+		exit(-1);
 	}
 }
 
@@ -107,7 +105,7 @@ static void toggle_breakpoint(int n, int type, int len,
 		     offsetof(struct user, u_debugreg[7]), dr7);
 	if (ret) {
 		perror("Can't set dr7");
-		ksft_exit_fail();
+		exit(-1);
 	}
 }
 
@@ -277,7 +275,7 @@ static void check_success(const char *msg)
 			msg2 = "Ok";
 		if (ptrace(PTRACE_POKEDATA, child_pid, &trapped, 1)) {
 			perror("Can't poke\n");
-			ksft_exit_fail();
+			exit(-1);
 		}
 	}
 
@@ -392,5 +390,5 @@ int main(int argc, char **argv)
 
 	wait(NULL);
 
-	return ksft_exit_pass();
+	return 0;
 }

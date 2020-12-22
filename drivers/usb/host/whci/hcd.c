@@ -134,7 +134,7 @@ static int whc_urb_enqueue(struct usb_hcd *usb_hcd, struct urb *urb,
 	default:
 		ret = asl_urb_enqueue(whc, urb, mem_flags);
 		break;
-	}
+	};
 
 	return ret;
 }
@@ -160,7 +160,7 @@ static int whc_urb_dequeue(struct usb_hcd *usb_hcd, struct urb *urb, int status)
 	default:
 		ret = asl_urb_dequeue(whc, urb, status);
 		break;
-	}
+	};
 
 	return ret;
 }
@@ -231,21 +231,23 @@ static struct hc_driver whc_hc_driver = {
 
 	.hub_status_data = wusbhc_rh_status_data,
 	.hub_control = wusbhc_rh_control,
+	.bus_suspend = wusbhc_rh_suspend,
+	.bus_resume = wusbhc_rh_resume,
 	.start_port_reset = wusbhc_rh_start_port_reset,
 };
 
 static int whc_probe(struct umc_dev *umc)
 {
-	int ret;
+	int ret = -ENOMEM;
 	struct usb_hcd *usb_hcd;
-	struct wusbhc *wusbhc;
-	struct whc *whc;
+	struct wusbhc *wusbhc = NULL;
+	struct whc *whc = NULL;
 	struct device *dev = &umc->dev;
 
 	usb_hcd = usb_create_hcd(&whc_hc_driver, dev, "whci");
 	if (usb_hcd == NULL) {
 		dev_err(dev, "unable to create hcd\n");
-		return -ENOMEM;
+		goto error;
 	}
 
 	usb_hcd->wireless = 1;
@@ -257,14 +259,14 @@ static int whc_probe(struct umc_dev *umc)
 
 	ret = whc_init(whc);
 	if (ret)
-		goto error_whc_init;
+		goto error;
 
 	wusbhc->dev = dev;
 	wusbhc->uwb_rc = uwb_rc_get_by_grandpa(umc->dev.parent);
 	if (!wusbhc->uwb_rc) {
 		ret = -ENODEV;
 		dev_err(dev, "cannot get radio controller\n");
-		goto error_uwb_rc;
+		goto error;
 	}
 
 	if (whc->n_devices > USB_MAXCHILDREN) {
@@ -293,7 +295,6 @@ static int whc_probe(struct umc_dev *umc)
 		dev_err(dev, "cannot add HCD: %d\n", ret);
 		goto error_usb_add_hcd;
 	}
-	device_wakeup_enable(usb_hcd->self.controller);
 
 	ret = wusbhc_b_create(wusbhc);
 	if (ret) {
@@ -311,10 +312,10 @@ error_usb_add_hcd:
 	wusbhc_destroy(wusbhc);
 error_wusbhc_create:
 	uwb_rc_put(wusbhc->uwb_rc);
-error_uwb_rc:
+error:
 	whc_clean_up(whc);
-error_whc_init:
-	usb_put_hcd(usb_hcd);
+	if (usb_hcd)
+		usb_put_hcd(usb_hcd);
 	return ret;
 }
 

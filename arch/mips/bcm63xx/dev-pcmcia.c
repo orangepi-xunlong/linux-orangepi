@@ -79,11 +79,11 @@ static int __init config_pcmcia_cs(unsigned int cs,
 	return ret;
 }
 
-static const struct {
+static const __initdata struct {
 	unsigned int	cs;
 	unsigned int	base;
 	unsigned int	size;
-} pcmcia_cs[3] __initconst = {
+} pcmcia_cs[3] = {
 	{
 		.cs	= MPI_CS_PCMCIA_COMMON,
 		.base	= BCM_PCMCIA_COMMON_BASE_PA,
@@ -139,6 +139,6 @@ int __init bcm63xx_pcmcia_register(void)
 	return platform_device_register(&bcm63xx_pcmcia_device);
 
 out_err:
-	pr_err("unable to set pcmcia chip select\n");
+	printk(KERN_ERR "unable to set pcmcia chip select\n");
 	return ret;
 }

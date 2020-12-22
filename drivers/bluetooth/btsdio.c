@@ -31,7 +31,6 @@
 #include <linux/errno.h>
 #include <linux/skbuff.h>
 
-#include <linux/mmc/host.h>
 #include <linux/mmc/sdio_ids.h>
 #include <linux/mmc/sdio_func.h>
 
@@ -74,7 +73,6 @@ struct btsdio_data {
 #define REG_CL_INTRD 0x13	/* Interrupt Clear */
 #define REG_EN_INTRD 0x14	/* Interrupt Enable */
 #define REG_MD_STAT  0x20	/* Bluetooth Mode Status */
-#define REG_MD_SET   0x20	/* Bluetooth Mode Set */
 
 static int btsdio_tx_packet(struct btsdio_data *data, struct sk_buff *skb)
 {
@@ -87,7 +85,7 @@ static int btsdio_tx_packet(struct btsdio_data *data, struct sk_buff *skb)
 	skb->data[0] = (skb->len & 0x0000ff);
 	skb->data[1] = (skb->len & 0x00ff00) >> 8;
 	skb->data[2] = (skb->len & 0xff0000) >> 16;
-	skb->data[3] = hci_skb_pkt_type(skb);
+	skb->data[3] = bt_cb(skb)->pkt_type;
 
 	err = sdio_writesb(data->func, REG_TDAT, skb->data, skb->len);
 	if (err < 0) {
@@ -159,9 +157,10 @@ static int btsdio_rx_packet(struct btsdio_data *data)
 
 	data->hdev->stat.byte_rx += len;
 
-	hci_skb_pkt_type(skb) = hdr[3];
+	skb->dev = (void *) data->hdev;
+	bt_cb(skb)->pkt_type = hdr[3];
 
-	err = hci_recv_frame(data->hdev, skb);
+	err = hci_recv_frame(skb);
 	if (err < 0)
 		return err;
 
@@ -195,20 +194,26 @@ static int btsdio_open(struct hci_dev *hdev)
 
 	BT_DBG("%s", hdev->name);
 
+	if (test_and_set_bit(HCI_RUNNING, &hdev->flags))
+		return 0;
+
 	sdio_claim_host(data->func);
 
 	err = sdio_enable_func(data->func);
-	if (err < 0)
+	if (err < 0) {
+		clear_bit(HCI_RUNNING, &hdev->flags);
 		goto release;
+	}
 
 	err = sdio_claim_irq(data->func, btsdio_interrupt);
 	if (err < 0) {
 		sdio_disable_func(data->func);
+		clear_bit(HCI_RUNNING, &hdev->flags);
 		goto release;
 	}
 
 	if (data->func->class == SDIO_CLASS_BT_B)
-		sdio_writeb(data->func, 0x00, REG_MD_SET, NULL);
+		sdio_writeb(data->func, 0x00, REG_MD_STAT, NULL);
 
 	sdio_writeb(data->func, 0x01, REG_EN_INTRD, NULL);
 
@@ -223,6 +228,9 @@ static int btsdio_close(struct hci_dev *hdev)
 	struct btsdio_data *data = hci_get_drvdata(hdev);
 
 	BT_DBG("%s", hdev->name);
+
+	if (!test_and_clear_bit(HCI_RUNNING, &hdev->flags))
+		return 0;
 
 	sdio_claim_host(data->func);
 
@@ -247,13 +255,17 @@ static int btsdio_flush(struct hci_dev *hdev)
 	return 0;
 }
 
-static int btsdio_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
+static int btsdio_send_frame(struct sk_buff *skb)
 {
+	struct hci_dev *hdev = (struct hci_dev *) skb->dev;
 	struct btsdio_data *data = hci_get_drvdata(hdev);
 
 	BT_DBG("%s", hdev->name);
 
-	switch (hci_skb_pkt_type(skb)) {
+	if (!test_bit(HCI_RUNNING, &hdev->flags))
+		return -EBUSY;
+
+	switch (bt_cb(skb)->pkt_type) {
 	case HCI_COMMAND_PKT:
 		hdev->stat.cmd_tx++;
 		break;
@@ -292,15 +304,7 @@ static int btsdio_probe(struct sdio_func *func,
 		tuple = tuple->next;
 	}
 
-	/* BCM43341 devices soldered onto the PCB (non-removable) use an
-	 * uart connection for bluetooth, ignore the BT SDIO interface.
-	 */
-	if (func->vendor == SDIO_VENDOR_ID_BROADCOM &&
-	    func->device == SDIO_DEVICE_ID_BROADCOM_43341 &&
-	    !mmc_card_is_removable(func->card->host))
-		return -ENODEV;
-
-	data = devm_kzalloc(&func->dev, sizeof(*data), GFP_KERNEL);
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
@@ -311,8 +315,10 @@ static int btsdio_probe(struct sdio_func *func,
 	skb_queue_head_init(&data->txq);
 
 	hdev = hci_alloc_dev();
-	if (!hdev)
+	if (!hdev) {
+		kfree(data);
 		return -ENOMEM;
+	}
 
 	hdev->bus = HCI_SDIO;
 	hci_set_drvdata(hdev, data);
@@ -320,7 +326,7 @@ static int btsdio_probe(struct sdio_func *func,
 	if (id->class == SDIO_CLASS_BT_AMP)
 		hdev->dev_type = HCI_AMP;
 	else
-		hdev->dev_type = HCI_PRIMARY;
+		hdev->dev_type = HCI_BREDR;
 
 	data->hdev = hdev;
 
@@ -331,12 +337,10 @@ static int btsdio_probe(struct sdio_func *func,
 	hdev->flush    = btsdio_flush;
 	hdev->send     = btsdio_send_frame;
 
-	if (func->vendor == 0x0104 && func->device == 0x00c5)
-		set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
-
 	err = hci_register_dev(hdev);
 	if (err < 0) {
 		hci_free_dev(hdev);
+		kfree(data);
 		return err;
 	}
 
@@ -362,6 +366,7 @@ static void btsdio_remove(struct sdio_func *func)
 	hci_unregister_dev(hdev);
 
 	hci_free_dev(hdev);
+	kfree(data);
 }
 
 static struct sdio_driver btsdio_driver = {

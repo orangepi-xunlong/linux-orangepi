@@ -37,6 +37,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -311,7 +312,8 @@ static struct ata_port_operations vsc_sata_ops = {
 	.scr_write		= vsc_sata_scr_write,
 };
 
-static void vsc_sata_setup_port(struct ata_ioports *port, void __iomem *base)
+static void __devinit vsc_sata_setup_port(struct ata_ioports *port,
+					  void __iomem *base)
 {
 	port->cmd_addr		= base + VSC_SATA_TF_CMD_OFFSET;
 	port->data_addr		= base + VSC_SATA_TF_DATA_OFFSET;
@@ -333,8 +335,8 @@ static void vsc_sata_setup_port(struct ata_ioports *port, void __iomem *base)
 }
 
 
-static int vsc_sata_init_one(struct pci_dev *pdev,
-			     const struct pci_device_id *ent)
+static int __devinit vsc_sata_init_one(struct pci_dev *pdev,
+				       const struct pci_device_id *ent)
 {
 	static const struct ata_port_info pi = {
 		.flags		= ATA_FLAG_SATA,
@@ -387,10 +389,10 @@ static int vsc_sata_init_one(struct pci_dev *pdev,
 	/*
 	 * Use 32 bit DMA mask, because 64 bit address support is poor.
 	 */
-	rc = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+	rc = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
 	if (rc)
 		return rc;
-	rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+	rc = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
 	if (rc)
 		return rc;
 
@@ -434,10 +436,21 @@ static struct pci_driver vsc_sata_pci_driver = {
 	.remove			= ata_pci_remove_one,
 };
 
-module_pci_driver(vsc_sata_pci_driver);
+static int __init vsc_sata_init(void)
+{
+	return pci_register_driver(&vsc_sata_pci_driver);
+}
+
+static void __exit vsc_sata_exit(void)
+{
+	pci_unregister_driver(&vsc_sata_pci_driver);
+}
 
 MODULE_AUTHOR("Jeremy Higdon");
 MODULE_DESCRIPTION("low-level driver for Vitesse VSC7174 SATA controller");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, vsc_sata_pci_tbl);
 MODULE_VERSION(DRV_VERSION);
+
+module_init(vsc_sata_init);
+module_exit(vsc_sata_exit);

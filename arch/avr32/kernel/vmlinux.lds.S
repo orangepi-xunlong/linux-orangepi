@@ -23,7 +23,7 @@ SECTIONS
 {
 	. = CONFIG_ENTRY_ADDRESS;
 	.init		: AT(ADDR(.init) - LOAD_OFFSET) {
-		_text = .;
+		_stext = .;
 		__init_begin = .;
 			_sinittext = .;
 			*(.text.reset)
@@ -46,13 +46,12 @@ SECTIONS
 
 	.text		: AT(ADDR(.text) - LOAD_OFFSET) {
 		_evba = .;
-		_stext = .;
+		_text = .;
 		*(.ex.text)
 		*(.irq.text)
 		KPROBES_TEXT
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		*(.fixup)
 		*(.gnu.warning)

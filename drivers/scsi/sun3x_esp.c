@@ -12,9 +12,9 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
-#include <linux/io.h>
 
 #include <asm/sun3x.h>
+#include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/dvma.h>
 
@@ -194,7 +194,7 @@ static const struct esp_driver_ops sun3x_esp_ops = {
 	.dma_error	=	sun3x_esp_dma_error,
 };
 
-static int esp_sun3x_probe(struct platform_device *dev)
+static int __devinit esp_sun3x_probe(struct platform_device *dev)
 {
 	struct scsi_host_template *tpnt = &scsi_esp_template;
 	struct Scsi_Host *host;
@@ -268,7 +268,7 @@ fail:
 	return err;
 }
 
-static int esp_sun3x_remove(struct platform_device *dev)
+static int __devexit esp_sun3x_remove(struct platform_device *dev)
 {
 	struct esp *esp = dev_get_drvdata(&dev->dev);
 	unsigned int irq = esp->host->irq;
@@ -292,9 +292,10 @@ static int esp_sun3x_remove(struct platform_device *dev)
 
 static struct platform_driver esp_sun3x_driver = {
 	.probe          = esp_sun3x_probe,
-	.remove         = esp_sun3x_remove,
+	.remove         = __devexit_p(esp_sun3x_remove),
 	.driver = {
 		.name   = "sun3x_esp",
+		.owner	= THIS_MODULE,
 	},
 };
 

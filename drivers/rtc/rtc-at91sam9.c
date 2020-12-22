@@ -11,20 +11,19 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <linux/clk.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/platform_device.h>
+#include <linux/time.h>
+#include <linux/rtc.h>
 #include <linux/interrupt.h>
 #include <linux/ioctl.h>
-#include <linux/io.h>
-#include <linux/kernel.h>
-#include <linux/mfd/syscon.h>
-#include <linux/module.h>
-#include <linux/of.h>
-#include <linux/platform_device.h>
-#include <linux/regmap.h>
-#include <linux/rtc.h>
 #include <linux/slab.h>
-#include <linux/suspend.h>
-#include <linux/time.h>
+
+#include <mach/board.h>
+#include <mach/at91_rtt.h>
+#include <mach/cpu.h>
+
 
 /*
  * This driver uses two configurable hardware resources that live in the
@@ -47,22 +46,6 @@
  * registers available, likewise usable for more than "RTC" support.
  */
 
-#define AT91_RTT_MR		0x00			/* Real-time Mode Register */
-#define AT91_RTT_RTPRES		(0xffff << 0)		/* Real-time Timer Prescaler Value */
-#define AT91_RTT_ALMIEN		(1 << 16)		/* Alarm Interrupt Enable */
-#define AT91_RTT_RTTINCIEN	(1 << 17)		/* Real Time Timer Increment Interrupt Enable */
-#define AT91_RTT_RTTRST		(1 << 18)		/* Real Time Timer Restart */
-
-#define AT91_RTT_AR		0x04			/* Real-time Alarm Register */
-#define AT91_RTT_ALMV		(0xffffffff)		/* Alarm Value */
-
-#define AT91_RTT_VR		0x08			/* Real-time Value Register */
-#define AT91_RTT_CRTV		(0xffffffff)		/* Current Real-time Value */
-
-#define AT91_RTT_SR		0x0c			/* Real-time Status Register */
-#define AT91_RTT_ALMS		(1 << 0)		/* Real-time Alarm Status */
-#define AT91_RTT_RTTINC		(1 << 1)		/* Real-time Timer Increment */
-
 /*
  * We store ALARM_DISABLED in ALMV to record that no alarm is set.
  * It's also the reset value for that field.
@@ -74,33 +57,18 @@ struct sam9_rtc {
 	void __iomem		*rtt;
 	struct rtc_device	*rtcdev;
 	u32			imr;
-	struct regmap		*gpbr;
-	unsigned int		gpbr_offset;
-	int 			irq;
-	struct clk		*sclk;
-	bool			suspended;
-	unsigned long		events;
-	spinlock_t		lock;
+	void __iomem		*gpbr;
 };
 
 #define rtt_readl(rtc, field) \
-	readl((rtc)->rtt + AT91_RTT_ ## field)
+	__raw_readl((rtc)->rtt + AT91_RTT_ ## field)
 #define rtt_writel(rtc, field, val) \
-	writel((val), (rtc)->rtt + AT91_RTT_ ## field)
+	__raw_writel((val), (rtc)->rtt + AT91_RTT_ ## field)
 
-static inline unsigned int gpbr_readl(struct sam9_rtc *rtc)
-{
-	unsigned int val;
-
-	regmap_read(rtc->gpbr, rtc->gpbr_offset, &val);
-
-	return val;
-}
-
-static inline void gpbr_writel(struct sam9_rtc *rtc, unsigned int val)
-{
-	regmap_write(rtc->gpbr, rtc->gpbr_offset, val);
-}
+#define gpbr_readl(rtc) \
+	__raw_readl((rtc)->gpbr)
+#define gpbr_writel(rtc, val) \
+	__raw_writel((val), (rtc)->gpbr)
 
 /*
  * Read current time and date in RTC
@@ -268,16 +236,21 @@ static int at91_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
 static int at91_rtc_proc(struct device *dev, struct seq_file *seq)
 {
 	struct sam9_rtc *rtc = dev_get_drvdata(dev);
-	u32 mr = rtt_readl(rtc, MR);
+	u32 mr = mr = rtt_readl(rtc, MR);
 
 	seq_printf(seq, "update_IRQ\t: %s\n",
 			(mr & AT91_RTT_RTTINCIEN) ? "yes" : "no");
 	return 0;
 }
 
-static irqreturn_t at91_rtc_cache_events(struct sam9_rtc *rtc)
+/*
+ * IRQ handler for the RTC
+ */
+static irqreturn_t at91_rtc_interrupt(int irq, void *_rtc)
 {
+	struct sam9_rtc *rtc = _rtc;
 	u32 sr, mr;
+	unsigned long events = 0;
 
 	/* Shared interrupt may be for another device.  Note: reading
 	 * SR clears it, so we must only read it in this irq handler!
@@ -289,54 +262,18 @@ static irqreturn_t at91_rtc_cache_events(struct sam9_rtc *rtc)
 
 	/* alarm status */
 	if (sr & AT91_RTT_ALMS)
-		rtc->events |= (RTC_AF | RTC_IRQF);
+		events |= (RTC_AF | RTC_IRQF);
 
 	/* timer update/increment */
 	if (sr & AT91_RTT_RTTINC)
-		rtc->events |= (RTC_UF | RTC_IRQF);
+		events |= (RTC_UF | RTC_IRQF);
 
-	return IRQ_HANDLED;
-}
-
-static void at91_rtc_flush_events(struct sam9_rtc *rtc)
-{
-	if (!rtc->events)
-		return;
-
-	rtc_update_irq(rtc->rtcdev, 1, rtc->events);
-	rtc->events = 0;
+	rtc_update_irq(rtc->rtcdev, 1, events);
 
 	pr_debug("%s: num=%ld, events=0x%02lx\n", __func__,
-		rtc->events >> 8, rtc->events & 0x000000FF);
-}
+		events >> 8, events & 0x000000FF);
 
-/*
- * IRQ handler for the RTC
- */
-static irqreturn_t at91_rtc_interrupt(int irq, void *_rtc)
-{
-	struct sam9_rtc *rtc = _rtc;
-	int ret;
-
-	spin_lock(&rtc->lock);
-
-	ret = at91_rtc_cache_events(rtc);
-
-	/* We're called in suspended state */
-	if (rtc->suspended) {
-		/* Mask irqs coming from this peripheral */
-		rtt_writel(rtc, MR,
-			   rtt_readl(rtc, MR) &
-			   ~(AT91_RTT_ALMIEN | AT91_RTT_RTTINCIEN));
-		/* Trigger a system wakeup */
-		pm_system_wakeup();
-	} else {
-		at91_rtc_flush_events(rtc);
-	}
-
-	spin_unlock(&rtc->lock);
-
-	return ret;
+	return IRQ_HANDLED;
 }
 
 static const struct rtc_class_ops at91_rtc_ops = {
@@ -348,102 +285,51 @@ static const struct rtc_class_ops at91_rtc_ops = {
 	.alarm_irq_enable = at91_rtc_alarm_irq_enable,
 };
 
-static const struct regmap_config gpbr_regmap_config = {
-	.reg_bits = 32,
-	.val_bits = 32,
-	.reg_stride = 4,
-};
-
 /*
  * Initialize and install RTC driver
  */
-static int at91_rtc_probe(struct platform_device *pdev)
+static int __devinit at91_rtc_probe(struct platform_device *pdev)
 {
-	struct resource	*r;
+	struct resource	*r, *r_gpbr;
 	struct sam9_rtc	*rtc;
-	int		ret, irq;
+	int		ret;
 	u32		mr;
-	unsigned int	sclk_rate;
 
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "failed to get interrupt resource\n");
-		return irq;
+	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	r_gpbr = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!r || !r_gpbr) {
+		dev_err(&pdev->dev, "need 2 ressources\n");
+		return -ENODEV;
 	}
 
-	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
+	rtc = kzalloc(sizeof *rtc, GFP_KERNEL);
 	if (!rtc)
 		return -ENOMEM;
-
-	spin_lock_init(&rtc->lock);
-	rtc->irq = irq;
 
 	/* platform setup code should have handled this; sigh */
 	if (!device_can_wakeup(&pdev->dev))
 		device_init_wakeup(&pdev->dev, 1);
 
 	platform_set_drvdata(pdev, rtc);
-
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rtc->rtt = devm_ioremap_resource(&pdev->dev, r);
-	if (IS_ERR(rtc->rtt))
-		return PTR_ERR(rtc->rtt);
-
-	if (!pdev->dev.of_node) {
-		/*
-		 * TODO: Remove this code chunk when removing non DT board
-		 * support. Remember to remove the gpbr_regmap_config
-		 * variable too.
-		 */
-		void __iomem *gpbr;
-
-		r = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-		gpbr = devm_ioremap_resource(&pdev->dev, r);
-		if (IS_ERR(gpbr))
-			return PTR_ERR(gpbr);
-
-		rtc->gpbr = regmap_init_mmio(NULL, gpbr,
-					     &gpbr_regmap_config);
-	} else {
-		struct of_phandle_args args;
-
-		ret = of_parse_phandle_with_fixed_args(pdev->dev.of_node,
-						"atmel,rtt-rtc-time-reg", 1, 0,
-						&args);
-		if (ret)
-			return ret;
-
-		rtc->gpbr = syscon_node_to_regmap(args.np);
-		rtc->gpbr_offset = args.args[0];
+	rtc->rtt = ioremap(r->start, resource_size(r));
+	if (!rtc->rtt) {
+		dev_err(&pdev->dev, "failed to map registers, aborting.\n");
+		ret = -ENOMEM;
+		goto fail;
 	}
 
-	if (IS_ERR(rtc->gpbr)) {
-		dev_err(&pdev->dev, "failed to retrieve gpbr regmap, aborting.\n");
-		return -ENOMEM;
-	}
-
-	rtc->sclk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(rtc->sclk))
-		return PTR_ERR(rtc->sclk);
-
-	ret = clk_prepare_enable(rtc->sclk);
-	if (ret) {
-		dev_err(&pdev->dev, "Could not enable slow clock\n");
-		return ret;
-	}
-
-	sclk_rate = clk_get_rate(rtc->sclk);
-	if (!sclk_rate || sclk_rate > AT91_RTT_RTPRES) {
-		dev_err(&pdev->dev, "Invalid slow clock rate\n");
-		ret = -EINVAL;
-		goto err_clk;
+	rtc->gpbr = ioremap(r_gpbr->start, resource_size(r_gpbr));
+	if (!rtc->gpbr) {
+		dev_err(&pdev->dev, "failed to map gpbr registers, aborting.\n");
+		ret = -ENOMEM;
+		goto fail_gpbr;
 	}
 
 	mr = rtt_readl(rtc, MR);
 
 	/* unless RTT is counting at 1 Hz, re-initialize it */
-	if ((mr & AT91_RTT_RTPRES) != sclk_rate) {
-		mr = AT91_RTT_RTTRST | (sclk_rate & AT91_RTT_RTPRES);
+	if ((mr & AT91_RTT_RTPRES) != AT91_SLOW_CLOCK) {
+		mr = AT91_RTT_RTTRST | (AT91_SLOW_CLOCK & AT91_RTT_RTPRES);
 		gpbr_writel(rtc, 0);
 	}
 
@@ -451,20 +337,21 @@ static int at91_rtc_probe(struct platform_device *pdev)
 	mr &= ~(AT91_RTT_ALMIEN | AT91_RTT_RTTINCIEN);
 	rtt_writel(rtc, MR, mr);
 
-	rtc->rtcdev = devm_rtc_device_register(&pdev->dev, pdev->name,
-					&at91_rtc_ops, THIS_MODULE);
+	rtc->rtcdev = rtc_device_register(pdev->name, &pdev->dev,
+				&at91_rtc_ops, THIS_MODULE);
 	if (IS_ERR(rtc->rtcdev)) {
 		ret = PTR_ERR(rtc->rtcdev);
-		goto err_clk;
+		goto fail_register;
 	}
 
 	/* register irq handler after we know what name we'll use */
-	ret = devm_request_irq(&pdev->dev, rtc->irq, at91_rtc_interrupt,
-			       IRQF_SHARED | IRQF_COND_SUSPEND,
-			       dev_name(&rtc->rtcdev->dev), rtc);
+	ret = request_irq(AT91_ID_SYS, at91_rtc_interrupt,
+				IRQF_SHARED,
+				dev_name(&rtc->rtcdev->dev), rtc);
 	if (ret) {
-		dev_dbg(&pdev->dev, "can't share IRQ %d?\n", rtc->irq);
-		goto err_clk;
+		dev_dbg(&pdev->dev, "can't share IRQ %d?\n", AT91_ID_SYS);
+		rtc_device_unregister(rtc->rtcdev);
+		goto fail_register;
 	}
 
 	/* NOTE:  sam9260 rev A silicon has a ROM bug which resets the
@@ -479,25 +366,34 @@ static int at91_rtc_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_clk:
-	clk_disable_unprepare(rtc->sclk);
-
+fail_register:
+	iounmap(rtc->gpbr);
+fail_gpbr:
+	iounmap(rtc->rtt);
+fail:
+	platform_set_drvdata(pdev, NULL);
+	kfree(rtc);
 	return ret;
 }
 
 /*
  * Disable and remove the RTC driver
  */
-static int at91_rtc_remove(struct platform_device *pdev)
+static int __devexit at91_rtc_remove(struct platform_device *pdev)
 {
 	struct sam9_rtc	*rtc = platform_get_drvdata(pdev);
 	u32		mr = rtt_readl(rtc, MR);
 
 	/* disable all interrupts */
 	rtt_writel(rtc, MR, mr & ~(AT91_RTT_ALMIEN | AT91_RTT_RTTINCIEN));
+	free_irq(AT91_ID_SYS, rtc);
 
-	clk_disable_unprepare(rtc->sclk);
+	rtc_device_unregister(rtc->rtcdev);
 
+	iounmap(rtc->gpbr);
+	iounmap(rtc->rtt);
+	platform_set_drvdata(pdev, NULL);
+	kfree(rtc);
 	return 0;
 }
 
@@ -510,13 +406,14 @@ static void at91_rtc_shutdown(struct platform_device *pdev)
 	rtt_writel(rtc, MR, mr & ~rtc->imr);
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 
 /* AT91SAM9 RTC Power management control */
 
-static int at91_rtc_suspend(struct device *dev)
+static int at91_rtc_suspend(struct platform_device *pdev,
+					pm_message_t state)
 {
-	struct sam9_rtc	*rtc = dev_get_drvdata(dev);
+	struct sam9_rtc	*rtc = platform_get_drvdata(pdev);
 	u32		mr = rtt_readl(rtc, MR);
 
 	/*
@@ -525,13 +422,8 @@ static int at91_rtc_suspend(struct device *dev)
 	 */
 	rtc->imr = mr & (AT91_RTT_ALMIEN | AT91_RTT_RTTINCIEN);
 	if (rtc->imr) {
-		if (device_may_wakeup(dev) && (mr & AT91_RTT_ALMIEN)) {
-			unsigned long flags;
-
-			enable_irq_wake(rtc->irq);
-			spin_lock_irqsave(&rtc->lock, flags);
-			rtc->suspended = true;
-			spin_unlock_irqrestore(&rtc->lock, flags);
+		if (device_may_wakeup(&pdev->dev) && (mr & AT91_RTT_ALMIEN)) {
+			enable_irq_wake(AT91_ID_SYS);
 			/* don't let RTTINC cause wakeups */
 			if (mr & AT91_RTT_RTTINCIEN)
 				rtt_writel(rtc, MR, mr & ~AT91_RTT_RTTINCIEN);
@@ -542,52 +434,49 @@ static int at91_rtc_suspend(struct device *dev)
 	return 0;
 }
 
-static int at91_rtc_resume(struct device *dev)
+static int at91_rtc_resume(struct platform_device *pdev)
 {
-	struct sam9_rtc	*rtc = dev_get_drvdata(dev);
+	struct sam9_rtc	*rtc = platform_get_drvdata(pdev);
 	u32		mr;
 
 	if (rtc->imr) {
-		unsigned long flags;
-
-		if (device_may_wakeup(dev))
-			disable_irq_wake(rtc->irq);
+		if (device_may_wakeup(&pdev->dev))
+			disable_irq_wake(AT91_ID_SYS);
 		mr = rtt_readl(rtc, MR);
 		rtt_writel(rtc, MR, mr | rtc->imr);
-
-		spin_lock_irqsave(&rtc->lock, flags);
-		rtc->suspended = false;
-		at91_rtc_cache_events(rtc);
-		at91_rtc_flush_events(rtc);
-		spin_unlock_irqrestore(&rtc->lock, flags);
 	}
 
 	return 0;
 }
-#endif
-
-static SIMPLE_DEV_PM_OPS(at91_rtc_pm_ops, at91_rtc_suspend, at91_rtc_resume);
-
-#ifdef CONFIG_OF
-static const struct of_device_id at91_rtc_dt_ids[] = {
-	{ .compatible = "atmel,at91sam9260-rtt" },
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, at91_rtc_dt_ids);
+#else
+#define at91_rtc_suspend	NULL
+#define at91_rtc_resume		NULL
 #endif
 
 static struct platform_driver at91_rtc_driver = {
 	.probe		= at91_rtc_probe,
-	.remove		= at91_rtc_remove,
+	.remove		= __devexit_p(at91_rtc_remove),
 	.shutdown	= at91_rtc_shutdown,
+	.suspend	= at91_rtc_suspend,
+	.resume		= at91_rtc_resume,
 	.driver		= {
 		.name	= "rtc-at91sam9",
-		.pm	= &at91_rtc_pm_ops,
-		.of_match_table = of_match_ptr(at91_rtc_dt_ids),
+		.owner	= THIS_MODULE,
 	},
 };
 
-module_platform_driver(at91_rtc_driver);
+static int __init at91_rtc_init(void)
+{
+	return platform_driver_register(&at91_rtc_driver);
+}
+module_init(at91_rtc_init);
+
+static void __exit at91_rtc_exit(void)
+{
+	platform_driver_unregister(&at91_rtc_driver);
+}
+module_exit(at91_rtc_exit);
+
 
 MODULE_AUTHOR("Michel Benoit");
 MODULE_DESCRIPTION("RTC driver for Atmel AT91SAM9x");

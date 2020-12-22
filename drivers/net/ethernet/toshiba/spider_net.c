@@ -48,6 +48,7 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/bitops.h>
+#include <asm/pci-bridge.h>
 #include <net/checksum.h>
 
 #include "spider_net.h"
@@ -72,7 +73,7 @@ MODULE_PARM_DESC(tx_descriptors, "number of descriptors used " \
 
 char spider_net_driver_name[] = "spidernet";
 
-static const struct pci_device_id spider_net_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(spider_net_pci_tbl) = {
 	{ PCI_VENDOR_ID_TOSHIBA_2, PCI_DEVICE_ID_TOSHIBA_SPIDER_NET,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0UL },
 	{ 0, }
@@ -113,8 +114,7 @@ spider_net_write_reg(struct spider_net_card *card, u32 reg, u32 value)
 	out_be32(card->regs + reg, value);
 }
 
-/**
- * spider_net_write_phy - write to phy register
+/** spider_net_write_phy - write to phy register
  * @netdev: adapter to be written to
  * @mii_id: id of MII
  * @reg: PHY register
@@ -137,8 +137,7 @@ spider_net_write_phy(struct net_device *netdev, int mii_id,
 	spider_net_write_reg(card, SPIDER_NET_GPCWOPCMD, writevalue);
 }
 
-/**
- * spider_net_read_phy - read from phy register
+/** spider_net_read_phy - read from phy register
  * @netdev: network device to be read from
  * @mii_id: id of MII
  * @reg: PHY register
@@ -266,6 +265,34 @@ spider_net_set_promisc(struct spider_net_card *card)
 }
 
 /**
+ * spider_net_get_mac_address - read mac address from spider card
+ * @card: device structure
+ *
+ * reads MAC address from GMACUNIMACU and GMACUNIMACL registers
+ */
+static int
+spider_net_get_mac_address(struct net_device *netdev)
+{
+	struct spider_net_card *card = netdev_priv(netdev);
+	u32 macl, macu;
+
+	macl = spider_net_read_reg(card, SPIDER_NET_GMACUNIMACL);
+	macu = spider_net_read_reg(card, SPIDER_NET_GMACUNIMACU);
+
+	netdev->dev_addr[0] = (macu >> 24) & 0xff;
+	netdev->dev_addr[1] = (macu >> 16) & 0xff;
+	netdev->dev_addr[2] = (macu >> 8) & 0xff;
+	netdev->dev_addr[3] = macu & 0xff;
+	netdev->dev_addr[4] = (macl >> 8) & 0xff;
+	netdev->dev_addr[5] = macl & 0xff;
+
+	if (!is_valid_ether_addr(&netdev->dev_addr[0]))
+		return -EINVAL;
+
+	return 0;
+}
+
+/**
  * spider_net_get_descr_status -- returns the status of a descriptor
  * @descr: descriptor to look at
  *
@@ -323,7 +350,8 @@ spider_net_init_chain(struct spider_net_card *card,
 	alloc_size = chain->num_desc * sizeof(struct spider_net_hw_descr);
 
 	chain->hwring = dma_alloc_coherent(&card->pdev->dev, alloc_size,
-					   &chain->dma_addr, GFP_KERNEL);
+		&chain->dma_addr, GFP_KERNEL);
+
 	if (!chain->hwring)
 		return -ENOMEM;
 
@@ -603,7 +631,8 @@ spider_net_set_multi(struct net_device *netdev)
 	int i;
 	u32 reg;
 	struct spider_net_card *card = netdev_priv(netdev);
-	DECLARE_BITMAP(bitmask, SPIDER_NET_MULTICAST_HASHES) = {};
+	unsigned long bitmask[SPIDER_NET_MULTICAST_HASHES / BITS_PER_LONG] =
+		{0, };
 
 	spider_net_set_promisc(card);
 
@@ -705,7 +734,7 @@ spider_net_prepare_tx_descr(struct spider_net_card *card,
 	wmb();
 	descr->prev->hwdescr->next_descr_addr = descr->bus_addr;
 
-	netif_trans_update(card->netdev); /* set netdev watchdog timer */
+	card->netdev->trans_start = jiffies; /* set netdev watchdog timer */
 	return 0;
 }
 
@@ -830,7 +859,7 @@ spider_net_release_tx_chain(struct spider_net_card *card, int brutal)
 		if (skb) {
 			pci_unmap_single(card->pdev, buf_addr, skb->len,
 					PCI_DMA_TODEVICE);
-			dev_consume_skb_any(skb);
+			dev_kfree_skb(skb);
 		}
 	}
 	return 0;
@@ -1315,17 +1344,15 @@ spider_net_set_mac(struct net_device *netdev, void *p)
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	memcpy(netdev->dev_addr, addr->sa_data, ETH_ALEN);
-
 	/* switch off GMACTPE and GMACRPE */
 	regvalue = spider_net_read_reg(card, SPIDER_NET_GMACOPEMD);
 	regvalue &= ~((1 << 5) | (1 << 6));
 	spider_net_write_reg(card, SPIDER_NET_GMACOPEMD, regvalue);
 
 	/* write mac */
-	macu = (netdev->dev_addr[0]<<24) + (netdev->dev_addr[1]<<16) +
-		(netdev->dev_addr[2]<<8) + (netdev->dev_addr[3]);
-	macl = (netdev->dev_addr[4]<<8) + (netdev->dev_addr[5]);
+	macu = (addr->sa_data[0]<<24) + (addr->sa_data[1]<<16) +
+		(addr->sa_data[2]<<8) + (addr->sa_data[3]);
+	macl = (addr->sa_data[4]<<8) + (addr->sa_data[5]);
 	spider_net_write_reg(card, SPIDER_NET_GMACUNIMACU, macu);
 	spider_net_write_reg(card, SPIDER_NET_GMACUNIMACL, macl);
 
@@ -1335,6 +1362,12 @@ spider_net_set_mac(struct net_device *netdev, void *p)
 	spider_net_write_reg(card, SPIDER_NET_GMACOPEMD, regvalue);
 
 	spider_net_set_promisc(card);
+
+	/* look up, whether we have been successful */
+	if (spider_net_get_mac_address(netdev))
+		return -EADDRNOTAVAIL;
+	if (memcmp(netdev->dev_addr,addr->sa_data,netdev->addr_len))
+		return -EADDRNOTAVAIL;
 
 	return 0;
 }
@@ -1956,8 +1989,7 @@ spider_net_open(struct net_device *netdev)
 		goto alloc_rx_failed;
 
 	/* Allocate rx skbs */
-	result = spider_net_alloc_rx_skbs(card);
-	if (result)
+	if (spider_net_alloc_rx_skbs(card))
 		goto alloc_skbs_failed;
 
 	spider_net_set_multi(netdev);
@@ -2296,8 +2328,8 @@ spider_net_setup_netdev(struct spider_net_card *card)
 	if (SPIDER_NET_RX_CSUM_DEFAULT)
 		netdev->features |= NETIF_F_RXCSUM;
 	netdev->features |= NETIF_F_IP_CSUM | NETIF_F_LLTX;
-	/* some time: NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX |
-	 *		NETIF_F_HW_VLAN_CTAG_FILTER */
+	/* some time: NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX |
+	 *		NETIF_F_HW_VLAN_FILTER */
 
 	netdev->irq = card->pdev->irq;
 	card->num_rx_ints = 0;
@@ -2444,6 +2476,7 @@ out_release_regions:
 	pci_release_regions(pdev);
 out_disable_dev:
 	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
 	return NULL;
 }
 
@@ -2457,7 +2490,7 @@ out_disable_dev:
  * spider_net_probe initializes pdev and registers a net_device
  * structure for it. After that, the device can be ifconfig'ed up
  **/
-static int
+static int __devinit
 spider_net_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	int err = -EIO;
@@ -2496,7 +2529,7 @@ out:
  * spider_net_remove is called to remove the device and unregisters the
  * net_device
  **/
-static void
+static void __devexit
 spider_net_remove(struct pci_dev *pdev)
 {
 	struct net_device *netdev;
@@ -2524,7 +2557,7 @@ static struct pci_driver spider_net_driver = {
 	.name		= spider_net_driver_name,
 	.id_table	= spider_net_pci_tbl,
 	.probe		= spider_net_probe,
-	.remove		= spider_net_remove
+	.remove		= __devexit_p(spider_net_remove)
 };
 
 /**

@@ -31,7 +31,7 @@
 *******************************************************************************/
 
 #include <linux/compiler.h>
-/* #include <linux/config.h> */
+//#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/if_arp.h>
 #include <linux/in6.h>
@@ -48,7 +48,7 @@
 #include <linux/types.h>
 #include <linux/wireless.h>
 #include <linux/etherdevice.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <net/arp.h>
 
 #include "ieee80211.h"
@@ -99,7 +99,7 @@ struct net_device *alloc_ieee80211(int sizeof_priv)
 {
 	struct ieee80211_device *ieee;
 	struct net_device *dev;
-	int i, err;
+	int i,err;
 
 	IEEE80211_DEBUG_INFO("Initializing...\n");
 
@@ -133,14 +133,15 @@ struct net_device *alloc_ieee80211(int sizeof_priv)
 	ieee->ieee802_1x = 1; /* Default to supporting 802.1x */
 
 	INIT_LIST_HEAD(&ieee->crypt_deinit_list);
-	setup_timer(&ieee->crypt_deinit_timer,
-		    ieee80211_crypt_deinit_handler, (unsigned long)ieee);
+	init_timer(&ieee->crypt_deinit_timer);
+	ieee->crypt_deinit_timer.data = (unsigned long)ieee;
+	ieee->crypt_deinit_timer.function = ieee80211_crypt_deinit_handler;
 
 	spin_lock_init(&ieee->lock);
 	spin_lock_init(&ieee->wpax_suitlist_lock);
 	spin_lock_init(&ieee->bw_spinlock);
 	spin_lock_init(&ieee->reorder_spinlock);
-	/* added by WB */
+	//added by WB
 	atomic_set(&(ieee->atm_chnlop), 0);
 	atomic_set(&(ieee->atm_swbw), 0);
 
@@ -152,7 +153,7 @@ struct net_device *alloc_ieee80211(int sizeof_priv)
 	ieee->ieee802_1x = 1;
 	ieee->raw_tx = 0;
 	//ieee->hwsec_support = 1; //defalt support hw security. //use module_param instead.
-	ieee->hwsec_active = 0; /* disable hwsec, switch it on when necessary. */
+	ieee->hwsec_active = 0; //disable hwsec, switch it on when necessary.
 
 	ieee80211_softmac_init(ieee);
 
@@ -160,10 +161,10 @@ struct net_device *alloc_ieee80211(int sizeof_priv)
 	if (ieee->pHTInfo == NULL)
 	{
 		IEEE80211_DEBUG(IEEE80211_DL_ERR, "can't alloc memory for HTInfo\n");
-		goto failed;
+		return NULL;
 	}
 	HTUpdateDefaultSetting(ieee);
-	HTInitializeHTInfo(ieee); /* may move to other place. */
+	HTInitializeHTInfo(ieee); //may move to other place.
 	TSInitialize(ieee);
 
 	for (i = 0; i < IEEE_IBSS_MAC_HASH_SIZE; i++)
@@ -175,8 +176,9 @@ struct net_device *alloc_ieee80211(int sizeof_priv)
 	  ieee->last_packet_time[i] = 0;
 	}
 
-/* These function were added to load crypte module autoly */
+//These function were added to load crypte module autoly
 	ieee80211_tkip_null();
+	ieee80211_wep_null();
 	ieee80211_ccmp_null();
 
 	return dev;
@@ -193,7 +195,7 @@ void free_ieee80211(struct net_device *dev)
 {
 	struct ieee80211_device *ieee = netdev_priv(dev);
 	int i;
-	/* struct list_head *p, *q; */
+	//struct list_head *p, *q;
 //	del_timer_sync(&ieee->SwBwTimer);
 	kfree(ieee->pHTInfo);
 	ieee->pHTInfo = NULL;
@@ -218,7 +220,7 @@ void free_ieee80211(struct net_device *dev)
 
 #ifdef CONFIG_IEEE80211_DEBUG
 
-u32 ieee80211_debug_level;
+u32 ieee80211_debug_level = 0;
 static int debug = \
 	//		    IEEE80211_DL_INFO	|
 	//		    IEEE80211_DL_WX	|
@@ -231,46 +233,48 @@ static int debug = \
 	//		    IEEE80211_DL_TX	|
 	//		    IEEE80211_DL_RX	|
 			    //IEEE80211_DL_QOS    |
-	//		    IEEE80211_DL_HT	|
+	//		    IEEE80211_DL_HT 	|
 	//		    IEEE80211_DL_TS	|
-//			    IEEE80211_DL_BA	|
+//			    IEEE80211_DL_BA 	|
 	//		    IEEE80211_DL_REORDER|
 //			    IEEE80211_DL_TRACE  |
 			    //IEEE80211_DL_DATA	|
-			    IEEE80211_DL_ERR	  /* awayls open this flags to show error out */
+			    IEEE80211_DL_ERR	  //awayls open this flags to show error out
 			    ;
-static struct proc_dir_entry *ieee80211_proc;
+struct proc_dir_entry *ieee80211_proc = NULL;
 
-static int show_debug_level(struct seq_file *m, void *v)
+static int show_debug_level(char *page, char **start, off_t offset,
+			    int count, int *eof, void *data)
 {
-	seq_printf(m, "0x%08X\n", ieee80211_debug_level);
-
-	return 0;
+	return snprintf(page, count, "0x%08X\n", ieee80211_debug_level);
 }
 
-static ssize_t write_debug_level(struct file *file, const char __user *buffer,
-			     size_t count, loff_t *ppos)
+static int store_debug_level(struct file *file, const char *buffer,
+			     unsigned long count, void *data)
 {
+	char buf[] = "0x00000000";
+	unsigned long len = min_t(unsigned long, sizeof(buf) - 1, count);
+	char *p = (char *)buf;
 	unsigned long val;
-	int err = kstrtoul_from_user(buffer, count, 0, &val);
-	if (err)
-		return err;
-	ieee80211_debug_level = val;
-	return count;
-}
 
-static int open_debug_level(struct inode *inode, struct file *file)
-{
-	return single_open(file, show_debug_level, NULL);
-}
+	if (copy_from_user(buf, buffer, len))
+		return count;
+	buf[len] = 0;
+	if (p[1] == 'x' || p[1] == 'X' || p[0] == 'x' || p[0] == 'X') {
+		p++;
+		if (p[0] == 'x' || p[0] == 'X')
+			p++;
+		val = simple_strtoul(p, &p, 16);
+	} else
+		val = simple_strtoul(p, &p, 10);
+	if (p == buf)
+		printk(KERN_INFO DRV_NAME
+		       ": %s is not in hex or decimal form.\n", buf);
+	else
+		ieee80211_debug_level = val;
 
-static const struct file_operations fops = {
-	.open = open_debug_level,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.write = write_debug_level,
-	.release = single_release,
-};
+	return strnlen(buf, count);
+}
 
 int __init ieee80211_debug_init(void)
 {
@@ -284,13 +288,17 @@ int __init ieee80211_debug_init(void)
 				" proc directory\n");
 		return -EIO;
 	}
-	e = proc_create("debug_level", S_IRUGO | S_IWUSR,
-			      ieee80211_proc, &fops);
+	e = create_proc_entry("debug_level", S_IFREG | S_IRUGO | S_IWUSR,
+			      ieee80211_proc);
 	if (!e) {
 		remove_proc_entry(DRV_NAME, init_net.proc_net);
 		ieee80211_proc = NULL;
 		return -EIO;
 	}
+	e->read_proc = show_debug_level;
+	e->write_proc = store_debug_level;
+	e->data = NULL;
+
 	return 0;
 }
 
@@ -303,6 +311,7 @@ void __exit ieee80211_debug_exit(void)
 	}
 }
 
+#include <linux/moduleparam.h>
 module_param(debug, int, 0444);
 MODULE_PARM_DESC(debug, "debug output mask");
 #endif

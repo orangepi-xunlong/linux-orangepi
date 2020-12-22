@@ -8,12 +8,11 @@ struct dst_entry;
 struct kmem_cachep;
 struct net_device;
 struct sk_buff;
-struct sock;
-struct net;
 
 struct dst_ops {
 	unsigned short		family;
-	unsigned int		gc_thresh;
+	__be16			protocol;
+	unsigned		gc_thresh;
 
 	int			(*gc)(struct dst_ops *ops);
 	struct dst_entry *	(*check)(struct dst_entry *, __u32 cookie);
@@ -25,14 +24,9 @@ struct dst_ops {
 					  struct net_device *dev, int how);
 	struct dst_entry *	(*negative_advice)(struct dst_entry *);
 	void			(*link_failure)(struct sk_buff *);
-	void			(*update_pmtu)(struct dst_entry *dst, struct sock *sk,
-					       struct sk_buff *skb, u32 mtu);
-	void			(*redirect)(struct dst_entry *dst, struct sock *sk,
-					    struct sk_buff *skb);
-	int			(*local_out)(struct net *net, struct sock *sk, struct sk_buff *skb);
-	struct neighbour *	(*neigh_lookup)(const struct dst_entry *dst,
-						struct sk_buff *skb,
-						const void *daddr);
+	void			(*update_pmtu)(struct dst_entry *dst, u32 mtu);
+	int			(*local_out)(struct sk_buff *skb);
+	struct neighbour *	(*neigh_lookup)(const struct dst_entry *dst, const void *daddr);
 
 	struct kmem_cache	*kmem_cachep;
 
@@ -63,7 +57,7 @@ static inline void dst_entries_add(struct dst_ops *dst, int val)
 
 static inline int dst_entries_init(struct dst_ops *dst)
 {
-	return percpu_counter_init(&dst->pcpuc_entries, 0, GFP_KERNEL);
+	return percpu_counter_init(&dst->pcpuc_entries, 0);
 }
 
 static inline void dst_entries_destroy(struct dst_ops *dst)

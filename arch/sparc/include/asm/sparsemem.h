@@ -3,11 +3,9 @@
 
 #ifdef __KERNEL__
 
-#include <asm/page.h>
-
 #define SECTION_SIZE_BITS       30
-#define MAX_PHYSADDR_BITS       MAX_PHYS_ADDRESS_BITS
-#define MAX_PHYSMEM_BITS        MAX_PHYS_ADDRESS_BITS
+#define MAX_PHYSADDR_BITS       42
+#define MAX_PHYSMEM_BITS        42
 
 #endif /* !(__KERNEL__) */
 

@@ -1,11 +1,15 @@
 /*
+ *  include/asm-s390/string.h
+ *
  *  S390 version
- *    Copyright IBM Corp. 1999
+ *    Copyright (C) 1999 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com),
  */
 
 #ifndef _S390_STRING_H_
 #define _S390_STRING_H_
+
+#ifdef __KERNEL__
 
 #ifndef _LINUX_TYPES_H
 #include <linux/types.h>
@@ -44,6 +48,7 @@ extern char *strstr(const char *, const char *);
 #undef __HAVE_ARCH_STRCHR
 #undef __HAVE_ARCH_STRNCHR
 #undef __HAVE_ARCH_STRNCMP
+#undef __HAVE_ARCH_STRNICMP
 #undef __HAVE_ARCH_STRPBRK
 #undef __HAVE_ARCH_STRSEP
 #undef __HAVE_ARCH_STRSPN
@@ -95,6 +100,7 @@ static inline char *strcat(char *dst, const char *src)
 
 static inline char *strcpy(char *dst, const char *src)
 {
+#if __GNUC__ < 4
 	register int r0 asm("0") = 0;
 	char *ret = dst;
 
@@ -104,10 +110,14 @@ static inline char *strcpy(char *dst, const char *src)
 		: "+&a" (dst), "+&a" (src) : "d" (r0)
 		: "cc", "memory");
 	return ret;
+#else
+	return __builtin_strcpy(dst, src);
+#endif
 }
 
 static inline size_t strlen(const char *s)
 {
+#if __GNUC__ < 4
 	register unsigned long r0 asm("0") = 0;
 	const char *tmp = s;
 
@@ -116,6 +126,9 @@ static inline size_t strlen(const char *s)
 		"	jo	0b"
 		: "+d" (r0), "+a" (tmp) :  : "cc");
 	return r0 - (unsigned long) s;
+#else
+	return __builtin_strlen(s);
+#endif
 }
 
 static inline size_t strnlen(const char * s, size_t n)
@@ -138,5 +151,7 @@ char *strcpy(char *dst, const char *src);
 size_t strlen(const char *s);
 size_t strnlen(const char * s, size_t n);
 #endif /* !IN_ARCH_STRING_C */
+
+#endif /* __KERNEL__ */
 
 #endif /* __S390_STRING_H_ */

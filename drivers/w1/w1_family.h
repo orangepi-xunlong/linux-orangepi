@@ -27,11 +27,9 @@
 #include <linux/atomic.h>
 
 #define W1_FAMILY_DEFAULT	0
-#define W1_FAMILY_BQ27000	0x01
 #define W1_FAMILY_SMEM_01	0x01
 #define W1_FAMILY_SMEM_81	0x81
 #define W1_THERM_DS18S20 	0x10
-#define W1_FAMILY_DS28E04	0x1C
 #define W1_COUNTER_DS2423	0x1D
 #define W1_THERM_DS1822  	0x22
 #define W1_EEPROM_DS2433  	0x23
@@ -40,9 +38,6 @@
 #define W1_EEPROM_DS2431	0x2D
 #define W1_FAMILY_DS2760	0x30
 #define W1_FAMILY_DS2780	0x32
-#define W1_FAMILY_DS2413	0x3A
-#define W1_FAMILY_DS2406	0x12
-#define W1_THERM_DS1825		0x3B
 #define W1_FAMILY_DS2781	0x3D
 #define W1_THERM_DS28EA00	0x42
 
@@ -50,26 +45,12 @@
 
 struct w1_slave;
 
-/**
- * struct w1_family_ops - operations for a family type
- * @add_slave: add_slave
- * @remove_slave: remove_slave
- * @groups: sysfs group
- */
 struct w1_family_ops
 {
 	int  (* add_slave)(struct w1_slave *);
 	void (* remove_slave)(struct w1_slave *);
-	const struct attribute_group **groups;
 };
 
-/**
- * struct w1_family - reference counted family structure.
- * @family_entry:	family linked list
- * @fid:		8 bit family identifier
- * @fops:		operations for this family
- * @refcnt:		reference counter
- */
 struct w1_family
 {
 	struct list_head	family_entry;
@@ -87,17 +68,5 @@ void __w1_family_get(struct w1_family *);
 struct w1_family * w1_family_registered(u8);
 void w1_unregister_family(struct w1_family *);
 int w1_register_family(struct w1_family *);
-
-/**
- * module_w1_driver() - Helper macro for registering a 1-Wire families
- * @__w1_family: w1_family struct
- *
- * Helper macro for 1-Wire families which do not do anything special in module
- * init/exit. This eliminates a lot of boilerplate. Each module may only
- * use this macro once, and calling it replaces module_init() and module_exit()
- */
-#define module_w1_family(__w1_family) \
-	module_driver(__w1_family, w1_register_family, \
-			w1_unregister_family)
 
 #endif /* __W1_FAMILY_H */

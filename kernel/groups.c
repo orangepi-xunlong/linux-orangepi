@@ -6,32 +6,58 @@
 #include <linux/slab.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/user_namespace.h>
-#include <linux/vmalloc.h>
 #include <asm/uaccess.h>
+
+/* init to 2 - one for init_task, one to ensure it is never freed */
+struct group_info init_groups = { .usage = ATOMIC_INIT(2) };
 
 struct group_info *groups_alloc(int gidsetsize)
 {
-	struct group_info *gi;
-	unsigned int len;
+	struct group_info *group_info;
+	int nblocks;
+	int i;
 
-	len = sizeof(struct group_info) + sizeof(kgid_t) * gidsetsize;
-	gi = kmalloc(len, GFP_KERNEL_ACCOUNT|__GFP_NOWARN|__GFP_NORETRY);
-	if (!gi)
-		gi = __vmalloc(len, GFP_KERNEL_ACCOUNT|__GFP_HIGHMEM, PAGE_KERNEL);
-	if (!gi)
+	nblocks = (gidsetsize + NGROUPS_PER_BLOCK - 1) / NGROUPS_PER_BLOCK;
+	/* Make sure we always allocate at least one indirect block pointer */
+	nblocks = nblocks ? : 1;
+	group_info = kmalloc(sizeof(*group_info) + nblocks*sizeof(gid_t *), GFP_USER);
+	if (!group_info)
 		return NULL;
+	group_info->ngroups = gidsetsize;
+	group_info->nblocks = nblocks;
+	atomic_set(&group_info->usage, 1);
 
-	atomic_set(&gi->usage, 1);
-	gi->ngroups = gidsetsize;
-	return gi;
+	if (gidsetsize <= NGROUPS_SMALL)
+		group_info->blocks[0] = group_info->small_block;
+	else {
+		for (i = 0; i < nblocks; i++) {
+			gid_t *b;
+			b = (void *)__get_free_page(GFP_USER);
+			if (!b)
+				goto out_undo_partial_alloc;
+			group_info->blocks[i] = b;
+		}
+	}
+	return group_info;
+
+out_undo_partial_alloc:
+	while (--i >= 0) {
+		free_page((unsigned long)group_info->blocks[i]);
+	}
+	kfree(group_info);
+	return NULL;
 }
 
 EXPORT_SYMBOL(groups_alloc);
 
 void groups_free(struct group_info *group_info)
 {
-	kvfree(group_info);
+	if (group_info->blocks[0] != group_info->small_block) {
+		int i;
+		for (i = 0; i < group_info->nblocks; i++)
+			free_page((unsigned long)group_info->blocks[i]);
+	}
+	kfree(group_info);
 }
 
 EXPORT_SYMBOL(groups_free);
@@ -40,15 +66,18 @@ EXPORT_SYMBOL(groups_free);
 static int groups_to_user(gid_t __user *grouplist,
 			  const struct group_info *group_info)
 {
-	struct user_namespace *user_ns = current_user_ns();
 	int i;
 	unsigned int count = group_info->ngroups;
 
-	for (i = 0; i < count; i++) {
-		gid_t gid;
-		gid = from_kgid_munged(user_ns, group_info->gid[i]);
-		if (put_user(gid, grouplist+i))
+	for (i = 0; i < group_info->nblocks; i++) {
+		unsigned int cp_count = min(NGROUPS_PER_BLOCK, count);
+		unsigned int len = cp_count * sizeof(*grouplist);
+
+		if (copy_to_user(grouplist, group_info->blocks[i], len))
 			return -EFAULT;
+
+		grouplist += NGROUPS_PER_BLOCK;
+		count -= cp_count;
 	}
 	return 0;
 }
@@ -57,27 +86,24 @@ static int groups_to_user(gid_t __user *grouplist,
 static int groups_from_user(struct group_info *group_info,
     gid_t __user *grouplist)
 {
-	struct user_namespace *user_ns = current_user_ns();
 	int i;
 	unsigned int count = group_info->ngroups;
 
-	for (i = 0; i < count; i++) {
-		gid_t gid;
-		kgid_t kgid;
-		if (get_user(gid, grouplist+i))
+	for (i = 0; i < group_info->nblocks; i++) {
+		unsigned int cp_count = min(NGROUPS_PER_BLOCK, count);
+		unsigned int len = cp_count * sizeof(*grouplist);
+
+		if (copy_from_user(group_info->blocks[i], grouplist, len))
 			return -EFAULT;
 
-		kgid = make_kgid(user_ns, gid);
-		if (!gid_valid(kgid))
-			return -EINVAL;
-
-		group_info->gid[i] = kgid;
+		grouplist += NGROUPS_PER_BLOCK;
+		count -= cp_count;
 	}
 	return 0;
 }
 
 /* a simple Shell sort */
-void groups_sort(struct group_info *group_info)
+static void groups_sort(struct group_info *group_info)
 {
 	int base, max, stride;
 	int gidsetsize = group_info->ngroups;
@@ -91,22 +117,22 @@ void groups_sort(struct group_info *group_info)
 		for (base = 0; base < max; base++) {
 			int left = base;
 			int right = left + stride;
-			kgid_t tmp = group_info->gid[right];
+			gid_t tmp = GROUP_AT(group_info, right);
 
-			while (left >= 0 && gid_gt(group_info->gid[left], tmp)) {
-				group_info->gid[right] = group_info->gid[left];
+			while (left >= 0 && GROUP_AT(group_info, left) > tmp) {
+				GROUP_AT(group_info, right) =
+				    GROUP_AT(group_info, left);
 				right = left;
 				left -= stride;
 			}
-			group_info->gid[right] = tmp;
+			GROUP_AT(group_info, right) = tmp;
 		}
 		stride /= 3;
 	}
 }
-EXPORT_SYMBOL(groups_sort);
 
 /* a simple bsearch */
-int groups_search(const struct group_info *group_info, kgid_t grp)
+int groups_search(const struct group_info *group_info, gid_t grp)
 {
 	unsigned int left, right;
 
@@ -117,9 +143,9 @@ int groups_search(const struct group_info *group_info, kgid_t grp)
 	right = group_info->ngroups;
 	while (left < right) {
 		unsigned int mid = (left+right)/2;
-		if (gid_gt(grp, group_info->gid[mid]))
+		if (grp > GROUP_AT(group_info, mid))
 			left = mid + 1;
-		else if (gid_lt(grp, group_info->gid[mid]))
+		else if (grp < GROUP_AT(group_info, mid))
 			right = mid;
 		else
 			return 1;
@@ -131,12 +157,17 @@ int groups_search(const struct group_info *group_info, kgid_t grp)
  * set_groups - Change a group subscription in a set of credentials
  * @new: The newly prepared set of credentials to alter
  * @group_info: The group list to install
+ *
+ * Validate a group subscription and, if valid, insert it into a set
+ * of credentials.
  */
-void set_groups(struct cred *new, struct group_info *group_info)
+int set_groups(struct cred *new, struct group_info *group_info)
 {
 	put_group_info(new->group_info);
+	groups_sort(group_info);
 	get_group_info(group_info);
 	new->group_info = group_info;
+	return 0;
 }
 
 EXPORT_SYMBOL(set_groups);
@@ -151,12 +182,18 @@ EXPORT_SYMBOL(set_groups);
 int set_current_groups(struct group_info *group_info)
 {
 	struct cred *new;
+	int ret;
 
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
 
-	set_groups(new, group_info);
+	ret = set_groups(new, group_info);
+	if (ret < 0) {
+		abort_creds(new);
+		return ret;
+	}
+
 	return commit_creds(new);
 }
 
@@ -186,14 +223,6 @@ out:
 	return i;
 }
 
-bool may_setgroups(void)
-{
-	struct user_namespace *user_ns = current_user_ns();
-
-	return ns_capable(user_ns, CAP_SETGID) &&
-		userns_may_setgroups(user_ns);
-}
-
 /*
  *	SMP: Our groups are copy-on-write. We can set them safely
  *	without another task interfering.
@@ -204,7 +233,7 @@ SYSCALL_DEFINE2(setgroups, int, gidsetsize, gid_t __user *, grouplist)
 	struct group_info *group_info;
 	int retval;
 
-	if (!may_setgroups())
+	if (!nsown_capable(CAP_SETGID))
 		return -EPERM;
 	if ((unsigned)gidsetsize > NGROUPS_MAX)
 		return -EINVAL;
@@ -218,7 +247,6 @@ SYSCALL_DEFINE2(setgroups, int, gidsetsize, gid_t __user *, grouplist)
 		return retval;
 	}
 
-	groups_sort(group_info);
 	retval = set_current_groups(group_info);
 	put_group_info(group_info);
 
@@ -228,24 +256,24 @@ SYSCALL_DEFINE2(setgroups, int, gidsetsize, gid_t __user *, grouplist)
 /*
  * Check whether we're fsgid/egid or in the supplemental group..
  */
-int in_group_p(kgid_t grp)
+int in_group_p(gid_t grp)
 {
 	const struct cred *cred = current_cred();
 	int retval = 1;
 
-	if (!gid_eq(grp, cred->fsgid))
+	if (grp != cred->fsgid)
 		retval = groups_search(cred->group_info, grp);
 	return retval;
 }
 
 EXPORT_SYMBOL(in_group_p);
 
-int in_egroup_p(kgid_t grp)
+int in_egroup_p(gid_t grp)
 {
 	const struct cred *cred = current_cred();
 	int retval = 1;
 
-	if (!gid_eq(grp, cred->egid))
+	if (grp != cred->egid)
 		retval = groups_search(cred->group_info, grp);
 	return retval;
 }

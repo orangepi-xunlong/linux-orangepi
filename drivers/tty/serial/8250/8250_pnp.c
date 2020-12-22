@@ -1,5 +1,5 @@
 /*
- *  Probe for 8250/16550-type ISAPNP serial ports.
+ *  Probe module for 8250/16550-type ISAPNP serial ports.
  *
  *  Based on drivers/char/serial.c, by Linus Torvalds, Theodore Ts'o.
  *
@@ -12,6 +12,7 @@
  * the Free Software Foundation; either version 2 of the License.
  */
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/pnp.h>
 #include <linux/string.h>
@@ -24,7 +25,7 @@
 #include "8250.h"
 
 #define UNKNOWN_DEV 0x3000
-#define CIR_PORT	0x0800
+
 
 static const struct pnp_device_id pnp_dev_table[] = {
 	/* Archtek America Corp. */
@@ -41,12 +42,6 @@ static const struct pnp_device_id pnp_dev_table[] = {
 	{	"AEI1240",		0	},
 	/* Rockwell 56K ACF II Fax+Data+Voice Modem */
 	{	"AKY1021",		0 /*SPCI_FL_NO_SHIRQ*/	},
-	/*
-	 * ALi Fast Infrared Controller
-	 * Native driver (ali-ircc) is broken so at least
-	 * it can be used with irtty-sir.
-	 */
-	{	"ALI5123",		0	},
 	/* AZT3005 PnP SOUND DEVICE */
 	{	"AZT4001",		0	},
 	/* Best Data Products Inc. Smart One 336F PnP Modem */
@@ -357,8 +352,8 @@ static const struct pnp_device_id pnp_dev_table[] = {
 	/* Fujitsu Wacom 1FGT Tablet PC device */
 	{	"FUJ02E9",		0	},
 	/*
-	 * LG C1 EXPRESS DUAL (C1-PB11A3) touch screen (actually a FUJ02E6
-	 * in disguise).
+	 * LG C1 EXPRESS DUAL (C1-PB11A3) touch screen (actually a FUJ02E6 in
+	 * disguise)
 	 */
 	{	"LTS0001",		0       },
 	/* Rockwell's (PORALiNK) 33600 INT PNP */
@@ -367,50 +362,40 @@ static const struct pnp_device_id pnp_dev_table[] = {
 	{	"PNPCXXX",		UNKNOWN_DEV	},
 	/* More unknown PnP modems */
 	{	"PNPDXXX",		UNKNOWN_DEV	},
-	/*
-	 * Winbond CIR port, should not be probed. We should keep track of
-	 * it to prevent the legacy serial driver from probing it.
-	 */
-	{	"WEC1022",		CIR_PORT	},
-	/*
-	 * SMSC IrCC SIR/FIR port, should not be probed by serial driver as
-	 * well so its own driver can bind to it.
-	 */
-	{	"SMCF010",		CIR_PORT	},
 	{	"",			0	}
 };
 
 MODULE_DEVICE_TABLE(pnp, pnp_dev_table);
 
-static const char *modem_names[] = {
+static char *modem_names[] __devinitdata = {
 	"MODEM", "Modem", "modem", "FAX", "Fax", "fax",
 	"56K", "56k", "K56", "33.6", "28.8", "14.4",
 	"33,600", "28,800", "14,400", "33.600", "28.800", "14.400",
 	"33600", "28800", "14400", "V.90", "V.34", "V.32", NULL
 };
 
-static bool check_name(const char *name)
+static int __devinit check_name(char *name)
 {
-	const char **tmp;
+	char **tmp;
 
 	for (tmp = modem_names; *tmp; tmp++)
 		if (strstr(name, *tmp))
-			return true;
+			return 1;
 
-	return false;
+	return 0;
 }
 
-static bool check_resources(struct pnp_dev *dev)
+static int __devinit check_resources(struct pnp_dev *dev)
 {
-	static const resource_size_t base[] = {0x2f8, 0x3f8, 0x2e8, 0x3e8};
-	unsigned int i;
+	resource_size_t base[] = {0x2f8, 0x3f8, 0x2e8, 0x3e8};
+	int i;
 
 	for (i = 0; i < ARRAY_SIZE(base); i++) {
 		if (pnp_possible_config(dev, IORESOURCE_IO, base[i], 8))
-			return true;
+			return 1;
 	}
 
-	return false;
+	return 0;
 }
 
 /*
@@ -424,11 +409,11 @@ static bool check_resources(struct pnp_dev *dev)
  * PnP modems, alternatively we must hardcode all modems in pnp_devices[]
  * table.
  */
-static int serial_pnp_guess_board(struct pnp_dev *dev)
+static int __devinit serial_pnp_guess_board(struct pnp_dev *dev, int *flags)
 {
 	if (!(check_name(pnp_dev_name(dev)) ||
-	    (dev->card && check_name(dev->card->name))))
-		return -ENODEV;
+		(dev->card && check_name(dev->card->name))))
+			return -ENODEV;
 
 	if (check_resources(dev))
 		return 0;
@@ -436,67 +421,54 @@ static int serial_pnp_guess_board(struct pnp_dev *dev)
 	return -ENODEV;
 }
 
-static int
+static int __devinit
 serial_pnp_probe(struct pnp_dev *dev, const struct pnp_device_id *dev_id)
 {
-	struct uart_8250_port uart, *port;
+	struct uart_port port;
 	int ret, line, flags = dev_id->driver_data;
 
 	if (flags & UNKNOWN_DEV) {
-		ret = serial_pnp_guess_board(dev);
+		ret = serial_pnp_guess_board(dev, &flags);
 		if (ret < 0)
 			return ret;
 	}
 
-	memset(&uart, 0, sizeof(uart));
+	memset(&port, 0, sizeof(struct uart_port));
 	if (pnp_irq_valid(dev, 0))
-		uart.port.irq = pnp_irq(dev, 0);
-	if ((flags & CIR_PORT) && pnp_port_valid(dev, 2)) {
-		uart.port.iobase = pnp_port_start(dev, 2);
-		uart.port.iotype = UPIO_PORT;
-	} else if (pnp_port_valid(dev, 0)) {
-		uart.port.iobase = pnp_port_start(dev, 0);
-		uart.port.iotype = UPIO_PORT;
+		port.irq = pnp_irq(dev, 0);
+	if (pnp_port_valid(dev, 0)) {
+		port.iobase = pnp_port_start(dev, 0);
+		port.iotype = UPIO_PORT;
 	} else if (pnp_mem_valid(dev, 0)) {
-		uart.port.mapbase = pnp_mem_start(dev, 0);
-		uart.port.iotype = UPIO_MEM;
-		uart.port.flags = UPF_IOREMAP;
+		port.mapbase = pnp_mem_start(dev, 0);
+		port.iotype = UPIO_MEM;
+		port.flags = UPF_IOREMAP;
 	} else
 		return -ENODEV;
 
-	dev_dbg(&dev->dev,
-		 "Setup PNP port: port %lx, mem %pa, irq %d, type %d\n",
-		 uart.port.iobase, &uart.port.mapbase,
-		 uart.port.irq, uart.port.iotype);
+#ifdef SERIAL_DEBUG_PNP
+	printk(KERN_DEBUG
+		"Setup PNP port: port %x, mem 0x%lx, irq %d, type %d\n",
+		       port.iobase, port.mapbase, port.irq, port.iotype);
+#endif
 
-	if (flags & CIR_PORT) {
-		uart.port.flags |= UPF_FIXED_PORT | UPF_FIXED_TYPE;
-		uart.port.type = PORT_8250_CIR;
-	}
-
-	uart.port.flags |= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF;
+	port.flags |= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF;
 	if (pnp_irq_flags(dev, 0) & IORESOURCE_IRQ_SHAREABLE)
-		uart.port.flags |= UPF_SHARE_IRQ;
-	uart.port.uartclk = 1843200;
-	uart.port.dev = &dev->dev;
+		port.flags |= UPF_SHARE_IRQ;
+	port.uartclk = 1843200;
+	port.dev = &dev->dev;
 
-	line = serial8250_register_8250_port(&uart);
-	if (line < 0 || (flags & CIR_PORT))
+	line = serial8250_register_port(&port);
+	if (line < 0)
 		return -ENODEV;
-
-	port = serial8250_get_port(line);
-	if (uart_console(&port->port))
-		dev->capabilities |= PNP_CONSOLE;
 
 	pnp_set_drvdata(dev, (void *)((long)line + 1));
 	return 0;
 }
 
-static void serial_pnp_remove(struct pnp_dev *dev)
+static void __devexit serial_pnp_remove(struct pnp_dev *dev)
 {
 	long line = (long)pnp_get_drvdata(dev);
-
-	dev->capabilities &= ~PNP_CONSOLE;
 	if (line)
 		serial8250_unregister_port(line - 1);
 }
@@ -529,19 +501,24 @@ static int serial_pnp_resume(struct pnp_dev *dev)
 static struct pnp_driver serial_pnp_driver = {
 	.name		= "serial",
 	.probe		= serial_pnp_probe,
-	.remove		= serial_pnp_remove,
+	.remove		= __devexit_p(serial_pnp_remove),
 	.suspend	= serial_pnp_suspend,
 	.resume		= serial_pnp_resume,
 	.id_table	= pnp_dev_table,
 };
 
-int serial8250_pnp_init(void)
+static int __init serial8250_pnp_init(void)
 {
 	return pnp_register_driver(&serial_pnp_driver);
 }
 
-void serial8250_pnp_exit(void)
+static void __exit serial8250_pnp_exit(void)
 {
 	pnp_unregister_driver(&serial_pnp_driver);
 }
 
+module_init(serial8250_pnp_init);
+module_exit(serial8250_pnp_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Generic 8250/16x50 PnP serial driver");

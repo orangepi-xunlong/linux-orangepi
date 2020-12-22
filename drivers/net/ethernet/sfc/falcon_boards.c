@@ -1,6 +1,6 @@
 /****************************************************************************
- * Driver for Solarflare network controllers and boards
- * Copyright 2007-2012 Solarflare Communications Inc.
+ * Driver for Solarflare Solarstorm network controllers and boards
+ * Copyright 2007-2010 Solarflare Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -64,7 +64,7 @@
 #define LM87_ALARM_TEMP_INT		0x10
 #define LM87_ALARM_TEMP_EXT1		0x20
 
-#if IS_ENABLED(CONFIG_SENSORS_LM87)
+#if defined(CONFIG_SENSORS_LM87) || defined(CONFIG_SENSORS_LM87_MODULE)
 
 static int efx_poke_lm87(struct i2c_client *client, const u8 *reg_values)
 {
@@ -380,7 +380,7 @@ static ssize_t set_phy_flash_cfg(struct device *dev,
 		new_mode = PHY_MODE_SPECIAL;
 	if (!((old_mode ^ new_mode) & PHY_MODE_SPECIAL)) {
 		err = 0;
-	} else if (efx->state != STATE_READY || netif_running(efx->net_dev)) {
+	} else if (efx->state != STATE_RUNNING || netif_running(efx->net_dev)) {
 		err = -EBUSY;
 	} else {
 		/* Reset the PHY, reconfigure the MAC and enable/disable
@@ -455,7 +455,7 @@ static int sfe4001_init(struct efx_nic *efx)
 	struct falcon_board *board = falcon_board(efx);
 	int rc;
 
-#if IS_ENABLED(CONFIG_SENSORS_LM90)
+#if defined(CONFIG_SENSORS_LM90) || defined(CONFIG_SENSORS_LM90_MODULE)
 	board->hwmon_client =
 		i2c_new_device(&board->i2c_adap, &sfe4001_hwmon_info);
 #else

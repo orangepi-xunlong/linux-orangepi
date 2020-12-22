@@ -1,16 +1,9 @@
-/*
- * IPv6 specific functions of netfilter core
- *
- * Rusty Russell (C) 2000 -- This code is GPL.
- * Patrick McHardy (C) 2006-2012
- */
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/ipv6.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv6.h>
 #include <linux/export.h>
-#include <net/addrconf.h>
 #include <net/dst.h>
 #include <net/ipv6.h>
 #include <net/ip6_route.h>
@@ -18,27 +11,24 @@
 #include <net/ip6_checksum.h>
 #include <net/netfilter/nf_queue.h>
 
-int ip6_route_me_harder(struct net *net, struct sk_buff *skb)
+int ip6_route_me_harder(struct sk_buff *skb)
 {
+	struct net *net = dev_net(skb_dst(skb)->dev);
 	const struct ipv6hdr *iph = ipv6_hdr(skb);
-	unsigned int hh_len;
 	struct dst_entry *dst;
 	struct flowi6 fl6 = {
 		.flowi6_oif = skb->sk ? skb->sk->sk_bound_dev_if : 0,
 		.flowi6_mark = skb->mark,
-		.flowi6_uid = sock_net_uid(net, skb->sk),
 		.daddr = iph->daddr,
 		.saddr = iph->saddr,
 	};
-	int err;
 
 	dst = ip6_route_output(net, skb->sk, &fl6);
-	err = dst->error;
-	if (err) {
+	if (dst->error) {
 		IP6_INC_STATS(net, ip6_dst_idev(dst), IPSTATS_MIB_OUTNOROUTES);
-		net_dbg_ratelimited("ip6_route_me_harder: No more route\n");
+		LIMIT_NETDEBUG(KERN_DEBUG "ip6_route_me_harder: No more route.\n");
 		dst_release(dst);
-		return err;
+		return -EINVAL;
 	}
 
 	/* Drop old route. */
@@ -52,17 +42,10 @@ int ip6_route_me_harder(struct net *net, struct sk_buff *skb)
 		skb_dst_set(skb, NULL);
 		dst = xfrm_lookup(net, dst, flowi6_to_flowi(&fl6), skb->sk, 0);
 		if (IS_ERR(dst))
-			return PTR_ERR(dst);
+			return -1;
 		skb_dst_set(skb, dst);
 	}
 #endif
-
-	/* Change in oif may mean change in hh_len. */
-	hh_len = skb_dst(skb)->dev->hard_header_len;
-	if (skb_headroom(skb) < hh_len &&
-	    pskb_expand_head(skb, HH_DATA_ALIGN(hh_len - skb_headroom(skb)),
-			     0, GFP_ATOMIC))
-		return -ENOMEM;
 
 	return 0;
 }
@@ -84,7 +67,7 @@ static void nf_ip6_saveroute(const struct sk_buff *skb,
 {
 	struct ip6_rt_info *rt_info = nf_queue_entry_reroute(entry);
 
-	if (entry->state.hook == NF_INET_LOCAL_OUT) {
+	if (entry->hook == NF_INET_LOCAL_OUT) {
 		const struct ipv6hdr *iph = ipv6_hdr(skb);
 
 		rt_info->daddr = iph->daddr;
@@ -93,17 +76,17 @@ static void nf_ip6_saveroute(const struct sk_buff *skb,
 	}
 }
 
-static int nf_ip6_reroute(struct net *net, struct sk_buff *skb,
+static int nf_ip6_reroute(struct sk_buff *skb,
 			  const struct nf_queue_entry *entry)
 {
 	struct ip6_rt_info *rt_info = nf_queue_entry_reroute(entry);
 
-	if (entry->state.hook == NF_INET_LOCAL_OUT) {
+	if (entry->hook == NF_INET_LOCAL_OUT) {
 		const struct ipv6hdr *iph = ipv6_hdr(skb);
 		if (!ipv6_addr_equal(&iph->daddr, &rt_info->daddr) ||
 		    !ipv6_addr_equal(&iph->saddr, &rt_info->saddr) ||
 		    skb->mark != rt_info->mark)
-			return ip6_route_me_harder(net, skb);
+			return ip6_route_me_harder(skb);
 	}
 	return 0;
 }
@@ -189,12 +172,6 @@ static __sum16 nf_ip6_checksum_partial(struct sk_buff *skb, unsigned int hook,
 	return csum;
 };
 
-static const struct nf_ipv6_ops ipv6ops = {
-	.chk_addr	= ipv6_chk_addr,
-	.route_input    = ip6_route_input,
-	.fragment	= ip6_fragment
-};
-
 static const struct nf_afinfo nf_ip6_afinfo = {
 	.family			= AF_INET6,
 	.checksum		= nf_ip6_checksum,
@@ -207,7 +184,6 @@ static const struct nf_afinfo nf_ip6_afinfo = {
 
 int __init ipv6_netfilter_init(void)
 {
-	RCU_INIT_POINTER(nf_ipv6_ops, &ipv6ops);
 	return nf_register_afinfo(&nf_ip6_afinfo);
 }
 
@@ -216,6 +192,5 @@ int __init ipv6_netfilter_init(void)
  */
 void ipv6_netfilter_fini(void)
 {
-	RCU_INIT_POINTER(nf_ipv6_ops, NULL);
 	nf_unregister_afinfo(&nf_ip6_afinfo);
 }

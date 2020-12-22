@@ -53,7 +53,7 @@ struct tty_driver *hp_simserial_driver;
 
 static struct console *console;
 
-static void receive_chars(struct tty_port *port)
+static void receive_chars(struct tty_struct *tty)
 {
 	unsigned char ch;
 	static unsigned char seen_esc = 0;
@@ -81,10 +81,10 @@ static void receive_chars(struct tty_port *port)
 		}
 		seen_esc = 0;
 
-		if (tty_insert_flip_char(port, ch, TTY_NORMAL) == 0)
+		if (tty_insert_flip_char(tty, ch, TTY_NORMAL) == 0)
 			break;
 	}
-	tty_flip_buffer_push(port);
+	tty_flip_buffer_push(tty);
 }
 
 /*
@@ -93,9 +93,18 @@ static void receive_chars(struct tty_port *port)
 static irqreturn_t rs_interrupt_single(int irq, void *dev_id)
 {
 	struct serial_state *info = dev_id;
+	struct tty_struct *tty = tty_port_tty_get(&info->port);
 
-	receive_chars(&info->port);
-
+	if (!tty) {
+		printk(KERN_INFO "%s: tty=0 problem\n", __func__);
+		return IRQ_NONE;
+	}
+	/*
+	 * pretty simple in our case, because we only get interrupts
+	 * on inbound traffic
+	 */
+	receive_chars(tty);
+	tty_kref_put(tty);
 	return IRQ_HANDLED;
 }
 
@@ -142,7 +151,8 @@ static void transmit_chars(struct tty_struct *tty, struct serial_state *info,
 		goto out;
 	}
 
-	if (info->xmit.head == info->xmit.tail || tty->stopped) {
+	if (info->xmit.head == info->xmit.tail || tty->stopped ||
+			tty->hw_stopped) {
 #ifdef SIMSERIAL_DEBUG
 		printk("transmit_chars: head=%d, tail=%d, stopped=%d\n",
 		       info->xmit.head, info->xmit.tail, tty->stopped);
@@ -180,7 +190,7 @@ static void rs_flush_chars(struct tty_struct *tty)
 	struct serial_state *info = tty->driver_data;
 
 	if (info->xmit.head == info->xmit.tail || tty->stopped ||
-			!info->xmit.buf)
+			tty->hw_stopped || !info->xmit.buf)
 		return;
 
 	transmit_chars(tty, info, NULL);
@@ -216,7 +226,7 @@ static int rs_write(struct tty_struct * tty,
 	 * Hey, we transmit directly from here in our case
 	 */
 	if (CIRC_CNT(info->xmit.head, info->xmit.tail, SERIAL_XMIT_SIZE) &&
-			!tty->stopped)
+			!tty->stopped && !tty->hw_stopped)
 		transmit_chars(tty, info, NULL);
 
 	return ret;
@@ -300,7 +310,7 @@ static int rs_ioctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg)
 	if ((cmd != TIOCGSERIAL) && (cmd != TIOCSSERIAL) &&
 	    (cmd != TIOCSERCONFIG) && (cmd != TIOCSERGSTRUCT) &&
 	    (cmd != TIOCMIWAIT)) {
-		if (tty_io_error(tty))
+		if (tty->flags & (1 << TTY_IO_ERROR))
 		    return -EIO;
 	}
 
@@ -324,6 +334,14 @@ static int rs_ioctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg)
 
 #define RELEVANT_IFLAG(iflag) (iflag & (IGNBRK|BRKINT|IGNPAR|PARMRK|INPCK))
 
+static void rs_set_termios(struct tty_struct *tty, struct ktermios *old_termios)
+{
+	/* Handle turning off CRTSCTS */
+	if ((old_termios->c_cflag & CRTSCTS) &&
+	    !(tty->termios->c_cflag & CRTSCTS)) {
+		tty->hw_stopped = 0;
+	}
+}
 /*
  * This routine will shutdown a serial port; interrupts are disabled, and
  * DTR is dropped if the hangup on close termio flag is on.
@@ -417,7 +435,7 @@ static int rs_open(struct tty_struct *tty, struct file * filp)
 	struct tty_port *port = &info->port;
 
 	tty->driver_data = info;
-	port->low_latency = (port->flags & ASYNC_LOW_LATENCY) ? 1 : 0;
+	tty->low_latency = (port->flags & ASYNC_LOW_LATENCY) ? 1 : 0;
 
 	/*
 	 * figure out which console to use (should be one already)
@@ -472,6 +490,7 @@ static const struct tty_operations hp_ops = {
 	.throttle = rs_throttle,
 	.unthrottle = rs_unthrottle,
 	.send_xchar = rs_send_xchar,
+	.set_termios = rs_set_termios,
 	.hangup = rs_hangup,
 	.proc_fops = &rs_proc_fops,
 };
@@ -526,7 +545,6 @@ static int __init simrs_init(void)
 	/* the port is imaginary */
 	printk(KERN_INFO "ttyS0 at 0x03f8 (irq = %d) is a 16550\n", state->irq);
 
-	tty_port_link_device(&state->port, hp_simserial_driver, 0);
 	retval = tty_register_driver(hp_simserial_driver);
 	if (retval) {
 		printk(KERN_ERR "Couldn't register simserial driver\n");
@@ -536,7 +554,6 @@ static int __init simrs_init(void)
 	return 0;
 err_free_tty:
 	put_tty_driver(hp_simserial_driver);
-	tty_port_destroy(&state->port);
 	return retval;
 }
 

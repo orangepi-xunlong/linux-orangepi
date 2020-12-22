@@ -14,25 +14,23 @@
 #include <linux/mman.h>
 #include <linux/signal.h>
 #include <linux/mm.h>
-#include <linux/extable.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/perf_event.h>
 #include <linux/interrupt.h>
 #include <linux/kprobes.h>
 #include <linux/kdebug.h>
 #include <linux/percpu.h>
-#include <linux/context_tracking.h>
-#include <linux/uaccess.h>
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/openprom.h>
 #include <asm/oplib.h>
+#include <asm/uaccess.h>
 #include <asm/asi.h>
 #include <asm/lsu.h>
 #include <asm/sections.h>
 #include <asm/mmu_context.h>
-#include <asm/setup.h>
 
 int show_unhandled_signals = 1;
 
@@ -111,8 +109,11 @@ static unsigned int get_user_insn(unsigned long tpc)
 	if (pmd_none(*pmdp) || unlikely(pmd_bad(*pmdp)))
 		goto out_irq_enable;
 
-#if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
-	if (is_hugetlb_pmd(*pmdp)) {
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	if (pmd_trans_huge(*pmdp)) {
+		if (pmd_trans_splitting(*pmdp))
+			goto out_irq_enable;
+
 		pa  = pmd_pfn(*pmdp) << PAGE_SHIFT;
 		pa += tpc & ~HPAGE_MASK;
 
@@ -152,7 +153,7 @@ show_signal_msg(struct pt_regs *regs, int sig, int code,
 	if (!printk_ratelimit())
 		return;
 
-	printk("%s%s[%d]: segfault at %lx ip %px (rpc %px) sp %px error %x",
+	printk("%s%s[%d]: segfault at %lx ip %p (rpc %p) sp %p error %x",
 	       task_pid_nr(tsk) > 1 ? KERN_INFO : KERN_EMERG,
 	       tsk->comm, task_pid_nr(tsk), address,
 	       (void *)regs->tpc, (void *)regs->u_regs[UREG_I7],
@@ -162,6 +163,8 @@ show_signal_msg(struct pt_regs *regs, int sig, int code,
 
 	printk(KERN_CONT "\n");
 }
+
+extern unsigned long compute_effective_address(struct pt_regs *, unsigned int, unsigned int);
 
 static void do_fault_siginfo(int code, int sig, struct pt_regs *regs,
 			     unsigned long fault_addr, unsigned int insn,
@@ -193,6 +196,9 @@ static void do_fault_siginfo(int code, int sig, struct pt_regs *regs,
 
 	force_sig_info(sig, &info, current);
 }
+
+extern int handle_ldf_stq(u32, struct pt_regs *);
+extern int handle_ld_nf(u32, struct pt_regs *);
 
 static unsigned int get_fault_insn(struct pt_regs *regs, unsigned int insn)
 {
@@ -278,7 +284,6 @@ static void noinline __kprobes bogus_32bit_fault_tpc(struct pt_regs *regs)
 
 asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 {
-	enum ctx_state prev_state = exception_enter();
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 	unsigned int insn = 0;
@@ -289,7 +294,7 @@ asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 	fault_code = get_thread_fault_code();
 
 	if (notify_page_fault(regs))
-		goto exit_exception;
+		return;
 
 	si_code = SEGV_MAPERR;
 	address = current_thread_info()->fault_address;
@@ -318,16 +323,15 @@ asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 			/* Valid, no problems... */
 		} else {
 			bad_kernel_pc(regs, address);
-			goto exit_exception;
+			return;
 		}
-	} else
-		flags |= FAULT_FLAG_USER;
+	}
 
 	/*
 	 * If we're in an interrupt or have no user
 	 * context, we must not take the fault..
 	 */
-	if (faulthandler_disabled() || !mm)
+	if (in_atomic() || !mm)
 		goto intr_or_no_mm;
 
 	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
@@ -342,9 +346,6 @@ asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 retry:
 		down_read(&mm->mmap_sem);
 	}
-
-	if (fault_code & FAULT_CODE_BAD_RA)
-		goto do_sigbus;
 
 	vma = find_vma(mm, address);
 	if (!vma)
@@ -410,9 +411,8 @@ good_area:
 	 * that here.
 	 */
 	if ((fault_code & FAULT_CODE_ITLB) && !(vma->vm_flags & VM_EXEC)) {
-		WARN(address != regs->tpc,
-		     "address (%lx) != regs->tpc (%lx)\n", address, regs->tpc);
-		WARN_ON(regs->tstate & TSTATE_PRIV);
+		BUG_ON(address != regs->tpc);
+		BUG_ON(regs->tstate & TSTATE_PRIV);
 		goto bad_area;
 	}
 
@@ -428,18 +428,17 @@ good_area:
 		    vma->vm_file != NULL)
 			set_thread_fault_code(fault_code |
 					      FAULT_CODE_BLKCOMMIT);
-
-		flags |= FAULT_FLAG_WRITE;
 	} else {
 		/* Allow reads even for write-only mappings */
 		if (!(vma->vm_flags & (VM_READ | VM_EXEC)))
 			goto bad_area;
 	}
 
-	fault = handle_mm_fault(vma, address, flags);
+	flags |= ((fault_code & FAULT_CODE_WRITE) ? FAULT_FLAG_WRITE : 0);
+	fault = handle_mm_fault(mm, vma, address, flags);
 
 	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
-		goto exit_exception;
+		return;
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
@@ -463,7 +462,6 @@ good_area:
 		}
 		if (fault & VM_FAULT_RETRY) {
 			flags &= ~FAULT_FLAG_ALLOW_RETRY;
-			flags |= FAULT_FLAG_TRIED;
 
 			/* No need to up_read(&mm->mmap_sem) as we would
 			 * have already released it in __lock_page_or_retry
@@ -476,26 +474,18 @@ good_area:
 	up_read(&mm->mmap_sem);
 
 	mm_rss = get_mm_rss(mm);
-#if defined(CONFIG_TRANSPARENT_HUGEPAGE)
-	mm_rss -= (mm->context.thp_pte_count * (HPAGE_SIZE / PAGE_SIZE));
+#ifdef CONFIG_HUGETLB_PAGE
+	mm_rss -= (mm->context.huge_pte_count * (HPAGE_SIZE / PAGE_SIZE));
 #endif
 	if (unlikely(mm_rss >
 		     mm->context.tsb_block[MM_TSB_BASE].tsb_rss_limit))
 		tsb_grow(mm, MM_TSB_BASE, mm_rss);
-#if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
-	mm_rss = mm->context.hugetlb_pte_count + mm->context.thp_pte_count;
-	mm_rss *= REAL_HPAGE_PER_HPAGE;
+#ifdef CONFIG_HUGETLB_PAGE
+	mm_rss = mm->context.huge_pte_count;
 	if (unlikely(mm_rss >
-		     mm->context.tsb_block[MM_TSB_HUGE].tsb_rss_limit)) {
-		if (mm->context.tsb_block[MM_TSB_HUGE].tsb)
-			tsb_grow(mm, MM_TSB_HUGE, mm_rss);
-		else
-			hugetlb_setup(regs);
-
-	}
+		     mm->context.tsb_block[MM_TSB_HUGE].tsb_rss_limit))
+		tsb_grow(mm, MM_TSB_HUGE, mm_rss);
 #endif
-exit_exception:
-	exception_exit(prev_state);
 	return;
 
 	/*
@@ -508,7 +498,7 @@ bad_area:
 
 handle_kernel_fault:
 	do_kernel_fault(regs, si_code, fault_code, insn, address);
-	goto exit_exception;
+	return;
 
 /*
  * We ran out of memory, or some other thing happened to us that made
@@ -519,7 +509,7 @@ out_of_memory:
 	up_read(&mm->mmap_sem);
 	if (!(regs->tstate & TSTATE_PRIV)) {
 		pagefault_out_of_memory();
-		goto exit_exception;
+		return;
 	}
 	goto handle_kernel_fault;
 

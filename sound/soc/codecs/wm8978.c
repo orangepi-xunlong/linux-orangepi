@@ -117,21 +117,21 @@ static const char *wm8978_eq5[] = {"5.3kHz", "6.9kHz", "9kHz", "11.7kHz"};
 static const char *wm8978_alc3[] = {"ALC", "Limiter"};
 static const char *wm8978_alc1[] = {"Off", "Right", "Left", "Both"};
 
-static SOC_ENUM_SINGLE_DECL(adc_compand, WM8978_COMPANDING_CONTROL, 1,
-			    wm8978_companding);
-static SOC_ENUM_SINGLE_DECL(dac_compand, WM8978_COMPANDING_CONTROL, 3,
-			    wm8978_companding);
-static SOC_ENUM_SINGLE_DECL(eqmode, WM8978_EQ1, 8, wm8978_eqmode);
-static SOC_ENUM_SINGLE_DECL(eq1, WM8978_EQ1, 5, wm8978_eq1);
-static SOC_ENUM_SINGLE_DECL(eq2bw, WM8978_EQ2, 8, wm8978_bw);
-static SOC_ENUM_SINGLE_DECL(eq2, WM8978_EQ2, 5, wm8978_eq2);
-static SOC_ENUM_SINGLE_DECL(eq3bw, WM8978_EQ3, 8, wm8978_bw);
-static SOC_ENUM_SINGLE_DECL(eq3, WM8978_EQ3, 5, wm8978_eq3);
-static SOC_ENUM_SINGLE_DECL(eq4bw, WM8978_EQ4, 8, wm8978_bw);
-static SOC_ENUM_SINGLE_DECL(eq4, WM8978_EQ4, 5, wm8978_eq4);
-static SOC_ENUM_SINGLE_DECL(eq5, WM8978_EQ5, 5, wm8978_eq5);
-static SOC_ENUM_SINGLE_DECL(alc3, WM8978_ALC_CONTROL_3, 8, wm8978_alc3);
-static SOC_ENUM_SINGLE_DECL(alc1, WM8978_ALC_CONTROL_1, 7, wm8978_alc1);
+static const SOC_ENUM_SINGLE_DECL(adc_compand, WM8978_COMPANDING_CONTROL, 1,
+				  wm8978_companding);
+static const SOC_ENUM_SINGLE_DECL(dac_compand, WM8978_COMPANDING_CONTROL, 3,
+				  wm8978_companding);
+static const SOC_ENUM_SINGLE_DECL(eqmode, WM8978_EQ1, 8, wm8978_eqmode);
+static const SOC_ENUM_SINGLE_DECL(eq1, WM8978_EQ1, 5, wm8978_eq1);
+static const SOC_ENUM_SINGLE_DECL(eq2bw, WM8978_EQ2, 8, wm8978_bw);
+static const SOC_ENUM_SINGLE_DECL(eq2, WM8978_EQ2, 5, wm8978_eq2);
+static const SOC_ENUM_SINGLE_DECL(eq3bw, WM8978_EQ3, 8, wm8978_bw);
+static const SOC_ENUM_SINGLE_DECL(eq3, WM8978_EQ3, 5, wm8978_eq3);
+static const SOC_ENUM_SINGLE_DECL(eq4bw, WM8978_EQ4, 8, wm8978_bw);
+static const SOC_ENUM_SINGLE_DECL(eq4, WM8978_EQ4, 5, wm8978_eq4);
+static const SOC_ENUM_SINGLE_DECL(eq5, WM8978_EQ5, 5, wm8978_eq5);
+static const SOC_ENUM_SINGLE_DECL(alc3, WM8978_ALC_CONTROL_3, 8, wm8978_alc3);
+static const SOC_ENUM_SINGLE_DECL(alc1, WM8978_ALC_CONTROL_1, 7, wm8978_alc1);
 
 static const DECLARE_TLV_DB_SCALE(digital_tlv, -12750, 50, 1);
 static const DECLARE_TLV_DB_SCALE(eq_tlv, -1200, 100, 0);
@@ -166,15 +166,15 @@ static const struct snd_kcontrol_new wm8978_snd_controls[] = {
 	SOC_ENUM("EQ1 Cut Off", eq1),
 	SOC_SINGLE_TLV("EQ1 Volume", WM8978_EQ1,  0, 24, 1, eq_tlv),
 
-	SOC_ENUM("Equaliser EQ2 Bandwidth", eq2bw),
+	SOC_ENUM("Equaliser EQ2 Bandwith", eq2bw),
 	SOC_ENUM("EQ2 Cut Off", eq2),
 	SOC_SINGLE_TLV("EQ2 Volume", WM8978_EQ2,  0, 24, 1, eq_tlv),
 
-	SOC_ENUM("Equaliser EQ3 Bandwidth", eq3bw),
+	SOC_ENUM("Equaliser EQ3 Bandwith", eq3bw),
 	SOC_ENUM("EQ3 Cut Off", eq3),
 	SOC_SINGLE_TLV("EQ3 Volume", WM8978_EQ3,  0, 24, 1, eq_tlv),
 
-	SOC_ENUM("Equaliser EQ4 Bandwidth", eq4bw),
+	SOC_ENUM("Equaliser EQ4 Bandwith", eq4bw),
 	SOC_ENUM("EQ4 Cut Off", eq4),
 	SOC_SINGLE_TLV("EQ4 Volume", WM8978_EQ4,  0, 24, 1, eq_tlv),
 
@@ -527,6 +527,9 @@ static int wm8978_configure_pll(struct snd_soc_codec *codec)
 			return idx;
 
 		wm8978->mclk_idx = idx;
+
+		/* GPIO1 into default mode as input - before configuring PLL */
+		snd_soc_update_bits(codec, WM8978_GPIO_CONTROL, 7, 0);
 	} else {
 		return -EINVAL;
 	}
@@ -720,7 +723,8 @@ static int wm8978_hw_params(struct snd_pcm_substream *substream,
 			    struct snd_pcm_hw_params *params,
 			    struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
 	struct wm8978_priv *wm8978 = snd_soc_codec_get_drvdata(codec);
 	/* Word length mask = 0x60 */
 	u16 iface_ctl = snd_soc_read(codec, WM8978_AUDIO_INTERFACE) & ~0x60;
@@ -736,16 +740,16 @@ static int wm8978_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 
 	/* bit size */
-	switch (params_width(params)) {
-	case 16:
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
 		break;
-	case 20:
+	case SNDRV_PCM_FORMAT_S20_3LE:
 		iface_ctl |= 0x20;
 		break;
-	case 24:
+	case SNDRV_PCM_FORMAT_S24_LE:
 		iface_ctl |= 0x40;
 		break;
-	case 32:
+	case SNDRV_PCM_FORMAT_S32_LE:
 		iface_ctl |= 0x60;
 		break;
 	}
@@ -817,8 +821,8 @@ static int wm8978_hw_params(struct snd_pcm_substream *substream,
 			wm8978->sysclk == WM8978_MCLK ?
 			", consider using PLL" : "");
 
-	dev_dbg(codec->dev, "%s: width %d, rate %u, MCLK divisor #%d\n", __func__,
-		params_width(params), params_rate(params), best);
+	dev_dbg(codec->dev, "%s: fmt %d, rate %u, MCLK divisor #%d\n", __func__,
+		params_format(params), params_rate(params), best);
 
 	/* MCLK divisor mask = 0xe0 */
 	snd_soc_update_bits(codec, WM8978_CLOCKING, 0xe0, best << 5);
@@ -868,7 +872,7 @@ static int wm8978_set_bias_level(struct snd_soc_codec *codec,
 		/* bit 3: enable bias, bit 2: enable I/O tie off buffer */
 		power1 |= 0xc;
 
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			/* Initial cap charge at VMID 5k */
 			snd_soc_write(codec, WM8978_POWER_MANAGEMENT_1,
 				      power1 | 0x3);
@@ -888,6 +892,7 @@ static int wm8978_set_bias_level(struct snd_soc_codec *codec,
 
 	dev_dbg(codec->dev, "%s: %d, %x\n", __func__, level, power1);
 
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -920,14 +925,13 @@ static struct snd_soc_dai_driver wm8978_dai = {
 		.formats = WM8978_FORMATS,
 	},
 	.ops = &wm8978_dai_ops,
-	.symmetric_rates = 1,
 };
 
 static int wm8978_suspend(struct snd_soc_codec *codec)
 {
 	struct wm8978_priv *wm8978 = snd_soc_codec_get_drvdata(codec);
 
-	snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_OFF);
+	wm8978_set_bias_level(codec, SND_SOC_BIAS_OFF);
 	/* Also switch PLL off */
 	snd_soc_write(codec, WM8978_POWER_MANAGEMENT_1, 0);
 
@@ -943,7 +947,7 @@ static int wm8978_resume(struct snd_soc_codec *codec)
 	/* Sync reg_cache with the hardware */
 	regcache_sync(wm8978->regmap);
 
-	snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	wm8978_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
 	if (wm8978->f_pllout)
 		/* Switch PLL on */
@@ -974,13 +978,19 @@ static const int update_reg[] = {
 static int wm8978_probe(struct snd_soc_codec *codec)
 {
 	struct wm8978_priv *wm8978 = snd_soc_codec_get_drvdata(codec);
-	int i;
+	int ret = 0, i;
 
 	/*
 	 * Set default system clock to PLL, it is more precise, this is also the
 	 * default hardware setting
 	 */
 	wm8978->sysclk = WM8978_PLL;
+	codec->control_data = wm8978->regmap;
+	ret = snd_soc_codec_set_cache_io(codec, 7, 9, SND_SOC_REGMAP);
+	if (ret < 0) {
+		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
+		return ret;
+	}
 
 	/*
 	 * Set the update bit in all registers, that have one. This way all
@@ -990,23 +1000,31 @@ static int wm8978_probe(struct snd_soc_codec *codec)
 	for (i = 0; i < ARRAY_SIZE(update_reg); i++)
 		snd_soc_update_bits(codec, update_reg[i], 0x100, 0x100);
 
+	wm8978_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+
 	return 0;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8978 = {
+/* power down chip */
+static int wm8978_remove(struct snd_soc_codec *codec)
+{
+	wm8978_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	return 0;
+}
+
+static struct snd_soc_codec_driver soc_codec_dev_wm8978 = {
 	.probe =	wm8978_probe,
+	.remove =	wm8978_remove,
 	.suspend =	wm8978_suspend,
 	.resume =	wm8978_resume,
 	.set_bias_level = wm8978_set_bias_level,
 
-	.component_driver = {
-		.controls		= wm8978_snd_controls,
-		.num_controls		= ARRAY_SIZE(wm8978_snd_controls),
-		.dapm_widgets		= wm8978_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(wm8978_dapm_widgets),
-		.dapm_routes		= wm8978_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(wm8978_dapm_routes),
-	},
+	.controls = wm8978_snd_controls,
+	.num_controls = ARRAY_SIZE(wm8978_snd_controls),
+	.dapm_widgets = wm8978_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(wm8978_dapm_widgets),
+	.dapm_routes = wm8978_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(wm8978_dapm_routes),
 };
 
 static const struct regmap_config wm8978_regmap_config = {
@@ -1021,8 +1039,8 @@ static const struct regmap_config wm8978_regmap_config = {
 	.num_reg_defaults = ARRAY_SIZE(wm8978_reg_defaults),
 };
 
-static int wm8978_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static __devinit int wm8978_i2c_probe(struct i2c_client *i2c,
+				      const struct i2c_device_id *id)
 {
 	struct wm8978_priv *wm8978;
 	int ret;
@@ -1032,7 +1050,7 @@ static int wm8978_i2c_probe(struct i2c_client *i2c,
 	if (wm8978 == NULL)
 		return -ENOMEM;
 
-	wm8978->regmap = devm_regmap_init_i2c(i2c, &wm8978_regmap_config);
+	wm8978->regmap = regmap_init_i2c(i2c, &wm8978_regmap_config);
 	if (IS_ERR(wm8978->regmap)) {
 		ret = PTR_ERR(wm8978->regmap);
 		dev_err(&i2c->dev, "Failed to allocate regmap: %d\n", ret);
@@ -1045,22 +1063,29 @@ static int wm8978_i2c_probe(struct i2c_client *i2c,
 	ret = regmap_write(wm8978->regmap, WM8978_RESET, 0);
 	if (ret != 0) {
 		dev_err(&i2c->dev, "Failed to issue reset: %d\n", ret);
-		return ret;
+		goto err;
 	}
 
 	ret = snd_soc_register_codec(&i2c->dev,
 			&soc_codec_dev_wm8978, &wm8978_dai, 1);
 	if (ret != 0) {
 		dev_err(&i2c->dev, "Failed to register CODEC: %d\n", ret);
-		return ret;
+		goto err;
 	}
 
 	return 0;
+
+err:
+	regmap_exit(wm8978->regmap);
+	return ret;
 }
 
-static int wm8978_i2c_remove(struct i2c_client *client)
+static __devexit int wm8978_i2c_remove(struct i2c_client *client)
 {
+	struct wm8978_priv *wm8978 = i2c_get_clientdata(client);
+
 	snd_soc_unregister_codec(&client->dev);
+	regmap_exit(wm8978->regmap);
 
 	return 0;
 }
@@ -1074,13 +1099,30 @@ MODULE_DEVICE_TABLE(i2c, wm8978_i2c_id);
 static struct i2c_driver wm8978_i2c_driver = {
 	.driver = {
 		.name = "wm8978",
+		.owner = THIS_MODULE,
 	},
 	.probe =    wm8978_i2c_probe,
-	.remove =   wm8978_i2c_remove,
+	.remove =   __devexit_p(wm8978_i2c_remove),
 	.id_table = wm8978_i2c_id,
 };
 
-module_i2c_driver(wm8978_i2c_driver);
+static int __init wm8978_modinit(void)
+{
+	int ret = 0;
+	ret = i2c_add_driver(&wm8978_i2c_driver);
+	if (ret != 0) {
+		printk(KERN_ERR "Failed to register WM8978 I2C driver: %d\n",
+		       ret);
+	}
+	return ret;
+}
+module_init(wm8978_modinit);
+
+static void __exit wm8978_exit(void)
+{
+	i2c_del_driver(&wm8978_i2c_driver);
+}
+module_exit(wm8978_exit);
 
 MODULE_DESCRIPTION("ASoC WM8978 codec driver");
 MODULE_AUTHOR("Guennadi Liakhovetski <g.liakhovetski@gmx.de>");

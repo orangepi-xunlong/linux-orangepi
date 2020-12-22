@@ -10,8 +10,8 @@
 #include <linux/gfp.h>
 #include <linux/moduleparam.h>
 #include <linux/interrupt.h>
-#include <linux/io.h>
 #include <sound/pcm.h>
+#include <asm/io.h>
 #include "pcsp.h"
 
 static bool nforce_wa;
@@ -334,7 +334,7 @@ static struct snd_pcm_ops snd_pcsp_playback_ops = {
 	.pointer = snd_pcsp_playback_pointer,
 };
 
-int snd_pcsp_new_pcm(struct snd_pcsp *chip)
+int __devinit snd_pcsp_new_pcm(struct snd_pcsp *chip)
 {
 	int err;
 

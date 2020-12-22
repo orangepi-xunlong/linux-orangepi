@@ -4,12 +4,10 @@
 #include <typedefs.h>
 #include <linuxver.h>
 #include <osl.h>
-#include <dngl_stats.h>
-#include <dhd.h>
 
 #include <bcmutils.h>
 #include <bcmendian.h>
-#include <ethernet.h>
+#include <proto/ethernet.h>
 
 #include <linux/if_arp.h>
 #include <asm/uaccess.h>
@@ -28,21 +26,21 @@
 #define ESCAN_ERROR(x) \
 	do { \
 		if (iw_msg_level & ESCAN_ERROR_LEVEL) { \
-			printf(KERN_ERR "ESCAN-ERROR) %s : ", __func__);	\
+			printf(KERN_ERR "ESCAN-ERROR) ");	\
 			printf x; \
 		} \
 	} while (0)
 #define ESCAN_SCAN(x) \
 	do { \
 		if (iw_msg_level & ESCAN_SCAN_LEVEL) { \
-			printf(KERN_ERR "ESCAN-SCAN) %s : ", __func__);	\
+			printf(KERN_ERR "ESCAN-SCAN) ");	\
 			printf x; \
 		} \
 	} while (0)
 #define ESCAN_TRACE(x) \
 	do { \
 		if (iw_msg_level & ESCAN_TRACE_LEVEL) { \
-			printf(KERN_ERR "ESCAN-TRACE) %s : ", __func__);	\
+			printf(KERN_ERR "ESCAN-TRACE) ");	\
 			printf x; \
 		} \
 	} while (0)
@@ -54,7 +52,6 @@
 #define dtoh16(i) (i)
 #define htodchanspec(i) (i)
 #define dtohchanspec(i) (i)
-#define WL_EXTRA_BUF_MAX 2048
 
 #define wl_escan_get_buf(a) ((wl_scan_results_t *) (a)->escan_buf)
 
@@ -71,6 +68,16 @@ typedef struct {
 	struct ether_addr BSSID;
 } removal_element_t;
 #endif /* ESCAN_BUF_OVERFLOW_MGMT */
+
+struct wl_escan_info *g_escan = NULL;
+
+#if defined(RSSIAVG)
+static wl_rssi_cache_ctrl_t g_rssi_cache_ctrl;
+static wl_rssi_cache_ctrl_t g_connected_rssi_cache_ctrl;
+#endif
+#if defined(BSSCACHE)
+static wl_bss_cache_ctrl_t g_bss_cache_ctrl;
+#endif
 
 /* Return a new chanspec given a legacy chanspec
  * Returns INVCHANSPEC on error
@@ -179,9 +186,9 @@ wl_chspec_driver_to_host(int ioctl_ver, chanspec_t chanspec)
  * Returns INVCHANSPEC on error
  */
 static chanspec_t
-wl_chspec_host_to_driver(int ioctl_ver, chanspec_t chanspec)
+wl_chspec_host_to_driver(chanspec_t chanspec)
 {
-	if (ioctl_ver == 1) {
+	if (1) {
 		chanspec = wl_chspec_to_legacy(chanspec);
 		if (chanspec == INVCHANSPEC) {
 			return chanspec;
@@ -197,7 +204,7 @@ wl_chspec_host_to_driver(int ioctl_ver, chanspec_t chanspec)
  * Returns INVCHANSPEC on error
  */
 static chanspec_t
-wl_ch_host_to_driver(int ioctl_ver, s32 bssidx, u16 channel)
+wl_ch_host_to_driver(s32 bssidx, u16 channel)
 {
 	chanspec_t chanspec;
 
@@ -212,7 +219,7 @@ wl_ch_host_to_driver(int ioctl_ver, s32 bssidx, u16 channel)
 
 	chanspec |= WL_CHANSPEC_CTL_SB_NONE;
 
-	return wl_chspec_host_to_driver(ioctl_ver, chanspec);
+	return wl_chspec_host_to_driver(chanspec);
 }
 
 static inline struct wl_bss_info *next_bss(struct wl_scan_results *list, struct wl_bss_info *bss)
@@ -397,7 +404,7 @@ static s32 wl_escan_event_handler(void *data)
 			}
 fail:
 			wl_put_event(e);
-			DHD_EVENT_WAKE_UNLOCK(escan->pub);
+			DHD_OS_WAKE_UNLOCK(escan->pub);
 		}
 	}
 	printf("%s: was terminated\n", __FUNCTION__);
@@ -406,11 +413,10 @@ fail:
 }
 
 void
-wl_escan_event(struct net_device *dev, const wl_event_msg_t *e, void *data)
+wl_escan_event(struct net_device *ndev, const wl_event_msg_t * e, void *data)
 {
-	struct dhd_pub *dhd = dhd_get_pub(dev);
-	struct wl_escan_info *escan = dhd->escan;
 	u32 event_type = ntoh32(e->event_type);
+	struct wl_escan_info *escan = g_escan;
 
 	if (!escan || !escan->dev) {
 		return;
@@ -433,11 +439,11 @@ wl_escan_event(struct net_device *dev, const wl_event_msg_t *e, void *data)
 		ESCAN_TRACE(("PNOEVENT: PNO_NET_LOST\n"));
 	}
 
-	DHD_EVENT_WAKE_LOCK(escan->pub);
-	if (likely(!wl_enq_event(escan, dev, event_type, e, data))) {
+	DHD_OS_WAKE_LOCK(escan->pub);
+	if (likely(!wl_enq_event(escan, ndev, event_type, e, data))) {
 		wl_wakeup_event(escan);
 	} else {
-		DHD_EVENT_WAKE_UNLOCK(escan->pub);
+		DHD_OS_WAKE_UNLOCK(escan->pub);
 	}
 }
 
@@ -453,41 +459,34 @@ static s32 wl_escan_inform_bss(struct wl_escan_info *escan)
 
 	/* Delete disconnected cache */
 #if defined(BSSCACHE)
-	wl_delete_disconnected_bss_cache(&escan->g_bss_cache_ctrl, (u8 *)&escan->disconnected_bssid);
+	wl_delete_disconnected_bss_cache(&g_bss_cache_ctrl, (u8*)&escan->disconnected_bssid);
 #if defined(RSSIAVG)
-	wl_delete_disconnected_rssi_cache(&escan->g_rssi_cache_ctrl, (u8 *)&escan->disconnected_bssid);
+	wl_delete_disconnected_rssi_cache(&g_rssi_cache_ctrl, (u8*)&escan->disconnected_bssid);
 #endif
 #endif
 
 	/* Update cache */
 #if defined(RSSIAVG)
-	wl_update_rssi_cache(&escan->g_rssi_cache_ctrl, bss_list);
+	wl_update_rssi_cache(&g_rssi_cache_ctrl, bss_list);
 	if (!in_atomic())
-		wl_update_connected_rssi_cache(escan->dev, &escan->g_rssi_cache_ctrl, &rssi);
+		wl_update_connected_rssi_cache(escan->dev, &g_rssi_cache_ctrl, &rssi);
 #endif
 #if defined(BSSCACHE)
-	wl_update_bss_cache(&escan->g_bss_cache_ctrl,
+	wl_update_bss_cache(&g_bss_cache_ctrl,
 #if defined(RSSIAVG)
-		&escan->g_rssi_cache_ctrl,
+		&g_rssi_cache_ctrl,
 #endif
 		bss_list);
 #endif
 
 	/* delete dirty cache */
 #if defined(RSSIAVG)
-	wl_delete_dirty_rssi_cache(&escan->g_rssi_cache_ctrl);
-	wl_reset_rssi_cache(&escan->g_rssi_cache_ctrl);
+	wl_delete_dirty_rssi_cache(&g_rssi_cache_ctrl);
+	wl_reset_rssi_cache(&g_rssi_cache_ctrl);
 #endif
 #if defined(BSSCACHE)
-	wl_delete_dirty_bss_cache(&escan->g_bss_cache_ctrl);
-	wl_reset_bss_cache(&escan->g_bss_cache_ctrl);
-	if (escan->autochannel)
-		wl_ext_get_best_channel(escan->dev, &escan->g_bss_cache_ctrl,
-			escan->ioctl_ver &escan->best_2g_ch, &escan->best_5g_ch);
-#else
-	if (escan->autochannel)
-		wl_ext_get_best_channel(escan->dev, bss_list, escan->ioctl_ver,
-			&escan->best_2g_ch, &escan->best_5g_ch);
+	wl_delete_dirty_bss_cache(&g_bss_cache_ctrl);
+	wl_reset_bss_cache(&g_bss_cache_ctrl);
 #endif
 
 	ESCAN_TRACE(("scanned AP count (%d)\n", bss_list->count));
@@ -496,8 +495,7 @@ static s32 wl_escan_inform_bss(struct wl_escan_info *escan)
 }
 
 static wl_scan_params_t *
-wl_escan_alloc_params(struct wl_escan_info *escan, int channel,
-	int nprobes, int *out_params_size)
+wl_escan_alloc_params(int channel, int nprobes, int *out_params_size)
 {
 	wl_scan_params_t *params;
 	int params_size;
@@ -528,7 +526,7 @@ wl_escan_alloc_params(struct wl_escan_info *escan, int channel,
 	if (channel == -1)
 		params->channel_list[0] = htodchanspec(channel);
 	else
-		params->channel_list[0] = wl_ch_host_to_driver(escan->ioctl_ver, bssidx, channel);
+		params->channel_list[0] = wl_ch_host_to_driver(bssidx, channel);
 
 	/* Our scan params have 1 channel and 0 ssids */
 	params->channel_num = htod32((0 << WL_SCAN_PARAMS_NSSID_SHIFT) |
@@ -545,7 +543,7 @@ static void wl_escan_abort(struct wl_escan_info *escan)
 	s32 err = BCME_OK;
 	if (!in_atomic()) {
 		/* Our scan params only need space for 1 channel and 0 ssids */
-		params = wl_escan_alloc_params(escan, -1, 0, &params_size);
+		params = wl_escan_alloc_params(-1, 0, &params_size);
 		if (params == NULL) {
 			ESCAN_ERROR(("scan params allocation failed \n"));
 			err = -ENOMEM;
@@ -848,21 +846,20 @@ static s32 wl_escan_handler(struct wl_escan_info *escan,
 	}
 	else if (status == WLC_E_STATUS_SUCCESS) {
 		escan->escan_state = ESCAN_STATE_IDLE;
-		ESCAN_TRACE(("ESCAN COMPLETED\n"));
-		escan->bss_list = wl_escan_get_buf(escan);
-		ESCAN_TRACE(("SCAN COMPLETED: scanned AP count=%d\n",
-			escan->bss_list->count));
-		wl_escan_inform_bss(escan);
-		wl_notify_escan_complete(escan, false);
+
+			ESCAN_TRACE(("ESCAN COMPLETED\n"));
+			escan->bss_list = wl_escan_get_buf(escan);
+			ESCAN_TRACE(("SCAN COMPLETED: scanned AP count=%d\n",
+				escan->bss_list->count));
+			wl_escan_inform_bss(escan);
+			wl_notify_escan_complete(escan, false);
+
 	} else if ((status == WLC_E_STATUS_ABORT) || (status == WLC_E_STATUS_NEWSCAN) ||
 		(status == WLC_E_STATUS_11HQUIET) || (status == WLC_E_STATUS_CS_ABORT) ||
 		(status == WLC_E_STATUS_NEWASSOC)) {
 		/* Handle all cases of scan abort */
 		escan->escan_state = ESCAN_STATE_IDLE;
 		ESCAN_TRACE(("ESCAN ABORT reason: %d\n", status));
-		escan->bss_list = wl_escan_get_buf(escan);
-		ESCAN_TRACE(("SCAN ABORT: scanned AP count=%d\n",
-			escan->bss_list->count));
 		wl_escan_inform_bss(escan);
 		wl_notify_escan_complete(escan, false);
 	} else if (status == WLC_E_STATUS_TIMEOUT) {
@@ -871,7 +868,6 @@ static s32 wl_escan_handler(struct wl_escan_info *escan,
 		if (e->reason == 0xFFFFFFFF) {
 			wl_notify_escan_complete(escan, true);
 		}
-		escan->escan_state = ESCAN_STATE_IDLE;
 	} else {
 		ESCAN_ERROR(("unexpected Escan Event %d : abort\n", status));
 		escan->escan_state = ESCAN_STATE_IDLE;
@@ -946,8 +942,7 @@ wl_escan_prep(struct wl_escan_info *escan, wl_uint32_list_t *list,
 			params->channel_list[j] |= chanspec;
 			ESCAN_SCAN(("Chan : %d, Channel spec: %x \n",
 				channel, params->channel_list[j]));
-			params->channel_list[j] = wl_chspec_host_to_driver(escan->ioctl_ver,
-				params->channel_list[j]);
+			params->channel_list[j] = wl_chspec_host_to_driver(params->channel_list[j]);
 			j++;
 		}
 	} else {
@@ -985,8 +980,9 @@ wl_escan_prep(struct wl_escan_info *escan, wl_uint32_list_t *list,
 	return err;
 }
 
-static int wl_escan_reset(struct wl_escan_info *escan)
-{
+static int wl_escan_reset(void) {
+	struct wl_escan_info *escan = g_escan;
+
 	if (timer_pending(&escan->scan_timeout))
 		del_timer_sync(&escan->scan_timeout);
 	escan->escan_state = ESCAN_STATE_IDLE;
@@ -994,20 +990,10 @@ static int wl_escan_reset(struct wl_escan_info *escan)
 	return 0;
 }
 
-static void wl_escan_timeout(
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-	struct timer_list *t
-#else
-	unsigned long data
-#endif
-)
+static void wl_escan_timeout(unsigned long data)
 {
 	wl_event_msg_t msg;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-	struct wl_escan_info *escan = from_timer(escan, t, scan_timeout);
-#else
 	struct wl_escan_info *escan = (struct wl_escan_info *)data;
-#endif
 	struct wl_scan_results *bss_list;
 	struct wl_bss_info *bi = NULL;
 	s32 i;
@@ -1053,13 +1039,12 @@ wl_escan_set_scan(
 	char *extra
 )
 {
-	struct dhd_pub *dhd = dhd_get_pub(dev);
-	struct wl_escan_info *escan = dhd->escan;
 	s32 err = BCME_OK;
 	s32 params_size = (WL_SCAN_PARAMS_FIXED_SIZE + OFFSETOF(wl_escan_params_t, params));
 	wl_escan_params_t *params = NULL;
 	scb_val_t scbval;
 	static int cnt = 0;
+	struct wl_escan_info *escan = NULL;
 	wlc_ssid_t ssid;
 	u32 n_channels = 0;
 	wl_uint32_list_t *list;
@@ -1068,12 +1053,9 @@ wl_escan_set_scan(
 
 	ESCAN_TRACE(("Enter \n"));
 
+	escan = g_escan;
 	if (!escan) {
-		ESCAN_ERROR(("device is not ready\n"));
-		return -EIO;
-	}
-	if (escan->escan_state == ESCAN_STATE_DOWN) {
-		ESCAN_ERROR(("STATE is down\n"));
+		ESCAN_ERROR(("device is not ready\n"));           \
 		return -EIO;
 	}
 	mutex_lock(&escan->usr_sync);
@@ -1081,12 +1063,12 @@ wl_escan_set_scan(
 	if (!escan->ioctl_ver) {
 		val = 1;
 		if ((err = wldev_ioctl(dev, WLC_GET_VERSION, &val, sizeof(int), false) < 0)) {
-			ESCAN_ERROR(("WLC_GET_VERSION failed, err=%d\n", err));
+			ANDROID_ERROR(("WLC_GET_VERSION failed, err=%d\n", err));
 			goto exit;
 		}
 		val = dtoh32(val);
 		if (val != WLC_IOCTL_VERSION && val != 1) {
-			ESCAN_ERROR(("Version mismatch, please upgrade. Got %d, expected %d or 1\n",
+			ANDROID_ERROR(("Version mismatch, please upgrade. Got %d, expected %d or 1\n",
 				val, WLC_IOCTL_VERSION));
 			goto exit;
 		}
@@ -1154,14 +1136,13 @@ wl_escan_set_scan(
 
 	err = wldev_iovar_setbuf(dev, "escan", params, params_size,
 		escan->escan_ioctl_buf, WLC_IOCTL_MEDLEN, NULL);
-	printf("%s: LEGACY_SCAN\n", __FUNCTION__);
 	if (unlikely(err)) {
 		if (err == BCME_EPERM)
 			/* Scan Not permitted at this point of time */
 			ESCAN_TRACE(("Escan not permitted at this time (%d)\n", err));
 		else
 			ESCAN_ERROR(("Escan set error (%d)\n", err));
-		wl_escan_reset(escan);
+		wl_escan_reset();
 	}
 	kfree(params);
 
@@ -1189,133 +1170,25 @@ exit:
 }
 
 int
-wl_escan_merge_scan_results(struct net_device *dev, struct iw_request_info *info,
-	char *extra, wl_bss_info_t *bi, int *len, int max_size)
+wl_escan_get_scan(
+	struct net_device *dev,
+	struct iw_request_info *info,
+	struct iw_point *dwrq,
+	char *extra
+)
 {
-	struct dhd_pub *dhd = dhd_get_pub(dev);
-	struct wl_escan_info *escan = dhd->escan;
 	s32 err = BCME_OK;
 	struct iw_event	iwe;
-	int j;
-	char *event = extra, *end = extra + max_size - WE_ADD_EVENT_FIX, *value;
+	int i, j;
+	char *event = extra, *end = extra + dwrq->length, *value;
 	int16 rssi;
 	int channel;
-
-	/* overflow check cover fields before wpa IEs */
-	if (event + ETHER_ADDR_LEN + bi->SSID_len + IW_EV_UINT_LEN + IW_EV_FREQ_LEN +
-		IW_EV_QUAL_LEN >= end) {
-		err = -E2BIG;
-		goto exit;
-	}
-
-#if defined(RSSIAVG)
-	rssi = wl_get_avg_rssi(&escan->g_rssi_cache_ctrl, &bi->BSSID);
-	if (rssi == RSSI_MINVAL)
-		rssi = MIN(dtoh16(bi->RSSI), RSSI_MAXVAL);
-#else
-	// terence 20150419: limit the max. rssi to -2 or the bss will be filtered out in android OS
-	rssi = MIN(dtoh16(bi->RSSI), RSSI_MAXVAL);
-#endif
-	channel = wf_chspec_ctlchan(wl_chspec_driver_to_host(escan->ioctl_ver, bi->chanspec));
-	ESCAN_SCAN(("BSSID="MACSTR", channel=%d, RSSI=%d, SSID=\"%s\"\n",
-		MAC2STR(bi->BSSID.octet), channel, rssi, bi->SSID));
-
-	/* First entry must be the BSSID */
-	iwe.cmd = SIOCGIWAP;
-	iwe.u.ap_addr.sa_family = ARPHRD_ETHER;
-	memcpy(iwe.u.ap_addr.sa_data, &bi->BSSID, ETHER_ADDR_LEN);
-	event = IWE_STREAM_ADD_EVENT(info, event, end, &iwe, IW_EV_ADDR_LEN);
-
-	/* SSID */
-	iwe.u.data.length = dtoh32(bi->SSID_len);
-	iwe.cmd = SIOCGIWESSID;
-	iwe.u.data.flags = 1;
-	event = IWE_STREAM_ADD_POINT(info, event, end, &iwe, bi->SSID);
-
-	/* Mode */
-	if (dtoh16(bi->capability) & (DOT11_CAP_ESS | DOT11_CAP_IBSS)) {
-		iwe.cmd = SIOCGIWMODE;
-		if (dtoh16(bi->capability) & DOT11_CAP_ESS)
-			iwe.u.mode = IW_MODE_INFRA;
-		else
-			iwe.u.mode = IW_MODE_ADHOC;
-		event = IWE_STREAM_ADD_EVENT(info, event, end, &iwe, IW_EV_UINT_LEN);
-	}
-
-	/* Channel */
-	iwe.cmd = SIOCGIWFREQ;
-#if 1
-	iwe.u.freq.m = wf_channel2mhz(channel, channel <= CH_MAX_2G_CHANNEL ?
-			WF_CHAN_FACTOR_2_4_G : WF_CHAN_FACTOR_5_G);
-#else
-	iwe.u.freq.m = wf_channel2mhz(bi->n_cap ?
-			bi->ctl_ch : CHSPEC_CHANNEL(bi->chanspec),
-			CHSPEC_CHANNEL(bi->chanspec) <= CH_MAX_2G_CHANNEL ?
-			WF_CHAN_FACTOR_2_4_G : WF_CHAN_FACTOR_5_G);
-#endif
-	iwe.u.freq.e = 6;
-	event = IWE_STREAM_ADD_EVENT(info, event, end, &iwe, IW_EV_FREQ_LEN);
-
-	/* Channel quality */
-	iwe.cmd = IWEVQUAL;
-	iwe.u.qual.qual = rssi_to_qual(rssi);
-	iwe.u.qual.level = 0x100 + rssi;
-	iwe.u.qual.noise = 0x100 + bi->phy_noise;
-	event = IWE_STREAM_ADD_EVENT(info, event, end, &iwe, IW_EV_QUAL_LEN);
-
-	wl_iw_handle_scanresults_ies(&event, end, info, bi);
-
-	/* Encryption */
-	iwe.cmd = SIOCGIWENCODE;
-	if (dtoh16(bi->capability) & DOT11_CAP_PRIVACY)
-		iwe.u.data.flags = IW_ENCODE_ENABLED | IW_ENCODE_NOKEY;
-	else
-		iwe.u.data.flags = IW_ENCODE_DISABLED;
-	iwe.u.data.length = 0;
-	event = IWE_STREAM_ADD_POINT(info, event, end, &iwe, (char *)event);
-
-	/* Rates */
-	if (bi->rateset.count <= sizeof(bi->rateset.rates)) {
-		if (event + IW_MAX_BITRATES*IW_EV_PARAM_LEN >= end) {
-			err = -E2BIG;
-			goto exit;
-		}
-		value = event + IW_EV_LCP_LEN;
-		iwe.cmd = SIOCGIWRATE;
-		/* Those two flags are ignored... */
-		iwe.u.bitrate.fixed = iwe.u.bitrate.disabled = 0;
-		for (j = 0; j < bi->rateset.count && j < IW_MAX_BITRATES; j++) {
-			iwe.u.bitrate.value = (bi->rateset.rates[j] & 0x7f) * 500000;
-			value = IWE_STREAM_ADD_VALUE(info, event, value, end, &iwe,
-				IW_EV_PARAM_LEN);
-		}
-		event = value;
-	}
-	*len = event - extra;
-	if (*len < 0)
-		ESCAN_ERROR(("==> Wrong size\n"));
-
-exit:
-	return err;
-}
-
-int
-wl_escan_get_scan(struct net_device *dev, struct iw_request_info *info,
-	struct iw_point *dwrq, char *extra)
-{
-	struct dhd_pub *dhd = dhd_get_pub(dev);
-	struct wl_escan_info *escan = dhd->escan;
-	s32 err = BCME_OK;
-	int i = 0;
-	int len_prep = 0, len_ret = 0;
 	wl_bss_info_t *bi = NULL;
+	struct wl_escan_info *escan = g_escan;
 	struct wl_scan_results *bss_list;
-	__u16 buflen_from_user = dwrq->length;
 #if defined(BSSCACHE)
 	wl_bss_cache_t *node;
 #endif
-	char *buf = NULL;
-	struct ether_addr cur_bssid;
 
 	ESCAN_TRACE(("%s: %s SIOCGIWSCAN, len=%d\n", __FUNCTION__, dev->name, dwrq->length));
 
@@ -1330,40 +1203,10 @@ wl_escan_get_scan(struct net_device *dev, struct iw_request_info *info,
 		err = -EAGAIN;
 		goto exit;
 	}
-	if (!escan->bss_list) {
-		ESCAN_ERROR(("%s: scan not ready\n", dev->name));
-		err = -EAGAIN;
-		goto exit;
-	}
-
-	err = wldev_ioctl(dev, WLC_GET_BSSID, &cur_bssid, sizeof(cur_bssid), false);
-	if (err != BCME_NOTASSOCIATED && memcmp(&ether_null, &cur_bssid, ETHER_ADDR_LEN)) {
-		// merge current connected bss
-		buf = kzalloc(WL_EXTRA_BUF_MAX, GFP_ATOMIC);
-		if (!buf) {
-			ESCAN_ERROR(("buffer alloc failed.\n"));
-			err = BCME_NOMEM;
-			goto exit;
-		}
-		*(u32 *)buf = htod32(WL_EXTRA_BUF_MAX);
-		err = wldev_ioctl(dev, WLC_GET_BSS_INFO, buf, WL_EXTRA_BUF_MAX, false);
-		if (unlikely(err)) {
-			ESCAN_ERROR(("Could not get bss info %d\n", err));
-			goto exit;
-		}
-		bi = (struct wl_bss_info *)(buf + 4);
-		len_prep = 0;
-		err = wl_escan_merge_scan_results(dev, info, extra+len_ret, bi,
-			&len_prep, buflen_from_user-len_ret);
-		len_ret += len_prep;
-		if (err)
-			goto exit;
-		bi = NULL;
-	}
 
 #if defined(BSSCACHE)
-	bss_list = &escan->g_bss_cache_ctrl.m_cache_head->results;
-	node = escan->g_bss_cache_ctrl.m_cache_head;
+	bss_list = &g_bss_cache_ctrl.m_cache_head->results;
+	node = g_bss_cache_ctrl.m_cache_head;
 	for (i=0; node && i<IW_MAX_AP; i++)
 #else
 	bss_list = escan->bss_list;
@@ -1374,56 +1217,107 @@ wl_escan_get_scan(struct net_device *dev, struct iw_request_info *info,
 #if defined(BSSCACHE)
 		bi = node->results.bss_info;
 #endif
-		if (!memcmp(&bi->BSSID, &cur_bssid, ETHER_ADDR_LEN)) {
-			ESCAN_SCAN(("skip connected AP %pM\n", &cur_bssid));
-#if defined(BSSCACHE)
-			node = node->next;
-#endif
-			continue;
-		}
-		len_prep = 0;
-		err = wl_escan_merge_scan_results(dev, info, extra+len_ret, bi,
-			&len_prep, buflen_from_user-len_ret);
-		len_ret += len_prep;
-		if (err)
+		/* overflow check cover fields before wpa IEs */
+		if (event + ETHER_ADDR_LEN + bi->SSID_len + IW_EV_UINT_LEN + IW_EV_FREQ_LEN +
+			IW_EV_QUAL_LEN >= end) {
+			err = -E2BIG;
 			goto exit;
+		}
+
+#if defined(RSSIAVG)
+		rssi = wl_get_avg_rssi(&g_rssi_cache_ctrl, &bi->BSSID);
+		if (rssi == RSSI_MINVAL)
+			rssi = MIN(dtoh16(bi->RSSI), RSSI_MAXVAL);
+#else
+		// terence 20150419: limit the max. rssi to -2 or the bss will be filtered out in android OS
+		rssi = MIN(dtoh16(bi->RSSI), RSSI_MAXVAL);
+#endif
+		channel = wf_chspec_ctlchan(wl_chspec_driver_to_host(escan->ioctl_ver, bi->chanspec));
+		ESCAN_SCAN(("%s: BSSID="MACSTR", channel=%d, RSSI=%d, SSID=\"%s\"\n",
+		__FUNCTION__, MAC2STR(bi->BSSID.octet), channel, rssi, bi->SSID));
+
+		/* First entry must be the BSSID */
+		iwe.cmd = SIOCGIWAP;
+		iwe.u.ap_addr.sa_family = ARPHRD_ETHER;
+		memcpy(iwe.u.ap_addr.sa_data, &bi->BSSID, ETHER_ADDR_LEN);
+		event = IWE_STREAM_ADD_EVENT(info, event, end, &iwe, IW_EV_ADDR_LEN);
+
+		/* SSID */
+		iwe.u.data.length = dtoh32(bi->SSID_len);
+		iwe.cmd = SIOCGIWESSID;
+		iwe.u.data.flags = 1;
+		event = IWE_STREAM_ADD_POINT(info, event, end, &iwe, bi->SSID);
+
+		/* Mode */
+		if (dtoh16(bi->capability) & (DOT11_CAP_ESS | DOT11_CAP_IBSS)) {
+			iwe.cmd = SIOCGIWMODE;
+			if (dtoh16(bi->capability) & DOT11_CAP_ESS)
+				iwe.u.mode = IW_MODE_INFRA;
+			else
+				iwe.u.mode = IW_MODE_ADHOC;
+			event = IWE_STREAM_ADD_EVENT(info, event, end, &iwe, IW_EV_UINT_LEN);
+		}
+
+		/* Channel */
+		iwe.cmd = SIOCGIWFREQ;
+#if 1
+		iwe.u.freq.m = wf_channel2mhz(channel, channel <= CH_MAX_2G_CHANNEL ?
+				WF_CHAN_FACTOR_2_4_G : WF_CHAN_FACTOR_5_G);
+#else
+		iwe.u.freq.m = wf_channel2mhz(bi->n_cap ?
+				bi->ctl_ch : CHSPEC_CHANNEL(bi->chanspec),
+				CHSPEC_CHANNEL(bi->chanspec) <= CH_MAX_2G_CHANNEL ?
+				WF_CHAN_FACTOR_2_4_G : WF_CHAN_FACTOR_5_G);
+#endif
+		iwe.u.freq.e = 6;
+		event = IWE_STREAM_ADD_EVENT(info, event, end, &iwe, IW_EV_FREQ_LEN);
+
+		/* Channel quality */
+		iwe.cmd = IWEVQUAL;
+		iwe.u.qual.qual = rssi_to_qual(rssi);
+		iwe.u.qual.level = 0x100 + rssi;
+		iwe.u.qual.noise = 0x100 + bi->phy_noise;
+		event = IWE_STREAM_ADD_EVENT(info, event, end, &iwe, IW_EV_QUAL_LEN);
+
+		wl_iw_handle_scanresults_ies(&event, end, info, bi);
+
+		/* Encryption */
+		iwe.cmd = SIOCGIWENCODE;
+		if (dtoh16(bi->capability) & DOT11_CAP_PRIVACY)
+			iwe.u.data.flags = IW_ENCODE_ENABLED | IW_ENCODE_NOKEY;
+		else
+			iwe.u.data.flags = IW_ENCODE_DISABLED;
+		iwe.u.data.length = 0;
+		event = IWE_STREAM_ADD_POINT(info, event, end, &iwe, (char *)event);
+
+		/* Rates */
+		if (bi->rateset.count <= sizeof(bi->rateset.rates)) {
+			if (event + IW_MAX_BITRATES*IW_EV_PARAM_LEN >= end) {
+				err = -E2BIG;
+				goto exit;
+			}
+			value = event + IW_EV_LCP_LEN;
+			iwe.cmd = SIOCGIWRATE;
+			/* Those two flags are ignored... */
+			iwe.u.bitrate.fixed = iwe.u.bitrate.disabled = 0;
+			for (j = 0; j < bi->rateset.count && j < IW_MAX_BITRATES; j++) {
+				iwe.u.bitrate.value = (bi->rateset.rates[j] & 0x7f) * 500000;
+				value = IWE_STREAM_ADD_VALUE(info, event, value, end, &iwe,
+					IW_EV_PARAM_LEN);
+			}
+			event = value;
+		}
 #if defined(BSSCACHE)
 		node = node->next;
 #endif
 	}
 
-	if ((len_ret + WE_ADD_EVENT_FIX) < dwrq->length)
-		dwrq->length = len_ret;
-
+	dwrq->length = event - extra;
 	dwrq->flags = 0;	/* todo */
-exit:
-	kfree(buf);
-	dwrq->length = len_ret;
 	ESCAN_SCAN(("scanned AP count (%d)\n", i));
+exit:
 	mutex_unlock(&escan->usr_sync);
 	return err;
-}
-
-s32 wl_escan_autochannel(struct net_device *dev, char *command, int total_len)
-{
-	struct dhd_pub *dhd = dhd_get_pub(dev);
-	struct wl_escan_info *escan = dhd->escan;
-	int ret = 0;
-	int bytes_written = -1;
-
-	sscanf(command, "%*s %d", &escan->autochannel);
-
-	if (escan->autochannel == 0) {
-		escan->best_2g_ch = 0;
-		escan->best_5g_ch = 0;
-	} else if (escan->autochannel == 2) {
-		bytes_written = snprintf(command, total_len, "2g=%d 5g=%d",
-			escan->best_2g_ch, escan->best_5g_ch);
-		ESCAN_TRACE(("%s: command result is %s\n", __FUNCTION__, command));
-		ret = bytes_written;
-	}
-
-	return ret;
 }
 
 static s32 wl_create_event_handler(struct wl_escan_info *escan)
@@ -1446,48 +1340,44 @@ static void wl_destroy_event_handler(struct wl_escan_info *escan)
 		PROC_STOP(&escan->event_tsk);
 }
 
-static void wl_escan_deinit(struct wl_escan_info *escan)
+static void wl_escan_deinit(void)
 {
+	struct wl_escan_info *escan = g_escan;
+
 	printf("%s: Enter\n", __FUNCTION__);
 	if (!escan) {
-		ESCAN_ERROR(("device is not ready\n"));
+		ESCAN_ERROR(("device is not ready\n"));           \
 		return;
 	}
 	wl_destroy_event_handler(escan);
 	wl_flush_eq(escan);
 	del_timer_sync(&escan->scan_timeout);
-	escan->escan_state = ESCAN_STATE_DOWN;
 
 #if defined(RSSIAVG)
-	wl_free_rssi_cache(&escan->g_rssi_cache_ctrl);
+	wl_free_rssi_cache(&g_rssi_cache_ctrl);
 #endif
 #if defined(BSSCACHE)
-	wl_free_bss_cache(&escan->g_bss_cache_ctrl);
+	wl_free_bss_cache(&g_bss_cache_ctrl);
 #endif
-	wl_ext_add_remove_pm_enable_work(&escan->conn_info, FALSE);
 }
 
-static s32 wl_escan_init(struct wl_escan_info *escan)
+static s32 wl_escan_init(void)
 {
+	struct wl_escan_info *escan = g_escan;
 	int err = 0;
 
 	printf("%s: Enter\n", __FUNCTION__);
 	if (!escan) {
-		ESCAN_ERROR(("device is not ready\n"));
+		ESCAN_ERROR(("device is not ready\n"));           \
 		return -EIO;
 	}
 
 	/* Init scan_timeout timer */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-	timer_setup(&escan->scan_timeout, wl_escan_timeout, 0);
-#else
 	init_timer(&escan->scan_timeout);
 	escan->scan_timeout.data = (unsigned long) escan;
 	escan->scan_timeout.function = wl_escan_timeout;
-#endif
 
 	if (wl_create_event_handler(escan)) {
-		ESCAN_ERROR(("device is not ready\n"));
 		err = -ENOMEM;
 		goto err;
 	}
@@ -1496,76 +1386,56 @@ static s32 wl_escan_init(struct wl_escan_info *escan)
 	escan->evt_handler[WLC_E_ESCAN_RESULT] = wl_escan_handler;
 	escan->escan_state = ESCAN_STATE_IDLE;
 
+	mutex_init(&escan->usr_sync);
+
 	return 0;
 err:
-	wl_escan_deinit(escan);
+	wl_escan_deinit();
 	return err;
 }
 
-void wl_escan_down(dhd_pub_t *dhdp)
+void wl_escan_detach(void)
 {
-	struct wl_escan_info *escan = dhdp->escan;
-
-	wl_escan_deinit(escan);
-}
-
-int wl_escan_up(struct net_device *net, dhd_pub_t *dhdp)
-{
-	struct wl_escan_info *escan = dhdp->escan;
-	int err;
-
-	err = wl_escan_init(escan);
-	if (err) {
-		ESCAN_ERROR(("wl_escan_init err %d\n", err));
-		return err;
-	}
-
-	return 0;
-}
-
-void wl_escan_detach(dhd_pub_t *dhdp)
-{
-	struct wl_escan_info *escan = dhdp->escan;
+	struct wl_escan_info *escan = g_escan;
 
 	printf("%s: Enter\n", __FUNCTION__);
 
 	if (!escan) {
-		ESCAN_ERROR(("device is not ready\n"));
+		ESCAN_ERROR(("device is not ready\n"));           \
 		return;
 	}
 
-	wl_escan_deinit(escan);
+	wl_escan_deinit();
 
 	if (escan->escan_ioctl_buf) {
 		kfree(escan->escan_ioctl_buf);
 		escan->escan_ioctl_buf = NULL;
 	}
-	DHD_OS_PREFREE(dhdp, escan, sizeof(struct wl_escan_info));
-	dhdp->escan = NULL;
+
+	kfree(escan);
+	g_escan = NULL;
 }
 
 int
-wl_escan_attach(struct net_device *dev, dhd_pub_t *dhdp)
+wl_escan_attach(struct net_device *dev, void * dhdp)
 {
 	struct wl_escan_info *escan = NULL;
-	int err = 0;
 
 	printf("%s: Enter\n", __FUNCTION__);
 
 	if (!dev)
 		return 0;
-	escan = (wl_escan_info_t *)DHD_OS_PREALLOC(dhdp, DHD_PREALLOC_WL_ESCAN_INFO, sizeof(struct wl_escan_info));
+
+	escan = kmalloc(sizeof(struct wl_escan_info), GFP_KERNEL);
 	if (!escan)
 		return -ENOMEM;
-	dhdp->escan = (void *)escan;
 	memset(escan, 0, sizeof(struct wl_escan_info));
 
 	/* we only care about main interface so save a global here */
+	g_escan = escan;
 	escan->dev = dev;
 	escan->pub = dhdp;
-	escan->conn_info.dev = dev;
-	escan->conn_info.dhd = dhdp;
-	escan->escan_state = ESCAN_STATE_DOWN;
+	escan->escan_state = ESCAN_STATE_IDLE;
 
 	escan->escan_ioctl_buf = (void *)kzalloc(WLC_IOCTL_MAXLEN, GFP_KERNEL);
 	if (unlikely(!escan->escan_ioctl_buf)) {
@@ -1573,18 +1443,13 @@ wl_escan_attach(struct net_device *dev, dhd_pub_t *dhdp)
 		goto err ;
 	}
 	wl_init_eq(escan);
-	err = wl_escan_init(escan);
-	if (err) {
-		ESCAN_ERROR(("wl_escan_init err %d\n", err));
-		return err;
-	}
-	mutex_init(&escan->usr_sync);
-	mutex_init(&escan->conn_info.pm_sync);
-	INIT_DELAYED_WORK(&escan->conn_info.pm_enable_work, wl_ext_pm_work_handler);
+#ifdef WL_ESCAN
+	wl_escan_init();
+#endif
 
 	return 0;
 err:
-	wl_escan_detach(dhdp);
+	wl_escan_detach();
 	return -ENOMEM;
 }
 

@@ -65,7 +65,7 @@ static void __init ebsa110_init_irq(void)
 	for (irq = 0; irq < NR_IRQS; irq++) {
 		irq_set_chip_and_handler(irq, &ebsa110_irq_chip,
 					 handle_level_irq);
-		irq_clear_status_flags(irq, IRQ_NOREQUEST | IRQ_NOPROBE);
+		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
 	}
 }
 
@@ -74,22 +74,22 @@ static struct map_desc ebsa110_io_desc[] __initdata = {
 	 * sparse external-decode ISAIO space
 	 */
 	{	/* IRQ_STAT/IRQ_MCLR */
-		.virtual	= (unsigned long)IRQ_STAT,
+		.virtual	= IRQ_STAT,
 		.pfn		= __phys_to_pfn(TRICK4_PHYS),
 		.length		= TRICK4_SIZE,
 		.type		= MT_DEVICE
 	}, {	/* IRQ_MASK/IRQ_MSET */
-		.virtual	= (unsigned long)IRQ_MASK,
+		.virtual	= IRQ_MASK,
 		.pfn		= __phys_to_pfn(TRICK3_PHYS),
 		.length		= TRICK3_SIZE,
 		.type		= MT_DEVICE
 	}, {	/* SOFT_BASE */
-		.virtual	= (unsigned long)SOFT_BASE,
+		.virtual	= SOFT_BASE,
 		.pfn		= __phys_to_pfn(TRICK1_PHYS),
 		.length		= TRICK1_SIZE,
 		.type		= MT_DEVICE
 	}, {	/* PIT_BASE */
-		.virtual	= (unsigned long)PIT_BASE,
+		.virtual	= PIT_BASE,
 		.pfn		= __phys_to_pfn(TRICK0_PHYS),
 		.length		= TRICK0_SIZE,
 		.type		= MT_DEVICE
@@ -116,7 +116,7 @@ static void __init ebsa110_map_io(void)
 	iotable_init(ebsa110_io_desc, ARRAY_SIZE(ebsa110_io_desc));
 }
 
-static void __iomem *ebsa110_ioremap_caller(phys_addr_t cookie, size_t size,
+static void __iomem *ebsa110_ioremap_caller(unsigned long cookie, size_t size,
 					    unsigned int flags, void *caller)
 {
 	return (void __iomem *)cookie;
@@ -158,7 +158,7 @@ static void __init ebsa110_init_early(void)
  * interrupt, then the PIT counter will roll over (ie, be negative).
  * This actually works out to be convenient.
  */
-static u32 ebsa110_gettimeoffset(void)
+static unsigned long ebsa110_gettimeoffset(void)
 {
 	unsigned long offset, count;
 
@@ -181,7 +181,7 @@ static u32 ebsa110_gettimeoffset(void)
 	 */
 	offset = offset * (1000000 / HZ) / COUNT;
 
-	return offset * 1000;
+	return offset;
 }
 
 static irqreturn_t
@@ -206,17 +206,15 @@ ebsa110_timer_interrupt(int irq, void *dev_id)
 
 static struct irqaction ebsa110_timer_irq = {
 	.name		= "EBSA110 Timer Tick",
-	.flags		= IRQF_TIMER | IRQF_IRQPOLL,
+	.flags		= IRQF_DISABLED | IRQF_TIMER | IRQF_IRQPOLL,
 	.handler	= ebsa110_timer_interrupt,
 };
 
 /*
  * Set up timer interrupt.
  */
-void __init ebsa110_timer_init(void)
+static void __init ebsa110_timer_init(void)
 {
-	arch_gettimeoffset = ebsa110_gettimeoffset;
-
 	/*
 	 * Timer 1, mode 2, LSB/MSB
 	 */
@@ -226,6 +224,11 @@ void __init ebsa110_timer_init(void)
 
 	setup_irq(IRQ_EBSA110_TIMER0, &ebsa110_timer_irq);
 }
+
+static struct sys_timer ebsa110_timer = {
+	.init		= ebsa110_timer_init,
+	.offset		= ebsa110_gettimeoffset,
+};
 
 static struct plat_serial8250_port serial_platform_data[] = {
 	{
@@ -311,7 +314,7 @@ static int __init ebsa110_init(void)
 
 arch_initcall(ebsa110_init);
 
-static void ebsa110_restart(enum reboot_mode mode, const char *cmd)
+static void ebsa110_restart(char mode, const char *cmd)
 {
 	soft_restart(0x80000000);
 }
@@ -321,9 +324,10 @@ MACHINE_START(EBSA110, "EBSA110")
 	.atag_offset	= 0x400,
 	.reserve_lp0	= 1,
 	.reserve_lp2	= 1,
+	.restart_mode	= 's',
 	.map_io		= ebsa110_map_io,
 	.init_early	= ebsa110_init_early,
 	.init_irq	= ebsa110_init_irq,
-	.init_time	= ebsa110_timer_init,
+	.timer		= &ebsa110_timer,
 	.restart	= ebsa110_restart,
 MACHINE_END

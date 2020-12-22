@@ -33,6 +33,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/input.h>
@@ -155,7 +156,7 @@ out:
 	return IRQ_HANDLED;
 }
 
-static void max11801_ts_phy_init(struct max11801_data *data)
+static void __devinit max11801_ts_phy_init(struct max11801_data *data)
 {
 	struct i2c_client *client = data->client;
 
@@ -173,18 +174,19 @@ static void max11801_ts_phy_init(struct max11801_data *data)
 	max11801_write_reg(client, OP_MODE_CONF_REG, 0x36);
 }
 
-static int max11801_ts_probe(struct i2c_client *client,
+static int __devinit max11801_ts_probe(struct i2c_client *client,
 				       const struct i2c_device_id *id)
 {
 	struct max11801_data *data;
 	struct input_dev *input_dev;
 	int error;
 
-	data = devm_kzalloc(&client->dev, sizeof(*data), GFP_KERNEL);
-	input_dev = devm_input_allocate_device(&client->dev);
+	data = kzalloc(sizeof(struct max11801_data), GFP_KERNEL);
+	input_dev = input_allocate_device();
 	if (!data || !input_dev) {
 		dev_err(&client->dev, "Failed to allocate memory\n");
-		return -ENOMEM;
+		error = -ENOMEM;
+		goto err_free_mem;
 	}
 
 	data->client = client;
@@ -203,20 +205,37 @@ static int max11801_ts_probe(struct i2c_client *client,
 
 	max11801_ts_phy_init(data);
 
-	error = devm_request_threaded_irq(&client->dev, client->irq, NULL,
-					  max11801_ts_interrupt,
-					  IRQF_TRIGGER_LOW | IRQF_ONESHOT,
-					  "max11801_ts", data);
+	error = request_threaded_irq(client->irq, NULL, max11801_ts_interrupt,
+				     IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+				     "max11801_ts", data);
 	if (error) {
 		dev_err(&client->dev, "Failed to register interrupt\n");
-		return error;
+		goto err_free_mem;
 	}
 
 	error = input_register_device(data->input_dev);
 	if (error)
-		return error;
+		goto err_free_irq;
 
 	i2c_set_clientdata(client, data);
+	return 0;
+
+err_free_irq:
+	free_irq(client->irq, data);
+err_free_mem:
+	input_free_device(input_dev);
+	kfree(data);
+	return error;
+}
+
+static __devexit int max11801_ts_remove(struct i2c_client *client)
+{
+	struct max11801_data *data = i2c_get_clientdata(client);
+
+	free_irq(client->irq, data);
+	input_unregister_device(data->input_dev);
+	kfree(data);
+
 	return 0;
 }
 
@@ -229,9 +248,11 @@ MODULE_DEVICE_TABLE(i2c, max11801_ts_id);
 static struct i2c_driver max11801_ts_driver = {
 	.driver = {
 		.name	= "max11801_ts",
+		.owner	= THIS_MODULE,
 	},
 	.id_table	= max11801_ts_id,
 	.probe		= max11801_ts_probe,
+	.remove		= __devexit_p(max11801_ts_remove),
 };
 
 module_i2c_driver(max11801_ts_driver);

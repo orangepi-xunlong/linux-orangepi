@@ -547,8 +547,8 @@ static int __init lance_probe1(struct net_device *dev, int ioaddr, int irq, int 
 	/* Make certain the data structures used by the LANCE are aligned and DMAble. */
 
 	lp = kzalloc(sizeof(*lp), GFP_DMA | GFP_KERNEL);
-	if (!lp)
-		return -ENOMEM;
+	if(lp==NULL)
+		return -ENODEV;
 	if (lance_debug > 6) printk(" (#0x%05lx)", (unsigned long)lp);
 	dev->ml_priv = lp;
 	lp->name = chipname;
@@ -754,7 +754,7 @@ lance_open(struct net_device *dev)
 	int i;
 
 	if (dev->irq == 0 ||
-		request_irq(dev->irq, lance_interrupt, 0, dev->name, dev)) {
+		request_irq(dev->irq, lance_interrupt, 0, lp->name, dev)) {
 		return -EAGAIN;
 	}
 
@@ -873,9 +873,10 @@ lance_init_ring(struct net_device *dev, gfp_t gfp)
 
 		skb = alloc_skb(PKT_BUF_SZ, GFP_DMA | gfp);
 		lp->rx_skbuff[i] = skb;
-		if (skb)
+		if (skb) {
+			skb->dev = dev;
 			rx_buff = skb->data;
-		else
+		} else
 			rx_buff = kmalloc(PKT_BUF_SZ, GFP_DMA | gfp);
 		if (rx_buff == NULL)
 			lp->rx_ring[i].base = 0;
@@ -943,7 +944,7 @@ static void lance_tx_timeout (struct net_device *dev)
 #endif
 	lance_restart (dev, 0x0043, 1);
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue (dev);
 }
 

@@ -30,9 +30,9 @@ iommu_fill_pdir(struct ioc *ioc, struct scatterlist *startsg, int nents,
 		unsigned long vaddr;
 		long size;
 
-		DBG_RUN_SG(" %d : %08lx/%05x %p/%05x\n", nents,
+		DBG_RUN_SG(" %d : %08lx/%05x %08lx/%05x\n", nents,
 			   (unsigned long)sg_dma_address(startsg), cnt,
-			   sg_virt(startsg), startsg->length
+			   sg_virt_addr(startsg), startsg->length
 		);
 
 
@@ -66,7 +66,7 @@ iommu_fill_pdir(struct ioc *ioc, struct scatterlist *startsg, int nents,
 		
 		BUG_ON(pdirp == NULL);
 		
-		vaddr = (unsigned long)sg_virt(startsg);
+		vaddr = sg_virt_addr(startsg);
 		sg_dma_len(dma_sg) += startsg->length;
 		size = startsg->length + dma_offset;
 		dma_offset = 0;
@@ -117,7 +117,7 @@ iommu_coalesce_chunks(struct ioc *ioc, struct device *dev,
 		*/
 		contig_sg = startsg;
 		dma_len = startsg->length;
-		dma_offset = startsg->offset;
+		dma_offset = sg_virt_addr(startsg) & ~IOVP_MASK;
 
 		/* PARANOID: clear entries */
 		sg_dma_address(startsg) = 0;
@@ -128,13 +128,14 @@ iommu_coalesce_chunks(struct ioc *ioc, struct device *dev,
 		** it's always looking one "ahead".
 		*/
 		while(--nents > 0) {
-			unsigned long prev_end, sg_start;
+			unsigned long prevstartsg_end, startsg_end;
 
-			prev_end = (unsigned long)sg_virt(startsg) +
-							startsg->length;
+			prevstartsg_end = sg_virt_addr(startsg) +
+				startsg->length;
 
 			startsg++;
-			sg_start = (unsigned long)sg_virt(startsg);
+			startsg_end = sg_virt_addr(startsg) + 
+				startsg->length;
 
 			/* PARANOID: clear entries */
 			sg_dma_address(startsg) = 0;
@@ -150,13 +151,10 @@ iommu_coalesce_chunks(struct ioc *ioc, struct device *dev,
 				break;
 
 			/*
-			* Next see if we can append the next chunk (i.e.
-			* it must end on one page and begin on another, or
-			* it must start on the same address as the previous
-			* entry ended.
+			** Next see if we can append the next chunk (i.e.
+			** it must end on one page and begin on another
 			*/
-			if (unlikely((prev_end != sg_start) ||
-				((prev_end | sg_start) & ~PAGE_MASK)))
+			if (unlikely(((prevstartsg_end | sg_virt_addr(startsg)) & ~PAGE_MASK) != 0))
 				break;
 			
 			dma_len += startsg->length;

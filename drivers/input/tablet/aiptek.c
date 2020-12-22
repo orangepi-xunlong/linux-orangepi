@@ -74,6 +74,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/usb/input.h>
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
@@ -307,7 +308,7 @@ struct aiptek_settings {
 
 struct aiptek {
 	struct input_dev *inputdev;		/* input device struct           */
-	struct usb_interface *intf;		/* usb interface struct          */
+	struct usb_device *usbdev;		/* usb device struct             */
 	struct urb *urb;			/* urb for incoming reports      */
 	dma_addr_t data_dma;			/* our dma stuffage              */
 	struct aiptek_features features;	/* tablet's array of features    */
@@ -434,7 +435,6 @@ static void aiptek_irq(struct urb *urb)
 	struct aiptek *aiptek = urb->context;
 	unsigned char *data = aiptek->data;
 	struct input_dev *inputdev = aiptek->inputdev;
-	struct usb_interface *intf = aiptek->intf;
 	int jitterable = 0;
 	int retval, macro, x, y, z, left, right, middle, p, dv, tip, bs, pck;
 
@@ -447,13 +447,13 @@ static void aiptek_irq(struct urb *urb)
 	case -ENOENT:
 	case -ESHUTDOWN:
 		/* This urb is terminated, clean up */
-		dev_dbg(&intf->dev, "%s - urb shutting down with status: %d\n",
-			__func__, urb->status);
+		dbg("%s - urb shutting down with status: %d",
+		    __func__, urb->status);
 		return;
 
 	default:
-		dev_dbg(&intf->dev, "%s - nonzero urb status received: %d\n",
-			__func__, urb->status);
+		dbg("%s - nonzero urb status received: %d",
+		    __func__, urb->status);
 		goto exit;
 	}
 
@@ -785,7 +785,7 @@ static void aiptek_irq(struct urb *urb)
 				 1 | AIPTEK_REPORT_TOOL_UNKNOWN);
 		input_sync(inputdev);
 	} else {
-		dev_dbg(&intf->dev, "Unknown report %d\n", data[0]);
+		dbg("Unknown report %d", data[0]);
 	}
 
 	/* Jitter may occur when the user presses a button on the stlyus
@@ -811,9 +811,8 @@ static void aiptek_irq(struct urb *urb)
 exit:
 	retval = usb_submit_urb(urb, GFP_ATOMIC);
 	if (retval != 0) {
-		dev_err(&intf->dev,
-			"%s - usb_submit_urb failed with result %d\n",
-			__func__, retval);
+		err("%s - usb_submit_urb failed with result %d",
+		    __func__, retval);
 	}
 }
 
@@ -846,7 +845,7 @@ static int aiptek_open(struct input_dev *inputdev)
 {
 	struct aiptek *aiptek = input_get_drvdata(inputdev);
 
-	aiptek->urb->dev = interface_to_usbdev(aiptek->intf);
+	aiptek->urb->dev = aiptek->usbdev;
 	if (usb_submit_urb(aiptek->urb, GFP_KERNEL) != 0)
 		return -EIO;
 
@@ -872,10 +871,8 @@ aiptek_set_report(struct aiptek *aiptek,
 		  unsigned char report_type,
 		  unsigned char report_id, void *buffer, int size)
 {
-	struct usb_device *udev = interface_to_usbdev(aiptek->intf);
-
-	return usb_control_msg(udev,
-			       usb_sndctrlpipe(udev, 0),
+	return usb_control_msg(aiptek->usbdev,
+			       usb_sndctrlpipe(aiptek->usbdev, 0),
 			       USB_REQ_SET_REPORT,
 			       USB_TYPE_CLASS | USB_RECIP_INTERFACE |
 			       USB_DIR_OUT, (report_type << 8) + report_id,
@@ -887,10 +884,8 @@ aiptek_get_report(struct aiptek *aiptek,
 		  unsigned char report_type,
 		  unsigned char report_id, void *buffer, int size)
 {
-	struct usb_device *udev = interface_to_usbdev(aiptek->intf);
-
-	return usb_control_msg(udev,
-			       usb_rcvctrlpipe(udev, 0),
+	return usb_control_msg(aiptek->usbdev,
+			       usb_rcvctrlpipe(aiptek->usbdev, 0),
 			       USB_REQ_GET_REPORT,
 			       USB_TYPE_CLASS | USB_RECIP_INTERFACE |
 			       USB_DIR_IN, (report_type << 8) + report_id,
@@ -917,9 +912,8 @@ aiptek_command(struct aiptek *aiptek, unsigned char command, unsigned char data)
 
 	if ((ret =
 	     aiptek_set_report(aiptek, 3, 2, buf, sizeof_buf)) != sizeof_buf) {
-		dev_dbg(&aiptek->intf->dev,
-			"aiptek_program: failed, tried to send: 0x%02x 0x%02x\n",
-			command, data);
+		dbg("aiptek_program: failed, tried to send: 0x%02x 0x%02x",
+		    command, data);
 	}
 	kfree(buf);
 	return ret < 0 ? ret : 0;
@@ -953,9 +947,8 @@ aiptek_query(struct aiptek *aiptek, unsigned char command, unsigned char data)
 
 	if ((ret =
 	     aiptek_get_report(aiptek, 3, 2, buf, sizeof_buf)) != sizeof_buf) {
-		dev_dbg(&aiptek->intf->dev,
-			"aiptek_query failed: returned 0x%02x 0x%02x 0x%02x\n",
-			buf[0], buf[1], buf[2]);
+		dbg("aiptek_query failed: returned 0x%02x 0x%02x 0x%02x",
+		    buf[0], buf[1], buf[2]);
 		ret = -EIO;
 	} else {
 		ret = get_unaligned_le16(buf + 1);
@@ -1732,7 +1725,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	}
 
 	aiptek->inputdev = inputdev;
-	aiptek->intf = intf;
+	aiptek->usbdev = usbdev;
 	aiptek->ifnum = intf->altsetting[0].desc.bInterfaceNumber;
 	aiptek->inDelay = 0;
 	aiptek->endDelay = 0;
@@ -1821,22 +1814,14 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	input_set_abs_params(inputdev, ABS_TILT_Y, AIPTEK_TILT_MIN, AIPTEK_TILT_MAX, 0, 0);
 	input_set_abs_params(inputdev, ABS_WHEEL, AIPTEK_WHEEL_MIN, AIPTEK_WHEEL_MAX - 1, 0, 0);
 
-	/* Verify that a device really has an endpoint */
-	if (intf->altsetting[0].desc.bNumEndpoints < 1) {
-		dev_err(&intf->dev,
-			"interface has %d endpoints, but must have minimum 1\n",
-			intf->altsetting[0].desc.bNumEndpoints);
-		err = -EINVAL;
-		goto fail3;
-	}
 	endpoint = &intf->altsetting[0].endpoint[0].desc;
 
 	/* Go set up our URB, which is called when the tablet receives
 	 * input.
 	 */
 	usb_fill_int_urb(aiptek->urb,
-			 usbdev,
-			 usb_rcvintpipe(usbdev,
+			 aiptek->usbdev,
+			 usb_rcvintpipe(aiptek->usbdev,
 					endpoint->bEndpointAddress),
 			 aiptek->data, 8, aiptek_irq, aiptek,
 			 endpoint->bInterval);
@@ -1871,8 +1856,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	if (i == ARRAY_SIZE(speeds)) {
 		dev_info(&intf->dev,
 			 "Aiptek tried all speeds, no sane response\n");
-		err = -EINVAL;
-		goto fail3;
+		goto fail2;
 	}
 
 	/* Associate this driver's struct with the usb interface.

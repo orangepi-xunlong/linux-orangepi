@@ -684,7 +684,7 @@ void mdfld_dsi_dpi_dpms(struct drm_encoder *encoder, int mode)
 }
 
 bool mdfld_dsi_dpi_mode_fixup(struct drm_encoder *encoder,
-				     const struct drm_display_mode *mode,
+				     struct drm_display_mode *mode,
 				     struct drm_display_mode *adjusted_mode)
 {
 	struct mdfld_dsi_encoder *dsi_encoder = mdfld_dsi_encoder(encoder);
@@ -821,17 +821,13 @@ void mdfld_dsi_dpi_mode_set(struct drm_encoder *encoder,
 	struct drm_device *dev = dsi_config->dev;
 	struct drm_psb_private *dev_priv = dev->dev_private;
 	int pipe = mdfld_dsi_encoder_get_pipe(dsi_encoder);
+
 	u32 pipeconf_reg = PIPEACONF;
 	u32 dspcntr_reg = DSPACNTR;
-	u32 pipeconf, dspcntr;
 
+	u32 pipeconf = dev_priv->pipeconf[pipe];
+	u32 dspcntr = dev_priv->dspcntr[pipe];
 	u32 mipi = MIPI_PORT_EN | PASS_FROM_SPHY_TO_AFE | SEL_FLOPPED_HSTX;
-
-	if (WARN_ON(pipe < 0))
-		return;
-
-	pipeconf = dev_priv->pipeconf[pipe];
-	dspcntr = dev_priv->dspcntr[pipe];
 
 	if (pipe) {
 		pipeconf_reg = PIPECCONF;
@@ -873,6 +869,7 @@ void mdfld_dsi_dpi_mode_set(struct drm_encoder *encoder,
 		mdfld_set_pipe_timing(dsi_config, pipe);
 
 		REG_WRITE(DSPABASE, 0x00);
+		REG_WRITE(DSPASTRIDE, (mode->hdisplay * 4));
 		REG_WRITE(DSPASIZE,
 			((mode->vdisplay - 1) << 16) | (mode->hdisplay - 1));
 
@@ -979,7 +976,11 @@ struct mdfld_dsi_encoder *mdfld_dsi_dpi_init(struct drm_device *dev,
 		return NULL;
 	}
 
-	dpi_output->panel_on = 0;
+	if (dsi_connector->pipe)
+		dpi_output->panel_on = 0;
+	else
+		dpi_output->panel_on = 0;
+
 	dpi_output->dev = dev;
 	if (mdfld_get_panel_type(dev, pipe) != TC35876X)
 		dpi_output->p_funcs = p_funcs;
@@ -994,7 +995,7 @@ struct mdfld_dsi_encoder *mdfld_dsi_dpi_init(struct drm_device *dev,
 	drm_encoder_init(dev,
 			encoder,
 			p_funcs->encoder_funcs,
-			DRM_MODE_ENCODER_LVDS, NULL);
+			DRM_MODE_ENCODER_LVDS);
 	drm_encoder_helper_add(encoder,
 				p_funcs->encoder_helper_funcs);
 

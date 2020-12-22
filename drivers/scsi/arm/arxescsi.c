@@ -220,21 +220,47 @@ static const char *arxescsi_info(struct Scsi_Host *host)
 	return string;
 }
 
+/*
+ * Function: int arxescsi_proc_info(char *buffer, char **start, off_t offset,
+ *					 int length, int host_no, int inout)
+ * Purpose : Return information about the driver to a user process accessing
+ *	     the /proc filesystem.
+ * Params  : buffer - a buffer to write information to
+ *	     start  - a pointer into this buffer set by this routine to the start
+ *		      of the required information.
+ *	     offset - offset into information that we have read up to.
+ *	     length - length of buffer
+ *	     host_no - host number to return information for
+ *	     inout  - 0 for reading, 1 for writing.
+ * Returns : length of data written to buffer.
+ */
 static int
-arxescsi_show_info(struct seq_file *m, struct Scsi_Host *host)
+arxescsi_proc_info(struct Scsi_Host *host, char *buffer, char **start, off_t offset, int length,
+		   int inout)
 {
 	struct arxescsi_info *info;
-	info = (struct arxescsi_info *)host->hostdata;
+	char *p = buffer;
+	int pos;
 
-	seq_printf(m, "ARXE 16-bit SCSI driver v%s\n", VERSION);
-	fas216_print_host(&info->info, m);
-	fas216_print_stats(&info->info, m);
-	fas216_print_devices(&info->info, m);
-	return 0;
+	info = (struct arxescsi_info *)host->hostdata;
+	if (inout == 1)
+		return -EINVAL;
+
+	p += sprintf(p, "ARXE 16-bit SCSI driver v%s\n", VERSION);
+	p += fas216_print_host(&info->info, p);
+	p += fas216_print_stats(&info->info, p);
+	p += fas216_print_devices(&info->info, p);
+
+	*start = buffer + offset;
+	pos = p - buffer - offset;
+	if (pos > length)
+		pos = length;
+
+	return pos;
 }
 
 static struct scsi_host_template arxescsi_template = {
-	.show_info			= arxescsi_show_info,
+	.proc_info			= arxescsi_proc_info,
 	.name				= "ARXE SCSI card",
 	.info				= arxescsi_info,
 	.queuecommand			= fas216_noqueue_command,
@@ -245,11 +271,13 @@ static struct scsi_host_template arxescsi_template = {
 	.can_queue			= 0,
 	.this_id			= 7,
 	.sg_tablesize			= SG_ALL,
+	.cmd_per_lun			= 1,
 	.use_clustering			= DISABLE_CLUSTERING,
 	.proc_name			= "arxescsi",
 };
 
-static int arxescsi_probe(struct expansion_card *ec, const struct ecard_id *id)
+static int __devinit
+arxescsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	struct Scsi_Host *host;
 	struct arxescsi_info *info;
@@ -312,7 +340,7 @@ static int arxescsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 	return ret;
 }
 
-static void arxescsi_remove(struct expansion_card *ec)
+static void __devexit arxescsi_remove(struct expansion_card *ec)
 {
 	struct Scsi_Host *host = ecard_get_drvdata(ec);
 
@@ -331,7 +359,7 @@ static const struct ecard_id arxescsi_cids[] = {
 
 static struct ecard_driver arxescsi_driver = {
 	.probe		= arxescsi_probe,
-	.remove		= arxescsi_remove,
+	.remove		= __devexit_p(arxescsi_remove),
 	.id_table	= arxescsi_cids,
 	.drv = {
 		.name		= "arxescsi",

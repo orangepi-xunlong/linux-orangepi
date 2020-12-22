@@ -10,13 +10,11 @@
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <linux/mfd/88pm860x.h>
 #include <linux/slab.h>
-#include <linux/device.h>
 
 #define MEAS_LEN		(8)
 #define ACCURATE_BIT		(12)
@@ -115,77 +113,14 @@ static void pm860x_touch_close(struct input_dev *dev)
 	pm860x_set_bits(touch->i2c, MEAS_EN3, data, 0);
 }
 
-#ifdef CONFIG_OF
-static int pm860x_touch_dt_init(struct platform_device *pdev,
-					  struct pm860x_chip *chip,
-					  int *res_x)
-{
-	struct device_node *np = pdev->dev.parent->of_node;
-	struct i2c_client *i2c = (chip->id == CHIP_PM8607) ? chip->client \
-				 : chip->companion;
-	int data, n, ret;
-	if (!np)
-		return -ENODEV;
-	np = of_get_child_by_name(np, "touch");
-	if (!np) {
-		dev_err(&pdev->dev, "Can't find touch node\n");
-		return -EINVAL;
-	}
-	/* set GPADC MISC1 register */
-	data = 0;
-	if (!of_property_read_u32(np, "marvell,88pm860x-gpadc-prebias", &n))
-		data |= (n << 1) & PM8607_GPADC_PREBIAS_MASK;
-	if (!of_property_read_u32(np, "marvell,88pm860x-gpadc-slot-cycle", &n))
-		data |= (n << 3) & PM8607_GPADC_SLOT_CYCLE_MASK;
-	if (!of_property_read_u32(np, "marvell,88pm860x-gpadc-off-scale", &n))
-		data |= (n << 5) & PM8607_GPADC_OFF_SCALE_MASK;
-	if (!of_property_read_u32(np, "marvell,88pm860x-gpadc-sw-cal", &n))
-		data |= (n << 7) & PM8607_GPADC_SW_CAL_MASK;
-	if (data) {
-		ret = pm860x_reg_write(i2c, PM8607_GPADC_MISC1, data);
-		if (ret < 0)
-			goto err_put_node;
-	}
-	/* set tsi prebias time */
-	if (!of_property_read_u32(np, "marvell,88pm860x-tsi-prebias", &data)) {
-		ret = pm860x_reg_write(i2c, PM8607_TSI_PREBIAS, data);
-		if (ret < 0)
-			goto err_put_node;
-	}
-	/* set prebias & prechg time of pen detect */
-	data = 0;
-	if (!of_property_read_u32(np, "marvell,88pm860x-pen-prebias", &n))
-		data |= n & PM8607_PD_PREBIAS_MASK;
-	if (!of_property_read_u32(np, "marvell,88pm860x-pen-prechg", &n))
-		data |= n & PM8607_PD_PRECHG_MASK;
-	if (data) {
-		ret = pm860x_reg_write(i2c, PM8607_PD_PREBIAS, data);
-		if (ret < 0)
-			goto err_put_node;
-	}
-	of_property_read_u32(np, "marvell,88pm860x-resistor-X", res_x);
-
-	of_node_put(np);
-
-	return 0;
-
-err_put_node:
-	of_node_put(np);
-
-	return -EINVAL;
-}
-#else
-#define pm860x_touch_dt_init(x, y, z)	(-1)
-#endif
-
-static int pm860x_touch_probe(struct platform_device *pdev)
+static int __devinit pm860x_touch_probe(struct platform_device *pdev)
 {
 	struct pm860x_chip *chip = dev_get_drvdata(pdev->dev.parent);
-	struct pm860x_touch_pdata *pdata = dev_get_platdata(&pdev->dev);
+	struct pm860x_platform_data *pm860x_pdata =		\
+				pdev->dev.parent->platform_data;
+	struct pm860x_touch_pdata *pdata = NULL;
 	struct pm860x_touch *touch;
-	struct i2c_client *i2c = (chip->id == CHIP_PM8607) ? chip->client \
-				 : chip->companion;
-	int irq, ret, res_x = 0, data = 0;
+	int irq, ret;
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
@@ -193,67 +128,27 @@ static int pm860x_touch_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	if (pm860x_touch_dt_init(pdev, chip, &res_x)) {
-		if (pdata) {
-			/* set GPADC MISC1 register */
-			data = 0;
-			data |= (pdata->gpadc_prebias << 1)
-				& PM8607_GPADC_PREBIAS_MASK;
-			data |= (pdata->slot_cycle << 3)
-				& PM8607_GPADC_SLOT_CYCLE_MASK;
-			data |= (pdata->off_scale << 5)
-				& PM8607_GPADC_OFF_SCALE_MASK;
-			data |= (pdata->sw_cal << 7)
-				& PM8607_GPADC_SW_CAL_MASK;
-			if (data) {
-				ret = pm860x_reg_write(i2c,
-					PM8607_GPADC_MISC1, data);
-				if (ret < 0)
-					return -EINVAL;
-			}
-			/* set tsi prebias time */
-			if (pdata->tsi_prebias) {
-				data = pdata->tsi_prebias;
-				ret = pm860x_reg_write(i2c,
-					PM8607_TSI_PREBIAS, data);
-				if (ret < 0)
-					return -EINVAL;
-			}
-			/* set prebias & prechg time of pen detect */
-			data = 0;
-			data |= pdata->pen_prebias
-				& PM8607_PD_PREBIAS_MASK;
-			data |= (pdata->pen_prechg << 5)
-				& PM8607_PD_PRECHG_MASK;
-			if (data) {
-				ret = pm860x_reg_write(i2c,
-					PM8607_PD_PREBIAS, data);
-				if (ret < 0)
-					return -EINVAL;
-			}
-			res_x = pdata->res_x;
-		} else {
-			dev_err(&pdev->dev, "failed to get platform data\n");
-			return -EINVAL;
-		}
+	if (!pm860x_pdata) {
+		dev_err(&pdev->dev, "platform data is missing\n");
+		return -EINVAL;
 	}
-	/* enable GPADC */
-	ret = pm860x_set_bits(i2c, PM8607_GPADC_MISC1, PM8607_GPADC_EN,
-			      PM8607_GPADC_EN);
-	if (ret)
-		return ret;
 
-	touch = devm_kzalloc(&pdev->dev, sizeof(struct pm860x_touch),
-			     GFP_KERNEL);
-	if (!touch)
+	pdata = pm860x_pdata->touch;
+	if (!pdata) {
+		dev_err(&pdev->dev, "touchscreen data is missing\n");
+		return -EINVAL;
+	}
+
+	touch = kzalloc(sizeof(struct pm860x_touch), GFP_KERNEL);
+	if (touch == NULL)
 		return -ENOMEM;
+	dev_set_drvdata(&pdev->dev, touch);
 
-	platform_set_drvdata(pdev, touch);
-
-	touch->idev = devm_input_allocate_device(&pdev->dev);
-	if (!touch->idev) {
+	touch->idev = input_allocate_device();
+	if (touch->idev == NULL) {
 		dev_err(&pdev->dev, "Failed to allocate input device!\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out;
 	}
 
 	touch->idev->name = "88pm860x-touch";
@@ -263,16 +158,15 @@ static int pm860x_touch_probe(struct platform_device *pdev)
 	touch->idev->open = pm860x_touch_open;
 	touch->idev->close = pm860x_touch_close;
 	touch->chip = chip;
-	touch->i2c = i2c;
-	touch->irq = irq;
-	touch->res_x = res_x;
+	touch->i2c = (chip->id == CHIP_PM8607) ? chip->client : chip->companion;
+	touch->irq = irq + chip->irq_base;
+	touch->res_x = pdata->res_x;
 	input_set_drvdata(touch->idev, touch);
 
-	ret = devm_request_threaded_irq(&pdev->dev, touch->irq, NULL,
-					pm860x_touch_handler, IRQF_ONESHOT,
-					"touch", touch);
+	ret = request_threaded_irq(touch->irq, NULL, pm860x_touch_handler,
+				   IRQF_ONESHOT, "touch", touch);
 	if (ret < 0)
-		return ret;
+		goto out_irq;
 
 	__set_bit(EV_ABS, touch->idev->evbit);
 	__set_bit(ABS_X, touch->idev->absbit);
@@ -290,18 +184,38 @@ static int pm860x_touch_probe(struct platform_device *pdev)
 	ret = input_register_device(touch->idev);
 	if (ret < 0) {
 		dev_err(chip->dev, "Failed to register touch!\n");
-		return ret;
+		goto out_rg;
 	}
 
 	platform_set_drvdata(pdev, touch);
+	return 0;
+out_rg:
+	free_irq(touch->irq, touch);
+out_irq:
+	input_free_device(touch->idev);
+out:
+	kfree(touch);
+	return ret;
+}
+
+static int __devexit pm860x_touch_remove(struct platform_device *pdev)
+{
+	struct pm860x_touch *touch = platform_get_drvdata(pdev);
+
+	input_unregister_device(touch->idev);
+	free_irq(touch->irq, touch);
+	platform_set_drvdata(pdev, NULL);
+	kfree(touch);
 	return 0;
 }
 
 static struct platform_driver pm860x_touch_driver = {
 	.driver	= {
 		.name	= "88pm860x-touch",
+		.owner	= THIS_MODULE,
 	},
 	.probe	= pm860x_touch_probe,
+	.remove	= __devexit_p(pm860x_touch_remove),
 };
 module_platform_driver(pm860x_touch_driver);
 

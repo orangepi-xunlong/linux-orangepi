@@ -1,232 +1,252 @@
-/*
- * drivers/cpufreq/autohotplug.c
- *
- * Copyright (C)  2016-2020 Allwinnertech.
- * East Yang <yangdong@allwinnertech.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
-
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
 #include <linux/cpufreq.h>
-#include <linux/freezer.h>
-#include <linux/input.h>
 #include <linux/module.h>
-#include <linux/sched/rt.h>
-#include <linux/slab.h>
+#include <linux/moduleparam.h>
+#include <linux/semaphore.h>
+#include <linux/sched.h>
+#include <linux/tick.h>
+#include <linux/time.h>
 #include <linux/timer.h>
+#include <linux/workqueue.h>
 #include <linux/kthread.h>
+#include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/vmalloc.h>
 #include <linux/debugfs.h>
+#include <linux/version.h>
+#include <linux/kernel_stat.h>
 #include <linux/reboot.h>
 #include <asm/uaccess.h>
+#define CREATE_TRACE_POINTS
+#include <trace/events/cpu_autohotplug.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0))
+#include <linux/sched/rt.h>
+#endif
+#include <linux/freezer.h>
 #include "autohotplug.h"
 
-#define CREATE_TRACE_POINTS
-#include <trace/events/autohotplug.h>
-
-#define AUTOHOTPLUG_ERR(format, args...) \
-	pr_err("[autohotplug] ERR:"format, ##args)
-
-static struct autohotplug_governor *cur_governor;
-static struct autohotplug_data_struct autohotplug_data;
-static DEFINE_PER_CPU(struct autohotplug_cpuinfo, cpuinfo);
-static struct autohotplug_governor_loadinfo governor_load;
-
-static struct cpumask autohotplug_fast_cpumask;
-static struct cpumask autohotplug_slow_cpumask;
-
-static struct task_struct *autohotplug_task;
-static struct timer_list hotplug_task_timer;
-static struct timer_list hotplug_sample_timer;
-
+struct auto_hotplug_data_struct auto_hotplug_data;
+static DEFINE_PER_CPU(struct auto_cpu_hotplug_cpuinfo, cpuinfo);
+static struct auto_cpu_hotplug_governor governor;
+static struct cpumask hmp_fast_cpu_mask;
+static struct cpumask hmp_slow_cpu_mask;
+static struct task_struct *auto_hotplug_task;
+struct timer_list hotplug_task_timer;
+struct timer_list hotplug_sample_timer;
 static struct mutex hotplug_enable_mutex;
 static spinlock_t hotplug_load_lock;
 static spinlock_t cpumask_lock;
+struct autohotplug_governor *cur_governor;
 
 static atomic_t hotplug_lock   = ATOMIC_INIT(0);
 static atomic_t g_hotplug_lock = ATOMIC_INIT(0);
 
-static unsigned int hotplug_enable;
-static unsigned int boost_all_online;
-static unsigned int hotplug_period_us = 200000;
+static unsigned int hotplug_enable    = 0;
+static unsigned int boost_all_online  = 0;
+static unsigned int hotplug_period_us = 500000;
 static unsigned int hotplug_sample_us = 20000;
 static unsigned int cpu_up_lastcpu    = INVALID_CPU;
-static unsigned int total_nr_cpus     = CONFIG_NR_CPUS;
 
-static unsigned int cpu_up_last_hold_us = 1500000;
+static unsigned int hotplug_up_attempt_hold_us = 500000;
+static unsigned int hotplug_up_cpu_hold_us     = 1500000;
+static unsigned int hotplug_boost_hold_us      = 3000000;
+static unsigned int total_nr_cpus              = CONFIG_NR_CPUS;
+
+static unsigned long cpu_sleep_lasttime[CONFIG_NR_CPUS];
 
 unsigned int load_try_down          = 30;
+unsigned int load_save_up           = 75;
 unsigned int load_try_up            = 80;
-
-unsigned int load_up_stable_us      = 200000;
-unsigned int load_down_stable_us    = 1000000;
+unsigned int load_try_boost         = 95;
 
 unsigned int load_last_big_min_freq = 300000;
+unsigned int load_up_stable_us      = 100000;
+unsigned int load_down_stable_us    = 500000;
+unsigned int load_boost_stable_us   = 200000;
+
+unsigned long cpu_boost_lasttime;
 unsigned long cpu_up_lasttime;
+unsigned long cpu_in_sleep[CONFIG_NR_CPUS];
 
-#ifdef CONFIG_CPU_AUTOHOTPLUG_STATS
-static unsigned long cpu_on_lasttime[CONFIG_NR_CPUS];
-static unsigned long cpu_on_time_total[CONFIG_NR_CPUS];
-static unsigned long cpu_up_count_total[CONFIG_NR_CPUS];
-static unsigned long cpu_down_count_total[CONFIG_NR_CPUS];
+static int c0_min = 0;
+static int c0_max = 0;
+static int c1_min = 0;
+static int c1_max = 0;
 
-static char *cpu_on_time_total_sysfs[] = {
-	"cpu0_on_time",
-	"cpu1_on_time",
-	"cpu2_on_time",
-	"cpu3_on_time",
-	"cpu4_on_time",
-	"cpu5_on_time",
-	"cpu6_on_time",
-	"cpu7_on_time"
+static char *cpu_state_sysfs[]=
+{
+	"cpu0_on",
+	"cpu1_off",
+	"cpu2_off",
+	"cpu3_off",
+	"cpu4_off",
+	"cpu5_off",
+	"cpu6_off",
+	"cpu7_off"
 };
 
-static char *cpu_count_up_sysfs[] = {
-	"cpu0_up_count",
-	"cpu1_up_count",
-	"cpu2_up_count",
-	"cpu3_up_count",
-	"cpu4_up_count",
-	"cpu5_up_count",
-	"cpu6_up_count",
-	"cpu7_up_count"
-};
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)) || \
+defined(CONFIG_ARCH_SUN9IW1) || \
+defined(CONFIG_ARCH_SUN8IW5) || \
+defined(CONFIG_ARCH_SUN8IW6) || \
+defined(CONFIG_ARCH_SUN8IW7)
+extern u64 get_cpu_idle_time(unsigned int cpu, u64 *wall, int io_busy);
+#else
+static inline cputime64_t get_cpu_idle_time_jiffy(unsigned int cpu,
+												  cputime64_t *wall)
+{
+	u64 idle_time;
+	u64 cur_wall_time;
+	u64 busy_time;
 
-static char *cpu_count_down_sysfs[] = {
-	"cpu0_down_count",
-	"cpu1_down_count",
-	"cpu2_down_count",
-	"cpu3_down_count",
-	"cpu4_down_count",
-	"cpu5_down_count",
-	"cpu6_down_count",
-	"cpu7_down_count"
-};
-#endif /* CONFIG_CPU_AUTOHOTPLUG_STATS */
+	cur_wall_time = jiffies64_to_cputime64(get_jiffies_64());
 
-#ifdef CONFIG_CPU_AUTOHOTPLUG_ROOMAGE
-static int cluster0_min_online;
-static int cluster0_max_online;
-static int cluster1_min_online;
-static int cluster1_max_online;
+	busy_time  = kcpustat_cpu(cpu).cpustat[CPUTIME_USER];
+	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_SYSTEM];
+	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_IRQ];
+	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_SOFTIRQ];
+	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_STEAL];
+	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_NICE];
+
+	idle_time = cur_wall_time - busy_time;
+	if (wall)
+			*wall = jiffies_to_usecs(cur_wall_time);
+
+	return jiffies_to_usecs(idle_time);
+}
+
+static inline cputime64_t get_cpu_idle_time(unsigned int cpu,
+											cputime64_t *wall,int io_busy)
+{
+		u64 idle_time = get_cpu_idle_time_us(cpu, wall);
+
+		if (idle_time == -1ULL)
+				idle_time = get_cpu_idle_time_jiffy(cpu, wall);
+		else if (!io_busy)
+				idle_time += get_cpu_iowait_time_us(cpu, wall);
+
+		return idle_time;
+}
 #endif
 
 /* Check if cpu is in fastest hmp_domain */
 unsigned int is_cpu_big(int cpu)
 {
-	return cpumask_test_cpu(cpu, &autohotplug_fast_cpumask);
+	return cpumask_test_cpu(cpu, &hmp_fast_cpu_mask);
 }
 
 /* Check if cpu is in slowest hmp_domain */
 unsigned int is_cpu_little(int cpu)
 {
-	return cpumask_test_cpu(cpu, &autohotplug_slow_cpumask);
+	return cpumask_test_cpu(cpu, &hmp_slow_cpu_mask);
+}
+
+static int get_cpu_load_level(unsigned int load)
+{
+	if (load == INVALID_LOAD)
+		return LOAD_LEVEL_INVALID;
+	else if(load < load_try_down)
+		return LOAD_LEVEL_DOWN;
+	else if(load < load_save_up)
+		return LOAD_LEVEL_NORMAL;
+	else if(load < load_try_up)
+		return LOAD_LEVEL_MIDDLE;
+	else if(load < load_try_boost)
+		return LOAD_LEVEL_UP;
+	else
+		return LOAD_LEVEL_BOOST;
+}
+
+static void set_cpu_load(unsigned int cpu, unsigned int load)
+{
+	if (cpu >= total_nr_cpus)
+		return;
+
+	if (get_cpu_load_level(governor.load.cpu_load[cpu])
+								!= get_cpu_load_level(load))
+		governor.load.cpu_load_lasttime[cpu] = jiffies;
+
+	governor.load.cpu_load[cpu] = load;
 }
 
 int do_cpu_down(unsigned int cpu)
 {
-#ifdef CONFIG_CPU_AUTOHOTPLUG_ROOMAGE
-	int i, cur_c0_online = 0, cur_c1_online = 0;
-	struct cpumask *c0_mask;
-	struct cpumask *c1_mask;
+	int i, c0_online=0, c1_online=0;
+    struct cpumask* c0_mask;
+    struct cpumask* c1_mask;
 
 	if (cpu == 0 || cpu >= total_nr_cpus)
 		return 0;
-
-	if (cpumask_test_cpu(0, &autohotplug_slow_cpumask)) {
-		c0_mask = &autohotplug_slow_cpumask;
-		c1_mask = &autohotplug_fast_cpumask;
-	} else {
-		c0_mask = &autohotplug_fast_cpumask;
-		c1_mask = &autohotplug_slow_cpumask;
-	}
-
+    if(cpumask_test_cpu(0,&hmp_slow_cpu_mask))
+    {
+        c0_mask=&hmp_slow_cpu_mask;
+        c1_mask=&hmp_fast_cpu_mask;
+    }
+    else
+    {
+        c0_mask=&hmp_fast_cpu_mask;
+        c1_mask=&hmp_slow_cpu_mask;
+    }
 	for_each_online_cpu(i) {
 		if (cpumask_test_cpu(i, c0_mask))
-			cur_c0_online++;
+			c0_online++;
 		else if (cpumask_test_cpu(i, c1_mask))
-			cur_c1_online++;
+			c1_online++;
 	}
 
-	if (cpumask_test_cpu(cpu, c0_mask) &&
-		cur_c0_online <= cluster0_min_online) {
-		trace_autohotplug_roomage(0, "min", cur_c0_online,
-						cluster0_min_online);
+	if (cpumask_test_cpu(cpu,c0_mask) && c0_online <= c0_min)
 		return 0;
-	}
 
-	if (cpumask_test_cpu(cpu, c1_mask) &&
-		cur_c1_online <= cluster1_min_online) {
-		trace_autohotplug_roomage(1, "min", cur_c1_online,
-						cluster1_min_online);
+	if (cpumask_test_cpu(cpu,c1_mask) && c1_online <= c1_min)
 		return 0;
-	}
-#endif
 
 	if (cpu == cpu_up_lastcpu && time_before(jiffies,
-		cpu_up_lasttime + usecs_to_jiffies(cpu_up_last_hold_us))) {
-		trace_autohotplug_notyet("down", cpu);
+				cpu_up_lasttime + usecs_to_jiffies(hotplug_up_cpu_hold_us)))
 		return 0;
-	}
+
+	if (time_before(jiffies,
+				cpu_boost_lasttime + usecs_to_jiffies(hotplug_boost_hold_us)))
+		return 0;
 
 	if (cpu_down(cpu))
 		return 0;
 
-	trace_autohotplug_operate(cpu, "down");
-
+	trace_cpu_autohotplug_operate(cpu, 0);
 	return 1;
+
 }
 
-int __ref do_cpu_up(unsigned int cpu)
+int do_cpu_up(unsigned int cpu)
 {
-#ifdef CONFIG_CPU_AUTOHOTPLUG_ROOMAGE
-	int i, cur_c0_online = 0, cur_c1_online = 0;
-	struct cpumask *c0_mask;
-	struct cpumask *c1_mask;
+	int i, c0_online = 0, c1_online = 0;
+    struct cpumask* c0_mask;
+    struct cpumask* c1_mask;
 
 	if (cpu == 0 || cpu >= total_nr_cpus)
 		return 0;
-
-	if (cpumask_test_cpu(0, &autohotplug_slow_cpumask)) {
-		c0_mask = &autohotplug_slow_cpumask;
-		c1_mask = &autohotplug_fast_cpumask;
-	} else {
-		c0_mask = &autohotplug_fast_cpumask;
-		c1_mask = &autohotplug_slow_cpumask;
-	}
-
+    if(cpumask_test_cpu(0,&hmp_slow_cpu_mask))
+    {
+        c0_mask=&hmp_slow_cpu_mask;
+        c1_mask=&hmp_fast_cpu_mask;
+    }
+    else
+    {
+        c0_mask=&hmp_fast_cpu_mask;
+        c1_mask=&hmp_slow_cpu_mask;
+    }
 	for_each_online_cpu(i) {
 		if (cpumask_test_cpu(i, c0_mask))
-			cur_c0_online++;
+			c0_online++;
 		else if (cpumask_test_cpu(i, c1_mask))
-			cur_c1_online++;
+			c1_online++;
 	}
 
-	if (cpumask_test_cpu(cpu, c0_mask) &&
-		cur_c0_online >= cluster0_max_online) {
-		trace_autohotplug_roomage(0, "max", cur_c0_online,
-						cluster0_max_online);
+	if (cpumask_test_cpu(cpu,c0_mask) && c0_online >= c0_max)
 		return 0;
-	}
 
-	if (cpumask_test_cpu(cpu, c1_mask) &&
-		cur_c1_online >= cluster1_max_online) {
-		trace_autohotplug_roomage(1, "max", cur_c1_online,
-						cluster1_max_online);
+	if (cpumask_test_cpu(cpu,c1_mask) && c1_online >= c1_max)
 		return 0;
-	}
-#endif
 
 	if (cpu_up(cpu))
 		return 0;
@@ -234,20 +254,23 @@ int __ref do_cpu_up(unsigned int cpu)
 	cpu_up_lastcpu = cpu;
 	cpu_up_lasttime = jiffies;
 
-	trace_autohotplug_operate(cpu, "up");
-
+	trace_cpu_autohotplug_operate(cpu, 1);
 	return 1;
 }
 
-int get_bigs_under(struct autohotplug_loadinfo *load,
-			unsigned char level, unsigned int *first)
+int get_cpus_stable_under(struct auto_cpu_hotplug_loadinfo *load,
+						unsigned char level, unsigned int *first, int is_up)
 {
 	int i, found = 0, count = 0;
 
 	for (i = total_nr_cpus - 1; i >= 0; i--) {
 		if ((load->cpu_load[i] != INVALID_LOAD)
-				&& (load->cpu_load[i] < level)
-				&& is_cpu_big(i)) {
+				&& load->cpu_load[i] < level
+				&& time_after_eq(jiffies, load->cpu_load_lasttime[i]
+					+ usecs_to_jiffies(is_up ? load_up_stable_us
+					: load_down_stable_us))
+			)
+		{
 			if (first && (!found)) {
 				*first = i;
 				found = 1;
@@ -259,15 +282,37 @@ int get_bigs_under(struct autohotplug_loadinfo *load,
 	return count;
 }
 
-int get_bigs_above(struct autohotplug_loadinfo *load,
-			unsigned char level, unsigned int *first)
+int get_bigs_under(struct auto_cpu_hotplug_loadinfo *load,
+						unsigned char level, unsigned int *first)
+{
+	int i, found = 0, count = 0;
+
+	for (i = total_nr_cpus - 1; i >= 0; i--) {
+		if ((load->cpu_load[i] != INVALID_LOAD)
+				&& (load->cpu_load[i] < level)
+				&& is_cpu_big(i))
+		{
+			if (first && (!found)) {
+				*first = i;
+				found = 1;
+			}
+			count++;
+		}
+	}
+
+	return count;
+}
+
+int get_bigs_above(struct auto_cpu_hotplug_loadinfo *load,
+						unsigned char level, unsigned int *first)
 {
 	int i, found = 0, count = 0;
 
 	for (i = total_nr_cpus - 1; i >= 0; i--) {
 		if ((load->cpu_load[i] != INVALID_LOAD)
 				&& (load->cpu_load[i] >= level)
-				&& is_cpu_big(i)) {
+				&& is_cpu_big(i))
+		{
 			if (first && (!found)) {
 				*first = i;
 				found = 1;
@@ -279,14 +324,13 @@ int get_bigs_above(struct autohotplug_loadinfo *load,
 	return count;
 }
 
-int get_cpus_under(struct autohotplug_loadinfo *load,
-			unsigned char level, unsigned int *first)
+int get_cpus_under(struct auto_cpu_hotplug_loadinfo *load,
+						unsigned char level, unsigned int *first)
 {
 	int i, found = 0, count = 0;
 
 	for (i = total_nr_cpus - 1; i >= 0; i--) {
-		if ((load->cpu_load[i] != INVALID_LOAD) &&
-			load->cpu_load[i] < level) {
+		if ((load->cpu_load[i] != INVALID_LOAD) && load->cpu_load[i] < level) {
 			if (first && (!found)) {
 				*first = i;
 				found = 1;
@@ -295,19 +339,19 @@ int get_cpus_under(struct autohotplug_loadinfo *load,
 		}
 	}
 
-	trace_autohotplug_under(level, count);
 	return count;
 }
 
-int get_littles_under(struct autohotplug_loadinfo *load,
-			unsigned char level, unsigned int *first)
+int get_littles_under(struct auto_cpu_hotplug_loadinfo* load,
+						unsigned char level, unsigned int* first)
 {
 	int i, found = 0, count = 0;
 
 	for (i = total_nr_cpus - 1; i >= 0; i--) {
 		if ((load->cpu_load[i] != INVALID_LOAD)
 				&& (load->cpu_load[i] < level)
-				&& is_cpu_little(i)) {
+				&& is_cpu_little(i))
+		{
 			if (first && (!found)) {
 				*first = i;
 				found = 1;
@@ -319,13 +363,13 @@ int get_littles_under(struct autohotplug_loadinfo *load,
 	return count;
 }
 
-int get_cpus_online(struct autohotplug_loadinfo *load,
+int get_cpus_online(struct auto_cpu_hotplug_loadinfo *load,
 						int *little, int *big)
 {
 	int i, big_count = 0, little_count = 0;
 
 	for (i = total_nr_cpus - 1; i >= 0; i--) {
-		if (load->cpu_load[i] != INVALID_LOAD) {
+		if ((load->cpu_load[i] != INVALID_LOAD)) {
 			if (is_cpu_little(i))
 				little_count++;
 			else
@@ -373,12 +417,11 @@ int try_up_little(void)
 
 	if (found < total_nr_cpus && cpu_possible(found))
 		return do_cpu_up(found);
-
-	trace_autohotplug_notyet("up", found);
-	return 0;
+	else
+		return 0;
 }
 
-static int autohotplug_try_any_up(void)
+static int try_any_up(void)
 {
 	unsigned int cpu = 0;
 
@@ -391,7 +434,7 @@ static int autohotplug_try_any_up(void)
 	return 0;
 }
 
-static int autohotplug_try_lock_up(int hotplug_lock)
+static int try_lock_up(int hotplug_lock)
 {
 	struct cpumask tmp_core_up_mask, tmp_core_down_mask;
 	int cpu, lock_flag = hotplug_lock - num_online_cpus();
@@ -407,13 +450,12 @@ static int autohotplug_try_lock_up(int hotplug_lock)
 			if (lock_flag-- == 0)
 				break;
 			spin_lock_irqsave(&cpumask_lock, flags);
-			cpumask_or(&tmp_core_up_mask, cpumask_of(cpu),
-					&tmp_core_up_mask);
+			cpumask_or(&tmp_core_up_mask, cpumask_of(cpu), &tmp_core_up_mask);
 			spin_unlock_irqrestore(&cpumask_lock, flags);
 		}
 	} else if (lock_flag < 0) {
 		lock_flag = -lock_flag;
-		for (cpu = nr_cpu_ids - 1; cpu > 0; cpu--) {
+		for (cpu = 7; cpu > 0; cpu--) {
 			if (cpumask_test_cpu(cpu, cpu_online_mask)) {
 				if (lock_flag-- == 0)
 					break;
@@ -427,20 +469,23 @@ static int autohotplug_try_lock_up(int hotplug_lock)
 
 	if (!cpumask_empty(&tmp_core_up_mask)) {
 		for_each_cpu(cpu, &tmp_core_up_mask) {
-			if (!cpu_online(cpu))
+			if (!cpu_online(cpu)) {
 				return do_cpu_up(cpu);
+			}
 		}
 	} else if (!cpumask_empty(&tmp_core_down_mask)) {
-		for_each_cpu(cpu, &tmp_core_down_mask)
-			if (cpu_online(cpu))
+		for_each_cpu(cpu, &tmp_core_down_mask) {
+			if (cpu_online(cpu)) {
 				cpu_down(cpu);
+			}
+		}
 	}
 
 	return 0;
 }
 
-#ifdef CONFIG_CPU_AUTOHOTPLUG_ROOMAGE
-static int autohotplug_roomage_get_offline(const cpumask_t *mask)
+#ifdef CONFIG_CPU_FREQ_GOV_AUTO_HOTPLUG_ROOMAGE
+static int get_any_offline_cpu(const cpumask_t *mask)
 {
 	int cpu, lastcpu = 0xffff;
 
@@ -451,7 +496,7 @@ static int autohotplug_roomage_get_offline(const cpumask_t *mask)
 
 	return lastcpu;
 }
-static int autohotplug_roomage_get_online(const cpumask_t *mask)
+static int get_any_online_cpu(const cpumask_t *mask)
 {
 	int cpu, lastcpu = 0xffff;
 
@@ -459,7 +504,7 @@ static int autohotplug_roomage_get_online(const cpumask_t *mask)
 		if ((cpu != 0) && cpu_online(cpu)) {
 			if (lastcpu == 0xffff)
 				lastcpu = cpu;
-			else if (cpu > lastcpu)
+			else if (cpu >lastcpu)
 				lastcpu = cpu;
 		}
 	}
@@ -467,151 +512,78 @@ static int autohotplug_roomage_get_online(const cpumask_t *mask)
 	return lastcpu;
 }
 
-static void autohotplug_roomage_update(void)
+static int autohotplug_tryroom(void)
 {
 	unsigned int to_down, to_up;
-	int i, cur_c0_online = 0, cur_c1_online = 0;
-	struct cpumask *c0_mask;
-	struct cpumask *c1_mask;
+	int i, c0_online = 0, c1_online = 0;
+    struct cpumask* c0_mask;
+    struct cpumask* c1_mask;
 
-	if (cpumask_test_cpu(0, &autohotplug_slow_cpumask)) {
-		c0_mask = &autohotplug_slow_cpumask;
-		c1_mask = &autohotplug_fast_cpumask;
-	} else {
-		c0_mask = &autohotplug_fast_cpumask;
-		c1_mask = &autohotplug_slow_cpumask;
-	}
-
+    if(cpumask_test_cpu(0,&hmp_slow_cpu_mask))
+    {
+        c0_mask=&hmp_slow_cpu_mask;
+        c1_mask=&hmp_fast_cpu_mask;
+    }
+    else
+    {
+        c0_mask=&hmp_fast_cpu_mask;
+        c1_mask=&hmp_slow_cpu_mask;
+    }
 	for_each_online_cpu(i) {
 		if (cpumask_test_cpu(i, c0_mask))
-			cur_c0_online++;
+			c0_online++;
 		else if (cpumask_test_cpu(i, c1_mask))
-			cur_c1_online++;
+			c1_online++;
 	}
 
-	while (cur_c1_online > cluster1_max_online) {
-		to_down = autohotplug_roomage_get_online(c1_mask);
+	while (c1_online > c1_max) {
+		to_down = get_any_online_cpu(c1_mask);
 		do_cpu_down(to_down);
-		cur_c1_online--;
+		c1_online--;
 	}
 
-	while (cur_c0_online > cluster0_max_online) {
-		to_down = autohotplug_roomage_get_online(c0_mask);
+	while (c0_online > c0_max) {
+		to_down = get_any_online_cpu(c0_mask);
 		do_cpu_down(to_down);
-		cur_c0_online--;
+		c0_online--;
 	}
 
-	while (cur_c1_online < cluster1_min_online) {
-		to_up = autohotplug_roomage_get_offline(c1_mask);
+	while (c1_online < c1_min) {
+		to_up = get_any_offline_cpu(c1_mask);
 		do_cpu_up(to_up);
-		cur_c1_online++;
+		c1_online++;
 	}
 
-	while (cur_c0_online < cluster0_min_online) {
-		to_up = autohotplug_roomage_get_offline(c0_mask);
+	while (c0_online < c0_min) {
+		to_up = get_any_offline_cpu(c0_mask);
 		do_cpu_up(to_up);
-		cur_c0_online++;
+		c0_online++;
 	}
+
+	return 1;
 }
 
-int autohotplug_roomage_limit(unsigned int cluster_id, unsigned int min,
-				unsigned int max)
+int autohotplug_update_room(unsigned int c0min, unsigned int c1min,
+							unsigned int c0max, unsigned int c1max)
 {
 	mutex_lock(&hotplug_enable_mutex);
-
-	if (cluster_id == 0) {
-		cluster0_min_online = min;
-		cluster0_max_online = max;
-	} else if (cluster_id == 1) {
-		cluster1_min_online = min;
-		cluster1_max_online = max;
-	}
-
+	c0_min = c0min;
+	c1_min = c1min;
+	c0_max = c0max;
+	c1_max = c1max;
 	mutex_unlock(&hotplug_enable_mutex);
 
 	return 0;
 }
-EXPORT_SYMBOL(autohotplug_roomage_limit);
-#endif /* CONFIG_CPU_AUTOHOTPLUG_ROOMAGE */
-
-static void autohotplug_load_parse(struct autohotplug_loadinfo *load)
-{
-	int i;
-
-	load->max_load = 0;
-	load->min_load = 255;
-	load->max_cpu = INVALID_CPU;
-	load->min_cpu = INVALID_CPU;
-
-	for (i = total_nr_cpus - 1; i >= 0; i--) {
-		if (!cpu_online(i))
-			load->cpu_load[i] = INVALID_LOAD;
-
-		if ((load->cpu_load[i] != INVALID_LOAD)
-			&& (load->cpu_load[i] >= load->max_load)) {
-			load->max_load = load->cpu_load[i];
-			load->max_cpu  = i;
-		}
-
-		if ((load->cpu_load[i] != INVALID_LOAD)
-			&& (load->cpu_load[i] < load->min_load)) {
-			load->min_load = load->cpu_load[i];
-			load->min_cpu  = i;
-		}
-	}
-}
-
-static void autohotplug_governor_judge(void)
-{
-	int hotplug_lock, try_attemp = 0;
-	unsigned long flags;
-	struct autohotplug_loadinfo load;
-	int ret;
-
-	try_attemp = 0;
-	spin_lock_irqsave(&hotplug_load_lock, flags);
-	memcpy(&load, &governor_load.load, sizeof(load));
-	spin_unlock_irqrestore(&hotplug_load_lock, flags);
-
-	mutex_lock(&hotplug_enable_mutex);
-
-	if (boost_all_online) {
-		autohotplug_try_any_up();
-	} else {
-		hotplug_lock = atomic_read(&g_hotplug_lock);
-		/* check if current is in hotplug lock */
-		if (hotplug_lock) {
-			autohotplug_try_lock_up(hotplug_lock);
-		} else {
-			autohotplug_load_parse(&load);
-			trace_autohotplug_try("up");
-			ret = cur_governor->try_up(&load);
-			if (ret) {
-				try_attemp = 1;
-				if (cur_governor->try_freq_limit)
-					cur_governor->try_freq_limit();
-			} else {
-				trace_autohotplug_try("down");
-				ret = cur_governor->try_down(&load);
-				if (ret) {
-					try_attemp = 2;
-					if (cur_governor->try_freq_limit)
-						cur_governor->try_freq_limit();
-				}
-			}
-		}
-	}
-
-#ifdef CONFIG_CPU_AUTOHOTPLUG_ROOMAGE
-	if (!try_attemp)
-		autohotplug_roomage_update();
+EXPORT_SYMBOL(autohotplug_update_room);
 #endif
-	mutex_unlock(&hotplug_enable_mutex);
-}
 
-
-static int autohotplug_thread_task(void *data)
+static int autohotplug_task(void *data)
 {
+	int i, hotplug_lock, try_attemp = 0; // 0: no success 1: up success 2: down success
+	unsigned long flags;
+	struct auto_cpu_hotplug_loadinfo load;
+
 	set_freezable();
 	while (1) {
 		if (freezing(current)) {
@@ -619,8 +591,69 @@ static int autohotplug_thread_task(void *data)
 				continue;
 		}
 
-		if (hotplug_enable)
-			autohotplug_governor_judge();
+		if (hotplug_enable) {
+			try_attemp = 0;
+			spin_lock_irqsave(&hotplug_load_lock, flags);
+			memcpy(&load, &governor.load, sizeof(load));
+			spin_unlock_irqrestore(&hotplug_load_lock, flags);
+
+			mutex_lock(&hotplug_enable_mutex);
+			load.max_load = 0;
+			load.min_load = 255;
+			load.max_cpu = INVALID_CPU;
+			load.min_cpu = INVALID_CPU;
+
+			for (i = total_nr_cpus - 1; i>= 0; i--) {
+				if (!cpu_online(i))
+					load.cpu_load[i] = INVALID_LOAD;
+
+				if ((load.cpu_load[i] != INVALID_LOAD)
+						&& (load.cpu_load[i] >= load.max_load))
+				{
+					load.max_load =load.cpu_load[i];
+					load.max_cpu  = i;
+				}
+
+				if ((load.cpu_load[i] != INVALID_LOAD)
+						&& (load.cpu_load[i] < load.min_load))
+				{
+					load.min_load =load.cpu_load[i];
+					load.min_cpu  = i;
+				}
+			}
+
+			if (boost_all_online) {
+				try_any_up();
+			} else {
+				hotplug_lock = atomic_read(&g_hotplug_lock);
+				/* check if current is in hotplug lock */
+				if (hotplug_lock) {
+					try_lock_up(hotplug_lock);
+				} else {
+					if (cur_governor->try_up(&load)) {
+						try_attemp = 1;
+						if (cur_governor->update_limits)
+							cur_governor->update_limits();
+					} else {
+						if (time_after_eq(jiffies, cpu_up_lasttime
+								+ usecs_to_jiffies(hotplug_up_attempt_hold_us)))
+						{
+							if (cur_governor->try_down(&load)) {
+								try_attemp = 2;
+								if (cur_governor->update_limits)
+									cur_governor->update_limits();
+							}
+						}
+					}
+				}
+			}
+
+#ifdef CONFIG_CPU_FREQ_GOV_AUTO_HOTPLUG_ROOMAGE
+			if (!try_attemp)
+			   autohotplug_tryroom();
+#endif
+			mutex_unlock(&hotplug_enable_mutex);
+		}
 
 		set_current_state(TASK_INTERRUPTIBLE);
 		schedule();
@@ -634,7 +667,7 @@ static int autohotplug_thread_task(void *data)
 
 static unsigned int autohotplug_updateload(int cpu)
 {
-	struct autohotplug_cpuinfo *pcpu = &per_cpu(cpuinfo, cpu);
+	struct auto_cpu_hotplug_cpuinfo *pcpu = &per_cpu(cpuinfo, cpu);
 	u64 now, now_idle, delta_idle, delta_time, active_time, load;
 
 	now_idle = get_cpu_idle_time(cpu, &now, 1);
@@ -652,22 +685,11 @@ static unsigned int autohotplug_updateload(int cpu)
 	load = active_time * 100;
 	do_div(load, delta_time);
 
-	return (unsigned int)load;
-}
-
-static void autohotplug_set_load(unsigned int cpu, unsigned int load,
-					unsigned int load_relative)
-{
-	if (cpu >= total_nr_cpus)
-		return;
-
-	governor_load.load.cpu_load[cpu] = load;
-	governor_load.load.cpu_load_relative[cpu] = load_relative;
+	return ((unsigned int)load);
 }
 
 static void autohotplug_governor_updateload(int cpu, unsigned int load,
-						unsigned int target,
-						struct cpufreq_policy *policy)
+							unsigned int target, struct cpufreq_policy *policy)
 {
 
 	unsigned long flags;
@@ -675,10 +697,9 @@ static void autohotplug_governor_updateload(int cpu, unsigned int load,
 
 	if (cur) {
 		spin_lock_irqsave(&hotplug_load_lock, flags);
-		autohotplug_set_load(cpu, (load * cur) / policy->max, load);
+		set_cpu_load(cpu, (load * cur) / policy->max);
 		if (is_cpu_big(cpu)) {
-			governor_load.load.big_min_load =
-				load_last_big_min_freq * 100 / policy->max;
+			governor.load.big_min_load = load_last_big_min_freq * 100 / policy->max;
 		}
 		spin_unlock_irqrestore(&hotplug_load_lock, flags);
 	}
@@ -688,7 +709,7 @@ static void autohotplug_sample_timer(unsigned long data)
 {
 	unsigned int i, load;
 	struct cpufreq_policy policy;
-	struct autohotplug_cpuinfo *pcpu;
+	struct auto_cpu_hotplug_cpuinfo *pcpu;
 	unsigned long flags, expires;
 	static const char performance_governor[] = "performance";
 	static const char powersave_governor[] = "powersave";
@@ -696,29 +717,42 @@ static void autohotplug_sample_timer(unsigned long data)
 	for_each_possible_cpu(i) {
 		if ((cpufreq_get_policy(&policy, i) == 0)
 				&& policy.governor->name
-				&& !(!strncmp(policy.governor->name,
-						performance_governor,
-						strlen(performance_governor)) ||
-						!strncmp(policy.governor->name,
-						powersave_governor,
-						strlen(powersave_governor))
-					)) {
+				&& !(!strncmp(policy.governor->name, performance_governor,
+						strlen(performance_governor))
+					|| !strncmp(policy.governor->name, powersave_governor,
+								strlen(powersave_governor))
+					)
+			)
+		{
 			pcpu = &per_cpu(cpuinfo, i);
 			spin_lock_irqsave(&pcpu->load_lock, flags);
 			load = autohotplug_updateload(i);
 			autohotplug_governor_updateload(i, load,
-					(policy.cur ? policy.cur : policy.min),
-					&policy);
+							(policy.cur ? policy.cur : policy.min), &policy);
 			spin_unlock_irqrestore(&pcpu->load_lock, flags);
-		} else {
-			autohotplug_set_load(i, INVALID_LOAD, INVALID_LOAD);
 		}
+		else
+#ifdef CONFIG_CPU_GOV_AUTO_HOTPLUG_WITHOUT_POLICY
+		{
+			policy.cur=1000000;
+			policy.max=1000000;
+			pcpu = &per_cpu(cpuinfo, i);
+			spin_lock_irqsave(&pcpu->load_lock, flags);
+			load = autohotplug_updateload(i);
+			autohotplug_governor_updateload(i, load,
+							(policy.cur ? policy.cur : policy.min), &policy);
+			spin_unlock_irqrestore(&pcpu->load_lock, flags);
+		}
+#else
+		set_cpu_load(i, INVALID_LOAD);
+#endif
 	}
 
 	if (!timer_pending(&hotplug_sample_timer)) {
 		expires = jiffies + usecs_to_jiffies(hotplug_sample_us);
-		mod_timer(&hotplug_sample_timer, expires);
+		mod_timer_pinned(&hotplug_sample_timer, expires);
 	}
+	return;
 }
 
 static void autohotplug_task_timer(unsigned long data)
@@ -726,11 +760,11 @@ static void autohotplug_task_timer(unsigned long data)
 	unsigned long expires;
 
 	if (hotplug_enable)
-		wake_up_process(autohotplug_task);
+		wake_up_process(auto_hotplug_task);
 
 	if (!timer_pending(&hotplug_task_timer)) {
 		expires = jiffies + usecs_to_jiffies(hotplug_period_us);
-		mod_timer(&hotplug_task_timer, expires);
+		mod_timer_pinned(&hotplug_task_timer, expires);
 	}
 }
 
@@ -743,33 +777,28 @@ static int autohotplug_timer_start(void)
 	/* init sample timer */
 	init_timer_deferrable(&hotplug_sample_timer);
 	hotplug_sample_timer.function  = autohotplug_sample_timer;
-	hotplug_sample_timer.data = (unsigned long)&governor_load.load;
-	hotplug_sample_timer.expires = jiffies +
-					usecs_to_jiffies(hotplug_sample_us);
+	hotplug_sample_timer.data = (unsigned long)&governor.load;
+	hotplug_sample_timer.expires = jiffies + usecs_to_jiffies(hotplug_sample_us);
 	add_timer_on(&hotplug_sample_timer, 0);
 
+	/* init task timer */
 	for (i = total_nr_cpus - 1; i >= 0; i--) {
-		autohotplug_set_load(i, INVALID_LOAD, INVALID_LOAD);
-#ifdef CONFIG_CPU_AUTOHOTPLUG_STATS
-		cpu_on_time_total[i] = 0;
-		cpu_up_count_total[i] = 1;
-		cpu_down_count_total[i] = 0;
-		cpu_on_lasttime[i] = get_jiffies_64();
-#endif
+		set_cpu_load(i, INVALID_LOAD);
+		cpu_in_sleep[i] = 0;
+		cpu_sleep_lasttime[i] = i ? 0 : jiffies;
 	}
 
 	cpu_up_lasttime = jiffies;
+	cpu_boost_lasttime = jiffies;
 
 	/* init hotplug timer */
 	init_timer(&hotplug_task_timer);
 	hotplug_task_timer.function  = autohotplug_task_timer;
-	hotplug_task_timer.data = (unsigned long)&governor_load.load;
-	hotplug_task_timer.expires = jiffies +
-					usecs_to_jiffies(hotplug_period_us);
+	hotplug_task_timer.data = (unsigned long)&governor.load;
+	hotplug_task_timer.expires = jiffies + usecs_to_jiffies(hotplug_period_us);
 	add_timer_on(&hotplug_task_timer, 0);
 
 	mutex_unlock(&hotplug_enable_mutex);
-
 	return 0;
 }
 
@@ -783,7 +812,7 @@ static int autohotplug_timer_stop(void)
 	return 0;
 }
 
-static int autohotplug_cpu_lock(int num_core)
+int hotplug_cpu_lock(int num_core)
 {
 	int prev_lock;
 
@@ -800,13 +829,13 @@ static int autohotplug_cpu_lock(int num_core)
 	}
 
 	atomic_set(&g_hotplug_lock, num_core);
-	wake_up_process(autohotplug_task);
+	wake_up_process(auto_hotplug_task);
 	mutex_unlock(&hotplug_enable_mutex);
 
 	return 0;
 }
 
-static int autohotplug_cpu_unlock(int num_core)
+int hotplug_cpu_unlock(int num_core)
 {
 	int prev_lock = atomic_read(&g_hotplug_lock);
 
@@ -823,8 +852,7 @@ static int autohotplug_cpu_unlock(int num_core)
 	return 0;
 }
 
-unsigned int autohotplug_enable_from_sysfs(unsigned int temp,
-						unsigned int *value)
+unsigned int hotplug_enable_from_sysfs(unsigned int temp, unsigned int *value)
 {
 	int prev_lock;
 
@@ -833,7 +861,7 @@ unsigned int autohotplug_enable_from_sysfs(unsigned int temp,
 	} else if (!temp && hotplug_enable) {
 		prev_lock = atomic_read(&hotplug_lock);
 		if (prev_lock)
-			autohotplug_cpu_unlock(prev_lock);
+			hotplug_cpu_unlock(prev_lock);
 
 		atomic_set(&hotplug_lock, 0);
 		autohotplug_timer_stop();
@@ -842,82 +870,40 @@ unsigned int autohotplug_enable_from_sysfs(unsigned int temp,
 	return temp;
 }
 
-#ifdef CONFIG_CPU_AUTOHOTPLUG_STATS
-static unsigned int autohotplug_cpu_time_up_to_sysfs(unsigned int temp,
-						unsigned int *value)
+unsigned int cpu_sleep_to_sysfs(unsigned int temp, unsigned int *value)
 {
-	u64 cur_jiffies = get_jiffies_64();
-	unsigned int index = ((unsigned long)value -
-				(unsigned long)cpu_on_time_total)
-				/ sizeof(unsigned long);
+	unsigned int index = ((unsigned int)value
+							- (unsigned int)cpu_in_sleep) / sizeof(unsigned int);
+
+	if (!index)
+		return (jiffies - cpu_sleep_lasttime[index]);
 
 	if (cpu_online(index))
-		return cpu_on_time_total[index] +
-			(cur_jiffies - cpu_on_lasttime[index]);
+		return cpu_in_sleep[index];
 	else
-		return cpu_on_time_total[index];
+		return (cpu_in_sleep[index] + (jiffies - cpu_sleep_lasttime[index]));
 }
 
-static unsigned int autohotplug_cpu_count_up_to_sysfs(unsigned int temp,
-						unsigned int *value)
-{
-	unsigned int index = ((unsigned long)value -
-				(unsigned long)cpu_up_count_total)
-				/ sizeof(unsigned long);
-
-	return cpu_up_count_total[index];
-}
-
-static unsigned int autohotplug_cpu_count_down_to_sysfs(unsigned int temp,
-						unsigned int *value)
-{
-	unsigned int index = ((unsigned long)value -
-				(unsigned long)cpu_down_count_total)
-				/ sizeof(unsigned long);
-
-	return cpu_down_count_total[index];
-}
-
-static void autohotplug_attr_stats_init(void)
-{
-	int i;
-
-	for (i = 0; i < CONFIG_NR_CPUS; i++) {
-		autohotplug_attr_add(cpu_on_time_total_sysfs[i],
-				(unsigned int *)&cpu_on_time_total[i],
-				0444, autohotplug_cpu_time_up_to_sysfs,
-				NULL);
-		autohotplug_attr_add(cpu_count_up_sysfs[i],
-				(unsigned int *)&cpu_up_count_total[i],
-				0444, autohotplug_cpu_count_up_to_sysfs,
-				NULL);
-		autohotplug_attr_add(cpu_count_down_sysfs[i],
-				(unsigned int *)&cpu_down_count_total[i],
-				0444, autohotplug_cpu_count_down_to_sysfs,
-				NULL);
-	}
-}
-#endif /* CONFIG_CPU_AUTOHOTPLUG_STATS */
-
-unsigned int autohotplug_lock_from_sysfs(unsigned int temp, unsigned int *value)
+unsigned int hotplug_lock_from_sysfs(unsigned int temp, unsigned int *value)
 {
 	int ret, prev_lock;
 
-	if ((!hotplug_enable) || temp > num_possible_cpus())
+	if ((!hotplug_enable) || temp > NR_CPUS) {
 		return atomic_read(&g_hotplug_lock);
+	}
 
 	prev_lock = atomic_read(&hotplug_lock);
 	if (prev_lock)
-		autohotplug_cpu_unlock(prev_lock);
+		hotplug_cpu_unlock(prev_lock);
 
 	if (temp == 0) {
 		atomic_set(&hotplug_lock, 0);
 		return 0;
 	}
 
-	ret = autohotplug_cpu_lock(temp);
+	ret = hotplug_cpu_lock(temp);
 	if (ret) {
-		pr_err("[HOTPLUG] already locked with smaller value %d < %d\n",
+		printk(KERN_ERR "[HOTPLUG] already locked with smaller value %d < %d\n",
 			atomic_read(&g_hotplug_lock), temp);
 		return ret;
 	}
@@ -927,7 +913,7 @@ unsigned int autohotplug_lock_from_sysfs(unsigned int temp, unsigned int *value)
 	return temp;
 }
 
-unsigned int autohotplug_lock_to_sysfs(unsigned int temp, unsigned int *value)
+unsigned int hotplug_lock_to_sysfs(unsigned int temp, unsigned int *value)
 {
 	return atomic_read(&hotplug_lock);
 }
@@ -936,8 +922,8 @@ static ssize_t autohotplug_show(struct kobject *kobj,
 		struct attribute *attr, char *buf)
 {
 	ssize_t ret = 0;
-	struct autohotplug_global_attr *auto_attr =
-		container_of(attr, struct autohotplug_global_attr, attr);
+	struct auto_hotplug_global_attr *auto_attr =
+		container_of(attr, struct auto_hotplug_global_attr, attr);
 	unsigned int temp = *(auto_attr->value);
 
 	if (auto_attr->to_sysfs != NULL)
@@ -952,8 +938,8 @@ static ssize_t autohotplug_store(struct kobject *a, struct attribute *attr,
 {
 	unsigned int temp;
 	ssize_t ret = count;
-	struct autohotplug_global_attr *auto_attr =
-		container_of(attr, struct autohotplug_global_attr, attr);
+	struct auto_hotplug_global_attr *auto_attr =
+		container_of(attr, struct auto_hotplug_global_attr, attr);
 	char *str = vmalloc(count + 1);
 
 	if (str == NULL)
@@ -961,7 +947,7 @@ static ssize_t autohotplug_store(struct kobject *a, struct attribute *attr,
 
 	memcpy(str, buf, count);
 	str[count] = 0;
-	if (kstrtouint(str, 10, &temp) != 0) {
+	if (sscanf(str, "%u", &temp) < 1) {
 		ret = -EINVAL;
 	} else {
 		if (auto_attr->from_sysfs != NULL)
@@ -978,83 +964,28 @@ static ssize_t autohotplug_store(struct kobject *a, struct attribute *attr,
 
 void autohotplug_attr_add(const char *name, unsigned int *value, umode_t mode,
 		unsigned int (*to_sysfs)(unsigned int, unsigned int *),
-		unsigned int (*from_sysfs)(unsigned int, unsigned int *))
+		unsigned int (*from_sysfs)(unsigned int ,unsigned int*))
 {
 	int i = 0;
 
-	while (autohotplug_data.attributes[i] != NULL) {
+	while (auto_hotplug_data.attributes[i] != NULL) {
 		i++;
 		if (i >= HOTPLUG_DATA_SYSFS_MAX)
 			return;
 	}
 
-	autohotplug_data.attr[i].attr.mode = mode;
-	autohotplug_data.attr[i].show = autohotplug_show;
-	autohotplug_data.attr[i].store = autohotplug_store;
-	autohotplug_data.attr[i].attr.name = name;
-	autohotplug_data.attr[i].value = value;
-	autohotplug_data.attr[i].to_sysfs = to_sysfs;
-	autohotplug_data.attr[i].from_sysfs = from_sysfs;
-	autohotplug_data.attributes[i] = &autohotplug_data.attr[i].attr;
-	autohotplug_data.attributes[i + 1] = NULL;
+	auto_hotplug_data.attr[i].attr.mode = mode;
+	auto_hotplug_data.attr[i].show = autohotplug_show;
+	auto_hotplug_data.attr[i].store = autohotplug_store;
+	auto_hotplug_data.attr[i].attr.name = name;
+	auto_hotplug_data.attr[i].value = value;
+	auto_hotplug_data.attr[i].to_sysfs = to_sysfs;
+	auto_hotplug_data.attr[i].from_sysfs = from_sysfs;
+	auto_hotplug_data.attributes[i] = &auto_hotplug_data.attr[i].attr;
+	auto_hotplug_data.attributes[i + 1] = NULL;
 }
 
-static int autohotplug_attr_init(void)
-{
-	memset(&autohotplug_data, 0, sizeof(autohotplug_data));
-
-#ifdef CONFIG_CPU_AUTOHOTPLUG_STATS
-	autohotplug_attr_stats_init();
-#endif
-
-	autohotplug_attr_add("enable",          &hotplug_enable,      0644,
-				NULL, autohotplug_enable_from_sysfs);
-	autohotplug_attr_add("boost_all",       &boost_all_online,    0644,
-				NULL, NULL);
-	autohotplug_attr_add("polling_us",      &hotplug_period_us,   0644,
-				NULL, NULL);
-	autohotplug_attr_add("try_up_load",     &load_try_up,         0644,
-				NULL, NULL);
-	autohotplug_attr_add("try_down_load",   &load_try_down,       0644,
-				NULL, NULL);
-	autohotplug_attr_add("hold_last_up_us", &cpu_up_last_hold_us, 0644,
-				NULL, NULL);
-	autohotplug_attr_add("stable_up_us",    &load_up_stable_us,   0644,
-				NULL, NULL);
-	autohotplug_attr_add("stable_down_us",  &load_down_stable_us, 0644,
-				NULL, NULL);
-	autohotplug_attr_add("lock", (unsigned int *)&hotplug_lock,   0644,
-				autohotplug_lock_to_sysfs,
-				autohotplug_lock_from_sysfs);
-
-	/* init governor attr */
-	if (cur_governor->init_attr)
-		cur_governor->init_attr();
-
-	autohotplug_data.attr_group.name = "autohotplug";
-	autohotplug_data.attr_group.attrs = autohotplug_data.attributes;
-
-	return sysfs_create_group(kernel_kobj, &autohotplug_data.attr_group);
-}
-
-static int reboot_notifier_call(struct notifier_block *this,
-						unsigned long code, void *_cmd)
-{
-	/* disable auto hotplug */
-	autohotplug_enable_from_sysfs(0, NULL);
-
-	pr_err("%s:%s: stop autohotplug done\n", __FILE__, __func__);
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block reboot_notifier = {
-	.notifier_call  = reboot_notifier_call,
-	/* autohotplug notifier must be invoked before cpufreq notifier */
-	.priority   = 1,
-};
-
-#ifdef CONFIG_CPU_AUTOHOTPLUG_STATS
-static int autohotplug_cpu_callback(struct notifier_block *nfb,
+static int __cpuinit autohotplug_cpu_callback(struct notifier_block *nfb,
 		unsigned long action, void *hcpu)
 {
 	unsigned long flags;
@@ -1064,190 +995,204 @@ static int autohotplug_cpu_callback(struct notifier_block *nfb,
 	dev = get_cpu_device(cpu);
 	if (dev) {
 		switch (action) {
-		case CPU_ONLINE:
-			spin_lock_irqsave(&hotplug_load_lock, flags);
-			autohotplug_set_load(cpu, INVALID_LOAD, INVALID_LOAD);
-			cpu_on_lasttime[cpu] = get_jiffies_64();
-			cpu_up_count_total[cpu]++;
-			spin_unlock_irqrestore(&hotplug_load_lock, flags);
-			break;
-		case CPU_DOWN_PREPARE:
-		case CPU_UP_CANCELED_FROZEN:
-		case CPU_DOWN_FAILED:
-			spin_lock_irqsave(&hotplug_load_lock, flags);
-			autohotplug_set_load(cpu, INVALID_LOAD, INVALID_LOAD);
-			spin_unlock_irqrestore(&hotplug_load_lock, flags);
-			break;
-		case CPU_DEAD:
-			spin_lock_irqsave(&hotplug_load_lock, flags);
-			if (cpu_on_lasttime[cpu]) {
-				cpu_on_time_total[cpu] += get_jiffies_64() -
-							cpu_on_lasttime[cpu];
-				cpu_on_lasttime[cpu] = 0;
-				cpu_down_count_total[cpu]++;
-			}
-			spin_unlock_irqrestore(&hotplug_load_lock, flags);
-			break;
-		default:
-			break;
+			case CPU_ONLINE:
+				spin_lock_irqsave(&hotplug_load_lock, flags);
+				set_cpu_load(cpu, INVALID_LOAD);
+				if (cpu_sleep_lasttime[cpu]) {
+					cpu_in_sleep[cpu] += jiffies - cpu_sleep_lasttime[cpu];
+					cpu_sleep_lasttime[cpu] = 0;
+				}
+				spin_unlock_irqrestore(&hotplug_load_lock, flags);
+				break;
+			case CPU_DOWN_PREPARE:
+			case CPU_UP_CANCELED_FROZEN:
+			case CPU_DOWN_FAILED:
+				spin_lock_irqsave(&hotplug_load_lock, flags);
+				set_cpu_load(cpu, INVALID_LOAD);
+				spin_unlock_irqrestore(&hotplug_load_lock, flags);
+				break;
+			case CPU_DEAD:
+				spin_lock_irqsave(&hotplug_load_lock, flags);
+				cpu_sleep_lasttime[cpu] = jiffies;
+				spin_unlock_irqrestore(&hotplug_load_lock, flags);
+				break;
+			default:
+				break;
 		}
 	}
 	return NOTIFY_OK;
 }
 
-static struct notifier_block __refdata autohotplug_cpu_notifier = {
+static struct notifier_block __refdata hotplug_cpu_notifier = {
 	.notifier_call = autohotplug_cpu_callback,
 };
-#endif /* CONFIG_CPU_AUTOHOTPLUG_STATS */
 
-#ifdef CONFIG_CPU_AUTOHOTPLUG_INPUT_EVNT_NOTIFY
-static struct timer_list autohotplug_input_timer;
-static unsigned int period_us_bak;
-static unsigned int up_stable_us_bak;
-static unsigned int down_stable_us_bak;
+#ifdef CONFIG_DEBUG_FS
+static struct dentry *autohotplug_loaddbg_root;
+static char autohotplug_load_info[256];
 
-static void autohotplug_input_mode(bool input_mode)
+static int autohotplug_loaddbg_open(struct inode *inode,
+							struct file *file)
 {
-	if (input_mode) {
-		hotplug_period_us   = 50000;
-		load_up_stable_us   = 50000;
-		load_down_stable_us = UINT_MAX;
-	} else {
-		hotplug_period_us   = period_us_bak;
-		load_up_stable_us   = up_stable_us_bak;
-		load_down_stable_us = down_stable_us_bak;
-	}
-
-	wake_up_process(autohotplug_task);
-}
-
-static void autohotplug_do_input_timer(unsigned long data)
-{
-	autohotplug_input_mode(false);
-}
-
-/*
- * trigger cpu frequency to a high speed when input event coming.
- * such as key, ir, touchpannel for ex. , but skip gsensor.
- */
-static void autohotplug_input_event(struct input_handle *handle,
-				unsigned int type, unsigned int code, int value)
-{
-	if (type == EV_SYN && code == SYN_REPORT) {
-		autohotplug_input_mode(true);
-		mod_timer(&autohotplug_input_timer,
-					jiffies + msecs_to_jiffies(2000));
-	}
-}
-
-static int autohotplug_input_connect(struct input_handler *handler,
-					struct input_dev *dev,
-					const struct input_device_id *id)
-{
-	struct input_handle *handle;
-	int error;
-
-	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
-	if (!handle)
-		return -ENOMEM;
-
-	handle->dev = dev;
-	handle->handler = handler;
-	handle->name = "autohotplug";
-
-	error = input_register_handle(handle);
-	if (error)
-		goto err;
-
-	error = input_open_device(handle);
-	if (error)
-		goto err_open;
-
 	return 0;
-
-err_open:
-	input_unregister_handle(handle);
-err:
-	kfree(handle);
-	return error;
 }
-
-static void autohotplug_input_disconnect(struct input_handle *handle)
+static int autohotplug_loaddbg_release(struct inode *inode,
+							struct file *file)
 {
-	input_close_device(handle);
-	input_unregister_handle(handle);
-	kfree(handle);
+	return 0;
+}
+static ssize_t autohotplug_loaddbg_write(struct file *file,
+							const char __user *buf, size_t count, loff_t *ppos)
+{
+	return 0;
+}
+static ssize_t autohotplug_loaddbg_read(struct file *file,
+							char __user *buf, size_t count, loff_t *ppos)
+{
+	int i, len;
+
+	for_each_possible_cpu(i) {
+		sprintf(autohotplug_load_info + i * 5,"%4d ", governor.load.cpu_load[i]);
+	}
+
+	len = strlen(autohotplug_load_info);
+	autohotplug_load_info[len] = 0x0A;
+	autohotplug_load_info[len + 1] = 0x0;
+
+	len = strlen(autohotplug_load_info);
+	if (len) {
+		if (*ppos >=len)
+			return 0;
+		if (count >=len)
+			count = len;
+		if (count > (len - *ppos))
+			count = (len - *ppos);
+		if (copy_to_user((void __user *)buf,
+				(const void *)autohotplug_load_info, (unsigned long)len))
+			return 0;
+		*ppos += count;
+	} else {
+		count = 0;
+	}
+
+	return count;
 }
 
-static const struct input_device_id autohotplug_ids[] = {
-	{
-		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
-			INPUT_DEVICE_ID_MATCH_ABSBIT,
-		.evbit = { BIT_MASK(EV_ABS) },
-		.absbit = { [BIT_WORD(ABS_MT_POSITION_X)] =
-				BIT_MASK(ABS_MT_POSITION_X) |
-				BIT_MASK(ABS_MT_POSITION_Y) },
-	}, /* multi-touch touchscreen */
-	{
-		.flags = INPUT_DEVICE_ID_MATCH_KEYBIT |
-			INPUT_DEVICE_ID_MATCH_ABSBIT,
-		.keybit = { [BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH) },
-		.absbit = { [BIT_WORD(ABS_X)] =
-				BIT_MASK(ABS_X) | BIT_MASK(ABS_Y) },
-	}, /* touchpad */
-	{
-		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
-			INPUT_DEVICE_ID_MATCH_BUS   |
-			INPUT_DEVICE_ID_MATCH_VENDOR |
-			INPUT_DEVICE_ID_MATCH_PRODUCT |
-			INPUT_DEVICE_ID_MATCH_VERSION,
-		.bustype = BUS_HOST,
-		.vendor  = 0x0001,
-		.product = 0x0001,
-		.version = 0x0100,
-		.evbit = { BIT_MASK(EV_KEY) },
-	}, /* keyboard/ir */
-	{ },
+static const struct file_operations loaddbg_ops = {
+	.write      = autohotplug_loaddbg_write,
+	.read       = autohotplug_loaddbg_read,
+	.open       = autohotplug_loaddbg_open,
+	.release    = autohotplug_loaddbg_release,
 };
 
-static struct input_handler autohotplug_input_handler = {
-	.event          = autohotplug_input_event,
-	.connect        = autohotplug_input_connect,
-	.disconnect     = autohotplug_input_disconnect,
-	.name           = "autohotplug",
-	.id_table       = autohotplug_ids,
-};
-#endif  /* #ifdef CONFIG_CPU_AUTOHOTPLUG_INPUT_EVNT_NOTIFY */
+int autohotplug_debug_init(void)
+{
+	autohotplug_loaddbg_root = debugfs_create_dir("hotplug", NULL);
 
-static int autohotplug_init(void)
+	if (debugfs_create_file("load", 0444, autohotplug_loaddbg_root,
+			NULL, &loaddbg_ops))
+		return 0;
+
+	debugfs_remove_recursive(autohotplug_loaddbg_root);
+	autohotplug_loaddbg_root = NULL;
+
+	return -ENOENT;
+}
+#endif /* CONFIG_DEBUG_FS */
+
+static int autohotplug_attr_init(void)
+{
+	int i;
+
+	memset(&auto_hotplug_data, sizeof(auto_hotplug_data), 0);
+
+	for_each_possible_cpu(i)
+		autohotplug_attr_add(cpu_state_sysfs[i], (unsigned int*)&cpu_in_sleep[i],
+							0444, cpu_sleep_to_sysfs, NULL);
+
+	autohotplug_attr_add("enable",          &hotplug_enable,             0644,
+							NULL, hotplug_enable_from_sysfs);
+	autohotplug_attr_add("boost_all",       &boost_all_online,           0644,
+							NULL, NULL);
+	autohotplug_attr_add("timer_task_us",   &hotplug_period_us,          0644,
+							NULL, NULL);
+	autohotplug_attr_add("try_cpuup_level", &load_try_up,                0644,
+							NULL, NULL);
+	autohotplug_attr_add("try_boost_level", &load_try_boost,             0644,
+							NULL, NULL);
+	autohotplug_attr_add("try_cpudn_level", &load_try_down,              0644,
+							NULL, NULL);
+	autohotplug_attr_add("save_all_up",     &load_save_up,               0644,
+							NULL, NULL);
+	autohotplug_attr_add("hold_atept_us",   &hotplug_up_attempt_hold_us, 0644,
+							NULL, NULL);
+	autohotplug_attr_add("hold_cpuup_us",   &hotplug_up_cpu_hold_us,     0644,
+							NULL, NULL);
+	autohotplug_attr_add("hold_boost_us",   &hotplug_boost_hold_us,      0644,
+							NULL, NULL);
+	autohotplug_attr_add("stable_tryup_us", &load_up_stable_us,          0644,
+							NULL, NULL);
+	autohotplug_attr_add("stable_boost_us", &load_boost_stable_us,       0644,
+							NULL, NULL);
+	autohotplug_attr_add("stable_tdown_us", &load_down_stable_us,        0644,
+							NULL, NULL);
+	autohotplug_attr_add("lock", (unsigned int *)&hotplug_lock,          0644,
+							hotplug_lock_to_sysfs, hotplug_lock_from_sysfs);
+
+	/* init governor attr */
+	if (cur_governor->init_attr)
+		cur_governor->init_attr();
+
+	auto_hotplug_data.attr_group.name = "autohotplug";
+	auto_hotplug_data.attr_group.attrs = auto_hotplug_data.attributes;
+
+	return sysfs_create_group(kernel_kobj, &auto_hotplug_data.attr_group);
+}
+
+static int reboot_notifier_call(struct notifier_block *this,
+						unsigned long code, void *_cmd)
+{
+    printk("%s:%s: stop autoplug begin\n", __FILE__, __func__);
+
+    // disable auto hotplug
+    hotplug_enable_from_sysfs(0, NULL);
+
+    printk("%s:%s: stop autoplug done\n", __FILE__, __func__);
+    return NOTIFY_DONE;
+}
+
+static struct notifier_block reboot_notifier = {
+	.notifier_call	= reboot_notifier_call,
+	// autohotplug notifier must be invoked before cpufreq notifier
+	.priority	= 1,
+};
+
+int autohotplug_init(void)
 {
 	int cpu;
-	struct autohotplug_cpuinfo *pcpu;
+	struct auto_cpu_hotplug_cpuinfo *pcpu;
 
 	cur_governor = &autohotplug_smart;
 	if (cur_governor == NULL) {
-		AUTOHOTPLUG_ERR("autohotplug governor is NULL, failed\n");
+		pr_err("autohotplug governor is NULL, failed\n");
 		return -EINVAL;
 	}
 
 	if (cur_governor->get_fast_and_slow_cpus == NULL) {
-		AUTOHOTPLUG_ERR("get_fast_and_slow_cpus is NULL, failed\n");
+		pr_err("get_fast_and_slow_cpus is NULL, failed\n");
 		return -EINVAL;
 	}
 
-	cur_governor->get_fast_and_slow_cpus(&autohotplug_fast_cpumask,
-						&autohotplug_slow_cpumask);
+	cur_governor->get_fast_and_slow_cpus(&hmp_fast_cpu_mask, &hmp_slow_cpu_mask);
 
 	/* init per_cpu load_lock */
 	for_each_possible_cpu(cpu) {
 		pcpu = &per_cpu(cpuinfo, cpu);
 		spin_lock_init(&pcpu->load_lock);
-#ifdef CONFIG_CPU_AUTOHOTPLUG_ROOMAGE
-		if (cpumask_test_cpu(cpu, &autohotplug_fast_cpumask))
-			cluster1_max_online++;
+		if (cpumask_test_cpu(cpu, &hmp_fast_cpu_mask))
+			c1_max++;
 		else
-			cluster0_max_online++;
-#endif
+			c0_max++;
 	}
 
 	mutex_init(&hotplug_enable_mutex);
@@ -1258,160 +1203,31 @@ static int autohotplug_init(void)
 		autohotplug_timer_start();
 
 	/* start task */
-	autohotplug_task = kthread_create(autohotplug_thread_task, NULL,
-						"autohotplug");
-	if (IS_ERR(autohotplug_task))
-		return PTR_ERR(autohotplug_task);
-	get_task_struct(autohotplug_task);
+	auto_hotplug_task = kthread_create(autohotplug_task,
+										NULL, "auto_cpu_hotplug");
+	if (IS_ERR(auto_hotplug_task))
+		return PTR_ERR(auto_hotplug_task);
+	get_task_struct(auto_hotplug_task);
 
 	/* attr init */
 	autohotplug_attr_init();
-
-#ifdef CONFIG_CPU_AUTOHOTPLUG_STATS
-	register_hotcpu_notifier(&autohotplug_cpu_notifier);
+	/* register hotcpu notifier */
+	register_hotcpu_notifier(&hotplug_cpu_notifier);
+#ifdef CONFIG_DEBUG_FS
+	autohotplug_debug_init();
 #endif
 
 	/* register reboot notifier for process cpus when reboot */
 	register_reboot_notifier(&reboot_notifier);
 
-#ifdef CONFIG_CPU_AUTOHOTPLUG_INPUT_EVNT_NOTIFY
-	period_us_bak      = hotplug_period_us;
-	up_stable_us_bak   = load_up_stable_us;
-	down_stable_us_bak = load_down_stable_us;
-
-	if (input_register_handler(&autohotplug_input_handler))
-		return -EINVAL;
-
-	/* init input event timer */
-	init_timer_deferrable(&autohotplug_input_timer);
-	autohotplug_input_timer.function = autohotplug_do_input_timer;
-	autohotplug_input_timer.expires = jiffies + msecs_to_jiffies(2000);
-	add_timer_on(&autohotplug_input_timer, 0);
-#endif
-
 	/* turn hotplug task on*/
-	wake_up_process(autohotplug_task);
+	wake_up_process(auto_hotplug_task);
 
+	pr_debug("%s init ok\n", __func__);
 	return 0;
 }
+
 device_initcall(autohotplug_init);
 
-#ifdef CONFIG_DEBUG_FS
-static struct dentry *debugfs_autohotplug_root;
-static char autohotplug_load_info[256];
-
-static ssize_t autohotplug_load_read(struct file *file,
-					char __user *buf, size_t count,
-					loff_t *ppos)
-{
-	int i, len;
-
-	for_each_possible_cpu(i)
-		sprintf(autohotplug_load_info + i * 5, "%4d ",
-						governor_load.load.cpu_load[i]);
-
-	len = strlen(autohotplug_load_info);
-	autohotplug_load_info[len] = 0x0A;
-	autohotplug_load_info[len + 1] = 0x0;
-
-	len = strlen(autohotplug_load_info);
-	if (len) {
-		if (*ppos >= len)
-			return 0;
-		if (count >= len)
-			count = len;
-		if (count > (len - *ppos))
-			count = (len - *ppos);
-		if (copy_to_user((void __user *)buf,
-				(const void *)autohotplug_load_info,
-				(unsigned long)len))
-			return 0;
-		*ppos += count;
-	} else {
-		count = 0;
-	}
-
-	return count;
-}
-
-static const struct file_operations load_ops = {
-	.read = autohotplug_load_read,
-};
-
-static ssize_t autohotplug_load_relative_read(struct file *file,
-						char __user *buf, size_t count,
-						loff_t *ppos)
-{
-	int i, len;
-
-	for_each_possible_cpu(i)
-		sprintf(autohotplug_load_info + i * 5, "%4d ",
-				governor_load.load.cpu_load_relative[i]);
-
-	len = strlen(autohotplug_load_info);
-	autohotplug_load_info[len] = 0x0A;
-	autohotplug_load_info[len + 1] = 0x0;
-
-	len = strlen(autohotplug_load_info);
-	if (len) {
-		if (*ppos >= len)
-			return 0;
-		if (count >= len)
-			count = len;
-		if (count > (len - *ppos))
-			count = (len - *ppos);
-		if (copy_to_user((void __user *)buf,
-				(const void *)autohotplug_load_info,
-				(unsigned long)len))
-			return 0;
-		*ppos += count;
-	} else {
-		count = 0;
-	}
-
-	return count;
-}
-
-static const struct file_operations load_relative_ops = {
-	.read = autohotplug_load_relative_read,
-};
-
-static int __init autohotplug_debugfs_init(void)
-{
-	int err = 0;
-
-	debugfs_autohotplug_root = debugfs_create_dir("autohotplug", NULL);
-	if (!debugfs_autohotplug_root)
-		return -ENOMEM;
-
-	if (!debugfs_create_file("load", 0444, debugfs_autohotplug_root,
-			NULL, &load_ops)) {
-		err = -ENOMEM;
-		goto out;
-	}
-
-	if (!debugfs_create_file("load_relative", 0444,
-					debugfs_autohotplug_root, NULL,
-					&load_relative_ops)) {
-		err = -ENOMEM;
-		goto out;
-	}
-
-	return 0;
-
-out:
-	debugfs_remove_recursive(debugfs_autohotplug_root);
-	return err;
-}
-
-static void __exit autohotplug_debugfs_exit(void)
-{
-	debugfs_remove_recursive(debugfs_autohotplug_root);
-}
-
-late_initcall(autohotplug_debugfs_init);
-module_exit(autohotplug_debugfs_exit);
-#endif /* CONFIG_DEBUG_FS */
-
-MODULE_DESCRIPTION("CPU Autohotplug");
+MODULE_DESCRIPTION("CPU Auto Hotplug");
 MODULE_LICENSE("GPL");

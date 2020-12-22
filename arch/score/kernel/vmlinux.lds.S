@@ -40,7 +40,6 @@ SECTIONS
 		_text = .;	/* Text and read-only data */
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		*(.text.*)
@@ -50,7 +49,6 @@ SECTIONS
 	}
 
 	. = ALIGN(16);
-	_sdata =  .;			/* Start of data section */
 	RODATA
 
 	EXCEPTION_TABLE(16)

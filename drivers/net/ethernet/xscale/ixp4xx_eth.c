@@ -171,6 +171,7 @@ struct port {
 	struct npe *npe;
 	struct net_device *netdev;
 	struct napi_struct napi;
+	struct phy_device *phydev;
 	struct eth_plat_info *plat;
 	buffer_t *rx_buff_tab[RX_DESCS], *tx_buff_tab[TX_DESCS];
 	struct desc *desc_tab;	/* coherent */
@@ -255,6 +256,10 @@ static int ports_open;
 static struct port *npe_port_tab[MAX_NPES];
 static struct dma_pool *dma_pool;
 
+static struct sock_filter ptp_filter[] = {
+	PTP_FILTER
+};
+
 static int ixp_ptp_match(struct sk_buff *skb, u16 uid_hi, u32 uid_lo, u16 seqid)
 {
 	u8 *data = skb->data;
@@ -262,7 +267,7 @@ static int ixp_ptp_match(struct sk_buff *skb, u16 uid_hi, u32 uid_lo, u16 seqid)
 	u16 *hi, *id;
 	u32 lo;
 
-	if (ptp_classify_raw(skb) != PTP_CLASS_V1_IPV4)
+	if (sk_run_filter(skb, ptp_filter) != PTP_CLASS_V1_IPV4)
 		return 0;
 
 	offset = ETH_HLEN + IPV4_HLEN(data) + UDP_HLEN;
@@ -368,7 +373,7 @@ static void ixp_tx_timestamp(struct port *port, struct sk_buff *skb)
 	__raw_writel(TX_SNAPSHOT_LOCKED, &regs->channel[ch].ch_event);
 }
 
-static int hwtstamp_set(struct net_device *netdev, struct ifreq *ifr)
+static int hwtstamp_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 {
 	struct hwtstamp_config cfg;
 	struct ixp46x_ts_regs *regs;
@@ -384,8 +389,16 @@ static int hwtstamp_set(struct net_device *netdev, struct ifreq *ifr)
 	ch = PORT2CHANNEL(port);
 	regs = (struct ixp46x_ts_regs __iomem *) IXP4XX_TIMESYNC_BASE_VIRT;
 
-	if (cfg.tx_type != HWTSTAMP_TX_OFF && cfg.tx_type != HWTSTAMP_TX_ON)
+	switch (cfg.tx_type) {
+	case HWTSTAMP_TX_OFF:
+		port->hwts_tx_en = 0;
+		break;
+	case HWTSTAMP_TX_ON:
+		port->hwts_tx_en = 1;
+		break;
+	default:
 		return -ERANGE;
+	}
 
 	switch (cfg.rx_filter) {
 	case HWTSTAMP_FILTER_NONE:
@@ -403,37 +416,9 @@ static int hwtstamp_set(struct net_device *netdev, struct ifreq *ifr)
 		return -ERANGE;
 	}
 
-	port->hwts_tx_en = cfg.tx_type == HWTSTAMP_TX_ON;
-
 	/* Clear out any old time stamps. */
 	__raw_writel(TX_SNAPSHOT_LOCKED | RX_SNAPSHOT_LOCKED,
 		     &regs->channel[ch].ch_event);
-
-	return copy_to_user(ifr->ifr_data, &cfg, sizeof(cfg)) ? -EFAULT : 0;
-}
-
-static int hwtstamp_get(struct net_device *netdev, struct ifreq *ifr)
-{
-	struct hwtstamp_config cfg;
-	struct port *port = netdev_priv(netdev);
-
-	cfg.flags = 0;
-	cfg.tx_type = port->hwts_tx_en ? HWTSTAMP_TX_ON : HWTSTAMP_TX_OFF;
-
-	switch (port->hwts_rx_en) {
-	case 0:
-		cfg.rx_filter = HWTSTAMP_FILTER_NONE;
-		break;
-	case PTP_SLAVE_MODE:
-		cfg.rx_filter = HWTSTAMP_FILTER_PTP_V1_L4_SYNC;
-		break;
-	case PTP_MASTER_MODE:
-		cfg.rx_filter = HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ;
-		break;
-	default:
-		WARN_ON_ONCE(1);
-		return -ERANGE;
-	}
 
 	return copy_to_user(ifr->ifr_data, &cfg, sizeof(cfg)) ? -EFAULT : 0;
 }
@@ -561,7 +546,7 @@ static void ixp4xx_mdio_remove(void)
 static void ixp4xx_adjust_link(struct net_device *dev)
 {
 	struct port *port = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
+	struct phy_device *phydev = port->phydev;
 
 	if (!phydev->link) {
 		if (port->speed) {
@@ -708,7 +693,8 @@ static int eth_poll(struct napi_struct *napi, int budget)
 			if (!qmgr_stat_below_low_watermark(rxq) &&
 			    napi_reschedule(napi)) { /* not empty again */
 #if DEBUG_RX
-				printk(KERN_DEBUG "%s: eth_poll napi_reschedule succeeded\n",
+				printk(KERN_DEBUG "%s: eth_poll"
+				       " napi_reschedule successed\n",
 				       dev->name);
 #endif
 				qmgr_disable_irq(rxq);
@@ -936,7 +922,7 @@ static void eth_set_mcast_list(struct net_device *dev)
 	int i;
 	static const u8 allmulti[] = { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
-	if ((dev->flags & IFF_ALLMULTI) && !(dev->flags & IFF_PROMISC)) {
+	if (dev->flags & IFF_ALLMULTI) {
 		for (i = 0; i < ETH_ALEN; i++) {
 			__raw_writel(allmulti[i], &port->regs->mcast_addr[i]);
 			__raw_writel(allmulti[i], &port->regs->mcast_mask[i]);
@@ -952,7 +938,7 @@ static void eth_set_mcast_list(struct net_device *dev)
 		return;
 	}
 
-	eth_zero_addr(diffs);
+	memset(diffs, 0, ETH_ALEN);
 
 	addr = NULL;
 	netdev_for_each_mc_addr(ha, dev) {
@@ -974,17 +960,15 @@ static void eth_set_mcast_list(struct net_device *dev)
 
 static int eth_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
 {
+	struct port *port = netdev_priv(dev);
+
 	if (!netif_running(dev))
 		return -EINVAL;
 
-	if (cpu_is_ixp46x()) {
-		if (cmd == SIOCSHWTSTAMP)
-			return hwtstamp_set(dev, req);
-		if (cmd == SIOCGHWTSTAMP)
-			return hwtstamp_get(dev, req);
-	}
+	if (cpu_is_ixp46x() && cmd == SIOCSHWTSTAMP)
+		return hwtstamp_ioctl(dev, req, cmd);
 
-	return phy_mii_ioctl(dev->phydev, req, cmd);
+	return phy_mii_ioctl(port->phydev, req, cmd);
 }
 
 /* ethtool support */
@@ -993,55 +977,37 @@ static void ixp4xx_get_drvinfo(struct net_device *dev,
 			       struct ethtool_drvinfo *info)
 {
 	struct port *port = netdev_priv(dev);
-
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strcpy(info->driver, DRV_NAME);
 	snprintf(info->fw_version, sizeof(info->fw_version), "%u:%u:%u:%u",
 		 port->firmware[0], port->firmware[1],
 		 port->firmware[2], port->firmware[3]);
-	strlcpy(info->bus_info, "internal", sizeof(info->bus_info));
+	strcpy(info->bus_info, "internal");
+}
+
+static int ixp4xx_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct port *port = netdev_priv(dev);
+	return phy_ethtool_gset(port->phydev, cmd);
+}
+
+static int ixp4xx_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct port *port = netdev_priv(dev);
+	return phy_ethtool_sset(port->phydev, cmd);
 }
 
 static int ixp4xx_nway_reset(struct net_device *dev)
 {
-	return phy_start_aneg(dev->phydev);
-}
-
-int ixp46x_phc_index = -1;
-EXPORT_SYMBOL_GPL(ixp46x_phc_index);
-
-static int ixp4xx_get_ts_info(struct net_device *dev,
-			      struct ethtool_ts_info *info)
-{
-	if (!cpu_is_ixp46x()) {
-		info->so_timestamping =
-			SOF_TIMESTAMPING_TX_SOFTWARE |
-			SOF_TIMESTAMPING_RX_SOFTWARE |
-			SOF_TIMESTAMPING_SOFTWARE;
-		info->phc_index = -1;
-		return 0;
-	}
-	info->so_timestamping =
-		SOF_TIMESTAMPING_TX_HARDWARE |
-		SOF_TIMESTAMPING_RX_HARDWARE |
-		SOF_TIMESTAMPING_RAW_HARDWARE;
-	info->phc_index = ixp46x_phc_index;
-	info->tx_types =
-		(1 << HWTSTAMP_TX_OFF) |
-		(1 << HWTSTAMP_TX_ON);
-	info->rx_filters =
-		(1 << HWTSTAMP_FILTER_NONE) |
-		(1 << HWTSTAMP_FILTER_PTP_V1_L4_SYNC) |
-		(1 << HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ);
-	return 0;
+	struct port *port = netdev_priv(dev);
+	return phy_start_aneg(port->phydev);
 }
 
 static const struct ethtool_ops ixp4xx_ethtool_ops = {
 	.get_drvinfo = ixp4xx_get_drvinfo,
+	.get_settings = ixp4xx_get_settings,
+	.set_settings = ixp4xx_set_settings,
 	.nway_reset = ixp4xx_nway_reset,
 	.get_link = ethtool_op_get_link,
-	.get_ts_info = ixp4xx_get_ts_info,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
 
@@ -1106,12 +1072,10 @@ static int init_queues(struct port *port)
 {
 	int i;
 
-	if (!ports_open) {
-		dma_pool = dma_pool_create(DRV_NAME, &port->netdev->dev,
-					   POOL_ALLOC_SIZE, 32, 0);
-		if (!dma_pool)
+	if (!ports_open)
+		if (!(dma_pool = dma_pool_create(DRV_NAME, NULL,
+						 POOL_ALLOC_SIZE, 32, 0)))
 			return -ENOMEM;
-	}
 
 	if (!(port->desc_tab = dma_pool_alloc(dma_pool, GFP_KERNEL,
 					      &port->desc_tab_phys)))
@@ -1242,7 +1206,7 @@ static int eth_open(struct net_device *dev)
 	}
 
 	port->speed = 0;	/* force "link up" message */
-	phy_start(dev->phydev);
+	phy_start(port->phydev);
 
 	for (i = 0; i < ETH_ALEN; i++)
 		__raw_writel(dev->dev_addr[i], &port->regs->hw_addr[i]);
@@ -1363,7 +1327,7 @@ static int eth_close(struct net_device *dev)
 		printk(KERN_CRIT "%s: unable to disable loopback\n",
 		       dev->name);
 
-	phy_stop(dev->phydev);
+	phy_stop(port->phydev);
 
 	if (!ports_open)
 		qmgr_disable_irq(TXDONE_QUEUE);
@@ -1383,15 +1347,19 @@ static const struct net_device_ops ixp4xx_netdev_ops = {
 	.ndo_validate_addr = eth_validate_addr,
 };
 
-static int eth_init_one(struct platform_device *pdev)
+static int __devinit eth_init_one(struct platform_device *pdev)
 {
 	struct port *port;
 	struct net_device *dev;
-	struct eth_plat_info *plat = dev_get_platdata(&pdev->dev);
-	struct phy_device *phydev = NULL;
+	struct eth_plat_info *plat = pdev->dev.platform_data;
 	u32 regs_phys;
 	char phy_id[MII_BUS_ID_SIZE + 3];
 	int err;
+
+	if (ptp_filter_init(ptp_filter, ARRAY_SIZE(ptp_filter))) {
+		pr_err("ixp4xx_eth: bad ptp filter\n");
+		return -EINVAL;
+	}
 
 	if (!(dev = alloc_etherdev(sizeof(struct port))))
 		return -ENOMEM;
@@ -1450,14 +1418,14 @@ static int eth_init_one(struct platform_device *pdev)
 
 	snprintf(phy_id, MII_BUS_ID_SIZE + 3, PHY_ID_FMT,
 		mdio_bus->id, plat->phy);
-	phydev = phy_connect(dev, phy_id, &ixp4xx_adjust_link,
-			     PHY_INTERFACE_MODE_MII);
-	if (IS_ERR(phydev)) {
-		err = PTR_ERR(phydev);
+	port->phydev = phy_connect(dev, phy_id, &ixp4xx_adjust_link, 0,
+				   PHY_INTERFACE_MODE_MII);
+	if (IS_ERR(port->phydev)) {
+		err = PTR_ERR(port->phydev);
 		goto err_free_mem;
 	}
 
-	phydev->irq = PHY_POLL;
+	port->phydev->irq = PHY_POLL;
 
 	if ((err = register_netdev(dev)))
 		goto err_phy_dis;
@@ -1468,9 +1436,10 @@ static int eth_init_one(struct platform_device *pdev)
 	return 0;
 
 err_phy_dis:
-	phy_disconnect(phydev);
+	phy_disconnect(port->phydev);
 err_free_mem:
 	npe_port_tab[NPE_ID(port->id)] = NULL;
+	platform_set_drvdata(pdev, NULL);
 	release_resource(port->mem_res);
 err_npe_rel:
 	npe_release(port->npe);
@@ -1479,15 +1448,15 @@ err_free:
 	return err;
 }
 
-static int eth_remove_one(struct platform_device *pdev)
+static int __devexit eth_remove_one(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
-	struct phy_device *phydev = dev->phydev;
 	struct port *port = netdev_priv(dev);
 
 	unregister_netdev(dev);
-	phy_disconnect(phydev);
+	phy_disconnect(port->phydev);
 	npe_port_tab[NPE_ID(port->id)] = NULL;
+	platform_set_drvdata(pdev, NULL);
 	npe_release(port->npe);
 	release_resource(port->mem_res);
 	free_netdev(dev);

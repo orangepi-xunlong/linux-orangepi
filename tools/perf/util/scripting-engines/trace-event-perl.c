@@ -24,21 +24,16 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
-#include <linux/bitmap.h>
-#include <linux/time64.h>
-
-#include "../util.h"
-#include <EXTERN.h>
-#include <perl.h>
 
 #include "../../perf.h"
-#include "../callchain.h"
-#include "../machine.h"
+#include "../util.h"
 #include "../thread.h"
 #include "../event.h"
 #include "../trace-event.h"
 #include "../evsel.h"
-#include "../debug.h"
+
+#include <EXTERN.h>
+#include <perl.h>
 
 void boot_Perf__Trace__Context(pTHX_ CV *cv);
 void boot_DynaLoader(pTHX_ CV *cv);
@@ -58,10 +53,10 @@ void xs_init(pTHX)
 
 INTERP my_perl;
 
-#define TRACE_EVENT_TYPE_MAX				\
+#define FTRACE_MAX_EVENT				\
 	((1 << (sizeof(unsigned short) * 8)) - 1)
 
-static DECLARE_BITMAP(events_defined, TRACE_EVENT_TYPE_MAX);
+struct event *events[FTRACE_MAX_EVENT];
 
 extern struct scripting_context *scripting_context;
 
@@ -186,13 +181,10 @@ static void define_flag_field(const char *ev_name,
 	LEAVE;
 }
 
-static void define_event_symbols(struct event_format *event,
+static void define_event_symbols(struct event *event,
 				 const char *ev_name,
 				 struct print_arg *args)
 {
-	if (args == NULL)
-		return;
-
 	switch (args->type) {
 	case PRINT_NULL:
 		break;
@@ -202,7 +194,8 @@ static void define_event_symbols(struct event_format *event,
 		zero_flag_atom = 0;
 		break;
 	case PRINT_FIELD:
-		free(cur_field_name);
+		if (cur_field_name)
+			free(cur_field_name);
 		cur_field_name = strdup(args->field.name);
 		break;
 	case PRINT_FLAGS:
@@ -216,20 +209,7 @@ static void define_event_symbols(struct event_format *event,
 		define_symbolic_values(args->symbol.symbols, ev_name,
 				       cur_field_name);
 		break;
-	case PRINT_HEX:
-		define_event_symbols(event, ev_name, args->hex.field);
-		define_event_symbols(event, ev_name, args->hex.size);
-		break;
-	case PRINT_INT_ARRAY:
-		define_event_symbols(event, ev_name, args->int_array.field);
-		define_event_symbols(event, ev_name, args->int_array.count);
-		define_event_symbols(event, ev_name, args->int_array.el_size);
-		break;
-	case PRINT_BSTRING:
-	case PRINT_DYNAMIC_ARRAY:
-	case PRINT_DYNAMIC_ARRAY_LEN:
 	case PRINT_STRING:
-	case PRINT_BITMASK:
 		break;
 	case PRINT_TYPE:
 		define_event_symbols(event, ev_name, args->typecast.item);
@@ -240,9 +220,7 @@ static void define_event_symbols(struct event_format *event,
 		define_event_symbols(event, ev_name, args->op.left);
 		define_event_symbols(event, ev_name, args->op.right);
 		break;
-	case PRINT_FUNC:
 	default:
-		pr_err("Unsupported print arg type\n");
 		/* we should warn... */
 		return;
 	}
@@ -251,120 +229,62 @@ static void define_event_symbols(struct event_format *event,
 		define_event_symbols(event, ev_name, args->next);
 }
 
-static SV *perl_process_callchain(struct perf_sample *sample,
-				  struct perf_evsel *evsel,
-				  struct addr_location *al)
+static inline struct event *find_cache_event(int type)
 {
-	AV *list;
+	static char ev_name[256];
+	struct event *event;
 
-	list = newAV();
-	if (!list)
-		goto exit;
+	if (events[type])
+		return events[type];
 
-	if (!symbol_conf.use_callchain || !sample->callchain)
-		goto exit;
+	events[type] = event = trace_find_event(type);
+	if (!event)
+		return NULL;
 
-	if (thread__resolve_callchain(al->thread, &callchain_cursor, evsel,
-				      sample, NULL, NULL, scripting_max_stack) != 0) {
-		pr_err("Failed to resolve callchain. Skipping\n");
-		goto exit;
-	}
-	callchain_cursor_commit(&callchain_cursor);
+	sprintf(ev_name, "%s::%s", event->system, event->name);
 
+	define_event_symbols(event, ev_name, event->print_fmt.args);
 
-	while (1) {
-		HV *elem;
-		struct callchain_cursor_node *node;
-		node = callchain_cursor_current(&callchain_cursor);
-		if (!node)
-			break;
-
-		elem = newHV();
-		if (!elem)
-			goto exit;
-
-		if (!hv_stores(elem, "ip", newSVuv(node->ip))) {
-			hv_undef(elem);
-			goto exit;
-		}
-
-		if (node->sym) {
-			HV *sym = newHV();
-			if (!sym) {
-				hv_undef(elem);
-				goto exit;
-			}
-			if (!hv_stores(sym, "start",   newSVuv(node->sym->start)) ||
-			    !hv_stores(sym, "end",     newSVuv(node->sym->end)) ||
-			    !hv_stores(sym, "binding", newSVuv(node->sym->binding)) ||
-			    !hv_stores(sym, "name",    newSVpvn(node->sym->name,
-								node->sym->namelen)) ||
-			    !hv_stores(elem, "sym",    newRV_noinc((SV*)sym))) {
-				hv_undef(sym);
-				hv_undef(elem);
-				goto exit;
-			}
-		}
-
-		if (node->map) {
-			struct map *map = node->map;
-			const char *dsoname = "[unknown]";
-			if (map && map->dso && (map->dso->name || map->dso->long_name)) {
-				if (symbol_conf.show_kernel_path && map->dso->long_name)
-					dsoname = map->dso->long_name;
-				else if (map->dso->name)
-					dsoname = map->dso->name;
-			}
-			if (!hv_stores(elem, "dso", newSVpv(dsoname,0))) {
-				hv_undef(elem);
-				goto exit;
-			}
-		}
-
-		callchain_cursor_advance(&callchain_cursor);
-		av_push(list, newRV_noinc((SV*)elem));
-	}
-
-exit:
-	return newRV_noinc((SV*)list);
+	return event;
 }
 
-static void perl_process_tracepoint(struct perf_sample *sample,
+static void perl_process_tracepoint(union perf_event *pevent __unused,
+				    struct perf_sample *sample,
 				    struct perf_evsel *evsel,
-				    struct addr_location *al)
+				    struct machine *machine __unused,
+				    struct thread *thread)
 {
-	struct thread *thread = al->thread;
-	struct event_format *event = evsel->tp_format;
 	struct format_field *field;
 	static char handler[256];
 	unsigned long long val;
 	unsigned long s, ns;
+	struct event *event;
+	int type;
 	int pid;
 	int cpu = sample->cpu;
 	void *data = sample->raw_data;
 	unsigned long long nsecs = sample->time;
-	const char *comm = thread__comm_str(thread);
+	char *comm = thread->comm;
 
 	dSP;
 
 	if (evsel->attr.type != PERF_TYPE_TRACEPOINT)
 		return;
 
-	if (!event)
-		die("ug! no event found for type %" PRIu64, (u64)evsel->attr.config);
+	type = trace_parse_common_type(data);
 
-	pid = raw_field_value(event, "common_pid", data);
+	event = find_cache_event(type);
+	if (!event)
+		die("ug! no event found for type %d", type);
+
+	pid = trace_parse_common_pid(data);
 
 	sprintf(handler, "%s::%s", event->system, event->name);
 
-	if (!test_and_set_bit(event->id, events_defined))
-		define_event_symbols(event, handler, event->print_fmt.args);
-
-	s = nsecs / NSEC_PER_SEC;
-	ns = nsecs - s * NSEC_PER_SEC;
+	s = nsecs / NSECS_PER_SEC;
+	ns = nsecs - s * NSECS_PER_SEC;
 
 	scripting_context->event_data = data;
-	scripting_context->pevent = evsel->tp_format->pevent;
 
 	ENTER;
 	SAVETMPS;
@@ -377,7 +297,6 @@ static void perl_process_tracepoint(struct perf_sample *sample,
 	XPUSHs(sv_2mortal(newSVuv(ns)));
 	XPUSHs(sv_2mortal(newSViv(pid)));
 	XPUSHs(sv_2mortal(newSVpv(comm, 0)));
-	XPUSHs(sv_2mortal(perl_process_callchain(sample, evsel, al)));
 
 	/* common fields other than pid can be accessed via xsub fns */
 
@@ -391,8 +310,7 @@ static void perl_process_tracepoint(struct perf_sample *sample,
 				offset = field->offset;
 			XPUSHs(sv_2mortal(newSVpv((char *)data + offset, 0)));
 		} else { /* FIELD_IS_NUMERIC */
-			val = read_size(event, data + field->offset,
-					field->size);
+			val = read_size(data + field->offset, field->size);
 			if (field->flags & FIELD_IS_SIGNED) {
 				XPUSHs(sv_2mortal(newSViv(val)));
 			} else {
@@ -412,7 +330,6 @@ static void perl_process_tracepoint(struct perf_sample *sample,
 		XPUSHs(sv_2mortal(newSVuv(nsecs)));
 		XPUSHs(sv_2mortal(newSViv(pid)));
 		XPUSHs(sv_2mortal(newSVpv(comm, 0)));
-		XPUSHs(sv_2mortal(perl_process_callchain(sample, evsel, al)));
 		call_pv("main::trace_unhandled", G_SCALAR);
 	}
 	SPAGAIN;
@@ -421,9 +338,11 @@ static void perl_process_tracepoint(struct perf_sample *sample,
 	LEAVE;
 }
 
-static void perl_process_event_generic(union perf_event *event,
+static void perl_process_event_generic(union perf_event *pevent __unused,
 				       struct perf_sample *sample,
-				       struct perf_evsel *evsel)
+				       struct perf_evsel *evsel __unused,
+				       struct machine *machine __unused,
+				       struct thread *thread __unused)
 {
 	dSP;
 
@@ -433,7 +352,7 @@ static void perl_process_event_generic(union perf_event *event,
 	ENTER;
 	SAVETMPS;
 	PUSHMARK(SP);
-	XPUSHs(sv_2mortal(newSVpvn((const char *)event, event->header.size)));
+	XPUSHs(sv_2mortal(newSVpvn((const char *)pevent, pevent->header.size)));
 	XPUSHs(sv_2mortal(newSVpvn((const char *)&evsel->attr, sizeof(evsel->attr))));
 	XPUSHs(sv_2mortal(newSVpvn((const char *)sample, sizeof(*sample))));
 	XPUSHs(sv_2mortal(newSVpvn((const char *)sample->raw_data, sample->raw_size)));
@@ -445,13 +364,14 @@ static void perl_process_event_generic(union perf_event *event,
 	LEAVE;
 }
 
-static void perl_process_event(union perf_event *event,
+static void perl_process_event(union perf_event *pevent,
 			       struct perf_sample *sample,
 			       struct perf_evsel *evsel,
-			       struct addr_location *al)
+			       struct machine *machine,
+			       struct thread *thread)
 {
-	perl_process_tracepoint(sample, evsel, al);
-	perl_process_event_generic(event, sample, evsel);
+	perl_process_tracepoint(pevent, sample, evsel, machine, thread);
+	perl_process_event_generic(pevent, sample, evsel, machine, thread);
 }
 
 static void run_start_sub(void)
@@ -507,11 +427,6 @@ error:
 	return err;
 }
 
-static int perl_flush_script(void)
-{
-	return 0;
-}
-
 /*
  * Stop trace script
  */
@@ -529,9 +444,9 @@ static int perl_stop_script(void)
 	return 0;
 }
 
-static int perl_generate_script(struct pevent *pevent, const char *outfile)
+static int perl_generate_script(const char *outfile)
 {
-	struct event_format *event = NULL;
+	struct event *event = NULL;
 	struct format_field *f;
 	char fname[PATH_MAX];
 	int not_first, count;
@@ -574,29 +489,9 @@ static int perl_generate_script(struct pevent *pevent, const char *outfile)
 	fprintf(ofp, "use Perf::Trace::Util;\n\n");
 
 	fprintf(ofp, "sub trace_begin\n{\n\t# optional\n}\n\n");
-	fprintf(ofp, "sub trace_end\n{\n\t# optional\n}\n");
+	fprintf(ofp, "sub trace_end\n{\n\t# optional\n}\n\n");
 
-
-	fprintf(ofp, "\n\
-sub print_backtrace\n\
-{\n\
-	my $callchain = shift;\n\
-	for my $node (@$callchain)\n\
-	{\n\
-		if(exists $node->{sym})\n\
-		{\n\
-			printf( \"\\t[\\%%x] \\%%s\\n\", $node->{ip}, $node->{sym}{name});\n\
-		}\n\
-		else\n\
-		{\n\
-			printf( \"\\t[\\%%x]\\n\", $node{ip});\n\
-		}\n\
-	}\n\
-}\n\n\
-");
-
-
-	while ((event = trace_find_next_event(pevent, event))) {
+	while ((event = trace_find_next_event(event))) {
 		fprintf(ofp, "sub %s::%s\n{\n", event->system, event->name);
 		fprintf(ofp, "\tmy (");
 
@@ -606,8 +501,7 @@ sub print_backtrace\n\
 		fprintf(ofp, "$common_secs, ");
 		fprintf(ofp, "$common_nsecs,\n");
 		fprintf(ofp, "\t    $common_pid, ");
-		fprintf(ofp, "$common_comm, ");
-		fprintf(ofp, "$common_callchain,\n\t    ");
+		fprintf(ofp, "$common_comm,\n\t    ");
 
 		not_first = 0;
 		count = 0;
@@ -624,7 +518,7 @@ sub print_backtrace\n\
 
 		fprintf(ofp, "\tprint_header($event_name, $common_cpu, "
 			"$common_secs, $common_nsecs,\n\t             "
-			"$common_pid, $common_comm, $common_callchain);\n\n");
+			"$common_pid, $common_comm);\n\n");
 
 		fprintf(ofp, "\tprintf(\"");
 
@@ -686,22 +580,17 @@ sub print_backtrace\n\
 				fprintf(ofp, "$%s", f->name);
 		}
 
-		fprintf(ofp, ");\n\n");
-
-		fprintf(ofp, "\tprint_backtrace($common_callchain);\n");
-
+		fprintf(ofp, ");\n");
 		fprintf(ofp, "}\n\n");
 	}
 
 	fprintf(ofp, "sub trace_unhandled\n{\n\tmy ($event_name, $context, "
 		"$common_cpu, $common_secs, $common_nsecs,\n\t    "
-		"$common_pid, $common_comm, $common_callchain) = @_;\n\n");
+		"$common_pid, $common_comm) = @_;\n\n");
 
 	fprintf(ofp, "\tprint_header($event_name, $common_cpu, "
 		"$common_secs, $common_nsecs,\n\t             $common_pid, "
-		"$common_comm, $common_callchain);\n");
-	fprintf(ofp, "\tprint_backtrace($common_callchain);\n");
-	fprintf(ofp, "}\n\n");
+		"$common_comm);\n}\n\n");
 
 	fprintf(ofp, "sub print_header\n{\n"
 		"\tmy ($event_name, $cpu, $secs, $nsecs, $pid, $comm) = @_;\n\n"
@@ -739,7 +628,6 @@ sub print_backtrace\n\
 struct scripting_ops perl_scripting_ops = {
 	.name = "Perl",
 	.start_script = perl_start_script,
-	.flush_script = perl_flush_script,
 	.stop_script = perl_stop_script,
 	.process_event = perl_process_event,
 	.generate_script = perl_generate_script,

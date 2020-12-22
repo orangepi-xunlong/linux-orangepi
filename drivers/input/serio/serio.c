@@ -49,6 +49,8 @@ static DEFINE_MUTEX(serio_mutex);
 
 static LIST_HEAD(serio_list);
 
+static struct bus_type serio_bus;
+
 static void serio_add_port(struct serio *serio);
 static int serio_reconnect_port(struct serio *serio);
 static void serio_disconnect_port(struct serio *serio);
@@ -134,7 +136,7 @@ static void serio_find_driver(struct serio *serio)
 	int error;
 
 	error = device_attach(&serio->dev);
-	if (error < 0 && error != -EPROBE_DEFER)
+	if (error < 0)
 		dev_warn(&serio->dev,
 			 "device_attach() failed for %s (%s), error: %d\n",
 			 serio->phys, serio->name, error);
@@ -363,7 +365,7 @@ static ssize_t serio_show_description(struct device *dev, struct device_attribut
 	return sprintf(buf, "%s\n", serio->name);
 }
 
-static ssize_t modalias_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t serio_show_modalias(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct serio *serio = to_serio_port(dev);
 
@@ -371,31 +373,54 @@ static ssize_t modalias_show(struct device *dev, struct device_attribute *attr, 
 			serio->id.type, serio->id.proto, serio->id.id, serio->id.extra);
 }
 
-static ssize_t type_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t serio_show_id_type(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct serio *serio = to_serio_port(dev);
 	return sprintf(buf, "%02x\n", serio->id.type);
 }
 
-static ssize_t proto_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t serio_show_id_proto(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct serio *serio = to_serio_port(dev);
 	return sprintf(buf, "%02x\n", serio->id.proto);
 }
 
-static ssize_t id_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t serio_show_id_id(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct serio *serio = to_serio_port(dev);
 	return sprintf(buf, "%02x\n", serio->id.id);
 }
 
-static ssize_t extra_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t serio_show_id_extra(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct serio *serio = to_serio_port(dev);
 	return sprintf(buf, "%02x\n", serio->id.extra);
 }
 
-static ssize_t drvctl_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static DEVICE_ATTR(type, S_IRUGO, serio_show_id_type, NULL);
+static DEVICE_ATTR(proto, S_IRUGO, serio_show_id_proto, NULL);
+static DEVICE_ATTR(id, S_IRUGO, serio_show_id_id, NULL);
+static DEVICE_ATTR(extra, S_IRUGO, serio_show_id_extra, NULL);
+
+static struct attribute *serio_device_id_attrs[] = {
+	&dev_attr_type.attr,
+	&dev_attr_proto.attr,
+	&dev_attr_id.attr,
+	&dev_attr_extra.attr,
+	NULL
+};
+
+static struct attribute_group serio_id_attr_group = {
+	.name	= "id",
+	.attrs	= serio_device_id_attrs,
+};
+
+static const struct attribute_group *serio_device_attr_groups[] = {
+	&serio_id_attr_group,
+	NULL
+};
+
+static ssize_t serio_rebind_driver(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct serio *serio = to_serio_port(dev);
 	struct device_driver *drv;
@@ -449,55 +474,14 @@ static ssize_t serio_set_bind_mode(struct device *dev, struct device_attribute *
 	return retval;
 }
 
-static ssize_t firmware_id_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct serio *serio = to_serio_port(dev);
-
-	return sprintf(buf, "%s\n", serio->firmware_id);
-}
-
-static DEVICE_ATTR_RO(type);
-static DEVICE_ATTR_RO(proto);
-static DEVICE_ATTR_RO(id);
-static DEVICE_ATTR_RO(extra);
-
-static struct attribute *serio_device_id_attrs[] = {
-	&dev_attr_type.attr,
-	&dev_attr_proto.attr,
-	&dev_attr_id.attr,
-	&dev_attr_extra.attr,
-	NULL
+static struct device_attribute serio_device_attrs[] = {
+	__ATTR(description, S_IRUGO, serio_show_description, NULL),
+	__ATTR(modalias, S_IRUGO, serio_show_modalias, NULL),
+	__ATTR(drvctl, S_IWUSR, NULL, serio_rebind_driver),
+	__ATTR(bind_mode, S_IWUSR | S_IRUGO, serio_show_bind_mode, serio_set_bind_mode),
+	__ATTR_NULL
 };
 
-static struct attribute_group serio_id_attr_group = {
-	.name	= "id",
-	.attrs	= serio_device_id_attrs,
-};
-
-static DEVICE_ATTR_RO(modalias);
-static DEVICE_ATTR_WO(drvctl);
-static DEVICE_ATTR(description, S_IRUGO, serio_show_description, NULL);
-static DEVICE_ATTR(bind_mode, S_IWUSR | S_IRUGO, serio_show_bind_mode, serio_set_bind_mode);
-static DEVICE_ATTR_RO(firmware_id);
-
-static struct attribute *serio_device_attrs[] = {
-	&dev_attr_modalias.attr,
-	&dev_attr_description.attr,
-	&dev_attr_drvctl.attr,
-	&dev_attr_bind_mode.attr,
-	&dev_attr_firmware_id.attr,
-	NULL
-};
-
-static struct attribute_group serio_device_attr_group = {
-	.attrs	= serio_device_attrs,
-};
-
-static const struct attribute_group *serio_device_attr_groups[] = {
-	&serio_id_attr_group,
-	&serio_device_attr_group,
-	NULL
-};
 
 static void serio_release_port(struct device *dev)
 {
@@ -512,7 +496,7 @@ static void serio_release_port(struct device *dev)
  */
 static void serio_init_port(struct serio *serio)
 {
-	static atomic_t serio_no = ATOMIC_INIT(-1);
+	static atomic_t serio_no = ATOMIC_INIT(0);
 
 	__module_get(THIS_MODULE);
 
@@ -522,8 +506,8 @@ static void serio_init_port(struct serio *serio)
 	spin_lock_init(&serio->lock);
 	mutex_init(&serio->drv_mutex);
 	device_initialize(&serio->dev);
-	dev_set_name(&serio->dev, "serio%lu",
-		     (unsigned long)atomic_inc_return(&serio_no));
+	dev_set_name(&serio->dev, "serio%ld",
+			(long)atomic_inc_return(&serio_no) - 1);
 	serio->dev.bus = &serio_bus;
 	serio->dev.release = serio_release_port;
 	serio->dev.groups = serio_device_attr_groups;
@@ -748,20 +732,19 @@ EXPORT_SYMBOL(serio_unregister_child_port);
  * Serio driver operations
  */
 
-static ssize_t description_show(struct device_driver *drv, char *buf)
+static ssize_t serio_driver_show_description(struct device_driver *drv, char *buf)
 {
 	struct serio_driver *driver = to_serio_driver(drv);
 	return sprintf(buf, "%s\n", driver->description ? driver->description : "(none)");
 }
-static DRIVER_ATTR_RO(description);
 
-static ssize_t bind_mode_show(struct device_driver *drv, char *buf)
+static ssize_t serio_driver_show_bind_mode(struct device_driver *drv, char *buf)
 {
 	struct serio_driver *serio_drv = to_serio_driver(drv);
 	return sprintf(buf, "%s\n", serio_drv->manual_bind ? "manual" : "auto");
 }
 
-static ssize_t bind_mode_store(struct device_driver *drv, const char *buf, size_t count)
+static ssize_t serio_driver_set_bind_mode(struct device_driver *drv, const char *buf, size_t count)
 {
 	struct serio_driver *serio_drv = to_serio_driver(drv);
 	int retval;
@@ -777,14 +760,14 @@ static ssize_t bind_mode_store(struct device_driver *drv, const char *buf, size_
 
 	return retval;
 }
-static DRIVER_ATTR_RW(bind_mode);
 
-static struct attribute *serio_driver_attrs[] = {
-	&driver_attr_description.attr,
-	&driver_attr_bind_mode.attr,
-	NULL,
+
+static struct driver_attribute serio_driver_attrs[] = {
+	__ATTR(description, S_IRUGO, serio_driver_show_description, NULL),
+	__ATTR(bind_mode, S_IWUSR | S_IRUGO,
+		serio_driver_show_bind_mode, serio_driver_set_bind_mode),
+	__ATTR_NULL
 };
-ATTRIBUTE_GROUPS(serio_driver);
 
 static int serio_driver_probe(struct device *dev)
 {
@@ -908,6 +891,8 @@ static int serio_bus_match(struct device *dev, struct device_driver *drv)
 	return serio_match_port(serio_drv->id_table, serio);
 }
 
+#ifdef CONFIG_HOTPLUG
+
 #define SERIO_ADD_UEVENT_VAR(fmt, val...)				\
 	do {								\
 		int err = add_uevent_var(env, fmt, val);		\
@@ -928,17 +913,21 @@ static int serio_uevent(struct device *dev, struct kobj_uevent_env *env)
 	SERIO_ADD_UEVENT_VAR("SERIO_PROTO=%02x", serio->id.proto);
 	SERIO_ADD_UEVENT_VAR("SERIO_ID=%02x", serio->id.id);
 	SERIO_ADD_UEVENT_VAR("SERIO_EXTRA=%02x", serio->id.extra);
-
 	SERIO_ADD_UEVENT_VAR("MODALIAS=serio:ty%02Xpr%02Xid%02Xex%02X",
 				serio->id.type, serio->id.proto, serio->id.id, serio->id.extra);
-
-	if (serio->firmware_id[0])
-		SERIO_ADD_UEVENT_VAR("SERIO_FIRMWARE_ID=%s",
-				     serio->firmware_id);
 
 	return 0;
 }
 #undef SERIO_ADD_UEVENT_VAR
+
+#else
+
+static int serio_uevent(struct device *dev, struct kobj_uevent_env *env)
+{
+	return -ENODEV;
+}
+
+#endif /* CONFIG_HOTPLUG */
 
 #ifdef CONFIG_PM
 static int serio_suspend(struct device *dev)
@@ -1015,9 +1004,10 @@ irqreturn_t serio_interrupt(struct serio *serio,
 }
 EXPORT_SYMBOL(serio_interrupt);
 
-struct bus_type serio_bus = {
+static struct bus_type serio_bus = {
 	.name		= "serio",
-	.drv_groups	= serio_driver_groups,
+	.dev_attrs	= serio_device_attrs,
+	.drv_attrs	= serio_driver_attrs,
 	.match		= serio_bus_match,
 	.uevent		= serio_uevent,
 	.probe		= serio_driver_probe,
@@ -1027,7 +1017,6 @@ struct bus_type serio_bus = {
 	.pm		= &serio_pm_ops,
 #endif
 };
-EXPORT_SYMBOL(serio_bus);
 
 static int __init serio_init(void)
 {

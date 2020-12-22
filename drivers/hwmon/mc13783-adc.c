@@ -37,7 +37,7 @@
 struct mc13783_adc_priv {
 	struct mc13xxx *mc13xxx;
 	struct device *hwmon_dev;
-	char name[PLATFORM_NAME_SIZE];
+	char name[10];
 };
 
 static ssize_t mc13783_adc_show_name(struct device *dev, struct device_attribute
@@ -179,7 +179,7 @@ static int __init mc13783_adc_probe(struct platform_device *pdev)
 	const struct platform_device_id *id = platform_get_device_id(pdev);
 	char *dash;
 
-	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
@@ -194,7 +194,7 @@ static int __init mc13783_adc_probe(struct platform_device *pdev)
 	/* Register sysfs hooks */
 	ret = sysfs_create_group(&pdev->dev.kobj, &mc13783_group_base);
 	if (ret)
-		return ret;
+		goto out_err_create_base;
 
 	if (id->driver_data & MC13783_ADC_16CHANS) {
 		ret = sysfs_create_group(&pdev->dev.kobj,
@@ -230,10 +230,15 @@ out_err_create_ts:
 out_err_create_16chans:
 
 	sysfs_remove_group(&pdev->dev.kobj, &mc13783_group_base);
+out_err_create_base:
+
+	platform_set_drvdata(pdev, NULL);
+	kfree(priv);
+
 	return ret;
 }
 
-static int mc13783_adc_remove(struct platform_device *pdev)
+static int __devexit mc13783_adc_remove(struct platform_device *pdev)
 {
 	struct mc13783_adc_priv *priv = platform_get_drvdata(pdev);
 	kernel_ulong_t driver_data = platform_get_device_id(pdev)->driver_data;
@@ -247,6 +252,9 @@ static int mc13783_adc_remove(struct platform_device *pdev)
 		sysfs_remove_group(&pdev->dev.kobj, &mc13783_group_16chans);
 
 	sysfs_remove_group(&pdev->dev.kobj, &mc13783_group_base);
+
+	platform_set_drvdata(pdev, NULL);
+	kfree(priv);
 
 	return 0;
 }
@@ -265,14 +273,26 @@ static const struct platform_device_id mc13783_adc_idtable[] = {
 MODULE_DEVICE_TABLE(platform, mc13783_adc_idtable);
 
 static struct platform_driver mc13783_adc_driver = {
-	.remove		= mc13783_adc_remove,
+	.remove		= __devexit_p(mc13783_adc_remove),
 	.driver		= {
+		.owner	= THIS_MODULE,
 		.name	= DRIVER_NAME,
 	},
 	.id_table	= mc13783_adc_idtable,
 };
 
-module_platform_driver_probe(mc13783_adc_driver, mc13783_adc_probe);
+static int __init mc13783_adc_init(void)
+{
+	return platform_driver_probe(&mc13783_adc_driver, mc13783_adc_probe);
+}
+
+static void __exit mc13783_adc_exit(void)
+{
+	platform_driver_unregister(&mc13783_adc_driver);
+}
+
+module_init(mc13783_adc_init);
+module_exit(mc13783_adc_exit);
 
 MODULE_DESCRIPTION("MC13783 ADC driver");
 MODULE_AUTHOR("Luotao Fu <l.fu@pengutronix.de>");

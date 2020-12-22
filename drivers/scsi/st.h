@@ -35,8 +35,8 @@ struct st_request {
 /* The tape buffer descriptor. */
 struct st_buffer {
 	unsigned char dma;	/* DMA-able buffer */
+	unsigned char do_dio;   /* direct i/o set up? */
 	unsigned char cleared;  /* internal buffer cleared after open? */
-	unsigned short do_dio;  /* direct i/o set up? */
 	int buffer_size;
 	int buffer_blocks;
 	int buffer_bytes;
@@ -66,8 +66,6 @@ struct st_modedef {
 	unsigned char default_compression;	/* 0 = don't touch, etc */
 	short default_density;	/* Forced density, -1 = no value */
 	int default_blksize;	/* Forced blocksize, -1 = no value */
-	struct scsi_tape *tape;
-	struct device *devs[2];  /* Auto-rewind and non-rewind devices */
 	struct cdev *cdevs[2];  /* Auto-rewind and non-rewind devices */
 };
 
@@ -78,7 +76,7 @@ struct st_modedef {
 #define ST_MODE_SHIFT (7 - ST_NBR_MODE_BITS)
 #define ST_MODE_MASK ((ST_NBR_MODES - 1) << ST_MODE_SHIFT)
 
-#define ST_MAX_TAPES (1 << (20 - (ST_NBR_MODE_BITS + 1)))
+#define ST_MAX_TAPES 128
 #define ST_MAX_TAPE_ENTRIES  (ST_MAX_TAPES << (ST_NBR_MODE_BITS + 1))
 
 /* The status related to each partition */
@@ -92,27 +90,6 @@ struct st_partstat {
 	int drv_file;
 };
 
-/* Tape statistics */
-struct scsi_tape_stats {
-	atomic64_t read_byte_cnt;  /* bytes read */
-	atomic64_t write_byte_cnt; /* bytes written */
-	atomic64_t in_flight;      /* Number of I/Os in flight */
-	atomic64_t read_cnt;       /* Count of read requests */
-	atomic64_t write_cnt;      /* Count of write requests */
-	atomic64_t other_cnt;      /* Count of other requests either
-				    * implicit or from user space
-				    * ioctl. */
-	atomic64_t resid_cnt;      /* Count of resid_len > 0 */
-	atomic64_t tot_read_time;  /* ktime spent completing reads */
-	atomic64_t tot_write_time; /* ktime spent completing writes */
-	atomic64_t tot_io_time;    /* ktime spent doing any I/O */
-	ktime_t read_time;         /* holds ktime request was queued */
-	ktime_t write_time;        /* holds ktime request was queued */
-	ktime_t other_time;        /* holds ktime request was queued */
-	atomic_t last_read_size;   /* Number of bytes issued for last read */
-	atomic_t last_write_size;  /* Number of bytes issued for last write */
-};
-
 #define ST_NBR_PARTITIONS 4
 
 /* The tape drive descriptor */
@@ -122,7 +99,6 @@ struct scsi_tape {
 	struct mutex lock;	/* For serialization */
 	struct completion wait;	/* For SCSI commands */
 	struct st_buffer *buffer;
-	int index;
 
 	/* Drive characteristics */
 	unsigned char omit_blklims;
@@ -147,6 +123,8 @@ struct scsi_tape {
 	unsigned char immediate_filemark;	/* write filemark immediately */
 	int tape_type;
 	int long_timeout;	/* timeout for commands known to take long time */
+
+	unsigned long max_pfn;	/* the maximum page number reachable by the HBA */
 
 	/* Mode characteristics */
 	struct st_modedef modes[ST_NBR_MODES];
@@ -190,7 +168,6 @@ struct scsi_tape {
 #endif
 	struct gendisk *disk;
 	struct kref     kref;
-	struct scsi_tape_stats *stats;
 };
 
 /* Bit masks for use_pf */

@@ -19,7 +19,6 @@
 #include <linux/rio_drv.h>
 #include <linux/rio_ids.h>
 #include <linux/delay.h>
-#include <linux/module.h>
 #include "../rio.h"
 
 /* Global (broadcast) route registers */
@@ -175,10 +174,12 @@ tsi57x_em_init(struct rio_dev *rdev)
 
 		/* Clear all pending interrupts */
 		rio_read_config_32(rdev,
-				RIO_DEV_PORT_N_ERR_STS_CSR(rdev, portnum),
+				rdev->phys_efptr +
+					RIO_PORT_N_ERR_STS_CSR(portnum),
 				&regval);
 		rio_write_config_32(rdev,
-				RIO_DEV_PORT_N_ERR_STS_CSR(rdev, portnum),
+				rdev->phys_efptr +
+					RIO_PORT_N_ERR_STS_CSR(portnum),
 				regval & 0x07120214);
 
 		rio_read_config_32(rdev,
@@ -196,7 +197,7 @@ tsi57x_em_init(struct rio_dev *rdev)
 
 		/* Skip next (odd) port if the current port is in x4 mode */
 		rio_read_config_32(rdev,
-				RIO_DEV_PORT_N_CTL_CSR(rdev, portnum),
+				rdev->phys_efptr + RIO_PORT_N_CTL_CSR(portnum),
 				&regval);
 		if ((regval & RIO_PORT_N_CTL_PWIDTH) == RIO_PORT_N_CTL_PWIDTH_4)
 			portnum++;
@@ -219,23 +220,23 @@ tsi57x_em_handler(struct rio_dev *rdev, u8 portnum)
 	u32 regval;
 
 	rio_read_config_32(rdev,
-			RIO_DEV_PORT_N_ERR_STS_CSR(rdev, portnum),
+			rdev->phys_efptr + RIO_PORT_N_ERR_STS_CSR(portnum),
 			&err_status);
 
 	if ((err_status & RIO_PORT_N_ERR_STS_PORT_OK) &&
-	    (err_status & (RIO_PORT_N_ERR_STS_OUT_ES |
-			  RIO_PORT_N_ERR_STS_INP_ES))) {
+	    (err_status & (RIO_PORT_N_ERR_STS_PW_OUT_ES |
+			  RIO_PORT_N_ERR_STS_PW_INP_ES))) {
 		/* Remove any queued packets by locking/unlocking port */
 		rio_read_config_32(rdev,
-			RIO_DEV_PORT_N_CTL_CSR(rdev, portnum),
+			rdev->phys_efptr + RIO_PORT_N_CTL_CSR(portnum),
 			&regval);
 		if (!(regval & RIO_PORT_N_CTL_LOCKOUT)) {
 			rio_write_config_32(rdev,
-				RIO_DEV_PORT_N_CTL_CSR(rdev, portnum),
+				rdev->phys_efptr + RIO_PORT_N_CTL_CSR(portnum),
 				regval | RIO_PORT_N_CTL_LOCKOUT);
 			udelay(50);
 			rio_write_config_32(rdev,
-				RIO_DEV_PORT_N_CTL_CSR(rdev, portnum),
+				rdev->phys_efptr + RIO_PORT_N_CTL_CSR(portnum),
 				regval);
 		}
 
@@ -243,7 +244,7 @@ tsi57x_em_handler(struct rio_dev *rdev, u8 portnum)
 		 * valid bit
 		 */
 		rio_read_config_32(rdev,
-			RIO_DEV_PORT_N_MNT_RSP_CSR(rdev, portnum),
+			rdev->phys_efptr + RIO_PORT_N_MNT_RSP_CSR(portnum),
 			&regval);
 
 		/* Send a Packet-Not-Accepted/Link-Request-Input-Status control
@@ -257,8 +258,8 @@ tsi57x_em_handler(struct rio_dev *rdev, u8 portnum)
 			while (checkcount--) {
 				udelay(50);
 				rio_read_config_32(rdev,
-					RIO_DEV_PORT_N_MNT_RSP_CSR(rdev,
-								   portnum),
+					rdev->phys_efptr +
+						RIO_PORT_N_MNT_RSP_CSR(portnum),
 					&regval);
 				if (regval & RIO_PORT_N_MNT_RSP_RVAL)
 					goto exit_es;
@@ -291,79 +292,27 @@ exit_es:
 	return 0;
 }
 
-static struct rio_switch_ops tsi57x_switch_ops = {
-	.owner = THIS_MODULE,
-	.add_entry = tsi57x_route_add_entry,
-	.get_entry = tsi57x_route_get_entry,
-	.clr_table = tsi57x_route_clr_table,
-	.set_domain = tsi57x_set_domain,
-	.get_domain = tsi57x_get_domain,
-	.em_init = tsi57x_em_init,
-	.em_handle = tsi57x_em_handler,
-};
-
-static int tsi57x_probe(struct rio_dev *rdev, const struct rio_device_id *id)
+static int tsi57x_switch_init(struct rio_dev *rdev, int do_enum)
 {
 	pr_debug("RIO: %s for %s\n", __func__, rio_name(rdev));
+	rdev->rswitch->add_entry = tsi57x_route_add_entry;
+	rdev->rswitch->get_entry = tsi57x_route_get_entry;
+	rdev->rswitch->clr_table = tsi57x_route_clr_table;
+	rdev->rswitch->set_domain = tsi57x_set_domain;
+	rdev->rswitch->get_domain = tsi57x_get_domain;
+	rdev->rswitch->em_init = tsi57x_em_init;
+	rdev->rswitch->em_handle = tsi57x_em_handler;
 
-	spin_lock(&rdev->rswitch->lock);
-
-	if (rdev->rswitch->ops) {
-		spin_unlock(&rdev->rswitch->lock);
-		return -EINVAL;
-	}
-	rdev->rswitch->ops = &tsi57x_switch_ops;
-
-	if (rdev->do_enum) {
+	if (do_enum) {
 		/* Ensure that default routing is disabled on startup */
 		rio_write_config_32(rdev, RIO_STD_RTE_DEFAULT_PORT,
 				    RIO_INVALID_ROUTE);
 	}
 
-	spin_unlock(&rdev->rswitch->lock);
 	return 0;
 }
 
-static void tsi57x_remove(struct rio_dev *rdev)
-{
-	pr_debug("RIO: %s for %s\n", __func__, rio_name(rdev));
-	spin_lock(&rdev->rswitch->lock);
-	if (rdev->rswitch->ops != &tsi57x_switch_ops) {
-		spin_unlock(&rdev->rswitch->lock);
-		return;
-	}
-	rdev->rswitch->ops = NULL;
-	spin_unlock(&rdev->rswitch->lock);
-}
-
-static struct rio_device_id tsi57x_id_table[] = {
-	{RIO_DEVICE(RIO_DID_TSI572, RIO_VID_TUNDRA)},
-	{RIO_DEVICE(RIO_DID_TSI574, RIO_VID_TUNDRA)},
-	{RIO_DEVICE(RIO_DID_TSI577, RIO_VID_TUNDRA)},
-	{RIO_DEVICE(RIO_DID_TSI578, RIO_VID_TUNDRA)},
-	{ 0, }	/* terminate list */
-};
-
-static struct rio_driver tsi57x_driver = {
-	.name = "tsi57x",
-	.id_table = tsi57x_id_table,
-	.probe = tsi57x_probe,
-	.remove = tsi57x_remove,
-};
-
-static int __init tsi57x_init(void)
-{
-	return rio_register_driver(&tsi57x_driver);
-}
-
-static void __exit tsi57x_exit(void)
-{
-	rio_unregister_driver(&tsi57x_driver);
-}
-
-device_initcall(tsi57x_init);
-module_exit(tsi57x_exit);
-
-MODULE_DESCRIPTION("IDT Tsi57x Serial RapidIO switch family driver");
-MODULE_AUTHOR("Integrated Device Technology, Inc.");
-MODULE_LICENSE("GPL");
+DECLARE_RIO_SWITCH_INIT(RIO_VID_TUNDRA, RIO_DID_TSI572, tsi57x_switch_init);
+DECLARE_RIO_SWITCH_INIT(RIO_VID_TUNDRA, RIO_DID_TSI574, tsi57x_switch_init);
+DECLARE_RIO_SWITCH_INIT(RIO_VID_TUNDRA, RIO_DID_TSI577, tsi57x_switch_init);
+DECLARE_RIO_SWITCH_INIT(RIO_VID_TUNDRA, RIO_DID_TSI578, tsi57x_switch_init);

@@ -1,6 +1,7 @@
 
 config SUNXI_DI
 	tristate "allwinnertech DE-Interlace driver"
+	depends on (ARCH_SUN8IW7 || ARCH_SUN9IW1)
 	default n
 	help
 	  This is an option for de-interlace.

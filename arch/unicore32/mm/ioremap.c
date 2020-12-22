@@ -144,11 +144,11 @@ void __iomem *__uc32_ioremap_pfn_caller(unsigned long pfn,
 	 * Don't allow RAM to be mapped
 	 */
 	if (pfn_valid(pfn)) {
-		WARN(1, "BUG: Your driver calls ioremap() on\n"
+		printk(KERN_WARNING "BUG: Your driver calls ioremap() on\n"
 			"system memory.  This leads to architecturally\n"
 			"unpredictable behaviour, and ioremap() will fail in\n"
 			"the next kernel release. Please fix your driver.\n");
-		return NULL;
+		WARN_ON(1);
 	}
 
 	type = get_mem_type(mtype);
@@ -235,7 +235,7 @@ EXPORT_SYMBOL(__uc32_ioremap_cached);
 void __uc32_iounmap(volatile void __iomem *io_addr)
 {
 	void *addr = (void *)(PAGE_MASK & (unsigned long)io_addr);
-	struct vm_struct *vm;
+	struct vm_struct **p, *tmp;
 
 	/*
 	 * If this is a section based mapping we need to handle it
@@ -244,10 +244,17 @@ void __uc32_iounmap(volatile void __iomem *io_addr)
 	 * all the mappings before the area can be reclaimed
 	 * by someone else.
 	 */
-	vm = find_vm_area(addr);
-	if (vm && (vm->flags & VM_IOREMAP) &&
-		(vm->flags & VM_UNICORE_SECTION_MAPPING))
-		unmap_area_sections((unsigned long)vm->addr, vm->size);
+	write_lock(&vmlist_lock);
+	for (p = &vmlist ; (tmp = *p) ; p = &tmp->next) {
+		if ((tmp->flags & VM_IOREMAP) && (tmp->addr == addr)) {
+			if (tmp->flags & VM_UNICORE_SECTION_MAPPING) {
+				unmap_area_sections((unsigned long)tmp->addr,
+						    tmp->size);
+			}
+			break;
+		}
+	}
+	write_unlock(&vmlist_lock);
 
 	vunmap(addr);
 }

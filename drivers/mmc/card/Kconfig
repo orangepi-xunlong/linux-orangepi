@@ -50,9 +50,17 @@ config MMC_BLOCK_BOUNCE
 
 	  If unsure, say Y here.
 
+config MMC_BLOCK_DEFERRED_RESUME
+	bool "Deferr MMC layer resume until I/O is requested"
+	depends on MMC_BLOCK
+	default n
+	help
+	  Say Y here to enable deferred MMC resume until I/O
+	  is requested. This will reduce overall resume latency and
+	  save power when theres an SD card inserted but not being used.
+
 config SDIO_UART
 	tristate "SDIO UART/GPS class support"
-	depends on TTY
 	help
 	  SDIO function driver for SDIO cards that implements the UART
 	  class, as well as the GPS class which appears like a UART.
@@ -69,14 +77,9 @@ config MMC_TEST
 	  This driver is only of interest to those developing or
 	  testing a host driver. Most people should say N here.
 
-config MMC_SIMULATE_MAX_SPEED
-	bool "Turn on maximum speed control per block device"
-	depends on MMC_BLOCK
+config FATFS_FS_SUPPORT
+	tristate "support for FATFS"
+	default n
 	help
-	  Say Y here to enable MMC device speed limiting. Used to test and
-	  simulate the behavior of the system when confronted with a slow MMC.
-
-	  Enables max_read_speed, max_write_speed and cache_size attributes to
-	  control the write or read maximum KB/second speed behaviors.
-
-	  If unsure, say N here.
+	 Make sure this item is set to 'y' if fatfs is used. This part is
+	 used to read/write sd card by fatfs in low layer.

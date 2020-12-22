@@ -10,9 +10,6 @@
  * modify it under the terms of version 2 of the GNU General Public
  * License as published by the Free Software Foundation.
  */
-
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/cs5535.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
@@ -25,23 +22,23 @@ static int dcon_init_xo_1(struct dcon_priv *dcon)
 	unsigned char lob;
 
 	if (gpio_request(OLPC_GPIO_DCON_STAT0, "OLPC-DCON")) {
-		pr_err("failed to request STAT0 GPIO\n");
+		printk(KERN_ERR "olpc-dcon: failed to request STAT0 GPIO\n");
 		return -EIO;
 	}
 	if (gpio_request(OLPC_GPIO_DCON_STAT1, "OLPC-DCON")) {
-		pr_err("failed to request STAT1 GPIO\n");
+		printk(KERN_ERR "olpc-dcon: failed to request STAT1 GPIO\n");
 		goto err_gp_stat1;
 	}
 	if (gpio_request(OLPC_GPIO_DCON_IRQ, "OLPC-DCON")) {
-		pr_err("failed to request IRQ GPIO\n");
+		printk(KERN_ERR "olpc-dcon: failed to request IRQ GPIO\n");
 		goto err_gp_irq;
 	}
 	if (gpio_request(OLPC_GPIO_DCON_LOAD, "OLPC-DCON")) {
-		pr_err("failed to request LOAD GPIO\n");
+		printk(KERN_ERR "olpc-dcon: failed to request LOAD GPIO\n");
 		goto err_gp_load;
 	}
 	if (gpio_request(OLPC_GPIO_DCON_BLANK, "OLPC-DCON")) {
-		pr_err("failed to request BLANK GPIO\n");
+		printk(KERN_ERR "olpc-dcon: failed to request BLANK GPIO\n");
 		goto err_gp_blank;
 	}
 
@@ -52,7 +49,7 @@ static int dcon_init_xo_1(struct dcon_priv *dcon)
 	 * Determine the current state by reading the GPIO bit; earlier
 	 * stages of the boot process have established the state.
 	 *
-	 * Note that we read GPIO_OUTPUT_VAL rather than GPIO_READ_BACK here;
+	 * Note that we read GPIO_OUPUT_VAL rather than GPIO_READ_BACK here;
 	 * this is because OFW will disable input for the pin and set a value..
 	 * READ_BACK will only contain a valid value if input is enabled and
 	 * then a value is set.  So, future readings of the pin can use
@@ -86,7 +83,7 @@ static int dcon_init_xo_1(struct dcon_priv *dcon)
 
 	/* Register the interrupt handler */
 	if (request_irq(DCON_IRQ, &dcon_interrupt, 0, "DCON", dcon)) {
-		pr_err("failed to request DCON's irq\n");
+		printk(KERN_ERR "olpc-dcon: failed to request DCON's irq\n");
 		goto err_req_irq;
 	}
 
@@ -119,7 +116,7 @@ static int dcon_init_xo_1(struct dcon_priv *dcon)
 	cs5535_gpio_set(OLPC_GPIO_DCON_IRQ, GPIO_NEGATIVE_EDGE_STS);
 	cs5535_gpio_set(OLPC_GPIO_DCON_BLANK, GPIO_NEGATIVE_EDGE_STS);
 
-	/* FIXME:  Clear the positive status as well, just to be sure */
+	/* FIXME:  Clear the posiitive status as well, just to be sure */
 	cs5535_gpio_set(OLPC_GPIO_DCON_IRQ, GPIO_POSITIVE_EDGE_STS);
 	cs5535_gpio_set(OLPC_GPIO_DCON_BLANK, GPIO_POSITIVE_EDGE_STS);
 

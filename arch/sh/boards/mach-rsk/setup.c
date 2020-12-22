@@ -16,16 +16,10 @@
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/map.h>
-#include <linux/regulator/fixed.h>
-#include <linux/regulator/machine.h>
 #include <asm/machvec.h>
 #include <asm/io.h>
 
-/* Dummy supplies, where voltage doesn't matter */
-static struct regulator_consumer_supply dummy_supplies[] = {
-	REGULATOR_SUPPLY("vddvario", "smsc911x"),
-	REGULATOR_SUPPLY("vdd33a", "smsc911x"),
-};
+static const char *part_probes[] = { "cmdlinepart", NULL };
 
 static struct mtd_partition rsk_partitions[] = {
 	{
@@ -48,6 +42,7 @@ static struct physmap_flash_data flash_data = {
 	.parts			= rsk_partitions,
 	.nr_parts		= ARRAY_SIZE(rsk_partitions),
 	.width			= 2,
+	.part_probe_types	= part_probes,
 };
 
 static struct resource flash_resource = {
@@ -72,8 +67,6 @@ static struct platform_device *rsk_devices[] __initdata = {
 
 static int __init rsk_devices_setup(void)
 {
-	regulator_register_fixed(0, dummy_supplies, ARRAY_SIZE(dummy_supplies));
-
 	return platform_add_devices(rsk_devices,
 				    ARRAY_SIZE(rsk_devices));
 }

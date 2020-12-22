@@ -58,7 +58,7 @@ int get_acorn_filename(struct iso_directory_record *de,
 	std = sizeof(struct iso_directory_record) + de->name_len[0];
 	if (std & 1)
 		std++;
-	if (de->length[0] - std != 32)
+	if ((*((unsigned char *) de) - std) != 32)
 		return retnamlen;
 	chr = ((unsigned char *) de) + std;
 	if (strncmp(chr, "ARCHIMEDES", 10))
@@ -78,8 +78,8 @@ int get_acorn_filename(struct iso_directory_record *de,
 /*
  * This should _really_ be cleaned up some day..
  */
-static int do_isofs_readdir(struct inode *inode, struct file *file,
-		struct dir_context *ctx,
+static int do_isofs_readdir(struct inode *inode, struct file *filp,
+		void *dirent, filldir_t filldir,
 		char *tmpname, struct iso_directory_record *tmpde)
 {
 	unsigned long bufsize = ISOFS_BUFFER_SIZE(inode);
@@ -94,10 +94,10 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
 	struct iso_directory_record *de;
 	struct isofs_sb_info *sbi = ISOFS_SB(inode->i_sb);
 
-	offset = ctx->pos & (bufsize - 1);
-	block = ctx->pos >> bufbits;
+	offset = filp->f_pos & (bufsize - 1);
+	block = filp->f_pos >> bufbits;
 
-	while (ctx->pos < inode->i_size) {
+	while (filp->f_pos < inode->i_size) {
 		int de_len;
 
 		if (!bh) {
@@ -108,7 +108,7 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
 
 		de = (struct iso_directory_record *) (bh->b_data + offset);
 
-		de_len = *(unsigned char *)de;
+		de_len = *(unsigned char *) de;
 
 		/*
 		 * If the length byte is zero, we should move on to the next
@@ -119,8 +119,8 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
 		if (de_len == 0) {
 			brelse(bh);
 			bh = NULL;
-			ctx->pos = (ctx->pos + ISOFS_BLOCK_SIZE) & ~(ISOFS_BLOCK_SIZE - 1);
-			block = ctx->pos >> bufbits;
+			filp->f_pos = (filp->f_pos + ISOFS_BLOCK_SIZE) & ~(ISOFS_BLOCK_SIZE - 1);
+			block = filp->f_pos >> bufbits;
 			offset = 0;
 			continue;
 		}
@@ -164,16 +164,16 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
 
 		if (de->flags[-sbi->s_high_sierra] & 0x80) {
 			first_de = 0;
-			ctx->pos += de_len;
+			filp->f_pos += de_len;
 			continue;
 		}
 		first_de = 1;
 
 		/* Handle the case of the '.' directory */
 		if (de->name_len[0] == 1 && de->name[0] == 0) {
-			if (!dir_emit_dot(file, ctx))
+			if (filldir(dirent, ".", 1, filp->f_pos, inode->i_ino, DT_DIR) < 0)
 				break;
-			ctx->pos += de_len;
+			filp->f_pos += de_len;
 			continue;
 		}
 
@@ -181,9 +181,10 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
 
 		/* Handle the case of the '..' directory */
 		if (de->name_len[0] == 1 && de->name[0] == 1) {
-			if (!dir_emit_dotdot(file, ctx))
+			inode_number = parent_ino(filp->f_path.dentry);
+			if (filldir(dirent, "..", 2, filp->f_pos, inode_number, DT_DIR) < 0)
 				break;
-			ctx->pos += de_len;
+			filp->f_pos += de_len;
 			continue;
 		}
 
@@ -197,7 +198,7 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
 		if ((sbi->s_hide && (de->flags[-sbi->s_high_sierra] & 1)) ||
 		    (!sbi->s_showassoc &&
 				(de->flags[-sbi->s_high_sierra] & 4))) {
-			ctx->pos += de_len;
+			filp->f_pos += de_len;
 			continue;
 		}
 
@@ -229,10 +230,10 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
 			}
 		}
 		if (len > 0) {
-			if (!dir_emit(ctx, p, len, inode_number, DT_UNKNOWN))
+			if (filldir(dirent, p, len, filp->f_pos, inode_number, DT_UNKNOWN) < 0)
 				break;
 		}
-		ctx->pos += de_len;
+		filp->f_pos += de_len;
 
 		continue;
 	}
@@ -246,12 +247,13 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
  * handling split directory entries.. The real work is done by
  * "do_isofs_readdir()".
  */
-static int isofs_readdir(struct file *file, struct dir_context *ctx)
+static int isofs_readdir(struct file *filp,
+		void *dirent, filldir_t filldir)
 {
 	int result;
 	char *tmpname;
 	struct iso_directory_record *tmpde;
-	struct inode *inode = file_inode(file);
+	struct inode *inode = filp->f_path.dentry->d_inode;
 
 	tmpname = (char *)__get_free_page(GFP_KERNEL);
 	if (tmpname == NULL)
@@ -259,7 +261,7 @@ static int isofs_readdir(struct file *file, struct dir_context *ctx)
 
 	tmpde = (struct iso_directory_record *) (tmpname+1024);
 
-	result = do_isofs_readdir(inode, file, ctx, tmpname, tmpde);
+	result = do_isofs_readdir(inode, filp, dirent, filldir, tmpname, tmpde);
 
 	free_page((unsigned long) tmpname);
 	return result;
@@ -269,7 +271,7 @@ const struct file_operations isofs_dir_operations =
 {
 	.llseek = generic_file_llseek,
 	.read = generic_read_dir,
-	.iterate_shared = isofs_readdir,
+	.readdir = isofs_readdir,
 };
 
 /*

@@ -23,7 +23,6 @@
 #include <hwregs/timer_defs.h>
 #include <asm/fasttimer.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 
 /*
  * timer0 is running at 100MHz and generating jiffies timer ticks
@@ -318,13 +317,11 @@ timer_trig_interrupt(int irq, void *dev_id)
 
 static void timer_trig_handler(struct work_struct *work)
 {
-	reg_timer_rw_ack_intr ack_intr = { 0 };
-	reg_timer_rw_intr_mask intr_mask;
-	reg_timer_rw_trig_cfg trig_cfg = { 0 };
-	struct fast_timer *t;
-	fast_timer_function_type *f;
-	unsigned long d;
-	unsigned long flags;
+  reg_timer_rw_ack_intr ack_intr = { 0 };
+  reg_timer_rw_intr_mask intr_mask;
+  reg_timer_rw_trig_cfg trig_cfg = { 0 };
+  struct fast_timer *t;
+  unsigned long flags;
 
 	/* We keep interrupts disabled not only when we modify the
 	 * fast timer list, but any time we hold a reference to a
@@ -351,6 +348,9 @@ static void timer_trig_handler(struct work_struct *work)
 
   fast_timer_running = 0;
   fast_timer_ints++;
+
+	fast_timer_function_type *f;
+	unsigned long d;
 
   t = fast_timer_list;
 	while (t) {
@@ -463,154 +463,195 @@ void schedule_usleep(unsigned long us)
 }
 
 #ifdef CONFIG_PROC_FS
+static int proc_fasttimer_read(char *buf, char **start, off_t offset, int len
+                       ,int *eof, void *data_unused);
+static struct proc_dir_entry *fasttimer_proc_entry;
+#endif /* CONFIG_PROC_FS */
+
+#ifdef CONFIG_PROC_FS
+
 /* This value is very much based on testing */
 #define BIG_BUF_SIZE (500 + NUM_TIMER_STATS * 300)
 
-static int proc_fasttimer_show(struct seq_file *m, void *v)
+static int proc_fasttimer_read(char *buf, char **start, off_t offset, int len
+                       ,int *eof, void *data_unused)
 {
-	unsigned long flags;
-	int i = 0;
-	int num_to_show;
+  unsigned long flags;
+  int i = 0;
+  int num_to_show;
 	struct fasttime_t tv;
-	struct fast_timer *t, *nextt;
+  struct fast_timer *t, *nextt;
+  static char *bigbuf = NULL;
+  static unsigned long used;
 
-	do_gettimeofday_fast(&tv);
-
-	seq_printf(m, "Fast timers added:     %i\n", fast_timers_added);
-	seq_printf(m, "Fast timers started:   %i\n", fast_timers_started);
-	seq_printf(m, "Fast timer interrupts: %i\n", fast_timer_ints);
-	seq_printf(m, "Fast timers expired:   %i\n", fast_timers_expired);
-	seq_printf(m, "Fast timers deleted:   %i\n", fast_timers_deleted);
-	seq_printf(m, "Fast timer running:    %s\n",
-		   fast_timer_running ? "yes" : "no");
-	seq_printf(m, "Current time:          %lu.%06lu\n",
-		   (unsigned long)tv.tv_jiff,
-		   (unsigned long)tv.tv_usec);
-#ifdef FAST_TIMER_SANITY_CHECKS
-	seq_printf(m, "Sanity failed:         %i\n", sanity_failed);
-#endif
-	seq_putc(m, '\n');
-
-#ifdef DEBUG_LOG_INCLUDED
-	{
-		int end_i = debug_log_cnt;
-		i = 0;
-
-		if (debug_log_cnt_wrapped)
-			i = debug_log_cnt;
-
-		while ((i != end_i || debug_log_cnt_wrapped)) {
-			seq_printf(m, debug_log_string[i], debug_log_value[i]);
-			if (seq_has_overflowed(m))
-				return 0;
-			i = (i+1) % DEBUG_LOG_MAX;
+	if (!bigbuf) {
+		bigbuf = vmalloc(BIG_BUF_SIZE);
+		if (!bigbuf) {
+			used = 0;
+			if (buf)
+				buf[0] = '\0';
+			return 0;
 		}
 	}
-	seq_putc(m, '\n');
+
+	if (!offset || !used) {
+    do_gettimeofday_fast(&tv);
+
+    used = 0;
+    used += sprintf(bigbuf + used, "Fast timers added:     %i\n",
+                    fast_timers_added);
+    used += sprintf(bigbuf + used, "Fast timers started:   %i\n",
+                    fast_timers_started);
+    used += sprintf(bigbuf + used, "Fast timer interrupts: %i\n",
+                    fast_timer_ints);
+    used += sprintf(bigbuf + used, "Fast timers expired:   %i\n",
+                    fast_timers_expired);
+    used += sprintf(bigbuf + used, "Fast timers deleted:   %i\n",
+                    fast_timers_deleted);
+    used += sprintf(bigbuf + used, "Fast timer running:    %s\n",
+                    fast_timer_running ? "yes" : "no");
+    used += sprintf(bigbuf + used, "Current time:          %lu.%06lu\n",
+			(unsigned long)tv.tv_jiff,
+                    (unsigned long)tv.tv_usec);
+#ifdef FAST_TIMER_SANITY_CHECKS
+    used += sprintf(bigbuf + used, "Sanity failed:         %i\n",
+                    sanity_failed);
+#endif
+    used += sprintf(bigbuf + used, "\n");
+
+#ifdef DEBUG_LOG_INCLUDED
+    {
+      int end_i = debug_log_cnt;
+      i = 0;
+
+			if (debug_log_cnt_wrapped)
+        i = debug_log_cnt;
+
+      while ((i != end_i || (debug_log_cnt_wrapped && !used)) &&
+             used+100 < BIG_BUF_SIZE)
+      {
+        used += sprintf(bigbuf + used, debug_log_string[i],
+                        debug_log_value[i]);
+        i = (i+1) % DEBUG_LOG_MAX;
+      }
+    }
+    used += sprintf(bigbuf + used, "\n");
 #endif
 
-	num_to_show = (fast_timers_started < NUM_TIMER_STATS ? fast_timers_started:
-		       NUM_TIMER_STATS);
-	seq_printf(m, "Timers started: %i\n", fast_timers_started);
-	for (i = 0; i < num_to_show; i++) {
-		int cur = (fast_timers_started - i - 1) % NUM_TIMER_STATS;
+    num_to_show = (fast_timers_started < NUM_TIMER_STATS ? fast_timers_started:
+                   NUM_TIMER_STATS);
+    used += sprintf(bigbuf + used, "Timers started: %i\n", fast_timers_started);
+    for (i = 0; i < num_to_show && (used+100 < BIG_BUF_SIZE) ; i++)
+    {
+      int cur = (fast_timers_started - i - 1) % NUM_TIMER_STATS;
 
 #if 1 //ndef FAST_TIMER_LOG
-		seq_printf(m, "div: %i delay: %i\n",
-			   timer_div_settings[cur],
-			   timer_delay_settings[cur]);
+      used += sprintf(bigbuf + used, "div: %i delay: %i"
+                      "\n",
+                      timer_div_settings[cur],
+                      timer_delay_settings[cur]
+                      );
 #endif
 #ifdef FAST_TIMER_LOG
-		t = &timer_started_log[cur];
-		seq_printf(m, "%-14s s: %6lu.%06lu e: %6lu.%06lu d: %6li us data: 0x%08lX\n",
-			   t->name,
-			   (unsigned long)t->tv_set.tv_jiff,
-			   (unsigned long)t->tv_set.tv_usec,
-			   (unsigned long)t->tv_expires.tv_jiff,
-			   (unsigned long)t->tv_expires.tv_usec,
-			   t->delay_us,
-			   t->data);
-		if (seq_has_overflowed(m))
-			return 0;
+      t = &timer_started_log[cur];
+      used += sprintf(bigbuf + used, "%-14s s: %6lu.%06lu e: %6lu.%06lu "
+                      "d: %6li us data: 0x%08lX"
+                      "\n",
+                      t->name,
+				(unsigned long)t->tv_set.tv_jiff,
+                      (unsigned long)t->tv_set.tv_usec,
+				(unsigned long)t->tv_expires.tv_jiff,
+                      (unsigned long)t->tv_expires.tv_usec,
+                      t->delay_us,
+                      t->data
+                      );
 #endif
-	}
-	seq_putc(m, '\n');
+    }
+    used += sprintf(bigbuf + used, "\n");
 
 #ifdef FAST_TIMER_LOG
-	num_to_show = (fast_timers_added < NUM_TIMER_STATS ? fast_timers_added:
-		       NUM_TIMER_STATS);
-	seq_printf(m, "Timers added: %i\n", fast_timers_added);
-	for (i = 0; i < num_to_show; i++) {
-		t = &timer_added_log[(fast_timers_added - i - 1) % NUM_TIMER_STATS];
-		seq_printf(m, "%-14s s: %6lu.%06lu e: %6lu.%06lu d: %6li us data: 0x%08lX\n",
-			   t->name,
-			   (unsigned long)t->tv_set.tv_jiff,
-			   (unsigned long)t->tv_set.tv_usec,
-			   (unsigned long)t->tv_expires.tv_jiff,
-			   (unsigned long)t->tv_expires.tv_usec,
-			   t->delay_us,
-			   t->data);
-		if (seq_has_overflowed(m))
-			return 0;
-	}
-	seq_putc(m, '\n');
+    num_to_show = (fast_timers_added < NUM_TIMER_STATS ? fast_timers_added:
+                   NUM_TIMER_STATS);
+    used += sprintf(bigbuf + used, "Timers added: %i\n", fast_timers_added);
+    for (i = 0; i < num_to_show && (used+100 < BIG_BUF_SIZE); i++)
+    {
+      t = &timer_added_log[(fast_timers_added - i - 1) % NUM_TIMER_STATS];
+      used += sprintf(bigbuf + used, "%-14s s: %6lu.%06lu e: %6lu.%06lu "
+                      "d: %6li us data: 0x%08lX"
+                      "\n",
+                      t->name,
+				(unsigned long)t->tv_set.tv_jiff,
+                      (unsigned long)t->tv_set.tv_usec,
+				(unsigned long)t->tv_expires.tv_jiff,
+                      (unsigned long)t->tv_expires.tv_usec,
+                      t->delay_us,
+                      t->data
+                      );
+    }
+    used += sprintf(bigbuf + used, "\n");
 
-	num_to_show = (fast_timers_expired < NUM_TIMER_STATS ? fast_timers_expired:
-		       NUM_TIMER_STATS);
-	seq_printf(m, "Timers expired: %i\n", fast_timers_expired);
-	for (i = 0; i < num_to_show; i++){
-		t = &timer_expired_log[(fast_timers_expired - i - 1) % NUM_TIMER_STATS];
-		seq_printf(m, "%-14s s: %6lu.%06lu e: %6lu.%06lu d: %6li us data: 0x%08lX\n",
-			   t->name,
-			   (unsigned long)t->tv_set.tv_jiff,
-			   (unsigned long)t->tv_set.tv_usec,
-			   (unsigned long)t->tv_expires.tv_jiff,
-			   (unsigned long)t->tv_expires.tv_usec,
-			   t->delay_us,
-			   t->data);
-		if (seq_has_overflowed(m))
-			return 0;
-	}
-	seq_putc(m, '\n');
+    num_to_show = (fast_timers_expired < NUM_TIMER_STATS ? fast_timers_expired:
+                   NUM_TIMER_STATS);
+    used += sprintf(bigbuf + used, "Timers expired: %i\n", fast_timers_expired);
+    for (i = 0; i < num_to_show && (used+100 < BIG_BUF_SIZE); i++)
+    {
+      t = &timer_expired_log[(fast_timers_expired - i - 1) % NUM_TIMER_STATS];
+      used += sprintf(bigbuf + used, "%-14s s: %6lu.%06lu e: %6lu.%06lu "
+                      "d: %6li us data: 0x%08lX"
+                      "\n",
+                      t->name,
+				(unsigned long)t->tv_set.tv_jiff,
+                      (unsigned long)t->tv_set.tv_usec,
+				(unsigned long)t->tv_expires.tv_jiff,
+                      (unsigned long)t->tv_expires.tv_usec,
+                      t->delay_us,
+                      t->data
+                      );
+    }
+    used += sprintf(bigbuf + used, "\n");
 #endif
 
-	seq_puts(m, "Active timers:\n");
-	local_irq_save(flags);
-	t = fast_timer_list;
-	while (t != NULL){
-		nextt = t->next;
-		local_irq_restore(flags);
-		seq_printf(m, "%-14s s: %6lu.%06lu e: %6lu.%06lu d: %6li us data: 0x%08lX\n",
-			   t->name,
-			   (unsigned long)t->tv_set.tv_jiff,
-			   (unsigned long)t->tv_set.tv_usec,
-			   (unsigned long)t->tv_expires.tv_jiff,
-			   (unsigned long)t->tv_expires.tv_usec,
-			   t->delay_us,
-			   t->data);
-		if (seq_has_overflowed(m))
-			return 0;
-		local_irq_save(flags);
-		if (t->next != nextt)
-			printk("timer removed!\n");
-		t = nextt;
-	}
-	local_irq_restore(flags);
-	return 0;
+    used += sprintf(bigbuf + used, "Active timers:\n");
+    local_irq_save(flags);
+    t = fast_timer_list;
+    while (t != NULL && (used+100 < BIG_BUF_SIZE))
+    {
+      nextt = t->next;
+      local_irq_restore(flags);
+      used += sprintf(bigbuf + used, "%-14s s: %6lu.%06lu e: %6lu.%06lu "
+			"d: %6li us data: 0x%08lX"
+/*			" func: 0x%08lX" */
+			"\n",
+			t->name,
+			(unsigned long)t->tv_set.tv_jiff,
+			(unsigned long)t->tv_set.tv_usec,
+			(unsigned long)t->tv_expires.tv_jiff,
+			(unsigned long)t->tv_expires.tv_usec,
+                      t->delay_us,
+                      t->data
+/*                      , t->function */
+                      );
+			local_irq_save(flags);
+      if (t->next != nextt)
+      {
+        printk("timer removed!\n");
+      }
+      t = nextt;
+    }
+    local_irq_restore(flags);
+  }
+
+  if (used - offset < len)
+  {
+    len = used - offset;
+  }
+
+  memcpy(buf, bigbuf + offset, len);
+  *start = buf;
+  *eof = 1;
+
+  return len;
 }
-
-static int proc_fasttimer_open(struct inode *inode, struct file *file)
-{
-	return single_open_size(file, proc_fasttimer_show, PDE_DATA(inode), BIG_BUF_SIZE);
-}
-
-static const struct file_operations proc_fasttimer_fops = {
-	.open		= proc_fasttimer_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
 #endif /* PROC_FS */
 
 #ifdef FAST_TIMER_TEST
@@ -775,10 +816,12 @@ int fast_timer_init(void)
     printk("fast_timer_init()\n");
 
 #ifdef CONFIG_PROC_FS
-    proc_create("fasttimer", 0, NULL, &proc_fasttimer_fops);
+    fasttimer_proc_entry = create_proc_entry("fasttimer", 0, 0);
+    if (fasttimer_proc_entry)
+      fasttimer_proc_entry->read_proc = proc_fasttimer_read;
 #endif /* PROC_FS */
 		if (request_irq(TIMER0_INTR_VECT, timer_trig_interrupt,
-				IRQF_SHARED,
+				IRQF_SHARED | IRQF_DISABLED,
 				"fast timer int", &fast_timer_list))
 			printk(KERN_ERR "err: fasttimer irq\n");
     fast_timer_is_init = 1;

@@ -1,9 +1,8 @@
-/* bnx2fc_tgt.c: QLogic Linux FCoE offload driver.
+/* bnx2fc_tgt.c: Broadcom NetXtreme II Linux FCoE offload driver.
  * Handles operations such as session offload/upload etc, and manages
  * session resources such as connection id and qp resources.
  *
- * Copyright (c) 2008-2013 Broadcom Corporation
- * Copyright (c) 2014-2015 QLogic Corporation
+ * Copyright (c) 2008 - 2011 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -34,7 +33,6 @@ static void bnx2fc_upld_timer(unsigned long data)
 	BNX2FC_TGT_DBG(tgt, "upld_timer - Upload compl not received!!\n");
 	/* fake upload completion */
 	clear_bit(BNX2FC_FLAG_OFFLOADED, &tgt->flags);
-	clear_bit(BNX2FC_FLAG_ENABLED, &tgt->flags);
 	set_bit(BNX2FC_FLAG_UPLD_REQ_COMPL, &tgt->flags);
 	wake_up_interruptible(&tgt->upld_wait);
 }
@@ -57,23 +55,8 @@ static void bnx2fc_ofld_timer(unsigned long data)
 	 * resources are freed up in bnx2fc_offload_session
 	 */
 	clear_bit(BNX2FC_FLAG_OFFLOADED, &tgt->flags);
-	clear_bit(BNX2FC_FLAG_ENABLED, &tgt->flags);
 	set_bit(BNX2FC_FLAG_OFLD_REQ_CMPL, &tgt->flags);
 	wake_up_interruptible(&tgt->ofld_wait);
-}
-
-static void bnx2fc_ofld_wait(struct bnx2fc_rport *tgt)
-{
-	setup_timer(&tgt->ofld_timer, bnx2fc_ofld_timer, (unsigned long)tgt);
-	mod_timer(&tgt->ofld_timer, jiffies + BNX2FC_FW_TIMEOUT);
-
-	wait_event_interruptible(tgt->ofld_wait,
-				 (test_bit(
-				  BNX2FC_FLAG_OFLD_REQ_CMPL,
-				  &tgt->flags)));
-	if (signal_pending(current))
-		flush_signals(current);
-	del_timer_sync(&tgt->ofld_timer);
 }
 
 static void bnx2fc_offload_session(struct fcoe_port *port,
@@ -120,7 +103,17 @@ retry_ofld:
 	 * wait for the session is offloaded and enabled. 3 Secs
 	 * should be ample time for this process to complete.
 	 */
-	bnx2fc_ofld_wait(tgt);
+	setup_timer(&tgt->ofld_timer, bnx2fc_ofld_timer, (unsigned long)tgt);
+	mod_timer(&tgt->ofld_timer, jiffies + BNX2FC_FW_TIMEOUT);
+
+	wait_event_interruptible(tgt->ofld_wait,
+				 (test_bit(
+				  BNX2FC_FLAG_OFLD_REQ_CMPL,
+				  &tgt->flags)));
+	if (signal_pending(current))
+		flush_signals(current);
+
+	del_timer_sync(&tgt->ofld_timer);
 
 	if (!(test_bit(BNX2FC_FLAG_OFFLOADED, &tgt->flags))) {
 		if (test_and_clear_bit(BNX2FC_FLAG_CTX_ALLOC_FAILURE,
@@ -138,23 +131,14 @@ retry_ofld:
 	}
 	if (bnx2fc_map_doorbell(tgt)) {
 		printk(KERN_ERR PFX "map doorbell failed - no mem\n");
-		goto ofld_err;
+		/* upload will take care of cleaning up sess resc */
+		lport->tt.rport_logoff(rdata);
 	}
-	clear_bit(BNX2FC_FLAG_OFLD_REQ_CMPL, &tgt->flags);
-	rval = bnx2fc_send_session_enable_req(port, tgt);
-	if (rval) {
-		pr_err(PFX "enable session failed\n");
-		goto ofld_err;
-	}
-	bnx2fc_ofld_wait(tgt);
-	if (!(test_bit(BNX2FC_FLAG_ENABLED, &tgt->flags)))
-		goto ofld_err;
 	return;
 
 ofld_err:
 	/* couldn't offload the session. log off from this rport */
 	BNX2FC_TGT_DBG(tgt, "bnx2fc_offload_session - offload error\n");
-	clear_bit(BNX2FC_FLAG_OFFLOADED, &tgt->flags);
 	/* Free session resources */
 	bnx2fc_free_session_resc(hba, tgt);
 tgt_init_err:
@@ -166,7 +150,8 @@ tgt_init_err:
 void bnx2fc_flush_active_ios(struct bnx2fc_rport *tgt)
 {
 	struct bnx2fc_cmd *io_req;
-	struct bnx2fc_cmd *tmp;
+	struct list_head *list;
+	struct list_head *tmp;
 	int rc;
 	int i = 0;
 	BNX2FC_TGT_DBG(tgt, "Entered flush_active_ios - %d\n",
@@ -175,8 +160,9 @@ void bnx2fc_flush_active_ios(struct bnx2fc_rport *tgt)
 	spin_lock_bh(&tgt->tgt_lock);
 	tgt->flush_in_prog = 1;
 
-	list_for_each_entry_safe(io_req, tmp, &tgt->active_cmd_queue, link) {
+	list_for_each_safe(list, tmp, &tgt->active_cmd_queue) {
 		i++;
+		io_req = (struct bnx2fc_cmd *)list;
 		list_del_init(&io_req->link);
 		io_req->on_active_queue = 0;
 		BNX2FC_IO_DBG(io_req, "cmd_queue cleanup\n");
@@ -195,27 +181,13 @@ void bnx2fc_flush_active_ios(struct bnx2fc_rport *tgt)
 
 		set_bit(BNX2FC_FLAG_IO_COMPL, &io_req->req_flags);
 		set_bit(BNX2FC_FLAG_IO_CLEANUP, &io_req->req_flags);
-
-		/* Do not issue cleanup when disable request failed */
-		if (test_bit(BNX2FC_FLAG_DISABLE_FAILED, &tgt->flags))
-			bnx2fc_process_cleanup_compl(io_req, io_req->task, 0);
-		else {
-			rc = bnx2fc_initiate_cleanup(io_req);
-			BUG_ON(rc);
-		}
+		rc = bnx2fc_initiate_cleanup(io_req);
+		BUG_ON(rc);
 	}
 
-	list_for_each_entry_safe(io_req, tmp, &tgt->active_tm_queue, link) {
+	list_for_each_safe(list, tmp, &tgt->els_queue) {
 		i++;
-		list_del_init(&io_req->link);
-		io_req->on_tmf_queue = 0;
-		BNX2FC_IO_DBG(io_req, "tm_queue cleanup\n");
-		if (io_req->wait_for_comp)
-			complete(&io_req->tm_done);
-	}
-
-	list_for_each_entry_safe(io_req, tmp, &tgt->els_queue, link) {
-		i++;
+		io_req = (struct bnx2fc_cmd *)list;
 		list_del_init(&io_req->link);
 		io_req->on_active_queue = 0;
 
@@ -230,32 +202,19 @@ void bnx2fc_flush_active_ios(struct bnx2fc_rport *tgt)
 			io_req->cb_arg = NULL;
 		}
 
-		/* Do not issue cleanup when disable request failed */
-		if (test_bit(BNX2FC_FLAG_DISABLE_FAILED, &tgt->flags))
-			bnx2fc_process_cleanup_compl(io_req, io_req->task, 0);
-		else {
-			rc = bnx2fc_initiate_cleanup(io_req);
-			BUG_ON(rc);
-		}
+		rc = bnx2fc_initiate_cleanup(io_req);
+		BUG_ON(rc);
 	}
 
-	list_for_each_entry_safe(io_req, tmp, &tgt->io_retire_queue, link) {
+	list_for_each_safe(list, tmp, &tgt->io_retire_queue) {
 		i++;
+		io_req = (struct bnx2fc_cmd *)list;
 		list_del_init(&io_req->link);
 
 		BNX2FC_IO_DBG(io_req, "retire_queue flush\n");
 
-		if (cancel_delayed_work(&io_req->timeout_work)) {
-			if (test_and_clear_bit(BNX2FC_FLAG_EH_ABORT,
-						&io_req->req_flags)) {
-				/* Handle eh_abort timeout */
-				BNX2FC_IO_DBG(io_req, "eh_abort for IO "
-					      "in retire_q\n");
-				if (io_req->wait_for_comp)
-					complete(&io_req->tm_done);
-			}
+		if (cancel_delayed_work(&io_req->timeout_work))
 			kref_put(&io_req->refcount, bnx2fc_cmd_release);
-		}
 
 		clear_bit(BNX2FC_FLAG_ISSUE_RRQ, &io_req->req_flags);
 	}
@@ -273,19 +232,6 @@ void bnx2fc_flush_active_ios(struct bnx2fc_rport *tgt)
 	spin_lock_bh(&tgt->tgt_lock);
 	tgt->flush_in_prog = 0;
 	spin_unlock_bh(&tgt->tgt_lock);
-}
-
-static void bnx2fc_upld_wait(struct bnx2fc_rport *tgt)
-{
-	setup_timer(&tgt->upld_timer, bnx2fc_upld_timer, (unsigned long)tgt);
-	mod_timer(&tgt->upld_timer, jiffies + BNX2FC_FW_TIMEOUT);
-	wait_event_interruptible(tgt->upld_wait,
-				 (test_bit(
-				  BNX2FC_FLAG_UPLD_REQ_COMPL,
-				  &tgt->flags)));
-	if (signal_pending(current))
-		flush_signals(current);
-	del_timer_sync(&tgt->upld_timer);
 }
 
 static void bnx2fc_upload_session(struct fcoe_port *port,
@@ -308,8 +254,19 @@ static void bnx2fc_upload_session(struct fcoe_port *port,
 	 * wait for upload to complete. 3 Secs
 	 * should be sufficient time for this process to complete.
 	 */
+	setup_timer(&tgt->upld_timer, bnx2fc_upld_timer, (unsigned long)tgt);
+	mod_timer(&tgt->upld_timer, jiffies + BNX2FC_FW_TIMEOUT);
+
 	BNX2FC_TGT_DBG(tgt, "waiting for disable compl\n");
-	bnx2fc_upld_wait(tgt);
+	wait_event_interruptible(tgt->upld_wait,
+				 (test_bit(
+				  BNX2FC_FLAG_UPLD_REQ_COMPL,
+				  &tgt->flags)));
+
+	if (signal_pending(current))
+		flush_signals(current);
+
+	del_timer_sync(&tgt->upld_timer);
 
 	/*
 	 * traverse thru the active_q and tmf_q and cleanup
@@ -326,21 +283,28 @@ static void bnx2fc_upload_session(struct fcoe_port *port,
 		bnx2fc_send_session_destroy_req(hba, tgt);
 
 		/* wait for destroy to complete */
-		bnx2fc_upld_wait(tgt);
+		setup_timer(&tgt->upld_timer,
+			    bnx2fc_upld_timer, (unsigned long)tgt);
+		mod_timer(&tgt->upld_timer, jiffies + BNX2FC_FW_TIMEOUT);
+
+		wait_event_interruptible(tgt->upld_wait,
+					 (test_bit(
+					  BNX2FC_FLAG_UPLD_REQ_COMPL,
+					  &tgt->flags)));
 
 		if (!(test_bit(BNX2FC_FLAG_DESTROYED, &tgt->flags)))
 			printk(KERN_ERR PFX "ERROR!! destroy timed out\n");
 
 		BNX2FC_TGT_DBG(tgt, "destroy wait complete flags = 0x%lx\n",
 			tgt->flags);
+		if (signal_pending(current))
+			flush_signals(current);
 
-	} else if (test_bit(BNX2FC_FLAG_DISABLE_FAILED, &tgt->flags)) {
-		printk(KERN_ERR PFX "ERROR!! DISABLE req failed, destroy"
-				" not sent to FW\n");
-	} else {
+		del_timer_sync(&tgt->upld_timer);
+
+	} else
 		printk(KERN_ERR PFX "ERROR!! DISABLE req timed out, destroy"
 				" not sent to FW\n");
-	}
 
 	/* Free session resources */
 	bnx2fc_free_session_resc(hba, tgt);
@@ -387,11 +351,8 @@ static int bnx2fc_init_tgt(struct bnx2fc_rport *tgt,
 	tgt->rq_prod_idx = 0x8000;
 	tgt->rq_cons_idx = 0;
 	atomic_set(&tgt->num_active_ios, 0);
-	tgt->retry_delay_timestamp = 0;
 
-	if (rdata->flags & FC_RP_FLAGS_RETRY &&
-	    rdata->ids.roles & FC_RPORT_ROLE_FCP_TARGET &&
-	    !(rdata->ids.roles & FC_RPORT_ROLE_FCP_INITIATOR)) {
+	if (rdata->flags & FC_RP_FLAGS_RETRY) {
 		tgt->dev_type = TYPE_TAPE;
 		tgt->io_timeout = 0; /* use default ULP timeout */
 	} else {
@@ -489,7 +450,7 @@ void bnx2fc_rport_event_handler(struct fc_lport *lport,
 		tgt = (struct bnx2fc_rport *)&rp[1];
 
 		/* This can happen when ADISC finds the same target */
-		if (test_bit(BNX2FC_FLAG_ENABLED, &tgt->flags)) {
+		if (test_bit(BNX2FC_FLAG_OFFLOADED, &tgt->flags)) {
 			BNX2FC_TGT_DBG(tgt, "already offloaded\n");
 			mutex_unlock(&hba->hba_mutex);
 			return;
@@ -504,8 +465,11 @@ void bnx2fc_rport_event_handler(struct fc_lport *lport,
 		BNX2FC_TGT_DBG(tgt, "OFFLOAD num_ofld_sess = %d\n",
 			hba->num_ofld_sess);
 
-		if (test_bit(BNX2FC_FLAG_ENABLED, &tgt->flags)) {
-			/* Session is offloaded and enabled.  */
+		if (test_bit(BNX2FC_FLAG_OFFLOADED, &tgt->flags)) {
+			/*
+			 * Session is offloaded and enabled. Map
+			 * doorbell register for this target
+			 */
 			BNX2FC_TGT_DBG(tgt, "sess offloaded\n");
 			/* This counter is protected with hba mutex */
 			hba->num_ofld_sess++;
@@ -542,7 +506,7 @@ void bnx2fc_rport_event_handler(struct fc_lport *lport,
 		 */
 		tgt = (struct bnx2fc_rport *)&rp[1];
 
-		if (!(test_bit(BNX2FC_FLAG_ENABLED, &tgt->flags))) {
+		if (!(test_bit(BNX2FC_FLAG_OFFLOADED, &tgt->flags))) {
 			mutex_unlock(&hba->hba_mutex);
 			break;
 		}
@@ -559,6 +523,12 @@ void bnx2fc_rport_event_handler(struct fc_lport *lport,
 		if ((hba->wait_for_link_down) &&
 		    (hba->num_ofld_sess == 0)) {
 			wake_up_interruptible(&hba->shutdown_wait);
+		}
+		if (test_bit(BNX2FC_FLAG_EXPL_LOGO, &tgt->flags)) {
+			printk(KERN_ERR PFX "Relogin to the tgt\n");
+			mutex_lock(&lport->disc.disc_mutex);
+			lport->tt.rport_login(rdata);
+			mutex_unlock(&lport->disc.disc_mutex);
 		}
 		mutex_unlock(&hba->hba_mutex);
 
@@ -669,8 +639,7 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 
 	/* Allocate and map SQ */
 	tgt->sq_mem_size = tgt->max_sqes * BNX2FC_SQ_WQE_SIZE;
-	tgt->sq_mem_size = (tgt->sq_mem_size + (CNIC_PAGE_SIZE - 1)) &
-			   CNIC_PAGE_MASK;
+	tgt->sq_mem_size = (tgt->sq_mem_size + (PAGE_SIZE - 1)) & PAGE_MASK;
 
 	tgt->sq = dma_alloc_coherent(&hba->pcidev->dev, tgt->sq_mem_size,
 				     &tgt->sq_dma, GFP_KERNEL);
@@ -683,8 +652,7 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 
 	/* Allocate and map CQ */
 	tgt->cq_mem_size = tgt->max_cqes * BNX2FC_CQ_WQE_SIZE;
-	tgt->cq_mem_size = (tgt->cq_mem_size + (CNIC_PAGE_SIZE - 1)) &
-			   CNIC_PAGE_MASK;
+	tgt->cq_mem_size = (tgt->cq_mem_size + (PAGE_SIZE - 1)) & PAGE_MASK;
 
 	tgt->cq = dma_alloc_coherent(&hba->pcidev->dev, tgt->cq_mem_size,
 				     &tgt->cq_dma, GFP_KERNEL);
@@ -697,8 +665,7 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 
 	/* Allocate and map RQ and RQ PBL */
 	tgt->rq_mem_size = tgt->max_rqes * BNX2FC_RQ_WQE_SIZE;
-	tgt->rq_mem_size = (tgt->rq_mem_size + (CNIC_PAGE_SIZE - 1)) &
-			   CNIC_PAGE_MASK;
+	tgt->rq_mem_size = (tgt->rq_mem_size + (PAGE_SIZE - 1)) & PAGE_MASK;
 
 	tgt->rq = dma_alloc_coherent(&hba->pcidev->dev, tgt->rq_mem_size,
 					&tgt->rq_dma, GFP_KERNEL);
@@ -709,9 +676,8 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 	}
 	memset(tgt->rq, 0, tgt->rq_mem_size);
 
-	tgt->rq_pbl_size = (tgt->rq_mem_size / CNIC_PAGE_SIZE) * sizeof(void *);
-	tgt->rq_pbl_size = (tgt->rq_pbl_size + (CNIC_PAGE_SIZE - 1)) &
-			   CNIC_PAGE_MASK;
+	tgt->rq_pbl_size = (tgt->rq_mem_size / PAGE_SIZE) * sizeof(void *);
+	tgt->rq_pbl_size = (tgt->rq_pbl_size + (PAGE_SIZE - 1)) & PAGE_MASK;
 
 	tgt->rq_pbl = dma_alloc_coherent(&hba->pcidev->dev, tgt->rq_pbl_size,
 					 &tgt->rq_pbl_dma, GFP_KERNEL);
@@ -722,7 +688,7 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 	}
 
 	memset(tgt->rq_pbl, 0, tgt->rq_pbl_size);
-	num_pages = tgt->rq_mem_size / CNIC_PAGE_SIZE;
+	num_pages = tgt->rq_mem_size / PAGE_SIZE;
 	page = tgt->rq_dma;
 	pbl = (u32 *)tgt->rq_pbl;
 
@@ -731,13 +697,13 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 		pbl++;
 		*pbl = (u32)((u64)page >> 32);
 		pbl++;
-		page += CNIC_PAGE_SIZE;
+		page += PAGE_SIZE;
 	}
 
 	/* Allocate and map XFERQ */
 	tgt->xferq_mem_size = tgt->max_sqes * BNX2FC_XFERQ_WQE_SIZE;
-	tgt->xferq_mem_size = (tgt->xferq_mem_size + (CNIC_PAGE_SIZE - 1)) &
-			       CNIC_PAGE_MASK;
+	tgt->xferq_mem_size = (tgt->xferq_mem_size + (PAGE_SIZE - 1)) &
+			       PAGE_MASK;
 
 	tgt->xferq = dma_alloc_coherent(&hba->pcidev->dev, tgt->xferq_mem_size,
 					&tgt->xferq_dma, GFP_KERNEL);
@@ -750,8 +716,8 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 
 	/* Allocate and map CONFQ & CONFQ PBL */
 	tgt->confq_mem_size = tgt->max_sqes * BNX2FC_CONFQ_WQE_SIZE;
-	tgt->confq_mem_size = (tgt->confq_mem_size + (CNIC_PAGE_SIZE - 1)) &
-			       CNIC_PAGE_MASK;
+	tgt->confq_mem_size = (tgt->confq_mem_size + (PAGE_SIZE - 1)) &
+			       PAGE_MASK;
 
 	tgt->confq = dma_alloc_coherent(&hba->pcidev->dev, tgt->confq_mem_size,
 					&tgt->confq_dma, GFP_KERNEL);
@@ -763,9 +729,9 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 	memset(tgt->confq, 0, tgt->confq_mem_size);
 
 	tgt->confq_pbl_size =
-		(tgt->confq_mem_size / CNIC_PAGE_SIZE) * sizeof(void *);
+		(tgt->confq_mem_size / PAGE_SIZE) * sizeof(void *);
 	tgt->confq_pbl_size =
-		(tgt->confq_pbl_size + (CNIC_PAGE_SIZE - 1)) & CNIC_PAGE_MASK;
+		(tgt->confq_pbl_size + (PAGE_SIZE - 1)) & PAGE_MASK;
 
 	tgt->confq_pbl = dma_alloc_coherent(&hba->pcidev->dev,
 					    tgt->confq_pbl_size,
@@ -777,7 +743,7 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 	}
 
 	memset(tgt->confq_pbl, 0, tgt->confq_pbl_size);
-	num_pages = tgt->confq_mem_size / CNIC_PAGE_SIZE;
+	num_pages = tgt->confq_mem_size / PAGE_SIZE;
 	page = tgt->confq_dma;
 	pbl = (u32 *)tgt->confq_pbl;
 
@@ -786,7 +752,7 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 		pbl++;
 		*pbl = (u32)((u64)page >> 32);
 		pbl++;
-		page += CNIC_PAGE_SIZE;
+		page += PAGE_SIZE;
 	}
 
 	/* Allocate and map ConnDB */
@@ -805,8 +771,8 @@ static int bnx2fc_alloc_session_resc(struct bnx2fc_hba *hba,
 
 	/* Allocate and map LCQ */
 	tgt->lcq_mem_size = (tgt->max_sqes + 8) * BNX2FC_SQ_WQE_SIZE;
-	tgt->lcq_mem_size = (tgt->lcq_mem_size + (CNIC_PAGE_SIZE - 1)) &
-			     CNIC_PAGE_MASK;
+	tgt->lcq_mem_size = (tgt->lcq_mem_size + (PAGE_SIZE - 1)) &
+			     PAGE_MASK;
 
 	tgt->lcq = dma_alloc_coherent(&hba->pcidev->dev, tgt->lcq_mem_size,
 				      &tgt->lcq_dma, GFP_KERNEL);

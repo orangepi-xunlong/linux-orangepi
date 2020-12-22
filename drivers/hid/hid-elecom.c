@@ -27,7 +27,7 @@ static __u8 *elecom_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		hid_info(hdev, "Fixing up Elecom BM084 report descriptor\n");
 		rdesc[47] = 0x00;
 	}
-	return rdesc;
+    return rdesc;
 }
 
 static const struct hid_device_id elecom_devices[] = {
@@ -41,6 +41,17 @@ static struct hid_driver elecom_driver = {
 	.id_table = elecom_devices,
 	.report_fixup = elecom_report_fixup
 };
-module_hid_driver(elecom_driver);
 
+static int __init elecom_init(void)
+{
+	return hid_register_driver(&elecom_driver);
+}
+
+static void __exit elecom_exit(void)
+{
+	hid_unregister_driver(&elecom_driver);
+}
+
+module_init(elecom_init);
+module_exit(elecom_exit);
 MODULE_LICENSE("GPL");

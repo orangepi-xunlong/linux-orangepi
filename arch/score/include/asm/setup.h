@@ -1,8 +1,11 @@
 #ifndef _ASM_SCORE_SETUP_H
 #define _ASM_SCORE_SETUP_H
 
-#include <uapi/asm/setup.h>
+#define COMMAND_LINE_SIZE	256
+#define MEMORY_START		0
+#define MEMORY_SIZE		0x2000000
 
+#ifdef __KERNEL__
 
 extern void pagetable_init(void);
 extern void pgd_init(unsigned long page);
@@ -32,5 +35,7 @@ extern void handle_mod(void);
 extern void debug_exception_vector(void);
 extern void general_exception_vector(void);
 extern void interrupt_exception_vector(void);
+
+#endif /* __KERNEL__ */
 
 #endif /* _ASM_SCORE_SETUP_H */

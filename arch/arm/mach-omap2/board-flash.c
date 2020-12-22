@@ -13,16 +13,16 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/omap-gpmc.h>
 #include <linux/platform_device.h>
 #include <linux/mtd/physmap.h>
 #include <linux/io.h>
+#include <plat/irqs.h>
 
-#include <linux/platform_data/mtd-nand-omap2.h>
-#include <linux/platform_data/mtd-onenand-omap2.h>
+#include <plat/gpmc.h>
+#include <plat/nand.h>
+#include <plat/onenand.h>
+#include <plat/tc.h>
 
-#include "soc.h"
-#include "common.h"
 #include "board-flash.h"
 
 #define REG_FPGA_REV			0x10
@@ -81,12 +81,13 @@ __init board_nor_init(struct mtd_partition *nor_parts, u8 nr_parts, u8 cs)
 		pr_err("Unable to register NOR device\n");
 }
 
-#if IS_ENABLED(CONFIG_MTD_ONENAND_OMAP2)
+#if defined(CONFIG_MTD_ONENAND_OMAP2) || \
+		defined(CONFIG_MTD_ONENAND_OMAP2_MODULE)
 static struct omap_onenand_platform_data board_onenand_data = {
 	.dma_channel	= -1,   /* disable DMA in OMAP OneNAND driver */
 };
 
-void
+static void
 __init board_onenand_init(struct mtd_partition *onenand_parts,
 				u8 nr_parts, u8 cs)
 {
@@ -96,53 +97,58 @@ __init board_onenand_init(struct mtd_partition *onenand_parts,
 
 	gpmc_onenand_init(&board_onenand_data);
 }
-#endif /* IS_ENABLED(CONFIG_MTD_ONENAND_OMAP2) */
+#else
+static void
+__init board_onenand_init(struct mtd_partition *nor_parts, u8 nr_parts, u8 cs)
+{
+}
+#endif /* CONFIG_MTD_ONENAND_OMAP2 || CONFIG_MTD_ONENAND_OMAP2_MODULE */
 
-#if IS_ENABLED(CONFIG_MTD_NAND_OMAP2)
+#if defined(CONFIG_MTD_NAND_OMAP2) || \
+		defined(CONFIG_MTD_NAND_OMAP2_MODULE)
 
 /* Note that all values in this struct are in nanoseconds */
-struct gpmc_timings nand_default_timings[1] = {
-	{
-		.sync_clk = 0,
+static struct gpmc_timings nand_timings = {
 
-		.cs_on = 0,
-		.cs_rd_off = 36,
-		.cs_wr_off = 36,
+	.sync_clk = 0,
 
-		.we_on = 6,
-		.oe_on = 6,
+	.cs_on = 0,
+	.cs_rd_off = 36,
+	.cs_wr_off = 36,
 
-		.adv_on = 6,
-		.adv_rd_off = 24,
-		.adv_wr_off = 36,
+	.adv_on = 6,
+	.adv_rd_off = 24,
+	.adv_wr_off = 36,
 
-		.we_off = 30,
-		.oe_off = 48,
+	.we_off = 30,
+	.oe_off = 48,
 
-		.access = 54,
-		.rd_cycle = 72,
-		.wr_cycle = 72,
+	.access = 54,
+	.rd_cycle = 72,
+	.wr_cycle = 72,
 
-		.wr_access = 30,
-		.wr_data_mux_bus = 0,
-	},
+	.wr_access = 30,
+	.wr_data_mux_bus = 0,
 };
 
-static struct omap_nand_platform_data board_nand_data;
+static struct omap_nand_platform_data board_nand_data = {
+	.gpmc_t		= &nand_timings,
+};
 
 void
-__init board_nand_init(struct mtd_partition *nand_parts, u8 nr_parts, u8 cs,
-				int nand_type, struct gpmc_timings *gpmc_t)
+__init board_nand_init(struct mtd_partition *nand_parts,
+			u8 nr_parts, u8 cs, int nand_type)
 {
 	board_nand_data.cs		= cs;
 	board_nand_data.parts		= nand_parts;
 	board_nand_data.nr_parts	= nr_parts;
 	board_nand_data.devsize		= nand_type;
 
-	board_nand_data.ecc_opt = OMAP_ECC_HAM1_CODE_SW;
-	gpmc_nand_init(&board_nand_data, gpmc_t);
+	board_nand_data.ecc_opt = OMAP_ECC_HAMMING_CODE_DEFAULT;
+	board_nand_data.gpmc_irq = OMAP_GPMC_IRQ_BASE + cs;
+	gpmc_nand_init(&board_nand_data);
 }
-#endif /* IS_ENABLED(CONFIG_MTD_NAND_OMAP2) */
+#endif /* CONFIG_MTD_NAND_OMAP2 || CONFIG_MTD_NAND_OMAP2_MODULE */
 
 /**
  * get_gpmc0_type - Reads the FPGA DIP_SWITCH_INPUT_REGISTER2 to get
@@ -157,13 +163,13 @@ static u8 get_gpmc0_type(void)
 	if (!fpga_map_addr)
 		return -ENOMEM;
 
-	if (!(readw_relaxed(fpga_map_addr + REG_FPGA_REV)))
+	if (!(__raw_readw(fpga_map_addr + REG_FPGA_REV)))
 		/* we dont have an DEBUG FPGA??? */
 		/* Depend on #defines!! default to strata boot return param */
 		goto unmap;
 
 	/* S8-DIP-OFF = 1, S8-DIP-ON = 0 */
-	cs = readw_relaxed(fpga_map_addr + REG_FPGA_DIP_SWITCH_INPUT2) & 0xf;
+	cs = __raw_readw(fpga_map_addr + REG_FPGA_DIP_SWITCH_INPUT2) & 0xf;
 
 	/* ES2.0 SDP's onwards 4 dip switches are provided for CS */
 	if (omap_rev() >= OMAP3430_REV_ES1_0)
@@ -217,7 +223,7 @@ void __init board_flash_init(struct flash_partitions partition_info[],
 			if (onenandcs > GPMC_CS_NUM)
 				onenandcs = cs;
 			break;
-		}
+		};
 		cs++;
 	}
 
@@ -237,6 +243,5 @@ void __init board_flash_init(struct flash_partitions partition_info[],
 		pr_err("NAND: Unable to find configuration in GPMC\n");
 	else
 		board_nand_init(partition_info[2].parts,
-			partition_info[2].nr_parts, nandcs,
-			nand_type, nand_default_timings);
+			partition_info[2].nr_parts, nandcs, nand_type);
 }

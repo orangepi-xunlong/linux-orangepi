@@ -34,6 +34,8 @@
  */
 #define NR_PRIORITY_IRQS 16
 
+#define NR_IRQS_LEGACY	NR_PRIORITY_IRQS
+
 /* Total number of virq in the platform */
 #define NR_IRQS		256
 

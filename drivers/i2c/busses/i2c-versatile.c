@@ -16,6 +16,7 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/io.h>
+#include <linux/of_i2c.h>
 
 #define I2C_CONTROL	0x00
 #define I2C_CONTROLS	0x00
@@ -70,14 +71,28 @@ static int i2c_versatile_probe(struct platform_device *dev)
 	struct resource *r;
 	int ret;
 
-	i2c = devm_kzalloc(&dev->dev, sizeof(struct i2c_versatile), GFP_KERNEL);
-	if (!i2c)
-		return -ENOMEM;
-
 	r = platform_get_resource(dev, IORESOURCE_MEM, 0);
-	i2c->base = devm_ioremap_resource(&dev->dev, r);
-	if (IS_ERR(i2c->base))
-		return PTR_ERR(i2c->base);
+	if (!r) {
+		ret = -EINVAL;
+		goto err_out;
+	}
+
+	if (!request_mem_region(r->start, resource_size(r), "versatile-i2c")) {
+		ret = -EBUSY;
+		goto err_out;
+	}
+
+	i2c = kzalloc(sizeof(struct i2c_versatile), GFP_KERNEL);
+	if (!i2c) {
+		ret = -ENOMEM;
+		goto err_release;
+	}
+
+	i2c->base = ioremap(r->start, resource_size(r));
+	if (!i2c->base) {
+		ret = -ENOMEM;
+		goto err_free;
+	}
 
 	writel(SCL | SDA, i2c->base + I2C_CONTROLS);
 
@@ -89,19 +104,33 @@ static int i2c_versatile_probe(struct platform_device *dev)
 	i2c->algo = i2c_versatile_algo;
 	i2c->algo.data = i2c;
 
-	i2c->adap.nr = dev->id;
-	ret = i2c_bit_add_numbered_bus(&i2c->adap);
-	if (ret < 0)
-		return ret;
+	if (dev->id >= 0) {
+		/* static bus numbering */
+		i2c->adap.nr = dev->id;
+		ret = i2c_bit_add_numbered_bus(&i2c->adap);
+	} else
+		/* dynamic bus numbering */
+		ret = i2c_bit_add_bus(&i2c->adap);
+	if (ret >= 0) {
+		platform_set_drvdata(dev, i2c);
+		of_i2c_register_devices(&i2c->adap);
+		return 0;
+	}
 
-	platform_set_drvdata(dev, i2c);
-
-	return 0;
+	iounmap(i2c->base);
+ err_free:
+	kfree(i2c);
+ err_release:
+	release_mem_region(r->start, resource_size(r));
+ err_out:
+	return ret;
 }
 
 static int i2c_versatile_remove(struct platform_device *dev)
 {
 	struct i2c_versatile *i2c = platform_get_drvdata(dev);
+
+	platform_set_drvdata(dev, NULL);
 
 	i2c_del_adapter(&i2c->adap);
 	return 0;
@@ -118,6 +147,7 @@ static struct platform_driver i2c_versatile_driver = {
 	.remove		= i2c_versatile_remove,
 	.driver		= {
 		.name	= "versatile-i2c",
+		.owner	= THIS_MODULE,
 		.of_match_table = i2c_versatile_match,
 	},
 };

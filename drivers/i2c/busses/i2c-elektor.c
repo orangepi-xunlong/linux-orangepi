@@ -12,7 +12,11 @@
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.			     */
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.		     */
 /* ------------------------------------------------------------------------- */
 
 /* With some changes from Kyösti Mälkki <kmalkki@cc.hut.fi> and even
@@ -201,7 +205,7 @@ static struct i2c_adapter pcf_isa_ops = {
 	.name		= "i2c-elektor",
 };
 
-static int elektor_match(struct device *dev, unsigned int id)
+static int __devinit elektor_match(struct device *dev, unsigned int id)
 {
 #ifdef __alpha__
 	/* check to see we have memory mapped PCF8584 connected to the
@@ -260,7 +264,7 @@ static int elektor_match(struct device *dev, unsigned int id)
 	return 1;
 }
 
-static int elektor_probe(struct device *dev, unsigned int id)
+static int __devinit elektor_probe(struct device *dev, unsigned int id)
 {
 	init_waitqueue_head(&pcf_wait);
 	if (pcf_isa_init())
@@ -289,7 +293,7 @@ static int elektor_probe(struct device *dev, unsigned int id)
 	return -ENODEV;
 }
 
-static int elektor_remove(struct device *dev, unsigned int id)
+static int __devexit elektor_remove(struct device *dev, unsigned int id)
 {
 	i2c_del_adapter(&pcf_isa_ops);
 
@@ -312,12 +316,22 @@ static int elektor_remove(struct device *dev, unsigned int id)
 static struct isa_driver i2c_elektor_driver = {
 	.match		= elektor_match,
 	.probe		= elektor_probe,
-	.remove		= elektor_remove,
+	.remove		= __devexit_p(elektor_remove),
 	.driver = {
 		.owner	= THIS_MODULE,
 		.name	= "i2c-elektor",
 	},
 };
+
+static int __init i2c_pcfisa_init(void)
+{
+	return isa_register_driver(&i2c_elektor_driver, 1);
+}
+
+static void __exit i2c_pcfisa_exit(void)
+{
+	isa_unregister_driver(&i2c_elektor_driver);
+}
 
 MODULE_AUTHOR("Hans Berglund <hb@spacetec.no>");
 MODULE_DESCRIPTION("I2C-Bus adapter routines for PCF8584 ISA bus adapter");
@@ -328,4 +342,6 @@ module_param(irq, int, 0);
 module_param(clock, int, 0);
 module_param(own, int, 0);
 module_param(mmapped, int, 0);
-module_isa_driver(i2c_elektor_driver, 1);
+
+module_init(i2c_pcfisa_init);
+module_exit(i2c_pcfisa_exit);

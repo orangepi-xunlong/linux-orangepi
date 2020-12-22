@@ -1,8 +1,9 @@
 #ifndef _SH_SETUP_H
 #define _SH_SETUP_H
 
-#include <uapi/asm/setup.h>
+#include <asm-generic/setup.h>
 
+#ifdef __KERNEL__
 /*
  * This is set up by the setup-routine at boot-time
  */
@@ -20,5 +21,7 @@
 void sh_mv_setup(void);
 void check_for_initrd(void);
 void per_cpu_trap_init(void);
+
+#endif /* __KERNEL__ */
 
 #endif /* _SH_SETUP_H */

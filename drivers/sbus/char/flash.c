@@ -9,6 +9,7 @@
 #include <linux/miscdevice.h>
 #include <linux/fcntl.h>
 #include <linux/poll.h>
+#include <linux/init.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/mm.h>
@@ -158,7 +159,7 @@ static const struct file_operations flash_fops = {
 
 static struct miscdevice flash_dev = { FLASH_MINOR, "flash", &flash_fops };
 
-static int flash_probe(struct platform_device *op)
+static int __devinit flash_probe(struct platform_device *op)
 {
 	struct device_node *dp = op->dev.of_node;
 	struct device_node *parent;
@@ -189,7 +190,7 @@ static int flash_probe(struct platform_device *op)
 	return misc_register(&flash_dev);
 }
 
-static int flash_remove(struct platform_device *op)
+static int __devexit flash_remove(struct platform_device *op)
 {
 	misc_deregister(&flash_dev);
 
@@ -207,10 +208,11 @@ MODULE_DEVICE_TABLE(of, flash_match);
 static struct platform_driver flash_driver = {
 	.driver = {
 		.name = "flash",
+		.owner = THIS_MODULE,
 		.of_match_table = flash_match,
 	},
 	.probe		= flash_probe,
-	.remove		= flash_remove,
+	.remove		= __devexit_p(flash_remove),
 };
 
 module_platform_driver(flash_driver);

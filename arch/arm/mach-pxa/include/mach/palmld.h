@@ -13,8 +13,6 @@
 #ifndef _INCLUDE_PALMLD_H_
 #define _INCLUDE_PALMLD_H_
 
-#include "irqs.h" /* PXA_GPIO_TO_IRQ */
-
 /** HERE ARE GPIOs **/
 
 /* GPIOs */

@@ -97,7 +97,8 @@ static ssize_t store_uframe_periodic_max(struct device *dev,
 {
 	struct ehci_hcd		*ehci;
 	unsigned		uframe_periodic_max;
-	unsigned		uframe;
+	unsigned		frame, uframe;
+	unsigned short		allocated_max;
 	unsigned long		flags;
 	ssize_t			ret;
 
@@ -121,18 +122,20 @@ static ssize_t store_uframe_periodic_max(struct device *dev,
 
 	/*
 	 * for request to decrease max periodic bandwidth, we have to check
-	 * to see whether the decrease is possible.
+	 * every microframe in the schedule to see whether the decrease is
+	 * possible.
 	 */
 	if (uframe_periodic_max < ehci->uframe_periodic_max) {
-		u8		allocated_max = 0;
+		allocated_max = 0;
 
-		for (uframe = 0; uframe < EHCI_BANDWIDTH_SIZE; ++uframe)
-			allocated_max = max(allocated_max,
-					ehci->bandwidth[uframe]);
+		for (frame = 0; frame < ehci->periodic_size; ++frame)
+			for (uframe = 0; uframe < 7; ++uframe)
+				allocated_max = max(allocated_max,
+						    periodic_usecs (ehci, frame, uframe));
 
 		if (allocated_max > uframe_periodic_max) {
 			ehci_info(ehci,
-				"cannot decrease uframe_periodic_max because "
+				"cannot decrease uframe_periodic_max becase "
 				"periodic bandwidth is already allocated "
 				"(%u > %u)\n",
 				allocated_max, uframe_periodic_max);

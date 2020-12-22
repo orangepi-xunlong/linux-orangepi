@@ -30,6 +30,7 @@ EXPORT_SYMBOL(ip_fast_csum);
 EXPORT_SYMBOL(local_irq_count);
 EXPORT_SYMBOL(local_bh_count);
 #endif
+EXPORT_SYMBOL(kernel_thread);
 
 EXPORT_SYMBOL(__res_bus_clock_speed_HZ);
 EXPORT_SYMBOL(__page_offset);
@@ -58,6 +59,11 @@ EXPORT_SYMBOL(__outsl_ns);
 EXPORT_SYMBOL(__insl_ns);
 
 #ifdef CONFIG_FRV_OUTOFLINE_ATOMIC_OPS
+EXPORT_SYMBOL(atomic_test_and_ANDNOT_mask);
+EXPORT_SYMBOL(atomic_test_and_OR_mask);
+EXPORT_SYMBOL(atomic_test_and_XOR_mask);
+EXPORT_SYMBOL(atomic_add_return);
+EXPORT_SYMBOL(atomic_sub_return);
 EXPORT_SYMBOL(__xchg_32);
 EXPORT_SYMBOL(__cmpxchg_32);
 #endif

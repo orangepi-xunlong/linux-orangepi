@@ -685,7 +685,7 @@ static int pci_conf2(void)
 	return 0;
 }
 
-static const struct ide_port_info cmd640_port_info __initconst = {
+static const struct ide_port_info cmd640_port_info __initdata = {
 	.chipset		= ide_cmd640,
 	.host_flags		= IDE_HFLAG_SERIALIZE |
 				  IDE_HFLAG_NO_DMA |
@@ -695,7 +695,7 @@ static const struct ide_port_info cmd640_port_info __initconst = {
 	.pio_mask		= ATA_PIO5,
 };
 
-static int __init cmd640x_init_one(unsigned long base, unsigned long ctl)
+static int cmd640x_init_one(unsigned long base, unsigned long ctl)
 {
 	if (!request_region(base, 8, DRV_NAME)) {
 		printk(KERN_ERR "%s: I/O resource 0x%lX-0x%lX not free.\n",

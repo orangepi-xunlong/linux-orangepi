@@ -31,6 +31,10 @@
  *
  */
 
+#if defined(CONFIG_SOC_OMAP2430) || defined(CONFIG_SOC_OMAP3430)
+#include "omap2430.h"
+#endif
+
 #ifndef CONFIG_BLACKFIN
 
 #define MUSB_HSDMA_BASE		0x200
@@ -157,5 +161,5 @@ struct musb_dma_controller {
 	void __iomem			*base;
 	u8				channel_count;
 	u8				used_channels;
-	int				irq;
+	u8				irq;
 };

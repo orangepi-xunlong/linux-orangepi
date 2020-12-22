@@ -19,33 +19,39 @@ ifeq ($(CONFIG_SPARC32),y)
 # sparc32
 #
 
-CHECKFLAGS     += -D__sparc__
+#
+# Uncomment the first KBUILD_CFLAGS if you are doing kgdb source level
+# debugging of the kernel to get the proper debugging information.
+
+AS             := $(AS) -32
 LDFLAGS        := -m elf32_sparc
+CHECKFLAGS     += -D__sparc__
 export BITS    := 32
 UTS_MACHINE    := sparc
 
-# We are adding -Wa,-Av8 to KBUILD_CFLAGS to deal with a specs bug in some
-# versions of gcc.  Some gcc versions won't pass -Av8 to binutils when you
-# give -mcpu=v8.  This silently worked with older bintutils versions but
-# does not any more.
-KBUILD_CFLAGS  += -m32 -mcpu=v8 -pipe -mno-fpu -fcall-used-g5 -fcall-used-g7
-KBUILD_CFLAGS  += -Wa,-Av8
+#KBUILD_CFLAGS += -g -pipe -fcall-used-g5 -fcall-used-g7
+KBUILD_CFLAGS += -m32 -pipe -mno-fpu -fcall-used-g5 -fcall-used-g7
+KBUILD_AFLAGS += -m32 -Wa,-Av8
 
-KBUILD_AFLAGS  += -m32 -Wa,-Av8
+#LDFLAGS_vmlinux = -N -Ttext 0xf0004000
+#  Since 2.5.40, the first stage is left not btfix-ed.
+#  Actual linking is done with "make image".
+LDFLAGS_vmlinux = -r
 
 else
 #####
 # sparc64
 #
 
-CHECKFLAGS    += -D__sparc__ -D__sparc_v9__ -D__arch64__ -m64
-LDFLAGS       := -m elf64_sparc
-export BITS   := 64
-UTS_MACHINE   := sparc64
+CHECKFLAGS      += -D__sparc__ -D__sparc_v9__ -D__arch64__ -m64
 
-KBUILD_CFLAGS += -m64 -pipe -mno-fpu -mcpu=ultrasparc -mcmodel=medlow
-KBUILD_CFLAGS += -ffixed-g4 -ffixed-g5 -fcall-used-g7 -Wno-sign-compare
-KBUILD_CFLAGS += -Wa,--undeclared-regs
+LDFLAGS              := -m elf64_sparc
+export BITS          := 64
+UTS_MACHINE          := sparc64
+
+KBUILD_CFLAGS += -m64 -pipe -mno-fpu -mcpu=ultrasparc -mcmodel=medlow   \
+                 -ffixed-g4 -ffixed-g5 -fcall-used-g7 -Wno-sign-compare \
+                 -Wa,--undeclared-regs
 KBUILD_CFLAGS += $(call cc-option,-mtune=ultrasparc3)
 KBUILD_AFLAGS += -m64 -mcpu=ultrasparc -Wa,--undeclared-regs
 
@@ -56,15 +62,26 @@ endif
 endif
 
 head-y                 := arch/sparc/kernel/head_$(BITS).o
+head-y                 += arch/sparc/kernel/init_task.o
 
-# See arch/sparc/Kbuild for the core part of the kernel
-core-y                 += arch/sparc/
+core-y                 += arch/sparc/kernel/
+core-y                 += arch/sparc/mm/ arch/sparc/math-emu/
 
 libs-y                 += arch/sparc/prom/
 libs-y                 += arch/sparc/lib/
 
-drivers-$(CONFIG_PM) += arch/sparc/power/
 drivers-$(CONFIG_OPROFILE)	+= arch/sparc/oprofile/
+
+# Export what is needed by arch/sparc/boot/Makefile
+export VMLINUX_INIT VMLINUX_MAIN
+VMLINUX_INIT := $(head-y) $(init-y)
+VMLINUX_MAIN := $(core-y) kernel/ mm/ fs/ ipc/ security/ crypto/ block/
+VMLINUX_MAIN += $(patsubst %/, %/lib.a, $(libs-y)) $(libs-y)
+VMLINUX_MAIN += $(drivers-y) $(net-y)
+
+ifdef CONFIG_KALLSYMS
+export kallsyms.o := .tmp_kallsyms2.o
+endif
 
 boot := arch/sparc/boot
 
@@ -73,9 +90,6 @@ all: zImage
 
 image zImage uImage tftpboot.img vmlinux.aout: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
-
-install:
-	$(Q)$(MAKE) $(build)=$(boot) $@
 
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)

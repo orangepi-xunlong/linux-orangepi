@@ -1,6 +1,6 @@
 menu "Device Drivers"
 
-source "drivers/amba/Kconfig"
+source "drivers/arisc/Kconfig"
 
 source "drivers/base/Kconfig"
 
@@ -17,8 +17,6 @@ source "drivers/parport/Kconfig"
 source "drivers/pnp/Kconfig"
 
 source "drivers/block/Kconfig"
-
-source "drivers/nvme/Kconfig"
 
 # misc before ide - BLK_DEV_SGIIOC4 depends on SGI_IOC4
 
@@ -38,13 +36,13 @@ source "drivers/message/fusion/Kconfig"
 
 source "drivers/firewire/Kconfig"
 
+source "drivers/message/i2o/Kconfig"
+
 source "drivers/macintosh/Kconfig"
 
 source "drivers/net/Kconfig"
 
 source "drivers/isdn/Kconfig"
-
-source "drivers/lightnvm/Kconfig"
 
 # input before char - char/joystick depends on it. As does USB.
 
@@ -55,8 +53,6 @@ source "drivers/char/Kconfig"
 source "drivers/i2c/Kconfig"
 
 source "drivers/spi/Kconfig"
-
-source "drivers/spmi/Kconfig"
 
 source "drivers/hsi/Kconfig"
 
@@ -86,6 +82,8 @@ source "drivers/mfd/Kconfig"
 
 source "drivers/regulator/Kconfig"
 
+source "drivers/pwm/Kconfig"
+
 source "drivers/media/Kconfig"
 
 source "drivers/video/Kconfig"
@@ -104,6 +102,8 @@ source "drivers/memstick/Kconfig"
 
 source "drivers/leds/Kconfig"
 
+source "drivers/switch/Kconfig"
+
 source "drivers/accessibility/Kconfig"
 
 source "drivers/infiniband/Kconfig"
@@ -114,19 +114,13 @@ source "drivers/rtc/Kconfig"
 
 source "drivers/dma/Kconfig"
 
-source "drivers/dma-buf/Kconfig"
-
 source "drivers/dca/Kconfig"
 
 source "drivers/auxdisplay/Kconfig"
 
 source "drivers/uio/Kconfig"
 
-source "drivers/vfio/Kconfig"
-
 source "drivers/vlynq/Kconfig"
-
-source "drivers/virt/Kconfig"
 
 source "drivers/virtio/Kconfig"
 
@@ -144,68 +138,15 @@ source "drivers/hwspinlock/Kconfig"
 
 source "drivers/clocksource/Kconfig"
 
-source "drivers/mailbox/Kconfig"
-
 source "drivers/iommu/Kconfig"
 
 source "drivers/remoteproc/Kconfig"
 
 source "drivers/rpmsg/Kconfig"
 
-source "drivers/soc/Kconfig"
+source "drivers/virt/Kconfig"
 
 source "drivers/devfreq/Kconfig"
 
-source "drivers/extcon/Kconfig"
-
-source "drivers/memory/Kconfig"
-
-source "drivers/iio/Kconfig"
-
-source "drivers/ntb/Kconfig"
-
-source "drivers/vme/Kconfig"
-
-source "drivers/pwm/Kconfig"
-
-source "drivers/irqchip/Kconfig"
-
-source "drivers/ipack/Kconfig"
-
-source "drivers/reset/Kconfig"
-
-source "drivers/fmc/Kconfig"
-
-source "drivers/phy/Kconfig"
-
-source "drivers/powercap/Kconfig"
-
-source "drivers/mcb/Kconfig"
-
-source "drivers/perf/Kconfig"
-
-source "drivers/ras/Kconfig"
-
-source "drivers/thunderbolt/Kconfig"
-
-source "drivers/android/Kconfig"
-
-source "drivers/nvdimm/Kconfig"
-
-source "drivers/dax/Kconfig"
-
-source "drivers/nvmem/Kconfig"
-
-source "drivers/hwtracing/stm/Kconfig"
-
-source "drivers/hwtracing/intel_th/Kconfig"
-
-source "drivers/fpga/Kconfig"
-
-source "drivers/mpp/Kconfig"
-
-source "drivers/tee/Kconfig"
-
 source "drivers/gator/Kconfig"
-
 endmenu

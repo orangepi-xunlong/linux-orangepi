@@ -1,8 +1,10 @@
 /*
+ *  drivers/mtd/nand_bbt.c
+ *
  *  Overview:
  *   Bad block table support for the NAND driver
  *
- *  Copyright © 2004 Thomas Gleixner (tglx@linutronix.de)
+ *  Copyright (C) 2004 Thomas Gleixner (tglx@linutronix.de)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -20,7 +22,7 @@
  * BBT on flash. If a BBT is found then the contents are read and the memory
  * based BBT is created. If a mirrored BBT is selected then the mirror is
  * searched too and the versions are compared. If the mirror has a greater
- * version number, then the mirror BBT is used to build the memory based BBT.
+ * version number than the mirror BBT is used to build the memory based BBT.
  * If the tables are not versioned, then we "or" the bad block information.
  * If one of the BBTs is out of date or does not exist it is (re)created.
  * If no BBT exists at all then the device is scanned for factory marked
@@ -60,43 +62,21 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/bbm.h>
 #include <linux/mtd/nand.h>
+#include <linux/mtd/nand_ecc.h>
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/vmalloc.h>
 #include <linux/export.h>
-#include <linux/string.h>
-
-#define BBT_BLOCK_GOOD		0x00
-#define BBT_BLOCK_WORN		0x01
-#define BBT_BLOCK_RESERVED	0x02
-#define BBT_BLOCK_FACTORY_BAD	0x03
-
-#define BBT_ENTRY_MASK		0x03
-#define BBT_ENTRY_SHIFT		2
-
-static int nand_update_bbt(struct mtd_info *mtd, loff_t offs);
-
-static inline uint8_t bbt_get_entry(struct nand_chip *chip, int block)
-{
-	uint8_t entry = chip->bbt[block >> BBT_ENTRY_SHIFT];
-	entry >>= (block & BBT_ENTRY_MASK) * 2;
-	return entry & BBT_ENTRY_MASK;
-}
-
-static inline void bbt_mark_entry(struct nand_chip *chip, int block,
-		uint8_t mark)
-{
-	uint8_t msk = (mark & BBT_ENTRY_MASK) << ((block & BBT_ENTRY_MASK) * 2);
-	chip->bbt[block >> BBT_ENTRY_SHIFT] |= msk;
-}
 
 static int check_pattern_no_oob(uint8_t *buf, struct nand_bbt_descr *td)
 {
-	if (memcmp(buf, td->pattern, td->len))
-		return -1;
-	return 0;
+	int ret;
+
+	ret = memcmp(buf, td->pattern, td->len);
+	if (!ret)
+		return ret;
+	return -1;
 }
 
 /**
@@ -107,17 +87,38 @@ static int check_pattern_no_oob(uint8_t *buf, struct nand_bbt_descr *td)
  * @td: search pattern descriptor
  *
  * Check for a pattern at the given place. Used to search bad block tables and
- * good / bad block identifiers.
+ * good / bad block identifiers. If the SCAN_EMPTY option is set then check, if
+ * all bytes except the pattern area contain 0xff.
  */
 static int check_pattern(uint8_t *buf, int len, int paglen, struct nand_bbt_descr *td)
 {
+	int i, end = 0;
+	uint8_t *p = buf;
+
 	if (td->options & NAND_BBT_NO_OOB)
 		return check_pattern_no_oob(buf, td);
 
+	end = paglen + td->offs;
+	if (td->options & NAND_BBT_SCANEMPTY) {
+		for (i = 0; i < end; i++) {
+			if (p[i] != 0xff)
+				return -1;
+		}
+	}
+	p += end;
+
 	/* Compare the pattern */
-	if (memcmp(buf + paglen + td->offs, td->pattern, td->len))
+	if (memcmp(p, td->pattern, td->len))
 		return -1;
 
+	if (td->options & NAND_BBT_SCANEMPTY) {
+		p += td->len;
+		end += td->len;
+		for (i = end; i < len; i++) {
+			if (*p++ != 0xff)
+				return -1;
+		}
+	}
 	return 0;
 }
 
@@ -132,9 +133,14 @@ static int check_pattern(uint8_t *buf, int len, int paglen, struct nand_bbt_desc
  */
 static int check_short_pattern(uint8_t *buf, struct nand_bbt_descr *td)
 {
+	int i;
+	uint8_t *p = buf;
+
 	/* Compare the pattern */
-	if (memcmp(buf + td->offs, td->pattern, td->len))
-		return -1;
+	for (i = 0; i < td->len; i++) {
+		if (p[td->offs + i] != td->pattern[i])
+			return -1;
+	}
 	return 0;
 }
 
@@ -164,7 +170,7 @@ static u32 add_marker_len(struct nand_bbt_descr *td)
  * @page: the starting page
  * @num: the number of bbt descriptors to read
  * @td: the bbt describtion table
- * @offs: block number offset in the table
+ * @offs: offset in the memory table
  *
  * Read the bad block table starting from page.
  */
@@ -172,7 +178,7 @@ static int read_bbt(struct mtd_info *mtd, uint8_t *buf, int page, int num,
 		struct nand_bbt_descr *td, int offs)
 {
 	int res, ret = 0, i, j, act = 0;
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	size_t retlen, len, totlen;
 	loff_t from;
 	int bits = td->options & NAND_BBT_NRBITS_MSK;
@@ -198,12 +204,12 @@ static int read_bbt(struct mtd_info *mtd, uint8_t *buf, int page, int num,
 		res = mtd_read(mtd, from, len, &retlen, buf);
 		if (res < 0) {
 			if (mtd_is_eccerr(res)) {
-				pr_info("nand_bbt: ECC error in BBT at 0x%012llx\n",
-					from & ~mtd->writesize);
+				pr_info("nand_bbt: ECC error in BBT at "
+					"0x%012llx\n", from & ~mtd->writesize);
 				return res;
 			} else if (mtd_is_bitflip(res)) {
-				pr_info("nand_bbt: corrected error in BBT at 0x%012llx\n",
-					from & ~mtd->writesize);
+				pr_info("nand_bbt: corrected error in BBT at "
+					"0x%012llx\n", from & ~mtd->writesize);
 				ret = res;
 			} else {
 				pr_info("nand_bbt: error reading BBT\n");
@@ -214,16 +220,14 @@ static int read_bbt(struct mtd_info *mtd, uint8_t *buf, int page, int num,
 		/* Analyse data */
 		for (i = 0; i < len; i++) {
 			uint8_t dat = buf[i];
-			for (j = 0; j < 8; j += bits, act++) {
+			for (j = 0; j < 8; j += bits, act += 2) {
 				uint8_t tmp = (dat >> j) & msk;
 				if (tmp == msk)
 					continue;
 				if (reserved_block_code && (tmp == reserved_block_code)) {
 					pr_info("nand_read_bbt: reserved block at 0x%012llx\n",
-						 (loff_t)(offs + act) <<
-						 this->bbt_erase_shift);
-					bbt_mark_entry(this, offs + act,
-							BBT_BLOCK_RESERVED);
+						 (loff_t)((offs << 2) + (act >> 1)) << this->bbt_erase_shift);
+					this->bbt[offs + (act >> 3)] |= 0x2 << (act & 0x06);
 					mtd->ecc_stats.bbtblocks++;
 					continue;
 				}
@@ -232,15 +236,12 @@ static int read_bbt(struct mtd_info *mtd, uint8_t *buf, int page, int num,
 				 * move this message to pr_debug.
 				 */
 				pr_info("nand_read_bbt: bad block at 0x%012llx\n",
-					 (loff_t)(offs + act) <<
-					 this->bbt_erase_shift);
+					 (loff_t)((offs << 2) + (act >> 1)) << this->bbt_erase_shift);
 				/* Factory marked bad or worn out? */
 				if (tmp == 0)
-					bbt_mark_entry(this, offs + act,
-							BBT_BLOCK_FACTORY_BAD);
+					this->bbt[offs + (act >> 3)] |= 0x3 << (act & 0x06);
 				else
-					bbt_mark_entry(this, offs + act,
-							BBT_BLOCK_WORN);
+					this->bbt[offs + (act >> 3)] |= 0x1 << (act & 0x06);
 				mtd->ecc_stats.badblocks++;
 			}
 		}
@@ -263,7 +264,7 @@ static int read_bbt(struct mtd_info *mtd, uint8_t *buf, int page, int num,
  */
 static int read_abs_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr *td, int chip)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	int res = 0, i;
 
 	if (td->options & NAND_BBT_PERCHIP) {
@@ -275,7 +276,7 @@ static int read_abs_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_desc
 					td, offs);
 			if (res)
 				return res;
-			offs += this->chipsize >> this->bbt_erase_shift;
+			offs += this->chipsize >> (this->bbt_erase_shift + 2);
 		}
 	} else {
 		res = read_bbt(mtd, buf, td->pages[0],
@@ -287,7 +288,7 @@ static int read_abs_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_desc
 }
 
 /* BBT marker is in the first page, no OOB */
-static int scan_read_data(struct mtd_info *mtd, uint8_t *buf, loff_t offs,
+static int scan_read_raw_data(struct mtd_info *mtd, uint8_t *buf, loff_t offs,
 			 struct nand_bbt_descr *td)
 {
 	size_t retlen;
@@ -300,24 +301,14 @@ static int scan_read_data(struct mtd_info *mtd, uint8_t *buf, loff_t offs,
 	return mtd_read(mtd, offs, len, &retlen, buf);
 }
 
-/**
- * scan_read_oob - [GENERIC] Scan data+OOB region to buffer
- * @mtd: MTD device structure
- * @buf: temporary buffer
- * @offs: offset at which to scan
- * @len: length of data region to read
- *
- * Scan read data from data+OOB. May traverse multiple pages, interleaving
- * page,OOB,page,OOB,... in buf. Completes transfer and returns the "strongest"
- * ECC condition (error or bitflip). May quit on the first (non-ECC) error.
- */
-static int scan_read_oob(struct mtd_info *mtd, uint8_t *buf, loff_t offs,
+/* Scan read raw data from flash */
+static int scan_read_raw_oob(struct mtd_info *mtd, uint8_t *buf, loff_t offs,
 			 size_t len)
 {
 	struct mtd_oob_ops ops;
-	int res, ret = 0;
+	int res;
 
-	ops.mode = MTD_OPS_PLACE_OOB;
+	ops.mode = MTD_OPS_RAW;
 	ops.ooboffs = 0;
 	ops.ooblen = mtd->oobsize;
 
@@ -327,27 +318,24 @@ static int scan_read_oob(struct mtd_info *mtd, uint8_t *buf, loff_t offs,
 		ops.oobbuf = buf + ops.len;
 
 		res = mtd_read_oob(mtd, offs, &ops);
-		if (res) {
-			if (!mtd_is_bitflip_or_eccerr(res))
-				return res;
-			else if (mtd_is_eccerr(res) || !ret)
-				ret = res;
-		}
+
+		if (res)
+			return res;
 
 		buf += mtd->oobsize + mtd->writesize;
 		len -= mtd->writesize;
 		offs += mtd->writesize;
 	}
-	return ret;
+	return 0;
 }
 
-static int scan_read(struct mtd_info *mtd, uint8_t *buf, loff_t offs,
+static int scan_read_raw(struct mtd_info *mtd, uint8_t *buf, loff_t offs,
 			 size_t len, struct nand_bbt_descr *td)
 {
 	if (td->options & NAND_BBT_NO_OOB)
-		return scan_read_data(mtd, buf, offs, td);
+		return scan_read_raw_data(mtd, buf, offs, td);
 	else
-		return scan_read_oob(mtd, buf, offs, len);
+		return scan_read_raw_oob(mtd, buf, offs, len);
 }
 
 /* Scan write data with oob to flash */
@@ -385,14 +373,14 @@ static u32 bbt_get_ver_offs(struct mtd_info *mtd, struct nand_bbt_descr *td)
  * Read the bad block table(s) for all chips starting at a given page. We
  * assume that the bbt bits are in consecutive order.
  */
-static void read_abs_bbts(struct mtd_info *mtd, uint8_t *buf,
-			  struct nand_bbt_descr *td, struct nand_bbt_descr *md)
+static int read_abs_bbts(struct mtd_info *mtd, uint8_t *buf,
+			 struct nand_bbt_descr *td, struct nand_bbt_descr *md)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 
 	/* Read the primary version, if available */
 	if (td->options & NAND_BBT_VERSION) {
-		scan_read(mtd, buf, (loff_t)td->pages[0] << this->page_shift,
+		scan_read_raw(mtd, buf, (loff_t)td->pages[0] << this->page_shift,
 			      mtd->writesize, td);
 		td->version[0] = buf[bbt_get_ver_offs(mtd, td)];
 		pr_info("Bad block table at page %d, version 0x%02X\n",
@@ -401,17 +389,37 @@ static void read_abs_bbts(struct mtd_info *mtd, uint8_t *buf,
 
 	/* Read the mirror version, if available */
 	if (md && (md->options & NAND_BBT_VERSION)) {
-		scan_read(mtd, buf, (loff_t)md->pages[0] << this->page_shift,
+		scan_read_raw(mtd, buf, (loff_t)md->pages[0] << this->page_shift,
 			      mtd->writesize, md);
 		md->version[0] = buf[bbt_get_ver_offs(mtd, md)];
 		pr_info("Bad block table at page %d, version 0x%02X\n",
 			 md->pages[0], md->version[0]);
 	}
+	return 1;
+}
+
+/* Scan a given block full */
+static int scan_block_full(struct mtd_info *mtd, struct nand_bbt_descr *bd,
+			   loff_t offs, uint8_t *buf, size_t readlen,
+			   int scanlen, int len)
+{
+	int ret, j;
+
+	ret = scan_read_raw_oob(mtd, buf, offs, readlen);
+	/* Ignore ECC errors when checking for BBM */
+	if (ret && !mtd_is_bitflip_or_eccerr(ret))
+		return ret;
+
+	for (j = 0; j < len; j++, buf += scanlen) {
+		if (check_pattern(buf, scanlen, mtd->writesize, bd))
+			return 1;
+	}
+	return 0;
 }
 
 /* Scan a given block partially */
 static int scan_block_fast(struct mtd_info *mtd, struct nand_bbt_descr *bd,
-			   loff_t offs, uint8_t *buf, int numpages)
+			   loff_t offs, uint8_t *buf, int len)
 {
 	struct mtd_oob_ops ops;
 	int j, ret;
@@ -422,7 +430,7 @@ static int scan_block_fast(struct mtd_info *mtd, struct nand_bbt_descr *bd,
 	ops.datbuf = NULL;
 	ops.mode = MTD_OPS_PLACE_OOB;
 
-	for (j = 0; j < numpages; j++) {
+	for (j = 0; j < len; j++) {
 		/*
 		 * Read the full oob until read_oob is fixed to handle single
 		 * byte reads for 16 bit buswidth.
@@ -454,20 +462,37 @@ static int scan_block_fast(struct mtd_info *mtd, struct nand_bbt_descr *bd,
 static int create_bbt(struct mtd_info *mtd, uint8_t *buf,
 	struct nand_bbt_descr *bd, int chip)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
-	int i, numblocks, numpages;
+	struct nand_chip *this = mtd->priv;
+	int i, numblocks, len, scanlen;
 	int startblock;
 	loff_t from;
+	size_t readlen;
 
 	pr_info("Scanning device for bad blocks\n");
 
-	if (bd->options & NAND_BBT_SCAN2NDPAGE)
-		numpages = 2;
+	if (bd->options & NAND_BBT_SCANALLPAGES)
+		len = 1 << (this->bbt_erase_shift - this->page_shift);
+	else if (bd->options & NAND_BBT_SCAN2NDPAGE)
+		len = 2;
 	else
-		numpages = 1;
+		len = 1;
+
+	if (!(bd->options & NAND_BBT_SCANEMPTY)) {
+		/* We need only read few bytes from the OOB area */
+		scanlen = 0;
+		readlen = bd->len;
+	} else {
+		/* Full page content should be read */
+		scanlen = mtd->writesize + mtd->oobsize;
+		readlen = len * mtd->writesize;
+	}
 
 	if (chip == -1) {
-		numblocks = mtd->size >> this->bbt_erase_shift;
+		/*
+		 * Note that numblocks is 2 * (real numblocks) here, see i+=2
+		 * below as it makes shifting and masking less painful
+		 */
+		numblocks = mtd->size >> (this->bbt_erase_shift - 1);
 		startblock = 0;
 		from = 0;
 	} else {
@@ -476,31 +501,37 @@ static int create_bbt(struct mtd_info *mtd, uint8_t *buf,
 			       chip + 1, this->numchips);
 			return -EINVAL;
 		}
-		numblocks = this->chipsize >> this->bbt_erase_shift;
+		numblocks = this->chipsize >> (this->bbt_erase_shift - 1);
 		startblock = chip * numblocks;
 		numblocks += startblock;
-		from = (loff_t)startblock << this->bbt_erase_shift;
+		from = (loff_t)startblock << (this->bbt_erase_shift - 1);
 	}
 
 	if (this->bbt_options & NAND_BBT_SCANLASTPAGE)
-		from += mtd->erasesize - (mtd->writesize * numpages);
+		from += mtd->erasesize - (mtd->writesize * len);
 
-	for (i = startblock; i < numblocks; i++) {
+	for (i = startblock; i < numblocks;) {
 		int ret;
 
 		BUG_ON(bd->options & NAND_BBT_NO_OOB);
 
-		ret = scan_block_fast(mtd, bd, from, buf, numpages);
+		if (bd->options & NAND_BBT_SCANALLPAGES)
+			ret = scan_block_full(mtd, bd, from, buf, readlen,
+					      scanlen, len);
+		else
+			ret = scan_block_fast(mtd, bd, from, buf, len);
+
 		if (ret < 0)
 			return ret;
 
 		if (ret) {
-			bbt_mark_entry(this, i, BBT_BLOCK_FACTORY_BAD);
+			this->bbt[i >> 3] |= 0x03 << (i & 0x6);
 			pr_warn("Bad eraseblock %d at 0x%012llx\n",
-				i, (unsigned long long)from);
+				i >> 1, (unsigned long long)from);
 			mtd->ecc_stats.badblocks++;
 		}
 
+		i += 2;
 		from += (1 << this->bbt_erase_shift);
 	}
 	return 0;
@@ -523,9 +554,9 @@ static int create_bbt(struct mtd_info *mtd, uint8_t *buf,
  */
 static int search_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr *td)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	int i, chips;
-	int startblock, block, dir;
+	int bits, startblock, block, dir;
 	int scanlen = mtd->writesize + mtd->oobsize;
 	int bbtblocks;
 	int blocktopage = this->bbt_erase_shift - this->page_shift;
@@ -549,6 +580,9 @@ static int search_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
 		bbtblocks = mtd->size >> this->bbt_erase_shift;
 	}
 
+	/* Number of bits for each erase block in the bbt */
+	bits = td->options & NAND_BBT_NRBITS_MSK;
+
 	for (i = 0; i < chips; i++) {
 		/* Reset version information */
 		td->version[i] = 0;
@@ -560,7 +594,7 @@ static int search_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
 			loff_t offs = (loff_t)actblock << this->bbt_erase_shift;
 
 			/* Read first page */
-			scan_read(mtd, buf, offs, mtd->writesize, td);
+			scan_read_raw(mtd, buf, offs, mtd->writesize, td);
 			if (!check_pattern(buf, scanlen, mtd->writesize, td)) {
 				td->pages[i] = actblock << blocktopage;
 				if (td->options & NAND_BBT_VERSION) {
@@ -577,8 +611,8 @@ static int search_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
 		if (td->pages[i] == -1)
 			pr_warn("Bad block table not found for chip %d\n", i);
 		else
-			pr_info("Bad block table found at page %d, version 0x%02X\n",
-				td->pages[i], td->version[i]);
+			pr_info("Bad block table found at page %d, version "
+				 "0x%02X\n", td->pages[i], td->version[i]);
 	}
 	return 0;
 }
@@ -592,9 +626,7 @@ static int search_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
  *
  * Search and read the bad block table(s).
  */
-static void search_read_bbts(struct mtd_info *mtd, uint8_t *buf,
-			     struct nand_bbt_descr *td,
-			     struct nand_bbt_descr *md)
+static int search_read_bbts(struct mtd_info *mtd, uint8_t * buf, struct nand_bbt_descr *td, struct nand_bbt_descr *md)
 {
 	/* Search the primary table */
 	search_bbt(mtd, buf, td);
@@ -602,100 +634,9 @@ static void search_read_bbts(struct mtd_info *mtd, uint8_t *buf,
 	/* Search the mirror table */
 	if (md)
 		search_bbt(mtd, buf, md);
-}
 
-/**
- * get_bbt_block - Get the first valid eraseblock suitable to store a BBT
- * @this: the NAND device
- * @td: the BBT description
- * @md: the mirror BBT descriptor
- * @chip: the CHIP selector
- *
- * This functions returns a positive block number pointing a valid eraseblock
- * suitable to store a BBT (i.e. in the range reserved for BBT), or -ENOSPC if
- * all blocks are already used of marked bad. If td->pages[chip] was already
- * pointing to a valid block we re-use it, otherwise we search for the next
- * valid one.
- */
-static int get_bbt_block(struct nand_chip *this, struct nand_bbt_descr *td,
-			 struct nand_bbt_descr *md, int chip)
-{
-	int startblock, dir, page, numblocks, i;
-
-	/*
-	 * There was already a version of the table, reuse the page. This
-	 * applies for absolute placement too, as we have the page number in
-	 * td->pages.
-	 */
-	if (td->pages[chip] != -1)
-		return td->pages[chip] >>
-				(this->bbt_erase_shift - this->page_shift);
-
-	numblocks = (int)(this->chipsize >> this->bbt_erase_shift);
-	if (!(td->options & NAND_BBT_PERCHIP))
-		numblocks *= this->numchips;
-
-	/*
-	 * Automatic placement of the bad block table. Search direction
-	 * top -> down?
-	 */
-	if (td->options & NAND_BBT_LASTBLOCK) {
-		startblock = numblocks * (chip + 1) - 1;
-		dir = -1;
-	} else {
-		startblock = chip * numblocks;
-		dir = 1;
-	}
-
-	for (i = 0; i < td->maxblocks; i++) {
-		int block = startblock + dir * i;
-
-		/* Check, if the block is bad */
-		switch (bbt_get_entry(this, block)) {
-		case BBT_BLOCK_WORN:
-		case BBT_BLOCK_FACTORY_BAD:
-			continue;
-		}
-
-		page = block << (this->bbt_erase_shift - this->page_shift);
-
-		/* Check, if the block is used by the mirror table */
-		if (!md || md->pages[chip] != page)
-			return block;
-	}
-
-	return -ENOSPC;
-}
-
-/**
- * mark_bbt_block_bad - Mark one of the block reserved for BBT bad
- * @this: the NAND device
- * @td: the BBT description
- * @chip: the CHIP selector
- * @block: the BBT block to mark
- *
- * Blocks reserved for BBT can become bad. This functions is an helper to mark
- * such blocks as bad. It takes care of updating the in-memory BBT, marking the
- * block as bad using a bad block marker and invalidating the associated
- * td->pages[] entry.
- */
-static void mark_bbt_block_bad(struct nand_chip *this,
-			       struct nand_bbt_descr *td,
-			       int chip, int block)
-{
-	struct mtd_info *mtd = nand_to_mtd(this);
-	loff_t to;
-	int res;
-
-	bbt_mark_entry(this, block, BBT_BLOCK_WORN);
-
-	to = (loff_t)block << this->bbt_erase_shift;
-	res = this->block_markbad(mtd, to);
-	if (res)
-		pr_warn("nand_bbt: error %d while marking block %d bad\n",
-			res, block);
-
-	td->pages[chip] = -1;
+	/* Force result check */
+	return 1;
 }
 
 /**
@@ -712,11 +653,11 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
 		     struct nand_bbt_descr *td, struct nand_bbt_descr *md,
 		     int chipsel)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	struct erase_info einfo;
-	int i, res, chip = 0;
-	int bits, page, offs, numblocks, sft, sftmsk;
-	int nrchips, pageoffs, ooboffs;
+	int i, j, res, chip = 0;
+	int bits, startblock, dir, page, offs, numblocks, sft, sftmsk;
+	int nrchips, bbtoffs, pageoffs, ooboffs;
 	uint8_t msk[4];
 	uint8_t rcode = td->reserved_block_code;
 	size_t retlen, len = 0;
@@ -746,21 +687,47 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
 	}
 
 	/* Loop through the chips */
-	while (chip < nrchips) {
-		int block;
-
-		block = get_bbt_block(this, td, md, chip);
-		if (block < 0) {
-			pr_err("No space left to write bad block table\n");
-			res = block;
-			goto outerr;
+	for (; chip < nrchips; chip++) {
+		/*
+		 * There was already a version of the table, reuse the page
+		 * This applies for absolute placement too, as we have the
+		 * page nr. in td->pages.
+		 */
+		if (td->pages[chip] != -1) {
+			page = td->pages[chip];
+			goto write;
 		}
 
 		/*
-		 * get_bbt_block() returns a block number, shift the value to
-		 * get a page number.
+		 * Automatic placement of the bad block table. Search direction
+		 * top -> down?
 		 */
-		page = block << (this->bbt_erase_shift - this->page_shift);
+		if (td->options & NAND_BBT_LASTBLOCK) {
+			startblock = numblocks * (chip + 1) - 1;
+			dir = -1;
+		} else {
+			startblock = chip * numblocks;
+			dir = 1;
+		}
+
+		for (i = 0; i < td->maxblocks; i++) {
+			int block = startblock + dir * i;
+			/* Check, if the block is bad */
+			switch ((this->bbt[block >> 2] >>
+				 (2 * (block & 0x03))) & 0x03) {
+			case 0x01:
+			case 0x03:
+				continue;
+			}
+			page = block <<
+				(this->bbt_erase_shift - this->page_shift);
+			/* Check, if the block is used by the mirror table */
+			if (!md || md->pages[chip] != page)
+				goto write;
+		}
+		pr_err("No space left to write bad block table\n");
+		return -ENOSPC;
+	write:
 
 		/* Set up shift count and masks for the flash table */
 		bits = td->options & NAND_BBT_NRBITS_MSK;
@@ -781,20 +748,24 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
 		default: return -EINVAL;
 		}
 
+		bbtoffs = chip * (numblocks >> 2);
+
 		to = ((loff_t)page) << this->page_shift;
 
 		/* Must we save the block contents? */
 		if (td->options & NAND_BBT_SAVECONTENT) {
 			/* Make it block aligned */
-			to &= ~(((loff_t)1 << this->bbt_erase_shift) - 1);
+			to &= ~((loff_t)((1 << this->bbt_erase_shift) - 1));
 			len = 1 << this->bbt_erase_shift;
 			res = mtd_read(mtd, to, len, &retlen, buf);
 			if (res < 0) {
 				if (retlen != len) {
-					pr_info("nand_bbt: error reading block for writing the bad block table\n");
+					pr_info("nand_bbt: error reading block "
+						"for writing the bad block table\n");
 					return res;
 				}
-				pr_warn("nand_bbt: ECC error while reading block for writing bad block table\n");
+				pr_warn("nand_bbt: ECC error while reading "
+					"block for writing bad block table\n");
 			}
 			/* Read oob data */
 			ops.ooblen = (len >> this->page_shift) * mtd->oobsize;
@@ -843,12 +814,16 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
 			buf[ooboffs + td->veroffs] = td->version[chip];
 
 		/* Walk through the memory table */
-		for (i = 0; i < numblocks; i++) {
+		for (i = 0; i < numblocks;) {
 			uint8_t dat;
-			int sftcnt = (i << (3 - sft)) & sftmsk;
-			dat = bbt_get_entry(this, chip * numblocks + i);
-			/* Do not store the reserved bbt blocks! */
-			buf[offs + (i >> sft)] &= ~(msk[dat] << sftcnt);
+			dat = this->bbt[bbtoffs + (i >> 2)];
+			for (j = 0; j < 4; j++, i++) {
+				int sftcnt = (i << (3 - sft)) & sftmsk;
+				/* Do not store the reserved bbt blocks! */
+				buf[offs + (i >> sft)] &=
+					~(msk[dat & 0x03] << sftcnt);
+				dat >>= 2;
+			}
 		}
 
 		memset(&einfo, 0, sizeof(einfo));
@@ -856,28 +831,20 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
 		einfo.addr = to;
 		einfo.len = 1 << this->bbt_erase_shift;
 		res = nand_erase_nand(mtd, &einfo, 1);
-		if (res < 0) {
-			pr_warn("nand_bbt: error while erasing BBT block %d\n",
-				res);
-			mark_bbt_block_bad(this, td, chip, block);
-			continue;
-		}
+		if (res < 0)
+			goto outerr;
 
 		res = scan_write_bbt(mtd, to, len, buf,
 				td->options & NAND_BBT_NO_OOB ? NULL :
 				&buf[len]);
-		if (res < 0) {
-			pr_warn("nand_bbt: error while writing BBT block %d\n",
-				res);
-			mark_bbt_block_bad(this, td, chip, block);
-			continue;
-		}
+		if (res < 0)
+			goto outerr;
 
 		pr_info("Bad block table written to 0x%012llx, version 0x%02X\n",
 			 (unsigned long long)to, td->version[chip]);
 
 		/* Mark it as used */
-		td->pages[chip++] = page;
+		td->pages[chip] = page;
 	}
 	return 0;
 
@@ -896,8 +863,9 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
  */
 static inline int nand_memory_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 
+	bd->options &= ~NAND_BBT_SCANEMPTY;
 	return create_bbt(mtd, this->buffers->databuf, bd, -1);
 }
 
@@ -915,7 +883,7 @@ static inline int nand_memory_bbt(struct mtd_info *mtd, struct nand_bbt_descr *b
 static int check_create(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr *bd)
 {
 	int i, chips, writeops, create, chipsel, res, res2;
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	struct nand_bbt_descr *td = this->bbt_td;
 	struct nand_bbt_descr *md = this->bbt_md;
 	struct nand_bbt_descr *rd, *rd2;
@@ -1039,9 +1007,9 @@ static int check_create(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_desc
  */
 static void mark_bbt_region(struct mtd_info *mtd, struct nand_bbt_descr *td)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	int i, j, chips, block, nrblocks, update;
-	uint8_t oldval;
+	uint8_t oldval, newval;
 
 	/* Do we have a bbt per chip? */
 	if (td->options & NAND_BBT_PERCHIP) {
@@ -1058,12 +1026,12 @@ static void mark_bbt_region(struct mtd_info *mtd, struct nand_bbt_descr *td)
 			if (td->pages[i] == -1)
 				continue;
 			block = td->pages[i] >> (this->bbt_erase_shift - this->page_shift);
-			oldval = bbt_get_entry(this, block);
-			bbt_mark_entry(this, block, BBT_BLOCK_RESERVED);
-			if ((oldval != BBT_BLOCK_RESERVED) &&
-					td->reserved_block_code)
-				nand_update_bbt(mtd, (loff_t)block <<
-						this->bbt_erase_shift);
+			block <<= 1;
+			oldval = this->bbt[(block >> 3)];
+			newval = oldval | (0x2 << (block & 0x06));
+			this->bbt[(block >> 3)] = newval;
+			if ((oldval != newval) && td->reserved_block_code)
+				nand_update_bbt(mtd, (loff_t)block << (this->bbt_erase_shift - 1));
 			continue;
 		}
 		update = 0;
@@ -1071,12 +1039,14 @@ static void mark_bbt_region(struct mtd_info *mtd, struct nand_bbt_descr *td)
 			block = ((i + 1) * nrblocks) - td->maxblocks;
 		else
 			block = i * nrblocks;
+		block <<= 1;
 		for (j = 0; j < td->maxblocks; j++) {
-			oldval = bbt_get_entry(this, block);
-			bbt_mark_entry(this, block, BBT_BLOCK_RESERVED);
-			if (oldval != BBT_BLOCK_RESERVED)
+			oldval = this->bbt[(block >> 3)];
+			newval = oldval | (0x2 << (block & 0x06));
+			this->bbt[(block >> 3)] = newval;
+			if (oldval != newval)
 				update = 1;
-			block++;
+			block += 2;
 		}
 		/*
 		 * If we want reserved blocks to be recorded to flash, and some
@@ -1084,8 +1054,7 @@ static void mark_bbt_region(struct mtd_info *mtd, struct nand_bbt_descr *td)
 		 * bbts.  This should only happen once.
 		 */
 		if (update && td->reserved_block_code)
-			nand_update_bbt(mtd, (loff_t)(block - 1) <<
-					this->bbt_erase_shift);
+			nand_update_bbt(mtd, (loff_t)(block - 2) << (this->bbt_erase_shift - 1));
 	}
 }
 
@@ -1099,7 +1068,7 @@ static void mark_bbt_region(struct mtd_info *mtd, struct nand_bbt_descr *td)
  */
 static void verify_bbt_descr(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	u32 pattern_len;
 	u32 bits;
 	u32 table_size;
@@ -1149,15 +1118,15 @@ static void verify_bbt_descr(struct mtd_info *mtd, struct nand_bbt_descr *bd)
  * The bad block table memory is allocated here. It must be freed by calling
  * the nand_free_bbt function.
  */
-static int nand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
+int nand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
-	int len, res;
+	struct nand_chip *this = mtd->priv;
+	int len, res = 0;
 	uint8_t *buf;
 	struct nand_bbt_descr *td = this->bbt_td;
 	struct nand_bbt_descr *md = this->bbt_md;
 
-	len = (mtd->size >> (this->bbt_erase_shift + 2)) ? : 1;
+	len = mtd->size >> (this->bbt_erase_shift + 2);
 	/*
 	 * Allocate memory (2bit per block) and clear the memory bad block
 	 * table.
@@ -1173,9 +1142,10 @@ static int nand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 	if (!td) {
 		if ((res = nand_memory_bbt(mtd, bd))) {
 			pr_err("nand_bbt: can't scan flash and build the RAM-based BBT\n");
-			goto err;
+			kfree(this->bbt);
+			this->bbt = NULL;
 		}
-		return 0;
+		return res;
 	}
 	verify_bbt_descr(mtd, td);
 	verify_bbt_descr(mtd, md);
@@ -1185,21 +1155,21 @@ static int nand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 	len += (len >> this->page_shift) * mtd->oobsize;
 	buf = vmalloc(len);
 	if (!buf) {
-		res = -ENOMEM;
-		goto err;
+		kfree(this->bbt);
+		this->bbt = NULL;
+		return -ENOMEM;
 	}
 
 	/* Is the bbt at a given page? */
 	if (td->options & NAND_BBT_ABSPAGE) {
-		read_abs_bbts(mtd, buf, td, md);
+		res = read_abs_bbts(mtd, buf, td, md);
 	} else {
 		/* Search the bad block table using a pattern in oob */
-		search_read_bbts(mtd, buf, td, md);
+		res = search_read_bbts(mtd, buf, td, md);
 	}
 
-	res = check_create(mtd, buf, bd);
 	if (res)
-		goto err;
+		res = check_create(mtd, buf, bd);
 
 	/* Prevent the bbt regions from erasing / writing */
 	mark_bbt_region(mtd, td);
@@ -1207,24 +1177,19 @@ static int nand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 		mark_bbt_region(mtd, md);
 
 	vfree(buf);
-	return 0;
-
-err:
-	kfree(this->bbt);
-	this->bbt = NULL;
 	return res;
 }
 
 /**
- * nand_update_bbt - update bad block table(s)
+ * nand_update_bbt - [NAND Interface] update bad block table(s)
  * @mtd: MTD device structure
  * @offs: the offset of the newly marked block
  *
  * The function updates the bad block table(s).
  */
-static int nand_update_bbt(struct mtd_info *mtd, loff_t offs)
+int nand_update_bbt(struct mtd_info *mtd, loff_t offs)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	int len, res = 0;
 	int chip, chipsel;
 	uint8_t *buf;
@@ -1276,6 +1241,15 @@ static int nand_update_bbt(struct mtd_info *mtd, loff_t offs)
  */
 static uint8_t scan_ff_pattern[] = { 0xff, 0xff };
 
+static uint8_t scan_agand_pattern[] = { 0x1C, 0x71, 0xC7, 0x1C, 0x71, 0xC7 };
+
+static struct nand_bbt_descr agand_flashbased = {
+	.options = NAND_BBT_SCANEMPTY | NAND_BBT_SCANALLPAGES,
+	.offs = 0x20,
+	.len = 6,
+	.pattern = scan_agand_pattern
+};
+
 /* Generic flash bbt descriptors */
 static uint8_t bbt_pattern[] = {'B', 'b', 't', '0' };
 static uint8_t mirror_pattern[] = {'1', 't', 'b', 'B' };
@@ -1286,7 +1260,7 @@ static struct nand_bbt_descr bbt_main_descr = {
 	.offs =	8,
 	.len = 4,
 	.veroffs = 12,
-	.maxblocks = NAND_BBT_SCAN_MAXBLOCKS,
+	.maxblocks = 4,
 	.pattern = bbt_pattern
 };
 
@@ -1296,27 +1270,27 @@ static struct nand_bbt_descr bbt_mirror_descr = {
 	.offs =	8,
 	.len = 4,
 	.veroffs = 12,
-	.maxblocks = NAND_BBT_SCAN_MAXBLOCKS,
+	.maxblocks = 4,
 	.pattern = mirror_pattern
 };
 
-static struct nand_bbt_descr bbt_main_no_oob_descr = {
+static struct nand_bbt_descr bbt_main_no_bbt_descr = {
 	.options = NAND_BBT_LASTBLOCK | NAND_BBT_CREATE | NAND_BBT_WRITE
 		| NAND_BBT_2BIT | NAND_BBT_VERSION | NAND_BBT_PERCHIP
 		| NAND_BBT_NO_OOB,
 	.len = 4,
 	.veroffs = 4,
-	.maxblocks = NAND_BBT_SCAN_MAXBLOCKS,
+	.maxblocks = 4,
 	.pattern = bbt_pattern
 };
 
-static struct nand_bbt_descr bbt_mirror_no_oob_descr = {
+static struct nand_bbt_descr bbt_mirror_no_bbt_descr = {
 	.options = NAND_BBT_LASTBLOCK | NAND_BBT_CREATE | NAND_BBT_WRITE
 		| NAND_BBT_2BIT | NAND_BBT_VERSION | NAND_BBT_PERCHIP
 		| NAND_BBT_NO_OOB,
 	.len = 4,
 	.veroffs = 4,
-	.maxblocks = NAND_BBT_SCAN_MAXBLOCKS,
+	.maxblocks = 4,
 	.pattern = mirror_pattern
 };
 
@@ -1358,16 +1332,31 @@ static int nand_create_badblock_pattern(struct nand_chip *this)
  */
 int nand_default_bbt(struct mtd_info *mtd)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
-	int ret;
+	struct nand_chip *this = mtd->priv;
+
+	/*
+	 * Default for AG-AND. We must use a flash based bad block table as the
+	 * devices have factory marked _good_ blocks. Erasing those blocks
+	 * leads to loss of the good / bad information, so we _must_ store this
+	 * information in a good / bad table during startup.
+	 */
+	if (this->options & NAND_IS_AND) {
+		/* Use the default pattern descriptors */
+		if (!this->bbt_td) {
+			this->bbt_td = &bbt_main_descr;
+			this->bbt_md = &bbt_mirror_descr;
+		}
+		this->bbt_options |= NAND_BBT_USE_FLASH;
+		return nand_scan_bbt(mtd, &agand_flashbased);
+	}
 
 	/* Is a flash based bad block table requested? */
 	if (this->bbt_options & NAND_BBT_USE_FLASH) {
 		/* Use the default pattern descriptors */
 		if (!this->bbt_td) {
 			if (this->bbt_options & NAND_BBT_NO_OOB) {
-				this->bbt_td = &bbt_main_no_oob_descr;
-				this->bbt_md = &bbt_mirror_no_oob_descr;
+				this->bbt_td = &bbt_main_no_bbt_descr;
+				this->bbt_md = &bbt_mirror_no_bbt_descr;
 			} else {
 				this->bbt_td = &bbt_main_descr;
 				this->bbt_md = &bbt_mirror_descr;
@@ -1378,27 +1367,10 @@ int nand_default_bbt(struct mtd_info *mtd)
 		this->bbt_md = NULL;
 	}
 
-	if (!this->badblock_pattern) {
-		ret = nand_create_badblock_pattern(this);
-		if (ret)
-			return ret;
-	}
+	if (!this->badblock_pattern)
+		nand_create_badblock_pattern(this);
 
 	return nand_scan_bbt(mtd, this->badblock_pattern);
-}
-
-/**
- * nand_isreserved_bbt - [NAND Interface] Check if a block is reserved
- * @mtd: MTD device structure
- * @offs: offset in the device
- */
-int nand_isreserved_bbt(struct mtd_info *mtd, loff_t offs)
-{
-	struct nand_chip *this = mtd_to_nand(mtd);
-	int block;
-
-	block = (int)(offs >> this->bbt_erase_shift);
-	return bbt_get_entry(this, block) == BBT_BLOCK_RESERVED;
 }
 
 /**
@@ -1409,44 +1381,28 @@ int nand_isreserved_bbt(struct mtd_info *mtd, loff_t offs)
  */
 int nand_isbad_bbt(struct mtd_info *mtd, loff_t offs, int allowbbt)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
-	int block, res;
+	struct nand_chip *this = mtd->priv;
+	int block;
+	uint8_t res;
 
-	block = (int)(offs >> this->bbt_erase_shift);
-	res = bbt_get_entry(this, block);
+	/* Get block number * 2 */
+	block = (int)(offs >> (this->bbt_erase_shift - 1));
+	res = (this->bbt[block >> 3] >> (block & 0x06)) & 0x03;
 
-	pr_debug("nand_isbad_bbt(): bbt info for offs 0x%08x: (block %d) 0x%02x\n",
-		 (unsigned int)offs, block, res);
+	pr_debug("nand_isbad_bbt(): bbt info for offs 0x%08x: "
+			"(block %d) 0x%02x\n",
+			(unsigned int)offs, block >> 1, res);
 
-	switch (res) {
-	case BBT_BLOCK_GOOD:
+	switch ((int)res) {
+	case 0x00:
 		return 0;
-	case BBT_BLOCK_WORN:
+	case 0x01:
 		return 1;
-	case BBT_BLOCK_RESERVED:
+	case 0x02:
 		return allowbbt ? 0 : 1;
 	}
 	return 1;
 }
 
-/**
- * nand_markbad_bbt - [NAND Interface] Mark a block bad in the BBT
- * @mtd: MTD device structure
- * @offs: offset of the bad block
- */
-int nand_markbad_bbt(struct mtd_info *mtd, loff_t offs)
-{
-	struct nand_chip *this = mtd_to_nand(mtd);
-	int block, ret = 0;
-
-	block = (int)(offs >> this->bbt_erase_shift);
-
-	/* Mark bad block in memory */
-	bbt_mark_entry(this, block, BBT_BLOCK_WORN);
-
-	/* Update flash-based bad block table */
-	if (this->bbt_options & NAND_BBT_USE_FLASH)
-		ret = nand_update_bbt(mtd, offs);
-
-	return ret;
-}
+EXPORT_SYMBOL(nand_scan_bbt);
+EXPORT_SYMBOL(nand_default_bbt);

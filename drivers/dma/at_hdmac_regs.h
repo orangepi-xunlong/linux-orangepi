@@ -11,7 +11,7 @@
 #ifndef AT_HDMAC_REGS_H
 #define	AT_HDMAC_REGS_H
 
-#include <linux/platform_data/dma-atmel.h>
+#include <mach/at_hdmac.h>
 
 #define	AT_DMA_MAX_NR_CHANNELS	8
 
@@ -87,32 +87,12 @@
 /* Bitfields in CTRLA */
 #define	ATC_BTSIZE_MAX		0xFFFFUL	/* Maximum Buffer Transfer Size */
 #define	ATC_BTSIZE(x)		(ATC_BTSIZE_MAX & (x)) /* Buffer Transfer Size */
-#define	ATC_SCSIZE_MASK		(0x7 << 16)	/* Source Chunk Transfer Size */
-#define		ATC_SCSIZE(x)		(ATC_SCSIZE_MASK & ((x) << 16))
-#define		ATC_SCSIZE_1		(0x0 << 16)
-#define		ATC_SCSIZE_4		(0x1 << 16)
-#define		ATC_SCSIZE_8		(0x2 << 16)
-#define		ATC_SCSIZE_16		(0x3 << 16)
-#define		ATC_SCSIZE_32		(0x4 << 16)
-#define		ATC_SCSIZE_64		(0x5 << 16)
-#define		ATC_SCSIZE_128		(0x6 << 16)
-#define		ATC_SCSIZE_256		(0x7 << 16)
-#define	ATC_DCSIZE_MASK		(0x7 << 20)	/* Destination Chunk Transfer Size */
-#define		ATC_DCSIZE(x)		(ATC_DCSIZE_MASK & ((x) << 20))
-#define		ATC_DCSIZE_1		(0x0 << 20)
-#define		ATC_DCSIZE_4		(0x1 << 20)
-#define		ATC_DCSIZE_8		(0x2 << 20)
-#define		ATC_DCSIZE_16		(0x3 << 20)
-#define		ATC_DCSIZE_32		(0x4 << 20)
-#define		ATC_DCSIZE_64		(0x5 << 20)
-#define		ATC_DCSIZE_128		(0x6 << 20)
-#define		ATC_DCSIZE_256		(0x7 << 20)
+/* Chunck Tranfer size definitions are in at_hdmac.h */
 #define	ATC_SRC_WIDTH_MASK	(0x3 << 24)	/* Source Single Transfer Size */
 #define		ATC_SRC_WIDTH(x)	((x) << 24)
 #define		ATC_SRC_WIDTH_BYTE	(0x0 << 24)
 #define		ATC_SRC_WIDTH_HALFWORD	(0x1 << 24)
 #define		ATC_SRC_WIDTH_WORD	(0x2 << 24)
-#define		ATC_REG_TO_SRC_WIDTH(r)	(((r) >> 24) & 0x3)
 #define	ATC_DST_WIDTH_MASK	(0x3 << 28)	/* Destination Single Transfer Size */
 #define		ATC_DST_WIDTH(x)	((x) << 28)
 #define		ATC_DST_WIDTH_BYTE	(0x0 << 28)
@@ -182,8 +162,7 @@ struct at_lli {
  * @at_lli: hardware lli structure
  * @txd: support for the async_tx api
  * @desc_node: node on the channed descriptors list
- * @len: descriptor byte count
- * @total_len: total transaction byte count
+ * @len: total transaction bytecount
  */
 struct at_desc {
 	/* FIRST values the hardware uses */
@@ -194,17 +173,6 @@ struct at_desc {
 	struct dma_async_tx_descriptor	txd;
 	struct list_head		desc_node;
 	size_t				len;
-	size_t				total_len;
-
-	/* Interleaved data */
-	size_t				boundary;
-	size_t				dst_hole;
-	size_t				src_hole;
-
-	/* Memset temporary buffer */
-	bool				memset_buffer;
-	dma_addr_t			memset_paddr;
-	int				*memset_vaddr;
 };
 
 static inline struct at_desc *
@@ -233,16 +201,13 @@ enum atc_status {
  * @device: parent device
  * @ch_regs: memory mapped register base
  * @mask: channel index in a mask
- * @per_if: peripheral interface
- * @mem_if: memory interface
  * @status: transmit status information from irq/prep* functions
  *                to tasklet (use atomic operations)
  * @tasklet: bottom half to finish transaction work
  * @save_cfg: configuration register that is saved on suspend/resume cycle
  * @save_dscr: for cyclic operations, preserve next descriptor address in
  *             the cyclic list on suspend/resume cycle
- * @dma_sconfig: configuration for slave transfers, passed via
- * .device_config
+ * @dma_sconfig: configuration for slave transfers, passed via DMA_SLAVE_CONFIG
  * @lock: serializes enqueue/dequeue operations to descriptors lists
  * @active_list: list of descriptors dmaengine is being running on
  * @queue: list of descriptors ready to be submitted to engine
@@ -254,8 +219,6 @@ struct at_dma_chan {
 	struct at_dma		*device;
 	void __iomem		*ch_regs;
 	u8			mask;
-	u8			per_if;
-	u8			mem_if;
 	unsigned long		status;
 	struct tasklet_struct	tasklet;
 	u32			save_cfg;
@@ -335,7 +298,6 @@ struct at_dma {
 	u8			all_chan_mask;
 
 	struct dma_pool		*dma_desc_pool;
-	struct dma_pool		*memset_pool;
 	/* AT THE END channels table */
 	struct at_dma_chan	chan[0];
 };
@@ -356,6 +318,10 @@ static inline struct at_dma *to_at_dma(struct dma_device *ddev)
 static struct device *chan2dev(struct dma_chan *chan)
 {
 	return &chan->dev->device;
+}
+static struct device *chan2parent(struct dma_chan *chan)
+{
+	return chan->dev->device.parent;
 }
 
 #if defined(VERBOSE_DEBUG)
@@ -384,10 +350,10 @@ static void vdbg_dump_regs(struct at_dma_chan *atchan) {}
 
 static void atc_dump_lli(struct at_dma_chan *atchan, struct at_lli *lli)
 {
-	dev_crit(chan2dev(&atchan->chan_common),
-		 "  desc: s%pad d%pad ctrl0x%x:0x%x l0x%pad\n",
-		 &lli->saddr, &lli->daddr,
-		 lli->ctrla, lli->ctrlb, &lli->dscr);
+	dev_printk(KERN_CRIT, chan2dev(&atchan->chan_common),
+			"  desc: s0x%x d0x%x ctrl0x%x:0x%x l0x%x\n",
+			lli->saddr, lli->daddr,
+			lli->ctrla, lli->ctrlb, lli->dscr);
 }
 
 

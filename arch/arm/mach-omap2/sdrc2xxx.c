@@ -24,13 +24,16 @@
 #include <linux/clk.h>
 #include <linux/io.h>
 
-#include "soc.h"
+#include <plat/hardware.h>
+#include <plat/clock.h>
+#include <plat/sram.h>
+#include <plat/sdrc.h>
+
 #include "iomap.h"
 #include "common.h"
-#include "prm2xxx.h"
+#include "prm2xxx_3xxx.h"
 #include "clock.h"
 #include "sdrc.h"
-#include "sram.h"
 
 /* Memory timing, DLL mode flags */
 #define M_DDR		1
@@ -103,9 +106,9 @@ u32 omap2xxx_sdrc_reprogram(u32 level, u32 force)
 	 * prm2xxx.c function
 	 */
 	if (cpu_is_omap2420())
-		writel_relaxed(0xffff, OMAP2420_PRCM_VOLTSETUP);
+		__raw_writel(0xffff, OMAP2420_PRCM_VOLTSETUP);
 	else
-		writel_relaxed(0xffff, OMAP2430_PRCM_VOLTSETUP);
+		__raw_writel(0xffff, OMAP2430_PRCM_VOLTSETUP);
 	omap2_sram_reprogram_sdrc(level, dll_ctrl, m_type);
 	curr_perf_level = level;
 	local_irq_restore(flags);
@@ -164,6 +167,6 @@ void omap2xxx_sdrc_init_params(u32 force_lock_to_unlock_mode)
 	mem_timings.slow_dll_ctrl |=
 		((mem_timings.fast_dll_ctrl & 0xF) | (1 << 2));
 
-	/* 90 degree phase for anything below 133MHz + disable DLL filter */
+	/* 90 degree phase for anything below 133Mhz + disable DLL filter */
 	mem_timings.slow_dll_ctrl |= ((1 << 1) | (3 << 8));
 }

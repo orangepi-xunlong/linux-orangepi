@@ -251,26 +251,24 @@ static unsigned int pmac_pic_get_irq(void)
 	}
 	raw_spin_unlock_irqrestore(&pmac_pic_lock, flags);
 	if (unlikely(irq < 0))
-		return 0;
+		return NO_IRQ;
 	return irq_linear_revmap(pmac_pic_host, irq);
 }
 
 #ifdef CONFIG_XMON
 static struct irqaction xmon_action = {
 	.handler	= xmon_irq,
-	.flags		= IRQF_NO_THREAD,
+	.flags		= 0,
 	.name		= "NMI - XMON"
 };
 #endif
 
 static struct irqaction gatwick_cascade_action = {
 	.handler	= gatwick_action,
-	.flags		= IRQF_NO_THREAD,
 	.name		= "cascade",
 };
 
-static int pmac_pic_host_match(struct irq_domain *h, struct device_node *node,
-			       enum irq_domain_bus_token bus_token)
+static int pmac_pic_host_match(struct irq_domain *h, struct device_node *node)
 {
 	/* We match all, we don't always have a node anyway */
 	return 1;
@@ -323,9 +321,6 @@ static void __init pmac_pic_probe_oldstyle(void)
 		max_irqs = max_real_irqs = 64;
 
 		/* We might have a second cascaded heathrow */
-
-		/* Compensate for of_node_put() in of_find_node_by_name() */
-		of_node_get(master);
 		slave = of_find_node_by_name(master, "mac-io");
 
 		/* Check ordering of master & slave */
@@ -389,7 +384,7 @@ static void __init pmac_pic_probe_oldstyle(void)
 		out_le32(&pmac_irq_hw[i]->enable, 0);
 
 	/* Hookup cascade irq */
-	if (slave && pmac_irq_cascade)
+	if (slave && pmac_irq_cascade != NO_IRQ)
 		setup_irq(pmac_irq_cascade, &gatwick_cascade_action);
 
 	printk(KERN_INFO "irq: System has %d possible interrupts\n", max_irqs);
@@ -398,8 +393,8 @@ static void __init pmac_pic_probe_oldstyle(void)
 #endif
 }
 
-int of_irq_parse_oldworld(struct device_node *device, int index,
-			struct of_phandle_args *out_irq)
+int of_irq_map_oldworld(struct device_node *device, int index,
+			struct of_irq *out_irq)
 {
 	const u32 *ints = NULL;
 	int intlen;
@@ -427,9 +422,9 @@ int of_irq_parse_oldworld(struct device_node *device, int index,
 	if (index >= intlen)
 		return -EINVAL;
 
-	out_irq->np = NULL;
-	out_irq->args[0] = ints[index];
-	out_irq->args_count = 1;
+	out_irq->controller = NULL;
+	out_irq->specifier[0] = ints[index];
+	out_irq->size = 1;
 
 	return 0;
 }
@@ -444,7 +439,7 @@ static void __init pmac_pic_setup_mpic_nmi(struct mpic *mpic)
 	pswitch = of_find_node_by_name(NULL, "programmer-switch");
 	if (pswitch) {
 		nmi_irq = irq_of_parse_and_map(pswitch, 0);
-		if (nmi_irq) {
+		if (nmi_irq != NO_IRQ) {
 			mpic_irq_set_priority(nmi_irq, 9);
 			setup_irq(nmi_irq, &xmon_action);
 		}
@@ -534,7 +529,7 @@ static int __init pmac_pic_probe_mpic(void)
 void __init pmac_pic_init(void)
 {
 	/* We configure the OF parsing based on our oldworld vs. newworld
-	 * platform type and whether we were booted by BootX.
+	 * platform type and wether we were booted by BootX.
 	 */
 #ifdef CONFIG_PPC32
 	if (!pmac_newworld)

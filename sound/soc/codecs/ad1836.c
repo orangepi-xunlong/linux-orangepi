@@ -19,8 +19,6 @@
 #include <sound/soc.h>
 #include <sound/tlv.h>
 #include <linux/spi/spi.h>
-#include <linux/regmap.h>
-
 #include "ad1836.h"
 
 enum ad1836_type {
@@ -32,7 +30,6 @@ enum ad1836_type {
 /* codec private data */
 struct ad1836_priv {
 	enum ad1836_type type;
-	struct regmap *regmap;
 };
 
 /*
@@ -40,8 +37,8 @@ struct ad1836_priv {
  */
 static const char *ad1836_deemp[] = {"None", "44.1kHz", "32kHz", "48kHz"};
 
-static SOC_ENUM_SINGLE_DECL(ad1836_deemp_enum,
-			    AD1836_DAC_CTRL1, 8, ad1836_deemp);
+static const struct soc_enum ad1836_deemp_enum =
+	SOC_ENUM_SINGLE(AD1836_DAC_CTRL1, 8, 4, ad1836_deemp);
 
 #define AD1836_DAC_VOLUME(x) \
 	SOC_DOUBLE_R("DAC" #x " Playback Volume", AD1836_DAC_L_VOL(x), \
@@ -164,31 +161,29 @@ static int ad1836_hw_params(struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params,
 		struct snd_soc_dai *dai)
 {
-	struct ad1836_priv *ad1836 = snd_soc_codec_get_drvdata(dai->codec);
 	int word_len = 0;
 
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
+
 	/* bit size */
-	switch (params_width(params)) {
-	case 16:
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
 		word_len = AD1836_WORD_LEN_16;
 		break;
-	case 20:
+	case SNDRV_PCM_FORMAT_S20_3LE:
 		word_len = AD1836_WORD_LEN_20;
 		break;
-	case 24:
-	case 32:
+	case SNDRV_PCM_FORMAT_S24_LE:
+	case SNDRV_PCM_FORMAT_S32_LE:
 		word_len = AD1836_WORD_LEN_24;
 		break;
-	default:
-		return -EINVAL;
 	}
 
-	regmap_update_bits(ad1836->regmap, AD1836_DAC_CTRL1,
-		AD1836_DAC_WORD_LEN_MASK,
+	snd_soc_update_bits(codec, AD1836_DAC_CTRL1, AD1836_DAC_WORD_LEN_MASK,
 		word_len << AD1836_DAC_WORD_LEN_OFFSET);
 
-	regmap_update_bits(ad1836->regmap, AD1836_ADC_CTRL2,
-		AD1836_ADC_WORD_LEN_MASK,
+	snd_soc_update_bits(codec, AD1836_ADC_CTRL2, AD1836_ADC_WORD_LEN_MASK,
 		word_len << AD1836_ADC_WORD_OFFSET);
 
 	return 0;
@@ -230,17 +225,15 @@ static struct snd_soc_dai_driver ad183x_dais[] = {
 #ifdef CONFIG_PM
 static int ad1836_suspend(struct snd_soc_codec *codec)
 {
-	struct ad1836_priv *ad1836 = snd_soc_codec_get_drvdata(codec);
 	/* reset clock control mode */
-	return regmap_update_bits(ad1836->regmap, AD1836_ADC_CTRL2,
+	return snd_soc_update_bits(codec, AD1836_ADC_CTRL2,
 		AD1836_ADC_SERFMT_MASK, 0);
 }
 
 static int ad1836_resume(struct snd_soc_codec *codec)
 {
-	struct ad1836_priv *ad1836 = snd_soc_codec_get_drvdata(codec);
 	/* restore clock control mode */
-	return regmap_update_bits(ad1836->regmap, AD1836_ADC_CTRL2,
+	return snd_soc_update_bits(codec, AD1836_ADC_CTRL2,
 		AD1836_ADC_SERFMT_MASK, AD1836_ADC_AUX);
 }
 #else
@@ -251,7 +244,7 @@ static int ad1836_resume(struct snd_soc_codec *codec)
 static int ad1836_probe(struct snd_soc_codec *codec)
 {
 	struct ad1836_priv *ad1836 = snd_soc_codec_get_drvdata(codec);
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
 	int num_dacs, num_adcs;
 	int ret = 0;
 	int i;
@@ -259,30 +252,37 @@ static int ad1836_probe(struct snd_soc_codec *codec)
 	num_dacs = ad183x_dais[ad1836->type].playback.channels_max / 2;
 	num_adcs = ad183x_dais[ad1836->type].capture.channels_max / 2;
 
+	ret = snd_soc_codec_set_cache_io(codec, 4, 12, SND_SOC_SPI);
+	if (ret < 0) {
+		dev_err(codec->dev, "failed to set cache I/O: %d\n",
+				ret);
+		return ret;
+	}
+
 	/* default setting for ad1836 */
 	/* de-emphasis: 48kHz, power-on dac */
-	regmap_write(ad1836->regmap, AD1836_DAC_CTRL1, 0x300);
+	snd_soc_write(codec, AD1836_DAC_CTRL1, 0x300);
 	/* unmute dac channels */
-	regmap_write(ad1836->regmap, AD1836_DAC_CTRL2, 0x0);
+	snd_soc_write(codec, AD1836_DAC_CTRL2, 0x0);
 	/* high-pass filter enable, power-on adc */
-	regmap_write(ad1836->regmap, AD1836_ADC_CTRL1, 0x100);
+	snd_soc_write(codec, AD1836_ADC_CTRL1, 0x100);
 	/* unmute adc channles, adc aux mode */
-	regmap_write(ad1836->regmap, AD1836_ADC_CTRL2, 0x180);
+	snd_soc_write(codec, AD1836_ADC_CTRL2, 0x180);
 	/* volume */
 	for (i = 1; i <= num_dacs; ++i) {
-		regmap_write(ad1836->regmap, AD1836_DAC_L_VOL(i), 0x3FF);
-		regmap_write(ad1836->regmap, AD1836_DAC_R_VOL(i), 0x3FF);
+		snd_soc_write(codec, AD1836_DAC_L_VOL(i), 0x3FF);
+		snd_soc_write(codec, AD1836_DAC_R_VOL(i), 0x3FF);
 	}
 
 	if (ad1836->type == AD1836) {
 		/* left/right diff:PGA/MUX */
-		regmap_write(ad1836->regmap, AD1836_ADC_CTRL3, 0x3A);
+		snd_soc_write(codec, AD1836_ADC_CTRL3, 0x3A);
 		ret = snd_soc_add_codec_controls(codec, ad1836_controls,
 				ARRAY_SIZE(ad1836_controls));
 		if (ret)
 			return ret;
 	} else {
-		regmap_write(ad1836->regmap, AD1836_ADC_CTRL3, 0x00);
+		snd_soc_write(codec, AD1836_ADC_CTRL3, 0x00);
 	}
 
 	ret = snd_soc_add_codec_controls(codec, ad183x_dac_controls, num_dacs * 2);
@@ -315,9 +315,8 @@ static int ad1836_probe(struct snd_soc_codec *codec)
 /* power down chip */
 static int ad1836_remove(struct snd_soc_codec *codec)
 {
-	struct ad1836_priv *ad1836 = snd_soc_codec_get_drvdata(codec);
 	/* reset clock control mode */
-	return regmap_update_bits(ad1836->regmap, AD1836_ADC_CTRL2,
+	return snd_soc_update_bits(codec, AD1836_ADC_CTRL2,
 		AD1836_ADC_SERFMT_MASK, 0);
 }
 
@@ -326,45 +325,18 @@ static struct snd_soc_codec_driver soc_codec_dev_ad1836 = {
 	.remove = ad1836_remove,
 	.suspend = ad1836_suspend,
 	.resume = ad1836_resume,
+	.reg_cache_size = AD1836_NUM_REGS,
+	.reg_word_size = sizeof(u16),
 
-	.component_driver = {
-		.controls		= ad183x_controls,
-		.num_controls		= ARRAY_SIZE(ad183x_controls),
-		.dapm_widgets		= ad183x_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(ad183x_dapm_widgets),
-		.dapm_routes		= ad183x_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(ad183x_dapm_routes),
-	},
+	.controls = ad183x_controls,
+	.num_controls = ARRAY_SIZE(ad183x_controls),
+	.dapm_widgets = ad183x_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(ad183x_dapm_widgets),
+	.dapm_routes = ad183x_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(ad183x_dapm_routes),
 };
 
-static const struct reg_default ad1836_reg_defaults[] = {
-	{ AD1836_DAC_CTRL1, 0x0000 },
-	{ AD1836_DAC_CTRL2, 0x0000 },
-	{ AD1836_DAC_L_VOL(0), 0x0000 },
-	{ AD1836_DAC_R_VOL(0), 0x0000 },
-	{ AD1836_DAC_L_VOL(1), 0x0000 },
-	{ AD1836_DAC_R_VOL(1), 0x0000 },
-	{ AD1836_DAC_L_VOL(2), 0x0000 },
-	{ AD1836_DAC_R_VOL(2), 0x0000 },
-	{ AD1836_DAC_L_VOL(3), 0x0000 },
-	{ AD1836_DAC_R_VOL(3), 0x0000 },
-	{ AD1836_ADC_CTRL1, 0x0000 },
-	{ AD1836_ADC_CTRL2, 0x0000 },
-	{ AD1836_ADC_CTRL3, 0x0000 },
-};
-
-static const struct regmap_config ad1836_regmap_config = {
-	.val_bits = 12,
-	.reg_bits = 4,
-	.read_flag_mask = 0x08,
-
-	.max_register = AD1836_ADC_CTRL3,
-	.reg_defaults = ad1836_reg_defaults,
-	.num_reg_defaults = ARRAY_SIZE(ad1836_reg_defaults),
-	.cache_type = REGCACHE_RBTREE,
-};
-
-static int ad1836_spi_probe(struct spi_device *spi)
+static int __devinit ad1836_spi_probe(struct spi_device *spi)
 {
 	struct ad1836_priv *ad1836;
 	int ret;
@@ -373,10 +345,6 @@ static int ad1836_spi_probe(struct spi_device *spi)
 			      GFP_KERNEL);
 	if (ad1836 == NULL)
 		return -ENOMEM;
-
-	ad1836->regmap = devm_regmap_init_spi(spi, &ad1836_regmap_config);
-	if (IS_ERR(ad1836->regmap))
-		return PTR_ERR(ad1836->regmap);
 
 	ad1836->type = spi_get_device_id(spi)->driver_data;
 
@@ -387,7 +355,7 @@ static int ad1836_spi_probe(struct spi_device *spi)
 	return ret;
 }
 
-static int ad1836_spi_remove(struct spi_device *spi)
+static int __devexit ad1836_spi_remove(struct spi_device *spi)
 {
 	snd_soc_unregister_codec(&spi->dev);
 	return 0;
@@ -406,13 +374,24 @@ MODULE_DEVICE_TABLE(spi, ad1836_ids);
 static struct spi_driver ad1836_spi_driver = {
 	.driver = {
 		.name	= "ad1836",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= ad1836_spi_probe,
-	.remove		= ad1836_spi_remove,
+	.remove		= __devexit_p(ad1836_spi_remove),
 	.id_table	= ad1836_ids,
 };
 
-module_spi_driver(ad1836_spi_driver);
+static int __init ad1836_init(void)
+{
+	return spi_register_driver(&ad1836_spi_driver);
+}
+module_init(ad1836_init);
+
+static void __exit ad1836_exit(void)
+{
+	spi_unregister_driver(&ad1836_spi_driver);
+}
+module_exit(ad1836_exit);
 
 MODULE_DESCRIPTION("ASoC ad1836 driver");
 MODULE_AUTHOR("Barry Song <21cnbao@gmail.com>");

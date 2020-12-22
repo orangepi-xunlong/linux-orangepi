@@ -11,13 +11,11 @@
  *  it under the terms of the GNU General Public License version 2 as
  *  published by the Free Software Foundation.
  */
-#include <linux/clkdev.h>
 #include <linux/gpio.h>
 #include <linux/gpio/machine.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/syscore_ops.h>
 #include <linux/major.h>
@@ -26,8 +24,6 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/smc91x.h>
-#include <linux/slab.h>
-#include <linux/leds.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/ads7846.h>
@@ -47,17 +43,18 @@
 
 #include <asm/hardware/sa1111.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #include <mach/audio.h>
 #include <mach/lubbock.h>
-#include "udc.h"
-#include <linux/platform_data/irda-pxaficp.h>
-#include <linux/platform_data/video-pxafb.h>
-#include <linux/platform_data/mmc-pxamci.h>
-#include "pm.h"
+#include <mach/udc.h>
+#include <mach/irda.h>
+#include <mach/pxafb.h>
+#include <mach/mmc.h>
+#include <mach/pm.h>
 #include <mach/smemc.h>
 
 #include "generic.h"
+#include "clock.h"
 #include "devices.h"
 
 static unsigned long lubbock_pin_config[] __initdata = {
@@ -102,9 +99,6 @@ static unsigned long lubbock_pin_config[] __initdata = {
 	GPIO6_MMC_CLK,
 	GPIO8_MMC_CS0,
 
-	/* SA1111 chip */
-	GPIO11_3_6MHz,
-
 	/* wakeup */
 	GPIO1_GPIO | WAKEUP_ON_EDGE_RISE,
 };
@@ -136,18 +130,6 @@ static struct pxa2xx_udc_mach_info udc_info __initdata = {
 	.udc_is_connected	= lubbock_udc_is_connected,
 	// no D+ pullup; lubbock can't connect/disconnect in software
 };
-
-static void lubbock_init_pcmcia(void)
-{
-	struct clk *clk;
-
-	/* Add an alias for the SA1111 PCMCIA clock */
-	clk = clk_get_sys("pxa2xx-pcmcia", NULL);
-	if (!IS_ERR(clk)) {
-		clkdev_create(clk, NULL, "1800");
-		clk_put(clk);
-	}
-}
 
 static struct resource sa1111_resources[] = {
 	[0] = {
@@ -424,7 +406,7 @@ static int lubbock_mci_init(struct device *dev,
 	init_timer(&mmc_timer);
 	mmc_timer.data = (unsigned long) data;
 	return request_irq(LUBBOCK_SD_IRQ, lubbock_detect_int,
-			   0, "lubbock-sd-detect", data);
+			IRQF_SAMPLE_RANDOM, "lubbock-sd-detect", data);
 }
 
 static int lubbock_mci_get_ro(struct device *dev)
@@ -479,8 +461,6 @@ static void __init lubbock_init(void)
 	pxa_set_btuart_info(NULL);
 	pxa_set_stuart_info(NULL);
 
-	lubbock_init_pcmcia();
-
 	clk_add_alias("SA1111_CLK", NULL, "GPIO11_CLK", NULL);
 	pxa_set_udc_info(&udc_info);
 	pxa_set_fb_info(NULL, &sharp_lm8v31);
@@ -519,105 +499,13 @@ static void __init lubbock_map_io(void)
 	PCFR |= PCFR_OPDE;
 }
 
-/*
- * Driver for the 8 discrete LEDs available for general use:
- * Note: bits [15-8] are used to enable/blank the 8 7 segment hex displays
- * so be sure to not monkey with them here.
- */
-
-#if defined(CONFIG_NEW_LEDS) && defined(CONFIG_LEDS_CLASS)
-struct lubbock_led {
-	struct led_classdev	cdev;
-	u8			mask;
-};
-
-/*
- * The triggers lines up below will only be used if the
- * LED triggers are compiled in.
- */
-static const struct {
-	const char *name;
-	const char *trigger;
-} lubbock_leds[] = {
-	{ "lubbock:D28", "default-on", },
-	{ "lubbock:D27", "cpu0", },
-	{ "lubbock:D26", "heartbeat" },
-	{ "lubbock:D25", },
-	{ "lubbock:D24", },
-	{ "lubbock:D23", },
-	{ "lubbock:D22", },
-	{ "lubbock:D21", },
-};
-
-static void lubbock_led_set(struct led_classdev *cdev,
-			      enum led_brightness b)
-{
-	struct lubbock_led *led = container_of(cdev,
-					 struct lubbock_led, cdev);
-	u32 reg = LUB_DISC_BLNK_LED;
-
-	if (b != LED_OFF)
-		reg |= led->mask;
-	else
-		reg &= ~led->mask;
-
-	LUB_DISC_BLNK_LED = reg;
-}
-
-static enum led_brightness lubbock_led_get(struct led_classdev *cdev)
-{
-	struct lubbock_led *led = container_of(cdev,
-					 struct lubbock_led, cdev);
-	u32 reg = LUB_DISC_BLNK_LED;
-
-	return (reg & led->mask) ? LED_FULL : LED_OFF;
-}
-
-static int __init lubbock_leds_init(void)
-{
-	int i;
-
-	if (!machine_is_lubbock())
-		return -ENODEV;
-
-	/* All ON */
-	LUB_DISC_BLNK_LED |= 0xff;
-	for (i = 0; i < ARRAY_SIZE(lubbock_leds); i++) {
-		struct lubbock_led *led;
-
-		led = kzalloc(sizeof(*led), GFP_KERNEL);
-		if (!led)
-			break;
-
-		led->cdev.name = lubbock_leds[i].name;
-		led->cdev.brightness_set = lubbock_led_set;
-		led->cdev.brightness_get = lubbock_led_get;
-		led->cdev.default_trigger = lubbock_leds[i].trigger;
-		led->mask = BIT(i);
-
-		if (led_classdev_register(NULL, &led->cdev) < 0) {
-			kfree(led);
-			break;
-		}
-	}
-
-	return 0;
-}
-
-/*
- * Since we may have triggers on any subsystem, defer registration
- * until after subsystem_init.
- */
-fs_initcall(lubbock_leds_init);
-#endif
-
 MACHINE_START(LUBBOCK, "Intel DBPXA250 Development Platform (aka Lubbock)")
 	/* Maintainer: MontaVista Software Inc. */
 	.map_io		= lubbock_map_io,
 	.nr_irqs	= LUBBOCK_NR_IRQS,
 	.init_irq	= pxa25x_init_irq,
 	.handle_irq	= pxa25x_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= lubbock_init,
 	.restart	= pxa_restart,
 MACHINE_END

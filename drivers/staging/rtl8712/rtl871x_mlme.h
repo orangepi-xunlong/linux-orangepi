@@ -47,20 +47,16 @@
 #define   WIFI_ADHOC_MASTER_STATE 0x00000040
 #define   WIFI_UNDER_LINKING	0x00000080
 #define WIFI_SITE_MONITOR	0x00000800	/* to indicate the station
-						 * is under site surveying
-						 */
+						 * is under site surveying*/
 #define	WIFI_MP_STATE		0x00010000
 #define	WIFI_MP_CTX_BACKGROUND	0x00020000	/* in cont. tx background*/
 #define	WIFI_MP_CTX_ST		0x00040000	/* in cont. tx with
-						 * single-tone
-						 */
+						 *  single-tone*/
 #define	WIFI_MP_CTX_BACKGROUND_PENDING	0x00080000 /* pending in cont, tx
-						    * background due to out of skb
-						    */
+					* background due to out of skb*/
 #define	WIFI_MP_CTX_CCK_HW	0x00100000	/* in continuous tx*/
 #define	WIFI_MP_CTX_CCK_CS	0x00200000	/* in cont, tx with carrier
-						 * suppression
-						 */
+						 * suppression*/
 #define   WIFI_MP_LPBK_STATE	0x00400000
 
 #define _FW_UNDER_LINKING	WIFI_UNDER_LINKING
@@ -73,8 +69,8 @@ since mlme_priv is a shared resource between many threads,
 like ISR/Call-Back functions, the OID handlers, and even timer functions.
 Each _queue has its own locks, already.
 Other items are protected by mlme_priv.lock.
-To avoid possible dead lock, any thread trying to modify mlme_priv
-SHALL not lock up more than one lock at a time!
+To avoid possible dead lock, any thread trying to modifiying mlme_priv
+SHALL not lock up more than one locks at a time!
 */
 
 #define traffic_threshold	10
@@ -136,7 +132,7 @@ static inline sint get_fwstate(struct mlme_priv *pmlmepriv)
  * therefore set it to be the critical section...
  *
  * ### NOTE:#### (!!!!)
- * TAKE CARE BEFORE CALLING THIS FUNC, LOCK pmlmepriv->lock
+ * TAKE CARE THAT BEFORE CALLING THIS FUNC, LOCK pmlmepriv->lock
  */
 static inline void set_fwstate(struct mlme_priv *pmlmepriv, sint state)
 {
@@ -157,7 +153,7 @@ static inline void clr_fwstate(struct mlme_priv *pmlmepriv, sint state)
 	unsigned long irqL;
 
 	spin_lock_irqsave(&pmlmepriv->lock, irqL);
-	if (check_fwstate(pmlmepriv, state))
+	if (check_fwstate(pmlmepriv, state) == true)
 		pmlmepriv->fw_state ^= state;
 	spin_unlock_irqrestore(&pmlmepriv->lock, irqL);
 }
@@ -206,7 +202,7 @@ sint r8712_set_key(struct _adapter *adapter,
 		   struct security_priv *psecuritypriv, sint keyid);
 sint r8712_set_auth(struct _adapter *adapter,
 		    struct security_priv *psecuritypriv);
-uint r8712_get_wlan_bssid_ex_sz(struct wlan_bssid_ex *bss);
+uint r8712_get_ndis_wlan_bssid_ex_sz(struct ndis_wlan_bssid_ex *bss);
 void r8712_generate_random_ibss(u8 *pibss);
 u8 *r8712_get_capability_from_ie(u8 *ie);
 struct wlan_network *r8712_get_oldest_wlan_network(

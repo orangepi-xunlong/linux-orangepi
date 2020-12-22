@@ -68,7 +68,7 @@ struct entry {
 	 * Number of timeout events:
 	 */
 	unsigned long		count;
-	u32			flags;
+	unsigned int		timer_flag;
 
 	/*
 	 * We save the command-line string to preserve
@@ -227,13 +227,13 @@ static struct entry *tstat_lookup(struct entry *entry, char *comm)
  * @startf:	pointer to the function which did the timer setup
  * @timerf:	pointer to the timer callback function of the timer
  * @comm:	name of the process which set up the timer
- * @tflags:	The flags field of the timer
  *
  * When the timer is already registered, then the event counter is
  * incremented. Otherwise the timer is registered in a free slot.
  */
 void timer_stats_update_stats(void *timer, pid_t pid, void *startf,
-			      void *timerf, char *comm, u32 tflags)
+			      void *timerf, char *comm,
+			      unsigned int timer_flag)
 {
 	/*
 	 * It doesn't matter which lock we take:
@@ -251,7 +251,7 @@ void timer_stats_update_stats(void *timer, pid_t pid, void *startf,
 	input.start_func = startf;
 	input.expire_func = timerf;
 	input.pid = pid;
-	input.flags = tflags;
+	input.timer_flag = timer_flag;
 
 	raw_spin_lock_irqsave(lock, flags);
 	if (!timer_stats_active)
@@ -279,7 +279,7 @@ static void print_name_offset(struct seq_file *m, unsigned long addr)
 
 static int tstats_show(struct seq_file *m, void *v)
 {
-	struct timespec64 period;
+	struct timespec period;
 	struct entry *entry;
 	unsigned long ms;
 	long events = 0;
@@ -295,18 +295,18 @@ static int tstats_show(struct seq_file *m, void *v)
 
 	time = ktime_sub(time_stop, time_start);
 
-	period = ktime_to_timespec64(time);
+	period = ktime_to_timespec(time);
 	ms = period.tv_nsec / 1000000;
 
-	seq_puts(m, "Timer Stats Version: v0.3\n");
-	seq_printf(m, "Sample period: %ld.%03ld s\n", (long)period.tv_sec, ms);
+	seq_puts(m, "Timer Stats Version: v0.2\n");
+	seq_printf(m, "Sample period: %ld.%03ld s\n", period.tv_sec, ms);
 	if (atomic_read(&overflow_count))
-		seq_printf(m, "Overflow: %d entries\n", atomic_read(&overflow_count));
-	seq_printf(m, "Collection: %s\n", timer_stats_active ? "active" : "inactive");
+		seq_printf(m, "Overflow: %d entries\n",
+			atomic_read(&overflow_count));
 
 	for (i = 0; i < nr_entries; i++) {
 		entry = entries + i;
-		if (entry->flags & TIMER_DEFERRABLE) {
+ 		if (entry->timer_flag & TIMER_STATS_FLAG_DEFERRABLE) {
 			seq_printf(m, "%4luD, %5d %-16s ",
 				entry->count, entry->pid, entry->comm);
 		} else {

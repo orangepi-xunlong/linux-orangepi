@@ -1,3 +1,4 @@
+
 ################################################################################
 #
 # Common Variables that already set:
@@ -7,36 +8,82 @@
 #     ARCH
 #
 #################################################################################
-
-ifneq ($(LICHEE_KDIR),)
-SOC=$(shell \
-	sed -n 's/^CONFIG_ARCH_\(SUN.*P1\)=y/\1/p' $(LICHEE_KDIR)/.config 2>/dev/null | sed 's/[A-Z]/\l&/g')
-else
-SOC=$(shell \
-	sed -n 's/^CONFIG_ARCH_\(SUN.*P1\)=y/\1/p' .config 2>/dev/null | sed 's/[A-Z]/\l&/g')
+PWD=$(shell pwd)
+			 
+ifneq ($(strip $(CONFIG_ARCH_SUN8IW1P1)),)
+obj-m += sun8iw1p1/
 endif
 
-obj-$(CONFIG_SUNXI_NAND) += $(SOC)/
+ifneq ($(strip $(CONFIG_ARCH_SUN8IW3P1)),)
+obj-m += sun8iw3p1/
+endif
 
-.PHONY: install build clean build_rr
+ifneq ($(strip $(CONFIG_ARCH_SUN9IW1P1)),)
+obj-m += sun9iw1p1/
+endif
 
-install:
-	@if cat $(LICHEE_KDIR)/.config|grep "CONFIG_SUNXI_NAND=m" >/dev/null 2>&1;then \
-		cp $(SOC)/nand.ko $(LICHEE_MOD_DIR)/; \
-	else \
-		echo "[NAND] NOT buid as ko";\
+ifneq ($(strip $(CONFIG_ARCH_SUN8IW5P1)),)
+obj-m += sun8iw5p1/
+endif
+
+ifneq ($(strip $(CONFIG_ARCH_SUN8IW6P1)),)
+obj-m += sun8iw6p1/
+endif
+
+ifneq ($(strip $(CONFIG_ARCH_SUN8IW7P1)),)
+obj-m += sun8iw7p1/
+endif
+
+ifneq ($(strip $(CONFIG_ARCH_SUN8IW9P1)),)
+obj-m += sun8iw9p1/
+endif
+
+install: build	
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW1P1=y" >/dev/null 2>&1;then \
+	cp sun8iw1p1/nand.ko $(LICHEE_MOD_DIR)/;\
 	fi
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW3P1=y" >/dev/null 2>&1;then \
+	cp sun8iw3p1/nand.ko $(LICHEE_MOD_DIR)/;\
+	fi
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN9IW1P1=y" >/dev/null 2>&1;then \
+	cp sun9iw1p1/nand.ko $(LICHEE_MOD_DIR)/;\
+	fi 
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW5P1=y" >/dev/null 2>&1;then \
+	cp sun8iw5p1/nand.ko $(LICHEE_MOD_DIR)/;\
+	fi
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW6P1=y" >/dev/null 2>&1;then \
+	cp sun8iw6p1/nand.ko $(LICHEE_MOD_DIR)/;\
+	fi	 
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW7P1=y" >/dev/null 2>&1;then \
+	cp sun8iw7p1/nand.ko $(LICHEE_MOD_DIR)/;\
+	fi
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW9P1=y" >/dev/null 2>&1;then \
+	cp sun8iw9p1/nand.ko $(LICHEE_MOD_DIR)/;\
+	fi
+	
+build:
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW1P1=y" >/dev/null 2>&1;then \
+	cp sun8iw1p1/libnand_sun8iw1p1 sun8iw1p1/libnand_sun8iw1p1.a;\
+	fi
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW3P1=y" >/dev/null 2>&1;then \
+	cp sun8iw3p1/libnand_sun8iw3p1 sun8iw3p1/libnand_sun8iw3p1.a;\
+	fi
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN9IW1P1=y" >/dev/null 2>&1;then \
+	cp sun9iw1p1/libnand_sun9iw1p1 sun9iw1p1/libnand_sun9iw1p1.a;\
+	fi	
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW5P1=y" >/dev/null 2>&1;then \
+	cp sun8iw5p1/libnand_sun8iw5p1 sun8iw5p1/libnand_sun8iw5p1.a;\
+	fi
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW6P1=y" >/dev/null 2>&1;then \
+	cp sun8iw6p1/libnand_sun8iw6p1 sun8iw6p1/libnand_sun8iw6p1.a;\
+	fi
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW7P1=y" >/dev/null 2>&1;then \
+	cp sun8iw7p1/libnand_sun8iw7p1 sun8iw7p1/libnand_sun8iw7p1.a;\
+	fi	
+	@if cat ../../.config|grep "CONFIG_ARCH_SUN8IW9P1=y" >/dev/null 2>&1;then \
+	cp sun8iw9p1/libnand_sun8iw9p1 sun8iw9p1/libnand_sun8iw9p1.a;\
+	fi
+	$(MAKE) -C $(LICHEE_KDIR) M=$(PWD)
+
 clean:
 	@rm -rf *.o *.ko .*.cmd *.mod.c *.order *.symvers .tmp_versions *~
-
-build:
-	@make -C ${SOC}/lib clean 2>/dev/null
-	@make -C ${SOC}/lib install
-
-build_rr:
-	@make -C ${SOC}/phy-nand/physic_v2/rr_lib clean 2>/dev/null
-	@make -C ${SOC}/phy-nand/physic_v2/rr_lib
-
-build_3d:
-	@make -C ${SOC}/lib-3d clean 2>/dev/null
-	@make -C ${SOC}/lib-3d install

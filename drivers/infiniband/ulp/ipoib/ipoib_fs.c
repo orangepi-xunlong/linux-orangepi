@@ -281,9 +281,10 @@ void ipoib_delete_debug_files(struct net_device *dev)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 
-	debugfs_remove(priv->mcg_dentry);
-	debugfs_remove(priv->path_dentry);
-	priv->mcg_dentry = priv->path_dentry = NULL;
+	if (priv->mcg_dentry)
+		debugfs_remove(priv->mcg_dentry);
+	if (priv->path_dentry)
+		debugfs_remove(priv->path_dentry);
 }
 
 int ipoib_register_debugfs(void)

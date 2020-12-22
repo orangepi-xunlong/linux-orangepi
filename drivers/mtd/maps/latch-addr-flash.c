@@ -10,6 +10,7 @@
  * kind, whether express or implied.
  */
 
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mtd/mtd.h>
@@ -101,8 +102,9 @@ static int latch_addr_flash_remove(struct platform_device *dev)
 	info = platform_get_drvdata(dev);
 	if (info == NULL)
 		return 0;
+	platform_set_drvdata(dev, NULL);
 
-	latch_addr_data = dev_get_platdata(&dev->dev);
+	latch_addr_data = dev->dev.platform_data;
 
 	if (info->mtd != NULL) {
 		mtd_device_unregister(info->mtd);
@@ -123,7 +125,7 @@ static int latch_addr_flash_remove(struct platform_device *dev)
 	return 0;
 }
 
-static int latch_addr_flash_probe(struct platform_device *dev)
+static int __devinit latch_addr_flash_probe(struct platform_device *dev)
 {
 	struct latch_addr_flash_data *latch_addr_data;
 	struct latch_addr_flash_info *info;
@@ -133,7 +135,7 @@ static int latch_addr_flash_probe(struct platform_device *dev)
 	int chipsel;
 	int err;
 
-	latch_addr_data = dev_get_platdata(&dev->dev);
+	latch_addr_data = dev->dev.platform_data;
 	if (latch_addr_data == NULL)
 		return -ENODEV;
 
@@ -195,7 +197,7 @@ static int latch_addr_flash_probe(struct platform_device *dev)
 		err = -ENODEV;
 		goto iounmap;
 	}
-	info->mtd->dev.parent = &dev->dev;
+	info->mtd->owner = THIS_MODULE;
 
 	mtd_device_parse_register(info->mtd, NULL, NULL,
 				  latch_addr_data->parts,
@@ -216,7 +218,7 @@ done:
 
 static struct platform_driver latch_addr_flash_driver = {
 	.probe		= latch_addr_flash_probe,
-	.remove		= latch_addr_flash_remove,
+	.remove		= __devexit_p(latch_addr_flash_remove),
 	.driver		= {
 		.name	= DRIVER_NAME,
 	},

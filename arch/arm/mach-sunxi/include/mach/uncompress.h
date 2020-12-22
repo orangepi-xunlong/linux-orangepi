@@ -1,9 +1,8 @@
 /*
  *  arch/arm/mach-sun6i/include/mach/uncompress.h
  *
- * Copyright(c) 2012-2016 Allwinnertech Co., Ltd.
- * Author: Benn Huang <benn@allwinnertech.com>
- *	   Sugar <shuge@allwinnertech.com>
+ * Copyright (c) Allwinner.  All rights reserved.
+ * Benn Huang (benn@allwinnertech.com) 
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,7 +15,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #ifndef __MACH_UNCOMPRESS_H
 #define __MACH_UNCOMPRESS_H
@@ -24,9 +24,9 @@
 #include <asm/mach-types.h>
 #include <asm/processor.h>
 #include <asm/barrier.h>
+#include <mach/platform.h>
 #include <linux/bitops.h>
 
-#define SUNXI_UART0_PBASE	0x01c28000
 #define UART_TF		(*(volatile unsigned long*)(SUNXI_UART0_PBASE + 0x00))
 #define UART_SR		(*(volatile unsigned long*)(SUNXI_UART0_PBASE + 0x7C))
 #define TX_BUSY		BIT(1)
@@ -36,7 +36,7 @@
 static inline void putc(int c)
 {
 #if 0
-	while (!(UART_SR & TX_BUSY))
+	while(!(UART_SR & TX_BUSY))
 		cpu_relax();
 	UART_TF = c;
 #endif

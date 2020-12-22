@@ -1,6 +1,39 @@
 #ifndef __INC_QOS_TYPE_H
 #define __INC_QOS_TYPE_H
 
+#define BIT0                    0x00000001
+#define BIT1                    0x00000002
+#define BIT2                    0x00000004
+#define BIT3                    0x00000008
+#define BIT4                    0x00000010
+#define BIT5                    0x00000020
+#define BIT6                    0x00000040
+#define BIT7                    0x00000080
+#define BIT8                    0x00000100
+#define BIT9                    0x00000200
+#define BIT10                   0x00000400
+#define BIT11                   0x00000800
+#define BIT12                   0x00001000
+#define BIT13                   0x00002000
+#define BIT14                   0x00004000
+#define BIT15                   0x00008000
+#define BIT16                   0x00010000
+#define BIT17                   0x00020000
+#define BIT18                   0x00040000
+#define BIT19                   0x00080000
+#define BIT20                   0x00100000
+#define BIT21                   0x00200000
+#define BIT22                   0x00400000
+#define BIT23                   0x00800000
+#define BIT24                   0x01000000
+#define BIT25                   0x02000000
+#define BIT26                   0x04000000
+#define BIT27                   0x08000000
+#define BIT28                   0x10000000
+#define BIT29                   0x20000000
+#define BIT30                   0x40000000
+#define BIT31                   0x80000000
+
 #define	MAX_WMMELE_LENGTH	64
 
 //
@@ -33,7 +66,7 @@ typedef u32 QOS_MODE, *PQOS_MODE;
 typedef	enum _ACK_POLICY{
 	eAckPlc0_ACK		= 0x00,
 	eAckPlc1_NoACK		= 0x01,
-} ACK_POLICY, *PACK_POLICY;
+}ACK_POLICY,*PACK_POLICY;
 
 #define WMM_PARAM_ELEMENT_SIZE	(8+(4*AC_PARAM_SIZE))
 
@@ -48,7 +81,8 @@ typedef	union _QOS_CTRL_FIELD{
 	u16	shortData;
 
 	// WMM spec
-	struct {
+	struct
+	{
 		u8		UP:3;
 		u8		usRsvd1:1;
 		u8		EOSP:1;
@@ -58,7 +92,8 @@ typedef	union _QOS_CTRL_FIELD{
 	}WMM;
 
 	// 802.11e: QoS data type frame sent by non-AP QSTAs.
-	struct {
+	struct
+	{
 		u8		TID:4;
 		u8		bIsQsize:1;// 0: BIT[8:15] is TXOP Duration Requested, 1: BIT[8:15] is Queue Size.
 		u8		AckPolicy:2;
@@ -67,7 +102,8 @@ typedef	union _QOS_CTRL_FIELD{
 	}BySta;
 
 	// 802.11e: QoS data, QoS Null, and QoS Data+CF-Ack frames sent by HC.
-	struct {
+	struct
+	{
 		u8		TID:4;
 		u8		EOSP:1;
 		u8		AckPolicy:2;
@@ -76,7 +112,8 @@ typedef	union _QOS_CTRL_FIELD{
 	}ByHc_Data;
 
 	// 802.11e: QoS (+) CF-Poll frames sent by HC.
-	struct {
+	struct
+	{
 		u8		TID:4;
 		u8		EOSP:1;
 		u8		AckPolicy:2;
@@ -96,12 +133,14 @@ typedef	union _QOS_CTRL_FIELD{
 typedef	union _QOS_INFO_FIELD{
 	u8	charData;
 
-	struct {
+	struct
+	{
 		u8		ucParameterSetCount:4;
 		u8		ucReserved:4;
 	}WMM;
 
-	struct {
+	struct
+	{
 		//Ref WMM_Specification_1-1.pdf, 2006-06-13 Isaiah
 		u8		ucAC_VO_UAPSD:1;
 		u8		ucAC_VI_UAPSD:1;
@@ -113,14 +152,16 @@ typedef	union _QOS_INFO_FIELD{
 
 	}ByWmmPsSta;
 
-	struct {
+	struct
+	{
 		//Ref WMM_Specification_1-1.pdf, 2006-06-13 Isaiah
 		u8		ucParameterSetCount:4;
 		u8		ucReserved:3;
 		u8		ucApUapsd:1;
 	}ByWmmPsAp;
 
-	struct {
+	struct
+	{
 		u8		ucAC3_UAPSD:1;
 		u8		ucAC2_UAPSD:1;
 		u8		ucAC1_UAPSD:1;
@@ -130,7 +171,8 @@ typedef	union _QOS_INFO_FIELD{
 		u8		ucMoreDataAck:1;
 	} By11eSta;
 
-	struct {
+	struct
+	{
 		u8		ucParameterSetCount:4;
 		u8		ucQAck:1;
 		u8		ucQueueReq:1;
@@ -138,14 +180,16 @@ typedef	union _QOS_INFO_FIELD{
 		u8		ucReserved:1;
 	} By11eAp;
 
-	struct {
+	struct
+	{
 		u8		ucReserved1:4;
 		u8		ucQAck:1;
 		u8		ucReserved2:2;
 		u8		ucMoreDataAck:1;
 	} ByWmmsaSta;
 
-	struct {
+	struct
+	{
 		u8		ucReserved1:4;
 		u8		ucQAck:1;
 		u8		ucQueueReq:1;
@@ -153,7 +197,8 @@ typedef	union _QOS_INFO_FIELD{
 		u8		ucReserved2:1;
 	} ByWmmsaAp;
 
-	struct {
+	struct
+	{
 		u8		ucAC3_UAPSD:1;
 		u8		ucAC2_UAPSD:1;
 		u8		ucAC1_UAPSD:1;
@@ -163,7 +208,8 @@ typedef	union _QOS_INFO_FIELD{
 		u8		ucMoreDataAck:1;
 	} ByAllSta;
 
-	struct {
+	struct
+	{
 		u8		ucParameterSetCount:4;
 		u8		ucQAck:1;
 		u8		ucQueueReq:1;
@@ -200,7 +246,8 @@ typedef u32 AC_CODING;
 typedef	union _ACI_AIFSN{
 	u8	charData;
 
-	struct {
+	struct
+	{
 		u8	AIFSN:4;
 		u8	ACM:1;
 		u8	ACI:2;
@@ -214,7 +261,8 @@ typedef	union _ACI_AIFSN{
 //
 typedef	union _ECW{
 	u8	charData;
-	struct {
+	struct
+	{
 		u8	ECWmin:4;
 		u8	ECWmax:4;
 	}f;	// Field
@@ -228,7 +276,8 @@ typedef	union _AC_PARAM{
 	u32	longData;
 	u8	charData[4];
 
-	struct {
+	struct
+	{
 		ACI_AIFSN	AciAifsn;
 		ECW		Ecw;
 		u16		TXOPLimit;
@@ -243,7 +292,7 @@ typedef	union _AC_PARAM{
 typedef	enum _QOS_ELE_SUBTYPE{
 	QOSELE_TYPE_INFO	= 0x00,		// 0x00: Information element
 	QOSELE_TYPE_PARAM	= 0x01,		// 0x01: parameter element
-} QOS_ELE_SUBTYPE, *PQOS_ELE_SUBTYPE;
+}QOS_ELE_SUBTYPE,*PQOS_ELE_SUBTYPE;
 
 
 //
@@ -255,7 +304,7 @@ typedef	enum _DIRECTION_VALUE{
 	DIR_DOWN		= 1,		// 0x01	// DownLink
 	DIR_DIRECT		= 2,		// 0x10	// DirectLink
 	DIR_BI_DIR		= 3,		// 0x11	// Bi-Direction
-} DIRECTION_VALUE, *PDIRECTION_VALUE;
+}DIRECTION_VALUE,*PDIRECTION_VALUE;
 
 
 //
@@ -287,7 +336,8 @@ typedef union _QOS_TSINFO{
 typedef union _TSPEC_BODY{
 	u8		charData[55];
 
-	struct {
+	struct
+	{
 		QOS_TSINFO	TSInfo;	//u8	TSInfo[3];
 		u16	NominalMSDUsize;
 		u16	MaxMSDUsize;
@@ -330,7 +380,7 @@ typedef	enum _ACM_METHOD{
 	eAcmWay0_SwAndHw		= 0,		// By SW and HW.
 	eAcmWay1_HW			= 1,		// By HW.
 	eAcmWay2_SW			= 2,		// By SW.
-} ACM_METHOD, *PACM_METHOD;
+}ACM_METHOD,*PACM_METHOD;
 
 
 typedef struct _ACM{
@@ -342,17 +392,17 @@ typedef struct _ACM{
 
 typedef	u8		AC_UAPSD, *PAC_UAPSD;
 
-#define	GET_VO_UAPSD(_apsd) ((_apsd) & BIT(0))
-#define	SET_VO_UAPSD(_apsd) ((_apsd) |= BIT(0))
+#define	GET_VO_UAPSD(_apsd) ((_apsd) & BIT0)
+#define	SET_VO_UAPSD(_apsd) ((_apsd) |= BIT0)
 
-#define	GET_VI_UAPSD(_apsd) ((_apsd) & BIT(1))
-#define	SET_VI_UAPSD(_apsd) ((_apsd) |= BIT(1))
+#define	GET_VI_UAPSD(_apsd) ((_apsd) & BIT1)
+#define	SET_VI_UAPSD(_apsd) ((_apsd) |= BIT1)
 
-#define	GET_BK_UAPSD(_apsd) ((_apsd) & BIT(2))
-#define	SET_BK_UAPSD(_apsd) ((_apsd) |= BIT(2))
+#define	GET_BK_UAPSD(_apsd) ((_apsd) & BIT2)
+#define	SET_BK_UAPSD(_apsd) ((_apsd) |= BIT2)
 
-#define	GET_BE_UAPSD(_apsd) ((_apsd) & BIT(3))
-#define	SET_BE_UAPSD(_apsd) ((_apsd) |= BIT(3))
+#define	GET_BE_UAPSD(_apsd) ((_apsd) & BIT3)
+#define	SET_BE_UAPSD(_apsd) ((_apsd) |= BIT3)
 
 
 //typedef struct _TCLASS{
@@ -362,14 +412,14 @@ typedef union _QOS_TCLAS{
 
 	struct _TYPE_GENERAL{
 		u8		Priority;
-		u8		ClassifierType;
-		u8		Mask;
+		u8 		ClassifierType;
+		u8 		Mask;
 	} TYPE_GENERAL;
 
 	struct _TYPE0_ETH{
 		u8		Priority;
-		u8		ClassifierType;
-		u8		Mask;
+		u8 		ClassifierType;
+		u8 		Mask;
 		u8		SrcAddr[6];
 		u8		DstAddr[6];
 		u16		Type;
@@ -377,9 +427,9 @@ typedef union _QOS_TCLAS{
 
 	struct _TYPE1_IPV4{
 		u8		Priority;
-		u8		ClassifierType;
-		u8		Mask;
-		u8		Version;
+		u8 		ClassifierType;
+		u8 		Mask;
+		u8 		Version;
 		u8		SrcIP[4];
 		u8		DstIP[4];
 		u16		SrcPort;
@@ -391,9 +441,9 @@ typedef union _QOS_TCLAS{
 
 	struct _TYPE1_IPV6{
 		u8		Priority;
-		u8		ClassifierType;
-		u8		Mask;
-		u8		Version;
+		u8 		ClassifierType;
+		u8 		Mask;
+		u8 		Version;
 		u8		SrcIP[16];
 		u8		DstIP[16];
 		u16		SrcPort;
@@ -403,8 +453,8 @@ typedef union _QOS_TCLAS{
 
 	struct _TYPE2_8021Q{
 		u8		Priority;
-		u8		ClassifierType;
-		u8		Mask;
+		u8 		ClassifierType;
+		u8 		Mask;
 		u16		TagType;
 	} TYPE2_8021Q;
 } QOS_TCLAS, *PQOS_TCLAS;
@@ -431,7 +481,7 @@ typedef struct _QOS_TSTREAM{
 //	"Qos control field" and "Qos info field"
 //typedef struct _QOS_UAPSD{
 //	u8			bTriggerEnable[4];
-//	u8			MaxSPLength;
+//	u8 			MaxSPLength;
 //	u8			HighestBufAC;
 //} QOS_UAPSD, *PQOS_APSD;
 
@@ -439,7 +489,7 @@ typedef struct _QOS_TSTREAM{
 //      802.11 Management frame Status Code field
 //----------------------------------------------------------------------------
 typedef struct _OCTET_STRING{
-	u8		*Octet;
+	u8        	*Octet;
 	u16             Length;
 }OCTET_STRING, *POCTET_STRING;
 
@@ -450,7 +500,7 @@ typedef struct _OCTET_STRING{
 typedef struct _STA_QOS{
 	//DECLARE_RT_OBJECT(STA_QOS);
 	u8				WMMIEBuf[MAX_WMMELE_LENGTH];
-	u8				*WMMIE;
+	u8*				WMMIE;
 
 	// Part 1. Self QoS Mode.
 	QOS_MODE			QosCapability; //QoS Capability, 2006-06-14 Isaiah
@@ -462,10 +512,10 @@ typedef struct _STA_QOS{
 	AC_UAPSD			Curr4acUapsd;
 	u8				bInServicePeriod;
 	u8				MaxSPLength;
-	int				NumBcnBeforeTrigger;
+	int 				NumBcnBeforeTrigger;
 
 	// Part 2. EDCA Parameter (perAC)
-	u8				*pWMMInfoEle;
+	u8 *				pWMMInfoEle;
 	u8				WMMParamEle[WMM_PARAM_ELEMENT_SIZE];
 	u8				WMMPELength;
 
@@ -473,7 +523,7 @@ typedef struct _STA_QOS{
 	//2 ToDo: remove the Qos Info Field and replace it by the above WMM Info element.
 	// By Bruce, 2008-01-30.
 	// Part 2. EDCA Parameter (perAC)
-	QOS_INFO_FIELD			QosInfoField_STA;	// Maintained by STA
+	QOS_INFO_FIELD			QosInfoField_STA; 	// Maintained by STA
 	QOS_INFO_FIELD			QosInfoField_AP;	// Retrieved from AP
 
 	AC_PARAM			CurAcParameters[4];
@@ -504,12 +554,12 @@ typedef struct _BSS_QOS{
 	QOS_MODE		bdQoSMode;
 
 	u8			bdWMMIEBuf[MAX_WMMELE_LENGTH];
-	u8		*bdWMMIE;
+	u8*		bdWMMIE;
 
 	QOS_ELE_SUBTYPE		EleSubType;
 
-	u8			*pWMMInfoEle;
-	u8			*pWMMParamEle;
+	u8 *			pWMMInfoEle;
+	u8 *			pWMMParamEle;
 
 	QOS_INFO_FIELD		QosInfoField;
 	AC_PARAM		AcParameter[4];

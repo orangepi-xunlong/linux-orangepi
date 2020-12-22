@@ -33,13 +33,18 @@ static int ath9k_hw_ar9287_get_eeprom_rev(struct ath_hw *ah)
 static bool __ath9k_hw_ar9287_fill_eeprom(struct ath_hw *ah)
 {
 	struct ar9287_eeprom *eep = &ah->eeprom.map9287;
+	struct ath_common *common = ath9k_hw_common(ah);
 	u16 *eep_data;
 	int addr, eep_start_loc = AR9287_EEP_START_LOC;
 	eep_data = (u16 *)eep;
 
 	for (addr = 0; addr < SIZE_EEPROM_AR9287; addr++) {
-		if (!ath9k_hw_nvram_read(ah, addr + eep_start_loc, eep_data))
+		if (!ath9k_hw_nvram_read(common, addr + eep_start_loc,
+					 eep_data)) {
+			ath_dbg(common, EEPROM,
+				"Unable to read eeprom region\n");
 			return false;
+		}
 		eep_data++;
 	}
 
@@ -125,9 +130,9 @@ static u32 ath9k_hw_ar9287_dump_eeprom(struct ath_hw *ah, bool dump_base_hdr,
 	struct base_eep_ar9287_header *pBase = &eep->baseEepHeader;
 
 	if (!dump_base_hdr) {
-		len += scnprintf(buf + len, size - len,
-				 "%20s :\n", "2GHz modal Header");
-		len = ar9287_dump_modal_eeprom(buf, len, size,
+		len += snprintf(buf + len, size - len,
+				"%20s :\n", "2GHz modal Header");
+		len += ar9287_dump_modal_eeprom(buf, len, size,
 						&eep->modalHeader);
 		goto out;
 	}
@@ -157,8 +162,8 @@ static u32 ath9k_hw_ar9287_dump_eeprom(struct ath_hw *ah, bool dump_base_hdr,
 	PR_EEP("Power Table Offset", pBase->pwrTableOffset);
 	PR_EEP("OpenLoop Power Ctrl", pBase->openLoopPwrCntl);
 
-	len += scnprintf(buf + len, size - len, "%20s : %pM\n", "MacAddress",
-			 pBase->macAddr);
+	len += snprintf(buf + len, size - len, "%20s : %pM\n", "MacAddress",
+			pBase->macAddr);
 
 out:
 	if (len > size)
@@ -177,24 +182,59 @@ static u32 ath9k_hw_ar9287_dump_eeprom(struct ath_hw *ah, bool dump_base_hdr,
 
 static int ath9k_hw_ar9287_check_eeprom(struct ath_hw *ah)
 {
-	u32 el, integer;
-	u16 word;
-	int i, err;
-	bool need_swap;
+	u32 sum = 0, el, integer;
+	u16 temp, word, magic, magic2, *eepdata;
+	int i, addr;
+	bool need_swap = false;
 	struct ar9287_eeprom *eep = &ah->eeprom.map9287;
+	struct ath_common *common = ath9k_hw_common(ah);
 
-	err = ath9k_hw_nvram_swap_data(ah, &need_swap, SIZE_EEPROM_AR9287);
-	if (err)
-		return err;
+	if (!ath9k_hw_use_flash(ah)) {
+		if (!ath9k_hw_nvram_read(common, AR5416_EEPROM_MAGIC_OFFSET,
+					 &magic)) {
+			ath_err(common, "Reading Magic # failed\n");
+			return false;
+		}
+
+		ath_dbg(common, EEPROM, "Read Magic = 0x%04X\n", magic);
+
+		if (magic != AR5416_EEPROM_MAGIC) {
+			magic2 = swab16(magic);
+
+			if (magic2 == AR5416_EEPROM_MAGIC) {
+				need_swap = true;
+				eepdata = (u16 *)(&ah->eeprom);
+
+				for (addr = 0; addr < SIZE_EEPROM_AR9287; addr++) {
+					temp = swab16(*eepdata);
+					*eepdata = temp;
+					eepdata++;
+				}
+			} else {
+				ath_err(common,
+					"Invalid EEPROM Magic. Endianness mismatch.\n");
+				return -EINVAL;
+			}
+		}
+	}
+
+	ath_dbg(common, EEPROM, "need_swap = %s\n",
+		need_swap ? "True" : "False");
 
 	if (need_swap)
-		el = swab16(eep->baseEepHeader.length);
+		el = swab16(ah->eeprom.map9287.baseEepHeader.length);
 	else
-		el = eep->baseEepHeader.length;
+		el = ah->eeprom.map9287.baseEepHeader.length;
 
-	el = min(el / sizeof(u16), SIZE_EEPROM_AR9287);
-	if (!ath9k_hw_nvram_validate_checksum(ah, el))
-		return -EINVAL;
+	if (el > sizeof(struct ar9287_eeprom))
+		el = sizeof(struct ar9287_eeprom) / sizeof(u16);
+	else
+		el = el / sizeof(u16);
+
+	eepdata = (u16 *)(&ah->eeprom);
+
+	for (i = 0; i < el; i++)
+		sum ^= *eepdata++;
 
 	if (need_swap) {
 		word = swab16(eep->baseEepHeader.length);
@@ -235,14 +275,15 @@ static int ath9k_hw_ar9287_check_eeprom(struct ath_hw *ah)
 		}
 	}
 
-	if (!ath9k_hw_nvram_check_version(ah, AR9287_EEP_VER,
-	    AR5416_EEP_NO_BACK_VER))
+	if (sum != 0xffff || ah->eep_ops->get_eeprom_ver(ah) != AR9287_EEP_VER
+	    || ah->eep_ops->get_eeprom_rev(ah) < AR5416_EEP_NO_BACK_VER) {
+		ath_err(common, "Bad EEPROM checksum 0x%x or revision 0x%04x\n",
+			sum, ah->eep_ops->get_eeprom_ver(ah));
 		return -EINVAL;
+	}
 
 	return 0;
 }
-
-#undef SIZE_EEPROM_AR9287
 
 static u32 ath9k_hw_ar9287_get_eeprom(struct ath_hw *ah,
 				      enum eeprom_param param)
@@ -523,6 +564,9 @@ static void ath9k_hw_set_ar9287_power_per_rate_table(struct ath_hw *ah,
 	(((cfgCtl & ~CTL_MODE_M) | (pCtlMode[ctlMode] & CTL_MODE_M)) == \
 	 ((pEepData->ctlIndex[i] & CTL_MODE_M) | SD_NO_CTL))
 
+#define REDUCE_SCALED_POWER_BY_TWO_CHAIN     6
+#define REDUCE_SCALED_POWER_BY_THREE_CHAIN   10
+
 	u16 twiceMaxEdgePower;
 	int i;
 	struct cal_ctl_data_ar9287 *rep;
@@ -547,8 +591,29 @@ static void ath9k_hw_set_ar9287_power_per_rate_table(struct ath_hw *ah,
 	tx_chainmask = ah->txchainmask;
 
 	ath9k_hw_get_channel_centers(ah, chan, &centers);
-	scaledPower = ath9k_hw_get_scaled_power(ah, powerLimit,
-						antenna_reduction);
+	scaledPower = powerLimit - antenna_reduction;
+
+	/*
+	 * Reduce scaled Power by number of chains active
+	 * to get the per chain tx power level.
+	 */
+	switch (ar5416_get_ntxchains(tx_chainmask)) {
+	case 1:
+		break;
+	case 2:
+		if (scaledPower > REDUCE_SCALED_POWER_BY_TWO_CHAIN)
+			scaledPower -= REDUCE_SCALED_POWER_BY_TWO_CHAIN;
+		else
+			scaledPower = 0;
+		break;
+	case 3:
+		if (scaledPower > REDUCE_SCALED_POWER_BY_THREE_CHAIN)
+			scaledPower -= REDUCE_SCALED_POWER_BY_THREE_CHAIN;
+		else
+			scaledPower = 0;
+		break;
+	}
+	scaledPower = max((u16)0, scaledPower);
 
 	/*
 	 * Get TX power from EEPROM.
@@ -721,6 +786,8 @@ static void ath9k_hw_set_ar9287_power_per_rate_table(struct ath_hw *ah,
 
 #undef CMP_CTL
 #undef CMP_NO_CTL
+#undef REDUCE_SCALED_POWER_BY_TWO_CHAIN
+#undef REDUCE_SCALED_POWER_BY_THREE_CHAIN
 }
 
 static void ath9k_hw_ar9287_set_txpower(struct ath_hw *ah,
@@ -850,21 +917,6 @@ static void ath9k_hw_ar9287_set_txpower(struct ath_hw *ah,
 			  | ATH9K_POW_SM(ratesArray[rateDupOfdm], 8)
 			  | ATH9K_POW_SM(ratesArray[rateDupCck], 0));
 	}
-
-	/* TPC initializations */
-	if (ah->tpc_enabled) {
-		int ht40_delta;
-
-		ht40_delta = (IS_CHAN_HT40(chan)) ? ht40PowerIncForPdadc : 0;
-		ar5008_hw_init_rate_txpower(ah, ratesArray, chan, ht40_delta);
-		/* Enable TPC */
-		REG_WRITE(ah, AR_PHY_POWER_TX_RATE_MAX,
-			MAX_RATE_POWER | AR_PHY_POWER_TX_RATE_MAX_TPC_ENABLE);
-	} else {
-		/* Disable TPC */
-		REG_WRITE(ah, AR_PHY_POWER_TX_RATE_MAX, MAX_RATE_POWER);
-	}
-
 	REGWRITE_BUFFER_FLUSH(ah);
 }
 
@@ -983,7 +1035,31 @@ static void ath9k_hw_ar9287_set_board_values(struct ath_hw *ah,
 static u16 ath9k_hw_ar9287_get_spur_channel(struct ath_hw *ah,
 					    u16 i, bool is2GHz)
 {
-	return ah->eeprom.map9287.modalHeader.spurChans[i].spurChan;
+#define EEP_MAP9287_SPURCHAN \
+	(ah->eeprom.map9287.modalHeader.spurChans[i].spurChan)
+
+	struct ath_common *common = ath9k_hw_common(ah);
+	u16 spur_val = AR_NO_SPUR;
+
+	ath_dbg(common, ANI, "Getting spur idx:%d is2Ghz:%d val:%x\n",
+		i, is2GHz, ah->config.spurchans[i][is2GHz]);
+
+	switch (ah->config.spurmode) {
+	case SPUR_DISABLE:
+		break;
+	case SPUR_ENABLE_IOCTL:
+		spur_val = ah->config.spurchans[i][is2GHz];
+		ath_dbg(common, ANI, "Getting spur val from new loc. %d\n",
+			spur_val);
+		break;
+	case SPUR_ENABLE_EEPROM:
+		spur_val = EEP_MAP9287_SPURCHAN;
+		break;
+	}
+
+	return spur_val;
+
+#undef EEP_MAP9287_SPURCHAN
 }
 
 const struct eeprom_ops eep_ar9287_ops = {

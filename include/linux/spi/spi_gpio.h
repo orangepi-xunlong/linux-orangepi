@@ -62,8 +62,8 @@
  */
 struct spi_gpio_platform_data {
 	unsigned	sck;
-	unsigned long	mosi;
-	unsigned long	miso;
+	unsigned	mosi;
+	unsigned	miso;
 
 	u16		num_chipselect;
 };

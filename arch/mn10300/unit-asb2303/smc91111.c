@@ -15,7 +15,6 @@
 #include <linux/platform_device.h>
 
 #include <asm/io.h>
-#include <asm/irq.h>
 #include <asm/timex.h>
 #include <asm/processor.h>
 #include <asm/intctl-regs.h>

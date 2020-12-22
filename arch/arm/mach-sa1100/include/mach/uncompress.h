@@ -8,8 +8,6 @@
 
 #include "hardware.h"
 
-#define IOMEM(x)	(x)
-
 /*
  * The following code assumes the serial port has already been
  * initialized by the bootloader.  We search for the first enabled
@@ -19,7 +17,7 @@
 
 #define UART(x)		(*(volatile unsigned long *)(serial_port + (x)))
 
-static inline void putc(int c)
+static void putc(int c)
 {
 	unsigned long serial_port;
 
@@ -49,3 +47,4 @@ static inline void flush(void)
  * Nothing to do for these
  */
 #define arch_decomp_setup()
+#define arch_decomp_wdog()

@@ -1,7 +1,7 @@
 /*
  * arch/powerpc/platforms/83xx/mpc837x_rdb.c
  *
- * Copyright (C) 2007 Freescale Semiconductor, Inc. All rights reserved.
+ * Copyright (C) 2007 Freescale Semicondutor, Inc. All rights reserved.
  *
  * MPC837x RDB board specific routines
  *
@@ -50,14 +50,17 @@ static void mpc837x_rdb_sd_cfg(void)
  */
 static void __init mpc837x_rdb_setup_arch(void)
 {
-	mpc83xx_setup_arch();
+	if (ppc_md.progress)
+		ppc_md.progress("mpc837x_rdb_setup_arch()", 0);
+
+	mpc83xx_setup_pci();
 	mpc837x_usb_cfg();
 	mpc837x_rdb_sd_cfg();
 }
 
 machine_device_initcall(mpc837x_rdb, mpc83xx_declare_of_platform_devices);
 
-static const char * const board[] __initconst = {
+static const char *board[] __initdata = {
 	"fsl,mpc8377rdb",
 	"fsl,mpc8378rdb",
 	"fsl,mpc8379rdb",
@@ -70,7 +73,7 @@ static const char * const board[] __initconst = {
  */
 static int __init mpc837x_rdb_probe(void)
 {
-	return of_device_compatible_match(of_root, board);
+	return of_flat_dt_match(of_get_flat_dt_root(), board);
 }
 
 define_machine(mpc837x_rdb) {

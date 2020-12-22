@@ -24,8 +24,6 @@
  *
  */
 
-#include <linux/linkage.h>
-
 .file "serpent-sse2-x86_64-asm_64.S"
 .text
 
@@ -634,7 +632,11 @@
 	pxor t0,		x3; \
 	movdqu x3,		(3*4*4)(out);
 
-ENTRY(__serpent_enc_blk_8way)
+.align 8
+.global __serpent_enc_blk_8way
+.type   __serpent_enc_blk_8way,@function;
+
+__serpent_enc_blk_8way:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -685,21 +687,24 @@ ENTRY(__serpent_enc_blk_8way)
 	leaq (4*4*4)(%rsi), %rax;
 
 	testb %cl, %cl;
-	jnz .L__enc_xor8;
+	jnz __enc_xor8;
 
 	write_blocks(%rsi, RA1, RB1, RC1, RD1, RK0, RK1, RK2);
 	write_blocks(%rax, RA2, RB2, RC2, RD2, RK0, RK1, RK2);
 
 	ret;
 
-.L__enc_xor8:
+__enc_xor8:
 	xor_blocks(%rsi, RA1, RB1, RC1, RD1, RK0, RK1, RK2);
 	xor_blocks(%rax, RA2, RB2, RC2, RD2, RK0, RK1, RK2);
 
 	ret;
-ENDPROC(__serpent_enc_blk_8way)
 
-ENTRY(serpent_dec_blk_8way)
+.align 8
+.global serpent_dec_blk_8way
+.type   serpent_dec_blk_8way,@function;
+
+serpent_dec_blk_8way:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -751,4 +756,3 @@ ENTRY(serpent_dec_blk_8way)
 	write_blocks(%rax, RC2, RD2, RB2, RE2, RK0, RK1, RK2);
 
 	ret;
-ENDPROC(serpent_dec_blk_8way)

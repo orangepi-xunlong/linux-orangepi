@@ -70,6 +70,29 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"MIC1", NULL, "Mic (Internal)"},
 };
 
+static int e750_ac97_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
+
+	snd_soc_dapm_nc_pin(dapm, "LOUT");
+	snd_soc_dapm_nc_pin(dapm, "ROUT");
+	snd_soc_dapm_nc_pin(dapm, "PHONE");
+	snd_soc_dapm_nc_pin(dapm, "LINEINL");
+	snd_soc_dapm_nc_pin(dapm, "LINEINR");
+	snd_soc_dapm_nc_pin(dapm, "CDINL");
+	snd_soc_dapm_nc_pin(dapm, "CDINR");
+	snd_soc_dapm_nc_pin(dapm, "PCBEEP");
+	snd_soc_dapm_nc_pin(dapm, "MIC2");
+
+	snd_soc_dapm_new_controls(dapm, e750_dapm_widgets,
+					ARRAY_SIZE(e750_dapm_widgets));
+
+	snd_soc_dapm_add_routes(dapm, audio_map, ARRAY_SIZE(audio_map));
+
+	return 0;
+}
+
 static struct snd_soc_dai_link e750_dai[] = {
 	{
 		.name = "AC97",
@@ -78,6 +101,7 @@ static struct snd_soc_dai_link e750_dai[] = {
 		.codec_dai_name = "wm9705-hifi",
 		.platform_name = "pxa-pcm-audio",
 		.codec_name = "wm9705-codec",
+		.init = e750_ac97_init,
 		/* use ops to check startup state */
 	},
 	{
@@ -95,12 +119,6 @@ static struct snd_soc_card e750 = {
 	.owner = THIS_MODULE,
 	.dai_link = e750_dai,
 	.num_links = ARRAY_SIZE(e750_dai),
-
-	.dapm_widgets = e750_dapm_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(e750_dapm_widgets),
-	.dapm_routes = audio_map,
-	.num_dapm_routes = ARRAY_SIZE(audio_map),
-	.fully_routed = true,
 };
 
 static struct gpio e750_audio_gpios[] = {
@@ -108,7 +126,7 @@ static struct gpio e750_audio_gpios[] = {
 	{ GPIO_E750_SPK_AMP_OFF, GPIOF_OUT_INIT_HIGH, "Speaker amp" },
 };
 
-static int e750_probe(struct platform_device *pdev)
+static int __devinit e750_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = &e750;
 	int ret;
@@ -120,7 +138,7 @@ static int e750_probe(struct platform_device *pdev)
 
 	card->dev = &pdev->dev;
 
-	ret = devm_snd_soc_register_card(&pdev->dev, card);
+	ret = snd_soc_register_card(card);
 	if (ret) {
 		dev_err(&pdev->dev, "snd_soc_register_card() failed: %d\n",
 			ret);
@@ -129,19 +147,22 @@ static int e750_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int e750_remove(struct platform_device *pdev)
+static int __devexit e750_remove(struct platform_device *pdev)
 {
+	struct snd_soc_card *card = platform_get_drvdata(pdev);
+
 	gpio_free_array(e750_audio_gpios, ARRAY_SIZE(e750_audio_gpios));
+	snd_soc_unregister_card(card);
 	return 0;
 }
 
 static struct platform_driver e750_driver = {
 	.driver		= {
 		.name	= "e750-audio",
-		.pm     = &snd_soc_pm_ops,
+		.owner	= THIS_MODULE,
 	},
 	.probe		= e750_probe,
-	.remove		= e750_remove,
+	.remove		= __devexit_p(e750_remove),
 };
 
 module_platform_driver(e750_driver);

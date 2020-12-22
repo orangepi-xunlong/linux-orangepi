@@ -273,7 +273,7 @@ static void eesoxscsi_buffer_out(void *buf, int length, void __iomem *base)
 {
 	const void __iomem *reg_fas = base + EESOX_FAS216_OFFSET;
 	const void __iomem *reg_dmastat = base + EESOX_DMASTAT;
-	void __iomem *reg_dmadata = base + EESOX_DMADATA;
+	const void __iomem *reg_dmadata = base + EESOX_DMADATA;
 
 	do {
 		unsigned int status;
@@ -422,20 +422,45 @@ eesoxscsi_set_proc_info(struct Scsi_Host *host, char *buffer, int length)
 	return ret;
 }
 
-static int eesoxscsi_show_info(struct seq_file *m, struct Scsi_Host *host)
+/* Prototype: int eesoxscsi_proc_info(char *buffer, char **start, off_t offset,
+ *				      int length, int host_no, int inout)
+ * Purpose  : Return information about the driver to a user process accessing
+ *	      the /proc filesystem.
+ * Params   : buffer - a buffer to write information to
+ *	      start  - a pointer into this buffer set by this routine to the start
+ *		       of the required information.
+ *	      offset - offset into information that we have read up to.
+ *	      length - length of buffer
+ *	      host_no - host number to return information for
+ *	      inout  - 0 for reading, 1 for writing.
+ * Returns  : length of data written to buffer.
+ */
+int eesoxscsi_proc_info(struct Scsi_Host *host, char *buffer, char **start, off_t offset,
+			    int length, int inout)
 {
 	struct eesoxscsi_info *info;
+	char *p = buffer;
+	int pos;
+
+	if (inout == 1)
+		return eesoxscsi_set_proc_info(host, buffer, length);
 
 	info = (struct eesoxscsi_info *)host->hostdata;
 
-	seq_printf(m, "EESOX SCSI driver v%s\n", VERSION);
-	fas216_print_host(&info->info, m);
-	seq_printf(m, "Term    : o%s\n",
+	p += sprintf(p, "EESOX SCSI driver v%s\n", VERSION);
+	p += fas216_print_host(&info->info, p);
+	p += sprintf(p, "Term    : o%s\n",
 			info->control & EESOX_TERM_ENABLE ? "n" : "ff");
 
-	fas216_print_stats(&info->info, m);
-	fas216_print_devices(&info->info, m);
-	return 0;
+	p += fas216_print_stats(&info->info, p);
+	p += fas216_print_devices(&info->info, p);
+
+	*start = buffer + offset;
+	pos = p - buffer - offset;
+	if (pos > length)
+		pos = length;
+
+	return pos;
 }
 
 static ssize_t eesoxscsi_show_term(struct device *dev, struct device_attribute *attr, char *buf)
@@ -473,8 +498,7 @@ static DEVICE_ATTR(bus_term, S_IRUGO | S_IWUSR,
 
 static struct scsi_host_template eesox_template = {
 	.module				= THIS_MODULE,
-	.show_info			= eesoxscsi_show_info,
-	.write_info			= eesoxscsi_set_proc_info,
+	.proc_info			= eesoxscsi_proc_info,
 	.name				= "EESOX SCSI",
 	.info				= eesoxscsi_info,
 	.queuecommand			= fas216_queue_command,
@@ -484,13 +508,15 @@ static struct scsi_host_template eesox_template = {
 	.eh_abort_handler		= fas216_eh_abort,
 	.can_queue			= 1,
 	.this_id			= 7,
-	.sg_tablesize			= SG_MAX_SEGMENTS,
+	.sg_tablesize			= SCSI_MAX_SG_CHAIN_SEGMENTS,
 	.dma_boundary			= IOMD_DMA_BOUNDARY,
+	.cmd_per_lun			= 1,
 	.use_clustering			= DISABLE_CLUSTERING,
 	.proc_name			= "eesox",
 };
 
-static int eesoxscsi_probe(struct expansion_card *ec, const struct ecard_id *id)
+static int __devinit
+eesoxscsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	struct Scsi_Host *host;
 	struct eesoxscsi_info *info;
@@ -591,7 +617,7 @@ static int eesoxscsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 	return ret;
 }
 
-static void eesoxscsi_remove(struct expansion_card *ec)
+static void __devexit eesoxscsi_remove(struct expansion_card *ec)
 {
 	struct Scsi_Host *host = ecard_get_drvdata(ec);
 	struct eesoxscsi_info *info = (struct eesoxscsi_info *)host->hostdata;
@@ -617,7 +643,7 @@ static const struct ecard_id eesoxscsi_cids[] = {
 
 static struct ecard_driver eesoxscsi_driver = {
 	.probe		= eesoxscsi_probe,
-	.remove		= eesoxscsi_remove,
+	.remove		= __devexit_p(eesoxscsi_remove),
 	.id_table	= eesoxscsi_cids,
 	.drv = {
 		.name		= "eesoxscsi",

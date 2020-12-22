@@ -6,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,7 +47,6 @@
 #include "amlcode.h"
 #include "acdispat.h"
 #include "acinterp.h"
-#include "acdebug.h"
 
 #define _COMPONENT          ACPI_DISPATCHER
 ACPI_MODULE_NAME("dscontrol")
@@ -57,7 +56,7 @@ ACPI_MODULE_NAME("dscontrol")
  * FUNCTION:    acpi_ds_exec_begin_control_op
  *
  * PARAMETERS:  walk_list       - The list that owns the walk stack
- *              op              - The control Op
+ *              Op              - The control Op
  *
  * RETURN:      Status
  *
@@ -79,6 +78,7 @@ acpi_ds_exec_begin_control_op(struct acpi_walk_state *walk_state,
 
 	switch (op->common.aml_opcode) {
 	case AML_WHILE_OP:
+
 		/*
 		 * If this is an additional iteration of a while loop, continue.
 		 * There is no need to allocate a new control state.
@@ -99,6 +99,7 @@ acpi_ds_exec_begin_control_op(struct acpi_walk_state *walk_state,
 		/*lint -fallthrough */
 
 	case AML_IF_OP:
+
 		/*
 		 * IF/WHILE: Create a new control state to manage these
 		 * constructs. We need to manage these as a stack, in order
@@ -141,7 +142,6 @@ acpi_ds_exec_begin_control_op(struct acpi_walk_state *walk_state,
 		break;
 
 	default:
-
 		break;
 	}
 
@@ -153,7 +153,7 @@ acpi_ds_exec_begin_control_op(struct acpi_walk_state *walk_state,
  * FUNCTION:    acpi_ds_exec_end_control_op
  *
  * PARAMETERS:  walk_list       - The list that owns the walk stack
- *              op              - The control Op
+ *              Op              - The control Op
  *
  * RETURN:      Status
  *
@@ -163,8 +163,8 @@ acpi_ds_exec_begin_control_op(struct acpi_walk_state *walk_state,
  ******************************************************************************/
 
 acpi_status
-acpi_ds_exec_end_control_op(struct acpi_walk_state *walk_state,
-			    union acpi_parse_object *op)
+acpi_ds_exec_end_control_op(struct acpi_walk_state * walk_state,
+			    union acpi_parse_object * op)
 {
 	acpi_status status = AE_OK;
 	union acpi_generic_state *control_state;
@@ -213,7 +213,7 @@ acpi_ds_exec_end_control_op(struct acpi_walk_state *walk_state,
 			 */
 			control_state->control.loop_count++;
 			if (control_state->control.loop_count >
-			    acpi_gbl_max_loop_iterations) {
+			    ACPI_MAX_LOOP_ITERATIONS) {
 				status = AE_AML_INFINITE_LOOP;
 				break;
 			}
@@ -280,7 +280,7 @@ acpi_ds_exec_end_control_op(struct acpi_walk_state *walk_state,
 
 			/*
 			 * Get the return value and save as the last result
-			 * value. This is the only place where walk_state->return_desc
+			 * value.  This is the only place where walk_state->return_desc
 			 * is set to anything other than zero!
 			 */
 			walk_state->return_desc = walk_state->operands[0];
@@ -344,12 +344,18 @@ acpi_ds_exec_end_control_op(struct acpi_walk_state *walk_state,
 	case AML_NOOP_OP:
 
 		/* Just do nothing! */
-
 		break;
 
 	case AML_BREAK_POINT_OP:
 
-		acpi_db_signal_break_point(walk_state);
+		/*
+		 * Set the single-step flag. This will cause the debugger (if present)
+		 * to break to the console within the AML debugger at the start of the
+		 * next AML instruction.
+		 */
+		ACPI_DEBUGGER_EXEC(acpi_gbl_cm_single_step = TRUE);
+		ACPI_DEBUGGER_EXEC(acpi_os_printf
+				   ("**break** Executed AML BreakPoint opcode\n"));
 
 		/* Call to the OSL in case OS wants a piece of the action */
 

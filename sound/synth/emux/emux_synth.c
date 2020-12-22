@@ -186,7 +186,8 @@ snd_emux_note_off(void *p, int note, int vel, struct snd_midi_channel *chan)
 				 */
 				vp->state = SNDRV_EMUX_ST_PENDING;
 				if (! emu->timer_active) {
-					mod_timer(&emu->tlist, jiffies + 1);
+					emu->tlist.expires = jiffies + 1;
+					add_timer(&emu->tlist);
 					emu->timer_active = 1;
 				}
 			} else
@@ -222,7 +223,8 @@ void snd_emux_timer_callback(unsigned long data)
 		}
 	}
 	if (do_again) {
-		mod_timer(&emu->tlist, jiffies + 1);
+		emu->tlist.expires = jiffies + 1;
+		add_timer(&emu->tlist);
 		emu->timer_active = 1;
 	} else
 		emu->timer_active = 0;

@@ -23,7 +23,8 @@
  * the GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program;  if not, see <http://www.gnu.org/licenses/>.
+ * along with this program;  if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  */
 
@@ -44,7 +45,6 @@
 #include "netlabel_mgmt.h"
 #include "netlabel_unlabeled.h"
 #include "netlabel_cipso_v4.h"
-#include "netlabel_calipso.h"
 #include "netlabel_user.h"
 
 /*
@@ -72,11 +72,11 @@ int __init netlbl_netlink_init(void)
 	if (ret_val != 0)
 		return ret_val;
 
-	ret_val = netlbl_calipso_genl_init();
+	ret_val = netlbl_unlabel_genl_init();
 	if (ret_val != 0)
 		return ret_val;
 
-	return netlbl_unlabel_genl_init();
+	return 0;
 }
 
 /*
@@ -109,7 +109,7 @@ struct audit_buffer *netlbl_audit_start_common(int type,
 		return NULL;
 
 	audit_log_format(audit_buf, "netlabel: auid=%u ses=%u",
-			 from_kuid(&init_user_ns, audit_info->loginuid),
+			 audit_info->loginuid,
 			 audit_info->sessionid);
 
 	if (audit_info->secid != 0 &&

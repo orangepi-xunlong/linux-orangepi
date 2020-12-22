@@ -94,7 +94,7 @@ _set_debug(struct sfax_hw *card)
 }
 
 static int
-set_debug(const char *val, const struct kernel_param *kp)
+set_debug(const char *val, struct kernel_param *kp)
 {
 	int ret;
 	struct sfax_hw *card;
@@ -224,7 +224,7 @@ channel_ctrl(struct sfax_hw  *sf, struct mISDN_ctrl_req *cq)
 
 	switch (cq->op) {
 	case MISDN_CTRL_GETOP:
-		cq->op = MISDN_CTRL_LOOP | MISDN_CTRL_L1_TIMER3;
+		cq->op = MISDN_CTRL_LOOP;
 		break;
 	case MISDN_CTRL_LOOP:
 		/* cq->channel: 0 disable, 1 B1 loop 2 B2 loop, 3 both */
@@ -233,9 +233,6 @@ channel_ctrl(struct sfax_hw  *sf, struct mISDN_ctrl_req *cq)
 			break;
 		}
 		ret = sf->isac.ctrl(&sf->isac, HW_TESTLOOP, cq->channel);
-		break;
-	case MISDN_CTRL_L1_TIMER3:
-		ret = sf->isac.ctrl(&sf->isac, HW_TIMER3_VALUE, cq->p1);
 		break;
 	default:
 		pr_info("%s: unknown Op %x\n", sf->name, cq->op);
@@ -282,7 +279,7 @@ sfax_dctrl(struct mISDNchannel *ch, u32 cmd, void *arg)
 	return err;
 }
 
-static int
+static int __devinit
 init_card(struct sfax_hw *sf)
 {
 	int	ret, cnt = 3;
@@ -321,7 +318,7 @@ init_card(struct sfax_hw *sf)
 }
 
 
-static int
+static int __devinit
 setup_speedfax(struct sfax_hw *sf)
 {
 	u_long flags;
@@ -371,7 +368,7 @@ release_card(struct sfax_hw *card) {
 	sfax_cnt--;
 }
 
-static int
+static int __devinit
 setup_instance(struct sfax_hw *card)
 {
 	const struct firmware *firmware;
@@ -451,7 +448,7 @@ error_fw:
 	return err;
 }
 
-static int
+static int __devinit
 sfaxpci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	int err = -ENOMEM;
@@ -480,7 +477,7 @@ sfaxpci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return err;
 }
 
-static void
+static void __devexit
 sfax_remove_pci(struct pci_dev *pdev)
 {
 	struct sfax_hw	*card = pci_get_drvdata(pdev);
@@ -491,7 +488,7 @@ sfax_remove_pci(struct pci_dev *pdev)
 		pr_debug("%s: drvdata already removed\n", __func__);
 }
 
-static struct pci_device_id sfaxpci_ids[] = {
+static struct pci_device_id sfaxpci_ids[] __devinitdata = {
 	{ PCI_VENDOR_ID_TIGERJET, PCI_DEVICE_ID_TIGERJET_100,
 	  PCI_SUBVENDOR_SPEEDFAX_PYRAMID, PCI_SUB_ID_SEDLBAUER,
 	  0, 0, (unsigned long) "Pyramid Speedfax + PCI"
@@ -507,7 +504,7 @@ MODULE_DEVICE_TABLE(pci, sfaxpci_ids);
 static struct pci_driver sfaxpci_driver = {
 	.name = "speedfax+ pci",
 	.probe = sfaxpci_probe,
-	.remove = sfax_remove_pci,
+	.remove = __devexit_p(sfax_remove_pci),
 	.id_table = sfaxpci_ids,
 };
 

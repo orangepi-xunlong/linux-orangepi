@@ -5,8 +5,8 @@
  *
  * Copyright (C) 2008 Nokia Corporation.
  *
- * Authors: Sakari Ailus <sakari.ailus@nokia.com>
- *          Rémi Denis-Courmont
+ * Contact: Remi Denis-Courmont <remi.denis-courmont@nokia.com>
+ * Original author: Sakari Ailus <sakari.ailus@nokia.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -97,7 +97,7 @@ static int pn_socket_create(struct net *net, struct socket *sock, int protocol,
 		goto out;
 	}
 
-	sk = sk_alloc(net, PF_PHONET, GFP_KERNEL, pnp->prot, kern);
+	sk = sk_alloc(net, PF_PHONET, GFP_KERNEL, pnp->prot);
 	if (sk == NULL) {
 		err = -ENOMEM;
 		goto out;
@@ -129,7 +129,7 @@ static const struct net_proto_family phonet_proto_family = {
 /* Phonet device header operations */
 static int pn_header_create(struct sk_buff *skb, struct net_device *dev,
 				unsigned short type, const void *daddr,
-				const void *saddr, unsigned int len)
+				const void *saddr, unsigned len)
 {
 	u8 *media = skb_push(skb, 1);
 
@@ -377,10 +377,6 @@ static int phonet_rcv(struct sk_buff *skb, struct net_device *dev,
 	struct sockaddr_pn sa;
 	u16 len;
 
-	skb = skb_share_check(skb, GFP_ATOMIC);
-	if (!skb)
-		return NET_RX_DROP;
-
 	/* check we have at least a full Phonet header */
 	if (!pskb_pull(skb, sizeof(struct phonethdr)))
 		goto out;
@@ -430,17 +426,16 @@ static int phonet_rcv(struct sk_buff *skb, struct net_device *dev,
 
 		out_dev = phonet_route_output(net, pn_sockaddr_get_addr(&sa));
 		if (!out_dev) {
-			net_dbg_ratelimited("No Phonet route to %02X\n",
-					    pn_sockaddr_get_addr(&sa));
+			LIMIT_NETDEBUG(KERN_WARNING"No Phonet route to %02X\n",
+					pn_sockaddr_get_addr(&sa));
 			goto out;
 		}
 
 		__skb_push(skb, sizeof(struct phonethdr));
 		skb->dev = out_dev;
 		if (out_dev == dev) {
-			net_dbg_ratelimited("Phonet loop to %02X on %s\n",
-					    pn_sockaddr_get_addr(&sa),
-					    dev->name);
+			LIMIT_NETDEBUG(KERN_ERR"Phonet loop to %02X on %s\n",
+					pn_sockaddr_get_addr(&sa), dev->name);
 			goto out_dev;
 		}
 		/* Some drivers (e.g. TUN) do not allocate HW header space */

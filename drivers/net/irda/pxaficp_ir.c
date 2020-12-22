@@ -19,9 +19,6 @@
 #include <linux/etherdevice.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
-#include <linux/dmaengine.h>
-#include <linux/dma-mapping.h>
-#include <linux/dma/pxa-dma.h>
 #include <linux/gpio.h>
 #include <linux/slab.h>
 
@@ -30,17 +27,18 @@
 #include <net/irda/wrapper.h>
 #include <net/irda/irda_device.h>
 
-#include <linux/platform_data/irda-pxaficp.h>
-#undef __REG
-#define __REG(x) ((x) & 0xffff)
+#include <mach/dma.h>
+#include <mach/irda.h>
 #include <mach/regs-uart.h>
+#include <mach/regs-ost.h>
 
-#define ICCR0		0x0000		/* ICP Control Register 0 */
-#define ICCR1		0x0004		/* ICP Control Register 1 */
-#define ICCR2		0x0008		/* ICP Control Register 2 */
-#define ICDR		0x000c		/* ICP Data Register */
-#define ICSR0		0x0014		/* ICP Status Register 0 */
-#define ICSR1		0x0018		/* ICP Status Register 1 */
+#define FICP		__REG(0x40800000)  /* Start of FICP area */
+#define ICCR0		__REG(0x40800000)  /* ICP Control Register 0 */
+#define ICCR1		__REG(0x40800004)  /* ICP Control Register 1 */
+#define ICCR2		__REG(0x40800008)  /* ICP Control Register 2 */
+#define ICDR		__REG(0x4080000c)  /* ICP Data Register */
+#define ICSR0		__REG(0x40800014)  /* ICP Status Register 0 */
+#define ICSR1		__REG(0x40800018)  /* ICP Status Register 1 */
 
 #define ICCR0_AME	(1 << 7)	/* Address match enable */
 #define ICCR0_TIE	(1 << 6)	/* Transmit FIFO interrupt enable */
@@ -58,7 +56,9 @@
 #define ICCR2_TRIG_16   (1 << 0)	/*	>= 16 bytes */
 #define ICCR2_TRIG_32   (2 << 0)	/*	>= 32 bytes */
 
+#ifdef CONFIG_PXA27x
 #define ICSR0_EOC	(1 << 6)	/* DMA End of Descriptor Chain */
+#endif
 #define ICSR0_FRE	(1 << 5)	/* Framing error */
 #define ICSR0_RFS	(1 << 4)	/* Receive FIFO service request */
 #define ICSR0_TFS	(1 << 3)	/* Transnit FIFO service request */
@@ -99,64 +99,18 @@
                 IrSR_RCVEIR_UART_MODE | \
                 IrSR_XMITIR_IR_MODE)
 
-/* macros for registers read/write */
-#define ficp_writel(irda, val, off)					\
-	do {								\
-		dev_vdbg(irda->dev,					\
-			 "%s():%d ficp_writel(0x%x, %s)\n",		\
-			 __func__, __LINE__, (val), #off);		\
-		writel_relaxed((val), (irda)->irda_base + (off));	\
-	} while (0)
-
-#define ficp_readl(irda, off)						\
-	({								\
-		unsigned int _v;					\
-		_v = readl_relaxed((irda)->irda_base + (off));		\
-		dev_vdbg(irda->dev,					\
-			 "%s():%d ficp_readl(%s): 0x%x\n",		\
-			 __func__, __LINE__, #off, _v);			\
-		_v;							\
-	})
-
-#define stuart_writel(irda, val, off)					\
-	do {								\
-		dev_vdbg(irda->dev,					\
-			 "%s():%d stuart_writel(0x%x, %s)\n",		\
-			 __func__, __LINE__, (val), #off);		\
-		writel_relaxed((val), (irda)->stuart_base + (off));	\
-	} while (0)
-
-#define stuart_readl(irda, off)						\
-	({								\
-		unsigned int _v;					\
-		_v = readl_relaxed((irda)->stuart_base + (off));	\
-		dev_vdbg(irda->dev,					\
-			 "%s():%d stuart_readl(%s): 0x%x\n",		\
-			 __func__, __LINE__, #off, _v);			\
-		_v;							\
-	})
-
 struct pxa_irda {
 	int			speed;
 	int			newspeed;
-	unsigned long long	last_clk;
+	unsigned long		last_oscr;
 
-	void __iomem		*stuart_base;
-	void __iomem		*irda_base;
 	unsigned char		*dma_rx_buff;
 	unsigned char		*dma_tx_buff;
 	dma_addr_t		dma_rx_buff_phy;
 	dma_addr_t		dma_tx_buff_phy;
 	unsigned int		dma_tx_buff_len;
-	struct dma_chan		*txdma;
-	struct dma_chan		*rxdma;
-	dma_cookie_t		rx_cookie;
-	dma_cookie_t		tx_cookie;
-	int			drcmr_rx;
-	int			drcmr_tx;
-
-	int			uart_irq;
-	int			icp_irq;
+	int			txdma;
+	int			rxdma;
 
 	struct irlap_cb		*irlap;
 	struct qos_info		qos;
@@ -170,8 +124,6 @@ struct pxa_irda {
 	struct clk		*sir_clk;
 	struct clk		*cur_clk;
 };
-
-static int pxa_irda_set_speed(struct pxa_irda *si, int speed);
 
 static inline void pxa_irda_disable_clk(struct pxa_irda *si)
 {
@@ -196,41 +148,22 @@ static inline void pxa_irda_enable_sirclk(struct pxa_irda *si)
 #define IS_FIR(si)		((si)->speed >= 4000000)
 #define IRDA_FRAME_SIZE_LIMIT	2047
 
-static void pxa_irda_fir_dma_rx_irq(void *data);
-static void pxa_irda_fir_dma_tx_irq(void *data);
-
 inline static void pxa_irda_fir_dma_rx_start(struct pxa_irda *si)
 {
-	struct dma_async_tx_descriptor *tx;
-
-	tx = dmaengine_prep_slave_single(si->rxdma, si->dma_rx_buff_phy,
-					 IRDA_FRAME_SIZE_LIMIT, DMA_FROM_DEVICE,
-					 DMA_PREP_INTERRUPT);
-	if (!tx) {
-		dev_err(si->dev, "prep_slave_sg() failed\n");
-		return;
-	}
-	tx->callback = pxa_irda_fir_dma_rx_irq;
-	tx->callback_param = si;
-	si->rx_cookie = dmaengine_submit(tx);
-	dma_async_issue_pending(si->rxdma);
+	DCSR(si->rxdma)  = DCSR_NODESC;
+	DSADR(si->rxdma) = __PREG(ICDR);
+	DTADR(si->rxdma) = si->dma_rx_buff_phy;
+	DCMD(si->rxdma) = DCMD_INCTRGADDR | DCMD_FLOWSRC |  DCMD_WIDTH1 | DCMD_BURST32 | IRDA_FRAME_SIZE_LIMIT;
+	DCSR(si->rxdma) |= DCSR_RUN;
 }
 
 inline static void pxa_irda_fir_dma_tx_start(struct pxa_irda *si)
 {
-	struct dma_async_tx_descriptor *tx;
-
-	tx = dmaengine_prep_slave_single(si->txdma, si->dma_tx_buff_phy,
-					 si->dma_tx_buff_len, DMA_TO_DEVICE,
-					 DMA_PREP_INTERRUPT);
-	if (!tx) {
-		dev_err(si->dev, "prep_slave_sg() failed\n");
-		return;
-	}
-	tx->callback = pxa_irda_fir_dma_tx_irq;
-	tx->callback_param = si;
-	si->tx_cookie = dmaengine_submit(tx);
-	dma_async_issue_pending(si->rxdma);
+	DCSR(si->txdma)  = DCSR_NODESC;
+	DSADR(si->txdma) = si->dma_tx_buff_phy;
+	DTADR(si->txdma) = __PREG(ICDR);
+	DCMD(si->txdma) = DCMD_INCSRCADDR | DCMD_FLOWTRG |  DCMD_ENDIRQEN | DCMD_WIDTH1 | DCMD_BURST32 | si->dma_tx_buff_len;
+	DCSR(si->txdma) |= DCSR_RUN;
 }
 
 /*
@@ -269,9 +202,9 @@ static int pxa_irda_set_speed(struct pxa_irda *si, int speed)
 
 		if (IS_FIR(si)) {
 			/* stop RX DMA */
-			dmaengine_terminate_all(si->rxdma);
+			DCSR(si->rxdma) &= ~DCSR_RUN;
 			/* disable FICP */
-			ficp_writel(si, 0, ICCR0);
+			ICCR0 = 0;
 			pxa_irda_disable_clk(si);
 
 			/* set board transceiver to SIR mode */
@@ -282,19 +215,17 @@ static int pxa_irda_set_speed(struct pxa_irda *si, int speed)
 		}
 
 		/* disable STUART first */
-		stuart_writel(si, 0, STIER);
+		STIER = 0;
 
 		/* access DLL & DLH */
-		stuart_writel(si, stuart_readl(si, STLCR) | LCR_DLAB, STLCR);
-		stuart_writel(si, divisor & 0xff, STDLL);
-		stuart_writel(si, divisor >> 8, STDLH);
-		stuart_writel(si, stuart_readl(si, STLCR) & ~LCR_DLAB, STLCR);
+		STLCR |= LCR_DLAB;
+		STDLL = divisor & 0xff;
+		STDLH = divisor >> 8;
+		STLCR &= ~LCR_DLAB;
 
 		si->speed = speed;
-		stuart_writel(si, IrSR_IR_RECEIVE_ON | IrSR_XMODE_PULSE_1_6,
-			      STISR);
-		stuart_writel(si, IER_UUE | IER_RLSE | IER_RAVIE | IER_RTIOE,
-			      STIER);
+		STISR = IrSR_IR_RECEIVE_ON | IrSR_XMODE_PULSE_1_6;
+		STIER = IER_UUE | IER_RLSE | IER_RAVIE | IER_RTIOE;
 
 		local_irq_restore(flags);
 		break;
@@ -303,12 +234,12 @@ static int pxa_irda_set_speed(struct pxa_irda *si, int speed)
 		local_irq_save(flags);
 
 		/* disable STUART */
-		stuart_writel(si, 0, STIER);
-		stuart_writel(si, 0, STISR);
+		STIER = 0;
+		STISR = 0;
 		pxa_irda_disable_clk(si);
 
 		/* disable FICP first */
-		ficp_writel(si, 0, ICCR0);
+		ICCR0 = 0;
 
 		/* set board transceiver to FIR mode */
 		pxa_irda_set_mode(si, IR_FIRMODE);
@@ -318,7 +249,7 @@ static int pxa_irda_set_speed(struct pxa_irda *si, int speed)
 
 		si->speed = speed;
 		pxa_irda_fir_dma_rx_start(si);
-		ficp_writel(si, ICCR0_ITR | ICCR0_RXE, ICCR0);
+		ICCR0 = ICCR0_ITR | ICCR0_RXE;
 
 		local_irq_restore(flags);
 		break;
@@ -337,13 +268,13 @@ static irqreturn_t pxa_irda_sir_irq(int irq, void *dev_id)
 	struct pxa_irda *si = netdev_priv(dev);
 	int iir, lsr, data;
 
-	iir = stuart_readl(si, STIIR);
+	iir = STIIR;
 
 	switch  (iir & 0x0F) {
 	case 0x06: /* Receiver Line Status */
-		lsr = stuart_readl(si, STLSR);
+	  	lsr = STLSR;
 		while (lsr & LSR_FIFOE) {
-			data = stuart_readl(si, STRBR);
+			data = STRBR;
 			if (lsr & (LSR_OE | LSR_PE | LSR_FE | LSR_BI)) {
 				printk(KERN_DEBUG "pxa_ir: sir receiving error\n");
 				dev->stats.rx_errors++;
@@ -356,9 +287,9 @@ static irqreturn_t pxa_irda_sir_irq(int irq, void *dev_id)
 				async_unwrap_char(dev, &dev->stats,
 						  &si->rx_buff, data);
 			}
-			lsr = stuart_readl(si, STLSR);
+			lsr = STLSR;
 		}
-		si->last_clk = sched_clock();
+		si->last_oscr = OSCR;
 		break;
 
 	case 0x04: /* Received Data Available */
@@ -367,16 +298,14 @@ static irqreturn_t pxa_irda_sir_irq(int irq, void *dev_id)
 	case 0x0C: /* Character Timeout Indication */
 	  	do  {
 		    dev->stats.rx_bytes++;
-		    async_unwrap_char(dev, &dev->stats, &si->rx_buff,
-				      stuart_readl(si, STRBR));
-		} while (stuart_readl(si, STLSR) & LSR_DR);
-		si->last_clk = sched_clock();
+	            async_unwrap_char(dev, &dev->stats, &si->rx_buff, STRBR);
+	  	} while (STLSR & LSR_DR);
+		si->last_oscr = OSCR;
 	  	break;
 
 	case 0x02: /* Transmit FIFO Data Request */
-		while ((si->tx_buff.len) &&
-		       (stuart_readl(si, STLSR) & LSR_TDRQ)) {
-			stuart_writel(si, *si->tx_buff.data++, STTHR);
+	    	while ((si->tx_buff.len) && (STLSR & LSR_TDRQ)) {
+	    		STTHR = *si->tx_buff.data++;
 			si->tx_buff.len -= 1;
 	    	}
 
@@ -385,9 +314,9 @@ static irqreturn_t pxa_irda_sir_irq(int irq, void *dev_id)
 			dev->stats.tx_bytes += si->tx_buff.data - si->tx_buff.head;
 
                         /* We need to ensure that the transmitter has finished. */
-			while ((stuart_readl(si, STLSR) & LSR_TEMT) == 0)
+			while ((STLSR & LSR_TEMT) == 0)
 				cpu_relax();
-			si->last_clk = sched_clock();
+			si->last_oscr = OSCR;
 
 			/*
 		 	* Ok, we've finished transmitting.  Now enable
@@ -399,11 +328,9 @@ static irqreturn_t pxa_irda_sir_irq(int irq, void *dev_id)
 				si->newspeed = 0;
 			} else {
 				/* enable IR Receiver, disable IR Transmitter */
-				stuart_writel(si, IrSR_IR_RECEIVE_ON |
-					      IrSR_XMODE_PULSE_1_6, STISR);
+				STISR = IrSR_IR_RECEIVE_ON | IrSR_XMODE_PULSE_1_6;
 				/* enable STUART and receive interrupts */
-				stuart_writel(si, IER_UUE | IER_RLSE |
-					      IER_RAVIE | IER_RTIOE, STIER);
+				STIER = IER_UUE | IER_RLSE | IER_RAVIE | IER_RTIOE;
 			}
 			/* I'm hungry! */
 			netif_wake_queue(dev);
@@ -415,32 +342,35 @@ static irqreturn_t pxa_irda_sir_irq(int irq, void *dev_id)
 }
 
 /* FIR Receive DMA interrupt handler */
-static void pxa_irda_fir_dma_rx_irq(void *data)
+static void pxa_irda_fir_dma_rx_irq(int channel, void *data)
 {
-	struct net_device *dev = data;
-	struct pxa_irda *si = netdev_priv(dev);
+	int dcsr = DCSR(channel);
 
-	dmaengine_terminate_all(si->rxdma);
-	netdev_dbg(dev, "pxa_ir: fir rx dma bus error\n");
+	DCSR(channel) = dcsr & ~DCSR_RUN;
+
+	printk(KERN_DEBUG "pxa_ir: fir rx dma bus error %#x\n", dcsr);
 }
 
 /* FIR Transmit DMA interrupt handler */
-static void pxa_irda_fir_dma_tx_irq(void *data)
+static void pxa_irda_fir_dma_tx_irq(int channel, void *data)
 {
 	struct net_device *dev = data;
 	struct pxa_irda *si = netdev_priv(dev);
+	int dcsr;
 
-	dmaengine_terminate_all(si->txdma);
-	if (dmaengine_tx_status(si->txdma, si->tx_cookie, NULL) == DMA_ERROR) {
-		dev->stats.tx_errors++;
-	} else {
+	dcsr = DCSR(channel);
+	DCSR(channel) = dcsr & ~DCSR_RUN;
+
+	if (dcsr & DCSR_ENDINTR)  {
 		dev->stats.tx_packets++;
 		dev->stats.tx_bytes += si->dma_tx_buff_len;
+	} else {
+		dev->stats.tx_errors++;
 	}
 
-	while (ficp_readl(si, ICSR1) & ICSR1_TBY)
+	while (ICSR1 & ICSR1_TBY)
 		cpu_relax();
-	si->last_clk = sched_clock();
+	si->last_oscr = OSCR;
 
 	/*
 	 * HACK: It looks like the TBY bit is dropped too soon.
@@ -454,11 +384,11 @@ static void pxa_irda_fir_dma_tx_irq(void *data)
 	} else {
 		int i = 64;
 
-		ficp_writel(si, 0, ICCR0);
+		ICCR0 = 0;
 		pxa_irda_fir_dma_rx_start(si);
-		while ((ficp_readl(si, ICSR1) & ICSR1_RNE) && i--)
-			ficp_readl(si, ICDR);
-		ficp_writel(si, ICCR0_ITR | ICCR0_RXE, ICCR0);
+		while ((ICSR1 & ICSR1_RNE) && i--)
+			(void)ICDR;
+		ICCR0 = ICCR0_ITR | ICCR0_RXE;
 
 		if (i < 0)
 			printk(KERN_ERR "pxa_ir: cannot clear Rx FIFO!\n");
@@ -470,18 +400,15 @@ static void pxa_irda_fir_dma_tx_irq(void *data)
 static void pxa_irda_fir_irq_eif(struct pxa_irda *si, struct net_device *dev, int icsr0)
 {
 	unsigned int len, stat, data;
-	struct dma_tx_state state;
 
 	/* Get the current data position. */
-
-	dmaengine_tx_status(si->rxdma, si->rx_cookie, &state);
-	len = IRDA_FRAME_SIZE_LIMIT - state.residue;
+	len = DTADR(si->rxdma) - si->dma_rx_buff_phy;
 
 	do {
 		/* Read Status, and then Data. 	 */
-		stat = ficp_readl(si, ICSR1);
+		stat = ICSR1;
 		rmb();
-		data = ficp_readl(si, ICDR);
+		data = ICDR;
 
 		if (stat & (ICSR1_CRE | ICSR1_ROR)) {
 			dev->stats.rx_errors++;
@@ -499,7 +426,7 @@ static void pxa_irda_fir_irq_eif(struct pxa_irda *si, struct net_device *dev, in
 		/* If we hit the end of frame, there's no point in continuing. */
 		if (stat & ICSR1_EOF)
 			break;
-	} while (ficp_readl(si, ICSR0) & ICSR0_EIF);
+	} while (ICSR0 & ICSR0_EIF);
 
 	if (stat & ICSR1_EOF) {
 		/* end of frame. */
@@ -542,9 +469,9 @@ static irqreturn_t pxa_irda_fir_irq(int irq, void *dev_id)
 	int icsr0, i = 64;
 
 	/* stop RX DMA */
-	dmaengine_terminate_all(si->rxdma);
-	si->last_clk = sched_clock();
-	icsr0 = ficp_readl(si, ICSR0);
+	DCSR(si->rxdma) &= ~DCSR_RUN;
+	si->last_oscr = OSCR;
+	icsr0 = ICSR0;
 
 	if (icsr0 & (ICSR0_FRE | ICSR0_RAB)) {
 		if (icsr0 & ICSR0_FRE) {
@@ -554,7 +481,7 @@ static irqreturn_t pxa_irda_fir_irq(int irq, void *dev_id)
 			printk(KERN_DEBUG "pxa_ir: fir receive abort\n");
 			dev->stats.rx_errors++;
 		}
-		ficp_writel(si, icsr0 & (ICSR0_FRE | ICSR0_RAB), ICSR0);
+		ICSR0 = icsr0 & (ICSR0_FRE | ICSR0_RAB);
 	}
 
 	if (icsr0 & ICSR0_EIF) {
@@ -562,11 +489,11 @@ static irqreturn_t pxa_irda_fir_irq(int irq, void *dev_id)
 		pxa_irda_fir_irq_eif(si, dev, icsr0);
 	}
 
-	ficp_writel(si, 0, ICCR0);
+	ICCR0 = 0;
 	pxa_irda_fir_dma_rx_start(si);
-	while ((ficp_readl(si, ICSR1) & ICSR1_RNE) && i--)
-		ficp_readl(si, ICDR);
-	ficp_writel(si, ICCR0_ITR | ICCR0_RXE, ICCR0);
+	while ((ICSR1 & ICSR1_RNE) && i--)
+		(void)ICDR;
+	ICCR0 = ICCR0_ITR | ICCR0_RXE;
 
 	if (i < 0)
 		printk(KERN_ERR "pxa_ir: cannot clear Rx FIFO!\n");
@@ -607,12 +534,11 @@ static int pxa_irda_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 		si->tx_buff.len  = async_wrap_skb(skb, si->tx_buff.data, si->tx_buff.truesize);
 
 		/* Disable STUART interrupts and switch to transmit mode. */
-		stuart_writel(si, 0, STIER);
-		stuart_writel(si, IrSR_IR_TRANSMIT_ON | IrSR_XMODE_PULSE_1_6,
-			      STISR);
+		STIER = 0;
+		STISR = IrSR_IR_TRANSMIT_ON | IrSR_XMODE_PULSE_1_6;
 
 		/* enable STUART and transmit interrupts */
-		stuart_writel(si, IER_UUE | IER_TIE, STIER);
+		STIER = IER_UUE | IER_TIE;
 	} else {
 		unsigned long mtt = irda_get_mtt(skb);
 
@@ -620,15 +546,15 @@ static int pxa_irda_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 		skb_copy_from_linear_data(skb, si->dma_tx_buff, skb->len);
 
 		if (mtt)
-			while ((sched_clock() - si->last_clk) * 1000 < mtt)
+			while ((unsigned)(OSCR - si->last_oscr)/4 < mtt)
 				cpu_relax();
 
 		/* stop RX DMA,  disable FICP */
-		dmaengine_terminate_all(si->rxdma);
-		ficp_writel(si, 0, ICCR0);
+		DCSR(si->rxdma) &= ~DCSR_RUN;
+		ICCR0 = 0;
 
 		pxa_irda_fir_dma_tx_start(si);
-		ficp_writel(si, ICCR0_ITR | ICCR0_TXE, ICCR0);
+		ICCR0 = ICCR0_ITR | ICCR0_TXE;
 	}
 
 	dev_kfree_skb(skb);
@@ -684,18 +610,22 @@ static int pxa_irda_ioctl(struct net_device *dev, struct ifreq *ifreq, int cmd)
 static void pxa_irda_startup(struct pxa_irda *si)
 {
 	/* Disable STUART interrupts */
-	stuart_writel(si, 0, STIER);
+	STIER = 0;
 	/* enable STUART interrupt to the processor */
-	stuart_writel(si, MCR_OUT2, STMCR);
+	STMCR = MCR_OUT2;
 	/* configure SIR frame format: StartBit - Data 7 ... Data 0 - Stop Bit */
-	stuart_writel(si, LCR_WLS0 | LCR_WLS1, STLCR);
+	STLCR = LCR_WLS0 | LCR_WLS1;
 	/* enable FIFO, we use FIFO to improve performance */
-	stuart_writel(si, FCR_TRFIFOE | FCR_ITL_32, STFCR);
+	STFCR = FCR_TRFIFOE | FCR_ITL_32;
 
 	/* disable FICP */
-	ficp_writel(si, 0, ICCR0);
+	ICCR0 = 0;
 	/* configure FICP ICCR2 */
-	ficp_writel(si, ICCR2_TXP | ICCR2_TRIG_32, ICCR2);
+	ICCR2 = ICCR2_TXP | ICCR2_TRIG_32;
+
+	/* configure DMAC */
+	DRCMR(17) = si->rxdma | DRCMR_MAPVLD;
+	DRCMR(18) = si->txdma | DRCMR_MAPVLD;
 
 	/* force SIR reinitialization */
 	si->speed = 4000000;
@@ -711,18 +641,21 @@ static void pxa_irda_shutdown(struct pxa_irda *si)
 	local_irq_save(flags);
 
 	/* disable STUART and interrupt */
-	stuart_writel(si, 0, STIER);
+	STIER = 0;
 	/* disable STUART SIR mode */
-	stuart_writel(si, 0, STISR);
+	STISR = 0;
 
 	/* disable DMA */
-	dmaengine_terminate_all(si->rxdma);
-	dmaengine_terminate_all(si->txdma);
+	DCSR(si->txdma) &= ~DCSR_RUN;
+	DCSR(si->rxdma) &= ~DCSR_RUN;
 	/* disable FICP */
-	ficp_writel(si, 0, ICCR0);
+	ICCR0 = 0;
 
 	/* disable the STUART or FICP clocks */
 	pxa_irda_disable_clk(si);
+
+	DRCMR(17) = 0;
+	DRCMR(18) = 0;
 
 	local_irq_restore(flags);
 
@@ -735,67 +668,41 @@ static void pxa_irda_shutdown(struct pxa_irda *si)
 static int pxa_irda_start(struct net_device *dev)
 {
 	struct pxa_irda *si = netdev_priv(dev);
-	dma_cap_mask_t mask;
-	struct dma_slave_config	config;
-	struct pxad_param param;
 	int err;
 
 	si->speed = 9600;
 
-	err = request_irq(si->uart_irq, pxa_irda_sir_irq, 0, dev->name, dev);
+	err = request_irq(IRQ_STUART, pxa_irda_sir_irq, 0, dev->name, dev);
 	if (err)
 		goto err_irq1;
 
-	err = request_irq(si->icp_irq, pxa_irda_fir_irq, 0, dev->name, dev);
+	err = request_irq(IRQ_ICP, pxa_irda_fir_irq, 0, dev->name, dev);
 	if (err)
 		goto err_irq2;
 
 	/*
 	 * The interrupt must remain disabled for now.
 	 */
-	disable_irq(si->uart_irq);
-	disable_irq(si->icp_irq);
+	disable_irq(IRQ_STUART);
+	disable_irq(IRQ_ICP);
 
 	err = -EBUSY;
-	dma_cap_zero(mask);
-	dma_cap_set(DMA_SLAVE, mask);
-	param.prio = PXAD_PRIO_LOWEST;
-
-	memset(&config, 0, sizeof(config));
-	config.src_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
-	config.dst_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
-	config.src_addr = (dma_addr_t)si->irda_base + ICDR;
-	config.dst_addr = (dma_addr_t)si->irda_base + ICDR;
-	config.src_maxburst = 32;
-	config.dst_maxburst = 32;
-
-	param.drcmr = si->drcmr_rx;
-	si->rxdma = dma_request_slave_channel_compat(mask, pxad_filter_fn,
-						     &param, &dev->dev, "rx");
-	if (!si->rxdma)
+	si->rxdma = pxa_request_dma("FICP_RX",DMA_PRIO_LOW, pxa_irda_fir_dma_rx_irq, dev);
+	if (si->rxdma < 0)
 		goto err_rx_dma;
 
-	param.drcmr = si->drcmr_tx;
-	si->txdma = dma_request_slave_channel_compat(mask, pxad_filter_fn,
-						     &param, &dev->dev, "tx");
-	if (!si->txdma)
+	si->txdma = pxa_request_dma("FICP_TX",DMA_PRIO_LOW, pxa_irda_fir_dma_tx_irq, dev);
+	if (si->txdma < 0)
 		goto err_tx_dma;
-
-	err = dmaengine_slave_config(si->rxdma, &config);
-	if (err)
-		goto err_dma_rx_buff;
-	err = dmaengine_slave_config(si->txdma, &config);
-	if (err)
-		goto err_dma_rx_buff;
 
 	err = -ENOMEM;
 	si->dma_rx_buff = dma_alloc_coherent(si->dev, IRDA_FRAME_SIZE_LIMIT,
-					     &si->dma_rx_buff_phy, GFP_KERNEL);
+					     &si->dma_rx_buff_phy, GFP_KERNEL );
 	if (!si->dma_rx_buff)
 		goto err_dma_rx_buff;
 
 	si->dma_tx_buff = dma_alloc_coherent(si->dev, IRDA_FRAME_SIZE_LIMIT,
-					     &si->dma_tx_buff_phy, GFP_KERNEL);
+					     &si->dma_tx_buff_phy, GFP_KERNEL );
 	if (!si->dma_tx_buff)
 		goto err_dma_tx_buff;
 
@@ -813,8 +720,8 @@ static int pxa_irda_start(struct net_device *dev)
 	/*
 	 * Now enable the interrupt and start the queue
 	 */
-	enable_irq(si->uart_irq);
-	enable_irq(si->icp_irq);
+	enable_irq(IRQ_STUART);
+	enable_irq(IRQ_ICP);
 	netif_start_queue(dev);
 
 	printk(KERN_DEBUG "pxa_ir: irda driver opened\n");
@@ -827,13 +734,13 @@ err_irlap:
 err_dma_tx_buff:
 	dma_free_coherent(si->dev, IRDA_FRAME_SIZE_LIMIT, si->dma_rx_buff, si->dma_rx_buff_phy);
 err_dma_rx_buff:
-	dma_release_channel(si->txdma);
+	pxa_free_dma(si->txdma);
 err_tx_dma:
-	dma_release_channel(si->rxdma);
+	pxa_free_dma(si->rxdma);
 err_rx_dma:
-	free_irq(si->icp_irq, dev);
+	free_irq(IRQ_ICP, dev);
 err_irq2:
-	free_irq(si->uart_irq, dev);
+	free_irq(IRQ_STUART, dev);
 err_irq1:
 
 	return err;
@@ -853,13 +760,11 @@ static int pxa_irda_stop(struct net_device *dev)
 		si->irlap = NULL;
 	}
 
-	free_irq(si->uart_irq, dev);
-	free_irq(si->icp_irq, dev);
+	free_irq(IRQ_STUART, dev);
+	free_irq(IRQ_ICP, dev);
 
-	dmaengine_terminate_all(si->rxdma);
-	dmaengine_terminate_all(si->txdma);
-	dma_release_channel(si->rxdma);
-	dma_release_channel(si->txdma);
+	pxa_free_dma(si->rxdma);
+	pxa_free_dma(si->txdma);
 
 	if (si->dma_rx_buff)
 		dma_free_coherent(si->dev, IRDA_FRAME_SIZE_LIMIT, si->dma_tx_buff, si->dma_tx_buff_phy);
@@ -922,58 +827,36 @@ static const struct net_device_ops pxa_irda_netdev_ops = {
 static int pxa_irda_probe(struct platform_device *pdev)
 {
 	struct net_device *dev;
-	struct resource *res;
 	struct pxa_irda *si;
-	void __iomem *ficp, *stuart;
 	unsigned int baudrate_mask;
 	int err;
 
 	if (!pdev->dev.platform_data)
 		return -ENODEV;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ficp = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(ficp)) {
-		dev_err(&pdev->dev, "resource ficp not defined\n");
-		return PTR_ERR(ficp);
-	}
+	err = request_mem_region(__PREG(STUART), 0x24, "IrDA") ? 0 : -EBUSY;
+	if (err)
+		goto err_mem_1;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	stuart = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(stuart)) {
-		dev_err(&pdev->dev, "resource stuart not defined\n");
-		return PTR_ERR(stuart);
-	}
+	err = request_mem_region(__PREG(FICP), 0x1c, "IrDA") ? 0 : -EBUSY;
+	if (err)
+		goto err_mem_2;
 
 	dev = alloc_irdadev(sizeof(struct pxa_irda));
-	if (!dev) {
-		err = -ENOMEM;
-		goto err_mem_1;
-	}
+	if (!dev)
+		goto err_mem_3;
 
 	SET_NETDEV_DEV(dev, &pdev->dev);
 	si = netdev_priv(dev);
 	si->dev = &pdev->dev;
 	si->pdata = pdev->dev.platform_data;
 
-	si->irda_base = ficp;
-	si->stuart_base = stuart;
-	si->uart_irq = platform_get_irq(pdev, 0);
-	si->icp_irq = platform_get_irq(pdev, 1);
-
-	si->sir_clk = devm_clk_get(&pdev->dev, "UARTCLK");
-	si->fir_clk = devm_clk_get(&pdev->dev, "FICPCLK");
+	si->sir_clk = clk_get(&pdev->dev, "UARTCLK");
+	si->fir_clk = clk_get(&pdev->dev, "FICPCLK");
 	if (IS_ERR(si->sir_clk) || IS_ERR(si->fir_clk)) {
 		err = PTR_ERR(IS_ERR(si->sir_clk) ? si->sir_clk : si->fir_clk);
 		goto err_mem_4;
 	}
-
-	res = platform_get_resource(pdev, IORESOURCE_DMA, 0);
-	if (res)
-		si->drcmr_rx = res->start;
-	res = platform_get_resource(pdev, IORESOURCE_DMA, 1);
-	if (res)
-		si->drcmr_tx = res->start;
 
 	/*
 	 * Initialise the SIR buffers
@@ -1024,7 +907,7 @@ static int pxa_irda_probe(struct platform_device *pdev)
 	err = register_netdev(dev);
 
 	if (err == 0)
-		platform_set_drvdata(pdev, dev);
+		dev_set_drvdata(&pdev->dev, dev);
 
 	if (err) {
 		if (si->pdata->shutdown)
@@ -1034,7 +917,15 @@ err_startup:
 err_mem_5:
 		kfree(si->rx_buff.head);
 err_mem_4:
+		if (si->sir_clk && !IS_ERR(si->sir_clk))
+			clk_put(si->sir_clk);
+		if (si->fir_clk && !IS_ERR(si->fir_clk))
+			clk_put(si->fir_clk);
 		free_netdev(dev);
+err_mem_3:
+		release_mem_region(__PREG(FICP), 0x1c);
+err_mem_2:
+		release_mem_region(__PREG(STUART), 0x24);
 	}
 err_mem_1:
 	return err;
@@ -1053,8 +944,13 @@ static int pxa_irda_remove(struct platform_device *_dev)
 			si->pdata->shutdown(si->dev);
 		kfree(si->tx_buff.head);
 		kfree(si->rx_buff.head);
+		clk_put(si->fir_clk);
+		clk_put(si->sir_clk);
 		free_netdev(dev);
 	}
+
+	release_mem_region(__PREG(STUART), 0x24);
+	release_mem_region(__PREG(FICP), 0x1c);
 
 	return 0;
 }
@@ -1062,6 +958,7 @@ static int pxa_irda_remove(struct platform_device *_dev)
 static struct platform_driver pxa_ir_driver = {
 	.driver         = {
 		.name   = "pxa2xx-ir",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= pxa_irda_probe,
 	.remove		= pxa_irda_remove,

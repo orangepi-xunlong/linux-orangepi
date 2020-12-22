@@ -18,7 +18,6 @@
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/i2c.h>
-#include <linux/regmap.h>
 #include <linux/spi/spi.h>
 #include <linux/slab.h>
 #include <linux/of_device.h>
@@ -35,55 +34,24 @@
  * We can't read the WM8750 register space when we
  * are using 2 wire for device control, so we cache them instead.
  */
-static const struct reg_default wm8750_reg_defaults[] = {
-	{  0, 0x0097 },
-	{  1, 0x0097 },
-	{  2, 0x0079 },
-	{  3, 0x0079 },
-	{  4, 0x0000 },
-	{  5, 0x0008 },
-	{  6, 0x0000 },
-	{  7, 0x000a },
-	{  8, 0x0000 },
-	{  9, 0x0000 },
-	{ 10, 0x00ff },
-	{ 11, 0x00ff },
-	{ 12, 0x000f },
-	{ 13, 0x000f },
-	{ 14, 0x0000 },
-	{ 15, 0x0000 },
-	{ 16, 0x0000 },
-	{ 17, 0x007b },
-	{ 18, 0x0000 },
-	{ 19, 0x0032 },
-	{ 20, 0x0000 },
-	{ 21, 0x00c3 },
-	{ 22, 0x00c3 },
-	{ 23, 0x00c0 },
-	{ 24, 0x0000 },
-	{ 25, 0x0000 },
-	{ 26, 0x0000 },
-	{ 27, 0x0000 },
-	{ 28, 0x0000 },
-	{ 29, 0x0000 },
-	{ 30, 0x0000 },
-	{ 31, 0x0000 },
-	{ 32, 0x0000 },
-	{ 33, 0x0000 },
-	{ 34, 0x0050 },
-	{ 35, 0x0050 },
-	{ 36, 0x0050 },
-	{ 37, 0x0050 },
-	{ 38, 0x0050 },
-	{ 39, 0x0050 },
-	{ 40, 0x0079 },
-	{ 41, 0x0079 },
-	{ 42, 0x0079 },
+static const u16 wm8750_reg[] = {
+	0x0097, 0x0097, 0x0079, 0x0079,  /*  0 */
+	0x0000, 0x0008, 0x0000, 0x000a,  /*  4 */
+	0x0000, 0x0000, 0x00ff, 0x00ff,  /*  8 */
+	0x000f, 0x000f, 0x0000, 0x0000,  /* 12 */
+	0x0000, 0x007b, 0x0000, 0x0032,  /* 16 */
+	0x0000, 0x00c3, 0x00c3, 0x00c0,  /* 20 */
+	0x0000, 0x0000, 0x0000, 0x0000,  /* 24 */
+	0x0000, 0x0000, 0x0000, 0x0000,  /* 28 */
+	0x0000, 0x0000, 0x0050, 0x0050,  /* 32 */
+	0x0050, 0x0050, 0x0050, 0x0050,  /* 36 */
+	0x0079, 0x0079, 0x0079,          /* 40 */
 };
 
 /* codec private data */
 struct wm8750_priv {
 	unsigned int sysclk;
+	enum snd_soc_control_type control_type;
 };
 
 #define wm8750_reset(c)	snd_soc_write(c, WM8750_RESET, 0)
@@ -323,7 +291,7 @@ static const struct snd_soc_dapm_widget wm8750_dapm_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("ROUT2"),
 	SND_SOC_DAPM_OUTPUT("MONO1"),
 	SND_SOC_DAPM_OUTPUT("OUT3"),
-	SND_SOC_DAPM_VMID("VREF"),
+	SND_SOC_DAPM_OUTPUT("VREF"),
 
 	SND_SOC_DAPM_INPUT("LINPUT1"),
 	SND_SOC_DAPM_INPUT("LINPUT2"),
@@ -579,23 +547,24 @@ static int wm8750_pcm_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params,
 				struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
 	struct wm8750_priv *wm8750 = snd_soc_codec_get_drvdata(codec);
 	u16 iface = snd_soc_read(codec, WM8750_IFACE) & 0x1f3;
 	u16 srate = snd_soc_read(codec, WM8750_SRATE) & 0x1c0;
 	int coeff = get_coeff(wm8750->sysclk, params_rate(params));
 
 	/* bit size */
-	switch (params_width(params)) {
-	case 16:
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
 		break;
-	case 20:
+	case SNDRV_PCM_FORMAT_S20_3LE:
 		iface |= 0x0004;
 		break;
-	case 24:
+	case SNDRV_PCM_FORMAT_S24_LE:
 		iface |= 0x0008;
 		break;
-	case 32:
+	case SNDRV_PCM_FORMAT_S32_LE:
 		iface |= 0x000c;
 		break;
 	}
@@ -634,7 +603,7 @@ static int wm8750_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			snd_soc_cache_sync(codec);
 
 			/* Set VMID to 5k */
@@ -651,6 +620,7 @@ static int wm8750_set_bias_level(struct snd_soc_codec *codec,
 		snd_soc_write(codec, WM8750_PWR1, 0x0001);
 		break;
 	}
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -685,15 +655,37 @@ static struct snd_soc_dai_driver wm8750_dai = {
 	.ops = &wm8750_dai_ops,
 };
 
+static int wm8750_suspend(struct snd_soc_codec *codec)
+{
+	wm8750_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	return 0;
+}
+
+static int wm8750_resume(struct snd_soc_codec *codec)
+{
+	wm8750_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	return 0;
+}
+
 static int wm8750_probe(struct snd_soc_codec *codec)
 {
+	struct wm8750_priv *wm8750 = snd_soc_codec_get_drvdata(codec);
 	int ret;
+
+	ret = snd_soc_codec_set_cache_io(codec, 7, 9, wm8750->control_type);
+	if (ret < 0) {
+		printk(KERN_ERR "wm8750: failed to set cache I/O: %d\n", ret);
+		return ret;
+	}
 
 	ret = wm8750_reset(codec);
 	if (ret < 0) {
 		printk(KERN_ERR "wm8750: failed to reset: %d\n", ret);
 		return ret;
 	}
+
+	/* charge output caps */
+	wm8750_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
 	/* set the update bits */
 	snd_soc_update_bits(codec, WM8750_LDAC, 0x0100, 0x0100);
@@ -708,19 +700,28 @@ static int wm8750_probe(struct snd_soc_codec *codec)
 	return ret;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8750 = {
-	.probe =	wm8750_probe,
-	.set_bias_level = wm8750_set_bias_level,
-	.suspend_bias_off = true,
+static int wm8750_remove(struct snd_soc_codec *codec)
+{
+	wm8750_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	return 0;
+}
 
-	.component_driver = {
-		.controls		= wm8750_snd_controls,
-		.num_controls		= ARRAY_SIZE(wm8750_snd_controls),
-		.dapm_widgets		= wm8750_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(wm8750_dapm_widgets),
-		.dapm_routes		= wm8750_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(wm8750_dapm_routes),
-	},
+static struct snd_soc_codec_driver soc_codec_dev_wm8750 = {
+	.probe =	wm8750_probe,
+	.remove =	wm8750_remove,
+	.suspend =	wm8750_suspend,
+	.resume =	wm8750_resume,
+	.set_bias_level = wm8750_set_bias_level,
+	.reg_cache_size = ARRAY_SIZE(wm8750_reg),
+	.reg_word_size = sizeof(u16),
+	.reg_cache_default = wm8750_reg,
+
+	.controls = wm8750_snd_controls,
+	.num_controls = ARRAY_SIZE(wm8750_snd_controls),
+	.dapm_widgets = wm8750_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(wm8750_dapm_widgets),
+	.dapm_routes = wm8750_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(wm8750_dapm_routes),
 };
 
 static const struct of_device_id wm8750_of_match[] = {
@@ -730,21 +731,10 @@ static const struct of_device_id wm8750_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, wm8750_of_match);
 
-static const struct regmap_config wm8750_regmap = {
-	.reg_bits = 7,
-	.val_bits = 9,
-	.max_register = WM8750_MOUTV,
-
-	.reg_defaults = wm8750_reg_defaults,
-	.num_reg_defaults = ARRAY_SIZE(wm8750_reg_defaults),
-	.cache_type = REGCACHE_RBTREE,
-};
-
 #if defined(CONFIG_SPI_MASTER)
-static int wm8750_spi_probe(struct spi_device *spi)
+static int __devinit wm8750_spi_probe(struct spi_device *spi)
 {
 	struct wm8750_priv *wm8750;
-	struct regmap *regmap;
 	int ret;
 
 	wm8750 = devm_kzalloc(&spi->dev, sizeof(struct wm8750_priv),
@@ -752,10 +742,7 @@ static int wm8750_spi_probe(struct spi_device *spi)
 	if (wm8750 == NULL)
 		return -ENOMEM;
 
-	regmap = devm_regmap_init_spi(spi, &wm8750_regmap);
-	if (IS_ERR(regmap))
-		return PTR_ERR(regmap);
-
+	wm8750->control_type = SND_SOC_SPI;
 	spi_set_drvdata(spi, wm8750);
 
 	ret = snd_soc_register_codec(&spi->dev,
@@ -763,7 +750,7 @@ static int wm8750_spi_probe(struct spi_device *spi)
 	return ret;
 }
 
-static int wm8750_spi_remove(struct spi_device *spi)
+static int __devexit wm8750_spi_remove(struct spi_device *spi)
 {
 	snd_soc_unregister_codec(&spi->dev);
 	return 0;
@@ -779,20 +766,20 @@ MODULE_DEVICE_TABLE(spi, wm8750_spi_ids);
 static struct spi_driver wm8750_spi_driver = {
 	.driver = {
 		.name	= "wm8750",
+		.owner	= THIS_MODULE,
 		.of_match_table = wm8750_of_match,
 	},
 	.id_table	= wm8750_spi_ids,
 	.probe		= wm8750_spi_probe,
-	.remove		= wm8750_spi_remove,
+	.remove		= __devexit_p(wm8750_spi_remove),
 };
 #endif /* CONFIG_SPI_MASTER */
 
-#if IS_ENABLED(CONFIG_I2C)
-static int wm8750_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
+static __devinit int wm8750_i2c_probe(struct i2c_client *i2c,
+				      const struct i2c_device_id *id)
 {
 	struct wm8750_priv *wm8750;
-	struct regmap *regmap;
 	int ret;
 
 	wm8750 = devm_kzalloc(&i2c->dev, sizeof(struct wm8750_priv),
@@ -801,17 +788,14 @@ static int wm8750_i2c_probe(struct i2c_client *i2c,
 		return -ENOMEM;
 
 	i2c_set_clientdata(i2c, wm8750);
-
-	regmap = devm_regmap_init_i2c(i2c, &wm8750_regmap);
-	if (IS_ERR(regmap))
-		return PTR_ERR(regmap);
+	wm8750->control_type = SND_SOC_I2C;
 
 	ret =  snd_soc_register_codec(&i2c->dev,
 			&soc_codec_dev_wm8750, &wm8750_dai, 1);
 	return ret;
 }
 
-static int wm8750_i2c_remove(struct i2c_client *client)
+static __devexit int wm8750_i2c_remove(struct i2c_client *client)
 {
 	snd_soc_unregister_codec(&client->dev);
 	return 0;
@@ -827,10 +811,11 @@ MODULE_DEVICE_TABLE(i2c, wm8750_i2c_id);
 static struct i2c_driver wm8750_i2c_driver = {
 	.driver = {
 		.name = "wm8750",
+		.owner = THIS_MODULE,
 		.of_match_table = wm8750_of_match,
 	},
 	.probe =    wm8750_i2c_probe,
-	.remove =   wm8750_i2c_remove,
+	.remove =   __devexit_p(wm8750_i2c_remove),
 	.id_table = wm8750_i2c_id,
 };
 #endif
@@ -838,7 +823,7 @@ static struct i2c_driver wm8750_i2c_driver = {
 static int __init wm8750_modinit(void)
 {
 	int ret = 0;
-#if IS_ENABLED(CONFIG_I2C)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
 	ret = i2c_add_driver(&wm8750_i2c_driver);
 	if (ret != 0) {
 		printk(KERN_ERR "Failed to register wm8750 I2C driver: %d\n",
@@ -858,7 +843,7 @@ module_init(wm8750_modinit);
 
 static void __exit wm8750_exit(void)
 {
-#if IS_ENABLED(CONFIG_I2C)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
 	i2c_del_driver(&wm8750_i2c_driver);
 #endif
 #if defined(CONFIG_SPI_MASTER)

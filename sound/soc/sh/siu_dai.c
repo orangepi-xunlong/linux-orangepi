@@ -543,8 +543,7 @@ static void siu_dai_shutdown(struct snd_pcm_substream *substream,
 	/* Stop the siu if the other stream is not using it */
 	if (!port_info->play_cap) {
 		/* during stmread or stmwrite ? */
-		if (WARN_ON(port_info->playback.rw_flg || port_info->capture.rw_flg))
-			return;
+		BUG_ON(port_info->playback.rw_flg || port_info->capture.rw_flg);
 		siu_dai_spbstop(port_info);
 		siu_dai_stop(port_info);
 	}
@@ -727,18 +726,14 @@ static struct snd_soc_dai_driver siu_i2s_dai = {
 	.ops = &siu_dai_ops,
 };
 
-static const struct snd_soc_component_driver siu_i2s_component = {
-	.name		= "siu-i2s",
-};
-
-static int siu_probe(struct platform_device *pdev)
+static int __devinit siu_probe(struct platform_device *pdev)
 {
 	const struct firmware *fw_entry;
 	struct resource *res, *region;
 	struct siu_info *info;
 	int ret;
 
-	info = devm_kmalloc(&pdev->dev, sizeof(*info), GFP_KERNEL);
+	info = kmalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 	siu_i2s_data = info;
@@ -746,7 +741,7 @@ static int siu_probe(struct platform_device *pdev)
 
 	ret = request_firmware(&fw_entry, "siu_spb.bin", &pdev->dev);
 	if (ret)
-		return ret;
+		goto ereqfw;
 
 	/*
 	 * Loaded firmware is "const" - read only, but we have to modify it in
@@ -757,61 +752,98 @@ static int siu_probe(struct platform_device *pdev)
 	release_firmware(fw_entry);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		return -ENODEV;
-
-	region = devm_request_mem_region(&pdev->dev, res->start,
-					 resource_size(res), pdev->name);
-	if (!region) {
-		dev_err(&pdev->dev, "SIU region already claimed\n");
-		return -EBUSY;
+	if (!res) {
+		ret = -ENODEV;
+		goto egetres;
 	}
 
-	info->pram = devm_ioremap(&pdev->dev, res->start, PRAM_SIZE);
+	region = request_mem_region(res->start, resource_size(res),
+				    pdev->name);
+	if (!region) {
+		dev_err(&pdev->dev, "SIU region already claimed\n");
+		ret = -EBUSY;
+		goto ereqmemreg;
+	}
+
+	ret = -ENOMEM;
+	info->pram = ioremap(res->start, PRAM_SIZE);
 	if (!info->pram)
-		return -ENOMEM;
-	info->xram = devm_ioremap(&pdev->dev, res->start + XRAM_OFFSET,
-				  XRAM_SIZE);
+		goto emappram;
+	info->xram = ioremap(res->start + XRAM_OFFSET, XRAM_SIZE);
 	if (!info->xram)
-		return -ENOMEM;
-	info->yram = devm_ioremap(&pdev->dev, res->start + YRAM_OFFSET,
-				  YRAM_SIZE);
+		goto emapxram;
+	info->yram = ioremap(res->start + YRAM_OFFSET, YRAM_SIZE);
 	if (!info->yram)
-		return -ENOMEM;
-	info->reg = devm_ioremap(&pdev->dev, res->start + REG_OFFSET,
-			    resource_size(res) - REG_OFFSET);
+		goto emapyram;
+	info->reg = ioremap(res->start + REG_OFFSET, resource_size(res) -
+			    REG_OFFSET);
 	if (!info->reg)
-		return -ENOMEM;
+		goto emapreg;
 
 	dev_set_drvdata(&pdev->dev, info);
 
 	/* register using ARRAY version so we can keep dai name */
-	ret = devm_snd_soc_register_component(&pdev->dev, &siu_i2s_component,
-					      &siu_i2s_dai, 1);
+	ret = snd_soc_register_dais(&pdev->dev, &siu_i2s_dai, 1);
 	if (ret < 0)
-		return ret;
+		goto edaiinit;
 
-	ret = devm_snd_soc_register_platform(&pdev->dev, &siu_platform);
+	ret = snd_soc_register_platform(&pdev->dev, &siu_platform);
 	if (ret < 0)
-		return ret;
+		goto esocregp;
 
 	pm_runtime_enable(&pdev->dev);
 
-	return 0;
+	return ret;
+
+esocregp:
+	snd_soc_unregister_dai(&pdev->dev);
+edaiinit:
+	iounmap(info->reg);
+emapreg:
+	iounmap(info->yram);
+emapyram:
+	iounmap(info->xram);
+emapxram:
+	iounmap(info->pram);
+emappram:
+	release_mem_region(res->start, resource_size(res));
+ereqmemreg:
+egetres:
+ereqfw:
+	kfree(info);
+
+	return ret;
 }
 
-static int siu_remove(struct platform_device *pdev)
+static int __devexit siu_remove(struct platform_device *pdev)
 {
+	struct siu_info *info = dev_get_drvdata(&pdev->dev);
+	struct resource *res;
+
 	pm_runtime_disable(&pdev->dev);
+
+	snd_soc_unregister_platform(&pdev->dev);
+	snd_soc_unregister_dai(&pdev->dev);
+
+	iounmap(info->reg);
+	iounmap(info->yram);
+	iounmap(info->xram);
+	iounmap(info->pram);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (res)
+		release_mem_region(res->start, resource_size(res));
+	kfree(info);
+
 	return 0;
 }
 
 static struct platform_driver siu_driver = {
 	.driver 	= {
+		.owner	= THIS_MODULE,
 		.name	= "siu-pcm-audio",
 	},
 	.probe		= siu_probe,
-	.remove		= siu_remove,
+	.remove		= __devexit_p(siu_remove),
 };
 
 module_platform_driver(siu_driver);

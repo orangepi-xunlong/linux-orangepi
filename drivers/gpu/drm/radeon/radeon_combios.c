@@ -24,8 +24,8 @@
  * Authors: Dave Airlie
  *          Alex Deucher
  */
-#include <drm/drmP.h>
-#include <drm/radeon_drm.h>
+#include "drmP.h"
+#include "radeon_drm.h"
 #include "radeon.h"
 #include "atom.h"
 
@@ -34,7 +34,24 @@
 #include <asm/machdep.h>
 #include <asm/pmac_feature.h>
 #include <asm/prom.h>
+#include <asm/pci-bridge.h>
 #endif /* CONFIG_PPC_PMAC */
+
+/* from radeon_encoder.c */
+extern uint32_t
+radeon_get_encoder_enum(struct drm_device *dev, uint32_t supported_device,
+			uint8_t dac);
+extern void radeon_link_encoder_connector(struct drm_device *dev);
+
+/* from radeon_connector.c */
+extern void
+radeon_add_legacy_connector(struct drm_device *dev,
+			    uint32_t connector_id,
+			    uint32_t supported_device,
+			    int connector_type,
+			    struct radeon_i2c_bus_rec *i2c_bus,
+			    uint16_t connector_object_id,
+			    struct radeon_hpd *hpd);
 
 /* from radeon_legacy_encoder.c */
 extern void
@@ -115,7 +132,7 @@ enum radeon_combios_connector {
 	CONNECTOR_UNSUPPORTED_LEGACY
 };
 
-static const int legacy_connector_convert[] = {
+const int legacy_connector_convert[] = {
 	DRM_MODE_CONNECTOR_Unknown,
 	DRM_MODE_CONNECTOR_DVID,
 	DRM_MODE_CONNECTOR_VGA,
@@ -639,34 +656,6 @@ static struct radeon_i2c_bus_rec combios_setup_i2c_bus(struct radeon_device *rde
 	return i2c;
 }
 
-static struct radeon_i2c_bus_rec radeon_combios_get_i2c_info_from_table(struct radeon_device *rdev)
-{
-	struct drm_device *dev = rdev->ddev;
-	struct radeon_i2c_bus_rec i2c;
-	u16 offset;
-	u8 id, blocks, clk, data;
-	int i;
-
-	i2c.valid = false;
-
-	offset = combios_get_table_offset(dev, COMBIOS_I2C_INFO_TABLE);
-	if (offset) {
-		blocks = RBIOS8(offset + 2);
-		for (i = 0; i < blocks; i++) {
-			id = RBIOS8(offset + 3 + (i * 5) + 0);
-			if (id == 136) {
-				clk = RBIOS8(offset + 3 + (i * 5) + 3);
-				data = RBIOS8(offset + 3 + (i * 5) + 4);
-				/* gpiopad */
-				i2c = combios_setup_i2c_bus(rdev, DDC_MONID,
-							    (1 << clk), (1 << data));
-				break;
-			}
-		}
-	}
-	return i2c;
-}
-
 void radeon_combios_i2c_init(struct radeon_device *rdev)
 {
 	struct drm_device *dev = rdev->ddev;
@@ -703,14 +692,30 @@ void radeon_combios_i2c_init(struct radeon_device *rdev)
 	} else if (rdev->family == CHIP_RS300 ||
 		   rdev->family == CHIP_RS400 ||
 		   rdev->family == CHIP_RS480) {
+		u16 offset;
+		u8 id, blocks, clk, data;
+		int i;
+
 		/* 0x68 */
 		i2c = combios_setup_i2c_bus(rdev, DDC_CRT2, 0, 0);
 		rdev->i2c_bus[3] = radeon_i2c_create(dev, &i2c, "MONID");
 
-		/* gpiopad */
-		i2c = radeon_combios_get_i2c_info_from_table(rdev);
-		if (i2c.valid)
-			rdev->i2c_bus[4] = radeon_i2c_create(dev, &i2c, "GPIOPAD_MASK");
+		offset = combios_get_table_offset(dev, COMBIOS_I2C_INFO_TABLE);
+		if (offset) {
+			blocks = RBIOS8(offset + 2);
+			for (i = 0; i < blocks; i++) {
+				id = RBIOS8(offset + 3 + (i * 5) + 0);
+				if (id == 136) {
+					clk = RBIOS8(offset + 3 + (i * 5) + 3);
+					data = RBIOS8(offset + 3 + (i * 5) + 4);
+					/* gpiopad */
+					i2c = combios_setup_i2c_bus(rdev, DDC_MONID,
+								    (1 << clk), (1 << data));
+					rdev->i2c_bus[4] = radeon_i2c_create(dev, &i2c, "GPIOPAD_MASK");
+					break;
+				}
+			}
+		}
 	} else if ((rdev->family == CHIP_R200) ||
 		   (rdev->family >= CHIP_R300)) {
 		/* 0x68 */
@@ -2324,10 +2329,7 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 			connector = (tmp >> 12) & 0xf;
 
 			ddc_type = (tmp >> 8) & 0xf;
-			if (ddc_type == 5)
-				ddc_i2c = radeon_combios_get_i2c_info_from_table(rdev);
-			else
-				ddc_i2c = combios_setup_i2c_bus(rdev, ddc_type, 0, 0);
+			ddc_i2c = combios_setup_i2c_bus(rdev, ddc_type, 0, 0);
 
 			switch (connector) {
 			case CONNECTOR_PROPRIETARY_LEGACY:
@@ -3245,9 +3247,11 @@ static uint32_t combios_detect_ram(struct drm_device *dev, int ram,
 	while (ram--) {
 		addr = ram * 1024 * 1024;
 		/* write to each page */
-		WREG32_IDX((addr) | RADEON_MM_APER, 0xdeadbeef);
+		WREG32(RADEON_MM_INDEX, (addr) | RADEON_MM_APER);
+		WREG32(RADEON_MM_DATA, 0xdeadbeef);
 		/* read back and verify */
-		if (RREG32_IDX((addr) | RADEON_MM_APER) != 0xdeadbeef)
+		WREG32(RADEON_MM_INDEX, (addr) | RADEON_MM_APER);
+		if (RREG32(RADEON_MM_DATA) != 0xdeadbeef)
 			return 0;
 	}
 
@@ -3314,6 +3318,15 @@ static void combios_write_ram_size(struct drm_device *dev)
 
 	mem_size *= (1024 * 1024);	/* convert to bytes */
 	WREG32(RADEON_CONFIG_MEMSIZE, mem_size);
+}
+
+void radeon_combios_dyn_clk_setup(struct drm_device *dev, int enable)
+{
+	uint16_t dyn_clk_info =
+	    combios_get_table_offset(dev, COMBIOS_DYN_CLK_1_TABLE);
+
+	if (dyn_clk_info)
+		combios_parse_pll_table(dev, dyn_clk_info);
 }
 
 void radeon_combios_asic_init(struct drm_device *dev)
@@ -3393,13 +3406,6 @@ void radeon_combios_asic_init(struct drm_device *dev)
 	    rdev->pdev->subsystem_vendor == 0x103c &&
 	    rdev->pdev->subsystem_device == 0x280a)
 		return;
-	/* quirk for rs4xx Toshiba Sattellite L20-183 latop to make it resume
-	 * - it hangs on resume inside the dynclk 1 table.
-	 */
-	if (rdev->family == CHIP_RS400 &&
-	    rdev->pdev->subsystem_vendor == 0x1179 &&
-	    rdev->pdev->subsystem_device == 0xff31)
-	        return;
 
 	/* DYN CLK 1 */
 	table = combios_get_table_offset(dev, COMBIOS_DYN_CLK_1_TABLE);

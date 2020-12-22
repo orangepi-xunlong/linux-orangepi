@@ -3,7 +3,8 @@
 #
 
 config LAPB
-	tristate "LAPB Data Link Driver"
+	tristate "LAPB Data Link Driver (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
 	---help---
 	  Link Access Procedure, Balanced (LAPB) is the data link layer (i.e.
 	  the lower) part of the X.25 protocol. It offers a reliable

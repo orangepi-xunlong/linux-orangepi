@@ -4,7 +4,6 @@
 
 config SUNXI_TIMER_TEST
 	tristate "sunxi timer test driver"
-	default n
+	default m
 	help
 	Nothing help.
-

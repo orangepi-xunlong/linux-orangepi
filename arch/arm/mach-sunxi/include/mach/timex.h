@@ -1,9 +1,8 @@
 /*
  *  arch/arm/mach-sunxi/include/mach/timex.h
  *
- * Copyright(c) 2013-2016 Allwinnertech Co., Ltd.
- * Author: Benn Huang <benn@allwinnertech.com>
- *	   Sugar <shuge@allwinnertech.com>
+ * Copyright (c) Allwinner.  All rights reserved.
+ * Benn Huang (benn@allwinnertech.com)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,10 +13,14 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef __SUNXI_ARCH_TIMEX_H
-#define __SUNXI_ARCH_TIMEX_H
+#ifndef __ASM_ARCH_TIMEX_H
+#define __ASM_ARCH_TIMEX_H
 
 #define CLOCK_TICK_RATE 24000000
 

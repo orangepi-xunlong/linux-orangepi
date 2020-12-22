@@ -33,48 +33,29 @@
 #include <asm/kexec.h>
 #include <asm/bug.h>
 #include <asm/ptrace.h>
-#include <asm/export.h>
 
 	.text
 
-/*
- * We store the saved ksp_limit in the unused part
- * of the STACK_FRAME_OVERHEAD
- */
 _GLOBAL(call_do_softirq)
 	mflr	r0
 	stw	r0,4(r1)
-	lwz	r10,THREAD+KSP_LIMIT(r2)
-	addi	r11,r3,THREAD_INFO_GAP
 	stwu	r1,THREAD_SIZE-STACK_FRAME_OVERHEAD(r3)
 	mr	r1,r3
-	stw	r10,8(r1)
-	stw	r11,THREAD+KSP_LIMIT(r2)
 	bl	__do_softirq
-	lwz	r10,8(r1)
 	lwz	r1,0(r1)
 	lwz	r0,4(r1)
-	stw	r10,THREAD+KSP_LIMIT(r2)
 	mtlr	r0
 	blr
 
-/*
- * void call_do_irq(struct pt_regs *regs, struct thread_info *irqtp);
- */
-_GLOBAL(call_do_irq)
+_GLOBAL(call_handle_irq)
 	mflr	r0
 	stw	r0,4(r1)
-	lwz	r10,THREAD+KSP_LIMIT(r2)
-	addi	r11,r4,THREAD_INFO_GAP
-	stwu	r1,THREAD_SIZE-STACK_FRAME_OVERHEAD(r4)
-	mr	r1,r4
-	stw	r10,8(r1)
-	stw	r11,THREAD+KSP_LIMIT(r2)
-	bl	__do_irq
-	lwz	r10,8(r1)
+	mtctr	r6
+	stwu	r1,THREAD_SIZE-STACK_FRAME_OVERHEAD(r5)
+	mr	r1,r5
+	bctrl
 	lwz	r1,0(r1)
 	lwz	r0,4(r1)
-	stw	r10,THREAD+KSP_LIMIT(r2)
 	mtlr	r0
 	blr
 
@@ -92,16 +73,31 @@ _GLOBAL(mulhdu)
 	addc	r7,r0,r7
 	addze	r4,r4
 1:	beqlr	cr1		/* all done if high part of A is 0 */
+	mr	r10,r3
 	mullw	r9,r3,r5
-	mulhwu	r10,r3,r5
+	mulhwu	r3,r3,r5
 	beq	2f
-	mullw	r0,r3,r6
-	mulhwu	r8,r3,r6
+	mullw	r0,r10,r6
+	mulhwu	r8,r10,r6
 	addc	r7,r0,r7
 	adde	r4,r4,r8
-	addze	r10,r10
+	addze	r3,r3
 2:	addc	r4,r4,r9
-	addze	r3,r10
+	addze	r3,r3
+	blr
+
+/*
+ * sub_reloc_offset(x) returns x - reloc_offset().
+ */
+_GLOBAL(sub_reloc_offset)
+	mflr	r0
+	bl	1f
+1:	mflr	r5
+	lis	r4,1b@ha
+	addi	r4,r4,1b@l
+	subf	r5,r4,r5
+	subf	r3,r5,r3
+	mtlr	r0
 	blr
 
 /*
@@ -183,7 +179,7 @@ _GLOBAL(low_choose_750fx_pll)
 	mtspr	SPRN_HID1,r4
 
 	/* Store new HID1 image */
-	CURRENT_THREAD_INFO(r6, r1)
+	rlwinm	r6,r1,0,0,(31-THREAD_SHIFT)
 	lwz	r6,TI_CPU(r6)
 	slwi	r6,r6,2
 	addis	r6,r6,nap_save_hid1@ha
@@ -282,9 +278,12 @@ _GLOBAL(real_writeb)
  * Flush instruction cache.
  * This is a no-op on the 601.
  */
-#ifndef CONFIG_PPC_8xx
 _GLOBAL(flush_instruction_cache)
-#if defined(CONFIG_4xx)
+#if defined(CONFIG_8xx)
+	isync
+	lis	r5, IDC_INVALL@h
+	mtspr	SPRN_IC_CST, r5
+#elif defined(CONFIG_4xx)
 #ifdef CONFIG_403GCX
 	li      r3, 512
 	mtctr   r3
@@ -296,7 +295,7 @@ _GLOBAL(flush_instruction_cache)
 	lis	r3, KERNELBASE@h
 	iccci	0,r3
 #endif
-#elif defined(CONFIG_FSL_BOOKE)
+#elif CONFIG_FSL_BOOKE
 BEGIN_FTR_SECTION
 	mfspr   r3,SPRN_L1CSR0
 	ori     r3,r3,L1CSR0_CFI|L1CSR0_CLFC
@@ -317,11 +316,9 @@ END_FTR_SECTION_IFSET(CPU_FTR_UNIFIED_ID_CACHE)
 	mfspr	r3,SPRN_HID0
 	ori	r3,r3,HID0_ICFI
 	mtspr	SPRN_HID0,r3
-#endif /* CONFIG_4xx */
+#endif /* CONFIG_8xx/4xx */
 	isync
 	blr
-EXPORT_SYMBOL(flush_instruction_cache)
-#endif /* CONFIG_PPC_8xx */
 
 /*
  * Write any modified data cache blocks out to memory
@@ -330,14 +327,14 @@ EXPORT_SYMBOL(flush_instruction_cache)
  *
  * flush_icache_range(unsigned long start, unsigned long stop)
  */
-_GLOBAL(flush_icache_range)
+_KPROBE(__flush_icache_range)
 BEGIN_FTR_SECTION
-	PURGE_PREFETCHED_INS
 	blr				/* for 601, do nothing */
 END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
-	rlwinm	r3,r3,0,0,31 - L1_CACHE_SHIFT
+	li	r5,L1_CACHE_BYTES-1
+	andc	r3,r3,r5
 	subf	r4,r3,r4
-	addi	r4,r4,L1_CACHE_BYTES - 1
+	add	r4,r4,r5
 	srwi.	r4,r4,L1_CACHE_SHIFT
 	beqlr
 	mtctr	r4
@@ -360,8 +357,70 @@ END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 	sync				/* additional sync needed on g4 */
 	isync
 	blr
-_ASM_NOKPROBE_SYMBOL(flush_icache_range)
-EXPORT_SYMBOL(flush_icache_range)
+/*
+ * Write any modified data cache blocks out to memory.
+ * Does not invalidate the corresponding cache lines (especially for
+ * any corresponding instruction cache).
+ *
+ * clean_dcache_range(unsigned long start, unsigned long stop)
+ */
+_GLOBAL(clean_dcache_range)
+	li	r5,L1_CACHE_BYTES-1
+	andc	r3,r3,r5
+	subf	r4,r3,r4
+	add	r4,r4,r5
+	srwi.	r4,r4,L1_CACHE_SHIFT
+	beqlr
+	mtctr	r4
+
+1:	dcbst	0,r3
+	addi	r3,r3,L1_CACHE_BYTES
+	bdnz	1b
+	sync				/* wait for dcbst's to get to ram */
+	blr
+
+/*
+ * Write any modified data cache blocks out to memory and invalidate them.
+ * Does not invalidate the corresponding instruction cache blocks.
+ *
+ * flush_dcache_range(unsigned long start, unsigned long stop)
+ */
+_GLOBAL(flush_dcache_range)
+	li	r5,L1_CACHE_BYTES-1
+	andc	r3,r3,r5
+	subf	r4,r3,r4
+	add	r4,r4,r5
+	srwi.	r4,r4,L1_CACHE_SHIFT
+	beqlr
+	mtctr	r4
+
+1:	dcbf	0,r3
+	addi	r3,r3,L1_CACHE_BYTES
+	bdnz	1b
+	sync				/* wait for dcbst's to get to ram */
+	blr
+
+/*
+ * Like above, but invalidate the D-cache.  This is used by the 8xx
+ * to invalidate the cache so the PPC core doesn't get stale data
+ * from the CPM (no cache snooping here :-).
+ *
+ * invalidate_dcache_range(unsigned long start, unsigned long stop)
+ */
+_GLOBAL(invalidate_dcache_range)
+	li	r5,L1_CACHE_BYTES-1
+	andc	r3,r3,r5
+	subf	r4,r3,r4
+	add	r4,r4,r5
+	srwi.	r4,r4,L1_CACHE_SHIFT
+	beqlr
+	mtctr	r4
+
+1:	dcbi	0,r3
+	addi	r3,r3,L1_CACHE_BYTES
+	bdnz	1b
+	sync				/* wait for dcbi's to get to ram */
+	blr
 
 /*
  * Flush a particular page from the data cache to RAM.
@@ -373,7 +432,6 @@ EXPORT_SYMBOL(flush_icache_range)
  */
 _GLOBAL(__flush_dcache_icache)
 BEGIN_FTR_SECTION
-	PURGE_PREFETCHED_INS
 	blr
 END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 	rlwinm	r3,r3,0,0,31-PAGE_SHIFT		/* Get page base address */
@@ -415,7 +473,6 @@ END_MMU_FTR_SECTION_IFSET(MMU_FTR_TYPE_44x)
  */
 _GLOBAL(__flush_dcache_icache_phys)
 BEGIN_FTR_SECTION
-	PURGE_PREFETCHED_INS
 	blr					/* for 601, do nothing */
 END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 	mfmsr	r10
@@ -439,6 +496,22 @@ END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 	isync
 	blr
 #endif /* CONFIG_BOOKE */
+
+/*
+ * Clear pages using the dcbz instruction, which doesn't cause any
+ * memory traffic (except to write out any cache lines which get
+ * displaced).  This only works on cacheable memory.
+ *
+ * void clear_pages(void *page, int order) ;
+ */
+_GLOBAL(clear_pages)
+	li	r0,PAGE_SIZE/L1_CACHE_BYTES
+	slw	r0,r0,r4
+	mtctr	r0
+1:	dcbz	0,r3
+	addi	r3,r3,L1_CACHE_BYTES
+	bdnz	1b
+	blr
 
 /*
  * Copy a whole page.  We use the dcbz instruction on the destination
@@ -500,7 +573,25 @@ _GLOBAL(copy_page)
 	li	r0,MAX_COPY_PREFETCH
 	li	r11,4
 	b	2b
-EXPORT_SYMBOL(copy_page)
+
+/*
+ * void atomic_clear_mask(atomic_t mask, atomic_t *addr)
+ * void atomic_set_mask(atomic_t mask, atomic_t *addr);
+ */
+_GLOBAL(atomic_clear_mask)
+10:	lwarx	r5,0,r4
+	andc	r5,r5,r3
+	PPC405_ERR77(0,r4)
+	stwcx.	r5,0,r4
+	bne-	10b
+	blr
+_GLOBAL(atomic_set_mask)
+10:	lwarx	r5,0,r4
+	or	r5,r5,r3
+	PPC405_ERR77(0,r4)
+	stwcx.	r5,0,r4
+	bne-	10b
+	blr
 
 /*
  * Extended precision shifts.
@@ -528,7 +619,6 @@ _GLOBAL(__ashrdi3)
 	sraw	r3,r3,r5	# MSW = MSW >> count
 	or	r4,r4,r7	# LSW |= t2
 	blr
-EXPORT_SYMBOL(__ashrdi3)
 
 _GLOBAL(__ashldi3)
 	subfic	r6,r5,32
@@ -540,7 +630,6 @@ _GLOBAL(__ashldi3)
 	slw	r4,r4,r5	# LSW = LSW << count
 	or	r3,r3,r7	# MSW |= t2
 	blr
-EXPORT_SYMBOL(__ashldi3)
 
 _GLOBAL(__lshrdi3)
 	subfic	r6,r5,32
@@ -552,23 +641,7 @@ _GLOBAL(__lshrdi3)
 	srw	r3,r3,r5	# MSW = MSW >> count
 	or	r4,r4,r7	# LSW |= t2
 	blr
-EXPORT_SYMBOL(__lshrdi3)
 
-/*
- * 64-bit comparison: __cmpdi2(s64 a, s64 b)
- * Returns 0 if a < b, 1 if a == b, 2 if a > b.
- */
-_GLOBAL(__cmpdi2)
-	cmpw	r3,r5
-	li	r3,1
-	bne	1f
-	cmplw	r4,r6
-	beqlr
-1:	li	r3,0
-	bltlr
-	li	r3,2
-	blr
-EXPORT_SYMBOL(__cmpdi2)
 /*
  * 64-bit comparison: __ucmpdi2(u64 a, u64 b)
  * Returns 0 if a < b, 1 if a == b, 2 if a > b.
@@ -583,24 +656,50 @@ _GLOBAL(__ucmpdi2)
 	bltlr
 	li	r3,2
 	blr
-EXPORT_SYMBOL(__ucmpdi2)
 
-_GLOBAL(__bswapdi2)
-	rotlwi  r9,r4,8
-	rotlwi  r10,r3,8
-	rlwimi  r9,r4,24,0,7
-	rlwimi  r10,r3,24,0,7
-	rlwimi  r9,r4,24,16,23
-	rlwimi  r10,r3,24,16,23
-	mr      r3,r9
-	mr      r4,r10
+_GLOBAL(abs)
+	srawi	r4,r3,31
+	xor	r3,r3,r4
+	sub	r3,r3,r4
 	blr
-EXPORT_SYMBOL(__bswapdi2)
+
+/*
+ * Create a kernel thread
+ *   kernel_thread(fn, arg, flags)
+ */
+_GLOBAL(kernel_thread)
+	stwu	r1,-16(r1)
+	stw	r30,8(r1)
+	stw	r31,12(r1)
+	mr	r30,r3		/* function */
+	mr	r31,r4		/* argument */
+	ori	r3,r5,CLONE_VM	/* flags */
+	oris	r3,r3,CLONE_UNTRACED>>16
+	li	r4,0		/* new sp (unused) */
+	li	r0,__NR_clone
+	sc
+	bns+	1f		/* did system call indicate error? */
+	neg	r3,r3		/* if so, make return code negative */
+1:	cmpwi	0,r3,0		/* parent or child? */
+	bne	2f		/* return if parent */
+	li	r0,0		/* make top-level stack frame */
+	stwu	r0,-16(r1)
+	mtlr	r30		/* fn addr in lr */
+	mr	r3,r31		/* load arg and call fn */
+	PPC440EP_ERR42
+	blrl
+	li	r0,__NR_exit	/* exit if function returns */
+	li	r3,0
+	sc
+2:	lwz	r30,8(r1)
+	lwz	r31,12(r1)
+	addi	r1,r1,16
+	blr
 
 #ifdef CONFIG_SMP
 _GLOBAL(start_secondary_resume)
 	/* Reset stack */
-	CURRENT_THREAD_INFO(r1, r1)
+	rlwinm	r1,r1,0,0,(31-THREAD_SHIFT)	/* current_thread_info() */
 	addi	r1,r1,THREAD_SIZE-STACK_FRAME_OVERHEAD
 	li	r3,0
 	stw	r3,0(r1)		/* Zero the stack frame pointer	*/
@@ -639,25 +738,8 @@ relocate_new_kernel:
 	mr      r5, r31
 
 	li	r0, 0
-#elif defined(CONFIG_44x)
+#elif defined(CONFIG_44x)  && !defined(CONFIG_PPC_47x)
 
-	/* Save our parameters */
-	mr	r29, r3
-	mr	r30, r4
-	mr	r31, r5
-
-#ifdef CONFIG_PPC_47x
-	/* Check for 47x cores */
-	mfspr	r3,SPRN_PVR
-	srwi	r3,r3,16
-	cmplwi	cr0,r3,PVR_476FPE@h
-	beq	setup_map_47x
-	cmplwi	cr0,r3,PVR_476@h
-	beq	setup_map_47x
-	cmplwi	cr0,r3,PVR_476_ISS@h
-	beq	setup_map_47x
-#endif /* CONFIG_PPC_47x */
-	
 /*
  * Code for setting up 1:1 mapping for PPC440x for KEXEC
  *
@@ -671,15 +753,16 @@ relocate_new_kernel:
  * 5) Invalidate the tmp mapping.
  *
  * - Based on the kexec support code for FSL BookE
+ * - Doesn't support 47x yet.
  *
  */
+	/* Save our parameters */
+	mr	r29, r3
+	mr	r30, r4
+	mr	r31, r5
 
-	/* 
-	 * Load the PID with kernel PID (0).
-	 * Also load our MSR_IS and TID to MMUCR for TLB search.
-	 */
-	li	r3, 0
-	mtspr	SPRN_PID, r3
+	/* Load our MSR_IS and TID to MMUCR for TLB search */
+	mfspr	r3,SPRN_PID
 	mfmsr	r4
 	andi.	r4,r4,MSR_IS@l
 	beq	wmmucr
@@ -817,179 +900,6 @@ next_tlb:
 	li	r3, 0
 	tlbwe	r3, r24, PPC44x_TLB_PAGEID
 	sync
-	b	ppc44x_map_done
-
-#ifdef CONFIG_PPC_47x
-
-	/* 1:1 mapping for 47x */
-
-setup_map_47x:
-
-	/*
-	 * Load the kernel pid (0) to PID and also to MMUCR[TID].
-	 * Also set the MSR IS->MMUCR STS
-	 */
-	li	r3, 0
-	mtspr	SPRN_PID, r3			/* Set PID */
-	mfmsr	r4				/* Get MSR */
-	andi.	r4, r4, MSR_IS@l		/* TS=1? */
-	beq	1f				/* If not, leave STS=0 */
-	oris	r3, r3, PPC47x_MMUCR_STS@h	/* Set STS=1 */
-1:	mtspr	SPRN_MMUCR, r3			/* Put MMUCR */
-	sync
-
-	/* Find the entry we are running from */
-	bl	2f
-2:	mflr	r23
-	tlbsx	r23, 0, r23
-	tlbre	r24, r23, 0			/* TLB Word 0 */
-	tlbre	r25, r23, 1			/* TLB Word 1 */
-	tlbre	r26, r23, 2			/* TLB Word 2 */
-
-
-	/*
-	 * Invalidates all the tlb entries by writing to 256 RPNs(r4)
-	 * of 4k page size in all  4 ways (0-3 in r3).
-	 * This would invalidate the entire UTLB including the one we are
-	 * running from. However the shadow TLB entries would help us 
-	 * to continue the execution, until we flush them (rfi/isync).
-	 */
-	addis	r3, 0, 0x8000			/* specify the way */
-	addi	r4, 0, 0			/* TLB Word0 = (EPN=0, VALID = 0) */
-	addi	r5, 0, 0
-	b	clear_utlb_entry
-
-	/* Align the loop to speed things up. from head_44x.S */
-	.align	6
-
-clear_utlb_entry:
-
-	tlbwe	r4, r3, 0
-	tlbwe	r5, r3, 1
-	tlbwe	r5, r3, 2
-	addis	r3, r3, 0x2000			/* Increment the way */
-	cmpwi	r3, 0
-	bne	clear_utlb_entry
-	addis	r3, 0, 0x8000
-	addis	r4, r4, 0x100			/* Increment the EPN */
-	cmpwi	r4, 0
-	bne	clear_utlb_entry
-
-	/* Create the entries in the other address space */
-	mfmsr	r5
-	rlwinm	r7, r5, 27, 31, 31		/* Get the TS (Bit 26) from MSR */
-	xori	r7, r7, 1			/* r7 = !TS */
-
-	insrwi	r24, r7, 1, 21			/* Change the TS in the saved TLB word 0 */
-
-	/* 
-	 * write out the TLB entries for the tmp mapping
-	 * Use way '0' so that we could easily invalidate it later.
-	 */
-	lis	r3, 0x8000			/* Way '0' */ 
-
-	tlbwe	r24, r3, 0
-	tlbwe	r25, r3, 1
-	tlbwe	r26, r3, 2
-
-	/* Update the msr to the new TS */
-	insrwi	r5, r7, 1, 26
-
-	bl	1f
-1:	mflr	r6
-	addi	r6, r6, (2f-1b)
-
-	mtspr	SPRN_SRR0, r6
-	mtspr	SPRN_SRR1, r5
-	rfi
-
-	/* 
-	 * Now we are in the tmp address space.
-	 * Create a 1:1 mapping for 0-2GiB in the original TS.
-	 */
-2:
-	li	r3, 0
-	li	r4, 0				/* TLB Word 0 */
-	li	r5, 0				/* TLB Word 1 */
-	li	r6, 0
-	ori	r6, r6, PPC47x_TLB2_S_RWX	/* TLB word 2 */
-
-	li	r8, 0				/* PageIndex */
-
-	xori	r7, r7, 1			/* revert back to original TS */
-
-write_utlb:
-	rotlwi	r5, r8, 28			/* RPN = PageIndex * 256M */
-						/* ERPN = 0 as we don't use memory above 2G */
-
-	mr	r4, r5				/* EPN = RPN */
-	ori	r4, r4, (PPC47x_TLB0_VALID | PPC47x_TLB0_256M)
-	insrwi	r4, r7, 1, 21			/* Insert the TS to Word 0 */
-
-	tlbwe	r4, r3, 0			/* Write out the entries */
-	tlbwe	r5, r3, 1
-	tlbwe	r6, r3, 2
-	addi	r8, r8, 1
-	cmpwi	r8, 8				/* Have we completed ? */
-	bne	write_utlb
-
-	/* make sure we complete the TLB write up */
-	isync
-
-	/* 
-	 * Prepare to jump to the 1:1 mapping.
-	 * 1) Extract page size of the tmp mapping
-	 *    DSIZ = TLB_Word0[22:27]
-	 * 2) Calculate the physical address of the address
-	 *    to jump to.
-	 */
-	rlwinm	r10, r24, 0, 22, 27
-
-	cmpwi	r10, PPC47x_TLB0_4K
-	bne	0f
-	li	r10, 0x1000			/* r10 = 4k */
-	bl	1f
-
-0:
-	/* Defaults to 256M */
-	lis	r10, 0x1000
-	
-	bl	1f
-1:	mflr	r4
-	addi	r4, r4, (2f-1b)			/* virtual address  of 2f */
-
-	subi	r11, r10, 1			/* offsetmask = Pagesize - 1 */
-	not	r10, r11			/* Pagemask = ~(offsetmask) */
-
-	and	r5, r25, r10			/* Physical page */
-	and	r6, r4, r11			/* offset within the current page */
-
-	or	r5, r5, r6			/* Physical address for 2f */
-
-	/* Switch the TS in MSR to the original one */
-	mfmsr	r8
-	insrwi	r8, r7, 1, 26
-
-	mtspr	SPRN_SRR1, r8
-	mtspr	SPRN_SRR0, r5
-	rfi
-
-2:
-	/* Invalidate the tmp mapping */
-	lis	r3, 0x8000			/* Way '0' */
-
-	clrrwi	r24, r24, 12			/* Clear the valid bit */
-	tlbwe	r24, r3, 0
-	tlbwe	r25, r3, 1
-	tlbwe	r26, r3, 2
-
-	/* Make sure we complete the TLB write and flush the shadow TLB */
-	isync
-
-#endif
-
-ppc44x_map_done:
-
 
 	/* Restore the parameters */
 	mr	r3, r29

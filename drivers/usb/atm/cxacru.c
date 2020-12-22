@@ -35,6 +35,7 @@
 #include <linux/timer.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/mutex.h>
@@ -270,7 +271,6 @@ static ssize_t cxacru_sysfs_showattr_dB(s16 value, char *buf)
 static ssize_t cxacru_sysfs_showattr_bool(u32 value, char *buf)
 {
 	static char *str[] = { "no", "yes" };
-
 	if (unlikely(value >= ARRAY_SIZE(str)))
 		return snprintf(buf, PAGE_SIZE, "%u\n", value);
 	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
@@ -279,7 +279,6 @@ static ssize_t cxacru_sysfs_showattr_bool(u32 value, char *buf)
 static ssize_t cxacru_sysfs_showattr_LINK(u32 value, char *buf)
 {
 	static char *str[] = { NULL, "not connected", "connected", "lost" };
-
 	if (unlikely(value >= ARRAY_SIZE(str) || str[value] == NULL))
 		return snprintf(buf, PAGE_SIZE, "%u\n", value);
 	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
@@ -475,8 +474,6 @@ static ssize_t cxacru_sysfs_store_adsl_config(struct device *dev,
 		if (ret < 2)
 			return -EINVAL;
 		if (index < 0 || index > 0x7f)
-			return -EINVAL;
-		if (tmp < 0 || tmp > len - pos)
 			return -EINVAL;
 		pos += tmp;
 
@@ -677,7 +674,7 @@ static int cxacru_cm(struct cxacru_data *instance, enum cxacru_cm_request cm,
 	}
 
 	ret = offd;
-	usb_dbg(instance->usbatm, "cm %#x\n", cm);
+	dbg("cm %#x", cm);
 fail:
 	mutex_unlock(&instance->cm_serialize);
 err:
@@ -706,7 +703,6 @@ static int cxacru_cm_get_array(struct cxacru_data *instance, enum cxacru_cm_requ
 	len = ret / 4;
 	for (offb = 0; offb < len; ) {
 		int l = le32_to_cpu(buf[offb++]);
-
 		if (l < 0 || l > stride || l > (len - offb) / 2) {
 			if (printk_ratelimit())
 				usb_err(instance->usbatm, "invalid data length from cm %#x: %d\n",
@@ -737,9 +733,8 @@ cleanup:
 static int cxacru_card_status(struct cxacru_data *instance)
 {
 	int ret = cxacru_cm(instance, CM_REQUEST_CARD_GET_STATUS, NULL, 0, NULL, 0);
-
 	if (ret < 0) {		/* firmware not loaded */
-		usb_dbg(instance->usbatm, "cxacru_adsl_start: CARD_GET_STATUS returned %d\n", ret);
+		dbg("cxacru_adsl_start: CARD_GET_STATUS returned %d", ret);
 		return ret;
 	}
 	return 0;
@@ -764,7 +759,7 @@ static int cxacru_atm_start(struct usbatm_data *usbatm_instance,
 	int ret;
 	int start_polling = 1;
 
-	dev_dbg(&intf->dev, "%s\n", __func__);
+	dbg("cxacru_atm_start");
 
 	/* Read MAC address */
 	ret = cxacru_cm(instance, CM_REQUEST_CARD_GET_MAC_ADDRESS, NULL, 0,
@@ -951,7 +946,6 @@ static int cxacru_fw(struct usb_device *usb_dev, enum cxacru_fw_request fw,
 	offb = offd = 0;
 	do {
 		int l = min_t(int, stride, size - offd);
-
 		buf[offb++] = fw;
 		buf[offb++] = l;
 		buf[offb++] = code1;
@@ -969,13 +963,13 @@ static int cxacru_fw(struct usb_device *usb_dev, enum cxacru_fw_request fw,
 			ret = usb_bulk_msg(usb_dev, usb_sndbulkpipe(usb_dev, CXACRU_EP_CMD),
 					   buf, offb, NULL, CMD_TIMEOUT);
 			if (ret < 0) {
-				dev_dbg(&usb_dev->dev, "sending fw %#x failed\n", fw);
+				dbg("sending fw %#x failed", fw);
 				goto cleanup;
 			}
 			offb = 0;
 		}
 	} while (offd < size);
-	dev_dbg(&usb_dev->dev, "sent fw %#x\n", fw);
+	dbg("sent fw %#x", fw);
 
 	ret = 0;
 
@@ -995,7 +989,7 @@ static void cxacru_upload_firmware(struct cxacru_data *instance,
 			       usb_dev->descriptor.idProduct };
 	__le32 val;
 
-	usb_dbg(usbatm, "%s\n", __func__);
+	dbg("cxacru_upload_firmware");
 
 	/* FirmwarePllFClkValue */
 	val = cpu_to_le32(instance->modem_type->pll_f_clk);
@@ -1081,7 +1075,7 @@ static int cxacru_find_firmware(struct cxacru_data *instance,
 	char buf[16];
 
 	sprintf(buf, "cxacru-%s.bin", phase);
-	usb_dbg(usbatm, "cxacru_find_firmware: looking for %s\n", buf);
+	dbg("cxacru_find_firmware: looking for %s", buf);
 
 	if (request_firmware(fw_p, buf, dev)) {
 		usb_dbg(usbatm, "no stage %s firmware found\n", phase);
@@ -1098,8 +1092,8 @@ static int cxacru_heavy_init(struct usbatm_data *usbatm_instance,
 {
 	const struct firmware *fw, *bp;
 	struct cxacru_data *instance = usbatm_instance->driver_data;
-	int ret = cxacru_find_firmware(instance, "fw", &fw);
 
+	int ret = cxacru_find_firmware(instance, "fw", &fw);
 	if (ret) {
 		usb_warn(usbatm_instance, "firmware (cxacru-fw.bin) unavailable (system misconfigured?)\n");
 		return ret;
@@ -1122,9 +1116,9 @@ static int cxacru_heavy_init(struct usbatm_data *usbatm_instance,
 
 	ret = cxacru_card_status(instance);
 	if (ret)
-		usb_dbg(usbatm_instance, "modem initialisation failed\n");
+		dbg("modem initialisation failed");
 	else
-		usb_dbg(usbatm_instance, "done setting up the modem\n");
+		dbg("done setting up the modem");
 
 	return ret;
 }
@@ -1139,8 +1133,10 @@ static int cxacru_bind(struct usbatm_data *usbatm_instance,
 
 	/* instance init */
 	instance = kzalloc(sizeof(*instance), GFP_KERNEL);
-	if (!instance)
+	if (!instance) {
+		dbg("cxacru_bind: no memory for instance data");
 		return -ENOMEM;
+	}
 
 	instance->usbatm = usbatm_instance;
 	instance->modem_type = (struct cxacru_modem_type *) id->driver_info;
@@ -1154,29 +1150,31 @@ static int cxacru_bind(struct usbatm_data *usbatm_instance,
 
 	instance->rcv_buf = (u8 *) __get_free_page(GFP_KERNEL);
 	if (!instance->rcv_buf) {
-		usb_dbg(usbatm_instance, "cxacru_bind: no memory for rcv_buf\n");
+		dbg("cxacru_bind: no memory for rcv_buf");
 		ret = -ENOMEM;
 		goto fail;
 	}
 	instance->snd_buf = (u8 *) __get_free_page(GFP_KERNEL);
 	if (!instance->snd_buf) {
-		usb_dbg(usbatm_instance, "cxacru_bind: no memory for snd_buf\n");
+		dbg("cxacru_bind: no memory for snd_buf");
 		ret = -ENOMEM;
 		goto fail;
 	}
 	instance->rcv_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!instance->rcv_urb) {
+		dbg("cxacru_bind: no memory for rcv_urb");
 		ret = -ENOMEM;
 		goto fail;
 	}
 	instance->snd_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!instance->snd_urb) {
+		dbg("cxacru_bind: no memory for snd_urb");
 		ret = -ENOMEM;
 		goto fail;
 	}
 
 	if (!cmd_ep) {
-		usb_dbg(usbatm_instance, "cxacru_bind: no command endpoint\n");
+		dbg("cxacru_bind: no command endpoint");
 		ret = -ENODEV;
 		goto fail;
 	}
@@ -1230,10 +1228,10 @@ static void cxacru_unbind(struct usbatm_data *usbatm_instance,
 	struct cxacru_data *instance = usbatm_instance->driver_data;
 	int is_polling = 1;
 
-	usb_dbg(usbatm_instance, "cxacru_unbind entered\n");
+	dbg("cxacru_unbind entered");
 
 	if (!instance) {
-		usb_dbg(usbatm_instance, "cxacru_unbind: NULL instance!\n");
+		dbg("cxacru_unbind: NULL instance!");
 		return;
 	}
 

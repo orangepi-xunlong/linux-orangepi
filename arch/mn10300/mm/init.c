@@ -99,21 +99,60 @@ void __init paging_init(void)
  */
 void __init mem_init(void)
 {
+	int codesize, reservedpages, datasize, initsize;
+	int tmp;
+
 	BUG_ON(!mem_map);
 
 #define START_PFN	(contig_page_data.bdata->node_min_pfn)
 #define MAX_LOW_PFN	(contig_page_data.bdata->node_low_pfn)
 
-	max_mapnr = MAX_LOW_PFN - START_PFN;
+	max_mapnr = num_physpages = MAX_LOW_PFN - START_PFN;
 	high_memory = (void *) __va(MAX_LOW_PFN * PAGE_SIZE);
 
 	/* clear the zero-page */
 	memset(empty_zero_page, 0, PAGE_SIZE);
 
 	/* this will put all low memory onto the freelists */
-	free_all_bootmem();
+	totalram_pages += free_all_bootmem();
 
-	mem_init_print_info(NULL);
+	reservedpages = 0;
+	for (tmp = 0; tmp < num_physpages; tmp++)
+		if (PageReserved(&mem_map[tmp]))
+			reservedpages++;
+
+	codesize =  (unsigned long) &_etext - (unsigned long) &_stext;
+	datasize =  (unsigned long) &_edata - (unsigned long) &_etext;
+	initsize =  (unsigned long) &__init_end - (unsigned long) &__init_begin;
+
+	printk(KERN_INFO
+	       "Memory: %luk/%luk available"
+	       " (%dk kernel code, %dk reserved, %dk data, %dk init,"
+	       " %ldk highmem)\n",
+	       nr_free_pages() << (PAGE_SHIFT - 10),
+	       max_mapnr << (PAGE_SHIFT - 10),
+	       codesize >> 10,
+	       reservedpages << (PAGE_SHIFT - 10),
+	       datasize >> 10,
+	       initsize >> 10,
+	       totalhigh_pages << (PAGE_SHIFT - 10));
+}
+
+/*
+ *
+ */
+void free_init_pages(char *what, unsigned long begin, unsigned long end)
+{
+	unsigned long addr;
+
+	for (addr = begin; addr < end; addr += PAGE_SIZE) {
+		ClearPageReserved(virt_to_page(addr));
+		init_page_count(virt_to_page(addr));
+		memset((void *) addr, 0xcc, PAGE_SIZE);
+		free_page(addr);
+		totalram_pages++;
+	}
+	printk(KERN_INFO "Freeing %s: %ldk freed\n", what, (end - begin) >> 10);
 }
 
 /*
@@ -121,7 +160,9 @@ void __init mem_init(void)
  */
 void free_initmem(void)
 {
-	free_initmem_default(POISON_FREE_INITMEM);
+	free_init_pages("unused kernel memory",
+			(unsigned long) &__init_begin,
+			(unsigned long) &__init_end);
 }
 
 /*
@@ -130,7 +171,6 @@ void free_initmem(void)
 #ifdef CONFIG_BLK_DEV_INITRD
 void free_initrd_mem(unsigned long start, unsigned long end)
 {
-	free_reserved_area((void *)start, (void *)end, POISON_FREE_INITMEM,
-			   "initrd");
+	free_init_pages("initrd memory", start, end);
 }
 #endif

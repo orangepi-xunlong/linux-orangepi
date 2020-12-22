@@ -1,9 +1,49 @@
 #ifndef __LINUX_ATALK_H__
 #define __LINUX_ATALK_H__
 
+#include <linux/types.h>
+#include <asm/byteorder.h>
+#include <linux/socket.h>
+
+/*
+ * AppleTalk networking structures
+ *
+ * The following are directly referenced from the University Of Michigan
+ * netatalk for compatibility reasons.
+ */
+#define ATPORT_FIRST	1
+#define ATPORT_RESERVED	128
+#define ATPORT_LAST	254		/* 254 is only legal on localtalk */ 
+#define ATADDR_ANYNET	(__u16)0
+#define ATADDR_ANYNODE	(__u8)0
+#define ATADDR_ANYPORT  (__u8)0
+#define ATADDR_BCAST	(__u8)255
+#define DDP_MAXSZ	587
+#define DDP_MAXHOPS     15		/* 4 bits of hop counter */
+
+#define SIOCATALKDIFADDR       (SIOCPROTOPRIVATE + 0)
+
+struct atalk_addr {
+	__be16	s_net;
+	__u8	s_node;
+};
+
+struct sockaddr_at {
+	__kernel_sa_family_t sat_family;
+	__u8		  sat_port;
+	struct atalk_addr sat_addr;
+	char		  sat_zero[8];
+};
+
+struct atalk_netrange {
+	__u8	nr_phase;
+	__be16	nr_firstnet;
+	__be16	nr_lastnet;
+};
+
+#ifdef __KERNEL__
 
 #include <net/sock.h>
-#include <uapi/linux/atalk.h>
 
 struct atalk_route {
 	struct net_device  *dev;
@@ -150,29 +190,20 @@ extern int sysctl_aarp_retransmit_limit;
 extern int sysctl_aarp_resolve_time;
 
 #ifdef CONFIG_SYSCTL
-extern int atalk_register_sysctl(void);
+extern void atalk_register_sysctl(void);
 extern void atalk_unregister_sysctl(void);
 #else
-static inline int atalk_register_sysctl(void)
-{
-	return 0;
-}
-static inline void atalk_unregister_sysctl(void)
-{
-}
+#define atalk_register_sysctl()		do { } while(0)
+#define atalk_unregister_sysctl()	do { } while(0)
 #endif
 
 #ifdef CONFIG_PROC_FS
 extern int atalk_proc_init(void);
 extern void atalk_proc_exit(void);
 #else
-static inline int atalk_proc_init(void)
-{
-	return 0;
-}
-static inline void atalk_proc_exit(void)
-{
-}
+#define atalk_proc_init()	({ 0; })
+#define atalk_proc_exit()	do { } while(0)
 #endif /* CONFIG_PROC_FS */
 
+#endif /* __KERNEL__ */
 #endif /* __LINUX_ATALK_H__ */

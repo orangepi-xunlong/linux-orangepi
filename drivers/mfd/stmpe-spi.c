@@ -4,14 +4,13 @@
  * Copyright (C) ST Microelectronics SA 2011
  *
  * License Terms: GNU General Public License, version 2
- * Author: Viresh Kumar <vireshk@kernel.org> for ST Microelectronics
+ * Author: Viresh Kumar <viresh.kumar@st.com> for ST Microelectronics
  */
 
 #include <linux/spi/spi.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/types.h>
 #include "stmpe.h"
 
@@ -83,7 +82,7 @@ static struct stmpe_client_info spi_ci = {
 	.init = spi_init,
 };
 
-static int
+static int __devinit
 stmpe_spi_probe(struct spi_device *spi)
 {
 	const struct spi_device_id *id = spi_get_device_id(spi);
@@ -102,23 +101,12 @@ stmpe_spi_probe(struct spi_device *spi)
 	return stmpe_probe(&spi_ci, id->driver_data);
 }
 
-static int stmpe_spi_remove(struct spi_device *spi)
+static int __devexit stmpe_spi_remove(struct spi_device *spi)
 {
-	struct stmpe *stmpe = spi_get_drvdata(spi);
+	struct stmpe *stmpe = dev_get_drvdata(&spi->dev);
 
 	return stmpe_remove(stmpe);
 }
-
-static const struct of_device_id stmpe_spi_of_match[] = {
-	{ .compatible = "st,stmpe610", },
-	{ .compatible = "st,stmpe801", },
-	{ .compatible = "st,stmpe811", },
-	{ .compatible = "st,stmpe1601", },
-	{ .compatible = "st,stmpe2401", },
-	{ .compatible = "st,stmpe2403", },
-	{ /* sentinel */ },
-};
-MODULE_DEVICE_TABLE(of, stmpe_spi_of_match);
 
 static const struct spi_device_id stmpe_spi_id[] = {
 	{ "stmpe610", STMPE610 },
@@ -134,13 +122,14 @@ MODULE_DEVICE_TABLE(spi, stmpe_id);
 static struct spi_driver stmpe_spi_driver = {
 	.driver = {
 		.name	= "stmpe-spi",
-		.of_match_table = of_match_ptr(stmpe_spi_of_match),
+		.bus	= &spi_bus_type,
+		.owner	= THIS_MODULE,
 #ifdef CONFIG_PM
 		.pm	= &stmpe_dev_pm_ops,
 #endif
 	},
 	.probe		= stmpe_spi_probe,
-	.remove		= stmpe_spi_remove,
+	.remove		= __devexit_p(stmpe_spi_remove),
 	.id_table	= stmpe_spi_id,
 };
 
@@ -158,4 +147,4 @@ module_exit(stmpe_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("STMPE MFD SPI Interface Driver");
-MODULE_AUTHOR("Viresh Kumar <vireshk@kernel.org>");
+MODULE_AUTHOR("Viresh Kumar <viresh.kumar@st.com>");

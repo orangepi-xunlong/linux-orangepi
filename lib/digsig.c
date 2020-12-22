@@ -30,10 +30,11 @@
 
 static struct crypto_shash *shash;
 
-static const char *pkcs_1_v1_5_decode_emsa(const unsigned char *msg,
-						unsigned long  msglen,
-						unsigned long  modulus_bitlen,
-						unsigned long *outlen)
+static int pkcs_1_v1_5_decode_emsa(const unsigned char *msg,
+			unsigned long  msglen,
+			unsigned long  modulus_bitlen,
+			unsigned char *out,
+			unsigned long *outlen)
 {
 	unsigned long modulus_len, ps_len, i;
 
@@ -41,11 +42,11 @@ static const char *pkcs_1_v1_5_decode_emsa(const unsigned char *msg,
 
 	/* test message size */
 	if ((msglen > modulus_len) || (modulus_len < 11))
-		return NULL;
+		return -EINVAL;
 
 	/* separate encoded message */
-	if (msg[0] != 0x00 || msg[1] != 0x01)
-		return NULL;
+	if ((msg[0] != 0x00) || (msg[1] != (unsigned char)1))
+		return -EINVAL;
 
 	for (i = 2; i < modulus_len - 1; i++)
 		if (msg[i] != 0xFF)
@@ -55,13 +56,19 @@ static const char *pkcs_1_v1_5_decode_emsa(const unsigned char *msg,
 	if (msg[i] != 0)
 		/* There was no octet with hexadecimal value 0x00
 		to separate ps from m. */
-		return NULL;
+		return -EINVAL;
 
 	ps_len = i - 2;
 
-	*outlen = (msglen - (2 + ps_len + 1));
+	if (*outlen < (msglen - (2 + ps_len + 1))) {
+		*outlen = msglen - (2 + ps_len + 1);
+		return -EOVERFLOW;
+	}
 
-	return msg + 2 + ps_len + 1;
+	*outlen = (msglen - (2 + ps_len + 1));
+	memcpy(out, &msg[2 + ps_len + 1], *outlen);
+
+	return 0;
 }
 
 /*
@@ -76,22 +83,14 @@ static int digsig_verify_rsa(struct key *key,
 	unsigned long mlen, mblen;
 	unsigned nret, l;
 	int head, i;
-	unsigned char *out1 = NULL;
-	const char *m;
+	unsigned char *out1 = NULL, *out2 = NULL;
 	MPI in = NULL, res = NULL, pkey[2];
-	uint8_t *p, *datap;
-	const uint8_t *endp;
-	const struct user_key_payload *ukp;
+	uint8_t *p, *datap, *endp;
+	struct user_key_payload *ukp;
 	struct pubkey_hdr *pkh;
 
 	down_read(&key->sem);
-	ukp = user_key_payload_locked(key);
-
-	if (!ukp) {
-		/* key was revoked before we acquired its semaphore */
-		err = -EKEYREVOKED;
-		goto err1;
-	}
+	ukp = key->payload.data;
 
 	if (ukp->datalen < sizeof(*pkh))
 		goto err1;
@@ -110,36 +109,34 @@ static int digsig_verify_rsa(struct key *key,
 	datap = pkh->mpi;
 	endp = ukp->data + ukp->datalen;
 
+	err = -ENOMEM;
+
 	for (i = 0; i < pkh->nmpi; i++) {
 		unsigned int remaining = endp - datap;
 		pkey[i] = mpi_read_from_buffer(datap, &remaining);
-		if (IS_ERR(pkey[i])) {
-			err = PTR_ERR(pkey[i]);
+		if (!pkey[i])
 			goto err;
-		}
 		datap += remaining;
 	}
 
 	mblen = mpi_get_nbits(pkey[0]);
-	mlen = DIV_ROUND_UP(mblen, 8);
+	mlen = (mblen + 7)/8;
 
-	if (mlen == 0) {
-		err = -EINVAL;
+	if (mlen == 0)
 		goto err;
-	}
-
-	err = -ENOMEM;
 
 	out1 = kzalloc(mlen, GFP_KERNEL);
 	if (!out1)
 		goto err;
 
+	out2 = kzalloc(mlen, GFP_KERNEL);
+	if (!out2)
+		goto err;
+
 	nret = siglen;
 	in = mpi_read_from_buffer(sig, &nret);
-	if (IS_ERR(in)) {
-		err = PTR_ERR(in);
+	if (!in)
 		goto err;
-	}
 
 	res = mpi_alloc(mpi_get_nlimbs(in) * 2);
 	if (!res)
@@ -167,15 +164,18 @@ static int digsig_verify_rsa(struct key *key,
 
 	kfree(p);
 
-	m = pkcs_1_v1_5_decode_emsa(out1, len, mblen, &len);
+	err = pkcs_1_v1_5_decode_emsa(out1, len, mblen, out2, &len);
+	if (err)
+		goto err;
 
-	if (!m || len != hlen || memcmp(m, h, hlen))
+	if (len != hlen || memcmp(out2, h, hlen))
 		err = -EINVAL;
 
 err:
 	mpi_free(in);
 	mpi_free(res);
 	kfree(out1);
+	kfree(out2);
 	while (--i >= 0)
 		mpi_free(pkey[i]);
 err1:
@@ -188,11 +188,10 @@ err1:
  * digsig_verify() - digital signature verification with public key
  * @keyring:	keyring to search key in
  * @sig:	digital signature
- * @siglen:	length of the signature
+ * @sigen:	length of the signature
  * @data:	data
  * @datalen:	length of the data
- *
- * Returns 0 on success, -EINVAL otherwise
+ * @return:	0 on success, -EINVAL otherwise
  *
  * Verifies data integrity against digital signature.
  * Currently only RSA is supported.
@@ -223,7 +222,7 @@ int digsig_verify(struct key *keyring, const char *sig, int siglen,
 		kref = keyring_search(make_key_ref(keyring, 1UL),
 						&key_type_user, name);
 		if (IS_ERR(kref))
-			key = ERR_CAST(kref);
+			key = ERR_PTR(PTR_ERR(kref));
 		else
 			key = key_ref_to_ptr(kref);
 	} else {

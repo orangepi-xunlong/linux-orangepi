@@ -25,8 +25,6 @@
 #include <asm/dma.h>
 #include <asm/oplib.h>
 
-#include "mm_32.h"
-
 /* #define IOUNIT_DEBUG */
 #ifdef IOUNIT_DEBUG
 #define IOD(x) printk(x)
@@ -40,8 +38,7 @@
 static void __init iounit_iommu_init(struct platform_device *op)
 {
 	struct iounit_struct *iounit;
-	iopte_t __iomem *xpt;
-	iopte_t __iomem *xptend;
+	iopte_t *xpt, *xptend;
 
 	iounit = kzalloc(sizeof(struct iounit_struct), GFP_ATOMIC);
 	if (!iounit) {
@@ -65,10 +62,10 @@ static void __init iounit_iommu_init(struct platform_device *op)
 	op->dev.archdata.iommu = iounit;
 	iounit->page_table = xpt;
 	spin_lock_init(&iounit->lock);
-
-	xptend = iounit->page_table + (16 * PAGE_SIZE) / sizeof(iopte_t);
-	for (; xpt < xptend; xpt++)
-		sbus_writel(0, xpt);
+	
+	for (xptend = iounit->page_table + (16 * PAGE_SIZE) / sizeof(iopte_t);
+	     xpt < xptend;)
+	     	iopte_val(*xpt++) = 0;
 }
 
 static int __init iounit_init(void)
@@ -133,7 +130,7 @@ nexti:	scan = find_next_zero_bit(iounit->bmap, limit, scan);
 	vaddr = IOUNIT_DMA_BASE + (scan << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
 	for (k = 0; k < npages; k++, iopte = __iopte(iopte_val(iopte) + 0x100), scan++) {
 		set_bit(scan, iounit->bmap);
-		sbus_writel(iopte_val(iopte), &iounit->page_table[scan]);
+		iounit->page_table[scan] = iopte;
 	}
 	IOD(("%08lx\n", vaddr));
 	return vaddr;
@@ -200,12 +197,12 @@ static void iounit_release_scsi_sgl(struct device *dev, struct scatterlist *sg, 
 }
 
 #ifdef CONFIG_SBUS
-static int iounit_map_dma_area(struct device *dev, dma_addr_t *pba, unsigned long va, unsigned long addr, int len)
+static int iounit_map_dma_area(struct device *dev, dma_addr_t *pba, unsigned long va, __u32 addr, int len)
 {
 	struct iounit_struct *iounit = dev->archdata.iommu;
 	unsigned long page, end;
 	pgprot_t dvma_prot;
-	iopte_t __iomem *iopte;
+	iopte_t *iopte;
 
 	*pba = addr;
 
@@ -227,8 +224,8 @@ static int iounit_map_dma_area(struct device *dev, dma_addr_t *pba, unsigned lon
 			
 			i = ((addr - IOUNIT_DMA_BASE) >> PAGE_SHIFT);
 
-			iopte = iounit->page_table + i;
-			sbus_writel(iopte_val(MKIOPTE(__pa(page))), iopte);
+			iopte = (iopte_t *)(iounit->page_table + i);
+			*iopte = MKIOPTE(__pa(page));
 		}
 		addr += PAGE_SIZE;
 		va += PAGE_SIZE;
@@ -245,18 +242,29 @@ static void iounit_unmap_dma_area(struct device *dev, unsigned long addr, int le
 }
 #endif
 
-static const struct sparc32_dma_ops iounit_dma_ops = {
-	.get_scsi_one		= iounit_get_scsi_one,
-	.get_scsi_sgl		= iounit_get_scsi_sgl,
-	.release_scsi_one	= iounit_release_scsi_one,
-	.release_scsi_sgl	= iounit_release_scsi_sgl,
-#ifdef CONFIG_SBUS
-	.map_dma_area		= iounit_map_dma_area,
-	.unmap_dma_area		= iounit_unmap_dma_area,
-#endif
-};
+static char *iounit_lockarea(char *vaddr, unsigned long len)
+{
+/* FIXME: Write this */
+	return vaddr;
+}
+
+static void iounit_unlockarea(char *vaddr, unsigned long len)
+{
+/* FIXME: Write this */
+}
 
 void __init ld_mmu_iounit(void)
 {
-	sparc32_dma_ops = &iounit_dma_ops;
+	BTFIXUPSET_CALL(mmu_lockarea, iounit_lockarea, BTFIXUPCALL_RETO0);
+	BTFIXUPSET_CALL(mmu_unlockarea, iounit_unlockarea, BTFIXUPCALL_NOP);
+
+	BTFIXUPSET_CALL(mmu_get_scsi_one, iounit_get_scsi_one, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(mmu_get_scsi_sgl, iounit_get_scsi_sgl, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(mmu_release_scsi_one, iounit_release_scsi_one, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(mmu_release_scsi_sgl, iounit_release_scsi_sgl, BTFIXUPCALL_NORM);
+
+#ifdef CONFIG_SBUS
+	BTFIXUPSET_CALL(mmu_map_dma_area, iounit_map_dma_area, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(mmu_unmap_dma_area, iounit_unmap_dma_area, BTFIXUPCALL_NORM);
+#endif
 }

@@ -13,9 +13,9 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include "etap.h"
-#include <os.h>
-#include <net_user.h>
-#include <um_malloc.h>
+#include "os.h"
+#include "net_user.h"
+#include "um_malloc.h"
 
 #define MAX_PACKET ETH_MAX_PACKET
 
@@ -105,7 +105,7 @@ static int etap_tramp(char *dev, char *gate, int control_me,
 	sprintf(data_fd_buf, "%d", data_remote);
 	sprintf(version_buf, "%d", UML_NET_VERSION);
 	if (gate != NULL) {
-		strncpy(gate_buf, gate, 15);
+		strcpy(gate_buf, gate);
 		args = setup_args;
 	}
 	else args = nosetup_args;

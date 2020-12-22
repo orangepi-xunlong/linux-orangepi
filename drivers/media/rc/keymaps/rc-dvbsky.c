@@ -1,9 +1,9 @@
-/* rc-dvbsky.c - Keytable for DVBSky Remote Controllers
+/* rc-dvbsky.c - Keytable for Dvbsky Remote Controllers
  *
  * keymap imported from ir-keymaps.c
  *
  *
- * Copyright (c) 2010-2012 by Nibble Max <nibble.max@gmail.com>
+ * Copyright (c) 2010-2011 by Mauro Carvalho Chehab <mchehab@redhat.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,11 +27,11 @@ static struct rc_map_table rc5_dvbsky[] = {
 	{ 0x0006, KEY_6 },
 	{ 0x0007, KEY_7 },
 	{ 0x0008, KEY_8 },
-	{ 0x0009, KEY_9 },
+	{ 0x0009, KEY_9 },	
 	{ 0x000a, KEY_MUTE },
 	{ 0x000d, KEY_OK },
 	{ 0x000b, KEY_STOP },
-	{ 0x000c, KEY_EXIT },
+	{ 0x000c, KEY_EXIT },	
 	{ 0x000e, KEY_CAMERA }, /*Snap shot*/
 	{ 0x000f, KEY_SUBTITLE }, /*PIP*/
 	{ 0x0010, KEY_VOLUMEUP },
@@ -47,9 +47,9 @@ static struct rc_map_table rc5_dvbsky[] = {
 	{ 0x0026, KEY_REWIND },
 	{ 0x0027, KEY_FASTFORWARD },
 	{ 0x0029, KEY_LAST },
-	{ 0x002b, KEY_MENU },
+	{ 0x002b, KEY_MENU },	
 	{ 0x002c, KEY_EPG },
-	{ 0x002d, KEY_ZOOM },
+	{ 0x002d, KEY_ZOOM },	
 };
 
 static struct rc_map_list rc5_dvbsky_map = {
@@ -75,4 +75,4 @@ module_init(init_rc_map_rc5_dvbsky)
 module_exit(exit_rc_map_rc5_dvbsky)
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Nibble Max <nibble.max@gmail.com>");
+MODULE_AUTHOR("Mauro Carvalho Chehab <mchehab@redhat.com>");

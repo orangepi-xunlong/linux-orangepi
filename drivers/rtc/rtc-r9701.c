@@ -119,7 +119,7 @@ static const struct rtc_class_ops r9701_rtc_ops = {
 	.set_time	= r9701_set_datetime,
 };
 
-static int r9701_probe(struct spi_device *spi)
+static int __devinit r9701_probe(struct spi_device *spi)
 {
 	struct rtc_device *rtc;
 	struct rtc_time dt;
@@ -138,7 +138,8 @@ static int r9701_probe(struct spi_device *spi)
 	 * contain invalid values. If so, try to write a default date:
 	 * 2000/1/1 00:00:00
 	 */
-	if (r9701_get_datetime(&spi->dev, &dt)) {
+	r9701_get_datetime(&spi->dev, &dt);
+	if (rtc_valid_tm(&dt)) {
 		dev_info(&spi->dev, "trying to repair invalid date/time\n");
 		dt.tm_sec  = 0;
 		dt.tm_min  = 0;
@@ -147,34 +148,37 @@ static int r9701_probe(struct spi_device *spi)
 		dt.tm_mon  = 0;
 		dt.tm_year = 100;
 
-		if (r9701_set_datetime(&spi->dev, &dt) ||
-				r9701_get_datetime(&spi->dev, &dt)) {
+		if (r9701_set_datetime(&spi->dev, &dt)) {
 			dev_err(&spi->dev, "cannot repair RTC register\n");
 			return -ENODEV;
 		}
 	}
 
-	rtc = devm_rtc_device_register(&spi->dev, "r9701",
-				&r9701_rtc_ops, THIS_MODULE);
+	rtc = rtc_device_register("r9701",
+				&spi->dev, &r9701_rtc_ops, THIS_MODULE);
 	if (IS_ERR(rtc))
 		return PTR_ERR(rtc);
 
-	spi_set_drvdata(spi, rtc);
+	dev_set_drvdata(&spi->dev, rtc);
 
 	return 0;
 }
 
-static int r9701_remove(struct spi_device *spi)
+static int __devexit r9701_remove(struct spi_device *spi)
 {
+	struct rtc_device *rtc = dev_get_drvdata(&spi->dev);
+
+	rtc_device_unregister(rtc);
 	return 0;
 }
 
 static struct spi_driver r9701_driver = {
 	.driver = {
 		.name	= "rtc-r9701",
+		.owner	= THIS_MODULE,
 	},
 	.probe	= r9701_probe,
-	.remove = r9701_remove,
+	.remove = __devexit_p(r9701_remove),
 };
 
 module_spi_driver(r9701_driver);

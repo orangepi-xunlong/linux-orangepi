@@ -16,7 +16,7 @@
 
 #ifndef __IRQS_SUN8I_W6P1_H
 #define __IRQS_SUN8I_W6P1_H
-#if (defined CONFIG_FPGA_V4_PLATFORM) || (defined CONFIG_FPGA_V7_PLATFORM) /* S4 820 */
+#if  (defined CONFIG_FPGA_V4_PLATFORM)|| (defined CONFIG_FPGA_V7_PLATFORM) /* S4 820 */
 #define SUNXI_IRQ_NMI                     (SUNXI_GIC_START + 0)  /* 32 */
 #define SUNXI_IRQ_UART0                   (SUNXI_GIC_START + 1)  /* 33 */
 #define SUNXI_IRQ_TWI0                    (SUNXI_GIC_START + 2)  /* 34 */
@@ -70,7 +70,7 @@
 #define SUNXI_IRQ_TOUCHPANEL			  (0)
 #define SUNXI_IRQ_LRADC				      (0)
 
-#elif (defined CONFIG_EVB_PLATFORM)
+#elif  (defined CONFIG_EVB_PLATFORM)
 #define SUNXI_IRQ_UART0                   (SUNXI_GIC_START + 0)  /* 32 */
 #define SUNXI_IRQ_UART1                   (SUNXI_GIC_START + 1)  /* 33 */
 #define SUNXI_IRQ_UART2                   (SUNXI_GIC_START + 2)  /* 34 */

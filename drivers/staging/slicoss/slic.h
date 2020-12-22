@@ -43,29 +43,34 @@
 
 /* firmware stuff */
 #define OASIS_UCODE_VERS_STRING	"1.2"
-#define OASIS_UCODE_VERS_DATE	"2006/03/27 15:10:37"
-#define OASIS_UCODE_HOSTIF_ID	3
+#define OASIS_UCODE_VERS_DATE  	"2006/03/27 15:10:37"
+#define OASIS_UCODE_HOSTIF_ID  	3
 
 #define MOJAVE_UCODE_VERS_STRING	"1.2"
-#define MOJAVE_UCODE_VERS_DATE		"2006/03/27 15:12:22"
-#define MOJAVE_UCODE_HOSTIF_ID		3
+#define MOJAVE_UCODE_VERS_DATE  	"2006/03/27 15:12:22"
+#define MOJAVE_UCODE_HOSTIF_ID  	3
 
 #define GB_RCVUCODE_VERS_STRING	"1.2"
-#define GB_RCVUCODE_VERS_DATE	"2006/03/27 15:12:15"
+#define GB_RCVUCODE_VERS_DATE  	"2006/03/27 15:12:15"
 static u32 OasisRcvUCodeLen = 512;
 static u32 GBRcvUCodeLen = 512;
 #define SECTION_SIZE 65536
+
+struct slic_spinlock {
+	spinlock_t	lock;
+	unsigned long	flags;
+};
 
 #define SLIC_RSPQ_PAGES_GB        10
 #define SLIC_RSPQ_BUFSINPAGE      (PAGE_SIZE / SLIC_RSPBUF_SIZE)
 
 struct slic_rspqueue {
-	u32             offset;
-	u32             pageindex;
-	u32             num_pages;
-	struct slic_rspbuf *rspbuf;
-	u32 *vaddr[SLIC_RSPQ_PAGES_GB];
-	dma_addr_t          paddr[SLIC_RSPQ_PAGES_GB];
+    u32             offset;
+    u32             pageindex;
+    u32             num_pages;
+    struct slic_rspbuf *rspbuf;
+    u32 *vaddr[SLIC_RSPQ_PAGES_GB];
+    dma_addr_t          paddr[SLIC_RSPQ_PAGES_GB];
 };
 
 #define SLIC_RCVQ_EXPANSION         1
@@ -77,27 +82,26 @@ struct slic_rspqueue {
 #define SLIC_RCVQ_FILLTHRESH        (SLIC_RCVQ_ENTRIES - SLIC_RCVQ_FILLENTRIES)
 
 struct slic_rcvqueue {
-	struct sk_buff    *head;
-	struct sk_buff    *tail;
-	u32            count;
-	u32            size;
-	u32            errors;
+    struct sk_buff    *head;
+    struct sk_buff    *tail;
+    u32            count;
+    u32            size;
+    u32            errors;
 };
 
 struct slic_rcvbuf_info {
-	u32     id;
-	u32     starttime;
-	u32     stoptime;
-	u32     slicworld;
-	u32     lasttime;
-	u32     lastid;
+    u32     id;
+    u32     starttime;
+    u32     stoptime;
+    u32     slicworld;
+    u32     lasttime;
+    u32     lastid;
 };
-
 /*
- * SLIC Handle structure.  Used to restrict handle values to
- * 32 bits by using an index rather than an address.
- * Simplifies ucode in 64-bit systems
- */
+ SLIC Handle structure.  Used to restrict handle values to
+ 32 bits by using an index rather than an address.
+ Simplifies ucode in 64-bit systems
+*/
 struct slic_handle_word {
 	union {
 		struct {
@@ -109,12 +113,12 @@ struct slic_handle_word {
 };
 
 struct slic_handle {
-	struct slic_handle_word  token;  /* token passed between host and card*/
-	ushort                      type;
-	void *address;    /* actual address of the object*/
-	ushort                      offset;
-	struct slic_handle       *other_handle;
-	struct slic_handle       *next;
+    struct slic_handle_word  token;  /* token passed between host and card*/
+    ushort                      type;
+    void *address;    /* actual address of the object*/
+    ushort                      offset;
+    struct slic_handle       *other_handle;
+    struct slic_handle       *next;
 };
 
 #define SLIC_HANDLE_FREE        0x0000
@@ -130,17 +134,17 @@ struct slic_handle {
 #define SLIC_HOSTCMD_SIZE    512
 
 struct slic_hostcmd {
-	struct slic_host64_cmd  cmd64;
-	u32                    type;
-	struct sk_buff            *skb;
-	u32                    paddrl;
-	u32                    paddrh;
-	u32                    busy;
-	u32                    cmdsize;
-	ushort                     numbufs;
-	struct slic_handle    *pslic_handle;/* handle associated with command */
-	struct slic_hostcmd    *next;
-	struct slic_hostcmd    *next_all;
+    struct slic_host64_cmd  cmd64;
+    u32                    type;
+    struct sk_buff            *skb;
+    u32                    paddrl;
+    u32                    paddrh;
+    u32                    busy;
+    u32                    cmdsize;
+    ushort                     numbufs;
+    struct slic_handle    *pslic_handle;/* handle associated with command */
+    struct slic_hostcmd    *next;
+    struct slic_hostcmd    *next_all;
 };
 
 #define SLIC_CMDQ_CMDSINPAGE    (PAGE_SIZE / SLIC_HOSTCMD_SIZE)
@@ -161,11 +165,12 @@ struct slic_cmdqueue {
 	struct slic_hostcmd *head;
 	struct slic_hostcmd *tail;
 	int count;
-	spinlock_t lock;
+	struct slic_spinlock lock;
 };
 
 #define SLIC_MAX_CARDS              32
 #define SLIC_MAX_PORTS              4        /* Max # of ports per card   */
+
 
 struct mcast_address {
 	unsigned char address[6];
@@ -223,35 +228,35 @@ struct mcast_address {
 #define SLIC_CARD_STATE(x)    ((x == CARD_UP) ? "UP" : "Down")
 
 struct slic_iface_stats {
-	/*
-	 * Stats
-	 */
-	u64        xmt_bytes;
-	u64        xmt_ucast;
-	u64        xmt_mcast;
-	u64        xmt_bcast;
-	u64        xmt_errors;
-	u64        xmt_discards;
-	u64        xmit_collisions;
-	u64        xmit_excess_xmit_collisions;
-	u64        rcv_bytes;
-	u64        rcv_ucast;
-	u64        rcv_mcast;
-	u64        rcv_bcast;
-	u64        rcv_errors;
-	u64        rcv_discards;
+    /*
+     * Stats
+     */
+    u64        xmt_bytes;
+    u64        xmt_ucast;
+    u64        xmt_mcast;
+    u64        xmt_bcast;
+    u64        xmt_errors;
+    u64        xmt_discards;
+    u64        xmit_collisions;
+    u64        xmit_excess_xmit_collisions;
+    u64        rcv_bytes;
+    u64        rcv_ucast;
+    u64        rcv_mcast;
+    u64        rcv_bcast;
+    u64        rcv_errors;
+    u64        rcv_discards;
 };
 
 struct sliccp_stats {
-	u64        xmit_tcp_segs;
-	u64        xmit_tcp_bytes;
-	u64        rcv_tcp_segs;
-	u64        rcv_tcp_bytes;
+    u64        xmit_tcp_segs;
+    u64        xmit_tcp_bytes;
+    u64        rcv_tcp_segs;
+    u64        rcv_tcp_bytes;
 };
 
 struct slicnet_stats {
-	struct sliccp_stats        tcp;
-	struct slic_iface_stats      iface;
+    struct sliccp_stats        tcp;
+    struct slic_iface_stats      iface;
 };
 
 #define SLIC_LOADTIMER_PERIOD     1
@@ -280,49 +285,51 @@ struct slicnet_stats {
 #define SLIC_INTAGG_5GB           100
 
 struct ether_header {
-	unsigned char    ether_dhost[6];
-	unsigned char    ether_shost[6];
-	ushort   ether_type;
+    unsigned char    ether_dhost[6];
+    unsigned char    ether_shost[6];
+    ushort   ether_type;
 };
 
 struct sliccard {
-	uint              busnumber;
-	uint              slotnumber;
-	uint              state;
-	uint              cardnum;
-	uint              card_size;
-	uint              adapters_activated;
-	uint              adapters_allocated;
-	uint              adapters_sleeping;
-	uint              gennumber;
-	u32           events;
-	u32           loadlevel_current;
-	u32           load;
-	uint              reset_in_progress;
-	u32           pingstatus;
-	u32           bad_pingstatus;
-	struct timer_list loadtimer;
-	u32           loadtimerset;
-	uint              config_set;
-	struct slic_config  config;
-	struct adapter  *master;
-	struct adapter  *adapter[SLIC_MAX_PORTS];
-	struct sliccard *next;
-	u32             error_interrupts;
-	u32             error_rmiss_interrupts;
-	u32             rcv_interrupts;
-	u32             xmit_interrupts;
-	u32             num_isrs;
-	u32             false_interrupts;
-	u32             max_isr_rcvs;
-	u32             max_isr_xmits;
-	u32             rcv_interrupt_yields;
-	u32             tx_packets;
-	u32             debug_ix;
-	ushort              reg_type[32];
-	ushort              reg_offset[32];
-	u32             reg_value[32];
-	u32             reg_valueh[32];
+    uint              busnumber;
+    uint              slotnumber;
+    uint              state;
+    uint              cardnum;
+    uint              card_size;
+    uint              adapters_activated;
+    uint              adapters_allocated;
+    uint              adapters_sleeping;
+    uint              gennumber;
+    u32           events;
+    u32           loadlevel_current;
+    u32           load;
+    uint              reset_in_progress;
+    u32           pingstatus;
+    u32           bad_pingstatus;
+    struct timer_list loadtimer;
+    u32           loadtimerset;
+    uint              config_set;
+    struct slic_config  config;
+    struct dentry      *debugfs_dir;
+    struct dentry      *debugfs_cardinfo;
+    struct adapter  *master;
+    struct adapter  *adapter[SLIC_MAX_PORTS];
+    struct sliccard *next;
+    u32             error_interrupts;
+    u32             error_rmiss_interrupts;
+    u32             rcv_interrupts;
+    u32             xmit_interrupts;
+    u32             num_isrs;
+    u32             false_interrupts;
+    u32             max_isr_rcvs;
+    u32             max_isr_xmits;
+    u32             rcv_interrupt_yields;
+    u32             tx_packets;
+    u32             debug_ix;
+    ushort              reg_type[32];
+    ushort              reg_offset[32];
+    u32             reg_value[32];
+    u32             reg_valueh[32];
 };
 
 #define NUM_CFG_SPACES      2
@@ -330,227 +337,182 @@ struct sliccard {
 #define NUM_CFG_REG_ULONGS  (NUM_CFG_REGS / sizeof(u32))
 
 struct physcard {
-	struct adapter  *adapter[SLIC_MAX_PORTS];
-	struct physcard *next;
-	uint                adapters_allocd;
+    struct adapter  *adapter[SLIC_MAX_PORTS];
+    struct physcard *next;
+    uint                adapters_allocd;
 
-/*
- * the following is not currently needed
- *	u32              bridge_busnum;
- *	u32              bridge_cfg[NUM_CFG_SPACES][NUM_CFG_REG_ULONGS];
+ /*  the following is not currently needed
+    u32               bridge_busnum;
+    u32               bridge_cfg[NUM_CFG_SPACES][NUM_CFG_REG_ULONGS];
  */
 };
 
 struct base_driver {
-	spinlock_t       driver_lock;
-	u32              num_slic_cards;
-	u32              num_slic_ports;
-	u32              num_slic_ports_active;
-	u32              dynamic_intagg;
-	struct sliccard  *slic_card;
-	struct physcard  *phys_card;
-	uint                 cardnuminuse[SLIC_MAX_CARDS];
+    struct slic_spinlock driver_lock;
+    u32              num_slic_cards;
+    u32              num_slic_ports;
+    u32              num_slic_ports_active;
+    u32              dynamic_intagg;
+    struct sliccard  *slic_card;
+    struct physcard  *phys_card;
+    uint                 cardnuminuse[SLIC_MAX_CARDS];
 };
 
-struct slic_stats {
-	/* xmit stats */
-	u64 xmit_tcp_bytes;
-	u64 xmit_tcp_segs;
-	u64 xmit_bytes;
-	u64 xmit_collisions;
-	u64 xmit_unicasts;
-	u64 xmit_other_error;
-	u64 xmit_excess_collisions;
-	/* rcv stats */
-	u64 rcv_tcp_bytes;
-	u64 rcv_tcp_segs;
-	u64 rcv_bytes;
-	u64 rcv_unicasts;
-	u64 rcv_other_error;
-	u64 rcv_drops;
+struct slic_shmem {
+    volatile u32          isr;
+    volatile u32          linkstatus;
+    volatile struct slic_stats     inicstats;
 };
 
-struct slic_shmem_data {
-	u32 isr;
-	u32 lnkstatus;
-	struct slic_stats stats;
-};
-
-struct slic_shmemory {
-	dma_addr_t isr_phaddr;
-	dma_addr_t lnkstatus_phaddr;
-	dma_addr_t stats_phaddr;
-	struct slic_shmem_data __iomem *shmem_data;
+struct slic_reg_params {
+    u32       linkspeed;
+    u32       linkduplex;
+    u32       fail_on_bad_eeprom;
 };
 
 struct slic_upr {
-	uint               adapter;
-	u32            upr_request;
-	u32            upr_data;
-	u32            upr_data_h;
-	u32            upr_buffer;
-	u32            upr_buffer_h;
-	struct slic_upr *next;
+    uint               adapter;
+    u32            upr_request;
+    u32            upr_data;
+    u32            upr_data_h;
+    u32            upr_buffer;
+    u32            upr_buffer_h;
+    struct slic_upr *next;
 };
 
 struct slic_ifevents {
-	uint        oflow802;
-	uint        uflow802;
-	uint        Tprtoflow;
-	uint        rcvearly;
-	uint        Bufov;
-	uint        Carre;
-	uint        Longe;
-	uint        Invp;
-	uint        Crc;
-	uint        Drbl;
-	uint        Code;
-	uint        IpHlen;
-	uint        IpLen;
-	uint        IpCsum;
-	uint        TpCsum;
-	uint        TpHlen;
+    uint        oflow802;
+    uint        uflow802;
+    uint        Tprtoflow;
+    uint        rcvearly;
+    uint        Bufov;
+    uint        Carre;
+    uint        Longe;
+    uint        Invp;
+    uint        Crc;
+    uint        Drbl;
+    uint        Code;
+    uint        IpHlen;
+    uint        IpLen;
+    uint        IpCsum;
+    uint        TpCsum;
+    uint        TpHlen;
 };
 
 struct adapter {
-	void *ifp;
-	struct sliccard *card;
-	uint                port;
-	struct physcard *physcard;
-	uint                physport;
-	uint                cardindex;
-	uint                card_size;
-	uint                chipid;
-	struct net_device  *netdev;
-	spinlock_t          adapter_lock;
-	spinlock_t          reset_lock;
-	struct pci_dev     *pcidev;
-	uint                busnumber;
-	uint                slotnumber;
-	uint                functionnumber;
-	ushort              vendid;
-	ushort              devid;
-	ushort              subsysid;
-	u32             irq;
-	u32             drambase;
-	u32             dramlength;
-	uint                queues_initialized;
-	uint                allocated;
-	uint                activated;
-	u32             intrregistered;
-	uint                isp_initialized;
-	uint                gennumber;
-	struct slic_shmemory shmem;
-	dma_addr_t          phys_shmem;
-	void __iomem *regs;
-	unsigned char               state;
-	unsigned char               linkstate;
-	unsigned char               linkspeed;
-	unsigned char               linkduplex;
-	uint                flags;
-	unsigned char               macaddr[6];
-	unsigned char               currmacaddr[6];
-	u32             macopts;
-	ushort              devflags_prev;
-	u64             mcastmask;
-	struct mcast_address   *mcastaddrs;
-	struct slic_upr   *upr_list;
-	uint                upr_busy;
-	struct timer_list   pingtimer;
-	u32             pingtimerset;
-	struct timer_list   loadtimer;
-	u32             loadtimerset;
-	spinlock_t               upr_lock;
-	spinlock_t               bit64reglock;
-	struct slic_rspqueue     rspqueue;
-	struct slic_rcvqueue     rcvqueue;
-	struct slic_cmdqueue     cmdq_free;
-	struct slic_cmdqueue     cmdq_done;
-	struct slic_cmdqueue     cmdq_all;
-	struct slic_cmdqmem      cmdqmem;
-	/*
-	 * SLIC Handles
-	 */
-	/* Object handles*/
-	struct slic_handle slic_handles[SLIC_CMDQ_MAXCMDS + 1];
-	/* Free object handles*/
-	struct slic_handle *pfree_slic_handles;
-	/* Object handle list lock*/
-	spinlock_t          handle_lock;
-	ushort              slic_handle_ix;
+    void *ifp;
+    struct sliccard *card;
+    uint                port;
+    struct physcard *physcard;
+    uint                physport;
+    uint                cardindex;
+    uint                card_size;
+    uint                chipid;
+    struct net_device  *netdev;
+    struct net_device  *next_netdevice;
+    struct slic_spinlock     adapter_lock;
+    struct slic_spinlock     reset_lock;
+    struct pci_dev     *pcidev;
+    uint                busnumber;
+    uint                slotnumber;
+    uint                functionnumber;
+    ushort              vendid;
+    ushort              devid;
+    ushort              subsysid;
+    u32             irq;
+    void __iomem *memorybase;
+    u32             memorylength;
+    u32             drambase;
+    u32             dramlength;
+    uint                queues_initialized;
+    uint                allocated;
+    uint                activated;
+    u32             intrregistered;
+    uint                isp_initialized;
+    uint                gennumber;
+    u32             curaddrupper;
+    struct slic_shmem      *pshmem;
+    dma_addr_t          phys_shmem;
+    u32             isrcopy;
+    __iomem struct slic_regs       *slic_regs;
+    unsigned char               state;
+    unsigned char               linkstate;
+    unsigned char               linkspeed;
+    unsigned char               linkduplex;
+    uint                flags;
+    unsigned char               macaddr[6];
+    unsigned char               currmacaddr[6];
+    u32             macopts;
+    ushort              devflags_prev;
+    u64             mcastmask;
+    struct mcast_address   *mcastaddrs;
+    struct slic_upr   *upr_list;
+    uint                upr_busy;
+    struct timer_list   pingtimer;
+    u32             pingtimerset;
+    struct timer_list   loadtimer;
+    u32             loadtimerset;
+    struct dentry      *debugfs_entry;
+    struct slic_spinlock     upr_lock;
+    struct slic_spinlock     bit64reglock;
+    struct slic_rspqueue     rspqueue;
+    struct slic_rcvqueue     rcvqueue;
+    struct slic_cmdqueue     cmdq_free;
+    struct slic_cmdqueue     cmdq_done;
+    struct slic_cmdqueue     cmdq_all;
+    struct slic_cmdqmem      cmdqmem;
+    /*
+     *  SLIC Handles
+    */
+    struct slic_handle slic_handles[SLIC_CMDQ_MAXCMDS+1]; /* Object handles*/
+    struct slic_handle *pfree_slic_handles;          /* Free object handles*/
+    struct slic_spinlock     handle_lock;           /* Object handle list lock*/
+    ushort              slic_handle_ix;
 
-	u32             xmitq_full;
-	u32             all_reg_writes;
-	u32             icr_reg_writes;
-	u32             isr_reg_writes;
-	u32             error_interrupts;
-	u32             error_rmiss_interrupts;
-	u32             rx_errors;
-	u32             rcv_drops;
-	u32             rcv_interrupts;
-	u32             xmit_interrupts;
-	u32             linkevent_interrupts;
-	u32             upr_interrupts;
-	u32             num_isrs;
-	u32             false_interrupts;
-	u32             tx_packets;
-	u32             xmit_completes;
-	u32             tx_drops;
-	u32             rcv_broadcasts;
-	u32             rcv_multicasts;
-	u32             rcv_unicasts;
-	u32             max_isr_rcvs;
-	u32             max_isr_xmits;
-	u32             rcv_interrupt_yields;
-	u32             intagg_period;
-	u32             intagg_delay;
-	u32             dynamic_intagg;
-	struct inicpm_state    *inicpm_info;
-	void *pinicpm_info;
-	struct slic_ifevents  if_events;
-	struct slic_stats        inicstats_prev;
-	struct slicnet_stats     slic_stats;
+    u32             xmitq_full;
+    u32             all_reg_writes;
+    u32             icr_reg_writes;
+    u32             isr_reg_writes;
+    u32             error_interrupts;
+    u32             error_rmiss_interrupts;
+    u32             rx_errors;
+    u32             rcv_drops;
+    u32             rcv_interrupts;
+    u32             xmit_interrupts;
+    u32             linkevent_interrupts;
+    u32             upr_interrupts;
+    u32             num_isrs;
+    u32             false_interrupts;
+    u32             tx_packets;
+    u32             xmit_completes;
+    u32             tx_drops;
+    u32             rcv_broadcasts;
+    u32             rcv_multicasts;
+    u32             rcv_unicasts;
+    u32             max_isr_rcvs;
+    u32             max_isr_xmits;
+    u32             rcv_interrupt_yields;
+    u32             intagg_period;
+    struct inicpm_state    *inicpm_info;
+    void *pinicpm_info;
+    struct slic_reg_params   reg_params;
+    struct slic_ifevents  if_events;
+    struct slic_stats        inicstats_prev;
+    struct slicnet_stats     slic_stats;
 };
 
-static inline u32 slic_read32(struct adapter *adapter, unsigned int reg)
-{
-	return ioread32(adapter->regs + reg);
-}
-
-static inline void slic_write32(struct adapter *adapter, unsigned int reg,
-				u32 val)
-{
-	iowrite32(val, adapter->regs + reg);
-}
-
-static inline void slic_write64(struct adapter *adapter, unsigned int reg,
-				u32 val, u32 hiaddr)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&adapter->bit64reglock, flags);
-	slic_write32(adapter, SLIC_REG_ADDR_UPPER, hiaddr);
-	slic_write32(adapter, reg, val);
-	mmiowb();
-	spin_unlock_irqrestore(&adapter->bit64reglock, flags);
-}
-
-static inline void slic_flush_write(struct adapter *adapter)
-{
-	ioread32(adapter->regs + SLIC_REG_HOSTID);
-}
 
 #define UPDATE_STATS(largestat, newstat, oldstat)                        \
 {                                                                        \
-	if ((newstat) < (oldstat))                                       \
-		(largestat) += ((newstat) + (0xFFFFFFFF - oldstat + 1)); \
-	else                                                             \
-		(largestat) += ((newstat) - (oldstat));                  \
+    if ((newstat) < (oldstat))                                           \
+	(largestat) += ((newstat) + (0xFFFFFFFF - oldstat + 1));         \
+    else                                                                 \
+	(largestat) += ((newstat) - (oldstat));                          \
 }
 
 #define UPDATE_STATS_GB(largestat, newstat, oldstat)                     \
 {                                                                        \
-	(largestat) += ((newstat) - (oldstat));                          \
+    (largestat) += ((newstat) - (oldstat));                              \
 }
 
 #if BITS_PER_LONG == 64
@@ -568,6 +530,8 @@ static inline void slic_flush_write(struct adapter *adapter)
 #define FLUSH		true
 #define DONT_FLUSH	false
 
-#define SIOCSLICSETINTAGG        (SIOCDEVPRIVATE + 10)
+#define SIOCSLICDUMPCARD         (SIOCDEVPRIVATE+9)
+#define SIOCSLICSETINTAGG        (SIOCDEVPRIVATE+10)
+#define SIOCSLICTRACEDUMP        (SIOCDEVPRIVATE+11)
 
 #endif /*  __SLIC_DRIVER_H__ */

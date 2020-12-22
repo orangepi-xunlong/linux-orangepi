@@ -5,6 +5,8 @@
  * MIPS floating point support
  * Copyright (C) 1994-2000 Algorithmics Ltd.
  *
+ * ########################################################################
+ *
  *  This program is free software; you can distribute it and/or modify it
  *  under the terms of the GNU General Public License (Version 2) as
  *  published by the Free Software Foundation.
@@ -16,41 +18,41 @@
  *
  *  You should have received a copy of the GNU General Public License along
  *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA.
+ *  59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
+ *
+ * ########################################################################
  */
+
 
 #include "ieee754dp.h"
 
-union ieee754dp ieee754dp_sub(union ieee754dp x, union ieee754dp y)
+ieee754dp ieee754dp_sub(ieee754dp x, ieee754dp y)
 {
-	int s;
-
 	COMPXDP;
 	COMPYDP;
 
 	EXPLODEXDP;
 	EXPLODEYDP;
 
-	ieee754_clearcx();
+	CLEARCX;
 
 	FLUSHXDP;
 	FLUSHYDP;
 
 	switch (CLPAIR(xc, yc)) {
+	case CLPAIR(IEEE754_CLASS_SNAN, IEEE754_CLASS_QNAN):
 	case CLPAIR(IEEE754_CLASS_QNAN, IEEE754_CLASS_SNAN):
+	case CLPAIR(IEEE754_CLASS_SNAN, IEEE754_CLASS_SNAN):
 	case CLPAIR(IEEE754_CLASS_ZERO, IEEE754_CLASS_SNAN):
 	case CLPAIR(IEEE754_CLASS_NORM, IEEE754_CLASS_SNAN):
 	case CLPAIR(IEEE754_CLASS_DNORM, IEEE754_CLASS_SNAN):
 	case CLPAIR(IEEE754_CLASS_INF, IEEE754_CLASS_SNAN):
-		return ieee754dp_nanxcpt(y);
-
-	case CLPAIR(IEEE754_CLASS_SNAN, IEEE754_CLASS_SNAN):
-	case CLPAIR(IEEE754_CLASS_SNAN, IEEE754_CLASS_QNAN):
 	case CLPAIR(IEEE754_CLASS_SNAN, IEEE754_CLASS_ZERO):
 	case CLPAIR(IEEE754_CLASS_SNAN, IEEE754_CLASS_NORM):
 	case CLPAIR(IEEE754_CLASS_SNAN, IEEE754_CLASS_DNORM):
 	case CLPAIR(IEEE754_CLASS_SNAN, IEEE754_CLASS_INF):
-		return ieee754dp_nanxcpt(x);
+		SETCX(IEEE754_INVALID_OPERATION);
+		return ieee754dp_nanxcpt(ieee754dp_indef(), "sub", x, y);
 
 	case CLPAIR(IEEE754_CLASS_ZERO, IEEE754_CLASS_QNAN):
 	case CLPAIR(IEEE754_CLASS_NORM, IEEE754_CLASS_QNAN):
@@ -66,14 +68,14 @@ union ieee754dp ieee754dp_sub(union ieee754dp x, union ieee754dp y)
 		return x;
 
 
-	/*
-	 * Infinity handling
-	 */
+		/* Infinity handling
+		 */
+
 	case CLPAIR(IEEE754_CLASS_INF, IEEE754_CLASS_INF):
 		if (xs != ys)
 			return x;
-		ieee754_setcx(IEEE754_INVALID_OPERATION);
-		return ieee754dp_indef();
+		SETCX(IEEE754_INVALID_OPERATION);
+		return ieee754dp_xcpt(ieee754dp_indef(), "sub", x, y);
 
 	case CLPAIR(IEEE754_CLASS_ZERO, IEEE754_CLASS_INF):
 	case CLPAIR(IEEE754_CLASS_DNORM, IEEE754_CLASS_INF):
@@ -85,14 +87,15 @@ union ieee754dp ieee754dp_sub(union ieee754dp x, union ieee754dp y)
 	case CLPAIR(IEEE754_CLASS_INF, IEEE754_CLASS_DNORM):
 		return x;
 
-	/*
-	 * Zero handling
-	 */
+		/* Zero handling
+		 */
+
 	case CLPAIR(IEEE754_CLASS_ZERO, IEEE754_CLASS_ZERO):
 		if (xs != ys)
 			return x;
 		else
-			return ieee754dp_zero(ieee754_csr.rm == FPU_CSR_RD);
+			return ieee754dp_zero(ieee754_csr.rm ==
+					      IEEE754_RD);
 
 	case CLPAIR(IEEE754_CLASS_NORM, IEEE754_CLASS_ZERO):
 	case CLPAIR(IEEE754_CLASS_DNORM, IEEE754_CLASS_ZERO):
@@ -133,17 +136,15 @@ union ieee754dp ieee754dp_sub(union ieee754dp x, union ieee754dp y)
 	ym <<= 3;
 
 	if (xe > ye) {
-		/*
-		 * Have to shift y fraction right to align
+		/* have to shift y fraction right to align
 		 */
-		s = xe - ye;
+		int s = xe - ye;
 		ym = XDPSRS(ym, s);
 		ye += s;
 	} else if (ye > xe) {
-		/*
-		 * Have to shift x fraction right to align
+		/* have to shift x fraction right to align
 		 */
-		s = ye - xe;
+		int s = ye - xe;
 		xm = XDPSRS(xm, s);
 		xe += s;
 	}
@@ -154,20 +155,25 @@ union ieee754dp ieee754dp_sub(union ieee754dp x, union ieee754dp y)
 		/* generate 28 bit result of adding two 27 bit numbers
 		 */
 		xm = xm + ym;
+		xe = xe;
+		xs = xs;
 
-		if (xm >> (DP_FBITS + 1 + 3)) { /* carry out */
+		if (xm >> (DP_MBITS + 1 + 3)) {	/* carry out */
 			xm = XDPSRS1(xm);	/* shift preserving sticky */
 			xe++;
 		}
 	} else {
 		if (xm >= ym) {
 			xm = xm - ym;
+			xe = xe;
+			xs = xs;
 		} else {
 			xm = ym - xm;
+			xe = xe;
 			xs = ys;
 		}
 		if (xm == 0) {
-			if (ieee754_csr.rm == FPU_CSR_RD)
+			if (ieee754_csr.rm == IEEE754_RD)
 				return ieee754dp_zero(1);	/* round negative inf. => sign = -1 */
 			else
 				return ieee754dp_zero(0);	/* other round modes   => sign = 1 */
@@ -175,11 +181,10 @@ union ieee754dp ieee754dp_sub(union ieee754dp x, union ieee754dp y)
 
 		/* normalize to rounding precision
 		 */
-		while ((xm >> (DP_FBITS + 3)) == 0) {
+		while ((xm >> (DP_MBITS + 3)) == 0) {
 			xm <<= 1;
 			xe--;
 		}
 	}
-
-	return ieee754dp_format(xs, xe, xm);
+	DPNORMRET2(xs, xe, xm, "sub", x, y);
 }

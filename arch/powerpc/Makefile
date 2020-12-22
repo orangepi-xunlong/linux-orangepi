@@ -36,168 +36,74 @@ KBUILD_DEFCONFIG := ppc64_defconfig
 endif
 
 ifeq ($(CONFIG_PPC64),y)
+OLDARCH	:= ppc64
+
 new_nm := $(shell if $(NM) --help 2>&1 | grep -- '--synthetic' > /dev/null; then echo y; else echo n; fi)
 
 ifeq ($(new_nm),y)
 NM		:= $(NM) --synthetic
 endif
-endif
 
-# BITS is used as extension for files which are available in a 32 bit
-# and a 64 bit version to simplify shared Makefiles.
-# e.g.: obj-y += foo_$(BITS).o
-export BITS
-
-ifdef CONFIG_PPC64
-        BITS := 64
 else
-        BITS := 32
+OLDARCH	:= ppc
 endif
 
-machine-y = ppc
-machine-$(CONFIG_PPC64) += 64
-machine-$(CONFIG_CPU_LITTLE_ENDIAN) += le
-UTS_MACHINE := $(subst $(space),,$(machine-y))
-
-ifeq ($(CONFIG_CPU_LITTLE_ENDIAN),y)
-override LD	+= -EL
-LDEMULATION	:= lppc
-GNUTARGET	:= powerpcle
-MULTIPLEWORD	:= -mno-multiple
-KBUILD_CFLAGS_MODULE += $(call cc-option,-mno-save-toc-indirect)
-else
-override LD	+= -EB
-LDEMULATION	:= ppc
-GNUTARGET	:= powerpc
-MULTIPLEWORD	:= -mmultiple
+# It seems there are times we use this Makefile without
+# including the config file, but this replicates the old behaviour
+ifeq ($(CONFIG_WORD_SIZE),)
+CONFIG_WORD_SIZE := 32
 endif
 
-ifdef CONFIG_PPC64
-cflags-$(CONFIG_CPU_BIG_ENDIAN)		+= $(call cc-option,-mabi=elfv1)
-cflags-$(CONFIG_CPU_BIG_ENDIAN)		+= $(call cc-option,-mcall-aixdesc)
-aflags-$(CONFIG_CPU_BIG_ENDIAN)		+= $(call cc-option,-mabi=elfv1)
-aflags-$(CONFIG_CPU_LITTLE_ENDIAN)	+= -mabi=elfv2
-endif
-
-cflags-$(CONFIG_CPU_LITTLE_ENDIAN)	+= -mlittle-endian
-cflags-$(CONFIG_CPU_BIG_ENDIAN)		+= $(call cc-option,-mbig-endian)
-ifneq ($(cc-name),clang)
-  cflags-$(CONFIG_CPU_LITTLE_ENDIAN)	+= -mno-strict-align
-endif
-
-aflags-$(CONFIG_CPU_BIG_ENDIAN)		+= $(call cc-option,-mbig-endian)
-aflags-$(CONFIG_CPU_LITTLE_ENDIAN)	+= -mlittle-endian
+UTS_MACHINE := $(OLDARCH)
 
 ifeq ($(HAS_BIARCH),y)
-override AS	+= -a$(BITS)
-override LD	+= -m elf$(BITS)$(LDEMULATION)
-override CC	+= -m$(BITS)
-override AR	:= GNUTARGET=elf$(BITS)-$(GNUTARGET) $(AR)
+override AS	+= -a$(CONFIG_WORD_SIZE)
+override LD	+= -m elf$(CONFIG_WORD_SIZE)ppc
+override CC	+= -m$(CONFIG_WORD_SIZE)
+override AR	:= GNUTARGET=elf$(CONFIG_WORD_SIZE)-powerpc $(AR)
 endif
 
 LDFLAGS_vmlinux-y := -Bstatic
 LDFLAGS_vmlinux-$(CONFIG_RELOCATABLE) := -pie
 LDFLAGS_vmlinux	:= $(LDFLAGS_vmlinux-y)
 
-ifeq ($(CONFIG_PPC64),y)
-ifeq ($(call cc-option-yn,-mcmodel=medium),y)
-	# -mcmodel=medium breaks modules because it uses 32bit offsets from
-	# the TOC pointer to create pointers where possible. Pointers into the
-	# percpu data area are created by this method.
-	#
-	# The kernel module loader relocates the percpu data section from the
-	# original location (starting with 0xd...) to somewhere in the base
-	# kernel percpu data space (starting with 0xc...). We need a full
-	# 64bit relocation for this to work, hence -mcmodel=large.
-	KBUILD_CFLAGS_MODULE += -mcmodel=large
-else
-	export NO_MINIMAL_TOC := -mno-minimal-toc
-endif
-endif
-
-CFLAGS-$(CONFIG_PPC64)	:= $(call cc-option,-mtraceback=no)
-ifeq ($(CONFIG_CPU_LITTLE_ENDIAN),y)
-CFLAGS-$(CONFIG_PPC64)	+= $(call cc-option,-mabi=elfv2,$(call cc-option,-mcall-aixdesc))
-AFLAGS-$(CONFIG_PPC64)	+= $(call cc-option,-mabi=elfv2)
-else
-CFLAGS-$(CONFIG_PPC64)	+= $(call cc-option,-mabi=elfv1)
-CFLAGS-$(CONFIG_PPC64)	+= $(call cc-option,-mcall-aixdesc)
-AFLAGS-$(CONFIG_PPC64)	+= $(call cc-option,-mabi=elfv1)
-endif
-CFLAGS-$(CONFIG_PPC64)	+= $(call cc-option,-mcmodel=medium,$(call cc-option,-mminimal-toc))
-CFLAGS-$(CONFIG_PPC64)	+= $(call cc-option,-mno-pointers-to-nested-functions)
-CFLAGS-$(CONFIG_PPC32)	:= -ffixed-r2 $(MULTIPLEWORD)
-
-ifeq ($(CONFIG_PPC_BOOK3S_64),y)
-CFLAGS-$(CONFIG_GENERIC_CPU) += $(call cc-option,-mtune=power7,-mtune=power4)
-else
-CFLAGS-$(CONFIG_GENERIC_CPU) += -mcpu=powerpc64
-endif
-
-ifdef CONFIG_MPROFILE_KERNEL
-    ifeq ($(shell $(srctree)/arch/powerpc/scripts/gcc-check-mprofile-kernel.sh $(CC) -I$(srctree)/include -D__KERNEL__),OK)
-        CC_FLAGS_FTRACE := -pg -mprofile-kernel
-        KBUILD_CPPFLAGS += -DCC_USING_MPROFILE_KERNEL
-    else
-        # If the user asked for mprofile-kernel but the toolchain doesn't
-        # support it, emit a warning and deliberately break the build later
-        # with mprofile-kernel-not-supported. We would prefer to make this an
-        # error right here, but then the user would never be able to run
-        # oldconfig to change their configuration.
-        $(warning Compiler does not support mprofile-kernel, set CONFIG_DISABLE_MPROFILE_KERNEL)
-        CC_FLAGS_FTRACE := -mprofile-kernel-not-supported
-    endif
-endif
-
-CFLAGS-$(CONFIG_CELL_CPU) += $(call cc-option,-mcpu=cell)
-CFLAGS-$(CONFIG_POWER4_CPU) += $(call cc-option,-mcpu=power4)
-CFLAGS-$(CONFIG_POWER5_CPU) += $(call cc-option,-mcpu=power5)
-CFLAGS-$(CONFIG_POWER6_CPU) += $(call cc-option,-mcpu=power6)
-CFLAGS-$(CONFIG_POWER7_CPU) += $(call cc-option,-mcpu=power7)
-CFLAGS-$(CONFIG_POWER8_CPU) += $(call cc-option,-mcpu=power8)
-
-# Altivec option not allowed with e500mc64 in GCC.
-ifeq ($(CONFIG_ALTIVEC),y)
-E5500_CPU := -mcpu=powerpc64
-else
-E5500_CPU := $(call cc-option,-mcpu=e500mc64,-mcpu=powerpc64)
-endif
-CFLAGS-$(CONFIG_E5500_CPU) += $(E5500_CPU)
-CFLAGS-$(CONFIG_E6500_CPU) += $(call cc-option,-mcpu=e6500,$(E5500_CPU))
-
-ifeq ($(CONFIG_PPC32),y)
-ifeq ($(CONFIG_PPC_E500MC),y)
-CFLAGS-y += $(call cc-option,-mcpu=e500mc,-mcpu=powerpc)
-else
-CFLAGS-$(CONFIG_E500) += $(call cc-option,-mcpu=8540 -msoft-float,-mcpu=powerpc)
-endif
-endif
-
 asinstr := $(call as-instr,lis 9$(comma)foo@high,-DHAVE_AS_ATHIGH=1)
 
+CFLAGS-$(CONFIG_PPC64)	:= -mminimal-toc -mtraceback=no -mcall-aixdesc
+CFLAGS-$(CONFIG_PPC32)	:= -ffixed-r2 -mmultiple
 KBUILD_CPPFLAGS	+= -Iarch/$(ARCH) $(asinstr)
-KBUILD_AFLAGS	+= -Iarch/$(ARCH) $(AFLAGS-y)
-KBUILD_CFLAGS	+= $(call cc-option,-msoft-float)
-KBUILD_CFLAGS	+= -pipe -Iarch/$(ARCH) $(CFLAGS-y)
+KBUILD_AFLAGS	+= -Iarch/$(ARCH)
+KBUILD_CFLAGS	+= -msoft-float -pipe -Iarch/$(ARCH) $(CFLAGS-y)
 CPP		= $(CC) -E $(KBUILD_CFLAGS)
 
-CHECKFLAGS	+= -m$(BITS) -D__powerpc__ -D__powerpc$(BITS)__
-ifdef CONFIG_CPU_BIG_ENDIAN
-CHECKFLAGS	+= -D__BIG_ENDIAN__
+CHECKFLAGS	+= -m$(CONFIG_WORD_SIZE) -D__powerpc__ -D__powerpc$(CONFIG_WORD_SIZE)__
+
+ifeq ($(CONFIG_PPC64),y)
+GCC_BROKEN_VEC	:= $(call cc-ifversion, -lt, 0400, y)
+
+ifeq ($(CONFIG_POWER4_ONLY),y)
+ifeq ($(CONFIG_ALTIVEC),y)
+ifeq ($(GCC_BROKEN_VEC),y)
+	KBUILD_CFLAGS += $(call cc-option,-mcpu=970)
 else
-CHECKFLAGS	+= -D__LITTLE_ENDIAN__
+	KBUILD_CFLAGS += $(call cc-option,-mcpu=power4)
+endif
+else
+	KBUILD_CFLAGS += $(call cc-option,-mcpu=power4)
+endif
+else
+	KBUILD_CFLAGS += $(call cc-option,-mtune=power4)
+endif
 endif
 
 KBUILD_LDFLAGS_MODULE += arch/powerpc/lib/crtsavres.o
 
-ifeq ($(CONFIG_476FPE_ERR46),y)
-	KBUILD_LDFLAGS_MODULE += --ppc476-workaround \
-		-T $(srctree)/arch/powerpc/platforms/44x/ppc476_modules.lds
+ifeq ($(CONFIG_TUNE_CELL),y)
+	KBUILD_CFLAGS += $(call cc-option,-mtune=cell)
 endif
 
-# No AltiVec or VSX instructions when building kernel
+# No AltiVec instruction when building kernel
 KBUILD_CFLAGS += $(call cc-option,-mno-altivec)
-KBUILD_CFLAGS += $(call cc-option,-mno-vsx)
 
 # No SPE instruction when building kernel
 # (We use all available options to help semi-broken compilers)
@@ -215,7 +121,7 @@ KBUILD_CFLAGS	+= $(call cc-option,-fno-dwarf2-cfi-asm)
 
 # Never use string load/store instructions as they are
 # often slow when they are implemented at all
-KBUILD_CFLAGS		+= $(call cc-option,-mno-string)
+KBUILD_CFLAGS		+= -mno-string
 
 ifeq ($(CONFIG_6xx),y)
 KBUILD_CFLAGS		+= -mcpu=powerpc
@@ -227,16 +133,14 @@ KBUILD_CFLAGS		+= -mno-sched-epilog
 endif
 
 cpu-as-$(CONFIG_4xx)		+= -Wa,-m405
-cpu-as-$(CONFIG_ALTIVEC)	+= $(call as-option,-Wa$(comma)-maltivec)
+cpu-as-$(CONFIG_ALTIVEC)	+= -Wa,-maltivec
+cpu-as-$(CONFIG_E500)		+= -Wa,-me500
 cpu-as-$(CONFIG_E200)		+= -Wa,-me200
 
 KBUILD_AFLAGS += $(cpu-as-y)
 KBUILD_CFLAGS += $(cpu-as-y)
 
-KBUILD_AFLAGS += $(aflags-y)
-KBUILD_CFLAGS += $(cflags-y)
-
-head-y				:= arch/powerpc/kernel/head_$(BITS).o
+head-y				:= arch/powerpc/kernel/head_$(CONFIG_WORD_SIZE).o
 head-$(CONFIG_8xx)		:= arch/powerpc/kernel/head_8xx.o
 head-$(CONFIG_40x)		:= arch/powerpc/kernel/head_40x.o
 head-$(CONFIG_44x)		:= arch/powerpc/kernel/head_44x.o
@@ -245,7 +149,6 @@ head-$(CONFIG_FSL_BOOKE)	:= arch/powerpc/kernel/head_fsl_booke.o
 head-$(CONFIG_PPC64)		+= arch/powerpc/kernel/entry_64.o
 head-$(CONFIG_PPC_FPU)		+= arch/powerpc/kernel/fpu.o
 head-$(CONFIG_ALTIVEC)		+= arch/powerpc/kernel/vector.o
-head-$(CONFIG_PPC_OF_BOOT_TRAMPOLINE)  += arch/powerpc/kernel/prom_init.o
 
 core-y				+= arch/powerpc/kernel/ \
 				   arch/powerpc/mm/ \
@@ -253,7 +156,6 @@ core-y				+= arch/powerpc/kernel/ \
 				   arch/powerpc/sysdev/ \
 				   arch/powerpc/platforms/ \
 				   arch/powerpc/math-emu/ \
-				   arch/powerpc/crypto/ \
 				   arch/powerpc/net/
 core-$(CONFIG_XMON)		+= arch/powerpc/xmon/
 core-$(CONFIG_KVM) 		+= arch/powerpc/kvm/
@@ -274,10 +176,10 @@ boot := arch/$(ARCH)/boot
 
 ifeq ($(CONFIG_RELOCATABLE),y)
 quiet_cmd_relocs_check = CALL    $<
-      cmd_relocs_check = $(CONFIG_SHELL) $< "$(OBJDUMP)" "$(obj)/vmlinux"
+      cmd_relocs_check = perl $< "$(OBJDUMP)" "$(obj)/vmlinux"
 
 PHONY += relocs_check
-relocs_check: arch/powerpc/relocs_check.sh vmlinux
+relocs_check: arch/powerpc/relocs_check.pl vmlinux
 	$(call cmd,relocs_check)
 
 zImage: relocs_check
@@ -292,57 +194,8 @@ $(BOOT_TARGETS2): vmlinux
 bootwrapper_install:
 	$(Q)$(MAKE) ARCH=ppc64 $(build)=$(boot) $(patsubst %,$(boot)/%,$@)
 
-%.dtb: scripts
+%.dtb:
 	$(Q)$(MAKE) ARCH=ppc64 $(build)=$(boot) $(patsubst %,$(boot)/%,$@)
-
-# Used to create 'merged defconfigs'
-# To use it $(call) it with the first argument as the base defconfig
-# and the second argument as a space separated list of .config files to merge,
-# without the .config suffix.
-define merge_into_defconfig
-	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/kconfig/merge_config.sh \
-		-m -O $(objtree) $(srctree)/arch/$(ARCH)/configs/$(1) \
-		$(foreach config,$(2),$(srctree)/arch/$(ARCH)/configs/$(config).config)
-	+$(Q)$(MAKE) -f $(srctree)/Makefile olddefconfig
-endef
-
-PHONY += pseries_le_defconfig
-pseries_le_defconfig:
-	$(call merge_into_defconfig,pseries_defconfig,le)
-
-PHONY += ppc64le_defconfig
-ppc64le_defconfig:
-	$(call merge_into_defconfig,ppc64_defconfig,le)
-
-PHONY += mpc85xx_defconfig
-mpc85xx_defconfig:
-	$(call merge_into_defconfig,mpc85xx_basic_defconfig,\
-		85xx-32bit 85xx-hw fsl-emb-nonhw)
-
-PHONY += mpc85xx_smp_defconfig
-mpc85xx_smp_defconfig:
-	$(call merge_into_defconfig,mpc85xx_basic_defconfig,\
-		85xx-32bit 85xx-smp 85xx-hw fsl-emb-nonhw)
-
-PHONY += corenet32_smp_defconfig
-corenet32_smp_defconfig:
-	$(call merge_into_defconfig,corenet_basic_defconfig,\
-		85xx-32bit 85xx-smp 85xx-hw fsl-emb-nonhw dpaa)
-
-PHONY += corenet64_smp_defconfig
-corenet64_smp_defconfig:
-	$(call merge_into_defconfig,corenet_basic_defconfig,\
-		85xx-64bit 85xx-smp altivec 85xx-hw fsl-emb-nonhw dpaa)
-
-PHONY += mpc86xx_defconfig
-mpc86xx_defconfig:
-	$(call merge_into_defconfig,mpc86xx_basic_defconfig,\
-		86xx-hw fsl-emb-nonhw)
-
-PHONY += mpc86xx_smp_defconfig
-mpc86xx_smp_defconfig:
-	$(call merge_into_defconfig,mpc86xx_basic_defconfig,\
-		86xx-smp 86xx-hw fsl-emb-nonhw)
 
 define archhelp
   @echo '* zImage          - Build default images selected by kernel config'
@@ -383,14 +236,12 @@ archprepare: checkbin
 # Use the file '.tmp_gas_check' for binutils tests, as gas won't output
 # to stdout and these checks are run even on install targets.
 TOUT	:= .tmp_gas_check
+# Ensure this is binutils 2.12.1 (or 2.12.90.0.7) or later for altivec
+# instructions.
+# gcc-3.4 and binutils-2.14 are a fatal combination.
 
-# Check gcc and binutils versions:
-# - gcc-3.4 and binutils-2.14 are a fatal combination
-# - Require gcc 4.0 or above on 64-bit
-# - gcc-4.2.0 has issues compiling modules on 64-bit
 checkbin:
-	@if test "$(cc-name)" != "clang" \
-	    && test "$(cc-version)" = "0304" ; then \
+	@if test "$(call cc-version)" = "0304" ; then \
 		if ! /bin/echo mftb 5 | $(AS) -v -mppc -many -o $(TOUT) >/dev/null 2>&1 ; then \
 			echo -n '*** ${VERSION}.${PATCHLEVEL} kernels no longer build '; \
 			echo 'correctly with gcc-3.4 and your version of binutils.'; \
@@ -398,15 +249,7 @@ checkbin:
 			false; \
 		fi ; \
 	fi
-	@if test "$(cc-name)" != "clang" \
-	    && test "$(cc-version)" -lt "0400" \
-	    && test "x${CONFIG_PPC64}" = "xy" ; then \
-                echo -n "Sorry, GCC v4.0 or above is required to build " ; \
-                echo "the 64-bit powerpc kernel." ; \
-                false ; \
-        fi
-	@if test "$(cc-name)" != "clang" \
-	    && test "$(cc-fullversion)" = "040200" \
+	@if test "$(call cc-fullversion)" = "040200" \
 	    && test "x${CONFIG_MODULES}${CONFIG_PPC64}" = "xyy" ; then \
 		echo -n '*** GCC-4.2.0 cannot compile the 64-bit powerpc ' ; \
 		echo 'kernel with modules enabled.' ; \
@@ -414,14 +257,6 @@ checkbin:
 		echo 'disable kernel modules' ; \
 		false ; \
 	fi
-	@if test "x${CONFIG_CPU_LITTLE_ENDIAN}" = "xy" \
-	    && $(LD) --version | head -1 | grep ' 2\.24$$' >/dev/null ; then \
-		echo -n '*** binutils 2.24 miscompiles weak symbols ' ; \
-		echo 'in some circumstances.' ; \
-		echo -n '*** Please use a different binutils version.' ; \
-		false ; \
-	fi
-
 
 CLEAN_FILES += $(TOUT)
 

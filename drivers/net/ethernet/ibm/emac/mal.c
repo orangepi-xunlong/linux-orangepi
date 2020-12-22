@@ -27,14 +27,14 @@
 
 #include <linux/delay.h>
 #include <linux/slab.h>
-#include <linux/of_irq.h>
 
 #include "core.h"
 #include <asm/dcr-regs.h>
 
 static int mal_count;
 
-int mal_register_commac(struct mal_instance *mal, struct mal_commac *commac)
+int __devinit mal_register_commac(struct mal_instance	*mal,
+				  struct mal_commac	*commac)
 {
 	unsigned long flags;
 
@@ -264,9 +264,7 @@ static inline void mal_schedule_poll(struct mal_instance *mal)
 {
 	if (likely(napi_schedule_prep(&mal->napi))) {
 		MAL_DBG2(mal, "schedule_poll" NL);
-		spin_lock(&mal->lock);
 		mal_disable_eob_irq(mal);
-		spin_unlock(&mal->lock);
 		__napi_schedule(&mal->napi);
 	} else
 		MAL_DBG2(mal, "already in poll" NL);
@@ -402,7 +400,7 @@ static int mal_poll(struct napi_struct *napi, int budget)
 	unsigned long flags;
 
 	MAL_DBG2(mal, "poll(%d)" NL, budget);
-
+ again:
 	/* Process TX skbs */
 	list_for_each(l, &mal->poll_list) {
 		struct mal_commac *mc =
@@ -445,12 +443,15 @@ static int mal_poll(struct napi_struct *napi, int budget)
 		if (unlikely(mc->ops->peek_rx(mc->dev) ||
 			     test_bit(MAL_COMMAC_RX_STOPPED, &mc->flags))) {
 			MAL_DBG2(mal, "rotting packet" NL);
-			if (!napi_reschedule(napi))
-				goto more_work;
+			if (napi_reschedule(napi))
+				mal_disable_eob_irq(mal);
+			else
+				MAL_DBG2(mal, "already in poll list" NL);
 
-			spin_lock_irqsave(&mal->lock, flags);
-			mal_disable_eob_irq(mal);
-			spin_unlock_irqrestore(&mal->lock, flags);
+			if (budget > 0)
+				goto again;
+			else
+				goto more_work;
 		}
 		mc->ops->poll_tx(mc->dev);
 	}
@@ -516,7 +517,7 @@ void *mal_dump_regs(struct mal_instance *mal, void *buf)
 	return regs + 1;
 }
 
-static int mal_probe(struct platform_device *ofdev)
+static int __devinit mal_probe(struct platform_device *ofdev)
 {
 	struct mal_instance *mal;
 	int err = 0, i, bd_size;
@@ -528,9 +529,12 @@ static int mal_probe(struct platform_device *ofdev)
 	irq_handler_t hdlr_serr, hdlr_txde, hdlr_rxde;
 
 	mal = kzalloc(sizeof(struct mal_instance), GFP_KERNEL);
-	if (!mal)
+	if (!mal) {
+		printk(KERN_ERR
+		       "mal%d: out of memory allocating MAL structure!\n",
+		       index);
 		return -ENOMEM;
-
+	}
 	mal->index = index;
 	mal->ofdev = ofdev;
 	mal->version = of_device_is_compatible(ofdev->dev.of_node, "ibm,mcmal2") ? 2 : 1;
@@ -596,8 +600,9 @@ static int mal_probe(struct platform_device *ofdev)
 		mal->rxde_irq = irq_of_parse_and_map(ofdev->dev.of_node, 4);
 	}
 
-	if (!mal->txeob_irq || !mal->rxeob_irq || !mal->serr_irq ||
-	    !mal->txde_irq  || !mal->rxde_irq) {
+	if (mal->txeob_irq == NO_IRQ || mal->rxeob_irq == NO_IRQ ||
+	    mal->serr_irq == NO_IRQ || mal->txde_irq == NO_IRQ ||
+	    mal->rxde_irq == NO_IRQ) {
 		printk(KERN_ERR
 		       "mal%d: failed to map interrupts !\n", index);
 		err = -ENODEV;
@@ -636,12 +641,17 @@ static int mal_probe(struct platform_device *ofdev)
 	bd_size = sizeof(struct mal_descriptor) *
 		(NUM_TX_BUFF * mal->num_tx_chans +
 		 NUM_RX_BUFF * mal->num_rx_chans);
-	mal->bd_virt = dma_zalloc_coherent(&ofdev->dev, bd_size, &mal->bd_dma,
-					   GFP_KERNEL);
+	mal->bd_virt =
+		dma_alloc_coherent(&ofdev->dev, bd_size, &mal->bd_dma,
+				   GFP_KERNEL);
 	if (mal->bd_virt == NULL) {
+		printk(KERN_ERR
+		       "mal%d: out of memory allocating RX/TX descriptors!\n",
+		       index);
 		err = -ENOMEM;
 		goto fail_unmap;
 	}
+	memset(mal->bd_virt, 0, bd_size);
 
 	for (i = 0; i < mal->num_tx_chans; ++i)
 		set_mal_dcrn(mal, MAL_TXCTPR(i), mal->bd_dma +
@@ -680,7 +690,10 @@ static int mal_probe(struct platform_device *ofdev)
 		goto fail6;
 
 	/* Enable all MAL SERR interrupt sources */
-	set_mal_dcrn(mal, MAL_IER, MAL_IER_EVENTS);
+	if (mal->version == 2)
+		set_mal_dcrn(mal, MAL_IER, MAL2_IER_EVENTS);
+	else
+		set_mal_dcrn(mal, MAL_IER, MAL1_IER_EVENTS);
 
 	/* Enable EOB interrupt */
 	mal_enable_eob_irq(mal);
@@ -692,7 +705,7 @@ static int mal_probe(struct platform_device *ofdev)
 
 	/* Advertise this instance to the rest of the world */
 	wmb();
-	platform_set_drvdata(ofdev, mal);
+	dev_set_drvdata(&ofdev->dev, mal);
 
 	mal_dbg_register(mal);
 
@@ -716,20 +729,24 @@ static int mal_probe(struct platform_device *ofdev)
 	return err;
 }
 
-static int mal_remove(struct platform_device *ofdev)
+static int __devexit mal_remove(struct platform_device *ofdev)
 {
-	struct mal_instance *mal = platform_get_drvdata(ofdev);
+	struct mal_instance *mal = dev_get_drvdata(&ofdev->dev);
 
 	MAL_DBG(mal, "remove" NL);
 
 	/* Synchronize with scheduled polling */
 	napi_disable(&mal->napi);
 
-	if (!list_empty(&mal->list))
+	if (!list_empty(&mal->list)) {
 		/* This is *very* bad */
-		WARN(1, KERN_EMERG
+		printk(KERN_EMERG
 		       "mal%d: commac list is not empty on remove!\n",
 		       mal->index);
+		WARN_ON(1);
+	}
+
+	dev_set_drvdata(&ofdev->dev, NULL);
 
 	free_irq(mal->serr_irq, mal);
 	free_irq(mal->txde_irq, mal);
@@ -751,7 +768,7 @@ static int mal_remove(struct platform_device *ofdev)
 	return 0;
 }
 
-static const struct of_device_id mal_platform_match[] =
+static struct of_device_id mal_platform_match[] =
 {
 	{
 		.compatible	= "ibm,mcmal",
@@ -774,6 +791,7 @@ static const struct of_device_id mal_platform_match[] =
 static struct platform_driver mal_of_driver = {
 	.driver = {
 		.name = "mcmal",
+		.owner = THIS_MODULE,
 		.of_match_table = mal_platform_match,
 	},
 	.probe = mal_probe,

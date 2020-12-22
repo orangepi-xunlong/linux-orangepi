@@ -11,7 +11,6 @@
 #include <linux/module.h>
 #include <linux/netfilter_ipv6/ip6_tables.h>
 #include <linux/slab.h>
-#include <net/ipv6.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Netfilter Core Team <coreteam@netfilter.org>");
@@ -23,30 +22,28 @@ MODULE_DESCRIPTION("ip6tables mangle table");
 			    (1 << NF_INET_LOCAL_OUT) | \
 			    (1 << NF_INET_POST_ROUTING))
 
-static int __net_init ip6table_mangle_table_init(struct net *net);
-
 static const struct xt_table packet_mangler = {
 	.name		= "mangle",
 	.valid_hooks	= MANGLE_VALID_HOOKS,
 	.me		= THIS_MODULE,
 	.af		= NFPROTO_IPV6,
 	.priority	= NF_IP6_PRI_MANGLE,
-	.table_init	= ip6table_mangle_table_init,
 };
 
 static unsigned int
-ip6t_mangle_out(struct sk_buff *skb, const struct nf_hook_state *state)
+ip6t_mangle_out(struct sk_buff *skb, const struct net_device *out)
 {
 	unsigned int ret;
 	struct in6_addr saddr, daddr;
 	u_int8_t hop_limit;
 	u_int32_t flowlabel, mark;
-	int err;
+
 #if 0
 	/* root is playing with raw sockets. */
 	if (skb->len < sizeof(struct iphdr) ||
 	    ip_hdrlen(skb) < sizeof(struct iphdr)) {
-		net_warn_ratelimited("ip6t_hook: happy cracking\n");
+		if (net_ratelimit())
+			pr_warning("ip6t_hook: happy cracking.\n");
 		return NF_ACCEPT;
 	}
 #endif
@@ -60,60 +57,59 @@ ip6t_mangle_out(struct sk_buff *skb, const struct nf_hook_state *state)
 	/* flowlabel and prio (includes version, which shouldn't change either */
 	flowlabel = *((u_int32_t *)ipv6_hdr(skb));
 
-	ret = ip6t_do_table(skb, state, state->net->ipv6.ip6table_mangle);
+	ret = ip6t_do_table(skb, NF_INET_LOCAL_OUT, NULL, out,
+			    dev_net(out)->ipv6.ip6table_mangle);
 
 	if (ret != NF_DROP && ret != NF_STOLEN &&
-	    (!ipv6_addr_equal(&ipv6_hdr(skb)->saddr, &saddr) ||
-	     !ipv6_addr_equal(&ipv6_hdr(skb)->daddr, &daddr) ||
+	    (memcmp(&ipv6_hdr(skb)->saddr, &saddr, sizeof(saddr)) ||
+	     memcmp(&ipv6_hdr(skb)->daddr, &daddr, sizeof(daddr)) ||
 	     skb->mark != mark ||
 	     ipv6_hdr(skb)->hop_limit != hop_limit ||
-	     flowlabel != *((u_int32_t *)ipv6_hdr(skb)))) {
-		err = ip6_route_me_harder(state->net, skb);
-		if (err < 0)
-			ret = NF_DROP_ERR(err);
-	}
+	     flowlabel != *((u_int32_t *)ipv6_hdr(skb))))
+		return ip6_route_me_harder(skb) == 0 ? ret : NF_DROP;
 
 	return ret;
 }
 
 /* The work comes in here from netfilter.c. */
 static unsigned int
-ip6table_mangle_hook(void *priv, struct sk_buff *skb,
-		     const struct nf_hook_state *state)
+ip6table_mangle_hook(unsigned int hook, struct sk_buff *skb,
+		     const struct net_device *in, const struct net_device *out,
+		     int (*okfn)(struct sk_buff *))
 {
-	if (state->hook == NF_INET_LOCAL_OUT)
-		return ip6t_mangle_out(skb, state);
-	return ip6t_do_table(skb, state, state->net->ipv6.ip6table_mangle);
+	if (hook == NF_INET_LOCAL_OUT)
+		return ip6t_mangle_out(skb, out);
+	if (hook == NF_INET_POST_ROUTING)
+		return ip6t_do_table(skb, hook, in, out,
+				     dev_net(out)->ipv6.ip6table_mangle);
+	/* INPUT/FORWARD */
+	return ip6t_do_table(skb, hook, in, out,
+			     dev_net(in)->ipv6.ip6table_mangle);
 }
 
 static struct nf_hook_ops *mangle_ops __read_mostly;
-static int __net_init ip6table_mangle_table_init(struct net *net)
+static int __net_init ip6table_mangle_net_init(struct net *net)
 {
 	struct ip6t_replace *repl;
-	int ret;
-
-	if (net->ipv6.ip6table_mangle)
-		return 0;
 
 	repl = ip6t_alloc_initial_table(&packet_mangler);
 	if (repl == NULL)
 		return -ENOMEM;
-	ret = ip6t_register_table(net, &packet_mangler, repl, mangle_ops,
-				  &net->ipv6.ip6table_mangle);
+	net->ipv6.ip6table_mangle =
+		ip6t_register_table(net, &packet_mangler, repl);
 	kfree(repl);
-	return ret;
+	if (IS_ERR(net->ipv6.ip6table_mangle))
+		return PTR_ERR(net->ipv6.ip6table_mangle);
+	return 0;
 }
 
 static void __net_exit ip6table_mangle_net_exit(struct net *net)
 {
-	if (!net->ipv6.ip6table_mangle)
-		return;
-
-	ip6t_unregister_table(net, net->ipv6.ip6table_mangle, mangle_ops);
-	net->ipv6.ip6table_mangle = NULL;
+	ip6t_unregister_table(net, net->ipv6.ip6table_mangle);
 }
 
 static struct pernet_operations ip6table_mangle_net_ops = {
+	.init = ip6table_mangle_net_init,
 	.exit = ip6table_mangle_net_exit,
 };
 
@@ -121,28 +117,28 @@ static int __init ip6table_mangle_init(void)
 {
 	int ret;
 
-	mangle_ops = xt_hook_ops_alloc(&packet_mangler, ip6table_mangle_hook);
-	if (IS_ERR(mangle_ops))
-		return PTR_ERR(mangle_ops);
-
 	ret = register_pernet_subsys(&ip6table_mangle_net_ops);
-	if (ret < 0) {
-		kfree(mangle_ops);
+	if (ret < 0)
 		return ret;
+
+	/* Register hooks */
+	mangle_ops = xt_hook_link(&packet_mangler, ip6table_mangle_hook);
+	if (IS_ERR(mangle_ops)) {
+		ret = PTR_ERR(mangle_ops);
+		goto cleanup_table;
 	}
 
-	ret = ip6table_mangle_table_init(&init_net);
-	if (ret) {
-		unregister_pernet_subsys(&ip6table_mangle_net_ops);
-		kfree(mangle_ops);
-	}
+	return ret;
+
+ cleanup_table:
+	unregister_pernet_subsys(&ip6table_mangle_net_ops);
 	return ret;
 }
 
 static void __exit ip6table_mangle_fini(void)
 {
+	xt_hook_unlink(&packet_mangler, mangle_ops);
 	unregister_pernet_subsys(&ip6table_mangle_net_ops);
-	kfree(mangle_ops);
 }
 
 module_init(ip6table_mangle_init);

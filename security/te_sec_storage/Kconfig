@@ -1,0 +1,11 @@
+#
+# sunxi secure storage for sensitive data
+#
+#
+config TE_SST
+	tristate "sunxi platform secure storage"
+	depends on TRUSTED_LITTLE_KERNEL
+	default n
+	help
+	  This module applies the way to store sentive data
+	  by sunxi platform secure storage policy

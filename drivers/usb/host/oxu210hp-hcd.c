@@ -29,6 +29,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/timer.h>
 #include <linux/list.h>
 #include <linux/interrupt.h>
@@ -58,10 +59,6 @@
 		dev_err(oxu_to_hcd(oxu)->self.controller , fmt , ## args)
 #define oxu_info(oxu, fmt, args...) \
 		dev_info(oxu_to_hcd(oxu)->self.controller , fmt , ## args)
-
-#ifdef CONFIG_DYNAMIC_DEBUG
-#define DEBUG
-#endif
 
 static inline struct usb_hcd *oxu_to_hcd(struct oxu_hcd *oxu)
 {
@@ -394,7 +391,8 @@ static void ehci_quiesce(struct oxu_hcd *oxu)
 	u32	temp;
 
 #ifdef DEBUG
-	BUG_ON(!HC_IS_RUNNING(oxu_to_hcd(oxu)->state));
+	if (!HC_IS_RUNNING(oxu_to_hcd(oxu)->state))
+		BUG();
 #endif
 
 	/* wait for any schedule enables/disables to take effect */
@@ -444,7 +442,7 @@ static void ehci_hub_descriptor(struct oxu_hcd *oxu,
 	int ports = HCS_N_PORTS(oxu->hcs_params);
 	u16 temp;
 
-	desc->bDescriptorType = USB_DT_HUB;
+	desc->bDescriptorType = 0x29;
 	desc->bPwrOn2PwrGood = 10;	/* oxu 1.0, 2.3.9 says 20ms max */
 	desc->bHubContrCurrent = 0;
 
@@ -456,11 +454,11 @@ static void ehci_hub_descriptor(struct oxu_hcd *oxu,
 	memset(&desc->u.hs.DeviceRemovable[0], 0, temp);
 	memset(&desc->u.hs.DeviceRemovable[temp], 0xff, temp);
 
-	temp = HUB_CHAR_INDV_PORT_OCPM;	/* per-port overcurrent reporting */
+	temp = 0x0008;			/* per-port overcurrent reporting */
 	if (HCS_PPC(oxu->hcs_params))
-		temp |= HUB_CHAR_INDV_PORT_LPSM; /* per-port power control */
+		temp |= 0x0001;		/* per-port power control */
 	else
-		temp |= HUB_CHAR_NO_LPSM; /* no power switching */
+		temp |= 0x0002;		/* no power switching */
 	desc->wHubCharacteristics = (__force __u16)cpu_to_le16(temp);
 }
 
@@ -981,7 +979,7 @@ static int qh_schedule(struct oxu_hcd *oxu, struct ehci_qh *qh);
 static unsigned qh_completions(struct oxu_hcd *oxu, struct ehci_qh *qh)
 {
 	struct ehci_qtd *last = NULL, *end = qh->dummy;
-	struct ehci_qtd	*qtd, *tmp;
+	struct list_head *entry, *tmp;
 	int stopped;
 	unsigned count = 0;
 	int do_status = 0;
@@ -1006,10 +1004,12 @@ static unsigned qh_completions(struct oxu_hcd *oxu, struct ehci_qh *qh)
 	 * then let the queue advance.
 	 * if queue is stopped, handles unlinks.
 	 */
-	list_for_each_entry_safe(qtd, tmp, &qh->qtd_list, qtd_list) {
+	list_for_each_safe(entry, tmp, &qh->qtd_list) {
+		struct ehci_qtd	*qtd;
 		struct urb *urb;
 		u32 token = 0;
 
+		qtd = list_entry(entry, struct ehci_qtd, qtd_list);
 		urb = qtd->urb;
 
 		/* Clean up any state from previous QTD ...*/
@@ -1172,11 +1172,14 @@ halt:
  * used for cleanup after errors, before HC sees an URB's TDs.
  */
 static void qtd_list_free(struct oxu_hcd *oxu,
-				struct urb *urb, struct list_head *head)
+				struct urb *urb, struct list_head *qtd_list)
 {
-	struct ehci_qtd	*qtd, *temp;
+	struct list_head *entry, *temp;
 
-	list_for_each_entry_safe(qtd, temp, head, qtd_list) {
+	list_for_each_safe(entry, temp, qtd_list) {
+		struct ehci_qtd	*qtd;
+
+		qtd = list_entry(entry, struct ehci_qtd, qtd_list);
 		list_del(&qtd->qtd_list);
 		oxu_qtd_free(oxu, qtd);
 	}
@@ -1396,8 +1399,8 @@ static struct ehci_qh *qh_make(struct oxu_hcd *oxu,
 				 * But interval 1 scheduling is simpler, and
 				 * includes high bandwidth.
 				 */
-				oxu_dbg(oxu, "intr period %d uframes, NYET!\n",
-					urb->interval);
+				dbg("intr period %d uframes, NYET!",
+						urb->interval);
 				goto done;
 			}
 		} else {
@@ -1468,7 +1471,7 @@ static struct ehci_qh *qh_make(struct oxu_hcd *oxu,
 		}
 		break;
 	default:
-		oxu_dbg(oxu, "bogus dev %p speed %d\n", urb->dev, urb->dev->speed);
+		dbg("bogus dev %p speed %d", urb->dev, urb->dev->speed);
 done:
 		qh_put(qh);
 		return NULL;
@@ -1703,8 +1706,9 @@ static void start_unlink_async(struct oxu_hcd *oxu, struct ehci_qh *qh)
 
 #ifdef DEBUG
 	assert_spin_locked(&oxu->lock);
-	BUG_ON(oxu->reclaim || (qh->qh_state != QH_STATE_LINKED
-				&& qh->qh_state != QH_STATE_UNLINK_WAIT));
+	if (oxu->reclaim || (qh->qh_state != QH_STATE_LINKED
+				&& qh->qh_state != QH_STATE_UNLINK_WAIT))
+		BUG();
 #endif
 
 	/* stop async schedule right now? */
@@ -2039,7 +2043,7 @@ static void intr_deschedule(struct oxu_hcd *oxu, struct ehci_qh *qh)
 
 	/* simple/paranoid:  always delay, expecting the HC needs to read
 	 * qh->hw_next or finish a writeback after SPLIT/CSPLIT ... and
-	 * expect hub_wq to clean up after any CSPLITs we won't issue.
+	 * expect khubd to clean up after any CSPLITs we won't issue.
 	 * active high speed queues may need bigger delays...
 	 */
 	if (list_empty(&qh->qtd_list)
@@ -2303,7 +2307,7 @@ restart:
 				qh_put(temp.qh);
 				break;
 			default:
-				oxu_dbg(oxu, "corrupt type %d frame %d shadow %p\n",
+				dbg("corrupt type %d frame %d shadow %p",
 					type, frame, q.ptr);
 				q.ptr = NULL;
 			}
@@ -2493,12 +2497,11 @@ static irqreturn_t oxu210_hcd_irq(struct usb_hcd *hcd)
 					|| oxu->reset_done[i] != 0)
 				continue;
 
-			/* start USB_RESUME_TIMEOUT resume signaling from this
-			 * port, and make hub_wq collect PORT_STAT_C_SUSPEND to
+			/* start 20 msec resume signaling from this port,
+			 * and make khubd collect PORT_STAT_C_SUSPEND to
 			 * stop that signaling.
 			 */
-			oxu->reset_done[i] = jiffies +
-				msecs_to_jiffies(USB_RESUME_TIMEOUT);
+			oxu->reset_done[i] = jiffies + msecs_to_jiffies(20);
 			oxu_dbg(oxu, "port %d remote wakeup\n", i + 1);
 			mod_timer(&hcd->rh_timer, oxu->reset_done[i]);
 		}
@@ -2592,7 +2595,9 @@ static int oxu_hcd_init(struct usb_hcd *hcd)
 
 	spin_lock_init(&oxu->lock);
 
-	setup_timer(&oxu->watchdog, oxu_watchdog, (unsigned long)oxu);
+	init_timer(&oxu->watchdog);
+	oxu->watchdog.function = oxu_watchdog;
+	oxu->watchdog.data = (unsigned long) oxu;
 
 	/*
 	 * hw default: 1K periodic list heads, one per frame.
@@ -2663,6 +2668,7 @@ static int oxu_hcd_init(struct usb_hcd *hcd)
 static int oxu_reset(struct usb_hcd *hcd)
 {
 	struct oxu_hcd *oxu = hcd_to_oxu(hcd);
+	int ret;
 
 	spin_lock_init(&oxu->mem_lock);
 	INIT_LIST_HEAD(&oxu->urb_list);
@@ -2688,7 +2694,11 @@ static int oxu_reset(struct usb_hcd *hcd)
 	oxu->hcs_params = readl(&oxu->caps->hcs_params);
 	oxu->sbrn = 0x20;
 
-	return oxu_hcd_init(hcd);
+	ret = oxu_hcd_init(hcd);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int oxu_run(struct usb_hcd *hcd)
@@ -2714,7 +2724,7 @@ static int oxu_run(struct usb_hcd *hcd)
 	 * streaming mappings for I/O buffers, like pci_map_single(),
 	 * can return segments above 4GB, if the device allows.
 	 *
-	 * NOTE:  the dma mask is visible through dev->dma_mask, so
+	 * NOTE:  the dma mask is visible through dma_supported(), so
 	 * drivers can pass this info along ... like NETIF_F_HIGHDMA,
 	 * Scsi_Host.highmem_io, and so forth.  It's readonly to all
 	 * host side drivers though.
@@ -2981,9 +2991,8 @@ static int oxu_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 				/* shouldn't happen often, but ...
 				 * FIXME kill those tds' urbs
 				 */
-				dev_err(hcd->self.controller,
-					"can't reschedule qh %p, err %d\n", qh,
-					status);
+				err("can't reschedule qh %p, err %d",
+					qh, status);
 			}
 			return status;
 		}
@@ -3074,7 +3083,7 @@ static int oxu_hub_status_data(struct usb_hcd *hcd, char *buf)
 	int ports, i, retval = 1;
 	unsigned long flags;
 
-	/* if !PM, root hub timers won't get shut down ... */
+	/* if !USB_SUSPEND, root hub timers won't get shut down ... */
 	if (!HC_IS_RUNNING(hcd->state))
 		return 0;
 
@@ -3106,7 +3115,7 @@ static int oxu_hub_status_data(struct usb_hcd *hcd, char *buf)
 
 		/*
 		 * Return status information even for ports with OWNER set.
-		 * Otherwise hub_wq wouldn't see the disconnect event when a
+		 * Otherwise khubd wouldn't see the disconnect event when a
 		 * high-speed device is switched over to the companion
 		 * controller by the user.
 		 */
@@ -3181,7 +3190,7 @@ static int oxu_hub_control(struct usb_hcd *hcd, u16 typeReq,
 
 		/*
 		 * Even if OWNER is set, so the port is owned by the
-		 * companion controller, hub_wq needs to be able to clear
+		 * companion controller, khubd needs to be able to clear
 		 * the port-change status bits (especially
 		 * USB_PORT_STAT_C_CONNECTION).
 		 */
@@ -3323,7 +3332,7 @@ static int oxu_hub_control(struct usb_hcd *hcd, u16 typeReq,
 		}
 
 		/*
-		 * Even if OWNER is set, there's no harm letting hub_wq
+		 * Even if OWNER is set, there's no harm letting khubd
 		 * see the wPortStatus values (they should all be 0 except
 		 * for PORT_POWER anyway).
 		 */
@@ -3737,7 +3746,6 @@ static struct usb_hcd *oxu_create(struct platform_device *pdev,
 	if (ret < 0)
 		return ERR_PTR(ret);
 
-	device_wakeup_enable(hcd->self.controller);
 	return hcd;
 }
 
@@ -3813,35 +3821,49 @@ static int oxu_drv_probe(struct platform_device *pdev)
 	dev_dbg(&pdev->dev, "IRQ resource %d\n", irq);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(base)) {
-		ret = PTR_ERR(base);
-		goto error;
+	if (!res) {
+		dev_err(&pdev->dev, "no registers address! Check %s setup!\n",
+			dev_name(&pdev->dev));
+		return -ENODEV;
 	}
 	memstart = res->start;
 	memlen = resource_size(res);
+	dev_dbg(&pdev->dev, "MEM resource %lx-%lx\n", memstart, memlen);
+	if (!request_mem_region(memstart, memlen,
+				oxu_hc_driver.description)) {
+		dev_dbg(&pdev->dev, "memory area already in use\n");
+		return -EBUSY;
+	}
 
 	ret = irq_set_irq_type(irq, IRQF_TRIGGER_FALLING);
 	if (ret) {
 		dev_err(&pdev->dev, "error setting irq type\n");
 		ret = -EFAULT;
-		goto error;
+		goto error_set_irq_type;
+	}
+
+	base = ioremap(memstart, memlen);
+	if (!base) {
+		dev_dbg(&pdev->dev, "error mapping memory\n");
+		ret = -EFAULT;
+		goto error_ioremap;
 	}
 
 	/* Allocate a driver data struct to hold useful info for both
 	 * SPH & OTG devices
 	 */
-	info = devm_kzalloc(&pdev->dev, sizeof(struct oxu_info), GFP_KERNEL);
+	info = kzalloc(sizeof(struct oxu_info), GFP_KERNEL);
 	if (!info) {
+		dev_dbg(&pdev->dev, "error allocating memory\n");
 		ret = -EFAULT;
-		goto error;
+		goto error_alloc;
 	}
 	platform_set_drvdata(pdev, info);
 
 	ret = oxu_init(pdev, memstart, memlen, base, irq);
 	if (ret < 0) {
 		dev_dbg(&pdev->dev, "cannot init USB devices\n");
-		goto error;
+		goto error_init;
 	}
 
 	dev_info(&pdev->dev, "devices enabled and running\n");
@@ -3849,7 +3871,17 @@ static int oxu_drv_probe(struct platform_device *pdev)
 
 	return 0;
 
-error:
+error_init:
+	kfree(info);
+	platform_set_drvdata(pdev, NULL);
+
+error_alloc:
+	iounmap(base);
+
+error_set_irq_type:
+error_ioremap:
+	release_mem_region(memstart, memlen);
+
 	dev_err(&pdev->dev, "init %s fail, %d\n", dev_name(&pdev->dev), ret);
 	return ret;
 }
@@ -3863,9 +3895,18 @@ static void oxu_remove(struct platform_device *pdev, struct usb_hcd *hcd)
 static int oxu_drv_remove(struct platform_device *pdev)
 {
 	struct oxu_info *info = platform_get_drvdata(pdev);
+	unsigned long memstart = info->hcd[0]->rsrc_start,
+			memlen = info->hcd[0]->rsrc_len;
+	void *base = info->hcd[0]->regs;
 
 	oxu_remove(pdev, info->hcd[0]);
 	oxu_remove(pdev, info->hcd[1]);
+
+	iounmap(base);
+	release_mem_region(memstart, memlen);
+
+	kfree(info);
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }

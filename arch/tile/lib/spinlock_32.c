@@ -65,23 +65,8 @@ EXPORT_SYMBOL(arch_spin_trylock);
 void arch_spin_unlock_wait(arch_spinlock_t *lock)
 {
 	u32 iterations = 0;
-	int curr = READ_ONCE(lock->current_ticket);
-	int next = READ_ONCE(lock->next_ticket);
-
-	/* Return immediately if unlocked. */
-	if (next == curr)
-		return;
-
-	/* Wait until the current locker has released the lock. */
-	do {
+	while (arch_spin_is_locked(lock))
 		delay_backoff(iterations++);
-	} while (READ_ONCE(lock->current_ticket) == curr);
-
-	/*
-	 * The TILE architecture doesn't do read speculation; therefore
-	 * a control dependency guarantees a LOAD->{LOAD,STORE} order.
-	 */
-	barrier();
 }
 EXPORT_SYMBOL(arch_spin_unlock_wait);
 
@@ -116,7 +101,7 @@ EXPORT_SYMBOL(arch_spin_unlock_wait);
  * preserve the semantic that the same read lock can be acquired in an
  * interrupt context.
  */
-int arch_read_trylock(arch_rwlock_t *rwlock)
+inline int arch_read_trylock(arch_rwlock_t *rwlock)
 {
 	u32 val;
 	__insn_mtspr(SPR_INTERRUPT_CRITICAL_SECTION, 1);

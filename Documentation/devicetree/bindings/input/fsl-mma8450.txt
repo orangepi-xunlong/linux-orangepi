@@ -2,7 +2,6 @@
 
 Required properties:
 - compatible : "fsl,mma8450".
-- reg: the I2C address of MMA8450
 
 Example:
 

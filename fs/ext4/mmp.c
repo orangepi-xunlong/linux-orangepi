@@ -6,54 +6,18 @@
 
 #include "ext4.h"
 
-/* Checksumming functions */
-static __le32 ext4_mmp_csum(struct super_block *sb, struct mmp_struct *mmp)
-{
-	struct ext4_sb_info *sbi = EXT4_SB(sb);
-	int offset = offsetof(struct mmp_struct, mmp_checksum);
-	__u32 csum;
-
-	csum = ext4_chksum(sbi, sbi->s_csum_seed, (char *)mmp, offset);
-
-	return cpu_to_le32(csum);
-}
-
-static int ext4_mmp_csum_verify(struct super_block *sb, struct mmp_struct *mmp)
-{
-	if (!ext4_has_metadata_csum(sb))
-		return 1;
-
-	return mmp->mmp_checksum == ext4_mmp_csum(sb, mmp);
-}
-
-static void ext4_mmp_csum_set(struct super_block *sb, struct mmp_struct *mmp)
-{
-	if (!ext4_has_metadata_csum(sb))
-		return;
-
-	mmp->mmp_checksum = ext4_mmp_csum(sb, mmp);
-}
-
 /*
  * Write the MMP block using WRITE_SYNC to try to get the block on-disk
  * faster.
  */
-static int write_mmp_block(struct super_block *sb, struct buffer_head *bh)
+static int write_mmp_block(struct buffer_head *bh)
 {
-	struct mmp_struct *mmp = (struct mmp_struct *)(bh->b_data);
-
-	/*
-	 * We protect against freezing so that we don't create dirty buffers
-	 * on frozen filesystem.
-	 */
-	sb_start_write(sb);
-	ext4_mmp_csum_set(sb, mmp);
+	mark_buffer_dirty(bh);
 	lock_buffer(bh);
 	bh->b_end_io = end_buffer_write_sync;
 	get_bh(bh);
-	submit_bh(REQ_OP_WRITE, WRITE_SYNC | REQ_META | REQ_PRIO, bh);
+	submit_bh(WRITE_SYNC, bh);
 	wait_on_buffer(bh);
-	sb_end_write(sb);
 	if (unlikely(!buffer_uptodate(bh)))
 		return 1;
 
@@ -68,7 +32,6 @@ static int read_mmp_block(struct super_block *sb, struct buffer_head **bh,
 			  ext4_fsblk_t mmp_block)
 {
 	struct mmp_struct *mmp;
-	int ret;
 
 	if (*bh)
 		clear_buffer_uptodate(*bh);
@@ -76,39 +39,32 @@ static int read_mmp_block(struct super_block *sb, struct buffer_head **bh,
 	/* This would be sb_bread(sb, mmp_block), except we need to be sure
 	 * that the MD RAID device cache has been bypassed, and that the read
 	 * is not blocked in the elevator. */
-	if (!*bh) {
+	if (!*bh)
 		*bh = sb_getblk(sb, mmp_block);
-		if (!*bh) {
-			ret = -ENOMEM;
-			goto warn_exit;
+	if (!*bh)
+		return -ENOMEM;
+	if (*bh) {
+		get_bh(*bh);
+		lock_buffer(*bh);
+		(*bh)->b_end_io = end_buffer_read_sync;
+		submit_bh(READ_SYNC, *bh);
+		wait_on_buffer(*bh);
+		if (!buffer_uptodate(*bh)) {
+			brelse(*bh);
+			*bh = NULL;
 		}
 	}
+	if (!*bh) {
+		ext4_warning(sb, "Error while reading MMP block %llu",
+			     mmp_block);
+		return -EIO;
+	}
 
-	get_bh(*bh);
-	lock_buffer(*bh);
-	(*bh)->b_end_io = end_buffer_read_sync;
-	submit_bh(REQ_OP_READ, READ_SYNC | REQ_META | REQ_PRIO, *bh);
-	wait_on_buffer(*bh);
-	if (!buffer_uptodate(*bh)) {
-		ret = -EIO;
-		goto warn_exit;
-	}
 	mmp = (struct mmp_struct *)((*bh)->b_data);
-	if (le32_to_cpu(mmp->mmp_magic) != EXT4_MMP_MAGIC) {
-		ret = -EFSCORRUPTED;
-		goto warn_exit;
-	}
-	if (!ext4_mmp_csum_verify(sb, mmp)) {
-		ret = -EFSBADCRC;
-		goto warn_exit;
-	}
+	if (le32_to_cpu(mmp->mmp_magic) != EXT4_MMP_MAGIC)
+		return -EINVAL;
+
 	return 0;
-warn_exit:
-	brelse(*bh);
-	*bh = NULL;
-	ext4_warning(sb, "Error %d while reading MMP block %llu",
-		     ret, mmp_block);
-	return ret;
 }
 
 /*
@@ -117,10 +73,10 @@ warn_exit:
 void __dump_mmp_msg(struct super_block *sb, struct mmp_struct *mmp,
 		    const char *function, unsigned int line, const char *msg)
 {
-	__ext4_warning(sb, function, line, "%s", msg);
+	__ext4_warning(sb, function, line, msg);
 	__ext4_warning(sb, function, line,
 		       "MMP failure info: last update time: %llu, last update "
-		       "node: %s, last update device: %s",
+		       "node: %s, last update device: %s\n",
 		       (long long unsigned int) le64_to_cpu(mmp->mmp_time),
 		       mmp->mmp_nodename, mmp->mmp_bdevname);
 }
@@ -166,7 +122,7 @@ static int kmmpd(void *data)
 		mmp->mmp_time = cpu_to_le64(get_seconds());
 		last_update_time = jiffies;
 
-		retval = write_mmp_block(sb, bh);
+		retval = write_mmp_block(bh);
 		/*
 		 * Don't spew too many error messages. Print one every
 		 * (s_mmp_update_interval * 60) seconds.
@@ -181,13 +137,15 @@ static int kmmpd(void *data)
 		    EXT4_FEATURE_INCOMPAT_MMP)) {
 			ext4_warning(sb, "kmmpd being stopped since MMP feature"
 				     " has been disabled.");
-			goto exit_thread;
+			EXT4_SB(sb)->s_mmp_tsk = NULL;
+			goto failed;
 		}
 
 		if (sb->s_flags & MS_RDONLY) {
 			ext4_warning(sb, "kmmpd being stopped since filesystem "
 				     "has been remounted as readonly.");
-			goto exit_thread;
+			EXT4_SB(sb)->s_mmp_tsk = NULL;
+			goto failed;
 		}
 
 		diff = jiffies - last_update_time;
@@ -209,7 +167,9 @@ static int kmmpd(void *data)
 			if (retval) {
 				ext4_error(sb, "error reading MMP data: %d",
 					   retval);
-				goto exit_thread;
+
+				EXT4_SB(sb)->s_mmp_tsk = NULL;
+				goto failed;
 			}
 
 			mmp_check = (struct mmp_struct *)(bh_check->b_data);
@@ -221,9 +181,7 @@ static int kmmpd(void *data)
 					     "The filesystem seems to have been"
 					     " multiply mounted.");
 				ext4_error(sb, "abort");
-				put_bh(bh_check);
-				retval = -EBUSY;
-				goto exit_thread;
+				goto failed;
 			}
 			put_bh(bh_check);
 		}
@@ -244,10 +202,9 @@ static int kmmpd(void *data)
 	mmp->mmp_seq = cpu_to_le32(EXT4_MMP_SEQ_CLEAN);
 	mmp->mmp_time = cpu_to_le64(get_seconds());
 
-	retval = write_mmp_block(sb, bh);
+	retval = write_mmp_block(bh);
 
-exit_thread:
-	EXT4_SB(sb)->s_mmp_tsk = NULL;
+failed:
 	kfree(data);
 	brelse(bh);
 	return retval;
@@ -262,7 +219,7 @@ static unsigned int mmp_new_seq(void)
 	u32 new_seq;
 
 	do {
-		new_seq = prandom_u32();
+		get_random_bytes(&new_seq, sizeof(u32));
 	} while (new_seq > EXT4_MMP_SEQ_MAX);
 
 	return new_seq;
@@ -344,7 +301,7 @@ skip:
 	seq = mmp_new_seq();
 	mmp->mmp_seq = cpu_to_le32(seq);
 
-	retval = write_mmp_block(sb, bh);
+	retval = write_mmp_block(bh);
 	if (retval)
 		goto failed;
 
@@ -352,7 +309,7 @@ skip:
 	 * wait for MMP interval and check mmp_seq.
 	 */
 	if (schedule_timeout_interruptible(HZ * wait_time) != 0) {
-		ext4_warning(sb, "MMP startup interrupted, failing mount");
+		ext4_warning(sb, "MMP startup interrupted, failing mount\n");
 		goto failed;
 	}
 

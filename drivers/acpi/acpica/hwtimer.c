@@ -1,3 +1,4 @@
+
 /******************************************************************************
  *
  * Name: hwtimer.c - ACPI Power Management Timer Interface
@@ -5,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,8 +42,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#define EXPORT_ACPI_INTERFACES
-
+#include <linux/export.h>
 #include <acpi/acpi.h>
 #include "accommon.h"
 
@@ -54,7 +54,7 @@ ACPI_MODULE_NAME("hwtimer")
  *
  * FUNCTION:    acpi_get_timer_resolution
  *
- * PARAMETERS:  resolution          - Where the resolution is returned
+ * PARAMETERS:  Resolution          - Where the resolution is returned
  *
  * RETURN:      Status and timer resolution
  *
@@ -84,7 +84,7 @@ ACPI_EXPORT_SYMBOL(acpi_get_timer_resolution)
  *
  * FUNCTION:    acpi_get_timer
  *
- * PARAMETERS:  ticks               - Where the timer value is returned
+ * PARAMETERS:  Ticks               - Where the timer value is returned
  *
  * RETURN:      Status and current timer value (ticks)
  *
@@ -101,13 +101,9 @@ acpi_status acpi_get_timer(u32 * ticks)
 		return_ACPI_STATUS(AE_BAD_PARAMETER);
 	}
 
-	/* ACPI 5.0A: PM Timer is optional */
+	status =
+	    acpi_hw_read(ticks, &acpi_gbl_FADT.xpm_timer_block);
 
-	if (!acpi_gbl_FADT.xpm_timer_block.address) {
-		return_ACPI_STATUS(AE_SUPPORT);
-	}
-
-	status = acpi_hw_read(ticks, &acpi_gbl_FADT.xpm_timer_block);
 	return_ACPI_STATUS(status);
 }
 
@@ -133,7 +129,7 @@ ACPI_EXPORT_SYMBOL(acpi_get_timer)
  *              a versatile and accurate timer.
  *
  *              Note that this function accommodates only a single timer
- *              rollover. Thus for 24-bit timers, this function should only
+ *              rollover.  Thus for 24-bit timers, this function should only
  *              be used for calculating durations less than ~4.6 seconds
  *              (~20 minutes for 32-bit timers) -- calculations below:
  *
@@ -152,12 +148,6 @@ acpi_get_timer_duration(u32 start_ticks, u32 end_ticks, u32 * time_elapsed)
 
 	if (!time_elapsed) {
 		return_ACPI_STATUS(AE_BAD_PARAMETER);
-	}
-
-	/* ACPI 5.0A: PM Timer is optional */
-
-	if (!acpi_gbl_FADT.xpm_timer_block.address) {
-		return_ACPI_STATUS(AE_SUPPORT);
 	}
 
 	/*
@@ -188,11 +178,10 @@ acpi_get_timer_duration(u32 start_ticks, u32 end_ticks, u32 * time_elapsed)
 	/*
 	 * Compute Duration (Requires a 64-bit multiply and divide):
 	 *
-	 * time_elapsed (microseconds) =
-	 *  (delta_ticks * ACPI_USEC_PER_SEC) / ACPI_PM_TIMER_FREQUENCY;
+	 * time_elapsed = (delta_ticks * 1000000) / PM_TIMER_FREQUENCY;
 	 */
-	status = acpi_ut_short_divide(((u64)delta_ticks) * ACPI_USEC_PER_SEC,
-				      ACPI_PM_TIMER_FREQUENCY, &quotient, NULL);
+	status = acpi_ut_short_divide(((u64) delta_ticks) * 1000000,
+				      PM_TIMER_FREQUENCY, &quotient, NULL);
 
 	*time_elapsed = (u32) quotient;
 	return_ACPI_STATUS(status);

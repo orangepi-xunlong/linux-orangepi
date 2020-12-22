@@ -214,7 +214,7 @@ out:
 	err = ubifs_add_bud_to_log(c, jhead, lnum, offs);
 	if (err)
 		goto out_return;
-	err = ubifs_wbuf_seek_nolock(wbuf, lnum, offs);
+	err = ubifs_wbuf_seek_nolock(wbuf, lnum, offs, wbuf->dtype);
 	if (err)
 		goto out_unlock;
 
@@ -363,11 +363,11 @@ again:
 		 * This should not happen unless the journal size limitations
 		 * are too tough.
 		 */
-		ubifs_err(c, "stuck in space allocation");
+		ubifs_err("stuck in space allocation");
 		err = -ENOSPC;
 		goto out;
 	} else if (cmt_retries > 32)
-		ubifs_warn(c, "too many space allocation re-tries (%d)",
+		ubifs_warn("too many space allocation re-tries (%d)",
 			   cmt_retries);
 
 	dbg_jnl("-EAGAIN, commit and retry (retried %d times)",
@@ -380,14 +380,14 @@ again:
 	goto again;
 
 out:
-	ubifs_err(c, "cannot reserve %d bytes in jhead %d, error %d",
+	ubifs_err("cannot reserve %d bytes in jhead %d, error %d",
 		  len, jhead, err);
 	if (err == -ENOSPC) {
 		/* This are some budgeting problems, print useful information */
 		down_write(&c->commit_sem);
-		dump_stack();
-		ubifs_dump_budg(c, &c->bi);
-		ubifs_dump_lprops(c);
+		dbg_dump_stack();
+		dbg_dump_budg(c, &c->bi);
+		dbg_dump_lprops(c);
 		cmt_retries = dbg_check_lprops(c);
 		up_write(&c->commit_sem);
 	}
@@ -469,8 +469,8 @@ static void pack_inode(struct ubifs_info *c, struct ubifs_ino_node *ino,
 	ino->ctime_nsec = cpu_to_le32(inode->i_ctime.tv_nsec);
 	ino->mtime_sec  = cpu_to_le64(inode->i_mtime.tv_sec);
 	ino->mtime_nsec = cpu_to_le32(inode->i_mtime.tv_nsec);
-	ino->uid   = cpu_to_le32(i_uid_read(inode));
-	ino->gid   = cpu_to_le32(i_gid_read(inode));
+	ino->uid   = cpu_to_le32(inode->i_uid);
+	ino->gid   = cpu_to_le32(inode->i_gid);
 	ino->mode  = cpu_to_le32(inode->i_mode);
 	ino->flags = cpu_to_le32(ui->flags);
 	ino->size  = cpu_to_le64(ui->ui_size);
@@ -546,14 +546,15 @@ int ubifs_jnl_update(struct ubifs_info *c, const struct inode *dir,
 	int aligned_dlen, aligned_ilen, sync = IS_DIRSYNC(dir);
 	int last_reference = !!(deletion && inode->i_nlink == 0);
 	struct ubifs_inode *ui = ubifs_inode(inode);
-	struct ubifs_inode *host_ui = ubifs_inode(dir);
+	struct ubifs_inode *dir_ui = ubifs_inode(dir);
 	struct ubifs_dent_node *dent;
 	struct ubifs_ino_node *ino;
 	union ubifs_key dent_key, ino_key;
 
 	dbg_jnl("ino %lu, dent '%.*s', data len %d in dir ino %lu",
 		inode->i_ino, nm->len, nm->name, ui->data_len, dir->i_ino);
-	ubifs_assert(mutex_is_locked(&host_ui->ui_mutex));
+	ubifs_assert(dir_ui->data_len == 0);
+	ubifs_assert(mutex_is_locked(&dir_ui->ui_mutex));
 
 	dlen = UBIFS_DENT_NODE_SZ + nm->len + 1;
 	ilen = UBIFS_INO_NODE_SZ;
@@ -571,12 +572,8 @@ int ubifs_jnl_update(struct ubifs_info *c, const struct inode *dir,
 
 	aligned_dlen = ALIGN(dlen, 8);
 	aligned_ilen = ALIGN(ilen, 8);
-
 	len = aligned_dlen + aligned_ilen + UBIFS_INO_NODE_SZ;
-	/* Make sure to also account for extended attributes */
-	len += host_ui->data_len;
-
-	dent = kzalloc(len, GFP_NOFS);
+	dent = kmalloc(len, GFP_NOFS);
 	if (!dent)
 		return -ENOMEM;
 
@@ -652,8 +649,7 @@ int ubifs_jnl_update(struct ubifs_info *c, const struct inode *dir,
 
 	ino_key_init(c, &ino_key, dir->i_ino);
 	ino_offs += aligned_ilen;
-	err = ubifs_tnc_add(c, &ino_key, lnum, ino_offs,
-			    UBIFS_INO_NODE_SZ + host_ui->data_len);
+	err = ubifs_tnc_add(c, &ino_key, lnum, ino_offs, UBIFS_INO_NODE_SZ);
 	if (err)
 		goto out_ro;
 
@@ -661,13 +657,8 @@ int ubifs_jnl_update(struct ubifs_info *c, const struct inode *dir,
 	spin_lock(&ui->ui_lock);
 	ui->synced_i_size = ui->ui_size;
 	spin_unlock(&ui->ui_lock);
-	if (xent) {
-		spin_lock(&host_ui->ui_lock);
-		host_ui->synced_i_size = host_ui->ui_size;
-		spin_unlock(&host_ui->ui_lock);
-	}
 	mark_inode_clean(c, ui);
-	mark_inode_clean(c, host_ui);
+	mark_inode_clean(c, dir_ui);
 	return 0;
 
 out_finish:
@@ -736,7 +727,7 @@ int ubifs_jnl_write_data(struct ubifs_info *c, const struct inode *inode,
 		compr_type = ui->compr_type;
 
 	out_len = dlen - UBIFS_DATA_NODE_SZ;
-	ubifs_compress(c, buf, len, &data->data, &out_len, &compr_type);
+	ubifs_compress(buf, len, &data->data, &out_len, &compr_type);
 	ubifs_assert(out_len <= UBIFS_BLOCK_SIZE);
 
 	dlen = UBIFS_DATA_NODE_SZ + out_len;
@@ -913,147 +904,6 @@ int ubifs_jnl_delete_inode(struct ubifs_info *c, const struct inode *inode)
 }
 
 /**
- * ubifs_jnl_xrename - cross rename two directory entries.
- * @c: UBIFS file-system description object
- * @fst_dir: parent inode of 1st directory entry to exchange
- * @fst_dentry: 1st directory entry to exchange
- * @snd_dir: parent inode of 2nd directory entry to exchange
- * @snd_dentry: 2nd directory entry to exchange
- * @sync: non-zero if the write-buffer has to be synchronized
- *
- * This function implements the cross rename operation which may involve
- * writing 2 inodes and 2 directory entries. It marks the written inodes as clean
- * and returns zero on success. In case of failure, a negative error code is
- * returned.
- */
-int ubifs_jnl_xrename(struct ubifs_info *c, const struct inode *fst_dir,
-		      const struct dentry *fst_dentry,
-		      const struct inode *snd_dir,
-		      const struct dentry *snd_dentry, int sync)
-{
-	union ubifs_key key;
-	struct ubifs_dent_node *dent1, *dent2;
-	int err, dlen1, dlen2, lnum, offs, len, plen = UBIFS_INO_NODE_SZ;
-	int aligned_dlen1, aligned_dlen2;
-	int twoparents = (fst_dir != snd_dir);
-	const struct inode *fst_inode = d_inode(fst_dentry);
-	const struct inode *snd_inode = d_inode(snd_dentry);
-	void *p;
-
-	dbg_jnl("dent '%pd' in dir ino %lu between dent '%pd' in dir ino %lu",
-		fst_dentry, fst_dir->i_ino, snd_dentry, snd_dir->i_ino);
-
-	ubifs_assert(ubifs_inode(fst_dir)->data_len == 0);
-	ubifs_assert(ubifs_inode(snd_dir)->data_len == 0);
-	ubifs_assert(mutex_is_locked(&ubifs_inode(fst_dir)->ui_mutex));
-	ubifs_assert(mutex_is_locked(&ubifs_inode(snd_dir)->ui_mutex));
-
-	dlen1 = UBIFS_DENT_NODE_SZ + snd_dentry->d_name.len + 1;
-	dlen2 = UBIFS_DENT_NODE_SZ + fst_dentry->d_name.len + 1;
-	aligned_dlen1 = ALIGN(dlen1, 8);
-	aligned_dlen2 = ALIGN(dlen2, 8);
-
-	len = aligned_dlen1 + aligned_dlen2 + ALIGN(plen, 8);
-	if (twoparents)
-		len += plen;
-
-	dent1 = kzalloc(len, GFP_NOFS);
-	if (!dent1)
-		return -ENOMEM;
-
-	/* Make reservation before allocating sequence numbers */
-	err = make_reservation(c, BASEHD, len);
-	if (err)
-		goto out_free;
-
-	/* Make new dent for 1st entry */
-	dent1->ch.node_type = UBIFS_DENT_NODE;
-	dent_key_init_flash(c, &dent1->key, snd_dir->i_ino, &snd_dentry->d_name);
-	dent1->inum = cpu_to_le64(fst_inode->i_ino);
-	dent1->type = get_dent_type(fst_inode->i_mode);
-	dent1->nlen = cpu_to_le16(snd_dentry->d_name.len);
-	memcpy(dent1->name, snd_dentry->d_name.name, snd_dentry->d_name.len);
-	dent1->name[snd_dentry->d_name.len] = '\0';
-	zero_dent_node_unused(dent1);
-	ubifs_prep_grp_node(c, dent1, dlen1, 0);
-
-	/* Make new dent for 2nd entry */
-	dent2 = (void *)dent1 + aligned_dlen1;
-	dent2->ch.node_type = UBIFS_DENT_NODE;
-	dent_key_init_flash(c, &dent2->key, fst_dir->i_ino, &fst_dentry->d_name);
-	dent2->inum = cpu_to_le64(snd_inode->i_ino);
-	dent2->type = get_dent_type(snd_inode->i_mode);
-	dent2->nlen = cpu_to_le16(fst_dentry->d_name.len);
-	memcpy(dent2->name, fst_dentry->d_name.name, fst_dentry->d_name.len);
-	dent2->name[fst_dentry->d_name.len] = '\0';
-	zero_dent_node_unused(dent2);
-	ubifs_prep_grp_node(c, dent2, dlen2, 0);
-
-	p = (void *)dent2 + aligned_dlen2;
-	if (!twoparents)
-		pack_inode(c, p, fst_dir, 1);
-	else {
-		pack_inode(c, p, fst_dir, 0);
-		p += ALIGN(plen, 8);
-		pack_inode(c, p, snd_dir, 1);
-	}
-
-	err = write_head(c, BASEHD, dent1, len, &lnum, &offs, sync);
-	if (err)
-		goto out_release;
-	if (!sync) {
-		struct ubifs_wbuf *wbuf = &c->jheads[BASEHD].wbuf;
-
-		ubifs_wbuf_add_ino_nolock(wbuf, fst_dir->i_ino);
-		ubifs_wbuf_add_ino_nolock(wbuf, snd_dir->i_ino);
-	}
-	release_head(c, BASEHD);
-
-	dent_key_init(c, &key, snd_dir->i_ino, &snd_dentry->d_name);
-	err = ubifs_tnc_add_nm(c, &key, lnum, offs, dlen1, &snd_dentry->d_name);
-	if (err)
-		goto out_ro;
-
-	offs += aligned_dlen1;
-	dent_key_init(c, &key, fst_dir->i_ino, &fst_dentry->d_name);
-	err = ubifs_tnc_add_nm(c, &key, lnum, offs, dlen2, &fst_dentry->d_name);
-	if (err)
-		goto out_ro;
-
-	offs += aligned_dlen2;
-
-	ino_key_init(c, &key, fst_dir->i_ino);
-	err = ubifs_tnc_add(c, &key, lnum, offs, plen);
-	if (err)
-		goto out_ro;
-
-	if (twoparents) {
-		offs += ALIGN(plen, 8);
-		ino_key_init(c, &key, snd_dir->i_ino);
-		err = ubifs_tnc_add(c, &key, lnum, offs, plen);
-		if (err)
-			goto out_ro;
-	}
-
-	finish_reservation(c);
-
-	mark_inode_clean(c, ubifs_inode(fst_dir));
-	if (twoparents)
-		mark_inode_clean(c, ubifs_inode(snd_dir));
-	kfree(dent1);
-	return 0;
-
-out_release:
-	release_head(c, BASEHD);
-out_ro:
-	ubifs_ro_mode(c, err);
-	finish_reservation(c);
-out_free:
-	kfree(dent1);
-	return err;
-}
-
-/**
  * ubifs_jnl_rename - rename a directory entry.
  * @c: UBIFS file-system description object
  * @old_dir: parent inode of directory entry to rename
@@ -1063,29 +913,30 @@ out_free:
  * @sync: non-zero if the write-buffer has to be synchronized
  *
  * This function implements the re-name operation which may involve writing up
- * to 4 inodes and 2 directory entries. It marks the written inodes as clean
+ * to 3 inodes and 2 directory entries. It marks the written inodes as clean
  * and returns zero on success. In case of failure, a negative error code is
  * returned.
  */
 int ubifs_jnl_rename(struct ubifs_info *c, const struct inode *old_dir,
 		     const struct dentry *old_dentry,
 		     const struct inode *new_dir,
-		     const struct dentry *new_dentry,
-		     const struct inode *whiteout, int sync)
+		     const struct dentry *new_dentry, int sync)
 {
 	void *p;
 	union ubifs_key key;
 	struct ubifs_dent_node *dent, *dent2;
 	int err, dlen1, dlen2, ilen, lnum, offs, len;
-	const struct inode *old_inode = d_inode(old_dentry);
-	const struct inode *new_inode = d_inode(new_dentry);
+	const struct inode *old_inode = old_dentry->d_inode;
+	const struct inode *new_inode = new_dentry->d_inode;
 	int aligned_dlen1, aligned_dlen2, plen = UBIFS_INO_NODE_SZ;
 	int last_reference = !!(new_inode && new_inode->i_nlink == 0);
 	int move = (old_dir != new_dir);
 	struct ubifs_inode *uninitialized_var(new_ui);
 
-	dbg_jnl("dent '%pd' in dir ino %lu to dent '%pd' in dir ino %lu",
-		old_dentry, old_dir->i_ino, new_dentry, new_dir->i_ino);
+	dbg_jnl("dent '%.*s' in dir ino %lu to dent '%.*s' in dir ino %lu",
+		old_dentry->d_name.len, old_dentry->d_name.name,
+		old_dir->i_ino, new_dentry->d_name.len,
+		new_dentry->d_name.name, new_dir->i_ino);
 	ubifs_assert(ubifs_inode(old_dir)->data_len == 0);
 	ubifs_assert(ubifs_inode(new_dir)->data_len == 0);
 	ubifs_assert(mutex_is_locked(&ubifs_inode(old_dir)->ui_mutex));
@@ -1105,9 +956,9 @@ int ubifs_jnl_rename(struct ubifs_info *c, const struct inode *old_dir,
 	aligned_dlen1 = ALIGN(dlen1, 8);
 	aligned_dlen2 = ALIGN(dlen2, 8);
 	len = aligned_dlen1 + aligned_dlen2 + ALIGN(ilen, 8) + ALIGN(plen, 8);
-	if (move)
+	if (old_dir != new_dir)
 		len += plen;
-	dent = kzalloc(len, GFP_NOFS);
+	dent = kmalloc(len, GFP_NOFS);
 	if (!dent)
 		return -ENOMEM;
 
@@ -1127,19 +978,13 @@ int ubifs_jnl_rename(struct ubifs_info *c, const struct inode *old_dir,
 	zero_dent_node_unused(dent);
 	ubifs_prep_grp_node(c, dent, dlen1, 0);
 
+	/* Make deletion dent */
 	dent2 = (void *)dent + aligned_dlen1;
 	dent2->ch.node_type = UBIFS_DENT_NODE;
 	dent_key_init_flash(c, &dent2->key, old_dir->i_ino,
 			    &old_dentry->d_name);
-
-	if (whiteout) {
-		dent2->inum = cpu_to_le64(whiteout->i_ino);
-		dent2->type = get_dent_type(whiteout->i_mode);
-	} else {
-		/* Make deletion dent */
-		dent2->inum = 0;
-		dent2->type = DT_UNKNOWN;
-	}
+	dent2->inum = 0;
+	dent2->type = DT_UNKNOWN;
 	dent2->nlen = cpu_to_le16(old_dentry->d_name.len);
 	memcpy(dent2->name, old_dentry->d_name.name, old_dentry->d_name.len);
 	dent2->name[old_dentry->d_name.len] = '\0';
@@ -1188,26 +1033,16 @@ int ubifs_jnl_rename(struct ubifs_info *c, const struct inode *old_dir,
 	if (err)
 		goto out_ro;
 
-	offs += aligned_dlen1;
-	if (whiteout) {
-		dent_key_init(c, &key, old_dir->i_ino, &old_dentry->d_name);
-		err = ubifs_tnc_add_nm(c, &key, lnum, offs, dlen2, &old_dentry->d_name);
-		if (err)
-			goto out_ro;
+	err = ubifs_add_dirt(c, lnum, dlen2);
+	if (err)
+		goto out_ro;
 
-		ubifs_delete_orphan(c, whiteout->i_ino);
-	} else {
-		err = ubifs_add_dirt(c, lnum, dlen2);
-		if (err)
-			goto out_ro;
+	dent_key_init(c, &key, old_dir->i_ino, &old_dentry->d_name);
+	err = ubifs_tnc_remove_nm(c, &key, &old_dentry->d_name);
+	if (err)
+		goto out_ro;
 
-		dent_key_init(c, &key, old_dir->i_ino, &old_dentry->d_name);
-		err = ubifs_tnc_remove_nm(c, &key, &old_dentry->d_name);
-		if (err)
-			goto out_ro;
-	}
-
-	offs += aligned_dlen2;
+	offs += aligned_dlen1 + aligned_dlen2;
 	if (new_inode) {
 		ino_key_init(c, &key, new_inode->i_ino);
 		err = ubifs_tnc_add(c, &key, lnum, offs, ilen);
@@ -1221,7 +1056,7 @@ int ubifs_jnl_rename(struct ubifs_info *c, const struct inode *old_dir,
 	if (err)
 		goto out_ro;
 
-	if (move) {
+	if (old_dir != new_dir) {
 		offs += ALIGN(plen, 8);
 		ino_key_init(c, &key, new_dir->i_ino);
 		err = ubifs_tnc_add(c, &key, lnum, offs, plen);
@@ -1263,8 +1098,7 @@ out_free:
  * This function is used when an inode is truncated and the last data node of
  * the inode has to be re-compressed and re-written.
  */
-static int recomp_data_node(const struct ubifs_info *c,
-			    struct ubifs_data_node *dn, int *new_len)
+static int recomp_data_node(struct ubifs_data_node *dn, int *new_len)
 {
 	void *buf;
 	int err, len, compr_type, out_len;
@@ -1276,11 +1110,11 @@ static int recomp_data_node(const struct ubifs_info *c,
 
 	len = le32_to_cpu(dn->ch.len) - UBIFS_DATA_NODE_SZ;
 	compr_type = le16_to_cpu(dn->compr_type);
-	err = ubifs_decompress(c, &dn->data, len, buf, &out_len, compr_type);
+	err = ubifs_decompress(&dn->data, len, buf, &out_len, compr_type);
 	if (err)
 		goto out;
 
-	ubifs_compress(c, buf, *new_len, &dn->data, &out_len, &compr_type);
+	ubifs_compress(buf, *new_len, &dn->data, &out_len, &compr_type);
 	ubifs_assert(out_len <= UBIFS_BLOCK_SIZE);
 	dn->compr_type = cpu_to_le16(compr_type);
 	dn->size = cpu_to_le32(*new_len);
@@ -1349,22 +1183,13 @@ int ubifs_jnl_truncate(struct ubifs_info *c, const struct inode *inode,
 		else if (err)
 			goto out_free;
 		else {
-			int dn_len = le32_to_cpu(dn->size);
-
-			if (dn_len <= 0 || dn_len > UBIFS_BLOCK_SIZE) {
-				ubifs_err(c, "bad data node (block %u, inode %lu)",
-					  blk, inode->i_ino);
-				ubifs_dump_node(c, dn);
-				goto out_free;
-			}
-
-			if (dn_len <= dlen)
+			if (le32_to_cpu(dn->size) <= dlen)
 				dlen = 0; /* Nothing to do */
 			else {
 				int compr_type = le16_to_cpu(dn->compr_type);
 
 				if (compr_type != UBIFS_COMPR_NONE) {
-					err = recomp_data_node(c, dn, &dlen);
+					err = recomp_data_node(dn, &dlen);
 					if (err)
 						goto out_free;
 				} else {
@@ -1442,6 +1267,7 @@ out_free:
 	return err;
 }
 
+#ifdef CONFIG_UBIFS_FS_XATTR
 
 /**
  * ubifs_jnl_delete_xattr - delete an extended attribute.
@@ -1480,7 +1306,7 @@ int ubifs_jnl_delete_xattr(struct ubifs_info *c, const struct inode *host,
 	hlen = host_ui->data_len + UBIFS_INO_NODE_SZ;
 	len = aligned_xlen + UBIFS_INO_NODE_SZ + ALIGN(hlen, 8);
 
-	xent = kzalloc(len, GFP_NOFS);
+	xent = kmalloc(len, GFP_NOFS);
 	if (!xent)
 		return -ENOMEM;
 
@@ -1587,7 +1413,7 @@ int ubifs_jnl_change_xattr(struct ubifs_info *c, const struct inode *inode,
 	aligned_len1 = ALIGN(len1, 8);
 	aligned_len = aligned_len1 + ALIGN(len2, 8);
 
-	ino = kzalloc(aligned_len, GFP_NOFS);
+	ino = kmalloc(aligned_len, GFP_NOFS);
 	if (!ino)
 		return -ENOMEM;
 
@@ -1636,3 +1462,4 @@ out_free:
 	return err;
 }
 
+#endif /* CONFIG_UBIFS_FS_XATTR */

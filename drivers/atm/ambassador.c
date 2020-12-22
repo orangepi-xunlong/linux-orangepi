@@ -1403,7 +1403,7 @@ static void amb_free_rx_skb (struct atm_vcc * atm_vcc, struct sk_buff * skb) {
   rx.host_address = cpu_to_be32 (virt_to_bus (skb->data));
   
   skb->data = skb->head;
-  skb_reset_tail_pointer(skb);
+  skb->tail = skb->head;
   skb->len = 0;
   
   if (!rx_give (dev, &rx, pool)) {
@@ -1507,9 +1507,9 @@ static void do_housekeeping (unsigned long arg) {
 
 /********** creation of communication queues **********/
 
-static int create_queues(amb_dev *dev, unsigned int cmds, unsigned int txs,
-			 unsigned int *rxs, unsigned int *rx_buffer_sizes)
-{
+static int __devinit create_queues (amb_dev * dev, unsigned int cmds,
+				 unsigned int txs, unsigned int * rxs,
+				 unsigned int * rx_buffer_sizes) {
   unsigned char pool;
   size_t total = 0;
   void * memory;
@@ -1737,9 +1737,8 @@ static  int decode_loader_result (loader_command cmd, u32 result)
 	return res;
 }
 
-static int do_loader_command(volatile loader_block *lb, const amb_dev *dev,
-			     loader_command cmd)
-{
+static int __devinit do_loader_command (volatile loader_block * lb,
+				     const amb_dev * dev, loader_command cmd) {
   
   unsigned long timeout;
   
@@ -1794,9 +1793,8 @@ static int do_loader_command(volatile loader_block *lb, const amb_dev *dev,
 
 /* loader: determine loader version */
 
-static int get_loader_version(loader_block *lb, const amb_dev *dev,
-			      u32 *version)
-{
+static int __devinit get_loader_version (loader_block * lb,
+				      const amb_dev * dev, u32 * version) {
   int res;
   
   PRINTD (DBG_FLOW|DBG_LOAD, "get_loader_version");
@@ -1811,9 +1809,9 @@ static int get_loader_version(loader_block *lb, const amb_dev *dev,
 
 /* loader: write memory data blocks */
 
-static int loader_write(loader_block *lb, const amb_dev *dev,
-			const struct ihex_binrec *rec)
-{
+static int __devinit loader_write (loader_block* lb,
+				   const amb_dev *dev,
+				   const struct ihex_binrec *rec) {
   transfer_block * tb = &lb->payload.transfer;
   
   PRINTD (DBG_FLOW|DBG_LOAD, "loader_write");
@@ -1826,9 +1824,9 @@ static int loader_write(loader_block *lb, const amb_dev *dev,
 
 /* loader: verify memory data blocks */
 
-static int loader_verify(loader_block *lb, const amb_dev *dev,
-			 const struct ihex_binrec *rec)
-{
+static int __devinit loader_verify (loader_block * lb,
+				    const amb_dev *dev,
+				    const struct ihex_binrec *rec) {
   transfer_block * tb = &lb->payload.transfer;
   int res;
   
@@ -1844,8 +1842,8 @@ static int loader_verify(loader_block *lb, const amb_dev *dev,
 
 /* loader: start microcode */
 
-static int loader_start(loader_block *lb, const amb_dev *dev, u32 address)
-{
+static int __devinit loader_start (loader_block * lb,
+				const amb_dev * dev, u32 address) {
   PRINTD (DBG_FLOW|DBG_LOAD, "loader_start");
   
   lb->payload.start = cpu_to_be32 (address);
@@ -1920,12 +1918,11 @@ static int amb_reset (amb_dev * dev, int diags) {
 
 /********** transfer and start the microcode **********/
 
-static int ucode_init(loader_block *lb, amb_dev *dev)
-{
+static int __devinit ucode_init (loader_block * lb, amb_dev * dev) {
   const struct firmware *fw;
   unsigned long start_address;
   const struct ihex_binrec *rec;
-  const char *errmsg = NULL;
+  const char *errmsg = 0;
   int res;
 
   res = request_ihex_firmware(&fw, "atmsar11.fw", &dev->pci_dev->dev);
@@ -1964,7 +1961,6 @@ static int ucode_init(loader_block *lb, amb_dev *dev)
     res = loader_verify(lb, dev, rec);
     if (res)
       break;
-    rec = ihex_next_binrec(rec);
   }
   release_firmware(fw);
   if (!res)
@@ -1983,8 +1979,7 @@ static inline __be32 bus_addr(void * addr) {
     return cpu_to_be32 (virt_to_bus (addr));
 }
 
-static int amb_talk(amb_dev *dev)
-{
+static int __devinit amb_talk (amb_dev * dev) {
   adap_talk_block a;
   unsigned char pool;
   unsigned long timeout;
@@ -2031,8 +2026,7 @@ static int amb_talk(amb_dev *dev)
 }
 
 // get microcode version
-static void amb_ucode_version(amb_dev *dev)
-{
+static void __devinit amb_ucode_version (amb_dev * dev) {
   u32 major;
   u32 minor;
   command cmd;
@@ -2047,8 +2041,7 @@ static void amb_ucode_version(amb_dev *dev)
 }
   
 // get end station address
-static void amb_esi(amb_dev *dev, u8 *esi)
-{
+static void __devinit amb_esi (amb_dev * dev, u8 * esi) {
   u32 lower4;
   u16 upper2;
   command cmd;
@@ -2094,7 +2087,7 @@ static void fixup_plx_window (amb_dev *dev, loader_block *lb)
 	return;
 }
 
-static int amb_init(amb_dev *dev)
+static int __devinit amb_init (amb_dev * dev)
 {
   loader_block lb;
   
@@ -2190,8 +2183,7 @@ static void setup_pci_dev(struct pci_dev *pci_dev)
 	}
 }
 
-static int amb_probe(struct pci_dev *pci_dev,
-		     const struct pci_device_id *pci_ent)
+static int __devinit amb_probe(struct pci_dev *pci_dev, const struct pci_device_id *pci_ent)
 {
 	amb_dev * dev;
 	int err;
@@ -2292,7 +2284,7 @@ out_disable:
 }
 
 
-static void amb_remove_one(struct pci_dev *pci_dev)
+static void __devexit amb_remove_one(struct pci_dev *pci_dev)
 {
 	struct amb_dev *dev;
 
@@ -2386,7 +2378,7 @@ MODULE_DEVICE_TABLE(pci, amb_pci_tbl);
 static struct pci_driver amb_driver = {
 	.name =		"amb",
 	.probe =	amb_probe,
-	.remove =	amb_remove_one,
+	.remove =	__devexit_p(amb_remove_one),
 	.id_table =	amb_pci_tbl,
 };
 

@@ -141,7 +141,7 @@ u8 r8712_usb_hal_bus_init(struct _adapter *padapter)
 		/* Enable AFE PLL Macro Block */
 		val8 = r8712_read8(padapter, AFE_PLL_CTRL);
 		r8712_write8(padapter, AFE_PLL_CTRL, (val8 | 0x11));
-		/* Attach AFE PLL to MACTOP/BB/PCIe Digital */
+		/* Attatch AFE PLL to MACTOP/BB/PCIe Digital */
 		val8 = r8712_read8(padapter, SYS_ISO_CTRL);
 		r8712_write8(padapter, SYS_ISO_CTRL, (val8 & 0xEE));
 		/* Switch to 40M clock */
@@ -167,12 +167,12 @@ u8 r8712_usb_hal_bus_init(struct _adapter *padapter)
 		r8712_write8(padapter, CR + 1, 0x37);
 		/* Fix the RX FIFO issue(usb error), */
 		val8 = r8712_read8(padapter, 0x1025FE5c);
-		r8712_write8(padapter, 0x1025FE5c, (val8 | BIT(7)));
+		r8712_write8(padapter, 0x1025FE5c, (val8|BIT(7)));
 		val8 = r8712_read8(padapter, 0x102500ab);
-		r8712_write8(padapter, 0x102500ab, (val8 | BIT(6) | BIT(7)));
+		r8712_write8(padapter, 0x102500ab, (val8|BIT(6)|BIT(7)));
 		/* For power save, used this in the bit file after 970621 */
 		val8 = r8712_read8(padapter, SYS_CLKR);
-		r8712_write8(padapter, SYS_CLKR, val8 & (~CPU_CLKSEL));
+		r8712_write8(padapter, SYS_CLKR, val8&(~CPU_CLKSEL));
 	} else if (pregistrypriv->chip_version == RTL8712_2ndCUT ||
 		  pregistrypriv->chip_version == RTL8712_3rdCUT) {
 		/* Initialization for power on sequence,
@@ -196,8 +196,7 @@ u8 r8712_usb_hal_bus_init(struct _adapter *padapter)
 		msleep(20);
 		/* Revised POS, */
 		/* Enable AFE Macro Block's Bandgap and Enable AFE Macro
-		 * Block's Mbias
-		 */
+		 * Block's Mbias */
 		r8712_write8(padapter, SPS0_CTRL + 1, 0x53);
 		r8712_write8(padapter, SPS0_CTRL, 0x57);
 		val8 = r8712_read8(padapter, AFE_MISC);
@@ -235,7 +234,7 @@ u8 r8712_usb_hal_bus_init(struct _adapter *padapter)
 		udelay(500);
 		r8712_write8(padapter, AFE_PLL_CTRL, (val8 | 0x11));
 		udelay(500);
-		/* Attach AFE PLL to MACTOP/BB/PCIe Digital */
+		/* Attatch AFE PLL to MACTOP/BB/PCIe Digital */
 		val8 = r8712_read8(padapter, SYS_ISO_CTRL);
 		r8712_write8(padapter, SYS_ISO_CTRL, (val8 & 0xEE));
 		/* Switch to 40M clock */
@@ -281,14 +280,13 @@ u8 r8712_usb_hal_bus_init(struct _adapter *padapter)
 
 		if (PollingCnt <= 0) {
 			val8 = r8712_read8(padapter, CR);
-			r8712_write8(padapter, CR, val8 & (~_TXDMA_EN));
+			r8712_write8(padapter, CR, val8&(~_TXDMA_EN));
 			udelay(2); /* PlatformStallExecution(2); */
 			/* Reset TxDMA */
-			r8712_write8(padapter, CR, val8 | _TXDMA_EN);
+			r8712_write8(padapter, CR, val8|_TXDMA_EN);
 		}
-	} else {
+	} else
 		ret = _FAIL;
-	}
 	return ret;
 }
 

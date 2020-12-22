@@ -23,45 +23,45 @@
 
 #include "tmio_mmc.h"
 
-#ifdef CONFIG_PM_SLEEP
-static int tmio_mmc_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int tmio_mmc_suspend(struct platform_device *dev, pm_message_t state)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	const struct mfd_cell *cell = mfd_get_cell(pdev);
+	const struct mfd_cell *cell = mfd_get_cell(dev);
 	int ret;
 
-	ret = pm_runtime_force_suspend(dev);
+	ret = tmio_mmc_host_suspend(&dev->dev);
 
 	/* Tell MFD core it can disable us now.*/
 	if (!ret && cell->disable)
-		cell->disable(pdev);
+		cell->disable(dev);
 
 	return ret;
 }
 
-static int tmio_mmc_resume(struct device *dev)
+static int tmio_mmc_resume(struct platform_device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	const struct mfd_cell *cell = mfd_get_cell(pdev);
+	const struct mfd_cell *cell = mfd_get_cell(dev);
 	int ret = 0;
 
 	/* Tell the MFD core we are ready to be enabled */
 	if (cell->resume)
-		ret = cell->resume(pdev);
+		ret = cell->resume(dev);
 
 	if (!ret)
-		ret = pm_runtime_force_resume(dev);
+		ret = tmio_mmc_host_resume(&dev->dev);
 
 	return ret;
 }
+#else
+#define tmio_mmc_suspend NULL
+#define tmio_mmc_resume NULL
 #endif
 
-static int tmio_mmc_probe(struct platform_device *pdev)
+static int __devinit tmio_mmc_probe(struct platform_device *pdev)
 {
 	const struct mfd_cell *cell = mfd_get_cell(pdev);
 	struct tmio_mmc_data *pdata;
 	struct tmio_mmc_host *host;
-	struct resource *res;
 	int ret = -EINVAL, irq;
 
 	if (pdev->num_resources != 2)
@@ -84,27 +84,11 @@ static int tmio_mmc_probe(struct platform_device *pdev)
 			goto out;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		ret = -EINVAL;
-		goto cell_disable;
-	}
-
-	pdata->flags |= TMIO_MMC_HAVE_HIGH_REG;
-
-	host = tmio_mmc_host_alloc(pdev);
-	if (!host)
-		goto cell_disable;
-
-	/* SD control register space size is 0x200, 0x400 for bus_shift=1 */
-	host->bus_shift = resource_size(res) >> 10;
-
-	ret = tmio_mmc_host_probe(host, pdata);
+	ret = tmio_mmc_host_probe(&host, pdev, pdata);
 	if (ret)
-		goto host_free;
+		goto cell_disable;
 
-	ret = devm_request_irq(&pdev->dev, irq, tmio_mmc_irq,
-				IRQF_TRIGGER_FALLING,
+	ret = request_irq(irq, tmio_mmc_irq, IRQF_TRIGGER_FALLING,
 				dev_name(&pdev->dev), host);
 	if (ret)
 		goto host_remove;
@@ -116,8 +100,6 @@ static int tmio_mmc_probe(struct platform_device *pdev)
 
 host_remove:
 	tmio_mmc_host_remove(host);
-host_free:
-	tmio_mmc_host_free(host);
 cell_disable:
 	if (cell->disable)
 		cell->disable(pdev);
@@ -125,13 +107,16 @@ out:
 	return ret;
 }
 
-static int tmio_mmc_remove(struct platform_device *pdev)
+static int __devexit tmio_mmc_remove(struct platform_device *pdev)
 {
 	const struct mfd_cell *cell = mfd_get_cell(pdev);
 	struct mmc_host *mmc = platform_get_drvdata(pdev);
 
+	platform_set_drvdata(pdev, NULL);
+
 	if (mmc) {
 		struct tmio_mmc_host *host = mmc_priv(mmc);
+		free_irq(platform_get_irq(pdev, 0), host);
 		tmio_mmc_host_remove(host);
 		if (cell->disable)
 			cell->disable(pdev);
@@ -142,20 +127,15 @@ static int tmio_mmc_remove(struct platform_device *pdev)
 
 /* ------------------- device registration ----------------------- */
 
-static const struct dev_pm_ops tmio_mmc_dev_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(tmio_mmc_suspend, tmio_mmc_resume)
-	SET_RUNTIME_PM_OPS(tmio_mmc_host_runtime_suspend,
-			tmio_mmc_host_runtime_resume,
-			NULL)
-};
-
 static struct platform_driver tmio_mmc_driver = {
 	.driver = {
 		.name = "tmio-mmc",
-		.pm = &tmio_mmc_dev_pm_ops,
+		.owner = THIS_MODULE,
 	},
 	.probe = tmio_mmc_probe,
-	.remove = tmio_mmc_remove,
+	.remove = __devexit_p(tmio_mmc_remove),
+	.suspend = tmio_mmc_suspend,
+	.resume = tmio_mmc_resume,
 };
 
 module_platform_driver(tmio_mmc_driver);

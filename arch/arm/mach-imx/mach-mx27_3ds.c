@@ -36,18 +36,19 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
+#include <mach/hardware.h>
+#include <mach/common.h>
+#include <mach/iomux-mx27.h>
+#include <mach/ulpi.h>
+#include <mach/irqs.h>
+#include <mach/3ds_debugboard.h>
 
-#include "3ds_debugboard.h"
-#include "common.h"
 #include "devices-imx27.h"
-#include "ehci.h"
-#include "hardware.h"
-#include "iomux-mx27.h"
-#include "ulpi.h"
 
 #define SD1_EN_GPIO		IMX_GPIO_NR(2, 25)
 #define OTG_PHY_RESET_GPIO	IMX_GPIO_NR(2, 23)
 #define SPI2_SS0		IMX_GPIO_NR(4, 21)
+#define EXPIO_PARENT_INT	gpio_to_irq(IMX_GPIO_NR(3, 28))
 #define PMIC_INT		IMX_GPIO_NR(3, 14)
 #define SPI1_SS0		IMX_GPIO_NR(4, 28)
 #define SD1_CD			IMX_GPIO_NR(2, 26)
@@ -159,11 +160,6 @@ static const int mx27pdk_pins[] __initconst = {
 	PB21_PF_CSI_HSYNC,
 	CSI_PWRDWN | GPIO_GPIO | GPIO_OUT,
 	CSI_RESET | GPIO_GPIO | GPIO_OUT,
-	/* SSI4 */
-	PC16_PF_SSI4_FS,
-	PC17_PF_SSI4_RXD,
-	PC18_PF_SSI4_TXD,
-	PC19_PF_SSI4_CLK,
 };
 
 static struct gpio mx27_3ds_camera_gpios[] = {
@@ -245,18 +241,18 @@ static const struct fsl_usb2_platform_data otg_device_pdata __initconst = {
 	.phy_mode       = FSL_USB2_PHY_ULPI,
 };
 
-static bool otg_mode_host __initdata;
+static int otg_mode_host;
 
 static int __init mx27_3ds_otg_mode(char *options)
 {
 	if (!strcmp(options, "host"))
-		otg_mode_host = true;
+		otg_mode_host = 1;
 	else if (!strcmp(options, "device"))
-		otg_mode_host = false;
+		otg_mode_host = 0;
 	else
 		pr_info("otg_mode neither \"host\" nor \"device\". "
 			"Defaulting to device\n");
-	return 1;
+	return 0;
 }
 __setup("otg_mode=", mx27_3ds_otg_mode);
 
@@ -335,24 +331,13 @@ static struct mc13xxx_regulator_init_data mx27_3ds_regulators[] = {
 };
 
 /* MC13783 */
-static struct mc13xxx_codec_platform_data mx27_3ds_codec = {
-	.dac_ssi_port = MC13783_SSI1_PORT,
-	.adc_ssi_port = MC13783_SSI1_PORT,
-};
-
 static struct mc13xxx_platform_data mc13783_pdata = {
 	.regulators = {
 		.regulators = mx27_3ds_regulators,
 		.num_regulators = ARRAY_SIZE(mx27_3ds_regulators),
 
 	},
-	.flags  = MC13XXX_USE_TOUCHSCREEN | MC13XXX_USE_RTC |
-						MC13XXX_USE_CODEC,
-	.codec = &mx27_3ds_codec,
-};
-
-static struct imx_ssi_platform_data mx27_3ds_ssi_pdata = {
-	.flags = IMX_SSI_DMA | IMX_SSI_NET,
+	.flags  = MC13XXX_USE_TOUCHSCREEN | MC13XXX_USE_RTC,
 };
 
 /* SPI */
@@ -460,7 +445,7 @@ static struct spi_board_info mx27_3ds_spi_devs[] __initdata = {
 		.bus_num	= 1,
 		.chip_select	= 0, /* SS0 */
 		.platform_data	= &mc13783_pdata,
-		/* irq number is run-time assigned */
+		.irq = IMX_GPIO_TO_IRQ(PMIC_INT),
 		.mode = SPI_CS_HIGH,
 	}, {
 		.modalias	= "l4f00242t03",
@@ -485,32 +470,17 @@ static const struct imxi2c_platform_data mx27_3ds_i2c0_data __initconst = {
 
 static void __init mx27pdk_init(void)
 {
+	int ret;
 	imx27_soc_init();
 
 	mxc_gpio_setup_multiple_pins(mx27pdk_pins, ARRAY_SIZE(mx27pdk_pins),
 		"mx27pdk");
+	mx27_3ds_sdhc1_enable_level_translator();
 	imx27_add_imx_uart0(&uart_pdata);
 	imx27_add_fec(NULL);
 	imx27_add_imx_keypad(&mx27_3ds_keymap_data);
-	imx27_add_imx2_wdt();
-
-	imx27_add_spi_imx1(&spi2_pdata);
-	imx27_add_spi_imx0(&spi1_pdata);
-
-	imx27_add_imx_i2c(0, &mx27_3ds_i2c0_data);
-	platform_add_devices(devices, ARRAY_SIZE(devices));
-	imx27_add_imx_fb(&mx27_3ds_fb_data);
-
-	imx27_add_imx_ssi(0, &mx27_3ds_ssi_pdata);
-}
-
-static void __init mx27pdk_late_init(void)
-{
-	int ret;
-
-	mx27_3ds_sdhc1_enable_level_translator();
 	imx27_add_mxc_mmc(0, &sdhc1_pdata);
-
+	imx27_add_imx2_wdt(NULL);
 	otg_phy_init();
 
 	if (otg_mode_host) {
@@ -524,12 +494,16 @@ static void __init mx27pdk_late_init(void)
 	if (!otg_mode_host)
 		imx27_add_fsl_usb2_udc(&otg_device_pdata);
 
-	mx27_3ds_spi_devs[0].irq = gpio_to_irq(PMIC_INT);
+	imx27_add_spi_imx1(&spi2_pdata);
+	imx27_add_spi_imx0(&spi1_pdata);
 	spi_register_board_info(mx27_3ds_spi_devs,
-				ARRAY_SIZE(mx27_3ds_spi_devs));
+						ARRAY_SIZE(mx27_3ds_spi_devs));
 
-	if (mxc_expio_init(MX27_CS5_BASE_ADDR, IMX_GPIO_NR(3, 28)))
+	if (mxc_expio_init(MX27_CS5_BASE_ADDR, EXPIO_PARENT_INT))
 		pr_warn("Init of the debugboard failed, all devices on the debugboard are unusable.\n");
+	imx27_add_imx_i2c(0, &mx27_3ds_i2c0_data);
+	platform_add_devices(devices, ARRAY_SIZE(devices));
+	imx27_add_imx_fb(&mx27_3ds_fb_data);
 
 	ret = gpio_request_array(mx27_3ds_camera_gpios,
 				 ARRAY_SIZE(mx27_3ds_camera_gpios));
@@ -539,8 +513,6 @@ static void __init mx27pdk_late_init(void)
 	}
 
 	imx27_add_mx2_camera(&mx27_3ds_cam_pdata);
-
-	imx_add_platform_device("imx_mc13783", 0, NULL, 0, NULL, 0);
 }
 
 static void __init mx27pdk_timer_init(void)
@@ -548,14 +520,18 @@ static void __init mx27pdk_timer_init(void)
 	mx27_clocks_init(26000000);
 }
 
+static struct sys_timer mx27pdk_timer = {
+	.init	= mx27pdk_timer_init,
+};
+
 MACHINE_START(MX27_3DS, "Freescale MX27PDK")
 	/* maintainer: Freescale Semiconductor, Inc. */
 	.atag_offset = 0x100,
 	.map_io = mx27_map_io,
 	.init_early = imx27_init_early,
 	.init_irq = mx27_init_irq,
-	.init_time	= mx27pdk_timer_init,
+	.handle_irq = imx27_handle_irq,
+	.timer = &mx27pdk_timer,
 	.init_machine = mx27pdk_init,
-	.init_late	= mx27pdk_late_init,
 	.restart	= mxc_restart,
 MACHINE_END

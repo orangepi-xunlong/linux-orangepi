@@ -81,8 +81,8 @@ static struct x25_asy *x25_asy_alloc(void)
 		char name[IFNAMSIZ];
 		sprintf(name, "x25asy%d", i);
 
-		dev = alloc_netdev(sizeof(struct x25_asy), name,
-				   NET_NAME_UNKNOWN, x25_asy_setup);
+		dev = alloc_netdev(sizeof(struct x25_asy),
+				   name, x25_asy_setup);
 		if (!dev)
 			return NULL;
 
@@ -122,16 +122,13 @@ static int x25_asy_change_mtu(struct net_device *dev, int newmtu)
 {
 	struct x25_asy *sl = netdev_priv(dev);
 	unsigned char *xbuff, *rbuff;
-	int len;
+	int len = 2 * newmtu;
 
-	if (newmtu > 65534)
-		return -EINVAL;
-
-	len = 2 * newmtu;
 	xbuff = kmalloc(len + 4, GFP_ATOMIC);
 	rbuff = kmalloc(len + 4, GFP_ATOMIC);
 
 	if (xbuff == NULL || rbuff == NULL) {
+		netdev_warn(dev, "unable to grow X.25 buffers, MTU change cancelled\n");
 		kfree(xbuff);
 		kfree(rbuff);
 		return -ENOMEM;
@@ -234,7 +231,7 @@ static void x25_asy_encaps(struct x25_asy *sl, unsigned char *icp, int len)
 	}
 
 	p = icp;
-	count = x25_asy_esc(p, sl->xbuff, len);
+	count = x25_asy_esc(p, (unsigned char *) sl->xbuff, len);
 
 	/* Order of next two lines is *very* important.
 	 * When we are sending a little amount of data,
@@ -488,10 +485,8 @@ static int x25_asy_open(struct net_device *dev)
 
 	/* Cleanup */
 	kfree(sl->xbuff);
-	sl->xbuff = NULL;
 noxbuff:
 	kfree(sl->rbuff);
-	sl->rbuff = NULL;
 norbuff:
 	return -ENOMEM;
 }
@@ -573,10 +568,8 @@ static int x25_asy_open_tty(struct tty_struct *tty)
 
 	/* Perform the low-level X.25 async init */
 	err = x25_asy_open(sl->dev);
-	if (err) {
-		x25_asy_free(sl);
+	if (err)
 		return err;
-	}
 	/* Done.  We have linked the TTY line to a channel. */
 	return 0;
 }

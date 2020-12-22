@@ -29,7 +29,7 @@
 #include <asm/kdebug.h>
 #include <asm/inst.h>
 
-#define	 __ARCH_WANT_KPROBES_INSN_SLOT
+#define  __ARCH_WANT_KPROBES_INSN_SLOT
 
 struct kprobe;
 struct pt_regs;
@@ -40,8 +40,7 @@ typedef union mips_instruction kprobe_opcode_t;
 
 #define flush_insn_slot(p)						\
 do {									\
-	if (p->addr)							\
-		flush_icache_range((unsigned long)p->addr,		\
+	flush_icache_range((unsigned long)p->addr,			\
 			   (unsigned long)p->addr +			\
 			   (MAX_INSN_SIZE * sizeof(kprobe_opcode_t)));	\
 } while (0)

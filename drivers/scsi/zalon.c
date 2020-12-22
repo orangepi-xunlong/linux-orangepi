@@ -182,7 +182,7 @@ static struct parisc_driver zalon_driver = {
 	.name =		"zalon",
 	.id_table =	zalon_tbl,
 	.probe =	zalon_probe,
-	.remove =	zalon_remove,
+	.remove =	__devexit_p(zalon_remove),
 };
 
 static int __init zalon7xx_init(void)

@@ -29,28 +29,12 @@
 
 #ifndef __ASSEMBLY__
 
-#include "irammap.h"
-
 extern unsigned long __tegra_cpu_reset_handler_data[TEGRA_RESET_DATA_SIZE];
 
 void __tegra_cpu_reset_handler_start(void);
 void __tegra_cpu_reset_handler(void);
-void __tegra20_cpu1_resettable_status_offset(void);
 void __tegra_cpu_reset_handler_end(void);
-
-#ifdef CONFIG_PM_SLEEP
-#define tegra_cpu_lp1_mask \
-	(IO_ADDRESS(TEGRA_IRAM_BASE + TEGRA_IRAM_RESET_HANDLER_OFFSET + \
-	((u32)&__tegra_cpu_reset_handler_data[TEGRA_RESET_MASK_LP1] - \
-	 (u32)__tegra_cpu_reset_handler_start)))
-#define tegra_cpu_lp2_mask \
-	(IO_ADDRESS(TEGRA_IRAM_BASE + TEGRA_IRAM_RESET_HANDLER_OFFSET + \
-	((u32)&__tegra_cpu_reset_handler_data[TEGRA_RESET_MASK_LP2] - \
-	 (u32)__tegra_cpu_reset_handler_start)))
-#define tegra20_cpu1_resettable_status \
-	(IO_ADDRESS(TEGRA_IRAM_BASE + TEGRA_IRAM_RESET_HANDLER_OFFSET + \
-	 (u32)__tegra20_cpu1_resettable_status_offset))
-#endif
+void tegra_secondary_startup(void);
 
 #define tegra_cpu_reset_handler_offset \
 		((u32)__tegra_cpu_reset_handler - \

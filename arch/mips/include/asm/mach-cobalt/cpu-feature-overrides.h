@@ -14,6 +14,7 @@
 #define cpu_has_3k_cache	0
 #define cpu_has_4k_cache	1
 #define cpu_has_tx39_cache	0
+#define cpu_has_fpu		1
 #define cpu_has_32fpr		1
 #define cpu_has_counter		1
 #define cpu_has_watch		0
@@ -31,9 +32,9 @@
 #define cpu_scache_line_size()	0
 
 #ifdef CONFIG_64BIT
-#define cpu_has_llsc		0
+#define cpu_has_llsc            0
 #else
-#define cpu_has_llsc		1
+#define cpu_has_llsc            1
 #endif
 
 #define cpu_has_mips16		0
@@ -44,7 +45,6 @@
 #define cpu_has_ic_fills_f_dc	0
 #define cpu_icache_snoops_remote_store	0
 #define cpu_has_dsp		0
-#define cpu_has_dsp2		0
 #define cpu_has_mipsmt		0
 #define cpu_has_userlocal	0
 

@@ -279,6 +279,7 @@ static int uwbd(void *param)
 			HZ);
 		if (should_stop)
 			break;
+		try_to_freeze();
 
 		spin_lock_irqsave(&rc->uwbd.event_list_lock, flags);
 		if (!list_empty(&rc->uwbd.event_list)) {
@@ -302,22 +303,18 @@ static int uwbd(void *param)
 /** Start the UWB daemon */
 void uwbd_start(struct uwb_rc *rc)
 {
-	struct task_struct *task = kthread_run(uwbd, rc, "uwbd");
-	if (IS_ERR(task)) {
-		rc->uwbd.task = NULL;
+	rc->uwbd.task = kthread_run(uwbd, rc, "uwbd");
+	if (rc->uwbd.task == NULL)
 		printk(KERN_ERR "UWB: Cannot start management daemon; "
 		       "UWB won't work\n");
-	} else {
-		rc->uwbd.task = task;
+	else
 		rc->uwbd.pid = rc->uwbd.task->pid;
-	}
 }
 
 /* Stop the UWB daemon and free any unprocessed events */
 void uwbd_stop(struct uwb_rc *rc)
 {
-	if (rc->uwbd.task)
-		kthread_stop(rc->uwbd.task);
+	kthread_stop(rc->uwbd.task);
 	uwbd_flush(rc);
 }
 

@@ -8,7 +8,6 @@
  * By Greg Banks <gnb@melbourne.sgi.com>
  * Copyright (c) 2008 Silicon Graphics Inc.  All Rights Reserved.
  * Copyright (C) 2011 Bart Van Assche.  All Rights Reserved.
- * Copyright (C) 2013 Du, Changbin <changbin.du@gmail.com>
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ":%s: " fmt, __func__
@@ -25,8 +24,6 @@
 #include <linux/sysctl.h>
 #include <linux/ctype.h>
 #include <linux/string.h>
-#include <linux/parser.h>
-#include <linux/string_helpers.h>
 #include <linux/uaccess.h>
 #include <linux/dynamic_debug.h>
 #include <linux/debugfs.h>
@@ -42,7 +39,7 @@ extern struct _ddebug __stop___verbose[];
 
 struct ddebug_table {
 	struct list_head link;
-	const char *mod_name;
+	char *mod_name;
 	unsigned int num_ddebugs;
 	struct _ddebug *ddebugs;
 };
@@ -62,8 +59,15 @@ struct ddebug_iter {
 
 static DEFINE_MUTEX(ddebug_lock);
 static LIST_HEAD(ddebug_tables);
-static int verbose;
+static int verbose = 0;
 module_param(verbose, int, 0644);
+
+/* Return the last part of a pathname */
+static inline const char *basename(const char *path)
+{
+	const char *tail = strrchr(path, '/');
+	return tail ? tail+1 : path;
+}
 
 /* Return the path relative to source root */
 static inline const char *trim_prefix(const char *path)
@@ -103,31 +107,21 @@ static char *ddebug_describe_flags(struct _ddebug *dp, char *buf,
 	return buf;
 }
 
-#define vpr_info(fmt, ...)					\
-do {								\
-	if (verbose)						\
-		pr_info(fmt, ##__VA_ARGS__);			\
+#define vpr_info_dq(q, msg)						\
+do {									\
+	if (verbose)							\
+		/* trim last char off format print */			\
+		pr_info("%s: func=\"%s\" file=\"%s\" "			\
+			"module=\"%s\" format=\"%.*s\" "		\
+			"lineno=%u-%u",					\
+			msg,						\
+			q->function ? q->function : "",			\
+			q->filename ? q->filename : "",			\
+			q->module ? q->module : "",			\
+			(int)(q->format ? strlen(q->format) - 1 : 0),	\
+			q->format ? q->format : "",			\
+			q->first_lineno, q->last_lineno);		\
 } while (0)
-
-static void vpr_info_dq(const struct ddebug_query *query, const char *msg)
-{
-	/* trim any trailing newlines */
-	int fmtlen = 0;
-
-	if (query->format) {
-		fmtlen = strlen(query->format);
-		while (fmtlen && query->format[fmtlen - 1] == '\n')
-			fmtlen--;
-	}
-
-	vpr_info("%s: func=\"%s\" file=\"%s\" module=\"%s\" format=\"%.*s\" lineno=%u-%u\n",
-		 msg,
-		 query->function ? query->function : "",
-		 query->filename ? query->filename : "",
-		 query->module ? query->module : "",
-		 fmtlen, query->format ? query->format : "",
-		 query->first_lineno, query->last_lineno);
-}
 
 /*
  * Search the tables for _ddebug's which match the given `query' and
@@ -149,25 +143,22 @@ static int ddebug_change(const struct ddebug_query *query,
 	list_for_each_entry(dt, &ddebug_tables, link) {
 
 		/* match against the module name */
-		if (query->module &&
-		    !match_wildcard(query->module, dt->mod_name))
+		if (query->module && strcmp(query->module, dt->mod_name))
 			continue;
 
-		for (i = 0; i < dt->num_ddebugs; i++) {
+		for (i = 0 ; i < dt->num_ddebugs ; i++) {
 			struct _ddebug *dp = &dt->ddebugs[i];
 
 			/* match against the source filename */
 			if (query->filename &&
-			    !match_wildcard(query->filename, dp->filename) &&
-			    !match_wildcard(query->filename,
-					   kbasename(dp->filename)) &&
-			    !match_wildcard(query->filename,
-					   trim_prefix(dp->filename)))
+			    strcmp(query->filename, dp->filename) &&
+			    strcmp(query->filename, basename(dp->filename)) &&
+			    strcmp(query->filename, trim_prefix(dp->filename)))
 				continue;
 
 			/* match against the function */
 			if (query->function &&
-			    !match_wildcard(query->function, dp->function))
+			    strcmp(query->function, dp->function))
 				continue;
 
 			/* match against the format */
@@ -188,19 +179,13 @@ static int ddebug_change(const struct ddebug_query *query,
 			newflags = (dp->flags & mask) | flags;
 			if (newflags == dp->flags)
 				continue;
-#ifdef HAVE_JUMP_LABEL
-			if (dp->flags & _DPRINTK_FLAGS_PRINT) {
-				if (!(flags & _DPRINTK_FLAGS_PRINT))
-					static_branch_disable(&dp->key.dd_key_true);
-			} else if (flags & _DPRINTK_FLAGS_PRINT)
-				static_branch_enable(&dp->key.dd_key_true);
-#endif
 			dp->flags = newflags;
-			vpr_info("changed %s:%d [%s]%s =%s\n",
-				 trim_prefix(dp->filename), dp->lineno,
-				 dt->mod_name, dp->function,
-				 ddebug_describe_flags(dp, flagbuf,
-						       sizeof(flagbuf)));
+			if (verbose)
+				pr_info("changed %s:%d [%s]%s =%s\n",
+					trim_prefix(dp->filename), dp->lineno,
+					dt->mod_name, dp->function,
+					ddebug_describe_flags(dp, flagbuf,
+							sizeof(flagbuf)));
 		}
 	}
 	mutex_unlock(&ddebug_lock);
@@ -234,23 +219,19 @@ static int ddebug_tokenize(char *buf, char *words[], int maxwords)
 		/* find `end' of word, whitespace separated or quoted */
 		if (*buf == '"' || *buf == '\'') {
 			int quote = *buf++;
-			for (end = buf; *end && *end != quote; end++)
+			for (end = buf ; *end && *end != quote ; end++)
 				;
-			if (!*end) {
-				pr_err("unclosed quote: %s\n", buf);
+			if (!*end)
 				return -EINVAL;	/* unclosed quote */
-			}
 		} else {
-			for (end = buf; *end && !isspace(*end); end++)
+			for (end = buf ; *end && !isspace(*end) ; end++)
 				;
 			BUG_ON(end == buf);
 		}
 
 		/* `buf' is start of word, `end' is one past its end */
-		if (nwords == maxwords) {
-			pr_err("too many words, legal max <=%d\n", maxwords);
+		if (nwords == maxwords)
 			return -EINVAL;	/* ran out of words[] before bytes */
-		}
 		if (*end)
 			*end++ = '\0';	/* terminate the word */
 		words[nwords++] = buf;
@@ -260,7 +241,7 @@ static int ddebug_tokenize(char *buf, char *words[], int maxwords)
 	if (verbose) {
 		int i;
 		pr_info("split into words:");
-		for (i = 0; i < nwords; i++)
+		for (i = 0 ; i < nwords ; i++)
 			pr_cont(" \"%s\"", words[i]);
 		pr_cont("\n");
 	}
@@ -275,16 +256,56 @@ static int ddebug_tokenize(char *buf, char *words[], int maxwords)
  */
 static inline int parse_lineno(const char *str, unsigned int *val)
 {
+	char *end = NULL;
 	BUG_ON(str == NULL);
 	if (*str == '\0') {
 		*val = 0;
 		return 0;
 	}
-	if (kstrtouint(str, 10, val) < 0) {
-		pr_err("bad line-number: %s\n", str);
-		return -EINVAL;
+	*val = simple_strtoul(str, &end, 10);
+	return end == NULL || end == str || *end != '\0' ? -EINVAL : 0;
+}
+
+/*
+ * Undo octal escaping in a string, inplace.  This is useful to
+ * allow the user to express a query which matches a format
+ * containing embedded spaces.
+ */
+#define isodigit(c)		((c) >= '0' && (c) <= '7')
+static char *unescape(char *str)
+{
+	char *in = str;
+	char *out = str;
+
+	while (*in) {
+		if (*in == '\\') {
+			if (in[1] == '\\') {
+				*out++ = '\\';
+				in += 2;
+				continue;
+			} else if (in[1] == 't') {
+				*out++ = '\t';
+				in += 2;
+				continue;
+			} else if (in[1] == 'n') {
+				*out++ = '\n';
+				in += 2;
+				continue;
+			} else if (isodigit(in[1]) &&
+			         isodigit(in[2]) &&
+			         isodigit(in[3])) {
+				*out++ = ((in[1] - '0')<<6) |
+				          ((in[2] - '0')<<3) |
+				          (in[3] - '0');
+				in += 4;
+				continue;
+			}
+		}
+		*out++ = *in++;
 	}
-	return 0;
+	*out = '\0';
+
+	return str;
 }
 
 static int check_set(const char **dest, char *src, char *name)
@@ -293,8 +314,8 @@ static int check_set(const char **dest, char *src, char *name)
 
 	if (*dest) {
 		rc = -EINVAL;
-		pr_err("match-spec:%s val:%s overridden by %s\n",
-		       name, *dest, src);
+		pr_err("match-spec:%s val:%s overridden by %s",
+			name, *dest, src);
 	}
 	*dest = src;
 	return rc;
@@ -316,39 +337,31 @@ static int check_set(const char **dest, char *src, char *name)
  * Returns 0 on success, <0 on error.
  */
 static int ddebug_parse_query(char *words[], int nwords,
-			struct ddebug_query *query, const char *modname)
+			       struct ddebug_query *query)
 {
 	unsigned int i;
-	int rc = 0;
+	int rc;
 
 	/* check we have an even number of words */
-	if (nwords % 2 != 0) {
-		pr_err("expecting pairs of match-spec <value>\n");
+	if (nwords % 2 != 0)
 		return -EINVAL;
-	}
 	memset(query, 0, sizeof(*query));
 
-	if (modname)
-		/* support $modname.dyndbg=<multiple queries> */
-		query->module = modname;
-
-	for (i = 0; i < nwords; i += 2) {
-		if (!strcmp(words[i], "func")) {
+	for (i = 0 ; i < nwords ; i += 2) {
+		if (!strcmp(words[i], "func"))
 			rc = check_set(&query->function, words[i+1], "func");
-		} else if (!strcmp(words[i], "file")) {
+		else if (!strcmp(words[i], "file"))
 			rc = check_set(&query->filename, words[i+1], "file");
-		} else if (!strcmp(words[i], "module")) {
+		else if (!strcmp(words[i], "module"))
 			rc = check_set(&query->module, words[i+1], "module");
-		} else if (!strcmp(words[i], "format")) {
-			string_unescape_inplace(words[i+1], UNESCAPE_SPACE |
-							    UNESCAPE_OCTAL |
-							    UNESCAPE_SPECIAL);
-			rc = check_set(&query->format, words[i+1], "format");
-		} else if (!strcmp(words[i], "line")) {
+		else if (!strcmp(words[i], "format"))
+			rc = check_set(&query->format, unescape(words[i+1]),
+				"format");
+		else if (!strcmp(words[i], "line")) {
 			char *first = words[i+1];
 			char *last = strchr(first, '-');
 			if (query->first_lineno || query->last_lineno) {
-				pr_err("match-spec: line used 2x\n");
+				pr_err("match-spec:line given 2 times\n");
 				return -EINVAL;
 			}
 			if (last)
@@ -357,17 +370,9 @@ static int ddebug_parse_query(char *words[], int nwords,
 				return -EINVAL;
 			if (last) {
 				/* range <first>-<last> */
-				if (parse_lineno(last, &query->last_lineno) < 0)
-					return -EINVAL;
-
-				/* special case for last lineno not specified */
-				if (query->last_lineno == 0)
-					query->last_lineno = UINT_MAX;
-
-				if (query->last_lineno < query->first_lineno) {
-					pr_err("last-line:%d < 1st-line:%d\n",
-						query->last_lineno,
-						query->first_lineno);
+				if (parse_lineno(last, &query->last_lineno)
+				    < query->first_lineno) {
+					pr_err("last-line < 1st-line\n");
 					return -EINVAL;
 				}
 			} else {
@@ -403,24 +408,23 @@ static int ddebug_parse_flags(const char *str, unsigned int *flagsp,
 		op = *str++;
 		break;
 	default:
-		pr_err("bad flag-op %c, at start of %s\n", *str, str);
 		return -EINVAL;
 	}
-	vpr_info("op='%c'\n", op);
+	if (verbose)
+		pr_info("op='%c'\n", op);
 
-	for (; *str ; ++str) {
+	for ( ; *str ; ++str) {
 		for (i = ARRAY_SIZE(opt_array) - 1; i >= 0; i--) {
 			if (*str == opt_array[i].opt_char) {
 				flags |= opt_array[i].flag;
 				break;
 			}
 		}
-		if (i < 0) {
-			pr_err("unknown flag '%c' in \"%s\"\n", *str, str);
+		if (i < 0)
 			return -EINVAL;
-		}
 	}
-	vpr_info("flags=0x%x\n", flags);
+	if (verbose)
+		pr_info("flags=0x%x\n", flags);
 
 	/* calculate final *flagsp, *maskp according to mask and op */
 	switch (op) {
@@ -437,11 +441,12 @@ static int ddebug_parse_flags(const char *str, unsigned int *flagsp,
 		*flagsp = 0;
 		break;
 	}
-	vpr_info("*flagsp=0x%x *maskp=0x%x\n", *flagsp, *maskp);
+	if (verbose)
+		pr_info("*flagsp=0x%x *maskp=0x%x\n", *flagsp, *maskp);
 	return 0;
 }
 
-static int ddebug_exec_query(char *query_string, const char *modname)
+static int ddebug_exec_query(char *query_string)
 {
 	unsigned int flags = 0, mask = 0;
 	struct ddebug_query query;
@@ -450,22 +455,16 @@ static int ddebug_exec_query(char *query_string, const char *modname)
 	char *words[MAXWORDS];
 
 	nwords = ddebug_tokenize(query_string, words, MAXWORDS);
-	if (nwords <= 0) {
-		pr_err("tokenize failed\n");
+	if (nwords <= 0)
 		return -EINVAL;
-	}
-	/* check flags 1st (last arg) so query is pairs of spec,val */
-	if (ddebug_parse_flags(words[nwords-1], &flags, &mask)) {
-		pr_err("flags parse failed\n");
+	if (ddebug_parse_query(words, nwords-1, &query))
 		return -EINVAL;
-	}
-	if (ddebug_parse_query(words, nwords-1, &query, modname)) {
-		pr_err("query parse failed\n");
+	if (ddebug_parse_flags(words[nwords-1], &flags, &mask))
 		return -EINVAL;
-	}
+
 	/* actually go and implement the change */
 	nfound = ddebug_change(&query, flags, mask);
-	vpr_info_dq(&query, nfound ? "applied" : "no-match");
+	vpr_info_dq((&query), (nfound) ? "applied" : "no-match");
 
 	return nfound;
 }
@@ -474,7 +473,7 @@ static int ddebug_exec_query(char *query_string, const char *modname)
    last error or number of matching callsites.  Module name is either
    in param (for boot arg) or perhaps in query string.
 */
-static int ddebug_exec_queries(char *query, const char *modname)
+static int ddebug_exec_queries(char *query)
 {
 	char *split;
 	int i, errs = 0, exitcode = 0, rc, nfound = 0;
@@ -488,18 +487,18 @@ static int ddebug_exec_queries(char *query, const char *modname)
 		if (!query || !*query || *query == '#')
 			continue;
 
-		vpr_info("query %d: \"%s\"\n", i, query);
+		if (verbose)
+			pr_info("query %d: \"%s\"\n", i, query);
 
-		rc = ddebug_exec_query(query, modname);
+		rc = ddebug_exec_query(query);
 		if (rc < 0) {
 			errs++;
 			exitcode = rc;
-		} else {
+		} else
 			nfound += rc;
-		}
 		i++;
 	}
-	vpr_info("processed %d queries, with %d matches, %d errs\n",
+	pr_info("processed %d queries, with %d matches, %d errs\n",
 		 i, nfound, errs);
 
 	if (exitcode)
@@ -521,25 +520,25 @@ static char *dynamic_emit_prefix(const struct _ddebug *desc, char *buf)
 	int pos_after_tid;
 	int pos = 0;
 
-	*buf = '\0';
-
+	pos += snprintf(buf + pos, remaining(pos), "%s", KERN_DEBUG);
 	if (desc->flags & _DPRINTK_FLAGS_INCL_TID) {
 		if (in_interrupt())
-			pos += snprintf(buf + pos, remaining(pos), "<intr> ");
+			pos += snprintf(buf + pos, remaining(pos), "%s ",
+						"<intr>");
 		else
 			pos += snprintf(buf + pos, remaining(pos), "[%d] ",
-					task_pid_vnr(current));
+						task_pid_vnr(current));
 	}
 	pos_after_tid = pos;
 	if (desc->flags & _DPRINTK_FLAGS_INCL_MODNAME)
 		pos += snprintf(buf + pos, remaining(pos), "%s:",
-				desc->modname);
+					desc->modname);
 	if (desc->flags & _DPRINTK_FLAGS_INCL_FUNCNAME)
 		pos += snprintf(buf + pos, remaining(pos), "%s:",
-				desc->function);
+					desc->function);
 	if (desc->flags & _DPRINTK_FLAGS_INCL_LINENO)
 		pos += snprintf(buf + pos, remaining(pos), "%d:",
-				desc->lineno);
+					desc->lineno);
 	if (pos - pos_after_tid)
 		pos += snprintf(buf + pos, remaining(pos), " ");
 	if (pos >= PREFIX_SIZE)
@@ -548,9 +547,10 @@ static char *dynamic_emit_prefix(const struct _ddebug *desc, char *buf)
 	return buf;
 }
 
-void __dynamic_pr_debug(struct _ddebug *descriptor, const char *fmt, ...)
+int __dynamic_pr_debug(struct _ddebug *descriptor, const char *fmt, ...)
 {
 	va_list args;
+	int res;
 	struct va_format vaf;
 	char buf[PREFIX_SIZE];
 
@@ -558,79 +558,56 @@ void __dynamic_pr_debug(struct _ddebug *descriptor, const char *fmt, ...)
 	BUG_ON(!fmt);
 
 	va_start(args, fmt);
-
 	vaf.fmt = fmt;
 	vaf.va = &args;
-
-	printk(KERN_DEBUG "%s%pV", dynamic_emit_prefix(descriptor, buf), &vaf);
-
+	res = printk("%s%pV", dynamic_emit_prefix(descriptor, buf), &vaf);
 	va_end(args);
+
+	return res;
 }
 EXPORT_SYMBOL(__dynamic_pr_debug);
 
-void __dynamic_dev_dbg(struct _ddebug *descriptor,
+int __dynamic_dev_dbg(struct _ddebug *descriptor,
 		      const struct device *dev, const char *fmt, ...)
 {
 	struct va_format vaf;
 	va_list args;
+	int res;
+	char buf[PREFIX_SIZE];
 
 	BUG_ON(!descriptor);
 	BUG_ON(!fmt);
 
 	va_start(args, fmt);
-
 	vaf.fmt = fmt;
 	vaf.va = &args;
-
-	if (!dev) {
-		printk(KERN_DEBUG "(NULL device *): %pV", &vaf);
-	} else {
-		char buf[PREFIX_SIZE];
-
-		dev_printk_emit(LOGLEVEL_DEBUG, dev, "%s%s %s: %pV",
-				dynamic_emit_prefix(descriptor, buf),
-				dev_driver_string(dev), dev_name(dev),
-				&vaf);
-	}
-
+	res = __dev_printk(dynamic_emit_prefix(descriptor, buf), dev, &vaf);
 	va_end(args);
+
+	return res;
 }
 EXPORT_SYMBOL(__dynamic_dev_dbg);
 
 #ifdef CONFIG_NET
 
-void __dynamic_netdev_dbg(struct _ddebug *descriptor,
-			  const struct net_device *dev, const char *fmt, ...)
+int __dynamic_netdev_dbg(struct _ddebug *descriptor,
+		      const struct net_device *dev, const char *fmt, ...)
 {
 	struct va_format vaf;
 	va_list args;
+	int res;
+	char buf[PREFIX_SIZE];
 
 	BUG_ON(!descriptor);
 	BUG_ON(!fmt);
 
 	va_start(args, fmt);
-
 	vaf.fmt = fmt;
 	vaf.va = &args;
-
-	if (dev && dev->dev.parent) {
-		char buf[PREFIX_SIZE];
-
-		dev_printk_emit(LOGLEVEL_DEBUG, dev->dev.parent,
-				"%s%s %s %s%s: %pV",
-				dynamic_emit_prefix(descriptor, buf),
-				dev_driver_string(dev->dev.parent),
-				dev_name(dev->dev.parent),
-				netdev_name(dev), netdev_reg_state(dev),
-				&vaf);
-	} else if (dev) {
-		printk(KERN_DEBUG "%s%s: %pV", netdev_name(dev),
-		       netdev_reg_state(dev), &vaf);
-	} else {
-		printk(KERN_DEBUG "(NULL net_device): %pV", &vaf);
-	}
-
+	res = __netdev_printk(dynamic_emit_prefix(descriptor, buf), dev, &vaf);
 	va_end(args);
+
+	return res;
 }
 EXPORT_SYMBOL(__dynamic_netdev_dbg);
 
@@ -652,7 +629,7 @@ static __init int ddebug_setup_query(char *str)
 __setup("ddebug_query=", ddebug_setup_query);
 
 /*
- * File_ops->write method for <debugfs>/dynamic_debug/control.  Gathers the
+ * File_ops->write method for <debugfs>/dynamic_debug/conrol.  Gathers the
  * command text from userspace, parses and executes it.
  */
 #define USER_BUF_PAGE 4096
@@ -668,12 +645,18 @@ static ssize_t ddebug_proc_write(struct file *file, const char __user *ubuf,
 		pr_warn("expected <%d bytes into control\n", USER_BUF_PAGE);
 		return -E2BIG;
 	}
-	tmpbuf = memdup_user_nul(ubuf, len);
-	if (IS_ERR(tmpbuf))
-		return PTR_ERR(tmpbuf);
-	vpr_info("read %d bytes from userspace\n", (int)len);
+	tmpbuf = kmalloc(len + 1, GFP_KERNEL);
+	if (!tmpbuf)
+		return -ENOMEM;
+	if (copy_from_user(tmpbuf, ubuf, len)) {
+		kfree(tmpbuf);
+		return -EFAULT;
+	}
+	tmpbuf[len] = '\0';
+	if (verbose)
+		pr_info("read %d bytes from userspace\n", (int)len);
 
-	ret = ddebug_exec_queries(tmpbuf, NULL);
+	ret = ddebug_exec_queries(tmpbuf);
 	kfree(tmpbuf);
 	if (ret < 0)
 		return ret;
@@ -734,7 +717,8 @@ static void *ddebug_proc_start(struct seq_file *m, loff_t *pos)
 	struct _ddebug *dp;
 	int n = *pos;
 
-	vpr_info("called m=%p *pos=%lld\n", m, (unsigned long long)*pos);
+	if (verbose)
+		pr_info("called m=%p *pos=%lld\n", m, (unsigned long long)*pos);
 
 	mutex_lock(&ddebug_lock);
 
@@ -758,8 +742,9 @@ static void *ddebug_proc_next(struct seq_file *m, void *p, loff_t *pos)
 	struct ddebug_iter *iter = m->private;
 	struct _ddebug *dp;
 
-	vpr_info("called m=%p p=%p *pos=%lld\n",
-		 m, p, (unsigned long long)*pos);
+	if (verbose)
+		pr_info("called m=%p p=%p *pos=%lld\n",
+			m, p, (unsigned long long)*pos);
 
 	if (p == SEQ_START_TOKEN)
 		dp = ddebug_iter_first(iter);
@@ -781,18 +766,19 @@ static int ddebug_proc_show(struct seq_file *m, void *p)
 	struct _ddebug *dp = p;
 	char flagsbuf[10];
 
-	vpr_info("called m=%p p=%p\n", m, p);
+	if (verbose)
+		pr_info("called m=%p p=%p\n", m, p);
 
 	if (p == SEQ_START_TOKEN) {
 		seq_puts(m,
-			 "# filename:lineno [module]function flags format\n");
+			"# filename:lineno [module]function flags format\n");
 		return 0;
 	}
 
 	seq_printf(m, "%s:%u [%s]%s =%s \"",
-		   trim_prefix(dp->filename), dp->lineno,
-		   iter->table->mod_name, dp->function,
-		   ddebug_describe_flags(dp, flagsbuf, sizeof(flagsbuf)));
+		trim_prefix(dp->filename), dp->lineno,
+		iter->table->mod_name, dp->function,
+		ddebug_describe_flags(dp, flagsbuf, sizeof(flagsbuf)));
 	seq_escape(m, dp->format, "\t\r\n\"");
 	seq_puts(m, "\"\n");
 
@@ -805,7 +791,8 @@ static int ddebug_proc_show(struct seq_file *m, void *p)
  */
 static void ddebug_proc_stop(struct seq_file *m, void *p)
 {
-	vpr_info("called m=%p p=%p\n", m, p);
+	if (verbose)
+		pr_info("called m=%p p=%p\n", m, p);
 	mutex_unlock(&ddebug_lock);
 }
 
@@ -825,9 +812,23 @@ static const struct seq_operations ddebug_proc_seqops = {
  */
 static int ddebug_proc_open(struct inode *inode, struct file *file)
 {
-	vpr_info("called\n");
-	return seq_open_private(file, &ddebug_proc_seqops,
-				sizeof(struct ddebug_iter));
+	struct ddebug_iter *iter;
+	int err;
+
+	if (verbose)
+		pr_info("called\n");
+
+	iter = kzalloc(sizeof(*iter), GFP_KERNEL);
+	if (iter == NULL)
+		return -ENOMEM;
+
+	err = seq_open(file, &ddebug_proc_seqops);
+	if (err) {
+		kfree(iter);
+		return err;
+	}
+	((struct seq_file *) file->private_data)->private = iter;
+	return 0;
 }
 
 static const struct file_operations ddebug_proc_fops = {
@@ -847,12 +848,12 @@ int ddebug_add_module(struct _ddebug *tab, unsigned int n,
 			     const char *name)
 {
 	struct ddebug_table *dt;
-	const char *new_name;
+	char *new_name;
 
 	dt = kzalloc(sizeof(*dt), GFP_KERNEL);
 	if (dt == NULL)
 		return -ENOMEM;
-	new_name = kstrdup_const(name, GFP_KERNEL);
+	new_name = kstrdup(name, GFP_KERNEL);
 	if (new_name == NULL) {
 		kfree(dt);
 		return -ENOMEM;
@@ -865,55 +866,16 @@ int ddebug_add_module(struct _ddebug *tab, unsigned int n,
 	list_add_tail(&dt->link, &ddebug_tables);
 	mutex_unlock(&ddebug_lock);
 
-	vpr_info("%u debug prints in module %s\n", n, dt->mod_name);
+	if (verbose)
+		pr_info("%u debug prints in module %s\n", n, dt->mod_name);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ddebug_add_module);
 
-/* helper for ddebug_dyndbg_(boot|module)_param_cb */
-static int ddebug_dyndbg_param_cb(char *param, char *val,
-				const char *modname, int on_err)
-{
-	char *sep;
-
-	sep = strchr(param, '.');
-	if (sep) {
-		/* needed only for ddebug_dyndbg_boot_param_cb */
-		*sep = '\0';
-		modname = param;
-		param = sep + 1;
-	}
-	if (strcmp(param, "dyndbg"))
-		return on_err; /* determined by caller */
-
-	ddebug_exec_queries((val ? val : "+p"), modname);
-
-	return 0; /* query failure shouldnt stop module load */
-}
-
-/* handle both dyndbg and $module.dyndbg params at boot */
-static int ddebug_dyndbg_boot_param_cb(char *param, char *val,
-				const char *unused, void *arg)
-{
-	vpr_info("%s=\"%s\"\n", param, val);
-	return ddebug_dyndbg_param_cb(param, val, NULL, 0);
-}
-
-/*
- * modprobe foo finds foo.params in boot-args, strips "foo.", and
- * passes them to load_module().  This callback gets unknown params,
- * processes dyndbg params, rejects others.
- */
-int ddebug_dyndbg_module_param_cb(char *param, char *val, const char *module)
-{
-	vpr_info("module: %s %s=\"%s\"\n", module, param, val);
-	return ddebug_dyndbg_param_cb(param, val, module, -ENOENT);
-}
-
 static void ddebug_table_free(struct ddebug_table *dt)
 {
 	list_del_init(&dt->link);
-	kfree_const(dt->mod_name);
+	kfree(dt->mod_name);
 	kfree(dt);
 }
 
@@ -926,7 +888,8 @@ int ddebug_remove_module(const char *mod_name)
 	struct ddebug_table *dt, *nextdt;
 	int ret = -ENOENT;
 
-	vpr_info("removing module \"%s\"\n", mod_name);
+	if (verbose)
+		pr_info("removing module \"%s\"\n", mod_name);
 
 	mutex_lock(&ddebug_lock);
 	list_for_each_entry_safe(dt, nextdt, &ddebug_tables, link) {
@@ -977,28 +940,22 @@ static int __init dynamic_debug_init(void)
 {
 	struct _ddebug *iter, *iter_start;
 	const char *modname = NULL;
-	char *cmdline;
 	int ret = 0;
-	int n = 0, entries = 0, modct = 0;
-	int verbose_bytes = 0;
+	int n = 0;
 
 	if (__start___verbose == __stop___verbose) {
-		pr_warn("_ddebug table is empty in a CONFIG_DYNAMIC_DEBUG build\n");
+		pr_warn("_ddebug table is empty in a "
+			"CONFIG_DYNAMIC_DEBUG build");
 		return 1;
 	}
 	iter = __start___verbose;
 	modname = iter->modname;
 	iter_start = iter;
 	for (; iter < __stop___verbose; iter++) {
-		entries++;
-		verbose_bytes += strlen(iter->modname) + strlen(iter->function)
-			+ strlen(iter->filename) + strlen(iter->format);
-
 		if (strcmp(modname, iter->modname)) {
-			modct++;
 			ret = ddebug_add_module(iter_start, n, modname);
 			if (ret)
-				goto out_err;
+				goto out_free;
 			n = 0;
 			modname = iter->modname;
 			iter_start = iter;
@@ -1007,43 +964,29 @@ static int __init dynamic_debug_init(void)
 	}
 	ret = ddebug_add_module(iter_start, n, modname);
 	if (ret)
-		goto out_err;
+		goto out_free;
 
-	ddebug_init_success = 1;
-	vpr_info("%d modules, %d entries and %d bytes in ddebug tables, %d bytes in (readonly) verbose section\n",
-		 modct, entries, (int)(modct * sizeof(struct ddebug_table)),
-		 verbose_bytes + (int)(__stop___verbose - __start___verbose));
-
-	/* apply ddebug_query boot param, dont unload tables on err */
+	/* ddebug_query boot param got passed -> set it up */
 	if (ddebug_setup_string[0] != '\0') {
-		pr_warn("ddebug_query param name is deprecated, change it to dyndbg\n");
-		ret = ddebug_exec_queries(ddebug_setup_string, NULL);
+		ret = ddebug_exec_queries(ddebug_setup_string);
 		if (ret < 0)
-			pr_warn("Invalid ddebug boot param %s\n",
+			pr_warn("Invalid ddebug boot param %s",
 				ddebug_setup_string);
 		else
 			pr_info("%d changes by ddebug_query\n", ret);
-	}
-	/* now that ddebug tables are loaded, process all boot args
-	 * again to find and activate queries given in dyndbg params.
-	 * While this has already been done for known boot params, it
-	 * ignored the unknown ones (dyndbg in particular).  Reusing
-	 * parse_args avoids ad-hoc parsing.  This will also attempt
-	 * to activate queries for not-yet-loaded modules, which is
-	 * slightly noisy if verbose, but harmless.
-	 */
-	cmdline = kstrdup(saved_command_line, GFP_KERNEL);
-	parse_args("dyndbg params", cmdline, NULL,
-		   0, 0, 0, NULL, &ddebug_dyndbg_boot_param_cb);
-	kfree(cmdline);
-	return 0;
 
-out_err:
-	ddebug_remove_all_tables();
+		/* keep tables even on ddebug_query parse error */
+		ret = 0;
+	}
+
+out_free:
+	if (ret)
+		ddebug_remove_all_tables();
+	else
+		ddebug_init_success = 1;
 	return 0;
 }
 /* Allow early initialization for boot messages via boot param */
-early_initcall(dynamic_debug_init);
-
+arch_initcall(dynamic_debug_init);
 /* Debugfs setup must be done later */
-fs_initcall(dynamic_debug_init_debugfs);
+module_init(dynamic_debug_init_debugfs);

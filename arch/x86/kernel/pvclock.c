@@ -17,18 +17,56 @@
 
 #include <linux/kernel.h>
 #include <linux/percpu.h>
-#include <linux/notifier.h>
-#include <linux/sched.h>
-#include <linux/gfp.h>
-#include <linux/bootmem.h>
-#include <asm/fixmap.h>
 #include <asm/pvclock.h>
+
+/*
+ * These are perodically updated
+ *    xen: magic shared_info page
+ *    kvm: gpa registered via msr
+ * and then copied here.
+ */
+struct pvclock_shadow_time {
+	u64 tsc_timestamp;     /* TSC at last update of time vals.  */
+	u64 system_timestamp;  /* Time, in nanosecs, since boot.    */
+	u32 tsc_to_nsec_mul;
+	int tsc_shift;
+	u32 version;
+	u8  flags;
+};
 
 static u8 valid_flags __read_mostly = 0;
 
 void pvclock_set_flags(u8 flags)
 {
 	valid_flags = flags;
+}
+
+static u64 pvclock_get_nsec_offset(struct pvclock_shadow_time *shadow)
+{
+	u64 delta = native_read_tsc() - shadow->tsc_timestamp;
+	return pvclock_scale_delta(delta, shadow->tsc_to_nsec_mul,
+				   shadow->tsc_shift);
+}
+
+/*
+ * Reads a consistent set of time-base values from hypervisor,
+ * into a shadow data area.
+ */
+static unsigned pvclock_get_time_values(struct pvclock_shadow_time *dst,
+					struct pvclock_vcpu_time_info *src)
+{
+	do {
+		dst->version = src->version;
+		rmb();		/* fetch version before data */
+		dst->tsc_timestamp     = src->tsc_timestamp;
+		dst->system_timestamp  = src->system_time;
+		dst->tsc_to_nsec_mul   = src->tsc_to_system_mul;
+		dst->tsc_shift         = src->tsc_shift;
+		dst->flags             = src->flags;
+		rmb();		/* test version after fetching data */
+	} while ((src->version & 1) || (dst->version != src->version));
+
+	return dst->version;
 }
 
 unsigned long pvclock_tsc_khz(struct pvclock_vcpu_time_info *src)
@@ -43,14 +81,6 @@ unsigned long pvclock_tsc_khz(struct pvclock_vcpu_time_info *src)
 	return pv_tsc_khz;
 }
 
-void pvclock_touch_watchdogs(void)
-{
-	touch_softlockup_watchdog_sync();
-	clocksource_touch_watchdog();
-	rcu_cpu_stall_reset();
-	reset_hung_task_detector();
-}
-
 static atomic64_t last_value = ATOMIC64_INIT(0);
 
 void pvclock_resume(void)
@@ -58,39 +88,23 @@ void pvclock_resume(void)
 	atomic64_set(&last_value, 0);
 }
 
-u8 pvclock_read_flags(struct pvclock_vcpu_time_info *src)
-{
-	unsigned version;
-	u8 flags;
-
-	do {
-		version = pvclock_read_begin(src);
-		flags = src->flags;
-	} while (pvclock_read_retry(src, version));
-
-	return flags & valid_flags;
-}
-
 cycle_t pvclock_clocksource_read(struct pvclock_vcpu_time_info *src)
 {
+	struct pvclock_shadow_time shadow;
 	unsigned version;
-	cycle_t ret;
+	cycle_t ret, offset;
 	u64 last;
-	u8 flags;
 
 	do {
-		version = pvclock_read_begin(src);
-		ret = __pvclock_read_cycles(src, rdtsc_ordered());
-		flags = src->flags;
-	} while (pvclock_read_retry(src, version));
-
-	if (unlikely((flags & PVCLOCK_GUEST_STOPPED) != 0)) {
-		src->flags &= ~PVCLOCK_GUEST_STOPPED;
-		pvclock_touch_watchdogs();
-	}
+		version = pvclock_get_time_values(&shadow, src);
+		barrier();
+		offset = pvclock_get_nsec_offset(&shadow);
+		ret = shadow.system_timestamp + offset;
+		barrier();
+	} while (version != src->version);
 
 	if ((valid_flags & PVCLOCK_TSC_STABLE_BIT) &&
-		(flags & PVCLOCK_TSC_STABLE_BIT))
+		(shadow.flags & PVCLOCK_TSC_STABLE_BIT))
 		return ret;
 
 	/*

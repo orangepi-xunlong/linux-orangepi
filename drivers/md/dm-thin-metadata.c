@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2012 Red Hat, Inc.
+ * Copyright (C) 2011 Red Hat, Inc.
  *
  * This file is released under the GPL.
  */
@@ -76,19 +76,9 @@
 
 #define THIN_SUPERBLOCK_MAGIC 27022010
 #define THIN_SUPERBLOCK_LOCATION 0
-#define THIN_VERSION 2
+#define THIN_VERSION 1
 #define THIN_METADATA_CACHE_SIZE 64
 #define SECTOR_TO_BLOCK_SHIFT 3
-
-/*
- * For btree insert:
- *  3 for btree insert +
- *  2 for btree lookup used within space map
- * For btree remove:
- *  2 for shadow spine +
- *  4 for rebalance 3 child node
- */
-#define THIN_MAX_CONCURRENT_LOCKS 6
 
 /* This should be plenty */
 #define SPACE_MAP_ROOT_SIZE 128
@@ -182,32 +172,13 @@ struct dm_pool_metadata {
 
 	struct rw_semaphore root_lock;
 	uint32_t time;
+	int need_commit;
 	dm_block_t root;
 	dm_block_t details_root;
 	struct list_head thin_devices;
 	uint64_t trans_id;
 	unsigned long flags;
 	sector_t data_block_size;
-
-	/*
-	 * We reserve a section of the metadata for commit overhead.
-	 * All reported space does *not* include this.
-	 */
-	dm_block_t metadata_reserve;
-
-	/*
-	 * Set if a transaction has to be aborted but the attempt to roll back
-	 * to the previous (good) transaction failed.  The only pool metadata
-	 * operation possible in this state is the closing of the device.
-	 */
-	bool fail_io:1;
-
-	/*
-	 * Reading the space map roots can fail, so we read it into these
-	 * buffers before the superblock is locked and updated.
-	 */
-	__u8 data_space_map_root[SPACE_MAP_ROOT_SIZE];
-	__u8 metadata_space_map_root[SPACE_MAP_ROOT_SIZE];
 };
 
 struct dm_thin_device {
@@ -216,8 +187,7 @@ struct dm_thin_device {
 	dm_thin_id id;
 
 	int open_count;
-	bool changed:1;
-	bool aborted_with_changes:1;
+	int changed;
 	uint64_t mapped_blocks;
 	uint64_t transaction_id;
 	uint32_t creation_time;
@@ -296,7 +266,7 @@ static void unpack_block_time(uint64_t v, dm_block_t *b, uint32_t *t)
 	*t = v & ((1 << 24) - 1);
 }
 
-static void data_block_inc(void *context, const void *value_le)
+static void data_block_inc(void *context, void *value_le)
 {
 	struct dm_space_map *sm = context;
 	__le64 v_le;
@@ -308,7 +278,7 @@ static void data_block_inc(void *context, const void *value_le)
 	dm_sm_inc_block(sm, b);
 }
 
-static void data_block_dec(void *context, const void *value_le)
+static void data_block_dec(void *context, void *value_le)
 {
 	struct dm_space_map *sm = context;
 	__le64 v_le;
@@ -320,7 +290,7 @@ static void data_block_dec(void *context, const void *value_le)
 	dm_sm_dec_block(sm, b);
 }
 
-static int data_block_equal(void *context, const void *value1_le, const void *value2_le)
+static int data_block_equal(void *context, void *value1_le, void *value2_le)
 {
 	__le64 v1_le, v2_le;
 	uint64_t b1, b2;
@@ -334,7 +304,7 @@ static int data_block_equal(void *context, const void *value1_le, const void *va
 	return b1 == b2;
 }
 
-static void subtree_inc(void *context, const void *value)
+static void subtree_inc(void *context, void *value)
 {
 	struct dm_btree_info *info = context;
 	__le64 root_le;
@@ -345,7 +315,7 @@ static void subtree_inc(void *context, const void *value)
 	dm_tm_inc(info->tm, root);
 }
 
-static void subtree_dec(void *context, const void *value)
+static void subtree_dec(void *context, void *value)
 {
 	struct dm_btree_info *info = context;
 	__le64 root_le;
@@ -354,10 +324,10 @@ static void subtree_dec(void *context, const void *value)
 	memcpy(&root_le, value, sizeof(root_le));
 	root = le64_to_cpu(root_le);
 	if (dm_btree_del(info, root))
-		DMERR("btree delete failed");
+		DMERR("btree delete failed\n");
 }
 
-static int subtree_equal(void *context, const void *value1_le, const void *value2_le)
+static int subtree_equal(void *context, void *value1_le, void *value2_le)
 {
 	__le64 v1_le, v2_le;
 	memcpy(&v1_le, value1_le, sizeof(v1_le));
@@ -368,21 +338,7 @@ static int subtree_equal(void *context, const void *value1_le, const void *value
 
 /*----------------------------------------------------------------*/
 
-static int superblock_lock_zero(struct dm_pool_metadata *pmd,
-				struct dm_block **sblock)
-{
-	return dm_bm_write_lock_zero(pmd->bm, THIN_SUPERBLOCK_LOCATION,
-				     &sb_validator, sblock);
-}
-
-static int superblock_lock(struct dm_pool_metadata *pmd,
-			   struct dm_block **sblock)
-{
-	return dm_bm_write_lock(pmd->bm, THIN_SUPERBLOCK_LOCATION,
-				&sb_validator, sblock);
-}
-
-static int __superblock_all_zeroes(struct dm_block_manager *bm, int *result)
+static int superblock_all_zeroes(struct dm_block_manager *bm, int *result)
 {
 	int r;
 	unsigned i;
@@ -406,14 +362,75 @@ static int __superblock_all_zeroes(struct dm_block_manager *bm, int *result)
 		}
 	}
 
-	dm_bm_unlock(b);
-
-	return 0;
+	return dm_bm_unlock(b);
 }
 
-static void __setup_btree_details(struct dm_pool_metadata *pmd)
+static int init_pmd(struct dm_pool_metadata *pmd,
+		    struct dm_block_manager *bm,
+		    dm_block_t nr_blocks, int create)
 {
-	pmd->info.tm = pmd->tm;
+	int r;
+	struct dm_space_map *sm, *data_sm;
+	struct dm_transaction_manager *tm;
+	struct dm_block *sblock;
+
+	if (create) {
+		r = dm_tm_create_with_sm(bm, THIN_SUPERBLOCK_LOCATION,
+					 &sb_validator, &tm, &sm, &sblock);
+		if (r < 0) {
+			DMERR("tm_create_with_sm failed");
+			return r;
+		}
+
+		data_sm = dm_sm_disk_create(tm, nr_blocks);
+		if (IS_ERR(data_sm)) {
+			DMERR("sm_disk_create failed");
+			dm_tm_unlock(tm, sblock);
+			r = PTR_ERR(data_sm);
+			goto bad;
+		}
+	} else {
+		struct thin_disk_superblock *disk_super = NULL;
+		size_t space_map_root_offset =
+			offsetof(struct thin_disk_superblock, metadata_space_map_root);
+
+		r = dm_tm_open_with_sm(bm, THIN_SUPERBLOCK_LOCATION,
+				       &sb_validator, space_map_root_offset,
+				       SPACE_MAP_ROOT_SIZE, &tm, &sm, &sblock);
+		if (r < 0) {
+			DMERR("tm_open_with_sm failed");
+			return r;
+		}
+
+		disk_super = dm_block_data(sblock);
+		data_sm = dm_sm_disk_open(tm, disk_super->data_space_map_root,
+					  sizeof(disk_super->data_space_map_root));
+		if (IS_ERR(data_sm)) {
+			DMERR("sm_disk_open failed");
+			r = PTR_ERR(data_sm);
+			goto bad;
+		}
+	}
+
+
+	r = dm_tm_unlock(tm, sblock);
+	if (r < 0) {
+		DMERR("couldn't unlock superblock");
+		goto bad_data_sm;
+	}
+
+	pmd->bm = bm;
+	pmd->metadata_sm = sm;
+	pmd->data_sm = data_sm;
+	pmd->tm = tm;
+	pmd->nb_tm = dm_tm_create_non_blocking_clone(tm);
+	if (!pmd->nb_tm) {
+		DMERR("could not create clone tm");
+		r = -ENOMEM;
+		goto bad_data_sm;
+	}
+
+	pmd->info.tm = tm;
 	pmd->info.levels = 2;
 	pmd->info.value_type.context = pmd->data_sm;
 	pmd->info.value_type.size = sizeof(__le64);
@@ -424,15 +441,15 @@ static void __setup_btree_details(struct dm_pool_metadata *pmd)
 	memcpy(&pmd->nb_info, &pmd->info, sizeof(pmd->nb_info));
 	pmd->nb_info.tm = pmd->nb_tm;
 
-	pmd->tl_info.tm = pmd->tm;
+	pmd->tl_info.tm = tm;
 	pmd->tl_info.levels = 1;
-	pmd->tl_info.value_type.context = &pmd->bl_info;
+	pmd->tl_info.value_type.context = &pmd->info;
 	pmd->tl_info.value_type.size = sizeof(__le64);
 	pmd->tl_info.value_type.inc = subtree_inc;
 	pmd->tl_info.value_type.dec = subtree_dec;
 	pmd->tl_info.value_type.equal = subtree_equal;
 
-	pmd->bl_info.tm = pmd->tm;
+	pmd->bl_info.tm = tm;
 	pmd->bl_info.levels = 1;
 	pmd->bl_info.value_type.context = pmd->data_sm;
 	pmd->bl_info.value_type.size = sizeof(__le64);
@@ -440,290 +457,46 @@ static void __setup_btree_details(struct dm_pool_metadata *pmd)
 	pmd->bl_info.value_type.dec = data_block_dec;
 	pmd->bl_info.value_type.equal = data_block_equal;
 
-	pmd->details_info.tm = pmd->tm;
+	pmd->details_info.tm = tm;
 	pmd->details_info.levels = 1;
 	pmd->details_info.value_type.context = NULL;
 	pmd->details_info.value_type.size = sizeof(struct disk_device_details);
 	pmd->details_info.value_type.inc = NULL;
 	pmd->details_info.value_type.dec = NULL;
 	pmd->details_info.value_type.equal = NULL;
-}
 
-static int save_sm_roots(struct dm_pool_metadata *pmd)
-{
-	int r;
-	size_t len;
+	pmd->root = 0;
 
-	r = dm_sm_root_size(pmd->metadata_sm, &len);
-	if (r < 0)
-		return r;
-
-	r = dm_sm_copy_root(pmd->metadata_sm, &pmd->metadata_space_map_root, len);
-	if (r < 0)
-		return r;
-
-	r = dm_sm_root_size(pmd->data_sm, &len);
-	if (r < 0)
-		return r;
-
-	return dm_sm_copy_root(pmd->data_sm, &pmd->data_space_map_root, len);
-}
-
-static void copy_sm_roots(struct dm_pool_metadata *pmd,
-			  struct thin_disk_superblock *disk)
-{
-	memcpy(&disk->metadata_space_map_root,
-	       &pmd->metadata_space_map_root,
-	       sizeof(pmd->metadata_space_map_root));
-
-	memcpy(&disk->data_space_map_root,
-	       &pmd->data_space_map_root,
-	       sizeof(pmd->data_space_map_root));
-}
-
-static int __write_initial_superblock(struct dm_pool_metadata *pmd)
-{
-	int r;
-	struct dm_block *sblock;
-	struct thin_disk_superblock *disk_super;
-	sector_t bdev_size = i_size_read(pmd->bdev->bd_inode) >> SECTOR_SHIFT;
-
-	if (bdev_size > THIN_METADATA_MAX_SECTORS)
-		bdev_size = THIN_METADATA_MAX_SECTORS;
-
-	r = dm_sm_commit(pmd->data_sm);
-	if (r < 0)
-		return r;
-
-	r = dm_tm_pre_commit(pmd->tm);
-	if (r < 0)
-		return r;
-
-	r = save_sm_roots(pmd);
-	if (r < 0)
-		return r;
-
-	r = superblock_lock_zero(pmd, &sblock);
-	if (r)
-		return r;
-
-	disk_super = dm_block_data(sblock);
-	disk_super->flags = 0;
-	memset(disk_super->uuid, 0, sizeof(disk_super->uuid));
-	disk_super->magic = cpu_to_le64(THIN_SUPERBLOCK_MAGIC);
-	disk_super->version = cpu_to_le32(THIN_VERSION);
-	disk_super->time = 0;
-	disk_super->trans_id = 0;
-	disk_super->held_root = 0;
-
-	copy_sm_roots(pmd, disk_super);
-
-	disk_super->data_mapping_root = cpu_to_le64(pmd->root);
-	disk_super->device_details_root = cpu_to_le64(pmd->details_root);
-	disk_super->metadata_block_size = cpu_to_le32(THIN_METADATA_BLOCK_SIZE);
-	disk_super->metadata_nr_blocks = cpu_to_le64(bdev_size >> SECTOR_TO_BLOCK_SHIFT);
-	disk_super->data_block_size = cpu_to_le32(pmd->data_block_size);
-
-	return dm_tm_commit(pmd->tm, sblock);
-}
-
-static int __format_metadata(struct dm_pool_metadata *pmd)
-{
-	int r;
-
-	r = dm_tm_create_with_sm(pmd->bm, THIN_SUPERBLOCK_LOCATION,
-				 &pmd->tm, &pmd->metadata_sm);
-	if (r < 0) {
-		DMERR("tm_create_with_sm failed");
-		return r;
-	}
-
-	pmd->data_sm = dm_sm_disk_create(pmd->tm, 0);
-	if (IS_ERR(pmd->data_sm)) {
-		DMERR("sm_disk_create failed");
-		r = PTR_ERR(pmd->data_sm);
-		goto bad_cleanup_tm;
-	}
-
-	pmd->nb_tm = dm_tm_create_non_blocking_clone(pmd->tm);
-	if (!pmd->nb_tm) {
-		DMERR("could not create non-blocking clone tm");
-		r = -ENOMEM;
-		goto bad_cleanup_data_sm;
-	}
-
-	__setup_btree_details(pmd);
-
-	r = dm_btree_empty(&pmd->info, &pmd->root);
-	if (r < 0)
-		goto bad_cleanup_nb_tm;
-
-	r = dm_btree_empty(&pmd->details_info, &pmd->details_root);
-	if (r < 0) {
-		DMERR("couldn't create devices root");
-		goto bad_cleanup_nb_tm;
-	}
-
-	r = __write_initial_superblock(pmd);
-	if (r)
-		goto bad_cleanup_nb_tm;
+	init_rwsem(&pmd->root_lock);
+	pmd->time = 0;
+	pmd->need_commit = 0;
+	pmd->details_root = 0;
+	pmd->trans_id = 0;
+	pmd->flags = 0;
+	INIT_LIST_HEAD(&pmd->thin_devices);
 
 	return 0;
 
-bad_cleanup_nb_tm:
-	dm_tm_destroy(pmd->nb_tm);
-bad_cleanup_data_sm:
-	dm_sm_destroy(pmd->data_sm);
-bad_cleanup_tm:
-	dm_tm_destroy(pmd->tm);
-	dm_sm_destroy(pmd->metadata_sm);
+bad_data_sm:
+	dm_sm_destroy(data_sm);
+bad:
+	dm_tm_destroy(tm);
+	dm_sm_destroy(sm);
 
 	return r;
-}
-
-static int __check_incompat_features(struct thin_disk_superblock *disk_super,
-				     struct dm_pool_metadata *pmd)
-{
-	uint32_t features;
-
-	features = le32_to_cpu(disk_super->incompat_flags) & ~THIN_FEATURE_INCOMPAT_SUPP;
-	if (features) {
-		DMERR("could not access metadata due to unsupported optional features (%lx).",
-		      (unsigned long)features);
-		return -EINVAL;
-	}
-
-	/*
-	 * Check for read-only metadata to skip the following RDWR checks.
-	 */
-	if (get_disk_ro(pmd->bdev->bd_disk))
-		return 0;
-
-	features = le32_to_cpu(disk_super->compat_ro_flags) & ~THIN_FEATURE_COMPAT_RO_SUPP;
-	if (features) {
-		DMERR("could not access metadata RDWR due to unsupported optional features (%lx).",
-		      (unsigned long)features);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int __open_metadata(struct dm_pool_metadata *pmd)
-{
-	int r;
-	struct dm_block *sblock;
-	struct thin_disk_superblock *disk_super;
-
-	r = dm_bm_read_lock(pmd->bm, THIN_SUPERBLOCK_LOCATION,
-			    &sb_validator, &sblock);
-	if (r < 0) {
-		DMERR("couldn't read superblock");
-		return r;
-	}
-
-	disk_super = dm_block_data(sblock);
-
-	/* Verify the data block size hasn't changed */
-	if (le32_to_cpu(disk_super->data_block_size) != pmd->data_block_size) {
-		DMERR("changing the data block size (from %u to %llu) is not supported",
-		      le32_to_cpu(disk_super->data_block_size),
-		      (unsigned long long)pmd->data_block_size);
-		r = -EINVAL;
-		goto bad_unlock_sblock;
-	}
-
-	r = __check_incompat_features(disk_super, pmd);
-	if (r < 0)
-		goto bad_unlock_sblock;
-
-	r = dm_tm_open_with_sm(pmd->bm, THIN_SUPERBLOCK_LOCATION,
-			       disk_super->metadata_space_map_root,
-			       sizeof(disk_super->metadata_space_map_root),
-			       &pmd->tm, &pmd->metadata_sm);
-	if (r < 0) {
-		DMERR("tm_open_with_sm failed");
-		goto bad_unlock_sblock;
-	}
-
-	pmd->data_sm = dm_sm_disk_open(pmd->tm, disk_super->data_space_map_root,
-				       sizeof(disk_super->data_space_map_root));
-	if (IS_ERR(pmd->data_sm)) {
-		DMERR("sm_disk_open failed");
-		r = PTR_ERR(pmd->data_sm);
-		goto bad_cleanup_tm;
-	}
-
-	pmd->nb_tm = dm_tm_create_non_blocking_clone(pmd->tm);
-	if (!pmd->nb_tm) {
-		DMERR("could not create non-blocking clone tm");
-		r = -ENOMEM;
-		goto bad_cleanup_data_sm;
-	}
-
-	__setup_btree_details(pmd);
-	dm_bm_unlock(sblock);
-
-	return 0;
-
-bad_cleanup_data_sm:
-	dm_sm_destroy(pmd->data_sm);
-bad_cleanup_tm:
-	dm_tm_destroy(pmd->tm);
-	dm_sm_destroy(pmd->metadata_sm);
-bad_unlock_sblock:
-	dm_bm_unlock(sblock);
-
-	return r;
-}
-
-static int __open_or_format_metadata(struct dm_pool_metadata *pmd, bool format_device)
-{
-	int r, unformatted;
-
-	r = __superblock_all_zeroes(pmd->bm, &unformatted);
-	if (r)
-		return r;
-
-	if (unformatted)
-		return format_device ? __format_metadata(pmd) : -EPERM;
-
-	return __open_metadata(pmd);
-}
-
-static int __create_persistent_data_objects(struct dm_pool_metadata *pmd, bool format_device)
-{
-	int r;
-
-	pmd->bm = dm_block_manager_create(pmd->bdev, THIN_METADATA_BLOCK_SIZE << SECTOR_SHIFT,
-					  THIN_METADATA_CACHE_SIZE,
-					  THIN_MAX_CONCURRENT_LOCKS);
-	if (IS_ERR(pmd->bm)) {
-		DMERR("could not create block manager");
-		return PTR_ERR(pmd->bm);
-	}
-
-	r = __open_or_format_metadata(pmd, format_device);
-	if (r)
-		dm_block_manager_destroy(pmd->bm);
-
-	return r;
-}
-
-static void __destroy_persistent_data_objects(struct dm_pool_metadata *pmd)
-{
-	dm_sm_destroy(pmd->data_sm);
-	dm_sm_destroy(pmd->metadata_sm);
-	dm_tm_destroy(pmd->nb_tm);
-	dm_tm_destroy(pmd->tm);
-	dm_block_manager_destroy(pmd->bm);
 }
 
 static int __begin_transaction(struct dm_pool_metadata *pmd)
 {
 	int r;
+	u32 features;
 	struct thin_disk_superblock *disk_super;
 	struct dm_block *sblock;
+
+	/*
+	 * __maybe_commit_transaction() resets these
+	 */
+	WARN_ON(pmd->need_commit);
 
 	/*
 	 * We re-read the superblock every time.  Shouldn't need to do this
@@ -742,8 +515,32 @@ static int __begin_transaction(struct dm_pool_metadata *pmd)
 	pmd->flags = le32_to_cpu(disk_super->flags);
 	pmd->data_block_size = le32_to_cpu(disk_super->data_block_size);
 
+	features = le32_to_cpu(disk_super->incompat_flags) & ~THIN_FEATURE_INCOMPAT_SUPP;
+	if (features) {
+		DMERR("could not access metadata due to "
+		      "unsupported optional features (%lx).",
+		      (unsigned long)features);
+		r = -EINVAL;
+		goto out;
+	}
+
+	/*
+	 * Check for read-only metadata to skip the following RDWR checks.
+	 */
+	if (get_disk_ro(pmd->bdev->bd_disk))
+		goto out;
+
+	features = le32_to_cpu(disk_super->compat_ro_flags) & ~THIN_FEATURE_COMPAT_RO_SUPP;
+	if (features) {
+		DMERR("could not access metadata RDWR due to "
+		      "unsupported optional features (%lx).",
+		      (unsigned long)features);
+		r = -EINVAL;
+	}
+
+out:
 	dm_bm_unlock(sblock);
-	return 0;
+	return r;
 }
 
 static int __write_changed_details(struct dm_pool_metadata *pmd)
@@ -776,6 +573,8 @@ static int __write_changed_details(struct dm_pool_metadata *pmd)
 			list_del(&td->list);
 			kfree(td);
 		}
+
+		pmd->need_commit = 1;
 	}
 
 	return 0;
@@ -783,6 +582,9 @@ static int __write_changed_details(struct dm_pool_metadata *pmd)
 
 static int __commit_transaction(struct dm_pool_metadata *pmd)
 {
+	/*
+	 * FIXME: Associated pool should be made read-only on failure.
+	 */
 	int r;
 	size_t metadata_len, data_len;
 	struct thin_disk_superblock *disk_super;
@@ -795,31 +597,31 @@ static int __commit_transaction(struct dm_pool_metadata *pmd)
 
 	r = __write_changed_details(pmd);
 	if (r < 0)
-		return r;
+		goto out;
+
+	if (!pmd->need_commit)
+		goto out;
 
 	r = dm_sm_commit(pmd->data_sm);
 	if (r < 0)
-		return r;
+		goto out;
 
 	r = dm_tm_pre_commit(pmd->tm);
 	if (r < 0)
-		return r;
+		goto out;
 
 	r = dm_sm_root_size(pmd->metadata_sm, &metadata_len);
 	if (r < 0)
-		return r;
+		goto out;
 
 	r = dm_sm_root_size(pmd->data_sm, &data_len);
 	if (r < 0)
-		return r;
+		goto out;
 
-	r = save_sm_roots(pmd);
-	if (r < 0)
-		return r;
-
-	r = superblock_lock(pmd, &sblock);
+	r = dm_bm_write_lock(pmd->bm, THIN_SUPERBLOCK_LOCATION,
+			     &sb_validator, &sblock);
 	if (r)
-		return r;
+		goto out;
 
 	disk_super = dm_block_data(sblock);
 	disk_super->time = cpu_to_le32(pmd->time);
@@ -828,31 +630,38 @@ static int __commit_transaction(struct dm_pool_metadata *pmd)
 	disk_super->trans_id = cpu_to_le64(pmd->trans_id);
 	disk_super->flags = cpu_to_le32(pmd->flags);
 
-	copy_sm_roots(pmd, disk_super);
+	r = dm_sm_copy_root(pmd->metadata_sm, &disk_super->metadata_space_map_root,
+			    metadata_len);
+	if (r < 0)
+		goto out_locked;
 
-	return dm_tm_commit(pmd->tm, sblock);
-}
+	r = dm_sm_copy_root(pmd->data_sm, &disk_super->data_space_map_root,
+			    data_len);
+	if (r < 0)
+		goto out_locked;
 
-static void __set_metadata_reserve(struct dm_pool_metadata *pmd)
-{
-	int r;
-	dm_block_t total;
-	dm_block_t max_blocks = 4096; /* 16M */
+	r = dm_tm_commit(pmd->tm, sblock);
+	if (!r)
+		pmd->need_commit = 0;
 
-	r = dm_sm_get_nr_blocks(pmd->metadata_sm, &total);
-	if (r) {
-		DMERR("could not get size of metadata device");
-		pmd->metadata_reserve = max_blocks;
-	} else
-		pmd->metadata_reserve = min(max_blocks, div_u64(total, 10));
+out:
+	return r;
+
+out_locked:
+	dm_bm_unlock(sblock);
+	return r;
 }
 
 struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
-					       sector_t data_block_size,
-					       bool format_device)
+					       sector_t data_block_size)
 {
 	int r;
+	struct thin_disk_superblock *disk_super;
 	struct dm_pool_metadata *pmd;
+	sector_t bdev_size = i_size_read(bdev->bd_inode) >> SECTOR_SHIFT;
+	struct dm_block_manager *bm;
+	int create;
+	struct dm_block *sblock;
 
 	pmd = kmalloc(sizeof(*pmd), GFP_KERNEL);
 	if (!pmd) {
@@ -860,29 +669,90 @@ struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
 		return ERR_PTR(-ENOMEM);
 	}
 
-	init_rwsem(&pmd->root_lock);
-	pmd->time = 0;
-	INIT_LIST_HEAD(&pmd->thin_devices);
-	pmd->fail_io = false;
-	pmd->bdev = bdev;
-	pmd->data_block_size = data_block_size;
+	/*
+	 * Max hex locks:
+	 *  3 for btree insert +
+	 *  2 for btree lookup used within space map
+	 */
+	bm = dm_block_manager_create(bdev, THIN_METADATA_BLOCK_SIZE,
+				     THIN_METADATA_CACHE_SIZE, 5);
+	if (!bm) {
+		DMERR("could not create block manager");
+		kfree(pmd);
+		return ERR_PTR(-ENOMEM);
+	}
 
-	r = __create_persistent_data_objects(pmd, format_device);
+	r = superblock_all_zeroes(bm, &create);
 	if (r) {
+		dm_block_manager_destroy(bm);
 		kfree(pmd);
 		return ERR_PTR(r);
 	}
 
-	r = __begin_transaction(pmd);
-	if (r < 0) {
-		if (dm_pool_metadata_close(pmd) < 0)
-			DMWARN("%s: dm_pool_metadata_close() failed.", __func__);
+
+	r = init_pmd(pmd, bm, 0, create);
+	if (r) {
+		dm_block_manager_destroy(bm);
+		kfree(pmd);
 		return ERR_PTR(r);
 	}
+	pmd->bdev = bdev;
 
-	__set_metadata_reserve(pmd);
+	if (!create) {
+		r = __begin_transaction(pmd);
+		if (r < 0)
+			goto bad;
+		return pmd;
+	}
+
+	/*
+	 * Create.
+	 */
+	r = dm_bm_write_lock(pmd->bm, THIN_SUPERBLOCK_LOCATION,
+			     &sb_validator, &sblock);
+	if (r)
+		goto bad;
+
+	if (bdev_size > THIN_METADATA_MAX_SECTORS)
+		bdev_size = THIN_METADATA_MAX_SECTORS;
+
+	disk_super = dm_block_data(sblock);
+	disk_super->magic = cpu_to_le64(THIN_SUPERBLOCK_MAGIC);
+	disk_super->version = cpu_to_le32(THIN_VERSION);
+	disk_super->time = 0;
+	disk_super->metadata_block_size = cpu_to_le32(THIN_METADATA_BLOCK_SIZE >> SECTOR_SHIFT);
+	disk_super->metadata_nr_blocks = cpu_to_le64(bdev_size >> SECTOR_TO_BLOCK_SHIFT);
+	disk_super->data_block_size = cpu_to_le32(data_block_size);
+
+	r = dm_bm_unlock(sblock);
+	if (r < 0)
+		goto bad;
+
+	r = dm_btree_empty(&pmd->info, &pmd->root);
+	if (r < 0)
+		goto bad;
+
+	r = dm_btree_empty(&pmd->details_info, &pmd->details_root);
+	if (r < 0) {
+		DMERR("couldn't create devices root");
+		goto bad;
+	}
+
+	pmd->flags = 0;
+	pmd->need_commit = 1;
+	r = dm_pool_commit_metadata(pmd);
+	if (r < 0) {
+		DMERR("%s: dm_pool_commit_metadata() failed, error = %d",
+		      __func__, r);
+		goto bad;
+	}
 
 	return pmd;
+
+bad:
+	if (dm_pool_metadata_close(pmd) < 0)
+		DMWARN("%s: dm_pool_metadata_close() failed.", __func__);
+	return ERR_PTR(r);
 }
 
 int dm_pool_metadata_close(struct dm_pool_metadata *pmd)
@@ -908,17 +778,18 @@ int dm_pool_metadata_close(struct dm_pool_metadata *pmd)
 		return -EBUSY;
 	}
 
-	if (!dm_bm_is_read_only(pmd->bm) && !pmd->fail_io) {
-		r = __commit_transaction(pmd);
-		if (r < 0)
-			DMWARN("%s: __commit_transaction() failed, error = %d",
-			       __func__, r);
-	}
+	r = __commit_transaction(pmd);
+	if (r < 0)
+		DMWARN("%s: __commit_transaction() failed, error = %d",
+		       __func__, r);
 
-	if (!pmd->fail_io)
-		__destroy_persistent_data_objects(pmd);
-
+	dm_tm_destroy(pmd->tm);
+	dm_tm_destroy(pmd->nb_tm);
+	dm_block_manager_destroy(pmd->bm);
+	dm_sm_destroy(pmd->metadata_sm);
+	dm_sm_destroy(pmd->data_sm);
 	kfree(pmd);
+
 	return 0;
 }
 
@@ -979,7 +850,6 @@ static int __open_device(struct dm_pool_metadata *pmd,
 	(*td)->id = dev;
 	(*td)->open_count = 1;
 	(*td)->changed = changed;
-	(*td)->aborted_with_changes = false;
 	(*td)->mapped_blocks = le64_to_cpu(details_le.mapped_blocks);
 	(*td)->transaction_id = le64_to_cpu(details_le.transaction_id);
 	(*td)->creation_time = le32_to_cpu(details_le.creation_time);
@@ -1041,11 +911,10 @@ static int __create_thin(struct dm_pool_metadata *pmd,
 
 int dm_pool_create_thin(struct dm_pool_metadata *pmd, dm_thin_id dev)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __create_thin(pmd, dev);
+	r = __create_thin(pmd, dev);
 	up_write(&pmd->root_lock);
 
 	return r;
@@ -1132,11 +1001,10 @@ int dm_pool_create_snap(struct dm_pool_metadata *pmd,
 				 dm_thin_id dev,
 				 dm_thin_id origin)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __create_snap(pmd, dev, origin);
+	r = __create_snap(pmd, dev, origin);
 	up_write(&pmd->root_lock);
 
 	return r;
@@ -1169,17 +1037,18 @@ static int __delete_device(struct dm_pool_metadata *pmd, dm_thin_id dev)
 	if (r)
 		return r;
 
+	pmd->need_commit = 1;
+
 	return 0;
 }
 
 int dm_pool_delete_thin_device(struct dm_pool_metadata *pmd,
 			       dm_thin_id dev)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __delete_device(pmd, dev);
+	r = __delete_device(pmd, dev);
 	up_write(&pmd->root_lock);
 
 	return r;
@@ -1189,195 +1058,55 @@ int dm_pool_set_metadata_transaction_id(struct dm_pool_metadata *pmd,
 					uint64_t current_id,
 					uint64_t new_id)
 {
-	int r = -EINVAL;
-
 	down_write(&pmd->root_lock);
-
-	if (pmd->fail_io)
-		goto out;
-
 	if (pmd->trans_id != current_id) {
+		up_write(&pmd->root_lock);
 		DMERR("mismatched transaction id");
-		goto out;
+		return -EINVAL;
 	}
 
 	pmd->trans_id = new_id;
-	r = 0;
-
-out:
+	pmd->need_commit = 1;
 	up_write(&pmd->root_lock);
 
-	return r;
+	return 0;
 }
 
 int dm_pool_get_metadata_transaction_id(struct dm_pool_metadata *pmd,
 					uint64_t *result)
 {
-	int r = -EINVAL;
-
 	down_read(&pmd->root_lock);
-	if (!pmd->fail_io) {
-		*result = pmd->trans_id;
-		r = 0;
-	}
+	*result = pmd->trans_id;
 	up_read(&pmd->root_lock);
 
-	return r;
-}
-
-static int __reserve_metadata_snap(struct dm_pool_metadata *pmd)
-{
-	int r, inc;
-	struct thin_disk_superblock *disk_super;
-	struct dm_block *copy, *sblock;
-	dm_block_t held_root;
-
-	/*
-	 * We commit to ensure the btree roots which we increment in a
-	 * moment are up to date.
-	 */
-	__commit_transaction(pmd);
-
-	/*
-	 * Copy the superblock.
-	 */
-	dm_sm_inc_block(pmd->metadata_sm, THIN_SUPERBLOCK_LOCATION);
-	r = dm_tm_shadow_block(pmd->tm, THIN_SUPERBLOCK_LOCATION,
-			       &sb_validator, &copy, &inc);
-	if (r)
-		return r;
-
-	BUG_ON(!inc);
-
-	held_root = dm_block_location(copy);
-	disk_super = dm_block_data(copy);
-
-	if (le64_to_cpu(disk_super->held_root)) {
-		DMWARN("Pool metadata snapshot already exists: release this before taking another.");
-
-		dm_tm_dec(pmd->tm, held_root);
-		dm_tm_unlock(pmd->tm, copy);
-		return -EBUSY;
-	}
-
-	/*
-	 * Wipe the spacemap since we're not publishing this.
-	 */
-	memset(&disk_super->data_space_map_root, 0,
-	       sizeof(disk_super->data_space_map_root));
-	memset(&disk_super->metadata_space_map_root, 0,
-	       sizeof(disk_super->metadata_space_map_root));
-
-	/*
-	 * Increment the data structures that need to be preserved.
-	 */
-	dm_tm_inc(pmd->tm, le64_to_cpu(disk_super->data_mapping_root));
-	dm_tm_inc(pmd->tm, le64_to_cpu(disk_super->device_details_root));
-	dm_tm_unlock(pmd->tm, copy);
-
-	/*
-	 * Write the held root into the superblock.
-	 */
-	r = superblock_lock(pmd, &sblock);
-	if (r) {
-		dm_tm_dec(pmd->tm, held_root);
-		return r;
-	}
-
-	disk_super = dm_block_data(sblock);
-	disk_super->held_root = cpu_to_le64(held_root);
-	dm_bm_unlock(sblock);
 	return 0;
 }
 
-int dm_pool_reserve_metadata_snap(struct dm_pool_metadata *pmd)
-{
-	int r = -EINVAL;
-
-	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __reserve_metadata_snap(pmd);
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
-static int __release_metadata_snap(struct dm_pool_metadata *pmd)
-{
-	int r;
-	struct thin_disk_superblock *disk_super;
-	struct dm_block *sblock, *copy;
-	dm_block_t held_root;
-
-	r = superblock_lock(pmd, &sblock);
-	if (r)
-		return r;
-
-	disk_super = dm_block_data(sblock);
-	held_root = le64_to_cpu(disk_super->held_root);
-	disk_super->held_root = cpu_to_le64(0);
-
-	dm_bm_unlock(sblock);
-
-	if (!held_root) {
-		DMWARN("No pool metadata snapshot found: nothing to release.");
-		return -EINVAL;
-	}
-
-	r = dm_tm_read_lock(pmd->tm, held_root, &sb_validator, &copy);
-	if (r)
-		return r;
-
-	disk_super = dm_block_data(copy);
-	dm_btree_del(&pmd->info, le64_to_cpu(disk_super->data_mapping_root));
-	dm_btree_del(&pmd->details_info, le64_to_cpu(disk_super->device_details_root));
-	dm_sm_dec_block(pmd->metadata_sm, held_root);
-
-	dm_tm_unlock(pmd->tm, copy);
-
-	return 0;
-}
-
-int dm_pool_release_metadata_snap(struct dm_pool_metadata *pmd)
-{
-	int r = -EINVAL;
-
-	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __release_metadata_snap(pmd);
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
-static int __get_metadata_snap(struct dm_pool_metadata *pmd,
-			       dm_block_t *result)
+static int __get_held_metadata_root(struct dm_pool_metadata *pmd,
+				    dm_block_t *result)
 {
 	int r;
 	struct thin_disk_superblock *disk_super;
 	struct dm_block *sblock;
 
-	r = dm_bm_read_lock(pmd->bm, THIN_SUPERBLOCK_LOCATION,
-			    &sb_validator, &sblock);
+	r = dm_bm_write_lock(pmd->bm, THIN_SUPERBLOCK_LOCATION,
+			     &sb_validator, &sblock);
 	if (r)
 		return r;
 
 	disk_super = dm_block_data(sblock);
 	*result = le64_to_cpu(disk_super->held_root);
 
-	dm_bm_unlock(sblock);
-
-	return 0;
+	return dm_bm_unlock(sblock);
 }
 
-int dm_pool_get_metadata_snap(struct dm_pool_metadata *pmd,
-			      dm_block_t *result)
+int dm_pool_get_held_metadata_root(struct dm_pool_metadata *pmd,
+				   dm_block_t *result)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_read(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __get_metadata_snap(pmd, result);
+	r = __get_held_metadata_root(pmd, result);
 	up_read(&pmd->root_lock);
 
 	return r;
@@ -1386,11 +1115,10 @@ int dm_pool_get_metadata_snap(struct dm_pool_metadata *pmd,
 int dm_pool_open_thin_device(struct dm_pool_metadata *pmd, dm_thin_id dev,
 			     struct dm_thin_device **td)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __open_device(pmd, dev, 0, td);
+	r = __open_device(pmd, dev, 0, td);
 	up_write(&pmd->root_lock);
 
 	return r;
@@ -1410,145 +1138,44 @@ dm_thin_id dm_thin_dev_id(struct dm_thin_device *td)
 	return td->id;
 }
 
-/*
- * Check whether @time (of block creation) is older than @td's last snapshot.
- * If so then the associated block is shared with the last snapshot device.
- * Any block on a device created *after* the device last got snapshotted is
- * necessarily not shared.
- */
-static bool __snapshotted_since(struct dm_thin_device *td, uint32_t time)
+static int __snapshotted_since(struct dm_thin_device *td, uint32_t time)
 {
 	return td->snapshotted_time > time;
 }
 
-static void unpack_lookup_result(struct dm_thin_device *td, __le64 value,
-				 struct dm_thin_lookup_result *result)
-{
-	uint64_t block_time = 0;
-	dm_block_t exception_block;
-	uint32_t exception_time;
-
-	block_time = le64_to_cpu(value);
-	unpack_block_time(block_time, &exception_block, &exception_time);
-	result->block = exception_block;
-	result->shared = __snapshotted_since(td, exception_time);
-}
-
-static int __find_block(struct dm_thin_device *td, dm_block_t block,
-			int can_issue_io, struct dm_thin_lookup_result *result)
-{
-	int r;
-	__le64 value;
-	struct dm_pool_metadata *pmd = td->pmd;
-	dm_block_t keys[2] = { td->id, block };
-	struct dm_btree_info *info;
-
-	if (can_issue_io) {
-		info = &pmd->info;
-	} else
-		info = &pmd->nb_info;
-
-	r = dm_btree_lookup(info, pmd->root, keys, &value);
-	if (!r)
-		unpack_lookup_result(td, value, result);
-
-	return r;
-}
-
 int dm_thin_find_block(struct dm_thin_device *td, dm_block_t block,
-		       int can_issue_io, struct dm_thin_lookup_result *result)
+		       int can_block, struct dm_thin_lookup_result *result)
 {
 	int r;
-	struct dm_pool_metadata *pmd = td->pmd;
-
-	down_read(&pmd->root_lock);
-	if (pmd->fail_io) {
-		up_read(&pmd->root_lock);
-		return -EINVAL;
-	}
-
-	r = __find_block(td, block, can_issue_io, result);
-
-	up_read(&pmd->root_lock);
-	return r;
-}
-
-static int __find_next_mapped_block(struct dm_thin_device *td, dm_block_t block,
-					  dm_block_t *vblock,
-					  struct dm_thin_lookup_result *result)
-{
-	int r;
+	uint64_t block_time = 0;
 	__le64 value;
 	struct dm_pool_metadata *pmd = td->pmd;
 	dm_block_t keys[2] = { td->id, block };
 
-	r = dm_btree_lookup_next(&pmd->info, pmd->root, keys, vblock, &value);
-	if (!r)
-		unpack_lookup_result(td, value, result);
+	if (can_block) {
+		down_read(&pmd->root_lock);
+		r = dm_btree_lookup(&pmd->info, pmd->root, keys, &value);
+		if (!r)
+			block_time = le64_to_cpu(value);
+		up_read(&pmd->root_lock);
 
-	return r;
-}
+	} else if (down_read_trylock(&pmd->root_lock)) {
+		r = dm_btree_lookup(&pmd->nb_info, pmd->root, keys, &value);
+		if (!r)
+			block_time = le64_to_cpu(value);
+		up_read(&pmd->root_lock);
 
-static int __find_mapped_range(struct dm_thin_device *td,
-			       dm_block_t begin, dm_block_t end,
-			       dm_block_t *thin_begin, dm_block_t *thin_end,
-			       dm_block_t *pool_begin, bool *maybe_shared)
-{
-	int r;
-	dm_block_t pool_end;
-	struct dm_thin_lookup_result lookup;
+	} else
+		return -EWOULDBLOCK;
 
-	if (end < begin)
-		return -ENODATA;
-
-	r = __find_next_mapped_block(td, begin, &begin, &lookup);
-	if (r)
-		return r;
-
-	if (begin >= end)
-		return -ENODATA;
-
-	*thin_begin = begin;
-	*pool_begin = lookup.block;
-	*maybe_shared = lookup.shared;
-
-	begin++;
-	pool_end = *pool_begin + 1;
-	while (begin != end) {
-		r = __find_block(td, begin, true, &lookup);
-		if (r) {
-			if (r == -ENODATA)
-				break;
-			else
-				return r;
-		}
-
-		if ((lookup.block != pool_end) ||
-		    (lookup.shared != *maybe_shared))
-			break;
-
-		pool_end++;
-		begin++;
+	if (!r) {
+		dm_block_t exception_block;
+		uint32_t exception_time;
+		unpack_block_time(block_time, &exception_block,
+				  &exception_time);
+		result->block = exception_block;
+		result->shared = __snapshotted_since(td, exception_time);
 	}
-
-	*thin_end = begin;
-	return 0;
-}
-
-int dm_thin_find_mapped_range(struct dm_thin_device *td,
-			      dm_block_t begin, dm_block_t end,
-			      dm_block_t *thin_begin, dm_block_t *thin_end,
-			      dm_block_t *pool_begin, bool *maybe_shared)
-{
-	int r = -EINVAL;
-	struct dm_pool_metadata *pmd = td->pmd;
-
-	down_read(&pmd->root_lock);
-	if (!pmd->fail_io) {
-		r = __find_mapped_range(td, begin, end, thin_begin, thin_end,
-					pool_begin, maybe_shared);
-	}
-	up_read(&pmd->root_lock);
 
 	return r;
 }
@@ -1561,6 +1188,7 @@ static int __insert(struct dm_thin_device *td, dm_block_t block,
 	struct dm_pool_metadata *pmd = td->pmd;
 	dm_block_t keys[2] = { td->id, block };
 
+	pmd->need_commit = 1;
 	value = cpu_to_le64(pack_block_time(data_block, pmd->time));
 	__dm_bless_for_disk(&value);
 
@@ -1569,9 +1197,10 @@ static int __insert(struct dm_thin_device *td, dm_block_t block,
 	if (r)
 		return r;
 
-	td->changed = 1;
-	if (inserted)
+	if (inserted) {
 		td->mapped_blocks++;
+		td->changed = 1;
+	}
 
 	return 0;
 }
@@ -1579,11 +1208,10 @@ static int __insert(struct dm_thin_device *td, dm_block_t block,
 int dm_thin_insert_block(struct dm_thin_device *td, dm_block_t block,
 			 dm_block_t data_block)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_write(&td->pmd->root_lock);
-	if (!td->pmd->fail_io)
-		r = __insert(td, block, data_block);
+	r = __insert(td, block, data_block);
 	up_write(&td->pmd->root_lock);
 
 	return r;
@@ -1601,184 +1229,31 @@ static int __remove(struct dm_thin_device *td, dm_block_t block)
 
 	td->mapped_blocks--;
 	td->changed = 1;
+	pmd->need_commit = 1;
 
 	return 0;
 }
 
-static int __remove_range(struct dm_thin_device *td, dm_block_t begin, dm_block_t end)
-{
-	int r;
-	unsigned count, total_count = 0;
-	struct dm_pool_metadata *pmd = td->pmd;
-	dm_block_t keys[1] = { td->id };
-	__le64 value;
-	dm_block_t mapping_root;
-
-	/*
-	 * Find the mapping tree
-	 */
-	r = dm_btree_lookup(&pmd->tl_info, pmd->root, keys, &value);
-	if (r)
-		return r;
-
-	/*
-	 * Remove from the mapping tree, taking care to inc the
-	 * ref count so it doesn't get deleted.
-	 */
-	mapping_root = le64_to_cpu(value);
-	dm_tm_inc(pmd->tm, mapping_root);
-	r = dm_btree_remove(&pmd->tl_info, pmd->root, keys, &pmd->root);
-	if (r)
-		return r;
-
-	/*
-	 * Remove leaves stops at the first unmapped entry, so we have to
-	 * loop round finding mapped ranges.
-	 */
-	while (begin < end) {
-		r = dm_btree_lookup_next(&pmd->bl_info, mapping_root, &begin, &begin, &value);
-		if (r == -ENODATA)
-			break;
-
-		if (r)
-			return r;
-
-		if (begin >= end)
-			break;
-
-		r = dm_btree_remove_leaves(&pmd->bl_info, mapping_root, &begin, end, &mapping_root, &count);
-		if (r)
-			return r;
-
-		total_count += count;
-	}
-
-	td->mapped_blocks -= total_count;
-	td->changed = 1;
-
-	/*
-	 * Reinsert the mapping tree.
-	 */
-	value = cpu_to_le64(mapping_root);
-	__dm_bless_for_disk(&value);
-	return dm_btree_insert(&pmd->tl_info, pmd->root, keys, &value, &pmd->root);
-}
-
 int dm_thin_remove_block(struct dm_thin_device *td, dm_block_t block)
 {
-	int r = -EINVAL;
-
-	down_write(&td->pmd->root_lock);
-	if (!td->pmd->fail_io)
-		r = __remove(td, block);
-	up_write(&td->pmd->root_lock);
-
-	return r;
-}
-
-int dm_thin_remove_range(struct dm_thin_device *td,
-			 dm_block_t begin, dm_block_t end)
-{
-	int r = -EINVAL;
-
-	down_write(&td->pmd->root_lock);
-	if (!td->pmd->fail_io)
-		r = __remove_range(td, begin, end);
-	up_write(&td->pmd->root_lock);
-
-	return r;
-}
-
-int dm_pool_block_is_shared(struct dm_pool_metadata *pmd, dm_block_t b, bool *result)
-{
-	int r;
-	uint32_t ref_count;
-
-	down_read(&pmd->root_lock);
-	r = dm_sm_get_count(pmd->data_sm, b, &ref_count);
-	if (!r)
-		*result = (ref_count > 1);
-	up_read(&pmd->root_lock);
-
-	return r;
-}
-
-int dm_pool_inc_data_range(struct dm_pool_metadata *pmd, dm_block_t b, dm_block_t e)
-{
-	int r = 0;
-
-	down_write(&pmd->root_lock);
-	for (; b != e; b++) {
-		r = dm_sm_inc_block(pmd->data_sm, b);
-		if (r)
-			break;
-	}
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
-int dm_pool_dec_data_range(struct dm_pool_metadata *pmd, dm_block_t b, dm_block_t e)
-{
-	int r = 0;
-
-	down_write(&pmd->root_lock);
-	for (; b != e; b++) {
-		r = dm_sm_dec_block(pmd->data_sm, b);
-		if (r)
-			break;
-	}
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
-bool dm_thin_changed_this_transaction(struct dm_thin_device *td)
-{
 	int r;
 
-	down_read(&td->pmd->root_lock);
-	r = td->changed;
-	up_read(&td->pmd->root_lock);
-
-	return r;
-}
-
-bool dm_pool_changed_this_transaction(struct dm_pool_metadata *pmd)
-{
-	bool r = false;
-	struct dm_thin_device *td, *tmp;
-
-	down_read(&pmd->root_lock);
-	list_for_each_entry_safe(td, tmp, &pmd->thin_devices, list) {
-		if (td->changed) {
-			r = td->changed;
-			break;
-		}
-	}
-	up_read(&pmd->root_lock);
-
-	return r;
-}
-
-bool dm_thin_aborted_changes(struct dm_thin_device *td)
-{
-	bool r;
-
-	down_read(&td->pmd->root_lock);
-	r = td->aborted_with_changes;
-	up_read(&td->pmd->root_lock);
+	down_write(&td->pmd->root_lock);
+	r = __remove(td, block);
+	up_write(&td->pmd->root_lock);
 
 	return r;
 }
 
 int dm_pool_alloc_data_block(struct dm_pool_metadata *pmd, dm_block_t *result)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = dm_sm_new_block(pmd->data_sm, result);
+
+	r = dm_sm_new_block(pmd->data_sm, result);
+	pmd->need_commit = 1;
+
 	up_write(&pmd->root_lock);
 
 	return r;
@@ -1786,11 +1261,9 @@ int dm_pool_alloc_data_block(struct dm_pool_metadata *pmd, dm_block_t *result)
 
 int dm_pool_commit_metadata(struct dm_pool_metadata *pmd)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_write(&pmd->root_lock);
-	if (pmd->fail_io)
-		goto out;
 
 	r = __commit_transaction(pmd);
 	if (r <= 0)
@@ -1805,41 +1278,12 @@ out:
 	return r;
 }
 
-static void __set_abort_with_changes_flags(struct dm_pool_metadata *pmd)
-{
-	struct dm_thin_device *td;
-
-	list_for_each_entry(td, &pmd->thin_devices, list)
-		td->aborted_with_changes = td->changed;
-}
-
-int dm_pool_abort_metadata(struct dm_pool_metadata *pmd)
-{
-	int r = -EINVAL;
-
-	down_write(&pmd->root_lock);
-	if (pmd->fail_io)
-		goto out;
-
-	__set_abort_with_changes_flags(pmd);
-	__destroy_persistent_data_objects(pmd);
-	r = __create_persistent_data_objects(pmd, false);
-	if (r)
-		pmd->fail_io = true;
-
-out:
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
 int dm_pool_get_free_block_count(struct dm_pool_metadata *pmd, dm_block_t *result)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_read(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = dm_sm_get_nr_free(pmd->data_sm, result);
+	r = dm_sm_get_nr_free(pmd->data_sm, result);
 	up_read(&pmd->root_lock);
 
 	return r;
@@ -1848,18 +1292,10 @@ int dm_pool_get_free_block_count(struct dm_pool_metadata *pmd, dm_block_t *resul
 int dm_pool_get_free_metadata_block_count(struct dm_pool_metadata *pmd,
 					  dm_block_t *result)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_read(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = dm_sm_get_nr_free(pmd->metadata_sm, result);
-
-	if (!r) {
-		if (*result < pmd->metadata_reserve)
-			*result = 0;
-		else
-			*result -= pmd->metadata_reserve;
-	}
+	r = dm_sm_get_nr_free(pmd->metadata_sm, result);
 	up_read(&pmd->root_lock);
 
 	return r;
@@ -1868,23 +1304,30 @@ int dm_pool_get_free_metadata_block_count(struct dm_pool_metadata *pmd,
 int dm_pool_get_metadata_dev_size(struct dm_pool_metadata *pmd,
 				  dm_block_t *result)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_read(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = dm_sm_get_nr_blocks(pmd->metadata_sm, result);
+	r = dm_sm_get_nr_blocks(pmd->metadata_sm, result);
 	up_read(&pmd->root_lock);
 
 	return r;
 }
 
+int dm_pool_get_data_block_size(struct dm_pool_metadata *pmd, sector_t *result)
+{
+	down_read(&pmd->root_lock);
+	*result = pmd->data_block_size;
+	up_read(&pmd->root_lock);
+
+	return 0;
+}
+
 int dm_pool_get_data_dev_size(struct dm_pool_metadata *pmd, dm_block_t *result)
 {
-	int r = -EINVAL;
+	int r;
 
 	down_read(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = dm_sm_get_nr_blocks(pmd->data_sm, result);
+	r = dm_sm_get_nr_blocks(pmd->data_sm, result);
 	up_read(&pmd->root_lock);
 
 	return r;
@@ -1892,17 +1335,13 @@ int dm_pool_get_data_dev_size(struct dm_pool_metadata *pmd, dm_block_t *result)
 
 int dm_thin_get_mapped_count(struct dm_thin_device *td, dm_block_t *result)
 {
-	int r = -EINVAL;
 	struct dm_pool_metadata *pmd = td->pmd;
 
 	down_read(&pmd->root_lock);
-	if (!pmd->fail_io) {
-		*result = td->mapped_blocks;
-		r = 0;
-	}
+	*result = td->mapped_blocks;
 	up_read(&pmd->root_lock);
 
-	return r;
+	return 0;
 }
 
 static int __highest_block(struct dm_thin_device *td, dm_block_t *result)
@@ -1924,23 +1363,22 @@ static int __highest_block(struct dm_thin_device *td, dm_block_t *result)
 int dm_thin_get_highest_mapped_block(struct dm_thin_device *td,
 				     dm_block_t *result)
 {
-	int r = -EINVAL;
+	int r;
 	struct dm_pool_metadata *pmd = td->pmd;
 
 	down_read(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __highest_block(td, result);
+	r = __highest_block(td, result);
 	up_read(&pmd->root_lock);
 
 	return r;
 }
 
-static int __resize_space_map(struct dm_space_map *sm, dm_block_t new_count)
+static int __resize_data_dev(struct dm_pool_metadata *pmd, dm_block_t new_count)
 {
 	int r;
 	dm_block_t old_count;
 
-	r = dm_sm_get_nr_blocks(sm, &old_count);
+	r = dm_sm_get_nr_blocks(pmd->data_sm, &old_count);
 	if (r)
 		return r;
 
@@ -1948,107 +1386,24 @@ static int __resize_space_map(struct dm_space_map *sm, dm_block_t new_count)
 		return 0;
 
 	if (new_count < old_count) {
-		DMERR("cannot reduce size of space map");
+		DMERR("cannot reduce size of data device");
 		return -EINVAL;
 	}
 
-	return dm_sm_extend(sm, new_count - old_count);
+	r = dm_sm_extend(pmd->data_sm, new_count - old_count);
+	if (!r)
+		pmd->need_commit = 1;
+
+	return r;
 }
 
 int dm_pool_resize_data_dev(struct dm_pool_metadata *pmd, dm_block_t new_count)
 {
-	int r = -EINVAL;
-
-	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
-		r = __resize_space_map(pmd->data_sm, new_count);
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
-int dm_pool_resize_metadata_dev(struct dm_pool_metadata *pmd, dm_block_t new_count)
-{
-	int r = -EINVAL;
-
-	down_write(&pmd->root_lock);
-	if (!pmd->fail_io) {
-		r = __resize_space_map(pmd->metadata_sm, new_count);
-		if (!r)
-			__set_metadata_reserve(pmd);
-	}
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
-void dm_pool_metadata_read_only(struct dm_pool_metadata *pmd)
-{
-	down_write(&pmd->root_lock);
-	dm_bm_set_read_only(pmd->bm);
-	up_write(&pmd->root_lock);
-}
-
-void dm_pool_metadata_read_write(struct dm_pool_metadata *pmd)
-{
-	down_write(&pmd->root_lock);
-	dm_bm_set_read_write(pmd->bm);
-	up_write(&pmd->root_lock);
-}
-
-int dm_pool_register_metadata_threshold(struct dm_pool_metadata *pmd,
-					dm_block_t threshold,
-					dm_sm_threshold_fn fn,
-					void *context)
-{
 	int r;
 
 	down_write(&pmd->root_lock);
-	r = dm_sm_register_threshold_callback(pmd->metadata_sm, threshold, fn, context);
+	r = __resize_data_dev(pmd, new_count);
 	up_write(&pmd->root_lock);
 
 	return r;
-}
-
-int dm_pool_metadata_set_needs_check(struct dm_pool_metadata *pmd)
-{
-	int r;
-	struct dm_block *sblock;
-	struct thin_disk_superblock *disk_super;
-
-	down_write(&pmd->root_lock);
-	pmd->flags |= THIN_METADATA_NEEDS_CHECK_FLAG;
-
-	r = superblock_lock(pmd, &sblock);
-	if (r) {
-		DMERR("couldn't read superblock");
-		goto out;
-	}
-
-	disk_super = dm_block_data(sblock);
-	disk_super->flags = cpu_to_le32(pmd->flags);
-
-	dm_bm_unlock(sblock);
-out:
-	up_write(&pmd->root_lock);
-	return r;
-}
-
-bool dm_pool_metadata_needs_check(struct dm_pool_metadata *pmd)
-{
-	bool needs_check;
-
-	down_read(&pmd->root_lock);
-	needs_check = pmd->flags & THIN_METADATA_NEEDS_CHECK_FLAG;
-	up_read(&pmd->root_lock);
-
-	return needs_check;
-}
-
-void dm_pool_issue_prefetches(struct dm_pool_metadata *pmd)
-{
-	down_read(&pmd->root_lock);
-	if (!pmd->fail_io)
-		dm_tm_issue_prefetches(pmd->tm);
-	up_read(&pmd->root_lock);
 }

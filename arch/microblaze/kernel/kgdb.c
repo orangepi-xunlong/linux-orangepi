@@ -12,7 +12,6 @@
 #include <linux/io.h>
 #include <asm/cacheflush.h>
 #include <asm/asm-offsets.h>
-#include <asm/kgdb.h>
 #include <asm/pvr.h>
 
 #define GDB_REG		0
@@ -32,14 +31,13 @@
 #define GDB_RTLBHI	56
 
 /* keep pvr separately because it is unchangeble */
-static struct pvr_s pvr;
+struct pvr_s pvr;
 
 void pt_regs_to_gdb_regs(unsigned long *gdb_regs, struct pt_regs *regs)
 {
-	unsigned int i;
+	int i;
 	unsigned long *pt_regb = (unsigned long *)regs;
 	int temp;
-
 	/* registers r0 - r31, pc, msr, ear, esr, fsr + do not save pt_mode */
 	for (i = 0; i < (sizeof(struct pt_regs) / 4) - 1; i++)
 		gdb_regs[i] = pt_regb[i];
@@ -69,7 +67,7 @@ void pt_regs_to_gdb_regs(unsigned long *gdb_regs, struct pt_regs *regs)
 
 void gdb_regs_to_pt_regs(unsigned long *gdb_regs, struct pt_regs *regs)
 {
-	unsigned int i;
+	int i;
 	unsigned long *pt_regb = (unsigned long *)regs;
 
 	/* pt_regs and gdb_regs have the same 37 values.
@@ -79,7 +77,7 @@ void gdb_regs_to_pt_regs(unsigned long *gdb_regs, struct pt_regs *regs)
 		pt_regb[i] = gdb_regs[i];
 }
 
-asmlinkage void microblaze_kgdb_break(struct pt_regs *regs)
+void microblaze_kgdb_break(struct pt_regs *regs)
 {
 	if (kgdb_handle_exception(1, SIGTRAP, 0, regs) != 0)
 		return;
@@ -93,7 +91,7 @@ asmlinkage void microblaze_kgdb_break(struct pt_regs *regs)
 /* untested */
 void sleeping_thread_to_gdb_regs(unsigned long *gdb_regs, struct task_struct *p)
 {
-	unsigned int i;
+	int i;
 	unsigned long *pt_regb = (unsigned long *)(p->thread.regs);
 
 	/* registers r0 - r31, pc, msr, ear, esr, fsr + do not save pt_mode */

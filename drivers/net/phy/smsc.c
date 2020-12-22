@@ -12,7 +12,7 @@
  * Free Software Foundation;  either version 2 of the  License, or (at your
  * option) any later version.
  *
- * Support added for SMSC LAN8187 and LAN8700 by steve.glendinning@shawell.net
+ * Support added for SMSC LAN8187 and LAN8700 by steve.glendinning@smsc.com
  *
  */
 
@@ -23,10 +23,6 @@
 #include <linux/phy.h>
 #include <linux/netdevice.h>
 #include <linux/smscphy.h>
-
-struct smsc_phy_priv {
-	bool energy_enable;
-};
 
 static int smsc_phy_config_intr(struct phy_device *phydev)
 {
@@ -47,41 +43,17 @@ static int smsc_phy_ack_interrupt(struct phy_device *phydev)
 
 static int smsc_phy_config_init(struct phy_device *phydev)
 {
-	struct smsc_phy_priv *priv = phydev->priv;
-
 	int rc = phy_read(phydev, MII_LAN83C185_CTRL_STATUS);
-
 	if (rc < 0)
 		return rc;
 
-	if (priv->energy_enable) {
-		/* Enable energy detect mode for this SMSC Transceivers */
-		rc = phy_write(phydev, MII_LAN83C185_CTRL_STATUS,
-			       rc | MII_LAN83C185_EDPWRDOWN);
-		if (rc < 0)
-			return rc;
-	}
-
-	return smsc_phy_ack_interrupt(phydev);
-}
-
-static int smsc_phy_reset(struct phy_device *phydev)
-{
-	int rc = phy_read(phydev, MII_LAN83C185_SPECIAL_MODES);
+	/* Enable energy detect mode for this SMSC Transceivers */
+	rc = phy_write(phydev, MII_LAN83C185_CTRL_STATUS,
+		       rc | MII_LAN83C185_EDPWRDOWN);
 	if (rc < 0)
 		return rc;
 
-	/* If the SMSC PHY is in power down mode, then set it
-	 * in all capable mode before using it.
-	 */
-	if ((rc & MII_LAN83C185_MODE_MASK) == MII_LAN83C185_MODE_POWERDOWN) {
-		/* set "all capable" mode */
-		rc |= MII_LAN83C185_MODE_ALL;
-		phy_write(phydev, MII_LAN83C185_SPECIAL_MODES, rc);
-	}
-
-	/* reset the phy */
-	return genphy_soft_reset(phydev);
+	return smsc_phy_ack_interrupt (phydev);
 }
 
 static int lan911x_config_init(struct phy_device *phydev)
@@ -89,81 +61,7 @@ static int lan911x_config_init(struct phy_device *phydev)
 	return smsc_phy_ack_interrupt(phydev);
 }
 
-/*
- * The LAN87xx suffers from rare absence of the ENERGYON-bit when Ethernet cable
- * plugs in while LAN87xx is in Energy Detect Power-Down mode. This leads to
- * unstable detection of plugging in Ethernet cable.
- * This workaround disables Energy Detect Power-Down mode and waiting for
- * response on link pulses to detect presence of plugged Ethernet cable.
- * The Energy Detect Power-Down mode is enabled again in the end of procedure to
- * save approximately 220 mW of power if cable is unplugged.
- */
-static int lan87xx_read_status(struct phy_device *phydev)
-{
-	struct smsc_phy_priv *priv = phydev->priv;
-
-	int err = genphy_read_status(phydev);
-
-	if (!phydev->link && priv->energy_enable) {
-		int i;
-
-		/* Disable EDPD to wake up PHY */
-		int rc = phy_read(phydev, MII_LAN83C185_CTRL_STATUS);
-		if (rc < 0)
-			return rc;
-
-		rc = phy_write(phydev, MII_LAN83C185_CTRL_STATUS,
-			       rc & ~MII_LAN83C185_EDPWRDOWN);
-		if (rc < 0)
-			return rc;
-
-		/* Wait max 640 ms to detect energy */
-		for (i = 0; i < 64; i++) {
-			/* Sleep to allow link test pulses to be sent */
-			msleep(10);
-			rc = phy_read(phydev, MII_LAN83C185_CTRL_STATUS);
-			if (rc < 0)
-				return rc;
-			if (rc & MII_LAN83C185_ENERGYON)
-				break;
-		}
-
-		/* Re-enable EDPD */
-		rc = phy_read(phydev, MII_LAN83C185_CTRL_STATUS);
-		if (rc < 0)
-			return rc;
-
-		rc = phy_write(phydev, MII_LAN83C185_CTRL_STATUS,
-			       rc | MII_LAN83C185_EDPWRDOWN);
-		if (rc < 0)
-			return rc;
-	}
-
-	return err;
-}
-
-static int smsc_phy_probe(struct phy_device *phydev)
-{
-	struct device *dev = &phydev->mdio.dev;
-	struct device_node *of_node = dev->of_node;
-	struct smsc_phy_priv *priv;
-
-	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
-	if (!priv)
-		return -ENOMEM;
-
-	priv->energy_enable = true;
-
-	if (of_property_read_bool(of_node, "smsc,disable-energy-detect"))
-		priv->energy_enable = false;
-
-	phydev->priv = priv;
-
-	return 0;
-}
-
-static struct phy_driver smsc_phy_driver[] = {
-{
+static struct phy_driver lan83c185_driver = {
 	.phy_id		= 0x0007c0a0, /* OUI=0x00800f, Model#=0x0a */
 	.phy_id_mask	= 0xfffffff0,
 	.name		= "SMSC LAN83C185",
@@ -172,13 +70,10 @@ static struct phy_driver smsc_phy_driver[] = {
 				| SUPPORTED_Asym_Pause),
 	.flags		= PHY_HAS_INTERRUPT | PHY_HAS_MAGICANEG,
 
-	.probe		= smsc_phy_probe,
-
 	/* basic functions */
 	.config_aneg	= genphy_config_aneg,
 	.read_status	= genphy_read_status,
 	.config_init	= smsc_phy_config_init,
-	.soft_reset	= smsc_phy_reset,
 
 	/* IRQ related */
 	.ack_interrupt	= smsc_phy_ack_interrupt,
@@ -186,7 +81,11 @@ static struct phy_driver smsc_phy_driver[] = {
 
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
-}, {
+
+	.driver		= { .owner = THIS_MODULE, }
+};
+
+static struct phy_driver lan8187_driver = {
 	.phy_id		= 0x0007c0b0, /* OUI=0x00800f, Model#=0x0b */
 	.phy_id_mask	= 0xfffffff0,
 	.name		= "SMSC LAN8187",
@@ -195,13 +94,10 @@ static struct phy_driver smsc_phy_driver[] = {
 				| SUPPORTED_Asym_Pause),
 	.flags		= PHY_HAS_INTERRUPT | PHY_HAS_MAGICANEG,
 
-	.probe		= smsc_phy_probe,
-
 	/* basic functions */
 	.config_aneg	= genphy_config_aneg,
 	.read_status	= genphy_read_status,
 	.config_init	= smsc_phy_config_init,
-	.soft_reset	= smsc_phy_reset,
 
 	/* IRQ related */
 	.ack_interrupt	= smsc_phy_ack_interrupt,
@@ -209,7 +105,11 @@ static struct phy_driver smsc_phy_driver[] = {
 
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
-}, {
+
+	.driver		= { .owner = THIS_MODULE, }
+};
+
+static struct phy_driver lan8700_driver = {
 	.phy_id		= 0x0007c0c0, /* OUI=0x00800f, Model#=0x0c */
 	.phy_id_mask	= 0xfffffff0,
 	.name		= "SMSC LAN8700",
@@ -218,13 +118,10 @@ static struct phy_driver smsc_phy_driver[] = {
 				| SUPPORTED_Asym_Pause),
 	.flags		= PHY_HAS_INTERRUPT | PHY_HAS_MAGICANEG,
 
-	.probe		= smsc_phy_probe,
-
 	/* basic functions */
 	.config_aneg	= genphy_config_aneg,
-	.read_status	= lan87xx_read_status,
+	.read_status	= genphy_read_status,
 	.config_init	= smsc_phy_config_init,
-	.soft_reset	= smsc_phy_reset,
 
 	/* IRQ related */
 	.ack_interrupt	= smsc_phy_ack_interrupt,
@@ -232,7 +129,11 @@ static struct phy_driver smsc_phy_driver[] = {
 
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
-}, {
+
+	.driver		= { .owner = THIS_MODULE, }
+};
+
+static struct phy_driver lan911x_int_driver = {
 	.phy_id		= 0x0007c0d0, /* OUI=0x00800f, Model#=0x0d */
 	.phy_id_mask	= 0xfffffff0,
 	.name		= "SMSC LAN911x Internal PHY",
@@ -240,8 +141,6 @@ static struct phy_driver smsc_phy_driver[] = {
 	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause
 				| SUPPORTED_Asym_Pause),
 	.flags		= PHY_HAS_INTERRUPT | PHY_HAS_MAGICANEG,
-
-	.probe		= smsc_phy_probe,
 
 	/* basic functions */
 	.config_aneg	= genphy_config_aneg,
@@ -254,7 +153,11 @@ static struct phy_driver smsc_phy_driver[] = {
 
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
-}, {
+
+	.driver		= { .owner = THIS_MODULE, }
+};
+
+static struct phy_driver lan8710_driver = {
 	.phy_id		= 0x0007c0f0, /* OUI=0x00800f, Model#=0x0f */
 	.phy_id_mask	= 0xfffffff0,
 	.name		= "SMSC LAN8710/LAN8720",
@@ -263,13 +166,10 @@ static struct phy_driver smsc_phy_driver[] = {
 				| SUPPORTED_Asym_Pause),
 	.flags		= PHY_HAS_INTERRUPT | PHY_HAS_MAGICANEG,
 
-	.probe		= smsc_phy_probe,
-
 	/* basic functions */
 	.config_aneg	= genphy_config_aneg,
-	.read_status	= lan87xx_read_status,
+	.read_status	= genphy_read_status,
 	.config_init	= smsc_phy_config_init,
-	.soft_reset	= smsc_phy_reset,
 
 	/* IRQ related */
 	.ack_interrupt	= smsc_phy_ack_interrupt,
@@ -277,36 +177,63 @@ static struct phy_driver smsc_phy_driver[] = {
 
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
-}, {
-	.phy_id		= 0x0007c110,
-	.phy_id_mask	= 0xfffffff0,
-	.name		= "SMSC LAN8740",
 
-	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause
-				| SUPPORTED_Asym_Pause),
-	.flags		= PHY_HAS_INTERRUPT | PHY_HAS_MAGICANEG,
+	.driver		= { .owner = THIS_MODULE, }
+};
 
-	.probe		= smsc_phy_probe,
+static int __init smsc_init(void)
+{
+	int ret;
 
-	/* basic functions */
-	.config_aneg	= genphy_config_aneg,
-	.read_status	= lan87xx_read_status,
-	.config_init	= smsc_phy_config_init,
-	.soft_reset	= smsc_phy_reset,
+	ret = phy_driver_register (&lan83c185_driver);
+	if (ret)
+		goto err1;
 
-	/* IRQ related */
-	.ack_interrupt	= smsc_phy_ack_interrupt,
-	.config_intr	= smsc_phy_config_intr,
+	ret = phy_driver_register (&lan8187_driver);
+	if (ret)
+		goto err2;
 
-	.suspend	= genphy_suspend,
-	.resume		= genphy_resume,
-} };
+	ret = phy_driver_register (&lan8700_driver);
+	if (ret)
+		goto err3;
 
-module_phy_driver(smsc_phy_driver);
+	ret = phy_driver_register (&lan911x_int_driver);
+	if (ret)
+		goto err4;
+
+	ret = phy_driver_register (&lan8710_driver);
+	if (ret)
+		goto err5;
+
+	return 0;
+
+err5:
+	phy_driver_unregister (&lan911x_int_driver);
+err4:
+	phy_driver_unregister (&lan8700_driver);
+err3:
+	phy_driver_unregister (&lan8187_driver);
+err2:
+	phy_driver_unregister (&lan83c185_driver);
+err1:
+	return ret;
+}
+
+static void __exit smsc_exit(void)
+{
+	phy_driver_unregister (&lan8710_driver);
+	phy_driver_unregister (&lan911x_int_driver);
+	phy_driver_unregister (&lan8700_driver);
+	phy_driver_unregister (&lan8187_driver);
+	phy_driver_unregister (&lan83c185_driver);
+}
 
 MODULE_DESCRIPTION("SMSC PHY driver");
 MODULE_AUTHOR("Herbert Valerio Riedel");
 MODULE_LICENSE("GPL");
+
+module_init(smsc_init);
+module_exit(smsc_exit);
 
 static struct mdio_device_id __maybe_unused smsc_tbl[] = {
 	{ 0x0007c0a0, 0xfffffff0 },
@@ -314,7 +241,6 @@ static struct mdio_device_id __maybe_unused smsc_tbl[] = {
 	{ 0x0007c0c0, 0xfffffff0 },
 	{ 0x0007c0d0, 0xfffffff0 },
 	{ 0x0007c0f0, 0xfffffff0 },
-	{ 0x0007c110, 0xfffffff0 },
 	{ }
 };
 

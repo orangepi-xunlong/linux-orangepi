@@ -13,11 +13,15 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /*
  * Driver for the Texas Instruments TMP421 SMBus temperature sensor IC.
- * Supported models: TMP421, TMP422, TMP423, TMP441, TMP442
+ * Supported models: TMP421, TMP422, TMP423
  */
 
 #include <linux/module.h>
@@ -35,10 +39,9 @@
 static const unsigned short normal_i2c[] = { 0x2a, 0x4c, 0x4d, 0x4e, 0x4f,
 					     I2C_CLIENT_END };
 
-enum chips { tmp421, tmp422, tmp423, tmp441, tmp442 };
+enum chips { tmp421, tmp422, tmp423 };
 
 /* The TMP421 registers */
-#define TMP421_STATUS_REG			0x08
 #define TMP421_CONFIG_REG_1			0x09
 #define TMP421_CONVERSION_RATE_REG		0x0B
 #define TMP421_MANUFACTURER_ID_REG		0xFE
@@ -56,26 +59,18 @@ static const u8 TMP421_TEMP_LSB[4]		= { 0x10, 0x11, 0x12, 0x13 };
 #define TMP421_DEVICE_ID			0x21
 #define TMP422_DEVICE_ID			0x22
 #define TMP423_DEVICE_ID			0x23
-#define TMP441_DEVICE_ID			0x41
-#define TMP442_DEVICE_ID			0x42
 
 static const struct i2c_device_id tmp421_id[] = {
 	{ "tmp421", 2 },
 	{ "tmp422", 3 },
 	{ "tmp423", 4 },
-	{ "tmp441", 2 },
-	{ "tmp442", 3 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tmp421_id);
 
 struct tmp421_data {
-	struct i2c_client *client;
+	struct device *hwmon_dev;
 	struct mutex update_lock;
-	u32 temp_config[5];
-	struct hwmon_channel_info temp_info;
-	const struct hwmon_channel_info *info[2];
-	struct hwmon_chip_info chip;
 	char valid;
 	unsigned long last_updated;
 	int channels;
@@ -104,8 +99,8 @@ static int temp_from_u16(u16 reg)
 
 static struct tmp421_data *tmp421_update_device(struct device *dev)
 {
-	struct tmp421_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct tmp421_data *data = i2c_get_clientdata(client);
 	int i;
 
 	mutex_lock(&data->update_lock);
@@ -129,45 +124,79 @@ static struct tmp421_data *tmp421_update_device(struct device *dev)
 	return data;
 }
 
-static int tmp421_read(struct device *dev, enum hwmon_sensor_types type,
-		       u32 attr, int channel, long *val)
+static ssize_t show_temp_value(struct device *dev,
+			       struct device_attribute *devattr, char *buf)
 {
-	struct tmp421_data *tmp421 = tmp421_update_device(dev);
+	int index = to_sensor_dev_attr(devattr)->index;
+	struct tmp421_data *data = tmp421_update_device(dev);
+	int temp;
 
-	switch (attr) {
-	case hwmon_temp_input:
-		if (tmp421->config & TMP421_CONFIG_RANGE)
-			*val = temp_from_u16(tmp421->temp[channel]);
-		else
-			*val = temp_from_s16(tmp421->temp[channel]);
-		return 0;
-	case hwmon_temp_fault:
-		/*
-		 * The OPEN bit signals a fault. This is bit 0 of the temperature
-		 * register (low byte).
-		 */
-		*val = tmp421->temp[channel] & 0x01;
-		return 0;
-	default:
-		return -EOPNOTSUPP;
-	}
+	mutex_lock(&data->update_lock);
+	if (data->config & TMP421_CONFIG_RANGE)
+		temp = temp_from_u16(data->temp[index]);
+	else
+		temp = temp_from_s16(data->temp[index]);
+	mutex_unlock(&data->update_lock);
 
+	return sprintf(buf, "%d\n", temp);
 }
 
-static umode_t tmp421_is_visible(const void *data, enum hwmon_sensor_types type,
-				 u32 attr, int channel)
+static ssize_t show_fault(struct device *dev,
+			  struct device_attribute *devattr, char *buf)
 {
-	switch (attr) {
-	case hwmon_temp_fault:
-		if (channel == 0)
-			return 0;
-		return S_IRUGO;
-	case hwmon_temp_input:
-		return S_IRUGO;
-	default:
-		return 0;
-	}
+	int index = to_sensor_dev_attr(devattr)->index;
+	struct tmp421_data *data = tmp421_update_device(dev);
+
+	/*
+	 * The OPEN bit signals a fault. This is bit 0 of the temperature
+	 * register (low byte).
+	 */
+	if (data->temp[index] & 0x01)
+		return sprintf(buf, "1\n");
+	else
+		return sprintf(buf, "0\n");
 }
+
+static umode_t tmp421_is_visible(struct kobject *kobj, struct attribute *a,
+				int n)
+{
+	struct device *dev = container_of(kobj, struct device, kobj);
+	struct tmp421_data *data = dev_get_drvdata(dev);
+	struct device_attribute *devattr;
+	unsigned int index;
+
+	devattr = container_of(a, struct device_attribute, attr);
+	index = to_sensor_dev_attr(devattr)->index;
+
+	if (index < data->channels)
+		return a->mode;
+
+	return 0;
+}
+
+static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_temp_value, NULL, 0);
+static SENSOR_DEVICE_ATTR(temp2_input, S_IRUGO, show_temp_value, NULL, 1);
+static SENSOR_DEVICE_ATTR(temp2_fault, S_IRUGO, show_fault, NULL, 1);
+static SENSOR_DEVICE_ATTR(temp3_input, S_IRUGO, show_temp_value, NULL, 2);
+static SENSOR_DEVICE_ATTR(temp3_fault, S_IRUGO, show_fault, NULL, 2);
+static SENSOR_DEVICE_ATTR(temp4_input, S_IRUGO, show_temp_value, NULL, 3);
+static SENSOR_DEVICE_ATTR(temp4_fault, S_IRUGO, show_fault, NULL, 3);
+
+static struct attribute *tmp421_attr[] = {
+	&sensor_dev_attr_temp1_input.dev_attr.attr,
+	&sensor_dev_attr_temp2_input.dev_attr.attr,
+	&sensor_dev_attr_temp2_fault.dev_attr.attr,
+	&sensor_dev_attr_temp3_input.dev_attr.attr,
+	&sensor_dev_attr_temp3_fault.dev_attr.attr,
+	&sensor_dev_attr_temp4_input.dev_attr.attr,
+	&sensor_dev_attr_temp4_fault.dev_attr.attr,
+	NULL
+};
+
+static const struct attribute_group tmp421_group = {
+	.attrs = tmp421_attr,
+	.is_visible = tmp421_is_visible,
+};
 
 static int tmp421_init_client(struct i2c_client *client)
 {
@@ -179,9 +208,9 @@ static int tmp421_init_client(struct i2c_client *client)
 	/* Start conversions (disable shutdown if necessary) */
 	config = i2c_smbus_read_byte_data(client, TMP421_CONFIG_REG_1);
 	if (config < 0) {
-		dev_err(&client->dev,
-			"Could not read configuration register (%d)\n", config);
-		return config;
+		dev_err(&client->dev, "Could not read configuration"
+			 " register (%d)\n", config);
+		return -ENODEV;
 	}
 
 	config_orig = config;
@@ -200,9 +229,7 @@ static int tmp421_detect(struct i2c_client *client,
 {
 	enum chips kind;
 	struct i2c_adapter *adapter = client->adapter;
-	const char * const names[] = { "TMP421", "TMP422", "TMP423",
-				       "TMP441", "TMP442" };
-	int addr = client->addr;
+	const char *names[] = { "TMP421", "TMP422", "TMP423" };
 	u8 reg;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
@@ -212,36 +239,16 @@ static int tmp421_detect(struct i2c_client *client,
 	if (reg != TMP421_MANUFACTURER_ID)
 		return -ENODEV;
 
-	reg = i2c_smbus_read_byte_data(client, TMP421_CONVERSION_RATE_REG);
-	if (reg & 0xf8)
-		return -ENODEV;
-
-	reg = i2c_smbus_read_byte_data(client, TMP421_STATUS_REG);
-	if (reg & 0x7f)
-		return -ENODEV;
-
 	reg = i2c_smbus_read_byte_data(client, TMP421_DEVICE_ID_REG);
 	switch (reg) {
 	case TMP421_DEVICE_ID:
 		kind = tmp421;
 		break;
 	case TMP422_DEVICE_ID:
-		if (addr == 0x2a)
-			return -ENODEV;
 		kind = tmp422;
 		break;
 	case TMP423_DEVICE_ID:
-		if (addr != 0x4c && addr != 0x4d)
-			return -ENODEV;
 		kind = tmp423;
-		break;
-	case TMP441_DEVICE_ID:
-		kind = tmp441;
-		break;
-	case TMP442_DEVICE_ID:
-		if (addr != 0x4c && addr != 0x4d)
-			return -ENODEV;
-		kind = tmp442;
 		break;
 	default:
 		return -ENODEV;
@@ -254,47 +261,55 @@ static int tmp421_detect(struct i2c_client *client,
 	return 0;
 }
 
-static const struct hwmon_ops tmp421_ops = {
-	.is_visible = tmp421_is_visible,
-	.read = tmp421_read,
-};
-
 static int tmp421_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
-	struct device *dev = &client->dev;
-	struct device *hwmon_dev;
 	struct tmp421_data *data;
-	int i, err;
+	int err;
 
-	data = devm_kzalloc(dev, sizeof(struct tmp421_data), GFP_KERNEL);
+	data = kzalloc(sizeof(struct tmp421_data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
+	i2c_set_clientdata(client, data);
 	mutex_init(&data->update_lock);
 	data->channels = id->driver_data;
-	data->client = client;
 
 	err = tmp421_init_client(client);
 	if (err)
-		return err;
+		goto exit_free;
 
-	for (i = 0; i < data->channels; i++)
-		data->temp_config[i] = HWMON_T_INPUT | HWMON_T_FAULT;
+	err = sysfs_create_group(&client->dev.kobj, &tmp421_group);
+	if (err)
+		goto exit_free;
 
-	data->chip.ops = &tmp421_ops;
-	data->chip.info = data->info;
+	data->hwmon_dev = hwmon_device_register(&client->dev);
+	if (IS_ERR(data->hwmon_dev)) {
+		err = PTR_ERR(data->hwmon_dev);
+		data->hwmon_dev = NULL;
+		goto exit_remove;
+	}
+	return 0;
 
-	data->info[0] = &data->temp_info;
+exit_remove:
+	sysfs_remove_group(&client->dev.kobj, &tmp421_group);
 
-	data->temp_info.type = hwmon_temp;
-	data->temp_info.config = data->temp_config;
+exit_free:
+	kfree(data);
 
-	hwmon_dev = devm_hwmon_device_register_with_info(dev, client->name,
-							 data,
-							 &data->chip,
-							 NULL);
-	return PTR_ERR_OR_ZERO(hwmon_dev);
+	return err;
+}
+
+static int tmp421_remove(struct i2c_client *client)
+{
+	struct tmp421_data *data = i2c_get_clientdata(client);
+
+	hwmon_device_unregister(data->hwmon_dev);
+	sysfs_remove_group(&client->dev.kobj, &tmp421_group);
+
+	kfree(data);
+
+	return 0;
 }
 
 static struct i2c_driver tmp421_driver = {
@@ -303,6 +318,7 @@ static struct i2c_driver tmp421_driver = {
 		.name	= "tmp421",
 	},
 	.probe = tmp421_probe,
+	.remove = tmp421_remove,
 	.id_table = tmp421_id,
 	.detect = tmp421_detect,
 	.address_list = normal_i2c,
@@ -311,5 +327,6 @@ static struct i2c_driver tmp421_driver = {
 module_i2c_driver(tmp421_driver);
 
 MODULE_AUTHOR("Andre Prendel <andre.prendel@gmx.de>");
-MODULE_DESCRIPTION("Texas Instruments TMP421/422/423/441/442 temperature sensor driver");
+MODULE_DESCRIPTION("Texas Instruments TMP421/422/423 temperature sensor"
+		   " driver");
 MODULE_LICENSE("GPL");

@@ -85,8 +85,8 @@ PP_VALUE
 
 %%
 
-void perf_pmu_error(struct list_head *list __maybe_unused,
-		    char *name __maybe_unused,
-		    char const *msg __maybe_unused)
+void perf_pmu_error(struct list_head *list __used,
+		    char *name __used,
+		    char const *msg __used)
 {
 }

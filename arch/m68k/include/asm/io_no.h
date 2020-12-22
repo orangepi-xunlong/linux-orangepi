@@ -3,10 +3,7 @@
 
 #ifdef __KERNEL__
 
-#define ARCH_HAS_IOREMAP_WT
-
 #include <asm/virtconvert.h>
-#include <asm-generic/iomap.h>
 
 /*
  * These are for ISA/PCI shared memory _only_ and should never be used
@@ -42,6 +39,10 @@ static inline unsigned int _swapl(volatile unsigned long v)
 #define readl(addr) \
     ({ unsigned int __v = (*(volatile unsigned int *) (addr)); __v; })
 
+#define readb_relaxed(addr) readb(addr)
+#define readw_relaxed(addr) readw(addr)
+#define readl_relaxed(addr) readl(addr)
+
 #define writeb(b,addr) (void)((*(volatile unsigned char *) (addr)) = (b))
 #define writew(b,addr) (void)((*(volatile unsigned short *) (addr)) = (b))
 #define writel(b,addr) (void)((*(volatile unsigned int *) (addr)) = (b))
@@ -53,7 +54,7 @@ static inline unsigned int _swapl(volatile unsigned long v)
 #define __raw_writew writew
 #define __raw_writel writel
 
-static inline void io_outsb(unsigned int addr, const void *buf, int len)
+static inline void io_outsb(unsigned int addr, void *buf, int len)
 {
 	volatile unsigned char *ap = (volatile unsigned char *) addr;
 	unsigned char *bp = (unsigned char *) buf;
@@ -61,7 +62,7 @@ static inline void io_outsb(unsigned int addr, const void *buf, int len)
 		*ap = *bp++;
 }
 
-static inline void io_outsw(unsigned int addr, const void *buf, int len)
+static inline void io_outsw(unsigned int addr, void *buf, int len)
 {
 	volatile unsigned short *ap = (volatile unsigned short *) addr;
 	unsigned short *bp = (unsigned short *) buf;
@@ -69,7 +70,7 @@ static inline void io_outsw(unsigned int addr, const void *buf, int len)
 		*ap = _swapw(*bp++);
 }
 
-static inline void io_outsl(unsigned int addr, const void *buf, int len)
+static inline void io_outsl(unsigned int addr, void *buf, int len)
 {
 	volatile unsigned int *ap = (volatile unsigned int *) addr;
 	unsigned int *bp = (unsigned int *) buf;
@@ -155,7 +156,7 @@ static inline void *ioremap_nocache(unsigned long physaddr, unsigned long size)
 {
 	return __ioremap(physaddr, size, IOMAP_NOCACHE_SER);
 }
-static inline void *ioremap_wt(unsigned long physaddr, unsigned long size)
+static inline void *ioremap_writethrough(unsigned long physaddr, unsigned long size)
 {
 	return __ioremap(physaddr, size, IOMAP_WRITETHROUGH);
 }
@@ -176,15 +177,6 @@ static inline void *ioremap_fullcache(unsigned long physaddr, unsigned long size
  * Convert a virtual cached pointer to an uncached pointer
  */
 #define xlate_dev_kmem_ptr(p)	p
-
-static inline void __iomem *ioport_map(unsigned long port, unsigned int nr)
-{
-	return (void __iomem *) port;
-}
-
-static inline void ioport_unmap(void __iomem *p)
-{
-}
 
 #endif /* __KERNEL__ */
 

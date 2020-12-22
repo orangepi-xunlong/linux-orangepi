@@ -29,12 +29,14 @@
 
 #include <linux/input.h>
 #include <linux/slab.h>
+#include <linux/usb.h>
 #include <linux/hid.h>
 #include <linux/module.h>
 
 #include "hid-ids.h"
 
 #ifdef CONFIG_HID_ACRUX_FF
+#include "usbhid/usbhid.h"
 
 struct axff_device {
 	struct hid_report *report;
@@ -66,7 +68,7 @@ static int axff_play(struct input_dev *dev, void *data, struct ff_effect *effect
 	}
 
 	dbg_hid("running with 0x%02x 0x%02x", left, right);
-	hid_hw_request(hid, axff->report, HID_REQ_SET_REPORT);
+	usbhid_submit_report(hid, axff->report, USB_DIR_OUT);
 
 	return 0;
 }
@@ -95,7 +97,7 @@ static int axff_init(struct hid_device *hid)
 		}
 	}
 
-	if (field_count < 4 && hid->product != 0xf705) {
+	if (field_count < 4) {
 		hid_err(hid, "not enough fields in the report: %d\n",
 			field_count);
 		return -ENODEV;
@@ -112,7 +114,7 @@ static int axff_init(struct hid_device *hid)
 		goto err_free_mem;
 
 	axff->report = report;
-	hid_hw_request(hid, axff->report, HID_REQ_SET_REPORT);
+	usbhid_submit_report(hid, axff->report, USB_DIR_OUT);
 
 	hid_info(hid, "Force Feedback for ACRUX game controllers by Sergei Kolzun <x0r@dv-life.ru>\n");
 
@@ -180,7 +182,6 @@ static void ax_remove(struct hid_device *hdev)
 
 static const struct hid_device_id ax_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_ACRUX, 0x0802), },
-	{ HID_USB_DEVICE(USB_VENDOR_ID_ACRUX, 0xf705), },
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, ax_devices);
@@ -191,7 +192,19 @@ static struct hid_driver ax_driver = {
 	.probe		= ax_probe,
 	.remove		= ax_remove,
 };
-module_hid_driver(ax_driver);
+
+static int __init ax_init(void)
+{
+	return hid_register_driver(&ax_driver);
+}
+
+static void __exit ax_exit(void)
+{
+	hid_unregister_driver(&ax_driver);
+}
+
+module_init(ax_init);
+module_exit(ax_exit);
 
 MODULE_AUTHOR("Sergei Kolzun");
 MODULE_DESCRIPTION("Force feedback support for ACRUX game controllers");

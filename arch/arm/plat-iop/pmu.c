@@ -9,6 +9,7 @@
  */
 
 #include <linux/platform_device.h>
+#include <asm/pmu.h>
 #include <mach/irqs.h>
 
 static struct resource pmu_resource = {
@@ -24,8 +25,8 @@ static struct resource pmu_resource = {
 };
 
 static struct platform_device pmu_device = {
-	.name		= "xscale-pmu",
-	.id		= -1,
+	.name		= "arm-pmu",
+	.id		= ARM_PMU_DEVICE_CPU,
 	.resource	= &pmu_resource,
 	.num_resources	= 1,
 };

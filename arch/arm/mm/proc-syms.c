@@ -17,9 +17,7 @@
 
 #ifndef MULTI_CPU
 EXPORT_SYMBOL(cpu_dcache_clean_area);
-#ifdef CONFIG_MMU
 EXPORT_SYMBOL(cpu_set_pte_ext);
-#endif
 #else
 EXPORT_SYMBOL(processor);
 #endif

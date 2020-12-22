@@ -23,14 +23,12 @@
    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
-#include <linux/crypto.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/random.h>
-#include "cifs_fs_sb.h"
 #include "cifs_unicode.h"
 #include "cifspdu.h"
 #include "cifsglob.h"
@@ -69,22 +67,35 @@ str_to_key(unsigned char *str, unsigned char *key)
 static int
 smbhash(unsigned char *out, const unsigned char *in, unsigned char *key)
 {
+	int rc;
 	unsigned char key2[8];
-	struct crypto_cipher *tfm_des;
+	struct crypto_blkcipher *tfm_des;
+	struct scatterlist sgin, sgout;
+	struct blkcipher_desc desc;
 
 	str_to_key(key, key2);
 
-	tfm_des = crypto_alloc_cipher("des", 0, 0);
+	tfm_des = crypto_alloc_blkcipher("ecb(des)", 0, CRYPTO_ALG_ASYNC);
 	if (IS_ERR(tfm_des)) {
-		cifs_dbg(VFS, "could not allocate des crypto API\n");
-		return PTR_ERR(tfm_des);
+		rc = PTR_ERR(tfm_des);
+		cERROR(1, "could not allocate des crypto API\n");
+		goto smbhash_err;
 	}
 
-	crypto_cipher_setkey(tfm_des, key2, 8);
-	crypto_cipher_encrypt_one(tfm_des, out, in);
-	crypto_free_cipher(tfm_des);
+	desc.tfm = tfm_des;
 
-	return 0;
+	crypto_blkcipher_setkey(tfm_des, key2, 8);
+
+	sg_init_one(&sgin, in, 8);
+	sg_init_one(&sgout, out, 8);
+
+	rc = crypto_blkcipher_encrypt(&desc, &sgout, &sgin, 8);
+	if (rc)
+		cERROR(1, "could not encrypt crypt key rc: %d\n", rc);
+
+	crypto_free_blkcipher(tfm_des);
+smbhash_err:
+	return rc;
 }
 
 static int
@@ -128,14 +139,14 @@ mdfour(unsigned char *md4_hash, unsigned char *link_str, int link_len)
 	md4 = crypto_alloc_shash("md4", 0, 0);
 	if (IS_ERR(md4)) {
 		rc = PTR_ERR(md4);
-		cifs_dbg(VFS, "%s: Crypto md4 allocation error %d\n",
-			 __func__, rc);
+		cERROR(1, "%s: Crypto md4 allocation error %d\n", __func__, rc);
 		return rc;
 	}
 	size = sizeof(struct shash_desc) + crypto_shash_descsize(md4);
 	sdescmd4 = kmalloc(size, GFP_KERNEL);
 	if (!sdescmd4) {
 		rc = -ENOMEM;
+		cERROR(1, "%s: Memory allocation failure\n", __func__);
 		goto mdfour_err;
 	}
 	sdescmd4->shash.tfm = md4;
@@ -143,17 +154,17 @@ mdfour(unsigned char *md4_hash, unsigned char *link_str, int link_len)
 
 	rc = crypto_shash_init(&sdescmd4->shash);
 	if (rc) {
-		cifs_dbg(VFS, "%s: Could not init md4 shash\n", __func__);
+		cERROR(1, "%s: Could not init md4 shash\n", __func__);
 		goto mdfour_err;
 	}
 	rc = crypto_shash_update(&sdescmd4->shash, link_str, link_len);
 	if (rc) {
-		cifs_dbg(VFS, "%s: Could not update with link_str\n", __func__);
+		cERROR(1, "%s: Could not update with link_str\n", __func__);
 		goto mdfour_err;
 	}
 	rc = crypto_shash_final(&sdescmd4->shash, md4_hash);
 	if (rc)
-		cifs_dbg(VFS, "%s: Could not generate md4 hash\n", __func__);
+		cERROR(1, "%s: Could not genereate md4 hash\n", __func__);
 
 mdfour_err:
 	crypto_free_shash(md4);
@@ -209,7 +220,7 @@ E_md4hash(const unsigned char *passwd, unsigned char *p16,
 	}
 
 	rc = mdfour(p16, (unsigned char *) wpwd, len * sizeof(__le16));
-	memzero_explicit(wpwd, sizeof(wpwd));
+	memset(wpwd, 0, 129 * sizeof(__le16));
 
 	return rc;
 }
@@ -227,8 +238,7 @@ SMBNTencrypt(unsigned char *passwd, unsigned char *c8, unsigned char *p24,
 
 	rc = E_md4hash(passwd, p16, codepage);
 	if (rc) {
-		cifs_dbg(FYI, "%s Can't generate NT hash, error: %d\n",
-			 __func__, rc);
+		cFYI(1, "%s Can't generate NT hash, error: %d", __func__, rc);
 		return rc;
 	}
 	memcpy(p21, p16, 16);

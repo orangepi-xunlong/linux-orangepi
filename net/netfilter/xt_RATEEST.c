@@ -24,6 +24,7 @@ static DEFINE_MUTEX(xt_rateest_mutex);
 #define RATEEST_HSIZE	16
 static struct hlist_head rateest_hash[RATEEST_HSIZE] __read_mostly;
 static unsigned int jhash_rnd __read_mostly;
+static bool rnd_inited __read_mostly;
 
 static unsigned int xt_rateest_hash(const char *name)
 {
@@ -39,30 +40,23 @@ static void xt_rateest_hash_insert(struct xt_rateest *est)
 	hlist_add_head(&est->list, &rateest_hash[h]);
 }
 
-static struct xt_rateest *__xt_rateest_lookup(const char *name)
-{
-	struct xt_rateest *est;
-	unsigned int h;
-
-	h = xt_rateest_hash(name);
-	hlist_for_each_entry(est, &rateest_hash[h], list) {
-		if (strcmp(est->name, name) == 0) {
-			est->refcnt++;
-			return est;
-		}
-	}
-
-	return NULL;
-}
-
 struct xt_rateest *xt_rateest_lookup(const char *name)
 {
 	struct xt_rateest *est;
+	struct hlist_node *n;
+	unsigned int h;
 
+	h = xt_rateest_hash(name);
 	mutex_lock(&xt_rateest_mutex);
-	est = __xt_rateest_lookup(name);
+	hlist_for_each_entry(est, n, &rateest_hash[h], list) {
+		if (strcmp(est->name, name) == 0) {
+			est->refcnt++;
+			mutex_unlock(&xt_rateest_mutex);
+			return est;
+		}
+	}
 	mutex_unlock(&xt_rateest_mutex);
-	return est;
+	return NULL;
 }
 EXPORT_SYMBOL_GPL(xt_rateest_lookup);
 
@@ -106,12 +100,13 @@ static int xt_rateest_tg_checkentry(const struct xt_tgchk_param *par)
 	} cfg;
 	int ret;
 
-	net_get_random_once(&jhash_rnd, sizeof(jhash_rnd));
+	if (unlikely(!rnd_inited)) {
+		get_random_bytes(&jhash_rnd, sizeof(jhash_rnd));
+		rnd_inited = true;
+	}
 
-	mutex_lock(&xt_rateest_mutex);
-	est = __xt_rateest_lookup(info->name);
+	est = xt_rateest_lookup(info->name);
 	if (est) {
-		mutex_unlock(&xt_rateest_mutex);
 		/*
 		 * If estimator parameters are specified, they must match the
 		 * existing estimator.
@@ -142,20 +137,18 @@ static int xt_rateest_tg_checkentry(const struct xt_tgchk_param *par)
 	cfg.est.interval	= info->interval;
 	cfg.est.ewma_log	= info->ewma_log;
 
-	ret = gen_new_estimator(&est->bstats, NULL, &est->rstats,
-				&est->lock, NULL, &cfg.opt);
+	ret = gen_new_estimator(&est->bstats, &est->rstats,
+				&est->lock, &cfg.opt);
 	if (ret < 0)
 		goto err2;
 
 	info->est = est;
 	xt_rateest_hash_insert(est);
-	mutex_unlock(&xt_rateest_mutex);
 	return 0;
 
 err2:
 	kfree(est);
 err1:
-	mutex_unlock(&xt_rateest_mutex);
 	return ret;
 }
 

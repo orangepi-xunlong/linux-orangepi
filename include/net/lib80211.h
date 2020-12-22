@@ -30,7 +30,10 @@
 #include <linux/skbuff.h>
 #include <linux/ieee80211.h>
 #include <linux/timer.h>
-#include <linux/seq_file.h>
+/* print_ssid() is intended to be used in debug (and possibly error)
+ * messages. It should never be used for passing ssid to user space. */
+const char *print_ssid(char *buf, const char *ssid, u8 ssid_len);
+#define DECLARE_SSID_BUF(var) char var[IEEE80211_MAX_SSID_LEN * 4 + 1] __maybe_unused
 
 #define NUM_WEP_KEYS	4
 
@@ -72,7 +75,7 @@ struct lib80211_crypto_ops {
 
 	/* procfs handler for printing out key information and possible
 	 * statistics */
-	void (*print_stats) (struct seq_file *m, void *priv);
+	char *(*print_stats) (char *p, void *priv);
 
 	/* Crypto specific flag get/set for configuration settings */
 	unsigned long (*get_flags) (void *priv);

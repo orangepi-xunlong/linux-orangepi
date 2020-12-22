@@ -42,6 +42,7 @@ MODULE_PARM_DESC(irq, "Which IRQ to use for the clock source MFGPT ticks.");
  *  256         128   .125            512.000
  */
 
+static unsigned int cs5535_tick_mode = CLOCK_EVT_MODE_SHUTDOWN;
 static struct cs5535_mfgpt_timer *cs5535_event_clock;
 
 /* Selected from the table above */
@@ -52,7 +53,7 @@ static struct cs5535_mfgpt_timer *cs5535_event_clock;
 #define MFGPT_PERIODIC (MFGPT_HZ / HZ)
 
 /*
- * The MFGPT timers on the CS5536 provide us with suitable timers to use
+ * The MFPGT timers on the CS5536 provide us with suitable timers to use
  * as clock event sources - not as good as a HPET or APIC, but certainly
  * better than the PIT.  This isn't a general purpose MFGPT driver, but
  * a simplified one designed specifically to act as a clock event source.
@@ -76,17 +77,15 @@ static void start_timer(struct cs5535_mfgpt_timer *timer, uint16_t delta)
 			MFGPT_SETUP_CNTEN | MFGPT_SETUP_CMP2);
 }
 
-static int mfgpt_shutdown(struct clock_event_device *evt)
+static void mfgpt_set_mode(enum clock_event_mode mode,
+		struct clock_event_device *evt)
 {
 	disable_timer(cs5535_event_clock);
-	return 0;
-}
 
-static int mfgpt_set_periodic(struct clock_event_device *evt)
-{
-	disable_timer(cs5535_event_clock);
-	start_timer(cs5535_event_clock, MFGPT_PERIODIC);
-	return 0;
+	if (mode == CLOCK_EVT_MODE_PERIODIC)
+		start_timer(cs5535_event_clock, MFGPT_PERIODIC);
+
+	cs5535_tick_mode = mode;
 }
 
 static int mfgpt_next_event(unsigned long delta, struct clock_event_device *evt)
@@ -98,12 +97,10 @@ static int mfgpt_next_event(unsigned long delta, struct clock_event_device *evt)
 static struct clock_event_device cs5535_clockevent = {
 	.name = DRV_NAME,
 	.features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT,
-	.set_state_shutdown = mfgpt_shutdown,
-	.set_state_periodic = mfgpt_set_periodic,
-	.set_state_oneshot = mfgpt_shutdown,
-	.tick_resume = mfgpt_shutdown,
+	.set_mode = mfgpt_set_mode,
 	.set_next_event = mfgpt_next_event,
 	.rating = 250,
+	.shift = 32
 };
 
 static irqreturn_t mfgpt_tick(int irq, void *dev_id)
@@ -117,8 +114,7 @@ static irqreturn_t mfgpt_tick(int irq, void *dev_id)
 	/* Turn off the clock (and clear the event) */
 	disable_timer(cs5535_event_clock);
 
-	if (clockevent_state_detached(&cs5535_clockevent) ||
-	    clockevent_state_shutdown(&cs5535_clockevent))
+	if (cs5535_tick_mode == CLOCK_EVT_MODE_SHUTDOWN)
 		return IRQ_HANDLED;
 
 	/* Clear the counter */
@@ -126,7 +122,7 @@ static irqreturn_t mfgpt_tick(int irq, void *dev_id)
 
 	/* Restart the clock in periodic mode */
 
-	if (clockevent_state_periodic(&cs5535_clockevent))
+	if (cs5535_tick_mode == CLOCK_EVT_MODE_PERIODIC)
 		cs5535_mfgpt_write(cs5535_event_clock, MFGPT_REG_SETUP,
 				MFGPT_SETUP_CNTEN | MFGPT_SETUP_CMP2);
 
@@ -136,7 +132,7 @@ static irqreturn_t mfgpt_tick(int irq, void *dev_id)
 
 static struct irqaction mfgptirq  = {
 	.handler = mfgpt_tick,
-	.flags = IRQF_NOBALANCING | IRQF_TIMER | IRQF_SHARED,
+	.flags = IRQF_DISABLED | IRQF_NOBALANCING | IRQF_TIMER | IRQF_SHARED,
 	.name = DRV_NAME,
 };
 
@@ -148,7 +144,7 @@ static int __init cs5535_mfgpt_init(void)
 
 	timer = cs5535_mfgpt_alloc_timer(MFGPT_TIMER_ANY, MFGPT_DOMAIN_WORKING);
 	if (!timer) {
-		printk(KERN_ERR DRV_NAME ": Could not allocate MFGPT timer\n");
+		printk(KERN_ERR DRV_NAME ": Could not allocate MFPGT timer\n");
 		return -ENODEV;
 	}
 	cs5535_event_clock = timer;
@@ -173,11 +169,17 @@ static int __init cs5535_mfgpt_init(void)
 	cs5535_mfgpt_write(cs5535_event_clock, MFGPT_REG_SETUP, val);
 
 	/* Set up the clock event */
+	cs5535_clockevent.mult = div_sc(MFGPT_HZ, NSEC_PER_SEC,
+			cs5535_clockevent.shift);
+	cs5535_clockevent.min_delta_ns = clockevent_delta2ns(0xF,
+			&cs5535_clockevent);
+	cs5535_clockevent.max_delta_ns = clockevent_delta2ns(0xFFFE,
+			&cs5535_clockevent);
+
 	printk(KERN_INFO DRV_NAME
 		": Registering MFGPT timer as a clock event, using IRQ %d\n",
 		timer_irq);
-	clockevents_config_and_register(&cs5535_clockevent, MFGPT_HZ,
-					0xF, 0xFFFE);
+	clockevents_register_device(&cs5535_clockevent);
 
 	return 0;
 

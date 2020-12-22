@@ -5,49 +5,63 @@
 # License.  See the file "COPYING" in the main directory of this archive
 # for more details.
 #
-# (C) Copyright 2002-2015 Yoshinori Sato <ysato@users.sourceforge.jp>
+# (C) Copyright 2002,2003 Yoshinori Sato <ysato@users.sourceforge.jp>
 #
 
+platform-$(CONFIG_CPU_H8300H)	:= h8300h
+platform-$(CONFIG_CPU_H8S)	:= h8s
+PLATFORM := $(platform-y)
+
+board-$(CONFIG_H8300H_GENERIC)		:= generic
+board-$(CONFIG_H8300H_AKI3068NET)	:= aki3068net
+board-$(CONFIG_H8300H_H8MAX)		:= h8max
+board-$(CONFIG_H8300H_SIM)		:= generic
+board-$(CONFIG_H8S_GENERIC)		:= generic
+board-$(CONFIG_H8S_EDOSK2674)		:= edosk2674
+board-$(CONFIG_H8S_SIM)			:= generic
+BOARD := $(board-y)
+
+model-$(CONFIG_RAMKERNEL)	:= ram
+model-$(CONFIG_ROMKERNEL)	:= rom
+MODEL := $(model-y)
+
 cflags-$(CONFIG_CPU_H8300H)	:= -mh
-aflags-$(CONFIG_CPU_H8300H)	:= -mh -Wa,--mach=h8300h
-ldflags-$(CONFIG_CPU_H8300H)	:= -mh8300helf_linux
+ldflags-$(CONFIG_CPU_H8300H)	:= -mh8300helf
 cflags-$(CONFIG_CPU_H8S)	:= -ms
-aflags-$(CONFIG_CPU_H8S)	:= -ms -Wa,--mach=h8300s
-ldflags-$(CONFIG_CPU_H8S)	:= -mh8300self_linux
+ldflags-$(CONFIG_CPU_H8S)	:= -mh8300self
 
 KBUILD_CFLAGS += $(cflags-y)
 KBUILD_CFLAGS += -mint32 -fno-builtin
+KBUILD_CFLAGS += -g
 KBUILD_CFLAGS += -D__linux__
 KBUILD_CFLAGS += -DUTS_SYSNAME=\"uClinux\"
-KBUILD_AFLAGS += $(aflags-y)
+KBUILD_AFLAGS += -DPLATFORM=$(PLATFORM) -DMODEL=$(MODEL) $(cflags-y)
 LDFLAGS += $(ldflags-y)
 
-ifeq ($(CROSS_COMPILE),)
-CROSS_COMPILE := $(call cc-cross-prefix, h8300-unknown-linux- h8300-linux-)
+CROSS_COMPILE = h8300-elf-
+LIBGCC := $(shell $(CROSS-COMPILE)$(CC) $(KBUILD_CFLAGS) -print-libgcc-file-name)
+
+head-y := arch/$(ARCH)/platform/$(PLATFORM)/$(BOARD)/crt0_$(MODEL).o
+
+core-y	+= arch/$(ARCH)/kernel/ \
+	   arch/$(ARCH)/mm/
+ifdef PLATFORM
+core-y	+= arch/$(ARCH)/platform/$(PLATFORM)/ \
+	   arch/$(ARCH)/platform/$(PLATFORM)/$(BOARD)/
 endif
 
-core-y	+= arch/$(ARCH)/kernel/ arch/$(ARCH)/mm/
-ifneq '$(CONFIG_H8300_BUILTIN_DTB)' '""'
-core-y += arch/h8300/boot/dts/
-endif
-
-libs-y	+= arch/$(ARCH)/lib/
+libs-y	+= arch/$(ARCH)/lib/ $(LIBGCC)
 
 boot := arch/h8300/boot
 
-%.dtb %.dtb.S %.dtb.o: | scripts
-	$(Q)$(MAKE) $(build)=arch/h8300/boot/dts arch/h8300/boot/dts/$@
-
-PHONY += dtbs
-dtbs: scripts
-	$(Q)$(MAKE) $(build)=arch/h8300/boot/dts
+export MODEL PLATFORM BOARD
 
 archmrproper:
 
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
 
-vmlinux.srec vmlinux.bin zImage uImage.bin: vmlinux
+vmlinux.srec vmlinux.bin zImage: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 define archhelp

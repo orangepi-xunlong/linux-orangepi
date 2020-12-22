@@ -16,11 +16,18 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  General Public License for more details.
  *
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+ *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
 #ifndef __ACPI_DRIVERS_H__
 #define __ACPI_DRIVERS_H__
+
+#include <linux/acpi.h>
+#include <acpi/acpi_bus.h>
 
 #define ACPI_MAX_STRING			80
 
@@ -83,21 +90,22 @@ int acpi_pci_link_allocate_irq(acpi_handle handle, int index, int *triggering,
 			       int *polarity, char **name);
 int acpi_pci_link_free_irq(acpi_handle handle);
 
+/* ACPI PCI Interrupt Routing (pci_irq.c) */
+
+int acpi_pci_irq_add_prt(acpi_handle handle, struct pci_bus *bus);
+void acpi_pci_irq_del_prt(struct pci_bus *bus);
+
 /* ACPI PCI Device Binding (pci_bind.c) */
 
 struct pci_bus;
 
 struct pci_dev *acpi_get_pci_dev(acpi_handle);
+int acpi_pci_bind_root(struct acpi_device *device);
 
 /* Arch-defined function to add a bus to the system */
 
 struct pci_bus *pci_acpi_scan_root(struct acpi_pci_root *root);
-
-#ifdef CONFIG_X86
 void pci_acpi_crs_quirks(void);
-#else
-static inline void pci_acpi_crs_quirks(void) { }
-#endif
 
 /* --------------------------------------------------------------------------
                                     Processor
@@ -110,14 +118,40 @@ static inline void pci_acpi_crs_quirks(void) { }
 /*--------------------------------------------------------------------------
                                   Dock Station
   -------------------------------------------------------------------------- */
+struct acpi_dock_ops {
+	acpi_notify_handler handler;
+	acpi_notify_handler uevent;
+};
 
-#ifdef CONFIG_ACPI_DOCK
-extern int is_dock_device(struct acpi_device *adev);
+#if defined(CONFIG_ACPI_DOCK) || defined(CONFIG_ACPI_DOCK_MODULE)
+extern int is_dock_device(acpi_handle handle);
+extern int register_dock_notifier(struct notifier_block *nb);
+extern void unregister_dock_notifier(struct notifier_block *nb);
+extern int register_hotplug_dock_device(acpi_handle handle,
+					const struct acpi_dock_ops *ops,
+					void *context);
+extern void unregister_hotplug_dock_device(acpi_handle handle);
 #else
-static inline int is_dock_device(struct acpi_device *adev)
+static inline int is_dock_device(acpi_handle handle)
 {
 	return 0;
 }
-#endif /* CONFIG_ACPI_DOCK */
+static inline int register_dock_notifier(struct notifier_block *nb)
+{
+	return -ENODEV;
+}
+static inline void unregister_dock_notifier(struct notifier_block *nb)
+{
+}
+static inline int register_hotplug_dock_device(acpi_handle handle,
+					       const struct acpi_dock_ops *ops,
+					       void *context)
+{
+	return -ENODEV;
+}
+static inline void unregister_hotplug_dock_device(acpi_handle handle)
+{
+}
+#endif
 
 #endif /*__ACPI_DRIVERS_H__*/

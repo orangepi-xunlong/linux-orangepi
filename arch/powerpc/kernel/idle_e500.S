@@ -21,7 +21,7 @@
 	.text
 
 _GLOBAL(e500_idle)
-	CURRENT_THREAD_INFO(r3, r1)
+	rlwinm	r3,r1,0,0,31-THREAD_SHIFT	/* current thread_info */
 	lwz	r4,TI_LOCAL_FLAGS(r3)	/* set napping bit */
 	ori	r4,r4,_TLF_NAPPING	/* so when we take an exception */
 	stw	r4,TI_LOCAL_FLAGS(r3)	/* it will return to our caller */
@@ -58,6 +58,15 @@ BEGIN_FTR_SECTION
 	mtlr	r0
 	lis	r3,HID0_NAP@h
 END_FTR_SECTION_IFSET(CPU_FTR_CAN_NAP)
+BEGIN_FTR_SECTION
+	msync
+	li	r7,L2CSR0_L2FL@l
+	mtspr	SPRN_L2CSR0,r7
+2:
+	mfspr	r7,SPRN_L2CSR0
+	andi.	r4,r7,L2CSR0_L2FL@l
+	bne	2b
+END_FTR_SECTION_IFSET(CPU_FTR_L2CSR|CPU_FTR_CAN_NAP)
 1:
 	/* Go to NAP or DOZE now */
 	mfspr	r4,SPRN_HID0
@@ -87,7 +96,7 @@ _GLOBAL(power_save_ppc32_restore)
 	stw	r9,_NIP(r11)		/* make it do a blr */
 
 #ifdef CONFIG_SMP
-	CURRENT_THREAD_INFO(r12, r1)
+	rlwinm	r12,r1,0,0,31-THREAD_SHIFT
 	lwz	r11,TI_CPU(r12)		/* get cpu number * 4 */
 	slwi	r11,r11,2
 #else

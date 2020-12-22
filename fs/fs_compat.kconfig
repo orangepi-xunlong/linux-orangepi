@@ -1,0 +1,30 @@
+menuconfig FS_BLOCK_COMPAT
+	bool "Compatibility settings for fs and block layer"
+	default n
+	help
+	  To provide users with some proprietary features.
+
+config PART_FOR_MSDOS
+	bool "Partition size restrictions lifted for msdos"
+	depends on FS_BLOCK_COMPAT && MSDOS_PARTITION
+	default n
+	help
+	  The function is modified in block layer.
+	  /block/partitions/msdos.c
+	  
+config CLUS_FOR_FAT32
+	bool "Cluster restrictions lifted for fat32"
+	depends on FS_BLOCK_COMPAT && FAT_FS
+	default n
+	help
+	  The function is modified in fs layer.
+	  /fs/fat/inode.c
+	  
+config SYNC_FOR_BLKDEV
+	bool "Ensure write data to device after sync system call"
+	depends on FS_BLOCK_COMPAT && BLOCK
+	default n
+	help
+	  The function is modified in fs layer.
+	  /fs/sync.c
+	  /fs/block_dev.c

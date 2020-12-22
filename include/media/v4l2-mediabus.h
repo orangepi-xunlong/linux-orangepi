@@ -40,9 +40,6 @@
 #define V4L2_MBUS_FIELD_EVEN_HIGH		(1 << 10)
 /* FIELD = 1/0 - Field1 (odd)/Field2 (even) */
 #define V4L2_MBUS_FIELD_EVEN_LOW		(1 << 11)
-/* Active state of Sync-on-green (SoG) signal, 0/1 for LOW/HIGH respectively. */
-#define V4L2_MBUS_VIDEO_SOG_ACTIVE_HIGH	(1 << 12)
-#define V4L2_MBUS_VIDEO_SOG_ACTIVE_LOW		(1 << 13)
 
 /* Serial flags */
 /* How many lanes the client can use */
@@ -65,7 +62,7 @@
 					 V4L2_MBUS_CSI2_CHANNEL_2 | V4L2_MBUS_CSI2_CHANNEL_3)
 
 /**
- * enum v4l2_mbus_type - media bus type
+ * v4l2_mbus_type - media bus type
  * @V4L2_MBUS_PARALLEL:	parallel interface with hsync and vsync
  * @V4L2_MBUS_BT656:	parallel interface with embedded synchronisation, can
  *			also be used for BT.1120
@@ -78,7 +75,7 @@ enum v4l2_mbus_type {
 };
 
 /**
- * struct v4l2_mbus_config - media bus configuration
+ * v4l2_mbus_config - media bus configuration
  * @type:	in: interface type
  * @flags:	in / out: configuration flags, depending on @type
  */
@@ -94,22 +91,16 @@ static inline void v4l2_fill_pix_format(struct v4l2_pix_format *pix_fmt,
 	pix_fmt->height = mbus_fmt->height;
 	pix_fmt->field = mbus_fmt->field;
 	pix_fmt->colorspace = mbus_fmt->colorspace;
-	pix_fmt->ycbcr_enc = mbus_fmt->ycbcr_enc;
-	pix_fmt->quantization = mbus_fmt->quantization;
-	pix_fmt->xfer_func = mbus_fmt->xfer_func;
 }
 
 static inline void v4l2_fill_mbus_format(struct v4l2_mbus_framefmt *mbus_fmt,
 			   const struct v4l2_pix_format *pix_fmt,
-			   u32 code)
+			   enum v4l2_mbus_pixelcode code)
 {
 	mbus_fmt->width = pix_fmt->width;
 	mbus_fmt->height = pix_fmt->height;
 	mbus_fmt->field = pix_fmt->field;
 	mbus_fmt->colorspace = pix_fmt->colorspace;
-	mbus_fmt->ycbcr_enc = pix_fmt->ycbcr_enc;
-	mbus_fmt->quantization = pix_fmt->quantization;
-	mbus_fmt->xfer_func = pix_fmt->xfer_func;
 	mbus_fmt->code = code;
 }
 

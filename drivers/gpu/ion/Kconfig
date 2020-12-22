@@ -1,0 +1,31 @@
+menuconfig ION
+	tristate "Ion Memory Manager"
+	select GENERIC_ALLOCATOR
+	select DMA_SHARED_BUFFER
+	help
+	  Chose this option to enable the ION Memory Manager.
+
+config ION_TEGRA
+	tristate "Ion for Tegra"
+	depends on ARCH_TEGRA && ION
+	help
+	  Choose this option if you wish to use ion on an nVidia Tegra.
+
+config ION_SUNXI
+	bool "ion for sunxi"
+	depends on ARCH_SUNXI && ION
+	help
+	  ION for sunxi platforms.
+      
+config ION_SUNXI_RESERVE_LIST
+	string "memory size(in MB) array for sunxi ion heap."
+	default "96m,150m"
+	depends on ION_SUNXI
+	help
+	  Select memory size for sunxi ion heap, the memory is used by modules that need physical continous memory.
+	  This memory is either for CMA or for CARVE_OUT heap:
+	  	if CONFIG_CMA is defined, the memory is reserved for CMA;
+	  	if CONFIG_CMA not defined, the memory is reserved for CARVE_OUT heap;
+	  Examples:
+		96m,150m =>reserve 96m for 512M memory,150m for 1G memory
+

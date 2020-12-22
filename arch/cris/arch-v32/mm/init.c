@@ -40,6 +40,17 @@ void __init cris_mmu_init(void)
 	 */
 	per_cpu(current_pgd, smp_processor_id()) = init_mm.pgd;
 
+#ifdef CONFIG_SMP
+	{
+		pgd_t **pgd;
+		pgd = (pgd_t**)&per_cpu(current_pgd, smp_processor_id());
+		SUPP_BANK_SEL(1);
+		SUPP_REG_WR(RW_MM_TLB_PGD, pgd);
+		SUPP_BANK_SEL(2);
+		SUPP_REG_WR(RW_MM_TLB_PGD, pgd);
+	}
+#endif
+
 	/* Initialise the TLB. Function found in tlb.c. */
 	tlb_init();
 
@@ -62,7 +73,11 @@ void __init cris_mmu_init(void)
 #endif
 		       REG_STATE(mmu, rw_mm_cfg, seg_c, linear) |
 		       REG_STATE(mmu, rw_mm_cfg, seg_b, linear) |
+#ifndef CONFIG_ETRAX_VCS_SIM
                        REG_STATE(mmu, rw_mm_cfg, seg_a, page)   |
+#else
+		       REG_STATE(mmu, rw_mm_cfg, seg_a, linear) |
+#endif
 		       REG_STATE(mmu, rw_mm_cfg, seg_9, page)   |
 		       REG_STATE(mmu, rw_mm_cfg, seg_8, page)   |
 		       REG_STATE(mmu, rw_mm_cfg, seg_7, page)   |
@@ -85,7 +100,11 @@ void __init cris_mmu_init(void)
 #endif
                          REG_FIELD(mmu, rw_mm_kbase_hi, base_c, 0x4) |
 			 REG_FIELD(mmu, rw_mm_kbase_hi, base_b, 0xb) |
+#ifndef CONFIG_ETRAX_VCS_SIM
 			 REG_FIELD(mmu, rw_mm_kbase_hi, base_a, 0x0) |
+#else
+                         REG_FIELD(mmu, rw_mm_kbase_hi, base_a, 0xa) |
+#endif
 			 REG_FIELD(mmu, rw_mm_kbase_hi, base_9, 0x0) |
 			 REG_FIELD(mmu, rw_mm_kbase_hi, base_8, 0x0));
 

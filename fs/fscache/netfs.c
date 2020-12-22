@@ -40,15 +40,12 @@ int __fscache_register_netfs(struct fscache_netfs *netfs)
 	/* initialise the primary index cookie */
 	atomic_set(&cookie->usage, 1);
 	atomic_set(&cookie->n_children, 0);
-	atomic_set(&cookie->n_active, 1);
 
 	cookie->def		= &fscache_fsdef_netfs_def;
 	cookie->parent		= &fscache_fsdef_index;
 	cookie->netfs_data	= netfs;
-	cookie->flags		= 1 << FSCACHE_COOKIE_ENABLED;
 
 	spin_lock_init(&cookie->lock);
-	spin_lock_init(&cookie->stores_lock);
 	INIT_HLIST_HEAD(&cookie->backing_objects);
 
 	/* check the netfs type is not already present */
@@ -67,7 +64,8 @@ int __fscache_register_netfs(struct fscache_netfs *netfs)
 	list_add(&netfs->link, &fscache_netfs_list);
 	ret = 0;
 
-	pr_notice("Netfs '%s' registered for caching\n", netfs->name);
+	printk(KERN_NOTICE "FS-Cache: Netfs '%s' registered for caching\n",
+	       netfs->name);
 
 already_registered:
 	up_write(&fscache_addremove_sem);
@@ -95,8 +93,8 @@ void __fscache_unregister_netfs(struct fscache_netfs *netfs)
 
 	up_write(&fscache_addremove_sem);
 
-	pr_notice("Netfs '%s' unregistered from caching\n",
-		  netfs->name);
+	printk(KERN_NOTICE "FS-Cache: Netfs '%s' unregistered from caching\n",
+	       netfs->name);
 
 	_leave("");
 }

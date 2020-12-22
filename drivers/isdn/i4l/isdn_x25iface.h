@@ -19,6 +19,7 @@
 #endif
 
 #include <linux/skbuff.h>
+#include <linux/wanrouter.h>
 #include <linux/isdn.h>
 #include <linux/concap.h>
 

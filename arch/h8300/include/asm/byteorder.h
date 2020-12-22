@@ -1,7 +1,6 @@
-#ifndef __H8300_BYTEORDER_H__
-#define __H8300_BYTEORDER_H__
+#ifndef _H8300_BYTEORDER_H
+#define _H8300_BYTEORDER_H
 
-#define __BIG_ENDIAN __ORDER_BIG_ENDIAN__
 #include <linux/byteorder/big_endian.h>
 
-#endif
+#endif /* _H8300_BYTEORDER_H */

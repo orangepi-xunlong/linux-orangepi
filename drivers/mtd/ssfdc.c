@@ -290,7 +290,7 @@ static void ssfdcr_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	int cis_sector;
 
 	/* Check for small page NAND flash */
-	if (!mtd_type_is_nand(mtd) || mtd->oobsize != OOB_SIZE ||
+	if (mtd->type != MTD_NANDFLASH || mtd->oobsize != OOB_SIZE ||
 	    mtd->size > UINT_MAX)
 		return;
 
@@ -380,7 +380,8 @@ static int ssfdcr_readsect(struct mtd_blktrans_dev *dev,
 		" block_addr=%d\n", logic_sect_no, sectors_per_block, offset,
 		block_address);
 
-	BUG_ON(block_address >= ssfdc->map_len);
+	if (block_address >= ssfdc->map_len)
+		BUG();
 
 	block_address = ssfdc->logic_block_map[block_address];
 

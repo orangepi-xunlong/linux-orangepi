@@ -19,7 +19,7 @@
  *
  */
 
-#include <stddef.h>
+#include <libio.h>
 #include <dwarf-regs.h>
 
 /*
@@ -51,5 +51,5 @@ const char *sh_regs_table[SH_MAX_REGS] = {
 /* Return architecture dependent register string (for kprobe-tracer) */
 const char *get_arch_regstr(unsigned int n)
 {
-	return (n < SH_MAX_REGS) ? sh_regs_table[n] : NULL;
+	return (n <= SH_MAX_REGS) ? sh_regs_table[n] : NULL;
 }

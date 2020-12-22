@@ -2,12 +2,11 @@
 # D. J. Bernstein
 # Public domain.
 
-#include <linux/linkage.h>
-
+# enter ECRYPT_encrypt_bytes
 .text
-
-# enter salsa20_encrypt_bytes
-ENTRY(salsa20_encrypt_bytes)
+.p2align 5
+.globl ECRYPT_encrypt_bytes
+ECRYPT_encrypt_bytes:
 	mov	%esp,%eax
 	and	$31,%eax
 	add	$256,%eax
@@ -934,10 +933,11 @@ ENTRY(salsa20_encrypt_bytes)
 	add	$64,%esi
 	# goto bytesatleast1
 	jmp	._bytesatleast1
-ENDPROC(salsa20_encrypt_bytes)
-
-# enter salsa20_keysetup
-ENTRY(salsa20_keysetup)
+# enter ECRYPT_keysetup
+.text
+.p2align 5
+.globl ECRYPT_keysetup
+ECRYPT_keysetup:
 	mov	%esp,%eax
 	and	$31,%eax
 	add	$256,%eax
@@ -1060,10 +1060,11 @@ ENTRY(salsa20_keysetup)
 	# leave
 	add	%eax,%esp
 	ret
-ENDPROC(salsa20_keysetup)
-
-# enter salsa20_ivsetup
-ENTRY(salsa20_ivsetup)
+# enter ECRYPT_ivsetup
+.text
+.p2align 5
+.globl ECRYPT_ivsetup
+ECRYPT_ivsetup:
 	mov	%esp,%eax
 	and	$31,%eax
 	add	$256,%eax
@@ -1111,4 +1112,3 @@ ENTRY(salsa20_ivsetup)
 	# leave
 	add	%eax,%esp
 	ret
-ENDPROC(salsa20_ivsetup)

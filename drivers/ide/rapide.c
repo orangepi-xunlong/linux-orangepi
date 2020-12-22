@@ -29,7 +29,8 @@ static void rapide_setup_ports(struct ide_hw *hw, void __iomem *base,
 	hw->irq = irq;
 }
 
-static int rapide_probe(struct expansion_card *ec, const struct ecard_id *id)
+static int __devinit
+rapide_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	void __iomem *base;
 	struct ide_host *host;
@@ -63,7 +64,7 @@ static int rapide_probe(struct expansion_card *ec, const struct ecard_id *id)
 	return ret;
 }
 
-static void rapide_remove(struct expansion_card *ec)
+static void __devexit rapide_remove(struct expansion_card *ec)
 {
 	struct ide_host *host = ecard_get_drvdata(ec);
 
@@ -81,7 +82,7 @@ static struct ecard_id rapide_ids[] = {
 
 static struct ecard_driver rapide_driver = {
 	.probe		= rapide_probe,
-	.remove		= rapide_remove,
+	.remove		= __devexit_p(rapide_remove),
 	.id_table	= rapide_ids,
 	.drv = {
 		.name	= "rapide",

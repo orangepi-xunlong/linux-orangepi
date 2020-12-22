@@ -22,7 +22,6 @@
 #define FT_NAMELEN 32		/* length of ASCII WWPNs including pad */
 #define FT_TPG_NAMELEN 32	/* max length of TPG name */
 #define FT_LUN_NAMELEN 32	/* max length of LUN name */
-#define TCM_FC_DEFAULT_TAGS 512	/* tags used for per-session preallocation */
 
 struct ft_transport_id {
 	__u8	format;
@@ -80,8 +79,8 @@ struct ft_node_auth {
  * Node ACL for FC remote port session.
  */
 struct ft_node_acl {
-	struct se_node_acl se_node_acl;
 	struct ft_node_auth node_auth;
+	struct se_node_acl se_node_acl;
 };
 
 struct ft_lun {
@@ -94,19 +93,20 @@ struct ft_lun {
  */
 struct ft_tpg {
 	u32 index;
-	struct ft_lport_wwn *lport_wwn;
+	struct ft_lport_acl *lport_acl;
 	struct ft_tport *tport;		/* active tport or NULL */
+	struct list_head list;		/* linkage in ft_lport_acl tpg_list */
 	struct list_head lun_list;	/* head of LUNs */
 	struct se_portal_group se_tpg;
 	struct workqueue_struct *workqueue;
 };
 
-struct ft_lport_wwn {
+struct ft_lport_acl {
 	u64 wwpn;
 	char name[FT_NAMELEN];
-	struct list_head ft_wwn_node;
-	struct ft_tpg *tpg;
-	struct se_wwn se_wwn;
+	struct list_head list;
+	struct list_head tpg_list;
+	struct se_wwn fc_lport_wwn;
 };
 
 /*
@@ -127,9 +127,10 @@ struct ft_cmd {
 	u32 sg_cnt;			/* No. of item in scatterlist */
 };
 
+extern struct list_head ft_lport_list;
 extern struct mutex ft_lport_lock;
 extern struct fc4_prov ft_prov;
-extern unsigned int ft_debug_logging;
+extern struct target_fabric_configfs *ft_configfs;
 
 /*
  * Fabric methods.
@@ -139,6 +140,7 @@ extern unsigned int ft_debug_logging;
  * Session ops.
  */
 void ft_sess_put(struct ft_sess *);
+int ft_sess_shutdown(struct se_session *);
 void ft_sess_close(struct se_session *);
 u32 ft_sess_get_index(struct se_session *);
 u32 ft_sess_get_port_name(struct se_session *, unsigned char *, u32);
@@ -156,15 +158,16 @@ int ft_queue_status(struct se_cmd *);
 int ft_queue_data_in(struct se_cmd *);
 int ft_write_pending(struct se_cmd *);
 int ft_write_pending_status(struct se_cmd *);
+u32 ft_get_task_tag(struct se_cmd *);
 int ft_get_cmd_state(struct se_cmd *);
-void ft_queue_tm_resp(struct se_cmd *);
-void ft_aborted_task(struct se_cmd *);
+int ft_queue_tm_resp(struct se_cmd *);
 
 /*
  * other internal functions.
  */
 void ft_recv_req(struct ft_sess *, struct fc_frame *);
 struct ft_tpg *ft_lport_find_tpg(struct fc_lport *);
+struct ft_node_acl *ft_acl_get(struct ft_tpg *, struct fc_rport_priv *);
 
 void ft_recv_write_data(struct ft_cmd *, struct fc_frame *);
 void ft_dump_cmd(struct ft_cmd *, const char *caller);

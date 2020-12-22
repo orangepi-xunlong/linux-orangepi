@@ -54,11 +54,13 @@ static CommandList_struct *cmd_special_alloc(ctlr_info_t *h);
 static void cmd_free(ctlr_info_t *h, CommandList_struct *c);
 static void cmd_special_free(ctlr_info_t *h, CommandList_struct *c);
 
-static int cciss_scsi_write_info(struct Scsi_Host *sh,
+static int cciss_scsi_proc_info(
+		struct Scsi_Host *sh,
 		char *buffer, /* data buffer */
-		int length); 	   /* length of data in buffer */
-static int cciss_scsi_show_info(struct seq_file *m,
-				struct Scsi_Host *sh);
+		char **start, 	   /* where data in buffer starts */
+		off_t offset,	   /* offset from start of imaginary file */
+		int length, 	   /* length of data in buffer */
+		int func);	   /* 0 == read, 1 == write */
 
 static int cciss_scsi_queue_command (struct Scsi_Host *h,
 				     struct scsi_cmnd *cmd);
@@ -80,10 +82,10 @@ static struct scsi_host_template cciss_driver_template = {
 	.module			= THIS_MODULE,
 	.name			= "cciss",
 	.proc_name		= "cciss",
-	.write_info		= cciss_scsi_write_info,
-	.show_info		= cciss_scsi_show_info,
+	.proc_info		= cciss_scsi_proc_info,
 	.queuecommand		= cciss_scsi_queue_command,
 	.this_id		= 7,
+	.cmd_per_lun		= 1,
 	.use_clustering		= DISABLE_CLUSTERING,
 	/* Can't have eh_bus_reset_handler or eh_host_reset_handler for cciss */
 	.eh_device_reset_handler= cciss_eh_device_reset_handler,
@@ -1300,54 +1302,59 @@ cciss_scsi_user_command(ctlr_info_t *h, int hostno, char *buffer, int length)
 	return length;
 }
 
+
 static int
-cciss_scsi_write_info(struct Scsi_Host *sh,
+cciss_scsi_proc_info(struct Scsi_Host *sh,
 		char *buffer, /* data buffer */
-		int length) 	   /* length of data in buffer */
-{
-	ctlr_info_t *h = (ctlr_info_t *) sh->hostdata[0];
-	if (h == NULL)  /* This really shouldn't ever happen. */
-		return -EINVAL;
-
-	return cciss_scsi_user_command(h, sh->host_no,
-			buffer, length);	
-} 
-
-static int
-cciss_scsi_show_info(struct seq_file *m, struct Scsi_Host *sh)
+		char **start, 	   /* where data in buffer starts */
+		off_t offset,	   /* offset from start of imaginary file */
+		int length, 	   /* length of data in buffer */
+		int func)	   /* 0 == read, 1 == write */
 {
 
-	ctlr_info_t *h = (ctlr_info_t *) sh->hostdata[0];
+	int buflen, datalen;
+	ctlr_info_t *h;
 	int i;
 
+	h = (ctlr_info_t *) sh->hostdata[0];
 	if (h == NULL)  /* This really shouldn't ever happen. */
 		return -EINVAL;
 
-	seq_printf(m, "cciss%d: SCSI host: %d\n",
-			h->ctlr, sh->host_no);
+	if (func == 0) {	/* User is reading from /proc/scsi/ciss*?/?*  */
+		buflen = sprintf(buffer, "cciss%d: SCSI host: %d\n",
+				h->ctlr, sh->host_no);
 
-	/* this information is needed by apps to know which cciss
-	   device corresponds to which scsi host number without
-	   having to open a scsi target device node.  The device
-	   information is not a duplicate of /proc/scsi/scsi because
-	   the two may be out of sync due to scsi hotplug, rather
-	   this info is for an app to be able to use to know how to
-	   get them back in sync. */
+		/* this information is needed by apps to know which cciss
+		   device corresponds to which scsi host number without
+		   having to open a scsi target device node.  The device
+		   information is not a duplicate of /proc/scsi/scsi because
+		   the two may be out of sync due to scsi hotplug, rather
+		   this info is for an app to be able to use to know how to
+		   get them back in sync. */
 
-	for (i = 0; i < ccissscsi[h->ctlr].ndevices; i++) {
-		struct cciss_scsi_dev_t *sd =
-			&ccissscsi[h->ctlr].dev[i];
-		seq_printf(m, "c%db%dt%dl%d %02d "
-			"0x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-			sh->host_no, sd->bus, sd->target, sd->lun,
-			sd->devtype,
-			sd->scsi3addr[0], sd->scsi3addr[1],
-			sd->scsi3addr[2], sd->scsi3addr[3],
-			sd->scsi3addr[4], sd->scsi3addr[5],
-			sd->scsi3addr[6], sd->scsi3addr[7]);
-	}
-	return 0;
-}
+		for (i = 0; i < ccissscsi[h->ctlr].ndevices; i++) {
+			struct cciss_scsi_dev_t *sd =
+				&ccissscsi[h->ctlr].dev[i];
+			buflen += sprintf(&buffer[buflen], "c%db%dt%dl%d %02d "
+				"0x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+				sh->host_no, sd->bus, sd->target, sd->lun,
+				sd->devtype,
+				sd->scsi3addr[0], sd->scsi3addr[1],
+				sd->scsi3addr[2], sd->scsi3addr[3],
+				sd->scsi3addr[4], sd->scsi3addr[5],
+				sd->scsi3addr[6], sd->scsi3addr[7]);
+		}
+		datalen = buflen - offset;
+		if (datalen < 0) { 	/* they're reading past EOF. */
+			datalen = 0;
+			*start = buffer+buflen;	
+		} else
+			*start = buffer + offset;
+		return(datalen);
+	} else 	/* User is writing to /proc/scsi/cciss*?/?*  ... */
+		return cciss_scsi_user_command(h, sh->host_no,
+			buffer, length);	
+} 
 
 /* cciss_scatter_gather takes a struct scsi_cmnd, (cmd), and does the pci 
    dma mapping  and fills in the scatter gather entries of the 

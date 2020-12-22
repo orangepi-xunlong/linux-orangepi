@@ -17,7 +17,6 @@
 
 #ifndef ATH9K_DFS_H
 #define ATH9K_DFS_H
-#include "../dfs_pattern_detector.h"
 
 #if defined(CONFIG_ATH9K_DFS_CERTIFIED)
 /**
@@ -32,14 +31,13 @@
  *
  * The radar information provided as raw payload data is validated and
  * filtered for false pulses. Events passing all tests are forwarded to
- * the DFS detector for pattern detection.
+ * the upper layer for pattern detection.
  */
 void ath9k_dfs_process_phyerr(struct ath_softc *sc, void *data,
 			      struct ath_rx_status *rs, u64 mactime);
 #else
-static inline void
-ath9k_dfs_process_phyerr(struct ath_softc *sc, void *data,
-			 struct ath_rx_status *rs, u64 mactime) { }
+static inline void ath9k_dfs_process_phyerr(struct ath_softc *sc, void *data,
+					    struct ath_rx_status *rs, u64 mactime) { }
 #endif
 
 #endif /* ATH9K_DFS_H */

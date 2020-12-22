@@ -400,6 +400,7 @@ found:
 		   ntohs(cs->cs_ip.tot_len) == hlen)
 			break;
 		goto uncompressed;
+		break;
 	case SPECIAL_I:
 	case SPECIAL_D:
 		/* actual changes match one of our special case encodings --
@@ -507,10 +508,6 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 		 */
 		x = *cp++;	/* Read conn index */
 		if(x < 0 || x > comp->rslot_limit)
-			goto bad;
-
-		/* Check if the cstate is initialized */
-		if (!comp->rstate[x].initialized)
 			goto bad;
 
 		comp->flags &=~ SLF_TOSS;
@@ -677,7 +674,6 @@ slhc_remember(struct slcompress *comp, unsigned char *icp, int isize)
 	if (cs->cs_tcp.doff > 5)
 	  memcpy(cs->cs_tcpopt, icp + ihl*4 + sizeof(struct tcphdr), (cs->cs_tcp.doff - 5) * 4);
 	cs->cs_hsize = ihl*2 + cs->cs_tcp.doff*2;
-	cs->initialized = true;
 	/* Put headers back on packet
 	 * Neither header checksum is recalculated
 	 */

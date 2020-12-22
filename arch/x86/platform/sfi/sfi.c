@@ -26,7 +26,6 @@
 #include <linux/sfi.h>
 #include <linux/io.h>
 
-#include <asm/irqdomain.h>
 #include <asm/io_apic.h>
 #include <asm/mpspec.h>
 #include <asm/setup.h>
@@ -36,7 +35,7 @@
 static unsigned long sfi_lapic_addr __initdata = APIC_DEFAULT_PHYS_BASE;
 
 /* All CPUs enumerated by SFI must be present and enabled */
-static void __init mp_sfi_register_lapic(u8 id)
+static void __cpuinit mp_sfi_register_lapic(u8 id)
 {
 	if (MAX_LOCAL_APIC - id <= 0) {
 		pr_warning("Processor #%d invalid (max %d)\n",
@@ -77,17 +76,13 @@ static int __init sfi_parse_ioapic(struct sfi_table_header *table)
 	struct sfi_table_simple *sb;
 	struct sfi_apic_table_entry *pentry;
 	int i, num;
-	struct ioapic_domain_cfg cfg = {
-		.type = IOAPIC_DOMAIN_STRICT,
-		.ops = &mp_ioapic_irqdomain_ops,
-	};
 
 	sb = (struct sfi_table_simple *)table;
 	num = SFI_GET_NUM_ENTRIES(sb, struct sfi_apic_table_entry);
 	pentry = (struct sfi_apic_table_entry *)sb->pentry;
 
 	for (i = 0; i < num; i++) {
-		mp_register_ioapic(i, pentry->phys_addr, gsi_top, &cfg);
+		mp_register_ioapic(i, pentry->phys_addr, gsi_top);
 		pentry++;
 	}
 

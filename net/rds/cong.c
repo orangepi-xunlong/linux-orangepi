@@ -221,22 +221,7 @@ void rds_cong_queue_updates(struct rds_cong_map *map)
 	list_for_each_entry(conn, &map->m_conn_list, c_map_item) {
 		if (!test_and_set_bit(0, &conn->c_map_queued)) {
 			rds_stats_inc(s_cong_update_queued);
-			/* We cannot inline the call to rds_send_xmit() here
-			 * for two reasons (both pertaining to a TCP transport):
-			 * 1. When we get here from the receive path, we
-			 *    are already holding the sock_lock (held by
-			 *    tcp_v4_rcv()). So inlining calls to
-			 *    tcp_setsockopt and/or tcp_sendmsg will deadlock
-			 *    when it tries to get the sock_lock())
-			 * 2. Interrupts are masked so that we can mark the
-			 *    the port congested from both send and recv paths.
-			 *    (See comment around declaration of rdc_cong_lock).
-			 *    An attempt to get the sock_lock() here will
-			 *    therefore trigger warnings.
-			 * Defer the xmit to rds_send_worker() instead.
-			 */
-			queue_delayed_work(rds_wq,
-					   &conn->c_path[0].cp_send_w, 0);
+			rds_send_xmit(conn);
 		}
 	}
 
@@ -300,7 +285,7 @@ void rds_cong_set_bit(struct rds_cong_map *map, __be16 port)
 	i = be16_to_cpu(port) / RDS_CONG_MAP_PAGE_BITS;
 	off = be16_to_cpu(port) % RDS_CONG_MAP_PAGE_BITS;
 
-	set_bit_le(off, (void *)map->m_page_addrs[i]);
+	__set_bit_le(off, (void *)map->m_page_addrs[i]);
 }
 
 void rds_cong_clear_bit(struct rds_cong_map *map, __be16 port)
@@ -314,7 +299,7 @@ void rds_cong_clear_bit(struct rds_cong_map *map, __be16 port)
 	i = be16_to_cpu(port) / RDS_CONG_MAP_PAGE_BITS;
 	off = be16_to_cpu(port) % RDS_CONG_MAP_PAGE_BITS;
 
-	clear_bit_le(off, (void *)map->m_page_addrs[i]);
+	__clear_bit_le(off, (void *)map->m_page_addrs[i]);
 }
 
 static int rds_cong_test_bit(struct rds_cong_map *map, __be16 port)

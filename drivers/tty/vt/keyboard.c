@@ -33,7 +33,6 @@
 #include <linux/string.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/leds.h>
 
 #include <linux/kbd_kern.h>
 #include <linux/kbd_diacr.h>
@@ -54,13 +53,17 @@ extern void ctrl_alt_del(void);
 
 #define KBD_DEFMODE ((1 << VC_REPEAT) | (1 << VC_META))
 
-#if defined(CONFIG_X86) || defined(CONFIG_PARISC)
-#include <asm/kbdleds.h>
+/*
+ * Some laptops take the 789uiojklm,. keys as number pad when NumLock is on.
+ * This seems a good reason to start with NumLock off. On HIL keyboards
+ * of PARISC machines however there is no NumLock key and everyone expects the
+ * keypad to be used for numbers.
+ */
+
+#if defined(CONFIG_PARISC) && (defined(CONFIG_KEYBOARD_HIL) || defined(CONFIG_KEYBOARD_HIL_OLD))
+#define KBD_DEFLEDS (1 << VC_NUMLOCK)
 #else
-static inline int kbd_defleds(void)
-{
-	return 0;
-}
+#define KBD_DEFLEDS 0
 #endif
 
 #define KBD_DEFLOCK 0
@@ -120,7 +123,6 @@ static const int NR_TYPES = ARRAY_SIZE(max_vals);
 
 static struct input_handler kbd_handler;
 static DEFINE_SPINLOCK(kbd_event_lock);
-static DEFINE_SPINLOCK(led_lock);
 static unsigned long key_down[BITS_TO_LONGS(KEY_CNT)];	/* keyboard key bitmap */
 static unsigned char shift_down[NR_SHIFT];		/* shift state counters.. */
 static bool dead_key_next;
@@ -130,8 +132,14 @@ static char rep;					/* flag telling character repeat */
 
 static int shift_state = 0;
 
-static unsigned int ledstate = -1U;			/* undefined */
+static unsigned char ledstate = 0xff;			/* undefined */
 static unsigned char ledioctl;
+
+static struct ledptr {
+	unsigned int *addr;
+	unsigned int mask;
+	unsigned char valid:1;
+} ledptrs[3];
 
 /*
  * Notifier list for console keyboard events
@@ -269,30 +277,30 @@ EXPORT_SYMBOL(kd_mksound);
 static int kbd_rate_helper(struct input_handle *handle, void *data)
 {
 	struct input_dev *dev = handle->dev;
-	struct kbd_repeat *rpt = data;
+	struct kbd_repeat *rep = data;
 
 	if (test_bit(EV_REP, dev->evbit)) {
 
-		if (rpt[0].delay > 0)
+		if (rep[0].delay > 0)
 			input_inject_event(handle,
-					   EV_REP, REP_DELAY, rpt[0].delay);
-		if (rpt[0].period > 0)
+					   EV_REP, REP_DELAY, rep[0].delay);
+		if (rep[0].period > 0)
 			input_inject_event(handle,
-					   EV_REP, REP_PERIOD, rpt[0].period);
+					   EV_REP, REP_PERIOD, rep[0].period);
 
-		rpt[1].delay = dev->rep[REP_DELAY];
-		rpt[1].period = dev->rep[REP_PERIOD];
+		rep[1].delay = dev->rep[REP_DELAY];
+		rep[1].period = dev->rep[REP_PERIOD];
 	}
 
 	return 0;
 }
 
-int kbd_rate(struct kbd_repeat *rpt)
+int kbd_rate(struct kbd_repeat *rep)
 {
-	struct kbd_repeat data[2] = { *rpt };
+	struct kbd_repeat data[2] = { *rep };
 
 	input_handler_for_each_handle(&kbd_handler, data, kbd_rate_helper);
-	*rpt = data[1];	/* Copy currently used settings */
+	*rep = data[1];	/* Copy currently used settings */
 
 	return 0;
 }
@@ -302,17 +310,26 @@ int kbd_rate(struct kbd_repeat *rpt)
  */
 static void put_queue(struct vc_data *vc, int ch)
 {
-	tty_insert_flip_char(&vc->port, ch, 0);
-	tty_schedule_flip(&vc->port);
+	struct tty_struct *tty = vc->port.tty;
+
+	if (tty) {
+		tty_insert_flip_char(tty, ch, 0);
+		con_schedule_flip(tty);
+	}
 }
 
 static void puts_queue(struct vc_data *vc, char *cp)
 {
+	struct tty_struct *tty = vc->port.tty;
+
+	if (!tty)
+		return;
+
 	while (*cp) {
-		tty_insert_flip_char(&vc->port, *cp, 0);
+		tty_insert_flip_char(tty, *cp, 0);
 		cp++;
 	}
-	tty_schedule_flip(&vc->port);
+	con_schedule_flip(tty);
 }
 
 static void applkey(struct vc_data *vc, int key, char mode)
@@ -366,22 +383,34 @@ static void to_utf8(struct vc_data *vc, uint c)
 
 static void do_compute_shiftstate(void)
 {
-	unsigned int k, sym, val;
+	unsigned int i, j, k, sym, val;
 
 	shift_state = 0;
 	memset(shift_down, 0, sizeof(shift_down));
 
-	for_each_set_bit(k, key_down, min(NR_KEYS, KEY_CNT)) {
-		sym = U(key_maps[0][k]);
-		if (KTYP(sym) != KT_SHIFT && KTYP(sym) != KT_SLOCK)
+	for (i = 0; i < ARRAY_SIZE(key_down); i++) {
+
+		if (!key_down[i])
 			continue;
 
-		val = KVAL(sym);
-		if (val == KVAL(K_CAPSSHIFT))
-			val = KVAL(K_SHIFT);
+		k = i * BITS_PER_LONG;
 
-		shift_down[val]++;
-		shift_state |= BIT(val);
+		for (j = 0; j < BITS_PER_LONG; j++, k++) {
+
+			if (!test_bit(k, key_down))
+				continue;
+
+			sym = U(key_maps[0][k]);
+			if (KTYP(sym) != KT_SHIFT && KTYP(sym) != KT_SLOCK)
+				continue;
+
+			val = KVAL(sym);
+			if (val == KVAL(K_CAPSSHIFT))
+				val = KVAL(K_SHIFT);
+
+			shift_down[val]++;
+			shift_state |= (1 << val);
+		}
 	}
 }
 
@@ -556,8 +585,12 @@ static void fn_inc_console(struct vc_data *vc)
 
 static void fn_send_intr(struct vc_data *vc)
 {
-	tty_insert_flip_char(&vc->port, 0, TTY_BREAK);
-	tty_schedule_flip(&vc->port);
+	struct tty_struct *tty = vc->port.tty;
+
+	if (!tty)
+		return;
+	tty_insert_flip_char(tty, 0, TTY_BREAK);
+	con_schedule_flip(tty);
 }
 
 static void fn_scroll_forw(struct vc_data *vc)
@@ -567,7 +600,7 @@ static void fn_scroll_forw(struct vc_data *vc)
 
 static void fn_scroll_back(struct vc_data *vc)
 {
-	scrollback(vc);
+	scrollback(vc, 0);
 }
 
 static void fn_show_mem(struct vc_data *vc)
@@ -913,7 +946,7 @@ static void k_brl(struct vc_data *vc, unsigned char value, char up_flag)
 
 	if (kbd->kbdmode != VC_UNICODE) {
 		if (!up_flag)
-			pr_warn("keyboard mode must be unicode for braille patterns\n");
+			pr_warning("keyboard mode must be unicode for braille patterns\n");
 		return;
 	}
 
@@ -950,98 +983,56 @@ static void k_brl(struct vc_data *vc, unsigned char value, char up_flag)
 	}
 }
 
-#if IS_ENABLED(CONFIG_INPUT_LEDS) && IS_ENABLED(CONFIG_LEDS_TRIGGERS)
-
-struct kbd_led_trigger {
-	struct led_trigger trigger;
-	unsigned int mask;
-};
-
-static void kbd_led_trigger_activate(struct led_classdev *cdev)
+/*
+ * The leds display either (i) the status of NumLock, CapsLock, ScrollLock,
+ * or (ii) whatever pattern of lights people want to show using KDSETLED,
+ * or (iii) specified bits of specified words in kernel memory.
+ */
+unsigned char getledstate(void)
 {
-	struct kbd_led_trigger *trigger =
-		container_of(cdev->trigger, struct kbd_led_trigger, trigger);
-
-	tasklet_disable(&keyboard_tasklet);
-	if (ledstate != -1U)
-		led_trigger_event(&trigger->trigger,
-				  ledstate & trigger->mask ?
-					LED_FULL : LED_OFF);
-	tasklet_enable(&keyboard_tasklet);
+	return ledstate;
 }
 
-#define KBD_LED_TRIGGER(_led_bit, _name) {			\
-		.trigger = {					\
-			.name = _name,				\
-			.activate = kbd_led_trigger_activate,	\
-		},						\
-		.mask	= BIT(_led_bit),			\
-	}
-
-#define KBD_LOCKSTATE_TRIGGER(_led_bit, _name)		\
-	KBD_LED_TRIGGER((_led_bit) + 8, _name)
-
-static struct kbd_led_trigger kbd_led_triggers[] = {
-	KBD_LED_TRIGGER(VC_SCROLLOCK, "kbd-scrolllock"),
-	KBD_LED_TRIGGER(VC_NUMLOCK,   "kbd-numlock"),
-	KBD_LED_TRIGGER(VC_CAPSLOCK,  "kbd-capslock"),
-	KBD_LED_TRIGGER(VC_KANALOCK,  "kbd-kanalock"),
-
-	KBD_LOCKSTATE_TRIGGER(VC_SHIFTLOCK,  "kbd-shiftlock"),
-	KBD_LOCKSTATE_TRIGGER(VC_ALTGRLOCK,  "kbd-altgrlock"),
-	KBD_LOCKSTATE_TRIGGER(VC_CTRLLOCK,   "kbd-ctrllock"),
-	KBD_LOCKSTATE_TRIGGER(VC_ALTLOCK,    "kbd-altlock"),
-	KBD_LOCKSTATE_TRIGGER(VC_SHIFTLLOCK, "kbd-shiftllock"),
-	KBD_LOCKSTATE_TRIGGER(VC_SHIFTRLOCK, "kbd-shiftrlock"),
-	KBD_LOCKSTATE_TRIGGER(VC_CTRLLLOCK,  "kbd-ctrlllock"),
-	KBD_LOCKSTATE_TRIGGER(VC_CTRLRLOCK,  "kbd-ctrlrlock"),
-};
-
-static void kbd_propagate_led_state(unsigned int old_state,
-				    unsigned int new_state)
+void setledstate(struct kbd_struct *kbd, unsigned int led)
 {
-	struct kbd_led_trigger *trigger;
-	unsigned int changed = old_state ^ new_state;
+        unsigned long flags;
+        spin_lock_irqsave(&kbd_event_lock, flags);
+	if (!(led & ~7)) {
+		ledioctl = led;
+		kbd->ledmode = LED_SHOW_IOCTL;
+	} else
+		kbd->ledmode = LED_SHOW_FLAGS;
+
+	set_leds();
+	spin_unlock_irqrestore(&kbd_event_lock, flags);
+}
+
+static inline unsigned char getleds(void)
+{
+	struct kbd_struct *kbd = kbd_table + fg_console;
+	unsigned char leds;
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(kbd_led_triggers); i++) {
-		trigger = &kbd_led_triggers[i];
+	if (kbd->ledmode == LED_SHOW_IOCTL)
+		return ledioctl;
 
-		if (changed & trigger->mask)
-			led_trigger_event(&trigger->trigger,
-					  new_state & trigger->mask ?
-						LED_FULL : LED_OFF);
+	leds = kbd->ledflagstate;
+
+	if (kbd->ledmode == LED_SHOW_MEM) {
+		for (i = 0; i < 3; i++)
+			if (ledptrs[i].valid) {
+				if (*ledptrs[i].addr & ledptrs[i].mask)
+					leds |= (1 << i);
+				else
+					leds &= ~(1 << i);
+			}
 	}
+	return leds;
 }
 
 static int kbd_update_leds_helper(struct input_handle *handle, void *data)
 {
-	unsigned int led_state = *(unsigned int *)data;
-
-	if (test_bit(EV_LED, handle->dev->evbit))
-		kbd_propagate_led_state(~led_state, led_state);
-
-	return 0;
-}
-
-static void kbd_init_leds(void)
-{
-	int error;
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(kbd_led_triggers); i++) {
-		error = led_trigger_register(&kbd_led_triggers[i].trigger);
-		if (error)
-			pr_err("error %d while registering trigger %s\n",
-			       error, kbd_led_triggers[i].trigger.name);
-	}
-}
-
-#else
-
-static int kbd_update_leds_helper(struct input_handle *handle, void *data)
-{
-	unsigned int leds = *(unsigned int *)data;
+	unsigned char leds = *(unsigned char *)data;
 
 	if (test_bit(EV_LED, handle->dev->evbit)) {
 		input_inject_event(handle, EV_LED, LED_SCROLLL, !!(leds & 0x01));
@@ -1053,53 +1044,6 @@ static int kbd_update_leds_helper(struct input_handle *handle, void *data)
 	return 0;
 }
 
-static void kbd_propagate_led_state(unsigned int old_state,
-				    unsigned int new_state)
-{
-	input_handler_for_each_handle(&kbd_handler, &new_state,
-				      kbd_update_leds_helper);
-}
-
-static void kbd_init_leds(void)
-{
-}
-
-#endif
-
-/*
- * The leds display either (i) the status of NumLock, CapsLock, ScrollLock,
- * or (ii) whatever pattern of lights people want to show using KDSETLED,
- * or (iii) specified bits of specified words in kernel memory.
- */
-static unsigned char getledstate(void)
-{
-	return ledstate & 0xff;
-}
-
-void setledstate(struct kbd_struct *kb, unsigned int led)
-{
-        unsigned long flags;
-        spin_lock_irqsave(&led_lock, flags);
-	if (!(led & ~7)) {
-		ledioctl = led;
-		kb->ledmode = LED_SHOW_IOCTL;
-	} else
-		kb->ledmode = LED_SHOW_FLAGS;
-
-	set_leds();
-	spin_unlock_irqrestore(&led_lock, flags);
-}
-
-static inline unsigned char getleds(void)
-{
-	struct kbd_struct *kb = kbd_table + fg_console;
-
-	if (kb->ledmode == LED_SHOW_IOCTL)
-		return ledioctl;
-
-	return kb->ledflagstate;
-}
-
 /**
  *	vt_get_leds	-	helper for braille console
  *	@console: console to read
@@ -1109,13 +1053,10 @@ static inline unsigned char getleds(void)
  */
 int vt_get_leds(int console, int flag)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
 	int ret;
-	unsigned long flags;
 
-	spin_lock_irqsave(&led_lock, flags);
-	ret = vc_kbd_led(kb, flag);
-	spin_unlock_irqrestore(&led_lock, flags);
+	ret = vc_kbd_led(kbd, flag);
 
 	return ret;
 }
@@ -1131,8 +1072,8 @@ EXPORT_SYMBOL_GPL(vt_get_leds);
  */
 void vt_set_led_state(int console, int leds)
 {
-	struct kbd_struct *kb = kbd_table + console;
-	setledstate(kb, leds);
+	struct kbd_struct * kbd = kbd_table + console;
+	setledstate(kbd, leds);
 }
 
 /**
@@ -1150,12 +1091,12 @@ void vt_set_led_state(int console, int leds)
  */
 void vt_kbd_con_start(int console)
 {
-	struct kbd_struct *kb = kbd_table + console;
-	unsigned long flags;
-	spin_lock_irqsave(&led_lock, flags);
-	clr_vc_kbd_led(kb, VC_SCROLLOCK);
+	struct kbd_struct * kbd = kbd_table + console;
+/*	unsigned long flags; */
+/*	spin_lock_irqsave(&kbd_event_lock, flags); */
+	clr_vc_kbd_led(kbd, VC_SCROLLOCK);
 	set_leds();
-	spin_unlock_irqrestore(&led_lock, flags);
+/*	spin_unlock_irqrestore(&kbd_event_lock, flags); */
 }
 
 /**
@@ -1164,35 +1105,37 @@ void vt_kbd_con_start(int console)
  *
  *	Handle console stop. This is a wrapper for the VT layer
  *	so that we can keep kbd knowledge internal
+ *
+ *	FIXME: We eventually need to hold the kbd lock here to protect
+ *	the LED updating. We can't do it yet because fn_hold calls stop_tty
+ *	and start_tty under the kbd_event_lock, while normal tty paths
+ *	don't hold the lock. We probably need to split out an LED lock
+ *	but not during an -rc release!
  */
 void vt_kbd_con_stop(int console)
 {
-	struct kbd_struct *kb = kbd_table + console;
-	unsigned long flags;
-	spin_lock_irqsave(&led_lock, flags);
-	set_vc_kbd_led(kb, VC_SCROLLOCK);
+	struct kbd_struct * kbd = kbd_table + console;
+/*	unsigned long flags; */
+/*	spin_lock_irqsave(&kbd_event_lock, flags); */
+	set_vc_kbd_led(kbd, VC_SCROLLOCK);
 	set_leds();
-	spin_unlock_irqrestore(&led_lock, flags);
+/*	spin_unlock_irqrestore(&kbd_event_lock, flags); */
 }
 
 /*
- * This is the tasklet that updates LED state of LEDs using standard
- * keyboard triggers. The reason we use tasklet is that we need to
- * handle the scenario when keyboard handler is not registered yet
- * but we already getting updates from the VT to update led state.
+ * This is the tasklet that updates LED state on all keyboards
+ * attached to the box. The reason we use tasklet is that we
+ * need to handle the scenario when keyboard handler is not
+ * registered yet but we already getting updates from the VT to
+ * update led state.
  */
 static void kbd_bh(unsigned long dummy)
 {
-	unsigned int leds;
-	unsigned long flags;
-
-	spin_lock_irqsave(&led_lock, flags);
-	leds = getleds();
-	leds |= (unsigned int)kbd->lockstate << 8;
-	spin_unlock_irqrestore(&led_lock, flags);
+	unsigned char leds = getleds();
 
 	if (leds != ledstate) {
-		kbd_propagate_led_state(ledstate, leds);
+		input_handler_for_each_handle(&kbd_handler, &leds,
+					      kbd_update_leds_helper);
 		ledstate = leds;
 	}
 }
@@ -1343,8 +1286,8 @@ static void kbd_keycode(unsigned int keycode, int down, int hw_raw)
 	if (raw_mode && !hw_raw)
 		if (emulate_raw(vc, keycode, !down << 7))
 			if (keycode < BTN_MISC && printk_ratelimit())
-				pr_warn("can't emulate rawmode for keycode %d\n",
-					keycode);
+				pr_warning("can't emulate rawmode for keycode %d\n",
+					   keycode);
 
 #ifdef CONFIG_SPARC
 	if (keycode == KEY_A && sparc_l1_a_state) {
@@ -1540,7 +1483,7 @@ static void kbd_start(struct input_handle *handle)
 {
 	tasklet_disable(&keyboard_tasklet);
 
-	if (ledstate != -1U)
+	if (ledstate != 0xff)
 		kbd_update_leds_helper(handle, &ledstate);
 
 	tasklet_enable(&keyboard_tasklet);
@@ -1578,16 +1521,14 @@ int __init kbd_init(void)
 	int error;
 
 	for (i = 0; i < MAX_NR_CONSOLES; i++) {
-		kbd_table[i].ledflagstate = kbd_defleds();
-		kbd_table[i].default_ledflagstate = kbd_defleds();
+		kbd_table[i].ledflagstate = KBD_DEFLEDS;
+		kbd_table[i].default_ledflagstate = KBD_DEFLEDS;
 		kbd_table[i].ledmode = LED_SHOW_FLAGS;
 		kbd_table[i].lockstate = KBD_DEFLOCK;
 		kbd_table[i].slockstate = 0;
 		kbd_table[i].modeflags = KBD_DEFMODE;
 		kbd_table[i].kbdmode = default_utf8 ? VC_UNICODE : VC_XLATE;
 	}
-
-	kbd_init_leds();
 
 	error = input_register_handler(&kbd_handler);
 	if (error)
@@ -1604,14 +1545,15 @@ int __init kbd_init(void)
 /**
  *	vt_do_diacrit		-	diacritical table updates
  *	@cmd: ioctl request
- *	@udp: pointer to user data for ioctl
+ *	@up: pointer to user data for ioctl
  *	@perm: permissions check computed by caller
  *
  *	Update the diacritical tables atomically and safely. Lock them
  *	against simultaneous keypresses
  */
-int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
+int vt_do_diacrit(unsigned int cmd, void __user *up, int perm)
 {
+	struct kbdiacrs __user *a = up;
 	unsigned long flags;
 	int asize;
 	int ret = 0;
@@ -1619,13 +1561,12 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 	switch (cmd) {
 	case KDGKBDIACR:
 	{
-		struct kbdiacrs __user *a = udp;
-		struct kbdiacr *dia;
+		struct kbdiacr *diacr;
 		int i;
 
-		dia = kmalloc(MAX_DIACR * sizeof(struct kbdiacr),
+		diacr = kmalloc(MAX_DIACR * sizeof(struct kbdiacr),
 								GFP_KERNEL);
-		if (!dia)
+		if (diacr == NULL)
 			return -ENOMEM;
 
 		/* Lock the diacriticals table, make a copy and then
@@ -1634,26 +1575,26 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 
 		asize = accent_table_size;
 		for (i = 0; i < asize; i++) {
-			dia[i].diacr = conv_uni_to_8bit(
+			diacr[i].diacr = conv_uni_to_8bit(
 						accent_table[i].diacr);
-			dia[i].base = conv_uni_to_8bit(
+			diacr[i].base = conv_uni_to_8bit(
 						accent_table[i].base);
-			dia[i].result = conv_uni_to_8bit(
+			diacr[i].result = conv_uni_to_8bit(
 						accent_table[i].result);
 		}
 		spin_unlock_irqrestore(&kbd_event_lock, flags);
 
 		if (put_user(asize, &a->kb_cnt))
 			ret = -EFAULT;
-		else  if (copy_to_user(a->kbdiacr, dia,
+		else  if (copy_to_user(a->kbdiacr, diacr,
 				asize * sizeof(struct kbdiacr)))
 			ret = -EFAULT;
-		kfree(dia);
+		kfree(diacr);
 		return ret;
 	}
 	case KDGKBDIACRUC:
 	{
-		struct kbdiacrsuc __user *a = udp;
+		struct kbdiacrsuc __user *a = up;
 		void *buf;
 
 		buf = kmalloc(MAX_DIACR * sizeof(struct kbdiacruc),
@@ -1681,8 +1622,8 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 
 	case KDSKBDIACR:
 	{
-		struct kbdiacrs __user *a = udp;
-		struct kbdiacr *dia = NULL;
+		struct kbdiacrs __user *a = up;
+		struct kbdiacr *diacr = NULL;
 		unsigned int ct;
 		int i;
 
@@ -1694,32 +1635,36 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 			return -EINVAL;
 
 		if (ct) {
+			diacr = kmalloc(sizeof(struct kbdiacr) * ct,
+								GFP_KERNEL);
+			if (diacr == NULL)
+				return -ENOMEM;
 
-			dia = memdup_user(a->kbdiacr,
-					sizeof(struct kbdiacr) * ct);
-			if (IS_ERR(dia))
-				return PTR_ERR(dia);
-
+			if (copy_from_user(diacr, a->kbdiacr,
+					sizeof(struct kbdiacr) * ct)) {
+				kfree(diacr);
+				return -EFAULT;
+			}
 		}
 
 		spin_lock_irqsave(&kbd_event_lock, flags);
 		accent_table_size = ct;
 		for (i = 0; i < ct; i++) {
 			accent_table[i].diacr =
-					conv_8bit_to_uni(dia[i].diacr);
+					conv_8bit_to_uni(diacr[i].diacr);
 			accent_table[i].base =
-					conv_8bit_to_uni(dia[i].base);
+					conv_8bit_to_uni(diacr[i].base);
 			accent_table[i].result =
-					conv_8bit_to_uni(dia[i].result);
+					conv_8bit_to_uni(diacr[i].result);
 		}
 		spin_unlock_irqrestore(&kbd_event_lock, flags);
-		kfree(dia);
+		kfree(diacr);
 		return 0;
 	}
 
 	case KDSKBDIACRUC:
 	{
-		struct kbdiacrsuc __user *a = udp;
+		struct kbdiacrsuc __user *a = up;
 		unsigned int ct;
 		void *buf = NULL;
 
@@ -1733,10 +1678,16 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 			return -EINVAL;
 
 		if (ct) {
-			buf = memdup_user(a->kbdiacruc,
-					  ct * sizeof(struct kbdiacruc));
-			if (IS_ERR(buf))
-				return PTR_ERR(buf);
+			buf = kmalloc(ct * sizeof(struct kbdiacruc),
+								GFP_KERNEL);
+			if (buf == NULL)
+				return -ENOMEM;
+
+			if (copy_from_user(buf, a->kbdiacruc,
+					ct * sizeof(struct kbdiacruc))) {
+				kfree(buf);
+				return -EFAULT;
+			}
 		} 
 		spin_lock_irqsave(&kbd_event_lock, flags);
 		if (ct)
@@ -1761,28 +1712,28 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
  */
 int vt_do_kdskbmode(int console, unsigned int arg)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
 	int ret = 0;
 	unsigned long flags;
 
 	spin_lock_irqsave(&kbd_event_lock, flags);
 	switch(arg) {
 	case K_RAW:
-		kb->kbdmode = VC_RAW;
+		kbd->kbdmode = VC_RAW;
 		break;
 	case K_MEDIUMRAW:
-		kb->kbdmode = VC_MEDIUMRAW;
+		kbd->kbdmode = VC_MEDIUMRAW;
 		break;
 	case K_XLATE:
-		kb->kbdmode = VC_XLATE;
+		kbd->kbdmode = VC_XLATE;
 		do_compute_shiftstate();
 		break;
 	case K_UNICODE:
-		kb->kbdmode = VC_UNICODE;
+		kbd->kbdmode = VC_UNICODE;
 		do_compute_shiftstate();
 		break;
 	case K_OFF:
-		kb->kbdmode = VC_OFF;
+		kbd->kbdmode = VC_OFF;
 		break;
 	default:
 		ret = -EINVAL;
@@ -1801,17 +1752,17 @@ int vt_do_kdskbmode(int console, unsigned int arg)
  */
 int vt_do_kdskbmeta(int console, unsigned int arg)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
 	int ret = 0;
 	unsigned long flags;
 
 	spin_lock_irqsave(&kbd_event_lock, flags);
 	switch(arg) {
 	case K_METABIT:
-		clr_vc_kbd_mode(kb, VC_META);
+		clr_vc_kbd_mode(kbd, VC_META);
 		break;
 	case K_ESCPREFIX:
-		set_vc_kbd_mode(kb, VC_META);
+		set_vc_kbd_mode(kbd, VC_META);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1850,7 +1801,7 @@ int vt_do_kbkeycode_ioctl(int cmd, struct kbkeycode __user *user_kbkc,
 int vt_do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm,
 						int console)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
 	struct kbentry tmp;
 	ushort *key_map, *new_map, val, ov;
 	unsigned long flags;
@@ -1868,7 +1819,7 @@ int vt_do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm,
 		key_map = key_maps[s];
 		if (key_map) {
 		    val = U(key_map[i]);
-		    if (kb->kbdmode != VC_UNICODE && KTYP(val) >= NR_TYPES)
+		    if (kbd->kbdmode != VC_UNICODE && KTYP(val) >= NR_TYPES)
 			val = K_HOLE;
 		} else
 		    val = (i ? K_HOLE : K_NOSUCHMAP);
@@ -1896,7 +1847,7 @@ int vt_do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm,
 		    if (KVAL(v) > max_vals[KTYP(v)])
 				return -EINVAL;
 		} else
-		    if (kb->kbdmode != VC_UNICODE)
+		    if (kbd->kbdmode != VC_UNICODE)
 				return -EINVAL;
 
 		/* ++Geert: non-PC keyboards may generate keycode zero */
@@ -2067,7 +2018,7 @@ reterr:
 
 int vt_do_kdskled(int console, int cmd, unsigned long arg, int perm)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
         unsigned long flags;
 	unsigned char ucval;
 
@@ -2076,7 +2027,7 @@ int vt_do_kdskled(int console, int cmd, unsigned long arg, int perm)
 	/* don't use them - they will go away without warning */
 	case KDGKBLED:
                 spin_lock_irqsave(&kbd_event_lock, flags);
-		ucval = kb->ledflagstate | (kb->default_ledflagstate << 4);
+		ucval = kbd->ledflagstate | (kbd->default_ledflagstate << 4);
                 spin_unlock_irqrestore(&kbd_event_lock, flags);
 		return put_user(ucval, (char __user *)arg);
 
@@ -2085,11 +2036,11 @@ int vt_do_kdskled(int console, int cmd, unsigned long arg, int perm)
 			return -EPERM;
 		if (arg & ~0x77)
 			return -EINVAL;
-                spin_lock_irqsave(&led_lock, flags);
-		kb->ledflagstate = (arg & 7);
-		kb->default_ledflagstate = ((arg >> 4) & 7);
+                spin_lock_irqsave(&kbd_event_lock, flags);
+		kbd->ledflagstate = (arg & 7);
+		kbd->default_ledflagstate = ((arg >> 4) & 7);
 		set_leds();
-                spin_unlock_irqrestore(&led_lock, flags);
+                spin_unlock_irqrestore(&kbd_event_lock, flags);
 		return 0;
 
 	/* the ioctls below only set the lights, not the functions */
@@ -2101,7 +2052,7 @@ int vt_do_kdskled(int console, int cmd, unsigned long arg, int perm)
 	case KDSETLED:
 		if (!perm)
 			return -EPERM;
-		setledstate(kb, arg);
+		setledstate(kbd, arg);
 		return 0;
         }
         return -ENOIOCTLCMD;
@@ -2109,9 +2060,9 @@ int vt_do_kdskled(int console, int cmd, unsigned long arg, int perm)
 
 int vt_do_kdgkbmode(int console)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
 	/* This is a spot read so needs no locking */
-	switch (kb->kbdmode) {
+	switch (kbd->kbdmode) {
 	case VC_RAW:
 		return K_RAW;
 	case VC_MEDIUMRAW:
@@ -2133,9 +2084,9 @@ int vt_do_kdgkbmode(int console)
  */
 int vt_do_kdgkbmeta(int console)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
         /* Again a spot read so no locking */
-	return vc_kbd_mode(kb, VC_META) ? K_ESCPREFIX : K_METABIT;
+	return vc_kbd_mode(kbd, VC_META) ? K_ESCPREFIX : K_METABIT;
 }
 
 /**
@@ -2174,20 +2125,18 @@ int vt_get_shift_state(void)
  */
 void vt_reset_keyboard(int console)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
 	unsigned long flags;
 
 	spin_lock_irqsave(&kbd_event_lock, flags);
-	set_vc_kbd_mode(kb, VC_REPEAT);
-	clr_vc_kbd_mode(kb, VC_CKMODE);
-	clr_vc_kbd_mode(kb, VC_APPLIC);
-	clr_vc_kbd_mode(kb, VC_CRLF);
-	kb->lockstate = 0;
-	kb->slockstate = 0;
-	spin_lock(&led_lock);
-	kb->ledmode = LED_SHOW_FLAGS;
-	kb->ledflagstate = kb->default_ledflagstate;
-	spin_unlock(&led_lock);
+	set_vc_kbd_mode(kbd, VC_REPEAT);
+	clr_vc_kbd_mode(kbd, VC_CKMODE);
+	clr_vc_kbd_mode(kbd, VC_APPLIC);
+	clr_vc_kbd_mode(kbd, VC_CRLF);
+	kbd->lockstate = 0;
+	kbd->slockstate = 0;
+	kbd->ledmode = LED_SHOW_FLAGS;
+	kbd->ledflagstate = kbd->default_ledflagstate;
 	/* do not do set_leds here because this causes an endless tasklet loop
 	   when the keyboard hasn't been initialized yet */
 	spin_unlock_irqrestore(&kbd_event_lock, flags);
@@ -2204,8 +2153,8 @@ void vt_reset_keyboard(int console)
 
 int vt_get_kbd_mode_bit(int console, int bit)
 {
-	struct kbd_struct *kb = kbd_table + console;
-	return vc_kbd_mode(kb, bit);
+	struct kbd_struct * kbd = kbd_table + console;
+	return vc_kbd_mode(kbd, bit);
 }
 
 /**
@@ -2219,11 +2168,11 @@ int vt_get_kbd_mode_bit(int console, int bit)
 
 void vt_set_kbd_mode_bit(int console, int bit)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
 	unsigned long flags;
 
 	spin_lock_irqsave(&kbd_event_lock, flags);
-	set_vc_kbd_mode(kb, bit);
+	set_vc_kbd_mode(kbd, bit);
 	spin_unlock_irqrestore(&kbd_event_lock, flags);
 }
 
@@ -2238,10 +2187,10 @@ void vt_set_kbd_mode_bit(int console, int bit)
 
 void vt_clr_kbd_mode_bit(int console, int bit)
 {
-	struct kbd_struct *kb = kbd_table + console;
+	struct kbd_struct * kbd = kbd_table + console;
 	unsigned long flags;
 
 	spin_lock_irqsave(&kbd_event_lock, flags);
-	clr_vc_kbd_mode(kb, bit);
+	clr_vc_kbd_mode(kbd, bit);
 	spin_unlock_irqrestore(&kbd_event_lock, flags);
 }

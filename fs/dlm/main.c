@@ -17,7 +17,6 @@
 #include "user.h"
 #include "memory.h"
 #include "config.h"
-#include "lowcomms.h"
 
 static int __init init_dlm(void)
 {
@@ -79,7 +78,6 @@ static void __exit exit_dlm(void)
 	dlm_config_exit();
 	dlm_memory_exit();
 	dlm_lockspace_exit();
-	dlm_lowcomms_exit();
 	dlm_unregister_debugfs();
 }
 

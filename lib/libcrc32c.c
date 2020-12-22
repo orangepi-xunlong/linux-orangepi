@@ -36,26 +36,25 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/crc32c.h>
 
 static struct crypto_shash *tfm;
 
 u32 crc32c(u32 crc, const void *address, unsigned int length)
 {
-	SHASH_DESC_ON_STACK(shash, tfm);
-	u32 ret, *ctx = (u32 *)shash_desc_ctx(shash);
+	struct {
+		struct shash_desc shash;
+		char ctx[crypto_shash_descsize(tfm)];
+	} desc;
 	int err;
 
-	shash->tfm = tfm;
-	shash->flags = 0;
-	*ctx = crc;
+	desc.shash.tfm = tfm;
+	desc.shash.flags = 0;
+	*(u32 *)desc.ctx = crc;
 
-	err = crypto_shash_update(shash, address, length);
+	err = crypto_shash_update(&desc.shash, address, length);
 	BUG_ON(err);
 
-	ret = *ctx;
-	barrier_data(ctx);
-	return ret;
+	return *(u32 *)desc.ctx;
 }
 
 EXPORT_SYMBOL(crc32c);
@@ -63,7 +62,10 @@ EXPORT_SYMBOL(crc32c);
 static int __init libcrc32c_mod_init(void)
 {
 	tfm = crypto_alloc_shash("crc32c", 0, 0);
-	return PTR_ERR_OR_ZERO(tfm);
+	if (IS_ERR(tfm))
+		return PTR_ERR(tfm);
+
+	return 0;
 }
 
 static void __exit libcrc32c_mod_fini(void)
@@ -77,4 +79,3 @@ module_exit(libcrc32c_mod_fini);
 MODULE_AUTHOR("Clay Haapala <chaapala@cisco.com>");
 MODULE_DESCRIPTION("CRC32c (Castagnoli) calculations");
 MODULE_LICENSE("GPL");
-MODULE_SOFTDEP("pre: crc32c");

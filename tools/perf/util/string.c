@@ -1,5 +1,5 @@
 #include "util.h"
-#include "linux/string.h"
+#include "string.h"
 
 #define K 1024LL
 /*
@@ -9,50 +9,78 @@
  */
 s64 perf_atoll(const char *str)
 {
-	s64 length;
-	char *p;
-	char c;
+	unsigned int i;
+	s64 length = -1, unit = 1;
 
 	if (!isdigit(str[0]))
 		goto out_err;
 
-	length = strtoll(str, &p, 10);
-	switch (c = *p++) {
-		case 'b': case 'B':
-			if (*p)
+	for (i = 1; i < strlen(str); i++) {
+		switch (str[i]) {
+		case 'B':
+		case 'b':
+			break;
+		case 'K':
+			if (str[i + 1] != 'B')
 				goto out_err;
-
-			__fallthrough;
-		case '\0':
-			return length;
+			else
+				goto kilo;
+		case 'k':
+			if (str[i + 1] != 'b')
+				goto out_err;
+kilo:
+			unit = K;
+			break;
+		case 'M':
+			if (str[i + 1] != 'B')
+				goto out_err;
+			else
+				goto mega;
+		case 'm':
+			if (str[i + 1] != 'b')
+				goto out_err;
+mega:
+			unit = K * K;
+			break;
+		case 'G':
+			if (str[i + 1] != 'B')
+				goto out_err;
+			else
+				goto giga;
+		case 'g':
+			if (str[i + 1] != 'b')
+				goto out_err;
+giga:
+			unit = K * K * K;
+			break;
+		case 'T':
+			if (str[i + 1] != 'B')
+				goto out_err;
+			else
+				goto tera;
+		case 't':
+			if (str[i + 1] != 'b')
+				goto out_err;
+tera:
+			unit = K * K * K * K;
+			break;
+		case '\0':	/* only specified figures */
+			unit = 1;
+			break;
 		default:
-			goto out_err;
-		/* two-letter suffices */
-		case 'k': case 'K':
-			length <<= 10;
+			if (!isdigit(str[i]))
+				goto out_err;
 			break;
-		case 'm': case 'M':
-			length <<= 20;
-			break;
-		case 'g': case 'G':
-			length <<= 30;
-			break;
-		case 't': case 'T':
-			length <<= 40;
-			break;
+		}
 	}
-	/* we want the cases to match */
-	if (islower(c)) {
-		if (strcmp(p, "b") != 0)
-			goto out_err;
-	} else {
-		if (strcmp(p, "B") != 0)
-			goto out_err;
-	}
-	return length;
+
+	length = atoll(str) * unit;
+	goto out;
 
 out_err:
-	return -1;
+	length = -1;
+out:
+	return length;
 }
 
 /*
@@ -100,7 +128,7 @@ void argv_free(char **argv)
 {
 	char **p;
 	for (p = argv; *p; p++)
-		zfree(p);
+		free(*p);
 
 	free(argv);
 }
@@ -285,100 +313,3 @@ int strtailcmp(const char *s1, const char *s2)
 	return 0;
 }
 
-/**
- * strxfrchar - Locate and replace character in @s
- * @s:    The string to be searched/changed.
- * @from: Source character to be replaced.
- * @to:   Destination character.
- *
- * Return pointer to the changed string.
- */
-char *strxfrchar(char *s, char from, char to)
-{
-	char *p = s;
-
-	while ((p = strchr(p, from)) != NULL)
-		*p++ = to;
-
-	return s;
-}
-
-/**
- * ltrim - Removes leading whitespace from @s.
- * @s: The string to be stripped.
- *
- * Return pointer to the first non-whitespace character in @s.
- */
-char *ltrim(char *s)
-{
-	int len = strlen(s);
-
-	while (len && isspace(*s)) {
-		len--;
-		s++;
-	}
-
-	return s;
-}
-
-/**
- * rtrim - Removes trailing whitespace from @s.
- * @s: The string to be stripped.
- *
- * Note that the first trailing whitespace is replaced with a %NUL-terminator
- * in the given string @s. Returns @s.
- */
-char *rtrim(char *s)
-{
-	size_t size = strlen(s);
-	char *end;
-
-	if (!size)
-		return s;
-
-	end = s + size - 1;
-	while (end >= s && isspace(*end))
-		end--;
-	*(end + 1) = '\0';
-
-	return s;
-}
-
-char *asprintf_expr_inout_ints(const char *var, bool in, size_t nints, int *ints)
-{
-	/*
-	 * FIXME: replace this with an expression using log10() when we
-	 * find a suitable implementation, maybe the one in the dvb drivers...
-	 *
-	 * "%s == %d || " = log10(MAXINT) * 2 + 8 chars for the operators
-	 */
-	size_t size = nints * 28 + 1; /* \0 */
-	size_t i, printed = 0;
-	char *expr = malloc(size);
-
-	if (expr) {
-		const char *or_and = "||", *eq_neq = "==";
-		char *e = expr;
-
-		if (!in) {
-			or_and = "&&";
-			eq_neq = "!=";
-		}
-
-		for (i = 0; i < nints; ++i) {
-			if (printed == size)
-				goto out_err_overflow;
-
-			if (i > 0)
-				printed += snprintf(e + printed, size - printed, " %s ", or_and);
-			printed += scnprintf(e + printed, size - printed,
-					     "%s %s %d", var, eq_neq, ints[i]);
-		}
-	}
-
-	return expr;
-
-out_err_overflow:
-	free(expr);
-	return NULL;
-}

@@ -12,10 +12,13 @@
  */
 #include <linux/pci.h>
 #include <linux/io.h>
-#include <linux/sh_intc.h>
 #include "pci-sh4.h"
+
+static char irq_tab[] __initdata = {
+	65, 66, 67, 68,
+};
 
 int __init pcibios_map_platform_irq(const struct pci_dev *pdev, u8 slot, u8 pin)
 {
-	return evt2irq(0xa20) + slot;
+	return irq_tab[slot];
 }

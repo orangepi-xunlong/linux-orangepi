@@ -22,6 +22,7 @@
  */
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/init.h>
 #include <linux/i2c.h>
 #include <linux/mfd/rc5t583.h>
 
@@ -254,7 +255,7 @@ static irqreturn_t rc5t583_irq(int irq, void *data)
 {
 	struct rc5t583 *rc5t583 = data;
 	uint8_t int_sts[RC5T583_MAX_INTERRUPT_MASK_REGS];
-	uint8_t master_int = 0;
+	uint8_t master_int;
 	int i;
 	int ret;
 	unsigned int rtc_int_sts = 0;
@@ -344,7 +345,7 @@ int rc5t583_irq_init(struct rc5t583 *rc5t583, int irq, int irq_base)
 	mutex_init(&rc5t583->irq_lock);
 
 	/* Initailize all int register to 0 */
-	for (i = 0; i < RC5T583_MAX_INTERRUPT_EN_REGS; i++)  {
+	for (i = 0; i < RC5T583_MAX_INTERRUPT_MASK_REGS; i++)  {
 		ret = rc5t583_write(rc5t583->dev, irq_en_add[i],
 				rc5t583->irq_en_reg[i]);
 		if (ret < 0)
@@ -386,13 +387,22 @@ int rc5t583_irq_init(struct rc5t583 *rc5t583, int irq, int irq_base)
 		irq_set_chip_and_handler(__irq, &rc5t583_irq_chip,
 					 handle_simple_irq);
 		irq_set_nested_thread(__irq, 1);
-		irq_clear_status_flags(__irq, IRQ_NOREQUEST);
+#ifdef CONFIG_ARM
+		set_irq_flags(__irq, IRQF_VALID);
+#endif
 	}
 
-	ret = devm_request_threaded_irq(rc5t583->dev, irq, NULL, rc5t583_irq,
-					IRQF_ONESHOT, "rc5t583", rc5t583);
+	ret = request_threaded_irq(irq, NULL, rc5t583_irq, IRQF_ONESHOT,
+				"rc5t583", rc5t583);
 	if (ret < 0)
 		dev_err(rc5t583->dev,
 			"Error in registering interrupt error: %d\n", ret);
 	return ret;
+}
+
+int rc5t583_irq_exit(struct rc5t583 *rc5t583)
+{
+	if (rc5t583->chip_irq)
+		free_irq(rc5t583->chip_irq, rc5t583);
+	return 0;
 }

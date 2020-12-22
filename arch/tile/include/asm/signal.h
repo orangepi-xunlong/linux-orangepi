@@ -11,11 +11,19 @@
  *   NON INFRINGEMENT.  See the GNU General Public License for
  *   more details.
  */
+
 #ifndef _ASM_TILE_SIGNAL_H
 #define _ASM_TILE_SIGNAL_H
 
-#include <uapi/asm/signal.h>
+/* Do not notify a ptracer when this signal is handled. */
+#define SA_NOPTRACE 0x02000000u
 
+/* Used in earlier Tilera releases, so keeping for binary compatibility. */
+#define SA_RESTORER 0x04000000u
+
+#include <asm-generic/signal.h>
+
+#if defined(__KERNEL__)
 #if !defined(__ASSEMBLY__)
 struct pt_regs;
 int restore_sigcontext(struct pt_regs *, struct sigcontext __user *);
@@ -26,4 +34,6 @@ void signal_fault(const char *type, struct pt_regs *,
 void trace_unhandled_signal(const char *type, struct pt_regs *regs,
 			    unsigned long address, int signo);
 #endif
+#endif
+
 #endif /* _ASM_TILE_SIGNAL_H */

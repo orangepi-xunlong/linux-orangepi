@@ -2,7 +2,7 @@
  * CAIF Framing Layer.
  *
  * Copyright (C) ST-Ericsson AB 2010
- * Author:	Sjur Brendeland
+ * Author:	Sjur Brendeland/sjur.brandeland@stericsson.com
  * License terms: GNU General Public License (GPL) version 2
  */
 
@@ -28,7 +28,7 @@ struct cffrml {
 static int cffrml_receive(struct cflayer *layr, struct cfpkt *pkt);
 static int cffrml_transmit(struct cflayer *layr, struct cfpkt *pkt);
 static void cffrml_ctrlcmd(struct cflayer *layr, enum caif_ctrlcmd ctrl,
-			   int phyid);
+				int phyid);
 
 static u32 cffrml_rcv_error;
 static u32 cffrml_rcv_checsum_error;
@@ -84,7 +84,7 @@ static int cffrml_receive(struct cflayer *layr, struct cfpkt *pkt)
 	u16 tmp;
 	u16 len;
 	u16 hdrchks;
-	int pktchks;
+	u16 pktchks;
 	struct cffrml *this;
 	this = container_obj(layr);
 
@@ -167,7 +167,7 @@ static int cffrml_transmit(struct cflayer *layr, struct cfpkt *pkt)
 }
 
 static void cffrml_ctrlcmd(struct cflayer *layr, enum caif_ctrlcmd ctrl,
-			   int phyid)
+					int phyid)
 {
 	if (layr->up && layr->up->ctrlcmd)
 		layr->up->ctrlcmd(layr->up, ctrl, layr->id);

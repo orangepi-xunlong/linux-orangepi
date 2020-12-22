@@ -25,7 +25,7 @@
 
 #include <asm/irq.h>
 
-#include <linux/platform_data/pcmcia-pxa2xx_viper.h>
+#include <mach/arcom-pcmcia.h>
 
 #include "soc_common.h"
 #include "pxa2xx_base.h"
@@ -172,6 +172,7 @@ static struct platform_driver viper_pcmcia_driver = {
 	.remove		= viper_pcmcia_remove,
 	.driver		= {
 		.name	= "arcom-pcmcia",
+		.owner	= THIS_MODULE,
 	},
 	.id_table	= viper_pcmcia_id_table,
 };

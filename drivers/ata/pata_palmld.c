@@ -48,7 +48,7 @@ static struct ata_port_operations palmld_port_ops = {
 	.cable_detect		= ata_cable_40wire,
 };
 
-static int palmld_pata_probe(struct platform_device *pdev)
+static __devinit int palmld_pata_probe(struct platform_device *pdev)
 {
 	struct ata_host *host;
 	struct ata_port *ap;
@@ -109,9 +109,11 @@ err1:
 	return ret;
 }
 
-static int palmld_pata_remove(struct platform_device *dev)
+static __devexit int palmld_pata_remove(struct platform_device *dev)
 {
-	ata_platform_remove_one(dev);
+	struct ata_host *host = platform_get_drvdata(dev);
+
+	ata_host_detach(host);
 
 	/* power down the HDD */
 	gpio_set_value(GPIO_NR_PALMLD_IDE_PWEN, 0);
@@ -124,9 +126,10 @@ static int palmld_pata_remove(struct platform_device *dev)
 static struct platform_driver palmld_pata_platform_driver = {
 	.driver	 = {
 		.name   = DRV_NAME,
+		.owner  = THIS_MODULE,
 	},
 	.probe		= palmld_pata_probe,
-	.remove		= palmld_pata_remove,
+	.remove		= __devexit_p(palmld_pata_remove),
 };
 
 module_platform_driver(palmld_pata_platform_driver);

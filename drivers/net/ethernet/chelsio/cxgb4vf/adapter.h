@@ -96,9 +96,6 @@ struct port_info {
 	s16 xact_addr_filt;		/* index of our MAC address filter */
 	u16 rss_size;			/* size of VI's RSS table slice */
 	u8 pidx;			/* index into adapter port[] */
-	s8 mdio_addr;
-	u8 port_type;			/* firmware port type */
-	u8 mod_type;			/* firmware module type */
 	u8 port_id;			/* physical port ID */
 	u8 nqsets;			/* # of "Queue Sets" */
 	u8 first_qset;			/* index of first "Queue Set" */
@@ -141,8 +138,6 @@ struct sge_fl {
 	struct rx_sw_desc *sdesc;	/* address of SW RX descriptor ring */
 	__be64 *desc;			/* address of HW RX descriptor ring */
 	dma_addr_t addr;		/* PCI bus address of hardware ring */
-	void __iomem *bar2_addr;	/* address of BAR2 Queue registers */
-	unsigned int bar2_qid;		/* Queue ID for BAR2 Queue registers */
 };
 
 /*
@@ -183,8 +178,6 @@ struct sge_rspq {
 	u16 abs_id;			/* SGE abs QID for the response Q */
 	__be64 *desc;			/* address of hardware response ring */
 	dma_addr_t phys_addr;		/* PCI bus address of ring */
-	void __iomem *bar2_addr;	/* address of BAR2 Queue registers */
-	unsigned int bar2_qid;		/* Queue ID for BAR2 Queue registers */
 	unsigned int iqe_len;		/* entry size */
 	unsigned int size;		/* capcity of response Q */
 	struct adapter *adapter;	/* our adapter */
@@ -247,8 +240,6 @@ struct sge_txq {
 	struct tx_sw_desc *sdesc;	/* address of SW TX descriptor ring */
 	struct sge_qstat *stat;		/* queue status entry */
 	dma_addr_t phys_addr;		/* PCI bus address of hardware ring */
-	void __iomem *bar2_addr;	/* address of BAR2 Queue registers */
-	unsigned int bar2_qid;		/* Queue ID for BAR2 Queue registers */
 };
 
 /*
@@ -308,14 +299,6 @@ struct sge {
 	u16 timer_val[SGE_NTIMERS];	/* interrupt holdoff timer array */
 	u8 counter_val[SGE_NCOUNTERS];	/* interrupt RX threshold array */
 
-	/* Decoded Adapter Parameters.
-	 */
-	u32 fl_pg_order;		/* large page allocation size */
-	u32 stat_len;			/* length of status page at ring end */
-	u32 pktshift;			/* padding between CPL & packet data */
-	u32 fl_align;			/* response queue message alignment */
-	u32 fl_starve_thres;		/* Free List starvation threshold */
-
 	/*
 	 * Reverse maps from Absolute Queue IDs to associated queue pointers.
 	 * The absolute Queue IDs are in a compact range which start at a
@@ -348,22 +331,12 @@ struct sge {
 #define for_each_ethrxq(sge, iter) \
 	for (iter = 0; iter < (sge)->ethqsets; iter++)
 
-struct hash_mac_addr {
-	struct list_head list;
-	u8 addr[ETH_ALEN];
-};
-
-struct mbox_list {
-	struct list_head list;
-};
-
 /*
  * Per-"adapter" (Virtual Function) information.
  */
 struct adapter {
 	/* PCI resources */
 	void __iomem *regs;
-	void __iomem *bar2;
 	struct pci_dev *pdev;
 	struct device *pdev_dev;
 
@@ -390,17 +363,6 @@ struct adapter {
 
 	/* various locks */
 	spinlock_t stats_lock;
-
-	/* lock for mailbox cmd list */
-	spinlock_t mbox_lock;
-	struct mbox_list mlist;
-
-	/* support for mailbox command/reply logging */
-#define T4VF_OS_LOG_MBOX_CMDS 256
-	struct mbox_cmd_log *mbox_log;
-
-	/* list of MAC addresses in MPS Hash */
-	struct list_head mac_hlist;
 };
 
 enum { /* adapter flags */
@@ -504,6 +466,7 @@ static inline void t4_os_set_hw_addr(struct adapter *adapter, int pidx,
 				     u8 hw_addr[])
 {
 	memcpy(adapter->port[pidx]->dev_addr, hw_addr, ETH_ALEN);
+	memcpy(adapter->port[pidx]->perm_addr, hw_addr, ETH_ALEN);
 }
 
 /**
@@ -545,7 +508,6 @@ static inline struct adapter *netdev2adap(const struct net_device *dev)
  * is "contracted" to provide for the common code.
  */
 void t4vf_os_link_changed(struct adapter *, int, int);
-void t4vf_os_portmod_changed(struct adapter *, int);
 
 /*
  * SGE function prototype declarations.

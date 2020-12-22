@@ -291,10 +291,9 @@ static void header_from_disk(struct log_header_core *core, struct log_header_dis
 	core->nr_regions = le64_to_cpu(disk->nr_regions);
 }
 
-static int rw_header(struct log_c *lc, int op)
+static int rw_header(struct log_c *lc, int rw)
 {
-	lc->io_req.bi_op = op;
-	lc->io_req.bi_op_flags = 0;
+	lc->io_req.bi_rw = rw;
 
 	return dm_io(&lc->io_req, 1, &lc->header_location, NULL);
 }
@@ -307,8 +306,7 @@ static int flush_header(struct log_c *lc)
 		.count = 0,
 	};
 
-	lc->io_req.bi_op = REQ_OP_WRITE;
-	lc->io_req.bi_op_flags = WRITE_FLUSH;
+	lc->io_req.bi_rw = WRITE_FLUSH;
 
 	return dm_io(&lc->io_req, 1, &null_location, NULL);
 }
@@ -317,7 +315,7 @@ static int read_header(struct log_c *log)
 {
 	int r;
 
-	r = rw_header(log, REQ_OP_READ);
+	r = rw_header(log, READ);
 	if (r)
 		return r;
 
@@ -573,6 +571,16 @@ static void disk_dtr(struct dm_dirty_log *log)
 	destroy_log_context(lc);
 }
 
+static int count_bits32(uint32_t *addr, unsigned size)
+{
+	int count = 0, i;
+
+	for (i = 0; i < size; i++) {
+		count += hweight32(*(addr+i));
+	}
+	return count;
+}
+
 static void fail_log_device(struct log_c *lc)
 {
 	if (lc->log_dev_failed)
@@ -621,8 +629,7 @@ static int disk_resume(struct dm_dirty_log *log)
 
 	/* copy clean across to sync */
 	memcpy(lc->sync_bits, lc->clean_bits, size);
-	lc->sync_count = memweight(lc->clean_bits,
-				lc->bitset_uint32_count * sizeof(uint32_t));
+	lc->sync_count = count_bits32(lc->clean_bits, lc->bitset_uint32_count);
 	lc->sync_search = 0;
 
 	/* set the correct number of regions in the header */
@@ -631,7 +638,7 @@ static int disk_resume(struct dm_dirty_log *log)
 	header_to_disk(&lc->header, lc->disk_header);
 
 	/* write the new header */
-	r = rw_header(lc, REQ_OP_WRITE);
+	r = rw_header(lc, WRITE);
 	if (!r) {
 		r = flush_header(lc);
 		if (r)
@@ -699,7 +706,7 @@ static int disk_flush(struct dm_dirty_log *log)
 			log_clear_bit(lc, lc->clean_bits, i);
 	}
 
-	r = rw_header(lc, REQ_OP_WRITE);
+	r = rw_header(lc, WRITE);
 	if (r)
 		fail_log_device(lc);
 	else {

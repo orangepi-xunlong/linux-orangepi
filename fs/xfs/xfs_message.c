@@ -17,10 +17,12 @@
 
 #include "xfs.h"
 #include "xfs_fs.h"
-#include "xfs_error.h"
-#include "xfs_format.h"
-#include "xfs_log_format.h"
-#include "xfs_trans_resv.h"
+#include "xfs_types.h"
+#include "xfs_log.h"
+#include "xfs_inum.h"
+#include "xfs_trans.h"
+#include "xfs_sb.h"
+#include "xfs_ag.h"
 #include "xfs_mount.h"
 
 /*
@@ -44,7 +46,6 @@ void func(const struct xfs_mount *mp, const char *fmt, ...)	\
 {								\
 	struct va_format	vaf;				\
 	va_list			args;				\
-	int			level;				\
 								\
 	va_start(args, fmt);					\
 								\
@@ -53,11 +54,6 @@ void func(const struct xfs_mount *mp, const char *fmt, ...)	\
 								\
 	__xfs_printk(kern_level, mp, &vaf);			\
 	va_end(args);						\
-								\
-	if (!kstrtoint(kern_level, 0, &level) &&		\
-	    level <= LOGLEVEL_ERR &&				\
-	    xfs_error_level >= XFS_ERRLEVEL_HIGH)		\
-		xfs_stack_trace();				\
 }								\
 
 define_xfs_printk_level(xfs_emerg, KERN_EMERG);
@@ -95,14 +91,6 @@ xfs_alert_tag(
 	va_end(args);
 
 	BUG_ON(do_panic);
-}
-
-void
-asswarn(char *expr, char *file, int line)
-{
-	xfs_warn(NULL, "Assertion failed: %s, file: %s, line: %d",
-		expr, file, line);
-	WARN_ON(1);
 }
 
 void

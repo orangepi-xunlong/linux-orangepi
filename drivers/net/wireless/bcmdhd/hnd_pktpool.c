@@ -1,51 +1,15 @@
 /*
  * HND generic packet pool operation primitives
  *
- * Copyright (C) 1999-2017, Broadcom Corporation
+ * $Copyright Open Broadcom Corporation$
  *
- *      Unless you and Broadcom execute a separate written software license
- * agreement governing use of this software, this software is licensed to you
- * under the terms of the GNU General Public License version 2 (the "GPL"),
- * available at http://www.broadcom.com/licenses/GPLv2.php, with the
- * following added to such license:
- *
- *      As a special exception, the copyright holders of this software give you
- * permission to link this software with independent modules, and to copy and
- * distribute the resulting executable under terms of your choice, provided that
- * you also meet, for each linked independent module, the terms and conditions of
- * the license of that module.  An independent module is a module which is not
- * derived from this software.  The special exception does not apply to any
- * modifications of the software.
- *
- *      Notwithstanding the above, under no circumstances may you combine this
- * software in any way with any other Broadcom software provided under a license
- * other than the GPL, without Broadcom's express prior written consent.
- *
- *
- * <<Broadcom-WL-IPTag/Open:>>
- *
- * $Id: hnd_pktpool.c 613891 2016-01-20 10:05:44Z $
+ * $Id: $
  */
 
 #include <typedefs.h>
 #include <osl.h>
-#include <osl_ext.h>
 #include <bcmutils.h>
 #include <hnd_pktpool.h>
-
-
-/* mutex macros for thread safe */
-#ifdef HND_PKTPOOL_THREAD_SAFE
-#define HND_PKTPOOL_MUTEX_CREATE(name, mutex)	osl_ext_mutex_create(name, mutex)
-#define HND_PKTPOOL_MUTEX_DELETE(mutex)		osl_ext_mutex_delete(mutex)
-#define HND_PKTPOOL_MUTEX_ACQUIRE(mutex, msec)	osl_ext_mutex_acquire(mutex, msec)
-#define HND_PKTPOOL_MUTEX_RELEASE(mutex)	osl_ext_mutex_release(mutex)
-#else
-#define HND_PKTPOOL_MUTEX_CREATE(name, mutex)	OSL_EXT_SUCCESS
-#define HND_PKTPOOL_MUTEX_DELETE(mutex)		OSL_EXT_SUCCESS
-#define HND_PKTPOOL_MUTEX_ACQUIRE(mutex, msec)	OSL_EXT_SUCCESS
-#define HND_PKTPOOL_MUTEX_RELEASE(mutex)	OSL_EXT_SUCCESS
-#endif
 
 /* Registry size is one larger than max pools, as slot #0 is reserved */
 #define PKTPOOLREG_RSVD_ID				(0U)
@@ -71,12 +35,6 @@
 #define PKTPOOL_REGISTRY_FOREACH(id)	\
 		for ((id) = 1U; (id) <= pktpools_max; (id)++)
 
-enum pktpool_empty_cb_state {
-	EMPTYCB_ENABLED = 0,	/* Enable callback when new packets are added to pool */
-	EMPTYCB_DISABLED,	/* Disable callback when new packets are added to pool */
-	EMPTYCB_SKIPPED		/* Packet was added to pool when callback was disabled */
-};
-
 uint32 pktpools_max = 0U; /* maximum number of pools that may be initialized */
 pktpool_t *pktpools_registry[PKTPOOL_MAXIMUM_ID + 1]; /* Pktpool registry */
 
@@ -84,18 +42,7 @@ pktpool_t *pktpools_registry[PKTPOOL_MAXIMUM_ID + 1]; /* Pktpool registry */
 static int pktpool_register(pktpool_t * poolptr);
 static int pktpool_deregister(pktpool_t * poolptr);
 
-/** add declaration */
-static void pktpool_avail_notify(pktpool_t *pktp);
-
 /** accessor functions required when ROMming this file, forced into RAM */
-
-
-pktpool_t *
-BCMRAMFN(get_pktpools_registry)(int id)
-{
-	return pktpools_registry[id];
-}
-
 static void
 BCMRAMFN(pktpool_registry_set)(int id, pktpool_t *pp)
 {
@@ -108,12 +55,10 @@ BCMRAMFN(pktpool_registry_cmp)(int id, pktpool_t *pp)
 	return pktpools_registry[id] == pp;
 }
 
-/** Constructs a pool registry to serve a maximum of total_pools */
-int
+int /* Construct a pool registry to serve a maximum of total_pools */
 pktpool_attach(osl_t *osh, uint32 total_pools)
 {
 	uint32 poolid;
-	BCM_REFERENCE(osh);
 
 	if (pktpools_max != 0U) {
 		return BCME_ERROR;
@@ -133,12 +78,10 @@ pktpool_attach(osl_t *osh, uint32 total_pools)
 	return (int)pktpools_max;
 }
 
-/** Destructs the pool registry. Ascertain all pools were first de-inited */
-int
+int /* Destruct the pool registry. Ascertain all pools were first de-inited */
 pktpool_dettach(osl_t *osh)
 {
 	uint32 poolid;
-	BCM_REFERENCE(osh);
 
 	if (pktpools_max == 0U) {
 		return BCME_OK;
@@ -156,8 +99,7 @@ pktpool_dettach(osl_t *osh)
 	return BCME_OK;
 }
 
-/** Registers a pool in a free slot; returns the registry slot index */
-static int
+static int	/* Register a pool in a free slot; return the registry slot index */
 pktpool_register(pktpool_t * poolptr)
 {
 	uint32 poolid;
@@ -179,8 +121,7 @@ pktpool_register(pktpool_t * poolptr)
 	return PKTPOOL_INVALID_ID;	/* error: registry is full */
 }
 
-/** Deregisters a pktpool, given the pool pointer; tag slot as free */
-static int
+static int	/* Deregister a pktpool, given the pool pointer; tag slot as free */
 pktpool_deregister(pktpool_t * poolptr)
 {
 	uint32 poolid;
@@ -201,10 +142,12 @@ pktpool_deregister(pktpool_t * poolptr)
 	return BCME_OK;
 }
 
-/**
+
+/*
  * pktpool_init:
- * User provides a pktpool_t structure and specifies the number of packets to
- * be pre-filled into the pool (pplen).
+ * User provides a pktpool_t sturcture and specifies the number of packets to
+ * be pre-filled into the pool (pplen). The size of all packets in a pool must
+ * be the same and is specified by plen.
  * pktpool_init first attempts to register the pool and fetch a unique poolid.
  * If registration fails, it is considered an BCME_ERR, caused by either the
  * registry was not pre-created (pktpool_attach) or the registry is full.
@@ -215,10 +158,6 @@ pktpool_deregister(pktpool_t * poolptr)
  * In dongle builds, prior to memory reclaimation, one should limit the number
  * of packets to be allocated during pktpool_init and fill the pool up after
  * reclaim stage.
- *
- * @param pplen  Number of packets to be pre-filled into the pool
- * @param plen   The size of all packets in a pool must be the same, [bytes] units. E.g. PKTBUFSZ.
- * @param type   e.g. 'lbuf_frag'
  */
 int
 pktpool_init(osl_t *osh, pktpool_t *pktp, int *pplen, int plen, bool istx, uint8 type)
@@ -245,10 +184,6 @@ pktpool_init(osl_t *osh, pktpool_t *pktp, int *pplen, int plen, bool istx, uint8
 	pktp->istx = istx ? TRUE : FALSE;
 	pktp->plen = (uint16)plen;
 	pktp->type = type;
-
-	if (HND_PKTPOOL_MUTEX_CREATE("pktpool", &pktp->mutex) != OSL_EXT_SUCCESS) {
-		return BCME_ERROR;
-	}
 
 	pktp->maxlen = PKTPOOL_LEN_MAX;
 	pktplen = LIMIT_TO_MAX(pktplen, pktp->maxlen);
@@ -283,11 +218,11 @@ pktpool_init(osl_t *osh, pktpool_t *pktp, int *pplen, int plen, bool istx, uint8
 exit:
 	pktp->len = pktp->avail;
 
-	*pplen = pktp->len; /* number of packets managed by pool */
+	*pplen = pktp->len;
 	return err;
-} /* pktpool_init */
+}
 
-/**
+/*
  * pktpool_deinit:
  * Prior to freeing a pktpool, all packets must be first freed into the pktpool.
  * Upon pktpool_deinit, all packets in the free pool will be freed to the heap.
@@ -334,9 +269,6 @@ pktpool_deinit(osl_t *osh, pktpool_t *pktp)
 	pktpool_deregister(pktp); /* release previously acquired unique pool id */
 	POOLSETID(pktp, PKTPOOL_INVALID_ID);
 
-	if (HND_PKTPOOL_MUTEX_DELETE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	pktp->inited = FALSE;
 
 	/* Are there still pending pkts? */
@@ -351,10 +283,6 @@ pktpool_fill(osl_t *osh, pktpool_t *pktp, bool minimal)
 	void *p;
 	int err = 0;
 	int len, psize, maxlen;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
 
 	ASSERT(pktp->plen != 0);
 
@@ -376,22 +304,13 @@ pktpool_fill(osl_t *osh, pktpool_t *pktp, bool minimal)
 		}
 	}
 
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
-	if (pktp->cbcnt) {
-		if (pktp->empty == FALSE)
-			pktpool_avail_notify(pktp);
-	}
-
 	return err;
 }
 
 static void *
 pktpool_deq(pktpool_t *pktp)
 {
-	void *p = NULL;
+	void *p;
 
 	if (pktp->avail == 0)
 		return NULL;
@@ -400,8 +319,6 @@ pktpool_deq(pktpool_t *pktp)
 
 	p = pktp->freelist;  /* dequeue packet from head of pktpool free list */
 	pktp->freelist = PKTFREELIST(p); /* free list points to next packet */
-
-
 	PKTSETFREELIST(p, NULL);
 
 	pktp->avail--;
@@ -417,12 +334,11 @@ pktpool_enq(pktpool_t *pktp, void *p)
 	PKTSETFREELIST(p, pktp->freelist); /* insert at head of pktpool free list */
 	pktp->freelist = p; /* free list points to newly inserted packet */
 
-
 	pktp->avail++;
 	ASSERT(pktp->avail <= pktp->len);
 }
 
-/** utility for registering host addr fill function called from pciedev */
+/* utility for registering host addr fill function called from pciedev */
 int
 /* BCMATTACHFN */
 (pktpool_hostaddr_fill_register)(pktpool_t *pktp, pktpool_cb_extn_t cb, void *arg)
@@ -442,15 +358,13 @@ pktpool_rxcplid_fill_register(pktpool_t *pktp, pktpool_cb_extn_t cb, void *arg)
 
 	ASSERT(cb != NULL);
 
-	if (pktp == NULL)
-		return BCME_ERROR;
 	ASSERT(pktp->rxcplidfn.cb == NULL);
 	pktp->rxcplidfn.cb = cb;
 	pktp->rxcplidfn.arg = arg;
 	return 0;
 }
-
-/** whenever host posts rxbuffer, invoke dma_rxfill from pciedev layer */
+/* Callback functions for split rx modes */
+/* when evr host posts rxbuffer, invike dma_rxfill from pciedev layer */
 void
 pktpool_invoke_dmarxfill(pktpool_t *pktp)
 {
@@ -460,8 +374,6 @@ pktpool_invoke_dmarxfill(pktpool_t *pktp)
 	if (pktp->dmarxfill.cb)
 		pktp->dmarxfill.cb(pktp, pktp->dmarxfill.arg);
 }
-
-/** Registers callback functions for split rx mode */
 int
 pkpool_haddr_avail_register_cb(pktpool_t *pktp, pktpool_cb_t cb, void *arg)
 {
@@ -473,75 +385,45 @@ pkpool_haddr_avail_register_cb(pktpool_t *pktp, pktpool_cb_t cb, void *arg)
 
 	return 0;
 }
-
-/**
- * Registers callback functions.
- * No BCMATTACHFN as it is used in xdc_enable_ep which is not an attach function
- */
+/* No BCMATTACHFN as it is used in xdc_enable_ep which is not an attach function */
 int
 pktpool_avail_register(pktpool_t *pktp, pktpool_cb_t cb, void *arg)
 {
-	int err = 0;
 	int i;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
 
 	ASSERT(cb != NULL);
 
 	i = pktp->cbcnt;
-	if (i == PKTPOOL_CB_MAX_AVL) {
-		err = BCME_ERROR;
-		goto done;
-	}
+	if (i == PKTPOOL_CB_MAX)
+		return BCME_ERROR;
 
 	ASSERT(pktp->cbs[i].cb == NULL);
 	pktp->cbs[i].cb = cb;
 	pktp->cbs[i].arg = arg;
 	pktp->cbcnt++;
 
-done:
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
-	return err;
+	return 0;
 }
 
-/** Registers callback functions */
 int
 pktpool_empty_register(pktpool_t *pktp, pktpool_cb_t cb, void *arg)
 {
-	int err = 0;
 	int i;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
 
 	ASSERT(cb != NULL);
 
 	i = pktp->ecbcnt;
-	if (i == PKTPOOL_CB_MAX) {
-		err = BCME_ERROR;
-		goto done;
-	}
+	if (i == PKTPOOL_CB_MAX)
+		return BCME_ERROR;
 
 	ASSERT(pktp->ecbs[i].cb == NULL);
 	pktp->ecbs[i].cb = cb;
 	pktp->ecbs[i].arg = arg;
 	pktp->ecbcnt++;
 
-done:
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
-	return err;
+	return 0;
 }
 
-/** Calls registered callback functions */
 static int
 pktpool_empty_notify(pktpool_t *pktp)
 {
@@ -561,32 +443,20 @@ pktpool_empty_notify(pktpool_t *pktp)
 int
 pktpool_dbg_register(pktpool_t *pktp, pktpool_cb_t cb, void *arg)
 {
-	int err = 0;
 	int i;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
 
 	ASSERT(cb);
 
 	i = pktp->dbg_cbcnt;
-	if (i == PKTPOOL_CB_MAX) {
-		err = BCME_ERROR;
-		goto done;
-	}
+	if (i == PKTPOOL_CB_MAX)
+		return BCME_ERROR;
 
 	ASSERT(pktp->dbg_cbs[i].cb == NULL);
 	pktp->dbg_cbs[i].cb = cb;
 	pktp->dbg_cbs[i].arg = arg;
 	pktp->dbg_cbcnt++;
 
-done:
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
-	return err;
+	return 0;
 }
 
 int pktpool_dbg_notify(pktpool_t *pktp);
@@ -596,18 +466,10 @@ pktpool_dbg_notify(pktpool_t *pktp)
 {
 	int i;
 
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	for (i = 0; i < pktp->dbg_cbcnt; i++) {
 		ASSERT(pktp->dbg_cbs[i].cb);
 		pktp->dbg_cbs[i].cb(pktp, pktp->dbg_cbs[i].arg);
 	}
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
 
 	return 0;
 }
@@ -617,20 +479,12 @@ pktpool_dbg_dump(pktpool_t *pktp)
 {
 	int i;
 
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	printf("pool len=%d maxlen=%d\n",  pktp->dbg_qlen, pktp->maxlen);
 	for (i = 0; i < pktp->dbg_qlen; i++) {
 		ASSERT(pktp->dbg_q[i].p);
 		printf("%d, p: 0x%x dur:%lu us state:%d\n", i,
 			pktp->dbg_q[i].p, pktp->dbg_q[i].dur/100, PKTPOOLSTATE(pktp->dbg_q[i].p));
 	}
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
 
 	return 0;
 }
@@ -640,10 +494,6 @@ pktpool_stats_dump(pktpool_t *pktp, pktpool_stats_t *stats)
 {
 	int i;
 	int state;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
 
 	bzero(stats, sizeof(pktpool_stats_t));
 	for (i = 0; i < pktp->dbg_qlen; i++) {
@@ -668,10 +518,6 @@ pktpool_stats_dump(pktpool_t *pktp, pktpool_stats_t *stats)
 		}
 	}
 
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	return 0;
 }
 
@@ -680,12 +526,8 @@ pktpool_start_trigger(pktpool_t *pktp, void *p)
 {
 	uint32 cycles, i;
 
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	if (!PKTPOOL(OSH_NULL, p))
-		goto done;
+		return 0;
 
 	OSL_GETCYCLES(cycles);
 
@@ -698,27 +540,17 @@ pktpool_start_trigger(pktpool_t *pktp, void *p)
 		}
 	}
 
-done:
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	return 0;
 }
 
 int pktpool_stop_trigger(pktpool_t *pktp, void *p);
-
 int
 pktpool_stop_trigger(pktpool_t *pktp, void *p)
 {
 	uint32 cycles, i;
 
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	if (!PKTPOOL(OSH_NULL, p))
-		goto done;
+		return 0;
 
 	OSL_GETCYCLES(cycles);
 
@@ -740,11 +572,6 @@ pktpool_stop_trigger(pktpool_t *pktp, void *p)
 		}
 	}
 
-done:
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	return 0;
 }
 #endif /* BCMDBG_POOL */
@@ -752,19 +579,8 @@ done:
 int
 pktpool_avail_notify_normal(osl_t *osh, pktpool_t *pktp)
 {
-	BCM_REFERENCE(osh);
 	ASSERT(pktp);
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	pktp->availcb_excl = NULL;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	return 0;
 }
 
@@ -772,15 +588,8 @@ int
 pktpool_avail_notify_exclusive(osl_t *osh, pktpool_t *pktp, pktpool_cb_t cb)
 {
 	int i;
-	int err;
-	BCM_REFERENCE(osh);
 
 	ASSERT(pktp);
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	ASSERT(pktp->availcb_excl == NULL);
 	for (i = 0; i < pktp->cbcnt; i++) {
 		if (cb == pktp->cbs[i].cb) {
@@ -790,18 +599,12 @@ pktpool_avail_notify_exclusive(osl_t *osh, pktpool_t *pktp, pktpool_cb_t cb)
 	}
 
 	if (pktp->availcb_excl == NULL)
-		err = BCME_ERROR;
-	else
-		err = 0;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
 		return BCME_ERROR;
-
-	return err;
+	else
+		return 0;
 }
 
-static void
+static int
 pktpool_avail_notify(pktpool_t *pktp)
 {
 	int i, k, idx;
@@ -810,7 +613,7 @@ pktpool_avail_notify(pktpool_t *pktp)
 	ASSERT(pktp);
 	if (pktp->availcb_excl != NULL) {
 		pktp->availcb_excl->cb(pktp, pktp->availcb_excl->arg);
-		return;
+		return 0;
 	}
 
 	k = pktp->cbcnt - 1;
@@ -832,19 +635,13 @@ pktpool_avail_notify(pktpool_t *pktp)
 	 */
 	pktp->cbtoggle ^= 1;
 
-	return;
+	return 0;
 }
 
-/** Gets an empty packet from the caller provided pool */
 void *
 pktpool_get(pktpool_t *pktp)
 {
 	void *p;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return NULL;
-
 
 	p = pktpool_deq(pktp);
 
@@ -855,14 +652,8 @@ pktpool_get(pktpool_t *pktp)
 
 		p = pktpool_deq(pktp);
 		if (p == NULL)
-			goto done;
+			return NULL;
 	}
-
-
-done:
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return NULL;
 
 	return p;
 }
@@ -870,10 +661,6 @@ done:
 void
 pktpool_free(pktpool_t *pktp, void *p)
 {
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return;
-
 	ASSERT(p != NULL);
 #ifdef BCMDBG_POOL
 	/* pktpool_stop_trigger(pktp, p); */
@@ -881,52 +668,22 @@ pktpool_free(pktpool_t *pktp, void *p)
 
 	pktpool_enq(pktp, p);
 
-	/**
-	 * Feed critical DMA with freshly freed packets, to avoid DMA starvation.
-	 * If any avail callback functions are registered, send a notification
-	 * that a new packet is available in the pool.
-	 */
-	if (pktp->cbcnt) {
-		/* To more efficiently use the cpu cycles, callbacks can be temporarily disabled.
-		 * This allows to feed on burst basis as opposed to inefficient per-packet basis.
-		 */
-		if (pktp->emptycb_disable == EMPTYCB_ENABLED) {
-			/**
-			 * If the call originated from pktpool_empty_notify, the just freed packet
-			 * is needed in pktpool_get.
-			 * Therefore don't call pktpool_avail_notify.
-			 */
-			if (pktp->empty == FALSE)
-				pktpool_avail_notify(pktp);
-		} else {
-			/**
-			 * The callback is temporarily disabled, log that a packet has been freed.
-			 */
-			pktp->emptycb_disable = EMPTYCB_SKIPPED;
-		}
-	}
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
+	if (pktp->emptycb_disable)
 		return;
+
+	if (pktp->cbcnt) {
+		if (pktp->empty == FALSE)
+			pktpool_avail_notify(pktp);
+	}
 }
 
-/** Adds a caller provided (empty) packet to the caller provided pool */
 int
 pktpool_add(pktpool_t *pktp, void *p)
 {
-	int err = 0;
-
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	ASSERT(p != NULL);
 
-	if (pktp->len == pktp->maxlen) {
-		err = BCME_RANGE;
-		goto done;
-	}
+	if (pktp->len == pktp->maxlen)
+		return BCME_RANGE;
 
 	/* pkts in pool have same length */
 	ASSERT(pktp->plen == PKTLEN(OSH_NULL, p));
@@ -939,25 +696,15 @@ pktpool_add(pktpool_t *pktp, void *p)
 	pktp->dbg_q[pktp->dbg_qlen++].p = p;
 #endif
 
-done:
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
-	return err;
+	return 0;
 }
 
-/**
- * Force pktpool_setmaxlen () into RAM as it uses a constant
+/* Force pktpool_setmaxlen () into RAM as it uses a constant
  * (PKTPOOL_LEN_MAX) that may be changed post tapeout for ROM-based chips.
  */
 int
 BCMRAMFN(pktpool_setmaxlen)(pktpool_t *pktp, uint16 maxlen)
 {
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_ACQUIRE(&pktp->mutex, OSL_EXT_TIME_FOREVER) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	if (maxlen > PKTPOOL_LEN_MAX)
 		maxlen = PKTPOOL_LEN_MAX;
 
@@ -967,10 +714,6 @@ BCMRAMFN(pktpool_setmaxlen)(pktpool_t *pktp, uint16 maxlen)
 	 */
 	pktp->maxlen = (pktp->len > maxlen) ? pktp->len : maxlen;
 
-	/* protect shared resource */
-	if (HND_PKTPOOL_MUTEX_RELEASE(&pktp->mutex) != OSL_EXT_SUCCESS)
-		return BCME_ERROR;
-
 	return pktp->maxlen;
 }
 
@@ -979,202 +722,12 @@ pktpool_emptycb_disable(pktpool_t *pktp, bool disable)
 {
 	ASSERT(pktp);
 
-	/**
-	 * To more efficiently use the cpu cycles, callbacks can be temporarily disabled.
-	 * If callback is going to be re-enabled, check if any packet got
-	 * freed and added back to the pool while callback was disabled.
-	 * When this is the case do the callback now, provided that callback functions
-	 * are registered and this call did not originate from pktpool_empty_notify.
-	 */
-	if ((!disable) && (pktp->cbcnt) && (pktp->empty == FALSE) &&
-		(pktp->emptycb_disable == EMPTYCB_SKIPPED)) {
-			pktpool_avail_notify(pktp);
-	}
-
-	/* Enable or temporarily disable callback when packet becomes available. */
-	pktp->emptycb_disable = disable ? EMPTYCB_DISABLED : EMPTYCB_ENABLED;
+	pktp->emptycb_disable = disable;
 }
 
 bool
 pktpool_emptycb_disabled(pktpool_t *pktp)
 {
 	ASSERT(pktp);
-	return pktp->emptycb_disable != EMPTYCB_ENABLED;
+	return pktp->emptycb_disable;
 }
-
-#ifdef BCMPKTPOOL
-#include <hnd_lbuf.h>
-
-pktpool_t *pktpool_shared = NULL;
-
-#ifdef BCMFRAGPOOL
-pktpool_t *pktpool_shared_lfrag = NULL;
-#endif /* BCMFRAGPOOL */
-
-pktpool_t *pktpool_shared_rxlfrag = NULL;
-
-static osl_t *pktpool_osh = NULL;
-
-/**
- * Initializes several packet pools and allocates packets within those pools.
- */
-int
-hnd_pktpool_init(osl_t *osh)
-{
-	int err;
-	int n;
-
-	/* Construct a packet pool registry before initializing packet pools */
-	n = pktpool_attach(osh, PKTPOOL_MAXIMUM_ID);
-	if (n != PKTPOOL_MAXIMUM_ID) {
-		ASSERT(0);
-		err = BCME_ERROR;
-		goto error0;
-	}
-
-	pktpool_shared = MALLOCZ(osh, sizeof(pktpool_t));
-	if (pktpool_shared == NULL) {
-		ASSERT(0);
-		err = BCME_NOMEM;
-		goto error1;
-	}
-
-#if defined(BCMFRAGPOOL) && !defined(BCMFRAGPOOL_DISABLED)
-	pktpool_shared_lfrag = MALLOCZ(osh, sizeof(pktpool_t));
-	if (pktpool_shared_lfrag == NULL) {
-		ASSERT(0);
-		err = BCME_NOMEM;
-		goto error2;
-	}
-#endif
-
-#if defined(BCMRXFRAGPOOL) && !defined(BCMRXFRAGPOOL_DISABLED)
-	pktpool_shared_rxlfrag = MALLOCZ(osh, sizeof(pktpool_t));
-	if (pktpool_shared_rxlfrag == NULL) {
-		ASSERT(0);
-		err = BCME_NOMEM;
-		goto error3;
-	}
-#endif
-
-
-	/*
-	 * At this early stage, there's not enough memory to allocate all
-	 * requested pkts in the shared pool.  Need to add to the pool
-	 * after reclaim
-	 *
-	 * n = NRXBUFPOST + SDPCMD_RXBUFS;
-	 *
-	 * Initialization of packet pools may fail (BCME_ERROR), if the packet pool
-	 * registry is not initialized or the registry is depleted.
-	 *
-	 * A BCME_NOMEM error only indicates that the requested number of packets
-	 * were not filled into the pool.
-	 */
-	n = 1;
-	if ((err = pktpool_init(osh, pktpool_shared,
-	                        &n, PKTBUFSZ, FALSE, lbuf_basic)) != BCME_OK) {
-		ASSERT(0);
-		goto error4;
-	}
-	pktpool_setmaxlen(pktpool_shared, SHARED_POOL_LEN);
-
-#if defined(BCMFRAGPOOL) && !defined(BCMFRAGPOOL_DISABLED)
-	n = 1;
-	if ((err = pktpool_init(osh, pktpool_shared_lfrag,
-	                        &n, PKTFRAGSZ, TRUE, lbuf_frag)) != BCME_OK) {
-		ASSERT(0);
-		goto error5;
-	}
-	pktpool_setmaxlen(pktpool_shared_lfrag, SHARED_FRAG_POOL_LEN);
-#endif
-#if defined(BCMRXFRAGPOOL) && !defined(BCMRXFRAGPOOL_DISABLED)
-	n = 1;
-	if ((err = pktpool_init(osh, pktpool_shared_rxlfrag,
-	                        &n, PKTRXFRAGSZ, TRUE, lbuf_rxfrag)) != BCME_OK) {
-		ASSERT(0);
-		goto error6;
-	}
-	pktpool_setmaxlen(pktpool_shared_rxlfrag, SHARED_RXFRAG_POOL_LEN);
-#endif
-
-	pktpool_osh = osh;
-
-	return BCME_OK;
-
-#if defined(BCMRXFRAGPOOL) && !defined(BCMRXFRAGPOOL_DISABLED)
-error6:
-#endif
-
-#if defined(BCMFRAGPOOL) && !defined(BCMFRAGPOOL_DISABLED)
-	pktpool_deinit(osh, pktpool_shared_lfrag);
-error5:
-#endif
-
-#if (defined(BCMRXFRAGPOOL) && !defined(BCMRXFRAGPOOL_DISABLED)) || \
-	(defined(BCMFRAGPOOL) && !defined(BCMFRAGPOOL_DISABLED))
-	pktpool_deinit(osh, pktpool_shared);
-#endif
-
-error4:
-#if defined(BCMRXFRAGPOOL) && !defined(BCMRXFRAGPOOL_DISABLED)
-	hnd_free(pktpool_shared_rxlfrag);
-	pktpool_shared_rxlfrag = (pktpool_t *)NULL;
-error3:
-#endif /* BCMRXFRAGPOOL */
-
-#if defined(BCMFRAGPOOL) && !defined(BCMFRAGPOOL_DISABLED)
-	hnd_free(pktpool_shared_lfrag);
-	pktpool_shared_lfrag = (pktpool_t *)NULL;
-error2:
-#endif /* BCMFRAGPOOL */
-
-	hnd_free(pktpool_shared);
-	pktpool_shared = (pktpool_t *)NULL;
-
-error1:
-	pktpool_dettach(osh);
-error0:
-	return err;
-} /* hnd_pktpool_init */
-
-int
-hnd_pktpool_fill(pktpool_t *pktpool, bool minimal)
-{
-	return (pktpool_fill(pktpool_osh, pktpool, minimal));
-}
-
-/** refills pktpools after reclaim */
-void
-hnd_pktpool_refill(bool minimal)
-{
-	if (POOL_ENAB(pktpool_shared)) {
-		pktpool_fill(pktpool_osh, pktpool_shared, minimal);
-	}
-/* fragpool reclaim */
-#ifdef BCMFRAGPOOL
-	if (POOL_ENAB(pktpool_shared_lfrag)) {
-#if defined(SRMEM)
-		if (SRMEM_ENAB()) {
-			int maxlen = pktpool_maxlen(pktpool_shared);
-			int len = pktpool_len(pktpool_shared);
-
-			for (; len < maxlen; len++)	{
-				void *p;
-				if ((p = PKTSRGET(pktpool_plen(pktpool_shared))) == NULL)
-					break;
-				pktpool_add(pktpool_shared, p);
-			}
-		}
-#endif /* SRMEM */
-		pktpool_fill(pktpool_osh, pktpool_shared_lfrag, minimal);
-	}
-#endif /* BCMFRAGPOOL */
-/* rx fragpool reclaim */
-#ifdef BCMRXFRAGPOOL
-	if (POOL_ENAB(pktpool_shared_rxlfrag)) {
-		pktpool_fill(pktpool_osh, pktpool_shared_rxlfrag, minimal);
-	}
-#endif
-}
-#endif /* BCMPKTPOOL */

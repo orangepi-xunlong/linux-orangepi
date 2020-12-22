@@ -41,7 +41,7 @@ static void mvs_64xx_detect_porttype(struct mvs_info *mvi, int i)
 		phy->phy_type |= PORT_TYPE_SATA;
 }
 
-static void mvs_64xx_enable_xmt(struct mvs_info *mvi, int phy_id)
+static void __devinit mvs_64xx_enable_xmt(struct mvs_info *mvi, int phy_id)
 {
 	void __iomem *regs = mvi->regs;
 	u32 tmp;
@@ -54,7 +54,7 @@ static void mvs_64xx_enable_xmt(struct mvs_info *mvi, int phy_id)
 	mw32(MVS_PCS, tmp);
 }
 
-static void mvs_64xx_phy_hacks(struct mvs_info *mvi)
+static void __devinit mvs_64xx_phy_hacks(struct mvs_info *mvi)
 {
 	void __iomem *regs = mvi->regs;
 	int i;
@@ -136,8 +136,7 @@ static void mvs_64xx_phy_reset(struct mvs_info *mvi, u32 phy_id, int hard)
 	}
 }
 
-static void
-mvs_64xx_clear_srs_irq(struct mvs_info *mvi, u8 reg_set, u8 clear_all)
+void mvs_64xx_clear_srs_irq(struct mvs_info *mvi, u8 reg_set, u8 clear_all)
 {
 	void __iomem *regs = mvi->regs;
 	u32 tmp;
@@ -157,7 +156,7 @@ mvs_64xx_clear_srs_irq(struct mvs_info *mvi, u8 reg_set, u8 clear_all)
 	}
 }
 
-static int mvs_64xx_chip_reset(struct mvs_info *mvi)
+static int __devinit mvs_64xx_chip_reset(struct mvs_info *mvi)
 {
 	void __iomem *regs = mvi->regs;
 	u32 tmp;
@@ -251,7 +250,7 @@ static void mvs_64xx_phy_enable(struct mvs_info *mvi, u32 phy_id)
 	}
 }
 
-static int mvs_64xx_init(struct mvs_info *mvi)
+static int __devinit mvs_64xx_init(struct mvs_info *mvi)
 {
 	void __iomem *regs = mvi->regs;
 	int i;
@@ -564,7 +563,7 @@ static u8 mvs_64xx_assign_reg_set(struct mvs_info *mvi, u8 *tfs)
 	return MVS_ID_NOT_MAPPED;
 }
 
-static void mvs_64xx_make_prd(struct scatterlist *scatter, int nr, void *prd)
+void mvs_64xx_make_prd(struct scatterlist *scatter, int nr, void *prd)
 {
 	int i;
 	struct scatterlist *sg;
@@ -634,7 +633,7 @@ static void mvs_64xx_phy_work_around(struct mvs_info *mvi, int i)
 	mvs_write_port_vsr_data(mvi, i, tmp);
 }
 
-static void mvs_64xx_phy_set_link_rate(struct mvs_info *mvi, u32 phy_id,
+void mvs_64xx_phy_set_link_rate(struct mvs_info *mvi, u32 phy_id,
 			struct sas_phy_linkrates *rates)
 {
 	u32 lrmin = 0, lrmax = 0;
@@ -669,20 +668,20 @@ static void mvs_64xx_clear_active_cmds(struct mvs_info *mvi)
 }
 
 
-static u32 mvs_64xx_spi_read_data(struct mvs_info *mvi)
+u32 mvs_64xx_spi_read_data(struct mvs_info *mvi)
 {
 	void __iomem *regs = mvi->regs_ex;
 	return ior32(SPI_DATA_REG_64XX);
 }
 
-static void mvs_64xx_spi_write_data(struct mvs_info *mvi, u32 data)
+void mvs_64xx_spi_write_data(struct mvs_info *mvi, u32 data)
 {
 	void __iomem *regs = mvi->regs_ex;
 	 iow32(SPI_DATA_REG_64XX, data);
 }
 
 
-static int mvs_64xx_spi_buildcmd(struct mvs_info *mvi,
+int mvs_64xx_spi_buildcmd(struct mvs_info *mvi,
 			u32      *dwCmd,
 			u8       cmd,
 			u8       read,
@@ -706,7 +705,7 @@ static int mvs_64xx_spi_buildcmd(struct mvs_info *mvi,
 }
 
 
-static int mvs_64xx_spi_issuecmd(struct mvs_info *mvi, u32 cmd)
+int mvs_64xx_spi_issuecmd(struct mvs_info *mvi, u32 cmd)
 {
 	void __iomem *regs = mvi->regs_ex;
 	int     retry;
@@ -721,7 +720,7 @@ static int mvs_64xx_spi_issuecmd(struct mvs_info *mvi, u32 cmd)
 	return 0;
 }
 
-static int mvs_64xx_spi_waitdataready(struct mvs_info *mvi, u32 timeout)
+int mvs_64xx_spi_waitdataready(struct mvs_info *mvi, u32 timeout)
 {
 	void __iomem *regs = mvi->regs_ex;
 	u32 i, dwTmp;
@@ -736,7 +735,7 @@ static int mvs_64xx_spi_waitdataready(struct mvs_info *mvi, u32 timeout)
 	return -1;
 }
 
-static void mvs_64xx_fix_dma(struct mvs_info *mvi, u32 phy_mask,
+void mvs_64xx_fix_dma(struct mvs_info *mvi, u32 phy_mask,
 				int buf_len, int from, void *prd)
 {
 	int i;

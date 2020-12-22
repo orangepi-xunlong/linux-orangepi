@@ -11,44 +11,108 @@
 #ifndef _LINUX_RTC_H_
 #define _LINUX_RTC_H_
 
+/*
+ * The struct used to pass data via the following ioctl. Similar to the
+ * struct tm in <time.h>, but it needs to be here so that the kernel
+ * source is self contained, allowing cross-compiles, etc. etc.
+ */
+
+struct rtc_time {
+	int tm_sec;
+	int tm_min;
+	int tm_hour;
+	int tm_mday;
+	int tm_mon;
+	int tm_year;
+	int tm_wday;
+	int tm_yday;
+	int tm_isdst;
+};
+
+/*
+ * This data structure is inspired by the EFI (v0.92) wakeup
+ * alarm API.
+ */
+struct rtc_wkalrm {
+	unsigned char enabled;	/* 0 = alarm disabled, 1 = alarm enabled */
+	unsigned char pending;  /* 0 = alarm not pending, 1 = alarm pending */
+	struct rtc_time time;	/* time the alarm is set to */
+};
+
+/*
+ * Data structure to control PLL correction some better RTC feature
+ * pll_value is used to get or set current value of correction,
+ * the rest of the struct is used to query HW capabilities.
+ * This is modeled after the RTC used in Q40/Q60 computers but
+ * should be sufficiently flexible for other devices
+ *
+ * +ve pll_value means clock will run faster by
+ *   pll_value*pll_posmult/pll_clock
+ * -ve pll_value means clock will run slower by
+ *   pll_value*pll_negmult/pll_clock
+ */
+
+struct rtc_pll_info {
+	int pll_ctrl;       /* placeholder for fancier control */
+	int pll_value;      /* get/set correction value */
+	int pll_max;        /* max +ve (faster) adjustment value */
+	int pll_min;        /* max -ve (slower) adjustment value */
+	int pll_posmult;    /* factor for +ve correction */
+	int pll_negmult;    /* factor for -ve correction */
+	long pll_clock;     /* base PLL frequency */
+};
+
+/*
+ * ioctl calls that are permitted to the /dev/rtc interface, if
+ * any of the RTC drivers are enabled.
+ */
+
+#define RTC_AIE_ON	_IO('p', 0x01)	/* Alarm int. enable on		*/
+#define RTC_AIE_OFF	_IO('p', 0x02)	/* ... off			*/
+#define RTC_UIE_ON	_IO('p', 0x03)	/* Update int. enable on	*/
+#define RTC_UIE_OFF	_IO('p', 0x04)	/* ... off			*/
+#define RTC_PIE_ON	_IO('p', 0x05)	/* Periodic int. enable on	*/
+#define RTC_PIE_OFF	_IO('p', 0x06)	/* ... off			*/
+#define RTC_WIE_ON	_IO('p', 0x0f)  /* Watchdog int. enable on	*/
+#define RTC_WIE_OFF	_IO('p', 0x10)  /* ... off			*/
+
+#define RTC_ALM_SET	_IOW('p', 0x07, struct rtc_time) /* Set alarm time  */
+#define RTC_ALM_READ	_IOR('p', 0x08, struct rtc_time) /* Read alarm time */
+#define RTC_RD_TIME	_IOR('p', 0x09, struct rtc_time) /* Read RTC time   */
+#define RTC_SET_TIME	_IOW('p', 0x0a, struct rtc_time) /* Set RTC time    */
+#define RTC_IRQP_READ	_IOR('p', 0x0b, unsigned long)	 /* Read IRQ rate   */
+#define RTC_IRQP_SET	_IOW('p', 0x0c, unsigned long)	 /* Set IRQ rate    */
+#define RTC_EPOCH_READ	_IOR('p', 0x0d, unsigned long)	 /* Read epoch      */
+#define RTC_EPOCH_SET	_IOW('p', 0x0e, unsigned long)	 /* Set epoch       */
+
+#define RTC_WKALM_SET	_IOW('p', 0x0f, struct rtc_wkalrm)/* Set wakeup alarm*/
+#define RTC_WKALM_RD	_IOR('p', 0x10, struct rtc_wkalrm)/* Get wakeup alarm*/
+
+#define RTC_PLL_GET	_IOR('p', 0x11, struct rtc_pll_info)  /* Get PLL correction */
+#define RTC_PLL_SET	_IOW('p', 0x12, struct rtc_pll_info)  /* Set PLL correction */
+
+/* interrupt flags */
+#define RTC_IRQF 0x80	/* Any of the following is active */
+#define RTC_PF 0x40	/* Periodic interrupt */
+#define RTC_AF 0x20	/* Alarm interrupt */
+#define RTC_UF 0x10	/* Update interrupt for 1Hz RTC */
+
+
+#define RTC_MAX_FREQ	8192
+
+#ifdef __KERNEL__
 
 #include <linux/types.h>
 #include <linux/interrupt.h>
-#include <uapi/linux/rtc.h>
 
 extern int rtc_month_days(unsigned int month, unsigned int year);
 extern int rtc_year_days(unsigned int day, unsigned int month, unsigned int year);
 extern int rtc_valid_tm(struct rtc_time *tm);
-extern time64_t rtc_tm_to_time64(struct rtc_time *tm);
-extern void rtc_time64_to_tm(time64_t time, struct rtc_time *tm);
+extern int rtc_tm_to_time(struct rtc_time *tm, unsigned long *time);
+extern void rtc_time_to_tm(unsigned long time, struct rtc_time *tm);
 ktime_t rtc_tm_to_ktime(struct rtc_time tm);
 struct rtc_time rtc_ktime_to_tm(ktime_t kt);
 
-/*
- * rtc_tm_sub - Return the difference in seconds.
- */
-static inline time64_t rtc_tm_sub(struct rtc_time *lhs, struct rtc_time *rhs)
-{
-	return rtc_tm_to_time64(lhs) - rtc_tm_to_time64(rhs);
-}
-
-/**
- * Deprecated. Use rtc_time64_to_tm().
- */
-static inline void rtc_time_to_tm(unsigned long time, struct rtc_time *tm)
-{
-	rtc_time64_to_tm(time, tm);
-}
-
-/**
- * Deprecated. Use rtc_tm_to_time64().
- */
-static inline int rtc_tm_to_time(struct rtc_time *tm, unsigned long *time)
-{
-	*time = rtc_tm_to_time64(tm);
-
-	return 0;
-}
 
 #include <linux/device.h>
 #include <linux/seq_file.h>
@@ -85,12 +149,9 @@ struct rtc_class_ops {
 	int (*read_alarm)(struct device *, struct rtc_wkalrm *);
 	int (*set_alarm)(struct device *, struct rtc_wkalrm *);
 	int (*proc)(struct device *, struct seq_file *);
-	int (*set_mmss64)(struct device *, time64_t secs);
 	int (*set_mmss)(struct device *, unsigned long secs);
 	int (*read_callback)(struct device *, int data);
 	int (*alarm_irq_enable)(struct device *, unsigned int enabled);
-	int (*read_offset)(struct device *, long *offset);
-	int (*set_offset)(struct device *, long offset);
 };
 
 #define RTC_DEVICE_NAME_SIZE 20
@@ -111,7 +172,8 @@ struct rtc_timer {
 /* flags */
 #define RTC_DEV_BUSY 0
 
-struct rtc_device {
+struct rtc_device
+{
 	struct device dev;
 	struct module *owner;
 
@@ -160,17 +222,11 @@ extern struct rtc_device *rtc_device_register(const char *name,
 					struct device *dev,
 					const struct rtc_class_ops *ops,
 					struct module *owner);
-extern struct rtc_device *devm_rtc_device_register(struct device *dev,
-					const char *name,
-					const struct rtc_class_ops *ops,
-					struct module *owner);
 extern void rtc_device_unregister(struct rtc_device *rtc);
-extern void devm_rtc_device_unregister(struct device *dev,
-					struct rtc_device *rtc);
 
 extern int rtc_read_time(struct rtc_device *rtc, struct rtc_time *tm);
 extern int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm);
-extern int rtc_set_ntp_time(struct timespec64 now);
+extern int rtc_set_mmss(struct rtc_device *rtc, unsigned long secs);
 int __rtc_read_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm);
 extern int rtc_read_alarm(struct rtc_device *rtc,
 			struct rtc_wkalrm *alrm);
@@ -181,7 +237,7 @@ extern int rtc_initialize_alarm(struct rtc_device *rtc,
 extern void rtc_update_irq(struct rtc_device *rtc,
 			unsigned long num, unsigned long events);
 
-extern struct rtc_device *rtc_class_open(const char *name);
+extern struct rtc_device *rtc_class_open(char *name);
 extern void rtc_class_close(struct rtc_device *rtc);
 
 extern int rtc_irq_register(struct rtc_device *rtc,
@@ -206,12 +262,10 @@ int rtc_register(rtc_task_t *task);
 int rtc_unregister(rtc_task_t *task);
 int rtc_control(rtc_task_t *t, unsigned int cmd, unsigned long arg);
 
-void rtc_timer_init(struct rtc_timer *timer, void (*f)(void *p), void *data);
-int rtc_timer_start(struct rtc_device *rtc, struct rtc_timer *timer,
-		    ktime_t expires, ktime_t period);
-void rtc_timer_cancel(struct rtc_device *rtc, struct rtc_timer *timer);
-int rtc_read_offset(struct rtc_device *rtc, long *offset);
-int rtc_set_offset(struct rtc_device *rtc, long offset);
+void rtc_timer_init(struct rtc_timer *timer, void (*f)(void* p), void* data);
+int rtc_timer_start(struct rtc_device *rtc, struct rtc_timer* timer,
+			ktime_t expires, ktime_t period);
+int rtc_timer_cancel(struct rtc_device *rtc, struct rtc_timer* timer);
 void rtc_timer_do_work(struct work_struct *work);
 
 static inline bool is_leap_year(unsigned int year)
@@ -219,10 +273,12 @@ static inline bool is_leap_year(unsigned int year)
 	return (!(year % 4) && (year % 100)) || !(year % 400);
 }
 
-#ifdef CONFIG_RTC_HCTOSYS_DEVICE
+#ifdef CONFIG_RTC_HCTOSYS
 extern int rtc_hctosys_ret;
 #else
 #define rtc_hctosys_ret -ENODEV
 #endif
+
+#endif /* __KERNEL__ */
 
 #endif /* _LINUX_RTC_H_ */

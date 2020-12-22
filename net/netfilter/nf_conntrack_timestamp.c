@@ -51,12 +51,8 @@ static int nf_conntrack_tstamp_init_sysctl(struct net *net)
 
 	table[0].data = &net->ct.sysctl_tstamp;
 
-	/* Don't export sysctls to unprivileged users */
-	if (net->user_ns != &init_user_ns)
-		table[0].procname = NULL;
-
-	net->ct.tstamp_sysctl_header = register_net_sysctl(net,	"net/netfilter",
-							   table);
+	net->ct.tstamp_sysctl_header = register_net_sysctl_table(net,
+			nf_net_netfilter_sysctl_path, table);
 	if (!net->ct.tstamp_sysctl_header) {
 		printk(KERN_ERR "nf_ct_tstamp: can't register to sysctl.\n");
 		goto out_register;
@@ -88,27 +84,37 @@ static void nf_conntrack_tstamp_fini_sysctl(struct net *net)
 }
 #endif
 
-int nf_conntrack_tstamp_pernet_init(struct net *net)
-{
-	net->ct.sysctl_tstamp = nf_ct_tstamp;
-	return nf_conntrack_tstamp_init_sysctl(net);
-}
-
-void nf_conntrack_tstamp_pernet_fini(struct net *net)
-{
-	nf_conntrack_tstamp_fini_sysctl(net);
-}
-
-int nf_conntrack_tstamp_init(void)
+int nf_conntrack_tstamp_init(struct net *net)
 {
 	int ret;
-	ret = nf_ct_extend_register(&tstamp_extend);
+
+	net->ct.sysctl_tstamp = nf_ct_tstamp;
+
+	if (net_eq(net, &init_net)) {
+		ret = nf_ct_extend_register(&tstamp_extend);
+		if (ret < 0) {
+			printk(KERN_ERR "nf_ct_tstamp: Unable to register "
+					"extension\n");
+			goto out_extend_register;
+		}
+	}
+
+	ret = nf_conntrack_tstamp_init_sysctl(net);
 	if (ret < 0)
-		pr_err("nf_ct_tstamp: Unable to register extension\n");
+		goto out_sysctl;
+
+	return 0;
+
+out_sysctl:
+	if (net_eq(net, &init_net))
+		nf_ct_extend_unregister(&tstamp_extend);
+out_extend_register:
 	return ret;
 }
 
-void nf_conntrack_tstamp_fini(void)
+void nf_conntrack_tstamp_fini(struct net *net)
 {
-	nf_ct_extend_unregister(&tstamp_extend);
+	nf_conntrack_tstamp_fini_sysctl(net);
+	if (net_eq(net, &init_net))
+		nf_ct_extend_unregister(&tstamp_extend);
 }

@@ -1,7 +1,7 @@
-Xilinx Zynq Platforms Device Tree Bindings
+Xilinx Zynq EP107 Emulation Platform board
 
-Boards with Zynq-7000 SOC based on an ARM Cortex A9 processor
-shall have the following properties.
+This board is an emulation platform for the Zynq product which is
+based on an ARM Cortex A9 processor.
 
 Required root node properties:
-    - compatible = "xlnx,zynq-7000";
+    - compatible = "xlnx,zynq-ep107";

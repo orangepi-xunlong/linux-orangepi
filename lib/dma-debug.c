@@ -22,7 +22,6 @@
 #include <linux/stacktrace.h>
 #include <linux/dma-debug.h>
 #include <linux/spinlock.h>
-#include <linux/vmalloc.h>
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/export.h>
@@ -44,43 +43,20 @@ enum {
 	dma_debug_page,
 	dma_debug_sg,
 	dma_debug_coherent,
-	dma_debug_resource,
-};
-
-enum map_err_types {
-	MAP_ERR_CHECK_NOT_APPLICABLE,
-	MAP_ERR_NOT_CHECKED,
-	MAP_ERR_CHECKED,
 };
 
 #define DMA_DEBUG_STACKTRACE_ENTRIES 5
 
-/**
- * struct dma_debug_entry - track a dma_map* or dma_alloc_coherent mapping
- * @list: node on pre-allocated free_entries list
- * @dev: 'dev' argument to dma_map_{page|single|sg} or dma_alloc_coherent
- * @type: single, page, sg, coherent
- * @pfn: page frame of the start address
- * @offset: offset of mapping relative to pfn
- * @size: length of the mapping
- * @direction: enum dma_data_direction
- * @sg_call_ents: 'nents' from dma_map_sg
- * @sg_mapped_ents: 'mapped_ents' from dma_map_sg
- * @map_err_type: track whether dma_mapping_error() was checked
- * @stacktrace: support backtraces when a violation is detected
- */
 struct dma_debug_entry {
 	struct list_head list;
 	struct device    *dev;
 	int              type;
-	unsigned long	 pfn;
-	size_t		 offset;
+	phys_addr_t      paddr;
 	u64              dev_addr;
 	u64              size;
 	int              direction;
 	int		 sg_call_ents;
 	int		 sg_mapped_ents;
-	enum map_err_types  map_err_type;
 #ifdef CONFIG_STACKTRACE
 	struct		 stack_trace stacktrace;
 	unsigned long	 st_entries[DMA_DEBUG_STACKTRACE_ENTRIES];
@@ -103,14 +79,6 @@ static DEFINE_SPINLOCK(free_entries_lock);
 
 /* Global disable flag - will be set in case of an error */
 static bool global_disable __read_mostly;
-
-/* Early initialization disable flag, set at the end of dma_debug_init */
-static bool dma_debug_initialized __read_mostly;
-
-static inline bool dma_debug_disabled(void)
-{
-	return global_disable || !dma_debug_initialized;
-}
 
 /* Global error count */
 static u32 error_count;
@@ -146,18 +114,16 @@ static struct device_driver *current_driver                    __read_mostly;
 
 static DEFINE_RWLOCK(driver_name_lock);
 
-static const char *const maperr2str[] = {
-	[MAP_ERR_CHECK_NOT_APPLICABLE] = "dma map error check not applicable",
-	[MAP_ERR_NOT_CHECKED] = "dma map error not checked",
-	[MAP_ERR_CHECKED] = "dma map error checked",
-};
-
-static const char *type2name[5] = { "single", "page",
-				    "scather-gather", "coherent",
-				    "resource" };
+static const char *type2name[4] = { "single", "page",
+				    "scather-gather", "coherent" };
 
 static const char *dir2name[4] = { "DMA_BIDIRECTIONAL", "DMA_TO_DEVICE",
 				   "DMA_FROM_DEVICE", "DMA_NONE" };
+
+/* little merge helper - remove it after the merge window */
+#ifndef BUS_NOTIFY_UNBOUND_DRIVER
+#define BUS_NOTIFY_UNBOUND_DRIVER 0x0005
+#endif
 
 /*
  * The access to some variables in this macro is racy. We can't use atomic_t
@@ -256,7 +222,6 @@ static int hash_fn(struct dma_debug_entry *entry)
  */
 static struct hash_bucket *get_hash_bucket(struct dma_debug_entry *entry,
 					   unsigned long *flags)
-	__acquires(&dma_entry_hash[idx].lock)
 {
 	int idx = hash_fn(entry);
 	unsigned long __flags;
@@ -271,7 +236,6 @@ static struct hash_bucket *get_hash_bucket(struct dma_debug_entry *entry,
  */
 static void put_hash_bucket(struct hash_bucket *bucket,
 			    unsigned long *flags)
-	__releases(&bucket->lock)
 {
 	unsigned long __flags = *flags;
 
@@ -305,7 +269,7 @@ static struct dma_debug_entry *__hash_bucket_find(struct hash_bucket *bucket,
 						  match_fn match)
 {
 	struct dma_debug_entry *entry, *ret = NULL;
-	int matches = 0, match_lvl, last_lvl = -1;
+	int matches = 0, match_lvl, last_lvl = 0;
 
 	list_for_each_entry(entry, &bucket->list, list) {
 		if (!match(ref, entry))
@@ -334,7 +298,7 @@ static struct dma_debug_entry *__hash_bucket_find(struct hash_bucket *bucket,
 		} else if (match_lvl > last_lvl) {
 			/*
 			 * We found an entry that fits better then the
-			 * previous one or it is the 1st match.
+			 * previous one
 			 */
 			last_lvl = match_lvl;
 			ret      = entry;
@@ -366,7 +330,7 @@ static struct dma_debug_entry *bucket_find_contain(struct hash_bucket **bucket,
 	unsigned int range = 0;
 
 	while (range <= max_range) {
-		entry = __hash_bucket_find(*bucket, ref, containing_match);
+		entry = __hash_bucket_find(*bucket, &index, containing_match);
 
 		if (entry)
 			return entry;
@@ -400,14 +364,6 @@ static void hash_bucket_del(struct dma_debug_entry *entry)
 	list_del(&entry->list);
 }
 
-static unsigned long long phys_addr(struct dma_debug_entry *entry)
-{
-	if (entry->type == dma_debug_resource)
-		return __pfn_to_phys(entry->pfn) + entry->offset;
-
-	return page_to_phys(pfn_to_page(entry->pfn)) + entry->offset;
-}
-
 /*
  * Dump mapping entries for debugging purposes
  */
@@ -425,12 +381,11 @@ void debug_dma_dump_mappings(struct device *dev)
 		list_for_each_entry(entry, &bucket->list, list) {
 			if (!dev || dev == entry->dev) {
 				dev_info(entry->dev,
-					 "%s idx %d P=%Lx N=%lx D=%Lx L=%Lx %s %s\n",
+					 "%s idx %d P=%Lx D=%Lx L=%Lx %s\n",
 					 type2name[entry->type], idx,
-					 phys_addr(entry), entry->pfn,
+					 (unsigned long long)entry->paddr,
 					 entry->dev_addr, entry->size,
-					 dir2name[entry->direction],
-					 maperr2str[entry->map_err_type]);
+					 dir2name[entry->direction]);
 			}
 		}
 
@@ -440,179 +395,6 @@ void debug_dma_dump_mappings(struct device *dev)
 EXPORT_SYMBOL(debug_dma_dump_mappings);
 
 /*
- * For each mapping (initial cacheline in the case of
- * dma_alloc_coherent/dma_map_page, initial cacheline in each page of a
- * scatterlist, or the cacheline specified in dma_map_single) insert
- * into this tree using the cacheline as the key. At
- * dma_unmap_{single|sg|page} or dma_free_coherent delete the entry.  If
- * the entry already exists at insertion time add a tag as a reference
- * count for the overlapping mappings.  For now, the overlap tracking
- * just ensures that 'unmaps' balance 'maps' before marking the
- * cacheline idle, but we should also be flagging overlaps as an API
- * violation.
- *
- * Memory usage is mostly constrained by the maximum number of available
- * dma-debug entries in that we need a free dma_debug_entry before
- * inserting into the tree.  In the case of dma_map_page and
- * dma_alloc_coherent there is only one dma_debug_entry and one
- * dma_active_cacheline entry to track per event.  dma_map_sg(), on the
- * other hand, consumes a single dma_debug_entry, but inserts 'nents'
- * entries into the tree.
- *
- * At any time debug_dma_assert_idle() can be called to trigger a
- * warning if any cachelines in the given page are in the active set.
- */
-static RADIX_TREE(dma_active_cacheline, GFP_NOWAIT);
-static DEFINE_SPINLOCK(radix_lock);
-#define ACTIVE_CACHELINE_MAX_OVERLAP ((1 << RADIX_TREE_MAX_TAGS) - 1)
-#define CACHELINE_PER_PAGE_SHIFT (PAGE_SHIFT - L1_CACHE_SHIFT)
-#define CACHELINES_PER_PAGE (1 << CACHELINE_PER_PAGE_SHIFT)
-
-static phys_addr_t to_cacheline_number(struct dma_debug_entry *entry)
-{
-	return (entry->pfn << CACHELINE_PER_PAGE_SHIFT) +
-		(entry->offset >> L1_CACHE_SHIFT);
-}
-
-static int active_cacheline_read_overlap(phys_addr_t cln)
-{
-	int overlap = 0, i;
-
-	for (i = RADIX_TREE_MAX_TAGS - 1; i >= 0; i--)
-		if (radix_tree_tag_get(&dma_active_cacheline, cln, i))
-			overlap |= 1 << i;
-	return overlap;
-}
-
-static int active_cacheline_set_overlap(phys_addr_t cln, int overlap)
-{
-	int i;
-
-	if (overlap > ACTIVE_CACHELINE_MAX_OVERLAP || overlap < 0)
-		return overlap;
-
-	for (i = RADIX_TREE_MAX_TAGS - 1; i >= 0; i--)
-		if (overlap & 1 << i)
-			radix_tree_tag_set(&dma_active_cacheline, cln, i);
-		else
-			radix_tree_tag_clear(&dma_active_cacheline, cln, i);
-
-	return overlap;
-}
-
-static void active_cacheline_inc_overlap(phys_addr_t cln)
-{
-	int overlap = active_cacheline_read_overlap(cln);
-
-	overlap = active_cacheline_set_overlap(cln, ++overlap);
-
-	/* If we overflowed the overlap counter then we're potentially
-	 * leaking dma-mappings.  Otherwise, if maps and unmaps are
-	 * balanced then this overflow may cause false negatives in
-	 * debug_dma_assert_idle() as the cacheline may be marked idle
-	 * prematurely.
-	 */
-	WARN_ONCE(overlap > ACTIVE_CACHELINE_MAX_OVERLAP,
-		  "DMA-API: exceeded %d overlapping mappings of cacheline %pa\n",
-		  ACTIVE_CACHELINE_MAX_OVERLAP, &cln);
-}
-
-static int active_cacheline_dec_overlap(phys_addr_t cln)
-{
-	int overlap = active_cacheline_read_overlap(cln);
-
-	return active_cacheline_set_overlap(cln, --overlap);
-}
-
-static int active_cacheline_insert(struct dma_debug_entry *entry)
-{
-	phys_addr_t cln = to_cacheline_number(entry);
-	unsigned long flags;
-	int rc;
-
-	/* If the device is not writing memory then we don't have any
-	 * concerns about the cpu consuming stale data.  This mitigates
-	 * legitimate usages of overlapping mappings.
-	 */
-	if (entry->direction == DMA_TO_DEVICE)
-		return 0;
-
-	spin_lock_irqsave(&radix_lock, flags);
-	rc = radix_tree_insert(&dma_active_cacheline, cln, entry);
-	if (rc == -EEXIST)
-		active_cacheline_inc_overlap(cln);
-	spin_unlock_irqrestore(&radix_lock, flags);
-
-	return rc;
-}
-
-static void active_cacheline_remove(struct dma_debug_entry *entry)
-{
-	phys_addr_t cln = to_cacheline_number(entry);
-	unsigned long flags;
-
-	/* ...mirror the insert case */
-	if (entry->direction == DMA_TO_DEVICE)
-		return;
-
-	spin_lock_irqsave(&radix_lock, flags);
-	/* since we are counting overlaps the final put of the
-	 * cacheline will occur when the overlap count is 0.
-	 * active_cacheline_dec_overlap() returns -1 in that case
-	 */
-	if (active_cacheline_dec_overlap(cln) < 0)
-		radix_tree_delete(&dma_active_cacheline, cln);
-	spin_unlock_irqrestore(&radix_lock, flags);
-}
-
-/**
- * debug_dma_assert_idle() - assert that a page is not undergoing dma
- * @page: page to lookup in the dma_active_cacheline tree
- *
- * Place a call to this routine in cases where the cpu touching the page
- * before the dma completes (page is dma_unmapped) will lead to data
- * corruption.
- */
-void debug_dma_assert_idle(struct page *page)
-{
-	static struct dma_debug_entry *ents[CACHELINES_PER_PAGE];
-	struct dma_debug_entry *entry = NULL;
-	void **results = (void **) &ents;
-	unsigned int nents, i;
-	unsigned long flags;
-	phys_addr_t cln;
-
-	if (dma_debug_disabled())
-		return;
-
-	if (!page)
-		return;
-
-	cln = (phys_addr_t) page_to_pfn(page) << CACHELINE_PER_PAGE_SHIFT;
-	spin_lock_irqsave(&radix_lock, flags);
-	nents = radix_tree_gang_lookup(&dma_active_cacheline, results, cln,
-				       CACHELINES_PER_PAGE);
-	for (i = 0; i < nents; i++) {
-		phys_addr_t ent_cln = to_cacheline_number(ents[i]);
-
-		if (ent_cln == cln) {
-			entry = ents[i];
-			break;
-		} else if (ent_cln >= cln + CACHELINES_PER_PAGE)
-			break;
-	}
-	spin_unlock_irqrestore(&radix_lock, flags);
-
-	if (!entry)
-		return;
-
-	cln = to_cacheline_number(entry);
-	err_printk(entry->dev, entry,
-		   "DMA-API: cpu touching an active dma mapped cacheline [cln=%pa]\n",
-		   &cln);
-}
-
-/*
  * Wrapper function for adding an entry to the hash.
  * This function takes care of locking itself.
  */
@@ -620,21 +402,10 @@ static void add_dma_entry(struct dma_debug_entry *entry)
 {
 	struct hash_bucket *bucket;
 	unsigned long flags;
-	int rc;
 
 	bucket = get_hash_bucket(entry, &flags);
 	hash_bucket_add(bucket, entry);
 	put_hash_bucket(bucket, &flags);
-
-	rc = active_cacheline_insert(entry);
-	if (rc == -ENOMEM) {
-		pr_err("DMA-API: cacheline tracking ENOMEM, dma-debug disabled\n");
-		global_disable = true;
-	}
-
-	/* TODO: report -EEXIST errors here as overlapping mappings are
-	 * not supported by the DMA API
-	 */
 }
 
 static struct dma_debug_entry *__dma_entry_alloc(void)
@@ -659,21 +430,18 @@ static struct dma_debug_entry *__dma_entry_alloc(void)
  */
 static struct dma_debug_entry *dma_entry_alloc(void)
 {
-	struct dma_debug_entry *entry;
+	struct dma_debug_entry *entry = NULL;
 	unsigned long flags;
 
 	spin_lock_irqsave(&free_entries_lock, flags);
 
 	if (list_empty(&free_entries)) {
-		global_disable = true;
-		spin_unlock_irqrestore(&free_entries_lock, flags);
 		pr_err("DMA-API: debugging out of memory - disabling\n");
-		return NULL;
+		global_disable = true;
+		goto out;
 	}
 
 	entry = __dma_entry_alloc();
-
-	spin_unlock_irqrestore(&free_entries_lock, flags);
 
 #ifdef CONFIG_STACKTRACE
 	entry->stacktrace.max_entries = DMA_DEBUG_STACKTRACE_ENTRIES;
@@ -682,14 +450,15 @@ static struct dma_debug_entry *dma_entry_alloc(void)
 	save_stack_trace(&entry->stacktrace);
 #endif
 
+out:
+	spin_unlock_irqrestore(&free_entries_lock, flags);
+
 	return entry;
 }
 
 static void dma_entry_free(struct dma_debug_entry *entry)
 {
 	unsigned long flags;
-
-	active_cacheline_remove(entry);
 
 	/*
 	 * add to beginning of the list - this way the entries are
@@ -888,7 +657,7 @@ static int dma_debug_fs_init(void)
 
 	global_disable_dent = debugfs_create_bool("disabled", 0444,
 			dma_debug_dent,
-			&global_disable);
+			(u32 *)&global_disable);
 	if (!global_disable_dent)
 		goto out_err;
 
@@ -964,7 +733,7 @@ static int dma_debug_device_change(struct notifier_block *nb, unsigned long acti
 	struct dma_debug_entry *uninitialized_var(entry);
 	int count;
 
-	if (dma_debug_disabled())
+	if (global_disable)
 		return 0;
 
 	switch (action) {
@@ -992,7 +761,7 @@ void dma_debug_add_bus(struct bus_type *bus)
 {
 	struct notifier_block *nb;
 
-	if (dma_debug_disabled())
+	if (global_disable)
 		return;
 
 	nb = kzalloc(sizeof(struct notifier_block), GFP_KERNEL);
@@ -1013,9 +782,6 @@ void dma_debug_init(u32 num_entries)
 {
 	int i;
 
-	/* Do not use dma_debug_initialized here, since we really want to be
-	 * called to set dma_debug_initialized
-	 */
 	if (global_disable)
 		return;
 
@@ -1042,8 +808,6 @@ void dma_debug_init(u32 num_entries)
 	}
 
 	nr_total_entries = num_free_entries;
-
-	dma_debug_initialized = true;
 
 	pr_info("DMA-API: debugging enabled by kernel config\n");
 }
@@ -1085,25 +849,21 @@ static void check_unmap(struct dma_debug_entry *ref)
 	struct hash_bucket *bucket;
 	unsigned long flags;
 
+	if (dma_mapping_error(ref->dev, ref->dev_addr)) {
+		err_printk(ref->dev, NULL, "DMA-API: device driver tries "
+			   "to free an invalid DMA memory address\n");
+		return;
+	}
+
 	bucket = get_hash_bucket(ref, &flags);
 	entry = bucket_find_exact(bucket, ref);
 
 	if (!entry) {
-		/* must drop lock before calling dma_mapping_error */
-		put_hash_bucket(bucket, &flags);
-
-		if (dma_mapping_error(ref->dev, ref->dev_addr)) {
-			err_printk(ref->dev, NULL,
-				   "DMA-API: device driver tries to free an "
-				   "invalid DMA memory address\n");
-		} else {
-			err_printk(ref->dev, NULL,
-				   "DMA-API: device driver tries to free DMA "
-				   "memory it has not allocated [device "
-				   "address=0x%016llx] [size=%llu bytes]\n",
-				   ref->dev_addr, ref->size);
-		}
-		return;
+		err_printk(ref->dev, NULL, "DMA-API: device driver tries "
+			   "to free DMA memory it has not allocated "
+			   "[device address=0x%016llx] [size=%llu bytes]\n",
+			   ref->dev_addr, ref->size);
+		goto out;
 	}
 
 	if (ref->size != entry->size) {
@@ -1122,15 +882,15 @@ static void check_unmap(struct dma_debug_entry *ref)
 			   ref->dev_addr, ref->size,
 			   type2name[entry->type], type2name[ref->type]);
 	} else if ((entry->type == dma_debug_coherent) &&
-		   (phys_addr(ref) != phys_addr(entry))) {
+		   (ref->paddr != entry->paddr)) {
 		err_printk(ref->dev, entry, "DMA-API: device driver frees "
 			   "DMA memory with different CPU address "
 			   "[device address=0x%016llx] [size=%llu bytes] "
 			   "[cpu alloc address=0x%016llx] "
 			   "[cpu free address=0x%016llx]",
 			   ref->dev_addr, ref->size,
-			   phys_addr(entry),
-			   phys_addr(ref));
+			   (unsigned long long)entry->paddr,
+			   (unsigned long long)ref->paddr);
 	}
 
 	if (ref->sg_call_ents && ref->type == dma_debug_sg &&
@@ -1155,47 +915,18 @@ static void check_unmap(struct dma_debug_entry *ref)
 			   dir2name[ref->direction]);
 	}
 
-	if (entry->map_err_type == MAP_ERR_NOT_CHECKED) {
-		err_printk(ref->dev, entry,
-			   "DMA-API: device driver failed to check map error"
-			   "[device address=0x%016llx] [size=%llu bytes] "
-			   "[mapped as %s]",
-			   ref->dev_addr, ref->size,
-			   type2name[entry->type]);
-	}
-
 	hash_bucket_del(entry);
 	dma_entry_free(entry);
 
+out:
 	put_hash_bucket(bucket, &flags);
 }
 
-static void check_for_stack(struct device *dev,
-			    struct page *page, size_t offset)
+static void check_for_stack(struct device *dev, void *addr)
 {
-	void *addr;
-	struct vm_struct *stack_vm_area = task_stack_vm_area(current);
-
-	if (!stack_vm_area) {
-		/* Stack is direct-mapped. */
-		if (PageHighMem(page))
-			return;
-		addr = page_address(page) + offset;
-		if (object_is_on_stack(addr))
-			err_printk(dev, NULL, "DMA-API: device driver maps memory from stack [addr=%p]\n", addr);
-	} else {
-		/* Stack is vmalloced. */
-		int i;
-
-		for (i = 0; i < stack_vm_area->nr_pages; i++) {
-			if (page != stack_vm_area->pages[i])
-				continue;
-
-			addr = (u8 *)current->stack + i * PAGE_SIZE + offset;
-			err_printk(dev, NULL, "DMA-API: device driver maps memory from stack [probable addr=%p]\n", addr);
-			break;
-		}
-	}
+	if (object_is_on_stack(addr))
+		err_printk(dev, NULL, "DMA-API: device driver maps memory from"
+				"stack [addr=%p]\n", addr);
 }
 
 static inline bool overlap(void *addr, unsigned long len, void *start, void *end)
@@ -1210,7 +941,7 @@ static inline bool overlap(void *addr, unsigned long len, void *start, void *end
 
 static void check_for_illegal_area(struct device *dev, void *addr, unsigned long len)
 {
-	if (overlap(addr, len, _stext, _etext) ||
+	if (overlap(addr, len, _text, _etext) ||
 	    overlap(addr, len, __start_rodata, __end_rodata))
 		err_printk(dev, NULL, "DMA-API: device driver maps memory from kernel text or rodata [addr=%p] [len=%lu]\n", addr, len);
 }
@@ -1278,14 +1009,6 @@ static void check_sync(struct device *dev,
 				dir2name[entry->direction],
 				dir2name[ref->direction]);
 
-	if (ref->sg_call_ents && ref->type == dma_debug_sg &&
-	    ref->sg_call_ents != entry->sg_call_ents) {
-		err_printk(ref->dev, entry, "DMA-API: device driver syncs "
-			   "DMA sg list with different entry count "
-			   "[map count=%d] [sync count=%d]\n",
-			   entry->sg_call_ents, ref->sg_call_ents);
-	}
-
 out:
 	put_hash_bucket(bucket, &flags);
 }
@@ -1296,10 +1019,10 @@ void debug_dma_map_page(struct device *dev, struct page *page, size_t offset,
 {
 	struct dma_debug_entry *entry;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
-	if (dma_mapping_error(dev, dma_addr))
+	if (unlikely(dma_mapping_error(dev, dma_addr)))
 		return;
 
 	entry = dma_entry_alloc();
@@ -1308,65 +1031,24 @@ void debug_dma_map_page(struct device *dev, struct page *page, size_t offset,
 
 	entry->dev       = dev;
 	entry->type      = dma_debug_page;
-	entry->pfn	 = page_to_pfn(page);
-	entry->offset	 = offset,
+	entry->paddr     = page_to_phys(page) + offset;
 	entry->dev_addr  = dma_addr;
 	entry->size      = size;
 	entry->direction = direction;
-	entry->map_err_type = MAP_ERR_NOT_CHECKED;
 
 	if (map_single)
 		entry->type = dma_debug_single;
 
-	check_for_stack(dev, page, offset);
-
 	if (!PageHighMem(page)) {
 		void *addr = page_address(page) + offset;
 
+		check_for_stack(dev, addr);
 		check_for_illegal_area(dev, addr, size);
 	}
 
 	add_dma_entry(entry);
 }
 EXPORT_SYMBOL(debug_dma_map_page);
-
-void debug_dma_mapping_error(struct device *dev, dma_addr_t dma_addr)
-{
-	struct dma_debug_entry ref;
-	struct dma_debug_entry *entry;
-	struct hash_bucket *bucket;
-	unsigned long flags;
-
-	if (unlikely(dma_debug_disabled()))
-		return;
-
-	ref.dev = dev;
-	ref.dev_addr = dma_addr;
-	bucket = get_hash_bucket(&ref, &flags);
-
-	list_for_each_entry(entry, &bucket->list, list) {
-		if (!exact_match(&ref, entry))
-			continue;
-
-		/*
-		 * The same physical address can be mapped multiple
-		 * times. Without a hardware IOMMU this results in the
-		 * same device addresses being put into the dma-debug
-		 * hash multiple times too. This can result in false
-		 * positives being reported. Therefore we implement a
-		 * best-fit algorithm here which updates the first entry
-		 * from the hash which fits the reference value and is
-		 * not currently listed as being checked.
-		 */
-		if (entry->map_err_type == MAP_ERR_NOT_CHECKED) {
-			entry->map_err_type = MAP_ERR_CHECKED;
-			break;
-		}
-	}
-
-	put_hash_bucket(bucket, &flags);
-}
-EXPORT_SYMBOL(debug_dma_mapping_error);
 
 void debug_dma_unmap_page(struct device *dev, dma_addr_t addr,
 			  size_t size, int direction, bool map_single)
@@ -1379,7 +1061,7 @@ void debug_dma_unmap_page(struct device *dev, dma_addr_t addr,
 		.direction      = direction,
 	};
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	if (map_single)
@@ -1396,7 +1078,7 @@ void debug_dma_map_sg(struct device *dev, struct scatterlist *sg,
 	struct scatterlist *s;
 	int i;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	for_each_sg(sg, s, mapped_ents, i) {
@@ -1406,17 +1088,15 @@ void debug_dma_map_sg(struct device *dev, struct scatterlist *sg,
 
 		entry->type           = dma_debug_sg;
 		entry->dev            = dev;
-		entry->pfn	      = page_to_pfn(sg_page(s));
-		entry->offset	      = s->offset,
+		entry->paddr          = sg_phys(s);
 		entry->size           = sg_dma_len(s);
 		entry->dev_addr       = sg_dma_address(s);
 		entry->direction      = direction;
 		entry->sg_call_ents   = nents;
 		entry->sg_mapped_ents = mapped_ents;
 
-		check_for_stack(dev, sg_page(s), s->offset);
-
 		if (!PageHighMem(sg_page(s))) {
+			check_for_stack(dev, sg_virt(s));
 			check_for_illegal_area(dev, sg_virt(s), sg_dma_len(s));
 		}
 
@@ -1450,7 +1130,7 @@ void debug_dma_unmap_sg(struct device *dev, struct scatterlist *sglist,
 	struct scatterlist *s;
 	int mapped_ents = 0, i;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	for_each_sg(sglist, s, nelems, i) {
@@ -1458,8 +1138,7 @@ void debug_dma_unmap_sg(struct device *dev, struct scatterlist *sglist,
 		struct dma_debug_entry ref = {
 			.type           = dma_debug_sg,
 			.dev            = dev,
-			.pfn		= page_to_pfn(sg_page(s)),
-			.offset		= s->offset,
+			.paddr          = sg_phys(s),
 			.dev_addr       = sg_dma_address(s),
 			.size           = sg_dma_len(s),
 			.direction      = dir,
@@ -1482,7 +1161,7 @@ void debug_dma_alloc_coherent(struct device *dev, size_t size,
 {
 	struct dma_debug_entry *entry;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	if (unlikely(virt == NULL))
@@ -1494,8 +1173,7 @@ void debug_dma_alloc_coherent(struct device *dev, size_t size,
 
 	entry->type      = dma_debug_coherent;
 	entry->dev       = dev;
-	entry->pfn	 = page_to_pfn(virt_to_page(virt));
-	entry->offset	 = (size_t) virt & ~PAGE_MASK;
+	entry->paddr     = virt_to_phys(virt);
 	entry->size      = size;
 	entry->dev_addr  = dma_addr;
 	entry->direction = DMA_BIDIRECTIONAL;
@@ -1510,69 +1188,25 @@ void debug_dma_free_coherent(struct device *dev, size_t size,
 	struct dma_debug_entry ref = {
 		.type           = dma_debug_coherent,
 		.dev            = dev,
-		.pfn		= page_to_pfn(virt_to_page(virt)),
-		.offset		= (size_t) virt & ~PAGE_MASK,
+		.paddr          = virt_to_phys(virt),
 		.dev_addr       = addr,
 		.size           = size,
 		.direction      = DMA_BIDIRECTIONAL,
 	};
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	check_unmap(&ref);
 }
 EXPORT_SYMBOL(debug_dma_free_coherent);
 
-void debug_dma_map_resource(struct device *dev, phys_addr_t addr, size_t size,
-			    int direction, dma_addr_t dma_addr)
-{
-	struct dma_debug_entry *entry;
-
-	if (unlikely(dma_debug_disabled()))
-		return;
-
-	entry = dma_entry_alloc();
-	if (!entry)
-		return;
-
-	entry->type		= dma_debug_resource;
-	entry->dev		= dev;
-	entry->pfn		= PHYS_PFN(addr);
-	entry->offset		= offset_in_page(addr);
-	entry->size		= size;
-	entry->dev_addr		= dma_addr;
-	entry->direction	= direction;
-	entry->map_err_type	= MAP_ERR_NOT_CHECKED;
-
-	add_dma_entry(entry);
-}
-EXPORT_SYMBOL(debug_dma_map_resource);
-
-void debug_dma_unmap_resource(struct device *dev, dma_addr_t dma_addr,
-			      size_t size, int direction)
-{
-	struct dma_debug_entry ref = {
-		.type           = dma_debug_resource,
-		.dev            = dev,
-		.dev_addr       = dma_addr,
-		.size           = size,
-		.direction      = direction,
-	};
-
-	if (unlikely(dma_debug_disabled()))
-		return;
-
-	check_unmap(&ref);
-}
-EXPORT_SYMBOL(debug_dma_unmap_resource);
-
 void debug_dma_sync_single_for_cpu(struct device *dev, dma_addr_t dma_handle,
 				   size_t size, int direction)
 {
 	struct dma_debug_entry ref;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	ref.type         = dma_debug_single;
@@ -1592,7 +1226,7 @@ void debug_dma_sync_single_for_device(struct device *dev,
 {
 	struct dma_debug_entry ref;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	ref.type         = dma_debug_single;
@@ -1613,7 +1247,7 @@ void debug_dma_sync_single_range_for_cpu(struct device *dev,
 {
 	struct dma_debug_entry ref;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	ref.type         = dma_debug_single;
@@ -1634,7 +1268,7 @@ void debug_dma_sync_single_range_for_device(struct device *dev,
 {
 	struct dma_debug_entry ref;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	ref.type         = dma_debug_single;
@@ -1654,7 +1288,7 @@ void debug_dma_sync_sg_for_cpu(struct device *dev, struct scatterlist *sg,
 	struct scatterlist *s;
 	int mapped_ents = 0, i;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	for_each_sg(sg, s, nelems, i) {
@@ -1662,8 +1296,7 @@ void debug_dma_sync_sg_for_cpu(struct device *dev, struct scatterlist *sg,
 		struct dma_debug_entry ref = {
 			.type           = dma_debug_sg,
 			.dev            = dev,
-			.pfn		= page_to_pfn(sg_page(s)),
-			.offset		= s->offset,
+			.paddr          = sg_phys(s),
 			.dev_addr       = sg_dma_address(s),
 			.size           = sg_dma_len(s),
 			.direction      = direction,
@@ -1687,7 +1320,7 @@ void debug_dma_sync_sg_for_device(struct device *dev, struct scatterlist *sg,
 	struct scatterlist *s;
 	int mapped_ents = 0, i;
 
-	if (unlikely(dma_debug_disabled()))
+	if (unlikely(global_disable))
 		return;
 
 	for_each_sg(sg, s, nelems, i) {
@@ -1695,8 +1328,7 @@ void debug_dma_sync_sg_for_device(struct device *dev, struct scatterlist *sg,
 		struct dma_debug_entry ref = {
 			.type           = dma_debug_sg,
 			.dev            = dev,
-			.pfn		= page_to_pfn(sg_page(s)),
-			.offset		= s->offset,
+			.paddr          = sg_phys(s),
 			.dev_addr       = sg_dma_address(s),
 			.size           = sg_dma_len(s),
 			.direction      = direction,

@@ -5,29 +5,30 @@
  */
 #include <linux/init.h>
 #include <linux/ioport.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/pci.h>
 
 #include <asm/bios_ebda.h>
 #include <asm/paravirt.h>
 #include <asm/pci_x86.h>
+#include <asm/pci.h>
 #include <asm/mpspec.h>
 #include <asm/setup.h>
 #include <asm/apic.h>
 #include <asm/e820.h>
 #include <asm/time.h>
 #include <asm/irq.h>
-#include <asm/io_apic.h>
-#include <asm/hpet.h>
 #include <asm/pat.h>
 #include <asm/tsc.h>
 #include <asm/iommu.h>
 #include <asm/mach_traps.h>
 
-void x86_init_noop(void) { }
+void __cpuinit x86_init_noop(void) { }
 void __init x86_init_uint_noop(unsigned int unused) { }
+void __init x86_init_pgd_noop(pgd_t *unused) { }
 int __init iommu_init_noop(void) { return 0; }
 void iommu_shutdown_noop(void) { }
+void wallclock_init_noop(void) { }
 
 /*
  * The platform setup functions are preset with the default functions
@@ -62,12 +63,18 @@ struct x86_init_ops x86_init __initdata = {
 		.banner			= default_banner,
 	},
 
+	.mapping = {
+		.pagetable_reserve		= native_pagetable_reserve,
+	},
+
 	.paging = {
-		.pagetable_init		= native_pagetable_init,
+		.pagetable_setup_start	= native_pagetable_setup_start,
+		.pagetable_setup_done	= native_pagetable_setup_done,
 	},
 
 	.timers = {
 		.setup_percpu_clockev	= setup_boot_APIC_clock,
+		.tsc_pre_init		= x86_init_noop,
 		.timer_init		= hpet_time_init,
 		.wallclock_init		= x86_init_noop,
 	},
@@ -83,7 +90,7 @@ struct x86_init_ops x86_init __initdata = {
 	},
 };
 
-struct x86_cpuinit_ops x86_cpuinit = {
+struct x86_cpuinit_ops x86_cpuinit __cpuinitdata = {
 	.early_percpu_clock_init	= x86_init_noop,
 	.setup_percpu_clockev		= setup_secondary_APIC_clock,
 };
@@ -91,9 +98,9 @@ struct x86_cpuinit_ops x86_cpuinit = {
 static void default_nmi_init(void) { };
 static int default_i8042_detect(void) { return 1; };
 
-struct x86_platform_ops x86_platform __ro_after_init = {
-	.calibrate_cpu			= native_calibrate_cpu,
+struct x86_platform_ops x86_platform = {
 	.calibrate_tsc			= native_calibrate_tsc,
+	.wallclock_init			= wallclock_init_noop,
 	.get_wallclock			= mach_get_cmos_time,
 	.set_wallclock			= mach_set_rtc_mmss,
 	.iommu_shutdown			= iommu_shutdown_noop,
@@ -106,38 +113,9 @@ struct x86_platform_ops x86_platform __ro_after_init = {
 };
 
 EXPORT_SYMBOL_GPL(x86_platform);
-
-#if defined(CONFIG_PCI_MSI)
-struct x86_msi_ops x86_msi __ro_after_init = {
-	.setup_msi_irqs		= native_setup_msi_irqs,
-	.teardown_msi_irq	= native_teardown_msi_irq,
-	.teardown_msi_irqs	= default_teardown_msi_irqs,
-	.restore_msi_irqs	= default_restore_msi_irqs,
-};
-
-/* MSI arch specific hooks */
-int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
-{
-	return x86_msi.setup_msi_irqs(dev, nvec, type);
-}
-
-void arch_teardown_msi_irqs(struct pci_dev *dev)
-{
-	x86_msi.teardown_msi_irqs(dev);
-}
-
-void arch_teardown_msi_irq(unsigned int irq)
-{
-	x86_msi.teardown_msi_irq(irq);
-}
-
-void arch_restore_msi_irqs(struct pci_dev *dev)
-{
-	x86_msi.restore_msi_irqs(dev);
-}
-#endif
-
-struct x86_io_apic_ops x86_io_apic_ops __ro_after_init = {
-	.read			= native_io_apic_read,
-	.disable		= native_disable_io_apic,
+struct x86_msi_ops x86_msi = {
+	.setup_msi_irqs = native_setup_msi_irqs,
+	.teardown_msi_irq = native_teardown_msi_irq,
+	.teardown_msi_irqs = default_teardown_msi_irqs,
+	.restore_msi_irqs = default_restore_msi_irqs,
 };

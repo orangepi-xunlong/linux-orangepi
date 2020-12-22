@@ -13,12 +13,13 @@
 #include <linux/slab.h>
 #include <linux/mutex.h>
 #include <linux/sunrpc/svc.h>
-#include <linux/sunrpc/addr.h>
+#include <linux/sunrpc/clnt.h>
+#include <linux/nfsd/nfsfh.h>
+#include <linux/nfsd/export.h>
 #include <linux/lockd/lockd.h>
 #include <linux/lockd/share.h>
 #include <linux/module.h>
 #include <linux/mount.h>
-#include <uapi/linux/nfs2.h>
 
 #define NLMDBG_FACILITY		NLMDBG_SVCSUBS
 
@@ -31,7 +32,7 @@
 static struct hlist_head	nlm_files[FILE_NRHASH];
 static DEFINE_MUTEX(nlm_file_mutex);
 
-#ifdef CONFIG_SUNRPC_DEBUG
+#ifdef NFSD_DEBUG
 static inline void nlm_debug_print_fh(char *msg, struct nfs_fh *f)
 {
 	u32 *fhp = (u32*)f->data;
@@ -44,7 +45,7 @@ static inline void nlm_debug_print_fh(char *msg, struct nfs_fh *f)
 
 static inline void nlm_debug_print_file(char *msg, struct nlm_file *file)
 {
-	struct inode *inode = file_inode(file->f_file);
+	struct inode *inode = file->f_file->f_path.dentry->d_inode;
 
 	dprintk("lockd: %s %s/%ld\n",
 		msg, inode->i_sb->s_id, inode->i_ino);
@@ -83,6 +84,7 @@ __be32
 nlm_lookup_file(struct svc_rqst *rqstp, struct nlm_file **result,
 					struct nfs_fh *f)
 {
+	struct hlist_node *pos;
 	struct nlm_file	*file;
 	unsigned int	hash;
 	__be32		nfserr;
@@ -94,7 +96,7 @@ nlm_lookup_file(struct svc_rqst *rqstp, struct nlm_file **result,
 	/* Lock file table */
 	mutex_lock(&nlm_file_mutex);
 
-	hlist_for_each_entry(file, &nlm_files[hash], f_list)
+	hlist_for_each_entry(file, pos, &nlm_files[hash], f_list)
 		if (!nfs_compare_fh(&file->f_handle, f))
 			goto found;
 
@@ -164,15 +166,12 @@ nlm_traverse_locks(struct nlm_host *host, struct nlm_file *file,
 {
 	struct inode	 *inode = nlmsvc_file_inode(file);
 	struct file_lock *fl;
-	struct file_lock_context *flctx = inode->i_flctx;
 	struct nlm_host	 *lockhost;
 
-	if (!flctx || list_empty_careful(&flctx->flc_posix))
-		return 0;
 again:
 	file->f_locks = 0;
-	spin_lock(&flctx->flc_lock);
-	list_for_each_entry(fl, &flctx->flc_posix, fl_list) {
+	lock_flocks(); /* protects i_flock list */
+	for (fl = inode->i_flock; fl; fl = fl->fl_next) {
 		if (fl->fl_lmops != &nlmsvc_lock_operations)
 			continue;
 
@@ -183,7 +182,7 @@ again:
 		if (match(lockhost, host)) {
 			struct file_lock lock = *fl;
 
-			spin_unlock(&flctx->flc_lock);
+			unlock_flocks();
 			lock.fl_type  = F_UNLCK;
 			lock.fl_start = 0;
 			lock.fl_end   = OFFSET_MAX;
@@ -195,7 +194,7 @@ again:
 			goto again;
 		}
 	}
-	spin_unlock(&flctx->flc_lock);
+	unlock_flocks();
 
 	return 0;
 }
@@ -226,21 +225,18 @@ nlm_file_inuse(struct nlm_file *file)
 {
 	struct inode	 *inode = nlmsvc_file_inode(file);
 	struct file_lock *fl;
-	struct file_lock_context *flctx = inode->i_flctx;
 
 	if (file->f_count || !list_empty(&file->f_blocks) || file->f_shares)
 		return 1;
 
-	if (flctx && !list_empty_careful(&flctx->flc_posix)) {
-		spin_lock(&flctx->flc_lock);
-		list_for_each_entry(fl, &flctx->flc_posix, fl_list) {
-			if (fl->fl_lmops == &nlmsvc_lock_operations) {
-				spin_unlock(&flctx->flc_lock);
-				return 1;
-			}
+	lock_flocks();
+	for (fl = inode->i_flock; fl; fl = fl->fl_next) {
+		if (fl->fl_lmops == &nlmsvc_lock_operations) {
+			unlock_flocks();
+			return 1;
 		}
-		spin_unlock(&flctx->flc_lock);
 	}
+	unlock_flocks();
 	file->f_locks = 0;
 	return 0;
 }
@@ -252,13 +248,13 @@ static int
 nlm_traverse_files(void *data, nlm_host_match_fn_t match,
 		int (*is_failover_file)(void *data, struct nlm_file *file))
 {
-	struct hlist_node *next;
+	struct hlist_node *pos, *next;
 	struct nlm_file	*file;
 	int i, ret = 0;
 
 	mutex_lock(&nlm_file_mutex);
 	for (i = 0; i < FILE_NRHASH; i++) {
-		hlist_for_each_entry_safe(file, next, &nlm_files[i], f_list) {
+		hlist_for_each_entry_safe(file, pos, next, &nlm_files[i], f_list) {
 			if (is_failover_file && !is_failover_file(data, file))
 				continue;
 			file->f_count++;
@@ -313,8 +309,7 @@ nlm_release_file(struct nlm_file *file)
  * Helpers function for resource traversal
  *
  * nlmsvc_mark_host:
- *	used by the garbage collector; simply sets h_inuse only for those
- *	hosts, which passed network check.
+ *	used by the garbage collector; simply sets h_inuse.
  *	Always returns 0.
  *
  * nlmsvc_same_host:
@@ -325,15 +320,12 @@ nlm_release_file(struct nlm_file *file)
  *	returns 1 iff the host is a client.
  *	Used by nlmsvc_invalidate_all
  */
-
 static int
-nlmsvc_mark_host(void *data, struct nlm_host *hint)
+nlmsvc_mark_host(void *data, struct nlm_host *dummy)
 {
 	struct nlm_host *host = data;
 
-	if ((hint->net == NULL) ||
-	    (host->net == hint->net))
-		host->h_inuse = 1;
+	host->h_inuse = 1;
 	return 0;
 }
 
@@ -366,13 +358,10 @@ nlmsvc_is_client(void *data, struct nlm_host *dummy)
  * Mark all hosts that still hold resources
  */
 void
-nlmsvc_mark_resources(struct net *net)
+nlmsvc_mark_resources(void)
 {
-	struct nlm_host hint;
-
-	dprintk("lockd: nlmsvc_mark_resources for net %p\n", net);
-	hint.net = net;
-	nlm_traverse_files(&hint, nlmsvc_mark_host, NULL);
+	dprintk("lockd: nlmsvc_mark_resources\n");
+	nlm_traverse_files(NULL, nlmsvc_mark_host, NULL);
 }
 
 /*
@@ -414,7 +403,7 @@ nlmsvc_match_sb(void *datap, struct nlm_file *file)
 {
 	struct super_block *sb = datap;
 
-	return sb == file_inode(file->f_file)->i_sb;
+	return sb == file->f_file->f_path.dentry->d_sb;
 }
 
 /**

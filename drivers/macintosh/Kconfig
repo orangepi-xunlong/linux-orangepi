@@ -32,7 +32,7 @@ config ADB_MACII
 
 config ADB_MACIISI
 	bool "Include Mac IIsi ADB driver"
-	depends on ADB && MAC && BROKEN
+	depends on ADB && MAC
 	help
 	  Say Y here if want your kernel to support Macintosh systems that use
 	  the Mac IIsi style ADB.  This includes the IIsi, IIvi, IIvx, Classic
@@ -96,18 +96,18 @@ config ADB_PMU_LED
 	  Support the front LED on Power/iBooks as a generic LED that can
 	  be triggered by any of the supported triggers. To get the
 	  behaviour of the old CONFIG_BLK_DEV_IDE_PMAC_BLINK, select this
-	  and the disk LED trigger and configure appropriately through sysfs.
+	  and the ide-disk LED trigger and configure appropriately through
+	  sysfs.
 
-config ADB_PMU_LED_DISK
-	bool "Use front LED as DISK LED by default"
+config ADB_PMU_LED_IDE
+	bool "Use front LED as IDE LED by default"
 	depends on ADB_PMU_LED
 	depends on LEDS_CLASS
-	depends on IDE_GD_ATA
 	select LEDS_TRIGGERS
-	select LEDS_TRIGGER_DISK
+	select LEDS_TRIGGER_IDE_DISK
 	help
-	  This option makes the front LED default to the disk trigger
-	  so that it blinks on disk activity.
+	  This option makes the front LED default to the IDE trigger
+	  so that it blinks on IDE activity.
 
 config PMAC_SMU
 	bool "Support for SMU  based PowerMacs"
@@ -165,8 +165,9 @@ config INPUT_ADBHID
 	  Say Y here if you want to have ADB (Apple Desktop Bus) HID devices
 	  such as keyboards, mice, joysticks, trackpads  or graphic tablets
 	  handled by the input layer.  If you say Y here, make sure to say Y to
-	  the corresponding drivers "Mouse Support" (CONFIG_INPUT_MOUSEDEV) and
-	  "Event interface support" (CONFIG_INPUT_EVDEV) as well.
+	  the corresponding drivers "Keyboard support" (CONFIG_INPUT_KEYBDEV),
+	  "Mouse Support" (CONFIG_INPUT_MOUSEDEV) and "Event interface
+	  support" (CONFIG_INPUT_EVDEV) as well.
 
 	  If unsure, say Y.
 
@@ -202,6 +203,13 @@ config THERM_ADT746X
           iBook G4, and the ATI based aluminium PowerBooks, allowing slightly
 	  better fan behaviour by default, and some manual control.
 
+config THERM_PM72
+	tristate "Support for thermal management on PowerMac G5"
+	depends on I2C && I2C_POWERMAC && PPC_PMAC64
+	help
+	  This driver provides thermostat and fan control for the desktop
+	  G5 machines. 
+
 config WINDFARM
 	tristate "New PowerMac thermal control infrastructure"
 	depends on PPC
@@ -212,22 +220,6 @@ config WINDFARM_PM81
 	select I2C_POWERMAC
 	help
 	  This driver provides thermal control for the iMacG5
-
-config WINDFARM_PM72
-	tristate "Support for thermal management on PowerMac G5 (AGP)"
-	depends on WINDFARM && I2C && CPU_FREQ_PMAC64 && ADB_PMU
-	select I2C_POWERMAC
-	help
-	  This driver provides thermal control for the PowerMac G5
-	  "AGP" variants (PowerMac 7,2 and 7,3)
-
-config WINDFARM_RM31
-	tristate "Support for thermal management on Xserve G5"
-	depends on WINDFARM && I2C && CPU_FREQ_PMAC64 && ADB_PMU
-	select I2C_POWERMAC
-	help
-	  This driver provides thermal control for the Xserve G5
-	  (RackMac3,1)
 
 config WINDFARM_PM91
 	tristate "Support for thermal management on PowerMac9,1"
@@ -267,7 +259,7 @@ config PMAC_RACKMETER
 
 config SENSORS_AMS
 	tristate "Apple Motion Sensor driver"
-	depends on PPC_PMAC && !PPC64 && INPUT && ((ADB_PMU && I2C = y) || (ADB_PMU && !I2C) || I2C)
+	depends on PPC_PMAC && !PPC64 && INPUT && ((ADB_PMU && I2C = y) || (ADB_PMU && !I2C) || I2C) && EXPERIMENTAL
 	select INPUT_POLLDEV
 	help
 	  Support for the motion sensor included in PowerBooks. Includes

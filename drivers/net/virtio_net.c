@@ -13,7 +13,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 //#define DEBUG
 #include <linux/netdevice.h>
@@ -25,11 +26,8 @@
 #include <linux/scatterlist.h>
 #include <linux/if_vlan.h>
 #include <linux/slab.h>
-#include <linux/cpu.h>
-#include <linux/average.h>
-#include <net/busy_poll.h>
 
-static int napi_weight = NAPI_POLL_WEIGHT;
+static int napi_weight = 128;
 module_param(napi_weight, int, 0444);
 
 static bool csum = true, gso = true;
@@ -37,32 +35,14 @@ module_param(csum, bool, 0444);
 module_param(gso, bool, 0444);
 
 /* FIXME: MTU in config. */
-#define GOOD_PACKET_LEN (ETH_HLEN + VLAN_HLEN + ETH_DATA_LEN)
+#define MAX_PACKET_LEN (ETH_HLEN + VLAN_HLEN + ETH_DATA_LEN)
 #define GOOD_COPY_LEN	128
 
-/* RX packet size EWMA. The average packet size is used to determine the packet
- * buffer size when refilling RX rings. As the entire RX ring may be refilled
- * at once, the weight is chosen so that the EWMA will be insensitive to short-
- * term, transient changes in packet size.
- */
-DECLARE_EWMA(pkt_len, 1, 64)
-
-/* With mergeable buffers we align buffer address and use the low bits to
- * encode its true size. Buffer size is up to 1 page so we need to align to
- * square root of page size to ensure we reserve enough bits to encode the true
- * size.
- */
-#define MERGEABLE_BUFFER_MIN_ALIGN_SHIFT ((PAGE_SHIFT + 1) / 2)
-
-/* Minimum alignment for mergeable packet buffers. */
-#define MERGEABLE_BUFFER_ALIGN max(L1_CACHE_BYTES, \
-				   1 << MERGEABLE_BUFFER_MIN_ALIGN_SHIFT)
-
+#define VIRTNET_SEND_COMMAND_SG_MAX    2
 #define VIRTNET_DRIVER_VERSION "1.0.0"
 
 struct virtnet_stats {
-	struct u64_stats_sync tx_syncp;
-	struct u64_stats_sync rx_syncp;
+	struct u64_stats_sync syncp;
 	u64 tx_bytes;
 	u64 tx_packets;
 
@@ -70,54 +50,15 @@ struct virtnet_stats {
 	u64 rx_packets;
 };
 
-/* Internal representation of a send virtqueue */
-struct send_queue {
-	/* Virtqueue associated with this send _queue */
-	struct virtqueue *vq;
-
-	/* TX: fragments + linear part + virtio header */
-	struct scatterlist sg[MAX_SKB_FRAGS + 2];
-
-	/* Name of the send queue: output.$index */
-	char name[40];
-};
-
-/* Internal representation of a receive virtqueue */
-struct receive_queue {
-	/* Virtqueue associated with this receive_queue */
-	struct virtqueue *vq;
-
-	struct napi_struct napi;
-
-	/* Chain pages by the private ptr. */
-	struct page *pages;
-
-	/* Average packet length for mergeable receive buffers. */
-	struct ewma_pkt_len mrg_avg_pkt_len;
-
-	/* Page frag for packet buffer allocation. */
-	struct page_frag alloc_frag;
-
-	/* RX: fragments + linear part + virtio header */
-	struct scatterlist sg[MAX_SKB_FRAGS + 2];
-
-	/* Name of this receive queue: input.$index */
-	char name[40];
-};
-
 struct virtnet_info {
 	struct virtio_device *vdev;
-	struct virtqueue *cvq;
+	struct virtqueue *rvq, *svq, *cvq;
 	struct net_device *dev;
-	struct send_queue *sq;
-	struct receive_queue *rq;
+	struct napi_struct napi;
 	unsigned int status;
 
-	/* Max # of queue pairs supported by the device */
-	u16 max_queue_pairs;
-
-	/* # of queue pairs currently used by the driver */
-	u16 curr_queue_pairs;
+	/* Number of input buffers, and max we've ever had. */
+	unsigned int num, max;
 
 	/* I like... big packets and I cannot lie! */
 	bool big_packets;
@@ -125,102 +66,63 @@ struct virtnet_info {
 	/* Host will merge rx buffers for big packets (shake it! shake it!) */
 	bool mergeable_rx_bufs;
 
-	/* Has control virtqueue */
-	bool has_cvq;
-
-	/* Host can handle any s/g split between our header and packet data */
-	bool any_header_sg;
-
-	/* Packet virtio header size */
-	u8 hdr_len;
-
 	/* Active statistics */
 	struct virtnet_stats __percpu *stats;
 
 	/* Work struct for refilling if we run low on memory. */
 	struct delayed_work refill;
 
-	/* Work struct for config space updates */
-	struct work_struct config_work;
+	/* Chain pages by the private ptr. */
+	struct page *pages;
 
-	/* Does the affinity hint is set for virtqueues? */
-	bool affinity_hint_set;
+	/* fragments + linear part + virtio header */
+	struct scatterlist rx_sg[MAX_SKB_FRAGS + 2];
+	struct scatterlist tx_sg[MAX_SKB_FRAGS + 2];
+};
 
-	/* CPU hotplug instances for online & dead */
-	struct hlist_node node;
-	struct hlist_node node_dead;
-
-	/* Control VQ buffers: protected by the rtnl lock */
-	struct virtio_net_ctrl_hdr ctrl_hdr;
-	virtio_net_ctrl_ack ctrl_status;
-	struct virtio_net_ctrl_mq ctrl_mq;
-	u8 ctrl_promisc;
-	u8 ctrl_allmulti;
-	u16 ctrl_vid;
-
-	/* Ethtool settings */
-	u8 duplex;
-	u32 speed;
+struct skb_vnet_hdr {
+	union {
+		struct virtio_net_hdr hdr;
+		struct virtio_net_hdr_mrg_rxbuf mhdr;
+	};
+	unsigned int num_sg;
 };
 
 struct padded_vnet_hdr {
-	struct virtio_net_hdr_mrg_rxbuf hdr;
+	struct virtio_net_hdr hdr;
 	/*
-	 * hdr is in a separate sg buffer, and data sg buffer shares same page
-	 * with this header sg. This padding makes next sg 16 byte aligned
-	 * after the header.
+	 * virtio_net_hdr should be in a separated sg buffer because of a
+	 * QEMU bug, and data sg buffer shares same page with this header sg.
+	 * This padding makes next sg 16 byte aligned after virtio_net_hdr.
 	 */
-	char padding[4];
+	char padding[6];
 };
 
-/* Converting between virtqueue no. and kernel tx/rx queue no.
- * 0:rx0 1:tx0 2:rx1 3:tx1 ... 2N:rxN 2N+1:txN 2N+2:cvq
- */
-static int vq2txq(struct virtqueue *vq)
+static inline struct skb_vnet_hdr *skb_vnet_hdr(struct sk_buff *skb)
 {
-	return (vq->index - 1) / 2;
-}
-
-static int txq2vq(int txq)
-{
-	return txq * 2 + 1;
-}
-
-static int vq2rxq(struct virtqueue *vq)
-{
-	return vq->index / 2;
-}
-
-static int rxq2vq(int rxq)
-{
-	return rxq * 2;
-}
-
-static inline struct virtio_net_hdr_mrg_rxbuf *skb_vnet_hdr(struct sk_buff *skb)
-{
-	return (struct virtio_net_hdr_mrg_rxbuf *)skb->cb;
+	return (struct skb_vnet_hdr *)skb->cb;
 }
 
 /*
  * private is used to chain pages for big packets, put the whole
  * most recent used list in the beginning for reuse
  */
-static void give_pages(struct receive_queue *rq, struct page *page)
+static void give_pages(struct virtnet_info *vi, struct page *page)
 {
 	struct page *end;
 
-	/* Find end of list, sew whole thing into vi->rq.pages. */
+	/* Find end of list, sew whole thing into vi->pages. */
 	for (end = page; end->private; end = (struct page *)end->private);
-	end->private = (unsigned long)rq->pages;
-	rq->pages = page;
+	end->private = (unsigned long)vi->pages;
+	vi->pages = page;
 }
 
-static struct page *get_a_page(struct receive_queue *rq, gfp_t gfp_mask)
+static struct page *get_a_page(struct virtnet_info *vi, gfp_t gfp_mask)
 {
-	struct page *p = rq->pages;
+	struct page *p = vi->pages;
 
 	if (p) {
-		rq->pages = (struct page *)p->private;
+		vi->pages = (struct page *)p->private;
 		/* clear private here, it is used to chain pages */
 		p->private = 0;
 	} else
@@ -228,66 +130,62 @@ static struct page *get_a_page(struct receive_queue *rq, gfp_t gfp_mask)
 	return p;
 }
 
-static void skb_xmit_done(struct virtqueue *vq)
+static void skb_xmit_done(struct virtqueue *svq)
 {
-	struct virtnet_info *vi = vq->vdev->priv;
+	struct virtnet_info *vi = svq->vdev->priv;
 
 	/* Suppress further interrupts. */
-	virtqueue_disable_cb(vq);
+	virtqueue_disable_cb(svq);
 
 	/* We were probably waiting for more output buffers. */
-	netif_wake_subqueue(vi->dev, vq2txq(vq));
+	netif_wake_queue(vi->dev);
 }
 
-static unsigned int mergeable_ctx_to_buf_truesize(unsigned long mrg_ctx)
+static void set_skb_frag(struct sk_buff *skb, struct page *page,
+			 unsigned int offset, unsigned int *len)
 {
-	unsigned int truesize = mrg_ctx & (MERGEABLE_BUFFER_ALIGN - 1);
-	return (truesize + 1) * MERGEABLE_BUFFER_ALIGN;
-}
+	int size = min((unsigned)PAGE_SIZE - offset, *len);
+	int i = skb_shinfo(skb)->nr_frags;
 
-static void *mergeable_ctx_to_buf_address(unsigned long mrg_ctx)
-{
-	return (void *)(mrg_ctx & -MERGEABLE_BUFFER_ALIGN);
+	__skb_fill_page_desc(skb, i, page, offset, size);
 
-}
-
-static unsigned long mergeable_buf_to_ctx(void *buf, unsigned int truesize)
-{
-	unsigned int size = truesize / MERGEABLE_BUFFER_ALIGN;
-	return (unsigned long)buf | (size - 1);
+	skb->data_len += size;
+	skb->len += size;
+	skb->truesize += PAGE_SIZE;
+	skb_shinfo(skb)->nr_frags++;
+	*len -= size;
 }
 
 /* Called from bottom half context */
 static struct sk_buff *page_to_skb(struct virtnet_info *vi,
-				   struct receive_queue *rq,
-				   struct page *page, unsigned int offset,
-				   unsigned int len, unsigned int truesize)
+				   struct page *page, unsigned int len)
 {
 	struct sk_buff *skb;
-	struct virtio_net_hdr_mrg_rxbuf *hdr;
-	unsigned int copy, hdr_len, hdr_padded_len;
+	struct skb_vnet_hdr *hdr;
+	unsigned int copy, hdr_len, offset;
 	char *p;
 
-	p = page_address(page) + offset;
+	p = page_address(page);
 
 	/* copy small packet so we can reuse these pages for small data */
-	skb = napi_alloc_skb(&rq->napi, GOOD_COPY_LEN);
+	skb = netdev_alloc_skb_ip_align(vi->dev, GOOD_COPY_LEN);
 	if (unlikely(!skb))
 		return NULL;
 
 	hdr = skb_vnet_hdr(skb);
 
-	hdr_len = vi->hdr_len;
-	if (vi->mergeable_rx_bufs)
-		hdr_padded_len = sizeof *hdr;
-	else
-		hdr_padded_len = sizeof(struct padded_vnet_hdr);
+	if (vi->mergeable_rx_bufs) {
+		hdr_len = sizeof hdr->mhdr;
+		offset = hdr_len;
+	} else {
+		hdr_len = sizeof hdr->hdr;
+		offset = sizeof(struct padded_vnet_hdr);
+	}
 
 	memcpy(hdr, p, hdr_len);
 
 	len -= hdr_len;
-	offset += hdr_padded_len;
-	p += hdr_padded_len;
+	p += offset;
 
 	copy = len;
 	if (copy > skb_tailroom(skb))
@@ -297,14 +195,6 @@ static struct sk_buff *page_to_skb(struct virtnet_info *vi,
 	len -= copy;
 	offset += copy;
 
-	if (vi->mergeable_rx_bufs) {
-		if (len)
-			skb_add_rx_frag(skb, 0, page, offset, len, truesize);
-		else
-			put_page(page);
-		return skb;
-	}
-
 	/*
 	 * Verify that we can indeed put this data into a skb.
 	 * This is here to handle cases when the device erroneously
@@ -312,200 +202,150 @@ static struct sk_buff *page_to_skb(struct virtnet_info *vi,
 	 * the case of a broken device.
 	 */
 	if (unlikely(len > MAX_SKB_FRAGS * PAGE_SIZE)) {
-		net_dbg_ratelimited("%s: too much data\n", skb->dev->name);
+		if (net_ratelimit())
+			pr_debug("%s: too much data\n", skb->dev->name);
 		dev_kfree_skb(skb);
 		return NULL;
 	}
-	BUG_ON(offset >= PAGE_SIZE);
+
 	while (len) {
-		unsigned int frag_size = min((unsigned)PAGE_SIZE - offset, len);
-		skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags, page, offset,
-				frag_size, truesize);
-		len -= frag_size;
+		set_skb_frag(skb, page, offset, &len);
 		page = (struct page *)page->private;
 		offset = 0;
 	}
 
 	if (page)
-		give_pages(rq, page);
+		give_pages(vi, page);
 
 	return skb;
 }
 
-static struct sk_buff *receive_small(struct virtnet_info *vi, void *buf, unsigned int len)
+static int receive_mergeable(struct virtnet_info *vi, struct sk_buff *skb)
 {
-	struct sk_buff * skb = buf;
+	struct skb_vnet_hdr *hdr = skb_vnet_hdr(skb);
+	struct page *page;
+	int num_buf, i, len;
 
-	len -= vi->hdr_len;
-	skb_trim(skb, len);
-
-	return skb;
-}
-
-static struct sk_buff *receive_big(struct net_device *dev,
-				   struct virtnet_info *vi,
-				   struct receive_queue *rq,
-				   void *buf,
-				   unsigned int len)
-{
-	struct page *page = buf;
-	struct sk_buff *skb = page_to_skb(vi, rq, page, 0, len, PAGE_SIZE);
-
-	if (unlikely(!skb))
-		goto err;
-
-	return skb;
-
-err:
-	dev->stats.rx_dropped++;
-	give_pages(rq, page);
-	return NULL;
-}
-
-static struct sk_buff *receive_mergeable(struct net_device *dev,
-					 struct virtnet_info *vi,
-					 struct receive_queue *rq,
-					 unsigned long ctx,
-					 unsigned int len)
-{
-	void *buf = mergeable_ctx_to_buf_address(ctx);
-	struct virtio_net_hdr_mrg_rxbuf *hdr = buf;
-	u16 num_buf = virtio16_to_cpu(vi->vdev, hdr->num_buffers);
-	struct page *page = virt_to_head_page(buf);
-	int offset = buf - page_address(page);
-	unsigned int truesize = max(len, mergeable_ctx_to_buf_truesize(ctx));
-
-	struct sk_buff *head_skb = page_to_skb(vi, rq, page, offset, len,
-					       truesize);
-	struct sk_buff *curr_skb = head_skb;
-
-	if (unlikely(!curr_skb))
-		goto err_skb;
+	num_buf = hdr->mhdr.num_buffers;
 	while (--num_buf) {
-		int num_skb_frags;
-
-		ctx = (unsigned long)virtqueue_get_buf(rq->vq, &len);
-		if (unlikely(!ctx)) {
-			pr_debug("%s: rx error: %d buffers out of %d missing\n",
-				 dev->name, num_buf,
-				 virtio16_to_cpu(vi->vdev,
-						 hdr->num_buffers));
-			dev->stats.rx_length_errors++;
-			goto err_buf;
+		i = skb_shinfo(skb)->nr_frags;
+		if (i >= MAX_SKB_FRAGS) {
+			pr_debug("%s: packet too long\n", skb->dev->name);
+			skb->dev->stats.rx_length_errors++;
+			return -EINVAL;
 		}
-
-		buf = mergeable_ctx_to_buf_address(ctx);
-		page = virt_to_head_page(buf);
-
-		num_skb_frags = skb_shinfo(curr_skb)->nr_frags;
-		if (unlikely(num_skb_frags == MAX_SKB_FRAGS)) {
-			struct sk_buff *nskb = alloc_skb(0, GFP_ATOMIC);
-
-			if (unlikely(!nskb))
-				goto err_skb;
-			if (curr_skb == head_skb)
-				skb_shinfo(curr_skb)->frag_list = nskb;
-			else
-				curr_skb->next = nskb;
-			curr_skb = nskb;
-			head_skb->truesize += nskb->truesize;
-			num_skb_frags = 0;
-		}
-		truesize = max(len, mergeable_ctx_to_buf_truesize(ctx));
-		if (curr_skb != head_skb) {
-			head_skb->data_len += len;
-			head_skb->len += len;
-			head_skb->truesize += truesize;
-		}
-		offset = buf - page_address(page);
-		if (skb_can_coalesce(curr_skb, num_skb_frags, page, offset)) {
-			put_page(page);
-			skb_coalesce_rx_frag(curr_skb, num_skb_frags - 1,
-					     len, truesize);
-		} else {
-			skb_add_rx_frag(curr_skb, num_skb_frags, page,
-					offset, len, truesize);
-		}
-	}
-
-	ewma_pkt_len_add(&rq->mrg_avg_pkt_len, head_skb->len);
-	return head_skb;
-
-err_skb:
-	put_page(page);
-	while (--num_buf) {
-		ctx = (unsigned long)virtqueue_get_buf(rq->vq, &len);
-		if (unlikely(!ctx)) {
+		page = virtqueue_get_buf(vi->rvq, &len);
+		if (!page) {
 			pr_debug("%s: rx error: %d buffers missing\n",
-				 dev->name, num_buf);
-			dev->stats.rx_length_errors++;
-			break;
+				 skb->dev->name, hdr->mhdr.num_buffers);
+			skb->dev->stats.rx_length_errors++;
+			return -EINVAL;
 		}
-		page = virt_to_head_page(mergeable_ctx_to_buf_address(ctx));
-		put_page(page);
+
+		if (len > PAGE_SIZE)
+			len = PAGE_SIZE;
+
+		set_skb_frag(skb, page, 0, &len);
+
+		--vi->num;
 	}
-err_buf:
-	dev->stats.rx_dropped++;
-	dev_kfree_skb(head_skb);
-	return NULL;
+	return 0;
 }
 
-static void receive_buf(struct virtnet_info *vi, struct receive_queue *rq,
-			void *buf, unsigned int len)
+static void receive_buf(struct net_device *dev, void *buf, unsigned int len)
 {
-	struct net_device *dev = vi->dev;
+	struct virtnet_info *vi = netdev_priv(dev);
 	struct virtnet_stats *stats = this_cpu_ptr(vi->stats);
 	struct sk_buff *skb;
-	struct virtio_net_hdr_mrg_rxbuf *hdr;
+	struct page *page;
+	struct skb_vnet_hdr *hdr;
 
-	if (unlikely(len < vi->hdr_len + ETH_HLEN)) {
+	if (unlikely(len < sizeof(struct virtio_net_hdr) + ETH_HLEN)) {
 		pr_debug("%s: short packet %i\n", dev->name, len);
 		dev->stats.rx_length_errors++;
-		if (vi->mergeable_rx_bufs) {
-			unsigned long ctx = (unsigned long)buf;
-			void *base = mergeable_ctx_to_buf_address(ctx);
-			put_page(virt_to_head_page(base));
-		} else if (vi->big_packets) {
-			give_pages(rq, buf);
-		} else {
+		if (vi->mergeable_rx_bufs || vi->big_packets)
+			give_pages(vi, buf);
+		else
 			dev_kfree_skb(buf);
-		}
 		return;
 	}
 
-	if (vi->mergeable_rx_bufs)
-		skb = receive_mergeable(dev, vi, rq, (unsigned long)buf, len);
-	else if (vi->big_packets)
-		skb = receive_big(dev, vi, rq, buf, len);
-	else
-		skb = receive_small(vi, buf, len);
-
-	if (unlikely(!skb))
-		return;
+	if (!vi->mergeable_rx_bufs && !vi->big_packets) {
+		skb = buf;
+		len -= sizeof(struct virtio_net_hdr);
+		skb_trim(skb, len);
+	} else {
+		page = buf;
+		skb = page_to_skb(vi, page, len);
+		if (unlikely(!skb)) {
+			dev->stats.rx_dropped++;
+			give_pages(vi, page);
+			return;
+		}
+		if (vi->mergeable_rx_bufs)
+			if (receive_mergeable(vi, skb)) {
+				dev_kfree_skb(skb);
+				return;
+			}
+	}
 
 	hdr = skb_vnet_hdr(skb);
 
-	u64_stats_update_begin(&stats->rx_syncp);
+	u64_stats_update_begin(&stats->syncp);
 	stats->rx_bytes += skb->len;
 	stats->rx_packets++;
-	u64_stats_update_end(&stats->rx_syncp);
+	u64_stats_update_end(&stats->syncp);
 
-	if (hdr->hdr.flags & VIRTIO_NET_HDR_F_DATA_VALID)
+	if (hdr->hdr.flags & VIRTIO_NET_HDR_F_NEEDS_CSUM) {
+		pr_debug("Needs csum!\n");
+		if (!skb_partial_csum_set(skb,
+					  hdr->hdr.csum_start,
+					  hdr->hdr.csum_offset))
+			goto frame_err;
+	} else if (hdr->hdr.flags & VIRTIO_NET_HDR_F_DATA_VALID) {
 		skb->ip_summed = CHECKSUM_UNNECESSARY;
-
-	if (virtio_net_hdr_to_skb(skb, &hdr->hdr,
-				  virtio_is_little_endian(vi->vdev))) {
-		net_warn_ratelimited("%s: bad gso: type: %u, size: %u\n",
-				     dev->name, hdr->hdr.gso_type,
-				     hdr->hdr.gso_size);
-		goto frame_err;
 	}
 
 	skb->protocol = eth_type_trans(skb, dev);
 	pr_debug("Receiving skb proto 0x%04x len %i type %i\n",
 		 ntohs(skb->protocol), skb->len, skb->pkt_type);
 
-	napi_gro_receive(&rq->napi, skb);
+	if (hdr->hdr.gso_type != VIRTIO_NET_HDR_GSO_NONE) {
+		pr_debug("GSO!\n");
+		switch (hdr->hdr.gso_type & ~VIRTIO_NET_HDR_GSO_ECN) {
+		case VIRTIO_NET_HDR_GSO_TCPV4:
+			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV4;
+			break;
+		case VIRTIO_NET_HDR_GSO_UDP:
+			skb_shinfo(skb)->gso_type = SKB_GSO_UDP;
+			break;
+		case VIRTIO_NET_HDR_GSO_TCPV6:
+			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV6;
+			break;
+		default:
+			if (net_ratelimit())
+				printk(KERN_WARNING "%s: bad gso type %u.\n",
+				       dev->name, hdr->hdr.gso_type);
+			goto frame_err;
+		}
+
+		if (hdr->hdr.gso_type & VIRTIO_NET_HDR_GSO_ECN)
+			skb_shinfo(skb)->gso_type |= SKB_GSO_TCP_ECN;
+
+		skb_shinfo(skb)->gso_size = hdr->hdr.gso_size;
+		if (skb_shinfo(skb)->gso_size == 0) {
+			if (net_ratelimit())
+				printk(KERN_WARNING "%s: zero gso size.\n",
+				       dev->name);
+			goto frame_err;
+		}
+
+		/* Header must be checked, and gso_segs computed. */
+		skb_shinfo(skb)->gso_type |= SKB_GSO_DODGY;
+		skb_shinfo(skb)->gso_segs = 0;
+	}
+
+	netif_receive_skb(skb);
 	return;
 
 frame_err:
@@ -513,126 +353,90 @@ frame_err:
 	dev_kfree_skb(skb);
 }
 
-static int add_recvbuf_small(struct virtnet_info *vi, struct receive_queue *rq,
-			     gfp_t gfp)
+static int add_recvbuf_small(struct virtnet_info *vi, gfp_t gfp)
 {
 	struct sk_buff *skb;
-	struct virtio_net_hdr_mrg_rxbuf *hdr;
+	struct skb_vnet_hdr *hdr;
 	int err;
 
-	skb = __netdev_alloc_skb_ip_align(vi->dev, GOOD_PACKET_LEN, gfp);
+	skb = __netdev_alloc_skb_ip_align(vi->dev, MAX_PACKET_LEN, gfp);
 	if (unlikely(!skb))
 		return -ENOMEM;
 
-	skb_put(skb, GOOD_PACKET_LEN);
+	skb_put(skb, MAX_PACKET_LEN);
 
 	hdr = skb_vnet_hdr(skb);
-	sg_init_table(rq->sg, 2);
-	sg_set_buf(rq->sg, hdr, vi->hdr_len);
+	sg_set_buf(vi->rx_sg, &hdr->hdr, sizeof hdr->hdr);
 
-	err = skb_to_sgvec(skb, rq->sg + 1, 0, skb->len);
-	if (unlikely(err < 0)) {
-		dev_kfree_skb(skb);
-		return err;
-	}
+	skb_to_sgvec(skb, vi->rx_sg + 1, 0, skb->len);
 
-	err = virtqueue_add_inbuf(rq->vq, rq->sg, 2, skb, gfp);
+	err = virtqueue_add_buf(vi->rvq, vi->rx_sg, 0, 2, skb, gfp);
 	if (err < 0)
 		dev_kfree_skb(skb);
 
 	return err;
 }
 
-static int add_recvbuf_big(struct virtnet_info *vi, struct receive_queue *rq,
-			   gfp_t gfp)
+static int add_recvbuf_big(struct virtnet_info *vi, gfp_t gfp)
 {
 	struct page *first, *list = NULL;
 	char *p;
 	int i, err, offset;
 
-	sg_init_table(rq->sg, MAX_SKB_FRAGS + 2);
-
-	/* page in rq->sg[MAX_SKB_FRAGS + 1] is list tail */
+	/* page in vi->rx_sg[MAX_SKB_FRAGS + 1] is list tail */
 	for (i = MAX_SKB_FRAGS + 1; i > 1; --i) {
-		first = get_a_page(rq, gfp);
+		first = get_a_page(vi, gfp);
 		if (!first) {
 			if (list)
-				give_pages(rq, list);
+				give_pages(vi, list);
 			return -ENOMEM;
 		}
-		sg_set_buf(&rq->sg[i], page_address(first), PAGE_SIZE);
+		sg_set_buf(&vi->rx_sg[i], page_address(first), PAGE_SIZE);
 
 		/* chain new page in list head to match sg */
 		first->private = (unsigned long)list;
 		list = first;
 	}
 
-	first = get_a_page(rq, gfp);
+	first = get_a_page(vi, gfp);
 	if (!first) {
-		give_pages(rq, list);
+		give_pages(vi, list);
 		return -ENOMEM;
 	}
 	p = page_address(first);
 
-	/* rq->sg[0], rq->sg[1] share the same page */
-	/* a separated rq->sg[0] for header - required in case !any_header_sg */
-	sg_set_buf(&rq->sg[0], p, vi->hdr_len);
+	/* vi->rx_sg[0], vi->rx_sg[1] share the same page */
+	/* a separated vi->rx_sg[0] for virtio_net_hdr only due to QEMU bug */
+	sg_set_buf(&vi->rx_sg[0], p, sizeof(struct virtio_net_hdr));
 
-	/* rq->sg[1] for data packet, from offset */
+	/* vi->rx_sg[1] for data packet, from offset */
 	offset = sizeof(struct padded_vnet_hdr);
-	sg_set_buf(&rq->sg[1], p + offset, PAGE_SIZE - offset);
+	sg_set_buf(&vi->rx_sg[1], p + offset, PAGE_SIZE - offset);
 
 	/* chain first in list head */
 	first->private = (unsigned long)list;
-	err = virtqueue_add_inbuf(rq->vq, rq->sg, MAX_SKB_FRAGS + 2,
-				  first, gfp);
+	err = virtqueue_add_buf(vi->rvq, vi->rx_sg, 0, MAX_SKB_FRAGS + 2,
+				first, gfp);
 	if (err < 0)
-		give_pages(rq, first);
+		give_pages(vi, first);
 
 	return err;
 }
 
-static unsigned int get_mergeable_buf_len(struct ewma_pkt_len *avg_pkt_len)
+static int add_recvbuf_mergeable(struct virtnet_info *vi, gfp_t gfp)
 {
-	const size_t hdr_len = sizeof(struct virtio_net_hdr_mrg_rxbuf);
-	unsigned int len;
-
-	len = hdr_len + clamp_t(unsigned int, ewma_pkt_len_read(avg_pkt_len),
-			GOOD_PACKET_LEN, PAGE_SIZE - hdr_len);
-	return ALIGN(len, MERGEABLE_BUFFER_ALIGN);
-}
-
-static int add_recvbuf_mergeable(struct receive_queue *rq, gfp_t gfp)
-{
-	struct page_frag *alloc_frag = &rq->alloc_frag;
-	char *buf;
-	unsigned long ctx;
+	struct page *page;
 	int err;
-	unsigned int len, hole;
 
-	len = get_mergeable_buf_len(&rq->mrg_avg_pkt_len);
-	if (unlikely(!skb_page_frag_refill(len, alloc_frag, gfp)))
+	page = get_a_page(vi, gfp);
+	if (!page)
 		return -ENOMEM;
 
-	buf = (char *)page_address(alloc_frag->page) + alloc_frag->offset;
-	ctx = mergeable_buf_to_ctx(buf, len);
-	get_page(alloc_frag->page);
-	alloc_frag->offset += len;
-	hole = alloc_frag->size - alloc_frag->offset;
-	if (hole < len) {
-		/* To avoid internal fragmentation, if there is very likely not
-		 * enough space for another buffer, add the remaining space to
-		 * the current buffer. This extra space is not included in
-		 * the truesize stored in ctx.
-		 */
-		len += hole;
-		alloc_frag->offset += hole;
-	}
+	sg_init_one(vi->rx_sg, page_address(page), PAGE_SIZE);
 
-	sg_init_one(rq->sg, buf, len);
-	err = virtqueue_add_inbuf(rq->vq, rq->sg, 1, (void *)ctx, gfp);
+	err = virtqueue_add_buf(vi->rvq, vi->rx_sg, 0, 1, page, gfp);
 	if (err < 0)
-		put_page(virt_to_head_page(buf));
+		give_pages(vi, page);
 
 	return err;
 }
@@ -644,342 +448,222 @@ static int add_recvbuf_mergeable(struct receive_queue *rq, gfp_t gfp)
  * before we're receiving packets, or from refill_work which is
  * careful to disable receiving (using napi_disable).
  */
-static bool try_fill_recv(struct virtnet_info *vi, struct receive_queue *rq,
-			  gfp_t gfp)
+static bool try_fill_recv(struct virtnet_info *vi, gfp_t gfp)
 {
 	int err;
 	bool oom;
 
-	gfp |= __GFP_COLD;
 	do {
 		if (vi->mergeable_rx_bufs)
-			err = add_recvbuf_mergeable(rq, gfp);
+			err = add_recvbuf_mergeable(vi, gfp);
 		else if (vi->big_packets)
-			err = add_recvbuf_big(vi, rq, gfp);
+			err = add_recvbuf_big(vi, gfp);
 		else
-			err = add_recvbuf_small(vi, rq, gfp);
+			err = add_recvbuf_small(vi, gfp);
 
 		oom = err == -ENOMEM;
-		if (err)
+		if (err < 0)
 			break;
-	} while (rq->vq->num_free);
-	virtqueue_kick(rq->vq);
+		++vi->num;
+	} while (err > 0);
+	if (unlikely(vi->num > vi->max))
+		vi->max = vi->num;
+	virtqueue_kick(vi->rvq);
 	return !oom;
 }
 
 static void skb_recv_done(struct virtqueue *rvq)
 {
 	struct virtnet_info *vi = rvq->vdev->priv;
-	struct receive_queue *rq = &vi->rq[vq2rxq(rvq)];
-
 	/* Schedule NAPI, Suppress further interrupts if successful. */
-	if (napi_schedule_prep(&rq->napi)) {
+	if (napi_schedule_prep(&vi->napi)) {
 		virtqueue_disable_cb(rvq);
-		__napi_schedule(&rq->napi);
+		__napi_schedule(&vi->napi);
 	}
 }
 
-static void virtnet_napi_enable(struct receive_queue *rq)
+static void virtnet_napi_enable(struct virtnet_info *vi)
 {
-	napi_enable(&rq->napi);
+	napi_enable(&vi->napi);
 
 	/* If all buffers were filled by other side before we napi_enabled, we
 	 * won't get another interrupt, so process any outstanding packets
 	 * now.  virtnet_poll wants re-enable the queue, so we disable here.
 	 * We synchronize against interrupts via NAPI_STATE_SCHED */
-	if (napi_schedule_prep(&rq->napi)) {
-		virtqueue_disable_cb(rq->vq);
+	if (napi_schedule_prep(&vi->napi)) {
+		virtqueue_disable_cb(vi->rvq);
 		local_bh_disable();
-		__napi_schedule(&rq->napi);
+		__napi_schedule(&vi->napi);
 		local_bh_enable();
 	}
 }
 
 static void refill_work(struct work_struct *work)
 {
-	struct virtnet_info *vi =
-		container_of(work, struct virtnet_info, refill.work);
+	struct virtnet_info *vi;
 	bool still_empty;
-	int i;
 
-	for (i = 0; i < vi->curr_queue_pairs; i++) {
-		struct receive_queue *rq = &vi->rq[i];
+	vi = container_of(work, struct virtnet_info, refill.work);
+	napi_disable(&vi->napi);
+	still_empty = !try_fill_recv(vi, GFP_KERNEL);
+	virtnet_napi_enable(vi);
 
-		napi_disable(&rq->napi);
-		still_empty = !try_fill_recv(vi, rq, GFP_KERNEL);
-		virtnet_napi_enable(rq);
-
-		/* In theory, this can happen: if we don't get any buffers in
-		 * we will *never* try to fill again.
-		 */
-		if (still_empty)
-			schedule_delayed_work(&vi->refill, HZ/2);
-	}
-}
-
-static int virtnet_receive(struct receive_queue *rq, int budget)
-{
-	struct virtnet_info *vi = rq->vq->vdev->priv;
-	unsigned int len, received = 0;
-	void *buf;
-
-	while (received < budget &&
-	       (buf = virtqueue_get_buf(rq->vq, &len)) != NULL) {
-		receive_buf(vi, rq, buf, len);
-		received++;
-	}
-
-	if (rq->vq->num_free > virtqueue_get_vring_size(rq->vq) / 2) {
-		if (!try_fill_recv(vi, rq, GFP_ATOMIC))
-			schedule_delayed_work(&vi->refill, 0);
-	}
-
-	return received;
+	/* In theory, this can happen: if we don't get any buffers in
+	 * we will *never* try to fill again. */
+	if (still_empty)
+		queue_delayed_work(system_nrt_wq, &vi->refill, HZ/2);
 }
 
 static int virtnet_poll(struct napi_struct *napi, int budget)
 {
-	struct receive_queue *rq =
-		container_of(napi, struct receive_queue, napi);
-	unsigned int r, received;
+	struct virtnet_info *vi = container_of(napi, struct virtnet_info, napi);
+	void *buf;
+	unsigned int r, len, received = 0;
 
-	received = virtnet_receive(rq, budget);
+again:
+	while (received < budget &&
+	       (buf = virtqueue_get_buf(vi->rvq, &len)) != NULL) {
+		receive_buf(vi->dev, buf, len);
+		--vi->num;
+		received++;
+	}
+
+	if (vi->num < vi->max / 2) {
+		if (!try_fill_recv(vi, GFP_ATOMIC))
+			queue_delayed_work(system_nrt_wq, &vi->refill, 0);
+	}
 
 	/* Out of packets? */
 	if (received < budget) {
-		r = virtqueue_enable_cb_prepare(rq->vq);
-		napi_complete_done(napi, received);
-		if (unlikely(virtqueue_poll(rq->vq, r)) &&
+		r = virtqueue_enable_cb_prepare(vi->rvq);
+		napi_complete(napi);
+		if (unlikely(virtqueue_poll(vi->rvq, r)) &&
 		    napi_schedule_prep(napi)) {
-			virtqueue_disable_cb(rq->vq);
+			virtqueue_disable_cb(vi->rvq);
 			__napi_schedule(napi);
-		}
-	}
-
-	return received;
-}
-
-#ifdef CONFIG_NET_RX_BUSY_POLL
-/* must be called with local_bh_disable()d */
-static int virtnet_busy_poll(struct napi_struct *napi)
-{
-	struct receive_queue *rq =
-		container_of(napi, struct receive_queue, napi);
-	struct virtnet_info *vi = rq->vq->vdev->priv;
-	int r, received = 0, budget = 4;
-
-	if (!(vi->status & VIRTIO_NET_S_LINK_UP))
-		return LL_FLUSH_FAILED;
-
-	if (!napi_schedule_prep(napi))
-		return LL_FLUSH_BUSY;
-
-	virtqueue_disable_cb(rq->vq);
-
-again:
-	received += virtnet_receive(rq, budget);
-
-	r = virtqueue_enable_cb_prepare(rq->vq);
-	clear_bit(NAPI_STATE_SCHED, &napi->state);
-	if (unlikely(virtqueue_poll(rq->vq, r)) &&
-	    napi_schedule_prep(napi)) {
-		virtqueue_disable_cb(rq->vq);
-		if (received < budget) {
-			budget -= received;
 			goto again;
-		} else {
-			__napi_schedule(napi);
 		}
 	}
 
 	return received;
 }
-#endif	/* CONFIG_NET_RX_BUSY_POLL */
 
-static int virtnet_open(struct net_device *dev)
-{
-	struct virtnet_info *vi = netdev_priv(dev);
-	int i;
-
-	for (i = 0; i < vi->max_queue_pairs; i++) {
-		if (i < vi->curr_queue_pairs)
-			/* Make sure we have some buffers: if oom use wq. */
-			if (!try_fill_recv(vi, &vi->rq[i], GFP_KERNEL))
-				schedule_delayed_work(&vi->refill, 0);
-		virtnet_napi_enable(&vi->rq[i]);
-	}
-
-	return 0;
-}
-
-static void free_old_xmit_skbs(struct send_queue *sq)
+static unsigned int free_old_xmit_skbs(struct virtnet_info *vi)
 {
 	struct sk_buff *skb;
-	unsigned int len;
-	struct virtnet_info *vi = sq->vq->vdev->priv;
+	unsigned int len, tot_sgs = 0;
 	struct virtnet_stats *stats = this_cpu_ptr(vi->stats);
 
-	while ((skb = virtqueue_get_buf(sq->vq, &len)) != NULL) {
+	while ((skb = virtqueue_get_buf(vi->svq, &len)) != NULL) {
 		pr_debug("Sent skb %p\n", skb);
 
-		u64_stats_update_begin(&stats->tx_syncp);
+		u64_stats_update_begin(&stats->syncp);
 		stats->tx_bytes += skb->len;
 		stats->tx_packets++;
-		u64_stats_update_end(&stats->tx_syncp);
+		u64_stats_update_end(&stats->syncp);
 
+		tot_sgs += skb_vnet_hdr(skb)->num_sg;
 		dev_kfree_skb_any(skb);
 	}
+	return tot_sgs;
 }
 
-static int xmit_skb(struct send_queue *sq, struct sk_buff *skb)
+static int xmit_skb(struct virtnet_info *vi, struct sk_buff *skb)
 {
-	struct virtio_net_hdr_mrg_rxbuf *hdr;
+	struct skb_vnet_hdr *hdr = skb_vnet_hdr(skb);
 	const unsigned char *dest = ((struct ethhdr *)skb->data)->h_dest;
-	struct virtnet_info *vi = sq->vq->vdev->priv;
-	int num_sg;
-	unsigned hdr_len = vi->hdr_len;
-	bool can_push;
 
 	pr_debug("%s: xmit %p %pM\n", vi->dev->name, skb, dest);
 
-	can_push = vi->any_header_sg &&
-		!((unsigned long)skb->data & (__alignof__(*hdr) - 1)) &&
-		!skb_header_cloned(skb) && skb_headroom(skb) >= hdr_len;
-	/* Even if we can, don't push here yet as this would skew
-	 * csum_start offset below. */
-	if (can_push)
-		hdr = (struct virtio_net_hdr_mrg_rxbuf *)(skb->data - hdr_len);
-	else
-		hdr = skb_vnet_hdr(skb);
-
-	if (virtio_net_hdr_from_skb(skb, &hdr->hdr,
-				    virtio_is_little_endian(vi->vdev), false))
-		BUG();
-
-	if (vi->mergeable_rx_bufs)
-		hdr->num_buffers = 0;
-
-	sg_init_table(sq->sg, skb_shinfo(skb)->nr_frags + (can_push ? 1 : 2));
-	if (can_push) {
-		__skb_push(skb, hdr_len);
-		num_sg = skb_to_sgvec(skb, sq->sg, 0, skb->len);
-		if (unlikely(num_sg < 0))
-			return num_sg;
-		/* Pull header back to avoid skew in tx bytes calculations. */
-		__skb_pull(skb, hdr_len);
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {
+		hdr->hdr.flags = VIRTIO_NET_HDR_F_NEEDS_CSUM;
+		hdr->hdr.csum_start = skb_checksum_start_offset(skb);
+		hdr->hdr.csum_offset = skb->csum_offset;
 	} else {
-		sg_set_buf(sq->sg, hdr, hdr_len);
-		num_sg = skb_to_sgvec(skb, sq->sg + 1, 0, skb->len);
-		if (unlikely(num_sg < 0))
-			return num_sg;
-		num_sg++;
+		hdr->hdr.flags = 0;
+		hdr->hdr.csum_offset = hdr->hdr.csum_start = 0;
 	}
-	return virtqueue_add_outbuf(sq->vq, sq->sg, num_sg, skb, GFP_ATOMIC);
+
+	if (skb_is_gso(skb)) {
+		hdr->hdr.hdr_len = skb_headlen(skb);
+		hdr->hdr.gso_size = skb_shinfo(skb)->gso_size;
+		if (skb_shinfo(skb)->gso_type & SKB_GSO_TCPV4)
+			hdr->hdr.gso_type = VIRTIO_NET_HDR_GSO_TCPV4;
+		else if (skb_shinfo(skb)->gso_type & SKB_GSO_TCPV6)
+			hdr->hdr.gso_type = VIRTIO_NET_HDR_GSO_TCPV6;
+		else if (skb_shinfo(skb)->gso_type & SKB_GSO_UDP)
+			hdr->hdr.gso_type = VIRTIO_NET_HDR_GSO_UDP;
+		else
+			BUG();
+		if (skb_shinfo(skb)->gso_type & SKB_GSO_TCP_ECN)
+			hdr->hdr.gso_type |= VIRTIO_NET_HDR_GSO_ECN;
+	} else {
+		hdr->hdr.gso_type = VIRTIO_NET_HDR_GSO_NONE;
+		hdr->hdr.gso_size = hdr->hdr.hdr_len = 0;
+	}
+
+	hdr->mhdr.num_buffers = 0;
+
+	/* Encode metadata header at front. */
+	if (vi->mergeable_rx_bufs)
+		sg_set_buf(vi->tx_sg, &hdr->mhdr, sizeof hdr->mhdr);
+	else
+		sg_set_buf(vi->tx_sg, &hdr->hdr, sizeof hdr->hdr);
+
+	hdr->num_sg = skb_to_sgvec(skb, vi->tx_sg + 1, 0, skb->len) + 1;
+	return virtqueue_add_buf(vi->svq, vi->tx_sg, hdr->num_sg,
+				 0, skb, GFP_ATOMIC);
 }
 
 static netdev_tx_t start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct virtnet_info *vi = netdev_priv(dev);
-	int qnum = skb_get_queue_mapping(skb);
-	struct send_queue *sq = &vi->sq[qnum];
-	int err;
-	struct netdev_queue *txq = netdev_get_tx_queue(dev, qnum);
-	bool kick = !skb->xmit_more;
+	int capacity;
 
 	/* Free up any pending old buffers before queueing new ones. */
-	free_old_xmit_skbs(sq);
-
-	/* timestamp packet in software */
-	skb_tx_timestamp(skb);
+	free_old_xmit_skbs(vi);
 
 	/* Try to transmit */
-	err = xmit_skb(sq, skb);
+	capacity = xmit_skb(vi, skb);
 
-	/* This should not happen! */
-	if (unlikely(err)) {
-		dev->stats.tx_fifo_errors++;
-		if (net_ratelimit())
-			dev_warn(&dev->dev,
-				 "Unexpected TXQ (%d) queue failure: %d\n", qnum, err);
+	/* This can happen with OOM and indirect buffers. */
+	if (unlikely(capacity < 0)) {
+		if (likely(capacity == -ENOMEM)) {
+			if (net_ratelimit())
+				dev_warn(&dev->dev,
+					 "TX queue failure: out of memory\n");
+		} else {
+			dev->stats.tx_fifo_errors++;
+			if (net_ratelimit())
+				dev_warn(&dev->dev,
+					 "Unexpected TX queue failure: %d\n",
+					 capacity);
+		}
 		dev->stats.tx_dropped++;
-		dev_kfree_skb_any(skb);
+		kfree_skb(skb);
 		return NETDEV_TX_OK;
 	}
+	virtqueue_kick(vi->svq);
 
 	/* Don't wait up for transmitted skbs to be freed. */
 	skb_orphan(skb);
 	nf_reset(skb);
 
-	/* If running out of space, stop queue to avoid getting packets that we
-	 * are then unable to transmit.
-	 * An alternative would be to force queuing layer to requeue the skb by
-	 * returning NETDEV_TX_BUSY. However, NETDEV_TX_BUSY should not be
-	 * returned in a normal path of operation: it means that driver is not
-	 * maintaining the TX queue stop/start state properly, and causes
-	 * the stack to do a non-trivial amount of useless work.
-	 * Since most packets only take 1 or 2 ring slots, stopping the queue
-	 * early means 16 slots are typically wasted.
-	 */
-	if (sq->vq->num_free < 2+MAX_SKB_FRAGS) {
-		netif_stop_subqueue(dev, qnum);
-		if (unlikely(!virtqueue_enable_cb_delayed(sq->vq))) {
+	/* Apparently nice girls don't return TX_BUSY; stop the queue
+	 * before it gets out of hand.  Naturally, this wastes entries. */
+	if (capacity < 2+MAX_SKB_FRAGS) {
+		netif_stop_queue(dev);
+		if (unlikely(!virtqueue_enable_cb_delayed(vi->svq))) {
 			/* More just got used, free them then recheck. */
-			free_old_xmit_skbs(sq);
-			if (sq->vq->num_free >= 2+MAX_SKB_FRAGS) {
-				netif_start_subqueue(dev, qnum);
-				virtqueue_disable_cb(sq->vq);
+			capacity += free_old_xmit_skbs(vi);
+			if (capacity >= 2+MAX_SKB_FRAGS) {
+				netif_start_queue(dev);
+				virtqueue_disable_cb(vi->svq);
 			}
 		}
 	}
 
-	if (kick || netif_xmit_stopped(txq))
-		virtqueue_kick(sq->vq);
-
 	return NETDEV_TX_OK;
-}
-
-/*
- * Send command via the control virtqueue and check status.  Commands
- * supported by the hypervisor, as indicated by feature bits, should
- * never fail unless improperly formatted.
- */
-static bool virtnet_send_command(struct virtnet_info *vi, u8 class, u8 cmd,
-				 struct scatterlist *out)
-{
-	struct scatterlist *sgs[4], hdr, stat;
-	unsigned out_num = 0, tmp;
-
-	/* Caller should know better */
-	BUG_ON(!virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_VQ));
-
-	vi->ctrl_status = ~0;
-	vi->ctrl_hdr.class = class;
-	vi->ctrl_hdr.cmd = cmd;
-	/* Add header */
-	sg_init_one(&hdr, &vi->ctrl_hdr, sizeof(vi->ctrl_hdr));
-	sgs[out_num++] = &hdr;
-
-	if (out)
-		sgs[out_num++] = out;
-
-	/* Add return status. */
-	sg_init_one(&stat, &vi->ctrl_status, sizeof(vi->ctrl_status));
-	sgs[out_num] = &stat;
-
-	BUG_ON(out_num + 1 > ARRAY_SIZE(sgs));
-	virtqueue_add_sgs(vi->cvq, sgs, out_num, 1, vi, GFP_ATOMIC);
-
-	if (unlikely(!virtqueue_kick(vi->cvq)))
-		return vi->ctrl_status == VIRTIO_NET_OK;
-
-	/* Spin for a response, the kick causes an ioport write, trapping
-	 * into the hypervisor, so the request should be handled immediately.
-	 */
-	while (!virtqueue_get_buf(vi->cvq, &tmp) &&
-	       !virtqueue_is_broken(vi->cvq))
-		cpu_relax();
-
-	return vi->ctrl_status == VIRTIO_NET_OK;
 }
 
 static int virtnet_set_mac_address(struct net_device *dev, void *p)
@@ -987,44 +671,16 @@ static int virtnet_set_mac_address(struct net_device *dev, void *p)
 	struct virtnet_info *vi = netdev_priv(dev);
 	struct virtio_device *vdev = vi->vdev;
 	int ret;
-	struct sockaddr *addr;
-	struct scatterlist sg;
 
-	addr = kmalloc(sizeof(*addr), GFP_KERNEL);
-	if (!addr)
-		return -ENOMEM;
-	memcpy(addr, p, sizeof(*addr));
-
-	ret = eth_prepare_mac_addr_change(dev, addr);
+	ret = eth_mac_addr(dev, p);
 	if (ret)
-		goto out;
+		return ret;
 
-	if (virtio_has_feature(vdev, VIRTIO_NET_F_CTRL_MAC_ADDR)) {
-		sg_init_one(&sg, addr->sa_data, dev->addr_len);
-		if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_MAC,
-					  VIRTIO_NET_CTRL_MAC_ADDR_SET, &sg)) {
-			dev_warn(&vdev->dev,
-				 "Failed to set mac address by vq command.\n");
-			ret = -EINVAL;
-			goto out;
-		}
-	} else if (virtio_has_feature(vdev, VIRTIO_NET_F_MAC) &&
-		   !virtio_has_feature(vdev, VIRTIO_F_VERSION_1)) {
-		unsigned int i;
+	if (virtio_has_feature(vdev, VIRTIO_NET_F_MAC))
+		vdev->config->set(vdev, offsetof(struct virtio_net_config, mac),
+		                  dev->dev_addr, dev->addr_len);
 
-		/* Naturally, this has an atomicity problem. */
-		for (i = 0; i < dev->addr_len; i++)
-			virtio_cwrite8(vdev,
-				       offsetof(struct virtio_net_config, mac) +
-				       i, addr->sa_data[i]);
-	}
-
-	eth_commit_mac_addr_change(dev, p);
-	ret = 0;
-
-out:
-	kfree(addr);
-	return ret;
+	return 0;
 }
 
 static struct rtnl_link_stats64 *virtnet_stats(struct net_device *dev,
@@ -1039,16 +695,12 @@ static struct rtnl_link_stats64 *virtnet_stats(struct net_device *dev,
 		u64 tpackets, tbytes, rpackets, rbytes;
 
 		do {
-			start = u64_stats_fetch_begin_irq(&stats->tx_syncp);
+			start = u64_stats_fetch_begin(&stats->syncp);
 			tpackets = stats->tx_packets;
 			tbytes   = stats->tx_bytes;
-		} while (u64_stats_fetch_retry_irq(&stats->tx_syncp, start));
-
-		do {
-			start = u64_stats_fetch_begin_irq(&stats->rx_syncp);
 			rpackets = stats->rx_packets;
 			rbytes   = stats->rx_bytes;
-		} while (u64_stats_fetch_retry_irq(&stats->rx_syncp, start));
+		} while (u64_stats_fetch_retry(&stats->syncp, start));
 
 		tot->rx_packets += rpackets;
 		tot->tx_packets += tpackets;
@@ -1069,58 +721,75 @@ static struct rtnl_link_stats64 *virtnet_stats(struct net_device *dev,
 static void virtnet_netpoll(struct net_device *dev)
 {
 	struct virtnet_info *vi = netdev_priv(dev);
-	int i;
 
-	for (i = 0; i < vi->curr_queue_pairs; i++)
-		napi_schedule(&vi->rq[i].napi);
+	napi_schedule(&vi->napi);
 }
 #endif
 
-static void virtnet_ack_link_announce(struct virtnet_info *vi)
+static int virtnet_open(struct net_device *dev)
 {
-	rtnl_lock();
-	if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_ANNOUNCE,
-				  VIRTIO_NET_CTRL_ANNOUNCE_ACK, NULL))
-		dev_warn(&vi->dev->dev, "Failed to ack link announce.\n");
-	rtnl_unlock();
+	struct virtnet_info *vi = netdev_priv(dev);
+
+	/* Make sure we have some buffers: if oom use wq. */
+	if (!try_fill_recv(vi, GFP_KERNEL))
+		queue_delayed_work(system_nrt_wq, &vi->refill, 0);
+
+	virtnet_napi_enable(vi);
+	return 0;
 }
 
-static int virtnet_set_queues(struct virtnet_info *vi, u16 queue_pairs)
+/*
+ * Send command via the control virtqueue and check status.  Commands
+ * supported by the hypervisor, as indicated by feature bits, should
+ * never fail unless improperly formated.
+ */
+static bool virtnet_send_command(struct virtnet_info *vi, u8 class, u8 cmd,
+				 struct scatterlist *data, int out, int in)
 {
-	struct scatterlist sg;
-	struct net_device *dev = vi->dev;
+	struct scatterlist *s, sg[VIRTNET_SEND_COMMAND_SG_MAX + 2];
+	struct virtio_net_ctrl_hdr ctrl;
+	virtio_net_ctrl_ack status = ~0;
+	unsigned int tmp;
+	int i;
 
-	if (!vi->has_cvq || !virtio_has_feature(vi->vdev, VIRTIO_NET_F_MQ))
-		return 0;
+	/* Caller should know better */
+	BUG_ON(!virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_VQ) ||
+		(out + in > VIRTNET_SEND_COMMAND_SG_MAX));
 
-	vi->ctrl_mq.virtqueue_pairs = cpu_to_virtio16(vi->vdev, queue_pairs);
-	sg_init_one(&sg, &vi->ctrl_mq, sizeof(vi->ctrl_mq));
+	out++; /* Add header */
+	in++; /* Add return status */
 
-	if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_MQ,
-				  VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET, &sg)) {
-		dev_warn(&dev->dev, "Fail to set num of queue pairs to %d\n",
-			 queue_pairs);
-		return -EINVAL;
-	} else {
-		vi->curr_queue_pairs = queue_pairs;
-		/* virtnet_open() will refill when device is going to up. */
-		if (dev->flags & IFF_UP)
-			schedule_delayed_work(&vi->refill, 0);
-	}
+	ctrl.class = class;
+	ctrl.cmd = cmd;
 
-	return 0;
+	sg_init_table(sg, out + in);
+
+	sg_set_buf(&sg[0], &ctrl, sizeof(ctrl));
+	for_each_sg(data, s, out + in - 2, i)
+		sg_set_buf(&sg[i + 1], sg_virt(s), s->length);
+	sg_set_buf(&sg[out + in - 1], &status, sizeof(status));
+
+	BUG_ON(virtqueue_add_buf(vi->cvq, sg, out, in, vi, GFP_ATOMIC) < 0);
+
+	virtqueue_kick(vi->cvq);
+
+	/*
+	 * Spin for a response, the kick causes an ioport write, trapping
+	 * into the hypervisor, so the request should be handled immediately.
+	 */
+	while (!virtqueue_get_buf(vi->cvq, &tmp))
+		cpu_relax();
+
+	return status == VIRTIO_NET_OK;
 }
 
 static int virtnet_close(struct net_device *dev)
 {
 	struct virtnet_info *vi = netdev_priv(dev);
-	int i;
 
 	/* Make sure refill_work doesn't re-enable napi! */
 	cancel_delayed_work_sync(&vi->refill);
-
-	for (i = 0; i < vi->max_queue_pairs; i++)
-		napi_disable(&vi->rq[i].napi);
+	napi_disable(&vi->napi);
 
 	return 0;
 }
@@ -1129,6 +798,7 @@ static void virtnet_set_rx_mode(struct net_device *dev)
 {
 	struct virtnet_info *vi = netdev_priv(dev);
 	struct scatterlist sg[2];
+	u8 promisc, allmulti;
 	struct virtio_net_ctrl_mac *mac_data;
 	struct netdev_hw_addr *ha;
 	int uc_count;
@@ -1136,26 +806,28 @@ static void virtnet_set_rx_mode(struct net_device *dev)
 	void *buf;
 	int i;
 
-	/* We can't dynamically set ndo_set_rx_mode, so return gracefully */
+	/* We can't dynamicaly set ndo_set_rx_mode, so return gracefully */
 	if (!virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_RX))
 		return;
 
-	vi->ctrl_promisc = ((dev->flags & IFF_PROMISC) != 0);
-	vi->ctrl_allmulti = ((dev->flags & IFF_ALLMULTI) != 0);
+	promisc = ((dev->flags & IFF_PROMISC) != 0);
+	allmulti = ((dev->flags & IFF_ALLMULTI) != 0);
 
-	sg_init_one(sg, &vi->ctrl_promisc, sizeof(vi->ctrl_promisc));
+	sg_init_one(sg, &promisc, sizeof(promisc));
 
 	if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_RX,
-				  VIRTIO_NET_CTRL_RX_PROMISC, sg))
+				  VIRTIO_NET_CTRL_RX_PROMISC,
+				  sg, 1, 0))
 		dev_warn(&dev->dev, "Failed to %sable promisc mode.\n",
-			 vi->ctrl_promisc ? "en" : "dis");
+			 promisc ? "en" : "dis");
 
-	sg_init_one(sg, &vi->ctrl_allmulti, sizeof(vi->ctrl_allmulti));
+	sg_init_one(sg, &allmulti, sizeof(allmulti));
 
 	if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_RX,
-				  VIRTIO_NET_CTRL_RX_ALLMULTI, sg))
+				  VIRTIO_NET_CTRL_RX_ALLMULTI,
+				  sg, 1, 0))
 		dev_warn(&dev->dev, "Failed to %sable allmulti mode.\n",
-			 vi->ctrl_allmulti ? "en" : "dis");
+			 allmulti ? "en" : "dis");
 
 	uc_count = netdev_uc_count(dev);
 	mc_count = netdev_mc_count(dev);
@@ -1163,13 +835,15 @@ static void virtnet_set_rx_mode(struct net_device *dev)
 	buf = kzalloc(((uc_count + mc_count) * ETH_ALEN) +
 		      (2 * sizeof(mac_data->entries)), GFP_ATOMIC);
 	mac_data = buf;
-	if (!buf)
+	if (!buf) {
+		dev_warn(&dev->dev, "No memory for MAC address buffer\n");
 		return;
+	}
 
 	sg_init_table(sg, 2);
 
 	/* Store the unicast list and count in the front of the buffer */
-	mac_data->entries = cpu_to_virtio32(vi->vdev, uc_count);
+	mac_data->entries = uc_count;
 	i = 0;
 	netdev_for_each_uc_addr(ha, dev)
 		memcpy(&mac_data->macs[i++][0], ha->addr, ETH_ALEN);
@@ -1180,7 +854,7 @@ static void virtnet_set_rx_mode(struct net_device *dev)
 	/* multicast list and count fill the end */
 	mac_data = (void *)&mac_data->macs[uc_count][0];
 
-	mac_data->entries = cpu_to_virtio32(vi->vdev, mc_count);
+	mac_data->entries = mc_count;
 	i = 0;
 	netdev_for_each_mc_addr(ha, dev)
 		memcpy(&mac_data->macs[i++][0], ha->addr, ETH_ALEN);
@@ -1189,129 +863,37 @@ static void virtnet_set_rx_mode(struct net_device *dev)
 		   sizeof(mac_data->entries) + (mc_count * ETH_ALEN));
 
 	if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_MAC,
-				  VIRTIO_NET_CTRL_MAC_TABLE_SET, sg))
-		dev_warn(&dev->dev, "Failed to set MAC filter table.\n");
+				  VIRTIO_NET_CTRL_MAC_TABLE_SET,
+				  sg, 2, 0))
+		dev_warn(&dev->dev, "Failed to set MAC fitler table.\n");
 
 	kfree(buf);
 }
 
-static int virtnet_vlan_rx_add_vid(struct net_device *dev,
-				   __be16 proto, u16 vid)
+static int virtnet_vlan_rx_add_vid(struct net_device *dev, u16 vid)
 {
 	struct virtnet_info *vi = netdev_priv(dev);
 	struct scatterlist sg;
 
-	vi->ctrl_vid = vid;
-	sg_init_one(&sg, &vi->ctrl_vid, sizeof(vi->ctrl_vid));
+	sg_init_one(&sg, &vid, sizeof(vid));
 
 	if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_VLAN,
-				  VIRTIO_NET_CTRL_VLAN_ADD, &sg))
+				  VIRTIO_NET_CTRL_VLAN_ADD, &sg, 1, 0))
 		dev_warn(&dev->dev, "Failed to add VLAN ID %d.\n", vid);
 	return 0;
 }
 
-static int virtnet_vlan_rx_kill_vid(struct net_device *dev,
-				    __be16 proto, u16 vid)
+static int virtnet_vlan_rx_kill_vid(struct net_device *dev, u16 vid)
 {
 	struct virtnet_info *vi = netdev_priv(dev);
 	struct scatterlist sg;
 
-	vi->ctrl_vid = vid;
-	sg_init_one(&sg, &vi->ctrl_vid, sizeof(vi->ctrl_vid));
+	sg_init_one(&sg, &vid, sizeof(vid));
 
 	if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_VLAN,
-				  VIRTIO_NET_CTRL_VLAN_DEL, &sg))
+				  VIRTIO_NET_CTRL_VLAN_DEL, &sg, 1, 0))
 		dev_warn(&dev->dev, "Failed to kill VLAN ID %d.\n", vid);
 	return 0;
-}
-
-static void virtnet_clean_affinity(struct virtnet_info *vi, long hcpu)
-{
-	int i;
-
-	if (vi->affinity_hint_set) {
-		for (i = 0; i < vi->max_queue_pairs; i++) {
-			virtqueue_set_affinity(vi->rq[i].vq, -1);
-			virtqueue_set_affinity(vi->sq[i].vq, -1);
-		}
-
-		vi->affinity_hint_set = false;
-	}
-}
-
-static void virtnet_set_affinity(struct virtnet_info *vi)
-{
-	int i;
-	int cpu;
-
-	/* In multiqueue mode, when the number of cpu is equal to the number of
-	 * queue pairs, we let the queue pairs to be private to one cpu by
-	 * setting the affinity hint to eliminate the contention.
-	 */
-	if (vi->curr_queue_pairs == 1 ||
-	    vi->max_queue_pairs != num_online_cpus()) {
-		virtnet_clean_affinity(vi, -1);
-		return;
-	}
-
-	i = 0;
-	for_each_online_cpu(cpu) {
-		virtqueue_set_affinity(vi->rq[i].vq, cpu);
-		virtqueue_set_affinity(vi->sq[i].vq, cpu);
-		netif_set_xps_queue(vi->dev, cpumask_of(cpu), i);
-		i++;
-	}
-
-	vi->affinity_hint_set = true;
-}
-
-static int virtnet_cpu_online(unsigned int cpu, struct hlist_node *node)
-{
-	struct virtnet_info *vi = hlist_entry_safe(node, struct virtnet_info,
-						   node);
-	virtnet_set_affinity(vi);
-	return 0;
-}
-
-static int virtnet_cpu_dead(unsigned int cpu, struct hlist_node *node)
-{
-	struct virtnet_info *vi = hlist_entry_safe(node, struct virtnet_info,
-						   node_dead);
-	virtnet_set_affinity(vi);
-	return 0;
-}
-
-static int virtnet_cpu_down_prep(unsigned int cpu, struct hlist_node *node)
-{
-	struct virtnet_info *vi = hlist_entry_safe(node, struct virtnet_info,
-						   node);
-
-	virtnet_clean_affinity(vi, cpu);
-	return 0;
-}
-
-static enum cpuhp_state virtionet_online;
-
-static int virtnet_cpu_notif_add(struct virtnet_info *vi)
-{
-	int ret;
-
-	ret = cpuhp_state_add_instance_nocalls(virtionet_online, &vi->node);
-	if (ret)
-		return ret;
-	ret = cpuhp_state_add_instance_nocalls(CPUHP_VIRT_NET_DEAD,
-					       &vi->node_dead);
-	if (!ret)
-		return ret;
-	cpuhp_state_remove_instance_nocalls(virtionet_online, &vi->node);
-	return ret;
-}
-
-static void virtnet_cpu_notif_remove(struct virtnet_info *vi)
-{
-	cpuhp_state_remove_instance_nocalls(virtionet_online, &vi->node);
-	cpuhp_state_remove_instance_nocalls(CPUHP_VIRT_NET_DEAD,
-					    &vi->node_dead);
 }
 
 static void virtnet_get_ringparam(struct net_device *dev,
@@ -1319,10 +901,11 @@ static void virtnet_get_ringparam(struct net_device *dev,
 {
 	struct virtnet_info *vi = netdev_priv(dev);
 
-	ring->rx_max_pending = virtqueue_get_vring_size(vi->rq[0].vq);
-	ring->tx_max_pending = virtqueue_get_vring_size(vi->sq[0].vq);
+	ring->rx_max_pending = virtqueue_get_vring_size(vi->rvq);
+	ring->tx_max_pending = virtqueue_get_vring_size(vi->svq);
 	ring->rx_pending = ring->rx_max_pending;
 	ring->tx_pending = ring->tx_max_pending;
+
 }
 
 
@@ -1338,112 +921,10 @@ static void virtnet_get_drvinfo(struct net_device *dev,
 
 }
 
-/* TODO: Eliminate OOO packets during switching */
-static int virtnet_set_channels(struct net_device *dev,
-				struct ethtool_channels *channels)
-{
-	struct virtnet_info *vi = netdev_priv(dev);
-	u16 queue_pairs = channels->combined_count;
-	int err;
-
-	/* We don't support separate rx/tx channels.
-	 * We don't allow setting 'other' channels.
-	 */
-	if (channels->rx_count || channels->tx_count || channels->other_count)
-		return -EINVAL;
-
-	if (queue_pairs > vi->max_queue_pairs || queue_pairs == 0)
-		return -EINVAL;
-
-	get_online_cpus();
-	err = virtnet_set_queues(vi, queue_pairs);
-	if (!err) {
-		netif_set_real_num_tx_queues(dev, queue_pairs);
-		netif_set_real_num_rx_queues(dev, queue_pairs);
-
-		virtnet_set_affinity(vi);
-	}
-	put_online_cpus();
-
-	return err;
-}
-
-static void virtnet_get_channels(struct net_device *dev,
-				 struct ethtool_channels *channels)
-{
-	struct virtnet_info *vi = netdev_priv(dev);
-
-	channels->combined_count = vi->curr_queue_pairs;
-	channels->max_combined = vi->max_queue_pairs;
-	channels->max_other = 0;
-	channels->rx_count = 0;
-	channels->tx_count = 0;
-	channels->other_count = 0;
-}
-
-/* Check if the user is trying to change anything besides speed/duplex */
-static bool virtnet_validate_ethtool_cmd(const struct ethtool_cmd *cmd)
-{
-	struct ethtool_cmd diff1 = *cmd;
-	struct ethtool_cmd diff2 = {};
-
-	/* cmd is always set so we need to clear it, validate the port type
-	 * and also without autonegotiation we can ignore advertising
-	 */
-	ethtool_cmd_speed_set(&diff1, 0);
-	diff2.port = PORT_OTHER;
-	diff1.advertising = 0;
-	diff1.duplex = 0;
-	diff1.cmd = 0;
-
-	return !memcmp(&diff1, &diff2, sizeof(diff1));
-}
-
-static int virtnet_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
-{
-	struct virtnet_info *vi = netdev_priv(dev);
-	u32 speed;
-
-	speed = ethtool_cmd_speed(cmd);
-	/* don't allow custom speed and duplex */
-	if (!ethtool_validate_speed(speed) ||
-	    !ethtool_validate_duplex(cmd->duplex) ||
-	    !virtnet_validate_ethtool_cmd(cmd))
-		return -EINVAL;
-	vi->speed = speed;
-	vi->duplex = cmd->duplex;
-
-	return 0;
-}
-
-static int virtnet_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
-{
-	struct virtnet_info *vi = netdev_priv(dev);
-
-	ethtool_cmd_speed_set(cmd, vi->speed);
-	cmd->duplex = vi->duplex;
-	cmd->port = PORT_OTHER;
-
-	return 0;
-}
-
-static void virtnet_init_settings(struct net_device *dev)
-{
-	struct virtnet_info *vi = netdev_priv(dev);
-
-	vi->speed = SPEED_UNKNOWN;
-	vi->duplex = DUPLEX_UNKNOWN;
-}
-
 static const struct ethtool_ops virtnet_ethtool_ops = {
 	.get_drvinfo = virtnet_get_drvinfo,
 	.get_link = ethtool_op_get_link,
 	.get_ringparam = virtnet_get_ringparam,
-	.set_channels = virtnet_set_channels,
-	.get_channels = virtnet_get_channels,
-	.get_ts_info = ethtool_op_get_ts_info,
-	.get_settings = virtnet_get_settings,
-	.set_settings = virtnet_set_settings,
 };
 
 #define MIN_MTU 68
@@ -1471,26 +952,16 @@ static const struct net_device_ops virtnet_netdev = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller = virtnet_netpoll,
 #endif
-#ifdef CONFIG_NET_RX_BUSY_POLL
-	.ndo_busy_poll		= virtnet_busy_poll,
-#endif
-	.ndo_features_check	= passthru_features_check,
 };
 
-static void virtnet_config_changed_work(struct work_struct *work)
+static void virtnet_update_status(struct virtnet_info *vi)
 {
-	struct virtnet_info *vi =
-		container_of(work, struct virtnet_info, config_work);
 	u16 v;
 
-	if (virtio_cread_feature(vi->vdev, VIRTIO_NET_F_STATUS,
-				 struct virtio_net_config, status, &v) < 0)
+	if (virtio_config_val(vi->vdev, VIRTIO_NET_F_STATUS,
+			      offsetof(struct virtio_net_config, status),
+			      &v) < 0)
 		return;
-
-	if (v & VIRTIO_NET_S_ANNOUNCE) {
-		netdev_notify_peers(vi->dev);
-		virtnet_ack_link_announce(vi);
-	}
 
 	/* Ignore unknown (future) status bits */
 	v &= VIRTIO_NET_S_LINK_UP;
@@ -1502,10 +973,10 @@ static void virtnet_config_changed_work(struct work_struct *work)
 
 	if (vi->status & VIRTIO_NET_S_LINK_UP) {
 		netif_carrier_on(vi->dev);
-		netif_tx_wake_all_queues(vi->dev);
+		netif_wake_queue(vi->dev);
 	} else {
 		netif_carrier_off(vi->dev);
-		netif_tx_stop_all_queues(vi->dev);
+		netif_stop_queue(vi->dev);
 	}
 }
 
@@ -1513,313 +984,53 @@ static void virtnet_config_changed(struct virtio_device *vdev)
 {
 	struct virtnet_info *vi = vdev->priv;
 
-	schedule_work(&vi->config_work);
-}
-
-static void virtnet_free_queues(struct virtnet_info *vi)
-{
-	int i;
-
-	for (i = 0; i < vi->max_queue_pairs; i++) {
-		napi_hash_del(&vi->rq[i].napi);
-		netif_napi_del(&vi->rq[i].napi);
-	}
-
-	/* We called napi_hash_del() before netif_napi_del(),
-	 * we need to respect an RCU grace period before freeing vi->rq
-	 */
-	synchronize_net();
-
-	kfree(vi->rq);
-	kfree(vi->sq);
-}
-
-static void free_receive_bufs(struct virtnet_info *vi)
-{
-	int i;
-
-	for (i = 0; i < vi->max_queue_pairs; i++) {
-		while (vi->rq[i].pages)
-			__free_pages(get_a_page(&vi->rq[i], GFP_KERNEL), 0);
-	}
-}
-
-static void free_receive_page_frags(struct virtnet_info *vi)
-{
-	int i;
-	for (i = 0; i < vi->max_queue_pairs; i++)
-		if (vi->rq[i].alloc_frag.page)
-			put_page(vi->rq[i].alloc_frag.page);
-}
-
-static void free_unused_bufs(struct virtnet_info *vi)
-{
-	void *buf;
-	int i;
-
-	for (i = 0; i < vi->max_queue_pairs; i++) {
-		struct virtqueue *vq = vi->sq[i].vq;
-		while ((buf = virtqueue_detach_unused_buf(vq)) != NULL)
-			dev_kfree_skb(buf);
-	}
-
-	for (i = 0; i < vi->max_queue_pairs; i++) {
-		struct virtqueue *vq = vi->rq[i].vq;
-
-		while ((buf = virtqueue_detach_unused_buf(vq)) != NULL) {
-			if (vi->mergeable_rx_bufs) {
-				unsigned long ctx = (unsigned long)buf;
-				void *base = mergeable_ctx_to_buf_address(ctx);
-				put_page(virt_to_head_page(base));
-			} else if (vi->big_packets) {
-				give_pages(&vi->rq[i], buf);
-			} else {
-				dev_kfree_skb(buf);
-			}
-		}
-	}
-}
-
-static void virtnet_del_vqs(struct virtnet_info *vi)
-{
-	struct virtio_device *vdev = vi->vdev;
-
-	virtnet_clean_affinity(vi, -1);
-
-	vdev->config->del_vqs(vdev);
-
-	virtnet_free_queues(vi);
-}
-
-static int virtnet_find_vqs(struct virtnet_info *vi)
-{
-	vq_callback_t **callbacks;
-	struct virtqueue **vqs;
-	int ret = -ENOMEM;
-	int i, total_vqs;
-	const char **names;
-
-	/* We expect 1 RX virtqueue followed by 1 TX virtqueue, followed by
-	 * possible N-1 RX/TX queue pairs used in multiqueue mode, followed by
-	 * possible control vq.
-	 */
-	total_vqs = vi->max_queue_pairs * 2 +
-		    virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_VQ);
-
-	/* Allocate space for find_vqs parameters */
-	vqs = kzalloc(total_vqs * sizeof(*vqs), GFP_KERNEL);
-	if (!vqs)
-		goto err_vq;
-	callbacks = kmalloc(total_vqs * sizeof(*callbacks), GFP_KERNEL);
-	if (!callbacks)
-		goto err_callback;
-	names = kmalloc(total_vqs * sizeof(*names), GFP_KERNEL);
-	if (!names)
-		goto err_names;
-
-	/* Parameters for control virtqueue, if any */
-	if (vi->has_cvq) {
-		callbacks[total_vqs - 1] = NULL;
-		names[total_vqs - 1] = "control";
-	}
-
-	/* Allocate/initialize parameters for send/receive virtqueues */
-	for (i = 0; i < vi->max_queue_pairs; i++) {
-		callbacks[rxq2vq(i)] = skb_recv_done;
-		callbacks[txq2vq(i)] = skb_xmit_done;
-		sprintf(vi->rq[i].name, "input.%d", i);
-		sprintf(vi->sq[i].name, "output.%d", i);
-		names[rxq2vq(i)] = vi->rq[i].name;
-		names[txq2vq(i)] = vi->sq[i].name;
-	}
-
-	ret = vi->vdev->config->find_vqs(vi->vdev, total_vqs, vqs, callbacks,
-					 names);
-	if (ret)
-		goto err_find;
-
-	if (vi->has_cvq) {
-		vi->cvq = vqs[total_vqs - 1];
-		if (virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_VLAN))
-			vi->dev->features |= NETIF_F_HW_VLAN_CTAG_FILTER;
-	}
-
-	for (i = 0; i < vi->max_queue_pairs; i++) {
-		vi->rq[i].vq = vqs[rxq2vq(i)];
-		vi->sq[i].vq = vqs[txq2vq(i)];
-	}
-
-	kfree(names);
-	kfree(callbacks);
-	kfree(vqs);
-
-	return 0;
-
-err_find:
-	kfree(names);
-err_names:
-	kfree(callbacks);
-err_callback:
-	kfree(vqs);
-err_vq:
-	return ret;
-}
-
-static int virtnet_alloc_queues(struct virtnet_info *vi)
-{
-	int i;
-
-	vi->sq = kzalloc(sizeof(*vi->sq) * vi->max_queue_pairs, GFP_KERNEL);
-	if (!vi->sq)
-		goto err_sq;
-	vi->rq = kzalloc(sizeof(*vi->rq) * vi->max_queue_pairs, GFP_KERNEL);
-	if (!vi->rq)
-		goto err_rq;
-
-	INIT_DELAYED_WORK(&vi->refill, refill_work);
-	for (i = 0; i < vi->max_queue_pairs; i++) {
-		vi->rq[i].pages = NULL;
-		netif_napi_add(vi->dev, &vi->rq[i].napi, virtnet_poll,
-			       napi_weight);
-
-		sg_init_table(vi->rq[i].sg, ARRAY_SIZE(vi->rq[i].sg));
-		ewma_pkt_len_init(&vi->rq[i].mrg_avg_pkt_len);
-		sg_init_table(vi->sq[i].sg, ARRAY_SIZE(vi->sq[i].sg));
-	}
-
-	return 0;
-
-err_rq:
-	kfree(vi->sq);
-err_sq:
-	return -ENOMEM;
+	virtnet_update_status(vi);
 }
 
 static int init_vqs(struct virtnet_info *vi)
 {
-	int ret;
+	struct virtqueue *vqs[3];
+	vq_callback_t *callbacks[] = { skb_recv_done, skb_xmit_done, NULL};
+	const char *names[] = { "input", "output", "control" };
+	int nvqs, err;
 
-	/* Allocate send & receive queues */
-	ret = virtnet_alloc_queues(vi);
-	if (ret)
-		goto err;
+	/* We expect two virtqueues, receive then send,
+	 * and optionally control. */
+	nvqs = virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_VQ) ? 3 : 2;
 
-	ret = virtnet_find_vqs(vi);
-	if (ret)
-		goto err_free;
+	err = vi->vdev->config->find_vqs(vi->vdev, nvqs, vqs, callbacks, names);
+	if (err)
+		return err;
 
-	get_online_cpus();
-	virtnet_set_affinity(vi);
-	put_online_cpus();
+	vi->rvq = vqs[0];
+	vi->svq = vqs[1];
 
-	return 0;
+	if (virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_VQ)) {
+		vi->cvq = vqs[2];
 
-err_free:
-	virtnet_free_queues(vi);
-err:
-	return ret;
-}
-
-#ifdef CONFIG_SYSFS
-static ssize_t mergeable_rx_buffer_size_show(struct netdev_rx_queue *queue,
-		struct rx_queue_attribute *attribute, char *buf)
-{
-	struct virtnet_info *vi = netdev_priv(queue->dev);
-	unsigned int queue_index = get_netdev_rx_queue_index(queue);
-	struct ewma_pkt_len *avg;
-
-	BUG_ON(queue_index >= vi->max_queue_pairs);
-	avg = &vi->rq[queue_index].mrg_avg_pkt_len;
-	return sprintf(buf, "%u\n", get_mergeable_buf_len(avg));
-}
-
-static struct rx_queue_attribute mergeable_rx_buffer_size_attribute =
-	__ATTR_RO(mergeable_rx_buffer_size);
-
-static struct attribute *virtio_net_mrg_rx_attrs[] = {
-	&mergeable_rx_buffer_size_attribute.attr,
-	NULL
-};
-
-static const struct attribute_group virtio_net_mrg_rx_group = {
-	.name = "virtio_net",
-	.attrs = virtio_net_mrg_rx_attrs
-};
-#endif
-
-static bool virtnet_fail_on_feature(struct virtio_device *vdev,
-				    unsigned int fbit,
-				    const char *fname, const char *dname)
-{
-	if (!virtio_has_feature(vdev, fbit))
-		return false;
-
-	dev_err(&vdev->dev, "device advertises feature %s but not %s",
-		fname, dname);
-
-	return true;
-}
-
-#define VIRTNET_FAIL_ON(vdev, fbit, dbit)			\
-	virtnet_fail_on_feature(vdev, fbit, #fbit, dbit)
-
-static bool virtnet_validate_features(struct virtio_device *vdev)
-{
-	if (!virtio_has_feature(vdev, VIRTIO_NET_F_CTRL_VQ) &&
-	    (VIRTNET_FAIL_ON(vdev, VIRTIO_NET_F_CTRL_RX,
-			     "VIRTIO_NET_F_CTRL_VQ") ||
-	     VIRTNET_FAIL_ON(vdev, VIRTIO_NET_F_CTRL_VLAN,
-			     "VIRTIO_NET_F_CTRL_VQ") ||
-	     VIRTNET_FAIL_ON(vdev, VIRTIO_NET_F_GUEST_ANNOUNCE,
-			     "VIRTIO_NET_F_CTRL_VQ") ||
-	     VIRTNET_FAIL_ON(vdev, VIRTIO_NET_F_MQ, "VIRTIO_NET_F_CTRL_VQ") ||
-	     VIRTNET_FAIL_ON(vdev, VIRTIO_NET_F_CTRL_MAC_ADDR,
-			     "VIRTIO_NET_F_CTRL_VQ"))) {
-		return false;
+		if (virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_VLAN))
+			vi->dev->features |= NETIF_F_HW_VLAN_FILTER;
 	}
-
-	return true;
+	return 0;
 }
 
 static int virtnet_probe(struct virtio_device *vdev)
 {
-	int i, err;
+	int err;
 	struct net_device *dev;
 	struct virtnet_info *vi;
-	u16 max_queue_pairs;
-	int mtu;
-
-	if (!vdev->config->get) {
-		dev_err(&vdev->dev, "%s failure: config access disabled\n",
-			__func__);
-		return -EINVAL;
-	}
-
-	if (!virtnet_validate_features(vdev))
-		return -EINVAL;
-
-	/* Find if host supports multiqueue virtio_net device */
-	err = virtio_cread_feature(vdev, VIRTIO_NET_F_MQ,
-				   struct virtio_net_config,
-				   max_virtqueue_pairs, &max_queue_pairs);
-
-	/* We need at least 2 queue's */
-	if (err || max_queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN ||
-	    max_queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX ||
-	    !virtio_has_feature(vdev, VIRTIO_NET_F_CTRL_VQ))
-		max_queue_pairs = 1;
 
 	/* Allocate ourselves a network device with room for our info */
-	dev = alloc_etherdev_mq(sizeof(struct virtnet_info), max_queue_pairs);
+	dev = alloc_etherdev(sizeof(struct virtnet_info));
 	if (!dev)
 		return -ENOMEM;
 
 	/* Set up network device as normal. */
-	dev->priv_flags |= IFF_UNICAST_FLT | IFF_LIVE_ADDR_CHANGE;
+	dev->priv_flags |= IFF_UNICAST_FLT;
 	dev->netdev_ops = &virtnet_netdev;
 	dev->features = NETIF_F_HIGHDMA;
 
-	dev->ethtool_ops = &virtnet_ethtool_ops;
+	SET_ETHTOOL_OPS(dev, &virtnet_ethtool_ops);
 	SET_NETDEV_DEV(dev, &vdev->dev);
 
 	/* Do we support "hardware" checksums? */
@@ -1843,43 +1054,32 @@ static int virtnet_probe(struct virtio_device *vdev)
 		if (virtio_has_feature(vdev, VIRTIO_NET_F_HOST_UFO))
 			dev->hw_features |= NETIF_F_UFO;
 
-		dev->features |= NETIF_F_GSO_ROBUST;
-
 		if (gso)
 			dev->features |= dev->hw_features & (NETIF_F_ALL_TSO|NETIF_F_UFO);
 		/* (!csum && gso) case will be fixed by register_netdev() */
 	}
-	if (virtio_has_feature(vdev, VIRTIO_NET_F_GUEST_CSUM))
-		dev->features |= NETIF_F_RXCSUM;
-
-	dev->vlan_features = dev->features;
 
 	/* Configuration may specify what MAC to use.  Otherwise random. */
-	if (virtio_has_feature(vdev, VIRTIO_NET_F_MAC))
-		virtio_cread_bytes(vdev,
-				   offsetof(struct virtio_net_config, mac),
-				   dev->dev_addr, dev->addr_len);
-	else
+	if (virtio_config_val_len(vdev, VIRTIO_NET_F_MAC,
+				  offsetof(struct virtio_net_config, mac),
+				  dev->dev_addr, dev->addr_len) < 0)
 		eth_hw_addr_random(dev);
 
 	/* Set up our device-specific information */
 	vi = netdev_priv(dev);
+	netif_napi_add(dev, &vi->napi, virtnet_poll, napi_weight);
 	vi->dev = dev;
 	vi->vdev = vdev;
 	vdev->priv = vi;
+	vi->pages = NULL;
 	vi->stats = alloc_percpu(struct virtnet_stats);
 	err = -ENOMEM;
 	if (vi->stats == NULL)
 		goto free;
 
-	for_each_possible_cpu(i) {
-		struct virtnet_stats *virtnet_stats;
-		virtnet_stats = per_cpu_ptr(vi->stats, i);
-		u64_stats_init(&virtnet_stats->tx_syncp);
-		u64_stats_init(&virtnet_stats->rx_syncp);
-	}
-
-	INIT_WORK(&vi->config_work, virtnet_config_changed_work);
+	INIT_DELAYED_WORK(&vi->refill, refill_work);
+	sg_init_table(vi->rx_sg, ARRAY_SIZE(vi->rx_sg));
+	sg_init_table(vi->tx_sg, ARRAY_SIZE(vi->tx_sg));
 
 	/* If we can receive ANY GSO packets, we must allocate large ones. */
 	if (virtio_has_feature(vdev, VIRTIO_NET_F_GUEST_TSO4) ||
@@ -1891,47 +1091,9 @@ static int virtnet_probe(struct virtio_device *vdev)
 	if (virtio_has_feature(vdev, VIRTIO_NET_F_MRG_RXBUF))
 		vi->mergeable_rx_bufs = true;
 
-	if (virtio_has_feature(vdev, VIRTIO_NET_F_MRG_RXBUF) ||
-	    virtio_has_feature(vdev, VIRTIO_F_VERSION_1))
-		vi->hdr_len = sizeof(struct virtio_net_hdr_mrg_rxbuf);
-	else
-		vi->hdr_len = sizeof(struct virtio_net_hdr);
-
-	if (virtio_has_feature(vdev, VIRTIO_F_ANY_LAYOUT) ||
-	    virtio_has_feature(vdev, VIRTIO_F_VERSION_1))
-		vi->any_header_sg = true;
-
-	if (virtio_has_feature(vdev, VIRTIO_NET_F_CTRL_VQ))
-		vi->has_cvq = true;
-
-	if (virtio_has_feature(vdev, VIRTIO_NET_F_MTU)) {
-		mtu = virtio_cread16(vdev,
-				     offsetof(struct virtio_net_config,
-					      mtu));
-		if (virtnet_change_mtu(dev, mtu))
-			__virtio_clear_bit(vdev, VIRTIO_NET_F_MTU);
-	}
-
-	if (vi->any_header_sg)
-		dev->needed_headroom = vi->hdr_len;
-
-	/* Use single tx/rx queue pair as default */
-	vi->curr_queue_pairs = 1;
-	vi->max_queue_pairs = max_queue_pairs;
-
-	/* Allocate/initialize the rx/tx queues, and invoke find_vqs */
 	err = init_vqs(vi);
 	if (err)
 		goto free_stats;
-
-#ifdef CONFIG_SYSFS
-	if (vi->mergeable_rx_bufs)
-		dev->sysfs_rx_queue_group = &virtio_net_mrg_rx_group;
-#endif
-	netif_set_real_num_tx_queues(dev, vi->curr_queue_pairs);
-	netif_set_real_num_rx_queues(dev, vi->curr_queue_pairs);
-
-	virtnet_init_settings(dev);
 
 	err = register_netdev(dev);
 	if (err) {
@@ -1939,42 +1101,59 @@ static int virtnet_probe(struct virtio_device *vdev)
 		goto free_vqs;
 	}
 
-	virtio_device_ready(vdev);
+	/* Last of all, set up some receive buffers. */
+	try_fill_recv(vi, GFP_KERNEL);
 
-	err = virtnet_cpu_notif_add(vi);
-	if (err) {
-		pr_debug("virtio_net: registering cpu notifier failed\n");
-		goto free_unregister_netdev;
+	/* If we didn't even get one input buffer, we're useless. */
+	if (vi->num == 0) {
+		err = -ENOMEM;
+		goto unregister;
 	}
 
 	/* Assume link up if device can't report link status,
 	   otherwise get link status from config. */
-	netif_carrier_off(dev);
 	if (virtio_has_feature(vi->vdev, VIRTIO_NET_F_STATUS)) {
-		schedule_work(&vi->config_work);
+		netif_carrier_off(dev);
+		virtnet_update_status(vi);
 	} else {
 		vi->status = VIRTIO_NET_S_LINK_UP;
 		netif_carrier_on(dev);
 	}
 
-	pr_debug("virtnet: registered device %s with %d RX and TX vq's\n",
-		 dev->name, max_queue_pairs);
-
+	pr_debug("virtnet: registered device %s\n", dev->name);
 	return 0;
 
-free_unregister_netdev:
-	vi->vdev->config->reset(vdev);
-
+unregister:
 	unregister_netdev(dev);
 free_vqs:
-	cancel_delayed_work_sync(&vi->refill);
-	free_receive_page_frags(vi);
-	virtnet_del_vqs(vi);
+	vdev->config->del_vqs(vdev);
 free_stats:
 	free_percpu(vi->stats);
 free:
 	free_netdev(dev);
 	return err;
+}
+
+static void free_unused_bufs(struct virtnet_info *vi)
+{
+	void *buf;
+	while (1) {
+		buf = virtqueue_detach_unused_buf(vi->svq);
+		if (!buf)
+			break;
+		dev_kfree_skb(buf);
+	}
+	while (1) {
+		buf = virtqueue_detach_unused_buf(vi->rvq);
+		if (!buf)
+			break;
+		if (vi->mergeable_rx_bufs || vi->big_packets)
+			give_pages(vi, buf);
+		else
+			dev_kfree_skb(buf);
+		--vi->num;
+	}
+	BUG_ON(vi->num != 0);
 }
 
 static void remove_vq_common(struct virtnet_info *vi)
@@ -1984,21 +1163,15 @@ static void remove_vq_common(struct virtnet_info *vi)
 	/* Free unused buffers in both send and recv, if any. */
 	free_unused_bufs(vi);
 
-	free_receive_bufs(vi);
+	vi->vdev->config->del_vqs(vi->vdev);
 
-	free_receive_page_frags(vi);
-
-	virtnet_del_vqs(vi);
+	while (vi->pages)
+		__free_pages(get_a_page(vi, GFP_KERNEL), 0);
 }
 
-static void virtnet_remove(struct virtio_device *vdev)
+static void __devexit virtnet_remove(struct virtio_device *vdev)
 {
 	struct virtnet_info *vi = vdev->priv;
-
-	virtnet_cpu_notif_remove(vi);
-
-	/* Make sure no work handler is accessing the device. */
-	flush_work(&vi->config_work);
 
 	unregister_netdev(vi->dev);
 
@@ -2008,24 +1181,21 @@ static void virtnet_remove(struct virtio_device *vdev)
 	free_netdev(vi->dev);
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int virtnet_freeze(struct virtio_device *vdev)
 {
 	struct virtnet_info *vi = vdev->priv;
-	int i;
 
-	virtnet_cpu_notif_remove(vi);
-
-	/* Make sure no work handler is accessing the device */
-	flush_work(&vi->config_work);
+	virtqueue_disable_cb(vi->rvq);
+	virtqueue_disable_cb(vi->svq);
+	if (virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_VQ))
+		virtqueue_disable_cb(vi->cvq);
 
 	netif_device_detach(vi->dev);
 	cancel_delayed_work_sync(&vi->refill);
 
-	if (netif_running(vi->dev)) {
-		for (i = 0; i < vi->max_queue_pairs; i++)
-			napi_disable(&vi->rq[i].napi);
-	}
+	if (netif_running(vi->dev))
+		napi_disable(&vi->napi);
 
 	remove_vq_common(vi);
 
@@ -2035,32 +1205,19 @@ static int virtnet_freeze(struct virtio_device *vdev)
 static int virtnet_restore(struct virtio_device *vdev)
 {
 	struct virtnet_info *vi = vdev->priv;
-	int err, i;
+	int err;
 
 	err = init_vqs(vi);
 	if (err)
 		return err;
 
-	virtio_device_ready(vdev);
-
-	if (netif_running(vi->dev)) {
-		for (i = 0; i < vi->curr_queue_pairs; i++)
-			if (!try_fill_recv(vi, &vi->rq[i], GFP_KERNEL))
-				schedule_delayed_work(&vi->refill, 0);
-
-		for (i = 0; i < vi->max_queue_pairs; i++)
-			virtnet_napi_enable(&vi->rq[i]);
-	}
+	if (netif_running(vi->dev))
+		virtnet_napi_enable(vi);
 
 	netif_device_attach(vi->dev);
 
-	rtnl_lock();
-	virtnet_set_queues(vi, vi->curr_queue_pairs);
-	rtnl_unlock();
-
-	err = virtnet_cpu_notif_add(vi);
-	if (err)
-		return err;
+	if (!try_fill_recv(vi, GFP_KERNEL))
+		queue_delayed_work(system_nrt_wq, &vi->refill, 0);
 
 	return 0;
 }
@@ -2071,80 +1228,42 @@ static struct virtio_device_id id_table[] = {
 	{ 0 },
 };
 
-#define VIRTNET_FEATURES \
-	VIRTIO_NET_F_CSUM, VIRTIO_NET_F_GUEST_CSUM, \
-	VIRTIO_NET_F_MAC, \
-	VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_UFO, VIRTIO_NET_F_HOST_TSO6, \
-	VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6, \
-	VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_UFO, \
-	VIRTIO_NET_F_MRG_RXBUF, VIRTIO_NET_F_STATUS, VIRTIO_NET_F_CTRL_VQ, \
-	VIRTIO_NET_F_CTRL_RX, VIRTIO_NET_F_CTRL_VLAN, \
-	VIRTIO_NET_F_GUEST_ANNOUNCE, VIRTIO_NET_F_MQ, \
-	VIRTIO_NET_F_CTRL_MAC_ADDR, \
-	VIRTIO_NET_F_MTU
-
 static unsigned int features[] = {
-	VIRTNET_FEATURES,
-};
-
-static unsigned int features_legacy[] = {
-	VIRTNET_FEATURES,
-	VIRTIO_NET_F_GSO,
-	VIRTIO_F_ANY_LAYOUT,
+	VIRTIO_NET_F_CSUM, VIRTIO_NET_F_GUEST_CSUM,
+	VIRTIO_NET_F_GSO, VIRTIO_NET_F_MAC,
+	VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_UFO, VIRTIO_NET_F_HOST_TSO6,
+	VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
+	VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_UFO,
+	VIRTIO_NET_F_MRG_RXBUF, VIRTIO_NET_F_STATUS, VIRTIO_NET_F_CTRL_VQ,
+	VIRTIO_NET_F_CTRL_RX, VIRTIO_NET_F_CTRL_VLAN,
 };
 
 static struct virtio_driver virtio_net_driver = {
 	.feature_table = features,
 	.feature_table_size = ARRAY_SIZE(features),
-	.feature_table_legacy = features_legacy,
-	.feature_table_size_legacy = ARRAY_SIZE(features_legacy),
 	.driver.name =	KBUILD_MODNAME,
 	.driver.owner =	THIS_MODULE,
 	.id_table =	id_table,
 	.probe =	virtnet_probe,
-	.remove =	virtnet_remove,
+	.remove =	__devexit_p(virtnet_remove),
 	.config_changed = virtnet_config_changed,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.freeze =	virtnet_freeze,
 	.restore =	virtnet_restore,
 #endif
 };
 
-static __init int virtio_net_driver_init(void)
+static int __init init(void)
 {
-	int ret;
-
-	ret = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN, "AP_VIRT_NET_ONLINE",
-				      virtnet_cpu_online,
-				      virtnet_cpu_down_prep);
-	if (ret < 0)
-		goto out;
-	virtionet_online = ret;
-	ret = cpuhp_setup_state_multi(CPUHP_VIRT_NET_DEAD, "VIRT_NET_DEAD",
-				      NULL, virtnet_cpu_dead);
-	if (ret)
-		goto err_dead;
-
-        ret = register_virtio_driver(&virtio_net_driver);
-	if (ret)
-		goto err_virtio;
-	return 0;
-err_virtio:
-	cpuhp_remove_multi_state(CPUHP_VIRT_NET_DEAD);
-err_dead:
-	cpuhp_remove_multi_state(virtionet_online);
-out:
-	return ret;
+	return register_virtio_driver(&virtio_net_driver);
 }
-module_init(virtio_net_driver_init);
 
-static __exit void virtio_net_driver_exit(void)
+static void __exit fini(void)
 {
-	cpuhp_remove_multi_state(CPUHP_VIRT_NET_DEAD);
-	cpuhp_remove_multi_state(virtionet_online);
 	unregister_virtio_driver(&virtio_net_driver);
 }
-module_exit(virtio_net_driver_exit);
+module_init(init);
+module_exit(fini);
 
 MODULE_DEVICE_TABLE(virtio, id_table);
 MODULE_DESCRIPTION("Virtio network driver");

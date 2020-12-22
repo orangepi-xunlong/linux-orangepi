@@ -433,7 +433,7 @@
 #include <linux/types.h>
 
 /*
- * gpio pint registers layout
+ * bfin pint registers layout
  */
 struct bfin_pint_regs {
 	u32 mask_set;

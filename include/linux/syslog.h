@@ -44,18 +44,15 @@
 /* Return size of the log buffer */
 #define SYSLOG_ACTION_SIZE_BUFFER   10
 
-#define SYSLOG_FROM_READER           0
-#define SYSLOG_FROM_PROC             1
+#define SYSLOG_FROM_CALL 0
+#define SYSLOG_FROM_FILE 1
 
-int do_syslog(int type, char __user *buf, int count, int source);
+/*
+ * Syslog priority (PRI) maximum length in char : '<[0-9]{1,3}>'
+ * See RFC5424 for details
+*/
+#define SYSLOG_PRI_MAX_LENGTH 5
 
-#ifdef CONFIG_PRINTK
-int check_syslog_permissions(int type, int source);
-#else
-static inline int check_syslog_permissions(int type, int source)
-{
-	return 0;
-}
-#endif
+int do_syslog(int type, char __user *buf, int count, bool from_file);
 
 #endif /* _LINUX_SYSLOG_H */

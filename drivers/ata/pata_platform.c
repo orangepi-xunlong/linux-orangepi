@@ -13,6 +13,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <scsi/scsi_host.h>
 #include <linux/ata.h>
@@ -78,7 +79,6 @@ static void pata_platform_setup_port(struct ata_ioports *ioaddr,
  *	@irq_res: Resource representing IRQ and its flags
  *	@ioport_shift: I/O port shift
  *	@__pio_mask: PIO mask
- *	@sht: scsi_host_template to use when registering
  *
  *	Register a platform bus IDE interface. Such interfaces are PIO and we
  *	assume do not support IRQ sharing.
@@ -98,10 +98,12 @@ static void pata_platform_setup_port(struct ata_ioports *ioaddr,
  *
  *	If no IRQ resource is present, PIO polling mode is used instead.
  */
-int __pata_platform_probe(struct device *dev, struct resource *io_res,
-			  struct resource *ctl_res, struct resource *irq_res,
-			  unsigned int ioport_shift, int __pio_mask,
-			  struct scsi_host_template *sht)
+int __devinit __pata_platform_probe(struct device *dev,
+				    struct resource *io_res,
+				    struct resource *ctl_res,
+				    struct resource *irq_res,
+				    unsigned int ioport_shift,
+				    int __pio_mask)
 {
 	struct ata_host *host;
 	struct ata_port *ap;
@@ -120,7 +122,7 @@ int __pata_platform_probe(struct device *dev, struct resource *io_res,
 	 */
 	if (irq_res && irq_res->start > 0) {
 		irq = irq_res->start;
-		irq_flags = irq_res->flags & IRQF_TRIGGER_MASK;
+		irq_flags = irq_res->flags;
 	}
 
 	/*
@@ -172,16 +174,33 @@ int __pata_platform_probe(struct device *dev, struct resource *io_res,
 
 	/* activate */
 	return ata_host_activate(host, irq, irq ? ata_sff_interrupt : NULL,
-				 irq_flags, sht);
+				 irq_flags, &pata_platform_sht);
 }
 EXPORT_SYMBOL_GPL(__pata_platform_probe);
 
-static int pata_platform_probe(struct platform_device *pdev)
+/**
+ *	__pata_platform_remove		-	unplug a platform interface
+ *	@dev: device
+ *
+ *	A platform bus ATA device has been unplugged. Perform the needed
+ *	cleanup. Also called on module unload for any active devices.
+ */
+int __pata_platform_remove(struct device *dev)
+{
+	struct ata_host *host = dev_get_drvdata(dev);
+
+	ata_host_detach(host);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(__pata_platform_remove);
+
+static int __devinit pata_platform_probe(struct platform_device *pdev)
 {
 	struct resource *io_res;
 	struct resource *ctl_res;
 	struct resource *irq_res;
-	struct pata_platform_info *pp_info = dev_get_platdata(&pdev->dev);
+	struct pata_platform_info *pp_info = pdev->dev.platform_data;
 
 	/*
 	 * Simple resource validation ..
@@ -215,17 +234,25 @@ static int pata_platform_probe(struct platform_device *pdev)
 	 * And the IRQ
 	 */
 	irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+	if (irq_res)
+		irq_res->flags = pp_info ? pp_info->irq_flags : 0;
 
 	return __pata_platform_probe(&pdev->dev, io_res, ctl_res, irq_res,
 				     pp_info ? pp_info->ioport_shift : 0,
-				     pio_mask, &pata_platform_sht);
+				     pio_mask);
+}
+
+static int __devexit pata_platform_remove(struct platform_device *pdev)
+{
+	return __pata_platform_remove(&pdev->dev);
 }
 
 static struct platform_driver pata_platform_driver = {
 	.probe		= pata_platform_probe,
-	.remove		= ata_platform_remove_one,
+	.remove		= __devexit_p(pata_platform_remove),
 	.driver = {
 		.name		= DRV_NAME,
+		.owner		= THIS_MODULE,
 	},
 };
 

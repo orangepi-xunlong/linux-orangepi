@@ -36,14 +36,16 @@
 #include <linux/types.h>
 #include <linux/ctype.h>
 #include <linux/delay.h>
+#include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
 #include <linux/mdio.h>
 #include "version.h"
 
-#define CH_ERR(adap, fmt, ...)   dev_err(&adap->pdev->dev, fmt, ##__VA_ARGS__)
-#define CH_WARN(adap, fmt, ...)  dev_warn(&adap->pdev->dev, fmt, ##__VA_ARGS__)
-#define CH_ALERT(adap, fmt, ...) dev_alert(&adap->pdev->dev, fmt, ##__VA_ARGS__)
+#define CH_ERR(adap, fmt, ...)   dev_err(&adap->pdev->dev, fmt, ## __VA_ARGS__)
+#define CH_WARN(adap, fmt, ...)  dev_warn(&adap->pdev->dev, fmt, ## __VA_ARGS__)
+#define CH_ALERT(adap, fmt, ...) \
+	dev_printk(KERN_ALERT, &adap->pdev->dev, fmt, ## __VA_ARGS__)
 
 /*
  * More powerful macro that selectively prints messages based on msg_enable.
@@ -575,7 +577,7 @@ static inline int t3_mdio_write(struct cphy *phy, int mmd, int reg,
 
 /* Convenience initializer */
 static inline void cphy_init(struct cphy *phy, struct adapter *adapter,
-			     int phy_addr, const struct cphy_ops *phy_ops,
+			     int phy_addr, struct cphy_ops *phy_ops,
 			     const struct mdio_ops *mdio_ops,
 			      unsigned int caps, const char *desc)
 {

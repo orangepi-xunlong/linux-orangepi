@@ -14,13 +14,11 @@
  * published by the Free Software Foundation.
  *
  */
-
-#include <linux/reboot.h>
-
 struct map_desc;
+struct sys_timer;
 
 /* core initialisation functions */
 
 extern void nuc900_init_irq(void);
-extern void nuc900_timer_init(void);
-extern void nuc9xx_restart(enum reboot_mode, const char *);
+extern struct sys_timer nuc900_timer;
+extern void nuc9xx_restart(char, const char *);

@@ -337,25 +337,50 @@ cumanascsi_2_set_proc_info(struct Scsi_Host *host, char *buffer, int length)
 	return ret;
 }
 
-static int cumanascsi_2_show_info(struct seq_file *m, struct Scsi_Host *host)
+/* Prototype: int cumanascsi_2_proc_info(char *buffer, char **start, off_t offset,
+ *					 int length, int host_no, int inout)
+ * Purpose  : Return information about the driver to a user process accessing
+ *	      the /proc filesystem.
+ * Params   : buffer - a buffer to write information to
+ *	      start  - a pointer into this buffer set by this routine to the start
+ *		       of the required information.
+ *	      offset - offset into information that we have read up to.
+ *	      length - length of buffer
+ *	      host_no - host number to return information for
+ *	      inout  - 0 for reading, 1 for writing.
+ * Returns  : length of data written to buffer.
+ */
+int cumanascsi_2_proc_info (struct Scsi_Host *host, char *buffer, char **start, off_t offset,
+			    int length, int inout)
 {
 	struct cumanascsi2_info *info;
+	char *p = buffer;
+	int pos;
+
+	if (inout == 1)
+		return cumanascsi_2_set_proc_info(host, buffer, length);
+
 	info = (struct cumanascsi2_info *)host->hostdata;
 
-	seq_printf(m, "Cumana SCSI II driver v%s\n", VERSION);
-	fas216_print_host(&info->info, m);
-	seq_printf(m, "Term    : o%s\n",
+	p += sprintf(p, "Cumana SCSI II driver v%s\n", VERSION);
+	p += fas216_print_host(&info->info, p);
+	p += sprintf(p, "Term    : o%s\n",
 			info->terms ? "n" : "ff");
 
-	fas216_print_stats(&info->info, m);
-	fas216_print_devices(&info->info, m);
-	return 0;
+	p += fas216_print_stats(&info->info, p);
+	p += fas216_print_devices(&info->info, p);
+
+	*start = buffer + offset;
+	pos = p - buffer - offset;
+	if (pos > length)
+		pos = length;
+
+	return pos;
 }
 
 static struct scsi_host_template cumanascsi2_template = {
 	.module				= THIS_MODULE,
-	.show_info			= cumanascsi_2_show_info,
-	.write_info			= cumanascsi_2_set_proc_info,
+	.proc_info			= cumanascsi_2_proc_info,
 	.name				= "Cumana SCSI II",
 	.info				= cumanascsi_2_info,
 	.queuecommand			= fas216_queue_command,
@@ -365,14 +390,15 @@ static struct scsi_host_template cumanascsi2_template = {
 	.eh_abort_handler		= fas216_eh_abort,
 	.can_queue			= 1,
 	.this_id			= 7,
-	.sg_tablesize			= SG_MAX_SEGMENTS,
+	.sg_tablesize			= SCSI_MAX_SG_CHAIN_SEGMENTS,
 	.dma_boundary			= IOMD_DMA_BOUNDARY,
+	.cmd_per_lun			= 1,
 	.use_clustering			= DISABLE_CLUSTERING,
 	.proc_name			= "cumanascsi2",
 };
 
-static int cumanascsi2_probe(struct expansion_card *ec,
-			     const struct ecard_id *id)
+static int __devinit
+cumanascsi2_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	struct Scsi_Host *host;
 	struct cumanascsi2_info *info;
@@ -430,7 +456,7 @@ static int cumanascsi2_probe(struct expansion_card *ec,
 		goto out_free;
 
 	ret = request_irq(ec->irq, cumanascsi_2_intr,
-			  0, "cumanascsi2", info);
+			  IRQF_DISABLED, "cumanascsi2", info);
 	if (ret) {
 		printk("scsi%d: IRQ%d not free: %d\n",
 		       host->host_no, ec->irq, ret);
@@ -469,7 +495,7 @@ static int cumanascsi2_probe(struct expansion_card *ec,
 	return ret;
 }
 
-static void cumanascsi2_remove(struct expansion_card *ec)
+static void __devexit cumanascsi2_remove(struct expansion_card *ec)
 {
 	struct Scsi_Host *host = ecard_get_drvdata(ec);
 	struct cumanascsi2_info *info = (struct cumanascsi2_info *)host->hostdata;
@@ -493,7 +519,7 @@ static const struct ecard_id cumanascsi2_cids[] = {
 
 static struct ecard_driver cumanascsi2_driver = {
 	.probe		= cumanascsi2_probe,
-	.remove		= cumanascsi2_remove,
+	.remove		= __devexit_p(cumanascsi2_remove),
 	.id_table	= cumanascsi2_cids,
 	.drv = {
 		.name		= "cumanascsi2",

@@ -9,7 +9,6 @@
 #include <linux/ptrace.h>		/* for linux pt_regs struct */
 #include <linux/kgdb.h>
 #include <linux/uaccess.h>
-#include <asm/irq_regs.h>
 
 void pt_regs_to_gdb_regs(unsigned long *gdb_regs, struct pt_regs *regs)
 {
@@ -337,12 +336,7 @@ void kgdb_passive_cpu_callback(void *info)
 
 void kgdb_roundup_cpus(unsigned long flags)
 {
-	unsigned int cpu;
-
-	for (cpu = cpumask_first(cpu_online_mask); cpu < nr_cpu_ids;
-		cpu = cpumask_next(cpu, cpu_online_mask))
-		smp_call_function_single(cpu, kgdb_passive_cpu_callback,
-					 NULL, 0);
+	smp_call_function(kgdb_passive_cpu_callback, NULL, 0);
 }
 
 void kgdb_roundup_cpu(int cpu, unsigned long flags)
@@ -354,6 +348,19 @@ void kgdb_roundup_cpu(int cpu, unsigned long flags)
 #ifdef CONFIG_IPIPE
 static unsigned long kgdb_arch_imask;
 #endif
+
+void kgdb_post_primary_code(struct pt_regs *regs, int e_vector, int err_code)
+{
+	if (kgdb_single_step)
+		preempt_enable();
+
+#ifdef CONFIG_IPIPE
+	if (kgdb_arch_imask) {
+		cpu_pda[raw_smp_processor_id()].ex_imask = kgdb_arch_imask;
+		kgdb_arch_imask = 0;
+	}
+#endif
+}
 
 int kgdb_arch_handle_exception(int vector, int signo,
 			       int err_code, char *remcom_in_buffer,

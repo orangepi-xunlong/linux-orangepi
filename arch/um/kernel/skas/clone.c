@@ -1,5 +1,4 @@
 /*
- * Copyright (C) 2015 Thomas Meyer (thomas@m3y3r.de)
  * Copyright (C) 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
  * Licensed under the GPL
  */
@@ -8,10 +7,10 @@
 #include <sched.h>
 #include <asm/unistd.h>
 #include <sys/time.h>
-#include <as-layout.h>
-#include <ptrace_user.h>
-#include <stub-data.h>
-#include <sysdep/stub.h>
+#include "as-layout.h"
+#include "ptrace_user.h"
+#include "stub-data.h"
+#include "sysdep/stub.h"
 
 /*
  * This is in a separate file because it needs to be compiled with any
@@ -33,6 +32,11 @@ stub_clone_handler(void)
 		goto out;
 
 	err = stub_syscall4(__NR_ptrace, PTRACE_TRACEME, 0, 0, 0);
+	if (err)
+		goto out;
+
+	err = stub_syscall3(__NR_setitimer, ITIMER_VIRTUAL,
+			    (long) &data->timer, 0);
 	if (err)
 		goto out;
 

@@ -12,6 +12,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  *
  * File: dpc.h
  *
@@ -26,9 +29,33 @@
 #ifndef __DPC_H__
 #define __DPC_H__
 
+#include "ttype.h"
 #include "device.h"
+#include "wcmd.h"
 
-int vnt_rx_data(struct vnt_private *, struct vnt_rcb *,
-		unsigned long bytes_received);
+/*---------------------  Export Definitions -------------------------*/
+
+/*---------------------  Export Classes  ----------------------------*/
+
+/*---------------------  Export Variables  --------------------------*/
+
+/*---------------------  Export Functions  --------------------------*/
+
+void RXvWorkItem(void *Context);
+
+void RXvMngWorkItem(void *Context);
+
+void
+RXvFreeRCB(
+     PRCB pRCB,
+     BOOL bReAllocSkb
+    );
+
+BOOL
+RXbBulkInProcessData(
+     PSDevice         pDevice,
+     PRCB             pRCB,
+     unsigned long            BytesToIndicate
+    );
 
 #endif /* __RXTX_H__ */

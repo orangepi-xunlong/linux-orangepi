@@ -63,7 +63,7 @@ static int ioctl_send_fib(struct aac_dev * dev, void __user *arg)
 	struct fib *fibptr;
 	struct hw_fib * hw_fib = (struct hw_fib *)0;
 	dma_addr_t hw_fib_pa = (dma_addr_t)0LL;
-	unsigned int size, osize;
+	unsigned size;
 	int retval;
 
 	if (dev->in_reset) {
@@ -87,8 +87,7 @@ static int ioctl_send_fib(struct aac_dev * dev, void __user *arg)
 	 *	will not overrun the buffer when we copy the memory. Return
 	 *	an error if we would.
 	 */
-	osize = size = le16_to_cpu(kfib->header.Size) +
-		sizeof(struct aac_fibhdr);
+	size = le16_to_cpu(kfib->header.Size) + sizeof(struct aac_fibhdr);
 	if (size < le16_to_cpu(kfib->header.SenderSize))
 		size = le16_to_cpu(kfib->header.SenderSize);
 	if (size > dev->max_fib_size) {
@@ -116,14 +115,6 @@ static int ioctl_send_fib(struct aac_dev * dev, void __user *arg)
 
 	if (copy_from_user(kfib, arg, size)) {
 		retval = -EFAULT;
-		goto cleanup;
-	}
-
-	/* Sanity check the second copy */
-	if ((osize != le16_to_cpu(kfib->header.Size) +
-		sizeof(struct aac_fibhdr))
-		|| (size < le16_to_cpu(kfib->header.SenderSize))) {
-		retval = -EINVAL;
 		goto cleanup;
 	}
 
@@ -327,8 +318,7 @@ return_fib:
 			kthread_stop(dev->thread);
 			ssleep(1);
 			dev->aif_thread = 0;
-			dev->thread = kthread_run(aac_command_thread, dev,
-						  "%s", dev->name);
+			dev->thread = kthread_run(aac_command_thread, dev, dev->name);
 			ssleep(1);
 		}
 		if (f.wait) {
@@ -508,8 +498,6 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 		return -ENOMEM;
 	}
 	aac_fib_init(srbfib);
-	/* raw_srb FIB is not FastResponseCapable */
-	srbfib->hw_fib_va->header.XferState &= ~cpu_to_le32(FastResponseCapable);
 
 	srbcmd = (struct aac_srb*) fib_data(srbfib);
 
@@ -644,14 +632,15 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 			}
 		} else {
 			struct user_sgmap* usg;
-			usg = kmemdup(upsg,
-				      actual_fibsize - sizeof(struct aac_srb)
-				      + sizeof(struct sgmap), GFP_KERNEL);
+			usg = kmalloc(actual_fibsize - sizeof(struct aac_srb)
+			  + sizeof(struct sgmap), GFP_KERNEL);
 			if (!usg) {
 				dprintk((KERN_DEBUG"aacraid: Allocation error in Raw SRB command\n"));
 				rcode = -ENOMEM;
 				goto cleanup;
 			}
+			memcpy (usg, upsg, actual_fibsize - sizeof(struct aac_srb)
+			  + sizeof(struct sgmap));
 			actual_fibsize = actual_fibsize64;
 
 			for (i = 0; i < usg->count; i++) {
@@ -697,10 +686,7 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 			kfree (usg);
 		}
 		srbcmd->count = cpu_to_le32(byte_count);
-		if (user_srbcmd->sg.count)
-			psg->count = cpu_to_le32(sg_indx+1);
-		else
-			psg->count = 0;
+		psg->count = cpu_to_le32(sg_indx+1);
 		status = aac_fib_send(ScsiPortCommand64, srbfib, actual_fibsize, FsaNormal, 1, 1,NULL,NULL);
 	} else {
 		struct user_sgmap* upsg = &user_srbcmd->sg;
@@ -786,10 +772,7 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 			}
 		}
 		srbcmd->count = cpu_to_le32(byte_count);
-		if (user_srbcmd->sg.count)
-			psg->count = cpu_to_le32(sg_indx+1);
-		else
-			psg->count = 0;
+		psg->count = cpu_to_le32(sg_indx+1);
 		status = aac_fib_send(ScsiPortCommand, srbfib, actual_fibsize, FsaNormal, 1, 1, NULL, NULL);
 	}
 	if (status == -ERESTARTSYS) {
@@ -863,20 +846,13 @@ int aac_do_ioctl(struct aac_dev * dev, int cmd, void __user *arg)
 {
 	int status;
 
-	mutex_lock(&dev->ioctl_mutex);
-
-	if (dev->adapter_shutdown) {
-		status = -EACCES;
-		goto cleanup;
-	}
-
 	/*
 	 *	HBA gets first crack
 	 */
 
 	status = aac_dev_ioctl(dev, cmd, arg);
 	if (status != -ENOTTY)
-		goto cleanup;
+		return status;
 
 	switch (cmd) {
 	case FSACTL_MINIPORT_REV_CHECK:
@@ -905,10 +881,6 @@ int aac_do_ioctl(struct aac_dev * dev, int cmd, void __user *arg)
 		status = -ENOTTY;
 		break;
 	}
-
-cleanup:
-	mutex_unlock(&dev->ioctl_mutex);
-
 	return status;
 }
 

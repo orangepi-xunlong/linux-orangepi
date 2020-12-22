@@ -29,17 +29,13 @@
 	 */
 tsb_miss_dtlb:
 	mov		TLB_TAG_ACCESS, %g4
-	ldxa		[%g4] ASI_DMMU, %g4
-	srlx		%g4, PAGE_SHIFT, %g4
 	ba,pt		%xcc, tsb_miss_page_table_walk
-	 sllx		%g4, PAGE_SHIFT, %g4
+	 ldxa		[%g4] ASI_DMMU, %g4
 
 tsb_miss_itlb:
 	mov		TLB_TAG_ACCESS, %g4
-	ldxa		[%g4] ASI_IMMU, %g4
-	srlx		%g4, PAGE_SHIFT, %g4
 	ba,pt		%xcc, tsb_miss_page_table_walk
-	 sllx		%g4, PAGE_SHIFT, %g4
+	 ldxa		[%g4] ASI_IMMU, %g4
 
 	/* At this point we have:
 	 * %g1 --	PAGE_SIZE TSB entry address
@@ -53,7 +49,7 @@ tsb_miss_page_table_walk:
 	/* Before committing to a full page table walk,
 	 * check the huge page TSB.
 	 */
-#if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
+#ifdef CONFIG_HUGETLB_PAGE
 
 661:	ldx		[%g7 + TRAP_PER_CPU_TSB_HUGE], %g5
 	nop
@@ -79,7 +75,7 @@ tsb_miss_page_table_walk:
 	mov		512, %g7
 	andn		%g5, 0x7, %g5
 	sllx		%g7, %g6, %g7
-	srlx		%g4, REAL_HPAGE_SHIFT, %g6
+	srlx		%g4, HPAGE_SHIFT, %g6
 	sub		%g7, 1, %g7
 	and		%g6, %g7, %g6
 	sllx		%g6, 4, %g6
@@ -114,9 +110,12 @@ tsb_miss_page_table_walk:
 tsb_miss_page_table_walk_sun4v_fastpath:
 	USER_PGTABLE_WALK_TL1(%g4, %g7, %g5, %g2, tsb_do_fault)
 
-	/* Valid PTE is now in %g5.  */
+	/* Load and check PTE.  */
+	ldxa		[%g5] ASI_PHYS_USE_EC, %g5
+	brgez,pn	%g5, tsb_do_fault
+	 nop
 
-#if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
+#ifdef CONFIG_HUGETLB_PAGE
 661:	sethi		%uhi(_PAGE_SZALL_4U), %g7
 	sllx		%g7, 32, %g7
 	.section	.sun4v_2insn_patch, "ax"
@@ -140,43 +139,12 @@ tsb_miss_page_table_walk_sun4v_fastpath:
 	 nop
 
 	/* It is a huge page, use huge page TSB entry address we
-	 * calculated above.  If the huge page TSB has not been
-	 * allocated, setup a trap stack and call hugetlb_setup()
-	 * to do so, then return from the trap to replay the TLB
-	 * miss.
-	 *
-	 * This is necessary to handle the case of transparent huge
-	 * pages where we don't really have a non-atomic context
-	 * in which to allocate the hugepage TSB hash table.  When
-	 * the 'mm' faults in the hugepage for the first time, we
-	 * thus handle it here.  This also makes sure that we can
-	 * allocate the TSB hash table on the correct NUMA node.
+	 * calculated above.
 	 */
 	TRAP_LOAD_TRAP_BLOCK(%g7, %g2)
-	ldx		[%g7 + TRAP_PER_CPU_TSB_HUGE_TEMP], %g1
-	cmp		%g1, -1
-	bne,pt		%xcc, 60f
-	 nop
-
-661:	rdpr		%pstate, %g5
-	wrpr		%g5, PSTATE_AG | PSTATE_MG, %pstate
-	.section	.sun4v_2insn_patch, "ax"
-	.word		661b
-	SET_GL(1)
-	nop
-	.previous
-
-	rdpr	%tl, %g7
-	cmp	%g7, 1
-	bne,pn	%xcc, winfix_trampoline
-	 mov	%g3, %g4
-	ba,pt	%xcc, etrap
-	 rd	%pc, %g7
-	call	hugetlb_setup
-	 add	%sp, PTREGS_OFF, %o0
-	ba,pt	%xcc, rtrap
-	 nop
-
+	ldx		[%g7 + TRAP_PER_CPU_TSB_HUGE_TEMP], %g2
+	cmp		%g2, -1
+	movne		%xcc, %g2, %g1
 60:
 #endif
 
@@ -288,10 +256,6 @@ tsb_do_dtlb_fault:
 	nop
 	.previous
 
-	/* Clear context ID bits.  */
-	srlx		%g5, PAGE_SHIFT, %g5
-	sllx		%g5, PAGE_SHIFT, %g5
-
 	be,pt	%xcc, sparc64_realfault_common
 	 mov	FAULT_CODE_DTLB, %g4
 	ba,pt	%xcc, winfix_trampoline
@@ -375,7 +339,6 @@ tsb_flush:
 	 * %o1:	TSB base config pointer
 	 * %o2:	TSB huge config pointer, or NULL if none
 	 * %o3:	Hypervisor TSB descriptor physical address
-	 * %o4: Secondary context to load, if non-zero
 	 *
 	 * We have to run this whole thing with interrupts
 	 * disabled so that the current cpu doesn't change
@@ -388,17 +351,6 @@ __tsb_context_switch:
 	rdpr	%pstate, %g1
 	wrpr	%g1, PSTATE_IE, %pstate
 
-	brz,pn	%o4, 1f
-	 mov	SECONDARY_CONTEXT, %o5
-
-661:	stxa	%o4, [%o5] ASI_DMMU
-	.section .sun4v_1insn_patch, "ax"
-	.word	661b
-	stxa	%o4, [%o5] ASI_MMU
-	.previous
-	flush	%g6
-
-1:
 	TRAP_LOAD_TRAP_BLOCK(%g2, %g3)
 
 	stx	%o0, [%g2 + TRAP_PER_CPU_PGD_PADDR]
@@ -482,15 +434,12 @@ __tsb_context_switch:
 	.type	copy_tsb,#function
 copy_tsb:		/* %o0=old_tsb_base, %o1=old_tsb_size
 			 * %o2=new_tsb_base, %o3=new_tsb_size
-			 * %o4=page_size_shift
 			 */
 	sethi		%uhi(TSB_PASS_BITS), %g7
 	srlx		%o3, 4, %o3
-	add		%o0, %o1, %o1	/* end of old tsb */
+	add		%o0, %o1, %g1	/* end of old tsb */
 	sllx		%g7, 32, %g7
 	sub		%o3, 1, %o3	/* %o3 == new tsb hash mask */
-
-	mov		%o4, %g1	/* page_size_shift */
 
 661:	prefetcha	[%o0] ASI_N, #one_read
 	.section	.tsb_phys_patch, "ax"
@@ -516,9 +465,9 @@ copy_tsb:		/* %o0=old_tsb_base, %o1=old_tsb_size
 	/* This can definitely be computed faster... */
 	srlx		%o0, 4, %o5	/* Build index */
 	and		%o5, 511, %o5	/* Mask index */
-	sllx		%o5, %g1, %o5	/* Put into vaddr position */
+	sllx		%o5, PAGE_SHIFT, %o5 /* Put into vaddr position */
 	or		%o4, %o5, %o4	/* Full VADDR. */
-	srlx		%o4, %g1, %o4	/* Shift down to create index */
+	srlx		%o4, PAGE_SHIFT, %o4 /* Shift down to create index */
 	and		%o4, %o3, %o4	/* Mask with new_tsb_nents-1 */
 	sllx		%o4, 4, %o4	/* Shift back up into tsb ent offset */
 	TSB_STORE(%o2 + %o4, %g2)	/* Store TAG */
@@ -526,7 +475,7 @@ copy_tsb:		/* %o0=old_tsb_base, %o1=old_tsb_size
 	TSB_STORE(%o2 + %o4, %g3)	/* Store TTE */
 
 80:	add		%o0, 16, %o0
-	cmp		%o0, %o1
+	cmp		%o0, %g1
 	bne,pt		%xcc, 90b
 	 nop
 

@@ -36,7 +36,6 @@
 .file "aes-i586-asm.S"
 .text
 
-#include <linux/linkage.h>
 #include <asm/asm-offsets.h>
 
 #define tlen 1024   // length of each of 4 'xor' arrays (256 32-bit words)
@@ -220,10 +219,14 @@
 // AES (Rijndael) Encryption Subroutine
 /* void aes_enc_blk(struct crypto_aes_ctx *ctx, u8 *out_blk, const u8 *in_blk) */
 
+.global  aes_enc_blk
+
 .extern  crypto_ft_tab
 .extern  crypto_fl_tab
 
-ENTRY(aes_enc_blk)
+.align 4
+
+aes_enc_blk:
 	push    %ebp
 	mov     ctx(%esp),%ebp
 
@@ -287,15 +290,18 @@ ENTRY(aes_enc_blk)
 	mov     %r0,(%ebp)
 	pop     %ebp
 	ret
-ENDPROC(aes_enc_blk)
 
 // AES (Rijndael) Decryption Subroutine
 /* void aes_dec_blk(struct crypto_aes_ctx *ctx, u8 *out_blk, const u8 *in_blk) */
 
+.global  aes_dec_blk
+
 .extern  crypto_it_tab
 .extern  crypto_il_tab
 
-ENTRY(aes_dec_blk)
+.align 4
+
+aes_dec_blk:
 	push    %ebp
 	mov     ctx(%esp),%ebp
 
@@ -359,4 +365,3 @@ ENTRY(aes_dec_blk)
 	mov     %r0,(%ebp)
 	pop     %ebp
 	ret
-ENDPROC(aes_dec_blk)

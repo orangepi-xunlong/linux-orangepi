@@ -8,8 +8,8 @@
 #define MAX_DMA_ADDRESS	0xffffffffUL
 #else
 #define MAX_DMA_ADDRESS	({ \
-	extern phys_addr_t arm_dma_zone_size; \
-	arm_dma_zone_size && arm_dma_zone_size < (0x10000000 - PAGE_OFFSET) ? \
+	extern unsigned long arm_dma_zone_size; \
+	arm_dma_zone_size ? \
 		(PAGE_OFFSET + arm_dma_zone_size) : 0xffffffffUL; })
 #endif
 
@@ -19,7 +19,7 @@
  * It should not be re-used except for that purpose.
  */
 #include <linux/spinlock.h>
-#include <linux/scatterlist.h>
+#include <asm/scatterlist.h>
 
 #include <mach/isa-dma.h>
 
@@ -105,7 +105,7 @@ extern void set_dma_sg(unsigned int chan, struct scatterlist *sg, int nr_sg);
  */
 extern void __set_dma_addr(unsigned int chan, void *addr);
 #define set_dma_addr(chan, addr)				\
-	__set_dma_addr(chan, (void *)__bus_to_virt(addr))
+	__set_dma_addr(chan, bus_to_virt(addr))
 
 /* Set the DMA byte count for this channel
  *

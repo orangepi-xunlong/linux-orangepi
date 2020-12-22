@@ -231,7 +231,7 @@ static void __init bootmem_init_one_node(unsigned int nid)
 	if (!p->node_spanned_pages)
 		return;
 
-	end_pfn = pgdat_end_pfn(p);
+	end_pfn = p->node_start_pfn + p->node_spanned_pages;
 
 	total_pages = bootmem_bootmap_pages(p->node_spanned_pages);
 
@@ -407,16 +407,32 @@ unsigned int mem_init_done = 0;
 
 void __init mem_init(void)
 {
-	pg_data_t *pgdat;
+	int codesize, datasize, initsize;
+	int nid;
 
 	iommu_init();
 
+	num_physpages = 0;
 	high_memory = NULL;
-	for_each_online_pgdat(pgdat)
-		high_memory = max_t(void *, high_memory,
-				    __va(pgdat_end_pfn(pgdat) << PAGE_SHIFT));
 
-	free_all_bootmem();
+	for_each_online_node(nid) {
+		pg_data_t *pgdat = NODE_DATA(nid);
+		unsigned long node_pages = 0;
+		void *node_high_memory;
+
+		num_physpages += pgdat->node_present_pages;
+
+		if (pgdat->node_spanned_pages)
+			node_pages = free_all_bootmem_node(pgdat);
+
+		totalram_pages += node_pages;
+
+		node_high_memory = (void *)__va((pgdat->node_start_pfn +
+						 pgdat->node_spanned_pages) <<
+						 PAGE_SHIFT);
+		if (node_high_memory > high_memory)
+			high_memory = node_high_memory;
+	}
 
 	/* Set this up early, so we can take care of the zero page */
 	cpu_cache_init();
@@ -427,8 +443,19 @@ void __init mem_init(void)
 
 	vsyscall_init();
 
-	mem_init_print_info(NULL);
-	pr_info("virtual kernel memory layout:\n"
+	codesize =  (unsigned long) &_etext - (unsigned long) &_text;
+	datasize =  (unsigned long) &_edata - (unsigned long) &_etext;
+	initsize =  (unsigned long) &__init_end - (unsigned long) &__init_begin;
+
+	printk(KERN_INFO "Memory: %luk/%luk available (%dk kernel code, "
+	       "%dk data, %dk init)\n",
+		nr_free_pages() << (PAGE_SHIFT-10),
+		num_physpages << (PAGE_SHIFT-10),
+		codesize >> 10,
+		datasize >> 10,
+		initsize >> 10);
+
+	printk(KERN_INFO "virtual kernel memory layout:\n"
 		"    fixmap  : 0x%08lx - 0x%08lx   (%4ld kB)\n"
 #ifdef CONFIG_HIGHMEM
 		"    pkmap   : 0x%08lx - 0x%08lx   (%4ld kB)\n"
@@ -474,31 +501,47 @@ void __init mem_init(void)
 
 void free_initmem(void)
 {
-	free_initmem_default(-1);
+	unsigned long addr;
+
+	addr = (unsigned long)(&__init_begin);
+	for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
+		ClearPageReserved(virt_to_page(addr));
+		init_page_count(virt_to_page(addr));
+		free_page(addr);
+		totalram_pages++;
+	}
+	printk("Freeing unused kernel memory: %ldk freed\n",
+	       ((unsigned long)&__init_end -
+	        (unsigned long)&__init_begin) >> 10);
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD
 void free_initrd_mem(unsigned long start, unsigned long end)
 {
-	free_reserved_area((void *)start, (void *)end, -1, "initrd");
+	unsigned long p;
+	for (p = start; p < end; p += PAGE_SIZE) {
+		ClearPageReserved(virt_to_page(p));
+		init_page_count(virt_to_page(p));
+		free_page(p);
+		totalram_pages++;
+	}
+	printk("Freeing initrd memory: %ldk freed\n", (end - start) >> 10);
 }
 #endif
 
 #ifdef CONFIG_MEMORY_HOTPLUG
-int arch_add_memory(int nid, u64 start, u64 size, bool for_device)
+int arch_add_memory(int nid, u64 start, u64 size)
 {
 	pg_data_t *pgdat;
-	unsigned long start_pfn = PFN_DOWN(start);
+	unsigned long start_pfn = start >> PAGE_SHIFT;
 	unsigned long nr_pages = size >> PAGE_SHIFT;
 	int ret;
 
 	pgdat = NODE_DATA(nid);
 
 	/* We only have ZONE_NORMAL, so this is easy.. */
-	ret = __add_pages(nid, pgdat->node_zones +
-			zone_for_memory(nid, start, size, ZONE_NORMAL,
-			for_device),
-			start_pfn, nr_pages);
+	ret = __add_pages(nid, pgdat->node_zones + ZONE_NORMAL,
+				start_pfn, nr_pages);
 	if (unlikely(ret))
 		printk("%s: Failed, __add_pages() == %d\n", __func__, ret);
 
@@ -515,21 +558,4 @@ int memory_add_physaddr_to_nid(u64 addr)
 EXPORT_SYMBOL_GPL(memory_add_physaddr_to_nid);
 #endif
 
-#ifdef CONFIG_MEMORY_HOTREMOVE
-int arch_remove_memory(u64 start, u64 size)
-{
-	unsigned long start_pfn = PFN_DOWN(start);
-	unsigned long nr_pages = size >> PAGE_SHIFT;
-	struct zone *zone;
-	int ret;
-
-	zone = page_zone(pfn_to_page(start_pfn));
-	ret = __remove_pages(zone, start_pfn, nr_pages);
-	if (unlikely(ret))
-		pr_warn("%s: Failed, __remove_pages() == %d\n", __func__,
-			ret);
-
-	return ret;
-}
-#endif
 #endif /* CONFIG_MEMORY_HOTPLUG */

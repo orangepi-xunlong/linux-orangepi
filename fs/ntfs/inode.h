@@ -239,7 +239,7 @@ typedef struct {
  */
 static inline ntfs_inode *NTFS_I(struct inode *inode)
 {
-	return (ntfs_inode *)container_of(inode, big_ntfs_inode, vfs_inode);
+	return (ntfs_inode *)list_entry(inode, big_ntfs_inode, vfs_inode);
 }
 
 static inline struct inode *VFS_I(ntfs_inode *ni)
@@ -315,10 +315,6 @@ static inline void ntfs_commit_inode(struct inode *vi)
 		__ntfs_write_inode(vi, 1);
 	return;
 }
-
-#else
-
-static inline void ntfs_truncate_vfs(struct inode *vi) {}
 
 #endif /* NTFS_RW */
 

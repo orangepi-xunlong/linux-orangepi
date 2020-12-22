@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -48,41 +48,16 @@
 #define _COMPONENT          ACPI_TABLES
 ACPI_MODULE_NAME("tbxfroot")
 
-/*******************************************************************************
- *
- * FUNCTION:    acpi_tb_get_rsdp_length
- *
- * PARAMETERS:  rsdp                - Pointer to RSDP
- *
- * RETURN:      Table length
- *
- * DESCRIPTION: Get the length of the RSDP
- *
- ******************************************************************************/
-u32 acpi_tb_get_rsdp_length(struct acpi_table_rsdp *rsdp)
-{
+/* Local prototypes */
+static u8 *acpi_tb_scan_memory_for_rsdp(u8 * start_address, u32 length);
 
-	if (!ACPI_VALIDATE_RSDP_SIG(rsdp->signature)) {
-
-		/* BAD Signature */
-
-		return (0);
-	}
-
-	/* "Length" field is available if table version >= 2 */
-
-	if (rsdp->revision >= 2) {
-		return (rsdp->length);
-	} else {
-		return (ACPI_RSDP_CHECKSUM_LENGTH);
-	}
-}
+static acpi_status acpi_tb_validate_rsdp(struct acpi_table_rsdp *rsdp);
 
 /*******************************************************************************
  *
  * FUNCTION:    acpi_tb_validate_rsdp
  *
- * PARAMETERS:  rsdp                - Pointer to unvalidated RSDP
+ * PARAMETERS:  Rsdp                - Pointer to unvalidated RSDP
  *
  * RETURN:      Status
  *
@@ -90,8 +65,9 @@ u32 acpi_tb_get_rsdp_length(struct acpi_table_rsdp *rsdp)
  *
  ******************************************************************************/
 
-acpi_status acpi_tb_validate_rsdp(struct acpi_table_rsdp *rsdp)
+static acpi_status acpi_tb_validate_rsdp(struct acpi_table_rsdp *rsdp)
 {
+	ACPI_FUNCTION_ENTRY();
 
 	/*
 	 * The signature and checksum must both be correct
@@ -99,7 +75,8 @@ acpi_status acpi_tb_validate_rsdp(struct acpi_table_rsdp *rsdp)
 	 * Note: Sometimes there exists more than one RSDP in memory; the valid
 	 * RSDP has a valid checksum, all others have an invalid checksum.
 	 */
-	if (!ACPI_VALIDATE_RSDP_SIG(rsdp->signature)) {
+	if (ACPI_STRNCMP((char *)rsdp, ACPI_SIG_RSDP,
+			 sizeof(ACPI_SIG_RSDP) - 1) != 0) {
 
 		/* Nope, BAD Signature */
 
@@ -130,10 +107,10 @@ acpi_status acpi_tb_validate_rsdp(struct acpi_table_rsdp *rsdp)
  *
  * RETURN:      Status, RSDP physical address
  *
- * DESCRIPTION: Search lower 1Mbyte of memory for the root system descriptor
- *              pointer structure. If it is found, set *RSDP to point to it.
+ * DESCRIPTION: Search lower 1_mbyte of memory for the root system descriptor
+ *              pointer structure.  If it is found, set *RSDP to point to it.
  *
- * NOTE1:       The RSDP must be either in the first 1K of the Extended
+ * NOTE1:       The RSDP must be either in the first 1_k of the Extended
  *              BIOS Data Area or between E0000 and FFFFF (From ACPI Spec.)
  *              Only a 32-bit physical address is necessary.
  *
@@ -142,8 +119,7 @@ acpi_status acpi_tb_validate_rsdp(struct acpi_table_rsdp *rsdp)
  *
  ******************************************************************************/
 
-acpi_status ACPI_INIT_FUNCTION
-acpi_find_root_pointer(acpi_physical_address *table_address)
+acpi_status acpi_find_root_pointer(acpi_size *table_address)
 {
 	u8 *table_ptr;
 	u8 *mem_rover;
@@ -176,7 +152,7 @@ acpi_find_root_pointer(acpi_physical_address *table_address)
 	if (physical_address > 0x400) {
 		/*
 		 * 1b) Search EBDA paragraphs (EBDA is required to be a
-		 *     minimum of 1K length)
+		 *     minimum of 1_k length)
 		 */
 		table_ptr = acpi_os_map_memory((acpi_physical_address)
 					       physical_address,
@@ -201,8 +177,7 @@ acpi_find_root_pointer(acpi_physical_address *table_address)
 			physical_address +=
 			    (u32) ACPI_PTR_DIFF(mem_rover, table_ptr);
 
-			*table_address =
-			    (acpi_physical_address)physical_address;
+			*table_address = physical_address;
 			return_ACPI_STATUS(AE_OK);
 		}
 	}
@@ -235,31 +210,29 @@ acpi_find_root_pointer(acpi_physical_address *table_address)
 		    (ACPI_HI_RSDP_WINDOW_BASE +
 		     ACPI_PTR_DIFF(mem_rover, table_ptr));
 
-		*table_address = (acpi_physical_address)physical_address;
+		*table_address = physical_address;
 		return_ACPI_STATUS(AE_OK);
 	}
 
 	/* A valid RSDP was not found */
 
-	ACPI_BIOS_ERROR((AE_INFO, "A valid RSDP was not found"));
+	ACPI_ERROR((AE_INFO, "A valid RSDP was not found"));
 	return_ACPI_STATUS(AE_NOT_FOUND);
 }
-
-ACPI_EXPORT_SYMBOL_INIT(acpi_find_root_pointer)
 
 /*******************************************************************************
  *
  * FUNCTION:    acpi_tb_scan_memory_for_rsdp
  *
  * PARAMETERS:  start_address       - Starting pointer for search
- *              length              - Maximum length to search
+ *              Length              - Maximum length to search
  *
  * RETURN:      Pointer to the RSDP if found, otherwise NULL.
  *
  * DESCRIPTION: Search a block of memory for the RSDP signature
  *
  ******************************************************************************/
-u8 *acpi_tb_scan_memory_for_rsdp(u8 *start_address, u32 length)
+static u8 *acpi_tb_scan_memory_for_rsdp(u8 * start_address, u32 length)
 {
 	acpi_status status;
 	u8 *mem_rover;

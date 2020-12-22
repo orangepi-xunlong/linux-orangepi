@@ -13,11 +13,12 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
+#include <linux/rcupdate.h>
 #include <linux/file.h>
 #include <linux/slab.h>
 
 #include "test.h"
-#include "vhost.h"
+#include "vhost.c"
 
 /* Max number of bytes transferred before requeueing the job.
  * Using this limit prevents one virtqueue from starving others. */
@@ -37,23 +38,21 @@ struct vhost_test {
  * read-size critical section for our kind of RCU. */
 static void handle_vq(struct vhost_test *n)
 {
-	struct vhost_virtqueue *vq = &n->vqs[VHOST_TEST_VQ];
+	struct vhost_virtqueue *vq = &n->dev.vqs[VHOST_TEST_VQ];
 	unsigned out, in;
 	int head;
 	size_t len, total_len = 0;
 	void *private;
 
-	mutex_lock(&vq->mutex);
-	private = vq->private_data;
-	if (!private) {
-		mutex_unlock(&vq->mutex);
+	private = rcu_dereference_check(vq->private_data, 1);
+	if (!private)
 		return;
-	}
 
+	mutex_lock(&vq->mutex);
 	vhost_disable_notify(&n->dev, vq);
 
 	for (;;) {
-		head = vhost_get_vq_desc(vq, vq->iov,
+		head = vhost_get_vq_desc(&n->dev, vq, vq->iov,
 					 ARRAY_SIZE(vq->iov),
 					 &out, &in,
 					 NULL, NULL);
@@ -103,20 +102,18 @@ static int vhost_test_open(struct inode *inode, struct file *f)
 {
 	struct vhost_test *n = kmalloc(sizeof *n, GFP_KERNEL);
 	struct vhost_dev *dev;
-	struct vhost_virtqueue **vqs;
+	int r;
 
 	if (!n)
 		return -ENOMEM;
-	vqs = kmalloc(VHOST_TEST_VQ_MAX * sizeof(*vqs), GFP_KERNEL);
-	if (!vqs) {
-		kfree(n);
-		return -ENOMEM;
-	}
 
 	dev = &n->dev;
-	vqs[VHOST_TEST_VQ] = &n->vqs[VHOST_TEST_VQ];
 	n->vqs[VHOST_TEST_VQ].handle_kick = handle_vq_kick;
-	vhost_dev_init(dev, vqs, VHOST_TEST_VQ_MAX);
+	r = vhost_dev_init(dev, n->vqs, VHOST_TEST_VQ_MAX);
+	if (r < 0) {
+		kfree(n);
+		return r;
+	}
 
 	f->private_data = n;
 
@@ -129,8 +126,9 @@ static void *vhost_test_stop_vq(struct vhost_test *n,
 	void *private;
 
 	mutex_lock(&vq->mutex);
-	private = vq->private_data;
-	vq->private_data = NULL;
+	private = rcu_dereference_protected(vq->private_data,
+					 lockdep_is_held(&vq->mutex));
+	rcu_assign_pointer(vq->private_data, NULL);
 	mutex_unlock(&vq->mutex);
 	return private;
 }
@@ -142,7 +140,7 @@ static void vhost_test_stop(struct vhost_test *n, void **privatep)
 
 static void vhost_test_flush_vq(struct vhost_test *n, int index)
 {
-	vhost_poll_flush(&n->vqs[index].poll);
+	vhost_poll_flush(&n->dev.vqs[index].poll);
 }
 
 static void vhost_test_flush(struct vhost_test *n)
@@ -193,10 +191,11 @@ static long vhost_test_run(struct vhost_test *n, int test)
 		priv = test ? n : NULL;
 
 		/* start polling new socket */
-		oldpriv = vq->private_data;
-		vq->private_data = priv;
+		oldpriv = rcu_dereference_protected(vq->private_data,
+						    lockdep_is_held(&vq->mutex));
+		rcu_assign_pointer(vq->private_data, priv);
 
-		r = vhost_vq_init_access(&n->vqs[index]);
+		r = vhost_init_used(&n->vqs[index]);
 
 		mutex_unlock(&vq->mutex);
 
@@ -220,20 +219,13 @@ static long vhost_test_reset_owner(struct vhost_test *n)
 {
 	void *priv = NULL;
 	long err;
-	struct vhost_umem *umem;
-
 	mutex_lock(&n->dev.mutex);
 	err = vhost_dev_check_owner(&n->dev);
 	if (err)
 		goto done;
-	umem = vhost_dev_reset_owner_prepare();
-	if (!umem) {
-		err = -ENOMEM;
-		goto done;
-	}
 	vhost_test_stop(n, &priv);
 	vhost_test_flush(n);
-	vhost_dev_reset_owner(&n->dev, umem);
+	err = vhost_dev_reset_owner(&n->dev);
 done:
 	mutex_unlock(&n->dev.mutex);
 	return err;
@@ -241,18 +233,15 @@ done:
 
 static int vhost_test_set_features(struct vhost_test *n, u64 features)
 {
-	struct vhost_virtqueue *vq;
-
 	mutex_lock(&n->dev.mutex);
 	if ((features & (1 << VHOST_F_LOG_ALL)) &&
 	    !vhost_log_access_ok(&n->dev)) {
 		mutex_unlock(&n->dev.mutex);
 		return -EFAULT;
 	}
-	vq = &n->vqs[VHOST_TEST_VQ];
-	mutex_lock(&vq->mutex);
-	vq->acked_features = features;
-	mutex_unlock(&vq->mutex);
+	n->dev.acked_features = features;
+	smp_wmb();
+	vhost_test_flush(n);
 	mutex_unlock(&n->dev.mutex);
 	return 0;
 }
@@ -277,21 +266,16 @@ static long vhost_test_ioctl(struct file *f, unsigned int ioctl,
 			return -EFAULT;
 		return 0;
 	case VHOST_SET_FEATURES:
-		printk(KERN_ERR "1\n");
 		if (copy_from_user(&features, featurep, sizeof features))
 			return -EFAULT;
-		printk(KERN_ERR "2\n");
 		if (features & ~VHOST_FEATURES)
 			return -EOPNOTSUPP;
-		printk(KERN_ERR "3\n");
 		return vhost_test_set_features(n, features);
 	case VHOST_RESET_OWNER:
 		return vhost_test_reset_owner(n);
 	default:
 		mutex_lock(&n->dev.mutex);
-		r = vhost_dev_ioctl(&n->dev, ioctl, argp);
-                if (r == -ENOIOCTLCMD)
-                        r = vhost_vring_ioctl(&n->dev, ioctl, argp);
+		r = vhost_dev_ioctl(&n->dev, ioctl, arg);
 		vhost_test_flush(n);
 		mutex_unlock(&n->dev.mutex);
 		return r;
@@ -322,7 +306,18 @@ static struct miscdevice vhost_test_misc = {
 	"vhost-test",
 	&vhost_test_fops,
 };
-module_misc_device(vhost_test_misc);
+
+static int vhost_test_init(void)
+{
+	return misc_register(&vhost_test_misc);
+}
+module_init(vhost_test_init);
+
+static void vhost_test_exit(void)
+{
+	misc_deregister(&vhost_test_misc);
+}
+module_exit(vhost_test_exit);
 
 MODULE_VERSION("0.0.1");
 MODULE_LICENSE("GPL v2");

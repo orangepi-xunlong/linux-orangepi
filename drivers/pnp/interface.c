@@ -203,8 +203,8 @@ static void pnp_print_option(pnp_info_buffer_t * buffer, char *space,
 	}
 }
 
-static ssize_t options_show(struct device *dmdev, struct device_attribute *attr,
-			    char *buf)
+static ssize_t pnp_show_options(struct device *dmdev,
+				struct device_attribute *attr, char *buf)
 {
 	struct pnp_dev *dev = to_pnp_dev(dmdev);
 	pnp_info_buffer_t *buffer;
@@ -241,10 +241,10 @@ static ssize_t options_show(struct device *dmdev, struct device_attribute *attr,
 	kfree(buffer);
 	return ret;
 }
-static DEVICE_ATTR_RO(options);
 
-static ssize_t resources_show(struct device *dmdev,
-			      struct device_attribute *attr, char *buf)
+static ssize_t pnp_show_current_resources(struct device *dmdev,
+					  struct device_attribute *attr,
+					  char *buf)
 {
 	struct pnp_dev *dev = to_pnp_dev(dmdev);
 	pnp_info_buffer_t *buffer;
@@ -298,46 +298,14 @@ static ssize_t resources_show(struct device *dmdev,
 	return ret;
 }
 
-static char *pnp_get_resource_value(char *buf,
-				    unsigned long type,
-				    resource_size_t *start,
-				    resource_size_t *end,
-				    unsigned long *flags)
-{
-	if (start)
-		*start = 0;
-	if (end)
-		*end = 0;
-	if (flags)
-		*flags = 0;
-
-	/* TBD: allow for disabled resources */
-
-	buf = skip_spaces(buf);
-	if (start) {
-		*start = simple_strtoull(buf, &buf, 0);
-		if (end) {
-			buf = skip_spaces(buf);
-			if (*buf == '-') {
-				buf = skip_spaces(buf + 1);
-				*end = simple_strtoull(buf, &buf, 0);
-			} else
-				*end = *start;
-		}
-	}
-
-	/* TBD: allow for additional flags, e.g., IORESOURCE_WINDOW */
-
-	return buf;
-}
-
-static ssize_t resources_store(struct device *dmdev,
-			       struct device_attribute *attr, const char *ubuf,
-			       size_t count)
+static ssize_t pnp_set_current_resources(struct device *dmdev,
+					 struct device_attribute *attr,
+					 const char *ubuf, size_t count)
 {
 	struct pnp_dev *dev = to_pnp_dev(dmdev);
 	char *buf = (void *)ubuf;
 	int retval = 0;
+	resource_size_t start, end;
 
 	if (dev->status & PNP_ATTACHED) {
 		retval = -EBUSY;
@@ -346,45 +314,41 @@ static ssize_t resources_store(struct device *dmdev,
 	}
 
 	buf = skip_spaces(buf);
-	if (!strncasecmp(buf, "disable", 7)) {
+	if (!strnicmp(buf, "disable", 7)) {
 		retval = pnp_disable_dev(dev);
 		goto done;
 	}
-	if (!strncasecmp(buf, "activate", 8)) {
+	if (!strnicmp(buf, "activate", 8)) {
 		retval = pnp_activate_dev(dev);
 		goto done;
 	}
-	if (!strncasecmp(buf, "fill", 4)) {
+	if (!strnicmp(buf, "fill", 4)) {
 		if (dev->active)
 			goto done;
 		retval = pnp_auto_config_dev(dev);
 		goto done;
 	}
-	if (!strncasecmp(buf, "auto", 4)) {
+	if (!strnicmp(buf, "auto", 4)) {
 		if (dev->active)
 			goto done;
 		pnp_init_resources(dev);
 		retval = pnp_auto_config_dev(dev);
 		goto done;
 	}
-	if (!strncasecmp(buf, "clear", 5)) {
+	if (!strnicmp(buf, "clear", 5)) {
 		if (dev->active)
 			goto done;
 		pnp_init_resources(dev);
 		goto done;
 	}
-	if (!strncasecmp(buf, "get", 3)) {
+	if (!strnicmp(buf, "get", 3)) {
 		mutex_lock(&pnp_res_mutex);
 		if (pnp_can_read(dev))
 			dev->protocol->get(dev);
 		mutex_unlock(&pnp_res_mutex);
 		goto done;
 	}
-	if (!strncasecmp(buf, "set", 3)) {
-		resource_size_t start;
-		resource_size_t end;
-		unsigned long flags;
-
+	if (!strnicmp(buf, "set", 3)) {
 		if (dev->active)
 			goto done;
 		buf += 3;
@@ -392,38 +356,43 @@ static ssize_t resources_store(struct device *dmdev,
 		mutex_lock(&pnp_res_mutex);
 		while (1) {
 			buf = skip_spaces(buf);
-			if (!strncasecmp(buf, "io", 2)) {
-				buf = pnp_get_resource_value(buf + 2,
-							     IORESOURCE_IO,
-							     &start, &end,
-							     &flags);
-				pnp_add_io_resource(dev, start, end, flags);
-			} else if (!strncasecmp(buf, "mem", 3)) {
-				buf = pnp_get_resource_value(buf + 3,
-							     IORESOURCE_MEM,
-							     &start, &end,
-							     &flags);
-				pnp_add_mem_resource(dev, start, end, flags);
-			} else if (!strncasecmp(buf, "irq", 3)) {
-				buf = pnp_get_resource_value(buf + 3,
-							     IORESOURCE_IRQ,
-							     &start, NULL,
-							     &flags);
-				pnp_add_irq_resource(dev, start, flags);
-			} else if (!strncasecmp(buf, "dma", 3)) {
-				buf = pnp_get_resource_value(buf + 3,
-							     IORESOURCE_DMA,
-							     &start, NULL,
-							     &flags);
-				pnp_add_dma_resource(dev, start, flags);
-			} else if (!strncasecmp(buf, "bus", 3)) {
-				buf = pnp_get_resource_value(buf + 3,
-							     IORESOURCE_BUS,
-							     &start, &end,
-							     NULL);
-				pnp_add_bus_resource(dev, start, end);
-			} else
-				break;
+			if (!strnicmp(buf, "io", 2)) {
+				buf = skip_spaces(buf + 2);
+				start = simple_strtoul(buf, &buf, 0);
+				buf = skip_spaces(buf);
+				if (*buf == '-') {
+					buf = skip_spaces(buf + 1);
+					end = simple_strtoul(buf, &buf, 0);
+				} else
+					end = start;
+				pnp_add_io_resource(dev, start, end, 0);
+				continue;
+			}
+			if (!strnicmp(buf, "mem", 3)) {
+				buf = skip_spaces(buf + 3);
+				start = simple_strtoul(buf, &buf, 0);
+				buf = skip_spaces(buf);
+				if (*buf == '-') {
+					buf = skip_spaces(buf + 1);
+					end = simple_strtoul(buf, &buf, 0);
+				} else
+					end = start;
+				pnp_add_mem_resource(dev, start, end, 0);
+				continue;
+			}
+			if (!strnicmp(buf, "irq", 3)) {
+				buf = skip_spaces(buf + 3);
+				start = simple_strtoul(buf, &buf, 0);
+				pnp_add_irq_resource(dev, start, 0);
+				continue;
+			}
+			if (!strnicmp(buf, "dma", 3)) {
+				buf = skip_spaces(buf + 3);
+				start = simple_strtoul(buf, &buf, 0);
+				pnp_add_dma_resource(dev, start, 0);
+				continue;
+			}
+			break;
 		}
 		mutex_unlock(&pnp_res_mutex);
 		goto done;
@@ -434,10 +403,9 @@ done:
 		return retval;
 	return count;
 }
-static DEVICE_ATTR_RW(resources);
 
-static ssize_t id_show(struct device *dmdev, struct device_attribute *attr,
-		       char *buf)
+static ssize_t pnp_show_current_ids(struct device *dmdev,
+				    struct device_attribute *attr, char *buf)
 {
 	char *str = buf;
 	struct pnp_dev *dev = to_pnp_dev(dmdev);
@@ -449,20 +417,12 @@ static ssize_t id_show(struct device *dmdev, struct device_attribute *attr,
 	}
 	return (str - buf);
 }
-static DEVICE_ATTR_RO(id);
 
-static struct attribute *pnp_dev_attrs[] = {
-	&dev_attr_resources.attr,
-	&dev_attr_options.attr,
-	&dev_attr_id.attr,
-	NULL,
-};
-
-static const struct attribute_group pnp_dev_group = {
-	.attrs = pnp_dev_attrs,
-};
-
-const struct attribute_group *pnp_dev_groups[] = {
-	&pnp_dev_group,
-	NULL,
+struct device_attribute pnp_interface_attrs[] = {
+	__ATTR(resources, S_IRUGO | S_IWUSR,
+		   pnp_show_current_resources,
+		   pnp_set_current_resources),
+	__ATTR(options, S_IRUGO, pnp_show_options, NULL),
+	__ATTR(id, S_IRUGO, pnp_show_current_ids, NULL),
+	__ATTR_NULL,
 };

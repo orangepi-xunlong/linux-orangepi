@@ -31,7 +31,8 @@
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/jiffies.h>
-#include <linux/fixp-arith.h>
+
+#include "fixp-arith.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Anssi Hannula <anssi.hannula@gmail.com>");
@@ -72,14 +73,12 @@ static const struct ff_envelope *get_envelope(const struct ff_effect *effect)
 	static const struct ff_envelope empty_envelope;
 
 	switch (effect->type) {
-	case FF_PERIODIC:
-		return &effect->u.periodic.envelope;
-
-	case FF_CONSTANT:
-		return &effect->u.constant.envelope;
-
-	default:
-		return &empty_envelope;
+		case FF_PERIODIC:
+			return &effect->u.periodic.envelope;
+		case FF_CONSTANT:
+			return &effect->u.constant.envelope;
+		default:
+			return &empty_envelope;
 	}
 }
 
@@ -178,7 +177,7 @@ static int apply_envelope(struct ml_effect_state *state, int value,
 			 value, envelope->attack_level);
 		time_from_level = jiffies_to_msecs(now - state->play_at);
 		time_of_envelope = envelope->attack_length;
-		envelope_level = min_t(u16, envelope->attack_level, 0x7fff);
+		envelope_level = min_t(__s16, envelope->attack_level, 0x7fff);
 
 	} else if (envelope->fade_length && effect->replay.length &&
 		   time_after(now,
@@ -186,7 +185,7 @@ static int apply_envelope(struct ml_effect_state *state, int value,
 		   time_before(now, state->stop_at)) {
 		time_from_level = jiffies_to_msecs(state->stop_at - now);
 		time_of_envelope = envelope->fade_length;
-		envelope_level = min_t(u16, envelope->fade_level, 0x7fff);
+		envelope_level = min_t(__s16, envelope->fade_level, 0x7fff);
 	} else
 		return value;
 
@@ -237,18 +236,6 @@ static u16 ml_calculate_direction(u16 direction, u16 force,
 		(force + new_force)) << 1;
 }
 
-#define FRAC_N 8
-static inline s16 fixp_new16(s16 a)
-{
-	return ((s32)a) >> (16 - FRAC_N);
-}
-
-static inline s16 fixp_mult(s16 a, s16 b)
-{
-	a = ((s32)a * 0x100) / 0x7fff;
-	return ((s32)(a * b)) >> FRAC_N;
-}
-
 /*
  * Combine two effects and apply gain.
  */
@@ -259,7 +246,7 @@ static void ml_combine_effects(struct ff_effect *effect,
 	struct ff_effect *new = state->effect;
 	unsigned int strong, weak, i;
 	int x, y;
-	s16 level;
+	fixp_t level;
 
 	switch (new->type) {
 	case FF_CONSTANT:
@@ -267,8 +254,8 @@ static void ml_combine_effects(struct ff_effect *effect,
 		level = fixp_new16(apply_envelope(state,
 					new->u.constant.level,
 					&new->u.constant.envelope));
-		x = fixp_mult(fixp_sin16(i), level) * gain / 0xffff;
-		y = fixp_mult(-fixp_cos16(i), level) * gain / 0xffff;
+		x = fixp_mult(fixp_sin(i), level) * gain / 0xffff;
+		y = fixp_mult(-fixp_cos(i), level) * gain / 0xffff;
 		/*
 		 * here we abuse ff_ramp to hold x and y of constant force
 		 * If in future any driver wants something else than x and y

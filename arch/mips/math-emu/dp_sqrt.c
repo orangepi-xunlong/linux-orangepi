@@ -5,6 +5,8 @@
  * MIPS floating point support
  * Copyright (C) 1994-2000 Algorithmics Ltd.
  *
+ * ########################################################################
+ *
  *  This program is free software; you can distribute it and/or modify it
  *  under the terms of the GNU General Public License (Version 2) as
  *  published by the Free Software Foundation.
@@ -16,8 +18,11 @@
  *
  *  You should have received a copy of the GNU General Public License along
  *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA.
+ *  59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
+ *
+ * ########################################################################
  */
+
 
 #include "ieee754dp.h"
 
@@ -29,48 +34,44 @@ static const unsigned table[] = {
 	1742, 661, 130
 };
 
-union ieee754dp ieee754dp_sqrt(union ieee754dp x)
+ieee754dp ieee754dp_sqrt(ieee754dp x)
 {
 	struct _ieee754_csr oldcsr;
-	union ieee754dp y, z, t;
+	ieee754dp y, z, t;
 	unsigned scalx, yh;
 	COMPXDP;
 
 	EXPLODEXDP;
-	ieee754_clearcx();
+	CLEARCX;
 	FLUSHXDP;
 
 	/* x == INF or NAN? */
 	switch (xc) {
-	case IEEE754_CLASS_SNAN:
-		return ieee754dp_nanxcpt(x);
-
 	case IEEE754_CLASS_QNAN:
 		/* sqrt(Nan) = Nan */
-		return x;
-
+		return ieee754dp_nanxcpt(x, "sqrt");
+	case IEEE754_CLASS_SNAN:
+		SETCX(IEEE754_INVALID_OPERATION);
+		return ieee754dp_nanxcpt(ieee754dp_indef(), "sqrt");
 	case IEEE754_CLASS_ZERO:
 		/* sqrt(0) = 0 */
 		return x;
-
 	case IEEE754_CLASS_INF:
 		if (xs) {
 			/* sqrt(-Inf) = Nan */
-			ieee754_setcx(IEEE754_INVALID_OPERATION);
-			return ieee754dp_indef();
+			SETCX(IEEE754_INVALID_OPERATION);
+			return ieee754dp_nanxcpt(ieee754dp_indef(), "sqrt");
 		}
 		/* sqrt(+Inf) = Inf */
 		return x;
-
 	case IEEE754_CLASS_DNORM:
 		DPDNORMX;
 		/* fall through */
-
 	case IEEE754_CLASS_NORM:
 		if (xs) {
 			/* sqrt(-x) = Nan */
-			ieee754_setcx(IEEE754_INVALID_OPERATION);
-			return ieee754dp_indef();
+			SETCX(IEEE754_INVALID_OPERATION);
+			return ieee754dp_nanxcpt(ieee754dp_indef(), "sqrt");
 		}
 		break;
 	}
@@ -79,14 +80,14 @@ union ieee754dp ieee754dp_sqrt(union ieee754dp x)
 	oldcsr = ieee754_csr;
 	ieee754_csr.mx &= ~IEEE754_INEXACT;
 	ieee754_csr.sx &= ~IEEE754_INEXACT;
-	ieee754_csr.rm = FPU_CSR_RN;
+	ieee754_csr.rm = IEEE754_RN;
 
 	/* adjust exponent to prevent overflow */
 	scalx = 0;
 	if (xe > 512) {		/* x > 2**-512? */
 		xe -= 512;	/* x = x / 2**512 */
 		scalx += 256;
-	} else if (xe < -512) { /* x < 2**-512? */
+	} else if (xe < -512) {	/* x < 2**-512? */
 		xe += 512;	/* x = x * 2**512 */
 		scalx -= 256;
 	}
@@ -107,21 +108,21 @@ union ieee754dp ieee754dp_sqrt(union ieee754dp x)
 	y.bits &= 0xffffffff00000000LL;
 
 	/* triple to almost 56 sig. bits: y ~= sqrt(x) to within 1 ulp */
-	/* t=y*y; z=t;	pt[n0]+=0x00100000; t+=z; z=(x-z)*y; */
+	/* t=y*y; z=t;  pt[n0]+=0x00100000; t+=z; z=(x-z)*y; */
 	z = t = ieee754dp_mul(y, y);
-	t.bexp += 0x001;
+	t.parts.bexp += 0x001;
 	t = ieee754dp_add(t, z);
 	z = ieee754dp_mul(ieee754dp_sub(x, z), y);
 
-	/* t=z/(t+x) ;	pt[n0]+=0x00100000; y+=t; */
+	/* t=z/(t+x) ;  pt[n0]+=0x00100000; y+=t; */
 	t = ieee754dp_div(z, ieee754dp_add(t, x));
-	t.bexp += 0x001;
+	t.parts.bexp += 0x001;
 	y = ieee754dp_add(y, t);
 
 	/* twiddle last bit to force y correctly rounded */
 
 	/* set RZ, clear INEX flag */
-	ieee754_csr.rm = FPU_CSR_RZ;
+	ieee754_csr.rm = IEEE754_RZ;
 	ieee754_csr.sx &= ~IEEE754_INEXACT;
 
 	/* t=x/y; ...chopped quotient, possibly inexact */
@@ -138,10 +139,10 @@ union ieee754dp ieee754dp_sqrt(union ieee754dp x)
 		oldcsr.sx |= IEEE754_INEXACT;
 
 		switch (oldcsr.rm) {
-		case FPU_CSR_RU:
+		case IEEE754_RP:
 			y.bits += 1;
 			/* drop through */
-		case FPU_CSR_RN:
+		case IEEE754_RN:
 			t.bits += 1;
 			break;
 		}
@@ -154,7 +155,7 @@ union ieee754dp ieee754dp_sqrt(union ieee754dp x)
 	}
 
 	/* py[n0]=py[n0]+scalx; ...scale back y */
-	y.bexp += scalx;
+	y.parts.bexp += scalx;
 
 	/* restore rounding mode, possibly set inexact */
 	ieee754_csr = oldcsr;

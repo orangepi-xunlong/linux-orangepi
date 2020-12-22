@@ -11,7 +11,6 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <linux/nodemask.h>
 #include <asm/io.h>
 #include <asm/sn/sn_sal.h>
@@ -102,18 +101,18 @@ get_fit_entry(unsigned long nasid, int index, unsigned long *fentry,
 /*
  * These two routines display the FIT table for each node.
  */
-static void dump_fit_entry(struct seq_file *m, unsigned long *fentry)
+static int dump_fit_entry(char *page, unsigned long *fentry)
 {
 	unsigned type;
 
 	type = FIT_TYPE(fentry[1]);
-	seq_printf(m, "%02x %-25s %x.%02x %016lx %u\n",
-		   type,
-		   fit_type_name(type),
-		   FIT_MAJOR(fentry[1]), FIT_MINOR(fentry[1]),
-		   fentry[0],
-		   /* mult by sixteen to get size in bytes */
-		   (unsigned)(fentry[1] & 0xffffff) * 16);
+	return sprintf(page, "%02x %-25s %x.%02x %016lx %u\n",
+		       type,
+		       fit_type_name(type),
+		       FIT_MAJOR(fentry[1]), FIT_MINOR(fentry[1]),
+		       fentry[0],
+		       /* mult by sixteen to get size in bytes */
+		       (unsigned)(fentry[1] & 0xffffff) * 16);
 }
 
 
@@ -125,39 +124,31 @@ static void dump_fit_entry(struct seq_file *m, unsigned long *fentry)
  * OK except for 4kB pages (and no one is going to do that on SN
  * anyway).
  */
-static int proc_fit_show(struct seq_file *m, void *v)
+static int
+dump_fit(char *page, unsigned long nasid)
 {
-	unsigned long nasid = (unsigned long)m->private;
 	unsigned long fentry[2];
 	int index;
+	char *p;
 
+	p = page;
 	for (index=0;;index++) {
 		BUG_ON(index * 60 > PAGE_SIZE);
 		if (get_fit_entry(nasid, index, fentry, NULL, 0))
 			break;
-		dump_fit_entry(m, fentry);
+		p += dump_fit_entry(p, fentry);
 	}
-	return 0;
+
+	return p - page;
 }
 
-static int proc_fit_open(struct inode *inode, struct file *file)
+static int
+dump_version(char *page, unsigned long nasid)
 {
-	return single_open(file, proc_fit_show, PDE_DATA(inode));
-}
-
-static const struct file_operations proc_fit_fops = {
-	.open		= proc_fit_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int proc_version_show(struct seq_file *m, void *v)
-{
-	unsigned long nasid = (unsigned long)m->private;
 	unsigned long fentry[2];
 	char banner[128];
 	int index;
+	int len;
 
 	for (index = 0; ; index++) {
 		if (get_fit_entry(nasid, index, fentry, banner,
@@ -167,24 +158,56 @@ static int proc_version_show(struct seq_file *m, void *v)
 			break;
 	}
 
-	seq_printf(m, "%x.%02x\n", FIT_MAJOR(fentry[1]), FIT_MINOR(fentry[1]));
+	len = sprintf(page, "%x.%02x\n", FIT_MAJOR(fentry[1]),
+		      FIT_MINOR(fentry[1]));
+	page += len;
 
 	if (banner[0])
-		seq_printf(m, "%s\n", banner);
-	return 0;
+		len += snprintf(page, PAGE_SIZE-len, "%s\n", banner);
+
+	return len;
 }
 
-static int proc_version_open(struct inode *inode, struct file *file)
+/* same as in proc_misc.c */
+static int
+proc_calc_metrics(char *page, char **start, off_t off, int count, int *eof,
+		  int len)
 {
-	return single_open(file, proc_version_show, PDE_DATA(inode));
+	if (len <= off + count)
+		*eof = 1;
+	*start = page + off;
+	len -= off;
+	if (len > count)
+		len = count;
+	if (len < 0)
+		len = 0;
+	return len;
 }
 
-static const struct file_operations proc_version_fops = {
-	.open		= proc_version_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+static int
+read_version_entry(char *page, char **start, off_t off, int count, int *eof,
+		   void *data)
+{
+	int len;
+
+	/* data holds the NASID of the node */
+	len = dump_version(page, (unsigned long)data);
+	len = proc_calc_metrics(page, start, off, count, eof, len);
+	return len;
+}
+
+static int
+read_fit_entry(char *page, char **start, off_t off, int count, int *eof,
+	       void *data)
+{
+	int len;
+
+	/* data holds the NASID of the node */
+	len = dump_fit(page, (unsigned long)data);
+	len = proc_calc_metrics(page, start, off, count, eof, len);
+
+	return len;
+}
 
 /* module entry points */
 int __init prominfo_init(void);
@@ -193,39 +216,58 @@ void __exit prominfo_exit(void);
 module_init(prominfo_init);
 module_exit(prominfo_exit);
 
+static struct proc_dir_entry **proc_entries;
+static struct proc_dir_entry *sgi_prominfo_entry;
+
 #define NODE_NAME_LEN 11
 
 int __init prominfo_init(void)
 {
-	struct proc_dir_entry *sgi_prominfo_entry;
+	struct proc_dir_entry **entp;
 	cnodeid_t cnodeid;
+	unsigned long nasid;
+	int size;
+	char name[NODE_NAME_LEN];
 
 	if (!ia64_platform_is("sn2"))
 		return 0;
 
-	sgi_prominfo_entry = proc_mkdir("sgi_prominfo", NULL);
-	if (!sgi_prominfo_entry)
+	size = num_online_nodes() * sizeof(struct proc_dir_entry *);
+	proc_entries = kzalloc(size, GFP_KERNEL);
+	if (!proc_entries)
 		return -ENOMEM;
 
-	for_each_online_node(cnodeid) {
-		struct proc_dir_entry *dir;
-		unsigned long nasid;
-		char name[NODE_NAME_LEN];
+	sgi_prominfo_entry = proc_mkdir("sgi_prominfo", NULL);
 
+	entp = proc_entries;
+	for_each_online_node(cnodeid) {
 		sprintf(name, "node%d", cnodeid);
-		dir = proc_mkdir(name, sgi_prominfo_entry);
-		if (!dir)
-			continue;
+		*entp = proc_mkdir(name, sgi_prominfo_entry);
 		nasid = cnodeid_to_nasid(cnodeid);
-		proc_create_data("fit", 0, dir,
-				 &proc_fit_fops, (void *)nasid);
-		proc_create_data("version", 0, dir,
-				 &proc_version_fops, (void *)nasid);
+		create_proc_read_entry("fit", 0, *entp, read_fit_entry,
+					   (void *)nasid);
+		create_proc_read_entry("version", 0, *entp,
+					   read_version_entry, (void *)nasid);
+		entp++;
 	}
+
 	return 0;
 }
 
 void __exit prominfo_exit(void)
 {
-	remove_proc_subtree("sgi_prominfo", NULL);
+	struct proc_dir_entry **entp;
+	unsigned int cnodeid;
+	char name[NODE_NAME_LEN];
+
+	entp = proc_entries;
+	for_each_online_node(cnodeid) {
+		remove_proc_entry("fit", *entp);
+		remove_proc_entry("version", *entp);
+		sprintf(name, "node%d", cnodeid);
+		remove_proc_entry(name, sgi_prominfo_entry);
+		entp++;
+	}
+	remove_proc_entry("sgi_prominfo", NULL);
+	kfree(proc_entries);
 }

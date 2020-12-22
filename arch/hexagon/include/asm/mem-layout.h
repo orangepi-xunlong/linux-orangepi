@@ -1,7 +1,7 @@
 /*
  * Memory layout definitions for the Hexagon architecture
  *
- * Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -32,24 +32,15 @@
 #define PAGE_OFFSET			_AC(0xc0000000, UL)
 
 /*
- * Compiling for a platform that needs a crazy physical offset
- * (like if the memory starts at 1GB and up) means we need
- * an actual PHYS_OFFSET.  Should be set up in head.S.
+ * LOAD_ADDRESS is the physical/linear address of where in memory
+ * the kernel gets loaded. The 12 least significant bits must be zero (0)
+ * due to limitations on setting the EVB
+ *
  */
 
-#ifdef CONFIG_HEXAGON_PHYS_OFFSET
-#ifndef __ASSEMBLY__
-extern unsigned long	__phys_offset;
+#ifndef LOAD_ADDRESS
+#define LOAD_ADDRESS			0x00000000
 #endif
-#define PHYS_OFFSET	__phys_offset
-#endif
-
-#ifndef PHYS_OFFSET
-#define PHYS_OFFSET	0
-#endif
-
-#define PHYS_PFN_OFFSET	(PHYS_OFFSET >> PAGE_SHIFT)
-#define ARCH_PFN_OFFSET	PHYS_PFN_OFFSET
 
 #define TASK_SIZE			(PAGE_OFFSET)
 
@@ -64,7 +55,7 @@ enum fixed_addresses {
 	__end_of_fixed_addresses
 };
 
-#define MIN_KERNEL_SEG (PAGE_OFFSET >> PGDIR_SHIFT)   /* L1 shift is 22 bits */
+#define MIN_KERNEL_SEG 0x300   /* From 0xc0000000 */
 extern int max_kernel_seg;
 
 /*
@@ -72,7 +63,8 @@ extern int max_kernel_seg;
  * supposed to be based on the amount of physical memory available
  */
 
-#define VMALLOC_START ((unsigned long) __va(high_memory + VMALLOC_OFFSET))
+#define VMALLOC_START (PAGE_OFFSET + VMALLOC_OFFSET + \
+	(unsigned long)high_memory)
 
 /* Gap between physical ram and vmalloc space for guard purposes. */
 #define VMALLOC_OFFSET PAGE_SIZE

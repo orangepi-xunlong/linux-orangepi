@@ -13,36 +13,20 @@
 	};
 
 	clocks {
-		slow_xtal {
-			clock-frequency = <32768>;
-		};
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
 
-		main_xtal {
+		main_clock: clock@0 {
+			compatible = "atmel,osc", "fixed-clock";
 			clock-frequency = <12000000>;
 		};
 	};
 
 	ahb {
-		apb {
-			pinctrl@fffff400 {
-				1wire_cm {
-					pinctrl_1wire_cm: 1wire_cm-0 {
-						atmel,pins = <AT91_PIOB 18 AT91_PERIPH_GPIO AT91_PINCTRL_MULTI_DRIVE>; /* PB18 multidrive, conflicts with led */
-					};
-				};
-			};
-
-			rtc@fffffeb0 {
-				status = "okay";
-			};
-		};
-
 		nand0: nand@40000000 {
 			nand-bus-width = <8>;
-			nand-ecc-mode = "hw";
-			atmel,has-pmecc;	/* Enable PMECC */
-			atmel,pmecc-cap = <2>;
-			atmel,pmecc-sector-size = <512>;
+			nand-ecc-mode = "soft";
 			nand-on-flash-bbt;
 			status = "okay";
 
@@ -78,23 +62,13 @@
 
 		pb18 {
 			label = "pb18";
-			gpios = <&pioB 18 GPIO_ACTIVE_LOW>;
+			gpios = <&pioB 18 1>;
 			linux,default-trigger = "heartbeat";
 		};
 
 		pd21 {
 			label = "pd21";
-			gpios = <&pioD 21 GPIO_ACTIVE_HIGH>;
+			gpios = <&pioD 21 0>;
 		};
 	};
-
-	1wire_cm {
-		compatible = "w1-gpio";
-		gpios = <&pioB 18 GPIO_ACTIVE_HIGH>;
-		linux,open-drain;
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_1wire_cm>;
-		status = "okay";
-	};
-
 };

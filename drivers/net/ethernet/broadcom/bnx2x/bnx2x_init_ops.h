@@ -1,17 +1,15 @@
-/* bnx2x_init_ops.h: Qlogic Everest network driver.
+/* bnx2x_init_ops.h: Broadcom Everest network driver.
  *               Static functions needed during the initialization.
  *               This file is "included" in bnx2x_main.c.
  *
- * Copyright (c) 2007-2013 Broadcom Corporation
- * Copyright (c) 2014 QLogic Corporation
- All rights reserved
+ * Copyright (c) 2007-2012 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation.
  *
- * Maintained by: Ariel Elior <ariel.elior@qlogic.com>
- * Written by: Vladislav Zolotarov
+ * Maintained by: Eilon Greenstein <eilong@broadcom.com>
+ * Written by: Vladislav Zolotarov <vladz@broadcom.com>
  */
 
 #ifndef BNX2X_INIT_OPS_H
@@ -220,7 +218,7 @@ static void bnx2x_init_wr_zp(struct bnx2x *bp, u32 addr, u32 len,
 	/* gunzip_outlen is in dwords */
 	len = GUNZIP_OUTLEN(bp);
 	for (i = 0; i < len; i++)
-		((u32 *)GUNZIP_BUF(bp))[i] = (__force u32)
+		((u32 *)GUNZIP_BUF(bp))[i] =
 				cpu_to_le32(((u32 *)GUNZIP_BUF(bp))[i]);
 
 	bnx2x_write_big_buf_wb(bp, addr, len);
@@ -234,7 +232,7 @@ static void bnx2x_init_block(struct bnx2x *bp, u32 block, u32 stage)
 	u16 op_end =
 		INIT_OPS_OFFSETS(bp)[BLOCK_OPS_IDX(block, stage,
 						     STAGE_END)];
-	const union init_op *op;
+	union init_op *op;
 	u32 op_idx, op_type, addr, len;
 	const u32 *data, *data_base;
 
@@ -246,7 +244,7 @@ static void bnx2x_init_block(struct bnx2x *bp, u32 block, u32 stage)
 
 	for (op_idx = op_start; op_idx < op_end; op_idx++) {
 
-		op = (const union init_op *)&(INIT_OPS(bp)[op_idx]);
+		op = (union init_op *)&(INIT_OPS(bp)[op_idx]);
 		/* Get generic data */
 		op_type = op->raw.op;
 		addr = op->raw.offset;
@@ -650,25 +648,15 @@ static int bnx2x_ilt_client_mem_op(struct bnx2x *bp, int cli_num,
 	return rc;
 }
 
-static int bnx2x_ilt_mem_op_cnic(struct bnx2x *bp, u8 memop)
-{
-	int rc = 0;
-
-	if (CONFIGURE_NIC_MODE(bp))
-		rc = bnx2x_ilt_client_mem_op(bp, ILT_CLIENT_SRC, memop);
-	if (!rc)
-		rc = bnx2x_ilt_client_mem_op(bp, ILT_CLIENT_TM, memop);
-
-	return rc;
-}
-
 static int bnx2x_ilt_mem_op(struct bnx2x *bp, u8 memop)
 {
 	int rc = bnx2x_ilt_client_mem_op(bp, ILT_CLIENT_CDU, memop);
 	if (!rc)
 		rc = bnx2x_ilt_client_mem_op(bp, ILT_CLIENT_QM, memop);
-	if (!rc && CNIC_SUPPORT(bp) && !CONFIGURE_NIC_MODE(bp))
+	if (!rc)
 		rc = bnx2x_ilt_client_mem_op(bp, ILT_CLIENT_SRC, memop);
+	if (!rc)
+		rc = bnx2x_ilt_client_mem_op(bp, ILT_CLIENT_TM, memop);
 
 	return rc;
 }
@@ -793,19 +781,12 @@ static void bnx2x_ilt_client_id_init_op(struct bnx2x *bp,
 	bnx2x_ilt_client_init_op(bp, ilt_cli, initop);
 }
 
-static void bnx2x_ilt_init_op_cnic(struct bnx2x *bp, u8 initop)
-{
-	if (CONFIGURE_NIC_MODE(bp))
-		bnx2x_ilt_client_id_init_op(bp, ILT_CLIENT_SRC, initop);
-	bnx2x_ilt_client_id_init_op(bp, ILT_CLIENT_TM, initop);
-}
-
 static void bnx2x_ilt_init_op(struct bnx2x *bp, u8 initop)
 {
 	bnx2x_ilt_client_id_init_op(bp, ILT_CLIENT_CDU, initop);
 	bnx2x_ilt_client_id_init_op(bp, ILT_CLIENT_QM, initop);
-	if (CNIC_SUPPORT(bp) && !CONFIGURE_NIC_MODE(bp))
-		bnx2x_ilt_client_id_init_op(bp, ILT_CLIENT_SRC, initop);
+	bnx2x_ilt_client_id_init_op(bp, ILT_CLIENT_SRC, initop);
+	bnx2x_ilt_client_id_init_op(bp, ILT_CLIENT_TM, initop);
 }
 
 static void bnx2x_ilt_init_client_psz(struct bnx2x *bp, int cli_num,
@@ -909,6 +890,7 @@ static void bnx2x_qm_init_ptr_table(struct bnx2x *bp, int qm_cid_count,
 /****************************************************************************
 * SRC initializations
 ****************************************************************************/
+#ifdef BCM_CNIC
 /* called during init func stage */
 static void bnx2x_src_init_t2(struct bnx2x *bp, struct src_ent *t2,
 			      dma_addr_t t2_mapping, int src_cid_count)
@@ -933,4 +915,5 @@ static void bnx2x_src_init_t2(struct bnx2x *bp, struct src_ent *t2,
 		    U64_HI((u64)t2_mapping +
 			   (src_cid_count-1) * sizeof(struct src_ent)));
 }
+#endif
 #endif /* BNX2X_INIT_OPS_H */

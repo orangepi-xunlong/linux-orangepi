@@ -15,8 +15,6 @@ enum {
 	INET_ECN_MASK = 3,
 };
 
-extern int sysctl_tunnel_ecn_log;
-
 static inline int INET_ECN_is_ce(__u8 dsfield)
 {
 	return (dsfield & INET_ECN_MASK) == INET_ECN_CE;
@@ -111,25 +109,11 @@ static inline void ipv4_copy_dscp(unsigned int dscp, struct iphdr *inner)
 
 struct ipv6hdr;
 
-/* Note:
- * IP_ECN_set_ce() has to tweak IPV4 checksum when setting CE,
- * meaning both changes have no effect on skb->csum if/when CHECKSUM_COMPLETE
- * In IPv6 case, no checksum compensates the change in IPv6 header,
- * so we have to update skb->csum.
- */
-static inline int IP6_ECN_set_ce(struct sk_buff *skb, struct ipv6hdr *iph)
+static inline int IP6_ECN_set_ce(struct ipv6hdr *iph)
 {
-	__be32 from, to;
-
 	if (INET_ECN_is_not_ect(ipv6_get_dsfield(iph)))
 		return 0;
-
-	from = *(__be32 *)iph;
-	to = from | htonl(INET_ECN_CE << 20);
-	*(__be32 *)iph = to;
-	if (skb->ip_summed == CHECKSUM_COMPLETE)
-		skb->csum = csum_add(csum_sub(skb->csum, (__force __wsum)from),
-				     (__force __wsum)to);
+	*(__be32*)iph |= htonl(INET_ECN_CE << 20);
 	return 1;
 }
 
@@ -148,93 +132,17 @@ static inline int INET_ECN_set_ce(struct sk_buff *skb)
 {
 	switch (skb->protocol) {
 	case cpu_to_be16(ETH_P_IP):
-		if (skb_network_header(skb) + sizeof(struct iphdr) <=
-		    skb_tail_pointer(skb))
+		if (skb->network_header + sizeof(struct iphdr) <= skb->tail)
 			return IP_ECN_set_ce(ip_hdr(skb));
 		break;
 
 	case cpu_to_be16(ETH_P_IPV6):
-		if (skb_network_header(skb) + sizeof(struct ipv6hdr) <=
-		    skb_tail_pointer(skb))
-			return IP6_ECN_set_ce(skb, ipv6_hdr(skb));
+		if (skb->network_header + sizeof(struct ipv6hdr) <= skb->tail)
+			return IP6_ECN_set_ce(ipv6_hdr(skb));
 		break;
 	}
 
 	return 0;
 }
 
-/*
- * RFC 6040 4.2
- *  To decapsulate the inner header at the tunnel egress, a compliant
- *  tunnel egress MUST set the outgoing ECN field to the codepoint at the
- *  intersection of the appropriate arriving inner header (row) and outer
- *  header (column) in Figure 4
- *
- *      +---------+------------------------------------------------+
- *      |Arriving |            Arriving Outer Header               |
- *      |   Inner +---------+------------+------------+------------+
- *      |  Header | Not-ECT | ECT(0)     | ECT(1)     |     CE     |
- *      +---------+---------+------------+------------+------------+
- *      | Not-ECT | Not-ECT |Not-ECT(!!!)|Not-ECT(!!!)| <drop>(!!!)|
- *      |  ECT(0) |  ECT(0) | ECT(0)     | ECT(1)     |     CE     |
- *      |  ECT(1) |  ECT(1) | ECT(1) (!) | ECT(1)     |     CE     |
- *      |    CE   |      CE |     CE     |     CE(!!!)|     CE     |
- *      +---------+---------+------------+------------+------------+
- *
- *             Figure 4: New IP in IP Decapsulation Behaviour
- *
- *  returns 0 on success
- *          1 if something is broken and should be logged (!!! above)
- *          2 if packet should be dropped
- */
-static inline int INET_ECN_decapsulate(struct sk_buff *skb,
-				       __u8 outer, __u8 inner)
-{
-	if (INET_ECN_is_not_ect(inner)) {
-		switch (outer & INET_ECN_MASK) {
-		case INET_ECN_NOT_ECT:
-			return 0;
-		case INET_ECN_ECT_0:
-		case INET_ECN_ECT_1:
-			return 1;
-		case INET_ECN_CE:
-			return 2;
-		}
-	}
-
-	if (INET_ECN_is_ce(outer))
-		INET_ECN_set_ce(skb);
-
-	return 0;
-}
-
-static inline int IP_ECN_decapsulate(const struct iphdr *oiph,
-				     struct sk_buff *skb)
-{
-	__u8 inner;
-
-	if (skb->protocol == htons(ETH_P_IP))
-		inner = ip_hdr(skb)->tos;
-	else if (skb->protocol == htons(ETH_P_IPV6))
-		inner = ipv6_get_dsfield(ipv6_hdr(skb));
-	else
-		return 0;
-
-	return INET_ECN_decapsulate(skb, oiph->tos, inner);
-}
-
-static inline int IP6_ECN_decapsulate(const struct ipv6hdr *oipv6h,
-				      struct sk_buff *skb)
-{
-	__u8 inner;
-
-	if (skb->protocol == htons(ETH_P_IP))
-		inner = ip_hdr(skb)->tos;
-	else if (skb->protocol == htons(ETH_P_IPV6))
-		inner = ipv6_get_dsfield(ipv6_hdr(skb));
-	else
-		return 0;
-
-	return INET_ECN_decapsulate(skb, ipv6_get_dsfield(oipv6h), inner);
-}
 #endif

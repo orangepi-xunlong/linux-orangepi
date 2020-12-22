@@ -3,6 +3,11 @@
 
 #include <mach/hardware.h>
 
+/*
+ * Physical DRAM offset.
+ */
+#define PLAT_PHYS_OFFSET	UL(0x00000000)
+
 #ifndef __ASSEMBLY__
 
 #if defined(CONFIG_ARCH_IOP13XX)
@@ -11,12 +16,12 @@
 #define IOP13XX_PMMR_P_START (IOP13XX_PMMR_PHYS_MEM_BASE)
 #define IOP13XX_PMMR_P_END   (IOP13XX_PMMR_PHYS_MEM_BASE + IOP13XX_PMMR_SIZE)
 
-static inline dma_addr_t __virt_to_lbus(void __iomem *x)
+static inline dma_addr_t __virt_to_lbus(unsigned long x)
 {
 	return x + IOP13XX_PMMR_PHYS_MEM_BASE - IOP13XX_PMMR_VIRT_MEM_BASE;
 }
 
-static inline void __iomem *__lbus_to_virt(dma_addr_t x)
+static inline unsigned long __lbus_to_virt(dma_addr_t x)
 {
 	return x + IOP13XX_PMMR_VIRT_MEM_BASE - IOP13XX_PMMR_PHYS_MEM_BASE;
 }
@@ -33,23 +38,23 @@ static inline void __iomem *__lbus_to_virt(dma_addr_t x)
 
 #define __arch_dma_to_virt(dev, addr)					\
 	({								\
-		void * __virt;						\
+		unsigned long __virt;					\
 		dma_addr_t __dma = addr;				\
 		if (is_lbus_device(dev) && __is_lbus_dma(__dma))	\
 			__virt = __lbus_to_virt(__dma);			\
 		else							\
-			__virt = (void *)__phys_to_virt(__dma);		\
-		__virt;							\
+			__virt = __phys_to_virt(__dma);			\
+		(void *)__virt;						\
 	})
 
 #define __arch_virt_to_dma(dev, addr)					\
 	({								\
-		void * __virt = addr;					\
+		unsigned long __virt = (unsigned long)addr;		\
 		dma_addr_t __dma;					\
 		if (is_lbus_device(dev) && __is_lbus_virt(__virt))	\
 			__dma = __virt_to_lbus(__virt);			\
 		else							\
-			__dma = __virt_to_phys((unsigned long)__virt);	\
+			__dma = __virt_to_phys(__virt);			\
 		__dma;							\
 	})
 

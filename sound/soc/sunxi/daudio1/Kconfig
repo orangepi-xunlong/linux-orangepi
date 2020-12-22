@@ -1,0 +1,22 @@
+
+config SND_SUNXI_SOC_DAUDIO1_INTERFACE
+	tristate "SoC daudio1 tdm interface for SUNXI chips"
+	depends on ARCH_SUN8IW7
+	select SND_SOC_DMAENGINE_PCM
+	default n
+	help
+	  Say Y or M if you want to add support for codecs attached to
+	  the SUNXI DAUDIO TDM interface. You will also need
+	  to select the audio interfaces to support below.
+config SND_SUNXI_SOC_DAUDIO1_PUBLIC_MACHINE
+	tristate "Daudio1 Public Machine for SUNXI chips"
+	depends on ARCH_SUN8IW7 && SND_SOC_RT3261 = n && MFD_ACX00 = n
+	default n
+	help
+	  Say Y or M if you want to add audiocodec support
+config SND_SUNXI_SOC_SUN8IW7_RT3261_AIF2
+	tristate "Machine for h3 rt3261 aif2"
+	depends on ARCH_SUN8IW7 && SND_SOC_RT3261
+	default n
+	help
+	  Say Y or M if you want to add rt3261 codec support

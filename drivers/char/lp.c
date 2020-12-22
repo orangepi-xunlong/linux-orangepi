@@ -294,7 +294,7 @@ static int lp_wait_ready(int minor, int nonblock)
 static ssize_t lp_write(struct file * file, const char __user * buf,
 		        size_t count, loff_t *ppos)
 {
-	unsigned int minor = iminor(file_inode(file));
+	unsigned int minor = iminor(file->f_path.dentry->d_inode);
 	struct parport *port = lp_table[minor].dev->port;
 	char *kbuf = lp_table[minor].lp_buffer;
 	ssize_t retv = 0;
@@ -413,7 +413,7 @@ static ssize_t lp_read(struct file * file, char __user * buf,
 		       size_t count, loff_t *ppos)
 {
 	DEFINE_WAIT(wait);
-	unsigned int minor=iminor(file_inode(file));
+	unsigned int minor=iminor(file->f_path.dentry->d_inode);
 	struct parport *port = lp_table[minor].dev->port;
 	ssize_t retval = 0;
 	char *kbuf = lp_table[minor].lp_buffer;
@@ -587,8 +587,6 @@ static int lp_do_ioctl(unsigned int minor, unsigned int cmd,
 		return -ENODEV;
 	switch ( cmd ) {
 		case LPTIME:
-			if (arg > UINT_MAX / HZ)
-				return -EINVAL;
 			LP_TIME(minor) = arg * HZ/100;
 			break;
 		case LPCHAR:
@@ -624,12 +622,9 @@ static int lp_do_ioctl(unsigned int minor, unsigned int cmd,
 				return -EFAULT;
 			break;
 		case LPGETSTATUS:
-			if (mutex_lock_interruptible(&lp_table[minor].port_mutex))
-				return -EINTR;
 			lp_claim_parport_or_block (&lp_table[minor]);
 			status = r_str(minor);
 			lp_release_parport (&lp_table[minor]);
-			mutex_unlock(&lp_table[minor].port_mutex);
 
 			if (copy_to_user(argp, &status, sizeof(int)))
 				return -EFAULT;
@@ -684,7 +679,7 @@ static long lp_ioctl(struct file *file, unsigned int cmd,
 	struct timeval par_timeout;
 	int ret;
 
-	minor = iminor(file_inode(file));
+	minor = iminor(file->f_path.dentry->d_inode);
 	mutex_lock(&lp_mutex);
 	switch (cmd) {
 	case LPSETTIMEOUT:
@@ -712,7 +707,7 @@ static long lp_compat_ioctl(struct file *file, unsigned int cmd,
 	struct timeval par_timeout;
 	int ret;
 
-	minor = iminor(file_inode(file));
+	minor = iminor(file->f_path.dentry->d_inode);
 	mutex_lock(&lp_mutex);
 	switch (cmd) {
 	case LPSETTIMEOUT:
@@ -859,11 +854,7 @@ static int __init lp_setup (char *str)
 	} else if (!strcmp(str, "auto")) {
 		parport_nr[0] = LP_PARPORT_AUTO;
 	} else if (!strcmp(str, "none")) {
-		if (parport_ptr < LP_NO)
-			parport_nr[parport_ptr++] = LP_PARPORT_NONE;
-		else
-			printk(KERN_INFO "lp: too many ports, %s ignored.\n",
-			       str);
+		parport_nr[parport_ptr++] = LP_PARPORT_NONE;
 	} else if (!strcmp(str, "reset")) {
 		reset = 1;
 	}

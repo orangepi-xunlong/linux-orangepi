@@ -63,7 +63,7 @@ int umc_controller_reset(struct umc_dev *umc)
 	struct device *parent = umc->dev.parent;
 	int ret = 0;
 
-	if (!device_trylock(parent))
+	if (device_trylock(parent))
 		return -EAGAIN;
 	ret = device_for_each_child(parent, parent, umc_bus_pre_reset_helper);
 	if (ret >= 0)
@@ -85,7 +85,7 @@ int umc_match_pci_id(struct umc_driver *umc_drv, struct umc_dev *umc)
 	const struct pci_device_id *id_table = umc_drv->match_data;
 	struct pci_dev *pci;
 
-	if (!dev_is_pci(umc->dev.parent))
+	if (umc->dev.parent->bus != &pci_bus_type)
 		return 0;
 
 	pci = to_pci_dev(umc->dev.parent);
@@ -163,13 +163,44 @@ static int umc_device_remove(struct device *dev)
 	return 0;
 }
 
+static int umc_device_suspend(struct device *dev, pm_message_t state)
+{
+	struct umc_dev *umc;
+	struct umc_driver *umc_driver;
+	int err = 0;
+
+	umc = to_umc_dev(dev);
+
+	if (dev->driver) {
+		umc_driver = to_umc_driver(dev->driver);
+		if (umc_driver->suspend)
+			err = umc_driver->suspend(umc, state);
+	}
+	return err;
+}
+
+static int umc_device_resume(struct device *dev)
+{
+	struct umc_dev *umc;
+	struct umc_driver *umc_driver;
+	int err = 0;
+
+	umc = to_umc_dev(dev);
+
+	if (dev->driver) {
+		umc_driver = to_umc_driver(dev->driver);
+		if (umc_driver->resume)
+			err = umc_driver->resume(umc);
+	}
+	return err;
+}
+
 static ssize_t capability_id_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct umc_dev *umc = to_umc_dev(dev);
 
 	return sprintf(buf, "0x%02x\n", umc->cap_id);
 }
-static DEVICE_ATTR_RO(capability_id);
 
 static ssize_t version_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -177,21 +208,21 @@ static ssize_t version_show(struct device *dev, struct device_attribute *attr, c
 
 	return sprintf(buf, "0x%04x\n", umc->version);
 }
-static DEVICE_ATTR_RO(version);
 
-static struct attribute *umc_dev_attrs[] = {
-	&dev_attr_capability_id.attr,
-	&dev_attr_version.attr,
-	NULL,
+static struct device_attribute umc_dev_attrs[] = {
+	__ATTR_RO(capability_id),
+	__ATTR_RO(version),
+	__ATTR_NULL,
 };
-ATTRIBUTE_GROUPS(umc_dev);
 
 struct bus_type umc_bus_type = {
 	.name		= "umc",
 	.match		= umc_bus_match,
 	.probe		= umc_device_probe,
 	.remove		= umc_device_remove,
-	.dev_groups	= umc_dev_groups,
+	.suspend        = umc_device_suspend,
+	.resume         = umc_device_resume,
+	.dev_attrs	= umc_dev_attrs,
 };
 EXPORT_SYMBOL_GPL(umc_bus_type);
 

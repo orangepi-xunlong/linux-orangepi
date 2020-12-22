@@ -14,10 +14,8 @@
 #include <asm/desc.h>
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
-#include <asm/realmode.h>
 
-#include <linux/ftrace.h>
-#include "../../realmode/rm/wakeup.h"
+#include "realmode/wakeup.h"
 #include "sleep.h"
 
 unsigned long acpi_realmode_flags;
@@ -26,28 +24,25 @@ unsigned long acpi_realmode_flags;
 static char temp_stack[4096];
 #endif
 
-/**
- * x86_acpi_enter_sleep_state - enter sleep state
- * @state: Sleep state to enter.
- *
- * Wrapper around acpi_enter_sleep_state() to be called by assmebly.
- */
-acpi_status asmlinkage __visible x86_acpi_enter_sleep_state(u8 state)
+asmlinkage void acpi_enter_s3(void)
 {
-	return acpi_enter_sleep_state(state);
+	acpi_enter_sleep_state(3, wake_sleep_flags);
 }
-
 /**
- * x86_acpi_suspend_lowlevel - save kernel state
+ * acpi_suspend_lowlevel - save kernel state
  *
  * Create an identity mapped page table and copy the wakeup routine to
  * low memory.
  */
-int x86_acpi_suspend_lowlevel(void)
+int acpi_suspend_lowlevel(void)
 {
-	struct wakeup_header *header =
-		(struct wakeup_header *) __va(real_mode_header->wakeup_header);
+	struct wakeup_header *header;
+	/* address in low memory of the wakeup routine. */
+	char *acpi_realmode;
 
+	acpi_realmode = TRAMPOLINE_SYM(acpi_wakeup_code);
+
+	header = (struct wakeup_header *)(acpi_realmode + WAKEUP_HEADER_OFFSET);
 	if (header->signature != WAKEUP_HEADER_SIGNATURE) {
 		printk(KERN_ERR "wakeup header does not match\n");
 		return -EINVAL;
@@ -55,39 +50,41 @@ int x86_acpi_suspend_lowlevel(void)
 
 	header->video_mode = saved_video_mode;
 
-	header->pmode_behavior = 0;
-
-#ifndef CONFIG_64BIT
-	native_store_gdt((struct desc_ptr *)&header->pmode_gdt);
+	header->wakeup_jmp_seg = acpi_wakeup_address >> 4;
 
 	/*
-	 * We have to check that we can write back the value, and not
-	 * just read it.  At least on 90 nm Pentium M (Family 6, Model
-	 * 13), reading an invalid MSR is not guaranteed to trap, see
-	 * Erratum X4 in "Intel Pentium M Processor on 90 nm Process
-	 * with 2-MB L2 Cache and Intel® Processor A100 and A110 on 90
-	 * nm process with 512-KB L2 Cache Specification Update".
+	 * Set up the wakeup GDT.  We set these up as Big Real Mode,
+	 * that is, with limits set to 4 GB.  At least the Lenovo
+	 * Thinkpad X61 is known to need this for the video BIOS
+	 * initialization quirk to work; this is likely to also
+	 * be the case for other laptops or integrated video devices.
 	 */
-	if (!rdmsr_safe(MSR_EFER,
-			&header->pmode_efer_low,
-			&header->pmode_efer_high) &&
-	    !wrmsr_safe(MSR_EFER,
-			header->pmode_efer_low,
-			header->pmode_efer_high))
-		header->pmode_behavior |= (1 << WAKEUP_BEHAVIOR_RESTORE_EFER);
+
+	/* GDT[0]: GDT self-pointer */
+	header->wakeup_gdt[0] =
+		(u64)(sizeof(header->wakeup_gdt) - 1) +
+		((u64)__pa(&header->wakeup_gdt) << 16);
+	/* GDT[1]: big real mode-like code segment */
+	header->wakeup_gdt[1] =
+		GDT_ENTRY(0x809b, acpi_wakeup_address, 0xfffff);
+	/* GDT[2]: big real mode-like data segment */
+	header->wakeup_gdt[2] =
+		GDT_ENTRY(0x8093, acpi_wakeup_address, 0xfffff);
+
+#ifndef CONFIG_64BIT
+	store_gdt((struct desc_ptr *)&header->pmode_gdt);
+
+	if (rdmsr_safe(MSR_EFER, &header->pmode_efer_low,
+		       &header->pmode_efer_high))
+		header->pmode_efer_low = header->pmode_efer_high = 0;
 #endif /* !CONFIG_64BIT */
 
 	header->pmode_cr0 = read_cr0();
-	if (__this_cpu_read(cpu_info.cpuid_level) >= 0) {
-		header->pmode_cr4 = __read_cr4();
-		header->pmode_behavior |= (1 << WAKEUP_BEHAVIOR_RESTORE_CR4);
-	}
+	header->pmode_cr4 = read_cr4_safe();
+	header->pmode_behavior = 0;
 	if (!rdmsr_safe(MSR_IA32_MISC_ENABLE,
 			&header->pmode_misc_en_low,
-			&header->pmode_misc_en_high) &&
-	    !wrmsr_safe(MSR_IA32_MISC_ENABLE,
-			header->pmode_misc_en_low,
-			header->pmode_misc_en_high))
+			&header->pmode_misc_en_high))
 		header->pmode_behavior |=
 			(1 << WAKEUP_BEHAVIOR_RESTORE_MISC_ENABLE);
 	header->realmode_flags = acpi_realmode_flags;
@@ -95,11 +92,12 @@ int x86_acpi_suspend_lowlevel(void)
 
 #ifndef CONFIG_64BIT
 	header->pmode_entry = (u32)&wakeup_pmode_return;
-	header->pmode_cr3 = (u32)__pa_symbol(initial_page_table);
+	header->pmode_cr3 = (u32)__pa(&initial_page_table);
 	saved_magic = 0x12345678;
 #else /* CONFIG_64BIT */
+	header->trampoline_segment = trampoline_address() >> 4;
 #ifdef CONFIG_SMP
-	initial_stack = (unsigned long)temp_stack + sizeof(temp_stack);
+	stack_start = (unsigned long)temp_stack + sizeof(temp_stack);
 	early_gdt_descr.address =
 			(unsigned long)get_cpu_gdt_table(smp_processor_id());
 	initial_gs = per_cpu_offset(smp_processor_id());
@@ -108,13 +106,7 @@ int x86_acpi_suspend_lowlevel(void)
        saved_magic = 0x123456789abcdef0L;
 #endif /* CONFIG_64BIT */
 
-	/*
-	 * Pause/unpause graph tracing around do_suspend_lowlevel as it has
-	 * inconsistent call/return info after it jumps to the wakeup vector.
-	 */
-	pause_graph_tracing();
 	do_suspend_lowlevel();
-	unpause_graph_tracing();
 	return 0;
 }
 
@@ -133,8 +125,6 @@ static int __init acpi_sleep_setup(char *str)
 #endif
 		if (strncmp(str, "nonvs", 5) == 0)
 			acpi_nvs_nosave();
-		if (strncmp(str, "nonvs_s3", 8) == 0)
-			acpi_nvs_nosave_s3();
 		if (strncmp(str, "old_ordering", 12) == 0)
 			acpi_old_suspend_ordering();
 		str = strchr(str, ',');

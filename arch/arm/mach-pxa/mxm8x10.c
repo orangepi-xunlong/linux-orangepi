@@ -24,14 +24,14 @@
 #include <linux/gpio.h>
 #include <linux/i2c/pxa-i2c.h>
 
-#include <linux/platform_data/mtd-nand-pxa3xx.h>
+#include <plat/pxa3xx_nand.h>
 
-#include <linux/platform_data/video-pxafb.h>
-#include <linux/platform_data/mmc-pxamci.h>
-#include <linux/platform_data/usb-ohci-pxa27x.h>
-#include "pxa320.h"
+#include <mach/pxafb.h>
+#include <mach/mmc.h>
+#include <mach/ohci.h>
+#include <mach/pxa320.h>
 
-#include "mxm8x10.h"
+#include <mach/mxm8x10.h>
 
 #include "devices.h"
 #include "generic.h"

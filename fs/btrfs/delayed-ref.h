@@ -18,30 +18,14 @@
 #ifndef __DELAYED_REF__
 #define __DELAYED_REF__
 
-/* these are the possible values of struct btrfs_delayed_ref_node->action */
+/* these are the possible values of struct btrfs_delayed_ref->action */
 #define BTRFS_ADD_DELAYED_REF    1 /* add one backref to the tree */
 #define BTRFS_DROP_DELAYED_REF   2 /* delete one backref from the tree */
 #define BTRFS_ADD_DELAYED_EXTENT 3 /* record a full extent allocation */
 #define BTRFS_UPDATE_DELAYED_HEAD 4 /* not changing ref count on head ref */
 
-/*
- * XXX: Qu: I really hate the design that ref_head and tree/data ref shares the
- * same ref_node structure.
- * Ref_head is in a higher logic level than tree/data ref, and duplicated
- * bytenr/num_bytes in ref_node is really a waste or memory, they should be
- * referred from ref_head.
- * This gets more disgusting after we use list to store tree/data ref in
- * ref_head. Must clean this mess up later.
- */
 struct btrfs_delayed_ref_node {
-	/*
-	 * ref_head use rb tree, stored in ref_root->href.
-	 * indexed by bytenr
-	 */
 	struct rb_node rb_node;
-
-	/*data/tree ref use list, stored in ref_head->ref_list. */
-	struct list_head list;
 
 	/* the starting bytenr of the extent */
 	u64 bytenr;
@@ -75,11 +59,10 @@ struct btrfs_delayed_ref_node {
 
 struct btrfs_delayed_extent_op {
 	struct btrfs_disk_key key;
-	u8 level;
-	bool update_key;
-	bool update_flags;
-	bool is_data;
 	u64 flags_to_set;
+	unsigned int update_key:1;
+	unsigned int update_flags:1;
+	unsigned int is_data:1;
 };
 
 /*
@@ -97,31 +80,9 @@ struct btrfs_delayed_ref_head {
 	 */
 	struct mutex mutex;
 
-	spinlock_t lock;
-	struct list_head ref_list;
-
-	struct rb_node href_node;
+	struct list_head cluster;
 
 	struct btrfs_delayed_extent_op *extent_op;
-
-	/*
-	 * This is used to track the final ref_mod from all the refs associated
-	 * with this head ref, this is not adjusted as delayed refs are run,
-	 * this is meant to track if we need to do the csum accounting or not.
-	 */
-	int total_ref_mod;
-
-	/*
-	 * For qgroup reserved space freeing.
-	 *
-	 * ref_root and reserved will be recorded after
-	 * BTRFS_ADD_DELAYED_EXTENT is called.
-	 * And will be used to free reserved qgroup space at
-	 * run_delayed_refs() time.
-	 */
-	u64 qgroup_ref_root;
-	u64 qgroup_reserved;
-
 	/*
 	 * when a new extent is allocated, it is just reserved in memory
 	 * The actual extent isn't inserted into the extent allocation tree
@@ -136,7 +97,6 @@ struct btrfs_delayed_ref_head {
 	 */
 	unsigned int must_insert_reserved:1;
 	unsigned int is_data:1;
-	unsigned int processing:1;
 };
 
 struct btrfs_delayed_tree_ref {
@@ -155,11 +115,7 @@ struct btrfs_delayed_data_ref {
 };
 
 struct btrfs_delayed_ref_root {
-	/* head ref rbtree */
-	struct rb_root href_root;
-
-	/* dirty extent records */
-	struct rb_root dirty_extent_root;
+	struct rb_root root;
 
 	/* this spin lock protects the rbtree and the entries inside */
 	spinlock_t lock;
@@ -167,15 +123,13 @@ struct btrfs_delayed_ref_root {
 	/* how many delayed ref updates we've queued, used by the
 	 * throttling code
 	 */
-	atomic_t num_entries;
+	unsigned long num_entries;
 
 	/* total number of head nodes in tree */
 	unsigned long num_heads;
 
 	/* total number of head nodes ready for processing */
 	unsigned long num_heads_ready;
-
-	u64 pending_csums;
 
 	/*
 	 * set when the tree is flushing before a transaction commit,
@@ -187,55 +141,32 @@ struct btrfs_delayed_ref_root {
 	u64 run_delayed_start;
 
 	/*
-	 * To make qgroup to skip given root.
-	 * This is for snapshot, as btrfs_qgroup_inherit() will manually
-	 * modify counters for snapshot and its source, so we should skip
-	 * the snapshot in new_root/old_roots or it will get calculated twice
+	 * seq number of delayed refs. We need to know if a backref was being
+	 * added before the currently processed ref or afterwards.
 	 */
-	u64 qgroup_to_skip;
+	u64 seq;
+
+	/*
+	 * seq_list holds a list of all seq numbers that are currently being
+	 * added to the list. While walking backrefs (btrfs_find_all_roots,
+	 * qgroups), which might take some time, no newer ref must be processed,
+	 * as it might influence the outcome of the walk.
+	 */
+	struct list_head seq_head;
+
+	/*
+	 * when the only refs we have in the list must not be processed, we want
+	 * to wait for more refs to show up or for the end of backref walking.
+	 */
+	wait_queue_head_t seq_wait;
 };
-
-extern struct kmem_cache *btrfs_delayed_ref_head_cachep;
-extern struct kmem_cache *btrfs_delayed_tree_ref_cachep;
-extern struct kmem_cache *btrfs_delayed_data_ref_cachep;
-extern struct kmem_cache *btrfs_delayed_extent_op_cachep;
-
-int btrfs_delayed_ref_init(void);
-void btrfs_delayed_ref_exit(void);
-
-static inline struct btrfs_delayed_extent_op *
-btrfs_alloc_delayed_extent_op(void)
-{
-	return kmem_cache_alloc(btrfs_delayed_extent_op_cachep, GFP_NOFS);
-}
-
-static inline void
-btrfs_free_delayed_extent_op(struct btrfs_delayed_extent_op *op)
-{
-	if (op)
-		kmem_cache_free(btrfs_delayed_extent_op_cachep, op);
-}
 
 static inline void btrfs_put_delayed_ref(struct btrfs_delayed_ref_node *ref)
 {
 	WARN_ON(atomic_read(&ref->refs) == 0);
 	if (atomic_dec_and_test(&ref->refs)) {
 		WARN_ON(ref->in_tree);
-		switch (ref->type) {
-		case BTRFS_TREE_BLOCK_REF_KEY:
-		case BTRFS_SHARED_BLOCK_REF_KEY:
-			kmem_cache_free(btrfs_delayed_tree_ref_cachep, ref);
-			break;
-		case BTRFS_EXTENT_DATA_REF_KEY:
-		case BTRFS_SHARED_DATA_REF_KEY:
-			kmem_cache_free(btrfs_delayed_data_ref_cachep, ref);
-			break;
-		case 0:
-			kmem_cache_free(btrfs_delayed_ref_head_cachep, ref);
-			break;
-		default:
-			BUG();
-		}
+		kfree(ref);
 	}
 }
 
@@ -243,38 +174,79 @@ int btrfs_add_delayed_tree_ref(struct btrfs_fs_info *fs_info,
 			       struct btrfs_trans_handle *trans,
 			       u64 bytenr, u64 num_bytes, u64 parent,
 			       u64 ref_root, int level, int action,
-			       struct btrfs_delayed_extent_op *extent_op);
+			       struct btrfs_delayed_extent_op *extent_op,
+			       int for_cow);
 int btrfs_add_delayed_data_ref(struct btrfs_fs_info *fs_info,
 			       struct btrfs_trans_handle *trans,
 			       u64 bytenr, u64 num_bytes,
 			       u64 parent, u64 ref_root,
-			       u64 owner, u64 offset, u64 reserved, int action,
-			       struct btrfs_delayed_extent_op *extent_op);
+			       u64 owner, u64 offset, int action,
+			       struct btrfs_delayed_extent_op *extent_op,
+			       int for_cow);
 int btrfs_add_delayed_extent_op(struct btrfs_fs_info *fs_info,
 				struct btrfs_trans_handle *trans,
 				u64 bytenr, u64 num_bytes,
 				struct btrfs_delayed_extent_op *extent_op);
-void btrfs_merge_delayed_refs(struct btrfs_trans_handle *trans,
-			      struct btrfs_fs_info *fs_info,
-			      struct btrfs_delayed_ref_root *delayed_refs,
-			      struct btrfs_delayed_ref_head *head);
 
 struct btrfs_delayed_ref_head *
 btrfs_find_delayed_ref_head(struct btrfs_trans_handle *trans, u64 bytenr);
 int btrfs_delayed_ref_lock(struct btrfs_trans_handle *trans,
 			   struct btrfs_delayed_ref_head *head);
-static inline void btrfs_delayed_ref_unlock(struct btrfs_delayed_ref_head *head)
+int btrfs_find_ref_cluster(struct btrfs_trans_handle *trans,
+			   struct list_head *cluster, u64 search_start);
+
+struct seq_list {
+	struct list_head list;
+	u64 seq;
+};
+
+static inline u64 inc_delayed_seq(struct btrfs_delayed_ref_root *delayed_refs)
 {
-	mutex_unlock(&head->mutex);
+	assert_spin_locked(&delayed_refs->lock);
+	++delayed_refs->seq;
+	return delayed_refs->seq;
 }
 
+static inline void
+btrfs_get_delayed_seq(struct btrfs_delayed_ref_root *delayed_refs,
+		      struct seq_list *elem)
+{
+	assert_spin_locked(&delayed_refs->lock);
+	elem->seq = delayed_refs->seq;
+	list_add_tail(&elem->list, &delayed_refs->seq_head);
+}
 
-struct btrfs_delayed_ref_head *
-btrfs_select_ref_head(struct btrfs_trans_handle *trans);
+static inline void
+btrfs_put_delayed_seq(struct btrfs_delayed_ref_root *delayed_refs,
+		      struct seq_list *elem)
+{
+	spin_lock(&delayed_refs->lock);
+	list_del(&elem->list);
+	wake_up(&delayed_refs->seq_wait);
+	spin_unlock(&delayed_refs->lock);
+}
 
-int btrfs_check_delayed_seq(struct btrfs_fs_info *fs_info,
-			    struct btrfs_delayed_ref_root *delayed_refs,
+int btrfs_check_delayed_seq(struct btrfs_delayed_ref_root *delayed_refs,
 			    u64 seq);
+
+/*
+ * delayed refs with a ref_seq > 0 must be held back during backref walking.
+ * this only applies to items in one of the fs-trees. for_cow items never need
+ * to be held back, so they won't get a ref_seq number.
+ */
+static inline int need_ref_seq(int for_cow, u64 rootid)
+{
+	if (for_cow)
+		return 0;
+
+	if (rootid == BTRFS_FS_TREE_OBJECTID)
+		return 1;
+
+	if ((s64)rootid >= (s64)BTRFS_FIRST_FREE_OBJECTID)
+		return 1;
+
+	return 0;
+}
 
 /*
  * a node might live in a head or a regular ref, this lets you

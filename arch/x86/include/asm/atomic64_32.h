@@ -3,6 +3,7 @@
 
 #include <linux/compiler.h>
 #include <linux/types.h>
+#include <asm/processor.h>
 //#include <asm/cmpxchg.h>
 
 /* An 64bit atomic type */
@@ -62,7 +63,7 @@ ATOMIC64_DECL(add_unless);
 
 /**
  * atomic64_cmpxchg - cmpxchg atomic64 variable
- * @v: pointer to type atomic64_t
+ * @p: pointer to type atomic64_t
  * @o: expected value
  * @n: new value
  *
@@ -97,7 +98,7 @@ static inline long long atomic64_xchg(atomic64_t *v, long long n)
 /**
  * atomic64_set - set atomic64 variable
  * @v: pointer to type atomic64_t
- * @i: value to assign
+ * @n: value to assign
  *
  * Atomically sets the value of @v to @n.
  */
@@ -199,7 +200,7 @@ static inline long long atomic64_sub(long long i, atomic64_t *v)
  * atomic64_sub_and_test - subtract value from variable and test result
  * @i: integer value to subtract
  * @v: pointer to type atomic64_t
- *
+  *
  * Atomically subtracts @i from @v and returns
  * true if the result is zero, or false for all
  * other cases.
@@ -223,9 +224,9 @@ static inline void atomic64_inc(atomic64_t *v)
 
 /**
  * atomic64_dec - decrement atomic64 variable
- * @v: pointer to type atomic64_t
+ * @ptr: pointer to type atomic64_t
  *
- * Atomically decrements @v by 1.
+ * Atomically decrements @ptr by 1.
  */
 static inline void atomic64_dec(atomic64_t *v)
 {
@@ -311,38 +312,5 @@ static inline long long atomic64_dec_if_positive(atomic64_t *v)
 
 #undef alternative_atomic64
 #undef __alternative_atomic64
-
-#define ATOMIC64_OP(op, c_op)						\
-static inline void atomic64_##op(long long i, atomic64_t *v)		\
-{									\
-	long long old, c = 0;						\
-	while ((old = atomic64_cmpxchg(v, c, c c_op i)) != c)		\
-		c = old;						\
-}
-
-#define ATOMIC64_FETCH_OP(op, c_op)					\
-static inline long long atomic64_fetch_##op(long long i, atomic64_t *v)	\
-{									\
-	long long old, c = 0;						\
-	while ((old = atomic64_cmpxchg(v, c, c c_op i)) != c)		\
-		c = old;						\
-	return old;							\
-}
-
-ATOMIC64_FETCH_OP(add, +)
-
-#define atomic64_fetch_sub(i, v)	atomic64_fetch_add(-(i), (v))
-
-#define ATOMIC64_OPS(op, c_op)						\
-	ATOMIC64_OP(op, c_op)						\
-	ATOMIC64_FETCH_OP(op, c_op)
-
-ATOMIC64_OPS(and, &)
-ATOMIC64_OPS(or, |)
-ATOMIC64_OPS(xor, ^)
-
-#undef ATOMIC64_OPS
-#undef ATOMIC64_FETCH_OP
-#undef ATOMIC64_OP
 
 #endif /* _ASM_X86_ATOMIC64_32_H */

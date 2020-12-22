@@ -38,20 +38,8 @@
  * The general purpose timer ticks at 1MHz independent if
  * the rest of the system
  */
-
-static int sibyte_shutdown(struct clock_event_device *evt)
-{
-	void __iomem *cfg;
-
-	cfg = IOADDR(A_SCD_TIMER_REGISTER(smp_processor_id(), R_SCD_TIMER_CFG));
-
-	/* Stop the timer until we actually program a shot */
-	__raw_writeq(0, cfg);
-
-	return 0;
-}
-
-static int sibyte_set_periodic(struct clock_event_device *evt)
+static void sibyte_set_mode(enum clock_event_mode mode,
+                           struct clock_event_device *evt)
 {
 	unsigned int cpu = smp_processor_id();
 	void __iomem *cfg, *init;
@@ -59,11 +47,24 @@ static int sibyte_set_periodic(struct clock_event_device *evt)
 	cfg = IOADDR(A_SCD_TIMER_REGISTER(cpu, R_SCD_TIMER_CFG));
 	init = IOADDR(A_SCD_TIMER_REGISTER(cpu, R_SCD_TIMER_INIT));
 
-	__raw_writeq(0, cfg);
-	__raw_writeq((V_SCD_TIMER_FREQ / HZ) - 1, init);
-	__raw_writeq(M_SCD_TIMER_ENABLE | M_SCD_TIMER_MODE_CONTINUOUS, cfg);
+	switch (mode) {
+	case CLOCK_EVT_MODE_PERIODIC:
+		__raw_writeq(0, cfg);
+		__raw_writeq((V_SCD_TIMER_FREQ / HZ) - 1, init);
+		__raw_writeq(M_SCD_TIMER_ENABLE | M_SCD_TIMER_MODE_CONTINUOUS,
+			     cfg);
+		break;
 
-	return 0;
+	case CLOCK_EVT_MODE_ONESHOT:
+		/* Stop the timer until we actually program a shot */
+	case CLOCK_EVT_MODE_SHUTDOWN:
+		__raw_writeq(0, cfg);
+		break;
+
+	case CLOCK_EVT_MODE_UNUSED:	/* shuddup gcc */
+	case CLOCK_EVT_MODE_RESUME:
+		;
+	}
 }
 
 static int sibyte_next_event(unsigned long delta, struct clock_event_device *cd)
@@ -88,7 +89,7 @@ static irqreturn_t sibyte_counter_handler(int irq, void *dev_id)
 	void __iomem *cfg;
 	unsigned long tmode;
 
-	if (clockevent_state_periodic(cd))
+	if (cd->mode == CLOCK_EVT_MODE_PERIODIC)
 		tmode = M_SCD_TIMER_ENABLE | M_SCD_TIMER_MODE_CONTINUOUS;
 	else
 		tmode = 0;
@@ -106,7 +107,7 @@ static DEFINE_PER_CPU(struct clock_event_device, sibyte_hpt_clockevent);
 static DEFINE_PER_CPU(struct irqaction, sibyte_hpt_irqaction);
 static DEFINE_PER_CPU(char [18], sibyte_hpt_name);
 
-void sb1250_clockevent_init(void)
+void __cpuinit sb1250_clockevent_init(void)
 {
 	unsigned int cpu = smp_processor_id();
 	unsigned int irq = K_INT_TIMER_0 + cpu;
@@ -128,9 +129,7 @@ void sb1250_clockevent_init(void)
 	cd->irq			= irq;
 	cd->cpumask		= cpumask_of(cpu);
 	cd->set_next_event	= sibyte_next_event;
-	cd->set_state_shutdown	= sibyte_shutdown;
-	cd->set_state_periodic	= sibyte_set_periodic;
-	cd->set_state_oneshot	= sibyte_shutdown;
+	cd->set_mode		= sibyte_set_mode;
 	clockevents_register_device(cd);
 
 	sb1250_mask_irq(cpu, irq);
@@ -144,7 +143,7 @@ void sb1250_clockevent_init(void)
 
 	sb1250_unmask_irq(cpu, irq);
 
-	action->handler = sibyte_counter_handler;
+	action->handler	= sibyte_counter_handler;
 	action->flags	= IRQF_PERCPU | IRQF_TIMER;
 	action->name	= name;
 	action->dev_id	= cd;

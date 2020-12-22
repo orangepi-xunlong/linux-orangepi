@@ -38,6 +38,9 @@
 #define DIVA_NO_DEBUGLIB
 #endif
 
+#define DIVA_INIT_FUNCTION  __init
+#define DIVA_EXIT_FUNCTION  __exit
+
 #define DIVA_USER_MODE_CARD_CONFIG 1
 #define	USE_EXTENDED_DEBUGS 1
 
@@ -203,7 +206,7 @@ void PCIread(byte bus, byte func, int offset, void *data, int length, void *pci_
 /*
 **  I/O Port utilities
 */
-int diva_os_register_io_port(void *adapter, int reg, unsigned long port,
+int diva_os_register_io_port(void *adapter, int register, unsigned long port,
 			     unsigned long length, const char *name, int id);
 /*
 **  I/O port access abstraction
@@ -271,13 +274,13 @@ void diva_os_get_time(dword *sec, dword *usec);
 **  atomic operation, fake because we use threads
 */
 typedef int diva_os_atomic_t;
-static inline diva_os_atomic_t
+static diva_os_atomic_t __inline__
 diva_os_atomic_increment(diva_os_atomic_t *pv)
 {
 	*pv += 1;
 	return (*pv);
 }
-static inline diva_os_atomic_t
+static diva_os_atomic_t __inline__
 diva_os_atomic_decrement(diva_os_atomic_t *pv)
 {
 	*pv -= 1;

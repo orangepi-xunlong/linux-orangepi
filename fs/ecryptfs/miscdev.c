@@ -33,7 +33,7 @@ static atomic_t ecryptfs_num_miscdev_opens;
 
 /**
  * ecryptfs_miscdev_poll
- * @file: dev file
+ * @file: dev file (ignored)
  * @pt: dev poll table (ignored)
  *
  * Returns the poll mask
@@ -41,10 +41,20 @@ static atomic_t ecryptfs_num_miscdev_opens;
 static unsigned int
 ecryptfs_miscdev_poll(struct file *file, poll_table *pt)
 {
-	struct ecryptfs_daemon *daemon = file->private_data;
+	struct ecryptfs_daemon *daemon;
 	unsigned int mask = 0;
+	uid_t euid = current_euid();
+	int rc;
 
+	mutex_lock(&ecryptfs_daemon_hash_mux);
+	/* TODO: Just use file->private_data? */
+	rc = ecryptfs_find_daemon_by_euid(&daemon, euid, current_user_ns());
+	if (rc || !daemon) {
+		mutex_unlock(&ecryptfs_daemon_hash_mux);
+		return -EINVAL;
+	}
 	mutex_lock(&daemon->mux);
+	mutex_unlock(&ecryptfs_daemon_hash_mux);
 	if (daemon->flags & ECRYPTFS_DAEMON_ZOMBIE) {
 		printk(KERN_WARNING "%s: Attempt to poll on zombified "
 		       "daemon\n", __func__);
@@ -69,7 +79,7 @@ out_unlock_daemon:
 /**
  * ecryptfs_miscdev_open
  * @inode: inode of miscdev handle (ignored)
- * @file: file for miscdev handle
+ * @file: file for miscdev handle (ignored)
  *
  * Returns zero on success; non-zero otherwise
  */
@@ -77,23 +87,41 @@ static int
 ecryptfs_miscdev_open(struct inode *inode, struct file *file)
 {
 	struct ecryptfs_daemon *daemon = NULL;
+	uid_t euid = current_euid();
 	int rc;
 
 	mutex_lock(&ecryptfs_daemon_hash_mux);
-	rc = ecryptfs_find_daemon_by_euid(&daemon);
-	if (!rc) {
-		rc = -EINVAL;
+	rc = try_module_get(THIS_MODULE);
+	if (rc == 0) {
+		rc = -EIO;
+		printk(KERN_ERR "%s: Error attempting to increment module use "
+		       "count; rc = [%d]\n", __func__, rc);
 		goto out_unlock_daemon_list;
 	}
-	rc = ecryptfs_spawn_daemon(&daemon, file);
-	if (rc) {
-		printk(KERN_ERR "%s: Error attempting to spawn daemon; "
-		       "rc = [%d]\n", __func__, rc);
-		goto out_unlock_daemon_list;
+	rc = ecryptfs_find_daemon_by_euid(&daemon, euid, current_user_ns());
+	if (rc || !daemon) {
+		rc = ecryptfs_spawn_daemon(&daemon, euid, current_user_ns(),
+					   task_pid(current));
+		if (rc) {
+			printk(KERN_ERR "%s: Error attempting to spawn daemon; "
+			       "rc = [%d]\n", __func__, rc);
+			goto out_module_put_unlock_daemon_list;
+		}
 	}
 	mutex_lock(&daemon->mux);
+	if (daemon->pid != task_pid(current)) {
+		rc = -EINVAL;
+		printk(KERN_ERR "%s: pid [0x%p] has registered with euid [%d], "
+		       "but pid [0x%p] has attempted to open the handle "
+		       "instead\n", __func__, daemon->pid, daemon->euid,
+		       task_pid(current));
+		goto out_unlock_daemon;
+	}
 	if (daemon->flags & ECRYPTFS_DAEMON_MISCDEV_OPEN) {
 		rc = -EBUSY;
+		printk(KERN_ERR "%s: Miscellaneous device handle may only be "
+		       "opened once per daemon; pid [0x%p] already has this "
+		       "handle open\n", __func__, daemon->pid);
 		goto out_unlock_daemon;
 	}
 	daemon->flags |= ECRYPTFS_DAEMON_MISCDEV_OPEN;
@@ -101,6 +129,9 @@ ecryptfs_miscdev_open(struct inode *inode, struct file *file)
 	atomic_inc(&ecryptfs_num_miscdev_opens);
 out_unlock_daemon:
 	mutex_unlock(&daemon->mux);
+out_module_put_unlock_daemon_list:
+	if (rc)
+		module_put(THIS_MODULE);
 out_unlock_daemon_list:
 	mutex_unlock(&ecryptfs_daemon_hash_mux);
 	return rc;
@@ -109,7 +140,7 @@ out_unlock_daemon_list:
 /**
  * ecryptfs_miscdev_release
  * @inode: inode of fs/ecryptfs/euid handle (ignored)
- * @file: file for fs/ecryptfs/euid handle
+ * @file: file for fs/ecryptfs/euid handle (ignored)
  *
  * This keeps the daemon registered until the daemon sends another
  * ioctl to fs/ecryptfs/ctl or until the kernel module unregisters.
@@ -119,24 +150,28 @@ out_unlock_daemon_list:
 static int
 ecryptfs_miscdev_release(struct inode *inode, struct file *file)
 {
-	struct ecryptfs_daemon *daemon = file->private_data;
+	struct ecryptfs_daemon *daemon = NULL;
+	uid_t euid = current_euid();
 	int rc;
 
+	mutex_lock(&ecryptfs_daemon_hash_mux);
+	rc = ecryptfs_find_daemon_by_euid(&daemon, euid, current_user_ns());
+	if (rc || !daemon)
+		daemon = file->private_data;
 	mutex_lock(&daemon->mux);
 	BUG_ON(!(daemon->flags & ECRYPTFS_DAEMON_MISCDEV_OPEN));
 	daemon->flags &= ~ECRYPTFS_DAEMON_MISCDEV_OPEN;
 	atomic_dec(&ecryptfs_num_miscdev_opens);
 	mutex_unlock(&daemon->mux);
-
-	mutex_lock(&ecryptfs_daemon_hash_mux);
 	rc = ecryptfs_exorcise_daemon(daemon);
-	mutex_unlock(&ecryptfs_daemon_hash_mux);
 	if (rc) {
 		printk(KERN_CRIT "%s: Fatal error whilst attempting to "
 		       "shut down daemon; rc = [%d]. Please report this "
 		       "bug.\n", __func__, rc);
 		BUG();
 	}
+	module_put(THIS_MODULE);
+	mutex_unlock(&ecryptfs_daemon_hash_mux);
 	return rc;
 }
 
@@ -213,7 +248,7 @@ int ecryptfs_send_miscdev(char *data, size_t data_size,
 
 /**
  * ecryptfs_miscdev_read - format and send message from queue
- * @file: miscdevfs handle
+ * @file: fs/ecryptfs/euid miscdevfs handle (ignored)
  * @buf: User buffer into which to copy the next message on the daemon queue
  * @count: Amount of space available in @buf
  * @ppos: Offset in file (ignored)
@@ -227,27 +262,43 @@ static ssize_t
 ecryptfs_miscdev_read(struct file *file, char __user *buf, size_t count,
 		      loff_t *ppos)
 {
-	struct ecryptfs_daemon *daemon = file->private_data;
+	struct ecryptfs_daemon *daemon;
 	struct ecryptfs_msg_ctx *msg_ctx;
 	size_t packet_length_size;
 	char packet_length[ECRYPTFS_MAX_PKT_LEN_SIZE];
 	size_t i;
 	size_t total_length;
+	uid_t euid = current_euid();
 	int rc;
 
+	mutex_lock(&ecryptfs_daemon_hash_mux);
+	/* TODO: Just use file->private_data? */
+	rc = ecryptfs_find_daemon_by_euid(&daemon, euid, current_user_ns());
+	if (rc || !daemon) {
+		mutex_unlock(&ecryptfs_daemon_hash_mux);
+		return -EINVAL;
+	}
 	mutex_lock(&daemon->mux);
+	if (task_pid(current) != daemon->pid) {
+		mutex_unlock(&daemon->mux);
+		mutex_unlock(&ecryptfs_daemon_hash_mux);
+		return -EPERM;
+	}
 	if (daemon->flags & ECRYPTFS_DAEMON_ZOMBIE) {
 		rc = 0;
+		mutex_unlock(&ecryptfs_daemon_hash_mux);
 		printk(KERN_WARNING "%s: Attempt to read from zombified "
 		       "daemon\n", __func__);
 		goto out_unlock_daemon;
 	}
 	if (daemon->flags & ECRYPTFS_DAEMON_IN_READ) {
 		rc = 0;
+		mutex_unlock(&ecryptfs_daemon_hash_mux);
 		goto out_unlock_daemon;
 	}
 	/* This daemon will not go away so long as this flag is set */
 	daemon->flags |= ECRYPTFS_DAEMON_IN_READ;
+	mutex_unlock(&ecryptfs_daemon_hash_mux);
 check_list:
 	if (list_empty(&daemon->msg_ctx_out_queue)) {
 		mutex_unlock(&daemon->mux);
@@ -331,12 +382,16 @@ out_unlock_daemon:
  * ecryptfs_miscdev_response - miscdevess response to message previously sent to daemon
  * @data: Bytes comprising struct ecryptfs_message
  * @data_size: sizeof(struct ecryptfs_message) + data len
+ * @euid: Effective user id of miscdevess sending the miscdev response
+ * @user_ns: The namespace in which @euid applies
+ * @pid: Miscdevess id of miscdevess sending the miscdev response
  * @seq: Sequence number for miscdev response packet
  *
  * Returns zero on success; non-zero otherwise
  */
-static int ecryptfs_miscdev_response(struct ecryptfs_daemon *daemon, char *data,
-				     size_t data_size, u32 seq)
+static int ecryptfs_miscdev_response(char *data, size_t data_size,
+				     uid_t euid, struct user_namespace *user_ns,
+				     struct pid *pid, u32 seq)
 {
 	struct ecryptfs_message *msg = (struct ecryptfs_message *)data;
 	int rc;
@@ -348,7 +403,7 @@ static int ecryptfs_miscdev_response(struct ecryptfs_daemon *daemon, char *data,
 		rc = -EINVAL;
 		goto out;
 	}
-	rc = ecryptfs_process_response(daemon, msg, seq);
+	rc = ecryptfs_process_response(msg, euid, user_ns, pid, seq);
 	if (rc)
 		printk(KERN_ERR
 		       "Error processing response message; rc = [%d]\n", rc);
@@ -358,7 +413,7 @@ out:
 
 /**
  * ecryptfs_miscdev_write - handle write to daemon miscdev handle
- * @file: File for misc dev handle
+ * @file: File for misc dev handle (ignored)
  * @buf: Buffer containing user data
  * @count: Amount of data in @buf
  * @ppos: Pointer to offset in file (ignored)
@@ -373,6 +428,7 @@ ecryptfs_miscdev_write(struct file *file, const char __user *buf,
 	u32 seq;
 	size_t packet_size, packet_size_length;
 	char *data;
+	uid_t euid = current_euid();
 	unsigned char packet_size_peek[ECRYPTFS_MAX_PKT_LEN_SIZE];
 	ssize_t rc;
 
@@ -432,9 +488,10 @@ memdup:
 		}
 		memcpy(&counter_nbo, &data[PKT_CTR_OFFSET], PKT_CTR_SIZE);
 		seq = be32_to_cpu(counter_nbo);
-		rc = ecryptfs_miscdev_response(file->private_data,
+		rc = ecryptfs_miscdev_response(
 				&data[PKT_LEN_OFFSET + packet_size_length],
-				packet_size, seq);
+				packet_size, euid, current_user_ns(),
+				task_pid(current), seq);
 		if (rc) {
 			printk(KERN_WARNING "%s: Failed to deliver miscdev "
 			       "response to requesting operation; rc = [%zd]\n",
@@ -460,7 +517,6 @@ out_free:
 
 
 static const struct file_operations ecryptfs_miscdev_fops = {
-	.owner   = THIS_MODULE,
 	.open    = ecryptfs_miscdev_open,
 	.poll    = ecryptfs_miscdev_poll,
 	.read    = ecryptfs_miscdev_read,

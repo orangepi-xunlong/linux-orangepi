@@ -2,7 +2,7 @@
  * Copyright (C) 2005, 2006
  * Avishay Traeger (avishay@gmail.com)
  * Copyright (C) 2008, 2009
- * Boaz Harrosh <ooo@electrozaur.com>
+ * Boaz Harrosh <bharrosh@panasas.com>
  *
  * Copyrights for code taken from ext2:
  *     Copyright (C) 1992, 1993, 1994, 1995
@@ -56,9 +56,6 @@
 struct exofs_dev {
 	struct ore_dev ored;
 	unsigned did;
-	unsigned urilen;
-	uint8_t *uri;
-	struct kobject ed_kobj;
 };
 /*
  * our extension to the in-memory superblock
@@ -76,7 +73,6 @@ struct exofs_sb_info {
 	struct ore_layout	layout;		/* Default files layout       */
 	struct ore_comp one_comp;		/* id & cred of partition id=0*/
 	struct ore_components oc;		/* comps for the partition    */
-	struct kobject	s_kobj;			/* holds per-sbi kobject      */
 };
 
 /*
@@ -180,16 +176,6 @@ void exofs_make_credential(u8 cred_a[OSD_CAP_LEN],
 			   const struct osd_obj_id *obj);
 int exofs_sbi_write_stats(struct exofs_sb_info *sbi);
 
-/* sys.c                 */
-int exofs_sysfs_init(void);
-void exofs_sysfs_uninit(void);
-int exofs_sysfs_sb_add(struct exofs_sb_info *sbi,
-		       struct exofs_dt_device_info *dt_dev);
-void exofs_sysfs_sb_del(struct exofs_sb_info *sbi);
-int exofs_sysfs_odev_add(struct exofs_dev *edev,
-			 struct exofs_sb_info *sbi);
-void exofs_sysfs_dbg_print(void);
-
 /*********************
  * operation vectors *
  *********************/
@@ -206,6 +192,10 @@ extern const struct address_space_operations exofs_aops;
 /* namei.c           */
 extern const struct inode_operations exofs_dir_inode_operations;
 extern const struct inode_operations exofs_special_inode_operations;
+
+/* symlink.c         */
+extern const struct inode_operations exofs_symlink_inode_operations;
+extern const struct inode_operations exofs_fast_symlink_inode_operations;
 
 /* exofs_init_comps will initialize an ore_components device array
  * pointing to a single ore_comp struct, and a round-robin view

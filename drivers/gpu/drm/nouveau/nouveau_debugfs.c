@@ -29,250 +29,170 @@
  */
 
 #include <linux/debugfs.h>
-#include <nvif/class.h>
-#include <nvif/if0001.h>
-#include "nouveau_debugfs.h"
+
+#include "drmP.h"
 #include "nouveau_drv.h"
+
+#include <ttm/ttm_page_alloc.h>
+
+static int
+nouveau_debugfs_channel_info(struct seq_file *m, void *data)
+{
+	struct drm_info_node *node = (struct drm_info_node *) m->private;
+	struct nouveau_channel *chan = node->info_ent->data;
+
+	seq_printf(m, "channel id    : %d\n", chan->id);
+
+	seq_printf(m, "cpu fifo state:\n");
+	seq_printf(m, "          base: 0x%10llx\n", chan->pushbuf_base);
+	seq_printf(m, "           max: 0x%08x\n", chan->dma.max << 2);
+	seq_printf(m, "           cur: 0x%08x\n", chan->dma.cur << 2);
+	seq_printf(m, "           put: 0x%08x\n", chan->dma.put << 2);
+	seq_printf(m, "          free: 0x%08x\n", chan->dma.free << 2);
+	if (chan->dma.ib_max) {
+		seq_printf(m, "        ib max: 0x%08x\n", chan->dma.ib_max);
+		seq_printf(m, "        ib put: 0x%08x\n", chan->dma.ib_put);
+		seq_printf(m, "       ib free: 0x%08x\n", chan->dma.ib_free);
+	}
+
+	seq_printf(m, "gpu fifo state:\n");
+	seq_printf(m, "           get: 0x%08x\n",
+					nvchan_rd32(chan, chan->user_get));
+	seq_printf(m, "           put: 0x%08x\n",
+					nvchan_rd32(chan, chan->user_put));
+	if (chan->dma.ib_max) {
+		seq_printf(m, "        ib get: 0x%08x\n",
+			   nvchan_rd32(chan, 0x88));
+		seq_printf(m, "        ib put: 0x%08x\n",
+			   nvchan_rd32(chan, 0x8c));
+	}
+
+	seq_printf(m, "last fence    : %d\n", chan->fence.sequence);
+	seq_printf(m, "last signalled: %d\n", chan->fence.sequence_ack);
+	return 0;
+}
+
+int
+nouveau_debugfs_channel_init(struct nouveau_channel *chan)
+{
+	struct drm_nouveau_private *dev_priv = chan->dev->dev_private;
+	struct drm_minor *minor = chan->dev->primary;
+	int ret;
+
+	if (!dev_priv->debugfs.channel_root) {
+		dev_priv->debugfs.channel_root =
+			debugfs_create_dir("channel", minor->debugfs_root);
+		if (!dev_priv->debugfs.channel_root)
+			return -ENOENT;
+	}
+
+	snprintf(chan->debugfs.name, 32, "%d", chan->id);
+	chan->debugfs.info.name = chan->debugfs.name;
+	chan->debugfs.info.show = nouveau_debugfs_channel_info;
+	chan->debugfs.info.driver_features = 0;
+	chan->debugfs.info.data = chan;
+
+	ret = drm_debugfs_create_files(&chan->debugfs.info, 1,
+				       dev_priv->debugfs.channel_root,
+				       chan->dev->primary);
+	if (ret == 0)
+		chan->debugfs.active = true;
+	return ret;
+}
+
+void
+nouveau_debugfs_channel_fini(struct nouveau_channel *chan)
+{
+	struct drm_nouveau_private *dev_priv = chan->dev->dev_private;
+
+	if (!chan->debugfs.active)
+		return;
+
+	drm_debugfs_remove_files(&chan->debugfs.info, 1, chan->dev->primary);
+	chan->debugfs.active = false;
+
+	if (chan == dev_priv->channel) {
+		debugfs_remove(dev_priv->debugfs.channel_root);
+		dev_priv->debugfs.channel_root = NULL;
+	}
+}
+
+static int
+nouveau_debugfs_chipset_info(struct seq_file *m, void *data)
+{
+	struct drm_info_node *node = (struct drm_info_node *) m->private;
+	struct drm_minor *minor = node->minor;
+	struct drm_device *dev = minor->dev;
+	struct drm_nouveau_private *dev_priv = dev->dev_private;
+	uint32_t ppci_0;
+
+	ppci_0 = nv_rd32(dev, dev_priv->chipset >= 0x40 ? 0x88000 : 0x1800);
+
+	seq_printf(m, "PMC_BOOT_0: 0x%08x\n", nv_rd32(dev, NV03_PMC_BOOT_0));
+	seq_printf(m, "PCI ID    : 0x%04x:0x%04x\n",
+		   ppci_0 & 0xffff, ppci_0 >> 16);
+	return 0;
+}
+
+static int
+nouveau_debugfs_memory_info(struct seq_file *m, void *data)
+{
+	struct drm_info_node *node = (struct drm_info_node *) m->private;
+	struct drm_minor *minor = node->minor;
+	struct drm_nouveau_private *dev_priv = minor->dev->dev_private;
+
+	seq_printf(m, "VRAM total: %dKiB\n", (int)(dev_priv->vram_size >> 10));
+	return 0;
+}
 
 static int
 nouveau_debugfs_vbios_image(struct seq_file *m, void *data)
 {
 	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct nouveau_drm *drm = nouveau_drm(node->minor->dev);
+	struct drm_nouveau_private *dev_priv = node->minor->dev->dev_private;
 	int i;
 
-	for (i = 0; i < drm->vbios.length; i++)
-		seq_printf(m, "%c", drm->vbios.data[i]);
+	for (i = 0; i < dev_priv->vbios.length; i++)
+		seq_printf(m, "%c", dev_priv->vbios.data[i]);
 	return 0;
 }
 
 static int
-nouveau_debugfs_pstate_get(struct seq_file *m, void *data)
+nouveau_debugfs_evict_vram(struct seq_file *m, void *data)
 {
 	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct nouveau_debugfs *debugfs = nouveau_debugfs(node->minor->dev);
-	struct nvif_object *ctrl = &debugfs->ctrl;
-	struct nvif_control_pstate_info_v0 info = {};
-	int ret, i;
+	struct drm_nouveau_private *dev_priv = node->minor->dev->dev_private;
+	int ret;
 
-	if (!debugfs)
-		return -ENODEV;
-
-	ret = nvif_mthd(ctrl, NVIF_CONTROL_PSTATE_INFO, &info, sizeof(info));
+	ret = ttm_bo_evict_mm(&dev_priv->ttm.bdev, TTM_PL_VRAM);
 	if (ret)
-		return ret;
-
-	for (i = 0; i < info.count + 1; i++) {
-		const s32 state = i < info.count ? i :
-			NVIF_CONTROL_PSTATE_ATTR_V0_STATE_CURRENT;
-		struct nvif_control_pstate_attr_v0 attr = {
-			.state = state,
-			.index = 0,
-		};
-
-		ret = nvif_mthd(ctrl, NVIF_CONTROL_PSTATE_ATTR,
-				&attr, sizeof(attr));
-		if (ret)
-			return ret;
-
-		if (i < info.count)
-			seq_printf(m, "%02x:", attr.state);
-		else
-			seq_printf(m, "%s:", info.pwrsrc == 0 ? "DC" :
-					     info.pwrsrc == 1 ? "AC" : "--");
-
-		attr.index = 0;
-		do {
-			attr.state = state;
-			ret = nvif_mthd(ctrl, NVIF_CONTROL_PSTATE_ATTR,
-					&attr, sizeof(attr));
-			if (ret)
-				return ret;
-
-			seq_printf(m, " %s %d", attr.name, attr.min);
-			if (attr.min != attr.max)
-				seq_printf(m, "-%d", attr.max);
-			seq_printf(m, " %s", attr.unit);
-		} while (attr.index);
-
-		if (state >= 0) {
-			if (info.ustate_ac == state)
-				seq_printf(m, " AC");
-			if (info.ustate_dc == state)
-				seq_printf(m, " DC");
-			if (info.pstate == state)
-				seq_printf(m, " *");
-		} else {
-			if (info.ustate_ac < -1)
-				seq_printf(m, " AC");
-			if (info.ustate_dc < -1)
-				seq_printf(m, " DC");
-		}
-
-		seq_printf(m, "\n");
-	}
-
+		seq_printf(m, "failed: %d", ret);
+	else
+		seq_printf(m, "succeeded\n");
 	return 0;
 }
-
-static ssize_t
-nouveau_debugfs_pstate_set(struct file *file, const char __user *ubuf,
-			   size_t len, loff_t *offp)
-{
-	struct seq_file *m = file->private_data;
-	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct nouveau_debugfs *debugfs = nouveau_debugfs(node->minor->dev);
-	struct nvif_object *ctrl = &debugfs->ctrl;
-	struct nvif_control_pstate_user_v0 args = { .pwrsrc = -EINVAL };
-	char buf[32] = {}, *tmp, *cur = buf;
-	long value, ret;
-
-	if (!debugfs)
-		return -ENODEV;
-
-	if (len >= sizeof(buf))
-		return -EINVAL;
-
-	if (copy_from_user(buf, ubuf, len))
-		return -EFAULT;
-
-	if ((tmp = strchr(buf, '\n')))
-		*tmp = '\0';
-
-	if (!strncasecmp(cur, "dc:", 3)) {
-		args.pwrsrc = 0;
-		cur += 3;
-	} else
-	if (!strncasecmp(cur, "ac:", 3)) {
-		args.pwrsrc = 1;
-		cur += 3;
-	}
-
-	if (!strcasecmp(cur, "none"))
-		args.ustate = NVIF_CONTROL_PSTATE_USER_V0_STATE_UNKNOWN;
-	else
-	if (!strcasecmp(cur, "auto"))
-		args.ustate = NVIF_CONTROL_PSTATE_USER_V0_STATE_PERFMON;
-	else {
-		ret = kstrtol(cur, 16, &value);
-		if (ret)
-			return ret;
-		args.ustate = value;
-	}
-
-	ret = nvif_mthd(ctrl, NVIF_CONTROL_PSTATE_USER, &args, sizeof(args));
-	if (ret < 0)
-		return ret;
-
-	return len;
-}
-
-static int
-nouveau_debugfs_pstate_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, nouveau_debugfs_pstate_get, inode->i_private);
-}
-
-static const struct file_operations nouveau_pstate_fops = {
-	.owner = THIS_MODULE,
-	.open = nouveau_debugfs_pstate_open,
-	.read = seq_read,
-	.write = nouveau_debugfs_pstate_set,
-};
 
 static struct drm_info_list nouveau_debugfs_list[] = {
+	{ "evict_vram", nouveau_debugfs_evict_vram, 0, NULL },
+	{ "chipset", nouveau_debugfs_chipset_info, 0, NULL },
+	{ "memory", nouveau_debugfs_memory_info, 0, NULL },
 	{ "vbios.rom", nouveau_debugfs_vbios_image, 0, NULL },
+	{ "ttm_page_pool", ttm_page_alloc_debugfs, 0, NULL },
+	{ "ttm_dma_page_pool", ttm_dma_page_alloc_debugfs, 0, NULL },
 };
 #define NOUVEAU_DEBUGFS_ENTRIES ARRAY_SIZE(nouveau_debugfs_list)
 
-static const struct nouveau_debugfs_files {
-	const char *name;
-	const struct file_operations *fops;
-} nouveau_debugfs_files[] = {
-	{"pstate", &nouveau_pstate_fops},
-};
-
-static int
-nouveau_debugfs_create_file(struct drm_minor *minor,
-		const struct nouveau_debugfs_files *ndf)
+int
+nouveau_debugfs_init(struct drm_minor *minor)
 {
-	struct drm_info_node *node;
-
-	node = kmalloc(sizeof(*node), GFP_KERNEL);
-	if (node == NULL)
-		return -ENOMEM;
-
-	node->minor = minor;
-	node->info_ent = (const void *)ndf->fops;
-	node->dent = debugfs_create_file(ndf->name, S_IRUGO | S_IWUSR,
-					 minor->debugfs_root, node, ndf->fops);
-	if (!node->dent) {
-		kfree(node);
-		return -ENOMEM;
-	}
-
-	mutex_lock(&minor->debugfs_lock);
-	list_add(&node->list, &minor->debugfs_list);
-	mutex_unlock(&minor->debugfs_lock);
+	drm_debugfs_create_files(nouveau_debugfs_list, NOUVEAU_DEBUGFS_ENTRIES,
+				 minor->debugfs_root, minor);
 	return 0;
 }
 
-int
-nouveau_drm_debugfs_init(struct drm_minor *minor)
-{
-	int i, ret;
-
-	for (i = 0; i < ARRAY_SIZE(nouveau_debugfs_files); i++) {
-		ret = nouveau_debugfs_create_file(minor,
-						  &nouveau_debugfs_files[i]);
-
-		if (ret)
-			return ret;
-	}
-
-	return drm_debugfs_create_files(nouveau_debugfs_list,
-					NOUVEAU_DEBUGFS_ENTRIES,
-					minor->debugfs_root, minor);
-}
-
 void
-nouveau_drm_debugfs_cleanup(struct drm_minor *minor)
+nouveau_debugfs_takedown(struct drm_minor *minor)
 {
-	int i;
-
 	drm_debugfs_remove_files(nouveau_debugfs_list, NOUVEAU_DEBUGFS_ENTRIES,
 				 minor);
-
-	for (i = 0; i < ARRAY_SIZE(nouveau_debugfs_files); i++) {
-		drm_debugfs_remove_files((struct drm_info_list *)
-					 nouveau_debugfs_files[i].fops,
-					 1, minor);
-	}
-}
-
-int
-nouveau_debugfs_init(struct nouveau_drm *drm)
-{
-	int ret;
-
-	drm->debugfs = kzalloc(sizeof(*drm->debugfs), GFP_KERNEL);
-	if (!drm->debugfs)
-		return -ENOMEM;
-
-	ret = nvif_object_init(&drm->device.object, 0, NVIF_CLASS_CONTROL,
-			       NULL, 0, &drm->debugfs->ctrl);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
-void
-nouveau_debugfs_fini(struct nouveau_drm *drm)
-{
-	if (drm->debugfs && drm->debugfs->ctrl.priv)
-		nvif_object_fini(&drm->debugfs->ctrl);
-
-	kfree(drm->debugfs);
-	drm->debugfs = NULL;
 }

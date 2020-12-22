@@ -16,13 +16,6 @@
 
 KBUILD_DEFCONFIG := multi_defconfig
 
-ifneq ($(SUBARCH),$(ARCH))
-	ifeq ($(CROSS_COMPILE),)
-		CROSS_COMPILE := $(call cc-cross-prefix, \
-			m68k-linux-gnu- m68k-linux- m68k-unknown-linux-gnu-)
-	endif
-endif
-
 #
 #	Enable processor type. Ordering of these is important - we want to
 #	use the minimum processor type of the range we support. The logic
@@ -39,29 +32,24 @@ cpuflags-$(CONFIG_M68040)	:= -m68040
 endif
 cpuflags-$(CONFIG_M68030)	:=
 cpuflags-$(CONFIG_M68020)	:=
+cpuflags-$(CONFIG_M68360)	:= -m68332
 cpuflags-$(CONFIG_M68000)	:= -m68000
-cpuflags-$(CONFIG_M5441x)	:= $(call cc-option,-mcpu=54455,-mcfv4e)
 cpuflags-$(CONFIG_M54xx)	:= $(call cc-option,-mcpu=5475,-m5200)
 cpuflags-$(CONFIG_M5407)	:= $(call cc-option,-mcpu=5407,-m5200)
 cpuflags-$(CONFIG_M532x)	:= $(call cc-option,-mcpu=532x,-m5307)
-cpuflags-$(CONFIG_M537x)	:= $(call cc-option,-mcpu=537x,-m5307)
 cpuflags-$(CONFIG_M5307)	:= $(call cc-option,-mcpu=5307,-m5200)
 cpuflags-$(CONFIG_M528x)	:= $(call cc-option,-mcpu=528x,-m5307)
 cpuflags-$(CONFIG_M5275)	:= $(call cc-option,-mcpu=5275,-m5307)
 cpuflags-$(CONFIG_M5272)	:= $(call cc-option,-mcpu=5272,-m5307)
 cpuflags-$(CONFIG_M5271)	:= $(call cc-option,-mcpu=5271,-m5307)
 cpuflags-$(CONFIG_M523x)	:= $(call cc-option,-mcpu=523x,-m5307)
-cpuflags-$(CONFIG_M525x)	:= $(call cc-option,-mcpu=5253,-m5200)
 cpuflags-$(CONFIG_M5249)	:= $(call cc-option,-mcpu=5249,-m5200)
 cpuflags-$(CONFIG_M520x)	:= $(call cc-option,-mcpu=5208,-m5200)
 cpuflags-$(CONFIG_M5206e)	:= $(call cc-option,-mcpu=5206e,-m5200)
 cpuflags-$(CONFIG_M5206)	:= $(call cc-option,-mcpu=5206,-m5200)
 
 KBUILD_AFLAGS += $(cpuflags-y)
-KBUILD_CFLAGS += $(cpuflags-y)
-
-KBUILD_CFLAGS += -pipe -ffreestanding
-
+KBUILD_CFLAGS += $(cpuflags-y) -pipe
 ifdef CONFIG_MMU
 # without -fno-strength-reduce the 53c7xx.c driver fails ;-(
 KBUILD_CFLAGS += -fno-strength-reduce -ffixed-a2
@@ -74,6 +62,12 @@ endif
 
 LDFLAGS := -m m68kelf
 KBUILD_LDFLAGS_MODULE += -T $(srctree)/arch/m68k/kernel/module.lds
+ifneq ($(SUBARCH),$(ARCH))
+	ifeq ($(CROSS_COMPILE),)
+		CROSS_COMPILE := $(call cc-cross-prefix, \
+			m68k-linux-gnu- m68k-linux- m68k-unknown-linux-gnu-)
+	endif
+endif
 
 ifdef CONFIG_SUN3
 LDFLAGS_vmlinux = -N
@@ -94,8 +88,9 @@ endif
 #
 head-y				:= arch/m68k/kernel/head.o
 head-$(CONFIG_SUN3)		:= arch/m68k/kernel/sun3-head.o
-head-$(CONFIG_M68000)		:= arch/m68k/68000/head.o
-head-$(CONFIG_COLDFIRE)		:= arch/m68k/coldfire/head.o
+head-$(CONFIG_M68360)		:= arch/m68k/platform/68360/head.o
+head-$(CONFIG_M68000)		:= arch/m68k/platform/68328/head.o
+head-$(CONFIG_COLDFIRE)		:= arch/m68k/platform/coldfire/head.o
 
 core-y				+= arch/m68k/kernel/	arch/m68k/mm/
 libs-y				+= arch/m68k/lib/
@@ -115,8 +110,23 @@ core-$(CONFIG_NATFEAT)		+= arch/m68k/emu/
 core-$(CONFIG_M68040)		+= arch/m68k/fpsp040/
 core-$(CONFIG_M68060)		+= arch/m68k/ifpsp060/
 core-$(CONFIG_M68KFPU_EMU)	+= arch/m68k/math-emu/
-core-$(CONFIG_M68000)		+= arch/m68k/68000/
-core-$(CONFIG_COLDFIRE)		+= arch/m68k/coldfire/
+core-$(CONFIG_M68360)		+= arch/m68k/platform/68360/
+core-$(CONFIG_M68000)		+= arch/m68k/platform/68328/
+core-$(CONFIG_M68EZ328)		+= arch/m68k/platform/68EZ328/
+core-$(CONFIG_M68VZ328)		+= arch/m68k/platform/68VZ328/
+core-$(CONFIG_COLDFIRE)		+= arch/m68k/platform/coldfire/
+core-$(CONFIG_M5206)		+= arch/m68k/platform/5206/
+core-$(CONFIG_M5206e)		+= arch/m68k/platform/5206/
+core-$(CONFIG_M520x)		+= arch/m68k/platform/520x/
+core-$(CONFIG_M523x)		+= arch/m68k/platform/523x/
+core-$(CONFIG_M5249)		+= arch/m68k/platform/5249/
+core-$(CONFIG_M527x)		+= arch/m68k/platform/527x/
+core-$(CONFIG_M5272)		+= arch/m68k/platform/5272/
+core-$(CONFIG_M528x)		+= arch/m68k/platform/528x/
+core-$(CONFIG_M5307)		+= arch/m68k/platform/5307/
+core-$(CONFIG_M532x)		+= arch/m68k/platform/532x/
+core-$(CONFIG_M5407)		+= arch/m68k/platform/5407/
+core-$(CONFIG_M54xx)		+= arch/m68k/platform/54xx/
 
 
 all:	zImage

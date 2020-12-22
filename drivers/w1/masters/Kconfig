@@ -26,7 +26,7 @@ config W1_MASTER_DS2490
 
 config W1_MASTER_DS2482
 	tristate "Maxim DS2482 I2C to 1-Wire bridge"
-	depends on I2C
+	depends on I2C && EXPERIMENTAL
 	help
 	  If you say yes here you get support for the Maxim DS2482
 	  I2C to 1-Wire bridge.
@@ -36,12 +36,13 @@ config W1_MASTER_DS2482
 
 config W1_MASTER_MXC
 	tristate "Freescale MXC 1-wire busmaster"
-	depends on ARCH_MXC || COMPILE_TEST
+	depends on W1 && ARCH_MXC
 	help
 	  Say Y here to enable MXC 1-wire host
 
 config W1_MASTER_DS1WM
 	tristate "Maxim DS1WM 1-wire busmaster"
+	depends on W1 && GENERIC_HARDIRQS
 	help
 	  Say Y here to enable the DS1WM 1-wire driver, such as that
 	  in HP iPAQ devices like h5xxx, h2200, and ASIC3-based like
@@ -49,7 +50,7 @@ config W1_MASTER_DS1WM
 
 config W1_MASTER_GPIO
 	tristate "GPIO 1-wire busmaster"
-	depends on GPIOLIB
+	depends on GENERIC_GPIO
 	help
 	  Say Y here if you want to communicate with your 1-wire devices using
 	  GPIO pins. This driver uses the GPIO API to control the wire.
@@ -59,7 +60,7 @@ config W1_MASTER_GPIO
 
 config HDQ_MASTER_OMAP
 	tristate "OMAP HDQ driver"
-	depends on ARCH_OMAP
+	depends on SOC_OMAP2430 || ARCH_OMAP3
 	help
 	  Say Y here if you want support for the 1-wire or HDQ Interface
 	  on an OMAP processor.

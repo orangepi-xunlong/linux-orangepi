@@ -47,9 +47,6 @@ int usb_choose_configuration(struct usb_device *udev)
 	int insufficient_power = 0;
 	struct usb_host_config *c, *best;
 
-	if (usb_device_is_owned(udev))
-		return 0;
-
 	best = NULL;
 	c = udev->config;
 	num_configs = udev->descriptor.bNumConfigurations;
@@ -100,7 +97,7 @@ int usb_choose_configuration(struct usb_device *udev)
 		 */
 
 		/* Rule out configs that draw too much bus current */
-		if (usb_get_max_power(udev, c) > udev->bus_mA) {
+		if (c->desc.bMaxPower * 2 > udev->bus_mA) {
 			insufficient_power++;
 			continue;
 		}
@@ -155,7 +152,6 @@ int usb_choose_configuration(struct usb_device *udev)
 	}
 	return i;
 }
-EXPORT_SYMBOL_GPL(usb_choose_configuration);
 
 static int generic_probe(struct usb_device *udev)
 {
@@ -164,13 +160,15 @@ static int generic_probe(struct usb_device *udev)
 	/* Choose and set the configuration.  This registers the interfaces
 	 * with the driver core and lets interface drivers bind to them.
 	 */
-	if (udev->authorized == 0)
+	if (usb_device_is_owned(udev))
+		;		/* Don't configure if the device is owned */
+	else if (udev->authorized == 0)
 		dev_err(&udev->dev, "Device is not authorized for usage\n");
 	else {
 		c = usb_choose_configuration(udev);
 		if (c >= 0) {
 			err = usb_set_configuration(udev, c);
-			if (err && err != -ENODEV) {
+			if (err) {
 				dev_err(&udev->dev, "can't set config #%d, error %d\n",
 					c, err);
 				/* This need not be fatal.  The user can try to
@@ -208,13 +206,8 @@ static int generic_suspend(struct usb_device *udev, pm_message_t msg)
 	if (!udev->parent)
 		rc = hcd_bus_suspend(udev, msg);
 
-	/*
-	 * Non-root USB2 devices don't need to do anything for FREEZE
-	 * or PRETHAW. USB3 devices don't support global suspend and
-	 * needs to be selectively suspended.
-	 */
-	else if ((msg.event == PM_EVENT_FREEZE || msg.event == PM_EVENT_PRETHAW)
-		 && (udev->speed < USB_SPEED_SUPER))
+	/* Non-root devices don't need to do anything for FREEZE or PRETHAW */
+	else if (msg.event == PM_EVENT_FREEZE || msg.event == PM_EVENT_PRETHAW)
 		rc = 0;
 	else
 		rc = usb_port_suspend(udev, msg);

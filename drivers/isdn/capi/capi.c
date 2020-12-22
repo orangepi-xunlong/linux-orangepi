@@ -77,6 +77,8 @@ struct ackqueue_entry {
 };
 
 struct capiminor {
+	struct kref kref;
+
 	unsigned int      minor;
 
 	struct capi20_appl	*ap;
@@ -188,20 +190,7 @@ static void capiminor_del_all_ack(struct capiminor *mp)
 
 /* -------- struct capiminor ---------------------------------------- */
 
-static void capiminor_destroy(struct tty_port *port)
-{
-	struct capiminor *mp = container_of(port, struct capiminor, port);
-
-	kfree_skb(mp->outskb);
-	skb_queue_purge(&mp->inqueue);
-	skb_queue_purge(&mp->outqueue);
-	capiminor_del_all_ack(mp);
-	kfree(mp);
-}
-
-static const struct tty_port_operations capiminor_port_ops = {
-	.destruct = capiminor_destroy,
-};
+static const struct tty_port_operations capiminor_port_ops; /* we have none */
 
 static struct capiminor *capiminor_alloc(struct capi20_appl *ap, u32 ncci)
 {
@@ -214,6 +203,8 @@ static struct capiminor *capiminor_alloc(struct capi20_appl *ap, u32 ncci)
 		printk(KERN_ERR "capi: can't alloc capiminor\n");
 		return NULL;
 	}
+
+	kref_init(&mp->kref);
 
 	mp->ap = ap;
 	mp->ncci = ncci;
@@ -243,8 +234,7 @@ static struct capiminor *capiminor_alloc(struct capi20_appl *ap, u32 ncci)
 
 	mp->minor = minor;
 
-	dev = tty_port_register_device(&mp->port, capinc_tty_driver, minor,
-			NULL);
+	dev = tty_register_device(capinc_tty_driver, minor, NULL);
 	if (IS_ERR(dev))
 		goto err_out2;
 
@@ -256,8 +246,19 @@ err_out2:
 	spin_unlock(&capiminors_lock);
 
 err_out1:
-	tty_port_put(&mp->port);
+	kfree(mp);
 	return NULL;
+}
+
+static void capiminor_destroy(struct kref *kref)
+{
+	struct capiminor *mp = container_of(kref, struct capiminor, kref);
+
+	kfree_skb(mp->outskb);
+	skb_queue_purge(&mp->inqueue);
+	skb_queue_purge(&mp->outqueue);
+	capiminor_del_all_ack(mp);
+	kfree(mp);
 }
 
 static struct capiminor *capiminor_get(unsigned int minor)
@@ -267,7 +268,7 @@ static struct capiminor *capiminor_get(unsigned int minor)
 	spin_lock(&capiminors_lock);
 	mp = capiminors[minor];
 	if (mp)
-		tty_port_get(&mp->port);
+		kref_get(&mp->kref);
 	spin_unlock(&capiminors_lock);
 
 	return mp;
@@ -275,7 +276,7 @@ static struct capiminor *capiminor_get(unsigned int minor)
 
 static inline void capiminor_put(struct capiminor *mp)
 {
-	tty_port_put(&mp->port);
+	kref_put(&mp->kref, capiminor_destroy);
 }
 
 static void capiminor_free(struct capiminor *mp)
@@ -335,6 +336,11 @@ static inline void
 capincci_alloc_minor(struct capidev *cdev, struct capincci *np) { }
 static inline void capincci_free_minor(struct capincci *np) { }
 
+static inline unsigned int capincci_minor_opencount(struct capincci *np)
+{
+	return 0;
+}
+
 #endif /* !CONFIG_ISDN_CAPI_MIDDLEWARE */
 
 static struct capincci *capincci_alloc(struct capidev *cdev, u32 ncci)
@@ -366,7 +372,6 @@ static void capincci_free(struct capidev *cdev, u32 ncci)
 		}
 }
 
-#ifdef CONFIG_ISDN_CAPI_MIDDLEWARE
 static struct capincci *capincci_find(struct capidev *cdev, u32 ncci)
 {
 	struct capincci *np;
@@ -377,6 +382,7 @@ static struct capincci *capincci_find(struct capidev *cdev, u32 ncci)
 	return NULL;
 }
 
+#ifdef CONFIG_ISDN_CAPI_MIDDLEWARE
 /* -------- handle data queue --------------------------------------- */
 
 static struct sk_buff *
@@ -569,10 +575,11 @@ static void capi_recv_message(struct capi20_appl *ap, struct sk_buff *skb)
 {
 	struct capidev *cdev = ap->private;
 #ifdef CONFIG_ISDN_CAPI_MIDDLEWARE
+	struct tty_struct *tty;
 	struct capiminor *mp;
 	u16 datahandle;
-	struct capincci *np;
 #endif /* CONFIG_ISDN_CAPI_MIDDLEWARE */
+	struct capincci *np;
 
 	mutex_lock(&cdev->lock);
 
@@ -590,12 +597,6 @@ static void capi_recv_message(struct capi20_appl *ap, struct sk_buff *skb)
 		goto unlock_out;
 	}
 
-#ifndef CONFIG_ISDN_CAPI_MIDDLEWARE
-	skb_queue_tail(&cdev->recvqueue, skb);
-	wake_up_interruptible(&cdev->recvwait);
-
-#else /* CONFIG_ISDN_CAPI_MIDDLEWARE */
-
 	np = capincci_find(cdev, CAPIMSG_CONTROL(skb->data));
 	if (!np) {
 		printk(KERN_ERR "BUG: capi_signal: ncci not found\n");
@@ -603,6 +604,12 @@ static void capi_recv_message(struct capi20_appl *ap, struct sk_buff *skb)
 		wake_up_interruptible(&cdev->recvwait);
 		goto unlock_out;
 	}
+
+#ifndef CONFIG_ISDN_CAPI_MIDDLEWARE
+	skb_queue_tail(&cdev->recvqueue, skb);
+	wake_up_interruptible(&cdev->recvwait);
+
+#else /* CONFIG_ISDN_CAPI_MIDDLEWARE */
 
 	mp = np->minorp;
 	if (!mp) {
@@ -626,7 +633,11 @@ static void capi_recv_message(struct capi20_appl *ap, struct sk_buff *skb)
 			 CAPIMSG_U16(skb->data, CAPIMSG_BASELEN + 4 + 2));
 		kfree_skb(skb);
 		capiminor_del_ack(mp, datahandle);
-		tty_port_tty_wakeup(&mp->port);
+		tty = tty_port_tty_get(&mp->port);
+		if (tty) {
+			tty_wakeup(tty);
+			tty_kref_put(tty);
+		}
 		handle_minor_send(mp);
 
 	} else {
@@ -775,6 +786,7 @@ register_out:
 		return retval;
 
 	case CAPI_GET_VERSION:
+	{
 		if (copy_from_user(&data.contr, argp,
 				   sizeof(data.contr)))
 			return -EFAULT;
@@ -784,9 +796,11 @@ register_out:
 		if (copy_to_user(argp, &data.version,
 				 sizeof(data.version)))
 			return -EFAULT;
-		return 0;
+	}
+	return 0;
 
 	case CAPI_GET_SERIAL:
+	{
 		if (copy_from_user(&data.contr, argp,
 				   sizeof(data.contr)))
 			return -EFAULT;
@@ -796,9 +810,10 @@ register_out:
 		if (copy_to_user(argp, data.serial,
 				 sizeof(data.serial)))
 			return -EFAULT;
-		return 0;
-
+	}
+	return 0;
 	case CAPI_GET_PROFILE:
+	{
 		if (copy_from_user(&data.contr, argp,
 				   sizeof(data.contr)))
 			return -EFAULT;
@@ -822,9 +837,11 @@ register_out:
 		}
 		if (retval)
 			return -EFAULT;
-		return 0;
+	}
+	return 0;
 
 	case CAPI_GET_MANUFACTURER:
+	{
 		if (copy_from_user(&data.contr, argp,
 				   sizeof(data.contr)))
 			return -EFAULT;
@@ -836,8 +853,8 @@ register_out:
 				 sizeof(data.manufacturer)))
 			return -EFAULT;
 
-		return 0;
-
+	}
+	return 0;
 	case CAPI_GET_ERRCODE:
 		data.errcode = cdev->errcode;
 		cdev->errcode = CAPI_NOERROR;
@@ -853,7 +870,8 @@ register_out:
 			return 0;
 		return -ENXIO;
 
-	case CAPI_MANUFACTURER_CMD: {
+	case CAPI_MANUFACTURER_CMD:
+	{
 		struct capi_manufacturer_cmd mcmd;
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
@@ -861,6 +879,8 @@ register_out:
 			return -EFAULT;
 		return capi20_manufacturer(mcmd.cmd, mcmd.data);
 	}
+	return 0;
+
 	case CAPI_SET_FLAGS:
 	case CAPI_CLR_FLAGS: {
 		unsigned userflags;
@@ -882,11 +902,6 @@ register_out:
 			return -EFAULT;
 		return 0;
 
-#ifndef CONFIG_ISDN_CAPI_MIDDLEWARE
-	case CAPI_NCCI_OPENCOUNT:
-		return 0;
-
-#else /* CONFIG_ISDN_CAPI_MIDDLEWARE */
 	case CAPI_NCCI_OPENCOUNT: {
 		struct capincci *nccip;
 		unsigned ncci;
@@ -903,6 +918,7 @@ register_out:
 		return count;
 	}
 
+#ifdef CONFIG_ISDN_CAPI_MIDDLEWARE
 	case CAPI_NCCI_GETUNIT: {
 		struct capincci *nccip;
 		struct capiminor *mp;
@@ -1260,7 +1276,7 @@ static int __init capinc_tty_init(void)
 	if (capi_ttyminors <= 0)
 		capi_ttyminors = CAPINC_NR_PORTS;
 
-	capiminors = kzalloc(sizeof(struct capiminor *) * capi_ttyminors,
+	capiminors = kzalloc(sizeof(struct capi_minor *) * capi_ttyminors,
 			     GFP_KERNEL);
 	if (!capiminors)
 		return -ENOMEM;
@@ -1271,7 +1287,7 @@ static int __init capinc_tty_init(void)
 		return -ENOMEM;
 	}
 	drv->driver_name = "capi_nc";
-	drv->name = "capi!";
+	drv->name = "capi";
 	drv->major = 0;
 	drv->minor_start = 0;
 	drv->type = TTY_DRIVER_TYPE_SERIAL;
@@ -1417,7 +1433,7 @@ static int __init capi_init(void)
 		return PTR_ERR(capi_class);
 	}
 
-	device_create(capi_class, NULL, MKDEV(capi_major, 0), NULL, "capi20");
+	device_create(capi_class, NULL, MKDEV(capi_major, 0), NULL, "capi");
 
 	if (capinc_tty_init() < 0) {
 		device_destroy(capi_class, MKDEV(capi_major, 0));

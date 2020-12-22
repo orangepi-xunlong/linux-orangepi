@@ -33,7 +33,6 @@
 #include <linux/pagemap.h>
 #include <linux/idr.h>
 #include <linux/sched.h>
-#include <linux/uio.h>
 #include <net/9p/9p.h>
 #include <net/9p/client.h>
 
@@ -51,11 +50,12 @@
  */
 static int v9fs_fid_readpage(struct p9_fid *fid, struct page *page)
 {
-	struct inode *inode = page->mapping->host;
-	struct bio_vec bvec = {.bv_page = page, .bv_len = PAGE_SIZE};
-	struct iov_iter to;
-	int retval, err;
+	int retval;
+	loff_t offset;
+	char *buffer;
+	struct inode *inode;
 
+	inode = page->mapping->host;
 	p9_debug(P9_DEBUG_VFS, "\n");
 
 	BUG_ON(!PageLocked(page));
@@ -64,16 +64,16 @@ static int v9fs_fid_readpage(struct p9_fid *fid, struct page *page)
 	if (retval == 0)
 		return retval;
 
-	iov_iter_bvec(&to, ITER_BVEC | READ, &bvec, 1, PAGE_SIZE);
+	buffer = kmap(page);
+	offset = page_offset(page);
 
-	retval = p9_client_read(fid, page_offset(page), &to, &err);
-	if (err) {
+	retval = v9fs_fid_readn(fid, buffer, NULL, PAGE_CACHE_SIZE, offset);
+	if (retval < 0) {
 		v9fs_uncache_page(inode, page);
-		retval = err;
 		goto done;
 	}
 
-	zero_user(page, retval, PAGE_SIZE - retval);
+	memset(buffer + retval, 0, PAGE_CACHE_SIZE - retval);
 	flush_dcache_page(page);
 	SetPageUptodate(page);
 
@@ -81,6 +81,7 @@ static int v9fs_fid_readpage(struct p9_fid *fid, struct page *page)
 	retval = 0;
 
 done:
+	kunmap(page);
 	unlock_page(page);
 	return retval;
 }
@@ -146,52 +147,58 @@ static int v9fs_release_page(struct page *page, gfp_t gfp)
  * @offset: offset in the page
  */
 
-static void v9fs_invalidate_page(struct page *page, unsigned int offset,
-				 unsigned int length)
+static void v9fs_invalidate_page(struct page *page, unsigned long offset)
 {
 	/*
 	 * If called with zero offset, we should release
 	 * the private state assocated with the page
 	 */
-	if (offset == 0 && length == PAGE_SIZE)
+	if (offset == 0)
 		v9fs_fscache_invalidate_page(page);
 }
 
 static int v9fs_vfs_writepage_locked(struct page *page)
 {
+	char *buffer;
+	int retval, len;
+	loff_t offset, size;
+	mm_segment_t old_fs;
+	struct v9fs_inode *v9inode;
 	struct inode *inode = page->mapping->host;
-	struct v9fs_inode *v9inode = V9FS_I(inode);
-	loff_t size = i_size_read(inode);
-	struct iov_iter from;
-	struct bio_vec bvec;
-	int err, len;
 
-	if (page->index == size >> PAGE_SHIFT)
-		len = size & ~PAGE_MASK;
+	v9inode = V9FS_I(inode);
+	size = i_size_read(inode);
+	if (page->index == size >> PAGE_CACHE_SHIFT)
+		len = size & ~PAGE_CACHE_MASK;
 	else
-		len = PAGE_SIZE;
-
-	bvec.bv_page = page;
-	bvec.bv_offset = 0;
-	bvec.bv_len = len;
-	iov_iter_bvec(&from, ITER_BVEC | WRITE, &bvec, 1, len);
-
-	/* We should have writeback_fid always set */
-	BUG_ON(!v9inode->writeback_fid);
+		len = PAGE_CACHE_SIZE;
 
 	set_page_writeback(page);
 
-	p9_client_write(v9inode->writeback_fid, page_offset(page), &from, &err);
+	buffer = kmap(page);
+	offset = page_offset(page);
 
+	old_fs = get_fs();
+	set_fs(get_ds());
+	/* We should have writeback_fid always set */
+	BUG_ON(!v9inode->writeback_fid);
+
+	retval = v9fs_file_write_internal(inode,
+					  v9inode->writeback_fid,
+					  (__force const char __user *)buffer,
+					  len, &offset, 0);
+	if (retval > 0)
+		retval = 0;
+
+	set_fs(old_fs);
+	kunmap(page);
 	end_page_writeback(page);
-	return err;
+	return retval;
 }
 
 static int v9fs_vfs_writepage(struct page *page, struct writeback_control *wbc)
 {
 	int retval;
-
-	p9_debug(P9_DEBUG_VFS, "page %p\n", page);
 
 	retval = v9fs_vfs_writepage_locked(page);
 	if (retval < 0) {
@@ -230,7 +237,11 @@ static int v9fs_launder_page(struct page *page)
 
 /**
  * v9fs_direct_IO - 9P address space operation for direct I/O
+ * @rw: direction (read or write)
  * @iocb: target I/O control block
+ * @iov: array of vectors that define I/O buffer
+ * @pos: offset in file to begin the operation
+ * @nr_segs: size of iovec array
  *
  * The presence of v9fs_direct_IO() in the address space ops vector
  * allowes open() O_DIRECT flags which would have failed otherwise.
@@ -244,24 +255,19 @@ static int v9fs_launder_page(struct page *page)
  *
  */
 static ssize_t
-v9fs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
+v9fs_direct_IO(int rw, struct kiocb *iocb, const struct iovec *iov,
+	       loff_t pos, unsigned long nr_segs)
 {
-	struct file *file = iocb->ki_filp;
-	loff_t pos = iocb->ki_pos;
-	ssize_t n;
-	int err = 0;
-	if (iov_iter_rw(iter) == WRITE) {
-		n = p9_client_write(file->private_data, pos, iter, &err);
-		if (n) {
-			struct inode *inode = file_inode(file);
-			loff_t i_size = i_size_read(inode);
-			if (pos + n > i_size)
-				inode_add_bytes(inode, pos + n - i_size);
-		}
-	} else {
-		n = p9_client_read(file->private_data, pos, iter, &err);
-	}
-	return n ? n : err;
+	/*
+	 * FIXME
+	 * Now that we do caching with cache mode enabled, We need
+	 * to support direct IO
+	 */
+	p9_debug(P9_DEBUG_VFS, "v9fs_direct_IO: v9fs_direct_IO (%s) off/no(%lld/%lu) EINVAL\n",
+		 iocb->ki_filp->f_path.dentry->d_name.name,
+		 (long long)pos, nr_segs);
+
+	return -EINVAL;
 }
 
 static int v9fs_write_begin(struct file *filp, struct address_space *mapping,
@@ -271,11 +277,8 @@ static int v9fs_write_begin(struct file *filp, struct address_space *mapping,
 	int retval = 0;
 	struct page *page;
 	struct v9fs_inode *v9inode;
-	pgoff_t index = pos >> PAGE_SHIFT;
+	pgoff_t index = pos >> PAGE_CACHE_SHIFT;
 	struct inode *inode = mapping->host;
-
-
-	p9_debug(P9_DEBUG_VFS, "filp %p, mapping %p\n", filp, mapping);
 
 	v9inode = V9FS_I(inode);
 start:
@@ -288,11 +291,11 @@ start:
 	if (PageUptodate(page))
 		goto out;
 
-	if (len == PAGE_SIZE)
+	if (len == PAGE_CACHE_SIZE)
 		goto out;
 
 	retval = v9fs_fid_readpage(v9inode->writeback_fid, page);
-	put_page(page);
+	page_cache_release(page);
 	if (!retval)
 		goto start;
 out:
@@ -307,13 +310,11 @@ static int v9fs_write_end(struct file *filp, struct address_space *mapping,
 	loff_t last_pos = pos + copied;
 	struct inode *inode = page->mapping->host;
 
-	p9_debug(P9_DEBUG_VFS, "filp %p, mapping %p\n", filp, mapping);
-
 	if (unlikely(copied < len)) {
 		/*
 		 * zero out the rest of the area
 		 */
-		unsigned from = pos & (PAGE_SIZE - 1);
+		unsigned from = pos & (PAGE_CACHE_SIZE - 1);
 
 		zero_user(page, from + copied, len - copied);
 		flush_dcache_page(page);
@@ -331,7 +332,7 @@ static int v9fs_write_end(struct file *filp, struct address_space *mapping,
 	}
 	set_page_dirty(page);
 	unlock_page(page);
-	put_page(page);
+	page_cache_release(page);
 
 	return copied;
 }

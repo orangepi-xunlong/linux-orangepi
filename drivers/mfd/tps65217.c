@@ -15,202 +15,18 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/device.h>
-#include <linux/err.h>
-#include <linux/init.h>
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/irq.h>
-#include <linux/irqdomain.h>
 #include <linux/kernel.h>
+#include <linux/device.h>
 #include <linux/module.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
-#include <linux/regmap.h>
+#include <linux/init.h>
+#include <linux/i2c.h>
 #include <linux/slab.h>
+#include <linux/regmap.h>
+#include <linux/err.h>
 
 #include <linux/mfd/core.h>
 #include <linux/mfd/tps65217.h>
-
-static struct resource charger_resources[] = {
-	DEFINE_RES_IRQ_NAMED(TPS65217_IRQ_AC, "AC"),
-	DEFINE_RES_IRQ_NAMED(TPS65217_IRQ_USB, "USB"),
-};
-
-static struct resource pb_resources[] = {
-	DEFINE_RES_IRQ_NAMED(TPS65217_IRQ_PB, "PB"),
-};
-
-struct tps65217_irq {
-	int mask;
-	int interrupt;
-};
-
-static const struct tps65217_irq tps65217_irqs[] = {
-	[TPS65217_IRQ_PB] = {
-		.mask = TPS65217_INT_PBM,
-		.interrupt = TPS65217_INT_PBI,
-	},
-	[TPS65217_IRQ_AC] = {
-		.mask = TPS65217_INT_ACM,
-		.interrupt = TPS65217_INT_ACI,
-	},
-	[TPS65217_IRQ_USB] = {
-		.mask = TPS65217_INT_USBM,
-		.interrupt = TPS65217_INT_USBI,
-	},
-};
-
-static void tps65217_irq_lock(struct irq_data *data)
-{
-	struct tps65217 *tps = irq_data_get_irq_chip_data(data);
-
-	mutex_lock(&tps->irq_lock);
-}
-
-static void tps65217_irq_sync_unlock(struct irq_data *data)
-{
-	struct tps65217 *tps = irq_data_get_irq_chip_data(data);
-	int ret;
-
-	ret = tps65217_reg_write(tps, TPS65217_REG_INT, tps->irq_mask,
-				TPS65217_PROTECT_NONE);
-	if (ret != 0)
-		dev_err(tps->dev, "Failed to sync IRQ masks\n");
-
-	mutex_unlock(&tps->irq_lock);
-}
-
-static inline const struct tps65217_irq *
-irq_to_tps65217_irq(struct tps65217 *tps, struct irq_data *data)
-{
-	return &tps65217_irqs[data->hwirq];
-}
-
-static void tps65217_irq_enable(struct irq_data *data)
-{
-	struct tps65217 *tps = irq_data_get_irq_chip_data(data);
-	const struct tps65217_irq *irq_data = irq_to_tps65217_irq(tps, data);
-
-	tps->irq_mask &= ~irq_data->mask;
-}
-
-static void tps65217_irq_disable(struct irq_data *data)
-{
-	struct tps65217 *tps = irq_data_get_irq_chip_data(data);
-	const struct tps65217_irq *irq_data = irq_to_tps65217_irq(tps, data);
-
-	tps->irq_mask |= irq_data->mask;
-}
-
-static struct irq_chip tps65217_irq_chip = {
-	.irq_bus_lock		= tps65217_irq_lock,
-	.irq_bus_sync_unlock	= tps65217_irq_sync_unlock,
-	.irq_enable		= tps65217_irq_enable,
-	.irq_disable		= tps65217_irq_disable,
-};
-
-static struct mfd_cell tps65217s[] = {
-	{
-		.name = "tps65217-pmic",
-		.of_compatible = "ti,tps65217-pmic",
-	},
-	{
-		.name = "tps65217-bl",
-		.of_compatible = "ti,tps65217-bl",
-	},
-	{
-		.name = "tps65217-charger",
-		.num_resources = ARRAY_SIZE(charger_resources),
-		.resources = charger_resources,
-		.of_compatible = "ti,tps65217-charger",
-	},
-	{
-		.name = "tps65217-pwrbutton",
-		.num_resources = ARRAY_SIZE(pb_resources),
-		.resources = pb_resources,
-		.of_compatible = "ti,tps65217-pwrbutton",
-	},
-};
-
-static irqreturn_t tps65217_irq_thread(int irq, void *data)
-{
-	struct tps65217 *tps = data;
-	unsigned int status;
-	bool handled = false;
-	int i;
-	int ret;
-
-	ret = tps65217_reg_read(tps, TPS65217_REG_INT, &status);
-	if (ret < 0) {
-		dev_err(tps->dev, "Failed to read IRQ status: %d\n",
-			ret);
-		return IRQ_NONE;
-	}
-
-	for (i = 0; i < ARRAY_SIZE(tps65217_irqs); i++) {
-		if (status & tps65217_irqs[i].interrupt) {
-			handle_nested_irq(irq_find_mapping(tps->irq_domain, i));
-			handled = true;
-		}
-	}
-
-	if (handled)
-		return IRQ_HANDLED;
-
-	return IRQ_NONE;
-}
-
-static int tps65217_irq_map(struct irq_domain *h, unsigned int virq,
-			irq_hw_number_t hw)
-{
-	struct tps65217 *tps = h->host_data;
-
-	irq_set_chip_data(virq, tps);
-	irq_set_chip_and_handler(virq, &tps65217_irq_chip, handle_edge_irq);
-	irq_set_nested_thread(virq, 1);
-	irq_set_parent(virq, tps->irq);
-	irq_set_noprobe(virq);
-
-	return 0;
-}
-
-static const struct irq_domain_ops tps65217_irq_domain_ops = {
-	.map = tps65217_irq_map,
-};
-
-static int tps65217_irq_init(struct tps65217 *tps, int irq)
-{
-	int ret;
-
-	mutex_init(&tps->irq_lock);
-	tps->irq = irq;
-
-	/* Mask all interrupt sources */
-	tps->irq_mask = (TPS65217_INT_RESERVEDM | TPS65217_INT_PBM
-			| TPS65217_INT_ACM | TPS65217_INT_USBM);
-	tps65217_reg_write(tps, TPS65217_REG_INT, tps->irq_mask,
-			TPS65217_PROTECT_NONE);
-
-	tps->irq_domain = irq_domain_add_linear(tps->dev->of_node,
-		TPS65217_NUM_IRQ, &tps65217_irq_domain_ops, tps);
-	if (!tps->irq_domain) {
-		dev_err(tps->dev, "Could not create IRQ domain\n");
-		return -ENOMEM;
-	}
-
-	ret = devm_request_threaded_irq(tps->dev, irq, NULL,
-					tps65217_irq_thread, IRQF_ONESHOT,
-					"tps65217-irq", tps);
-	if (ret) {
-		dev_err(tps->dev, "Failed to request IRQ %d: %d\n",
-			irq, ret);
-		return ret;
-	}
-
-	return 0;
-}
 
 /**
  * tps65217_reg_read: Read a single tps65217 register.
@@ -280,7 +96,7 @@ EXPORT_SYMBOL_GPL(tps65217_reg_write);
  * @val: Value to write.
  * @level: Password protected level
  */
-static int tps65217_update_bits(struct tps65217 *tps, unsigned int reg,
+int tps65217_update_bits(struct tps65217 *tps, unsigned int reg,
 		unsigned int mask, unsigned int val, unsigned int level)
 {
 	int ret;
@@ -316,66 +132,25 @@ int tps65217_clear_bits(struct tps65217 *tps, unsigned int reg,
 }
 EXPORT_SYMBOL_GPL(tps65217_clear_bits);
 
-static bool tps65217_volatile_reg(struct device *dev, unsigned int reg)
-{
-	switch (reg) {
-	case TPS65217_REG_INT:
-		return true;
-	default:
-		return false;
-	}
-}
-
-static const struct regmap_config tps65217_regmap_config = {
+static struct regmap_config tps65217_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
-
-	.max_register = TPS65217_REG_MAX,
-	.volatile_reg = tps65217_volatile_reg,
 };
 
-static const struct of_device_id tps65217_of_match[] = {
-	{ .compatible = "ti,tps65217", .data = (void *)TPS65217 },
-	{ /* sentinel */ },
-};
-MODULE_DEVICE_TABLE(of, tps65217_of_match);
-
-static int tps65217_probe(struct i2c_client *client,
+static int __devinit tps65217_probe(struct i2c_client *client,
 				const struct i2c_device_id *ids)
 {
 	struct tps65217 *tps;
+	struct tps65217_board *pdata = client->dev.platform_data;
+	int i, ret;
 	unsigned int version;
-	unsigned long chip_id = ids->driver_data;
-	const struct of_device_id *match;
-	bool status_off = false;
-	int ret;
-
-	if (client->dev.of_node) {
-		match = of_match_device(tps65217_of_match, &client->dev);
-		if (!match) {
-			dev_err(&client->dev,
-				"Failed to find matching dt id\n");
-			return -EINVAL;
-		}
-		chip_id = (unsigned long)match->data;
-		status_off = of_property_read_bool(client->dev.of_node,
-					"ti,pmic-shutdown-controller");
-	}
-
-	if (!chip_id) {
-		dev_err(&client->dev, "id is null.\n");
-		return -ENODEV;
-	}
 
 	tps = devm_kzalloc(&client->dev, sizeof(*tps), GFP_KERNEL);
 	if (!tps)
 		return -ENOMEM;
 
-	i2c_set_clientdata(client, tps);
-	tps->dev = &client->dev;
-	tps->id = chip_id;
-
-	tps->regmap = devm_regmap_init_i2c(client, &tps65217_regmap_config);
+	tps->pdata = pdata;
+	tps->regmap = regmap_init_i2c(client, &tps65217_regmap_config);
 	if (IS_ERR(tps->regmap)) {
 		ret = PTR_ERR(tps->regmap);
 		dev_err(tps->dev, "Failed to allocate register map: %d\n",
@@ -383,79 +158,71 @@ static int tps65217_probe(struct i2c_client *client,
 		return ret;
 	}
 
-	if (client->irq) {
-		tps65217_irq_init(tps, client->irq);
-	} else {
-		int i;
-
-		/* Don't tell children about IRQ resources which won't fire */
-		for (i = 0; i < ARRAY_SIZE(tps65217s); i++)
-			tps65217s[i].num_resources = 0;
-	}
-
-	ret = devm_mfd_add_devices(tps->dev, -1, tps65217s,
-				   ARRAY_SIZE(tps65217s), NULL, 0,
-				   tps->irq_domain);
-	if (ret < 0) {
-		dev_err(tps->dev, "mfd_add_devices failed: %d\n", ret);
-		return ret;
-	}
+	i2c_set_clientdata(client, tps);
+	tps->dev = &client->dev;
 
 	ret = tps65217_reg_read(tps, TPS65217_REG_CHIPID, &version);
 	if (ret < 0) {
-		dev_err(tps->dev, "Failed to read revision register: %d\n",
-			ret);
-		return ret;
-	}
-
-	/* Set the PMIC to shutdown on PWR_EN toggle */
-	if (status_off) {
-		ret = tps65217_set_bits(tps, TPS65217_REG_STATUS,
-				TPS65217_STATUS_OFF, TPS65217_STATUS_OFF,
-				TPS65217_PROTECT_NONE);
-		if (ret)
-			dev_warn(tps->dev, "unable to set the status OFF\n");
+		dev_err(tps->dev, "Failed to read revision"
+					" register: %d\n", ret);
+		goto err_regmap;
 	}
 
 	dev_info(tps->dev, "TPS65217 ID %#x version 1.%d\n",
 			(version & TPS65217_CHIPID_CHIP_MASK) >> 4,
 			version & TPS65217_CHIPID_REV_MASK);
 
-	return 0;
-}
+	for (i = 0; i < TPS65217_NUM_REGULATOR; i++) {
+		struct platform_device *pdev;
 
-static int tps65217_remove(struct i2c_client *client)
-{
-	struct tps65217 *tps = i2c_get_clientdata(client);
-	unsigned int virq;
-	int i;
+		pdev = platform_device_alloc("tps65217-pmic", i);
+		if (!pdev) {
+			dev_err(tps->dev, "Cannot create regulator %d\n", i);
+			continue;
+		}
 
-	for (i = 0; i < ARRAY_SIZE(tps65217_irqs); i++) {
-		virq = irq_find_mapping(tps->irq_domain, i);
-		if (virq)
-			irq_dispose_mapping(virq);
+		pdev->dev.parent = tps->dev;
+		platform_device_add_data(pdev, &pdata->tps65217_init_data[i],
+					sizeof(pdata->tps65217_init_data[i]));
+		tps->regulator_pdev[i] = pdev;
+
+		platform_device_add(pdev);
 	}
 
-	irq_domain_remove(tps->irq_domain);
-	tps->irq_domain = NULL;
+	return 0;
+
+err_regmap:
+	regmap_exit(tps->regmap);
+
+	return ret;
+}
+
+static int __devexit tps65217_remove(struct i2c_client *client)
+{
+	struct tps65217 *tps = i2c_get_clientdata(client);
+	int i;
+
+	for (i = 0; i < TPS65217_NUM_REGULATOR; i++)
+		platform_device_unregister(tps->regulator_pdev[i]);
+
+	regmap_exit(tps->regmap);
 
 	return 0;
 }
 
 static const struct i2c_device_id tps65217_id_table[] = {
-	{"tps65217", TPS65217},
-	{ /* sentinel */ }
+	{"tps65217", 0xF0},
+	{/* end of list */}
 };
 MODULE_DEVICE_TABLE(i2c, tps65217_id_table);
 
 static struct i2c_driver tps65217_driver = {
 	.driver		= {
 		.name	= "tps65217",
-		.of_match_table = tps65217_of_match,
 	},
 	.id_table	= tps65217_id_table,
 	.probe		= tps65217_probe,
-	.remove		= tps65217_remove,
+	.remove		= __devexit_p(tps65217_remove),
 };
 
 static int __init tps65217_init(void)

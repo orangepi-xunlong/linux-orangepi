@@ -191,9 +191,9 @@ static struct irq_chip mpc52xx_gpt_irq_chip = {
 	.irq_set_type = mpc52xx_gpt_irq_set_type,
 };
 
-static void mpc52xx_gpt_irq_cascade(struct irq_desc *desc)
+void mpc52xx_gpt_irq_cascade(unsigned int virq, struct irq_desc *desc)
 {
-	struct mpc52xx_gpt_priv *gpt = irq_desc_get_handler_data(desc);
+	struct mpc52xx_gpt_priv *gpt = irq_get_handler_data(virq);
 	int sub_virq;
 	u32 status;
 
@@ -278,9 +278,14 @@ mpc52xx_gpt_irq_setup(struct mpc52xx_gpt_priv *gpt, struct device_node *node)
  * GPIOLIB hooks
  */
 #if defined(CONFIG_GPIOLIB)
+static inline struct mpc52xx_gpt_priv *gc_to_mpc52xx_gpt(struct gpio_chip *gc)
+{
+	return container_of(gc, struct mpc52xx_gpt_priv, gc);
+}
+
 static int mpc52xx_gpt_gpio_get(struct gpio_chip *gc, unsigned int gpio)
 {
-	struct mpc52xx_gpt_priv *gpt = gpiochip_get_data(gc);
+	struct mpc52xx_gpt_priv *gpt = gc_to_mpc52xx_gpt(gc);
 
 	return (in_be32(&gpt->regs->status) >> 8) & 1;
 }
@@ -288,7 +293,7 @@ static int mpc52xx_gpt_gpio_get(struct gpio_chip *gc, unsigned int gpio)
 static void
 mpc52xx_gpt_gpio_set(struct gpio_chip *gc, unsigned int gpio, int v)
 {
-	struct mpc52xx_gpt_priv *gpt = gpiochip_get_data(gc);
+	struct mpc52xx_gpt_priv *gpt = gc_to_mpc52xx_gpt(gc);
 	unsigned long flags;
 	u32 r;
 
@@ -302,7 +307,7 @@ mpc52xx_gpt_gpio_set(struct gpio_chip *gc, unsigned int gpio, int v)
 
 static int mpc52xx_gpt_gpio_dir_in(struct gpio_chip *gc, unsigned int gpio)
 {
-	struct mpc52xx_gpt_priv *gpt = gpiochip_get_data(gc);
+	struct mpc52xx_gpt_priv *gpt = gc_to_mpc52xx_gpt(gc);
 	unsigned long flags;
 
 	dev_dbg(gpt->dev, "%s: gpio:%d\n", __func__, gpio);
@@ -349,9 +354,9 @@ mpc52xx_gpt_gpio_setup(struct mpc52xx_gpt_priv *gpt, struct device_node *node)
 	clrsetbits_be32(&gpt->regs->mode, MPC52xx_GPT_MODE_MS_MASK,
 			MPC52xx_GPT_MODE_MS_GPIO);
 
-	rc = gpiochip_add_data(&gpt->gc, gpt);
+	rc = gpiochip_add(&gpt->gc);
 	if (rc)
-		dev_err(gpt->dev, "gpiochip_add_data() failed; rc=%i\n", rc);
+		dev_err(gpt->dev, "gpiochip_add() failed; rc=%i\n", rc);
 
 	dev_dbg(gpt->dev, "%s() complete.\n", __func__);
 }
@@ -521,7 +526,7 @@ EXPORT_SYMBOL(mpc52xx_gpt_timer_period);
 
 #define WDT_IDENTITY	    "mpc52xx watchdog on GPT0"
 
-/* wdt_is_active stores whether or not the /dev/watchdog device is opened */
+/* wdt_is_active stores wether or not the /dev/watchdog device is opened */
 static unsigned long wdt_is_active;
 
 /* wdt-capable gpt */
@@ -664,7 +669,7 @@ static struct miscdevice mpc52xx_wdt_miscdev = {
 	.fops		= &mpc52xx_wdt_fops,
 };
 
-static int mpc52xx_gpt_wdt_init(void)
+static int __devinit mpc52xx_gpt_wdt_init(void)
 {
 	int err;
 
@@ -699,7 +704,7 @@ static int mpc52xx_gpt_wdt_setup(struct mpc52xx_gpt_priv *gpt,
 
 #else
 
-static int mpc52xx_gpt_wdt_init(void)
+static int __devinit mpc52xx_gpt_wdt_init(void)
 {
 	return 0;
 }
@@ -715,11 +720,11 @@ static inline int mpc52xx_gpt_wdt_setup(struct mpc52xx_gpt_priv *gpt,
 /* ---------------------------------------------------------------------
  * of_platform bus binding code
  */
-static int mpc52xx_gpt_probe(struct platform_device *ofdev)
+static int __devinit mpc52xx_gpt_probe(struct platform_device *ofdev)
 {
 	struct mpc52xx_gpt_priv *gpt;
 
-	gpt = devm_kzalloc(&ofdev->dev, sizeof *gpt, GFP_KERNEL);
+	gpt = kzalloc(sizeof *gpt, GFP_KERNEL);
 	if (!gpt)
 		return -ENOMEM;
 
@@ -727,8 +732,10 @@ static int mpc52xx_gpt_probe(struct platform_device *ofdev)
 	gpt->dev = &ofdev->dev;
 	gpt->ipb_freq = mpc5xxx_get_bus_frequency(ofdev->dev.of_node);
 	gpt->regs = of_iomap(ofdev->dev.of_node, 0);
-	if (!gpt->regs)
+	if (!gpt->regs) {
+		kfree(gpt);
 		return -ENOMEM;
+	}
 
 	dev_set_drvdata(&ofdev->dev, gpt);
 
@@ -775,6 +782,7 @@ static const struct of_device_id mpc52xx_gpt_match[] = {
 static struct platform_driver mpc52xx_gpt_driver = {
 	.driver = {
 		.name = "mpc52xx-gpt",
+		.owner = THIS_MODULE,
 		.of_match_table = mpc52xx_gpt_match,
 	},
 	.probe = mpc52xx_gpt_probe,

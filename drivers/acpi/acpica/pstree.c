@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -58,8 +58,8 @@ union acpi_parse_object *acpi_ps_get_child(union acpi_parse_object *op);
  *
  * FUNCTION:    acpi_ps_get_arg
  *
- * PARAMETERS:  op              - Get an argument for this op
- *              argn            - Nth argument to get
+ * PARAMETERS:  Op              - Get an argument for this op
+ *              Argn            - Nth argument to get
  *
  * RETURN:      The argument (as an Op object). NULL if argument does not exist
  *
@@ -114,8 +114,8 @@ union acpi_parse_object *acpi_ps_get_arg(union acpi_parse_object *op, u32 argn)
  *
  * FUNCTION:    acpi_ps_append_arg
  *
- * PARAMETERS:  op              - Append an argument to this Op.
- *              arg             - Argument Op to append
+ * PARAMETERS:  Op              - Append an argument to this Op.
+ *              Arg             - Argument Op to append
  *
  * RETURN:      None.
  *
@@ -183,12 +183,13 @@ acpi_ps_append_arg(union acpi_parse_object *op, union acpi_parse_object *arg)
 	}
 }
 
+#ifdef ACPI_FUTURE_USAGE
 /*******************************************************************************
  *
  * FUNCTION:    acpi_ps_get_depth_next
  *
- * PARAMETERS:  origin          - Root of subtree to search
- *              op              - Last (previous) Op that was found
+ * PARAMETERS:  Origin          - Root of subtree to search
+ *              Op              - Last (previous) Op that was found
  *
  * RETURN:      Next Op found in the search.
  *
@@ -260,7 +261,7 @@ union acpi_parse_object *acpi_ps_get_depth_next(union acpi_parse_object *origin,
  *
  * FUNCTION:    acpi_ps_get_child
  *
- * PARAMETERS:  op              - Get the child of this Op
+ * PARAMETERS:  Op              - Get the child of this Op
  *
  * RETURN:      Child Op, Null if none is found.
  *
@@ -307,12 +308,11 @@ union acpi_parse_object *acpi_ps_get_child(union acpi_parse_object *op)
 		break;
 
 	default:
-
 		/* All others have no children */
-
 		break;
 	}
 
 	return (child);
 }
 #endif
+#endif				/*  ACPI_FUTURE_USAGE  */

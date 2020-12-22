@@ -17,55 +17,6 @@
 /*----------------------------------------------------------------*/
 
 /*
- * An edge triggered threshold.
- */
-struct threshold {
-	bool threshold_set;
-	bool value_set;
-	dm_block_t threshold;
-	dm_block_t current_value;
-	dm_sm_threshold_fn fn;
-	void *context;
-};
-
-static void threshold_init(struct threshold *t)
-{
-	t->threshold_set = false;
-	t->value_set = false;
-}
-
-static void set_threshold(struct threshold *t, dm_block_t value,
-			  dm_sm_threshold_fn fn, void *context)
-{
-	t->threshold_set = true;
-	t->threshold = value;
-	t->fn = fn;
-	t->context = context;
-}
-
-static bool below_threshold(struct threshold *t, dm_block_t value)
-{
-	return t->threshold_set && value <= t->threshold;
-}
-
-static bool threshold_already_triggered(struct threshold *t)
-{
-	return t->value_set && below_threshold(t, t->current_value);
-}
-
-static void check_threshold(struct threshold *t, dm_block_t value)
-{
-	if (below_threshold(t, value) &&
-	    !threshold_already_triggered(t))
-		t->fn(t->context);
-
-	t->value_set = true;
-	t->current_value = value;
-}
-
-/*----------------------------------------------------------------*/
-
-/*
  * Space map interface.
  *
  * The low level disk format is written using the standard btree and
@@ -91,77 +42,6 @@ struct block_op {
 	dm_block_t block;
 };
 
-struct bop_ring_buffer {
-	unsigned begin;
-	unsigned end;
-	struct block_op bops[MAX_RECURSIVE_ALLOCATIONS + 1];
-};
-
-static void brb_init(struct bop_ring_buffer *brb)
-{
-	brb->begin = 0;
-	brb->end = 0;
-}
-
-static bool brb_empty(struct bop_ring_buffer *brb)
-{
-	return brb->begin == brb->end;
-}
-
-static unsigned brb_next(struct bop_ring_buffer *brb, unsigned old)
-{
-	unsigned r = old + 1;
-	return (r >= (sizeof(brb->bops) / sizeof(*brb->bops))) ? 0 : r;
-}
-
-static int brb_push(struct bop_ring_buffer *brb,
-		    enum block_op_type type, dm_block_t b)
-{
-	struct block_op *bop;
-	unsigned next = brb_next(brb, brb->end);
-
-	/*
-	 * We don't allow the last bop to be filled, this way we can
-	 * differentiate between full and empty.
-	 */
-	if (next == brb->begin)
-		return -ENOMEM;
-
-	bop = brb->bops + brb->end;
-	bop->type = type;
-	bop->block = b;
-
-	brb->end = next;
-
-	return 0;
-}
-
-static int brb_peek(struct bop_ring_buffer *brb, struct block_op *result)
-{
-	struct block_op *bop;
-
-	if (brb_empty(brb))
-		return -ENODATA;
-
-	bop = brb->bops + brb->begin;
-	result->type = bop->type;
-	result->block = bop->block;
-
-	return 0;
-}
-
-static int brb_pop(struct bop_ring_buffer *brb)
-{
-	if (brb_empty(brb))
-		return -ENODATA;
-
-	brb->begin = brb_next(brb, brb->begin);
-
-	return 0;
-}
-
-/*----------------------------------------------------------------*/
-
 struct sm_metadata {
 	struct dm_space_map sm;
 
@@ -172,19 +52,22 @@ struct sm_metadata {
 
 	unsigned recursion_count;
 	unsigned allocated_this_transaction;
-	struct bop_ring_buffer uncommitted;
-
-	struct threshold threshold;
+	unsigned nr_uncommitted;
+	struct block_op uncommitted[MAX_RECURSIVE_ALLOCATIONS];
 };
 
 static int add_bop(struct sm_metadata *smm, enum block_op_type type, dm_block_t b)
 {
-	int r = brb_push(&smm->uncommitted, type, b);
+	struct block_op *op;
 
-	if (r) {
+	if (smm->nr_uncommitted == MAX_RECURSIVE_ALLOCATIONS) {
 		DMERR("too many recursive allocations");
 		return -ENOMEM;
 	}
+
+	op = smm->uncommitted + smm->nr_uncommitted++;
+	op->type = type;
+	op->block = b;
 
 	return 0;
 }
@@ -212,29 +95,6 @@ static void in(struct sm_metadata *smm)
 	smm->recursion_count++;
 }
 
-static int apply_bops(struct sm_metadata *smm)
-{
-	int r = 0;
-
-	while (!brb_empty(&smm->uncommitted)) {
-		struct block_op bop;
-
-		r = brb_peek(&smm->uncommitted, &bop);
-		if (r) {
-			DMERR("bug in bop ring buffer");
-			break;
-		}
-
-		r = commit_bop(smm, &bop);
-		if (r)
-			break;
-
-		brb_pop(&smm->uncommitted);
-	}
-
-	return r;
-}
-
 static int out(struct sm_metadata *smm)
 {
 	int r = 0;
@@ -247,8 +107,15 @@ static int out(struct sm_metadata *smm)
 		return -ENOMEM;
 	}
 
-	if (smm->recursion_count == 1)
-		apply_bops(smm);
+	if (smm->recursion_count == 1 && smm->nr_uncommitted) {
+		while (smm->nr_uncommitted && !r) {
+			smm->nr_uncommitted--;
+			r = commit_bop(smm, smm->uncommitted +
+				       smm->nr_uncommitted);
+			if (r)
+				break;
+		}
+	}
 
 	smm->recursion_count--;
 
@@ -277,6 +144,12 @@ static void sm_metadata_destroy(struct dm_space_map *sm)
 	kfree(smm);
 }
 
+static int sm_metadata_extend(struct dm_space_map *sm, dm_block_t extra_blocks)
+{
+	DMERR("doesn't support extend");
+	return -EINVAL;
+}
+
 static int sm_metadata_get_nr_blocks(struct dm_space_map *sm, dm_block_t *count)
 {
 	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
@@ -299,8 +172,7 @@ static int sm_metadata_get_nr_free(struct dm_space_map *sm, dm_block_t *count)
 static int sm_metadata_get_count(struct dm_space_map *sm, dm_block_t b,
 				 uint32_t *result)
 {
-	int r;
-	unsigned i;
+	int r, i;
 	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
 	unsigned adjustment = 0;
 
@@ -308,10 +180,8 @@ static int sm_metadata_get_count(struct dm_space_map *sm, dm_block_t b,
 	 * We may have some uncommitted adjustments to add.  This list
 	 * should always be really short.
 	 */
-	for (i = smm->uncommitted.begin;
-	     i != smm->uncommitted.end;
-	     i = brb_next(&smm->uncommitted, i)) {
-		struct block_op *op = smm->uncommitted.bops + i;
+	for (i = 0; i < smm->nr_uncommitted; i++) {
+		struct block_op *op = smm->uncommitted + i;
 
 		if (op->block != b)
 			continue;
@@ -339,8 +209,7 @@ static int sm_metadata_get_count(struct dm_space_map *sm, dm_block_t b,
 static int sm_metadata_count_is_more_than_one(struct dm_space_map *sm,
 					      dm_block_t b, int *result)
 {
-	int r, adjustment = 0;
-	unsigned i;
+	int r, i, adjustment = 0;
 	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
 	uint32_t rc;
 
@@ -348,11 +217,8 @@ static int sm_metadata_count_is_more_than_one(struct dm_space_map *sm,
 	 * We may have some uncommitted adjustments to add.  This list
 	 * should always be really short.
 	 */
-	for (i = smm->uncommitted.begin;
-	     i != smm->uncommitted.end;
-	     i = brb_next(&smm->uncommitted, i)) {
-
-		struct block_op *op = smm->uncommitted.bops + i;
+	for (i = 0; i < smm->nr_uncommitted; i++) {
+		struct block_op *op = smm->uncommitted + i;
 
 		if (op->block != b)
 			continue;
@@ -469,23 +335,9 @@ static int sm_metadata_new_block_(struct dm_space_map *sm, dm_block_t *b)
 
 static int sm_metadata_new_block(struct dm_space_map *sm, dm_block_t *b)
 {
-	dm_block_t count;
-	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
-
 	int r = sm_metadata_new_block_(sm, b);
-	if (r) {
-		DMERR_LIMIT("unable to allocate new metadata block");
-		return r;
-	}
-
-	r = sm_metadata_get_nr_free(sm, &count);
-	if (r) {
-		DMERR_LIMIT("couldn't get free block count");
-		return r;
-	}
-
-	check_threshold(&smm->threshold, count);
-
+	if (r)
+		DMERR("out of metadata space");
 	return r;
 }
 
@@ -501,18 +353,6 @@ static int sm_metadata_commit(struct dm_space_map *sm)
 	memcpy(&smm->old_ll, &smm->ll, sizeof(smm->old_ll));
 	smm->begin = 0;
 	smm->allocated_this_transaction = 0;
-
-	return 0;
-}
-
-static int sm_metadata_register_threshold_callback(struct dm_space_map *sm,
-						   dm_block_t threshold,
-						   dm_sm_threshold_fn fn,
-						   void *context)
-{
-	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
-
-	set_threshold(&smm->threshold, threshold, fn, context);
 
 	return 0;
 }
@@ -542,8 +382,6 @@ static int sm_metadata_copy_root(struct dm_space_map *sm, void *where_le, size_t
 	return 0;
 }
 
-static int sm_metadata_extend(struct dm_space_map *sm, dm_block_t extra_blocks);
-
 static struct dm_space_map ops = {
 	.destroy = sm_metadata_destroy,
 	.extend = sm_metadata_extend,
@@ -557,8 +395,7 @@ static struct dm_space_map ops = {
 	.new_block = sm_metadata_new_block,
 	.commit = sm_metadata_commit,
 	.root_size = sm_metadata_root_size,
-	.copy_root = sm_metadata_copy_root,
-	.register_threshold_callback = sm_metadata_register_threshold_callback
+	.copy_root = sm_metadata_copy_root
 };
 
 /*----------------------------------------------------------------*/
@@ -573,7 +410,7 @@ static void sm_bootstrap_destroy(struct dm_space_map *sm)
 
 static int sm_bootstrap_extend(struct dm_space_map *sm, dm_block_t extra_blocks)
 {
-	DMERR("bootstrap doesn't support extend");
+	DMERR("boostrap doesn't support extend");
 
 	return -EINVAL;
 }
@@ -582,9 +419,7 @@ static int sm_bootstrap_get_nr_blocks(struct dm_space_map *sm, dm_block_t *count
 {
 	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
 
-	*count = smm->ll.nr_blocks;
-
-	return 0;
+	return smm->ll.nr_blocks;
 }
 
 static int sm_bootstrap_get_nr_free(struct dm_space_map *sm, dm_block_t *count)
@@ -601,9 +436,7 @@ static int sm_bootstrap_get_count(struct dm_space_map *sm, dm_block_t b,
 {
 	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
 
-	*result = (b < smm->begin) ? 1 : 0;
-
-	return 0;
+	return b < smm->begin ? 1 : 0;
 }
 
 static int sm_bootstrap_count_is_more_than_one(struct dm_space_map *sm,
@@ -617,7 +450,7 @@ static int sm_bootstrap_count_is_more_than_one(struct dm_space_map *sm,
 static int sm_bootstrap_set_count(struct dm_space_map *sm, dm_block_t b,
 				  uint32_t count)
 {
-	DMERR("bootstrap doesn't support set_count");
+	DMERR("boostrap doesn't support set_count");
 
 	return -EINVAL;
 }
@@ -658,7 +491,7 @@ static int sm_bootstrap_commit(struct dm_space_map *sm)
 
 static int sm_bootstrap_root_size(struct dm_space_map *sm, size_t *result)
 {
-	DMERR("bootstrap doesn't support root_size");
+	DMERR("boostrap doesn't support root_size");
 
 	return -EINVAL;
 }
@@ -666,7 +499,7 @@ static int sm_bootstrap_root_size(struct dm_space_map *sm, size_t *result)
 static int sm_bootstrap_copy_root(struct dm_space_map *sm, void *where,
 				  size_t max)
 {
-	DMERR("bootstrap doesn't support copy_root");
+	DMERR("boostrap doesn't support copy_root");
 
 	return -EINVAL;
 }
@@ -684,63 +517,8 @@ static struct dm_space_map bootstrap_ops = {
 	.new_block = sm_bootstrap_new_block,
 	.commit = sm_bootstrap_commit,
 	.root_size = sm_bootstrap_root_size,
-	.copy_root = sm_bootstrap_copy_root,
-	.register_threshold_callback = NULL
+	.copy_root = sm_bootstrap_copy_root
 };
-
-/*----------------------------------------------------------------*/
-
-static int sm_metadata_extend(struct dm_space_map *sm, dm_block_t extra_blocks)
-{
-	int r, i;
-	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
-	dm_block_t old_len = smm->ll.nr_blocks;
-
-	/*
-	 * Flick into a mode where all blocks get allocated in the new area.
-	 */
-	smm->begin = old_len;
-	memcpy(sm, &bootstrap_ops, sizeof(*sm));
-
-	/*
-	 * Extend.
-	 */
-	r = sm_ll_extend(&smm->ll, extra_blocks);
-	if (r)
-		goto out;
-
-	/*
-	 * We repeatedly increment then commit until the commit doesn't
-	 * allocate any new blocks.
-	 */
-	do {
-		for (i = old_len; !r && i < smm->begin; i++)
-			r = add_bop(smm, BOP_INC, i);
-
-		if (r)
-			goto out;
-
-		old_len = smm->begin;
-
-		r = apply_bops(smm);
-		if (r) {
-			DMERR("%s: apply_bops failed", __func__);
-			goto out;
-		}
-
-		r = sm_ll_commit(&smm->ll);
-		if (r)
-			goto out;
-
-	} while (old_len != smm->begin);
-
-out:
-	/*
-	 * Switch back to normal behaviour.
-	 */
-	memcpy(sm, &ops, sizeof(*sm));
-	return r;
-}
 
 /*----------------------------------------------------------------*/
 
@@ -764,41 +542,35 @@ int dm_sm_metadata_create(struct dm_space_map *sm,
 {
 	int r;
 	dm_block_t i;
+	enum allocation_event ev;
 	struct sm_metadata *smm = container_of(sm, struct sm_metadata, sm);
 
 	smm->begin = superblock + 1;
 	smm->recursion_count = 0;
 	smm->allocated_this_transaction = 0;
-	brb_init(&smm->uncommitted);
-	threshold_init(&smm->threshold);
+	smm->nr_uncommitted = 0;
 
 	memcpy(&smm->sm, &bootstrap_ops, sizeof(smm->sm));
 
 	r = sm_ll_new_metadata(&smm->ll, tm);
-	if (!r) {
-		if (nr_blocks > DM_SM_METADATA_MAX_BLOCKS)
-			nr_blocks = DM_SM_METADATA_MAX_BLOCKS;
-		r = sm_ll_extend(&smm->ll, nr_blocks);
-	}
-	memcpy(&smm->sm, &ops, sizeof(smm->sm));
 	if (r)
 		return r;
+
+	r = sm_ll_extend(&smm->ll, nr_blocks);
+	if (r)
+		return r;
+
+	memcpy(&smm->sm, &ops, sizeof(smm->sm));
 
 	/*
 	 * Now we need to update the newly created data structures with the
 	 * allocated blocks that they were built from.
 	 */
 	for (i = superblock; !r && i < smm->begin; i++)
-		r = add_bop(smm, BOP_INC, i);
+		r = sm_ll_inc(&smm->ll, i, &ev);
 
 	if (r)
 		return r;
-
-	r = apply_bops(smm);
-	if (r) {
-		DMERR("%s: apply_bops failed", __func__);
-		return r;
-	}
 
 	return sm_metadata_commit(sm);
 }
@@ -817,8 +589,7 @@ int dm_sm_metadata_open(struct dm_space_map *sm,
 	smm->begin = 0;
 	smm->recursion_count = 0;
 	smm->allocated_this_transaction = 0;
-	brb_init(&smm->uncommitted);
-	threshold_init(&smm->threshold);
+	smm->nr_uncommitted = 0;
 
 	memcpy(&smm->old_ll, &smm->ll, sizeof(smm->old_ll));
 	return 0;

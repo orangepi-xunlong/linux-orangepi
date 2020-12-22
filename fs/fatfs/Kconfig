@@ -1,0 +1,9 @@
+config FATFS_FS
+	tristate "FatFs for mmc support"
+    default n
+	help
+	  FatFs is used for writing sd card with less memory cache.
+	  When system contain very small memory, use this FatFs
+	  can help to reduce system load.
+
+	  If you want to compile it in module, select m.

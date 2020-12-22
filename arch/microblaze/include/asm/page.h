@@ -23,10 +23,12 @@
 #ifdef __KERNEL__
 
 /* PAGE_SHIFT determines the page size */
-#if defined(CONFIG_MICROBLAZE_64K_PAGES)
-#define PAGE_SHIFT		16
+#if defined(CONFIG_MICROBLAZE_32K_PAGES)
+#define PAGE_SHIFT		15
 #elif defined(CONFIG_MICROBLAZE_16K_PAGES)
 #define PAGE_SHIFT		14
+#elif defined(CONFIG_MICROBLAZE_8K_PAGES)
+#define PAGE_SHIFT		13
 #else
 #define PAGE_SHIFT		12
 #endif
@@ -34,8 +36,6 @@
 #define PAGE_MASK	(~(PAGE_SIZE-1))
 
 #define LOAD_OFFSET	ASM_CONST((CONFIG_KERNEL_START-CONFIG_KERNEL_BASE_ADDR))
-
-#define PTE_SHIFT	(PAGE_SHIFT - 2)	/* 1024 ptes per page */
 
 #ifndef __ASSEMBLY__
 
@@ -71,6 +71,7 @@ extern unsigned int __page_offset;
  * The basic type of a PTE - 32 bit physical addressing.
  */
 typedef unsigned long pte_basic_t;
+#define PTE_SHIFT	(PAGE_SHIFT - 2)	/* 1024 ptes per page */
 #define PTE_FMT		"%.8lx"
 
 #endif /* CONFIG_MMU */
@@ -168,6 +169,7 @@ extern int page_is_ram(unsigned long pfn);
 #  else /* CONFIG_MMU */
 #  define ARCH_PFN_OFFSET	(memory_start >> PAGE_SHIFT)
 #  define pfn_valid(pfn)	((pfn) < (max_mapnr + ARCH_PFN_OFFSET))
+#  define VALID_PAGE(page) 	((page - mem_map) < max_mapnr)
 #  endif /* CONFIG_MMU */
 
 # endif /* __ASSEMBLY__ */

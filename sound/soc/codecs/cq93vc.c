@@ -38,6 +38,24 @@
 #include <sound/soc.h>
 #include <sound/initval.h>
 
+static inline unsigned int cq93vc_read(struct snd_soc_codec *codec,
+						unsigned int reg)
+{
+	struct davinci_vc *davinci_vc = codec->control_data;
+
+	return readl(davinci_vc->base + reg);
+}
+
+static inline int cq93vc_write(struct snd_soc_codec *codec, unsigned int reg,
+		       unsigned int value)
+{
+	struct davinci_vc *davinci_vc = codec->control_data;
+
+	writel(value, davinci_vc->base + reg);
+
+	return 0;
+}
+
 static const struct snd_kcontrol_new cq93vc_snd_controls[] = {
 	SOC_SINGLE("PGA Capture Volume", DAVINCI_VC_REG05, 0, 0x03, 0),
 	SOC_SINGLE("Mono DAC Playback Volume", DAVINCI_VC_REG09, 0, 0x3f, 0),
@@ -46,15 +64,13 @@ static const struct snd_kcontrol_new cq93vc_snd_controls[] = {
 static int cq93vc_mute(struct snd_soc_dai *dai, int mute)
 {
 	struct snd_soc_codec *codec = dai->codec;
-	u8 reg;
+	u8 reg = cq93vc_read(codec, DAVINCI_VC_REG09) & ~DAVINCI_VC_REG09_MUTE;
 
 	if (mute)
-		reg = DAVINCI_VC_REG09_MUTE;
+		cq93vc_write(codec, DAVINCI_VC_REG09,
+			     reg | DAVINCI_VC_REG09_MUTE);
 	else
-		reg = 0;
-
-	snd_soc_update_bits(codec, DAVINCI_VC_REG09, DAVINCI_VC_REG09_MUTE,
-			    reg);
+		cq93vc_write(codec, DAVINCI_VC_REG09, reg);
 
 	return 0;
 }
@@ -62,10 +78,14 @@ static int cq93vc_mute(struct snd_soc_dai *dai, int mute)
 static int cq93vc_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 				 int clk_id, unsigned int freq, int dir)
 {
+	struct snd_soc_codec *codec = codec_dai->codec;
+	struct davinci_vc *davinci_vc = codec->control_data;
+
 	switch (freq) {
 	case 22579200:
 	case 27000000:
 	case 33868800:
+		davinci_vc->cq93vc.sysclk = freq;
 		return 0;
 	}
 
@@ -77,21 +97,22 @@ static int cq93vc_set_bias_level(struct snd_soc_codec *codec,
 {
 	switch (level) {
 	case SND_SOC_BIAS_ON:
-		snd_soc_write(codec, DAVINCI_VC_REG12,
+		cq93vc_write(codec, DAVINCI_VC_REG12,
 			     DAVINCI_VC_REG12_POWER_ALL_ON);
 		break;
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		snd_soc_write(codec, DAVINCI_VC_REG12,
+		cq93vc_write(codec, DAVINCI_VC_REG12,
 			     DAVINCI_VC_REG12_POWER_ALL_OFF);
 		break;
 	case SND_SOC_BIAS_OFF:
 		/* force all power off */
-		snd_soc_write(codec, DAVINCI_VC_REG12,
+		cq93vc_write(codec, DAVINCI_VC_REG12,
 			     DAVINCI_VC_REG12_POWER_ALL_OFF);
 		break;
 	}
+	codec->dapm.bias_level = level;
 
 	return 0;
 }
@@ -121,20 +142,44 @@ static struct snd_soc_dai_driver cq93vc_dai = {
 	.ops = &cq93vc_dai_ops,
 };
 
-static struct regmap *cq93vc_get_regmap(struct device *dev)
+static int cq93vc_resume(struct snd_soc_codec *codec)
 {
-	struct davinci_vc *davinci_vc = dev->platform_data;
+	cq93vc_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
-	return davinci_vc->regmap;
+	return 0;
+}
+
+static int cq93vc_probe(struct snd_soc_codec *codec)
+{
+	struct davinci_vc *davinci_vc = codec->dev->platform_data;
+
+	davinci_vc->cq93vc.codec = codec;
+	codec->control_data = davinci_vc;
+
+	/* Set controls */
+	snd_soc_add_codec_controls(codec, cq93vc_snd_controls,
+			     ARRAY_SIZE(cq93vc_snd_controls));
+
+	/* Off, with power on */
+	cq93vc_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+
+	return 0;
+}
+
+static int cq93vc_remove(struct snd_soc_codec *codec)
+{
+	cq93vc_set_bias_level(codec, SND_SOC_BIAS_OFF);
+
+	return 0;
 }
 
 static struct snd_soc_codec_driver soc_codec_dev_cq93vc = {
+	.read = cq93vc_read,
+	.write = cq93vc_write,
 	.set_bias_level = cq93vc_set_bias_level,
-	.get_regmap = cq93vc_get_regmap,
-	.component_driver = {
-		.controls = cq93vc_snd_controls,
-		.num_controls = ARRAY_SIZE(cq93vc_snd_controls),
-	},
+	.probe = cq93vc_probe,
+	.remove = cq93vc_remove,
+	.resume = cq93vc_resume,
 };
 
 static int cq93vc_platform_probe(struct platform_device *pdev)
@@ -152,10 +197,11 @@ static int cq93vc_platform_remove(struct platform_device *pdev)
 static struct platform_driver cq93vc_codec_driver = {
 	.driver = {
 			.name = "cq93vc-codec",
+			.owner = THIS_MODULE,
 	},
 
 	.probe = cq93vc_platform_probe,
-	.remove = cq93vc_platform_remove,
+	.remove = __devexit_p(cq93vc_platform_remove),
 };
 
 module_platform_driver(cq93vc_codec_driver);

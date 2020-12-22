@@ -1,4 +1,5 @@
-menu "DCCP CCIDs Configuration"
+menu "DCCP CCIDs Configuration (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
 
 config IP_DCCP_CCID2_DEBUG
 	bool "CCID-2 debugging messages"
@@ -11,7 +12,7 @@ config IP_DCCP_CCID2_DEBUG
 	  If in doubt, say N.
 
 config IP_DCCP_CCID3
-	bool "CCID-3 (TCP-Friendly)"
+	bool "CCID-3 (TCP-Friendly) (EXPERIMENTAL)"
 	def_bool y if (IP_DCCP = y || IP_DCCP = m)
 	---help---
 	  CCID-3 denotes TCP-Friendly Rate Control (TFRC), an equation-based

@@ -15,14 +15,12 @@ struct parsed_partitions {
 		int flags;
 		bool has_info;
 		struct partition_meta_info info;
-	} *parts;
+	} parts[DISK_MAX_PARTS];
 	int next;
 	int limit;
 	bool access_beyond_eod;
 	char *pp_buf;
 };
-
-void free_partitions(struct parsed_partitions *state);
 
 struct parsed_partitions *
 check_partition(struct gendisk *, struct block_device *);

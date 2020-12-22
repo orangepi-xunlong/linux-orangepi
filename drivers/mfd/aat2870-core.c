@@ -293,7 +293,7 @@ static ssize_t aat2870_reg_write_file(struct file *file,
 	unsigned long addr, val;
 	int ret;
 
-	buf_size = min(count, (size_t)(sizeof(buf)-1));
+	buf_size = min(count, (sizeof(buf)-1));
 	if (copy_from_user(buf, user_buf, buf_size)) {
 		dev_err(aat2870->dev, "Failed to copy from user\n");
 		return -EFAULT;
@@ -303,10 +303,7 @@ static ssize_t aat2870_reg_write_file(struct file *file,
 	while (*start == ' ')
 		start++;
 
-	ret = kstrtoul(start, 16, &addr);
-	if (ret)
-		return ret;
-
+	addr = simple_strtoul(start, &start, 16);
 	if (addr >= AAT2870_REG_NUM) {
 		dev_err(aat2870->dev, "Invalid address, 0x%lx\n", addr);
 		return -EINVAL;
@@ -315,9 +312,8 @@ static ssize_t aat2870_reg_write_file(struct file *file,
 	while (*start == ' ')
 		start++;
 
-	ret = kstrtoul(start, 16, &val);
-	if (ret)
-		return ret;
+	if (strict_strtoul(start, 16, &val))
+		return -EINVAL;
 
 	ret = aat2870->write(aat2870, (u8)addr, (u8)val);
 	if (ret)
@@ -366,15 +362,18 @@ static inline void aat2870_uninit_debugfs(struct aat2870_data *aat2870)
 static int aat2870_i2c_probe(struct i2c_client *client,
 			     const struct i2c_device_id *id)
 {
-	struct aat2870_platform_data *pdata = dev_get_platdata(&client->dev);
+	struct aat2870_platform_data *pdata = client->dev.platform_data;
 	struct aat2870_data *aat2870;
 	int i, j;
 	int ret = 0;
 
-	aat2870 = devm_kzalloc(&client->dev, sizeof(struct aat2870_data),
-				GFP_KERNEL);
-	if (!aat2870)
-		return -ENOMEM;
+	aat2870 = kzalloc(sizeof(struct aat2870_data), GFP_KERNEL);
+	if (!aat2870) {
+		dev_err(&client->dev,
+			"Failed to allocate memory for aat2870\n");
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	aat2870->dev = &client->dev;
 	dev_set_drvdata(aat2870->dev, aat2870);
@@ -401,12 +400,12 @@ static int aat2870_i2c_probe(struct i2c_client *client,
 		aat2870->init(aat2870);
 
 	if (aat2870->en_pin >= 0) {
-		ret = devm_gpio_request_one(&client->dev, aat2870->en_pin,
-					GPIOF_OUT_INIT_HIGH, "aat2870-en");
+		ret = gpio_request_one(aat2870->en_pin, GPIOF_OUT_INIT_HIGH,
+				       "aat2870-en");
 		if (ret < 0) {
 			dev_err(&client->dev,
 				"Failed to request GPIO %d\n", aat2870->en_pin);
-			return ret;
+			goto out_kfree;
 		}
 	}
 
@@ -425,7 +424,7 @@ static int aat2870_i2c_probe(struct i2c_client *client,
 	}
 
 	ret = mfd_add_devices(aat2870->dev, 0, aat2870_devs,
-			      ARRAY_SIZE(aat2870_devs), NULL, 0, NULL);
+			      ARRAY_SIZE(aat2870_devs), NULL, 0);
 	if (ret != 0) {
 		dev_err(aat2870->dev, "Failed to add subdev: %d\n", ret);
 		goto out_disable;
@@ -437,6 +436,11 @@ static int aat2870_i2c_probe(struct i2c_client *client,
 
 out_disable:
 	aat2870_disable(aat2870);
+	if (aat2870->en_pin >= 0)
+		gpio_free(aat2870->en_pin);
+out_kfree:
+	kfree(aat2870);
+out:
 	return ret;
 }
 
@@ -448,8 +452,11 @@ static int aat2870_i2c_remove(struct i2c_client *client)
 
 	mfd_remove_devices(aat2870->dev);
 	aat2870_disable(aat2870);
+	if (aat2870->en_pin >= 0)
+		gpio_free(aat2870->en_pin);
 	if (aat2870->uninit)
 		aat2870->uninit(aat2870);
+	kfree(aat2870);
 
 	return 0;
 }
@@ -497,6 +504,7 @@ MODULE_DEVICE_TABLE(i2c, aat2870_i2c_id_table);
 static struct i2c_driver aat2870_i2c_driver = {
 	.driver = {
 		.name	= "aat2870",
+		.owner	= THIS_MODULE,
 		.pm	= &aat2870_pm_ops,
 	},
 	.probe		= aat2870_i2c_probe,

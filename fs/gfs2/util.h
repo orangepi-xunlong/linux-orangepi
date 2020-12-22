@@ -10,23 +10,22 @@
 #ifndef __UTIL_DOT_H__
 #define __UTIL_DOT_H__
 
-#ifdef pr_fmt
-#undef pr_fmt
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-#endif
-
 #include <linux/mempool.h>
 
 #include "incore.h"
 
-#define fs_emerg(fs, fmt, ...)						\
-	pr_emerg("fsid=%s: " fmt, (fs)->sd_fsname, ##__VA_ARGS__)
-#define fs_warn(fs, fmt, ...)						\
-	pr_warn("fsid=%s: " fmt, (fs)->sd_fsname, ##__VA_ARGS__)
-#define fs_err(fs, fmt, ...)						\
-	pr_err("fsid=%s: " fmt, (fs)->sd_fsname, ##__VA_ARGS__)
-#define fs_info(fs, fmt, ...)						\
-	pr_info("fsid=%s: " fmt, (fs)->sd_fsname, ##__VA_ARGS__)
+#define fs_printk(level, fs, fmt, arg...) \
+	printk(level "GFS2: fsid=%s: " fmt , (fs)->sd_fsname , ## arg)
+
+#define fs_info(fs, fmt, arg...) \
+	fs_printk(KERN_INFO , fs , fmt , ## arg)
+
+#define fs_warn(fs, fmt, arg...) \
+	fs_printk(KERN_WARNING , fs , fmt , ## arg)
+
+#define fs_err(fs, fmt, arg...) \
+	fs_printk(KERN_ERR, fs , fmt , ## arg)
+
 
 void gfs2_assert_i(struct gfs2_sbd *sdp);
 
@@ -80,18 +79,22 @@ int gfs2_meta_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
 		       const char *type, const char *function,
 		       char *file, unsigned int line);
 
-static inline int gfs2_meta_check(struct gfs2_sbd *sdp,
-				    struct buffer_head *bh)
+static inline int gfs2_meta_check_i(struct gfs2_sbd *sdp,
+				    struct buffer_head *bh,
+				    const char *function,
+				    char *file, unsigned int line)
 {
 	struct gfs2_meta_header *mh = (struct gfs2_meta_header *)bh->b_data;
 	u32 magic = be32_to_cpu(mh->mh_magic);
-	if (unlikely(magic != GFS2_MAGIC)) {
-		pr_err("Magic number missing at %llu\n",
-		       (unsigned long long)bh->b_blocknr);
-		return -EIO;
-	}
+	if (unlikely(magic != GFS2_MAGIC))
+		return gfs2_meta_check_ii(sdp, bh, "magic number", function,
+					  file, line);
 	return 0;
 }
+
+#define gfs2_meta_check(sdp, bh) \
+gfs2_meta_check_i((sdp), (bh), __func__, __FILE__, __LINE__)
+
 
 int gfs2_metatype_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
 			   u16 type, u16 t,
@@ -149,8 +152,7 @@ extern struct kmem_cache *gfs2_inode_cachep;
 extern struct kmem_cache *gfs2_bufdata_cachep;
 extern struct kmem_cache *gfs2_rgrpd_cachep;
 extern struct kmem_cache *gfs2_quotad_cachep;
-extern struct kmem_cache *gfs2_qadata_cachep;
-extern mempool_t *gfs2_page_pool;
+extern mempool_t *gfs2_bh_pool;
 
 static inline unsigned int gfs2_tune_get_i(struct gfs2_tune *gt,
 					   unsigned int *p)
@@ -165,7 +167,9 @@ static inline unsigned int gfs2_tune_get_i(struct gfs2_tune *gt,
 #define gfs2_tune_get(sdp, field) \
 gfs2_tune_get_i(&(sdp)->sd_tune, &(sdp)->sd_tune.field)
 
-__printf(2, 3)
-int gfs2_lm_withdraw(struct gfs2_sbd *sdp, const char *fmt, ...);
+void gfs2_icbit_munge(struct gfs2_sbd *sdp, unsigned char **bitmap,
+		      unsigned int bit, int new_value);
+int gfs2_lm_withdraw(struct gfs2_sbd *sdp, char *fmt, ...);
 
 #endif /* __UTIL_DOT_H__ */
+

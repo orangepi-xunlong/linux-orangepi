@@ -16,7 +16,7 @@
 #   The second row specify the type of the symbol:
 #   A = Absolute
 #   B = Uninitialised data (.bss)
-#   C = Common symbol
+#   C = Comon symbol
 #   D = Initialised data
 #   G = Initialised data for small objects
 #   I = Indirect reference to another symbol
@@ -41,4 +41,5 @@
 # so we just ignore them to let readprofile continue to work.
 # (At least sparc64 has __crc_ in the middle).
 
-$NM -n $1 | grep -v '\( [aNUw] \)\|\(__crc_\)\|\( \$[adt]\)\|\( .L\)' > $2
+$NM -n $1 | grep -v '\( [aNUw] \)\|\(__crc_\)\|\( \$[adt]\)' > $2
+

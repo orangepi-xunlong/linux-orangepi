@@ -21,7 +21,6 @@
 #include <linux/gpio_keys.h>
 #include <linux/input.h>
 #include <linux/pda_power.h>
-#include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 #include <linux/gpio.h>
 #include <linux/wm97xx.h>
@@ -32,14 +31,14 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #include <mach/audio.h>
-#include "palmte2.h"
-#include <linux/platform_data/mmc-pxamci.h>
-#include <linux/platform_data/video-pxafb.h>
-#include <linux/platform_data/irda-pxaficp.h>
-#include "udc.h"
-#include <linux/platform_data/asoc-palm27x.h>
+#include <mach/palmte2.h>
+#include <mach/mmc.h>
+#include <mach/pxafb.h>
+#include <mach/irda.h>
+#include <mach/udc.h>
+#include <mach/palmasoc.h>
 
 #include "generic.h"
 #include "devices.h"
@@ -106,7 +105,6 @@ static struct pxamci_platform_data palmte2_mci_platform_data = {
 	.gpio_power		= GPIO_NR_PALMTE2_SD_POWER,
 };
 
-#if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
 /******************************************************************************
  * GPIO keys
  ******************************************************************************/
@@ -134,16 +132,10 @@ static struct platform_device palmte2_pxa_keys = {
 		.platform_data = &palmte2_pxa_keys_data,
 	},
 };
-#endif
 
 /******************************************************************************
  * Backlight
  ******************************************************************************/
-static struct pwm_lookup palmte2_pwm_lookup[] = {
-	PWM_LOOKUP("pxa25x-pwm.0", 0, "pwm-backlight.0", NULL,
-		   PALMTE2_PERIOD_NS, PWM_POLARITY_NORMAL),
-};
-
 static struct gpio palmte_bl_gpios[] = {
 	{ GPIO_NR_PALMTE2_BL_POWER, GPIOF_INIT_LOW, "Backlight power" },
 	{ GPIO_NR_PALMTE2_LCD_POWER, GPIOF_INIT_LOW, "LCD power" },
@@ -167,9 +159,10 @@ static void palmte2_backlight_exit(struct device *dev)
 }
 
 static struct platform_pwm_backlight_data palmte2_backlight_data = {
+	.pwm_id		= 0,
 	.max_brightness	= PALMTE2_MAX_INTENSITY,
 	.dft_brightness	= PALMTE2_MAX_INTENSITY,
-	.enable_gpio	= -1,
+	.pwm_period_ns	= PALMTE2_PERIOD_NS,
 	.init		= palmte2_backlight_init,
 	.notify		= palmte2_backlight_notify,
 	.exit		= palmte2_backlight_exit,
@@ -359,7 +352,6 @@ static void __init palmte2_init(void)
 	pxa_set_ac97_info(&palmte2_ac97_pdata);
 	pxa_set_ficp_info(&palmte2_ficp_platform_data);
 
-	pwm_add_table(palmte2_pwm_lookup, ARRAY_SIZE(palmte2_pwm_lookup));
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 }
 
@@ -369,7 +361,7 @@ MACHINE_START(PALMTE2, "Palm Tungsten|E2")
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa25x_init_irq,
 	.handle_irq	= pxa25x_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= palmte2_init,
 	.restart	= pxa_restart,
 MACHINE_END

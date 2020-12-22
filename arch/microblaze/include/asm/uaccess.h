@@ -71,6 +71,9 @@ struct exception_table_entry {
 	unsigned long insn, fixup;
 };
 
+/* Returns 0 if exception not found and fixup otherwise.  */
+extern unsigned long search_exception_table(unsigned long);
+
 #ifndef CONFIG_MMU
 
 /* Check against bounds of physical memory */
@@ -87,25 +90,17 @@ static inline int ___range_ok(unsigned long addr, unsigned long size)
 
 #else
 
-static inline int access_ok(int type, const void __user *addr,
-							unsigned long size)
-{
-	if (!size)
-		goto ok;
+/*
+ * Address is valid if:
+ *  - "addr", "addr + size" and "size" are all below the limit
+ */
+#define access_ok(type, addr, size) \
+	(get_fs().seg >= (((unsigned long)(addr)) | \
+		(size) | ((unsigned long)(addr) + (size))))
 
-	if ((get_fs().seg < ((unsigned long)addr)) ||
-			(get_fs().seg < ((unsigned long)addr + size - 1))) {
-		pr_devel("ACCESS fail: %s at 0x%08x (size 0x%x), seg 0x%08x\n",
-			type ? "WRITE" : "READ ", (__force u32)addr, (u32)size,
-			(u32)get_fs().seg);
-		return 0;
-	}
-ok:
-	pr_devel("ACCESS OK: %s at 0x%08x (size 0x%x), seg 0x%08x\n",
-			type ? "WRITE" : "READ ", (__force u32)addr, (u32)size,
-			(u32)get_fs().seg);
-	return 1;
-}
+/* || printk("access_ok failed for %s at 0x%08lx (size %d), seg 0x%08x\n",
+ type?"WRITE":"READ",addr,size,get_fs().seg)) */
+
 #endif
 
 #ifdef CONFIG_MMU
@@ -113,7 +108,7 @@ ok:
 # define __EX_TABLE_SECTION	".section __ex_table,\"a\"\n"
 #else
 # define __FIXUP_SECTION	".section .discard,\"ax\"\n"
-# define __EX_TABLE_SECTION	".section .discard,\"ax\"\n"
+# define __EX_TABLE_SECTION	".section .discard,\"a\"\n"
 #endif
 
 extern unsigned long __copy_tofrom_user(void __user *to,
@@ -142,7 +137,7 @@ static inline unsigned long __must_check __clear_user(void __user *to,
 static inline unsigned long __must_check clear_user(void __user *to,
 							unsigned long n)
 {
-	might_fault();
+	might_sleep();
 	if (unlikely(!access_ok(VERIFY_WRITE, to, n)))
 		return n;
 
@@ -175,8 +170,7 @@ extern long __user_bad(void);
  * @x:   Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -218,13 +212,13 @@ extern long __user_bad(void);
 	} else {							\
 		__gu_err = -EFAULT;					\
 	}								\
-	x = (__force typeof(*(ptr)))__gu_val;				\
+	x = (typeof(*(ptr)))__gu_val;					\
 	__gu_err;							\
 })
 
 #define __get_user(x, ptr)						\
 ({									\
-	unsigned long __gu_val = 0;					\
+	unsigned long __gu_val;						\
 	/*unsigned long __gu_ptr = (unsigned long)(ptr);*/		\
 	long __gu_err;							\
 	switch (sizeof(*(ptr))) {					\
@@ -240,7 +234,7 @@ extern long __user_bad(void);
 	default:							\
 		/* __gu_val = 0; __gu_err = -EINVAL;*/ __gu_err = __user_bad();\
 	}								\
-	x = (__force __typeof__(*(ptr))) __gu_val;			\
+	x = (__typeof__(*(ptr))) __gu_val;				\
 	__gu_err;							\
 })
 
@@ -288,8 +282,7 @@ extern long __user_bad(void);
  * @x:   Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -305,10 +298,11 @@ extern long __user_bad(void);
 
 #define __put_user_check(x, ptr, size)					\
 ({									\
-	typeof(*(ptr)) volatile __pu_val = x;				\
+	typeof(*(ptr)) __pu_val;					\
 	typeof(*(ptr)) __user *__pu_addr = (ptr);			\
 	int __pu_err = 0;						\
 									\
+	__pu_val = (x);							\
 	if (access_ok(VERIFY_WRITE, __pu_addr, size)) {			\
 		switch (size) {						\
 		case 1:							\
@@ -370,13 +364,10 @@ extern long __user_bad(void);
 static inline long copy_from_user(void *to,
 		const void __user *from, unsigned long n)
 {
-	unsigned long res = n;
-	might_fault();
-	if (likely(access_ok(VERIFY_READ, from, n)))
-		res = __copy_from_user(to, from, n);
-	if (unlikely(res))
-		memset(to + (n - res), 0, res);
-	return res;
+	might_sleep();
+	if (access_ok(VERIFY_READ, from, n))
+		return __copy_from_user(to, from, n);
+	return n;
 }
 
 #define __copy_to_user(to, from, n)	\
@@ -387,7 +378,7 @@ static inline long copy_from_user(void *to,
 static inline long copy_to_user(void __user *to,
 		const void *from, unsigned long n)
 {
-	might_fault();
+	might_sleep();
 	if (access_ok(VERIFY_WRITE, to, n))
 		return __copy_to_user(to, from, n);
 	return n;

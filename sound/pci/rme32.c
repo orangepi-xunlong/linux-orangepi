@@ -75,7 +75,6 @@
 #include <linux/interrupt.h>
 #include <linux/pci.h>
 #include <linux/module.h>
-#include <linux/io.h>
 
 #include <sound/core.h>
 #include <sound/info.h>
@@ -85,6 +84,8 @@
 #include <sound/pcm-indirect.h>
 #include <sound/asoundef.h>
 #include <sound/initval.h>
+
+#include <asm/io.h>
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
@@ -225,7 +226,7 @@ struct rme32 {
 	struct snd_kcontrol *spdif_ctl;
 };
 
-static const struct pci_device_id snd_rme32_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(snd_rme32_ids) = {
 	{PCI_VDEVICE(XILINX_RME, PCI_DEVICE_ID_RME_DIGI32), 0,},
 	{PCI_VDEVICE(XILINX_RME, PCI_DEVICE_ID_RME_DIGI32_8), 0,},
 	{PCI_VDEVICE(XILINX_RME, PCI_DEVICE_ID_RME_DIGI32_PRO), 0,},
@@ -631,7 +632,7 @@ snd_rme32_setframelog(struct rme32 * rme32, int n_channels, int is_playback)
 	}
 }
 
-static int snd_rme32_setformat(struct rme32 *rme32, snd_pcm_format_t format)
+static int snd_rme32_setformat(struct rme32 * rme32, int format)
 {
 	switch (format) {
 	case SNDRV_PCM_FORMAT_S16_LE:
@@ -831,9 +832,9 @@ static struct snd_pcm_hw_constraint_list hw_constraints_period_bytes = {
 static void snd_rme32_set_buffer_constraint(struct rme32 *rme32, struct snd_pcm_runtime *runtime)
 {
 	if (! rme32->fullduplex_mode) {
-		snd_pcm_hw_constraint_single(runtime,
+		snd_pcm_hw_constraint_minmax(runtime,
 					     SNDRV_PCM_HW_PARAM_BUFFER_BYTES,
-					     RME32_BUFFER_SIZE);
+					     RME32_BUFFER_SIZE, RME32_BUFFER_SIZE);
 		snd_pcm_hw_constraint_list(runtime, 0,
 					   SNDRV_PCM_HW_PARAM_PERIOD_BYTES,
 					   &hw_constraints_period_bytes);
@@ -1196,7 +1197,7 @@ snd_rme32_capture_fd_pointer(struct snd_pcm_substream *substream)
 }
 
 /* for halfduplex mode */
-static const struct snd_pcm_ops snd_rme32_playback_spdif_ops = {
+static struct snd_pcm_ops snd_rme32_playback_spdif_ops = {
 	.open =		snd_rme32_playback_spdif_open,
 	.close =	snd_rme32_playback_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1210,7 +1211,7 @@ static const struct snd_pcm_ops snd_rme32_playback_spdif_ops = {
 	.mmap =		snd_pcm_lib_mmap_iomem,
 };
 
-static const struct snd_pcm_ops snd_rme32_capture_spdif_ops = {
+static struct snd_pcm_ops snd_rme32_capture_spdif_ops = {
 	.open =		snd_rme32_capture_spdif_open,
 	.close =	snd_rme32_capture_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1223,7 +1224,7 @@ static const struct snd_pcm_ops snd_rme32_capture_spdif_ops = {
 	.mmap =		snd_pcm_lib_mmap_iomem,
 };
 
-static const struct snd_pcm_ops snd_rme32_playback_adat_ops = {
+static struct snd_pcm_ops snd_rme32_playback_adat_ops = {
 	.open =		snd_rme32_playback_adat_open,
 	.close =	snd_rme32_playback_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1236,7 +1237,7 @@ static const struct snd_pcm_ops snd_rme32_playback_adat_ops = {
 	.mmap =		snd_pcm_lib_mmap_iomem,
 };
 
-static const struct snd_pcm_ops snd_rme32_capture_adat_ops = {
+static struct snd_pcm_ops snd_rme32_capture_adat_ops = {
 	.open =		snd_rme32_capture_adat_open,
 	.close =	snd_rme32_capture_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1249,7 +1250,7 @@ static const struct snd_pcm_ops snd_rme32_capture_adat_ops = {
 };
 
 /* for fullduplex mode */
-static const struct snd_pcm_ops snd_rme32_playback_spdif_fd_ops = {
+static struct snd_pcm_ops snd_rme32_playback_spdif_fd_ops = {
 	.open =		snd_rme32_playback_spdif_open,
 	.close =	snd_rme32_playback_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1261,7 +1262,7 @@ static const struct snd_pcm_ops snd_rme32_playback_spdif_fd_ops = {
 	.ack =		snd_rme32_playback_fd_ack,
 };
 
-static const struct snd_pcm_ops snd_rme32_capture_spdif_fd_ops = {
+static struct snd_pcm_ops snd_rme32_capture_spdif_fd_ops = {
 	.open =		snd_rme32_capture_spdif_open,
 	.close =	snd_rme32_capture_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1273,7 +1274,7 @@ static const struct snd_pcm_ops snd_rme32_capture_spdif_fd_ops = {
 	.ack =		snd_rme32_capture_fd_ack,
 };
 
-static const struct snd_pcm_ops snd_rme32_playback_adat_fd_ops = {
+static struct snd_pcm_ops snd_rme32_playback_adat_fd_ops = {
 	.open =		snd_rme32_playback_adat_open,
 	.close =	snd_rme32_playback_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1284,7 +1285,7 @@ static const struct snd_pcm_ops snd_rme32_playback_adat_fd_ops = {
 	.ack =		snd_rme32_playback_fd_ack,
 };
 
-static const struct snd_pcm_ops snd_rme32_capture_adat_fd_ops = {
+static struct snd_pcm_ops snd_rme32_capture_adat_fd_ops = {
 	.open =		snd_rme32_capture_adat_open,
 	.close =	snd_rme32_capture_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1331,7 +1332,7 @@ snd_rme32_free_adat_pcm(struct snd_pcm *pcm)
 	rme32->adat_pcm = NULL;
 }
 
-static int snd_rme32_create(struct rme32 *rme32)
+static int __devinit snd_rme32_create(struct rme32 * rme32)
 {
 	struct pci_dev *pci = rme32->pci;
 	int err;
@@ -1348,15 +1349,14 @@ static int snd_rme32_create(struct rme32 *rme32)
 
 	rme32->iobase = ioremap_nocache(rme32->port, RME32_IO_SIZE);
 	if (!rme32->iobase) {
-		dev_err(rme32->card->dev,
-			"unable to remap memory region 0x%lx-0x%lx\n",
+		snd_printk(KERN_ERR "unable to remap memory region 0x%lx-0x%lx\n",
 			   rme32->port, rme32->port + RME32_IO_SIZE - 1);
 		return -ENOMEM;
 	}
 
 	if (request_irq(pci->irq, snd_rme32_interrupt, IRQF_SHARED,
 			KBUILD_MODNAME, rme32)) {
-		dev_err(rme32->card->dev, "unable to grab IRQ %d\n", pci->irq);
+		snd_printk(KERN_ERR "unable to grab IRQ %d\n", pci->irq);
 		return -EBUSY;
 	}
 	rme32->irq = pci->irq;
@@ -1554,7 +1554,7 @@ snd_rme32_proc_read(struct snd_info_entry * entry, struct snd_info_buffer *buffe
 	}
 }
 
-static void snd_rme32_proc_init(struct rme32 *rme32)
+static void __devinit snd_rme32_proc_init(struct rme32 * rme32)
 {
 	struct snd_info_entry *entry;
 
@@ -1607,24 +1607,30 @@ snd_rme32_info_inputtype_control(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_info *uinfo)
 {
 	struct rme32 *rme32 = snd_kcontrol_chip(kcontrol);
-	static const char * const texts[4] = {
-		"Optical", "Coaxial", "Internal", "XLR"
-	};
-	int num_items;
+	static char *texts[4] = { "Optical", "Coaxial", "Internal", "XLR" };
 
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
 	switch (rme32->pci->device) {
 	case PCI_DEVICE_ID_RME_DIGI32:
 	case PCI_DEVICE_ID_RME_DIGI32_8:
-		num_items = 3;
+		uinfo->value.enumerated.items = 3;
 		break;
 	case PCI_DEVICE_ID_RME_DIGI32_PRO:
-		num_items = 4;
+		uinfo->value.enumerated.items = 4;
 		break;
 	default:
 		snd_BUG();
-		return -EINVAL;
+		break;
 	}
-	return snd_ctl_enum_info(uinfo, 1, num_items, texts);
+	if (uinfo->value.enumerated.item >
+	    uinfo->value.enumerated.items - 1) {
+		uinfo->value.enumerated.item =
+		    uinfo->value.enumerated.items - 1;
+	}
+	strcpy(uinfo->value.enumerated.name,
+	       texts[uinfo->value.enumerated.item]);
+	return 0;
 }
 static int
 snd_rme32_get_inputtype_control(struct snd_kcontrol *kcontrol,
@@ -1688,12 +1694,20 @@ static int
 snd_rme32_info_clockmode_control(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_info *uinfo)
 {
-	static const char * const texts[4] = { "AutoSync",
+	static char *texts[4] = { "AutoSync", 
 				  "Internal 32.0kHz", 
 				  "Internal 44.1kHz", 
 				  "Internal 48.0kHz" };
 
-	return snd_ctl_enum_info(uinfo, 1, 4, texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 4;
+	if (uinfo->value.enumerated.item > 3) {
+		uinfo->value.enumerated.item = 3;
+	}
+	strcpy(uinfo->value.enumerated.name,
+	       texts[uinfo->value.enumerated.item]);
+	return 0;
 }
 static int
 snd_rme32_get_clockmode_control(struct snd_kcontrol *kcontrol,
@@ -1908,7 +1922,7 @@ static void snd_rme32_card_free(struct snd_card *card)
 	snd_rme32_free(card->private_data);
 }
 
-static int
+static int __devinit
 snd_rme32_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 {
 	static int dev;
@@ -1924,14 +1938,15 @@ snd_rme32_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 		return -ENOENT;
 	}
 
-	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
-			   sizeof(struct rme32), &card);
+	err = snd_card_create(index[dev], id[dev], THIS_MODULE,
+			      sizeof(struct rme32), &card);
 	if (err < 0)
 		return err;
 	card->private_free = snd_rme32_card_free;
 	rme32 = (struct rme32 *) card->private_data;
 	rme32->card = card;
 	rme32->pci = pci;
+	snd_card_set_dev(card, &pci->dev);
         if (fullduplex[dev])
 		rme32->fullduplex_mode = 1;
 	if ((err = snd_rme32_create(rme32)) < 0) {
@@ -1963,16 +1978,28 @@ snd_rme32_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 	return 0;
 }
 
-static void snd_rme32_remove(struct pci_dev *pci)
+static void __devexit snd_rme32_remove(struct pci_dev *pci)
 {
 	snd_card_free(pci_get_drvdata(pci));
+	pci_set_drvdata(pci, NULL);
 }
 
-static struct pci_driver rme32_driver = {
+static struct pci_driver driver = {
 	.name =		KBUILD_MODNAME,
 	.id_table =	snd_rme32_ids,
 	.probe =	snd_rme32_probe,
-	.remove =	snd_rme32_remove,
+	.remove =	__devexit_p(snd_rme32_remove),
 };
 
-module_pci_driver(rme32_driver);
+static int __init alsa_card_rme32_init(void)
+{
+	return pci_register_driver(&driver);
+}
+
+static void __exit alsa_card_rme32_exit(void)
+{
+	pci_unregister_driver(&driver);
+}
+
+module_init(alsa_card_rme32_init)
+module_exit(alsa_card_rme32_exit)

@@ -23,187 +23,130 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
-#include <linux/of.h>
 #include <linux/hw_random.h>
 #include <linux/io.h>
-#include <linux/slab.h>
 #include <linux/timeriomem-rng.h>
 #include <linux/jiffies.h>
 #include <linux/sched.h>
 #include <linux/timer.h>
 #include <linux/completion.h>
 
-struct timeriomem_rng_private_data {
-	void __iomem		*io_base;
-	unsigned int		expires;
-	unsigned int		period;
-	unsigned int		present:1;
+static struct timeriomem_rng_data *timeriomem_rng_data;
 
-	struct timer_list	timer;
-	struct completion	completion;
-
-	struct hwrng		timeriomem_rng_ops;
-};
-
-#define to_rng_priv(rng) \
-		((struct timeriomem_rng_private_data *)rng->priv)
+static void timeriomem_rng_trigger(unsigned long);
+static DEFINE_TIMER(timeriomem_rng_timer, timeriomem_rng_trigger, 0, 0);
 
 /*
  * have data return 1, however return 0 if we have nothing
  */
 static int timeriomem_rng_data_present(struct hwrng *rng, int wait)
 {
-	struct timeriomem_rng_private_data *priv = to_rng_priv(rng);
+	if (rng->priv == 0)
+		return 1;
 
-	if (!wait || priv->present)
-		return priv->present;
+	if (!wait || timeriomem_rng_data->present)
+		return timeriomem_rng_data->present;
 
-	wait_for_completion(&priv->completion);
+	wait_for_completion(&timeriomem_rng_data->completion);
 
 	return 1;
 }
 
 static int timeriomem_rng_data_read(struct hwrng *rng, u32 *data)
 {
-	struct timeriomem_rng_private_data *priv = to_rng_priv(rng);
 	unsigned long cur;
 	s32 delay;
 
-	*data = readl(priv->io_base);
+	*data = readl(timeriomem_rng_data->address);
 
-	cur = jiffies;
+	if (rng->priv != 0) {
+		cur = jiffies;
 
-	delay = cur - priv->expires;
-	delay = priv->period - (delay % priv->period);
+		delay = cur - timeriomem_rng_timer.expires;
+		delay = rng->priv - (delay % rng->priv);
 
-	priv->expires = cur + delay;
-	priv->present = 0;
+		timeriomem_rng_timer.expires = cur + delay;
+		timeriomem_rng_data->present = 0;
 
-	reinit_completion(&priv->completion);
-	mod_timer(&priv->timer, priv->expires);
+		init_completion(&timeriomem_rng_data->completion);
+		add_timer(&timeriomem_rng_timer);
+	}
 
 	return 4;
 }
 
-static void timeriomem_rng_trigger(unsigned long data)
+static void timeriomem_rng_trigger(unsigned long dummy)
 {
-	struct timeriomem_rng_private_data *priv
-			= (struct timeriomem_rng_private_data *)data;
-
-	priv->present = 1;
-	complete(&priv->completion);
+	timeriomem_rng_data->present = 1;
+	complete(&timeriomem_rng_data->completion);
 }
 
-static int timeriomem_rng_probe(struct platform_device *pdev)
-{
-	struct timeriomem_rng_data *pdata = pdev->dev.platform_data;
-	struct timeriomem_rng_private_data *priv;
-	struct resource *res;
-	int err = 0;
-	int period;
+static struct hwrng timeriomem_rng_ops = {
+	.name		= "timeriomem",
+	.data_present	= timeriomem_rng_data_present,
+	.data_read	= timeriomem_rng_data_read,
+	.priv		= 0,
+};
 
-	if (!pdev->dev.of_node && !pdata) {
-		dev_err(&pdev->dev, "timeriomem_rng_data is missing\n");
-		return -EINVAL;
-	}
+static int __devinit timeriomem_rng_probe(struct platform_device *pdev)
+{
+	struct resource *res;
+	int ret;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+
 	if (!res)
-		return -ENXIO;
+		return -ENOENT;
 
-	if (res->start % 4 != 0 || resource_size(res) != 4) {
-		dev_err(&pdev->dev,
-			"address must be four bytes wide and aligned\n");
-		return -EINVAL;
+	timeriomem_rng_data = pdev->dev.platform_data;
+
+	timeriomem_rng_data->address = ioremap(res->start, resource_size(res));
+	if (!timeriomem_rng_data->address)
+		return -EIO;
+
+	if (timeriomem_rng_data->period != 0
+		&& usecs_to_jiffies(timeriomem_rng_data->period) > 0) {
+		timeriomem_rng_timer.expires = jiffies;
+
+		timeriomem_rng_ops.priv = usecs_to_jiffies(
+						timeriomem_rng_data->period);
 	}
+	timeriomem_rng_data->present = 1;
 
-	/* Allocate memory for the device structure (and zero it) */
-	priv = devm_kzalloc(&pdev->dev,
-			sizeof(struct timeriomem_rng_private_data), GFP_KERNEL);
-	if (!priv)
-		return -ENOMEM;
-
-	platform_set_drvdata(pdev, priv);
-
-	if (pdev->dev.of_node) {
-		int i;
-
-		if (!of_property_read_u32(pdev->dev.of_node,
-						"period", &i))
-			period = i;
-		else {
-			dev_err(&pdev->dev, "missing period\n");
-			return -EINVAL;
-		}
-	} else {
-		period = pdata->period;
-	}
-
-	priv->period = usecs_to_jiffies(period);
-	if (priv->period < 1) {
-		dev_err(&pdev->dev, "period is less than one jiffy\n");
-		return -EINVAL;
-	}
-
-	priv->expires	= jiffies;
-	priv->present	= 1;
-
-	init_completion(&priv->completion);
-	complete(&priv->completion);
-
-	setup_timer(&priv->timer, timeriomem_rng_trigger, (unsigned long)priv);
-
-	priv->timeriomem_rng_ops.name		= dev_name(&pdev->dev);
-	priv->timeriomem_rng_ops.data_present	= timeriomem_rng_data_present;
-	priv->timeriomem_rng_ops.data_read	= timeriomem_rng_data_read;
-	priv->timeriomem_rng_ops.priv		= (unsigned long)priv;
-
-	priv->io_base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(priv->io_base)) {
-		err = PTR_ERR(priv->io_base);
-		goto out_timer;
-	}
-
-	err = hwrng_register(&priv->timeriomem_rng_ops);
-	if (err) {
-		dev_err(&pdev->dev, "problem registering\n");
-		goto out_timer;
-	}
+	ret = hwrng_register(&timeriomem_rng_ops);
+	if (ret)
+		goto failed;
 
 	dev_info(&pdev->dev, "32bits from 0x%p @ %dus\n",
-			priv->io_base, period);
+			timeriomem_rng_data->address,
+			timeriomem_rng_data->period);
 
 	return 0;
 
-out_timer:
-	del_timer_sync(&priv->timer);
-	return err;
+failed:
+	dev_err(&pdev->dev, "problem registering\n");
+	iounmap(timeriomem_rng_data->address);
+
+	return ret;
 }
 
-static int timeriomem_rng_remove(struct platform_device *pdev)
+static int __devexit timeriomem_rng_remove(struct platform_device *pdev)
 {
-	struct timeriomem_rng_private_data *priv = platform_get_drvdata(pdev);
+	del_timer_sync(&timeriomem_rng_timer);
+	hwrng_unregister(&timeriomem_rng_ops);
 
-	hwrng_unregister(&priv->timeriomem_rng_ops);
-
-	del_timer_sync(&priv->timer);
+	iounmap(timeriomem_rng_data->address);
 
 	return 0;
 }
-
-static const struct of_device_id timeriomem_rng_match[] = {
-	{ .compatible = "timeriomem_rng" },
-	{},
-};
-MODULE_DEVICE_TABLE(of, timeriomem_rng_match);
 
 static struct platform_driver timeriomem_rng_driver = {
 	.driver = {
 		.name		= "timeriomem_rng",
-		.of_match_table	= timeriomem_rng_match,
+		.owner		= THIS_MODULE,
 	},
 	.probe		= timeriomem_rng_probe,
-	.remove		= timeriomem_rng_remove,
+	.remove		= __devexit_p(timeriomem_rng_remove),
 };
 
 module_platform_driver(timeriomem_rng_driver);

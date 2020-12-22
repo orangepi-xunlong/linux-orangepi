@@ -30,7 +30,6 @@
 #include <linux/module.h>
 #include <linux/kfifo.h>
 #include <linux/vmalloc.h>
-#include <linux/time64.h>
 #include <linux/gfp.h>
 #include <net/net_namespace.h>
 
@@ -48,20 +47,20 @@ static struct {
 	struct kfifo	  fifo;
 	spinlock_t	  lock;
 	wait_queue_head_t wait;
-	struct timespec64 tstart;
+	struct timespec	  tstart;
 } dccpw;
 
 static void printl(const char *fmt, ...)
 {
 	va_list args;
 	int len;
-	struct timespec64 now;
+	struct timespec now;
 	char tbuf[256];
 
 	va_start(args, fmt);
-	getnstimeofday64(&now);
+	getnstimeofday(&now);
 
-	now = timespec64_sub(now, dccpw.tstart);
+	now = timespec_sub(now, dccpw.tstart);
 
 	len = sprintf(tbuf, "%lu.%06lu ",
 		      (unsigned long) now.tv_sec,
@@ -73,7 +72,8 @@ static void printl(const char *fmt, ...)
 	wake_up(&dccpw.wait);
 }
 
-static int jdccp_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
+static int jdccp_sendmsg(struct kiocb *iocb, struct sock *sk,
+			 struct msghdr *msg, size_t size)
 {
 	const struct inet_sock *inet = inet_sk(sk);
 	struct ccid3_hc_tx_sock *hc = NULL;
@@ -111,7 +111,7 @@ static struct jprobe dccp_send_probe = {
 static int dccpprobe_open(struct inode *inode, struct file *file)
 {
 	kfifo_reset(&dccpw.fifo);
-	getnstimeofday64(&dccpw.tstart);
+	getnstimeofday(&dccpw.tstart);
 	return 0;
 }
 
@@ -152,6 +152,17 @@ static const struct file_operations dccpprobe_fops = {
 	.llseek  = noop_llseek,
 };
 
+static __init int setup_jprobe(void)
+{
+	int ret = register_jprobe(&dccp_send_probe);
+
+	if (ret) {
+		request_module("dccp");
+		ret = register_jprobe(&dccp_send_probe);
+	}
+	return ret;
+}
+
 static __init int dccpprobe_init(void)
 {
 	int ret = -ENOMEM;
@@ -160,23 +171,17 @@ static __init int dccpprobe_init(void)
 	spin_lock_init(&dccpw.lock);
 	if (kfifo_alloc(&dccpw.fifo, bufsize, GFP_KERNEL))
 		return ret;
-	if (!proc_create(procname, S_IRUSR, init_net.proc_net, &dccpprobe_fops))
+	if (!proc_net_fops_create(&init_net, procname, S_IRUSR, &dccpprobe_fops))
 		goto err0;
 
-	ret = register_jprobe(&dccp_send_probe);
-	if (ret) {
-		ret = request_module("dccp");
-		if (!ret)
-			ret = register_jprobe(&dccp_send_probe);
-	}
-
+	ret = setup_jprobe();
 	if (ret)
 		goto err1;
 
 	pr_info("DCCP watch registered (port=%d)\n", port);
 	return 0;
 err1:
-	remove_proc_entry(procname, init_net.proc_net);
+	proc_net_remove(&init_net, procname);
 err0:
 	kfifo_free(&dccpw.fifo);
 	return ret;
@@ -186,7 +191,7 @@ module_init(dccpprobe_init);
 static __exit void dccpprobe_exit(void)
 {
 	kfifo_free(&dccpw.fifo);
-	remove_proc_entry(procname, init_net.proc_net);
+	proc_net_remove(&init_net, procname);
 	unregister_jprobe(&dccp_send_probe);
 
 }

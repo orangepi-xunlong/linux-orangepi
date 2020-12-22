@@ -4,12 +4,21 @@
 #
 # Licensed under GPLv2
 
-ccflags-$(CONFIG_ARCH_S3C64XX) := -I$(srctree)/arch/arm/mach-s3c64xx/include
-ccflags-$(CONFIG_ARCH_MULTIPLATFORM) += -I$(srctree)/$(src)/include
+obj-y				:=
+obj-m				:=
+obj-n				:= dummy.o
+obj-				:=
 
 # Objects we always build independent of SoC choice
 
 obj-y				+= init.o cpu.o
+obj-$(CONFIG_ARCH_USES_GETTIMEOFFSET)   += time.o
+obj-y				+= clock.o
+obj-y				+= pwm-clock.o
+
+obj-$(CONFIG_SAMSUNG_CLKSRC)	+= clock-clksrc.o
+
+obj-$(CONFIG_SAMSUNG_IRQ_VIC_TIMER) += irq-vic-timer.o
 
 # ADC
 
@@ -17,21 +26,31 @@ obj-$(CONFIG_S3C_ADC)	+= adc.o
 
 # devices
 
-obj-$(CONFIG_SAMSUNG_ATAGS)	+= platformdata.o
+obj-y				+= platformdata.o
 
-obj-$(CONFIG_SAMSUNG_ATAGS)	+= devs.o
-obj-$(CONFIG_SAMSUNG_ATAGS)	+= dev-uart.o
+obj-y				+= devs.o
+obj-y				+= dev-uart.o
 
-obj-$(CONFIG_GPIO_SAMSUNG)     += gpio-samsung.o
+obj-$(CONFIG_SAMSUNG_DEV_BACKLIGHT)	+= dev-backlight.o
+
+# DMA support
+
+obj-$(CONFIG_S3C_DMA)		+= dma.o s3c-dma-ops.o
+
+obj-$(CONFIG_SAMSUNG_DMADEV)	+= dma-ops.o
 
 # PM support
 
-obj-$(CONFIG_PM_SLEEP)		+= pm-common.o
-obj-$(CONFIG_EXYNOS_CPU_SUSPEND) += pm-common.o
-obj-$(CONFIG_SAMSUNG_PM)	+= pm.o
-obj-$(CONFIG_SAMSUNG_PM_GPIO)	+= pm-gpio.o
+obj-$(CONFIG_PM)		+= pm.o
+obj-$(CONFIG_PM)		+= pm-gpio.o
 obj-$(CONFIG_SAMSUNG_PM_CHECK)	+= pm-check.o
-obj-$(CONFIG_SAMSUNG_PM_DEBUG)	+= pm-debug.o
 
 obj-$(CONFIG_SAMSUNG_WAKEMASK)	+= wakeup-mask.o
-obj-$(CONFIG_SAMSUNG_WDT_RESET)	+= watchdog-reset.o
+
+# PD support
+
+obj-$(CONFIG_SAMSUNG_PD)	+= pd.o
+
+# PWM support
+
+obj-$(CONFIG_HAVE_PWM)		+= pwm.o

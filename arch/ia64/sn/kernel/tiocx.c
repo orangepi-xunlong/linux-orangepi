@@ -490,14 +490,11 @@ static int __init tiocx_init(void)
 {
 	cnodeid_t cnodeid;
 	int found_tiocx_device = 0;
-	int err;
 
 	if (!ia64_platform_is("sn2"))
 		return 0;
 
-	err = bus_register(&tiocx_bus_type);
-	if (err)
-		return err;
+	bus_register(&tiocx_bus_type);
 
 	for (cnodeid = 0; cnodeid < num_cnodes; cnodeid++) {
 		nasid_t nasid;

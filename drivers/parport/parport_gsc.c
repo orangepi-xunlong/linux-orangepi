@@ -137,7 +137,7 @@ struct parport_operations parport_gsc_ops =
 /*
  * Checks for port existence, all ports support SPP MODE
  */
-static int parport_SPP_supported(struct parport *pb)
+static int __devinit parport_SPP_supported(struct parport *pb)
 {
 	unsigned char r, w;
 
@@ -201,7 +201,7 @@ static int parport_SPP_supported(struct parport *pb)
  * be misdetected here is rather academic. 
  */
 
-static int parport_PS2_supported(struct parport *pb)
+static int __devinit parport_PS2_supported(struct parport *pb)
 {
 	int ok = 0;
   
@@ -232,9 +232,10 @@ static int parport_PS2_supported(struct parport *pb)
 
 /* --- Initialisation code -------------------------------- */
 
-struct parport *parport_gsc_probe_port(unsigned long base,
-				       unsigned long base_hi, int irq,
-				       int dma, struct parisc_device *padev)
+struct parport *__devinit parport_gsc_probe_port (unsigned long base,
+						 unsigned long base_hi,
+						 int irq, int dma,
+						 struct pci_dev *dev)
 {
 	struct parport_gsc_private *priv;
 	struct parport_operations *ops;
@@ -246,18 +247,19 @@ struct parport *parport_gsc_probe_port(unsigned long base,
 		printk (KERN_DEBUG "parport (0x%lx): no memory!\n", base);
 		return NULL;
 	}
-	ops = kmemdup(&parport_gsc_ops, sizeof(struct parport_operations),
-		      GFP_KERNEL);
+	ops = kmalloc (sizeof (struct parport_operations), GFP_KERNEL);
 	if (!ops) {
 		printk (KERN_DEBUG "parport (0x%lx): no memory for ops!\n",
 			base);
 		kfree (priv);
 		return NULL;
 	}
+	memcpy (ops, &parport_gsc_ops, sizeof (struct parport_operations));
 	priv->ctr = 0xc;
 	priv->ctr_writable = 0xff;
 	priv->dma_buf = 0;
 	priv->dma_handle = 0;
+	priv->dev = dev;
 	p->base = base;
 	p->base_hi = base_hi;
 	p->irq = irq;
@@ -269,7 +271,6 @@ struct parport *parport_gsc_probe_port(unsigned long base,
 	if (!parport_SPP_supported (p)) {
 		/* No port. */
 		kfree (priv);
-		kfree(ops);
 		return NULL;
 	}
 	parport_PS2_supported (p);
@@ -281,7 +282,6 @@ struct parport *parport_gsc_probe_port(unsigned long base,
 		return NULL;
 	}
 
-	p->dev = &padev->dev;
 	p->base_hi = base_hi;
 	p->modes = tmp.modes;
 	p->size = (p->modes & PARPORT_MODE_EPP)?8:3;
@@ -293,7 +293,7 @@ struct parport *parport_gsc_probe_port(unsigned long base,
 		p->irq = PARPORT_IRQ_NONE;
 	}
 	if (p->irq != PARPORT_IRQ_NONE) {
-		pr_cont(", irq %d", p->irq);
+		printk(", irq %d", p->irq);
 
 		if (p->dma == PARPORT_DMA_AUTO) {
 			p->dma = PARPORT_DMA_NONE;
@@ -303,8 +303,8 @@ struct parport *parport_gsc_probe_port(unsigned long base,
                                            is mandatory (see above) */
 		p->dma = PARPORT_DMA_NONE;
 
-	pr_cont(" [");
-#define printmode(x) {if(p->modes&PARPORT_MODE_##x){pr_cont("%s%s",f?",":"",#x);f++;}}
+	printk(" [");
+#define printmode(x) {if(p->modes&PARPORT_MODE_##x){printk("%s%s",f?",":"",#x);f++;}}
 	{
 		int f = 0;
 		printmode(PCSPP);
@@ -315,7 +315,7 @@ struct parport *parport_gsc_probe_port(unsigned long base,
 //		printmode(DMA);
 	}
 #undef printmode
-	pr_cont("]\n");
+	printk("]\n");
 
 	if (p->irq != PARPORT_IRQ_NONE) {
 		if (request_irq (p->irq, parport_irq_handler,
@@ -344,9 +344,9 @@ struct parport *parport_gsc_probe_port(unsigned long base,
 
 #define PARPORT_GSC_OFFSET 0x800
 
-static int parport_count;
+static int __devinitdata parport_count;
 
-static int parport_init_chip(struct parisc_device *dev)
+static int __devinit parport_init_chip(struct parisc_device *dev)
 {
 	struct parport *p;
 	unsigned long port;
@@ -373,7 +373,7 @@ static int parport_init_chip(struct parisc_device *dev)
 	}
 	
 	p = parport_gsc_probe_port(port, 0, dev->irq,
-			/* PARPORT_IRQ_NONE */ PARPORT_DMA_NONE, dev);
+			/* PARPORT_IRQ_NONE */ PARPORT_DMA_NONE, NULL);
 	if (p)
 		parport_count++;
 	dev_set_drvdata(&dev->dev, p);
@@ -381,7 +381,7 @@ static int parport_init_chip(struct parisc_device *dev)
 	return 0;
 }
 
-static int parport_remove_chip(struct parisc_device *dev)
+static int __devexit parport_remove_chip(struct parisc_device *dev)
 {
 	struct parport *p = dev_get_drvdata(&dev->dev);
 	if (p) {
@@ -414,15 +414,15 @@ static struct parisc_driver parport_driver = {
 	.name		= "Parallel",
 	.id_table	= parport_tbl,
 	.probe		= parport_init_chip,
-	.remove		= parport_remove_chip,
+	.remove		= __devexit_p(parport_remove_chip),
 };
 
-int parport_gsc_init(void)
+int __devinit parport_gsc_init(void)
 {
 	return register_parisc_driver(&parport_driver);
 }
 
-static void parport_gsc_exit(void)
+static void __devexit parport_gsc_exit(void)
 {
 	unregister_parisc_driver(&parport_driver);
 }

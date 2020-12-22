@@ -63,16 +63,20 @@ static inline void CSYNC(void)
 
 #if ANOMALY_05000312 || ANOMALY_05000244
 #define SSYNC(scratch)	\
+do {			\
 	cli scratch;	\
 	nop; nop; nop;	\
 	SSYNC;		\
-	sti scratch;
+	sti scratch;	\
+} while (0)
 
 #define CSYNC(scratch)	\
+do {			\
 	cli scratch;	\
 	nop; nop; nop;	\
 	CSYNC;		\
-	sti scratch;
+	sti scratch;	\
+} while (0)
 
 #else
 #define SSYNC(scratch) SSYNC;

@@ -17,8 +17,8 @@
 #define PCI_DEVICE_ID_SI_662	0x0662
 #define PCI_DEVICE_ID_SI_671	0x0671
 
-static bool agp_sis_force_delay = 0;
-static int agp_sis_agp_spec = -1;
+static bool __devinitdata agp_sis_force_delay = 0;
+static int __devinitdata agp_sis_agp_spec = -1;
 
 static int sis_fetch_size(void)
 {
@@ -50,12 +50,13 @@ static void sis_tlbflush(struct agp_memory *mem)
 
 static int sis_configure(void)
 {
+	u32 temp;
 	struct aper_size_info_8 *current_size;
 
 	current_size = A_SIZE_8(agp_bridge->current_size);
 	pci_write_config_byte(agp_bridge->dev, SIS_TLBCNTRL, 0x05);
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 	pci_write_config_dword(agp_bridge->dev, SIS_ATTBASE,
 			       agp_bridge->gatt_bus_addr);
 	pci_write_config_byte(agp_bridge->dev, SIS_APSIZE,
@@ -147,13 +148,13 @@ static struct agp_bridge_driver sis_driver = {
 };
 
 // chipsets that require the 'delay hack'
-static int sis_broken_chipsets[] = {
+static int sis_broken_chipsets[] __devinitdata = {
 	PCI_DEVICE_ID_SI_648,
 	PCI_DEVICE_ID_SI_746,
 	0 // terminator
 };
 
-static void sis_get_driver(struct agp_bridge_data *bridge)
+static void __devinit sis_get_driver(struct agp_bridge_data *bridge)
 {
 	int i;
 
@@ -179,7 +180,8 @@ static void sis_get_driver(struct agp_bridge_data *bridge)
 }
 
 
-static int agp_sis_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit agp_sis_probe(struct pci_dev *pdev,
+				   const struct pci_device_id *ent)
 {
 	struct agp_bridge_data *bridge;
 	u8 cap_ptr;
@@ -209,7 +211,7 @@ static int agp_sis_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return agp_add_bridge(bridge);
 }
 
-static void agp_sis_remove(struct pci_dev *pdev)
+static void __devexit agp_sis_remove(struct pci_dev *pdev)
 {
 	struct agp_bridge_data *bridge = pci_get_drvdata(pdev);
 

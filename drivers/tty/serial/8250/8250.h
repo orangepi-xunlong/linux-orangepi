@@ -12,44 +12,31 @@
  */
 
 #include <linux/serial_8250.h>
-#include <linux/serial_reg.h>
-#include <linux/dmaengine.h>
 
-struct uart_8250_dma {
-	int (*tx_dma)(struct uart_8250_port *p);
-	int (*rx_dma)(struct uart_8250_port *p);
+struct uart_8250_port {
+	struct uart_port	port;
+	struct timer_list	timer;		/* "no irq" timer */
+	struct list_head	list;		/* ports on this IRQ */
+	unsigned short		capabilities;	/* port capabilities */
+	unsigned short		bugs;		/* port bugs */
+	unsigned int		tx_loadsz;	/* transmit fifo load size */
+	unsigned char		acr;
+	unsigned char		ier;
+	unsigned char		lcr;
+	unsigned char		mcr;
+	unsigned char		mcr_mask;	/* mask of user bits */
+	unsigned char		mcr_force;	/* mask of forced bits */
+	unsigned char		cur_iotype;	/* Running I/O type */
 
-	/* Filter function */
-	dma_filter_fn		fn;
-	/* Parameter to the filter function */
-	void			*rx_param;
-	void			*tx_param;
-
-	struct dma_slave_config	rxconf;
-	struct dma_slave_config	txconf;
-
-	struct dma_chan		*rxchan;
-	struct dma_chan		*txchan;
-
-	/* Device address base for DMA operations */
-	phys_addr_t		rx_dma_addr;
-	phys_addr_t		tx_dma_addr;
-
-	/* DMA address of the buffer in memory */
-	dma_addr_t		rx_addr;
-	dma_addr_t		tx_addr;
-
-	dma_cookie_t		rx_cookie;
-	dma_cookie_t		tx_cookie;
-
-	void			*rx_buf;
-
-	size_t			rx_size;
-	size_t			tx_size;
-
-	unsigned char		tx_running;
-	unsigned char		tx_err;
-	unsigned char		rx_running;
+	/*
+	 * Some bits in registers are cleared on a read, so they must
+	 * be saved whenever the register is read but the bits will not
+	 * be immediately processed.
+	 */
+#define LSR_SAVE_FLAGS UART_LSR_BRK_ERROR_BITS
+	unsigned char		lsr_saved_flags;
+#define MSR_SAVE_FLAGS UART_MSR_ANY_DELTA
+	unsigned char		msr_saved_flags;
 };
 
 struct old_serial_port {
@@ -57,20 +44,27 @@ struct old_serial_port {
 	unsigned int baud_base;
 	unsigned int port;
 	unsigned int irq;
-	upf_t        flags;
+	unsigned int flags;
+	unsigned char hub6;
 	unsigned char io_type;
-	unsigned char __iomem *iomem_base;
+	unsigned char *iomem_base;
 	unsigned short iomem_reg_shift;
+	unsigned long irqflags;
 };
 
+/*
+ * This replaces serial_uart_config in include/linux/serial.h
+ */
 struct serial8250_config {
 	const char	*name;
 	unsigned short	fifo_size;
 	unsigned short	tx_loadsz;
 	unsigned char	fcr;
-	unsigned char	rxtrig_bytes[UART_FCR_R_TRIG_MAX_STATE];
 	unsigned int	flags;
 };
+
+extern void sunxi_8250_comeback_reg(int port_num,struct uart_port *port);
+extern void sunxi_8250_backup_reg(int port_num ,struct uart_port *port);
 
 #define UART_CAP_FIFO	(1 << 8)	/* UART has FIFO */
 #define UART_CAP_EFR	(1 << 9)	/* UART has EFR */
@@ -79,32 +73,22 @@ struct serial8250_config {
 #define UART_CAP_UUE	(1 << 12)	/* UART needs IER bit 6 set (Xscale) */
 #define UART_CAP_RTOIE	(1 << 13)	/* UART needs IER bit 4 set (Xscale, Tegra) */
 #define UART_CAP_HFIFO	(1 << 14)	/* UART has a "hidden" FIFO */
-#define UART_CAP_RPM	(1 << 15)	/* Runtime PM is active while idle */
 
 #define UART_BUG_QUOT	(1 << 0)	/* UART has buggy quot LSB */
 #define UART_BUG_TXEN	(1 << 1)	/* UART has buggy TX IIR status */
 #define UART_BUG_NOMSR	(1 << 2)	/* UART has buggy MSR status bits (Au1x00) */
 #define UART_BUG_THRE	(1 << 3)	/* UART has buggy THRE reassertion */
-#define UART_BUG_PARITY	(1 << 4)	/* UART mishandles parity if FIFO enabled */
 
+#define PROBE_RSA	(1 << 0)
+#define PROBE_ANY	(~0)
+
+#define HIGH_BITS_OFFSET ((sizeof(long)-sizeof(int))*8)
 
 #ifdef CONFIG_SERIAL_8250_SHARE_IRQ
 #define SERIAL8250_SHARE_IRQS 1
 #else
 #define SERIAL8250_SHARE_IRQS 0
 #endif
-
-#define SERIAL8250_PORT_FLAGS(_base, _irq, _flags)		\
-	{							\
-		.iobase		= _base,			\
-		.irq		= _irq,				\
-		.uartclk	= 1843200,			\
-		.iotype		= UPIO_PORT,			\
-		.flags		= UPF_BOOT_AUTOCONF | (_flags),	\
-	}
-
-#define SERIAL8250_PORT(_base, _irq) SERIAL8250_PORT_FLAGS(_base, _irq, 0)
-
 
 static inline int serial_in(struct uart_8250_port *up, int offset)
 {
@@ -116,34 +100,6 @@ static inline void serial_out(struct uart_8250_port *up, int offset, int value)
 	up->port.serial_out(&up->port, offset, value);
 }
 
-void serial8250_clear_and_reinit_fifos(struct uart_8250_port *p);
-
-static inline int serial_dl_read(struct uart_8250_port *up)
-{
-	return up->dl_read(up);
-}
-
-static inline void serial_dl_write(struct uart_8250_port *up, int value)
-{
-	up->dl_write(up, value);
-}
-
-struct uart_8250_port *serial8250_get_port(int line);
-void serial8250_rpm_get(struct uart_8250_port *p);
-void serial8250_rpm_put(struct uart_8250_port *p);
-int serial8250_em485_init(struct uart_8250_port *p);
-void serial8250_em485_destroy(struct uart_8250_port *p);
-
-static inline void serial8250_out_MCR(struct uart_8250_port *up, int value)
-{
-	serial_out(up, UART_MCR, value);
-}
-
-static inline int serial8250_in_MCR(struct uart_8250_port *up)
-{
-	return serial_in(up, UART_MCR);
-}
-
 #if defined(__alpha__) && !defined(CONFIG_PCI)
 /*
  * Digital did something really horribly wrong with the OUT1 and OUT2
@@ -151,102 +107,13 @@ static inline int serial8250_in_MCR(struct uart_8250_port *up)
  * is cleared, the machine locks up with endless interrupts.
  */
 #define ALPHA_KLUDGE_MCR  (UART_MCR_OUT2 | UART_MCR_OUT1)
+#elif defined(CONFIG_SBC8560)
+/*
+ * WindRiver did something similarly broken on their SBC8560 board. The
+ * UART tristates its IRQ output while OUT2 is clear, but they pulled
+ * the interrupt line _up_ instead of down, so if we register the IRQ
+ * while the UART is in that state, we die in an IRQ storm. */
+#define ALPHA_KLUDGE_MCR (UART_MCR_OUT2)
 #else
 #define ALPHA_KLUDGE_MCR 0
 #endif
-
-#ifdef CONFIG_SERIAL_8250_PNP
-int serial8250_pnp_init(void);
-void serial8250_pnp_exit(void);
-#else
-static inline int serial8250_pnp_init(void) { return 0; }
-static inline void serial8250_pnp_exit(void) { }
-#endif
-
-#ifdef CONFIG_SERIAL_8250_FINTEK
-int fintek_8250_probe(struct uart_8250_port *uart);
-#else
-static inline int fintek_8250_probe(struct uart_8250_port *uart) { return 0; }
-#endif
-
-#ifdef CONFIG_ARCH_OMAP1
-static inline int is_omap1_8250(struct uart_8250_port *pt)
-{
-	int res;
-
-	switch (pt->port.mapbase) {
-	case OMAP1_UART1_BASE:
-	case OMAP1_UART2_BASE:
-	case OMAP1_UART3_BASE:
-		res = 1;
-		break;
-	default:
-		res = 0;
-		break;
-	}
-
-	return res;
-}
-
-static inline int is_omap1510_8250(struct uart_8250_port *pt)
-{
-	if (!cpu_is_omap1510())
-		return 0;
-
-	return is_omap1_8250(pt);
-}
-#else
-static inline int is_omap1_8250(struct uart_8250_port *pt)
-{
-	return 0;
-}
-static inline int is_omap1510_8250(struct uart_8250_port *pt)
-{
-	return 0;
-}
-#endif
-
-#ifdef CONFIG_SERIAL_8250_DMA
-extern int serial8250_tx_dma(struct uart_8250_port *);
-extern int serial8250_rx_dma(struct uart_8250_port *);
-extern void serial8250_rx_dma_flush(struct uart_8250_port *);
-extern int serial8250_request_dma(struct uart_8250_port *);
-extern void serial8250_release_dma(struct uart_8250_port *);
-#else
-static inline int serial8250_tx_dma(struct uart_8250_port *p)
-{
-	return -1;
-}
-static inline int serial8250_rx_dma(struct uart_8250_port *p)
-{
-	return -1;
-}
-static inline void serial8250_rx_dma_flush(struct uart_8250_port *p) { }
-static inline int serial8250_request_dma(struct uart_8250_port *p)
-{
-	return -1;
-}
-static inline void serial8250_release_dma(struct uart_8250_port *p) { }
-#endif
-
-static inline int ns16550a_goto_highspeed(struct uart_8250_port *up)
-{
-	unsigned char status;
-
-	status = serial_in(up, 0x04); /* EXCR2 */
-#define PRESL(x) ((x) & 0x30)
-	if (PRESL(status) == 0x10) {
-		/* already in high speed mode */
-		return 0;
-	} else {
-		status &= ~0xB0; /* Disable LOCK, mask out PRESL[01] */
-		status |= 0x10;  /* 1.625 divisor for baud_base --> 921600 */
-		serial_out(up, 0x04, status);
-	}
-	return 1;
-}
-
-static inline int serial_index(struct uart_port *port)
-{
-	return port->minor - 64;
-}

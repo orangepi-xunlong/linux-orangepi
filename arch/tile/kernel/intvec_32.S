@@ -28,9 +28,19 @@
 #include <arch/interrupts.h>
 #include <arch/spr_def.h>
 
+#ifdef CONFIG_PREEMPT
+# error "No support for kernel preemption currently"
+#endif
+
 #define PTREGS_PTR(reg, ptreg) addli reg, sp, C_ABI_SAVE_AREA_SIZE + (ptreg)
 
 #define PTREGS_OFFSET_SYSCALL PTREGS_OFFSET_REG(TREG_SYSCALL_NR)
+
+#if !CHIP_HAS_WH64()
+	/* By making this an empty macro, we can use wh64 in the code. */
+	.macro  wh64 reg
+	.endm
+#endif
 
 	.macro  push_reg reg, ptr=sp, delta=-4
 	{
@@ -179,7 +189,7 @@ intvec_\vecname:
 	 * point sp at the top aligned address on the actual stack page.
 	 */
 	mfspr   r0, SPR_SYSTEM_SAVE_K_0
-	mm      r0, r0, zero, LOG2_NR_CPU_IDS, 31
+	mm      r0, r0, zero, LOG2_THREAD_SIZE, 31
 
 0:
 	/*
@@ -197,9 +207,6 @@ intvec_\vecname:
 	 *    cache line 1: r14...r29
 	 *    cache line 0: 2 x frame, r0..r13
 	 */
-#if STACK_TOP_DELTA != 64
-#error STACK_TOP_DELTA must be 64 for assumptions here and in task_pt_regs()
-#endif
 	andi    r0, r0, -64
 
 	/*
@@ -313,20 +320,24 @@ intvec_\vecname:
 	 movei  r3, 0
 	}
 	.else
-	.ifc \c_routine, handle_perf_interrupt
+	.ifc \c_routine, op_handle_perf_interrupt
 	{
 	 mfspr  r2, PERF_COUNT_STS
 	 movei  r3, -1   /* not used, but set for consistency */
 	}
 	.else
-	.ifc \c_routine, handle_perf_interrupt
+#if CHIP_HAS_AUX_PERF_COUNTERS()
+	.ifc \c_routine, op_handle_aux_perf_interrupt
 	{
 	 mfspr  r2, AUX_PERF_COUNT_STS
 	 movei  r3, -1   /* not used, but set for consistency */
 	}
 	.else
+#endif
 	movei   r3, 0
+#if CHIP_HAS_AUX_PERF_COUNTERS()
 	.endif
+#endif
 	.endif
 	.endif
 	.endif
@@ -343,7 +354,7 @@ intvec_\vecname:
 #ifdef __COLLECT_LINKER_FEEDBACK__
 	.pushsection .text.intvec_feedback,"ax"
 	.org    (\vecnum << 5)
-	FEEDBACK_ENTER_EXPLICIT(intvec_\vecname, .intrpt, 1 << 8)
+	FEEDBACK_ENTER_EXPLICIT(intvec_\vecname, .intrpt1, 1 << 8)
 	jrp     lr
 	.popsection
 #endif
@@ -457,7 +468,7 @@ intvec_\vecname:
 	}
 	{
 	 auli   r21, r21, ha16(__per_cpu_offset)
-	 mm     r20, r20, zero, 0, LOG2_NR_CPU_IDS-1
+	 mm     r20, r20, zero, 0, LOG2_THREAD_SIZE-1
 	}
 	s2a     r20, r20, r21
 	lw      tp, r20
@@ -551,6 +562,7 @@ intvec_\vecname:
 	.endif
 	mtspr   INTERRUPT_CRITICAL_SECTION, zero
 
+#if CHIP_HAS_WH64()
 	/*
 	 * Prepare the first 256 stack bytes to be rapidly accessible
 	 * without having to fetch the background data.  We don't really
@@ -571,8 +583,9 @@ intvec_\vecname:
 	 addi   r52, r52, -64
 	}
 	wh64    r52
+#endif
 
-#if defined(CONFIG_TRACE_IRQFLAGS) || defined(CONFIG_CONTEXT_TRACKING)
+#ifdef CONFIG_TRACE_IRQFLAGS
 	.ifnc \function,handle_nmi
 	/*
 	 * We finally have enough state set up to notify the irq
@@ -588,9 +601,6 @@ intvec_\vecname:
 	{ move r32, r2; move r33, r3 }
 	.endif
 	TRACE_IRQS_OFF
-#ifdef CONFIG_CONTEXT_TRACKING
-	jal     context_tracking_user_exit
-#endif
 	.ifnc \function,handle_syscall
 	{ move r0, r30; move r1, r31 }
 	{ move r2, r32; move r3, r33 }
@@ -752,7 +762,7 @@ intvec_\vecname:
 	.macro  dc_dispatch vecnum, vecname
 	.org    (\vecnum << 8)
 intvec_\vecname:
-	j       _hv_downcall_dispatch
+	j       hv_downcall_dispatch
 	ENDPROC(intvec_\vecname)
 	.endm
 
@@ -802,37 +812,17 @@ STD_ENTRY(interrupt_return)
 	}
 	lw      r29, r29
 	andi    r29, r29, SPR_EX_CONTEXT_1_1__PL_MASK  /* mask off ICS */
-	bzt     r29, .Lresume_userspace
-
-#ifdef CONFIG_PREEMPT
-	/* Returning to kernel space. Check if we need preemption. */
-	GET_THREAD_INFO(r29)
-	addli   r28, r29, THREAD_INFO_FLAGS_OFFSET
 	{
-	 lw     r28, r28
-	 addli  r29, r29, THREAD_INFO_PREEMPT_COUNT_OFFSET
+	 bzt    r29, .Lresume_userspace
+	 PTREGS_PTR(r29, PTREGS_OFFSET_PC)
 	}
-	{
-	 andi   r28, r28, _TIF_NEED_RESCHED
-	 lw     r29, r29
-	}
-	bzt     r28, 1f
-	bnz     r29, 1f
-	/* Disable interrupts explicitly for preemption. */
-	IRQ_DISABLE(r20,r21)
-	TRACE_IRQS_OFF
-	jal     preempt_schedule_irq
-	FEEDBACK_REENTER(interrupt_return)
-1:
-#endif
 
 	/* If we're resuming to _cpu_idle_nap, bump PC forward by 8. */
 	{
-	 PTREGS_PTR(r29, PTREGS_OFFSET_PC)
+	 lw     r28, r29
 	 moveli r27, lo16(_cpu_idle_nap)
 	}
 	{
-	 lw     r28, r29
 	 auli   r27, r27, ha16(_cpu_idle_nap)
 	}
 	{
@@ -849,6 +839,18 @@ STD_ENTRY(interrupt_return)
 	FEEDBACK_REENTER(interrupt_return)
 
 	/*
+	 * Use r33 to hold whether we have already loaded the callee-saves
+	 * into ptregs.  We don't want to do it twice in this loop, since
+	 * then we'd clobber whatever changes are made by ptrace, etc.
+	 * Get base of stack in r32.
+	 */
+	{
+	 GET_THREAD_INFO(r32)
+	 movei  r33, 0
+	}
+
+.Lretry_work_pending:
+	/*
 	 * Disable interrupts so as to make sure we don't
 	 * miss an interrupt that sets any of the thread flags (like
 	 * need_resched or sigpending) between sampling and the iret.
@@ -858,27 +860,33 @@ STD_ENTRY(interrupt_return)
 	IRQ_DISABLE(r20, r21)
 	TRACE_IRQS_OFF  /* Note: clobbers registers r0-r29 */
 
+
+	/* Check to see if there is any work to do before returning to user. */
+	{
+	 addi   r29, r32, THREAD_INFO_FLAGS_OFFSET
+	 moveli r1, lo16(_TIF_ALLWORK_MASK)
+	}
+	{
+	 lw     r29, r29
+	 auli   r1, r1, ha16(_TIF_ALLWORK_MASK)
+	}
+	and     r1, r29, r1
+	bzt     r1, .Lrestore_all
+
 	/*
-	 * See if there are any work items (including single-shot items)
-	 * to do.  If so, save the callee-save registers to pt_regs
-	 * and then dispatch to C code.
+	 * Make sure we have all the registers saved for signal
+	 * handling, notify-resume, or single-step.  Call out to C
+	 * code to figure out exactly what we need to do for each flag bit,
+	 * then if necessary, reload the flags and recheck.
 	 */
-	GET_THREAD_INFO(r21)
-	{
-	 addi   r22, r21, THREAD_INFO_FLAGS_OFFSET
-	 moveli r20, lo16(_TIF_ALLWORK_MASK)
-	}
-	{
-	 lw     r22, r22
-	 auli   r20, r20, ha16(_TIF_ALLWORK_MASK)
-	}
-	and     r1, r22, r20
 	{
 	 PTREGS_PTR(r0, PTREGS_OFFSET_BASE)
-	 bzt    r1, .Lrestore_all
+	 bnz    r33, 1f
 	}
 	push_extra_callee_saves r0
-	jal     prepare_exit_to_usermode
+	movei   r33, 1
+1:	jal     do_work_pending
+	bnz     r0, .Lretry_work_pending
 
 	/*
 	 * In the NMI case we
@@ -931,13 +939,6 @@ STD_ENTRY(interrupt_return)
 	bzt     r30, .Lrestore_regs
 3:
 
-	/* We are relying on INT_PERF_COUNT at 33, and AUX_PERF_COUNT at 48 */
-	{
-	 moveli r0, lo16(1 << (INT_PERF_COUNT - 32))
-	 bz     r31, .Lrestore_regs
-	}
-	auli    r0, r0, ha16(1 << (INT_AUX_PERF_COUNT - 32))
-	mtspr   SPR_INTERRUPT_MASK_RESET_K_1, r0
 
 	/*
 	 * We now commit to returning from this interrupt, since we will be
@@ -1163,10 +1164,6 @@ handle_nmi:
 	 PTREGS_PTR(r0, PTREGS_OFFSET_BASE)
 	}
 	FEEDBACK_REENTER(handle_nmi)
-	{
-	 movei  r30, 1
-	 seq    r31, r0, zero
-	}
 	j       interrupt_return
 	STD_ENDPROC(handle_nmi)
 
@@ -1204,12 +1201,8 @@ handle_syscall:
 	lw	r30, r31
 	andi    r30, r30, _TIF_SYSCALL_TRACE
 	bzt	r30, .Lrestore_syscall_regs
-	{
-	 PTREGS_PTR(r0, PTREGS_OFFSET_BASE)
-	 jal    do_syscall_trace_enter
-	}
+	jal	do_syscall_trace
 	FEEDBACK_REENTER(handle_syscall)
-	blz     r0, .Lsyscall_sigreturn_skip
 
 	/*
 	 * We always reload our registers from the stack at this
@@ -1259,10 +1252,7 @@ handle_syscall:
 	lw	r30, r31
 	andi    r30, r30, _TIF_SYSCALL_TRACE
 	bzt     r30, 1f
-	{
-	 PTREGS_PTR(r0, PTREGS_OFFSET_BASE)
-	 jal    do_syscall_trace_exit
-	}
+	jal	do_syscall_trace
 	FEEDBACK_REENTER(handle_syscall)
 1:	{
 	 movei  r30, 0               /* not an NMI */
@@ -1300,21 +1290,6 @@ STD_ENTRY(ret_from_fork)
 	 j      .Lresume_userspace   /* jump into middle of interrupt_return */
 	}
 	STD_ENDPROC(ret_from_fork)
-
-STD_ENTRY(ret_from_kernel_thread)
-	jal     sim_notify_fork
-	jal     schedule_tail
-	FEEDBACK_REENTER(ret_from_fork)
-	{
-	 move   r0, r31
-	 jalr   r30
-	}
-	FEEDBACK_REENTER(ret_from_kernel_thread)
-	{
-	 movei  r30, 0               /* not an NMI */
-	 j      interrupt_return
-	}
-	STD_ENDPROC(ret_from_kernel_thread)
 
 	/*
 	 * Code for ill interrupt.
@@ -1424,6 +1399,7 @@ handle_ill:
 	{
 	 lw     r0, r0          /* indirect thru thread_info to get task_info*/
 	 addi   r1, sp, C_ABI_SAVE_AREA_SIZE  /* put ptregs pointer into r1 */
+	 move   r2, zero        /* load error code into r2 */
 	}
 
 	jal     send_sigtrap    /* issue a SIGTRAP */
@@ -1461,6 +1437,15 @@ STD_ENTRY_LOCAL(bad_intr)
 	panic   "Unhandled interrupt %#x: PC %#lx"
 	STD_ENDPROC(bad_intr)
 
+/* Put address of pt_regs in reg and jump. */
+#define PTREGS_SYSCALL(x, reg)                          \
+	STD_ENTRY(_##x);                                \
+	{                                               \
+	 PTREGS_PTR(reg, PTREGS_OFFSET_BASE);           \
+	 j      x                                       \
+	};                                              \
+	STD_ENDPROC(_##x)
+
 /*
  * Special-case sigreturn to not write r0 to the stack on return.
  * This is technically more efficient, but it also avoids difficulties
@@ -1476,9 +1461,12 @@ STD_ENTRY_LOCAL(bad_intr)
 	};                                              \
 	STD_ENDPROC(_##x)
 
+PTREGS_SYSCALL(sys_execve, r3)
+PTREGS_SYSCALL(sys_sigaltstack, r2)
 PTREGS_SYSCALL_SIGRETURN(sys_rt_sigreturn, r0)
+PTREGS_SYSCALL(sys_cmpxchg_badaddr, r1)
 
-/* Save additional callee-saves to pt_regs and jump to standard function. */
+/* Save additional callee-saves to pt_regs, put address in r4 and jump. */
 STD_ENTRY(_sys_clone)
 	push_extra_callee_saves r4
 	j       sys_clone
@@ -1521,9 +1509,11 @@ STD_ENTRY(_sys_clone)
 	__HEAD
 	.align 64
 	/* Align much later jump on the start of a cache line. */
+#if !ATOMIC_LOCKS_FOUND_VIA_TABLE()
 	nop
 #if PAGE_SIZE >= 0x10000
 	nop
+#endif
 #endif
 ENTRY(sys_cmpxchg)
 
@@ -1558,6 +1548,45 @@ ENTRY(sys_cmpxchg)
 # error Code here assumes PAGE_OFFSET can be loaded with just hi16()
 #endif
 
+#if ATOMIC_LOCKS_FOUND_VIA_TABLE()
+	{
+	 /* Check for unaligned input. */
+	 bnz    sp, .Lcmpxchg_badaddr
+	 mm     r25, r0, zero, 3, PAGE_SHIFT-1
+	}
+	{
+	 crc32_32 r25, zero, r25
+	 moveli r21, lo16(atomic_lock_ptr)
+	}
+	{
+	 auli   r21, r21, ha16(atomic_lock_ptr)
+	 auli   r23, zero, hi16(PAGE_OFFSET)  /* hugepage-aligned */
+	}
+	{
+	 shri	r20, r25, 32 - ATOMIC_HASH_L1_SHIFT
+	 slt_u  r23, r0, r23
+	 lw	r26, r0  /* see comment in the "#else" for the "lw r26". */
+	}
+	{
+	 s2a    r21, r20, r21
+	 bbns   r23, .Lcmpxchg_badaddr
+	}
+	{
+	 lw     r21, r21
+	 seqi	r23, TREG_SYSCALL_NR_NAME, __NR_FAST_cmpxchg64
+	 andi	r25, r25, ATOMIC_HASH_L2_SIZE - 1
+	}
+	{
+	 /* Branch away at this point if we're doing a 64-bit cmpxchg. */
+	 bbs    r23, .Lcmpxchg64
+	 andi   r23, r0, 7       /* Precompute alignment for cmpxchg64. */
+	}
+	{
+	 s2a	ATOMIC_LOCK_REG_NAME, r25, r21
+	 j      .Lcmpxchg32_tns   /* see comment in the #else for the jump. */
+	}
+
+#else /* ATOMIC_LOCKS_FOUND_VIA_TABLE() */
 	{
 	 /* Check for unaligned input. */
 	 bnz    sp, .Lcmpxchg_badaddr
@@ -1571,7 +1600,7 @@ ENTRY(sys_cmpxchg)
 	  * Because of C pointer arithmetic, we want to compute this:
 	  *
 	  * ((char*)atomic_locks +
-	  *  (((r0 >> 3) & ((1 << ATOMIC_HASH_SHIFT) - 1)) << 2))
+	  *  (((r0 >> 3) & (1 << (ATOMIC_HASH_SIZE - 1))) << 2))
 	  *
 	  * Instead of two shifts we just ">> 1", and use 'mm'
 	  * to ignore the low and high bits we don't want.
@@ -1582,9 +1611,12 @@ ENTRY(sys_cmpxchg)
 
 	 /*
 	  * Ensure that the TLB is loaded before we take out the lock.
-	  * This will start fetching the value all the way into our L1
-	  * as well (and if it gets modified before we grab the lock,
-	  * it will be invalidated from our cache before we reload it).
+	  * On tilepro, this will start fetching the value all the way
+	  * into our L1 as well (and if it gets modified before we
+	  * grab the lock, it will be invalidated from our cache
+	  * before we reload it).  On tile64, we'll start fetching it
+	  * into our L1 if we're the home, and if we're not, we'll
+	  * still at least start fetching it into the home's L2.
 	  */
 	 lw	r26, r0
 	}
@@ -1626,6 +1658,8 @@ ENTRY(sys_cmpxchg)
 	  */
 	 j      .Lcmpxchg32_tns
 	}
+
+#endif /* ATOMIC_LOCKS_FOUND_VIA_TABLE() */
 
 /* Symbol for do_page_fault_ics() to use to compare against the PC. */
 .global __sys_cmpxchg_grab_lock
@@ -1764,6 +1798,9 @@ __sys_cmpxchg_grab_lock:
 	.align 64
 .Lcmpxchg64:
 	{
+#if ATOMIC_LOCKS_FOUND_VIA_TABLE()
+	 s2a	ATOMIC_LOCK_REG_NAME, r25, r21
+#endif
 	 bzt     r23, .Lcmpxchg64_tns
 	}
 	j       .Lcmpxchg_badaddr
@@ -1829,12 +1866,11 @@ int_unalign:
 	push_extra_callee_saves r0
 	j       do_trap
 
-/* Include .intrpt array of interrupt vectors */
-	.section ".intrpt", "ax"
+/* Include .intrpt1 array of interrupt vectors */
+	.section ".intrpt1", "ax"
 
-#ifndef CONFIG_USE_PMC
-#define handle_perf_interrupt bad_intr
-#endif
+#define op_handle_perf_interrupt bad_intr
+#define op_handle_aux_perf_interrupt bad_intr
 
 #ifndef CONFIG_HARDWALL
 #define do_hardwall_trap bad_intr
@@ -1875,7 +1911,7 @@ int_unalign:
 	int_hand     INT_IDN_AVAIL, IDN_AVAIL, bad_intr
 	int_hand     INT_UDN_AVAIL, UDN_AVAIL, bad_intr
 	int_hand     INT_PERF_COUNT, PERF_COUNT, \
-		     handle_perf_interrupt, handle_nmi
+		     op_handle_perf_interrupt, handle_nmi
 	int_hand     INT_INTCTRL_3, INTCTRL_3, bad_intr
 #if CONFIG_KERNEL_PL == 2
 	dc_dispatch  INT_INTCTRL_2, INTCTRL_2
@@ -1899,8 +1935,10 @@ int_unalign:
 		     do_page_fault
 	int_hand     INT_SN_CPL, SN_CPL, bad_intr
 	int_hand     INT_DOUBLE_FAULT, DOUBLE_FAULT, do_trap
+#if CHIP_HAS_AUX_PERF_COUNTERS()
 	int_hand     INT_AUX_PERF_COUNT, AUX_PERF_COUNT, \
-		     handle_perf_interrupt, handle_nmi
+		     op_handle_aux_perf_interrupt, handle_nmi
+#endif
 
 	/* Synthetic interrupt delivered only by the simulator */
 	int_hand     INT_BREAKPOINT, BREAKPOINT, do_breakpoint

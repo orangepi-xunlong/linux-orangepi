@@ -40,13 +40,12 @@
 	 * pin muxing when the DIU is enabled.
 	 */
 	compatible = "fsl,p1022-elbc", "fsl,elbc";
-	interrupts = <19 2 0 0>,
-		     <16 2 0 0>;
+	interrupts = <19 2 0 0>;
 };
 
 /* controller at 0x9000 */
 &pci0 {
-	compatible = "fsl,mpc8548-pcie";
+	compatible = "fsl,p1022-pcie";
 	device_type = "pci";
 	#size-cells = <2>;
 	#address-cells = <3>;
@@ -74,7 +73,7 @@
 
 /* controller at 0xa000 */
 &pci1 {
-	compatible = "fsl,mpc8548-pcie";
+	compatible = "fsl,p1022-pcie";
 	device_type = "pci";
 	#size-cells = <2>;
 	#address-cells = <3>;
@@ -103,7 +102,7 @@
 
 /* controller at 0xb000 */
 &pci2 {
-	compatible = "fsl,mpc8548-pcie";
+	compatible = "fsl,p1022-pcie";
 	device_type = "pci";
 	#size-cells = <2>;
 	#address-cells = <3>;
@@ -175,7 +174,7 @@
 
 /include/ "pq3-gpio-0.dtsi"
 
-	display: display@10000 {
+	display@10000 {
 		compatible = "fsl,diu", "fsl,p1022-diu";
 		reg = <0x10000 1000>;
 		interrupts = <64 2 0 0>;
@@ -224,12 +223,10 @@
 
 /include/ "pq3-etsec2-0.dtsi"
 	enet0: enet0_grp2: ethernet@b0000 {
-		fsl,wake-on-filer;
 	};
 
 /include/ "pq3-etsec2-1.dtsi"
 	enet1: enet1_grp2: ethernet@b1000 {
-		fsl,wake-on-filer;
 	};
 
 	global-utilities@e0000 {

@@ -3,7 +3,6 @@
 config SND_WSS_LIB
         tristate
         select SND_PCM
-	select SND_TIMER
 
 config SND_SB_COMMON
         tristate
@@ -43,7 +42,6 @@ config SND_AD1816A
 	select SND_OPL3_LIB
 	select SND_MPU401_UART
 	select SND_PCM
-	select SND_TIMER
 	help
 	  Say Y here to include support for Analog Devices SoundPort
 	  AD1816A or compatible sound chips.
@@ -119,18 +117,6 @@ config SND_AZT2320
 	  To compile this driver as a module, choose M here: the module
 	  will be called snd-azt2320.
 
-config SND_CMI8328
-	tristate "C-Media CMI8328"
-	select SND_WSS_LIB
-	select SND_OPL3_LIB
-	select SND_MPU401_UART
-	help
-	  Say Y here to include support for soundcards based on the
-	  C-Media CMI8328 chip.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called snd-cmi8328.
-
 config SND_CMI8330
 	tristate "C-Media CMI8330"
 	select SND_WSS_LIB
@@ -193,7 +179,7 @@ config SND_ES18XX
 
 config SND_SC6000
 	tristate "Gallant SC-6000/6600/7000 and Audio Excel DSP 16"
-	depends on HAS_IOPORT_MAP
+	depends on HAS_IOPORT
 	select SND_WSS_LIB
 	select SND_OPL3_LIB
 	select SND_MPU401_UART
@@ -211,7 +197,6 @@ config SND_GUSCLASSIC
 	tristate "Gravis UltraSound Classic"
 	select SND_RAWMIDI
 	select SND_PCM
-	select SND_TIMER
 	help
 	  Say Y here to include support for Gravis UltraSound Classic
 	  soundcards.
@@ -224,7 +209,6 @@ config SND_GUSEXTREME
 	select SND_OPL3_LIB
 	select SND_MPU401_UART
 	select SND_PCM
-	select SND_TIMER
 	help
 	  Say Y here to include support for Gravis UltraSound Extreme
 	  soundcards.
@@ -429,7 +413,7 @@ config SND_WAVEFRONT
 
 config SND_MSND_PINNACLE
 	tristate "Turtle Beach MultiSound Pinnacle/Fiji driver"
-	depends on X86
+	depends on X86 && EXPERIMENTAL
 	select FW_LOADER
 	select SND_MPU401_UART
 	select SND_PCM
@@ -442,7 +426,7 @@ config SND_MSND_PINNACLE
 
 config SND_MSND_CLASSIC
 	tristate "Support for Turtle Beach MultiSound Classic, Tahiti, Monterey"
-	depends on X86
+	depends on X86 && EXPERIMENTAL
 	select FW_LOADER
 	select SND_MPU401_UART
 	select SND_PCM

@@ -109,13 +109,13 @@ static struct frv_dma_channel frv_dma_channels[FRV_DMA_NCHANS] = {
 
 static DEFINE_RWLOCK(frv_dma_channels_lock);
 
-unsigned int frv_dma_inprogress;
+unsigned long frv_dma_inprogress;
 
 #define frv_clear_dma_inprogress(channel) \
-	(void)__atomic32_fetch_and(~(1 << (channel)), &frv_dma_inprogress);
+	atomic_clear_mask(1 << (channel), &frv_dma_inprogress);
 
 #define frv_set_dma_inprogress(channel) \
-	(void)__atomic32_fetch_or(1 << (channel), &frv_dma_inprogress);
+	atomic_set_mask(1 << (channel), &frv_dma_inprogress);
 
 /*****************************************************************************/
 /*

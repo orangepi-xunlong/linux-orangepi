@@ -1,7 +1,7 @@
 /*
  * VMware PVSCSI header file
  *
- * Copyright (C) 2008-2014, VMware, Inc. All Rights Reserved.
+ * Copyright (C) 2008-2009, VMware, Inc. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -17,7 +17,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
  *
- * Maintained by: Jim Gill <jgill@vmware.com>
+ * Maintained by: Arvind Kumar <arvindkumar@vmware.com>
  *
  */
 
@@ -26,12 +26,13 @@
 
 #include <linux/types.h>
 
-#define PVSCSI_DRIVER_VERSION_STRING   "1.0.7.0-k"
+#define PVSCSI_DRIVER_VERSION_STRING   "1.0.2.0-k"
 
 #define PVSCSI_MAX_NUM_SG_ENTRIES_PER_SEGMENT 128
 
 #define MASK(n)        ((1 << (n)) - 1)        /* make an n-bit mask */
 
+#define PCI_VENDOR_ID_VMWARE		0x15AD
 #define PCI_DEVICE_ID_VMWARE_PVSCSI	0x07C0
 
 /*
@@ -116,9 +117,8 @@ enum PVSCSICommands {
 	PVSCSI_CMD_CONFIG            = 7,
 	PVSCSI_CMD_SETUP_MSG_RING    = 8,
 	PVSCSI_CMD_DEVICE_UNPLUG     = 9,
-	PVSCSI_CMD_SETUP_REQCALLTHRESHOLD     = 10,
 
-	PVSCSI_CMD_LAST              = 11  /* has to be last */
+	PVSCSI_CMD_LAST              = 10  /* has to be last */
 };
 
 /*
@@ -139,14 +139,6 @@ struct PVSCSICmdDescConfigCmd {
 	u64 configPageAddress;
 	u32 configPageNum;
 	u32 _pad;
-} __packed;
-
-/*
- * Command descriptor for PVSCSI_CMD_SETUP_REQCALLTHRESHOLD --
- */
-
-struct PVSCSICmdDescSetupReqCall {
-	u32 enable;
 } __packed;
 
 enum PVSCSIConfigPageType {
@@ -269,9 +261,7 @@ struct PVSCSIRingsState {
 	u32	cmpConsIdx;
 	u32	cmpNumEntriesLog2;
 
-	u32	reqCallThreshold;
-
-	u8	_pad[100];
+	u8	_pad[104];
 
 	u32	msgProdIdx;
 	u32	msgConsIdx;

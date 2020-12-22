@@ -83,7 +83,6 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/workqueue.h>
 #include "slip.h"
 #ifdef CONFIG_INET
 #include <linux/ip.h>
@@ -391,10 +390,10 @@ static void sl_encaps(struct slip *sl, unsigned char *icp, int len)
 #endif
 #ifdef CONFIG_SLIP_MODE_SLIP6
 	if (sl->mode & SL_MODE_SLIP6)
-		count = slip_esc6(p, sl->xbuff, len);
+		count = slip_esc6(p, (unsigned char *) sl->xbuff, len);
 	else
 #endif
-		count = slip_esc(p, sl->xbuff, len);
+		count = slip_esc(p, (unsigned char *) sl->xbuff, len);
 
 	/* Order of next two lines is *very* important.
 	 * When we are sending a little amount of data,
@@ -407,7 +406,7 @@ static void sl_encaps(struct slip *sl, unsigned char *icp, int len)
 	set_bit(TTY_DO_WRITE_WAKEUP, &sl->tty->flags);
 	actual = sl->tty->ops->write(sl->tty, sl->xbuff, count);
 #ifdef SL_CHECK_TRANSMIT
-	netif_trans_update(sl->dev);
+	sl->dev->trans_start = jiffies;
 #endif
 	sl->xleft = count - actual;
 	sl->xhead = sl->xbuff + actual;
@@ -417,44 +416,31 @@ static void sl_encaps(struct slip *sl, unsigned char *icp, int len)
 #endif
 }
 
-/* Write out any remaining transmit buffer. Scheduled when tty is writable */
-static void slip_transmit(struct work_struct *work)
+/*
+ * Called by the driver when there's room for more data.  If we have
+ * more packets to send, we send them here.
+ */
+static void slip_write_wakeup(struct tty_struct *tty)
 {
-	struct slip *sl = container_of(work, struct slip, tx_work);
 	int actual;
+	struct slip *sl = tty->disc_data;
 
-	spin_lock_bh(&sl->lock);
 	/* First make sure we're connected. */
-	if (!sl->tty || sl->magic != SLIP_MAGIC || !netif_running(sl->dev)) {
-		spin_unlock_bh(&sl->lock);
+	if (!sl || sl->magic != SLIP_MAGIC || !netif_running(sl->dev))
 		return;
-	}
 
 	if (sl->xleft <= 0)  {
 		/* Now serial buffer is almost free & we can start
 		 * transmission of another packet */
 		sl->dev->stats.tx_packets++;
-		clear_bit(TTY_DO_WRITE_WAKEUP, &sl->tty->flags);
-		spin_unlock_bh(&sl->lock);
+		clear_bit(TTY_DO_WRITE_WAKEUP, &tty->flags);
 		sl_unlock(sl);
 		return;
 	}
 
-	actual = sl->tty->ops->write(sl->tty, sl->xhead, sl->xleft);
+	actual = tty->ops->write(tty, sl->xhead, sl->xleft);
 	sl->xleft -= actual;
 	sl->xhead += actual;
-	spin_unlock_bh(&sl->lock);
-}
-
-/*
- * Called by the driver when there's room for more data.
- * Schedule the transmit.
- */
-static void slip_write_wakeup(struct tty_struct *tty)
-{
-	struct slip *sl = tty->disc_data;
-
-	schedule_work(&sl->tx_work);
 }
 
 static void sl_tx_timeout(struct net_device *dev)
@@ -749,7 +735,7 @@ static struct slip *sl_alloc(dev_t line)
 		return NULL;
 
 	sprintf(name, "sl%d", i);
-	dev = alloc_netdev(sizeof(*sl), name, NET_NAME_UNKNOWN, sl_setup);
+	dev = alloc_netdev(sizeof(*sl), name, sl_setup);
 	if (!dev)
 		return NULL;
 
@@ -760,7 +746,6 @@ static struct slip *sl_alloc(dev_t line)
 	sl->magic       = SLIP_MAGIC;
 	sl->dev	      	= dev;
 	spin_lock_init(&sl->lock);
-	INIT_WORK(&sl->tx_work, slip_transmit);
 	sl->mode        = SL_MODE_DEFAULT;
 #ifdef CONFIG_SLIP_SMART
 	/* initialize timer_list struct */
@@ -884,12 +869,8 @@ static void slip_close(struct tty_struct *tty)
 	if (!sl || sl->magic != SLIP_MAGIC || sl->tty != tty)
 		return;
 
-	spin_lock_bh(&sl->lock);
 	tty->disc_data = NULL;
 	sl->tty = NULL;
-	spin_unlock_bh(&sl->lock);
-
-	flush_work(&sl->tx_work);
 
 	/* VSV = very important to remove timers */
 #ifdef CONFIG_SLIP_SMART

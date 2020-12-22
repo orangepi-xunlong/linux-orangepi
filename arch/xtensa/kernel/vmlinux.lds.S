@@ -7,7 +7,7 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (C) 2001 - 2008 Tensilica Inc.
+ * Copyright (C) 2001 - 2005 Tensilica Inc.
  *
  * Chris Zankel <chris@zankel.net>
  * Marc Gauthier <marc@tensilica.com, marc@alumni.uwaterloo.ca>
@@ -18,7 +18,6 @@
 #include <asm/page.h>
 #include <asm/thread_info.h>
 
-#include <asm/vectors.h>
 #include <variant/core.h>
 #include <platform/hardware.h>
 OUTPUT_ARCH(xtensa)
@@ -28,6 +27,10 @@ ENTRY(_start)
 jiffies = jiffies_64 + 4;
 #else
 jiffies = jiffies_64;
+#endif
+
+#ifndef KERNELOFFSET
+#define KERNELOFFSET 0xd0001000
 #endif
 
 /* Note: In the following macros, it would be nice to specify only the
@@ -89,9 +92,6 @@ SECTIONS
     VMLINUX_SYMBOL(__sched_text_start) = .;
     *(.sched.literal .sched.text)
     VMLINUX_SYMBOL(__sched_text_end) = .;
-    VMLINUX_SYMBOL(__cpuidle_text_start) = .;
-    *(.cpuidle.literal .cpuidle.text)
-    VMLINUX_SYMBOL(__cpuidle_text_end) = .;
     VMLINUX_SYMBOL(__lock_text_start) = .;
     *(.spinlock.literal .spinlock.text)
     VMLINUX_SYMBOL(__lock_text_end) = .;
@@ -109,7 +109,6 @@ SECTIONS
   .fixup   : { *(.fixup) }
 
   EXCEPTION_TABLE(16)
-  NOTES
   /* Data section */
 
   _sdata = .;
@@ -135,26 +134,6 @@ SECTIONS
 
     RELOCATE_ENTRY(_WindowVectors_text,
 		   .WindowVectors.text);
-#if XCHAL_EXCM_LEVEL >= 2
-    RELOCATE_ENTRY(_Level2InterruptVector_text,
-		   .Level2InterruptVector.text);
-#endif
-#if XCHAL_EXCM_LEVEL >= 3
-    RELOCATE_ENTRY(_Level3InterruptVector_text,
-		   .Level3InterruptVector.text);
-#endif
-#if XCHAL_EXCM_LEVEL >= 4
-    RELOCATE_ENTRY(_Level4InterruptVector_text,
-		   .Level4InterruptVector.text);
-#endif
-#if XCHAL_EXCM_LEVEL >= 5
-    RELOCATE_ENTRY(_Level5InterruptVector_text,
-		   .Level5InterruptVector.text);
-#endif
-#if XCHAL_EXCM_LEVEL >= 6
-    RELOCATE_ENTRY(_Level6InterruptVector_text,
-		   .Level6InterruptVector.text);
-#endif
     RELOCATE_ENTRY(_KernelExceptionVector_text,
 		   .KernelExceptionVector.text);
     RELOCATE_ENTRY(_UserExceptionVector_text,
@@ -165,11 +144,6 @@ SECTIONS
 		   .DoubleExceptionVector.text);
     RELOCATE_ENTRY(_DebugInterruptVector_text,
 		   .DebugInterruptVector.text);
-#if defined(CONFIG_SMP)
-    RELOCATE_ENTRY(_SecondaryResetVector_text,
-		   .SecondaryResetVector.text);
-#endif
-
   
     __boot_reloc_table_end = ABSOLUTE(.) ;
 
@@ -191,105 +165,50 @@ SECTIONS
 
   SECTION_VECTOR (_WindowVectors_text,
 		  .WindowVectors.text,
-		  WINDOW_VECTORS_VADDR, 4,
+		  XCHAL_WINDOW_VECTORS_VADDR, 4,
 		  .dummy)
   SECTION_VECTOR (_DebugInterruptVector_literal,
 		  .DebugInterruptVector.literal,
-		  DEBUG_VECTOR_VADDR - 4,
+		  XCHAL_DEBUG_VECTOR_VADDR - 4,
 		  SIZEOF(.WindowVectors.text),
 		  .WindowVectors.text)
   SECTION_VECTOR (_DebugInterruptVector_text,
 		  .DebugInterruptVector.text,
-		  DEBUG_VECTOR_VADDR,
+		  XCHAL_DEBUG_VECTOR_VADDR,
 		  4,
 		  .DebugInterruptVector.literal)
-#undef LAST
-#define LAST	.DebugInterruptVector.text
-#if XCHAL_EXCM_LEVEL >= 2
-  SECTION_VECTOR (_Level2InterruptVector_text,
-		  .Level2InterruptVector.text,
-		  INTLEVEL2_VECTOR_VADDR,
-		  SIZEOF(LAST), LAST)
-# undef LAST
-# define LAST	.Level2InterruptVector.text
-#endif
-#if XCHAL_EXCM_LEVEL >= 3
-  SECTION_VECTOR (_Level3InterruptVector_text,
-		  .Level3InterruptVector.text,
-		  INTLEVEL3_VECTOR_VADDR,
-		  SIZEOF(LAST), LAST)
-# undef LAST
-# define LAST	.Level3InterruptVector.text
-#endif
-#if XCHAL_EXCM_LEVEL >= 4
-  SECTION_VECTOR (_Level4InterruptVector_text,
-		  .Level4InterruptVector.text,
-		  INTLEVEL4_VECTOR_VADDR,
-		  SIZEOF(LAST), LAST)
-# undef LAST
-# define LAST	.Level4InterruptVector.text
-#endif
-#if XCHAL_EXCM_LEVEL >= 5
-  SECTION_VECTOR (_Level5InterruptVector_text,
-		  .Level5InterruptVector.text,
-		  INTLEVEL5_VECTOR_VADDR,
-		  SIZEOF(LAST), LAST)
-# undef LAST
-# define LAST	.Level5InterruptVector.text
-#endif
-#if XCHAL_EXCM_LEVEL >= 6
-  SECTION_VECTOR (_Level6InterruptVector_text,
-		  .Level6InterruptVector.text,
-		  INTLEVEL6_VECTOR_VADDR,
-		  SIZEOF(LAST), LAST)
-# undef LAST
-# define LAST	.Level6InterruptVector.text
-#endif
   SECTION_VECTOR (_KernelExceptionVector_literal,
 		  .KernelExceptionVector.literal,
-		  KERNEL_VECTOR_VADDR - 4,
-		  SIZEOF(LAST), LAST)
-#undef LAST
+		  XCHAL_KERNEL_VECTOR_VADDR - 4,
+		  SIZEOF(.DebugInterruptVector.text),
+		  .DebugInterruptVector.text)
   SECTION_VECTOR (_KernelExceptionVector_text,
 		  .KernelExceptionVector.text,
-		  KERNEL_VECTOR_VADDR,
+		  XCHAL_KERNEL_VECTOR_VADDR,
 		  4,
 		  .KernelExceptionVector.literal)
   SECTION_VECTOR (_UserExceptionVector_literal,
 		  .UserExceptionVector.literal,
-		  USER_VECTOR_VADDR - 4,
+		  XCHAL_USER_VECTOR_VADDR - 4,
 		  SIZEOF(.KernelExceptionVector.text),
 		  .KernelExceptionVector.text)
   SECTION_VECTOR (_UserExceptionVector_text,
 		  .UserExceptionVector.text,
-		  USER_VECTOR_VADDR,
+		  XCHAL_USER_VECTOR_VADDR,
 		  4,
 		  .UserExceptionVector.literal)
   SECTION_VECTOR (_DoubleExceptionVector_literal,
 		  .DoubleExceptionVector.literal,
-		  DOUBLEEXC_VECTOR_VADDR - 48,
+		  XCHAL_DOUBLEEXC_VECTOR_VADDR - 16,
 		  SIZEOF(.UserExceptionVector.text),
 		  .UserExceptionVector.text)
   SECTION_VECTOR (_DoubleExceptionVector_text,
 		  .DoubleExceptionVector.text,
-		  DOUBLEEXC_VECTOR_VADDR,
-		  48,
+		  XCHAL_DOUBLEEXC_VECTOR_VADDR,
+		  32,
 		  .DoubleExceptionVector.literal)
 
   . = (LOADADDR( .DoubleExceptionVector.text ) + SIZEOF( .DoubleExceptionVector.text ) + 3) & ~ 3;
-
-#if defined(CONFIG_SMP)
-
-  SECTION_VECTOR (_SecondaryResetVector_text,
-		  .SecondaryResetVector.text,
-		  RESET_VECTOR1_VADDR,
-		  SIZEOF(.DoubleExceptionVector.text),
-		  .DoubleExceptionVector.text)
-
-  . = LOADADDR(.SecondaryResetVector.text)+SIZEOF(.SecondaryResetVector.text);
-
-#endif
-
   . = ALIGN(PAGE_SIZE);
 
   __init_end = .;
@@ -297,6 +216,21 @@ SECTIONS
   BSS_SECTION(0, 8192, 0)
 
   _end = .;
+
+  /* only used by the boot loader  */
+
+  . = ALIGN(0x10);
+  .bootstrap : { *(.bootstrap.literal .bootstrap.text .bootstrap.data) }
+
+  . = ALIGN(0x1000);
+  __initrd_start = .;
+  .initrd : { *(.initrd) }
+  __initrd_end = .;
+
+  .ResetVector.text XCHAL_RESET_VECTOR_VADDR :
+  {
+    *(.ResetVector.text)
+  }
 
   .xt.lit : { *(.xt.lit) }
   .xt.prop : { *(.xt.prop) }

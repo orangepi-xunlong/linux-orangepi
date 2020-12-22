@@ -18,13 +18,14 @@
 #define _PAGE_ACCESSED	0x080
 #define _PAGE_DIRTY	0x100
 /* If _PAGE_PRESENT is clear, we use these: */
+#define _PAGE_FILE	0x008	/* nonlinear file mapping, saved PTE; unset:swap */
 #define _PAGE_PROTNONE	0x010	/* if the user mapped it with PROT_NONE;
 				   pte_present gives true */
 
 #ifdef CONFIG_3_LEVEL_PGTABLES
-#include <asm/pgtable-3level.h>
+#include "asm/pgtable-3level.h"
 #else
-#include <asm/pgtable-2level.h>
+#include "asm/pgtable-2level.h"
 #endif
 
 extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
@@ -47,7 +48,11 @@ extern unsigned long end_iomem;
 #define VMALLOC_OFFSET	(__va_space)
 #define VMALLOC_START ((end_iomem + VMALLOC_OFFSET) & ~(VMALLOC_OFFSET-1))
 #define PKMAP_BASE ((FIXADDR_START - LAST_PKMAP * PAGE_SIZE) & PMD_MASK)
-#define VMALLOC_END	(FIXADDR_START-2*PAGE_SIZE)
+#ifdef CONFIG_HIGHMEM
+# define VMALLOC_END	(PKMAP_BASE-2*PAGE_SIZE)
+#else
+# define VMALLOC_END	(FIXADDR_START-2*PAGE_SIZE)
+#endif
 #define MODULES_VADDR	VMALLOC_START
 #define MODULES_END	VMALLOC_END
 #define MODULES_LEN	(MODULES_VADDR - MODULES_END)
@@ -63,6 +68,8 @@ extern unsigned long end_iomem;
 #define PAGE_READONLY	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
 #define PAGE_KERNEL	__pgprot(_PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_ACCESSED)
 #define PAGE_KERNEL_EXEC	__pgprot(__PAGE_KERNEL_EXEC)
+
+#define io_remap_pfn_range	remap_pfn_range
 
 /*
  * The i386 can't do page protection for execute, and considers that the same
@@ -146,6 +153,14 @@ static inline int pte_write(pte_t pte)
 	       !(pte_get_bits(pte, _PAGE_PROTNONE)));
 }
 
+/*
+ * The following only works if pte_present() is not true.
+ */
+static inline int pte_file(pte_t pte)
+{
+	return pte_get_bits(pte, _PAGE_FILE);
+}
+
 static inline int pte_dirty(pte_t pte)
 {
 	return pte_get_bits(pte, _PAGE_DIRTY);
@@ -197,17 +212,12 @@ static inline pte_t pte_mkold(pte_t pte)
 
 static inline pte_t pte_wrprotect(pte_t pte)
 { 
-	if (likely(pte_get_bits(pte, _PAGE_RW)))
-		pte_clear_bits(pte, _PAGE_RW);
-	else
-		return pte;
+	pte_clear_bits(pte, _PAGE_RW);
 	return(pte_mknewprot(pte)); 
 }
 
 static inline pte_t pte_mkread(pte_t pte)
 { 
-	if (unlikely(pte_get_bits(pte, _PAGE_USER)))
-		return pte;
 	pte_set_bits(pte, _PAGE_USER);
 	return(pte_mknewprot(pte)); 
 }
@@ -226,8 +236,6 @@ static inline pte_t pte_mkyoung(pte_t pte)
 
 static inline pte_t pte_mkwrite(pte_t pte)	
 {
-	if (unlikely(pte_get_bits(pte,  _PAGE_RW)))
-		return pte;
 	pte_set_bits(pte, _PAGE_RW);
 	return(pte_mknewprot(pte)); 
 }
@@ -278,7 +286,7 @@ static inline int pte_same(pte_t pte_a, pte_t pte_b)
 
 #define phys_to_page(phys) pfn_to_page(phys_to_pfn(phys))
 #define __virt_to_page(virt) phys_to_page(__pa(virt))
-#define page_to_phys(page) pfn_to_phys(page_to_pfn(page))
+#define page_to_phys(page) pfn_to_phys((pfn_t) page_to_pfn(page))
 #define virt_to_page(addr) __virt_to_page((const unsigned long) addr)
 
 #define mk_pte(page, pgprot) \

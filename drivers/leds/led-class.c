@@ -9,22 +9,27 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/ctype.h>
-#include <linux/device.h>
-#include <linux/err.h>
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/leds.h>
-#include <linux/list.h>
 #include <linux/module.h>
-#include <linux/slab.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/device.h>
 #include <linux/timer.h>
+#include <linux/err.h>
+#include <linux/ctype.h>
+#include <linux/leds.h>
 #include "leds.h"
 
 static struct class *leds_class;
 
-static ssize_t brightness_show(struct device *dev,
+static void led_update_brightness(struct led_classdev *led_cdev)
+{
+	if (led_cdev->brightness_get)
+		led_cdev->brightness = led_cdev->brightness_get(led_cdev);
+}
+
+static ssize_t led_brightness_show(struct device *dev, 
 		struct device_attribute *attr, char *buf)
 {
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
@@ -35,72 +40,75 @@ static ssize_t brightness_show(struct device *dev,
 	return sprintf(buf, "%u\n", led_cdev->brightness);
 }
 
-static ssize_t brightness_store(struct device *dev,
+static ssize_t led_brightness_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
-	unsigned long state;
-	ssize_t ret;
+	ssize_t ret = -EINVAL;
+	char *after;
+	unsigned long state = simple_strtoul(buf, &after, 10);
+	size_t count = after - buf;
 
-	mutex_lock(&led_cdev->led_access);
+	if (isspace(*after))
+		count++;
 
-	if (led_sysfs_is_disabled(led_cdev)) {
-		ret = -EBUSY;
-		goto unlock;
+	if (count == size) {
+		ret = count;
+
+		if (state == LED_OFF)
+			led_trigger_remove(led_cdev);
+		led_set_brightness(led_cdev, state);
 	}
 
-	ret = kstrtoul(buf, 10, &state);
-	if (ret)
-		goto unlock;
-
-	if (state == LED_OFF)
-		led_trigger_remove(led_cdev);
-	led_set_brightness(led_cdev, state);
-
-	ret = size;
-unlock:
-	mutex_unlock(&led_cdev->led_access);
 	return ret;
 }
-static DEVICE_ATTR_RW(brightness);
 
-static ssize_t max_brightness_show(struct device *dev,
+static ssize_t led_max_brightness_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%u\n", led_cdev->max_brightness);
 }
-static DEVICE_ATTR_RO(max_brightness);
 
+static struct device_attribute led_class_attrs[] = {
+	__ATTR(brightness, 0644, led_brightness_show, led_brightness_store),
+	__ATTR(max_brightness, 0444, led_max_brightness_show, NULL),
 #ifdef CONFIG_LEDS_TRIGGERS
-static DEVICE_ATTR(trigger, 0644, led_trigger_show, led_trigger_store);
-static struct attribute *led_trigger_attrs[] = {
-	&dev_attr_trigger.attr,
-	NULL,
-};
-static const struct attribute_group led_trigger_group = {
-	.attrs = led_trigger_attrs,
-};
+	__ATTR(trigger, 0644, led_trigger_show, led_trigger_store),
 #endif
-
-static struct attribute *led_class_attrs[] = {
-	&dev_attr_brightness.attr,
-	&dev_attr_max_brightness.attr,
-	NULL,
+	__ATTR_NULL,
 };
 
-static const struct attribute_group led_group = {
-	.attrs = led_class_attrs,
-};
+static void led_timer_function(unsigned long data)
+{
+	struct led_classdev *led_cdev = (void *)data;
+	unsigned long brightness;
+	unsigned long delay;
 
-static const struct attribute_group *led_groups[] = {
-	&led_group,
-#ifdef CONFIG_LEDS_TRIGGERS
-	&led_trigger_group,
-#endif
-	NULL,
-};
+	if (!led_cdev->blink_delay_on || !led_cdev->blink_delay_off) {
+		led_set_brightness(led_cdev, LED_OFF);
+		return;
+	}
+
+	brightness = led_get_brightness(led_cdev);
+	if (!brightness) {
+		/* Time to switch the LED on. */
+		brightness = led_cdev->blink_brightness;
+		delay = led_cdev->blink_delay_on;
+	} else {
+		/* Store the current brightness value to be able
+		 * to restore it when the delay_off period is over.
+		 */
+		led_cdev->blink_brightness = brightness;
+		brightness = LED_OFF;
+		delay = led_cdev->blink_delay_off;
+	}
+
+	led_set_brightness(led_cdev, brightness);
+
+	mod_timer(&led_cdev->blink_timer, jiffies + msecs_to_jiffies(delay));
+}
 
 /**
  * led_classdev_suspend - suspend an led_classdev.
@@ -109,7 +117,7 @@ static const struct attribute_group *led_groups[] = {
 void led_classdev_suspend(struct led_classdev *led_cdev)
 {
 	led_cdev->flags |= LED_SUSPENDED;
-	led_set_brightness_nopm(led_cdev, 0);
+	led_cdev->brightness_set(led_cdev, 0);
 }
 EXPORT_SYMBOL_GPL(led_classdev_suspend);
 
@@ -119,17 +127,12 @@ EXPORT_SYMBOL_GPL(led_classdev_suspend);
  */
 void led_classdev_resume(struct led_classdev *led_cdev)
 {
-	led_set_brightness_nopm(led_cdev, led_cdev->brightness);
-
-	if (led_cdev->flash_resume)
-		led_cdev->flash_resume(led_cdev);
-
+	led_cdev->brightness_set(led_cdev, led_cdev->brightness);
 	led_cdev->flags &= ~LED_SUSPENDED;
 }
 EXPORT_SYMBOL_GPL(led_classdev_resume);
 
-#ifdef CONFIG_PM_SLEEP
-static int led_suspend(struct device *dev)
+static int led_suspend(struct device *dev, pm_message_t state)
 {
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 
@@ -148,37 +151,6 @@ static int led_resume(struct device *dev)
 
 	return 0;
 }
-#endif
-
-static SIMPLE_DEV_PM_OPS(leds_class_dev_pm_ops, led_suspend, led_resume);
-
-static int match_name(struct device *dev, const void *data)
-{
-	if (!dev_name(dev))
-		return 0;
-	return !strcmp(dev_name(dev), (char *)data);
-}
-
-static int led_classdev_next_name(const char *init_name, char *name,
-				  size_t len)
-{
-	unsigned int i = 0;
-	int ret = 0;
-	struct device *dev;
-
-	strlcpy(name, init_name, len);
-
-	while ((ret < len) &&
-	       (dev = class_find_device(leds_class, NULL, name, match_name))) {
-		put_device(dev);
-		ret = snprintf(name, len, "%s_%u", init_name, ++i);
-	}
-
-	if (ret >= len)
-		return -ENOMEM;
-
-	return i;
-}
 
 /**
  * led_classdev_register - register a new object of led_classdev class.
@@ -187,26 +159,14 @@ static int led_classdev_next_name(const char *init_name, char *name,
  */
 int led_classdev_register(struct device *parent, struct led_classdev *led_cdev)
 {
-	char name[64];
-	int ret;
-
-	ret = led_classdev_next_name(led_cdev->name, name, sizeof(name));
-	if (ret < 0)
-		return ret;
-
-	led_cdev->dev = device_create_with_groups(leds_class, parent, 0,
-				led_cdev, led_cdev->groups, "%s", name);
+	led_cdev->dev = device_create(leds_class, parent, 0, led_cdev,
+				      "%s", led_cdev->name);
 	if (IS_ERR(led_cdev->dev))
 		return PTR_ERR(led_cdev->dev);
-
-	if (ret)
-		dev_warn(parent, "Led %s renamed to %s due to name collision",
-				led_cdev->name, dev_name(led_cdev->dev));
 
 #ifdef CONFIG_LEDS_TRIGGERS
 	init_rwsem(&led_cdev->trigger_lock);
 #endif
-	mutex_init(&led_cdev->led_access);
 	/* add to the list of leds */
 	down_write(&leds_list_lock);
 	list_add_tail(&led_cdev->node, &leds_list);
@@ -217,13 +177,15 @@ int led_classdev_register(struct device *parent, struct led_classdev *led_cdev)
 
 	led_update_brightness(led_cdev);
 
-	led_init_core(led_cdev);
+	init_timer(&led_cdev->blink_timer);
+	led_cdev->blink_timer.function = led_timer_function;
+	led_cdev->blink_timer.data = (unsigned long)led_cdev;
 
 #ifdef CONFIG_LEDS_TRIGGERS
 	led_trigger_set_default(led_cdev);
 #endif
 
-	dev_dbg(parent, "Registered led device: %s\n",
+	printk(KERN_DEBUG "Registered led device: %s\n",
 			led_cdev->name);
 
 	return 0;
@@ -245,89 +207,25 @@ void led_classdev_unregister(struct led_classdev *led_cdev)
 	up_write(&led_cdev->trigger_lock);
 #endif
 
-	led_cdev->flags |= LED_UNREGISTERING;
-
 	/* Stop blinking */
-	led_stop_software_blink(led_cdev);
-
-	led_set_brightness(led_cdev, LED_OFF);
-
-	flush_work(&led_cdev->set_brightness_work);
+	led_brightness_set(led_cdev, LED_OFF);
 
 	device_unregister(led_cdev->dev);
 
 	down_write(&leds_list_lock);
 	list_del(&led_cdev->node);
 	up_write(&leds_list_lock);
-
-	mutex_destroy(&led_cdev->led_access);
 }
 EXPORT_SYMBOL_GPL(led_classdev_unregister);
-
-static void devm_led_classdev_release(struct device *dev, void *res)
-{
-	led_classdev_unregister(*(struct led_classdev **)res);
-}
-
-/**
- * devm_led_classdev_register - resource managed led_classdev_register()
- * @parent: The device to register.
- * @led_cdev: the led_classdev structure for this device.
- */
-int devm_led_classdev_register(struct device *parent,
-			       struct led_classdev *led_cdev)
-{
-	struct led_classdev **dr;
-	int rc;
-
-	dr = devres_alloc(devm_led_classdev_release, sizeof(*dr), GFP_KERNEL);
-	if (!dr)
-		return -ENOMEM;
-
-	rc = led_classdev_register(parent, led_cdev);
-	if (rc) {
-		devres_free(dr);
-		return rc;
-	}
-
-	*dr = led_cdev;
-	devres_add(parent, dr);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(devm_led_classdev_register);
-
-static int devm_led_classdev_match(struct device *dev, void *res, void *data)
-{
-	struct led_cdev **p = res;
-
-	if (WARN_ON(!p || !*p))
-		return 0;
-
-	return *p == data;
-}
-
-/**
- * devm_led_classdev_unregister() - resource managed led_classdev_unregister()
- * @parent: The device to unregister.
- * @led_cdev: the led_classdev structure for this device.
- */
-void devm_led_classdev_unregister(struct device *dev,
-				  struct led_classdev *led_cdev)
-{
-	WARN_ON(devres_release(dev,
-			       devm_led_classdev_release,
-			       devm_led_classdev_match, led_cdev));
-}
-EXPORT_SYMBOL_GPL(devm_led_classdev_unregister);
 
 static int __init leds_init(void)
 {
 	leds_class = class_create(THIS_MODULE, "leds");
 	if (IS_ERR(leds_class))
 		return PTR_ERR(leds_class);
-	leds_class->pm = &leds_class_dev_pm_ops;
-	leds_class->dev_groups = led_groups;
+	leds_class->suspend = led_suspend;
+	leds_class->resume = led_resume;
+	leds_class->dev_attrs = led_class_attrs;
 	return 0;
 }
 

@@ -38,7 +38,7 @@ SYSCALL_DEFINE3(msync, unsigned long, start, size_t, len, int, flags)
 
 	if (flags & ~(MS_ASYNC | MS_INVALIDATE | MS_SYNC))
 		goto out;
-	if (offset_in_page(start))
+	if (start & ~PAGE_MASK)
 		goto out;
 	if ((flags & MS_ASYNC) && (flags & MS_SYNC))
 		goto out;
@@ -58,7 +58,6 @@ SYSCALL_DEFINE3(msync, unsigned long, start, size_t, len, int, flags)
 	vma = find_vma(mm, start);
 	for (;;) {
 		struct file *file;
-		loff_t fstart, fend;
 
 		/* Still start < end. */
 		error = -ENOMEM;
@@ -78,15 +77,12 @@ SYSCALL_DEFINE3(msync, unsigned long, start, size_t, len, int, flags)
 			goto out_unlock;
 		}
 		file = vma->vm_file;
-		fstart = (start - vma->vm_start) +
-			 ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
-		fend = fstart + (min(end, vma->vm_end) - start) - 1;
 		start = vma->vm_end;
 		if ((flags & MS_SYNC) && file &&
 				(vma->vm_flags & VM_SHARED)) {
 			get_file(file);
 			up_read(&mm->mmap_sem);
-			error = vfs_fsync_range(file, fstart, fend, 1);
+			error = vfs_fsync(file, 0);
 			fput(file);
 			if (error || start >= end)
 				goto out;

@@ -64,14 +64,13 @@
 
 #define		GPIOMUX_EN	BIT(3)	/* When this bit is set to "1",
 					 * GPIO PINs will switch to MAC
-					 * GPIO Function
-					 */
+					 * GPIO Function*/
 #define		GPIOSEL_GPIO	0	/* UART or JTAG or pure GPIO*/
 #define		GPIOSEL_PHYDBG	1	/* PHYDBG*/
 #define		GPIOSEL_BT	2	/* BT_coex*/
 #define		GPIOSEL_WLANDBG	3	/* WLANDBG*/
 #define		GPIOSEL_GPIO_MASK	(~(BIT(0)|BIT(1)))
-/* HW Radio OFF switch (GPIO BIT) */
+/* HW Readio OFF switch (GPIO BIT) */
 #define		HAL_8192S_HW_GPIO_OFF_BIT	BIT(3)
 #define		HAL_8192S_HW_GPIO_OFF_MASK	0xF7
 #define		HAL_8192S_HW_GPIO_WPS_BIT	BIT(4)

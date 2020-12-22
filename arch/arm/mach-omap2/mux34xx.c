@@ -614,16 +614,16 @@ static struct omap_mux __initdata omap3_muxmodes[] = {
 		"sys_off_mode", NULL, NULL, NULL,
 		"gpio_9", NULL, NULL, "safe_mode"),
 	_OMAP3_MUXENTRY(UART1_CTS, 150,
-		"uart1_cts", "ssi1_rdy_tx", NULL, NULL,
+		"uart1_cts", NULL, NULL, NULL,
 		"gpio_150", "hsusb3_tll_clk", NULL, "safe_mode"),
 	_OMAP3_MUXENTRY(UART1_RTS, 149,
-		"uart1_rts", "ssi1_flag_tx", NULL, NULL,
+		"uart1_rts", NULL, NULL, NULL,
 		"gpio_149", NULL, NULL, "safe_mode"),
 	_OMAP3_MUXENTRY(UART1_RX, 151,
-		"uart1_rx", "ssi1_wake_tx", "mcbsp1_clkr", "mcspi4_clk",
+		"uart1_rx", NULL, "mcbsp1_clkr", "mcspi4_clk",
 		"gpio_151", NULL, NULL, "safe_mode"),
 	_OMAP3_MUXENTRY(UART1_TX, 148,
-		"uart1_tx", "ssi1_dat_tx", NULL, NULL,
+		"uart1_tx", NULL, NULL, NULL,
 		"gpio_148", NULL, NULL, "safe_mode"),
 	_OMAP3_MUXENTRY(UART2_CTS, 144,
 		"uart2_cts", "mcbsp3_dx", "gpt9_pwm_evt", NULL,
@@ -1266,7 +1266,7 @@ static struct omap_ball __initdata omap3_cus_ball[] = {
 #endif
 
 /*
- * Signals different on CBB package compared to superset
+ * Signals different on CBB package comapared to superset
  */
 #if defined(CONFIG_OMAP_MUX) && defined(CONFIG_OMAP_PACKAGE_CBB)
 static struct omap_mux __initdata omap3_cbb_subset[] = {
@@ -1597,7 +1597,7 @@ static struct omap_ball __initdata omap3_cbb_ball[] = {
 #endif
 
 /*
- * Signals different on 36XX CBP package compared to 34XX CBC package
+ * Signals different on 36XX CBP package comapared to 34XX CBC package
  */
 #if defined(CONFIG_OMAP_MUX) && defined(CONFIG_OMAP_PACKAGE_CBP)
 static struct omap_mux __initdata omap36xx_cbp_subset[] = {
@@ -2053,7 +2053,7 @@ int __init omap3_mux_init(struct omap_board_mux *board_subset, int flags)
 		return -EINVAL;
 	}
 
-	return omap_mux_init("core", OMAP_MUX_GPIO_IN_MODE4,
+	return omap_mux_init("core", 0,
 			     OMAP3_CONTROL_PADCONF_MUX_PBASE,
 			     OMAP3_CONTROL_PADCONF_MUX_SIZE,
 			     omap3_muxmodes, package_subset, board_subset,

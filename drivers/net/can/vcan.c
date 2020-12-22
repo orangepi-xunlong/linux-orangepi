@@ -46,9 +46,11 @@
 #include <linux/if_ether.h>
 #include <linux/can.h>
 #include <linux/can/dev.h>
-#include <linux/can/skb.h>
 #include <linux/slab.h>
 #include <net/rtnetlink.h>
+
+static __initdata const char banner[] =
+	KERN_INFO "vcan: Virtual CAN interface driver\n";
 
 MODULE_DESCRIPTION("virtual CAN interface");
 MODULE_LICENSE("Dual BSD/GPL");
@@ -68,12 +70,13 @@ MODULE_PARM_DESC(echo, "Echo sent frames (for testing). Default: 0 (Off)");
 
 static void vcan_rx(struct sk_buff *skb, struct net_device *dev)
 {
-	struct canfd_frame *cfd = (struct canfd_frame *)skb->data;
+	struct can_frame *cf = (struct can_frame *)skb->data;
 	struct net_device_stats *stats = &dev->stats;
 
 	stats->rx_packets++;
-	stats->rx_bytes += cfd->len;
+	stats->rx_bytes += cf->can_dlc;
 
+	skb->protocol  = htons(ETH_P_CAN);
 	skb->pkt_type  = PACKET_BROADCAST;
 	skb->dev       = dev;
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
@@ -83,7 +86,7 @@ static void vcan_rx(struct sk_buff *skb, struct net_device *dev)
 
 static netdev_tx_t vcan_tx(struct sk_buff *skb, struct net_device *dev)
 {
-	struct canfd_frame *cfd = (struct canfd_frame *)skb->data;
+	struct can_frame *cf = (struct can_frame *)skb->data;
 	struct net_device_stats *stats = &dev->stats;
 	int loop;
 
@@ -91,7 +94,7 @@ static netdev_tx_t vcan_tx(struct sk_buff *skb, struct net_device *dev)
 		return NETDEV_TX_OK;
 
 	stats->tx_packets++;
-	stats->tx_bytes += cfd->len;
+	stats->tx_bytes += cf->can_dlc;
 
 	/* set flag whether this packet has to be looped back */
 	loop = skb->pkt_type == PACKET_LOOPBACK;
@@ -105,51 +108,39 @@ static netdev_tx_t vcan_tx(struct sk_buff *skb, struct net_device *dev)
 			 * CAN core already did the echo for us
 			 */
 			stats->rx_packets++;
-			stats->rx_bytes += cfd->len;
+			stats->rx_bytes += cf->can_dlc;
 		}
-		consume_skb(skb);
+		kfree_skb(skb);
 		return NETDEV_TX_OK;
 	}
 
 	/* perform standard echo handling for CAN network interfaces */
 
 	if (loop) {
+		struct sock *srcsk = skb->sk;
 
-		skb = can_create_echo_skb(skb);
+		skb = skb_share_check(skb, GFP_ATOMIC);
 		if (!skb)
 			return NETDEV_TX_OK;
 
 		/* receive with packet counting */
+		skb->sk = srcsk;
 		vcan_rx(skb, dev);
 	} else {
 		/* no looped packets => no counting */
-		consume_skb(skb);
+		kfree_skb(skb);
 	}
 	return NETDEV_TX_OK;
 }
 
-static int vcan_change_mtu(struct net_device *dev, int new_mtu)
-{
-	/* Do not allow changing the MTU while running */
-	if (dev->flags & IFF_UP)
-		return -EBUSY;
-
-	if (new_mtu != CAN_MTU && new_mtu != CANFD_MTU)
-		return -EINVAL;
-
-	dev->mtu = new_mtu;
-	return 0;
-}
-
 static const struct net_device_ops vcan_netdev_ops = {
 	.ndo_start_xmit = vcan_tx,
-	.ndo_change_mtu = vcan_change_mtu,
 };
 
 static void vcan_setup(struct net_device *dev)
 {
 	dev->type		= ARPHRD_CAN;
-	dev->mtu		= CAN_MTU;
+	dev->mtu		= sizeof(struct can_frame);
 	dev->hard_header_len	= 0;
 	dev->addr_len		= 0;
 	dev->tx_queue_len	= 0;
@@ -170,7 +161,7 @@ static struct rtnl_link_ops vcan_link_ops __read_mostly = {
 
 static __init int vcan_init_module(void)
 {
-	pr_info("vcan: Virtual CAN interface driver\n");
+	printk(banner);
 
 	if (echo)
 		printk(KERN_INFO "vcan: enabled echo on driver level.\n");

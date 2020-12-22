@@ -10,15 +10,14 @@
  */
 
 #include <linux/linkage.h>
-#include <asm/assembler.h>
 #include <asm/smp_scu.h>
 #include <asm/memory.h>
 #include <asm/hardware/cache-l2x0.h>
 
-#include "omap-secure.h"
+#include <plat/omap44xx.h>
+#include <mach/omap-secure.h>
 
 #include "common.h"
-#include "omap44xx.h"
 #include "omap4-sar-layout.h"
 
 #if defined(CONFIG_SMP) && defined(CONFIG_PM)
@@ -29,7 +28,11 @@
 	dsb
 .endm
 
-#ifdef CONFIG_ARCH_OMAP4
+ppa_zero_params:
+	.word		0x0
+
+ppa_por_params:
+	.word		1, 0
 
 /*
  * =============================
@@ -53,13 +56,9 @@
  * The restore function pointer is stored at CPUx_WAKEUP_NS_PA_ADDR_OFFSET.
  * It returns to the caller for CPU INACTIVE and ON power states or in case
  * CPU failed to transition to targeted OFF/DORMANT state.
- *
- * omap4_finish_suspend() calls v7_flush_dcache_all() which doesn't save
- * stack frame and it expects the caller to take care of it. Hence the entire
- * stack frame is saved to avoid possible stack corruption.
  */
 ENTRY(omap4_finish_suspend)
-	stmfd	sp!, {r4-r12, lr}
+	stmfd	sp!, {lr}
 	cmp	r0, #0x0
 	beq	do_WFI				@ No lowpower state, jump to WFI
 
@@ -227,7 +226,7 @@ scu_gp_clear:
 skip_scu_gp_clear:
 	isb
 	dsb
-	ldmfd	sp!, {r4-r12, pc}
+	ldmfd	sp!, {pc}
 ENDPROC(omap4_finish_suspend)
 
 /*
@@ -260,9 +259,7 @@ ENTRY(omap4_cpu_resume)
 	beq	skip_ns_smp_enable
 ppa_actrl_retry:
 	mov     r0, #OMAP4_PPA_CPU_ACTRL_SMP_INDEX
-	adr	r1, ppa_zero_params_offset
-	ldr	r3, [r1]
-	add	r3, r3, r1			@ Pointer to ppa_zero_params
+	adr	r3, ppa_zero_params		@ Pointer to parameters
 	mov	r1, #0x0			@ Process ID
 	mov	r2, #0x4			@ Flag
 	mov	r6, #0xff
@@ -299,9 +296,7 @@ skip_ns_smp_enable:
 	ldr     r0, =OMAP4_PPA_L2_POR_INDEX
 	ldr     r1, =OMAP44XX_SAR_RAM_BASE
 	ldr     r4, [r1, #L2X0_PREFETCH_CTRL_OFFSET]
-	adr     r1, ppa_por_params_offset
-	ldr	r3, [r1]
-	add	r3, r3, r1			@ Pointer to ppa_por_params
+	adr     r3, ppa_por_params
 	str     r4, [r3, #0x04]
 	mov	r1, #0x0			@ Process ID
 	mov	r2, #0x4			@ Flag
@@ -326,19 +321,19 @@ skip_l2en:
 #endif
 
 	b	cpu_resume			@ Jump to generic resume
-ppa_por_params_offset:
-	.long	ppa_por_params - .
 ENDPROC(omap4_cpu_resume)
-#endif	/* CONFIG_ARCH_OMAP4 */
+#endif
 
-#endif	/* defined(CONFIG_SMP) && defined(CONFIG_PM) */
+#ifndef CONFIG_OMAP4_ERRATA_I688
+ENTRY(omap_bus_sync)
+	mov	pc, lr
+ENDPROC(omap_bus_sync)
+#endif
 
 ENTRY(omap_do_wfi)
 	stmfd	sp!, {lr}
-#ifdef CONFIG_OMAP_INTERCONNECT_BARRIER
 	/* Drain interconnect write buffers. */
-	bl	omap_interconnect_sync
-#endif
+	bl omap_bus_sync
 
 	/*
 	 * Execute an ISB instruction to ensure that all of the
@@ -380,13 +375,4 @@ ENTRY(omap_do_wfi)
 	nop
 
 	ldmfd	sp!, {pc}
-ppa_zero_params_offset:
-	.long	ppa_zero_params - .
 ENDPROC(omap_do_wfi)
-
-	.data
-ppa_zero_params:
-	.word		0
-
-ppa_por_params:
-	.word		1, 0

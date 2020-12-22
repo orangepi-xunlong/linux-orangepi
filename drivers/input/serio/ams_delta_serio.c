@@ -27,7 +27,7 @@
 #include <linux/module.h>
 
 #include <asm/mach-types.h>
-#include <mach/board-ams-delta.h>
+#include <plat/board-ams-delta.h>
 
 #include <mach/ams-delta-fiq.h>
 
@@ -56,7 +56,7 @@ static int check_data(int data)
 	/* it should be odd */
 	if (!(parity & 0x01)) {
 		dev_warn(&ams_delta_serio->dev,
-				"parity check failed, data=0x%X parity=0x%X\n",
+				"paritiy check failed, data=0x%X parity=0x%X\n",
 				data, parity);
 		return SERIO_PARITY;
 	}

@@ -13,9 +13,9 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/power_supply.h>
-#include <linux/olpc-ec.h>
 
-#include <linux/acpi.h>
+#include <acpi/acpi_bus.h>
+#include <acpi/acpi_drivers.h>
 #include <asm/olpc.h>
 
 #define DRV_NAME			"olpc-xo15-sci"
@@ -39,9 +39,16 @@ static bool				lid_wake_on_close;
  */
 static int set_lid_wake_behavior(bool wake_on_close)
 {
+	struct acpi_object_list arg_list;
+	union acpi_object arg;
 	acpi_status status;
 
-	status = acpi_execute_simple_method(NULL, "\\_SB.PCI0.LID.LIDW", wake_on_close);
+	arg_list.count		= 1;
+	arg_list.pointer	= &arg;
+	arg.type		= ACPI_TYPE_INTEGER;
+	arg.integer.value	= wake_on_close;
+
+	status = acpi_evaluate_object(NULL, "\\_SB.PCI0.LID.LIDW", &arg_list, NULL);
 	if (ACPI_FAILURE(status)) {
 		pr_warning(PFX "failed to set lid behavior\n");
 		return 1;
@@ -83,7 +90,7 @@ static void battery_status_changed(void)
 
 	if (psy) {
 		power_supply_changed(psy);
-		power_supply_put(psy);
+		put_device(psy->dev);
 	}
 }
 
@@ -93,7 +100,7 @@ static void ac_status_changed(void)
 
 	if (psy) {
 		power_supply_changed(psy);
-		power_supply_put(psy);
+		put_device(psy->dev);
 	}
 }
 
@@ -187,7 +194,7 @@ err_sysfs:
 	return r;
 }
 
-static int xo15_sci_remove(struct acpi_device *device)
+static int xo15_sci_remove(struct acpi_device *device, int type)
 {
 	acpi_disable_gpe(NULL, xo15_sci_gpe);
 	acpi_remove_gpe_handler(NULL, xo15_sci_gpe, xo15_sci_gpe_handler);
@@ -196,8 +203,7 @@ static int xo15_sci_remove(struct acpi_device *device)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int xo15_sci_resume(struct device *dev)
+static int xo15_sci_resume(struct acpi_device *device)
 {
 	/* Enable all EC events */
 	olpc_ec_mask_write(EC_SCI_SRC_ALL);
@@ -208,9 +214,6 @@ static int xo15_sci_resume(struct device *dev)
 
 	return 0;
 }
-#endif
-
-static SIMPLE_DEV_PM_OPS(xo15_sci_pm, NULL, xo15_sci_resume);
 
 static const struct acpi_device_id xo15_sci_device_ids[] = {
 	{"XO15EC", 0},
@@ -224,8 +227,8 @@ static struct acpi_driver xo15_sci_drv = {
 	.ops = {
 		.add = xo15_sci_add,
 		.remove = xo15_sci_remove,
+		.resume = xo15_sci_resume,
 	},
-	.drv.pm = &xo15_sci_pm,
 };
 
 static int __init xo15_sci_init(void)

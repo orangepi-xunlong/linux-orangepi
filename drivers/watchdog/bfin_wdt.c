@@ -356,7 +356,7 @@ static const struct watchdog_info bfin_wdt_info = {
  *	Registers the misc device.  Actual device
  *	initialization is handled by bfin_wdt_open().
  */
-static int bfin_wdt_probe(struct platform_device *pdev)
+static int __devinit bfin_wdt_probe(struct platform_device *pdev)
 {
 	int ret;
 
@@ -379,7 +379,7 @@ static int bfin_wdt_probe(struct platform_device *pdev)
  *	Unregisters the misc device.  Actual device
  *	deinitialization is handled by bfin_wdt_close().
  */
-static int bfin_wdt_remove(struct platform_device *pdev)
+static int __devexit bfin_wdt_remove(struct platform_device *pdev)
 {
 	misc_deregister(&bfin_wdt_miscdev);
 	return 0;
@@ -401,12 +401,13 @@ static struct platform_device *bfin_wdt_device;
 
 static struct platform_driver bfin_wdt_driver = {
 	.probe     = bfin_wdt_probe,
-	.remove    = bfin_wdt_remove,
+	.remove    = __devexit_p(bfin_wdt_remove),
 	.shutdown  = bfin_wdt_shutdown,
 	.suspend   = bfin_wdt_suspend,
 	.resume    = bfin_wdt_resume,
 	.driver    = {
 		.name  = WATCHDOG_NAME,
+		.owner = THIS_MODULE,
 	},
 };
 
@@ -464,6 +465,7 @@ module_exit(bfin_wdt_exit);
 MODULE_AUTHOR("Michele d'Amico, Mike Frysinger <vapier@gentoo.org>");
 MODULE_DESCRIPTION("Blackfin Watchdog Device Driver");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 
 module_param(timeout, uint, 0);
 MODULE_PARM_DESC(timeout,

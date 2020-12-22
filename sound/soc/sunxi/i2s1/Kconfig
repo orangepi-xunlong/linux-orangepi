@@ -1,0 +1,10 @@
+
+config SND_SUNXI_SOC_I2S1_INTERFACE
+	tristate "SoC i2s1 interface for SUNXI chips"
+	depends on ARCH_SUN8IW3 || ARCH_SUN8IW5 || ARCH_SUN8IW1
+	select SND_SOC_DMAENGINE_PCM
+	default n
+	help
+	  Say Y or M if you want to add support for codecs attached to
+	  the SUNXI AC97, I2S or PCM interface. You will also need
+	  to select the audio interfaces to support below.

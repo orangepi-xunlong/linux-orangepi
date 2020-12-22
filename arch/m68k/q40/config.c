@@ -12,7 +12,6 @@
  * for more details.
  */
 
-#include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -28,6 +27,7 @@
 #include <linux/platform_device.h>
 
 #include <asm/io.h>
+#include <asm/rtc.h>
 #include <asm/bootinfo.h>
 #include <asm/pgtable.h>
 #include <asm/setup.h>
@@ -40,7 +40,7 @@ extern void q40_init_IRQ(void);
 static void q40_get_model(char *model);
 extern void q40_sched_init(irq_handler_t handler);
 
-static u32 q40_gettimeoffset(void);
+static unsigned long q40_gettimeoffset(void);
 static int q40_hwclk(int, struct rtc_time *);
 static unsigned int q40_get_ss(void);
 static int q40_set_clock_mmss(unsigned long);
@@ -154,7 +154,7 @@ static unsigned int serports[] =
 	0x3f8,0x2f8,0x3e8,0x2e8,0
 };
 
-static void __init q40_disable_irqs(void)
+static void q40_disable_irqs(void)
 {
 	unsigned i, j;
 
@@ -170,7 +170,7 @@ void __init config_q40(void)
 	mach_sched_init = q40_sched_init;
 
 	mach_init_IRQ = q40_init_IRQ;
-	arch_gettimeoffset = q40_gettimeoffset;
+	mach_gettimeoffset = q40_gettimeoffset;
 	mach_hwclk = q40_hwclk;
 	mach_get_ss = q40_get_ss;
 	mach_get_rtc_pll = q40_get_rtc_pll;
@@ -180,7 +180,7 @@ void __init config_q40(void)
 	mach_reset = q40_reset;
 	mach_get_model = q40_get_model;
 
-#if IS_ENABLED(CONFIG_INPUT_M68K_BEEP)
+#if defined(CONFIG_INPUT_M68K_BEEP) || defined(CONFIG_INPUT_M68K_BEEP_MODULE)
 	mach_beep = q40_mksound;
 #endif
 #ifdef CONFIG_HEARTBEAT
@@ -198,15 +198,15 @@ void __init config_q40(void)
 }
 
 
-int __init q40_parse_bootinfo(const struct bi_record *rec)
+int q40_parse_bootinfo(const struct bi_record *rec)
 {
 	return 1;
 }
 
 
-static u32 q40_gettimeoffset(void)
+static unsigned long q40_gettimeoffset(void)
 {
-	return 5000 * (ql_ticks != 0) * 1000;
+	return 5000 * (ql_ticks != 0);
 }
 
 
@@ -338,6 +338,9 @@ static __init int q40_add_kbd_device(void)
 		return -ENODEV;
 
 	pdev = platform_device_register_simple("q40kbd", -1, NULL, 0);
-	return PTR_ERR_OR_ZERO(pdev);
+	if (IS_ERR(pdev))
+		return PTR_ERR(pdev);
+
+	return 0;
 }
 arch_initcall(q40_add_kbd_device);

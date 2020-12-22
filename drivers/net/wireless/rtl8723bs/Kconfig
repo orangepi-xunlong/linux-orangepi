@@ -1,0 +1,6 @@
+config RTL8723BS
+	tristate "Realtek 8723B SDIO WiFi"
+	select WIRELESS_EXT
+	select WEXT_PRIV
+	---help---
+	  Help message of RTL8723BS

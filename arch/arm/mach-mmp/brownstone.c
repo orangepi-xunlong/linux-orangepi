@@ -14,7 +14,6 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
-#include <linux/gpio-pxa.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/max8649.h>
 #include <linux/regulator/fixed.h>
@@ -22,10 +21,10 @@
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include "addr-map.h"
-#include "mfp-mmp2.h"
-#include "mmp2.h"
-#include "irqs.h"
+#include <mach/addr-map.h>
+#include <mach/mfp-mmp2.h>
+#include <mach/mmp2.h>
+#include <mach/irqs.h>
 
 #include "common.h"
 
@@ -103,10 +102,6 @@ static unsigned long brownstone_pin_config[] __initdata = {
 
 	/* 5V regulator */
 	GPIO89_GPIO,
-};
-
-static struct pxa_gpio_platform_data mmp2_gpio_pdata = {
-	.irq_base	= MMP_GPIO_TO_IRQ(0),
 };
 
 static struct regulator_consumer_supply max8649_supply[] = {
@@ -207,8 +202,6 @@ static void __init brownstone_init(void)
 	/* on-chip devices */
 	mmp2_add_uart(1);
 	mmp2_add_uart(3);
-	platform_device_add_data(&mmp2_device_gpio, &mmp2_gpio_pdata,
-				 sizeof(struct pxa_gpio_platform_data));
 	platform_device_register(&mmp2_device_gpio);
 	mmp2_add_twsi(1, NULL, ARRAY_AND_SIZE(brownstone_twsi1_info));
 	mmp2_add_sdhost(0, &mmp2_sdh_platdata_mmc0); /* SD/MMC */
@@ -225,7 +218,7 @@ MACHINE_START(BROWNSTONE, "Brownstone Development Platform")
 	.map_io		= mmp_map_io,
 	.nr_irqs	= BROWNSTONE_NR_IRQS,
 	.init_irq	= mmp2_init_irq,
-	.init_time	= mmp2_timer_init,
+	.timer		= &mmp2_timer,
 	.init_machine	= brownstone_init,
 	.restart	= mmp_restart,
 MACHINE_END

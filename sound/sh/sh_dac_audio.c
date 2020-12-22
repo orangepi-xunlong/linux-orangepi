@@ -261,7 +261,7 @@ static struct snd_pcm_ops snd_sh_dac_pcm_ops = {
 	.mmap		= snd_pcm_lib_mmap_iomem,
 };
 
-static int snd_sh_dac_pcm(struct snd_sh_dac *chip, int device)
+static int __devinit snd_sh_dac_pcm(struct snd_sh_dac *chip, int device)
 {
 	int err;
 	struct snd_pcm *pcm;
@@ -290,6 +290,8 @@ static int snd_sh_dac_pcm(struct snd_sh_dac *chip, int device)
 static int snd_sh_dac_remove(struct platform_device *devptr)
 {
 	snd_card_free(platform_get_drvdata(devptr));
+	platform_set_drvdata(devptr, NULL);
+
 	return 0;
 }
 
@@ -344,9 +346,9 @@ static enum hrtimer_restart sh_dac_audio_timer(struct hrtimer *handle)
 }
 
 /* create  --  chip-specific constructor for the cards components */
-static int snd_sh_dac_create(struct snd_card *card,
-			     struct platform_device *devptr,
-			     struct snd_sh_dac **rchip)
+static int __devinit snd_sh_dac_create(struct snd_card *card,
+				       struct platform_device *devptr,
+				       struct snd_sh_dac **rchip)
 {
 	struct snd_sh_dac *chip;
 	int err;
@@ -390,13 +392,13 @@ static int snd_sh_dac_create(struct snd_card *card,
 }
 
 /* driver .probe  --  constructor */
-static int snd_sh_dac_probe(struct platform_device *devptr)
+static int __devinit snd_sh_dac_probe(struct platform_device *devptr)
 {
 	struct snd_sh_dac *chip;
 	struct snd_card *card;
 	int err;
 
-	err = snd_card_new(&devptr->dev, index, id, THIS_MODULE, 0, &card);
+	err = snd_card_create(index, id, THIS_MODULE, 0, &card);
 	if (err < 0) {
 			snd_printk(KERN_ERR "cannot allocate the card\n");
 			return err;
@@ -431,7 +433,7 @@ probe_error:
 /*
  * "driver" definition
  */
-static struct platform_driver sh_dac_driver = {
+static struct platform_driver driver = {
 	.probe	= snd_sh_dac_probe,
 	.remove = snd_sh_dac_remove,
 	.driver = {
@@ -439,4 +441,4 @@ static struct platform_driver sh_dac_driver = {
 	},
 };
 
-module_platform_driver(sh_dac_driver);
+module_platform_driver(driver);

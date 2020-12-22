@@ -24,6 +24,8 @@
 #include <linux/mtd/mtdram.h>
 #include <linux/mtd/partitions.h>
 
+#include <linux/cramfs_fs.h>
+
 #include <asm/axisflashmap.h>
 #include <asm/mmu.h>
 
@@ -246,7 +248,7 @@ static struct mtd_info *probe_cs(struct map_info *map_cs)
 /*
  * Probe each chip select individually for flash chips. If there are chips on
  * both cse0 and cse1, the mtd_info structs will be concatenated to one struct
- * so that MTD partitions can cross chip boundaries.
+ * so that MTD partitions can cross chip boundries.
  *
  * The only known restriction to how you can mount your chips is that each
  * chip select must hold similar flash chips. But you need external hardware
@@ -313,14 +315,13 @@ static int __init init_axis_flash(void)
 	size_t len;
 	int ram_rootfs_partition = -1; /* -1 => no RAM rootfs partition */
 	int part;
-	struct mtd_partition *partition;
 
 	/* We need a root fs. If it resides in RAM, we need to use an
 	 * MTDRAM device, so it must be enabled in the kernel config,
 	 * but its size must be configured as 0 so as not to conflict
 	 * with our usage.
 	 */
-#if !defined(CONFIG_MTD_MTDRAM) || (CONFIG_MTDRAM_TOTAL_SIZE != 0)
+#if !defined(CONFIG_MTD_MTDRAM) || (CONFIG_MTDRAM_TOTAL_SIZE != 0) || (CONFIG_MTDRAM_ABS_POS != 0)
 	if (!romfs_in_flash && !nand_boot) {
 		printk(KERN_EMERG "axisflashmap: Cannot create an MTD RAM "
 		       "device; configure CONFIG_MTD_MTDRAM with size = 0!\n");
@@ -328,9 +329,10 @@ static int __init init_axis_flash(void)
 	}
 #endif
 
+#ifndef CONFIG_ETRAX_VCS_SIM
 	main_mtd = flash_probe();
 	if (main_mtd)
-		printk(KERN_INFO "%s: 0x%08llx bytes of NOR flash memory.\n",
+		printk(KERN_INFO "%s: 0x%08x bytes of NOR flash memory.\n",
 		       main_mtd->name, main_mtd->size);
 
 #ifdef CONFIG_ETRAX_NANDFLASH
@@ -361,7 +363,7 @@ static int __init init_axis_flash(void)
 
 #if 0 /* Dump flash memory so we can see what is going on */
 	if (main_mtd) {
-		int sectoraddr;
+		int sectoraddr, i;
 		for (sectoraddr = 0; sectoraddr < 2*65536+4096;
 				sectoraddr += PAGESIZE) {
 			main_mtd->read(main_mtd, sectoraddr, PAGESIZE, &len,
@@ -369,16 +371,30 @@ static int __init init_axis_flash(void)
 			printk(KERN_INFO
 			       "Sector at %d (length %d):\n",
 			       sectoraddr, len);
-			print_hex_dump(KERN_INFO, "", DUMP_PREFIX_NONE, 16, 1, page, PAGESIZE, false);
+			for (i = 0; i < PAGESIZE; i += 16) {
+				printk(KERN_INFO
+				       "%02x %02x %02x %02x "
+				       "%02x %02x %02x %02x "
+				       "%02x %02x %02x %02x "
+				       "%02x %02x %02x %02x\n",
+				       page[i] & 255, page[i+1] & 255,
+				       page[i+2] & 255, page[i+3] & 255,
+				       page[i+4] & 255, page[i+5] & 255,
+				       page[i+6] & 255, page[i+7] & 255,
+				       page[i+8] & 255, page[i+9] & 255,
+				       page[i+10] & 255, page[i+11] & 255,
+				       page[i+12] & 255, page[i+13] & 255,
+				       page[i+14] & 255, page[i+15] & 255);
+			}
 		}
 	}
 #endif
 
 	if (main_mtd) {
-		loff_t ptable_sector = CONFIG_ETRAX_PTABLE_SECTOR;
 		main_mtd->owner = THIS_MODULE;
 		axisflash_mtd = main_mtd;
 
+		loff_t ptable_sector = CONFIG_ETRAX_PTABLE_SECTOR;
 
 		/* First partition (rescue) is always set to the default. */
 		pidx++;
@@ -403,11 +419,25 @@ static int __init init_axis_flash(void)
 
 #if 0 /* Dump partition table so we can see what is going on */
 		printk(KERN_INFO
-		       "axisflashmap: flash read %d bytes at 0x%08x, data: %8ph\n",
-		       len, CONFIG_ETRAX_PTABLE_SECTOR, page);
+		       "axisflashmap: flash read %d bytes at 0x%08x, data: "
+		       "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+		       len, CONFIG_ETRAX_PTABLE_SECTOR,
+		       page[0] & 255, page[1] & 255,
+		       page[2] & 255, page[3] & 255,
+		       page[4] & 255, page[5] & 255,
+		       page[6] & 255, page[7] & 255);
 		printk(KERN_INFO
-		       "axisflashmap: partition table offset %d, data: %8ph\n",
-		       PARTITION_TABLE_OFFSET, page + PARTITION_TABLE_OFFSET);
+		       "axisflashmap: partition table offset %d, data: "
+		       "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+		       PARTITION_TABLE_OFFSET,
+		       page[PARTITION_TABLE_OFFSET+0] & 255,
+		       page[PARTITION_TABLE_OFFSET+1] & 255,
+		       page[PARTITION_TABLE_OFFSET+2] & 255,
+		       page[PARTITION_TABLE_OFFSET+3] & 255,
+		       page[PARTITION_TABLE_OFFSET+4] & 255,
+		       page[PARTITION_TABLE_OFFSET+5] & 255,
+		       page[PARTITION_TABLE_OFFSET+6] & 255,
+		       page[PARTITION_TABLE_OFFSET+7] & 255);
 #endif
 	}
 
@@ -490,7 +520,7 @@ static int __init init_axis_flash(void)
 	/* Decide whether to use default partition table. */
 	/* Only use default table if we actually have a device (main_mtd) */
 
-	partition = &axis_partitions[0];
+	struct mtd_partition *partition = &axis_partitions[0];
 	if (main_mtd && !ptable_ok) {
 		memcpy(axis_partitions, axis_default_partitions,
 		       sizeof(axis_default_partitions));
@@ -553,7 +583,7 @@ static int __init init_axis_flash(void)
 			printk(KERN_INFO "axisflashmap: Adding RAM partition "
 			       "for rootfs image.\n");
 			err = mtdram_init_device(mtd_ram,
-						 (void *)(u_int32_t)partition[part].offset,
+						 (void *)partition[part].offset,
 						 partition[part].size,
 						 partition[part].name);
 			if (err)
@@ -573,7 +603,34 @@ static int __init init_axis_flash(void)
 					"partition %d\n", part);
 		}
 	}
+#endif /* CONFIG_EXTRAX_VCS_SIM */
 
+#ifdef CONFIG_ETRAX_VCS_SIM
+	/* For simulator, always use a RAM partition.
+	 * The rootfs will be found after the kernel in RAM,
+	 * with romfs_start and romfs_end indicating location and size.
+	 */
+	struct mtd_info *mtd_ram;
+
+	mtd_ram = kmalloc(sizeof(struct mtd_info), GFP_KERNEL);
+	if (!mtd_ram) {
+		panic("axisflashmap: Couldn't allocate memory for "
+		      "mtd_info!\n");
+	}
+
+	printk(KERN_INFO "axisflashmap: Adding RAM partition for romfs, "
+	       "at %u, size %u\n",
+	       (unsigned) romfs_start, (unsigned) romfs_length);
+
+	err = mtdram_init_device(mtd_ram, (void *)romfs_start,
+				 romfs_length, "romfs");
+	if (err) {
+		panic("axisflashmap: Could not initialize MTD RAM "
+		      "device!\n");
+	}
+#endif /* CONFIG_EXTRAX_VCS_SIM */
+
+#ifndef CONFIG_ETRAX_VCS_SIM
 	if (aux_mtd) {
 		aux_partition.size = aux_mtd->size;
 		err = mtd_device_register(aux_mtd, &aux_partition, 1);
@@ -582,6 +639,7 @@ static int __init init_axis_flash(void)
 			      "aux mtd device!\n");
 
 	}
+#endif /* CONFIG_EXTRAX_VCS_SIM */
 
 	return err;
 }

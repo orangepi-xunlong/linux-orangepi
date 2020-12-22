@@ -74,21 +74,21 @@ _GLOBAL(swsusp_arch_suspend)
 	bne	1b
 
 	/* Save SPRGs */
-	mfspr	r4,SPRN_SPRG0
+	mfsprg	r4,0
 	stw	r4,SL_SPRG0(r11)
-	mfspr	r4,SPRN_SPRG1
+	mfsprg	r4,1
 	stw	r4,SL_SPRG1(r11)
-	mfspr	r4,SPRN_SPRG2
+	mfsprg	r4,2
 	stw	r4,SL_SPRG2(r11)
-	mfspr	r4,SPRN_SPRG3
+	mfsprg	r4,3
 	stw	r4,SL_SPRG3(r11)
-	mfspr	r4,SPRN_SPRG4
+	mfsprg	r4,4
 	stw	r4,SL_SPRG4(r11)
-	mfspr	r4,SPRN_SPRG5
+	mfsprg	r4,5
 	stw	r4,SL_SPRG5(r11)
-	mfspr	r4,SPRN_SPRG6
+	mfsprg	r4,6
 	stw	r4,SL_SPRG6(r11)
-	mfspr	r4,SPRN_SPRG7
+	mfsprg	r4,7
 	stw	r4,SL_SPRG7(r11)
 
 	/* Call the low level suspend stuff (we should probably have made
@@ -141,30 +141,22 @@ _GLOBAL(swsusp_arch_resume)
 	lis	r11,swsusp_save_area@h
 	ori	r11,r11,swsusp_save_area@l
 
-	/*
-	 * Mappings from virtual addresses to physical addresses may be
-	 * different than they were prior to restoring hibernation state. 
-	 * Invalidate the TLB so that the boot CPU is using the new
-	 * mappings.
-	 */
-	bl	_tlbil_all
-
 	lwz	r4,SL_SPRG0(r11)
-	mtspr	SPRN_SPRG0,r4
+	mtsprg	0,r4
 	lwz	r4,SL_SPRG1(r11)
-	mtspr	SPRN_SPRG1,r4
+	mtsprg	1,r4
 	lwz	r4,SL_SPRG2(r11)
-	mtspr	SPRN_SPRG2,r4
+	mtsprg	2,r4
 	lwz	r4,SL_SPRG3(r11)
-	mtspr	SPRN_SPRG3,r4
+	mtsprg	3,r4
 	lwz	r4,SL_SPRG4(r11)
-	mtspr	SPRN_SPRG4,r4
+	mtsprg	4,r4
 	lwz	r4,SL_SPRG5(r11)
-	mtspr	SPRN_SPRG5,r4
+	mtsprg	5,r4
 	lwz	r4,SL_SPRG6(r11)
-	mtspr	SPRN_SPRG6,r4
+	mtsprg	6,r4
 	lwz	r4,SL_SPRG7(r11)
-	mtspr	SPRN_SPRG7,r4
+	mtsprg	7,r4
 
 	/* restore the MSR */
 	lwz	r3,SL_MSR(r11)

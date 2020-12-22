@@ -389,7 +389,7 @@ void hdlcdrv_arbitrate(struct net_device *dev, struct hdlcdrv_state *s)
 	if ((--s->hdlctx.slotcnt) > 0)
 		return;
 	s->hdlctx.slotcnt = s->ch_params.slottime;
-	if ((prandom_u32() % 256) > s->ch_params.ppersist)
+	if ((random32() % 256) > s->ch_params.ppersist)
 		return;
 	start_tx(dev, s);
 }
@@ -404,18 +404,13 @@ static netdev_tx_t hdlcdrv_send_packet(struct sk_buff *skb,
 {
 	struct hdlcdrv_state *sm = netdev_priv(dev);
 
-	if (skb->protocol == htons(ETH_P_IP))
-		return ax25_ip_xmit(skb);
-
 	if (skb->data[0] != 0) {
 		do_kiss_params(sm, skb->data, skb->len);
 		dev_kfree_skb(skb);
 		return NETDEV_TX_OK;
 	}
-	if (sm->skb) {
-		dev_kfree_skb(skb);
-		return NETDEV_TX_OK;
-	}
+	if (sm->skb)
+		return NETDEV_TX_LOCKED;
 	netif_stop_queue(dev);
 	sm->skb = skb;
 	return NETDEV_TX_OK;
@@ -576,8 +571,6 @@ static int hdlcdrv_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	case HDLCDRVCTL_CALIBRATE:
 		if(!capable(CAP_SYS_RAWIO))
 			return -EPERM;
-		if (s->par.bitrate <= 0)
-			return -EINVAL;
 		if (bi.data.calibrate > INT_MAX / s->par.bitrate)
 			return -EINVAL;
 		s->hdlctx.calibrate = bi.data.calibrate * s->par.bitrate / 16;
@@ -706,7 +699,7 @@ struct net_device *hdlcdrv_register(const struct hdlcdrv_ops *ops,
 	if (privsize < sizeof(struct hdlcdrv_state))
 		privsize = sizeof(struct hdlcdrv_state);
 
-	dev = alloc_netdev(privsize, ifname, NET_NAME_UNKNOWN, hdlcdrv_setup);
+	dev = alloc_netdev(privsize, ifname, hdlcdrv_setup);
 	if (!dev)
 		return ERR_PTR(-ENOMEM);
 

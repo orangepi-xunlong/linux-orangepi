@@ -1,9 +1,10 @@
 /* 
+ * File...........: linux/include/asm-s390x/idals.h
  * Author(s)......: Holger Smolinski <Holger.Smolinski@de.ibm.com>
  *		    Martin Schwidefsky <schwidefsky@de.ibm.com>
  * Bugreports.to..: <Linux390@de.ibm.com>
- * Copyright IBM Corp. 2000
- *
+ * (C) IBM Corporation, IBM Deutschland Entwicklung GmbH, 2000a
+ 
  * History of changes
  * 07/24/00 new file
  * 05/04/02 code restructuring.
@@ -19,7 +20,11 @@
 #include <asm/cio.h>
 #include <asm/uaccess.h>
 
+#ifdef __s390x__
 #define IDA_SIZE_LOG 12 /* 11 for 2k , 12 for 4k */
+#else
+#define IDA_SIZE_LOG 11 /* 11 for 2k , 12 for 4k */
+#endif
 #define IDA_BLOCK_SIZE (1L<<IDA_SIZE_LOG)
 
 /*
@@ -28,7 +33,11 @@
 static inline int
 idal_is_needed(void *vaddr, unsigned int length)
 {
+#ifdef __s390x__
 	return ((__pa(vaddr) + length - 1) >> 31) != 0;
+#else
+	return 0;
+#endif
 }
 
 
@@ -69,6 +78,7 @@ static inline unsigned long *idal_create_words(unsigned long *idaws,
 static inline int
 set_normalized_cda(struct ccw1 * ccw, void *vaddr)
 {
+#ifdef __s390x__
 	unsigned int nridaws;
 	unsigned long *idal;
 
@@ -84,6 +94,7 @@ set_normalized_cda(struct ccw1 * ccw, void *vaddr)
 		ccw->flags |= CCW_FLAG_IDA;
 		vaddr = idal;
 	}
+#endif
 	ccw->cda = (__u32)(unsigned long) vaddr;
 	return 0;
 }
@@ -94,10 +105,12 @@ set_normalized_cda(struct ccw1 * ccw, void *vaddr)
 static inline void
 clear_normalized_cda(struct ccw1 * ccw)
 {
+#ifdef __s390x__
 	if (ccw->flags & CCW_FLAG_IDA) {
 		kfree((void *)(unsigned long) ccw->cda);
 		ccw->flags &= ~CCW_FLAG_IDA;
 	}
+#endif
 	ccw->cda = 0;
 }
 
@@ -169,8 +182,12 @@ idal_buffer_free(struct idal_buffer *ib)
 static inline int
 __idal_buffer_is_needed(struct idal_buffer *ib)
 {
+#ifdef __s390x__
 	return ib->size > (4096ul << ib->page_order) ||
 		idal_is_needed(ib->data[0], ib->size);
+#else
+	return ib->size > (4096ul << ib->page_order);
+#endif
 }
 
 /*

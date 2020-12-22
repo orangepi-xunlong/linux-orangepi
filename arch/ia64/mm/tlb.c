@@ -337,7 +337,8 @@ flush_tlb_range (struct vm_area_struct *vma, unsigned long start,
 }
 EXPORT_SYMBOL(flush_tlb_range);
 
-void ia64_tlb_init(void)
+void __devinit
+ia64_tlb_init (void)
 {
 	ia64_ptce_info_t uninitialized_var(ptce_info); /* GCC be quiet */
 	u64 tr_pgbits;
@@ -444,7 +445,7 @@ int ia64_itr_entry(u64 target_mask, u64 va, u64 pte, u64 log_size)
 			if (p->pte & 0x1)
 				if (is_tr_overlap(p, va, log_size)) {
 					printk(KERN_DEBUG "Overlapped Entry"
-						"Inserted for TR Register!!\n");
+						"Inserted for TR Reigster!!\n");
 					goto out;
 			}
 		}
@@ -456,7 +457,7 @@ int ia64_itr_entry(u64 target_mask, u64 va, u64 pte, u64 log_size)
 			if (p->pte & 0x1)
 				if (is_tr_overlap(p, va, log_size)) {
 					printk(KERN_DEBUG "Overlapped Entry"
-						"Inserted for TR Register!!\n");
+						"Inserted for TR Reigster!!\n");
 					goto out;
 				}
 		}

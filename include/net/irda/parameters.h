@@ -22,7 +22,9 @@
  *     GNU General Public License for more details.
  * 
  *     You should have received a copy of the GNU General Public License 
- *     along with this program; if not, see <http://www.gnu.org/licenses/>.
+ *     along with this program; if not, write to the Free Software 
+ *     Foundation, Inc., 59 Temple Place, Suite 330, Boston, 
+ *     MA 02111-1307 USA
  *
  *     Michel Dänzer <daenzer@debian.org>, 10/2001
  *     - simplify irda_pv_t to avoid endianness issues
@@ -71,17 +73,17 @@ typedef int (*PV_HANDLER)(void *self, __u8 *buf, int len, __u8 pi,
 			  PV_TYPE type, PI_HANDLER func);
 
 typedef struct {
-	const PI_HANDLER func;  /* Handler for this parameter identifier */
+	PI_HANDLER func;  /* Handler for this parameter identifier */
 	PV_TYPE    type;  /* Data type for this parameter */
 } pi_minor_info_t;
 
 typedef struct {
-	const pi_minor_info_t *pi_minor_call_table;
+	pi_minor_info_t *pi_minor_call_table;
 	int len;
 } pi_major_info_t;
 
 typedef struct {
-	const pi_major_info_t *tables;
+	pi_major_info_t *tables;
 	int              len;
 	__u8             pi_mask;
 	int              pi_major_offset;

@@ -9,14 +9,11 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/export.h>
-
 #include <asm/oplib.h>
 #include <asm/io.h>
 #include <asm/auxio.h>
 #include <asm/string.h>		/* memset(), Linux has no bzero() */
 #include <asm/cpu_type.h>
-
-#include "kernel.h"
 
 /* Probe and map in the Auxiliary I/O register */
 
@@ -35,6 +32,7 @@ void __init auxio_probe(void)
 	switch (sparc_cpu_model) {
 	case sparc_leon:
 	case sun4d:
+	case sun4:
 		return;
 	default:
 		break;
@@ -67,8 +65,9 @@ void __init auxio_probe(void)
 	r.start = auxregs[0].phys_addr;
 	r.end = auxregs[0].phys_addr + auxregs[0].reg_size - 1;
 	auxio_register = of_ioremap(&r, 0, auxregs[0].reg_size, "auxio");
-	/* Fix the address on sun4m. */
-	if ((((unsigned long) auxregs[0].phys_addr) & 3) == 3)
+	/* Fix the address on sun4m and sun4c. */
+	if((((unsigned long) auxregs[0].phys_addr) & 3) == 3 ||
+	   sparc_cpu_model == sun4c)
 		auxio_register += (3 - ((unsigned long)auxio_register & 3));
 
 	set_auxio(AUXIO_LED, 0);
@@ -87,7 +86,12 @@ void set_auxio(unsigned char bits_on, unsigned char bits_off)
 	unsigned char regval;
 	unsigned long flags;
 	spin_lock_irqsave(&auxio_lock, flags);
-	switch (sparc_cpu_model) {
+	switch(sparc_cpu_model) {
+	case sun4c:
+		regval = sbus_readb(auxio_register);
+		sbus_writeb(((regval | bits_on) & ~bits_off) | AUXIO_ORMEIN,
+			auxio_register);
+		break;
 	case sun4m:
 		if(!auxio_register)
 			break;     /* VME chassis sun4m, no auxio. */
@@ -106,7 +110,7 @@ EXPORT_SYMBOL(set_auxio);
 
 /* sun4m power control register (AUXIO2) */
 
-volatile u8 __iomem *auxio_power_register = NULL;
+volatile unsigned char * auxio_power_register = NULL;
 
 void __init auxio_power_probe(void)
 {
@@ -130,8 +134,8 @@ void __init auxio_power_probe(void)
 	r.flags = regs.which_io & 0xF;
 	r.start = regs.phys_addr;
 	r.end = regs.phys_addr + regs.reg_size - 1;
-	auxio_power_register =
-		(u8 __iomem *)of_ioremap(&r, 0, regs.reg_size, "auxpower");
+	auxio_power_register = (unsigned char *) of_ioremap(&r, 0,
+	    regs.reg_size, "auxpower");
 
 	/* Display a quick message on the console. */
 	if (auxio_power_register)

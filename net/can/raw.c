@@ -50,12 +50,13 @@
 #include <linux/skbuff.h>
 #include <linux/can.h>
 #include <linux/can/core.h>
-#include <linux/can/skb.h>
 #include <linux/can/raw.h>
 #include <net/sock.h>
 #include <net/net_namespace.h>
 
 #define CAN_RAW_VERSION CAN_VERSION
+static __initdata const char banner[] =
+	KERN_INFO "can: raw protocol (rev " CAN_RAW_VERSION ")\n";
 
 MODULE_DESCRIPTION("PF_CAN raw protocol");
 MODULE_LICENSE("Dual BSD/GPL");
@@ -74,12 +75,6 @@ MODULE_ALIAS("can-proto-1");
  * storing the single filter in dfilter, to avoid using dynamic memory.
  */
 
-struct uniqframe {
-	int skbcnt;
-	const struct sk_buff *skb;
-	unsigned int join_rx_count;
-};
-
 struct raw_sock {
 	struct sock sk;
 	int bound;
@@ -87,13 +82,10 @@ struct raw_sock {
 	struct notifier_block notifier;
 	int loopback;
 	int recv_own_msgs;
-	int fd_frames;
-	int join_filters;
 	int count;                 /* number of active filters */
 	struct can_filter dfilter; /* default/single filter */
 	struct can_filter *filter; /* pointer to filter(s) */
 	can_err_mask_t err_mask;
-	struct uniqframe __percpu *uniq;
 };
 
 /*
@@ -103,8 +95,8 @@ struct raw_sock {
  */
 static inline unsigned int *raw_flags(struct sk_buff *skb)
 {
-	sock_skb_cb_check_size(sizeof(struct sockaddr_can) +
-			       sizeof(unsigned int));
+	BUILD_BUG_ON(sizeof(skb->cb) <= (sizeof(struct sockaddr_can) +
+					 sizeof(unsigned int)));
 
 	/* return pointer after struct sockaddr_can */
 	return (unsigned int *)(&((struct sockaddr_can *)skb->cb)[1]);
@@ -127,30 +119,6 @@ static void raw_rcv(struct sk_buff *oskb, void *data)
 	if (!ro->recv_own_msgs && oskb->sk == sk)
 		return;
 
-	/* do not pass non-CAN2.0 frames to a legacy socket */
-	if (!ro->fd_frames && oskb->len != CAN_MTU)
-		return;
-
-	/* eliminate multiple filter matches for the same skb */
-	if (this_cpu_ptr(ro->uniq)->skb == oskb &&
-	    this_cpu_ptr(ro->uniq)->skbcnt == can_skb_prv(oskb)->skbcnt) {
-		if (ro->join_filters) {
-			this_cpu_inc(ro->uniq->join_rx_count);
-			/* drop frame until all enabled filters matched */
-			if (this_cpu_ptr(ro->uniq)->join_rx_count < ro->count)
-				return;
-		} else {
-			return;
-		}
-	} else {
-		this_cpu_ptr(ro->uniq)->skb = oskb;
-		this_cpu_ptr(ro->uniq)->skbcnt = can_skb_prv(oskb)->skbcnt;
-		this_cpu_ptr(ro->uniq)->join_rx_count = 1;
-		/* drop first frame to check all enabled filters? */
-		if (ro->join_filters && ro->count > 1)
-			return;
-	}
-
 	/* clone the given skb to be able to enqueue it into the rcv queue */
 	skb = skb_clone(oskb, GFP_ATOMIC);
 	if (!skb)
@@ -163,7 +131,7 @@ static void raw_rcv(struct sk_buff *oskb, void *data)
 	 *  containing the interface index.
 	 */
 
-	sock_skb_cb_check_size(sizeof(struct sockaddr_can));
+	BUILD_BUG_ON(sizeof(skb->cb) < sizeof(struct sockaddr_can));
 	addr = (struct sockaddr_can *)skb->cb;
 	memset(addr, 0, sizeof(*addr));
 	addr->can_family  = AF_CAN;
@@ -190,7 +158,7 @@ static int raw_enable_filters(struct net_device *dev, struct sock *sk,
 	for (i = 0; i < count; i++) {
 		err = can_rx_register(dev, filter[i].can_id,
 				      filter[i].can_mask,
-				      raw_rcv, sk, "raw", sk);
+				      raw_rcv, sk, "raw");
 		if (err) {
 			/* clean up successfully registered filters */
 			while (--i >= 0)
@@ -211,7 +179,7 @@ static int raw_enable_errfilter(struct net_device *dev, struct sock *sk,
 
 	if (err_mask)
 		err = can_rx_register(dev, 0, err_mask | CAN_ERR_FLAG,
-				      raw_rcv, sk, "raw", sk);
+				      raw_rcv, sk, "raw");
 
 	return err;
 }
@@ -261,9 +229,9 @@ static int raw_enable_allfilters(struct net_device *dev, struct sock *sk)
 }
 
 static int raw_notifier(struct notifier_block *nb,
-			unsigned long msg, void *ptr)
+			unsigned long msg, void *data)
 {
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = (struct net_device *)data;
 	struct raw_sock *ro = container_of(nb, struct raw_sock, notifier);
 	struct sock *sk = &ro->sk;
 
@@ -323,13 +291,6 @@ static int raw_init(struct sock *sk)
 	/* set default loopback behaviour */
 	ro->loopback         = 1;
 	ro->recv_own_msgs    = 0;
-	ro->fd_frames        = 0;
-	ro->join_filters     = 0;
-
-	/* alloc_percpu provides zero'ed memory */
-	ro->uniq = alloc_percpu(struct uniqframe);
-	if (unlikely(!ro->uniq))
-		return -ENOMEM;
 
 	/* set notifier */
 	ro->notifier.notifier_call = raw_notifier;
@@ -373,7 +334,6 @@ static int raw_release(struct socket *sock)
 	ro->ifindex = 0;
 	ro->bound   = 0;
 	ro->count   = 0;
-	free_percpu(ro->uniq);
 
 	sock_orphan(sk);
 	sock->sk = NULL;
@@ -499,9 +459,6 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 		if (optlen % sizeof(struct can_filter) != 0)
 			return -EINVAL;
 
-		if (optlen > CAN_RAW_FILTER_MAX * sizeof(struct can_filter))
-			return -EINVAL;
-
 		count = optlen / sizeof(struct can_filter);
 
 		if (count > 1) {
@@ -612,24 +569,6 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 
 		break;
 
-	case CAN_RAW_FD_FRAMES:
-		if (optlen != sizeof(ro->fd_frames))
-			return -EINVAL;
-
-		if (copy_from_user(&ro->fd_frames, optval, optlen))
-			return -EFAULT;
-
-		break;
-
-	case CAN_RAW_JOIN_FILTERS:
-		if (optlen != sizeof(ro->join_filters))
-			return -EINVAL;
-
-		if (copy_from_user(&ro->join_filters, optval, optlen))
-			return -EFAULT;
-
-		break;
-
 	default:
 		return -ENOPROTOOPT;
 	}
@@ -688,18 +627,6 @@ static int raw_getsockopt(struct socket *sock, int level, int optname,
 		val = &ro->recv_own_msgs;
 		break;
 
-	case CAN_RAW_FD_FRAMES:
-		if (len > sizeof(int))
-			len = sizeof(int);
-		val = &ro->fd_frames;
-		break;
-
-	case CAN_RAW_JOIN_FILTERS:
-		if (len > sizeof(int))
-			len = sizeof(int);
-		val = &ro->join_filters;
-		break;
-
 	default:
 		return -ENOPROTOOPT;
 	}
@@ -711,7 +638,8 @@ static int raw_getsockopt(struct socket *sock, int level, int optname,
 	return 0;
 }
 
-static int raw_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
+static int raw_sendmsg(struct kiocb *iocb, struct socket *sock,
+		       struct msghdr *msg, size_t size)
 {
 	struct sock *sk = sock->sk;
 	struct raw_sock *ro = raw_sk(sk);
@@ -721,7 +649,8 @@ static int raw_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 	int err;
 
 	if (msg->msg_name) {
-		DECLARE_SOCKADDR(struct sockaddr_can *, addr, msg->msg_name);
+		struct sockaddr_can *addr =
+			(struct sockaddr_can *)msg->msg_name;
 
 		if (msg->msg_namelen < sizeof(*addr))
 			return -EINVAL;
@@ -733,36 +662,27 @@ static int raw_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 	} else
 		ifindex = ro->ifindex;
 
-	if (ro->fd_frames) {
-		if (unlikely(size != CANFD_MTU && size != CAN_MTU))
-			return -EINVAL;
-	} else {
-		if (unlikely(size != CAN_MTU))
-			return -EINVAL;
-	}
+	if (size != sizeof(struct can_frame))
+		return -EINVAL;
 
 	dev = dev_get_by_index(&init_net, ifindex);
 	if (!dev)
 		return -ENXIO;
 
-	skb = sock_alloc_send_skb(sk, size + sizeof(struct can_skb_priv),
-				  msg->msg_flags & MSG_DONTWAIT, &err);
+	skb = sock_alloc_send_skb(sk, size, msg->msg_flags & MSG_DONTWAIT,
+				  &err);
 	if (!skb)
 		goto put_dev;
 
-	can_skb_reserve(skb);
-	can_skb_prv(skb)->ifindex = dev->ifindex;
-	can_skb_prv(skb)->skbcnt = 0;
-
-	err = memcpy_from_msg(skb_put(skb, size), msg, size);
+	err = memcpy_fromiovec(skb_put(skb, size), msg->msg_iov, size);
+	if (err < 0)
+		goto free_skb;
+	err = sock_tx_timestamp(sk, &skb_shinfo(skb)->tx_flags);
 	if (err < 0)
 		goto free_skb;
 
-	sock_tx_timestamp(sk, sk->sk_tsflags, &skb_shinfo(skb)->tx_flags);
-
 	skb->dev = dev;
 	skb->sk  = sk;
-	skb->priority = sk->sk_priority;
 
 	err = can_send(skb, ro->loopback);
 
@@ -781,8 +701,8 @@ send_failed:
 	return err;
 }
 
-static int raw_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
-		       int flags)
+static int raw_recvmsg(struct kiocb *iocb, struct socket *sock,
+		       struct msghdr *msg, size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
 	struct sk_buff *skb;
@@ -801,7 +721,7 @@ static int raw_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	else
 		size = skb->len;
 
-	err = memcpy_to_msg(msg, skb->data, size);
+	err = memcpy_toiovec(msg->msg_iov, skb->data, size);
 	if (err < 0) {
 		skb_free_datagram(sk, skb);
 		return err;
@@ -810,7 +730,6 @@ static int raw_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	sock_recv_ts_and_drops(msg, sk, skb);
 
 	if (msg->msg_name) {
-		__sockaddr_check_size(sizeof(struct sockaddr_can));
 		msg->msg_namelen = sizeof(struct sockaddr_can);
 		memcpy(msg->msg_name, skb->cb, msg->msg_namelen);
 	}
@@ -861,7 +780,7 @@ static __init int raw_module_init(void)
 {
 	int err;
 
-	pr_info("can: raw protocol (rev " CAN_RAW_VERSION ")\n");
+	printk(banner);
 
 	err = can_proto_register(&raw_can_proto);
 	if (err < 0)

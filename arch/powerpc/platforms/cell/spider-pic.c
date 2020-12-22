@@ -148,7 +148,7 @@ static int spider_set_irq_type(struct irq_data *d, unsigned int type)
 
 	/* Configure the source. One gross hack that was there before and
 	 * that I've kept around is the priority to the BE which I set to
-	 * be the same as the interrupt source number. I don't know whether
+	 * be the same as the interrupt source number. I don't know wether
 	 * that's supposed to make any kind of sense however, we'll have to
 	 * decide that, but for now, I'm not changing the behaviour.
 	 */
@@ -199,7 +199,7 @@ static const struct irq_domain_ops spider_host_ops = {
 	.xlate = spider_host_xlate,
 };
 
-static void spider_irq_cascade(struct irq_desc *desc)
+static void spider_irq_cascade(unsigned int irq, struct irq_desc *desc)
 {
 	struct irq_chip *chip = irq_desc_get_chip(desc);
 	struct spider_pic *pic = irq_desc_get_handler_data(desc);
@@ -207,20 +207,20 @@ static void spider_irq_cascade(struct irq_desc *desc)
 
 	cs = in_be32(pic->regs + TIR_CS) >> 24;
 	if (cs == SPIDER_IRQ_INVALID)
-		virq = 0;
+		virq = NO_IRQ;
 	else
 		virq = irq_linear_revmap(pic->host, cs);
 
-	if (virq)
+	if (virq != NO_IRQ)
 		generic_handle_irq(virq);
 
 	chip->irq_eoi(&desc->irq_data);
 }
 
-/* For hooking up the cascade we have a problem. Our device-tree is
+/* For hooking up the cascace we have a problem. Our device-tree is
  * crap and we don't know on which BE iic interrupt we are hooked on at
  * least not the "standard" way. We can reconstitute it based on two
- * informations though: which BE node we are connected to and whether
+ * informations though: which BE node we are connected to and wether
  * we are connected to IOIF0 or IOIF1. Right now, we really only care
  * about the IBM cell blade and we know that its firmware gives us an
  * interrupt-map property which is pretty strange.
@@ -231,33 +231,33 @@ static unsigned int __init spider_find_cascade_and_node(struct spider_pic *pic)
 	const u32 *imap, *tmp;
 	int imaplen, intsize, unit;
 	struct device_node *iic;
-	struct device_node *of_node;
 
-	of_node = irq_domain_get_of_node(pic->host);
-
-	/* First, we check whether we have a real "interrupts" in the device
+	/* First, we check wether we have a real "interrupts" in the device
 	 * tree in case the device-tree is ever fixed
 	 */
-	virq = irq_of_parse_and_map(of_node, 0);
-	if (virq)
+	struct of_irq oirq;
+	if (of_irq_map_one(pic->host->of_node, 0, &oirq) == 0) {
+		virq = irq_create_of_mapping(oirq.controller, oirq.specifier,
+					     oirq.size);
 		return virq;
+	}
 
 	/* Now do the horrible hacks */
-	tmp = of_get_property(of_node, "#interrupt-cells", NULL);
+	tmp = of_get_property(pic->host->of_node, "#interrupt-cells", NULL);
 	if (tmp == NULL)
-		return 0;
+		return NO_IRQ;
 	intsize = *tmp;
-	imap = of_get_property(of_node, "interrupt-map", &imaplen);
+	imap = of_get_property(pic->host->of_node, "interrupt-map", &imaplen);
 	if (imap == NULL || imaplen < (intsize + 1))
-		return 0;
+		return NO_IRQ;
 	iic = of_find_node_by_phandle(imap[intsize]);
 	if (iic == NULL)
-		return 0;
+		return NO_IRQ;
 	imap += intsize + 1;
 	tmp = of_get_property(iic, "#interrupt-cells", NULL);
 	if (tmp == NULL) {
 		of_node_put(iic);
-		return 0;
+		return NO_IRQ;
 	}
 	intsize = *tmp;
 	/* Assume unit is last entry of interrupt specifier */
@@ -266,7 +266,7 @@ static unsigned int __init spider_find_cascade_and_node(struct spider_pic *pic)
 	tmp = of_get_property(iic, "ibm,interrupt-server-ranges", NULL);
 	if (tmp == NULL) {
 		of_node_put(iic);
-		return 0;
+		return NO_IRQ;
 	}
 	/* ugly as hell but works for now */
 	pic->node_id = (*tmp) >> 1;
@@ -281,7 +281,7 @@ static unsigned int __init spider_find_cascade_and_node(struct spider_pic *pic)
 				  (pic->node_id << IIC_IRQ_NODE_SHIFT) |
 				  (2 << IIC_IRQ_CLASS_SHIFT) |
 				  unit);
-	if (!virq)
+	if (virq == NO_IRQ)
 		printk(KERN_ERR "spider_pic: failed to map cascade !");
 	return virq;
 }
@@ -318,7 +318,7 @@ static void __init spider_init_one(struct device_node *of_node, int chip,
 
 	/* Hook up the cascade interrupt to the iic and nodeid */
 	virq = spider_find_cascade_and_node(pic);
-	if (!virq)
+	if (virq == NO_IRQ)
 		return;
 	irq_set_handler_data(virq, pic);
 	irq_set_chained_handler(virq, spider_irq_cascade);

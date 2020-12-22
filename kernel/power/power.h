@@ -2,7 +2,6 @@
 #include <linux/suspend_ioctls.h>
 #include <linux/utsname.h>
 #include <linux/freezer.h>
-#include <linux/compiler.h>
 
 struct swsusp_info {
 	struct new_utsname	uts;
@@ -12,7 +11,7 @@ struct swsusp_info {
 	unsigned long		image_pages;
 	unsigned long		pages;
 	unsigned long		size;
-} __aligned(PAGE_SIZE);
+} __attribute__((aligned(PAGE_SIZE)));
 
 #ifdef CONFIG_HIBERNATION
 /* kernel/power/snapshot.c */
@@ -38,8 +37,6 @@ static inline char *check_image_kernel(struct swsusp_info *info)
 }
 #endif /* CONFIG_ARCH_HIBERNATION_HEADER */
 
-extern int hibernate_resume_nonboot_cpu_disable(void);
-
 /*
  * Keep some memory free so that I/O operations can succeed without paging
  * [Might this be more than 4 MB?]
@@ -52,21 +49,12 @@ extern int hibernate_resume_nonboot_cpu_disable(void);
  */
 #define SPARE_PAGES	((1024 * 1024) >> PAGE_SHIFT)
 
-asmlinkage int swsusp_save(void);
-
 /* kernel/power/hibernate.c */
 extern bool freezer_test_done;
 
 extern int hibernation_snapshot(int platform_mode);
 extern int hibernation_restore(int platform_mode);
 extern int hibernation_platform_enter(void);
-
-#ifdef CONFIG_DEBUG_RODATA
-/* kernel/power/snapshot.c */
-extern void enable_restore_image_protection(void);
-#else
-static inline void enable_restore_image_protection(void) {}
-#endif /* CONFIG_DEBUG_RODATA */
 
 #else /* !CONFIG_HIBERNATION */
 
@@ -86,15 +74,6 @@ static struct kobj_attribute _name##_attr = {	\
 	.store	= _name##_store,		\
 }
 
-#define power_attr_ro(_name) \
-static struct kobj_attribute _name##_attr = {	\
-	.attr	= {				\
-		.name = __stringify(_name),	\
-		.mode = S_IRUGO,		\
-	},					\
-	.show	= _name##_show,			\
-}
-
 /* Preferred image size in bytes (default 500 MB) */
 extern unsigned long image_size;
 /* Size of memory reserved for drivers (default SPARE_PAGES x PAGE_SIZE) */
@@ -103,11 +82,12 @@ extern int in_suspend;
 extern dev_t swsusp_resume_device;
 extern sector_t swsusp_resume_block;
 
+extern asmlinkage int swsusp_arch_suspend(void);
+extern asmlinkage int swsusp_arch_resume(void);
+
 extern int create_basic_memory_bitmaps(void);
 extern void free_basic_memory_bitmaps(void);
 extern int hibernate_preallocate_memory(void);
-
-extern void clear_free_pages(void);
 
 /**
  *	Auxiliary structure used for reading the snapshot image data and
@@ -176,25 +156,35 @@ extern void swsusp_free(void);
 extern int swsusp_read(unsigned int *flags_p);
 extern int swsusp_write(unsigned int flags);
 extern void swsusp_close(fmode_t);
-#ifdef CONFIG_SUSPEND
-extern int swsusp_unmark(void);
-#endif
+
+/* kernel/power/block_io.c */
+extern struct block_device *hib_resume_bdev;
+
+extern int hib_bio_read_page(pgoff_t page_off, void *addr,
+		struct bio **bio_chain);
+extern int hib_bio_write_page(pgoff_t page_off, void *addr,
+		struct bio **bio_chain);
+extern int hib_wait_on_bio_chain(struct bio **bio_chain);
 
 struct timeval;
 /* kernel/power/swsusp.c */
-extern void swsusp_show_speed(ktime_t, ktime_t, unsigned int, char *);
+extern void swsusp_show_speed(struct timeval *, struct timeval *,
+				unsigned int, char *);
 
 #ifdef CONFIG_SUSPEND
 /* kernel/power/suspend.c */
-extern const char *pm_labels[];
-extern const char *pm_states[];
+extern const char *const pm_states[];
 
+extern bool valid_state(suspend_state_t state);
 extern int suspend_devices_and_enter(suspend_state_t state);
+extern int enter_state(suspend_state_t state);
 #else /* !CONFIG_SUSPEND */
 static inline int suspend_devices_and_enter(suspend_state_t state)
 {
 	return -ENOSYS;
 }
+static inline int enter_state(suspend_state_t state) { return -ENOSYS; }
+static inline bool valid_state(suspend_state_t state) { return false; }
 #endif /* !CONFIG_SUSPEND */
 
 #ifdef CONFIG_PM_TEST_SUSPEND
@@ -208,8 +198,6 @@ static inline void suspend_test_finish(const char *label) {}
 
 #ifdef CONFIG_PM_SLEEP
 /* kernel/power/main.c */
-extern int __pm_notifier_call_chain(unsigned long val, int nr_to_call,
-				    int *nr_calls);
 extern int pm_notifier_call_chain(unsigned long val);
 #endif
 
@@ -305,3 +293,52 @@ extern int pm_wake_lock(const char *buf);
 extern int pm_wake_unlock(const char *buf);
 
 #endif /* !CONFIG_PM_WAKELOCKS */
+
+#ifdef CONFIG_WAKELOCK
+/* kernel/power/wakelock.c */
+extern struct workqueue_struct *suspend_work_queue;
+extern struct wake_lock main_wake_lock;
+extern suspend_state_t requested_suspend_state;
+#endif
+
+#ifdef CONFIG_USER_WAKELOCK
+ssize_t wake_lock_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf);
+ssize_t wake_lock_store(struct kobject *kobj, struct kobj_attribute *attr,
+			const char *buf, size_t n);
+ssize_t wake_unlock_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf);
+ssize_t  wake_unlock_store(struct kobject *kobj, struct kobj_attribute *attr,
+			const char *buf, size_t n);
+#endif
+
+#ifdef CONFIG_USER_SCENELOCK
+ssize_t scene_lock_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf);
+ssize_t scene_lock_store(struct kobject *kobj, struct kobj_attribute *attr,
+			const char *buf, size_t n);
+ssize_t scene_unlock_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf);
+ssize_t scene_unlock_store(struct kobject *kobj, struct kobj_attribute *attr,
+			const char *buf, size_t n);
+ssize_t scene_state_store(struct kobject *kobj, struct kobj_attribute *attr,
+	const char *buf, size_t n);
+ssize_t scene_state_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf);
+ssize_t wakeup_src_store(struct kobject *kobj, struct kobj_attribute *attr,
+	const char *buf, size_t n);
+ssize_t wakeup_src_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf);
+#if (defined CONFIG_AW_AXP)
+ssize_t sys_pwr_dm_mask_store(struct kobject *kobj, struct kobj_attribute *attr,
+	const char *buf, size_t n);
+ssize_t sys_pwr_dm_mask_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf);
+#endif
+#endif
+
+#ifdef CONFIG_EARLYSUSPEND
+/* kernel/power/earlysuspend.c */
+void request_suspend_state(suspend_state_t state);
+suspend_state_t get_suspend_state(void);
+#endif

@@ -18,17 +18,17 @@
  *
  */
 
-#include <linux/init.h>
-#include <linux/io.h>
 #include <linux/kernel.h>
-#include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/init.h>
+#include <linux/mm.h>
+#include <linux/io.h>
 
-#include <asm/mach/map.h>
 #include <asm/page.h>
+#include <asm/mach/map.h>
+#include <mach/iomap.h>
 
 #include "board.h"
-#include "iomap.h"
 
 static struct map_desc tegra_io_desc[] __initdata = {
 	{
@@ -59,6 +59,5 @@ static struct map_desc tegra_io_desc[] __initdata = {
 
 void __init tegra_map_common_io(void)
 {
-	debug_ll_io_init();
 	iotable_init(tegra_io_desc, ARRAY_SIZE(tegra_io_desc));
 }

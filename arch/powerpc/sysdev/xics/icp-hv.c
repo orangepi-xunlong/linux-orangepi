@@ -12,6 +12,7 @@
 #include <linux/irq.h>
 #include <linux/smp.h>
 #include <linux/interrupt.h>
+#include <linux/init.h>
 #include <linux/cpu.h>
 #include <linux/of.h>
 
@@ -112,10 +113,10 @@ static unsigned int icp_hv_get_irq(void)
 	unsigned int irq;
 
 	if (vec == XICS_IRQ_SPURIOUS)
-		return 0;
+		return NO_IRQ;
 
-	irq = irq_find_mapping(xics_host, vec);
-	if (likely(irq)) {
+	irq = irq_radix_revmap_lookup(xics_host, vec);
+	if (likely(irq != NO_IRQ)) {
 		xics_push_cppr(vec);
 		return irq;
 	}
@@ -126,7 +127,7 @@ static unsigned int icp_hv_get_irq(void)
 	/* We might learn about it later, so EOI it */
 	icp_hv_set_xirr(xirr);
 
-	return 0;
+	return NO_IRQ;
 }
 
 static void icp_hv_set_cpu_priority(unsigned char cppr)

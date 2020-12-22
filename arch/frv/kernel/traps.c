@@ -466,6 +466,17 @@ asmlinkage void compound_exception(unsigned long esfr1,
 	BUG();
 } /* end compound_exception() */
 
+/*****************************************************************************/
+/*
+ * The architecture-independent backtrace generator
+ */
+void dump_stack(void)
+{
+	show_stack(NULL, NULL);
+}
+
+EXPORT_SYMBOL(dump_stack);
+
 void show_stack(struct task_struct *task, unsigned long *sp)
 {
 }
@@ -497,7 +508,6 @@ void show_regs(struct pt_regs *regs)
 	int loop;
 
 	printk("\n");
-	show_regs_print_info(KERN_DEFAULT);
 
 	printk("Frame: @%08lx [%s]\n",
 	       (unsigned long) regs,
@@ -512,6 +522,8 @@ void show_regs(struct pt_regs *regs)
 		else
 			printk(" | ");
 	}
+
+	printk("Process %s (pid: %d)\n", current->comm, current->pid);
 }
 
 void die_if_kernel(const char *str, ...)
@@ -523,7 +535,7 @@ void die_if_kernel(const char *str, ...)
 		return;
 
 	va_start(va, str);
-	vsnprintf(buffer, sizeof(buffer), str, va);
+	vsprintf(buffer, str, va);
 	va_end(va);
 
 	console_verbose();

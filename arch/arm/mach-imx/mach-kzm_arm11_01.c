@@ -36,10 +36,12 @@
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
 
-#include "common.h"
+#include <mach/clock.h>
+#include <mach/common.h>
+#include <mach/hardware.h>
+#include <mach/iomux-mx3.h>
+
 #include "devices-imx31.h"
-#include "hardware.h"
-#include "iomux-mx3.h"
 
 #define KZM_ARM11_IO_ADDRESS(x) (IOMEM(					\
 	IMX_IO_P2V_MODULE(x, MX31_CS4) ?:				\
@@ -63,7 +65,7 @@
  */
 #define KZM_ARM11_16550		(MX31_CS4_BASE_ADDR + 0x1050)
 
-#if IS_ENABLED(CONFIG_SERIAL_8250)
+#if defined(CONFIG_SERIAL_8250) || defined(CONFIG_SERIAL_8250_MODULE)
 /*
  * KZM-ARM11-01 has an external UART on FPGA
  */
@@ -71,7 +73,7 @@ static struct plat_serial8250_port serial_platform_data[] = {
 	{
 		.membase	= KZM_ARM11_IO_ADDRESS(KZM_ARM11_16550),
 		.mapbase	= KZM_ARM11_16550,
-		/* irq number is run-time assigned */
+		.irq		= IOMUX_TO_IRQ(MX31_PIN_GPIO1_1),
 		.irqflags	= IRQ_TYPE_EDGE_RISING,
 		.uartclk	= 14745600,
 		.regshift	= 0,
@@ -89,7 +91,8 @@ static struct resource serial8250_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		/* irq number is run-time assigned */
+		.start	= IOMUX_TO_IRQ(MX31_PIN_GPIO1_1),
+		.end	= IOMUX_TO_IRQ(MX31_PIN_GPIO1_1),
 		.flags	= IORESOURCE_IRQ,
 	},
 };
@@ -122,13 +125,6 @@ static int __init kzm_init_ext_uart(void)
 	tmp |= 0x2;
 	__raw_writeb(tmp, KZM_ARM11_IO_ADDRESS(KZM_ARM11_CTL1));
 
-	serial_platform_data[0].irq =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_1));
-	serial8250_resources[1].start =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_1));
-	serial8250_resources[1].end =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_1));
-
 	return platform_device_register(&serial_device);
 }
 #else
@@ -141,7 +137,7 @@ static inline int kzm_init_ext_uart(void)
 /*
  * SMSC LAN9118
  */
-#if IS_ENABLED(CONFIG_SMSC911X)
+#if defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
 static struct smsc911x_platform_config kzm_smsc9118_config = {
 	.phy_interface	= PHY_INTERFACE_MODE_MII,
 	.irq_polarity	= SMSC911X_IRQ_POLARITY_ACTIVE_HIGH,
@@ -156,7 +152,8 @@ static struct resource kzm_smsc9118_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		/* irq number is run-time assigned */
+		.start	= IOMUX_TO_IRQ(MX31_PIN_GPIO1_2),
+		.end	= IOMUX_TO_IRQ(MX31_PIN_GPIO1_2),
 		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE,
 	},
 };
@@ -187,11 +184,6 @@ static int __init kzm_init_smsc9118(void)
 
 	regulator_register_fixed(0, dummy_supplies, ARRAY_SIZE(dummy_supplies));
 
-	kzm_smsc9118_resources[1].start =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_2));
-	kzm_smsc9118_resources[1].end =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_2));
-
 	return platform_device_register(&kzm_smsc9118_device);
 }
 #else
@@ -201,7 +193,7 @@ static inline int kzm_init_smsc9118(void)
 }
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_IMX)
+#if defined(CONFIG_SERIAL_IMX) || defined(CONFIG_SERIAL_IMX_MODULE)
 static const struct imxuart_platform_data uart_pdata __initconst = {
 	.flags = IMXUART_HAVE_RTSCTS,
 };
@@ -245,15 +237,11 @@ static void __init kzm_board_init(void)
 
 	mxc_iomux_setup_multiple_pins(kzm_pins,
 				      ARRAY_SIZE(kzm_pins), "kzm");
+	kzm_init_ext_uart();
+	kzm_init_smsc9118();
 	kzm_init_imx_uart();
 
 	pr_info("Clock input source is 26MHz\n");
-}
-
-static void __init kzm_late_init(void)
-{
-	kzm_init_ext_uart();
-	kzm_init_smsc9118();
 }
 
 /*
@@ -261,13 +249,13 @@ static void __init kzm_late_init(void)
  */
 static struct map_desc kzm_io_desc[] __initdata = {
 	{
-		.virtual	= (unsigned long)MX31_CS4_BASE_ADDR_VIRT,
+		.virtual	= MX31_CS4_BASE_ADDR_VIRT,
 		.pfn		= __phys_to_pfn(MX31_CS4_BASE_ADDR),
 		.length		= MX31_CS4_SIZE,
 		.type		= MT_DEVICE
 	},
 	{
-		.virtual	= (unsigned long)MX31_CS5_BASE_ADDR_VIRT,
+		.virtual	= MX31_CS5_BASE_ADDR_VIRT,
 		.pfn		= __phys_to_pfn(MX31_CS5_BASE_ADDR),
 		.length		= MX31_CS5_SIZE,
 		.type		= MT_DEVICE
@@ -288,13 +276,17 @@ static void __init kzm_timer_init(void)
 	mx31_clocks_init(26000000);
 }
 
+static struct sys_timer kzm_timer = {
+	.init = kzm_timer_init,
+};
+
 MACHINE_START(KZM_ARM11_01, "Kyoto Microcomputer Co., Ltd. KZM-ARM11-01")
 	.atag_offset = 0x100,
 	.map_io = kzm_map_io,
 	.init_early = imx31_init_early,
 	.init_irq = mx31_init_irq,
-	.init_time	= kzm_timer_init,
+	.handle_irq = imx31_handle_irq,
+	.timer = &kzm_timer,
 	.init_machine = kzm_board_init,
-	.init_late	= kzm_late_init,
 	.restart	= mxc_restart,
 MACHINE_END

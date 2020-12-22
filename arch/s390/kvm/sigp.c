@@ -1,7 +1,7 @@
 /*
- * handling interprocessor communication
+ * sigp.c - handlinge interprocessor communication
  *
- * Copyright IBM Corp. 2008, 2013
+ * Copyright IBM Corp. 2008,2009
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License (version 2 only)
@@ -15,164 +15,206 @@
 #include <linux/kvm.h>
 #include <linux/kvm_host.h>
 #include <linux/slab.h>
-#include <asm/sigp.h>
 #include "gaccess.h"
 #include "kvm-s390.h"
-#include "trace.h"
 
-static int __sigp_sense(struct kvm_vcpu *vcpu, struct kvm_vcpu *dst_vcpu,
+/* sigp order codes */
+#define SIGP_SENSE             0x01
+#define SIGP_EXTERNAL_CALL     0x02
+#define SIGP_EMERGENCY         0x03
+#define SIGP_START             0x04
+#define SIGP_STOP              0x05
+#define SIGP_RESTART           0x06
+#define SIGP_STOP_STORE_STATUS 0x09
+#define SIGP_INITIAL_CPU_RESET 0x0b
+#define SIGP_CPU_RESET         0x0c
+#define SIGP_SET_PREFIX        0x0d
+#define SIGP_STORE_STATUS_ADDR 0x0e
+#define SIGP_SET_ARCH          0x12
+#define SIGP_SENSE_RUNNING     0x15
+
+/* cpu status bits */
+#define SIGP_STAT_EQUIPMENT_CHECK   0x80000000UL
+#define SIGP_STAT_NOT_RUNNING	    0x00000400UL
+#define SIGP_STAT_INCORRECT_STATE   0x00000200UL
+#define SIGP_STAT_INVALID_PARAMETER 0x00000100UL
+#define SIGP_STAT_EXT_CALL_PENDING  0x00000080UL
+#define SIGP_STAT_STOPPED           0x00000040UL
+#define SIGP_STAT_OPERATOR_INTERV   0x00000020UL
+#define SIGP_STAT_CHECK_STOP        0x00000010UL
+#define SIGP_STAT_INOPERATIVE       0x00000004UL
+#define SIGP_STAT_INVALID_ORDER     0x00000002UL
+#define SIGP_STAT_RECEIVER_CHECK    0x00000001UL
+
+
+static int __sigp_sense(struct kvm_vcpu *vcpu, u16 cpu_addr,
 			u64 *reg)
 {
-	struct kvm_s390_local_interrupt *li;
-	int cpuflags;
+	struct kvm_s390_float_interrupt *fi = &vcpu->kvm->arch.float_int;
 	int rc;
-	int ext_call_pending;
 
-	li = &dst_vcpu->arch.local_int;
+	if (cpu_addr >= KVM_MAX_VCPUS)
+		return 3; /* not operational */
 
-	cpuflags = atomic_read(li->cpuflags);
-	ext_call_pending = kvm_s390_ext_call_pending(dst_vcpu);
-	if (!(cpuflags & CPUSTAT_STOPPED) && !ext_call_pending)
-		rc = SIGP_CC_ORDER_CODE_ACCEPTED;
-	else {
+	spin_lock(&fi->lock);
+	if (fi->local_int[cpu_addr] == NULL)
+		rc = 3; /* not operational */
+	else if (!(atomic_read(fi->local_int[cpu_addr]->cpuflags)
+		  & CPUSTAT_STOPPED)) {
 		*reg &= 0xffffffff00000000UL;
-		if (ext_call_pending)
-			*reg |= SIGP_STATUS_EXT_CALL_PENDING;
-		if (cpuflags & CPUSTAT_STOPPED)
-			*reg |= SIGP_STATUS_STOPPED;
-		rc = SIGP_CC_STATUS_STORED;
-	}
-
-	VCPU_EVENT(vcpu, 4, "sensed status of cpu %x rc %x", dst_vcpu->vcpu_id,
-		   rc);
-	return rc;
-}
-
-static int __inject_sigp_emergency(struct kvm_vcpu *vcpu,
-				    struct kvm_vcpu *dst_vcpu)
-{
-	struct kvm_s390_irq irq = {
-		.type = KVM_S390_INT_EMERGENCY,
-		.u.emerg.code = vcpu->vcpu_id,
-	};
-	int rc = 0;
-
-	rc = kvm_s390_inject_vcpu(dst_vcpu, &irq);
-	if (!rc)
-		VCPU_EVENT(vcpu, 4, "sent sigp emerg to cpu %x",
-			   dst_vcpu->vcpu_id);
-
-	return rc ? rc : SIGP_CC_ORDER_CODE_ACCEPTED;
-}
-
-static int __sigp_emergency(struct kvm_vcpu *vcpu, struct kvm_vcpu *dst_vcpu)
-{
-	return __inject_sigp_emergency(vcpu, dst_vcpu);
-}
-
-static int __sigp_conditional_emergency(struct kvm_vcpu *vcpu,
-					struct kvm_vcpu *dst_vcpu,
-					u16 asn, u64 *reg)
-{
-	const u64 psw_int_mask = PSW_MASK_IO | PSW_MASK_EXT;
-	u16 p_asn, s_asn;
-	psw_t *psw;
-	bool idle;
-
-	idle = is_vcpu_idle(vcpu);
-	psw = &dst_vcpu->arch.sie_block->gpsw;
-	p_asn = dst_vcpu->arch.sie_block->gcr[4] & 0xffff;  /* Primary ASN */
-	s_asn = dst_vcpu->arch.sie_block->gcr[3] & 0xffff;  /* Secondary ASN */
-
-	/* Inject the emergency signal? */
-	if (!is_vcpu_stopped(vcpu)
-	    || (psw->mask & psw_int_mask) != psw_int_mask
-	    || (idle && psw->addr != 0)
-	    || (!idle && (asn == p_asn || asn == s_asn))) {
-		return __inject_sigp_emergency(vcpu, dst_vcpu);
+		rc = 1; /* status stored */
 	} else {
 		*reg &= 0xffffffff00000000UL;
-		*reg |= SIGP_STATUS_INCORRECT_STATE;
-		return SIGP_CC_STATUS_STORED;
+		*reg |= SIGP_STAT_STOPPED;
+		rc = 1; /* status stored */
 	}
-}
+	spin_unlock(&fi->lock);
 
-static int __sigp_external_call(struct kvm_vcpu *vcpu,
-				struct kvm_vcpu *dst_vcpu, u64 *reg)
-{
-	struct kvm_s390_irq irq = {
-		.type = KVM_S390_INT_EXTERNAL_CALL,
-		.u.extcall.code = vcpu->vcpu_id,
-	};
-	int rc;
-
-	rc = kvm_s390_inject_vcpu(dst_vcpu, &irq);
-	if (rc == -EBUSY) {
-		*reg &= 0xffffffff00000000UL;
-		*reg |= SIGP_STATUS_EXT_CALL_PENDING;
-		return SIGP_CC_STATUS_STORED;
-	} else if (rc == 0) {
-		VCPU_EVENT(vcpu, 4, "sent sigp ext call to cpu %x",
-			   dst_vcpu->vcpu_id);
-	}
-
-	return rc ? rc : SIGP_CC_ORDER_CODE_ACCEPTED;
-}
-
-static int __sigp_stop(struct kvm_vcpu *vcpu, struct kvm_vcpu *dst_vcpu)
-{
-	struct kvm_s390_irq irq = {
-		.type = KVM_S390_SIGP_STOP,
-	};
-	int rc;
-
-	rc = kvm_s390_inject_vcpu(dst_vcpu, &irq);
-	if (rc == -EBUSY)
-		rc = SIGP_CC_BUSY;
-	else if (rc == 0)
-		VCPU_EVENT(vcpu, 4, "sent sigp stop to cpu %x",
-			   dst_vcpu->vcpu_id);
-
+	VCPU_EVENT(vcpu, 4, "sensed status of cpu %x rc %x", cpu_addr, rc);
 	return rc;
 }
 
-static int __sigp_stop_and_store_status(struct kvm_vcpu *vcpu,
-					struct kvm_vcpu *dst_vcpu, u64 *reg)
+static int __sigp_emergency(struct kvm_vcpu *vcpu, u16 cpu_addr)
 {
-	struct kvm_s390_irq irq = {
-		.type = KVM_S390_SIGP_STOP,
-		.u.stop.flags = KVM_S390_STOP_FLAG_STORE_STATUS,
-	};
+	struct kvm_s390_float_interrupt *fi = &vcpu->kvm->arch.float_int;
+	struct kvm_s390_local_interrupt *li;
+	struct kvm_s390_interrupt_info *inti;
 	int rc;
 
-	rc = kvm_s390_inject_vcpu(dst_vcpu, &irq);
-	if (rc == -EBUSY)
-		rc = SIGP_CC_BUSY;
-	else if (rc == 0)
-		VCPU_EVENT(vcpu, 4, "sent sigp stop and store status to cpu %x",
-			   dst_vcpu->vcpu_id);
+	if (cpu_addr >= KVM_MAX_VCPUS)
+		return 3; /* not operational */
 
+	inti = kzalloc(sizeof(*inti), GFP_KERNEL);
+	if (!inti)
+		return -ENOMEM;
+
+	inti->type = KVM_S390_INT_EMERGENCY;
+	inti->emerg.code = vcpu->vcpu_id;
+
+	spin_lock(&fi->lock);
+	li = fi->local_int[cpu_addr];
+	if (li == NULL) {
+		rc = 3; /* not operational */
+		kfree(inti);
+		goto unlock;
+	}
+	spin_lock_bh(&li->lock);
+	list_add_tail(&inti->list, &li->list);
+	atomic_set(&li->active, 1);
+	atomic_set_mask(CPUSTAT_EXT_INT, li->cpuflags);
+	if (waitqueue_active(&li->wq))
+		wake_up_interruptible(&li->wq);
+	spin_unlock_bh(&li->lock);
+	rc = 0; /* order accepted */
+	VCPU_EVENT(vcpu, 4, "sent sigp emerg to cpu %x", cpu_addr);
+unlock:
+	spin_unlock(&fi->lock);
 	return rc;
+}
+
+static int __sigp_external_call(struct kvm_vcpu *vcpu, u16 cpu_addr)
+{
+	struct kvm_s390_float_interrupt *fi = &vcpu->kvm->arch.float_int;
+	struct kvm_s390_local_interrupt *li;
+	struct kvm_s390_interrupt_info *inti;
+	int rc;
+
+	if (cpu_addr >= KVM_MAX_VCPUS)
+		return 3; /* not operational */
+
+	inti = kzalloc(sizeof(*inti), GFP_KERNEL);
+	if (!inti)
+		return -ENOMEM;
+
+	inti->type = KVM_S390_INT_EXTERNAL_CALL;
+	inti->extcall.code = vcpu->vcpu_id;
+
+	spin_lock(&fi->lock);
+	li = fi->local_int[cpu_addr];
+	if (li == NULL) {
+		rc = 3; /* not operational */
+		kfree(inti);
+		goto unlock;
+	}
+	spin_lock_bh(&li->lock);
+	list_add_tail(&inti->list, &li->list);
+	atomic_set(&li->active, 1);
+	atomic_set_mask(CPUSTAT_EXT_INT, li->cpuflags);
+	if (waitqueue_active(&li->wq))
+		wake_up_interruptible(&li->wq);
+	spin_unlock_bh(&li->lock);
+	rc = 0; /* order accepted */
+	VCPU_EVENT(vcpu, 4, "sent sigp ext call to cpu %x", cpu_addr);
+unlock:
+	spin_unlock(&fi->lock);
+	return rc;
+}
+
+static int __inject_sigp_stop(struct kvm_s390_local_interrupt *li, int action)
+{
+	struct kvm_s390_interrupt_info *inti;
+
+	inti = kzalloc(sizeof(*inti), GFP_ATOMIC);
+	if (!inti)
+		return -ENOMEM;
+	inti->type = KVM_S390_SIGP_STOP;
+
+	spin_lock_bh(&li->lock);
+	if ((atomic_read(li->cpuflags) & CPUSTAT_STOPPED))
+		goto out;
+	list_add_tail(&inti->list, &li->list);
+	atomic_set(&li->active, 1);
+	atomic_set_mask(CPUSTAT_STOP_INT, li->cpuflags);
+	li->action_bits |= action;
+	if (waitqueue_active(&li->wq))
+		wake_up_interruptible(&li->wq);
+out:
+	spin_unlock_bh(&li->lock);
+
+	return 0; /* order accepted */
+}
+
+static int __sigp_stop(struct kvm_vcpu *vcpu, u16 cpu_addr, int action)
+{
+	struct kvm_s390_float_interrupt *fi = &vcpu->kvm->arch.float_int;
+	struct kvm_s390_local_interrupt *li;
+	int rc;
+
+	if (cpu_addr >= KVM_MAX_VCPUS)
+		return 3; /* not operational */
+
+	spin_lock(&fi->lock);
+	li = fi->local_int[cpu_addr];
+	if (li == NULL) {
+		rc = 3; /* not operational */
+		goto unlock;
+	}
+
+	rc = __inject_sigp_stop(li, action);
+
+unlock:
+	spin_unlock(&fi->lock);
+	VCPU_EVENT(vcpu, 4, "sent sigp stop to cpu %x", cpu_addr);
+	return rc;
+}
+
+int kvm_s390_inject_sigp_stop(struct kvm_vcpu *vcpu, int action)
+{
+	struct kvm_s390_local_interrupt *li = &vcpu->arch.local_int;
+	return __inject_sigp_stop(li, action);
 }
 
 static int __sigp_set_arch(struct kvm_vcpu *vcpu, u32 parameter)
 {
 	int rc;
-	unsigned int i;
-	struct kvm_vcpu *v;
 
 	switch (parameter & 0xff) {
 	case 0:
-		rc = SIGP_CC_NOT_OPERATIONAL;
+		rc = 3; /* not operational */
 		break;
 	case 1:
 	case 2:
-		kvm_for_each_vcpu(i, v, vcpu->kvm) {
-			v->arch.pfault_token = KVM_S390_PFAULT_TOKEN_INVALID;
-			kvm_clear_async_pf_completion_queue(v);
-		}
-
-		rc = SIGP_CC_ORDER_CODE_ACCEPTED;
+		rc = 0; /* order accepted */
 		break;
 	default:
 		rc = -EOPNOTSUPP;
@@ -180,250 +222,130 @@ static int __sigp_set_arch(struct kvm_vcpu *vcpu, u32 parameter)
 	return rc;
 }
 
-static int __sigp_set_prefix(struct kvm_vcpu *vcpu, struct kvm_vcpu *dst_vcpu,
-			     u32 address, u64 *reg)
+static int __sigp_set_prefix(struct kvm_vcpu *vcpu, u16 cpu_addr, u32 address,
+			     u64 *reg)
 {
-	struct kvm_s390_irq irq = {
-		.type = KVM_S390_SIGP_SET_PREFIX,
-		.u.prefix.address = address & 0x7fffe000u,
-	};
+	struct kvm_s390_float_interrupt *fi = &vcpu->kvm->arch.float_int;
+	struct kvm_s390_local_interrupt *li = NULL;
+	struct kvm_s390_interrupt_info *inti;
 	int rc;
+	u8 tmp;
 
-	/*
-	 * Make sure the new value is valid memory. We only need to check the
-	 * first page, since address is 8k aligned and memory pieces are always
-	 * at least 1MB aligned and have at least a size of 1MB.
-	 */
-	if (kvm_is_error_gpa(vcpu->kvm, irq.u.prefix.address)) {
-		*reg &= 0xffffffff00000000UL;
-		*reg |= SIGP_STATUS_INVALID_PARAMETER;
-		return SIGP_CC_STATUS_STORED;
+	/* make sure that the new value is valid memory */
+	address = address & 0x7fffe000u;
+	if (copy_from_guest_absolute(vcpu, &tmp, address, 1) ||
+	   copy_from_guest_absolute(vcpu, &tmp, address + PAGE_SIZE, 1)) {
+		*reg |= SIGP_STAT_INVALID_PARAMETER;
+		return 1; /* invalid parameter */
 	}
 
-	rc = kvm_s390_inject_vcpu(dst_vcpu, &irq);
-	if (rc == -EBUSY) {
-		*reg &= 0xffffffff00000000UL;
-		*reg |= SIGP_STATUS_INCORRECT_STATE;
-		return SIGP_CC_STATUS_STORED;
+	inti = kzalloc(sizeof(*inti), GFP_KERNEL);
+	if (!inti)
+		return 2; /* busy */
+
+	spin_lock(&fi->lock);
+	if (cpu_addr < KVM_MAX_VCPUS)
+		li = fi->local_int[cpu_addr];
+
+	if (li == NULL) {
+		rc = 1; /* incorrect state */
+		*reg &= SIGP_STAT_INCORRECT_STATE;
+		kfree(inti);
+		goto out_fi;
 	}
+
+	spin_lock_bh(&li->lock);
+	/* cpu must be in stopped state */
+	if (!(atomic_read(li->cpuflags) & CPUSTAT_STOPPED)) {
+		rc = 1; /* incorrect state */
+		*reg &= SIGP_STAT_INCORRECT_STATE;
+		kfree(inti);
+		goto out_li;
+	}
+
+	inti->type = KVM_S390_SIGP_SET_PREFIX;
+	inti->prefix.address = address;
+
+	list_add_tail(&inti->list, &li->list);
+	atomic_set(&li->active, 1);
+	if (waitqueue_active(&li->wq))
+		wake_up_interruptible(&li->wq);
+	rc = 0; /* order accepted */
+
+	VCPU_EVENT(vcpu, 4, "set prefix of cpu %02x to %x", cpu_addr, address);
+out_li:
+	spin_unlock_bh(&li->lock);
+out_fi:
+	spin_unlock(&fi->lock);
+	return rc;
+}
+
+static int __sigp_sense_running(struct kvm_vcpu *vcpu, u16 cpu_addr,
+				u64 *reg)
+{
+	int rc;
+	struct kvm_s390_float_interrupt *fi = &vcpu->kvm->arch.float_int;
+
+	if (cpu_addr >= KVM_MAX_VCPUS)
+		return 3; /* not operational */
+
+	spin_lock(&fi->lock);
+	if (fi->local_int[cpu_addr] == NULL)
+		rc = 3; /* not operational */
+	else {
+		if (atomic_read(fi->local_int[cpu_addr]->cpuflags)
+		    & CPUSTAT_RUNNING) {
+			/* running */
+			rc = 1;
+		} else {
+			/* not running */
+			*reg &= 0xffffffff00000000UL;
+			*reg |= SIGP_STAT_NOT_RUNNING;
+			rc = 0;
+		}
+	}
+	spin_unlock(&fi->lock);
+
+	VCPU_EVENT(vcpu, 4, "sensed running status of cpu %x rc %x", cpu_addr,
+		   rc);
 
 	return rc;
 }
 
-static int __sigp_store_status_at_addr(struct kvm_vcpu *vcpu,
-				       struct kvm_vcpu *dst_vcpu,
-				       u32 addr, u64 *reg)
+static int __sigp_restart(struct kvm_vcpu *vcpu, u16 cpu_addr)
 {
-	int flags;
-	int rc;
-
-	flags = atomic_read(dst_vcpu->arch.local_int.cpuflags);
-	if (!(flags & CPUSTAT_STOPPED)) {
-		*reg &= 0xffffffff00000000UL;
-		*reg |= SIGP_STATUS_INCORRECT_STATE;
-		return SIGP_CC_STATUS_STORED;
-	}
-
-	addr &= 0x7ffffe00;
-	rc = kvm_s390_store_status_unloaded(dst_vcpu, addr);
-	if (rc == -EFAULT) {
-		*reg &= 0xffffffff00000000UL;
-		*reg |= SIGP_STATUS_INVALID_PARAMETER;
-		rc = SIGP_CC_STATUS_STORED;
-	}
-	return rc;
-}
-
-static int __sigp_sense_running(struct kvm_vcpu *vcpu,
-				struct kvm_vcpu *dst_vcpu, u64 *reg)
-{
+	int rc = 0;
+	struct kvm_s390_float_interrupt *fi = &vcpu->kvm->arch.float_int;
 	struct kvm_s390_local_interrupt *li;
-	int rc;
 
-	if (!test_kvm_facility(vcpu->kvm, 9)) {
-		*reg &= 0xffffffff00000000UL;
-		*reg |= SIGP_STATUS_INVALID_ORDER;
-		return SIGP_CC_STATUS_STORED;
+	if (cpu_addr >= KVM_MAX_VCPUS)
+		return 3; /* not operational */
+
+	spin_lock(&fi->lock);
+	li = fi->local_int[cpu_addr];
+	if (li == NULL) {
+		rc = 3; /* not operational */
+		goto out;
 	}
 
-	li = &dst_vcpu->arch.local_int;
-	if (atomic_read(li->cpuflags) & CPUSTAT_RUNNING) {
-		/* running */
-		rc = SIGP_CC_ORDER_CODE_ACCEPTED;
-	} else {
-		/* not running */
-		*reg &= 0xffffffff00000000UL;
-		*reg |= SIGP_STATUS_NOT_RUNNING;
-		rc = SIGP_CC_STATUS_STORED;
-	}
-
-	VCPU_EVENT(vcpu, 4, "sensed running status of cpu %x rc %x",
-		   dst_vcpu->vcpu_id, rc);
-
+	spin_lock_bh(&li->lock);
+	if (li->action_bits & ACTION_STOP_ON_STOP)
+		rc = 2; /* busy */
+	else
+		VCPU_EVENT(vcpu, 4, "sigp restart %x to handle userspace",
+			cpu_addr);
+	spin_unlock_bh(&li->lock);
+out:
+	spin_unlock(&fi->lock);
 	return rc;
-}
-
-static int __prepare_sigp_re_start(struct kvm_vcpu *vcpu,
-				   struct kvm_vcpu *dst_vcpu, u8 order_code)
-{
-	struct kvm_s390_local_interrupt *li = &dst_vcpu->arch.local_int;
-	/* handle (RE)START in user space */
-	int rc = -EOPNOTSUPP;
-
-	/* make sure we don't race with STOP irq injection */
-	spin_lock(&li->lock);
-	if (kvm_s390_is_stop_irq_pending(dst_vcpu))
-		rc = SIGP_CC_BUSY;
-	spin_unlock(&li->lock);
-
-	return rc;
-}
-
-static int __prepare_sigp_cpu_reset(struct kvm_vcpu *vcpu,
-				    struct kvm_vcpu *dst_vcpu, u8 order_code)
-{
-	/* handle (INITIAL) CPU RESET in user space */
-	return -EOPNOTSUPP;
-}
-
-static int __prepare_sigp_unknown(struct kvm_vcpu *vcpu,
-				  struct kvm_vcpu *dst_vcpu)
-{
-	/* handle unknown orders in user space */
-	return -EOPNOTSUPP;
-}
-
-static int handle_sigp_dst(struct kvm_vcpu *vcpu, u8 order_code,
-			   u16 cpu_addr, u32 parameter, u64 *status_reg)
-{
-	int rc;
-	struct kvm_vcpu *dst_vcpu = kvm_get_vcpu_by_id(vcpu->kvm, cpu_addr);
-
-	if (!dst_vcpu)
-		return SIGP_CC_NOT_OPERATIONAL;
-
-	switch (order_code) {
-	case SIGP_SENSE:
-		vcpu->stat.instruction_sigp_sense++;
-		rc = __sigp_sense(vcpu, dst_vcpu, status_reg);
-		break;
-	case SIGP_EXTERNAL_CALL:
-		vcpu->stat.instruction_sigp_external_call++;
-		rc = __sigp_external_call(vcpu, dst_vcpu, status_reg);
-		break;
-	case SIGP_EMERGENCY_SIGNAL:
-		vcpu->stat.instruction_sigp_emergency++;
-		rc = __sigp_emergency(vcpu, dst_vcpu);
-		break;
-	case SIGP_STOP:
-		vcpu->stat.instruction_sigp_stop++;
-		rc = __sigp_stop(vcpu, dst_vcpu);
-		break;
-	case SIGP_STOP_AND_STORE_STATUS:
-		vcpu->stat.instruction_sigp_stop_store_status++;
-		rc = __sigp_stop_and_store_status(vcpu, dst_vcpu, status_reg);
-		break;
-	case SIGP_STORE_STATUS_AT_ADDRESS:
-		vcpu->stat.instruction_sigp_store_status++;
-		rc = __sigp_store_status_at_addr(vcpu, dst_vcpu, parameter,
-						 status_reg);
-		break;
-	case SIGP_SET_PREFIX:
-		vcpu->stat.instruction_sigp_prefix++;
-		rc = __sigp_set_prefix(vcpu, dst_vcpu, parameter, status_reg);
-		break;
-	case SIGP_COND_EMERGENCY_SIGNAL:
-		vcpu->stat.instruction_sigp_cond_emergency++;
-		rc = __sigp_conditional_emergency(vcpu, dst_vcpu, parameter,
-						  status_reg);
-		break;
-	case SIGP_SENSE_RUNNING:
-		vcpu->stat.instruction_sigp_sense_running++;
-		rc = __sigp_sense_running(vcpu, dst_vcpu, status_reg);
-		break;
-	case SIGP_START:
-		vcpu->stat.instruction_sigp_start++;
-		rc = __prepare_sigp_re_start(vcpu, dst_vcpu, order_code);
-		break;
-	case SIGP_RESTART:
-		vcpu->stat.instruction_sigp_restart++;
-		rc = __prepare_sigp_re_start(vcpu, dst_vcpu, order_code);
-		break;
-	case SIGP_INITIAL_CPU_RESET:
-		vcpu->stat.instruction_sigp_init_cpu_reset++;
-		rc = __prepare_sigp_cpu_reset(vcpu, dst_vcpu, order_code);
-		break;
-	case SIGP_CPU_RESET:
-		vcpu->stat.instruction_sigp_cpu_reset++;
-		rc = __prepare_sigp_cpu_reset(vcpu, dst_vcpu, order_code);
-		break;
-	default:
-		vcpu->stat.instruction_sigp_unknown++;
-		rc = __prepare_sigp_unknown(vcpu, dst_vcpu);
-	}
-
-	if (rc == -EOPNOTSUPP)
-		VCPU_EVENT(vcpu, 4,
-			   "sigp order %u -> cpu %x: handled in user space",
-			   order_code, dst_vcpu->vcpu_id);
-
-	return rc;
-}
-
-static int handle_sigp_order_in_user_space(struct kvm_vcpu *vcpu, u8 order_code,
-					   u16 cpu_addr)
-{
-	if (!vcpu->kvm->arch.user_sigp)
-		return 0;
-
-	switch (order_code) {
-	case SIGP_SENSE:
-	case SIGP_EXTERNAL_CALL:
-	case SIGP_EMERGENCY_SIGNAL:
-	case SIGP_COND_EMERGENCY_SIGNAL:
-	case SIGP_SENSE_RUNNING:
-		return 0;
-	/* update counters as we're directly dropping to user space */
-	case SIGP_STOP:
-		vcpu->stat.instruction_sigp_stop++;
-		break;
-	case SIGP_STOP_AND_STORE_STATUS:
-		vcpu->stat.instruction_sigp_stop_store_status++;
-		break;
-	case SIGP_STORE_STATUS_AT_ADDRESS:
-		vcpu->stat.instruction_sigp_store_status++;
-		break;
-	case SIGP_STORE_ADDITIONAL_STATUS:
-		vcpu->stat.instruction_sigp_store_adtl_status++;
-		break;
-	case SIGP_SET_PREFIX:
-		vcpu->stat.instruction_sigp_prefix++;
-		break;
-	case SIGP_START:
-		vcpu->stat.instruction_sigp_start++;
-		break;
-	case SIGP_RESTART:
-		vcpu->stat.instruction_sigp_restart++;
-		break;
-	case SIGP_INITIAL_CPU_RESET:
-		vcpu->stat.instruction_sigp_init_cpu_reset++;
-		break;
-	case SIGP_CPU_RESET:
-		vcpu->stat.instruction_sigp_cpu_reset++;
-		break;
-	default:
-		vcpu->stat.instruction_sigp_unknown++;
-	}
-	VCPU_EVENT(vcpu, 3, "SIGP: order %u for CPU %d handled in userspace",
-		   order_code, cpu_addr);
-
-	return 1;
 }
 
 int kvm_s390_handle_sigp(struct kvm_vcpu *vcpu)
 {
 	int r1 = (vcpu->arch.sie_block->ipa & 0x00f0) >> 4;
 	int r3 = vcpu->arch.sie_block->ipa & 0x000f;
+	int base2 = vcpu->arch.sie_block->ipb >> 28;
+	int disp2 = ((vcpu->arch.sie_block->ipb & 0x0fff0000) >> 16);
 	u32 parameter;
 	u16 cpu_addr = vcpu->run->s.regs.gprs[r3];
 	u8 order_code;
@@ -431,62 +353,69 @@ int kvm_s390_handle_sigp(struct kvm_vcpu *vcpu)
 
 	/* sigp in userspace can exit */
 	if (vcpu->arch.sie_block->gpsw.mask & PSW_MASK_PSTATE)
-		return kvm_s390_inject_program_int(vcpu, PGM_PRIVILEGED_OP);
+		return kvm_s390_inject_program_int(vcpu,
+						   PGM_PRIVILEGED_OPERATION);
 
-	order_code = kvm_s390_get_base_disp_rs(vcpu, NULL);
-	if (handle_sigp_order_in_user_space(vcpu, order_code, cpu_addr))
-		return -EOPNOTSUPP;
+	order_code = disp2;
+	if (base2)
+		order_code += vcpu->run->s.regs.gprs[base2];
 
 	if (r1 % 2)
 		parameter = vcpu->run->s.regs.gprs[r1];
 	else
 		parameter = vcpu->run->s.regs.gprs[r1 + 1];
 
-	trace_kvm_s390_handle_sigp(vcpu, order_code, cpu_addr, parameter);
 	switch (order_code) {
-	case SIGP_SET_ARCHITECTURE:
+	case SIGP_SENSE:
+		vcpu->stat.instruction_sigp_sense++;
+		rc = __sigp_sense(vcpu, cpu_addr,
+				  &vcpu->run->s.regs.gprs[r1]);
+		break;
+	case SIGP_EXTERNAL_CALL:
+		vcpu->stat.instruction_sigp_external_call++;
+		rc = __sigp_external_call(vcpu, cpu_addr);
+		break;
+	case SIGP_EMERGENCY:
+		vcpu->stat.instruction_sigp_emergency++;
+		rc = __sigp_emergency(vcpu, cpu_addr);
+		break;
+	case SIGP_STOP:
+		vcpu->stat.instruction_sigp_stop++;
+		rc = __sigp_stop(vcpu, cpu_addr, ACTION_STOP_ON_STOP);
+		break;
+	case SIGP_STOP_STORE_STATUS:
+		vcpu->stat.instruction_sigp_stop++;
+		rc = __sigp_stop(vcpu, cpu_addr, ACTION_STORE_ON_STOP |
+						 ACTION_STOP_ON_STOP);
+		break;
+	case SIGP_SET_ARCH:
 		vcpu->stat.instruction_sigp_arch++;
 		rc = __sigp_set_arch(vcpu, parameter);
 		break;
+	case SIGP_SET_PREFIX:
+		vcpu->stat.instruction_sigp_prefix++;
+		rc = __sigp_set_prefix(vcpu, cpu_addr, parameter,
+				       &vcpu->run->s.regs.gprs[r1]);
+		break;
+	case SIGP_SENSE_RUNNING:
+		vcpu->stat.instruction_sigp_sense_running++;
+		rc = __sigp_sense_running(vcpu, cpu_addr,
+					  &vcpu->run->s.regs.gprs[r1]);
+		break;
+	case SIGP_RESTART:
+		vcpu->stat.instruction_sigp_restart++;
+		rc = __sigp_restart(vcpu, cpu_addr);
+		if (rc == 2) /* busy */
+			break;
+		/* user space must know about restart */
 	default:
-		rc = handle_sigp_dst(vcpu, order_code, cpu_addr,
-				     parameter,
-				     &vcpu->run->s.regs.gprs[r1]);
+		return -EOPNOTSUPP;
 	}
 
 	if (rc < 0)
 		return rc;
 
-	kvm_s390_set_psw_cc(vcpu, rc);
+	vcpu->arch.sie_block->gpsw.mask &= ~(3ul << 44);
+	vcpu->arch.sie_block->gpsw.mask |= (rc & 3ul) << 44;
 	return 0;
-}
-
-/*
- * Handle SIGP partial execution interception.
- *
- * This interception will occur at the source cpu when a source cpu sends an
- * external call to a target cpu and the target cpu has the WAIT bit set in
- * its cpuflags. Interception will occurr after the interrupt indicator bits at
- * the target cpu have been set. All error cases will lead to instruction
- * interception, therefore nothing is to be checked or prepared.
- */
-int kvm_s390_handle_sigp_pei(struct kvm_vcpu *vcpu)
-{
-	int r3 = vcpu->arch.sie_block->ipa & 0x000f;
-	u16 cpu_addr = vcpu->run->s.regs.gprs[r3];
-	struct kvm_vcpu *dest_vcpu;
-	u8 order_code = kvm_s390_get_base_disp_rs(vcpu, NULL);
-
-	trace_kvm_s390_handle_sigp_pei(vcpu, order_code, cpu_addr);
-
-	if (order_code == SIGP_EXTERNAL_CALL) {
-		dest_vcpu = kvm_get_vcpu_by_id(vcpu->kvm, cpu_addr);
-		BUG_ON(dest_vcpu == NULL);
-
-		kvm_s390_vcpu_wakeup(dest_vcpu);
-		kvm_s390_set_psw_cc(vcpu, SIGP_CC_ORDER_CODE_ACCEPTED);
-		return 0;
-	}
-
-	return -EOPNOTSUPP;
 }

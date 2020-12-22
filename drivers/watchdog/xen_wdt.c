@@ -244,7 +244,7 @@ static struct miscdevice xen_wdt_miscdev = {
 	.fops =		&xen_wdt_fops,
 };
 
-static int xen_wdt_probe(struct platform_device *dev)
+static int __devinit xen_wdt_probe(struct platform_device *dev)
 {
 	struct sched_watchdog wd = { .id = ~0 };
 	int ret = HYPERVISOR_sched_op(SCHEDOP_watchdog, &wd);
@@ -280,7 +280,7 @@ static int xen_wdt_probe(struct platform_device *dev)
 	return ret;
 }
 
-static int xen_wdt_remove(struct platform_device *dev)
+static int __devexit xen_wdt_remove(struct platform_device *dev)
 {
 	/* Stop the timer before we leave */
 	if (!nowayout)
@@ -315,11 +315,12 @@ static int xen_wdt_resume(struct platform_device *dev)
 
 static struct platform_driver xen_wdt_driver = {
 	.probe          = xen_wdt_probe,
-	.remove         = xen_wdt_remove,
+	.remove         = __devexit_p(xen_wdt_remove),
 	.shutdown       = xen_wdt_shutdown,
 	.suspend        = xen_wdt_suspend,
 	.resume         = xen_wdt_resume,
 	.driver         = {
+		.owner  = THIS_MODULE,
 		.name   = DRV_NAME,
 	},
 };
@@ -361,3 +362,4 @@ MODULE_AUTHOR("Jan Beulich <jbeulich@novell.com>");
 MODULE_DESCRIPTION("Xen WatchDog Timer Driver");
 MODULE_VERSION(DRV_VERSION);
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);

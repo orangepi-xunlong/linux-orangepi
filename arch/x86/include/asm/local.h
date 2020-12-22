@@ -50,9 +50,14 @@ static inline void local_sub(long i, local_t *l)
  * true if the result is zero, or false for all
  * other cases.
  */
-static inline bool local_sub_and_test(long i, local_t *l)
+static inline int local_sub_and_test(long i, local_t *l)
 {
-	GEN_BINARY_RMWcc(_ASM_SUB, l->a.counter, "er", i, "%0", e);
+	unsigned char c;
+
+	asm volatile(_ASM_SUB "%2,%0; sete %1"
+		     : "+m" (l->a.counter), "=qm" (c)
+		     : "ir" (i) : "memory");
+	return c;
 }
 
 /**
@@ -63,9 +68,14 @@ static inline bool local_sub_and_test(long i, local_t *l)
  * returns true if the result is 0, or false for all other
  * cases.
  */
-static inline bool local_dec_and_test(local_t *l)
+static inline int local_dec_and_test(local_t *l)
 {
-	GEN_UNARY_RMWcc(_ASM_DEC, l->a.counter, "%0", e);
+	unsigned char c;
+
+	asm volatile(_ASM_DEC "%0; sete %1"
+		     : "+m" (l->a.counter), "=qm" (c)
+		     : : "memory");
+	return c != 0;
 }
 
 /**
@@ -76,9 +86,14 @@ static inline bool local_dec_and_test(local_t *l)
  * and returns true if the result is zero, or false for all
  * other cases.
  */
-static inline bool local_inc_and_test(local_t *l)
+static inline int local_inc_and_test(local_t *l)
 {
-	GEN_UNARY_RMWcc(_ASM_INC, l->a.counter, "%0", e);
+	unsigned char c;
+
+	asm volatile(_ASM_INC "%0; sete %1"
+		     : "+m" (l->a.counter), "=qm" (c)
+		     : : "memory");
+	return c != 0;
 }
 
 /**
@@ -90,9 +105,14 @@ static inline bool local_inc_and_test(local_t *l)
  * if the result is negative, or false when
  * result is greater than or equal to zero.
  */
-static inline bool local_add_negative(long i, local_t *l)
+static inline int local_add_negative(long i, local_t *l)
 {
-	GEN_BINARY_RMWcc(_ASM_ADD, l->a.counter, "er", i, "%0", s);
+	unsigned char c;
+
+	asm volatile(_ASM_ADD "%2,%0; sets %1"
+		     : "+m" (l->a.counter), "=qm" (c)
+		     : "ir" (i) : "memory");
+	return c;
 }
 
 /**
@@ -104,11 +124,27 @@ static inline bool local_add_negative(long i, local_t *l)
  */
 static inline long local_add_return(long i, local_t *l)
 {
-	long __i = i;
+	long __i;
+#ifdef CONFIG_M386
+	unsigned long flags;
+	if (unlikely(boot_cpu_data.x86 <= 3))
+		goto no_xadd;
+#endif
+	/* Modern 486+ processor */
+	__i = i;
 	asm volatile(_ASM_XADD "%0, %1;"
 		     : "+r" (i), "+m" (l->a.counter)
 		     : : "memory");
 	return i + __i;
+
+#ifdef CONFIG_M386
+no_xadd: /* Legacy 386 processor */
+	local_irq_save(flags);
+	__i = local_read(l);
+	local_set(l, i + __i);
+	local_irq_restore(flags);
+	return i + __i;
+#endif
 }
 
 static inline long local_sub_return(long i, local_t *l)

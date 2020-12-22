@@ -26,7 +26,8 @@ struct ufs_buffer_head * _ubh_bread_ (struct ufs_sb_private_info * uspi,
 	count = size >> uspi->s_fshift;
 	if (count > UFS_MAXFRAG)
 		return NULL;
-	ubh = kmalloc (sizeof (struct ufs_buffer_head), GFP_NOFS);
+	ubh = (struct ufs_buffer_head *)
+		kmalloc (sizeof (struct ufs_buffer_head), GFP_NOFS);
 	if (!ubh)
 		return NULL;
 	ubh->fragment = fragment;
@@ -118,7 +119,7 @@ void ubh_sync_block(struct ufs_buffer_head *ubh)
 		unsigned i;
 
 		for (i = 0; i < ubh->count; i++)
-			write_dirty_buffer(ubh->bh[i], 0);
+			write_dirty_buffer(ubh->bh[i], WRITE);
 
 		for (i = 0; i < ubh->count; i++)
 			wait_on_buffer(ubh->bh[i]);
@@ -261,14 +262,14 @@ struct page *ufs_get_locked_page(struct address_space *mapping,
 		if (unlikely(page->mapping == NULL)) {
 			/* Truncate got there first */
 			unlock_page(page);
-			put_page(page);
+			page_cache_release(page);
 			page = NULL;
 			goto out;
 		}
 
 		if (!PageUptodate(page) || PageError(page)) {
 			unlock_page(page);
-			put_page(page);
+			page_cache_release(page);
 
 			printk(KERN_ERR "ufs_change_blocknr: "
 			       "can not read page: ino %lu, index: %lu\n",

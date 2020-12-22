@@ -7,6 +7,8 @@
  */
 
 #include <linux/module.h>
+#include <linux/time.h>
+#include <linux/buffer_head.h>
 #include "fat.h"
 
 /* Characters that are undesirable in an MS-DOS file name */
@@ -146,7 +148,8 @@ static int msdos_find(struct inode *dir, const unsigned char *name, int len,
  * that the existing dentry can be used. The msdos fs routines will
  * return ENOENT or EINVAL as appropriate.
  */
-static int msdos_hash(const struct dentry *dentry, struct qstr *qstr)
+static int msdos_hash(const struct dentry *dentry, const struct inode *inode,
+	       struct qstr *qstr)
 {
 	struct fat_mount_options *options = &MSDOS_SB(dentry->d_sb)->options;
 	unsigned char msdos_name[MSDOS_NAME];
@@ -154,7 +157,7 @@ static int msdos_hash(const struct dentry *dentry, struct qstr *qstr)
 
 	error = msdos_format_name(qstr->name, qstr->len, msdos_name, options);
 	if (!error)
-		qstr->hash = full_name_hash(dentry, msdos_name, MSDOS_NAME);
+		qstr->hash = full_name_hash(msdos_name, MSDOS_NAME);
 	return 0;
 }
 
@@ -162,10 +165,11 @@ static int msdos_hash(const struct dentry *dentry, struct qstr *qstr)
  * Compare two msdos names. If either of the names are invalid,
  * we fall back to doing the standard name comparison.
  */
-static int msdos_cmp(const struct dentry *dentry,
+static int msdos_cmp(const struct dentry *parent, const struct inode *pinode,
+		const struct dentry *dentry, const struct inode *inode,
 		unsigned int len, const char *str, const struct qstr *name)
 {
-	struct fat_mount_options *options = &MSDOS_SB(dentry->d_sb)->options;
+	struct fat_mount_options *options = &MSDOS_SB(parent->d_sb)->options;
 	unsigned char a_msdos_name[MSDOS_NAME], b_msdos_name[MSDOS_NAME];
 	int error;
 
@@ -197,14 +201,14 @@ static const struct dentry_operations msdos_dentry_operations = {
 
 /***** Get inode using directory and name */
 static struct dentry *msdos_lookup(struct inode *dir, struct dentry *dentry,
-				   unsigned int flags)
+				   struct nameidata *nd)
 {
 	struct super_block *sb = dir->i_sb;
 	struct fat_slot_info sinfo;
 	struct inode *inode;
 	int err;
 
-	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	lock_super(sb);
 	err = msdos_find(dir, dentry->d_name.name, dentry->d_name.len, &sinfo);
 	switch (err) {
 	case -ENOENT:
@@ -217,7 +221,7 @@ static struct dentry *msdos_lookup(struct inode *dir, struct dentry *dentry,
 	default:
 		inode = ERR_PTR(err);
 	}
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	unlock_super(sb);
 	return d_splice_alias(inode, dentry);
 }
 
@@ -242,7 +246,8 @@ static int msdos_add_entry(struct inode *dir, const unsigned char *name,
 	de.ctime_cs = 0;
 	de.time = time;
 	de.date = date;
-	fat_set_start(&de, cluster);
+	de.start = cpu_to_le16(cluster);
+	de.starthi = cpu_to_le16(cluster >> 16);
 	de.size = 0;
 
 	err = fat_add_entries(dir, &de, 1, sinfo);
@@ -260,7 +265,7 @@ static int msdos_add_entry(struct inode *dir, const unsigned char *name,
 
 /***** Create a file */
 static int msdos_create(struct inode *dir, struct dentry *dentry, umode_t mode,
-			bool excl)
+			struct nameidata *nd)
 {
 	struct super_block *sb = dir->i_sb;
 	struct inode *inode = NULL;
@@ -269,7 +274,7 @@ static int msdos_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 	unsigned char msdos_name[MSDOS_NAME];
 	int err, is_hid;
 
-	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	lock_super(sb);
 
 	err = msdos_format_name(dentry->d_name.name, dentry->d_name.len,
 				msdos_name, &MSDOS_SB(sb)->options);
@@ -283,7 +288,7 @@ static int msdos_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		goto out;
 	}
 
-	ts = current_time(dir);
+	ts = CURRENT_TIME_SEC;
 	err = msdos_add_entry(dir, msdos_name, 0, is_hid, 0, &ts, &sinfo);
 	if (err)
 		goto out;
@@ -298,7 +303,7 @@ static int msdos_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 
 	d_instantiate(dentry, inode);
 out:
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	unlock_super(sb);
 	if (!err)
 		err = fat_flush_inodes(sb, dir, inode);
 	return err;
@@ -308,11 +313,11 @@ out:
 static int msdos_rmdir(struct inode *dir, struct dentry *dentry)
 {
 	struct super_block *sb = dir->i_sb;
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	struct fat_slot_info sinfo;
 	int err;
 
-	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	lock_super(sb);
 	/*
 	 * Check whether the directory is not in use, then check
 	 * whether it is empty.
@@ -330,10 +335,10 @@ static int msdos_rmdir(struct inode *dir, struct dentry *dentry)
 	drop_nlink(dir);
 
 	clear_nlink(inode);
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	fat_detach(inode);
 out:
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	unlock_super(sb);
 	if (!err)
 		err = fat_flush_inodes(sb, dir, inode);
 
@@ -350,7 +355,7 @@ static int msdos_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	struct timespec ts;
 	int err, is_hid, cluster;
 
-	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	lock_super(sb);
 
 	err = msdos_format_name(dentry->d_name.name, dentry->d_name.len,
 				msdos_name, &MSDOS_SB(sb)->options);
@@ -364,7 +369,7 @@ static int msdos_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 		goto out;
 	}
 
-	ts = current_time(dir);
+	ts = CURRENT_TIME_SEC;
 	cluster = fat_alloc_new_dir(dir, &ts);
 	if (cluster < 0) {
 		err = cluster;
@@ -388,26 +393,26 @@ static int msdos_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 
 	d_instantiate(dentry, inode);
 
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	unlock_super(sb);
 	fat_flush_inodes(sb, dir, inode);
 	return 0;
 
 out_free:
 	fat_free_clusters(dir, cluster);
 out:
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	unlock_super(sb);
 	return err;
 }
 
 /***** Unlink a file */
 static int msdos_unlink(struct inode *dir, struct dentry *dentry)
 {
-	struct inode *inode = d_inode(dentry);
-	struct super_block *sb = inode->i_sb;
+	struct inode *inode = dentry->d_inode;
+	struct super_block *sb= inode->i_sb;
 	struct fat_slot_info sinfo;
 	int err;
 
-	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	lock_super(sb);
 	err = msdos_find(dir, dentry->d_name.name, dentry->d_name.len, &sinfo);
 	if (err)
 		goto out;
@@ -416,10 +421,10 @@ static int msdos_unlink(struct inode *dir, struct dentry *dentry)
 	if (err)
 		goto out;
 	clear_nlink(inode);
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	fat_detach(inode);
 out:
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	unlock_super(sb);
 	if (!err)
 		err = fat_flush_inodes(sb, dir, inode);
 
@@ -436,12 +441,12 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 	struct inode *old_inode, *new_inode;
 	struct fat_slot_info old_sinfo, sinfo;
 	struct timespec ts;
-	loff_t new_i_pos;
+	loff_t dotdot_i_pos, new_i_pos;
 	int err, old_attrs, is_dir, update_dotdot, corrupt = 0;
 
 	old_sinfo.bh = sinfo.bh = dotdot_bh = NULL;
-	old_inode = d_inode(old_dentry);
-	new_inode = d_inode(new_dentry);
+	old_inode = old_dentry->d_inode;
+	new_inode = new_dentry->d_inode;
 
 	err = fat_scan(old_dir, old_name, &old_sinfo);
 	if (err) {
@@ -452,7 +457,8 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 	is_dir = S_ISDIR(old_inode->i_mode);
 	update_dotdot = (is_dir && old_dir != new_dir);
 	if (update_dotdot) {
-		if (fat_get_dotdot_entry(old_inode, &dotdot_bh, &dotdot_de)) {
+		if (fat_get_dotdot_entry(old_inode, &dotdot_bh, &dotdot_de,
+					 &dotdot_i_pos) < 0) {
 			err = -EIO;
 			goto out;
 		}
@@ -481,7 +487,7 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 				mark_inode_dirty(old_inode);
 
 			old_dir->i_version++;
-			old_dir->i_ctime = old_dir->i_mtime = current_time(old_dir);
+			old_dir->i_ctime = old_dir->i_mtime = CURRENT_TIME_SEC;
 			if (IS_DIRSYNC(old_dir))
 				(void)fat_sync_inode(old_dir);
 			else
@@ -490,7 +496,7 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 		}
 	}
 
-	ts = current_time(old_inode);
+	ts = CURRENT_TIME_SEC;
 	if (new_inode) {
 		if (err)
 			goto out;
@@ -524,7 +530,9 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 		mark_inode_dirty(old_inode);
 
 	if (update_dotdot) {
-		fat_set_start(dotdot_de, MSDOS_I(new_dir)->i_logstart);
+		int start = MSDOS_I(new_dir)->i_logstart;
+		dotdot_de->start = cpu_to_le16(start);
+		dotdot_de->starthi = cpu_to_le16(start >> 16);
 		mark_buffer_dirty_inode(dotdot_bh, old_inode);
 		if (IS_DIRSYNC(new_dir)) {
 			err = sync_dirty_buffer(dotdot_bh);
@@ -564,7 +572,9 @@ error_dotdot:
 	corrupt = 1;
 
 	if (update_dotdot) {
-		fat_set_start(dotdot_de, MSDOS_I(old_dir)->i_logstart);
+		int start = MSDOS_I(old_dir)->i_logstart;
+		dotdot_de->start = cpu_to_le16(start);
+		dotdot_de->starthi = cpu_to_le16(start >> 16);
 		mark_buffer_dirty_inode(dotdot_bh, old_inode);
 		corrupt |= sync_dirty_buffer(dotdot_bh);
 	}
@@ -596,17 +606,13 @@ error_inode:
 
 /***** Rename, a wrapper for rename_same_dir & rename_diff_dir */
 static int msdos_rename(struct inode *old_dir, struct dentry *old_dentry,
-			struct inode *new_dir, struct dentry *new_dentry,
-			unsigned int flags)
+			struct inode *new_dir, struct dentry *new_dentry)
 {
 	struct super_block *sb = old_dir->i_sb;
 	unsigned char old_msdos_name[MSDOS_NAME], new_msdos_name[MSDOS_NAME];
 	int err, is_hid;
 
-	if (flags & ~RENAME_NOREPLACE)
-		return -EINVAL;
-
-	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	lock_super(sb);
 
 	err = msdos_format_name(old_dentry->d_name.name,
 				old_dentry->d_name.len, old_msdos_name,
@@ -625,7 +631,7 @@ static int msdos_rename(struct inode *old_dir, struct dentry *old_dentry,
 	err = do_msdos_rename(old_dir, old_msdos_name, old_dentry,
 			      new_dir, new_msdos_name, new_dentry, is_hid);
 out:
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	unlock_super(sb);
 	if (!err)
 		err = fat_flush_inodes(sb, old_dir, new_dir);
 	return err;
@@ -668,7 +674,6 @@ static struct file_system_type msdos_fs_type = {
 	.kill_sb	= kill_block_super,
 	.fs_flags	= FS_REQUIRES_DEV,
 };
-MODULE_ALIAS_FS("msdos");
 
 static int __init init_msdos_fs(void)
 {

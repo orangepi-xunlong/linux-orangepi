@@ -198,12 +198,13 @@ static void bf5xx_ac97_cold_reset(struct snd_ac97 *ac97)
 #endif
 }
 
-static struct snd_ac97_bus_ops bf5xx_ac97_ops = {
+struct snd_ac97_bus_ops soc_ac97_ops = {
 	.read	= bf5xx_ac97_read,
 	.write	= bf5xx_ac97_write,
 	.warm_reset	= bf5xx_ac97_warm_reset,
 	.reset	= bf5xx_ac97_cold_reset,
 };
+EXPORT_SYMBOL_GPL(soc_ac97_ops);
 
 #ifdef CONFIG_PM
 static int bf5xx_ac97_suspend(struct snd_soc_dai *dai)
@@ -230,9 +231,9 @@ static int bf5xx_ac97_resume(struct snd_soc_dai *dai)
 		return 0;
 
 #if defined(CONFIG_SND_BF5XX_MULTICHAN_SUPPORT)
-	ret = sport_set_multichannel(sport, 16, 0x3FF, 0x3FF, 1);
+	ret = sport_set_multichannel(sport, 16, 0x3FF, 1);
 #else
-	ret = sport_set_multichannel(sport, 16, 0x1F, 0x1F, 1);
+	ret = sport_set_multichannel(sport, 16, 0x1F, 1);
 #endif
 	if (ret) {
 		pr_err("SPORT is busy!\n");
@@ -260,7 +261,7 @@ static int bf5xx_ac97_resume(struct snd_soc_dai *dai)
 #endif
 
 static struct snd_soc_dai_driver bfin_ac97_dai = {
-	.bus_control = true,
+	.ac97_control = 1,
 	.suspend = bf5xx_ac97_suspend,
 	.resume = bf5xx_ac97_resume,
 	.playback = {
@@ -281,26 +282,20 @@ static struct snd_soc_dai_driver bfin_ac97_dai = {
 		.formats = SNDRV_PCM_FMTBIT_S16_LE, },
 };
 
-static const struct snd_soc_component_driver bfin_ac97_component = {
-	.name		= "bfin-ac97",
-};
-
-static int asoc_bfin_ac97_probe(struct platform_device *pdev)
+static int __devinit asoc_bfin_ac97_probe(struct platform_device *pdev)
 {
 	struct sport_device *sport_handle;
 	int ret;
 
 #ifdef CONFIG_SND_BF5XX_HAVE_COLD_RESET
 	/* Request PB3 as reset pin */
-	ret = devm_gpio_request_one(&pdev->dev,
-				    CONFIG_SND_BF5XX_RESET_GPIO_NUM,
-				    GPIOF_OUT_INIT_HIGH, "SND_AD198x RESET");
-	if (ret) {
-		dev_err(&pdev->dev,
-			"Failed to request GPIO_%d for reset: %d\n",
-			CONFIG_SND_BF5XX_RESET_GPIO_NUM, ret);
-		return ret;
+	if (gpio_request(CONFIG_SND_BF5XX_RESET_GPIO_NUM, "SND_AD198x RESET")) {
+		pr_err("Failed to request GPIO_%d for reset\n",
+				CONFIG_SND_BF5XX_RESET_GPIO_NUM);
+		ret =  -1;
+		goto gpio_err;
 	}
+	gpio_direction_output(CONFIG_SND_BF5XX_RESET_GPIO_NUM, 1);
 #endif
 
 	sport_handle = sport_init(pdev, 2, sizeof(struct ac97_frame),
@@ -312,9 +307,9 @@ static int asoc_bfin_ac97_probe(struct platform_device *pdev)
 
 	/*SPORT works in TDM mode to simulate AC97 transfers*/
 #if defined(CONFIG_SND_BF5XX_MULTICHAN_SUPPORT)
-	ret = sport_set_multichannel(sport_handle, 16, 0x3FF, 0x3FF, 1);
+	ret = sport_set_multichannel(sport_handle, 16, 0x3FF, 1);
 #else
-	ret = sport_set_multichannel(sport_handle, 16, 0x1F, 0x1F, 1);
+	ret = sport_set_multichannel(sport_handle, 16, 0x1F, 1);
 #endif
 	if (ret) {
 		pr_err("SPORT is busy!\n");
@@ -336,14 +331,7 @@ static int asoc_bfin_ac97_probe(struct platform_device *pdev)
 		goto sport_config_err;
 	}
 
-	ret = snd_soc_set_ac97_ops(&bf5xx_ac97_ops);
-	if (ret != 0) {
-		dev_err(&pdev->dev, "Failed to set AC'97 ops: %d\n", ret);
-		goto sport_config_err;
-	}
-
-	ret = snd_soc_register_component(&pdev->dev, &bfin_ac97_component,
-					 &bfin_ac97_dai, 1);
+	ret = snd_soc_register_dai(&pdev->dev, &bfin_ac97_dai);
 	if (ret) {
 		pr_err("Failed to register DAI: %d\n", ret);
 		goto sport_config_err;
@@ -356,18 +344,23 @@ static int asoc_bfin_ac97_probe(struct platform_device *pdev)
 sport_config_err:
 	sport_done(sport_handle);
 sport_err:
-	snd_soc_set_ac97_ops(NULL);
+#ifdef CONFIG_SND_BF5XX_HAVE_COLD_RESET
+	gpio_free(CONFIG_SND_BF5XX_RESET_GPIO_NUM);
+gpio_err:
+#endif
 
 	return ret;
 }
 
-static int asoc_bfin_ac97_remove(struct platform_device *pdev)
+static int __devexit asoc_bfin_ac97_remove(struct platform_device *pdev)
 {
 	struct sport_device *sport_handle = platform_get_drvdata(pdev);
 
-	snd_soc_unregister_component(&pdev->dev);
+	snd_soc_unregister_dai(&pdev->dev);
 	sport_done(sport_handle);
-	snd_soc_set_ac97_ops(NULL);
+#ifdef CONFIG_SND_BF5XX_HAVE_COLD_RESET
+	gpio_free(CONFIG_SND_BF5XX_RESET_GPIO_NUM);
+#endif
 
 	return 0;
 }
@@ -375,10 +368,11 @@ static int asoc_bfin_ac97_remove(struct platform_device *pdev)
 static struct platform_driver asoc_bfin_ac97_driver = {
 	.driver = {
 			.name = "bfin-ac97",
+			.owner = THIS_MODULE,
 	},
 
 	.probe = asoc_bfin_ac97_probe,
-	.remove = asoc_bfin_ac97_remove,
+	.remove = __devexit_p(asoc_bfin_ac97_remove),
 };
 
 module_platform_driver(asoc_bfin_ac97_driver);

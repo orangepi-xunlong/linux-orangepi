@@ -576,8 +576,8 @@ static ide_startstop_t idetape_do_request(ide_drive_t *drive,
 		      rq->cmd[0], (unsigned long long)blk_rq_pos(rq),
 		      blk_rq_sectors(rq));
 
-	BUG_ON(!(rq->cmd_type == REQ_TYPE_DRV_PRIV ||
-		 rq->cmd_type == REQ_TYPE_ATA_SENSE));
+	BUG_ON(!(rq->cmd_type == REQ_TYPE_SPECIAL ||
+		 rq->cmd_type == REQ_TYPE_SENSE));
 
 	/* Retry a failed packet command */
 	if (drive->failed_pc && drive->pc->c[0] == REQUEST_SENSE) {
@@ -852,15 +852,15 @@ static int idetape_queue_rw_tail(ide_drive_t *drive, int cmd, int size)
 	BUG_ON(cmd != REQ_IDETAPE_READ && cmd != REQ_IDETAPE_WRITE);
 	BUG_ON(size < 0 || size % tape->blk_size);
 
-	rq = blk_get_request(drive->queue, READ, __GFP_RECLAIM);
-	rq->cmd_type = REQ_TYPE_DRV_PRIV;
+	rq = blk_get_request(drive->queue, READ, __GFP_WAIT);
+	rq->cmd_type = REQ_TYPE_SPECIAL;
 	rq->cmd[13] = cmd;
 	rq->rq_disk = tape->disk;
 	rq->__sector = tape->first_frame;
 
 	if (size) {
 		ret = blk_rq_map_kern(drive->queue, rq, tape->buf, size,
-				      __GFP_RECLAIM);
+				      __GFP_WAIT);
 		if (ret)
 			goto out_put;
 	}
@@ -1793,11 +1793,11 @@ static void idetape_setup(ide_drive_t *drive, idetape_tape_t *tape, int minor)
 	tape->best_dsc_rw_freq = clamp_t(unsigned long, t, IDETAPE_DSC_RW_MIN,
 					 IDETAPE_DSC_RW_MAX);
 	printk(KERN_INFO "ide-tape: %s <-> %s: %dKBps, %d*%dkB buffer, "
-		"%ums tDSC%s\n",
+		"%lums tDSC%s\n",
 		drive->name, tape->name, *(u16 *)&tape->caps[14],
 		(*(u16 *)&tape->caps[16] * 512) / tape->buffer_size,
 		tape->buffer_size / 1024,
-		jiffies_to_msecs(tape->best_dsc_rw_freq),
+		tape->best_dsc_rw_freq * 1000 / HZ,
 		(drive->dev_flags & IDE_DFLAG_USING_DMA) ? ", DMA" : "");
 
 	ide_proc_register_driver(drive, tape->driver);
@@ -1847,7 +1847,7 @@ static int idetape_name_proc_show(struct seq_file *m, void *v)
 
 static int idetape_name_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, idetape_name_proc_show, PDE_DATA(inode));
+	return single_open(file, idetape_name_proc_show, PDE(inode)->data);
 }
 
 static const struct file_operations idetape_name_proc_fops = {
@@ -1918,13 +1918,15 @@ static int idetape_open(struct block_device *bdev, fmode_t mode)
 	return 0;
 }
 
-static void idetape_release(struct gendisk *disk, fmode_t mode)
+static int idetape_release(struct gendisk *disk, fmode_t mode)
 {
 	struct ide_tape_obj *tape = ide_drv_g(disk, ide_tape_obj);
 
 	mutex_lock(&ide_tape_mutex);
 	ide_tape_put(tape);
 	mutex_unlock(&ide_tape_mutex);
+
+	return 0;
 }
 
 static int idetape_ioctl(struct block_device *bdev, fmode_t mode,
@@ -1985,7 +1987,7 @@ static int ide_tape_probe(ide_drive_t *drive)
 
 	tape->dev.parent = &drive->gendev;
 	tape->dev.release = ide_tape_release;
-	dev_set_name(&tape->dev, "%s", dev_name(&drive->gendev));
+	dev_set_name(&tape->dev, dev_name(&drive->gendev));
 
 	if (device_register(&tape->dev))
 		goto out_free_disk;
@@ -2052,12 +2054,12 @@ static int __init idetape_init(void)
 
 	error = driver_register(&idetape_driver.gen_driver);
 	if (error)
-		goto out_free_chrdev;
+		goto out_free_driver;
 
 	return 0;
 
-out_free_chrdev:
-	unregister_chrdev(IDETAPE_MAJOR, "ht");
+out_free_driver:
+	driver_unregister(&idetape_driver.gen_driver);
 out_free_class:
 	class_destroy(idetape_sysfs_class);
 out:

@@ -277,6 +277,7 @@
 					interrupt-parent = <&ipic>;
 					interrupts = <17 0x8>;
 					reg = <0x2>;
+					device_type = "ethernet-phy";
 				};
 
 				tbi0: tbi-phy@11 {
@@ -480,7 +481,7 @@
 
 		hdd {
 			gpios = <&mcu_pio 1 0>;
-			linux,default-trigger = "disk-activity";
+			linux,default-trigger = "ide-disk";
 		};
 	};
 };

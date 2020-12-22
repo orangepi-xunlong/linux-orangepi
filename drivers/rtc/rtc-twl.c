@@ -18,8 +18,6 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -29,7 +27,6 @@
 #include <linux/bcd.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
-#include <linux/of.h>
 
 #include <linux/i2c/twl.h>
 
@@ -147,7 +144,8 @@ static int twl_rtc_read_u8(u8 *data, u8 reg)
 
 	ret = twl_i2c_read_u8(TWL_MODULE_RTC, data, (rtc_reg_map[reg]));
 	if (ret < 0)
-		pr_err("Could not read TWL register %X - error %d\n", reg, ret);
+		pr_err("twl_rtc: Could not read TWL"
+		       "register %X - error %d\n", reg, ret);
 	return ret;
 }
 
@@ -160,8 +158,8 @@ static int twl_rtc_write_u8(u8 data, u8 reg)
 
 	ret = twl_i2c_write_u8(TWL_MODULE_RTC, data, (rtc_reg_map[reg]));
 	if (ret < 0)
-		pr_err("Could not write TWL register %X - error %d\n",
-		       reg, ret);
+		pr_err("twl_rtc: Could not write TWL"
+		       "register %X - error %d\n", reg, ret);
 	return ret;
 }
 
@@ -214,24 +212,12 @@ static int mask_rtc_irq_bit(unsigned char bit)
 
 static int twl_rtc_alarm_irq_enable(struct device *dev, unsigned enabled)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	int irq = platform_get_irq(pdev, 0);
-	static bool twl_rtc_wake_enabled;
 	int ret;
 
-	if (enabled) {
+	if (enabled)
 		ret = set_rtc_irq_bit(BIT_RTC_INTERRUPTS_REG_IT_ALARM_M);
-		if (device_can_wakeup(dev) && !twl_rtc_wake_enabled) {
-			enable_irq_wake(irq);
-			twl_rtc_wake_enabled = true;
-		}
-	} else {
+	else
 		ret = mask_rtc_irq_bit(BIT_RTC_INTERRUPTS_REG_IT_ALARM_M);
-		if (twl_rtc_wake_enabled) {
-			disable_irq_wake(irq);
-			twl_rtc_wake_enabled = false;
-		}
-	}
 
 	return ret;
 }
@@ -247,7 +233,7 @@ static int twl_rtc_alarm_irq_enable(struct device *dev, unsigned enabled)
  */
 static int twl_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
-	unsigned char rtc_data[ALL_TIME_REGS];
+	unsigned char rtc_data[ALL_TIME_REGS + 1];
 	int ret;
 	u8 save_control;
 	u8 rtc_control;
@@ -314,15 +300,15 @@ static int twl_rtc_read_time(struct device *dev, struct rtc_time *tm)
 static int twl_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
 	unsigned char save_control;
-	unsigned char rtc_data[ALL_TIME_REGS];
+	unsigned char rtc_data[ALL_TIME_REGS + 1];
 	int ret;
 
-	rtc_data[0] = bin2bcd(tm->tm_sec);
-	rtc_data[1] = bin2bcd(tm->tm_min);
-	rtc_data[2] = bin2bcd(tm->tm_hour);
-	rtc_data[3] = bin2bcd(tm->tm_mday);
-	rtc_data[4] = bin2bcd(tm->tm_mon + 1);
-	rtc_data[5] = bin2bcd(tm->tm_year - 100);
+	rtc_data[1] = bin2bcd(tm->tm_sec);
+	rtc_data[2] = bin2bcd(tm->tm_min);
+	rtc_data[3] = bin2bcd(tm->tm_hour);
+	rtc_data[4] = bin2bcd(tm->tm_mday);
+	rtc_data[5] = bin2bcd(tm->tm_mon + 1);
+	rtc_data[6] = bin2bcd(tm->tm_year - 100);
 
 	/* Stop RTC while updating the TC registers */
 	ret = twl_rtc_read_u8(&save_control, REG_RTC_CTRL_REG);
@@ -355,7 +341,7 @@ out:
  */
 static int twl_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alm)
 {
-	unsigned char rtc_data[ALL_TIME_REGS];
+	unsigned char rtc_data[ALL_TIME_REGS + 1];
 	int ret;
 
 	ret = twl_i2c_read(TWL_MODULE_RTC, rtc_data,
@@ -382,19 +368,19 @@ static int twl_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alm)
 
 static int twl_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 {
-	unsigned char alarm_data[ALL_TIME_REGS];
+	unsigned char alarm_data[ALL_TIME_REGS + 1];
 	int ret;
 
 	ret = twl_rtc_alarm_irq_enable(dev, 0);
 	if (ret)
 		goto out;
 
-	alarm_data[0] = bin2bcd(alm->time.tm_sec);
-	alarm_data[1] = bin2bcd(alm->time.tm_min);
-	alarm_data[2] = bin2bcd(alm->time.tm_hour);
-	alarm_data[3] = bin2bcd(alm->time.tm_mday);
-	alarm_data[4] = bin2bcd(alm->time.tm_mon + 1);
-	alarm_data[5] = bin2bcd(alm->time.tm_year - 100);
+	alarm_data[1] = bin2bcd(alm->time.tm_sec);
+	alarm_data[2] = bin2bcd(alm->time.tm_min);
+	alarm_data[3] = bin2bcd(alm->time.tm_hour);
+	alarm_data[4] = bin2bcd(alm->time.tm_mday);
+	alarm_data[5] = bin2bcd(alm->time.tm_mon + 1);
+	alarm_data[6] = bin2bcd(alm->time.tm_year - 100);
 
 	/* update all the alarm registers in one shot */
 	ret = twl_i2c_write(TWL_MODULE_RTC, alarm_data,
@@ -462,7 +448,7 @@ out:
 	return ret;
 }
 
-static const struct rtc_class_ops twl_rtc_ops = {
+static struct rtc_class_ops twl_rtc_ops = {
 	.read_time	= twl_rtc_read_time,
 	.set_time	= twl_rtc_set_time,
 	.read_alarm	= twl_rtc_read_alarm,
@@ -472,7 +458,7 @@ static const struct rtc_class_ops twl_rtc_ops = {
 
 /*----------------------------------------------------------------------*/
 
-static int twl_rtc_probe(struct platform_device *pdev)
+static int __devinit twl_rtc_probe(struct platform_device *pdev)
 {
 	struct rtc_device *rtc;
 	int ret = -EINVAL;
@@ -480,17 +466,11 @@ static int twl_rtc_probe(struct platform_device *pdev)
 	u8 rd_reg;
 
 	if (irq <= 0)
-		return ret;
-
-	/* Initialize the register map */
-	if (twl_class_is_4030())
-		rtc_reg_map = (u8 *)twl4030_rtc_reg_map;
-	else
-		rtc_reg_map = (u8 *)twl6030_rtc_reg_map;
+		goto out1;
 
 	ret = twl_rtc_read_u8(&rd_reg, REG_RTC_STATUS_REG);
 	if (ret < 0)
-		return ret;
+		goto out1;
 
 	if (rd_reg & BIT_RTC_STATUS_REG_POWER_UP_M)
 		dev_warn(&pdev->dev, "Power up reset detected.\n");
@@ -501,7 +481,7 @@ static int twl_rtc_probe(struct platform_device *pdev)
 	/* Clear RTC Power up reset and pending alarm interrupts */
 	ret = twl_rtc_write_u8(rd_reg, REG_RTC_STATUS_REG);
 	if (ret < 0)
-		return ret;
+		goto out1;
 
 	if (twl_class_is_6030()) {
 		twl6030_interrupt_unmask(TWL6030_RTC_INT_MASK,
@@ -513,7 +493,7 @@ static int twl_rtc_probe(struct platform_device *pdev)
 	dev_info(&pdev->dev, "Enabling TWL-RTC\n");
 	ret = twl_rtc_write_u8(BIT_RTC_CTRL_REG_STOP_RTC_M, REG_RTC_CTRL_REG);
 	if (ret < 0)
-		return ret;
+		goto out1;
 
 	/* ensure interrupts are disabled, bootloaders can be strange */
 	ret = twl_rtc_write_u8(0, REG_RTC_INTERRUPTS_REG);
@@ -523,38 +503,45 @@ static int twl_rtc_probe(struct platform_device *pdev)
 	/* init cached IRQ enable bits */
 	ret = twl_rtc_read_u8(&rtc_irq_bits, REG_RTC_INTERRUPTS_REG);
 	if (ret < 0)
-		return ret;
+		goto out1;
 
-	device_init_wakeup(&pdev->dev, 1);
-
-	rtc = devm_rtc_device_register(&pdev->dev, pdev->name,
-					&twl_rtc_ops, THIS_MODULE);
+	rtc = rtc_device_register(pdev->name,
+				  &pdev->dev, &twl_rtc_ops, THIS_MODULE);
 	if (IS_ERR(rtc)) {
+		ret = PTR_ERR(rtc);
 		dev_err(&pdev->dev, "can't register RTC device, err %ld\n",
 			PTR_ERR(rtc));
-		return PTR_ERR(rtc);
+		goto out1;
 	}
 
-	ret = devm_request_threaded_irq(&pdev->dev, irq, NULL,
-					twl_rtc_interrupt,
-					IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-					dev_name(&rtc->dev), rtc);
+	ret = request_threaded_irq(irq, NULL, twl_rtc_interrupt,
+				   IRQF_TRIGGER_RISING,
+				   dev_name(&rtc->dev), rtc);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "IRQ is not free.\n");
-		return ret;
+		goto out2;
 	}
 
 	platform_set_drvdata(pdev, rtc);
+	device_init_wakeup(&pdev->dev, 1);
 	return 0;
+
+out2:
+	rtc_device_unregister(rtc);
+out1:
+	return ret;
 }
 
 /*
  * Disable all TWL RTC module interrupts.
  * Sets status flag to free.
  */
-static int twl_rtc_remove(struct platform_device *pdev)
+static int __devexit twl_rtc_remove(struct platform_device *pdev)
 {
 	/* leave rtc running, but disable irqs */
+	struct rtc_device *rtc = platform_get_drvdata(pdev);
+	int irq = platform_get_irq(pdev, 0);
+
 	mask_rtc_irq_bit(BIT_RTC_INTERRUPTS_REG_IT_ALARM_M);
 	mask_rtc_irq_bit(BIT_RTC_INTERRUPTS_REG_IT_TIMER_M);
 	if (twl_class_is_6030()) {
@@ -564,6 +551,11 @@ static int twl_rtc_remove(struct platform_device *pdev)
 			REG_INT_MSK_STS_A);
 	}
 
+
+	free_irq(irq, rtc);
+
+	rtc_device_unregister(rtc);
+	platform_set_drvdata(pdev, NULL);
 	return 0;
 }
 
@@ -574,10 +566,11 @@ static void twl_rtc_shutdown(struct platform_device *pdev)
 	mask_rtc_irq_bit(BIT_RTC_INTERRUPTS_REG_IT_TIMER_M);
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
+
 static unsigned char irqstat;
 
-static int twl_rtc_suspend(struct device *dev)
+static int twl_rtc_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	irqstat = rtc_irq_bits;
 
@@ -585,37 +578,53 @@ static int twl_rtc_suspend(struct device *dev)
 	return 0;
 }
 
-static int twl_rtc_resume(struct device *dev)
+static int twl_rtc_resume(struct platform_device *pdev)
 {
 	set_rtc_irq_bit(irqstat);
 	return 0;
 }
+
+#else
+#define twl_rtc_suspend NULL
+#define twl_rtc_resume  NULL
 #endif
 
-static SIMPLE_DEV_PM_OPS(twl_rtc_pm_ops, twl_rtc_suspend, twl_rtc_resume);
-
-#ifdef CONFIG_OF
 static const struct of_device_id twl_rtc_of_match[] = {
 	{.compatible = "ti,twl4030-rtc", },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, twl_rtc_of_match);
-#endif
-
 MODULE_ALIAS("platform:twl_rtc");
 
 static struct platform_driver twl4030rtc_driver = {
 	.probe		= twl_rtc_probe,
-	.remove		= twl_rtc_remove,
+	.remove		= __devexit_p(twl_rtc_remove),
 	.shutdown	= twl_rtc_shutdown,
+	.suspend	= twl_rtc_suspend,
+	.resume		= twl_rtc_resume,
 	.driver		= {
+		.owner		= THIS_MODULE,
 		.name		= "twl_rtc",
-		.pm		= &twl_rtc_pm_ops,
-		.of_match_table = of_match_ptr(twl_rtc_of_match),
+		.of_match_table = twl_rtc_of_match,
 	},
 };
 
-module_platform_driver(twl4030rtc_driver);
+static int __init twl_rtc_init(void)
+{
+	if (twl_class_is_4030())
+		rtc_reg_map = (u8 *) twl4030_rtc_reg_map;
+	else
+		rtc_reg_map = (u8 *) twl6030_rtc_reg_map;
+
+	return platform_driver_register(&twl4030rtc_driver);
+}
+module_init(twl_rtc_init);
+
+static void __exit twl_rtc_exit(void)
+{
+	platform_driver_unregister(&twl4030rtc_driver);
+}
+module_exit(twl_rtc_exit);
 
 MODULE_AUTHOR("Texas Instruments, MontaVista Software");
 MODULE_LICENSE("GPL");

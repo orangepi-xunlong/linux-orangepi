@@ -40,10 +40,6 @@ static int ras_check_exception_token;
 #define EPOW_SENSOR_TOKEN	9
 #define EPOW_SENSOR_INDEX	0
 
-/* EPOW events counter variable */
-static int num_epow_events;
-
-static irqreturn_t ras_hotplug_interrupt(int irq, void *dev_id);
 static irqreturn_t ras_epow_interrupt(int irq, void *dev_id);
 static irqreturn_t ras_error_interrupt(int irq, void *dev_id);
 
@@ -66,14 +62,6 @@ static int __init init_ras_IRQ(void)
 		of_node_put(np);
 	}
 
-	/* Hotplug Events */
-	np = of_find_node_by_path("/event-sources/hot-plug-events");
-	if (np != NULL) {
-		request_event_sources_irqs(np, ras_hotplug_interrupt,
-					   "RAS_HOTPLUG");
-		of_node_put(np);
-	}
-
 	/* EPOW Events */
 	np = of_find_node_by_path("/event-sources/epow-events");
 	if (np != NULL) {
@@ -83,7 +71,7 @@ static int __init init_ras_IRQ(void)
 
 	return 0;
 }
-machine_subsys_initcall(pseries, init_ras_IRQ);
+subsys_initcall(init_ras_IRQ);
 
 #define EPOW_SHUTDOWN_NORMAL				1
 #define EPOW_SHUTDOWN_ON_UPS				2
@@ -94,30 +82,30 @@ static void handle_system_shutdown(char event_modifier)
 {
 	switch (event_modifier) {
 	case EPOW_SHUTDOWN_NORMAL:
-		pr_emerg("Power off requested\n");
-		orderly_poweroff(true);
+		pr_emerg("Firmware initiated power off");
+		orderly_poweroff(1);
 		break;
 
 	case EPOW_SHUTDOWN_ON_UPS:
-		pr_emerg("Loss of system power detected. System is running on"
-			 " UPS/battery. Check RTAS error log for details\n");
-		orderly_poweroff(true);
+		pr_emerg("Loss of power reported by firmware, system is "
+			"running on UPS/battery");
 		break;
 
 	case EPOW_SHUTDOWN_LOSS_OF_CRITICAL_FUNCTIONS:
-		pr_emerg("Loss of system critical functions detected. Check"
-			 " RTAS error log for details\n");
-		orderly_poweroff(true);
+		pr_emerg("Loss of system critical functions reported by "
+			"firmware");
+		pr_emerg("Check RTAS error log for details");
+		orderly_poweroff(1);
 		break;
 
 	case EPOW_SHUTDOWN_AMBIENT_TEMPERATURE_TOO_HIGH:
-		pr_emerg("High ambient temperature detected. Check RTAS"
-			 " error log for details\n");
-		orderly_poweroff(true);
+		pr_emerg("Ambient temperature too high reported by firmware");
+		pr_emerg("Check RTAS error log for details");
+		orderly_poweroff(1);
 		break;
 
 	default:
-		pr_err("Unknown power/cooling shutdown event (modifier = %d)\n",
+		pr_err("Unknown power/cooling shutdown event (modifier %d)",
 			event_modifier);
 	}
 }
@@ -138,7 +126,7 @@ struct epow_errorlog {
 #define EPOW_MAIN_ENCLOSURE		5
 #define EPOW_POWER_OFF			7
 
-static void rtas_parse_epow_errlog(struct rtas_error_log *log)
+void rtas_parse_epow_errlog(struct rtas_error_log *log)
 {
 	struct pseries_errorlog *pseries_log;
 	struct epow_errorlog *epow_log;
@@ -155,20 +143,17 @@ static void rtas_parse_epow_errlog(struct rtas_error_log *log)
 
 	switch (action_code) {
 	case EPOW_RESET:
-		if (num_epow_events) {
-			pr_info("Non critical power/cooling issue cleared\n");
-			num_epow_events--;
-		}
+		pr_err("Non critical power or cooling issue cleared");
 		break;
 
 	case EPOW_WARN_COOLING:
-		pr_info("Non-critical cooling issue detected. Check RTAS error"
-			" log for details\n");
+		pr_err("Non critical cooling issue reported by firmware");
+		pr_err("Check RTAS error log for details");
 		break;
 
 	case EPOW_WARN_POWER:
-		pr_info("Non-critical power issue detected. Check RTAS error"
-			" log for details\n");
+		pr_err("Non critical power issue reported by firmware");
+		pr_err("Check RTAS error log for details");
 		break;
 
 	case EPOW_SYSTEM_SHUTDOWN:
@@ -176,57 +161,23 @@ static void rtas_parse_epow_errlog(struct rtas_error_log *log)
 		break;
 
 	case EPOW_SYSTEM_HALT:
-		pr_emerg("Critical power/cooling issue detected. Check RTAS"
-			 " error log for details. Powering off.\n");
-		orderly_poweroff(true);
+		pr_emerg("Firmware initiated power off");
+		orderly_poweroff(1);
 		break;
 
 	case EPOW_MAIN_ENCLOSURE:
 	case EPOW_POWER_OFF:
-		pr_emerg("System about to lose power. Check RTAS error log "
-			 " for details. Powering off immediately.\n");
+		pr_emerg("Critical power/cooling issue reported by firmware");
+		pr_emerg("Check RTAS error log for details");
+		pr_emerg("Immediate power off");
 		emergency_sync();
 		kernel_power_off();
 		break;
 
 	default:
-		pr_err("Unknown power/cooling event (action code  = %d)\n",
+		pr_err("Unknown power/cooling event (action code %d)",
 			action_code);
 	}
-
-	/* Increment epow events counter variable */
-	if (action_code != EPOW_RESET)
-		num_epow_events++;
-}
-
-static irqreturn_t ras_hotplug_interrupt(int irq, void *dev_id)
-{
-	struct pseries_errorlog *pseries_log;
-	struct pseries_hp_errorlog *hp_elog;
-
-	spin_lock(&ras_log_buf_lock);
-
-	rtas_call(ras_check_exception_token, 6, 1, NULL,
-		  RTAS_VECTOR_EXTERNAL_INTERRUPT, virq_to_hw(irq),
-		  RTAS_HOTPLUG_EVENTS, 0, __pa(&ras_log_buf),
-		  rtas_get_error_log_max());
-
-	pseries_log = get_pseries_errorlog((struct rtas_error_log *)ras_log_buf,
-					   PSERIES_ELOG_SECT_ID_HOTPLUG);
-	hp_elog = (struct pseries_hp_errorlog *)pseries_log->data;
-
-	/*
-	 * Since PCI hotplug is not currently supported on pseries, put PCI
-	 * hotplug events on the ras_log_buf to be handled by rtas_errd.
-	 */
-	if (hp_elog->resource == PSERIES_HP_ELOG_RESOURCE_MEM ||
-	    hp_elog->resource == PSERIES_HP_ELOG_RESOURCE_CPU)
-		queue_hotplug_event(hp_elog, NULL, NULL);
-	else
-		log_error(ras_log_buf, ERR_TYPE_RTAS_LOG, 0);
-
-	spin_unlock(&ras_log_buf_lock);
-	return IRQ_HANDLED;
 }
 
 /* Handle environmental and power warning (EPOW) interrupts. */
@@ -286,8 +237,7 @@ static irqreturn_t ras_error_interrupt(int irq, void *dev_id)
 
 	rtas_elog = (struct rtas_error_log *)ras_log_buf;
 
-	if (status == 0 &&
-	    rtas_error_severity(rtas_elog) >= RTAS_SEVERITY_ERROR_SYNC)
+	if ((status == 0) && (rtas_elog->severity >= RTAS_SEVERITY_ERROR_SYNC))
 		fatal = 1;
 	else
 		fatal = 0;
@@ -296,12 +246,13 @@ static irqreturn_t ras_error_interrupt(int irq, void *dev_id)
 	log_error(ras_log_buf, ERR_TYPE_RTAS_LOG, fatal);
 
 	if (fatal) {
-		pr_emerg("Fatal hardware error detected. Check RTAS error"
-			 " log for details. Powering off immediately\n");
+		pr_emerg("Fatal hardware error reported by firmware");
+		pr_emerg("Check RTAS error log for details");
+		pr_emerg("Immediate power off");
 		emergency_sync();
 		kernel_power_off();
 	} else {
-		pr_err("Recoverable hardware error detected\n");
+		pr_err("Recoverable hardware error reported by firmware");
 	}
 
 	spin_unlock(&ras_log_buf_lock);
@@ -337,27 +288,23 @@ static struct rtas_error_log *fwnmi_get_errinfo(struct pt_regs *regs)
 	unsigned long *savep;
 	struct rtas_error_log *h, *errhdr = NULL;
 
-	/* Mask top two bits */
-	regs->gpr[3] &= ~(0x3UL << 62);
-
 	if (!VALID_FWNMI_BUFFER(regs->gpr[3])) {
 		printk(KERN_ERR "FWNMI: corrupt r3 0x%016lx\n", regs->gpr[3]);
 		return NULL;
 	}
 
 	savep = __va(regs->gpr[3]);
-	regs->gpr[3] = be64_to_cpu(savep[0]);	/* restore original r3 */
+	regs->gpr[3] = savep[0];	/* restore original r3 */
 
 	/* If it isn't an extended log we can use the per cpu 64bit buffer */
 	h = (struct rtas_error_log *)&savep[1];
-	if (!rtas_error_extended(h)) {
-		memcpy(this_cpu_ptr(&mce_data_buf), h, sizeof(__u64));
-		errhdr = (struct rtas_error_log *)this_cpu_ptr(&mce_data_buf);
+	if (!h->extended) {
+		memcpy(&__get_cpu_var(mce_data_buf), h, sizeof(__u64));
+		errhdr = (struct rtas_error_log *)&__get_cpu_var(mce_data_buf);
 	} else {
-		int len, error_log_length;
+		int len;
 
-		error_log_length = 8 + rtas_error_extended_log_length(h);
-		len = min_t(int, error_log_length, RTAS_ERROR_LOG_MAX);
+		len = max_t(int, 8+h->extended_log_length, RTAS_ERROR_LOG_MAX);
 		memset(global_mce_data_buf, 0, RTAS_ERROR_LOG_MAX);
 		memcpy(global_mce_data_buf, h, len);
 		errhdr = (struct rtas_error_log *)global_mce_data_buf;
@@ -401,24 +348,23 @@ int pSeries_system_reset_exception(struct pt_regs *regs)
 static int recover_mce(struct pt_regs *regs, struct rtas_error_log *err)
 {
 	int recovered = 0;
-	int disposition = rtas_error_disposition(err);
 
 	if (!(regs->msr & MSR_RI)) {
 		/* If MSR_RI isn't set, we cannot recover */
 		recovered = 0;
 
-	} else if (disposition == RTAS_DISP_FULLY_RECOVERED) {
+	} else if (err->disposition == RTAS_DISP_FULLY_RECOVERED) {
 		/* Platform corrected itself */
 		recovered = 1;
 
-	} else if (disposition == RTAS_DISP_LIMITED_RECOVERY) {
+	} else if (err->disposition == RTAS_DISP_LIMITED_RECOVERY) {
 		/* Platform corrected itself but could be degraded */
 		printk(KERN_ERR "MCE: limited recovery, system may "
 		       "be degraded\n");
 		recovered = 1;
 
 	} else if (user_mode(regs) && !is_global_init(current) &&
-		   rtas_error_severity(err) == RTAS_SEVERITY_ERROR_SYNC) {
+		   err->severity == RTAS_SEVERITY_ERROR_SYNC) {
 
 		/*
 		 * If we received a synchronous error when in userspace

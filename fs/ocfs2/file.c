@@ -37,7 +37,6 @@
 #include <linux/falloc.h>
 #include <linux/quotaops.h>
 #include <linux/blkdev.h>
-#include <linux/backing-dev.h>
 
 #include <cluster/masklog.h>
 
@@ -105,11 +104,8 @@ static int ocfs2_file_open(struct inode *inode, struct file *file)
 			      file->f_path.dentry->d_name.len,
 			      file->f_path.dentry->d_name.name, mode);
 
-	if (file->f_mode & FMODE_WRITE) {
-		status = dquot_initialize(inode);
-		if (status)
-			goto leave;
-	}
+	if (file->f_mode & FMODE_WRITE)
+		dquot_initialize(inode);
 
 	spin_lock(&oi->ip_lock);
 
@@ -179,13 +175,9 @@ static int ocfs2_sync_file(struct file *file, loff_t start, loff_t end,
 			   int datasync)
 {
 	int err = 0;
+	journal_t *journal;
 	struct inode *inode = file->f_mapping->host;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
-	struct ocfs2_inode_info *oi = OCFS2_I(inode);
-	journal_t *journal = osb->journal->j_journal;
-	int ret;
-	tid_t commit_tid;
-	bool needs_barrier = false;
 
 	trace_ocfs2_sync_file(inode, file, file->f_path.dentry,
 			      OCFS2_I(inode)->ip_blkno,
@@ -193,26 +185,33 @@ static int ocfs2_sync_file(struct file *file, loff_t start, loff_t end,
 			      file->f_path.dentry->d_name.name,
 			      (unsigned long long)datasync);
 
-	if (ocfs2_is_hard_readonly(osb) || ocfs2_is_soft_readonly(osb))
-		return -EROFS;
-
 	err = filemap_write_and_wait_range(inode->i_mapping, start, end);
 	if (err)
 		return err;
 
-	commit_tid = datasync ? oi->i_datasync_tid : oi->i_sync_tid;
-	if (journal->j_flags & JBD2_BARRIER &&
-	    !jbd2_trans_will_send_data_barrier(journal, commit_tid))
-		needs_barrier = true;
-	err = jbd2_complete_transaction(journal, commit_tid);
-	if (needs_barrier) {
-		ret = blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL, NULL);
-		if (!err)
-			err = ret;
+	/*
+	 * Probably don't need the i_mutex at all in here, just putting it here
+	 * to be consistent with how fsync used to be called, someone more
+	 * familiar with the fs could possibly remove it.
+	 */
+	mutex_lock(&inode->i_mutex);
+	if (datasync && !(inode->i_state & I_DIRTY_DATASYNC)) {
+		/*
+		 * We still have to flush drive's caches to get data to the
+		 * platter
+		 */
+		if (osb->s_mount_opt & OCFS2_MOUNT_BARRIER)
+			blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL, NULL);
+		goto bail;
 	}
 
+	journal = osb->journal->j_journal;
+	err = jbd2_journal_force_commit(journal);
+
+bail:
 	if (err)
 		mlog_errno(err);
+	mutex_unlock(&inode->i_mutex);
 
 	return (err < 0) ? -EIO : 0;
 }
@@ -253,7 +252,7 @@ int ocfs2_should_update_atime(struct inode *inode,
 		return 0;
 	}
 
-	now = current_time(inode);
+	now = CURRENT_TIME;
 	if ((now.tv_sec - inode->i_atime.tv_sec <= osb->s_atime_quantum))
 		return 0;
 	else
@@ -287,10 +286,9 @@ int ocfs2_update_inode_atime(struct inode *inode,
 	 * have i_mutex to guard against concurrent changes to other
 	 * inode fields.
 	 */
-	inode->i_atime = current_time(inode);
+	inode->i_atime = CURRENT_TIME;
 	di->i_atime = cpu_to_le64(inode->i_atime.tv_sec);
 	di->i_atime_nsec = cpu_to_le32(inode->i_atime.tv_nsec);
-	ocfs2_update_inode_fsync_trans(handle, inode, 0);
 	ocfs2_journal_dirty(handle, bh);
 
 out_commit:
@@ -299,7 +297,7 @@ out:
 	return ret;
 }
 
-int ocfs2_set_inode_size(handle_t *handle,
+static int ocfs2_set_inode_size(handle_t *handle,
 				struct inode *inode,
 				struct buffer_head *fe_bh,
 				u64 new_i_size)
@@ -308,7 +306,7 @@ int ocfs2_set_inode_size(handle_t *handle,
 
 	i_size_write(inode, new_i_size);
 	inode->i_blocks = ocfs2_inode_sector_count(inode);
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = CURRENT_TIME;
 
 	status = ocfs2_mark_inode_dirty(handle, inode, fe_bh);
 	if (status < 0) {
@@ -340,7 +338,6 @@ int ocfs2_simple_size_update(struct inode *inode,
 	if (ret < 0)
 		mlog_errno(ret);
 
-	ocfs2_update_inode_fsync_trans(handle, inode, 0);
 	ocfs2_commit_trans(osb, handle);
 out:
 	return ret;
@@ -373,7 +370,7 @@ static int ocfs2_cow_file_pos(struct inode *inode,
 	if (!(ext_flags & OCFS2_EXT_REFCOUNTED))
 		goto out;
 
-	return ocfs2_refcount_cow(inode, fe_bh, cpos, 1, cpos+1);
+	return ocfs2_refcount_cow(inode, NULL, fe_bh, cpos, 1, cpos+1);
 
 out:
 	return status;
@@ -429,13 +426,12 @@ static int ocfs2_orphan_for_truncate(struct ocfs2_super *osb,
 	}
 
 	i_size_write(inode, new_i_size);
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = CURRENT_TIME;
 
 	di = (struct ocfs2_dinode *) fe_bh->b_data;
 	di->i_size = cpu_to_le64(new_i_size);
 	di->i_ctime = di->i_mtime = cpu_to_le64(inode->i_ctime.tv_sec);
 	di->i_ctime_nsec = di->i_mtime_nsec = cpu_to_le32(inode->i_ctime.tv_nsec);
-	ocfs2_update_inode_fsync_trans(handle, inode, 0);
 
 	ocfs2_journal_dirty(handle, fe_bh);
 
@@ -445,7 +441,7 @@ out:
 	return status;
 }
 
-int ocfs2_truncate_file(struct inode *inode,
+static int ocfs2_truncate_file(struct inode *inode,
 			       struct buffer_head *di_bh,
 			       u64 new_i_size)
 {
@@ -477,6 +473,11 @@ int ocfs2_truncate_file(struct inode *inode,
 		mlog_errno(status);
 		goto bail;
 	}
+
+	/* lets handle the simple truncate cases before doing any more
+	 * cluster locking. */
+	if (new_i_size == le64_to_cpu(fe->i_size))
+		goto bail;
 
 	down_write(&OCFS2_I(inode)->ip_alloc_sem);
 
@@ -573,13 +574,13 @@ static int __ocfs2_extend_allocation(struct inode *inode, u32 logical_start,
 	handle_t *handle = NULL;
 	struct ocfs2_alloc_context *data_ac = NULL;
 	struct ocfs2_alloc_context *meta_ac = NULL;
-	enum ocfs2_alloc_restarted why = RESTART_NONE;
+	enum ocfs2_alloc_restarted why;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 	struct ocfs2_extent_tree et;
 	int did_quota = 0;
 
 	/*
-	 * Unwritten extent only exists for file systems which
+	 * This function only exists for file systems which don't
 	 * support holes.
 	 */
 	BUG_ON(mark_unwritten && !ocfs2_sparse_alloc(osb));
@@ -602,7 +603,8 @@ restart_all:
 		goto leave;
 	}
 
-	credits = ocfs2_calc_extend_credits(osb->sb, &fe->id2.i_list);
+	credits = ocfs2_calc_extend_credits(osb->sb, &fe->id2.i_list,
+					    clusters_to_add);
 	handle = ocfs2_start_trans(osb, credits);
 	if (IS_ERR(handle)) {
 		status = PTR_ERR(handle);
@@ -651,7 +653,7 @@ restarted_transaction:
 			mlog_errno(status);
 		goto leave;
 	}
-	ocfs2_update_inode_fsync_trans(handle, inode, 1);
+
 	ocfs2_journal_dirty(handle, bh);
 
 	spin_lock(&OCFS2_I(inode)->ip_lock);
@@ -669,7 +671,11 @@ restarted_transaction:
 		} else {
 			BUG_ON(why != RESTART_TRANS);
 
-			status = ocfs2_allocate_extend_trans(handle, 1);
+			/* TODO: This can be more intelligent. */
+			credits = ocfs2_calc_extend_credits(osb->sb,
+							    &fe->id2.i_list,
+							    clusters_to_add);
+			status = ocfs2_extend_trans(handle, credits);
 			if (status < 0) {
 				/* handle still has to be committed at
 				 * this point. */
@@ -713,19 +719,11 @@ leave:
 	return status;
 }
 
-int ocfs2_extend_allocation(struct inode *inode, u32 logical_start,
-		u32 clusters_to_add, int mark_unwritten)
-{
-	return __ocfs2_extend_allocation(inode, logical_start,
-			clusters_to_add, mark_unwritten);
-}
-
 /*
  * While a write will already be ordering the data, a truncate will not.
  * Thus, we need to explicitly order the zeroed pages.
  */
-static handle_t *ocfs2_zero_start_ordered_transaction(struct inode *inode,
-						struct buffer_head *di_bh)
+static handle_t *ocfs2_zero_start_ordered_transaction(struct inode *inode)
 {
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 	handle_t *handle = NULL;
@@ -742,16 +740,8 @@ static handle_t *ocfs2_zero_start_ordered_transaction(struct inode *inode,
 	}
 
 	ret = ocfs2_jbd2_file_inode(handle, inode);
-	if (ret < 0) {
+	if (ret < 0)
 		mlog_errno(ret);
-		goto out;
-	}
-
-	ret = ocfs2_journal_access_di(handle, INODE_CACHE(inode), di_bh,
-				      OCFS2_JOURNAL_ACCESS_WRITE);
-	if (ret)
-		mlog_errno(ret);
-	ocfs2_update_inode_fsync_trans(handle, inode, 1);
 
 out:
 	if (ret) {
@@ -766,38 +756,31 @@ out:
  * to be too fragile to do exactly what we need without us having to
  * worry about recursive locking in ->write_begin() and ->write_end(). */
 static int ocfs2_write_zero_page(struct inode *inode, u64 abs_from,
-				 u64 abs_to, struct buffer_head *di_bh)
+				 u64 abs_to)
 {
 	struct address_space *mapping = inode->i_mapping;
 	struct page *page;
-	unsigned long index = abs_from >> PAGE_SHIFT;
-	handle_t *handle;
+	unsigned long index = abs_from >> PAGE_CACHE_SHIFT;
+	handle_t *handle = NULL;
 	int ret = 0;
 	unsigned zero_from, zero_to, block_start, block_end;
-	struct ocfs2_dinode *di = (struct ocfs2_dinode *)di_bh->b_data;
 
 	BUG_ON(abs_from >= abs_to);
-	BUG_ON(abs_to > (((u64)index + 1) << PAGE_SHIFT));
+	BUG_ON(abs_to > (((u64)index + 1) << PAGE_CACHE_SHIFT));
 	BUG_ON(abs_from & (inode->i_blkbits - 1));
-
-	handle = ocfs2_zero_start_ordered_transaction(inode, di_bh);
-	if (IS_ERR(handle)) {
-		ret = PTR_ERR(handle);
-		goto out;
-	}
 
 	page = find_or_create_page(mapping, index, GFP_NOFS);
 	if (!page) {
 		ret = -ENOMEM;
 		mlog_errno(ret);
-		goto out_commit_trans;
+		goto out;
 	}
 
 	/* Get the offsets within the page that we want to zero */
-	zero_from = abs_from & (PAGE_SIZE - 1);
-	zero_to = abs_to & (PAGE_SIZE - 1);
+	zero_from = abs_from & (PAGE_CACHE_SIZE - 1);
+	zero_to = abs_to & (PAGE_CACHE_SIZE - 1);
 	if (!zero_to)
-		zero_to = PAGE_SIZE;
+		zero_to = PAGE_CACHE_SIZE;
 
 	trace_ocfs2_write_zero_page(
 			(unsigned long long)OCFS2_I(inode)->ip_blkno,
@@ -808,7 +791,7 @@ static int ocfs2_write_zero_page(struct inode *inode, u64 abs_from,
 	/* We know that zero_from is block aligned */
 	for (block_start = zero_from; block_start < zero_to;
 	     block_start = block_end) {
-		block_end = block_start + i_blocksize(inode);
+		block_end = block_start + (1 << inode->i_blkbits);
 
 		/*
 		 * block_start is block-aligned.  Bump it by one to force
@@ -822,6 +805,14 @@ static int ocfs2_write_zero_page(struct inode *inode, u64 abs_from,
 			goto out_unlock;
 		}
 
+		if (!handle) {
+			handle = ocfs2_zero_start_ordered_transaction(inode);
+			if (IS_ERR(handle)) {
+				ret = PTR_ERR(handle);
+				handle = NULL;
+				break;
+			}
+		}
 
 		/* must not update i_size! */
 		ret = block_commit_write(page, block_start + 1,
@@ -832,29 +823,12 @@ static int ocfs2_write_zero_page(struct inode *inode, u64 abs_from,
 			ret = 0;
 	}
 
-	/*
-	 * fs-writeback will release the dirty pages without page lock
-	 * whose offset are over inode size, the release happens at
-	 * block_write_full_page().
-	 */
-	i_size_write(inode, abs_to);
-	inode->i_blocks = ocfs2_inode_sector_count(inode);
-	di->i_size = cpu_to_le64((u64)i_size_read(inode));
-	inode->i_mtime = inode->i_ctime = current_time(inode);
-	di->i_mtime = di->i_ctime = cpu_to_le64(inode->i_mtime.tv_sec);
-	di->i_ctime_nsec = cpu_to_le32(inode->i_mtime.tv_nsec);
-	di->i_mtime_nsec = di->i_ctime_nsec;
-	if (handle) {
-		ocfs2_journal_dirty(handle, di_bh);
-		ocfs2_update_inode_fsync_trans(handle, inode, 1);
-	}
+	if (handle)
+		ocfs2_commit_trans(OCFS2_SB(inode->i_sb), handle);
 
 out_unlock:
 	unlock_page(page);
-	put_page(page);
-out_commit_trans:
-	if (handle)
-		ocfs2_commit_trans(OCFS2_SB(inode->i_sb), handle);
+	page_cache_release(page);
 out:
 	return ret;
 }
@@ -925,7 +899,7 @@ static int ocfs2_zero_extend_get_range(struct inode *inode,
 		zero_clusters = last_cpos - zero_cpos;
 
 	if (needs_cow) {
-		rc = ocfs2_refcount_cow(inode, di_bh, zero_cpos,
+		rc = ocfs2_refcount_cow(inode, NULL, di_bh, zero_cpos,
 					zero_clusters, UINT_MAX);
 		if (rc) {
 			mlog_errno(rc);
@@ -946,7 +920,7 @@ out:
  * has made sure that the entire range needs zeroing.
  */
 static int ocfs2_zero_extend_range(struct inode *inode, u64 range_start,
-				   u64 range_end, struct buffer_head *di_bh)
+				   u64 range_end)
 {
 	int rc = 0;
 	u64 next_pos;
@@ -959,10 +933,10 @@ static int ocfs2_zero_extend_range(struct inode *inode, u64 range_start,
 	BUG_ON(range_start >= range_end);
 
 	while (zero_pos < range_end) {
-		next_pos = (zero_pos & PAGE_MASK) + PAGE_SIZE;
+		next_pos = (zero_pos & PAGE_CACHE_MASK) + PAGE_CACHE_SIZE;
 		if (next_pos > range_end)
 			next_pos = range_end;
-		rc = ocfs2_write_zero_page(inode, zero_pos, next_pos, di_bh);
+		rc = ocfs2_write_zero_page(inode, zero_pos, next_pos);
 		if (rc < 0) {
 			mlog_errno(rc);
 			break;
@@ -1008,7 +982,7 @@ int ocfs2_zero_extend(struct inode *inode, struct buffer_head *di_bh,
 			range_end = zero_to_size;
 
 		ret = ocfs2_zero_extend_range(inode, range_start,
-					      range_end, di_bh);
+					      range_end);
 		if (ret) {
 			mlog_errno(ret);
 			break;
@@ -1130,8 +1104,7 @@ out:
 int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 {
 	int status = 0, size_change;
-	int inode_locked = 0;
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	struct super_block *sb = inode->i_sb;
 	struct ocfs2_super *osb = OCFS2_SB(sb);
 	struct buffer_head *bh = NULL;
@@ -1143,8 +1116,7 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 			    (unsigned long long)OCFS2_I(inode)->ip_blkno,
 			    dentry->d_name.len, dentry->d_name.name,
 			    attr->ia_valid, attr->ia_mode,
-			    from_kuid(&init_user_ns, attr->ia_uid),
-			    from_kgid(&init_user_ns, attr->ia_gid));
+			    attr->ia_uid, attr->ia_gid);
 
 	/* ensuring we don't even attempt to truncate a symlink */
 	if (S_ISLNK(inode->i_mode))
@@ -1155,24 +1127,14 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 	if (!(attr->ia_valid & OCFS2_VALID_ATTRS))
 		return 0;
 
-	status = setattr_prepare(dentry, attr);
+	status = inode_change_ok(inode, attr);
 	if (status)
 		return status;
 
-	if (is_quota_modification(inode, attr)) {
-		status = dquot_initialize(inode);
-		if (status)
-			return status;
-	}
+	if (is_quota_modification(inode, attr))
+		dquot_initialize(inode);
 	size_change = S_ISREG(inode->i_mode) && attr->ia_valid & ATTR_SIZE;
 	if (size_change) {
-		/*
-		 * Here we should wait dio to finish before inode lock
-		 * to avoid a deadlock between ocfs2_setattr() and
-		 * ocfs2_dio_end_io_write()
-		 */
-		inode_dio_wait(inode);
-
 		status = ocfs2_rw_lock(inode, 1);
 		if (status < 0) {
 			mlog_errno(status);
@@ -1186,14 +1148,15 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 			mlog_errno(status);
 		goto bail_unlock_rw;
 	}
-	inode_locked = 1;
 
-	if (size_change) {
+	if (size_change && attr->ia_size != i_size_read(inode)) {
 		status = inode_newsize_ok(inode, attr->ia_size);
 		if (status)
 			goto bail_unlock;
 
-		if (i_size_read(inode) >= attr->ia_size) {
+		inode_dio_wait(inode);
+
+		if (i_size_read(inode) > attr->ia_size) {
 			if (ocfs2_should_order_data(inode)) {
 				status = ocfs2_begin_ordered_truncate(inode,
 								      attr->ia_size);
@@ -1211,28 +1174,30 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 		}
 	}
 
-	if ((attr->ia_valid & ATTR_UID && !uid_eq(attr->ia_uid, inode->i_uid)) ||
-	    (attr->ia_valid & ATTR_GID && !gid_eq(attr->ia_gid, inode->i_gid))) {
+	if ((attr->ia_valid & ATTR_UID && attr->ia_uid != inode->i_uid) ||
+	    (attr->ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid)) {
 		/*
 		 * Gather pointers to quota structures so that allocation /
 		 * freeing of quota structures happens here and not inside
 		 * dquot_transfer() where we have problems with lock ordering
 		 */
-		if (attr->ia_valid & ATTR_UID && !uid_eq(attr->ia_uid, inode->i_uid)
+		if (attr->ia_valid & ATTR_UID && attr->ia_uid != inode->i_uid
 		    && OCFS2_HAS_RO_COMPAT_FEATURE(sb,
 		    OCFS2_FEATURE_RO_COMPAT_USRQUOTA)) {
-			transfer_to[USRQUOTA] = dqget(sb, make_kqid_uid(attr->ia_uid));
-			if (IS_ERR(transfer_to[USRQUOTA])) {
-				status = PTR_ERR(transfer_to[USRQUOTA]);
+			transfer_to[USRQUOTA] = dqget(sb, attr->ia_uid,
+						      USRQUOTA);
+			if (!transfer_to[USRQUOTA]) {
+				status = -ESRCH;
 				goto bail_unlock;
 			}
 		}
-		if (attr->ia_valid & ATTR_GID && !gid_eq(attr->ia_gid, inode->i_gid)
+		if (attr->ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid
 		    && OCFS2_HAS_RO_COMPAT_FEATURE(sb,
 		    OCFS2_FEATURE_RO_COMPAT_GRPQUOTA)) {
-			transfer_to[GRPQUOTA] = dqget(sb, make_kqid_gid(attr->ia_gid));
-			if (IS_ERR(transfer_to[GRPQUOTA])) {
-				status = PTR_ERR(transfer_to[GRPQUOTA]);
+			transfer_to[GRPQUOTA] = dqget(sb, attr->ia_gid,
+						      GRPQUOTA);
+			if (!transfer_to[GRPQUOTA]) {
+				status = -ESRCH;
 				goto bail_unlock;
 			}
 		}
@@ -1255,6 +1220,24 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 		}
 	}
 
+	/*
+	 * This will intentionally not wind up calling truncate_setsize(),
+	 * since all the work for a size change has been done above.
+	 * Otherwise, we could get into problems with truncate as
+	 * ip_alloc_sem is used there to protect against i_size
+	 * changes.
+	 *
+	 * XXX: this means the conditional below can probably be removed.
+	 */
+	if ((attr->ia_valid & ATTR_SIZE) &&
+	    attr->ia_size != i_size_read(inode)) {
+		status = vmtruncate(inode, attr->ia_size);
+		if (status) {
+			mlog_errno(status);
+			goto bail_commit;
+		}
+	}
+
 	setattr_copy(inode, attr);
 	mark_inode_dirty(inode);
 
@@ -1265,28 +1248,23 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 bail_commit:
 	ocfs2_commit_trans(osb, handle);
 bail_unlock:
-	if (status) {
-		ocfs2_inode_unlock(inode, 1);
-		inode_locked = 0;
-	}
+	ocfs2_inode_unlock(inode, 1);
 bail_unlock_rw:
 	if (size_change)
 		ocfs2_rw_unlock(inode, 1);
 bail:
+	brelse(bh);
 
 	/* Release quota pointers in case we acquired them */
-	for (qtype = 0; qtype < OCFS2_MAXQUOTAS; qtype++)
+	for (qtype = 0; qtype < MAXQUOTAS; qtype++)
 		dqput(transfer_to[qtype]);
 
 	if (!status && attr->ia_valid & ATTR_MODE) {
-		status = ocfs2_acl_chmod(inode, bh);
+		status = ocfs2_acl_chmod(inode);
 		if (status < 0)
 			mlog_errno(status);
 	}
-	if (inode_locked)
-		ocfs2_inode_unlock(inode, 1);
 
-	brelse(bh);
 	return status;
 }
 
@@ -1294,8 +1272,8 @@ int ocfs2_getattr(struct vfsmount *mnt,
 		  struct dentry *dentry,
 		  struct kstat *stat)
 {
-	struct inode *inode = d_inode(dentry);
-	struct super_block *sb = dentry->d_sb;
+	struct inode *inode = dentry->d_inode;
+	struct super_block *sb = dentry->d_inode->i_sb;
 	struct ocfs2_super *osb = sb->s_fs_info;
 	int err;
 
@@ -1307,14 +1285,6 @@ int ocfs2_getattr(struct vfsmount *mnt,
 	}
 
 	generic_fillattr(inode, stat);
-	/*
-	 * If there is inline data in the inode, the inode will normally not
-	 * have data blocks allocated (it may have an external xattr block).
-	 * Report at least one sector for such files, so tools like tar, rsync,
-	 * others don't incorrectly think the file is completely sparse.
-	 */
-	if (unlikely(OCFS2_I(inode)->ip_dyn_features & OCFS2_INLINE_DATA_FL))
-		stat->blocks += (stat->size + 511)>>9;
 
 	/* We set the blksize from the cluster size for performance */
 	stat->blksize = osb->s_clustersize;
@@ -1376,12 +1346,49 @@ static int __ocfs2_write_remove_suid(struct inode *inode,
 
 	di = (struct ocfs2_dinode *) bh->b_data;
 	di->i_mode = cpu_to_le16(inode->i_mode);
-	ocfs2_update_inode_fsync_trans(handle, inode, 0);
 
 	ocfs2_journal_dirty(handle, bh);
 
 out_trans:
 	ocfs2_commit_trans(osb, handle);
+out:
+	return ret;
+}
+
+/*
+ * Will look for holes and unwritten extents in the range starting at
+ * pos for count bytes (inclusive).
+ */
+static int ocfs2_check_range_for_holes(struct inode *inode, loff_t pos,
+				       size_t count)
+{
+	int ret = 0;
+	unsigned int extent_flags;
+	u32 cpos, clusters, extent_len, phys_cpos;
+	struct super_block *sb = inode->i_sb;
+
+	cpos = pos >> OCFS2_SB(sb)->s_clustersize_bits;
+	clusters = ocfs2_clusters_for_bytes(sb, pos + count) - cpos;
+
+	while (clusters) {
+		ret = ocfs2_get_clusters(inode, cpos, &phys_cpos, &extent_len,
+					 &extent_flags);
+		if (ret < 0) {
+			mlog_errno(ret);
+			goto out;
+		}
+
+		if (phys_cpos == 0 || (extent_flags & OCFS2_EXT_UNWRITTEN)) {
+			ret = 1;
+			break;
+		}
+
+		if (extent_len > clusters)
+			extent_len = clusters;
+
+		clusters -= extent_len;
+		cpos += extent_len;
+	}
 out:
 	return ret;
 }
@@ -1511,8 +1518,7 @@ static int ocfs2_zero_partial_clusters(struct inode *inode,
 				       u64 start, u64 len)
 {
 	int ret = 0;
-	u64 tmpend = 0;
-	u64 end = start + len;
+	u64 tmpend, end = start + len;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 	unsigned int csize = osb->s_clustersize;
 	handle_t *handle;
@@ -1544,31 +1550,18 @@ static int ocfs2_zero_partial_clusters(struct inode *inode,
 	}
 
 	/*
-	 * If start is on a cluster boundary and end is somewhere in another
-	 * cluster, we have not COWed the cluster starting at start, unless
-	 * end is also within the same cluster. So, in this case, we skip this
-	 * first call to ocfs2_zero_range_for_truncate() truncate and move on
-	 * to the next one.
+	 * We want to get the byte offset of the end of the 1st cluster.
 	 */
-	if ((start & (csize - 1)) != 0) {
-		/*
-		 * We want to get the byte offset of the end of the 1st
-		 * cluster.
-		 */
-		tmpend = (u64)osb->s_clustersize +
-			(start & ~(osb->s_clustersize - 1));
-		if (tmpend > end)
-			tmpend = end;
+	tmpend = (u64)osb->s_clustersize + (start & ~(osb->s_clustersize - 1));
+	if (tmpend > end)
+		tmpend = end;
 
-		trace_ocfs2_zero_partial_clusters_range1(
-			(unsigned long long)start,
-			(unsigned long long)tmpend);
+	trace_ocfs2_zero_partial_clusters_range1((unsigned long long)start,
+						 (unsigned long long)tmpend);
 
-		ret = ocfs2_zero_range_for_truncate(inode, handle, start,
-						    tmpend);
-		if (ret)
-			mlog_errno(ret);
-	}
+	ret = ocfs2_zero_range_for_truncate(inode, handle, start, tmpend);
+	if (ret)
+		mlog_errno(ret);
 
 	if (tmpend < end) {
 		/*
@@ -1585,7 +1578,6 @@ static int ocfs2_zero_partial_clusters(struct inode *inode,
 		if (ret)
 			mlog_errno(ret);
 	}
-	ocfs2_update_inode_fsync_trans(handle, inode, 1);
 
 	ocfs2_commit_trans(osb, handle);
 out:
@@ -1813,7 +1805,7 @@ static int ocfs2_remove_inode_range(struct inode *inode,
 
 		ret = ocfs2_remove_btree_range(inode, &et, trunc_cpos,
 					       phys_cpos, trunc_len, flags,
-					       &dealloc, refcount_loc, false);
+					       &dealloc, refcount_loc);
 		if (ret < 0) {
 			mlog_errno(ret);
 			goto out;
@@ -1827,7 +1819,6 @@ static int ocfs2_remove_inode_range(struct inode *inode,
 	ocfs2_truncate_cluster_pages(inode, byte_start, byte_len);
 
 out:
-	ocfs2_free_path(path);
 	ocfs2_schedule_truncate_log_flush(osb, 1);
 	ocfs2_run_deallocs(osb, &dealloc);
 
@@ -1853,7 +1844,7 @@ static int __ocfs2_change_file_space(struct file *file, struct inode *inode,
 	if (ocfs2_is_hard_readonly(osb) || ocfs2_is_soft_readonly(osb))
 		return -EROFS;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 
 	/*
 	 * This prevents concurrent writes on other nodes
@@ -1901,8 +1892,7 @@ static int __ocfs2_change_file_space(struct file *file, struct inode *inode,
 	}
 	size = sr->l_start + sr->l_len;
 
-	if (cmd == OCFS2_IOC_RESVSP || cmd == OCFS2_IOC_RESVSP64 ||
-	    cmd == OCFS2_IOC_UNRESVSP || cmd == OCFS2_IOC_UNRESVSP64) {
+	if (cmd == OCFS2_IOC_RESVSP || cmd == OCFS2_IOC_RESVSP64) {
 		if (sr->l_len <= 0) {
 			ret = -EINVAL;
 			goto out_inode_unlock;
@@ -1955,7 +1945,7 @@ static int __ocfs2_change_file_space(struct file *file, struct inode *inode,
 	if (change_size && i_size_read(inode) < size)
 		i_size_write(inode, size);
 
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = CURRENT_TIME;
 	ret = ocfs2_mark_inode_dirty(handle, inode, di_bh);
 	if (ret < 0)
 		mlog_errno(ret);
@@ -1972,16 +1962,15 @@ out_rw_unlock:
 	ocfs2_rw_unlock(inode, 1);
 
 out:
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	return ret;
 }
 
 int ocfs2_change_file_space(struct file *file, unsigned int cmd,
 			    struct ocfs2_space_resv *sr)
 {
-	struct inode *inode = file_inode(file);
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
-	int ret;
 
 	if ((cmd == OCFS2_IOC_RESVSP || cmd == OCFS2_IOC_RESVSP64) &&
 	    !ocfs2_writes_unwritten_extents(osb))
@@ -1996,18 +1985,13 @@ int ocfs2_change_file_space(struct file *file, unsigned int cmd,
 	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
 
-	ret = mnt_want_write_file(file);
-	if (ret)
-		return ret;
-	ret = __ocfs2_change_file_space(file, inode, file->f_pos, cmd, sr, 0);
-	mnt_drop_write_file(file);
-	return ret;
+	return __ocfs2_change_file_space(file, inode, file->f_pos, cmd, sr, 0);
 }
 
 static long ocfs2_fallocate(struct file *file, int mode, loff_t offset,
 			    loff_t len)
 {
-	struct inode *inode = file_inode(file);
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 	struct ocfs2_space_resv sr;
 	int change_size = 1;
@@ -2071,6 +2055,13 @@ out:
 	return ret;
 }
 
+static void ocfs2_aiodio_wait(struct inode *inode)
+{
+	wait_queue_head_t *wq = ocfs2_ioend_wq(inode);
+
+	wait_event(*wq, (atomic_read(&OCFS2_I(inode)->ip_unaligned_aio) == 0));
+}
+
 static int ocfs2_is_io_unaligned(struct inode *inode, size_t count, loff_t pos)
 {
 	int blockmask = inode->i_sb->s_blocksize - 1;
@@ -2100,7 +2091,7 @@ static int ocfs2_prepare_inode_for_refcount(struct inode *inode,
 
 	*meta_level = 1;
 
-	ret = ocfs2_refcount_cow(inode, di_bh, cpos, clusters, UINT_MAX);
+	ret = ocfs2_refcount_cow(inode, file, di_bh, cpos, clusters, UINT_MAX);
 	if (ret)
 		mlog_errno(ret);
 out:
@@ -2109,13 +2100,16 @@ out:
 }
 
 static int ocfs2_prepare_inode_for_write(struct file *file,
-					 loff_t pos,
-					 size_t count)
+					 loff_t *ppos,
+					 size_t count,
+					 int appending,
+					 int *direct_io,
+					 int *has_refcount)
 {
 	int ret = 0, meta_level = 0;
 	struct dentry *dentry = file->f_path.dentry;
-	struct inode *inode = d_inode(dentry);
-	loff_t end;
+	struct inode *inode = dentry->d_inode;
+	loff_t saved_pos = 0, end;
 
 	/*
 	 * We start with a read level meta lock and only jump to an ex
@@ -2152,18 +2146,29 @@ static int ocfs2_prepare_inode_for_write(struct file *file,
 			}
 		}
 
-		end = pos + count;
+		/* work on a copy of ppos until we're sure that we won't have
+		 * to recalculate it due to relocking. */
+		if (appending)
+			saved_pos = i_size_read(inode);
+		else
+			saved_pos = *ppos;
 
-		ret = ocfs2_check_range_for_refcount(inode, pos, count);
+		end = saved_pos + count;
+
+		ret = ocfs2_check_range_for_refcount(inode, saved_pos, count);
 		if (ret == 1) {
 			ocfs2_inode_unlock(inode, meta_level);
 			meta_level = -1;
 
 			ret = ocfs2_prepare_inode_for_refcount(inode,
 							       file,
-							       pos,
+							       saved_pos,
 							       count,
 							       &meta_level);
+			if (has_refcount)
+				*has_refcount = 1;
+			if (direct_io)
+				*direct_io = 0;
 		}
 
 		if (ret < 0) {
@@ -2171,12 +2176,55 @@ static int ocfs2_prepare_inode_for_write(struct file *file,
 			goto out_unlock;
 		}
 
+		/*
+		 * Skip the O_DIRECT checks if we don't need
+		 * them.
+		 */
+		if (!direct_io || !(*direct_io))
+			break;
+
+		/*
+		 * There's no sane way to do direct writes to an inode
+		 * with inline data.
+		 */
+		if (OCFS2_I(inode)->ip_dyn_features & OCFS2_INLINE_DATA_FL) {
+			*direct_io = 0;
+			break;
+		}
+
+		/*
+		 * Allowing concurrent direct writes means
+		 * i_size changes wouldn't be synchronized, so
+		 * one node could wind up truncating another
+		 * nodes writes.
+		 */
+		if (end > i_size_read(inode)) {
+			*direct_io = 0;
+			break;
+		}
+
+		/*
+		 * We don't fill holes during direct io, so
+		 * check for them here. If any are found, the
+		 * caller will have to retake some cluster
+		 * locks and initiate the io as buffered.
+		 */
+		ret = ocfs2_check_range_for_holes(inode, saved_pos, count);
+		if (ret == 1) {
+			*direct_io = 0;
+			ret = 0;
+		} else if (ret < 0)
+			mlog_errno(ret);
 		break;
 	}
 
+	if (appending)
+		*ppos = saved_pos;
+
 out_unlock:
 	trace_ocfs2_prepare_inode_for_write(OCFS2_I(inode)->ip_blkno,
-					    pos, count);
+					    saved_pos, appending, count,
+					    direct_io, has_refcount);
 
 	if (meta_level >= 0)
 		ocfs2_inode_unlock(inode, meta_level);
@@ -2185,46 +2233,61 @@ out:
 	return ret;
 }
 
-static ssize_t ocfs2_file_write_iter(struct kiocb *iocb,
-				    struct iov_iter *from)
+static ssize_t ocfs2_file_aio_write(struct kiocb *iocb,
+				    const struct iovec *iov,
+				    unsigned long nr_segs,
+				    loff_t pos)
 {
-	int direct_io, rw_level;
+	int ret, direct_io, appending, rw_level, have_alloc_sem  = 0;
+	int can_do_direct, has_refcount = 0;
 	ssize_t written = 0;
-	ssize_t ret;
-	size_t count = iov_iter_count(from);
+	size_t ocount;		/* original count */
+	size_t count;		/* after file limit checks */
+	loff_t old_size, *ppos = &iocb->ki_pos;
+	u32 old_clusters;
 	struct file *file = iocb->ki_filp;
-	struct inode *inode = file_inode(file);
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 	int full_coherency = !(osb->s_mount_opt &
 			       OCFS2_MOUNT_COHERENCY_BUFFERED);
-	void *saved_ki_complete = NULL;
-	int append_write = ((iocb->ki_pos + count) >=
-			i_size_read(inode) ? 1 : 0);
+	int unaligned_dio = 0;
 
 	trace_ocfs2_file_aio_write(inode, file, file->f_path.dentry,
 		(unsigned long long)OCFS2_I(inode)->ip_blkno,
 		file->f_path.dentry->d_name.len,
 		file->f_path.dentry->d_name.name,
-		(unsigned int)from->nr_segs);	/* GRRRRR */
+		(unsigned int)nr_segs);
 
-	if (count == 0)
+	if (iocb->ki_left == 0)
 		return 0;
 
-	direct_io = iocb->ki_flags & IOCB_DIRECT ? 1 : 0;
+	vfs_check_frozen(inode->i_sb, SB_FREEZE_WRITE);
 
-	inode_lock(inode);
+	appending = file->f_flags & O_APPEND ? 1 : 0;
+	direct_io = file->f_flags & O_DIRECT ? 1 : 0;
+
+	mutex_lock(&inode->i_mutex);
+
+	ocfs2_iocb_clear_sem_locked(iocb);
+
+relock:
+	/* to match setattr's i_mutex -> rw_lock ordering */
+	if (direct_io) {
+		have_alloc_sem = 1;
+		/* communicate with ocfs2_dio_end_io */
+		ocfs2_iocb_set_sem_locked(iocb);
+	}
 
 	/*
 	 * Concurrent O_DIRECT writes are allowed with
 	 * mount_option "coherency=buffered".
-	 * For append write, we must take rw EX.
 	 */
-	rw_level = (!direct_io || full_coherency || append_write);
+	rw_level = (!direct_io || full_coherency);
 
 	ret = ocfs2_rw_lock(inode, rw_level);
 	if (ret < 0) {
 		mlog_errno(ret);
-		goto out_mutex;
+		goto out_sems;
 	}
 
 	/*
@@ -2240,66 +2303,104 @@ static ssize_t ocfs2_file_write_iter(struct kiocb *iocb,
 		ret = ocfs2_inode_lock(inode, NULL, 1);
 		if (ret < 0) {
 			mlog_errno(ret);
-			goto out;
+			goto out_sems;
 		}
 
 		ocfs2_inode_unlock(inode, 1);
 	}
 
-	ret = generic_write_checks(iocb, from);
-	if (ret <= 0) {
-		if (ret)
-			mlog_errno(ret);
-		goto out;
-	}
-	count = ret;
-
-	ret = ocfs2_prepare_inode_for_write(file, iocb->ki_pos, count);
+	can_do_direct = direct_io;
+	ret = ocfs2_prepare_inode_for_write(file, ppos,
+					    iocb->ki_left, appending,
+					    &can_do_direct, &has_refcount);
 	if (ret < 0) {
 		mlog_errno(ret);
 		goto out;
 	}
 
-	if (direct_io && !is_sync_kiocb(iocb) &&
-	    ocfs2_is_io_unaligned(inode, count, iocb->ki_pos)) {
-		/*
-		 * Make it a sync io if it's an unaligned aio.
-		 */
-		saved_ki_complete = xchg(&iocb->ki_complete, NULL);
+	if (direct_io && !is_sync_kiocb(iocb))
+		unaligned_dio = ocfs2_is_io_unaligned(inode, iocb->ki_left,
+						      *ppos);
+
+	/*
+	 * We can't complete the direct I/O as requested, fall back to
+	 * buffered I/O.
+	 */
+	if (direct_io && !can_do_direct) {
+		ocfs2_rw_unlock(inode, rw_level);
+
+		have_alloc_sem = 0;
+		rw_level = -1;
+
+		direct_io = 0;
+		goto relock;
 	}
+
+	if (unaligned_dio) {
+		/*
+		 * Wait on previous unaligned aio to complete before
+		 * proceeding.
+		 */
+		ocfs2_aiodio_wait(inode);
+
+		/* Mark the iocb as needing a decrement in ocfs2_dio_end_io */
+		atomic_inc(&OCFS2_I(inode)->ip_unaligned_aio);
+		ocfs2_iocb_set_unaligned_aio(iocb);
+	}
+
+	/*
+	 * To later detect whether a journal commit for sync writes is
+	 * necessary, we sample i_size, and cluster count here.
+	 */
+	old_size = i_size_read(inode);
+	old_clusters = OCFS2_I(inode)->ip_clusters;
 
 	/* communicate with ocfs2_dio_end_io */
 	ocfs2_iocb_set_rw_locked(iocb, rw_level);
 
-	written = __generic_file_write_iter(iocb, from);
-	/* buffered aio wouldn't have proper lock coverage today */
-	BUG_ON(written == -EIOCBQUEUED && !(iocb->ki_flags & IOCB_DIRECT));
+	ret = generic_segment_checks(iov, &nr_segs, &ocount,
+				     VERIFY_READ);
+	if (ret)
+		goto out_dio;
 
-	/*
-	 * deep in g_f_a_w_n()->ocfs2_direct_IO we pass in a ocfs2_dio_end_io
-	 * function pointer which is called when o_direct io completes so that
-	 * it can unlock our rw lock.
-	 * Unfortunately there are error cases which call end_io and others
-	 * that don't.  so we don't have to unlock the rw_lock if either an
-	 * async dio is going to do it in the future or an end_io after an
-	 * error has already done it.
-	 */
-	if ((written == -EIOCBQUEUED) || (!ocfs2_iocb_is_rw_locked(iocb))) {
-		rw_level = -1;
+	count = ocount;
+	ret = generic_write_checks(file, ppos, &count,
+				   S_ISBLK(inode->i_mode));
+	if (ret)
+		goto out_dio;
+
+	if (direct_io) {
+		written = generic_file_direct_write(iocb, iov, &nr_segs, *ppos,
+						    ppos, count, ocount);
+		if (written < 0) {
+			ret = written;
+			goto out_dio;
+		}
+	} else {
+		current->backing_dev_info = file->f_mapping->backing_dev_info;
+		written = generic_file_buffered_write(iocb, iov, nr_segs, *ppos,
+						      ppos, count, 0);
+		current->backing_dev_info = NULL;
 	}
 
-	if (unlikely(written <= 0))
-		goto out;
+out_dio:
+	/* buffered aio wouldn't have proper lock coverage today */
+	BUG_ON(ret == -EIOCBQUEUED && !(file->f_flags & O_DIRECT));
 
-	if (((file->f_flags & O_DSYNC) && !direct_io) ||
-	    IS_SYNC(inode)) {
+	if (unlikely(written <= 0))
+		goto no_sync;
+
+	if (((file->f_flags & O_DSYNC) && !direct_io) || IS_SYNC(inode) ||
+	    ((file->f_flags & O_DIRECT) && !direct_io)) {
 		ret = filemap_fdatawrite_range(file->f_mapping,
 					       iocb->ki_pos - written,
 					       iocb->ki_pos - 1);
 		if (ret < 0)
 			written = ret;
 
-		if (!ret) {
+		if (!ret && ((old_size != i_size_read(inode)) ||
+			     (old_clusters != OCFS2_I(inode)->ip_clusters) ||
+			     has_refcount)) {
 			ret = jbd2_journal_force_commit(osb->journal->j_journal);
 			if (ret < 0)
 				written = ret;
@@ -2311,33 +2412,172 @@ static ssize_t ocfs2_file_write_iter(struct kiocb *iocb,
 						      iocb->ki_pos - 1);
 	}
 
-out:
-	if (saved_ki_complete)
-		xchg(&iocb->ki_complete, saved_ki_complete);
+no_sync:
+	/*
+	 * deep in g_f_a_w_n()->ocfs2_direct_IO we pass in a ocfs2_dio_end_io
+	 * function pointer which is called when o_direct io completes so that
+	 * it can unlock our rw lock.
+	 * Unfortunately there are error cases which call end_io and others
+	 * that don't.  so we don't have to unlock the rw_lock if either an
+	 * async dio is going to do it in the future or an end_io after an
+	 * error has already done it.
+	 */
+	if ((ret == -EIOCBQUEUED) || (!ocfs2_iocb_is_rw_locked(iocb))) {
+		rw_level = -1;
+		have_alloc_sem = 0;
+		unaligned_dio = 0;
+	}
 
+	if (unaligned_dio) {
+		ocfs2_iocb_clear_unaligned_aio(iocb);
+		atomic_dec(&OCFS2_I(inode)->ip_unaligned_aio);
+	}
+
+out:
 	if (rw_level != -1)
 		ocfs2_rw_unlock(inode, rw_level);
 
-out_mutex:
-	inode_unlock(inode);
+out_sems:
+	if (have_alloc_sem)
+		ocfs2_iocb_clear_sem_locked(iocb);
+
+	mutex_unlock(&inode->i_mutex);
 
 	if (written)
 		ret = written;
 	return ret;
 }
 
-static ssize_t ocfs2_file_read_iter(struct kiocb *iocb,
-				   struct iov_iter *to)
+static int ocfs2_splice_to_file(struct pipe_inode_info *pipe,
+				struct file *out,
+				struct splice_desc *sd)
 {
-	int ret = 0, rw_level = -1, lock_level = 0;
+	int ret;
+
+	ret = ocfs2_prepare_inode_for_write(out, &sd->pos,
+					    sd->total_len, 0, NULL, NULL);
+	if (ret < 0) {
+		mlog_errno(ret);
+		return ret;
+	}
+
+	return splice_from_pipe_feed(pipe, sd, pipe_to_file);
+}
+
+static ssize_t ocfs2_file_splice_write(struct pipe_inode_info *pipe,
+				       struct file *out,
+				       loff_t *ppos,
+				       size_t len,
+				       unsigned int flags)
+{
+	int ret;
+	struct address_space *mapping = out->f_mapping;
+	struct inode *inode = mapping->host;
+	struct splice_desc sd = {
+		.flags = flags,
+		.u.file = out,
+	};
+
+
+	trace_ocfs2_file_splice_write(inode, out, out->f_path.dentry,
+			(unsigned long long)OCFS2_I(inode)->ip_blkno,
+			out->f_path.dentry->d_name.len,
+			out->f_path.dentry->d_name.name, len);
+
+	ret = generic_write_checks(out, ppos, &len, 0);
+	if (ret)
+		return ret;
+	sd.total_len = len;
+	sd.pos = *ppos;
+
+	if (pipe->inode)
+		mutex_lock_nested(&pipe->inode->i_mutex, I_MUTEX_PARENT);
+
+	splice_from_pipe_begin(&sd);
+	do {
+		ret = splice_from_pipe_next(pipe, &sd);
+		if (ret <= 0)
+			break;
+
+		mutex_lock_nested(&inode->i_mutex, I_MUTEX_CHILD);
+		ret = ocfs2_rw_lock(inode, 1);
+		if (ret < 0)
+			mlog_errno(ret);
+		else {
+			ret = ocfs2_splice_to_file(pipe, out, &sd);
+			ocfs2_rw_unlock(inode, 1);
+		}
+		mutex_unlock(&inode->i_mutex);
+	} while (ret > 0);
+	splice_from_pipe_end(pipe, &sd);
+
+	if (pipe->inode)
+		mutex_unlock(&pipe->inode->i_mutex);
+
+	if (sd.num_spliced)
+		ret = sd.num_spliced;
+
+	if (ret > 0) {
+		unsigned long nr_pages;
+		int err;
+
+		nr_pages = (ret + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+
+		err = generic_write_sync(out, *ppos, ret);
+		if (err)
+			ret = err;
+		else
+			*ppos += ret;
+
+		balance_dirty_pages_ratelimited_nr(mapping, nr_pages);
+	}
+
+	return ret;
+}
+
+static ssize_t ocfs2_file_splice_read(struct file *in,
+				      loff_t *ppos,
+				      struct pipe_inode_info *pipe,
+				      size_t len,
+				      unsigned int flags)
+{
+	int ret = 0, lock_level = 0;
+	struct inode *inode = in->f_path.dentry->d_inode;
+
+	trace_ocfs2_file_splice_read(inode, in, in->f_path.dentry,
+			(unsigned long long)OCFS2_I(inode)->ip_blkno,
+			in->f_path.dentry->d_name.len,
+			in->f_path.dentry->d_name.name, len);
+
+	/*
+	 * See the comment in ocfs2_file_aio_read()
+	 */
+	ret = ocfs2_inode_lock_atime(inode, in->f_vfsmnt, &lock_level);
+	if (ret < 0) {
+		mlog_errno(ret);
+		goto bail;
+	}
+	ocfs2_inode_unlock(inode, lock_level);
+
+	ret = generic_file_splice_read(in, ppos, pipe, len, flags);
+
+bail:
+	return ret;
+}
+
+static ssize_t ocfs2_file_aio_read(struct kiocb *iocb,
+				   const struct iovec *iov,
+				   unsigned long nr_segs,
+				   loff_t pos)
+{
+	int ret = 0, rw_level = -1, have_alloc_sem = 0, lock_level = 0;
 	struct file *filp = iocb->ki_filp;
-	struct inode *inode = file_inode(filp);
+	struct inode *inode = filp->f_path.dentry->d_inode;
 
 	trace_ocfs2_file_aio_read(inode, filp, filp->f_path.dentry,
 			(unsigned long long)OCFS2_I(inode)->ip_blkno,
 			filp->f_path.dentry->d_name.len,
-			filp->f_path.dentry->d_name.name,
-			to->nr_segs);	/* GRRRRR */
+			filp->f_path.dentry->d_name.name, nr_segs);
 
 
 	if (!inode) {
@@ -2346,11 +2586,16 @@ static ssize_t ocfs2_file_read_iter(struct kiocb *iocb,
 		goto bail;
 	}
 
+	ocfs2_iocb_clear_sem_locked(iocb);
+
 	/*
 	 * buffered reads protect themselves in ->readpage().  O_DIRECT reads
 	 * need locks to protect pending reads from racing with truncate.
 	 */
-	if (iocb->ki_flags & IOCB_DIRECT) {
+	if (filp->f_flags & O_DIRECT) {
+		have_alloc_sem = 1;
+		ocfs2_iocb_set_sem_locked(iocb);
+
 		ret = ocfs2_rw_lock(inode, 0);
 		if (ret < 0) {
 			mlog_errno(ret);
@@ -2370,25 +2615,29 @@ static ssize_t ocfs2_file_read_iter(struct kiocb *iocb,
 	 * like i_size. This allows the checks down below
 	 * generic_file_aio_read() a chance of actually working.
 	 */
-	ret = ocfs2_inode_lock_atime(inode, filp->f_path.mnt, &lock_level);
+	ret = ocfs2_inode_lock_atime(inode, filp->f_vfsmnt, &lock_level);
 	if (ret < 0) {
 		mlog_errno(ret);
 		goto bail;
 	}
 	ocfs2_inode_unlock(inode, lock_level);
 
-	ret = generic_file_read_iter(iocb, to);
+	ret = generic_file_aio_read(iocb, iov, nr_segs, iocb->ki_pos);
 	trace_generic_file_aio_read_ret(ret);
 
 	/* buffered aio wouldn't have proper lock coverage today */
-	BUG_ON(ret == -EIOCBQUEUED && !(iocb->ki_flags & IOCB_DIRECT));
+	BUG_ON(ret == -EIOCBQUEUED && !(filp->f_flags & O_DIRECT));
 
-	/* see ocfs2_file_write_iter */
+	/* see ocfs2_file_aio_write */
 	if (ret == -EIOCBQUEUED || !ocfs2_iocb_is_rw_locked(iocb)) {
 		rw_level = -1;
+		have_alloc_sem = 0;
 	}
 
 bail:
+	if (have_alloc_sem)
+		ocfs2_iocb_clear_sem_locked(iocb);
+
 	if (rw_level != -1)
 		ocfs2_rw_unlock(inode, rw_level);
 
@@ -2396,27 +2645,18 @@ bail:
 }
 
 /* Refer generic_file_llseek_unlocked() */
-static loff_t ocfs2_file_llseek(struct file *file, loff_t offset, int whence)
+static loff_t ocfs2_file_llseek(struct file *file, loff_t offset, int origin)
 {
 	struct inode *inode = file->f_mapping->host;
 	int ret = 0;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 
-	switch (whence) {
+	switch (origin) {
 	case SEEK_SET:
 		break;
 	case SEEK_END:
-		/* SEEK_END requires the OCFS2 inode lock for the file
-		 * because it references the file's size.
-		 */
-		ret = ocfs2_inode_lock(inode, NULL, 0);
-		if (ret < 0) {
-			mlog_errno(ret);
-			goto out;
-		}
-		offset += i_size_read(inode);
-		ocfs2_inode_unlock(inode, 0);
+		offset += inode->i_size;
 		break;
 	case SEEK_CUR:
 		if (offset == 0) {
@@ -2427,7 +2667,7 @@ static loff_t ocfs2_file_llseek(struct file *file, loff_t offset, int whence)
 		break;
 	case SEEK_DATA:
 	case SEEK_HOLE:
-		ret = ocfs2_seek_data_hole_offset(file, &offset, whence);
+		ret = ocfs2_seek_data_hole_offset(file, &offset, origin);
 		if (ret)
 			goto out;
 		break;
@@ -2436,10 +2676,20 @@ static loff_t ocfs2_file_llseek(struct file *file, loff_t offset, int whence)
 		goto out;
 	}
 
-	offset = vfs_setpos(file, offset, inode->i_sb->s_maxbytes);
+	if (offset < 0 && !(file->f_mode & FMODE_UNSIGNED_OFFSET))
+		ret = -EINVAL;
+	if (!ret && offset > inode->i_sb->s_maxbytes)
+		ret = -EINVAL;
+	if (ret)
+		goto out;
+
+	if (offset != file->f_pos) {
+		file->f_pos = offset;
+		file->f_version = 0;
+	}
 
 out:
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	if (ret)
 		return ret;
 	return offset;
@@ -2449,10 +2699,12 @@ const struct inode_operations ocfs2_file_iops = {
 	.setattr	= ocfs2_setattr,
 	.getattr	= ocfs2_getattr,
 	.permission	= ocfs2_permission,
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= ocfs2_listxattr,
+	.removexattr	= generic_removexattr,
 	.fiemap		= ocfs2_fiemap,
 	.get_acl	= ocfs2_iop_get_acl,
-	.set_acl	= ocfs2_iop_set_acl,
 };
 
 const struct inode_operations ocfs2_special_file_iops = {
@@ -2460,7 +2712,6 @@ const struct inode_operations ocfs2_special_file_iops = {
 	.getattr	= ocfs2_getattr,
 	.permission	= ocfs2_permission,
 	.get_acl	= ocfs2_iop_get_acl,
-	.set_acl	= ocfs2_iop_set_acl,
 };
 
 /*
@@ -2469,27 +2720,29 @@ const struct inode_operations ocfs2_special_file_iops = {
  */
 const struct file_operations ocfs2_fops = {
 	.llseek		= ocfs2_file_llseek,
+	.read		= do_sync_read,
+	.write		= do_sync_write,
 	.mmap		= ocfs2_mmap,
 	.fsync		= ocfs2_sync_file,
 	.release	= ocfs2_file_release,
 	.open		= ocfs2_file_open,
-	.read_iter	= ocfs2_file_read_iter,
-	.write_iter	= ocfs2_file_write_iter,
+	.aio_read	= ocfs2_file_aio_read,
+	.aio_write	= ocfs2_file_aio_write,
 	.unlocked_ioctl	= ocfs2_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl   = ocfs2_compat_ioctl,
 #endif
 	.lock		= ocfs2_lock,
 	.flock		= ocfs2_flock,
-	.splice_read	= generic_file_splice_read,
-	.splice_write	= iter_file_splice_write,
+	.splice_read	= ocfs2_file_splice_read,
+	.splice_write	= ocfs2_file_splice_write,
 	.fallocate	= ocfs2_fallocate,
 };
 
 const struct file_operations ocfs2_dops = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
-	.iterate	= ocfs2_readdir,
+	.readdir	= ocfs2_readdir,
 	.fsync		= ocfs2_sync_file,
 	.release	= ocfs2_dir_release,
 	.open		= ocfs2_dir_open,
@@ -2515,26 +2768,28 @@ const struct file_operations ocfs2_dops = {
  */
 const struct file_operations ocfs2_fops_no_plocks = {
 	.llseek		= ocfs2_file_llseek,
+	.read		= do_sync_read,
+	.write		= do_sync_write,
 	.mmap		= ocfs2_mmap,
 	.fsync		= ocfs2_sync_file,
 	.release	= ocfs2_file_release,
 	.open		= ocfs2_file_open,
-	.read_iter	= ocfs2_file_read_iter,
-	.write_iter	= ocfs2_file_write_iter,
+	.aio_read	= ocfs2_file_aio_read,
+	.aio_write	= ocfs2_file_aio_write,
 	.unlocked_ioctl	= ocfs2_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl   = ocfs2_compat_ioctl,
 #endif
 	.flock		= ocfs2_flock,
-	.splice_read	= generic_file_splice_read,
-	.splice_write	= iter_file_splice_write,
+	.splice_read	= ocfs2_file_splice_read,
+	.splice_write	= ocfs2_file_splice_write,
 	.fallocate	= ocfs2_fallocate,
 };
 
 const struct file_operations ocfs2_dops_no_plocks = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
-	.iterate	= ocfs2_readdir,
+	.readdir	= ocfs2_readdir,
 	.fsync		= ocfs2_sync_file,
 	.release	= ocfs2_dir_release,
 	.open		= ocfs2_dir_open,

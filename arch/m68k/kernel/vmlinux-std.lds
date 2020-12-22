@@ -15,10 +15,7 @@ SECTIONS
   .text : {
 	HEAD_TEXT
 	TEXT_TEXT
-	IRQENTRY_TEXT
-	SOFTIRQENTRY_TEXT
 	SCHED_TEXT
-	CPUIDLE_TEXT
 	LOCK_TEXT
 	*(.fixup)
 	*(.gnu.warning)
@@ -34,7 +31,9 @@ SECTIONS
 
   RW_DATA_SECTION(16, PAGE_SIZE, THREAD_SIZE)
 
+  _sbss = .;
   BSS_SECTION(0, 0, 0)
+  _ebss = .;
 
   _edata = .;			/* End of data section */
 

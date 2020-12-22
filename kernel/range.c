@@ -4,7 +4,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/sort.h>
-#include <linux/string.h>
+
 #include <linux/range.h>
 
 int add_range(struct range *range, int az, int nr_range, u64 start, u64 end)
@@ -32,8 +32,9 @@ int add_range_with_merge(struct range *range, int az, int nr_range,
 	if (start >= end)
 		return nr_range;
 
-	/* get new start/end: */
+	/* Try to merge it with old one: */
 	for (i = 0; i < nr_range; i++) {
+		u64 final_start, final_end;
 		u64 common_start, common_end;
 
 		if (!range[i].end)
@@ -44,16 +45,12 @@ int add_range_with_merge(struct range *range, int az, int nr_range,
 		if (common_start > common_end)
 			continue;
 
-		/* new start/end, will add it back at last */
-		start = min(range[i].start, start);
-		end = max(range[i].end, end);
+		final_start = min(range[i].start, start);
+		final_end = max(range[i].end, end);
 
-		memmove(&range[i], &range[i + 1],
-			(nr_range - (i + 1)) * sizeof(range[i]));
-		range[nr_range - 1].start = 0;
-		range[nr_range - 1].end   = 0;
-		nr_range--;
-		i--;
+		range[i].start = final_start;
+		range[i].end =  final_end;
+		return nr_range;
 	}
 
 	/* Need to add it: */
@@ -100,8 +97,7 @@ void subtract_range(struct range *range, int az, u64 start, u64 end)
 				range[i].end = range[j].end;
 				range[i].start = end;
 			} else {
-				pr_err("%s: run out of slot in ranges\n",
-					__func__);
+				printk(KERN_ERR "run of slot in ranges\n");
 			}
 			range[j].end = start;
 			continue;
@@ -113,12 +109,12 @@ static int cmp_range(const void *x1, const void *x2)
 {
 	const struct range *r1 = x1;
 	const struct range *r2 = x2;
+	s64 start1, start2;
 
-	if (r1->start < r2->start)
-		return -1;
-	if (r1->start > r2->start)
-		return 1;
-	return 0;
+	start1 = r1->start;
+	start2 = r2->start;
+
+	return start1 - start2;
 }
 
 int clean_sort_range(struct range *range, int az)

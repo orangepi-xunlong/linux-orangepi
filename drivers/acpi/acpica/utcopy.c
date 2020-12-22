@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -53,7 +53,7 @@ ACPI_MODULE_NAME("utcopy")
 static acpi_status
 acpi_ut_copy_isimple_to_esimple(union acpi_operand_object *internal_object,
 				union acpi_object *external_object,
-				u8 *data_space, acpi_size *buffer_space_used);
+				u8 * data_space, acpi_size * buffer_space_used);
 
 static acpi_status
 acpi_ut_copy_ielement_to_ielement(u8 object_type,
@@ -63,7 +63,7 @@ acpi_ut_copy_ielement_to_ielement(u8 object_type,
 
 static acpi_status
 acpi_ut_copy_ipackage_to_epackage(union acpi_operand_object *internal_object,
-				  u8 *buffer, acpi_size *space_used);
+				  u8 * buffer, acpi_size * space_used);
 
 static acpi_status
 acpi_ut_copy_esimple_to_isimple(union acpi_object *user_obj,
@@ -111,7 +111,7 @@ acpi_ut_copy_ipackage_to_ipackage(union acpi_operand_object *source_obj,
 static acpi_status
 acpi_ut_copy_isimple_to_esimple(union acpi_operand_object *internal_object,
 				union acpi_object *external_object,
-				u8 *data_space, acpi_size *buffer_space_used)
+				u8 * data_space, acpi_size * buffer_space_used)
 {
 	acpi_status status = AE_OK;
 
@@ -129,7 +129,7 @@ acpi_ut_copy_isimple_to_esimple(union acpi_operand_object *internal_object,
 
 	/* Always clear the external object */
 
-	memset(external_object, 0, sizeof(union acpi_object));
+	ACPI_MEMSET(external_object, 0, sizeof(union acpi_object));
 
 	/*
 	 * In general, the external object will be the same type as
@@ -149,9 +149,9 @@ acpi_ut_copy_isimple_to_esimple(union acpi_operand_object *internal_object,
 								  string.
 								  length + 1);
 
-		memcpy((void *)data_space,
-		       (void *)internal_object->string.pointer,
-		       (acpi_size)internal_object->string.length + 1);
+		ACPI_MEMCPY((void *)data_space,
+			    (void *)internal_object->string.pointer,
+			    (acpi_size) internal_object->string.length + 1);
 		break;
 
 	case ACPI_TYPE_BUFFER:
@@ -162,9 +162,9 @@ acpi_ut_copy_isimple_to_esimple(union acpi_operand_object *internal_object,
 		    ACPI_ROUND_UP_TO_NATIVE_WORD(internal_object->string.
 						 length);
 
-		memcpy((void *)data_space,
-		       (void *)internal_object->buffer.pointer,
-		       internal_object->buffer.length);
+		ACPI_MEMCPY((void *)data_space,
+			    (void *)internal_object->buffer.pointer,
+			    internal_object->buffer.length);
 		break;
 
 	case ACPI_TYPE_INTEGER:
@@ -178,6 +178,7 @@ acpi_ut_copy_isimple_to_esimple(union acpi_operand_object *internal_object,
 
 		switch (internal_object->reference.class) {
 		case ACPI_REFCLASS_NAME:
+
 			/*
 			 * For namepath, return the object handle ("reference")
 			 * We are referring to the namespace node
@@ -257,12 +258,13 @@ acpi_ut_copy_ielement_to_eelement(u8 object_type,
 	ACPI_FUNCTION_ENTRY();
 
 	this_index = state->pkg.index;
-	target_object = (union acpi_object *)&((union acpi_object *)
-					       (state->pkg.dest_object))->
-	    package.elements[this_index];
+	target_object = (union acpi_object *)
+	    &((union acpi_object *)(state->pkg.dest_object))->package.
+	    elements[this_index];
 
 	switch (object_type) {
 	case ACPI_COPY_TYPE_SIMPLE:
+
 		/*
 		 * This is a simple or null object
 		 */
@@ -276,6 +278,7 @@ acpi_ut_copy_ielement_to_eelement(u8 object_type,
 		break;
 
 	case ACPI_COPY_TYPE_PACKAGE:
+
 		/*
 		 * Build the package object
 		 */
@@ -301,7 +304,6 @@ acpi_ut_copy_ielement_to_eelement(u8 object_type,
 		break;
 
 	default:
-
 		return (AE_BAD_PARAMETER);
 	}
 
@@ -315,7 +317,7 @@ acpi_ut_copy_ielement_to_eelement(u8 object_type,
  * FUNCTION:    acpi_ut_copy_ipackage_to_epackage
  *
  * PARAMETERS:  internal_object     - Pointer to the object we are returning
- *              buffer              - Where the object is returned
+ *              Buffer              - Where the object is returned
  *              space_used          - Where the object length is returned
  *
  * RETURN:      Status
@@ -331,7 +333,7 @@ acpi_ut_copy_ielement_to_eelement(u8 object_type,
 
 static acpi_status
 acpi_ut_copy_ipackage_to_epackage(union acpi_operand_object *internal_object,
-				  u8 *buffer, acpi_size *space_used)
+				  u8 * buffer, acpi_size * space_used)
 {
 	union acpi_object *external_object;
 	acpi_status status;
@@ -348,21 +350,21 @@ acpi_ut_copy_ipackage_to_epackage(union acpi_operand_object *internal_object,
 	 * Free space begins right after the first package
 	 */
 	info.length = ACPI_ROUND_UP_TO_NATIVE_WORD(sizeof(union acpi_object));
-	info.free_space = buffer +
-	    ACPI_ROUND_UP_TO_NATIVE_WORD(sizeof(union acpi_object));
+	info.free_space =
+	    buffer + ACPI_ROUND_UP_TO_NATIVE_WORD(sizeof(union acpi_object));
 	info.object_space = 0;
 	info.num_packages = 1;
 
 	external_object->type = internal_object->common.type;
 	external_object->package.count = internal_object->package.count;
-	external_object->package.elements =
-	    ACPI_CAST_PTR(union acpi_object, info.free_space);
+	external_object->package.elements = ACPI_CAST_PTR(union acpi_object,
+							  info.free_space);
 
 	/*
 	 * Leave room for an array of ACPI_OBJECTS in the buffer
 	 * and move the free space past it
 	 */
-	info.length += (acpi_size)external_object->package.count *
+	info.length += (acpi_size) external_object->package.count *
 	    ACPI_ROUND_UP_TO_NATIVE_WORD(sizeof(union acpi_object));
 	info.free_space += external_object->package.count *
 	    ACPI_ROUND_UP_TO_NATIVE_WORD(sizeof(union acpi_object));
@@ -479,7 +481,6 @@ acpi_ut_copy_esimple_to_isimple(union acpi_object *external_object,
 		return_ACPI_STATUS(AE_OK);
 
 	default:
-
 		/* All other types are not supported */
 
 		ACPI_ERROR((AE_INFO,
@@ -502,9 +503,9 @@ acpi_ut_copy_esimple_to_isimple(union acpi_object *external_object,
 			goto error_exit;
 		}
 
-		memcpy(internal_object->string.pointer,
-		       external_object->string.pointer,
-		       external_object->string.length);
+		ACPI_MEMCPY(internal_object->string.pointer,
+			    external_object->string.pointer,
+			    external_object->string.length);
 
 		internal_object->string.length = external_object->string.length;
 		break;
@@ -517,9 +518,9 @@ acpi_ut_copy_esimple_to_isimple(union acpi_object *external_object,
 			goto error_exit;
 		}
 
-		memcpy(internal_object->buffer.pointer,
-		       external_object->buffer.pointer,
-		       external_object->buffer.length);
+		ACPI_MEMCPY(internal_object->buffer.pointer,
+			    external_object->buffer.pointer,
+			    external_object->buffer.length);
 
 		internal_object->buffer.length = external_object->buffer.length;
 
@@ -535,24 +536,22 @@ acpi_ut_copy_esimple_to_isimple(union acpi_object *external_object,
 
 	case ACPI_TYPE_LOCAL_REFERENCE:
 
-		/* An incoming reference is defined to be a namespace node */
+		/* TBD: should validate incoming handle */
 
-		internal_object->reference.class = ACPI_REFCLASS_REFOF;
-		internal_object->reference.object =
+		internal_object->reference.class = ACPI_REFCLASS_NAME;
+		internal_object->reference.node =
 		    external_object->reference.handle;
 		break;
 
 	default:
-
 		/* Other types can't get here */
-
 		break;
 	}
 
 	*ret_internal_object = internal_object;
 	return_ACPI_STATUS(AE_OK);
 
-error_exit:
+      error_exit:
 	acpi_ut_remove_reference(internal_object);
 	return_ACPI_STATUS(AE_NO_MEMORY);
 }
@@ -593,8 +592,8 @@ acpi_ut_copy_epackage_to_ipackage(union acpi_object *external_object,
 	package_elements = package_object->package.elements;
 
 	/*
-	 * Recursive implementation. Probably ok, since nested external
-	 * packages as parameters should be very rare.
+	 * Recursive implementation. Probably ok, since nested external packages
+	 * as parameters should be very rare.
 	 */
 	for (i = 0; i < external_object->package.count; i++) {
 		status =
@@ -649,8 +648,9 @@ acpi_ut_copy_eobject_to_iobject(union acpi_object *external_object,
 		/*
 		 * Build a simple object (no nested objects)
 		 */
-		status = acpi_ut_copy_esimple_to_isimple(external_object,
-							 internal_object);
+		status =
+		    acpi_ut_copy_esimple_to_isimple(external_object,
+						    internal_object);
 	}
 
 	return_ACPI_STATUS(status);
@@ -693,8 +693,8 @@ acpi_ut_copy_simple_object(union acpi_operand_object *source_desc,
 		copy_size = sizeof(struct acpi_namespace_node);
 	}
 
-	memcpy(ACPI_CAST_PTR(char, dest_desc),
-	       ACPI_CAST_PTR(char, source_desc), copy_size);
+	ACPI_MEMCPY(ACPI_CAST_PTR(char, dest_desc),
+		    ACPI_CAST_PTR(char, source_desc), copy_size);
 
 	/* Restore the saved fields */
 
@@ -724,9 +724,9 @@ acpi_ut_copy_simple_object(union acpi_operand_object *source_desc,
 
 			/* Copy the actual buffer data */
 
-			memcpy(dest_desc->buffer.pointer,
-			       source_desc->buffer.pointer,
-			       source_desc->buffer.length);
+			ACPI_MEMCPY(dest_desc->buffer.pointer,
+				    source_desc->buffer.pointer,
+				    source_desc->buffer.length);
 		}
 		break;
 
@@ -738,7 +738,7 @@ acpi_ut_copy_simple_object(union acpi_operand_object *source_desc,
 		 */
 		if (source_desc->string.pointer) {
 			dest_desc->string.pointer =
-			    ACPI_ALLOCATE((acpi_size)source_desc->string.
+			    ACPI_ALLOCATE((acpi_size) source_desc->string.
 					  length + 1);
 			if (!dest_desc->string.pointer) {
 				return (AE_NO_MEMORY);
@@ -746,9 +746,9 @@ acpi_ut_copy_simple_object(union acpi_operand_object *source_desc,
 
 			/* Copy the actual string data */
 
-			memcpy(dest_desc->string.pointer,
-			       source_desc->string.pointer,
-			       (acpi_size)source_desc->string.length + 1);
+			ACPI_MEMCPY(dest_desc->string.pointer,
+				    source_desc->string.pointer,
+				    (acpi_size) source_desc->string.length + 1);
 		}
 		break;
 
@@ -785,7 +785,7 @@ acpi_ut_copy_simple_object(union acpi_operand_object *source_desc,
 
 		status = acpi_os_create_mutex(&dest_desc->mutex.os_mutex);
 		if (ACPI_FAILURE(status)) {
-			return (status);
+			return status;
 		}
 		break;
 
@@ -795,14 +795,12 @@ acpi_ut_copy_simple_object(union acpi_operand_object *source_desc,
 						  &dest_desc->event.
 						  os_semaphore);
 		if (ACPI_FAILURE(status)) {
-			return (status);
+			return status;
 		}
 		break;
 
 	default:
-
 		/* Nothing to do for other simple objects */
-
 		break;
 	}
 
@@ -870,6 +868,7 @@ acpi_ut_copy_ielement_to_ielement(u8 object_type,
 		break;
 
 	case ACPI_COPY_TYPE_PACKAGE:
+
 		/*
 		 * This object is a package - go down another nesting level
 		 * Create and build the package object
@@ -892,13 +891,12 @@ acpi_ut_copy_ielement_to_ielement(u8 object_type,
 		break;
 
 	default:
-
 		return (AE_BAD_PARAMETER);
 	}
 
 	return (status);
 
-error_exit:
+      error_exit:
 	acpi_ut_remove_reference(target_object);
 	return (status);
 }
@@ -998,12 +996,6 @@ acpi_ut_copy_iobject_to_iobject(union acpi_operand_object *source_desc,
 						      walk_state);
 	} else {
 		status = acpi_ut_copy_simple_object(source_desc, *dest_desc);
-	}
-
-	/* Delete the allocated object if copy failed */
-
-	if (ACPI_FAILURE(status)) {
-		acpi_ut_remove_reference(*dest_desc);
 	}
 
 	return_ACPI_STATUS(status);

@@ -20,135 +20,83 @@
 #include <linux/slab.h>
 #include <linux/mtd/partitions.h>
 
-static bool node_has_compatible(struct device_node *pp)
-{
-	return of_get_property(pp, "compatible", NULL);
-}
-
 static int parse_ofpart_partitions(struct mtd_info *master,
-				   const struct mtd_partition **pparts,
+				   struct mtd_partition **pparts,
 				   struct mtd_part_parser_data *data)
 {
-	struct mtd_partition *parts;
-	struct device_node *mtd_node;
-	struct device_node *ofpart_node;
+	struct device_node *node;
 	const char *partname;
 	struct device_node *pp;
-	int nr_parts, i, ret = 0;
-	bool dedicated = true;
+	int nr_parts, i;
 
 
-	/* Pull of_node from the master device node */
-	mtd_node = mtd_get_of_node(master);
-	if (!mtd_node)
+	if (!data)
 		return 0;
 
-	ofpart_node = of_get_child_by_name(mtd_node, "partitions");
-	if (!ofpart_node) {
-		/*
-		 * We might get here even when ofpart isn't used at all (e.g.,
-		 * when using another parser), so don't be louder than
-		 * KERN_DEBUG
-		 */
-		pr_debug("%s: 'partitions' subnode not found on %s. Trying to parse direct subnodes as partitions.\n",
-			 master->name, mtd_node->full_name);
-		ofpart_node = mtd_node;
-		dedicated = false;
-	} else if (!of_device_is_compatible(ofpart_node, "fixed-partitions")) {
-		/* The 'partitions' subnode might be used by another parser */
+	node = data->of_node;
+	if (!node)
 		return 0;
-	}
 
 	/* First count the subnodes */
+	pp = NULL;
 	nr_parts = 0;
-	for_each_child_of_node(ofpart_node,  pp) {
-		if (!dedicated && node_has_compatible(pp))
-			continue;
-
+	while ((pp = of_get_next_child(node, pp)))
 		nr_parts++;
-	}
 
 	if (nr_parts == 0)
 		return 0;
 
-	parts = kzalloc(nr_parts * sizeof(*parts), GFP_KERNEL);
-	if (!parts)
+	*pparts = kzalloc(nr_parts * sizeof(**pparts), GFP_KERNEL);
+	if (!*pparts)
 		return -ENOMEM;
 
+	pp = NULL;
 	i = 0;
-	for_each_child_of_node(ofpart_node,  pp) {
+	while ((pp = of_get_next_child(node, pp))) {
 		const __be32 *reg;
 		int len;
-		int a_cells, s_cells;
-
-		if (!dedicated && node_has_compatible(pp))
-			continue;
 
 		reg = of_get_property(pp, "reg", &len);
 		if (!reg) {
-			if (dedicated) {
-				pr_debug("%s: ofpart partition %s (%s) missing reg property.\n",
-					 master->name, pp->full_name,
-					 mtd_node->full_name);
-				goto ofpart_fail;
-			} else {
-				nr_parts--;
-				continue;
-			}
+			nr_parts--;
+			continue;
 		}
 
-		a_cells = of_n_addr_cells(pp);
-		s_cells = of_n_size_cells(pp);
-		if (len / 4 != a_cells + s_cells) {
-			pr_debug("%s: ofpart partition %s (%s) error parsing reg property.\n",
-				 master->name, pp->full_name,
-				 mtd_node->full_name);
-			goto ofpart_fail;
-		}
-
-		parts[i].offset = of_read_number(reg, a_cells);
-		parts[i].size = of_read_number(reg + a_cells, s_cells);
+		(*pparts)[i].offset = be32_to_cpu(reg[0]);
+		(*pparts)[i].size = be32_to_cpu(reg[1]);
 
 		partname = of_get_property(pp, "label", &len);
 		if (!partname)
 			partname = of_get_property(pp, "name", &len);
-		parts[i].name = partname;
+		(*pparts)[i].name = (char *)partname;
 
 		if (of_get_property(pp, "read-only", &len))
-			parts[i].mask_flags |= MTD_WRITEABLE;
-
-		if (of_get_property(pp, "lock", &len))
-			parts[i].mask_flags |= MTD_POWERUP_LOCK;
+			(*pparts)[i].mask_flags = MTD_WRITEABLE;
 
 		i++;
 	}
 
-	if (!nr_parts)
-		goto ofpart_none;
+	if (!i) {
+		of_node_put(pp);
+		pr_err("No valid partition found on %s\n", node->full_name);
+		kfree(*pparts);
+		*pparts = NULL;
+		return -EINVAL;
+	}
 
-	*pparts = parts;
 	return nr_parts;
-
-ofpart_fail:
-	pr_err("%s: error parsing ofpart partition %s (%s)\n",
-	       master->name, pp->full_name, mtd_node->full_name);
-	ret = -EINVAL;
-ofpart_none:
-	of_node_put(pp);
-	kfree(parts);
-	return ret;
 }
 
 static struct mtd_part_parser ofpart_parser = {
+	.owner = THIS_MODULE,
 	.parse_fn = parse_ofpart_partitions,
 	.name = "ofpart",
 };
 
 static int parse_ofoldpart_partitions(struct mtd_info *master,
-				      const struct mtd_partition **pparts,
+				      struct mtd_partition **pparts,
 				      struct mtd_part_parser_data *data)
 {
-	struct mtd_partition *parts;
 	struct device_node *dp;
 	int i, plen, nr_parts;
 	const struct {
@@ -156,8 +104,10 @@ static int parse_ofoldpart_partitions(struct mtd_info *master,
 	} *part;
 	const char *names;
 
-	/* Pull of_node from the master device node */
-	dp = mtd_get_of_node(master);
+	if (!data)
+		return 0;
+
+	dp = data->of_node;
 	if (!dp)
 		return 0;
 
@@ -170,56 +120,58 @@ static int parse_ofoldpart_partitions(struct mtd_info *master,
 
 	nr_parts = plen / sizeof(part[0]);
 
-	parts = kzalloc(nr_parts * sizeof(*parts), GFP_KERNEL);
-	if (!parts)
+	*pparts = kzalloc(nr_parts * sizeof(*(*pparts)), GFP_KERNEL);
+	if (!*pparts)
 		return -ENOMEM;
 
 	names = of_get_property(dp, "partition-names", &plen);
 
 	for (i = 0; i < nr_parts; i++) {
-		parts[i].offset = be32_to_cpu(part->offset);
-		parts[i].size   = be32_to_cpu(part->len) & ~1;
+		(*pparts)[i].offset = be32_to_cpu(part->offset);
+		(*pparts)[i].size   = be32_to_cpu(part->len) & ~1;
 		/* bit 0 set signifies read only partition */
 		if (be32_to_cpu(part->len) & 1)
-			parts[i].mask_flags = MTD_WRITEABLE;
+			(*pparts)[i].mask_flags = MTD_WRITEABLE;
 
 		if (names && (plen > 0)) {
 			int len = strlen(names) + 1;
 
-			parts[i].name = names;
+			(*pparts)[i].name = (char *)names;
 			plen -= len;
 			names += len;
 		} else {
-			parts[i].name = "unnamed";
+			(*pparts)[i].name = "unnamed";
 		}
 
 		part++;
 	}
 
-	*pparts = parts;
 	return nr_parts;
 }
 
 static struct mtd_part_parser ofoldpart_parser = {
+	.owner = THIS_MODULE,
 	.parse_fn = parse_ofoldpart_partitions,
 	.name = "ofoldpart",
 };
 
 static int __init ofpart_parser_init(void)
 {
-	register_mtd_parser(&ofpart_parser);
-	register_mtd_parser(&ofoldpart_parser);
-	return 0;
-}
+	int rc;
+	rc = register_mtd_parser(&ofpart_parser);
+	if (rc)
+		goto out;
 
-static void __exit ofpart_parser_exit(void)
-{
-	deregister_mtd_parser(&ofpart_parser);
+	rc = register_mtd_parser(&ofoldpart_parser);
+	if (!rc)
+		return 0;
+
 	deregister_mtd_parser(&ofoldpart_parser);
+out:
+	return rc;
 }
 
 module_init(ofpart_parser_init);
-module_exit(ofpart_parser_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Parser for MTD partitioning information in device tree");

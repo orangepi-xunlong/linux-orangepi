@@ -31,6 +31,7 @@
 #include <linux/slab.h>
 #include <linux/leds.h>
 #include <linux/mutex.h>
+#include <linux/workqueue.h>
 #include <linux/leds-lp3944.h>
 
 /* Read Only Registers */
@@ -67,8 +68,10 @@
 struct lp3944_led_data {
 	u8 id;
 	enum lp3944_type type;
+	enum lp3944_status status;
 	struct led_classdev ldev;
 	struct i2c_client *client;
+	struct work_struct work;
 };
 
 struct lp3944_data {
@@ -83,7 +86,7 @@ static int lp3944_reg_read(struct i2c_client *client, u8 reg, u8 *value)
 
 	tmp = i2c_smbus_read_byte_data(client, reg);
 	if (tmp < 0)
-		return tmp;
+		return -EINVAL;
 
 	*value = tmp;
 
@@ -199,11 +202,8 @@ static int lp3944_led_set(struct lp3944_led_data *led, u8 status)
 	if (status > LP3944_LED_STATUS_DIM1)
 		return -EINVAL;
 
-	/*
-	 * Invert status only when it's < 2 (i.e. 0 or 1) which means it's
-	 * controlling the on/off state directly.
-	 * When, instead, status is >= 2 don't invert it because it would mean
-	 * to mess with the hardware blinking mode.
+	/* invert only 0 and 1, leave unchanged the other values,
+	 * remember we are abusing status to set blink patterns
 	 */
 	if (led->type == LP3944_LED_TYPE_LED_INVERTED && status < 2)
 		status = 1 - status;
@@ -275,12 +275,13 @@ static int lp3944_led_set_blink(struct led_classdev *led_cdev,
 	dev_dbg(&led->client->dev, "%s: OK hardware accelerated blink!\n",
 		__func__);
 
-	lp3944_led_set(led, LP3944_LED_STATUS_DIM0);
+	led->status = LP3944_LED_STATUS_DIM0;
+	schedule_work(&led->work);
 
 	return 0;
 }
 
-static int lp3944_led_set_brightness(struct led_classdev *led_cdev,
+static void lp3944_led_set_brightness(struct led_classdev *led_cdev,
 				      enum led_brightness brightness)
 {
 	struct lp3944_led_data *led = ldev_to_led(led_cdev);
@@ -288,7 +289,16 @@ static int lp3944_led_set_brightness(struct led_classdev *led_cdev,
 	dev_dbg(&led->client->dev, "%s: %s, %d\n",
 		__func__, led_cdev->name, brightness);
 
-	return lp3944_led_set(led, !!brightness);
+	led->status = brightness;
+	schedule_work(&led->work);
+}
+
+static void lp3944_led_work(struct work_struct *work)
+{
+	struct lp3944_led_data *led;
+
+	led = container_of(work, struct lp3944_led_data, work);
+	lp3944_led_set(led, led->status);
 }
 
 static int lp3944_configure(struct i2c_client *client,
@@ -308,13 +318,14 @@ static int lp3944_configure(struct i2c_client *client,
 		case LP3944_LED_TYPE_LED:
 		case LP3944_LED_TYPE_LED_INVERTED:
 			led->type = pled->type;
+			led->status = pled->status;
 			led->ldev.name = pled->name;
 			led->ldev.max_brightness = 1;
-			led->ldev.brightness_set_blocking =
-						lp3944_led_set_brightness;
+			led->ldev.brightness_set = lp3944_led_set_brightness;
 			led->ldev.blink_set = lp3944_led_set_blink;
 			led->ldev.flags = LED_CORE_SUSPENDRESUME;
 
+			INIT_WORK(&led->work, lp3944_led_work);
 			err = led_classdev_register(&client->dev, &led->ldev);
 			if (err < 0) {
 				dev_err(&client->dev,
@@ -324,15 +335,14 @@ static int lp3944_configure(struct i2c_client *client,
 			}
 
 			/* to expose the default value to userspace */
-			led->ldev.brightness =
-					(enum led_brightness) pled->status;
+			led->ldev.brightness = led->status;
 
 			/* Set the default led status */
-			err = lp3944_led_set(led, pled->status);
+			err = lp3944_led_set(led, led->status);
 			if (err < 0) {
 				dev_err(&client->dev,
 					"%s couldn't set STATUS %d\n",
-					led->ldev.name, pled->status);
+					led->ldev.name, led->status);
 				goto exit;
 			}
 			break;
@@ -353,6 +363,7 @@ exit:
 			case LP3944_LED_TYPE_LED:
 			case LP3944_LED_TYPE_LED_INVERTED:
 				led_classdev_unregister(&data->leds[i].ldev);
+				cancel_work_sync(&data->leds[i].work);
 				break;
 
 			case LP3944_LED_TYPE_NONE:
@@ -363,11 +374,10 @@ exit:
 	return err;
 }
 
-static int lp3944_probe(struct i2c_client *client,
+static int __devinit lp3944_probe(struct i2c_client *client,
 				  const struct i2c_device_id *id)
 {
-	struct lp3944_platform_data *lp3944_pdata =
-			dev_get_platdata(&client->dev);
+	struct lp3944_platform_data *lp3944_pdata = client->dev.platform_data;
 	struct lp3944_data *data;
 	int err;
 
@@ -383,8 +393,7 @@ static int lp3944_probe(struct i2c_client *client,
 		return -ENODEV;
 	}
 
-	data = devm_kzalloc(&client->dev, sizeof(struct lp3944_data),
-			GFP_KERNEL);
+	data = kzalloc(sizeof(struct lp3944_data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
@@ -394,16 +403,18 @@ static int lp3944_probe(struct i2c_client *client,
 	mutex_init(&data->lock);
 
 	err = lp3944_configure(client, data, lp3944_pdata);
-	if (err < 0)
+	if (err < 0) {
+		kfree(data);
 		return err;
+	}
 
 	dev_info(&client->dev, "lp3944 enabled\n");
 	return 0;
 }
 
-static int lp3944_remove(struct i2c_client *client)
+static int __devexit lp3944_remove(struct i2c_client *client)
 {
-	struct lp3944_platform_data *pdata = dev_get_platdata(&client->dev);
+	struct lp3944_platform_data *pdata = client->dev.platform_data;
 	struct lp3944_data *data = i2c_get_clientdata(client);
 	int i;
 
@@ -412,12 +423,15 @@ static int lp3944_remove(struct i2c_client *client)
 		case LP3944_LED_TYPE_LED:
 		case LP3944_LED_TYPE_LED_INVERTED:
 			led_classdev_unregister(&data->leds[i].ldev);
+			cancel_work_sync(&data->leds[i].work);
 			break;
 
 		case LP3944_LED_TYPE_NONE:
 		default:
 			break;
 		}
+
+	kfree(data);
 
 	return 0;
 }
@@ -435,7 +449,7 @@ static struct i2c_driver lp3944_driver = {
 		   .name = "lp3944",
 	},
 	.probe    = lp3944_probe,
-	.remove   = lp3944_remove,
+	.remove   = __devexit_p(lp3944_remove),
 	.id_table = lp3944_id,
 };
 

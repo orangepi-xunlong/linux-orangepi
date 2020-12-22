@@ -307,7 +307,8 @@ static u8 sgiioc4_read_status(ide_hwif_t *hwif)
 }
 
 /* Creates a DMA map for the scatter-gather list entries */
-static int ide_dma_sgiioc4(ide_hwif_t *hwif, const struct ide_port_info *d)
+static int __devinit ide_dma_sgiioc4(ide_hwif_t *hwif,
+				     const struct ide_port_info *d)
 {
 	struct pci_dev *dev = to_pci_dev(hwif->dev);
 	unsigned long dma_base = pci_resource_start(dev, 0) + IOC4_DMA_OFFSET;
@@ -334,8 +335,8 @@ static int ide_dma_sgiioc4(ide_hwif_t *hwif, const struct ide_port_info *d)
 	if (ide_allocate_dma_engine(hwif))
 		goto dma_pci_alloc_failure;
 
-	pad = dma_alloc_coherent(&dev->dev, IOC4_IDE_CACHELINE_SIZE,
-				   (dma_addr_t *)&hwif->extra_base, GFP_KERNEL);
+	pad = pci_alloc_consistent(dev, IOC4_IDE_CACHELINE_SIZE,
+				   (dma_addr_t *)&hwif->extra_base);
 	if (pad) {
 		ide_set_hwifdata(hwif, pad);
 		return 0;
@@ -519,7 +520,7 @@ static const struct ide_dma_ops sgiioc4_dma_ops = {
 	.dma_lost_irq		= sgiioc4_dma_lost_irq,
 };
 
-static const struct ide_port_info sgiioc4_port_info = {
+static const struct ide_port_info sgiioc4_port_info __devinitconst = {
 	.name			= DRV_NAME,
 	.chipset		= ide_pci,
 	.init_dma		= ide_dma_sgiioc4,
@@ -531,7 +532,7 @@ static const struct ide_port_info sgiioc4_port_info = {
 	.mwdma_mask		= ATA_MWDMA2_ONLY,
 };
 
-static int sgiioc4_ide_setup_pci_device(struct pci_dev *dev)
+static int __devinit sgiioc4_ide_setup_pci_device(struct pci_dev *dev)
 {
 	unsigned long cmd_base, irqport;
 	unsigned long bar0, cmd_phys_base, ctl;
@@ -580,7 +581,7 @@ req_mem_rgn_err:
 	return rc;
 }
 
-static unsigned int pci_init_sgiioc4(struct pci_dev *dev)
+static unsigned int __devinit pci_init_sgiioc4(struct pci_dev *dev)
 {
 	int ret;
 
@@ -600,7 +601,7 @@ out:
 	return ret;
 }
 
-static int ioc4_ide_attach_one(struct ioc4_driver_data *idd)
+int __devinit ioc4_ide_attach_one(struct ioc4_driver_data *idd)
 {
 	/*
 	 * PCI-RT does not bring out IDE connection.
@@ -612,7 +613,7 @@ static int ioc4_ide_attach_one(struct ioc4_driver_data *idd)
 	return pci_init_sgiioc4(idd->idd_pdev);
 }
 
-static struct ioc4_submodule ioc4_ide_submodule = {
+static struct ioc4_submodule __devinitdata ioc4_ide_submodule = {
 	.is_name = "IOC4_ide",
 	.is_owner = THIS_MODULE,
 	.is_probe = ioc4_ide_attach_one,

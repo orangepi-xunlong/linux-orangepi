@@ -28,8 +28,6 @@
 #ifndef _SIS_DRV_H_
 #define _SIS_DRV_H_
 
-#include <drm/drm_legacy.h>
-
 /* General customization:
  */
 
@@ -46,7 +44,7 @@ enum sis_family {
 	SIS_CHIP_315 = 1,
 };
 
-#include <drm/drm_mm.h>
+#include "drm_mm.h"
 
 
 #define SIS_BASE (dev_priv->mmio)
@@ -67,16 +65,12 @@ typedef struct drm_sis_private {
 	struct idr object_idr;
 } drm_sis_private_t;
 
-struct sis_file_private {
-	struct list_head obj_list;
-};
-
 extern int sis_idle(struct drm_device *dev);
 extern void sis_reclaim_buffers_locked(struct drm_device *dev,
 				       struct drm_file *file_priv);
 extern void sis_lastclose(struct drm_device *dev);
 
-extern const struct drm_ioctl_desc sis_ioctls[];
+extern struct drm_ioctl_desc sis_ioctls[];
 extern int sis_max_ioctl;
 
 #endif

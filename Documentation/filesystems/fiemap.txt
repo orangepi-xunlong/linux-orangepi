@@ -196,8 +196,7 @@ struct fiemap_extent_info {
 };
 
 It is intended that the file system should not need to access any of this
-structure directly. Filesystem handlers should be tolerant to signals and return
-EINTR once fatal signal received.
+structure directly.
 
 
 Flag checking should be done at the beginning of the ->fiemap callback via the

@@ -20,8 +20,8 @@
 
 struct platdata_mtd_ram {
 	const char		*mapname;
-	const char * const      *map_probes;
-	const char * const      *probes;
+	const char		**map_probes;
+	const char		**probes;
 	struct mtd_partition	*partitions;
 	int			 nr_partitions;
 	int			 bankwidth;

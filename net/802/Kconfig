@@ -5,6 +5,3 @@ config STP
 config GARP
 	tristate
 	select STP
-
-config MRP
-	tristate

@@ -26,44 +26,13 @@ struct brport_attribute {
 	int (*store)(struct net_bridge_port *, unsigned long);
 };
 
-#define BRPORT_ATTR(_name, _mode, _show, _store)		\
-const struct brport_attribute brport_attr_##_name = { 	        \
+#define BRPORT_ATTR(_name,_mode,_show,_store)		        \
+struct brport_attribute brport_attr_##_name = { 	        \
 	.attr = {.name = __stringify(_name), 			\
 		 .mode = _mode },				\
 	.show	= _show,					\
 	.store	= _store,					\
 };
-
-#define BRPORT_ATTR_FLAG(_name, _mask)				\
-static ssize_t show_##_name(struct net_bridge_port *p, char *buf) \
-{								\
-	return sprintf(buf, "%d\n", !!(p->flags & _mask));	\
-}								\
-static int store_##_name(struct net_bridge_port *p, unsigned long v) \
-{								\
-	return store_flag(p, v, _mask);				\
-}								\
-static BRPORT_ATTR(_name, S_IRUGO | S_IWUSR,			\
-		   show_##_name, store_##_name)
-
-static int store_flag(struct net_bridge_port *p, unsigned long v,
-		      unsigned long mask)
-{
-	unsigned long flags;
-
-	flags = p->flags;
-
-	if (v)
-		flags |= mask;
-	else
-		flags &= ~mask;
-
-	if (flags != p->flags) {
-		p->flags = flags;
-		br_port_flags_change(p, mask);
-	}
-	return 0;
-}
 
 static ssize_t show_path_cost(struct net_bridge_port *p, char *buf)
 {
@@ -159,19 +128,26 @@ static BRPORT_ATTR(hold_timer, S_IRUGO, show_hold_timer, NULL);
 
 static int store_flush(struct net_bridge_port *p, unsigned long v)
 {
-	br_fdb_delete_by_port(p->br, p, 0, 0); // Don't delete local entry
+	br_fdb_delete_by_port(p->br, p, 0); // Don't delete local entry
 	return 0;
 }
 static BRPORT_ATTR(flush, S_IWUSR, NULL, store_flush);
 
-BRPORT_ATTR_FLAG(hairpin_mode, BR_HAIRPIN_MODE);
-BRPORT_ATTR_FLAG(bpdu_guard, BR_BPDU_GUARD);
-BRPORT_ATTR_FLAG(root_block, BR_ROOT_BLOCK);
-BRPORT_ATTR_FLAG(learning, BR_LEARNING);
-BRPORT_ATTR_FLAG(unicast_flood, BR_FLOOD);
-BRPORT_ATTR_FLAG(proxyarp, BR_PROXYARP);
-BRPORT_ATTR_FLAG(proxyarp_wifi, BR_PROXYARP_WIFI);
-BRPORT_ATTR_FLAG(multicast_flood, BR_MCAST_FLOOD);
+static ssize_t show_hairpin_mode(struct net_bridge_port *p, char *buf)
+{
+	int hairpin_mode = (p->flags & BR_HAIRPIN_MODE) ? 1 : 0;
+	return sprintf(buf, "%d\n", hairpin_mode);
+}
+static int store_hairpin_mode(struct net_bridge_port *p, unsigned long v)
+{
+	if (v)
+		p->flags |= BR_HAIRPIN_MODE;
+	else
+		p->flags &= ~BR_HAIRPIN_MODE;
+	return 0;
+}
+static BRPORT_ATTR(hairpin_mode, S_IRUGO | S_IWUSR,
+		   show_hairpin_mode, store_hairpin_mode);
 
 #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
 static ssize_t show_multicast_router(struct net_bridge_port *p, char *buf)
@@ -186,11 +162,9 @@ static int store_multicast_router(struct net_bridge_port *p,
 }
 static BRPORT_ATTR(multicast_router, S_IRUGO | S_IWUSR, show_multicast_router,
 		   store_multicast_router);
-
-BRPORT_ATTR_FLAG(multicast_fast_leave, BR_MULTICAST_FAST_LEAVE);
 #endif
 
-static const struct brport_attribute *brport_attrs[] = {
+static struct brport_attribute *brport_attrs[] = {
 	&brport_attr_path_cost,
 	&brport_attr_priority,
 	&brport_attr_port_id,
@@ -207,46 +181,35 @@ static const struct brport_attribute *brport_attrs[] = {
 	&brport_attr_hold_timer,
 	&brport_attr_flush,
 	&brport_attr_hairpin_mode,
-	&brport_attr_bpdu_guard,
-	&brport_attr_root_block,
-	&brport_attr_learning,
-	&brport_attr_unicast_flood,
 #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
 	&brport_attr_multicast_router,
-	&brport_attr_multicast_fast_leave,
 #endif
-	&brport_attr_proxyarp,
-	&brport_attr_proxyarp_wifi,
-	&brport_attr_multicast_flood,
 	NULL
 };
 
 #define to_brport_attr(_at) container_of(_at, struct brport_attribute, attr)
 #define to_brport(obj)	container_of(obj, struct net_bridge_port, kobj)
 
-static ssize_t brport_show(struct kobject *kobj,
-			   struct attribute *attr, char *buf)
+static ssize_t brport_show(struct kobject * kobj,
+			   struct attribute * attr, char * buf)
 {
-	struct brport_attribute *brport_attr = to_brport_attr(attr);
-	struct net_bridge_port *p = to_brport(kobj);
-
-	if (!brport_attr->show)
-		return -EINVAL;
+	struct brport_attribute * brport_attr = to_brport_attr(attr);
+	struct net_bridge_port * p = to_brport(kobj);
 
 	return brport_attr->show(p, buf);
 }
 
-static ssize_t brport_store(struct kobject *kobj,
-			    struct attribute *attr,
-			    const char *buf, size_t count)
+static ssize_t brport_store(struct kobject * kobj,
+			    struct attribute * attr,
+			    const char * buf, size_t count)
 {
-	struct brport_attribute *brport_attr = to_brport_attr(attr);
-	struct net_bridge_port *p = to_brport(kobj);
+	struct brport_attribute * brport_attr = to_brport_attr(attr);
+	struct net_bridge_port * p = to_brport(kobj);
 	ssize_t ret = -EINVAL;
 	char *endp;
 	unsigned long val;
 
-	if (!ns_capable(dev_net(p->dev)->user_ns, CAP_NET_ADMIN))
+	if (!capable(CAP_NET_ADMIN))
 		return -EPERM;
 
 	val = simple_strtoul(buf, &endp, 0);
@@ -257,10 +220,8 @@ static ssize_t brport_store(struct kobject *kobj,
 			spin_lock_bh(&p->br->lock);
 			ret = brport_attr->store(p, val);
 			spin_unlock_bh(&p->br->lock);
-			if (!ret) {
-				br_ifinfo_notify(RTM_NEWLINK, p);
+			if (ret == 0)
 				ret = count;
-			}
 		}
 		rtnl_unlock();
 	}
@@ -280,7 +241,7 @@ const struct sysfs_ops brport_sysfs_ops = {
 int br_sysfs_addif(struct net_bridge_port *p)
 {
 	struct net_bridge *br = p->br;
-	const struct brport_attribute **a;
+	struct brport_attribute **a;
 	int err;
 
 	err = sysfs_create_link(&p->kobj, &br->dev->dev.kobj,

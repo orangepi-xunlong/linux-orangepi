@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Allwinnertech
+ * Copyright (C) 2013 Allwinnertech, kevin.z.m <kevin@allwinnertech.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -13,12 +13,8 @@
 #include <linux/clk-provider.h>
 #include <linux/clkdev.h>
 #include <linux/io.h>
+#include <mach/hardware.h>
 #include "clk-factors.h"
-
-#define IO_ADDRESS(x) (void __iomem *)(((x) & 0x0fffffff) + \
-					(((x) >> 4) & 0x0f000000) + \
-					0xf0000000)
-
 /* register list */
 #define PLL_CPU             0x0000
 #define PLL_AUDIO           0x0008
@@ -70,7 +66,7 @@
 #define CSI_MISC            0x0130
 #define CSI_CFG             0x0134
 #define VE_CFG              0x013C
-#define ADDA_CFG            0x0140 /* AC_DIG_CLK */
+#define ADDA_CFG            0x0140//AC_DIG_CLK
 #define AVS_CFG             0x0144
 #define HDMI_CFG            0x0150
 #define HDMI_SLOW           0x0154
@@ -82,14 +78,14 @@
 
 #define PLL_LOCK            0x0200
 #define CPU_LOCK            0x0204
-#define PLL_CPUPAT          0x0280
-#define PLL_AUDIOPAT        0x0284
+#define PLL_CPUPAT			0x0280
+#define PLL_AUDIOPAT		0x0284
 #define PLL_VIDEOPAT        0x0288
-#define PLL_VEPAT           0x028C
-#define PLL_DDRPAT          0x0290
-#define PLL_GPUPAT          0x029C
-#define PLL_PERIPH1PAT      0x02A4
-#define PLL_DEPAT           0x02A8
+#define PLL_VEPAT			0x028C
+#define PLL_DDRPAT			0x0290
+#define PLL_GPUPAT			0x029C
+#define PLL_PERIPH1PAT		0x02A4
+#define PLL_DEPAT			0x02A8
 
 #define BUS_RST0           0x02C0
 #define BUS_RST1           0x02C4
@@ -104,50 +100,29 @@
 #define CPUS_APB0_RST       0x00B0
 #define CPUS_CLK_MAX_REG    0x00B0
 
-#define LOSC_OUT_GATE       0x0060
-#define ADDA_PR_CFG_REG     0x01c0
+#define LOSC_OUT_GATE       0x01F00060
+#define F_N8X7_M0X4(nv,mv) FACTOR_ALL(nv,8,7,0,0,0,mv,0,4,0,0,0,0,0,0,0,0,0)
+#define F_N8X5_K4X2(nv,kv) FACTOR_ALL(nv,8,5,kv,4,2,0,0,0,0,0,0,0,0,0,0,0,0)
+#define F_N8X6(nv) FACTOR_ALL(nv,8,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+#define F_N8X5_K4X2_M0X2(nv,kv,mv) FACTOR_ALL(nv,8,5,kv,4,2,mv,0,2,0,0,0,0,0,0,0,0,0)
+#define F_N8X5_K4X2_M0X2_P16x2(nv,kv,mv,pv) \
+               FACTOR_ALL(nv,8,5, \
+                          kv,4,2, \
+                          mv,0,2, \
+                          pv,16,2, \
+                          0,0,0,0,0,0)
+#define PLLCPU(n,k,m,p,freq)  {F_N8X5_K4X2_M0X2_P16x2(n, k, m, p),  freq}
+//AUDIO
+#define PLLVIDEO(n,m,freq)  {F_N8X7_M0X4( n, m),  freq}
+#define PLLVE(n,m,freq)  {F_N8X7_M0X4( n, m),  freq}
+#define PLLDDR(n,k,m,freq)  {F_N8X5_K4X2_M0X2( n, k, m),  freq}
+#define PLLPERIPH(n,k,freq)  {F_N8X5_K4X2( n, k),  freq}
+#define PLLGPU(n,m,freq)  {F_N8X7_M0X4( n, m),  freq}
+#define PLLHSIC(n,m,freq)  {F_N8X7_M0X4( n, m),  freq}
+#define PLLDE(n,m,freq) {F_N8X7_M0X4( n, m),  freq}
 
-#define F_N8X7_M0X4(nv, mv)                                                    \
-	FACTOR_ALL(nv, 8, 7, 0, 0, 0, mv, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-#define F_N8X5_K4X2(nv, kv)                                                    \
-	FACTOR_ALL(nv, 8, 5, kv, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-#define F_N8X6(nv)                                                             \
-	FACTOR_ALL(nv, 8, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-#define F_N8X5_K4X2_M0X2(nv, kv, mv)                                           \
-	FACTOR_ALL(nv, 8, 5, kv, 4, 2, mv, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-#define F_N8X5_K4X2_M0X2_P16x2(nv, kv, mv, pv)                                 \
-	FACTOR_ALL(nv, 8, 5, kv, 4, 2, mv, 0, 2, pv, 16, 2, 0, 0, 0, 0, 0, 0)
-#define PLLCPU(n, k, m, p, freq)                                               \
-	{                                                                      \
-		F_N8X5_K4X2_M0X2_P16x2(n, k, m, p), freq                       \
-	}
-#define PLLVIDEO(n, m, freq)                                                   \
-	{                                                                      \
-		F_N8X7_M0X4(n, m), freq                                        \
-	}
-#define PLLVE(n, m, freq)                                                      \
-	{                                                                      \
-		F_N8X7_M0X4(n, m), freq                                        \
-	}
-#define PLLDDR(n, k, m, freq)                                                  \
-	{                                                                      \
-		F_N8X5_K4X2_M0X2(n, k, m), freq                                \
-	}
-#define PLLPERIPH(n, k, freq)                                                  \
-	{                                                                      \
-		F_N8X5_K4X2(n, k), freq                                        \
-	}
-#define PLLGPU(n, m, freq)                                                     \
-	{                                                                      \
-		F_N8X7_M0X4(n, m), freq                                        \
-	}
-#define PLLHSIC(n, m, freq)                                                    \
-	{                                                                      \
-		F_N8X7_M0X4(n, m), freq                                        \
-	}
-#define PLLDE(n, m, freq)                                                      \
-	{                                                                      \
-		F_N8X7_M0X4(n, m), freq                                        \
-	}
-
+struct sun8iw3_factor_config{
+		u32		factor;
+    u32   freq;
+};
 #endif

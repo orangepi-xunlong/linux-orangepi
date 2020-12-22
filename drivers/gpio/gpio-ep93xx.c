@@ -16,11 +16,10 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/slab.h>
-#include <linux/gpio/driver.h>
-/* FIXME: this is here for gpio_to_irq() - get rid of this! */
-#include <linux/gpio.h>
+#include <linux/basic_mmio_gpio.h>
 
 #include <mach/hardware.h>
 #include <mach/gpio-ep93xx.h>
@@ -29,7 +28,7 @@
 
 struct ep93xx_gpio {
 	void __iomem		*mmio_base;
-	struct gpio_chip	gc[8];
+	struct bgpio_chip	bgc[8];
 };
 
 /*************************************************************************
@@ -52,15 +51,15 @@ static void ep93xx_gpio_update_int_params(unsigned port)
 {
 	BUG_ON(port > 2);
 
-	writeb_relaxed(0, EP93XX_GPIO_REG(int_en_register_offset[port]));
+	__raw_writeb(0, EP93XX_GPIO_REG(int_en_register_offset[port]));
 
-	writeb_relaxed(gpio_int_type2[port],
+	__raw_writeb(gpio_int_type2[port],
 		EP93XX_GPIO_REG(int_type2_register_offset[port]));
 
-	writeb_relaxed(gpio_int_type1[port],
+	__raw_writeb(gpio_int_type1[port],
 		EP93XX_GPIO_REG(int_type1_register_offset[port]));
 
-	writeb(gpio_int_unmasked[port] & gpio_int_enabled[port],
+	__raw_writeb(gpio_int_unmasked[port] & gpio_int_enabled[port],
 		EP93XX_GPIO_REG(int_en_register_offset[port]));
 }
 
@@ -75,16 +74,16 @@ static void ep93xx_gpio_int_debounce(unsigned int irq, bool enable)
 	else
 		gpio_int_debounce[port] &= ~port_mask;
 
-	writeb(gpio_int_debounce[port],
+	__raw_writeb(gpio_int_debounce[port],
 		EP93XX_GPIO_REG(int_debounce_register_offset[port]));
 }
 
-static void ep93xx_gpio_ab_irq_handler(struct irq_desc *desc)
+static void ep93xx_gpio_ab_irq_handler(unsigned int irq, struct irq_desc *desc)
 {
 	unsigned char status;
 	int i;
 
-	status = readb(EP93XX_GPIO_A_INT_STATUS);
+	status = __raw_readb(EP93XX_GPIO_A_INT_STATUS);
 	for (i = 0; i < 8; i++) {
 		if (status & (1 << i)) {
 			int gpio_irq = gpio_to_irq(EP93XX_GPIO_LINE_A(0)) + i;
@@ -92,7 +91,7 @@ static void ep93xx_gpio_ab_irq_handler(struct irq_desc *desc)
 		}
 	}
 
-	status = readb(EP93XX_GPIO_B_INT_STATUS);
+	status = __raw_readb(EP93XX_GPIO_B_INT_STATUS);
 	for (i = 0; i < 8; i++) {
 		if (status & (1 << i)) {
 			int gpio_irq = gpio_to_irq(EP93XX_GPIO_LINE_B(0)) + i;
@@ -101,14 +100,13 @@ static void ep93xx_gpio_ab_irq_handler(struct irq_desc *desc)
 	}
 }
 
-static void ep93xx_gpio_f_irq_handler(struct irq_desc *desc)
+static void ep93xx_gpio_f_irq_handler(unsigned int irq, struct irq_desc *desc)
 {
 	/*
 	 * map discontiguous hw irq range to continuous sw irq range:
 	 *
 	 *  IRQ_EP93XX_GPIO{0..7}MUX -> gpio_to_irq(EP93XX_GPIO_LINE_F({0..7})
 	 */
-	unsigned int irq = irq_desc_get_irq(desc);
 	int port_f_idx = ((irq + 1) & 7) ^ 4; /* {19..22,47..50} -> {0..7} */
 	int gpio_irq = gpio_to_irq(EP93XX_GPIO_LINE_F(0)) + port_f_idx;
 
@@ -126,7 +124,7 @@ static void ep93xx_gpio_irq_ack(struct irq_data *d)
 		ep93xx_gpio_update_int_params(port);
 	}
 
-	writeb(port_mask, EP93XX_GPIO_REG(eoi_register_offset[port]));
+	__raw_writeb(port_mask, EP93XX_GPIO_REG(eoi_register_offset[port]));
 }
 
 static void ep93xx_gpio_irq_mask_ack(struct irq_data *d)
@@ -141,7 +139,7 @@ static void ep93xx_gpio_irq_mask_ack(struct irq_data *d)
 	gpio_int_unmasked[port] &= ~port_mask;
 	ep93xx_gpio_update_int_params(port);
 
-	writeb(port_mask, EP93XX_GPIO_REG(eoi_register_offset[port]));
+	__raw_writeb(port_mask, EP93XX_GPIO_REG(eoi_register_offset[port]));
 }
 
 static void ep93xx_gpio_irq_mask(struct irq_data *d)
@@ -210,7 +208,7 @@ static int ep93xx_gpio_irq_type(struct irq_data *d, unsigned int type)
 		return -EINVAL;
 	}
 
-	irq_set_handler_locked(d, handler);
+	__irq_set_handler_locked(d->irq, handler);
 
 	gpio_int_enabled[port] |= port_mask;
 
@@ -236,7 +234,7 @@ static void ep93xx_gpio_init_irq(void)
 	     gpio_irq <= gpio_to_irq(EP93XX_GPIO_LINE_MAX_IRQ); ++gpio_irq) {
 		irq_set_chip_and_handler(gpio_irq, &ep93xx_gpio_irq_chip,
 					 handle_level_irq);
-		irq_clear_status_flags(gpio_irq, IRQ_NOREQUEST);
+		set_irq_flags(gpio_irq, IRQF_VALID);
 	}
 
 	irq_set_chained_handler(IRQ_EP93XX_GPIO_AB,
@@ -320,50 +318,63 @@ static int ep93xx_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 	return 64 + gpio;
 }
 
-static int ep93xx_gpio_add_bank(struct gpio_chip *gc, struct device *dev,
+static int ep93xx_gpio_add_bank(struct bgpio_chip *bgc, struct device *dev,
 	void __iomem *mmio_base, struct ep93xx_gpio_bank *bank)
 {
 	void __iomem *data = mmio_base + bank->data;
 	void __iomem *dir =  mmio_base + bank->dir;
 	int err;
 
-	err = bgpio_init(gc, dev, 1, data, NULL, NULL, dir, NULL, 0);
+	err = bgpio_init(bgc, dev, 1, data, NULL, NULL, dir, NULL, false);
 	if (err)
 		return err;
 
-	gc->label = bank->label;
-	gc->base = bank->base;
+	bgc->gc.label = bank->label;
+	bgc->gc.base = bank->base;
 
 	if (bank->has_debounce) {
-		gc->set_debounce = ep93xx_gpio_set_debounce;
-		gc->to_irq = ep93xx_gpio_to_irq;
+		bgc->gc.set_debounce = ep93xx_gpio_set_debounce;
+		bgc->gc.to_irq = ep93xx_gpio_to_irq;
 	}
 
-	return devm_gpiochip_add_data(dev, gc, NULL);
+	return gpiochip_add(&bgc->gc);
 }
 
-static int ep93xx_gpio_probe(struct platform_device *pdev)
+static int __devinit ep93xx_gpio_probe(struct platform_device *pdev)
 {
 	struct ep93xx_gpio *ep93xx_gpio;
 	struct resource *res;
+	void __iomem *mmio;
 	int i;
-	struct device *dev = &pdev->dev;
+	int ret;
 
-	ep93xx_gpio = devm_kzalloc(dev, sizeof(struct ep93xx_gpio), GFP_KERNEL);
+	ep93xx_gpio = kzalloc(sizeof(*ep93xx_gpio), GFP_KERNEL);
 	if (!ep93xx_gpio)
 		return -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ep93xx_gpio->mmio_base = devm_ioremap_resource(dev, res);
-	if (IS_ERR(ep93xx_gpio->mmio_base))
-		return PTR_ERR(ep93xx_gpio->mmio_base);
+	if (!res) {
+		ret = -ENXIO;
+		goto exit_free;
+	}
+
+	if (!request_mem_region(res->start, resource_size(res), pdev->name)) {
+		ret = -EBUSY;
+		goto exit_free;
+	}
+
+	mmio = ioremap(res->start, resource_size(res));
+	if (!mmio) {
+		ret = -ENXIO;
+		goto exit_release;
+	}
+	ep93xx_gpio->mmio_base = mmio;
 
 	for (i = 0; i < ARRAY_SIZE(ep93xx_gpio_banks); i++) {
-		struct gpio_chip *gc = &ep93xx_gpio->gc[i];
+		struct bgpio_chip *bgc = &ep93xx_gpio->bgc[i];
 		struct ep93xx_gpio_bank *bank = &ep93xx_gpio_banks[i];
 
-		if (ep93xx_gpio_add_bank(gc, &pdev->dev,
-					 ep93xx_gpio->mmio_base, bank))
+		if (ep93xx_gpio_add_bank(bgc, &pdev->dev, mmio, bank))
 			dev_warn(&pdev->dev, "Unable to add gpio bank %s\n",
 				bank->label);
 	}
@@ -371,11 +382,19 @@ static int ep93xx_gpio_probe(struct platform_device *pdev)
 	ep93xx_gpio_init_irq();
 
 	return 0;
+
+exit_release:
+	release_mem_region(res->start, resource_size(res));
+exit_free:
+	kfree(ep93xx_gpio);
+	dev_info(&pdev->dev, "%s failed with errno %d\n", __func__, ret);
+	return ret;
 }
 
 static struct platform_driver ep93xx_gpio_driver = {
 	.driver		= {
 		.name	= "gpio-ep93xx",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= ep93xx_gpio_probe,
 };

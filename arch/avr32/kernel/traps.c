@@ -11,8 +11,7 @@
 #include <linux/init.h>
 #include <linux/kallsyms.h>
 #include <linux/kdebug.h>
-#include <linux/extable.h>
-#include <linux/module.h>	/* print_modules */
+#include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/sched.h>
 #include <linux/uaccess.h>
@@ -62,7 +61,7 @@ void die(const char *str, struct pt_regs *regs, long err)
 	show_regs_log_lvl(regs, KERN_EMERG);
 	show_stack_log_lvl(current, regs->sp, regs, KERN_EMERG);
 	bust_spinlocks(0);
-	add_taint(TAINT_DIE, LOCKDEP_NOW_UNRELIABLE);
+	add_taint(TAINT_DIE);
 	spin_unlock_irq(&die_lock);
 
 	if (in_interrupt())

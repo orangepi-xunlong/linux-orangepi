@@ -14,9 +14,9 @@
 #include <linux/buffer_head.h>
 #include "qnx4.h"
 
-static int qnx4_readdir(struct file *file, struct dir_context *ctx)
+static int qnx4_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
-	struct inode *inode = file_inode(file);
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	unsigned int offset;
 	struct buffer_head *bh;
 	struct qnx4_inode_entry *de;
@@ -26,44 +26,48 @@ static int qnx4_readdir(struct file *file, struct dir_context *ctx)
 	int size;
 
 	QNX4DEBUG((KERN_INFO "qnx4_readdir:i_size = %ld\n", (long) inode->i_size));
-	QNX4DEBUG((KERN_INFO "pos                 = %ld\n", (long) ctx->pos));
+	QNX4DEBUG((KERN_INFO "filp->f_pos         = %ld\n", (long) filp->f_pos));
 
-	while (ctx->pos < inode->i_size) {
-		blknum = qnx4_block_map(inode, ctx->pos >> QNX4_BLOCK_SIZE_BITS);
+	while (filp->f_pos < inode->i_size) {
+		blknum = qnx4_block_map( inode, filp->f_pos >> QNX4_BLOCK_SIZE_BITS );
 		bh = sb_bread(inode->i_sb, blknum);
-		if (bh == NULL) {
+		if(bh==NULL) {
 			printk(KERN_ERR "qnx4_readdir: bread failed (%ld)\n", blknum);
-			return 0;
+			break;
 		}
-		ix = (ctx->pos >> QNX4_DIR_ENTRY_SIZE_BITS) % QNX4_INODES_PER_BLOCK;
-		for (; ix < QNX4_INODES_PER_BLOCK; ix++, ctx->pos += QNX4_DIR_ENTRY_SIZE) {
+		ix = (int)(filp->f_pos >> QNX4_DIR_ENTRY_SIZE_BITS) % QNX4_INODES_PER_BLOCK;
+		while (ix < QNX4_INODES_PER_BLOCK) {
 			offset = ix * QNX4_DIR_ENTRY_SIZE;
 			de = (struct qnx4_inode_entry *) (bh->b_data + offset);
-			if (!de->di_fname[0])
-				continue;
-			if (!(de->di_status & (QNX4_FILE_USED|QNX4_FILE_LINK)))
-				continue;
-			if (!(de->di_status & QNX4_FILE_LINK))
-				size = QNX4_SHORT_NAME_MAX;
-			else
-				size = QNX4_NAME_MAX;
-			size = strnlen(de->di_fname, size);
-			QNX4DEBUG((KERN_INFO "qnx4_readdir:%.*s\n", size, de->di_fname));
-			if (!(de->di_status & QNX4_FILE_LINK))
-				ino = blknum * QNX4_INODES_PER_BLOCK + ix - 1;
-			else {
-				le  = (struct qnx4_link_info*)de;
-				ino = ( le32_to_cpu(le->dl_inode_blk) - 1 ) *
-					QNX4_INODES_PER_BLOCK +
-					le->dl_inode_ndx;
+			size = strlen(de->di_fname);
+			if (size) {
+				if ( !( de->di_status & QNX4_FILE_LINK ) && size > QNX4_SHORT_NAME_MAX )
+					size = QNX4_SHORT_NAME_MAX;
+				else if ( size > QNX4_NAME_MAX )
+					size = QNX4_NAME_MAX;
+
+				if ( ( de->di_status & (QNX4_FILE_USED|QNX4_FILE_LINK) ) != 0 ) {
+					QNX4DEBUG((KERN_INFO "qnx4_readdir:%.*s\n", size, de->di_fname));
+					if ( ( de->di_status & QNX4_FILE_LINK ) == 0 )
+						ino = blknum * QNX4_INODES_PER_BLOCK + ix - 1;
+					else {
+						le  = (struct qnx4_link_info*)de;
+						ino = ( le32_to_cpu(le->dl_inode_blk) - 1 ) *
+							QNX4_INODES_PER_BLOCK +
+							le->dl_inode_ndx;
+					}
+					if (filldir(dirent, de->di_fname, size, filp->f_pos, ino, DT_UNKNOWN) < 0) {
+						brelse(bh);
+						goto out;
+					}
+				}
 			}
-			if (!dir_emit(ctx, de->di_fname, size, ino, DT_UNKNOWN)) {
-				brelse(bh);
-				return 0;
-			}
+			ix++;
+			filp->f_pos += QNX4_DIR_ENTRY_SIZE;
 		}
 		brelse(bh);
 	}
+out:
 	return 0;
 }
 
@@ -71,7 +75,7 @@ const struct file_operations qnx4_dir_operations =
 {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
-	.iterate_shared	= qnx4_readdir,
+	.readdir	= qnx4_readdir,
 	.fsync		= generic_file_fsync,
 };
 

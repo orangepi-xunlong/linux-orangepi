@@ -27,7 +27,8 @@
  *  for more details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, see <http://www.gnu.org/licenses/>.
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
  *
  * ########################################################################
  *
@@ -47,6 +48,7 @@
 #include <linux/bitops.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
+#include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
@@ -88,124 +90,6 @@ MODULE_AUTHOR(DRV_AUTHOR);
 MODULE_DESCRIPTION(DRV_DESC);
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_VERSION);
-
-/* AU1000 MAC registers and bits */
-#define MAC_CONTROL		0x0
-#  define MAC_RX_ENABLE		(1 << 2)
-#  define MAC_TX_ENABLE		(1 << 3)
-#  define MAC_DEF_CHECK		(1 << 5)
-#  define MAC_SET_BL(X)		(((X) & 0x3) << 6)
-#  define MAC_AUTO_PAD		(1 << 8)
-#  define MAC_DISABLE_RETRY	(1 << 10)
-#  define MAC_DISABLE_BCAST	(1 << 11)
-#  define MAC_LATE_COL		(1 << 12)
-#  define MAC_HASH_MODE		(1 << 13)
-#  define MAC_HASH_ONLY		(1 << 15)
-#  define MAC_PASS_ALL		(1 << 16)
-#  define MAC_INVERSE_FILTER	(1 << 17)
-#  define MAC_PROMISCUOUS	(1 << 18)
-#  define MAC_PASS_ALL_MULTI	(1 << 19)
-#  define MAC_FULL_DUPLEX	(1 << 20)
-#  define MAC_NORMAL_MODE	0
-#  define MAC_INT_LOOPBACK	(1 << 21)
-#  define MAC_EXT_LOOPBACK	(1 << 22)
-#  define MAC_DISABLE_RX_OWN	(1 << 23)
-#  define MAC_BIG_ENDIAN	(1 << 30)
-#  define MAC_RX_ALL		(1 << 31)
-#define MAC_ADDRESS_HIGH	0x4
-#define MAC_ADDRESS_LOW		0x8
-#define MAC_MCAST_HIGH		0xC
-#define MAC_MCAST_LOW		0x10
-#define MAC_MII_CNTRL		0x14
-#  define MAC_MII_BUSY		(1 << 0)
-#  define MAC_MII_READ		0
-#  define MAC_MII_WRITE		(1 << 1)
-#  define MAC_SET_MII_SELECT_REG(X) (((X) & 0x1f) << 6)
-#  define MAC_SET_MII_SELECT_PHY(X) (((X) & 0x1f) << 11)
-#define MAC_MII_DATA		0x18
-#define MAC_FLOW_CNTRL		0x1C
-#  define MAC_FLOW_CNTRL_BUSY	(1 << 0)
-#  define MAC_FLOW_CNTRL_ENABLE (1 << 1)
-#  define MAC_PASS_CONTROL	(1 << 2)
-#  define MAC_SET_PAUSE(X)	(((X) & 0xffff) << 16)
-#define MAC_VLAN1_TAG		0x20
-#define MAC_VLAN2_TAG		0x24
-
-/* Ethernet Controller Enable */
-#  define MAC_EN_CLOCK_ENABLE	(1 << 0)
-#  define MAC_EN_RESET0		(1 << 1)
-#  define MAC_EN_TOSS		(0 << 2)
-#  define MAC_EN_CACHEABLE	(1 << 3)
-#  define MAC_EN_RESET1		(1 << 4)
-#  define MAC_EN_RESET2		(1 << 5)
-#  define MAC_DMA_RESET		(1 << 6)
-
-/* Ethernet Controller DMA Channels */
-/* offsets from MAC_TX_RING_ADDR address */
-#define MAC_TX_BUFF0_STATUS	0x0
-#  define TX_FRAME_ABORTED	(1 << 0)
-#  define TX_JAB_TIMEOUT	(1 << 1)
-#  define TX_NO_CARRIER		(1 << 2)
-#  define TX_LOSS_CARRIER	(1 << 3)
-#  define TX_EXC_DEF		(1 << 4)
-#  define TX_LATE_COLL_ABORT	(1 << 5)
-#  define TX_EXC_COLL		(1 << 6)
-#  define TX_UNDERRUN		(1 << 7)
-#  define TX_DEFERRED		(1 << 8)
-#  define TX_LATE_COLL		(1 << 9)
-#  define TX_COLL_CNT_MASK	(0xF << 10)
-#  define TX_PKT_RETRY		(1 << 31)
-#define MAC_TX_BUFF0_ADDR	0x4
-#  define TX_DMA_ENABLE		(1 << 0)
-#  define TX_T_DONE		(1 << 1)
-#  define TX_GET_DMA_BUFFER(X)	(((X) >> 2) & 0x3)
-#define MAC_TX_BUFF0_LEN	0x8
-#define MAC_TX_BUFF1_STATUS	0x10
-#define MAC_TX_BUFF1_ADDR	0x14
-#define MAC_TX_BUFF1_LEN	0x18
-#define MAC_TX_BUFF2_STATUS	0x20
-#define MAC_TX_BUFF2_ADDR	0x24
-#define MAC_TX_BUFF2_LEN	0x28
-#define MAC_TX_BUFF3_STATUS	0x30
-#define MAC_TX_BUFF3_ADDR	0x34
-#define MAC_TX_BUFF3_LEN	0x38
-
-/* offsets from MAC_RX_RING_ADDR */
-#define MAC_RX_BUFF0_STATUS	0x0
-#  define RX_FRAME_LEN_MASK	0x3fff
-#  define RX_WDOG_TIMER		(1 << 14)
-#  define RX_RUNT		(1 << 15)
-#  define RX_OVERLEN		(1 << 16)
-#  define RX_COLL		(1 << 17)
-#  define RX_ETHER		(1 << 18)
-#  define RX_MII_ERROR		(1 << 19)
-#  define RX_DRIBBLING		(1 << 20)
-#  define RX_CRC_ERROR		(1 << 21)
-#  define RX_VLAN1		(1 << 22)
-#  define RX_VLAN2		(1 << 23)
-#  define RX_LEN_ERROR		(1 << 24)
-#  define RX_CNTRL_FRAME	(1 << 25)
-#  define RX_U_CNTRL_FRAME	(1 << 26)
-#  define RX_MCAST_FRAME	(1 << 27)
-#  define RX_BCAST_FRAME	(1 << 28)
-#  define RX_FILTER_FAIL	(1 << 29)
-#  define RX_PACKET_FILTER	(1 << 30)
-#  define RX_MISSED_FRAME	(1 << 31)
-
-#  define RX_ERROR (RX_WDOG_TIMER | RX_RUNT | RX_OVERLEN |  \
-		    RX_COLL | RX_MII_ERROR | RX_CRC_ERROR | \
-		    RX_LEN_ERROR | RX_U_CNTRL_FRAME | RX_MISSED_FRAME)
-#define MAC_RX_BUFF0_ADDR	0x4
-#  define RX_DMA_ENABLE		(1 << 0)
-#  define RX_T_DONE		(1 << 1)
-#  define RX_GET_DMA_BUFFER(X)	(((X) >> 2) & 0x3)
-#  define RX_SET_BUFF_ADDR(X)	((X) & 0xffffffc0)
-#define MAC_RX_BUFF1_STATUS	0x10
-#define MAC_RX_BUFF1_ADDR	0x14
-#define MAC_RX_BUFF2_STATUS	0x20
-#define MAC_RX_BUFF2_ADDR	0x24
-#define MAC_RX_BUFF3_STATUS	0x30
-#define MAC_RX_BUFF3_ADDR	0x34
 
 /*
  * Theory of operation
@@ -270,12 +154,10 @@ static void au1000_enable_mac(struct net_device *dev, int force_reset)
 
 	if (force_reset || (!aup->mac_enabled)) {
 		writel(MAC_EN_CLOCK_ENABLE, aup->enable);
-		wmb(); /* drain writebuffer */
-		mdelay(2);
+		au_sync_delay(2);
 		writel((MAC_EN_RESET0 | MAC_EN_RESET1 | MAC_EN_RESET2
 				| MAC_EN_CLOCK_ENABLE), aup->enable);
-		wmb(); /* drain writebuffer */
-		mdelay(2);
+		au_sync_delay(2);
 
 		aup->mac_enabled = 1;
 	}
@@ -344,6 +226,9 @@ static void au1000_mdio_write(struct net_device *dev, int phy_addr,
 
 static int au1000_mdiobus_read(struct mii_bus *bus, int phy_addr, int regnum)
 {
+	/* WARNING: bus->phy_map[phy_addr].attached_dev == dev does
+	 * _NOT_ hold (e.g. when PHY is accessed through other MAC's MII bus)
+	 */
 	struct net_device *const dev = bus->priv;
 
 	/* make sure the MAC associated with this
@@ -390,8 +275,7 @@ static void au1000_hard_stop(struct net_device *dev)
 	reg = readl(&aup->mac->control);
 	reg &= ~(MAC_RX_ENABLE | MAC_TX_ENABLE);
 	writel(reg, &aup->mac->control);
-	wmb(); /* drain writebuffer */
-	mdelay(10);
+	au_sync_delay(10);
 }
 
 static void au1000_enable_rx_tx(struct net_device *dev)
@@ -404,21 +288,20 @@ static void au1000_enable_rx_tx(struct net_device *dev)
 	reg = readl(&aup->mac->control);
 	reg |= (MAC_RX_ENABLE | MAC_TX_ENABLE);
 	writel(reg, &aup->mac->control);
-	wmb(); /* drain writebuffer */
-	mdelay(10);
+	au_sync_delay(10);
 }
 
 static void
 au1000_adjust_link(struct net_device *dev)
 {
 	struct au1000_private *aup = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
+	struct phy_device *phydev = aup->phy_dev;
 	unsigned long flags;
 	u32 reg;
 
 	int status_change = 0;
 
-	BUG_ON(!phydev);
+	BUG_ON(!aup->phy_dev);
 
 	spin_lock_irqsave(&aup->lock, flags);
 
@@ -455,8 +338,7 @@ au1000_adjust_link(struct net_device *dev)
 			reg |= MAC_DISABLE_RX_OWN;
 		}
 		writel(reg, &aup->mac->control);
-		wmb(); /* drain writebuffer */
-		mdelay(1);
+		au_sync_delay(1);
 
 		au1000_enable_rx_tx(dev);
 		aup->old_duplex = phydev->duplex;
@@ -499,7 +381,7 @@ static int au1000_mii_probe(struct net_device *dev)
 		BUG_ON(aup->mac_id < 0 || aup->mac_id > 1);
 
 		if (aup->phy_addr)
-			phydev = mdiobus_get_phy(aup->mii_bus, aup->phy_addr);
+			phydev = aup->mii_bus->phy_map[aup->phy_addr];
 		else
 			netdev_info(dev, "using PHY-less setup\n");
 		return 0;
@@ -509,8 +391,8 @@ static int au1000_mii_probe(struct net_device *dev)
 	 * on the current MAC's MII bus
 	 */
 	for (phy_addr = 0; phy_addr < PHY_MAX_ADDR; phy_addr++)
-		if (mdiobus_get_phy(aup->mii_bus, phy_addr)) {
-			phydev = mdiobus_get_phy(aup->mii_bus, phy_addr);
+		if (aup->mii_bus->phy_map[phy_addr]) {
+			phydev = aup->mii_bus->phy_map[phy_addr];
 			if (!aup->phy_search_highest_addr)
 				/* break out with first one found */
 				break;
@@ -528,8 +410,7 @@ static int au1000_mii_probe(struct net_device *dev)
 			 */
 			for (phy_addr = 0; phy_addr < PHY_MAX_ADDR; phy_addr++) {
 				struct phy_device *const tmp_phydev =
-					mdiobus_get_phy(aup->mii_bus,
-							phy_addr);
+					aup->mii_bus->phy_map[phy_addr];
 
 				if (aup->mac_id == 1)
 					break;
@@ -556,8 +437,8 @@ static int au1000_mii_probe(struct net_device *dev)
 	/* now we are supposed to have a proper phydev, to attach to... */
 	BUG_ON(phydev->attached_dev);
 
-	phydev = phy_connect(dev, phydev_name(phydev),
-			     &au1000_adjust_link, PHY_INTERFACE_MODE_MII);
+	phydev = phy_connect(dev, dev_name(&phydev->dev), &au1000_adjust_link,
+			0, PHY_INTERFACE_MODE_MII);
 
 	if (IS_ERR(phydev)) {
 		netdev_err(dev, "Could not attach to PHY\n");
@@ -579,8 +460,11 @@ static int au1000_mii_probe(struct net_device *dev)
 	aup->old_link = 0;
 	aup->old_speed = 0;
 	aup->old_duplex = -1;
+	aup->phy_dev = phydev;
 
-	phy_attached_info(phydev);
+	netdev_info(dev, "attached PHY driver [%s] "
+	       "(mii_bus:phy_addr=%s, irq=%d)\n",
+	       phydev->drv->name, dev_name(&phydev->dev), phydev->irq);
 
 	return 0;
 }
@@ -618,11 +502,9 @@ static void au1000_reset_mac_unlocked(struct net_device *dev)
 	au1000_hard_stop(dev);
 
 	writel(MAC_EN_CLOCK_ENABLE, aup->enable);
-	wmb(); /* drain writebuffer */
-	mdelay(2);
+	au_sync_delay(2);
 	writel(0, aup->enable);
-	wmb(); /* drain writebuffer */
-	mdelay(2);
+	au_sync_delay(2);
 
 	aup->tx_full = 0;
 	for (i = 0; i < NUM_RX_DMA; i++) {
@@ -677,15 +559,39 @@ au1000_setup_hw_rings(struct au1000_private *aup, void __iomem *tx_base)
  * ethtool operations
  */
 
+static int au1000_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct au1000_private *aup = netdev_priv(dev);
+
+	if (aup->phy_dev)
+		return phy_ethtool_gset(aup->phy_dev, cmd);
+
+	return -EINVAL;
+}
+
+static int au1000_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct au1000_private *aup = netdev_priv(dev);
+
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+
+	if (aup->phy_dev)
+		return phy_ethtool_sset(aup->phy_dev, cmd);
+
+	return -EINVAL;
+}
+
 static void
 au1000_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
 	struct au1000_private *aup = netdev_priv(dev);
 
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
-	snprintf(info->bus_info, sizeof(info->bus_info), "%s %d", DRV_NAME,
-		 aup->mac_id);
+	strcpy(info->driver, DRV_NAME);
+	strcpy(info->version, DRV_VERSION);
+	info->fw_version[0] = '\0';
+	sprintf(info->bus_info, "%s %d", DRV_NAME, aup->mac_id);
+	info->regdump_len = 0;
 }
 
 static void au1000_set_msglevel(struct net_device *dev, u32 value)
@@ -701,12 +607,12 @@ static u32 au1000_get_msglevel(struct net_device *dev)
 }
 
 static const struct ethtool_ops au1000_ethtool_ops = {
+	.get_settings = au1000_get_settings,
+	.set_settings = au1000_set_settings,
 	.get_drvinfo = au1000_get_drvinfo,
 	.get_link = ethtool_op_get_link,
 	.get_msglevel = au1000_get_msglevel,
 	.set_msglevel = au1000_set_msglevel,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
 
@@ -748,14 +654,14 @@ static int au1000_init(struct net_device *dev)
 	for (i = 0; i < NUM_RX_DMA; i++)
 		aup->rx_dma_ring[i]->buff_stat |= RX_DMA_ENABLE;
 
-	wmb(); /* drain writebuffer */
+	au_sync();
 
 	control = MAC_RX_ENABLE | MAC_TX_ENABLE;
 #ifndef CONFIG_CPU_LITTLE_ENDIAN
 	control |= MAC_BIG_ENDIAN;
 #endif
-	if (dev->phydev) {
-		if (dev->phydev->link && (DUPLEX_FULL == dev->phydev->duplex))
+	if (aup->phy_dev) {
+		if (aup->phy_dev->link && (DUPLEX_FULL == aup->phy_dev->duplex))
 			control |= MAC_FULL_DUPLEX;
 		else
 			control |= MAC_DISABLE_RX_OWN;
@@ -765,7 +671,7 @@ static int au1000_init(struct net_device *dev)
 
 	writel(control, &aup->mac->control);
 	writel(0x8100, &aup->mac->vlan1_tag); /* activate vlan support */
-	wmb(); /* drain writebuffer */
+	au_sync();
 
 	spin_unlock_irqrestore(&aup->lock, flags);
 	return 0;
@@ -821,6 +727,7 @@ static int au1000_rx(struct net_device *dev)
 			frmlen -= 4; /* Remove FCS */
 			skb = netdev_alloc_skb(dev, frmlen + 2);
 			if (skb == NULL) {
+				netdev_err(dev, "Memory squeeze, dropping packet.\n");
 				dev->stats.rx_dropped++;
 				continue;
 			}
@@ -856,7 +763,7 @@ static int au1000_rx(struct net_device *dev)
 		}
 		prxd->buff_stat = (u32)(pDB->dma_addr | RX_DMA_ENABLE);
 		aup->rx_head = (aup->rx_head + 1) & (NUM_RX_DMA - 1);
-		wmb(); /* drain writebuffer */
+		au_sync();
 
 		/* next descriptor */
 		prxd = aup->rx_dma_ring[aup->rx_head];
@@ -867,10 +774,11 @@ static int au1000_rx(struct net_device *dev)
 
 static void au1000_update_tx_stats(struct net_device *dev, u32 status)
 {
+	struct au1000_private *aup = netdev_priv(dev);
 	struct net_device_stats *ps = &dev->stats;
 
 	if (status & TX_FRAME_ABORTED) {
-		if (!dev->phydev || (DUPLEX_FULL == dev->phydev->duplex)) {
+		if (!aup->phy_dev || (DUPLEX_FULL == aup->phy_dev->duplex)) {
 			if (status & (TX_JAB_TIMEOUT | TX_UNDERRUN)) {
 				/* any other tx errors are only valid
 				 * in half duplex mode
@@ -903,7 +811,7 @@ static void au1000_tx_ack(struct net_device *dev)
 		au1000_update_tx_stats(dev, ptxd->status);
 		ptxd->buff_stat &= ~TX_T_DONE;
 		ptxd->len = 0;
-		wmb(); /* drain writebuffer */
+		au_sync();
 
 		aup->tx_tail = (aup->tx_tail + 1) & (NUM_TX_DMA - 1);
 		ptxd = aup->tx_dma_ring[aup->tx_tail];
@@ -950,10 +858,10 @@ static int au1000_open(struct net_device *dev)
 		return retval;
 	}
 
-	if (dev->phydev) {
+	if (aup->phy_dev) {
 		/* cause the PHY state machine to schedule a link state check */
-		dev->phydev->state = PHY_CHANGELINK;
-		phy_start(dev->phydev);
+		aup->phy_dev->state = PHY_CHANGELINK;
+		phy_start(aup->phy_dev);
 	}
 
 	netif_start_queue(dev);
@@ -970,8 +878,8 @@ static int au1000_close(struct net_device *dev)
 
 	netif_dbg(aup, drv, dev, "close: dev=%p\n", dev);
 
-	if (dev->phydev)
-		phy_stop(dev->phydev);
+	if (aup->phy_dev)
+		phy_stop(aup->phy_dev);
 
 	spin_lock_irqsave(&aup->lock, flags);
 
@@ -1034,7 +942,7 @@ static netdev_tx_t au1000_tx(struct sk_buff *skb, struct net_device *dev)
 	ps->tx_bytes += ptxd->len;
 
 	ptxd->buff_stat = pDB->dma_addr | TX_DMA_ENABLE;
-	wmb(); /* drain writebuffer */
+	au_sync();
 	dev_kfree_skb(skb);
 	aup->tx_head = (aup->tx_head + 1) & (NUM_TX_DMA - 1);
 	return NETDEV_TX_OK;
@@ -1049,7 +957,7 @@ static void au1000_tx_timeout(struct net_device *dev)
 	netdev_err(dev, "au1000_tx_timeout: dev=%p\n", dev);
 	au1000_reset_mac(dev);
 	au1000_init(dev);
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue(dev);
 }
 
@@ -1085,13 +993,15 @@ static void au1000_multicast_list(struct net_device *dev)
 
 static int au1000_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
+	struct au1000_private *aup = netdev_priv(dev);
+
 	if (!netif_running(dev))
 		return -EINVAL;
 
-	if (!dev->phydev)
+	if (!aup->phy_dev)
 		return -EINVAL; /* PHY not controllable */
 
-	return phy_mii_ioctl(dev->phydev, rq, cmd);
+	return phy_mii_ioctl(aup->phy_dev, rq, cmd);
 }
 
 static const struct net_device_ops au1000_netdev_ops = {
@@ -1106,8 +1016,9 @@ static const struct net_device_ops au1000_netdev_ops = {
 	.ndo_change_mtu		= eth_change_mtu,
 };
 
-static int au1000_probe(struct platform_device *pdev)
+static int __devinit au1000_probe(struct platform_device *pdev)
 {
+	static unsigned version_printed;
 	struct au1000_private *aup = NULL;
 	struct au1000_eth_platform_data *pd;
 	struct net_device *dev = NULL;
@@ -1221,14 +1132,14 @@ static int au1000_probe(struct platform_device *pdev)
 	writel(0, aup->enable);
 	aup->mac_enabled = 0;
 
-	pd = dev_get_platdata(&pdev->dev);
+	pd = pdev->dev.platform_data;
 	if (!pd) {
 		dev_info(&pdev->dev, "no platform_data passed,"
 					" PHY search on MAC0\n");
 		aup->phy1_search_mac0 = 1;
 	} else {
 		if (is_valid_ether_addr(pd->mac)) {
-			memcpy(dev->dev_addr, pd->mac, ETH_ALEN);
+			memcpy(dev->dev_addr, pd->mac, 6);
 		} else {
 			/* Set a random MAC since no valid provided by platform_data. */
 			eth_hw_addr_random(dev);
@@ -1242,7 +1153,7 @@ static int au1000_probe(struct platform_device *pdev)
 		aup->phy_irq = pd->phy_irq;
 	}
 
-	if (aup->phy_busid > 0) {
+	if (aup->phy_busid && aup->phy_busid > 0) {
 		dev_err(&pdev->dev, "MAC0-associated PHY attached 2nd MACs MII bus not supported yet\n");
 		err = -ENODEV;
 		goto err_mdiobus_alloc;
@@ -1262,7 +1173,12 @@ static int au1000_probe(struct platform_device *pdev)
 	aup->mii_bus->name = "au1000_eth_mii";
 	snprintf(aup->mii_bus->id, MII_BUS_ID_SIZE, "%s-%x",
 		pdev->name, aup->mac_id);
+	aup->mii_bus->irq = kmalloc(sizeof(int)*PHY_MAX_ADDR, GFP_KERNEL);
+	if (aup->mii_bus->irq == NULL)
+		goto err_out;
 
+	for (i = 0; i < PHY_MAX_ADDR; ++i)
+		aup->mii_bus->irq[i] = PHY_POLL;
 	/* if known, set corresponding PHY IRQs */
 	if (aup->phy_static_config)
 		if (aup->phy_irq && aup->phy_busid == aup->mac_id)
@@ -1274,8 +1190,7 @@ static int au1000_probe(struct platform_device *pdev)
 		goto err_mdiobus_reg;
 	}
 
-	err = au1000_mii_probe(dev);
-	if (err != 0)
+	if (au1000_mii_probe(dev) != 0)
 		goto err_out;
 
 	pDBfree = NULL;
@@ -1290,7 +1205,6 @@ static int au1000_probe(struct platform_device *pdev)
 	}
 	aup->pDBfree = pDBfree;
 
-	err = -ENODEV;
 	for (i = 0; i < NUM_RX_DMA; i++) {
 		pDB = au1000_GetFreeDB(aup);
 		if (!pDB)
@@ -1299,8 +1213,6 @@ static int au1000_probe(struct platform_device *pdev)
 		aup->rx_dma_ring[i]->buff_stat = (unsigned)pDB->dma_addr;
 		aup->rx_db_inuse[i] = pDB;
 	}
-
-	err = -ENODEV;
 	for (i = 0; i < NUM_TX_DMA; i++) {
 		pDB = au1000_GetFreeDB(aup);
 		if (!pDB)
@@ -1314,7 +1226,7 @@ static int au1000_probe(struct platform_device *pdev)
 	dev->base_addr = base->start;
 	dev->irq = irq;
 	dev->netdev_ops = &au1000_netdev_ops;
-	dev->ethtool_ops = &au1000_ethtool_ops;
+	SET_ETHTOOL_OPS(dev, &au1000_ethtool_ops);
 	dev->watchdog_timeo = ETH_TX_TIMEOUT;
 
 	/*
@@ -1331,8 +1243,9 @@ static int au1000_probe(struct platform_device *pdev)
 
 	netdev_info(dev, "Au1xx0 Ethernet found at 0x%lx, irq %d\n",
 			(unsigned long)base->start, irq);
-
-	pr_info_once("%s version %s %s\n", DRV_NAME, DRV_VERSION, DRV_AUTHOR);
+	if (version_printed++ == 0)
+		pr_info("%s version %s %s\n",
+					DRV_NAME, DRV_VERSION, DRV_AUTHOR);
 
 	return 0;
 
@@ -1376,12 +1289,14 @@ out:
 	return err;
 }
 
-static int au1000_remove(struct platform_device *pdev)
+static int __devexit au1000_remove(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
 	struct au1000_private *aup = netdev_priv(dev);
 	int i;
 	struct resource *base, *macen;
+
+	platform_set_drvdata(pdev, NULL);
 
 	unregister_netdev(dev);
 	mdiobus_unregister(aup->mii_bus);
@@ -1419,9 +1334,10 @@ static int au1000_remove(struct platform_device *pdev)
 
 static struct platform_driver au1000_eth_driver = {
 	.probe  = au1000_probe,
-	.remove = au1000_remove,
+	.remove = __devexit_p(au1000_remove),
 	.driver = {
 		.name   = "au1000-eth",
+		.owner  = THIS_MODULE,
 	},
 };
 

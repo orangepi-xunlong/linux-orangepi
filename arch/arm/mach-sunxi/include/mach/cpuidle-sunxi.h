@@ -28,8 +28,9 @@
 #include <asm/cacheflush.h>
 #include <asm/suspend.h>
 #include <asm/cputype.h>
-#include <linux/irqchip/arm-gic.h>
+#include <asm/hardware/gic.h>
 #include <asm/mcpm.h>
+#include <asm/hardware/gic.h>
 
 #include <mach/platform.h>
 #include <mach/cci.h>
@@ -63,20 +64,20 @@ extern void sunxi_set_cpus_boot_entry(int cpu, void *entry);
 
 static inline void sunxi_cpuidle_power_up_cpu(unsigned int cpu)
 {
-	unsigned int cluster_id, cpu_id, mpidr;
+	unsigned int cluster_id,cpu_id,mpidr;
 
 	mpidr = cpu_logical_map(cpu);
 	cpu_id = MPIDR_AFFINITY_LEVEL(mpidr, 0);
 	cluster_id = MPIDR_AFFINITY_LEVEL(mpidr, 1);
 #if defined(CONFIG_ARCH_SUN9IW1P1)
 	mcpm_set_entry_vector(cpu_id, cluster_id, NULL);
-	sun9i_cpu_power_set(cluster_id, cpu_id, 1);
+	sun9i_cpu_power_set(cluster_id,cpu_id,1);
 	mcpm_set_entry_vector(cpu_id, cluster_id, cpu_resume);
 #endif
 
 #if defined(CONFIG_ARCH_SUN8IW6P1)
 	mcpm_set_entry_vector(cpu_id, cluster_id, NULL);
-	sun8i_cpu_power_set(cluster_id, cpu_id, 1);
+	sun8i_cpu_power_set(cluster_id,cpu_id, 1);
 	mcpm_set_entry_vector(cpu_id, cluster_id, cpu_resume);
 #endif
 
@@ -89,18 +90,18 @@ static inline void sunxi_cpuidle_power_up_cpu(unsigned int cpu)
 }
 static inline void sunxi_cpuidle_power_down_cpu(unsigned int cpu)
 {
-	unsigned int cluster_id, cpu_id, mpidr;
+	unsigned int cluster_id,cpu_id,mpidr;
 
 	mpidr = cpu_logical_map(cpu);
 	cpu_id = MPIDR_AFFINITY_LEVEL(mpidr, 0);
 	cluster_id = MPIDR_AFFINITY_LEVEL(mpidr, 1);
 
 #if defined(CONFIG_ARCH_SUN9IW1P1)
-	sun9i_cpu_power_set(cluster_id, cpu_id, 0);
+	sun9i_cpu_power_set(cluster_id,cpu_id,0);
 #endif
 
 #if defined(CONFIG_ARCH_SUN8IW6P1)
-	sun8i_cpu_power_set(cluster_id, cpu_id, 0);
+	sun8i_cpu_power_set(cluster_id,cpu_id, 0);
 #endif
 
 #if defined(CONFIG_ARCH_SUN8IW1P1) || defined(CONFIG_ARCH_SUN8IW3P1) || defined(CONFIG_ARCH_SUN8IW5P1)
@@ -110,7 +111,7 @@ static inline void sunxi_cpuidle_power_down_cpu(unsigned int cpu)
 
 static inline bool SUNXI_CPU_IS_WFI_MODE(unsigned int cpu)
 {
-	unsigned int cluster_id, cpu_id, mpidr;
+	unsigned int cluster_id,cpu_id,mpidr;
 	int ret = 0;
 	mpidr = cpu_logical_map(cpu);
 	cpu_id = MPIDR_AFFINITY_LEVEL(mpidr, 0);
@@ -155,12 +156,12 @@ static inline void sunxi_idle_cpu_die(void)
 	unsigned int cpu = MPIDR_AFFINITY_LEVEL(mpidr, 0);
 #endif
 
-	gic_cpu_if_down(0);
+	gic_cpu_exit(0);
 #if defined(CONFIG_ARCH_SUN8IW6P1)
 	writel(0, CLUSTER_CPUW_FLG(cluster, cpu)); /* for cpus sync */
 #endif
 	/* step1: disable cache */
-	asm("mrc    p15, 0, %0, c1, c0, 0" : "=r" (actlr));
+	asm("mrc    p15, 0, %0, c1, c0, 0" : "=r" (actlr) );
 	actlr &= ~(1<<2);
 	asm("mcr    p15, 0, %0, c1, c0, 0\n" : : "r" (actlr));
 
@@ -171,7 +172,7 @@ static inline void sunxi_idle_cpu_die(void)
 	asm("clrex" : : : "memory", "cc");
 
 	/* step4: switch cpu from SMP mode to AMP mode, aim is to disable cache coherency */
-	asm("mrc    p15, 0, %0, c1, c0, 1" : "=r" (actlr));
+	asm("mrc    p15, 0, %0, c1, c0, 1" : "=r" (actlr) );
 	actlr &= ~(1<<6);
 	asm("mcr    p15, 0, %0, c1, c0, 1\n" : : "r" (actlr));
 
@@ -182,12 +183,10 @@ static inline void sunxi_idle_cpu_die(void)
 	dsb();
 
 	/* step7: execute a WFI instruction */
-	while (1) {
+	while(1){
 		asm("wfi" : : : "memory", "cc");
 	}
 }
-
-extern void __mcpm_outbound_leave_critical(unsigned int cluster, int state);
 
 static inline void sunxi_idle_cluster_die(unsigned int cluster)
 {
@@ -197,12 +196,12 @@ static inline void sunxi_idle_cluster_die(unsigned int cluster)
 	unsigned int cpu = MPIDR_AFFINITY_LEVEL(mpidr, 0);
 #endif
 
-	gic_cpu_if_down(0);
+	gic_cpu_exit(0);
 #if defined(CONFIG_ARCH_SUN8IW6P1)
 	writel(0, CLUSTER_CPUW_FLG(cluster, cpu)); /* for cpus sync */
 #endif
 	/* step1: disable cache */
-	asm("mrc    p15, 0, %0, c1, c0, 0" : "=r" (actlr));
+	asm("mrc    p15, 0, %0, c1, c0, 0" : "=r" (actlr) );
 	actlr &= ~(1<<2);
 	asm("mcr    p15, 0, %0, c1, c0, 0\n" : : "r" (actlr));
 
@@ -214,7 +213,7 @@ static inline void sunxi_idle_cluster_die(unsigned int cluster)
 	asm("clrex" : : : "memory", "cc");
 
 	/* step4: switch cpu from SMP mode to AMP mode, aim is to disable cache coherency */
-	asm("mrc    p15, 0, %0, c1, c0, 1" : "=r" (actlr));
+	asm("mrc    p15, 0, %0, c1, c0, 1" : "=r" (actlr) );
 	actlr &= ~(1<<6);
 	asm("mcr    p15, 0, %0, c1, c0, 1\n" : : "r" (actlr));
 #if (defined CONFIG_ARCH_SUN8IW6P1) || (defined CONFIG_ARCH_SUN9IW1P1)
@@ -230,7 +229,7 @@ static inline void sunxi_idle_cluster_die(unsigned int cluster)
 	dsb();
 
 	/* step7: execute a WFI instruction */
-	while (1) {
+	while(1){
 		asm("wfi" : : : "memory", "cc");
 	}
 }
@@ -240,21 +239,19 @@ static inline void sunxi_idle_cluster_die(unsigned int cluster)
 static void __iomem *distbase = (void __iomem *)SUNXI_GIC_DIST_VBASE;
 static inline bool sunxi_pending_sgi(void)
 {
-	u32 pending_set;
+    u32 pending_set;
 
-	pending_set = readl_relaxed(distbase + GIC_DIST_PENDING_SET);
-	if (pending_set & SGI_MASK) {
-		return true;
+    pending_set = readl_relaxed(distbase + GIC_DIST_PENDING_SET);
+    if (pending_set & SGI_MASK){
+        return true;
 	}
-	return false;
+    return false;
 }
 
 extern atomic_t sunxi_user_idle_driver;
 extern raw_spinlock_t sunxi_cpu_idle_c1_lock;
 extern struct cpumask sunxi_cpu_idle_mask;
 extern struct cpumask sunxi_cpu_try_enter_idle_mask;
-
-extern void gic_raise_softirq(const struct cpumask *mask, unsigned int irq);
 
 /*raise software interrupt*/
 static inline void sunxi_raise_softirq(const struct cpumask *mask, unsigned int irq)
@@ -263,31 +260,32 @@ static inline void sunxi_raise_softirq(const struct cpumask *mask, unsigned int 
 	unsigned long flag;
 	struct cpumask tmp_cores;
 	sync_cache_r(&sunxi_user_idle_driver);
-	if (atomic_read(&sunxi_user_idle_driver) == 0x00) {
-		gic_raise_softirq(mask, irq);
-	} else {
+	if(atomic_read(&sunxi_user_idle_driver) == 0x00){
+		gic_raise_softirq(mask,irq);
+	} else{
+
 		/* send interupt first */
-		gic_raise_softirq(mask, irq);
+		gic_raise_softirq(mask,irq);
 		/* wait every core exit temp state, except myself */
 		cpu = get_logical_index(read_cpuid_mpidr()&0xFFFF);
 		do {
 			cpumask_and(&tmp_cores, mask, &sunxi_cpu_try_enter_idle_mask);
 			cpumask_clear_cpu(cpu, &tmp_cores);
-		} while (!cpumask_empty(&tmp_cores));
+		} while(!cpumask_empty(&tmp_cores));
 
 		/* check if need enable some core */
 		cpumask_and(&tmp_cores, mask, &sunxi_cpu_idle_mask);
-		if (!cpumask_empty(&tmp_cores)) {
-			raw_spin_lock_irqsave(&sunxi_cpu_idle_c1_lock, flag);
+		if(!cpumask_empty(&tmp_cores)) {
+			raw_spin_lock_irqsave(&sunxi_cpu_idle_c1_lock,flag);
 
-			for_each_cpu(cpu, mask) {
-				if (cpumask_test_cpu(cpu, &sunxi_cpu_idle_mask)) {
+			for_each_cpu(cpu, mask){
+				if(cpumask_test_cpu(cpu, &sunxi_cpu_idle_mask)){
 					sunxi_cpuidle_power_up_cpu(cpu);
 					/* clear cpu idle mask, because the cpu has been enable */
 					cpumask_clear_cpu(cpu, &sunxi_cpu_idle_mask);
 				}
 			}
-			raw_spin_unlock_irqrestore(&sunxi_cpu_idle_c1_lock, flag);
+			raw_spin_unlock_irqrestore(&sunxi_cpu_idle_c1_lock,flag);
 		}
 	}
 }

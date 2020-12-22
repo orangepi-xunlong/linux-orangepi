@@ -18,9 +18,8 @@
 #include <linux/stop_machine.h>
 #include <linux/interrupt.h>
 #include <linux/kallsyms.h>
-#include <linux/smpboot.h>
+
 #include <linux/atomic.h>
-#include <linux/nmi.h>
 
 /*
  * Structure to determine completion condition and record errors.  May
@@ -28,27 +27,21 @@
  */
 struct cpu_stop_done {
 	atomic_t		nr_todo;	/* nr left to execute */
+	bool			executed;	/* actually executed? */
 	int			ret;		/* collected return value */
 	struct completion	completion;	/* fired if nr_todo reaches 0 */
 };
 
 /* the actual stopper, one per every possible cpu, enabled on online cpus */
 struct cpu_stopper {
-	struct task_struct	*thread;
-
-	raw_spinlock_t		lock;
+	spinlock_t		lock;
 	bool			enabled;	/* is this stopper enabled? */
 	struct list_head	works;		/* list of pending works */
-
-	struct cpu_stop_work	stop_work;	/* for stop_cpus */
+	struct task_struct	*thread;	/* stopper thread */
 };
 
 static DEFINE_PER_CPU(struct cpu_stopper, cpu_stopper);
 static bool stop_machine_initialized = false;
-
-/* static data for stop_cpus */
-static DEFINE_MUTEX(stop_cpus_mutex);
-static bool stop_cpus_in_progress;
 
 static void cpu_stop_init_done(struct cpu_stop_done *done, unsigned int nr_todo)
 {
@@ -58,35 +51,31 @@ static void cpu_stop_init_done(struct cpu_stop_done *done, unsigned int nr_todo)
 }
 
 /* signal completion unless @done is NULL */
-static void cpu_stop_signal_done(struct cpu_stop_done *done)
+static void cpu_stop_signal_done(struct cpu_stop_done *done, bool executed)
 {
-	if (atomic_dec_and_test(&done->nr_todo))
-		complete(&done->completion);
-}
-
-static void __cpu_stop_queue_work(struct cpu_stopper *stopper,
-					struct cpu_stop_work *work)
-{
-	list_add_tail(&work->list, &stopper->works);
-	wake_up_process(stopper->thread);
+	if (done) {
+		if (executed)
+			done->executed = true;
+		if (atomic_dec_and_test(&done->nr_todo))
+			complete(&done->completion);
+	}
 }
 
 /* queue @work to @stopper.  if offline, @work is completed immediately */
-static bool cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
+static void cpu_stop_queue_work(struct cpu_stopper *stopper,
+				struct cpu_stop_work *work)
 {
-	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
 	unsigned long flags;
-	bool enabled;
 
-	raw_spin_lock_irqsave(&stopper->lock, flags);
-	enabled = stopper->enabled;
-	if (enabled)
-		__cpu_stop_queue_work(stopper, work);
-	else if (work->done)
-		cpu_stop_signal_done(work->done);
-	raw_spin_unlock_irqrestore(&stopper->lock, flags);
+	spin_lock_irqsave(&stopper->lock, flags);
 
-	return enabled;
+	if (stopper->enabled) {
+		list_add_tail(&work->list, &stopper->works);
+		wake_up_process(stopper->thread);
+	} else
+		cpu_stop_signal_done(work->done, false);
+
+	spin_unlock_irqrestore(&stopper->lock, flags);
 }
 
 /**
@@ -119,192 +108,9 @@ int stop_one_cpu(unsigned int cpu, cpu_stop_fn_t fn, void *arg)
 	struct cpu_stop_work work = { .fn = fn, .arg = arg, .done = &done };
 
 	cpu_stop_init_done(&done, 1);
-	if (!cpu_stop_queue_work(cpu, &work))
-		return -ENOENT;
-	/*
-	 * In case @cpu == smp_proccessor_id() we can avoid a sleep+wakeup
-	 * cycle by doing a preemption:
-	 */
-	cond_resched();
+	cpu_stop_queue_work(&per_cpu(cpu_stopper, cpu), &work);
 	wait_for_completion(&done.completion);
-	return done.ret;
-}
-
-/* This controls the threads on each CPU. */
-enum multi_stop_state {
-	/* Dummy starting state for thread. */
-	MULTI_STOP_NONE,
-	/* Awaiting everyone to be scheduled. */
-	MULTI_STOP_PREPARE,
-	/* Disable interrupts. */
-	MULTI_STOP_DISABLE_IRQ,
-	/* Run the function */
-	MULTI_STOP_RUN,
-	/* Exit */
-	MULTI_STOP_EXIT,
-};
-
-struct multi_stop_data {
-	cpu_stop_fn_t		fn;
-	void			*data;
-	/* Like num_online_cpus(), but hotplug cpu uses us, so we need this. */
-	unsigned int		num_threads;
-	const struct cpumask	*active_cpus;
-
-	enum multi_stop_state	state;
-	atomic_t		thread_ack;
-};
-
-static void set_state(struct multi_stop_data *msdata,
-		      enum multi_stop_state newstate)
-{
-	/* Reset ack counter. */
-	atomic_set(&msdata->thread_ack, msdata->num_threads);
-	smp_wmb();
-	msdata->state = newstate;
-}
-
-/* Last one to ack a state moves to the next state. */
-static void ack_state(struct multi_stop_data *msdata)
-{
-	if (atomic_dec_and_test(&msdata->thread_ack))
-		set_state(msdata, msdata->state + 1);
-}
-
-/* This is the cpu_stop function which stops the CPU. */
-static int multi_cpu_stop(void *data)
-{
-	struct multi_stop_data *msdata = data;
-	enum multi_stop_state curstate = MULTI_STOP_NONE;
-	int cpu = smp_processor_id(), err = 0;
-	unsigned long flags;
-	bool is_active;
-
-	/*
-	 * When called from stop_machine_from_inactive_cpu(), irq might
-	 * already be disabled.  Save the state and restore it on exit.
-	 */
-	local_save_flags(flags);
-
-	if (!msdata->active_cpus)
-		is_active = cpu == cpumask_first(cpu_online_mask);
-	else
-		is_active = cpumask_test_cpu(cpu, msdata->active_cpus);
-
-	/* Simple state machine */
-	do {
-		/* Chill out and ensure we re-read multi_stop_state. */
-		cpu_relax();
-		if (msdata->state != curstate) {
-			curstate = msdata->state;
-			switch (curstate) {
-			case MULTI_STOP_DISABLE_IRQ:
-				local_irq_disable();
-				hard_irq_disable();
-				break;
-			case MULTI_STOP_RUN:
-				if (is_active)
-					err = msdata->fn(msdata->data);
-				break;
-			default:
-				break;
-			}
-			ack_state(msdata);
-		} else if (curstate > MULTI_STOP_PREPARE) {
-			/*
-			 * At this stage all other CPUs we depend on must spin
-			 * in the same loop. Any reason for hard-lockup should
-			 * be detected and reported on their side.
-			 */
-			touch_nmi_watchdog();
-		}
-	} while (curstate != MULTI_STOP_EXIT);
-
-	local_irq_restore(flags);
-	return err;
-}
-
-static int cpu_stop_queue_two_works(int cpu1, struct cpu_stop_work *work1,
-				    int cpu2, struct cpu_stop_work *work2)
-{
-	struct cpu_stopper *stopper1 = per_cpu_ptr(&cpu_stopper, cpu1);
-	struct cpu_stopper *stopper2 = per_cpu_ptr(&cpu_stopper, cpu2);
-	int err;
-retry:
-	raw_spin_lock_irq(&stopper1->lock);
-	raw_spin_lock_nested(&stopper2->lock, SINGLE_DEPTH_NESTING);
-
-	err = -ENOENT;
-	if (!stopper1->enabled || !stopper2->enabled)
-		goto unlock;
-	/*
-	 * Ensure that if we race with __stop_cpus() the stoppers won't get
-	 * queued up in reverse order leading to system deadlock.
-	 *
-	 * We can't miss stop_cpus_in_progress if queue_stop_cpus_work() has
-	 * queued a work on cpu1 but not on cpu2, we hold both locks.
-	 *
-	 * It can be falsely true but it is safe to spin until it is cleared,
-	 * queue_stop_cpus_work() does everything under preempt_disable().
-	 */
-	err = -EDEADLK;
-	if (unlikely(stop_cpus_in_progress))
-			goto unlock;
-
-	err = 0;
-	__cpu_stop_queue_work(stopper1, work1);
-	__cpu_stop_queue_work(stopper2, work2);
-unlock:
-	raw_spin_unlock(&stopper2->lock);
-	raw_spin_unlock_irq(&stopper1->lock);
-
-	if (unlikely(err == -EDEADLK)) {
-		while (stop_cpus_in_progress)
-			cpu_relax();
-		goto retry;
-	}
-	return err;
-}
-/**
- * stop_two_cpus - stops two cpus
- * @cpu1: the cpu to stop
- * @cpu2: the other cpu to stop
- * @fn: function to execute
- * @arg: argument to @fn
- *
- * Stops both the current and specified CPU and runs @fn on one of them.
- *
- * returns when both are completed.
- */
-int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *arg)
-{
-	struct cpu_stop_done done;
-	struct cpu_stop_work work1, work2;
-	struct multi_stop_data msdata;
-
-	msdata = (struct multi_stop_data){
-		.fn = fn,
-		.data = arg,
-		.num_threads = 2,
-		.active_cpus = cpumask_of(cpu1),
-	};
-
-	work1 = work2 = (struct cpu_stop_work){
-		.fn = multi_cpu_stop,
-		.arg = &msdata,
-		.done = &done
-	};
-
-	cpu_stop_init_done(&done, 2);
-	set_state(&msdata, MULTI_STOP_PREPARE);
-
-	if (cpu1 > cpu2)
-		swap(cpu1, cpu2);
-	if (cpu_stop_queue_two_works(cpu1, &work1, cpu2, &work2))
-		return -ENOENT;
-
-	wait_for_completion(&done.completion);
-	return done.ret;
+	return done.executed ? done.ret : -ENOENT;
 }
 
 /**
@@ -312,7 +118,6 @@ int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *
  * @cpu: cpu to stop
  * @fn: function to execute
  * @arg: argument to @fn
- * @work_buf: pointer to cpu_stop_work structure
  *
  * Similar to stop_one_cpu() but doesn't wait for completion.  The
  * caller is responsible for ensuring @work_buf is currently unused
@@ -320,25 +125,32 @@ int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *
  *
  * CONTEXT:
  * Don't care.
- *
- * RETURNS:
- * true if cpu_stop_work was queued successfully and @fn will be called,
- * false otherwise.
  */
-bool stop_one_cpu_nowait(unsigned int cpu, cpu_stop_fn_t fn, void *arg,
+void stop_one_cpu_nowait(unsigned int cpu, cpu_stop_fn_t fn, void *arg,
 			struct cpu_stop_work *work_buf)
 {
 	*work_buf = (struct cpu_stop_work){ .fn = fn, .arg = arg, };
-	return cpu_stop_queue_work(cpu, work_buf);
+	cpu_stop_queue_work(&per_cpu(cpu_stopper, cpu), work_buf);
 }
 
-static bool queue_stop_cpus_work(const struct cpumask *cpumask,
+/* static data for stop_cpus */
+static DEFINE_MUTEX(stop_cpus_mutex);
+static DEFINE_PER_CPU(struct cpu_stop_work, stop_cpus_work);
+
+static void queue_stop_cpus_work(const struct cpumask *cpumask,
 				 cpu_stop_fn_t fn, void *arg,
 				 struct cpu_stop_done *done)
 {
 	struct cpu_stop_work *work;
 	unsigned int cpu;
-	bool queued = false;
+
+	/* initialize works and done */
+	for_each_cpu(cpu, cpumask) {
+		work = &per_cpu(stop_cpus_work, cpu);
+		work->fn = fn;
+		work->arg = arg;
+		work->done = done;
+	}
 
 	/*
 	 * Disable preemption while queueing to avoid getting
@@ -346,19 +158,10 @@ static bool queue_stop_cpus_work(const struct cpumask *cpumask,
 	 * to enter @fn which can lead to deadlock.
 	 */
 	preempt_disable();
-	stop_cpus_in_progress = true;
-	for_each_cpu(cpu, cpumask) {
-		work = &per_cpu(cpu_stopper.stop_work, cpu);
-		work->fn = fn;
-		work->arg = arg;
-		work->done = done;
-		if (cpu_stop_queue_work(cpu, work))
-			queued = true;
-	}
-	stop_cpus_in_progress = false;
+	for_each_cpu(cpu, cpumask)
+		cpu_stop_queue_work(&per_cpu(cpu_stopper, cpu),
+				    &per_cpu(stop_cpus_work, cpu));
 	preempt_enable();
-
-	return queued;
 }
 
 static int __stop_cpus(const struct cpumask *cpumask,
@@ -367,10 +170,9 @@ static int __stop_cpus(const struct cpumask *cpumask,
 	struct cpu_stop_done done;
 
 	cpu_stop_init_done(&done, cpumask_weight(cpumask));
-	if (!queue_stop_cpus_work(cpumask, fn, arg, &done))
-		return -ENOENT;
+	queue_stop_cpus_work(cpumask, fn, arg, &done);
 	wait_for_completion(&done.completion);
-	return done.ret;
+	return done.executed ? done.ret : -ENOENT;
 }
 
 /**
@@ -442,124 +244,249 @@ int try_stop_cpus(const struct cpumask *cpumask, cpu_stop_fn_t fn, void *arg)
 	return ret;
 }
 
-static int cpu_stop_should_run(unsigned int cpu)
+static int cpu_stopper_thread(void *data)
 {
-	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
-	unsigned long flags;
-	int run;
-
-	raw_spin_lock_irqsave(&stopper->lock, flags);
-	run = !list_empty(&stopper->works);
-	raw_spin_unlock_irqrestore(&stopper->lock, flags);
-	return run;
-}
-
-static void cpu_stopper_thread(unsigned int cpu)
-{
-	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
+	struct cpu_stopper *stopper = data;
 	struct cpu_stop_work *work;
+	int ret;
 
 repeat:
+	set_current_state(TASK_INTERRUPTIBLE);	/* mb paired w/ kthread_stop */
+
+	if (kthread_should_stop()) {
+		__set_current_state(TASK_RUNNING);
+		return 0;
+	}
+
 	work = NULL;
-	raw_spin_lock_irq(&stopper->lock);
+	spin_lock_irq(&stopper->lock);
 	if (!list_empty(&stopper->works)) {
 		work = list_first_entry(&stopper->works,
 					struct cpu_stop_work, list);
 		list_del_init(&work->list);
 	}
-	raw_spin_unlock_irq(&stopper->lock);
+	spin_unlock_irq(&stopper->lock);
 
 	if (work) {
 		cpu_stop_fn_t fn = work->fn;
 		void *arg = work->arg;
 		struct cpu_stop_done *done = work->done;
-		int ret;
+		char ksym_buf[KSYM_NAME_LEN] __maybe_unused;
 
-		/* cpu stop callbacks must not sleep, make in_atomic() == T */
-		preempt_count_inc();
+		__set_current_state(TASK_RUNNING);
+
+		/* cpu stop callbacks are not allowed to sleep */
+		preempt_disable();
+
 		ret = fn(arg);
-		if (done) {
-			if (ret)
-				done->ret = ret;
-			cpu_stop_signal_done(done);
-		}
-		preempt_count_dec();
-		WARN_ONCE(preempt_count(),
-			  "cpu_stop: %pf(%p) leaked preempt count\n", fn, arg);
-		goto repeat;
-	}
-}
+		if (ret)
+			done->ret = ret;
 
-void stop_machine_park(int cpu)
-{
-	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
-	/*
-	 * Lockless. cpu_stopper_thread() will take stopper->lock and flush
-	 * the pending works before it parks, until then it is fine to queue
-	 * the new works.
-	 */
-	stopper->enabled = false;
-	kthread_park(stopper->thread);
+		/* restore preemption and check it's still balanced */
+		preempt_enable();
+		WARN_ONCE(preempt_count(),
+			  "cpu_stop: %s(%p) leaked preempt count\n",
+			  kallsyms_lookup((unsigned long)fn, NULL, NULL, NULL,
+					  ksym_buf), arg);
+
+		cpu_stop_signal_done(done, true);
+	} else
+		schedule();
+
+	goto repeat;
 }
 
 extern void sched_set_stop_task(int cpu, struct task_struct *stop);
 
-static void cpu_stop_create(unsigned int cpu)
+/* manage stopper for a cpu, mostly lifted from sched migration thread mgmt */
+static int __cpuinit cpu_stop_cpu_callback(struct notifier_block *nfb,
+					   unsigned long action, void *hcpu)
 {
-	sched_set_stop_task(cpu, per_cpu(cpu_stopper.thread, cpu));
-}
-
-static void cpu_stop_park(unsigned int cpu)
-{
+	unsigned int cpu = (unsigned long)hcpu;
 	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
+	struct task_struct *p;
 
-	WARN_ON(!list_empty(&stopper->works));
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_UP_PREPARE:
+		BUG_ON(stopper->thread || stopper->enabled ||
+		       !list_empty(&stopper->works));
+		p = kthread_create_on_node(cpu_stopper_thread,
+					   stopper,
+					   cpu_to_node(cpu),
+					   "migration/%d", cpu);
+		if (IS_ERR(p))
+			return notifier_from_errno(PTR_ERR(p));
+		get_task_struct(p);
+		kthread_bind(p, cpu);
+		sched_set_stop_task(cpu, p);
+		stopper->thread = p;
+		break;
+
+	case CPU_ONLINE:
+		/* strictly unnecessary, as first user will wake it */
+		wake_up_process(stopper->thread);
+		/* mark enabled */
+		spin_lock_irq(&stopper->lock);
+		stopper->enabled = true;
+		spin_unlock_irq(&stopper->lock);
+		break;
+
+#ifdef CONFIG_HOTPLUG_CPU
+	case CPU_UP_CANCELED:
+	case CPU_POST_DEAD:
+	{
+		struct cpu_stop_work *work;
+
+		sched_set_stop_task(cpu, NULL);
+		/* kill the stopper */
+		kthread_stop(stopper->thread);
+		/* drain remaining works */
+		spin_lock_irq(&stopper->lock);
+		list_for_each_entry(work, &stopper->works, list)
+			cpu_stop_signal_done(work->done, false);
+		stopper->enabled = false;
+		spin_unlock_irq(&stopper->lock);
+		/* release the stopper */
+		put_task_struct(stopper->thread);
+		stopper->thread = NULL;
+		break;
+	}
+#endif
+	}
+
+	return NOTIFY_OK;
 }
 
-void stop_machine_unpark(int cpu)
-{
-	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
-
-	stopper->enabled = true;
-	kthread_unpark(stopper->thread);
-}
-
-static struct smp_hotplug_thread cpu_stop_threads = {
-	.store			= &cpu_stopper.thread,
-	.thread_should_run	= cpu_stop_should_run,
-	.thread_fn		= cpu_stopper_thread,
-	.thread_comm		= "migration/%u",
-	.create			= cpu_stop_create,
-	.park			= cpu_stop_park,
-	.selfparking		= true,
+/*
+ * Give it a higher priority so that cpu stopper is available to other
+ * cpu notifiers.  It currently shares the same priority as sched
+ * migration_notifier.
+ */
+static struct notifier_block __cpuinitdata cpu_stop_cpu_notifier = {
+	.notifier_call	= cpu_stop_cpu_callback,
+	.priority	= 10,
 };
 
 static int __init cpu_stop_init(void)
 {
+	void *bcpu = (void *)(long)smp_processor_id();
 	unsigned int cpu;
+	int err;
 
 	for_each_possible_cpu(cpu) {
 		struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
 
-		raw_spin_lock_init(&stopper->lock);
+		spin_lock_init(&stopper->lock);
 		INIT_LIST_HEAD(&stopper->works);
 	}
 
-	BUG_ON(smpboot_register_percpu_thread(&cpu_stop_threads));
-	stop_machine_unpark(raw_smp_processor_id());
+	/* start one for the boot cpu */
+	err = cpu_stop_cpu_callback(&cpu_stop_cpu_notifier, CPU_UP_PREPARE,
+				    bcpu);
+	BUG_ON(err != NOTIFY_OK);
+	cpu_stop_cpu_callback(&cpu_stop_cpu_notifier, CPU_ONLINE, bcpu);
+	register_cpu_notifier(&cpu_stop_cpu_notifier);
+
 	stop_machine_initialized = true;
+
 	return 0;
 }
 early_initcall(cpu_stop_init);
 
-static int __stop_machine(cpu_stop_fn_t fn, void *data, const struct cpumask *cpus)
+#ifdef CONFIG_STOP_MACHINE
+
+/* This controls the threads on each CPU. */
+enum stopmachine_state {
+	/* Dummy starting state for thread. */
+	STOPMACHINE_NONE,
+	/* Awaiting everyone to be scheduled. */
+	STOPMACHINE_PREPARE,
+	/* Disable interrupts. */
+	STOPMACHINE_DISABLE_IRQ,
+	/* Run the function */
+	STOPMACHINE_RUN,
+	/* Exit */
+	STOPMACHINE_EXIT,
+};
+
+struct stop_machine_data {
+	int			(*fn)(void *);
+	void			*data;
+	/* Like num_online_cpus(), but hotplug cpu uses us, so we need this. */
+	unsigned int		num_threads;
+	const struct cpumask	*active_cpus;
+
+	enum stopmachine_state	state;
+	atomic_t		thread_ack;
+};
+
+static void set_state(struct stop_machine_data *smdata,
+		      enum stopmachine_state newstate)
 {
-	struct multi_stop_data msdata = {
-		.fn = fn,
-		.data = data,
-		.num_threads = num_online_cpus(),
-		.active_cpus = cpus,
-	};
+	/* Reset ack counter. */
+	atomic_set(&smdata->thread_ack, smdata->num_threads);
+	smp_wmb();
+	smdata->state = newstate;
+}
+
+/* Last one to ack a state moves to the next state. */
+static void ack_state(struct stop_machine_data *smdata)
+{
+	if (atomic_dec_and_test(&smdata->thread_ack))
+		set_state(smdata, smdata->state + 1);
+}
+
+/* This is the cpu_stop function which stops the CPU. */
+static int stop_machine_cpu_stop(void *data)
+{
+	struct stop_machine_data *smdata = data;
+	enum stopmachine_state curstate = STOPMACHINE_NONE;
+	int cpu = smp_processor_id(), err = 0;
+	unsigned long flags;
+	bool is_active;
+
+	/*
+	 * When called from stop_machine_from_inactive_cpu(), irq might
+	 * already be disabled.  Save the state and restore it on exit.
+	 */
+	local_save_flags(flags);
+
+	if (!smdata->active_cpus)
+		is_active = cpu == cpumask_first(cpu_online_mask);
+	else
+		is_active = cpumask_test_cpu(cpu, smdata->active_cpus);
+
+	/* Simple state machine */
+	do {
+		/* Chill out and ensure we re-read stopmachine_state. */
+		cpu_relax();
+		if (smdata->state != curstate) {
+			curstate = smdata->state;
+			switch (curstate) {
+			case STOPMACHINE_DISABLE_IRQ:
+				local_irq_disable();
+				hard_irq_disable();
+				break;
+			case STOPMACHINE_RUN:
+				if (is_active)
+					err = smdata->fn(smdata->data);
+				break;
+			default:
+				break;
+			}
+			ack_state(smdata);
+		}
+	} while (curstate != STOPMACHINE_EXIT);
+
+	local_irq_restore(flags);
+	return err;
+}
+
+int __stop_machine(int (*fn)(void *), void *data, const struct cpumask *cpus)
+{
+	struct stop_machine_data smdata = { .fn = fn, .data = data,
+					    .num_threads = num_online_cpus(),
+					    .active_cpus = cpus };
 
 	if (!stop_machine_initialized) {
 		/*
@@ -570,7 +497,7 @@ static int __stop_machine(cpu_stop_fn_t fn, void *data, const struct cpumask *cp
 		unsigned long flags;
 		int ret;
 
-		WARN_ON_ONCE(msdata.num_threads != 1);
+		WARN_ON_ONCE(smdata.num_threads != 1);
 
 		local_irq_save(flags);
 		hard_irq_disable();
@@ -581,11 +508,11 @@ static int __stop_machine(cpu_stop_fn_t fn, void *data, const struct cpumask *cp
 	}
 
 	/* Set the initial state and stop all online cpus. */
-	set_state(&msdata, MULTI_STOP_PREPARE);
-	return stop_cpus(cpu_online_mask, multi_cpu_stop, &msdata);
+	set_state(&smdata, STOPMACHINE_PREPARE);
+	return stop_cpus(cpu_online_mask, stop_machine_cpu_stop, &smdata);
 }
 
-int stop_machine(cpu_stop_fn_t fn, void *data, const struct cpumask *cpus)
+int stop_machine(int (*fn)(void *), void *data, const struct cpumask *cpus)
 {
 	int ret;
 
@@ -619,28 +546,28 @@ EXPORT_SYMBOL_GPL(stop_machine);
  * 0 if all executions of @fn returned 0, any non zero return value if any
  * returned non zero.
  */
-int stop_machine_from_inactive_cpu(cpu_stop_fn_t fn, void *data,
+int stop_machine_from_inactive_cpu(int (*fn)(void *), void *data,
 				  const struct cpumask *cpus)
 {
-	struct multi_stop_data msdata = { .fn = fn, .data = data,
+	struct stop_machine_data smdata = { .fn = fn, .data = data,
 					    .active_cpus = cpus };
 	struct cpu_stop_done done;
 	int ret;
 
 	/* Local CPU must be inactive and CPU hotplug in progress. */
 	BUG_ON(cpu_active(raw_smp_processor_id()));
-	msdata.num_threads = num_active_cpus() + 1;	/* +1 for local */
+	smdata.num_threads = num_active_cpus() + 1;	/* +1 for local */
 
 	/* No proper task established and can't sleep - busy wait for lock. */
 	while (!mutex_trylock(&stop_cpus_mutex))
 		cpu_relax();
 
 	/* Schedule work on other CPUs and execute directly for local CPU */
-	set_state(&msdata, MULTI_STOP_PREPARE);
+	set_state(&smdata, STOPMACHINE_PREPARE);
 	cpu_stop_init_done(&done, num_active_cpus());
-	queue_stop_cpus_work(cpu_active_mask, multi_cpu_stop, &msdata,
+	queue_stop_cpus_work(cpu_active_mask, stop_machine_cpu_stop, &smdata,
 			     &done);
-	ret = multi_cpu_stop(&msdata);
+	ret = stop_machine_cpu_stop(&smdata);
 
 	/* Busy wait for completion. */
 	while (!completion_done(&done.completion))
@@ -649,3 +576,5 @@ int stop_machine_from_inactive_cpu(cpu_stop_fn_t fn, void *data,
 	mutex_unlock(&stop_cpus_mutex);
 	return ret ?: done.ret;
 }
+
+#endif	/* CONFIG_STOP_MACHINE */

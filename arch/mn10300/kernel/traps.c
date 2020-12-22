@@ -26,7 +26,6 @@
 #include <linux/kdebug.h>
 #include <linux/bug.h>
 #include <linux/irq.h>
-#include <linux/export.h>
 #include <asm/processor.h>
 #include <linux/uaccess.h>
 #include <asm/io.h>
@@ -292,6 +291,17 @@ void show_stack(struct task_struct *task, unsigned long *sp)
 
 	show_trace(sp);
 }
+
+/*
+ * the architecture-independent dump_stack generator
+ */
+void dump_stack(void)
+{
+	unsigned long stack;
+
+	show_stack(current, &stack);
+}
+EXPORT_SYMBOL(dump_stack);
 
 /*
  * dump the register file in the specified exception frame

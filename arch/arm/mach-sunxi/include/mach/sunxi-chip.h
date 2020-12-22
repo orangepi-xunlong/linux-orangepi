@@ -20,7 +20,7 @@
 #define SUNXI_CHIP_REV(p, v)  (p + v)
 
 /* sunxi platform chip version policy:
- * high 16bit value: platform number(Such as: sun8i/sun9i/..)
+ * high 16bit value: platfrom number(Such as: sun8i/sun9i/..)
  * low  16bit value: chip version (Such as: VERSION_A,VERSION_B)
  */
 #define SUNXI_CHIP_MASK      (0xFFFF0000)
@@ -62,6 +62,7 @@ extern int sunxi_get_serial(u8 *serial);
 extern unsigned int sunxi_get_soc_bin(void);
 extern int sunxi_soc_is_secure(void);
 extern int sunxi_boot_is_secure(void);
+extern unsigned int  sunxi_get_board_vendor_id(void);
 
 /* sunxi platform init functions */
 void __init sunxi_soc_ver_init(void);

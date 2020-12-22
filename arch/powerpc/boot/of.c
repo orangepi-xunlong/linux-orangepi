@@ -26,9 +26,6 @@
 
 static unsigned long claim_base;
 
-void epapr_platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
-			 unsigned long r6, unsigned long r7);
-
 static void *of_try_claim(unsigned long size)
 {
 	unsigned long addr = 0;
@@ -40,8 +37,8 @@ static void *of_try_claim(unsigned long size)
 #ifdef DEBUG
 		printf("    trying: 0x%08lx\n\r", claim_base);
 #endif
-		addr = (unsigned long) of_claim(claim_base, size, 0);
-		if (addr != PROM_ERROR)
+		addr = (unsigned long)of_claim(claim_base, size, 0);
+		if ((void *)addr != (void *)-1)
 			break;
 	}
 	if (addr == 0)
@@ -64,7 +61,7 @@ static void of_image_hdr(const void *hdr)
 	}
 }
 
-static void of_platform_init(unsigned long a1, unsigned long a2, void *promptr)
+void platform_init(unsigned long a1, unsigned long a2, void *promptr)
 {
 	platform_ops.image_hdr = of_image_hdr;
 	platform_ops.malloc = of_try_claim;
@@ -84,14 +81,3 @@ static void of_platform_init(unsigned long a1, unsigned long a2, void *promptr)
 		loader_info.initrd_size = a2;
 	}
 }
-
-void platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
-		   unsigned long r6, unsigned long r7)
-{
-	/* Detect OF vs. ePAPR boot */
-	if (r5)
-		of_platform_init(r3, r4, (void *)r5);
-	else
-		epapr_platform_init(r3, r4, r5, r6, r7);
-}
-

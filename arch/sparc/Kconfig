@@ -12,62 +12,46 @@ config 64BIT
 config SPARC
 	bool
 	default y
-	select ARCH_MIGHT_HAVE_PC_PARPORT if SPARC64 && PCI
-	select ARCH_MIGHT_HAVE_PC_SERIO
 	select OF
 	select OF_PROMTREE
 	select HAVE_IDE
 	select HAVE_OPROFILE
 	select HAVE_ARCH_KGDB if !SMP || SPARC64
 	select HAVE_ARCH_TRACEHOOK
-	select HAVE_EXIT_THREAD
-	select SYSCTL_EXCEPTION_TRACE
+	select ARCH_WANT_OPTIONAL_GPIOLIB
 	select RTC_CLASS
 	select RTC_DRV_M48T59
-	select RTC_SYSTOHC
+	select HAVE_IRQ_WORK
+	select HAVE_DMA_ATTRS
 	select HAVE_DMA_API_DEBUG
 	select HAVE_ARCH_JUMP_LABEL if SPARC64
+	select HAVE_GENERIC_HARDIRQS
 	select GENERIC_IRQ_SHOW
-	select ARCH_WANT_IPC_PARSE_VERSION
+	select USE_GENERIC_SMP_HELPERS if SMP
 	select GENERIC_PCI_IOMAP
 	select HAVE_NMI_WATCHDOG if SPARC64
-	select HAVE_CBPF_JIT
-	select HAVE_DEBUG_BUGVERBOSE
-	select GENERIC_SMP_IDLE_THREAD
-	select GENERIC_CLOCKEVENTS
-	select GENERIC_STRNCPY_FROM_USER
-	select GENERIC_STRNLEN_USER
-	select MODULES_USE_ELF_RELA
-	select ODD_RT_SIGACTION
-	select OLD_SIGSUSPEND
-	select ARCH_HAS_SG_CHAIN
-	select CPU_NO_EFFICIENT_FFS
-	select HAVE_ARCH_HARDENED_USERCOPY
-	select PROVE_LOCKING_SMALL if PROVE_LOCKING
 
 config SPARC32
 	def_bool !64BIT
 	select GENERIC_ATOMIC64
 	select CLZ_TAB
-	select HAVE_UID16
-	select OLD_SIGACTION
 
 config SPARC64
 	def_bool 64BIT
+	select ARCH_SUPPORTS_MSI
 	select HAVE_FUNCTION_TRACER
 	select HAVE_FUNCTION_GRAPH_TRACER
+	select HAVE_FUNCTION_GRAPH_FP_TEST
+	select HAVE_FUNCTION_TRACE_MCOUNT_TEST
 	select HAVE_KRETPROBES
 	select HAVE_KPROBES
 	select HAVE_RCU_TABLE_FREE if SMP
 	select HAVE_MEMBLOCK
 	select HAVE_MEMBLOCK_NODE_MAP
-	select HAVE_ARCH_TRANSPARENT_HUGEPAGE
+	select HAVE_SYSCALL_WRAPPERS
 	select HAVE_DYNAMIC_FTRACE
 	select HAVE_FTRACE_MCOUNT_RECORD
 	select HAVE_SYSCALL_TRACEPOINTS
-	select HAVE_CONTEXT_TRACKING
-	select HAVE_DEBUG_KMEMLEAK
-	select SPARSE_IRQ
 	select RTC_DRV_CMOS
 	select RTC_DRV_BQ4802
 	select RTC_DRV_SUN4V
@@ -77,26 +61,29 @@ config SPARC64
 	select IRQ_PREFLOW_FASTEOI
 	select ARCH_HAVE_NMI_SAFE_CMPXCHG
 	select HAVE_C_RECORDMCOUNT
-	select NO_BOOTMEM
-	select HAVE_ARCH_AUDITSYSCALL
-	select ARCH_SUPPORTS_ATOMIC_RMW
-	select HAVE_NMI
 
 config ARCH_DEFCONFIG
 	string
 	default "arch/sparc/configs/sparc32_defconfig" if SPARC32
 	default "arch/sparc/configs/sparc64_defconfig" if SPARC64
 
-config ARCH_PROC_KCORE_TEXT
-	def_bool y
+# CONFIG_BITS can be used at source level to get 32/64 bits
+config BITS
+	int
+	default 32 if SPARC32
+	default 64 if SPARC64
 
-config ARCH_ATU
+config ARCH_USES_GETTIMEOFFSET
+	bool
+	default y if SPARC32
+
+config GENERIC_CMOS_UPDATE
+	bool
+	default y
+
+config GENERIC_CLOCKEVENTS
 	bool
 	default y if SPARC64
-
-config ARCH_DMA_ADDR_T_64BIT
-	bool
-	default y if ARCH_ATU
 
 config IOMMU_HELPER
 	bool
@@ -110,8 +97,9 @@ config LOCKDEP_SUPPORT
 	bool
 	default y if SPARC64
 
-config ARCH_HIBERNATION_POSSIBLE
-	def_bool y if SPARC64
+config HAVE_LATENCYTOP_SUPPORT
+	bool
+	default y if SPARC64
 
 config AUDIT_ARCH
 	bool
@@ -148,12 +136,16 @@ config GENERIC_ISA_DMA
 	bool
 	default y if SPARC32
 
+config GENERIC_GPIO
+	bool
+	help
+	  Generic GPIO API support
+
+config ARCH_NO_VIRT_TO_BUS
+	def_bool y
+
 config ARCH_SUPPORTS_DEBUG_PAGEALLOC
 	def_bool y if SPARC64
-
-config PGTABLE_LEVELS
-	default 4 if 64BIT
-	default 3
 
 source "init/Kconfig"
 
@@ -162,16 +154,16 @@ source "kernel/Kconfig.freezer"
 menu "Processor type and features"
 
 config SMP
-	bool "Symmetric multi-processing support"
+	bool "Symmetric multi-processing support (does not work on sun4/sun4c)"
 	---help---
 	  This enables support for systems with more than one CPU. If you have
 	  a system with only one CPU, say N. If you have a system with more
 	  than one CPU, say Y.
 
-	  If you say N here, the kernel will run on uni- and multiprocessor
+	  If you say N here, the kernel will run on single and multiprocessor
 	  machines, but will use only one CPU of a multiprocessor machine. If
 	  you say Y here, the kernel will run on many, but not all,
-	  uniprocessor machines. On a uniprocessor machine, the kernel
+	  singleprocessor machines. On a singleprocessor machine, the kernel
 	  will run faster if you say N here.
 
 	  People using multiprocessor machines who say Y here should also say
@@ -187,9 +179,9 @@ config NR_CPUS
 	int "Maximum number of CPUs"
 	depends on SMP
 	range 2 32 if SPARC32
-	range 2 4096 if SPARC64
+	range 2 1024 if SPARC64
 	default 32 if SPARC32
-	default 4096 if SPARC64
+	default 64 if SPARC64
 
 source kernel/Kconfig.hz
 
@@ -203,7 +195,7 @@ config RWSEM_XCHGADD_ALGORITHM
 
 config GENERIC_HWEIGHT
 	bool
-	default y
+	default y if !ULTRA_HAS_POPULATION_COUNT
 
 config GENERIC_CALIBRATE_DELAY
 	bool
@@ -238,6 +230,25 @@ config EARLYFB
 	help
 	  Say Y here to enable a faster early framebuffer boot console.
 
+choice
+	prompt "Kernel page size" if SPARC64
+	default SPARC64_PAGE_SIZE_8KB
+
+config SPARC64_PAGE_SIZE_8KB
+	bool "8KB"
+	help
+	  This lets you select the page size of the kernel.
+
+	  8KB and 64KB work quite well, since SPARC ELF sections
+	  provide for up to 64KB alignment.
+
+	  If you don't know what to do, choose 8KB.
+
+config SPARC64_PAGE_SIZE_64KB
+	bool "64KB"
+
+endchoice
+
 config SECCOMP
 	bool "Enable seccomp to safely compute untrusted bytecode"
 	depends on SPARC64 && PROC_FS
@@ -258,13 +269,39 @@ config SECCOMP
 config HOTPLUG_CPU
 	bool "Support for hot-pluggable CPUs"
 	depends on SPARC64 && SMP
+	select HOTPLUG
 	help
 	  Say Y here to experiment with turning CPUs off and on.  CPUs
 	  can be controlled through /sys/devices/system/cpu/cpu#.
 	  Say N if you want to disable CPU hotplug.
 
+source "kernel/time/Kconfig"
+
 if SPARC64
 source "drivers/cpufreq/Kconfig"
+
+config US3_FREQ
+	tristate "UltraSPARC-III CPU Frequency driver"
+	depends on CPU_FREQ
+	select CPU_FREQ_TABLE
+	help
+	  This adds the CPUFreq driver for UltraSPARC-III processors.
+
+	  For details, take a look at <file:Documentation/cpu-freq>.
+
+	  If in doubt, say N.
+
+config US2E_FREQ
+	tristate "UltraSPARC-IIe CPU Frequency driver"
+	depends on CPU_FREQ
+	select CPU_FREQ_TABLE
+	help
+	  This adds the CPUFreq driver for UltraSPARC-IIe processors.
+
+	  For details, take a look at <file:Documentation/cpu-freq>.
+
+	  If in doubt, say N.
+
 endif
 
 config US3_MC
@@ -285,18 +322,31 @@ config GENERIC_LOCKBREAK
 	default y
 	depends on SPARC64 && SMP && PREEMPT
 
+choice
+	prompt "SPARC64 Huge TLB Page Size"
+	depends on SPARC64 && HUGETLB_PAGE
+	default HUGETLB_PAGE_SIZE_4MB
+
+config HUGETLB_PAGE_SIZE_4MB
+	bool "4MB"
+
+config HUGETLB_PAGE_SIZE_512K
+	bool "512K"
+
+config HUGETLB_PAGE_SIZE_64K
+	depends on !SPARC64_PAGE_SIZE_64KB
+	bool "64K"
+
+endchoice
+
 config NUMA
 	bool "NUMA support"
 	depends on SPARC64 && SMP
 
 config NODES_SHIFT
-	int "Maximum NUMA Nodes (as a power of 2)"
-	range 4 5 if SPARC64
-	default "5"
+	int
+	default "4"
 	depends on NEED_MULTIPLE_NODES
-	help
-	  Specify the maximum number of NUMA Nodes available on the target
-	  system.  Increases memory reserved to accommodate various tables.
 
 # Some NUMA nodes have memory ranges that span
 # other nodes.  Even though a pfn is valid and
@@ -317,25 +367,7 @@ config ARCH_SPARSEMEM_ENABLE
 config ARCH_SPARSEMEM_DEFAULT
 	def_bool y if SPARC64
 
-config FORCE_MAX_ZONEORDER
-	int "Maximum zone order"
-	default "13"
-	help
-	  The kernel memory allocator divides physically contiguous memory
-	  blocks into "zones", where each zone is a power of two number of
-	  pages.  This option selects the largest power of two that the kernel
-	  keeps in the memory allocator.  If you need to allocate very large
-	  blocks of physically contiguous memory, then you may need to
-	  increase this value.
-
-	  This config option is actually maximum order plus one. For example,
-	  a value of 13 means that the largest free memory block is 2^12 pages.
-
 source "mm/Kconfig"
-
-if SPARC64
-source "kernel/power/Kconfig"
-endif
 
 config SCHED_SMT
 	bool "SMT (Hyperthreading) scheduler support"
@@ -417,8 +449,6 @@ config SERIAL_CONSOLE
 config SPARC_LEON
 	bool "Sparc Leon processor family"
 	depends on SPARC32
-	select USB_EHCI_BIG_ENDIAN_MMIO
-	select USB_EHCI_BIG_ENDIAN_DESC
 	---help---
 	  If you say Y here if you are running on a SPARC-LEON processor.
 	  The LEON processor is a synthesizable VHDL model of the
@@ -506,18 +536,7 @@ config LEON_PCI
 	depends on PCI && SPARC_LEON
 	default y
 
-config SPARC_GRPCI1
-	bool "GRPCI Host Bridge Support"
-	depends on LEON_PCI
-	default y
-	help
-	  Say Y here to include the GRPCI Host Bridge Driver. The GRPCI
-	  PCI host controller is typically found in GRLIB SPARC32/LEON
-	  systems. The driver has one property (all_pci_errors) controlled
-	  from the bootloader that makes the GRPCI to generate interrupts
-	  on detected PCI Parity and System errors.
-
-config SPARC_GRPCI2
+config GRPCI2
 	bool "GRPCI2 Host Bridge Support"
 	depends on LEON_PCI
 	default y
@@ -541,16 +560,11 @@ config SUN_OPENPROMFS
 	  Only choose N if you know in advance that you will not need to modify
 	  OpenPROM settings on the running system.
 
-# Makefile helpers
+# Makefile helper
 config SPARC64_PCI
 	bool
 	default y
 	depends on SPARC64 && PCI
-
-config SPARC64_PCI_MSI
-	bool
-	default y
-	depends on SPARC64_PCI && PCI_MSI
 
 endmenu
 
@@ -563,14 +577,15 @@ config COMPAT
 	depends on SPARC64
 	default y
 	select COMPAT_BINFMT_ELF
-	select HAVE_UID16
 	select ARCH_WANT_OLD_COMPAT_IPC
-	select COMPAT_OLD_SIGACTION
 
 config SYSVIPC_COMPAT
 	bool
 	depends on COMPAT && SYSVIPC
 	default y
+
+config KEYS_COMPAT
+	def_bool y if COMPAT && KEYS
 
 endmenu
 

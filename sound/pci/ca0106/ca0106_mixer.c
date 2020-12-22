@@ -70,7 +70,7 @@
 #include <sound/ac97_codec.h>
 #include <sound/info.h>
 #include <sound/tlv.h>
-#include <linux/io.h>
+#include <asm/io.h>
 
 #include "ca0106.h"
 
@@ -185,11 +185,17 @@ static int snd_ca0106_shared_spdif_put(struct snd_kcontrol *kcontrol,
 static int snd_ca0106_capture_source_info(struct snd_kcontrol *kcontrol,
 					  struct snd_ctl_elem_info *uinfo)
 {
-	static const char * const texts[6] = {
+	static char *texts[6] = {
 		"IEC958 out", "i2s mixer out", "IEC958 in", "i2s in", "AC97 in", "SRC out"
 	};
 
-	return snd_ctl_enum_info(uinfo, 1, 6, texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 6;
+	if (uinfo->value.enumerated.item > 5)
+                uinfo->value.enumerated.item = 5;
+	strcpy(uinfo->value.enumerated.name, texts[uinfo->value.enumerated.item]);
+	return 0;
 }
 
 static int snd_ca0106_capture_source_get(struct snd_kcontrol *kcontrol,
@@ -222,11 +228,17 @@ static int snd_ca0106_capture_source_put(struct snd_kcontrol *kcontrol,
 static int snd_ca0106_i2c_capture_source_info(struct snd_kcontrol *kcontrol,
 					  struct snd_ctl_elem_info *uinfo)
 {
-	static const char * const texts[4] = {
+	static char *texts[6] = {
 		"Phone", "Mic", "Line in", "Aux"
 	};
 
-	return snd_ctl_enum_info(uinfo, 1, 4, texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 4;
+	if (uinfo->value.enumerated.item > 3)
+                uinfo->value.enumerated.item = 3;
+	strcpy(uinfo->value.enumerated.name, texts[uinfo->value.enumerated.item]);
+	return 0;
 }
 
 static int snd_ca0106_i2c_capture_source_get(struct snd_kcontrol *kcontrol,
@@ -261,17 +273,29 @@ static int snd_ca0106_i2c_capture_source_put(struct snd_kcontrol *kcontrol,
 static int snd_ca0106_capture_line_in_side_out_info(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_info *uinfo)
 {
-	static const char * const texts[2] = { "Side out", "Line in" };
+	static char *texts[2] = { "Side out", "Line in" };
 
-	return snd_ctl_enum_info(uinfo, 1, 2, texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 2;
+	if (uinfo->value.enumerated.item > 1)
+                uinfo->value.enumerated.item = 1;
+	strcpy(uinfo->value.enumerated.name, texts[uinfo->value.enumerated.item]);
+	return 0;
 }
 
 static int snd_ca0106_capture_mic_line_in_info(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_info *uinfo)
 {
-	static const char * const texts[2] = { "Line in", "Mic in" };
+	static char *texts[2] = { "Line in", "Mic in" };
 
-	return snd_ctl_enum_info(uinfo, 1, 2, texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 2;
+	if (uinfo->value.enumerated.item > 1)
+                uinfo->value.enumerated.item = 1;
+	strcpy(uinfo->value.enumerated.name, texts[uinfo->value.enumerated.item]);
+	return 0;
 }
 
 static int snd_ca0106_capture_mic_line_in_get(struct snd_kcontrol *kcontrol,
@@ -301,7 +325,7 @@ static int snd_ca0106_capture_mic_line_in_put(struct snd_kcontrol *kcontrol,
         return change;
 }
 
-static struct snd_kcontrol_new snd_ca0106_capture_mic_line_in =
+static struct snd_kcontrol_new snd_ca0106_capture_mic_line_in __devinitdata =
 {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name =		"Shared Mic/Line in Capture Switch",
@@ -310,7 +334,7 @@ static struct snd_kcontrol_new snd_ca0106_capture_mic_line_in =
 	.put =		snd_ca0106_capture_mic_line_in_put
 };
 
-static struct snd_kcontrol_new snd_ca0106_capture_line_in_side_out =
+static struct snd_kcontrol_new snd_ca0106_capture_line_in_side_out __devinitdata =
 {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name =		"Shared Line in/Side out Capture Switch",
@@ -564,7 +588,7 @@ static int spi_mute_put(struct snd_kcontrol *kcontrol,
 	.private_value = ((chid) << 8) | (reg)			\
 }
 
-static struct snd_kcontrol_new snd_ca0106_volume_ctls[] = {
+static struct snd_kcontrol_new snd_ca0106_volume_ctls[] __devinitdata = {
 	CA_VOLUME("Analog Front Playback Volume",
 		  CONTROL_FRONT_CHANNEL, PLAYBACK_VOLUME2),
         CA_VOLUME("Analog Rear Playback Volume",
@@ -645,7 +669,7 @@ static struct snd_kcontrol_new snd_ca0106_volume_ctls[] = {
 	.private_value = chid					\
 }
 
-static struct snd_kcontrol_new snd_ca0106_volume_i2c_adc_ctls[] = {
+static struct snd_kcontrol_new snd_ca0106_volume_i2c_adc_ctls[] __devinitdata = {
         I2C_VOLUME("Phone Capture Volume", 0),
         I2C_VOLUME("Mic Capture Volume", 1),
         I2C_VOLUME("Line in Capture Volume", 2),
@@ -667,7 +691,7 @@ static const int spi_dmute_bit[] = {
 	SPI_DMUTE4_BIT,
 };
 
-static struct snd_kcontrol_new
+static struct snd_kcontrol_new __devinit
 snd_ca0106_volume_spi_dac_ctl(struct snd_ca0106_details *details,
 			      int channel_id)
 {
@@ -711,7 +735,7 @@ snd_ca0106_volume_spi_dac_ctl(struct snd_ca0106_details *details,
 	return spi_switch;
 }
 
-static int remove_ctl(struct snd_card *card, const char *name)
+static int __devinit remove_ctl(struct snd_card *card, const char *name)
 {
 	struct snd_ctl_elem_id id;
 	memset(&id, 0, sizeof(id));
@@ -720,7 +744,7 @@ static int remove_ctl(struct snd_card *card, const char *name)
 	return snd_ctl_remove_id(card, &id);
 }
 
-static struct snd_kcontrol *ctl_find(struct snd_card *card, const char *name)
+static struct snd_kcontrol __devinit *ctl_find(struct snd_card *card, const char *name)
 {
 	struct snd_ctl_elem_id sid;
 	memset(&sid, 0, sizeof(sid));
@@ -730,7 +754,7 @@ static struct snd_kcontrol *ctl_find(struct snd_card *card, const char *name)
 	return snd_ctl_find_id(card, &sid);
 }
 
-static int rename_ctl(struct snd_card *card, const char *src, const char *dst)
+static int __devinit rename_ctl(struct snd_card *card, const char *src, const char *dst)
 {
 	struct snd_kcontrol *kctl = ctl_find(card, src);
 	if (kctl) {
@@ -750,10 +774,10 @@ static int rename_ctl(struct snd_card *card, const char *src, const char *dst)
 		}							\
 	} while (0)
 
-static
+static __devinitdata
 DECLARE_TLV_DB_SCALE(snd_ca0106_master_db_scale, -6375, 25, 1);
 
-static char *slave_vols[] = {
+static char *slave_vols[] __devinitdata = {
 	"Analog Front Playback Volume",
         "Analog Rear Playback Volume",
 	"Analog Center/LFE Playback Volume",
@@ -766,7 +790,7 @@ static char *slave_vols[] = {
 	NULL
 };
 
-static char *slave_sws[] = {
+static char *slave_sws[] __devinitdata = {
 	"Analog Front Playback Switch",
 	"Analog Rear Playback Switch",
 	"Analog Center/LFE Playback Switch",
@@ -775,7 +799,7 @@ static char *slave_sws[] = {
 	NULL
 };
 
-static void add_slaves(struct snd_card *card,
+static void __devinit add_slaves(struct snd_card *card,
 				 struct snd_kcontrol *master, char **list)
 {
 	for (; *list; list++) {
@@ -785,7 +809,7 @@ static void add_slaves(struct snd_card *card,
 	}
 }
 
-int snd_ca0106_mixer(struct snd_ca0106 *emu)
+int __devinit snd_ca0106_mixer(struct snd_ca0106 *emu)
 {
 	int err;
         struct snd_card *card = emu->card;
@@ -883,7 +907,7 @@ int snd_ca0106_mixer(struct snd_ca0106 *emu)
         return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 struct ca0106_vol_tbl {
 	unsigned int channel_id;
 	unsigned int reg;
@@ -929,4 +953,4 @@ void snd_ca0106_mixer_resume(struct snd_ca0106  *chip)
 	if (chip->details->i2c_adc)
 		ca0106_set_capture_mic_line_in(chip);
 }
-#endif /* CONFIG_PM_SLEEP */
+#endif /* CONFIG_PM */

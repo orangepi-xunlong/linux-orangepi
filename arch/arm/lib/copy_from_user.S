@@ -12,12 +12,11 @@
 
 #include <linux/linkage.h>
 #include <asm/assembler.h>
-#include <asm/unwind.h>
 
 /*
  * Prototype:
  *
- *	size_t arm_copy_from_user(void *to, const void *from, size_t n)
+ *	size_t __copy_from_user(void *to, const void *from, size_t n)
  *
  * Purpose:
  *
@@ -78,10 +77,6 @@
 	stmdb	sp!, {r0, r2, r3, \reg1, \reg2}
 	.endm
 
-	.macro usave reg1 reg2
-	UNWIND(	.save {r0, r2, r3, \reg1, \reg2}	)
-	.endm
-
 	.macro exit reg1 reg2
 	add	sp, sp, #8
 	ldmfd	sp!, {r0, \reg1, \reg2}
@@ -89,23 +84,21 @@
 
 	.text
 
-ENTRY(arm_copy_from_user)
-#ifdef CONFIG_CPU_SPECTRE
-	get_thread_info r3
-	ldr	r3, [r3, #TI_ADDR_LIMIT]
-	uaccess_mask_range_ptr r1, r2, r3, ip
-#endif
+ENTRY(__copy_from_user)
 
 #include "copy_template.S"
 
-ENDPROC(arm_copy_from_user)
+ENDPROC(__copy_from_user)
 
 	.pushsection .fixup,"ax"
 	.align 0
 	copy_abort_preamble
-	ldmfd	sp!, {r1, r2, r3}
-	sub	r0, r0, r1
-	rsb	r0, r0, r2
+	ldmfd	sp!, {r1, r2}
+	sub	r3, r0, r1
+	rsb	r1, r3, r2
+	str	r1, [sp]
+	bl	__memzero
+	ldr	r0, [sp], #4
 	copy_abort_end
 	.popsection
 

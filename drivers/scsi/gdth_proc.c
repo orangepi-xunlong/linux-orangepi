@@ -5,9 +5,23 @@
 #include <linux/completion.h>
 #include <linux/slab.h>
 
-int gdth_set_info(struct Scsi_Host *host, char *buffer, int length)
+int gdth_proc_info(struct Scsi_Host *host, char *buffer,char **start,off_t offset,int length,   
+                   int inout)
 {
     gdth_ha_str *ha = shost_priv(host);
+
+    TRACE2(("gdth_proc_info() length %d offs %d inout %d\n",
+            length,(int)offset,inout));
+
+    if (inout)
+        return(gdth_set_info(buffer,length,host,ha));
+    else
+        return(gdth_get_info(buffer,start,offset,length,host,ha));
+}
+
+static int gdth_set_info(char *buffer,int length,struct Scsi_Host *host,
+                         gdth_ha_str *ha)
+{
     int ret_val = -EINVAL;
 
     TRACE2(("gdth_set_info() ha %d\n",ha->hanum,));
@@ -135,10 +149,12 @@ static int gdth_set_asc_info(struct Scsi_Host *host, char *buffer,
     return(-EINVAL);
 }
 
-int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
+static int gdth_get_info(char *buffer,char **start,off_t offset,int length,
+                         struct Scsi_Host *host, gdth_ha_str *ha)
 {
-    gdth_ha_str *ha = shost_priv(host);
+    int size = 0,len = 0;
     int hlen;
+    off_t begin = 0,pos = 0;
     int id, i, j, k, sec, flag;
     int no_mdrv = 0, drv_no, is_mirr;
     u32 cnt;
@@ -148,6 +164,7 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
     gdth_cmd_str *gdtcmd;
     gdth_evt_str *estr;
     char hrec[161];
+    struct timeval tv;
 
     char *buf;
     gdth_dskstat_str *pds;
@@ -172,7 +189,8 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
     /* request is i.e. "cat /proc/scsi/gdth/0" */ 
     /* format: %-15s\t%-10s\t%-15s\t%s */
     /* driver parameters */
-    seq_puts(m, "Driver Parameters:\n");
+    size = sprintf(buffer+len,"Driver Parameters:\n");
+    len += size;  pos = begin + len;
     if (reserve_list[0] == 0xff)
         strcpy(hrec, "--");
     else {
@@ -183,50 +201,69 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
             hlen += snprintf(hrec + hlen , 161 - hlen, ",%d", reserve_list[i]);
         }
     }
-    seq_printf(m,
+    size = sprintf(buffer+len,
                    " reserve_mode: \t%d         \treserve_list:  \t%s\n",
                    reserve_mode, hrec);
-    seq_printf(m,
+    len += size;  pos = begin + len;
+    size = sprintf(buffer+len,
                    " max_ids:      \t%-3d       \thdr_channel:   \t%d\n",
                    max_ids, hdr_channel);
+    len += size;  pos = begin + len;
 
     /* controller information */
-    seq_puts(m, "\nDisk Array Controller Information:\n");
-    seq_printf(m,
+    size = sprintf(buffer+len,"\nDisk Array Controller Information:\n");
+    len += size;  pos = begin + len;
+    strcpy(hrec, ha->binfo.type_string);
+    size = sprintf(buffer+len,
                    " Number:       \t%d         \tName:          \t%s\n",
-                   ha->hanum, ha->binfo.type_string);
+                   ha->hanum, hrec);
+    len += size;  pos = begin + len;
 
-    seq_printf(m,
-                   " Driver Ver.:  \t%-10s\tFirmware Ver.: \t",
-                   GDTH_VERSION_STR);
     if (ha->more_proc)
-        seq_printf(m, "%d.%02d.%02d-%c%03X\n", 
+        sprintf(hrec, "%d.%02d.%02d-%c%03X", 
                 (u8)(ha->binfo.upd_fw_ver>>24),
                 (u8)(ha->binfo.upd_fw_ver>>16),
                 (u8)(ha->binfo.upd_fw_ver),
                 ha->bfeat.raid ? 'R':'N',
                 ha->binfo.upd_revision);
     else
-        seq_printf(m, "%d.%02d\n", (u8)(ha->cpar.version>>8),
+        sprintf(hrec, "%d.%02d", (u8)(ha->cpar.version>>8),
                 (u8)(ha->cpar.version));
+
+    size = sprintf(buffer+len,
+                   " Driver Ver.:  \t%-10s\tFirmware Ver.: \t%s\n",
+                   GDTH_VERSION_STR, hrec);
+    len += size;  pos = begin + len;
  
-    if (ha->more_proc)
+    if (ha->more_proc) {
         /* more information: 1. about controller */
-        seq_printf(m,
+        size = sprintf(buffer+len,
                        " Serial No.:   \t0x%8X\tCache RAM size:\t%d KB\n",
                        ha->binfo.ser_no, ha->binfo.memsize / 1024);
+        len += size;  pos = begin + len;
+    }
 
 #ifdef GDTH_DMA_STATISTICS
     /* controller statistics */
-    seq_puts(m, "\nController Statistics:\n");
-    seq_printf(m,
+    size = sprintf(buffer+len,"\nController Statistics:\n");
+    len += size;  pos = begin + len;
+    size = sprintf(buffer+len,
                    " 32-bit DMA buffer:\t%lu\t64-bit DMA buffer:\t%lu\n",
                    ha->dma32_cnt, ha->dma64_cnt);
+    len += size;  pos = begin + len;
 #endif
+
+    if (pos < offset) {
+        len = 0;
+        begin = pos;
+    }
+    if (pos > offset + length)
+        goto stop_output;
 
     if (ha->more_proc) {
         /* more information: 2. about physical devices */
-        seq_puts(m, "\nPhysical Devices:");
+        size = sprintf(buffer+len,"\nPhysical Devices:");
+        len += size;  pos = begin + len;
         flag = FALSE;
             
         buf = gdth_ioctl_alloc(ha, GDTH_SCRATCH, FALSE, &paddr);
@@ -272,19 +309,21 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
                     strncpy(hrec+8,pdi->product,16);
                     strncpy(hrec+24,pdi->revision,4);
                     hrec[28] = 0;
-                    seq_printf(m,
+                    size = sprintf(buffer+len,
                                    "\n Chn/ID/LUN:   \t%c/%02d/%d    \tName:          \t%s\n",
                                    'A'+i,pdi->target_id,pdi->lun,hrec);
+                    len += size;  pos = begin + len;
                     flag = TRUE;
                     pdi->no_ldrive &= 0xffff;
                     if (pdi->no_ldrive == 0xffff)
                         strcpy(hrec,"--");
                     else
                         sprintf(hrec,"%d",pdi->no_ldrive);
-                    seq_printf(m,
+                    size = sprintf(buffer+len,
                                    " Capacity [MB]:\t%-6d    \tTo Log. Drive: \t%s\n",
                                    pdi->blkcnt/(1024*1024/pdi->blksize),
                                    hrec);
+                    len += size;  pos = begin + len;
                 } else {
                     pdi->devtype = 0xff;
                 }
@@ -294,10 +333,11 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
                     for (k = 0; k < pds->count; ++k) {
                         if (pds->list[k].tid == pdi->target_id &&
                             pds->list[k].lun == pdi->lun) {
-                            seq_printf(m,
+                            size = sprintf(buffer+len,
                                            " Retries:      \t%-6d    \tReassigns:     \t%d\n",
                                            pds->list[k].retries,
                                            pds->list[k].reassigns);
+                            len += size;  pos = begin + len;
                             break;
                         }
                     }
@@ -315,20 +355,32 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
                     pdef->sddc_type = 0x08;
 
                     if (gdth_execute(host, gdtcmd, cmnd, 30, NULL) == S_OK) {
-                        seq_printf(m,
+                        size = sprintf(buffer+len,
                                        " Grown Defects:\t%d\n",
                                        pdef->sddc_cnt);
+                        len += size;  pos = begin + len;
                     }
                 }
+                if (pos < offset) {
+                    len = 0;
+                    begin = pos;
+                }
+		if (pos > offset + length) {
+		    gdth_ioctl_free(ha, GDTH_SCRATCH, buf, paddr);
+                    goto stop_output;
+		}
             }
         }
         gdth_ioctl_free(ha, GDTH_SCRATCH, buf, paddr);
 
-        if (!flag)
-            seq_puts(m, "\n --\n");
+        if (!flag) {
+            size = sprintf(buffer+len, "\n --\n");
+            len += size;  pos = begin + len;
+        }
 
         /* 3. about logical drives */
-        seq_puts(m, "\nLogical Drives:");
+        size = sprintf(buffer+len,"\nLogical Drives:");
+        len += size;  pos = begin + len;
         flag = FALSE;
 
         buf = gdth_ioctl_alloc(ha, GDTH_SCRATCH, FALSE, &paddr);
@@ -366,9 +418,10 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
                 }
                     
                 if (drv_no == i) {
-                    seq_printf(m,
+                    size = sprintf(buffer+len,
                                    "\n Number:       \t%-2d        \tStatus:        \t%s\n",
                                    drv_no, hrec);
+                    len += size;  pos = begin + len;
                     flag = TRUE;
                     no_mdrv = pcdi->cd_ldcnt;
                     if (no_mdrv > 1 || pcdi->ld_slave != -1) {
@@ -383,37 +436,61 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
                     } else {
                         strcpy(hrec, "???");
                     }
-                    seq_printf(m,
+                    size = sprintf(buffer+len,
                                    " Capacity [MB]:\t%-6d    \tType:          \t%s\n",
                                    pcdi->ld_blkcnt/(1024*1024/pcdi->ld_blksize),
                                    hrec);
+                    len += size;  pos = begin + len;
                 } else {
-                    seq_printf(m,
+                    size = sprintf(buffer+len,
                                    " Slave Number: \t%-2d        \tStatus:        \t%s\n",
                                    drv_no & 0x7fff, hrec);
+                    len += size;  pos = begin + len;
                 }
                 drv_no = pcdi->ld_slave;
+                if (pos < offset) {
+                    len = 0;
+                    begin = pos;
+                }
+		if (pos > offset + length) {
+		    gdth_ioctl_free(ha, GDTH_SCRATCH, buf, paddr);
+                    goto stop_output;
+		}
             } while (drv_no != -1);
              
-            if (is_mirr)
-                seq_printf(m,
+            if (is_mirr) {
+                size = sprintf(buffer+len,
                                " Missing Drv.: \t%-2d        \tInvalid Drv.:  \t%d\n",
                                no_mdrv - j - k, k);
-
+                len += size;  pos = begin + len;
+            }
+              
             if (!ha->hdr[i].is_arraydrv)
                 strcpy(hrec, "--");
             else
                 sprintf(hrec, "%d", ha->hdr[i].master_no);
-            seq_printf(m,
+            size = sprintf(buffer+len,
                            " To Array Drv.:\t%s\n", hrec);
+            len += size;  pos = begin + len;
+            if (pos < offset) {
+                len = 0;
+                begin = pos;
+            }
+	    if (pos > offset + length) {
+		gdth_ioctl_free(ha, GDTH_SCRATCH, buf, paddr);
+                goto stop_output;
+	    }
         }       
         gdth_ioctl_free(ha, GDTH_SCRATCH, buf, paddr);
         
-        if (!flag)
-            seq_puts(m, "\n --\n");
+        if (!flag) {
+            size = sprintf(buffer+len, "\n --\n");
+            len += size;  pos = begin + len;
+        }   
 
         /* 4. about array drives */
-        seq_puts(m, "\nArray Drives:");
+        size = sprintf(buffer+len,"\nArray Drives:");
+        len += size;  pos = begin + len;
         flag = FALSE;
 
         buf = gdth_ioctl_alloc(ha, GDTH_SCRATCH, FALSE, &paddr);
@@ -448,9 +525,10 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
                     strcat(hrec, "/expand");
                 else if (pai->ai_ext_state & 0x1)
                     strcat(hrec, "/patch");
-                seq_printf(m,
+                size = sprintf(buffer+len,
                                "\n Number:       \t%-2d        \tStatus:        \t%s\n",
                                i,hrec);
+                len += size;  pos = begin + len;
                 flag = TRUE;
 
                 if (pai->ai_type == 0)
@@ -461,19 +539,31 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
                     strcpy(hrec, "RAID-5");
                 else 
                     strcpy(hrec, "RAID-10");
-                seq_printf(m,
+                size = sprintf(buffer+len,
                                " Capacity [MB]:\t%-6d    \tType:          \t%s\n",
                                pai->ai_size/(1024*1024/pai->ai_secsize),
                                hrec);
+                len += size;  pos = begin + len;
+                if (pos < offset) {
+                    len = 0;
+                    begin = pos;
+                }
+		if (pos > offset + length) {
+		    gdth_ioctl_free(ha, GDTH_SCRATCH, buf, paddr);
+                    goto stop_output;
+		}
             }
         }
         gdth_ioctl_free(ha, GDTH_SCRATCH, buf, paddr);
         
-        if (!flag)
-            seq_puts(m, "\n --\n");
+        if (!flag) {
+            size = sprintf(buffer+len, "\n --\n");
+            len += size;  pos = begin + len;
+        }
 
         /* 5. about host drives */
-        seq_puts(m, "\nHost Drives:");
+        size = sprintf(buffer+len,"\nHost Drives:");
+        len += size;  pos = begin + len;
         flag = FALSE;
 
         buf = gdth_ioctl_alloc(ha, sizeof(gdth_hget_str), FALSE, &paddr);
@@ -515,22 +605,33 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
             if (!(ha->hdr[i].present))
                 continue;
               
-            seq_printf(m,
+            size = sprintf(buffer+len,
                            "\n Number:       \t%-2d        \tArr/Log. Drive:\t%d\n",
                            i, ha->hdr[i].ldr_no);
+            len += size;  pos = begin + len;
             flag = TRUE;
 
-            seq_printf(m,
+            size = sprintf(buffer+len,
                            " Capacity [MB]:\t%-6d    \tStart Sector:  \t%d\n",
                            (u32)(ha->hdr[i].size/2048), ha->hdr[i].start_sec);
+            len += size;  pos = begin + len;
+            if (pos < offset) {
+                len = 0;
+                begin = pos;
+            }
+            if (pos > offset + length)
+                goto stop_output;
         }
         
-        if (!flag)
-            seq_puts(m, "\n --\n");
+        if (!flag) {
+            size = sprintf(buffer+len, "\n --\n");
+            len += size;  pos = begin + len;
+        }
     }
 
     /* controller events */
-    seq_puts(m, "\nController Events:\n");
+    size = sprintf(buffer+len,"\nController Events:\n");
+    len += size;  pos = begin + len;
 
     for (id = -1;;) {
         id = gdth_read_event(ha, id, estr);
@@ -539,23 +640,32 @@ int gdth_show_info(struct seq_file *m, struct Scsi_Host *host)
         if (estr->event_data.eu.driver.ionode == ha->hanum &&
             estr->event_source == ES_ASYNC) { 
             gdth_log_event(&estr->event_data, hrec);
-
-	    /*
-	     * Elapsed seconds subtraction with unsigned operands is
-	     * safe from wrap around in year 2106.  Executes as:
-	     * operand a + (2's complement operand b) + 1
-	     */
-
-	    sec = (int)((u32)ktime_get_real_seconds() - estr->first_stamp);
+            do_gettimeofday(&tv);
+            sec = (int)(tv.tv_sec - estr->first_stamp);
             if (sec < 0) sec = 0;
-            seq_printf(m," date- %02d:%02d:%02d\t%s\n",
+            size = sprintf(buffer+len," date- %02d:%02d:%02d\t%s\n",
                            sec/3600, sec%3600/60, sec%60, hrec);
+            len += size;  pos = begin + len;
+            if (pos < offset) {
+                len = 0;
+                begin = pos;
+            }
+            if (pos > offset + length)
+                goto stop_output;
         }
         if (id == -1)
             break;
     }
+
 stop_output:
-    rc = 0;
+    *start = buffer +(offset-begin);
+    len -= (offset-begin);
+    if (len > length)
+        len = length;
+    TRACE2(("get_info() len %d pos %d begin %d offset %d length %d size %d\n",
+            len,(int)pos,(int)begin,(int)offset,length,size));
+    rc = len;
+
 free_fail:
     kfree(gdtcmd);
     kfree(estr);

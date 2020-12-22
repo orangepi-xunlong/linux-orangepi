@@ -1,8 +1,9 @@
 /*
+ *  drivers/s390/char/tape_std.c
  *    standard tape device functions for ibm tapes.
  *
  *  S390 and zSeries version
- *    Copyright IBM Corp. 2001, 2002
+ *    Copyright (C) 2001,2002 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Carsten Otte <cotte@de.ibm.com>
  *		 Michael Holzheu <holzheu@de.ibm.com>
  *		 Tuan Ngo-Anh <ngoanh@de.ibm.com>
@@ -78,8 +79,7 @@ tape_std_assign(struct tape_device *device)
 
 	rc = tape_do_io_interruptible(device, request);
 
-	del_timer_sync(&timeout);
-	destroy_timer_on_stack(&timeout);
+	del_timer(&timeout);
 
 	if (rc != 0) {
 		DBF_EVENT(3, "%08x: assign failed - device might be busy\n",

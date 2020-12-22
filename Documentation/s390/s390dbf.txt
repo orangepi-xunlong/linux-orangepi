@@ -143,8 +143,7 @@ Parameter:     id:   handle for debug log
 
 Return Value:  none 
 
-Description:   frees memory for a debug log and removes all registered debug
-	       views.
+Description:   frees memory for a debug log     
                Must not be called within an interrupt handler 
 
 ---------------------------------------------------------------------------
@@ -157,16 +156,6 @@ Return Value:  none
 
 Description:   Sets new actual debug level if new_level is valid. 
 
----------------------------------------------------------------------------
-bool debug_level_enabled (debug_info_t * id, int level);
-
-Parameter:    id:	  handle for debug log
-	      level:	  debug level
-
-Return Value: True if level is less or equal to the current debug level.
-
-Description:  Returns true if debug events for the specified level would be
-	      logged. Otherwise returns false.
 ---------------------------------------------------------------------------
 void debug_stop_all(void);
 
@@ -405,7 +394,7 @@ Example:
 
 > ls /sys/kernel/debug/s390dbf/dasd
 flush  hex_ascii  level pages raw
-> cat /sys/kernel/debug/s390dbf/dasd/hex_ascii | sort -k2,2 -s
+> cat /sys/kernel/debug/s390dbf/dasd/hex_ascii | sort +1
 00 00974733272:680099 2 - 02 0006ad7e  07 ea 4a 90 | ....
 00 00974733272:682210 2 - 02 0006ade6  46 52 45 45 | FREE
 00 00974733272:682213 2 - 02 0006adf6  07 ea 4a 90 | ....

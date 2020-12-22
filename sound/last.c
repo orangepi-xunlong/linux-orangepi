@@ -19,6 +19,7 @@
  *
  */
 
+#define SNDRV_MAIN_OBJECT_FILE
 #include <linux/init.h>
 #include <sound/core.h>
 

@@ -9,7 +9,8 @@
  *  for more details.
  *
  *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, see <http://www.gnu.org/licenses/>.
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
  *
  * Copyright (C) Hans Alblas PE1AYX <hans@esrac.ele.tue.nl>
  * Copyright (C) 2004, 05 Ralf Baechle DL5RB <ralf@linux-mips.org>
@@ -484,7 +485,7 @@ static void ax_encaps(struct net_device *dev, unsigned char *icp, int len)
 
 			return;
 		default:
-			count = kiss_esc(p, ax->xbuff, len);
+			count = kiss_esc(p, (unsigned char *)ax->xbuff, len);
 		}
 	} else {
 		unsigned short crc;
@@ -496,7 +497,7 @@ static void ax_encaps(struct net_device *dev, unsigned char *icp, int len)
 		case CRC_MODE_SMACK:
 			*p |= 0x80;
 			crc = swab16(crc16(0, p, len));
-			count = kiss_esc_crc(p, ax->xbuff, crc, len+2);
+			count = kiss_esc_crc(p, (unsigned char *)ax->xbuff, crc, len+2);
 			break;
 		case CRC_MODE_FLEX_TEST:
 			ax->crcmode = CRC_MODE_NONE;
@@ -505,11 +506,11 @@ static void ax_encaps(struct net_device *dev, unsigned char *icp, int len)
 		case CRC_MODE_FLEX:
 			*p |= 0x20;
 			crc = calc_crc_flex(p, len);
-			count = kiss_esc_crc(p, ax->xbuff, crc, len+2);
+			count = kiss_esc_crc(p, (unsigned char *)ax->xbuff, crc, len+2);
 			break;
 
 		default:
-			count = kiss_esc(p, ax->xbuff, len);
+			count = kiss_esc(p, (unsigned char *)ax->xbuff, len);
 		}
   	}
 	spin_unlock_bh(&ax->buflock);
@@ -519,7 +520,7 @@ static void ax_encaps(struct net_device *dev, unsigned char *icp, int len)
 	dev->stats.tx_packets++;
 	dev->stats.tx_bytes += actual;
 
-	netif_trans_update(ax->dev);
+	ax->dev->trans_start = jiffies;
 	ax->xleft = count - actual;
 	ax->xhead = ax->xbuff + actual;
 }
@@ -528,9 +529,6 @@ static void ax_encaps(struct net_device *dev, unsigned char *icp, int len)
 static netdev_tx_t ax_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct mkiss *ax = netdev_priv(dev);
-
-	if (skb->protocol == htons(ETH_P_IP))
-		return ax25_ip_xmit(skb);
 
 	if (!netif_running(dev))  {
 		printk(KERN_ERR "mkiss: %s: xmit call when iface is down\n", dev->name);
@@ -542,7 +540,7 @@ static netdev_tx_t ax_xmit(struct sk_buff *skb, struct net_device *dev)
 		 * May be we must check transmitter timeout here ?
 		 *      14 Oct 1994 Dmitry Gorodchanin.
 		 */
-		if (time_before(jiffies, dev_trans_start(dev) + 20 * HZ)) {
+		if (time_before(jiffies, dev->trans_start + 20 * HZ)) {
 			/* 20 sec timeout not reached */
 			return NETDEV_TX_BUSY;
 		}
@@ -557,9 +555,11 @@ static netdev_tx_t ax_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	/* We were not busy, so we are now... :-) */
-	netif_stop_queue(dev);
-	ax_encaps(dev, skb->data, skb->len);
-	kfree_skb(skb);
+	if (skb != NULL) {
+		netif_stop_queue(dev);
+		ax_encaps(dev, skb->data, skb->len);
+		kfree_skb(skb);
+	}
 
 	return NETDEV_TX_OK;
 }
@@ -573,6 +573,32 @@ static int ax_open_dev(struct net_device *dev)
 
 	return 0;
 }
+
+#if defined(CONFIG_AX25) || defined(CONFIG_AX25_MODULE)
+
+/* Return the frame type ID */
+static int ax_header(struct sk_buff *skb, struct net_device *dev,
+		     unsigned short type, const void *daddr,
+		     const void *saddr, unsigned len)
+{
+#ifdef CONFIG_INET
+	if (type != ETH_P_AX25)
+		return ax25_hard_header(skb, dev, type, daddr, saddr, len);
+#endif
+	return 0;
+}
+
+
+static int ax_rebuild_header(struct sk_buff *skb)
+{
+#ifdef CONFIG_INET
+	return ax25_rebuild_header(skb);
+#else
+	return 0;
+#endif
+}
+
+#endif	/* CONFIG_{AX25,AX25_MODULE} */
 
 /* Open the low-level part of the AX25 channel. Easy! */
 static int ax_open(struct net_device *dev)
@@ -637,6 +663,11 @@ static int ax_close(struct net_device *dev)
 	return 0;
 }
 
+static const struct header_ops ax_header_ops = {
+	.create    = ax_header,
+	.rebuild   = ax_rebuild_header,
+};
+
 static const struct net_device_ops ax_netdev_ops = {
 	.ndo_open            = ax_open_dev,
 	.ndo_stop            = ax_close,
@@ -648,11 +679,11 @@ static void ax_setup(struct net_device *dev)
 {
 	/* Finish setting up the DEVICE info. */
 	dev->mtu             = AX_MTU;
-	dev->hard_header_len = AX25_MAX_HEADER_LEN;
-	dev->addr_len        = AX25_ADDR_LEN;
+	dev->hard_header_len = 0;
+	dev->addr_len        = 0;
 	dev->type            = ARPHRD_AX25;
 	dev->tx_queue_len    = 10;
-	dev->header_ops      = &ax25_header_ops;
+	dev->header_ops      = &ax_header_ops;
 	dev->netdev_ops	     = &ax_netdev_ops;
 
 
@@ -704,8 +735,7 @@ static int mkiss_open(struct tty_struct *tty)
 	if (tty->ops->write == NULL)
 		return -EOPNOTSUPP;
 
-	dev = alloc_netdev(sizeof(struct mkiss), "ax%d", NET_NAME_UNKNOWN,
-			   ax_setup);
+	dev = alloc_netdev(sizeof(struct mkiss), "ax%d", ax_setup);
 	if (!dev) {
 		err = -ENOMEM;
 		goto out;
@@ -728,12 +758,11 @@ static int mkiss_open(struct tty_struct *tty)
 	dev->type = ARPHRD_AX25;
 
 	/* Perform the low-level AX25 initialization. */
-	err = ax_open(ax->dev);
-	if (err)
+	if ((err = ax_open(ax->dev))) {
 		goto out_free_netdev;
+	}
 
-	err = register_netdev(dev);
-	if (err)
+	if (register_netdev(dev))
 		goto out_free_buffers;
 
 	/* after register_netdev() - because else printk smashes the kernel */
@@ -797,19 +826,14 @@ static void mkiss_close(struct tty_struct *tty)
 	 */
 	if (!atomic_dec_and_test(&ax->refcnt))
 		down(&ax->dead_sem);
-	/*
-	 * Halt the transmit queue so that a new transmit cannot scribble
-	 * on our buffers
-	 */
-	netif_stop_queue(ax->dev);
+
+	unregister_netdev(ax->dev);
 
 	/* Free all AX25 frame buffers. */
 	kfree(ax->rbuff);
 	kfree(ax->xbuff);
 
 	ax->tty = NULL;
-
-	unregister_netdev(ax->dev);
 }
 
 /* Perform I/O control on an active ax25 channel. */
@@ -973,9 +997,9 @@ static struct tty_ldisc_ops ax_ldisc = {
 	.write_wakeup	= mkiss_write_wakeup
 };
 
-static const char banner[] __initconst = KERN_INFO \
+static const char banner[] __initdata = KERN_INFO \
 	"mkiss: AX.25 Multikiss, Hans Albas PE1AYX\n";
-static const char msg_regfail[] __initconst = KERN_ERR \
+static const char msg_regfail[] __initdata = KERN_ERR \
 	"mkiss: can't register line discipline (err = %d)\n";
 
 static int __init mkiss_init_driver(void)
@@ -991,7 +1015,7 @@ static int __init mkiss_init_driver(void)
 	return status;
 }
 
-static const char msg_unregfail[] = KERN_ERR \
+static const char msg_unregfail[] __exitdata = KERN_ERR \
 	"mkiss: can't unregister line discipline (err = %d)\n";
 
 static void __exit mkiss_exit_driver(void)

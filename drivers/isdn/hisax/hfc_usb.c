@@ -927,8 +927,9 @@ start_int_fifo(usb_fifo *fifo)
 	fifo->active = 1;	/* must be marked active */
 	errcode = usb_submit_urb(fifo->urb, GFP_KERNEL);
 	if (errcode) {
-		printk(KERN_ERR "HFC-S USB: submit URB error(%s): status:%i\n",
-		       __func__, errcode);
+		printk(KERN_ERR
+		       "HFC-S USB: submit URB error(start_int_info): status:%i\n",
+		       errcode);
 		fifo->active = 0;
 		fifo->skbuff = NULL;
 	}
@@ -1482,21 +1483,13 @@ hfc_usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 				usb_rcvctrlpipe(context->dev, 0);
 			context->ctrl_out_pipe =
 				usb_sndctrlpipe(context->dev, 0);
-
-			driver_info = (hfcsusb_vdata *)
-				      hfcusb_idtab[vend_idx].driver_info;
-
 			context->ctrl_urb = usb_alloc_urb(0, GFP_KERNEL);
 
-			if (!context->ctrl_urb) {
-				pr_warn("%s: No memory for control urb\n",
-					driver_info->vend_name);
-				kfree(context);
-				return -ENOMEM;
-			}
-
-			pr_info("HFC-S USB: detected \"%s\"\n",
-				driver_info->vend_name);
+			driver_info =
+				(hfcsusb_vdata *) hfcusb_idtab[vend_idx].
+				driver_info;
+			printk(KERN_INFO "HFC-S USB: detected \"%s\"\n",
+			       driver_info->vend_name);
 
 			DBG(HFCUSB_DBG_INIT,
 			    "HFC-S USB: Endpoint-Config: %s (if=%d alt=%d), E-Channel(%d)",
@@ -1575,7 +1568,6 @@ static struct usb_driver hfc_drv = {
 	.id_table = hfcusb_idtab,
 	.probe = hfc_usb_probe,
 	.disconnect = hfc_usb_disconnect,
-	.disable_hub_initiated_lpm = 1,
 };
 
 static void __exit

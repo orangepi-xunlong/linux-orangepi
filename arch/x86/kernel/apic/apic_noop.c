@@ -11,9 +11,11 @@
 
 #include <linux/threads.h>
 #include <linux/cpumask.h>
+#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/ctype.h>
+#include <linux/init.h>
 #include <linux/errno.h>
 #include <asm/fixmap.h>
 #include <asm/mpspec.h>
@@ -29,7 +31,6 @@
 #include <asm/e820.h>
 
 static void noop_init_apic_ldr(void) { }
-static void noop_send_IPI(int cpu, int vector) { }
 static void noop_send_IPI_mask(const struct cpumask *cpumask, int vector) { }
 static void noop_send_IPI_mask_allbutself(const struct cpumask *cpumask, int vector) { }
 static void noop_send_IPI_allbutself(int vector) { }
@@ -89,26 +90,36 @@ static const struct cpumask *noop_target_cpus(void)
 	return cpumask_of(0);
 }
 
-static void noop_vector_allocation_domain(int cpu, struct cpumask *retmask,
-					  const struct cpumask *mask)
+static unsigned long noop_check_apicid_used(physid_mask_t *map, int apicid)
+{
+	return physid_isset(apicid, *map);
+}
+
+static unsigned long noop_check_apicid_present(int bit)
+{
+	return physid_isset(bit, phys_cpu_present_map);
+}
+
+static void noop_vector_allocation_domain(int cpu, struct cpumask *retmask)
 {
 	if (cpu != 0)
 		pr_warning("APIC: Vector allocated for non-BSP cpu\n");
-	cpumask_copy(retmask, cpumask_of(cpu));
+	cpumask_clear(retmask);
+	cpumask_set_cpu(cpu, retmask);
 }
 
 static u32 noop_apic_read(u32 reg)
 {
-	WARN_ON_ONCE(boot_cpu_has(X86_FEATURE_APIC) && !disable_apic);
+	WARN_ON_ONCE((cpu_has_apic && !disable_apic));
 	return 0;
 }
 
 static void noop_apic_write(u32 reg, u32 v)
 {
-	WARN_ON_ONCE(boot_cpu_has(X86_FEATURE_APIC) && !disable_apic);
+	WARN_ON_ONCE(cpu_has_apic && !disable_apic);
 }
 
-struct apic apic_noop __ro_after_init = {
+struct apic apic_noop = {
 	.name				= "noop",
 	.probe				= noop_probe,
 	.acpi_madt_oem_check		= NULL,
@@ -123,27 +134,34 @@ struct apic apic_noop __ro_after_init = {
 	.target_cpus			= noop_target_cpus,
 	.disable_esr			= 0,
 	.dest_logical			= APIC_DEST_LOGICAL,
-	.check_apicid_used		= default_check_apicid_used,
+	.check_apicid_used		= noop_check_apicid_used,
+	.check_apicid_present		= noop_check_apicid_present,
 
 	.vector_allocation_domain	= noop_vector_allocation_domain,
 	.init_apic_ldr			= noop_init_apic_ldr,
 
 	.ioapic_phys_id_map		= default_ioapic_phys_id_map,
 	.setup_apic_routing		= NULL,
+	.multi_timer_check		= NULL,
 
 	.cpu_present_to_apicid		= default_cpu_present_to_apicid,
 	.apicid_to_cpu_present		= physid_set_mask_of_physid,
 
+	.setup_portio_remap		= NULL,
 	.check_phys_apicid_present	= default_check_phys_apicid_present,
+	.enable_apic_mode		= NULL,
 
 	.phys_pkg_id			= noop_phys_pkg_id,
 
+	.mps_oem_check			= NULL,
+
 	.get_apic_id			= noop_get_apic_id,
 	.set_apic_id			= NULL,
+	.apic_id_mask			= 0x0F << 24,
 
-	.cpu_mask_to_apicid_and		= flat_cpu_mask_to_apicid_and,
+	.cpu_mask_to_apicid		= default_cpu_mask_to_apicid,
+	.cpu_mask_to_apicid_and		= default_cpu_mask_to_apicid_and,
 
-	.send_IPI			= noop_send_IPI,
 	.send_IPI_mask			= noop_send_IPI_mask,
 	.send_IPI_mask_allbutself	= noop_send_IPI_mask_allbutself,
 	.send_IPI_allbutself		= noop_send_IPI_allbutself,
@@ -152,11 +170,17 @@ struct apic apic_noop __ro_after_init = {
 
 	.wakeup_secondary_cpu		= noop_wakeup_secondary_cpu,
 
+	/* should be safe */
+	.trampoline_phys_low		= DEFAULT_TRAMPOLINE_PHYS_LOW,
+	.trampoline_phys_high		= DEFAULT_TRAMPOLINE_PHYS_HIGH,
+
+	.wait_for_init_deassert		= NULL,
+
+	.smp_callin_clear_local_apic	= NULL,
 	.inquire_remote_apic		= NULL,
 
 	.read				= noop_apic_read,
 	.write				= noop_apic_write,
-	.eoi_write			= noop_apic_write,
 	.icr_read			= noop_apic_icr_read,
 	.icr_write			= noop_apic_icr_write,
 	.wait_icr_idle			= noop_apic_wait_icr_idle,

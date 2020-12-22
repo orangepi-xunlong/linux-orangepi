@@ -28,7 +28,7 @@
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 
-#include "devices.h"
+#include <mach/devices.h>
 #include <mach/gpio-ks8695.h>
 
 #include "generic.h"
@@ -125,6 +125,6 @@ MACHINE_START(DSM320, "D-Link DSM-320 Wireless Media Player")
 	.map_io		= ks8695_map_io,
 	.init_irq	= ks8695_init_irq,
 	.init_machine	= dsm320_init,
-	.init_time	= ks8695_timer_init,
+	.timer		= &ks8695_timer,
 	.restart	= ks8695_restart,
 MACHINE_END

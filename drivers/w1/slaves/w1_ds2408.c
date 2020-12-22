@@ -22,7 +22,6 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jean-Francois Dagenais <dagenaisj@sonatest.com>");
 MODULE_DESCRIPTION("w1 family 29 driver for DS2408 8 Pin IO");
-MODULE_ALIAS("w1-family-" __stringify(W1_FAMILY_DS2408));
 
 
 #define W1_F29_RETRIES		3
@@ -53,11 +52,11 @@ static int _read_reg(struct w1_slave *sl, u8 address, unsigned char* buf)
 	if (!buf)
 		return -EINVAL;
 
-	mutex_lock(&sl->master->bus_mutex);
+	mutex_lock(&sl->master->mutex);
 	dev_dbg(&sl->dev, "mutex locked");
 
 	if (w1_reset_select_slave(sl)) {
-		mutex_unlock(&sl->master->bus_mutex);
+		mutex_unlock(&sl->master->mutex);
 		return -EIO;
 	}
 
@@ -67,14 +66,15 @@ static int _read_reg(struct w1_slave *sl, u8 address, unsigned char* buf)
 	w1_write_block(sl->master, wrbuf, 3);
 	*buf = w1_read_8(sl->master);
 
-	mutex_unlock(&sl->master->bus_mutex);
+	mutex_unlock(&sl->master->mutex);
 	dev_dbg(&sl->dev, "mutex unlocked");
 	return 1;
 }
 
-static ssize_t state_read(struct file *filp, struct kobject *kobj,
-			  struct bin_attribute *bin_attr, char *buf, loff_t off,
-			  size_t count)
+static ssize_t w1_f29_read_state(
+	struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
 {
 	dev_dbg(&kobj_to_w1_slave(kobj)->dev,
 		"Reading %s kobj: %p, off: %0#10x, count: %zu, buff addr: %p",
@@ -84,9 +84,10 @@ static ssize_t state_read(struct file *filp, struct kobject *kobj,
 	return _read_reg(kobj_to_w1_slave(kobj), W1_F29_REG_LOGIG_STATE, buf);
 }
 
-static ssize_t output_read(struct file *filp, struct kobject *kobj,
-			   struct bin_attribute *bin_attr, char *buf,
-			   loff_t off, size_t count)
+static ssize_t w1_f29_read_output(
+	struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
 {
 	dev_dbg(&kobj_to_w1_slave(kobj)->dev,
 		"Reading %s kobj: %p, off: %0#10x, count: %zu, buff addr: %p",
@@ -97,9 +98,10 @@ static ssize_t output_read(struct file *filp, struct kobject *kobj,
 					 W1_F29_REG_OUTPUT_LATCH_STATE, buf);
 }
 
-static ssize_t activity_read(struct file *filp, struct kobject *kobj,
-			     struct bin_attribute *bin_attr, char *buf,
-			     loff_t off, size_t count)
+static ssize_t w1_f29_read_activity(
+	struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
 {
 	dev_dbg(&kobj_to_w1_slave(kobj)->dev,
 		"Reading %s kobj: %p, off: %0#10x, count: %zu, buff addr: %p",
@@ -110,9 +112,10 @@ static ssize_t activity_read(struct file *filp, struct kobject *kobj,
 					 W1_F29_REG_ACTIVITY_LATCH_STATE, buf);
 }
 
-static ssize_t cond_search_mask_read(struct file *filp, struct kobject *kobj,
-				     struct bin_attribute *bin_attr, char *buf,
-				     loff_t off, size_t count)
+static ssize_t w1_f29_read_cond_search_mask(
+	struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
 {
 	dev_dbg(&kobj_to_w1_slave(kobj)->dev,
 		"Reading %s kobj: %p, off: %0#10x, count: %zu, buff addr: %p",
@@ -123,10 +126,10 @@ static ssize_t cond_search_mask_read(struct file *filp, struct kobject *kobj,
 		W1_F29_REG_COND_SEARCH_SELECT_MASK, buf);
 }
 
-static ssize_t cond_search_polarity_read(struct file *filp,
-					 struct kobject *kobj,
-					 struct bin_attribute *bin_attr,
-					 char *buf, loff_t off, size_t count)
+static ssize_t w1_f29_read_cond_search_polarity(
+	struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
 {
 	if (count != 1 || off != 0)
 		return -EFAULT;
@@ -134,9 +137,10 @@ static ssize_t cond_search_polarity_read(struct file *filp,
 		W1_F29_REG_COND_SEARCH_POL_SELECT, buf);
 }
 
-static ssize_t status_control_read(struct file *filp, struct kobject *kobj,
-				   struct bin_attribute *bin_attr, char *buf,
-				   loff_t off, size_t count)
+static ssize_t w1_f29_read_status_control(
+	struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
 {
 	if (count != 1 || off != 0)
 		return -EFAULT;
@@ -144,9 +148,13 @@ static ssize_t status_control_read(struct file *filp, struct kobject *kobj,
 		W1_F29_REG_CONTROL_AND_STATUS, buf);
 }
 
-static ssize_t output_write(struct file *filp, struct kobject *kobj,
-			    struct bin_attribute *bin_attr, char *buf,
-			    loff_t off, size_t count)
+
+
+
+static ssize_t w1_f29_write_output(
+	struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
 {
 	struct w1_slave *sl = kobj_to_w1_slave(kobj);
 	u8 w1_buf[3];
@@ -157,7 +165,7 @@ static ssize_t output_write(struct file *filp, struct kobject *kobj,
 		return -EFAULT;
 
 	dev_dbg(&sl->dev, "locking mutex for write_output");
-	mutex_lock(&sl->master->bus_mutex);
+	mutex_lock(&sl->master->mutex);
 	dev_dbg(&sl->dev, "mutex locked");
 
 	if (w1_reset_select_slave(sl))
@@ -170,15 +178,6 @@ static ssize_t output_write(struct file *filp, struct kobject *kobj,
 		w1_write_block(sl->master, w1_buf, 3);
 
 		readBack = w1_read_8(sl->master);
-
-		if (readBack != W1_F29_SUCCESS_CONFIRM_BYTE) {
-			if (w1_reset_resume_command(sl->master))
-				goto error;
-			/* try again, the slave is ready for a command */
-			continue;
-		}
-
-#ifdef CONFIG_W1_SLAVE_DS2408_READBACK
 		/* here the master could read another byte which
 		   would be the PIO reg (the actual pin logic state)
 		   since in this driver we don't know which pins are
@@ -187,6 +186,11 @@ static ssize_t output_write(struct file *filp, struct kobject *kobj,
 		if (w1_reset_resume_command(sl->master))
 			goto error;
 
+		if (readBack != 0xAA) {
+			/* try again, the slave is ready for a command */
+			continue;
+		}
+
 		/* go read back the output latches */
 		/* (the direct effect of the write above) */
 		w1_buf[0] = W1_F29_FUNC_READ_PIO_REGS;
@@ -194,18 +198,16 @@ static ssize_t output_write(struct file *filp, struct kobject *kobj,
 		w1_buf[2] = 0;
 		w1_write_block(sl->master, w1_buf, 3);
 		/* read the result of the READ_PIO_REGS command */
-		if (w1_read_8(sl->master) == *buf)
-#endif
-		{
+		if (w1_read_8(sl->master) == *buf) {
 			/* success! */
-			mutex_unlock(&sl->master->bus_mutex);
+			mutex_unlock(&sl->master->mutex);
 			dev_dbg(&sl->dev,
 				"mutex unlocked, retries:%d", retries);
 			return 1;
 		}
 	}
 error:
-	mutex_unlock(&sl->master->bus_mutex);
+	mutex_unlock(&sl->master->mutex);
 	dev_dbg(&sl->dev, "mutex unlocked in error, retries:%d", retries);
 
 	return -EIO;
@@ -215,9 +217,10 @@ error:
 /**
  * Writing to the activity file resets the activity latches.
  */
-static ssize_t activity_write(struct file *filp, struct kobject *kobj,
-			      struct bin_attribute *bin_attr, char *buf,
-			      loff_t off, size_t count)
+static ssize_t w1_f29_write_activity(
+	struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
 {
 	struct w1_slave *sl = kobj_to_w1_slave(kobj);
 	unsigned int retries = W1_F29_RETRIES;
@@ -225,7 +228,7 @@ static ssize_t activity_write(struct file *filp, struct kobject *kobj,
 	if (count != 1 || off != 0)
 		return -EFAULT;
 
-	mutex_lock(&sl->master->bus_mutex);
+	mutex_lock(&sl->master->mutex);
 
 	if (w1_reset_select_slave(sl))
 		goto error;
@@ -233,7 +236,7 @@ static ssize_t activity_write(struct file *filp, struct kobject *kobj,
 	while (retries--) {
 		w1_write_8(sl->master, W1_F29_FUNC_RESET_ACTIVITY_LATCHES);
 		if (w1_read_8(sl->master) == W1_F29_SUCCESS_CONFIRM_BYTE) {
-			mutex_unlock(&sl->master->bus_mutex);
+			mutex_unlock(&sl->master->mutex);
 			return 1;
 		}
 		if (w1_reset_resume_command(sl->master))
@@ -241,13 +244,17 @@ static ssize_t activity_write(struct file *filp, struct kobject *kobj,
 	}
 
 error:
-	mutex_unlock(&sl->master->bus_mutex);
+	mutex_unlock(&sl->master->mutex);
 	return -EIO;
 }
 
-static ssize_t status_control_write(struct file *filp, struct kobject *kobj,
-				    struct bin_attribute *bin_attr, char *buf,
-				    loff_t off, size_t count)
+static ssize_t w1_f29_write_status_control(
+	struct file *filp,
+	struct kobject *kobj,
+	struct bin_attribute *bin_attr,
+	char *buf,
+	loff_t off,
+	size_t count)
 {
 	struct w1_slave *sl = kobj_to_w1_slave(kobj);
 	u8 w1_buf[4];
@@ -256,7 +263,7 @@ static ssize_t status_control_write(struct file *filp, struct kobject *kobj,
 	if (count != 1 || off != 0)
 		return -EFAULT;
 
-	mutex_lock(&sl->master->bus_mutex);
+	mutex_lock(&sl->master->mutex);
 
 	if (w1_reset_select_slave(sl))
 		goto error;
@@ -278,77 +285,118 @@ static ssize_t status_control_write(struct file *filp, struct kobject *kobj,
 		w1_write_block(sl->master, w1_buf, 3);
 		if (w1_read_8(sl->master) == *buf) {
 			/* success! */
-			mutex_unlock(&sl->master->bus_mutex);
+			mutex_unlock(&sl->master->mutex);
 			return 1;
 		}
 	}
 error:
-	mutex_unlock(&sl->master->bus_mutex);
+	mutex_unlock(&sl->master->mutex);
 
 	return -EIO;
 }
 
-/*
- * This is a special sequence we must do to ensure the P0 output is not stuck
- * in test mode. This is described in rev 2 of the ds2408's datasheet
- * (http://datasheets.maximintegrated.com/en/ds/DS2408.pdf) under
- * "APPLICATION INFORMATION/Power-up timing".
- */
-static int w1_f29_disable_test_mode(struct w1_slave *sl)
+
+
+#define NB_SYSFS_BIN_FILES 6
+static struct bin_attribute w1_f29_sysfs_bin_files[NB_SYSFS_BIN_FILES] = {
+	{
+		.attr =	{
+			.name = "state",
+			.mode = S_IRUGO,
+		},
+		.size = 1,
+		.read = w1_f29_read_state,
+	},
+	{
+		.attr =	{
+			.name = "output",
+			.mode = S_IRUGO | S_IWUSR | S_IWGRP,
+		},
+		.size = 1,
+		.read = w1_f29_read_output,
+		.write = w1_f29_write_output,
+	},
+	{
+		.attr =	{
+			.name = "activity",
+			.mode = S_IRUGO,
+		},
+		.size = 1,
+		.read = w1_f29_read_activity,
+		.write = w1_f29_write_activity,
+	},
+	{
+		.attr =	{
+			.name = "cond_search_mask",
+			.mode = S_IRUGO,
+		},
+		.size = 1,
+		.read = w1_f29_read_cond_search_mask,
+		.write = 0,
+	},
+	{
+		.attr =	{
+			.name = "cond_search_polarity",
+			.mode = S_IRUGO,
+		},
+		.size = 1,
+		.read = w1_f29_read_cond_search_polarity,
+		.write = 0,
+	},
+	{
+		.attr =	{
+			.name = "status_control",
+			.mode = S_IRUGO | S_IWUSR | S_IWGRP,
+		},
+		.size = 1,
+		.read = w1_f29_read_status_control,
+		.write = w1_f29_write_status_control,
+	}
+};
+
+static int w1_f29_add_slave(struct w1_slave *sl)
 {
-	int res;
-	u8 magic[10] = {0x96, };
-	u64 rn = le64_to_cpu(*((u64*)&sl->reg_num));
+	int err = 0;
+	int i;
 
-	memcpy(&magic[1], &rn, 8);
-	magic[9] = 0x3C;
-
-	mutex_lock(&sl->master->bus_mutex);
-
-	res = w1_reset_bus(sl->master);
-	if (res)
-		goto out;
-	w1_write_block(sl->master, magic, ARRAY_SIZE(magic));
-
-	res = w1_reset_bus(sl->master);
-out:
-	mutex_unlock(&sl->master->bus_mutex);
-	return res;
+	for (i = 0; i < NB_SYSFS_BIN_FILES && !err; ++i)
+		err = sysfs_create_bin_file(
+			&sl->dev.kobj,
+			&(w1_f29_sysfs_bin_files[i]));
+	if (err)
+		while (--i >= 0)
+			sysfs_remove_bin_file(&sl->dev.kobj,
+				&(w1_f29_sysfs_bin_files[i]));
+	return err;
 }
 
-static BIN_ATTR_RO(state, 1);
-static BIN_ATTR_RW(output, 1);
-static BIN_ATTR_RW(activity, 1);
-static BIN_ATTR_RO(cond_search_mask, 1);
-static BIN_ATTR_RO(cond_search_polarity, 1);
-static BIN_ATTR_RW(status_control, 1);
-
-static struct bin_attribute *w1_f29_bin_attrs[] = {
-	&bin_attr_state,
-	&bin_attr_output,
-	&bin_attr_activity,
-	&bin_attr_cond_search_mask,
-	&bin_attr_cond_search_polarity,
-	&bin_attr_status_control,
-	NULL,
-};
-
-static const struct attribute_group w1_f29_group = {
-	.bin_attrs = w1_f29_bin_attrs,
-};
-
-static const struct attribute_group *w1_f29_groups[] = {
-	&w1_f29_group,
-	NULL,
-};
+static void w1_f29_remove_slave(struct w1_slave *sl)
+{
+	int i;
+	for (i = NB_SYSFS_BIN_FILES - 1; i >= 0; --i)
+		sysfs_remove_bin_file(&sl->dev.kobj,
+			&(w1_f29_sysfs_bin_files[i]));
+}
 
 static struct w1_family_ops w1_f29_fops = {
-	.add_slave      = w1_f29_disable_test_mode,
-	.groups		= w1_f29_groups,
+	.add_slave      = w1_f29_add_slave,
+	.remove_slave   = w1_f29_remove_slave,
 };
 
 static struct w1_family w1_family_29 = {
 	.fid = W1_FAMILY_DS2408,
 	.fops = &w1_f29_fops,
 };
-module_w1_family(w1_family_29);
+
+static int __init w1_f29_init(void)
+{
+	return w1_register_family(&w1_family_29);
+}
+
+static void __exit w1_f29_exit(void)
+{
+	w1_unregister_family(&w1_family_29);
+}
+
+module_init(w1_f29_init);
+module_exit(w1_f29_exit);

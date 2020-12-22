@@ -11,8 +11,6 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#define JFFS2_XATTR_IS_CORRUPTED	1
-
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
@@ -22,7 +20,6 @@
 #include <linux/crc32.h>
 #include <linux/jffs2.h>
 #include <linux/xattr.h>
-#include <linux/posix_acl_xattr.h>
 #include <linux/mtd/mtd.h>
 #include "nodelist.h"
 /* -------- xdatum related functions ----------------
@@ -156,7 +153,7 @@ static int do_verify_xattr_datum(struct jffs2_sb_info *c, struct jffs2_xattr_dat
 		JFFS2_ERROR("node CRC failed at %#08x, read=%#08x, calc=%#08x\n",
 			    offset, je32_to_cpu(rx.hdr_crc), crc);
 		xd->flags |= JFFS2_XFLAGS_INVALID;
-		return JFFS2_XATTR_IS_CORRUPTED;
+		return -EIO;
 	}
 	totlen = PAD(sizeof(rx) + rx.name_len + 1 + je16_to_cpu(rx.value_len));
 	if (je16_to_cpu(rx.magic) != JFFS2_MAGIC_BITMASK
@@ -172,7 +169,7 @@ static int do_verify_xattr_datum(struct jffs2_sb_info *c, struct jffs2_xattr_dat
 			    je32_to_cpu(rx.xid), xd->xid,
 			    je32_to_cpu(rx.version), xd->version);
 		xd->flags |= JFFS2_XFLAGS_INVALID;
-		return JFFS2_XATTR_IS_CORRUPTED;
+		return -EIO;
 	}
 	xd->xprefix = rx.xprefix;
 	xd->name_len = rx.name_len;
@@ -195,7 +192,7 @@ static int do_verify_xattr_datum(struct jffs2_sb_info *c, struct jffs2_xattr_dat
 	/* unchecked xdatum is chained with c->xattr_unchecked */
 	list_del_init(&xd->xindex);
 
-	dbg_xattr("success on verifying xdatum (xid=%u, version=%u)\n",
+	dbg_xattr("success on verfying xdatum (xid=%u, version=%u)\n",
 		  xd->xid, xd->version);
 
 	return 0;
@@ -230,12 +227,12 @@ static int do_load_xattr_datum(struct jffs2_sb_info *c, struct jffs2_xattr_datum
 	data[xd->name_len] = '\0';
 	crc = crc32(0, data, length);
 	if (crc != xd->data_crc) {
-		JFFS2_WARNING("node CRC failed (JFFS2_NODETYPE_XATTR)"
+		JFFS2_WARNING("node CRC failed (JFFS2_NODETYPE_XREF)"
 			      " at %#08x, read: 0x%08x calculated: 0x%08x\n",
 			      ref_offset(xd->node), xd->data_crc, crc);
 		kfree(data);
 		xd->flags |= JFFS2_XFLAGS_INVALID;
-		return JFFS2_XATTR_IS_CORRUPTED;
+		return -EIO;
 	}
 
 	xd->flags |= JFFS2_XFLAGS_HOT;
@@ -273,7 +270,7 @@ static int load_xattr_datum(struct jffs2_sb_info *c, struct jffs2_xattr_datum *x
 	if (xd->xname)
 		return 0;
 	if (xd->flags & JFFS2_XFLAGS_INVALID)
-		return JFFS2_XATTR_IS_CORRUPTED;
+		return -EIO;
 	if (unlikely(is_xattr_datum_unchecked(c, xd)))
 		rc = do_verify_xattr_datum(c, xd);
 	if (!rc)
@@ -438,8 +435,6 @@ static void unrefer_xattr_datum(struct jffs2_sb_info *c, struct jffs2_xattr_datu
  *   is called to release xattr related objects when unmounting. 
  * check_xattr_ref_inode(c, ic)
  *   is used to confirm inode does not have duplicate xattr name/value pair.
- * jffs2_xattr_do_crccheck_inode(c, ic)
- *   is used to force xattr data integrity check during the initial gc scan.
  * -------------------------------------------------- */
 static int verify_xattr_ref(struct jffs2_sb_info *c, struct jffs2_xattr_ref *ref)
 {
@@ -467,7 +462,7 @@ static int verify_xattr_ref(struct jffs2_sb_info *c, struct jffs2_xattr_ref *ref
 	if (crc != je32_to_cpu(rr.node_crc)) {
 		JFFS2_ERROR("node CRC failed at %#08x, read=%#08x, calc=%#08x\n",
 			    offset, je32_to_cpu(rr.node_crc), crc);
-		return JFFS2_XATTR_IS_CORRUPTED;
+		return -EIO;
 	}
 	if (je16_to_cpu(rr.magic) != JFFS2_MAGIC_BITMASK
 	    || je16_to_cpu(rr.nodetype) != JFFS2_NODETYPE_XREF
@@ -477,7 +472,7 @@ static int verify_xattr_ref(struct jffs2_sb_info *c, struct jffs2_xattr_ref *ref
 			    offset, je16_to_cpu(rr.magic), JFFS2_MAGIC_BITMASK,
 			    je16_to_cpu(rr.nodetype), JFFS2_NODETYPE_XREF,
 			    je32_to_cpu(rr.totlen), PAD(sizeof(rr)));
-		return JFFS2_XATTR_IS_CORRUPTED;
+		return -EIO;
 	}
 	ref->ino = je32_to_cpu(rr.ino);
 	ref->xid = je32_to_cpu(rr.xid);
@@ -687,11 +682,6 @@ static int check_xattr_ref_inode(struct jffs2_sb_info *c, struct jffs2_inode_cac
 	return rc;
 }
 
-void jffs2_xattr_do_crccheck_inode(struct jffs2_sb_info *c, struct jffs2_inode_cache *ic)
-{
-	check_xattr_ref_inode(c, ic);
-}
-
 /* -------- xattr subsystem functions ---------------
  * jffs2_init_xattr_subsystem(c)
  *   is used to initialize semaphore and list_head, and some variables.
@@ -756,7 +746,8 @@ void jffs2_clear_xattr_subsystem(struct jffs2_sb_info *c)
 	for (i=0; i < XATTRINDEX_HASHSIZE; i++) {
 		list_for_each_entry_safe(xd, _xd, &c->xattrindex[i], xindex) {
 			list_del(&xd->xindex);
-			kfree(xd->xname);
+			if (xd->xname)
+				kfree(xd->xname);
 			jffs2_free_xattr_datum(xd);
 		}
 	}
@@ -921,8 +912,8 @@ const struct xattr_handler *jffs2_xattr_handlers[] = {
 	&jffs2_security_xattr_handler,
 #endif
 #ifdef CONFIG_JFFS2_FS_POSIX_ACL
-	&posix_acl_access_xattr_handler,
-	&posix_acl_default_xattr_handler,
+	&jffs2_acl_access_xattr_handler,
+	&jffs2_acl_default_xattr_handler,
 #endif
 	&jffs2_trusted_xattr_handler,
 	NULL
@@ -942,10 +933,10 @@ static const struct xattr_handler *xprefix_to_handler(int xprefix) {
 #endif
 #ifdef CONFIG_JFFS2_FS_POSIX_ACL
 	case JFFS2_XPREFIX_ACL_ACCESS:
-		ret = &posix_acl_access_xattr_handler;
+		ret = &jffs2_acl_access_xattr_handler;
 		break;
 	case JFFS2_XPREFIX_ACL_DEFAULT:
-		ret = &posix_acl_default_xattr_handler;
+		ret = &jffs2_acl_default_xattr_handler;
 		break;
 #endif
 	case JFFS2_XPREFIX_TRUSTED:
@@ -960,15 +951,14 @@ static const struct xattr_handler *xprefix_to_handler(int xprefix) {
 
 ssize_t jffs2_listxattr(struct dentry *dentry, char *buffer, size_t size)
 {
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(inode);
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(inode->i_sb);
 	struct jffs2_inode_cache *ic = f->inocache;
 	struct jffs2_xattr_ref *ref, **pref;
 	struct jffs2_xattr_datum *xd;
 	const struct xattr_handler *xhandle;
-	const char *prefix;
-	ssize_t prefix_len, len, rc;
+	ssize_t len, rc;
 	int retry = 0;
 
 	rc = check_xattr_ref_inode(c, ic);
@@ -999,23 +989,17 @@ ssize_t jffs2_listxattr(struct dentry *dentry, char *buffer, size_t size)
 			}
 		}
 		xhandle = xprefix_to_handler(xd->xprefix);
-		if (!xhandle || (xhandle->list && !xhandle->list(dentry)))
+		if (!xhandle)
 			continue;
-		prefix = xhandle->prefix ?: xhandle->name;
-		prefix_len = strlen(prefix);
-		rc = prefix_len + xd->name_len + 1;
-
 		if (buffer) {
-			if (rc > size - len) {
-				rc = -ERANGE;
-				goto out;
-			}
-			memcpy(buffer, prefix, prefix_len);
-			buffer += prefix_len;
-			memcpy(buffer, xd->xname, xd->name_len);
-			buffer += xd->name_len;
-			*buffer++ = 0;
+			rc = xhandle->list(dentry, buffer+len, size-len,
+					   xd->xname, xd->name_len, xd->flags);
+		} else {
+			rc = xhandle->list(dentry, NULL, 0, xd->xname,
+					   xd->name_len, xd->flags);
 		}
+		if (rc < 0)
+			goto out;
 		len += rc;
 	}
 	rc = len;
@@ -1273,6 +1257,7 @@ int jffs2_garbage_collect_xattr_ref(struct jffs2_sb_info *c, struct jffs2_xattr_
 	if (rc) {
 		JFFS2_WARNING("%s: jffs2_reserve_space_gc() = %d, request = %u\n",
 			      __func__, rc, totlen);
+		rc = rc ? rc : -EBADFD;
 		goto out;
 	}
 	rc = save_xattr_ref(c, ref);

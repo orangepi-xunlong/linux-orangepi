@@ -13,8 +13,20 @@
 /* IPVS pe list */
 static LIST_HEAD(ip_vs_pe);
 
-/* semaphore for IPVS PEs. */
-static DEFINE_MUTEX(ip_vs_pe_mutex);
+/* lock for service table */
+static DEFINE_SPINLOCK(ip_vs_pe_lock);
+
+/* Bind a service with a pe */
+void ip_vs_bind_pe(struct ip_vs_service *svc, struct ip_vs_pe *pe)
+{
+	svc->pe = pe;
+}
+
+/* Unbind a service from its pe */
+void ip_vs_unbind_pe(struct ip_vs_service *svc)
+{
+	svc->pe = NULL;
+}
 
 /* Get pe in the pe list by name */
 struct ip_vs_pe *__ip_vs_pe_getbyname(const char *pe_name)
@@ -24,8 +36,9 @@ struct ip_vs_pe *__ip_vs_pe_getbyname(const char *pe_name)
 	IP_VS_DBG(10, "%s(): pe_name \"%s\"\n", __func__,
 		  pe_name);
 
-	rcu_read_lock();
-	list_for_each_entry_rcu(pe, &ip_vs_pe, n_list) {
+	spin_lock_bh(&ip_vs_pe_lock);
+
+	list_for_each_entry(pe, &ip_vs_pe, n_list) {
 		/* Test and get the modules atomically */
 		if (pe->module &&
 		    !try_module_get(pe->module)) {
@@ -34,13 +47,14 @@ struct ip_vs_pe *__ip_vs_pe_getbyname(const char *pe_name)
 		}
 		if (strcmp(pe_name, pe->name)==0) {
 			/* HIT */
-			rcu_read_unlock();
+			spin_unlock_bh(&ip_vs_pe_lock);
 			return pe;
 		}
-		module_put(pe->module);
+		if (pe->module)
+			module_put(pe->module);
 	}
-	rcu_read_unlock();
 
+	spin_unlock_bh(&ip_vs_pe_lock);
 	return NULL;
 }
 
@@ -69,13 +83,22 @@ int register_ip_vs_pe(struct ip_vs_pe *pe)
 	/* increase the module use count */
 	ip_vs_use_count_inc();
 
-	mutex_lock(&ip_vs_pe_mutex);
+	spin_lock_bh(&ip_vs_pe_lock);
+
+	if (!list_empty(&pe->n_list)) {
+		spin_unlock_bh(&ip_vs_pe_lock);
+		ip_vs_use_count_dec();
+		pr_err("%s(): [%s] pe already linked\n",
+		       __func__, pe->name);
+		return -EINVAL;
+	}
+
 	/* Make sure that the pe with this name doesn't exist
 	 * in the pe list.
 	 */
 	list_for_each_entry(tmp, &ip_vs_pe, n_list) {
 		if (strcmp(tmp->name, pe->name) == 0) {
-			mutex_unlock(&ip_vs_pe_mutex);
+			spin_unlock_bh(&ip_vs_pe_lock);
 			ip_vs_use_count_dec();
 			pr_err("%s(): [%s] pe already existed "
 			       "in the system\n", __func__, pe->name);
@@ -83,8 +106,8 @@ int register_ip_vs_pe(struct ip_vs_pe *pe)
 		}
 	}
 	/* Add it into the d-linked pe list */
-	list_add_rcu(&pe->n_list, &ip_vs_pe);
-	mutex_unlock(&ip_vs_pe_mutex);
+	list_add(&pe->n_list, &ip_vs_pe);
+	spin_unlock_bh(&ip_vs_pe_lock);
 
 	pr_info("[%s] pe registered.\n", pe->name);
 
@@ -95,10 +118,17 @@ EXPORT_SYMBOL_GPL(register_ip_vs_pe);
 /* Unregister a pe from the pe list */
 int unregister_ip_vs_pe(struct ip_vs_pe *pe)
 {
-	mutex_lock(&ip_vs_pe_mutex);
+	spin_lock_bh(&ip_vs_pe_lock);
+	if (list_empty(&pe->n_list)) {
+		spin_unlock_bh(&ip_vs_pe_lock);
+		pr_err("%s(): [%s] pe is not in the list. failed\n",
+		       __func__, pe->name);
+		return -EINVAL;
+	}
+
 	/* Remove it from the d-linked pe list */
-	list_del_rcu(&pe->n_list);
-	mutex_unlock(&ip_vs_pe_mutex);
+	list_del(&pe->n_list);
+	spin_unlock_bh(&ip_vs_pe_lock);
 
 	/* decrease the module use count */
 	ip_vs_use_count_dec();

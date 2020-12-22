@@ -50,10 +50,6 @@ LDFLAGS_MODULE
 --------------------------------------------------
 Additional options used for $(LD) when linking modules.
 
-LDFLAGS_vmlinux
---------------------------------------------------
-Additional options passed to final link of vmlinux.
-
 KBUILD_VERBOSE
 --------------------------------------------------
 Set the kbuild verbosity. Can be assigned same values as "V=...".
@@ -174,11 +170,6 @@ The output directory is often set using "O=..." on the commandline.
 
 The value can be overridden in which case the default value is ignored.
 
-KBUILD_SIGN_PIN
---------------------------------------------------
-This variable allows a passphrase or PIN to be passed to the sign-file
-utility when signing kernel modules, if the private key requires such.
-
 KBUILD_MODPOST_WARN
 --------------------------------------------------
 KBUILD_MODPOST_WARN can be set to avoid errors in case of undefined
@@ -223,18 +214,3 @@ KBUILD_BUILD_USER, KBUILD_BUILD_HOST
 These two variables allow to override the user@host string displayed during
 boot and in /proc/version. The default value is the output of the commands
 whoami and host, respectively.
-
-KBUILD_LDS
---------------------------------------------------
-The linker script with full path. Assigned by the top-level Makefile.
-
-KBUILD_VMLINUX_INIT
---------------------------------------------------
-All object files for the init (first) part of vmlinux.
-Files specified with KBUILD_VMLINUX_INIT are linked first.
-
-KBUILD_VMLINUX_MAIN
---------------------------------------------------
-All object files for the main part of vmlinux.
-KBUILD_VMLINUX_INIT and KBUILD_VMLINUX_MAIN together specify
-all the object files used to link vmlinux.

@@ -78,7 +78,7 @@ static void print_board_data(struct pci_dev *pdev, struct uio_info *i)
 		ioread8(i->priv + 0x07));
 }
 
-static int probe(struct pci_dev *pdev, const struct pci_device_id *id)
+static int __devinit probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct uio_info *info;
 	int ret;
@@ -147,6 +147,7 @@ static void remove(struct pci_dev *pdev)
 	uio_unregister_device(info);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
 	iounmap(info->priv);
 
 	kfree(info);
@@ -159,5 +160,17 @@ static struct pci_driver pci_driver = {
 	.remove = remove,
 };
 
-module_pci_driver(pci_driver);
+static int __init aectc_init(void)
+{
+	return pci_register_driver(&pci_driver);
+}
+
+static void __exit aectc_exit(void)
+{
+	pci_unregister_driver(&pci_driver);
+}
+
 MODULE_LICENSE("GPL");
+
+module_init(aectc_init);
+module_exit(aectc_exit);

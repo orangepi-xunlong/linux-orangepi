@@ -9,8 +9,8 @@
 #ifndef __XEN_PUBLIC_IO_BLKIF_H__
 #define __XEN_PUBLIC_IO_BLKIF_H__
 
-#include <xen/interface/io/ring.h>
-#include <xen/interface/grant_table.h>
+#include "ring.h"
+#include "../grant_table.h"
 
 /*
  * Front->back notifications: When enqueuing a new request, sending a
@@ -26,54 +26,6 @@
 
 typedef uint16_t blkif_vdev_t;
 typedef uint64_t blkif_sector_t;
-
-/*
- * Multiple hardware queues/rings:
- * If supported, the backend will write the key "multi-queue-max-queues" to
- * the directory for that vbd, and set its value to the maximum supported
- * number of queues.
- * Frontends that are aware of this feature and wish to use it can write the
- * key "multi-queue-num-queues" with the number they wish to use, which must be
- * greater than zero, and no more than the value reported by the backend in
- * "multi-queue-max-queues".
- *
- * For frontends requesting just one queue, the usual event-channel and
- * ring-ref keys are written as before, simplifying the backend processing
- * to avoid distinguishing between a frontend that doesn't understand the
- * multi-queue feature, and one that does, but requested only one queue.
- *
- * Frontends requesting two or more queues must not write the toplevel
- * event-channel and ring-ref keys, instead writing those keys under sub-keys
- * having the name "queue-N" where N is the integer ID of the queue/ring for
- * which those keys belong. Queues are indexed from zero.
- * For example, a frontend with two queues must write the following set of
- * queue-related keys:
- *
- * /local/domain/1/device/vbd/0/multi-queue-num-queues = "2"
- * /local/domain/1/device/vbd/0/queue-0 = ""
- * /local/domain/1/device/vbd/0/queue-0/ring-ref = "<ring-ref#0>"
- * /local/domain/1/device/vbd/0/queue-0/event-channel = "<evtchn#0>"
- * /local/domain/1/device/vbd/0/queue-1 = ""
- * /local/domain/1/device/vbd/0/queue-1/ring-ref = "<ring-ref#1>"
- * /local/domain/1/device/vbd/0/queue-1/event-channel = "<evtchn#1>"
- *
- * It is also possible to use multiple queues/rings together with
- * feature multi-page ring buffer.
- * For example, a frontend requests two queues/rings and the size of each ring
- * buffer is two pages must write the following set of related keys:
- *
- * /local/domain/1/device/vbd/0/multi-queue-num-queues = "2"
- * /local/domain/1/device/vbd/0/ring-page-order = "1"
- * /local/domain/1/device/vbd/0/queue-0 = ""
- * /local/domain/1/device/vbd/0/queue-0/ring-ref0 = "<ring-ref#0>"
- * /local/domain/1/device/vbd/0/queue-0/ring-ref1 = "<ring-ref#1>"
- * /local/domain/1/device/vbd/0/queue-0/event-channel = "<evtchn#0>"
- * /local/domain/1/device/vbd/0/queue-1 = ""
- * /local/domain/1/device/vbd/0/queue-1/ring-ref0 = "<ring-ref#2>"
- * /local/domain/1/device/vbd/0/queue-1/ring-ref1 = "<ring-ref#3>"
- * /local/domain/1/device/vbd/0/queue-1/event-channel = "<evtchn#1>"
- *
- */
 
 /*
  * REQUEST CODES.
@@ -134,7 +86,7 @@ typedef uint64_t blkif_sector_t;
  *     Interface%20manuals/100293068c.pdf
  * The backend can optionally provide three extra XenBus attributes to
  * further optimize the discard functionality:
- * 'discard-alignment' - Devices that support discard functionality may
+ * 'discard-aligment' - Devices that support discard functionality may
  * internally allocate space in units that are bigger than the exported
  * logical block size. The discard-alignment parameter indicates how many bytes
  * the beginning of the partition is offset from the internal allocation unit's
@@ -151,61 +103,33 @@ typedef uint64_t blkif_sector_t;
 #define BLKIF_OP_DISCARD           5
 
 /*
- * Recognized if "feature-max-indirect-segments" in present in the backend
- * xenbus info. The "feature-max-indirect-segments" node contains the maximum
- * number of segments allowed by the backend per request. If the node is
- * present, the frontend might use blkif_request_indirect structs in order to
- * issue requests with more than BLKIF_MAX_SEGMENTS_PER_REQUEST (11). The
- * maximum number of indirect segments is fixed by the backend, but the
- * frontend can issue requests with any number of indirect segments as long as
- * it's less than the number provided by the backend. The indirect_grefs field
- * in blkif_request_indirect should be filled by the frontend with the
- * grant references of the pages that are holding the indirect segments.
- * These pages are filled with an array of blkif_request_segment that hold the
- * information about the segments. The number of indirect pages to use is
- * determined by the number of segments an indirect request contains. Every
- * indirect page can contain a maximum of
- * (PAGE_SIZE / sizeof(struct blkif_request_segment)) segments, so to
- * calculate the number of indirect pages to use we have to do
- * ceil(indirect_segments / (PAGE_SIZE / sizeof(struct blkif_request_segment))).
- *
- * If a backend does not recognize BLKIF_OP_INDIRECT, it should *not*
- * create the "feature-max-indirect-segments" node!
- */
-#define BLKIF_OP_INDIRECT          6
-
-/*
  * Maximum scatter/gather segments per request.
  * This is carefully chosen so that sizeof(struct blkif_ring) <= PAGE_SIZE.
  * NB. This could be 12 if the ring indexes weren't stored in the same page.
  */
 #define BLKIF_MAX_SEGMENTS_PER_REQUEST 11
 
-#define BLKIF_MAX_INDIRECT_PAGES_PER_REQUEST 8
-
-struct blkif_request_segment {
-		grant_ref_t gref;        /* reference to I/O buffer frame        */
-		/* @first_sect: first sector in frame to transfer (inclusive).   */
-		/* @last_sect: last sector in frame to transfer (inclusive).     */
-		uint8_t     first_sect, last_sect;
-};
-
 struct blkif_request_rw {
 	uint8_t        nr_segments;  /* number of segments                   */
 	blkif_vdev_t   handle;       /* only for read/write requests         */
-#ifndef CONFIG_X86_32
+#ifdef CONFIG_X86_64
 	uint32_t       _pad1;	     /* offsetof(blkif_request,u.rw.id) == 8 */
 #endif
 	uint64_t       id;           /* private guest value, echoed in resp  */
 	blkif_sector_t sector_number;/* start sector idx on disk (r/w only)  */
-	struct blkif_request_segment seg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
+	struct blkif_request_segment {
+		grant_ref_t gref;        /* reference to I/O buffer frame        */
+		/* @first_sect: first sector in frame to transfer (inclusive).   */
+		/* @last_sect: last sector in frame to transfer (inclusive).     */
+		uint8_t     first_sect, last_sect;
+	} seg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 } __attribute__((__packed__));
 
 struct blkif_request_discard {
 	uint8_t        flag;         /* BLKIF_DISCARD_SECURE or zero.        */
 #define BLKIF_DISCARD_SECURE (1<<0)  /* ignored if discard-secure=0          */
 	blkif_vdev_t   _pad1;        /* only for read/write requests         */
-#ifndef CONFIG_X86_32
+#ifdef CONFIG_X86_64
 	uint32_t       _pad2;        /* offsetof(blkif_req..,u.discard.id)==8*/
 #endif
 	uint64_t       id;           /* private guest value, echoed in resp  */
@@ -217,28 +141,10 @@ struct blkif_request_discard {
 struct blkif_request_other {
 	uint8_t      _pad1;
 	blkif_vdev_t _pad2;        /* only for read/write requests         */
-#ifndef CONFIG_X86_32
+#ifdef CONFIG_X86_64
 	uint32_t     _pad3;        /* offsetof(blkif_req..,u.other.id)==8*/
 #endif
 	uint64_t     id;           /* private guest value, echoed in resp  */
-} __attribute__((__packed__));
-
-struct blkif_request_indirect {
-	uint8_t        indirect_op;
-	uint16_t       nr_segments;
-#ifndef CONFIG_X86_32
-	uint32_t       _pad1;        /* offsetof(blkif_...,u.indirect.id) == 8 */
-#endif
-	uint64_t       id;
-	blkif_sector_t sector_number;
-	blkif_vdev_t   handle;
-	uint16_t       _pad2;
-	grant_ref_t    indirect_grefs[BLKIF_MAX_INDIRECT_PAGES_PER_REQUEST];
-#ifndef CONFIG_X86_32
-	uint32_t      _pad3;         /* make it 64 byte aligned */
-#else
-	uint64_t      _pad3;         /* make it 64 byte aligned */
-#endif
 } __attribute__((__packed__));
 
 struct blkif_request {
@@ -247,7 +153,6 @@ struct blkif_request {
 		struct blkif_request_rw rw;
 		struct blkif_request_discard discard;
 		struct blkif_request_other other;
-		struct blkif_request_indirect indirect;
 	} u;
 } __attribute__((__packed__));
 

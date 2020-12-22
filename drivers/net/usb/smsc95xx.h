@@ -13,7 +13,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  *
  *****************************************************************************/
 
@@ -52,11 +53,6 @@
 #define ID_REV_CHIP_ID_MASK_		(0xFFFF0000)
 #define ID_REV_CHIP_REV_MASK_		(0x0000FFFF)
 #define ID_REV_CHIP_ID_9500_		(0x9500)
-#define ID_REV_CHIP_ID_9500A_		(0x9E00)
-#define ID_REV_CHIP_ID_9512_		(0xEC00)
-#define ID_REV_CHIP_ID_9530_		(0x9530)
-#define ID_REV_CHIP_ID_89530_		(0x9E08)
-#define ID_REV_CHIP_ID_9730_		(0x9730)
 
 #define INT_STS				(0x08)
 #define INT_STS_TX_STOP_		(0x00020000)
@@ -67,7 +63,6 @@
 #define INT_STS_TDFO_			(0x00001000)
 #define INT_STS_RXDF_			(0x00000800)
 #define INT_STS_GPIOS_			(0x000007FF)
-#define INT_STS_CLEAR_ALL_		(0xFFFFFFFF)
 
 #define RX_CFG				(0x0C)
 #define RX_FIFO_FLUSH_			(0x00000001)
@@ -88,16 +83,12 @@
 #define HW_CFG_BCE_			(0x00000002)
 #define HW_CFG_SRST_			(0x00000001)
 
-#define RX_FIFO_INF			(0x18)
-
 #define PM_CTRL				(0x20)
-#define PM_CTL_RES_CLR_WKP_STS		(0x00000200)
 #define PM_CTL_DEV_RDY_			(0x00000080)
 #define PM_CTL_SUS_MODE_		(0x00000060)
 #define PM_CTL_SUS_MODE_0		(0x00000000)
 #define PM_CTL_SUS_MODE_1		(0x00000020)
-#define PM_CTL_SUS_MODE_2		(0x00000040)
-#define PM_CTL_SUS_MODE_3		(0x00000060)
+#define PM_CTL_SUS_MODE_2		(0x00000060)
 #define PM_CTL_PHY_RST_			(0x00000010)
 #define PM_CTL_WOL_EN_			(0x00000008)
 #define PM_CTL_ED_EN_			(0x00000004)
@@ -143,14 +134,6 @@
 #define E2P_DATA_MASK_			(0x000000FF)
 
 #define BURST_CAP			(0x38)
-
-#define	STRAP_STATUS			(0x3C)
-#define	STRAP_STATUS_PWR_SEL_		(0x00000020)
-#define	STRAP_STATUS_AMDIX_EN_		(0x00000010)
-#define	STRAP_STATUS_PORT_SWAP_		(0x00000008)
-#define	STRAP_STATUS_EEP_SIZE_		(0x00000004)
-#define	STRAP_STATUS_RMT_WKP_		(0x00000002)
-#define	STRAP_STATUS_EEP_DISABLE_	(0x00000001)
 
 #define GPIO_WAKE			(0x64)
 
@@ -215,16 +198,8 @@
 #define VLAN2				(0x124)
 
 #define WUFF				(0x128)
-#define LAN9500_WUFF_NUM		(4)
-#define LAN9500A_WUFF_NUM		(8)
 
 #define WUCSR				(0x12C)
-#define WUCSR_WFF_PTR_RST_		(0x80000000)
-#define WUCSR_GUE_			(0x00000200)
-#define WUCSR_WUFR_			(0x00000040)
-#define WUCSR_MPR_			(0x00000020)
-#define WUCSR_WAKE_EN_			(0x00000004)
-#define WUCSR_MPEN_			(0x00000002)
 
 #define COE_CR				(0x130)
 #define Tx_COE_EN_			(0x00010000)
@@ -232,23 +207,6 @@
 #define Rx_COE_EN_			(0x00000001)
 
 /* Vendor-specific PHY Definitions */
-
-/* EDPD NLP / crossover time configuration (LAN9500A only) */
-#define PHY_EDPD_CONFIG			(16)
-#define PHY_EDPD_CONFIG_TX_NLP_EN_	((u16)0x8000)
-#define PHY_EDPD_CONFIG_TX_NLP_1000_	((u16)0x0000)
-#define PHY_EDPD_CONFIG_TX_NLP_768_	((u16)0x2000)
-#define PHY_EDPD_CONFIG_TX_NLP_512_	((u16)0x4000)
-#define PHY_EDPD_CONFIG_TX_NLP_256_	((u16)0x6000)
-#define PHY_EDPD_CONFIG_RX_1_NLP_	((u16)0x1000)
-#define PHY_EDPD_CONFIG_RX_NLP_64_	((u16)0x0000)
-#define PHY_EDPD_CONFIG_RX_NLP_256_	((u16)0x0400)
-#define PHY_EDPD_CONFIG_RX_NLP_512_	((u16)0x0800)
-#define PHY_EDPD_CONFIG_RX_NLP_1000_	((u16)0x0C00)
-#define PHY_EDPD_CONFIG_EXT_CROSSOVER_	((u16)0x0001)
-#define PHY_EDPD_CONFIG_DEFAULT		(PHY_EDPD_CONFIG_TX_NLP_EN_ | \
-					 PHY_EDPD_CONFIG_TX_NLP_768_ | \
-					 PHY_EDPD_CONFIG_RX_1_NLP_)
 
 /* Mode Control/Status Register */
 #define PHY_MODE_CTRL_STS		(17)

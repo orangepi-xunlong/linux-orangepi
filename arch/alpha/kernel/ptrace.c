@@ -13,8 +13,6 @@
 #include <linux/user.h>
 #include <linux/security.h>
 #include <linux/signal.h>
-#include <linux/tracehook.h>
-#include <linux/audit.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -157,16 +155,14 @@ put_reg(struct task_struct *task, unsigned long regno, unsigned long data)
 static inline int
 read_int(struct task_struct *task, unsigned long addr, int * data)
 {
-	int copied = access_process_vm(task, addr, data, sizeof(int),
-			FOLL_FORCE);
+	int copied = access_process_vm(task, addr, data, sizeof(int), 0);
 	return (copied == sizeof(int)) ? 0 : -EIO;
 }
 
 static inline int
 write_int(struct task_struct *task, unsigned long addr, int data)
 {
-	int copied = access_process_vm(task, addr, &data, sizeof(int),
-			FOLL_FORCE | FOLL_WRITE);
+	int copied = access_process_vm(task, addr, &data, sizeof(int), 1);
 	return (copied == sizeof(int)) ? 0 : -EIO;
 }
 
@@ -283,8 +279,7 @@ long arch_ptrace(struct task_struct *child, long request,
 	/* When I and D space are separate, these will need to be fixed.  */
 	case PTRACE_PEEKTEXT: /* read word at location addr. */
 	case PTRACE_PEEKDATA:
-		copied = ptrace_access_vm(child, addr, &tmp, sizeof(tmp),
-				FOLL_FORCE);
+		copied = access_process_vm(child, addr, &tmp, sizeof(tmp), 0);
 		ret = -EIO;
 		if (copied != sizeof(tmp))
 			break;
@@ -317,21 +312,25 @@ long arch_ptrace(struct task_struct *child, long request,
 	return ret;
 }
 
-asmlinkage unsigned long syscall_trace_enter(void)
-{
-	unsigned long ret = 0;
-	struct pt_regs *regs = current_pt_regs();
-	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
-	    tracehook_report_syscall_entry(current_pt_regs()))
-		ret = -1UL;
-	audit_syscall_entry(regs->r0, regs->r16, regs->r17, regs->r18, regs->r19);
-	return ret ?: current_pt_regs()->r0;
-}
-
 asmlinkage void
-syscall_trace_leave(void)
+syscall_trace(void)
 {
-	audit_syscall_exit(current_pt_regs());
-	if (test_thread_flag(TIF_SYSCALL_TRACE))
-		tracehook_report_syscall_exit(current_pt_regs(), 0);
+	if (!test_thread_flag(TIF_SYSCALL_TRACE))
+		return;
+	if (!(current->ptrace & PT_PTRACED))
+		return;
+	/* The 0x80 provides a way for the tracing parent to distinguish
+	   between a syscall stop and SIGTRAP delivery */
+	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
+				 ? 0x80 : 0));
+
+	/*
+	 * This isn't the same as continuing with a signal, but it will do
+	 * for normal use.  strace only continues with a signal if the
+	 * stopping signal is not SIGTRAP.  -brl
+	 */
+	if (current->exit_code) {
+		send_sig(current->exit_code, current, 1);
+		current->exit_code = 0;
+	}
 }

@@ -7,7 +7,7 @@
  * Copyright (C) 2000 by Silicon Graphics, Inc.
  * Copyright (C) 2004 by Christoph Hellwig
  *
- * On SGI IP27 the ARC memory configuration data is completely bogus but
+ * On SGI IP27 the ARC memory configuration data is completly bogus but
  * alternate easier to use mechanisms are available.
  */
 #include <linux/init.h>
@@ -31,8 +31,8 @@
 #include <asm/sn/sn_private.h>
 
 
-#define SLOT_PFNSHIFT		(SLOT_SHIFT - PAGE_SHIFT)
-#define PFN_NASIDSHFT		(NASID_SHFT - PAGE_SHIFT)
+#define SLOT_PFNSHIFT           (SLOT_SHIFT - PAGE_SHIFT)
+#define PFN_NASIDSHFT           (NASID_SHFT - PAGE_SHIFT)
 
 struct node_data *__node_data[MAX_COMPACT_NODES];
 
@@ -42,7 +42,8 @@ static int fine_mode;
 
 static int is_fine_dirmode(void)
 {
-	return ((LOCAL_HUB_L(NI_STATUS_REV_ID) & NSRI_REGIONSIZE_MASK) >> NSRI_REGIONSIZE_SHFT) & REGIONSIZE_FINE;
+	return (((LOCAL_HUB_L(NI_STATUS_REV_ID) & NSRI_REGIONSIZE_MASK)
+	        >> NSRI_REGIONSIZE_SHFT) & REGIONSIZE_FINE);
 }
 
 static hubreg_t get_region(cnodeid_t cnode)
@@ -65,7 +66,7 @@ static void gen_region_mask(hubreg_t *region_mask)
 	}
 }
 
-#define rou_rflag	rou_flags
+#define	rou_rflag	rou_flags
 
 static int router_distance;
 
@@ -106,7 +107,6 @@ static void router_recurse(klrou_t *router_a, klrou_t *router_b, int depth)
 }
 
 unsigned char __node_distances[MAX_COMPACT_NODES][MAX_COMPACT_NODES];
-EXPORT_SYMBOL(__node_distances);
 
 static int __init compute_node_distance(nasid_t nasid_a, nasid_t nasid_b)
 {
@@ -255,14 +255,14 @@ static void __init dump_topology(void)
 	}
 }
 
-static unsigned long __init slot_getbasepfn(cnodeid_t cnode, int slot)
+static pfn_t __init slot_getbasepfn(cnodeid_t cnode, int slot)
 {
 	nasid_t nasid = COMPACT_TO_NASID_NODEID(cnode);
 
-	return ((unsigned long)nasid << PFN_NASIDSHFT) | (slot << SLOT_PFNSHIFT);
+	return ((pfn_t)nasid << PFN_NASIDSHFT) | (slot << SLOT_PFNSHIFT);
 }
 
-static unsigned long __init slot_psize_compute(cnodeid_t node, int slot)
+static pfn_t __init slot_psize_compute(cnodeid_t node, int slot)
 {
 	nasid_t nasid;
 	lboard_t *brd;
@@ -287,7 +287,7 @@ static unsigned long __init slot_psize_compute(cnodeid_t node, int slot)
 	if (size <= 128) {
 		if (slot % 4 == 0) {
 			size <<= 20;		/* size in bytes */
-			return size >> PAGE_SHIFT;
+			return(size >> PAGE_SHIFT);
 		} else
 			return 0;
 	} else {
@@ -353,9 +353,11 @@ static void __init mlreset(void)
 
 static void __init szmem(void)
 {
-	unsigned long slot_psize, slot0sz = 0, nodebytes;	/* Hack to detect problem configs */
+	pfn_t slot_psize, slot0sz = 0, nodebytes;	/* Hack to detect problem configs */
 	int slot;
 	cnodeid_t node;
+
+	num_physpages = 0;
 
 	for_each_online_node(node) {
 		nodebytes = 0;
@@ -379,6 +381,7 @@ static void __init szmem(void)
 				slot = MAX_MEM_SLOTS;
 				continue;
 			}
+			num_physpages += slot_psize;
 			memblock_add_node(PFN_PHYS(slot_getbasepfn(node, slot)),
 					  PFN_PHYS(slot_psize), node);
 		}
@@ -387,10 +390,10 @@ static void __init szmem(void)
 
 static void __init node_mem_init(cnodeid_t node)
 {
-	unsigned long slot_firstpfn = slot_getbasepfn(node, 0);
-	unsigned long slot_freepfn = node_getfirstfree(node);
+	pfn_t slot_firstpfn = slot_getbasepfn(node, 0);
+	pfn_t slot_freepfn = node_getfirstfree(node);
 	unsigned long bootmap_size;
-	unsigned long start_pfn, end_pfn;
+	pfn_t start_pfn, end_pfn;
 
 	get_pfn_range_for_nid(node, &start_pfn, &end_pfn);
 
@@ -398,18 +401,17 @@ static void __init node_mem_init(cnodeid_t node)
 	 * Allocate the node data structures on the node first.
 	 */
 	__node_data[node] = __va(slot_freepfn << PAGE_SHIFT);
-	memset(__node_data[node], 0, PAGE_SIZE);
 
 	NODE_DATA(node)->bdata = &bootmem_node_data[node];
 	NODE_DATA(node)->node_start_pfn = start_pfn;
 	NODE_DATA(node)->node_spanned_pages = end_pfn - start_pfn;
 
-	cpumask_clear(&hub_data(node)->h_cpus);
+	cpus_clear(hub_data(node)->h_cpus);
 
 	slot_freepfn += PFN_UP(sizeof(struct pglist_data) +
 			       sizeof(struct hub_data));
 
-	bootmap_size = init_bootmem_node(NODE_DATA(node), slot_freepfn,
+  	bootmap_size = init_bootmem_node(NODE_DATA(node), slot_freepfn,
 					start_pfn, end_pfn);
 	free_bootmem_with_active_regions(node, end_pfn);
 	reserve_bootmem_node(NODE_DATA(node), slot_firstpfn << PAGE_SHIFT,
@@ -419,7 +421,7 @@ static void __init node_mem_init(cnodeid_t node)
 }
 
 /*
- * A node with nothing.	 We use it to avoid any special casing in
+ * A node with nothing.  We use it to avoid any special casing in
  * cpumask_of_node
  */
 static struct node_data null_node = {
@@ -454,7 +456,7 @@ void __init prom_free_prom_memory(void)
 	/* We got nothing to free here ...  */
 }
 
-extern void setup_zero_pages(void);
+extern unsigned long setup_zero_pages(void);
 
 void __init paging_init(void)
 {
@@ -464,7 +466,7 @@ void __init paging_init(void)
 	pagetable_init();
 
 	for_each_online_node(node) {
-		unsigned long start_pfn, end_pfn;
+		pfn_t start_pfn, end_pfn;
 
 		get_pfn_range_for_nid(node, &start_pfn, &end_pfn);
 
@@ -477,8 +479,32 @@ void __init paging_init(void)
 
 void __init mem_init(void)
 {
-	high_memory = (void *) __va(get_num_physpages() << PAGE_SHIFT);
-	free_all_bootmem();
-	setup_zero_pages();	/* This comes from node 0 */
-	mem_init_print_info(NULL);
+	unsigned long codesize, datasize, initsize, tmp;
+	unsigned node;
+
+	high_memory = (void *) __va(num_physpages << PAGE_SHIFT);
+
+	for_each_online_node(node) {
+		/*
+		 * This will free up the bootmem, ie, slot 0 memory.
+		 */
+		totalram_pages += free_all_bootmem_node(NODE_DATA(node));
+	}
+
+	totalram_pages -= setup_zero_pages();	/* This comes from node 0 */
+
+	codesize =  (unsigned long) &_etext - (unsigned long) &_text;
+	datasize =  (unsigned long) &_edata - (unsigned long) &_etext;
+	initsize =  (unsigned long) &__init_end - (unsigned long) &__init_begin;
+
+	tmp = nr_free_pages();
+	printk(KERN_INFO "Memory: %luk/%luk available (%ldk kernel code, "
+	       "%ldk reserved, %ldk data, %ldk init, %ldk highmem)\n",
+	       tmp << (PAGE_SHIFT-10),
+	       num_physpages << (PAGE_SHIFT-10),
+	       codesize >> 10,
+	       (num_physpages - tmp) << (PAGE_SHIFT-10),
+	       datasize >> 10,
+	       initsize >> 10,
+	       totalhigh_pages << (PAGE_SHIFT-10));
 }

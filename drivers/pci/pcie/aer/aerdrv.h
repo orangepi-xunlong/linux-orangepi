@@ -13,6 +13,10 @@
 #include <linux/aer.h>
 #include <linux/interrupt.h>
 
+#define AER_NONFATAL			0
+#define AER_FATAL			1
+#define AER_CORRECTABLE			2
+
 #define SYSTEM_ERROR_INTR_ON_MESG_MASK	(PCI_EXP_RTCTL_SECEE|	\
 					PCI_EXP_RTCTL_SENFEE|	\
 					PCI_EXP_RTCTL_SEFEE)
@@ -60,7 +64,6 @@ struct aer_rpc {
 	struct pcie_device *rpd;	/* Root Port device */
 	struct work_struct dpc_handler;
 	struct aer_err_source e_sources[AER_ERROR_SOURCES_MAX];
-	struct aer_err_info e_info;
 	unsigned short prod_idx;	/* Error Producer Index */
 	unsigned short cons_idx;	/* Error Consumer Index */
 	int isr;
@@ -73,6 +76,7 @@ struct aer_rpc {
 					 * recovery on the same
 					 * root port hierarchy
 					 */
+	wait_queue_head_t wait_release;
 };
 
 struct aer_broadcast_data {
@@ -83,9 +87,6 @@ struct aer_broadcast_data {
 static inline pci_ers_result_t merge_result(enum pci_ers_result orig,
 		enum pci_ers_result new)
 {
-	if (new == PCI_ERS_RESULT_NO_AER_DRIVER)
-		return PCI_ERS_RESULT_NO_AER_DRIVER;
-
 	if (new == PCI_ERS_RESULT_NONE)
 		return orig;
 
@@ -96,7 +97,7 @@ static inline pci_ers_result_t merge_result(enum pci_ers_result orig,
 		break;
 	case PCI_ERS_RESULT_DISCONNECT:
 		if (new == PCI_ERS_RESULT_NEED_RESET)
-			orig = PCI_ERS_RESULT_NEED_RESET;
+			orig = new;
 		break;
 	default:
 		break;
@@ -106,13 +107,15 @@ static inline pci_ers_result_t merge_result(enum pci_ers_result orig,
 }
 
 extern struct bus_type pcie_port_bus_type;
-void aer_isr(struct work_struct *work);
-void aer_print_error(struct pci_dev *dev, struct aer_err_info *info);
-void aer_print_port_info(struct pci_dev *dev, struct aer_err_info *info);
-irqreturn_t aer_irq(int irq, void *context);
+extern void aer_do_secondary_bus_reset(struct pci_dev *dev);
+extern int aer_init(struct pcie_device *dev);
+extern void aer_isr(struct work_struct *work);
+extern void aer_print_error(struct pci_dev *dev, struct aer_err_info *info);
+extern void aer_print_port_info(struct pci_dev *dev, struct aer_err_info *info);
+extern irqreturn_t aer_irq(int irq, void *context);
 
 #ifdef CONFIG_ACPI_APEI
-int pcie_aer_get_firmware_first(struct pci_dev *pci_dev);
+extern int pcie_aer_get_firmware_first(struct pci_dev *pci_dev);
 #else
 static inline int pcie_aer_get_firmware_first(struct pci_dev *pci_dev)
 {
@@ -121,4 +124,11 @@ static inline int pcie_aer_get_firmware_first(struct pci_dev *pci_dev)
 	return 0;
 }
 #endif
+
+static inline void pcie_aer_force_firmware_first(struct pci_dev *pci_dev,
+						 int enable)
+{
+	pci_dev->__aer_firmware_first = !!enable;
+	pci_dev->__aer_firmware_first_valid = 1;
+}
 #endif /* _AERDRV_H_ */

@@ -11,7 +11,6 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/mutex.h>
@@ -285,30 +284,7 @@ out:
 }
 #endif
 
-#ifdef CONFIG_OF
-static int pm860x_rtc_dt_init(struct platform_device *pdev,
-			      struct pm860x_rtc_info *info)
-{
-	struct device_node *np = pdev->dev.parent->of_node;
-	int ret;
-	if (!np)
-		return -ENODEV;
-	np = of_get_child_by_name(np, "rtc");
-	if (!np) {
-		dev_err(&pdev->dev, "failed to find rtc node\n");
-		return -ENODEV;
-	}
-	ret = of_property_read_u32(np, "marvell,88pm860x-vrtc", &info->vrtc);
-	if (ret)
-		info->vrtc = 0;
-	of_node_put(np);
-	return 0;
-}
-#else
-#define pm860x_rtc_dt_init(x, y)	(-1)
-#endif
-
-static int pm860x_rtc_probe(struct platform_device *pdev)
+static int __devinit pm860x_rtc_probe(struct platform_device *pdev)
 {
 	struct pm860x_chip *chip = dev_get_drvdata(pdev->dev.parent);
 	struct pm860x_rtc_pdata *pdata = NULL;
@@ -317,16 +293,18 @@ static int pm860x_rtc_probe(struct platform_device *pdev)
 	unsigned long ticks = 0;
 	int ret;
 
-	pdata = dev_get_platdata(&pdev->dev);
+	pdata = pdev->dev.platform_data;
+	if (pdata == NULL)
+		dev_warn(&pdev->dev, "No platform data!\n");
 
-	info = devm_kzalloc(&pdev->dev, sizeof(struct pm860x_rtc_info),
-			    GFP_KERNEL);
+	info = kzalloc(sizeof(struct pm860x_rtc_info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 	info->irq = platform_get_irq(pdev, 0);
 	if (info->irq < 0) {
 		dev_err(&pdev->dev, "No IRQ resource!\n");
-		return info->irq;
+		ret = -EINVAL;
+		goto out;
 	}
 
 	info->chip = chip;
@@ -334,13 +312,12 @@ static int pm860x_rtc_probe(struct platform_device *pdev)
 	info->dev = &pdev->dev;
 	dev_set_drvdata(&pdev->dev, info);
 
-	ret = devm_request_threaded_irq(&pdev->dev, info->irq, NULL,
-					rtc_update_handler, IRQF_ONESHOT, "rtc",
-					info);
+	ret = request_threaded_irq(info->irq, NULL, rtc_update_handler,
+				   IRQF_ONESHOT, "rtc", info);
 	if (ret < 0) {
 		dev_err(chip->dev, "Failed to request IRQ: #%d: %d\n",
 			info->irq, ret);
-		return ret;
+		goto out;
 	}
 
 	/* set addresses of 32-bit base value for RTC time */
@@ -352,7 +329,7 @@ static int pm860x_rtc_probe(struct platform_device *pdev)
 	ret = pm860x_rtc_read_time(&pdev->dev, &tm);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to read initial time.\n");
-		return ret;
+		goto out_rtc;
 	}
 	if ((tm.tm_year < 70) || (tm.tm_year > 138)) {
 		tm.tm_year = 70;
@@ -364,23 +341,21 @@ static int pm860x_rtc_probe(struct platform_device *pdev)
 		ret = pm860x_rtc_set_time(&pdev->dev, &tm);
 		if (ret < 0) {
 			dev_err(&pdev->dev, "Failed to set initial time.\n");
-			return ret;
+			goto out_rtc;
 		}
 	}
 	rtc_tm_to_time(&tm, &ticks);
-	if (pm860x_rtc_dt_init(pdev, info)) {
-		if (pdata && pdata->sync) {
-			pdata->sync(ticks);
-			info->sync = pdata->sync;
-		}
+	if (pdata && pdata->sync) {
+		pdata->sync(ticks);
+		info->sync = pdata->sync;
 	}
 
-	info->rtc_dev = devm_rtc_device_register(&pdev->dev, "88pm860x-rtc",
+	info->rtc_dev = rtc_device_register("88pm860x-rtc", &pdev->dev,
 					    &pm860x_rtc_ops, THIS_MODULE);
 	ret = PTR_ERR(info->rtc_dev);
 	if (IS_ERR(info->rtc_dev)) {
 		dev_err(&pdev->dev, "Failed to register RTC device: %d\n", ret);
-		return ret;
+		goto out_rtc;
 	}
 
 	/*
@@ -391,12 +366,10 @@ static int pm860x_rtc_probe(struct platform_device *pdev)
 
 #ifdef VRTC_CALIBRATION
 	/* <00> -- 2.7V, <01> -- 2.9V, <10> -- 3.1V, <11> -- 3.3V */
-	if (pm860x_rtc_dt_init(pdev, info)) {
-		if (pdata && pdata->vrtc)
-			info->vrtc = pdata->vrtc & 0x3;
-		else
-			info->vrtc = 1;
-	}
+	if (pdata && pdata->vrtc)
+		info->vrtc = pdata->vrtc & 0x3;
+	else
+		info->vrtc = 1;
 	pm860x_set_bits(info->i2c, PM8607_MEAS_EN2, MEAS2_VRTC, MEAS2_VRTC);
 
 	/* calibrate VRTC */
@@ -407,9 +380,14 @@ static int pm860x_rtc_probe(struct platform_device *pdev)
 	device_init_wakeup(&pdev->dev, 1);
 
 	return 0;
+out_rtc:
+	free_irq(info->irq, info);
+out:
+	kfree(info);
+	return ret;
 }
 
-static int pm860x_rtc_remove(struct platform_device *pdev)
+static int __devexit pm860x_rtc_remove(struct platform_device *pdev)
 {
 	struct pm860x_rtc_info *info = platform_get_drvdata(pdev);
 
@@ -419,6 +397,10 @@ static int pm860x_rtc_remove(struct platform_device *pdev)
 	pm860x_set_bits(info->i2c, PM8607_MEAS_EN2, MEAS2_VRTC, 0);
 #endif	/* VRTC_CALIBRATION */
 
+	platform_set_drvdata(pdev, NULL);
+	rtc_device_unregister(info->rtc_dev);
+	free_irq(info->irq, info);
+	kfree(info);
 	return 0;
 }
 
@@ -448,10 +430,11 @@ static SIMPLE_DEV_PM_OPS(pm860x_rtc_pm_ops, pm860x_rtc_suspend, pm860x_rtc_resum
 static struct platform_driver pm860x_rtc_driver = {
 	.driver		= {
 		.name	= "88pm860x-rtc",
+		.owner	= THIS_MODULE,
 		.pm	= &pm860x_rtc_pm_ops,
 	},
 	.probe		= pm860x_rtc_probe,
-	.remove		= pm860x_rtc_remove,
+	.remove		= __devexit_p(pm860x_rtc_remove),
 };
 
 module_platform_driver(pm860x_rtc_driver);

@@ -1,7 +1,7 @@
 /*
  * IUCV special message driver
  *
- * Copyright IBM Corp. 2003
+ * Copyright (C) 2003 IBM Deutschland Entwicklung GmbH, IBM Corporation
  * Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com)
  */
 

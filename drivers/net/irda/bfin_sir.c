@@ -31,7 +31,7 @@ static void turnaround_delay(unsigned long last_jif, int mtt)
 	schedule_timeout_uninterruptible(ticks);
 }
 
-static void bfin_sir_init_ports(struct bfin_sir_port *sp, struct platform_device *pdev)
+static void __devinit bfin_sir_init_ports(struct bfin_sir_port *sp, struct platform_device *pdev)
 {
 	int i;
 	struct resource *res;
@@ -158,7 +158,7 @@ static int bfin_sir_set_speed(struct bfin_sir_port *port, int speed)
 	/* If not add the 'RPOLC', we can't catch the receive interrupt.
 	 * It's related with the HW layout and the IR transiver.
 	 */
-	val |= UMOD_IRDA | RPOLC;
+	val |= IREN | RPOLC;
 	UART_PUT_GCTL(port, val);
 	return ret;
 }
@@ -389,8 +389,7 @@ static int bfin_sir_startup(struct bfin_sir_port *port, struct net_device *dev)
 	set_dma_callback(port->rx_dma_channel, bfin_sir_dma_rx_int, dev);
 	set_dma_callback(port->tx_dma_channel, bfin_sir_dma_tx_int, dev);
 
-	port->rx_dma_buf.buf = dma_alloc_coherent(NULL, PAGE_SIZE,
-						  &dma_handle, GFP_DMA);
+	port->rx_dma_buf.buf = (unsigned char *)dma_alloc_coherent(NULL, PAGE_SIZE, &dma_handle, GFP_DMA);
 	port->rx_dma_buf.head = 0;
 	port->rx_dma_buf.tail = 0;
 	port->rx_dma_nrows = 0;
@@ -411,12 +410,12 @@ static int bfin_sir_startup(struct bfin_sir_port *port, struct net_device *dev)
 
 #else
 
-	if (request_irq(port->irq, bfin_sir_rx_int, 0, "BFIN_SIR_RX", dev)) {
+	if (request_irq(port->irq, bfin_sir_rx_int, IRQF_DISABLED, "BFIN_SIR_RX", dev)) {
 		dev_warn(&dev->dev, "Unable to attach SIR RX interrupt\n");
 		return -EBUSY;
 	}
 
-	if (request_irq(port->irq+1, bfin_sir_tx_int, 0, "BFIN_SIR_TX", dev)) {
+	if (request_irq(port->irq+1, bfin_sir_tx_int, IRQF_DISABLED, "BFIN_SIR_TX", dev)) {
 		dev_warn(&dev->dev, "Unable to attach SIR TX interrupt\n");
 		free_irq(port->irq, dev);
 		return -EBUSY;
@@ -433,7 +432,7 @@ static void bfin_sir_shutdown(struct bfin_sir_port *port, struct net_device *dev
 	bfin_sir_stop_rx(port);
 
 	val = UART_GET_GCTL(port);
-	val &= ~(UCEN | UMOD_MASK | RPOLC);
+	val &= ~(UCEN | IREN | RPOLC);
 	UART_PUT_GCTL(port, val);
 
 #ifdef CONFIG_SIR_BFIN_DMA
@@ -519,10 +518,10 @@ static void bfin_sir_send_work(struct work_struct *work)
 	 * reset all the UART.
 	 */
 	val = UART_GET_GCTL(port);
-	val &= ~(UMOD_MASK | RPOLC);
+	val &= ~(IREN | RPOLC);
 	UART_PUT_GCTL(port, val);
 	SSYNC();
-	val |= UMOD_IRDA | RPOLC;
+	val |= IREN | RPOLC;
 	UART_PUT_GCTL(port, val);
 	SSYNC();
 	/* bfin_sir_set_speed(port, self->speed); */
@@ -531,7 +530,7 @@ static void bfin_sir_send_work(struct work_struct *work)
 	bfin_sir_dma_tx_chars(dev);
 #endif
 	bfin_sir_enable_tx(port);
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 }
 
 static int bfin_sir_hard_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -609,7 +608,7 @@ static int bfin_sir_open(struct net_device *dev)
 {
 	struct bfin_sir_self *self = netdev_priv(dev);
 	struct bfin_sir_port *port = self->sir_port;
-	int err;
+	int err = -ENOMEM;
 
 	self->newspeed = 0;
 	self->speed = 9600;
@@ -623,10 +622,8 @@ static int bfin_sir_open(struct net_device *dev)
 	bfin_sir_set_speed(port, 9600);
 
 	self->irlap = irlap_open(dev, &self->qos, DRIVER_NAME);
-	if (!self->irlap) {
-		err = -ENOMEM;
+	if (!self->irlap)
 		goto err_irlap;
-	}
 
 	INIT_WORK(&self->work, bfin_sir_send_work);
 
@@ -691,7 +688,7 @@ static const struct net_device_ops bfin_sir_ndo = {
 	.ndo_get_stats		= bfin_sir_stats,
 };
 
-static int bfin_sir_probe(struct platform_device *pdev)
+static int __devinit bfin_sir_probe(struct platform_device *pdev)
 {
 	struct net_device *dev;
 	struct bfin_sir_self *self;
@@ -778,7 +775,7 @@ err_mem_0:
 	return err;
 }
 
-static int bfin_sir_remove(struct platform_device *pdev)
+static int __devexit bfin_sir_remove(struct platform_device *pdev)
 {
 	struct bfin_sir_port *sir_port;
 	struct net_device *dev = NULL;
@@ -794,13 +791,14 @@ static int bfin_sir_remove(struct platform_device *pdev)
 	kfree(self->rx_buff.head);
 	free_netdev(dev);
 	kfree(sir_port);
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }
 
 static struct platform_driver bfin_ir_driver = {
 	.probe   = bfin_sir_probe,
-	.remove  = bfin_sir_remove,
+	.remove  = __devexit_p(bfin_sir_remove),
 	.suspend = bfin_sir_suspend,
 	.resume  = bfin_sir_resume,
 	.driver  = {

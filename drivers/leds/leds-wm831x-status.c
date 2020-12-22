@@ -10,6 +10,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/leds.h>
@@ -23,6 +24,7 @@
 struct wm831x_status {
 	struct led_classdev cdev;
 	struct wm831x *wm831x;
+	struct work_struct work;
 	struct mutex mutex;
 
 	spinlock_t value_lock;
@@ -39,8 +41,10 @@ struct wm831x_status {
 #define to_wm831x_status(led_cdev) \
 	container_of(led_cdev, struct wm831x_status, cdev)
 
-static void wm831x_status_set(struct wm831x_status *led)
+static void wm831x_status_work(struct work_struct *work)
 {
+	struct wm831x_status *led = container_of(work, struct wm831x_status,
+						 work);
 	unsigned long flags;
 
 	mutex_lock(&led->mutex);
@@ -67,8 +71,8 @@ static void wm831x_status_set(struct wm831x_status *led)
 	mutex_unlock(&led->mutex);
 }
 
-static int wm831x_status_brightness_set(struct led_classdev *led_cdev,
-					 enum led_brightness value)
+static void wm831x_status_set(struct led_classdev *led_cdev,
+			   enum led_brightness value)
 {
 	struct wm831x_status *led = to_wm831x_status(led_cdev);
 	unsigned long flags;
@@ -77,10 +81,8 @@ static int wm831x_status_brightness_set(struct led_classdev *led_cdev,
 	led->brightness = value;
 	if (value == LED_OFF)
 		led->blink = 0;
+	schedule_work(&led->work);
 	spin_unlock_irqrestore(&led->value_lock, flags);
-	wm831x_status_set(led);
-
-	return 0;
 }
 
 static int wm831x_status_blink_set(struct led_classdev *led_cdev,
@@ -146,13 +148,16 @@ static int wm831x_status_blink_set(struct led_classdev *led_cdev,
 	else
 		led->blink = 0;
 
+	/* Always update; if we fail turn off blinking since we expect
+	 * a software fallback. */
+	schedule_work(&led->work);
+
 	spin_unlock_irqrestore(&led->value_lock, flags);
-	wm831x_status_set(led);
 
 	return ret;
 }
 
-static const char * const led_src_texts[] = {
+static const char *led_src_texts[] = {
 	"otp",
 	"power",
 	"charger",
@@ -202,9 +207,11 @@ static ssize_t wm831x_status_src_store(struct device *dev,
 	for (i = 0; i < ARRAY_SIZE(led_src_texts); i++) {
 		if (!strcmp(name, led_src_texts[i])) {
 			mutex_lock(&led->mutex);
+
 			led->src = i;
+			schedule_work(&led->work);
+
 			mutex_unlock(&led->mutex);
-			wm831x_status_set(led);
 		}
 	}
 
@@ -212,12 +219,6 @@ static ssize_t wm831x_status_src_store(struct device *dev,
 }
 
 static DEVICE_ATTR(src, 0644, wm831x_status_src_show, wm831x_status_src_store);
-
-static struct attribute *wm831x_status_attrs[] = {
-	&dev_attr_src.attr,
-	NULL
-};
-ATTRIBUTE_GROUPS(wm831x_status);
 
 static int wm831x_status_probe(struct platform_device *pdev)
 {
@@ -229,22 +230,24 @@ static int wm831x_status_probe(struct platform_device *pdev)
 	int id = pdev->id % ARRAY_SIZE(chip_pdata->status);
 	int ret;
 
-	res = platform_get_resource(pdev, IORESOURCE_REG, 0);
+	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
 	if (res == NULL) {
-		dev_err(&pdev->dev, "No register resource\n");
-		return -EINVAL;
+		dev_err(&pdev->dev, "No I/O resource\n");
+		ret = -EINVAL;
+		goto err;
 	}
 
 	drvdata = devm_kzalloc(&pdev->dev, sizeof(struct wm831x_status),
 			       GFP_KERNEL);
 	if (!drvdata)
 		return -ENOMEM;
+	dev_set_drvdata(&pdev->dev, drvdata);
 
 	drvdata->wm831x = wm831x;
 	drvdata->reg = res->start;
 
-	if (dev_get_platdata(wm831x->dev))
-		chip_pdata = dev_get_platdata(wm831x->dev);
+	if (wm831x->dev->platform_data)
+		chip_pdata = wm831x->dev->platform_data;
 	else
 		chip_pdata = NULL;
 
@@ -255,6 +258,7 @@ static int wm831x_status_probe(struct platform_device *pdev)
 		pdata.name = dev_name(&pdev->dev);
 
 	mutex_init(&drvdata->mutex);
+	INIT_WORK(&drvdata->work, wm831x_status_work);
 	spin_lock_init(&drvdata->value_lock);
 
 	/* We cache the configuration register and read startup values
@@ -279,15 +283,34 @@ static int wm831x_status_probe(struct platform_device *pdev)
 
 	drvdata->cdev.name = pdata.name;
 	drvdata->cdev.default_trigger = pdata.default_trigger;
-	drvdata->cdev.brightness_set_blocking = wm831x_status_brightness_set;
+	drvdata->cdev.brightness_set = wm831x_status_set;
 	drvdata->cdev.blink_set = wm831x_status_blink_set;
-	drvdata->cdev.groups = wm831x_status_groups;
 
-	ret = devm_led_classdev_register(wm831x->dev, &drvdata->cdev);
+	ret = led_classdev_register(wm831x->dev, &drvdata->cdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to register LED: %d\n", ret);
-		return ret;
+		goto err_led;
 	}
+
+	ret = device_create_file(drvdata->cdev.dev, &dev_attr_src);
+	if (ret != 0)
+		dev_err(&pdev->dev,
+			"No source control for LED: %d\n", ret);
+
+	return 0;
+
+err_led:
+	led_classdev_unregister(&drvdata->cdev);
+err:
+	return ret;
+}
+
+static int wm831x_status_remove(struct platform_device *pdev)
+{
+	struct wm831x_status *drvdata = platform_get_drvdata(pdev);
+
+	device_remove_file(drvdata->cdev.dev, &dev_attr_src);
+	led_classdev_unregister(&drvdata->cdev);
 
 	return 0;
 }
@@ -295,8 +318,10 @@ static int wm831x_status_probe(struct platform_device *pdev)
 static struct platform_driver wm831x_status_driver = {
 	.driver = {
 		   .name = "wm831x-status",
+		   .owner = THIS_MODULE,
 		   },
 	.probe = wm831x_status_probe,
+	.remove = wm831x_status_remove,
 };
 
 module_platform_driver(wm831x_status_driver);

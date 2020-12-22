@@ -8,7 +8,7 @@
  */
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/stat.h>
@@ -107,7 +107,7 @@ static int __init create_setup_data_nodes(struct dentry *parent)
 {
 	struct setup_data_node *node;
 	struct setup_data *data;
-	int error;
+	int error = -ENOMEM;
 	struct dentry *d;
 	struct page *pg;
 	u64 pa_data;
@@ -121,10 +121,8 @@ static int __init create_setup_data_nodes(struct dentry *parent)
 
 	while (pa_data) {
 		node = kmalloc(sizeof(*node), GFP_KERNEL);
-		if (!node) {
-			error = -ENOMEM;
+		if (!node)
 			goto err_dir;
-		}
 
 		pg = pfn_to_page((pa_data+sizeof(*data)-1) >> PAGE_SHIFT);
 		if (PageHighMem(pg)) {

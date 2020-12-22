@@ -143,8 +143,7 @@ static const struct file_operations wireless_seq_fops = {
 int __net_init wext_proc_init(struct net *net)
 {
 	/* Create /proc/net/wireless entry */
-	if (!proc_create("wireless", S_IRUGO, net->proc_net,
-			 &wireless_seq_fops))
+	if (!proc_net_fops_create(net, "wireless", S_IRUGO, &wireless_seq_fops))
 		return -ENOMEM;
 
 	return 0;
@@ -152,5 +151,5 @@ int __net_init wext_proc_init(struct net *net)
 
 void __net_exit wext_proc_exit(struct net *net)
 {
-	remove_proc_entry("wireless", net->proc_net);
+	proc_net_remove(net, "wireless");
 }

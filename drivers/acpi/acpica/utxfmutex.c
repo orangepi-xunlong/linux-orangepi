@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -58,8 +58,8 @@ acpi_ut_get_mutex_object(acpi_handle handle,
  *
  * FUNCTION:    acpi_ut_get_mutex_object
  *
- * PARAMETERS:  handle              - Mutex or prefix handle (optional)
- *              pathname            - Mutex pathname (optional)
+ * PARAMETERS:  Handle              - Mutex or prefix handle (optional)
+ *              Pathname            - Mutex pathname (optional)
  *              ret_obj             - Where the mutex object is returned
  *
  * RETURN:      Status
@@ -89,9 +89,9 @@ acpi_ut_get_mutex_object(acpi_handle handle,
 
 	mutex_node = handle;
 	if (pathname != NULL) {
-		status =
-		    acpi_get_handle(handle, pathname,
-				    ACPI_CAST_PTR(acpi_handle, &mutex_node));
+		status = acpi_get_handle(handle, pathname,
+					 ACPI_CAST_PTR(acpi_handle,
+						       &mutex_node));
 		if (ACPI_FAILURE(status)) {
 			return (status);
 		}
@@ -118,9 +118,9 @@ acpi_ut_get_mutex_object(acpi_handle handle,
  *
  * FUNCTION:    acpi_acquire_mutex
  *
- * PARAMETERS:  handle              - Mutex or prefix handle (optional)
- *              pathname            - Mutex pathname (optional)
- *              timeout             - Max time to wait for the lock (millisec)
+ * PARAMETERS:  Handle              - Mutex or prefix handle (optional)
+ *              Pathname            - Mutex pathname (optional)
+ *              Timeout             - Max time to wait for the lock (millisec)
  *
  * RETURN:      Status
  *
@@ -155,8 +155,8 @@ acpi_acquire_mutex(acpi_handle handle, acpi_string pathname, u16 timeout)
  *
  * FUNCTION:    acpi_release_mutex
  *
- * PARAMETERS:  handle              - Mutex or prefix handle (optional)
- *              pathname            - Mutex pathname (optional)
+ * PARAMETERS:  Handle              - Mutex or prefix handle (optional)
+ *              Pathname            - Mutex pathname (optional)
  *
  * RETURN:      Status
  *

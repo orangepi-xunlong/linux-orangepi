@@ -4,7 +4,6 @@
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
-#include <linux/of_irq.h>
 
 #include <asm/pmac_feature.h>
 #include <asm/pmac_pfunc.h>
@@ -26,7 +25,7 @@ static irqreturn_t macio_gpio_irq(int irq, void *data)
 static int macio_do_gpio_irq_enable(struct pmf_function *func)
 {
 	unsigned int irq = irq_of_parse_and_map(func->node, 0);
-	if (!irq)
+	if (irq == NO_IRQ)
 		return -EINVAL;
 	return request_irq(irq, macio_gpio_irq, 0, func->node->name, func);
 }
@@ -34,7 +33,7 @@ static int macio_do_gpio_irq_enable(struct pmf_function *func)
 static int macio_do_gpio_irq_disable(struct pmf_function *func)
 {
 	unsigned int irq = irq_of_parse_and_map(func->node, 0);
-	if (!irq)
+	if (irq == NO_IRQ)
 		return -EINVAL;
 	free_irq(irq, func);
 	return 0;

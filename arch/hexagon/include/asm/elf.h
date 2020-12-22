@@ -1,7 +1,7 @@
 /*
  * ELF definitions for the Hexagon architecture
  *
- * Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -104,16 +104,6 @@ typedef unsigned long elf_fpregset_t;
  * Bypass the whole "regsets" thing for now and use the define.
  */
 
-#if CONFIG_HEXAGON_ARCH_VERSION >= 4
-#define CS_COPYREGS(DEST,REGS) \
-do {\
-	DEST.cs0 = REGS->cs0;\
-	DEST.cs1 = REGS->cs1;\
-} while (0)
-#else
-#define CS_COPYREGS(DEST,REGS)
-#endif
-
 #define ELF_CORE_COPY_REGS(DEST, REGS)	\
 do {					\
 	DEST.r0 = REGS->r00;		\
@@ -158,11 +148,12 @@ do {					\
 	DEST.p3_0 = REGS->preds;	\
 	DEST.gp = REGS->gp;		\
 	DEST.ugp = REGS->ugp;		\
-	CS_COPYREGS(DEST,REGS);		\
-	DEST.pc = pt_elr(REGS);		\
+	DEST.pc = pt_elr(REGS);	\
 	DEST.cause = pt_cause(REGS);	\
 	DEST.badva = pt_badva(REGS);	\
 } while (0);
+
+
 
 /*
  * This is used to ensure we don't load something for the wrong architecture.
@@ -177,15 +168,15 @@ do {					\
 #define ELF_DATA	ELFDATA2LSB
 #define ELF_ARCH	EM_HEXAGON
 
-#if CONFIG_HEXAGON_ARCH_VERSION == 2
+#ifdef CONFIG_HEXAGON_ARCH_V2
 #define ELF_CORE_EFLAGS 0x1
 #endif
 
-#if CONFIG_HEXAGON_ARCH_VERSION == 3
+#ifdef CONFIG_HEXAGON_ARCH_V3
 #define ELF_CORE_EFLAGS 0x2
 #endif
 
-#if CONFIG_HEXAGON_ARCH_VERSION == 4
+#ifdef CONFIG_HEXAGON_ARCH_V4
 #define ELF_CORE_EFLAGS 0x3
 #endif
 
@@ -202,7 +193,7 @@ do {					\
 #define CORE_DUMP_USE_REGSET
 
 /* Hrm is this going to cause problems for changing PAGE_SIZE?  */
-#define ELF_EXEC_PAGESIZE	PAGE_SIZE
+#define ELF_EXEC_PAGESIZE	4096
 
 /*
  * This is the location that an ET_DYN program is loaded if exec'ed.  Typical
@@ -224,6 +215,10 @@ do {					\
  * intent than poking at uname or /proc/cpuinfo.
  */
 #define ELF_PLATFORM  (NULL)
+
+#ifdef __KERNEL__
+#define SET_PERSONALITY(ex) set_personality(PER_LINUX)
+#endif
 
 #define ARCH_HAS_SETUP_ADDITIONAL_PAGES 1
 struct linux_binprm;

@@ -21,11 +21,32 @@
 #include <linux/swap.h>
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
+#include "time.h"
 #include "kmem.h"
 #include "xfs_message.h"
 
+/*
+ * Greedy allocation.  May fail and may return vmalloced memory.
+ *
+ * Must be freed using kmem_free_large.
+ */
 void *
-kmem_alloc(size_t size, xfs_km_flags_t flags)
+kmem_zalloc_greedy(size_t *size, size_t minsize, size_t maxsize)
+{
+	void		*ptr;
+	size_t		kmsize = maxsize;
+
+	while (!(ptr = kmem_zalloc_large(kmsize))) {
+		if ((kmsize >>= 1) <= minsize)
+			kmsize = minsize;
+	}
+	if (ptr)
+		*size = kmsize;
+	return ptr;
+}
+
+void *
+kmem_alloc(size_t size, unsigned int __nocast flags)
 {
 	int	retries = 0;
 	gfp_t	lflags = kmem_flags_convert(flags);
@@ -37,65 +58,51 @@ kmem_alloc(size_t size, xfs_km_flags_t flags)
 			return ptr;
 		if (!(++retries % 100))
 			xfs_err(NULL,
-	"%s(%u) possible memory allocation deadlock size %u in %s (mode:0x%x)",
-				current->comm, current->pid,
-				(unsigned int)size, __func__, lflags);
+		"possible memory allocation deadlock in %s (mode:0x%x)",
+					__func__, lflags);
 		congestion_wait(BLK_RW_ASYNC, HZ/50);
 	} while (1);
 }
 
 void *
-kmem_zalloc_large(size_t size, xfs_km_flags_t flags)
+kmem_zalloc(size_t size, unsigned int __nocast flags)
 {
-	unsigned noio_flag = 0;
 	void	*ptr;
-	gfp_t	lflags;
 
-	ptr = kmem_zalloc(size, flags | KM_MAYFAIL);
+	ptr = kmem_alloc(size, flags);
 	if (ptr)
-		return ptr;
-
-	/*
-	 * __vmalloc() will allocate data pages and auxillary structures (e.g.
-	 * pagetables) with GFP_KERNEL, yet we may be under GFP_NOFS context
-	 * here. Hence we need to tell memory reclaim that we are in such a
-	 * context via PF_MEMALLOC_NOIO to prevent memory reclaim re-entering
-	 * the filesystem here and potentially deadlocking.
-	 */
-	if ((current->flags & PF_FSTRANS) || (flags & KM_NOFS))
-		noio_flag = memalloc_noio_save();
-
-	lflags = kmem_flags_convert(flags);
-	ptr = __vmalloc(size, lflags | __GFP_HIGHMEM | __GFP_ZERO, PAGE_KERNEL);
-
-	if ((current->flags & PF_FSTRANS) || (flags & KM_NOFS))
-		memalloc_noio_restore(noio_flag);
-
+		memset((char *)ptr, 0, (int)size);
 	return ptr;
 }
 
-void *
-kmem_realloc(const void *old, size_t newsize, xfs_km_flags_t flags)
+void
+kmem_free(const void *ptr)
 {
-	int	retries = 0;
-	gfp_t	lflags = kmem_flags_convert(flags);
-	void	*ptr;
-
-	do {
-		ptr = krealloc(old, newsize, lflags);
-		if (ptr || (flags & (KM_MAYFAIL|KM_NOSLEEP)))
-			return ptr;
-		if (!(++retries % 100))
-			xfs_err(NULL,
-	"%s(%u) possible memory allocation deadlock size %zu in %s (mode:0x%x)",
-				current->comm, current->pid,
-				newsize, __func__, lflags);
-		congestion_wait(BLK_RW_ASYNC, HZ/50);
-	} while (1);
+	if (!is_vmalloc_addr(ptr)) {
+		kfree(ptr);
+	} else {
+		vfree(ptr);
+	}
 }
 
 void *
-kmem_zone_alloc(kmem_zone_t *zone, xfs_km_flags_t flags)
+kmem_realloc(const void *ptr, size_t newsize, size_t oldsize,
+	     unsigned int __nocast flags)
+{
+	void	*new;
+
+	new = kmem_alloc(newsize, flags);
+	if (ptr) {
+		if (new)
+			memcpy(new, ptr,
+				((oldsize < newsize) ? oldsize : newsize));
+		kmem_free(ptr);
+	}
+	return new;
+}
+
+void *
+kmem_zone_alloc(kmem_zone_t *zone, unsigned int __nocast flags)
 {
 	int	retries = 0;
 	gfp_t	lflags = kmem_flags_convert(flags);
@@ -107,9 +114,19 @@ kmem_zone_alloc(kmem_zone_t *zone, xfs_km_flags_t flags)
 			return ptr;
 		if (!(++retries % 100))
 			xfs_err(NULL,
-		"%s(%u) possible memory allocation deadlock in %s (mode:0x%x)",
-				current->comm, current->pid,
-				__func__, lflags);
+		"possible memory allocation deadlock in %s (mode:0x%x)",
+					__func__, lflags);
 		congestion_wait(BLK_RW_ASYNC, HZ/50);
 	} while (1);
+}
+
+void *
+kmem_zone_zalloc(kmem_zone_t *zone, unsigned int __nocast flags)
+{
+	void	*ptr;
+
+	ptr = kmem_zone_alloc(zone, flags);
+	if (ptr)
+		memset((char *)ptr, 0, kmem_cache_size(zone));
+	return ptr;
 }

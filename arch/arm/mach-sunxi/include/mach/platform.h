@@ -17,6 +17,8 @@
 #ifndef __SUNXI_PLATFORM_H
 #define __SUNXI_PLATFORM_H
 
+#include "hardware.h"
+
 #if defined CONFIG_ARCH_SUN8IW1P1
 #include "sun8i/platform-sun8iw1p1.h"
 #elif defined CONFIG_ARCH_SUN8IW3P1

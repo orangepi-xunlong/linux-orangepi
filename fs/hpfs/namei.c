@@ -81,7 +81,7 @@ static int hpfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	fnode->len = len;
 	memcpy(fnode->name, name, len > 15 ? 15 : len);
 	fnode->up = cpu_to_le32(dir->i_ino);
-	fnode->flags |= FNODE_dir;
+	fnode->dirflag = 1;
 	fnode->btree.n_free_nodes = 7;
 	fnode->btree.n_used_nodes = 1;
 	fnode->btree.first_free = cpu_to_le16(0x14);
@@ -102,8 +102,8 @@ static int hpfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	inc_nlink(dir);
 	insert_inode_hash(result);
 
-	if (!uid_eq(result->i_uid, current_fsuid()) ||
-	    !gid_eq(result->i_gid, current_fsgid()) ||
+	if (result->i_uid != current_fsuid() ||
+	    result->i_gid != current_fsgid() ||
 	    result->i_mode != (mode | S_IFDIR)) {
 		result->i_uid = current_fsuid();
 		result->i_gid = current_fsgid();
@@ -127,7 +127,7 @@ bail:
 	return err;
 }
 
-static int hpfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
+static int hpfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, struct nameidata *nd)
 {
 	const unsigned char *name = dentry->d_name.name;
 	unsigned len = dentry->d_name.len;
@@ -191,8 +191,8 @@ static int hpfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, b
 
 	insert_inode_hash(result);
 
-	if (!uid_eq(result->i_uid, current_fsuid()) ||
-	    !gid_eq(result->i_gid, current_fsgid()) ||
+	if (result->i_uid != current_fsuid() ||
+	    result->i_gid != current_fsgid() ||
 	    result->i_mode != (mode | S_IFREG)) {
 		result->i_uid = current_fsuid();
 		result->i_gid = current_fsgid();
@@ -227,6 +227,8 @@ static int hpfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, de
 	int err;
 	if ((err = hpfs_chk_name(name, &len))) return err==-ENOENT ? -EINVAL : err;
 	if (hpfs_sb(dir->i_sb)->sb_eas < 2) return -EPERM;
+	if (!new_valid_dev(rdev))
+		return -EINVAL;
 	hpfs_lock(dir->i_sb);
 	err = -ENOSPC;
 	fnode = hpfs_alloc_fnode(dir->i_sb, hpfs_i(dir)->i_dno, &fno, &bh);
@@ -332,7 +334,6 @@ static int hpfs_symlink(struct inode *dir, struct dentry *dentry, const char *sy
 	result->i_blocks = 1;
 	set_nlink(result, 1);
 	result->i_size = strlen(symlink);
-	inode_nohighmem(result);
 	result->i_op = &page_symlink_inode_operations;
 	result->i_data.a_ops = &hpfs_symlink_aops;
 
@@ -373,14 +374,15 @@ static int hpfs_unlink(struct inode *dir, struct dentry *dentry)
 	unsigned len = dentry->d_name.len;
 	struct quad_buffer_head qbh;
 	struct hpfs_dirent *de;
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	dnode_secno dno;
 	int r;
+	int rep = 0;
 	int err;
 
 	hpfs_lock(dir->i_sb);
 	hpfs_adjust_length(name, &len);
-
+again:
 	err = -ENOENT;
 	de = map_dirent(dir, hpfs_i(dir)->i_dno, name, len, &dno, &qbh);
 	if (!de)
@@ -400,9 +402,33 @@ static int hpfs_unlink(struct inode *dir, struct dentry *dentry)
 		hpfs_error(dir->i_sb, "there was error when removing dirent");
 		err = -EFSERROR;
 		break;
-	case 2:		/* no space for deleting */
+	case 2:		/* no space for deleting, try to truncate file */
+
 		err = -ENOSPC;
-		break;
+		if (rep++)
+			break;
+
+		dentry_unhash(dentry);
+		if (!d_unhashed(dentry)) {
+			hpfs_unlock(dir->i_sb);
+			return -ENOSPC;
+		}
+		if (generic_permission(inode, MAY_WRITE) ||
+		    !S_ISREG(inode->i_mode) ||
+		    get_write_access(inode)) {
+			d_rehash(dentry);
+		} else {
+			struct iattr newattrs;
+			/*printk("HPFS: truncating file before delete.\n");*/
+			newattrs.ia_size = 0;
+			newattrs.ia_valid = ATTR_SIZE | ATTR_CTIME;
+			err = notify_change(dentry, &newattrs);
+			put_write_access(inode);
+			if (!err)
+				goto again;
+		}
+		hpfs_unlock(dir->i_sb);
+		return -ENOSPC;
 	default:
 		drop_nlink(inode);
 		err = 0;
@@ -424,7 +450,7 @@ static int hpfs_rmdir(struct inode *dir, struct dentry *dentry)
 	unsigned len = dentry->d_name.len;
 	struct quad_buffer_head qbh;
 	struct hpfs_dirent *de;
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	dnode_secno dno;
 	int n_items = 0;
 	int err;
@@ -476,7 +502,7 @@ out:
 
 static int hpfs_symlink_readpage(struct file *file, struct page *page)
 {
-	char *link = page_address(page);
+	char *link = kmap(page);
 	struct inode *i = page->mapping->host;
 	struct fnode *fnode;
 	struct buffer_head *bh;
@@ -492,12 +518,14 @@ static int hpfs_symlink_readpage(struct file *file, struct page *page)
 		goto fail;
 	hpfs_unlock(i->i_sb);
 	SetPageUptodate(page);
+	kunmap(page);
 	unlock_page(page);
 	return 0;
 
 fail:
 	hpfs_unlock(i->i_sb);
 	SetPageError(page);
+	kunmap(page);
 	unlock_page(page);
 	return err;
 }
@@ -507,15 +535,14 @@ const struct address_space_operations hpfs_symlink_aops = {
 };
 	
 static int hpfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-		       struct inode *new_dir, struct dentry *new_dentry,
-		       unsigned int flags)
+		struct inode *new_dir, struct dentry *new_dentry)
 {
 	const unsigned char *old_name = old_dentry->d_name.name;
 	unsigned old_len = old_dentry->d_name.len;
 	const unsigned char *new_name = new_dentry->d_name.name;
 	unsigned new_len = new_dentry->d_name.len;
-	struct inode *i = d_inode(old_dentry);
-	struct inode *new_inode = d_inode(new_dentry);
+	struct inode *i = old_dentry->d_inode;
+	struct inode *new_inode = new_dentry->d_inode;
 	struct quad_buffer_head qbh, qbh1;
 	struct hpfs_dirent *dep, *nde;
 	struct hpfs_dirent de;
@@ -524,9 +551,6 @@ static int hpfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	struct buffer_head *bh;
 	struct fnode *fnode;
 	int err;
-
-	if (flags & ~RENAME_NOREPLACE)
-		return -EINVAL;
 
 	if ((err = hpfs_chk_name(new_name, &new_len))) return err;
 	err = 0;

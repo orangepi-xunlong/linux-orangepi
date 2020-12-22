@@ -13,10 +13,10 @@
  *
  */
 
-#ifndef __SUNXI_UDC_DMA_H__
-#define __SUNXI_UDC_DMA_H__
+#ifndef  __SUNXI_UDC_DMA_H__
+#define  __SUNXI_UDC_DMA_H__
 
-#ifdef SW_UDC_DMA
+#ifdef  SW_UDC_DMA
 #define  is_udc_support_dma()		1
 #else
 #define  is_udc_support_dma()		0
@@ -24,20 +24,22 @@
 
 /* dma channel total */
 #define DMA_CHAN_TOTAL			(8)
-typedef int *dm_hdl_t;
+typedef void * dm_hdl_t;
 
 /* define dma channel struct */
 typedef struct {
-	u32		used;		/* 1 used, 0 unuse */
+	u32		used;     	/* 1 used, 0 unuse */
 	u32		channel_num;
 	u32		ep_num;		/* the ep's index in sunxi_udc.ep[] */
-	void __iomem    *reg_base;	/* regs base addr */
-	spinlock_t	lock;		/* dma channel lock */
-} dma_channel_t;
+	u32		reg_base;	/* regs base addr */
+	spinlock_t 	lock;		/* dma channel lock */
+}dma_channel_t;
 
 extern dma_channel_t dma_chnl[DMA_CHAN_TOTAL];
 
-/* dma config information */
+/*
+ * dma config information
+ */
 struct dma_config_t {
 	spinlock_t	lock;		/* dma channel lock */
 	u32		dma_num;
@@ -51,8 +53,6 @@ struct dma_config_t {
 	u32		dma_residual_bc;
 };
 
-extern int g_dma_debug;
-
 void sunxi_udc_switch_bus_to_dma(struct sunxi_udc_ep *ep, u32 is_tx);
 void sunxi_udc_switch_bus_to_pio(struct sunxi_udc_ep *ep, __u32 is_tx);
 
@@ -61,19 +61,15 @@ void sunxi_udc_disable_dma_channel_irq(struct sunxi_udc_ep *ep);
 void sunxi_dma_set_config(dm_hdl_t dma_hdl, struct dma_config_t *pcfg);
 dm_hdl_t sunxi_udc_dma_request(void);
 int sunxi_udc_dma_release(dm_hdl_t dma_hdl);
-int sunxi_udc_dma_chan_disable(dm_hdl_t dma_hdl);
-void sunxi_udc_dma_set_config(struct sunxi_udc_ep *ep,
-		struct sunxi_udc_request *req, __u32 buff_addr, __u32 len);
-void sunxi_udc_dma_start(struct sunxi_udc_ep *ep,
-		void __iomem  *fifo, __u32 buffer, __u32 len);
+void sunxi_udc_dma_set_config(struct sunxi_udc_ep *ep, struct sunxi_udc_request *req, __u32 buff_addr, __u32 len);
+void sunxi_udc_dma_start(struct sunxi_udc_ep *ep, __u32 fifo, __u32 buffer, __u32 len);
 void sunxi_udc_dma_stop(struct sunxi_udc_ep *ep);
-__u32 sunxi_udc_dma_transmit_length(struct sunxi_udc_ep *ep);
+__u32 sunxi_udc_dma_transmit_length(struct sunxi_udc_ep *ep, __u32 is_in, __u32 buffer_addr);
 __u32 sunxi_udc_dma_is_busy(struct sunxi_udc_ep *ep);
-void sunxi_udc_dma_completion(struct sunxi_udc *dev,
-		struct sunxi_udc_ep *ep, struct sunxi_udc_request *req);
+void sunxi_udc_dma_completion(struct sunxi_udc *dev, struct sunxi_udc_ep *ep, struct sunxi_udc_request *req);
 
 __s32 sunxi_udc_dma_probe(struct sunxi_udc *dev);
 __s32 sunxi_udc_dma_remove(struct sunxi_udc *dev);
 
-#endif /* __SUNXI_UDC_DMA_H__ */
+#endif   //__SUNXI_UDC_DMA_H__
 

@@ -24,8 +24,8 @@
 #include <asm/io.h>
 #include <asm/sizes.h>
 
-#include <mach/mux.h>
-#include <mach/tc.h>
+#include <plat/mux.h>
+#include <plat/tc.h>
 
 
 /* NOTE:  don't expect this to support many I/O cards.  The 16xx chips have
@@ -220,7 +220,9 @@ static int __init omap_cf_probe(struct platform_device *pdev)
 	cf = kzalloc(sizeof *cf, GFP_KERNEL);
 	if (!cf)
 		return -ENOMEM;
-	setup_timer(&cf->timer, omap_cf_timer, (unsigned long)cf);
+	init_timer(&cf->timer);
+	cf->timer.function = omap_cf_timer;
+	cf->timer.data = (unsigned long) cf;
 
 	cf->pdev = pdev;
 	platform_set_drvdata(pdev, cf);
@@ -332,6 +334,7 @@ static int __exit omap_cf_remove(struct platform_device *pdev)
 static struct platform_driver omap_cf_driver = {
 	.driver = {
 		.name	= (char *) driver_name,
+		.owner	= THIS_MODULE,
 	},
 	.remove		= __exit_p(omap_cf_remove),
 };

@@ -1,30 +1,9 @@
 /*
  * Linux cfg80211 driver - Dongle Host Driver (DHD) related
  *
- * Copyright (C) 1999-2017, Broadcom Corporation
+ * $Copyright Open Broadcom Corporation$
  *
- *      Unless you and Broadcom execute a separate written software license
- * agreement governing use of this software, this software is licensed to you
- * under the terms of the GNU General Public License version 2 (the "GPL"),
- * available at http://www.broadcom.com/licenses/GPLv2.php, with the
- * following added to such license:
- *
- *      As a special exception, the copyright holders of this software give you
- * permission to link this software with independent modules, and to copy and
- * distribute the resulting executable under terms of your choice, provided that
- * you also meet, for each linked independent module, the terms and conditions of
- * the license of that module.  An independent module is a module which is not
- * derived from this software.  The special exception does not apply to any
- * modifications of the software.
- *
- *      Notwithstanding the above, under no circumstances may you combine this
- * software in any way with any other Broadcom software provided under a license
- * other than the GPL, without Broadcom's express prior written consent.
- *
- *
- * <<Broadcom-WL-IPTag/Open:>>
- *
- * $Id: wl_cfg_btcoex.c 699163 2017-05-12 05:18:23Z $
+ * $Id: wl_cfg_btcoex.c 467328 2014-04-03 01:23:40Z $
  */
 
 #include <net/rtnetlink.h>
@@ -94,7 +73,7 @@ dev_wlc_intvar_get_reg(struct net_device *dev, char *name,
 
 	bcm_mkiovar(name, (char *)(&reg), sizeof(reg),
 		(char *)(&var), sizeof(var.buf));
-	error = wldev_ioctl_get(dev, WLC_GET_VAR, (char *)(&var), sizeof(var.buf));
+	error = wldev_ioctl(dev, WLC_GET_VAR, (char *)(&var), sizeof(var.buf), false);
 
 	*retval = dtoh32(var.val);
 	return (error);
@@ -103,11 +82,15 @@ dev_wlc_intvar_get_reg(struct net_device *dev, char *name,
 static int
 dev_wlc_bufvar_set(struct net_device *dev, char *name, char *buf, int len)
 {
-	char ioctlbuf_local[WLC_IOCTL_SMLEN];
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 31)
+	char ioctlbuf_local[1024];
+#else
+	static char ioctlbuf_local[1024];
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 31) */
 
 	bcm_mkiovar(name, buf, len, ioctlbuf_local, sizeof(ioctlbuf_local));
 
-	return (wldev_ioctl_set(dev, WLC_SET_VAR, ioctlbuf_local, sizeof(ioctlbuf_local)));
+	return (wldev_ioctl(dev, WLC_SET_VAR, ioctlbuf_local, sizeof(ioctlbuf_local), true));
 }
 /*
 get named driver variable to uint register value and return error indication
@@ -294,19 +277,9 @@ wl_cfg80211_bt_setflag(struct net_device *dev, bool set)
 #endif
 }
 
-static void wl_cfg80211_bt_timerfunc(
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-	struct timer_list *t
-#else
-	unsigned long data
-#endif
-)
+static void wl_cfg80211_bt_timerfunc(ulong data)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-	struct btcoex_info *bt_local = from_timer(bt_local, t, timer);
-#else
 	struct btcoex_info *bt_local = (struct btcoex_info *)data;
-#endif
 	WL_TRACE(("Enter\n"));
 	bt_local->timer_on = 0;
 	schedule_work(&bt_local->work);
@@ -316,14 +289,7 @@ static void wl_cfg80211_bt_handler(struct work_struct *work)
 {
 	struct btcoex_info *btcx_inf;
 
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif
 	btcx_inf = container_of(work, struct btcoex_info, work);
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
 
 	if (btcx_inf->timer_on) {
 		btcx_inf->timer_on = 0;
@@ -403,13 +369,9 @@ void* wl_cfg80211_btcoex_init(struct net_device *ndev)
 	btco_inf->ts_dhcp_ok = 0;
 	/* Set up timer for BT  */
 	btco_inf->timer_ms = 10;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-	timer_setup(&btco_inf->timer, wl_cfg80211_bt_timerfunc, 0);
-#else
 	init_timer(&btco_inf->timer);
 	btco_inf->timer.data = (ulong)btco_inf;
 	btco_inf->timer.function = wl_cfg80211_bt_timerfunc;
-#endif
 
 	btco_inf->dev = ndev;
 
@@ -457,24 +419,19 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 	if (strnicmp((char *)&powermode_val, "1", strlen("1")) == 0) {
 		WL_TRACE_HW4(("DHCP session starts\n"));
 
+#if defined(DHCP_SCAN_SUPPRESS)
+		/* Suppress scan during the DHCP */
+		wl_cfg80211_scan_suppress(dev, 1);
+#endif /* OEM_ANDROID */
 
 #ifdef PKT_FILTER_SUPPORT
 		dhd->dhcp_in_progress = 1;
 
-#if defined(WL_VIRTUAL_APSTA) && defined(APSTA_BLOCK_ARP_DURING_DHCP)
-		if ((dhd->op_mode & DHD_FLAG_CONCURR_STA_HOSTAP_MODE) ==
-			DHD_FLAG_CONCURR_STA_HOSTAP_MODE) {
-			/* Block ARP frames while DHCP of STA interface is in
-			 * progress in case of STA/SoftAP concurrent mode
-			 */
-			wl_cfg80211_block_arp(dev, TRUE);
-		} else
-#endif /* WL_VIRTUAL_APSTA && APSTA_BLOCK_ARP_DURING_DHCP */
 		if (dhd->early_suspended) {
 			WL_TRACE_HW4(("DHCP in progressing , disable packet filter!!!\n"));
 			dhd_enable_packet_filter(0, dhd);
 		}
-#endif /* PKT_FILTER_SUPPORT */
+#endif
 
 		/* Retrieve and saved orig regs value */
 		if ((saved_status == FALSE) &&
@@ -517,20 +474,17 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 	else if (strnicmp((char *)&powermode_val, "2", strlen("2")) == 0) {
 
 
+#if defined(DHCP_SCAN_SUPPRESS)
+		/* Since DHCP is complete, enable the scan back */
+		wl_cfg80211_scan_suppress(dev, 0);
+#endif /* OEM_ANDROID */
 
 #ifdef PKT_FILTER_SUPPORT
 		dhd->dhcp_in_progress = 0;
 		WL_TRACE_HW4(("DHCP is complete \n"));
 
-#if defined(WL_VIRTUAL_APSTA) && defined(APSTA_BLOCK_ARP_DURING_DHCP)
-		if ((dhd->op_mode & DHD_FLAG_CONCURR_STA_HOSTAP_MODE) ==
-			DHD_FLAG_CONCURR_STA_HOSTAP_MODE) {
-			/* Unblock ARP frames */
-			wl_cfg80211_block_arp(dev, FALSE);
-		} else
-#endif /* WL_VIRTUAL_APSTA && APSTA_BLOCK_ARP_DURING_DHCP */
+		/* Enable packet filtering */
 		if (dhd->early_suspended) {
-			/* Enable packet filtering */
 			WL_TRACE_HW4(("DHCP is complete , enable packet filter!!!\n"));
 			dhd_enable_packet_filter(1, dhd);
 		}

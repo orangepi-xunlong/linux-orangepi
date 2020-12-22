@@ -60,14 +60,11 @@
 #include <linux/dma-mapping.h>
 #include <linux/device.h>
 #include <linux/clk.h>
-#include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 #include <linux/ata_platform.h>
 #include <linux/mbus.h>
 #include <linux/bitops.h>
 #include <linux/gfp.h>
-#include <linux/of.h>
-#include <linux/of_irq.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_device.h>
@@ -80,8 +77,8 @@
  * module options
  */
 
-#ifdef CONFIG_PCI
 static int msi;
+#ifdef CONFIG_PCI
 module_param(msi, int, S_IRUGO);
 MODULE_PARM_DESC(msi, "Enable use of PCI MSI (0=off, 1=on)");
 #endif
@@ -305,12 +302,6 @@ enum {
 	MV5_LTMODE		= 0x30,
 	MV5_PHY_CTL		= 0x0C,
 	SATA_IFCFG		= 0x050,
-	LP_PHY_CTL		= 0x058,
-	LP_PHY_CTL_PIN_PU_PLL   = (1 << 0),
-	LP_PHY_CTL_PIN_PU_RX    = (1 << 1),
-	LP_PHY_CTL_PIN_PU_TX    = (1 << 2),
-	LP_PHY_CTL_GEN_TX_3G    = (1 << 5),
-	LP_PHY_CTL_GEN_RX_3G    = (1 << 9),
 
 	MV_M2_PREAMP_MASK	= 0x7e0,
 
@@ -438,7 +429,6 @@ enum {
 	MV_HP_CUT_THROUGH	= (1 << 10),	/* can use EDMA cut-through */
 	MV_HP_FLAG_SOC		= (1 << 11),	/* SystemOnChip, no PCI */
 	MV_HP_QUIRK_LED_BLINK_EN = (1 << 12),	/* is led blinking enabled? */
-	MV_HP_FIX_LP_PHY_CTL	= (1 << 13),	/* fix speed in LP_PHY_CTL ? */
 
 	/* Port private flags (pp_flags) */
 	MV_PP_FLAG_EDMA_EN	= (1 << 0),	/* is EDMA engine enabled? */
@@ -561,21 +551,9 @@ struct mv_host_priv {
 	u32			irq_mask_offset;
 	u32			unmask_all_irqs;
 
-	/*
-	 * Needed on some devices that require their clocks to be enabled.
-	 * These are optional: if the platform device does not have any
-	 * clocks, they won't be used.  Also, if the underlying hardware
-	 * does not support the common clock framework (CONFIG_HAVE_CLK=n),
-	 * all the clock operations become no-ops (see clk.h).
-	 */
+#if defined(CONFIG_HAVE_CLK)
 	struct clk		*clk;
-	struct clk              **port_clks;
-	/*
-	 * Some devices have a SATA PHY which can be enabled/disabled
-	 * in order to save power. These are optional: if the platform
-	 * devices does not have any phy, they won't be used.
-	 */
-	struct phy		**port_phys;
+#endif
 	/*
 	 * These consistent DMA memory pools give us guaranteed
 	 * alignment for hardware-accessed data structures,
@@ -671,13 +649,12 @@ static u8 mv_sff_check_status(struct ata_port *ap);
  * because we have to allow room for worst case splitting of
  * PRDs for 64K boundaries in mv_fill_sg().
  */
-#ifdef CONFIG_PCI
 static struct scsi_host_template mv5_sht = {
 	ATA_BASE_SHT(DRV_NAME),
 	.sg_tablesize		= MV_MAX_SG_CT / 2,
 	.dma_boundary		= MV_DMA_BOUNDARY,
 };
-#endif
+
 static struct scsi_host_template mv6_sht = {
 	ATA_NCQ_SHT(DRV_NAME),
 	.can_queue		= MV_MAX_Q_DEPTH - 1,
@@ -986,7 +963,7 @@ static inline void mv_write_cached_reg(void __iomem *addr, u32 *old, u32 new)
 		 * Looks like a lot of fuss, but it avoids an unnecessary
 		 * +1 usec read-after-write delay for unaffected registers.
 		 */
-		laddr = (unsigned long)addr & 0xffff;
+		laddr = (long)addr & 0xffff;
 		if (laddr >= 0x300 && laddr <= 0x33c) {
 			laddr &= 0x000f;
 			if (laddr == 0x4 || laddr == 0xc) {
@@ -1272,7 +1249,7 @@ static void mv_dump_mem(void __iomem *start, unsigned bytes)
 	}
 }
 #endif
-#if defined(ATA_DEBUG) || defined(CONFIG_PCI)
+
 static void mv_dump_pci_cfg(struct pci_dev *pdev, unsigned bytes)
 {
 #ifdef ATA_DEBUG
@@ -1289,7 +1266,6 @@ static void mv_dump_pci_cfg(struct pci_dev *pdev, unsigned bytes)
 	}
 #endif
 }
-#endif
 static void mv_dump_all_regs(void __iomem *mmio_base, int port,
 			     struct pci_dev *pdev)
 {
@@ -1372,7 +1348,6 @@ static int mv_scr_write(struct ata_link *link, unsigned int sc_reg_in, u32 val)
 
 	if (ofs != 0xffffffffU) {
 		void __iomem *addr = mv_ap_base(link->ap) + ofs;
-		struct mv_host_priv *hpriv = link->ap->host->private_data;
 		if (sc_reg_in == SCR_CONTROL) {
 			/*
 			 * Workaround for 88SX60x1 FEr SATA#26:
@@ -1389,25 +1364,6 @@ static int mv_scr_write(struct ata_link *link, unsigned int sc_reg_in, u32 val)
 			 */
 			if ((val & 0xf) == 1 || (readl(addr) & 0xf) == 1)
 				val |= 0xf000;
-
-			if (hpriv->hp_flags & MV_HP_FIX_LP_PHY_CTL) {
-				void __iomem *lp_phy_addr =
-					mv_ap_base(link->ap) + LP_PHY_CTL;
-				/*
-				 * Set PHY speed according to SControl speed.
-				 */
-				u32 lp_phy_val =
-					LP_PHY_CTL_PIN_PU_PLL |
-					LP_PHY_CTL_PIN_PU_RX  |
-					LP_PHY_CTL_PIN_PU_TX;
-
-				if ((val & 0xf0) != 0x10)
-					lp_phy_val |=
-						LP_PHY_CTL_GEN_TX_3G |
-						LP_PHY_CTL_GEN_RX_3G;
-
-				writelfl(lp_phy_val, lp_phy_addr);
-			}
 		}
 		writelfl(val, addr);
 		return 0;
@@ -1727,13 +1683,15 @@ static int mv_port_start(struct ata_port *ap)
 		return -ENOMEM;
 	ap->private_data = pp;
 
-	pp->crqb = dma_pool_zalloc(hpriv->crqb_pool, GFP_KERNEL, &pp->crqb_dma);
+	pp->crqb = dma_pool_alloc(hpriv->crqb_pool, GFP_KERNEL, &pp->crqb_dma);
 	if (!pp->crqb)
 		return -ENOMEM;
+	memset(pp->crqb, 0, MV_CRQB_Q_SZ);
 
-	pp->crpb = dma_pool_zalloc(hpriv->crpb_pool, GFP_KERNEL, &pp->crpb_dma);
+	pp->crpb = dma_pool_alloc(hpriv->crpb_pool, GFP_KERNEL, &pp->crpb_dma);
 	if (!pp->crpb)
 		goto out_port_free_dma_mem;
+	memset(pp->crpb, 0, MV_CRPB_Q_SZ);
 
 	/* 6041/6081 Rev. "C0" (and newer) are okay with async notify */
 	if (hpriv->hp_flags & MV_HP_ERRATA_60X1C0)
@@ -4067,9 +4025,8 @@ static int mv_platform_probe(struct platform_device *pdev)
 	struct ata_host *host;
 	struct mv_host_priv *hpriv;
 	struct resource *res;
-	int n_ports = 0, irq = 0;
+	int n_ports = 0;
 	int rc;
-	int port;
 
 	ata_print_version_once(&pdev->dev, DRV_VERSION);
 
@@ -4089,85 +4046,30 @@ static int mv_platform_probe(struct platform_device *pdev)
 		return -EINVAL;
 
 	/* allocate host */
-	if (pdev->dev.of_node) {
-		rc = of_property_read_u32(pdev->dev.of_node, "nr-ports",
-					   &n_ports);
-		if (rc) {
-			dev_err(&pdev->dev,
-				"error parsing nr-ports property: %d\n", rc);
-			return rc;
-		}
-
-		if (n_ports <= 0) {
-			dev_err(&pdev->dev, "nr-ports must be positive: %d\n",
-				n_ports);
-			return -EINVAL;
-		}
-
-		irq = irq_of_parse_and_map(pdev->dev.of_node, 0);
-	} else {
-		mv_platform_data = dev_get_platdata(&pdev->dev);
-		n_ports = mv_platform_data->n_ports;
-		irq = platform_get_irq(pdev, 0);
-	}
+	mv_platform_data = pdev->dev.platform_data;
+	n_ports = mv_platform_data->n_ports;
 
 	host = ata_host_alloc_pinfo(&pdev->dev, ppi, n_ports);
 	hpriv = devm_kzalloc(&pdev->dev, sizeof(*hpriv), GFP_KERNEL);
 
 	if (!host || !hpriv)
 		return -ENOMEM;
-	hpriv->port_clks = devm_kzalloc(&pdev->dev,
-					sizeof(struct clk *) * n_ports,
-					GFP_KERNEL);
-	if (!hpriv->port_clks)
-		return -ENOMEM;
-	hpriv->port_phys = devm_kzalloc(&pdev->dev,
-					sizeof(struct phy *) * n_ports,
-					GFP_KERNEL);
-	if (!hpriv->port_phys)
-		return -ENOMEM;
 	host->private_data = hpriv;
+	hpriv->n_ports = n_ports;
 	hpriv->board_idx = chip_soc;
 
 	host->iomap = NULL;
 	hpriv->base = devm_ioremap(&pdev->dev, res->start,
 				   resource_size(res));
-	if (!hpriv->base)
-		return -ENOMEM;
-
 	hpriv->base -= SATAHC0_REG_BASE;
 
+#if defined(CONFIG_HAVE_CLK)
 	hpriv->clk = clk_get(&pdev->dev, NULL);
 	if (IS_ERR(hpriv->clk))
-		dev_notice(&pdev->dev, "cannot get optional clkdev\n");
+		dev_notice(&pdev->dev, "cannot get clkdev\n");
 	else
-		clk_prepare_enable(hpriv->clk);
-
-	for (port = 0; port < n_ports; port++) {
-		char port_number[16];
-		sprintf(port_number, "%d", port);
-		hpriv->port_clks[port] = clk_get(&pdev->dev, port_number);
-		if (!IS_ERR(hpriv->port_clks[port]))
-			clk_prepare_enable(hpriv->port_clks[port]);
-
-		sprintf(port_number, "port%d", port);
-		hpriv->port_phys[port] = devm_phy_optional_get(&pdev->dev,
-							       port_number);
-		if (IS_ERR(hpriv->port_phys[port])) {
-			rc = PTR_ERR(hpriv->port_phys[port]);
-			hpriv->port_phys[port] = NULL;
-			if (rc != -EPROBE_DEFER)
-				dev_warn(&pdev->dev, "error getting phy %d", rc);
-
-			/* Cleanup only the initialized ports */
-			hpriv->n_ports = port;
-			goto err;
-		} else
-			phy_power_on(hpriv->port_phys[port]);
-	}
-
-	/* All the ports have been initialized */
-	hpriv->n_ports = n_ports;
+		clk_enable(hpriv->clk);
+#endif
 
 	/*
 	 * (Re-)program MBUS remapping windows if we are asked to.
@@ -4180,15 +4082,6 @@ static int mv_platform_probe(struct platform_device *pdev)
 	if (rc)
 		goto err;
 
-	/*
-	 * To allow disk hotplug on Armada 370/XP SoCs, the PHY speed must be
-	 * updated in the LP_PHY_CTL register.
-	 */
-	if (pdev->dev.of_node &&
-		of_device_is_compatible(pdev->dev.of_node,
-					"marvell,armada-370-sata"))
-		hpriv->hp_flags |= MV_HP_FIX_LP_PHY_CTL;
-
 	/* initialize adapter */
 	rc = mv_init_host(host);
 	if (rc)
@@ -4197,22 +4090,18 @@ static int mv_platform_probe(struct platform_device *pdev)
 	dev_info(&pdev->dev, "slots %u ports %d\n",
 		 (unsigned)MV_MAX_Q_DEPTH, host->n_ports);
 
-	rc = ata_host_activate(host, irq, mv_interrupt, IRQF_SHARED, &mv6_sht);
+	rc = ata_host_activate(host, platform_get_irq(pdev, 0), mv_interrupt,
+			       IRQF_SHARED, &mv6_sht);
 	if (!rc)
 		return 0;
 
 err:
+#if defined(CONFIG_HAVE_CLK)
 	if (!IS_ERR(hpriv->clk)) {
-		clk_disable_unprepare(hpriv->clk);
+		clk_disable(hpriv->clk);
 		clk_put(hpriv->clk);
 	}
-	for (port = 0; port < hpriv->n_ports; port++) {
-		if (!IS_ERR(hpriv->port_clks[port])) {
-			clk_disable_unprepare(hpriv->port_clks[port]);
-			clk_put(hpriv->port_clks[port]);
-		}
-		phy_power_off(hpriv->port_phys[port]);
-	}
+#endif
 
 	return rc;
 }
@@ -4225,28 +4114,24 @@ err:
  *      A platform bus SATA device has been unplugged. Perform the needed
  *      cleanup. Also called on module unload for any active devices.
  */
-static int mv_platform_remove(struct platform_device *pdev)
+static int __devexit mv_platform_remove(struct platform_device *pdev)
 {
 	struct ata_host *host = platform_get_drvdata(pdev);
+#if defined(CONFIG_HAVE_CLK)
 	struct mv_host_priv *hpriv = host->private_data;
-	int port;
+#endif
 	ata_host_detach(host);
 
+#if defined(CONFIG_HAVE_CLK)
 	if (!IS_ERR(hpriv->clk)) {
-		clk_disable_unprepare(hpriv->clk);
+		clk_disable(hpriv->clk);
 		clk_put(hpriv->clk);
 	}
-	for (port = 0; port < host->n_ports; port++) {
-		if (!IS_ERR(hpriv->port_clks[port])) {
-			clk_disable_unprepare(hpriv->port_clks[port]);
-			clk_put(hpriv->port_clks[port]);
-		}
-		phy_power_off(hpriv->port_phys[port]);
-	}
+#endif
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int mv_platform_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct ata_host *host = platform_get_drvdata(pdev);
@@ -4288,31 +4173,22 @@ static int mv_platform_resume(struct platform_device *pdev)
 #define mv_platform_resume NULL
 #endif
 
-#ifdef CONFIG_OF
-static struct of_device_id mv_sata_dt_ids[] = {
-	{ .compatible = "marvell,armada-370-sata", },
-	{ .compatible = "marvell,orion-sata", },
-	{},
-};
-MODULE_DEVICE_TABLE(of, mv_sata_dt_ids);
-#endif
-
 static struct platform_driver mv_platform_driver = {
-	.probe		= mv_platform_probe,
-	.remove		= mv_platform_remove,
-	.suspend	= mv_platform_suspend,
-	.resume		= mv_platform_resume,
-	.driver		= {
-		.name = DRV_NAME,
-		.of_match_table = of_match_ptr(mv_sata_dt_ids),
-	},
+	.probe			= mv_platform_probe,
+	.remove			= __devexit_p(mv_platform_remove),
+	.suspend		= mv_platform_suspend,
+	.resume			= mv_platform_resume,
+	.driver			= {
+				   .name = DRV_NAME,
+				   .owner = THIS_MODULE,
+				  },
 };
 
 
 #ifdef CONFIG_PCI
 static int mv_pci_init_one(struct pci_dev *pdev,
 			   const struct pci_device_id *ent);
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int mv_pci_device_resume(struct pci_dev *pdev);
 #endif
 
@@ -4322,7 +4198,7 @@ static struct pci_driver mv_pci_driver = {
 	.id_table		= mv_pci_tbl,
 	.probe			= mv_pci_init_one,
 	.remove			= ata_pci_remove_one,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend		= ata_pci_device_suspend,
 	.resume			= mv_pci_device_resume,
 #endif
@@ -4334,10 +4210,10 @@ static int pci_go_64(struct pci_dev *pdev)
 {
 	int rc;
 
-	if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(64))) {
-		rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
+	if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
+		rc = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
 		if (rc) {
-			rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+			rc = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
 			if (rc) {
 				dev_err(&pdev->dev,
 					"64-bit DMA enable failed\n");
@@ -4345,12 +4221,12 @@ static int pci_go_64(struct pci_dev *pdev)
 			}
 		}
 	} else {
-		rc = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+		rc = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
 		if (rc) {
 			dev_err(&pdev->dev, "32-bit DMA enable failed\n");
 			return rc;
 		}
-		rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+		rc = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
 		if (rc) {
 			dev_err(&pdev->dev,
 				"32-bit consistent DMA enable failed\n");
@@ -4480,7 +4356,7 @@ static int mv_pci_init_one(struct pci_dev *pdev,
 				 IS_GEN_I(hpriv) ? &mv5_sht : &mv6_sht);
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int mv_pci_device_resume(struct pci_dev *pdev)
 {
 	struct ata_host *host = pci_get_drvdata(pdev);
@@ -4501,6 +4377,9 @@ static int mv_pci_device_resume(struct pci_dev *pdev)
 }
 #endif
 #endif
+
+static int mv_platform_probe(struct platform_device *pdev);
+static int __devexit mv_platform_remove(struct platform_device *pdev);
 
 static int __init mv_init(void)
 {

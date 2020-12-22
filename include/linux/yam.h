@@ -77,6 +77,6 @@ struct yamdrv_ioctl_cfg {
 
 struct yamdrv_ioctl_mcs {
 	int cmd;
-	unsigned int bitrate;
+	int bitrate;
 	unsigned char bits[YAM_FPGA_SIZE];
 };

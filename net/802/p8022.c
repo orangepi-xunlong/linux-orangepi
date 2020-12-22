@@ -1,5 +1,6 @@
 /*
- *	NET3:	Support for 802.2 demultiplexing off Ethernet
+ *	NET3:	Support for 802.2 demultiplexing off Ethernet (Token ring
+ *		is kept separate see p8022tr.c)
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
  *		as published by the Free Software Foundation; either version

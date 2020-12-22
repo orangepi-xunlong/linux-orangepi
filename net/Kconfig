@@ -5,8 +5,6 @@
 menuconfig NET
 	bool "Networking support"
 	select NLATTR
-	select GENERIC_NET_UTILS
-	select BPF
 	---help---
 	  Unless you really know what you are doing, you should say Y here.
 	  The reason is that some programs need kernel networking support even
@@ -45,12 +43,6 @@ config COMPAT_NETLINK_MESSAGES
 	  Newly written code should NEVER need this option but do
 	  compat-independent messages instead!
 
-config NET_INGRESS
-	bool
-
-config NET_EGRESS
-	bool
-
 menu "Networking options"
 
 source "net/packet/Kconfig"
@@ -60,8 +52,6 @@ source "net/iucv/Kconfig"
 
 config INET
 	bool "TCP/IP networking"
-	select CRYPTO
-	select CRYPTO_AES
 	---help---
 	  These are the protocols used on the Internet and on most local
 	  Ethernets. It is highly recommended to say Y here (this will enlarge
@@ -95,6 +85,14 @@ config ANDROID_PARANOID_NETWORK
 	help
 		none
 
+config NET_ACTIVITY_STATS
+	bool "Network activity statistics tracking"
+	default y
+	help
+	 Network activity statistics are useful for tracking wireless
+	 modem activity on 2G, 3G, 4G wireless networks. Counts number of
+	 transmissions and groups them in specified time buckets.
+
 config NETWORK_SECMARK
 	bool "Security Marking"
 	help
@@ -102,12 +100,9 @@ config NETWORK_SECMARK
 	  to nfmark, but designated for security purposes.
 	  If you are unsure how to answer this question, answer N.
 
-config NET_PTP_CLASSIFY
-	def_bool n
-
 config NETWORK_PHY_TIMESTAMPING
 	bool "Timestamping in PHY devices"
-	select NET_PTP_CLASSIFY
+	depends on EXPERIMENTAL
 	help
 	  This allows timestamping of network packets by PHYs with
 	  hardware timestamping capabilities. This option adds some
@@ -189,11 +184,10 @@ config NETFILTER_ADVANCED
 	  If unsure, say Y.
 
 config BRIDGE_NETFILTER
-	tristate "Bridged IP/ARP packets filtering"
-	depends on BRIDGE
-	depends on NETFILTER && INET
+	bool "Bridged IP/ARP packets filtering"
+	depends on BRIDGE && NETFILTER && INET
 	depends on NETFILTER_ADVANCED
-	default m
+	default y
 	---help---
 	  Enabling this option will let arptables resp. iptables see bridged
 	  ARP resp. IP traffic. If you want a bridging firewall, you probably
@@ -227,101 +221,64 @@ source "net/ipx/Kconfig"
 source "drivers/net/appletalk/Kconfig"
 source "net/x25/Kconfig"
 source "net/lapb/Kconfig"
+source "net/econet/Kconfig"
+source "net/wanrouter/Kconfig"
 source "net/phonet/Kconfig"
-source "net/6lowpan/Kconfig"
 source "net/ieee802154/Kconfig"
-source "net/mac802154/Kconfig"
 source "net/sched/Kconfig"
 source "net/dcb/Kconfig"
 source "net/dns_resolver/Kconfig"
 source "net/batman-adv/Kconfig"
 source "net/openvswitch/Kconfig"
-source "net/vmw_vsock/Kconfig"
-source "net/netlink/Kconfig"
-source "net/mpls/Kconfig"
-source "net/hsr/Kconfig"
-source "net/switchdev/Kconfig"
-source "net/l3mdev/Kconfig"
-source "net/qrtr/Kconfig"
-source "net/ncsi/Kconfig"
 
 config RPS
-	bool
-	depends on SMP && SYSFS
+	boolean "RPS"
+	depends on SMP && SYSFS && USE_GENERIC_SMP_HELPERS
 	default y
 
 config RFS_ACCEL
-	bool
-	depends on RPS
+	boolean
+	depends on RPS && GENERIC_HARDIRQS
 	select CPU_RMAP
 	default y
 
 config XPS
-	bool
-	depends on SMP
+	boolean
+	depends on SMP && SYSFS && USE_GENERIC_SMP_HELPERS
 	default y
 
-config HWBM
-       bool
-
-config CGROUP_NET_PRIO
-	bool "Network priority cgroup"
+config NETPRIO_CGROUP
+	tristate "Network priority cgroup"
 	depends on CGROUPS
-	select SOCK_CGROUP_DATA
 	---help---
 	  Cgroup subsystem for use in assigning processes to network priorities on
-	  a per-interface basis.
-
-config CGROUP_NET_CLASSID
-	bool "Network classid cgroup"
-	depends on CGROUPS
-	select SOCK_CGROUP_DATA
-	---help---
-	  Cgroup subsystem for use as general purpose socket classid marker that is
-	  being used in cls_cgroup and for netfilter matching.
-
-config NET_RX_BUSY_POLL
-	bool
-	default y
+	  a per-interface basis
 
 config BQL
-	bool
+	boolean
 	depends on SYSFS
 	select DQL
 	default y
 
+config HAVE_BPF_JIT
+	bool
+
 config BPF_JIT
 	bool "enable BPF Just In Time compiler"
-	depends on HAVE_CBPF_JIT || HAVE_EBPF_JIT
+	depends on HAVE_BPF_JIT
 	depends on MODULES
-	depends on !CFI
 	---help---
 	  Berkeley Packet Filter filtering capabilities are normally handled
 	  by an interpreter. This option allows kernel to generate a native
 	  code when filter is loaded in memory. This should speedup
-	  packet sniffing (libpcap/tcpdump).
-
-	  Note, admin should enable this feature changing:
-	  /proc/sys/net/core/bpf_jit_enable
-	  /proc/sys/net/core/bpf_jit_harden (optional)
-
-config NET_FLOW_LIMIT
-	bool
-	depends on RPS
-	default y
-	---help---
-	  The network stack has to drop packets when a receive processing CPU's
-	  backlog reaches netdev_max_backlog. If a few out of many active flows
-	  generate the vast majority of load, drop their traffic earlier to
-	  maintain capacity for the other flows. This feature provides servers
-	  with many clients some protection against DoS by a single (spoofed)
-	  flow that greatly exceeds average workload.
+	  packet sniffing (libpcap/tcpdump). Note : Admin should enable
+	  this feature changing /proc/sys/net/core/bpf_jit_enable
 
 menu "Network testing"
 
 config NET_PKTGEN
 	tristate "Packet Generator (USE WITH CAUTION)"
-	depends on INET && PROC_FS
+	depends on PROC_FS
 	---help---
 	  This module will inject preconfigured packets, at a configurable
 	  rate, out of a given interface.  It is used for network interface
@@ -336,7 +293,7 @@ config NET_PKTGEN
 
 config NET_TCPPROBE
 	tristate "TCP connection probing"
-	depends on INET && PROC_FS && KPROBES
+	depends on INET && EXPERIMENTAL && PROC_FS && KPROBES
 	---help---
 	This module allows for capturing the changes to TCP connection
 	state in response to incoming packets. It is used for debugging
@@ -352,8 +309,8 @@ config NET_TCPPROBE
 	module will be called tcp_probe.
 
 config NET_DROP_MONITOR
-	tristate "Network packet drop alerting service"
-	depends on INET && TRACEPOINTS
+	boolean "Network packet drop alerting service"
+	depends on INET && EXPERIMENTAL && TRACEPOINTS
 	---help---
 	This feature provides an alerting service to userspace in the
 	event that packets are discarded in the network stack.  Alerts
@@ -371,8 +328,6 @@ source "net/can/Kconfig"
 source "net/irda/Kconfig"
 source "net/bluetooth/Kconfig"
 source "net/rxrpc/Kconfig"
-source "net/kcm/Kconfig"
-source "net/strparser/Kconfig"
 
 config FIB_RULES
 	bool
@@ -397,44 +352,5 @@ source "net/caif/Kconfig"
 source "net/ceph/Kconfig"
 source "net/nfc/Kconfig"
 
-config LWTUNNEL
-	bool "Network light weight tunnels"
-	---help---
-	  This feature provides an infrastructure to support light weight
-	  tunnels like mpls. There is no netdevice associated with a light
-	  weight tunnel endpoint. Tunnel encapsulation parameters are stored
-	  with light weight tunnel state associated with fib routes.
-
-config DST_CACHE
-	bool
-	default n
-
-config NET_DEVLINK
-	tristate "Network physical/parent device Netlink interface"
-	help
-	  Network physical/parent device Netlink interface provides
-	  infrastructure to support access to physical chip-wide config and
-	  monitoring.
-
-config MAY_USE_DEVLINK
-	tristate
-	default m if NET_DEVLINK=m
-	default y if NET_DEVLINK=y || NET_DEVLINK=n
-	help
-	  Drivers using the devlink infrastructure should have a dependency
-	  on MAY_USE_DEVLINK to ensure they do not cause link errors when
-	  devlink is a loadable module and the driver using it is built-in.
 
 endif   # if NET
-
-# Used by archs to tell that they support BPF JIT compiler plus which flavour.
-# Only one of the two can be selected for a specific arch since eBPF JIT supersedes
-# the cBPF JIT.
-
-# Classic BPF JIT (cBPF)
-config HAVE_CBPF_JIT
-	bool
-
-# Extended BPF JIT (eBPF)
-config HAVE_EBPF_JIT
-	bool

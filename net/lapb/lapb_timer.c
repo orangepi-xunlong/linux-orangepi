@@ -14,8 +14,6 @@
  *	LAPB 002	Jonathan Naylor	New timer architecture.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/socket.h>
@@ -107,17 +105,21 @@ static void lapb_t1timer_expiry(unsigned long param)
 				lapb_clear_queues(lapb);
 				lapb->state = LAPB_STATE_0;
 				lapb_disconnect_indication(lapb, LAPB_TIMEDOUT);
-				lapb_dbg(0, "(%p) S1 -> S0\n", lapb->dev);
+#if LAPB_DEBUG > 0
+				printk(KERN_DEBUG "lapb: (%p) S1 -> S0\n", lapb->dev);
+#endif
 				return;
 			} else {
 				lapb->n2count++;
 				if (lapb->mode & LAPB_EXTENDED) {
-					lapb_dbg(1, "(%p) S1 TX SABME(1)\n",
-						 lapb->dev);
+#if LAPB_DEBUG > 1
+					printk(KERN_DEBUG "lapb: (%p) S1 TX SABME(1)\n", lapb->dev);
+#endif
 					lapb_send_control(lapb, LAPB_SABME, LAPB_POLLON, LAPB_COMMAND);
 				} else {
-					lapb_dbg(1, "(%p) S1 TX SABM(1)\n",
-						 lapb->dev);
+#if LAPB_DEBUG > 1
+					printk(KERN_DEBUG "lapb: (%p) S1 TX SABM(1)\n", lapb->dev);
+#endif
 					lapb_send_control(lapb, LAPB_SABM, LAPB_POLLON, LAPB_COMMAND);
 				}
 			}
@@ -131,11 +133,15 @@ static void lapb_t1timer_expiry(unsigned long param)
 				lapb_clear_queues(lapb);
 				lapb->state = LAPB_STATE_0;
 				lapb_disconnect_confirmation(lapb, LAPB_TIMEDOUT);
-				lapb_dbg(0, "(%p) S2 -> S0\n", lapb->dev);
+#if LAPB_DEBUG > 0
+				printk(KERN_DEBUG "lapb: (%p) S2 -> S0\n", lapb->dev);
+#endif
 				return;
 			} else {
 				lapb->n2count++;
-				lapb_dbg(1, "(%p) S2 TX DISC(1)\n", lapb->dev);
+#if LAPB_DEBUG > 1
+				printk(KERN_DEBUG "lapb: (%p) S2 TX DISC(1)\n", lapb->dev);
+#endif
 				lapb_send_control(lapb, LAPB_DISC, LAPB_POLLON, LAPB_COMMAND);
 			}
 			break;
@@ -149,12 +155,13 @@ static void lapb_t1timer_expiry(unsigned long param)
 				lapb->state = LAPB_STATE_0;
 				lapb_stop_t2timer(lapb);
 				lapb_disconnect_indication(lapb, LAPB_TIMEDOUT);
-				lapb_dbg(0, "(%p) S3 -> S0\n", lapb->dev);
+#if LAPB_DEBUG > 0
+				printk(KERN_DEBUG "lapb: (%p) S3 -> S0\n", lapb->dev);
+#endif
 				return;
 			} else {
 				lapb->n2count++;
 				lapb_requeue_frames(lapb);
-				lapb_kick(lapb);
 			}
 			break;
 
@@ -166,7 +173,9 @@ static void lapb_t1timer_expiry(unsigned long param)
 				lapb_clear_queues(lapb);
 				lapb->state = LAPB_STATE_0;
 				lapb_disconnect_indication(lapb, LAPB_TIMEDOUT);
-				lapb_dbg(0, "(%p) S4 -> S0\n", lapb->dev);
+#if LAPB_DEBUG > 0
+				printk(KERN_DEBUG "lapb: (%p) S4 -> S0\n", lapb->dev);
+#endif
 				return;
 			} else {
 				lapb->n2count++;

@@ -29,12 +29,14 @@
 
 #include <linux/input.h>
 #include <linux/slab.h>
+#include <linux/usb.h>
 #include <linux/hid.h>
 #include <linux/module.h>
 
 #include "hid-ids.h"
 
 #ifdef CONFIG_DRAGONRISE_FF
+#include "usbhid/usbhid.h"
 
 struct drff_device {
 	struct hid_report *report;
@@ -66,7 +68,7 @@ static int drff_play(struct input_dev *dev, void *data,
 		drff->report->field[0]->value[1] = 0x00;
 		drff->report->field[0]->value[2] = weak;
 		drff->report->field[0]->value[4] = strong;
-		hid_hw_request(hid, drff->report, HID_REQ_SET_REPORT);
+		usbhid_submit_report(hid, drff->report, USB_DIR_OUT);
 
 		drff->report->field[0]->value[0] = 0xfa;
 		drff->report->field[0]->value[1] = 0xfe;
@@ -78,7 +80,7 @@ static int drff_play(struct input_dev *dev, void *data,
 	drff->report->field[0]->value[2] = 0x00;
 	drff->report->field[0]->value[4] = 0x00;
 	dbg_hid("running with 0x%02x 0x%02x", strong, weak);
-	hid_hw_request(hid, drff->report, HID_REQ_SET_REPORT);
+	usbhid_submit_report(hid, drff->report, USB_DIR_OUT);
 
 	return 0;
 }
@@ -130,7 +132,7 @@ static int drff_init(struct hid_device *hid)
 	drff->report->field[0]->value[4] = 0x00;
 	drff->report->field[0]->value[5] = 0x00;
 	drff->report->field[0]->value[6] = 0x00;
-	hid_hw_request(hid, drff->report, HID_REQ_SET_REPORT);
+	usbhid_submit_report(hid, drff->report, USB_DIR_OUT);
 
 	hid_info(hid, "Force Feedback for DragonRise Inc. "
 		 "game controllers by Richard Walmsley <richwalm@gmail.com>\n");
@@ -151,7 +153,7 @@ static inline int drff_init(struct hid_device *hid)
  * descriptor. In any case, it's a wonder it works on Windows.
  *
  *  Usage Page (Desktop),             ; Generic desktop controls (01h)
- *  Usage (Joystick),                 ; Joystick (04h, application collection)
+ *  Usage (Joystik),                  ; Joystik (04h, application collection)
  *  Collection (Application),
  *    Collection (Logical),
  *      Report Size (8),
@@ -207,7 +209,7 @@ static inline int drff_init(struct hid_device *hid)
 /* Fixed report descriptor for PID 0x011 joystick */
 static __u8 pid0011_rdesc_fixed[] = {
 	0x05, 0x01,         /*  Usage Page (Desktop),           */
-	0x09, 0x04,         /*  Usage (Joystick),               */
+	0x09, 0x04,         /*  Usage (Joystik),                */
 	0xA1, 0x01,         /*  Collection (Application),       */
 	0xA1, 0x02,         /*      Collection (Logical),       */
 	0x14,               /*          Logical Minimum (0),    */
@@ -246,30 +248,6 @@ static __u8 *dr_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		break;
 	}
 	return rdesc;
-}
-
-#define map_abs(c)      hid_map_usage(hi, usage, bit, max, EV_ABS, (c))
-#define map_rel(c)      hid_map_usage(hi, usage, bit, max, EV_REL, (c))
-
-static int dr_input_mapping(struct hid_device *hdev, struct hid_input *hi,
-			    struct hid_field *field, struct hid_usage *usage,
-			    unsigned long **bit, int *max)
-{
-	switch (usage->hid) {
-	/*
-	 * revert to the old hid-input behavior where axes
-	 * can be randomly assigned when hid->usage is reused.
-	 */
-	case HID_GD_X: case HID_GD_Y: case HID_GD_Z:
-	case HID_GD_RX: case HID_GD_RY: case HID_GD_RZ:
-		if (field->flags & HID_MAIN_ITEM_RELATIVE)
-			map_rel(usage->hid & 0xf);
-		else
-			map_abs(usage->hid & 0xf);
-		return 1;
-	}
-
-	return 0;
 }
 
 static int dr_probe(struct hid_device *hdev, const struct hid_device_id *id)
@@ -318,8 +296,18 @@ static struct hid_driver dr_driver = {
 	.id_table = dr_devices,
 	.report_fixup = dr_report_fixup,
 	.probe = dr_probe,
-	.input_mapping = dr_input_mapping,
 };
-module_hid_driver(dr_driver);
 
+static int __init dr_init(void)
+{
+	return hid_register_driver(&dr_driver);
+}
+
+static void __exit dr_exit(void)
+{
+	hid_unregister_driver(&dr_driver);
+}
+
+module_init(dr_init);
+module_exit(dr_exit);
 MODULE_LICENSE("GPL");

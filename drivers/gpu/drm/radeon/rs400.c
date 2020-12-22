@@ -109,6 +109,7 @@ int rs400_gart_enable(struct radeon_device *rdev)
 	uint32_t size_reg;
 	uint32_t tmp;
 
+	radeon_gart_restore(rdev);
 	tmp = RREG32_MC(RS690_AIC_CTRL_SCRATCH);
 	tmp |= RS690_DIS_OUT_OF_PCI_GART_ACCESS;
 	WREG32_MC(RS690_AIC_CTRL_SCRATCH, tmp);
@@ -208,30 +209,24 @@ void rs400_gart_fini(struct radeon_device *rdev)
 	radeon_gart_table_ram_free(rdev);
 }
 
-#define RS400_PTE_UNSNOOPED (1 << 0)
 #define RS400_PTE_WRITEABLE (1 << 2)
 #define RS400_PTE_READABLE  (1 << 3)
 
-uint64_t rs400_gart_get_page_entry(uint64_t addr, uint32_t flags)
+int rs400_gart_set_page(struct radeon_device *rdev, int i, uint64_t addr)
 {
 	uint32_t entry;
+	u32 *gtt = rdev->gart.ptr;
+
+	if (i < 0 || i > rdev->gart.num_gpu_pages) {
+		return -EINVAL;
+	}
 
 	entry = (lower_32_bits(addr) & PAGE_MASK) |
-		((upper_32_bits(addr) & 0xff) << 4);
-	if (flags & RADEON_GART_PAGE_READ)
-		entry |= RS400_PTE_READABLE;
-	if (flags & RADEON_GART_PAGE_WRITE)
-		entry |= RS400_PTE_WRITEABLE;
-	if (!(flags & RADEON_GART_PAGE_SNOOP))
-		entry |= RS400_PTE_UNSNOOPED;
-	return entry;
-}
-
-void rs400_gart_set_page(struct radeon_device *rdev, unsigned i,
-			 uint64_t entry)
-{
-	u32 *gtt = rdev->gart.ptr;
-	gtt[i] = cpu_to_le32(lower_32_bits(entry));
+		((upper_32_bits(addr) & 0xff) << 4) |
+		RS400_PTE_WRITEABLE | RS400_PTE_READABLE;
+	entry = cpu_to_le32(entry);
+	gtt[i] = entry;
+	return 0;
 }
 
 int rs400_mc_wait_for_idle(struct radeon_device *rdev)
@@ -250,7 +245,7 @@ int rs400_mc_wait_for_idle(struct radeon_device *rdev)
 	return -1;
 }
 
-static void rs400_gpu_init(struct radeon_device *rdev)
+void rs400_gpu_init(struct radeon_device *rdev)
 {
 	/* FIXME: is this correct ? */
 	r420_pipes_init(rdev);
@@ -260,7 +255,7 @@ static void rs400_gpu_init(struct radeon_device *rdev)
 	}
 }
 
-static void rs400_mc_init(struct radeon_device *rdev)
+void rs400_mc_init(struct radeon_device *rdev)
 {
 	u64 base;
 
@@ -279,26 +274,19 @@ static void rs400_mc_init(struct radeon_device *rdev)
 
 uint32_t rs400_mc_rreg(struct radeon_device *rdev, uint32_t reg)
 {
-	unsigned long flags;
 	uint32_t r;
 
-	spin_lock_irqsave(&rdev->mc_idx_lock, flags);
 	WREG32(RS480_NB_MC_INDEX, reg & 0xff);
 	r = RREG32(RS480_NB_MC_DATA);
 	WREG32(RS480_NB_MC_INDEX, 0xff);
-	spin_unlock_irqrestore(&rdev->mc_idx_lock, flags);
 	return r;
 }
 
 void rs400_mc_wreg(struct radeon_device *rdev, uint32_t reg, uint32_t v)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&rdev->mc_idx_lock, flags);
 	WREG32(RS480_NB_MC_INDEX, ((reg) & 0xff) | RS480_NB_MC_IND_WR_EN);
 	WREG32(RS480_NB_MC_DATA, (v));
 	WREG32(RS480_NB_MC_INDEX, 0xff);
-	spin_unlock_irqrestore(&rdev->mc_idx_lock, flags);
 }
 
 #if defined(CONFIG_DEBUG_FS)
@@ -385,7 +373,7 @@ static int rs400_debugfs_pcie_gart_info_init(struct radeon_device *rdev)
 #endif
 }
 
-static void rs400_mc_program(struct radeon_device *rdev)
+void rs400_mc_program(struct radeon_device *rdev)
 {
 	struct r100_mc_save save;
 
@@ -447,9 +435,14 @@ static int rs400_startup(struct radeon_device *rdev)
 		return r;
 	}
 
-	r = radeon_ib_pool_init(rdev);
+	r = radeon_ib_pool_start(rdev);
+	if (r)
+		return r;
+
+	r = radeon_ib_test(rdev, RADEON_RING_TYPE_GFX_INDEX, &rdev->ring[RADEON_RING_TYPE_GFX_INDEX]);
 	if (r) {
-		dev_err(rdev->dev, "IB initialization failed (%d).\n", r);
+		dev_err(rdev->dev, "failed testing IB (%d).\n", r);
+		rdev->accel_working = false;
 		return r;
 	}
 
@@ -489,7 +482,7 @@ int rs400_resume(struct radeon_device *rdev)
 
 int rs400_suspend(struct radeon_device *rdev)
 {
-	radeon_pm_suspend(rdev);
+	radeon_ib_pool_suspend(rdev);
 	r100_cp_disable(rdev);
 	radeon_wb_disable(rdev);
 	r100_irq_disable(rdev);
@@ -499,10 +492,9 @@ int rs400_suspend(struct radeon_device *rdev)
 
 void rs400_fini(struct radeon_device *rdev)
 {
-	radeon_pm_fini(rdev);
 	r100_cp_fini(rdev);
 	radeon_wb_fini(rdev);
-	radeon_ib_pool_fini(rdev);
+	r100_ib_fini(rdev);
 	radeon_gem_fini(rdev);
 	rs400_gart_fini(rdev);
 	radeon_irq_kms_fini(rdev);
@@ -567,17 +559,20 @@ int rs400_init(struct radeon_device *rdev)
 		return r;
 	r300_set_reg_safe(rdev);
 
-	/* Initialize power management */
-	radeon_pm_init(rdev);
-
+	r = radeon_ib_pool_init(rdev);
 	rdev->accel_working = true;
+	if (r) {
+		dev_err(rdev->dev, "IB initialization failed (%d).\n", r);
+		rdev->accel_working = false;
+	}
+
 	r = rs400_startup(rdev);
 	if (r) {
 		/* Somethings want wront with the accel init stop accel */
 		dev_err(rdev->dev, "Disabling GPU acceleration\n");
 		r100_cp_fini(rdev);
 		radeon_wb_fini(rdev);
-		radeon_ib_pool_fini(rdev);
+		r100_ib_fini(rdev);
 		rs400_gart_fini(rdev);
 		radeon_irq_kms_fini(rdev);
 		rdev->accel_working = false;

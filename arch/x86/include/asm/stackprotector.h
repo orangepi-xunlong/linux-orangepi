@@ -39,9 +39,7 @@
 #include <asm/processor.h>
 #include <asm/percpu.h>
 #include <asm/desc.h>
-
 #include <linux/random.h>
-#include <linux/sched.h>
 
 /*
  * 24 byte read-only segment initializer for stack canary.  Linker
@@ -72,14 +70,14 @@ static __always_inline void boot_init_stack_canary(void)
 	 * on during the bootup the random pool has true entropy too.
 	 */
 	get_random_bytes(&canary, sizeof(canary));
-	tsc = rdtsc();
+	tsc = __native_read_tsc();
 	canary += tsc + (tsc << 32UL);
 
 	current->stack_canary = canary;
 #ifdef CONFIG_X86_64
-	this_cpu_write(irq_stack_union.stack_canary, canary);
+	percpu_write(irq_stack_union.stack_canary, canary);
 #else
-	this_cpu_write(stack_canary.canary, canary);
+	percpu_write(stack_canary.canary, canary);
 #endif
 }
 

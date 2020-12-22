@@ -19,12 +19,6 @@ EXPORT_SYMBOL(system_freezing_cnt);
 bool pm_freezing;
 bool pm_nosig_freezing;
 
-/*
- * Temporary export for the deadlock workaround in ata_scsi_hotplug().
- * Remove once the hack becomes unnecessary.
- */
-EXPORT_SYMBOL_GPL(pm_freezing);
-
 /* protects freezing and frozen transitions */
 static DEFINE_SPINLOCK(freezer_lock);
 
@@ -39,10 +33,10 @@ static DEFINE_SPINLOCK(freezer_lock);
  */
 bool freezing_slow_path(struct task_struct *p)
 {
-	if (p->flags & (PF_NOFREEZE | PF_SUSPEND_TASK))
+	if (p->flags & PF_NOFREEZE)
 		return false;
 
-	if (test_tsk_thread_flag(p, TIF_MEMDIE))
+	if (test_thread_flag(TIF_MEMDIE))
 		return false;
 
 	if (pm_nosig_freezing || cgroup_freezing(p))
@@ -137,10 +131,17 @@ bool freeze_task(struct task_struct *p)
 		return false;
 	}
 
-	if (!(p->flags & PF_KTHREAD))
+	if (!(p->flags & PF_KTHREAD)) {
 		fake_signal_wake_up(p);
-	else
+		/*
+		 * fake_signal_wake_up() goes through p's scheduler
+		 * lock and guarantees that TASK_STOPPED/TRACED ->
+		 * TASK_RUNNING transition can't race with task state
+		 * testing in try_to_freeze_tasks().
+		 */
+	} else {
 		wake_up_state(p, TASK_INTERRUPTIBLE);
+	}
 
 	spin_unlock_irqrestore(&freezer_lock, flags);
 	return true;
@@ -150,6 +151,12 @@ void __thaw_task(struct task_struct *p)
 {
 	unsigned long flags;
 
+	/*
+	 * Clear freezing and kick @p if FROZEN.  Clearing is guaranteed to
+	 * be visible to @p as waking up implies wmb.  Waking up inside
+	 * freezer_lock also prevents wakeups from leaking outside
+	 * refrigerator.
+	 */
 	spin_lock_irqsave(&freezer_lock, flags);
 	if (frozen(p))
 		wake_up_process(p);

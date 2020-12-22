@@ -227,12 +227,13 @@ static void hac_ac97_coldrst(struct snd_ac97 *ac97)
 	hac_ac97_warmrst(ac97);
 }
 
-static struct snd_ac97_bus_ops hac_ac97_ops = {
+struct snd_ac97_bus_ops soc_ac97_ops = {
 	.read	= hac_ac97_read,
 	.write	= hac_ac97_write,
 	.reset	= hac_ac97_coldrst,
 	.warm_reset = hac_ac97_warmrst,
 };
+EXPORT_SYMBOL_GPL(soc_ac97_ops);
 
 static int hac_hw_params(struct snd_pcm_substream *substream,
 			 struct snd_pcm_hw_params *params,
@@ -272,7 +273,7 @@ static const struct snd_soc_dai_ops hac_dai_ops = {
 static struct snd_soc_dai_driver sh4_hac_dai[] = {
 {
 	.name			= "hac-dai.0",
-	.bus_control		= true,
+	.ac97_control		= 1,
 	.playback = {
 		.rates		= AC97_RATES,
 		.formats	= AC97_FMTS,
@@ -309,34 +310,26 @@ static struct snd_soc_dai_driver sh4_hac_dai[] = {
 #endif
 };
 
-static const struct snd_soc_component_driver sh4_hac_component = {
-	.name		= "sh4-hac",
-};
-
-static int hac_soc_platform_probe(struct platform_device *pdev)
+static int __devinit hac_soc_platform_probe(struct platform_device *pdev)
 {
-	ret = snd_soc_set_ac97_ops(&hac_ac97_ops);
-	if (ret != 0)
-		return ret;
-
-	return snd_soc_register_component(&pdev->dev, &sh4_hac_component,
-					  sh4_hac_dai, ARRAY_SIZE(sh4_hac_dai));
+	return snd_soc_register_dais(&pdev->dev, sh4_hac_dai,
+			ARRAY_SIZE(sh4_hac_dai));
 }
 
-static int hac_soc_platform_remove(struct platform_device *pdev)
+static int __devexit hac_soc_platform_remove(struct platform_device *pdev)
 {
-	snd_soc_unregister_component(&pdev->dev);
-	snd_soc_set_ac97_ops(NULL);
+	snd_soc_unregister_dais(&pdev->dev, ARRAY_SIZE(sh4_hac_dai));
 	return 0;
 }
 
 static struct platform_driver hac_pcm_driver = {
 	.driver = {
 			.name = "hac-pcm-audio",
+			.owner = THIS_MODULE,
 	},
 
 	.probe = hac_soc_platform_probe,
-	.remove = hac_soc_platform_remove,
+	.remove = __devexit_p(hac_soc_platform_remove),
 };
 
 module_platform_driver(hac_pcm_driver);

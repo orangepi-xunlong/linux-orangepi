@@ -99,7 +99,7 @@ static inline void hdlc_proto_stop(struct net_device *dev)
 static int hdlc_device_event(struct notifier_block *this, unsigned long event,
 			     void *ptr)
 {
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = ptr;
 	hdlc_device *hdlc;
 	unsigned long flags;
 	int on;
@@ -256,8 +256,7 @@ static void hdlc_setup(struct net_device *dev)
 struct net_device *alloc_hdlcdev(void *priv)
 {
 	struct net_device *dev;
-	dev = alloc_netdev(sizeof(struct hdlc_device), "hdlc%d",
-			   NET_NAME_UNKNOWN, hdlc_setup);
+	dev = alloc_netdev(sizeof(struct hdlc_device), "hdlc%d", hdlc_setup);
 	if (dev)
 		dev_to_hdlc(dev)->priv = priv;
 	return dev;
@@ -266,8 +265,8 @@ struct net_device *alloc_hdlcdev(void *priv)
 void unregister_hdlc_device(struct net_device *dev)
 {
 	rtnl_lock();
-	detach_hdlc_protocol(dev);
 	unregister_netdevice(dev);
+	detach_hdlc_protocol(dev);
 	rtnl_unlock();
 }
 
@@ -276,41 +275,29 @@ void unregister_hdlc_device(struct net_device *dev)
 int attach_hdlc_protocol(struct net_device *dev, struct hdlc_proto *proto,
 			 size_t size)
 {
-	int err;
-
-	err = detach_hdlc_protocol(dev);
-	if (err)
-		return err;
+	detach_hdlc_protocol(dev);
 
 	if (!try_module_get(proto->module))
 		return -ENOSYS;
 
-	if (size) {
-		dev_to_hdlc(dev)->state = kmalloc(size, GFP_KERNEL);
-		if (dev_to_hdlc(dev)->state == NULL) {
+	if (size)
+		if ((dev_to_hdlc(dev)->state = kmalloc(size,
+						       GFP_KERNEL)) == NULL) {
+			netdev_warn(dev,
+				    "Memory squeeze on hdlc_proto_attach()\n");
 			module_put(proto->module);
 			return -ENOBUFS;
 		}
-	}
 	dev_to_hdlc(dev)->proto = proto;
-
 	return 0;
 }
 
 
-int detach_hdlc_protocol(struct net_device *dev)
+void detach_hdlc_protocol(struct net_device *dev)
 {
 	hdlc_device *hdlc = dev_to_hdlc(dev);
-	int err;
 
 	if (hdlc->proto) {
-		err = call_netdevice_notifiers(NETDEV_PRE_TYPE_CHANGE, dev);
-		err = notifier_to_errno(err);
-		if (err) {
-			netdev_err(dev, "Refused to change device type\n");
-			return err;
-		}
-
 		if (hdlc->proto->detach)
 			hdlc->proto->detach(dev);
 		module_put(hdlc->proto->module);
@@ -319,8 +306,6 @@ int detach_hdlc_protocol(struct net_device *dev)
 	kfree(hdlc->state);
 	hdlc->state = NULL;
 	hdlc_setup_dev(dev);
-
-	return 0;
 }
 
 

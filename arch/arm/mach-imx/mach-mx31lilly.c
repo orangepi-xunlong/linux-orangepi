@@ -42,39 +42,19 @@
 #include <asm/mach/time.h>
 #include <asm/mach/map.h>
 
-#include "board-mx31lilly.h"
-#include "common.h"
+#include <mach/hardware.h>
+#include <mach/common.h>
+#include <mach/iomux-mx3.h>
+#include <mach/board-mx31lilly.h>
+#include <mach/ulpi.h>
+
 #include "devices-imx31.h"
-#include "ehci.h"
-#include "hardware.h"
-#include "iomux-mx3.h"
-#include "ulpi.h"
 
 /*
  * This file contains module-specific initialization routines for LILLY-1131.
  * Initialization of peripherals found on the baseboard is implemented in the
  * appropriate baseboard support code.
  */
-
-static unsigned int mx31lilly_pins[] __initdata = {
-	MX31_PIN_CTS1__CTS1,
-	MX31_PIN_RTS1__RTS1,
-	MX31_PIN_TXD1__TXD1,
-	MX31_PIN_RXD1__RXD1,
-	MX31_PIN_CTS2__CTS2,
-	MX31_PIN_RTS2__RTS2,
-	MX31_PIN_TXD2__TXD2,
-	MX31_PIN_RXD2__RXD2,
-	MX31_PIN_CSPI3_MOSI__RXD3,
-	MX31_PIN_CSPI3_MISO__TXD3,
-	MX31_PIN_CSPI3_SCLK__RTS3,
-	MX31_PIN_CSPI3_SPI_RDY__CTS3,
-};
-
-/* UART */
-static const struct imxuart_platform_data uart_pdata __initconst = {
-	.flags = IMXUART_HAVE_RTSCTS,
-};
 
 /* SMSC ethernet support */
 
@@ -85,7 +65,8 @@ static struct resource smsc91x_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		/* irq number is run-time assigned */
+		.start	= IOMUX_TO_IRQ(MX31_PIN_GPIO1_0),
+		.end	= IOMUX_TO_IRQ(MX31_PIN_GPIO1_0),
 		.flags	= IORESOURCE_IRQ | IRQF_TRIGGER_FALLING,
 	}
 };
@@ -252,7 +233,7 @@ static struct spi_board_info mc13783_dev __initdata = {
 	.bus_num	= 1,
 	.chip_select	= 0,
 	.platform_data	= &mc13783_pdata,
-	/* irq number is run-time assigned */
+	.irq		= IOMUX_TO_IRQ(MX31_PIN_GPIO1_3),
 };
 
 static struct platform_device *devices[] __initdata = {
@@ -272,12 +253,16 @@ static void __init mx31lilly_board_init(void)
 {
 	imx31_soc_init();
 
-	mxc_iomux_setup_multiple_pins(mx31lilly_pins,
-				      ARRAY_SIZE(mx31lilly_pins), "mx31lily");
-
-	imx31_add_imx_uart0(&uart_pdata);
-	imx31_add_imx_uart1(&uart_pdata);
-	imx31_add_imx_uart2(&uart_pdata);
+	switch (mx31lilly_baseboard) {
+	case MX31LILLY_NOBOARD:
+		break;
+	case MX31LILLY_DB:
+		mx31lilly_db_init();
+		break;
+	default:
+		printk(KERN_ERR "Illegal mx31lilly_baseboard type %d\n",
+			mx31lilly_baseboard);
+	}
 
 	mxc_iomux_alloc_pin(MX31_PIN_CS4__CS4, "Ethernet CS");
 
@@ -300,22 +285,10 @@ static void __init mx31lilly_board_init(void)
 
 	imx31_add_spi_imx0(&spi0_pdata);
 	imx31_add_spi_imx1(&spi1_pdata);
-
-	regulator_register_fixed(0, dummy_supplies, ARRAY_SIZE(dummy_supplies));
-}
-
-static void __init mx31lilly_late_init(void)
-{
-	if (mx31lilly_baseboard == MX31LILLY_DB)
-		mx31lilly_db_init();
-
-	mc13783_dev.irq = gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_3));
 	spi_register_board_info(&mc13783_dev, 1);
 
-	smsc91x_resources[1].start =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_0));
-	smsc91x_resources[1].end =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_0));
+	regulator_register_fixed(0, dummy_supplies, ARRAY_SIZE(dummy_supplies));
+
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 
 	/* USB */
@@ -327,13 +300,17 @@ static void __init mx31lilly_timer_init(void)
 	mx31_clocks_init(26000000);
 }
 
+static struct sys_timer mx31lilly_timer = {
+	.init	= mx31lilly_timer_init,
+};
+
 MACHINE_START(LILLY1131, "INCO startec LILLY-1131")
 	.atag_offset = 0x100,
 	.map_io = mx31_map_io,
 	.init_early = imx31_init_early,
 	.init_irq = mx31_init_irq,
-	.init_time	= mx31lilly_timer_init,
-	.init_machine	= mx31lilly_board_init,
-	.init_late	= mx31lilly_late_init,
+	.handle_irq = imx31_handle_irq,
+	.timer = &mx31lilly_timer,
+	.init_machine = mx31lilly_board_init,
 	.restart	= mxc_restart,
 MACHINE_END

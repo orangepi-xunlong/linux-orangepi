@@ -69,21 +69,18 @@ MODULE_PARM_DESC(ignore_oc, "ignore hardware overcurrent indications");
  *            show all queues in /sys/kernel/debug/uhci/[pci_addr]
  * debug = 3, show all TDs in URBs when dumping
  */
-#ifdef CONFIG_DYNAMIC_DEBUG
-
+#ifdef DEBUG
+#define DEBUG_CONFIGURED	1
 static int debug = 1;
 module_param(debug, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debug level");
-static char *errbuf;
 
 #else
-
-#define debug 0
-#define errbuf NULL
-
+#define DEBUG_CONFIGURED	0
+#define debug			0
 #endif
 
-
+static char *errbuf;
 #define ERRBUF_LEN    (32 * 1024)
 
 static struct kmem_cache *uhci_up_cachep;	/* urb_priv */
@@ -456,19 +453,20 @@ static irqreturn_t uhci_irq(struct usb_hcd *hcd)
 
 	if (status & ~(USBSTS_USBINT | USBSTS_ERROR | USBSTS_RD)) {
 		if (status & USBSTS_HSE)
-			dev_err(uhci_dev(uhci),
-				"host system error, PCI problems?\n");
+			dev_err(uhci_dev(uhci), "host system error, "
+					"PCI problems?\n");
 		if (status & USBSTS_HCPE)
-			dev_err(uhci_dev(uhci),
-				"host controller process error, something bad happened!\n");
+			dev_err(uhci_dev(uhci), "host controller process "
+					"error, something bad happened!\n");
 		if (status & USBSTS_HCH) {
 			if (uhci->rh_state >= UHCI_RH_RUNNING) {
 				dev_err(uhci_dev(uhci),
-					"host controller halted, very bad!\n");
+					"host controller halted, "
+					"very bad!\n");
 				if (debug > 1 && errbuf) {
 					/* Print the schedule for debugging */
-					uhci_sprint_schedule(uhci, errbuf,
-						ERRBUF_LEN - EXTRA_SPACE);
+					uhci_sprint_schedule(uhci,
+							errbuf, ERRBUF_LEN);
 					lprintk(errbuf);
 				}
 				uhci_hc_died(uhci);
@@ -519,12 +517,13 @@ static void release_uhci(struct uhci_hcd *uhci)
 {
 	int i;
 
+	if (DEBUG_CONFIGURED) {
+		spin_lock_irq(&uhci->lock);
+		uhci->is_initialized = 0;
+		spin_unlock_irq(&uhci->lock);
 
-	spin_lock_irq(&uhci->lock);
-	uhci->is_initialized = 0;
-	spin_unlock_irq(&uhci->lock);
-
-	debugfs_remove(uhci->dentry);
+		debugfs_remove(uhci->dentry);
+	}
 
 	for (i = 0; i < UHCI_NUM_SKELQH; i++)
 		uhci_free_qh(uhci, uhci->skelqh[i]);
@@ -591,18 +590,21 @@ static int uhci_start(struct usb_hcd *hcd)
 
 	uhci->frame = dma_alloc_coherent(uhci_dev(uhci),
 			UHCI_NUMFRAMES * sizeof(*uhci->frame),
-			&uhci->frame_dma_handle, GFP_KERNEL);
+			&uhci->frame_dma_handle, 0);
 	if (!uhci->frame) {
-		dev_err(uhci_dev(uhci),
-			"unable to allocate consistent memory for frame list\n");
+		dev_err(uhci_dev(uhci), "unable to allocate "
+				"consistent memory for frame list\n");
 		goto err_alloc_frame;
 	}
 	memset(uhci->frame, 0, UHCI_NUMFRAMES * sizeof(*uhci->frame));
 
 	uhci->frame_cpu = kcalloc(UHCI_NUMFRAMES, sizeof(*uhci->frame_cpu),
 			GFP_KERNEL);
-	if (!uhci->frame_cpu)
+	if (!uhci->frame_cpu) {
+		dev_err(uhci_dev(uhci), "unable to allocate "
+				"memory for frame pointers\n");
 		goto err_alloc_frame_cpu;
+	}
 
 	uhci->td_pool = dma_pool_create("uhci_td", uhci_dev(uhci),
 			sizeof(struct uhci_td), 16, 0);
@@ -735,8 +737,8 @@ static int uhci_rh_suspend(struct usb_hcd *hcd)
 	 */
 	else if (hcd->self.root_hub->do_remote_wakeup &&
 			uhci->resuming_ports) {
-		dev_dbg(uhci_dev(uhci),
-			"suspend failed because a port is resuming\n");
+		dev_dbg(uhci_dev(uhci), "suspend failed because a port "
+				"is resuming\n");
 		rc = -EBUSY;
 	} else
 		suspend_rh(uhci, UHCI_RH_SUSPENDED);
@@ -827,8 +829,8 @@ static int uhci_count_ports(struct usb_hcd *hcd)
 
 	/* Anything greater than 7 is weird so we'll ignore it. */
 	if (port > UHCI_RH_MAXCHILD) {
-		dev_info(uhci_dev(uhci),
-			"port count misdetected? forcing to 2 ports\n");
+		dev_info(uhci_dev(uhci), "port count misdetected? "
+				"forcing to 2 ports\n");
 		port = 2;
 	}
 
@@ -847,11 +849,6 @@ static const char hcd_name[] = "uhci_hcd";
 #define PLATFORM_DRIVER		uhci_grlib_driver
 #endif
 
-#ifdef CONFIG_USB_UHCI_PLATFORM
-#include "uhci-platform.c"
-#define PLATFORM_DRIVER		uhci_platform_driver
-#endif
-
 #if !defined(PCI_DRIVER) && !defined(PLATFORM_DRIVER)
 #error "missing bus glue for uhci-hcd"
 #endif
@@ -867,14 +864,14 @@ static int __init uhci_hcd_init(void)
 			ignore_oc ? ", overcurrent ignored" : "");
 	set_bit(USB_UHCI_LOADED, &usb_hcds_loaded);
 
-#ifdef CONFIG_DYNAMIC_DEBUG
-	errbuf = kmalloc(ERRBUF_LEN, GFP_KERNEL);
-	if (!errbuf)
-		goto errbuf_failed;
-	uhci_debugfs_root = debugfs_create_dir("uhci", usb_debug_root);
-	if (!uhci_debugfs_root)
-		goto debug_failed;
-#endif
+	if (DEBUG_CONFIGURED) {
+		errbuf = kmalloc(ERRBUF_LEN, GFP_KERNEL);
+		if (!errbuf)
+			goto errbuf_failed;
+		uhci_debugfs_root = debugfs_create_dir("uhci", usb_debug_root);
+		if (!uhci_debugfs_root)
+			goto debug_failed;
+	}
 
 	uhci_up_cachep = kmem_cache_create("uhci_urb_priv",
 		sizeof(struct urb_priv), 0, 0, NULL);
@@ -905,14 +902,12 @@ clean0:
 	kmem_cache_destroy(uhci_up_cachep);
 
 up_failed:
-#if defined(DEBUG) || defined(CONFIG_DYNAMIC_DEBUG)
 	debugfs_remove(uhci_debugfs_root);
 
 debug_failed:
 	kfree(errbuf);
 
 errbuf_failed:
-#endif
 
 	clear_bit(USB_UHCI_LOADED, &usb_hcds_loaded);
 	return retval;
@@ -928,9 +923,7 @@ static void __exit uhci_hcd_cleanup(void)
 #endif
 	kmem_cache_destroy(uhci_up_cachep);
 	debugfs_remove(uhci_debugfs_root);
-#ifdef CONFIG_DYNAMIC_DEBUG
 	kfree(errbuf);
-#endif
 	clear_bit(USB_UHCI_LOADED, &usb_hcds_loaded);
 }
 

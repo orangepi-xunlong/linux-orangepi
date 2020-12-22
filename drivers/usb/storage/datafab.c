@@ -1,5 +1,4 @@
-/*
- * Driver for Datafab USB Compact Flash reader
+/* Driver for Datafab USB Compact Flash reader
  *
  * datafab driver v0.1:
  *
@@ -60,9 +59,6 @@
 #include "transport.h"
 #include "protocol.h"
 #include "debug.h"
-#include "scsiglue.h"
-
-#define DRV_NAME "ums-datafab"
 
 MODULE_DESCRIPTION("Driver for Datafab USB Compact Flash reader");
 MODULE_AUTHOR("Jimmie Mayfield <mayfield+datafab@sackheads.org>");
@@ -90,7 +86,7 @@ static int datafab_determine_lun(struct us_data *us,
 		    vendorName, productName, useProtocol, useTransport, \
 		    initFunction, flags) \
 { USB_DEVICE_VER(id_vendor, id_product, bcdDeviceMin, bcdDeviceMax), \
-  .driver_info = (flags) }
+  .driver_info = (flags)|(USB_US_TYPE_STOR<<24) }
 
 static struct usb_device_id datafab_usb_ids[] = {
 #	include "unusual_datafab.h"
@@ -127,7 +123,7 @@ datafab_bulk_read(struct us_data *us, unsigned char *data, unsigned int len) {
 	if (len == 0)
 		return USB_STOR_XFER_GOOD;
 
-	usb_stor_dbg(us, "len = %d\n", len);
+	US_DEBUGP("datafab_bulk_read:  len = %d\n", len);
 	return usb_stor_bulk_transfer_buf(us, us->recv_bulk_pipe,
 			data, len, NULL);
 }
@@ -138,7 +134,7 @@ datafab_bulk_write(struct us_data *us, unsigned char *data, unsigned int len) {
 	if (len == 0)
 		return USB_STOR_XFER_GOOD;
 
-	usb_stor_dbg(us, "len = %d\n", len);
+	US_DEBUGP("datafab_bulk_write:  len = %d\n", len);
 	return usb_stor_bulk_transfer_buf(us, us->send_bulk_pipe,
 			data, len, NULL);
 }
@@ -304,8 +300,9 @@ static int datafab_write_data(struct us_data *us,
 			goto leave;
 
 		if (reply[0] != 0x50 && reply[1] != 0) {
-			usb_stor_dbg(us, "Gah! write return code: %02x %02x\n",
-				     reply[0], reply[1]);
+			US_DEBUGP("datafab_write_data:  Gah! "
+				  "write return code: %02x %02x\n",
+				  reply[0], reply[1]);
 			result = USB_STOR_TRANSPORT_ERROR;
 			goto leave;
 		}
@@ -345,7 +342,7 @@ static int datafab_determine_lun(struct us_data *us,
 	if (!buf)
 		return USB_STOR_TRANSPORT_ERROR;
 
-	usb_stor_dbg(us, "locating...\n");
+	US_DEBUGP("datafab_determine_lun:  locating...\n");
 
 	// we'll try 3 times before giving up...
 	//
@@ -477,16 +474,16 @@ static int datafab_handle_mode_sense(struct us_data *us,
 
 	switch (pc) {
 	   case 0x0:
-		   usb_stor_dbg(us, "Current values\n");
+		US_DEBUGP("datafab_handle_mode_sense:  Current values\n");
 		break;
 	   case 0x1:
-		   usb_stor_dbg(us, "Changeable values\n");
+		US_DEBUGP("datafab_handle_mode_sense:  Changeable values\n");
 		break;
 	   case 0x2:
-		   usb_stor_dbg(us, "Default values\n");
+		US_DEBUGP("datafab_handle_mode_sense:  Default values\n");
 		break;
 	   case 0x3:
-		   usb_stor_dbg(us, "Saves values\n");
+		US_DEBUGP("datafab_handle_mode_sense:  Saves values\n");
 		break;
 	}
 
@@ -569,9 +566,11 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 
 	if (!us->extra) {
 		us->extra = kzalloc(sizeof(struct datafab_info), GFP_NOIO);
-		if (!us->extra)
+		if (!us->extra) {
+			US_DEBUGP("datafab_transport:  Gah! "
+				  "Can't allocate storage for Datafab info struct!\n");
 			return USB_STOR_TRANSPORT_ERROR;
-
+		}
 		us->extra_destructor = datafab_info_destructor;
   		((struct datafab_info *)us->extra)->lun = -1;
 	}
@@ -579,7 +578,7 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 	info = (struct datafab_info *) (us->extra);
 
 	if (srb->cmnd[0] == INQUIRY) {
-		usb_stor_dbg(us, "INQUIRY - Returning bogus response\n");
+		US_DEBUGP("datafab_transport:  INQUIRY.  Returning bogus response");
 		memcpy(ptr, inquiry_reply, sizeof(inquiry_reply));
 		fill_inquiry_response(us, ptr, 36);
 		return USB_STOR_TRANSPORT_GOOD;
@@ -591,8 +590,8 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 		if (rc != USB_STOR_TRANSPORT_GOOD)
 			return rc;
 
-		usb_stor_dbg(us, "READ_CAPACITY:  %ld sectors, %ld bytes per sector\n",
-			     info->sectors, info->ssize);
+		US_DEBUGP("datafab_transport:  READ_CAPACITY:  %ld sectors, %ld bytes per sector\n",
+			  info->sectors, info->ssize);
 
 		// build the reply
 		// we need the last sector, not the number of sectors
@@ -604,7 +603,7 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 	}
 
 	if (srb->cmnd[0] == MODE_SELECT_10) {
-		usb_stor_dbg(us, "Gah! MODE_SELECT_10\n");
+		US_DEBUGP("datafab_transport:  Gah! MODE_SELECT_10.\n");
 		return USB_STOR_TRANSPORT_ERROR;
 	}
 
@@ -616,8 +615,7 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 
 		blocks = ((u32)(srb->cmnd[7]) << 8) | ((u32)(srb->cmnd[8]));
 
-		usb_stor_dbg(us, "READ_10: read block 0x%04lx  count %ld\n",
-			     block, blocks);
+		US_DEBUGP("datafab_transport:  READ_10: read block 0x%04lx  count %ld\n", block, blocks);
 		return datafab_read_data(us, info, block, blocks);
 	}
 
@@ -630,8 +628,7 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 		blocks = ((u32)(srb->cmnd[6]) << 24) | ((u32)(srb->cmnd[7]) << 16) |
 			 ((u32)(srb->cmnd[8]) <<  8) | ((u32)(srb->cmnd[9]));
 
-		usb_stor_dbg(us, "READ_12: read block 0x%04lx  count %ld\n",
-			     block, blocks);
+		US_DEBUGP("datafab_transport:  READ_12: read block 0x%04lx  count %ld\n", block, blocks);
 		return datafab_read_data(us, info, block, blocks);
 	}
 
@@ -641,8 +638,7 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 
 		blocks = ((u32)(srb->cmnd[7]) << 8) | ((u32)(srb->cmnd[8]));
 
-		usb_stor_dbg(us, "WRITE_10: write block 0x%04lx count %ld\n",
-			     block, blocks);
+		US_DEBUGP("datafab_transport:  WRITE_10: write block 0x%04lx  count %ld\n", block, blocks);
 		return datafab_write_data(us, info, block, blocks);
 	}
 
@@ -655,18 +651,17 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 		blocks = ((u32)(srb->cmnd[6]) << 24) | ((u32)(srb->cmnd[7]) << 16) |
 			 ((u32)(srb->cmnd[8]) <<  8) | ((u32)(srb->cmnd[9]));
 
-		usb_stor_dbg(us, "WRITE_12: write block 0x%04lx count %ld\n",
-			     block, blocks);
+		US_DEBUGP("datafab_transport:  WRITE_12: write block 0x%04lx  count %ld\n", block, blocks);
 		return datafab_write_data(us, info, block, blocks);
 	}
 
 	if (srb->cmnd[0] == TEST_UNIT_READY) {
-		usb_stor_dbg(us, "TEST_UNIT_READY\n");
+		US_DEBUGP("datafab_transport:  TEST_UNIT_READY.\n");
 		return datafab_id_device(us, info);
 	}
 
 	if (srb->cmnd[0] == REQUEST_SENSE) {
-		usb_stor_dbg(us, "REQUEST_SENSE - Returning faked response\n");
+		US_DEBUGP("datafab_transport:  REQUEST_SENSE.  Returning faked response\n");
 
 		// this response is pretty bogus right now.  eventually if necessary
 		// we can set the correct sense data.  so far though it hasn't been
@@ -684,33 +679,28 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 	}
 
 	if (srb->cmnd[0] == MODE_SENSE) {
-		usb_stor_dbg(us, "MODE_SENSE_6 detected\n");
+		US_DEBUGP("datafab_transport:  MODE_SENSE_6 detected\n");
 		return datafab_handle_mode_sense(us, srb, 1);
 	}
 
 	if (srb->cmnd[0] == MODE_SENSE_10) {
-		usb_stor_dbg(us, "MODE_SENSE_10 detected\n");
+		US_DEBUGP("datafab_transport:  MODE_SENSE_10 detected\n");
 		return datafab_handle_mode_sense(us, srb, 0);
 	}
 
 	if (srb->cmnd[0] == ALLOW_MEDIUM_REMOVAL) {
-		/*
-		 * sure.  whatever.  not like we can stop the user from
-		 * popping the media out of the device (no locking doors, etc)
-		 */
+		// sure.  whatever.  not like we can stop the user from
+		// popping the media out of the device (no locking doors, etc)
+		//
 		return USB_STOR_TRANSPORT_GOOD;
 	}
 
 	if (srb->cmnd[0] == START_STOP) {
-		/*
-		 * this is used by sd.c'check_scsidisk_media_change to detect
-		 * media change
-		 */
-		usb_stor_dbg(us, "START_STOP\n");
-		/*
-		 * the first datafab_id_device after a media change returns
-		 * an error (determined experimentally)
-		 */
+		/* this is used by sd.c'check_scsidisk_media_change to detect
+		   media change */
+		US_DEBUGP("datafab_transport:  START_STOP.\n");
+		/* the first datafab_id_device after a media change returns
+		   an error (determined experimentally) */
 		rc = datafab_id_device(us, info);
 		if (rc == USB_STOR_TRANSPORT_GOOD) {
 			info->sense_key = NO_SENSE;
@@ -722,15 +712,13 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 		return rc;
 	}
 
-	usb_stor_dbg(us, "Gah! Unknown command: %d (0x%x)\n",
-		     srb->cmnd[0], srb->cmnd[0]);
+	US_DEBUGP("datafab_transport:  Gah! Unknown command: %d (0x%x)\n",
+		  srb->cmnd[0], srb->cmnd[0]);
 	info->sense_key = 0x05;
 	info->sense_asc = 0x20;
 	info->sense_ascq = 0x00;
 	return USB_STOR_TRANSPORT_FAILED;
 }
-
-static struct scsi_host_template datafab_host_template;
 
 static int datafab_probe(struct usb_interface *intf,
 			 const struct usb_device_id *id)
@@ -739,8 +727,7 @@ static int datafab_probe(struct usb_interface *intf,
 	int result;
 
 	result = usb_stor_probe1(&us, intf, id,
-			(id - datafab_usb_ids) + datafab_unusual_dev_list,
-			&datafab_host_template);
+			(id - datafab_usb_ids) + datafab_unusual_dev_list);
 	if (result)
 		return result;
 
@@ -754,7 +741,7 @@ static int datafab_probe(struct usb_interface *intf,
 }
 
 static struct usb_driver datafab_driver = {
-	.name =		DRV_NAME,
+	.name =		"ums-datafab",
 	.probe =	datafab_probe,
 	.disconnect =	usb_stor_disconnect,
 	.suspend =	usb_stor_suspend,
@@ -767,4 +754,4 @@ static struct usb_driver datafab_driver = {
 	.no_dynamic_id = 1,
 };
 
-module_usb_stor_driver(datafab_driver, datafab_host_template, DRV_NAME);
+module_usb_driver(datafab_driver);

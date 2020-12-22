@@ -68,13 +68,23 @@ static const struct inet_peer peer_fake_node = {
 	.avl_height	= 0
 };
 
-void inet_peer_base_init(struct inet_peer_base *bp)
-{
-	bp->root = peer_avl_empty_rcu;
-	seqlock_init(&bp->lock);
-	bp->total = 0;
-}
-EXPORT_SYMBOL_GPL(inet_peer_base_init);
+struct inet_peer_base {
+	struct inet_peer __rcu *root;
+	seqlock_t	lock;
+	int		total;
+};
+
+static struct inet_peer_base v4_peers = {
+	.root		= peer_avl_empty_rcu,
+	.lock		= __SEQLOCK_UNLOCKED(v4_peers.lock),
+	.total		= 0,
+};
+
+static struct inet_peer_base v6_peers = {
+	.root		= peer_avl_empty_rcu,
+	.lock		= __SEQLOCK_UNLOCKED(v6_peers.lock),
+	.total		= 0,
+};
 
 #define PEER_MAXDEPTH 40 /* sufficient for about 2^27 nodes */
 
@@ -86,8 +96,8 @@ int inet_peer_maxttl __read_mostly = 10 * 60 * HZ;	/* usual time to live: 10 min
 
 static void inetpeer_gc_worker(struct work_struct *work)
 {
-	struct inet_peer *p, *n, *c;
-	struct list_head list;
+	struct inet_peer *p, *n;
+	LIST_HEAD(list);
 
 	spin_lock_bh(&gc_lock);
 	list_replace_init(&gc_list, &list);
@@ -98,19 +108,17 @@ static void inetpeer_gc_worker(struct work_struct *work)
 
 	list_for_each_entry_safe(p, n, &list, gc_list) {
 
-		if (need_resched())
+		if(need_resched())
 			cond_resched();
 
-		c = rcu_dereference_protected(p->avl_left, 1);
-		if (c != peer_avl_empty) {
-			list_add_tail(&c->gc_list, &list);
-			p->avl_left = peer_avl_empty_rcu;
+		if (p->avl_left != peer_avl_empty) {
+			list_add_tail(&p->avl_left->gc_list, &list);
+			p->avl_left = peer_avl_empty;
 		}
 
-		c = rcu_dereference_protected(p->avl_right, 1);
-		if (c != peer_avl_empty) {
-			list_add_tail(&c->gc_list, &list);
-			p->avl_right = peer_avl_empty_rcu;
+		if (p->avl_right != peer_avl_empty) {
+			list_add_tail(&p->avl_right->gc_list, &list);
+			p->avl_right = peer_avl_empty;
 		}
 
 		n = list_entry(p->gc_list.next, struct inet_peer, gc_list);
@@ -154,7 +162,23 @@ void __init inet_initpeers(void)
 			0, SLAB_HWCACHE_ALIGN | SLAB_PANIC,
 			NULL);
 
-	INIT_DEFERRABLE_WORK(&gc_work, inetpeer_gc_worker);
+	INIT_DELAYED_WORK_DEFERRABLE(&gc_work, inetpeer_gc_worker);
+}
+
+static int addr_compare(const struct inetpeer_addr *a,
+			const struct inetpeer_addr *b)
+{
+	int i, n = (a->family == AF_INET ? 1 : 4);
+
+	for (i = 0; i < n; i++) {
+		if (a->addr.a6[i] == b->addr.a6[i])
+			continue;
+		if ((__force u32)a->addr.a6[i] < (__force u32)b->addr.a6[i])
+			return -1;
+		return 1;
+	}
+
+	return 0;
 }
 
 #define rcu_deref_locked(X, BASE)				\
@@ -171,8 +195,8 @@ void __init inet_initpeers(void)
 	stackptr = _stack;					\
 	*stackptr++ = &_base->root;				\
 	for (u = rcu_deref_locked(_base->root, _base);		\
-	     u != peer_avl_empty;) {				\
-		int cmp = inetpeer_addr_cmp(_daddr, &u->daddr);	\
+	     u != peer_avl_empty; ) {				\
+		int cmp = addr_compare(_daddr, &u->daddr);	\
 		if (cmp == 0)					\
 			break;					\
 		if (cmp == -1)					\
@@ -199,7 +223,7 @@ static struct inet_peer *lookup_rcu(const struct inetpeer_addr *daddr,
 	int count = 0;
 
 	while (u != peer_avl_empty) {
-		int cmp = inetpeer_addr_cmp(daddr, &u->daddr);
+		int cmp = addr_compare(daddr, &u->daddr);
 		if (cmp == 0) {
 			/* Before taking a reference, check if this entry was
 			 * deleted (refcnt=-1)
@@ -226,7 +250,7 @@ static struct inet_peer *lookup_rcu(const struct inetpeer_addr *daddr,
 	*stackptr++ = &start->avl_left;				\
 	v = &start->avl_left;					\
 	for (u = rcu_deref_locked(*v, base);			\
-	     u->avl_right != peer_avl_empty_rcu;) {		\
+	     u->avl_right != peer_avl_empty_rcu; ) {		\
 		v = &u->avl_right;				\
 		*stackptr++ = v;				\
 		u = rcu_deref_locked(*v, base);			\
@@ -363,6 +387,11 @@ static void unlink_from_pool(struct inet_peer *p, struct inet_peer_base *base,
 	call_rcu(&p->rcu, inetpeer_free_rcu);
 }
 
+static struct inet_peer_base *family_to_base(int family)
+{
+	return family == AF_INET ? &v4_peers : &v6_peers;
+}
+
 /* perform garbage collect on all items stacked during a lookup */
 static int inet_peer_gc(struct inet_peer_base *base,
 			struct inet_peer __rcu **stack[PEER_MAXDEPTH],
@@ -400,11 +429,10 @@ static int inet_peer_gc(struct inet_peer_base *base,
 	return cnt;
 }
 
-struct inet_peer *inet_getpeer(struct inet_peer_base *base,
-			       const struct inetpeer_addr *daddr,
-			       int create)
+struct inet_peer *inet_getpeer(const struct inetpeer_addr *daddr, int create)
 {
 	struct inet_peer __rcu **stack[PEER_MAXDEPTH], ***stackptr;
+	struct inet_peer_base *base = family_to_base(daddr->family);
 	struct inet_peer *p;
 	unsigned int sequence;
 	int invalidated, gccnt = 0;
@@ -446,13 +474,13 @@ relookup:
 		p->daddr = *daddr;
 		atomic_set(&p->refcnt, 1);
 		atomic_set(&p->rid, 0);
+		p->tcp_ts_stamp = 0;
 		p->metrics[RTAX_LOCK-1] = INETPEER_METRICS_NEW;
 		p->rate_tokens = 0;
-		p->n_redirects = 0;
-		/* 60*HZ is arbitrary, but chosen enough high so that the first
-		 * calculation of tokens is at its maximum.
-		 */
-		p->rate_last = jiffies - 60*HZ;
+		p->rate_last = 0;
+		p->pmtu_expires = 0;
+		p->pmtu_orig = 0;
+		memset(&p->redirect_learned, 0, sizeof(p->redirect_learned));
 		INIT_LIST_HEAD(&p->gc_list);
 
 		/* Link the node. */
@@ -468,7 +496,7 @@ EXPORT_SYMBOL_GPL(inet_getpeer);
 void inet_putpeer(struct inet_peer *p)
 {
 	p->dtime = (__u32)jiffies;
-	smp_mb__before_atomic();
+	smp_mb__before_atomic_dec();
 	atomic_dec(&p->refcnt);
 }
 EXPORT_SYMBOL_GPL(inet_putpeer);
@@ -525,19 +553,26 @@ static void inetpeer_inval_rcu(struct rcu_head *head)
 	schedule_delayed_work(&gc_work, gc_delay);
 }
 
-void inetpeer_invalidate_tree(struct inet_peer_base *base)
+void inetpeer_invalidate_tree(int family)
 {
-	struct inet_peer *root;
+	struct inet_peer *old, *new, *prev;
+	struct inet_peer_base *base = family_to_base(family);
 
 	write_seqlock_bh(&base->lock);
 
-	root = rcu_deref_locked(base->root, base);
-	if (root != peer_avl_empty) {
-		base->root = peer_avl_empty_rcu;
+	old = base->root;
+	if (old == peer_avl_empty_rcu)
+		goto out;
+
+	new = peer_avl_empty_rcu;
+
+	prev = cmpxchg(&base->root, old, new);
+	if (prev == old) {
 		base->total = 0;
-		call_rcu(&root->gc_rcu, inetpeer_inval_rcu);
+		call_rcu(&prev->gc_rcu, inetpeer_inval_rcu);
 	}
 
+out:
 	write_sequnlock_bh(&base->lock);
 }
 EXPORT_SYMBOL(inetpeer_invalidate_tree);

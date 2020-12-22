@@ -23,12 +23,16 @@
  * See the GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with GNU CC; see the file COPYING.  If not, see
- * <http://www.gnu.org/licenses/>.
+ * along with GNU CC; see the file COPYING.  If not, write to
+ * the Free Software Foundation, 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  * Please send any bug reports or fixes you make to the
  * email address(es):
- *    lksctp developers <linux-sctp@vger.kernel.org>
+ *    lksctp developers <lksctp-developers@lists.sourceforge.net>
+ *
+ * Or submit a bug report through the following website:
+ *    http://www.sf.net/projects/lksctp
  *
  * Written or modified by:
  *    La Monte H.P. Yarroll <piggy@acm.org>
@@ -36,6 +40,9 @@
  *    Karl Knutson          <karl@athena.chicago.il.us>
  *    Ardelle Fan	    <ardelle.fan@intel.com>
  *    Kevin Gao             <kevin.gao@intel.com>
+ *
+ * Any bugs reported given to us we will try to fix... any fixes shared will
+ * be incorporated into the next SCTP release.
  */
 
 #include <linux/types.h>
@@ -50,7 +57,7 @@
 
 #define DECLARE_PRIMITIVE(name) \
 /* This is called in the code as sctp_primitive_ ## name.  */ \
-int sctp_primitive_ ## name(struct net *net, struct sctp_association *asoc, \
+int sctp_primitive_ ## name(struct sctp_association *asoc, \
 			    void *arg) { \
 	int error = 0; \
 	sctp_event_t event_type; sctp_subtype_t subtype; \
@@ -62,7 +69,7 @@ int sctp_primitive_ ## name(struct net *net, struct sctp_association *asoc, \
 	state = asoc ? asoc->state : SCTP_STATE_CLOSED; \
 	ep = asoc ? asoc->ep : NULL; \
 	\
-	error = sctp_do_sm(net, event_type, subtype, state, ep, asoc,	\
+	error = sctp_do_sm(event_type, subtype, state, ep, asoc, \
 			   arg, GFP_KERNEL); \
 	return error; \
 }

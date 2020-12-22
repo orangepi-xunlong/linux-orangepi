@@ -3,5 +3,5 @@ config FILE_INTEGRITY
 	depends on SECURITYFS
 	default n
 	help
-	  This selects off-line file integrity module , which help to verify
+	  This selects off-line file integrity module , which help to verify 
 	  the system file integrity on run-time

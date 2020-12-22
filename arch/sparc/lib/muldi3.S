@@ -17,7 +17,6 @@ along with GNU CC; see the file COPYING.  If not, write to
 the Free Software Foundation, 59 Temple Place - Suite 330,
 Boston, MA 02111-1307, USA.  */
 
-#include <asm/export.h>
 	.text
 	.align 4
 	.globl __muldi3
@@ -64,15 +63,14 @@ __muldi3:
 	rd  %y, %o1
 	mov  %o1, %l3
 	mov  %i1, %o0
+	call  .umul
 	mov  %i2, %o1
-	umul %o0, %o1, %o0
 	mov  %o0, %l0
 	mov  %i0, %o0
+	call  .umul
 	mov  %i3, %o1
-	umul %o0, %o1, %o0
 	add  %l0, %o0, %l0
 	mov  %l2, %i0
 	add  %l2, %l0, %i0
 	ret 
 	restore  %g0, %l3, %o1
-EXPORT_SYMBOL(__muldi3)

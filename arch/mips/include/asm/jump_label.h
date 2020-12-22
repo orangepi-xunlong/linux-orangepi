@@ -8,9 +8,9 @@
 #ifndef _ASM_MIPS_JUMP_LABEL_H
 #define _ASM_MIPS_JUMP_LABEL_H
 
-#ifndef __ASSEMBLY__
-
 #include <linux/types.h>
+
+#ifdef __KERNEL__
 
 #define JUMP_LABEL_NOP_SIZE 4
 
@@ -20,39 +20,20 @@
 #define WORD_INSN ".word"
 #endif
 
-#ifdef CONFIG_CPU_MICROMIPS
-#define B_INSN "b32"
-#else
-#define B_INSN "b"
-#endif
-
-static __always_inline bool arch_static_branch(struct static_key *key, bool branch)
+static __always_inline bool arch_static_branch(struct static_key *key)
 {
-	asm_volatile_goto("1:\t" B_INSN " 2f\n\t"
-		"2:\tnop\n\t"
-		".pushsection __jump_table,  \"aw\"\n\t"
-		WORD_INSN " 1b, %l[l_yes], %0\n\t"
-		".popsection\n\t"
-		: :  "i" (&((char *)key)[branch]) : : l_yes);
-
-	return false;
-l_yes:
-	return true;
-}
-
-static __always_inline bool arch_static_branch_jump(struct static_key *key, bool branch)
-{
-	asm_volatile_goto("1:\tj %l[l_yes]\n\t"
+	asm_volatile_goto("1:\tnop\n\t"
 		"nop\n\t"
 		".pushsection __jump_table,  \"aw\"\n\t"
 		WORD_INSN " 1b, %l[l_yes], %0\n\t"
 		".popsection\n\t"
-		: :  "i" (&((char *)key)[branch]) : : l_yes);
-
+		: :  "i" (key) : : l_yes);
 	return false;
 l_yes:
 	return true;
 }
+
+#endif /* __KERNEL__ */
 
 #ifdef CONFIG_64BIT
 typedef u64 jump_label_t;
@@ -66,5 +47,4 @@ struct jump_entry {
 	jump_label_t key;
 };
 
-#endif  /* __ASSEMBLY__ */
 #endif /* _ASM_MIPS_JUMP_LABEL_H */

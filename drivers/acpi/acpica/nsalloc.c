@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -52,7 +52,7 @@ ACPI_MODULE_NAME("nsalloc")
  *
  * FUNCTION:    acpi_ns_create_node
  *
- * PARAMETERS:  name            - Name of the new node (4 char ACPI name)
+ * PARAMETERS:  Name            - Name of the new node (4 char ACPI name)
  *
  * RETURN:      New namespace node (Null on failure)
  *
@@ -92,7 +92,7 @@ struct acpi_namespace_node *acpi_ns_create_node(u32 name)
  *
  * FUNCTION:    acpi_ns_delete_node
  *
- * PARAMETERS:  node            - Node to be deleted
+ * PARAMETERS:  Node            - Node to be deleted
  *
  * RETURN:      None
  *
@@ -106,7 +106,6 @@ struct acpi_namespace_node *acpi_ns_create_node(u32 name)
 void acpi_ns_delete_node(struct acpi_namespace_node *node)
 {
 	union acpi_operand_object *obj_desc;
-	union acpi_operand_object *next_desc;
 
 	ACPI_FUNCTION_NAME(ns_delete_node);
 
@@ -115,13 +114,12 @@ void acpi_ns_delete_node(struct acpi_namespace_node *node)
 	acpi_ns_detach_object(node);
 
 	/*
-	 * Delete an attached data object list if present (objects that were
-	 * attached via acpi_attach_data). Note: After any normal object is
-	 * detached above, the only possible remaining object(s) are data
-	 * objects, in a linked list.
+	 * Delete an attached data object if present (an object that was created
+	 * and attached via acpi_attach_data). Note: After any normal object is
+	 * detached above, the only possible remaining object is a data object.
 	 */
 	obj_desc = node->object;
-	while (obj_desc && (obj_desc->common.type == ACPI_TYPE_LOCAL_DATA)) {
+	if (obj_desc && (obj_desc->common.type == ACPI_TYPE_LOCAL_DATA)) {
 
 		/* Invoke the attached data deletion handler if present */
 
@@ -129,15 +127,7 @@ void acpi_ns_delete_node(struct acpi_namespace_node *node)
 			obj_desc->data.handler(node, obj_desc->data.pointer);
 		}
 
-		next_desc = obj_desc->common.next_object;
 		acpi_ut_remove_reference(obj_desc);
-		obj_desc = next_desc;
-	}
-
-	/* Special case for the statically allocated root node */
-
-	if (node == acpi_gbl_root_node) {
-		return;
 	}
 
 	/* Now we can delete the node */
@@ -153,7 +143,7 @@ void acpi_ns_delete_node(struct acpi_namespace_node *node)
  *
  * FUNCTION:    acpi_ns_remove_node
  *
- * PARAMETERS:  node            - Node to be removed/deleted
+ * PARAMETERS:  Node            - Node to be removed/deleted
  *
  * RETURN:      None
  *
@@ -206,8 +196,8 @@ void acpi_ns_remove_node(struct acpi_namespace_node *node)
  *
  * PARAMETERS:  walk_state      - Current state of the walk
  *              parent_node     - The parent of the new Node
- *              node            - The new Node to install
- *              type            - ACPI object type of the new Node
+ *              Node            - The new Node to install
+ *              Type            - ACPI object type of the new Node
  *
  * RETURN:      None
  *
@@ -342,7 +332,7 @@ void acpi_ns_delete_children(struct acpi_namespace_node *parent_node)
  *
  * RETURN:      None.
  *
- * DESCRIPTION: Delete a subtree of the namespace. This includes all objects
+ * DESCRIPTION: Delete a subtree of the namespace.  This includes all objects
  *              stored within the subtree.
  *
  ******************************************************************************/
@@ -428,7 +418,7 @@ void acpi_ns_delete_namespace_subtree(struct acpi_namespace_node *parent_node)
  * RETURN:      Status
  *
  * DESCRIPTION: Delete entries within the namespace that are owned by a
- *              specific ID. Used to delete entire ACPI tables. All
+ *              specific ID.  Used to delete entire ACPI tables.  All
  *              reference counts are updated.
  *
  * MUTEX:       Locks namespace during deletion walk.

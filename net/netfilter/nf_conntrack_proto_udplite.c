@@ -35,27 +35,14 @@ static unsigned int udplite_timeouts[UDPLITE_CT_MAX] = {
 	[UDPLITE_CT_REPLIED]	= 180*HZ,
 };
 
-static int udplite_net_id __read_mostly;
-struct udplite_net {
-	struct nf_proto_net pn;
-	unsigned int timeouts[UDPLITE_CT_MAX];
-};
-
-static inline struct udplite_net *udplite_pernet(struct net *net)
-{
-	return net_generic(net, udplite_net_id);
-}
-
 static bool udplite_pkt_to_tuple(const struct sk_buff *skb,
 				 unsigned int dataoff,
-				 struct net *net,
 				 struct nf_conntrack_tuple *tuple)
 {
 	const struct udphdr *hp;
 	struct udphdr _hdr;
 
-	/* Actually only need first 4 bytes to get ports. */
-	hp = skb_header_pointer(skb, dataoff, 4, &_hdr);
+	hp = skb_header_pointer(skb, dataoff, sizeof(_hdr), &_hdr);
 	if (hp == NULL)
 		return false;
 
@@ -73,17 +60,17 @@ static bool udplite_invert_tuple(struct nf_conntrack_tuple *tuple,
 }
 
 /* Print out the per-protocol part of the tuple. */
-static void udplite_print_tuple(struct seq_file *s,
-				const struct nf_conntrack_tuple *tuple)
+static int udplite_print_tuple(struct seq_file *s,
+			       const struct nf_conntrack_tuple *tuple)
 {
-	seq_printf(s, "sport=%hu dport=%hu ",
-		   ntohs(tuple->src.u.udp.port),
-		   ntohs(tuple->dst.u.udp.port));
+	return seq_printf(s, "sport=%hu dport=%hu ",
+			  ntohs(tuple->src.u.udp.port),
+			  ntohs(tuple->dst.u.udp.port));
 }
 
 static unsigned int *udplite_get_timeouts(struct net *net)
 {
-	return udplite_pernet(net)->timeouts;
+	return udplite_timeouts;
 }
 
 /* Returns verdict for packet, and may modify conntracktype */
@@ -133,7 +120,7 @@ static int udplite_error(struct net *net, struct nf_conn *tmpl,
 	hdr = skb_header_pointer(skb, dataoff, sizeof(_hdr), &_hdr);
 	if (hdr == NULL) {
 		if (LOG_INVALID(net, IPPROTO_UDPLITE))
-			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+			nf_log_packet(pf, 0, skb, NULL, NULL, NULL,
 				      "nf_ct_udplite: short packet ");
 		return -NF_ACCEPT;
 	}
@@ -143,7 +130,7 @@ static int udplite_error(struct net *net, struct nf_conn *tmpl,
 		cscov = udplen;
 	else if (cscov < sizeof(*hdr) || cscov > udplen) {
 		if (LOG_INVALID(net, IPPROTO_UDPLITE))
-			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+			nf_log_packet(pf, 0, skb, NULL, NULL, NULL,
 				"nf_ct_udplite: invalid checksum coverage ");
 		return -NF_ACCEPT;
 	}
@@ -151,7 +138,7 @@ static int udplite_error(struct net *net, struct nf_conn *tmpl,
 	/* UDPLITE mandates checksums */
 	if (!hdr->check) {
 		if (LOG_INVALID(net, IPPROTO_UDPLITE))
-			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+			nf_log_packet(pf, 0, skb, NULL, NULL, NULL,
 				      "nf_ct_udplite: checksum missing ");
 		return -NF_ACCEPT;
 	}
@@ -161,7 +148,7 @@ static int udplite_error(struct net *net, struct nf_conn *tmpl,
 	    nf_checksum_partial(skb, hooknum, dataoff, cscov, IPPROTO_UDP,
 	    			pf)) {
 		if (LOG_INVALID(net, IPPROTO_UDPLITE))
-			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+			nf_log_packet(pf, 0, skb, NULL, NULL, NULL,
 				      "nf_ct_udplite: bad UDPLite checksum ");
 		return -NF_ACCEPT;
 	}
@@ -174,15 +161,13 @@ static int udplite_error(struct net *net, struct nf_conn *tmpl,
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter/nfnetlink_cttimeout.h>
 
-static int udplite_timeout_nlattr_to_obj(struct nlattr *tb[],
-					 struct net *net, void *data)
+static int udplite_timeout_nlattr_to_obj(struct nlattr *tb[], void *data)
 {
 	unsigned int *timeouts = data;
-	struct udplite_net *un = udplite_pernet(net);
 
 	/* set default timeouts for UDPlite. */
-	timeouts[UDPLITE_CT_UNREPLIED] = un->timeouts[UDPLITE_CT_UNREPLIED];
-	timeouts[UDPLITE_CT_REPLIED] = un->timeouts[UDPLITE_CT_REPLIED];
+	timeouts[UDPLITE_CT_UNREPLIED] = udplite_timeouts[UDPLITE_CT_UNREPLIED];
+	timeouts[UDPLITE_CT_REPLIED] = udplite_timeouts[UDPLITE_CT_REPLIED];
 
 	if (tb[CTA_TIMEOUT_UDPLITE_UNREPLIED]) {
 		timeouts[UDPLITE_CT_UNREPLIED] =
@@ -200,11 +185,10 @@ udplite_timeout_obj_to_nlattr(struct sk_buff *skb, const void *data)
 {
 	const unsigned int *timeouts = data;
 
-	if (nla_put_be32(skb, CTA_TIMEOUT_UDPLITE_UNREPLIED,
-			 htonl(timeouts[UDPLITE_CT_UNREPLIED] / HZ)) ||
-	    nla_put_be32(skb, CTA_TIMEOUT_UDPLITE_REPLIED,
-			 htonl(timeouts[UDPLITE_CT_REPLIED] / HZ)))
-		goto nla_put_failure;
+	NLA_PUT_BE32(skb, CTA_TIMEOUT_UDPLITE_UNREPLIED,
+			htonl(timeouts[UDPLITE_CT_UNREPLIED] / HZ));
+	NLA_PUT_BE32(skb, CTA_TIMEOUT_UDPLITE_REPLIED,
+			htonl(timeouts[UDPLITE_CT_REPLIED] / HZ));
 	return 0;
 
 nla_put_failure:
@@ -219,15 +203,19 @@ udplite_timeout_nla_policy[CTA_TIMEOUT_UDPLITE_MAX+1] = {
 #endif /* CONFIG_NF_CT_NETLINK_TIMEOUT */
 
 #ifdef CONFIG_SYSCTL
+static unsigned int udplite_sysctl_table_users;
+static struct ctl_table_header *udplite_sysctl_header;
 static struct ctl_table udplite_sysctl_table[] = {
 	{
 		.procname	= "nf_conntrack_udplite_timeout",
+		.data		= &udplite_timeouts[UDPLITE_CT_UNREPLIED],
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_jiffies,
 	},
 	{
 		.procname	= "nf_conntrack_udplite_timeout_stream",
+		.data		= &udplite_timeouts[UDPLITE_CT_REPLIED],
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_jiffies,
@@ -236,46 +224,11 @@ static struct ctl_table udplite_sysctl_table[] = {
 };
 #endif /* CONFIG_SYSCTL */
 
-static int udplite_kmemdup_sysctl_table(struct nf_proto_net *pn,
-					struct udplite_net *un)
-{
-#ifdef CONFIG_SYSCTL
-	if (pn->ctl_table)
-		return 0;
-
-	pn->ctl_table = kmemdup(udplite_sysctl_table,
-				sizeof(udplite_sysctl_table),
-				GFP_KERNEL);
-	if (!pn->ctl_table)
-		return -ENOMEM;
-
-	pn->ctl_table[0].data = &un->timeouts[UDPLITE_CT_UNREPLIED];
-	pn->ctl_table[1].data = &un->timeouts[UDPLITE_CT_REPLIED];
-#endif
-	return 0;
-}
-
-static int udplite_init_net(struct net *net, u_int16_t proto)
-{
-	struct udplite_net *un = udplite_pernet(net);
-	struct nf_proto_net *pn = &un->pn;
-
-	if (!pn->users) {
-		int i;
-
-		for (i = 0 ; i < UDPLITE_CT_MAX; i++)
-			un->timeouts[i] = udplite_timeouts[i];
-	}
-
-	return udplite_kmemdup_sysctl_table(pn, un);
-}
-
 static struct nf_conntrack_l4proto nf_conntrack_l4proto_udplite4 __read_mostly =
 {
 	.l3proto		= PF_INET,
 	.l4proto		= IPPROTO_UDPLITE,
 	.name			= "udplite",
-	.allow_clash		= true,
 	.pkt_to_tuple		= udplite_pkt_to_tuple,
 	.invert_tuple		= udplite_invert_tuple,
 	.print_tuple		= udplite_print_tuple,
@@ -299,8 +252,11 @@ static struct nf_conntrack_l4proto nf_conntrack_l4proto_udplite4 __read_mostly =
 		.nla_policy	= udplite_timeout_nla_policy,
 	},
 #endif /* CONFIG_NF_CT_NETLINK_TIMEOUT */
-	.net_id			= &udplite_net_id,
-	.init_net		= udplite_init_net,
+#ifdef CONFIG_SYSCTL
+	.ctl_table_users	= &udplite_sysctl_table_users,
+	.ctl_table_header	= &udplite_sysctl_header,
+	.ctl_table		= udplite_sysctl_table,
+#endif
 };
 
 static struct nf_conntrack_l4proto nf_conntrack_l4proto_udplite6 __read_mostly =
@@ -308,7 +264,6 @@ static struct nf_conntrack_l4proto nf_conntrack_l4proto_udplite6 __read_mostly =
 	.l3proto		= PF_INET6,
 	.l4proto		= IPPROTO_UDPLITE,
 	.name			= "udplite",
-	.allow_clash		= true,
 	.pkt_to_tuple		= udplite_pkt_to_tuple,
 	.invert_tuple		= udplite_invert_tuple,
 	.print_tuple		= udplite_print_tuple,
@@ -332,75 +287,34 @@ static struct nf_conntrack_l4proto nf_conntrack_l4proto_udplite6 __read_mostly =
 		.nla_policy	= udplite_timeout_nla_policy,
 	},
 #endif /* CONFIG_NF_CT_NETLINK_TIMEOUT */
-	.net_id			= &udplite_net_id,
-	.init_net		= udplite_init_net,
-};
-
-static int udplite_net_init(struct net *net)
-{
-	int ret = 0;
-
-	ret = nf_ct_l4proto_pernet_register(net, &nf_conntrack_l4proto_udplite4);
-	if (ret < 0) {
-		pr_err("nf_conntrack_udplite4: pernet registration failed.\n");
-		goto out;
-	}
-	ret = nf_ct_l4proto_pernet_register(net, &nf_conntrack_l4proto_udplite6);
-	if (ret < 0) {
-		pr_err("nf_conntrack_udplite6: pernet registration failed.\n");
-		goto cleanup_udplite4;
-	}
-	return 0;
-
-cleanup_udplite4:
-	nf_ct_l4proto_pernet_unregister(net, &nf_conntrack_l4proto_udplite4);
-out:
-	return ret;
-}
-
-static void udplite_net_exit(struct net *net)
-{
-	nf_ct_l4proto_pernet_unregister(net, &nf_conntrack_l4proto_udplite6);
-	nf_ct_l4proto_pernet_unregister(net, &nf_conntrack_l4proto_udplite4);
-}
-
-static struct pernet_operations udplite_net_ops = {
-	.init = udplite_net_init,
-	.exit = udplite_net_exit,
-	.id   = &udplite_net_id,
-	.size = sizeof(struct udplite_net),
+#ifdef CONFIG_SYSCTL
+	.ctl_table_users	= &udplite_sysctl_table_users,
+	.ctl_table_header	= &udplite_sysctl_header,
+	.ctl_table		= udplite_sysctl_table,
+#endif
 };
 
 static int __init nf_conntrack_proto_udplite_init(void)
 {
-	int ret;
+	int err;
 
-	ret = register_pernet_subsys(&udplite_net_ops);
-	if (ret < 0)
-		goto out_pernet;
-
-	ret = nf_ct_l4proto_register(&nf_conntrack_l4proto_udplite4);
-	if (ret < 0)
-		goto out_udplite4;
-
-	ret = nf_ct_l4proto_register(&nf_conntrack_l4proto_udplite6);
-	if (ret < 0)
-		goto out_udplite6;
-
+	err = nf_conntrack_l4proto_register(&nf_conntrack_l4proto_udplite4);
+	if (err < 0)
+		goto err1;
+	err = nf_conntrack_l4proto_register(&nf_conntrack_l4proto_udplite6);
+	if (err < 0)
+		goto err2;
 	return 0;
-out_udplite6:
-	nf_ct_l4proto_unregister(&nf_conntrack_l4proto_udplite4);
-out_udplite4:
-	unregister_pernet_subsys(&udplite_net_ops);
-out_pernet:
-	return ret;
+err2:
+	nf_conntrack_l4proto_unregister(&nf_conntrack_l4proto_udplite4);
+err1:
+	return err;
 }
 
 static void __exit nf_conntrack_proto_udplite_exit(void)
 {
-	nf_ct_l4proto_unregister(&nf_conntrack_l4proto_udplite6);
-	nf_ct_l4proto_unregister(&nf_conntrack_l4proto_udplite4);
-	unregister_pernet_subsys(&udplite_net_ops);
+	nf_conntrack_l4proto_unregister(&nf_conntrack_l4proto_udplite6);
+	nf_conntrack_l4proto_unregister(&nf_conntrack_l4proto_udplite4);
 }
 
 module_init(nf_conntrack_proto_udplite_init);

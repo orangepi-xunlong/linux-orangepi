@@ -29,7 +29,6 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Ben Gardner <bgardner@wabtec.com>");
 MODULE_DESCRIPTION("w1 family 23 driver for DS2433, 4kb EEPROM");
-MODULE_ALIAS("w1-family-" __stringify(W1_EEPROM_DS2433));
 
 #define W1_EEPROM_SIZE		512
 #define W1_PAGE_COUNT		16
@@ -93,9 +92,9 @@ static int w1_f23_refresh_block(struct w1_slave *sl, struct w1_f23_data *data,
 }
 #endif	/* CONFIG_W1_SLAVE_DS2433_CRC */
 
-static ssize_t eeprom_read(struct file *filp, struct kobject *kobj,
-			   struct bin_attribute *bin_attr, char *buf,
-			   loff_t off, size_t count)
+static ssize_t w1_f23_read_bin(struct file *filp, struct kobject *kobj,
+			       struct bin_attribute *bin_attr,
+			       char *buf, loff_t off, size_t count)
 {
 	struct w1_slave *sl = kobj_to_w1_slave(kobj);
 #ifdef CONFIG_W1_SLAVE_DS2433_CRC
@@ -108,7 +107,7 @@ static ssize_t eeprom_read(struct file *filp, struct kobject *kobj,
 	if ((count = w1_f23_fix_count(off, count, W1_EEPROM_SIZE)) == 0)
 		return 0;
 
-	mutex_lock(&sl->master->bus_mutex);
+	mutex_lock(&sl->master->mutex);
 
 #ifdef CONFIG_W1_SLAVE_DS2433_CRC
 
@@ -139,7 +138,7 @@ static ssize_t eeprom_read(struct file *filp, struct kobject *kobj,
 #endif	/* CONFIG_W1_SLAVE_DS2433_CRC */
 
 out_up:
-	mutex_unlock(&sl->master->bus_mutex);
+	mutex_unlock(&sl->master->mutex);
 
 	return count;
 }
@@ -207,9 +206,9 @@ static int w1_f23_write(struct w1_slave *sl, int addr, int len, const u8 *data)
 	return 0;
 }
 
-static ssize_t eeprom_write(struct file *filp, struct kobject *kobj,
-			    struct bin_attribute *bin_attr, char *buf,
-			    loff_t off, size_t count)
+static ssize_t w1_f23_write_bin(struct file *filp, struct kobject *kobj,
+				struct bin_attribute *bin_attr,
+				char *buf, loff_t off, size_t count)
 {
 	struct w1_slave *sl = kobj_to_w1_slave(kobj);
 	int addr, len, idx;
@@ -234,7 +233,7 @@ static ssize_t eeprom_write(struct file *filp, struct kobject *kobj,
 	}
 #endif	/* CONFIG_W1_SLAVE_DS2433_CRC */
 
-	mutex_lock(&sl->master->bus_mutex);
+	mutex_lock(&sl->master->mutex);
 
 	/* Can only write data to one page at a time */
 	idx = 0;
@@ -252,29 +251,24 @@ static ssize_t eeprom_write(struct file *filp, struct kobject *kobj,
 	}
 
 out_up:
-	mutex_unlock(&sl->master->bus_mutex);
+	mutex_unlock(&sl->master->mutex);
 
 	return count;
 }
 
-static BIN_ATTR_RW(eeprom, W1_EEPROM_SIZE);
-
-static struct bin_attribute *w1_f23_bin_attributes[] = {
-	&bin_attr_eeprom,
-	NULL,
-};
-
-static const struct attribute_group w1_f23_group = {
-	.bin_attrs = w1_f23_bin_attributes,
-};
-
-static const struct attribute_group *w1_f23_groups[] = {
-	&w1_f23_group,
-	NULL,
+static struct bin_attribute w1_f23_bin_attr = {
+	.attr = {
+		.name = "eeprom",
+		.mode = S_IRUGO | S_IWUSR,
+	},
+	.size = W1_EEPROM_SIZE,
+	.read = w1_f23_read_bin,
+	.write = w1_f23_write_bin,
 };
 
 static int w1_f23_add_slave(struct w1_slave *sl)
 {
+	int err;
 #ifdef CONFIG_W1_SLAVE_DS2433_CRC
 	struct w1_f23_data *data;
 
@@ -284,7 +278,15 @@ static int w1_f23_add_slave(struct w1_slave *sl)
 	sl->family_data = data;
 
 #endif	/* CONFIG_W1_SLAVE_DS2433_CRC */
-	return 0;
+
+	err = sysfs_create_bin_file(&sl->dev.kobj, &w1_f23_bin_attr);
+
+#ifdef CONFIG_W1_SLAVE_DS2433_CRC
+	if (err)
+		kfree(data);
+#endif	/* CONFIG_W1_SLAVE_DS2433_CRC */
+
+	return err;
 }
 
 static void w1_f23_remove_slave(struct w1_slave *sl)
@@ -293,16 +295,28 @@ static void w1_f23_remove_slave(struct w1_slave *sl)
 	kfree(sl->family_data);
 	sl->family_data = NULL;
 #endif	/* CONFIG_W1_SLAVE_DS2433_CRC */
+	sysfs_remove_bin_file(&sl->dev.kobj, &w1_f23_bin_attr);
 }
 
 static struct w1_family_ops w1_f23_fops = {
 	.add_slave      = w1_f23_add_slave,
 	.remove_slave   = w1_f23_remove_slave,
-	.groups		= w1_f23_groups,
 };
 
 static struct w1_family w1_family_23 = {
 	.fid = W1_EEPROM_DS2433,
 	.fops = &w1_f23_fops,
 };
-module_w1_family(w1_family_23);
+
+static int __init w1_f23_init(void)
+{
+	return w1_register_family(&w1_family_23);
+}
+
+static void __exit w1_f23_fini(void)
+{
+	w1_unregister_family(&w1_family_23);
+}
+
+module_init(w1_f23_init);
+module_exit(w1_f23_fini);

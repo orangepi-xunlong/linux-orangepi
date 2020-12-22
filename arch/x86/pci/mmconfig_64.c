@@ -9,7 +9,6 @@
 #include <linux/init.h>
 #include <linux/acpi.h>
 #include <linux/bitmap.h>
-#include <linux/rcupdate.h>
 #include <asm/e820.h>
 #include <asm/pci_x86.h>
 
@@ -35,12 +34,9 @@ err:		*value = -1;
 		return -EINVAL;
 	}
 
-	rcu_read_lock();
 	addr = pci_dev_base(seg, bus, devfn);
-	if (!addr) {
-		rcu_read_unlock();
+	if (!addr)
 		goto err;
-	}
 
 	switch (len) {
 	case 1:
@@ -53,7 +49,6 @@ err:		*value = -1;
 		*value = mmio_config_readl(addr + reg);
 		break;
 	}
-	rcu_read_unlock();
 
 	return 0;
 }
@@ -67,12 +62,9 @@ static int pci_mmcfg_write(unsigned int seg, unsigned int bus,
 	if (unlikely((bus > 255) || (devfn > 255) || (reg > 4095)))
 		return -EINVAL;
 
-	rcu_read_lock();
 	addr = pci_dev_base(seg, bus, devfn);
-	if (!addr) {
-		rcu_read_unlock();
+	if (!addr)
 		return -EINVAL;
-	}
 
 	switch (len) {
 	case 1:
@@ -85,17 +77,16 @@ static int pci_mmcfg_write(unsigned int seg, unsigned int bus,
 		mmio_config_writel(addr + reg, value);
 		break;
 	}
-	rcu_read_unlock();
 
 	return 0;
 }
 
-const struct pci_raw_ops pci_mmcfg = {
+static const struct pci_raw_ops pci_mmcfg = {
 	.read =		pci_mmcfg_read,
 	.write =	pci_mmcfg_write,
 };
 
-static void __iomem *mcfg_ioremap(struct pci_mmcfg_region *cfg)
+static void __iomem * __init mcfg_ioremap(struct pci_mmcfg_region *cfg)
 {
 	void __iomem *addr;
 	u64 start, size;
@@ -114,14 +105,16 @@ int __init pci_mmcfg_arch_init(void)
 {
 	struct pci_mmcfg_region *cfg;
 
-	list_for_each_entry(cfg, &pci_mmcfg_list, list)
-		if (pci_mmcfg_arch_map(cfg)) {
+	list_for_each_entry(cfg, &pci_mmcfg_list, list) {
+		cfg->virt = mcfg_ioremap(cfg);
+		if (!cfg->virt) {
+			printk(KERN_ERR PREFIX "can't map MMCONFIG at %pR\n",
+			       &cfg->res);
 			pci_mmcfg_arch_free();
 			return 0;
 		}
-
+	}
 	raw_pci_ext_ops = &pci_mmcfg;
-
 	return 1;
 }
 
@@ -129,25 +122,10 @@ void __init pci_mmcfg_arch_free(void)
 {
 	struct pci_mmcfg_region *cfg;
 
-	list_for_each_entry(cfg, &pci_mmcfg_list, list)
-		pci_mmcfg_arch_unmap(cfg);
-}
-
-int pci_mmcfg_arch_map(struct pci_mmcfg_region *cfg)
-{
-	cfg->virt = mcfg_ioremap(cfg);
-	if (!cfg->virt) {
-		pr_err(PREFIX "can't map MMCONFIG at %pR\n", &cfg->res);
-		return -ENOMEM;
-	}
-
-	return 0;
-}
-
-void pci_mmcfg_arch_unmap(struct pci_mmcfg_region *cfg)
-{
-	if (cfg && cfg->virt) {
-		iounmap(cfg->virt + PCI_MMCFG_BUS_OFFSET(cfg->start_bus));
-		cfg->virt = NULL;
+	list_for_each_entry(cfg, &pci_mmcfg_list, list) {
+		if (cfg->virt) {
+			iounmap(cfg->virt + PCI_MMCFG_BUS_OFFSET(cfg->start_bus));
+			cfg->virt = NULL;
+		}
 	}
 }

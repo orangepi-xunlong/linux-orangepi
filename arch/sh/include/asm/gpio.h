@@ -20,7 +20,7 @@
 #endif
 
 #define ARCH_NR_GPIOS 512
-#include <asm-generic/gpio.h>
+#include <linux/sh_pfc.h>
 
 #ifdef CONFIG_GPIOLIB
 

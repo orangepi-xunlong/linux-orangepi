@@ -28,6 +28,7 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <generated/utsrelease.h>
 #include <linux/utsname.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -39,11 +40,17 @@
 #include <linux/hash.h>
 #include <linux/ratelimit.h>
 #include <asm/unaligned.h>
+#include <scsi/scsi.h>
+#include <scsi/scsi_host.h>
+#include <scsi/scsi_device.h>
+#include <scsi/scsi_cmnd.h>
 #include <scsi/libfc.h>
 #include <scsi/fc_encode.h>
 
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
+#include <target/target_core_configfs.h>
+#include <target/configfs_macros.h>
 
 #include "tcm_fc.h"
 
@@ -76,10 +83,6 @@ int ft_queue_data_in(struct se_cmd *se_cmd)
 
 	if (cmd->aborted)
 		return 0;
-
-	if (se_cmd->scsi_status == SAM_STAT_TASK_SET_FULL)
-		goto queue_status;
-
 	ep = fc_seq_exch(cmd->seq);
 	lport = ep->lp;
 	cmd->seq = lport->tt.seq_start_next(cmd->seq);
@@ -101,13 +104,6 @@ int ft_queue_data_in(struct se_cmd *se_cmd)
 	use_sg = !(remaining % 4);
 
 	while (remaining) {
-		struct fc_seq *seq = cmd->seq;
-
-		if (!seq) {
-			pr_debug("%s: Command aborted, xid 0x%x\n",
-				 __func__, ep->xid);
-			break;
-		}
 		if (!mem_len) {
 			sg = sg_next(sg);
 			mem_len = min((size_t)sg->length, remaining);
@@ -154,9 +150,9 @@ int ft_queue_data_in(struct se_cmd *se_cmd)
 			BUG_ON(!page);
 			from = kmap_atomic(page + (mem_off >> PAGE_SHIFT));
 			page_addr = from;
-			from += offset_in_page(mem_off);
+			from += mem_off & ~PAGE_MASK;
 			tlen = min(tlen, (size_t)(PAGE_SIZE -
-						offset_in_page(mem_off)));
+						(mem_off & ~PAGE_MASK)));
 			memcpy(to, from, tlen);
 			kunmap_atomic(page_addr);
 			to += tlen;
@@ -174,33 +170,17 @@ int ft_queue_data_in(struct se_cmd *se_cmd)
 			f_ctl |= FC_FC_END_SEQ;
 		fc_fill_fc_hdr(fp, FC_RCTL_DD_SOL_DATA, ep->did, ep->sid,
 			       FC_TYPE_FCP, f_ctl, fh_off);
-		error = lport->tt.seq_send(lport, seq, fp);
+		error = lport->tt.seq_send(lport, cmd->seq, fp);
 		if (error) {
-			pr_info_ratelimited("%s: Failed to send frame %p, "
+			/* XXX For now, initiator will retry */
+			pr_err_ratelimited("%s: Failed to send frame %p, "
 						"xid <0x%x>, remaining %zu, "
 						"lso_max <0x%x>\n",
 						__func__, fp, ep->xid,
 						remaining, lport->lso_max);
-			/*
-			 * Go ahead and set TASK_SET_FULL status ignoring the
-			 * rest of the DataIN, and immediately attempt to
-			 * send the response via ft_queue_status() in order
-			 * to notify the initiator that it should reduce it's
-			 * per LUN queue_depth.
-			 */
-			se_cmd->scsi_status = SAM_STAT_TASK_SET_FULL;
-			break;
 		}
 	}
-queue_status:
 	return ft_queue_status(se_cmd);
-}
-
-static void ft_execute_work(struct work_struct *work)
-{
-	struct ft_cmd *cmd = container_of(work, struct ft_cmd, work);
-
-	target_execute_cmd(&cmd->se_cmd);
 }
 
 /*
@@ -248,7 +228,7 @@ void ft_recv_write_data(struct ft_cmd *cmd, struct fc_frame *fp)
 				"payload, Frame will be dropped if"
 				"'Sequence Initiative' bit in f_ctl is"
 				"not set\n", __func__, ep->xid, f_ctl,
-				se_cmd->t_data_sg, se_cmd->t_data_nents);
+				cmd->sg, cmd->sg_cnt);
 		/*
 		 * Invalidate HW DDP context if it was setup for respective
 		 * command. Invalidation of HW DDP context is requited in both
@@ -314,9 +294,9 @@ void ft_recv_write_data(struct ft_cmd *cmd, struct fc_frame *fp)
 
 		to = kmap_atomic(page + (mem_off >> PAGE_SHIFT));
 		page_addr = to;
-		to += offset_in_page(mem_off);
+		to += mem_off & ~PAGE_MASK;
 		tlen = min(tlen, (size_t)(PAGE_SIZE -
-					  offset_in_page(mem_off)));
+					  (mem_off & ~PAGE_MASK)));
 		memcpy(to, from, tlen);
 		kunmap_atomic(page_addr);
 
@@ -327,10 +307,8 @@ void ft_recv_write_data(struct ft_cmd *cmd, struct fc_frame *fp)
 		cmd->write_data_len += tlen;
 	}
 last_frame:
-	if (cmd->write_data_len == se_cmd->data_length) {
-		INIT_WORK(&cmd->work, ft_execute_work);
-		queue_work(cmd->sess->tport->tpg->workqueue, &cmd->work);
-	}
+	if (cmd->write_data_len == se_cmd->data_length)
+		transport_generic_handle_data(se_cmd);
 drop:
 	fc_frame_free(fp);
 }
@@ -341,12 +319,11 @@ drop:
  */
 void ft_invl_hw_context(struct ft_cmd *cmd)
 {
-	struct fc_seq *seq;
+	struct fc_seq *seq = cmd->seq;
 	struct fc_exch *ep = NULL;
 	struct fc_lport *lport = NULL;
 
 	BUG_ON(!cmd);
-	seq = cmd->seq;
 
 	/* Cleanup the DDP context in HW if DDP was setup */
 	if (cmd->was_ddp_setup && seq) {

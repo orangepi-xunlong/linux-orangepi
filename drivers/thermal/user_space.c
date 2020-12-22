@@ -22,31 +22,23 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
+#include <linux/module.h>
 #include <linux/thermal.h>
-#include <linux/slab.h>
+
 #include "thermal_core.h"
 
 /**
  * notify_user_space - Notifies user space about thermal events
  * @tz - thermal_zone_device
- * @trip - Trip point index
  *
  * This function notifies the user space through UEvents.
  */
 static int notify_user_space(struct thermal_zone_device *tz, int trip)
 {
-	char *thermal_prop[5];
-	int i;
-
 	mutex_lock(&tz->lock);
-	thermal_prop[0] = kasprintf(GFP_KERNEL, "NAME=%s", tz->type);
-	thermal_prop[1] = kasprintf(GFP_KERNEL, "TEMP=%d", tz->temperature);
-	thermal_prop[2] = kasprintf(GFP_KERNEL, "TRIP=%d", trip);
-	thermal_prop[3] = kasprintf(GFP_KERNEL, "EVENT=%d", tz->notify_event);
-	thermal_prop[4] = NULL;
-	kobject_uevent_env(&tz->device.kobj, KOBJ_CHANGE, thermal_prop);
-	for (i = 0; i < 4; ++i)
-		kfree(thermal_prop[i]);
+	kobject_uevent(&tz->device.kobj, KOBJ_CHANGE);
 	mutex_unlock(&tz->lock);
 	return 0;
 }
@@ -54,15 +46,23 @@ static int notify_user_space(struct thermal_zone_device *tz, int trip)
 static struct thermal_governor thermal_gov_user_space = {
 	.name		= "user_space",
 	.throttle	= notify_user_space,
+	.owner		= THIS_MODULE,
 };
 
-int thermal_gov_user_space_register(void)
+static int __init thermal_gov_user_space_init(void)
 {
 	return thermal_register_governor(&thermal_gov_user_space);
 }
 
-void thermal_gov_user_space_unregister(void)
+static void __exit thermal_gov_user_space_exit(void)
 {
 	thermal_unregister_governor(&thermal_gov_user_space);
 }
 
+/* This should load after thermal framework */
+fs_initcall(thermal_gov_user_space_init);
+module_exit(thermal_gov_user_space_exit);
+
+MODULE_AUTHOR("Durgadoss R");
+MODULE_DESCRIPTION("A user space Thermal notifier");
+MODULE_LICENSE("GPL");

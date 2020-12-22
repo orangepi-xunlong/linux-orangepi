@@ -13,6 +13,7 @@
 #include <linux/in.h>
 #include <linux/string.h>
 #include <linux/delay.h>
+#include <linux/init.h>
 #include <linux/crc32.h>
 #include <linux/errno.h>
 #include <linux/ethtool.h>
@@ -211,6 +212,7 @@ static void bigmac_clean_rings(struct bigmac *bp)
 static void bigmac_init_rings(struct bigmac *bp, int from_irq)
 {
 	struct bmac_init_block *bb = bp->bmac_block;
+	struct net_device *dev = bp->dev;
 	int i;
 	gfp_t gfp_flags = GFP_KERNEL;
 
@@ -231,6 +233,7 @@ static void bigmac_init_rings(struct bigmac *bp, int from_irq)
 			continue;
 
 		bp->rx_skbs[i] = skb;
+		skb->dev = dev;
 
 		/* Because we reserve afterwards. */
 		skb_put(skb, ETH_FRAME_LEN);
@@ -623,7 +626,6 @@ static int bigmac_init_hw(struct bigmac *bp, int from_irq)
 	void __iomem *gregs        = bp->gregs;
 	void __iomem *cregs        = bp->creg;
 	void __iomem *bregs        = bp->bregs;
-	__u32 bblk_dvma = (__u32)bp->bblock_dvma;
 	unsigned char *e = &bp->dev->dev_addr[0];
 
 	/* Latch current counters into statistics. */
@@ -672,9 +674,9 @@ static int bigmac_init_hw(struct bigmac *bp, int from_irq)
 		    bregs + BMAC_XIFCFG);
 
 	/* Tell the QEC where the ring descriptors are. */
-	sbus_writel(bblk_dvma + bib_offset(be_rxd, 0),
+	sbus_writel(bp->bblock_dvma + bib_offset(be_rxd, 0),
 		    cregs + CREG_RXDS);
-	sbus_writel(bblk_dvma + bib_offset(be_txd, 0),
+	sbus_writel(bp->bblock_dvma + bib_offset(be_txd, 0),
 		    cregs + CREG_TXDS);
 
 	/* Setup the FIFO pointers into QEC local memory. */
@@ -836,6 +838,7 @@ static void bigmac_rx(struct bigmac *bp)
 					 RX_BUF_ALLOC_SIZE - 34,
 					 DMA_FROM_DEVICE);
 			bp->rx_skbs[elem] = new_skb;
+			new_skb->dev = bp->dev;
 			skb_put(new_skb, ETH_FRAME_LEN);
 			skb_reserve(new_skb, 34);
 			this->rx_addr =
@@ -995,6 +998,7 @@ static void bigmac_set_multicast(struct net_device *dev)
 	struct bigmac *bp = netdev_priv(dev);
 	void __iomem *bregs = bp->bregs;
 	struct netdev_hw_addr *ha;
+	int i;
 	u32 tmp, crc;
 
 	/* Disable the receiver.  The bit self-clears when
@@ -1016,7 +1020,10 @@ static void bigmac_set_multicast(struct net_device *dev)
 		tmp |= BIGMAC_RXCFG_PMISC;
 		sbus_writel(tmp, bregs + BMAC_RXCFG);
 	} else {
-		u16 hash_table[4] = { 0 };
+		u16 hash_table[4];
+
+		for (i = 0; i < 4; i++)
+			hash_table[i] = 0;
 
 		netdev_for_each_mc_addr(ha, dev) {
 			crc = ether_crc_le(6, ha->addr);
@@ -1038,8 +1045,8 @@ static void bigmac_set_multicast(struct net_device *dev)
 /* Ethtool support... */
 static void bigmac_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, "sunbmac", sizeof(info->driver));
-	strlcpy(info->version, "2.0", sizeof(info->version));
+	strcpy(info->driver, "sunbmac");
+	strcpy(info->version, "2.0");
 }
 
 static u32 bigmac_get_link(struct net_device *dev)
@@ -1070,8 +1077,8 @@ static const struct net_device_ops bigmac_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
-static int bigmac_ether_init(struct platform_device *op,
-			     struct platform_device *qec_op)
+static int __devinit bigmac_ether_init(struct platform_device *op,
+				       struct platform_device *qec_op)
 {
 	static int version_printed;
 	struct net_device *dev;
@@ -1165,8 +1172,10 @@ static int bigmac_ether_init(struct platform_device *op,
 	bp->bmac_block = dma_alloc_coherent(&bp->bigmac_op->dev,
 					    PAGE_SIZE,
 					    &bp->bblock_dvma, GFP_ATOMIC);
-	if (bp->bmac_block == NULL || bp->bblock_dvma == 0)
+	if (bp->bmac_block == NULL || bp->bblock_dvma == 0) {
+		printk(KERN_ERR "BIGMAC: Cannot allocate consistent DMA.\n");
 		goto fail_and_cleanup;
+	}
 
 	/* Get the board revision of this BigMAC. */
 	bp->board_rev = of_getintprop_default(bp->bigmac_op->dev.of_node,
@@ -1227,7 +1236,7 @@ fail_and_cleanup:
 /* QEC can be the parent of either QuadEthernet or a BigMAC.  We want
  * the latter.
  */
-static int bigmac_sbus_probe(struct platform_device *op)
+static int __devinit bigmac_sbus_probe(struct platform_device *op)
 {
 	struct device *parent = op->dev.parent;
 	struct platform_device *qec_op;
@@ -1237,9 +1246,9 @@ static int bigmac_sbus_probe(struct platform_device *op)
 	return bigmac_ether_init(op, qec_op);
 }
 
-static int bigmac_sbus_remove(struct platform_device *op)
+static int __devexit bigmac_sbus_remove(struct platform_device *op)
 {
-	struct bigmac *bp = platform_get_drvdata(op);
+	struct bigmac *bp = dev_get_drvdata(&op->dev);
 	struct device *parent = op->dev.parent;
 	struct net_device *net_dev = bp->dev;
 	struct platform_device *qec_op;
@@ -1259,6 +1268,8 @@ static int bigmac_sbus_remove(struct platform_device *op)
 
 	free_netdev(net_dev);
 
+	dev_set_drvdata(&op->dev, NULL);
+
 	return 0;
 }
 
@@ -1274,10 +1285,11 @@ MODULE_DEVICE_TABLE(of, bigmac_sbus_match);
 static struct platform_driver bigmac_sbus_driver = {
 	.driver = {
 		.name = "sunbmac",
+		.owner = THIS_MODULE,
 		.of_match_table = bigmac_sbus_match,
 	},
 	.probe		= bigmac_sbus_probe,
-	.remove		= bigmac_sbus_remove,
+	.remove		= __devexit_p(bigmac_sbus_remove),
 };
 
 module_platform_driver(bigmac_sbus_driver);

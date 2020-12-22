@@ -1,0 +1,22 @@
+
+config SND_SUNXI_SOC_AUDIOHUB_INTERFACE
+	tristate "SoC audiohub interface for the allwinnertech SUNXI chips"
+	depends on  ARCH_SUN8IW6 || ARCH_SUN8IW7
+	select SND_SOC_DMAENGINE_PCM
+	default n
+	help
+	  Say Y or M if you want to add support for codecs attached to
+	  the SUNXI AUDIOHUB interface. You will also need
+	  to select the audio interfaces to support below.
+config SND_SUN8IW6_AUDIOHUB
+	tristate "AUDIOHUB for the SUN8IW6 chips"
+	depends on ARCH_SUN8IW6
+	default n
+	help
+	  Say Y or M if you want to add sun8iw6 audiohub support
+config SND_SUN8IW7_AUDIOHUB
+	tristate "AUDIOHUB for the SUN8IW7 chips"
+	depends on ARCH_SUN8IW7
+	default n
+	help
+	  Say Y or M if you want to add sun8iw7 audiohub support

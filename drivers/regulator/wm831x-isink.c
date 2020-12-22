@@ -128,7 +128,7 @@ static int wm831x_isink_get_current(struct regulator_dev *rdev)
 	return wm831x_isinkv_values[ret];
 }
 
-static const struct regulator_ops wm831x_isink_ops = {
+static struct regulator_ops wm831x_isink_ops = {
 	.is_enabled = wm831x_isink_is_enabled,
 	.enable = wm831x_isink_enable,
 	.disable = wm831x_isink_disable,
@@ -148,13 +148,12 @@ static irqreturn_t wm831x_isink_irq(int irq, void *data)
 }
 
 
-static int wm831x_isink_probe(struct platform_device *pdev)
+static __devinit int wm831x_isink_probe(struct platform_device *pdev)
 {
 	struct wm831x *wm831x = dev_get_drvdata(pdev->dev.parent);
-	struct wm831x_pdata *pdata = dev_get_platdata(wm831x->dev);
+	struct wm831x_pdata *pdata = wm831x->dev->platform_data;
 	struct wm831x_isink *isink;
 	int id = pdev->id % ARRAY_SIZE(pdata->isink);
-	struct regulator_config config = { };
 	struct resource *res;
 	int ret, irq;
 
@@ -165,14 +164,16 @@ static int wm831x_isink_probe(struct platform_device *pdev)
 
 	isink = devm_kzalloc(&pdev->dev, sizeof(struct wm831x_isink),
 			     GFP_KERNEL);
-	if (!isink)
+	if (isink == NULL) {
+		dev_err(&pdev->dev, "Unable to allocate private data\n");
 		return -ENOMEM;
+	}
 
 	isink->wm831x = wm831x;
 
-	res = platform_get_resource(pdev, IORESOURCE_REG, 0);
+	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
 	if (res == NULL) {
-		dev_err(&pdev->dev, "No REG resource\n");
+		dev_err(&pdev->dev, "No I/O resource\n");
 		ret = -EINVAL;
 		goto err;
 	}
@@ -188,12 +189,8 @@ static int wm831x_isink_probe(struct platform_device *pdev)
 	isink->desc.type = REGULATOR_CURRENT;
 	isink->desc.owner = THIS_MODULE;
 
-	config.dev = pdev->dev.parent;
-	config.init_data = pdata->isink[id];
-	config.driver_data = isink;
-
-	isink->regulator = devm_regulator_register(&pdev->dev, &isink->desc,
-						   &config);
+	isink->regulator = regulator_register(&isink->desc, &pdev->dev,
+					     pdata->isink[id], isink, NULL);
 	if (IS_ERR(isink->regulator)) {
 		ret = PTR_ERR(isink->regulator);
 		dev_err(wm831x->dev, "Failed to register ISINK%d: %d\n",
@@ -201,30 +198,44 @@ static int wm831x_isink_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	irq = wm831x_irq(wm831x, platform_get_irq(pdev, 0));
-	ret = devm_request_threaded_irq(&pdev->dev, irq, NULL,
-					wm831x_isink_irq,
-					IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-					isink->name,
-					isink);
+	irq = platform_get_irq(pdev, 0);
+	ret = request_threaded_irq(irq, NULL, wm831x_isink_irq,
+				   IRQF_TRIGGER_RISING, isink->name, isink);
 	if (ret != 0) {
 		dev_err(&pdev->dev, "Failed to request ISINK IRQ %d: %d\n",
 			irq, ret);
-		goto err;
+		goto err_regulator;
 	}
 
 	platform_set_drvdata(pdev, isink);
 
 	return 0;
 
+err_regulator:
+	regulator_unregister(isink->regulator);
 err:
 	return ret;
 }
 
+static __devexit int wm831x_isink_remove(struct platform_device *pdev)
+{
+	struct wm831x_isink *isink = platform_get_drvdata(pdev);
+
+	platform_set_drvdata(pdev, NULL);
+
+	free_irq(platform_get_irq(pdev, 0), isink);
+
+	regulator_unregister(isink->regulator);
+
+	return 0;
+}
+
 static struct platform_driver wm831x_isink_driver = {
 	.probe = wm831x_isink_probe,
+	.remove = __devexit_p(wm831x_isink_remove),
 	.driver		= {
 		.name	= "wm831x-isink",
+		.owner	= THIS_MODULE,
 	},
 };
 

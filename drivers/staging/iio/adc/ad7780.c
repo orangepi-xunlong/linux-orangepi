@@ -1,5 +1,5 @@
 /*
- * AD7170/AD7171 and AD7780/AD7781 SPI ADC driver
+ * AD7780/AD7781 SPI ADC driver
  *
  * Copyright 2011 Analog Devices Inc.
  *
@@ -15,69 +15,71 @@
 #include <linux/regulator/consumer.h>
 #include <linux/err.h>
 #include <linux/sched.h>
-#include <linux/gpio/consumer.h>
+#include <linux/gpio.h>
 #include <linux/module.h>
 
-#include <linux/iio/iio.h>
-#include <linux/iio/sysfs.h>
-#include <linux/iio/adc/ad_sigma_delta.h>
+#include "../iio.h"
+#include "../sysfs.h"
 
-#define AD7780_RDY	BIT(7)
-#define AD7780_FILTER	BIT(6)
-#define AD7780_ERR	BIT(5)
-#define AD7780_ID1	BIT(4)
-#define AD7780_ID0	BIT(3)
-#define AD7780_GAIN	BIT(2)
-#define AD7780_PAT1	BIT(1)
-#define AD7780_PAT0	BIT(0)
+#include "ad7780.h"
+
+#define AD7780_RDY	(1 << 7)
+#define AD7780_FILTER	(1 << 6)
+#define AD7780_ERR	(1 << 5)
+#define AD7780_ID1	(1 << 4)
+#define AD7780_ID0	(1 << 3)
+#define AD7780_GAIN	(1 << 2)
+#define AD7780_PAT1	(1 << 1)
+#define AD7780_PAT0	(1 << 0)
 
 struct ad7780_chip_info {
-	struct iio_chan_spec	channel;
-	unsigned int		pattern_mask;
-	unsigned int		pattern;
+	struct iio_chan_spec		channel;
 };
 
 struct ad7780_state {
+	struct spi_device		*spi;
 	const struct ad7780_chip_info	*chip_info;
 	struct regulator		*reg;
-	struct gpio_desc		*powerdown_gpio;
-	unsigned int	gain;
+	struct ad7780_platform_data	*pdata;
+	wait_queue_head_t		wq_data_avail;
+	bool				done;
 	u16				int_vref_mv;
-
-	struct ad_sigma_delta sd;
+	struct spi_transfer		xfer;
+	struct spi_message		msg;
+	/*
+	 * DMA (thus cache coherency maintenance) requires the
+	 * transfer buffers to live in their own cache lines.
+	 */
+	unsigned int			data ____cacheline_aligned;
 };
 
 enum ad7780_supported_device_ids {
-	ID_AD7170,
-	ID_AD7171,
 	ID_AD7780,
 	ID_AD7781,
 };
 
-static struct ad7780_state *ad_sigma_delta_to_ad7780(struct ad_sigma_delta *sd)
+static int ad7780_read(struct ad7780_state *st, int *val)
 {
-	return container_of(sd, struct ad7780_state, sd);
-}
+	int ret;
 
-static int ad7780_set_mode(struct ad_sigma_delta *sigma_delta,
-			   enum ad_sigma_delta_mode mode)
-{
-	struct ad7780_state *st = ad_sigma_delta_to_ad7780(sigma_delta);
-	unsigned int val;
+	spi_bus_lock(st->spi->master);
 
-	switch (mode) {
-	case AD_SD_MODE_SINGLE:
-	case AD_SD_MODE_CONTINUOUS:
-		val = 1;
-		break;
-	default:
-		val = 0;
-		break;
-	}
+	enable_irq(st->spi->irq);
+	st->done = false;
+	gpio_set_value(st->pdata->gpio_pdrst, 1);
 
-	gpiod_set_value(st->powerdown_gpio, val);
+	ret = wait_event_interruptible(st->wq_data_avail, st->done);
+	disable_irq_nosync(st->spi->irq);
+	if (ret)
+		goto out;
 
-	return 0;
+	ret = spi_sync_locked(st->spi, &st->msg);
+	*val = be32_to_cpu(st->data);
+out:
+	gpio_set_value(st->pdata->gpio_pdrst, 0);
+	spi_bus_unlock(st->spi->master);
+
+	return ret;
 }
 
 static int ad7780_read_raw(struct iio_dev *indio_dev,
@@ -87,74 +89,65 @@ static int ad7780_read_raw(struct iio_dev *indio_dev,
 			   long m)
 {
 	struct ad7780_state *st = iio_priv(indio_dev);
-	int voltage_uv;
+	struct iio_chan_spec channel = st->chip_info->channel;
+	int ret, smpl = 0;
+	unsigned long scale_uv;
 
 	switch (m) {
-	case IIO_CHAN_INFO_RAW:
-		return ad_sigma_delta_single_conversion(indio_dev, chan, val);
-	case IIO_CHAN_INFO_SCALE:
-		voltage_uv = regulator_get_voltage(st->reg);
-		if (voltage_uv < 0)
-			return voltage_uv;
-		*val = (voltage_uv / 1000) * st->gain;
-		*val2 = chan->scan_type.realbits - 1;
-		return IIO_VAL_FRACTIONAL_LOG2;
-	case IIO_CHAN_INFO_OFFSET:
-		*val -= (1 << (chan->scan_type.realbits - 1));
-		return IIO_VAL_INT;
-	}
+	case 0:
+		mutex_lock(&indio_dev->mlock);
+		ret = ad7780_read(st, &smpl);
+		mutex_unlock(&indio_dev->mlock);
 
+		if (ret < 0)
+			return ret;
+
+		if ((smpl & AD7780_ERR) ||
+			!((smpl & AD7780_PAT0) && !(smpl & AD7780_PAT1)))
+			return -EIO;
+
+		*val = (smpl >> channel.scan_type.shift) &
+			((1 << (channel.scan_type.realbits)) - 1);
+		*val -= (1 << (channel.scan_type.realbits - 1));
+
+		if (!(smpl & AD7780_GAIN))
+			*val *= 128;
+
+		return IIO_VAL_INT;
+	case IIO_CHAN_INFO_SCALE:
+		scale_uv = (st->int_vref_mv * 100000)
+			>> (channel.scan_type.realbits - 1);
+		*val =  scale_uv / 100000;
+		*val2 = (scale_uv % 100000) * 10;
+		return IIO_VAL_INT_PLUS_MICRO;
+	}
 	return -EINVAL;
 }
 
-static int ad7780_postprocess_sample(struct ad_sigma_delta *sigma_delta,
-				     unsigned int raw_sample)
-{
-	struct ad7780_state *st = ad_sigma_delta_to_ad7780(sigma_delta);
-	const struct ad7780_chip_info *chip_info = st->chip_info;
-
-	if ((raw_sample & AD7780_ERR) ||
-	    ((raw_sample & chip_info->pattern_mask) != chip_info->pattern))
-		return -EIO;
-
-	if (raw_sample & AD7780_GAIN)
-		st->gain = 1;
-	else
-		st->gain = 128;
-
-	return 0;
-}
-
-static const struct ad_sigma_delta_info ad7780_sigma_delta_info = {
-	.set_mode = ad7780_set_mode,
-	.postprocess_sample = ad7780_postprocess_sample,
-	.has_registers = false,
-};
-
-#define AD7780_CHANNEL(bits, wordsize) \
-	AD_SD_CHANNEL(1, 0, 0, bits, 32, wordsize - bits)
-
 static const struct ad7780_chip_info ad7780_chip_info_tbl[] = {
-	[ID_AD7170] = {
-		.channel = AD7780_CHANNEL(12, 24),
-		.pattern = 0x5,
-		.pattern_mask = 0x7,
-	},
-	[ID_AD7171] = {
-		.channel = AD7780_CHANNEL(16, 24),
-		.pattern = 0x5,
-		.pattern_mask = 0x7,
-	},
 	[ID_AD7780] = {
-		.channel = AD7780_CHANNEL(24, 32),
-		.pattern = 0x1,
-		.pattern_mask = 0x3,
+		.channel = IIO_CHAN(IIO_VOLTAGE, 0, 1, 0, NULL, 0, 0,
+				    IIO_CHAN_INFO_SCALE_SHARED_BIT,
+				    0, 0, IIO_ST('s', 24, 32, 8), 0),
 	},
 	[ID_AD7781] = {
-		.channel = AD7780_CHANNEL(20, 32),
-		.pattern = 0x1,
-		.pattern_mask = 0x3,
+		.channel = IIO_CHAN(IIO_VOLTAGE, 0, 1, 0, NULL, 0, 0,
+				    IIO_CHAN_INFO_SCALE_SHARED_BIT,
+				    0, 0, IIO_ST('s', 20, 32, 12), 0),
 	},
+};
+
+/**
+ *  Interrupt handler
+ */
+static irqreturn_t ad7780_interrupt(int irq, void *dev_id)
+{
+	struct ad7780_state *st = dev_id;
+
+	st->done = true;
+	wake_up_interruptible(&st->wq_data_avail);
+
+	return IRQ_HANDLED;
 };
 
 static const struct iio_info ad7780_info = {
@@ -162,26 +155,29 @@ static const struct iio_info ad7780_info = {
 	.driver_module = THIS_MODULE,
 };
 
-static int ad7780_probe(struct spi_device *spi)
+static int __devinit ad7780_probe(struct spi_device *spi)
 {
+	struct ad7780_platform_data *pdata = spi->dev.platform_data;
 	struct ad7780_state *st;
 	struct iio_dev *indio_dev;
 	int ret, voltage_uv = 0;
 
-	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
-	if (!indio_dev)
+	if (!pdata) {
+		dev_dbg(&spi->dev, "no platform data?\n");
+		return -ENODEV;
+	}
+
+	indio_dev = iio_allocate_device(sizeof(*st));
+	if (indio_dev == NULL)
 		return -ENOMEM;
 
 	st = iio_priv(indio_dev);
-	st->gain = 1;
 
-	ad_sd_init(&st->sd, indio_dev, spi, &ad7780_sigma_delta_info);
-
-	st->reg = devm_regulator_get(&spi->dev, "vcc");
+	st->reg = regulator_get(&spi->dev, "vcc");
 	if (!IS_ERR(st->reg)) {
 		ret = regulator_enable(st->reg);
 		if (ret)
-			return ret;
+			goto error_put_reg;
 
 		voltage_uv = regulator_get_voltage(st->reg);
 	}
@@ -189,12 +185,17 @@ static int ad7780_probe(struct spi_device *spi)
 	st->chip_info =
 		&ad7780_chip_info_tbl[spi_get_device_id(spi)->driver_data];
 
-	if (voltage_uv)
+	st->pdata = pdata;
+
+	if (pdata && pdata->vref_mv)
+		st->int_vref_mv = pdata->vref_mv;
+	else if (voltage_uv)
 		st->int_vref_mv = voltage_uv / 1000;
 	else
-		dev_warn(&spi->dev, "Reference voltage unspecified\n");
+		dev_warn(&spi->dev, "reference voltage unspecified\n");
 
 	spi_set_drvdata(spi, indio_dev);
+	st->spi = spi;
 
 	indio_dev->dev.parent = &spi->dev;
 	indio_dev->name = spi_get_device_id(spi)->name;
@@ -203,31 +204,48 @@ static int ad7780_probe(struct spi_device *spi)
 	indio_dev->num_channels = 1;
 	indio_dev->info = &ad7780_info;
 
-	st->powerdown_gpio = devm_gpiod_get_optional(&spi->dev,
-						     "powerdown",
-						     GPIOD_OUT_LOW);
-	if (IS_ERR(st->powerdown_gpio)) {
-		ret = PTR_ERR(st->powerdown_gpio);
-		dev_err(&spi->dev, "Failed to request powerdown GPIO: %d\n",
-			ret);
+	init_waitqueue_head(&st->wq_data_avail);
+
+	/* Setup default message */
+
+	st->xfer.rx_buf = &st->data;
+	st->xfer.len = st->chip_info->channel.scan_type.storagebits / 8;
+
+	spi_message_init(&st->msg);
+	spi_message_add_tail(&st->xfer, &st->msg);
+
+	ret = gpio_request_one(st->pdata->gpio_pdrst, GPIOF_OUT_INIT_LOW,
+			       "AD7780 /PDRST");
+	if (ret) {
+		dev_err(&spi->dev, "failed to request GPIO PDRST\n");
 		goto error_disable_reg;
 	}
 
-	ret = ad_sd_setup_buffer_and_trigger(indio_dev);
+	ret = request_irq(spi->irq, ad7780_interrupt,
+		IRQF_TRIGGER_FALLING, spi_get_device_id(spi)->name, st);
 	if (ret)
-		goto error_disable_reg;
+		goto error_free_gpio;
+
+	disable_irq(spi->irq);
 
 	ret = iio_device_register(indio_dev);
 	if (ret)
-		goto error_cleanup_buffer_and_trigger;
+		goto error_free_irq;
 
 	return 0;
 
-error_cleanup_buffer_and_trigger:
-	ad_sd_cleanup_buffer_and_trigger(indio_dev);
+error_free_irq:
+	free_irq(spi->irq, st);
+error_free_gpio:
+	gpio_free(st->pdata->gpio_pdrst);
 error_disable_reg:
 	if (!IS_ERR(st->reg))
 		regulator_disable(st->reg);
+error_put_reg:
+	if (!IS_ERR(st->reg))
+		regulator_put(st->reg);
+
+	iio_free_device(indio_dev);
 
 	return ret;
 }
@@ -238,17 +256,18 @@ static int ad7780_remove(struct spi_device *spi)
 	struct ad7780_state *st = iio_priv(indio_dev);
 
 	iio_device_unregister(indio_dev);
-	ad_sd_cleanup_buffer_and_trigger(indio_dev);
-
-	if (!IS_ERR(st->reg))
+	free_irq(spi->irq, st);
+	gpio_free(st->pdata->gpio_pdrst);
+	if (!IS_ERR(st->reg)) {
 		regulator_disable(st->reg);
+		regulator_put(st->reg);
+	}
+	iio_free_device(indio_dev);
 
 	return 0;
 }
 
 static const struct spi_device_id ad7780_id[] = {
-	{"ad7170", ID_AD7170},
-	{"ad7171", ID_AD7171},
 	{"ad7780", ID_AD7780},
 	{"ad7781", ID_AD7781},
 	{}
@@ -258,13 +277,14 @@ MODULE_DEVICE_TABLE(spi, ad7780_id);
 static struct spi_driver ad7780_driver = {
 	.driver = {
 		.name	= "ad7780",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= ad7780_probe,
-	.remove		= ad7780_remove,
+	.remove		= __devexit_p(ad7780_remove),
 	.id_table	= ad7780_id,
 };
 module_spi_driver(ad7780_driver);
 
 MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");
-MODULE_DESCRIPTION("Analog Devices AD7780 and similar ADCs");
+MODULE_DESCRIPTION("Analog Devices AD7780/1 ADC");
 MODULE_LICENSE("GPL v2");

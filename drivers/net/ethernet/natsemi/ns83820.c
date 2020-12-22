@@ -22,7 +22,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  *
  * ChangeLog
@@ -134,7 +135,7 @@ static int lnksts = 0;		/* CFG_LNKSTS bit polarity */
 
 /* tunables */
 #define RX_BUF_SIZE	1500	/* 8192 */
-#if IS_ENABLED(CONFIG_VLAN_8021Q)
+#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
 #define NS83820_VLAN_ACCEL_SUPPORT
 #endif
 
@@ -910,7 +911,7 @@ static void rx_irq(struct net_device *ndev)
 				unsigned short tag;
 
 				tag = ntohs(extsts & EXTSTS_VTG_MASK);
-				__vlan_hwaccel_put_tag(skb, htons(ETH_P_IPV6), tag);
+				__vlan_hwaccel_put_tag(skb, tag);
 			}
 #endif
 			rx_rc = netif_rx(skb);
@@ -1122,12 +1123,12 @@ again:
 	}
 
 #ifdef NS83820_VLAN_ACCEL_SUPPORT
-	if (skb_vlan_tag_present(skb)) {
+	if(vlan_tx_tag_present(skb)) {
 		/* fetch the vlan tag info out of the
 		 * ancillary data if the vlan code
 		 * is using hw vlan acceleration
 		 */
-		short tag = skb_vlan_tag_get(skb);
+		short tag = vlan_tx_tag_get(skb);
 		extsts |= (EXTSTS_VPKT | htons(tag));
 	}
 #endif
@@ -1940,8 +1941,8 @@ static const struct net_device_ops netdev_ops = {
 	.ndo_tx_timeout		= ns83820_tx_timeout,
 };
 
-static int ns83820_init_one(struct pci_dev *pci_dev,
-			    const struct pci_device_id *id)
+static int __devinit ns83820_init_one(struct pci_dev *pci_dev,
+				      const struct pci_device_id *id)
 {
 	struct net_device *ndev;
 	struct ns83820 *dev;
@@ -2030,7 +2031,7 @@ static int ns83820_init_one(struct pci_dev *pci_dev,
 		pci_dev->subsystem_vendor, pci_dev->subsystem_device);
 
 	ndev->netdev_ops = &netdev_ops;
-	ndev->ethtool_ops = &ops;
+	SET_ETHTOOL_OPS(ndev, &ops);
 	ndev->watchdog_timeo = 5 * HZ;
 	pci_set_drvdata(pci_dev, ndev);
 
@@ -2192,7 +2193,7 @@ static int ns83820_init_one(struct pci_dev *pci_dev,
 
 #ifdef NS83820_VLAN_ACCEL_SUPPORT
 	/* We also support hardware vlan acceleration */
-	ndev->features |= NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX;
+	ndev->features |= NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX;
 #endif
 
 	if (using_dac) {
@@ -2235,11 +2236,12 @@ out_disable:
 	pci_disable_device(pci_dev);
 out_free:
 	free_netdev(ndev);
+	pci_set_drvdata(pci_dev, NULL);
 out:
 	return err;
 }
 
-static void ns83820_remove_one(struct pci_dev *pci_dev)
+static void __devexit ns83820_remove_one(struct pci_dev *pci_dev)
 {
 	struct net_device *ndev = pci_get_drvdata(pci_dev);
 	struct ns83820 *dev = PRIV(ndev); /* ok even if NULL */
@@ -2258,9 +2260,10 @@ static void ns83820_remove_one(struct pci_dev *pci_dev)
 			dev->rx_info.descs, dev->rx_info.phy_descs);
 	pci_disable_device(dev->pci_dev);
 	free_netdev(ndev);
+	pci_set_drvdata(pci_dev, NULL);
 }
 
-static const struct pci_device_id ns83820_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(ns83820_pci_tbl) = {
 	{ 0x100b, 0x0022, PCI_ANY_ID, PCI_ANY_ID, 0, .driver_data = 0, },
 	{ 0, },
 };
@@ -2269,7 +2272,7 @@ static struct pci_driver driver = {
 	.name		= "ns83820",
 	.id_table	= ns83820_pci_tbl,
 	.probe		= ns83820_init_one,
-	.remove		= ns83820_remove_one,
+	.remove		= __devexit_p(ns83820_remove_one),
 #if 0	/* FIXME: implement */
 	.suspend	= ,
 	.resume		= ,

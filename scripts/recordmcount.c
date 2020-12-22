@@ -33,26 +33,6 @@
 #include <string.h>
 #include <unistd.h>
 
-/*
- * glibc synced up and added the metag number but didn't add the relocations.
- * Work around this in a crude manner for now.
- */
-#ifndef EM_METAG
-#define EM_METAG      174
-#endif
-#ifndef R_METAG_ADDR32
-#define R_METAG_ADDR32                   2
-#endif
-#ifndef R_METAG_NONE
-#define R_METAG_NONE                     3
-#endif
-
-#ifndef EM_AARCH64
-#define EM_AARCH64	183
-#define R_AARCH64_NONE		0
-#define R_AARCH64_ABS64	257
-#endif
-
 static int fd_map;	/* File descriptor for file being modified. */
 static int mmap_failed; /* Boolean flag. */
 static char gpfx;	/* prefix for global symbol name (sometimes '_') */
@@ -213,22 +193,6 @@ static int make_nop_x86(void *map, size_t const offset)
 	return 0;
 }
 
-static unsigned char ideal_nop4_arm64[4] = {0x1f, 0x20, 0x03, 0xd5};
-static int make_nop_arm64(void *map, size_t const offset)
-{
-	uint32_t *ptr;
-
-	ptr = map + offset;
-	/* bl <_mcount> is 0x94000000 before relocation */
-	if (*ptr != 0x94000000)
-		return -1;
-
-	/* Convert to nop */
-	ulseek(fd_map, offset, SEEK_SET);
-	uwrite(fd_map, ideal_nop, 4);
-	return 0;
-}
-
 /*
  * Get the whole file as a programming convenience in order to avoid
  * malloc+lseek+read+free of many pieces.  If successful, then mmap
@@ -363,11 +327,8 @@ is_mcounted_section_name(char const *const txtname)
 		strcmp(".sched.text",    txtname) == 0 ||
 		strcmp(".spinlock.text", txtname) == 0 ||
 		strcmp(".irqentry.text", txtname) == 0 ||
-		strcmp(".softirqentry.text", txtname) == 0 ||
 		strcmp(".kprobes.text", txtname) == 0 ||
-		strcmp(".cpuidle.text", txtname) == 0 ||
-		(strncmp(".text.",       txtname, 6) == 0 &&
-		 strcmp(".text..ftrace", txtname) != 0);
+		strcmp(".text.unlikely", txtname) == 0;
 }
 
 /* 32 bit and 64 bit are very similar */
@@ -457,7 +418,6 @@ do_file(char const *const fname)
 		break;
 	case EM_386:
 		reltype = R_386_32;
-		rel_type_nop = R_386_NONE;
 		make_nop = make_nop_x86;
 		ideal_nop = ideal_nop5_x86_32;
 		mcount_adjust_32 = -1;
@@ -465,20 +425,7 @@ do_file(char const *const fname)
 	case EM_ARM:	 reltype = R_ARM_ABS32;
 			 altmcount = "__gnu_mcount_nc";
 			 break;
-	case EM_AARCH64:
-			reltype = R_AARCH64_ABS64;
-			make_nop = make_nop_arm64;
-			rel_type_nop = R_AARCH64_NONE;
-			ideal_nop = ideal_nop4_arm64;
-			gpfx = '_';
-			break;
 	case EM_IA_64:	 reltype = R_IA64_IMM64;   gpfx = '_'; break;
-	case EM_METAG:	 reltype = R_METAG_ADDR32;
-			 altmcount = "_mcount_wrapper";
-			 rel_type_nop = R_METAG_NONE;
-			 /* We happen to have the same requirement as MIPS */
-			 is_fake_mcount32 = MIPS32_is_fake_mcount;
-			 break;
 	case EM_MIPS:	 /* reltype: e_class    */ gpfx = '_'; break;
 	case EM_PPC:	 reltype = R_PPC_ADDR32;   gpfx = '_'; break;
 	case EM_PPC64:	 reltype = R_PPC64_ADDR64; gpfx = '_'; break;
@@ -489,7 +436,6 @@ do_file(char const *const fname)
 		make_nop = make_nop_x86;
 		ideal_nop = ideal_nop5_x86_64;
 		reltype = R_X86_64_64;
-		rel_type_nop = R_X86_64_NONE;
 		mcount_adjust_64 = -1;
 		break;
 	}  /* end switch */
@@ -507,6 +453,10 @@ do_file(char const *const fname)
 				"unrecognized ET_REL file: %s\n", fname);
 			fail_file();
 		}
+		if (w2(ehdr->e_machine) == EM_S390) {
+			reltype = R_390_32;
+			mcount_adjust_32 = -4;
+		}
 		if (w2(ehdr->e_machine) == EM_MIPS) {
 			reltype = R_MIPS_32;
 			is_fake_mcount32 = MIPS32_is_fake_mcount;
@@ -523,7 +473,7 @@ do_file(char const *const fname)
 		}
 		if (w2(ghdr->e_machine) == EM_S390) {
 			reltype = R_390_64;
-			mcount_adjust_64 = -14;
+			mcount_adjust_64 = -8;
 		}
 		if (w2(ghdr->e_machine) == EM_MIPS) {
 			reltype = R_MIPS_64;
@@ -606,3 +556,5 @@ main(int argc, char *argv[])
 	}
 	return !!n_error;
 }
+
+

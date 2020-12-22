@@ -22,12 +22,12 @@
 #include <linux/pci.h>
 #include <linux/init.h>
 #include <linux/ide.h>
-#include <linux/ktime.h>
 
 #include <asm/io.h>
 
 #ifdef CONFIG_PPC_PMAC
 #include <asm/prom.h>
+#include <asm/pci-bridge.h>
 #endif
 
 #define DRV_NAME "pdc202xx_new"
@@ -243,13 +243,13 @@ static long read_counter(u32 dma_base)
  */
 static long detect_pll_input_clock(unsigned long dma_base)
 {
-	ktime_t start_time, end_time;
+	struct timeval start_time, end_time;
 	long start_count, end_count;
 	long pll_input, usec_elapsed;
 	u8 scr1;
 
 	start_count = read_counter(dma_base);
-	start_time = ktime_get();
+	do_gettimeofday(&start_time);
 
 	/* Start the test mode */
 	outb(0x01, dma_base + 0x01);
@@ -261,7 +261,7 @@ static long detect_pll_input_clock(unsigned long dma_base)
 	mdelay(10);
 
 	end_count = read_counter(dma_base);
-	end_time = ktime_get();
+	do_gettimeofday(&end_time);
 
 	/* Stop the test mode */
 	outb(0x01, dma_base + 0x01);
@@ -273,7 +273,8 @@ static long detect_pll_input_clock(unsigned long dma_base)
 	 * Calculate the input clock in Hz
 	 * (the clock counter is 30 bit wide and counts down)
 	 */
-	usec_elapsed = ktime_us_delta(end_time, start_time);
+	usec_elapsed = (end_time.tv_sec - start_time.tv_sec) * 1000000 +
+		(end_time.tv_usec - start_time.tv_usec);
 	pll_input = ((start_count - end_count) & 0x3fffffff) / 10 *
 		(10000000 / usec_elapsed);
 
@@ -421,7 +422,7 @@ static int init_chipset_pdcnew(struct pci_dev *dev)
 	return 0;
 }
 
-static struct pci_dev *pdc20270_get_dev2(struct pci_dev *dev)
+static struct pci_dev * __devinit pdc20270_get_dev2(struct pci_dev *dev)
 {
 	struct pci_dev *dev2;
 
@@ -464,7 +465,7 @@ static const struct ide_port_ops pdcnew_port_ops = {
 		.udma_mask	= udma, \
 	}
 
-static const struct ide_port_info pdcnew_chipsets[] = {
+static const struct ide_port_info pdcnew_chipsets[] __devinitdata = {
 	/* 0: PDC202{68,70} */		DECLARE_PDCNEW_DEV(ATA_UDMA5),
 	/* 1: PDC202{69,71,75,76,77} */	DECLARE_PDCNEW_DEV(ATA_UDMA6),
 };
@@ -478,7 +479,7 @@ static const struct ide_port_info pdcnew_chipsets[] = {
  *	finds a device matching our IDE device tables.
  */
  
-static int pdc202new_init_one(struct pci_dev *dev, const struct pci_device_id *id)
+static int __devinit pdc202new_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	const struct ide_port_info *d = &pdcnew_chipsets[id->driver_data];
 	struct pci_dev *bridge = dev->bus->self;
@@ -513,7 +514,7 @@ static int pdc202new_init_one(struct pci_dev *dev, const struct pci_device_id *i
 	return ide_pci_init_one(dev, d, NULL);
 }
 
-static void pdc202new_remove(struct pci_dev *dev)
+static void __devexit pdc202new_remove(struct pci_dev *dev)
 {
 	struct ide_host *host = pci_get_drvdata(dev);
 	struct pci_dev *dev2 = host->dev[1] ? to_pci_dev(host->dev[1]) : NULL;
@@ -538,7 +539,7 @@ static struct pci_driver pdc202new_pci_driver = {
 	.name		= "Promise_IDE",
 	.id_table	= pdc202new_pci_tbl,
 	.probe		= pdc202new_init_one,
-	.remove		= pdc202new_remove,
+	.remove		= __devexit_p(pdc202new_remove),
 	.suspend	= ide_pci_suspend,
 	.resume		= ide_pci_resume,
 };

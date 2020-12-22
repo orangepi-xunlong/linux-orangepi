@@ -32,7 +32,7 @@ static struct pci_channel *hose_head, **hose_tail = &hose_head;
 
 static int pci_initialized;
 
-static void pcibios_scanbus(struct pci_channel *hose)
+static void __devinit pcibios_scanbus(struct pci_channel *hose)
 {
 	static int next_busno;
 	static int need_domain_info;
@@ -58,23 +58,21 @@ static void pcibios_scanbus(struct pci_channel *hose)
 
 	need_domain_info = need_domain_info || hose->index;
 	hose->need_domain_info = need_domain_info;
+	if (bus) {
+		next_busno = bus->subordinate + 1;
+		/* Don't allow 8-bit bus number overflow inside the hose -
+		   reserve some space for bridges. */
+		if (next_busno > 224) {
+			next_busno = 0;
+			need_domain_info = 1;
+		}
 
-	if (!bus) {
+		pci_bus_size_bridges(bus);
+		pci_bus_assign_resources(bus);
+		pci_enable_bridges(bus);
+	} else {
 		pci_free_resource_list(&resources);
-		return;
 	}
-
-	next_busno = bus->busn_res.end + 1;
-	/* Don't allow 8-bit bus number overflow inside the hose -
-	   reserve some space for bridges. */
-	if (next_busno > 224) {
-		next_busno = 0;
-		need_domain_info = 1;
-	}
-
-	pci_bus_size_bridges(bus);
-	pci_bus_assign_resources(bus);
-	pci_bus_add_devices(bus);
 }
 
 /*
@@ -84,7 +82,7 @@ static void pcibios_scanbus(struct pci_channel *hose)
 DEFINE_RAW_SPINLOCK(pci_config_lock);
 static DEFINE_MUTEX(pci_scan_mutex);
 
-int register_pci_controller(struct pci_channel *hose)
+int __devinit register_pci_controller(struct pci_channel *hose)
 {
 	int i;
 
@@ -158,7 +156,7 @@ subsys_initcall(pcibios_init);
  *  Called after each bus is probed, but before its children
  *  are examined.
  */
-void pcibios_fixup_bus(struct pci_bus *bus)
+void __devinit pcibios_fixup_bus(struct pci_bus *bus)
 {
 }
 
@@ -187,6 +185,21 @@ resource_size_t pcibios_align_resource(void *data, const struct resource *res,
 	}
 
 	return start;
+}
+
+int pcibios_enable_device(struct pci_dev *dev, int mask)
+{
+	return pci_enable_resources(dev, mask);
+}
+
+void __init pcibios_update_irq(struct pci_dev *dev, int irq)
+{
+	pci_write_config_byte(dev, PCI_INTERRUPT_LINE, irq);
+}
+
+char * __devinit __weak pcibios_setup(char *str)
+{
+	return str;
 }
 
 static void __init
@@ -221,7 +234,7 @@ pcibios_bus_report_status_early(struct pci_channel *hose,
  * We can't use pci_find_device() here since we are
  * called from interrupt context.
  */
-static void __ref
+static void __init_refok
 pcibios_bus_report_status(struct pci_bus *bus, unsigned int status_mask,
 			  int warn)
 {
@@ -256,7 +269,7 @@ pcibios_bus_report_status(struct pci_bus *bus, unsigned int status_mask,
 			pcibios_bus_report_status(dev->subordinate, status_mask, warn);
 }
 
-void __ref pcibios_report_status(unsigned int status_mask, int warn)
+void __init_refok pcibios_report_status(unsigned int status_mask, int warn)
 {
 	struct pci_channel *hose;
 
@@ -316,5 +329,7 @@ EXPORT_SYMBOL(pci_iounmap);
 
 #endif /* CONFIG_GENERIC_IOMAP */
 
+#ifdef CONFIG_HOTPLUG
 EXPORT_SYMBOL(PCIBIOS_MIN_IO);
 EXPORT_SYMBOL(PCIBIOS_MIN_MEM);
+#endif

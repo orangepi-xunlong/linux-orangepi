@@ -20,68 +20,75 @@
 #include <linux/cache.h>
 #include <linux/io.h>
 
-#ifdef __tilegx__
-#define ARCH_HAS_DMA_GET_REQUIRED_MASK
-#endif
-
-extern struct dma_map_ops *tile_dma_map_ops;
-extern struct dma_map_ops *gx_pci_dma_map_ops;
-extern struct dma_map_ops *gx_legacy_pci_dma_map_ops;
-extern struct dma_map_ops *gx_hybrid_pci_dma_map_ops;
-
-static inline struct dma_map_ops *get_dma_ops(struct device *dev)
-{
-	if (dev && dev->archdata.dma_ops)
-		return dev->archdata.dma_ops;
-	else
-		return tile_dma_map_ops;
-}
-
-static inline dma_addr_t get_dma_offset(struct device *dev)
-{
-	return dev->archdata.dma_offset;
-}
-
-static inline void set_dma_offset(struct device *dev, dma_addr_t off)
-{
-	dev->archdata.dma_offset = off;
-}
-
-static inline dma_addr_t phys_to_dma(struct device *dev, phys_addr_t paddr)
-{
-	return paddr;
-}
-
-static inline phys_addr_t dma_to_phys(struct device *dev, dma_addr_t daddr)
-{
-	return daddr;
-}
-
-static inline void dma_mark_clean(void *addr, size_t size) {}
-
-static inline void set_dma_ops(struct device *dev, struct dma_map_ops *ops)
-{
-	dev->archdata.dma_ops = ops;
-}
-
-static inline bool dma_capable(struct device *dev, dma_addr_t addr, size_t size)
-{
-	if (!dev->dma_mask)
-		return 0;
-
-	return addr + size - 1 <= *dev->dma_mask;
-}
-
-#define HAVE_ARCH_DMA_SET_MASK 1
-int dma_set_mask(struct device *dev, u64 mask);
-
 /*
- * dma_alloc_noncoherent() is #defined to return coherent memory,
- * so there's no need to do any flushing here.
+ * Note that on x86 and powerpc, there is a "struct dma_mapping_ops"
+ * that is used for all the DMA operations.  For now, we don't have an
+ * equivalent on tile, because we only have a single way of doing DMA.
+ * (Tilera bug 7994 to use dma_mapping_ops.)
  */
-static inline void dma_cache_sync(struct device *dev, void *vaddr, size_t size,
-				  enum dma_data_direction direction)
+
+#define dma_alloc_noncoherent(d, s, h, f) dma_alloc_coherent(d, s, h, f)
+#define dma_free_noncoherent(d, s, v, h) dma_free_coherent(d, s, v, h)
+
+extern dma_addr_t dma_map_single(struct device *dev, void *ptr, size_t size,
+			  enum dma_data_direction);
+extern void dma_unmap_single(struct device *dev, dma_addr_t dma_addr,
+			     size_t size, enum dma_data_direction);
+extern int dma_map_sg(struct device *dev, struct scatterlist *sg, int nents,
+	       enum dma_data_direction);
+extern void dma_unmap_sg(struct device *dev, struct scatterlist *sg,
+			 int nhwentries, enum dma_data_direction);
+extern dma_addr_t dma_map_page(struct device *dev, struct page *page,
+			       unsigned long offset, size_t size,
+			       enum dma_data_direction);
+extern void dma_unmap_page(struct device *dev, dma_addr_t dma_address,
+			   size_t size, enum dma_data_direction);
+extern void dma_sync_sg_for_cpu(struct device *dev, struct scatterlist *sg,
+				int nelems, enum dma_data_direction);
+extern void dma_sync_sg_for_device(struct device *dev, struct scatterlist *sg,
+				   int nelems, enum dma_data_direction);
+
+
+void *dma_alloc_coherent(struct device *dev, size_t size,
+			   dma_addr_t *dma_handle, gfp_t flag);
+
+void dma_free_coherent(struct device *dev, size_t size,
+			 void *vaddr, dma_addr_t dma_handle);
+
+extern void dma_sync_single_for_cpu(struct device *, dma_addr_t, size_t,
+				    enum dma_data_direction);
+extern void dma_sync_single_for_device(struct device *, dma_addr_t,
+				       size_t, enum dma_data_direction);
+extern void dma_sync_single_range_for_cpu(struct device *, dma_addr_t,
+					  unsigned long offset, size_t,
+					  enum dma_data_direction);
+extern void dma_sync_single_range_for_device(struct device *, dma_addr_t,
+					     unsigned long offset, size_t,
+					     enum dma_data_direction);
+extern void dma_cache_sync(struct device *dev, void *vaddr, size_t,
+			   enum dma_data_direction);
+
+static inline int
+dma_mapping_error(struct device *dev, dma_addr_t dma_addr)
 {
+	return 0;
+}
+
+static inline int
+dma_supported(struct device *dev, u64 mask)
+{
+	return 1;
+}
+
+static inline int
+dma_set_mask(struct device *dev, u64 mask)
+{
+	if (!dev->dma_mask || !dma_supported(dev, mask))
+		return -EIO;
+
+	*dev->dma_mask = mask;
+
+	return 0;
 }
 
 #endif /* _ASM_TILE_DMA_MAPPING_H */

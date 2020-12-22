@@ -11,6 +11,7 @@
 #include <linux/slab.h>
 #include <linux/mutex.h>
 #include <linux/ioport.h>
+#include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/of.h>
@@ -346,7 +347,7 @@ static void uctrl_get_external_status(struct uctrl_driver *driver)
 	
 }
 
-static int uctrl_probe(struct platform_device *op)
+static int __devinit uctrl_probe(struct platform_device *op)
 {
 	struct uctrl_driver *p;
 	int err = -ENOMEM;
@@ -401,7 +402,7 @@ out_free:
 	goto out;
 }
 
-static int uctrl_remove(struct platform_device *op)
+static int __devexit uctrl_remove(struct platform_device *op)
 {
 	struct uctrl_driver *p = dev_get_drvdata(&op->dev);
 
@@ -425,10 +426,11 @@ MODULE_DEVICE_TABLE(of, uctrl_match);
 static struct platform_driver uctrl_driver = {
 	.driver = {
 		.name = "uctrl",
+		.owner = THIS_MODULE,
 		.of_match_table = uctrl_match,
 	},
 	.probe		= uctrl_probe,
-	.remove		= uctrl_remove,
+	.remove		= __devexit_p(uctrl_remove),
 };
 
 

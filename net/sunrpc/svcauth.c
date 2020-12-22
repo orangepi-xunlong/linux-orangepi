@@ -54,9 +54,6 @@ svc_authenticate(struct svc_rqst *rqstp, __be32 *authp)
 	}
 	spin_unlock(&authtab_lock);
 
-	rqstp->rq_auth_slack = 0;
-	init_svc_cred(&rqstp->rq_cred);
-
 	rqstp->rq_authop = aops;
 	return aops->accept(rqstp, authp);
 }
@@ -64,7 +61,6 @@ EXPORT_SYMBOL_GPL(svc_authenticate);
 
 int svc_set_client(struct svc_rqst *rqstp)
 {
-	rqstp->rq_client = NULL;
 	return rqstp->rq_authop->set_client(rqstp);
 }
 EXPORT_SYMBOL_GPL(svc_set_client);
@@ -142,12 +138,13 @@ auth_domain_lookup(char *name, struct auth_domain *new)
 {
 	struct auth_domain *hp;
 	struct hlist_head *head;
+	struct hlist_node *np;
 
 	head = &auth_domain_table[hash_str(name, DN_HASHBITS)];
 
 	spin_lock(&auth_domain_lock);
 
-	hlist_for_each_entry(hp, head, hash) {
+	hlist_for_each_entry(hp, np, head, hash) {
 		if (strcmp(hp->name, name)==0) {
 			kref_get(&hp->ref);
 			spin_unlock(&auth_domain_lock);

@@ -6,9 +6,9 @@
 
 #include <linux/mm.h>
 #include <linux/interrupt.h>
-#include <linux/extable.h>
+#include <linux/module.h>
 #include <linux/wait.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <arch/system.h>
 
 extern int find_fixup_code(struct pt_regs *);
@@ -58,7 +58,6 @@ do_page_fault(unsigned long address, struct pt_regs *regs,
 	struct vm_area_struct * vma;
 	siginfo_t info;
 	int fault;
-	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
 	D(printk(KERN_DEBUG
 		 "Page fault for %lX on %X at %lX, prot %d write %d\n",
@@ -109,16 +108,13 @@ do_page_fault(unsigned long address, struct pt_regs *regs,
 	info.si_code = SEGV_MAPERR;
 
 	/*
-	 * If we're in an interrupt, have pagefaults disabled or have no
+	 * If we're in an interrupt or "atomic" operation or have no
 	 * user context, we must not take the fault.
 	 */
 
-	if (faulthandler_disabled() || !mm)
+	if (in_atomic() || !mm)
 		goto no_context;
 
-	if (user_mode(regs))
-		flags |= FAULT_FLAG_USER;
-retry:
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, address);
 	if (!vma)
@@ -156,7 +152,6 @@ retry:
 	} else if (writeaccess == 1) {
 		if (!(vma->vm_flags & VM_WRITE))
 			goto bad_area;
-		flags |= FAULT_FLAG_WRITE;
 	} else {
 		if (!(vma->vm_flags & (VM_READ | VM_EXEC)))
 			goto bad_area;
@@ -168,11 +163,7 @@ retry:
 	 * the fault.
 	 */
 
-	fault = handle_mm_fault(vma, address, flags);
-
-	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
-		return;
-
+	fault = handle_mm_fault(mm, vma, address, (writeaccess & 1) ? FAULT_FLAG_WRITE : 0);
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
 			goto out_of_memory;
@@ -182,25 +173,10 @@ retry:
 			goto do_sigbus;
 		BUG();
 	}
-
-	if (flags & FAULT_FLAG_ALLOW_RETRY) {
-		if (fault & VM_FAULT_MAJOR)
-			tsk->maj_flt++;
-		else
-			tsk->min_flt++;
-		if (fault & VM_FAULT_RETRY) {
-			flags &= ~FAULT_FLAG_ALLOW_RETRY;
-			flags |= FAULT_FLAG_TRIED;
-
-			/*
-			 * No need to up_read(&mm->mmap_sem) as we would
-			 * have already released it in __lock_page_or_retry
-			 * in mm/filemap.c.
-			 */
-
-			goto retry;
-		}
-	}
+	if (fault & VM_FAULT_MAJOR)
+		tsk->maj_flt++;
+	else
+		tsk->min_flt++;
 
 	up_read(&mm->mmap_sem);
 	return;
@@ -219,9 +195,6 @@ retry:
 	/* User mode accesses just cause a SIGSEGV */
 
 	if (user_mode(regs)) {
-#ifdef CONFIG_NO_SEGFAULT_TERMINATION
-		DECLARE_WAIT_QUEUE_HEAD(wq);
-#endif
 		printk(KERN_NOTICE "%s (pid %d) segfaults for page "
 			"address %08lx at pc %08lx\n",
 			tsk->comm, tsk->pid,
@@ -232,6 +205,7 @@ retry:
 			show_registers(regs);
 
 #ifdef CONFIG_NO_SEGFAULT_TERMINATION
+		DECLARE_WAIT_QUEUE_HEAD(wq);
 		wait_event_interruptible(wq, 0 == 1);
 #else
 		info.si_signo = SIGSEGV;

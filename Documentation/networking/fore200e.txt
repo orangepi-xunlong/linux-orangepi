@@ -11,10 +11,12 @@ i386, alpha (untested), powerpc, sparc and sparc64 archs.
 
 The intent is to enable the use of different models of FORE adapters at the
 same time, by hosts that have several bus interfaces (such as PCI+SBUS,
-or PCI+EISA).
+PCI+MCA or PCI+EISA).
 
 Only PCI and SBUS devices are currently supported by the driver, but support
-for other bus interfaces such as EISA should not be too hard to add.
+for other bus interfaces such as EISA should not be too hard to add (this may
+be more tricky for the MCA bus, though, as FORE made some MCA-specific
+modifications to the adapter's AALI interface).
 
 
 Firmware Copyright Notice
@@ -37,7 +39,7 @@ version. Alternative binary firmware images can be found somewhere on the
 ForeThought CD-ROM supplied with your adapter by FORE Systems.
 
 You can also get the latest firmware images from FORE Systems at
-https://en.wikipedia.org/wiki/FORE_Systems. Register TACTics Online and go to
+http://en.wikipedia.org/wiki/FORE_Systems. Register TACTics Online and go to
 the 'software updates' pages. The firmware binaries are part of
 the various ForeThought software distributions.
 

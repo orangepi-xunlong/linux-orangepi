@@ -34,11 +34,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  *
  * Author: James Morris <jmorris@intercode.com.au>
- *
- * Copyright (c) 2006-2010 Patrick McHardy <kaber@trash.net>
  */
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -406,7 +405,7 @@ static unsigned char asn1_octets_decode(struct asn1_ctx *ctx,
 
 	ptr = *octets;
 	while (ctx->pointer < eoc) {
-		if (!asn1_octet_decode(ctx, ptr++)) {
+		if (!asn1_octet_decode(ctx, (unsigned char *)ptr++)) {
 			kfree(*octets);
 			*octets = NULL;
 			return 0;
@@ -461,14 +460,14 @@ static unsigned char asn1_oid_decode(struct asn1_ctx *ctx,
 	}
 
 	if (subid < 40) {
-		optr[0] = 0;
-		optr[1] = subid;
+		optr [0] = 0;
+		optr [1] = subid;
 	} else if (subid < 80) {
-		optr[0] = 1;
-		optr[1] = subid - 40;
+		optr [0] = 1;
+		optr [1] = subid - 40;
 	} else {
-		optr[0] = 2;
-		optr[1] = subid - 80;
+		optr [0] = 2;
+		optr [1] = subid - 80;
 	}
 
 	*len = 2;
@@ -760,7 +759,7 @@ static unsigned char snmp_object_decode(struct asn1_ctx *ctx,
 		}
 		break;
 	case SNMP_OBJECTID:
-		if (!asn1_oid_decode(ctx, end, &lp, &len)) {
+		if (!asn1_oid_decode(ctx, end, (unsigned long **)&lp, &len)) {
 			kfree(id);
 			return 0;
 		}
@@ -1048,7 +1047,7 @@ static int snmp_parse_mangle(unsigned char *msg,
 	if (!asn1_uint_decode (&ctx, end, &vers))
 		return 0;
 	if (debug > 1)
-		pr_debug("bsalg: snmp version: %u\n", vers + 1);
+		printk(KERN_DEBUG "bsalg: snmp version: %u\n", vers + 1);
 	if (vers > 1)
 		return 1;
 
@@ -1064,10 +1063,10 @@ static int snmp_parse_mangle(unsigned char *msg,
 	if (debug > 1) {
 		unsigned int i;
 
-		pr_debug("bsalg: community: ");
+		printk(KERN_DEBUG "bsalg: community: ");
 		for (i = 0; i < comm.len; i++)
-			pr_cont("%c", comm.data[i]);
-		pr_cont("\n");
+			printk("%c", comm.data[i]);
+		printk("\n");
 	}
 	kfree(comm.data);
 
@@ -1091,9 +1090,9 @@ static int snmp_parse_mangle(unsigned char *msg,
 		};
 
 		if (pdutype > SNMP_PDU_TRAP2)
-			pr_debug("bsalg: bad pdu type %u\n", pdutype);
+			printk(KERN_DEBUG "bsalg: bad pdu type %u\n", pdutype);
 		else
-			pr_debug("bsalg: pdu: %s\n", pdus[pdutype]);
+			printk(KERN_DEBUG "bsalg: pdu: %s\n", pdus[pdutype]);
 	}
 	if (pdutype != SNMP_PDU_RESPONSE &&
 	    pdutype != SNMP_PDU_TRAP1 && pdutype != SNMP_PDU_TRAP2)
@@ -1119,7 +1118,7 @@ static int snmp_parse_mangle(unsigned char *msg,
 			return 0;
 
 		if (debug > 1)
-			pr_debug("bsalg: request: id=0x%lx error_status=%u "
+			printk(KERN_DEBUG "bsalg: request: id=0x%lx error_status=%u "
 			"error_index=%u\n", req.id, req.error_status,
 			req.error_index);
 	}
@@ -1145,18 +1144,18 @@ static int snmp_parse_mangle(unsigned char *msg,
 		}
 
 		if (debug > 1) {
-			pr_debug("bsalg: object: ");
+			printk(KERN_DEBUG "bsalg: object: ");
 			for (i = 0; i < obj->id_len; i++) {
 				if (i > 0)
-					pr_cont(".");
-				pr_cont("%lu", obj->id[i]);
+					printk(".");
+				printk("%lu", obj->id[i]);
 			}
-			pr_cont(": type=%u\n", obj->type);
+			printk(": type=%u\n", obj->type);
 
 		}
 
 		if (obj->type == SNMP_IPADDR)
-			mangle_address(ctx.begin, ctx.pointer - 4, map, check);
+			mangle_address(ctx.begin, ctx.pointer - 4 , map, check);
 
 		kfree(obj->id);
 		kfree(obj);
@@ -1198,8 +1197,8 @@ static int snmp_translate(struct nf_conn *ct,
 		map.to = NOCT1(&ct->tuplehash[!dir].tuple.dst.u3.ip);
 	} else {
 		/* DNAT replies */
-		map.from = NOCT1(&ct->tuplehash[!dir].tuple.src.u3.ip);
-		map.to = NOCT1(&ct->tuplehash[dir].tuple.dst.u3.ip);
+		map.from = NOCT1(&ct->tuplehash[dir].tuple.src.u3.ip);
+		map.to = NOCT1(&ct->tuplehash[!dir].tuple.dst.u3.ip);
 	}
 
 	if (map.from == map.to)
@@ -1207,7 +1206,8 @@ static int snmp_translate(struct nf_conn *ct,
 
 	if (!snmp_parse_mangle((unsigned char *)udph + sizeof(struct udphdr),
 			       paylen, &map, &udph->check)) {
-		net_warn_ratelimited("bsalg: parser failed\n");
+		if (net_ratelimit())
+			printk(KERN_WARNING "bsalg: parser failed\n");
 		return NF_DROP;
 	}
 	return NF_ACCEPT;
@@ -1241,8 +1241,9 @@ static int help(struct sk_buff *skb, unsigned int protoff,
 	 * can mess around with the payload.
 	 */
 	if (ntohs(udph->len) != skb->len - (iph->ihl << 2)) {
-		net_warn_ratelimited("SNMP: dropping malformed packet src=%pI4 dst=%pI4\n",
-				     &iph->saddr, &iph->daddr);
+		 if (net_ratelimit())
+			 printk(KERN_WARNING "SNMP: dropping malformed packet src=%pI4 dst=%pI4\n",
+				&iph->saddr, &iph->daddr);
 		 return NF_DROP;
 	}
 
@@ -1258,6 +1259,16 @@ static int help(struct sk_buff *skb, unsigned int protoff,
 static const struct nf_conntrack_expect_policy snmp_exp_policy = {
 	.max_expected	= 0,
 	.timeout	= 180,
+};
+
+static struct nf_conntrack_helper snmp_helper __read_mostly = {
+	.me			= THIS_MODULE,
+	.help			= help,
+	.expect_policy		= &snmp_exp_policy,
+	.name			= "snmp",
+	.tuple.src.l3num	= AF_INET,
+	.tuple.src.u.udp.port	= cpu_to_be16(SNMP_PORT),
+	.tuple.dst.protonum	= IPPROTO_UDP,
 };
 
 static struct nf_conntrack_helper snmp_trap_helper __read_mostly = {
@@ -1278,16 +1289,22 @@ static struct nf_conntrack_helper snmp_trap_helper __read_mostly = {
 
 static int __init nf_nat_snmp_basic_init(void)
 {
+	int ret = 0;
+
 	BUG_ON(nf_nat_snmp_hook != NULL);
 	RCU_INIT_POINTER(nf_nat_snmp_hook, help);
 
-	return nf_conntrack_helper_register(&snmp_trap_helper);
+	ret = nf_conntrack_helper_register(&snmp_trap_helper);
+	if (ret < 0) {
+		nf_conntrack_helper_unregister(&snmp_helper);
+		return ret;
+	}
+	return ret;
 }
 
 static void __exit nf_nat_snmp_basic_fini(void)
 {
 	RCU_INIT_POINTER(nf_nat_snmp_hook, NULL);
-	synchronize_rcu();
 	nf_conntrack_helper_unregister(&snmp_trap_helper);
 }
 

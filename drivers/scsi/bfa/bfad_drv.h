@@ -1,10 +1,9 @@
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014- QLogic Corporation.
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  *
- * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
+ * Linux driver for Brocade Fibre Channel Host Bus Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -38,7 +37,6 @@
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
 #include <linux/bitops.h>
-#include <linux/aer.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_tcq.h>
@@ -58,7 +56,7 @@
 #ifdef BFA_DRIVER_VERSION
 #define BFAD_DRIVER_VERSION    BFA_DRIVER_VERSION
 #else
-#define BFAD_DRIVER_VERSION    "3.2.25.1"
+#define BFAD_DRIVER_VERSION    "3.0.23.0"
 #endif
 
 #define BFAD_PROTO_NAME FCPI_NAME
@@ -83,8 +81,6 @@
 #define BFAD_FC4_PROBE_DONE			0x00000200
 #define BFAD_PORT_DELETE			0x00000001
 #define BFAD_INTX_ON				0x00000400
-#define BFAD_EEH_BUSY				0x00000800
-#define BFAD_EEH_PCI_CHANNEL_IO_PERM_FAILURE	0x00001000
 /*
  * BFAD related definition
  */
@@ -241,8 +237,8 @@ enum bfad_sm_event {
 	BFAD_E_KTHREAD_CREATE_FAILED	= 2,
 	BFAD_E_INIT			= 3,
 	BFAD_E_INIT_SUCCESS		= 4,
-	BFAD_E_HAL_INIT_FAILED		= 5,
-	BFAD_E_INIT_FAILED		= 6,
+	BFAD_E_INIT_FAILED		= 5,
+	BFAD_E_INTR_INIT_FAILED		= 6,
 	BFAD_E_FCS_EXIT_COMP		= 7,
 	BFAD_E_EXIT_COMP		= 8,
 	BFAD_E_STOP			= 9

@@ -49,26 +49,16 @@ The dma_buf buffer sharing API usage contains the following steps:
    The buffer exporter announces its wish to export a buffer. In this, it
    connects its own private buffer data, provides implementation for operations
    that can be performed on the exported dma_buf, and flags for the file
-   associated with this buffer. All these fields are filled in struct
-   dma_buf_export_info, defined via the DEFINE_DMA_BUF_EXPORT_INFO macro.
+   associated with this buffer.
 
    Interface:
-      DEFINE_DMA_BUF_EXPORT_INFO(exp_info)
-      struct dma_buf *dma_buf_export(struct dma_buf_export_info *exp_info)
+      struct dma_buf *dma_buf_export(void *priv, struct dma_buf_ops *ops,
+				     size_t size, int flags)
 
-   If this succeeds, dma_buf_export allocates a dma_buf structure, and
-   returns a pointer to the same. It also associates an anonymous file with this
-   buffer, so it can be exported. On failure to allocate the dma_buf object,
-   it returns NULL.
-
-   'exp_name' in struct dma_buf_export_info is the name of exporter - to
-   facilitate information while debugging. It is set to KBUILD_MODNAME by
-   default, so exporters don't have to provide a specific name, if they don't
-   wish to.
-
-   DEFINE_DMA_BUF_EXPORT_INFO macro defines the struct dma_buf_export_info,
-   zeroes it out and pre-populates exp_name in it.
-
+   If this succeeds, dma_buf_export allocates a dma_buf structure, and returns a
+   pointer to the same. It also associates an anonymous file with this buffer,
+   so it can be exported. On failure to allocate the dma_buf object, it returns
+   NULL.
 
 2. Userspace gets a handle to pass around to potential buffer-users
 
@@ -77,7 +67,7 @@ The dma_buf buffer sharing API usage contains the following steps:
    drivers and/or processes.
 
    Interface:
-      int dma_buf_fd(struct dma_buf *dmabuf, int flags)
+      int dma_buf_fd(struct dma_buf *dmabuf)
 
    This API installs an fd for the anonymous file associated with this buffer;
    returns either 'fd', or error.
@@ -158,9 +148,7 @@ to request use of buffer for allocation.
    "dma_buf->ops->" indirection from the users of this interface.
 
    In struct dma_buf_ops, unmap_dma_buf is defined as
-      void (*unmap_dma_buf)(struct dma_buf_attachment *,
-                            struct sg_table *,
-                            enum dma_data_direction);
+      void (*unmap_dma_buf)(struct dma_buf_attachment *, struct sg_table *);
 
    unmap_dma_buf signifies the end-of-DMA for the attachment provided. Like
    map_dma_buf, this API also must be implemented by the exporter.
@@ -220,7 +208,7 @@ NOTES:
     and then allow further {map,unmap}_dma_buf operations from any buffer-user
     from the migrated backing-storage.
 
-   If the exporter cannot fulfill the backing-storage constraints of the new
+   If the exporter cannot fulfil the backing-storage constraints of the new
    buffer-user device as requested, dma_buf_attach() would return an error to
    denote non-compatibility of the new buffer-sharing request with the current
    buffer.
@@ -257,15 +245,17 @@ Access to a dma_buf from the kernel context involves three steps:
 
    Interface:
       int dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
+				   size_t start, size_t len,
 				   enum dma_data_direction direction)
 
    This allows the exporter to ensure that the memory is actually available for
    cpu access - the exporter might need to allocate or swap-in and pin the
    backing storage. The exporter also needs to ensure that cpu access is
-   coherent for the access direction. The direction can be used by the exporter
-   to optimize the cache flushing, i.e. access with a different direction (read
-   instead of write) might return stale or even bogus data (e.g. when the
-   exporter needs to copy the data to temporary storage).
+   coherent for the given range and access direction. The range and access
+   direction can be used by the exporter to optimize the cache flushing, i.e.
+   access outside of the range or with a different direction (read instead of
+   write) might return stale or even bogus data (e.g. when the exporter needs to
+   copy the data to temporary storage).
 
    This step might fail, e.g. in oom conditions.
 
@@ -320,13 +310,14 @@ Access to a dma_buf from the kernel context involves three steps:
 
 3. Finish access
 
-   When the importer is done accessing the CPU, it needs to announce this to
-   the exporter (to facilitate cache flushing and unpinning of any pinned
-   resources). The result of any dma_buf kmap calls after end_cpu_access is
-   undefined.
+   When the importer is done accessing the range specified in begin_cpu_access,
+   it needs to announce this to the exporter (to facilitate cache flushing and
+   unpinning of any pinned resources). The result of of any dma_buf kmap calls
+   after end_cpu_access is undefined.
 
    Interface:
       void dma_buf_end_cpu_access(struct dma_buf *dma_buf,
+				  size_t start, size_t len,
 				  enum dma_data_direction dir);
 
 
@@ -350,29 +341,9 @@ Being able to mmap an export dma-buf buffer object has 2 main use-cases:
    handles, too). So it's beneficial to support this in a similar fashion on
    dma-buf to have a good transition path for existing Android userspace.
 
-   No special interfaces, userspace simply calls mmap on the dma-buf fd, making
-   sure that the cache synchronization ioctl (DMA_BUF_IOCTL_SYNC) is *always*
-   used when the access happens. Note that DMA_BUF_IOCTL_SYNC can fail with
-   -EAGAIN or -EINTR, in which case it must be restarted.
+   No special interfaces, userspace simply calls mmap on the dma-buf fd.
 
-   Some systems might need some sort of cache coherency management e.g. when
-   CPU and GPU domains are being accessed through dma-buf at the same time. To
-   circumvent this problem there are begin/end coherency markers, that forward
-   directly to existing dma-buf device drivers vfunc hooks. Userspace can make
-   use of those markers through the DMA_BUF_IOCTL_SYNC ioctl. The sequence
-   would be used like following:
-     - mmap dma-buf fd
-     - for each drawing/upload cycle in CPU 1. SYNC_START ioctl, 2. read/write
-       to mmap area 3. SYNC_END ioctl. This can be repeated as often as you
-       want (with the new data being consumed by the GPU or say scanout device)
-     - munmap once you don't need the buffer any more
-
-    For correctness and optimal performance, it is always required to use
-    SYNC_START and SYNC_END before and after, respectively, when accessing the
-    mapped address. Userspace cannot rely on coherent access, even when there
-    are systems where it just works without calling these ioctls.
-
-2. Supporting existing mmap interfaces in importers
+2. Supporting existing mmap interfaces in exporters
 
    Similar to the motivation for kernel cpu access it is again important that
    the userspace code of a given importing subsystem can use the same interfaces
@@ -426,18 +397,6 @@ Being able to mmap an export dma-buf buffer object has 2 main use-cases:
    different exporters handle this differently, buffer sharing can fail in
    interesting ways depending upong the exporter (if userspace starts depending
    upon this implicit synchronization).
-
-Other Interfaces Exposed to Userspace on the dma-buf FD
-------------------------------------------------------
-
-- Since kernel 3.12 the dma-buf FD supports the llseek system call, but only
-  with offset=0 and whence=SEEK_END|SEEK_SET. SEEK_SET is supported to allow
-  the usual size discover pattern size = SEEK_END(0); SEEK_SET(0). Every other
-  llseek operation will report -EINVAL.
-
-  If llseek on dma-buf FDs isn't support the kernel will report -ESPIPE for all
-  cases. Userspace can use this to detect support for discovering the dma-buf
-  size using llseek.
 
 Miscellaneous notes
 -------------------

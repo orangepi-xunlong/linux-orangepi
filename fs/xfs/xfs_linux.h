@@ -21,27 +21,22 @@
 #include <linux/types.h>
 
 /*
- * Kernel specific type declarations for XFS
+ * XFS_BIG_BLKNOS needs block layer disk addresses to be 64 bits.
+ * XFS_BIG_INUMS requires XFS_BIG_BLKNOS to be set.
  */
-typedef signed char		__int8_t;
-typedef unsigned char		__uint8_t;
-typedef signed short int	__int16_t;
-typedef unsigned short int	__uint16_t;
-typedef signed int		__int32_t;
-typedef unsigned int		__uint32_t;
-typedef signed long long int	__int64_t;
-typedef unsigned long long int	__uint64_t;
-
-typedef __s64			xfs_off_t;	/* <file offset> type */
-typedef unsigned long long	xfs_ino_t;	/* <inode> type */
-typedef __s64			xfs_daddr_t;	/* <disk address> type */
-typedef __u32			xfs_dev_t;
-typedef __u32			xfs_nlink_t;
+#if defined(CONFIG_LBDAF) || (BITS_PER_LONG == 64)
+# define XFS_BIG_BLKNOS	1
+# define XFS_BIG_INUMS	1
+#else
+# define XFS_BIG_BLKNOS	0
+# define XFS_BIG_INUMS	0
+#endif
 
 #include "xfs_types.h"
 
 #include "kmem.h"
 #include "mrlock.h"
+#include "time.h"
 #include "uuid.h"
 
 #include <linux/semaphore.h>
@@ -49,7 +44,6 @@ typedef __u32			xfs_nlink_t;
 #include <linux/kernel.h>
 #include <linux/blkdev.h>
 #include <linux/slab.h>
-#include <linux/crc32c.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/file.h>
@@ -77,7 +71,6 @@ typedef __u32			xfs_nlink_t;
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 #include <linux/list_sort.h>
-#include <linux/ratelimit.h>
 
 #include <asm/page.h>
 #include <asm/div64.h>
@@ -86,13 +79,12 @@ typedef __u32			xfs_nlink_t;
 #include <asm/byteorder.h>
 #include <asm/unaligned.h>
 
-#include "xfs_fs.h"
+#include "xfs_vnode.h"
 #include "xfs_stats.h"
 #include "xfs_sysctl.h"
 #include "xfs_iops.h"
 #include "xfs_aops.h"
 #include "xfs_super.h"
-#include "xfs_cksum.h"
 #include "xfs_buf.h"
 #include "xfs_message.h"
 
@@ -100,6 +92,15 @@ typedef __u32			xfs_nlink_t;
 #define XFS_NATIVE_HOST 1
 #else
 #undef XFS_NATIVE_HOST
+#endif
+
+/*
+ * Feature macros (disable/enable)
+ */
+#ifdef CONFIG_SMP
+#define HAVE_PERCPU_SB	/* per cpu superblock counters are a 2.6 feature */
+#else
+#undef  HAVE_PERCPU_SB	/* per cpu superblock counters are a 2.6 feature */
 #endif
 
 #define irix_sgid_inherit	xfs_params.sgid_inherit.val
@@ -111,12 +112,12 @@ typedef __u32			xfs_nlink_t;
 #define xfs_inherit_sync	xfs_params.inherit_sync.val
 #define xfs_inherit_nodump	xfs_params.inherit_nodump.val
 #define xfs_inherit_noatime	xfs_params.inherit_noatim.val
+#define xfs_buf_timer_centisecs	xfs_params.xfs_buf_timer.val
+#define xfs_buf_age_centisecs	xfs_params.xfs_buf_age.val
 #define xfs_inherit_nosymlinks	xfs_params.inherit_nosym.val
 #define xfs_rotorstep		xfs_params.rotorstep.val
 #define xfs_inherit_nodefrag	xfs_params.inherit_nodfrg.val
 #define xfs_fstrm_centisecs	xfs_params.fstrm_timer.val
-#define xfs_eofb_secs		xfs_params.eofb_timer.val
-#define xfs_cowb_secs		xfs_params.cowb_timer.val
 
 #define current_cpu()		(raw_smp_processor_id())
 #define current_pid()		(current->pid)
@@ -136,7 +137,7 @@ typedef __u32			xfs_nlink_t;
  * Size of block device i/o is parameterized here.
  * Currently the system supports page-sized i/o.
  */
-#define	BLKDEV_IOSHIFT		PAGE_SHIFT
+#define	BLKDEV_IOSHIFT		PAGE_CACHE_SHIFT
 #define	BLKDEV_IOSIZE		(1<<BLKDEV_IOSHIFT)
 /* number of BB's per block device block */
 #define	BLKDEV_BB		BTOBB(BLKDEV_IOSIZE)
@@ -144,7 +145,6 @@ typedef __u32			xfs_nlink_t;
 #define ENOATTR		ENODATA		/* Attribute not found */
 #define EWRONGFS	EINVAL		/* Mount with wrong filesystem type */
 #define EFSCORRUPTED	EUCLEAN		/* Filesystem is corrupted */
-#define EFSBADCRC	EBADMSG		/* Bad CRC detected */
 
 #define SYNCHRONIZE()	barrier()
 #define __return_address __builtin_return_address(0)
@@ -155,55 +155,6 @@ typedef __u32			xfs_nlink_t;
 #define MIN(a,b)	(min(a,b))
 #define MAX(a,b)	(max(a,b))
 #define howmany(x, y)	(((x)+((y)-1))/(y))
-
-static inline void delay(long ticks)
-{
-	schedule_timeout_uninterruptible(ticks);
-}
-
-/*
- * XFS wrapper structure for sysfs support. It depends on external data
- * structures and is embedded in various internal data structures to implement
- * the XFS sysfs object heirarchy. Define it here for broad access throughout
- * the codebase.
- */
-struct xfs_kobj {
-	struct kobject		kobject;
-	struct completion	complete;
-};
-
-struct xstats {
-	struct xfsstats __percpu	*xs_stats;
-	struct xfs_kobj			xs_kobj;
-};
-
-extern struct xstats xfsstats;
-
-/* Kernel uid/gid conversion. These are used to convert to/from the on disk
- * uid_t/gid_t types to the kuid_t/kgid_t types that the kernel uses internally.
- * The conversion here is type only, the value will remain the same since we
- * are converting to the init_user_ns. The uid is later mapped to a particular
- * user namespace value when crossing the kernel/user boundary.
- */
-static inline __uint32_t xfs_kuid_to_uid(kuid_t uid)
-{
-	return from_kuid(&init_user_ns, uid);
-}
-
-static inline kuid_t xfs_uid_to_kuid(__uint32_t uid)
-{
-	return make_kuid(&init_user_ns, uid);
-}
-
-static inline __uint32_t xfs_kgid_to_gid(kgid_t gid)
-{
-	return from_kgid(&init_user_ns, gid);
-}
-
-static inline kgid_t xfs_gid_to_kgid(__uint32_t gid)
-{
-	return make_kgid(&init_user_ns, gid);
-}
 
 /*
  * Various platform dependent calls that don't fit anywhere else
@@ -319,7 +270,7 @@ static inline __uint64_t roundup_64(__uint64_t x, __uint32_t y)
 {
 	x += y - 1;
 	do_div(x, y);
-	return x * y;
+	return(x * y);
 }
 
 static inline __uint64_t howmany_64(__uint64_t x, __uint32_t y)
@@ -329,50 +280,32 @@ static inline __uint64_t howmany_64(__uint64_t x, __uint32_t y)
 	return x;
 }
 
+/* ARM old ABI has some weird alignment/padding */
+#if defined(__arm__) && !defined(__ARM_EABI__)
+#define __arch_pack __attribute__((packed))
+#else
+#define __arch_pack
+#endif
+
 #define ASSERT_ALWAYS(expr)	\
-	(likely(expr) ? (void)0 : assfail(#expr, __FILE__, __LINE__))
+	(unlikely(expr) ? (void)0 : assfail(#expr, __FILE__, __LINE__))
 
-#ifdef DEBUG
-#define ASSERT(expr)	\
-	(likely(expr) ? (void)0 : assfail(#expr, __FILE__, __LINE__))
-
-#ifndef STATIC
-# define STATIC noinline
-#endif
-
-#else	/* !DEBUG */
-
-#ifdef XFS_WARN
-
-#define ASSERT(expr)	\
-	(likely(expr) ? (void)0 : asswarn(#expr, __FILE__, __LINE__))
-
-#ifndef STATIC
-# define STATIC static noinline
-#endif
-
-#else	/* !DEBUG && !XFS_WARN */
-
+#ifndef DEBUG
 #define ASSERT(expr)	((void)0)
 
 #ifndef STATIC
 # define STATIC static noinline
 #endif
 
-#endif /* XFS_WARN */
-#endif /* DEBUG */
+#else /* DEBUG */
 
-#ifdef CONFIG_XFS_RT
+#define ASSERT(expr)	\
+	(unlikely(expr) ? (void)0 : assfail(#expr, __FILE__, __LINE__))
 
-/*
- * make sure we ignore the inode flag if the filesystem doesn't have a
- * configured realtime device.
- */
-#define XFS_IS_REALTIME_INODE(ip)			\
-	(((ip)->i_d.di_flags & XFS_DIFLAG_REALTIME) &&	\
-	 (ip)->i_mount->m_rtdev_targp)
-#else
-#define XFS_IS_REALTIME_INODE(ip) (0)
+#ifndef STATIC
+# define STATIC noinline
 #endif
+
+#endif /* DEBUG */
 
 #endif /* __XFS_LINUX__ */

@@ -8,7 +8,6 @@
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
-#include <asm/sclp.h>
 #include <asm/ipl.h>
 #include "sizes.h"
 
@@ -48,10 +47,6 @@ static unsigned long free_mem_end_ptr;
 #include "../../../../lib/decompress_bunzip2.c"
 #endif
 
-#ifdef CONFIG_KERNEL_LZ4
-#include "../../../../lib/decompress_unlz4.c"
-#endif
-
 #ifdef CONFIG_KERNEL_LZMA
 #include "../../../../lib/decompress_unlzma.c"
 #endif
@@ -64,6 +59,8 @@ static unsigned long free_mem_end_ptr;
 #include "../../../../lib/decompress_unxz.c"
 #endif
 
+extern _sclp_print_early(const char *);
+
 static int puts(const char *s)
 {
 	_sclp_print_early(s);
@@ -74,37 +71,34 @@ void *memset(void *s, int c, size_t n)
 {
 	char *xs;
 
-	xs = s;
-	while (n--)
-		*xs++ = c;
+	if (c == 0)
+		return __builtin_memset(s, 0, n);
+
+	xs = (char *) s;
+	if (n > 0)
+		do {
+			*xs++ = c;
+		} while (--n > 0);
 	return s;
 }
 
-void *memcpy(void *dest, const void *src, size_t n)
+void *memcpy(void *__dest, __const void *__src, size_t __n)
 {
-	const char *s = src;
-	char *d = dest;
-
-	while (n--)
-		*d++ = *s++;
-	return dest;
+	return __builtin_memcpy(__dest, __src, __n);
 }
 
-void *memmove(void *dest, const void *src, size_t n)
+void *memmove(void *__dest, __const void *__src, size_t __n)
 {
-	const char *s = src;
-	char *d = dest;
+	char *d;
+	const char *s;
 
-	if (d <= s) {
-		while (n--)
-			*d++ = *s++;
-	} else {
-		d += n;
-		s += n;
-		while (n--)
-			*--d = *--s;
-	}
-	return dest;
+	if (__dest <= __src)
+		return __builtin_memcpy(__dest, __src, __n);
+	d = __dest + __n;
+	s = __src + __n;
+	while (__n--)
+		*--d = *--s;
+	return __dest;
 }
 
 static void error(char *x)
@@ -141,36 +135,33 @@ static void check_ipl_parmblock(void *start, unsigned long size)
 
 unsigned long decompress_kernel(void)
 {
-	void *output, *kernel_end;
+	unsigned long output_addr;
+	unsigned char *output;
 
-	output = (void *) ALIGN((unsigned long) &_end + HEAP_SIZE, PAGE_SIZE);
-	kernel_end = output + SZ__bss_start;
-	check_ipl_parmblock((void *) 0, (unsigned long) kernel_end);
+	output_addr = ((unsigned long) &_end + HEAP_SIZE + 4095UL) & -4096UL;
+	check_ipl_parmblock((void *) 0, output_addr + SZ__bss_start);
+	memset(&_bss, 0, &_ebss - &_bss);
+	free_mem_ptr = (unsigned long)&_end;
+	free_mem_end_ptr = free_mem_ptr + HEAP_SIZE;
+	output = (unsigned char *) output_addr;
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	/*
 	 * Move the initrd right behind the end of the decompressed
-	 * kernel image. This also prevents initrd corruption caused by
-	 * bss clearing since kernel_end will always be located behind the
-	 * current bss section..
+	 * kernel image.
 	 */
-	if (INITRD_START && INITRD_SIZE && kernel_end > (void *) INITRD_START) {
-		check_ipl_parmblock(kernel_end, INITRD_SIZE);
-		memmove(kernel_end, (void *) INITRD_START, INITRD_SIZE);
-		INITRD_START = (unsigned long) kernel_end;
+	if (INITRD_START && INITRD_SIZE &&
+	    INITRD_START < (unsigned long) output + SZ__bss_start) {
+		check_ipl_parmblock(output + SZ__bss_start,
+				    INITRD_START + INITRD_SIZE);
+		memmove(output + SZ__bss_start,
+			(void *) INITRD_START, INITRD_SIZE);
+		INITRD_START = (unsigned long) output + SZ__bss_start;
 	}
 #endif
 
-	/*
-	 * Clear bss section. free_mem_ptr and free_mem_end_ptr need to be
-	 * initialized afterwards since they reside in bss.
-	 */
-	memset(&_bss, 0, &_ebss - &_bss);
-	free_mem_ptr = (unsigned long) &_end;
-	free_mem_end_ptr = free_mem_ptr + HEAP_SIZE;
-
 	puts("Uncompressing Linux... ");
-	__decompress(input_data, input_len, NULL, NULL, output, 0, NULL, error);
+	decompress(input_data, input_len, NULL, NULL, output, NULL, error);
 	puts("Ok, booting the kernel.\n");
 	return (unsigned long) output;
 }

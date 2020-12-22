@@ -346,8 +346,7 @@ static void lanai_buf_allocate(struct lanai_buffer *buf,
 		 * everything, but the way the lanai uses DMA memory would
 		 * make that a terrific pain.  This is much simpler.
 		 */
-		buf->start = dma_alloc_coherent(&pci->dev,
-						size, &buf->dmaaddr, GFP_KERNEL);
+		buf->start = pci_alloc_consistent(pci, size, &buf->dmaaddr);
 		if (buf->start != NULL) {	/* Success */
 			/* Lanai requires 256-byte alignment of DMA bufs */
 			APRINTK((buf->dmaaddr & ~0xFFFFFF00) == 0,
@@ -373,8 +372,8 @@ static void lanai_buf_deallocate(struct lanai_buffer *buf,
 	struct pci_dev *pci)
 {
 	if (buf->start != NULL) {
-		dma_free_coherent(&pci->dev, lanai_buf_size(buf),
-				  buf->start, buf->dmaaddr);
+		pci_free_consistent(pci, lanai_buf_size(buf),
+		    buf->start, buf->dmaaddr);
 		buf->start = buf->end = buf->ptr = NULL;
 	}
 }
@@ -552,8 +551,8 @@ static inline void sram_write(const struct lanai_dev *lanai,
 	writel(val, sram_addr(lanai, offset));
 }
 
-static int sram_test_word(const struct lanai_dev *lanai, int offset,
-			  u32 pattern)
+static int __devinit sram_test_word(const struct lanai_dev *lanai,
+				    int offset, u32 pattern)
 {
 	u32 readback;
 	sram_write(lanai, pattern, offset);
@@ -567,7 +566,7 @@ static int sram_test_word(const struct lanai_dev *lanai, int offset,
 	return -EIO;
 }
 
-static int sram_test_pass(const struct lanai_dev *lanai, u32 pattern)
+static int __devinit sram_test_pass(const struct lanai_dev *lanai, u32 pattern)
 {
 	int offset, result = 0;
 	for (offset = 0; offset < SRAM_BYTES && result == 0; offset += 4)
@@ -575,7 +574,7 @@ static int sram_test_pass(const struct lanai_dev *lanai, u32 pattern)
 	return result;
 }
 
-static int sram_test_and_clear(const struct lanai_dev *lanai)
+static int __devinit sram_test_and_clear(const struct lanai_dev *lanai)
 {
 #ifdef FULL_MEMORY_TEST
 	int result;
@@ -679,6 +678,15 @@ static inline void cardvcc_write(const struct lanai_vcc *lvcc,
 static inline int aal5_size(int size)
 {
 	int cells = (size + 8 + 47) / 48;
+	return cells * 48;
+}
+
+/* How many bytes can we send if we have "space" space, assuming we have
+ * to send full cells
+ */
+static inline int aal5_spacefor(int space)
+{
+	int cells = space / 48;
 	return cells * 48;
 }
 
@@ -852,7 +860,7 @@ static inline void aal0_buffer_free(struct lanai_dev *lanai)
 #ifndef READ_EEPROM
 
 /* Stub functions to use if EEPROM reading is disabled */
-static int eeprom_read(struct lanai_dev *lanai)
+static int __devinit eeprom_read(struct lanai_dev *lanai)
 {
 	printk(KERN_INFO DEV_LABEL "(itf %d): *NOT* reading EEPROM\n",
 	    lanai->number);
@@ -860,7 +868,7 @@ static int eeprom_read(struct lanai_dev *lanai)
 	return 0;
 }
 
-static int eeprom_validate(struct lanai_dev *lanai)
+static int __devinit eeprom_validate(struct lanai_dev *lanai)
 {
 	lanai->serialno = 0;
 	lanai->magicno = EEPROM_MAGIC_VALUE;
@@ -869,7 +877,7 @@ static int eeprom_validate(struct lanai_dev *lanai)
 
 #else /* READ_EEPROM */
 
-static int eeprom_read(struct lanai_dev *lanai)
+static int __devinit eeprom_read(struct lanai_dev *lanai)
 {
 	int i, address;
 	u8 data;
@@ -945,7 +953,7 @@ static inline u32 eeprom_be4(const struct lanai_dev *lanai, int address)
 }
 
 /* Checksum/validate EEPROM contents */
-static int eeprom_validate(struct lanai_dev *lanai)
+static int __devinit eeprom_validate(struct lanai_dev *lanai)
 {
 	int i, s;
 	u32 v;
@@ -1440,7 +1448,7 @@ static void vcc_rx_aal0(struct lanai_dev *lanai)
 #include <linux/vmalloc.h>
 #endif
 
-static int vcc_table_allocate(struct lanai_dev *lanai)
+static int __devinit vcc_table_allocate(struct lanai_dev *lanai)
 {
 #ifdef VCCTABLE_GETFREEPAGE
 	APRINTK((lanai->num_vci) * sizeof(struct lanai_vcc *) <= PAGE_SIZE,
@@ -1580,7 +1588,7 @@ static void lanai_reset(struct lanai_dev *lanai)
 /*
  * Allocate service buffer and tell card about it
  */
-static int service_buffer_allocate(struct lanai_dev *lanai)
+static int __devinit service_buffer_allocate(struct lanai_dev *lanai)
 {
 	lanai_buf_allocate(&lanai->service, SERVICE_ENTRIES * 4, 8,
 	    lanai->pci);
@@ -1934,7 +1942,7 @@ static int check_board_id_and_rev(const char *name, u32 val, int *revp)
 
 /* -------------------- PCI INITIALIZATION/SHUTDOWN: */
 
-static int lanai_pci_start(struct lanai_dev *lanai)
+static int __devinit lanai_pci_start(struct lanai_dev *lanai)
 {
 	struct pci_dev *pci = lanai->pci;
 	int result;
@@ -1945,7 +1953,12 @@ static int lanai_pci_start(struct lanai_dev *lanai)
 		return -ENXIO;
 	}
 	pci_set_master(pci);
-	if (dma_set_mask_and_coherent(&pci->dev, DMA_BIT_MASK(32)) != 0) {
+	if (pci_set_dma_mask(pci, DMA_BIT_MASK(32)) != 0) {
+		printk(KERN_WARNING DEV_LABEL
+		    "(itf %d): No suitable DMA available.\n", lanai->number);
+		return -EBUSY;
+	}
+	if (pci_set_consistent_dma_mask(pci, DMA_BIT_MASK(32)) != 0) {
 		printk(KERN_WARNING DEV_LABEL
 		    "(itf %d): No suitable DMA available.\n", lanai->number);
 		return -EBUSY;
@@ -2110,7 +2123,7 @@ static inline void lanai_cbr_shutdown(struct lanai_dev *lanai)
 /* -------------------- OPERATIONS: */
 
 /* setup a newly detected device */
-static int lanai_dev_open(struct atm_dev *atmdev)
+static int __devinit lanai_dev_open(struct atm_dev *atmdev)
 {
 	struct lanai_dev *lanai = (struct lanai_dev *) atmdev->dev_data;
 	unsigned long raw_base;
@@ -2143,7 +2156,6 @@ static int lanai_dev_open(struct atm_dev *atmdev)
 	lanai->base = (bus_addr_t) ioremap(raw_base, LANAI_MAPPING_SIZE);
 	if (lanai->base == NULL) {
 		printk(KERN_ERR DEV_LABEL ": couldn't remap I/O space\n");
-		result = -ENOMEM;
 		goto error_pci;
 	}
 	/* 3.3: Reset lanai and PHY */
@@ -2554,8 +2566,8 @@ static const struct atmdev_ops ops = {
 };
 
 /* initialize one probed card */
-static int lanai_init_one(struct pci_dev *pci,
-			  const struct pci_device_id *ident)
+static int __devinit lanai_init_one(struct pci_dev *pci,
+				    const struct pci_device_id *ident)
 {
 	struct lanai_dev *lanai;
 	struct atm_dev *atmdev;
@@ -2602,7 +2614,27 @@ static struct pci_driver lanai_driver = {
 	.probe    = lanai_init_one,
 };
 
-module_pci_driver(lanai_driver);
+static int __init lanai_module_init(void)
+{
+	int x;
+
+	x = pci_register_driver(&lanai_driver);
+	if (x != 0)
+		printk(KERN_ERR DEV_LABEL ": no adapter found\n");
+	return x;
+}
+
+static void __exit lanai_module_exit(void)
+{
+	/* We'll only get called when all the interfaces are already
+	 * gone, so there isn't much to do
+	 */
+	DPRINTK("cleanup_module()\n");
+	pci_unregister_driver(&lanai_driver);
+}
+
+module_init(lanai_module_init);
+module_exit(lanai_module_exit);
 
 MODULE_AUTHOR("Mitchell Blank Jr <mitch@sfgoth.com>");
 MODULE_DESCRIPTION("Efficient Networks Speedstream 3010 driver");

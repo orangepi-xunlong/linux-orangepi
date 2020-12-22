@@ -11,32 +11,99 @@
 #ifndef __ARCH_ARM_MACH_AT91_PM
 #define __ARCH_ARM_MACH_AT91_PM
 
-#include <asm/proc-fns.h>
+#include <mach/at91_ramc.h>
+#ifdef CONFIG_ARCH_AT91RM9200
+#include <mach/at91rm9200_sdramc.h>
 
-#include <linux/mfd/syscon/atmel-mc.h>
-#include <soc/at91/at91sam9_ddrsdr.h>
-#include <soc/at91/at91sam9_sdramc.h>
+/*
+ * The AT91RM9200 goes into self-refresh mode with this command, and will
+ * terminate self-refresh automatically on the next SDRAM access.
+ *
+ * Self-refresh mode is exited as soon as a memory access is made, but we don't
+ * know for sure when that happens. However, we need to restore the low-power
+ * mode if it was enabled before going idle. Restoring low-power mode while
+ * still in self-refresh is "not recommended", but seems to work.
+ */
 
-#ifndef __ASSEMBLY__
-extern void __iomem *at91_ramc_base[];
+static inline void at91rm9200_standby(void)
+{
+	u32 lpr = at91_ramc_read(0, AT91RM9200_SDRAMC_LPR);
 
-#define at91_ramc_read(id, field) \
-	__raw_readl(at91_ramc_base[id] + field)
+	asm volatile(
+		"b    1f\n\t"
+		".align    5\n\t"
+		"1:  mcr    p15, 0, %0, c7, c10, 4\n\t"
+		"    str    %0, [%1, %2]\n\t"
+		"    str    %3, [%1, %4]\n\t"
+		"    mcr    p15, 0, %0, c7, c0, 4\n\t"
+		"    str    %5, [%1, %2]"
+		:
+		: "r" (0), "r" (at91_ramc_base[0]), "r" (AT91RM9200_SDRAMC_LPR),
+		  "r" (1), "r" (AT91RM9200_SDRAMC_SRR),
+		  "r" (lpr));
+}
 
-#define at91_ramc_write(id, field, value) \
-	__raw_writel(value, at91_ramc_base[id] + field)
+#define at91_standby at91rm9200_standby
+
+#elif defined(CONFIG_ARCH_AT91SAM9G45)
+
+/* We manage both DDRAM/SDRAM controllers, we need more than one value to
+ * remember.
+ */
+static inline void at91sam9g45_standby(void)
+{
+	/* Those two values allow us to delay self-refresh activation
+	 * to the maximum. */
+	u32 lpr0, lpr1;
+	u32 saved_lpr0, saved_lpr1;
+
+	saved_lpr1 = at91_ramc_read(1, AT91_DDRSDRC_LPR);
+	lpr1 = saved_lpr1 & ~AT91_DDRSDRC_LPCB;
+	lpr1 |= AT91_DDRSDRC_LPCB_SELF_REFRESH;
+
+	saved_lpr0 = at91_ramc_read(0, AT91_DDRSDRC_LPR);
+	lpr0 = saved_lpr0 & ~AT91_DDRSDRC_LPCB;
+	lpr0 |= AT91_DDRSDRC_LPCB_SELF_REFRESH;
+
+	/* self-refresh mode now */
+	at91_ramc_write(0, AT91_DDRSDRC_LPR, lpr0);
+	at91_ramc_write(1, AT91_DDRSDRC_LPR, lpr1);
+
+	cpu_do_idle();
+
+	at91_ramc_write(0, AT91_DDRSDRC_LPR, saved_lpr0);
+	at91_ramc_write(1, AT91_DDRSDRC_LPR, saved_lpr1);
+}
+
+#define at91_standby at91sam9g45_standby
+
+#else
+
+#ifdef CONFIG_ARCH_AT91SAM9263
+/*
+ * FIXME either or both the SDRAM controllers (EB0, EB1) might be in use;
+ * handle those cases both here and in the Suspend-To-RAM support.
+ */
+#warning Assuming EB1 SDRAM controller is *NOT* used
 #endif
 
-#define AT91_MEMCTRL_MC		0
-#define AT91_MEMCTRL_SDRAMC	1
-#define AT91_MEMCTRL_DDRSDR	2
+static inline void at91sam9_standby(void)
+{
+	u32 saved_lpr, lpr;
 
-#define	AT91_PM_MEMTYPE_MASK	0x0f
+	saved_lpr = at91_ramc_read(0, AT91_SDRAMC_LPR);
 
-#define	AT91_PM_MODE_OFFSET	4
-#define	AT91_PM_MODE_MASK	0x01
-#define	AT91_PM_MODE(x)		(((x) & AT91_PM_MODE_MASK) << AT91_PM_MODE_OFFSET)
+	lpr = saved_lpr & ~AT91_SDRAMC_LPCB;
+	at91_ramc_write(0, AT91_SDRAMC_LPR, lpr |
+			AT91_SDRAMC_LPCB_SELF_REFRESH);
 
-#define	AT91_PM_SLOW_CLOCK	0x01
+	cpu_do_idle();
+
+	at91_ramc_write(0, AT91_SDRAMC_LPR, saved_lpr);
+}
+
+#define at91_standby at91sam9_standby
+
+#endif
 
 #endif

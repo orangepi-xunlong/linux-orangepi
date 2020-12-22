@@ -130,7 +130,7 @@ static int rx_submit(struct usbpn_dev *pnd, struct urb *req, gfp_t gfp_flags)
 	struct page *page;
 	int err;
 
-	page = __dev_alloc_page(gfp_flags | __GFP_NOMEMALLOC);
+	page = alloc_page(gfp_flags);
 	if (!page)
 		return -ENOMEM;
 
@@ -212,7 +212,7 @@ resubmit:
 	if (page)
 		put_page(page);
 	if (req)
-		rx_submit(pnd, req, GFP_ATOMIC);
+		rx_submit(pnd, req, GFP_ATOMIC | __GFP_COLD);
 }
 
 static int usbpn_close(struct net_device *dev);
@@ -231,8 +231,7 @@ static int usbpn_open(struct net_device *dev)
 	for (i = 0; i < rxq_size; i++) {
 		struct urb *req = usb_alloc_urb(0, GFP_KERNEL);
 
-		if (!req || rx_submit(pnd, req, GFP_KERNEL)) {
-			usb_free_urb(req);
+		if (!req || rx_submit(pnd, req, GFP_KERNEL | __GFP_COLD)) {
 			usbpn_close(dev);
 			return -ENOMEM;
 		}
@@ -328,7 +327,7 @@ MODULE_DEVICE_TABLE(usb, usbpn_ids);
 
 static struct usb_driver usbpn_driver;
 
-static int usbpn_probe(struct usb_interface *intf, const struct usb_device_id *id)
+int usbpn_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
 	static const char ifname[] = "usbpn%d";
 	const struct usb_cdc_union_desc *union_header = NULL;
@@ -340,13 +339,32 @@ static int usbpn_probe(struct usb_interface *intf, const struct usb_device_id *i
 	u8 *data;
 	int phonet = 0;
 	int len, err;
-	struct usb_cdc_parsed_header hdr;
 
 	data = intf->altsetting->extra;
 	len = intf->altsetting->extralen;
-	cdc_parse_cdc_header(&hdr, intf, data, len);
-	union_header = hdr.usb_cdc_union_desc;
-	phonet = hdr.phonet_magic_present;
+	while (len >= 3) {
+		u8 dlen = data[0];
+		if (dlen < 3)
+			return -EINVAL;
+
+		/* bDescriptorType */
+		if (data[1] == USB_DT_CS_INTERFACE) {
+			/* bDescriptorSubType */
+			switch (data[2]) {
+			case USB_CDC_UNION_TYPE:
+				if (union_header || dlen < 5)
+					break;
+				union_header =
+					(struct usb_cdc_union_desc *)data;
+				break;
+			case 0xAB:
+				phonet = 1;
+				break;
+			}
+		}
+		data += dlen;
+		len -= dlen;
+	}
 
 	if (!union_header || !phonet)
 		return -EINVAL;
@@ -368,7 +386,7 @@ static int usbpn_probe(struct usb_interface *intf, const struct usb_device_id *i
 		return -EINVAL;
 
 	dev = alloc_netdev(sizeof(*pnd) + sizeof(pnd->urbs[0]) * rxq_size,
-			   ifname, NET_NAME_UNKNOWN, usbpn_setup);
+				ifname, usbpn_setup);
 	if (!dev)
 		return -ENOMEM;
 
@@ -376,7 +394,7 @@ static int usbpn_probe(struct usb_interface *intf, const struct usb_device_id *i
 	SET_NETDEV_DEV(dev, &intf->dev);
 
 	pnd->dev = dev;
-	pnd->usb = usbdev;
+	pnd->usb = usb_get_dev(usbdev);
 	pnd->intf = intf;
 	pnd->data_intf = data_intf;
 	spin_lock_init(&pnd->tx_lock);
@@ -422,6 +440,7 @@ out:
 static void usbpn_disconnect(struct usb_interface *intf)
 {
 	struct usbpn_dev *pnd = usb_get_intfdata(intf);
+	struct usb_device *usb = pnd->usb;
 
 	if (pnd->disconnected)
 		return;
@@ -430,6 +449,7 @@ static void usbpn_disconnect(struct usb_interface *intf)
 	usb_driver_release_interface(&usbpn_driver,
 			(pnd->intf == intf) ? pnd->data_intf : pnd->intf);
 	unregister_netdev(pnd->dev);
+	usb_put_dev(usb);
 }
 
 static struct usb_driver usbpn_driver = {
@@ -437,7 +457,6 @@ static struct usb_driver usbpn_driver = {
 	.probe =	usbpn_probe,
 	.disconnect =	usbpn_disconnect,
 	.id_table =	usbpn_ids,
-	.disable_hub_initiated_lpm = 1,
 };
 
 module_usb_driver(usbpn_driver);

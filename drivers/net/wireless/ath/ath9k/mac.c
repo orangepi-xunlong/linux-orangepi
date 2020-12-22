@@ -133,15 +133,7 @@ EXPORT_SYMBOL(ath9k_hw_updatetxtriglevel);
 
 void ath9k_hw_abort_tx_dma(struct ath_hw *ah)
 {
-	int maxdelay = 1000;
 	int i, q;
-
-	if (ah->curchan) {
-		if (IS_CHAN_HALF_RATE(ah->curchan))
-			maxdelay *= 2;
-		else if (IS_CHAN_QUARTER_RATE(ah->curchan))
-			maxdelay *= 4;
-	}
 
 	REG_WRITE(ah, AR_Q_TXD, AR_Q_TXD_M);
 
@@ -150,7 +142,7 @@ void ath9k_hw_abort_tx_dma(struct ath_hw *ah)
 	REG_SET_BIT(ah, AR_D_GBL_IFS_MISC, AR_D_GBL_IFS_MISC_IGNORE_BACKOFF);
 
 	for (q = 0; q < AR_NUM_QCU; q++) {
-		for (i = 0; i < maxdelay; i++) {
+		for (i = 0; i < 1000; i++) {
 			if (i)
 				udelay(5);
 
@@ -367,6 +359,7 @@ EXPORT_SYMBOL(ath9k_hw_releasetxqueue);
 bool ath9k_hw_resettxqueue(struct ath_hw *ah, u32 q)
 {
 	struct ath_common *common = ath9k_hw_common(ah);
+	struct ath9k_channel *chan = ah->curchan;
 	struct ath9k_tx_queue_info *qi;
 	u32 cwMin, chanCwMin, value;
 
@@ -379,7 +372,10 @@ bool ath9k_hw_resettxqueue(struct ath_hw *ah, u32 q)
 	ath_dbg(common, QUEUE, "Reset TX queue: %u\n", q);
 
 	if (qi->tqi_cwmin == ATH9K_TXQ_USEDEFAULT) {
-		chanCwMin = INIT_CWMIN;
+		if (chan && IS_CHAN_B(chan))
+			chanCwMin = INIT_CWMIN_11B;
+		else
+			chanCwMin = INIT_CWMIN;
 
 		for (cwMin = 1; cwMin < chanCwMin; cwMin = (cwMin << 1) | 1);
 	} else
@@ -399,7 +395,7 @@ bool ath9k_hw_resettxqueue(struct ath_hw *ah, u32 q)
 
 	REG_WRITE(ah, AR_QMISC(q), AR_Q_MISC_DCU_EARLY_TERM_REQ);
 
-	if (AR_SREV_9340(ah) && !AR_SREV_9340_13_OR_LATER(ah))
+	if (AR_SREV_9340(ah))
 		REG_WRITE(ah, AR_DMISC(q),
 			  AR_D_MISC_CW_BKOFF_EN | AR_D_MISC_FRAG_WAIT_EN | 0x1);
 	else
@@ -474,7 +470,8 @@ bool ath9k_hw_resettxqueue(struct ath_hw *ah, u32 q)
 			    | AR_Q_MISC_CBR_INCR_DIS0);
 		value = (qi->tqi_readyTime -
 			 (ah->config.sw_beacon_response_time -
-			  ah->config.dma_beacon_response_time)) * 1024;
+			  ah->config.dma_beacon_response_time) -
+			 ah->config.additional_swba_backoff) * 1024;
 		REG_WRITE(ah, AR_QRDYTIMECFG(q),
 			  value | AR_Q_RDYTIMECFG_EN);
 		REG_SET_BIT(ah, AR_DMISC(q),
@@ -535,32 +532,31 @@ int ath9k_hw_rxprocdesc(struct ath_hw *ah, struct ath_desc *ds,
 
 	rs->rs_status = 0;
 	rs->rs_flags = 0;
-	rs->flag = 0;
 
 	rs->rs_datalen = ads.ds_rxstatus1 & AR_DataLen;
 	rs->rs_tstamp = ads.AR_RcvTimestamp;
 
 	if (ads.ds_rxstatus8 & AR_PostDelimCRCErr) {
 		rs->rs_rssi = ATH9K_RSSI_BAD;
-		rs->rs_rssi_ctl[0] = ATH9K_RSSI_BAD;
-		rs->rs_rssi_ctl[1] = ATH9K_RSSI_BAD;
-		rs->rs_rssi_ctl[2] = ATH9K_RSSI_BAD;
-		rs->rs_rssi_ext[0] = ATH9K_RSSI_BAD;
-		rs->rs_rssi_ext[1] = ATH9K_RSSI_BAD;
-		rs->rs_rssi_ext[2] = ATH9K_RSSI_BAD;
+		rs->rs_rssi_ctl0 = ATH9K_RSSI_BAD;
+		rs->rs_rssi_ctl1 = ATH9K_RSSI_BAD;
+		rs->rs_rssi_ctl2 = ATH9K_RSSI_BAD;
+		rs->rs_rssi_ext0 = ATH9K_RSSI_BAD;
+		rs->rs_rssi_ext1 = ATH9K_RSSI_BAD;
+		rs->rs_rssi_ext2 = ATH9K_RSSI_BAD;
 	} else {
 		rs->rs_rssi = MS(ads.ds_rxstatus4, AR_RxRSSICombined);
-		rs->rs_rssi_ctl[0] = MS(ads.ds_rxstatus0,
+		rs->rs_rssi_ctl0 = MS(ads.ds_rxstatus0,
 						AR_RxRSSIAnt00);
-		rs->rs_rssi_ctl[1] = MS(ads.ds_rxstatus0,
+		rs->rs_rssi_ctl1 = MS(ads.ds_rxstatus0,
 						AR_RxRSSIAnt01);
-		rs->rs_rssi_ctl[2] = MS(ads.ds_rxstatus0,
+		rs->rs_rssi_ctl2 = MS(ads.ds_rxstatus0,
 						AR_RxRSSIAnt02);
-		rs->rs_rssi_ext[0] = MS(ads.ds_rxstatus4,
+		rs->rs_rssi_ext0 = MS(ads.ds_rxstatus4,
 						AR_RxRSSIAnt10);
-		rs->rs_rssi_ext[1] = MS(ads.ds_rxstatus4,
+		rs->rs_rssi_ext1 = MS(ads.ds_rxstatus4,
 						AR_RxRSSIAnt11);
-		rs->rs_rssi_ext[2] = MS(ads.ds_rxstatus4,
+		rs->rs_rssi_ext2 = MS(ads.ds_rxstatus4,
 						AR_RxRSSIAnt12);
 	}
 	if (ads.ds_rxstatus8 & AR_RxKeyIdxValid)
@@ -571,21 +567,14 @@ int ath9k_hw_rxprocdesc(struct ath_hw *ah, struct ath_desc *ds,
 	rs->rs_rate = MS(ads.ds_rxstatus0, AR_RxRate);
 	rs->rs_more = (ads.ds_rxstatus1 & AR_RxMore) ? 1 : 0;
 
-	rs->rs_firstaggr = (ads.ds_rxstatus8 & AR_RxFirstAggr) ? 1 : 0;
 	rs->rs_isaggr = (ads.ds_rxstatus8 & AR_RxAggr) ? 1 : 0;
-	rs->rs_moreaggr = (ads.ds_rxstatus8 & AR_RxMoreAggr) ? 1 : 0;
+	rs->rs_moreaggr =
+		(ads.ds_rxstatus8 & AR_RxMoreAggr) ? 1 : 0;
 	rs->rs_antenna = MS(ads.ds_rxstatus3, AR_RxAntenna);
-
-	/* directly mapped flags for ieee80211_rx_status */
-	rs->flag |=
-		(ads.ds_rxstatus3 & AR_GI) ? RX_FLAG_SHORT_GI : 0;
-	rs->flag |=
-		(ads.ds_rxstatus3 & AR_2040) ? RX_FLAG_40MHZ : 0;
-	if (AR_SREV_9280_20_OR_LATER(ah))
-		rs->flag |=
-			(ads.ds_rxstatus3 & AR_STBC) ?
-				/* we can only Nss=1 STBC */
-				(1 << RX_FLAG_STBC_SHIFT) : 0;
+	rs->rs_flags =
+		(ads.ds_rxstatus3 & AR_GI) ? ATH9K_RX_GI : 0;
+	rs->rs_flags |=
+		(ads.ds_rxstatus3 & AR_2040) ? ATH9K_RX_2040 : 0;
 
 	if (ads.ds_rxstatus8 & AR_PreDelimCRCErr)
 		rs->rs_flags |= ATH9K_RX_DELIM_CRC_PRE;
@@ -601,24 +590,16 @@ int ath9k_hw_rxprocdesc(struct ath_hw *ah, struct ath_desc *ds,
 		 * reported, then decryption and MIC errors are irrelevant,
 		 * the frame is going to be dropped either way
 		 */
-		if (ads.ds_rxstatus8 & AR_PHYErr) {
+		if (ads.ds_rxstatus8 & AR_CRCErr)
+			rs->rs_status |= ATH9K_RXERR_CRC;
+		else if (ads.ds_rxstatus8 & AR_PHYErr) {
 			rs->rs_status |= ATH9K_RXERR_PHY;
 			phyerr = MS(ads.ds_rxstatus8, AR_PHYErrCode);
 			rs->rs_phyerr = phyerr;
-		} else if (ads.ds_rxstatus8 & AR_CRCErr)
-			rs->rs_status |= ATH9K_RXERR_CRC;
-		else if (ads.ds_rxstatus8 & AR_DecryptCRCErr)
+		} else if (ads.ds_rxstatus8 & AR_DecryptCRCErr)
 			rs->rs_status |= ATH9K_RXERR_DECRYPT;
 		else if (ads.ds_rxstatus8 & AR_MichaelErr)
 			rs->rs_status |= ATH9K_RXERR_MIC;
-	} else {
-		if (ads.ds_rxstatus8 &
-		    (AR_CRCErr | AR_PHYErr | AR_DecryptCRCErr | AR_MichaelErr))
-			rs->rs_status |= ATH9K_RXERR_CORRUPT_DESC;
-
-		/* Only up to MCS16 supported, everything above is invalid */
-		if (rs->rs_rate >= 0x90)
-			rs->rs_status |= ATH9K_RXERR_CORRUPT_DESC;
 	}
 
 	if (ads.ds_rxstatus8 & AR_KeyMiss)
@@ -777,9 +758,14 @@ bool ath9k_hw_intrpend(struct ath_hw *ah)
 }
 EXPORT_SYMBOL(ath9k_hw_intrpend);
 
-void ath9k_hw_kill_interrupts(struct ath_hw *ah)
+void ath9k_hw_disable_interrupts(struct ath_hw *ah)
 {
 	struct ath_common *common = ath9k_hw_common(ah);
+
+	if (!(ah->imask & ATH9K_INT_GLOBAL))
+		atomic_set(&ah->intr_ref_cnt, -1);
+	else
+		atomic_dec(&ah->intr_ref_cnt);
 
 	ath_dbg(common, INTERRUPT, "disable IER\n");
 	REG_WRITE(ah, AR_IER, AR_IER_DISABLE);
@@ -792,27 +778,24 @@ void ath9k_hw_kill_interrupts(struct ath_hw *ah)
 		(void) REG_READ(ah, AR_INTR_SYNC_ENABLE);
 	}
 }
-EXPORT_SYMBOL(ath9k_hw_kill_interrupts);
-
-void ath9k_hw_disable_interrupts(struct ath_hw *ah)
-{
-	if (!(ah->imask & ATH9K_INT_GLOBAL))
-		atomic_set(&ah->intr_ref_cnt, -1);
-	else
-		atomic_dec(&ah->intr_ref_cnt);
-
-	ath9k_hw_kill_interrupts(ah);
-}
 EXPORT_SYMBOL(ath9k_hw_disable_interrupts);
 
-static void __ath9k_hw_enable_interrupts(struct ath_hw *ah)
+void ath9k_hw_enable_interrupts(struct ath_hw *ah)
 {
 	struct ath_common *common = ath9k_hw_common(ah);
 	u32 sync_default = AR_INTR_SYNC_DEFAULT;
 	u32 async_mask;
 
-	if (AR_SREV_9340(ah) || AR_SREV_9550(ah) || AR_SREV_9531(ah) ||
-	    AR_SREV_9561(ah))
+	if (!(ah->imask & ATH9K_INT_GLOBAL))
+		return;
+
+	if (!atomic_inc_and_test(&ah->intr_ref_cnt)) {
+		ath_dbg(common, INTERRUPT, "Do not enable IER ref count %d\n",
+			atomic_read(&ah->intr_ref_cnt));
+		return;
+	}
+
+	if (AR_SREV_9340(ah))
 		sync_default &= ~AR_INTR_SYNC_HOST1_FATAL;
 
 	async_mask = AR_INTR_MAC_IRQ;
@@ -831,39 +814,6 @@ static void __ath9k_hw_enable_interrupts(struct ath_hw *ah)
 	}
 	ath_dbg(common, INTERRUPT, "AR_IMR 0x%x IER 0x%x\n",
 		REG_READ(ah, AR_IMR), REG_READ(ah, AR_IER));
-}
-
-void ath9k_hw_resume_interrupts(struct ath_hw *ah)
-{
-	struct ath_common *common = ath9k_hw_common(ah);
-
-	if (!(ah->imask & ATH9K_INT_GLOBAL))
-		return;
-
-	if (atomic_read(&ah->intr_ref_cnt) != 0) {
-		ath_dbg(common, INTERRUPT, "Do not enable IER ref count %d\n",
-			atomic_read(&ah->intr_ref_cnt));
-		return;
-	}
-
-	__ath9k_hw_enable_interrupts(ah);
-}
-EXPORT_SYMBOL(ath9k_hw_resume_interrupts);
-
-void ath9k_hw_enable_interrupts(struct ath_hw *ah)
-{
-	struct ath_common *common = ath9k_hw_common(ah);
-
-	if (!(ah->imask & ATH9K_INT_GLOBAL))
-		return;
-
-	if (!atomic_inc_and_test(&ah->intr_ref_cnt)) {
-		ath_dbg(common, INTERRUPT, "Do not enable IER ref count %d\n",
-			atomic_read(&ah->intr_ref_cnt));
-		return;
-	}
-
-	__ath9k_hw_enable_interrupts(ah);
 }
 EXPORT_SYMBOL(ath9k_hw_enable_interrupts);
 
@@ -940,29 +890,11 @@ void ath9k_hw_set_interrupts(struct ath_hw *ah)
 			mask2 |= AR_IMR_S2_CST;
 	}
 
-	if (ah->config.hw_hang_checks & HW_BB_WATCHDOG) {
-		if (ints & ATH9K_INT_BB_WATCHDOG) {
-			mask |= AR_IMR_BCNMISC;
-			mask2 |= AR_IMR_S2_BB_WATCHDOG;
-		}
-	}
-
 	ath_dbg(common, INTERRUPT, "new IMR 0x%x\n", mask);
 	REG_WRITE(ah, AR_IMR, mask);
-	ah->imrs2_reg &= ~(AR_IMR_S2_TIM |
-			   AR_IMR_S2_DTIM |
-			   AR_IMR_S2_DTIMSYNC |
-			   AR_IMR_S2_CABEND |
-			   AR_IMR_S2_CABTO |
-			   AR_IMR_S2_TSFOOR |
-			   AR_IMR_S2_GTT |
-			   AR_IMR_S2_CST);
-
-	if (ah->config.hw_hang_checks & HW_BB_WATCHDOG) {
-		if (ints & ATH9K_INT_BB_WATCHDOG)
-			ah->imrs2_reg &= ~AR_IMR_S2_BB_WATCHDOG;
-	}
-
+	ah->imrs2_reg &= ~(AR_IMR_S2_TIM | AR_IMR_S2_DTIM | AR_IMR_S2_DTIMSYNC |
+			   AR_IMR_S2_CABEND | AR_IMR_S2_CABTO |
+			   AR_IMR_S2_TSFOOR | AR_IMR_S2_GTT | AR_IMR_S2_CST);
 	ah->imrs2_reg |= mask2;
 	REG_WRITE(ah, AR_IMR_S2, ah->imrs2_reg);
 
@@ -976,25 +908,3 @@ void ath9k_hw_set_interrupts(struct ath_hw *ah)
 	return;
 }
 EXPORT_SYMBOL(ath9k_hw_set_interrupts);
-
-#define ATH9K_HW_MAX_DCU       10
-#define ATH9K_HW_SLICE_PER_DCU 16
-#define ATH9K_HW_BIT_IN_SLICE  16
-void ath9k_hw_set_tx_filter(struct ath_hw *ah, u8 destidx, bool set)
-{
-	int dcu_idx;
-	u32 filter;
-
-	for (dcu_idx = 0; dcu_idx < 10; dcu_idx++) {
-		filter = SM(set, AR_D_TXBLK_WRITE_COMMAND);
-		filter |= SM(dcu_idx, AR_D_TXBLK_WRITE_DCU);
-		filter |= SM((destidx / ATH9K_HW_SLICE_PER_DCU),
-			     AR_D_TXBLK_WRITE_SLICE);
-		filter |= BIT(destidx % ATH9K_HW_BIT_IN_SLICE);
-		ath_dbg(ath9k_hw_common(ah), PS,
-			"DCU%d staid %d set %d txfilter %08x\n",
-			dcu_idx, destidx, set, filter);
-		REG_WRITE(ah, AR_D_TXBLK_BASE, filter);
-	}
-}
-EXPORT_SYMBOL(ath9k_hw_set_tx_filter);

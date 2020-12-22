@@ -25,6 +25,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <scsi/scsi_host.h>
@@ -440,16 +441,27 @@ static struct pci_driver optidma_pci_driver = {
 	.id_table	= optidma,
 	.probe 		= optidma_init_one,
 	.remove		= ata_pci_remove_one,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend	= ata_pci_device_suspend,
 	.resume		= ata_pci_device_resume,
 #endif
 };
 
-module_pci_driver(optidma_pci_driver);
+static int __init optidma_init(void)
+{
+	return pci_register_driver(&optidma_pci_driver);
+}
+
+static void __exit optidma_exit(void)
+{
+	pci_unregister_driver(&optidma_pci_driver);
+}
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("low-level driver for Opti Firestar/Firestar Plus");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, optidma);
 MODULE_VERSION(DRV_VERSION);
+
+module_init(optidma_init);
+module_exit(optidma_exit);

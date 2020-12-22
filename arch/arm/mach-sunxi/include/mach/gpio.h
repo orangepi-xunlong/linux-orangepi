@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-sunxi/include/mach/gpio.h
  *
- * Copyright(c) 2013-2015 Allwinnertech Co., Ltd.
+ * Copyright(c) 2013-2015 Allwinnertech Co., Ltd. 
  *         http://www.allwinnertech.com
  *
  * Author: sunny <sunny@allwinnertech.com>
@@ -25,7 +25,7 @@
 /* pin group base number name space,
  * the max pin number : 26*32=832.
  */
-#define SUNXI_PINCTRL	"sunxi-pinctrl"
+#define SUNXI_PINCTRL 	"sunxi-pinctrl"
 #define SUNXI_BANK_SIZE 32
 #define SUNXI_PA_BASE	0
 #define SUNXI_PB_BASE	32
@@ -73,11 +73,12 @@
 /* axp group base number name space,
  * axp pinctrl number space coherent to sunxi-pinctrl.
  */
-#define AXP_PINCTRL			"axp-pinctrl"
-#define AXP_CFG_GRP			(0xFFFF)
+#define AXP_PINCTRL 	        "axp-pinctrl"
+#define AXP_CFG_GRP 		(0xFFFF)
 #define AXP_PIN_INPUT_FUNC	(0)
 #define AXP_PIN_OUTPUT_FUNC	(1)
 #define IS_AXP_PIN(pin)         (pin >= AXP_PIN_BASE)
+
 
 /* sunxi specific pull up/down */
 enum sunxi_pull_up_down {
@@ -94,7 +95,7 @@ enum sunxi_data_type {
 
 /* sunxi specific pull status */
 enum sunxi_pin_pull {
-	SUNXI_PIN_PULL_DISABLE	= 0x00,
+	SUNXI_PIN_PULL_DISABLE 	= 0x00,
 	SUNXI_PIN_PULL_UP	= 0x01,
 	SUNXI_PIN_PULL_DOWN	= 0x02,
 	SUNXI_PIN_PULL_RESERVED	= 0x03,
@@ -110,32 +111,31 @@ enum sunxi_pin_drv_level {
 
 /* sunxi specific data bit status */
 enum sunxi_pin_data_status {
-	SUNXI_PIN_DATA_LOW  = 0x00,
-	SUNXI_PIN_DATA_HIGH = 0x01,
+    SUNXI_PIN_DATA_LOW  = 0x00,
+    SUNXI_PIN_DATA_HIGH = 0x01,
 };
 
 /* sunxi pin interrupt trigger mode */
 enum sunxi_pin_int_trigger_mode {
-	SUNXI_PIN_EINT_POSITIVE_EDGE   =   0x0,
-	SUNXI_PIN_EINT_NEGATIVE_EDGE   =   0x1,
-	SUNXI_PIN_EINT_HIGN_LEVEL      =   0x2,
-	SUNXI_PIN_EINT_LOW_LEVEL       =   0x3,
-	SUNXI_PIN_EINT_DOUBLE_EDGE     =   0x4
+    SUNXI_PIN_EINT_POSITIVE_EDGE   =   0x0,
+    SUNXI_PIN_EINT_NEGATIVE_EDGE   =   0x1,
+    SUNXI_PIN_EINT_HIGN_LEVEL      =   0x2,
+    SUNXI_PIN_EINT_LOW_LEVEL       =   0x3,
+    SUNXI_PIN_EINT_DOUBLE_EDGE     =   0x4
 };
 
 /* the source clock of pin int */
 enum sunxi_pin_int_source_clk {
-	SUNXI_PIN_INT_SRC_CLK_32K = 0x0,
-	SUNXI_PIN_INT_SRC_CLK_24M = 0x1
+    SUNXI_PIN_INT_SRC_CLK_32K = 0x0,
+    SUNXI_PIN_INT_SRC_CLK_24M = 0x1
 };
 
 static inline int sunxi_gpio_to_name(int gpio, char *name)
 {
 	int bank, index;
-
-	if (!name)
+	if (!name) {
 		return -EINVAL;
-
+	}
 	if (IS_AXP_PIN(gpio)) {
 		/* axp gpio name like this : GPIO0/GPIO1/.. */
 		index = gpio - AXP_PIN_BASE;
@@ -144,7 +144,7 @@ static inline int sunxi_gpio_to_name(int gpio, char *name)
 		/* sunxi gpio name like this : PA0/PA1/PB0 */
 		bank = gpio / SUNXI_BANK_SIZE;
 		index = gpio % SUNXI_BANK_SIZE;
-		sprintf(name, "P%c%d", ('A' + bank), index);
+		sprintf(name, "P%c%d", ('A' + bank), index);	
 	}
 	return 0;
 }

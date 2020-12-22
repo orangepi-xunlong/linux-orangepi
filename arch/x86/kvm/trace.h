@@ -4,8 +4,6 @@
 #include <linux/tracepoint.h>
 #include <asm/vmx.h>
 #include <asm/svm.h>
-#include <asm/clocksource.h>
-#include <asm/pvclock-abi.h>
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM kvm
@@ -92,21 +90,16 @@ TRACE_EVENT(kvm_hv_hypercall,
 /*
  * Tracepoint for PIO.
  */
-
-#define KVM_PIO_IN   0
-#define KVM_PIO_OUT  1
-
 TRACE_EVENT(kvm_pio,
 	TP_PROTO(unsigned int rw, unsigned int port, unsigned int size,
-		 unsigned int count, void *data),
-	TP_ARGS(rw, port, size, count, data),
+		 unsigned int count),
+	TP_ARGS(rw, port, size, count),
 
 	TP_STRUCT__entry(
 		__field(	unsigned int, 	rw		)
 		__field(	unsigned int, 	port		)
 		__field(	unsigned int, 	size		)
 		__field(	unsigned int,	count		)
-		__field(	unsigned int,	val		)
 	),
 
 	TP_fast_assign(
@@ -114,36 +107,11 @@ TRACE_EVENT(kvm_pio,
 		__entry->port		= port;
 		__entry->size		= size;
 		__entry->count		= count;
-		if (size == 1)
-			__entry->val	= *(unsigned char *)data;
-		else if (size == 2)
-			__entry->val	= *(unsigned short *)data;
-		else
-			__entry->val	= *(unsigned int *)data;
 	),
 
-	TP_printk("pio_%s at 0x%x size %d count %d val 0x%x %s",
+	TP_printk("pio_%s at 0x%x size %d count %d",
 		  __entry->rw ? "write" : "read",
-		  __entry->port, __entry->size, __entry->count, __entry->val,
-		  __entry->count > 1 ? "(...)" : "")
-);
-
-/*
- * Tracepoint for fast mmio.
- */
-TRACE_EVENT(kvm_fast_mmio,
-	TP_PROTO(u64 gpa),
-	TP_ARGS(gpa),
-
-	TP_STRUCT__entry(
-		__field(u64,	gpa)
-	),
-
-	TP_fast_assign(
-		__entry->gpa		= gpa;
-	),
-
-	TP_printk("fast mmio at gpa 0x%llx", __entry->gpa)
+		  __entry->port, __entry->size, __entry->count)
 );
 
 /*
@@ -215,6 +183,96 @@ TRACE_EVENT(kvm_apic,
 #define KVM_ISA_VMX   1
 #define KVM_ISA_SVM   2
 
+#define VMX_EXIT_REASONS \
+	{ EXIT_REASON_EXCEPTION_NMI,		"EXCEPTION_NMI" }, \
+	{ EXIT_REASON_EXTERNAL_INTERRUPT,	"EXTERNAL_INTERRUPT" }, \
+	{ EXIT_REASON_TRIPLE_FAULT,		"TRIPLE_FAULT" }, \
+	{ EXIT_REASON_PENDING_INTERRUPT,	"PENDING_INTERRUPT" }, \
+	{ EXIT_REASON_NMI_WINDOW,		"NMI_WINDOW" }, \
+	{ EXIT_REASON_TASK_SWITCH,		"TASK_SWITCH" }, \
+	{ EXIT_REASON_CPUID,			"CPUID" }, \
+	{ EXIT_REASON_HLT,			"HLT" }, \
+	{ EXIT_REASON_INVLPG,			"INVLPG" }, \
+	{ EXIT_REASON_RDPMC,			"RDPMC" }, \
+	{ EXIT_REASON_RDTSC,			"RDTSC" }, \
+	{ EXIT_REASON_VMCALL,			"VMCALL" }, \
+	{ EXIT_REASON_VMCLEAR,			"VMCLEAR" }, \
+	{ EXIT_REASON_VMLAUNCH,			"VMLAUNCH" }, \
+	{ EXIT_REASON_VMPTRLD,			"VMPTRLD" }, \
+	{ EXIT_REASON_VMPTRST,			"VMPTRST" }, \
+	{ EXIT_REASON_VMREAD,			"VMREAD" }, \
+	{ EXIT_REASON_VMRESUME,			"VMRESUME" }, \
+	{ EXIT_REASON_VMWRITE,			"VMWRITE" }, \
+	{ EXIT_REASON_VMOFF,			"VMOFF" }, \
+	{ EXIT_REASON_VMON,			"VMON" }, \
+	{ EXIT_REASON_CR_ACCESS,		"CR_ACCESS" }, \
+	{ EXIT_REASON_DR_ACCESS,		"DR_ACCESS" }, \
+	{ EXIT_REASON_IO_INSTRUCTION,		"IO_INSTRUCTION" }, \
+	{ EXIT_REASON_MSR_READ,			"MSR_READ" }, \
+	{ EXIT_REASON_MSR_WRITE,		"MSR_WRITE" }, \
+	{ EXIT_REASON_MWAIT_INSTRUCTION,	"MWAIT_INSTRUCTION" }, \
+	{ EXIT_REASON_MONITOR_INSTRUCTION,	"MONITOR_INSTRUCTION" }, \
+	{ EXIT_REASON_PAUSE_INSTRUCTION,	"PAUSE_INSTRUCTION" }, \
+	{ EXIT_REASON_MCE_DURING_VMENTRY,	"MCE_DURING_VMENTRY" }, \
+	{ EXIT_REASON_TPR_BELOW_THRESHOLD,	"TPR_BELOW_THRESHOLD" },	\
+	{ EXIT_REASON_APIC_ACCESS,		"APIC_ACCESS" }, \
+	{ EXIT_REASON_EPT_VIOLATION,		"EPT_VIOLATION" }, \
+	{ EXIT_REASON_EPT_MISCONFIG,		"EPT_MISCONFIG" }, \
+	{ EXIT_REASON_WBINVD,			"WBINVD" }
+
+#define SVM_EXIT_REASONS \
+	{ SVM_EXIT_READ_CR0,			"read_cr0" }, \
+	{ SVM_EXIT_READ_CR3,			"read_cr3" }, \
+	{ SVM_EXIT_READ_CR4,			"read_cr4" }, \
+	{ SVM_EXIT_READ_CR8,			"read_cr8" }, \
+	{ SVM_EXIT_WRITE_CR0,			"write_cr0" }, \
+	{ SVM_EXIT_WRITE_CR3,			"write_cr3" }, \
+	{ SVM_EXIT_WRITE_CR4,			"write_cr4" }, \
+	{ SVM_EXIT_WRITE_CR8,			"write_cr8" }, \
+	{ SVM_EXIT_READ_DR0,			"read_dr0" }, \
+	{ SVM_EXIT_READ_DR1,			"read_dr1" }, \
+	{ SVM_EXIT_READ_DR2,			"read_dr2" }, \
+	{ SVM_EXIT_READ_DR3,			"read_dr3" }, \
+	{ SVM_EXIT_WRITE_DR0,			"write_dr0" }, \
+	{ SVM_EXIT_WRITE_DR1,			"write_dr1" }, \
+	{ SVM_EXIT_WRITE_DR2,			"write_dr2" }, \
+	{ SVM_EXIT_WRITE_DR3,			"write_dr3" }, \
+	{ SVM_EXIT_WRITE_DR5,			"write_dr5" }, \
+	{ SVM_EXIT_WRITE_DR7,			"write_dr7" }, \
+	{ SVM_EXIT_EXCP_BASE + DB_VECTOR,	"DB excp" }, \
+	{ SVM_EXIT_EXCP_BASE + BP_VECTOR,	"BP excp" }, \
+	{ SVM_EXIT_EXCP_BASE + UD_VECTOR,	"UD excp" }, \
+	{ SVM_EXIT_EXCP_BASE + PF_VECTOR,	"PF excp" }, \
+	{ SVM_EXIT_EXCP_BASE + NM_VECTOR,	"NM excp" }, \
+	{ SVM_EXIT_EXCP_BASE + AC_VECTOR,	"AC excp" }, \
+	{ SVM_EXIT_EXCP_BASE + MC_VECTOR,	"MC excp" }, \
+	{ SVM_EXIT_INTR,			"interrupt" }, \
+	{ SVM_EXIT_NMI,				"nmi" }, \
+	{ SVM_EXIT_SMI,				"smi" }, \
+	{ SVM_EXIT_INIT,			"init" }, \
+	{ SVM_EXIT_VINTR,			"vintr" }, \
+	{ SVM_EXIT_CPUID,			"cpuid" }, \
+	{ SVM_EXIT_INVD,			"invd" }, \
+	{ SVM_EXIT_HLT,				"hlt" }, \
+	{ SVM_EXIT_INVLPG,			"invlpg" }, \
+	{ SVM_EXIT_INVLPGA,			"invlpga" }, \
+	{ SVM_EXIT_IOIO,			"io" }, \
+	{ SVM_EXIT_MSR,				"msr" }, \
+	{ SVM_EXIT_TASK_SWITCH,			"task_switch" }, \
+	{ SVM_EXIT_SHUTDOWN,			"shutdown" }, \
+	{ SVM_EXIT_VMRUN,			"vmrun" }, \
+	{ SVM_EXIT_VMMCALL,			"hypercall" }, \
+	{ SVM_EXIT_VMLOAD,			"vmload" }, \
+	{ SVM_EXIT_VMSAVE,			"vmsave" }, \
+	{ SVM_EXIT_STGI,			"stgi" }, \
+	{ SVM_EXIT_CLGI,			"clgi" }, \
+	{ SVM_EXIT_SKINIT,			"skinit" }, \
+	{ SVM_EXIT_WBINVD,			"wbinvd" }, \
+	{ SVM_EXIT_MONITOR,			"monitor" }, \
+	{ SVM_EXIT_MWAIT,			"mwait" }, \
+	{ SVM_EXIT_XSETBV,			"xsetbv" }, \
+	{ SVM_EXIT_NPF,				"npf" }
+
 /*
  * Tracepoint for kvm guest exit:
  */
@@ -268,7 +326,7 @@ TRACE_EVENT(kvm_inj_virq,
 #define kvm_trace_sym_exc						\
 	EXS(DE), EXS(DB), EXS(BP), EXS(OF), EXS(BR), EXS(UD), EXS(NM),	\
 	EXS(DF), EXS(TS), EXS(NP), EXS(SS), EXS(GP), EXS(PF),		\
-	EXS(MF), EXS(AC), EXS(MC)
+	EXS(MF), EXS(MC)
 
 /*
  * Tracepoint for kvm interrupt injection:
@@ -434,14 +492,15 @@ TRACE_EVENT(kvm_apic_ipi,
 );
 
 TRACE_EVENT(kvm_apic_accept_irq,
-	    TP_PROTO(__u32 apicid, __u16 dm, __u8 tm, __u8 vec),
-	    TP_ARGS(apicid, dm, tm, vec),
+	    TP_PROTO(__u32 apicid, __u16 dm, __u8 tm, __u8 vec, bool coalesced),
+	    TP_ARGS(apicid, dm, tm, vec, coalesced),
 
 	TP_STRUCT__entry(
 		__field(	__u32,		apicid		)
 		__field(	__u16,		dm		)
 		__field(	__u8,		tm		)
 		__field(	__u8,		vec		)
+		__field(	bool,		coalesced	)
 	),
 
 	TP_fast_assign(
@@ -449,46 +508,14 @@ TRACE_EVENT(kvm_apic_accept_irq,
 		__entry->dm		= dm;
 		__entry->tm		= tm;
 		__entry->vec		= vec;
+		__entry->coalesced	= coalesced;
 	),
 
-	TP_printk("apicid %x vec %u (%s|%s)",
+	TP_printk("apicid %x vec %u (%s|%s)%s",
 		  __entry->apicid, __entry->vec,
 		  __print_symbolic((__entry->dm >> 8 & 0x7), kvm_deliver_mode),
-		  __entry->tm ? "level" : "edge")
-);
-
-TRACE_EVENT(kvm_eoi,
-	    TP_PROTO(struct kvm_lapic *apic, int vector),
-	    TP_ARGS(apic, vector),
-
-	TP_STRUCT__entry(
-		__field(	__u32,		apicid		)
-		__field(	int,		vector		)
-	),
-
-	TP_fast_assign(
-		__entry->apicid		= apic->vcpu->vcpu_id;
-		__entry->vector		= vector;
-	),
-
-	TP_printk("apicid %x vector %d", __entry->apicid, __entry->vector)
-);
-
-TRACE_EVENT(kvm_pv_eoi,
-	    TP_PROTO(struct kvm_lapic *apic, int vector),
-	    TP_ARGS(apic, vector),
-
-	TP_STRUCT__entry(
-		__field(	__u32,		apicid		)
-		__field(	int,		vector		)
-	),
-
-	TP_fast_assign(
-		__entry->apicid		= apic->vcpu->vcpu_id;
-		__entry->vector		= vector;
-	),
-
-	TP_printk("apicid %x vector %d", __entry->apicid, __entry->vector)
+		  __entry->tm ? "level" : "edge",
+		  __entry->coalesced ? " (coalesced)" : "")
 );
 
 /*
@@ -684,6 +711,16 @@ TRACE_EVENT(kvm_skinit,
 		  __entry->rip, __entry->slb)
 );
 
+#define __print_insn(insn, ilen) ({		                 \
+	int i;							 \
+	const char *ret = p->buffer + p->len;			 \
+								 \
+	for (i = 0; i < ilen; ++i)				 \
+		trace_seq_printf(p, " %02x", insn[i]);		 \
+	trace_seq_printf(p, "%c", 0);				 \
+	ret;							 \
+	})
+
 #define KVM_EMUL_INSN_F_CR0_PE (1 << 0)
 #define KVM_EMUL_INSN_F_EFL_VM (1 << 1)
 #define KVM_EMUL_INSN_F_CS_D   (1 << 2)
@@ -737,10 +774,10 @@ TRACE_EVENT(kvm_emulate_insn,
 		),
 
 	TP_fast_assign(
+		__entry->rip = vcpu->arch.emulate_ctxt.fetch.start;
 		__entry->csbase = kvm_x86_ops->get_segment_base(vcpu, VCPU_SREG_CS);
-		__entry->len = vcpu->arch.emulate_ctxt.fetch.ptr
-			       - vcpu->arch.emulate_ctxt.fetch.data;
-		__entry->rip = vcpu->arch.emulate_ctxt._eip - __entry->len;
+		__entry->len = vcpu->arch.emulate_ctxt._eip
+			       - vcpu->arch.emulate_ctxt.fetch.start;
 		memcpy(__entry->insn,
 		       vcpu->arch.emulate_ctxt.fetch.data,
 		       15);
@@ -750,7 +787,7 @@ TRACE_EVENT(kvm_emulate_insn,
 
 	TP_printk("%x:%llx:%s (%s)%s",
 		  __entry->csbase, __entry->rip,
-		  __print_hex(__entry->insn, __entry->len),
+		  __print_insn(__entry->insn, __entry->len),
 		  __print_symbolic(__entry->flags,
 				   kvm_trace_symbol_emul_flags),
 		  __entry->failed ? " failed" : ""
@@ -782,586 +819,6 @@ TRACE_EVENT(
 	TP_printk("gva %#lx gpa %#llx %s %s", __entry->gva, __entry->gpa,
 		  __entry->write ? "Write" : "Read",
 		  __entry->gpa_match ? "GPA" : "GVA")
-);
-
-TRACE_EVENT(kvm_write_tsc_offset,
-	TP_PROTO(unsigned int vcpu_id, __u64 previous_tsc_offset,
-		 __u64 next_tsc_offset),
-	TP_ARGS(vcpu_id, previous_tsc_offset, next_tsc_offset),
-
-	TP_STRUCT__entry(
-		__field( unsigned int,	vcpu_id				)
-		__field(	__u64,	previous_tsc_offset		)
-		__field(	__u64,	next_tsc_offset			)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id		= vcpu_id;
-		__entry->previous_tsc_offset	= previous_tsc_offset;
-		__entry->next_tsc_offset	= next_tsc_offset;
-	),
-
-	TP_printk("vcpu=%u prev=%llu next=%llu", __entry->vcpu_id,
-		  __entry->previous_tsc_offset, __entry->next_tsc_offset)
-);
-
-#ifdef CONFIG_X86_64
-
-#define host_clocks					\
-	{VCLOCK_NONE, "none"},				\
-	{VCLOCK_TSC,  "tsc"}				\
-
-TRACE_EVENT(kvm_update_master_clock,
-	TP_PROTO(bool use_master_clock, unsigned int host_clock, bool offset_matched),
-	TP_ARGS(use_master_clock, host_clock, offset_matched),
-
-	TP_STRUCT__entry(
-		__field(		bool,	use_master_clock	)
-		__field(	unsigned int,	host_clock		)
-		__field(		bool,	offset_matched		)
-	),
-
-	TP_fast_assign(
-		__entry->use_master_clock	= use_master_clock;
-		__entry->host_clock		= host_clock;
-		__entry->offset_matched		= offset_matched;
-	),
-
-	TP_printk("masterclock %d hostclock %s offsetmatched %u",
-		  __entry->use_master_clock,
-		  __print_symbolic(__entry->host_clock, host_clocks),
-		  __entry->offset_matched)
-);
-
-TRACE_EVENT(kvm_track_tsc,
-	TP_PROTO(unsigned int vcpu_id, unsigned int nr_matched,
-		 unsigned int online_vcpus, bool use_master_clock,
-		 unsigned int host_clock),
-	TP_ARGS(vcpu_id, nr_matched, online_vcpus, use_master_clock,
-		host_clock),
-
-	TP_STRUCT__entry(
-		__field(	unsigned int,	vcpu_id			)
-		__field(	unsigned int,	nr_vcpus_matched_tsc	)
-		__field(	unsigned int,	online_vcpus		)
-		__field(	bool,		use_master_clock	)
-		__field(	unsigned int,	host_clock		)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id		= vcpu_id;
-		__entry->nr_vcpus_matched_tsc	= nr_matched;
-		__entry->online_vcpus		= online_vcpus;
-		__entry->use_master_clock	= use_master_clock;
-		__entry->host_clock		= host_clock;
-	),
-
-	TP_printk("vcpu_id %u masterclock %u offsetmatched %u nr_online %u"
-		  " hostclock %s",
-		  __entry->vcpu_id, __entry->use_master_clock,
-		  __entry->nr_vcpus_matched_tsc, __entry->online_vcpus,
-		  __print_symbolic(__entry->host_clock, host_clocks))
-);
-
-#endif /* CONFIG_X86_64 */
-
-/*
- * Tracepoint for PML full VMEXIT.
- */
-TRACE_EVENT(kvm_pml_full,
-	TP_PROTO(unsigned int vcpu_id),
-	TP_ARGS(vcpu_id),
-
-	TP_STRUCT__entry(
-		__field(	unsigned int,	vcpu_id			)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id		= vcpu_id;
-	),
-
-	TP_printk("vcpu %d: PML full", __entry->vcpu_id)
-);
-
-TRACE_EVENT(kvm_ple_window,
-	TP_PROTO(bool grow, unsigned int vcpu_id, int new, int old),
-	TP_ARGS(grow, vcpu_id, new, old),
-
-	TP_STRUCT__entry(
-		__field(                bool,      grow         )
-		__field(        unsigned int,   vcpu_id         )
-		__field(                 int,       new         )
-		__field(                 int,       old         )
-	),
-
-	TP_fast_assign(
-		__entry->grow           = grow;
-		__entry->vcpu_id        = vcpu_id;
-		__entry->new            = new;
-		__entry->old            = old;
-	),
-
-	TP_printk("vcpu %u: ple_window %d (%s %d)",
-	          __entry->vcpu_id,
-	          __entry->new,
-	          __entry->grow ? "grow" : "shrink",
-	          __entry->old)
-);
-
-#define trace_kvm_ple_window_grow(vcpu_id, new, old) \
-	trace_kvm_ple_window(true, vcpu_id, new, old)
-#define trace_kvm_ple_window_shrink(vcpu_id, new, old) \
-	trace_kvm_ple_window(false, vcpu_id, new, old)
-
-TRACE_EVENT(kvm_pvclock_update,
-	TP_PROTO(unsigned int vcpu_id, struct pvclock_vcpu_time_info *pvclock),
-	TP_ARGS(vcpu_id, pvclock),
-
-	TP_STRUCT__entry(
-		__field(	unsigned int,	vcpu_id			)
-		__field(	__u32,		version			)
-		__field(	__u64,		tsc_timestamp		)
-		__field(	__u64,		system_time		)
-		__field(	__u32,		tsc_to_system_mul	)
-		__field(	__s8,		tsc_shift		)
-		__field(	__u8,		flags			)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id	   = vcpu_id;
-		__entry->version	   = pvclock->version;
-		__entry->tsc_timestamp	   = pvclock->tsc_timestamp;
-		__entry->system_time	   = pvclock->system_time;
-		__entry->tsc_to_system_mul = pvclock->tsc_to_system_mul;
-		__entry->tsc_shift	   = pvclock->tsc_shift;
-		__entry->flags		   = pvclock->flags;
-	),
-
-	TP_printk("vcpu_id %u, pvclock { version %u, tsc_timestamp 0x%llx, "
-		  "system_time 0x%llx, tsc_to_system_mul 0x%x, tsc_shift %d, "
-		  "flags 0x%x }",
-		  __entry->vcpu_id,
-		  __entry->version,
-		  __entry->tsc_timestamp,
-		  __entry->system_time,
-		  __entry->tsc_to_system_mul,
-		  __entry->tsc_shift,
-		  __entry->flags)
-);
-
-TRACE_EVENT(kvm_wait_lapic_expire,
-	TP_PROTO(unsigned int vcpu_id, s64 delta),
-	TP_ARGS(vcpu_id, delta),
-
-	TP_STRUCT__entry(
-		__field(	unsigned int,	vcpu_id		)
-		__field(	s64,		delta		)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id	   = vcpu_id;
-		__entry->delta             = delta;
-	),
-
-	TP_printk("vcpu %u: delta %lld (%s)",
-		  __entry->vcpu_id,
-		  __entry->delta,
-		  __entry->delta < 0 ? "early" : "late")
-);
-
-TRACE_EVENT(kvm_enter_smm,
-	TP_PROTO(unsigned int vcpu_id, u64 smbase, bool entering),
-	TP_ARGS(vcpu_id, smbase, entering),
-
-	TP_STRUCT__entry(
-		__field(	unsigned int,	vcpu_id		)
-		__field(	u64,		smbase		)
-		__field(	bool,		entering	)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id	= vcpu_id;
-		__entry->smbase		= smbase;
-		__entry->entering	= entering;
-	),
-
-	TP_printk("vcpu %u: %s SMM, smbase 0x%llx",
-		  __entry->vcpu_id,
-		  __entry->entering ? "entering" : "leaving",
-		  __entry->smbase)
-);
-
-/*
- * Tracepoint for VT-d posted-interrupts.
- */
-TRACE_EVENT(kvm_pi_irte_update,
-	TP_PROTO(unsigned int host_irq, unsigned int vcpu_id,
-		 unsigned int gsi, unsigned int gvec,
-		 u64 pi_desc_addr, bool set),
-	TP_ARGS(host_irq, vcpu_id, gsi, gvec, pi_desc_addr, set),
-
-	TP_STRUCT__entry(
-		__field(	unsigned int,	host_irq	)
-		__field(	unsigned int,	vcpu_id		)
-		__field(	unsigned int,	gsi		)
-		__field(	unsigned int,	gvec		)
-		__field(	u64,		pi_desc_addr	)
-		__field(	bool,		set		)
-	),
-
-	TP_fast_assign(
-		__entry->host_irq	= host_irq;
-		__entry->vcpu_id	= vcpu_id;
-		__entry->gsi		= gsi;
-		__entry->gvec		= gvec;
-		__entry->pi_desc_addr	= pi_desc_addr;
-		__entry->set		= set;
-	),
-
-	TP_printk("VT-d PI is %s for irq %u, vcpu %u, gsi: 0x%x, "
-		  "gvec: 0x%x, pi_desc_addr: 0x%llx",
-		  __entry->set ? "enabled and being updated" : "disabled",
-		  __entry->host_irq,
-		  __entry->vcpu_id,
-		  __entry->gsi,
-		  __entry->gvec,
-		  __entry->pi_desc_addr)
-);
-
-/*
- * Tracepoint for kvm_hv_notify_acked_sint.
- */
-TRACE_EVENT(kvm_hv_notify_acked_sint,
-	TP_PROTO(int vcpu_id, u32 sint),
-	TP_ARGS(vcpu_id, sint),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(u32, sint)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->sint = sint;
-	),
-
-	TP_printk("vcpu_id %d sint %u", __entry->vcpu_id, __entry->sint)
-);
-
-/*
- * Tracepoint for synic_set_irq.
- */
-TRACE_EVENT(kvm_hv_synic_set_irq,
-	TP_PROTO(int vcpu_id, u32 sint, int vector, int ret),
-	TP_ARGS(vcpu_id, sint, vector, ret),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(u32, sint)
-		__field(int, vector)
-		__field(int, ret)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->sint = sint;
-		__entry->vector = vector;
-		__entry->ret = ret;
-	),
-
-	TP_printk("vcpu_id %d sint %u vector %d ret %d",
-		  __entry->vcpu_id, __entry->sint, __entry->vector,
-		  __entry->ret)
-);
-
-/*
- * Tracepoint for kvm_hv_synic_send_eoi.
- */
-TRACE_EVENT(kvm_hv_synic_send_eoi,
-	TP_PROTO(int vcpu_id, int vector),
-	TP_ARGS(vcpu_id, vector),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(u32, sint)
-		__field(int, vector)
-		__field(int, ret)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->vector	= vector;
-	),
-
-	TP_printk("vcpu_id %d vector %d", __entry->vcpu_id, __entry->vector)
-);
-
-/*
- * Tracepoint for synic_set_msr.
- */
-TRACE_EVENT(kvm_hv_synic_set_msr,
-	TP_PROTO(int vcpu_id, u32 msr, u64 data, bool host),
-	TP_ARGS(vcpu_id, msr, data, host),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(u32, msr)
-		__field(u64, data)
-		__field(bool, host)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->msr = msr;
-		__entry->data = data;
-		__entry->host = host
-	),
-
-	TP_printk("vcpu_id %d msr 0x%x data 0x%llx host %d",
-		  __entry->vcpu_id, __entry->msr, __entry->data, __entry->host)
-);
-
-/*
- * Tracepoint for stimer_set_config.
- */
-TRACE_EVENT(kvm_hv_stimer_set_config,
-	TP_PROTO(int vcpu_id, int timer_index, u64 config, bool host),
-	TP_ARGS(vcpu_id, timer_index, config, host),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(int, timer_index)
-		__field(u64, config)
-		__field(bool, host)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->timer_index = timer_index;
-		__entry->config = config;
-		__entry->host = host;
-	),
-
-	TP_printk("vcpu_id %d timer %d config 0x%llx host %d",
-		  __entry->vcpu_id, __entry->timer_index, __entry->config,
-		  __entry->host)
-);
-
-/*
- * Tracepoint for stimer_set_count.
- */
-TRACE_EVENT(kvm_hv_stimer_set_count,
-	TP_PROTO(int vcpu_id, int timer_index, u64 count, bool host),
-	TP_ARGS(vcpu_id, timer_index, count, host),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(int, timer_index)
-		__field(u64, count)
-		__field(bool, host)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->timer_index = timer_index;
-		__entry->count = count;
-		__entry->host = host;
-	),
-
-	TP_printk("vcpu_id %d timer %d count %llu host %d",
-		  __entry->vcpu_id, __entry->timer_index, __entry->count,
-		  __entry->host)
-);
-
-/*
- * Tracepoint for stimer_start(periodic timer case).
- */
-TRACE_EVENT(kvm_hv_stimer_start_periodic,
-	TP_PROTO(int vcpu_id, int timer_index, u64 time_now, u64 exp_time),
-	TP_ARGS(vcpu_id, timer_index, time_now, exp_time),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(int, timer_index)
-		__field(u64, time_now)
-		__field(u64, exp_time)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->timer_index = timer_index;
-		__entry->time_now = time_now;
-		__entry->exp_time = exp_time;
-	),
-
-	TP_printk("vcpu_id %d timer %d time_now %llu exp_time %llu",
-		  __entry->vcpu_id, __entry->timer_index, __entry->time_now,
-		  __entry->exp_time)
-);
-
-/*
- * Tracepoint for stimer_start(one-shot timer case).
- */
-TRACE_EVENT(kvm_hv_stimer_start_one_shot,
-	TP_PROTO(int vcpu_id, int timer_index, u64 time_now, u64 count),
-	TP_ARGS(vcpu_id, timer_index, time_now, count),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(int, timer_index)
-		__field(u64, time_now)
-		__field(u64, count)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->timer_index = timer_index;
-		__entry->time_now = time_now;
-		__entry->count = count;
-	),
-
-	TP_printk("vcpu_id %d timer %d time_now %llu count %llu",
-		  __entry->vcpu_id, __entry->timer_index, __entry->time_now,
-		  __entry->count)
-);
-
-/*
- * Tracepoint for stimer_timer_callback.
- */
-TRACE_EVENT(kvm_hv_stimer_callback,
-	TP_PROTO(int vcpu_id, int timer_index),
-	TP_ARGS(vcpu_id, timer_index),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(int, timer_index)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->timer_index = timer_index;
-	),
-
-	TP_printk("vcpu_id %d timer %d",
-		  __entry->vcpu_id, __entry->timer_index)
-);
-
-/*
- * Tracepoint for stimer_expiration.
- */
-TRACE_EVENT(kvm_hv_stimer_expiration,
-	TP_PROTO(int vcpu_id, int timer_index, int msg_send_result),
-	TP_ARGS(vcpu_id, timer_index, msg_send_result),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(int, timer_index)
-		__field(int, msg_send_result)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->timer_index = timer_index;
-		__entry->msg_send_result = msg_send_result;
-	),
-
-	TP_printk("vcpu_id %d timer %d msg send result %d",
-		  __entry->vcpu_id, __entry->timer_index,
-		  __entry->msg_send_result)
-);
-
-/*
- * Tracepoint for stimer_cleanup.
- */
-TRACE_EVENT(kvm_hv_stimer_cleanup,
-	TP_PROTO(int vcpu_id, int timer_index),
-	TP_ARGS(vcpu_id, timer_index),
-
-	TP_STRUCT__entry(
-		__field(int, vcpu_id)
-		__field(int, timer_index)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu_id = vcpu_id;
-		__entry->timer_index = timer_index;
-	),
-
-	TP_printk("vcpu_id %d timer %d",
-		  __entry->vcpu_id, __entry->timer_index)
-);
-
-/*
- * Tracepoint for AMD AVIC
- */
-TRACE_EVENT(kvm_avic_incomplete_ipi,
-	    TP_PROTO(u32 vcpu, u32 icrh, u32 icrl, u32 id, u32 index),
-	    TP_ARGS(vcpu, icrh, icrl, id, index),
-
-	TP_STRUCT__entry(
-		__field(u32, vcpu)
-		__field(u32, icrh)
-		__field(u32, icrl)
-		__field(u32, id)
-		__field(u32, index)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu = vcpu;
-		__entry->icrh = icrh;
-		__entry->icrl = icrl;
-		__entry->id = id;
-		__entry->index = index;
-	),
-
-	TP_printk("vcpu=%u, icrh:icrl=%#010x:%08x, id=%u, index=%u\n",
-		  __entry->vcpu, __entry->icrh, __entry->icrl,
-		  __entry->id, __entry->index)
-);
-
-TRACE_EVENT(kvm_avic_unaccelerated_access,
-	    TP_PROTO(u32 vcpu, u32 offset, bool ft, bool rw, u32 vec),
-	    TP_ARGS(vcpu, offset, ft, rw, vec),
-
-	TP_STRUCT__entry(
-		__field(u32, vcpu)
-		__field(u32, offset)
-		__field(bool, ft)
-		__field(bool, rw)
-		__field(u32, vec)
-	),
-
-	TP_fast_assign(
-		__entry->vcpu = vcpu;
-		__entry->offset = offset;
-		__entry->ft = ft;
-		__entry->rw = rw;
-		__entry->vec = vec;
-	),
-
-	TP_printk("vcpu=%u, offset=%#x(%s), %s, %s, vec=%#x\n",
-		  __entry->vcpu,
-		  __entry->offset,
-		  __print_symbolic(__entry->offset, kvm_trace_symbol_apic),
-		  __entry->ft ? "trap" : "fault",
-		  __entry->rw ? "write" : "read",
-		  __entry->vec)
-);
-
-TRACE_EVENT(kvm_hv_timer_state,
-		TP_PROTO(unsigned int vcpu_id, unsigned int hv_timer_in_use),
-		TP_ARGS(vcpu_id, hv_timer_in_use),
-		TP_STRUCT__entry(
-			__field(unsigned int, vcpu_id)
-			__field(unsigned int, hv_timer_in_use)
-			),
-		TP_fast_assign(
-			__entry->vcpu_id = vcpu_id;
-			__entry->hv_timer_in_use = hv_timer_in_use;
-			),
-		TP_printk("vcpu_id %x hv_timer %x\n",
-			__entry->vcpu_id,
-			__entry->hv_timer_in_use)
 );
 #endif /* _TRACE_KVM_H */
 

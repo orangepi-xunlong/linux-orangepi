@@ -9,20 +9,29 @@
  * under the terms of the GNU General Public License as published by the
  * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
-#include <linux/backlight.h>
-#include <linux/delay.h>
+#include <linux/wait.h>
 #include <linux/fb.h>
+#include <linux/delay.h>
 #include <linux/gpio.h>
-#include <linux/interrupt.h>
+#include <linux/spi/spi.h>
 #include <linux/irq.h>
+#include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/lcd.h>
+#include <linux/backlight.h>
 #include <linux/module.h>
 #include <linux/regulator/consumer.h>
-#include <linux/spi/spi.h>
-#include <linux/wait.h>
 
 #include "ld9040_gamma.h"
 
@@ -34,6 +43,7 @@
 
 #define MIN_BRIGHTNESS		0
 #define MAX_BRIGHTNESS		24
+#define power_is_on(pwr)	((pwr) <= FB_BLANK_NORMAL)
 
 struct ld9040 {
 	struct device			*dev;
@@ -68,7 +78,7 @@ static void ld9040_regulator_enable(struct ld9040 *lcd)
 
 		lcd->enabled = true;
 	}
-	msleep(pd->power_on_delay);
+	mdelay(pd->power_on_delay);
 out:
 	mutex_unlock(&lcd->lock);
 }
@@ -464,9 +474,8 @@ static int ld9040_panel_send_sequence(struct ld9040 *lcd,
 			ret = ld9040_spi_write(lcd, wbuf[i], wbuf[i+1]);
 			if (ret)
 				break;
-		} else {
-			msleep(wbuf[i+1]);
-		}
+		} else
+			udelay(wbuf[i+1]*1000);
 		i += 2;
 	}
 
@@ -504,8 +513,13 @@ gamma_err:
 
 static int ld9040_gamma_ctl(struct ld9040 *lcd, int gamma)
 {
-	return _ld9040_gamma_ctl(lcd, gamma_table.gamma_22_table[gamma]);
+	int ret = 0;
+
+	ret = _ld9040_gamma_ctl(lcd, gamma_table.gamma_22_table[gamma]);
+
+	return ret;
 }
+
 
 static int ld9040_ldi_init(struct ld9040 *lcd)
 {
@@ -525,7 +539,7 @@ static int ld9040_ldi_init(struct ld9040 *lcd)
 	for (i = 0; i < ARRAY_SIZE(init_seq); i++) {
 		ret = ld9040_panel_send_sequence(lcd, init_seq[i]);
 		/* workaround: minimum delay time for transferring CMD */
-		usleep_range(300, 310);
+		udelay(300);
 		if (ret)
 			break;
 	}
@@ -535,7 +549,11 @@ static int ld9040_ldi_init(struct ld9040 *lcd)
 
 static int ld9040_ldi_enable(struct ld9040 *lcd)
 {
-	return ld9040_panel_send_sequence(lcd, seq_display_on);
+	int ret = 0;
+
+	ret = ld9040_panel_send_sequence(lcd, seq_display_on);
+
+	return ret;
 }
 
 static int ld9040_ldi_disable(struct ld9040 *lcd)
@@ -548,28 +566,26 @@ static int ld9040_ldi_disable(struct ld9040 *lcd)
 	return ret;
 }
 
-static int ld9040_power_is_on(int power)
-{
-	return power <= FB_BLANK_NORMAL;
-}
-
 static int ld9040_power_on(struct ld9040 *lcd)
 {
 	int ret = 0;
-	struct lcd_platform_data *pd;
-
+	struct lcd_platform_data *pd = NULL;
 	pd = lcd->lcd_pd;
+	if (!pd) {
+		dev_err(lcd->dev, "platform data is NULL.\n");
+		return -EFAULT;
+	}
 
 	/* lcd power on */
 	ld9040_regulator_enable(lcd);
 
 	if (!pd->reset) {
 		dev_err(lcd->dev, "reset is NULL.\n");
-		return -EINVAL;
+		return -EFAULT;
+	} else {
+		pd->reset(lcd->ld);
+		mdelay(pd->reset_delay);
 	}
-
-	pd->reset(lcd->ld);
-	msleep(pd->reset_delay);
 
 	ret = ld9040_ldi_init(lcd);
 	if (ret) {
@@ -588,10 +604,14 @@ static int ld9040_power_on(struct ld9040 *lcd)
 
 static int ld9040_power_off(struct ld9040 *lcd)
 {
-	int ret;
-	struct lcd_platform_data *pd;
+	int ret = 0;
+	struct lcd_platform_data *pd = NULL;
 
 	pd = lcd->lcd_pd;
+	if (!pd) {
+		dev_err(lcd->dev, "platform data is NULL.\n");
+		return -EFAULT;
+	}
 
 	ret = ld9040_ldi_disable(lcd);
 	if (ret) {
@@ -599,7 +619,7 @@ static int ld9040_power_off(struct ld9040 *lcd)
 		return -EIO;
 	}
 
-	msleep(pd->power_off_delay);
+	mdelay(pd->power_off_delay);
 
 	/* lcd power off */
 	ld9040_regulator_disable(lcd);
@@ -611,9 +631,9 @@ static int ld9040_power(struct ld9040 *lcd, int power)
 {
 	int ret = 0;
 
-	if (ld9040_power_is_on(power) && !ld9040_power_is_on(lcd->power))
+	if (power_is_on(power) && !power_is_on(lcd->power))
 		ret = ld9040_power_on(lcd);
-	else if (!ld9040_power_is_on(power) && ld9040_power_is_on(lcd->power))
+	else if (!power_is_on(power) && power_is_on(lcd->power))
 		ret = ld9040_power_off(lcd);
 
 	if (!ret)
@@ -640,6 +660,11 @@ static int ld9040_get_power(struct lcd_device *ld)
 	struct ld9040 *lcd = lcd_get_data(ld);
 
 	return lcd->power;
+}
+
+static int ld9040_get_brightness(struct backlight_device *bd)
+{
+	return bd->props.brightness;
 }
 
 static int ld9040_set_brightness(struct backlight_device *bd)
@@ -669,8 +694,10 @@ static struct lcd_ops ld9040_lcd_ops = {
 };
 
 static const struct backlight_ops ld9040_backlight_ops  = {
+	.get_brightness = ld9040_get_brightness,
 	.update_status = ld9040_set_brightness,
 };
+
 
 static int ld9040_probe(struct spi_device *spi)
 {
@@ -680,7 +707,7 @@ static int ld9040_probe(struct spi_device *spi)
 	struct backlight_device *bd = NULL;
 	struct backlight_properties props;
 
-	lcd = devm_kzalloc(&spi->dev, sizeof(struct ld9040), GFP_KERNEL);
+	lcd = kzalloc(sizeof(struct ld9040), GFP_KERNEL);
 	if (!lcd)
 		return -ENOMEM;
 
@@ -690,30 +717,31 @@ static int ld9040_probe(struct spi_device *spi)
 	ret = spi_setup(spi);
 	if (ret < 0) {
 		dev_err(&spi->dev, "spi setup failed.\n");
-		return ret;
+		goto out_free_lcd;
 	}
 
 	lcd->spi = spi;
 	lcd->dev = &spi->dev;
 
-	lcd->lcd_pd = dev_get_platdata(&spi->dev);
+	lcd->lcd_pd = spi->dev.platform_data;
 	if (!lcd->lcd_pd) {
 		dev_err(&spi->dev, "platform data is NULL.\n");
-		return -EINVAL;
+		goto out_free_lcd;
 	}
 
 	mutex_init(&lcd->lock);
 
-	ret = devm_regulator_bulk_get(lcd->dev, ARRAY_SIZE(supplies), supplies);
+	ret = regulator_bulk_get(lcd->dev, ARRAY_SIZE(supplies), supplies);
 	if (ret) {
 		dev_err(lcd->dev, "Failed to get regulators: %d\n", ret);
-		return ret;
+		goto out_free_lcd;
 	}
 
-	ld = devm_lcd_device_register(&spi->dev, "ld9040", &spi->dev, lcd,
-					&ld9040_lcd_ops);
-	if (IS_ERR(ld))
-		return PTR_ERR(ld);
+	ld = lcd_device_register("ld9040", &spi->dev, lcd, &ld9040_lcd_ops);
+	if (IS_ERR(ld)) {
+		ret = PTR_ERR(ld);
+		goto out_free_lcd;
+	}
 
 	lcd->ld = ld;
 
@@ -721,10 +749,12 @@ static int ld9040_probe(struct spi_device *spi)
 	props.type = BACKLIGHT_RAW;
 	props.max_brightness = MAX_BRIGHTNESS;
 
-	bd = devm_backlight_device_register(&spi->dev, "ld9040-bl", &spi->dev,
-					lcd, &ld9040_backlight_ops, &props);
-	if (IS_ERR(bd))
-		return PTR_ERR(bd);
+	bd = backlight_device_register("ld9040-bl", &spi->dev,
+		lcd, &ld9040_backlight_ops, &props);
+	if (IS_ERR(bd)) {
+		ret = PTR_ERR(bd);
+		goto out_unregister_lcd;
+	}
 
 	bd->props.brightness = MAX_BRIGHTNESS;
 	lcd->bd = bd;
@@ -742,54 +772,73 @@ static int ld9040_probe(struct spi_device *spi)
 		lcd->power = FB_BLANK_POWERDOWN;
 
 		ld9040_power(lcd, FB_BLANK_UNBLANK);
-	} else {
+	} else
 		lcd->power = FB_BLANK_UNBLANK;
-	}
 
-	spi_set_drvdata(spi, lcd);
+	dev_set_drvdata(&spi->dev, lcd);
 
 	dev_info(&spi->dev, "ld9040 panel driver has been probed.\n");
 	return 0;
+
+out_unregister_lcd:
+	lcd_device_unregister(lcd->ld);
+out_free_lcd:
+	regulator_bulk_free(ARRAY_SIZE(supplies), supplies);
+
+	kfree(lcd);
+	return ret;
 }
 
-static int ld9040_remove(struct spi_device *spi)
+static int __devexit ld9040_remove(struct spi_device *spi)
 {
-	struct ld9040 *lcd = spi_get_drvdata(spi);
+	struct ld9040 *lcd = dev_get_drvdata(&spi->dev);
 
 	ld9040_power(lcd, FB_BLANK_POWERDOWN);
+	backlight_device_unregister(lcd->bd);
+	lcd_device_unregister(lcd->ld);
+	regulator_bulk_free(ARRAY_SIZE(supplies), supplies);
+	kfree(lcd);
+
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int ld9040_suspend(struct device *dev)
+#if defined(CONFIG_PM)
+static int ld9040_suspend(struct spi_device *spi, pm_message_t mesg)
 {
-	struct ld9040 *lcd = dev_get_drvdata(dev);
+	int ret = 0;
+	struct ld9040 *lcd = dev_get_drvdata(&spi->dev);
 
-	dev_dbg(dev, "lcd->power = %d\n", lcd->power);
+	dev_dbg(&spi->dev, "lcd->power = %d\n", lcd->power);
 
 	/*
 	 * when lcd panel is suspend, lcd panel becomes off
 	 * regardless of status.
 	 */
-	return ld9040_power(lcd, FB_BLANK_POWERDOWN);
+	ret = ld9040_power(lcd, FB_BLANK_POWERDOWN);
+
+	return ret;
 }
 
-static int ld9040_resume(struct device *dev)
+static int ld9040_resume(struct spi_device *spi)
 {
-	struct ld9040 *lcd = dev_get_drvdata(dev);
+	int ret = 0;
+	struct ld9040 *lcd = dev_get_drvdata(&spi->dev);
 
 	lcd->power = FB_BLANK_POWERDOWN;
 
-	return ld9040_power(lcd, FB_BLANK_UNBLANK);
-}
-#endif
+	ret = ld9040_power(lcd, FB_BLANK_UNBLANK);
 
-static SIMPLE_DEV_PM_OPS(ld9040_pm_ops, ld9040_suspend, ld9040_resume);
+	return ret;
+}
+#else
+#define ld9040_suspend		NULL
+#define ld9040_resume		NULL
+#endif
 
 /* Power down all displays on reboot, poweroff or halt. */
 static void ld9040_shutdown(struct spi_device *spi)
 {
-	struct ld9040 *lcd = spi_get_drvdata(spi);
+	struct ld9040 *lcd = dev_get_drvdata(&spi->dev);
 
 	ld9040_power(lcd, FB_BLANK_POWERDOWN);
 }
@@ -797,11 +846,14 @@ static void ld9040_shutdown(struct spi_device *spi)
 static struct spi_driver ld9040_driver = {
 	.driver = {
 		.name	= "ld9040",
-		.pm	= &ld9040_pm_ops,
+		.bus	= &spi_bus_type,
+		.owner	= THIS_MODULE,
 	},
 	.probe		= ld9040_probe,
-	.remove		= ld9040_remove,
+	.remove		= __devexit_p(ld9040_remove),
 	.shutdown	= ld9040_shutdown,
+	.suspend	= ld9040_suspend,
+	.resume		= ld9040_resume,
 };
 
 module_spi_driver(ld9040_driver);

@@ -4,12 +4,12 @@
  * Copyright (c) 2000 Eric Brower (ebrower@usa.net)
  */
 
-#include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/errno.h>
 #include <linux/major.h>
+#include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/ioport.h>		/* request_region */
 #include <linux/slab.h>
@@ -107,7 +107,7 @@ static long d7s_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	int error = 0;
 	u8 ireg = 0;
 
-	if (D7S_MINOR != iminor(file_inode(file)))
+	if (D7S_MINOR != iminor(file->f_path.dentry->d_inode))
 		return -ENODEV;
 
 	mutex_lock(&d7s_mutex);
@@ -144,10 +144,13 @@ static long d7s_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case D7SIOCTM:
 		/* toggle device mode-- flip display orientation */
-		regs ^= D7S_FLIP;
+		if (regs & D7S_FLIP)
+			regs &= ~D7S_FLIP;
+		else
+			regs |= D7S_FLIP;
 		writeb(regs, p->regs);
 		break;
-	}
+	};
 	mutex_unlock(&d7s_mutex);
 
 	return error;
@@ -168,7 +171,7 @@ static struct miscdevice d7s_miscdev = {
 	.fops		= &d7s_fops
 };
 
-static int d7s_probe(struct platform_device *op)
+static int __devinit d7s_probe(struct platform_device *op)
 {
 	struct device_node *opts;
 	int err = -EINVAL;
@@ -178,7 +181,7 @@ static int d7s_probe(struct platform_device *op)
 	if (d7s_device)
 		goto out;
 
-	p = devm_kzalloc(&op->dev, sizeof(*p), GFP_KERNEL);
+	p = kzalloc(sizeof(*p), GFP_KERNEL);
 	err = -ENOMEM;
 	if (!p)
 		goto out;
@@ -221,7 +224,6 @@ static int d7s_probe(struct platform_device *op)
 	dev_set_drvdata(&op->dev, p);
 	d7s_device = p;
 	err = 0;
-	of_node_put(opts);
 
 out:
 	return err;
@@ -230,10 +232,11 @@ out_iounmap:
 	of_iounmap(&op->resource[0], p->regs, sizeof(u8));
 
 out_free:
+	kfree(p);
 	goto out;
 }
 
-static int d7s_remove(struct platform_device *op)
+static int __devexit d7s_remove(struct platform_device *op)
 {
 	struct d7s *p = dev_get_drvdata(&op->dev);
 	u8 regs = readb(p->regs);
@@ -249,6 +252,7 @@ static int d7s_remove(struct platform_device *op)
 
 	misc_deregister(&d7s_miscdev);
 	of_iounmap(&op->resource[0], p->regs, sizeof(u8));
+	kfree(p);
 
 	return 0;
 }
@@ -264,10 +268,11 @@ MODULE_DEVICE_TABLE(of, d7s_match);
 static struct platform_driver d7s_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = d7s_match,
 	},
 	.probe		= d7s_probe,
-	.remove		= d7s_remove,
+	.remove		= __devexit_p(d7s_remove),
 };
 
 module_platform_driver(d7s_driver);

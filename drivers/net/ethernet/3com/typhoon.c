@@ -168,7 +168,7 @@ enum typhoon_cards {
 };
 
 /* directly indexed by enum typhoon_cards, above */
-static struct typhoon_card_info typhoon_card_info[] = {
+static struct typhoon_card_info typhoon_card_info[] __devinitdata = {
 	{ "3Com Typhoon (3C990-TX)",
 		TYPHOON_CRYPTO_NONE},
 	{ "3Com Typhoon (3CR990-TX-95)",
@@ -203,7 +203,7 @@ static struct typhoon_card_info typhoon_card_info[] = {
  * bit 8 indicates if this is a (0) copper or (1) fiber card
  * bits 12-16 indicate card type: (0) client and (1) server
  */
-static const struct pci_device_id typhoon_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(typhoon_pci_tbl) = {
 	{ PCI_VENDOR_ID_3COM, PCI_DEVICE_ID_3COM_3CR990,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0,TYPHOON_TX },
 	{ PCI_VENDOR_ID_3COM, PCI_DEVICE_ID_3COM_3CR990_TX_95,
@@ -364,7 +364,7 @@ typhoon_inc_rxfree_index(u32 *index, const int count)
 static inline void
 typhoon_inc_tx_index(u32 *index, const int count)
 {
-	/* if we start using the Hi Tx ring, this needs updating */
+	/* if we start using the Hi Tx ring, this needs updateing */
 	typhoon_inc_index(index, count, TXLO_ENTRIES);
 }
 
@@ -769,11 +769,11 @@ typhoon_start_tx(struct sk_buff *skb, struct net_device *dev)
 		first_txd->processFlags |= TYPHOON_TX_PF_IP_CHKSUM;
 	}
 
-	if (skb_vlan_tag_present(skb)) {
+	if(vlan_tx_tag_present(skb)) {
 		first_txd->processFlags |=
 		    TYPHOON_TX_PF_INSERT_VLAN | TYPHOON_TX_PF_VLAN_PRIORITY;
 		first_txd->processFlags |=
-		    cpu_to_le32(htons(skb_vlan_tag_get(skb)) <<
+		    cpu_to_le32(htons(vlan_tx_tag_get(skb)) <<
 				TYPHOON_TX_PF_VLAN_TAG_SHIFT);
 	}
 
@@ -1285,7 +1285,7 @@ typhoon_request_firmware(struct typhoon *tp)
 		return err;
 	}
 
-	image_data = typhoon_fw->data;
+	image_data = (u8 *) typhoon_fw->data;
 	remaining = typhoon_fw->size;
 	if (remaining < sizeof(struct typhoon_file_header))
 		goto invalid_fw;
@@ -1343,7 +1343,7 @@ typhoon_download_firmware(struct typhoon *tp)
 	int i;
 	int err;
 
-	image_data = typhoon_fw->data;
+	image_data = (u8 *) typhoon_fw->data;
 	fHdr = (struct typhoon_file_header *) image_data;
 
 	/* Cannot just map the firmware image using pci_map_single() as
@@ -1690,7 +1690,7 @@ typhoon_rx(struct typhoon *tp, struct basic_ring *rxRing, volatile __le32 * read
 			skb_checksum_none_assert(new_skb);
 
 		if (rx->rxStatus & TYPHOON_RX_VLAN)
-			__vlan_hwaccel_put_tag(new_skb, htons(ETH_P_8021Q),
+			__vlan_hwaccel_put_tag(new_skb,
 					       ntohl(rx->vlanTag) & 0xffff);
 		netif_receive_skb(new_skb);
 
@@ -2200,7 +2200,7 @@ need_resume:
 }
 #endif
 
-static int
+static int __devinit
 typhoon_test_mmio(struct pci_dev *pdev)
 {
 	void __iomem *ioaddr = pci_iomap(pdev, 1, 128);
@@ -2258,7 +2258,7 @@ static const struct net_device_ops typhoon_netdev_ops = {
 	.ndo_change_mtu		= eth_change_mtu,
 };
 
-static int
+static int __devinit
 typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct net_device *dev;
@@ -2366,9 +2366,9 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * 4) Get the hardware address.
 	 * 5) Put the card to sleep.
 	 */
-	err = typhoon_reset(ioaddr, WaitSleep);
-	if (err < 0) {
+	if (typhoon_reset(ioaddr, WaitSleep) < 0) {
 		err_msg = "could not reset 3XP";
+		err = -EIO;
 		goto error_out_dma;
 	}
 
@@ -2382,25 +2382,24 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	typhoon_init_interface(tp);
 	typhoon_init_rings(tp);
 
-	err = typhoon_boot_3XP(tp, TYPHOON_STATUS_WAITING_FOR_HOST);
-	if (err < 0) {
+	if(typhoon_boot_3XP(tp, TYPHOON_STATUS_WAITING_FOR_HOST) < 0) {
 		err_msg = "cannot boot 3XP sleep image";
+		err = -EIO;
 		goto error_out_reset;
 	}
 
 	INIT_COMMAND_WITH_RESPONSE(&xp_cmd, TYPHOON_CMD_READ_MAC_ADDRESS);
-	err = typhoon_issue_command(tp, 1, &xp_cmd, 1, xp_resp);
-	if (err < 0) {
+	if(typhoon_issue_command(tp, 1, &xp_cmd, 1, xp_resp) < 0) {
 		err_msg = "cannot read MAC address";
+		err = -EIO;
 		goto error_out_reset;
 	}
 
 	*(__be16 *)&dev->dev_addr[0] = htons(le16_to_cpu(xp_resp[0].parm1));
 	*(__be32 *)&dev->dev_addr[2] = htonl(le32_to_cpu(xp_resp[0].parm2));
 
-	if (!is_valid_ether_addr(dev->dev_addr)) {
+	if(!is_valid_ether_addr(dev->dev_addr)) {
 		err_msg = "Could not obtain valid ethernet address, aborting";
-		err = -EIO;
 		goto error_out_reset;
 	}
 
@@ -2408,8 +2407,7 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * later when we print out the version reported.
 	 */
 	INIT_COMMAND_WITH_RESPONSE(&xp_cmd, TYPHOON_CMD_READ_VERSIONS);
-	err = typhoon_issue_command(tp, 1, &xp_cmd, 3, xp_resp);
-	if (err < 0) {
+	if(typhoon_issue_command(tp, 1, &xp_cmd, 3, xp_resp) < 0) {
 		err_msg = "Could not get Sleep Image version";
 		goto error_out_reset;
 	}
@@ -2426,9 +2424,9 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if(xp_resp[0].numDesc != 0)
 		tp->capabilities |= TYPHOON_WAKEUP_NEEDS_RESET;
 
-	err = typhoon_sleep(tp, PCI_D3hot, 0);
-	if (err < 0) {
+	if(typhoon_sleep(tp, PCI_D3hot, 0) < 0) {
 		err_msg = "cannot put adapter to sleep";
+		err = -EIO;
 		goto error_out_reset;
 	}
 
@@ -2437,7 +2435,7 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	netif_napi_add(dev, &tp->napi, typhoon_poll, 16);
 	dev->watchdog_timeo	= TX_TIMEOUT;
 
-	dev->ethtool_ops = &typhoon_ethtool_ops;
+	SET_ETHTOOL_OPS(dev, &typhoon_ethtool_ops);
 
 	/* We can handle scatter gather, up to 16 entries, and
 	 * we can do IP checksumming (only version 4, doh...)
@@ -2447,12 +2445,11 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * settings -- so we only allow the user to toggle the TX processing.
 	 */
 	dev->hw_features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_TSO |
-		NETIF_F_HW_VLAN_CTAG_TX;
+		NETIF_F_HW_VLAN_TX;
 	dev->features = dev->hw_features |
-		NETIF_F_HW_VLAN_CTAG_RX | NETIF_F_RXCSUM;
+		NETIF_F_HW_VLAN_RX | NETIF_F_RXCSUM;
 
-	err = register_netdev(dev);
-	if (err < 0) {
+	if(register_netdev(dev) < 0) {
 		err_msg = "unable to register netdev";
 		goto error_out_reset;
 	}
@@ -2512,7 +2509,7 @@ error_out:
 	return err;
 }
 
-static void
+static void __devexit
 typhoon_remove_one(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
@@ -2528,6 +2525,7 @@ typhoon_remove_one(struct pci_dev *pdev)
 	pci_release_regions(pdev);
 	pci_clear_mwi(pdev);
 	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
 	free_netdev(dev);
 }
 
@@ -2535,7 +2533,7 @@ static struct pci_driver typhoon_driver = {
 	.name		= KBUILD_MODNAME,
 	.id_table	= typhoon_pci_tbl,
 	.probe		= typhoon_init_one,
-	.remove		= typhoon_remove_one,
+	.remove		= __devexit_p(typhoon_remove_one),
 #ifdef CONFIG_PM
 	.suspend	= typhoon_suspend,
 	.resume		= typhoon_resume,
@@ -2551,7 +2549,8 @@ typhoon_init(void)
 static void __exit
 typhoon_cleanup(void)
 {
-	release_firmware(typhoon_fw);
+	if (typhoon_fw)
+		release_firmware(typhoon_fw);
 	pci_unregister_driver(&typhoon_driver);
 }
 

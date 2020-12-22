@@ -317,8 +317,7 @@ int iforce_init_device(struct iforce *iforce)
 			break;
 
 	if (i == 20) { /* 5 seconds */
-		dev_err(&input_dev->dev,
-			"Timeout waiting for response from device.\n");
+		err("Timeout waiting for response from device.");
 		error = -ENODEV;
 		goto fail;
 	}

@@ -45,7 +45,6 @@ MODULE_AUTHOR("Vojtech Pavlik <vojtech@ucw.cz>");
 MODULE_DESCRIPTION("Amiga keyboard driver");
 MODULE_LICENSE("GPL");
 
-#ifdef CONFIG_HW_CONSOLE
 static unsigned char amikbd_keycode[0x78] __initdata = {
 	[0]	 = KEY_GRAVE,
 	[1]	 = KEY_1,
@@ -145,32 +144,6 @@ static unsigned char amikbd_keycode[0x78] __initdata = {
 	[103]	 = KEY_RIGHTMETA
 };
 
-static void __init amikbd_init_console_keymaps(void)
-{
-	/* We can spare 512 bytes on stack for temp_map in init path. */
-	unsigned short temp_map[NR_KEYS];
-	int i, j;
-
-	for (i = 0; i < MAX_NR_KEYMAPS; i++) {
-		if (!key_maps[i])
-			continue;
-		memset(temp_map, 0, sizeof(temp_map));
-		for (j = 0; j < 0x78; j++) {
-			if (!amikbd_keycode[j])
-				continue;
-			temp_map[j] = key_maps[i][amikbd_keycode[j]];
-		}
-		for (j = 0; j < NR_KEYS; j++) {
-			if (!temp_map[j])
-				temp_map[j] = 0xf200;
-		}
-		memcpy(key_maps[i], temp_map, sizeof(temp_map));
-	}
-}
-#else /* !CONFIG_HW_CONSOLE */
-static inline void amikbd_init_console_keymaps(void) {}
-#endif /* !CONFIG_HW_CONSOLE */
-
 static const char *amikbd_messages[8] = {
 	[0] = KERN_ALERT "amikbd: Ctrl-Amiga-Amiga reset warning!!\n",
 	[1] = KERN_WARNING "amikbd: keyboard lost sync\n",
@@ -213,7 +186,7 @@ static irqreturn_t amikbd_interrupt(int irq, void *data)
 static int __init amikbd_probe(struct platform_device *pdev)
 {
 	struct input_dev *dev;
-	int i, err;
+	int i, j, err;
 
 	dev = input_allocate_device();
 	if (!dev) {
@@ -234,8 +207,22 @@ static int __init amikbd_probe(struct platform_device *pdev)
 	for (i = 0; i < 0x78; i++)
 		set_bit(i, dev->keybit);
 
-	amikbd_init_console_keymaps();
-
+	for (i = 0; i < MAX_NR_KEYMAPS; i++) {
+		static u_short temp_map[NR_KEYS] __initdata;
+		if (!key_maps[i])
+			continue;
+		memset(temp_map, 0, sizeof(temp_map));
+		for (j = 0; j < 0x78; j++) {
+			if (!amikbd_keycode[j])
+				continue;
+			temp_map[j] = key_maps[i][amikbd_keycode[j]];
+		}
+		for (j = 0; j < NR_KEYS; j++) {
+			if (!temp_map[j])
+				temp_map[j] = 0xf200;
+		}
+		memcpy(key_maps[i], temp_map, sizeof(temp_map));
+	}
 	ciaa.cra &= ~0x41;	 /* serial data in, turn off TA */
 	err = request_irq(IRQ_AMIGA_CIAA_SP, amikbd_interrupt, 0, "amikbd",
 			  dev);
@@ -259,6 +246,7 @@ static int __exit amikbd_remove(struct platform_device *pdev)
 {
 	struct input_dev *dev = platform_get_drvdata(pdev);
 
+	platform_set_drvdata(pdev, NULL);
 	free_irq(IRQ_AMIGA_CIAA_SP, dev);
 	input_unregister_device(dev);
 	return 0;
@@ -268,9 +256,22 @@ static struct platform_driver amikbd_driver = {
 	.remove = __exit_p(amikbd_remove),
 	.driver   = {
 		.name	= "amiga-keyboard",
+		.owner	= THIS_MODULE,
 	},
 };
 
-module_platform_driver_probe(amikbd_driver, amikbd_probe);
+static int __init amikbd_init(void)
+{
+	return platform_driver_probe(&amikbd_driver, amikbd_probe);
+}
+
+module_init(amikbd_init);
+
+static void __exit amikbd_exit(void)
+{
+	platform_driver_unregister(&amikbd_driver);
+}
+
+module_exit(amikbd_exit);
 
 MODULE_ALIAS("platform:amiga-keyboard");

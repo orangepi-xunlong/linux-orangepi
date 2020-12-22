@@ -16,13 +16,13 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 #include <linux/clk.h>
+#include <linux/clk/sunxi_name.h>
 #include <linux/cpu.h>
 #include <linux/cpufreq.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/devfreq.h>
 #include <linux/io.h>
-#include <linux/of.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
@@ -31,21 +31,11 @@
 #if defined(CONFIG_ARCH_SUN8IW7P1) && defined(CONFIG_CPU_BUDGET_THERMAL)
 #include <linux/cpu_budget_cooling.h>
 #endif
+#include <mach/sys_config.h>
+#include <mach/platform.h>
 #include "sunxi-mdfs.h"
 
-#if defined(CONFIG_ARCH_SUN8IW5P1)
-#define PLL_DDR0_CLK		"pll_ddr0"
-#define PLL_DDR1_CLK		"pll_ddr1"
-#define SUNXI_CCM_PBASE		(0x01c20000)
-#define SUNXI_CCM_SIZE		(0x2dc)
-static void __iomem *sunxi_ccm_vbase;
-#endif
-
-#define AHB1_CLK       "ahb1"
-#define CCI400_CLK     "cci400"
-#define PLL_DDR_CLK    "pll_ddr"
-
-#if defined(CONFIG_ARCH_SUN9IW1P1) || defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW7P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN9IW1P1) || defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW7P1)
 extern char __sram_start, __sram_end, __sram_text_start, __sram_data_end;
 #endif
 
@@ -55,21 +45,21 @@ enum {
 };
 static int debug_mask = DEBUG_FREQ | DEBUG_SUSPEND;
 module_param(debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
-#define DDRFREQ_DBG(mask, format, args...) \
-	do { if (mask & debug_mask) printk("[ddrfreq] "format, ##args); } while (0)
-#define DDRFREQ_ERR(format, args...) \
-	printk(KERN_ERR "[ddrfreq] ERR:"format, ##args)
+#define DDRFREQ_DBG(mask,format,args...) \
+	do { if (mask & debug_mask) printk("[ddrfreq] "format,##args); } while (0)
+#define DDRFREQ_ERR(format,args...) \
+	printk(KERN_ERR "[ddrfreq] ERR:"format,##args)
 
 #define MDFS_RETRIES            (10)
 
 static DEFINE_MUTEX(ddrfreq_lock);
-static unsigned int ddrfreq_enable;
+static unsigned int ddrfreq_enable = 0;
 static __dram_para_t dram_para;
-static struct devfreq *this_df;
-static unsigned long long setfreq_time_usecs;
-static unsigned long long getfreq_time_usecs;
-unsigned int sunxi_ddrfreq_max;
-unsigned int sunxi_ddrfreq_min;
+static struct devfreq *this_df = NULL;
+static unsigned long long setfreq_time_usecs = 0;
+static unsigned long long getfreq_time_usecs = 0;
+unsigned int sunxi_ddrfreq_max = 0;
+unsigned int sunxi_ddrfreq_min = 0;
 
 #ifdef CONFIG_SMP
 static struct cpumask ipi_mask;
@@ -78,25 +68,16 @@ static struct cpumask ipi_mask;
 #if defined(CONFIG_ARCH_SUN9IW1P1)
 static struct clk *clk_pll4;
 static struct clk *clk_pll6;
-
 #elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 static struct clk *clk_pll_ddr0;
 static struct clk *clk_pll_ddr1;
-
 #elif defined(CONFIG_ARCH_SUN8IW6P1)
-#define SUNXI_DDRFREQ_MAXFREQ_MIN       (600000)
-#define SUNXI_DDRFREQ_MINFREQ_MIN       (168000)
+#define SUNXI_DDRFREQ_MAXFREQ_MIN		(600000)
+#define SUNXI_DDRFREQ_MINFREQ_MIN		(168000)
 static struct clk *clk_pll_ddr0;
-static unsigned int ddrfreq_odt_disable;
-
+static unsigned int ddrfreq_odt_disable = 0;
 #elif defined(CONFIG_ARCH_SUN8IW7P1)
 static struct clk *clk_pll_ddr0;
-
-#elif defined(CONFIG_ARCH_SUN8IW9P1)
-#define SUNXI_DDRFREQ_MAXFREQ_MIN       (600000)
-#define SUNXI_DDRFREQ_MINFREQ_MIN       (168000)
-static struct clk *clk_pll_ddr0;
-static struct clk *clk_pll_ddr1;
 #endif
 
 #ifdef CONFIG_ARCH_SUN9IW1P1
@@ -109,18 +90,18 @@ static int dram_freq_table[][2] = {
 	{          0, 0 },
 };
 
-static unsigned int dram_freq_adjust;
+static unsigned int dram_freq_adjust = 0;
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
-unsigned int mdfs_in_cfs;
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
+unsigned int mdfs_in_cfs = 0;
 #endif
 
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_LOW_POWER_SW
 /*
  * 0: normal; 1:enter low-power music; 2:exit low-power music
  */
-static unsigned int ddrfreq_system_state;
+static unsigned int ddrfreq_system_state = 0;
 #endif
 
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_IN_VSYNC
@@ -186,24 +167,15 @@ static struct busfreq_table busfreq_tbl[] = {
 
 static struct clk *cci400;
 static struct clk *ahb1;
-
-#elif defined(CONFIG_ARCH_SUN8IW9P1)
-static struct busfreq_table busfreq_tbl[] = {
-	{ .name = "cci400", .normal_freq = 400000000, .idle_freq = 300000000 },
-	{ .name = "ahb1",   .normal_freq = 200000000, .idle_freq = 100000000 },
-};
-
-static struct clk *cci400;
-static struct clk *ahb1;
 #endif
 
 #endif /* CONFIG_DEVFREQ_DRAM_FREQ_BUSFREQ */
 
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_VDDSYS
 #define TABLE_LENGTH (8)
-static unsigned int table_length_syscfg;
-static unsigned int last_vdd;
-static struct regulator *vdd_sys;
+static unsigned int table_length_syscfg = 0;
+static unsigned int last_vdd = 0;
+static struct regulator *vdd_sys = NULL;
 struct ddrfreq_dvfs {
 	unsigned int freq;   /* ddr frequency, based on KHz */
 	unsigned int volt;   /* voltage for the frequency, based on mv */
@@ -255,7 +227,7 @@ static int __set_bus_freq(const char *name, struct clk *clk,
 		}
 	}
 
-#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1)
 	if (clk_set_rate(clk, target_freq)) {
 		DDRFREQ_ERR("try to set %s rate to %lu failed!\n", name, target_freq);
 		goto err;
@@ -282,46 +254,40 @@ static int __init_vftable_syscfg(void)
 {
 	int i, ret = 0;
 	char name[16] = {0};
-	struct device_node *dvfs_np;
-	unsigned int val;
+	script_item_u val;
+	script_item_value_type_e type;
 
-	dvfs_np = of_find_compatible_node(NULL, NULL,
-						"allwinner,dram_dvfs_table");
-	if (!dvfs_np) {
-		DDRFREQ_ERR("Get dram_dvfs_table failed\n");
-		ret = -ENODEV;
-		goto fail;
+	type = script_get_item("dram_dvfs_table", "LV_count", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch LV_count from sysconfig failed\n");
+		return -ENODEV;
 	}
-
-	if (of_property_read_u32(dvfs_np, "LV_count", &table_length_syscfg)) {
-		DDRFREQ_ERR("Get dram LV_count failed!\n");
-		ret = -ENODEV;
-		goto fail;
-	}
+	pr_debug("LV_count value is %d\n", val.val);
+	table_length_syscfg = val.val;
 
 	/* table_length_syscfg must be < TABLE_LENGTH */
-	if (table_length_syscfg > TABLE_LENGTH) {
+	if(table_length_syscfg > TABLE_LENGTH){
 		DDRFREQ_ERR("LV_count from sysconfig is out of bounder\n");
 		ret = -1;
 		goto fail;
 	}
 
-	for (i = 1; i <= table_length_syscfg; i++) {
+	for (i = 1; i <= table_length_syscfg; i++){
 		sprintf(name, "LV%d_freq", i);
-		if (of_property_read_u32(dvfs_np, name, &val)) {
-			DDRFREQ_ERR("Get dram LV%d_freq failed\n", i);
-			ret = -ENODEV;
-			goto fail;
+		type = script_get_item("dram_dvfs_table", name, &val);
+		if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+			DDRFREQ_ERR("get LV%d_freq from sysconfig failed\n", i);
+			return -ENODEV;
 		}
-		dvfs_table_syscfg[i-1].freq = val / 1000;
+		dvfs_table_syscfg[i-1].freq = val.val / 1000;
 
 		sprintf(name, "LV%d_volt", i);
-		if (of_property_read_u32(dvfs_np, name, &val)) {
-			DDRFREQ_ERR("Get dram LV%d_volt failed\n", i);
-			ret = -ENODEV;
-			goto fail;
+		type = script_get_item("dram_dvfs_table", name, &val);
+		if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+			DDRFREQ_ERR("get LV%d_volt from sysconfig failed\n", i);
+			return -ENODEV;
 		}
-		dvfs_table_syscfg[i-1].volt = val;
+		dvfs_table_syscfg[i-1].volt = val.val;
 	}
 
 fail:
@@ -333,7 +299,7 @@ static void __vftable_show(void)
 	int i;
 
 	pr_debug("---------------Dram V-F Table---------------\n");
-	for (i = 0; i < table_length_syscfg; i++) {
+	for(i = 0; i < table_length_syscfg; i++){
 		pr_debug("voltage = %4dmv \tfrequency = %4dKHz\n",
 			dvfs_table_syscfg[i].volt, dvfs_table_syscfg[i].freq);
 	}
@@ -345,7 +311,7 @@ static unsigned int __get_vddsys_value(unsigned int freq)
 	struct ddrfreq_dvfs *dvfs_inf = NULL;
 	dvfs_inf = &dvfs_table_syscfg[0];
 
-	while ((dvfs_inf+1)->freq >= freq)
+	while((dvfs_inf+1)->freq >= freq)
 		dvfs_inf++;
 
 	return dvfs_inf->volt;
@@ -361,30 +327,30 @@ static unsigned long __ddrfreq_get(void)
 	value = (readl(SUNXI_CCM_MOD_VBASE + 0x84) >> 12) & 0xF;
 	if (value == 0x3) {
 		pll6_rate = clk_get_rate(clk_pll6) / 1000;
-		/* DDRFREQ_DBG(DEBUG_FREQ, "pll6_rate: %d\n", pll6_rate); */
+		// DDRFREQ_DBG(DEBUG_FREQ, "pll6_rate: %d\n", pll6_rate);
 
 		value = readl(SUNXI_CCM_MOD_VBASE + 0x84) >> 8;
 		value &= 0xF;
 		dram_clk_rate = pll6_rate / (value + 1);
-		/* DDRFREQ_DBG(DEBUG_FREQ, "dram_clk_rate: %d\n", dram_clk_rate); */
+		// DDRFREQ_DBG(DEBUG_FREQ, "dram_clk_rate: %d\n", dram_clk_rate);
 
-		if ((readl(SUNXI_DRAMPHY0_VBASE + 0x04) >> 17) & 0x1)    /* pll bypass mode */
+		if ((readl(SUNXI_DRAMPHY0_VBASE + 0x04) >> 17) & 0x1)    //pll bypass mode
 			dram_freq = dram_clk_rate >> 1;
-		else                                                     /* pll normal mode */
+		else                                                     //pll normal mode
 			dram_freq = dram_clk_rate << 1;
-		/* DDRFREQ_DBG(DEBUG_FREQ, "dram_freq: %d\n", dram_freq); */
+		// DDRFREQ_DBG(DEBUG_FREQ, "dram_freq: %d\n", dram_freq);
 
 	} else if (value == 0x0) {
 		pll4_rate = clk_get_rate(clk_pll4) / 1000;
-		/* DDRFREQ_DBG(DEBUG_FREQ, "pll4_rate: %d\n", pll4_rate); */
+		// DDRFREQ_DBG(DEBUG_FREQ, "pll4_rate: %d\n", pll4_rate);
 
 		value = readl(SUNXI_CCM_MOD_VBASE + 0x84) >> 8;
 		value &= 0xF;
 		dram_clk_rate = pll4_rate / (value + 1);
-		/* DDRFREQ_DBG(DEBUG_FREQ, "dram_clk_rate: %d\n", dram_clk_rate); */
+		// DDRFREQ_DBG(DEBUG_FREQ, "dram_clk_rate: %d\n", dram_clk_rate);
 
 		dram_freq = dram_clk_rate >> 1;
-		/*  DDRFREQ_DBG(DEBUG_FREQ, "dram_freq: %d\n", dram_freq); */
+		// DDRFREQ_DBG(DEBUG_FREQ, "dram_freq: %d\n", dram_freq);
 	}
 
 	return dram_freq;
@@ -396,23 +362,24 @@ static unsigned long __ddrfreq_get(void)
 	unsigned long pll_ddr_rate, dram_freq = 0;
 	unsigned int dram_div_m;
 
-	if ((readl(sunxi_ccm_vbase + 0xF8) >> 16) & 0x1)
+	if ((readl(SUNXI_CCM_VBASE + 0xF8) >> 16) & 0x1)
 		pll_ddr_rate = clk_get_rate(clk_pll_ddr1) / 1000;
 	else
 		pll_ddr_rate = clk_get_rate(clk_pll_ddr0) / 1000;
 
 	if (mdfs_in_cfs == 1) {
-		if (readl(sunxi_ccm_vbase + 0xF4) & 0xF)  /* pll normal mode */
+		if (readl(SUNXI_CCM_VBASE + 0xF4) & 0xF)  //pll normal mode
 			dram_freq = pll_ddr_rate;
-		else                                      /* pll bypass mode */
+		else                                      //pll bypass mode
 			dram_freq = pll_ddr_rate / 4;
 	} else if (mdfs_in_cfs == 0) {
-		dram_div_m = (readl(sunxi_ccm_vbase + 0xF4) & 0xF) + 1;
+		dram_div_m = (readl(SUNXI_CCM_VBASE + 0xF4) & 0xF) + 1;
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_LOW_POWER_SW
-		if (ddrfreq_system_state == 1)
+		if (ddrfreq_system_state == 1) {
 			dram_freq = pll_ddr_rate / 4 / dram_div_m;
-		else
+		} else {
 			dram_freq = pll_ddr_rate * 2 / dram_div_m;
+		}
 #else
 		dram_freq = pll_ddr_rate * 2 / dram_div_m;
 #endif
@@ -431,25 +398,6 @@ static unsigned long __ddrfreq_get(void)
 	unsigned int dram_div_m;
 
 	pll_ddr_rate = clk_get_rate(clk_pll_ddr0) / 1000;
-	dram_div_m = (readl((void *)CCM_DRAM_CFG_REG) & 0xF) + 1;
-	dram_freq = pll_ddr_rate / 2 / dram_div_m;
-
-	return dram_freq;
-}
-
-#elif defined(CONFIG_ARCH_SUN8IW9P1)
-static unsigned long __ddrfreq_get(void)
-{
-	unsigned long pll_ddr_rate = 0, dram_freq = 0;
-	unsigned int dram_div_m;
-	unsigned int value;
-
-	value = (readl(SUNXI_CCM_VBASE + 0xF4) >> 20) & 0x3;
-	if (value == 0x0)
-		pll_ddr_rate = clk_get_rate(clk_pll_ddr0) / 1000;
-	else if (value == 0x1)
-		pll_ddr_rate = clk_get_rate(clk_pll_ddr1) / 1000;
-
 	dram_div_m = (readl(CCM_DRAM_CFG_REG) & 0xF) + 1;
 	dram_freq = pll_ddr_rate / 2 / dram_div_m;
 
@@ -457,7 +405,7 @@ static unsigned long __ddrfreq_get(void)
 }
 #endif
 
-/*
+/**
  * dramfreq_get - get the current DRAM frequency (in KHz)
  *
  */
@@ -486,7 +434,7 @@ static unsigned int __get_pll6_para(unsigned int pll_clk)
 	} else if ((pll_clk % 12) == 0) {
 		n = pll_clk / 12;
 		div1 = 1;
-	} else if ((pll_clk % 6) == 0) {
+	} else if((pll_clk % 6) == 0) {
 		n = pll_clk / 6;
 		div1 = 1;
 		div2 = 1;
@@ -524,8 +472,8 @@ static unsigned int __get_pll_ddr_para_in_cfs(unsigned int pll_clk)
 	u32 div;
 
 	div = pll_clk / 24;
-	if (div < 12) /* no less than 288M */
-		div = 12;
+	if (div < 12) //no less than 288M
+		div=12;
 
 	rval |= (((div - 1) << 8) | (0x1U << 31));
 
@@ -537,14 +485,14 @@ static unsigned int __get_pll_div_para(unsigned int pll_clk)
 	u32 pll_div, present_clk, pll_source;
 
 	pll_source = (readl(_CCM_PLL_DDR_CFG_REG) >> 16) & 0x1;
-	if (pll_source)/* pll_ddr1 */
+	if (pll_source)//pll_ddr1
 		present_clk = clk_get_rate(clk_pll_ddr1) / 1000000;
 	else
 		present_clk = clk_get_rate(clk_pll_ddr0) / 1000000;
 
 	pll_div = present_clk * 2 / pll_clk;
-	if (pll_div > 16)
-		pll_div = 16;
+	if (pll_div >= 16)
+		pll_div = 15;
 
 	return pll_div;
 }
@@ -572,8 +520,8 @@ static unsigned int __get_pll_ddr1_para(unsigned int pll_clk)
 	u32 rval, div;
 
 	div = pll_clk / 24;
-	if (div < 12) /* no less than 288M */
-		div = 12;
+	if (div < 12) //no less than 288M
+		div=12;
 
 	rval = readl(_CCM_PLL_DDR1_REG);
 	rval &= ~(0x3f << 8);
@@ -587,7 +535,7 @@ static unsigned int __get_pll_ddrx_para(unsigned int pll_clk)
 	u32 para, pll_source;
 
 	pll_source = (readl(_CCM_PLL_DDR_CFG_REG) >> 16) & 0x1;
-	if (pll_source)/* pll_ddr1 */
+	if (pll_source)//pll_ddr1
 		para = __get_pll_ddr1_para(pll_clk << 1);
 	else
 		para = __get_pll_ddr0_para(pll_clk);
@@ -634,12 +582,13 @@ static unsigned int __get_pll_ddr_para(unsigned int pll_clk)
 		if (div <= 64) {
 			k = 2;
 		} else {
-			if (div % 3 == 0)
+			if (div%3 == 0) {
 				k = 3;
-			else if (div % 4 == 0)
+			} else if(div%4 == 0) {
 				k = 4;
-			else if (div % 5 == 0)
+			} else if(div%5 == 0) {
 				k = 5;
+			}
 		}
 		n = div / k;
 	}
@@ -692,8 +641,7 @@ void __sram mdfs_pause_cpu(void *info)
 	dsb();
 	isb();
 	set_cpuX_paused(cpu, true);
-	while (is_paused())
-		;
+	while (is_paused());
 	set_cpuX_paused(cpu, false);
 }
 static void mdfs_wait_cpu(void *info)
@@ -707,11 +655,10 @@ static int mdfs_cfs(unsigned int freq_jump, __dram_para_t *para,
 {
 	unsigned int reg_val;
 
-	/* bit0 must be 0 for new MDFS process */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
+	//bit0 must be 0 for new MDFS process
+	while(readl(MC_MDFSCR) & 0x1);
 
-	/* setting ODT configuration,enable before adjust */
+	//setting ODT configuration,enable before adjust
 	if (para->dram_clk > 400) {
 		writel(0x00000201, ODTMAP);
 
@@ -726,28 +673,27 @@ static int mdfs_cfs(unsigned int freq_jump, __dram_para_t *para,
 		}
 	}
 
-	/* set pll ddr configuration */
+	//set pll ddr configuration
 	reg_val = readl(_CCM_PLL_DDR_CFG_REG);
-	reg_val |= ((0x1 << 12) | (0x9 << 0));   /* continuously */
+	reg_val |= ((0x1 << 12) | (0x9 << 0));   //continuously
 	writel(reg_val, _CCM_PLL_DDR_CFG_REG);
-	/* set PLL-DDR1 without update */
+	//set PLL-DDR1 without update
 	writel(pll_ddr_para, _CCM_PLL_DDR1_REG);
 
-	/* setting MDFS configuration */
+	//setting MDFS configuration
 	reg_val = readl(MC_MDFSCR);
 	reg_val &= ~(0x1 << 2);
-	reg_val |= ((freq_jump & 0x1) << 2);    /* 1: increase  0:decrease */
-	reg_val |= (0x1 << 1);   /* CFS mode */
+	reg_val |= ((freq_jump & 0x1) << 2);    //1: increase  0:decrease
+	reg_val |= (0x1 << 1);   //CFS mode
 	writel(reg_val, MC_MDFSCR);
 
-	/* start mdfs */
+	//start mdfs
 	writel(((reg_val) | 0x1), MC_MDFSCR);
 
-	/* wait for process finished, bit0 must be 0 for new MDFS process */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
+	//wait for process finished, bit0 must be 0 for new MDFS process
+	while(readl(MC_MDFSCR) & 0x1);
 
-	/* setting ODT configuration, disable after adjust */
+	//setting ODT configuration, disable after adjust
 	if (para->dram_clk < 400) {
 		writel(0x0, ODTMAP);
 
@@ -770,22 +716,21 @@ static int mdfs_dfs(unsigned int freq_jump, __dram_para_t *para,
 	unsigned int trefi = 0;
 	unsigned int trfc = 0;
 
-	/* bit0 must be 0 for new MDFS process */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
+	//bit0 must be 0 for new MDFS process
+	while(readl(MC_MDFSCR) & 0x1);
 
-	/* set new refresh timing */
-	trefi = (39 * para->dram_clk) / 320;
-	trfc = (7 * para->dram_clk) / 40;
-	/* masked master ready */
+	//set new refresh timing
+	trefi = (39 * para->dram_clk) / 320 ;
+	trfc = (7 * para->dram_clk) / 40 ;
+	//masked master ready
 	writel(0xffffffff, MC_MDFSMRMR);
 
-	/* set pll lock time */
+	//set pll lock time
 	writel(0x4e200960, PTR1);
 
-	/* set ODT register buffer for power save */
+	//set ODT register buffer for power save
 	reg_val = readl(MC_MDFSCR);
-	reg_val |= (0x3U << 14);
+	reg_val |=(0x3U << 14);
 	writel(reg_val, MC_MDFSCR);
 
 	reg_val = 0;
@@ -794,9 +739,9 @@ static int mdfs_dfs(unsigned int freq_jump, __dram_para_t *para,
 
 	rank_num = readl(MC_WORK_MODE) & 0x1;
 	odt_freq = rank_num == 1 ? 360 : 400;
-	/* * * * * * * * according to frequency set register buffer value */
+	//according to frequency set register buffer value
 	if (para->dram_clk >= odt_freq) {
-		/* turn on DRAMC odt */
+		//turn on DRAMC odt
 		reg_val = readl(DXnGCR0(0));
 		reg_val |= (0x3 << 9);
 		writel(reg_val, DXnGCR0(0));
@@ -805,13 +750,14 @@ static int mdfs_dfs(unsigned int freq_jump, __dram_para_t *para,
 		reg_val |= (0x3 << 9);
 		writel(reg_val, DXnGCR0(1));
 
-		/* turn on DRAM ODT */
-		if (rank_num)
+		//turn on DRAM ODT
+		if (rank_num) {
 			writel(0x00000303, ODTMAP);
-		else
+		} else {
 			writel(0x00000201, ODTMAP);
+		}
 	} else {
-		/* turn off DRAMC ODT */
+		 //turn off DRAMC ODT
 		reg_val = readl(DXnGCR0(0));
 		reg_val &= ~(0x3 << 9);
 		writel(reg_val, DXnGCR0(0));
@@ -820,31 +766,30 @@ static int mdfs_dfs(unsigned int freq_jump, __dram_para_t *para,
 		reg_val &= ~(0x3 << 9);
 		writel(reg_val, DXnGCR0(1));
 
-		/* turn off DRAM ODT */
+		//turn off DRAM ODT
 		writel(0x0, ODTMAP);
 	}
 
-	/* set the DRAM_CFG_REG divider in CCMU */
+	//set the DRAM_CFG_REG divider in CCMU
 	reg_val = readl(CCM_DRAM_CFG_REG);
 	reg_val &= ~(0xf << 0);
 	reg_val |= ((pll_div - 1) << 0);
 	writel(reg_val, CCM_DRAM_CFG_REG);
 
-	/* set MDFS register */
+	//set MDFS register
 	reg_val = readl(MC_MDFSCR);
-	reg_val |= (0x1U << 13);  /* enable pad hold in the process */
-	reg_val |= ((freq_jump & 0x1) << 2);    /* increase or decrease */
-	reg_val |= (0x0U << 1);   /* DFS mode */
-	reg_val |= (0x1U << 0);   /* start mdfs */
+	reg_val |= (0x1U << 13);  //enable pad hold in the process
+	reg_val |= ( (freq_jump & 0x1) << 2 );    //increase or decrease
+	reg_val |= (0x0U << 1);   //DFS mode
+	reg_val |= (0x1U << 0);   //start mdfs
 	writel(reg_val, MC_MDFSCR);
 
-	/* wait for process finished */
-	while (readl(MC_MDFSCR) & 0x1)
-		;  /* bit0 must be 0 for new MDFS process */
+	//wait for process finished
+	while(readl(MC_MDFSCR) & 0x1);  //bit0 must be 0 for new MDFS process
 
-	/* close ODT register buffer */
+	//close ODT register buffer
 	reg_val = readl(MC_MDFSCR);
-	reg_val &= ~(0x3U << 14);
+	reg_val &=~(0x3U << 14);
 	writel(reg_val, MC_MDFSCR);
 
 	return 0;
@@ -859,54 +804,52 @@ static int mdfs_cfs(unsigned int freq_jump, __dram_para_t *para,
 	unsigned int trfc;
 	unsigned int ctrl_freq;
 
-	/* bit0 must be 0 for new MDFS process */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
+	//bit0 must be 0 for new MDFS process
+	while(readl(MC_MDFSCR) & 0x1);
 
-	/* calculate new timing */
+	//calculate new timing
 	ctrl_freq = para->dram_clk / 2;
 	trefi = (3900 * ctrl_freq) / 1000 / 32;
 	trfc = (210 * ctrl_freq) / 1000;
-	/* enable timing double buffer */
+	//enable timing double buffer
 	reg_val = readl(MC_MDFSCR);
 	reg_val |= (0x1U << 15);
 	writel(reg_val, MC_MDFSCR);
-	/* set new timing into buffer */
+	//set new timing into buffer
 	reg_val = 0;
 	reg_val = (trefi << 16) | (trfc << 0);
 	writel(reg_val, RFSHTMG);
-	/* set pll-pattern control register */
+	//set pll-pattern control register
 	reg_val = readl(_CCM_PLL_DDR_PATTERN_REG);
-	reg_val |= (0x7U << 29);
+	reg_val |=(0x7U << 29);
 	writel(reg_val, _CCM_PLL_DDR_PATTERN_REG);
 
-	/* set pll ddr configuration */
+	//set pll ddr configuration
 	reg_val = readl(_CCM_PLL_DDR_CFG_REG);
-	reg_val |= ((0x1 << 12) | (0x9 << 0));   /* continuously */
+	reg_val |= ((0x1 << 12) | (0x9 << 0));   //continuously
 	writel(reg_val, _CCM_PLL_DDR_CFG_REG);
-	/* set PLL-DDR1 without update */
+	//set PLL-DDR1 without update
 	writel(pll_ddr_para, _CCM_PLL_DDR_REG);
 
-	/* setting MDFS configuration */
+	//setting MDFS configuration
 	reg_val = readl(MC_MDFSCR);
 	reg_val &= ~(0x1 << 2);
-	reg_val |= ((freq_jump & 0x1) << 2);    /* 1: increase  0:decrease */
-	reg_val |= (0x1 << 1);   /* CFS mode */
+	reg_val |= ((freq_jump & 0x1) << 2);    //1: increase  0:decrease
+	reg_val |= (0x1 << 1);   //CFS mode
 	writel(reg_val, MC_MDFSCR);
 
-	/* start mdfs */
+	//start mdfs
 	writel(((reg_val) | 0x1), MC_MDFSCR);
 
-	/* wait for process finished, bit0 must be 0 for new MDFS process */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
+	//wait for process finished, bit0 must be 0 for new MDFS process
+	while(readl(MC_MDFSCR) & 0x1);
 
-	/* set pll-pattern control register */
+	//set pll-pattern control register
 	reg_val = readl(_CCM_PLL_DDR_PATTERN_REG);
 	reg_val &= ~(0x7U << 29);
 	writel(reg_val, _CCM_PLL_DDR_PATTERN_REG);
 
-	/* disable timing double buffer */
+	//disable timing double buffer
 	reg_val = readl(MC_MDFSCR);
 	reg_val &= ~(0x1U << 15);
 	writel(reg_val, MC_MDFSCR);
@@ -921,104 +864,105 @@ unsigned int mdfs_dfs(unsigned int freq_jump, __dram_para_t *para,
 	unsigned int i = 0;
 	unsigned int odt_type = 0;
 
-	/* bit0 must be 0 for new MDFS process */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
+	//bit0 must be 0 for new MDFS process
+	while(readl(MC_MDFSCR) & 0x1);
 
-	/* masked master ready */
+	//masked master ready
 	writel(0xffffffff, MC_MDFSMRMR);
 
-	/* set ODT register buffer for power save */
+	//set ODT register buffer for power save
 	reg_val = readl(MC_MDFSCR);
-	reg_val |= (0x3U << 14);
+	reg_val |=(0x3U << 14);
 	writel(reg_val, MC_MDFSCR);
 
-	/* according to frequency set register buffer value */
+	//according to frequency set register buffer value
 	if (!((para->dram_tpr13 >> 12) & 0x1)) {
 		if (para->dram_clk > 400) {
-			/* turn on DRAMC odt */
+			//turn on DRAMC odt
 			if (para->dram_odt_en & 0x1) {
 				odt_type = (para->dram_odt_en >> 1) & 0x1;
 				for (i = 0; i < 11; i++) {
+					//byte 0
 					reg_val = readl(DATX0IOCR(i));
 					reg_val &= ~(0x3U<<24);
-					reg_val |= (odt_type<<24);
+					reg_val |=(odt_type<<24);
 					writel(reg_val, DATX0IOCR(i));
-
+					//byte 1
 					reg_val = readl(DATX1IOCR(i));
 					reg_val &= ~(0x3U<<24);
-					reg_val |= (odt_type<<24);
+					reg_val |=(odt_type<<24);
 					writel(reg_val, DATX1IOCR(i));
-
+					//byte 2
 					reg_val = readl(DATX2IOCR(i));
 					reg_val &= ~(0x3U<<24);
-					reg_val |= (odt_type<<24);
+					reg_val |=(odt_type<<24);
 					writel(reg_val, DATX2IOCR(i));
-
+					//byte 3
 					reg_val = readl(DATX3IOCR(i));
 					reg_val &= ~(0x3U<<24);
-					reg_val |= (odt_type<<24);
+					reg_val |=(odt_type<<24);
 					writel(reg_val, DATX3IOCR(i));
 				}
 			}
-			/* turn on DRAM ODT */
+			//turn on DRAM ODT
 			rank_num = readl(MC_WORK_MODE) & 0x1;
-			if (rank_num)
+			if (rank_num) {
 				writel(0x00000303, ODTMAP);
-			else
+			} else {
 				writel(0x00000201, ODTMAP);
+			}
 		} else {
 			if (para->dram_odt_en & 0x1) {
-				/* for dqs/dqs#,odt always on */
+				//for dqs/dqs#,odt always on
 				for (i = 0; i < 11; i++) {
+					//byte 0
 					reg_val = readl(DATX0IOCR(i));
 					reg_val &= ~(0x3U<<24);
 					reg_val |= (0x2U<<24);
 					writel(reg_val, DATX0IOCR(i));
-
+					//byte 1
 					reg_val = readl(DATX1IOCR(i));
 					reg_val &= ~(0x3U<<24);
 					reg_val |= (0x2U<<24);
 					writel(reg_val, DATX1IOCR(i));
-
+					//byte 2
 					reg_val = readl(DATX2IOCR(i));
 					reg_val &= ~(0x3U<<24);
 					reg_val |= (0x2U<<24);
 					writel(reg_val, DATX2IOCR(i));
-
+					//byte 3
 					reg_val = readl(DATX3IOCR(i));
 					reg_val &= ~(0x3U<<24);
 					reg_val |= (0x2U<<24);
 					writel(reg_val, DATX3IOCR(i));
 				}
 			}
-			/* turn off DRAM ODT */
+			//turn off DRAM ODT
 			writel(0x0, ODTMAP);
 		}
 	}
 
-	/* set the DRAM_CFG_REG divider in CCMU */
+	//set the DRAM_CFG_REG divider in CCMU
 	reg_val = readl(CCM_DRAM_CFG_REG);
 	reg_val &= ~(0xf << 0);
 	reg_val |= ((pll_div - 1) << 0);
 	writel(reg_val, CCM_DRAM_CFG_REG);
 
-	/* set MDFS register */
+	//set MDFS register
 	reg_val = readl(MC_MDFSCR);
-	reg_val |= (0x1U << 13);  /* enable pad hold in the process */
-	reg_val |= (0x1 << 4);
-	reg_val |= ((freq_jump & 0x1) << 2);    /* increase or decrease */
-	reg_val |= (0x0U << 1);   /* DFS mode */
-	reg_val |= (0x1U << 0);   /* start mdfs */
+	reg_val |= (0x1U << 13);  //enable pad hold in the process
+	reg_val |= (0x1<<4);
+	reg_val |= ( (freq_jump & 0x1) << 2 );    //increase or decrease
+	reg_val |= (0x0U << 1);   //DFS mode
+	reg_val |= (0x1U << 0);   //start mdfs
 	writel(reg_val, MC_MDFSCR);
 
-	/* wait for process finished */
-	while (readl(MC_MDFSCR) & 0x1)
-		;  /* bit0 must be 0 for new MDFS process */
+	//wait for process finished
+	while(readl(MC_MDFSCR) & 0x1);  //bit0 must be 0 for new MDFS process
 
-	/* close ODT register buffer */
+	//close ODT register buffer
 	reg_val = readl(MC_MDFSCR);
-	reg_val &= ~(0x3U << 14);
+	reg_val &=~(0x3U << 14);
 	writel(reg_val, MC_MDFSCR);
 
 	return 0;
@@ -1034,235 +978,6 @@ static int mdfs_cfs(unsigned int freq_jump, __dram_para_t *para,
 static int mdfs_dfs(unsigned int freq_jump, __dram_para_t *para,
 				unsigned int pll_div)
 {
-	return 0;
-}
-
-#elif defined(CONFIG_ARCH_SUN8IW9P1)
-static int mdfs_cfs(unsigned int freq_jump, __dram_para_t *para,
-				unsigned int freq)
-{
-	unsigned int reg_val, i;
-	unsigned int trefi, trfc, ctrl_freq;
-	unsigned int rank_num = 0;
-	unsigned int n = 4;
-	unsigned int div = 0;
-
-	/* bit0 must be 0 for new MDFS process */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
-
-	/*for CFS only support LPDDR */
-	ctrl_freq = freq >> 1;
-	if ((para->dram_type == 3) || (para->dram_type == 2)) {
-		trefi = ((7800*ctrl_freq)/1000 + ((((7800*ctrl_freq)%1000) != 0) ? 1 : 0)) / 32;
-		trfc = (350*ctrl_freq)/1000 + ((((350*ctrl_freq)%1000) != 0) ? 1 : 0);
-	} else {
-		trefi = ((3900*ctrl_freq)/1000 + ((((3900*ctrl_freq)%1000) != 0) ? 1 : 0)) / 32;
-		trfc = (210*ctrl_freq)/1000 + ((((210*ctrl_freq)%1000) != 0) ? 1 : 0);
-	}
-
-	/* set dual buffer for timing change and power save */
-	reg_val = readl(MC_MDFSCR);
-	reg_val |= (0x1U << 15);
-	writel(reg_val, MC_MDFSCR);
-
-	/* change refresh timing */
-	reg_val = readl(RFSHTMG);
-	reg_val &= ~((0xfff<<0)|(0xfff<<16));
-	reg_val |= ((trfc<<0)|(trefi<<16));
-	writel(reg_val, RFSHTMG);
-
-	/* make sure clk always on  */
-	reg_val = readl(PGCR0);
-	reg_val &= ~(0xf<<12);
-	reg_val |= (0x5<<12);
-	writel(reg_val, PGCR0);
-
-	/* change ODT status for power save  */
-	if (!((para->dram_tpr13>>12) & 0x1)) {
-		if (freq > 400) {
-			if ((para->dram_odt_en & 0x1)) {
-				for (i = 0; i < n; i++) {
-					/* byte 0/byte 1 */
-					reg_val = readl(DXnGCR0(i));
-					reg_val &= ~(0x3U<<4);
-					reg_val |= (0x0<<4);/* ODT dynamic */
-					writel(reg_val, DXnGCR0(i));
-				}
-
-				rank_num = readl(MC_WORK_MODE) & 0x1;
-				if (rank_num)
-					writel(0x00000303, ODTMAP);
-				else
-					writel(0x00000201, ODTMAP);
-			}
-		} else {
-			if (para->dram_odt_en & 0x1) {
-				for (i = 0; i < n; i++) {
-					/* byte 0/byte 1 */
-					reg_val = readl(DXnGCR0(i));
-					reg_val &= ~(0x3U<<4);
-					reg_val |= (0x2<<4);
-					writel(reg_val, DXnGCR0(i));
-				}
-				writel(0x0, ODTMAP);
-			}
-		}
-	}
-
-	/* change pll-ddr N value */
-	div = freq / 12;
-	reg_val = readl(_CCM_PLL_DDR1_REG);
-	reg_val &= ~(0x7f<<8);
-	reg_val |= (((div-1)<<8));
-	writel(reg_val, _CCM_PLL_DDR1_REG);
-
-	/* setting MDFS configuration */
-	reg_val = readl(MC_MDFSCR);
-	reg_val &= ~(0x1 << 2);
-	reg_val |= ((freq_jump & 0x1) << 2);    /* 1: increase  0:decrease */
-	reg_val |= (0x1 << 1);   /* CFS mode */
-	writel(reg_val, MC_MDFSCR);
-
-	/* start mdfs,no wait; */
-	writel(((reg_val) | 0x1), MC_MDFSCR);
-
-	return 0;
-}
-
-static unsigned int mdfs_dfs(unsigned int freq_jump, __dram_para_t *para,
-				unsigned int freq)
-{
-	unsigned int reg_val, rank_num;
-	unsigned int trefi, trfc, ctrl_freq;
-	unsigned int i = 0;
-	unsigned int n = 4;
-	unsigned int div, source;
-	unsigned int hdr_clk_status = 0;
-
-	/* bit0 must be 0 for new MDFS process */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
-
-	/* calculate source and divider */
-	if (para->dram_tpr9 != 0) {
-		if (((para->dram_clk % freq) == 0) && ((para->dram_tpr9 % freq) == 0)) {
-			if ((para->dram_clk/freq) > (para->dram_tpr9/freq)) {
-				source = 0;
-				div = para->dram_tpr9 / freq;
-			} else {
-				source = 1;
-				div = para->dram_clk / freq;
-			}
-		} else if ((para->dram_clk % freq) == 0) {
-			source = 1;
-			div = para->dram_clk / freq;
-		} else if ((para->dram_tpr9 % freq) == 0) {
-			source = 0;
-			div = para->dram_tpr9 / freq;
-		} else {
-			printk("MDFS fail!\n");
-			return 1;
-		}
-	} else {
-		source = 1;
-		div = para->dram_clk / freq;
-	}
-
-	ctrl_freq = freq >> 1;
-	if ((para->dram_type == 3) || (para->dram_type == 2)) {
-		trefi = ((7800*ctrl_freq)/1000 + ((((7800*ctrl_freq)%1000) != 0) ? 1 : 0))/32;
-		trfc = (350*ctrl_freq)/1000 + ((((350*ctrl_freq)%1000) != 0) ? 1 : 0);
-	} else {
-		trefi = ((3900*ctrl_freq)/1000 + ((((3900*ctrl_freq)%1000) != 0) ? 1 : 0))/32;
-		trfc = (210*ctrl_freq)/1000 + ((((210*ctrl_freq)%1000) != 0) ? 1 : 0);
-	}
-
-	/* make sure clk always on  */
-	hdr_clk_status = (readl(PGCR0) >> 12) & 0xf;
-	reg_val = readl(PGCR0);
-	reg_val &= ~(0xf<<12);
-	reg_val |= (0x5<<12);
-	writel(reg_val, PGCR0);
-
-	/* set dual buffer for timing change and power save */
-	reg_val = readl(MC_MDFSCR);
-	/* VTC dual buffer can not be used */
-	reg_val |= (0x1U << 15);
-	writel(reg_val, MC_MDFSCR);
-
-	/* change refresh timing */
-	reg_val = readl(RFSHTMG);
-	reg_val &= ~((0xfff<<0)|(0xfff<<16));
-	reg_val |= ((trfc<<0)|(trefi<<16));
-	writel(reg_val, RFSHTMG);
-
-	/* change ODT status for power save  */
-	if (!((para->dram_tpr13 >> 12) & 0x1)) {
-		if (freq > 400) {
-			if (para->dram_odt_en & 0x1) {
-				for (i = 0; i < n; i++) {
-					/* byte 0/byte 1 */
-					reg_val = readl(DXnGCR0(i));
-					reg_val &= ~(0x3U<<4);
-					reg_val |= (0x0<<4);/* ODT dynamic */
-					writel(reg_val, DXnGCR0(i));
-				}
-
-				rank_num = readl(MC_WORK_MODE) & 0x1;
-				if (rank_num)
-					writel(0x00000303, ODTMAP);
-				else
-					writel(0x00000201, ODTMAP);
-			}
-		} else {
-			if (para->dram_odt_en & 0x1) {
-				for (i = 0; i < n; i++) {
-					/* byte 0/byte 1 */
-					reg_val = readl(DXnGCR0(i));
-					reg_val &= ~(0x3U<<4);
-					reg_val |= (0x2<<4);
-					writel(reg_val, DXnGCR0(i));
-				}
-				writel(0x0, ODTMAP);
-			}
-		}
-	}
-
-	/* set the DRAM_CFG_REG divider in CCMU */
-	reg_val = readl(CCM_DRAM_CFG_REG);
-	reg_val &= ~(0xf << 0);
-	reg_val |= ((div - 1) << 0);
-	reg_val &= ~(0x3<<20);
-	reg_val |= (source<<20);
-	writel(reg_val, CCM_DRAM_CFG_REG);
-
-	/* set MDFS register */
-	reg_val = readl(MC_MDFSCR);
-	reg_val |= (0x1<<4); /* bypass */
-	reg_val |= (0x1<<13);/* pad hold */
-	reg_val &= ~(0x1U << 1); /* DFS mode */
-	writel(reg_val, MC_MDFSCR);
-
-	reg_val = readl(MC_MDFSCR);
-	reg_val |= (0x1U << 0); /* start mdfs */
-	writel(reg_val, MC_MDFSCR);
-
-	/* wait for process finished */
-	while (readl(MC_MDFSCR) & 0x1)
-		;
-
-	/* turn off dual buffer */
-	reg_val = readl(MC_MDFSCR);
-	reg_val &= ~(0x1U << 15);
-	writel(reg_val, MC_MDFSCR);
-
-	/*revovery hdr clk status */
-	reg_val = readl(PGCR0);
-	reg_val &= ~(0xf<<12);
-	reg_val |= (hdr_clk_status<<12);
-	writel(reg_val, PGCR0);
-
 	return 0;
 }
 #endif
@@ -1297,7 +1012,7 @@ static int __ddrfreq_set(unsigned int jump, struct devfreq *df,
 	DDRFREQ_DBG(DEBUG_FREQ, "current cpu is cpu%u\n", this_cpu);
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	if (mdfs_in_cfs == 0) {
 #endif
 
@@ -1308,7 +1023,7 @@ static int __ddrfreq_set(unsigned int jump, struct devfreq *df,
 		}
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	}
 #endif
 
@@ -1319,9 +1034,7 @@ static int __ddrfreq_set(unsigned int jump, struct devfreq *df,
 	}
 #endif
 
-#ifndef CONFIG_ARCH_SUN8IW9P1
 	dram_para.dram_clk = freq_target / 1000;
-#endif
 
 #ifdef CONFIG_ARCH_SUN9IW1P1
 	if (dram_para.dram_clk <= 800)
@@ -1347,26 +1060,23 @@ static int __ddrfreq_set(unsigned int jump, struct devfreq *df,
 
 #elif defined(CONFIG_ARCH_SUN8IW7P1)
 	pll_para_to_mdfs = __get_pll_ddr_para(dram_para.dram_clk << 1);
-
-#elif defined(CONFIG_ARCH_SUN8IW9P1)
-	pll_para_to_mdfs = freq_target / 1000;
 #endif
 
-#if defined(CONFIG_ARCH_SUN9IW1P1) || defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW7P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN9IW1P1) || defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW7P1)
 	memcpy(&__sram_text_start, &__sram_start, (&__sram_end - &__sram_start));
 #endif
 
-
 #ifdef CONFIG_CPU_FREQ
-	if (policy.cur < policy.max)
+	if (policy.cur < policy.max) {
 		__cpufreq_driver_target(&policy, policy.max, CPUFREQ_RELATION_H);
+	}
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	if (mdfs_in_cfs == 0) {
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	}
 #endif
 
@@ -1399,8 +1109,7 @@ static int __ddrfreq_set(unsigned int jump, struct devfreq *df,
 
 	local_irq_disable();
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_IN_VSYNC
-	while (!vbtime_ops.is_in_vb())
-		;
+	while(!vbtime_ops.is_in_vb());
 #endif
 	calltime = ktime_get();
 	flush_tlb_all();
@@ -1411,12 +1120,13 @@ static int __ddrfreq_set(unsigned int jump, struct devfreq *df,
 #if defined(CONFIG_ARCH_SUN9IW1P1)
 	mdfs_main(jump, &dram_para, pll_para_to_mdfs, div);
 
-#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	if (mdfs_in_cfs == 1) {
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_CFS_SW
 		if (!ddrfreq_odt_disable) {
-			if (dram_para.dram_clk > 200)
+			if (dram_para.dram_clk > 200) {
 				mdfs_main(jump, &dram_para, 0, 0);
+			}
 		}
 #endif
 
@@ -1424,16 +1134,18 @@ static int __ddrfreq_set(unsigned int jump, struct devfreq *df,
 
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_CFS_SW
 		if (!ddrfreq_odt_disable) {
-			if (dram_para.dram_clk < 200)
+			if (dram_para.dram_clk < 200) {
 				mdfs_main(jump, &dram_para, 0, 0);
+			}
 		}
 #endif
 	} else if (mdfs_in_cfs == 0) {
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_LOW_POWER_SW
-		if (ddrfreq_system_state == 0)
+		if (ddrfreq_system_state == 0) {
 			mdfs_dfs(jump, &dram_para, pll_para_to_mdfs);
-		else
+		} else {
 			mdfs_main(jump, &dram_para, pll_para_to_mdfs, 0);
+		}
 #else
 		mdfs_dfs(jump, &dram_para, pll_para_to_mdfs);
 #endif
@@ -1485,8 +1197,9 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 	mutex_lock(&ddrfreq_lock);
 	get_online_cpus();
 
-	if (!ddrfreq_enable)
+	if (!ddrfreq_enable) {
 		goto unlock;
+	}
 
 	if (df == NULL) {
 		ret = -1;
@@ -1509,16 +1222,16 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 	jump = (*freq > df->previous_freq) ? 1 : 0;
 
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_LOW_POWER_SW
-	if ((df->previous_freq == df->max_freq) && (*freq == df->min_freq))
+	if ((df->previous_freq == df->max_freq) && (*freq == df->min_freq)) {
 		ddrfreq_system_state = 1;
-	else if ((df->previous_freq == df->min_freq) && (*freq == df->max_freq))
+	} else if ((df->previous_freq == df->min_freq) && (*freq == df->max_freq)) {
 		ddrfreq_system_state = 2;
-	else
+	} else {
 		ddrfreq_system_state = 0;
-
-	DDRFREQ_DBG(DEBUG_FREQ, "DDR: %luKHz->%luKHz start: %u\n", df->previous_freq, *freq, ddrfreq_system_state);
+	}
 #endif
 
+	DDRFREQ_DBG(DEBUG_FREQ, "DDR: %luKHz->%luKHz start\n", df->previous_freq, *freq);
 
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_VDDSYS
 #if defined(CONFIG_ARCH_SUN9IW1P1)
@@ -1536,7 +1249,7 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 	if ((df->previous_freq == df->min_freq) && (*freq == df->max_freq)) {
 		if (vdd_sys && (new_vdd > last_vdd)) {
 			ret = regulator_set_voltage(vdd_sys, new_vdd * 1000, new_vdd * 1000);
-			if (ret != 0) {
+			if(ret != 0) {
 				DDRFREQ_ERR("fail to set regulator voltage!\n");
 				regulator_put(vdd_sys);
 				goto unlock;
@@ -1554,13 +1267,13 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 		}
 
 #if defined(CONFIG_ARCH_SUN9IW1P1)
-		DDRFREQ_DBG(DEBUG_FREQ, "GTBUS:%lu, CCI400:%lu, AHB0:%lu, AHB1:%lu, AHB2:%lu\n",
-		clk_get_rate(gtbus) / 1000000, clk_get_rate(cci400) / 1000000,
-		clk_get_rate(ahb0) / 1000000, clk_get_rate(ahb1)   / 1000000,
-		clk_get_rate(ahb2) / 1000000);
+		DDRFREQ_DBG(DEBUG_FREQ, "GTBUS:%lu, CCI400:%lu, AHB0:%lu, AHB1:%lu, "
+				"AHB2:%lu\n", clk_get_rate(gtbus) / 1000000,
+				clk_get_rate(cci400) / 1000000, clk_get_rate(ahb0) / 1000000,
+				clk_get_rate(ahb1)   / 1000000, clk_get_rate(ahb2) / 1000000);
 #elif defined(CONFIG_ARCH_SUN8IW5P1)
 		DDRFREQ_DBG(DEBUG_FREQ, "AHB1:%lu\n", clk_get_rate(ahb1) / 1000000);
-#elif defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW6P1)
 		DDRFREQ_DBG(DEBUG_FREQ, "CCI400:%lu, AHB1:%lu\n",
 				clk_get_rate(cci400) / 1000000, clk_get_rate(ahb1) / 1000000);
 #endif
@@ -1568,7 +1281,7 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 	}
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	if (mdfs_in_cfs == 0) {
 #endif
 
@@ -1599,7 +1312,7 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 		}
 #endif /* CONFIG_DEVFREQ_DRAM_FREQ_IN_VSYNC */
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	}
 #endif
 
@@ -1609,13 +1322,13 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 #else
 		ret = __ddrfreq_set(jump, df, *freq);
 #endif
-		if (ret == -1)
+		if (ret == -1) {
 			goto unlock;
-		else if (ret == -2)
+		} else if (ret == -2) {
 			mdfs_retries++;
-		else if (ret == 0)
+		} else if (ret == 0) {
 			break;
-
+		}
 	} while (mdfs_retries < MDFS_RETRIES);
 
 	if (mdfs_retries >= MDFS_RETRIES) {
@@ -1635,13 +1348,13 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 		}
 
 #if defined(CONFIG_ARCH_SUN9IW1P1)
-		DDRFREQ_DBG(DEBUG_FREQ, "GTBUS:%lu, CCI400:%lu, AHB0:%lu, AHB1:%lu, AHB2:%lu\n",
-		clk_get_rate(gtbus) / 1000000, clk_get_rate(cci400) / 1000000,
-		clk_get_rate(ahb0) / 1000000, clk_get_rate(ahb1)   / 1000000,
-		clk_get_rate(ahb2) / 1000000);
+		DDRFREQ_DBG(DEBUG_FREQ, "GTBUS:%lu, CCI400:%lu, AHB0:%lu, AHB1:%lu, "
+				"AHB2:%lu\n", clk_get_rate(gtbus) / 1000000,
+				clk_get_rate(cci400) / 1000000, clk_get_rate(ahb0) / 1000000,
+				clk_get_rate(ahb1)   / 1000000, clk_get_rate(ahb2) / 1000000);
 #elif defined(CONFIG_ARCH_SUN8IW5P1)
 		DDRFREQ_DBG(DEBUG_FREQ, "AHB1:%lu\n", clk_get_rate(ahb1) / 1000000);
-#elif defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW6P1)
 		DDRFREQ_DBG(DEBUG_FREQ, "CCI400:%lu, AHB1:%lu\n",
 				clk_get_rate(cci400) / 1000000, clk_get_rate(ahb1) / 1000000);
 #endif
@@ -1654,7 +1367,7 @@ static int ddrfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 		if (vdd_sys && (new_vdd < last_vdd)) {
 			ret = regulator_set_voltage(vdd_sys, new_vdd * 1000, new_vdd * 1000);
 			if (ret != 0) {
-				/* without care, ddr freq scaling is ok */
+				//without care, ddr freq scaling is ok
 				ret = 0;
 				DDRFREQ_ERR("fail to set regulator voltage!\n");
 				regulator_put(vdd_sys);
@@ -1684,16 +1397,9 @@ static int ddrfreq_get_dev_status(struct device *dev,
 	return 0;
 }
 
-static int ddrfreq_get_cur_freq(struct device *dev, unsigned long *freq)
-{
-	*freq = dramfreq_get();
-	return 0;
-}
-
 static struct devfreq_dev_profile ddrfreq_profile = {
 	.target         = ddrfreq_target,
 	.get_dev_status = ddrfreq_get_dev_status,
-	.get_cur_freq   = ddrfreq_get_cur_freq,
 };
 
 #ifdef CONFIG_ARCH_SUN8IW5P1
@@ -1745,11 +1451,11 @@ static int ddrfreq_budget_cooling_notifier_call(struct notifier_block *nfb, unsi
 
 	temperature = ths_read_data(4);
 	if (temperature >= 100) {
-		DDRFREQ_DBG(DEBUG_FREQ, "temperature=%d C, ddr freq down\n", temperature);
+		//DDRFREQ_DBG(DEBUG_FREQ, "temperature=%d C, ddr freq down\n", temperature);
 		ddrfreq_target(&sunxi_ddrfreq_device.dev, &this_df->min_freq, 0);
 		goto out;
 	} else if (temperature < 90) {
-		DDRFREQ_DBG(DEBUG_FREQ, "temperature=%d C, ddr freq up\n", temperature);
+		//DDRFREQ_DBG(DEBUG_FREQ, "temperature=%d C, ddr freq up\n", temperature);
 		ddrfreq_target(&sunxi_ddrfreq_device.dev, &this_df->max_freq, 0);
 		goto out;
 	} else {
@@ -1765,26 +1471,21 @@ static struct notifier_block ddrfreq_budget_cooling_notifier = {
 };
 #endif
 
-static int sunxi_ddrfreq_probe(struct platform_device *pdev)
+static __devinit int sunxi_ddrfreq_probe(struct platform_device *pdev)
 {
 	int err = 0;
-	struct device_node *dram_np;
+	script_item_u val;
+	script_item_value_type_e type;
 
-	dram_np = of_find_node_by_path("/dram");
-	if (!dram_np) {
-		DDRFREQ_ERR("Get dram node failed!\n");
+	type = script_get_item("dram_para", "dram_clk", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_clk from sysconfig failed\n");
 		return -ENODEV;
 	}
-
-	if (of_property_read_u32(dram_np, "dram_clk",
-				&dram_para.dram_clk)) {
-		DDRFREQ_ERR("Get dram_clk failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
-	}
-
+	pr_debug("dram_clk value is %u\n", val.val);
+	dram_para.dram_clk = val.val;
 	sunxi_ddrfreq_max = dram_para.dram_clk * 1000;
-#if defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW6P1)
 	if (sunxi_ddrfreq_max < SUNXI_DDRFREQ_MAXFREQ_MIN) {
 		printk("[ddrfreq] warning: dram clk is too low to support\n");
 		return -ENODEV;
@@ -1792,177 +1493,199 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 #endif
 	pr_debug("sunxi_ddrfreq_max=%u\n", sunxi_ddrfreq_max);
 
-	if (of_property_read_u32(dram_np, "dram_type",
-				&dram_para.dram_type)) {
-		DDRFREQ_ERR("Get dram_type failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_type", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_type from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_type value is %u\n", val.val);
+	dram_para.dram_type = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_zq",
-				&dram_para.dram_zq)) {
-		DDRFREQ_ERR("Get dram_zq failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_zq", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_zq from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_zq value is 0x%x\n", val.val);
+	dram_para.dram_zq = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_odt_en",
-				&dram_para.dram_odt_en)) {
-		DDRFREQ_ERR("Get dram_odt_en failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_odt_en", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_odt_en from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_odt_en value is %u\n", val.val);
+	dram_para.dram_odt_en = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_para1",
-				&dram_para.dram_para1)) {
-		DDRFREQ_ERR("Get dram_para1 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_para1", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_para1 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_para1 value is 0x%x\n", val.val);
+	dram_para.dram_para1 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_para2",
-				&dram_para.dram_para2)) {
-		DDRFREQ_ERR("Get dram_para2 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_para2", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_para2 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_para2 value is 0x%x\n", val.val);
+	dram_para.dram_para2 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_mr0",
-				&dram_para.dram_mr0)) {
-		DDRFREQ_ERR("Get dram_mr0 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_mr0", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_mr0 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_mr0 value is 0x%x\n", val.val);
+	dram_para.dram_mr0 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_mr1",
-				&dram_para.dram_mr1)) {
-		DDRFREQ_ERR("Get dram_mr1 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_mr1", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_mr1 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_mr1 value is 0x%x\n", val.val);
+	dram_para.dram_mr1 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_mr2",
-				&dram_para.dram_mr2)) {
-		DDRFREQ_ERR("Get dram_mr2 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_mr2", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_mr2 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_mr2 value is 0x%x\n", val.val);
+	dram_para.dram_mr2 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_mr3",
-				&dram_para.dram_mr3)) {
-		DDRFREQ_ERR("Get dram_mr3 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_mr3", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_mr3 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_mr3 value is 0x%x\n", val.val);
+	dram_para.dram_mr3 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr0",
-				&dram_para.dram_tpr0)) {
-		DDRFREQ_ERR("Get dram_tpr0 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr0", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr0 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr0 value is 0x%x\n", val.val);
+	dram_para.dram_tpr0 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr1",
-				&dram_para.dram_tpr1)) {
-		DDRFREQ_ERR("Get dram_tpr1 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr1", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr1 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr1 value is 0x%x\n", val.val);
+	dram_para.dram_tpr1 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr2",
-				&dram_para.dram_tpr2)) {
-		DDRFREQ_ERR("Get dram_tpr2 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr2", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr2 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr2 value is 0x%x\n", val.val);
+	dram_para.dram_tpr2 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr3",
-				&dram_para.dram_tpr3)) {
-		DDRFREQ_ERR("Get dram_tpr3 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr3", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr3 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr3 value is 0x%x\n", val.val);
+	dram_para.dram_tpr3 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr4",
-				&dram_para.dram_tpr4)) {
-		DDRFREQ_ERR("Get dram_tpr4 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr4", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr4 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr4 value is 0x%x\n", val.val);
+	dram_para.dram_tpr4 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr5",
-				&dram_para.dram_tpr5)) {
-		DDRFREQ_ERR("Get dram_tpr5 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr5", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr5 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr5 value is 0x%x\n", val.val);
+	dram_para.dram_tpr5 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr6",
-				&dram_para.dram_tpr6)) {
-		DDRFREQ_ERR("Get dram_tpr6 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr6", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr6 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr6 value is 0x%x\n", val.val);
+	dram_para.dram_tpr6 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr7",
-				&dram_para.dram_tpr7)) {
-		DDRFREQ_ERR("Get dram_tpr7 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr7", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr7 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr7 value is 0x%x\n", val.val);
+	dram_para.dram_tpr7 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr8",
-				&dram_para.dram_tpr8)) {
-		DDRFREQ_ERR("Get dram_tpr8 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr8", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr8 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr8 value is 0x%x\n", val.val);
+	dram_para.dram_tpr8 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr9",
-				&dram_para.dram_tpr9)) {
-		DDRFREQ_ERR("Get dram_tpr9 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr9", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr9 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr9 value is 0x%x\n", val.val);
+	dram_para.dram_tpr9 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr10",
-				&dram_para.dram_tpr10)) {
-		DDRFREQ_ERR("Get dram_tpr10 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr10", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr10 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr10 value is 0x%x\n", val.val);
+	dram_para.dram_tpr10 = val.val;
 
-	if (of_property_read_u32(dram_np, "dram_tpr11",
-				&dram_para.dram_tpr11)) {
-		DDRFREQ_ERR("Get dram_tpr11 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr11", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr11 from sysconfig failed\n");
+		return -ENODEV;
 	}
+	pr_debug("dram_tpr11 value is 0x%x\n", val.val);
+	dram_para.dram_tpr11 = val.val;
 
-#if defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW6P1)
 	sunxi_ddrfreq_min = sunxi_ddrfreq_max / 4;
 	if (sunxi_ddrfreq_min < SUNXI_DDRFREQ_MINFREQ_MIN)
 		sunxi_ddrfreq_min = sunxi_ddrfreq_max / 3;
 #elif defined(CONFIG_ARCH_SUN8IW7P1)
-	sunxi_ddrfreq_min = 408000;
+	sunxi_ddrfreq_min = 132000;
 #else
-	if (of_property_read_u32(dram_np, "dram_tpr12",
-				&dram_para.dram_tpr12)) {
-		DDRFREQ_ERR("Get dram_tpr12 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr12", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr12 from sysconfig failed\n");
+		return -ENODEV;
 	}
-
+	pr_debug("dram_tpr12 value is %u\n", val.val);
+	dram_para.dram_tpr12 = val.val;
 	sunxi_ddrfreq_min = dram_para.dram_tpr12 * 1000;
 #endif
+	pr_debug("sunxi_ddrfreq_min=%u\n", sunxi_ddrfreq_min);
 
-	if (of_property_read_u32(dram_np, "dram_tpr13",
-				&dram_para.dram_tpr13)) {
-		DDRFREQ_ERR("Get dram_tpr13 failed!\n");
-		err = -ENODEV;
-		goto err_put_node;
+	type = script_get_item("dram_para", "dram_tpr13", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		DDRFREQ_ERR("fetch dram_tpr13 from sysconfig failed\n");
+		return -ENODEV;
 	}
-
+	pr_debug("dram_tpr13 value is 0x%x\n", val.val);
+	dram_para.dram_tpr13 = val.val;
 	ddrfreq_enable = (dram_para.dram_tpr13 >> 11) & 0x1;
 	if (!ddrfreq_enable)
 		printk("[ddrfreq] warning: disabled!\n");
@@ -1973,7 +1696,7 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 
 #if defined(CONFIG_ARCH_SUN9IW1P1)
 	dram_freq_adjust = (dram_para.dram_tpr13 >> 18) & 0x1F;
-#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	mdfs_in_cfs = (dram_para.dram_tpr13 >> 10) & 0x1;
 #endif
 
@@ -2015,8 +1738,6 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 	}
 
 #elif defined(CONFIG_ARCH_SUN8IW5P1)
-	sunxi_ccm_vbase = ioremap(SUNXI_CCM_PBASE, SUNXI_CCM_SIZE);
-
 	ahb1 = clk_get(NULL, AHB1_CLK);
 	if (!ahb1 || IS_ERR(ahb1)) {
 		DDRFREQ_ERR("try to get AHB1 failed!\n");
@@ -2024,7 +1745,7 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 		goto err_ahb1;
 	}
 
-#elif defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW6P1)
 	ahb1 = clk_get(NULL, AHB1_CLK);
 	if (!ahb1 || IS_ERR(ahb1)) {
 		DDRFREQ_ERR("try to get AHB1 failed!\n");
@@ -2057,7 +1778,7 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 		goto err_pll6;
 	}
 
-#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	clk_pll_ddr0 = clk_get(NULL, PLL_DDR0_CLK);
 	if (!clk_pll_ddr0 || IS_ERR(clk_pll_ddr0)) {
 		DDRFREQ_ERR("try to get clk_pll_ddr0 failed!\n");
@@ -2090,22 +1811,23 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 	busfreq_tbl[4].bus_clk = ahb2;
 #elif defined(CONFIG_ARCH_SUN8IW5P1)
 	busfreq_tbl[0].bus_clk = ahb1;
-#elif defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW6P1)
 	busfreq_tbl[0].bus_clk = cci400;
 	busfreq_tbl[1].bus_clk = ahb1;
 #endif
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
-	if (mdfs_in_cfs == 1)
+#ifdef CONFIG_ARCH_SUN8IW6P1
+	if (mdfs_in_cfs == 1) {
 		sunxi_ddrfreq_min = 168000;
+	}
 #endif
 
 	ddrfreq_profile.initial_freq = __ddrfreq_get();
 #ifdef CONFIG_ARCH_SUN8IW7P1
 	this_df = devfreq_add_device(&pdev->dev, &ddrfreq_profile, &devfreq_userspace, NULL);
 #else
-	this_df = devfreq_add_device(&pdev->dev, &ddrfreq_profile, "dsm", NULL);
+	this_df = devfreq_add_device(&pdev->dev, &ddrfreq_profile, &devfreq_dsm, NULL);
 #endif
 	if (IS_ERR(this_df)) {
 		DDRFREQ_ERR("add devfreq device failed!\n");
@@ -2115,7 +1837,7 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_DEVFREQ_DRAM_FREQ_VDDSYS
 	err = __init_vftable_syscfg();
-	if (err) {
+	if(err) {
 		DDRFREQ_ERR("init V-F Table failed\n");
 		goto err_vftable;
 	}
@@ -2142,12 +1864,12 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 	}
 #endif
 
-	this_df->min_freq = sunxi_ddrfreq_min;
-	this_df->max_freq = sunxi_ddrfreq_max;
+	this_df->min_freq = this_df->scaling_min_freq = sunxi_ddrfreq_min;
+	this_df->max_freq = this_df->scaling_max_freq = sunxi_ddrfreq_max;
 
 	platform_set_drvdata(pdev, this_df);
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	if (mdfs_in_cfs == 0) {
 #endif
 
@@ -2155,7 +1877,7 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 		memset(&vbtime_ops, 0, sizeof(struct ddrfreq_vb_time_ops));
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#if defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	}
 #endif
 
@@ -2173,12 +1895,12 @@ static int sunxi_ddrfreq_probe(struct platform_device *pdev)
 	register_budget_cooling_notifier(&ddrfreq_budget_cooling_notifier);
 #endif
 
-#if defined(CONFIG_ARCH_SUN9IW1P1) || defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW7P1) || defined(CONFIG_ARCH_SUN8IW9P1)
-	pr_debug("__sram_start: 0x%0x, __sram_end: 0x%08x, __sram_text_start: 0x%08x, __sram_data_end: 0x%08x\n",
+#if defined(CONFIG_ARCH_SUN9IW1P1) || defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW7P1)
+	pr_debug("__sram_start: 0x%0x, __sram_end: 0x%08x, "
+			"__sram_text_start: 0x%08x, __sram_data_end: 0x%08x\n",
 			(unsigned int)&__sram_start, (unsigned int)&__sram_end,
 			(unsigned int)&__sram_text_start, (unsigned int)&__sram_data_end);
 #endif
-	of_node_put(dram_np);
 
 	return 0;
 
@@ -2195,7 +1917,7 @@ err_pll6:
 	clk_put(clk_pll4);
 	clk_pll4 = NULL;
 err_pll4:
-#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	clk_put(clk_pll_ddr1);
 	clk_pll_ddr1 = NULL;
 err_pll_ddr1:
@@ -2229,7 +1951,7 @@ err_ahb2:
 	clk_put(ahb1);
 	ahb1 = NULL;
 err_ahb1:
-#elif defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW6P1)
 	clk_put(cci400);
 	cci400 = NULL;
 err_cci400:
@@ -2239,12 +1961,10 @@ err_ahb1:
 #endif
 #endif /* CONFIG_DEVFREQ_DRAM_FREQ_BUSFREQ */
 
-err_put_node:
-	of_node_put(dram_np);
 	return err;
 }
 
-static int sunxi_ddrfreq_remove(struct platform_device *pdev)
+static __devexit int sunxi_ddrfreq_remove(struct platform_device *pdev)
 {
 	struct devfreq *df = platform_get_drvdata(pdev);
 
@@ -2276,7 +1996,7 @@ static int sunxi_ddrfreq_remove(struct platform_device *pdev)
 		clk_pll4 = NULL;
 	}
 
-#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW8P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW8P1)
 	if (!clk_pll_ddr0 || IS_ERR(clk_pll_ddr0)) {
 		DDRFREQ_ERR("clk_pll_ddr0 handle is invalid, just return!\n");
 		return -EINVAL;
@@ -2354,7 +2074,7 @@ static int sunxi_ddrfreq_remove(struct platform_device *pdev)
 		ahb1 = NULL;
 	}
 
-#elif defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
+#elif defined(CONFIG_ARCH_SUN8IW6P1)
 	if (!cci400 || IS_ERR(cci400)) {
 		DDRFREQ_ERR("cci400 handle is invalid, just return!\n");
 		return -EINVAL;
@@ -2388,8 +2108,9 @@ static int sunxi_ddrfreq_suspend(struct platform_device *pdev, pm_message_t stat
 
 	cur_freq = __ddrfreq_get();
 	if (cur_freq != df->max_freq) {
-		if (!ddrfreq_target(&pdev->dev, &df->max_freq, 0))
+		if (!ddrfreq_target(&pdev->dev, &df->max_freq, 0)) {
 			df->previous_freq = df->max_freq;
+		}
 	}
 
 	return 0;
@@ -2496,13 +2217,15 @@ static int __init debug_init(void)
 		return -ENOMEM;
 
 	if (!debugfs_create_file("get_time", 0444, ddrfreq_root,
-								NULL, &get_time_fops)) {
+								NULL, &get_time_fops))
+	{
 		err = -ENOMEM;
 		goto out;
 	}
 
 	if (!debugfs_create_file("set_time", 0444, ddrfreq_root,
-					NULL, &set_time_fops)) {
+								NULL, &set_time_fops))
+	{
 		err = -ENOMEM;
 		goto out;
 	}

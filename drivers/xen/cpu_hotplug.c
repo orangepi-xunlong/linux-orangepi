@@ -1,5 +1,3 @@
-#define pr_fmt(fmt) "xen:" KBUILD_MODNAME ": " fmt
-
 #include <linux/notifier.h>
 
 #include <xen/xen.h>
@@ -11,35 +9,29 @@
 static void enable_hotplug_cpu(int cpu)
 {
 	if (!cpu_present(cpu))
-		xen_arch_register_cpu(cpu);
+		arch_register_cpu(cpu);
 
 	set_cpu_present(cpu, true);
 }
 
 static void disable_hotplug_cpu(int cpu)
 {
-	if (!cpu_is_hotpluggable(cpu))
-		return;
-	lock_device_hotplug();
-	if (cpu_online(cpu))
-		device_offline(get_cpu_device(cpu));
-	if (!cpu_online(cpu) && cpu_present(cpu)) {
-		xen_arch_unregister_cpu(cpu);
-		set_cpu_present(cpu, false);
-	}
-	unlock_device_hotplug();
+	if (cpu_present(cpu))
+		arch_unregister_cpu(cpu);
+
+	set_cpu_present(cpu, false);
 }
 
 static int vcpu_online(unsigned int cpu)
 {
 	int err;
-	char dir[16], state[16];
+	char dir[32], state[32];
 
 	sprintf(dir, "cpu/%u", cpu);
-	err = xenbus_scanf(XBT_NIL, dir, "availability", "%15s", state);
+	err = xenbus_scanf(XBT_NIL, dir, "availability", "%s", state);
 	if (err != 1) {
 		if (!xen_initial_domain())
-			pr_err("Unable to read cpu state\n");
+			printk(KERN_ERR "XENBUS: Unable to read cpu state\n");
 		return err;
 	}
 
@@ -48,7 +40,7 @@ static int vcpu_online(unsigned int cpu)
 	else if (strcmp(state, "offline") == 0)
 		return 0;
 
-	pr_err("unknown state(%s) on CPU%d\n", state, cpu);
+	printk(KERN_ERR "XENBUS: unknown state(%s) on CPU%d\n", state, cpu);
 	return -EINVAL;
 }
 static void vcpu_hotplug(unsigned int cpu)
@@ -61,6 +53,7 @@ static void vcpu_hotplug(unsigned int cpu)
 		enable_hotplug_cpu(cpu);
 		break;
 	case 0:
+		(void)cpu_down(cpu);
 		disable_hotplug_cpu(cpu);
 		break;
 	default:
@@ -107,11 +100,7 @@ static int __init setup_vcpu_hotplug_event(void)
 	static struct notifier_block xsn_cpu = {
 		.notifier_call = setup_cpu_watcher };
 
-#ifdef CONFIG_X86
 	if (!xen_pv_domain())
-#else
-	if (!xen_domain())
-#endif
 		return -ENODEV;
 
 	register_xenstore_notifier(&xsn_cpu);

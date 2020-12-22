@@ -16,18 +16,19 @@
 #ifndef BOOT_BOOT_H
 #define BOOT_BOOT_H
 
-#define STACK_SIZE	1024	/* Minimum number of bytes for stack */
+#define STACK_SIZE	512	/* Minimum number of bytes for stack */
 
 #ifndef __ASSEMBLY__
 
 #include <stdarg.h>
 #include <linux/types.h>
 #include <linux/edd.h>
+#include <asm/boot.h>
 #include <asm/setup.h>
-#include <asm/asm.h>
 #include "bitops.h"
+#include <asm/cpufeature.h>
+#include <asm/processor-flags.h>
 #include "ctype.h"
-#include "cpuflags.h"
 
 /* Useful macros */
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
@@ -177,18 +178,26 @@ static inline void wrgs32(u32 v, addr_t addr)
 }
 
 /* Note: these only return true/false, not a signed return value! */
-static inline bool memcmp_fs(const void *s1, addr_t s2, size_t len)
+static inline int memcmp(const void *s1, const void *s2, size_t len)
 {
-	bool diff;
-	asm volatile("fs; repe; cmpsb" CC_SET(nz)
-		     : CC_OUT(nz) (diff), "+D" (s1), "+S" (s2), "+c" (len));
+	u8 diff;
+	asm("repe; cmpsb; setnz %0"
+	    : "=qm" (diff), "+D" (s1), "+S" (s2), "+c" (len));
 	return diff;
 }
-static inline bool memcmp_gs(const void *s1, addr_t s2, size_t len)
+
+static inline int memcmp_fs(const void *s1, addr_t s2, size_t len)
 {
-	bool diff;
-	asm volatile("gs; repe; cmpsb" CC_SET(nz)
-		     : CC_OUT(nz) (diff), "+D" (s1), "+S" (s2), "+c" (len));
+	u8 diff;
+	asm volatile("fs; repe; cmpsb; setnz %0"
+		     : "=qm" (diff), "+D" (s1), "+S" (s2), "+c" (len));
+	return diff;
+}
+static inline int memcmp_gs(const void *s1, addr_t s2, size_t len)
+{
+	u8 diff;
+	asm volatile("gs; repe; cmpsb; setnz %0"
+		     : "=qm" (diff), "+D" (s1), "+S" (s2), "+c" (len));
 	return diff;
 }
 
@@ -220,6 +229,11 @@ void copy_to_fs(addr_t dst, void *src, size_t len);
 void *copy_from_fs(void *dst, addr_t src, size_t len);
 void copy_to_gs(addr_t dst, void *src, size_t len);
 void *copy_from_gs(void *dst, addr_t src, size_t len);
+void *memcpy(void *dst, void *src, size_t len);
+void *memset(void *dst, int c, size_t len);
+
+#define memcpy(d,s,l) __builtin_memcpy(d,s,l)
+#define memset(d,c,l) __builtin_memset(d,c,l)
 
 /* a20.c */
 int enable_a20(void);
@@ -271,31 +285,27 @@ struct biosregs {
 void intcall(u8 int_no, const struct biosregs *ireg, struct biosregs *oreg);
 
 /* cmdline.c */
-int __cmdline_find_option(unsigned long cmdline_ptr, const char *option, char *buffer, int bufsize);
-int __cmdline_find_option_bool(unsigned long cmdline_ptr, const char *option);
+int __cmdline_find_option(u32 cmdline_ptr, const char *option, char *buffer, int bufsize);
+int __cmdline_find_option_bool(u32 cmdline_ptr, const char *option);
 static inline int cmdline_find_option(const char *option, char *buffer, int bufsize)
 {
-	unsigned long cmd_line_ptr = boot_params.hdr.cmd_line_ptr;
-
-	if (cmd_line_ptr >= 0x100000)
-		return -1;      /* inaccessible */
-
-	return __cmdline_find_option(cmd_line_ptr, option, buffer, bufsize);
+	return __cmdline_find_option(boot_params.hdr.cmd_line_ptr, option, buffer, bufsize);
 }
 
 static inline int cmdline_find_option_bool(const char *option)
 {
-	unsigned long cmd_line_ptr = boot_params.hdr.cmd_line_ptr;
-
-	if (cmd_line_ptr >= 0x100000)
-		return -1;      /* inaccessible */
-
-	return __cmdline_find_option_bool(cmd_line_ptr, option);
+	return __cmdline_find_option_bool(boot_params.hdr.cmd_line_ptr, option);
 }
 
+
 /* cpu.c, cpucheck.c */
+struct cpu_features {
+	int level;		/* Family, or 64 for x86-64 */
+	int model;
+	u32 flags[NCAPINTS];
+};
+extern struct cpu_features cpu;
 int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr);
-int check_knl_erratum(void);
 int validate_cpu(void);
 
 /* early_serial_console.c */
@@ -307,6 +317,9 @@ void query_edd(void);
 
 /* header.S */
 void __attribute__((noreturn)) die(void);
+
+/* mca.c */
+int query_mca(void);
 
 /* memory.c */
 int detect_memory(void);
@@ -332,7 +345,6 @@ int strncmp(const char *cs, const char *ct, size_t count);
 size_t strnlen(const char *s, size_t maxlen);
 unsigned int atou(const char *s);
 unsigned long long simple_strtoull(const char *cp, char **endp, unsigned int base);
-size_t strlen(const char *s);
 
 /* tty.c */
 void puts(const char *);

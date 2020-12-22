@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -76,7 +76,7 @@ acpi_ds_method_data_get_type(u16 opcode,
  * RETURN:      Status
  *
  * DESCRIPTION: Initialize the data structures that hold the method's arguments
- *              and locals. The data struct is an array of namespace nodes for
+ *              and locals.  The data struct is an array of namespace nodes for
  *              each - this allows ref_of and de_ref_of to work properly for these
  *              special data types.
  *
@@ -99,7 +99,6 @@ void acpi_ds_method_data_init(struct acpi_walk_state *walk_state)
 	for (i = 0; i < ACPI_METHOD_NUM_ARGS; i++) {
 		ACPI_MOVE_32_TO_32(&walk_state->arguments[i].name,
 				   NAMEOF_ARG_NTE);
-
 		walk_state->arguments[i].name.integer |= (i << 24);
 		walk_state->arguments[i].descriptor_type = ACPI_DESC_TYPE_NAMED;
 		walk_state->arguments[i].type = ACPI_TYPE_ANY;
@@ -130,7 +129,7 @@ void acpi_ds_method_data_init(struct acpi_walk_state *walk_state)
  *
  * RETURN:      None
  *
- * DESCRIPTION: Delete method locals and arguments. Arguments are only
+ * DESCRIPTION: Delete method locals and arguments.  Arguments are only
  *              deleted if this method was called from another method.
  *
  ******************************************************************************/
@@ -178,13 +177,13 @@ void acpi_ds_method_data_delete_all(struct acpi_walk_state *walk_state)
  *
  * FUNCTION:    acpi_ds_method_data_init_args
  *
- * PARAMETERS:  *params         - Pointer to a parameter list for the method
+ * PARAMETERS:  *Params         - Pointer to a parameter list for the method
  *              max_param_count - The arg count for this method
  *              walk_state      - Current walk state object
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Initialize arguments for a method. The parameter list is a list
+ * DESCRIPTION: Initialize arguments for a method.  The parameter list is a list
  *              of ACPI operand objects, either null terminated or whose length
  *              is defined by max_param_count.
  *
@@ -202,7 +201,7 @@ acpi_ds_method_data_init_args(union acpi_operand_object **params,
 
 	if (!params) {
 		ACPI_DEBUG_PRINT((ACPI_DB_EXEC,
-				  "No parameter list passed to method\n"));
+				  "No param list passed to method\n"));
 		return_ACPI_STATUS(AE_OK);
 	}
 
@@ -215,9 +214,9 @@ acpi_ds_method_data_init_args(union acpi_operand_object **params,
 		 * Store the argument in the method/walk descriptor.
 		 * Do not copy the arg in order to implement call by reference
 		 */
-		status =
-		    acpi_ds_method_data_set_value(ACPI_REFCLASS_ARG, index,
-						  params[index], walk_state);
+		status = acpi_ds_method_data_set_value(ACPI_REFCLASS_ARG, index,
+						       params[index],
+						       walk_state);
 		if (ACPI_FAILURE(status)) {
 			return_ACPI_STATUS(status);
 		}
@@ -233,11 +232,11 @@ acpi_ds_method_data_init_args(union acpi_operand_object **params,
  *
  * FUNCTION:    acpi_ds_method_data_get_node
  *
- * PARAMETERS:  type                - Either ACPI_REFCLASS_LOCAL or
+ * PARAMETERS:  Type                - Either ACPI_REFCLASS_LOCAL or
  *                                    ACPI_REFCLASS_ARG
- *              index               - Which Local or Arg whose type to get
+ *              Index               - Which Local or Arg whose type to get
  *              walk_state          - Current walk state object
- *              node                - Where the node is returned.
+ *              Node                - Where the node is returned.
  *
  * RETURN:      Status and node
  *
@@ -286,7 +285,6 @@ acpi_ds_method_data_get_node(u8 type,
 		break;
 
 	default:
-
 		ACPI_ERROR((AE_INFO, "Type %u is invalid", type));
 		return_ACPI_STATUS(AE_TYPE);
 	}
@@ -298,10 +296,10 @@ acpi_ds_method_data_get_node(u8 type,
  *
  * FUNCTION:    acpi_ds_method_data_set_value
  *
- * PARAMETERS:  type                - Either ACPI_REFCLASS_LOCAL or
+ * PARAMETERS:  Type                - Either ACPI_REFCLASS_LOCAL or
  *                                    ACPI_REFCLASS_ARG
- *              index               - Which Local or Arg to get
- *              object              - Object to be inserted into the stack entry
+ *              Index               - Which Local or Arg to get
+ *              Object              - Object to be inserted into the stack entry
  *              walk_state          - Current walk state object
  *
  * RETURN:      Status
@@ -338,7 +336,7 @@ acpi_ds_method_data_set_value(u8 type,
 	 * Increment ref count so object can't be deleted while installed.
 	 * NOTE: We do not copy the object in order to preserve the call by
 	 * reference semantics of ACPI Control Method invocation.
-	 * (See ACPI Specification 2.0C)
+	 * (See ACPI Specification 2.0_c)
 	 */
 	acpi_ut_add_reference(object);
 
@@ -352,9 +350,9 @@ acpi_ds_method_data_set_value(u8 type,
  *
  * FUNCTION:    acpi_ds_method_data_get_value
  *
- * PARAMETERS:  type                - Either ACPI_REFCLASS_LOCAL or
+ * PARAMETERS:  Type                - Either ACPI_REFCLASS_LOCAL or
  *                                    ACPI_REFCLASS_ARG
- *              index               - Which localVar or argument to get
+ *              Index               - Which local_var or argument to get
  *              walk_state          - Current walk state object
  *              dest_desc           - Where Arg or Local value is returned
  *
@@ -403,7 +401,7 @@ acpi_ds_method_data_get_value(u8 type,
 		 * This means that either 1) The expected argument was
 		 * not passed to the method, or 2) A local variable
 		 * was referenced by the method (via the ASL)
-		 * before it was initialized. Either case is an error.
+		 * before it was initialized.  Either case is an error.
 		 */
 
 		/* If slack enabled, init the local_x/arg_x to an Integer of value zero */
@@ -430,6 +428,7 @@ acpi_ds_method_data_get_value(u8 type,
 				return_ACPI_STATUS(AE_AML_UNINITIALIZED_ARG);
 
 			case ACPI_REFCLASS_LOCAL:
+
 				/*
 				 * No error message for this case, will be trapped again later to
 				 * detect and ignore cases of Store(local_x,local_x)
@@ -459,14 +458,14 @@ acpi_ds_method_data_get_value(u8 type,
  *
  * FUNCTION:    acpi_ds_method_data_delete_value
  *
- * PARAMETERS:  type                - Either ACPI_REFCLASS_LOCAL or
+ * PARAMETERS:  Type                - Either ACPI_REFCLASS_LOCAL or
  *                                    ACPI_REFCLASS_ARG
- *              index               - Which localVar or argument to delete
+ *              Index               - Which local_var or argument to delete
  *              walk_state          - Current walk state object
  *
  * RETURN:      None
  *
- * DESCRIPTION: Delete the entry at Opcode:Index. Inserts
+ * DESCRIPTION: Delete the entry at Opcode:Index.  Inserts
  *              a null into the stack slot after the object is deleted.
  *
  ******************************************************************************/
@@ -516,15 +515,15 @@ acpi_ds_method_data_delete_value(u8 type,
  *
  * FUNCTION:    acpi_ds_store_object_to_local
  *
- * PARAMETERS:  type                - Either ACPI_REFCLASS_LOCAL or
+ * PARAMETERS:  Type                - Either ACPI_REFCLASS_LOCAL or
  *                                    ACPI_REFCLASS_ARG
- *              index               - Which Local or Arg to set
+ *              Index               - Which Local or Arg to set
  *              obj_desc            - Value to be stored
  *              walk_state          - Current walk state
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Store a value in an Arg or Local. The obj_desc is installed
+ * DESCRIPTION: Store a value in an Arg or Local.  The obj_desc is installed
  *              as the new value for the Arg or Local and the reference count
  *              for obj_desc is incremented.
  *
@@ -567,7 +566,7 @@ acpi_ds_store_object_to_local(u8 type,
 
 	/*
 	 * If the reference count on the object is more than one, we must
-	 * take a copy of the object before we store. A reference count
+	 * take a copy of the object before we store.  A reference count
 	 * of exactly 1 means that the object was just created during the
 	 * evaluation of an expression, and we can safely use it since it
 	 * is not used anywhere else.
@@ -611,11 +610,11 @@ acpi_ds_store_object_to_local(u8 type,
 			 * do the indirect store
 			 */
 			if ((ACPI_GET_DESCRIPTOR_TYPE(current_obj_desc) ==
-			     ACPI_DESC_TYPE_OPERAND) &&
-			    (current_obj_desc->common.type ==
-			     ACPI_TYPE_LOCAL_REFERENCE) &&
-			    (current_obj_desc->reference.class ==
-			     ACPI_REFCLASS_REFOF)) {
+			     ACPI_DESC_TYPE_OPERAND)
+			    && (current_obj_desc->common.type ==
+				ACPI_TYPE_LOCAL_REFERENCE)
+			    && (current_obj_desc->reference.class ==
+				ACPI_REFCLASS_REFOF)) {
 				ACPI_DEBUG_PRINT((ACPI_DB_EXEC,
 						  "Arg (%p) is an ObjRef(Node), storing in node %p\n",
 						  new_obj_desc,
@@ -639,7 +638,6 @@ acpi_ds_store_object_to_local(u8 type,
 				if (new_obj_desc != obj_desc) {
 					acpi_ut_remove_reference(new_obj_desc);
 				}
-
 				return_ACPI_STATUS(status);
 			}
 		}
@@ -672,8 +670,8 @@ acpi_ds_store_object_to_local(u8 type,
  *
  * FUNCTION:    acpi_ds_method_data_get_type
  *
- * PARAMETERS:  opcode              - Either AML_LOCAL_OP or AML_ARG_OP
- *              index               - Which Local or Arg whose type to get
+ * PARAMETERS:  Opcode              - Either AML_LOCAL_OP or AML_ARG_OP
+ *              Index               - Which Local or Arg whose type to get
  *              walk_state          - Current walk state object
  *
  * RETURN:      Data type of current value of the selected Arg or Local

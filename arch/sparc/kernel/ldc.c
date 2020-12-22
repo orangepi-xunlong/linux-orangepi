@@ -15,7 +15,6 @@
 #include <linux/list.h>
 #include <linux/init.h>
 #include <linux/bitmap.h>
-#include <linux/iommu-common.h>
 
 #include <asm/hypervisor.h>
 #include <asm/iommu.h>
@@ -28,11 +27,7 @@
 #define DRV_MODULE_VERSION	"1.1"
 #define DRV_MODULE_RELDATE	"July 22, 2008"
 
-#define COOKIE_PGSZ_CODE	0xf000000000000000ULL
-#define COOKIE_PGSZ_CODE_SHIFT	60ULL
-
-
-static char version[] =
+static char version[] __devinitdata =
 	DRV_MODULE_NAME ".c:v" DRV_MODULE_VERSION " (" DRV_MODULE_RELDATE ")\n";
 #define LDC_PACKET_SIZE		64
 
@@ -103,10 +98,10 @@ static const struct ldc_mode_ops stream_ops;
 int ldom_domaining_enabled;
 
 struct ldc_iommu {
-	/* Protects ldc_unmap.  */
+	/* Protects arena alloc/free.  */
 	spinlock_t			lock;
+	struct iommu_arena		arena;
 	struct ldc_mtable_entry		*page_table;
-	struct iommu_map_table		iommu_map_table;
 };
 
 struct ldc_channel {
@@ -958,8 +953,9 @@ static HLIST_HEAD(ldc_channel_list);
 static int __ldc_channel_exists(unsigned long id)
 {
 	struct ldc_channel *lp;
+	struct hlist_node *n;
 
-	hlist_for_each_entry(lp, &ldc_channel_list, list) {
+	hlist_for_each_entry(lp, n, &ldc_channel_list, list) {
 		if (lp->id == id)
 			return 1;
 	}
@@ -1003,59 +999,31 @@ static void free_queue(unsigned long num_entries, struct ldc_packet *q)
 	free_pages((unsigned long)q, order);
 }
 
-static unsigned long ldc_cookie_to_index(u64 cookie, void *arg)
-{
-	u64 szcode = cookie >> COOKIE_PGSZ_CODE_SHIFT;
-	/* struct ldc_iommu *ldc_iommu = (struct ldc_iommu *)arg; */
-
-	cookie &= ~COOKIE_PGSZ_CODE;
-
-	return (cookie >> (13ULL + (szcode * 3ULL)));
-}
-
-static void ldc_demap(struct ldc_iommu *iommu, unsigned long id, u64 cookie,
-		      unsigned long entry, unsigned long npages)
-{
-	struct ldc_mtable_entry *base;
-	unsigned long i, shift;
-
-	shift = (cookie >> COOKIE_PGSZ_CODE_SHIFT) * 3;
-	base = iommu->page_table + entry;
-	for (i = 0; i < npages; i++) {
-		if (base->cookie)
-			sun4v_ldc_revoke(id, cookie + (i << shift),
-					 base->cookie);
-		base->mte = 0;
-	}
-}
-
 /* XXX Make this configurable... XXX */
 #define LDC_IOTABLE_SIZE	(8 * 1024)
 
-static int ldc_iommu_init(const char *name, struct ldc_channel *lp)
+static int ldc_iommu_init(struct ldc_channel *lp)
 {
 	unsigned long sz, num_tsb_entries, tsbsize, order;
-	struct ldc_iommu *ldc_iommu = &lp->iommu;
-	struct iommu_map_table *iommu = &ldc_iommu->iommu_map_table;
+	struct ldc_iommu *iommu = &lp->iommu;
 	struct ldc_mtable_entry *table;
 	unsigned long hv_err;
 	int err;
 
 	num_tsb_entries = LDC_IOTABLE_SIZE;
 	tsbsize = num_tsb_entries * sizeof(struct ldc_mtable_entry);
-	spin_lock_init(&ldc_iommu->lock);
+
+	spin_lock_init(&iommu->lock);
 
 	sz = num_tsb_entries / 8;
 	sz = (sz + 7UL) & ~7UL;
-	iommu->map = kzalloc(sz, GFP_KERNEL);
-	if (!iommu->map) {
+	iommu->arena.map = kzalloc(sz, GFP_KERNEL);
+	if (!iommu->arena.map) {
 		printk(KERN_ERR PFX "Alloc of arena map failed, sz=%lu\n", sz);
 		return -ENOMEM;
 	}
-	iommu_tbl_pool_init(iommu, num_tsb_entries, PAGE_SHIFT,
-			    NULL, false /* no large pool */,
-			    1 /* npools */,
-			    true /* skip span boundary check */);
+
+	iommu->arena.limit = num_tsb_entries;
 
 	order = get_order(tsbsize);
 
@@ -1070,7 +1038,7 @@ static int ldc_iommu_init(const char *name, struct ldc_channel *lp)
 
 	memset(table, 0, PAGE_SIZE << order);
 
-	ldc_iommu->page_table = table;
+	iommu->page_table = table;
 
 	hv_err = sun4v_ldc_set_map_table(lp->id, __pa(table),
 					 num_tsb_entries);
@@ -1082,38 +1050,36 @@ static int ldc_iommu_init(const char *name, struct ldc_channel *lp)
 
 out_free_table:
 	free_pages((unsigned long) table, order);
-	ldc_iommu->page_table = NULL;
+	iommu->page_table = NULL;
 
 out_free_map:
-	kfree(iommu->map);
-	iommu->map = NULL;
+	kfree(iommu->arena.map);
+	iommu->arena.map = NULL;
 
 	return err;
 }
 
 static void ldc_iommu_release(struct ldc_channel *lp)
 {
-	struct ldc_iommu *ldc_iommu = &lp->iommu;
-	struct iommu_map_table *iommu = &ldc_iommu->iommu_map_table;
+	struct ldc_iommu *iommu = &lp->iommu;
 	unsigned long num_tsb_entries, tsbsize, order;
 
 	(void) sun4v_ldc_set_map_table(lp->id, 0, 0);
 
-	num_tsb_entries = iommu->poolsize * iommu->nr_pools;
+	num_tsb_entries = iommu->arena.limit;
 	tsbsize = num_tsb_entries * sizeof(struct ldc_mtable_entry);
 	order = get_order(tsbsize);
 
-	free_pages((unsigned long) ldc_iommu->page_table, order);
-	ldc_iommu->page_table = NULL;
+	free_pages((unsigned long) iommu->page_table, order);
+	iommu->page_table = NULL;
 
-	kfree(iommu->map);
-	iommu->map = NULL;
+	kfree(iommu->arena.map);
+	iommu->arena.map = NULL;
 }
 
 struct ldc_channel *ldc_alloc(unsigned long id,
 			      const struct ldc_channel_config *cfgp,
-			      void *event_arg,
-			      const char *name)
+			      void *event_arg)
 {
 	struct ldc_channel *lp;
 	const struct ldc_mode_ops *mops;
@@ -1127,8 +1093,6 @@ struct ldc_channel *ldc_alloc(unsigned long id,
 
 	err = -EINVAL;
 	if (!cfgp)
-		goto out_err;
-	if (!name)
 		goto out_err;
 
 	switch (cfgp->mode) {
@@ -1174,7 +1138,7 @@ struct ldc_channel *ldc_alloc(unsigned long id,
 
 	lp->id = id;
 
-	err = ldc_iommu_init(name, lp);
+	err = ldc_iommu_init(lp);
 	if (err)
 		goto out_free_ldc;
 
@@ -1222,21 +1186,6 @@ struct ldc_channel *ldc_alloc(unsigned long id,
 
 	INIT_HLIST_HEAD(&lp->mh_list);
 
-	snprintf(lp->rx_irq_name, LDC_IRQ_NAME_MAX, "%s RX", name);
-	snprintf(lp->tx_irq_name, LDC_IRQ_NAME_MAX, "%s TX", name);
-
-	err = request_irq(lp->cfg.rx_irq, ldc_rx, 0,
-			  lp->rx_irq_name, lp);
-	if (err)
-		goto out_free_txq;
-
-	err = request_irq(lp->cfg.tx_irq, ldc_tx, 0,
-			  lp->tx_irq_name, lp);
-	if (err) {
-		free_irq(lp->cfg.rx_irq, lp);
-		goto out_free_txq;
-	}
-
 	return lp;
 
 out_free_txq:
@@ -1256,12 +1205,11 @@ out_err:
 }
 EXPORT_SYMBOL(ldc_alloc);
 
-void ldc_unbind(struct ldc_channel *lp)
+void ldc_free(struct ldc_channel *lp)
 {
 	if (lp->flags & LDC_FLAG_REGISTERED_IRQS) {
 		free_irq(lp->cfg.rx_irq, lp);
 		free_irq(lp->cfg.tx_irq, lp);
-		lp->flags &= ~LDC_FLAG_REGISTERED_IRQS;
 	}
 
 	if (lp->flags & LDC_FLAG_REGISTERED_QUEUES) {
@@ -1275,15 +1223,10 @@ void ldc_unbind(struct ldc_channel *lp)
 		lp->flags &= ~LDC_FLAG_ALLOCED_QUEUES;
 	}
 
-	ldc_set_state(lp, LDC_STATE_INIT);
-}
-EXPORT_SYMBOL(ldc_unbind);
-
-void ldc_free(struct ldc_channel *lp)
-{
-	ldc_unbind(lp);
 	hlist_del(&lp->list);
+
 	kfree(lp->mssbuf);
+
 	ldc_iommu_release(lp);
 
 	kfree(lp);
@@ -1295,13 +1238,32 @@ EXPORT_SYMBOL(ldc_free);
  * state.  This does not initiate a handshake, ldc_connect() does
  * that.
  */
-int ldc_bind(struct ldc_channel *lp)
+int ldc_bind(struct ldc_channel *lp, const char *name)
 {
 	unsigned long hv_err, flags;
 	int err = -EINVAL;
 
-	if (lp->state != LDC_STATE_INIT)
+	if (!name ||
+	    (lp->state != LDC_STATE_INIT))
 		return -EINVAL;
+
+	snprintf(lp->rx_irq_name, LDC_IRQ_NAME_MAX, "%s RX", name);
+	snprintf(lp->tx_irq_name, LDC_IRQ_NAME_MAX, "%s TX", name);
+
+	err = request_irq(lp->cfg.rx_irq, ldc_rx,
+			  IRQF_SAMPLE_RANDOM | IRQF_DISABLED,
+			  lp->rx_irq_name, lp);
+	if (err)
+		return err;
+
+	err = request_irq(lp->cfg.tx_irq, ldc_tx,
+			  IRQF_SAMPLE_RANDOM | IRQF_DISABLED,
+			  lp->tx_irq_name, lp);
+	if (err) {
+		free_irq(lp->cfg.rx_irq, lp);
+		return err;
+	}
+
 
 	spin_lock_irqsave(&lp->lock, flags);
 
@@ -1733,14 +1695,9 @@ static int read_nonraw(struct ldc_channel *lp, void *buf, unsigned int size)
 
 		lp->rcv_nxt = p->seqid;
 
-		/*
-		 * If this is a control-only packet, there is nothing
-		 * else to do but advance the rx queue since the packet
-		 * was already processed above.
-		 */
 		if (!(p->type & LDC_DATA)) {
 			new = rx_advance(lp, new);
-			break;
+			goto no_data;
 		}
 		if (p->stype & (LDC_ACK | LDC_NACK)) {
 			err = data_ack_nack(lp, p);
@@ -1924,6 +1881,40 @@ int ldc_read(struct ldc_channel *lp, void *buf, unsigned int size)
 }
 EXPORT_SYMBOL(ldc_read);
 
+static long arena_alloc(struct ldc_iommu *iommu, unsigned long npages)
+{
+	struct iommu_arena *arena = &iommu->arena;
+	unsigned long n, start, end, limit;
+	int pass;
+
+	limit = arena->limit;
+	start = arena->hint;
+	pass = 0;
+
+again:
+	n = bitmap_find_next_zero_area(arena->map, limit, start, npages, 0);
+	end = n + npages;
+	if (unlikely(end >= limit)) {
+		if (likely(pass < 1)) {
+			limit = start;
+			start = 0;
+			pass++;
+			goto again;
+		} else {
+			/* Scanned the whole thing, give up. */
+			return -1;
+		}
+	}
+	bitmap_set(arena->map, n, npages);
+
+	arena->hint = end;
+
+	return n;
+}
+
+#define COOKIE_PGSZ_CODE	0xf000000000000000ULL
+#define COOKIE_PGSZ_CODE_SHIFT	60ULL
+
 static u64 pagesize_code(void)
 {
 	switch (PAGE_SIZE) {
@@ -1950,15 +1941,24 @@ static u64 make_cookie(u64 index, u64 pgsz_code, u64 page_offset)
 		page_offset);
 }
 
+static u64 cookie_to_index(u64 cookie, unsigned long *shift)
+{
+	u64 szcode = cookie >> COOKIE_PGSZ_CODE_SHIFT;
+
+	cookie &= ~COOKIE_PGSZ_CODE;
+
+	*shift = szcode * 3;
+
+	return (cookie >> (13ULL + (szcode * 3ULL)));
+}
 
 static struct ldc_mtable_entry *alloc_npages(struct ldc_iommu *iommu,
 					     unsigned long npages)
 {
 	long entry;
 
-	entry = iommu_tbl_range_alloc(NULL, &iommu->iommu_map_table,
-				      npages, NULL, (unsigned long)-1, 0);
-	if (unlikely(entry == IOMMU_ERROR_CODE))
+	entry = arena_alloc(iommu, npages);
+	if (unlikely(entry < 0))
 		return NULL;
 
 	return iommu->page_table + entry;
@@ -2086,12 +2086,11 @@ int ldc_map_sg(struct ldc_channel *lp,
 	       struct ldc_trans_cookie *cookies, int ncookies,
 	       unsigned int map_perm)
 {
-	unsigned long i, npages;
+	unsigned long i, npages, flags;
 	struct ldc_mtable_entry *base;
 	struct cookie_state state;
 	struct ldc_iommu *iommu;
 	int err;
-	struct scatterlist *s;
 
 	if (map_perm & ~LDC_MAP_ALL)
 		return -EINVAL;
@@ -2106,7 +2105,9 @@ int ldc_map_sg(struct ldc_channel *lp,
 
 	iommu = &lp->iommu;
 
+	spin_lock_irqsave(&iommu->lock, flags);
 	base = alloc_npages(iommu, npages);
+	spin_unlock_irqrestore(&iommu->lock, flags);
 
 	if (!base)
 		return -ENOMEM;
@@ -2118,10 +2119,9 @@ int ldc_map_sg(struct ldc_channel *lp,
 	state.pte_idx = (base - iommu->page_table);
 	state.nc = 0;
 
-	for_each_sg(sg, s, num_sg, i) {
-		fill_cookies(&state, page_to_pfn(sg_page(s)) << PAGE_SHIFT,
-			     s->offset, s->length);
-	}
+	for (i = 0; i < num_sg; i++)
+		fill_cookies(&state, page_to_pfn(sg_page(&sg[i])) << PAGE_SHIFT,
+			     sg[i].offset, sg[i].length);
 
 	return state.nc;
 }
@@ -2132,7 +2132,7 @@ int ldc_map_single(struct ldc_channel *lp,
 		   struct ldc_trans_cookie *cookies, int ncookies,
 		   unsigned int map_perm)
 {
-	unsigned long npages, pa;
+	unsigned long npages, pa, flags;
 	struct ldc_mtable_entry *base;
 	struct cookie_state state;
 	struct ldc_iommu *iommu;
@@ -2148,7 +2148,9 @@ int ldc_map_single(struct ldc_channel *lp,
 
 	iommu = &lp->iommu;
 
+	spin_lock_irqsave(&iommu->lock, flags);
 	base = alloc_npages(iommu, npages);
+	spin_unlock_irqrestore(&iommu->lock, flags);
 
 	if (!base)
 		return -ENOMEM;
@@ -2160,31 +2162,41 @@ int ldc_map_single(struct ldc_channel *lp,
 	state.pte_idx = (base - iommu->page_table);
 	state.nc = 0;
 	fill_cookies(&state, (pa & PAGE_MASK), (pa & ~PAGE_MASK), len);
-	BUG_ON(state.nc > ncookies);
+	BUG_ON(state.nc != 1);
 
 	return state.nc;
 }
 EXPORT_SYMBOL(ldc_map_single);
 
-
 static void free_npages(unsigned long id, struct ldc_iommu *iommu,
 			u64 cookie, u64 size)
 {
-	unsigned long npages, entry;
+	struct iommu_arena *arena = &iommu->arena;
+	unsigned long i, shift, index, npages;
+	struct ldc_mtable_entry *base;
 
 	npages = PAGE_ALIGN(((cookie & ~PAGE_MASK) + size)) >> PAGE_SHIFT;
+	index = cookie_to_index(cookie, &shift);
+	base = iommu->page_table + index;
 
-	entry = ldc_cookie_to_index(cookie, iommu);
-	ldc_demap(iommu, id, cookie, entry, npages);
-	iommu_tbl_range_free(&iommu->iommu_map_table, cookie, npages, entry);
+	BUG_ON(index > arena->limit ||
+	       (index + npages) > arena->limit);
+
+	for (i = 0; i < npages; i++) {
+		if (base->cookie)
+			sun4v_ldc_revoke(id, cookie + (i << shift),
+					 base->cookie);
+		base->mte = 0;
+		__clear_bit(index + i, arena->map);
+	}
 }
 
 void ldc_unmap(struct ldc_channel *lp, struct ldc_trans_cookie *cookies,
 	       int ncookies)
 {
 	struct ldc_iommu *iommu = &lp->iommu;
-	int i;
 	unsigned long flags;
+	int i;
 
 	spin_lock_irqsave(&iommu->lock, flags);
 	for (i = 0; i < ncookies; i++) {
@@ -2297,7 +2309,7 @@ void *ldc_alloc_exp_dring(struct ldc_channel *lp, unsigned int len,
 	if (len & (8UL - 1))
 		return ERR_PTR(-EINVAL);
 
-	buf = kzalloc(len, GFP_ATOMIC);
+	buf = kzalloc(len, GFP_KERNEL);
 	if (!buf)
 		return ERR_PTR(-ENOMEM);
 

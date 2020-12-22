@@ -49,4 +49,3 @@ Description:	Module taint flags:
 			O - out-of-tree module
 			F - force-loaded module
 			C - staging driver module
-			E - unsigned module

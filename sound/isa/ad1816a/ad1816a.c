@@ -63,6 +63,11 @@ MODULE_PARM_DESC(enable, "Enable ad1816a based soundcard.");
 module_param_array(clockfreq, int, NULL, 0444);
 MODULE_PARM_DESC(clockfreq, "Clock frequency for ad1816a driver (default = 0).");
 
+struct snd_card_ad1816a {
+	struct pnp_dev *dev;
+	struct pnp_dev *devmpu;
+};
+
 static struct pnp_card_device_id snd_ad1816a_pnpids[] = {
 	/* Analog Devices AD1815 */
 	{ .id = "ADS7150", .devs = { { .id = "ADS7150" }, { .id = "ADS7151" } } },
@@ -94,15 +99,24 @@ MODULE_DEVICE_TABLE(pnp_card, snd_ad1816a_pnpids);
 #define	DRIVER_NAME	"snd-card-ad1816a"
 
 
-static int snd_card_ad1816a_pnp(int dev, struct pnp_card_link *card,
-				const struct pnp_card_device_id *id)
+static int __devinit snd_card_ad1816a_pnp(int dev, struct snd_card_ad1816a *acard,
+					  struct pnp_card_link *card,
+					  const struct pnp_card_device_id *id)
 {
 	struct pnp_dev *pdev;
 	int err;
 
-	pdev = pnp_request_card_device(card, id->devs[0].id, NULL);
-	if (pdev == NULL)
+	acard->dev = pnp_request_card_device(card, id->devs[0].id, NULL);
+	if (acard->dev == NULL)
 		return -EBUSY;
+
+	acard->devmpu = pnp_request_card_device(card, id->devs[1].id, NULL);
+	if (acard->devmpu == NULL) {
+		mpu_port[dev] = -1;
+		snd_printk(KERN_WARNING PFX "MPU401 device busy, skipping.\n");
+	}
+
+	pdev = acard->dev;
 
 	err = pnp_activate_dev(pdev);
 	if (err < 0) {
@@ -116,17 +130,16 @@ static int snd_card_ad1816a_pnp(int dev, struct pnp_card_link *card,
 	dma2[dev] = pnp_dma(pdev, 1);
 	irq[dev] = pnp_irq(pdev, 0);
 
-	pdev = pnp_request_card_device(card, id->devs[1].id, NULL);
-	if (pdev == NULL) {
-		mpu_port[dev] = -1;
-		snd_printk(KERN_WARNING PFX "MPU401 device busy, skipping.\n");
+	if (acard->devmpu == NULL)
 		return 0;
-	}
+
+	pdev = acard->devmpu;
 
 	err = pnp_activate_dev(pdev);
 	if (err < 0) {
 		printk(KERN_ERR PFX "MPU401 PnP configure failure\n");
 		mpu_port[dev] = -1;
+		acard->devmpu = NULL;
 	} else {
 		mpu_port[dev] = pnp_port_start(pdev, 0);
 		mpu_irq[dev] = pnp_irq(pdev, 0);
@@ -135,31 +148,33 @@ static int snd_card_ad1816a_pnp(int dev, struct pnp_card_link *card,
 	return 0;
 }
 
-static int snd_card_ad1816a_probe(int dev, struct pnp_card_link *pcard,
-				  const struct pnp_card_device_id *pid)
+static int __devinit snd_card_ad1816a_probe(int dev, struct pnp_card_link *pcard,
+					    const struct pnp_card_device_id *pid)
 {
 	int error;
 	struct snd_card *card;
+	struct snd_card_ad1816a *acard;
 	struct snd_ad1816a *chip;
 	struct snd_opl3 *opl3;
+	struct snd_timer *timer;
 
-	error = snd_card_new(&pcard->card->dev,
-			     index[dev], id[dev], THIS_MODULE,
-			     sizeof(struct snd_ad1816a), &card);
+	error = snd_card_create(index[dev], id[dev], THIS_MODULE,
+				sizeof(struct snd_card_ad1816a), &card);
 	if (error < 0)
 		return error;
-	chip = card->private_data;
+	acard = card->private_data;
 
-	if ((error = snd_card_ad1816a_pnp(dev, pcard, pid))) {
+	if ((error = snd_card_ad1816a_pnp(dev, acard, pcard, pid))) {
 		snd_card_free(card);
 		return error;
 	}
+	snd_card_set_dev(card, &pcard->card->dev);
 
 	if ((error = snd_ad1816a_create(card, port[dev],
 					irq[dev],
 					dma1[dev],
 					dma2[dev],
-					chip)) < 0) {
+					&chip)) < 0) {
 		snd_card_free(card);
 		return error;
 	}
@@ -171,7 +186,7 @@ static int snd_card_ad1816a_probe(int dev, struct pnp_card_link *pcard,
 	sprintf(card->longname, "%s, SS at 0x%lx, irq %d, dma %d&%d",
 		card->shortname, chip->port, irq[dev], dma1[dev], dma2[dev]);
 
-	if ((error = snd_ad1816a_pcm(chip, 0)) < 0) {
+	if ((error = snd_ad1816a_pcm(chip, 0, NULL)) < 0) {
 		snd_card_free(card);
 		return error;
 	}
@@ -181,7 +196,7 @@ static int snd_card_ad1816a_probe(int dev, struct pnp_card_link *pcard,
 		return error;
 	}
 
-	error = snd_ad1816a_timer(chip, 0);
+	error = snd_ad1816a_timer(chip, 0, &timer);
 	if (error < 0) {
 		snd_card_free(card);
 		return error;
@@ -216,10 +231,10 @@ static int snd_card_ad1816a_probe(int dev, struct pnp_card_link *pcard,
 	return 0;
 }
 
-static unsigned int ad1816a_devices;
+static unsigned int __devinitdata ad1816a_devices;
 
-static int snd_ad1816a_pnp_detect(struct pnp_card_link *card,
-				  const struct pnp_card_device_id *id)
+static int __devinit snd_ad1816a_pnp_detect(struct pnp_card_link *card,
+					    const struct pnp_card_device_id *id)
 {
 	static int dev;
 	int res;
@@ -237,43 +252,19 @@ static int snd_ad1816a_pnp_detect(struct pnp_card_link *card,
         return -ENODEV;
 }
 
-static void snd_ad1816a_pnp_remove(struct pnp_card_link *pcard)
+static void __devexit snd_ad1816a_pnp_remove(struct pnp_card_link * pcard)
 {
 	snd_card_free(pnp_get_card_drvdata(pcard));
 	pnp_set_card_drvdata(pcard, NULL);
 }
-
-#ifdef CONFIG_PM
-static int snd_ad1816a_pnp_suspend(struct pnp_card_link *pcard,
-				   pm_message_t state)
-{
-	struct snd_card *card = pnp_get_card_drvdata(pcard);
-
-	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
-	snd_ad1816a_suspend(card->private_data);
-	return 0;
-}
-
-static int snd_ad1816a_pnp_resume(struct pnp_card_link *pcard)
-{
-	struct snd_card *card = pnp_get_card_drvdata(pcard);
-
-	snd_ad1816a_resume(card->private_data);
-	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
-	return 0;
-}
-#endif
 
 static struct pnp_card_driver ad1816a_pnpc_driver = {
 	.flags		= PNP_DRIVER_RES_DISABLE,
 	.name		= "ad1816a",
 	.id_table	= snd_ad1816a_pnpids,
 	.probe		= snd_ad1816a_pnp_detect,
-	.remove		= snd_ad1816a_pnp_remove,
-#ifdef CONFIG_PM
-	.suspend	= snd_ad1816a_pnp_suspend,
-	.resume		= snd_ad1816a_pnp_resume,
-#endif
+	.remove		= __devexit_p(snd_ad1816a_pnp_remove),
+	/* FIXME: suspend/resume */
 };
 
 static int __init alsa_card_ad1816a_init(void)

@@ -150,12 +150,12 @@
 #define MC13892_USB1				50
 #define MC13892_USB1_VUSBEN			(1<<3)
 
-static const unsigned int mc13892_vcoincell[] = {
+static const int mc13892_vcoincell[] = {
 	2500000, 2700000, 2800000, 2900000, 3000000, 3100000,
 	3200000, 3300000,
 };
 
-static const unsigned int mc13892_sw1[] = {
+static const int mc13892_sw1[] = {
 	600000,   625000,  650000,  675000,  700000,  725000,
 	750000,   775000,  800000,  825000,  850000,  875000,
 	900000,   925000,  950000,  975000, 1000000, 1025000,
@@ -164,15 +164,7 @@ static const unsigned int mc13892_sw1[] = {
 	1350000, 1375000
 };
 
-/*
- * Note: this table is used to derive SWxVSEL by index into
- * the array. Offset the values by the index of 1100000uV
- * to get the actual register value for that voltage selector
- * if the HI bit is to be set as well.
- */
-#define MC13892_SWxHI_SEL_OFFSET		20
-
-static const unsigned int mc13892_sw[] = {
+static const int mc13892_sw[] = {
 	600000,   625000,  650000,  675000,  700000,  725000,
 	750000,   775000,  800000,  825000,  850000,  875000,
 	900000,   925000,  950000,  975000, 1000000, 1025000,
@@ -184,69 +176,70 @@ static const unsigned int mc13892_sw[] = {
 	1800000, 1825000, 1850000, 1875000
 };
 
-static const unsigned int mc13892_swbst[] = {
+static const int mc13892_swbst[] = {
 	5000000,
 };
 
-static const unsigned int mc13892_viohi[] = {
+static const int mc13892_viohi[] = {
 	2775000,
 };
 
-static const unsigned int mc13892_vpll[] = {
+static const int mc13892_vpll[] = {
 	1050000, 1250000, 1650000, 1800000,
 };
 
-static const unsigned int mc13892_vdig[] = {
+static const int mc13892_vdig[] = {
 	1050000, 1250000, 1650000, 1800000,
 };
 
-static const unsigned int mc13892_vsd[] = {
+static const int mc13892_vsd[] = {
 	1800000, 2000000, 2600000, 2700000,
 	2800000, 2900000, 3000000, 3150000,
 };
 
-static const unsigned int mc13892_vusb2[] = {
+static const int mc13892_vusb2[] = {
 	2400000, 2600000, 2700000, 2775000,
 };
 
-static const unsigned int mc13892_vvideo[] = {
+static const int mc13892_vvideo[] = {
 	2700000, 2775000, 2500000, 2600000,
 };
 
-static const unsigned int mc13892_vaudio[] = {
+static const int mc13892_vaudio[] = {
 	2300000, 2500000, 2775000, 3000000,
 };
 
-static const unsigned int mc13892_vcam[] = {
+static const int mc13892_vcam[] = {
 	2500000, 2600000, 2750000, 3000000,
 };
 
-static const unsigned int mc13892_vgen1[] = {
+static const int mc13892_vgen1[] = {
 	1200000, 1500000, 2775000, 3150000,
 };
 
-static const unsigned int mc13892_vgen2[] = {
+static const int mc13892_vgen2[] = {
 	1200000, 1500000, 1600000, 1800000,
 	2700000, 2800000, 3000000, 3150000,
 };
 
-static const unsigned int mc13892_vgen3[] = {
+static const int mc13892_vgen3[] = {
 	1800000, 2900000,
 };
 
-static const unsigned int mc13892_vusb[] = {
+static const int mc13892_vusb[] = {
 	3300000,
 };
 
-static const unsigned int mc13892_gpo[] = {
+static const int mc13892_gpo[] = {
 	2750000,
 };
 
-static const unsigned int mc13892_pwgtdrv[] = {
+static const int mc13892_pwgtdrv[] = {
 	5000000,
 };
 
 static struct regulator_ops mc13892_gpo_regulator_ops;
+/* sw regulators need special care due to the "hi bit" */
 static struct regulator_ops mc13892_sw_regulator_ops;
 
 
@@ -274,25 +267,25 @@ static struct mc13xxx_regulator mc13892_regulators[] = {
 	MC13892_SW_DEFINE(SW4, SWITCHERS3, SWITCHERS3, mc13892_sw),
 	MC13892_FIXED_DEFINE(SWBST, SWITCHERS5, mc13892_swbst),
 	MC13892_FIXED_DEFINE(VIOHI, REGULATORMODE0, mc13892_viohi),
-	MC13892_DEFINE_REGU(VPLL, REGULATORMODE0, REGULATORSETTING0,
+	MC13892_DEFINE_REGU(VPLL, REGULATORMODE0, REGULATORSETTING0,	\
 		mc13892_vpll),
-	MC13892_DEFINE_REGU(VDIG, REGULATORMODE0, REGULATORSETTING0,
+	MC13892_DEFINE_REGU(VDIG, REGULATORMODE0, REGULATORSETTING0,	\
 		mc13892_vdig),
-	MC13892_DEFINE_REGU(VSD, REGULATORMODE1, REGULATORSETTING1,
+	MC13892_DEFINE_REGU(VSD, REGULATORMODE1, REGULATORSETTING1,	\
 		mc13892_vsd),
-	MC13892_DEFINE_REGU(VUSB2, REGULATORMODE0, REGULATORSETTING0,
+	MC13892_DEFINE_REGU(VUSB2, REGULATORMODE0, REGULATORSETTING0,	\
 		mc13892_vusb2),
-	MC13892_DEFINE_REGU(VVIDEO, REGULATORMODE1, REGULATORSETTING1,
+	MC13892_DEFINE_REGU(VVIDEO, REGULATORMODE1, REGULATORSETTING1,	\
 		mc13892_vvideo),
-	MC13892_DEFINE_REGU(VAUDIO, REGULATORMODE1, REGULATORSETTING1,
+	MC13892_DEFINE_REGU(VAUDIO, REGULATORMODE1, REGULATORSETTING1,	\
 		mc13892_vaudio),
-	MC13892_DEFINE_REGU(VCAM, REGULATORMODE1, REGULATORSETTING0,
+	MC13892_DEFINE_REGU(VCAM, REGULATORMODE1, REGULATORSETTING0,	\
 		mc13892_vcam),
-	MC13892_DEFINE_REGU(VGEN1, REGULATORMODE0, REGULATORSETTING0,
+	MC13892_DEFINE_REGU(VGEN1, REGULATORMODE0, REGULATORSETTING0,	\
 		mc13892_vgen1),
-	MC13892_DEFINE_REGU(VGEN2, REGULATORMODE0, REGULATORSETTING0,
+	MC13892_DEFINE_REGU(VGEN2, REGULATORMODE0, REGULATORSETTING0,	\
 		mc13892_vgen2),
-	MC13892_DEFINE_REGU(VGEN3, REGULATORMODE1, REGULATORSETTING0,
+	MC13892_DEFINE_REGU(VGEN3, REGULATORMODE1, REGULATORSETTING0,	\
 		mc13892_vgen3),
 	MC13892_FIXED_DEFINE(VUSB, USB1, mc13892_vusb),
 	MC13892_GPO_DEFINE(GPO1, POWERMISC, mc13892_gpo),
@@ -312,10 +305,9 @@ static int mc13892_powermisc_rmw(struct mc13xxx_regulator_priv *priv, u32 mask,
 
 	BUG_ON(val & ~mask);
 
-	mc13xxx_lock(priv->mc13xxx);
 	ret = mc13xxx_reg_read(mc13892, MC13892_POWERMISC, &valread);
 	if (ret)
-		goto out;
+		return ret;
 
 	/* Update the stored state for Power Gates. */
 	priv->powermisc_pwgt_state =
@@ -328,16 +320,14 @@ static int mc13892_powermisc_rmw(struct mc13xxx_regulator_priv *priv, u32 mask,
 	valread = (valread & ~MC13892_POWERMISC_PWGTSPI_M) |
 		priv->powermisc_pwgt_state;
 
-	ret = mc13xxx_reg_write(mc13892, MC13892_POWERMISC, valread);
-out:
-	mc13xxx_unlock(priv->mc13xxx);
-	return ret;
+	return mc13xxx_reg_write(mc13892, MC13892_POWERMISC, valread);
 }
 
 static int mc13892_gpo_regulator_enable(struct regulator_dev *rdev)
 {
 	struct mc13xxx_regulator_priv *priv = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
+	int ret;
 	u32 en_val = mc13892_regulators[id].enable_bit;
 	u32 mask = mc13892_regulators[id].enable_bit;
 
@@ -350,13 +340,18 @@ static int mc13892_gpo_regulator_enable(struct regulator_dev *rdev)
 	if (id == MC13892_GPO4)
 		mask |= MC13892_POWERMISC_GPO4ADINEN;
 
-	return mc13892_powermisc_rmw(priv, mask, en_val);
+	mc13xxx_lock(priv->mc13xxx);
+	ret = mc13892_powermisc_rmw(priv, mask, en_val);
+	mc13xxx_unlock(priv->mc13xxx);
+
+	return ret;
 }
 
 static int mc13892_gpo_regulator_disable(struct regulator_dev *rdev)
 {
 	struct mc13xxx_regulator_priv *priv = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
+	int ret;
 	u32 dis_val = 0;
 
 	dev_dbg(rdev_get_dev(rdev), "%s id: %d\n", __func__, id);
@@ -365,8 +360,12 @@ static int mc13892_gpo_regulator_disable(struct regulator_dev *rdev)
 	if (id == MC13892_PWGT1SPI || id == MC13892_PWGT2SPI)
 		dis_val = mc13892_regulators[id].enable_bit;
 
-	return mc13892_powermisc_rmw(priv, mc13892_regulators[id].enable_bit,
+	mc13xxx_lock(priv->mc13xxx);
+	ret = mc13892_powermisc_rmw(priv, mc13892_regulators[id].enable_bit,
 		dis_val);
+	mc13xxx_unlock(priv->mc13xxx);
+
+	return ret;
 }
 
 static int mc13892_gpo_regulator_is_enabled(struct regulator_dev *rdev)
@@ -395,15 +394,16 @@ static struct regulator_ops mc13892_gpo_regulator_ops = {
 	.enable = mc13892_gpo_regulator_enable,
 	.disable = mc13892_gpo_regulator_disable,
 	.is_enabled = mc13892_gpo_regulator_is_enabled,
-	.list_voltage = regulator_list_voltage_table,
+	.list_voltage = mc13xxx_regulator_list_voltage,
 	.set_voltage = mc13xxx_fixed_regulator_set_voltage,
+	.get_voltage = mc13xxx_fixed_regulator_get_voltage,
 };
 
-static int mc13892_sw_regulator_get_voltage_sel(struct regulator_dev *rdev)
+static int mc13892_sw_regulator_get_voltage(struct regulator_dev *rdev)
 {
 	struct mc13xxx_regulator_priv *priv = rdev_get_drvdata(rdev);
 	int ret, id = rdev_get_id(rdev);
-	unsigned int val, selector;
+	unsigned int val, hi;
 
 	dev_dbg(rdev_get_dev(rdev), "%s id: %d\n", __func__, id);
 
@@ -414,80 +414,74 @@ static int mc13892_sw_regulator_get_voltage_sel(struct regulator_dev *rdev)
 	if (ret)
 		return ret;
 
-	/*
-	 * Figure out if the HI bit is set inside the switcher mode register
-	 * since this means the selector value we return is at a different
-	 * offset into the selector table.
-	 *
-	 * According to the MC13892 documentation note 59 (Table 47) the SW1
-	 * buck switcher does not support output range programming therefore
-	 * the HI bit must always remain 0. So do not do anything strange if
-	 * our register is MC13892_SWITCHERS0.
-	 */
+	hi  = val & MC13892_SWITCHERS0_SWxHI;
+	val = (val & mc13892_regulators[id].vsel_mask)
+		>> mc13892_regulators[id].vsel_shift;
 
-	selector = val & mc13892_regulators[id].vsel_mask;
+	dev_dbg(rdev_get_dev(rdev), "%s id: %d val: %d\n", __func__, id, val);
 
-	if ((mc13892_regulators[id].vsel_reg != MC13892_SWITCHERS0) &&
-	    (val & MC13892_SWITCHERS0_SWxHI)) {
-		selector += MC13892_SWxHI_SEL_OFFSET;
-	}
+	if (hi)
+		val = (25000 * val) + 1100000;
+	else
+		val = (25000 * val) + 600000;
 
-	dev_dbg(rdev_get_dev(rdev), "%s id: %d val: 0x%08x selector: %d\n",
-			__func__, id, val, selector);
-
-	return selector;
+	return val;
 }
 
-static int mc13892_sw_regulator_set_voltage_sel(struct regulator_dev *rdev,
-						unsigned selector)
+static int mc13892_sw_regulator_set_voltage(struct regulator_dev *rdev,
+		int min_uV, int max_uV, unsigned *selector)
 {
 	struct mc13xxx_regulator_priv *priv = rdev_get_drvdata(rdev);
-	int volt, mask, id = rdev_get_id(rdev);
-	u32 reg_value;
+	int hi, value, mask, id = rdev_get_id(rdev);
+	u32 valread;
 	int ret;
 
-	volt = rdev->desc->volt_table[selector];
-	mask = mc13892_regulators[id].vsel_mask;
-	reg_value = selector;
+	dev_dbg(rdev_get_dev(rdev), "%s id: %d min_uV: %d max_uV: %d\n",
+		__func__, id, min_uV, max_uV);
 
-	/*
-	 * Don't mess with the HI bit or support HI voltage offsets for SW1.
-	 *
-	 * Since the get_voltage_sel callback has given a fudged value for
-	 * the selector offset, we need to back out that offset if HI is
-	 * to be set so we write the correct value to the register.
-	 *
-	 * The HI bit addition and selector offset handling COULD be more
-	 * complicated by shifting and masking off the voltage selector part
-	 * of the register then logical OR it back in, but since the selector
-	 * is at bits 4:0 there is very little point. This makes the whole
-	 * thing more readable and we do far less work.
-	 */
+	/* Find the best index */
+	value = mc13xxx_get_best_voltage_index(rdev, min_uV, max_uV);
+	dev_dbg(rdev_get_dev(rdev), "%s best value: %d\n", __func__, value);
+	if (value < 0)
+		return value;
 
-	if (mc13892_regulators[id].vsel_reg != MC13892_SWITCHERS0) {
-		mask |= MC13892_SWITCHERS0_SWxHI;
-
-		if (volt > 1375000) {
-			reg_value -= MC13892_SWxHI_SEL_OFFSET;
-			reg_value |= MC13892_SWITCHERS0_SWxHI;
-		} else {
-			reg_value &= ~MC13892_SWITCHERS0_SWxHI;
-		}
-	}
+	value = mc13892_regulators[id].voltages[value];
 
 	mc13xxx_lock(priv->mc13xxx);
-	ret = mc13xxx_reg_rmw(priv->mc13xxx, mc13892_regulators[id].vsel_reg,
-			      mask, reg_value);
+	ret = mc13xxx_reg_read(priv->mc13xxx,
+		mc13892_regulators[id].vsel_reg, &valread);
+	if (ret)
+		goto err;
+
+	if (value > 1375000)
+		hi = 1;
+	else if (value < 1100000)
+		hi = 0;
+	else
+		hi = valread & MC13892_SWITCHERS0_SWxHI;
+
+	if (hi) {
+		value = (value - 1100000) / 25000;
+		value |= MC13892_SWITCHERS0_SWxHI;
+	} else
+		value = (value - 600000) / 25000;
+
+	mask = mc13892_regulators[id].vsel_mask | MC13892_SWITCHERS0_SWxHI;
+	valread = (valread & ~mask) |
+			(value << mc13892_regulators[id].vsel_shift);
+	ret = mc13xxx_reg_write(priv->mc13xxx, mc13892_regulators[id].vsel_reg,
+			valread);
+err:
 	mc13xxx_unlock(priv->mc13xxx);
 
 	return ret;
 }
 
 static struct regulator_ops mc13892_sw_regulator_ops = {
-	.list_voltage = regulator_list_voltage_table,
-	.map_voltage = regulator_map_voltage_ascend,
-	.set_voltage_sel = mc13892_sw_regulator_set_voltage_sel,
-	.get_voltage_sel = mc13892_sw_regulator_get_voltage_sel,
+	.is_enabled = mc13xxx_sw_regulator_is_enabled,
+	.list_voltage = mc13xxx_regulator_list_voltage,
+	.set_voltage = mc13892_sw_regulator_set_voltage,
+	.get_voltage = mc13892_sw_regulator_get_voltage,
 };
 
 static int mc13892_vcam_set_mode(struct regulator_dev *rdev, unsigned int mode)
@@ -526,22 +520,19 @@ static unsigned int mc13892_vcam_get_mode(struct regulator_dev *rdev)
 	return REGULATOR_MODE_NORMAL;
 }
 
-static struct regulator_ops mc13892_vcam_ops;
 
-static int mc13892_regulator_probe(struct platform_device *pdev)
+static int __devinit mc13892_regulator_probe(struct platform_device *pdev)
 {
 	struct mc13xxx_regulator_priv *priv;
 	struct mc13xxx *mc13892 = dev_get_drvdata(pdev->dev.parent);
 	struct mc13xxx_regulator_platform_data *pdata =
 		dev_get_platdata(&pdev->dev);
 	struct mc13xxx_regulator_init_data *mc13xxx_data;
-	struct regulator_config config = { };
 	int i, ret;
 	int num_regulators = 0;
 	u32 val;
 
 	num_regulators = mc13xxx_get_num_regulators_dt(pdev);
-
 	if (num_regulators <= 0 && pdata)
 		num_regulators = pdata->num_regulators;
 	if (num_regulators <= 0)
@@ -563,7 +554,7 @@ static int mc13892_regulator_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_unlock;
 
-	/* enable switch auto mode (on 2.0A silicon only) */
+	/* enable switch auto mode */
 	if ((val & 0x0000FFFF) == 0x45d0) {
 		ret = mc13xxx_reg_rmw(mc13892, MC13892_SWITCHERS4,
 			MC13892_SWITCHERS4_SW1MODE_M |
@@ -583,17 +574,14 @@ static int mc13892_regulator_probe(struct platform_device *pdev)
 	}
 	mc13xxx_unlock(mc13892);
 
-	/* update mc13892_vcam ops */
-	memcpy(&mc13892_vcam_ops, mc13892_regulators[MC13892_VCAM].desc.ops,
-						sizeof(struct regulator_ops));
-	mc13892_vcam_ops.set_mode = mc13892_vcam_set_mode,
-	mc13892_vcam_ops.get_mode = mc13892_vcam_get_mode,
-	mc13892_regulators[MC13892_VCAM].desc.ops = &mc13892_vcam_ops;
+	mc13892_regulators[MC13892_VCAM].desc.ops->set_mode
+		= mc13892_vcam_set_mode;
+	mc13892_regulators[MC13892_VCAM].desc.ops->get_mode
+		= mc13892_vcam_get_mode;
 
 	mc13xxx_data = mc13xxx_parse_regulators_dt(pdev, mc13892_regulators,
 					ARRAY_SIZE(mc13892_regulators));
-
-	for (i = 0; i < priv->num_regulators; i++) {
+	for (i = 0; i < num_regulators; i++) {
 		struct regulator_init_data *init_data;
 		struct regulator_desc *desc;
 		struct device_node *node = NULL;
@@ -609,31 +597,47 @@ static int mc13892_regulator_probe(struct platform_device *pdev)
 		}
 		desc = &mc13892_regulators[id].desc;
 
-		config.dev = &pdev->dev;
-		config.init_data = init_data;
-		config.driver_data = priv;
-		config.of_node = node;
+		priv->regulators[i] = regulator_register(
+			desc, &pdev->dev, init_data, priv, node);
 
-		priv->regulators[i] = devm_regulator_register(&pdev->dev, desc,
-							      &config);
 		if (IS_ERR(priv->regulators[i])) {
 			dev_err(&pdev->dev, "failed to register regulator %s\n",
 				mc13892_regulators[i].desc.name);
-			return PTR_ERR(priv->regulators[i]);
+			ret = PTR_ERR(priv->regulators[i]);
+			goto err;
 		}
 	}
 
 	return 0;
+err:
+	while (--i >= 0)
+		regulator_unregister(priv->regulators[i]);
+	return ret;
 
 err_unlock:
 	mc13xxx_unlock(mc13892);
 	return ret;
 }
 
+static int __devexit mc13892_regulator_remove(struct platform_device *pdev)
+{
+	struct mc13xxx_regulator_priv *priv = platform_get_drvdata(pdev);
+	int i;
+
+	platform_set_drvdata(pdev, NULL);
+
+	for (i = 0; i < priv->num_regulators; i++)
+		regulator_unregister(priv->regulators[i]);
+
+	return 0;
+}
+
 static struct platform_driver mc13892_regulator_driver = {
 	.driver	= {
 		.name	= "mc13892-regulator",
+		.owner	= THIS_MODULE,
 	},
+	.remove	= __devexit_p(mc13892_regulator_remove),
 	.probe	= mc13892_regulator_probe,
 };
 

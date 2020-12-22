@@ -14,6 +14,8 @@
 #ifndef __ASM_ARCH_REGS_GPIO_H
 #define __ASM_ARCH_REGS_GPIO_H
 
+#include <mach/gpio-nrs.h>
+
 #define S3C24XX_MISCCR		S3C24XX_GPIOREG2(0x80)
 
 /* general configuration options */
@@ -300,7 +302,7 @@
 /* S3C2410:
  * Port G consists of 8 GPIO/IRQ/Special function
  *
- * GPGCON has 2 bits for each of the input pins on port G
+ * GPGCON has 2 bits for each of the input pins on port F
  *   00 = 0 input, 1 output, 2 interrupt (EINT0..7), 3 special func
  *
  * pull up works like all other ports.
@@ -364,7 +366,7 @@
 
 /* Port H consists of11 GPIO/serial/Misc pins
  *
- * GPHCON has 2 bits for each of the input pins on port H
+ * GPGCON has 2 bits for each of the input pins on port F
  *   00 = 0 input, 1 output, 2 interrupt (EINT0..7), 3 special func
  *
  * pull up works like all other ports.
@@ -425,19 +427,6 @@
  * for the 2412/2413 from the 2410/2440/2442
 */
 
-/*
- * Port J consists of 13 GPIO/Camera pins. GPJCON has 2 bits
- * for each of the pins on port J.
- *   00 - input, 01 output, 10 - camera
- *
- * Pull up works like all other ports.
- */
-
-#define S3C2413_GPJCON	   S3C2410_GPIOREG(0x80)
-#define S3C2413_GPJDAT	   S3C2410_GPIOREG(0x84)
-#define S3C2413_GPJUP	   S3C2410_GPIOREG(0x88)
-#define S3C2413_GPJSLPCON  S3C2410_GPIOREG(0x8C)
-
 /* S3C2443 and above */
 #define S3C2440_GPJCON	   S3C2410_GPIOREG(0xD0)
 #define S3C2440_GPJDAT	   S3C2410_GPIOREG(0xD4)
@@ -457,6 +446,9 @@
 
 /* miscellaneous control */
 #define S3C2410_MISCCR	   S3C2410_GPIOREG(0x80)
+#define S3C2410_DCLKCON	   S3C2410_GPIOREG(0x84)
+
+#define S3C24XX_DCLKCON	   S3C24XX_GPIOREG2(0x84)
 
 /* see clock.h for dclk definitions */
 
@@ -520,7 +512,7 @@
 #define S3C24XX_EXTINT1	   S3C24XX_GPIOREG2(0x8C)
 #define S3C24XX_EXTINT2	   S3C24XX_GPIOREG2(0x90)
 
-/* interrupt filtering control for EINT16..EINT23 */
+/* interrupt filtering conrrol for EINT16..EINT23 */
 #define S3C2410_EINFLT0	   S3C2410_GPIOREG(0x94)
 #define S3C2410_EINFLT1	   S3C2410_GPIOREG(0x98)
 #define S3C2410_EINFLT2	   S3C2410_GPIOREG(0x9C)

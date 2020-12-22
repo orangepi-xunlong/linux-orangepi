@@ -21,12 +21,16 @@
  * See the GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with GNU CC; see the file COPYING.  If not, see
- * <http://www.gnu.org/licenses/>.
+ * along with GNU CC; see the file COPYING.  If not, write to
+ * the Free Software Foundation, 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  * Please send any bug reports or fixes you make to the
  * email addresses:
- *    lksctp developers <linux-sctp@vger.kernel.org>
+ *    lksctp developers <lksctp-developers@lists.sourceforge.net>
+ *
+ * Or submit a bug report through the following website:
+ *    http://www.sf.net/projects/lksctp
  *
  * Written or modified by:
  *    La Monte H.P. Yarroll <piggy@acm.org>
@@ -38,6 +42,9 @@
  *    Daisy Chang <daisyc@us.ibm.com>
  *    Ardelle Fan <ardelle.fan@intel.com>
  *    Kevin Gao <kevin.gao@intel.com>
+ *
+ * Any bugs reported given to us we will try to fix... any fixes shared will
+ * be incorporated into the next SCTP release.
  */
 
 #include <linux/types.h>
@@ -70,8 +77,7 @@ typedef struct {
 	int action;
 } sctp_sm_command_t;
 
-typedef sctp_disposition_t (sctp_state_fn_t) (struct net *,
-					      const struct sctp_endpoint *,
+typedef sctp_disposition_t (sctp_state_fn_t) (const struct sctp_endpoint *,
 					      const struct sctp_association *,
 					      const sctp_subtype_t type,
 					      void *arg,
@@ -172,8 +178,7 @@ sctp_state_fn_t sctp_sf_autoclose_timer_expire;
 
 /* Prototypes for utility support functions.  */
 __u8 sctp_get_chunk_type(struct sctp_chunk *chunk);
-const sctp_sm_table_entry_t *sctp_sm_lookup_event(struct net *,
-					    sctp_event_t,
+const sctp_sm_table_entry_t *sctp_sm_lookup_event(sctp_event_t,
 					    sctp_state_t,
 					    sctp_subtype_t);
 int sctp_chunk_iif(const struct sctp_chunk *);
@@ -201,7 +206,7 @@ struct sctp_chunk *sctp_make_cwr(const struct sctp_association *,
 struct sctp_chunk * sctp_make_datafrag_empty(struct sctp_association *,
 					const struct sctp_sndrcvinfo *sinfo,
 					int len, const __u8 flags,
-					__u16 ssn, gfp_t gfp);
+					__u16 ssn);
 struct sctp_chunk *sctp_make_ecne(const struct sctp_association *,
 				  const __u32);
 struct sctp_chunk *sctp_make_sack(const struct sctp_association *);
@@ -219,7 +224,7 @@ struct sctp_chunk *sctp_make_abort_no_data(const struct sctp_association *,
 				      const struct sctp_chunk *,
 				      __u32 tsn);
 struct sctp_chunk *sctp_make_abort_user(const struct sctp_association *,
-					struct msghdr *, size_t msg_len);
+					const struct msghdr *, size_t msg_len);
 struct sctp_chunk *sctp_make_abort_violation(const struct sctp_association *,
 				   const struct sctp_chunk *,
 				   const __u8 *,
@@ -227,8 +232,6 @@ struct sctp_chunk *sctp_make_abort_violation(const struct sctp_association *,
 struct sctp_chunk *sctp_make_violation_paramlen(const struct sctp_association *,
 				   const struct sctp_chunk *,
 				   struct sctp_paramhdr *);
-struct sctp_chunk *sctp_make_violation_max_retrans(const struct sctp_association *,
-						   const struct sctp_chunk *);
 struct sctp_chunk *sctp_make_heartbeat(const struct sctp_association *,
 				  const struct sctp_transport *);
 struct sctp_chunk *sctp_make_heartbeat_ack(const struct sctp_association *,
@@ -265,7 +268,7 @@ void sctp_chunk_assign_ssn(struct sctp_chunk *);
 
 /* Prototypes for statetable processing. */
 
-int sctp_do_sm(struct net *net, sctp_event_t event_type, sctp_subtype_t subtype,
+int sctp_do_sm(sctp_event_t event_type, sctp_subtype_t subtype,
 	       sctp_state_t state,
                struct sctp_endpoint *,
                struct sctp_association *asoc,
@@ -307,27 +310,85 @@ static inline __u16 sctp_data_size(struct sctp_chunk *chunk)
 }
 
 /* Compare two TSNs */
-#define TSN_lt(a,b)	\
-	(typecheck(__u32, a) && \
-	 typecheck(__u32, b) && \
-	 ((__s32)((a) - (b)) < 0))
 
-#define TSN_lte(a,b)	\
-	(typecheck(__u32, a) && \
-	 typecheck(__u32, b) && \
-	 ((__s32)((a) - (b)) <= 0))
+/* RFC 1982 - Serial Number Arithmetic
+ *
+ * 2. Comparison
+ *  Then, s1 is said to be equal to s2 if and only if i1 is equal to i2,
+ *  in all other cases, s1 is not equal to s2.
+ *
+ * s1 is said to be less than s2 if, and only if, s1 is not equal to s2,
+ * and
+ *
+ *      (i1 < i2 and i2 - i1 < 2^(SERIAL_BITS - 1)) or
+ *      (i1 > i2 and i1 - i2 > 2^(SERIAL_BITS - 1))
+ *
+ * s1 is said to be greater than s2 if, and only if, s1 is not equal to
+ * s2, and
+ *
+ *      (i1 < i2 and i2 - i1 > 2^(SERIAL_BITS - 1)) or
+ *      (i1 > i2 and i1 - i2 < 2^(SERIAL_BITS - 1))
+ */
+
+/*
+ * RFC 2960
+ *  1.6 Serial Number Arithmetic
+ *
+ * Comparisons and arithmetic on TSNs in this document SHOULD use Serial
+ * Number Arithmetic as defined in [RFC1982] where SERIAL_BITS = 32.
+ */
+
+enum {
+	TSN_SIGN_BIT = (1<<31)
+};
+
+static inline int TSN_lt(__u32 s, __u32 t)
+{
+	return ((s) - (t)) & TSN_SIGN_BIT;
+}
+
+static inline int TSN_lte(__u32 s, __u32 t)
+{
+	return ((s) == (t)) || (((s) - (t)) & TSN_SIGN_BIT);
+}
 
 /* Compare two SSNs */
-#define SSN_lt(a,b)		\
-	(typecheck(__u16, a) && \
-	 typecheck(__u16, b) && \
-	 ((__s16)((a) - (b)) < 0))
 
-/* ADDIP 3.1.1 */
-#define ADDIP_SERIAL_gte(a,b)	\
-	(typecheck(__u32, a) && \
-	 typecheck(__u32, b) && \
-	 ((__s32)((b) - (a)) <= 0))
+/*
+ * RFC 2960
+ *  1.6 Serial Number Arithmetic
+ *
+ * Comparisons and arithmetic on Stream Sequence Numbers in this document
+ * SHOULD use Serial Number Arithmetic as defined in [RFC1982] where
+ * SERIAL_BITS = 16.
+ */
+enum {
+	SSN_SIGN_BIT = (1<<15)
+};
+
+static inline int SSN_lt(__u16 s, __u16 t)
+{
+	return ((s) - (t)) & SSN_SIGN_BIT;
+}
+
+static inline int SSN_lte(__u16 s, __u16 t)
+{
+	return ((s) == (t)) || (((s) - (t)) & SSN_SIGN_BIT);
+}
+
+/*
+ * ADDIP 3.1.1
+ * The valid range of Serial Number is from 0 to 4294967295 (2**32 - 1). Serial
+ * Numbers wrap back to 0 after reaching 4294967295.
+ */
+enum {
+	ADDIP_SERIAL_SIGN_BIT = (1<<31)
+};
+
+static inline int ADDIP_SERIAL_gte(__u16 s, __u16 t)
+{
+	return ((s) == (t)) || (((t) - (s)) & ADDIP_SERIAL_SIGN_BIT);
+}
 
 /* Check VTAG of the packet matches the sender's own tag. */
 static inline int

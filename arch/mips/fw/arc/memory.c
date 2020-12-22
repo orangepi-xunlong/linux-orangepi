@@ -1,6 +1,6 @@
 /*
  * memory.c: PROM library functions for acquiring/using memory descriptors
- *	     given to us from the ARCS firmware.
+ *           given to us from the ARCS firmware.
  *
  * Copyright (C) 1996 by David S. Miller
  * Copyright (C) 1999, 2000, 2001 by Ralf Baechle
@@ -9,7 +9,7 @@
  * PROM library functions for acquiring/using memory descriptors given to us
  * from the ARCS firmware.  This is only used when CONFIG_ARC_MEMORY is set
  * because on some machines like SGI IP27 the ARC memory configuration data
- * completely bogus and alternate easier to use mechanisms are available.
+ * completly bogus and alternate easier to use mechanisms are available.
  */
 #include <linux/init.h>
 #include <linux/kernel.h>

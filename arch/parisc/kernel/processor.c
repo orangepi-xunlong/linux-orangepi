@@ -44,12 +44,10 @@
 
 struct system_cpuinfo_parisc boot_cpu_data __read_mostly;
 EXPORT_SYMBOL(boot_cpu_data);
-#ifdef CONFIG_PA8X00
-int _parisc_requires_coherency __read_mostly;
-EXPORT_SYMBOL(_parisc_requires_coherency);
-#endif
 
 DEFINE_PER_CPU(struct cpuinfo_parisc, cpu_data);
+
+extern int update_cr16_clocksource(void);	/* from time.c */
 
 /*
 **  	PARISC CPU driver - claim "device" and initialize CPU data structures.
@@ -75,7 +73,7 @@ DEFINE_PER_CPU(struct cpuinfo_parisc, cpu_data);
  *
  * FIXME: doesn't do much yet...
  */
-static void
+static void __cpuinit
 init_percpu_prof(unsigned long cpunum)
 {
 	struct cpuinfo_parisc *p;
@@ -94,7 +92,7 @@ init_percpu_prof(unsigned long cpunum)
  * (return 1).  If so, initialize the chip and tell other partners in crime 
  * they have work to do.
  */
-static int processor_probe(struct parisc_device *dev)
+static int __cpuinit processor_probe(struct parisc_device *dev)
 {
 	unsigned long txn_addr;
 	unsigned long cpuid;
@@ -226,6 +224,12 @@ static int processor_probe(struct parisc_device *dev)
 	}
 #endif
 
+	/* If we've registered more than one cpu,
+	 * we'll use the jiffies clocksource since cr16
+	 * is not synchronized between CPUs.
+	 */
+	update_cr16_clocksource();
+
 	return 0;
 }
 
@@ -273,12 +277,8 @@ void __init collect_boot_cpu_data(void)
 	boot_cpu_data.cpu_type = parisc_get_cpu_type(boot_cpu_data.hversion);
 	boot_cpu_data.cpu_name = cpu_name_version[boot_cpu_data.cpu_type][0];
 	boot_cpu_data.family_name = cpu_name_version[boot_cpu_data.cpu_type][1];
-
-#ifdef CONFIG_PA8X00
-	_parisc_requires_coherency = (boot_cpu_data.cpu_type == mako) ||
-				(boot_cpu_data.cpu_type == mako2);
-#endif
 }
+
 
 
 /**
@@ -299,7 +299,7 @@ void __init collect_boot_cpu_data(void)
  *
  * o Enable CPU profiling hooks.
  */
-int init_per_cpu(int cpunum)
+int __cpuinit init_per_cpu(int cpunum)
 {
 	int ret;
 	struct pdc_coproc_cfg coproc_cfg;
@@ -316,9 +316,8 @@ int init_per_cpu(int cpunum)
 		per_cpu(cpu_data, cpunum).fp_rev = coproc_cfg.revision;
 		per_cpu(cpu_data, cpunum).fp_model = coproc_cfg.model;
 
-		if (cpunum == 0)
-			printk(KERN_INFO  "FP[%d] enabled: Rev %ld Model %ld\n",
-				cpunum, coproc_cfg.revision, coproc_cfg.model);
+		printk(KERN_INFO  "FP[%d] enabled: Rev %ld Model %ld\n",
+			cpunum, coproc_cfg.revision, coproc_cfg.model);
 
 		/*
 		** store status register to stack (hopefully aligned)
@@ -372,23 +371,10 @@ show_cpuinfo (struct seq_file *m, void *v)
 
 		seq_printf(m, "capabilities\t:");
 		if (boot_cpu_data.pdc.capabilities & PDC_MODEL_OS32)
-			seq_puts(m, " os32");
+			seq_printf(m, " os32");
 		if (boot_cpu_data.pdc.capabilities & PDC_MODEL_OS64)
-			seq_puts(m, " os64");
-		if (boot_cpu_data.pdc.capabilities & PDC_MODEL_IOPDIR_FDC)
-			seq_puts(m, " iopdir_fdc");
-		switch (boot_cpu_data.pdc.capabilities & PDC_MODEL_NVA_MASK) {
-		case PDC_MODEL_NVA_SUPPORTED:
-			seq_puts(m, " nva_supported");
-			break;
-		case PDC_MODEL_NVA_SLOW:
-			seq_puts(m, " nva_slow");
-			break;
-		case PDC_MODEL_NVA_UNSUPPORTED:
-			seq_puts(m, " needs_equivalent_aliasing");
-			break;
-		}
-		seq_printf(m, " (0x%02lx)\n", boot_cpu_data.pdc.capabilities);
+			seq_printf(m, " os64");
+		seq_printf(m, "\n");
 
 		seq_printf(m, "model\t\t: %s\n"
 				"model name\t: %s\n",

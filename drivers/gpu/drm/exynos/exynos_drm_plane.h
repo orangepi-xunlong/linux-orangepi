@@ -9,7 +9,6 @@
  *
  */
 
-int exynos_plane_init(struct drm_device *dev,
-		      struct exynos_drm_plane *exynos_plane, unsigned int index,
-		      unsigned long possible_crtcs,
-		      const struct exynos_drm_plane_config *config);
+int exynos_plane_init(struct drm_device *dev, unsigned int nr);
+int exynos_plane_set_zpos_ioctl(struct drm_device *dev, void *data,
+				struct drm_file *file_priv);

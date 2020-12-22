@@ -1,6 +1,6 @@
 /*
  * emc6w201.c - Hardware monitoring driver for the SMSC EMC6W201
- * Copyright (C) 2011  Jean Delvare <jdelvare@suse.de>
+ * Copyright (C) 2011  Jean Delvare <khali@linux-fr.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,6 +18,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/jiffies.h>
@@ -49,14 +50,14 @@ static const unsigned short normal_i2c[] = { 0x2c, 0x2d, 0x2e, I2C_CLIENT_END };
 #define EMC6W201_REG_TEMP_HIGH(nr)	(0x57 + (nr) * 2)
 #define EMC6W201_REG_FAN_MIN(nr)	(0x62 + (nr) * 2)
 
-enum subfeature { input, min, max };
+enum { input, min, max } subfeature;
 
 /*
  * Per-device data
  */
 
 struct emc6w201_data {
-	struct i2c_client *client;
+	struct device *hwmon_dev;
 	struct mutex update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* in jiffies */
@@ -134,8 +135,8 @@ static int emc6w201_write8(struct i2c_client *client, u8 reg, u8 val)
 
 static struct emc6w201_data *emc6w201_update_device(struct device *dev)
 {
-	struct emc6w201_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct emc6w201_data *data = i2c_get_clientdata(client);
 	int nr;
 
 	mutex_lock(&data->update_lock);
@@ -187,7 +188,7 @@ static struct emc6w201_data *emc6w201_update_device(struct device *dev)
  * Sysfs callback functions
  */
 
-static const s16 nominal_mv[6] = { 2500, 1500, 3300, 5000, 1500, 1500 };
+static const u16 nominal_mv[6] = { 2500, 1500, 3300, 5000, 1500, 1500 };
 
 static ssize_t show_in(struct device *dev, struct device_attribute *devattr,
 	char *buf)
@@ -203,8 +204,8 @@ static ssize_t show_in(struct device *dev, struct device_attribute *devattr,
 static ssize_t set_in(struct device *dev, struct device_attribute *devattr,
 		      const char *buf, size_t count)
 {
-	struct emc6w201_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct emc6w201_data *data = i2c_get_clientdata(client);
 	int sf = to_sensor_dev_attr_2(devattr)->index;
 	int nr = to_sensor_dev_attr_2(devattr)->nr;
 	int err;
@@ -220,7 +221,7 @@ static ssize_t set_in(struct device *dev, struct device_attribute *devattr,
 			  : EMC6W201_REG_IN_HIGH(nr);
 
 	mutex_lock(&data->update_lock);
-	data->in[sf][nr] = clamp_val(val, 0, 255);
+	data->in[sf][nr] = SENSORS_LIMIT(val, 0, 255);
 	err = emc6w201_write8(client, reg, data->in[sf][nr]);
 	mutex_unlock(&data->update_lock);
 
@@ -240,8 +241,8 @@ static ssize_t show_temp(struct device *dev, struct device_attribute *devattr,
 static ssize_t set_temp(struct device *dev, struct device_attribute *devattr,
 			const char *buf, size_t count)
 {
-	struct emc6w201_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct emc6w201_data *data = i2c_get_clientdata(client);
 	int sf = to_sensor_dev_attr_2(devattr)->index;
 	int nr = to_sensor_dev_attr_2(devattr)->nr;
 	int err;
@@ -252,12 +253,12 @@ static ssize_t set_temp(struct device *dev, struct device_attribute *devattr,
 	if (err < 0)
 		return err;
 
-	val = DIV_ROUND_CLOSEST(val, 1000);
+	val /= 1000;
 	reg = (sf == min) ? EMC6W201_REG_TEMP_LOW(nr)
 			  : EMC6W201_REG_TEMP_HIGH(nr);
 
 	mutex_lock(&data->update_lock);
-	data->temp[sf][nr] = clamp_val(val, -127, 127);
+	data->temp[sf][nr] = SENSORS_LIMIT(val, -127, 128);
 	err = emc6w201_write8(client, reg, data->temp[sf][nr]);
 	mutex_unlock(&data->update_lock);
 
@@ -283,8 +284,8 @@ static ssize_t show_fan(struct device *dev, struct device_attribute *devattr,
 static ssize_t set_fan(struct device *dev, struct device_attribute *devattr,
 		       const char *buf, size_t count)
 {
-	struct emc6w201_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct emc6w201_data *data = i2c_get_clientdata(client);
 	int sf = to_sensor_dev_attr_2(devattr)->index;
 	int nr = to_sensor_dev_attr_2(devattr)->nr;
 	int err;
@@ -298,7 +299,7 @@ static ssize_t set_fan(struct device *dev, struct device_attribute *devattr,
 		val = 0xFFFF;
 	} else {
 		val = DIV_ROUND_CLOSEST(5400000U, val);
-		val = clamp_val(val, 0, 0xFFFE);
+		val = SENSORS_LIMIT(val, 0, 0xFFFE);
 	}
 
 	mutex_lock(&data->update_lock);
@@ -388,7 +389,7 @@ static SENSOR_DEVICE_ATTR_2(fan5_input, S_IRUGO, show_fan, NULL, 4, input);
 static SENSOR_DEVICE_ATTR_2(fan5_min, S_IRUGO | S_IWUSR, show_fan, set_fan,
 			    4, min);
 
-static struct attribute *emc6w201_attrs[] = {
+static struct attribute *emc6w201_attributes[] = {
 	&sensor_dev_attr_in0_input.dev_attr.attr,
 	&sensor_dev_attr_in0_min.dev_attr.attr,
 	&sensor_dev_attr_in0_max.dev_attr.attr,
@@ -440,7 +441,9 @@ static struct attribute *emc6w201_attrs[] = {
 	NULL
 };
 
-ATTRIBUTE_GROUPS(emc6w201);
+static const struct attribute_group emc6w201_group = {
+	.attrs = emc6w201_attributes,
+};
 
 /*
  * Driver interface
@@ -464,7 +467,7 @@ static int emc6w201_detect(struct i2c_client *client,
 	if (verstep < 0 || (verstep & 0xF0) != 0xB0)
 		return -ENODEV;
 	if ((verstep & 0x0F) > 2) {
-		dev_dbg(&client->dev, "Unknown EMC6W201 stepping %d\n",
+		dev_dbg(&client->dev, "Unknwown EMC6W201 stepping %d\n",
 			verstep & 0x0F);
 		return -ENODEV;
 	}
@@ -486,21 +489,49 @@ static int emc6w201_detect(struct i2c_client *client,
 static int emc6w201_probe(struct i2c_client *client,
 			  const struct i2c_device_id *id)
 {
-	struct device *dev = &client->dev;
 	struct emc6w201_data *data;
-	struct device *hwmon_dev;
+	int err;
 
-	data = devm_kzalloc(dev, sizeof(struct emc6w201_data), GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
+	data = kzalloc(sizeof(struct emc6w201_data), GFP_KERNEL);
+	if (!data) {
+		err = -ENOMEM;
+		goto exit;
+	}
 
-	data->client = client;
+	i2c_set_clientdata(client, data);
 	mutex_init(&data->update_lock);
 
-	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
-							   data,
-							   emc6w201_groups);
-	return PTR_ERR_OR_ZERO(hwmon_dev);
+	/* Create sysfs attribute */
+	err = sysfs_create_group(&client->dev.kobj, &emc6w201_group);
+	if (err)
+		goto exit_free;
+
+	/* Expose as a hwmon device */
+	data->hwmon_dev = hwmon_device_register(&client->dev);
+	if (IS_ERR(data->hwmon_dev)) {
+		err = PTR_ERR(data->hwmon_dev);
+		goto exit_remove;
+	}
+
+	return 0;
+
+ exit_remove:
+	sysfs_remove_group(&client->dev.kobj, &emc6w201_group);
+ exit_free:
+	kfree(data);
+ exit:
+	return err;
+}
+
+static int emc6w201_remove(struct i2c_client *client)
+{
+	struct emc6w201_data *data = i2c_get_clientdata(client);
+
+	hwmon_device_unregister(data->hwmon_dev);
+	sysfs_remove_group(&client->dev.kobj, &emc6w201_group);
+	kfree(data);
+
+	return 0;
 }
 
 static const struct i2c_device_id emc6w201_id[] = {
@@ -515,6 +546,7 @@ static struct i2c_driver emc6w201_driver = {
 		.name	= "emc6w201",
 	},
 	.probe		= emc6w201_probe,
+	.remove		= emc6w201_remove,
 	.id_table	= emc6w201_id,
 	.detect		= emc6w201_detect,
 	.address_list	= normal_i2c,
@@ -522,6 +554,6 @@ static struct i2c_driver emc6w201_driver = {
 
 module_i2c_driver(emc6w201_driver);
 
-MODULE_AUTHOR("Jean Delvare <jdelvare@suse.de>");
+MODULE_AUTHOR("Jean Delvare <khali@linux-fr.org>");
 MODULE_DESCRIPTION("SMSC EMC6W201 hardware monitoring driver");
 MODULE_LICENSE("GPL");

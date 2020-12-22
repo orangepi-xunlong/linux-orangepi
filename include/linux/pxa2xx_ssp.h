@@ -21,8 +21,6 @@
 
 #include <linux/list.h>
 #include <linux/io.h>
-#include <linux/of.h>
-
 
 /*
  * SSP Serial Port Registers
@@ -37,7 +35,6 @@
 #define SSDR		(0x10)  /* SSP Data Write/Data Read Register */
 
 #define SSTO		(0x28)  /* SSP Time Out Register */
-#define DDS_RATE	(0x28)  /* SSP DDS Clock Rate Register (Intel Quark) */
 #define SSPSP		(0x2C)  /* SSP Programmable Serial Protocol */
 #define SSTSA		(0x30)  /* SSP Tx Timeslot Active */
 #define SSRSA		(0x34)  /* SSP Rx Timeslot Active */
@@ -83,6 +80,7 @@
 #define SSSR_RFS	(1 << 6)	/* Receive FIFO Service Request */
 #define SSSR_ROR	(1 << 7)	/* Receive FIFO Overrun */
 
+#ifdef CONFIG_ARCH_PXA
 #define RX_THRESH_DFLT	8
 #define TX_THRESH_DFLT	8
 
@@ -94,35 +92,19 @@
 #define SSCR1_RFT	(0x00003c00)	/* Receive FIFO Threshold (mask) */
 #define SSCR1_RxTresh(x) (((x) - 1) << 10) /* level [1..16] */
 
-#define RX_THRESH_CE4100_DFLT	2
-#define TX_THRESH_CE4100_DFLT	2
+#else
 
-#define CE4100_SSSR_TFL_MASK	(0x3 << 8)	/* Transmit FIFO Level mask */
-#define CE4100_SSSR_RFL_MASK	(0x3 << 12)	/* Receive FIFO Level mask */
+#define RX_THRESH_DFLT	2
+#define TX_THRESH_DFLT	2
 
-#define CE4100_SSCR1_TFT	(0x000000c0)	/* Transmit FIFO Threshold (mask) */
-#define CE4100_SSCR1_TxTresh(x) (((x) - 1) << 6)	/* level [1..4] */
-#define CE4100_SSCR1_RFT	(0x00000c00)	/* Receive FIFO Threshold (mask) */
-#define CE4100_SSCR1_RxTresh(x) (((x) - 1) << 10)	/* level [1..4] */
+#define SSSR_TFL_MASK	(0x3 << 8)	/* Transmit FIFO Level mask */
+#define SSSR_RFL_MASK	(0x3 << 12)	/* Receive FIFO Level mask */
 
-/* QUARK_X1000 SSCR0 bit definition */
-#define QUARK_X1000_SSCR0_DSS	(0x1F)		/* Data Size Select (mask) */
-#define QUARK_X1000_SSCR0_DataSize(x)  ((x) - 1)	/* Data Size Select [4..32] */
-#define QUARK_X1000_SSCR0_FRF	(0x3 << 5)	/* FRame Format (mask) */
-#define QUARK_X1000_SSCR0_Motorola	(0x0 << 5)	/* Motorola's Serial Peripheral Interface (SPI) */
-
-#define RX_THRESH_QUARK_X1000_DFLT	1
-#define TX_THRESH_QUARK_X1000_DFLT	16
-
-#define QUARK_X1000_SSSR_TFL_MASK	(0x1F << 8)	/* Transmit FIFO Level mask */
-#define QUARK_X1000_SSSR_RFL_MASK	(0x1F << 13)	/* Receive FIFO Level mask */
-
-#define QUARK_X1000_SSCR1_TFT	(0x1F << 6)	/* Transmit FIFO Threshold (mask) */
-#define QUARK_X1000_SSCR1_TxTresh(x) (((x) - 1) << 6)	/* level [1..32] */
-#define QUARK_X1000_SSCR1_RFT	(0x1F << 11)	/* Receive FIFO Threshold (mask) */
-#define QUARK_X1000_SSCR1_RxTresh(x) (((x) - 1) << 11)	/* level [1..32] */
-#define QUARK_X1000_SSCR1_STRF       (1 << 17)		/* Select FIFO or EFWR */
-#define QUARK_X1000_SSCR1_EFWR	(1 << 16)		/* Enable FIFO Write/Read */
+#define SSCR1_TFT	(0x000000c0)	/* Transmit FIFO Threshold (mask) */
+#define SSCR1_TxTresh(x) (((x) - 1) << 6) /* level [1..4] */
+#define SSCR1_RFT	(0x00000c00)	/* Receive FIFO Threshold (mask) */
+#define SSCR1_RxTresh(x) (((x) - 1) << 10) /* level [1..4] */
+#endif
 
 /* extra bits in PXA255, PXA26x and PXA27x SSP ports */
 #define SSCR0_TISSP		(1 << 4)	/* TI Sync Serial Protocol */
@@ -173,29 +155,13 @@
 #define SSACD_ACDS(x)		((x) << 0)	/* Audio clock divider select */
 #define SSACD_SCDX8		(1 << 7)	/* SYSCLK division ratio select */
 
-/* LPSS SSP */
-#define SSITF			0x44		/* TX FIFO trigger level */
-#define SSITF_TxLoThresh(x)	(((x) - 1) << 8)
-#define SSITF_TxHiThresh(x)	((x) - 1)
-
-#define SSIRF			0x48		/* RX FIFO trigger level */
-#define SSIRF_RxThresh(x)	((x) - 1)
-
 enum pxa_ssp_type {
 	SSP_UNDEFINED = 0,
 	PXA25x_SSP,  /* pxa 210, 250, 255, 26x */
 	PXA25x_NSSP, /* pxa 255, 26x (including ASSP) */
 	PXA27x_SSP,
-	PXA3xx_SSP,
 	PXA168_SSP,
-	PXA910_SSP,
 	CE4100_SSP,
-	QUARK_X1000_SSP,
-	LPSS_LPT_SSP, /* Keep LPSS types sorted with lpss_platforms[] */
-	LPSS_BYT_SSP,
-	LPSS_BSW_SSP,
-	LPSS_SPT_SSP,
-	LPSS_BXT_SSP,
 };
 
 struct ssp_device {
@@ -213,8 +179,6 @@ struct ssp_device {
 	int		irq;
 	int		drcmr_rx;
 	int		drcmr_tx;
-
-	struct device_node	*of_node;
 };
 
 /**
@@ -240,22 +204,6 @@ static inline u32 pxa_ssp_read_reg(struct ssp_device *dev, u32 reg)
 	return __raw_readl(dev->mmio_base + reg);
 }
 
-#if IS_ENABLED(CONFIG_PXA_SSP)
 struct ssp_device *pxa_ssp_request(int port, const char *label);
 void pxa_ssp_free(struct ssp_device *);
-struct ssp_device *pxa_ssp_request_of(const struct device_node *of_node,
-				      const char *label);
-#else
-static inline struct ssp_device *pxa_ssp_request(int port, const char *label)
-{
-	return NULL;
-}
-static inline struct ssp_device *pxa_ssp_request_of(const struct device_node *n,
-						    const char *name)
-{
-	return NULL;
-}
-static inline void pxa_ssp_free(struct ssp_device *ssp) {}
-#endif
-
 #endif

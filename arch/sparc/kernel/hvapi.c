@@ -39,17 +39,13 @@ static struct api_info api_table[] = {
 	{ .group = HV_GRP_SDIO,					},
 	{ .group = HV_GRP_SDIO_ERR,				},
 	{ .group = HV_GRP_REBOOT_DATA,				},
-	{ .group = HV_GRP_ATU,		.flags = FLAG_PRE_API	},
 	{ .group = HV_GRP_NIAG_PERF,	.flags = FLAG_PRE_API	},
 	{ .group = HV_GRP_FIRE_PERF,				},
 	{ .group = HV_GRP_N2_CPU,				},
 	{ .group = HV_GRP_NIU,					},
 	{ .group = HV_GRP_VF_CPU,				},
 	{ .group = HV_GRP_KT_CPU,				},
-	{ .group = HV_GRP_VT_CPU,				},
-	{ .group = HV_GRP_T5_CPU,				},
 	{ .group = HV_GRP_DIAG,		.flags = FLAG_PRE_API	},
-	{ .group = HV_GRP_M7_PERF,				},
 };
 
 static DEFINE_SPINLOCK(hvapi_lock);
@@ -197,7 +193,7 @@ void __init sun4v_hvapi_init(void)
 
 bad:
 	prom_printf("HVAPI: Cannot register API group "
-		    "%lx with major(%lu) minor(%lu)\n",
+		    "%lx with major(%u) minor(%u)\n",
 		    group, major, minor);
 	prom_halt();
 }

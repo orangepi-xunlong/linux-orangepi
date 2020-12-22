@@ -13,44 +13,35 @@
  *
  */
 
-#ifndef __USB_HW_SCAN_H__
-#define __USB_HW_SCAN_H__
+#ifndef  __USB_HW_SCAN_H__
+#define  __USB_HW_SCAN_H__
 
 #define  USB_SCAN_INSMOD_DEVICE_DRIVER_DELAY	2
 #define  USB_SCAN_INSMOD_HOST_DRIVER_DELAY	1
 
 /* ubs id */
-typedef enum usb_id_state {
+typedef enum usb_id_state{
 	USB_HOST_MODE = 0,
 	USB_DEVICE_MODE = 1,
-} usb_id_state_t;
+}usb_id_state_t;
 
 /* usb detect vbus */
-typedef enum usb_det_vbus_state {
+typedef enum usb_det_vbus_state{
 	USB_DET_VBUS_INVALID = 0,
 	USB_DET_VBUS_VALID  = 1
-} usb_det_vbus_state_t;
+}usb_det_vbus_state_t;
 
 /* usb info */
-typedef struct usb_scan_info {
-	struct usb_cfg		*cfg;
+typedef struct usb_scan_info{
+	struct usb_cfg 		*cfg;
 
-	usb_id_state_t		id_old_state;		/* last id state */
-	usb_det_vbus_state_t	det_vbus_old_state;	/* last vbus state */
+	usb_id_state_t          id_old_state;           /* last id state            */
+	usb_det_vbus_state_t    det_vbus_old_state;     /* last detect vbus state   */
 
-	u32			device_insmod_delay;	/* debounce time */
-	u32			host_insmod_delay;	/* debounce time */
-} usb_scan_info_t;
-
-#if defined(CONFIG_AW_AXP)
-extern int axp_usb_det(void);
-#if defined(CONFIG_TYPE_C)
-extern int axp_usb_cc_status(void);
-#endif
-#endif
-
+	u32                     device_insmod_delay;    /* debounce time            */
+	u32                     host_insmod_delay;    	/* debounce time            */
+}usb_scan_info_t;
 extern int usb_hw_scan_debug;
-extern int thread_stopped_flag;
 
 void usb_hw_scan(struct usb_cfg *cfg);
 __u32 set_vbus_id_state(u32 state);
@@ -60,5 +51,5 @@ __s32 usb_hw_scan_exit(struct usb_cfg *cfg);
 __s32 usbc0_platform_device_init(struct usb_port_info *port_info);
 __s32 usbc0_platform_device_exit(struct usb_port_info *info);
 
-#endif /* __USB_HW_SCAN_H__ */
+#endif   //__USB_HW_SCAN_H__
 

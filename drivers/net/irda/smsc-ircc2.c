@@ -1,6 +1,7 @@
 /*********************************************************************
  *
  * Description:   Driver for the SMC Infrared Communications Controller
+ * Status:        Experimental.
  * Author:        Daniele Peri (peri@csai.unipa.it)
  * Created at:
  * Modified at:
@@ -34,7 +35,9 @@
  *     GNU General Public License for more details.
  *
  *     You should have received a copy of the GNU General Public License
- *     along with this program; if not, see <http://www.gnu.org/licenses/>.
+ *     along with this program; if not, write to the Free Software
+ *     Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ *     MA 02111-1307 USA
  *
  ********************************************************************/
 
@@ -374,8 +377,8 @@ MODULE_DEVICE_TABLE(pnp, smsc_ircc_pnp_table);
 static int pnp_driver_registered;
 
 #ifdef CONFIG_PNP
-static int smsc_ircc_pnp_probe(struct pnp_dev *dev,
-			       const struct pnp_device_id *dev_id)
+static int __devinit smsc_ircc_pnp_probe(struct pnp_dev *dev,
+				      const struct pnp_device_id *dev_id)
 {
 	unsigned int firbase, sirbase;
 	u8 dma, irq;
@@ -419,16 +422,13 @@ static int __init smsc_ircc_legacy_probe(void)
 #ifdef CONFIG_PCI
 	if (smsc_ircc_preconfigure_subsystems(ircc_cfg, ircc_fir, ircc_sir, ircc_dma, ircc_irq) < 0) {
 		/* Ignore errors from preconfiguration */
-		net_err_ratelimited("%s, Preconfiguration failed !\n",
-				    driver_name);
+		IRDA_ERROR("%s, Preconfiguration failed !\n", driver_name);
 	}
 #endif
 
 	if (ircc_fir > 0 && ircc_sir > 0) {
-		net_info_ratelimited(" Overriding FIR address 0x%04x\n",
-				     ircc_fir);
-		net_info_ratelimited(" Overriding SIR address 0x%04x\n",
-				     ircc_sir);
+		IRDA_MESSAGE(" Overriding FIR address 0x%04x\n", ircc_fir);
+		IRDA_MESSAGE(" Overriding SIR address 0x%04x\n", ircc_sir);
 
 		if (smsc_ircc_open(ircc_fir, ircc_sir, ircc_dma, ircc_irq))
 			ret = -ENODEV;
@@ -437,8 +437,8 @@ static int __init smsc_ircc_legacy_probe(void)
 
 		/* try user provided configuration register base address */
 		if (ircc_cfg > 0) {
-			net_info_ratelimited(" Overriding configuration address 0x%04x\n",
-					     ircc_cfg);
+			IRDA_MESSAGE(" Overriding configuration address "
+				     "0x%04x\n", ircc_cfg);
 			if (!smsc_superio_fdc(ircc_cfg))
 				ret = 0;
 			if (!smsc_superio_lpc(ircc_cfg))
@@ -461,12 +461,11 @@ static int __init smsc_ircc_init(void)
 {
 	int ret;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	ret = platform_driver_register(&smsc_ircc_driver);
 	if (ret) {
-		net_err_ratelimited("%s, Can't register driver!\n",
-				    driver_name);
+		IRDA_ERROR("%s, Can't register driver!\n", driver_name);
 		return ret;
 	}
 
@@ -517,13 +516,13 @@ static const struct net_device_ops smsc_ircc_netdev_ops = {
  *    Try to open driver instance
  *
  */
-static int smsc_ircc_open(unsigned int fir_base, unsigned int sir_base, u8 dma, u8 irq)
+static int __devinit smsc_ircc_open(unsigned int fir_base, unsigned int sir_base, u8 dma, u8 irq)
 {
 	struct smsc_ircc_cb *self;
 	struct net_device *dev;
 	int err;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	err = smsc_ircc_present(fir_base, sir_base);
 	if (err)
@@ -531,7 +530,7 @@ static int smsc_ircc_open(unsigned int fir_base, unsigned int sir_base, u8 dma, 
 
 	err = -ENOMEM;
 	if (dev_count >= ARRAY_SIZE(dev_self)) {
-		net_warn_ratelimited("%s(), too many devices!\n", __func__);
+	        IRDA_WARNING("%s(), too many devices!\n", __func__);
 		goto err_out1;
 	}
 
@@ -540,8 +539,7 @@ static int smsc_ircc_open(unsigned int fir_base, unsigned int sir_base, u8 dma, 
 	 */
 	dev = alloc_irdadev(sizeof(struct smsc_ircc_cb));
 	if (!dev) {
-		net_warn_ratelimited("%s() can't allocate net device\n",
-				     __func__);
+		IRDA_WARNING("%s() can't allocate net device\n", __func__);
 		goto err_out1;
 	}
 
@@ -565,16 +563,25 @@ static int smsc_ircc_open(unsigned int fir_base, unsigned int sir_base, u8 dma, 
 	self->tx_buff.truesize = SMSC_IRCC2_TX_BUFF_TRUESIZE;
 
 	self->rx_buff.head =
-		dma_zalloc_coherent(NULL, self->rx_buff.truesize,
-				    &self->rx_buff_dma, GFP_KERNEL);
-	if (self->rx_buff.head == NULL)
+		dma_alloc_coherent(NULL, self->rx_buff.truesize,
+				   &self->rx_buff_dma, GFP_KERNEL);
+	if (self->rx_buff.head == NULL) {
+		IRDA_ERROR("%s, Can't allocate memory for receive buffer!\n",
+			   driver_name);
 		goto err_out2;
+	}
 
 	self->tx_buff.head =
-		dma_zalloc_coherent(NULL, self->tx_buff.truesize,
-				    &self->tx_buff_dma, GFP_KERNEL);
-	if (self->tx_buff.head == NULL)
+		dma_alloc_coherent(NULL, self->tx_buff.truesize,
+				   &self->tx_buff_dma, GFP_KERNEL);
+	if (self->tx_buff.head == NULL) {
+		IRDA_ERROR("%s, Can't allocate memory for transmit buffer!\n",
+			   driver_name);
 		goto err_out3;
+	}
+
+	memset(self->rx_buff.head, 0, self->rx_buff.truesize);
+	memset(self->tx_buff.head, 0, self->tx_buff.truesize);
 
 	self->rx_buff.in_frame = FALSE;
 	self->rx_buff.state = OUTSIDE_FRAME;
@@ -593,8 +600,8 @@ static int smsc_ircc_open(unsigned int fir_base, unsigned int sir_base, u8 dma, 
 
 	err = register_netdev(self->netdev);
 	if (err) {
-		net_err_ratelimited("%s, Network device registration failed!\n",
-				    driver_name);
+		IRDA_ERROR("%s, Network device registration failed!\n",
+			   driver_name);
 		goto err_out4;
 	}
 
@@ -606,7 +613,7 @@ static int smsc_ircc_open(unsigned int fir_base, unsigned int sir_base, u8 dma, 
 	}
 	platform_set_drvdata(self->pldev, self);
 
-	net_info_ratelimited("IrDA: Registered device %s\n", dev->name);
+	IRDA_MESSAGE("IrDA: Registered device %s\n", dev->name);
 	dev_count++;
 
 	return 0;
@@ -642,15 +649,15 @@ static int smsc_ircc_present(unsigned int fir_base, unsigned int sir_base)
 
 	if (!request_region(fir_base, SMSC_IRCC2_FIR_CHIP_IO_EXTENT,
 			    driver_name)) {
-		net_warn_ratelimited("%s: can't get fir_base of 0x%03x\n",
-				     __func__, fir_base);
+		IRDA_WARNING("%s: can't get fir_base of 0x%03x\n",
+			     __func__, fir_base);
 		goto out1;
 	}
 
 	if (!request_region(sir_base, SMSC_IRCC2_SIR_CHIP_IO_EXTENT,
 			    driver_name)) {
-		net_warn_ratelimited("%s: can't get sir_base of 0x%03x\n",
-				     __func__, sir_base);
+		IRDA_WARNING("%s: can't get sir_base of 0x%03x\n",
+			     __func__, sir_base);
 		goto out2;
 	}
 
@@ -665,13 +672,13 @@ static int smsc_ircc_present(unsigned int fir_base, unsigned int sir_base)
 	irq     = (config & IRCC_INTERFACE_IRQ_MASK) >> 4;
 
 	if (high != 0x10 || low != 0xb8 || (chip != 0xf1 && chip != 0xf2)) {
-		net_warn_ratelimited("%s(), addr 0x%04x - no device found!\n",
-				     __func__, fir_base);
+		IRDA_WARNING("%s(), addr 0x%04x - no device found!\n",
+			     __func__, fir_base);
 		goto out3;
 	}
-	net_info_ratelimited("SMsC IrDA Controller found\n IrCC version %d.%d, firport 0x%03x, sirport 0x%03x dma=%d, irq=%d\n",
-			     chip & 0x0f, version,
-			     fir_base, sir_base, dma, irq);
+	IRDA_MESSAGE("SMsC IrDA Controller found\n IrCC version %d.%d, "
+		     "firport 0x%03x, sirport 0x%03x dma=%d, irq=%d\n",
+		     chip & 0x0f, version, fir_base, sir_base, dma, irq);
 
 	return 0;
 
@@ -709,16 +716,16 @@ static void smsc_ircc_setup_io(struct smsc_ircc_cb *self,
 
 	if (irq != IRQ_INVAL) {
 		if (irq != chip_irq)
-			net_info_ratelimited("%s, Overriding IRQ - chip says %d, using %d\n",
-					     driver_name, chip_irq, irq);
+			IRDA_MESSAGE("%s, Overriding IRQ - chip says %d, using %d\n",
+				     driver_name, chip_irq, irq);
 		self->io.irq = irq;
 	} else
 		self->io.irq = chip_irq;
 
 	if (dma != DMA_INVAL) {
 		if (dma != chip_dma)
-			net_info_ratelimited("%s, Overriding DMA - chip says %d, using %d\n",
-					     driver_name, chip_dma, dma);
+			IRDA_MESSAGE("%s, Overriding DMA - chip says %d, using %d\n",
+				     driver_name, chip_dma, dma);
 		self->io.dma = dma;
 	} else
 		self->io.dma = chip_dma;
@@ -803,7 +810,7 @@ static int smsc_ircc_net_ioctl(struct net_device *dev, struct ifreq *rq, int cmd
 
 	IRDA_ASSERT(self != NULL, return -1;);
 
-	pr_debug("%s(), %s, (cmd=0x%X)\n", __func__, dev->name, cmd);
+	IRDA_DEBUG(2, "%s(), %s, (cmd=0x%X)\n", __func__, dev->name, cmd);
 
 	switch (cmd) {
 	case SIOCSBANDWIDTH: /* Set bandwidth */
@@ -857,12 +864,12 @@ static void smsc_ircc_timeout(struct net_device *dev)
 	struct smsc_ircc_cb *self = netdev_priv(dev);
 	unsigned long flags;
 
-	net_warn_ratelimited("%s: transmit timed out, changing speed to: %d\n",
-			     dev->name, self->io.speed);
+	IRDA_WARNING("%s: transmit timed out, changing speed to: %d\n",
+		     dev->name, self->io.speed);
 	spin_lock_irqsave(&self->lock, flags);
 	smsc_ircc_sir_start(self);
 	smsc_ircc_change_speed(self, self->io.speed);
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue(dev);
 	spin_unlock_irqrestore(&self->lock, flags);
 }
@@ -882,7 +889,7 @@ static netdev_tx_t smsc_ircc_hard_xmit_sir(struct sk_buff *skb,
 	unsigned long flags;
 	s32 speed;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	IRDA_ASSERT(dev != NULL, return NETDEV_TX_OK;);
 
@@ -957,21 +964,21 @@ static void smsc_ircc_set_fir_speed(struct smsc_ircc_cb *self, u32 speed)
 		ir_mode = IRCC_CFGA_IRDA_HDLC;
 		ctrl = IRCC_CRC;
 		fast = 0;
-		pr_debug("%s(), handling baud of 576000\n", __func__);
+		IRDA_DEBUG(0, "%s(), handling baud of 576000\n", __func__);
 		break;
 	case 1152000:
 		ir_mode = IRCC_CFGA_IRDA_HDLC;
 		ctrl = IRCC_1152 | IRCC_CRC;
 		fast = IRCC_LCR_A_FAST | IRCC_LCR_A_GP_DATA;
-		pr_debug("%s(), handling baud of 1152000\n",
-			 __func__);
+		IRDA_DEBUG(0, "%s(), handling baud of 1152000\n",
+			   __func__);
 		break;
 	case 4000000:
 		ir_mode = IRCC_CFGA_IRDA_4PPM;
 		ctrl = IRCC_CRC;
 		fast = IRCC_LCR_A_FAST;
-		pr_debug("%s(), handling baud of 4000000\n",
-			 __func__);
+		IRDA_DEBUG(0, "%s(), handling baud of 4000000\n",
+			   __func__);
 		break;
 	}
 	#if 0
@@ -999,7 +1006,7 @@ static void smsc_ircc_fir_start(struct smsc_ircc_cb *self)
 	struct net_device *dev;
 	int fir_base;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	IRDA_ASSERT(self != NULL, return;);
 	dev = self->netdev;
@@ -1044,7 +1051,7 @@ static void smsc_ircc_fir_stop(struct smsc_ircc_cb *self)
 {
 	int fir_base;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	IRDA_ASSERT(self != NULL, return;);
 
@@ -1068,7 +1075,7 @@ static void smsc_ircc_change_speed(struct smsc_ircc_cb *self, u32 speed)
 	struct net_device *dev;
 	int last_speed_was_sir;
 
-	pr_debug("%s() changing speed to: %d\n", __func__, speed);
+	IRDA_DEBUG(0, "%s() changing speed to: %d\n", __func__, speed);
 
 	IRDA_ASSERT(self != NULL, return;);
 	dev = self->netdev;
@@ -1136,7 +1143,7 @@ static void smsc_ircc_set_sir_speed(struct smsc_ircc_cb *self, __u32 speed)
 	int lcr;    /* Line control reg */
 	int divisor;
 
-	pr_debug("%s(), Setting speed to: %d\n", __func__, speed);
+	IRDA_DEBUG(0, "%s(), Setting speed to: %d\n", __func__, speed);
 
 	IRDA_ASSERT(self != NULL, return;);
 	iobase = self->io.sir_base;
@@ -1171,7 +1178,7 @@ static void smsc_ircc_set_sir_speed(struct smsc_ircc_cb *self, __u32 speed)
 	/* Turn on interrups */
 	outb(UART_IER_RLSI | UART_IER_RDI | UART_IER_THRI, iobase + UART_IER);
 
-	pr_debug("%s() speed changed to: %d\n", __func__, speed);
+	IRDA_DEBUG(2, "%s() speed changed to: %d\n", __func__, speed);
 }
 
 
@@ -1255,7 +1262,7 @@ static void smsc_ircc_dma_xmit(struct smsc_ircc_cb *self, int bofs)
 	int iobase = self->io.fir_base;
 	u8 ctrl;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(3, "%s\n", __func__);
 #if 1
 	/* Disable Rx */
 	register_bank(iobase, 0);
@@ -1309,7 +1316,7 @@ static void smsc_ircc_dma_xmit_complete(struct smsc_ircc_cb *self)
 {
 	int iobase = self->io.fir_base;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(3, "%s\n", __func__);
 #if 0
 	/* Disable Tx */
 	register_bank(iobase, 0);
@@ -1413,7 +1420,7 @@ static void smsc_ircc_dma_receive_complete(struct smsc_ircc_cb *self)
 
 	register_bank(iobase, 0);
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(3, "%s\n", __func__);
 #if 0
 	/* Disable Rx */
 	register_bank(iobase, 0);
@@ -1424,8 +1431,8 @@ static void smsc_ircc_dma_receive_complete(struct smsc_ircc_cb *self)
 	lsr= inb(iobase + IRCC_LSR);
 	msgcnt = inb(iobase + IRCC_LCR_B) & 0x08;
 
-	pr_debug("%s: dma count = %d\n", __func__,
-		 get_dma_residue(self->io.dma));
+	IRDA_DEBUG(2, "%s: dma count = %d\n", __func__,
+		   get_dma_residue(self->io.dma));
 
 	len = self->rx_buff.truesize - get_dma_residue(self->io.dma);
 
@@ -1447,15 +1454,17 @@ static void smsc_ircc_dma_receive_complete(struct smsc_ircc_cb *self)
 	len -= self->io.speed < 4000000 ? 2 : 4;
 
 	if (len < 2 || len > 2050) {
-		net_warn_ratelimited("%s(), bogus len=%d\n", __func__, len);
+		IRDA_WARNING("%s(), bogus len=%d\n", __func__, len);
 		return;
 	}
-	pr_debug("%s: msgcnt = %d, len=%d\n", __func__, msgcnt, len);
+	IRDA_DEBUG(2, "%s: msgcnt = %d, len=%d\n", __func__, msgcnt, len);
 
 	skb = dev_alloc_skb(len + 1);
-	if (!skb)
+	if (!skb) {
+		IRDA_WARNING("%s(), memory squeeze, dropping frame.\n",
+			     __func__);
 		return;
-
+	}
 	/* Make sure IP header gets aligned */
 	skb_reserve(skb, 1);
 
@@ -1494,7 +1503,7 @@ static void smsc_ircc_sir_receive(struct smsc_ircc_cb *self)
 
 		/* Make sure we don't stay here to long */
 		if (boguscount++ > 32) {
-			pr_debug("%s(), breaking!\n", __func__);
+			IRDA_DEBUG(2, "%s(), breaking!\n", __func__);
 			break;
 		}
 	} while (inb(iobase + UART_LSR) & UART_LSR_DR);
@@ -1536,7 +1545,7 @@ static irqreturn_t smsc_ircc_interrupt(int dummy, void *dev_id)
 	lcra = inb(iobase + IRCC_LCR_A);
 	lsr = inb(iobase + IRCC_LSR);
 
-	pr_debug("%s(), iir = 0x%02x\n", __func__, iir);
+	IRDA_DEBUG(2, "%s(), iir = 0x%02x\n", __func__, iir);
 
 	if (iir & IRCC_IIR_EOM) {
 		if (self->io.direction == IO_RECV)
@@ -1586,12 +1595,12 @@ static irqreturn_t smsc_ircc_interrupt_sir(struct net_device *dev)
 		/* Clear interrupt */
 		lsr = inb(iobase + UART_LSR);
 
-		pr_debug("%s(), iir=%02x, lsr=%02x, iobase=%#x\n",
-			 __func__, iir, lsr, iobase);
+		IRDA_DEBUG(4, "%s(), iir=%02x, lsr=%02x, iobase=%#x\n",
+			    __func__, iir, lsr, iobase);
 
 		switch (iir) {
 		case UART_IIR_RLSI:
-			pr_debug("%s(), RLSI\n", __func__);
+			IRDA_DEBUG(2, "%s(), RLSI\n", __func__);
 			break;
 		case UART_IIR_RDI:
 			/* Receive interrupt */
@@ -1603,8 +1612,8 @@ static irqreturn_t smsc_ircc_interrupt_sir(struct net_device *dev)
 				smsc_ircc_sir_write_wakeup(self);
 			break;
 		default:
-			pr_debug("%s(), unhandled IIR=%#x\n",
-				 __func__, iir);
+			IRDA_DEBUG(0, "%s(), unhandled IIR=%#x\n",
+				   __func__, iir);
 			break;
 		}
 
@@ -1631,12 +1640,12 @@ static int ircc_is_receiving(struct smsc_ircc_cb *self)
 	int status = FALSE;
 	/* int iobase; */
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	IRDA_ASSERT(self != NULL, return FALSE;);
 
-	pr_debug("%s: dma count = %d\n", __func__,
-		 get_dma_residue(self->io.dma));
+	IRDA_DEBUG(0, "%s: dma count = %d\n", __func__,
+		   get_dma_residue(self->io.dma));
 
 	status = (self->rx_buff.state != OUTSIDE_FRAME);
 
@@ -1651,8 +1660,8 @@ static int smsc_ircc_request_irq(struct smsc_ircc_cb *self)
 	error = request_irq(self->io.irq, smsc_ircc_interrupt, 0,
 			    self->netdev->name, self->netdev);
 	if (error)
-		pr_debug("%s(), unable to allocate irq=%d, err=%d\n",
-			 __func__, self->io.irq, error);
+		IRDA_DEBUG(0, "%s(), unable to allocate irq=%d, err=%d\n",
+			   __func__, self->io.irq, error);
 
 	return error;
 }
@@ -1696,21 +1705,21 @@ static int smsc_ircc_net_open(struct net_device *dev)
 	struct smsc_ircc_cb *self;
 	char hwname[16];
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	IRDA_ASSERT(dev != NULL, return -1;);
 	self = netdev_priv(dev);
 	IRDA_ASSERT(self != NULL, return 0;);
 
 	if (self->io.suspended) {
-		pr_debug("%s(), device is suspended\n", __func__);
+		IRDA_DEBUG(0, "%s(), device is suspended\n", __func__);
 		return -EAGAIN;
 	}
 
 	if (request_irq(self->io.irq, smsc_ircc_interrupt, 0, dev->name,
 			(void *) dev)) {
-		pr_debug("%s(), unable to allocate irq=%d\n",
-			 __func__, self->io.irq);
+		IRDA_DEBUG(0, "%s(), unable to allocate irq=%d\n",
+			   __func__, self->io.irq);
 		return -EAGAIN;
 	}
 
@@ -1733,8 +1742,8 @@ static int smsc_ircc_net_open(struct net_device *dev)
 	if (request_dma(self->io.dma, dev->name)) {
 		smsc_ircc_net_close(dev);
 
-		net_warn_ratelimited("%s(), unable to allocate DMA=%d\n",
-				     __func__, self->io.dma);
+		IRDA_WARNING("%s(), unable to allocate DMA=%d\n",
+			     __func__, self->io.dma);
 		return -EAGAIN;
 	}
 
@@ -1753,7 +1762,7 @@ static int smsc_ircc_net_close(struct net_device *dev)
 {
 	struct smsc_ircc_cb *self;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	IRDA_ASSERT(dev != NULL, return -1;);
 	self = netdev_priv(dev);
@@ -1784,7 +1793,7 @@ static int smsc_ircc_suspend(struct platform_device *dev, pm_message_t state)
 	struct smsc_ircc_cb *self = platform_get_drvdata(dev);
 
 	if (!self->io.suspended) {
-		pr_debug("%s, Suspending\n", driver_name);
+		IRDA_DEBUG(1, "%s, Suspending\n", driver_name);
 
 		rtnl_lock();
 		if (netif_running(self->netdev)) {
@@ -1805,7 +1814,7 @@ static int smsc_ircc_resume(struct platform_device *dev)
 	struct smsc_ircc_cb *self = platform_get_drvdata(dev);
 
 	if (self->io.suspended) {
-		pr_debug("%s, Waking up\n", driver_name);
+		IRDA_DEBUG(1, "%s, Waking up\n", driver_name);
 
 		rtnl_lock();
 		smsc_ircc_init_chip(self);
@@ -1836,7 +1845,7 @@ static int smsc_ircc_resume(struct platform_device *dev)
  */
 static int __exit smsc_ircc_close(struct smsc_ircc_cb *self)
 {
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	IRDA_ASSERT(self != NULL, return -1;);
 
@@ -1848,13 +1857,13 @@ static int __exit smsc_ircc_close(struct smsc_ircc_cb *self)
 	smsc_ircc_stop_interrupts(self);
 
 	/* Release the PORTS that this driver is using */
-	pr_debug("%s(), releasing 0x%03x\n",  __func__,
-		 self->io.fir_base);
+	IRDA_DEBUG(0, "%s(), releasing 0x%03x\n",  __func__,
+		   self->io.fir_base);
 
 	release_region(self->io.fir_base, self->io.fir_ext);
 
-	pr_debug("%s(), releasing 0x%03x\n", __func__,
-		 self->io.sir_base);
+	IRDA_DEBUG(0, "%s(), releasing 0x%03x\n", __func__,
+		   self->io.sir_base);
 
 	release_region(self->io.sir_base, self->io.sir_ext);
 
@@ -1875,7 +1884,7 @@ static void __exit smsc_ircc_cleanup(void)
 {
 	int i;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	for (i = 0; i < 2; i++) {
 		if (dev_self[i])
@@ -1899,7 +1908,7 @@ static void smsc_ircc_sir_start(struct smsc_ircc_cb *self)
 	struct net_device *dev;
 	int fir_base, sir_base;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(3, "%s\n", __func__);
 
 	IRDA_ASSERT(self != NULL, return;);
 	dev = self->netdev;
@@ -1925,7 +1934,7 @@ static void smsc_ircc_sir_start(struct smsc_ircc_cb *self)
 	/* Turn on interrups */
 	outb(UART_IER_RLSI | UART_IER_RDI |UART_IER_THRI, sir_base + UART_IER);
 
-	pr_debug("%s() - exit\n", __func__);
+	IRDA_DEBUG(3, "%s() - exit\n", __func__);
 
 	outb(0x00, fir_base + IRCC_MASTER);
 }
@@ -1935,7 +1944,7 @@ void smsc_ircc_sir_stop(struct smsc_ircc_cb *self)
 {
 	int iobase;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(3, "%s\n", __func__);
 	iobase = self->io.sir_base;
 
 	/* Reset UART */
@@ -1961,7 +1970,7 @@ static void smsc_ircc_sir_write_wakeup(struct smsc_ircc_cb *self)
 
 	IRDA_ASSERT(self != NULL, return;);
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(4, "%s\n", __func__);
 
 	iobase = self->io.sir_base;
 
@@ -1982,8 +1991,8 @@ static void smsc_ircc_sir_write_wakeup(struct smsc_ircc_cb *self)
 		 *  if we need to change the speed of the hardware
 		 */
 		if (self->new_speed) {
-			pr_debug("%s(), Changing speed to %d.\n",
-				 __func__, self->new_speed);
+			IRDA_DEBUG(5, "%s(), Changing speed to %d.\n",
+				   __func__, self->new_speed);
 			smsc_ircc_sir_wait_hw_transmitter_finish(self);
 			smsc_ircc_change_speed(self, self->new_speed);
 			self->new_speed = 0;
@@ -2022,8 +2031,7 @@ static int smsc_ircc_sir_write(int iobase, int fifo_size, __u8 *buf, int len)
 
 	/* Tx FIFO should be empty! */
 	if (!(inb(iobase + UART_LSR) & UART_LSR_THRE)) {
-		net_warn_ratelimited("%s(), failed, fifo not empty!\n",
-				     __func__);
+		IRDA_WARNING("%s(), failed, fifo not empty!\n", __func__);
 		return 0;
 	}
 
@@ -2062,14 +2070,14 @@ static void smsc_ircc_probe_transceiver(struct smsc_ircc_cb *self)
 
 	for (i = 0; smsc_transceivers[i].name != NULL; i++)
 		if (smsc_transceivers[i].probe(self->io.fir_base)) {
-			net_info_ratelimited(" %s transceiver found\n",
-					     smsc_transceivers[i].name);
+			IRDA_MESSAGE(" %s transceiver found\n",
+				     smsc_transceivers[i].name);
 			self->transceiver= i + 1;
 			return;
 		}
 
-	net_info_ratelimited("No transceiver found. Defaulting to %s\n",
-			     smsc_transceivers[SMSC_IRCC2_C_DEFAULT_TRANSCEIVER].name);
+	IRDA_MESSAGE("No transceiver found. Defaulting to %s\n",
+		     smsc_transceivers[SMSC_IRCC2_C_DEFAULT_TRANSCEIVER].name);
 
 	self->transceiver = SMSC_IRCC2_C_DEFAULT_TRANSCEIVER;
 }
@@ -2123,7 +2131,7 @@ static void smsc_ircc_sir_wait_hw_transmitter_finish(struct smsc_ircc_cb *self)
 		udelay(1);
 
 	if (count < 0)
-		pr_debug("%s(): stuck transmitter\n", __func__);
+		IRDA_DEBUG(0, "%s(): stuck transmitter\n", __func__);
 }
 
 
@@ -2184,7 +2192,7 @@ static int __init smsc_superio_flat(const struct smsc_chip *chips, unsigned shor
 	u8 mode, dma, irq;
 	int ret = -ENODEV;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	if (smsc_ircc_probe(cfgbase, SMSCSIOFLAT_DEVICEID_REG, chips, type) == NULL)
 		return ret;
@@ -2195,7 +2203,7 @@ static int __init smsc_superio_flat(const struct smsc_chip *chips, unsigned shor
 	/*printk(KERN_WARNING "%s(): mode: 0x%02x\n", __func__, mode);*/
 
 	if (!(mode & SMSCSIOFLAT_UART2MODE_VAL_IRDA))
-		net_warn_ratelimited("%s(): IrDA not enabled\n", __func__);
+		IRDA_WARNING("%s(): IrDA not enabled\n", __func__);
 
 	outb(SMSCSIOFLAT_UART2BASEADDR_REG, cfgbase);
 	sirbase = inb(cfgbase + 1) << 2;
@@ -2212,8 +2220,7 @@ static int __init smsc_superio_flat(const struct smsc_chip *chips, unsigned shor
 	outb(SMSCSIOFLAT_UARTIRQSELECT_REG, cfgbase);
 	irq = inb(cfgbase + 1) & SMSCSIOFLAT_UART2IRQSELECT_MASK;
 
-	net_info_ratelimited("%s(): fir: 0x%02x, sir: 0x%02x, dma: %02d, irq: %d, mode: 0x%02x\n",
-			     __func__, firbase, sirbase, dma, irq, mode);
+	IRDA_MESSAGE("%s(): fir: 0x%02x, sir: 0x%02x, dma: %02d, irq: %d, mode: 0x%02x\n", __func__, firbase, sirbase, dma, irq, mode);
 
 	if (firbase && smsc_ircc_open(firbase, sirbase, dma, irq) == 0)
 		ret = 0;
@@ -2235,7 +2242,7 @@ static int __init smsc_superio_paged(const struct smsc_chip *chips, unsigned sho
 	unsigned short fir_io, sir_io;
 	int ret = -ENODEV;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	if (smsc_ircc_probe(cfg_base, 0x20, chips, type) == NULL)
 		return ret;
@@ -2269,7 +2276,7 @@ static int __init smsc_superio_paged(const struct smsc_chip *chips, unsigned sho
 
 static int __init smsc_access(unsigned short cfg_base, unsigned char reg)
 {
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	outb(reg, cfg_base);
 	return inb(cfg_base) != reg ? -1 : 0;
@@ -2279,7 +2286,7 @@ static const struct smsc_chip * __init smsc_ircc_probe(unsigned short cfg_base, 
 {
 	u8 devid, xdevid, rev;
 
-	pr_debug("%s\n", __func__);
+	IRDA_DEBUG(1, "%s\n", __func__);
 
 	/* Leave configuration */
 
@@ -2334,16 +2341,16 @@ static const struct smsc_chip * __init smsc_ircc_probe(unsigned short cfg_base, 
 			return NULL;
 	}
 
-	net_info_ratelimited("found SMC SuperIO Chip (devid=0x%02x rev=%02X base=0x%04x): %s%s\n",
-			     devid, rev, cfg_base, type, chip->name);
+	IRDA_MESSAGE("found SMC SuperIO Chip (devid=0x%02x rev=%02X base=0x%04x): %s%s\n",
+		     devid, rev, cfg_base, type, chip->name);
 
 	if (chip->rev > rev) {
-		net_info_ratelimited("Revision higher than expected\n");
+		IRDA_MESSAGE("Revision higher than expected\n");
 		return NULL;
 	}
 
 	if (chip->flags & NoIRDA)
-		net_info_ratelimited("chipset does not support IRDA\n");
+		IRDA_MESSAGE("chipset does not support IRDA\n");
 
 	return chip;
 }
@@ -2353,8 +2360,8 @@ static int __init smsc_superio_fdc(unsigned short cfg_base)
 	int ret = -1;
 
 	if (!request_region(cfg_base, 2, driver_name)) {
-		net_warn_ratelimited("%s: can't get cfg_base of 0x%03x\n",
-				     __func__, cfg_base);
+		IRDA_WARNING("%s: can't get cfg_base of 0x%03x\n",
+			     __func__, cfg_base);
 	} else {
 		if (!smsc_superio_flat(fdc_chips_flat, cfg_base, "FDC") ||
 		    !smsc_superio_paged(fdc_chips_paged, cfg_base, "FDC"))
@@ -2371,8 +2378,8 @@ static int __init smsc_superio_lpc(unsigned short cfg_base)
 	int ret = -1;
 
 	if (!request_region(cfg_base, 2, driver_name)) {
-		net_warn_ratelimited("%s: can't get cfg_base of 0x%03x\n",
-				     __func__, cfg_base);
+		IRDA_WARNING("%s: can't get cfg_base of 0x%03x\n",
+			     __func__, cfg_base);
 	} else {
 		if (!smsc_superio_flat(lpc_chips_flat, cfg_base, "LPC") ||
 		    !smsc_superio_paged(lpc_chips_paged, cfg_base, "LPC"))
@@ -2534,8 +2541,9 @@ static int __init preconfigure_smsc_chip(struct
 	outb(LPC47N227_CFGACCESSKEY, iobase); // enter configuration state
 	outb(SMSCSIOFLAT_DEVICEID_REG, iobase); // set for device ID
 	tmpbyte = inb(iobase +1); // Read device ID
-	pr_debug("Detected Chip id: 0x%02x, setting up registers...\n",
-		 tmpbyte);
+	IRDA_DEBUG(0,
+		   "Detected Chip id: 0x%02x, setting up registers...\n",
+		   tmpbyte);
 
 	/* Disable UART1 and set up SIR I/O port */
 	outb(0x24, iobase);  // select CR24 - UART1 base addr
@@ -2544,8 +2552,8 @@ static int __init preconfigure_smsc_chip(struct
 	outb( (conf->sir_io >> 2), iobase + 1); // bits 2-9 of 0x3f8
 	tmpbyte = inb(iobase + 1);
 	if (tmpbyte != (conf->sir_io >> 2) ) {
-		net_warn_ratelimited("ERROR: could not configure SIR ioport\n");
-		net_warn_ratelimited("Try to supply ircc_cfg argument\n");
+		IRDA_WARNING("ERROR: could not configure SIR ioport.\n");
+		IRDA_WARNING("Try to supply ircc_cfg argument.\n");
 		return -ENXIO;
 	}
 
@@ -2557,7 +2565,7 @@ static int __init preconfigure_smsc_chip(struct
 	outb(tmpbyte, iobase + 1);
 	tmpbyte = inb(iobase + 1) & SMSCSIOFLAT_UART2IRQSELECT_MASK;
 	if (tmpbyte != conf->fir_irq) {
-		net_warn_ratelimited("ERROR: could not configure FIR IRQ channel\n");
+		IRDA_WARNING("ERROR: could not configure FIR IRQ channel.\n");
 		return -ENXIO;
 	}
 
@@ -2566,7 +2574,7 @@ static int __init preconfigure_smsc_chip(struct
 	outb((conf->fir_io >> 3), iobase + 1);
 	tmpbyte = inb(iobase + 1);
 	if (tmpbyte != (conf->fir_io >> 3) ) {
-		net_warn_ratelimited("ERROR: could not configure FIR I/O port\n");
+		IRDA_WARNING("ERROR: could not configure FIR I/O port.\n");
 		return -ENXIO;
 	}
 
@@ -2575,7 +2583,7 @@ static int __init preconfigure_smsc_chip(struct
 	outb((conf->fir_dma & LPC47N227_FIRDMASELECT_MASK), iobase + 1); // DMA
 	tmpbyte = inb(iobase + 1) & LPC47N227_FIRDMASELECT_MASK;
 	if (tmpbyte != (conf->fir_dma & LPC47N227_FIRDMASELECT_MASK)) {
-		net_warn_ratelimited("ERROR: could not configure FIR DMA channel\n");
+		IRDA_WARNING("ERROR: could not configure FIR DMA channel.\n");
 		return -ENXIO;
 	}
 
@@ -2632,7 +2640,7 @@ static int __init preconfigure_through_82801(struct pci_dev *dev,
 	unsigned short tmpword;
 	unsigned char tmpbyte;
 
-	net_info_ratelimited("Setting up Intel 82801 controller and SMSC device\n");
+	IRDA_MESSAGE("Setting up Intel 82801 controller and SMSC device\n");
 	/*
 	 * Select the range for the COMA COM port (SIR)
 	 * Register COM_DEC:
@@ -2681,7 +2689,7 @@ static int __init preconfigure_through_82801(struct pci_dev *dev,
 	default:
 		tmpbyte |= 0x01; /* COM2 default */
 	}
-	pr_debug("COM_DEC (write): 0x%02x\n", tmpbyte);
+	IRDA_DEBUG(1, "COM_DEC (write): 0x%02x\n", tmpbyte);
 	pci_write_config_byte(dev, COM_DEC, tmpbyte);
 
 	/* Enable Low Pin Count interface */
@@ -2703,13 +2711,13 @@ static int __init preconfigure_through_82801(struct pci_dev *dev,
 		tmpword |= 0x0400;
 		break;
 	default:
-		net_warn_ratelimited("Uncommon I/O base address: 0x%04x\n",
-				     conf->cfg_base);
+		IRDA_WARNING("Uncommon I/O base address: 0x%04x\n",
+			     conf->cfg_base);
 		break;
 	}
 	tmpword &= 0xfffd; /* disable LPC COMB */
 	tmpword |= 0x0001; /* set bit 0 : enable LPC COMA addr range (GEN2) */
-	pr_debug("LPC_EN (write): 0x%04x\n", tmpword);
+	IRDA_DEBUG(1, "LPC_EN (write): 0x%04x\n", tmpword);
 	pci_write_config_word(dev, LPC_EN, tmpword);
 
 	/*
@@ -2754,7 +2762,7 @@ static int __init preconfigure_through_82801(struct pci_dev *dev,
 	default:
 		break; /* do not change settings */
 	}
-	pr_debug("PCI_DMA_C (write): 0x%04x\n", tmpword);
+	IRDA_DEBUG(1, "PCI_DMA_C (write): 0x%04x\n", tmpword);
 	pci_write_config_word(dev, PCI_DMA_C, tmpword);
 
 	/*
@@ -2765,7 +2773,7 @@ static int __init preconfigure_through_82801(struct pci_dev *dev,
 	 */
 	tmpword = conf->fir_io & 0xfff8;
 	tmpword |= 0x0001;
-	pr_debug("GEN2_DEC (write): 0x%04x\n", tmpword);
+	IRDA_DEBUG(1, "GEN2_DEC (write): 0x%04x\n", tmpword);
 	pci_write_config_word(dev, GEN2_DEC, tmpword);
 
 	/* Pre-configure chip */
@@ -2804,8 +2812,7 @@ static void __init preconfigure_ali_port(struct pci_dev *dev,
 		mask = 0x08;
 		break;
 	default:
-		net_err_ratelimited("Failed to configure unsupported port on ALi 1533 bridge: 0x%04x\n",
-				    port);
+		IRDA_ERROR("Failed to configure unsupported port on ALi 1533 bridge: 0x%04x\n", port);
 		return;
 	}
 
@@ -2813,8 +2820,7 @@ static void __init preconfigure_ali_port(struct pci_dev *dev,
 	/* Turn on the right bits */
 	tmpbyte |= mask;
 	pci_write_config_byte(dev, reg, tmpbyte);
-	net_info_ratelimited("Activated ALi 1533 ISA bridge port 0x%04x\n",
-			     port);
+	IRDA_MESSAGE("Activated ALi 1533 ISA bridge port 0x%04x.\n", port);
 }
 
 static int __init preconfigure_through_ali(struct pci_dev *dev,
@@ -2883,8 +2889,7 @@ static int __init smsc_ircc_preconfigure_subsystems(unsigned short ircc_cfg,
 				if (ircc_irq != IRQ_INVAL)
 					tmpconf.fir_irq = ircc_irq;
 
-				net_info_ratelimited("Detected unconfigured %s SMSC IrDA chip, pre-configuring device\n",
-						     conf->name);
+				IRDA_MESSAGE("Detected unconfigured %s SMSC IrDA chip, pre-configuring device.\n", conf->name);
 				if (conf->preconfigure)
 					ret = conf->preconfigure(dev, &tmpconf);
 				else
@@ -2929,8 +2934,8 @@ static void smsc_ircc_set_transceiver_smsc_ircc_atc(int fir_base, u32 speed)
 		/* empty */;
 
 	if (val)
-		net_warn_ratelimited("%s(): ATC: 0x%02x\n",
-				     __func__, inb(fir_base + IRCC_ATC));
+		IRDA_WARNING("%s(): ATC: 0x%02x\n", __func__,
+			     inb(fir_base + IRCC_ATC));
 }
 
 /*

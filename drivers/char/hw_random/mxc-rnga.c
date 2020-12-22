@@ -24,7 +24,6 @@
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
 #include <linux/hw_random.h>
-#include <linux/delay.h>
 #include <linux/io.h>
 
 /* RNGA Registers */
@@ -59,47 +58,38 @@
 #define RNGA_STATUS_LAST_READ_STATUS	0x00000002
 #define RNGA_STATUS_SECURITY_VIOLATION	0x00000001
 
-struct mxc_rng {
-	struct device *dev;
-	struct hwrng rng;
-	void __iomem *mem;
-	struct clk *clk;
-};
+static struct platform_device *rng_dev;
 
-static int mxc_rnga_data_present(struct hwrng *rng, int wait)
+static int mxc_rnga_data_present(struct hwrng *rng)
 {
-	int i;
-	struct mxc_rng *mxc_rng = container_of(rng, struct mxc_rng, rng);
+	int level;
+	void __iomem *rng_base = (void __iomem *)rng->priv;
 
-	for (i = 0; i < 20; i++) {
-		/* how many random numbers are in FIFO? [0-16] */
-		int level = (__raw_readl(mxc_rng->mem + RNGA_STATUS) &
-				RNGA_STATUS_LEVEL_MASK) >> 8;
-		if (level || !wait)
-			return !!level;
-		udelay(10);
-	}
-	return 0;
+	/* how many random numbers is in FIFO? [0-16] */
+	level = ((__raw_readl(rng_base + RNGA_STATUS) &
+			RNGA_STATUS_LEVEL_MASK) >> 8);
+
+	return level > 0 ? 1 : 0;
 }
 
 static int mxc_rnga_data_read(struct hwrng *rng, u32 * data)
 {
 	int err;
 	u32 ctrl;
-	struct mxc_rng *mxc_rng = container_of(rng, struct mxc_rng, rng);
+	void __iomem *rng_base = (void __iomem *)rng->priv;
 
 	/* retrieve a random number from FIFO */
-	*data = __raw_readl(mxc_rng->mem + RNGA_OUTPUT_FIFO);
+	*data = __raw_readl(rng_base + RNGA_OUTPUT_FIFO);
 
 	/* some error while reading this random number? */
-	err = __raw_readl(mxc_rng->mem + RNGA_STATUS) & RNGA_STATUS_ERROR_INT;
+	err = __raw_readl(rng_base + RNGA_STATUS) & RNGA_STATUS_ERROR_INT;
 
 	/* if error: clear error interrupt, but doesn't return random number */
 	if (err) {
-		dev_dbg(mxc_rng->dev, "Error while reading random number!\n");
-		ctrl = __raw_readl(mxc_rng->mem + RNGA_CONTROL);
+		dev_dbg(&rng_dev->dev, "Error while reading random number!\n");
+		ctrl = __raw_readl(rng_base + RNGA_CONTROL);
 		__raw_writel(ctrl | RNGA_CONTROL_CLEAR_INT,
-					mxc_rng->mem + RNGA_CONTROL);
+					rng_base + RNGA_CONTROL);
 		return 0;
 	} else
 		return 4;
@@ -108,22 +98,22 @@ static int mxc_rnga_data_read(struct hwrng *rng, u32 * data)
 static int mxc_rnga_init(struct hwrng *rng)
 {
 	u32 ctrl, osc;
-	struct mxc_rng *mxc_rng = container_of(rng, struct mxc_rng, rng);
+	void __iomem *rng_base = (void __iomem *)rng->priv;
 
 	/* wake up */
-	ctrl = __raw_readl(mxc_rng->mem + RNGA_CONTROL);
-	__raw_writel(ctrl & ~RNGA_CONTROL_SLEEP, mxc_rng->mem + RNGA_CONTROL);
+	ctrl = __raw_readl(rng_base + RNGA_CONTROL);
+	__raw_writel(ctrl & ~RNGA_CONTROL_SLEEP, rng_base + RNGA_CONTROL);
 
 	/* verify if oscillator is working */
-	osc = __raw_readl(mxc_rng->mem + RNGA_STATUS);
+	osc = __raw_readl(rng_base + RNGA_STATUS);
 	if (osc & RNGA_STATUS_OSC_DEAD) {
-		dev_err(mxc_rng->dev, "RNGA Oscillator is dead!\n");
+		dev_err(&rng_dev->dev, "RNGA Oscillator is dead!\n");
 		return -ENODEV;
 	}
 
 	/* go running */
-	ctrl = __raw_readl(mxc_rng->mem + RNGA_CONTROL);
-	__raw_writel(ctrl | RNGA_CONTROL_GO, mxc_rng->mem + RNGA_CONTROL);
+	ctrl = __raw_readl(rng_base + RNGA_CONTROL);
+	__raw_writel(ctrl | RNGA_CONTROL_GO, rng_base + RNGA_CONTROL);
 
 	return 0;
 }
@@ -131,68 +121,102 @@ static int mxc_rnga_init(struct hwrng *rng)
 static void mxc_rnga_cleanup(struct hwrng *rng)
 {
 	u32 ctrl;
-	struct mxc_rng *mxc_rng = container_of(rng, struct mxc_rng, rng);
+	void __iomem *rng_base = (void __iomem *)rng->priv;
 
-	ctrl = __raw_readl(mxc_rng->mem + RNGA_CONTROL);
+	ctrl = __raw_readl(rng_base + RNGA_CONTROL);
 
 	/* stop rnga */
-	__raw_writel(ctrl & ~RNGA_CONTROL_GO, mxc_rng->mem + RNGA_CONTROL);
+	__raw_writel(ctrl & ~RNGA_CONTROL_GO, rng_base + RNGA_CONTROL);
 }
+
+static struct hwrng mxc_rnga = {
+	.name = "mxc-rnga",
+	.init = mxc_rnga_init,
+	.cleanup = mxc_rnga_cleanup,
+	.data_present = mxc_rnga_data_present,
+	.data_read = mxc_rnga_data_read
+};
 
 static int __init mxc_rnga_probe(struct platform_device *pdev)
 {
-	int err;
-	struct resource *res;
-	struct mxc_rng *mxc_rng;
+	int err = -ENODEV;
+	struct clk *clk;
+	struct resource *res, *mem;
+	void __iomem *rng_base = NULL;
 
-	mxc_rng = devm_kzalloc(&pdev->dev, sizeof(*mxc_rng), GFP_KERNEL);
-	if (!mxc_rng)
-		return -ENOMEM;
+	if (rng_dev)
+		return -EBUSY;
 
-	mxc_rng->dev = &pdev->dev;
-	mxc_rng->rng.name = "mxc-rnga";
-	mxc_rng->rng.init = mxc_rnga_init;
-	mxc_rng->rng.cleanup = mxc_rnga_cleanup,
-	mxc_rng->rng.data_present = mxc_rnga_data_present,
-	mxc_rng->rng.data_read = mxc_rnga_data_read,
-
-	mxc_rng->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(mxc_rng->clk)) {
+	clk = clk_get(&pdev->dev, "rng");
+	if (IS_ERR(clk)) {
 		dev_err(&pdev->dev, "Could not get rng_clk!\n");
-		return PTR_ERR(mxc_rng->clk);
+		err = PTR_ERR(clk);
+		goto out;
 	}
 
-	err = clk_prepare_enable(mxc_rng->clk);
-	if (err)
-		return err;
+	clk_enable(clk);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	mxc_rng->mem = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(mxc_rng->mem)) {
-		err = PTR_ERR(mxc_rng->mem);
+	if (!res) {
+		err = -ENOENT;
+		goto err_region;
+	}
+
+	mem = request_mem_region(res->start, resource_size(res), pdev->name);
+	if (mem == NULL) {
+		err = -EBUSY;
+		goto err_region;
+	}
+
+	rng_base = ioremap(res->start, resource_size(res));
+	if (!rng_base) {
+		err = -ENOMEM;
 		goto err_ioremap;
 	}
 
-	err = hwrng_register(&mxc_rng->rng);
+	mxc_rnga.priv = (unsigned long)rng_base;
+
+	err = hwrng_register(&mxc_rnga);
 	if (err) {
 		dev_err(&pdev->dev, "MXC RNGA registering failed (%d)\n", err);
-		goto err_ioremap;
+		goto err_register;
 	}
+
+	rng_dev = pdev;
+
+	dev_info(&pdev->dev, "MXC RNGA Registered.\n");
 
 	return 0;
 
+err_register:
+	iounmap(rng_base);
+	rng_base = NULL;
+
 err_ioremap:
-	clk_disable_unprepare(mxc_rng->clk);
+	release_mem_region(res->start, resource_size(res));
+
+err_region:
+	clk_disable(clk);
+	clk_put(clk);
+
+out:
 	return err;
 }
 
 static int __exit mxc_rnga_remove(struct platform_device *pdev)
 {
-	struct mxc_rng *mxc_rng = platform_get_drvdata(pdev);
+	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	void __iomem *rng_base = (void __iomem *)mxc_rnga.priv;
+	struct clk *clk = clk_get(&pdev->dev, "rng");
 
-	hwrng_unregister(&mxc_rng->rng);
+	hwrng_unregister(&mxc_rnga);
 
-	clk_disable_unprepare(mxc_rng->clk);
+	iounmap(rng_base);
+
+	release_mem_region(res->start, resource_size(res));
+
+	clk_disable(clk);
+	clk_put(clk);
 
 	return 0;
 }
@@ -200,11 +224,23 @@ static int __exit mxc_rnga_remove(struct platform_device *pdev)
 static struct platform_driver mxc_rnga_driver = {
 	.driver = {
 		   .name = "mxc_rnga",
+		   .owner = THIS_MODULE,
 		   },
 	.remove = __exit_p(mxc_rnga_remove),
 };
 
-module_platform_driver_probe(mxc_rnga_driver, mxc_rnga_probe);
+static int __init mod_init(void)
+{
+	return platform_driver_probe(&mxc_rnga_driver, mxc_rnga_probe);
+}
+
+static void __exit mod_exit(void)
+{
+	platform_driver_unregister(&mxc_rnga_driver);
+}
+
+module_init(mod_init);
+module_exit(mod_exit);
 
 MODULE_AUTHOR("Freescale Semiconductor, Inc.");
 MODULE_DESCRIPTION("H/W RNGA driver for i.MX");

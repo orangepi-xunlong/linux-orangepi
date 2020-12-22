@@ -31,6 +31,7 @@
 #include <linux/notifier.h>
 #include <linux/proc_fs.h>
 #include <linux/stat.h>
+#include <linux/netfilter.h>
 #include <linux/sysctl.h>
 #include <net/ip.h>
 #include <net/arp.h>
@@ -45,9 +46,9 @@
 
 #ifdef CONFIG_INET
 
-static int ax25_hard_header(struct sk_buff *skb, struct net_device *dev,
-			    unsigned short type, const void *daddr,
-			    const void *saddr, unsigned int len)
+int ax25_hard_header(struct sk_buff *skb, struct net_device *dev,
+		     unsigned short type, const void *daddr,
+		     const void *saddr, unsigned len)
 {
 	unsigned char *buff;
 
@@ -99,7 +100,7 @@ static int ax25_hard_header(struct sk_buff *skb, struct net_device *dev,
 	return -AX25_HEADER_LEN;	/* Unfinished header */
 }
 
-netdev_tx_t ax25_ip_xmit(struct sk_buff *skb)
+int ax25_rebuild_header(struct sk_buff *skb)
 {
 	struct sk_buff *ourskb;
 	unsigned char *bp  = skb->data;
@@ -114,7 +115,9 @@ netdev_tx_t ax25_ip_xmit(struct sk_buff *skb)
 	dst = (ax25_address *)(bp + 1);
 	src = (ax25_address *)(bp + 8);
 
-	ax25_route_lock_use();
+	if (arp_find(bp + 1, skb))
+		return 1;
+
 	route = ax25_get_route(dst, NULL);
 	if (route) {
 		digipeat = route->digipeat;
@@ -126,7 +129,6 @@ netdev_tx_t ax25_ip_xmit(struct sk_buff *skb)
 		dev = skb->dev;
 
 	if ((ax25_dev = ax25_dev_ax25dev(dev)) == NULL) {
-		kfree_skb(skb);
 		goto put;
 	}
 
@@ -207,46 +209,34 @@ netdev_tx_t ax25_ip_xmit(struct sk_buff *skb)
 	ax25_queue_xmit(skb, dev);
 
 put:
+	if (route)
+		ax25_put_route(route);
 
-	ax25_route_lock_unuse();
-	return NETDEV_TX_OK;
+	return 1;
 }
 
 #else	/* INET */
 
-static int ax25_hard_header(struct sk_buff *skb, struct net_device *dev,
-			    unsigned short type, const void *daddr,
-			    const void *saddr, unsigned int len)
+int ax25_hard_header(struct sk_buff *skb, struct net_device *dev,
+		     unsigned short type, const void *daddr,
+		     const void *saddr, unsigned len)
 {
 	return -AX25_HEADER_LEN;
 }
 
-netdev_tx_t ax25_ip_xmit(struct sk_buff *skb)
+int ax25_rebuild_header(struct sk_buff *skb)
 {
-	kfree_skb(skb);
-	return NETDEV_TX_OK;
+	return 1;
 }
+
 #endif
-
-static bool ax25_validate_header(const char *header, unsigned int len)
-{
-	ax25_digi digi;
-
-	if (!len)
-		return false;
-
-	if (header[0])
-		return true;
-
-	return ax25_addr_parse(header + 1, len - 1, NULL, NULL, &digi, NULL,
-			       NULL);
-}
 
 const struct header_ops ax25_header_ops = {
 	.create = ax25_hard_header,
-	.validate = ax25_validate_header,
+	.rebuild = ax25_rebuild_header,
 };
 
+EXPORT_SYMBOL(ax25_hard_header);
+EXPORT_SYMBOL(ax25_rebuild_header);
 EXPORT_SYMBOL(ax25_header_ops);
-EXPORT_SYMBOL(ax25_ip_xmit);
 

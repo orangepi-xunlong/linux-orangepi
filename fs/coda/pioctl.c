@@ -16,7 +16,7 @@
 #include <linux/string.h>
 #include <linux/namei.h>
 #include <linux/module.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <linux/coda.h>
 #include <linux/coda_psdev.h>
@@ -35,6 +35,7 @@ const struct inode_operations coda_ioctl_inode_operations = {
 };
 
 const struct file_operations coda_ioctl_operations = {
+	.owner		= THIS_MODULE,
 	.unlocked_ioctl	= coda_pioctl,
 	.llseek		= noop_llseek,
 };
@@ -51,7 +52,7 @@ static long coda_pioctl(struct file *filp, unsigned int cmd,
 	struct path path;
 	int error;
 	struct PioctlData data;
-	struct inode *inode = file_inode(filp);
+	struct inode *inode = filp->f_dentry->d_inode;
 	struct inode *target_inode = NULL;
 	struct coda_inode_info *cnp;
 
@@ -71,7 +72,7 @@ static long coda_pioctl(struct file *filp, unsigned int cmd,
 	if (error)
 		return error;
 
-	target_inode = d_inode(path.dentry);
+	target_inode = path.dentry->d_inode;
 
 	/* return if it is not a Coda inode */
 	if (target_inode->i_sb != inode->i_sb) {

@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
 #include <linux/leds.h>
 #include <linux/leds-regulator.h>
 #include <linux/platform_device.h>
@@ -24,8 +25,10 @@
 
 struct regulator_led {
 	struct led_classdev cdev;
+	enum led_brightness value;
 	int enabled;
 	struct mutex mutex;
+	struct work_struct work;
 
 	struct regulator *vcc;
 };
@@ -91,24 +94,22 @@ static void regulator_led_disable(struct regulator_led *led)
 	led->enabled = 0;
 }
 
-static int regulator_led_brightness_set(struct led_classdev *led_cdev,
-					 enum led_brightness value)
+static void regulator_led_set_value(struct regulator_led *led)
 {
-	struct regulator_led *led = to_regulator_led(led_cdev);
 	int voltage;
-	int ret = 0;
+	int ret;
 
 	mutex_lock(&led->mutex);
 
-	if (value == LED_OFF) {
+	if (led->value == LED_OFF) {
 		regulator_led_disable(led);
 		goto out;
 	}
 
 	if (led->cdev.max_brightness > 1) {
-		voltage = led_regulator_get_voltage(led->vcc, value);
+		voltage = led_regulator_get_voltage(led->vcc, led->value);
 		dev_dbg(led->cdev.dev, "brightness: %d voltage: %d\n",
-				value, voltage);
+				led->value, voltage);
 
 		ret = regulator_set_voltage(led->vcc, voltage, voltage);
 		if (ret != 0)
@@ -120,13 +121,28 @@ static int regulator_led_brightness_set(struct led_classdev *led_cdev,
 
 out:
 	mutex_unlock(&led->mutex);
-	return ret;
 }
 
-static int regulator_led_probe(struct platform_device *pdev)
+static void led_work(struct work_struct *work)
 {
-	struct led_regulator_platform_data *pdata =
-			dev_get_platdata(&pdev->dev);
+	struct regulator_led *led;
+
+	led = container_of(work, struct regulator_led, work);
+	regulator_led_set_value(led);
+}
+
+static void regulator_led_brightness_set(struct led_classdev *led_cdev,
+			   enum led_brightness value)
+{
+	struct regulator_led *led = to_regulator_led(led_cdev);
+
+	led->value = value;
+	schedule_work(&led->work);
+}
+
+static int __devinit regulator_led_probe(struct platform_device *pdev)
+{
+	struct led_regulator_platform_data *pdata = pdev->dev.platform_data;
 	struct regulator_led *led;
 	struct regulator *vcc;
 	int ret = 0;
@@ -136,24 +152,28 @@ static int regulator_led_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	vcc = devm_regulator_get_exclusive(&pdev->dev, "vled");
+	vcc = regulator_get_exclusive(&pdev->dev, "vled");
 	if (IS_ERR(vcc)) {
 		dev_err(&pdev->dev, "Cannot get vcc for %s\n", pdata->name);
 		return PTR_ERR(vcc);
 	}
 
-	led = devm_kzalloc(&pdev->dev, sizeof(*led), GFP_KERNEL);
-	if (led == NULL)
-		return -ENOMEM;
+	led = kzalloc(sizeof(*led), GFP_KERNEL);
+	if (led == NULL) {
+		ret = -ENOMEM;
+		goto err_vcc;
+	}
 
 	led->cdev.max_brightness = led_regulator_get_max_brightness(vcc);
 	if (pdata->brightness > led->cdev.max_brightness) {
 		dev_err(&pdev->dev, "Invalid default brightness %d\n",
 				pdata->brightness);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_led;
 	}
+	led->value = pdata->brightness;
 
-	led->cdev.brightness_set_blocking = regulator_led_brightness_set;
+	led->cdev.brightness_set = regulator_led_brightness_set;
 	led->cdev.name = pdata->name;
 	led->cdev.flags |= LED_CORE_SUSPENDRESUME;
 	led->vcc = vcc;
@@ -163,37 +183,50 @@ static int regulator_led_probe(struct platform_device *pdev)
 		led->enabled = 1;
 
 	mutex_init(&led->mutex);
+	INIT_WORK(&led->work, led_work);
 
 	platform_set_drvdata(pdev, led);
 
 	ret = led_classdev_register(&pdev->dev, &led->cdev);
-	if (ret < 0)
-		return ret;
+	if (ret < 0) {
+		cancel_work_sync(&led->work);
+		goto err_led;
+	}
 
 	/* to expose the default value to userspace */
-	led->cdev.brightness = pdata->brightness;
+	led->cdev.brightness = led->value;
 
 	/* Set the default led status */
-	regulator_led_brightness_set(&led->cdev, led->cdev.brightness);
+	regulator_led_set_value(led);
 
 	return 0;
+
+err_led:
+	kfree(led);
+err_vcc:
+	regulator_put(vcc);
+	return ret;
 }
 
-static int regulator_led_remove(struct platform_device *pdev)
+static int __devexit regulator_led_remove(struct platform_device *pdev)
 {
 	struct regulator_led *led = platform_get_drvdata(pdev);
 
 	led_classdev_unregister(&led->cdev);
+	cancel_work_sync(&led->work);
 	regulator_led_disable(led);
+	regulator_put(led->vcc);
+	kfree(led);
 	return 0;
 }
 
 static struct platform_driver regulator_led_driver = {
 	.driver = {
 		   .name  = "leds-regulator",
+		   .owner = THIS_MODULE,
 		   },
 	.probe  = regulator_led_probe,
-	.remove = regulator_led_remove,
+	.remove = __devexit_p(regulator_led_remove),
 };
 
 module_platform_driver(regulator_led_driver);

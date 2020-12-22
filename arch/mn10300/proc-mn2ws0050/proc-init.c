@@ -14,7 +14,6 @@
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 
-#include <asm/cacheflush.h>
 #include <asm/processor.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>

@@ -13,12 +13,11 @@
  *
  */
 
-#ifndef __SUNXI_HCD_H__
-#define __SUNXI_HCD_H__
+#ifndef  __SUNXI_HCD_H__
+#define  __SUNXI_HCD_H__
 
-/**
- * The USB role is defined by the connector used on the board, so long as
- * standards are being followed. (Developer boards sometimes won't.)
+/* The USB role is defined by the connector used on the board, so long as
+ * standards are being followed.  (Developer boards sometimes won't.)
  */
 enum sunxi_hcd_mode {
 	SW_HCD_UNDEFINED = 0,
@@ -32,7 +31,7 @@ struct clk;
 typedef struct sunxi_hcd_eps_bits {
 	const char	name[16];
 	u8		bits;
-} sunxi_hcd_eps_bits_t;
+}sunxi_hcd_eps_bits_t;
 
 typedef struct sunxi_hcd_config {
 	/* sunxi_hcd configuration-specific details */
@@ -58,7 +57,7 @@ typedef struct sunxi_hcd_config {
 
 	struct sunxi_hcd_eps_bits *eps_bits;
 	struct usb_port_info *port_info;
-} sunxi_hcd_config_t;
+}sunxi_hcd_config_t;
 
 typedef struct sunxi_hcd_platform_data {
 	u32 usbc_base;
@@ -86,7 +85,7 @@ typedef struct sunxi_hcd_platform_data {
 
 	/* sunxi_hcd configuration-specific details */
 	struct sunxi_hcd_config	*config;
-} sunxi_hcd_platform_data_t;
+}sunxi_hcd_platform_data_t;
 
 int sunxi_usb_host0_enable(void);
 int sunxi_usb_host0_disable(void);
@@ -100,4 +99,6 @@ int sunxi_usb_enable_hcd1(void);
 int sunxi_usb_disable_hcd2(void);
 int sunxi_usb_enable_hcd2(void);
 
-#endif /* __SUNXI_HCD_H__ */
+
+#endif   //__SUNXI_HCD_H__
+

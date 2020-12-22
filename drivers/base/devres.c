@@ -50,8 +50,8 @@ static void devres_log(struct device *dev, struct devres_node *node,
 		       const char *op)
 {
 	if (unlikely(log_devres))
-		dev_err(dev, "DEVRES %3s %p %s (%lu bytes)\n",
-			op, node, node->name, (unsigned long)node->size);
+		dev_printk(KERN_ERR, dev, "DEVRES %3s %p %s (%lu bytes)\n",
+			   op, node, node->name, (unsigned long)node->size);
 }
 #else /* CONFIG_DEBUG_DEVRES */
 #define set_node_dbginfo(node, n, s)	do {} while (0)
@@ -82,17 +82,16 @@ static struct devres_group * node_to_group(struct devres_node *node)
 }
 
 static __always_inline struct devres * alloc_dr(dr_release_t release,
-						size_t size, gfp_t gfp, int nid)
+						size_t size, gfp_t gfp)
 {
 	size_t tot_size = sizeof(struct devres) + size;
 	struct devres *dr;
 
-	dr = kmalloc_node_track_caller(tot_size, gfp, nid);
+	dr = kmalloc_track_caller(tot_size, gfp);
 	if (unlikely(!dr))
 		return NULL;
 
-	memset(dr, 0, offsetof(struct devres, data));
-
+	memset(dr, 0, tot_size);
 	INIT_LIST_HEAD(&dr->node.entry);
 	dr->node.release = release;
 	return dr;
@@ -106,25 +105,24 @@ static void add_dr(struct device *dev, struct devres_node *node)
 }
 
 #ifdef CONFIG_DEBUG_DEVRES
-void * __devres_alloc_node(dr_release_t release, size_t size, gfp_t gfp, int nid,
+void * __devres_alloc(dr_release_t release, size_t size, gfp_t gfp,
 		      const char *name)
 {
 	struct devres *dr;
 
-	dr = alloc_dr(release, size, gfp | __GFP_ZERO, nid);
+	dr = alloc_dr(release, size, gfp);
 	if (unlikely(!dr))
 		return NULL;
 	set_node_dbginfo(&dr->node, name, size);
 	return dr->data;
 }
-EXPORT_SYMBOL_GPL(__devres_alloc_node);
+EXPORT_SYMBOL_GPL(__devres_alloc);
 #else
 /**
  * devres_alloc - Allocate device resource data
  * @release: Release function devres will be associated with
  * @size: Allocation size
  * @gfp: Allocation flags
- * @nid: NUMA node
  *
  * Allocate devres of @size bytes.  The allocated area is zeroed, then
  * associated with @release.  The returned pointer can be passed to
@@ -133,16 +131,16 @@ EXPORT_SYMBOL_GPL(__devres_alloc_node);
  * RETURNS:
  * Pointer to allocated devres on success, NULL on failure.
  */
-void * devres_alloc_node(dr_release_t release, size_t size, gfp_t gfp, int nid)
+void * devres_alloc(dr_release_t release, size_t size, gfp_t gfp)
 {
 	struct devres *dr;
 
-	dr = alloc_dr(release, size, gfp | __GFP_ZERO, nid);
+	dr = alloc_dr(release, size, gfp);
 	if (unlikely(!dr))
 		return NULL;
 	return dr->data;
 }
-EXPORT_SYMBOL_GPL(devres_alloc_node);
+EXPORT_SYMBOL_GPL(devres_alloc);
 #endif
 
 /**
@@ -373,8 +371,6 @@ int devres_destroy(struct device *dev, dr_release_t release,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(devres_destroy);
-
-
 /**
  * devres_release - Find a device resource and destroy it, calling release
  * @dev: Device to find resource from
@@ -673,315 +669,58 @@ int devres_release_group(struct device *dev, void *id)
 EXPORT_SYMBOL_GPL(devres_release_group);
 
 /*
- * Custom devres actions allow inserting a simple function call
- * into the teadown sequence.
+ * Managed kzalloc/kfree
  */
-
-struct action_devres {
-	void *data;
-	void (*action)(void *);
-};
-
-static int devm_action_match(struct device *dev, void *res, void *p)
-{
-	struct action_devres *devres = res;
-	struct action_devres *target = p;
-
-	return devres->action == target->action &&
-	       devres->data == target->data;
-}
-
-static void devm_action_release(struct device *dev, void *res)
-{
-	struct action_devres *devres = res;
-
-	devres->action(devres->data);
-}
-
-/**
- * devm_add_action() - add a custom action to list of managed resources
- * @dev: Device that owns the action
- * @action: Function that should be called
- * @data: Pointer to data passed to @action implementation
- *
- * This adds a custom action to the list of managed resources so that
- * it gets executed as part of standard resource unwinding.
- */
-int devm_add_action(struct device *dev, void (*action)(void *), void *data)
-{
-	struct action_devres *devres;
-
-	devres = devres_alloc(devm_action_release,
-			      sizeof(struct action_devres), GFP_KERNEL);
-	if (!devres)
-		return -ENOMEM;
-
-	devres->data = data;
-	devres->action = action;
-
-	devres_add(dev, devres);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(devm_add_action);
-
-/**
- * devm_remove_action() - removes previously added custom action
- * @dev: Device that owns the action
- * @action: Function implementing the action
- * @data: Pointer to data passed to @action implementation
- *
- * Removes instance of @action previously added by devm_add_action().
- * Both action and data should match one of the existing entries.
- */
-void devm_remove_action(struct device *dev, void (*action)(void *), void *data)
-{
-	struct action_devres devres = {
-		.data = data,
-		.action = action,
-	};
-
-	WARN_ON(devres_destroy(dev, devm_action_release, devm_action_match,
-			       &devres));
-
-}
-EXPORT_SYMBOL_GPL(devm_remove_action);
-
-/*
- * Managed kmalloc/kfree
- */
-static void devm_kmalloc_release(struct device *dev, void *res)
+static void devm_kzalloc_release(struct device *dev, void *res)
 {
 	/* noop */
 }
 
-static int devm_kmalloc_match(struct device *dev, void *res, void *data)
+static int devm_kzalloc_match(struct device *dev, void *res, void *data)
 {
 	return res == data;
 }
 
 /**
- * devm_kmalloc - Resource-managed kmalloc
+ * devm_kzalloc - Resource-managed kzalloc
  * @dev: Device to allocate memory for
  * @size: Allocation size
  * @gfp: Allocation gfp flags
  *
- * Managed kmalloc.  Memory allocated with this function is
+ * Managed kzalloc.  Memory allocated with this function is
  * automatically freed on driver detach.  Like all other devres
  * resources, guaranteed alignment is unsigned long long.
  *
  * RETURNS:
  * Pointer to allocated memory on success, NULL on failure.
  */
-void * devm_kmalloc(struct device *dev, size_t size, gfp_t gfp)
+void * devm_kzalloc(struct device *dev, size_t size, gfp_t gfp)
 {
 	struct devres *dr;
 
 	/* use raw alloc_dr for kmalloc caller tracing */
-	dr = alloc_dr(devm_kmalloc_release, size, gfp, dev_to_node(dev));
+	dr = alloc_dr(devm_kzalloc_release, size, gfp);
 	if (unlikely(!dr))
 		return NULL;
 
-	/*
-	 * This is named devm_kzalloc_release for historical reasons
-	 * The initial implementation did not support kmalloc, only kzalloc
-	 */
 	set_node_dbginfo(&dr->node, "devm_kzalloc_release", size);
 	devres_add(dev, dr->data);
 	return dr->data;
 }
-EXPORT_SYMBOL_GPL(devm_kmalloc);
-
-/**
- * devm_kstrdup - Allocate resource managed space and
- *                copy an existing string into that.
- * @dev: Device to allocate memory for
- * @s: the string to duplicate
- * @gfp: the GFP mask used in the devm_kmalloc() call when
- *       allocating memory
- * RETURNS:
- * Pointer to allocated string on success, NULL on failure.
- */
-char *devm_kstrdup(struct device *dev, const char *s, gfp_t gfp)
-{
-	size_t size;
-	char *buf;
-
-	if (!s)
-		return NULL;
-
-	size = strlen(s) + 1;
-	buf = devm_kmalloc(dev, size, gfp);
-	if (buf)
-		memcpy(buf, s, size);
-	return buf;
-}
-EXPORT_SYMBOL_GPL(devm_kstrdup);
-
-/**
- * devm_kvasprintf - Allocate resource managed space and format a string
- *		     into that.
- * @dev: Device to allocate memory for
- * @gfp: the GFP mask used in the devm_kmalloc() call when
- *       allocating memory
- * @fmt: The printf()-style format string
- * @ap: Arguments for the format string
- * RETURNS:
- * Pointer to allocated string on success, NULL on failure.
- */
-char *devm_kvasprintf(struct device *dev, gfp_t gfp, const char *fmt,
-		      va_list ap)
-{
-	unsigned int len;
-	char *p;
-	va_list aq;
-
-	va_copy(aq, ap);
-	len = vsnprintf(NULL, 0, fmt, aq);
-	va_end(aq);
-
-	p = devm_kmalloc(dev, len+1, gfp);
-	if (!p)
-		return NULL;
-
-	vsnprintf(p, len+1, fmt, ap);
-
-	return p;
-}
-EXPORT_SYMBOL(devm_kvasprintf);
-
-/**
- * devm_kasprintf - Allocate resource managed space and format a string
- *		    into that.
- * @dev: Device to allocate memory for
- * @gfp: the GFP mask used in the devm_kmalloc() call when
- *       allocating memory
- * @fmt: The printf()-style format string
- * @...: Arguments for the format string
- * RETURNS:
- * Pointer to allocated string on success, NULL on failure.
- */
-char *devm_kasprintf(struct device *dev, gfp_t gfp, const char *fmt, ...)
-{
-	va_list ap;
-	char *p;
-
-	va_start(ap, fmt);
-	p = devm_kvasprintf(dev, gfp, fmt, ap);
-	va_end(ap);
-
-	return p;
-}
-EXPORT_SYMBOL_GPL(devm_kasprintf);
+EXPORT_SYMBOL_GPL(devm_kzalloc);
 
 /**
  * devm_kfree - Resource-managed kfree
  * @dev: Device this memory belongs to
  * @p: Memory to free
  *
- * Free memory allocated with devm_kmalloc().
+ * Free memory allocated with devm_kzalloc().
  */
 void devm_kfree(struct device *dev, void *p)
 {
 	int rc;
 
-	rc = devres_destroy(dev, devm_kmalloc_release, devm_kmalloc_match, p);
+	rc = devres_destroy(dev, devm_kzalloc_release, devm_kzalloc_match, p);
 	WARN_ON(rc);
 }
 EXPORT_SYMBOL_GPL(devm_kfree);
-
-/**
- * devm_kmemdup - Resource-managed kmemdup
- * @dev: Device this memory belongs to
- * @src: Memory region to duplicate
- * @len: Memory region length
- * @gfp: GFP mask to use
- *
- * Duplicate region of a memory using resource managed kmalloc
- */
-void *devm_kmemdup(struct device *dev, const void *src, size_t len, gfp_t gfp)
-{
-	void *p;
-
-	p = devm_kmalloc(dev, len, gfp);
-	if (p)
-		memcpy(p, src, len);
-
-	return p;
-}
-EXPORT_SYMBOL_GPL(devm_kmemdup);
-
-struct pages_devres {
-	unsigned long addr;
-	unsigned int order;
-};
-
-static int devm_pages_match(struct device *dev, void *res, void *p)
-{
-	struct pages_devres *devres = res;
-	struct pages_devres *target = p;
-
-	return devres->addr == target->addr;
-}
-
-static void devm_pages_release(struct device *dev, void *res)
-{
-	struct pages_devres *devres = res;
-
-	free_pages(devres->addr, devres->order);
-}
-
-/**
- * devm_get_free_pages - Resource-managed __get_free_pages
- * @dev: Device to allocate memory for
- * @gfp_mask: Allocation gfp flags
- * @order: Allocation size is (1 << order) pages
- *
- * Managed get_free_pages.  Memory allocated with this function is
- * automatically freed on driver detach.
- *
- * RETURNS:
- * Address of allocated memory on success, 0 on failure.
- */
-
-unsigned long devm_get_free_pages(struct device *dev,
-				  gfp_t gfp_mask, unsigned int order)
-{
-	struct pages_devres *devres;
-	unsigned long addr;
-
-	addr = __get_free_pages(gfp_mask, order);
-
-	if (unlikely(!addr))
-		return 0;
-
-	devres = devres_alloc(devm_pages_release,
-			      sizeof(struct pages_devres), GFP_KERNEL);
-	if (unlikely(!devres)) {
-		free_pages(addr, order);
-		return 0;
-	}
-
-	devres->addr = addr;
-	devres->order = order;
-
-	devres_add(dev, devres);
-	return addr;
-}
-EXPORT_SYMBOL_GPL(devm_get_free_pages);
-
-/**
- * devm_free_pages - Resource-managed free_pages
- * @dev: Device this memory belongs to
- * @addr: Memory to free
- *
- * Free memory allocated with devm_get_free_pages(). Unlike free_pages,
- * there is no need to supply the @order.
- */
-void devm_free_pages(struct device *dev, unsigned long addr)
-{
-	struct pages_devres devres = { .addr = addr };
-
-	WARN_ON(devres_release(dev, devm_pages_release, devm_pages_match,
-			       &devres));
-}
-EXPORT_SYMBOL_GPL(devm_free_pages);

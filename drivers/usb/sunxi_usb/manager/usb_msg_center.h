@@ -13,18 +13,18 @@
  *
  */
 
-#ifndef __USB_MSG_CENTER_H__
-#define __USB_MSG_CENTER_H__
+#ifndef  __USB_MSG_CENTER_H__
+#define  __USB_MSG_CENTER_H__
 
 /* usb role mode */
-typedef enum usb_role {
+typedef enum usb_role{
 	USB_ROLE_NULL = 0,
 	USB_ROLE_HOST,
 	USB_ROLE_DEVICE,
-} usb_role_t;
+}usb_role_t;
 
-typedef struct usb_msg {
-	u8  app_drv_null;		/* not install any driver */
+typedef struct usb_msg{
+	u8  app_drv_null;		//not install any driver
 	u8  app_insmod_host;
 	u8  app_rmmod_host;
 	u8  app_insmod_device;
@@ -34,22 +34,17 @@ typedef struct usb_msg {
 	u8  hw_rmmod_host;
 	u8  hw_insmod_device;
 	u8  hw_rmmod_device;
-} usb_msg_t;
+}usb_msg_t;
 
-typedef struct usb_msg_center_info {
+typedef struct usb_msg_center_info{
 	struct usb_cfg *cfg;
 
 	struct usb_msg msg;
 	enum usb_role role;
 
-	u32 skip;			/* if skip, not enter msg process */
-	/* mainly to omit invalid msg */
-} usb_msg_center_info_t;
-
-extern int sunxi_usb_disable_ehci(__u32 usbc_no);
-extern int sunxi_usb_enable_ehci(__u32 usbc_no);
-extern int sunxi_usb_disable_ohci(__u32 usbc_no);
-extern int sunxi_usb_enable_ohci(__u32 usbc_no);
+	u32 skip;			//if skip, not enter msg process
+	//mainly to omit invalid msg
+}usb_msg_center_info_t;
 
 void hw_insmod_usb_host(void);
 void hw_rmmod_usb_host(void);
@@ -63,5 +58,5 @@ void usb_msg_center(struct usb_cfg *cfg);
 s32 usb_msg_center_init(void);
 s32 usb_msg_center_exit(void);
 
-#endif /* __USB_MSG_CENTER_H__ */
+#endif   //__USB_MSG_CENTER_H__
 

@@ -30,9 +30,14 @@ struct wm831x_gpio {
 	struct gpio_chip gpio_chip;
 };
 
+static inline struct wm831x_gpio *to_wm831x_gpio(struct gpio_chip *chip)
+{
+	return container_of(chip, struct wm831x_gpio, gpio_chip);
+}
+
 static int wm831x_gpio_direction_in(struct gpio_chip *chip, unsigned offset)
 {
-	struct wm831x_gpio *wm831x_gpio = gpiochip_get_data(chip);
+	struct wm831x_gpio *wm831x_gpio = to_wm831x_gpio(chip);
 	struct wm831x *wm831x = wm831x_gpio->wm831x;
 	int val = WM831X_GPN_DIR;
 
@@ -46,7 +51,7 @@ static int wm831x_gpio_direction_in(struct gpio_chip *chip, unsigned offset)
 
 static int wm831x_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
-	struct wm831x_gpio *wm831x_gpio = gpiochip_get_data(chip);
+	struct wm831x_gpio *wm831x_gpio = to_wm831x_gpio(chip);
 	struct wm831x *wm831x = wm831x_gpio->wm831x;
 	int ret;
 
@@ -62,7 +67,7 @@ static int wm831x_gpio_get(struct gpio_chip *chip, unsigned offset)
 
 static void wm831x_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
-	struct wm831x_gpio *wm831x_gpio = gpiochip_get_data(chip);
+	struct wm831x_gpio *wm831x_gpio = to_wm831x_gpio(chip);
 	struct wm831x *wm831x = wm831x_gpio->wm831x;
 
 	wm831x_set_bits(wm831x, WM831X_GPIO_LEVEL, 1 << offset,
@@ -72,7 +77,7 @@ static void wm831x_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 static int wm831x_gpio_direction_out(struct gpio_chip *chip,
 				     unsigned offset, int value)
 {
-	struct wm831x_gpio *wm831x_gpio = gpiochip_get_data(chip);
+	struct wm831x_gpio *wm831x_gpio = to_wm831x_gpio(chip);
 	struct wm831x *wm831x = wm831x_gpio->wm831x;
 	int val = 0;
 	int ret;
@@ -94,17 +99,19 @@ static int wm831x_gpio_direction_out(struct gpio_chip *chip,
 
 static int wm831x_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 {
-	struct wm831x_gpio *wm831x_gpio = gpiochip_get_data(chip);
+	struct wm831x_gpio *wm831x_gpio = to_wm831x_gpio(chip);
 	struct wm831x *wm831x = wm831x_gpio->wm831x;
 
-	return irq_create_mapping(wm831x->irq_domain,
-				  WM831X_IRQ_GPIO_1 + offset);
+	if (!wm831x->irq_base)
+		return -EINVAL;
+
+	return wm831x->irq_base + WM831X_IRQ_GPIO_1 + offset;
 }
 
 static int wm831x_gpio_set_debounce(struct gpio_chip *chip, unsigned offset,
 				    unsigned debounce)
 {
-	struct wm831x_gpio *wm831x_gpio = gpiochip_get_data(chip);
+	struct wm831x_gpio *wm831x_gpio = to_wm831x_gpio(chip);
 	struct wm831x *wm831x = wm831x_gpio->wm831x;
 	int reg = WM831X_GPIO1_CONTROL + offset;
 	int ret, fn;
@@ -132,32 +139,10 @@ static int wm831x_gpio_set_debounce(struct gpio_chip *chip, unsigned offset,
 	return wm831x_set_bits(wm831x, reg, WM831X_GPN_FN_MASK, fn);
 }
 
-static int wm831x_set_single_ended(struct gpio_chip *chip,
-				   unsigned int offset,
-				   enum single_ended_mode mode)
-{
-	struct wm831x_gpio *wm831x_gpio = gpiochip_get_data(chip);
-	struct wm831x *wm831x = wm831x_gpio->wm831x;
-	int reg = WM831X_GPIO1_CONTROL + offset;
-
-	switch (mode) {
-	case LINE_MODE_OPEN_DRAIN:
-		return wm831x_set_bits(wm831x, reg,
-				       WM831X_GPN_OD_MASK, WM831X_GPN_OD);
-	case LINE_MODE_PUSH_PULL:
-		return wm831x_set_bits(wm831x, reg,
-				       WM831X_GPN_OD_MASK, 0);
-	default:
-		break;
-	}
-
-	return -ENOTSUPP;
-}
-
 #ifdef CONFIG_DEBUG_FS
 static void wm831x_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
-	struct wm831x_gpio *wm831x_gpio = gpiochip_get_data(chip);
+	struct wm831x_gpio *wm831x_gpio = to_wm831x_gpio(chip);
 	struct wm831x *wm831x = wm831x_gpio->wm831x;
 	int i, tristated;
 
@@ -238,7 +223,7 @@ static void wm831x_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 			   pull,
 			   powerdomain,
 			   reg & WM831X_GPN_POL ? "" : " inverted",
-			   reg & WM831X_GPN_OD ? "open-drain" : "push-pull",
+			   reg & WM831X_GPN_OD ? "open-drain" : "CMOS",
 			   tristated ? " tristated" : "",
 			   reg);
 	}
@@ -247,7 +232,7 @@ static void wm831x_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 #define wm831x_gpio_dbg_show NULL
 #endif
 
-static const struct gpio_chip template_chip = {
+static struct gpio_chip template_chip = {
 	.label			= "wm831x",
 	.owner			= THIS_MODULE,
 	.direction_input	= wm831x_gpio_direction_in,
@@ -256,47 +241,63 @@ static const struct gpio_chip template_chip = {
 	.set			= wm831x_gpio_set,
 	.to_irq			= wm831x_gpio_to_irq,
 	.set_debounce		= wm831x_gpio_set_debounce,
-	.set_single_ended	= wm831x_set_single_ended,
 	.dbg_show		= wm831x_gpio_dbg_show,
-	.can_sleep		= true,
+	.can_sleep		= 1,
 };
 
-static int wm831x_gpio_probe(struct platform_device *pdev)
+static int __devinit wm831x_gpio_probe(struct platform_device *pdev)
 {
 	struct wm831x *wm831x = dev_get_drvdata(pdev->dev.parent);
-	struct wm831x_pdata *pdata = dev_get_platdata(wm831x->dev);
+	struct wm831x_pdata *pdata = wm831x->dev->platform_data;
 	struct wm831x_gpio *wm831x_gpio;
 	int ret;
 
-	wm831x_gpio = devm_kzalloc(&pdev->dev, sizeof(*wm831x_gpio),
-				   GFP_KERNEL);
+	wm831x_gpio = kzalloc(sizeof(*wm831x_gpio), GFP_KERNEL);
 	if (wm831x_gpio == NULL)
 		return -ENOMEM;
 
 	wm831x_gpio->wm831x = wm831x;
 	wm831x_gpio->gpio_chip = template_chip;
 	wm831x_gpio->gpio_chip.ngpio = wm831x->num_gpio;
-	wm831x_gpio->gpio_chip.parent = &pdev->dev;
+	wm831x_gpio->gpio_chip.dev = &pdev->dev;
 	if (pdata && pdata->gpio_base)
 		wm831x_gpio->gpio_chip.base = pdata->gpio_base;
 	else
 		wm831x_gpio->gpio_chip.base = -1;
 
-	ret = devm_gpiochip_add_data(&pdev->dev, &wm831x_gpio->gpio_chip,
-				     wm831x_gpio);
+	ret = gpiochip_add(&wm831x_gpio->gpio_chip);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "Could not register gpiochip, %d\n", ret);
-		return ret;
+		dev_err(&pdev->dev, "Could not register gpiochip, %d\n",
+			ret);
+		goto err;
 	}
 
 	platform_set_drvdata(pdev, wm831x_gpio);
+
+	return ret;
+
+err:
+	kfree(wm831x_gpio);
+	return ret;
+}
+
+static int __devexit wm831x_gpio_remove(struct platform_device *pdev)
+{
+	struct wm831x_gpio *wm831x_gpio = platform_get_drvdata(pdev);
+	int ret;
+
+	ret = gpiochip_remove(&wm831x_gpio->gpio_chip);
+	if (ret == 0)
+		kfree(wm831x_gpio);
 
 	return ret;
 }
 
 static struct platform_driver wm831x_gpio_driver = {
 	.driver.name	= "wm831x-gpio",
+	.driver.owner	= THIS_MODULE,
 	.probe		= wm831x_gpio_probe,
+	.remove		= __devexit_p(wm831x_gpio_remove),
 };
 
 static int __init wm831x_gpio_init(void)

@@ -24,8 +24,6 @@
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
-#include "systbls.h"
-
 /* #define DEBUG_UNIMP_SYSCALL */
 
 /* XXX Make this per-binary type, this way we can detect the type of
@@ -36,9 +34,11 @@ asmlinkage unsigned long sys_getpagesize(void)
 	return PAGE_SIZE; /* Possibly older binaries want 8192 on sun4's? */
 }
 
+#define COLOUR_ALIGN(addr)      (((addr)+SHMLBA-1)&~(SHMLBA-1))
+
 unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsigned long len, unsigned long pgoff, unsigned long flags)
 {
-	struct vm_unmapped_area_info info;
+	struct vm_area_struct * vmm;
 
 	if (flags & MAP_FIXED) {
 		/* We do not accept a shared mapping if it would violate
@@ -53,24 +53,37 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 	/* See asm-sparc/uaccess.h */
 	if (len > TASK_SIZE - PAGE_SIZE)
 		return -ENOMEM;
+	if (ARCH_SUN4C && len > 0x20000000)
+		return -ENOMEM;
 	if (!addr)
 		addr = TASK_UNMAPPED_BASE;
 
-	info.flags = 0;
-	info.length = len;
-	info.low_limit = addr;
-	info.high_limit = TASK_SIZE;
-	info.align_mask = (flags & MAP_SHARED) ?
-		(PAGE_MASK & (SHMLBA - 1)) : 0;
-	info.align_offset = pgoff << PAGE_SHIFT;
-	return vm_unmapped_area(&info);
+	if (flags & MAP_SHARED)
+		addr = COLOUR_ALIGN(addr);
+	else
+		addr = PAGE_ALIGN(addr);
+
+	for (vmm = find_vma(current->mm, addr); ; vmm = vmm->vm_next) {
+		/* At this point:  (!vmm || addr < vmm->vm_end). */
+		if (ARCH_SUN4C && addr < 0xe0000000 && 0x20000000 - len < addr) {
+			addr = PAGE_OFFSET;
+			vmm = find_vma(current->mm, PAGE_OFFSET);
+		}
+		if (TASK_SIZE - PAGE_SIZE - len < addr)
+			return -ENOMEM;
+		if (!vmm || addr + len <= vmm->vm_start)
+			return addr;
+		addr = vmm->vm_end;
+		if (flags & MAP_SHARED)
+			addr = COLOUR_ALIGN(addr);
+	}
 }
 
 /*
  * sys_pipe() is the normal C calling standard for creating
  * a pipe. It's not the way unix traditionally does this, though.
  */
-asmlinkage long sparc_pipe(struct pt_regs *regs)
+asmlinkage int sparc_pipe(struct pt_regs *regs)
 {
 	int fd[2];
 	int error;
@@ -86,6 +99,11 @@ out:
 
 int sparc_mmap_check(unsigned long addr, unsigned long len)
 {
+	if (ARCH_SUN4C &&
+	    (len > 0x20000000 ||
+	     (addr < 0xe0000000 && addr + len > 0x20000000)))
+		return -EINVAL;
+
 	/* See asm-sparc/uaccess.h */
 	if (len > TASK_SIZE - PAGE_SIZE || addr + len > TASK_SIZE - PAGE_SIZE)
 		return -EINVAL;
@@ -95,7 +113,7 @@ int sparc_mmap_check(unsigned long addr, unsigned long len)
 
 /* Linux version of mmap */
 
-asmlinkage long sys_mmap2(unsigned long addr, unsigned long len,
+asmlinkage unsigned long sys_mmap2(unsigned long addr, unsigned long len,
 	unsigned long prot, unsigned long flags, unsigned long fd,
 	unsigned long pgoff)
 {
@@ -105,7 +123,7 @@ asmlinkage long sys_mmap2(unsigned long addr, unsigned long len,
 			      pgoff >> (PAGE_SHIFT - 12));
 }
 
-asmlinkage long sys_mmap(unsigned long addr, unsigned long len,
+asmlinkage unsigned long sys_mmap(unsigned long addr, unsigned long len,
 	unsigned long prot, unsigned long flags, unsigned long fd,
 	unsigned long off)
 {
@@ -162,19 +180,54 @@ sparc_breakpoint (struct pt_regs *regs)
 #endif
 }
 
-SYSCALL_DEFINE3(sparc_sigaction, int, sig,
-		struct old_sigaction __user *,act,
-		struct old_sigaction __user *,oact)
+asmlinkage int
+sparc_sigaction (int sig, const struct old_sigaction __user *act,
+		 struct old_sigaction __user *oact)
 {
+	struct k_sigaction new_ka, old_ka;
+	int ret;
+
 	WARN_ON_ONCE(sig >= 0);
-	return sys_sigaction(-sig, act, oact);
+	sig = -sig;
+
+	if (act) {
+		unsigned long mask;
+
+		if (!access_ok(VERIFY_READ, act, sizeof(*act)) ||
+		    __get_user(new_ka.sa.sa_handler, &act->sa_handler) ||
+		    __get_user(new_ka.sa.sa_restorer, &act->sa_restorer))
+			return -EFAULT;
+		__get_user(new_ka.sa.sa_flags, &act->sa_flags);
+		__get_user(mask, &act->sa_mask);
+		siginitset(&new_ka.sa.sa_mask, mask);
+		new_ka.ka_restorer = NULL;
+	}
+
+	ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
+
+	if (!ret && oact) {
+		/* In the clone() case we could copy half consistent
+		 * state to the user, however this could sleep and
+		 * deadlock us if we held the signal lock on SMP.  So for
+		 * now I take the easy way out and do no locking.
+		 */
+		if (!access_ok(VERIFY_WRITE, oact, sizeof(*oact)) ||
+		    __put_user(old_ka.sa.sa_handler, &oact->sa_handler) ||
+		    __put_user(old_ka.sa.sa_restorer, &oact->sa_restorer))
+			return -EFAULT;
+		__put_user(old_ka.sa.sa_flags, &oact->sa_flags);
+		__put_user(old_ka.sa.sa_mask.sig[0], &oact->sa_mask);
+	}
+
+	return ret;
 }
 
-SYSCALL_DEFINE5(rt_sigaction, int, sig,
-		 const struct sigaction __user *, act,
-		 struct sigaction __user *, oact,
-		 void __user *, restorer,
-		 size_t, sigsetsize)
+asmlinkage long
+sys_rt_sigaction(int sig,
+		 const struct sigaction __user *act,
+		 struct sigaction __user *oact,
+		 void __user *restorer,
+		 size_t sigsetsize)
 {
 	struct k_sigaction new_ka, old_ka;
 	int ret;
@@ -199,29 +252,49 @@ SYSCALL_DEFINE5(rt_sigaction, int, sig,
 	return ret;
 }
 
-asmlinkage long sys_getdomainname(char __user *name, int len)
+asmlinkage int sys_getdomainname(char __user *name, int len)
 {
-	int nlen, err;
-	char tmp[__NEW_UTS_LEN + 1];
-
+ 	int nlen, err;
+ 	
 	if (len < 0)
 		return -EINVAL;
 
-	down_read(&uts_sem);
-
+ 	down_read(&uts_sem);
+ 	
 	nlen = strlen(utsname()->domainname) + 1;
 	err = -EINVAL;
 	if (nlen > len)
-		goto out_unlock;
-	memcpy(tmp, utsname()->domainname, nlen);
+		goto out;
 
-	up_read(&uts_sem);
+	err = -EFAULT;
+	if (!copy_to_user(name, utsname()->domainname, nlen))
+		err = 0;
 
-	if (copy_to_user(name, tmp, nlen))
-		return -EFAULT;
-	return 0;
-
-out_unlock:
+out:
 	up_read(&uts_sem);
 	return err;
+}
+
+/*
+ * Do a system call from kernel instead of calling sys_execve so we
+ * end up with proper pt_regs.
+ */
+int kernel_execve(const char *filename,
+		  const char *const argv[],
+		  const char *const envp[])
+{
+	long __res;
+	register long __g1 __asm__ ("g1") = __NR_execve;
+	register long __o0 __asm__ ("o0") = (long)(filename);
+	register long __o1 __asm__ ("o1") = (long)(argv);
+	register long __o2 __asm__ ("o2") = (long)(envp);
+	asm volatile ("t 0x10\n\t"
+		      "bcc 1f\n\t"
+		      "mov %%o0, %0\n\t"
+		      "sub %%g0, %%o0, %0\n\t"
+		      "1:\n\t"
+		      : "=r" (__res), "=&r" (__o0)
+		      : "1" (__o0), "r" (__o1), "r" (__o2), "r" (__g1)
+		      : "cc");
+	return __res;
 }

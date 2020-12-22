@@ -1,6 +1,5 @@
 /*
  * Copyright 2010 ARM Ltd.
- * Copyright 2012 Advanced Micro Devices, Inc., Robert Richter
  *
  * Perf-events backend for OProfile.
  */
@@ -26,7 +25,7 @@ static int oprofile_perf_enabled;
 static DEFINE_MUTEX(oprofile_perf_mutex);
 
 static struct op_counter_config *counter_config;
-static DEFINE_PER_CPU(struct perf_event **, perf_events);
+static struct perf_event **perf_events[NR_CPUS];
 static int num_counters;
 
 /*
@@ -39,7 +38,7 @@ static void op_overflow_handler(struct perf_event *event,
 	u32 cpu = smp_processor_id();
 
 	for (id = 0; id < num_counters; ++id)
-		if (per_cpu(perf_events, cpu)[id] == event)
+		if (perf_events[cpu][id] == event)
 			break;
 
 	if (id != num_counters)
@@ -75,7 +74,7 @@ static int op_create_counter(int cpu, int event)
 {
 	struct perf_event *pevent;
 
-	if (!counter_config[event].enabled || per_cpu(perf_events, cpu)[event])
+	if (!counter_config[event].enabled || perf_events[cpu][event])
 		return 0;
 
 	pevent = perf_event_create_kernel_counter(&counter_config[event].attr,
@@ -92,18 +91,18 @@ static int op_create_counter(int cpu, int event)
 		return -EBUSY;
 	}
 
-	per_cpu(perf_events, cpu)[event] = pevent;
+	perf_events[cpu][event] = pevent;
 
 	return 0;
 }
 
 static void op_destroy_counter(int cpu, int event)
 {
-	struct perf_event *pevent = per_cpu(perf_events, cpu)[event];
+	struct perf_event *pevent = perf_events[cpu][event];
 
 	if (pevent) {
 		perf_event_release_kernel(pevent);
-		per_cpu(perf_events, cpu)[event] = NULL;
+		perf_events[cpu][event] = NULL;
 	}
 }
 
@@ -138,7 +137,7 @@ static void op_perf_stop(void)
 			op_destroy_counter(cpu, event);
 }
 
-static int oprofile_perf_create_files(struct dentry *root)
+static int oprofile_perf_create_files(struct super_block *sb, struct dentry *root)
 {
 	unsigned int i;
 
@@ -147,13 +146,13 @@ static int oprofile_perf_create_files(struct dentry *root)
 		char buf[4];
 
 		snprintf(buf, sizeof buf, "%d", i);
-		dir = oprofilefs_mkdir(root, buf);
-		oprofilefs_create_ulong(dir, "enabled", &counter_config[i].enabled);
-		oprofilefs_create_ulong(dir, "event", &counter_config[i].event);
-		oprofilefs_create_ulong(dir, "count", &counter_config[i].count);
-		oprofilefs_create_ulong(dir, "unit_mask", &counter_config[i].unit_mask);
-		oprofilefs_create_ulong(dir, "kernel", &counter_config[i].kernel);
-		oprofilefs_create_ulong(dir, "user", &counter_config[i].user);
+		dir = oprofilefs_mkdir(sb, root, buf);
+		oprofilefs_create_ulong(sb, dir, "enabled", &counter_config[i].enabled);
+		oprofilefs_create_ulong(sb, dir, "event", &counter_config[i].event);
+		oprofilefs_create_ulong(sb, dir, "count", &counter_config[i].count);
+		oprofilefs_create_ulong(sb, dir, "unit_mask", &counter_config[i].unit_mask);
+		oprofilefs_create_ulong(sb, dir, "kernel", &counter_config[i].kernel);
+		oprofilefs_create_ulong(sb, dir, "user", &counter_config[i].user);
 	}
 
 	return 0;
@@ -258,12 +257,12 @@ void oprofile_perf_exit(void)
 
 	for_each_possible_cpu(cpu) {
 		for (id = 0; id < num_counters; ++id) {
-			event = per_cpu(perf_events, cpu)[id];
+			event = perf_events[cpu][id];
 			if (event)
 				perf_event_release_kernel(event);
 		}
 
-		kfree(per_cpu(perf_events, cpu));
+		kfree(perf_events[cpu]);
 	}
 
 	kfree(counter_config);
@@ -277,6 +276,8 @@ int __init oprofile_perf_init(struct oprofile_operations *ops)
 	ret = init_driverfs();
 	if (ret)
 		return ret;
+
+	memset(&perf_events, 0, sizeof(perf_events));
 
 	num_counters = perf_num_counters();
 	if (num_counters <= 0) {
@@ -297,9 +298,9 @@ int __init oprofile_perf_init(struct oprofile_operations *ops)
 	}
 
 	for_each_possible_cpu(cpu) {
-		per_cpu(perf_events, cpu) = kcalloc(num_counters,
+		perf_events[cpu] = kcalloc(num_counters,
 				sizeof(struct perf_event *), GFP_KERNEL);
-		if (!per_cpu(perf_events, cpu)) {
+		if (!perf_events[cpu]) {
 			pr_info("oprofile: failed to allocate %d perf events "
 					"for cpu %d\n", num_counters, cpu);
 			ret = -ENOMEM;

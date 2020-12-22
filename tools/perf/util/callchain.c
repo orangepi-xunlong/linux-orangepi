@@ -15,212 +15,22 @@
 #include <errno.h>
 #include <math.h>
 
-#include "asm/bug.h"
-
-#include "hist.h"
 #include "util.h"
-#include "sort.h"
-#include "machine.h"
 #include "callchain.h"
 
-__thread struct callchain_cursor callchain_cursor;
-
-int parse_callchain_record_opt(const char *arg, struct callchain_param *param)
+bool ip_callchain__valid(struct ip_callchain *chain,
+			 const union perf_event *event)
 {
-	return parse_callchain_record(arg, param);
+	unsigned int chain_size = event->header.size;
+	chain_size -= (unsigned long)&event->ip.__more_data - (unsigned long)event;
+	return chain->nr * sizeof(u64) <= chain_size;
 }
 
-static int parse_callchain_mode(const char *value)
-{
-	if (!strncmp(value, "graph", strlen(value))) {
-		callchain_param.mode = CHAIN_GRAPH_ABS;
-		return 0;
-	}
-	if (!strncmp(value, "flat", strlen(value))) {
-		callchain_param.mode = CHAIN_FLAT;
-		return 0;
-	}
-	if (!strncmp(value, "fractal", strlen(value))) {
-		callchain_param.mode = CHAIN_GRAPH_REL;
-		return 0;
-	}
-	if (!strncmp(value, "folded", strlen(value))) {
-		callchain_param.mode = CHAIN_FOLDED;
-		return 0;
-	}
-	return -1;
-}
+#define chain_for_each_child(child, parent)	\
+	list_for_each_entry(child, &parent->children, siblings)
 
-static int parse_callchain_order(const char *value)
-{
-	if (!strncmp(value, "caller", strlen(value))) {
-		callchain_param.order = ORDER_CALLER;
-		callchain_param.order_set = true;
-		return 0;
-	}
-	if (!strncmp(value, "callee", strlen(value))) {
-		callchain_param.order = ORDER_CALLEE;
-		callchain_param.order_set = true;
-		return 0;
-	}
-	return -1;
-}
-
-static int parse_callchain_sort_key(const char *value)
-{
-	if (!strncmp(value, "function", strlen(value))) {
-		callchain_param.key = CCKEY_FUNCTION;
-		return 0;
-	}
-	if (!strncmp(value, "address", strlen(value))) {
-		callchain_param.key = CCKEY_ADDRESS;
-		return 0;
-	}
-	if (!strncmp(value, "branch", strlen(value))) {
-		callchain_param.branch_callstack = 1;
-		return 0;
-	}
-	return -1;
-}
-
-static int parse_callchain_value(const char *value)
-{
-	if (!strncmp(value, "percent", strlen(value))) {
-		callchain_param.value = CCVAL_PERCENT;
-		return 0;
-	}
-	if (!strncmp(value, "period", strlen(value))) {
-		callchain_param.value = CCVAL_PERIOD;
-		return 0;
-	}
-	if (!strncmp(value, "count", strlen(value))) {
-		callchain_param.value = CCVAL_COUNT;
-		return 0;
-	}
-	return -1;
-}
-
-static int
-__parse_callchain_report_opt(const char *arg, bool allow_record_opt)
-{
-	char *tok;
-	char *endptr;
-	bool minpcnt_set = false;
-	bool record_opt_set = false;
-	bool try_stack_size = false;
-
-	callchain_param.enabled = true;
-	symbol_conf.use_callchain = true;
-
-	if (!arg)
-		return 0;
-
-	while ((tok = strtok((char *)arg, ",")) != NULL) {
-		if (!strncmp(tok, "none", strlen(tok))) {
-			callchain_param.mode = CHAIN_NONE;
-			callchain_param.enabled = false;
-			symbol_conf.use_callchain = false;
-			return 0;
-		}
-
-		if (!parse_callchain_mode(tok) ||
-		    !parse_callchain_order(tok) ||
-		    !parse_callchain_sort_key(tok) ||
-		    !parse_callchain_value(tok)) {
-			/* parsing ok - move on to the next */
-			try_stack_size = false;
-			goto next;
-		} else if (allow_record_opt && !record_opt_set) {
-			if (parse_callchain_record(tok, &callchain_param))
-				goto try_numbers;
-
-			/* assume that number followed by 'dwarf' is stack size */
-			if (callchain_param.record_mode == CALLCHAIN_DWARF)
-				try_stack_size = true;
-
-			record_opt_set = true;
-			goto next;
-		}
-
-try_numbers:
-		if (try_stack_size) {
-			unsigned long size = 0;
-
-			if (get_stack_size(tok, &size) < 0)
-				return -1;
-			callchain_param.dump_size = size;
-			try_stack_size = false;
-		} else if (!minpcnt_set) {
-			/* try to get the min percent */
-			callchain_param.min_percent = strtod(tok, &endptr);
-			if (tok == endptr)
-				return -1;
-			minpcnt_set = true;
-		} else {
-			/* try print limit at last */
-			callchain_param.print_limit = strtoul(tok, &endptr, 0);
-			if (tok == endptr)
-				return -1;
-		}
-next:
-		arg = NULL;
-	}
-
-	if (callchain_register_param(&callchain_param) < 0) {
-		pr_err("Can't register callchain params\n");
-		return -1;
-	}
-	return 0;
-}
-
-int parse_callchain_report_opt(const char *arg)
-{
-	return __parse_callchain_report_opt(arg, false);
-}
-
-int parse_callchain_top_opt(const char *arg)
-{
-	return __parse_callchain_report_opt(arg, true);
-}
-
-int perf_callchain_config(const char *var, const char *value)
-{
-	char *endptr;
-
-	if (prefixcmp(var, "call-graph."))
-		return 0;
-	var += sizeof("call-graph.") - 1;
-
-	if (!strcmp(var, "record-mode"))
-		return parse_callchain_record_opt(value, &callchain_param);
-	if (!strcmp(var, "dump-size")) {
-		unsigned long size = 0;
-		int ret;
-
-		ret = get_stack_size(value, &size);
-		callchain_param.dump_size = size;
-
-		return ret;
-	}
-	if (!strcmp(var, "print-type"))
-		return parse_callchain_mode(value);
-	if (!strcmp(var, "order"))
-		return parse_callchain_order(value);
-	if (!strcmp(var, "sort-key"))
-		return parse_callchain_sort_key(value);
-	if (!strcmp(var, "threshold")) {
-		callchain_param.min_percent = strtod(value, &endptr);
-		if (value == endptr)
-			return -1;
-	}
-	if (!strcmp(var, "print-limit")) {
-		callchain_param.print_limit = strtod(value, &endptr);
-		if (value == endptr)
-			return -1;
-	}
-
-	return 0;
-}
+#define chain_for_each_child_safe(child, next, parent)	\
+	list_for_each_entry_safe(child, next, &parent->children, siblings)
 
 static void
 rb_insert_callchain(struct rb_root *root, struct callchain_node *chain,
@@ -240,7 +50,6 @@ rb_insert_callchain(struct rb_root *root, struct callchain_node *chain,
 
 		switch (mode) {
 		case CHAIN_FLAT:
-		case CHAIN_FOLDED:
 			if (rnode->hit < chain->hit)
 				p = &(*p)->rb_left;
 			else
@@ -267,16 +76,10 @@ static void
 __sort_chain_flat(struct rb_root *rb_root, struct callchain_node *node,
 		  u64 min_hit)
 {
-	struct rb_node *n;
 	struct callchain_node *child;
 
-	n = rb_first(&node->rb_root_in);
-	while (n) {
-		child = rb_entry(n, struct callchain_node, rb_node_in);
-		n = rb_next(n);
-
+	chain_for_each_child(child, node)
 		__sort_chain_flat(rb_root, child, min_hit);
-	}
 
 	if (node->hit && node->hit >= min_hit)
 		rb_insert_callchain(rb_root, node, CHAIN_FLAT);
@@ -288,25 +91,19 @@ __sort_chain_flat(struct rb_root *rb_root, struct callchain_node *node,
  */
 static void
 sort_chain_flat(struct rb_root *rb_root, struct callchain_root *root,
-		u64 min_hit, struct callchain_param *param __maybe_unused)
+		u64 min_hit, struct callchain_param *param __used)
 {
-	*rb_root = RB_ROOT;
 	__sort_chain_flat(rb_root, &root->node, min_hit);
 }
 
 static void __sort_chain_graph_abs(struct callchain_node *node,
 				   u64 min_hit)
 {
-	struct rb_node *n;
 	struct callchain_node *child;
 
 	node->rb_root = RB_ROOT;
-	n = rb_first(&node->rb_root_in);
 
-	while (n) {
-		child = rb_entry(n, struct callchain_node, rb_node_in);
-		n = rb_next(n);
-
+	chain_for_each_child(child, node) {
 		__sort_chain_graph_abs(child, min_hit);
 		if (callchain_cumul_hits(child) >= min_hit)
 			rb_insert_callchain(&node->rb_root, child,
@@ -316,7 +113,7 @@ static void __sort_chain_graph_abs(struct callchain_node *node,
 
 static void
 sort_chain_graph_abs(struct rb_root *rb_root, struct callchain_root *chain_root,
-		     u64 min_hit, struct callchain_param *param __maybe_unused)
+		     u64 min_hit, struct callchain_param *param __used)
 {
 	__sort_chain_graph_abs(&chain_root->node, min_hit);
 	rb_root->rb_node = chain_root->node.rb_root.rb_node;
@@ -325,18 +122,13 @@ sort_chain_graph_abs(struct rb_root *rb_root, struct callchain_root *chain_root,
 static void __sort_chain_graph_rel(struct callchain_node *node,
 				   double min_percent)
 {
-	struct rb_node *n;
 	struct callchain_node *child;
 	u64 min_hit;
 
 	node->rb_root = RB_ROOT;
 	min_hit = ceil(node->children_hit * min_percent);
 
-	n = rb_first(&node->rb_root_in);
-	while (n) {
-		child = rb_entry(n, struct callchain_node, rb_node_in);
-		n = rb_next(n);
-
+	chain_for_each_child(child, node) {
 		__sort_chain_graph_rel(child, min_percent);
 		if (callchain_cumul_hits(child) >= min_hit)
 			rb_insert_callchain(&node->rb_root, child,
@@ -346,7 +138,7 @@ static void __sort_chain_graph_rel(struct callchain_node *node,
 
 static void
 sort_chain_graph_rel(struct rb_root *rb_root, struct callchain_root *chain_root,
-		     u64 min_hit __maybe_unused, struct callchain_param *param)
+		     u64 min_hit __used, struct callchain_param *param)
 {
 	__sort_chain_graph_rel(&chain_root->node, param->min_percent / 100.0);
 	rb_root->rb_node = chain_root->node.rb_root.rb_node;
@@ -362,7 +154,6 @@ int callchain_register_param(struct callchain_param *param)
 		param->sort = sort_chain_graph_rel;
 		break;
 	case CHAIN_FLAT:
-	case CHAIN_FOLDED:
 		param->sort = sort_chain_flat;
 		break;
 	case CHAIN_NONE:
@@ -387,27 +178,19 @@ create_child(struct callchain_node *parent, bool inherit_children)
 		return NULL;
 	}
 	new->parent = parent;
+	INIT_LIST_HEAD(&new->children);
 	INIT_LIST_HEAD(&new->val);
-	INIT_LIST_HEAD(&new->parent_val);
 
 	if (inherit_children) {
-		struct rb_node *n;
-		struct callchain_node *child;
+		struct callchain_node *next;
 
-		new->rb_root_in = parent->rb_root_in;
-		parent->rb_root_in = RB_ROOT;
+		list_splice(&parent->children, &new->children);
+		INIT_LIST_HEAD(&parent->children);
 
-		n = rb_first(&new->rb_root_in);
-		while (n) {
-			child = rb_entry(n, struct callchain_node, rb_node_in);
-			child->parent = new;
-			n = rb_next(n);
-		}
-
-		/* make it the first child */
-		rb_link_node(&new->rb_node_in, NULL, &parent->rb_root_in.rb_node);
-		rb_insert_color(&new->rb_node_in, &parent->rb_root_in);
+		chain_for_each_child(next, new)
+			next->parent = new;
 	}
+	list_add_tail(&new->siblings, &parent->children);
 
 	return new;
 }
@@ -416,7 +199,7 @@ create_child(struct callchain_node *parent, bool inherit_children)
 /*
  * Fill the node with callchain values
  */
-static int
+static void
 fill_node(struct callchain_node *node, struct callchain_cursor *cursor)
 {
 	struct callchain_cursor_node *cursor_node;
@@ -433,20 +216,19 @@ fill_node(struct callchain_node *node, struct callchain_cursor *cursor)
 		call = zalloc(sizeof(*call));
 		if (!call) {
 			perror("not enough memory for the code path tree");
-			return -1;
+			return;
 		}
 		call->ip = cursor_node->ip;
 		call->ms.sym = cursor_node->sym;
-		call->ms.map = map__get(cursor_node->map);
+		call->ms.map = cursor_node->map;
 		list_add_tail(&call->list, &node->val);
 
 		callchain_cursor_advance(cursor);
 		cursor_node = callchain_cursor_current(cursor);
 	}
-	return 0;
 }
 
-static struct callchain_node *
+static void
 add_child(struct callchain_node *parent,
 	  struct callchain_cursor *cursor,
 	  u64 period)
@@ -454,54 +236,10 @@ add_child(struct callchain_node *parent,
 	struct callchain_node *new;
 
 	new = create_child(parent, false);
-	if (new == NULL)
-		return NULL;
-
-	if (fill_node(new, cursor) < 0) {
-		struct callchain_list *call, *tmp;
-
-		list_for_each_entry_safe(call, tmp, &new->val, list) {
-			list_del(&call->list);
-			map__zput(call->ms.map);
-			free(call);
-		}
-		free(new);
-		return NULL;
-	}
+	fill_node(new, cursor);
 
 	new->children_hit = 0;
 	new->hit = period;
-	new->children_count = 0;
-	new->count = 1;
-	return new;
-}
-
-enum match_result {
-	MATCH_ERROR  = -1,
-	MATCH_EQ,
-	MATCH_LT,
-	MATCH_GT,
-};
-
-static enum match_result match_chain(struct callchain_cursor_node *node,
-				     struct callchain_list *cnode)
-{
-	struct symbol *sym = node->sym;
-	u64 left, right;
-
-	if (cnode->ms.sym && sym &&
-	    callchain_param.key == CCKEY_FUNCTION) {
-		left = cnode->ms.sym->start;
-		right = sym->start;
-	} else {
-		left = cnode->ip;
-		right = node->ip;
-	}
-
-	if (left == right)
-		return MATCH_EQ;
-
-	return left > right ? MATCH_GT : MATCH_LT;
 }
 
 /*
@@ -509,7 +247,7 @@ static enum match_result match_chain(struct callchain_cursor_node *node,
  * give a part of its callchain to the created child.
  * Then create another child to host the given callchain of new branch
  */
-static int
+static void
 split_add_child(struct callchain_node *parent,
 		struct callchain_cursor *cursor,
 		struct callchain_list *to_split,
@@ -521,8 +259,6 @@ split_add_child(struct callchain_node *parent,
 
 	/* split */
 	new = create_child(parent, true);
-	if (new == NULL)
-		return -1;
 
 	/* split the callchain and move a part to the new child */
 	old_tail = parent->val.prev;
@@ -538,164 +274,106 @@ split_add_child(struct callchain_node *parent,
 	parent->children_hit = callchain_cumul_hits(new);
 	new->val_nr = parent->val_nr - idx_local;
 	parent->val_nr = idx_local;
-	new->count = parent->count;
-	new->children_count = parent->children_count;
-	parent->children_count = callchain_cumul_counts(new);
 
 	/* create a new child for the new branch if any */
 	if (idx_total < cursor->nr) {
-		struct callchain_node *first;
-		struct callchain_list *cnode;
-		struct callchain_cursor_node *node;
-		struct rb_node *p, **pp;
-
 		parent->hit = 0;
+		add_child(parent, cursor, period);
 		parent->children_hit += period;
-		parent->count = 0;
-		parent->children_count += 1;
-
-		node = callchain_cursor_current(cursor);
-		new = add_child(parent, cursor, period);
-		if (new == NULL)
-			return -1;
-
-		/*
-		 * This is second child since we moved parent's children
-		 * to new (first) child above.
-		 */
-		p = parent->rb_root_in.rb_node;
-		first = rb_entry(p, struct callchain_node, rb_node_in);
-		cnode = list_first_entry(&first->val, struct callchain_list,
-					 list);
-
-		if (match_chain(node, cnode) == MATCH_LT)
-			pp = &p->rb_left;
-		else
-			pp = &p->rb_right;
-
-		rb_link_node(&new->rb_node_in, p, pp);
-		rb_insert_color(&new->rb_node_in, &parent->rb_root_in);
 	} else {
 		parent->hit = period;
-		parent->count = 1;
 	}
-	return 0;
 }
 
-static enum match_result
+static int
 append_chain(struct callchain_node *root,
 	     struct callchain_cursor *cursor,
 	     u64 period);
 
-static int
+static void
 append_chain_children(struct callchain_node *root,
 		      struct callchain_cursor *cursor,
 		      u64 period)
 {
 	struct callchain_node *rnode;
-	struct callchain_cursor_node *node;
-	struct rb_node **p = &root->rb_root_in.rb_node;
-	struct rb_node *parent = NULL;
-
-	node = callchain_cursor_current(cursor);
-	if (!node)
-		return -1;
 
 	/* lookup in childrens */
-	while (*p) {
-		enum match_result ret;
+	chain_for_each_child(rnode, root) {
+		unsigned int ret = append_chain(rnode, cursor, period);
 
-		parent = *p;
-		rnode = rb_entry(parent, struct callchain_node, rb_node_in);
-
-		/* If at least first entry matches, rely to children */
-		ret = append_chain(rnode, cursor, period);
-		if (ret == MATCH_EQ)
+		if (!ret)
 			goto inc_children_hit;
-		if (ret == MATCH_ERROR)
-			return -1;
-
-		if (ret == MATCH_LT)
-			p = &parent->rb_left;
-		else
-			p = &parent->rb_right;
 	}
 	/* nothing in children, add to the current node */
-	rnode = add_child(root, cursor, period);
-	if (rnode == NULL)
-		return -1;
-
-	rb_link_node(&rnode->rb_node_in, parent, p);
-	rb_insert_color(&rnode->rb_node_in, &root->rb_root_in);
+	add_child(root, cursor, period);
 
 inc_children_hit:
 	root->children_hit += period;
-	root->children_count++;
-	return 0;
 }
 
-static enum match_result
+static int
 append_chain(struct callchain_node *root,
 	     struct callchain_cursor *cursor,
 	     u64 period)
 {
+	struct callchain_cursor_node *curr_snap = cursor->curr;
 	struct callchain_list *cnode;
 	u64 start = cursor->pos;
 	bool found = false;
 	u64 matches;
-	enum match_result cmp = MATCH_ERROR;
 
 	/*
 	 * Lookup in the current node
 	 * If we have a symbol, then compare the start to match
-	 * anywhere inside a function, unless function
-	 * mode is disabled.
+	 * anywhere inside a function.
 	 */
 	list_for_each_entry(cnode, &root->val, list) {
 		struct callchain_cursor_node *node;
+		struct symbol *sym;
 
 		node = callchain_cursor_current(cursor);
 		if (!node)
 			break;
 
-		cmp = match_chain(node, cnode);
-		if (cmp != MATCH_EQ)
+		sym = node->sym;
+
+		if (cnode->ms.sym && sym) {
+			if (cnode->ms.sym->start != sym->start)
+				break;
+		} else if (cnode->ip != node->ip)
 			break;
 
-		found = true;
+		if (!found)
+			found = true;
 
 		callchain_cursor_advance(cursor);
 	}
 
-	/* matches not, relay no the parent */
+	/* matches not, relay on the parent */
 	if (!found) {
-		WARN_ONCE(cmp == MATCH_ERROR, "Chain comparison error\n");
-		return cmp;
+		cursor->curr = curr_snap;
+		cursor->pos = start;
+		return -1;
 	}
 
 	matches = cursor->pos - start;
 
 	/* we match only a part of the node. Split it and add the new chain */
 	if (matches < root->val_nr) {
-		if (split_add_child(root, cursor, cnode, start, matches,
-				    period) < 0)
-			return MATCH_ERROR;
-
-		return MATCH_EQ;
+		split_add_child(root, cursor, cnode, start, matches, period);
+		return 0;
 	}
 
 	/* we match 100% of the path, increment the hit */
 	if (matches == root->val_nr && cursor->pos == cursor->nr) {
 		root->hit += period;
-		root->count++;
-		return MATCH_EQ;
+		return 0;
 	}
 
 	/* We match the node and still have a part remaining */
-	if (append_chain_children(root, cursor, period) < 0)
-		return MATCH_ERROR;
+	append_chain_children(root, cursor, period);
 
-	return MATCH_EQ;
+	return 0;
 }
 
 int callchain_append(struct callchain_root *root,
@@ -707,8 +385,7 @@ int callchain_append(struct callchain_root *root,
 
 	callchain_cursor_commit(cursor);
 
-	if (append_chain_children(&root->node, cursor, period) < 0)
-		return -1;
+	append_chain_children(&root->node, cursor, period);
 
 	if (cursor->nr > root->max_depth)
 		root->max_depth = cursor->nr;
@@ -721,9 +398,8 @@ merge_chain_branch(struct callchain_cursor *cursor,
 		   struct callchain_node *dst, struct callchain_node *src)
 {
 	struct callchain_cursor_node **old_last = cursor->last;
-	struct callchain_node *child;
+	struct callchain_node *child, *next_child;
 	struct callchain_list *list, *next_list;
-	struct rb_node *n;
 	int old_pos = cursor->nr;
 	int err = 0;
 
@@ -731,26 +407,20 @@ merge_chain_branch(struct callchain_cursor *cursor,
 		callchain_cursor_append(cursor, list->ip,
 					list->ms.map, list->ms.sym);
 		list_del(&list->list);
-		map__zput(list->ms.map);
 		free(list);
 	}
 
 	if (src->hit) {
 		callchain_cursor_commit(cursor);
-		if (append_chain_children(dst, cursor, src->hit) < 0)
-			return -1;
+		append_chain_children(dst, cursor, src->hit);
 	}
 
-	n = rb_first(&src->rb_root_in);
-	while (n) {
-		child = container_of(n, struct callchain_node, rb_node_in);
-		n = rb_next(n);
-		rb_erase(&child->rb_node_in, &src->rb_root_in);
-
+	chain_for_each_child_safe(child, next_child, src) {
 		err = merge_chain_branch(cursor, dst, child);
 		if (err)
 			break;
 
+		list_del(&child->siblings);
 		free(child);
 	}
 
@@ -772,7 +442,7 @@ int callchain_cursor_append(struct callchain_cursor *cursor,
 	struct callchain_cursor_node *node = *cursor->last;
 
 	if (!node) {
-		node = calloc(1, sizeof(*node));
+		node = calloc(sizeof(*node), 1);
 		if (!node)
 			return -ENOMEM;
 
@@ -780,8 +450,7 @@ int callchain_cursor_append(struct callchain_cursor *cursor,
 	}
 
 	node->ip = ip;
-	map__zput(node->map);
-	node->map = map__get(map);
+	node->map = map;
 	node->sym = sym;
 
 	cursor->nr++;
@@ -789,258 +458,4 @@ int callchain_cursor_append(struct callchain_cursor *cursor,
 	cursor->last = &node->next;
 
 	return 0;
-}
-
-int sample__resolve_callchain(struct perf_sample *sample,
-			      struct callchain_cursor *cursor, struct symbol **parent,
-			      struct perf_evsel *evsel, struct addr_location *al,
-			      int max_stack)
-{
-	if (sample->callchain == NULL)
-		return 0;
-
-	if (symbol_conf.use_callchain || symbol_conf.cumulate_callchain ||
-	    perf_hpp_list.parent) {
-		return thread__resolve_callchain(al->thread, cursor, evsel, sample,
-						 parent, al, max_stack);
-	}
-	return 0;
-}
-
-int hist_entry__append_callchain(struct hist_entry *he, struct perf_sample *sample)
-{
-	if (!symbol_conf.use_callchain || sample->callchain == NULL)
-		return 0;
-	return callchain_append(he->callchain, &callchain_cursor, sample->period);
-}
-
-int fill_callchain_info(struct addr_location *al, struct callchain_cursor_node *node,
-			bool hide_unresolved)
-{
-	al->map = node->map;
-	al->sym = node->sym;
-	if (node->map)
-		al->addr = node->map->map_ip(node->map, node->ip);
-	else
-		al->addr = node->ip;
-
-	if (al->sym == NULL) {
-		if (hide_unresolved)
-			return 0;
-		if (al->map == NULL)
-			goto out;
-	}
-
-	if (al->map->groups == &al->machine->kmaps) {
-		if (machine__is_host(al->machine)) {
-			al->cpumode = PERF_RECORD_MISC_KERNEL;
-			al->level = 'k';
-		} else {
-			al->cpumode = PERF_RECORD_MISC_GUEST_KERNEL;
-			al->level = 'g';
-		}
-	} else {
-		if (machine__is_host(al->machine)) {
-			al->cpumode = PERF_RECORD_MISC_USER;
-			al->level = '.';
-		} else if (perf_guest) {
-			al->cpumode = PERF_RECORD_MISC_GUEST_USER;
-			al->level = 'u';
-		} else {
-			al->cpumode = PERF_RECORD_MISC_HYPERVISOR;
-			al->level = 'H';
-		}
-	}
-
-out:
-	return 1;
-}
-
-char *callchain_list__sym_name(struct callchain_list *cl,
-			       char *bf, size_t bfsize, bool show_dso)
-{
-	int printed;
-
-	if (cl->ms.sym) {
-		if (callchain_param.key == CCKEY_ADDRESS &&
-		    cl->ms.map && !cl->srcline)
-			cl->srcline = get_srcline(cl->ms.map->dso,
-						  map__rip_2objdump(cl->ms.map,
-								    cl->ip),
-						  cl->ms.sym, false);
-		if (cl->srcline)
-			printed = scnprintf(bf, bfsize, "%s %s",
-					cl->ms.sym->name, cl->srcline);
-		else
-			printed = scnprintf(bf, bfsize, "%s", cl->ms.sym->name);
-	} else
-		printed = scnprintf(bf, bfsize, "%#" PRIx64, cl->ip);
-
-	if (show_dso)
-		scnprintf(bf + printed, bfsize - printed, " %s",
-			  cl->ms.map ?
-			  cl->ms.map->dso->short_name :
-			  "unknown");
-
-	return bf;
-}
-
-char *callchain_node__scnprintf_value(struct callchain_node *node,
-				      char *bf, size_t bfsize, u64 total)
-{
-	double percent = 0.0;
-	u64 period = callchain_cumul_hits(node);
-	unsigned count = callchain_cumul_counts(node);
-
-	if (callchain_param.mode == CHAIN_FOLDED) {
-		period = node->hit;
-		count = node->count;
-	}
-
-	switch (callchain_param.value) {
-	case CCVAL_PERIOD:
-		scnprintf(bf, bfsize, "%"PRIu64, period);
-		break;
-	case CCVAL_COUNT:
-		scnprintf(bf, bfsize, "%u", count);
-		break;
-	case CCVAL_PERCENT:
-	default:
-		if (total)
-			percent = period * 100.0 / total;
-		scnprintf(bf, bfsize, "%.2f%%", percent);
-		break;
-	}
-	return bf;
-}
-
-int callchain_node__fprintf_value(struct callchain_node *node,
-				 FILE *fp, u64 total)
-{
-	double percent = 0.0;
-	u64 period = callchain_cumul_hits(node);
-	unsigned count = callchain_cumul_counts(node);
-
-	if (callchain_param.mode == CHAIN_FOLDED) {
-		period = node->hit;
-		count = node->count;
-	}
-
-	switch (callchain_param.value) {
-	case CCVAL_PERIOD:
-		return fprintf(fp, "%"PRIu64, period);
-	case CCVAL_COUNT:
-		return fprintf(fp, "%u", count);
-	case CCVAL_PERCENT:
-	default:
-		if (total)
-			percent = period * 100.0 / total;
-		return percent_color_fprintf(fp, "%.2f%%", percent);
-	}
-	return 0;
-}
-
-static void free_callchain_node(struct callchain_node *node)
-{
-	struct callchain_list *list, *tmp;
-	struct callchain_node *child;
-	struct rb_node *n;
-
-	list_for_each_entry_safe(list, tmp, &node->parent_val, list) {
-		list_del(&list->list);
-		map__zput(list->ms.map);
-		free(list);
-	}
-
-	list_for_each_entry_safe(list, tmp, &node->val, list) {
-		list_del(&list->list);
-		map__zput(list->ms.map);
-		free(list);
-	}
-
-	n = rb_first(&node->rb_root_in);
-	while (n) {
-		child = container_of(n, struct callchain_node, rb_node_in);
-		n = rb_next(n);
-		rb_erase(&child->rb_node_in, &node->rb_root_in);
-
-		free_callchain_node(child);
-		free(child);
-	}
-}
-
-void free_callchain(struct callchain_root *root)
-{
-	if (!symbol_conf.use_callchain)
-		return;
-
-	free_callchain_node(&root->node);
-}
-
-static u64 decay_callchain_node(struct callchain_node *node)
-{
-	struct callchain_node *child;
-	struct rb_node *n;
-	u64 child_hits = 0;
-
-	n = rb_first(&node->rb_root_in);
-	while (n) {
-		child = container_of(n, struct callchain_node, rb_node_in);
-
-		child_hits += decay_callchain_node(child);
-		n = rb_next(n);
-	}
-
-	node->hit = (node->hit * 7) / 8;
-	node->children_hit = child_hits;
-
-	return node->hit;
-}
-
-void decay_callchain(struct callchain_root *root)
-{
-	if (!symbol_conf.use_callchain)
-		return;
-
-	decay_callchain_node(&root->node);
-}
-
-int callchain_node__make_parent_list(struct callchain_node *node)
-{
-	struct callchain_node *parent = node->parent;
-	struct callchain_list *chain, *new;
-	LIST_HEAD(head);
-
-	while (parent) {
-		list_for_each_entry_reverse(chain, &parent->val, list) {
-			new = malloc(sizeof(*new));
-			if (new == NULL)
-				goto out;
-			*new = *chain;
-			new->has_children = false;
-			map__get(new->ms.map);
-			list_add_tail(&new->list, &head);
-		}
-		parent = parent->parent;
-	}
-
-	list_for_each_entry_safe_reverse(chain, new, &head, list)
-		list_move_tail(&chain->list, &node->parent_val);
-
-	if (!list_empty(&node->parent_val)) {
-		chain = list_first_entry(&node->parent_val, struct callchain_list, list);
-		chain->has_children = rb_prev(&node->rb_node) || rb_next(&node->rb_node);
-
-		chain = list_first_entry(&node->val, struct callchain_list, list);
-		chain->has_children = false;
-	}
-	return 0;
-
-out:
-	list_for_each_entry_safe(chain, new, &head, list) {
-		list_del(&chain->list);
-		map__zput(chain->ms.map);
-		free(chain);
-	}
-	return -ENOMEM;
 }

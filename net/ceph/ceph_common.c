@@ -9,17 +9,14 @@
 #include <keys/ceph-type.h>
 #include <linux/module.h>
 #include <linux/mount.h>
-#include <linux/nsproxy.h>
 #include <linux/parser.h>
 #include <linux/sched.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/statfs.h>
 #include <linux/string.h>
-#include <linux/vmalloc.h>
 
 
-#include <linux/ceph/ceph_features.h>
 #include <linux/ceph/libceph.h>
 #include <linux/ceph/debugfs.h>
 #include <linux/ceph/decode.h>
@@ -28,22 +25,6 @@
 #include "crypto.h"
 
 
-/*
- * Module compatibility interface.  For now it doesn't do anything,
- * but its existence signals a certain level of functionality.
- *
- * The data buffer is used to pass information both to and from
- * libceph.  The return value indicates whether libceph determines
- * it is compatible with the caller (from another kernel module),
- * given the provided data.
- *
- * The data pointer can be null.
- */
-bool libceph_compatible(void *data)
-{
-	return true;
-}
-EXPORT_SYMBOL(libceph_compatible);
 
 /*
  * find filename portion of a path (/foo/bar/baz -> baz)
@@ -71,8 +52,6 @@ const char *ceph_msg_type_name(int type)
 	case CEPH_MSG_MON_SUBSCRIBE_ACK: return "mon_subscribe_ack";
 	case CEPH_MSG_STATFS: return "statfs";
 	case CEPH_MSG_STATFS_REPLY: return "statfs_reply";
-	case CEPH_MSG_MON_GET_VERSION: return "mon_get_version";
-	case CEPH_MSG_MON_GET_VERSION_REPLY: return "mon_get_version_reply";
 	case CEPH_MSG_MDS_MAP: return "mds_map";
 	case CEPH_MSG_CLIENT_SESSION: return "client_session";
 	case CEPH_MSG_CLIENT_RECONNECT: return "client_reconnect";
@@ -130,13 +109,6 @@ int ceph_compare_options(struct ceph_options *new_opt,
 	int i;
 	int ret;
 
-	/*
-	 * Don't bother comparing options if network namespaces don't
-	 * match.
-	 */
-	if (!net_eq(current->nsproxy->net_ns, read_pnet(&client->msgr.net)))
-		return -1;
-
 	ret = memcmp(opt1, opt2, ofs);
 	if (ret)
 		return ret;
@@ -178,17 +150,6 @@ int ceph_compare_options(struct ceph_options *new_opt,
 	return -1;
 }
 EXPORT_SYMBOL(ceph_compare_options);
-
-void *ceph_kvmalloc(size_t size, gfp_t flags)
-{
-	if (size <= (PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER)) {
-		void *ptr = kmalloc(size, flags | __GFP_NOWARN);
-		if (ptr)
-			return ptr;
-	}
-
-	return __vmalloc(size, flags | __GFP_HIGHMEM, PAGE_KERNEL);
-}
 
 
 static int parse_fsid(const char *str, struct ceph_fsid *fsid)
@@ -243,12 +204,6 @@ enum {
 	Opt_noshare,
 	Opt_crc,
 	Opt_nocrc,
-	Opt_cephx_require_signatures,
-	Opt_nocephx_require_signatures,
-	Opt_cephx_sign_messages,
-	Opt_nocephx_sign_messages,
-	Opt_tcp_nodelay,
-	Opt_notcp_nodelay,
 };
 
 static match_table_t opt_tokens = {
@@ -267,12 +222,6 @@ static match_table_t opt_tokens = {
 	{Opt_noshare, "noshare"},
 	{Opt_crc, "crc"},
 	{Opt_nocrc, "nocrc"},
-	{Opt_cephx_require_signatures, "cephx_require_signatures"},
-	{Opt_nocephx_require_signatures, "nocephx_require_signatures"},
-	{Opt_cephx_sign_messages, "cephx_sign_messages"},
-	{Opt_nocephx_sign_messages, "nocephx_sign_messages"},
-	{Opt_tcp_nodelay, "tcp_nodelay"},
-	{Opt_notcp_nodelay, "notcp_nodelay"},
 	{-1, NULL}
 };
 
@@ -303,26 +252,23 @@ static int get_secret(struct ceph_crypto_key *dst, const char *name) {
 		key_err = PTR_ERR(ukey);
 		switch (key_err) {
 		case -ENOKEY:
-			pr_warn("ceph: Mount failed due to key not found: %s\n",
-				name);
+			pr_warning("ceph: Mount failed due to key not found: %s\n", name);
 			break;
 		case -EKEYEXPIRED:
-			pr_warn("ceph: Mount failed due to expired key: %s\n",
-				name);
+			pr_warning("ceph: Mount failed due to expired key: %s\n", name);
 			break;
 		case -EKEYREVOKED:
-			pr_warn("ceph: Mount failed due to revoked key: %s\n",
-				name);
+			pr_warning("ceph: Mount failed due to revoked key: %s\n", name);
 			break;
 		default:
-			pr_warn("ceph: Mount failed due to unknown key error %d: %s\n",
-				key_err, name);
+			pr_warning("ceph: Mount failed due to unknown key error"
+			       " %d: %s\n", key_err, name);
 		}
 		err = -EPERM;
 		goto out;
 	}
 
-	ckey = ukey->payload.data[0];
+	ckey = ukey->payload.data;
 	err = ceph_crypto_key_clone(dst, ckey);
 	if (err)
 		goto out_key;
@@ -359,8 +305,8 @@ ceph_parse_options(char *options, const char *dev_name,
 	/* start with defaults */
 	opt->flags = CEPH_OPT_DEFAULT;
 	opt->osd_keepalive_timeout = CEPH_OSD_KEEPALIVE_DEFAULT;
-	opt->mount_timeout = CEPH_MOUNT_TIMEOUT_DEFAULT;
-	opt->osd_idle_ttl = CEPH_OSD_IDLE_TTL_DEFAULT;
+	opt->mount_timeout = CEPH_MOUNT_TIMEOUT_DEFAULT; /* seconds */
+	opt->osd_idle_ttl = CEPH_OSD_IDLE_TTL_DEFAULT;   /* seconds */
 
 	/* get mon ip(s) */
 	/* ip1[:port1][,ip2[:port2]...] */
@@ -443,35 +389,16 @@ ceph_parse_options(char *options, const char *dev_name,
 
 			/* misc */
 		case Opt_osdtimeout:
-			pr_warn("ignoring deprecated osdtimeout option\n");
+			pr_warning("ignoring deprecated osdtimeout option\n");
 			break;
 		case Opt_osdkeepalivetimeout:
-			/* 0 isn't well defined right now, reject it */
-			if (intval < 1 || intval > INT_MAX / 1000) {
-				pr_err("osdkeepalive out of range\n");
-				err = -EINVAL;
-				goto out;
-			}
-			opt->osd_keepalive_timeout =
-					msecs_to_jiffies(intval * 1000);
+			opt->osd_keepalive_timeout = intval;
 			break;
 		case Opt_osd_idle_ttl:
-			/* 0 isn't well defined right now, reject it */
-			if (intval < 1 || intval > INT_MAX / 1000) {
-				pr_err("osd_idle_ttl out of range\n");
-				err = -EINVAL;
-				goto out;
-			}
-			opt->osd_idle_ttl = msecs_to_jiffies(intval * 1000);
+			opt->osd_idle_ttl = intval;
 			break;
 		case Opt_mount_timeout:
-			/* 0 is "wait forever" (i.e. infinite timeout) */
-			if (intval < 0 || intval > INT_MAX / 1000) {
-				pr_err("mount_timeout out of range\n");
-				err = -EINVAL;
-				goto out;
-			}
-			opt->mount_timeout = msecs_to_jiffies(intval * 1000);
+			opt->mount_timeout = intval;
 			break;
 
 		case Opt_share:
@@ -488,26 +415,6 @@ ceph_parse_options(char *options, const char *dev_name,
 			opt->flags |= CEPH_OPT_NOCRC;
 			break;
 
-		case Opt_cephx_require_signatures:
-			opt->flags &= ~CEPH_OPT_NOMSGAUTH;
-			break;
-		case Opt_nocephx_require_signatures:
-			opt->flags |= CEPH_OPT_NOMSGAUTH;
-			break;
-		case Opt_cephx_sign_messages:
-			opt->flags &= ~CEPH_OPT_NOMSGSIGN;
-			break;
-		case Opt_nocephx_sign_messages:
-			opt->flags |= CEPH_OPT_NOMSGSIGN;
-			break;
-
-		case Opt_tcp_nodelay:
-			opt->flags |= CEPH_OPT_TCP_NODELAY;
-			break;
-		case Opt_notcp_nodelay:
-			opt->flags &= ~CEPH_OPT_TCP_NODELAY;
-			break;
-
 		default:
 			BUG_ON(token);
 		}
@@ -522,68 +429,18 @@ out:
 }
 EXPORT_SYMBOL(ceph_parse_options);
 
-int ceph_print_client_options(struct seq_file *m, struct ceph_client *client)
-{
-	struct ceph_options *opt = client->options;
-	size_t pos = m->count;
-
-	if (opt->name) {
-		seq_puts(m, "name=");
-		seq_escape(m, opt->name, ", \t\n\\");
-		seq_putc(m, ',');
-	}
-	if (opt->key)
-		seq_puts(m, "secret=<hidden>,");
-
-	if (opt->flags & CEPH_OPT_FSID)
-		seq_printf(m, "fsid=%pU,", &opt->fsid);
-	if (opt->flags & CEPH_OPT_NOSHARE)
-		seq_puts(m, "noshare,");
-	if (opt->flags & CEPH_OPT_NOCRC)
-		seq_puts(m, "nocrc,");
-	if (opt->flags & CEPH_OPT_NOMSGAUTH)
-		seq_puts(m, "nocephx_require_signatures,");
-	if (opt->flags & CEPH_OPT_NOMSGSIGN)
-		seq_puts(m, "nocephx_sign_messages,");
-	if ((opt->flags & CEPH_OPT_TCP_NODELAY) == 0)
-		seq_puts(m, "notcp_nodelay,");
-
-	if (opt->mount_timeout != CEPH_MOUNT_TIMEOUT_DEFAULT)
-		seq_printf(m, "mount_timeout=%d,",
-			   jiffies_to_msecs(opt->mount_timeout) / 1000);
-	if (opt->osd_idle_ttl != CEPH_OSD_IDLE_TTL_DEFAULT)
-		seq_printf(m, "osd_idle_ttl=%d,",
-			   jiffies_to_msecs(opt->osd_idle_ttl) / 1000);
-	if (opt->osd_keepalive_timeout != CEPH_OSD_KEEPALIVE_DEFAULT)
-		seq_printf(m, "osdkeepalivetimeout=%d,",
-		    jiffies_to_msecs(opt->osd_keepalive_timeout) / 1000);
-
-	/* drop redundant comma */
-	if (m->count != pos)
-		m->count--;
-
-	return 0;
-}
-EXPORT_SYMBOL(ceph_print_client_options);
-
-struct ceph_entity_addr *ceph_client_addr(struct ceph_client *client)
-{
-	return &client->msgr.inst.addr;
-}
-EXPORT_SYMBOL(ceph_client_addr);
-
-u64 ceph_client_gid(struct ceph_client *client)
+u64 ceph_client_id(struct ceph_client *client)
 {
 	return client->monc.auth->global_id;
 }
-EXPORT_SYMBOL(ceph_client_gid);
+EXPORT_SYMBOL(ceph_client_id);
 
 /*
  * create a fresh client instance
  */
 struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private,
-				       u64 supported_features,
-				       u64 required_features)
+				       unsigned supported_features,
+				       unsigned required_features)
 {
 	struct ceph_client *client;
 	struct ceph_entity_addr *myaddr = NULL;
@@ -600,20 +457,19 @@ struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private,
 	init_waitqueue_head(&client->auth_wq);
 	client->auth_err = 0;
 
-	if (!ceph_test_opt(client, NOMSGAUTH))
-		required_features |= CEPH_FEATURE_MSG_AUTH;
-
 	client->extra_mon_dispatch = NULL;
-	client->supported_features = CEPH_FEATURES_SUPPORTED_DEFAULT |
+	client->supported_features = CEPH_FEATURE_SUPPORTED_DEFAULT |
 		supported_features;
-	client->required_features = CEPH_FEATURES_REQUIRED_DEFAULT |
+	client->required_features = CEPH_FEATURE_REQUIRED_DEFAULT |
 		required_features;
 
 	/* msgr */
 	if (ceph_test_opt(client, MYIP))
 		myaddr = &client->options->my_addr;
-
-	ceph_messenger_init(&client->msgr, myaddr);
+	ceph_messenger_init(&client->msgr, myaddr,
+		client->supported_features,
+		client->required_features,
+		ceph_test_opt(client, NOCRC));
 
 	/* subsystems */
 	err = ceph_monc_init(&client->monc, client);
@@ -628,7 +484,6 @@ struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private,
 fail_monc:
 	ceph_monc_stop(&client->monc);
 fail:
-	ceph_messenger_fini(&client->msgr);
 	kfree(client);
 	return ERR_PTR(err);
 }
@@ -642,8 +497,8 @@ void ceph_destroy_client(struct ceph_client *client)
 
 	/* unmount */
 	ceph_osdc_stop(&client->osdc);
+
 	ceph_monc_stop(&client->monc);
-	ceph_messenger_fini(&client->msgr);
 
 	ceph_debugfs_client_cleanup(client);
 
@@ -657,7 +512,7 @@ EXPORT_SYMBOL(ceph_destroy_client);
 /*
  * true if we have the mon map (and have thus joined the cluster)
  */
-static bool have_mon_and_osd_map(struct ceph_client *client)
+static int have_mon_and_osd_map(struct ceph_client *client)
 {
 	return client->monc.monmap && client->monc.monmap->epoch &&
 	       client->osdc.osdmap && client->osdc.osdmap->epoch;
@@ -668,8 +523,8 @@ static bool have_mon_and_osd_map(struct ceph_client *client)
  */
 int __ceph_open_session(struct ceph_client *client, unsigned long started)
 {
-	unsigned long timeout = client->options->mount_timeout;
-	long err;
+	int err;
+	unsigned long timeout = client->options->mount_timeout * HZ;
 
 	/* open session, and wait for mon and osd maps */
 	err = ceph_monc_open_session(&client->monc);
@@ -677,27 +532,25 @@ int __ceph_open_session(struct ceph_client *client, unsigned long started)
 		return err;
 
 	while (!have_mon_and_osd_map(client)) {
+		err = -EIO;
 		if (timeout && time_after_eq(jiffies, started + timeout))
-			return -ETIMEDOUT;
+			return err;
 
 		/* wait */
 		dout("mount waiting for mon_map\n");
 		err = wait_event_interruptible_timeout(client->auth_wq,
 			have_mon_and_osd_map(client) || (client->auth_err < 0),
-			ceph_timeout_jiffies(timeout));
-		if (err < 0)
+			timeout);
+		if (err == -EINTR || err == -ERESTARTSYS)
 			return err;
 		if (client->auth_err < 0)
 			return client->auth_err;
 	}
 
-	pr_info("client%llu fsid %pU\n", ceph_client_gid(client),
-		&client->fsid);
-	ceph_debugfs_client_init(client);
-
 	return 0;
 }
 EXPORT_SYMBOL(__ceph_open_session);
+
 
 int ceph_open_session(struct ceph_client *client)
 {
@@ -714,23 +567,6 @@ int ceph_open_session(struct ceph_client *client)
 }
 EXPORT_SYMBOL(ceph_open_session);
 
-int ceph_wait_for_latest_osdmap(struct ceph_client *client,
-				unsigned long timeout)
-{
-	u64 newest_epoch;
-	int ret;
-
-	ret = ceph_monc_get_version(&client->monc, "osdmap", &newest_epoch);
-	if (ret)
-		return ret;
-
-	if (client->osdc.osdmap->epoch >= newest_epoch)
-		return 0;
-
-	ceph_osdc_maybe_request_map(&client->osdc);
-	return ceph_monc_wait_osdmap(&client->monc, newest_epoch, timeout);
-}
-EXPORT_SYMBOL(ceph_wait_for_latest_osdmap);
 
 static int __init init_ceph_lib(void)
 {
@@ -748,17 +584,13 @@ static int __init init_ceph_lib(void)
 	if (ret < 0)
 		goto out_crypto;
 
-	ret = ceph_osdc_setup();
-	if (ret < 0)
-		goto out_msgr;
-
-	pr_info("loaded (mon/osd proto %d/%d)\n",
-		CEPH_MONC_PROTOCOL, CEPH_OSDC_PROTOCOL);
+	pr_info("loaded (mon/osd proto %d/%d, osdmap %d/%d %d/%d)\n",
+		CEPH_MONC_PROTOCOL, CEPH_OSDC_PROTOCOL,
+		CEPH_OSDMAP_VERSION, CEPH_OSDMAP_VERSION_EXT,
+		CEPH_OSDMAP_INC_VERSION, CEPH_OSDMAP_INC_VERSION_EXT);
 
 	return 0;
 
-out_msgr:
-	ceph_msgr_exit();
 out_crypto:
 	ceph_crypto_shutdown();
 out_debugfs:
@@ -770,9 +602,6 @@ out:
 static void __exit exit_ceph_lib(void)
 {
 	dout("exit_ceph_lib\n");
-	WARN_ON(!ceph_strings_empty());
-
-	ceph_osdc_cleanup();
 	ceph_msgr_exit();
 	ceph_crypto_shutdown();
 	ceph_debugfs_cleanup();
@@ -784,5 +613,5 @@ module_exit(exit_ceph_lib);
 MODULE_AUTHOR("Sage Weil <sage@newdream.net>");
 MODULE_AUTHOR("Yehuda Sadeh <yehuda@hq.newdream.net>");
 MODULE_AUTHOR("Patience Warnick <patience@newdream.net>");
-MODULE_DESCRIPTION("Ceph core library");
+MODULE_DESCRIPTION("Ceph filesystem for Linux");
 MODULE_LICENSE("GPL");

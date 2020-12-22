@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -128,7 +128,6 @@ acpi_status acpi_ev_remove_global_lock_handler(void)
 	status = acpi_remove_fixed_event_handler(ACPI_EVENT_GLOBAL,
 						 acpi_ev_global_lock_handler);
 
-	acpi_os_delete_lock(acpi_gbl_global_lock_pending_lock);
 	return_ACPI_STATUS(status);
 }
 
@@ -136,7 +135,7 @@ acpi_status acpi_ev_remove_global_lock_handler(void)
  *
  * FUNCTION:    acpi_ev_global_lock_handler
  *
- * PARAMETERS:  context         - From thread interface, not used
+ * PARAMETERS:  Context         - From thread interface, not used
  *
  * RETURN:      ACPI_INTERRUPT_HANDLED
  *
@@ -173,7 +172,7 @@ static u32 acpi_ev_global_lock_handler(void *context)
 
 	acpi_gbl_global_lock_pending = FALSE;
 
-cleanup_and_exit:
+      cleanup_and_exit:
 
 	acpi_os_release_lock(acpi_gbl_global_lock_pending_lock, flags);
 	return (ACPI_INTERRUPT_HANDLED);
@@ -183,7 +182,7 @@ cleanup_and_exit:
  *
  * FUNCTION:    acpi_ev_acquire_global_lock
  *
- * PARAMETERS:  timeout         - Max time to wait for the lock, in millisec.
+ * PARAMETERS:  Timeout         - Max time to wait for the lock, in millisec.
  *
  * RETURN:      Status
  *

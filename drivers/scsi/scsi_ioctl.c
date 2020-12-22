@@ -91,14 +91,12 @@ static int ioctl_internal_command(struct scsi_device *sdev, char *cmd,
 	int result;
 	struct scsi_sense_hdr sshdr;
 
-	SCSI_LOG_IOCTL(1, sdev_printk(KERN_INFO, sdev,
-				      "Trying ioctl with scsi command %d\n", *cmd));
+	SCSI_LOG_IOCTL(1, printk("Trying ioctl with scsi command %d\n", *cmd));
 
 	result = scsi_execute_req(sdev, cmd, DMA_NONE, NULL, 0,
 				  &sshdr, timeout, retries, NULL);
 
-	SCSI_LOG_IOCTL(2, sdev_printk(KERN_INFO, sdev,
-				      "Ioctl returned  0x%x\n", result));
+	SCSI_LOG_IOCTL(2, printk("Ioctl returned  0x%x\n", result));
 
 	if ((driver_byte(result) & DRIVER_SENSE) &&
 	    (scsi_sense_valid(&sshdr))) {
@@ -107,11 +105,9 @@ static int ioctl_internal_command(struct scsi_device *sdev, char *cmd,
 			if (cmd[0] == ALLOW_MEDIUM_REMOVAL)
 				sdev->lockable = 0;
 			else
-				sdev_printk(KERN_INFO, sdev,
-					    "ioctl_internal_command: "
-					    "ILLEGAL REQUEST "
-					    "asc=0x%x ascq=0x%x\n",
-					    sshdr.asc, sshdr.ascq);
+				printk(KERN_INFO "ioctl_internal_command: "
+				       "ILLEGAL REQUEST asc=0x%x ascq=0x%x\n",
+				       sshdr.asc, sshdr.ascq);
 			break;
 		case NOT_READY:	/* This happens if there is no disc in drive */
 			if (sdev->removable)
@@ -126,13 +122,12 @@ static int ioctl_internal_command(struct scsi_device *sdev, char *cmd,
 			sdev_printk(KERN_INFO, sdev,
 				    "ioctl_internal_command return code = %x\n",
 				    result);
-			scsi_print_sense_hdr(sdev, NULL, &sshdr);
+			scsi_print_sense_hdr("   ", &sshdr);
 			break;
 		}
 	}
 
-	SCSI_LOG_IOCTL(2, sdev_printk(KERN_INFO, sdev,
-				      "IOCTL Releasing command\n"));
+	SCSI_LOG_IOCTL(2, printk("IOCTL Releasing command\n"));
 	return result;
 }
 
@@ -200,6 +195,19 @@ int scsi_ioctl(struct scsi_device *sdev, int cmd, void __user *arg)
 {
 	char scsi_cmd[MAX_COMMAND_SIZE];
 
+	/* No idea how this happens.... */
+	if (!sdev)
+		return -ENXIO;
+
+	/*
+	 * If we are in the middle of error recovery, don't let anyone
+	 * else try and use this device.  Also, if error recovery fails, it
+	 * may try and take the device offline, in which case all further
+	 * access to the device is prohibited.
+	 */
+	if (!scsi_block_when_processing_errors(sdev))
+		return -ENODEV;
+
 	/* Check for deprecated ioctls ... all the ioctls which don't
 	 * follow the new unique numbering scheme are deprecated */
 	switch (cmd) {
@@ -260,8 +268,6 @@ int scsi_ioctl(struct scsi_device *sdev, int cmd, void __user *arg)
 				     START_STOP_TIMEOUT, NORMAL_RETRIES);
         case SCSI_IOCTL_GET_PCI:
                 return scsi_ioctl_get_pci(sdev, arg);
-	case SG_SCSI_RESET:
-		return scsi_ioctl_reset(sdev, arg);
 	default:
 		if (sdev->host->hostt->ioctl)
 			return sdev->host->hostt->ioctl(sdev, cmd, arg);
@@ -270,20 +276,55 @@ int scsi_ioctl(struct scsi_device *sdev, int cmd, void __user *arg)
 }
 EXPORT_SYMBOL(scsi_ioctl);
 
-/*
- * We can process a reset even when a device isn't fully operable.
+/**
+ * scsi_nonblockable_ioctl() - Handle SG_SCSI_RESET
+ * @sdev: scsi device receiving ioctl
+ * @cmd: Must be SC_SCSI_RESET
+ * @arg: pointer to int containing SG_SCSI_RESET_{DEVICE,BUS,HOST}
+ * @ndelay: file mode O_NDELAY flag
  */
-int scsi_ioctl_block_when_processing_errors(struct scsi_device *sdev, int cmd,
-		bool ndelay)
+int scsi_nonblockable_ioctl(struct scsi_device *sdev, int cmd,
+			    void __user *arg, int ndelay)
 {
-	if (cmd == SG_SCSI_RESET && ndelay) {
-		if (scsi_host_in_recovery(sdev->host))
-			return -EAGAIN;
-	} else {
-		if (!scsi_block_when_processing_errors(sdev))
-			return -ENODEV;
-	}
+	int val, result;
 
-	return 0;
+	/* The first set of iocts may be executed even if we're doing
+	 * error processing, as long as the device was opened
+	 * non-blocking */
+	if (ndelay) {
+		if (scsi_host_in_recovery(sdev->host))
+			return -ENODEV;
+	} else if (!scsi_block_when_processing_errors(sdev))
+		return -ENODEV;
+
+	switch (cmd) {
+	case SG_SCSI_RESET:
+		result = get_user(val, (int __user *)arg);
+		if (result)
+			return result;
+		if (val == SG_SCSI_RESET_NOTHING)
+			return 0;
+		switch (val) {
+		case SG_SCSI_RESET_DEVICE:
+			val = SCSI_TRY_RESET_DEVICE;
+			break;
+		case SG_SCSI_RESET_TARGET:
+			val = SCSI_TRY_RESET_TARGET;
+			break;
+		case SG_SCSI_RESET_BUS:
+			val = SCSI_TRY_RESET_BUS;
+			break;
+		case SG_SCSI_RESET_HOST:
+			val = SCSI_TRY_RESET_HOST;
+			break;
+		default:
+			return -EINVAL;
+		}
+		if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
+			return -EACCES;
+		return (scsi_reset_provider(sdev, val) ==
+			SUCCESS) ? 0 : -EIO;
+	}
+	return -ENODEV;
 }
-EXPORT_SYMBOL_GPL(scsi_ioctl_block_when_processing_errors);
+EXPORT_SYMBOL(scsi_nonblockable_ioctl);

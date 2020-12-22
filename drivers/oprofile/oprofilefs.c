@@ -30,7 +30,7 @@ static struct inode *oprofilefs_get_inode(struct super_block *sb, int mode)
 	if (inode) {
 		inode->i_ino = get_next_ino();
 		inode->i_mode = mode;
-		inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	}
 	return inode;
 }
@@ -132,44 +132,40 @@ static const struct file_operations ulong_ro_fops = {
 };
 
 
-static int __oprofilefs_create_file(struct dentry *root, char const *name,
-	const struct file_operations *fops, int perm, void *priv)
+static int __oprofilefs_create_file(struct super_block *sb,
+	struct dentry *root, char const *name, const struct file_operations *fops,
+	int perm, void *priv)
 {
 	struct dentry *dentry;
 	struct inode *inode;
 
-	inode_lock(d_inode(root));
 	dentry = d_alloc_name(root, name);
-	if (!dentry) {
-		inode_unlock(d_inode(root));
+	if (!dentry)
 		return -ENOMEM;
-	}
-	inode = oprofilefs_get_inode(root->d_sb, S_IFREG | perm);
+	inode = oprofilefs_get_inode(sb, S_IFREG | perm);
 	if (!inode) {
 		dput(dentry);
-		inode_unlock(d_inode(root));
 		return -ENOMEM;
 	}
 	inode->i_fop = fops;
-	inode->i_private = priv;
 	d_add(dentry, inode);
-	inode_unlock(d_inode(root));
+	dentry->d_inode->i_private = priv;
 	return 0;
 }
 
 
-int oprofilefs_create_ulong(struct dentry *root,
+int oprofilefs_create_ulong(struct super_block *sb, struct dentry *root,
 	char const *name, unsigned long *val)
 {
-	return __oprofilefs_create_file(root, name,
+	return __oprofilefs_create_file(sb, root, name,
 					&ulong_fops, 0644, val);
 }
 
 
-int oprofilefs_create_ro_ulong(struct dentry *root,
+int oprofilefs_create_ro_ulong(struct super_block *sb, struct dentry *root,
 	char const *name, unsigned long *val)
 {
-	return __oprofilefs_create_file(root, name,
+	return __oprofilefs_create_file(sb, root, name,
 					&ulong_ro_fops, 0444, val);
 }
 
@@ -188,49 +184,45 @@ static const struct file_operations atomic_ro_fops = {
 };
 
 
-int oprofilefs_create_ro_atomic(struct dentry *root,
+int oprofilefs_create_ro_atomic(struct super_block *sb, struct dentry *root,
 	char const *name, atomic_t *val)
 {
-	return __oprofilefs_create_file(root, name,
+	return __oprofilefs_create_file(sb, root, name,
 					&atomic_ro_fops, 0444, val);
 }
 
 
-int oprofilefs_create_file(struct dentry *root,
+int oprofilefs_create_file(struct super_block *sb, struct dentry *root,
 	char const *name, const struct file_operations *fops)
 {
-	return __oprofilefs_create_file(root, name, fops, 0644, NULL);
+	return __oprofilefs_create_file(sb, root, name, fops, 0644, NULL);
 }
 
 
-int oprofilefs_create_file_perm(struct dentry *root,
+int oprofilefs_create_file_perm(struct super_block *sb, struct dentry *root,
 	char const *name, const struct file_operations *fops, int perm)
 {
-	return __oprofilefs_create_file(root, name, fops, perm, NULL);
+	return __oprofilefs_create_file(sb, root, name, fops, perm, NULL);
 }
 
 
-struct dentry *oprofilefs_mkdir(struct dentry *parent, char const *name)
+struct dentry *oprofilefs_mkdir(struct super_block *sb,
+	struct dentry *root, char const *name)
 {
 	struct dentry *dentry;
 	struct inode *inode;
 
-	inode_lock(d_inode(parent));
-	dentry = d_alloc_name(parent, name);
-	if (!dentry) {
-		inode_unlock(d_inode(parent));
+	dentry = d_alloc_name(root, name);
+	if (!dentry)
 		return NULL;
-	}
-	inode = oprofilefs_get_inode(parent->d_sb, S_IFDIR | 0755);
+	inode = oprofilefs_get_inode(sb, S_IFDIR | 0755);
 	if (!inode) {
 		dput(dentry);
-		inode_unlock(d_inode(parent));
 		return NULL;
 	}
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
 	d_add(dentry, inode);
-	inode_unlock(d_inode(parent));
 	return dentry;
 }
 
@@ -239,8 +231,8 @@ static int oprofilefs_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct inode *root_inode;
 
-	sb->s_blocksize = PAGE_SIZE;
-	sb->s_blocksize_bits = PAGE_SHIFT;
+	sb->s_blocksize = PAGE_CACHE_SIZE;
+	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	sb->s_magic = OPROFILEFS_MAGIC;
 	sb->s_op = &s_ops;
 	sb->s_time_gran = 1;
@@ -254,7 +246,7 @@ static int oprofilefs_fill_super(struct super_block *sb, void *data, int silent)
 	if (!sb->s_root)
 		return -ENOMEM;
 
-	oprofile_create_files(sb->s_root);
+	oprofile_create_files(sb, sb->s_root);
 
 	// FIXME: verify kill_litter_super removes our dentries
 	return 0;
@@ -274,7 +266,6 @@ static struct file_system_type oprofilefs_type = {
 	.mount		= oprofilefs_mount,
 	.kill_sb	= kill_litter_super,
 };
-MODULE_ALIAS_FS("oprofilefs");
 
 
 int __init oprofilefs_register(void)

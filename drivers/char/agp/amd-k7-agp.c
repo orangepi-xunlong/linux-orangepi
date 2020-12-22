@@ -11,7 +11,7 @@
 #include <linux/slab.h>
 #include "agp.h"
 
-#define AMD_MMBASE_BAR	1
+#define AMD_MMBASE	0x14
 #define AMD_APSIZE	0xac
 #define AMD_MODECNTL	0xb0
 #define AMD_MODECNTL2	0xb2
@@ -126,6 +126,7 @@ static int amd_create_gatt_table(struct agp_bridge_data *bridge)
 	unsigned long __iomem *cur_gatt;
 	unsigned long addr;
 	int retval;
+	u32 temp;
 	int i;
 
 	value = A_SIZE_LVL2(agp_bridge->current_size);
@@ -148,7 +149,8 @@ static int amd_create_gatt_table(struct agp_bridge_data *bridge)
 	 * used to program the agp master not the cpu
 	 */
 
-	addr = pci_bus_address(agp_bridge->dev, AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 	agp_bridge->gart_bus_addr = addr;
 
 	/* Calculate the agp offset */
@@ -205,7 +207,6 @@ static int amd_irongate_fetch_size(void)
 static int amd_irongate_configure(void)
 {
 	struct aper_size_info_lvl2 *current_size;
-	phys_addr_t reg;
 	u32 temp;
 	u16 enable_reg;
 
@@ -213,8 +214,9 @@ static int amd_irongate_configure(void)
 
 	if (!amd_irongate_private.registers) {
 		/* Get the memory mapped registers */
-		reg = pci_resource_start(agp_bridge->dev, AMD_MMBASE_BAR);
-		amd_irongate_private.registers = (volatile u8 __iomem *) ioremap(reg, 4096);
+		pci_read_config_dword(agp_bridge->dev, AMD_MMBASE, &temp);
+		temp = (temp & PCI_BASE_ADDRESS_MEM_MASK);
+		amd_irongate_private.registers = (volatile u8 __iomem *) ioremap(temp, 4096);
 		if (!amd_irongate_private.registers)
 			return -ENOMEM;
 	}
@@ -386,7 +388,7 @@ static const struct agp_bridge_driver amd_irongate_driver = {
 	.agp_type_to_mask_type  = agp_generic_type_to_mask_type,
 };
 
-static struct agp_device_ids amd_agp_device_ids[] =
+static struct agp_device_ids amd_agp_device_ids[] __devinitdata =
 {
 	{
 		.device_id	= PCI_DEVICE_ID_AMD_FE_GATE_7006,
@@ -403,8 +405,8 @@ static struct agp_device_ids amd_agp_device_ids[] =
 	{ }, /* dummy final entry, always present */
 };
 
-static int agp_amdk7_probe(struct pci_dev *pdev,
-			   const struct pci_device_id *ent)
+static int __devinit agp_amdk7_probe(struct pci_dev *pdev,
+				     const struct pci_device_id *ent)
 {
 	struct agp_bridge_data *bridge;
 	u8 cap_ptr;
@@ -478,7 +480,7 @@ static int agp_amdk7_probe(struct pci_dev *pdev,
 	return agp_add_bridge(bridge);
 }
 
-static void agp_amdk7_remove(struct pci_dev *pdev)
+static void __devexit agp_amdk7_remove(struct pci_dev *pdev)
 {
 	struct agp_bridge_data *bridge = pci_get_drvdata(pdev);
 

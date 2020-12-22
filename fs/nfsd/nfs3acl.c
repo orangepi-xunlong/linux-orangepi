@@ -29,9 +29,8 @@ nfsd3_proc_null(struct svc_rqst *rqstp, void *argp, void *resp)
 static __be32 nfsd3_proc_getacl(struct svc_rqst * rqstp,
 		struct nfsd3_getaclargs *argp, struct nfsd3_getaclres *resp)
 {
-	struct posix_acl *acl;
-	struct inode *inode;
 	svc_fh *fh;
+	struct posix_acl *acl;
 	__be32 nfserr = 0;
 
 	fh = fh_copy(&resp->fh, &argp->fh);
@@ -39,31 +38,44 @@ static __be32 nfsd3_proc_getacl(struct svc_rqst * rqstp,
 	if (nfserr)
 		RETURN_STATUS(nfserr);
 
-	inode = d_inode(fh->fh_dentry);
-
-	if (argp->mask & ~NFS_ACL_MASK)
+	if (argp->mask & ~(NFS_ACL|NFS_ACLCNT|NFS_DFACL|NFS_DFACLCNT))
 		RETURN_STATUS(nfserr_inval);
 	resp->mask = argp->mask;
 
 	if (resp->mask & (NFS_ACL|NFS_ACLCNT)) {
-		acl = get_acl(inode, ACL_TYPE_ACCESS);
+		acl = nfsd_get_posix_acl(fh, ACL_TYPE_ACCESS);
+		if (IS_ERR(acl)) {
+			int err = PTR_ERR(acl);
+
+			if (err == -ENODATA || err == -EOPNOTSUPP)
+				acl = NULL;
+			else {
+				nfserr = nfserrno(err);
+				goto fail;
+			}
+		}
 		if (acl == NULL) {
 			/* Solaris returns the inode's minimum ACL. */
+
+			struct inode *inode = fh->fh_dentry->d_inode;
 			acl = posix_acl_from_mode(inode->i_mode, GFP_KERNEL);
-		}
-		if (IS_ERR(acl)) {
-			nfserr = nfserrno(PTR_ERR(acl));
-			goto fail;
 		}
 		resp->acl_access = acl;
 	}
 	if (resp->mask & (NFS_DFACL|NFS_DFACLCNT)) {
 		/* Check how Solaris handles requests for the Default ACL
 		   of a non-directory! */
-		acl = get_acl(inode, ACL_TYPE_DEFAULT);
+
+		acl = nfsd_get_posix_acl(fh, ACL_TYPE_DEFAULT);
 		if (IS_ERR(acl)) {
-			nfserr = nfserrno(PTR_ERR(acl));
-			goto fail;
+			int err = PTR_ERR(acl);
+
+			if (err == -ENODATA || err == -EOPNOTSUPP)
+				acl = NULL;
+			else {
+				nfserr = nfserrno(err);
+				goto fail;
+			}
 		}
 		resp->acl_default = acl;
 	}
@@ -84,35 +96,21 @@ static __be32 nfsd3_proc_setacl(struct svc_rqst * rqstp,
 		struct nfsd3_setaclargs *argp,
 		struct nfsd3_attrstat *resp)
 {
-	struct inode *inode;
 	svc_fh *fh;
 	__be32 nfserr = 0;
-	int error;
 
 	fh = fh_copy(&resp->fh, &argp->fh);
 	nfserr = fh_verify(rqstp, &resp->fh, 0, NFSD_MAY_SATTR);
-	if (nfserr)
-		goto out;
 
-	inode = d_inode(fh->fh_dentry);
+	if (!nfserr) {
+		nfserr = nfserrno( nfsd_set_posix_acl(
+			fh, ACL_TYPE_ACCESS, argp->acl_access) );
+	}
+	if (!nfserr) {
+		nfserr = nfserrno( nfsd_set_posix_acl(
+			fh, ACL_TYPE_DEFAULT, argp->acl_default) );
+	}
 
-	error = fh_want_write(fh);
-	if (error)
-		goto out_errno;
-
-	fh_lock(fh);
-
-	error = set_posix_acl(inode, ACL_TYPE_ACCESS, argp->acl_access);
-	if (error)
-		goto out_drop_lock;
-	error = set_posix_acl(inode, ACL_TYPE_DEFAULT, argp->acl_default);
-
-out_drop_lock:
-	fh_unlock(fh);
-	fh_drop_write(fh);
-out_errno:
-	nfserr = nfserrno(error);
-out:
 	/* argp->acl_{access,default} may have been allocated in
 	   nfs3svc_decode_setaclargs. */
 	posix_acl_release(argp->acl_access);
@@ -126,8 +124,7 @@ out:
 static int nfs3svc_decode_getaclargs(struct svc_rqst *rqstp, __be32 *p,
 		struct nfsd3_getaclargs *args)
 {
-	p = nfs3svc_decode_fh(p, &args->fh);
-	if (!p)
+	if (!(p = nfs3svc_decode_fh(p, &args->fh)))
 		return 0;
 	args->mask = ntohl(*p); p++;
 
@@ -142,11 +139,10 @@ static int nfs3svc_decode_setaclargs(struct svc_rqst *rqstp, __be32 *p,
 	unsigned int base;
 	int n;
 
-	p = nfs3svc_decode_fh(p, &args->fh);
-	if (!p)
+	if (!(p = nfs3svc_decode_fh(p, &args->fh)))
 		return 0;
 	args->mask = ntohl(*p++);
-	if (args->mask & ~NFS_ACL_MASK ||
+	if (args->mask & ~(NFS_ACL|NFS_ACLCNT|NFS_DFACL|NFS_DFACLCNT) ||
 	    !xdr_argsize_check(rqstp, p))
 		return 0;
 
@@ -172,8 +168,8 @@ static int nfs3svc_encode_getaclres(struct svc_rqst *rqstp, __be32 *p,
 	struct dentry *dentry = resp->fh.fh_dentry;
 
 	p = nfs3svc_encode_post_op_attr(rqstp, p, &resp->fh);
-	if (resp->status == 0 && dentry && d_really_is_positive(dentry)) {
-		struct inode *inode = d_inode(dentry);
+	if (resp->status == 0 && dentry && dentry->d_inode) {
+		struct inode *inode = dentry->d_inode;
 		struct kvec *head = rqstp->rq_res.head;
 		unsigned int base;
 		int n;
@@ -188,7 +184,7 @@ static int nfs3svc_encode_getaclres(struct svc_rqst *rqstp, __be32 *p,
 			(resp->mask & NFS_ACL)   ? resp->acl_access  : NULL,
 			(resp->mask & NFS_DFACL) ? resp->acl_default : NULL);
 		while (w > 0) {
-			if (!*(rqstp->rq_next_page++))
+			if (!rqstp->rq_respages[rqstp->rq_resused++])
 				return 0;
 			w -= PAGE_SIZE;
 		}

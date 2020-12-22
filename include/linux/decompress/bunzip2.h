@@ -1,10 +1,10 @@
 #ifndef DECOMPRESS_BUNZIP2_H
 #define DECOMPRESS_BUNZIP2_H
 
-int bunzip2(unsigned char *inbuf, long len,
-	    long (*fill)(void*, unsigned long),
-	    long (*flush)(void*, unsigned long),
+int bunzip2(unsigned char *inbuf, int len,
+	    int(*fill)(void*, unsigned int),
+	    int(*flush)(void*, unsigned int),
 	    unsigned char *output,
-	    long *pos,
+	    int *pos,
 	    void(*error)(char *x));
 #endif

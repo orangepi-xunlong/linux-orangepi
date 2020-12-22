@@ -1,11 +1,9 @@
 /* (C) 2001-2002 Magnus Boden <mb@ozaba.mine.nu>
- * (C) 2006-2012 Patrick McHardy <kaber@trash.net>
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -62,10 +60,8 @@ static int tftp_help(struct sk_buff *skb,
 		nf_ct_dump_tuple(&ct->tuplehash[IP_CT_DIR_REPLY].tuple);
 
 		exp = nf_ct_expect_alloc(ct);
-		if (exp == NULL) {
-			nf_ct_helper_log(skb, ct, "cannot alloc expectation");
+		if (exp == NULL)
 			return NF_DROP;
-		}
 		tuple = &ct->tuplehash[IP_CT_DIR_REPLY].tuple;
 		nf_ct_expect_init(exp, NF_CT_EXPECT_CLASS_DEFAULT,
 				  nf_ct_l3num(ct),
@@ -78,10 +74,8 @@ static int tftp_help(struct sk_buff *skb,
 		nf_nat_tftp = rcu_dereference(nf_nat_tftp_hook);
 		if (nf_nat_tftp && ct->status & IPS_NAT_MASK)
 			ret = nf_nat_tftp(skb, ctinfo, exp);
-		else if (nf_ct_expect_related(exp) != 0) {
-			nf_ct_helper_log(skb, ct, "cannot add expectation");
+		else if (nf_ct_expect_related(exp) != 0)
 			ret = NF_DROP;
-		}
 		nf_ct_expect_put(exp);
 		break;
 	case TFTP_OPCODE_DATA:
@@ -97,7 +91,8 @@ static int tftp_help(struct sk_buff *skb,
 	return ret;
 }
 
-static struct nf_conntrack_helper tftp[MAX_PORTS * 2] __read_mostly;
+static struct nf_conntrack_helper tftp[MAX_PORTS][2] __read_mostly;
+static char tftp_names[MAX_PORTS][2][sizeof("tftp-65535")] __read_mostly;
 
 static const struct nf_conntrack_expect_policy tftp_exp_policy = {
 	.max_expected	= 1,
@@ -106,29 +101,50 @@ static const struct nf_conntrack_expect_policy tftp_exp_policy = {
 
 static void nf_conntrack_tftp_fini(void)
 {
-	nf_conntrack_helpers_unregister(tftp, ports_c * 2);
+	int i, j;
+
+	for (i = 0; i < ports_c; i++) {
+		for (j = 0; j < 2; j++)
+			nf_conntrack_helper_unregister(&tftp[i][j]);
+	}
 }
 
 static int __init nf_conntrack_tftp_init(void)
 {
-	int i, ret;
+	int i, j, ret;
+	char *tmpname;
 
 	if (ports_c == 0)
 		ports[ports_c++] = TFTP_PORT;
 
 	for (i = 0; i < ports_c; i++) {
-		nf_ct_helper_init(&tftp[2 * i], AF_INET, IPPROTO_UDP, "tftp",
-				  TFTP_PORT, ports[i], i, &tftp_exp_policy,
-				  0, 0, tftp_help, NULL, THIS_MODULE);
-		nf_ct_helper_init(&tftp[2 * i + 1], AF_INET6, IPPROTO_UDP, "tftp",
-				  TFTP_PORT, ports[i], i, &tftp_exp_policy,
-				  0, 0, tftp_help, NULL, THIS_MODULE);
-	}
+		memset(&tftp[i], 0, sizeof(tftp[i]));
 
-	ret = nf_conntrack_helpers_register(tftp, ports_c * 2);
-	if (ret < 0) {
-		pr_err("failed to register helpers\n");
-		return ret;
+		tftp[i][0].tuple.src.l3num = AF_INET;
+		tftp[i][1].tuple.src.l3num = AF_INET6;
+		for (j = 0; j < 2; j++) {
+			tftp[i][j].tuple.dst.protonum = IPPROTO_UDP;
+			tftp[i][j].tuple.src.u.udp.port = htons(ports[i]);
+			tftp[i][j].expect_policy = &tftp_exp_policy;
+			tftp[i][j].me = THIS_MODULE;
+			tftp[i][j].help = tftp_help;
+
+			tmpname = &tftp_names[i][j][0];
+			if (ports[i] == TFTP_PORT)
+				sprintf(tmpname, "tftp");
+			else
+				sprintf(tmpname, "tftp-%u", i);
+			tftp[i][j].name = tmpname;
+
+			ret = nf_conntrack_helper_register(&tftp[i][j]);
+			if (ret) {
+				printk(KERN_ERR "nf_ct_tftp: failed to register"
+				       " helper for pf: %u port: %u\n",
+					tftp[i][j].tuple.src.l3num, ports[i]);
+				nf_conntrack_tftp_fini();
+				return ret;
+			}
+		}
 	}
 	return 0;
 }

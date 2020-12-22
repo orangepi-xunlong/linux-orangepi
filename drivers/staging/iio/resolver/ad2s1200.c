@@ -18,10 +18,9 @@
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/module.h>
-#include <linux/bitops.h>
 
-#include <linux/iio/iio.h>
-#include <linux/iio/sysfs.h>
+#include "../iio.h"
+#include "../sysfs.h"
 
 #define DRV_NAME "ad2s1200"
 
@@ -31,7 +30,7 @@
 /* input clock on serial interface */
 #define AD2S1200_HZ	8192000
 /* clock period in nano second */
-#define AD2S1200_TSCLK	(1000000000 / AD2S1200_HZ)
+#define AD2S1200_TSCLK	(1000000000/AD2S1200_HZ)
 
 struct ad2s1200_state {
 	struct mutex lock;
@@ -42,10 +41,10 @@ struct ad2s1200_state {
 };
 
 static int ad2s1200_read_raw(struct iio_dev *indio_dev,
-			     struct iio_chan_spec const *chan,
-			     int *val,
-			     int *val2,
-			     long m)
+			   struct iio_chan_spec const *chan,
+			   int *val,
+			   int *val2,
+			   long m)
 {
 	int ret = 0;
 	s16 vel;
@@ -69,9 +68,8 @@ static int ad2s1200_read_raw(struct iio_dev *indio_dev,
 		break;
 	case IIO_ANGL_VEL:
 		vel = (((s16)(st->rx[0])) << 4) | ((st->rx[1] & 0xF0) >> 4);
-		vel = sign_extend32(vel, 11);
+		vel = (vel << 4) >> 4;
 		*val = vel;
-		break;
 	default:
 		mutex_unlock(&st->lock);
 		return -EINVAL;
@@ -87,12 +85,10 @@ static const struct iio_chan_spec ad2s1200_channels[] = {
 		.type = IIO_ANGL,
 		.indexed = 1,
 		.channel = 0,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 	}, {
 		.type = IIO_ANGL_VEL,
 		.indexed = 1,
 		.channel = 0,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 	}
 };
 
@@ -101,25 +97,24 @@ static const struct iio_info ad2s1200_info = {
 	.driver_module = THIS_MODULE,
 };
 
-static int ad2s1200_probe(struct spi_device *spi)
+static int __devinit ad2s1200_probe(struct spi_device *spi)
 {
 	struct ad2s1200_state *st;
 	struct iio_dev *indio_dev;
 	int pn, ret = 0;
 	unsigned short *pins = spi->dev.platform_data;
 
-	for (pn = 0; pn < AD2S1200_PN; pn++) {
-		ret = devm_gpio_request_one(&spi->dev, pins[pn], GPIOF_DIR_OUT,
-					    DRV_NAME);
-		if (ret) {
-			dev_err(&spi->dev, "request gpio pin %d failed\n",
-				pins[pn]);
-			return ret;
+	for (pn = 0; pn < AD2S1200_PN; pn++)
+		if (gpio_request_one(pins[pn], GPIOF_DIR_OUT, DRV_NAME)) {
+			pr_err("%s: request gpio pin %d failed\n",
+						DRV_NAME, pins[pn]);
+			goto error_ret;
 		}
+	indio_dev = iio_allocate_device(sizeof(*st));
+	if (indio_dev == NULL) {
+		ret = -ENOMEM;
+		goto error_ret;
 	}
-	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
-	if (!indio_dev)
-		return -ENOMEM;
 	spi_set_drvdata(spi, indio_dev);
 	st = iio_priv(indio_dev);
 	mutex_init(&st->lock);
@@ -134,13 +129,28 @@ static int ad2s1200_probe(struct spi_device *spi)
 	indio_dev->num_channels = ARRAY_SIZE(ad2s1200_channels);
 	indio_dev->name = spi_get_device_id(spi)->name;
 
-	ret = devm_iio_device_register(&spi->dev, indio_dev);
+	ret = iio_device_register(indio_dev);
 	if (ret)
-		return ret;
+		goto error_free_dev;
 
 	spi->max_speed_hz = AD2S1200_HZ;
 	spi->mode = SPI_MODE_3;
 	spi_setup(spi);
+
+	return 0;
+
+error_free_dev:
+	iio_free_device(indio_dev);
+error_ret:
+	for (--pn; pn >= 0; pn--)
+		gpio_free(pins[pn]);
+	return ret;
+}
+
+static int __devexit ad2s1200_remove(struct spi_device *spi)
+{
+	iio_device_unregister(spi_get_drvdata(spi));
+	iio_free_device(spi_get_drvdata(spi));
 
 	return 0;
 }
@@ -155,8 +165,10 @@ MODULE_DEVICE_TABLE(spi, ad2s1200_id);
 static struct spi_driver ad2s1200_driver = {
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 	},
 	.probe = ad2s1200_probe,
+	.remove = __devexit_p(ad2s1200_remove),
 	.id_table = ad2s1200_id,
 };
 module_spi_driver(ad2s1200_driver);

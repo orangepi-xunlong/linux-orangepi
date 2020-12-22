@@ -3,10 +3,12 @@
 #include <linux/pid_namespace.h>
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
-#include <linux/sched/loadavg.h>
 #include <linux/seq_file.h>
 #include <linux/seqlock.h>
 #include <linux/time.h>
+
+#define LOAD_INT(x) ((x) >> FSHIFT)
+#define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
 
 static int loadavg_proc_show(struct seq_file *m, void *v)
 {
@@ -40,4 +42,4 @@ static int __init proc_loadavg_init(void)
 	proc_create("loadavg", 0, NULL, &loadavg_proc_fops);
 	return 0;
 }
-fs_initcall(proc_loadavg_init);
+module_init(proc_loadavg_init);

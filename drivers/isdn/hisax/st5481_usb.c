@@ -267,8 +267,8 @@ int st5481_setup_usb(struct st5481_adapter *adapter)
 	}
 
 	// The descriptor is wrong for some early samples of the ST5481 chip
-	altsetting->endpoint[3].desc.wMaxPacketSize = cpu_to_le16(32);
-	altsetting->endpoint[4].desc.wMaxPacketSize = cpu_to_le16(32);
+	altsetting->endpoint[3].desc.wMaxPacketSize = __constant_cpu_to_le16(32);
+	altsetting->endpoint[4].desc.wMaxPacketSize = __constant_cpu_to_le16(32);
 
 	// Use alternative setting 3 on interface 0 to have 2B+D
 	if ((status = usb_set_interface(dev, 0, 3)) < 0) {
@@ -294,13 +294,13 @@ int st5481_setup_usb(struct st5481_adapter *adapter)
 	// Allocate URBs and buffers for interrupt endpoint
 	urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!urb) {
-		goto err1;
+		return -ENOMEM;
 	}
 	intr->urb = urb;
 
 	buf = kmalloc(INT_PKT_SIZE, GFP_KERNEL);
 	if (!buf) {
-		goto err2;
+		return -ENOMEM;
 	}
 
 	endpoint = &altsetting->endpoint[EP_INT-1];
@@ -313,14 +313,6 @@ int st5481_setup_usb(struct st5481_adapter *adapter)
 			 endpoint->desc.bInterval);
 
 	return 0;
-err2:
-	usb_free_urb(intr->urb);
-	intr->urb = NULL;
-err1:
-	usb_free_urb(ctrl->urb);
-	ctrl->urb = NULL;
-
-	return -ENOMEM;
 }
 
 /*

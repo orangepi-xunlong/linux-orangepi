@@ -7,7 +7,7 @@
 struct led_pwm {
 	const char	*name;
 	const char	*default_trigger;
-	unsigned	pwm_id __deprecated;
+	unsigned	pwm_id;
 	u8 		active_low;
 	unsigned 	max_brightness;
 	unsigned	pwm_period_ns;

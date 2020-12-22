@@ -9,50 +9,16 @@
 #include <linux/kernel.h>
 #include <linux/mtd/nand.h>
 #include <linux/module.h>
-#include <linux/sizes.h>
 #include "sm_common.h"
 
-static int oob_sm_ooblayout_ecc(struct mtd_info *mtd, int section,
-				struct mtd_oob_region *oobregion)
-{
-	if (section > 1)
-		return -ERANGE;
-
-	oobregion->length = 3;
-	oobregion->offset = ((section + 1) * 8) - 3;
-
-	return 0;
-}
-
-static int oob_sm_ooblayout_free(struct mtd_info *mtd, int section,
-				 struct mtd_oob_region *oobregion)
-{
-	switch (section) {
-	case 0:
-		/* reserved */
-		oobregion->offset = 0;
-		oobregion->length = 4;
-		break;
-	case 1:
-		/* LBA1 */
-		oobregion->offset = 6;
-		oobregion->length = 2;
-		break;
-	case 2:
-		/* LBA2 */
-		oobregion->offset = 11;
-		oobregion->length = 2;
-		break;
-	default:
-		return -ERANGE;
+static struct nand_ecclayout nand_oob_sm = {
+	.eccbytes = 6,
+	.eccpos = {8, 9, 10, 13, 14, 15},
+	.oobfree = {
+		{.offset = 0 , .length = 4}, /* reserved */
+		{.offset = 6 , .length = 2}, /* LBA1 */
+		{.offset = 11, .length = 2}  /* LBA2 */
 	}
-
-	return 0;
-}
-
-static const struct mtd_ooblayout_ops oob_sm_ops = {
-	.ecc = oob_sm_ooblayout_ecc,
-	.free = oob_sm_ooblayout_free,
 };
 
 /* NOTE: This layout is is not compatabable with SmartMedia, */
@@ -61,49 +27,21 @@ static const struct mtd_ooblayout_ops oob_sm_ops = {
 /* If you use smftl, it will bypass this and work correctly */
 /* If you not, then you break SmartMedia compliance anyway */
 
-static int oob_sm_small_ooblayout_ecc(struct mtd_info *mtd, int section,
-				      struct mtd_oob_region *oobregion)
-{
-	if (section)
-		return -ERANGE;
-
-	oobregion->length = 3;
-	oobregion->offset = 0;
-
-	return 0;
-}
-
-static int oob_sm_small_ooblayout_free(struct mtd_info *mtd, int section,
-				       struct mtd_oob_region *oobregion)
-{
-	switch (section) {
-	case 0:
-		/* reserved */
-		oobregion->offset = 3;
-		oobregion->length = 2;
-		break;
-	case 1:
-		/* LBA1 */
-		oobregion->offset = 6;
-		oobregion->length = 2;
-		break;
-	default:
-		return -ERANGE;
+static struct nand_ecclayout nand_oob_sm_small = {
+	.eccbytes = 3,
+	.eccpos = {0, 1, 2},
+	.oobfree = {
+		{.offset = 3 , .length = 2}, /* reserved */
+		{.offset = 6 , .length = 2}, /* LBA1 */
 	}
-
-	return 0;
-}
-
-static const struct mtd_ooblayout_ops oob_sm_small_ops = {
-	.ecc = oob_sm_small_ooblayout_ecc,
-	.free = oob_sm_small_ooblayout_free,
 };
+
 
 static int sm_block_markbad(struct mtd_info *mtd, loff_t ofs)
 {
 	struct mtd_oob_ops ops;
 	struct sm_oob oob;
-	int ret;
+	int ret, error = 0;
 
 	memset(&oob, -1, SM_OOB_SIZE);
 	oob.block_status = 0x0F;
@@ -122,48 +60,57 @@ static int sm_block_markbad(struct mtd_info *mtd, loff_t ofs)
 		printk(KERN_NOTICE
 			"sm_common: can't mark sector at %i as bad\n",
 								(int)ofs);
-		return -EIO;
-	}
+		error = -EIO;
+	} else
+		mtd->ecc_stats.badblocks++;
 
-	return 0;
+	return error;
 }
 
+
 static struct nand_flash_dev nand_smartmedia_flash_ids[] = {
-	LEGACY_ID_NAND("SmartMedia 2MiB 3,3V ROM",   0x5d, 2,   SZ_8K, NAND_ROM),
-	LEGACY_ID_NAND("SmartMedia 4MiB 3,3V",       0xe3, 4,   SZ_8K, 0),
-	LEGACY_ID_NAND("SmartMedia 4MiB 3,3/5V",     0xe5, 4,   SZ_8K, 0),
-	LEGACY_ID_NAND("SmartMedia 4MiB 5V",         0x6b, 4,   SZ_8K, 0),
-	LEGACY_ID_NAND("SmartMedia 4MiB 3,3V ROM",   0xd5, 4,   SZ_8K, NAND_ROM),
-	LEGACY_ID_NAND("SmartMedia 8MiB 3,3V",       0xe6, 8,   SZ_8K, 0),
-	LEGACY_ID_NAND("SmartMedia 8MiB 3,3V ROM",   0xd6, 8,   SZ_8K, NAND_ROM),
-	LEGACY_ID_NAND("SmartMedia 16MiB 3,3V",      0x73, 16,  SZ_16K, 0),
-	LEGACY_ID_NAND("SmartMedia 16MiB 3,3V ROM",  0x57, 16,  SZ_16K, NAND_ROM),
-	LEGACY_ID_NAND("SmartMedia 32MiB 3,3V",      0x75, 32,  SZ_16K, 0),
-	LEGACY_ID_NAND("SmartMedia 32MiB 3,3V ROM",  0x58, 32,  SZ_16K, NAND_ROM),
-	LEGACY_ID_NAND("SmartMedia 64MiB 3,3V",      0x76, 64,  SZ_16K, 0),
-	LEGACY_ID_NAND("SmartMedia 64MiB 3,3V ROM",  0xd9, 64,  SZ_16K, NAND_ROM),
-	LEGACY_ID_NAND("SmartMedia 128MiB 3,3V",     0x79, 128, SZ_16K, 0),
-	LEGACY_ID_NAND("SmartMedia 128MiB 3,3V ROM", 0xda, 128, SZ_16K, NAND_ROM),
-	LEGACY_ID_NAND("SmartMedia 256MiB 3, 3V",    0x71, 256, SZ_16K, 0),
-	LEGACY_ID_NAND("SmartMedia 256MiB 3,3V ROM", 0x5b, 256, SZ_16K, NAND_ROM),
-	{NULL}
+	{"SmartMedia 1MiB 5V",          0x6e, 256, 1, 0x1000, 0},
+	{"SmartMedia 1MiB 3,3V",        0xe8, 256, 1, 0x1000, 0},
+	{"SmartMedia 1MiB 3,3V",        0xec, 256, 1, 0x1000, 0},
+	{"SmartMedia 2MiB 3,3V",        0xea, 256, 2, 0x1000, 0},
+	{"SmartMedia 2MiB 5V",          0x64, 256, 2, 0x1000, 0},
+	{"SmartMedia 2MiB 3,3V ROM",    0x5d, 512, 2, 0x2000, NAND_ROM},
+	{"SmartMedia 4MiB 3,3V",        0xe3, 512, 4, 0x2000, 0},
+	{"SmartMedia 4MiB 3,3/5V",      0xe5, 512, 4, 0x2000, 0},
+	{"SmartMedia 4MiB 5V",          0x6b, 512, 4, 0x2000, 0},
+	{"SmartMedia 4MiB 3,3V ROM",    0xd5, 512, 4, 0x2000, NAND_ROM},
+	{"SmartMedia 8MiB 3,3V",        0xe6, 512, 8, 0x2000, 0},
+	{"SmartMedia 8MiB 3,3V ROM",    0xd6, 512, 8, 0x2000, NAND_ROM},
+	{"SmartMedia 16MiB 3,3V",       0x73, 512, 16, 0x4000, 0},
+	{"SmartMedia 16MiB 3,3V ROM",   0x57, 512, 16, 0x4000, NAND_ROM},
+	{"SmartMedia 32MiB 3,3V",       0x75, 512, 32, 0x4000, 0},
+	{"SmartMedia 32MiB 3,3V ROM",   0x58, 512, 32, 0x4000, NAND_ROM},
+	{"SmartMedia 64MiB 3,3V",       0x76, 512, 64, 0x4000, 0},
+	{"SmartMedia 64MiB 3,3V ROM",   0xd9, 512, 64, 0x4000, NAND_ROM},
+	{"SmartMedia 128MiB 3,3V",      0x79, 512, 128, 0x4000, 0},
+	{"SmartMedia 128MiB 3,3V ROM",  0xda, 512, 128, 0x4000, NAND_ROM},
+	{"SmartMedia 256MiB 3,3V",      0x71, 512, 256, 0x4000 },
+	{"SmartMedia 256MiB 3,3V ROM",  0x5b, 512, 256, 0x4000, NAND_ROM},
+	{NULL,}
 };
 
+#define XD_TYPEM       (NAND_NO_AUTOINCR | NAND_BROKEN_XD)
 static struct nand_flash_dev nand_xd_flash_ids[] = {
-	LEGACY_ID_NAND("xD 16MiB 3,3V",  0x73, 16,   SZ_16K, 0),
-	LEGACY_ID_NAND("xD 32MiB 3,3V",  0x75, 32,   SZ_16K, 0),
-	LEGACY_ID_NAND("xD 64MiB 3,3V",  0x76, 64,   SZ_16K, 0),
-	LEGACY_ID_NAND("xD 128MiB 3,3V", 0x79, 128,  SZ_16K, 0),
-	LEGACY_ID_NAND("xD 256MiB 3,3V", 0x71, 256,  SZ_16K, NAND_BROKEN_XD),
-	LEGACY_ID_NAND("xD 512MiB 3,3V", 0xdc, 512,  SZ_16K, NAND_BROKEN_XD),
-	LEGACY_ID_NAND("xD 1GiB 3,3V",   0xd3, 1024, SZ_16K, NAND_BROKEN_XD),
-	LEGACY_ID_NAND("xD 2GiB 3,3V",   0xd5, 2048, SZ_16K, NAND_BROKEN_XD),
-	{NULL}
+
+	{"xD 16MiB 3,3V",    0x73, 512, 16, 0x4000, 0},
+	{"xD 32MiB 3,3V",    0x75, 512, 32, 0x4000, 0},
+	{"xD 64MiB 3,3V",    0x76, 512, 64, 0x4000, 0},
+	{"xD 128MiB 3,3V",   0x79, 512, 128, 0x4000, 0},
+	{"xD 256MiB 3,3V",   0x71, 512, 256, 0x4000, XD_TYPEM},
+	{"xD 512MiB 3,3V",   0xdc, 512, 512, 0x4000, XD_TYPEM},
+	{"xD 1GiB 3,3V",     0xd3, 512, 1024, 0x4000, XD_TYPEM},
+	{"xD 2GiB 3,3V",     0xd5, 512, 2048, 0x4000, XD_TYPEM},
+	{NULL,}
 };
 
 int sm_register_device(struct mtd_info *mtd, int smartmedia)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
+	struct nand_chip *chip = mtd->priv;
 	int ret;
 
 	chip->options |= NAND_SKIP_BBTSCAN;
@@ -182,9 +129,9 @@ int sm_register_device(struct mtd_info *mtd, int smartmedia)
 
 	/* ECC layout */
 	if (mtd->writesize == SM_SECTOR_SIZE)
-		mtd_set_ooblayout(mtd, &oob_sm_ops);
+		chip->ecc.layout = &nand_oob_sm;
 	else if (mtd->writesize == SM_SMALL_PAGE)
-		mtd_set_ooblayout(mtd, &oob_sm_small_ops);
+		chip->ecc.layout = &nand_oob_sm_small;
 	else
 		return -ENODEV;
 

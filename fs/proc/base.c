@@ -73,7 +73,6 @@
 #include <linux/security.h>
 #include <linux/ptrace.h>
 #include <linux/tracehook.h>
-#include <linux/printk.h>
 #include <linux/cgroup.h>
 #include <linux/cpuset.h>
 #include <linux/audit.h>
@@ -82,20 +81,14 @@
 #include <linux/oom.h>
 #include <linux/elf.h>
 #include <linux/pid_namespace.h>
-#include <linux/user_namespace.h>
 #include <linux/fs_struct.h>
 #include <linux/slab.h>
 #include <linux/flex_array.h>
-#include <linux/posix-timers.h>
-#include <linux/cpufreq_times.h>
 #ifdef CONFIG_HARDWALL
 #include <asm/hardwall.h>
 #endif
 #include <trace/events/oom.h>
 #include "internal.h"
-#include "fd.h"
-
-#include "../../lib/kstrtox.h"
 
 /* NOTE:
  *	Implementing inode permission operations in /proc is almost
@@ -108,7 +101,7 @@
  */
 
 struct pid_entry {
-	const char *name;
+	char *name;
 	int len;
 	umode_t mode;
 	const struct inode_operations *iop;
@@ -133,10 +126,22 @@ struct pid_entry {
 		{ .proc_get_link = get_link } )
 #define REG(NAME, MODE, fops)				\
 	NOD(NAME, (S_IFREG|(MODE)), NULL, &fops, {})
+#define INF(NAME, MODE, read)				\
+	NOD(NAME, (S_IFREG|(MODE)), 			\
+		NULL, &proc_info_file_operations,	\
+		{ .proc_read = read } )
 #define ONE(NAME, MODE, show)				\
 	NOD(NAME, (S_IFREG|(MODE)), 			\
 		NULL, &proc_single_file_operations,	\
 		{ .proc_show = show } )
+
+static int proc_fd_permission(struct inode *inode, int mask);
+
+/* ANDROID is for special files in /proc. */
+#define ANDROID(NAME, MODE, OTYPE)			\
+	NOD(NAME, (S_IFREG|(MODE)),			\
+		&proc_##OTYPE##_inode_operations,	\
+		&proc_##OTYPE##_operations, {})
 
 /*
  * Count the number of hardlinks for the pid_entry table, excluding the .
@@ -172,7 +177,7 @@ static int get_task_root(struct task_struct *task, struct path *root)
 
 static int proc_cwd_link(struct dentry *dentry, struct path *path)
 {
-	struct task_struct *task = get_proc_task(d_inode(dentry));
+	struct task_struct *task = get_proc_task(dentry->d_inode);
 	int result = -ENOENT;
 
 	if (task) {
@@ -189,7 +194,7 @@ static int proc_cwd_link(struct dentry *dentry, struct path *path)
 
 static int proc_root_link(struct dentry *dentry, struct path *path)
 {
-	struct task_struct *task = get_proc_task(d_inode(dentry));
+	struct task_struct *task = get_proc_task(dentry->d_inode);
 	int result = -ENOENT;
 
 	if (task) {
@@ -199,230 +204,86 @@ static int proc_root_link(struct dentry *dentry, struct path *path)
 	return result;
 }
 
-static ssize_t proc_pid_cmdline_read(struct file *file, char __user *buf,
-				     size_t _count, loff_t *pos)
+struct mm_struct *mm_for_maps(struct task_struct *task)
 {
-	struct task_struct *tsk;
-	struct mm_struct *mm;
-	char *page;
-	unsigned long count = _count;
-	unsigned long arg_start, arg_end, env_start, env_end;
-	unsigned long len1, len2, len;
-	unsigned long p;
-	char c;
-	ssize_t rv;
-
-	BUG_ON(*pos < 0);
-
-	tsk = get_proc_task(file_inode(file));
-	if (!tsk)
-		return -ESRCH;
-	mm = get_task_mm(tsk);
-	put_task_struct(tsk);
-	if (!mm)
-		return 0;
-	/* Check if process spawned far enough to have cmdline. */
-	if (!mm->env_end) {
-		rv = 0;
-		goto out_mmput;
-	}
-
-	page = (char *)__get_free_page(GFP_TEMPORARY);
-	if (!page) {
-		rv = -ENOMEM;
-		goto out_mmput;
-	}
-
-	down_read(&mm->mmap_sem);
-	arg_start = mm->arg_start;
-	arg_end = mm->arg_end;
-	env_start = mm->env_start;
-	env_end = mm->env_end;
-	up_read(&mm->mmap_sem);
-
-	BUG_ON(arg_start > arg_end);
-	BUG_ON(env_start > env_end);
-
-	len1 = arg_end - arg_start;
-	len2 = env_end - env_start;
-
-	/* Empty ARGV. */
-	if (len1 == 0) {
-		rv = 0;
-		goto out_free_page;
-	}
-	/*
-	 * Inherently racy -- command line shares address space
-	 * with code and data.
-	 */
-	rv = access_remote_vm(mm, arg_end - 1, &c, 1, FOLL_ANON);
-	if (rv <= 0)
-		goto out_free_page;
-
-	rv = 0;
-
-	if (c == '\0') {
-		/* Command line (set of strings) occupies whole ARGV. */
-		if (len1 <= *pos)
-			goto out_free_page;
-
-		p = arg_start + *pos;
-		len = len1 - *pos;
-		while (count > 0 && len > 0) {
-			unsigned int _count;
-			int nr_read;
-
-			_count = min3(count, len, PAGE_SIZE);
-			nr_read = access_remote_vm(mm, p, page, _count, FOLL_ANON);
-			if (nr_read < 0)
-				rv = nr_read;
-			if (nr_read <= 0)
-				goto out_free_page;
-
-			if (copy_to_user(buf, page, nr_read)) {
-				rv = -EFAULT;
-				goto out_free_page;
-			}
-
-			p	+= nr_read;
-			len	-= nr_read;
-			buf	+= nr_read;
-			count	-= nr_read;
-			rv	+= nr_read;
-		}
-	} else {
-		/*
-		 * Command line (1 string) occupies ARGV and maybe
-		 * extends into ENVP.
-		 */
-		if (len1 + len2 <= *pos)
-			goto skip_argv_envp;
-		if (len1 <= *pos)
-			goto skip_argv;
-
-		p = arg_start + *pos;
-		len = len1 - *pos;
-		while (count > 0 && len > 0) {
-			unsigned int _count, l;
-			int nr_read;
-			bool final;
-
-			_count = min3(count, len, PAGE_SIZE);
-			nr_read = access_remote_vm(mm, p, page, _count, FOLL_ANON);
-			if (nr_read < 0)
-				rv = nr_read;
-			if (nr_read <= 0)
-				goto out_free_page;
-
-			/*
-			 * Command line can be shorter than whole ARGV
-			 * even if last "marker" byte says it is not.
-			 */
-			final = false;
-			l = strnlen(page, nr_read);
-			if (l < nr_read) {
-				nr_read = l;
-				final = true;
-			}
-
-			if (copy_to_user(buf, page, nr_read)) {
-				rv = -EFAULT;
-				goto out_free_page;
-			}
-
-			p	+= nr_read;
-			len	-= nr_read;
-			buf	+= nr_read;
-			count	-= nr_read;
-			rv	+= nr_read;
-
-			if (final)
-				goto out_free_page;
-		}
-skip_argv:
-		/*
-		 * Command line (1 string) occupies ARGV and
-		 * extends into ENVP.
-		 */
-		if (len1 <= *pos) {
-			p = env_start + *pos - len1;
-			len = len1 + len2 - *pos;
-		} else {
-			p = env_start;
-			len = len2;
-		}
-		while (count > 0 && len > 0) {
-			unsigned int _count, l;
-			int nr_read;
-			bool final;
-
-			_count = min3(count, len, PAGE_SIZE);
-			nr_read = access_remote_vm(mm, p, page, _count, FOLL_ANON);
-			if (nr_read < 0)
-				rv = nr_read;
-			if (nr_read <= 0)
-				goto out_free_page;
-
-			/* Find EOS. */
-			final = false;
-			l = strnlen(page, nr_read);
-			if (l < nr_read) {
-				nr_read = l;
-				final = true;
-			}
-
-			if (copy_to_user(buf, page, nr_read)) {
-				rv = -EFAULT;
-				goto out_free_page;
-			}
-
-			p	+= nr_read;
-			len	-= nr_read;
-			buf	+= nr_read;
-			count	-= nr_read;
-			rv	+= nr_read;
-
-			if (final)
-				goto out_free_page;
-		}
-skip_argv_envp:
-		;
-	}
-
-out_free_page:
-	free_page((unsigned long)page);
-out_mmput:
-	mmput(mm);
-	if (rv > 0)
-		*pos += rv;
-	return rv;
+	return mm_access(task, PTRACE_MODE_READ);
 }
 
-static const struct file_operations proc_pid_cmdline_ops = {
-	.read	= proc_pid_cmdline_read,
-	.llseek	= generic_file_llseek,
-};
+static int proc_pid_cmdline(struct task_struct *task, char * buffer)
+{
+	int res = 0;
+	unsigned int len;
+	struct mm_struct *mm = get_task_mm(task);
+	if (!mm)
+		goto out;
+	if (!mm->arg_end)
+		goto out_mm;	/* Shh! No looking before we're done */
+
+ 	len = mm->arg_end - mm->arg_start;
+ 
+	if (len > PAGE_SIZE)
+		len = PAGE_SIZE;
+ 
+	res = access_process_vm(task, mm->arg_start, buffer, len, 0);
+
+	// If the nul at the end of args has been overwritten, then
+	// assume application is using setproctitle(3).
+	if (res > 0 && buffer[res-1] != '\0' && len < PAGE_SIZE) {
+		len = strnlen(buffer, res);
+		if (len < res) {
+		    res = len;
+		} else {
+			len = mm->env_end - mm->env_start;
+			if (len > PAGE_SIZE - res)
+				len = PAGE_SIZE - res;
+			res += access_process_vm(task, mm->env_start, buffer+res, len, 0);
+			res = strnlen(buffer, res);
+		}
+	}
+out_mm:
+	mmput(mm);
+out:
+	return res;
+}
+
+static int proc_pid_auxv(struct task_struct *task, char *buffer)
+{
+	struct mm_struct *mm = mm_for_maps(task);
+	int res = PTR_ERR(mm);
+	if (mm && !IS_ERR(mm)) {
+		unsigned int nwords = 0;
+		do {
+			nwords += 2;
+		} while (mm->saved_auxv[nwords - 2] != 0); /* AT_NULL */
+		res = nwords * sizeof(mm->saved_auxv[0]);
+		if (res > PAGE_SIZE)
+			res = PAGE_SIZE;
+		memcpy(buffer, mm->saved_auxv, res);
+		mmput(mm);
+	}
+	return res;
+}
+
 
 #ifdef CONFIG_KALLSYMS
 /*
  * Provides a wchan file via kallsyms in a proper one-value-per-file format.
  * Returns the resolved symbol.  If that fails, simply return the address.
  */
-static int proc_pid_wchan(struct seq_file *m, struct pid_namespace *ns,
-			  struct pid *pid, struct task_struct *task)
+static int proc_pid_wchan(struct task_struct *task, char *buffer)
 {
 	unsigned long wchan;
 	char symname[KSYM_NAME_LEN];
 
 	wchan = get_wchan(task);
 
-	if (wchan && ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS)
-			&& !lookup_symbol_name(wchan, symname))
-		seq_printf(m, "%s", symname);
+	if (lookup_symbol_name(wchan, symname) < 0)
+		if (!ptrace_may_access(task, PTRACE_MODE_READ))
+			return 0;
+		else
+			return sprintf(buffer, "%lu", wchan);
 	else
-		seq_putc(m, '0');
-
-	return 0;
+		return sprintf(buffer, "%s", symname);
 }
 #endif /* CONFIG_KALLSYMS */
 
@@ -431,7 +292,7 @@ static int lock_trace(struct task_struct *task)
 	int err = mutex_lock_killable(&task->signal->cred_guard_mutex);
 	if (err)
 		return err;
-	if (!ptrace_may_access(task, PTRACE_MODE_ATTACH_FSCREDS)) {
+	if (!ptrace_may_access(task, PTRACE_MODE_ATTACH)) {
 		mutex_unlock(&task->signal->cred_guard_mutex);
 		return -EPERM;
 	}
@@ -455,20 +316,6 @@ static int proc_pid_stack(struct seq_file *m, struct pid_namespace *ns,
 	int err;
 	int i;
 
-	/*
-	 * The ability to racily run the kernel stack unwinder on a running task
-	 * and then observe the unwinder output is scary; while it is useful for
-	 * debugging kernel issues, it can also allow an attacker to leak kernel
-	 * stack contents.
-	 * Doing this in a manner that is at least safe from races would require
-	 * some work to ensure that the remote task can not be scheduled; and
-	 * even then, this would still expose the unwinder as local attack
-	 * surface.
-	 * Therefore, this interface is restricted to root.
-	 */
-	if (!file_ns_capable(m->file, &init_user_ns, CAP_SYS_ADMIN))
-		return -EACCES;
-
 	entries = kmalloc(MAX_STACK_TRACE_DEPTH * sizeof(*entries), GFP_KERNEL);
 	if (!entries)
 		return -ENOMEM;
@@ -483,7 +330,7 @@ static int proc_pid_stack(struct seq_file *m, struct pid_namespace *ns,
 		save_stack_trace_tsk(task, &trace);
 
 		for (i = 0; i < trace.nr_entries; i++) {
-			seq_printf(m, "[<%pK>] %pB\n",
+			seq_printf(m, "[<%pK>] %pS\n",
 				   (void *)entries[i], (void *)entries[i]);
 		}
 		unlock_trace(task);
@@ -494,22 +341,16 @@ static int proc_pid_stack(struct seq_file *m, struct pid_namespace *ns,
 }
 #endif
 
-#ifdef CONFIG_SCHED_INFO
+#ifdef CONFIG_SCHEDSTATS
 /*
  * Provides /proc/PID/schedstat
  */
-static int proc_pid_schedstat(struct seq_file *m, struct pid_namespace *ns,
-			      struct pid *pid, struct task_struct *task)
+static int proc_pid_schedstat(struct task_struct *task, char *buffer)
 {
-	if (unlikely(!sched_info_on()))
-		seq_printf(m, "0 0 0\n");
-	else
-		seq_printf(m, "%llu %llu %lu\n",
-		   (unsigned long long)task->se.sum_exec_runtime,
-		   (unsigned long long)task->sched_info.run_delay,
-		   task->sched_info.pcount);
-
-	return 0;
+	return sprintf(buffer, "%llu %llu %lu\n",
+			(unsigned long long)task->se.sum_exec_runtime,
+			(unsigned long long)task->sched_info.run_delay,
+			task->sched_info.pcount);
 }
 #endif
 
@@ -553,7 +394,7 @@ static int lstats_open(struct inode *inode, struct file *file)
 static ssize_t lstats_write(struct file *file, const char __user *buf,
 			    size_t count, loff_t *offs)
 {
-	struct task_struct *task = get_proc_task(file_inode(file));
+	struct task_struct *task = get_proc_task(file->f_dentry->d_inode);
 
 	if (!task)
 		return -ESRCH;
@@ -573,22 +414,21 @@ static const struct file_operations proc_lstats_operations = {
 
 #endif
 
-static int proc_oom_score(struct seq_file *m, struct pid_namespace *ns,
-			  struct pid *pid, struct task_struct *task)
+static int proc_oom_score(struct task_struct *task, char *buffer)
 {
-	unsigned long totalpages = totalram_pages + total_swap_pages;
 	unsigned long points = 0;
 
-	points = oom_badness(task, NULL, NULL, totalpages) *
-					1000 / totalpages;
-	seq_printf(m, "%lu\n", points);
-
-	return 0;
+	read_lock(&tasklist_lock);
+	if (pid_alive(task))
+		points = oom_badness(task, NULL, NULL,
+					totalram_pages + total_swap_pages);
+	read_unlock(&tasklist_lock);
+	return sprintf(buffer, "%lu\n", points);
 }
 
 struct limit_names {
-	const char *name;
-	const char *unit;
+	char *name;
+	char *unit;
 };
 
 static const struct limit_names lnames[RLIM_NLIMITS] = {
@@ -611,11 +451,12 @@ static const struct limit_names lnames[RLIM_NLIMITS] = {
 };
 
 /* Display limits for a process */
-static int proc_pid_limits(struct seq_file *m, struct pid_namespace *ns,
-			   struct pid *pid, struct task_struct *task)
+static int proc_pid_limits(struct task_struct *task, char *buffer)
 {
 	unsigned int i;
+	int count = 0;
 	unsigned long flags;
+	char *bufptr = buffer;
 
 	struct rlimit rlim[RLIM_NLIMITS];
 
@@ -627,56 +468,54 @@ static int proc_pid_limits(struct seq_file *m, struct pid_namespace *ns,
 	/*
 	 * print the file header
 	 */
-       seq_printf(m, "%-25s %-20s %-20s %-10s\n",
-		  "Limit", "Soft Limit", "Hard Limit", "Units");
+	count += sprintf(&bufptr[count], "%-25s %-20s %-20s %-10s\n",
+			"Limit", "Soft Limit", "Hard Limit", "Units");
 
 	for (i = 0; i < RLIM_NLIMITS; i++) {
 		if (rlim[i].rlim_cur == RLIM_INFINITY)
-			seq_printf(m, "%-25s %-20s ",
-				   lnames[i].name, "unlimited");
+			count += sprintf(&bufptr[count], "%-25s %-20s ",
+					 lnames[i].name, "unlimited");
 		else
-			seq_printf(m, "%-25s %-20lu ",
-				   lnames[i].name, rlim[i].rlim_cur);
+			count += sprintf(&bufptr[count], "%-25s %-20lu ",
+					 lnames[i].name, rlim[i].rlim_cur);
 
 		if (rlim[i].rlim_max == RLIM_INFINITY)
-			seq_printf(m, "%-20s ", "unlimited");
+			count += sprintf(&bufptr[count], "%-20s ", "unlimited");
 		else
-			seq_printf(m, "%-20lu ", rlim[i].rlim_max);
+			count += sprintf(&bufptr[count], "%-20lu ",
+					 rlim[i].rlim_max);
 
 		if (lnames[i].unit)
-			seq_printf(m, "%-10s\n", lnames[i].unit);
+			count += sprintf(&bufptr[count], "%-10s\n",
+					 lnames[i].unit);
 		else
-			seq_putc(m, '\n');
+			count += sprintf(&bufptr[count], "\n");
 	}
 
-	return 0;
+	return count;
 }
 
 #ifdef CONFIG_HAVE_ARCH_TRACEHOOK
-static int proc_pid_syscall(struct seq_file *m, struct pid_namespace *ns,
-			    struct pid *pid, struct task_struct *task)
+static int proc_pid_syscall(struct task_struct *task, char *buffer)
 {
 	long nr;
 	unsigned long args[6], sp, pc;
-	int res;
-
-	res = lock_trace(task);
+	int res = lock_trace(task);
 	if (res)
 		return res;
 
 	if (task_current_syscall(task, &nr, args, 6, &sp, &pc))
-		seq_puts(m, "running\n");
+		res = sprintf(buffer, "running\n");
 	else if (nr < 0)
-		seq_printf(m, "%ld 0x%lx 0x%lx\n", nr, sp, pc);
+		res = sprintf(buffer, "%ld 0x%lx 0x%lx\n", nr, sp, pc);
 	else
-		seq_printf(m,
+		res = sprintf(buffer,
 		       "%ld 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx\n",
 		       nr,
 		       args[0], args[1], args[2], args[3], args[4], args[5],
 		       sp, pc);
 	unlock_trace(task);
-
-	return 0;
+	return res;
 }
 #endif /* CONFIG_HAVE_ARCH_TRACEHOOK */
 
@@ -695,7 +534,7 @@ static int proc_fd_access_allowed(struct inode *inode)
 	 */
 	task = get_proc_task(inode);
 	if (task) {
-		allowed = ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS);
+		allowed = ptrace_may_access(task, PTRACE_MODE_READ);
 		put_task_struct(task);
 	}
 	return allowed;
@@ -704,14 +543,21 @@ static int proc_fd_access_allowed(struct inode *inode)
 int proc_setattr(struct dentry *dentry, struct iattr *attr)
 {
 	int error;
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 
 	if (attr->ia_valid & ATTR_MODE)
 		return -EPERM;
 
-	error = setattr_prepare(dentry, attr);
+	error = inode_change_ok(inode, attr);
 	if (error)
 		return error;
+
+	if ((attr->ia_valid & ATTR_SIZE) &&
+	    attr->ia_size != i_size_read(inode)) {
+		error = vmtruncate(inode, attr->ia_size);
+		if (error)
+			return error;
+	}
 
 	setattr_copy(inode, attr);
 	mark_inode_dirty(inode);
@@ -730,7 +576,7 @@ static bool has_pid_permissions(struct pid_namespace *pid,
 		return true;
 	if (in_group_p(pid->pid_gid))
 		return true;
-	return ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS);
+	return ptrace_may_access(task, PTRACE_MODE_READ);
 }
 
 
@@ -768,6 +614,43 @@ static const struct inode_operations proc_def_inode_operations = {
 	.setattr	= proc_setattr,
 };
 
+#define PROC_BLOCK_SIZE	(3*1024)		/* 4K page size but our output routines use some slack for overruns */
+
+static ssize_t proc_info_read(struct file * file, char __user * buf,
+			  size_t count, loff_t *ppos)
+{
+	struct inode * inode = file->f_path.dentry->d_inode;
+	unsigned long page;
+	ssize_t length;
+	struct task_struct *task = get_proc_task(inode);
+
+	length = -ESRCH;
+	if (!task)
+		goto out_no_task;
+
+	if (count > PROC_BLOCK_SIZE)
+		count = PROC_BLOCK_SIZE;
+
+	length = -ENOMEM;
+	if (!(page = __get_free_page(GFP_TEMPORARY)))
+		goto out;
+
+	length = PROC_I(inode)->op.proc_read(task, (char*)page);
+
+	if (length >= 0)
+		length = simple_read_from_buffer(buf, count, ppos, (char *)page, length);
+	free_page(page);
+out:
+	put_task_struct(task);
+out_no_task:
+	return length;
+}
+
+static const struct file_operations proc_info_file_operations = {
+	.read		= proc_info_read,
+	.llseek		= generic_file_llseek,
+};
+
 static int proc_single_show(struct seq_file *m, void *v)
 {
 	struct inode *inode = m->private;
@@ -800,46 +683,32 @@ static const struct file_operations proc_single_file_operations = {
 	.release	= single_release,
 };
 
-
-struct mm_struct *proc_mem_open(struct inode *inode, unsigned int mode)
+static int mem_open(struct inode* inode, struct file* file)
 {
-	struct task_struct *task = get_proc_task(inode);
-	struct mm_struct *mm = ERR_PTR(-ESRCH);
+	struct task_struct *task = get_proc_task(file->f_path.dentry->d_inode);
+	struct mm_struct *mm;
 
-	if (task) {
-		mm = mm_access(task, mode | PTRACE_MODE_FSCREDS);
-		put_task_struct(task);
+	if (!task)
+		return -ESRCH;
 
-		if (!IS_ERR_OR_NULL(mm)) {
-			/* ensure this mm_struct can't be freed */
-			atomic_inc(&mm->mm_count);
-			/* but do not pin its memory */
-			mmput(mm);
-		}
-	}
-
-	return mm;
-}
-
-static int __mem_open(struct inode *inode, struct file *file, unsigned int mode)
-{
-	struct mm_struct *mm = proc_mem_open(inode, mode);
+	mm = mm_access(task, PTRACE_MODE_ATTACH);
+	put_task_struct(task);
 
 	if (IS_ERR(mm))
 		return PTR_ERR(mm);
 
-	file->private_data = mm;
-	return 0;
-}
-
-static int mem_open(struct inode *inode, struct file *file)
-{
-	int ret = __mem_open(inode, file, PTRACE_MODE_ATTACH);
+	if (mm) {
+		/* ensure this mm_struct can't be freed */
+		atomic_inc(&mm->mm_count);
+		/* but do not pin its memory */
+		mmput(mm);
+	}
 
 	/* OK to pass negative loff_t, we can catch out-of-range */
 	file->f_mode |= FMODE_UNSIGNED_OFFSET;
+	file->private_data = mm;
 
-	return ret;
+	return 0;
 }
 
 static ssize_t mem_rw(struct file *file, char __user *buf,
@@ -849,7 +718,6 @@ static ssize_t mem_rw(struct file *file, char __user *buf,
 	unsigned long addr = *ppos;
 	ssize_t copied;
 	char *page;
-	unsigned int flags;
 
 	if (!mm)
 		return 0;
@@ -862,11 +730,6 @@ static ssize_t mem_rw(struct file *file, char __user *buf,
 	if (!atomic_inc_not_zero(&mm->mm_users))
 		goto free;
 
-	/* Maybe we should limit FOLL_FORCE to actual ptrace users? */
-	flags = FOLL_FORCE;
-	if (write)
-		flags |= FOLL_WRITE;
-
 	while (count > 0) {
 		int this_len = min_t(int, count, PAGE_SIZE);
 
@@ -875,7 +738,7 @@ static ssize_t mem_rw(struct file *file, char __user *buf,
 			break;
 		}
 
-		this_len = access_remote_vm(mm, addr, page, this_len, flags);
+		this_len = access_remote_vm(mm, addr, page, this_len, write);
 		if (!this_len) {
 			if (!copied)
 				copied = -EIO;
@@ -944,50 +807,43 @@ static const struct file_operations proc_mem_operations = {
 	.release	= mem_release,
 };
 
-static int environ_open(struct inode *inode, struct file *file)
-{
-	return __mem_open(inode, file, PTRACE_MODE_READ);
-}
-
 static ssize_t environ_read(struct file *file, char __user *buf,
 			size_t count, loff_t *ppos)
 {
+	struct task_struct *task = get_proc_task(file->f_dentry->d_inode);
 	char *page;
 	unsigned long src = *ppos;
-	int ret = 0;
-	struct mm_struct *mm = file->private_data;
-	unsigned long env_start, env_end;
+	int ret = -ESRCH;
+	struct mm_struct *mm;
 
-	/* Ensure the process spawned far enough to have an environment. */
-	if (!mm || !mm->env_end)
-		return 0;
+	if (!task)
+		goto out_no_task;
 
+	ret = -ENOMEM;
 	page = (char *)__get_free_page(GFP_TEMPORARY);
 	if (!page)
-		return -ENOMEM;
+		goto out;
+
+
+	mm = mm_for_maps(task);
+	ret = PTR_ERR(mm);
+	if (!mm || IS_ERR(mm))
+		goto out_free;
 
 	ret = 0;
-	if (!atomic_inc_not_zero(&mm->mm_users))
-		goto free;
-
-	down_read(&mm->mmap_sem);
-	env_start = mm->env_start;
-	env_end = mm->env_end;
-	up_read(&mm->mmap_sem);
-
 	while (count > 0) {
-		size_t this_len, max_len;
-		int retval;
+		int this_len, retval, max_len;
 
-		if (src >= (env_end - env_start))
+		this_len = mm->env_end - (mm->env_start + src);
+
+		if (this_len <= 0)
 			break;
 
-		this_len = env_end - (env_start + src);
+		max_len = (count > PAGE_SIZE) ? PAGE_SIZE : count;
+		this_len = (this_len > max_len) ? max_len : this_len;
 
-		max_len = min_t(size_t, PAGE_SIZE, count);
-		this_len = min(max_len, this_len);
-
-		retval = access_remote_vm(mm, (env_start + src), page, this_len, FOLL_ANON);
+		retval = access_process_vm(task, (mm->env_start + src),
+			page, this_len, 0);
 
 		if (retval <= 0) {
 			ret = retval;
@@ -1005,166 +861,52 @@ static ssize_t environ_read(struct file *file, char __user *buf,
 		count -= retval;
 	}
 	*ppos = src;
-	mmput(mm);
 
-free:
+	mmput(mm);
+out_free:
 	free_page((unsigned long) page);
+out:
+	put_task_struct(task);
+out_no_task:
 	return ret;
 }
 
 static const struct file_operations proc_environ_operations = {
-	.open		= environ_open,
 	.read		= environ_read,
 	.llseek		= generic_file_llseek,
-	.release	= mem_release,
 };
 
-static int auxv_open(struct inode *inode, struct file *file)
+static ssize_t oom_adjust_read(struct file *file, char __user *buf,
+				size_t count, loff_t *ppos)
 {
-	return __mem_open(inode, file, PTRACE_MODE_READ_FSCREDS);
-}
-
-static ssize_t auxv_read(struct file *file, char __user *buf,
-			size_t count, loff_t *ppos)
-{
-	struct mm_struct *mm = file->private_data;
-	unsigned int nwords = 0;
-
-	if (!mm)
-		return 0;
-	do {
-		nwords += 2;
-	} while (mm->saved_auxv[nwords - 2] != 0); /* AT_NULL */
-	return simple_read_from_buffer(buf, count, ppos, mm->saved_auxv,
-				       nwords * sizeof(mm->saved_auxv[0]));
-}
-
-static const struct file_operations proc_auxv_operations = {
-	.open		= auxv_open,
-	.read		= auxv_read,
-	.llseek		= generic_file_llseek,
-	.release	= mem_release,
-};
-
-static ssize_t oom_adj_read(struct file *file, char __user *buf, size_t count,
-			    loff_t *ppos)
-{
-	struct task_struct *task = get_proc_task(file_inode(file));
+	struct task_struct *task = get_proc_task(file->f_path.dentry->d_inode);
 	char buffer[PROC_NUMBUF];
-	int oom_adj = OOM_ADJUST_MIN;
 	size_t len;
+	int oom_adjust = OOM_DISABLE;
+	unsigned long flags;
 
 	if (!task)
 		return -ESRCH;
-	if (task->signal->oom_score_adj == OOM_SCORE_ADJ_MAX)
-		oom_adj = OOM_ADJUST_MAX;
-	else
-		oom_adj = (task->signal->oom_score_adj * -OOM_DISABLE) /
-			  OOM_SCORE_ADJ_MAX;
+
+	if (lock_task_sighand(task, &flags)) {
+		oom_adjust = task->signal->oom_adj;
+		unlock_task_sighand(task, &flags);
+	}
+
 	put_task_struct(task);
-	len = snprintf(buffer, sizeof(buffer), "%d\n", oom_adj);
+
+	len = snprintf(buffer, sizeof(buffer), "%i\n", oom_adjust);
+
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }
 
-static int __set_oom_adj(struct file *file, int oom_adj, bool legacy)
+static ssize_t oom_adjust_write(struct file *file, const char __user *buf,
+				size_t count, loff_t *ppos)
 {
-	static DEFINE_MUTEX(oom_adj_mutex);
-	struct mm_struct *mm = NULL;
 	struct task_struct *task;
-	int err = 0;
-
-	task = get_proc_task(file_inode(file));
-	if (!task)
-		return -ESRCH;
-
-	mutex_lock(&oom_adj_mutex);
-	if (legacy) {
-		if (oom_adj < task->signal->oom_score_adj &&
-				!capable(CAP_SYS_RESOURCE)) {
-			err = -EACCES;
-			goto err_unlock;
-		}
-		/*
-		 * /proc/pid/oom_adj is provided for legacy purposes, ask users to use
-		 * /proc/pid/oom_score_adj instead.
-		 */
-		pr_warn_once("%s (%d): /proc/%d/oom_adj is deprecated, please use /proc/%d/oom_score_adj instead.\n",
-			  current->comm, task_pid_nr(current), task_pid_nr(task),
-			  task_pid_nr(task));
-	} else {
-		if ((short)oom_adj < task->signal->oom_score_adj_min &&
-				!capable(CAP_SYS_RESOURCE)) {
-			err = -EACCES;
-			goto err_unlock;
-		}
-	}
-
-	/*
-	 * Make sure we will check other processes sharing the mm if this is
-	 * not vfrok which wants its own oom_score_adj.
-	 * pin the mm so it doesn't go away and get reused after task_unlock
-	 */
-	if (!task->vfork_done) {
-		struct task_struct *p = find_lock_task_mm(task);
-
-		if (p) {
-			if (atomic_read(&p->mm->mm_users) > 1) {
-				mm = p->mm;
-				atomic_inc(&mm->mm_count);
-			}
-			task_unlock(p);
-		}
-	}
-
-	task->signal->oom_score_adj = oom_adj;
-	if (!legacy && has_capability_noaudit(current, CAP_SYS_RESOURCE))
-		task->signal->oom_score_adj_min = (short)oom_adj;
-	trace_oom_score_adj_update(task);
-
-	if (mm) {
-		struct task_struct *p;
-
-		rcu_read_lock();
-		for_each_process(p) {
-			if (same_thread_group(task, p))
-				continue;
-
-			/* do not touch kernel threads or the global init */
-			if (p->flags & PF_KTHREAD || is_global_init(p))
-				continue;
-
-			task_lock(p);
-			if (!p->vfork_done && process_shares_mm(p, mm)) {
-				p->signal->oom_score_adj = oom_adj;
-				if (!legacy && has_capability_noaudit(current, CAP_SYS_RESOURCE))
-					p->signal->oom_score_adj_min = (short)oom_adj;
-			}
-			task_unlock(p);
-		}
-		rcu_read_unlock();
-		mmdrop(mm);
-	}
-err_unlock:
-	mutex_unlock(&oom_adj_mutex);
-	put_task_struct(task);
-	return err;
-}
-
-/*
- * /proc/pid/oom_adj exists solely for backwards compatibility with previous
- * kernels.  The effective policy is defined by oom_score_adj, which has a
- * different scale: oom_adj grew exponentially and oom_score_adj grows linearly.
- * Values written to oom_adj are simply mapped linearly to oom_score_adj.
- * Processes that become oom disabled via oom_adj will still be oom disabled
- * with this implementation.
- *
- * oom_adj cannot be removed since existing userspace binaries use it.
- */
-static ssize_t oom_adj_write(struct file *file, const char __user *buf,
-			     size_t count, loff_t *ppos)
-{
 	char buffer[PROC_NUMBUF];
-	int oom_adj;
+	int oom_adjust;
+	unsigned long flags;
 	int err;
 
 	memset(buffer, 0, sizeof(buffer));
@@ -1175,55 +917,125 @@ static ssize_t oom_adj_write(struct file *file, const char __user *buf,
 		goto out;
 	}
 
-	err = kstrtoint(strstrip(buffer), 0, &oom_adj);
+	err = kstrtoint(strstrip(buffer), 0, &oom_adjust);
 	if (err)
 		goto out;
-	if ((oom_adj < OOM_ADJUST_MIN || oom_adj > OOM_ADJUST_MAX) &&
-	     oom_adj != OOM_DISABLE) {
+	if ((oom_adjust < OOM_ADJUST_MIN || oom_adjust > OOM_ADJUST_MAX) &&
+	     oom_adjust != OOM_DISABLE) {
 		err = -EINVAL;
 		goto out;
 	}
 
+	task = get_proc_task(file->f_path.dentry->d_inode);
+	if (!task) {
+		err = -ESRCH;
+		goto out;
+	}
+
+	task_lock(task);
+	if (!task->mm) {
+		err = -EINVAL;
+		goto err_task_lock;
+	}
+
+	if (!lock_task_sighand(task, &flags)) {
+		err = -ESRCH;
+		goto err_task_lock;
+	}
+
+	if (oom_adjust < task->signal->oom_adj && !capable(CAP_SYS_RESOURCE)) {
+		err = -EACCES;
+		goto err_sighand;
+	}
+
+	/*
+	 * Warn that /proc/pid/oom_adj is deprecated, see
+	 * Documentation/feature-removal-schedule.txt.
+	 */
+	printk_once(KERN_WARNING "%s (%d): /proc/%d/oom_adj is deprecated, please use /proc/%d/oom_score_adj instead.\n",
+		  current->comm, task_pid_nr(current), task_pid_nr(task),
+		  task_pid_nr(task));
+	task->signal->oom_adj = oom_adjust;
 	/*
 	 * Scale /proc/pid/oom_score_adj appropriately ensuring that a maximum
 	 * value is always attainable.
 	 */
-	if (oom_adj == OOM_ADJUST_MAX)
-		oom_adj = OOM_SCORE_ADJ_MAX;
+	if (task->signal->oom_adj == OOM_ADJUST_MAX)
+		task->signal->oom_score_adj = OOM_SCORE_ADJ_MAX;
 	else
-		oom_adj = (oom_adj * OOM_SCORE_ADJ_MAX) / -OOM_DISABLE;
-
-	err = __set_oom_adj(file, oom_adj, true);
+		task->signal->oom_score_adj = (oom_adjust * OOM_SCORE_ADJ_MAX) /
+								-OOM_DISABLE;
+	trace_oom_score_adj_update(task);
+err_sighand:
+	unlock_task_sighand(task, &flags);
+err_task_lock:
+	task_unlock(task);
+	put_task_struct(task);
 out:
 	return err < 0 ? err : count;
 }
 
-static const struct file_operations proc_oom_adj_operations = {
-	.read		= oom_adj_read,
-	.write		= oom_adj_write,
+static int oom_adjust_permission(struct inode *inode, int mask)
+{
+	uid_t uid;
+	struct task_struct *p;
+
+	p = get_proc_task(inode);
+	if(p) {
+		uid = task_uid(p);
+		put_task_struct(p);
+	}
+
+	/*
+	 * System Server (uid == 1000) is granted access to oom_adj of all 
+	 * android applications (uid > 10000) as and services (uid >= 1000)
+	 */
+	if (p && (current_fsuid() == 1000) && (uid >= 1000)) {
+		if (inode->i_mode >> 6 & mask) {
+			return 0;
+		}
+	}
+
+	/* Fall back to default. */
+	return generic_permission(inode, mask);
+}
+
+static const struct inode_operations proc_oom_adjust_inode_operations = {
+	.permission	= oom_adjust_permission,
+};
+
+static const struct file_operations proc_oom_adjust_operations = {
+	.read		= oom_adjust_read,
+	.write		= oom_adjust_write,
 	.llseek		= generic_file_llseek,
 };
 
 static ssize_t oom_score_adj_read(struct file *file, char __user *buf,
 					size_t count, loff_t *ppos)
 {
-	struct task_struct *task = get_proc_task(file_inode(file));
+	struct task_struct *task = get_proc_task(file->f_path.dentry->d_inode);
 	char buffer[PROC_NUMBUF];
-	short oom_score_adj = OOM_SCORE_ADJ_MIN;
+	int oom_score_adj = OOM_SCORE_ADJ_MIN;
+	unsigned long flags;
 	size_t len;
 
 	if (!task)
 		return -ESRCH;
-	oom_score_adj = task->signal->oom_score_adj;
+	if (lock_task_sighand(task, &flags)) {
+		oom_score_adj = task->signal->oom_score_adj;
+		unlock_task_sighand(task, &flags);
+	}
 	put_task_struct(task);
-	len = snprintf(buffer, sizeof(buffer), "%hd\n", oom_score_adj);
+	len = snprintf(buffer, sizeof(buffer), "%d\n", oom_score_adj);
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }
 
 static ssize_t oom_score_adj_write(struct file *file, const char __user *buf,
 					size_t count, loff_t *ppos)
 {
+	struct task_struct *task;
 	char buffer[PROC_NUMBUF];
+	unsigned long flags;
 	int oom_score_adj;
 	int err;
 
@@ -1244,7 +1056,47 @@ static ssize_t oom_score_adj_write(struct file *file, const char __user *buf,
 		goto out;
 	}
 
-	err = __set_oom_adj(file, oom_score_adj, false);
+	task = get_proc_task(file->f_path.dentry->d_inode);
+	if (!task) {
+		err = -ESRCH;
+		goto out;
+	}
+
+	task_lock(task);
+	if (!task->mm) {
+		err = -EINVAL;
+		goto err_task_lock;
+	}
+
+	if (!lock_task_sighand(task, &flags)) {
+		err = -ESRCH;
+		goto err_task_lock;
+	}
+
+	if (oom_score_adj < task->signal->oom_score_adj_min &&
+			!capable(CAP_SYS_RESOURCE)) {
+		err = -EACCES;
+		goto err_sighand;
+	}
+
+	task->signal->oom_score_adj = oom_score_adj;
+	if (has_capability_noaudit(current, CAP_SYS_RESOURCE))
+		task->signal->oom_score_adj_min = oom_score_adj;
+	trace_oom_score_adj_update(task);
+	/*
+	 * Scale /proc/pid/oom_adj appropriately ensuring that OOM_DISABLE is
+	 * always attainable.
+	 */
+	if (task->signal->oom_score_adj == OOM_SCORE_ADJ_MIN)
+		task->signal->oom_adj = OOM_DISABLE;
+	else
+		task->signal->oom_adj = (oom_score_adj * OOM_ADJUST_MAX) /
+							OOM_SCORE_ADJ_MAX;
+err_sighand:
+	unlock_task_sighand(task, &flags);
+err_task_lock:
+	task_unlock(task);
+	put_task_struct(task);
 out:
 	return err < 0 ? err : count;
 }
@@ -1260,7 +1112,7 @@ static const struct file_operations proc_oom_score_adj_operations = {
 static ssize_t proc_loginuid_read(struct file * file, char __user * buf,
 				  size_t count, loff_t *ppos)
 {
-	struct inode * inode = file_inode(file);
+	struct inode * inode = file->f_path.dentry->d_inode;
 	struct task_struct *task = get_proc_task(inode);
 	ssize_t length;
 	char tmpbuf[TMPBUFLEN];
@@ -1268,8 +1120,7 @@ static ssize_t proc_loginuid_read(struct file * file, char __user * buf,
 	if (!task)
 		return -ESRCH;
 	length = scnprintf(tmpbuf, TMPBUFLEN, "%u",
-			   from_kuid(file->f_cred->user_ns,
-				     audit_get_loginuid(task)));
+				audit_get_loginuid(task));
 	put_task_struct(task);
 	return simple_read_from_buffer(buf, count, ppos, tmpbuf, length);
 }
@@ -1277,10 +1128,10 @@ static ssize_t proc_loginuid_read(struct file * file, char __user * buf,
 static ssize_t proc_loginuid_write(struct file * file, const char __user * buf,
 				   size_t count, loff_t *ppos)
 {
-	struct inode * inode = file_inode(file);
+	struct inode * inode = file->f_path.dentry->d_inode;
+	char *page, *tmp;
+	ssize_t length;
 	uid_t loginuid;
-	kuid_t kloginuid;
-	int rv;
 
 	rcu_read_lock();
 	if (current != pid_task(proc_pid(inode), PIDTYPE_PID)) {
@@ -1289,28 +1140,34 @@ static ssize_t proc_loginuid_write(struct file * file, const char __user * buf,
 	}
 	rcu_read_unlock();
 
+	if (count >= PAGE_SIZE)
+		count = PAGE_SIZE - 1;
+
 	if (*ppos != 0) {
 		/* No partial writes. */
 		return -EINVAL;
 	}
+	page = (char*)__get_free_page(GFP_TEMPORARY);
+	if (!page)
+		return -ENOMEM;
+	length = -EFAULT;
+	if (copy_from_user(page, buf, count))
+		goto out_free_page;
 
-	rv = kstrtou32_from_user(buf, count, 10, &loginuid);
-	if (rv < 0)
-		return rv;
+	page[count] = '\0';
+	loginuid = simple_strtoul(page, &tmp, 10);
+	if (tmp == page) {
+		length = -EINVAL;
+		goto out_free_page;
 
-	/* is userspace tring to explicitly UNSET the loginuid? */
-	if (loginuid == AUDIT_UID_UNSET) {
-		kloginuid = INVALID_UID;
-	} else {
-		kloginuid = make_kuid(file->f_cred->user_ns, loginuid);
-		if (!uid_valid(kloginuid))
-			return -EINVAL;
 	}
+	length = audit_set_loginuid(loginuid);
+	if (likely(length == 0))
+		length = count;
 
-	rv = audit_set_loginuid(kloginuid);
-	if (rv < 0)
-		return rv;
-	return count;
+out_free_page:
+	free_page((unsigned long) page);
+	return length;
 }
 
 static const struct file_operations proc_loginuid_operations = {
@@ -1322,7 +1179,7 @@ static const struct file_operations proc_loginuid_operations = {
 static ssize_t proc_sessionid_read(struct file * file, char __user * buf,
 				  size_t count, loff_t *ppos)
 {
-	struct inode * inode = file_inode(file);
+	struct inode * inode = file->f_path.dentry->d_inode;
 	struct task_struct *task = get_proc_task(inode);
 	ssize_t length;
 	char tmpbuf[TMPBUFLEN];
@@ -1345,7 +1202,7 @@ static const struct file_operations proc_sessionid_operations = {
 static ssize_t proc_fault_inject_read(struct file * file, char __user * buf,
 				      size_t count, loff_t *ppos)
 {
-	struct task_struct *task = get_proc_task(file_inode(file));
+	struct task_struct *task = get_proc_task(file->f_dentry->d_inode);
 	char buffer[PROC_NUMBUF];
 	size_t len;
 	int make_it_fail;
@@ -1364,9 +1221,8 @@ static ssize_t proc_fault_inject_write(struct file * file,
 			const char __user * buf, size_t count, loff_t *ppos)
 {
 	struct task_struct *task;
-	char buffer[PROC_NUMBUF];
+	char buffer[PROC_NUMBUF], *end;
 	int make_it_fail;
-	int rv;
 
 	if (!capable(CAP_SYS_RESOURCE))
 		return -EPERM;
@@ -1375,13 +1231,10 @@ static ssize_t proc_fault_inject_write(struct file * file,
 		count = sizeof(buffer) - 1;
 	if (copy_from_user(buffer, buf, count))
 		return -EFAULT;
-	rv = kstrtoint(strstrip(buffer), 0, &make_it_fail);
-	if (rv < 0)
-		return rv;
-	if (make_it_fail < 0 || make_it_fail > 1)
+	make_it_fail = simple_strtol(strstrip(buffer), &end, 0);
+	if (*end)
 		return -EINVAL;
-
-	task = get_proc_task(file_inode(file));
+	task = get_proc_task(file->f_dentry->d_inode);
 	if (!task)
 		return -ESRCH;
 	task->make_it_fail = make_it_fail;
@@ -1421,7 +1274,7 @@ static ssize_t
 sched_write(struct file *file, const char __user *buf,
 	    size_t count, loff_t *offset)
 {
-	struct inode *inode = file_inode(file);
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct task_struct *p;
 
 	p = get_proc_task(inode);
@@ -1472,7 +1325,7 @@ static ssize_t
 sched_autogroup_write(struct file *file, const char __user *buf,
 	    size_t count, loff_t *offset)
 {
-	struct inode *inode = file_inode(file);
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct task_struct *p;
 	char buffer[PROC_NUMBUF];
 	int nice;
@@ -1527,13 +1380,14 @@ static const struct file_operations proc_pid_sched_autogroup_operations = {
 static ssize_t comm_write(struct file *file, const char __user *buf,
 				size_t count, loff_t *offset)
 {
-	struct inode *inode = file_inode(file);
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct task_struct *p;
 	char buffer[TASK_COMM_LEN];
-	const size_t maxlen = sizeof(buffer) - 1;
 
 	memset(buffer, 0, sizeof(buffer));
-	if (copy_from_user(buffer, buf, count > maxlen ? maxlen : count))
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+	if (copy_from_user(buffer, buf, count))
 		return -EFAULT;
 
 	p = get_proc_task(inode);
@@ -1584,13 +1438,18 @@ static const struct file_operations proc_pid_set_comm_operations = {
 static int proc_exe_link(struct dentry *dentry, struct path *exe_path)
 {
 	struct task_struct *task;
+	struct mm_struct *mm;
 	struct file *exe_file;
 
-	task = get_proc_task(d_inode(dentry));
+	task = get_proc_task(dentry->d_inode);
 	if (!task)
 		return -ENOENT;
-	exe_file = get_task_exe_file(task);
+	mm = get_task_mm(task);
 	put_task_struct(task);
+	if (!mm)
+		return -ENOENT;
+	exe_file = get_mm_exe_file(mm);
+	mmput(mm);
 	if (exe_file) {
 		*exe_path = exe_file->f_path;
 		path_get(&exe_file->f_path);
@@ -1600,26 +1459,19 @@ static int proc_exe_link(struct dentry *dentry, struct path *exe_path)
 		return -ENOENT;
 }
 
-static const char *proc_pid_get_link(struct dentry *dentry,
-				     struct inode *inode,
-				     struct delayed_call *done)
+static void *proc_pid_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-	struct path path;
+	struct inode *inode = dentry->d_inode;
 	int error = -EACCES;
 
-	if (!dentry)
-		return ERR_PTR(-ECHILD);
+	/* We don't need a base pointer in the /proc filesystem */
+	path_put(&nd->path);
 
 	/* Are we allowed to snoop on the tasks file descriptors? */
 	if (!proc_fd_access_allowed(inode))
 		goto out;
 
-	error = PROC_I(inode)->op.proc_get_link(dentry, &path);
-	if (error)
-		goto out;
-
-	nd_jump_link(&path);
-	return NULL;
+	error = PROC_I(inode)->op.proc_get_link(dentry, &nd->path);
 out:
 	return ERR_PTR(error);
 }
@@ -1651,7 +1503,7 @@ static int do_proc_readlink(struct path *path, char __user *buffer, int buflen)
 static int proc_pid_readlink(struct dentry * dentry, char __user * buffer, int buflen)
 {
 	int error = -EACCES;
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	struct path path;
 
 	/* Are we allowed to snoop on the tasks file descriptors? */
@@ -1668,14 +1520,29 @@ out:
 	return error;
 }
 
-const struct inode_operations proc_pid_link_inode_operations = {
+static const struct inode_operations proc_pid_link_inode_operations = {
 	.readlink	= proc_pid_readlink,
-	.get_link	= proc_pid_get_link,
+	.follow_link	= proc_pid_follow_link,
 	.setattr	= proc_setattr,
 };
 
 
 /* building an inode */
+
+static int task_dumpable(struct task_struct *task)
+{
+	int dumpable = 0;
+	struct mm_struct *mm;
+
+	task_lock(task);
+	mm = task->mm;
+	if (mm)
+		dumpable = get_dumpable(mm);
+	task_unlock(task);
+	if(dumpable == 1)
+		return 1;
+	return 0;
+}
 
 struct inode *proc_pid_make_inode(struct super_block * sb, struct task_struct *task)
 {
@@ -1692,7 +1559,7 @@ struct inode *proc_pid_make_inode(struct super_block * sb, struct task_struct *t
 	/* Common stuff */
 	ei = PROC_I(inode);
 	inode->i_ino = get_next_ino();
-	inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
+	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	inode->i_op = &proc_def_inode_operations;
 
 	/*
@@ -1721,7 +1588,7 @@ out_unlock:
 
 int pid_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat)
 {
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	struct task_struct *task;
 	const struct cred *cred;
 	struct pid_namespace *pid = dentry->d_sb->s_fs_info;
@@ -1729,8 +1596,8 @@ int pid_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat)
 	generic_fillattr(inode, stat);
 
 	rcu_read_lock();
-	stat->uid = GLOBAL_ROOT_UID;
-	stat->gid = GLOBAL_ROOT_GID;
+	stat->uid = 0;
+	stat->gid = 0;
 	task = pid_task(proc_pid(inode), PIDTYPE_PID);
 	if (task) {
 		if (!has_pid_permissions(pid, task, 2)) {
@@ -1769,16 +1636,16 @@ int pid_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat)
  * made this apply to all per process world readable and executable
  * directories.
  */
-int pid_revalidate(struct dentry *dentry, unsigned int flags)
+int pid_revalidate(struct dentry *dentry, struct nameidata *nd)
 {
 	struct inode *inode;
 	struct task_struct *task;
 	const struct cred *cred;
 
-	if (flags & LOOKUP_RCU)
+	if (nd && nd->flags & LOOKUP_RCU)
 		return -ECHILD;
 
-	inode = d_inode(dentry);
+	inode = dentry->d_inode;
 	task = get_proc_task(inode);
 
 	if (task) {
@@ -1790,29 +1657,25 @@ int pid_revalidate(struct dentry *dentry, unsigned int flags)
 			inode->i_gid = cred->egid;
 			rcu_read_unlock();
 		} else {
-			inode->i_uid = GLOBAL_ROOT_UID;
-			inode->i_gid = GLOBAL_ROOT_GID;
+			inode->i_uid = 0;
+			inode->i_gid = 0;
 		}
 		inode->i_mode &= ~(S_ISUID | S_ISGID);
 		security_task_to_inode(task, inode);
 		put_task_struct(task);
 		return 1;
 	}
+	d_drop(dentry);
 	return 0;
 }
 
-static inline bool proc_inode_is_dead(struct inode *inode)
-{
-	return !proc_pid(inode)->tasks[PIDTYPE_PID].first;
-}
-
-int pid_delete_dentry(const struct dentry *dentry)
+static int pid_delete_dentry(const struct dentry * dentry)
 {
 	/* Is the task we represent dead?
 	 * If so, then don't put the dentry on the lru list,
 	 * kill it immediately.
 	 */
-	return proc_inode_is_dead(d_inode(dentry));
+	return !proc_pid(dentry->d_inode)->tasks[PIDTYPE_PID].first;
 }
 
 const struct dentry_operations pid_dentry_operations =
@@ -1835,40 +1698,331 @@ const struct dentry_operations pid_dentry_operations =
  * reported by readdir in sync with the inode numbers reported
  * by stat.
  */
-bool proc_fill_cache(struct file *file, struct dir_context *ctx,
+int proc_fill_cache(struct file *filp, void *dirent, filldir_t filldir,
 	const char *name, int len,
 	instantiate_t instantiate, struct task_struct *task, const void *ptr)
 {
-	struct dentry *child, *dir = file->f_path.dentry;
-	struct qstr qname = QSTR_INIT(name, len);
+	struct dentry *child, *dir = filp->f_path.dentry;
 	struct inode *inode;
-	unsigned type;
-	ino_t ino;
+	struct qstr qname;
+	ino_t ino = 0;
+	unsigned type = DT_UNKNOWN;
 
-	child = d_hash_and_lookup(dir, &qname);
+	qname.name = name;
+	qname.len  = len;
+	qname.hash = full_name_hash(name, len);
+
+	child = d_lookup(dir, &qname);
 	if (!child) {
-		DECLARE_WAIT_QUEUE_HEAD_ONSTACK(wq);
-		child = d_alloc_parallel(dir, &qname, &wq);
-		if (IS_ERR(child))
-			goto end_instantiate;
-		if (d_in_lookup(child)) {
-			int err = instantiate(d_inode(dir), child, task, ptr);
-			d_lookup_done(child);
-			if (err < 0) {
-				dput(child);
-				goto end_instantiate;
-			}
+		struct dentry *new;
+		new = d_alloc(dir, &qname);
+		if (new) {
+			child = instantiate(dir->d_inode, new, task, ptr);
+			if (child)
+				dput(new);
+			else
+				child = new;
 		}
 	}
-	inode = d_inode(child);
-	ino = inode->i_ino;
-	type = inode->i_mode >> 12;
+	if (!child || IS_ERR(child) || !child->d_inode)
+		goto end_instantiate;
+	inode = child->d_inode;
+	if (inode) {
+		ino = inode->i_ino;
+		type = inode->i_mode >> 12;
+	}
 	dput(child);
-	return dir_emit(ctx, name, len, ino, type);
-
 end_instantiate:
-	return dir_emit(ctx, name, len, 1, DT_UNKNOWN);
+	if (!ino)
+		ino = find_inode_number(dir, &qname);
+	if (!ino)
+		ino = 1;
+	return filldir(dirent, name, len, filp->f_pos, ino, type);
 }
+
+static unsigned name_to_int(struct dentry *dentry)
+{
+	const char *name = dentry->d_name.name;
+	int len = dentry->d_name.len;
+	unsigned n = 0;
+
+	if (len > 1 && *name == '0')
+		goto out;
+	while (len-- > 0) {
+		unsigned c = *name++ - '0';
+		if (c > 9)
+			goto out;
+		if (n >= (~0U-9)/10)
+			goto out;
+		n *= 10;
+		n += c;
+	}
+	return n;
+out:
+	return ~0U;
+}
+
+#define PROC_FDINFO_MAX 64
+
+static int proc_fd_info(struct inode *inode, struct path *path, char *info)
+{
+	struct task_struct *task = get_proc_task(inode);
+	struct files_struct *files = NULL;
+	struct file *file;
+	int fd = proc_fd(inode);
+
+	if (task) {
+		files = get_files_struct(task);
+		put_task_struct(task);
+	}
+	if (files) {
+		/*
+		 * We are not taking a ref to the file structure, so we must
+		 * hold ->file_lock.
+		 */
+		spin_lock(&files->file_lock);
+		file = fcheck_files(files, fd);
+		if (file) {
+			unsigned int f_flags;
+			struct fdtable *fdt;
+
+			fdt = files_fdtable(files);
+			f_flags = file->f_flags & ~O_CLOEXEC;
+			if (close_on_exec(fd, fdt))
+				f_flags |= O_CLOEXEC;
+
+			if (path) {
+				*path = file->f_path;
+				path_get(&file->f_path);
+			}
+			if (info)
+				snprintf(info, PROC_FDINFO_MAX,
+					 "pos:\t%lli\n"
+					 "flags:\t0%o\n",
+					 (long long) file->f_pos,
+					 f_flags);
+			spin_unlock(&files->file_lock);
+			put_files_struct(files);
+			return 0;
+		}
+		spin_unlock(&files->file_lock);
+		put_files_struct(files);
+	}
+	return -ENOENT;
+}
+
+static int proc_fd_link(struct dentry *dentry, struct path *path)
+{
+	return proc_fd_info(dentry->d_inode, path, NULL);
+}
+
+static int tid_fd_revalidate(struct dentry *dentry, struct nameidata *nd)
+{
+	struct inode *inode;
+	struct task_struct *task;
+	int fd;
+	struct files_struct *files;
+	const struct cred *cred;
+
+	if (nd && nd->flags & LOOKUP_RCU)
+		return -ECHILD;
+
+	inode = dentry->d_inode;
+	task = get_proc_task(inode);
+	fd = proc_fd(inode);
+
+	if (task) {
+		files = get_files_struct(task);
+		if (files) {
+			struct file *file;
+			rcu_read_lock();
+			file = fcheck_files(files, fd);
+			if (file) {
+				unsigned f_mode = file->f_mode;
+
+				rcu_read_unlock();
+				put_files_struct(files);
+
+				if (task_dumpable(task)) {
+					rcu_read_lock();
+					cred = __task_cred(task);
+					inode->i_uid = cred->euid;
+					inode->i_gid = cred->egid;
+					rcu_read_unlock();
+				} else {
+					inode->i_uid = 0;
+					inode->i_gid = 0;
+				}
+
+				if (S_ISLNK(inode->i_mode)) {
+					unsigned i_mode = S_IFLNK;
+					if (f_mode & FMODE_READ)
+						i_mode |= S_IRUSR | S_IXUSR;
+					if (f_mode & FMODE_WRITE)
+						i_mode |= S_IWUSR | S_IXUSR;
+					inode->i_mode = i_mode;
+				}
+
+				security_task_to_inode(task, inode);
+				put_task_struct(task);
+				return 1;
+			}
+			rcu_read_unlock();
+			put_files_struct(files);
+		}
+		put_task_struct(task);
+	}
+	d_drop(dentry);
+	return 0;
+}
+
+static const struct dentry_operations tid_fd_dentry_operations =
+{
+	.d_revalidate	= tid_fd_revalidate,
+	.d_delete	= pid_delete_dentry,
+};
+
+static struct dentry *proc_fd_instantiate(struct inode *dir,
+	struct dentry *dentry, struct task_struct *task, const void *ptr)
+{
+	unsigned fd = *(const unsigned *)ptr;
+ 	struct inode *inode;
+ 	struct proc_inode *ei;
+	struct dentry *error = ERR_PTR(-ENOENT);
+
+	inode = proc_pid_make_inode(dir->i_sb, task);
+	if (!inode)
+		goto out;
+	ei = PROC_I(inode);
+	ei->fd = fd;
+
+	inode->i_mode = S_IFLNK;
+	inode->i_op = &proc_pid_link_inode_operations;
+	inode->i_size = 64;
+	ei->op.proc_get_link = proc_fd_link;
+	d_set_d_op(dentry, &tid_fd_dentry_operations);
+	d_add(dentry, inode);
+	/* Close the race of the process dying before we return the dentry */
+	if (tid_fd_revalidate(dentry, NULL))
+		error = NULL;
+
+ out:
+	return error;
+}
+
+static struct dentry *proc_lookupfd_common(struct inode *dir,
+					   struct dentry *dentry,
+					   instantiate_t instantiate)
+{
+	struct task_struct *task = get_proc_task(dir);
+	unsigned fd = name_to_int(dentry);
+	struct dentry *result = ERR_PTR(-ENOENT);
+
+	if (!task)
+		goto out_no_task;
+	if (fd == ~0U)
+		goto out;
+
+	result = instantiate(dir, dentry, task, &fd);
+out:
+	put_task_struct(task);
+out_no_task:
+	return result;
+}
+
+static int proc_readfd_common(struct file * filp, void * dirent,
+			      filldir_t filldir, instantiate_t instantiate)
+{
+	struct dentry *dentry = filp->f_path.dentry;
+	struct inode *inode = dentry->d_inode;
+	struct task_struct *p = get_proc_task(inode);
+	unsigned int fd, ino;
+	int retval;
+	struct files_struct * files;
+
+	retval = -ENOENT;
+	if (!p)
+		goto out_no_task;
+	retval = 0;
+
+	fd = filp->f_pos;
+	switch (fd) {
+		case 0:
+			if (filldir(dirent, ".", 1, 0, inode->i_ino, DT_DIR) < 0)
+				goto out;
+			filp->f_pos++;
+		case 1:
+			ino = parent_ino(dentry);
+			if (filldir(dirent, "..", 2, 1, ino, DT_DIR) < 0)
+				goto out;
+			filp->f_pos++;
+		default:
+			files = get_files_struct(p);
+			if (!files)
+				goto out;
+			rcu_read_lock();
+			for (fd = filp->f_pos-2;
+			     fd < files_fdtable(files)->max_fds;
+			     fd++, filp->f_pos++) {
+				char name[PROC_NUMBUF];
+				int len;
+
+				if (!fcheck_files(files, fd))
+					continue;
+				rcu_read_unlock();
+
+				len = snprintf(name, sizeof(name), "%d", fd);
+				if (proc_fill_cache(filp, dirent, filldir,
+						    name, len, instantiate,
+						    p, &fd) < 0) {
+					rcu_read_lock();
+					break;
+				}
+				rcu_read_lock();
+			}
+			rcu_read_unlock();
+			put_files_struct(files);
+	}
+out:
+	put_task_struct(p);
+out_no_task:
+	return retval;
+}
+
+static struct dentry *proc_lookupfd(struct inode *dir, struct dentry *dentry,
+				    struct nameidata *nd)
+{
+	return proc_lookupfd_common(dir, dentry, proc_fd_instantiate);
+}
+
+static int proc_readfd(struct file *filp, void *dirent, filldir_t filldir)
+{
+	return proc_readfd_common(filp, dirent, filldir, proc_fd_instantiate);
+}
+
+static ssize_t proc_fdinfo_read(struct file *file, char __user *buf,
+				      size_t len, loff_t *ppos)
+{
+	char tmp[PROC_FDINFO_MAX];
+	int err = proc_fd_info(file->f_path.dentry->d_inode, NULL, tmp);
+	if (!err)
+		err = simple_read_from_buffer(buf, len, ppos, tmp, strlen(tmp));
+	return err;
+}
+
+static const struct file_operations proc_fdinfo_file_operations = {
+	.open           = nonseekable_open,
+	.read		= proc_fdinfo_read,
+	.llseek		= no_llseek,
+};
+
+static const struct file_operations proc_fd_operations = {
+	.read		= generic_read_dir,
+	.readdir	= proc_readfd,
+	.llseek		= default_llseek,
+};
+
+#ifdef CONFIG_CHECKPOINT_RESTORE
 
 /*
  * dname_to_vma_addr - maps a dentry name into two unsigned longs
@@ -1877,38 +2031,13 @@ end_instantiate:
 static int dname_to_vma_addr(struct dentry *dentry,
 			     unsigned long *start, unsigned long *end)
 {
-	const char *str = dentry->d_name.name;
-	unsigned long long sval, eval;
-	unsigned int len;
-
-	len = _parse_integer(str, 16, &sval);
-	if (len & KSTRTOX_OVERFLOW)
+	if (sscanf(dentry->d_name.name, "%lx-%lx", start, end) != 2)
 		return -EINVAL;
-	if (sval != (unsigned long)sval)
-		return -EINVAL;
-	str += len;
-
-	if (*str != '-')
-		return -EINVAL;
-	str++;
-
-	len = _parse_integer(str, 16, &eval);
-	if (len & KSTRTOX_OVERFLOW)
-		return -EINVAL;
-	if (eval != (unsigned long)eval)
-		return -EINVAL;
-	str += len;
-
-	if (*str != '\0')
-		return -EINVAL;
-
-	*start = sval;
-	*end = eval;
 
 	return 0;
 }
 
-static int map_files_d_revalidate(struct dentry *dentry, unsigned int flags)
+static int map_files_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 {
 	unsigned long vm_start, vm_end;
 	bool exact_vma_exists = false;
@@ -1918,16 +2047,24 @@ static int map_files_d_revalidate(struct dentry *dentry, unsigned int flags)
 	struct inode *inode;
 	int status = 0;
 
-	if (flags & LOOKUP_RCU)
+	if (nd && nd->flags & LOOKUP_RCU)
 		return -ECHILD;
 
-	inode = d_inode(dentry);
+	if (!capable(CAP_SYS_ADMIN)) {
+		status = -EACCES;
+		goto out_notask;
+	}
+
+	inode = dentry->d_inode;
 	task = get_proc_task(inode);
 	if (!task)
 		goto out_notask;
 
-	mm = mm_access(task, PTRACE_MODE_READ_FSCREDS);
-	if (IS_ERR_OR_NULL(mm))
+	if (!ptrace_may_access(task, PTRACE_MODE_READ))
+		goto out;
+
+	mm = get_task_mm(task);
+	if (!mm)
 		goto out;
 
 	if (!dname_to_vma_addr(dentry, &vm_start, &vm_end)) {
@@ -1946,8 +2083,8 @@ static int map_files_d_revalidate(struct dentry *dentry, unsigned int flags)
 			inode->i_gid = cred->egid;
 			rcu_read_unlock();
 		} else {
-			inode->i_uid = GLOBAL_ROOT_UID;
-			inode->i_gid = GLOBAL_ROOT_GID;
+			inode->i_uid = 0;
+			inode->i_gid = 0;
 		}
 		security_task_to_inode(task, inode);
 		status = 1;
@@ -1957,6 +2094,9 @@ out:
 	put_task_struct(task);
 
 out_notask:
+	if (status <= 0)
+		d_drop(dentry);
+
 	return status;
 }
 
@@ -1965,7 +2105,7 @@ static const struct dentry_operations tid_map_files_dentry_operations = {
 	.d_delete	= pid_delete_dentry,
 };
 
-static int map_files_get_link(struct dentry *dentry, struct path *path)
+static int proc_map_files_get_link(struct dentry *dentry, struct path *path)
 {
 	unsigned long vm_start, vm_end;
 	struct vm_area_struct *vma;
@@ -1974,7 +2114,7 @@ static int map_files_get_link(struct dentry *dentry, struct path *path)
 	int rc;
 
 	rc = -ENOENT;
-	task = get_proc_task(d_inode(dentry));
+	task = get_proc_task(dentry->d_inode);
 	if (!task)
 		goto out;
 
@@ -2004,85 +2144,67 @@ out:
 }
 
 struct map_files_info {
-	fmode_t		mode;
+	struct file	*file;
 	unsigned long	len;
 	unsigned char	name[4*sizeof(long)+2]; /* max: %lx-%lx\0 */
 };
 
-/*
- * Only allow CAP_SYS_ADMIN to follow the links, due to concerns about how the
- * symlinks may be used to bypass permissions on ancestor directories in the
- * path to the file in question.
- */
-static const char *
-proc_map_files_get_link(struct dentry *dentry,
-			struct inode *inode,
-		        struct delayed_call *done)
-{
-	if (!capable(CAP_SYS_ADMIN))
-		return ERR_PTR(-EPERM);
-
-	return proc_pid_get_link(dentry, inode, done);
-}
-
-/*
- * Identical to proc_pid_link_inode_operations except for get_link()
- */
-static const struct inode_operations proc_map_files_link_inode_operations = {
-	.readlink	= proc_pid_readlink,
-	.get_link	= proc_map_files_get_link,
-	.setattr	= proc_setattr,
-};
-
-static int
+static struct dentry *
 proc_map_files_instantiate(struct inode *dir, struct dentry *dentry,
 			   struct task_struct *task, const void *ptr)
 {
-	fmode_t mode = (fmode_t)(unsigned long)ptr;
+	const struct file *file = ptr;
 	struct proc_inode *ei;
 	struct inode *inode;
 
+	if (!file)
+		return ERR_PTR(-ENOENT);
+
 	inode = proc_pid_make_inode(dir->i_sb, task);
 	if (!inode)
-		return -ENOENT;
+		return ERR_PTR(-ENOENT);
 
 	ei = PROC_I(inode);
-	ei->op.proc_get_link = map_files_get_link;
+	ei->op.proc_get_link = proc_map_files_get_link;
 
-	inode->i_op = &proc_map_files_link_inode_operations;
+	inode->i_op = &proc_pid_link_inode_operations;
 	inode->i_size = 64;
 	inode->i_mode = S_IFLNK;
 
-	if (mode & FMODE_READ)
+	if (file->f_mode & FMODE_READ)
 		inode->i_mode |= S_IRUSR;
-	if (mode & FMODE_WRITE)
+	if (file->f_mode & FMODE_WRITE)
 		inode->i_mode |= S_IWUSR;
 
 	d_set_d_op(dentry, &tid_map_files_dentry_operations);
 	d_add(dentry, inode);
 
-	return 0;
+	return NULL;
 }
 
 static struct dentry *proc_map_files_lookup(struct inode *dir,
-		struct dentry *dentry, unsigned int flags)
+		struct dentry *dentry, struct nameidata *nd)
 {
 	unsigned long vm_start, vm_end;
 	struct vm_area_struct *vma;
 	struct task_struct *task;
-	int result;
+	struct dentry *result;
 	struct mm_struct *mm;
 
-	result = -ENOENT;
+	result = ERR_PTR(-EACCES);
+	if (!capable(CAP_SYS_ADMIN))
+		goto out;
+
+	result = ERR_PTR(-ENOENT);
 	task = get_proc_task(dir);
 	if (!task)
 		goto out;
 
-	result = -EACCES;
-	if (!ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS))
+	result = ERR_PTR(-EACCES);
+	if (!ptrace_may_access(task, PTRACE_MODE_READ))
 		goto out_put_task;
 
-	result = -ENOENT;
+	result = ERR_PTR(-ENOENT);
 	if (dname_to_vma_addr(dentry, &vm_start, &vm_end))
 		goto out_put_task;
 
@@ -2095,9 +2217,7 @@ static struct dentry *proc_map_files_lookup(struct inode *dir,
 	if (!vma)
 		goto out_no_vma;
 
-	if (vma->vm_file)
-		result = proc_map_files_instantiate(dir, dentry, task,
-				(void *)(unsigned long)vma->vm_file->f_mode);
+	result = proc_map_files_instantiate(dir, dentry, task, vma->vm_file);
 
 out_no_vma:
 	up_read(&mm->mmap_sem);
@@ -2105,7 +2225,7 @@ out_no_vma:
 out_put_task:
 	put_task_struct(task);
 out:
-	return ERR_PTR(result);
+	return result;
 }
 
 static const struct inode_operations proc_map_files_inode_operations = {
@@ -2115,94 +2235,124 @@ static const struct inode_operations proc_map_files_inode_operations = {
 };
 
 static int
-proc_map_files_readdir(struct file *file, struct dir_context *ctx)
+proc_map_files_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
+	struct dentry *dentry = filp->f_path.dentry;
+	struct inode *inode = dentry->d_inode;
 	struct vm_area_struct *vma;
 	struct task_struct *task;
 	struct mm_struct *mm;
-	unsigned long nr_files, pos, i;
-	struct flex_array *fa = NULL;
-	struct map_files_info info;
-	struct map_files_info *p;
+	ino_t ino;
 	int ret;
 
+	ret = -EACCES;
+	if (!capable(CAP_SYS_ADMIN))
+		goto out;
+
 	ret = -ENOENT;
-	task = get_proc_task(file_inode(file));
+	task = get_proc_task(inode);
 	if (!task)
 		goto out;
 
 	ret = -EACCES;
-	if (!ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS))
+	if (!ptrace_may_access(task, PTRACE_MODE_READ))
 		goto out_put_task;
 
 	ret = 0;
-	if (!dir_emit_dots(file, ctx))
-		goto out_put_task;
-
-	mm = get_task_mm(task);
-	if (!mm)
-		goto out_put_task;
-	down_read(&mm->mmap_sem);
-
-	nr_files = 0;
-
-	/*
-	 * We need two passes here:
-	 *
-	 *  1) Collect vmas of mapped files with mmap_sem taken
-	 *  2) Release mmap_sem and instantiate entries
-	 *
-	 * otherwise we get lockdep complained, since filldir()
-	 * routine might require mmap_sem taken in might_fault().
-	 */
-
-	for (vma = mm->mmap, pos = 2; vma; vma = vma->vm_next) {
-		if (vma->vm_file && ++pos > ctx->pos)
-			nr_files++;
-	}
-
-	if (nr_files) {
-		fa = flex_array_alloc(sizeof(info), nr_files,
-					GFP_KERNEL);
-		if (!fa || flex_array_prealloc(fa, 0, nr_files,
-						GFP_KERNEL)) {
-			ret = -ENOMEM;
-			if (fa)
-				flex_array_free(fa);
-			up_read(&mm->mmap_sem);
-			mmput(mm);
+	switch (filp->f_pos) {
+	case 0:
+		ino = inode->i_ino;
+		if (filldir(dirent, ".", 1, 0, ino, DT_DIR) < 0)
 			goto out_put_task;
-		}
-		for (i = 0, vma = mm->mmap, pos = 2; vma;
-				vma = vma->vm_next) {
-			if (!vma->vm_file)
-				continue;
-			if (++pos <= ctx->pos)
-				continue;
+		filp->f_pos++;
+	case 1:
+		ino = parent_ino(dentry);
+		if (filldir(dirent, "..", 2, 1, ino, DT_DIR) < 0)
+			goto out_put_task;
+		filp->f_pos++;
+	default:
+	{
+		unsigned long nr_files, pos, i;
+		struct flex_array *fa = NULL;
+		struct map_files_info info;
+		struct map_files_info *p;
 
-			info.mode = vma->vm_file->f_mode;
-			info.len = snprintf(info.name,
-					sizeof(info.name), "%lx-%lx",
-					vma->vm_start, vma->vm_end);
-			if (flex_array_put(fa, i++, &info, GFP_KERNEL))
-				BUG();
-		}
-	}
-	up_read(&mm->mmap_sem);
+		mm = get_task_mm(task);
+		if (!mm)
+			goto out_put_task;
+		down_read(&mm->mmap_sem);
 
-	for (i = 0; i < nr_files; i++) {
-		p = flex_array_get(fa, i);
-		if (!proc_fill_cache(file, ctx,
-				      p->name, p->len,
-				      proc_map_files_instantiate,
-				      task,
-				      (void *)(unsigned long)p->mode))
-			break;
-		ctx->pos++;
+		nr_files = 0;
+
+		/*
+		 * We need two passes here:
+		 *
+		 *  1) Collect vmas of mapped files with mmap_sem taken
+		 *  2) Release mmap_sem and instantiate entries
+		 *
+		 * otherwise we get lockdep complained, since filldir()
+		 * routine might require mmap_sem taken in might_fault().
+		 */
+
+		for (vma = mm->mmap, pos = 2; vma; vma = vma->vm_next) {
+			if (vma->vm_file && ++pos > filp->f_pos)
+				nr_files++;
+		}
+
+		if (nr_files) {
+			fa = flex_array_alloc(sizeof(info), nr_files,
+						GFP_KERNEL);
+			if (!fa || flex_array_prealloc(fa, 0, nr_files,
+							GFP_KERNEL)) {
+				ret = -ENOMEM;
+				if (fa)
+					flex_array_free(fa);
+				up_read(&mm->mmap_sem);
+				mmput(mm);
+				goto out_put_task;
+			}
+			for (i = 0, vma = mm->mmap, pos = 2; vma;
+					vma = vma->vm_next) {
+				if (!vma->vm_file)
+					continue;
+				if (++pos <= filp->f_pos)
+					continue;
+
+				get_file(vma->vm_file);
+				info.file = vma->vm_file;
+				info.len = snprintf(info.name,
+						sizeof(info.name), "%lx-%lx",
+						vma->vm_start, vma->vm_end);
+				if (flex_array_put(fa, i++, &info, GFP_KERNEL))
+					BUG();
+			}
+		}
+		up_read(&mm->mmap_sem);
+
+		for (i = 0; i < nr_files; i++) {
+			p = flex_array_get(fa, i);
+			ret = proc_fill_cache(filp, dirent, filldir,
+					      p->name, p->len,
+					      proc_map_files_instantiate,
+					      task, p->file);
+			if (ret)
+				break;
+			filp->f_pos++;
+			fput(p->file);
+		}
+		for (; i < nr_files; i++) {
+			/*
+			 * In case of error don't forget
+			 * to put rest of file refs.
+			 */
+			p = flex_array_get(fa, i);
+			fput(p->file);
+		}
+		if (fa)
+			flex_array_free(fa);
+		mmput(mm);
 	}
-	if (fa)
-		flex_array_free(fa);
-	mmput(mm);
+	}
 
 out_put_task:
 	put_task_struct(task);
@@ -2212,203 +2362,95 @@ out:
 
 static const struct file_operations proc_map_files_operations = {
 	.read		= generic_read_dir,
-	.iterate_shared	= proc_map_files_readdir,
-	.llseek		= generic_file_llseek,
+	.readdir	= proc_map_files_readdir,
+	.llseek		= default_llseek,
 };
 
-#ifdef CONFIG_CHECKPOINT_RESTORE
-struct timers_private {
-	struct pid *pid;
-	struct task_struct *task;
-	struct sighand_struct *sighand;
-	struct pid_namespace *ns;
-	unsigned long flags;
+#endif /* CONFIG_CHECKPOINT_RESTORE */
+
+/*
+ * /proc/pid/fd needs a special permission handler so that a process can still
+ * access /proc/self/fd after it has executed a setuid().
+ */
+static int proc_fd_permission(struct inode *inode, int mask)
+{
+	int rv = generic_permission(inode, mask);
+	if (rv == 0)
+		return 0;
+	if (task_pid(current) == proc_pid(inode))
+		rv = 0;
+	return rv;
+}
+
+/*
+ * proc directories can do almost nothing..
+ */
+static const struct inode_operations proc_fd_inode_operations = {
+	.lookup		= proc_lookupfd,
+	.permission	= proc_fd_permission,
+	.setattr	= proc_setattr,
 };
 
-static void *timers_start(struct seq_file *m, loff_t *pos)
+static struct dentry *proc_fdinfo_instantiate(struct inode *dir,
+	struct dentry *dentry, struct task_struct *task, const void *ptr)
 {
-	struct timers_private *tp = m->private;
+	unsigned fd = *(unsigned *)ptr;
+ 	struct inode *inode;
+ 	struct proc_inode *ei;
+	struct dentry *error = ERR_PTR(-ENOENT);
 
-	tp->task = get_pid_task(tp->pid, PIDTYPE_PID);
-	if (!tp->task)
-		return ERR_PTR(-ESRCH);
+	inode = proc_pid_make_inode(dir->i_sb, task);
+	if (!inode)
+		goto out;
+	ei = PROC_I(inode);
+	ei->fd = fd;
+	inode->i_mode = S_IFREG | S_IRUSR;
+	inode->i_fop = &proc_fdinfo_file_operations;
+	d_set_d_op(dentry, &tid_fd_dentry_operations);
+	d_add(dentry, inode);
+	/* Close the race of the process dying before we return the dentry */
+	if (tid_fd_revalidate(dentry, NULL))
+		error = NULL;
 
-	tp->sighand = lock_task_sighand(tp->task, &tp->flags);
-	if (!tp->sighand)
-		return ERR_PTR(-ESRCH);
-
-	return seq_list_start(&tp->task->signal->posix_timers, *pos);
+ out:
+	return error;
 }
 
-static void *timers_next(struct seq_file *m, void *v, loff_t *pos)
+static struct dentry *proc_lookupfdinfo(struct inode *dir,
+					struct dentry *dentry,
+					struct nameidata *nd)
 {
-	struct timers_private *tp = m->private;
-	return seq_list_next(v, &tp->task->signal->posix_timers, pos);
+	return proc_lookupfd_common(dir, dentry, proc_fdinfo_instantiate);
 }
 
-static void timers_stop(struct seq_file *m, void *v)
+static int proc_readfdinfo(struct file *filp, void *dirent, filldir_t filldir)
 {
-	struct timers_private *tp = m->private;
-
-	if (tp->sighand) {
-		unlock_task_sighand(tp->task, &tp->flags);
-		tp->sighand = NULL;
-	}
-
-	if (tp->task) {
-		put_task_struct(tp->task);
-		tp->task = NULL;
-	}
+	return proc_readfd_common(filp, dirent, filldir,
+				  proc_fdinfo_instantiate);
 }
 
-static int show_timer(struct seq_file *m, void *v)
-{
-	struct k_itimer *timer;
-	struct timers_private *tp = m->private;
-	int notify;
-	static const char * const nstr[] = {
-		[SIGEV_SIGNAL] = "signal",
-		[SIGEV_NONE] = "none",
-		[SIGEV_THREAD] = "thread",
-	};
-
-	timer = list_entry((struct list_head *)v, struct k_itimer, list);
-	notify = timer->it_sigev_notify;
-
-	seq_printf(m, "ID: %d\n", timer->it_id);
-	seq_printf(m, "signal: %d/%p\n",
-		   timer->sigq->info.si_signo,
-		   timer->sigq->info.si_value.sival_ptr);
-	seq_printf(m, "notify: %s/%s.%d\n",
-		   nstr[notify & ~SIGEV_THREAD_ID],
-		   (notify & SIGEV_THREAD_ID) ? "tid" : "pid",
-		   pid_nr_ns(timer->it_pid, tp->ns));
-	seq_printf(m, "ClockID: %d\n", timer->it_clock);
-
-	return 0;
-}
-
-static const struct seq_operations proc_timers_seq_ops = {
-	.start	= timers_start,
-	.next	= timers_next,
-	.stop	= timers_stop,
-	.show	= show_timer,
+static const struct file_operations proc_fdinfo_operations = {
+	.read		= generic_read_dir,
+	.readdir	= proc_readfdinfo,
+	.llseek		= default_llseek,
 };
 
-static int proc_timers_open(struct inode *inode, struct file *file)
-{
-	struct timers_private *tp;
-
-	tp = __seq_open_private(file, &proc_timers_seq_ops,
-			sizeof(struct timers_private));
-	if (!tp)
-		return -ENOMEM;
-
-	tp->pid = proc_pid(inode);
-	tp->ns = inode->i_sb->s_fs_info;
-	return 0;
-}
-
-static const struct file_operations proc_timers_operations = {
-	.open		= proc_timers_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= seq_release_private,
-};
-#endif
-
-static ssize_t timerslack_ns_write(struct file *file, const char __user *buf,
-					size_t count, loff_t *offset)
-{
-	struct inode *inode = file_inode(file);
-	struct task_struct *p;
-	u64 slack_ns;
-	int err;
-
-	err = kstrtoull_from_user(buf, count, 10, &slack_ns);
-	if (err < 0)
-		return err;
-
-	p = get_proc_task(inode);
-	if (!p)
-		return -ESRCH;
-
-	if (p != current) {
-		if (!capable(CAP_SYS_NICE)) {
-			count = -EPERM;
-			goto out;
-		}
-
-		err = security_task_setscheduler(p);
-		if (err) {
-			count = err;
-			goto out;
-		}
-	}
-
-	task_lock(p);
-	if (slack_ns == 0)
-		p->timer_slack_ns = p->default_timer_slack_ns;
-	else
-		p->timer_slack_ns = slack_ns;
-	task_unlock(p);
-
-out:
-	put_task_struct(p);
-
-	return count;
-}
-
-static int timerslack_ns_show(struct seq_file *m, void *v)
-{
-	struct inode *inode = m->private;
-	struct task_struct *p;
-	int err = 0;
-
-	p = get_proc_task(inode);
-	if (!p)
-		return -ESRCH;
-
-	if (p != current) {
-
-		if (!capable(CAP_SYS_NICE)) {
-			err = -EPERM;
-			goto out;
-		}
-		err = security_task_getscheduler(p);
-		if (err)
-			goto out;
-	}
-
-	task_lock(p);
-	seq_printf(m, "%llu\n", p->timer_slack_ns);
-	task_unlock(p);
-
-out:
-	put_task_struct(p);
-
-	return err;
-}
-
-static int timerslack_ns_open(struct inode *inode, struct file *filp)
-{
-	return single_open(filp, timerslack_ns_show, inode);
-}
-
-static const struct file_operations proc_pid_set_timerslack_ns_operations = {
-	.open		= timerslack_ns_open,
-	.read		= seq_read,
-	.write		= timerslack_ns_write,
-	.llseek		= seq_lseek,
-	.release	= single_release,
+/*
+ * proc directories can do almost nothing..
+ */
+static const struct inode_operations proc_fdinfo_inode_operations = {
+	.lookup		= proc_lookupfdinfo,
+	.setattr	= proc_setattr,
 };
 
-static int proc_pident_instantiate(struct inode *dir,
+
+static struct dentry *proc_pident_instantiate(struct inode *dir,
 	struct dentry *dentry, struct task_struct *task, const void *ptr)
 {
 	const struct pid_entry *p = ptr;
 	struct inode *inode;
 	struct proc_inode *ei;
+	struct dentry *error = ERR_PTR(-ENOENT);
 
 	inode = proc_pid_make_inode(dir->i_sb, task);
 	if (!inode)
@@ -2426,10 +2468,10 @@ static int proc_pident_instantiate(struct inode *dir,
 	d_set_d_op(dentry, &pid_dentry_operations);
 	d_add(dentry, inode);
 	/* Close the race of the process dying before we return the dentry */
-	if (pid_revalidate(dentry, 0))
-		return 0;
+	if (pid_revalidate(dentry, NULL))
+		error = NULL;
 out:
-	return -ENOENT;
+	return error;
 }
 
 static struct dentry *proc_pident_lookup(struct inode *dir, 
@@ -2437,11 +2479,11 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 					 const struct pid_entry *ents,
 					 unsigned int nents)
 {
-	int error;
+	struct dentry *error;
 	struct task_struct *task = get_proc_task(dir);
 	const struct pid_entry *p, *last;
 
-	error = -ENOENT;
+	error = ERR_PTR(-ENOENT);
 
 	if (!task)
 		goto out_no_task;
@@ -2464,40 +2506,77 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 out:
 	put_task_struct(task);
 out_no_task:
-	return ERR_PTR(error);
+	return error;
 }
 
-static int proc_pident_readdir(struct file *file, struct dir_context *ctx,
+static int proc_pident_fill_cache(struct file *filp, void *dirent,
+	filldir_t filldir, struct task_struct *task, const struct pid_entry *p)
+{
+	return proc_fill_cache(filp, dirent, filldir, p->name, p->len,
+				proc_pident_instantiate, task, p);
+}
+
+static int proc_pident_readdir(struct file *filp,
+		void *dirent, filldir_t filldir,
 		const struct pid_entry *ents, unsigned int nents)
 {
-	struct task_struct *task = get_proc_task(file_inode(file));
-	const struct pid_entry *p;
+	int i;
+	struct dentry *dentry = filp->f_path.dentry;
+	struct inode *inode = dentry->d_inode;
+	struct task_struct *task = get_proc_task(inode);
+	const struct pid_entry *p, *last;
+	ino_t ino;
+	int ret;
 
+	ret = -ENOENT;
 	if (!task)
-		return -ENOENT;
+		goto out_no_task;
 
-	if (!dir_emit_dots(file, ctx))
-		goto out;
-
-	if (ctx->pos >= nents + 2)
-		goto out;
-
-	for (p = ents + (ctx->pos - 2); p <= ents + nents - 1; p++) {
-		if (!proc_fill_cache(file, ctx, p->name, p->len,
-				proc_pident_instantiate, task, p))
-			break;
-		ctx->pos++;
+	ret = 0;
+	i = filp->f_pos;
+	switch (i) {
+	case 0:
+		ino = inode->i_ino;
+		if (filldir(dirent, ".", 1, i, ino, DT_DIR) < 0)
+			goto out;
+		i++;
+		filp->f_pos++;
+		/* fall through */
+	case 1:
+		ino = parent_ino(dentry);
+		if (filldir(dirent, "..", 2, i, ino, DT_DIR) < 0)
+			goto out;
+		i++;
+		filp->f_pos++;
+		/* fall through */
+	default:
+		i -= 2;
+		if (i >= nents) {
+			ret = 1;
+			goto out;
+		}
+		p = ents + i;
+		last = &ents[nents - 1];
+		while (p <= last) {
+			if (proc_pident_fill_cache(filp, dirent, filldir, task, p) < 0)
+				goto out;
+			filp->f_pos++;
+			p++;
+		}
 	}
+
+	ret = 1;
 out:
 	put_task_struct(task);
-	return 0;
+out_no_task:
+	return ret;
 }
 
 #ifdef CONFIG_SECURITY
 static ssize_t proc_pid_attr_read(struct file * file, char __user * buf,
 				  size_t count, loff_t *ppos)
 {
-	struct inode * inode = file_inode(file);
+	struct inode * inode = file->f_path.dentry->d_inode;
 	char *p = NULL;
 	ssize_t length;
 	struct task_struct *task = get_proc_task(inode);
@@ -2518,8 +2597,8 @@ static ssize_t proc_pid_attr_read(struct file * file, char __user * buf,
 static ssize_t proc_pid_attr_write(struct file * file, const char __user * buf,
 				   size_t count, loff_t *ppos)
 {
-	struct inode * inode = file_inode(file);
-	void *page;
+	struct inode * inode = file->f_path.dentry->d_inode;
+	char *page;
 	ssize_t length;
 	struct task_struct *task = get_proc_task(inode);
 
@@ -2534,11 +2613,14 @@ static ssize_t proc_pid_attr_write(struct file * file, const char __user * buf,
 	if (*ppos != 0)
 		goto out;
 
-	page = memdup_user(buf, count);
-	if (IS_ERR(page)) {
-		length = PTR_ERR(page);
+	length = -ENOMEM;
+	page = (char*)__get_free_page(GFP_TEMPORARY);
+	if (!page)
 		goto out;
-	}
+
+	length = -EFAULT;
+	if (copy_from_user(page, buf, count))
+		goto out_free;
 
 	/* Guard against adverse ptrace interaction */
 	length = mutex_lock_interruptible(&task->signal->cred_guard_mutex);
@@ -2547,10 +2629,10 @@ static ssize_t proc_pid_attr_write(struct file * file, const char __user * buf,
 
 	length = security_setprocattr(task,
 				      (char*)file->f_path.dentry->d_name.name,
-				      page, count);
+				      (void*)page, count);
 	mutex_unlock(&task->signal->cred_guard_mutex);
 out_free:
-	kfree(page);
+	free_page((unsigned long) page);
 out:
 	put_task_struct(task);
 out_no_task:
@@ -2572,20 +2654,21 @@ static const struct pid_entry attr_dir_stuff[] = {
 	REG("sockcreate", S_IRUGO|S_IWUGO, proc_pid_attr_operations),
 };
 
-static int proc_attr_dir_readdir(struct file *file, struct dir_context *ctx)
+static int proc_attr_dir_readdir(struct file * filp,
+			     void * dirent, filldir_t filldir)
 {
-	return proc_pident_readdir(file, ctx, 
-				   attr_dir_stuff, ARRAY_SIZE(attr_dir_stuff));
+	return proc_pident_readdir(filp,dirent,filldir,
+				   attr_dir_stuff,ARRAY_SIZE(attr_dir_stuff));
 }
 
 static const struct file_operations proc_attr_dir_operations = {
 	.read		= generic_read_dir,
-	.iterate_shared	= proc_attr_dir_readdir,
-	.llseek		= generic_file_llseek,
+	.readdir	= proc_attr_dir_readdir,
+	.llseek		= default_llseek,
 };
 
 static struct dentry *proc_attr_dir_lookup(struct inode *dir,
-				struct dentry *dentry, unsigned int flags)
+				struct dentry *dentry, struct nameidata *nd)
 {
 	return proc_pident_lookup(dir, dentry,
 				  attr_dir_stuff, ARRAY_SIZE(attr_dir_stuff));
@@ -2603,7 +2686,7 @@ static const struct inode_operations proc_attr_dir_inode_operations = {
 static ssize_t proc_coredump_filter_read(struct file *file, char __user *buf,
 					 size_t count, loff_t *ppos)
 {
-	struct task_struct *task = get_proc_task(file_inode(file));
+	struct task_struct *task = get_proc_task(file->f_dentry->d_inode);
 	struct mm_struct *mm;
 	char buffer[PROC_NUMBUF];
 	size_t len;
@@ -2634,24 +2717,35 @@ static ssize_t proc_coredump_filter_write(struct file *file,
 {
 	struct task_struct *task;
 	struct mm_struct *mm;
+	char buffer[PROC_NUMBUF], *end;
 	unsigned int val;
 	int ret;
 	int i;
 	unsigned long mask;
 
-	ret = kstrtouint_from_user(buf, count, 0, &val);
-	if (ret < 0)
-		return ret;
+	ret = -EFAULT;
+	memset(buffer, 0, sizeof(buffer));
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+	if (copy_from_user(buffer, buf, count))
+		goto out_no_task;
+
+	ret = -EINVAL;
+	val = (unsigned int)simple_strtoul(buffer, &end, 0);
+	if (*end == '\n')
+		end++;
+	if (end - buffer == 0)
+		goto out_no_task;
 
 	ret = -ESRCH;
-	task = get_proc_task(file_inode(file));
+	task = get_proc_task(file->f_dentry->d_inode);
 	if (!task)
 		goto out_no_task;
 
+	ret = end - buffer;
 	mm = get_task_mm(task);
 	if (!mm)
 		goto out_no_mm;
-	ret = 0;
 
 	for (i = 0, mask = 1; i < MMF_DUMP_FILTER_BITS; i++, mask <<= 1) {
 		if (val & mask)
@@ -2664,9 +2758,7 @@ static ssize_t proc_coredump_filter_write(struct file *file,
  out_no_mm:
 	put_task_struct(task);
  out_no_task:
-	if (ret < 0)
-		return ret;
-	return count;
+	return ret;
 }
 
 static const struct file_operations proc_coredump_filter_operations = {
@@ -2676,8 +2768,147 @@ static const struct file_operations proc_coredump_filter_operations = {
 };
 #endif
 
+/*
+ * /proc/self:
+ */
+static int proc_self_readlink(struct dentry *dentry, char __user *buffer,
+			      int buflen)
+{
+	struct pid_namespace *ns = dentry->d_sb->s_fs_info;
+	pid_t tgid = task_tgid_nr_ns(current, ns);
+	char tmp[PROC_NUMBUF];
+	if (!tgid)
+		return -ENOENT;
+	sprintf(tmp, "%d", tgid);
+	return vfs_readlink(dentry,buffer,buflen,tmp);
+}
+
+static void *proc_self_follow_link(struct dentry *dentry, struct nameidata *nd)
+{
+	struct pid_namespace *ns = dentry->d_sb->s_fs_info;
+	pid_t tgid = task_tgid_nr_ns(current, ns);
+	char *name = ERR_PTR(-ENOENT);
+	if (tgid) {
+		name = __getname();
+		if (!name)
+			name = ERR_PTR(-ENOMEM);
+		else
+			sprintf(name, "%d", tgid);
+	}
+	nd_set_link(nd, name);
+	return NULL;
+}
+
+static void proc_self_put_link(struct dentry *dentry, struct nameidata *nd,
+				void *cookie)
+{
+	char *s = nd_get_link(nd);
+	if (!IS_ERR(s))
+		__putname(s);
+}
+
+static const struct inode_operations proc_self_inode_operations = {
+	.readlink	= proc_self_readlink,
+	.follow_link	= proc_self_follow_link,
+	.put_link	= proc_self_put_link,
+};
+
+/*
+ * proc base
+ *
+ * These are the directory entries in the root directory of /proc
+ * that properly belong to the /proc filesystem, as they describe
+ * describe something that is process related.
+ */
+static const struct pid_entry proc_base_stuff[] = {
+	NOD("self", S_IFLNK|S_IRWXUGO,
+		&proc_self_inode_operations, NULL, {}),
+};
+
+static struct dentry *proc_base_instantiate(struct inode *dir,
+	struct dentry *dentry, struct task_struct *task, const void *ptr)
+{
+	const struct pid_entry *p = ptr;
+	struct inode *inode;
+	struct proc_inode *ei;
+	struct dentry *error;
+
+	/* Allocate the inode */
+	error = ERR_PTR(-ENOMEM);
+	inode = new_inode(dir->i_sb);
+	if (!inode)
+		goto out;
+
+	/* Initialize the inode */
+	ei = PROC_I(inode);
+	inode->i_ino = get_next_ino();
+	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
+
+	/*
+	 * grab the reference to the task.
+	 */
+	ei->pid = get_task_pid(task, PIDTYPE_PID);
+	if (!ei->pid)
+		goto out_iput;
+
+	inode->i_mode = p->mode;
+	if (S_ISDIR(inode->i_mode))
+		set_nlink(inode, 2);
+	if (S_ISLNK(inode->i_mode))
+		inode->i_size = 64;
+	if (p->iop)
+		inode->i_op = p->iop;
+	if (p->fop)
+		inode->i_fop = p->fop;
+	ei->op = p->op;
+	d_add(dentry, inode);
+	error = NULL;
+out:
+	return error;
+out_iput:
+	iput(inode);
+	goto out;
+}
+
+static struct dentry *proc_base_lookup(struct inode *dir, struct dentry *dentry)
+{
+	struct dentry *error;
+	struct task_struct *task = get_proc_task(dir);
+	const struct pid_entry *p, *last;
+
+	error = ERR_PTR(-ENOENT);
+
+	if (!task)
+		goto out_no_task;
+
+	/* Lookup the directory entry */
+	last = &proc_base_stuff[ARRAY_SIZE(proc_base_stuff) - 1];
+	for (p = proc_base_stuff; p <= last; p++) {
+		if (p->len != dentry->d_name.len)
+			continue;
+		if (!memcmp(dentry->d_name.name, p->name, p->len))
+			break;
+	}
+	if (p > last)
+		goto out;
+
+	error = proc_base_instantiate(dir, dentry, task, p);
+
+out:
+	put_task_struct(task);
+out_no_task:
+	return error;
+}
+
+static int proc_base_fill_cache(struct file *filp, void *dirent,
+	filldir_t filldir, struct task_struct *task, const struct pid_entry *p)
+{
+	return proc_fill_cache(filp, dirent, filldir, p->name, p->len,
+				proc_base_instantiate, task, p);
+}
+
 #ifdef CONFIG_TASK_IO_ACCOUNTING
-static int do_io_accounting(struct task_struct *task, struct seq_file *m, int whole)
+static int do_io_accounting(struct task_struct *task, char *buffer, int whole)
 {
 	struct task_io_accounting acct = task->ioac;
 	unsigned long flags;
@@ -2687,7 +2918,7 @@ static int do_io_accounting(struct task_struct *task, struct seq_file *m, int wh
 	if (result)
 		return result;
 
-	if (!ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS)) {
+	if (!ptrace_may_access(task, PTRACE_MODE_READ)) {
 		result = -EACCES;
 		goto out_unlock;
 	}
@@ -2701,172 +2932,36 @@ static int do_io_accounting(struct task_struct *task, struct seq_file *m, int wh
 
 		unlock_task_sighand(task, &flags);
 	}
-	seq_printf(m,
-		   "rchar: %llu\n"
-		   "wchar: %llu\n"
-		   "syscr: %llu\n"
-		   "syscw: %llu\n"
-		   "read_bytes: %llu\n"
-		   "write_bytes: %llu\n"
-		   "cancelled_write_bytes: %llu\n",
-		   (unsigned long long)acct.rchar,
-		   (unsigned long long)acct.wchar,
-		   (unsigned long long)acct.syscr,
-		   (unsigned long long)acct.syscw,
-		   (unsigned long long)acct.read_bytes,
-		   (unsigned long long)acct.write_bytes,
-		   (unsigned long long)acct.cancelled_write_bytes);
-	result = 0;
-
+	result = sprintf(buffer,
+			"rchar: %llu\n"
+			"wchar: %llu\n"
+			"syscr: %llu\n"
+			"syscw: %llu\n"
+			"read_bytes: %llu\n"
+			"write_bytes: %llu\n"
+			"cancelled_write_bytes: %llu\n",
+			(unsigned long long)acct.rchar,
+			(unsigned long long)acct.wchar,
+			(unsigned long long)acct.syscr,
+			(unsigned long long)acct.syscw,
+			(unsigned long long)acct.read_bytes,
+			(unsigned long long)acct.write_bytes,
+			(unsigned long long)acct.cancelled_write_bytes);
 out_unlock:
 	mutex_unlock(&task->signal->cred_guard_mutex);
 	return result;
 }
 
-static int proc_tid_io_accounting(struct seq_file *m, struct pid_namespace *ns,
-				  struct pid *pid, struct task_struct *task)
+static int proc_tid_io_accounting(struct task_struct *task, char *buffer)
 {
-	return do_io_accounting(task, m, 0);
+	return do_io_accounting(task, buffer, 0);
 }
 
-static int proc_tgid_io_accounting(struct seq_file *m, struct pid_namespace *ns,
-				   struct pid *pid, struct task_struct *task)
+static int proc_tgid_io_accounting(struct task_struct *task, char *buffer)
 {
-	return do_io_accounting(task, m, 1);
+	return do_io_accounting(task, buffer, 1);
 }
 #endif /* CONFIG_TASK_IO_ACCOUNTING */
-
-#ifdef CONFIG_USER_NS
-static int proc_id_map_open(struct inode *inode, struct file *file,
-	const struct seq_operations *seq_ops)
-{
-	struct user_namespace *ns = NULL;
-	struct task_struct *task;
-	struct seq_file *seq;
-	int ret = -EINVAL;
-
-	task = get_proc_task(inode);
-	if (task) {
-		rcu_read_lock();
-		ns = get_user_ns(task_cred_xxx(task, user_ns));
-		rcu_read_unlock();
-		put_task_struct(task);
-	}
-	if (!ns)
-		goto err;
-
-	ret = seq_open(file, seq_ops);
-	if (ret)
-		goto err_put_ns;
-
-	seq = file->private_data;
-	seq->private = ns;
-
-	return 0;
-err_put_ns:
-	put_user_ns(ns);
-err:
-	return ret;
-}
-
-static int proc_id_map_release(struct inode *inode, struct file *file)
-{
-	struct seq_file *seq = file->private_data;
-	struct user_namespace *ns = seq->private;
-	put_user_ns(ns);
-	return seq_release(inode, file);
-}
-
-static int proc_uid_map_open(struct inode *inode, struct file *file)
-{
-	return proc_id_map_open(inode, file, &proc_uid_seq_operations);
-}
-
-static int proc_gid_map_open(struct inode *inode, struct file *file)
-{
-	return proc_id_map_open(inode, file, &proc_gid_seq_operations);
-}
-
-static int proc_projid_map_open(struct inode *inode, struct file *file)
-{
-	return proc_id_map_open(inode, file, &proc_projid_seq_operations);
-}
-
-static const struct file_operations proc_uid_map_operations = {
-	.open		= proc_uid_map_open,
-	.write		= proc_uid_map_write,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= proc_id_map_release,
-};
-
-static const struct file_operations proc_gid_map_operations = {
-	.open		= proc_gid_map_open,
-	.write		= proc_gid_map_write,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= proc_id_map_release,
-};
-
-static const struct file_operations proc_projid_map_operations = {
-	.open		= proc_projid_map_open,
-	.write		= proc_projid_map_write,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= proc_id_map_release,
-};
-
-static int proc_setgroups_open(struct inode *inode, struct file *file)
-{
-	struct user_namespace *ns = NULL;
-	struct task_struct *task;
-	int ret;
-
-	ret = -ESRCH;
-	task = get_proc_task(inode);
-	if (task) {
-		rcu_read_lock();
-		ns = get_user_ns(task_cred_xxx(task, user_ns));
-		rcu_read_unlock();
-		put_task_struct(task);
-	}
-	if (!ns)
-		goto err;
-
-	if (file->f_mode & FMODE_WRITE) {
-		ret = -EACCES;
-		if (!ns_capable(ns, CAP_SYS_ADMIN))
-			goto err_put_ns;
-	}
-
-	ret = single_open(file, &proc_setgroups_show, ns);
-	if (ret)
-		goto err_put_ns;
-
-	return 0;
-err_put_ns:
-	put_user_ns(ns);
-err:
-	return ret;
-}
-
-static int proc_setgroups_release(struct inode *inode, struct file *file)
-{
-	struct seq_file *seq = file->private_data;
-	struct user_namespace *ns = seq->private;
-	int ret = single_release(inode, file);
-	put_user_ns(ns);
-	return ret;
-}
-
-static const struct file_operations proc_setgroups_operations = {
-	.open		= proc_setgroups_open,
-	.write		= proc_setgroups_write,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= proc_setgroups_release,
-};
-#endif /* CONFIG_USER_NS */
 
 static int proc_pid_personality(struct seq_file *m, struct pid_namespace *ns,
 				struct pid *pid, struct task_struct *task)
@@ -2888,17 +2983,19 @@ static const struct inode_operations proc_task_inode_operations;
 static const struct pid_entry tgid_base_stuff[] = {
 	DIR("task",       S_IRUGO|S_IXUGO, proc_task_inode_operations, proc_task_operations),
 	DIR("fd",         S_IRUSR|S_IXUSR, proc_fd_inode_operations, proc_fd_operations),
+#ifdef CONFIG_CHECKPOINT_RESTORE
 	DIR("map_files",  S_IRUSR|S_IXUSR, proc_map_files_inode_operations, proc_map_files_operations),
+#endif
 	DIR("fdinfo",     S_IRUSR|S_IXUSR, proc_fdinfo_inode_operations, proc_fdinfo_operations),
 	DIR("ns",	  S_IRUSR|S_IXUGO, proc_ns_dir_inode_operations, proc_ns_dir_operations),
 #ifdef CONFIG_NET
 	DIR("net",        S_IRUGO|S_IXUGO, proc_net_inode_operations, proc_net_operations),
 #endif
 	REG("environ",    S_IRUSR, proc_environ_operations),
-	REG("auxv",       S_IRUSR, proc_auxv_operations),
+	INF("auxv",       S_IRUSR, proc_pid_auxv),
 	ONE("status",     S_IRUGO, proc_pid_status),
-	ONE("personality", S_IRUSR, proc_pid_personality),
-	ONE("limits",	  S_IRUGO, proc_pid_limits),
+	ONE("personality", S_IRUGO, proc_pid_personality),
+	INF("limits",	  S_IRUGO, proc_pid_limits),
 #ifdef CONFIG_SCHED_DEBUG
 	REG("sched",      S_IRUGO|S_IWUSR, proc_pid_sched_operations),
 #endif
@@ -2907,9 +3004,9 @@ static const struct pid_entry tgid_base_stuff[] = {
 #endif
 	REG("comm",      S_IRUGO|S_IWUSR, proc_pid_set_comm_operations),
 #ifdef CONFIG_HAVE_ARCH_TRACEHOOK
-	ONE("syscall",    S_IRUSR, proc_pid_syscall),
+	INF("syscall",    S_IRUGO, proc_pid_syscall),
 #endif
-	REG("cmdline",    S_IRUGO, proc_pid_cmdline_ops),
+	INF("cmdline",    S_IRUGO, proc_pid_cmdline),
 	ONE("stat",       S_IRUGO, proc_tgid_stat),
 	ONE("statm",      S_IRUGO, proc_pid_statm),
 	REG("maps",       S_IRUGO, proc_pid_maps_operations),
@@ -2926,32 +3023,31 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_PROC_PAGE_MONITOR
 	REG("clear_refs", S_IWUSR, proc_clear_refs_operations),
 	REG("smaps",      S_IRUGO, proc_pid_smaps_operations),
-	REG("smaps_rollup", S_IRUGO, proc_pid_smaps_rollup_operations),
-	REG("pagemap",    S_IRUSR, proc_pagemap_operations),
+	REG("pagemap",    S_IRUGO, proc_pagemap_operations),
 #endif
 #ifdef CONFIG_SECURITY
 	DIR("attr",       S_IRUGO|S_IXUGO, proc_attr_dir_inode_operations, proc_attr_dir_operations),
 #endif
 #ifdef CONFIG_KALLSYMS
-	ONE("wchan",      S_IRUGO, proc_pid_wchan),
+	INF("wchan",      S_IRUGO, proc_pid_wchan),
 #endif
 #ifdef CONFIG_STACKTRACE
-	ONE("stack",      S_IRUSR, proc_pid_stack),
+	ONE("stack",      S_IRUGO, proc_pid_stack),
 #endif
-#ifdef CONFIG_SCHED_INFO
-	ONE("schedstat",  S_IRUGO, proc_pid_schedstat),
+#ifdef CONFIG_SCHEDSTATS
+	INF("schedstat",  S_IRUGO, proc_pid_schedstat),
 #endif
 #ifdef CONFIG_LATENCYTOP
 	REG("latency",  S_IRUGO, proc_lstats_operations),
 #endif
 #ifdef CONFIG_PROC_PID_CPUSET
-	ONE("cpuset",     S_IRUGO, proc_cpuset_show),
+	REG("cpuset",     S_IRUGO, proc_cpuset_operations),
 #endif
 #ifdef CONFIG_CGROUPS
-	ONE("cgroup",  S_IRUGO, proc_cgroup_show),
+	REG("cgroup",  S_IRUGO, proc_cgroup_operations),
 #endif
-	ONE("oom_score",  S_IRUGO, proc_oom_score),
-	REG("oom_adj",    S_IRUGO|S_IWUSR, proc_oom_adj_operations),
+	INF("oom_score",  S_IRUGO, proc_oom_score),
+	ANDROID("oom_adj",S_IRUGO|S_IWUSR, oom_adjust),
 	REG("oom_score_adj", S_IRUGO|S_IWUSR, proc_oom_score_adj_operations),
 #ifdef CONFIG_AUDITSYSCALL
 	REG("loginuid",   S_IWUSR|S_IRUGO, proc_loginuid_operations),
@@ -2964,40 +3060,27 @@ static const struct pid_entry tgid_base_stuff[] = {
 	REG("coredump_filter", S_IRUGO|S_IWUSR, proc_coredump_filter_operations),
 #endif
 #ifdef CONFIG_TASK_IO_ACCOUNTING
-	ONE("io",	S_IRUSR, proc_tgid_io_accounting),
+	INF("io",	S_IRUSR, proc_tgid_io_accounting),
 #endif
 #ifdef CONFIG_HARDWALL
-	ONE("hardwall",   S_IRUGO, proc_pid_hardwall),
-#endif
-#ifdef CONFIG_USER_NS
-	REG("uid_map",    S_IRUGO|S_IWUSR, proc_uid_map_operations),
-	REG("gid_map",    S_IRUGO|S_IWUSR, proc_gid_map_operations),
-	REG("projid_map", S_IRUGO|S_IWUSR, proc_projid_map_operations),
-	REG("setgroups",  S_IRUGO|S_IWUSR, proc_setgroups_operations),
-#endif
-#ifdef CONFIG_CHECKPOINT_RESTORE
-	REG("timers",	  S_IRUGO, proc_timers_operations),
-#endif
-	REG("timerslack_ns", S_IRUGO|S_IWUGO, proc_pid_set_timerslack_ns_operations),
-#ifdef CONFIG_CPU_FREQ_TIMES
-	ONE("time_in_state", 0444, proc_time_in_state_show),
+	INF("hardwall",   S_IRUGO, proc_pid_hardwall),
 #endif
 };
 
-static int proc_tgid_base_readdir(struct file *file, struct dir_context *ctx)
+static int proc_tgid_base_readdir(struct file * filp,
+			     void * dirent, filldir_t filldir)
 {
-	return proc_pident_readdir(file, ctx,
-				   tgid_base_stuff, ARRAY_SIZE(tgid_base_stuff));
+	return proc_pident_readdir(filp,dirent,filldir,
+				   tgid_base_stuff,ARRAY_SIZE(tgid_base_stuff));
 }
 
 static const struct file_operations proc_tgid_base_operations = {
 	.read		= generic_read_dir,
-	.iterate_shared	= proc_tgid_base_readdir,
-	.llseek		= generic_file_llseek,
+	.readdir	= proc_tgid_base_readdir,
+	.llseek		= default_llseek,
 };
 
-static struct dentry *proc_tgid_base_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
-{
+static struct dentry *proc_tgid_base_lookup(struct inode *dir, struct dentry *dentry, struct nameidata *nd){
 	return proc_pident_lookup(dir, dentry,
 				  tgid_base_stuff, ARRAY_SIZE(tgid_base_stuff));
 }
@@ -3017,15 +3100,12 @@ static void proc_flush_task_mnt(struct vfsmount *mnt, pid_t pid, pid_t tgid)
 
 	name.name = buf;
 	name.len = snprintf(buf, sizeof(buf), "%d", pid);
-	/* no ->d_hash() rejects on procfs */
 	dentry = d_hash_and_lookup(mnt->mnt_root, &name);
 	if (dentry) {
-		d_invalidate(dentry);
+		shrink_dcache_parent(dentry);
+		d_drop(dentry);
 		dput(dentry);
 	}
-
-	if (pid == tgid)
-		return;
 
 	name.name = buf;
 	name.len = snprintf(buf, sizeof(buf), "%d", tgid);
@@ -3043,7 +3123,8 @@ static void proc_flush_task_mnt(struct vfsmount *mnt, pid_t pid, pid_t tgid)
 	name.len = snprintf(buf, sizeof(buf), "%d", pid);
 	dentry = d_hash_and_lookup(dir, &name);
 	if (dentry) {
-		d_invalidate(dentry);
+		shrink_dcache_parent(dentry);
+		d_drop(dentry);
 		dput(dentry);
 	}
 
@@ -3093,12 +3174,17 @@ void proc_flush_task(struct task_struct *task)
 		proc_flush_task_mnt(upid->ns->proc_mnt, upid->nr,
 					tgid->numbers[i].nr);
 	}
+
+	upid = &pid->numbers[pid->level];
+	if (upid->nr == 1)
+		pid_ns_release_proc(upid->ns);
 }
 
-static int proc_pid_instantiate(struct inode *dir,
-				   struct dentry * dentry,
-				   struct task_struct *task, const void *ptr)
+static struct dentry *proc_pid_instantiate(struct inode *dir,
+					   struct dentry * dentry,
+					   struct task_struct *task, const void *ptr)
 {
+	struct dentry *error = ERR_PTR(-ENOENT);
 	struct inode *inode;
 
 	inode = proc_pid_make_inode(dir->i_sb, task);
@@ -3117,20 +3203,24 @@ static int proc_pid_instantiate(struct inode *dir,
 
 	d_add(dentry, inode);
 	/* Close the race of the process dying before we return the dentry */
-	if (pid_revalidate(dentry, 0))
-		return 0;
+	if (pid_revalidate(dentry, NULL))
+		error = NULL;
 out:
-	return -ENOENT;
+	return error;
 }
 
-struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, unsigned int flags)
+struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, struct nameidata *nd)
 {
-	int result = -ENOENT;
+	struct dentry *result;
 	struct task_struct *task;
 	unsigned tgid;
 	struct pid_namespace *ns;
 
-	tgid = name_to_int(&dentry->d_name);
+	result = proc_base_lookup(dir, dentry);
+	if (!IS_ERR(result) || PTR_ERR(result) != -ENOENT)
+		goto out;
+
+	tgid = name_to_int(dentry);
 	if (tgid == ~0U)
 		goto out;
 
@@ -3146,7 +3236,7 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, unsign
 	result = proc_pid_instantiate(dir, dentry, task, NULL);
 	put_task_struct(task);
 out:
-	return ERR_PTR(result);
+	return result;
 }
 
 /*
@@ -3192,91 +3282,69 @@ retry:
 	return iter;
 }
 
-#define TGID_OFFSET (FIRST_PROCESS_ENTRY + 2)
+#define TGID_OFFSET (FIRST_PROCESS_ENTRY + ARRAY_SIZE(proc_base_stuff))
 
-/* for the /proc/ directory itself, after non-process stuff has been done */
-int proc_pid_readdir(struct file *file, struct dir_context *ctx)
+static int proc_pid_fill_cache(struct file *filp, void *dirent, filldir_t filldir,
+	struct tgid_iter iter)
 {
-	struct tgid_iter iter;
-	struct pid_namespace *ns = file_inode(file)->i_sb->s_fs_info;
-	loff_t pos = ctx->pos;
+	char name[PROC_NUMBUF];
+	int len = snprintf(name, sizeof(name), "%d", iter.tgid);
+	return proc_fill_cache(filp, dirent, filldir, name, len,
+				proc_pid_instantiate, iter.task, NULL);
+}
 
-	if (pos >= PID_MAX_LIMIT + TGID_OFFSET)
-		return 0;
-
-	if (pos == TGID_OFFSET - 2) {
-		struct inode *inode = d_inode(ns->proc_self);
-		if (!dir_emit(ctx, "self", 4, inode->i_ino, DT_LNK))
-			return 0;
-		ctx->pos = pos = pos + 1;
-	}
-	if (pos == TGID_OFFSET - 1) {
-		struct inode *inode = d_inode(ns->proc_thread_self);
-		if (!dir_emit(ctx, "thread-self", 11, inode->i_ino, DT_LNK))
-			return 0;
-		ctx->pos = pos = pos + 1;
-	}
-	iter.tgid = pos - TGID_OFFSET;
-	iter.task = NULL;
-	for (iter = next_tgid(ns, iter);
-	     iter.task;
-	     iter.tgid += 1, iter = next_tgid(ns, iter)) {
-		char name[PROC_NUMBUF];
-		int len;
-
-		cond_resched();
-		if (!has_pid_permissions(ns, iter.task, 2))
-			continue;
-
-		len = snprintf(name, sizeof(name), "%d", iter.tgid);
-		ctx->pos = iter.tgid + TGID_OFFSET;
-		if (!proc_fill_cache(file, ctx, name, len,
-				     proc_pid_instantiate, iter.task, NULL)) {
-			put_task_struct(iter.task);
-			return 0;
-		}
-	}
-	ctx->pos = PID_MAX_LIMIT + TGID_OFFSET;
+static int fake_filldir(void *buf, const char *name, int namelen,
+			loff_t offset, u64 ino, unsigned d_type)
+{
 	return 0;
 }
 
-/*
- * proc_tid_comm_permission is a special permission function exclusively
- * used for the node /proc/<pid>/task/<tid>/comm.
- * It bypasses generic permission checks in the case where a task of the same
- * task group attempts to access the node.
- * The rationale behind this is that glibc and bionic access this node for
- * cross thread naming (pthread_set/getname_np(!self)). However, if
- * PR_SET_DUMPABLE gets set to 0 this node among others becomes uid=0 gid=0,
- * which locks out the cross thread naming implementation.
- * This function makes sure that the node is always accessible for members of
- * same thread group.
- */
-static int proc_tid_comm_permission(struct inode *inode, int mask)
+/* for the /proc/ directory itself, after non-process stuff has been done */
+int proc_pid_readdir(struct file * filp, void * dirent, filldir_t filldir)
 {
-	bool is_same_tgroup;
-	struct task_struct *task;
+	unsigned int nr;
+	struct task_struct *reaper;
+	struct tgid_iter iter;
+	struct pid_namespace *ns;
+	filldir_t __filldir;
 
-	task = get_proc_task(inode);
-	if (!task)
-		return -ESRCH;
-	is_same_tgroup = same_thread_group(current, task);
-	put_task_struct(task);
+	if (filp->f_pos >= PID_MAX_LIMIT + TGID_OFFSET)
+		goto out_no_task;
+	nr = filp->f_pos - FIRST_PROCESS_ENTRY;
 
-	if (likely(is_same_tgroup && !(mask & MAY_EXEC))) {
-		/* This file (/proc/<pid>/task/<tid>/comm) can always be
-		 * read or written by the members of the corresponding
-		 * thread group.
-		 */
-		return 0;
+	reaper = get_proc_task(filp->f_path.dentry->d_inode);
+	if (!reaper)
+		goto out_no_task;
+
+	for (; nr < ARRAY_SIZE(proc_base_stuff); filp->f_pos++, nr++) {
+		const struct pid_entry *p = &proc_base_stuff[nr];
+		if (proc_base_fill_cache(filp, dirent, filldir, reaper, p) < 0)
+			goto out;
 	}
 
-	return generic_permission(inode, mask);
-}
+	ns = filp->f_dentry->d_sb->s_fs_info;
+	iter.task = NULL;
+	iter.tgid = filp->f_pos - TGID_OFFSET;
+	for (iter = next_tgid(ns, iter);
+	     iter.task;
+	     iter.tgid += 1, iter = next_tgid(ns, iter)) {
+		if (has_pid_permissions(ns, iter.task, 2))
+			__filldir = filldir;
+		else
+			__filldir = fake_filldir;
 
-static const struct inode_operations proc_tid_comm_inode_operations = {
-		.permission = proc_tid_comm_permission,
-};
+		filp->f_pos = iter.tgid + TGID_OFFSET;
+		if (proc_pid_fill_cache(filp, dirent, __filldir, iter) < 0) {
+			put_task_struct(iter.task);
+			goto out;
+		}
+	}
+	filp->f_pos = PID_MAX_LIMIT + TGID_OFFSET;
+out:
+	put_task_struct(reaper);
+out_no_task:
+	return 0;
+}
 
 /*
  * Tasks
@@ -3285,30 +3353,22 @@ static const struct pid_entry tid_base_stuff[] = {
 	DIR("fd",        S_IRUSR|S_IXUSR, proc_fd_inode_operations, proc_fd_operations),
 	DIR("fdinfo",    S_IRUSR|S_IXUSR, proc_fdinfo_inode_operations, proc_fdinfo_operations),
 	DIR("ns",	 S_IRUSR|S_IXUGO, proc_ns_dir_inode_operations, proc_ns_dir_operations),
-#ifdef CONFIG_NET
-	DIR("net",        S_IRUGO|S_IXUGO, proc_net_inode_operations, proc_net_operations),
-#endif
 	REG("environ",   S_IRUSR, proc_environ_operations),
-	REG("auxv",      S_IRUSR, proc_auxv_operations),
+	INF("auxv",      S_IRUSR, proc_pid_auxv),
 	ONE("status",    S_IRUGO, proc_pid_status),
-	ONE("personality", S_IRUSR, proc_pid_personality),
-	ONE("limits",	 S_IRUGO, proc_pid_limits),
+	ONE("personality", S_IRUGO, proc_pid_personality),
+	INF("limits",	 S_IRUGO, proc_pid_limits),
 #ifdef CONFIG_SCHED_DEBUG
 	REG("sched",     S_IRUGO|S_IWUSR, proc_pid_sched_operations),
 #endif
-	NOD("comm",      S_IFREG|S_IRUGO|S_IWUSR,
-			 &proc_tid_comm_inode_operations,
-			 &proc_pid_set_comm_operations, {}),
+	REG("comm",      S_IRUGO|S_IWUSR, proc_pid_set_comm_operations),
 #ifdef CONFIG_HAVE_ARCH_TRACEHOOK
-	ONE("syscall",   S_IRUSR, proc_pid_syscall),
+	INF("syscall",   S_IRUGO, proc_pid_syscall),
 #endif
-	REG("cmdline",   S_IRUGO, proc_pid_cmdline_ops),
+	INF("cmdline",   S_IRUGO, proc_pid_cmdline),
 	ONE("stat",      S_IRUGO, proc_tid_stat),
 	ONE("statm",     S_IRUGO, proc_pid_statm),
 	REG("maps",      S_IRUGO, proc_tid_maps_operations),
-#ifdef CONFIG_PROC_CHILDREN
-	REG("children",  S_IRUGO, proc_tid_children_operations),
-#endif
 #ifdef CONFIG_NUMA
 	REG("numa_maps", S_IRUGO, proc_tid_numa_maps_operations),
 #endif
@@ -3321,32 +3381,31 @@ static const struct pid_entry tid_base_stuff[] = {
 #ifdef CONFIG_PROC_PAGE_MONITOR
 	REG("clear_refs", S_IWUSR, proc_clear_refs_operations),
 	REG("smaps",     S_IRUGO, proc_tid_smaps_operations),
-	REG("smaps_rollup", S_IRUGO, proc_pid_smaps_rollup_operations),
-	REG("pagemap",    S_IRUSR, proc_pagemap_operations),
+	REG("pagemap",    S_IRUGO, proc_pagemap_operations),
 #endif
 #ifdef CONFIG_SECURITY
 	DIR("attr",      S_IRUGO|S_IXUGO, proc_attr_dir_inode_operations, proc_attr_dir_operations),
 #endif
 #ifdef CONFIG_KALLSYMS
-	ONE("wchan",     S_IRUGO, proc_pid_wchan),
+	INF("wchan",     S_IRUGO, proc_pid_wchan),
 #endif
 #ifdef CONFIG_STACKTRACE
-	ONE("stack",      S_IRUSR, proc_pid_stack),
+	ONE("stack",      S_IRUGO, proc_pid_stack),
 #endif
-#ifdef CONFIG_SCHED_INFO
-	ONE("schedstat", S_IRUGO, proc_pid_schedstat),
+#ifdef CONFIG_SCHEDSTATS
+	INF("schedstat", S_IRUGO, proc_pid_schedstat),
 #endif
 #ifdef CONFIG_LATENCYTOP
 	REG("latency",  S_IRUGO, proc_lstats_operations),
 #endif
 #ifdef CONFIG_PROC_PID_CPUSET
-	ONE("cpuset",    S_IRUGO, proc_cpuset_show),
+	REG("cpuset",    S_IRUGO, proc_cpuset_operations),
 #endif
 #ifdef CONFIG_CGROUPS
-	ONE("cgroup",  S_IRUGO, proc_cgroup_show),
+	REG("cgroup",  S_IRUGO, proc_cgroup_operations),
 #endif
-	ONE("oom_score", S_IRUGO, proc_oom_score),
-	REG("oom_adj",   S_IRUGO|S_IWUSR, proc_oom_adj_operations),
+	INF("oom_score", S_IRUGO, proc_oom_score),
+	REG("oom_adj",   S_IRUGO|S_IWUSR, proc_oom_adjust_operations),
 	REG("oom_score_adj", S_IRUGO|S_IWUSR, proc_oom_score_adj_operations),
 #ifdef CONFIG_AUDITSYSCALL
 	REG("loginuid",  S_IWUSR|S_IRUGO, proc_loginuid_operations),
@@ -3356,38 +3415,29 @@ static const struct pid_entry tid_base_stuff[] = {
 	REG("make-it-fail", S_IRUGO|S_IWUSR, proc_fault_inject_operations),
 #endif
 #ifdef CONFIG_TASK_IO_ACCOUNTING
-	ONE("io",	S_IRUSR, proc_tid_io_accounting),
+	INF("io",	S_IRUSR, proc_tid_io_accounting),
 #endif
 #ifdef CONFIG_HARDWALL
-	ONE("hardwall",   S_IRUGO, proc_pid_hardwall),
-#endif
-#ifdef CONFIG_USER_NS
-	REG("uid_map",    S_IRUGO|S_IWUSR, proc_uid_map_operations),
-	REG("gid_map",    S_IRUGO|S_IWUSR, proc_gid_map_operations),
-	REG("projid_map", S_IRUGO|S_IWUSR, proc_projid_map_operations),
-	REG("setgroups",  S_IRUGO|S_IWUSR, proc_setgroups_operations),
-#endif
-#ifdef CONFIG_CPU_FREQ_TIMES
-	ONE("time_in_state", 0444, proc_time_in_state_show),
+	INF("hardwall",   S_IRUGO, proc_pid_hardwall),
 #endif
 };
 
-static int proc_tid_base_readdir(struct file *file, struct dir_context *ctx)
+static int proc_tid_base_readdir(struct file * filp,
+			     void * dirent, filldir_t filldir)
 {
-	return proc_pident_readdir(file, ctx,
-				   tid_base_stuff, ARRAY_SIZE(tid_base_stuff));
+	return proc_pident_readdir(filp,dirent,filldir,
+				   tid_base_stuff,ARRAY_SIZE(tid_base_stuff));
 }
 
-static struct dentry *proc_tid_base_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
-{
+static struct dentry *proc_tid_base_lookup(struct inode *dir, struct dentry *dentry, struct nameidata *nd){
 	return proc_pident_lookup(dir, dentry,
 				  tid_base_stuff, ARRAY_SIZE(tid_base_stuff));
 }
 
 static const struct file_operations proc_tid_base_operations = {
 	.read		= generic_read_dir,
-	.iterate_shared	= proc_tid_base_readdir,
-	.llseek		= generic_file_llseek,
+	.readdir	= proc_tid_base_readdir,
+	.llseek		= default_llseek,
 };
 
 static const struct inode_operations proc_tid_base_inode_operations = {
@@ -3396,9 +3446,10 @@ static const struct inode_operations proc_tid_base_inode_operations = {
 	.setattr	= proc_setattr,
 };
 
-static int proc_task_instantiate(struct inode *dir,
+static struct dentry *proc_task_instantiate(struct inode *dir,
 	struct dentry *dentry, struct task_struct *task, const void *ptr)
 {
+	struct dentry *error = ERR_PTR(-ENOENT);
 	struct inode *inode;
 	inode = proc_pid_make_inode(dir->i_sb, task);
 
@@ -3416,15 +3467,15 @@ static int proc_task_instantiate(struct inode *dir,
 
 	d_add(dentry, inode);
 	/* Close the race of the process dying before we return the dentry */
-	if (pid_revalidate(dentry, 0))
-		return 0;
+	if (pid_revalidate(dentry, NULL))
+		error = NULL;
 out:
-	return -ENOENT;
+	return error;
 }
 
-static struct dentry *proc_task_lookup(struct inode *dir, struct dentry * dentry, unsigned int flags)
+static struct dentry *proc_task_lookup(struct inode *dir, struct dentry * dentry, struct nameidata *nd)
 {
-	int result = -ENOENT;
+	struct dentry *result = ERR_PTR(-ENOENT);
 	struct task_struct *task;
 	struct task_struct *leader = get_proc_task(dir);
 	unsigned tid;
@@ -3433,7 +3484,7 @@ static struct dentry *proc_task_lookup(struct inode *dir, struct dentry * dentry
 	if (!leader)
 		goto out_no_task;
 
-	tid = name_to_int(&dentry->d_name);
+	tid = name_to_int(dentry);
 	if (tid == ~0U)
 		goto out;
 
@@ -3454,7 +3505,7 @@ out_drop_task:
 out:
 	put_task_struct(leader);
 out_no_task:
-	return ERR_PTR(result);
+	return result;
 }
 
 /*
@@ -3469,42 +3520,34 @@ out_no_task:
  * In the case of a seek we start with the leader and walk nr
  * threads past it.
  */
-static struct task_struct *first_tid(struct pid *pid, int tid, loff_t f_pos,
-					struct pid_namespace *ns)
+static struct task_struct *first_tid(struct task_struct *leader,
+		int tid, int nr, struct pid_namespace *ns)
 {
-	struct task_struct *pos, *task;
-	unsigned long nr = f_pos;
-
-	if (nr != f_pos)	/* 32bit overflow? */
-		return NULL;
+	struct task_struct *pos;
 
 	rcu_read_lock();
-	task = pid_task(pid, PIDTYPE_PID);
-	if (!task)
-		goto fail;
-
-	/* Attempt to start with the tid of a thread */
-	if (tid && nr) {
+	/* Attempt to start with the pid of a thread */
+	if (tid && (nr > 0)) {
 		pos = find_task_by_pid_ns(tid, ns);
-		if (pos && same_thread_group(pos, task))
+		if (pos && (pos->group_leader == leader))
 			goto found;
 	}
 
 	/* If nr exceeds the number of threads there is nothing todo */
-	if (nr >= get_nr_threads(task))
-		goto fail;
+	pos = NULL;
+	if (nr && nr >= get_nr_threads(leader))
+		goto out;
 
 	/* If we haven't found our starting place yet start
 	 * with the leader and walk nr threads forward.
 	 */
-	pos = task = task->group_leader;
-	do {
-		if (!nr--)
-			goto found;
-	} while_each_thread(task, pos);
-fail:
-	pos = NULL;
-	goto out;
+	for (pos = leader; nr > 0; --nr) {
+		pos = next_thread(pos);
+		if (pos == leader) {
+			pos = NULL;
+			goto out;
+		}
+	}
 found:
 	get_task_struct(pos);
 out:
@@ -3534,49 +3577,83 @@ static struct task_struct *next_tid(struct task_struct *start)
 	return pos;
 }
 
-/* for the /proc/TGID/task/ directories */
-static int proc_task_readdir(struct file *file, struct dir_context *ctx)
+static int proc_task_fill_cache(struct file *filp, void *dirent, filldir_t filldir,
+	struct task_struct *task, int tid)
 {
-	struct inode *inode = file_inode(file);
+	char name[PROC_NUMBUF];
+	int len = snprintf(name, sizeof(name), "%d", tid);
+	return proc_fill_cache(filp, dirent, filldir, name, len,
+				proc_task_instantiate, task, NULL);
+}
+
+/* for the /proc/TGID/task/ directories */
+static int proc_task_readdir(struct file * filp, void * dirent, filldir_t filldir)
+{
+	struct dentry *dentry = filp->f_path.dentry;
+	struct inode *inode = dentry->d_inode;
+	struct task_struct *leader = NULL;
 	struct task_struct *task;
-	struct pid_namespace *ns;
+	int retval = -ENOENT;
+	ino_t ino;
 	int tid;
+	struct pid_namespace *ns;
 
-	if (proc_inode_is_dead(inode))
-		return -ENOENT;
+	task = get_proc_task(inode);
+	if (!task)
+		goto out_no_task;
+	rcu_read_lock();
+	if (pid_alive(task)) {
+		leader = task->group_leader;
+		get_task_struct(leader);
+	}
+	rcu_read_unlock();
+	put_task_struct(task);
+	if (!leader)
+		goto out_no_task;
+	retval = 0;
 
-	if (!dir_emit_dots(file, ctx))
-		return 0;
+	switch ((unsigned long)filp->f_pos) {
+	case 0:
+		ino = inode->i_ino;
+		if (filldir(dirent, ".", 1, filp->f_pos, ino, DT_DIR) < 0)
+			goto out;
+		filp->f_pos++;
+		/* fall through */
+	case 1:
+		ino = parent_ino(dentry);
+		if (filldir(dirent, "..", 2, filp->f_pos, ino, DT_DIR) < 0)
+			goto out;
+		filp->f_pos++;
+		/* fall through */
+	}
 
 	/* f_version caches the tgid value that the last readdir call couldn't
 	 * return. lseek aka telldir automagically resets f_version to 0.
 	 */
-	ns = inode->i_sb->s_fs_info;
-	tid = (int)file->f_version;
-	file->f_version = 0;
-	for (task = first_tid(proc_pid(inode), tid, ctx->pos - 2, ns);
+	ns = filp->f_dentry->d_sb->s_fs_info;
+	tid = (int)filp->f_version;
+	filp->f_version = 0;
+	for (task = first_tid(leader, tid, filp->f_pos - 2, ns);
 	     task;
-	     task = next_tid(task), ctx->pos++) {
-		char name[PROC_NUMBUF];
-		int len;
+	     task = next_tid(task), filp->f_pos++) {
 		tid = task_pid_nr_ns(task, ns);
-		len = snprintf(name, sizeof(name), "%d", tid);
-		if (!proc_fill_cache(file, ctx, name, len,
-				proc_task_instantiate, task, NULL)) {
+		if (proc_task_fill_cache(filp, dirent, filldir, task, tid) < 0) {
 			/* returning this tgid failed, save it as the first
 			 * pid for the next readir call */
-			file->f_version = (u64)tid;
+			filp->f_version = (u64)tid;
 			put_task_struct(task);
 			break;
 		}
 	}
-
-	return 0;
+out:
+	put_task_struct(leader);
+out_no_task:
+	return retval;
 }
 
 static int proc_task_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat)
 {
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	struct task_struct *p = get_proc_task(inode);
 	generic_fillattr(inode, stat);
 
@@ -3597,6 +3674,6 @@ static const struct inode_operations proc_task_inode_operations = {
 
 static const struct file_operations proc_task_operations = {
 	.read		= generic_read_dir,
-	.iterate_shared	= proc_task_readdir,
-	.llseek		= generic_file_llseek,
+	.readdir	= proc_task_readdir,
+	.llseek		= default_llseek,
 };

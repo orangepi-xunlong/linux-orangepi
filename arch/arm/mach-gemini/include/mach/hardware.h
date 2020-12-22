@@ -57,6 +57,9 @@
 #define GEMINI_USB1_BASE	0x69000000
 #define GEMINI_BIG_ENDIAN_BASE	0x80000000
 
+#define GEMINI_TIMER1_BASE	GEMINI_TIMER_BASE
+#define GEMINI_TIMER2_BASE	(GEMINI_TIMER_BASE + 0x10)
+#define GEMINI_TIMER3_BASE	(GEMINI_TIMER_BASE + 0x20)
 
 /*
  * UART Clock when System clk is 150MHz
@@ -66,6 +69,6 @@
 /*
  * macro to get at IO space when running virtually
  */
-#define IO_ADDRESS(x)	IOMEM((((x) & 0xFFF00000) >> 4) | ((x) & 0x000FFFFF) | 0xF0000000)
+#define IO_ADDRESS(x)	((((x) & 0xFFF00000) >> 4) | ((x) & 0x000FFFFF) | 0xF0000000)
 
 #endif

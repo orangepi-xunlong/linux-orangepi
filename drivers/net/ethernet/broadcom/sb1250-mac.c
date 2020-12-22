@@ -13,7 +13,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  *
  *
  * This driver is designed for the Broadcom SiByte SOC built-in
@@ -35,6 +36,7 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/init.h>
 #include <linux/bitops.h>
 #include <linux/err.h>
 #include <linux/ethtool.h>
@@ -238,6 +240,7 @@ struct sbmac_softc {
 	struct napi_struct	napi;
 	struct phy_device	*phy_dev;	/* the associated PHY device */
 	struct mii_bus		*mii_bus;	/* the MII bus */
+	int			phy_irq[PHY_MAX_ADDR];
 	spinlock_t		sbm_lock;	/* spin lock */
 	int			sbm_devflags;	/* current device flags */
 
@@ -828,8 +831,11 @@ static int sbdma_add_rcvbuffer(struct sbmac_softc *sc, struct sbmacdma *d,
 		sb_new = netdev_alloc_skb(dev, ENET_PACKET_SIZE +
 					       SMP_CACHE_BYTES * 2 +
 					       NET_IP_ALIGN);
-		if (sb_new == NULL)
+		if (sb_new == NULL) {
+			pr_info("%s: sk_buff allocation failed\n",
+			       d->sbdma_eth->sbm_dev->name);
 			return -ENOBUFS;
+		}
 
 		sbdma_align_skb(sb_new, SMP_CACHE_BYTES, NET_IP_ALIGN);
 	}
@@ -1507,7 +1513,16 @@ static void sbmac_channel_start(struct sbmac_softc *s)
 	__raw_writeq(reg, port);
 	port = s->sbm_base + R_MAC_ETHERNET_ADDR;
 
+#ifdef CONFIG_SB1_PASS_1_WORKAROUNDS
+	/*
+	 * Pass1 SOCs do not receive packets addressed to the
+	 * destination address in the R_MAC_ETHERNET_ADDR register.
+	 * Set the value to zero.
+	 */
+	__raw_writeq(0, port);
+#else
 	__raw_writeq(reg, port);
+#endif
 
 	/*
 	 * Set the receive filter for no packets, and write values
@@ -2185,7 +2200,7 @@ static const struct net_device_ops sbmac_netdev_ops = {
 
 static int sbmac_init(struct platform_device *pldev, long long base)
 {
-	struct net_device *dev = platform_get_drvdata(pldev);
+	struct net_device *dev = dev_get_drvdata(&pldev->dev);
 	int idx = pldev->id;
 	struct sbmac_softc *sc = netdev_priv(dev);
 	unsigned char *eaddr;
@@ -2249,6 +2264,9 @@ static int sbmac_init(struct platform_device *pldev, long long base)
 	sc->mii_bus->priv = sc;
 	sc->mii_bus->read = sbmac_mii_read;
 	sc->mii_bus->write = sbmac_mii_write;
+	sc->mii_bus->irq = sc->phy_irq;
+	for (i = 0; i < PHY_MAX_ADDR; ++i)
+		sc->mii_bus->irq[i] = SBMAC_PHY_INT;
 
 	sc->mii_bus->parent = &pldev->dev;
 	/*
@@ -2260,7 +2278,7 @@ static int sbmac_init(struct platform_device *pldev, long long base)
 		       dev->name);
 		goto free_mdio;
 	}
-	platform_set_drvdata(pldev, sc->mii_bus);
+	dev_set_drvdata(&pldev->dev, sc->mii_bus);
 
 	err = register_netdev(dev);
 	if (err) {
@@ -2285,6 +2303,7 @@ static int sbmac_init(struct platform_device *pldev, long long base)
 	return 0;
 unreg_mdio:
 	mdiobus_unregister(sc->mii_bus);
+	dev_set_drvdata(&pldev->dev, NULL);
 free_mdio:
 	mdiobus_free(sc->mii_bus);
 uninit_ctx:
@@ -2354,15 +2373,20 @@ static int sbmac_mii_probe(struct net_device *dev)
 {
 	struct sbmac_softc *sc = netdev_priv(dev);
 	struct phy_device *phy_dev;
+	int i;
 
-	phy_dev = phy_find_first(sc->mii_bus);
+	for (i = 0; i < PHY_MAX_ADDR; i++) {
+		phy_dev = sc->mii_bus->phy_map[i];
+		if (phy_dev)
+			break;
+	}
 	if (!phy_dev) {
 		printk(KERN_ERR "%s: no PHY found\n", dev->name);
 		return -ENXIO;
 	}
 
-	phy_dev = phy_connect(dev, dev_name(&phy_dev->mdio.dev),
-			      &sbmac_mii_poll, PHY_INTERFACE_MODE_GMII);
+	phy_dev = phy_connect(dev, dev_name(&phy_dev->dev), &sbmac_mii_poll, 0,
+			      PHY_INTERFACE_MODE_GMII);
 	if (IS_ERR(phy_dev)) {
 		printk(KERN_ERR "%s: could not attach to PHY\n", dev->name);
 		return PTR_ERR(phy_dev);
@@ -2379,10 +2403,11 @@ static int sbmac_mii_probe(struct net_device *dev)
 			      SUPPORTED_MII |
 			      SUPPORTED_Pause |
 			      SUPPORTED_Asym_Pause;
-
-	phy_attached_info(phy_dev);
-
 	phy_dev->advertising = phy_dev->supported;
+
+	pr_info("%s: attached PHY driver [%s] (mii_bus:phy_addr=%s, irq=%d)\n",
+		dev->name, phy_dev->drv->name,
+		dev_name(&phy_dev->dev), phy_dev->irq);
 
 	sc->phy_dev = phy_dev;
 
@@ -2462,7 +2487,7 @@ static void sbmac_tx_timeout (struct net_device *dev)
 	spin_lock_irqsave(&sc->sbm_lock, flags);
 
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	dev->stats.tx_errors++;
 
 	spin_unlock_irqrestore(&sc->sbm_lock, flags);
@@ -2561,7 +2586,7 @@ static int sbmac_poll(struct napi_struct *napi, int budget)
 }
 
 
-static int sbmac_probe(struct platform_device *pldev)
+static int __devinit sbmac_probe(struct platform_device *pldev)
 {
 	struct net_device *dev;
 	struct sbmac_softc *sc;
@@ -2602,7 +2627,7 @@ static int sbmac_probe(struct platform_device *pldev)
 		goto out_unmap;
 	}
 
-	platform_set_drvdata(pldev, dev);
+	dev_set_drvdata(&pldev->dev, dev);
 	SET_NETDEV_DEV(dev, &pldev->dev);
 
 	sc = netdev_priv(dev);
@@ -2627,7 +2652,7 @@ out_out:
 
 static int __exit sbmac_remove(struct platform_device *pldev)
 {
-	struct net_device *dev = platform_get_drvdata(pldev);
+	struct net_device *dev = dev_get_drvdata(&pldev->dev);
 	struct sbmac_softc *sc = netdev_priv(dev);
 
 	unregister_netdev(dev);
@@ -2645,6 +2670,7 @@ static struct platform_driver sbmac_driver = {
 	.remove = __exit_p(sbmac_remove),
 	.driver = {
 		.name = sbmac_string,
+		.owner  = THIS_MODULE,
 	},
 };
 

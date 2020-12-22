@@ -1,0 +1,7 @@
+
+config SND_SUNXI_SOC_SPDIF
+	tristate "sunxi On-Chip spdif"
+	depends on ARCH_SUN8IW1 ||ARCH_SUN8IW6 || ARCH_SUN8IW7 || ARCH_SUN9IW1
+	select SND_SOC_DMAENGINE_PCM
+	default n
+

@@ -4,6 +4,7 @@
  * This file is released under the GPL.
  */
 
+#include "dm-space-map-checker.h"
 #include "dm-space-map-common.h"
 #include "dm-space-map-disk.h"
 #include "dm-space-map.h"
@@ -78,9 +79,7 @@ static int sm_disk_count_is_more_than_one(struct dm_space_map *sm, dm_block_t b,
 	if (r)
 		return r;
 
-	*result = count > 1;
-
-	return 0;
+	return count > 1;
 }
 
 static int sm_disk_set_count(struct dm_space_map *sm, dm_block_t b,
@@ -154,7 +153,10 @@ static int sm_disk_dec_block(struct dm_space_map *sm, dm_block_t b)
 		 * transaction.
 		 */
 		r = sm_ll_lookup(&smd->old_ll, b, &old_count);
-		if (!r && !old_count)
+		if (r)
+			return r;
+
+		if (!old_count)
 			smd->nr_allocated_this_transaction--;
 	}
 
@@ -247,12 +249,12 @@ static struct dm_space_map ops = {
 	.new_block = sm_disk_new_block,
 	.commit = sm_disk_commit,
 	.root_size = sm_disk_root_size,
-	.copy_root = sm_disk_copy_root,
-	.register_threshold_callback = NULL
+	.copy_root = sm_disk_copy_root
 };
 
-struct dm_space_map *dm_sm_disk_create(struct dm_transaction_manager *tm,
-				       dm_block_t nr_blocks)
+static struct dm_space_map *dm_sm_disk_create_real(
+	struct dm_transaction_manager *tm,
+	dm_block_t nr_blocks)
 {
 	int r;
 	struct sm_disk *smd;
@@ -283,10 +285,27 @@ bad:
 	kfree(smd);
 	return ERR_PTR(r);
 }
+
+struct dm_space_map *dm_sm_disk_create(struct dm_transaction_manager *tm,
+				       dm_block_t nr_blocks)
+{
+	struct dm_space_map *sm = dm_sm_disk_create_real(tm, nr_blocks);
+	struct dm_space_map *smc;
+
+	if (IS_ERR_OR_NULL(sm))
+		return sm;
+
+	smc = dm_sm_checker_create_fresh(sm);
+	if (IS_ERR(smc))
+		dm_sm_destroy(sm);
+
+	return smc;
+}
 EXPORT_SYMBOL_GPL(dm_sm_disk_create);
 
-struct dm_space_map *dm_sm_disk_open(struct dm_transaction_manager *tm,
-				     void *root_le, size_t len)
+static struct dm_space_map *dm_sm_disk_open_real(
+	struct dm_transaction_manager *tm,
+	void *root_le, size_t len)
 {
 	int r;
 	struct sm_disk *smd;
@@ -312,6 +331,13 @@ struct dm_space_map *dm_sm_disk_open(struct dm_transaction_manager *tm,
 bad:
 	kfree(smd);
 	return ERR_PTR(r);
+}
+
+struct dm_space_map *dm_sm_disk_open(struct dm_transaction_manager *tm,
+				     void *root_le, size_t len)
+{
+	return dm_sm_checker_create(
+		dm_sm_disk_open_real(tm, root_le, len));
 }
 EXPORT_SYMBOL_GPL(dm_sm_disk_open);
 

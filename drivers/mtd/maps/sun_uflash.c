@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
@@ -74,7 +75,7 @@ int uflash_devinit(struct platform_device *op, struct device_node *dp)
 
 	up->name = of_get_property(dp, "model", NULL);
 	if (up->name && 0 < strlen(up->name))
-		up->map.name = up->name;
+		up->map.name = (char *)up->name;
 
 	up->map.phys = op->resource[0].start;
 
@@ -107,7 +108,7 @@ int uflash_devinit(struct platform_device *op, struct device_node *dp)
 	return 0;
 }
 
-static int uflash_probe(struct platform_device *op)
+static int __devinit uflash_probe(struct platform_device *op)
 {
 	struct device_node *dp = op->dev.of_node;
 
@@ -120,7 +121,7 @@ static int uflash_probe(struct platform_device *op)
 	return uflash_devinit(op, dp);
 }
 
-static int uflash_remove(struct platform_device *op)
+static int __devexit uflash_remove(struct platform_device *op)
 {
 	struct uflash_dev *up = dev_get_drvdata(&op->dev);
 
@@ -150,10 +151,11 @@ MODULE_DEVICE_TABLE(of, uflash_match);
 static struct platform_driver uflash_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = uflash_match,
 	},
 	.probe		= uflash_probe,
-	.remove		= uflash_remove,
+	.remove		= __devexit_p(uflash_remove),
 };
 
 module_platform_driver(uflash_driver);

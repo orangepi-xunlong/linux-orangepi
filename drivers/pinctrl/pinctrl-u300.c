@@ -663,6 +663,8 @@ static const struct pinctrl_pin_desc u300_pads[] = {
 struct u300_pmx {
 	struct device *dev;
 	struct pinctrl_dev *pctl;
+	u32 phybase;
+	u32 physize;
 	void __iomem *virtbase;
 };
 
@@ -670,7 +672,7 @@ struct u300_pmx {
  * u300_pmx_registers - the array of registers read/written for each pinmux
  * shunt setting
  */
-static const u32 u300_pmx_registers[] = {
+const u32 u300_pmx_registers[] = {
 	U300_SYSCON_PMC1LR,
 	U300_SYSCON_PMC1HR,
 	U300_SYSCON_PMC2R,
@@ -834,14 +836,18 @@ static const struct u300_pin_group u300_pin_groups[] = {
 	},
 };
 
-static int u300_get_groups_count(struct pinctrl_dev *pctldev)
+static int u300_list_groups(struct pinctrl_dev *pctldev, unsigned selector)
 {
-	return ARRAY_SIZE(u300_pin_groups);
+	if (selector >= ARRAY_SIZE(u300_pin_groups))
+		return -EINVAL;
+	return 0;
 }
 
 static const char *u300_get_group_name(struct pinctrl_dev *pctldev,
 				       unsigned selector)
 {
+	if (selector >= ARRAY_SIZE(u300_pin_groups))
+		return NULL;
 	return u300_pin_groups[selector].name;
 }
 
@@ -849,6 +855,8 @@ static int u300_get_group_pins(struct pinctrl_dev *pctldev, unsigned selector,
 			       const unsigned **pins,
 			       unsigned *num_pins)
 {
+	if (selector >= ARRAY_SIZE(u300_pin_groups))
+		return -EINVAL;
 	*pins = u300_pin_groups[selector].pins;
 	*num_pins = u300_pin_groups[selector].num_pins;
 	return 0;
@@ -860,8 +868,8 @@ static void u300_pin_dbg_show(struct pinctrl_dev *pctldev, struct seq_file *s,
 	seq_printf(s, " " DRIVER_NAME);
 }
 
-static const struct pinctrl_ops u300_pctrl_ops = {
-	.get_groups_count = u300_get_groups_count,
+static struct pinctrl_ops u300_pctrl_ops = {
+	.list_groups = u300_list_groups,
 	.get_group_name = u300_get_group_name,
 	.get_group_pins = u300_get_group_pins,
 	.pin_dbg_show = u300_pin_dbg_show,
@@ -955,8 +963,8 @@ static void u300_pmx_endisable(struct u300_pmx *upmx, unsigned selector,
 	}
 }
 
-static int u300_pmx_set_mux(struct pinctrl_dev *pctldev, unsigned selector,
-			    unsigned group)
+static int u300_pmx_enable(struct pinctrl_dev *pctldev, unsigned selector,
+			   unsigned group)
 {
 	struct u300_pmx *upmx;
 
@@ -970,9 +978,24 @@ static int u300_pmx_set_mux(struct pinctrl_dev *pctldev, unsigned selector,
 	return 0;
 }
 
-static int u300_pmx_get_funcs_count(struct pinctrl_dev *pctldev)
+static void u300_pmx_disable(struct pinctrl_dev *pctldev, unsigned selector,
+			     unsigned group)
 {
-	return ARRAY_SIZE(u300_pmx_functions);
+	struct u300_pmx *upmx;
+
+	/* There is nothing to do with the power pins */
+	if (selector == 0)
+		return;
+
+	upmx = pinctrl_dev_get_drvdata(pctldev);
+	u300_pmx_endisable(upmx, selector, false);
+}
+
+static int u300_pmx_list_funcs(struct pinctrl_dev *pctldev, unsigned selector)
+{
+	if (selector >= ARRAY_SIZE(u300_pmx_functions))
+		return -EINVAL;
+	return 0;
 }
 
 static const char *u300_pmx_get_func_name(struct pinctrl_dev *pctldev,
@@ -990,18 +1013,60 @@ static int u300_pmx_get_groups(struct pinctrl_dev *pctldev, unsigned selector,
 	return 0;
 }
 
-static const struct pinmux_ops u300_pmx_ops = {
-	.get_functions_count = u300_pmx_get_funcs_count,
+static struct pinmux_ops u300_pmx_ops = {
+	.list_functions = u300_pmx_list_funcs,
 	.get_function_name = u300_pmx_get_func_name,
 	.get_function_groups = u300_pmx_get_groups,
-	.set_mux = u300_pmx_set_mux,
+	.enable = u300_pmx_enable,
+	.disable = u300_pmx_disable,
 };
 
-static int u300_pin_config_get(struct pinctrl_dev *pctldev, unsigned pin,
-			       unsigned long *config)
+/*
+ * GPIO ranges handled by the application-side COH901XXX GPIO controller
+ * Very many pins can be converted into GPIO pins, but we only list those
+ * that are useful in practice to cut down on tables.
+ */
+#define U300_GPIO_RANGE(a, b, c) { .name = "COH901XXX", .id = a, .base= a, \
+			.pin_base = b, .npins = c }
+
+static struct pinctrl_gpio_range u300_gpio_ranges[] = {
+	U300_GPIO_RANGE(10, 426, 1),
+	U300_GPIO_RANGE(11, 180, 1),
+	U300_GPIO_RANGE(12, 165, 1), /* MS/MMC card insertion */
+	U300_GPIO_RANGE(13, 179, 1),
+	U300_GPIO_RANGE(14, 178, 1),
+	U300_GPIO_RANGE(16, 194, 1),
+	U300_GPIO_RANGE(17, 193, 1),
+	U300_GPIO_RANGE(18, 192, 1),
+	U300_GPIO_RANGE(19, 191, 1),
+	U300_GPIO_RANGE(20, 186, 1),
+	U300_GPIO_RANGE(21, 185, 1),
+	U300_GPIO_RANGE(22, 184, 1),
+	U300_GPIO_RANGE(23, 183, 1),
+	U300_GPIO_RANGE(24, 182, 1),
+	U300_GPIO_RANGE(25, 181, 1),
+};
+
+static struct pinctrl_gpio_range *u300_match_gpio_range(unsigned pin)
 {
-	struct pinctrl_gpio_range *range =
-		pinctrl_find_gpio_range_from_pin(pctldev, pin);
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(u300_gpio_ranges); i++) {
+		struct pinctrl_gpio_range *range;
+
+		range = &u300_gpio_ranges[i];
+		if (pin >= range->pin_base &&
+		    pin <= (range->pin_base + range->npins - 1))
+			return range;
+	}
+	return NULL;
+}
+
+int u300_pin_config_get(struct pinctrl_dev *pctldev,
+			unsigned pin,
+			unsigned long *config)
+{
+	struct pinctrl_gpio_range *range = u300_match_gpio_range(pin);
 
 	/* We get config for those pins we CAN get it for and that's it */
 	if (!range)
@@ -1012,29 +1077,27 @@ static int u300_pin_config_get(struct pinctrl_dev *pctldev, unsigned pin,
 				    config);
 }
 
-static int u300_pin_config_set(struct pinctrl_dev *pctldev, unsigned pin,
-			       unsigned long *configs, unsigned num_configs)
+int u300_pin_config_set(struct pinctrl_dev *pctldev,
+			unsigned pin,
+			unsigned long config)
 {
-	struct pinctrl_gpio_range *range =
-		pinctrl_find_gpio_range_from_pin(pctldev, pin);
-	int ret, i;
+	struct pinctrl_gpio_range *range = u300_match_gpio_range(pin);
+	int ret;
 
 	if (!range)
 		return -EINVAL;
 
-	for (i = 0; i < num_configs; i++) {
-		/* Note: none of these configurations take any argument */
-		ret = u300_gpio_config_set(range->gc,
-			(pin - range->pin_base + range->base),
-			pinconf_to_config_param(configs[i]));
-		if (ret)
-			return ret;
-	} /* for each config */
+	/* Note: none of these configurations take any argument */
+	ret = u300_gpio_config_set(range->gc,
+				   (pin - range->pin_base + range->base),
+				   pinconf_to_config_param(config));
+	if (ret)
+		return ret;
 
 	return 0;
 }
 
-static const struct pinconf_ops u300_pconf_ops = {
+static struct pinconf_ops u300_pconf_ops = {
 	.is_generic = true,
 	.pin_config_get = u300_pin_config_get,
 	.pin_config_set = u300_pin_config_set,
@@ -1063,14 +1126,17 @@ static int u300_pmx_probe(struct platform_device *pdev)
 	upmx->dev = &pdev->dev;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -ENOENT;
+
 	upmx->virtbase = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(upmx->virtbase))
 		return PTR_ERR(upmx->virtbase);
 
-	upmx->pctl = devm_pinctrl_register(&pdev->dev, &u300_pmx_desc, upmx);
-	if (IS_ERR(upmx->pctl)) {
+	upmx->pctl = pinctrl_register(&u300_pmx_desc, &pdev->dev, upmx);
+	if (!upmx->pctl) {
 		dev_err(&pdev->dev, "could not register U300 pinmux driver\n");
-		return PTR_ERR(upmx->pctl);
+		return -EINVAL;
 	}
 
 	platform_set_drvdata(pdev, upmx);
@@ -1080,18 +1146,23 @@ static int u300_pmx_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id u300_pinctrl_match[] = {
-	{ .compatible = "stericsson,pinctrl-u300" },
-	{},
-};
+static int u300_pmx_remove(struct platform_device *pdev)
+{
+	struct u300_pmx *upmx = platform_get_drvdata(pdev);
 
+	pinctrl_unregister(upmx->pctl);
+	platform_set_drvdata(pdev, NULL);
+
+	return 0;
+}
 
 static struct platform_driver u300_pmx_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
-		.of_match_table = u300_pinctrl_match,
+		.owner = THIS_MODULE,
 	},
 	.probe = u300_pmx_probe,
+	.remove = u300_pmx_remove,
 };
 
 static int __init u300_pmx_init(void)

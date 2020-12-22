@@ -16,6 +16,7 @@
 #include <linux/spinlock.h>
 #include <linux/irq.h>
 #include <linux/types.h>
+#include <linux/bootmem.h>
 #include <linux/slab.h>
 
 #include <asm/io.h>
@@ -78,7 +79,7 @@ static struct irq_chip pq2ads_pci_ic = {
 	.irq_disable = pq2ads_pci_mask_irq
 };
 
-static void pq2ads_pci_irq_demux(struct irq_desc *desc)
+static void pq2ads_pci_irq_demux(unsigned int irq, struct irq_desc *desc)
 {
 	struct pq2ads_pci_pic *priv = irq_desc_get_handler_data(desc);
 	u32 stat, mask, pend;
@@ -131,7 +132,7 @@ int __init pq2ads_pci_init_irq(void)
 	}
 
 	irq = irq_of_parse_and_map(np, 0);
-	if (!irq) {
+	if (irq == NO_IRQ) {
 		printk(KERN_ERR "No interrupt in pci pic node.\n");
 		of_node_put(np);
 		goto out;
@@ -148,7 +149,7 @@ int __init pq2ads_pci_init_irq(void)
 	priv->regs = of_iomap(np, 0);
 	if (!priv->regs) {
 		printk(KERN_ERR "Cannot map PCI PIC registers.\n");
-		goto out_free_kmalloc;
+		goto out_free_bootmem;
 	}
 
 	/* mask all PCI interrupts */
@@ -170,8 +171,9 @@ int __init pq2ads_pci_init_irq(void)
 
 out_unmap_regs:
 	iounmap(priv->regs);
-out_free_kmalloc:
-	kfree(priv);
+out_free_bootmem:
+	free_bootmem((unsigned long)priv,
+	             sizeof(struct pq2ads_pci_pic));
 	of_node_put(np);
 out_unmap_irq:
 	irq_dispose_mapping(irq);

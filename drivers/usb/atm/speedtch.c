@@ -27,6 +27,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -169,7 +170,7 @@ static void speedtch_set_swbuff(struct speedtch_instance_data *instance, int sta
 			 "%sabling SW buffering: usb_control_msg returned %d\n",
 			 state ? "En" : "Dis", ret);
 	else
-		usb_dbg(usbatm, "speedtch_set_swbuff: %sbled SW buffering\n", state ? "En" : "Dis");
+		dbg("speedtch_set_swbuff: %sbled SW buffering", state ? "En" : "Dis");
 }
 
 static void speedtch_test_sequence(struct speedtch_instance_data *instance)
@@ -255,8 +256,7 @@ static int speedtch_upload_firmware(struct speedtch_instance_data *instance,
 
 	usb_dbg(usbatm, "%s entered\n", __func__);
 
-	buffer = (unsigned char *)__get_free_page(GFP_KERNEL);
-	if (!buffer) {
+	if (!(buffer = (unsigned char *)__get_free_page(GFP_KERNEL))) {
 		ret = -ENOMEM;
 		usb_dbg(usbatm, "%s: no memory for buffer!\n", __func__);
 		goto out;
@@ -639,8 +639,7 @@ static void speedtch_handle_int(struct urb *int_urb)
 		goto fail;
 	}
 
-	int_urb = instance->int_urb;
-	if (int_urb) {
+	if ((int_urb = instance->int_urb)) {
 		ret = usb_submit_urb(int_urb, GFP_ATOMIC);
 		schedule_work(&instance->status_check_work);
 		if (ret < 0) {
@@ -652,8 +651,7 @@ static void speedtch_handle_int(struct urb *int_urb)
 	return;
 
 fail:
-	int_urb = instance->int_urb;
-	if (int_urb)
+	if ((int_urb = instance->int_urb))
 		mod_timer(&instance->resubmit_timer, jiffies + msecs_to_jiffies(RESUBMIT_DELAY));
 }
 
@@ -720,7 +718,7 @@ static void speedtch_atm_stop(struct usbatm_data *usbatm, struct atm_dev *atm_de
 	del_timer_sync(&instance->resubmit_timer);
 	usb_free_urb(int_urb);
 
-	flush_work(&instance->status_check_work);
+	flush_work_sync(&instance->status_check_work);
 }
 
 static int speedtch_pre_reset(struct usb_interface *intf)
@@ -762,13 +760,11 @@ static void speedtch_release_interfaces(struct usb_device *usb_dev,
 	struct usb_interface *cur_intf;
 	int i;
 
-	for (i = 0; i < num_interfaces; i++) {
-		cur_intf = usb_ifnum_to_if(usb_dev, i);
-		if (cur_intf) {
+	for (i = 0; i < num_interfaces; i++)
+		if ((cur_intf = usb_ifnum_to_if(usb_dev, i))) {
 			usb_set_intfdata(cur_intf, NULL);
 			usb_driver_release_interface(&speedtch_usb_driver, cur_intf);
 		}
-	}
 }
 
 static int speedtch_bind(struct usbatm_data *usbatm,
@@ -792,8 +788,7 @@ static int speedtch_bind(struct usbatm_data *usbatm,
 		return -ENODEV;
 	}
 
-	data_intf = usb_ifnum_to_if(usb_dev, INTERFACE_DATA);
-	if (!data_intf) {
+	if (!(data_intf = usb_ifnum_to_if(usb_dev, INTERFACE_DATA))) {
 		usb_err(usbatm, "%s: data interface not found!\n", __func__);
 		return -ENODEV;
 	}
@@ -817,6 +812,7 @@ static int speedtch_bind(struct usbatm_data *usbatm,
 	instance = kzalloc(sizeof(*instance), GFP_KERNEL);
 
 	if (!instance) {
+		usb_err(usbatm, "%s: no memory for instance data!\n", __func__);
 		ret = -ENOMEM;
 		goto fail_release;
 	}
@@ -892,7 +888,7 @@ static int speedtch_bind(struct usbatm_data *usbatm,
 		usb_fill_int_urb(instance->int_urb, usb_dev,
 				 usb_rcvintpipe(usb_dev, ENDPOINT_INT),
 				 instance->int_data, sizeof(instance->int_data),
-				 speedtch_handle_int, instance, 16);
+				 speedtch_handle_int, instance, 50);
 	else
 		usb_dbg(usbatm, "%s: no memory for interrupt urb!\n", __func__);
 

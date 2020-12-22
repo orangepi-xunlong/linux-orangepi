@@ -22,6 +22,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/jiffies.h>
@@ -135,14 +136,14 @@ static SENSOR_DEVICE_ATTR_2(temp3_input, S_IRUGO, show_temp, NULL, 1, 0);
 static SENSOR_DEVICE_ATTR_2(temp4_input, S_IRUGO, show_temp, NULL, 1, 1);
 static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
 
-static const struct pci_device_id k8temp_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(k8temp_ids) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_K8_NB_MISC) },
 	{ 0 },
 };
 
 MODULE_DEVICE_TABLE(pci, k8temp_ids);
 
-static int is_rev_g_desktop(u8 model)
+static int __devinit is_rev_g_desktop(u8 model)
 {
 	u32 brandidx;
 
@@ -173,7 +174,7 @@ static int is_rev_g_desktop(u8 model)
 	return 1;
 }
 
-static int k8temp_probe(struct pci_dev *pdev,
+static int __devinit k8temp_probe(struct pci_dev *pdev,
 				  const struct pci_device_id *id)
 {
 	int err;
@@ -182,17 +183,21 @@ static int k8temp_probe(struct pci_dev *pdev,
 	u8 model, stepping;
 	struct k8temp_data *data;
 
-	data = devm_kzalloc(&pdev->dev, sizeof(struct k8temp_data), GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
+	data = kzalloc(sizeof(struct k8temp_data), GFP_KERNEL);
+	if (!data) {
+		err = -ENOMEM;
+		goto exit;
+	}
 
 	model = boot_cpu_data.x86_model;
-	stepping = boot_cpu_data.x86_stepping;
+	stepping = boot_cpu_data.x86_mask;
 
 	/* feature available since SH-C0, exclude older revisions */
-	if ((model == 4 && stepping == 0) ||
-	    (model == 5 && stepping <= 1))
-		return -ENODEV;
+	if (((model == 4) && (stepping == 0)) ||
+	    ((model == 5) && (stepping <= 1))) {
+		err = -ENODEV;
+		goto exit_free;
+	}
 
 	/*
 	 * AMD NPT family 0fh, i.e. RevF and RevG:
@@ -200,8 +205,8 @@ static int k8temp_probe(struct pci_dev *pdev,
 	 */
 	if (model >= 0x40) {
 		data->swap_core_select = 1;
-		dev_warn(&pdev->dev,
-			 "Temperature readouts might be wrong - check erratum #141\n");
+		dev_warn(&pdev->dev, "Temperature readouts might be wrong - "
+			 "check erratum #141\n");
 	}
 
 	/*
@@ -219,7 +224,8 @@ static int k8temp_probe(struct pci_dev *pdev,
 
 	if (scfg & (SEL_PLACE | SEL_CORE)) {
 		dev_err(&pdev->dev, "Configuration bit(s) stuck at 1!\n");
-		return -ENODEV;
+		err = -ENODEV;
+		goto exit_free;
 	}
 
 	scfg |= (SEL_PLACE | SEL_CORE);
@@ -301,10 +307,14 @@ exit_remove:
 	device_remove_file(&pdev->dev,
 			   &sensor_dev_attr_temp4_input.dev_attr);
 	device_remove_file(&pdev->dev, &dev_attr_name);
+exit_free:
+	pci_set_drvdata(pdev, NULL);
+	kfree(data);
+exit:
 	return err;
 }
 
-static void k8temp_remove(struct pci_dev *pdev)
+static void __devexit k8temp_remove(struct pci_dev *pdev)
 {
 	struct k8temp_data *data = pci_get_drvdata(pdev);
 
@@ -318,17 +328,30 @@ static void k8temp_remove(struct pci_dev *pdev)
 	device_remove_file(&pdev->dev,
 			   &sensor_dev_attr_temp4_input.dev_attr);
 	device_remove_file(&pdev->dev, &dev_attr_name);
+	pci_set_drvdata(pdev, NULL);
+	kfree(data);
 }
 
 static struct pci_driver k8temp_driver = {
 	.name = "k8temp",
 	.id_table = k8temp_ids,
 	.probe = k8temp_probe,
-	.remove = k8temp_remove,
+	.remove = __devexit_p(k8temp_remove),
 };
 
-module_pci_driver(k8temp_driver);
+static int __init k8temp_init(void)
+{
+	return pci_register_driver(&k8temp_driver);
+}
+
+static void __exit k8temp_exit(void)
+{
+	pci_unregister_driver(&k8temp_driver);
+}
 
 MODULE_AUTHOR("Rudolf Marek <r.marek@assembler.cz>");
 MODULE_DESCRIPTION("AMD K8 core temperature monitor");
 MODULE_LICENSE("GPL");
+
+module_init(k8temp_init)
+module_exit(k8temp_exit)

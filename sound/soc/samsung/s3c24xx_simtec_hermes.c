@@ -63,6 +63,14 @@ static const struct snd_soc_dapm_route base_map[] = {
 */
 static int simtec_hermes_init(struct snd_soc_pcm_runtime *rtd)
 {
+	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
+
+	snd_soc_dapm_enable_pin(dapm, "Headphone Jack");
+	snd_soc_dapm_enable_pin(dapm, "Line In");
+	snd_soc_dapm_enable_pin(dapm, "Line Out");
+	snd_soc_dapm_enable_pin(dapm, "Mic Jack");
+
 	simtec_audio_init(rtd);
 
 	return 0;
@@ -74,7 +82,7 @@ static struct snd_soc_dai_link simtec_dai_aic33 = {
 	.codec_name	= "tlv320aic3x-codec.0-001a",
 	.cpu_dai_name	= "s3c24xx-iis",
 	.codec_dai_name = "tlv320aic3x-hifi",
-	.platform_name	= "s3c24xx-iis",
+	.platform_name	= "samsung-audio",
 	.init		= simtec_hermes_init,
 };
 
@@ -91,7 +99,7 @@ static struct snd_soc_card snd_soc_machine_simtec_aic33 = {
 	.num_dapm_routes = ARRAY_SIZE(base_map),
 };
 
-static int simtec_audio_hermes_probe(struct platform_device *pd)
+static int __devinit simtec_audio_hermes_probe(struct platform_device *pd)
 {
 	dev_info(&pd->dev, "probing....\n");
 	return simtec_audio_core_probe(pd, &snd_soc_machine_simtec_aic33);
@@ -99,11 +107,12 @@ static int simtec_audio_hermes_probe(struct platform_device *pd)
 
 static struct platform_driver simtec_audio_hermes_platdrv = {
 	.driver	= {
+		.owner	= THIS_MODULE,
 		.name	= "s3c24xx-simtec-hermes-snd",
 		.pm	= simtec_audio_pm,
 	},
 	.probe	= simtec_audio_hermes_probe,
-	.remove	= simtec_audio_remove,
+	.remove	= __devexit_p(simtec_audio_remove),
 };
 
 module_platform_driver(simtec_audio_hermes_platdrv);

@@ -32,10 +32,11 @@
 
 #include <asm/assembler.h>
 
-#include "soc.h"
+#include <mach/hardware.h>
+
 #include "iomap.h"
-#include "prm2xxx.h"
-#include "cm2xxx.h"
+#include "prm2xxx_3xxx.h"
+#include "cm2xxx_3xxx.h"
 #include "sdrc.h"
 
 	.text
@@ -64,7 +65,7 @@ ENTRY(omap242x_sram_ddr_init)
 	mvn	r9, #0x4		@ mask to get clear bit2
 	and	r10, r10, r9		@ clear bit2 for lock mode.
 	orr	r10, r10, #0x8		@ make sure DLL on (es2 bit pos)
-	orr	r10, r10, #0x2		@ 90 degree phase for all below 133MHz
+	orr	r10, r10, #0x2		@ 90 degree phase for all below 133Mhz
 	str	r10, [r11]		@ commit to DLLA_CTRL
 	bl	i_dll_wait		@ wait for dll to lock
 
@@ -101,7 +102,7 @@ i_dll_wait:
 i_dll_delay:
 	subs	r4, r4, #0x1
 	bne	i_dll_delay
-	ret	lr
+	mov	pc, lr
 
 	/*
 	 * shift up or down voltage, use R9 as input to tell level.
@@ -125,7 +126,7 @@ volt_delay:
 	ldr	r7, [r3]		@ get timer value
 	cmp	r5, r7			@ time up?
 	bhi	volt_delay		@ not yet->branch
-	ret	lr			@ back to caller.
+	mov	pc, lr			@ back to caller.
 
 omap242x_sdi_cm_clksel2_pll:
 	.word OMAP2420_CM_REGADDR(PLL_MOD, CM_CLKSEL2)
@@ -220,7 +221,7 @@ volt_delay_c:
 	ldr	r7, [r10]		@ get timer value
 	cmp	r8, r7			@ time up?
 	bhi	volt_delay_c		@ not yet->branch
-	ret	lr			@ back to caller
+	mov	pc, lr			@ back to caller
 
 omap242x_srs_cm_clksel2_pll:
 	.word OMAP2420_CM_REGADDR(PLL_MOD, CM_CLKSEL2)

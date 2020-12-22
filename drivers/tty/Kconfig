@@ -1,14 +1,3 @@
-config TTY
-	bool "Enable TTY" if EXPERT
-	default y
-	---help---
-	  Allows you to remove TTY support which can save space, and
-	  blocks features that require TTY from inclusion in the kernel.
-	  TTY is required for any text terminals or serial port
-	  communication. Most users should leave this enabled.
-
-if TTY
-
 config VT
 	bool "Virtual terminal" if EXPERT
 	depends on !S390 && !UML
@@ -120,6 +109,17 @@ config UNIX98_PTYS
 	  All modern Linux systems use the Unix98 ptys.  Say Y unless
 	  you're on an embedded system and want to conserve memory.
 
+config DEVPTS_MULTIPLE_INSTANCES
+	bool "Support multiple instances of devpts"
+	depends on UNIX98_PTYS
+	default n
+	---help---
+	  Enable support for multiple instances of devpts filesystem.
+	  If you want to have isolated PTY namespaces (eg: in containers),
+	  say Y here.  Otherwise, say N. If enabled, each mount of devpts
+	  filesystem with the '-o newinstance' option will create an
+	  independent PTY namespace.
+
 config LEGACY_PTYS
 	bool "Legacy (BSD) PTY support"
 	default y
@@ -214,8 +214,8 @@ config CYCLADES
 	  If you haven't heard about it, it's safe to say N.
 
 config CYZ_INTR
-	bool "Cyclades-Z interrupt mode operation"
-	depends on CYCLADES && PCI
+	bool "Cyclades-Z interrupt mode operation (EXPERIMENTAL)"
+	depends on EXPERIMENTAL && CYCLADES
 	help
 	  The Cyclades-Z family of multiport cards allows 2 (two) driver op
 	  modes: polling and interrupt. In polling mode, the driver will check
@@ -285,7 +285,7 @@ config SYNCLINK_GT
 
 config NOZOMI
 	tristate "HSDPA Broadband Wireless Data Card - Globe Trotter"
-	depends on PCI
+	depends on PCI && EXPERIMENTAL
 	help
 	  If you have a HSDPA driver Broadband Wireless Data Card -
 	  Globe Trotter PCMCIA card, say Y here.
@@ -294,7 +294,7 @@ config NOZOMI
 	  will be called nozomi.
 
 config ISI
-	tristate "Multi-Tech multiport card support"
+	tristate "Multi-Tech multiport card support (EXPERIMENTAL)"
 	depends on SERIAL_NONSTANDARD && PCI
 	select FW_LOADER
 	help
@@ -317,6 +317,7 @@ config N_HDLC
 
 config N_GSM
 	tristate "GSM MUX line discipline support (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
 	depends on NET
 	help
 	  This line discipline provides support for the GSM MUX protocol and
@@ -355,9 +356,8 @@ config TRACE_SINK
 	  "Trace data router for MIPI P1149.7 cJTAG standard".
 
 config PPC_EPAPR_HV_BYTECHAN
-	bool "ePAPR hypervisor byte channel driver"
+	tristate "ePAPR hypervisor byte channel driver"
 	depends on PPC
-	select EPAPR_PARAVIRT
 	help
 	  This driver creates /dev entries for each ePAPR hypervisor byte
 	  channel, thereby allowing applications to communicate with byte
@@ -388,94 +388,3 @@ config PPC_EARLY_DEBUG_EHV_BC_HANDLE
 	  If the number you specify is not a valid byte channel handle, then
 	  there simply will be no early console output.  This is true also
 	  if you don't boot under a hypervisor at all.
-
-config GOLDFISH_TTY
-	tristate "Goldfish TTY Driver"
-	depends on GOLDFISH
-	help
-	  Console and system TTY driver for the Goldfish virtual platform.
-
-config DA_TTY
-	bool "DA TTY"
-	depends on METAG_DA
-	select SERIAL_NONSTANDARD
-	help
-	  This enables a TTY on a Dash channel.
-
-config DA_CONSOLE
-	bool "DA Console"
-	depends on DA_TTY
-	help
-	  This enables a console on a Dash channel.
-
-config MIPS_EJTAG_FDC_TTY
-	bool "MIPS EJTAG Fast Debug Channel TTY"
-	depends on MIPS_CDMM
-	help
-	  This enables a TTY and console on the MIPS EJTAG Fast Debug Channels,
-	  if they are present. This can be useful when working with an EJTAG
-	  probe which supports it, to get console output and a login prompt via
-	  EJTAG without needing to connect a serial cable.
-
-	  TTY devices are named e.g. ttyFDC3c2 (for FDC channel 2 of the FDC on
-	  CPU3).
-
-	  The console can be enabled with console=fdc1 (for FDC channel 1 on all
-	  CPUs). Do not use the console unless there is a debug probe attached
-	  to drain the FDC TX FIFO.
-
-	  If unsure, say N.
-
-config MIPS_EJTAG_FDC_EARLYCON
-	bool "Early FDC console"
-	depends on MIPS_EJTAG_FDC_TTY
-	help
-	  This registers a console on FDC channel 1 very early during boot (from
-	  MIPS arch code). This is useful for bring-up and debugging early boot
-	  issues.
-
-	  Do not enable unless there is a debug probe attached to drain the FDC
-	  TX FIFO.
-
-	  If unsure, say N.
-
-config MIPS_EJTAG_FDC_KGDB
-	bool "Use KGDB over an FDC channel"
-	depends on MIPS_EJTAG_FDC_TTY && KGDB
-	default y
-	help
-          This enables the use of KGDB over an FDC channel, allowing KGDB to be
-          used remotely or when a serial port isn't available.
-
-config MIPS_EJTAG_FDC_KGDB_CHAN
-	int "KGDB FDC channel"
-	depends on MIPS_EJTAG_FDC_KGDB
-	range 2 15
-	default 3
-	help
-	  FDC channel number to use for KGDB.
-
-config LDISC_AUTOLOAD
-	bool "Automatically load TTY Line Disciplines"
-	default y
-	help
-	  Historically the kernel has always automatically loaded any
-	  line discipline that is in a kernel module when a user asks
-	  for it to be loaded with the TIOCSETD ioctl, or through other
-	  means.  This is not always the best thing to do on systems
-	  where you know you will not be using some of the more
-	  "ancient" line disciplines, so prevent the kernel from doing
-	  this unless the request is coming from a process with the
-	  CAP_SYS_MODULE permissions.
-
-	  Say 'Y' here if you trust your userspace users to do the right
-	  thing, or if you have only provided the line disciplines that
-	  you know you will be using, or if you wish to continue to use
-	  the traditional method of on-demand loading of these modules
-	  by any user.
-
-	  This functionality can be changed at runtime with the
-	  dev.tty.ldisc_autoload sysctl, this configuration option will
-	  only set the default value of this functionality.
-
-endif # TTY

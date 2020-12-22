@@ -60,6 +60,7 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
@@ -500,8 +501,7 @@ static void start_atl_transfers(struct isp116x *isp116x)
 	if (isp116x->periodic_count) {
 		isp116x->fmindex = index =
 		    (isp116x->fmindex + 1) & (PERIODIC_SIZE - 1);
-		load = isp116x->load[index];
-		if (load) {
+		if ((load = isp116x->load[index])) {
 			/* Bring all int transfers for this frame
 			   into the active queue */
 			isp116x->atl_active = last_ep =
@@ -944,15 +944,12 @@ static void isp116x_hub_descriptor(struct isp116x *isp116x,
 {
 	u32 reg = isp116x->rhdesca;
 
-	desc->bDescriptorType = USB_DT_HUB;
+	desc->bDescriptorType = 0x29;
 	desc->bDescLength = 9;
 	desc->bHubContrCurrent = 0;
 	desc->bNbrPorts = (u8) (reg & 0x3);
 	/* Power switching, device type, overcurrent. */
-	desc->wHubCharacteristics = cpu_to_le16((u16) ((reg >> 8) &
-						       (HUB_CHAR_LPSM |
-							HUB_CHAR_COMPOUND |
-							HUB_CHAR_OCPM)));
+	desc->wHubCharacteristics = cpu_to_le16((u16) ((reg >> 8) & 0x1f));
 	desc->bPwrOn2PwrGood = (u8) ((reg >> 24) & 0xff);
 	/* ports removable, and legacy PortPwrCtrlMask */
 	desc->u.hs.DeviceRemovable[0] = 0;
@@ -1491,7 +1488,7 @@ static int isp116x_bus_resume(struct usb_hcd *hcd)
 	spin_unlock_irq(&isp116x->lock);
 
 	hcd->state = HC_STATE_RESUMING;
-	msleep(USB_RESUME_TIMEOUT);
+	msleep(20);
 
 	/* Go operational */
 	spin_lock_irq(&isp116x->lock);
@@ -1560,7 +1557,7 @@ static int isp116x_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int isp116x_probe(struct platform_device *pdev)
+static int __devinit isp116x_probe(struct platform_device *pdev)
 {
 	struct usb_hcd *hcd;
 	struct isp116x *isp116x;
@@ -1629,7 +1626,7 @@ static int isp116x_probe(struct platform_device *pdev)
 	isp116x->addr_reg = addr_reg;
 	spin_lock_init(&isp116x->lock);
 	INIT_LIST_HEAD(&isp116x->async);
-	isp116x->board = dev_get_platdata(&pdev->dev);
+	isp116x->board = pdev->dev.platform_data;
 
 	if (!isp116x->board) {
 		ERR("Platform data structure not initialized\n");
@@ -1647,8 +1644,6 @@ static int isp116x_probe(struct platform_device *pdev)
 	ret = usb_add_hcd(hcd, irq, irqflags);
 	if (ret)
 		goto err6;
-
-	device_wakeup_enable(hcd->self.controller);
 
 	ret = create_debug_file(isp116x);
 	if (ret) {
@@ -1710,7 +1705,8 @@ static struct platform_driver isp116x_driver = {
 	.suspend = isp116x_suspend,
 	.resume = isp116x_resume,
 	.driver = {
-		.name = hcd_name,
+		.name = (char *)hcd_name,
+		.owner	= THIS_MODULE,
 	},
 };
 

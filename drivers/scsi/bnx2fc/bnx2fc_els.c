@@ -1,10 +1,9 @@
 /*
- * bnx2fc_els.c: QLogic Linux FCoE offload driver.
+ * bnx2fc_els.c: Broadcom NetXtreme II Linux FCoE offload driver.
  * This file contains helper routines that handle ELS requests
  * and responses.
  *
- * Copyright (c) 2008-2013 Broadcom Corporation
- * Copyright (c) 2014-2015 QLogic Corporation
+ * Copyright (c) 2008 - 2011 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -254,7 +253,7 @@ int bnx2fc_send_rls(struct bnx2fc_rport *tgt, struct fc_frame *fp)
 	return rc;
 }
 
-static void bnx2fc_srr_compl(struct bnx2fc_els_cb_arg *cb_arg)
+void bnx2fc_srr_compl(struct bnx2fc_els_cb_arg *cb_arg)
 {
 	struct bnx2fc_mp_req *mp_req;
 	struct fc_frame_header *fc_hdr, *fh;
@@ -364,7 +363,7 @@ srr_compl_done:
 	kref_put(&orig_io_req->refcount, bnx2fc_cmd_release);
 }
 
-static void bnx2fc_rec_compl(struct bnx2fc_els_cb_arg *cb_arg)
+void bnx2fc_rec_compl(struct bnx2fc_els_cb_arg *cb_arg)
 {
 	struct bnx2fc_cmd *orig_io_req, *new_io_req;
 	struct bnx2fc_cmd *rec_req;
@@ -480,7 +479,9 @@ static void bnx2fc_rec_compl(struct bnx2fc_els_cb_arg *cb_arg)
 			bnx2fc_initiate_cleanup(orig_io_req);
 			/* Post a new IO req with the same sc_cmd */
 			BNX2FC_IO_DBG(rec_req, "Post IO request again\n");
+			spin_unlock_bh(&tgt->tgt_lock);
 			rc = bnx2fc_post_io_req(tgt, new_io_req);
+			spin_lock_bh(&tgt->tgt_lock);
 			if (!rc)
 				goto free_frame;
 			BNX2FC_IO_DBG(rec_req, "REC: io post err\n");
@@ -689,7 +690,8 @@ static int bnx2fc_initiate_els(struct bnx2fc_rport *tgt, unsigned int op,
 		rc = -EINVAL;
 		goto els_err;
 	}
-	if (!(test_bit(BNX2FC_FLAG_SESSION_READY, &tgt->flags))) {
+	if (!(test_bit(BNX2FC_FLAG_SESSION_READY, &tgt->flags)) ||
+	     (test_bit(BNX2FC_FLAG_EXPL_LOGO, &tgt->flags))) {
 		printk(KERN_ERR PFX "els 0x%x: tgt not ready\n", op);
 		rc = -EINVAL;
 		goto els_err;
@@ -706,7 +708,6 @@ static int bnx2fc_initiate_els(struct bnx2fc_rport *tgt, unsigned int op,
 	els_req->cb_func = cb_func;
 	cb_arg->io_req = els_req;
 	els_req->cb_arg = cb_arg;
-	els_req->data_xfer_len = data_len;
 
 	mp_req = (struct bnx2fc_mp_req *)&(els_req->mp_req);
 	rc = bnx2fc_init_mp_req(els_req);
@@ -853,6 +854,7 @@ static void bnx2fc_flogi_resp(struct fc_seq *seq, struct fc_frame *fp,
 	struct fc_exch *exch = fc_seq_exch(seq);
 	struct fc_lport *lport = exch->lp;
 	u8 *mac;
+	struct fc_frame_header *fh;
 	u8 op;
 
 	if (IS_ERR(fp))
@@ -860,6 +862,13 @@ static void bnx2fc_flogi_resp(struct fc_seq *seq, struct fc_frame *fp,
 
 	mac = fr_cb(fp)->granted_mac;
 	if (is_zero_ether_addr(mac)) {
+		fh = fc_frame_header_get(fp);
+		if (fh->fh_type != FC_TYPE_ELS) {
+			printk(KERN_ERR PFX "bnx2fc_flogi_resp:"
+				"fh_type != FC_TYPE_ELS\n");
+			fc_frame_free(fp);
+			return;
+		}
 		op = fc_frame_payload_op(fp);
 		if (lport->vport) {
 			if (op == ELS_LS_RJT) {
@@ -869,10 +878,12 @@ static void bnx2fc_flogi_resp(struct fc_seq *seq, struct fc_frame *fp,
 				return;
 			}
 		}
-		fcoe_ctlr_recv_flogi(fip, lport, fp);
+		if (fcoe_ctlr_recv_flogi(fip, lport, fp)) {
+			fc_frame_free(fp);
+			return;
+		}
 	}
-	if (!is_zero_ether_addr(mac))
-		fip->update_mac(lport, mac);
+	fip->update_mac(lport, mac);
 done:
 	fc_lport_flogi_resp(seq, fp, lport);
 }
@@ -899,7 +910,7 @@ struct fc_seq *bnx2fc_elsct_send(struct fc_lport *lport, u32 did,
 {
 	struct fcoe_port *port = lport_priv(lport);
 	struct bnx2fc_interface *interface = port->priv;
-	struct fcoe_ctlr *fip = bnx2fc_to_ctlr(interface);
+	struct fcoe_ctlr *fip = &interface->ctlr;
 	struct fc_frame_header *fh = fc_frame_header_get(fp);
 
 	switch (op) {

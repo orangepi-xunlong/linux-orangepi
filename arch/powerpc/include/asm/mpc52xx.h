@@ -275,7 +275,7 @@ extern int mpc5200_psc_ac97_gpio_reset(int psc_number);
 extern void mpc52xx_map_common_devices(void);
 extern int mpc52xx_set_psc_clkdiv(int psc_id, int clkdiv);
 extern unsigned int mpc52xx_get_xtal_freq(struct device_node *node);
-extern void __noreturn mpc52xx_restart(char *cmd);
+extern void mpc52xx_restart(char *cmd);
 
 /* mpc52xx_gpt.c */
 struct mpc52xx_gpt_priv;
@@ -307,7 +307,6 @@ struct mpc52xx_lpbfifo_request {
 	size_t size;
 	size_t pos;	/* current position of transfer */
 	int flags;
-	int defer_xfer_start;
 
 	/* What to do when finished */
 	void (*callback)(struct mpc52xx_lpbfifo_request *);
@@ -324,7 +323,6 @@ struct mpc52xx_lpbfifo_request {
 extern int mpc52xx_lpbfifo_submit(struct mpc52xx_lpbfifo_request *req);
 extern void mpc52xx_lpbfifo_abort(struct mpc52xx_lpbfifo_request *req);
 extern void mpc52xx_lpbfifo_poll(void);
-extern int mpc52xx_lpbfifo_start_xfer(struct mpc52xx_lpbfifo_request *req);
 
 /* mpc52xx_pic.c */
 extern void mpc52xx_init_irq(void);

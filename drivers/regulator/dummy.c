@@ -25,31 +25,24 @@
 
 struct regulator_dev *dummy_regulator_rdev;
 
-static struct regulator_init_data dummy_initdata = {
-	.constraints = {
-		.always_on = 1,
-	},
-};
+static struct regulator_init_data dummy_initdata;
 
 static struct regulator_ops dummy_ops;
 
-static const struct regulator_desc dummy_desc = {
-	.name = "regulator-dummy",
+static struct regulator_desc dummy_desc = {
+	.name = "dummy",
 	.id = -1,
 	.type = REGULATOR_VOLTAGE,
 	.owner = THIS_MODULE,
 	.ops = &dummy_ops,
 };
 
-static int dummy_regulator_probe(struct platform_device *pdev)
+static int __devinit dummy_regulator_probe(struct platform_device *pdev)
 {
-	struct regulator_config config = { };
 	int ret;
 
-	config.dev = &pdev->dev;
-	config.init_data = &dummy_initdata;
-
-	dummy_regulator_rdev = regulator_register(&dummy_desc, &config);
+	dummy_regulator_rdev = regulator_register(&dummy_desc, NULL,
+						  &dummy_initdata, NULL, NULL);
 	if (IS_ERR(dummy_regulator_rdev)) {
 		ret = PTR_ERR(dummy_regulator_rdev);
 		pr_err("Failed to register regulator: %d\n", ret);
@@ -63,6 +56,7 @@ static struct platform_driver dummy_regulator_driver = {
 	.probe		= dummy_regulator_probe,
 	.driver		= {
 		.name		= "reg-dummy",
+		.owner		= THIS_MODULE,
 	},
 };
 

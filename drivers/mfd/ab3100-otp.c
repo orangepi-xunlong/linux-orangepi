@@ -187,10 +187,11 @@ static int __init ab3100_otp_probe(struct platform_device *pdev)
 	int err = 0;
 	int i;
 
-	otp = devm_kzalloc(&pdev->dev, sizeof(struct ab3100_otp), GFP_KERNEL);
-	if (!otp)
+	otp = kzalloc(sizeof(struct ab3100_otp), GFP_KERNEL);
+	if (!otp) {
+		dev_err(&pdev->dev, "could not allocate AB3100 OTP device\n");
 		return -ENOMEM;
-
+	}
 	otp->dev = &pdev->dev;
 
 	/* Replace platform data coming in with a local struct */
@@ -198,7 +199,7 @@ static int __init ab3100_otp_probe(struct platform_device *pdev)
 
 	err = ab3100_otp_read(otp);
 	if (err)
-		return err;
+		goto err_otp_read;
 
 	dev_info(&pdev->dev, "AB3100 OTP readout registered\n");
 
@@ -207,19 +208,22 @@ static int __init ab3100_otp_probe(struct platform_device *pdev)
 		err = device_create_file(&pdev->dev,
 					 &ab3100_otp_attrs[i]);
 		if (err)
-			goto err;
+			goto err_create_file;
 	}
 
 	/* debugfs entries */
 	err = ab3100_otp_init_debugfs(&pdev->dev, otp);
 	if (err)
-		goto err;
+		goto err_init_debugfs;
 
 	return 0;
 
-err:
+err_init_debugfs:
+err_create_file:
 	while (--i >= 0)
 		device_remove_file(&pdev->dev, &ab3100_otp_attrs[i]);
+err_otp_read:
+	kfree(otp);
 	return err;
 }
 
@@ -232,17 +236,31 @@ static int __exit ab3100_otp_remove(struct platform_device *pdev)
 		device_remove_file(&pdev->dev,
 				   &ab3100_otp_attrs[i]);
 	ab3100_otp_exit_debugfs(otp);
+	kfree(otp);
 	return 0;
 }
 
 static struct platform_driver ab3100_otp_driver = {
 	.driver = {
 		.name = "ab3100-otp",
+		.owner = THIS_MODULE,
 	},
 	.remove	 = __exit_p(ab3100_otp_remove),
 };
 
-module_platform_driver_probe(ab3100_otp_driver, ab3100_otp_probe);
+static int __init ab3100_otp_init(void)
+{
+	return platform_driver_probe(&ab3100_otp_driver,
+				     ab3100_otp_probe);
+}
+
+static void __exit ab3100_otp_exit(void)
+{
+	platform_driver_unregister(&ab3100_otp_driver);
+}
+
+module_init(ab3100_otp_init);
+module_exit(ab3100_otp_exit);
 
 MODULE_AUTHOR("Linus Walleij <linus.walleij@stericsson.com>");
 MODULE_DESCRIPTION("AB3100 OTP Readout Driver");

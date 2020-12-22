@@ -12,7 +12,6 @@
 #ifndef _ASM_SYSCALL_H
 #define _ASM_SYSCALL_H	1
 
-#include <uapi/linux/audit.h>
 #include <linux/sched.h>
 #include <linux/err.h>
 #include <asm/ptrace.h>
@@ -23,12 +22,11 @@
  * type here is what we want [need] for both 32 bit and 64 bit systems.
  */
 extern const unsigned int sys_call_table[];
-extern const unsigned int sys_call_table_emu[];
 
 static inline long syscall_get_nr(struct task_struct *task,
 				  struct pt_regs *regs)
 {
-	return test_pt_regs_flag(regs, PIF_SYSCALL) ?
+	return test_tsk_thread_flag(task, TIF_SYSCALL) ?
 		(regs->int_code & 0xffff) : -1;
 }
 
@@ -54,7 +52,7 @@ static inline void syscall_set_return_value(struct task_struct *task,
 					    struct pt_regs *regs,
 					    int error, long val)
 {
-	regs->gprs[2] = error ? error : val;
+	regs->gprs[2] = error ? -error : val;
 }
 
 static inline void syscall_get_arguments(struct task_struct *task,
@@ -63,12 +61,6 @@ static inline void syscall_get_arguments(struct task_struct *task,
 					 unsigned long *args)
 {
 	unsigned long mask = -1UL;
-
-	/*
-	 * No arguments for this syscall, there's nothing to do.
-	 */
-	if (!n)
-		return;
 
 	BUG_ON(i + n > 6);
 #ifdef CONFIG_COMPAT
@@ -95,12 +87,4 @@ static inline void syscall_set_arguments(struct task_struct *task,
 		regs->orig_gpr2 = args[0];
 }
 
-static inline int syscall_get_arch(void)
-{
-#ifdef CONFIG_COMPAT
-	if (test_tsk_thread_flag(current, TIF_31BIT))
-		return AUDIT_ARCH_S390;
-#endif
-	return AUDIT_ARCH_S390X;
-}
 #endif	/* _ASM_SYSCALL_H */

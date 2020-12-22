@@ -27,6 +27,12 @@
 #include <sound/hwdep.h>
 #include <linux/interrupt.h>
 
+#if defined(CONFIG_FW_LOADER) || defined(CONFIG_FW_LOADER_MODULE)
+#if !defined(CONFIG_USE_VXLOADER) && !defined(CONFIG_SND_VX_LIB) /* built-in kernel */
+#define SND_VX_FW_LOADER	/* use the standard firmware loader */
+#endif
+#endif
+
 struct firmware;
 struct device;
 
@@ -80,6 +86,8 @@ struct vx_pipe {
 
 	unsigned int references;     /* an output pipe may be used for monitoring and/or playback */
 	struct vx_pipe *monitoring_pipe;  /* pointer to the monitoring pipe (capture pipe only)*/
+
+	struct tasklet_struct start_tq;
 };
 
 struct vx_core;
@@ -163,7 +171,9 @@ struct vx_core {
 	struct snd_vx_hardware *hw;
 	struct snd_vx_ops *ops;
 
-	struct mutex lock;
+	spinlock_t lock;
+	spinlock_t irq_lock;
+	struct tasklet_struct tq;
 
 	unsigned int chip_status;
 	unsigned int pcm_running;
@@ -219,7 +229,6 @@ void snd_vx_free_firmware(struct vx_core *chip);
  * interrupt handler; exported for pcmcia
  */
 irqreturn_t snd_vx_irq_handler(int irq, void *dev);
-irqreturn_t snd_vx_threaded_irq_handler(int irq, void *dev);
 
 /*
  * lowlevel functions
@@ -332,7 +341,7 @@ int vx_change_frequency(struct vx_core *chip);
 /*
  * PM
  */
-int snd_vx_suspend(struct vx_core *card);
+int snd_vx_suspend(struct vx_core *card, pm_message_t state);
 int snd_vx_resume(struct vx_core *card);
 
 /*

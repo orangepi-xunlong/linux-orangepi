@@ -30,6 +30,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/input.h>
 #include <linux/gameport.h>
 #include <linux/jiffies.h>
@@ -819,4 +820,15 @@ static struct gameport_driver sw_drv = {
 	.disconnect	= sw_disconnect,
 };
 
-module_gameport_driver(sw_drv);
+static int __init sw_init(void)
+{
+	return gameport_register_driver(&sw_drv);
+}
+
+static void __exit sw_exit(void)
+{
+	gameport_unregister_driver(&sw_drv);
+}
+
+module_init(sw_init);
+module_exit(sw_exit);

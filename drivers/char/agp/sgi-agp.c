@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/agp_backend.h>
 #include <asm/sn/addrs.h>
 #include <asm/sn/io.h>
@@ -157,6 +158,7 @@ static int sgi_tioca_insert_memory(struct agp_memory *mem, off_t pg_start,
 		break;
 	case LVL2_APER_SIZE:
 		return -EINVAL;
+		break;
 	default:
 		num_entries = 0;
 		break;
@@ -269,7 +271,7 @@ const struct agp_bridge_driver sgi_tioca_driver = {
 	.num_aperture_sizes = 1,
 };
 
-static int agp_sgi_init(void)
+static int __devinit agp_sgi_init(void)
 {
 	unsigned int j;
 	struct tioca_kernel *info;
@@ -288,11 +290,12 @@ static int agp_sgi_init(void)
 
 	j = 0;
 	list_for_each_entry(info, &tioca_list, ca_list) {
+		struct list_head *tmp;
 		if (list_empty(info->ca_devices))
 			continue;
-		list_for_each_entry(pdev, info->ca_devices, bus_list) {
+		list_for_each(tmp, info->ca_devices) {
 			u8 cap_ptr;
-
+			pdev = pci_dev_b(tmp);
 			if (pdev->class != (PCI_CLASS_DISPLAY_VGA << 8))
 				continue;
 			cap_ptr = pci_find_capability(pdev, PCI_CAP_ID_AGP);
@@ -326,7 +329,7 @@ static int agp_sgi_init(void)
 	return 0;
 }
 
-static void agp_sgi_cleanup(void)
+static void __devexit agp_sgi_cleanup(void)
 {
 	kfree(sgi_tioca_agp_bridges);
 	sgi_tioca_agp_bridges = NULL;

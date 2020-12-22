@@ -92,7 +92,7 @@ static int full_duplex[MAX_UNITS] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 #include <asm/byteorder.h>
 
 /* These identify the driver base version and may not be removed. */
-static const char version[] =
+static const char version[] __devinitconst =
 	KERN_INFO DRV_NAME ".c:v" DRV_VERSION " " DRV_RELDATE "\n";
 
 
@@ -150,7 +150,7 @@ struct chip_info {
 	int flags;
 };
 
-static const struct chip_info skel_netdrv_tbl[] = {
+static const struct chip_info skel_netdrv_tbl[] __devinitdata = {
  	{ "100/10M Ethernet PCI Adapter",	HAS_MII_XCVR },
 	{ "100/10M Ethernet PCI Adapter",	HAS_CHIP_XCVR },
 	{ "1000/100/10M Ethernet PCI Adapter",	HAS_MII_XCVR },
@@ -257,8 +257,8 @@ enum rx_desc_status_bits {
 	RXFSD = 0x00000800,	/* first descriptor */
 	RXLSD = 0x00000400,	/* last descriptor */
 	ErrorSummary = 0x80,	/* error summary */
-	RUNTPKT = 0x40,		/* runt packet received */
-	LONGPKT = 0x20,		/* long packet received */
+	RUNT = 0x40,		/* runt packet received */
+	LONG = 0x20,		/* long packet received */
 	FAE = 0x10,		/* frame align error */
 	CRC = 0x08,		/* crc error */
 	RXER = 0x04,		/* receive error */
@@ -477,8 +477,8 @@ static const struct net_device_ops netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
-static int fealnx_init_one(struct pci_dev *pdev,
-			   const struct pci_device_id *ent)
+static int __devinit fealnx_init_one(struct pci_dev *pdev,
+				     const struct pci_device_id *ent)
 {
 	struct netdev_private *np;
 	int i, option, err, irq;
@@ -544,6 +544,9 @@ static int fealnx_init_one(struct pci_dev *pdev,
 
 	/* Reset the chip to erase previous misconfiguration. */
 	iowrite32(0x00000001, ioaddr + BCR);
+
+	dev->base_addr = (unsigned long)ioaddr;
+	dev->irq = irq;
 
 	/* Make certain the descriptor lists are aligned. */
 	np = netdev_priv(dev);
@@ -684,7 +687,7 @@ err_out_res:
 }
 
 
-static void fealnx_remove_one(struct pci_dev *pdev)
+static void __devexit fealnx_remove_one(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 
@@ -699,6 +702,7 @@ static void fealnx_remove_one(struct pci_dev *pdev)
 		pci_iounmap(pdev, np->mem);
 		free_netdev(dev);
 		pci_release_regions(pdev);
+		pci_set_drvdata(pdev, NULL);
 	} else
 		printk(KERN_ERR "fealnx: remove for unknown device\n");
 }
@@ -828,13 +832,11 @@ static int netdev_open(struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem *ioaddr = np->mem;
-	const int irq = np->pci_dev->irq;
-	int rc, i;
+	int i;
 
 	iowrite32(0x00000001, ioaddr + BCR);	/* Reset */
 
-	rc = request_irq(irq, intr_handler, IRQF_SHARED, dev->name, dev);
-	if (rc)
+	if (request_irq(dev->irq, intr_handler, IRQF_SHARED, dev->name, dev))
 		return -EAGAIN;
 
 	for (i = 0; i < 3; i++)
@@ -922,7 +924,8 @@ static int netdev_open(struct net_device *dev)
 	np->reset_timer.data = (unsigned long) dev;
 	np->reset_timer.function = reset_timer;
 	np->reset_timer_armed = 0;
-	return rc;
+
+	return 0;
 }
 
 
@@ -1227,7 +1230,7 @@ static void fealnx_tx_timeout(struct net_device *dev)
 
 	spin_unlock_irqrestore(&np->lock, flags);
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	dev->stats.tx_errors++;
 	netif_wake_queue(dev); /* or .._start_.. ?? */
 }
@@ -1633,7 +1636,7 @@ static int netdev_rx(struct net_device *dev)
 					       dev->name, rx_status);
 
 				dev->stats.rx_errors++;	/* end of a packet. */
-				if (rx_status & (LONGPKT | RUNTPKT))
+				if (rx_status & (LONG | RUNT))
 					dev->stats.rx_length_errors++;
 				if (rx_status & RXER)
 					dev->stats.rx_frame_errors++;
@@ -1907,7 +1910,7 @@ static int netdev_close(struct net_device *dev)
 	del_timer_sync(&np->timer);
 	del_timer_sync(&np->reset_timer);
 
-	free_irq(np->pci_dev->irq, dev);
+	free_irq(dev->irq, dev);
 
 	/* Free all the skbuffs in the Rx queue. */
 	for (i = 0; i < RX_RING_SIZE; i++) {
@@ -1936,7 +1939,7 @@ static int netdev_close(struct net_device *dev)
 	return 0;
 }
 
-static const struct pci_device_id fealnx_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(fealnx_pci_tbl) = {
 	{0x1516, 0x0800, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{0x1516, 0x0803, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1},
 	{0x1516, 0x0891, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2},
@@ -1949,7 +1952,7 @@ static struct pci_driver fealnx_driver = {
 	.name		= "fealnx",
 	.id_table	= fealnx_pci_tbl,
 	.probe		= fealnx_init_one,
-	.remove		= fealnx_remove_one,
+	.remove		= __devexit_p(fealnx_remove_one),
 };
 
 static int __init fealnx_init(void)

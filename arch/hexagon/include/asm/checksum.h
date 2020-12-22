@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -38,12 +38,12 @@ __wsum csum_partial_copy_nocheck(const void *src, void *dst,
  * returns a 16-bit checksum, already complemented
  */
 #define csum_tcpudp_nofold csum_tcpudp_nofold
-__wsum csum_tcpudp_nofold(__be32 saddr, __be32 daddr,
-			  __u32 len, __u8 proto, __wsum sum);
+__wsum csum_tcpudp_nofold(unsigned long saddr, unsigned long daddr,
+	unsigned short len, unsigned short proto, __wsum sum);
 
 #define csum_tcpudp_magic csum_tcpudp_magic
-__sum16 csum_tcpudp_magic(__be32 saddr, __be32 daddr,
-			  __u32 len, __u8 proto, __wsum sum);
+__sum16 csum_tcpudp_magic(unsigned long saddr, unsigned long daddr,
+	unsigned short len, unsigned short proto, __wsum sum);
 
 #include <asm-generic/checksum.h>
 

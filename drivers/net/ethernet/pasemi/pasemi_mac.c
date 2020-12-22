@@ -13,9 +13,11 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
+#include <linux/init.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
@@ -30,7 +32,9 @@
 #include <linux/skbuff.h>
 
 #include <linux/ip.h>
+#include <linux/tcp.h>
 #include <net/checksum.h>
+#include <linux/inet_lro.h>
 #include <linux/prefetch.h>
 
 #include <asm/irq.h>
@@ -50,8 +54,11 @@
  *
  * - Multicast support
  * - Large MTU support
+ * - SW LRO
  * - Multiqueue RX/TX
  */
+
+#define LRO_MAX_AGGR 64
 
 #define PE_MIN_MTU	64
 #define PE_MAX_MTU	9000
@@ -184,7 +191,7 @@ static int pasemi_get_mac_addr(struct pasemi_mac *mac)
 	struct device_node *dn = pci_device_to_OF_node(pdev);
 	int len;
 	const u8 *maddr;
-	u8 addr[ETH_ALEN];
+	u8 addr[6];
 
 	if (!dn) {
 		dev_dbg(&pdev->dev,
@@ -194,8 +201,8 @@ static int pasemi_get_mac_addr(struct pasemi_mac *mac)
 
 	maddr = of_get_property(dn, "local-mac-address", &len);
 
-	if (maddr && len == ETH_ALEN) {
-		memcpy(mac->mac_addr, maddr, ETH_ALEN);
+	if (maddr && len == 6) {
+		memcpy(mac->mac_addr, maddr, 6);
 		return 0;
 	}
 
@@ -212,15 +219,14 @@ static int pasemi_get_mac_addr(struct pasemi_mac *mac)
 		return -ENOENT;
 	}
 
-	if (sscanf(maddr, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-		   &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5])
-	    != ETH_ALEN) {
+	if (sscanf(maddr, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &addr[0],
+		   &addr[1], &addr[2], &addr[3], &addr[4], &addr[5]) != 6) {
 		dev_warn(&pdev->dev,
 			 "can't parse mac address, not configuring\n");
 		return -EINVAL;
 	}
 
-	memcpy(mac->mac_addr, addr, ETH_ALEN);
+	memcpy(mac->mac_addr, addr, 6);
 
 	return 0;
 }
@@ -248,6 +254,37 @@ static int pasemi_mac_set_mac_addr(struct net_device *dev, void *p)
 	write_mac_reg(mac, PAS_MAC_CFG_ADR0, adr0);
 	write_mac_reg(mac, PAS_MAC_CFG_ADR1, adr1);
 	pasemi_mac_intf_enable(mac);
+
+	return 0;
+}
+
+static int get_skb_hdr(struct sk_buff *skb, void **iphdr,
+		       void **tcph, u64 *hdr_flags, void *data)
+{
+	u64 macrx = (u64) data;
+	unsigned int ip_len;
+	struct iphdr *iph;
+
+	/* IPv4 header checksum failed */
+	if ((macrx & XCT_MACRX_HTY_M) != XCT_MACRX_HTY_IPV4_OK)
+		return -1;
+
+	/* non tcp packet */
+	skb_reset_network_header(skb);
+	iph = ip_hdr(skb);
+	if (iph->protocol != IPPROTO_TCP)
+		return -1;
+
+	ip_len = ip_hdrlen(skb);
+	skb_set_transport_header(skb, ip_len);
+	*tcph = tcp_hdr(skb);
+
+	/* check if ip header and tcp header are complete */
+	if (ntohs(iph->tot_len) < ip_len + tcp_hdrlen(skb))
+		return -1;
+
+	*hdr_flags = LRO_IPV4 | LRO_TCP;
+	*iphdr = iph;
 
 	return 0;
 }
@@ -402,11 +439,13 @@ static int pasemi_mac_setup_rx_resources(const struct net_device *dev)
 	if (pasemi_dma_alloc_ring(&ring->chan, RX_RING_SIZE))
 		goto out_ring_desc;
 
-	ring->buffers = dma_zalloc_coherent(&mac->dma_pdev->dev,
-					    RX_RING_SIZE * sizeof(u64),
-					    &ring->buf_dma, GFP_KERNEL);
+	ring->buffers = dma_alloc_coherent(&mac->dma_pdev->dev,
+					   RX_RING_SIZE * sizeof(u64),
+					   &ring->buf_dma, GFP_KERNEL);
 	if (!ring->buffers)
 		goto out_ring_desc;
+
+	memset(ring->buffers, 0, RX_RING_SIZE * sizeof(u64));
 
 	write_dma_reg(PAS_DMA_RXCHAN_BASEL(chno),
 		      PAS_DMA_RXCHAN_BASEL_BRBL(ring->chan.ring_dma));
@@ -540,9 +579,8 @@ static void pasemi_mac_free_tx_resources(struct pasemi_mac *mac)
 						(TX_RING_SIZE-1)].dma;
 			freed = pasemi_mac_unmap_tx_skb(mac, nfrags,
 							info->skb, dmas);
-		} else {
+		} else
 			freed = 2;
-		}
 	}
 
 	kfree(txring->ring_info);
@@ -585,7 +623,7 @@ static void pasemi_mac_free_rx_resources(struct pasemi_mac *mac)
 	mac->rx = NULL;
 }
 
-static void pasemi_mac_replenish_rx_ring(struct net_device *dev,
+static void pasemi_mac_replenish_rx_ring(const struct net_device *dev,
 					 const int limit)
 {
 	const struct pasemi_mac *mac = netdev_priv(dev);
@@ -770,9 +808,8 @@ static int pasemi_mac_clean_rx(struct pasemi_mac_rxring *rx,
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 			skb->csum = (macrx & XCT_MACRX_CSUM_M) >>
 					   XCT_MACRX_CSUM_S;
-		} else {
+		} else
 			skb_checksum_none_assert(skb);
-		}
 
 		packets++;
 		tot_bytes += len;
@@ -781,7 +818,7 @@ static int pasemi_mac_clean_rx(struct pasemi_mac_rxring *rx,
 		skb_put(skb, len-4);
 
 		skb->protocol = eth_type_trans(skb, mac->netdev);
-		napi_gro_receive(&mac->napi, skb);
+		lro_receive_skb(&mac->lro_mgr, skb, (void *)macrx);
 
 next:
 		RX_DESC(rx, n) = 0;
@@ -802,6 +839,8 @@ next:
 	}
 
 	rx_ring(mac)->next_to_clean = n;
+
+	lro_flush_all(&mac->lro_mgr);
 
 	/* Increase is in number of 16-byte entries, and since each descriptor
 	 * with an 8BRES takes up 3x8 bytes (padded to 4x8), increase with
@@ -989,7 +1028,7 @@ static void pasemi_adjust_link(struct net_device *dev)
 	unsigned int flags;
 	unsigned int new_flags;
 
-	if (!dev->phydev->link) {
+	if (!mac->phydev->link) {
 		/* If no link, MAC speed settings don't matter. Just report
 		 * link down and return.
 		 */
@@ -1010,10 +1049,10 @@ static void pasemi_adjust_link(struct net_device *dev)
 	new_flags = flags & ~(PAS_MAC_CFG_PCFG_HD | PAS_MAC_CFG_PCFG_SPD_M |
 			      PAS_MAC_CFG_PCFG_TSR_M);
 
-	if (!dev->phydev->duplex)
+	if (!mac->phydev->duplex)
 		new_flags |= PAS_MAC_CFG_PCFG_HD;
 
-	switch (dev->phydev->speed) {
+	switch (mac->phydev->speed) {
 	case 1000:
 		new_flags |= PAS_MAC_CFG_PCFG_SPD_1G |
 			     PAS_MAC_CFG_PCFG_TSR_1G;
@@ -1027,15 +1066,15 @@ static void pasemi_adjust_link(struct net_device *dev)
 			     PAS_MAC_CFG_PCFG_TSR_10M;
 		break;
 	default:
-		printk("Unsupported speed %d\n", dev->phydev->speed);
+		printk("Unsupported speed %d\n", mac->phydev->speed);
 	}
 
 	/* Print on link or speed/duplex change */
-	msg = mac->link != dev->phydev->link || flags != new_flags;
+	msg = mac->link != mac->phydev->link || flags != new_flags;
 
-	mac->duplex = dev->phydev->duplex;
-	mac->speed = dev->phydev->speed;
-	mac->link = dev->phydev->link;
+	mac->duplex = mac->phydev->duplex;
+	mac->speed = mac->phydev->speed;
+	mac->link = mac->phydev->link;
 
 	if (new_flags != flags)
 		write_mac_reg(mac, PAS_MAC_CFG_PCFG, new_flags);
@@ -1062,10 +1101,12 @@ static int pasemi_mac_phy_init(struct net_device *dev)
 	phydev = of_phy_connect(dev, phy_dn, &pasemi_adjust_link, 0,
 				PHY_INTERFACE_MODE_SGMII);
 
-	if (!phydev) {
+	if (IS_ERR(phydev)) {
 		printk(KERN_ERR "%s: Could not attach to phy\n", dev->name);
-		return -ENODEV;
+		return PTR_ERR(phydev);
 	}
+
+	mac->phydev = phydev;
 
 	return 0;
 }
@@ -1177,7 +1218,7 @@ static int pasemi_mac_open(struct net_device *dev)
 	snprintf(mac->tx_irq_name, sizeof(mac->tx_irq_name), "%s tx",
 		 dev->name);
 
-	ret = request_irq(mac->tx->chan.irq, pasemi_mac_tx_intr, 0,
+	ret = request_irq(mac->tx->chan.irq, pasemi_mac_tx_intr, IRQF_DISABLED,
 			  mac->tx_irq_name, mac->tx);
 	if (ret) {
 		dev_err(&mac->pdev->dev, "request_irq of irq %d failed: %d\n",
@@ -1188,7 +1229,7 @@ static int pasemi_mac_open(struct net_device *dev)
 	snprintf(mac->rx_irq_name, sizeof(mac->rx_irq_name), "%s rx",
 		 dev->name);
 
-	ret = request_irq(mac->rx->chan.irq, pasemi_mac_rx_intr, 0,
+	ret = request_irq(mac->rx->chan.irq, pasemi_mac_rx_intr, IRQF_DISABLED,
 			  mac->rx_irq_name, mac->rx);
 	if (ret) {
 		dev_err(&mac->pdev->dev, "request_irq of irq %d failed: %d\n",
@@ -1196,12 +1237,14 @@ static int pasemi_mac_open(struct net_device *dev)
 		goto out_rx_int;
 	}
 
-	if (dev->phydev)
-		phy_start(dev->phydev);
+	if (mac->phydev)
+		phy_start(mac->phydev);
 
-	setup_timer(&mac->tx->clean_timer, pasemi_mac_tx_timer,
-		    (unsigned long)mac->tx);
-	mod_timer(&mac->tx->clean_timer, jiffies + HZ);
+	init_timer(&mac->tx->clean_timer);
+	mac->tx->clean_timer.function = pasemi_mac_tx_timer;
+	mac->tx->clean_timer.data = (unsigned long)mac->tx;
+	mac->tx->clean_timer.expires = jiffies+HZ;
+	add_timer(&mac->tx->clean_timer);
 
 	return 0;
 
@@ -1291,9 +1334,9 @@ static int pasemi_mac_close(struct net_device *dev)
 	rxch = rx_ring(mac)->chan.chno;
 	txch = tx_ring(mac)->chan.chno;
 
-	if (dev->phydev) {
-		phy_stop(dev->phydev);
-		phy_disconnect(dev->phydev);
+	if (mac->phydev) {
+		phy_stop(mac->phydev);
+		phy_disconnect(mac->phydev);
 	}
 
 	del_timer_sync(&mac->tx->clean_timer);
@@ -1684,7 +1727,7 @@ static const struct net_device_ops pasemi_netdev_ops = {
 #endif
 };
 
-static int
+static int __devinit
 pasemi_mac_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct net_device *dev;
@@ -1713,6 +1756,16 @@ pasemi_mac_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	dev->features = NETIF_F_IP_CSUM | NETIF_F_LLTX | NETIF_F_SG |
 			NETIF_F_HIGHDMA | NETIF_F_GSO;
+
+	mac->lro_mgr.max_aggr = LRO_MAX_AGGR;
+	mac->lro_mgr.max_desc = MAX_LRO_DESCRIPTORS;
+	mac->lro_mgr.lro_arr = mac->lro_desc;
+	mac->lro_mgr.get_skb_header = get_skb_hdr;
+	mac->lro_mgr.features = LRO_F_NAPI | LRO_F_EXTRACT_VLAN_ID;
+	mac->lro_mgr.dev = mac->netdev;
+	mac->lro_mgr.ip_summed = CHECKSUM_UNNECESSARY;
+	mac->lro_mgr.ip_summed_aggr = CHECKSUM_UNNECESSARY;
+
 
 	mac->dma_pdev = pci_get_device(PCI_VENDOR_ID_PASEMI, 0xa007, NULL);
 	if (!mac->dma_pdev) {
@@ -1776,17 +1829,18 @@ pasemi_mac_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		dev_err(&mac->pdev->dev, "register_netdev failed with error %d\n",
 			err);
 		goto out;
-	} else if (netif_msg_probe(mac)) {
+	} else if netif_msg_probe(mac)
 		printk(KERN_INFO "%s: PA Semi %s: intf %d, hw addr %pM\n",
 		       dev->name, mac->type == MAC_TYPE_GMAC ? "GMAC" : "XAUI",
 		       mac->dma_if, dev->dev_addr);
-	}
 
 	return err;
 
 out:
-	pci_dev_put(mac->iob_pdev);
-	pci_dev_put(mac->dma_pdev);
+	if (mac->iob_pdev)
+		pci_dev_put(mac->iob_pdev);
+	if (mac->dma_pdev)
+		pci_dev_put(mac->dma_pdev);
 
 	free_netdev(dev);
 out_disable_device:
@@ -1795,7 +1849,7 @@ out_disable_device:
 
 }
 
-static void pasemi_mac_remove(struct pci_dev *pdev)
+static void __devexit pasemi_mac_remove(struct pci_dev *pdev)
 {
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct pasemi_mac *mac;
@@ -1814,10 +1868,11 @@ static void pasemi_mac_remove(struct pci_dev *pdev)
 	pasemi_dma_free_chan(&mac->tx->chan);
 	pasemi_dma_free_chan(&mac->rx->chan);
 
+	pci_set_drvdata(pdev, NULL);
 	free_netdev(netdev);
 }
 
-static const struct pci_device_id pasemi_mac_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(pasemi_mac_pci_tbl) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_PASEMI, 0xa005) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_PASEMI, 0xa006) },
 	{ },
@@ -1829,7 +1884,7 @@ static struct pci_driver pasemi_mac_driver = {
 	.name		= "pasemi_mac",
 	.id_table	= pasemi_mac_pci_tbl,
 	.probe		= pasemi_mac_probe,
-	.remove		= pasemi_mac_remove,
+	.remove		= __devexit_p(pasemi_mac_remove),
 };
 
 static void __exit pasemi_mac_cleanup_module(void)

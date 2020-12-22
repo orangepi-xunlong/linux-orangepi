@@ -292,9 +292,9 @@
 	/* Jump to .init code at _start which lives in the .head section
 	 * and will be discarded after boot.
 	 */
-	LOAD_SYMBOL_2_GPR(r15, _start)
-	tophys	(r13,r15)			/* MMU disabled */
-	l.jr	r13
+	LOAD_SYMBOL_2_GPR(r4, _start)
+	tophys	(r3,r4)			/* MMU disabled */
+	l.jr	r3
 	 l.nop
 
 /* ---[ 0x200: BUS exception ]------------------------------------------- */
@@ -754,6 +754,11 @@ _dc_enable:
 
 /* ===============================================[ page table masks ]=== */
 
+/* bit 4 is used in hardware as write back cache bit. we never use this bit
+ * explicitly, so we can reuse it as _PAGE_FILE bit and mask it out when
+ * writing into hardware pte's
+ */
+
 #define DTLB_UP_CONVERT_MASK  0x3fa
 #define ITLB_UP_CONVERT_MASK  0x3a
 
@@ -1065,7 +1070,8 @@ d_pte_not_present:
 	EXCEPTION_LOAD_GPR4
 	EXCEPTION_LOAD_GPR5
 	EXCEPTION_LOAD_GPR6
-	EXCEPTION_HANDLE(_dtlb_miss_page_fault_handler)
+	l.j	_dispatch_do_dpage_fault
+	l.nop
 
 /* ==============================================[ ITLB miss handler ]=== */
 ENTRY(itlb_miss_handler)
@@ -1187,7 +1193,8 @@ i_pte_not_present:
 	EXCEPTION_LOAD_GPR4
 	EXCEPTION_LOAD_GPR5
 	EXCEPTION_LOAD_GPR6
-	EXCEPTION_HANDLE(_itlb_miss_page_fault_handler)
+	l.j	_dispatch_do_ipage_fault
+	l.nop
 
 /* ==============================================[ boot tlb handlers ]=== */
 

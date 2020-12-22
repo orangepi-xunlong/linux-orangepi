@@ -66,7 +66,7 @@ static void (*specific_poweroff_func)(ipmi_user_t user);
 /* Holds the old poweroff function so we can restore it on removal. */
 static void (*old_poweroff_func)(void);
 
-static int set_param_ifnum(const char *val, const struct kernel_param *kp)
+static int set_param_ifnum(const char *val, struct kernel_param *kp)
 {
 	int rv = param_set_int(val, kp);
 	if (rv)
@@ -659,7 +659,7 @@ static struct ipmi_smi_watcher smi_watcher = {
 #ifdef CONFIG_PROC_FS
 #include <linux/sysctl.h>
 
-static struct ctl_table ipmi_table[] = {
+static ctl_table ipmi_table[] = {
 	{ .procname	= "poweroff_powercycle",
 	  .data		= &poweroff_powercycle,
 	  .maxlen	= sizeof(poweroff_powercycle),
@@ -668,14 +668,14 @@ static struct ctl_table ipmi_table[] = {
 	{ }
 };
 
-static struct ctl_table ipmi_dir_table[] = {
+static ctl_table ipmi_dir_table[] = {
 	{ .procname	= "ipmi",
 	  .mode		= 0555,
 	  .child	= ipmi_table },
 	{ }
 };
 
-static struct ctl_table ipmi_root_table[] = {
+static ctl_table ipmi_root_table[] = {
 	{ .procname	= "dev",
 	  .mode		= 0555,
 	  .child	= ipmi_dir_table },

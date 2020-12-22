@@ -58,24 +58,12 @@ static inline void ip_vs_app_put(struct ip_vs_app *app)
 	module_put(app->module);
 }
 
-static void ip_vs_app_inc_destroy(struct ip_vs_app *inc)
-{
-	kfree(inc->timeout_table);
-	kfree(inc);
-}
-
-static void ip_vs_app_inc_rcu_free(struct rcu_head *head)
-{
-	struct ip_vs_app *inc = container_of(head, struct ip_vs_app, rcu_head);
-
-	ip_vs_app_inc_destroy(inc);
-}
 
 /*
  *	Allocate/initialize app incarnation and register it in proto apps.
  */
 static int
-ip_vs_app_inc_new(struct netns_ipvs *ipvs, struct ip_vs_app *app, __u16 proto,
+ip_vs_app_inc_new(struct net *net, struct ip_vs_app *app, __u16 proto,
 		  __u16 port)
 {
 	struct ip_vs_protocol *pp;
@@ -107,7 +95,7 @@ ip_vs_app_inc_new(struct netns_ipvs *ipvs, struct ip_vs_app *app, __u16 proto,
 		}
 	}
 
-	ret = pp->register_app(ipvs, inc);
+	ret = pp->register_app(net, inc);
 	if (ret)
 		goto out;
 
@@ -118,7 +106,8 @@ ip_vs_app_inc_new(struct netns_ipvs *ipvs, struct ip_vs_app *app, __u16 proto,
 	return 0;
 
   out:
-	ip_vs_app_inc_destroy(inc);
+	kfree(inc->timeout_table);
+	kfree(inc);
 	return ret;
 }
 
@@ -127,7 +116,7 @@ ip_vs_app_inc_new(struct netns_ipvs *ipvs, struct ip_vs_app *app, __u16 proto,
  *	Release app incarnation
  */
 static void
-ip_vs_app_inc_release(struct netns_ipvs *ipvs, struct ip_vs_app *inc)
+ip_vs_app_inc_release(struct net *net, struct ip_vs_app *inc)
 {
 	struct ip_vs_protocol *pp;
 
@@ -135,14 +124,15 @@ ip_vs_app_inc_release(struct netns_ipvs *ipvs, struct ip_vs_app *inc)
 		return;
 
 	if (pp->unregister_app)
-		pp->unregister_app(ipvs, inc);
+		pp->unregister_app(net, inc);
 
 	IP_VS_DBG(9, "%s App %s:%u unregistered\n",
 		  pp->name, inc->name, ntohs(inc->port));
 
 	list_del(&inc->a_list);
 
-	call_rcu(&inc->rcu_head, ip_vs_app_inc_rcu_free);
+	kfree(inc->timeout_table);
+	kfree(inc);
 }
 
 
@@ -154,9 +144,9 @@ int ip_vs_app_inc_get(struct ip_vs_app *inc)
 {
 	int result;
 
-	result = ip_vs_app_get(inc->app);
-	if (result)
-		atomic_inc(&inc->usecnt);
+	atomic_inc(&inc->usecnt);
+	if (unlikely((result = ip_vs_app_get(inc->app)) != 1))
+		atomic_dec(&inc->usecnt);
 	return result;
 }
 
@@ -166,8 +156,8 @@ int ip_vs_app_inc_get(struct ip_vs_app *inc)
  */
 void ip_vs_app_inc_put(struct ip_vs_app *inc)
 {
-	atomic_dec(&inc->usecnt);
 	ip_vs_app_put(inc->app);
+	atomic_dec(&inc->usecnt);
 }
 
 
@@ -175,14 +165,14 @@ void ip_vs_app_inc_put(struct ip_vs_app *inc)
  *	Register an application incarnation in protocol applications
  */
 int
-register_ip_vs_app_inc(struct netns_ipvs *ipvs, struct ip_vs_app *app, __u16 proto,
+register_ip_vs_app_inc(struct net *net, struct ip_vs_app *app, __u16 proto,
 		       __u16 port)
 {
 	int result;
 
 	mutex_lock(&__ip_vs_app_mutex);
 
-	result = ip_vs_app_inc_new(ipvs, app, proto, port);
+	result = ip_vs_app_inc_new(net, app, proto, port);
 
 	mutex_unlock(&__ip_vs_app_mutex);
 
@@ -190,63 +180,45 @@ register_ip_vs_app_inc(struct netns_ipvs *ipvs, struct ip_vs_app *app, __u16 pro
 }
 
 
-/* Register application for netns */
-struct ip_vs_app *register_ip_vs_app(struct netns_ipvs *ipvs, struct ip_vs_app *app)
+/*
+ *	ip_vs_app registration routine
+ */
+int register_ip_vs_app(struct net *net, struct ip_vs_app *app)
 {
-	struct ip_vs_app *a;
-	int err = 0;
-
-	mutex_lock(&__ip_vs_app_mutex);
-
-	list_for_each_entry(a, &ipvs->app_list, a_list) {
-		if (!strcmp(app->name, a->name)) {
-			err = -EEXIST;
-			goto out_unlock;
-		}
-	}
-	a = kmemdup(app, sizeof(*app), GFP_KERNEL);
-	if (!a) {
-		err = -ENOMEM;
-		goto out_unlock;
-	}
-	INIT_LIST_HEAD(&a->incs_list);
-	list_add(&a->a_list, &ipvs->app_list);
+	struct netns_ipvs *ipvs = net_ipvs(net);
 	/* increase the module use count */
 	ip_vs_use_count_inc();
 
-out_unlock:
+	mutex_lock(&__ip_vs_app_mutex);
+
+	list_add(&app->a_list, &ipvs->app_list);
+
 	mutex_unlock(&__ip_vs_app_mutex);
 
-	return err ? ERR_PTR(err) : a;
+	return 0;
 }
 
 
 /*
  *	ip_vs_app unregistration routine
  *	We are sure there are no app incarnations attached to services
- *	Caller should use synchronize_rcu() or rcu_barrier()
  */
-void unregister_ip_vs_app(struct netns_ipvs *ipvs, struct ip_vs_app *app)
+void unregister_ip_vs_app(struct net *net, struct ip_vs_app *app)
 {
-	struct ip_vs_app *a, *anxt, *inc, *nxt;
+	struct ip_vs_app *inc, *nxt;
 
 	mutex_lock(&__ip_vs_app_mutex);
 
-	list_for_each_entry_safe(a, anxt, &ipvs->app_list, a_list) {
-		if (app && strcmp(app->name, a->name))
-			continue;
-		list_for_each_entry_safe(inc, nxt, &a->incs_list, a_list) {
-			ip_vs_app_inc_release(ipvs, inc);
-		}
-
-		list_del(&a->a_list);
-		kfree(a);
-
-		/* decrease the module use count */
-		ip_vs_use_count_dec();
+	list_for_each_entry_safe(inc, nxt, &app->incs_list, a_list) {
+		ip_vs_app_inc_release(net, inc);
 	}
 
+	list_del(&app->a_list);
+
 	mutex_unlock(&__ip_vs_app_mutex);
+
+	/* decrease the module use count */
+	ip_vs_use_count_dec();
 }
 
 
@@ -341,17 +313,17 @@ vs_fix_ack_seq(const struct ip_vs_seq *vseq, struct tcphdr *th)
  *	Assumes already checked proto==IPPROTO_TCP and diff!=0.
  */
 static inline void vs_seq_update(struct ip_vs_conn *cp, struct ip_vs_seq *vseq,
-				 unsigned int flag, __u32 seq, int diff)
+				 unsigned flag, __u32 seq, int diff)
 {
 	/* spinlock is to keep updating cp->flags atomic */
-	spin_lock_bh(&cp->lock);
+	spin_lock(&cp->lock);
 	if (!(cp->flags & flag) || after(seq, vseq->init_seq)) {
 		vseq->previous_delta = vseq->delta;
 		vseq->delta += diff;
 		vseq->init_seq = seq;
 		cp->flags |= flag;
 	}
-	spin_unlock_bh(&cp->lock);
+	spin_unlock(&cp->lock);
 }
 
 static inline int app_tcp_pkt_out(struct ip_vs_conn *cp, struct sk_buff *skb,
@@ -603,15 +575,16 @@ static const struct file_operations ip_vs_app_fops = {
 };
 #endif
 
-int __net_init ip_vs_app_net_init(struct netns_ipvs *ipvs)
+int __net_init ip_vs_app_net_init(struct net *net)
 {
+	struct netns_ipvs *ipvs = net_ipvs(net);
+
 	INIT_LIST_HEAD(&ipvs->app_list);
-	proc_create("ip_vs_app", 0, ipvs->net->proc_net, &ip_vs_app_fops);
+	proc_net_fops_create(net, "ip_vs_app", 0, &ip_vs_app_fops);
 	return 0;
 }
 
-void __net_exit ip_vs_app_net_cleanup(struct netns_ipvs *ipvs)
+void __net_exit ip_vs_app_net_cleanup(struct net *net)
 {
-	unregister_ip_vs_app(ipvs, NULL /* all */);
-	remove_proc_entry("ip_vs_app", ipvs->net->proc_net);
+	proc_net_remove(net, "ip_vs_app");
 }

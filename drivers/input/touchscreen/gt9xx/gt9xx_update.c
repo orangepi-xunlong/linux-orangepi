@@ -415,7 +415,6 @@ static u8 gup_enter_update_judge(st_fw_head *fw_head)
         return FAIL;
 }
 
-#if !GTP_HEADER_FW_UPDATE
 static u8 ascii2hex(u8 a)
 {
         s8 value = 0;
@@ -538,7 +537,6 @@ update_cfg_file_failed:
         kfree(file_config);
         return ret;
 }
-#endif
 
 #if GTP_HEADER_FW_UPDATE
 static u8 gup_check_fs_mounted(char *path_name)
@@ -571,6 +569,7 @@ static u8 gup_check_update_file(struct i2c_client *client, st_fw_head* fw_head, 
         u8 buf[FW_HEAD_LENGTH];
     
         if (path) {
+                GTP_DEBUG("Update File path:%s, %d", path, strlen(path));
                 update_msg.file = filp_open(path, O_RDONLY, 0644);
 
                 if (IS_ERR(update_msg.file)) {

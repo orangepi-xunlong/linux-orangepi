@@ -24,10 +24,13 @@
 
 #include <linux/raid/pq.h>
 
+#ifdef CONFIG_ALTIVEC
+
 #include <altivec.h>
 #ifdef __KERNEL__
 # include <asm/cputable.h>
 # include <asm/switch_to.h>
+#endif
 
 /*
  * This is the C data type to use.  We use a vector of
@@ -101,7 +104,6 @@ static void raid6_altivec$#_gen_syndrome(int disks, size_t bytes, void **ptrs)
 
 	raid6_altivec$#_gen_syndrome_real(disks, bytes, ptrs);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 
@@ -120,7 +122,6 @@ int raid6_have_altivec(void)
 
 const struct raid6_calls raid6_altivec$# = {
 	raid6_altivec$#_gen_syndrome,
-	NULL,			/* XOR not yet implemented */
 	raid6_have_altivec,
 	"altivecx$#",
 	0

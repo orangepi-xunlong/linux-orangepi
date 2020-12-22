@@ -784,7 +784,8 @@ static __init int gcov_fs_init(void)
 
 err_remove:
 	pr_err("init failed\n");
-	debugfs_remove(root_node.dentry);
+	if (root_node.dentry)
+		debugfs_remove(root_node.dentry);
 
 	return rc;
 }

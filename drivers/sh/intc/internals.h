@@ -1,6 +1,5 @@
 #include <linux/sh_intc.h>
 #include <linux/irq.h>
-#include <linux/irqdomain.h>
 #include <linux/list.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -67,7 +66,6 @@ struct intc_desc_int {
 	unsigned int nr_sense;
 	struct intc_window *window;
 	unsigned int nr_windows;
-	struct irq_domain *domain;
 	struct irq_chip chip;
 	bool skip_suspend;
 };
@@ -99,7 +97,15 @@ static inline struct intc_desc_int *get_intc_desc(unsigned int irq)
  */
 static inline void activate_irq(int irq)
 {
-	irq_modify_status(irq, IRQ_NOREQUEST, IRQ_NOPROBE);
+#ifdef CONFIG_ARM
+	/* ARM requires an extra step to clear IRQ_NOREQUEST, which it
+	 * sets on behalf of every irq_chip.  Also sets IRQ_NOPROBE.
+	 */
+	set_irq_flags(irq, IRQF_VALID);
+#else
+	/* same effect on other architectures */
+	irq_set_noprobe(irq);
+#endif
 }
 
 static inline int intc_handle_int_cmp(const void *a, const void *b)
@@ -180,9 +186,6 @@ void intc_set_ack_handle(unsigned int irq, struct intc_desc *desc,
 unsigned long intc_get_ack_handle(unsigned int irq);
 void intc_enable_disable_enum(struct intc_desc *desc, struct intc_desc_int *d,
 			      intc_enum enum_id, int enable);
-
-/* irqdomain.c */
-void intc_irq_domain_init(struct intc_desc_int *d, struct intc_hw_desc *hw);
 
 /* virq.c */
 void intc_subgroup_init(struct intc_desc *desc, struct intc_desc_int *d);

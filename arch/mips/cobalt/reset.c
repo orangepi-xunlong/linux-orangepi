@@ -12,7 +12,6 @@
 #include <linux/io.h>
 #include <linux/leds.h>
 
-#include <asm/idle.h>
 #include <asm/processor.h>
 
 #include <cobalt.h>

@@ -68,7 +68,7 @@ MODULE_PARM_DESC(dma1, "DMA1 # for " CRD_NAME " driver.");
 module_param_array(dma2, int, NULL, 0444);
 MODULE_PARM_DESC(dma2, "DMA2 # for " CRD_NAME " driver.");
 
-static int snd_cs4231_match(struct device *dev, unsigned int n)
+static int __devinit snd_cs4231_match(struct device *dev, unsigned int n)
 {
 	if (!enable[n])
 		return 0;
@@ -88,13 +88,14 @@ static int snd_cs4231_match(struct device *dev, unsigned int n)
 	return 1;
 }
 
-static int snd_cs4231_probe(struct device *dev, unsigned int n)
+static int __devinit snd_cs4231_probe(struct device *dev, unsigned int n)
 {
 	struct snd_card *card;
 	struct snd_wss *chip;
+	struct snd_pcm *pcm;
 	int error;
 
-	error = snd_card_new(dev, index[n], id[n], THIS_MODULE, 0, &card);
+	error = snd_card_create(index[n], id[n], THIS_MODULE, 0, &card);
 	if (error < 0)
 		return error;
 
@@ -105,15 +106,15 @@ static int snd_cs4231_probe(struct device *dev, unsigned int n)
 
 	card->private_data = chip;
 
-	error = snd_wss_pcm(chip, 0);
+	error = snd_wss_pcm(chip, 0, &pcm);
 	if (error < 0)
 		goto out;
 
 	strcpy(card->driver, "CS4231");
-	strcpy(card->shortname, chip->pcm->name);
+	strcpy(card->shortname, pcm->name);
 
 	sprintf(card->longname, "%s at 0x%lx, irq %d, dma %d",
-		chip->pcm->name, chip->port, irq[n], dma1[n]);
+		pcm->name, chip->port, irq[n], dma1[n]);
 	if (dma2[n] >= 0)
 		sprintf(card->longname + strlen(card->longname), "&%d", dma2[n]);
 
@@ -121,7 +122,7 @@ static int snd_cs4231_probe(struct device *dev, unsigned int n)
 	if (error < 0)
 		goto out;
 
-	error = snd_wss_timer(chip, 0);
+	error = snd_wss_timer(chip, 0, NULL);
 	if (error < 0)
 		goto out;
 
@@ -134,6 +135,8 @@ static int snd_cs4231_probe(struct device *dev, unsigned int n)
 			dev_warn(dev, "MPU401 not detected\n");
 	}
 
+	snd_card_set_dev(card, dev);
+
 	error = snd_card_register(card);
 	if (error < 0)
 		goto out;
@@ -145,9 +148,10 @@ out:	snd_card_free(card);
 	return error;
 }
 
-static int snd_cs4231_remove(struct device *dev, unsigned int n)
+static int __devexit snd_cs4231_remove(struct device *dev, unsigned int n)
 {
 	snd_card_free(dev_get_drvdata(dev));
+	dev_set_drvdata(dev, NULL);
 	return 0;
 }
 
@@ -176,7 +180,7 @@ static int snd_cs4231_resume(struct device *dev, unsigned int n)
 static struct isa_driver snd_cs4231_driver = {
 	.match		= snd_cs4231_match,
 	.probe		= snd_cs4231_probe,
-	.remove		= snd_cs4231_remove,
+	.remove		= __devexit_p(snd_cs4231_remove),
 #ifdef CONFIG_PM
 	.suspend	= snd_cs4231_suspend,
 	.resume		= snd_cs4231_resume,
@@ -186,4 +190,15 @@ static struct isa_driver snd_cs4231_driver = {
 	}
 };
 
-module_isa_driver(snd_cs4231_driver, SNDRV_CARDS);
+static int __init alsa_card_cs4231_init(void)
+{
+	return isa_register_driver(&snd_cs4231_driver, SNDRV_CARDS);
+}
+
+static void __exit alsa_card_cs4231_exit(void)
+{
+	isa_unregister_driver(&snd_cs4231_driver);
+}
+
+module_init(alsa_card_cs4231_init);
+module_exit(alsa_card_cs4231_exit);

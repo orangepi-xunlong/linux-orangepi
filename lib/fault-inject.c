@@ -40,16 +40,10 @@ EXPORT_SYMBOL_GPL(setup_fault_attr);
 
 static void fail_dump(struct fault_attr *attr)
 {
-	if (attr->verbose > 0 && __ratelimit(&attr->ratelimit_state)) {
-		printk(KERN_NOTICE "FAULT_INJECTION: forcing a failure.\n"
-		       "name %pd, interval %lu, probability %lu, "
-		       "space %d, times %d\n", attr->dname,
-		       attr->interval, attr->probability,
-		       atomic_read(&attr->space),
-		       atomic_read(&attr->times));
-		if (attr->verbose > 1)
-			dump_stack();
-	}
+	if (attr->verbose > 0)
+		printk(KERN_NOTICE "FAULT_INJECTION: forcing a failure\n");
+	if (attr->verbose > 1)
+		dump_stack();
 }
 
 #define atomic_dec_not_zero(v)		atomic_add_unless((v), -1, 0)
@@ -107,10 +101,6 @@ static inline bool fail_stacktrace(struct fault_attr *attr)
 
 bool should_fail(struct fault_attr *attr, ssize_t size)
 {
-	/* No need to check any other properties if the probability is 0 */
-	if (attr->probability == 0)
-		return false;
-
 	if (attr->task_filter && !fail_task(attr, current))
 		return false;
 
@@ -128,7 +118,7 @@ bool should_fail(struct fault_attr *attr, ssize_t size)
 			return false;
 	}
 
-	if (attr->probability <= prandom_u32() % 100)
+	if (attr->probability <= random32() % 100)
 		return false;
 
 	if (!fail_stacktrace(attr))
@@ -188,6 +178,27 @@ static struct dentry *debugfs_create_stacktrace_depth(
 
 #endif /* CONFIG_FAULT_INJECTION_STACKTRACE_FILTER */
 
+static int debugfs_atomic_t_set(void *data, u64 val)
+{
+	atomic_set((atomic_t *)data, val);
+	return 0;
+}
+
+static int debugfs_atomic_t_get(void *data, u64 *val)
+{
+	*val = atomic_read((atomic_t *)data);
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(fops_atomic_t, debugfs_atomic_t_get,
+			debugfs_atomic_t_set, "%lld\n");
+
+static struct dentry *debugfs_create_atomic_t(const char *name, umode_t mode,
+				struct dentry *parent, atomic_t *value)
+{
+	return debugfs_create_file(name, mode, parent, value, &fops_atomic_t);
+}
+
 struct dentry *fault_create_debugfs_attr(const char *name,
 			struct dentry *parent, struct fault_attr *attr)
 {
@@ -207,12 +218,6 @@ struct dentry *fault_create_debugfs_attr(const char *name,
 	if (!debugfs_create_atomic_t("space", mode, dir, &attr->space))
 		goto fail;
 	if (!debugfs_create_ul("verbose", mode, dir, &attr->verbose))
-		goto fail;
-	if (!debugfs_create_u32("verbose_ratelimit_interval_ms", mode, dir,
-				&attr->ratelimit_state.interval))
-		goto fail;
-	if (!debugfs_create_u32("verbose_ratelimit_burst", mode, dir,
-				&attr->ratelimit_state.burst))
 		goto fail;
 	if (!debugfs_create_bool("task-filter", mode, dir, &attr->task_filter))
 		goto fail;
@@ -234,7 +239,6 @@ struct dentry *fault_create_debugfs_attr(const char *name,
 
 #endif /* CONFIG_FAULT_INJECTION_STACKTRACE_FILTER */
 
-	attr->dname = dget(dir);
 	return dir;
 fail:
 	debugfs_remove_recursive(dir);

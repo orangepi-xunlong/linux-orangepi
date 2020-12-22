@@ -131,17 +131,6 @@ static int rio_device_remove(struct device *dev)
 	return 0;
 }
 
-static void rio_device_shutdown(struct device *dev)
-{
-	struct rio_dev *rdev = to_rio_dev(dev);
-	struct rio_driver *rdrv = rdev->driver;
-
-	dev_dbg(dev, "RIO: %s\n", __func__);
-
-	if (rdrv && rdrv->shutdown)
-		rdrv->shutdown(rdev);
-}
-
 /**
  *  rio_register_driver - register a new RIO driver
  *  @rdrv: the RIO driver structure to register
@@ -175,12 +164,6 @@ void rio_unregister_driver(struct rio_driver *rdrv)
 	driver_unregister(&rdrv->driver);
 }
 
-void rio_attach_device(struct rio_dev *rdev)
-{
-	rdev->dev.bus = &rio_bus_type;
-}
-EXPORT_SYMBOL_GPL(rio_attach_device);
-
 /**
  *  rio_match_bus - Tell if a RIO device structure has a matching RIO driver device id structure
  *  @dev: the standard device structure to match against
@@ -209,58 +192,29 @@ static int rio_match_bus(struct device *dev, struct device_driver *drv)
       out:return 0;
 }
 
-static int rio_uevent(struct device *dev, struct kobj_uevent_env *env)
-{
-	struct rio_dev *rdev;
-
-	if (!dev)
-		return -ENODEV;
-
-	rdev = to_rio_dev(dev);
-	if (!rdev)
-		return -ENODEV;
-
-	if (add_uevent_var(env, "MODALIAS=rapidio:v%04Xd%04Xav%04Xad%04X",
-			   rdev->vid, rdev->did, rdev->asm_vid, rdev->asm_did))
-		return -ENOMEM;
-	return 0;
-}
-
-struct class rio_mport_class = {
-	.name		= "rapidio_port",
-	.owner		= THIS_MODULE,
-	.dev_groups	= rio_mport_groups,
+struct device rio_bus = {
+	.init_name = "rapidio",
 };
-EXPORT_SYMBOL_GPL(rio_mport_class);
 
 struct bus_type rio_bus_type = {
 	.name = "rapidio",
 	.match = rio_match_bus,
-	.dev_groups = rio_dev_groups,
-	.bus_groups = rio_bus_groups,
+	.dev_attrs = rio_dev_attrs,
 	.probe = rio_device_probe,
 	.remove = rio_device_remove,
-	.shutdown = rio_device_shutdown,
-	.uevent	= rio_uevent,
 };
 
 /**
  *  rio_bus_init - Register the RapidIO bus with the device model
  *
- *  Registers the RIO mport device class and RIO bus type with the Linux
+ *  Registers the RIO bus device and RIO bus type with the Linux
  *  device model.
  */
 static int __init rio_bus_init(void)
 {
-	int ret;
-
-	ret = class_register(&rio_mport_class);
-	if (!ret) {
-		ret = bus_register(&rio_bus_type);
-		if (ret)
-			class_unregister(&rio_mport_class);
-	}
-	return ret;
+	if (device_register(&rio_bus) < 0)
+		printk("RIO: failed to register RIO bus device\n");
+	return bus_register(&rio_bus_type);
 }
 
 postcore_initcall(rio_bus_init);

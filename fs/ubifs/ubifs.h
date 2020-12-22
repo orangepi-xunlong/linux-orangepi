@@ -36,19 +36,29 @@
 #include <linux/mtd/ubi.h>
 #include <linux/pagemap.h>
 #include <linux/backing-dev.h>
-#include <linux/security.h>
-#include <linux/xattr.h>
 #include "ubifs-media.h"
 
 /* Version of this UBIFS implementation */
 #define UBIFS_VERSION 1
 
+/* Normal UBIFS messages */
+#define ubifs_msg(fmt, ...) \
+		printk(KERN_NOTICE "UBIFS: " fmt "\n", ##__VA_ARGS__)
+/* UBIFS error messages */
+#define ubifs_err(fmt, ...)                                                  \
+	printk(KERN_ERR "UBIFS error (pid %d): %s: " fmt "\n", current->pid, \
+	       __func__, ##__VA_ARGS__)
+/* UBIFS warning messages */
+#define ubifs_warn(fmt, ...)                                         \
+	printk(KERN_WARNING "UBIFS warning (pid %d): %s: " fmt "\n", \
+	       current->pid, __func__, ##__VA_ARGS__)
+
 /* UBIFS file system VFS magic number */
 #define UBIFS_SUPER_MAGIC 0x24051905
 
 /* Number of UBIFS blocks per VFS page */
-#define UBIFS_BLOCKS_PER_PAGE (PAGE_SIZE / UBIFS_BLOCK_SIZE)
-#define UBIFS_BLOCKS_PER_PAGE_SHIFT (PAGE_SHIFT - UBIFS_BLOCK_SHIFT)
+#define UBIFS_BLOCKS_PER_PAGE (PAGE_CACHE_SIZE / UBIFS_BLOCK_SIZE)
+#define UBIFS_BLOCKS_PER_PAGE_SHIFT (PAGE_CACHE_SHIFT - UBIFS_BLOCK_SHIFT)
 
 /* "File system end of life" sequence number watermark */
 #define SQNUM_WARN_WATERMARK 0xFFFFFFFF00000000ULL
@@ -139,7 +149,7 @@
 #define WORST_COMPR_FACTOR 2
 
 /*
- * How much memory is needed for a buffer where we compress a data node.
+ * How much memory is needed for a buffer where we comress a data node.
  */
 #define COMPRESSED_DATA_NODE_BUF_SZ \
 	(UBIFS_DATA_NODE_SZ + UBIFS_BLOCK_SIZE * WORST_COMPR_FACTOR)
@@ -157,7 +167,6 @@ enum {
 	WB_MUTEX_1 = 0,
 	WB_MUTEX_2 = 1,
 	WB_MUTEX_3 = 2,
-	WB_MUTEX_4 = 3,
 };
 
 /*
@@ -297,6 +306,7 @@ struct ubifs_scan_node {
  * @nodes_cnt: number of nodes scanned
  * @nodes: list of struct ubifs_scan_node
  * @endpt: end point (and therefore the start of empty space)
+ * @ecc: read returned -EBADMSG
  * @buf: buffer containing entire LEB scanned
  */
 struct ubifs_scan_leb {
@@ -304,6 +314,7 @@ struct ubifs_scan_leb {
 	int nodes_cnt;
 	struct list_head nodes;
 	int endpt;
+	int ecc;
 	void *buf;
 };
 
@@ -639,6 +650,8 @@ typedef int (*ubifs_lpt_scan_callback)(struct ubifs_info *c,
  * @avail: number of bytes available in the write-buffer
  * @used:  number of used bytes in the write-buffer
  * @size: write-buffer size (in [@c->min_io_size, @c->max_write_size] range)
+ * @dtype: type of data stored in this LEB (%UBI_LONGTERM, %UBI_SHORTTERM,
+ * %UBI_UNKNOWN)
  * @jhead: journal head the mutex belongs to (note, needed only to shut lockdep
  *         up by 'mutex_lock_nested()).
  * @sync_callback: write-buffer synchronization callback
@@ -646,7 +659,7 @@ typedef int (*ubifs_lpt_scan_callback)(struct ubifs_info *c,
  * @lock: serializes @buf, @lnum, @offs, @avail, @used, @next_ino and @inodes
  *        fields
  * @softlimit: soft write-buffer timeout interval
- * @delta: hard and soft timeouts delta (the timer expire interval is @softlimit
+ * @delta: hard and soft timeouts delta (the timer expire inteval is @softlimit
  *         and @softlimit + @delta)
  * @timer: write-buffer timer
  * @no_timer: non-zero if this write-buffer does not have a timer
@@ -672,6 +685,7 @@ struct ubifs_wbuf {
 	int avail;
 	int used;
 	int size;
+	int dtype;
 	int jhead;
 	int (*sync_callback)(struct ubifs_info *c, int lnum, int free, int pad);
 	struct mutex io_mutex;
@@ -748,9 +762,6 @@ struct ubifs_zbranch {
  * @offs: offset of the corresponding indexing node
  * @len: length  of the corresponding indexing node
  * @zbranch: array of znode branches (@c->fanout elements)
- *
- * Note! The @lnum, @offs, and @len fields are not really needed - we have them
- * only for internal consistency check. They could be removed to save some RAM.
  */
 struct ubifs_znode {
 	struct ubifs_znode *parent;
@@ -761,9 +772,9 @@ struct ubifs_znode {
 	int child_cnt;
 	int iip;
 	int alt;
-	int lnum;
-	int offs;
-	int len;
+#ifdef CONFIG_UBIFS_FS_DEBUG
+	int lnum, offs, len;
+#endif
 	struct ubifs_zbranch zbranch[];
 };
 
@@ -836,9 +847,9 @@ struct ubifs_compressor {
  * @mod_dent: non-zero if the operation removes or modifies an existing
  *            directory entry
  * @new_ino: non-zero if the operation adds a new inode
- * @new_ino_d: how much data newly created inode contains
+ * @new_ino_d: now much data newly created inode contains
  * @dirtied_ino: how many inodes the operation makes dirty
- * @dirtied_ino_d: how much data dirtied inode contains
+ * @dirtied_ino_d: now much data dirtied inode contains
  * @idx_growth: how much the index will supposedly grow
  * @data_growth: how much new data the operation will supposedly add
  * @dd_growth: how much data that makes other data dirty the operation will
@@ -894,7 +905,6 @@ struct ubifs_budget_req {
  * @dnext: next orphan to delete
  * @inum: inode number
  * @new: %1 => added since the last commit, otherwise %0
- * @cmt: %1 => commit pending, otherwise %0
  * @del: %1 => delete pending, otherwise %0
  */
 struct ubifs_orphan {
@@ -904,17 +914,16 @@ struct ubifs_orphan {
 	struct ubifs_orphan *cnext;
 	struct ubifs_orphan *dnext;
 	ino_t inum;
-	unsigned new:1;
-	unsigned cmt:1;
+	int new;
 	unsigned del:1;
 };
 
 /**
  * struct ubifs_mount_opts - UBIFS-specific mount options information.
  * @unmount_mode: selected unmount mode (%0 default, %1 normal, %2 fast)
- * @bulk_read: enable/disable bulk-reads (%0 default, %1 disable, %2 enable)
+ * @bulk_read: enable/disable bulk-reads (%0 default, %1 disabe, %2 enable)
  * @chk_data_crc: enable/disable CRC data checking when reading data nodes
- *                (%0 default, %1 disable, %2 enable)
+ *                (%0 default, %1 disabe, %2 enable)
  * @override_compr: override default compressor (%0 - do not override and use
  *                  superblock compressor, %1 - override and use compressor
  *                  specified in @compr_type)
@@ -944,9 +953,9 @@ struct ubifs_mount_opts {
  *           optimization)
  * @nospace_rp: the same as @nospace, but additionally means that even reserved
  *              pool is full
- * @page_budget: budget for a page (constant, never changed after mount)
- * @inode_budget: budget for an inode (constant, never changed after mount)
- * @dent_budget: budget for a directory entry (constant, never changed after
+ * @page_budget: budget for a page (constant, nenver changed after mount)
+ * @inode_budget: budget for an inode (constant, nenver changed after mount)
+ * @dent_budget: budget for a directory entry (constant, nenver changed after
  *               mount)
  */
 struct ubifs_budg_info {
@@ -1198,7 +1207,6 @@ struct ubifs_debug_info;
  * @need_recovery: %1 if the file-system needs recovery
  * @replaying: %1 during journal replay
  * @mounting: %1 while mounting
- * @probing: %1 while attempting to mount if MS_SILENT mount flag is set
  * @remounting_rw: %1 while re-mounting from R/O mode to R/W mode
  * @replay_list: temporary list used during journal replay
  * @replay_buds: list of buds to replay
@@ -1421,8 +1429,8 @@ struct ubifs_info {
 
 	long long rp_size;
 	long long report_rp_size;
-	kuid_t rp_uid;
-	kgid_t rp_gid;
+	uid_t rp_uid;
+	gid_t rp_gid;
 
 	/* The below fields are used only during mounting and re-mounting */
 	unsigned int empty:1;
@@ -1430,7 +1438,6 @@ struct ubifs_info {
 	unsigned int replaying:1;
 	unsigned int mounting:1;
 	unsigned int remounting_rw:1;
-	unsigned int probing:1;
 	struct list_head replay_list;
 	struct list_head replay_buds;
 	unsigned long long cs_sqnum;
@@ -1440,7 +1447,9 @@ struct ubifs_info {
 	struct rb_root size_tree;
 	struct ubifs_mount_opts mount_opts;
 
+#ifdef CONFIG_UBIFS_FS_DEBUG
 	struct ubifs_debug_info *dbg;
+#endif
 };
 
 extern struct list_head ubifs_infos;
@@ -1462,20 +1471,22 @@ void ubifs_ro_mode(struct ubifs_info *c, int err);
 int ubifs_leb_read(const struct ubifs_info *c, int lnum, void *buf, int offs,
 		   int len, int even_ebadmsg);
 int ubifs_leb_write(struct ubifs_info *c, int lnum, const void *buf, int offs,
-		    int len);
-int ubifs_leb_change(struct ubifs_info *c, int lnum, const void *buf, int len);
+		    int len, int dtype);
+int ubifs_leb_change(struct ubifs_info *c, int lnum, const void *buf, int len,
+		     int dtype);
 int ubifs_leb_unmap(struct ubifs_info *c, int lnum);
-int ubifs_leb_map(struct ubifs_info *c, int lnum);
+int ubifs_leb_map(struct ubifs_info *c, int lnum, int dtype);
 int ubifs_is_mapped(const struct ubifs_info *c, int lnum);
 int ubifs_wbuf_write_nolock(struct ubifs_wbuf *wbuf, void *buf, int len);
-int ubifs_wbuf_seek_nolock(struct ubifs_wbuf *wbuf, int lnum, int offs);
+int ubifs_wbuf_seek_nolock(struct ubifs_wbuf *wbuf, int lnum, int offs,
+			   int dtype);
 int ubifs_wbuf_init(struct ubifs_info *c, struct ubifs_wbuf *wbuf);
 int ubifs_read_node(const struct ubifs_info *c, void *buf, int type, int len,
 		    int lnum, int offs);
 int ubifs_read_node_wbuf(struct ubifs_wbuf *wbuf, void *buf, int type, int len,
 			 int lnum, int offs);
 int ubifs_write_node(struct ubifs_info *c, void *node, int len, int lnum,
-		     int offs);
+		     int offs, int dtype);
 int ubifs_check_node(const struct ubifs_info *c, const void *buf, int lnum,
 		     int offs, int quiet, int must_chk_crc);
 void ubifs_prepare_node(struct ubifs_info *c, void *buf, int len, int pad);
@@ -1521,15 +1532,10 @@ int ubifs_jnl_write_data(struct ubifs_info *c, const struct inode *inode,
 			 const union ubifs_key *key, const void *buf, int len);
 int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode);
 int ubifs_jnl_delete_inode(struct ubifs_info *c, const struct inode *inode);
-int ubifs_jnl_xrename(struct ubifs_info *c, const struct inode *fst_dir,
-		      const struct dentry *fst_dentry,
-		      const struct inode *snd_dir,
-		      const struct dentry *snd_dentry, int sync);
 int ubifs_jnl_rename(struct ubifs_info *c, const struct inode *old_dir,
 		     const struct dentry *old_dentry,
 		     const struct inode *new_dir,
-		     const struct dentry *new_dentry,
-		     const struct inode *whiteout, int sync);
+		     const struct dentry *new_dentry, int sync);
 int ubifs_jnl_truncate(struct ubifs_info *c, const struct inode *inode,
 		       loff_t old_size, loff_t new_size);
 int ubifs_jnl_delete_xattr(struct ubifs_info *c, const struct inode *host,
@@ -1619,10 +1625,7 @@ int ubifs_tnc_start_commit(struct ubifs_info *c, struct ubifs_zbranch *zroot);
 int ubifs_tnc_end_commit(struct ubifs_info *c);
 
 /* shrinker.c */
-unsigned long ubifs_shrink_scan(struct shrinker *shrink,
-				struct shrink_control *sc);
-unsigned long ubifs_shrink_count(struct shrinker *shrink,
-				 struct shrink_control *sc);
+int ubifs_shrinker(struct shrinker *shrink, struct shrink_control *sc);
 
 /* commit.c */
 int ubifs_bg_thread(void *info);
@@ -1728,9 +1731,6 @@ int ubifs_calc_dark(const struct ubifs_info *c, int spc);
 /* file.c */
 int ubifs_fsync(struct file *file, loff_t start, loff_t end, int datasync);
 int ubifs_setattr(struct dentry *dentry, struct iattr *attr);
-#ifdef CONFIG_UBIFS_ATIME_SUPPORT
-int ubifs_update_time(struct inode *inode, struct timespec *time, int flags);
-#endif
 
 /* dir.c */
 struct inode *ubifs_new_inode(struct ubifs_info *c, const struct inode *dir,
@@ -1739,10 +1739,12 @@ int ubifs_getattr(struct vfsmount *mnt, struct dentry *dentry,
 		  struct kstat *stat);
 
 /* xattr.c */
-extern const struct xattr_handler *ubifs_xattr_handlers[];
+int ubifs_setxattr(struct dentry *dentry, const char *name,
+		   const void *value, size_t size, int flags);
+ssize_t ubifs_getxattr(struct dentry *dentry, const char *name, void *buf,
+		       size_t size);
 ssize_t ubifs_listxattr(struct dentry *dentry, char *buffer, size_t size);
-int ubifs_init_security(struct inode *dentry, struct inode *inode,
-			const struct qstr *qstr);
+int ubifs_removexattr(struct dentry *dentry, const char *name);
 
 /* super.c */
 struct inode *ubifs_iget(struct super_block *sb, unsigned long inum);
@@ -1772,30 +1774,13 @@ long ubifs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 /* compressor.c */
 int __init ubifs_compressors_init(void);
 void ubifs_compressors_exit(void);
-void ubifs_compress(const struct ubifs_info *c, const void *in_buf, int in_len,
-		    void *out_buf, int *out_len, int *compr_type);
-int ubifs_decompress(const struct ubifs_info *c, const void *buf, int len,
-		     void *out, int *out_len, int compr_type);
+void ubifs_compress(const void *in_buf, int in_len, void *out_buf, int *out_len,
+		    int *compr_type);
+int ubifs_decompress(const void *buf, int len, void *out, int *out_len,
+		     int compr_type);
 
 #include "debug.h"
 #include "misc.h"
 #include "key.h"
-
-/* Normal UBIFS messages */
-__printf(2, 3)
-void ubifs_msg(const struct ubifs_info *c, const char *fmt, ...);
-__printf(2, 3)
-void ubifs_err(const struct ubifs_info *c, const char *fmt, ...);
-__printf(2, 3)
-void ubifs_warn(const struct ubifs_info *c, const char *fmt, ...);
-/*
- * A conditional variant of 'ubifs_err()' which doesn't output anything
- * if probing (ie. MS_SILENT set).
- */
-#define ubifs_errc(c, fmt, ...)						\
-do {									\
-	if (!(c)->probing)						\
-		ubifs_err(c, fmt, ##__VA_ARGS__);			\
-} while (0)
 
 #endif /* !__UBIFS_H__ */

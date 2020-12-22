@@ -5,7 +5,7 @@
  */
 #include <asm/hwcap.h>
 
-#include <asm/vfp.h>
+#include "vfp.h"
 
 @ Macros to allow building with old toolkits (with no VFP support)
 	.macro	VFPFMRX, rd, sysreg, cond

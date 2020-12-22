@@ -60,7 +60,7 @@ void gigaset_isdn_stop(struct cardstate *cs)
 
 int gigaset_isdn_regdev(struct cardstate *cs, const char *isdnid)
 {
-	return 0;
+	return 1;
 }
 
 void gigaset_isdn_unregdev(struct cardstate *cs)

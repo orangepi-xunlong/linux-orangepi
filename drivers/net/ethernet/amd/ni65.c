@@ -782,7 +782,7 @@ static void ni65_stop_start(struct net_device *dev,struct priv *p)
 		if(!p->lock)
 			if (p->tmdnum || !p->xmit_queued)
 				netif_wake_queue(dev);
-		netif_trans_update(dev); /* prevent tx timeout */
+		dev->trans_start = jiffies; /* prevent tx timeout */
 	}
 	else
 		writedatareg(CSR0_STRT | csr0);
@@ -1148,7 +1148,7 @@ static void ni65_timeout(struct net_device *dev)
 		printk("%02x ",p->tmdhead[i].u.s.status);
 	printk("\n");
 	ni65_lance_reinit(dev);
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue(dev);
 }
 
@@ -1238,7 +1238,7 @@ MODULE_PARM_DESC(dma, "ni6510 ISA DMA channel (ignored for some cards)");
 int __init init_module(void)
 {
  	dev_ni65 = ni65_probe(-1);
-	return PTR_ERR_OR_ZERO(dev_ni65);
+	return IS_ERR(dev_ni65) ? PTR_ERR(dev_ni65) : 0;
 }
 
 void __exit cleanup_module(void)

@@ -43,7 +43,7 @@
  *	not real hardware.
  */
 
-static u8 mixer_read(unsigned long io, u8 reg)
+static u8 __devinit mixer_read(unsigned long io, u8 reg)
 {
 	outb(reg, io + 4);
 	udelay(20);
@@ -52,7 +52,7 @@ static u8 mixer_read(unsigned long io, u8 reg)
 	return reg;
 }
 
-static int probe_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit probe_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct address_info *hw_config;
 	unsigned long base;
@@ -178,14 +178,16 @@ static int probe_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return 0;
 
 err_out_free:
+	pci_set_drvdata(pdev, NULL);
 	kfree(hw_config);
 	return 1;
 }
 
-static void remove_one(struct pci_dev *pdev)
+static void __devexit remove_one(struct pci_dev *pdev)
 {
 	struct address_info *hw_config = pci_get_drvdata(pdev);
 	sb_dsp_unload(hw_config, 0);
+	pci_set_drvdata(pdev, NULL);
 	kfree(hw_config);
 }
 
@@ -197,7 +199,7 @@ MODULE_LICENSE("GPL");
  *	5530 only. The 5510/5520 decode is different.
  */
 
-static const struct pci_device_id id_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(id_tbl) = {
 	{ PCI_VDEVICE(CYRIX, PCI_DEVICE_ID_CYRIX_5530_AUDIO), 0 },
 	{ }
 };
@@ -208,7 +210,7 @@ static struct pci_driver kahlua_driver = {
 	.name		= "kahlua",
 	.id_table	= id_tbl,
 	.probe		= probe_one,
-	.remove		= remove_one,
+	.remove		= __devexit_p(remove_one),
 };
 
 
@@ -218,7 +220,7 @@ static int __init kahlua_init_module(void)
 	return pci_register_driver(&kahlua_driver);
 }
 
-static void kahlua_cleanup_module(void)
+static void __devexit kahlua_cleanup_module(void)
 {
 	pci_unregister_driver(&kahlua_driver);
 }

@@ -58,7 +58,7 @@ void __init setup_pdc(void)
 	status = pdc_system_map_find_mods(&module_result, &module_path, 0);
 	if (status == PDC_OK) {
 		pdc_type = PDC_TYPE_SYSTEM_MAP;
-		pr_cont("System Map.\n");
+		printk("System Map.\n");
 		return;
 	}
 
@@ -77,7 +77,7 @@ void __init setup_pdc(void)
 	status = pdc_pat_cell_get_number(&cell_info);
 	if (status == PDC_OK) {
 		pdc_type = PDC_TYPE_PAT;
-		pr_cont("64 bit PAT.\n");
+		printk("64 bit PAT.\n");
 		return;
 	}
 #endif
@@ -97,12 +97,12 @@ void __init setup_pdc(void)
 	case 0xC:		/* 715/64, at least */
 
 		pdc_type = PDC_TYPE_SNAKE;
-		pr_cont("Snake.\n");
+		printk("Snake.\n");
 		return;
 
 	default:		/* Everything else */
 
-		pr_cont("Unsupported.\n");
+		printk("Unsupported.\n");
 		panic("If this is a 64-bit machine, please try a 64-bit kernel.\n");
 	}
 }
@@ -186,14 +186,12 @@ pat_query_module(ulong pcell_loc, ulong mod_index)
 
 	if (status != PDC_OK) {
 		/* no more cell modules or error */
-		kfree(pa_pdc_cell);
 		return status;
 	}
 
 	temp = pa_pdc_cell->cba;
 	dev = alloc_pa_dev(PAT_GET_CBA(temp), &(pa_pdc_cell->mod_path));
 	if (!dev) {
-		kfree(pa_pdc_cell);
 		return PDC_OK;
 	}
 
@@ -211,7 +209,6 @@ pat_query_module(ulong pcell_loc, ulong mod_index)
 	/* REVISIT: who is the consumer of this? not sure yet... */
 	dev->mod_info = pa_pdc_cell->mod_info;	/* pass to PAT_GET_ENTITY() */
 	dev->pmod_loc = pa_pdc_cell->mod_location;
-	dev->mod0 = pa_pdc_cell->mod[0];
 
 	register_parisc_device(dev);	/* advertise device */
 
@@ -506,7 +503,7 @@ add_system_map_addresses(struct parisc_device *dev, int num_addrs,
 	long status;
 	struct pdc_system_map_addr_info addr_result;
 
-	dev->addr = kmalloc_array(num_addrs, sizeof(*dev->addr), GFP_KERNEL);
+	dev->addr = kmalloc(num_addrs * sizeof(unsigned long), GFP_KERNEL);
 	if(!dev->addr) {
 		printk(KERN_ERR "%s %s(): memory allocation failure\n",
 		       __FILE__, __func__);

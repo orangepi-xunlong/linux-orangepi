@@ -73,7 +73,7 @@
 static struct {
 	int ioport;
 	int id;
-} mixcomwd_io_info[] = {
+} mixcomwd_io_info[] __devinitdata = {
 	/* The Mixcom cards */
 	{0x0d90, MIXCOM_ID},
 	{0x0e90, MIXCOM_ID},
@@ -315,3 +315,4 @@ MODULE_AUTHOR("Gergely Madarasz <gorgo@itc.hu>");
 MODULE_DESCRIPTION("MixCom Watchdog driver");
 MODULE_VERSION(VERSION);
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);

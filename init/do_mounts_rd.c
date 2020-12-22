@@ -1,19 +1,10 @@
-/*
- * Many of the syscalls used in this file expect some of the arguments
- * to be __user pointers not __kernel pointers.  To limit the sparse
- * noise, turn off sparse checking for this file.
- */
-#ifdef __CHECKER__
-#undef __CHECKER__
-#warning "Sparse checking disabled for this file"
-#endif
 
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/minix_fs.h>
 #include <linux/ext2_fs.h>
 #include <linux/romfs_fs.h>
-#include <uapi/linux/cramfs_fs.h>
+#include <linux/cramfs_fs.h>
 #include <linux/initrd.h>
 #include <linux/string.h>
 #include <linux/slab.h>
@@ -57,11 +48,6 @@ static int __init crd_load(int in_fd, int out_fd, decompress_fn deco);
  *	cramfs
  *	squashfs
  *	gzip
- *	bzip2
- *	lzma
- *	xz
- *	lzo
- *	lz4
  */
 static int __init
 identify_ramdisk_image(int fd, int start_block, decompress_fn *decompressor)
@@ -195,7 +181,7 @@ int __init rd_load_image(char *from)
 	char rotator[4] = { '|' , '/' , '-' , '\\' };
 #endif
 
-	out_fd = sys_open("/dev/ram", O_RDWR, 0);
+	out_fd = sys_open((const char __user __force *) "/dev/ram", O_RDWR, 0);
 	if (out_fd < 0)
 		goto out;
 
@@ -216,6 +202,13 @@ int __init rd_load_image(char *from)
 	/*
 	 * NOTE NOTE: nblocks is not actually blocks but
 	 * the number of kibibytes of data to load into a ramdisk.
+	 * So any ramdisk block size that is a multiple of 1KiB should
+	 * work when the appropriate ramdisk_blocksize is specified
+	 * on the command line.
+	 *
+	 * The default ramdisk_blocksize is 1KiB and it is generally
+	 * silly to use anything else, so make sure to use 1KiB
+	 * blocksize while generating ext2fs ramdisk-images.
 	 */
 	if (sys_ioctl(out_fd, BLKGETSIZE, (unsigned long)&rd_blocks) < 0)
 		rd_blocks = 0;
@@ -272,7 +265,7 @@ int __init rd_load_image(char *from)
 		sys_write(out_fd, buf, BLOCK_SIZE);
 #if !defined(CONFIG_S390)
 		if (!(i % 16)) {
-			pr_cont("%c\b", rotator[rotate & 0x3]);
+			printk("%c\b", rotator[rotate & 0x3]);
 			rotate++;
 		}
 #endif
@@ -287,7 +280,7 @@ noclose_input:
 	sys_close(out_fd);
 out:
 	kfree(buf);
-	sys_unlink("/dev/ram");
+	sys_unlink((const char __user __force *) "/dev/ram");
 	return res;
 }
 
@@ -304,9 +297,9 @@ static int exit_code;
 static int decompress_error;
 static int crd_infd, crd_outfd;
 
-static long __init compr_fill(void *buf, unsigned long len)
+static int __init compr_fill(void *buf, unsigned int len)
 {
-	long r = sys_read(crd_infd, buf, len);
+	int r = sys_read(crd_infd, buf, len);
 	if (r < 0)
 		printk(KERN_ERR "RAMDISK: error while reading compressed data");
 	else if (r == 0)
@@ -314,13 +307,13 @@ static long __init compr_fill(void *buf, unsigned long len)
 	return r;
 }
 
-static long __init compr_flush(void *window, unsigned long outcnt)
+static int __init compr_flush(void *window, unsigned int outcnt)
 {
-	long written = sys_write(crd_outfd, window, outcnt);
+	int written = sys_write(crd_outfd, window, outcnt);
 	if (written != outcnt) {
 		if (decompress_error == 0)
 			printk(KERN_ERR
-			       "RAMDISK: incomplete write (%ld != %ld)\n",
+			       "RAMDISK: incomplete write (%d != %d)\n",
 			       written, outcnt);
 		decompress_error = 1;
 		return -1;
@@ -340,13 +333,6 @@ static int __init crd_load(int in_fd, int out_fd, decompress_fn deco)
 	int result;
 	crd_infd = in_fd;
 	crd_outfd = out_fd;
-
-	if (!deco) {
-		pr_emerg("Invalid ramdisk decompression routine.  "
-			 "Select appropriate config option.\n");
-		panic("Could not decompress initial ramdisk image.");
-	}
-
 	result = deco(NULL, 0, compr_fill, compr_flush, NULL, NULL, error);
 	if (decompress_error)
 		result = 1;

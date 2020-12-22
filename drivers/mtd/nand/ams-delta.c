@@ -17,20 +17,17 @@
  */
 
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
-#include <linux/gpio.h>
-#include <linux/platform_data/gpio-omap.h>
-
 #include <asm/io.h>
-#include <asm/sizes.h>
-
-#include <mach/board-ams-delta.h>
-
 #include <mach/hardware.h>
+#include <asm/sizes.h>
+#include <linux/gpio.h>
+#include <plat/board-ams-delta.h>
 
 /*
  * MTD structure for E3 (Delta)
@@ -64,8 +61,8 @@ static struct mtd_partition partition_info[] = {
 
 static void ams_delta_write_byte(struct mtd_info *mtd, u_char byte)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
-	void __iomem *io_base = (void __iomem *)nand_get_controller_data(this);
+	struct nand_chip *this = mtd->priv;
+	void __iomem *io_base = this->priv;
 
 	writew(0, io_base + OMAP_MPUIO_IO_CNTL);
 	writew(byte, this->IO_ADDR_W);
@@ -77,8 +74,8 @@ static void ams_delta_write_byte(struct mtd_info *mtd, u_char byte)
 static u_char ams_delta_read_byte(struct mtd_info *mtd)
 {
 	u_char res;
-	struct nand_chip *this = mtd_to_nand(mtd);
-	void __iomem *io_base = (void __iomem *)nand_get_controller_data(this);
+	struct nand_chip *this = mtd->priv;
+	void __iomem *io_base = this->priv;
 
 	gpio_set_value(AMS_DELTA_GPIO_PIN_NAND_NRE, 0);
 	ndelay(40);
@@ -104,6 +101,18 @@ static void ams_delta_read_buf(struct mtd_info *mtd, u_char *buf, int len)
 
 	for (i=0; i<len; i++)
 		buf[i] = ams_delta_read_byte(mtd);
+}
+
+static int ams_delta_verify_buf(struct mtd_info *mtd, const u_char *buf,
+				int len)
+{
+	int i;
+
+	for (i=0; i<len; i++)
+		if (buf[i] != ams_delta_read_byte(mtd))
+			return -EFAULT;
+
+	return 0;
 }
 
 /*
@@ -172,7 +181,7 @@ static const struct gpio _mandatory_gpio[] = {
 /*
  * Main initialization routine
  */
-static int ams_delta_init(struct platform_device *pdev)
+static int __devinit ams_delta_init(struct platform_device *pdev)
 {
 	struct nand_chip *this;
 	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -183,15 +192,25 @@ static int ams_delta_init(struct platform_device *pdev)
 		return -ENXIO;
 
 	/* Allocate memory for MTD device structure and private data */
-	this = kzalloc(sizeof(struct nand_chip), GFP_KERNEL);
-	if (!this) {
+	ams_delta_mtd = kmalloc(sizeof(struct mtd_info) +
+				sizeof(struct nand_chip), GFP_KERNEL);
+	if (!ams_delta_mtd) {
 		printk (KERN_WARNING "Unable to allocate E3 NAND MTD device structure.\n");
 		err = -ENOMEM;
 		goto out;
 	}
 
-	ams_delta_mtd = nand_to_mtd(this);
 	ams_delta_mtd->owner = THIS_MODULE;
+
+	/* Get pointer to private data */
+	this = (struct nand_chip *) (&ams_delta_mtd[1]);
+
+	/* Initialize structures */
+	memset(ams_delta_mtd, 0, sizeof(struct mtd_info));
+	memset(this, 0, sizeof(struct nand_chip));
+
+	/* Link the private data with the MTD structure */
+	ams_delta_mtd->priv = this;
 
 	/*
 	 * Don't try to request the memory region from here,
@@ -206,7 +225,7 @@ static int ams_delta_init(struct platform_device *pdev)
 		goto out_free;
 	}
 
-	nand_set_controller_data(this, (void *)io_base);
+	this->priv = io_base;
 
 	/* Set address of NAND IO lines */
 	this->IO_ADDR_R = io_base + OMAP_MPUIO_INPUT_LATCH;
@@ -214,6 +233,7 @@ static int ams_delta_init(struct platform_device *pdev)
 	this->read_byte = ams_delta_read_byte;
 	this->write_buf = ams_delta_write_buf;
 	this->read_buf = ams_delta_read_buf;
+	this->verify_buf = ams_delta_verify_buf;
 	this->cmd_ctrl = ams_delta_hwcontrol;
 	if (gpio_request(AMS_DELTA_GPIO_PIN_NAND_RB, "nand_rdy") == 0) {
 		this->dev_ready = ams_delta_nand_ready;
@@ -224,7 +244,6 @@ static int ams_delta_init(struct platform_device *pdev)
 	/* 25 us command delay time */
 	this->chip_delay = 30;
 	this->ecc.mode = NAND_ECC_SOFT;
-	this->ecc.algo = NAND_ECC_HAMMING;
 
 	platform_set_drvdata(pdev, io_base);
 
@@ -248,10 +267,11 @@ static int ams_delta_init(struct platform_device *pdev)
  out_mtd:
 	gpio_free_array(_mandatory_gpio, ARRAY_SIZE(_mandatory_gpio));
 out_gpio:
+	platform_set_drvdata(pdev, NULL);
 	gpio_free(AMS_DELTA_GPIO_PIN_NAND_RB);
 	iounmap(io_base);
 out_free:
-	kfree(this);
+	kfree(ams_delta_mtd);
  out:
 	return err;
 }
@@ -259,7 +279,7 @@ out_free:
 /*
  * Clean up routine
  */
-static int ams_delta_cleanup(struct platform_device *pdev)
+static int __devexit ams_delta_cleanup(struct platform_device *pdev)
 {
 	void __iomem *io_base = platform_get_drvdata(pdev);
 
@@ -271,16 +291,17 @@ static int ams_delta_cleanup(struct platform_device *pdev)
 	iounmap(io_base);
 
 	/* Free the MTD device structure */
-	kfree(mtd_to_nand(ams_delta_mtd));
+	kfree(ams_delta_mtd);
 
 	return 0;
 }
 
 static struct platform_driver ams_delta_nand_driver = {
 	.probe		= ams_delta_init,
-	.remove		= ams_delta_cleanup,
+	.remove		= __devexit_p(ams_delta_cleanup),
 	.driver		= {
 		.name	= "ams-delta-nand",
+		.owner	= THIS_MODULE,
 	},
 };
 

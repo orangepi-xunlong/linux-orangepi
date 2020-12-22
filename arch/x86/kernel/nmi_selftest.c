@@ -13,7 +13,6 @@
 #include <linux/cpumask.h>
 #include <linux/delay.h>
 #include <linux/init.h>
-#include <linux/percpu.h>
 
 #include <asm/apic.h>
 #include <asm/nmi.h>
@@ -42,8 +41,7 @@ static int __init nmi_unk_cb(unsigned int val, struct pt_regs *regs)
 static void __init init_nmi_testsuite(void)
 {
 	/* trap all the unknown NMIs we may generate */
-	register_nmi_handler(NMI_UNKNOWN, nmi_unk_cb, 0, "nmi_selftest_unk",
-			__initdata);
+	register_nmi_handler(NMI_UNKNOWN, nmi_unk_cb, 0, "nmi_selftest_unk");
 }
 
 static void __init cleanup_nmi_testsuite(void)
@@ -66,7 +64,7 @@ static void __init test_nmi_ipi(struct cpumask *mask)
 	unsigned long timeout;
 
 	if (register_nmi_handler(NMI_LOCAL, test_nmi_ipi_callback,
-				 NMI_FLAG_FIRST, "nmi_selftest", __initdata)) {
+				 NMI_FLAG_FIRST, "nmi_selftest")) {
 		nmi_fail = FAILURE;
 		return;
 	}
@@ -119,15 +117,15 @@ static void __init dotest(void (*testcase_fn)(void), int expected)
 		unexpected_testcase_failures++;
 
 		if (nmi_fail == FAILURE)
-			printk(KERN_CONT "FAILED |");
+			printk("FAILED |");
 		else if (nmi_fail == TIMEOUT)
-			printk(KERN_CONT "TIMEOUT|");
+			printk("TIMEOUT|");
 		else
-			printk(KERN_CONT "ERROR  |");
+			printk("ERROR  |");
 		dump_stack();
 	} else {
 		testcase_successes++;
-		printk(KERN_CONT "  ok  |");
+		printk("  ok  |");
 	}
 	testcase_total++;
 
@@ -152,10 +150,10 @@ void __init nmi_selftest(void)
 
 	print_testname("remote IPI");
 	dotest(remote_ipi, SUCCESS);
-	printk(KERN_CONT "\n");
+	printk("\n");
 	print_testname("local IPI");
 	dotest(local_ipi, SUCCESS);
-	printk(KERN_CONT "\n");
+	printk("\n");
 
 	cleanup_nmi_testsuite();
 

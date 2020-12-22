@@ -10,7 +10,6 @@
 
 #include <linux/bio.h>
 #include <linux/blkdev.h>
-#include <linux/math64.h>
 #include <linux/ratelimit.h>
 
 struct dm_dev;
@@ -19,19 +18,12 @@ struct dm_table;
 struct mapped_device;
 struct bio_vec;
 
-/*
- * Type of table, mapped_device's mempool and request_queue
- */
-#define DM_TYPE_NONE			0
-#define DM_TYPE_BIO_BASED		1
-#define DM_TYPE_REQUEST_BASED		2
-#define DM_TYPE_MQ_REQUEST_BASED	3
-#define DM_TYPE_DAX_BIO_BASED		4
-
 typedef enum { STATUSTYPE_INFO, STATUSTYPE_TABLE } status_type_t;
 
 union map_info {
 	void *ptr;
+	unsigned long long ll;
+	unsigned target_request_nr;
 };
 
 /*
@@ -54,14 +46,10 @@ typedef void (*dm_dtr_fn) (struct dm_target *ti);
  * = 1: simple remap complete
  * = 2: The target wants to push back the io
  */
-typedef int (*dm_map_fn) (struct dm_target *ti, struct bio *bio);
+typedef int (*dm_map_fn) (struct dm_target *ti, struct bio *bio,
+			  union map_info *map_context);
 typedef int (*dm_map_request_fn) (struct dm_target *ti, struct request *clone,
 				  union map_info *map_context);
-typedef int (*dm_clone_and_map_request_fn) (struct dm_target *ti,
-					    struct request *rq,
-					    union map_info *map_context,
-					    struct request **clone);
-typedef void (*dm_release_clone_request_fn) (struct request *clone);
 
 /*
  * Returns:
@@ -72,45 +60,34 @@ typedef void (*dm_release_clone_request_fn) (struct request *clone);
  * 2   : The target wants to push back the io
  */
 typedef int (*dm_endio_fn) (struct dm_target *ti,
-			    struct bio *bio, int error);
+			    struct bio *bio, int error,
+			    union map_info *map_context);
 typedef int (*dm_request_endio_fn) (struct dm_target *ti,
 				    struct request *clone, int error,
 				    union map_info *map_context);
 
+typedef void (*dm_flush_fn) (struct dm_target *ti);
 typedef void (*dm_presuspend_fn) (struct dm_target *ti);
-typedef void (*dm_presuspend_undo_fn) (struct dm_target *ti);
 typedef void (*dm_postsuspend_fn) (struct dm_target *ti);
 typedef int (*dm_preresume_fn) (struct dm_target *ti);
 typedef void (*dm_resume_fn) (struct dm_target *ti);
 
 typedef void (*dm_status_fn) (struct dm_target *ti, status_type_t status_type,
-			      unsigned status_flags, char *result, unsigned maxlen);
+			      char *result, unsigned int maxlen);
 
 typedef int (*dm_message_fn) (struct dm_target *ti, unsigned argc, char **argv);
 
-typedef int (*dm_prepare_ioctl_fn) (struct dm_target *ti,
-			    struct block_device **bdev, fmode_t *mode);
+typedef int (*dm_ioctl_fn) (struct dm_target *ti, unsigned int cmd,
+			    unsigned long arg);
 
-/*
- * These iteration functions are typically used to check (and combine)
- * properties of underlying devices.
- * E.g. Does at least one underlying device support flush?
- *      Does any underlying device not support WRITE_SAME?
- *
- * The callout function is called once for each contiguous section of
- * an underlying device.  State can be maintained in *data.
- * Return non-zero to stop iterating through any further devices.
- */
+typedef int (*dm_merge_fn) (struct dm_target *ti, struct bvec_merge_data *bvm,
+			    struct bio_vec *biovec, int max_size);
+
 typedef int (*iterate_devices_callout_fn) (struct dm_target *ti,
 					   struct dm_dev *dev,
 					   sector_t start, sector_t len,
 					   void *data);
 
-/*
- * This function must iterate through each section of device used by the
- * target until it encounters a non-zero return code, which it then returns.
- * Returns zero if no callout returned non-zero.
- */
 typedef int (*dm_iterate_devices_fn) (struct dm_target *ti,
 				      iterate_devices_callout_fn fn,
 				      void *data);
@@ -125,15 +102,13 @@ typedef void (*dm_io_hints_fn) (struct dm_target *ti,
  */
 typedef int (*dm_busy_fn) (struct dm_target *ti);
 
-/*
- * Returns:
- *  < 0 : error
- * >= 0 : the number of bytes accessible at the address
- */
-typedef long (*dm_direct_access_fn) (struct dm_target *ti, sector_t sector,
-				     void **kaddr, pfn_t *pfn, long size);
-
 void dm_error(const char *message);
+
+/*
+ * Combine device limits.
+ */
+int dm_set_device_limits(struct dm_target *ti, struct dm_dev *dev,
+			 sector_t start, sector_t len, void *data);
 
 struct dm_dev {
 	struct block_device *bdev;
@@ -141,14 +116,12 @@ struct dm_dev {
 	char name[16];
 };
 
-dev_t dm_get_dev_t(const char *path);
-
 /*
  * Constructors should call these functions to ensure destination devices
  * are opened/closed correctly.
  */
 int dm_get_device(struct dm_target *ti, const char *path, fmode_t mode,
-		  struct dm_dev **result);
+						 struct dm_dev **result);
 void dm_put_device(struct dm_target *ti, struct dm_dev *d);
 
 /*
@@ -164,22 +137,20 @@ struct target_type {
 	dm_dtr_fn dtr;
 	dm_map_fn map;
 	dm_map_request_fn map_rq;
-	dm_clone_and_map_request_fn clone_and_map_rq;
-	dm_release_clone_request_fn release_clone_rq;
 	dm_endio_fn end_io;
 	dm_request_endio_fn rq_end_io;
+	dm_flush_fn flush;
 	dm_presuspend_fn presuspend;
-	dm_presuspend_undo_fn presuspend_undo;
 	dm_postsuspend_fn postsuspend;
 	dm_preresume_fn preresume;
 	dm_resume_fn resume;
 	dm_status_fn status;
 	dm_message_fn message;
-	dm_prepare_ioctl_fn prepare_ioctl;
+	dm_ioctl_fn ioctl;
+	dm_merge_fn merge;
 	dm_busy_fn busy;
 	dm_iterate_devices_fn iterate_devices;
 	dm_io_hints_fn io_hints;
-	dm_direct_access_fn direct_access;
 
 	/* For internal device-mapper use. */
 	struct list_head list;
@@ -209,21 +180,6 @@ struct target_type {
 #define DM_TARGET_IMMUTABLE		0x00000004
 #define dm_target_is_immutable(type)	((type)->features & DM_TARGET_IMMUTABLE)
 
-/*
- * Indicates that a target may replace any target; even immutable targets.
- * .map, .map_rq, .clone_and_map_rq and .release_clone_rq are all defined.
- */
-#define DM_TARGET_WILDCARD		0x00000008
-#define dm_target_is_wildcard(type)	((type)->features & DM_TARGET_WILDCARD)
-
-/*
- * Some targets need to be sent the same WRITE bio severals times so
- * that they can send copies of it to different devices.  This function
- * examines any supplied bio and returns the number of copies of it the
- * target requires.
- */
-typedef unsigned (*dm_num_write_bios_fn) (struct dm_target *ti, struct bio *bio);
-
 struct dm_target {
 	struct dm_table *table;
 	struct target_type *type;
@@ -232,43 +188,24 @@ struct dm_target {
 	sector_t begin;
 	sector_t len;
 
-	/* If non-zero, maximum size of I/O submitted to a target. */
-	uint32_t max_io_len;
+	/* Always a power of 2 */
+	sector_t split_io;
 
 	/*
-	 * A number of zero-length barrier bios that will be submitted
+	 * A number of zero-length barrier requests that will be submitted
 	 * to the target for the purpose of flushing cache.
 	 *
-	 * The bio number can be accessed with dm_bio_get_target_bio_nr.
-	 * It is a responsibility of the target driver to remap these bios
+	 * The request number will be placed in union map_info->target_request_nr.
+	 * It is a responsibility of the target driver to remap these requests
 	 * to the real underlying devices.
 	 */
-	unsigned num_flush_bios;
+	unsigned num_flush_requests;
 
 	/*
-	 * The number of discard bios that will be submitted to the target.
-	 * The bio number can be accessed with dm_bio_get_target_bio_nr.
+	 * The number of discard requests that will be submitted to the
+	 * target.  map_info->request_nr is used just like num_flush_requests.
 	 */
-	unsigned num_discard_bios;
-
-	/*
-	 * The number of WRITE SAME bios that will be submitted to the target.
-	 * The bio number can be accessed with dm_bio_get_target_bio_nr.
-	 */
-	unsigned num_write_same_bios;
-
-	/*
-	 * The minimum number of extra bytes allocated in each io for the
-	 * target to use.
-	 */
-	unsigned per_io_data_size;
-
-	/*
-	 * If defined, this function is called to find out how many
-	 * duplicate bios should be sent to the target when writing
-	 * data.
-	 */
-	dm_num_write_bios_fn num_write_bios;
+	unsigned num_discard_requests;
 
 	/* target specific data */
 	void *private;
@@ -277,27 +214,15 @@ struct dm_target {
 	char *error;
 
 	/*
-	 * Set if this target needs to receive flushes regardless of
-	 * whether or not its underlying devices have support.
-	 */
-	bool flush_supported:1;
-
-	/*
 	 * Set if this target needs to receive discards regardless of
 	 * whether or not its underlying devices have support.
 	 */
-	bool discards_supported:1;
-
-	/*
-	 * Set if the target required discard bios to be split
-	 * on max_io_len boundary.
-	 */
-	bool split_discard_bios:1;
+	unsigned discards_supported:1;
 
 	/*
 	 * Set if this target does not return zeroes on discarded blocks.
 	 */
-	bool discard_zeroes_data_unsupported:1;
+	unsigned discard_zeroes_data_unsupported:1;
 };
 
 /* Each target can link one of these into the table */
@@ -305,36 +230,6 @@ struct dm_target_callbacks {
 	struct list_head list;
 	int (*congested_fn) (struct dm_target_callbacks *, int);
 };
-
-/*
- * For bio-based dm.
- * One of these is allocated for each bio.
- * This structure shouldn't be touched directly by target drivers.
- * It is here so that we can inline dm_per_bio_data and
- * dm_bio_from_per_bio_data
- */
-struct dm_target_io {
-	struct dm_io *io;
-	struct dm_target *ti;
-	unsigned target_bio_nr;
-	unsigned *len_ptr;
-	struct bio clone;
-};
-
-static inline void *dm_per_bio_data(struct bio *bio, size_t data_size)
-{
-	return (char *)bio - offsetof(struct dm_target_io, clone) - data_size;
-}
-
-static inline struct bio *dm_bio_from_per_bio_data(void *data, size_t data_size)
-{
-	return (struct bio *)((char *)data + data_size + offsetof(struct dm_target_io, clone));
-}
-
-static inline unsigned dm_bio_get_target_bio_nr(const struct bio *bio)
-{
-	return container_of(bio, struct dm_target_io, clone)->target_bio_nr;
-}
 
 int dm_register_target(struct target_type *t);
 void dm_unregister_target(struct target_type *t);
@@ -398,7 +293,6 @@ int dm_create(int minor, struct mapped_device **md);
  */
 struct mapped_device *dm_get_md(dev_t dev);
 void dm_get(struct mapped_device *md);
-int dm_hold(struct mapped_device *md);
 void dm_put(struct mapped_device *md);
 
 /*
@@ -406,12 +300,6 @@ void dm_put(struct mapped_device *md);
  */
 void dm_set_mdptr(struct mapped_device *md, void *ptr);
 void *dm_get_mdptr(struct mapped_device *md);
-
-/*
- * Export the device via the ioctl interface (uses mdptr).
- */
-int dm_ioctl_export(struct mapped_device *md, const char *name,
-		    const char *uuid);
 
 /*
  * A device can still be used while suspended, but I/O is deferred.
@@ -435,23 +323,15 @@ int dm_copy_name_and_uuid(struct mapped_device *md, char *name, char *uuid);
 struct gendisk *dm_disk(struct mapped_device *md);
 int dm_suspended(struct dm_target *ti);
 int dm_noflush_suspending(struct dm_target *ti);
-void dm_accept_partial_bio(struct bio *bio, unsigned n_sectors);
+union map_info *dm_get_mapinfo(struct bio *bio);
 union map_info *dm_get_rq_mapinfo(struct request *rq);
-
-struct queue_limits *dm_get_queue_limits(struct mapped_device *md);
-
-void dm_lock_md_type(struct mapped_device *md);
-void dm_unlock_md_type(struct mapped_device *md);
-void dm_set_md_type(struct mapped_device *md, unsigned type);
-unsigned dm_get_md_type(struct mapped_device *md);
-int dm_setup_md_queue(struct mapped_device *md, struct dm_table *t);
-unsigned dm_table_get_type(struct dm_table *t);
 
 /*
  * Geometry functions.
  */
 int dm_get_geometry(struct mapped_device *md, struct hd_geometry *geo);
 int dm_set_geometry(struct mapped_device *md, struct hd_geometry *geo);
+
 
 /*-----------------------------------------------------------------
  * Functions for manipulating device-mapper tables.
@@ -475,29 +355,16 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 void dm_table_add_target_callbacks(struct dm_table *t, struct dm_target_callbacks *cb);
 
 /*
- * Target can use this to set the table's type.
- * Can only ever be called from a target's ctr.
- * Useful for "hybrid" target (supports both bio-based
- * and request-based).
- */
-void dm_table_set_type(struct dm_table *t, unsigned type);
-
-/*
  * Finally call this to make the table ready for use.
  */
 int dm_table_complete(struct dm_table *t);
 
 /*
- * Target may require that it is never sent I/O larger than len.
- */
-int __must_check dm_set_target_max_io_len(struct dm_target *ti, sector_t len);
-
-/*
  * Table reference counting.
  */
-struct dm_table *dm_get_live_table(struct mapped_device *md, int *srcu_idx);
-void dm_put_live_table(struct mapped_device *md, int srcu_idx);
-void dm_sync_table(struct mapped_device *md);
+struct dm_table *dm_get_live_table(struct mapped_device *md);
+void dm_table_get(struct dm_table *t);
+void dm_table_put(struct dm_table *t);
 
 /*
  * Queries
@@ -511,11 +378,6 @@ struct mapped_device *dm_table_get_md(struct dm_table *t);
  * Trigger an event.
  */
 void dm_table_event(struct dm_table *t);
-
-/*
- * Run the queue for request-based targets.
- */
-void dm_table_run_md_queue_async(struct dm_table *t);
 
 /*
  * The device must be suspended before calling this method.
@@ -603,15 +465,6 @@ extern struct ratelimit_state dm_ratelimit_state;
 #define DM_MAPIO_SUBMITTED	0
 #define DM_MAPIO_REMAPPED	1
 #define DM_MAPIO_REQUEUE	DM_ENDIO_REQUEUE
-#define DM_MAPIO_DELAY_REQUEUE	3
-
-#define dm_sector_div64(x, y)( \
-{ \
-	u64 _res; \
-	(x) = div64_u64_rem(x, y, &_res); \
-	_res; \
-} \
-)
 
 /*
  * Ceiling(n / sz)
@@ -640,7 +493,7 @@ extern struct ratelimit_state dm_ratelimit_state;
  */
 #define dm_target_offset(ti, sector) ((sector) - (ti)->begin)
 
-static inline sector_t to_sector(unsigned long long n)
+static inline sector_t to_sector(unsigned long n)
 {
 	return (n >> SECTOR_SHIFT);
 }
@@ -649,5 +502,13 @@ static inline unsigned long to_bytes(sector_t n)
 {
 	return (n << SECTOR_SHIFT);
 }
+
+/*-----------------------------------------------------------------
+ * Helper for block layer and dm core operations
+ *---------------------------------------------------------------*/
+void dm_dispatch_request(struct request *rq);
+void dm_requeue_unmapped_request(struct request *rq);
+void dm_kill_unmapped_request(struct request *rq, int error);
+int dm_underlying_device_busy(struct request_queue *q);
 
 #endif	/* _LINUX_DEVICE_MAPPER_H */

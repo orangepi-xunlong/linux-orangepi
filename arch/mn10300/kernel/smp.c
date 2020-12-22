@@ -130,12 +130,10 @@ static irqreturn_t smp_call_function_interrupt(int irq, void *dev_id);
 
 static struct irqaction reschedule_ipi = {
 	.handler	= smp_reschedule_interrupt,
-	.flags		= IRQF_NOBALANCING,
 	.name		= "smp reschedule IPI"
 };
 static struct irqaction call_function_ipi = {
 	.handler	= smp_call_function_interrupt,
-	.flags		= IRQF_NOBALANCING,
 	.name		= "smp call function IPI"
 };
 
@@ -143,7 +141,7 @@ static struct irqaction call_function_ipi = {
 static irqreturn_t smp_ipi_timer_interrupt(int irq, void *dev_id);
 static struct irqaction local_timer_ipi = {
 	.handler	= smp_ipi_timer_interrupt,
-	.flags		= IRQF_NOBALANCING,
+	.flags		= IRQF_DISABLED,
 	.name		= "smp local timer IPI"
 };
 #endif
@@ -182,7 +180,6 @@ static void init_ipi(void)
 
 #ifdef CONFIG_MN10300_CACHE_ENABLED
 	/* set up the cache flush IPI */
-	irq_set_chip(FLUSH_CACHE_IPI, &mn10300_ipi_type);
 	flags = arch_local_cli_save();
 	__set_intr_stub(NUM2EXCEP_IRQ_LEVEL(FLUSH_CACHE_GxICR_LV),
 			mn10300_low_ipi_handler);
@@ -192,7 +189,6 @@ static void init_ipi(void)
 #endif
 
 	/* set up the NMI call function IPI */
-	irq_set_chip(CALL_FUNCTION_NMI_IPI, &mn10300_ipi_type);
 	flags = arch_local_cli_save();
 	GxICR(CALL_FUNCTION_NMI_IPI) = GxICR_NMI | GxICR_ENABLE | GxICR_DETECT;
 	tmp16 = GxICR(CALL_FUNCTION_NMI_IPI);
@@ -203,10 +199,6 @@ static void init_ipi(void)
 	__set_intr_stub(NUM2EXCEP_IRQ_LEVEL(SMP_BOOT_GxICR_LV),
 			mn10300_low_ipi_handler);
 	arch_local_irq_restore(flags);
-
-#ifdef CONFIG_KERNEL_DEBUGGER
-	irq_set_chip(DEBUGGER_NMI_IPI, &mn10300_ipi_type);
-#endif
 }
 
 /**
@@ -675,7 +667,7 @@ int __init start_secondary(void *unused)
 #ifdef CONFIG_GENERIC_CLOCKEVENTS
 	init_clockevents();
 #endif
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_idle();
 	return 0;
 }
 
@@ -884,7 +876,9 @@ static void __init smp_online(void)
 
 	notify_cpu_starting(cpu);
 
+	ipi_call_lock();
 	set_cpu_online(cpu, true);
+	ipi_call_unlock();
 
 	local_irq_enable();
 }
@@ -905,7 +899,7 @@ void __init smp_cpus_done(unsigned int max_cpus)
  * Set up the cpu_online_mask, cpu_callout_map and cpu_callin_map of the boot
  * processor (CPU 0).
  */
-void smp_prepare_boot_cpu(void)
+void __devinit smp_prepare_boot_cpu(void)
 {
 	cpumask_set_cpu(0, &cpu_callout_map);
 	cpumask_set_cpu(0, &cpu_callin_map);
@@ -930,11 +924,13 @@ void initialize_secondary(void)
  * __cpu_up - Set smp_commenced_mask for the nominated CPU
  * @cpu: The target CPU.
  */
-int __cpu_up(unsigned int cpu, struct task_struct *tidle)
+int __devinit __cpu_up(unsigned int cpu)
 {
 	int timeout;
 
 #ifdef CONFIG_HOTPLUG_CPU
+	if (num_online_cpus() == 1)
+		disable_hlt();
 	if (sleep_mode[cpu])
 		run_wakeup_cpu(cpu);
 #endif /* CONFIG_HOTPLUG_CPU */
@@ -1001,6 +997,9 @@ int __cpu_disable(void)
 void __cpu_die(unsigned int cpu)
 {
 	run_sleep_cpu(cpu);
+
+	if (num_online_cpus() == 1)
+		enable_hlt();
 }
 
 #ifdef CONFIG_MN10300_CACHE_ENABLED

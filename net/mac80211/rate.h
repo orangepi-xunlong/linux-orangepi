@@ -17,11 +17,10 @@
 #include <net/mac80211.h>
 #include "ieee80211_i.h"
 #include "sta_info.h"
-#include "driver-ops.h"
 
 struct rate_control_ref {
 	struct ieee80211_local *local;
-	const struct rate_control_ops *ops;
+	struct rate_control_ops *ops;
 	void *priv;
 };
 
@@ -37,50 +36,50 @@ static inline void rate_control_tx_status(struct ieee80211_local *local,
 	struct rate_control_ref *ref = local->rate_ctrl;
 	struct ieee80211_sta *ista = &sta->sta;
 	void *priv_sta = sta->rate_ctrl_priv;
-	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 
 	if (!ref || !test_sta_flag(sta, WLAN_STA_RATE_CONTROL))
 		return;
 
-	spin_lock_bh(&sta->rate_ctrl_lock);
-	if (ref->ops->tx_status)
-		ref->ops->tx_status(ref->priv, sband, ista, priv_sta, skb);
-	else
-		ref->ops->tx_status_noskb(ref->priv, sband, ista, priv_sta, info);
-	spin_unlock_bh(&sta->rate_ctrl_lock);
+	ref->ops->tx_status(ref->priv, sband, ista, priv_sta, skb);
 }
 
-static inline void
-rate_control_tx_status_noskb(struct ieee80211_local *local,
-			     struct ieee80211_supported_band *sband,
-			     struct sta_info *sta,
-			     struct ieee80211_tx_info *info)
+
+static inline void rate_control_rate_init(struct sta_info *sta)
+{
+	struct ieee80211_local *local = sta->sdata->local;
+	struct rate_control_ref *ref = sta->rate_ctrl;
+	struct ieee80211_sta *ista = &sta->sta;
+	void *priv_sta = sta->rate_ctrl_priv;
+	struct ieee80211_supported_band *sband;
+
+	if (!ref)
+		return;
+
+	sband = local->hw.wiphy->bands[local->hw.conf.channel->band];
+
+	ref->ops->rate_init(ref->priv, sband, ista, priv_sta);
+	set_sta_flag(sta, WLAN_STA_RATE_CONTROL);
+}
+
+static inline void rate_control_rate_update(struct ieee80211_local *local,
+				    struct ieee80211_supported_band *sband,
+				    struct sta_info *sta, u32 changed,
+				    enum nl80211_channel_type oper_chan_type)
 {
 	struct rate_control_ref *ref = local->rate_ctrl;
 	struct ieee80211_sta *ista = &sta->sta;
 	void *priv_sta = sta->rate_ctrl_priv;
 
-	if (!ref || !test_sta_flag(sta, WLAN_STA_RATE_CONTROL))
-		return;
-
-	if (WARN_ON_ONCE(!ref->ops->tx_status_noskb))
-		return;
-
-	spin_lock_bh(&sta->rate_ctrl_lock);
-	ref->ops->tx_status_noskb(ref->priv, sband, ista, priv_sta, info);
-	spin_unlock_bh(&sta->rate_ctrl_lock);
+	if (ref && ref->ops->rate_update)
+		ref->ops->rate_update(ref->priv, sband, ista,
+				      priv_sta, changed, oper_chan_type);
 }
 
-void rate_control_rate_init(struct sta_info *sta);
-void rate_control_rate_update(struct ieee80211_local *local,
-				    struct ieee80211_supported_band *sband,
-				    struct sta_info *sta, u32 changed);
-
 static inline void *rate_control_alloc_sta(struct rate_control_ref *ref,
-					   struct sta_info *sta, gfp_t gfp)
+					   struct ieee80211_sta *sta,
+					   gfp_t gfp)
 {
-	spin_lock_init(&sta->rate_ctrl_lock);
-	return ref->ops->alloc_sta(ref->priv, &sta->sta, gfp);
+	return ref->ops->alloc_sta(ref->priv, sta, gfp);
 }
 
 static inline void rate_control_free_sta(struct sta_info *sta)
@@ -96,9 +95,9 @@ static inline void rate_control_add_sta_debugfs(struct sta_info *sta)
 {
 #ifdef CONFIG_MAC80211_DEBUGFS
 	struct rate_control_ref *ref = sta->rate_ctrl;
-	if (ref && sta->debugfs_dir && ref->ops->add_sta_debugfs)
+	if (ref && sta->debugfs.dir && ref->ops->add_sta_debugfs)
 		ref->ops->add_sta_debugfs(ref->priv, sta->rate_ctrl_priv,
-					  sta->debugfs_dir);
+					  sta->debugfs.dir);
 #endif
 }
 
@@ -119,9 +118,22 @@ void rate_control_deinitialize(struct ieee80211_local *local);
 
 
 /* Rate control algorithms */
+#ifdef CONFIG_MAC80211_RC_PID
+extern int rc80211_pid_init(void);
+extern void rc80211_pid_exit(void);
+#else
+static inline int rc80211_pid_init(void)
+{
+	return 0;
+}
+static inline void rc80211_pid_exit(void)
+{
+}
+#endif
+
 #ifdef CONFIG_MAC80211_RC_MINSTREL
-int rc80211_minstrel_init(void);
-void rc80211_minstrel_exit(void);
+extern int rc80211_minstrel_init(void);
+extern void rc80211_minstrel_exit(void);
 #else
 static inline int rc80211_minstrel_init(void)
 {
@@ -133,8 +145,8 @@ static inline void rc80211_minstrel_exit(void)
 #endif
 
 #ifdef CONFIG_MAC80211_RC_MINSTREL_HT
-int rc80211_minstrel_ht_init(void);
-void rc80211_minstrel_ht_exit(void);
+extern int rc80211_minstrel_ht_init(void);
+extern void rc80211_minstrel_ht_exit(void);
 #else
 static inline int rc80211_minstrel_ht_init(void)
 {

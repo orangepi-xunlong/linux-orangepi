@@ -18,6 +18,7 @@
 #include <linux/input.h>
 #include <linux/serio.h>
 #include <linux/i8042.h>
+#include <linux/init.h>
 #include <linux/libps2.h>
 
 #define DRIVER_DESC	"PS/2 driver library"
@@ -56,17 +57,19 @@ EXPORT_SYMBOL(ps2_sendbyte);
 
 void ps2_begin_command(struct ps2dev *ps2dev)
 {
-	struct mutex *m = ps2dev->serio->ps2_cmd_mutex ?: &ps2dev->cmd_mutex;
+	mutex_lock(&ps2dev->cmd_mutex);
 
-	mutex_lock(m);
+	if (i8042_check_port_owner(ps2dev->serio))
+		i8042_lock_chip();
 }
 EXPORT_SYMBOL(ps2_begin_command);
 
 void ps2_end_command(struct ps2dev *ps2dev)
 {
-	struct mutex *m = ps2dev->serio->ps2_cmd_mutex ?: &ps2dev->cmd_mutex;
+	if (i8042_check_port_owner(ps2dev->serio))
+		i8042_unlock_chip();
 
-	mutex_unlock(m);
+	mutex_unlock(&ps2dev->cmd_mutex);
 }
 EXPORT_SYMBOL(ps2_end_command);
 
@@ -210,17 +213,12 @@ int __ps2_command(struct ps2dev *ps2dev, unsigned char *param, int command)
 	 * time before the ACK arrives.
 	 */
 	if (ps2_sendbyte(ps2dev, command & 0xff,
-			 command == PS2_CMD_RESET_BAT ? 1000 : 200)) {
-		serio_pause_rx(ps2dev->serio);
-		goto out_reset_flags;
-	}
+			 command == PS2_CMD_RESET_BAT ? 1000 : 200))
+		goto out;
 
-	for (i = 0; i < send; i++) {
-		if (ps2_sendbyte(ps2dev, param[i], 200)) {
-			serio_pause_rx(ps2dev->serio);
-			goto out_reset_flags;
-		}
-	}
+	for (i = 0; i < send; i++)
+		if (ps2_sendbyte(ps2dev, param[i], 200))
+			goto out;
 
 	/*
 	 * The reset command takes a long time to execute.
@@ -237,18 +235,17 @@ int __ps2_command(struct ps2dev *ps2dev, unsigned char *param, int command)
 				   !(ps2dev->flags & PS2_FLAG_CMD), timeout);
 	}
 
-	serio_pause_rx(ps2dev->serio);
-
 	if (param)
 		for (i = 0; i < receive; i++)
 			param[i] = ps2dev->cmdbuf[(receive - 1) - i];
 
 	if (ps2dev->cmdcnt && (command != PS2_CMD_RESET_BAT || ps2dev->cmdcnt != 1))
-		goto out_reset_flags;
+		goto out;
 
 	rc = 0;
 
- out_reset_flags:
+ out:
+	serio_pause_rx(ps2dev->serio);
 	ps2dev->flags = 0;
 	serio_continue_rx(ps2dev->serio);
 

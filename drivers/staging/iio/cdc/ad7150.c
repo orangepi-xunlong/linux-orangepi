@@ -13,16 +13,16 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 
-#include <linux/iio/iio.h>
-#include <linux/iio/sysfs.h>
-#include <linux/iio/events.h>
+#include "../iio.h"
+#include "../sysfs.h"
+#include "../events.h"
 /*
  * AD7150 registers definition
  */
 
 #define AD7150_STATUS              0
-#define AD7150_STATUS_OUT1         BIT(3)
-#define AD7150_STATUS_OUT2         BIT(5)
+#define AD7150_STATUS_OUT1         (1 << 3)
+#define AD7150_STATUS_OUT2         (1 << 5)
 #define AD7150_CH1_DATA_HIGH       1
 #define AD7150_CH2_DATA_HIGH       3
 #define AD7150_CH1_AVG_HIGH        5
@@ -36,7 +36,7 @@
 #define AD7150_CH2_TIMEOUT         13
 #define AD7150_CH2_SETUP           14
 #define AD7150_CFG                 15
-#define AD7150_CFG_FIX             BIT(7)
+#define AD7150_CFG_FIX             (1 << 7)
 #define AD7150_PD_TIMER            16
 #define AD7150_CH1_CAPDAC          17
 #define AD7150_CH2_CAPDAC          18
@@ -104,7 +104,7 @@ static int ad7150_read_raw(struct iio_dev *indio_dev,
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
 
 	switch (mask) {
-	case IIO_CHAN_INFO_RAW:
+	case 0:
 		ret = i2c_smbus_read_word_data(chip->client,
 					ad7150_addresses[chan->channel][0]);
 		if (ret < 0)
@@ -123,14 +123,14 @@ static int ad7150_read_raw(struct iio_dev *indio_dev,
 	}
 }
 
-static int ad7150_read_event_config(struct iio_dev *indio_dev,
-	const struct iio_chan_spec *chan, enum iio_event_type type,
-	enum iio_event_direction dir)
+static int ad7150_read_event_config(struct iio_dev *indio_dev, u64 event_code)
 {
 	int ret;
 	u8 threshtype;
 	bool adaptive;
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
+	int rising = !!(IIO_EVENT_CODE_EXTRACT_DIR(event_code) ==
+			IIO_EV_DIR_RISING);
 
 	ret = i2c_smbus_read_byte_data(chip->client, AD7150_CFG);
 	if (ret < 0)
@@ -139,50 +139,51 @@ static int ad7150_read_event_config(struct iio_dev *indio_dev,
 	threshtype = (ret >> 5) & 0x03;
 	adaptive = !!(ret & 0x80);
 
-	switch (type) {
+	switch (IIO_EVENT_CODE_EXTRACT_TYPE(event_code)) {
 	case IIO_EV_TYPE_MAG_ADAPTIVE:
-		if (dir == IIO_EV_DIR_RISING)
+		if (rising)
 			return adaptive && (threshtype == 0x1);
-		return adaptive && (threshtype == 0x0);
+		else
+			return adaptive && (threshtype == 0x0);
 	case IIO_EV_TYPE_THRESH_ADAPTIVE:
-		if (dir == IIO_EV_DIR_RISING)
+		if (rising)
 			return adaptive && (threshtype == 0x3);
-		return adaptive && (threshtype == 0x2);
+		else
+			return adaptive && (threshtype == 0x2);
+
 	case IIO_EV_TYPE_THRESH:
-		if (dir == IIO_EV_DIR_RISING)
+		if (rising)
 			return !adaptive && (threshtype == 0x1);
-		return !adaptive && (threshtype == 0x0);
-	default:
-		break;
-	}
+		else
+			return !adaptive && (threshtype == 0x0);
+	};
 	return -EINVAL;
 }
 
 /* lock should be held */
-static int ad7150_write_event_params(struct iio_dev *indio_dev,
-				     unsigned int chan,
-				     enum iio_event_type type,
-				     enum iio_event_direction dir)
+static int ad7150_write_event_params(struct iio_dev *indio_dev, u64 event_code)
 {
 	int ret;
 	u16 value;
 	u8 sens, timeout;
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
-	int rising = (dir == IIO_EV_DIR_RISING);
-	u64 event_code;
-
-	event_code = IIO_UNMOD_EVENT_CODE(IIO_CAPACITANCE, chan, type, dir);
+	int chan = IIO_EVENT_CODE_EXTRACT_CHAN(event_code);
+	int rising = !!(IIO_EVENT_CODE_EXTRACT_DIR(event_code) ==
+			IIO_EV_DIR_RISING);
 
 	if (event_code != chip->current_event)
 		return 0;
 
-	switch (type) {
+	switch (IIO_EVENT_CODE_EXTRACT_TYPE(event_code)) {
 		/* Note completely different from the adaptive versions */
 	case IIO_EV_TYPE_THRESH:
 		value = chip->threshold[rising][chan];
-		return i2c_smbus_write_word_data(chip->client,
+		ret = i2c_smbus_write_word_data(chip->client,
 						ad7150_addresses[chan][3],
 						swab16(value));
+		if (ret < 0)
+			return ret;
+		return 0;
 	case IIO_EV_TYPE_MAG_ADAPTIVE:
 		sens = chip->mag_sensitivity[rising][chan];
 		timeout = chip->mag_timeout[rising][chan];
@@ -193,7 +194,7 @@ static int ad7150_write_event_params(struct iio_dev *indio_dev,
 		break;
 	default:
 		return -EINVAL;
-	}
+	};
 	ret = i2c_smbus_write_byte_data(chip->client,
 					ad7150_addresses[chan][4],
 					sens);
@@ -210,21 +211,18 @@ static int ad7150_write_event_params(struct iio_dev *indio_dev,
 }
 
 static int ad7150_write_event_config(struct iio_dev *indio_dev,
-				     const struct iio_chan_spec *chan,
-				     enum iio_event_type type,
-				     enum iio_event_direction dir, int state)
+				     u64 event_code, int state)
 {
 	u8 thresh_type, cfg, adaptive;
 	int ret;
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
-	int rising = (dir == IIO_EV_DIR_RISING);
-	u64 event_code;
+	int rising = !!(IIO_EVENT_CODE_EXTRACT_DIR(event_code) ==
+			IIO_EV_DIR_RISING);
 
 	/* Something must always be turned on */
-	if (!state)
+	if (state == 0)
 		return -EINVAL;
 
-	event_code = IIO_UNMOD_EVENT_CODE(chan->type, chan->channel, type, dir);
 	if (event_code == chip->current_event)
 		return 0;
 	mutex_lock(&chip->state_lock);
@@ -234,7 +232,7 @@ static int ad7150_write_event_config(struct iio_dev *indio_dev,
 
 	cfg = ret & ~((0x03 << 5) | (0x1 << 7));
 
-	switch (type) {
+	switch (IIO_EVENT_CODE_EXTRACT_TYPE(event_code)) {
 	case IIO_EV_TYPE_MAG_ADAPTIVE:
 		adaptive = 1;
 		if (rising)
@@ -259,7 +257,7 @@ static int ad7150_write_event_config(struct iio_dev *indio_dev,
 	default:
 		ret = -EINVAL;
 		goto error_ret;
-	}
+	};
 
 	cfg |= (!adaptive << 7) | (thresh_type << 5);
 
@@ -270,68 +268,69 @@ static int ad7150_write_event_config(struct iio_dev *indio_dev,
 	chip->current_event = event_code;
 
 	/* update control attributes */
-	ret = ad7150_write_event_params(indio_dev, chan->channel, type, dir);
+	ret = ad7150_write_event_params(indio_dev, event_code);
 error_ret:
 	mutex_unlock(&chip->state_lock);
 
-	return ret;
+	return 0;
 }
 
 static int ad7150_read_event_value(struct iio_dev *indio_dev,
-				   const struct iio_chan_spec *chan,
-				   enum iio_event_type type,
-				   enum iio_event_direction dir,
-				   enum iio_event_info info,
-				   int *val, int *val2)
+				   u64 event_code,
+				   int *val)
 {
+	int chan = IIO_EVENT_CODE_EXTRACT_CHAN(event_code);
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
-	int rising = (dir == IIO_EV_DIR_RISING);
+	int rising = !!(IIO_EVENT_CODE_EXTRACT_DIR(event_code) ==
+			IIO_EV_DIR_RISING);
 
 	/* Complex register sharing going on here */
-	switch (type) {
+	switch (IIO_EVENT_CODE_EXTRACT_TYPE(event_code)) {
 	case IIO_EV_TYPE_MAG_ADAPTIVE:
-		*val = chip->mag_sensitivity[rising][chan->channel];
-		return IIO_VAL_INT;
+		*val = chip->mag_sensitivity[rising][chan];
+		return 0;
+
 	case IIO_EV_TYPE_THRESH_ADAPTIVE:
-		*val = chip->thresh_sensitivity[rising][chan->channel];
-		return IIO_VAL_INT;
+		*val = chip->thresh_sensitivity[rising][chan];
+		return 0;
+
 	case IIO_EV_TYPE_THRESH:
-		*val = chip->threshold[rising][chan->channel];
-		return IIO_VAL_INT;
+		*val = chip->threshold[rising][chan];
+		return 0;
+
 	default:
 		return -EINVAL;
-	}
+	};
 }
 
 static int ad7150_write_event_value(struct iio_dev *indio_dev,
-				    const struct iio_chan_spec *chan,
-				    enum iio_event_type type,
-				    enum iio_event_direction dir,
-				    enum iio_event_info info,
-				    int val, int val2)
+				   u64 event_code,
+				   int val)
 {
 	int ret;
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
-	int rising = (dir == IIO_EV_DIR_RISING);
+	int chan = IIO_EVENT_CODE_EXTRACT_CHAN(event_code);
+	int rising = !!(IIO_EVENT_CODE_EXTRACT_DIR(event_code) ==
+			IIO_EV_DIR_RISING);
 
 	mutex_lock(&chip->state_lock);
-	switch (type) {
+	switch (IIO_EVENT_CODE_EXTRACT_TYPE(event_code)) {
 	case IIO_EV_TYPE_MAG_ADAPTIVE:
-		chip->mag_sensitivity[rising][chan->channel] = val;
+		chip->mag_sensitivity[rising][chan] = val;
 		break;
 	case IIO_EV_TYPE_THRESH_ADAPTIVE:
-		chip->thresh_sensitivity[rising][chan->channel] = val;
+		chip->thresh_sensitivity[rising][chan] = val;
 		break;
 	case IIO_EV_TYPE_THRESH:
-		chip->threshold[rising][chan->channel] = val;
+		chip->threshold[rising][chan] = val;
 		break;
 	default:
 		ret = -EINVAL;
 		goto error_ret;
-	}
+	};
 
 	/* write back if active */
-	ret = ad7150_write_event_params(indio_dev, chan->channel, type, dir);
+	ret = ad7150_write_event_params(indio_dev, event_code);
 
 error_ret:
 	mutex_unlock(&chip->state_lock);
@@ -342,7 +341,7 @@ static ssize_t ad7150_show_timeout(struct device *dev,
 				   struct device_attribute *attr,
 				   char *buf)
 {
-	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
 	struct iio_dev_attr *this_attr = to_iio_dev_attr(attr);
 	u8 value;
@@ -361,36 +360,31 @@ static ssize_t ad7150_show_timeout(struct device *dev,
 		break;
 	default:
 		return -EINVAL;
-	}
+	};
 
 	return sprintf(buf, "%d\n", value);
 }
 
 static ssize_t ad7150_store_timeout(struct device *dev,
-				    struct device_attribute *attr,
-				    const char *buf,
-				    size_t len)
+		struct device_attribute *attr,
+		const char *buf,
+		size_t len)
 {
-	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
 	struct iio_dev_attr *this_attr = to_iio_dev_attr(attr);
 	int chan = IIO_EVENT_CODE_EXTRACT_CHAN(this_attr->address);
-	enum iio_event_direction dir;
-	enum iio_event_type type;
-	int rising;
+	int rising = !!(IIO_EVENT_CODE_EXTRACT_DIR(this_attr->address) ==
+			IIO_EV_DIR_RISING);
 	u8 data;
 	int ret;
-
-	type = IIO_EVENT_CODE_EXTRACT_TYPE(this_attr->address);
-	dir = IIO_EVENT_CODE_EXTRACT_DIR(this_attr->address);
-	rising = (dir == IIO_EV_DIR_RISING);
 
 	ret = kstrtou8(buf, 10, &data);
 	if (ret < 0)
 		return ret;
 
 	mutex_lock(&chip->state_lock);
-	switch (type) {
+	switch (IIO_EVENT_CODE_EXTRACT_TYPE(this_attr->address)) {
 	case IIO_EV_TYPE_MAG_ADAPTIVE:
 		chip->mag_timeout[rising][chan] = data;
 		break;
@@ -400,9 +394,9 @@ static ssize_t ad7150_store_timeout(struct device *dev,
 	default:
 		ret = -EINVAL;
 		goto error_ret;
-	}
+	};
 
-	ret = ad7150_write_event_params(indio_dev, chan, type, dir);
+	ret = ad7150_write_event_params(indio_dev, this_attr->address);
 error_ret:
 	mutex_unlock(&chip->state_lock);
 
@@ -430,57 +424,31 @@ static AD7150_TIMEOUT(0, thresh_adaptive, falling, THRESH_ADAPTIVE, FALLING);
 static AD7150_TIMEOUT(1, thresh_adaptive, rising, THRESH_ADAPTIVE, RISING);
 static AD7150_TIMEOUT(1, thresh_adaptive, falling, THRESH_ADAPTIVE, FALLING);
 
-static const struct iio_event_spec ad7150_events[] = {
-	{
-		.type = IIO_EV_TYPE_THRESH,
-		.dir = IIO_EV_DIR_RISING,
-		.mask_separate = BIT(IIO_EV_INFO_VALUE) |
-			BIT(IIO_EV_INFO_ENABLE),
-	}, {
-		.type = IIO_EV_TYPE_THRESH,
-		.dir = IIO_EV_DIR_FALLING,
-		.mask_separate = BIT(IIO_EV_INFO_VALUE) |
-			BIT(IIO_EV_INFO_ENABLE),
-	}, {
-		.type = IIO_EV_TYPE_THRESH_ADAPTIVE,
-		.dir = IIO_EV_DIR_RISING,
-		.mask_separate = BIT(IIO_EV_INFO_VALUE) |
-			BIT(IIO_EV_INFO_ENABLE),
-	}, {
-		.type = IIO_EV_TYPE_THRESH_ADAPTIVE,
-		.dir = IIO_EV_DIR_FALLING,
-		.mask_separate = BIT(IIO_EV_INFO_VALUE) |
-			BIT(IIO_EV_INFO_ENABLE),
-	}, {
-		.type = IIO_EV_TYPE_MAG_ADAPTIVE,
-		.dir = IIO_EV_DIR_RISING,
-		.mask_separate = BIT(IIO_EV_INFO_VALUE) |
-			BIT(IIO_EV_INFO_ENABLE),
-	}, {
-		.type = IIO_EV_TYPE_MAG_ADAPTIVE,
-		.dir = IIO_EV_DIR_FALLING,
-		.mask_separate = BIT(IIO_EV_INFO_VALUE) |
-			BIT(IIO_EV_INFO_ENABLE),
-	},
-};
-
 static const struct iio_chan_spec ad7150_channels[] = {
 	{
 		.type = IIO_CAPACITANCE,
 		.indexed = 1,
 		.channel = 0,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
-		BIT(IIO_CHAN_INFO_AVERAGE_RAW),
-		.event_spec = ad7150_events,
-		.num_event_specs = ARRAY_SIZE(ad7150_events),
+		.info_mask = IIO_CHAN_INFO_AVERAGE_RAW_SEPARATE_BIT,
+		.event_mask =
+		IIO_EV_BIT(IIO_EV_TYPE_THRESH, IIO_EV_DIR_RISING) |
+		IIO_EV_BIT(IIO_EV_TYPE_THRESH, IIO_EV_DIR_FALLING) |
+		IIO_EV_BIT(IIO_EV_TYPE_THRESH_ADAPTIVE, IIO_EV_DIR_RISING) |
+		IIO_EV_BIT(IIO_EV_TYPE_THRESH_ADAPTIVE, IIO_EV_DIR_FALLING) |
+		IIO_EV_BIT(IIO_EV_TYPE_MAG_ADAPTIVE, IIO_EV_DIR_RISING) |
+		IIO_EV_BIT(IIO_EV_TYPE_MAG_ADAPTIVE, IIO_EV_DIR_FALLING)
 	}, {
 		.type = IIO_CAPACITANCE,
 		.indexed = 1,
 		.channel = 1,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
-		BIT(IIO_CHAN_INFO_AVERAGE_RAW),
-		.event_spec = ad7150_events,
-		.num_event_specs = ARRAY_SIZE(ad7150_events),
+		.info_mask = IIO_CHAN_INFO_AVERAGE_RAW_SEPARATE_BIT,
+		.event_mask =
+		IIO_EV_BIT(IIO_EV_TYPE_THRESH, IIO_EV_DIR_RISING) |
+		IIO_EV_BIT(IIO_EV_TYPE_THRESH, IIO_EV_DIR_FALLING) |
+		IIO_EV_BIT(IIO_EV_TYPE_THRESH_ADAPTIVE, IIO_EV_DIR_RISING) |
+		IIO_EV_BIT(IIO_EV_TYPE_THRESH_ADAPTIVE, IIO_EV_DIR_FALLING) |
+		IIO_EV_BIT(IIO_EV_TYPE_MAG_ADAPTIVE, IIO_EV_DIR_RISING) |
+		IIO_EV_BIT(IIO_EV_TYPE_MAG_ADAPTIVE, IIO_EV_DIR_FALLING)
 	},
 };
 
@@ -493,7 +461,7 @@ static irqreturn_t ad7150_event_handler(int irq, void *private)
 	struct iio_dev *indio_dev = private;
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
 	u8 int_status;
-	s64 timestamp = iio_get_time_ns(indio_dev);
+	s64 timestamp = iio_get_time_ns();
 	int ret;
 
 	ret = i2c_smbus_read_byte_data(chip->client, AD7150_STATUS);
@@ -581,16 +549,18 @@ static const struct iio_info ad7150_info = {
  * device probe and remove
  */
 
-static int ad7150_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int __devinit ad7150_probe(struct i2c_client *client,
+		const struct i2c_device_id *id)
 {
 	int ret;
 	struct ad7150_chip_info *chip;
 	struct iio_dev *indio_dev;
 
-	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*chip));
-	if (!indio_dev)
-		return -ENOMEM;
+	indio_dev = iio_allocate_device(sizeof(*chip));
+	if (indio_dev == NULL) {
+		ret = -ENOMEM;
+		goto error_ret;
+	}
 	chip = iio_priv(indio_dev);
 	mutex_init(&chip->state_lock);
 	/* this is only used for device removal purposes */
@@ -609,38 +579,63 @@ static int ad7150_probe(struct i2c_client *client,
 	indio_dev->modes = INDIO_DIRECT_MODE;
 
 	if (client->irq) {
-		ret = devm_request_threaded_irq(&client->dev, client->irq,
+		ret = request_threaded_irq(client->irq,
 					   NULL,
 					   &ad7150_event_handler,
 					   IRQF_TRIGGER_RISING |
-					   IRQF_TRIGGER_FALLING |
-					   IRQF_ONESHOT,
+					   IRQF_TRIGGER_FALLING,
 					   "ad7150_irq1",
 					   indio_dev);
 		if (ret)
-			return ret;
+			goto error_free_dev;
 	}
 
 	if (client->dev.platform_data) {
-		ret = devm_request_threaded_irq(&client->dev, *(unsigned int *)
+		ret = request_threaded_irq(*(unsigned int *)
 					   client->dev.platform_data,
 					   NULL,
 					   &ad7150_event_handler,
 					   IRQF_TRIGGER_RISING |
-					   IRQF_TRIGGER_FALLING |
-					   IRQF_ONESHOT,
+					   IRQF_TRIGGER_FALLING,
 					   "ad7150_irq2",
 					   indio_dev);
 		if (ret)
-			return ret;
+			goto error_free_irq;
 	}
 
-	ret = devm_iio_device_register(indio_dev->dev.parent, indio_dev);
+	ret = iio_device_register(indio_dev);
 	if (ret)
-		return ret;
+		goto error_free_irq2;
 
 	dev_info(&client->dev, "%s capacitive sensor registered,irq: %d\n",
 		 id->name, client->irq);
+
+	return 0;
+error_free_irq2:
+	if (client->dev.platform_data)
+		free_irq(*(unsigned int *)client->dev.platform_data,
+			 indio_dev);
+error_free_irq:
+	if (client->irq)
+		free_irq(client->irq, indio_dev);
+error_free_dev:
+	iio_free_device(indio_dev);
+error_ret:
+	return ret;
+}
+
+static int __devexit ad7150_remove(struct i2c_client *client)
+{
+	struct iio_dev *indio_dev = i2c_get_clientdata(client);
+
+	iio_device_unregister(indio_dev);
+	if (client->irq)
+		free_irq(client->irq, indio_dev);
+
+	if (client->dev.platform_data)
+		free_irq(*(unsigned int *)client->dev.platform_data, indio_dev);
+
+	iio_free_device(indio_dev);
 
 	return 0;
 }
@@ -659,6 +654,7 @@ static struct i2c_driver ad7150_driver = {
 		.name = "ad7150",
 	},
 	.probe = ad7150_probe,
+	.remove = __devexit_p(ad7150_remove),
 	.id_table = ad7150_id,
 };
 module_i2c_driver(ad7150_driver);

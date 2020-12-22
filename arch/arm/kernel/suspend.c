@@ -1,7 +1,6 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 
-#include <asm/bugs.h>
 #include <asm/cacheflush.h>
 #include <asm/idmap.h>
 #include <asm/pgalloc.h>
@@ -10,11 +9,21 @@
 #include <asm/smp_plat.h>
 #include <asm/suspend.h>
 #include <asm/tlbflush.h>
+#include <asm/cache.h>
 
 extern int __cpu_suspend(unsigned long, int (*)(unsigned long), u32 cpuid);
 extern void cpu_resume_mmu(void);
 
 #ifdef CONFIG_MMU
+/*
+ * Hide the first two arguments to __cpu_suspend - these are an implementation
+ * detail which platform code shouldn't have to know about.
+ *
+ * On SMP systems, the value of cpu_logical_map(smp_processor_id()) must be
+ * the MPIDR of the physical CPU the suspending logical CPU will resume on.
+ * Consequently, if doing a physical CPU migration, cpu_logical_map() must be
+ * updated appropriately somewhere between cpu_pm_enter() and cpu_suspend().
+ */
 int cpu_suspend(unsigned long arg, int (*fn)(unsigned long))
 {
 	struct mm_struct *mm = current->active_mm;
@@ -33,9 +42,7 @@ int cpu_suspend(unsigned long arg, int (*fn)(unsigned long))
 	ret = __cpu_suspend(arg, fn, __mpidr);
 	if (ret == 0) {
 		cpu_switch_mm(mm->pgd, mm);
-		local_flush_bp_all();
 		local_flush_tlb_all();
-		check_other_bugs();
 	}
 
 	return ret;
@@ -56,8 +63,6 @@ int cpu_suspend(unsigned long arg, int (*fn)(unsigned long))
  */
 void __cpu_suspend_save(u32 *ptr, u32 ptrsz, u32 sp, u32 *save_ptr)
 {
-	u32 *ctx = ptr;
-
 	*save_ptr = virt_to_phys(ptr);
 
 	/* This must correspond to the LDM in cpu_resume() assembly */
@@ -67,20 +72,7 @@ void __cpu_suspend_save(u32 *ptr, u32 ptrsz, u32 sp, u32 *save_ptr)
 
 	cpu_do_suspend(ptr);
 
-	flush_cache_louis();
-
-	/*
-	 * flush_cache_louis does not guarantee that
-	 * save_ptr and ptr are cleaned to main memory,
-	 * just up to the Level of Unification Inner Shareable.
-	 * Since the context pointer and context itself
-	 * are to be retrieved with the MMU off that
-	 * data must be cleaned from all cache levels
-	 * to main memory using "area" cache primitives.
-	*/
-	__cpuc_flush_dcache_area(ctx, ptrsz);
-	__cpuc_flush_dcache_area(save_ptr, sizeof(*save_ptr));
-
+	flush_cache_all();
 	outer_clean_range(*save_ptr, *save_ptr + ptrsz);
 	outer_clean_range(virt_to_phys(save_ptr),
 			  virt_to_phys(save_ptr) + sizeof(*save_ptr));
@@ -92,7 +84,8 @@ static int cpu_suspend_alloc_sp(void)
 {
 	void *ctx_ptr;
 	/* ctx_ptr is an array of physical addresses */
-	ctx_ptr = kcalloc(mpidr_hash_size(), sizeof(u32), GFP_KERNEL);
+//	ctx_ptr = kcalloc(mpidr_hash_size(), sizeof(u32), GFP_KERNEL);
+	ctx_ptr = kcalloc(mpidr_hash_size(), L1_CACHE_BYTES, GFP_KERNEL);
 
 	if (WARN_ON(!ctx_ptr))
 		return -ENOMEM;

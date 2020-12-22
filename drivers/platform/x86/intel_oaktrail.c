@@ -50,7 +50,9 @@
 #include <linux/platform_device.h>
 #include <linux/dmi.h>
 #include <linux/rfkill.h>
-#include <acpi/video.h>
+#include <acpi/acpi_bus.h>
+#include <acpi/acpi_drivers.h>
+
 
 #define DRIVER_NAME	"intel_oaktrail"
 #define DRIVER_VERSION	"0.4ac1"
@@ -63,7 +65,7 @@
  * (1 << 1):	Bluetooth enable/disable, RW.
  * (1 << 2):	GPS enable/disable, RW.
  * (1 << 3):	WiFi enable/disable, RW.
- * (1 << 4):	WWAN (3G) enable/disable, RW.
+ * (1 << 4):	WWAN (3G) enable/disalbe, RW.
  * (1 << 5):	Touchscreen enable/disable, Read Only.
  */
 #define OT_EC_DEVICE_STATE_ADDRESS	0xD6
@@ -272,15 +274,16 @@ static int oaktrail_backlight_init(void)
 
 static void oaktrail_backlight_exit(void)
 {
-	backlight_device_unregister(oaktrail_bl_device);
+	if (oaktrail_bl_device)
+		backlight_device_unregister(oaktrail_bl_device);
 }
 
-static int oaktrail_probe(struct platform_device *pdev)
+static int __devinit oaktrail_probe(struct platform_device *pdev)
 {
 	return 0;
 }
 
-static int oaktrail_remove(struct platform_device *pdev)
+static int __devexit oaktrail_remove(struct platform_device *pdev)
 {
 	return 0;
 }
@@ -288,9 +291,10 @@ static int oaktrail_remove(struct platform_device *pdev)
 static struct platform_driver oaktrail_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 	},
 	.probe	= oaktrail_probe,
-	.remove	= oaktrail_remove,
+	.remove	= __devexit_p(oaktrail_remove)
 };
 
 static int dmi_check_cb(const struct dmi_system_id *id)
@@ -344,11 +348,13 @@ static int __init oaktrail_init(void)
 		goto err_device_add;
 	}
 
-	if (acpi_video_get_backlight_type() == acpi_backlight_vendor) {
+	if (!acpi_video_backlight_support()) {
 		ret = oaktrail_backlight_init();
 		if (ret)
 			goto err_backlight;
-	}
+
+	} else
+		pr_info("Backlight controlled by ACPI video driver\n");
 
 	ret = oaktrail_rfkill_init();
 	if (ret) {

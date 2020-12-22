@@ -1,5 +1,4 @@
-#include "debug.h"
-#include "util.h"
+#include "cache.h"
 #include <linux/kernel.h>
 
 int prefixcmp(const char *str, const char *prefix)
@@ -18,19 +17,18 @@ int prefixcmp(const char *str, const char *prefix)
  */
 char strbuf_slopbuf[1];
 
-int strbuf_init(struct strbuf *sb, ssize_t hint)
+void strbuf_init(struct strbuf *sb, ssize_t hint)
 {
 	sb->alloc = sb->len = 0;
 	sb->buf = strbuf_slopbuf;
 	if (hint)
-		return strbuf_grow(sb, hint);
-	return 0;
+		strbuf_grow(sb, hint);
 }
 
 void strbuf_release(struct strbuf *sb)
 {
 	if (sb->alloc) {
-		zfree(&sb->buf);
+		free(sb->buf);
 		strbuf_init(sb, 0);
 	}
 }
@@ -44,110 +42,76 @@ char *strbuf_detach(struct strbuf *sb, size_t *sz)
 	return res;
 }
 
-int strbuf_grow(struct strbuf *sb, size_t extra)
+void strbuf_grow(struct strbuf *sb, size_t extra)
 {
-	char *buf;
-	size_t nr = sb->len + extra + 1;
-
-	if (nr < sb->alloc)
-		return 0;
-
-	if (nr <= sb->len)
-		return -E2BIG;
-
-	if (alloc_nr(sb->alloc) > nr)
-		nr = alloc_nr(sb->alloc);
-
-	/*
-	 * Note that sb->buf == strbuf_slopbuf if sb->alloc == 0, and it is
-	 * a static variable. Thus we have to avoid passing it to realloc.
-	 */
-	buf = realloc(sb->alloc ? sb->buf : NULL, nr * sizeof(*buf));
-	if (!buf)
-		return -ENOMEM;
-
-	sb->buf = buf;
-	sb->alloc = nr;
-	return 0;
+	if (sb->len + extra + 1 <= sb->len)
+		die("you want to use way too much memory");
+	if (!sb->alloc)
+		sb->buf = NULL;
+	ALLOC_GROW(sb->buf, sb->len + extra + 1, sb->alloc);
 }
 
-int strbuf_addch(struct strbuf *sb, int c)
+static void strbuf_splice(struct strbuf *sb, size_t pos, size_t len,
+				   const void *data, size_t dlen)
 {
-	int ret = strbuf_grow(sb, 1);
-	if (ret)
-		return ret;
+	if (pos + len < pos)
+		die("you want to use way too much memory");
+	if (pos > sb->len)
+		die("`pos' is too far after the end of the buffer");
+	if (pos + len > sb->len)
+		die("`pos + len' is too far after the end of the buffer");
 
-	sb->buf[sb->len++] = c;
-	sb->buf[sb->len] = '\0';
-	return 0;
+	if (dlen >= len)
+		strbuf_grow(sb, dlen - len);
+	memmove(sb->buf + pos + dlen,
+			sb->buf + pos + len,
+			sb->len - pos - len);
+	memcpy(sb->buf + pos, data, dlen);
+	strbuf_setlen(sb, sb->len + dlen - len);
 }
 
-int strbuf_add(struct strbuf *sb, const void *data, size_t len)
+void strbuf_remove(struct strbuf *sb, size_t pos, size_t len)
 {
-	int ret = strbuf_grow(sb, len);
-	if (ret)
-		return ret;
+	strbuf_splice(sb, pos, len, NULL, 0);
+}
 
+void strbuf_add(struct strbuf *sb, const void *data, size_t len)
+{
+	strbuf_grow(sb, len);
 	memcpy(sb->buf + sb->len, data, len);
-	return strbuf_setlen(sb, sb->len + len);
+	strbuf_setlen(sb, sb->len + len);
 }
 
-static int strbuf_addv(struct strbuf *sb, const char *fmt, va_list ap)
+void strbuf_addf(struct strbuf *sb, const char *fmt, ...)
 {
-	int len, ret;
-	va_list ap_saved;
-
-	if (!strbuf_avail(sb)) {
-		ret = strbuf_grow(sb, 64);
-		if (ret)
-			return ret;
-	}
-
-	va_copy(ap_saved, ap);
-	len = vsnprintf(sb->buf + sb->len, sb->alloc - sb->len, fmt, ap);
-	if (len < 0) {
-		va_end(ap_saved);
-		return len;
-	}
-	if (len > strbuf_avail(sb)) {
-		ret = strbuf_grow(sb, len);
-		if (ret) {
-			va_end(ap_saved);
-			return ret;
-		}
-		len = vsnprintf(sb->buf + sb->len, sb->alloc - sb->len, fmt, ap_saved);
-		va_end(ap_saved);
-		if (len > strbuf_avail(sb)) {
-			pr_debug("this should not happen, your vsnprintf is broken");
-			va_end(ap_saved);
-			return -EINVAL;
-		}
-	}
-	va_end(ap_saved);
-	return strbuf_setlen(sb, sb->len + len);
-}
-
-int strbuf_addf(struct strbuf *sb, const char *fmt, ...)
-{
+	int len;
 	va_list ap;
-	int ret;
 
+	if (!strbuf_avail(sb))
+		strbuf_grow(sb, 64);
 	va_start(ap, fmt);
-	ret = strbuf_addv(sb, fmt, ap);
+	len = vscnprintf(sb->buf + sb->len, sb->alloc - sb->len, fmt, ap);
 	va_end(ap);
-	return ret;
+	if (len < 0)
+		die("your vscnprintf is broken");
+	if (len > strbuf_avail(sb)) {
+		strbuf_grow(sb, len);
+		va_start(ap, fmt);
+		len = vscnprintf(sb->buf + sb->len, sb->alloc - sb->len, fmt, ap);
+		va_end(ap);
+		if (len > strbuf_avail(sb)) {
+			die("this should not happen, your snprintf is broken");
+		}
+	}
+	strbuf_setlen(sb, sb->len + len);
 }
 
 ssize_t strbuf_read(struct strbuf *sb, int fd, ssize_t hint)
 {
 	size_t oldlen = sb->len;
 	size_t oldalloc = sb->alloc;
-	int ret;
 
-	ret = strbuf_grow(sb, hint ? hint : 8192);
-	if (ret)
-		return ret;
-
+	strbuf_grow(sb, hint ? hint : 8192);
 	for (;;) {
 		ssize_t cnt;
 
@@ -157,14 +121,12 @@ ssize_t strbuf_read(struct strbuf *sb, int fd, ssize_t hint)
 				strbuf_release(sb);
 			else
 				strbuf_setlen(sb, oldlen);
-			return cnt;
+			return -1;
 		}
 		if (!cnt)
 			break;
 		sb->len += cnt;
-		ret = strbuf_grow(sb, 8192);
-		if (ret)
-			return ret;
+		strbuf_grow(sb, 8192);
 	}
 
 	sb->buf[sb->len] = '\0';

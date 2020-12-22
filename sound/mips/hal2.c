@@ -260,7 +260,7 @@ static int hal2_gain_put(struct snd_kcontrol *kcontrol,
 	return old != new;
 }
 
-static struct snd_kcontrol_new hal2_ctrl_headphone = {
+static struct snd_kcontrol_new hal2_ctrl_headphone __devinitdata = {
 	.iface          = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name           = "Headphone Playback Volume",
 	.access         = SNDRV_CTL_ELEM_ACCESS_READWRITE,
@@ -270,7 +270,7 @@ static struct snd_kcontrol_new hal2_ctrl_headphone = {
 	.put            = hal2_gain_put,
 };
 
-static struct snd_kcontrol_new hal2_ctrl_mic = {
+static struct snd_kcontrol_new hal2_ctrl_mic __devinitdata = {
 	.iface          = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name           = "Mic Capture Volume",
 	.access         = SNDRV_CTL_ELEM_ACCESS_READWRITE,
@@ -280,7 +280,7 @@ static struct snd_kcontrol_new hal2_ctrl_mic = {
 	.put            = hal2_gain_put,
 };
 
-static int hal2_mixer_create(struct snd_hal2 *hal2)
+static int __devinit hal2_mixer_create(struct snd_hal2 *hal2)
 {
 	int err;
 
@@ -733,7 +733,7 @@ static struct snd_pcm_ops hal2_capture_ops = {
 	.ack =         hal2_capture_ack,
 };
 
-static int hal2_pcm_create(struct snd_hal2 *hal2)
+static int __devinit hal2_pcm_create(struct snd_hal2 *hal2)
 {
 	struct snd_pcm *pcm;
 	int err;
@@ -874,13 +874,13 @@ static int hal2_create(struct snd_card *card, struct snd_hal2 **rchip)
 	return 0;
 }
 
-static int hal2_probe(struct platform_device *pdev)
+static int __devinit hal2_probe(struct platform_device *pdev)
 {
 	struct snd_card *card;
 	struct snd_hal2 *chip;
 	int err;
 
-	err = snd_card_new(&pdev->dev, index, id, THIS_MODULE, 0, &card);
+	err = snd_card_create(index, id, THIS_MODULE, 0, &card);
 	if (err < 0)
 		return err;
 
@@ -889,6 +889,7 @@ static int hal2_probe(struct platform_device *pdev)
 		snd_card_free(card);
 		return err;
 	}
+	snd_card_set_dev(card, &pdev->dev);
 
 	err = hal2_pcm_create(chip);
 	if (err < 0) {
@@ -916,19 +917,21 @@ static int hal2_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int hal2_remove(struct platform_device *pdev)
+static int __devexit hal2_remove(struct platform_device *pdev)
 {
 	struct snd_card *card = platform_get_drvdata(pdev);
 
 	snd_card_free(card);
+	platform_set_drvdata(pdev, NULL);
 	return 0;
 }
 
 static struct platform_driver hal2_driver = {
 	.probe	= hal2_probe,
-	.remove	= hal2_remove,
+	.remove	= __devexit_p(hal2_remove),
 	.driver = {
 		.name	= "sgihal2",
+		.owner	= THIS_MODULE,
 	}
 };
 

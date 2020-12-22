@@ -1228,7 +1228,8 @@ static int asd_seq_start_lseq(struct asd_ha_struct *asd_ha, int lseq)
 
 int asd_release_firmware(void)
 {
-	release_firmware(sequencer_fw);
+	if (sequencer_fw)
+		release_firmware(sequencer_fw);
 	return 0;
 }
 
@@ -1352,7 +1353,7 @@ int asd_start_seqs(struct asd_ha_struct *asd_ha)
 	for_each_sequencer(lseq_mask, lseq_mask, lseq) {
 		err = asd_seq_start_lseq(asd_ha, lseq);
 		if (err) {
-			asd_printk("couldn't start LSEQ %d for %s\n", lseq,
+			asd_printk("coudln't start LSEQ %d for %s\n", lseq,
 				   pci_name(asd_ha->pcidev));
 			return err;
 		}

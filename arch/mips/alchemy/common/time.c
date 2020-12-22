@@ -36,7 +36,6 @@
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
 
-#include <asm/idle.h>
 #include <asm/processor.h>
 #include <asm/time.h>
 #include <asm/mach-au1x00/au1000.h>
@@ -46,7 +45,7 @@
 
 static cycle_t au1x_counter1_read(struct clocksource *cs)
 {
-	return alchemy_rdsys(AU1000_SYS_RTCREAD);
+	return au_readl(SYS_RTCREAD);
 }
 
 static struct clocksource au1x_counter1_clocksource = {
@@ -54,19 +53,25 @@ static struct clocksource au1x_counter1_clocksource = {
 	.read		= au1x_counter1_read,
 	.mask		= CLOCKSOURCE_MASK(32),
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
-	.rating		= 1500,
+	.rating		= 100,
 };
 
 static int au1x_rtcmatch2_set_next_event(unsigned long delta,
 					 struct clock_event_device *cd)
 {
-	delta += alchemy_rdsys(AU1000_SYS_RTCREAD);
+	delta += au_readl(SYS_RTCREAD);
 	/* wait for register access */
-	while (alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_M21)
+	while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_M21)
 		;
-	alchemy_wrsys(delta, AU1000_SYS_RTCMATCH2);
+	au_writel(delta, SYS_RTCMATCH2);
+	au_sync();
 
 	return 0;
+}
+
+static void au1x_rtcmatch2_set_mode(enum clock_event_mode mode,
+				    struct clock_event_device *cd)
+{
 }
 
 static irqreturn_t au1x_rtcmatch2_irq(int irq, void *dev_id)
@@ -79,8 +84,9 @@ static irqreturn_t au1x_rtcmatch2_irq(int irq, void *dev_id)
 static struct clock_event_device au1x_rtcmatch2_clockdev = {
 	.name		= "rtcmatch2",
 	.features	= CLOCK_EVT_FEAT_ONESHOT,
-	.rating		= 1500,
-	.set_next_event = au1x_rtcmatch2_set_next_event,
+	.rating		= 100,
+	.set_next_event	= au1x_rtcmatch2_set_next_event,
+	.set_mode	= au1x_rtcmatch2_set_mode,
 	.cpumask	= cpu_all_mask,
 };
 
@@ -105,29 +111,31 @@ static int __init alchemy_time_init(unsigned int m2int)
 	 * (the 32S bit seems to be stuck set to 1 once a single clock-
 	 * edge is detected, hence the timeouts).
 	 */
-	if (CNTR_OK != (alchemy_rdsys(AU1000_SYS_CNTRCTRL) & CNTR_OK))
+	if (CNTR_OK != (au_readl(SYS_COUNTER_CNTRL) & CNTR_OK))
 		goto cntr_err;
 
 	/*
 	 * setup counter 1 (RTC) to tick at full speed
 	 */
 	t = 0xffffff;
-	while ((alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_T1S) && --t)
+	while ((au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_T1S) && --t)
 		asm volatile ("nop");
 	if (!t)
 		goto cntr_err;
 
-	alchemy_wrsys(0, AU1000_SYS_RTCTRIM);	/* 32.768 kHz */
+	au_writel(0, SYS_RTCTRIM);	/* 32.768 kHz */
+	au_sync();
 
 	t = 0xffffff;
-	while ((alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_C1S) && --t)
+	while ((au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_C1S) && --t)
 		asm volatile ("nop");
 	if (!t)
 		goto cntr_err;
-	alchemy_wrsys(0, AU1000_SYS_RTCWRITE);
+	au_writel(0, SYS_RTCWRITE);
+	au_sync();
 
 	t = 0xffffff;
-	while ((alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_C1S) && --t)
+	while ((au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_C1S) && --t)
 		asm volatile ("nop");
 	if (!t)
 		goto cntr_err;
@@ -150,6 +158,20 @@ cntr_err:
 	return -1;
 }
 
+static void __init alchemy_setup_c0timer(void)
+{
+	/*
+	 * MIPS kernel assigns 'au1k_wait' to 'cpu_wait' before this
+	 * function is called.  Because the Alchemy counters are unusable
+	 * the C0 timekeeping code is installed and use of the 'wait'
+	 * instruction must be prohibited, which is done most easily by
+	 * assigning NULL to cpu_wait.
+	 */
+	cpu_wait = NULL;
+	r4k_clockevent_init();
+	init_r4k_clocksource();
+}
+
 static int alchemy_m2inttab[] __initdata = {
 	AU1000_RTC_MATCH2_INT,
 	AU1500_RTC_MATCH2_INT,
@@ -164,7 +186,8 @@ void __init plat_time_init(void)
 	int t;
 
 	t = alchemy_get_cputype();
-	if (t == ALCHEMY_CPU_UNKNOWN ||
-	    alchemy_time_init(alchemy_m2inttab[t]))
-		cpu_wait = NULL;	/* wait doesn't work with r4k timer */
+	if (t == ALCHEMY_CPU_UNKNOWN)
+		alchemy_setup_c0timer();
+	else if (alchemy_time_init(alchemy_m2inttab[t]))
+		alchemy_setup_c0timer();
 }

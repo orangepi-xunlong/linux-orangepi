@@ -219,7 +219,7 @@ enum chip_capability_flags {
 	CanHaveMII=1, HasBrokenTx=2, AlwaysFDX=4, FDXOnNoMII=8,
 };
 
-static const struct pci_device_id w840_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(w840_pci_tbl) = {
 	{ 0x1050, 0x0840, PCI_ANY_ID, 0x8153,     0, 0, 0 },
 	{ 0x1050, 0x0840, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1 },
 	{ 0x11f6, 0x2011, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2 },
@@ -236,7 +236,7 @@ struct pci_id_info {
         int drv_flags;		/* Driver use, intended as capability flags. */
 };
 
-static const struct pci_id_info pci_id_tbl[] = {
+static const struct pci_id_info pci_id_tbl[] __devinitdata = {
 	{ 				/* Sometime a Level-One switch card. */
 	  "Winbond W89c840",	CanHaveMII | HasBrokenTx | FDXOnNoMII},
 	{ "Winbond W89c840",	CanHaveMII | HasBrokenTx},
@@ -358,7 +358,8 @@ static const struct net_device_ops netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
-static int w840_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit w840_probe1 (struct pci_dev *pdev,
+				  const struct pci_device_id *ent)
 {
 	struct net_device *dev;
 	struct netdev_private *np;
@@ -398,6 +399,9 @@ static int w840_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
 	/* Reset the chip to erase previous misconfiguration.
 	   No hold time required! */
 	iowrite32(0x00000001, ioaddr + PCIBusCfg);
+
+	dev->base_addr = (unsigned long)ioaddr;
+	dev->irq = irq;
 
 	np = netdev_priv(dev);
 	np->pci_dev = pdev;
@@ -468,6 +472,7 @@ static int w840_probe1(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return 0;
 
 err_out_cleardev:
+	pci_set_drvdata(pdev, NULL);
 	pci_iounmap(pdev, ioaddr);
 err_out_free_res:
 	pci_release_regions(pdev);
@@ -630,18 +635,17 @@ static int netdev_open(struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem *ioaddr = np->base_addr;
-	const int irq = np->pci_dev->irq;
 	int i;
 
 	iowrite32(0x00000001, ioaddr + PCIBusCfg);		/* Reset */
 
 	netif_device_detach(dev);
-	i = request_irq(irq, intr_handler, IRQF_SHARED, dev->name, dev);
+	i = request_irq(dev->irq, intr_handler, IRQF_SHARED, dev->name, dev);
 	if (i)
 		goto out_err;
 
 	if (debug > 1)
-		netdev_dbg(dev, "w89c840_open() irq %d\n", irq);
+		netdev_dbg(dev, "w89c840_open() irq %d\n", dev->irq);
 
 	if((i=alloc_ringdesc(dev)))
 		goto out_err;
@@ -904,10 +908,10 @@ static void init_registers(struct net_device *dev)
 	}
 #elif defined(__powerpc__) || defined(__i386__) || defined(__alpha__) || defined(__ia64__) || defined(__x86_64__)
 	i |= 0xE000;
-#elif defined(CONFIG_SPARC) || defined (CONFIG_PARISC) || defined(CONFIG_ARM)
+#elif defined(CONFIG_SPARC) || defined (CONFIG_PARISC)
 	i |= 0x4800;
 #else
-	dev_warn(&dev->dev, "unknown CPU architecture, using default csr0 setting\n");
+#warning Processor architecture undefined
 	i |= 0x4800;
 #endif
 	iowrite32(i, ioaddr + PCIBusCfg);
@@ -928,7 +932,6 @@ static void tx_timeout(struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem *ioaddr = np->base_addr;
-	const int irq = np->pci_dev->irq;
 
 	dev_warn(&dev->dev, "Transmit timed out, status %08x, resetting...\n",
 		 ioread32(ioaddr + IntrStatus));
@@ -948,7 +951,7 @@ static void tx_timeout(struct net_device *dev)
 	       np->cur_tx, np->dirty_tx, np->tx_full, np->tx_q_bytes);
 	printk(KERN_DEBUG "Tx Descriptor addr %xh\n", ioread32(ioaddr+0x4C));
 
-	disable_irq(irq);
+	disable_irq(dev->irq);
 	spin_lock_irq(&np->lock);
 	/*
 	 * Under high load dirty_tx and the internal tx descriptor pointer
@@ -963,10 +966,10 @@ static void tx_timeout(struct net_device *dev)
 	init_rxtx_rings(dev);
 	init_registers(dev);
 	spin_unlock_irq(&np->lock);
-	enable_irq(irq);
+	enable_irq(dev->irq);
 
 	netif_wake_queue(dev);
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	np->stats.tx_errors++;
 }
 
@@ -1497,7 +1500,7 @@ static int netdev_close(struct net_device *dev)
 	iowrite32(0x0000, ioaddr + IntrEnable);
 	spin_unlock_irq(&np->lock);
 
-	free_irq(np->pci_dev->irq, dev);
+	free_irq(dev->irq, dev);
 	wmb();
 	netif_device_attach(dev);
 
@@ -1530,7 +1533,7 @@ static int netdev_close(struct net_device *dev)
 	return 0;
 }
 
-static void w840_remove1(struct pci_dev *pdev)
+static void __devexit w840_remove1 (struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 
@@ -1541,6 +1544,8 @@ static void w840_remove1(struct pci_dev *pdev)
 		pci_iounmap(pdev, np->base_addr);
 		free_netdev(dev);
 	}
+
+	pci_set_drvdata(pdev, NULL);
 }
 
 #ifdef CONFIG_PM
@@ -1584,7 +1589,7 @@ static int w840_suspend (struct pci_dev *pdev, pm_message_t state)
 		iowrite32(0, ioaddr + IntrEnable);
 		spin_unlock_irq(&np->lock);
 
-		synchronize_irq(np->pci_dev->irq);
+		synchronize_irq(dev->irq);
 		netif_tx_disable(dev);
 
 		np->stats.rx_missed_errors += ioread32(ioaddr + RxMissed) & 0xffff;
@@ -1643,7 +1648,7 @@ static struct pci_driver w840_driver = {
 	.name		= DRV_NAME,
 	.id_table	= w840_pci_tbl,
 	.probe		= w840_probe1,
-	.remove		= w840_remove1,
+	.remove		= __devexit_p(w840_remove1),
 #ifdef CONFIG_PM
 	.suspend	= w840_suspend,
 	.resume		= w840_resume,

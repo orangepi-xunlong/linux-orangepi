@@ -13,8 +13,6 @@
  *	- Get the key and enable EVM
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/uaccess.h>
 #include <linux/module.h>
 #include "evm.h"
@@ -62,9 +60,9 @@ static ssize_t evm_write_key(struct file *file, const char __user *buf,
 			     size_t count, loff_t *ppos)
 {
 	char temp[80];
-	int i;
+	int i, error;
 
-	if (!capable(CAP_SYS_ADMIN) || (evm_initialized & EVM_INIT_HMAC))
+	if (!capable(CAP_SYS_ADMIN) || evm_initialized)
 		return -EPERM;
 
 	if (count >= sizeof(temp) || count == 0)
@@ -78,8 +76,12 @@ static ssize_t evm_write_key(struct file *file, const char __user *buf,
 	if ((sscanf(temp, "%d", &i) != 1) || (i != 1))
 		return -EINVAL;
 
-	evm_init_key();
-
+	error = evm_init_key();
+	if (!error) {
+		evm_initialized = 1;
+		pr_info("EVM: initialized\n");
+	} else
+		pr_err("EVM: initialization failed\n");
 	return count;
 }
 
@@ -97,4 +99,10 @@ int __init evm_init_secfs(void)
 	if (!evm_init_tpm || IS_ERR(evm_init_tpm))
 		error = -EFAULT;
 	return error;
+}
+
+void __exit evm_cleanup_secfs(void)
+{
+	if (evm_init_tpm)
+		securityfs_remove(evm_init_tpm);
 }

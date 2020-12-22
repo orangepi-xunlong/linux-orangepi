@@ -39,7 +39,9 @@
 #define SC92031_NAME "sc92031"
 
 /* BAR 0 is MMIO, BAR 1 is PIO */
-#define SC92031_USE_PIO	0
+#ifndef SC92031_USE_BAR
+#define SC92031_USE_BAR 0
+#endif
 
 /* Maximum number of multicast addresses to filter (vs. Rx-all-multicast). */
 static int multicast_filter_limit = 64;
@@ -364,7 +366,7 @@ static void sc92031_disable_interrupts(struct net_device *dev)
 	mmiowb();
 
 	/* wait for any concurrent interrupt/tasklet to finish */
-	synchronize_irq(priv->pdev->irq);
+	synchronize_irq(dev->irq);
 	tasklet_disable(&priv->tasklet);
 }
 
@@ -987,7 +989,7 @@ out_unlock:
 	spin_unlock(&priv->lock);
 
 out:
-	dev_consume_skb_any(skb);
+	dev_kfree_skb(skb);
 
 	return NETDEV_TX_OK;
 }
@@ -1112,13 +1114,10 @@ static void sc92031_tx_timeout(struct net_device *dev)
 #ifdef CONFIG_NET_POLL_CONTROLLER
 static void sc92031_poll_controller(struct net_device *dev)
 {
-	struct sc92031_priv *priv = netdev_priv(dev);
-	const int irq = priv->pdev->irq;
-
-	disable_irq(irq);
-	if (sc92031_interrupt(irq, dev) != IRQ_NONE)
+	disable_irq(dev->irq);
+	if (sc92031_interrupt(dev->irq, dev) != IRQ_NONE)
 		sc92031_tasklet((unsigned long)dev);
-	enable_irq(irq);
+	enable_irq(dev->irq);
 }
 #endif
 
@@ -1395,13 +1394,15 @@ static const struct net_device_ops sc92031_netdev_ops = {
 #endif
 };
 
-static int sc92031_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+static int __devinit sc92031_probe(struct pci_dev *pdev,
+		const struct pci_device_id *id)
 {
 	int err;
 	void __iomem* port_base;
 	struct net_device *dev;
 	struct sc92031_priv *priv;
 	u32 mac0, mac1;
+	unsigned long base_addr;
 
 	err = pci_enable_device(pdev);
 	if (unlikely(err < 0))
@@ -1421,7 +1422,7 @@ static int sc92031_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (unlikely(err < 0))
 		goto out_request_regions;
 
-	port_base = pci_iomap(pdev, SC92031_USE_PIO, 0);
+	port_base = pci_iomap(pdev, SC92031_USE_BAR, 0);
 	if (unlikely(!port_base)) {
 		err = -EIO;
 		goto out_iomap;
@@ -1435,6 +1436,14 @@ static int sc92031_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pci_set_drvdata(pdev, dev);
 	SET_NETDEV_DEV(dev, &pdev->dev);
+
+#if SC92031_USE_BAR == 0
+	dev->mem_start = pci_resource_start(pdev, SC92031_USE_BAR);
+	dev->mem_end = pci_resource_end(pdev, SC92031_USE_BAR);
+#elif SC92031_USE_BAR == 1
+	dev->base_addr = pci_resource_start(pdev, SC92031_USE_BAR);
+#endif
+	dev->irq = pdev->irq;
 
 	/* faked with skb_copy_and_csum_dev */
 	dev->features = NETIF_F_SG | NETIF_F_HIGHDMA |
@@ -1458,20 +1467,24 @@ static int sc92031_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	mac0 = ioread32(port_base + MAC0);
 	mac1 = ioread32(port_base + MAC0 + 4);
-	dev->dev_addr[0] = mac0 >> 24;
-	dev->dev_addr[1] = mac0 >> 16;
-	dev->dev_addr[2] = mac0 >> 8;
-	dev->dev_addr[3] = mac0;
-	dev->dev_addr[4] = mac1 >> 8;
-	dev->dev_addr[5] = mac1;
+	dev->dev_addr[0] = dev->perm_addr[0] = mac0 >> 24;
+	dev->dev_addr[1] = dev->perm_addr[1] = mac0 >> 16;
+	dev->dev_addr[2] = dev->perm_addr[2] = mac0 >> 8;
+	dev->dev_addr[3] = dev->perm_addr[3] = mac0;
+	dev->dev_addr[4] = dev->perm_addr[4] = mac1 >> 8;
+	dev->dev_addr[5] = dev->perm_addr[5] = mac1;
 
 	err = register_netdev(dev);
 	if (err < 0)
 		goto out_register_netdev;
 
+#if SC92031_USE_BAR == 0
+	base_addr = dev->mem_start;
+#elif SC92031_USE_BAR == 1
+	base_addr = dev->base_addr;
+#endif
 	printk(KERN_INFO "%s: SC92031 at 0x%lx, %pM, IRQ %d\n", dev->name,
-	       (long)pci_resource_start(pdev, SC92031_USE_PIO), dev->dev_addr,
-	       pdev->irq);
+			base_addr, dev->dev_addr, dev->irq);
 
 	return 0;
 
@@ -1488,7 +1501,7 @@ out_enable_device:
 	return err;
 }
 
-static void sc92031_remove(struct pci_dev *pdev)
+static void __devexit sc92031_remove(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct sc92031_priv *priv = netdev_priv(dev);
@@ -1561,7 +1574,7 @@ out:
 	return 0;
 }
 
-static const struct pci_device_id sc92031_pci_device_id_table[] = {
+static DEFINE_PCI_DEVICE_TABLE(sc92031_pci_device_id_table) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_SILAN, 0x2031) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_SILAN, 0x8139) },
 	{ PCI_DEVICE(0x1088, 0x2031) },
@@ -1573,12 +1586,24 @@ static struct pci_driver sc92031_pci_driver = {
 	.name		= SC92031_NAME,
 	.id_table	= sc92031_pci_device_id_table,
 	.probe		= sc92031_probe,
-	.remove		= sc92031_remove,
+	.remove		= __devexit_p(sc92031_remove),
 	.suspend	= sc92031_suspend,
 	.resume		= sc92031_resume,
 };
 
-module_pci_driver(sc92031_pci_driver);
+static int __init sc92031_init(void)
+{
+	return pci_register_driver(&sc92031_pci_driver);
+}
+
+static void __exit sc92031_exit(void)
+{
+	pci_unregister_driver(&sc92031_pci_driver);
+}
+
+module_init(sc92031_init);
+module_exit(sc92031_exit);
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Cesar Eduardo Barros <cesarb@cesarb.net>");
 MODULE_DESCRIPTION("Silan SC92031 PCI Fast Ethernet Adapter driver");

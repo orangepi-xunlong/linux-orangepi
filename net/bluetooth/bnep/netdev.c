@@ -25,7 +25,16 @@
    SOFTWARE IS DISCLAIMED.
 */
 
+#include <linux/module.h>
+#include <linux/slab.h>
+
+#include <linux/socket.h>
+#include <linux/netdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/skbuff.h>
+#include <linux/wait.h>
+
+#include <asm/unaligned.h>
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
@@ -119,7 +128,7 @@ static void bnep_net_timeout(struct net_device *dev)
 }
 
 #ifdef CONFIG_BT_BNEP_MC_FILTER
-static int bnep_net_mc_filter(struct sk_buff *skb, struct bnep_session *s)
+static inline int bnep_net_mc_filter(struct sk_buff *skb, struct bnep_session *s)
 {
 	struct ethhdr *eh = (void *) skb->data;
 
@@ -131,12 +140,12 @@ static int bnep_net_mc_filter(struct sk_buff *skb, struct bnep_session *s)
 
 #ifdef CONFIG_BT_BNEP_PROTO_FILTER
 /* Determine ether protocol. Based on eth_type_trans. */
-static u16 bnep_net_eth_proto(struct sk_buff *skb)
+static inline u16 bnep_net_eth_proto(struct sk_buff *skb)
 {
 	struct ethhdr *eh = (void *) skb->data;
 	u16 proto = ntohs(eh->h_proto);
 
-	if (proto >= ETH_P_802_3_MIN)
+	if (proto >= 1536)
 		return proto;
 
 	if (get_unaligned((__be16 *) skb->data) == htons(0xFFFF))
@@ -145,7 +154,7 @@ static u16 bnep_net_eth_proto(struct sk_buff *skb)
 	return ETH_P_802_2;
 }
 
-static int bnep_net_proto_filter(struct sk_buff *skb, struct bnep_session *s)
+static inline int bnep_net_proto_filter(struct sk_buff *skb, struct bnep_session *s)
 {
 	u16 proto = bnep_net_eth_proto(skb);
 	struct bnep_proto_filter *f = s->proto_filter;
@@ -188,7 +197,7 @@ static netdev_tx_t bnep_net_xmit(struct sk_buff *skb,
 	 * So we have to queue them and wake up session thread which is sleeping
 	 * on the sk_sleep(sk).
 	 */
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	skb_queue_tail(&sk->sk_write_queue, skb);
 	wake_up_interruptible(sk_sleep(sk));
 
@@ -218,7 +227,7 @@ static const struct net_device_ops bnep_netdev_ops = {
 void bnep_net_setup(struct net_device *dev)
 {
 
-	eth_broadcast_addr(dev->broadcast);
+	memset(dev->broadcast, 0xff, ETH_ALEN);
 	dev->addr_len = ETH_ALEN;
 
 	ether_setup(dev);

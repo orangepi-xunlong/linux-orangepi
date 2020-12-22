@@ -35,6 +35,8 @@
 #define	HPET_ID_NUMBER_SHIFT	8
 #define HPET_ID_VENDOR_SHIFT	16
 
+#define HPET_ID_VENDOR_8086	0x8086
+
 #define HPET_CFG_ENABLE		0x001
 #define HPET_CFG_LEGACY		0x002
 #define	HPET_LEGACY_8254	2
@@ -63,10 +65,9 @@
 /* hpet memory map physical address */
 extern unsigned long hpet_address;
 extern unsigned long force_hpet_address;
-extern bool boot_hpet_disable;
 extern u8 hpet_blockid;
-extern bool hpet_force_user;
-extern bool hpet_msi_disable;
+extern int hpet_force_user;
+extern u8 hpet_msi_disable;
 extern int is_hpet_enabled(void);
 extern int hpet_enable(void);
 extern void hpet_disable(void);
@@ -74,16 +75,20 @@ extern unsigned int hpet_readl(unsigned int a);
 extern void force_hpet_resume(void);
 
 struct irq_data;
-struct hpet_dev;
-struct irq_domain;
-
 extern void hpet_msi_unmask(struct irq_data *data);
 extern void hpet_msi_mask(struct irq_data *data);
+struct hpet_dev;
 extern void hpet_msi_write(struct hpet_dev *hdev, struct msi_msg *msg);
 extern void hpet_msi_read(struct hpet_dev *hdev, struct msi_msg *msg);
-extern struct irq_domain *hpet_create_irq_domain(int hpet_id);
-extern int hpet_assign_irq(struct irq_domain *domain,
-			   struct hpet_dev *dev, int dev_num);
+
+#ifdef CONFIG_PCI_MSI
+extern int arch_setup_hpet_msi(unsigned int irq, unsigned int id);
+#else
+static inline int arch_setup_hpet_msi(unsigned int irq, unsigned int id)
+{
+	return -EINVAL;
+}
+#endif
 
 #ifdef CONFIG_HPET_EMULATE_RTC
 
@@ -108,7 +113,6 @@ extern void hpet_unregister_irq_handler(rtc_irq_handler handler);
 static inline int hpet_enable(void) { return 0; }
 static inline int is_hpet_enabled(void) { return 0; }
 #define hpet_readl(a) 0
-#define default_setup_hpet_msi	NULL
 
 #endif
 #endif /* _ASM_X86_HPET_H */

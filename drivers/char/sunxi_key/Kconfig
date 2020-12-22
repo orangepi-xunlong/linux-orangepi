@@ -1,0 +1,9 @@
+#
+# sunxi continous physic memory allocator.
+#
+
+config RESET_KEY
+	bool "sunxi rest_key "
+	default n
+	help
+	Nothing help.

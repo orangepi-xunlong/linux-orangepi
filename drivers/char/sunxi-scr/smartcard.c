@@ -1,325 +1,321 @@
-/*
- * drivers/char/sunxi-scr/smartcard.c
- *
- * Copyright (C) 2016 Allwinner.
- * fuzhaoke <fuzhaoke@allwinnertech.com>
- *
- * Decode for ISO7816 smart card
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- */
 
+//code for iso7816 smart card
 #include <linux/module.h>
 #include "smartcard.h"
+#include "sunxi-scr-common.h"
 
-void smartcard_ta1_decode(struct smc_atr_para *psmc_atr, uint8_t ta1)
+extern u32 scr_debug_mask;
+
+uint32_t smartcard_params_init(pscatr_struct pscatr)
 {
-	pr_debug("%s: enter!!\n", __func__);
+	pscatr->TS = 0x3B;
+	pscatr->TK_NUM = 0x00;
 
-	switch ((ta1>>4)&0xf) {
-	case 0x0:
-		psmc_atr->FMAX = 4;
-		psmc_atr->F = 372;
-		break;
-	case 0x1:
-		psmc_atr->FMAX = 5;
-		psmc_atr->F = 372;
-		break;
-	case 0x2:
-		psmc_atr->FMAX = 6;
-		psmc_atr->F = 558;
-		break;
-	case 0x3:
-		psmc_atr->FMAX = 8;
-		psmc_atr->F = 744;
-		break;
-	case 0x4:
-		psmc_atr->FMAX = 12;
-		psmc_atr->F = 1116;
-		break;
-	case 0x5:
-		psmc_atr->FMAX = 16;
-		psmc_atr->F = 1488;
-		break;
-	case 0x6:
-		psmc_atr->FMAX = 20;
-		psmc_atr->F = 1860;
-		break;
-	case 0x9:
-		psmc_atr->FMAX = 5;
-		psmc_atr->F = 512;
-		break;
-	case 0xA:
-		psmc_atr->FMAX = 7;
-		psmc_atr->F = 768;
-		break;
-	case 0xB:
-		psmc_atr->FMAX = 10;
-		psmc_atr->F = 1024;
-		break;
-	case 0xC:
-		psmc_atr->FMAX = 15;
-		psmc_atr->F = 1536;
-		break;
-	case 0xD:
-		psmc_atr->FMAX = 20;
-		psmc_atr->F = 2048;
-		break;
-	default:  /* 0x7/0x8/0xE/0xF */
-		psmc_atr->FMAX = 4;
-		psmc_atr->F = 372;
-		pr_err("Unsupport ta1 = 0x%x\n", ta1);
-		break;
-	}
+	pscatr->T = 0;		//T=0 Protocol
+	pscatr->FMAX = 4; //4MHz
+	pscatr->F = 372;
+	pscatr->D = 1;
+	pscatr->I = 50; //50mA
+	pscatr->P = 5;  //5V
+	pscatr->N = 2;
 
-	switch (ta1&0xf) {
-	case 0x1:
-		psmc_atr->D = 1;
-		break;
-	case 0x2:
-		psmc_atr->D = 2;
-		break;
-	case 0x3:
-		psmc_atr->D = 4;
-		break;
-	case 0x4:
-		psmc_atr->D = 8;
-		break;
-	case 0x5:
-		psmc_atr->D = 16;
-		break;
-	case 0x6:
-		psmc_atr->D = 32;
-		break;
-	case 0x8:
-		psmc_atr->D = 12;
-		break;
-	case 0x9:
-		psmc_atr->D = 20;
-		break;
-	default: /* 0x0/0x7/0xA/0xB/0xC/0xD/0xE/0xF */
-		psmc_atr->D = 1;
-		pr_err("Unsupport ta1 = 0x%x\n", ta1);
-		break;
-	}
+	return 0;
 }
 
-void smartcard_tb1_decode(struct smc_atr_para *psmc_atr, uint8_t tb1)
+uint32_t smartcard_atr_decode(pscr_struct pscr, pscatr_struct pscatr, uint8_t* pdata, ppps_struct pps, uint32_t with_ts)
 {
-	pr_debug("%s: enter!!\n", __func__);
-
-	switch ((tb1>>5)&0x3) {
-	case 0:
-		psmc_atr->I = 25;
-		break;
-	case 1:
-		psmc_atr->I = 50;
-		break;
-	case 2:
-		psmc_atr->I = 100;
-		break;
-	default:
-		psmc_atr->I = 50;
-	}
-
-	if (((tb1&0x1f) > 4) && ((tb1&0x1f) < 26))
-		psmc_atr->P = (tb1&0x1f); /* 5~25 in Volts */
-	else if (0 == (tb1&0x1f))
-		psmc_atr->P = 0;
-	else
-		psmc_atr->P = 5;
-}
-
-/* ATR data format: max 33 byte(include TS)
- * [TS|T0|TA1|TB1|TC1|TD1|TA2|TB2|TC2|TD2|...|T1|T2|........|TK|TCK]
- *       |-------- max 16 byte --------------|-- max 15 byte --|verify
- * |--------------------- max 33 byte -------------------------|
- * TS: Initial character
- *	0x3b:direct convention, 0x3f:inverse convention
- * T0: Format character
- *	[bit7|bit6|bit5|bit4|bit3|bit2|bit1|bit0]
- *	|------- Y1 --------|-------- K --------|
- *	Y1: indicator for the presence of the interface character
- *		TA1 is transmitted when bit[4] = 1
- *		TB1 is transmitted when bit[5] = 1
- *		TC1 is transmitted when bit[6] = 1
- *		TD1 is transmitted when bit[7] = 1
- *	K: history number
- * TAi: Interface character
- *	code FI,DI
- * TBi: Interface character
- *	code II,PI
- * TCi: Interface character
- *	code N
- * TDi: Interface character
- *	code Yi+1, T
- *	[bit7|bit6|bit5|bit4|bit3|bit2|bit1|bit0]
- *	|------ Yi + 1 -----|-------- T --------|
- *	Yi + 1: indicator for the presence of the interface character
- *		TAi+1 is transmitted when bit[4] = 1
- *		TBi+1 is transmitted when bit[5] = 1
- *		TCi+1 is transmitted when bit[6] = 1
- *		TDi+1 is transmitted when bit[7] = 1
- *	T: Protocol type for subsequent transmission
- *		T=0: character transmit
- *		T=1: block transmit
- *		T=other: reserved
- * T1~TK: history byte, information of the card like manufacture name
- * TCK: verify character, make sure the data is correctly
-*/
-void smartcard_atr_decode(struct smc_atr_para *psmc_atr, struct smc_pps_para *psmc_pps,
-			  uint8_t *pdata, uint8_t with_ts)
-{
-	uint8_t index = 0;
+	uint32_t index=0;
 	uint8_t temp;
-	uint8_t i;
+	uint32_t i;
 
-	pr_debug("%s: Enter...\n", __func__);
+	dprintk(DEBUG_INIT, "%s: enter!!\n", __func__);
 
-	psmc_pps->ppss = 0xff;
-	psmc_pps->pps0 = 0;
+	pps->ppss = 0xff;  //PPSS
+	pps->pps0 = 0;
 
-	if (with_ts) {
-		psmc_atr->TS = pdata[0]; /* TS */
+	if(with_ts)
+	{
+		pscatr->TS = pdata[0]; //TS
+		index ++;
+	}
+	temp = pdata[index]; //T0
+	index ++;
+	pscatr->TK_NUM = temp & 0xf;
+
+	if(temp & 0x10) //TA1
+	{
+		smartcard_ta1_decode(pscatr, pdata[index]);
+		pps->pps0 |= 0x1<<4;
+		pps->pps1 = pdata[index];
+		index ++;
+	}
+	if(temp & 0x20) //TB1
+	{
+		smartcard_tb1_decode(pscatr, pdata[index]);
 		index++;
 	}
-	temp = pdata[index]; /* T0 */
-	index++;
-	psmc_atr->TK_NUM = temp & 0xf;
-
-	/* TA1 */
-	if (temp & 0x10) {
-		smartcard_ta1_decode(psmc_atr, pdata[index]);
-		psmc_pps->pps0 |= 0x1<<4;
-		psmc_pps->pps1 = pdata[index];
-		index++;
+	if(temp & 0x40) //TC1
+	{
+		pscatr->N = pdata[index] & 0xff;
+		index ++;
 	}
+	if(temp & 0x80) //TD1
+	{
+		dprintk(DEBUG_INIT, "%s: TD1 parse 0x%x !!\n", __func__, pdata[index]);
 
-	/* TB1 */
-	if (temp & 0x20) {
-		smartcard_tb1_decode(psmc_atr, pdata[index]);
-		index++;
-	}
-
-	/* TC1 */
-	if (temp & 0x40) {
-		psmc_atr->N = pdata[index] & 0xff;
-		index++;
-	}
-
-	/* TD1 */
-	if (temp & 0x80) {
-		pr_debug("%s: TD1 parse 0x%x !!\n", __func__, pdata[index]);
 		temp = pdata[index];
-		psmc_atr->T = temp & 0xf;
-		psmc_pps->pps0 |= temp & 0xf;
-
-		/* Adjust Guard Time */
-		if (psmc_atr->N == 0xff) {
-			if (psmc_atr->T == 1)
-				psmc_atr->N = 1;
+		pscatr->T = temp & 0xf;
+		pps->pps0 |= temp & 0xf;
+		if(pscatr->T == 1)
+				scr_set_t_protocol(pscr, 1);
 			else
-				psmc_atr->N = 2;
+				scr_set_t_protocol(pscr, 0);
+		if(pscatr->N == 0xff)  //Adjust Guard Time
+		{
+			if(pscatr->T == 1)
+				pscatr->N = 1;
+			else
+				pscatr->N = 2;
 		}
-		index++;
-	} else {
-		if (psmc_atr->N == 0xff)
-			psmc_atr->N = 2;
+		index ++;
+	}
+	else
+	{
+		if(pscatr->N == 0xff) pscatr->N = 2;
 		goto rx_tk;
 	}
 
-	/* TA2 */
-	if (temp & 0x10) {
-		pr_debug("TA2 Exist!!\n");
-		index++;
+	if(temp & 0x10)  //TA2
+	{
+		dprintk(DEBUG_INIT, "TA2 Exist!!\n");
+		index ++;
 	}
-
-	/* TB2 */
-	if (temp & 0x20) {
-		pr_debug("TB2 Exist!!\n");
-		index++;
+	if(temp & 0x20)  //TB2
+	{
+		dprintk(DEBUG_INIT, "TB2 Exist!!\n");
+		index ++;
 	}
-
-	/* TC2 */
-	if (temp & 0x40) {
-		pr_debug("TC2 Exist!!\n");
-		index++;
+	if(temp & 0x40)  //TC2
+	{
+		dprintk(DEBUG_INIT, "TC2 Exist!!\n");
+		index ++;
 	}
-
-	/* TD2 */
-	if (temp & 0x80) {
-		pr_debug("TD2 Exist!!\n");
+	if(temp & 0x80)  //TD2
+	{
+		dprintk(DEBUG_INIT, "TD2 Exist!!\n");
 		temp = pdata[index];
-		index++;
-	} else {
+		index ++;
+	}
+	else
+	{
 		goto rx_tk;
 	}
 
-	/* TA3 */
-	if (temp & 0x10) {
-		pr_debug("TA3 Exist!!\n");
-		index++;
+	if(temp & 0x10)  //TA3
+	{
+		dprintk(DEBUG_INIT, "TA3 Exist!!\n");
+		index ++;
 	}
-
-	/* TB3 */
-	if (temp & 0x20) {
-		pr_debug("TB3 Exist!!\n");
-		index++;
+	if(temp & 0x20)  //TB3
+	{
+		dprintk(DEBUG_INIT, "TB3 Exist!!\n");
+		index ++;
 	}
-
-	/* TC3 */
-	if (temp & 0x40) {
-		pr_debug("TC3 Exist!!\n");
-		index++;
+	if(temp & 0x40)  //TC3
+	{
+		dprintk(DEBUG_INIT, "TC3 Exist!!\n");
+		index ++;
 	}
-
-	/* TD3 */
-	if (temp & 0x80) {
-		pr_debug("TD3 Exist!!\n");
+	if(temp & 0x80)  //TD3
+	{
+		dprintk(DEBUG_INIT, "TD3 Exist!!\n");
 		temp = pdata[index];
-		index++;
-	} else {
+		index ++;
+	}
+	else
+	{
 		goto rx_tk;
 	}
 
-	/* TA4 */
-	if (temp & 0x10) {
-		pr_debug("TA4 Exist!!\n");
-		index++;
+	if(temp & 0x10)  //TA4
+	{
+		dprintk(DEBUG_INIT, "TA4 Exist!!\n");
+		index ++;
 	}
-
-	/* TB4 */
-	if (temp & 0x20) {
-		pr_debug("TB4 Exist!!\n");
-		index++;
+	if(temp & 0x20)  //TB4
+	{
+		dprintk(DEBUG_INIT, "TB4 Exist!!\n");
+		index ++;
 	}
-
-	/* TC4 */
-	if (temp & 0x40) {
-		pr_debug("TC4 Exist!!\n");
-		index++;
+	if(temp & 0x40)  //TC4
+	{
+		dprintk(DEBUG_INIT, "TC4 Exist!!\n");
+		index ++;
 	}
-
-	/* TD4 */
-	if (temp & 0x80) {
-		pr_debug("TD4 Exist!!\n");
+	if(temp & 0x80)  //TD4
+	{
+		dprintk(DEBUG_INIT, "TD4 Exist!!\n");
 		temp = pdata[index];
-		index++;
+		index ++;
+	}
+	else
+	{
+		goto rx_tk;
 	}
 
 rx_tk:
-	for (i = 0; i < (psmc_atr->TK_NUM); i++)
-		psmc_atr->TK[i] = pdata[index++];
+	for(i=0; i<(pscatr->TK_NUM); i++)
+	{
+		pscatr->TK[i] = pdata[index++];
+	}
 
-	psmc_pps->pck = psmc_pps->ppss;
-	psmc_pps->pck ^= psmc_pps->pps0;
-	if (psmc_pps->pps0&(0x1<<4))
-		psmc_pps->pck ^= psmc_pps->pps1;
-	if (psmc_pps->pps0&(0x1<<5))
-		psmc_pps->pck ^= psmc_pps->pps2;
-	if (psmc_pps->pps0&(0x1<<6))
-		psmc_pps->pck ^= psmc_pps->pps3;
+	pps->pck = pps->ppss;
+	pps->pck ^= pps->pps0;
+	if(pps->pps0&(0x1<<4))
+	{
+		pps->pck ^= pps->pps1;
+	}
+	if(pps->pps0&(0x1<<5))
+	{
+		pps->pck ^= pps->pps2;
+	}
+	if(pps->pps0&(0x1<<6))
+	{
+		pps->pck ^= pps->pps3;
+	}
+
+	return 0;
 }
+
+
+void smartcard_ta1_decode(pscatr_struct pscatr, uint8_t ta1)
+{
+	uint8_t temp = ta1;
+
+	dprintk(DEBUG_INIT, "%s: enter!!\n", __func__);
+
+	switch((temp>>4)&0xf)
+	{
+		case 0x0:
+			pscatr->FMAX = 4;
+			pscatr->F = 372;
+			break;
+		case 0x1:
+			pscatr->FMAX = 5;
+			pscatr->F = 372;
+			break;
+		case 0x2:
+			pscatr->FMAX = 6;
+			pscatr->F = 558;
+			break;
+		case 0x3:
+			pscatr->FMAX = 8;
+			pscatr->F = 744;
+			break;
+		case 0x4:
+			pscatr->FMAX = 12;
+			pscatr->F = 1116;
+			break;
+		case 0x5:
+			pscatr->FMAX = 16;
+			pscatr->F = 1488;
+			break;
+		case 0x6:
+			pscatr->FMAX = 20;
+			pscatr->F = 1860;
+			break;
+		case 0x9:
+			pscatr->FMAX = 5;
+			pscatr->F = 512;
+			break;
+		case 0xA:
+			pscatr->FMAX = 7;
+			pscatr->F = 768;
+			break;
+		case 0xB:
+			pscatr->FMAX = 10;
+			pscatr->F = 1024;
+			break;
+		case 0xC:
+			pscatr->FMAX = 15;
+			pscatr->F = 1536;
+			break;
+		case 0xD:
+			pscatr->FMAX = 20;
+			pscatr->F = 2048;
+			break;
+		default:  //0x7/0x8/0xE/0xF
+			pscatr->FMAX = 4;
+			pscatr->F = 372;
+			dprintk(DEBUG_INIT, "Unsupport ta1 = 0x%x\n", ta1);
+			break;
+	}
+
+	switch(temp&0xf)
+	{
+		case 0x1:
+			pscatr->D = 1;
+			break;
+		case 0x2:
+			pscatr->D = 2;
+			break;
+		case 0x3:
+			pscatr->D = 4;
+			break;
+		case 0x4:
+			pscatr->D = 8;
+			break;
+		case 0x5:
+			pscatr->D = 16;
+			break;
+		case 0x6:
+			pscatr->D = 32;
+			break;
+		case 0x8:
+			pscatr->D = 12;
+			break;
+		case 0x9:
+			pscatr->D = 20;
+			break;
+		default: //0x0/0x7/0xA/0xB/0xC/0xD/0xE/0xF
+			pscatr->D = 1;
+			dprintk(DEBUG_INIT, "Unsupport ta1 = 0x%x\n", ta1);
+			break;
+	}
+}
+
+void smartcard_tb1_decode(pscatr_struct pscatr, uint8_t tb1)
+{
+	uint8_t temp = tb1;
+
+	dprintk(DEBUG_INIT, "%s: enter!!\n", __func__);
+
+	switch((temp>>5)&0x3)
+	{
+		case 0:
+			pscatr->I = 25;
+			break;
+		case 1:
+			pscatr->I = 50;
+			break;
+		case 2:
+			pscatr->I = 100;
+			break;
+		default:
+			pscatr->I = 50;
+	}
+
+	if(((temp&0x1f)>4)&&((temp&0x1f)<26))
+	{
+		pscatr->P = (temp&0x1f); //5~25 in Volts
+	}
+	else if((temp&0x1f)==0)
+	{
+		pscatr->P = 0;  //NC
+	}
+	else
+	{
+		pscatr->P = 5;  //NC
+	}
+}
+

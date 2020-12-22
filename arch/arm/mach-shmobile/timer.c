@@ -12,52 +12,40 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
  */
 #include <linux/platform_device.h>
-#include <linux/clocksource.h>
-#include <linux/delay.h>
-#include <linux/of_address.h>
+#include <asm/mach/time.h>
+#include <asm/smp_twd.h>
 
-#include "common.h"
-
-void __init shmobile_init_delay(void)
+static void __init shmobile_late_time_init(void)
 {
-	struct device_node *np, *cpus;
-	u32 max_freq = 0;
-
-	cpus = of_find_node_by_path("/cpus");
-	if (!cpus)
-		return;
-
-	for_each_child_of_node(cpus, np) {
-		u32 freq;
-
-		if (IS_ENABLED(CONFIG_ARM_ARCH_TIMER) &&
-		    (of_device_is_compatible(np, "arm,cortex-a7") ||
-		     of_device_is_compatible(np, "arm,cortex-a15"))) {
-			of_node_put(np);
-			of_node_put(cpus);
-			return;
-		}
-
-		if (!of_property_read_u32(np, "clock-frequency", &freq))
-			max_freq = max(max_freq, freq);
-	}
-
-	of_node_put(cpus);
-
-	if (!max_freq)
-		return;
-
 	/*
-	 * Calculate a worst-case loops-per-jiffy value
-	 * based on maximum cpu core hz setting and the
-	 * __delay() implementation in arch/arm/lib/delay.S.
+	 * Make sure all compiled-in early timers register themselves.
 	 *
-	 * This will result in a longer delay than expected
-	 * when the cpu core runs on lower frequencies.
+	 * Run probe() for two "earlytimer" devices, these will be the
+	 * clockevents and clocksource devices respectively. In the event
+	 * that only a clockevents device is available, we -ENODEV on the
+	 * clocksource and the jiffies clocksource is used transparently
+	 * instead. No error handling is necessary here.
 	 */
-
-	if (!preset_lpj)
-		preset_lpj = max_freq / HZ;
+	early_platform_driver_register_all("earlytimer");
+	early_platform_driver_probe("earlytimer", 2, 0);
 }
+
+void __init shmobile_earlytimer_init(void)
+{
+	late_time_init = shmobile_late_time_init;
+}
+
+static void __init shmobile_timer_init(void)
+{
+}
+
+struct sys_timer shmobile_timer = {
+	.init		= shmobile_timer_init,
+};

@@ -33,6 +33,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/input.h>
 #include <linux/serio.h>
 
@@ -295,4 +296,19 @@ static struct serio_driver spaceball_drv = {
 	.disconnect	= spaceball_disconnect,
 };
 
-module_serio_driver(spaceball_drv);
+/*
+ * The functions for inserting/removing us as a module.
+ */
+
+static int __init spaceball_init(void)
+{
+	return serio_register_driver(&spaceball_drv);
+}
+
+static void __exit spaceball_exit(void)
+{
+	serio_unregister_driver(&spaceball_drv);
+}
+
+module_init(spaceball_init);
+module_exit(spaceball_exit);

@@ -14,8 +14,6 @@
  *
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/dma-mapping.h>
 #include <linux/module.h>
 
@@ -31,7 +29,6 @@
 #include <linux/delay.h>
 #include <linux/of_device.h>
 #include <linux/of_mdio.h>
-#include <linux/of_net.h>
 #include <linux/of_platform.h>
 
 #include <linux/netdevice.h>
@@ -43,8 +40,8 @@
 #include <asm/delay.h>
 #include <asm/mpc52xx.h>
 
-#include <linux/fsl/bestcomm/bestcomm.h>
-#include <linux/fsl/bestcomm/fec.h>
+#include <sysdev/bestcomm/bestcomm.h>
+#include <sysdev/bestcomm/fec.h>
 
 #include "fec_mpc52xx.h"
 
@@ -66,6 +63,7 @@ struct mpc52xx_fec_priv {
 	/* MDIO link details */
 	unsigned int mdio_speed;
 	struct device_node *phy_node;
+	struct phy_device *phydev;
 	enum phy_state link;
 	int seven_wire_mode;
 };
@@ -77,6 +75,10 @@ static irqreturn_t mpc52xx_fec_tx_interrupt(int, void *);
 static void mpc52xx_fec_stop(struct net_device *dev);
 static void mpc52xx_fec_start(struct net_device *dev);
 static void mpc52xx_fec_reset(struct net_device *dev);
+
+static u8 mpc52xx_fec_mac_addr[6];
+module_param_array_named(mac, mpc52xx_fec_mac_addr, byte, NULL, 0);
+MODULE_PARM_DESC(mac, "six hex digits, ie. 0x1,0x2,0xc0,0x01,0xba,0xbe");
 
 #define MPC52xx_MESSAGES_DEFAULT ( NETIF_MSG_DRV | NETIF_MSG_PROBE | \
 		NETIF_MSG_LINK | NETIF_MSG_IFDOWN | NETIF_MSG_IFUP)
@@ -106,6 +108,15 @@ static void mpc52xx_fec_set_paddr(struct net_device *dev, u8 *mac)
 
 	out_be32(&fec->paddr1, *(u32 *)(&mac[0]));
 	out_be32(&fec->paddr2, (*(u16 *)(&mac[4]) << 16) | FEC_PADDR2_TYPE);
+}
+
+static void mpc52xx_fec_get_paddr(struct net_device *dev, u8 *mac)
+{
+	struct mpc52xx_fec_priv *priv = netdev_priv(dev);
+	struct mpc52xx_fec __iomem *fec = priv->fec;
+
+	*(u32 *)(&mac[0]) = in_be32(&fec->paddr1);
+	*(u16 *)(&mac[4]) = in_be32(&fec->paddr2) >> 16;
 }
 
 static int mpc52xx_fec_set_mac_address(struct net_device *dev, void *addr)
@@ -164,7 +175,7 @@ static int mpc52xx_fec_alloc_rx_buffers(struct net_device *dev, struct bcom_task
 static void mpc52xx_fec_adjust_link(struct net_device *dev)
 {
 	struct mpc52xx_fec_priv *priv = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
+	struct phy_device *phydev = priv->phydev;
 	int new_state = 0;
 
 	if (phydev->link != PHY_DOWN) {
@@ -214,17 +225,16 @@ static void mpc52xx_fec_adjust_link(struct net_device *dev)
 static int mpc52xx_fec_open(struct net_device *dev)
 {
 	struct mpc52xx_fec_priv *priv = netdev_priv(dev);
-	struct phy_device *phydev = NULL;
 	int err = -EBUSY;
 
 	if (priv->phy_node) {
-		phydev = of_phy_connect(priv->ndev, priv->phy_node,
-					mpc52xx_fec_adjust_link, 0, 0);
-		if (!phydev) {
+		priv->phydev = of_phy_connect(priv->ndev, priv->phy_node,
+					      mpc52xx_fec_adjust_link, 0, 0);
+		if (!priv->phydev) {
 			dev_err(&dev->dev, "of_phy_connect failed\n");
 			return -ENODEV;
 		}
-		phy_start(phydev);
+		phy_start(priv->phydev);
 	}
 
 	if (request_irq(dev->irq, mpc52xx_fec_interrupt, IRQF_SHARED,
@@ -268,9 +278,10 @@ static int mpc52xx_fec_open(struct net_device *dev)
  free_ctrl_irq:
 	free_irq(dev->irq, dev);
  free_phy:
-	if (phydev) {
-		phy_stop(phydev);
-		phy_disconnect(phydev);
+	if (priv->phydev) {
+		phy_stop(priv->phydev);
+		phy_disconnect(priv->phydev);
+		priv->phydev = NULL;
 	}
 
 	return err;
@@ -279,7 +290,6 @@ static int mpc52xx_fec_open(struct net_device *dev)
 static int mpc52xx_fec_close(struct net_device *dev)
 {
 	struct mpc52xx_fec_priv *priv = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
 
 	netif_stop_queue(dev);
 
@@ -291,10 +301,11 @@ static int mpc52xx_fec_close(struct net_device *dev)
 	free_irq(priv->r_irq, dev);
 	free_irq(priv->t_irq, dev);
 
-	if (phydev) {
+	if (priv->phydev) {
 		/* power down phy */
-		phy_stop(phydev);
-		phy_disconnect(phydev);
+		phy_stop(priv->phydev);
+		phy_disconnect(priv->phydev);
+		priv->phydev = NULL;
 	}
 
 	return 0;
@@ -762,6 +773,26 @@ static void mpc52xx_fec_reset(struct net_device *dev)
 
 /* ethtool interface */
 
+static int mpc52xx_fec_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct mpc52xx_fec_priv *priv = netdev_priv(dev);
+
+	if (!priv->phydev)
+		return -ENODEV;
+
+	return phy_ethtool_gset(priv->phydev, cmd);
+}
+
+static int mpc52xx_fec_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct mpc52xx_fec_priv *priv = netdev_priv(dev);
+
+	if (!priv->phydev)
+		return -ENODEV;
+
+	return phy_ethtool_sset(priv->phydev, cmd);
+}
+
 static u32 mpc52xx_fec_get_msglevel(struct net_device *dev)
 {
 	struct mpc52xx_fec_priv *priv = netdev_priv(dev);
@@ -775,23 +806,22 @@ static void mpc52xx_fec_set_msglevel(struct net_device *dev, u32 level)
 }
 
 static const struct ethtool_ops mpc52xx_fec_ethtool_ops = {
+	.get_settings = mpc52xx_fec_get_settings,
+	.set_settings = mpc52xx_fec_set_settings,
 	.get_link = ethtool_op_get_link,
 	.get_msglevel = mpc52xx_fec_get_msglevel,
 	.set_msglevel = mpc52xx_fec_set_msglevel,
-	.get_ts_info = ethtool_op_get_ts_info,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
 
 static int mpc52xx_fec_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
-	struct phy_device *phydev = dev->phydev;
+	struct mpc52xx_fec_priv *priv = netdev_priv(dev);
 
-	if (!phydev)
+	if (!priv->phydev)
 		return -ENOTSUPP;
 
-	return phy_mii_ioctl(phydev, rq, cmd);
+	return phy_mii_ioctl(priv->phydev, rq, cmd);
 }
 
 static const struct net_device_ops mpc52xx_fec_netdev_ops = {
@@ -814,7 +844,7 @@ static const struct net_device_ops mpc52xx_fec_netdev_ops = {
 /* OF Driver                                                                */
 /* ======================================================================== */
 
-static int mpc52xx_fec_probe(struct platform_device *op)
+static int __devinit mpc52xx_fec_probe(struct platform_device *op)
 {
 	int rv;
 	struct net_device *ndev;
@@ -822,8 +852,6 @@ static int mpc52xx_fec_probe(struct platform_device *op)
 	struct resource mem;
 	const u32 *prop;
 	int prop_size;
-	struct device_node *np = op->dev.of_node;
-	const char *mac_addr;
 
 	phys_addr_t rx_fifo;
 	phys_addr_t tx_fifo;
@@ -837,13 +865,15 @@ static int mpc52xx_fec_probe(struct platform_device *op)
 	priv->ndev = ndev;
 
 	/* Reserve FEC control zone */
-	rv = of_address_to_resource(np, 0, &mem);
+	rv = of_address_to_resource(op->dev.of_node, 0, &mem);
 	if (rv) {
-		pr_err("Error while parsing device node resource\n");
+		printk(KERN_ERR DRIVER_NAME ": "
+				"Error while parsing device node resource\n" );
 		goto err_netdev;
 	}
 	if (resource_size(&mem) < sizeof(struct mpc52xx_fec)) {
-		pr_err("invalid resource size (%lx < %x), check mpc52xx_devices.c\n",
+		printk(KERN_ERR DRIVER_NAME
+		       " - invalid resource size (%lx < %x), check mpc52xx_devices.c\n",
 		       (unsigned long)resource_size(&mem),
 		       sizeof(struct mpc52xx_fec));
 		rv = -EINVAL;
@@ -881,14 +911,14 @@ static int mpc52xx_fec_probe(struct platform_device *op)
 	priv->tx_dmatsk = bcom_fec_tx_init(FEC_TX_NUM_BD, tx_fifo);
 
 	if (!priv->rx_dmatsk || !priv->tx_dmatsk) {
-		pr_err("Can not init SDMA tasks\n");
+		printk(KERN_ERR DRIVER_NAME ": Can not init SDMA tasks\n" );
 		rv = -ENOMEM;
 		goto err_rx_tx_dmatsk;
 	}
 
 	/* Get the IRQ we need one by one */
 		/* Control */
-	ndev->irq = irq_of_parse_and_map(np, 0);
+	ndev->irq = irq_of_parse_and_map(op->dev.of_node, 0);
 
 		/* RX */
 	priv->r_irq = bcom_get_task_irq(priv->rx_dmatsk);
@@ -896,33 +926,11 @@ static int mpc52xx_fec_probe(struct platform_device *op)
 		/* TX */
 	priv->t_irq = bcom_get_task_irq(priv->tx_dmatsk);
 
-	/*
-	 * MAC address init:
-	 *
-	 * First try to read MAC address from DT
-	 */
-	mac_addr = of_get_mac_address(np);
-	if (mac_addr) {
-		memcpy(ndev->dev_addr, mac_addr, ETH_ALEN);
-	} else {
-		struct mpc52xx_fec __iomem *fec = priv->fec;
-
-		/*
-		 * If the MAC addresse is not provided via DT then read
-		 * it back from the controller regs
-		 */
-		*(u32 *)(&ndev->dev_addr[0]) = in_be32(&fec->paddr1);
-		*(u16 *)(&ndev->dev_addr[4]) = in_be32(&fec->paddr2) >> 16;
-	}
-
-	/*
-	 * Check if the MAC address is valid, if not get a random one
-	 */
-	if (!is_valid_ether_addr(ndev->dev_addr)) {
-		eth_hw_addr_random(ndev);
-		dev_warn(&ndev->dev, "using random MAC address %pM\n",
-			 ndev->dev_addr);
-	}
+	/* MAC address init */
+	if (!is_zero_ether_addr(mpc52xx_fec_mac_addr))
+		memcpy(ndev->dev_addr, mpc52xx_fec_mac_addr, 6);
+	else
+		mpc52xx_fec_get_paddr(ndev, ndev->dev_addr);
 
 	priv->msg_enable = netif_msg_init(debug, MPC52xx_MESSAGES_DEFAULT);
 
@@ -933,20 +941,20 @@ static int mpc52xx_fec_probe(struct platform_device *op)
 	/* Start with safe defaults for link connection */
 	priv->speed = 100;
 	priv->duplex = DUPLEX_HALF;
-	priv->mdio_speed = ((mpc5xxx_get_bus_frequency(np) >> 20) / 5) << 1;
+	priv->mdio_speed = ((mpc5xxx_get_bus_frequency(op->dev.of_node) >> 20) / 5) << 1;
 
 	/* The current speed preconfigures the speed of the MII link */
-	prop = of_get_property(np, "current-speed", &prop_size);
+	prop = of_get_property(op->dev.of_node, "current-speed", &prop_size);
 	if (prop && (prop_size >= sizeof(u32) * 2)) {
 		priv->speed = prop[0];
 		priv->duplex = prop[1] ? DUPLEX_FULL : DUPLEX_HALF;
 	}
 
 	/* If there is a phy handle, then get the PHY node */
-	priv->phy_node = of_parse_phandle(np, "phy-handle", 0);
+	priv->phy_node = of_parse_phandle(op->dev.of_node, "phy-handle", 0);
 
 	/* the 7-wire property means don't use MII mode */
-	if (of_find_property(np, "fsl,7-wire-mode", NULL)) {
+	if (of_find_property(op->dev.of_node, "fsl,7-wire-mode", NULL)) {
 		priv->seven_wire_mode = 1;
 		dev_info(&ndev->dev, "using 7-wire PHY mode\n");
 	}
@@ -960,9 +968,7 @@ static int mpc52xx_fec_probe(struct platform_device *op)
 		goto err_node;
 
 	/* We're done ! */
-	platform_set_drvdata(op, ndev);
-	netdev_info(ndev, "%s MAC %pM\n",
-		    op->dev.of_node->full_name, ndev->dev_addr);
+	dev_set_drvdata(&op->dev, ndev);
 
 	return 0;
 
@@ -989,12 +995,13 @@ mpc52xx_fec_remove(struct platform_device *op)
 	struct net_device *ndev;
 	struct mpc52xx_fec_priv *priv;
 
-	ndev = platform_get_drvdata(op);
+	ndev = dev_get_drvdata(&op->dev);
 	priv = netdev_priv(ndev);
 
 	unregister_netdev(ndev);
 
-	of_node_put(priv->phy_node);
+	if (priv->phy_node)
+		of_node_put(priv->phy_node);
 	priv->phy_node = NULL;
 
 	irq_dispose_mapping(ndev->irq);
@@ -1008,13 +1015,14 @@ mpc52xx_fec_remove(struct platform_device *op)
 
 	free_netdev(ndev);
 
+	dev_set_drvdata(&op->dev, NULL);
 	return 0;
 }
 
 #ifdef CONFIG_PM
 static int mpc52xx_fec_of_suspend(struct platform_device *op, pm_message_t state)
 {
-	struct net_device *dev = platform_get_drvdata(op);
+	struct net_device *dev = dev_get_drvdata(&op->dev);
 
 	if (netif_running(dev))
 		mpc52xx_fec_close(dev);
@@ -1024,7 +1032,7 @@ static int mpc52xx_fec_of_suspend(struct platform_device *op, pm_message_t state
 
 static int mpc52xx_fec_of_resume(struct platform_device *op)
 {
-	struct net_device *dev = platform_get_drvdata(op);
+	struct net_device *dev = dev_get_drvdata(&op->dev);
 
 	mpc52xx_fec_hw_init(dev);
 	mpc52xx_fec_reset_stats(dev);
@@ -1036,7 +1044,7 @@ static int mpc52xx_fec_of_resume(struct platform_device *op)
 }
 #endif
 
-static const struct of_device_id mpc52xx_fec_match[] = {
+static struct of_device_id mpc52xx_fec_match[] = {
 	{ .compatible = "fsl,mpc5200b-fec", },
 	{ .compatible = "fsl,mpc5200-fec", },
 	{ .compatible = "mpc5200-fec", },
@@ -1048,6 +1056,7 @@ MODULE_DEVICE_TABLE(of, mpc52xx_fec_match);
 static struct platform_driver mpc52xx_fec_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = mpc52xx_fec_match,
 	},
 	.probe		= mpc52xx_fec_probe,
@@ -1063,23 +1072,27 @@ static struct platform_driver mpc52xx_fec_driver = {
 /* Module                                                                   */
 /* ======================================================================== */
 
-static struct platform_driver * const drivers[] = {
-#ifdef CONFIG_FEC_MPC52xx_MDIO
-	&mpc52xx_fec_mdio_driver,
-#endif
-	&mpc52xx_fec_driver,
-};
-
 static int __init
 mpc52xx_fec_init(void)
 {
-	return platform_register_drivers(drivers, ARRAY_SIZE(drivers));
+#ifdef CONFIG_FEC_MPC52xx_MDIO
+	int ret;
+	ret = platform_driver_register(&mpc52xx_fec_mdio_driver);
+	if (ret) {
+		printk(KERN_ERR DRIVER_NAME ": failed to register mdio driver\n");
+		return ret;
+	}
+#endif
+	return platform_driver_register(&mpc52xx_fec_driver);
 }
 
 static void __exit
 mpc52xx_fec_exit(void)
 {
-	platform_unregister_drivers(drivers, ARRAY_SIZE(drivers));
+	platform_driver_unregister(&mpc52xx_fec_driver);
+#ifdef CONFIG_FEC_MPC52xx_MDIO
+	platform_driver_unregister(&mpc52xx_fec_mdio_driver);
+#endif
 }
 
 

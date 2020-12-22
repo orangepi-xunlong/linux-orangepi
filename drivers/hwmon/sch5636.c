@@ -402,17 +402,19 @@ static int sch5636_remove(struct platform_device *pdev)
 		device_remove_file(&pdev->dev,
 				   &sch5636_fan_attr[i].dev_attr);
 
+	platform_set_drvdata(pdev, NULL);
+	kfree(data);
+
 	return 0;
 }
 
-static int sch5636_probe(struct platform_device *pdev)
+static int __devinit sch5636_probe(struct platform_device *pdev)
 {
 	struct sch5636_data *data;
 	int i, err, val, revision[2];
 	char id[4];
 
-	data = devm_kzalloc(&pdev->dev, sizeof(struct sch5636_data),
-			    GFP_KERNEL);
+	data = kzalloc(sizeof(struct sch5636_data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
@@ -449,7 +451,7 @@ static int sch5636_probe(struct platform_device *pdev)
 		}
 		revision[i] = val;
 	}
-	pr_info("Found %s chip at %#hx, revision: %d.%02d\n", DEVNAME,
+	pr_info("Found %s chip at %#hx, revison: %d.%02d\n", DEVNAME,
 		data->addr, revision[0], revision[1]);
 
 	/* Read all temp + fan ctrl registers to determine which are active */
@@ -508,7 +510,7 @@ static int sch5636_probe(struct platform_device *pdev)
 	}
 
 	/* Note failing to register the watchdog is not a fatal error */
-	data->watchdog = sch56xx_watchdog_register(&pdev->dev, data->addr,
+	data->watchdog = sch56xx_watchdog_register(data->addr,
 					(revision[0] << 8) | revision[1],
 					&data->update_lock, 0);
 
@@ -521,6 +523,7 @@ error:
 
 static struct platform_driver sch5636_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= DRVNAME,
 	},
 	.probe		= sch5636_probe,

@@ -48,10 +48,10 @@
 #include <asm/thread_info.h>
 #include <asm/unistd.h>
 #include <asm/ftrace.h>
-#include <asm/export.h>
 
 #include "minstate.h"
 
+#ifdef __IA64_ASM_PARAVIRTUALIZED_NATIVE
 	/*
 	 * execve() is special because in case of success, we need to
 	 * setup a null register window frame.
@@ -61,13 +61,14 @@ ENTRY(ia64_execve)
 	 * Allocate 8 input registers since ptrace() may clobber them
 	 */
 	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(8)
-	alloc loc1=ar.pfs,8,2,3,0
+	alloc loc1=ar.pfs,8,2,4,0
 	mov loc0=rp
 	.body
 	mov out0=in0			// filename
 	;;				// stop bit between alloc and call
 	mov out1=in1			// argv
 	mov out2=in2			// envp
+	add out3=16,sp			// regs
 	br.call.sptk.many rp=sys_execve
 .ret0:
 	cmp4.ge p6,p7=r8,r0
@@ -75,6 +76,7 @@ ENTRY(ia64_execve)
 	sxt4 r8=r8			// return 64-bit result
 	;;
 	stf.spill [sp]=f0
+(p6)	cmp.ne pKStk,pUStk=r0,r0	// a successful execve() lands us in user-mode...
 	mov rp=loc0
 (p6)	mov ar.pfs=r0			// clear ar.pfs on success
 (p7)	br.ret.sptk.many rp
@@ -116,12 +118,13 @@ GLOBAL_ENTRY(sys_clone2)
 	mov loc1=r16				// save ar.pfs across do_fork
 	.body
 	mov out1=in1
-	mov out2=in2
+	mov out3=in2
 	tbit.nz p6,p0=in0,CLONE_SETTLS_BIT
-	mov out3=in3	// parent_tidptr: valid only w/CLONE_PARENT_SETTID
+	mov out4=in3	// parent_tidptr: valid only w/CLONE_PARENT_SETTID
 	;;
 (p6)	st8 [r2]=in5				// store TLS in r16 for copy_thread()
-	mov out4=in4	// child_tidptr:  valid only w/CLONE_CHILD_SETTID or CLONE_CHILD_CLEARTID
+	mov out5=in4	// child_tidptr:  valid only w/CLONE_CHILD_SETTID or CLONE_CHILD_CLEARTID
+	adds out2=IA64_SWITCH_STACK_SIZE+16,sp	// out2 = &regs
 	mov out0=in0				// out0 = clone_flags
 	br.call.sptk.many rp=do_fork
 .ret1:	.restore sp
@@ -147,12 +150,13 @@ GLOBAL_ENTRY(sys_clone)
 	mov loc1=r16				// save ar.pfs across do_fork
 	.body
 	mov out1=in1
-	mov out2=16				// stacksize (compensates for 16-byte scratch area)
+	mov out3=16				// stacksize (compensates for 16-byte scratch area)
 	tbit.nz p6,p0=in0,CLONE_SETTLS_BIT
-	mov out3=in2	// parent_tidptr: valid only w/CLONE_PARENT_SETTID
+	mov out4=in2	// parent_tidptr: valid only w/CLONE_PARENT_SETTID
 	;;
 (p6)	st8 [r2]=in4				// store TLS in r13 (tp)
-	mov out4=in3	// child_tidptr:  valid only w/CLONE_CHILD_SETTID or CLONE_CHILD_CLEARTID
+	mov out5=in3	// child_tidptr:  valid only w/CLONE_CHILD_SETTID or CLONE_CHILD_CLEARTID
+	adds out2=IA64_SWITCH_STACK_SIZE+16,sp	// out2 = &regs
 	mov out0=in0				// out0 = clone_flags
 	br.call.sptk.many rp=do_fork
 .ret2:	.restore sp
@@ -161,6 +165,7 @@ GLOBAL_ENTRY(sys_clone)
 	mov rp=loc0
 	br.ret.sptk.many rp
 END(sys_clone)
+#endif /* __IA64_ASM_PARAVIRTUALIZED_NATIVE */
 
 /*
  * prev_task <- ia64_switch_to(struct task_struct *next)
@@ -168,7 +173,7 @@ END(sys_clone)
  *	called.  The code starting at .map relies on this.  The rest of the code
  *	doesn't care about the interrupt masking status.
  */
-GLOBAL_ENTRY(ia64_switch_to)
+GLOBAL_ENTRY(__paravirt_switch_to)
 	.prologue
 	alloc r16=ar.pfs,1,0,0,0
 	DO_SAVE_SWITCH_STACK
@@ -220,8 +225,9 @@ GLOBAL_ENTRY(ia64_switch_to)
 	itr.d dtr[r25]=r23		// wire in new mapping...
 	SSM_PSR_IC_AND_SRLZ_D(r8, r9)	// reenable the psr.ic bit
 	br.cond.sptk .done
-END(ia64_switch_to)
+END(__paravirt_switch_to)
 
+#ifdef __IA64_ASM_PARAVIRTUALIZED_NATIVE
 /*
  * Note that interrupts are enabled during save_switch_stack and load_switch_stack.  This
  * means that we may get an interrupt with "sp" pointing to the new kernel stack while
@@ -478,6 +484,19 @@ GLOBAL_ENTRY(prefetch_stack)
 	br.ret.sptk.many rp
 END(prefetch_stack)
 
+GLOBAL_ENTRY(kernel_execve)
+	rum psr.ac
+	mov r15=__NR_execve			// put syscall number in place
+	break __BREAK_SYSCALL
+	br.ret.sptk.many rp
+END(kernel_execve)
+
+GLOBAL_ENTRY(clone)
+	mov r15=__NR_clone			// put syscall number in place
+	break __BREAK_SYSCALL
+	br.ret.sptk.many rp
+END(clone)
+
 	/*
 	 * Invoke a system call, but do some tracing before and after the call.
 	 * We MUST preserve the current register frame throughout this routine
@@ -581,27 +600,6 @@ GLOBAL_ENTRY(ia64_strace_leave_kernel)
 .ret4:	br.cond.sptk ia64_leave_kernel
 END(ia64_strace_leave_kernel)
 
-ENTRY(call_payload)
-	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(0)
-	/* call the kernel_thread payload; fn is in r4, arg - in r5 */
-	alloc loc1=ar.pfs,0,3,1,0
-	mov loc0=rp
-	mov loc2=gp
-	mov out0=r5		// arg
-	ld8 r14 = [r4], 8	// fn.address
-	;;
-	mov b6 = r14
-	ld8 gp = [r4]		// fn.gp
-	;;
-	br.call.sptk.many rp=b6	// fn(arg)
-.ret12:	mov gp=loc2
-	mov rp=loc0
-	mov ar.pfs=loc1
-	/* ... and if it has returned, we are going to userland */
-	cmp.ne pKStk,pUStk=r0,r0
-	br.ret.sptk.many rp
-END(call_payload)
-
 GLOBAL_ENTRY(ia64_ret_from_clone)
 	PT_REGS_UNWIND_INFO(0)
 {	/*
@@ -618,7 +616,6 @@ GLOBAL_ENTRY(ia64_ret_from_clone)
 	br.call.sptk.many rp=ia64_invoke_schedule_tail
 }
 .ret8:
-(pKStk)	br.call.sptk.many rp=call_payload
 	adds r2=TI_FLAGS+IA64_TASK_SIZE,r13
 	;;
 	ld4 r2=[r2]
@@ -637,8 +634,16 @@ GLOBAL_ENTRY(ia64_ret_from_syscall)
 	adds r2=PT(R8)+16,sp			// r2 = &pt_regs.r8
 	mov r10=r0				// clear error indication in r10
 (p7)	br.cond.spnt handle_syscall_error	// handle potential syscall failure
+#ifdef CONFIG_PARAVIRT
+	;;
+	br.cond.sptk.few ia64_leave_syscall
+	;;
+#endif /* CONFIG_PARAVIRT */
 END(ia64_ret_from_syscall)
+#ifndef CONFIG_PARAVIRT
 	// fall through
+#endif
+#endif /* __IA64_ASM_PARAVIRTUALIZED_NATIVE */
 
 /*
  * ia64_leave_syscall(): Same as ia64_leave_kernel, except that it doesn't
@@ -684,7 +689,7 @@ END(ia64_ret_from_syscall)
  *	      ar.csd: cleared
  *	      ar.ssd: cleared
  */
-GLOBAL_ENTRY(ia64_leave_syscall)
+GLOBAL_ENTRY(__paravirt_leave_syscall)
 	PT_REGS_UNWIND_INFO(0)
 	/*
 	 * work.need_resched etc. mustn't get changed by this CPU before it returns to
@@ -712,9 +717,9 @@ GLOBAL_ENTRY(ia64_leave_syscall)
 	cmp.eq pLvSys,p0=r0,r0		// pLvSys=1: leave from syscall
 (pUStk)	cmp.eq.unc p6,p0=r0,r0		// p6 <- pUStk
 #endif
-.global ia64_work_processed_syscall;
-ia64_work_processed_syscall:
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+.global __paravirt_work_processed_syscall;
+__paravirt_work_processed_syscall:
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 	adds r2=PT(LOADRS)+16,r12
 	MOV_FROM_ITC(pUStk, p9, r22, r19)	// fetch time at leave
 	adds r18=TI_FLAGS+IA64_TASK_SIZE,r13
@@ -752,7 +757,7 @@ ia64_work_processed_syscall:
 
 	ld8 r29=[r2],16		// M0|1 load cr.ipsr
 	ld8 r28=[r3],16		// M0|1 load cr.iip
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 (pUStk) add r14=TI_AC_LEAVE+IA64_TASK_SIZE,r13
 	;;
 	ld8 r30=[r2],16		// M0|1 load cr.ifs
@@ -783,7 +788,7 @@ ia64_work_processed_syscall:
 	ld8.fill r1=[r3],16			// M0|1 load r1
 (pUStk) mov r17=1				// A
 	;;
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 (pUStk) st1 [r15]=r17				// M2|3
 #else
 (pUStk) st1 [r14]=r17				// M2|3
@@ -803,7 +808,7 @@ ia64_work_processed_syscall:
 	shr.u r18=r19,16		// I0|1 get byte size of existing "dirty" partition
 	COVER				// B    add current frame into dirty partition & set cr.ifs
 	;;
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 	mov r19=ar.bsp			// M2   get new backing store pointer
 	st8 [r14]=r22			// M	save time at leave
 	mov f10=f0			// F    clear f10
@@ -826,9 +831,9 @@ ia64_work_processed_syscall:
 	mov.m ar.ssd=r0			// M2   clear ar.ssd
 	mov f11=f0			// F    clear f11
 	br.cond.sptk.many rbs_switch	// B
-END(ia64_leave_syscall)
+END(__paravirt_leave_syscall)
 
-GLOBAL_ENTRY(ia64_leave_kernel)
+GLOBAL_ENTRY(__paravirt_leave_kernel)
 	PT_REGS_UNWIND_INFO(0)
 	/*
 	 * work.need_resched etc. mustn't get changed by this CPU before it returns to
@@ -938,7 +943,7 @@ GLOBAL_ENTRY(ia64_leave_kernel)
 	adds r16=PT(CR_IPSR)+16,r12
 	adds r17=PT(CR_IIP)+16,r12
 
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 	.pred.rel.mutex pUStk,pKStk
 	MOV_FROM_PSR(pKStk, r22, r29)	// M2 read PSR now that interrupts are disabled
 	MOV_FROM_ITC(pUStk, p9, r22, r29)	// M  fetch time at leave
@@ -971,7 +976,7 @@ GLOBAL_ENTRY(ia64_leave_kernel)
 	;;
 	ld8.fill r12=[r16],16
 	ld8.fill r13=[r17],16
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 (pUStk)	adds r3=TI_AC_LEAVE+IA64_TASK_SIZE,r18
 #else
 (pUStk)	adds r18=IA64_TASK_THREAD_ON_USTACK_OFFSET,r18
@@ -979,7 +984,7 @@ GLOBAL_ENTRY(ia64_leave_kernel)
 	;;
 	ld8 r20=[r16],16	// ar.fpsr
 	ld8.fill r15=[r17],16
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 (pUStk)	adds r18=IA64_TASK_THREAD_ON_USTACK_OFFSET,r18	// deferred
 #endif
 	;;
@@ -987,7 +992,7 @@ GLOBAL_ENTRY(ia64_leave_kernel)
 	ld8.fill r2=[r17]
 (pUStk)	mov r17=1
 	;;
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 	//  mmi_ :  ld8 st1 shr;;         mmi_ : st8 st1 shr;;
 	//  mib  :  mov add br        ->  mib  : ld8 add br
 	//  bbb_ :  br  nop cover;;       mbb_ : mov br  cover;;
@@ -1159,27 +1164,41 @@ skip_rbs_switch:
 .work_pending:
 	tbit.z p6,p0=r31,TIF_NEED_RESCHED	// is resched not needed?
 (p6)	br.cond.sptk.few .notify
-	br.call.spnt.many rp=preempt_schedule_irq
+#ifdef CONFIG_PREEMPT
+(pKStk) dep r21=-1,r0,PREEMPT_ACTIVE_BIT,1
+	;;
+(pKStk) st4 [r20]=r21
+#endif
+	SSM_PSR_I(p0, p6, r2)	// enable interrupts
+	br.call.spnt.many rp=schedule
 .ret9:	cmp.eq p6,p0=r0,r0	// p6 <- 1 (re-check)
-(pLvSys)br.cond.sptk.few  ia64_work_pending_syscall_end
+	RSM_PSR_I(p0, r2, r20)	// disable interrupts
+	;;
+#ifdef CONFIG_PREEMPT
+(pKStk)	adds r20=TI_PRE_COUNT+IA64_TASK_SIZE,r13
+	;;
+(pKStk)	st4 [r20]=r0		// preempt_count() <- 0
+#endif
+(pLvSys)br.cond.sptk.few  __paravirt_pending_syscall_end
 	br.cond.sptk.many .work_processed_kernel
 
 .notify:
 (pUStk)	br.call.spnt.many rp=notify_resume_user
 .ret10:	cmp.ne p6,p0=r0,r0	// p6 <- 0 (don't re-check)
-(pLvSys)br.cond.sptk.few  ia64_work_pending_syscall_end
+(pLvSys)br.cond.sptk.few  __paravirt_pending_syscall_end
 	br.cond.sptk.many .work_processed_kernel
 
-.global ia64_work_pending_syscall_end;
-ia64_work_pending_syscall_end:
+.global __paravirt_pending_syscall_end;
+__paravirt_pending_syscall_end:
 	adds r2=PT(R8)+16,r12
 	adds r3=PT(R10)+16,r12
 	;;
 	ld8 r8=[r2]
 	ld8 r10=[r3]
-	br.cond.sptk.many ia64_work_processed_syscall
-END(ia64_leave_kernel)
+	br.cond.sptk.many __paravirt_work_processed_syscall_target
+END(__paravirt_leave_kernel)
 
+#ifdef __IA64_ASM_PARAVIRTUALIZED_NATIVE
 ENTRY(handle_syscall_error)
 	/*
 	 * Some system calls (e.g., ptrace, mmap) can return arbitrary values which could
@@ -1283,7 +1302,7 @@ ENTRY(sys_rt_sigreturn)
 	adds sp=16,sp
 	;;
 	ld8 r9=[sp]				// load new ar.unat
-	mov.sptk b7=r8,ia64_leave_kernel
+	mov.sptk b7=r8,ia64_native_leave_kernel
 	;;
 	mov ar.unat=r9
 	br.many b7
@@ -1346,14 +1365,12 @@ GLOBAL_ENTRY(unw_init_running)
 	mov rp=loc0
 	br.ret.sptk.many rp
 END(unw_init_running)
-EXPORT_SYMBOL(unw_init_running)
 
 #ifdef CONFIG_FUNCTION_TRACER
 #ifdef CONFIG_DYNAMIC_FTRACE
 GLOBAL_ENTRY(_mcount)
 	br ftrace_stub
 END(_mcount)
-EXPORT_SYMBOL(_mcount)
 
 .here:
 	br.ret.sptk.many b0
@@ -1763,20 +1780,6 @@ sys_call_table:
 	data8 sys_process_vm_readv
 	data8 sys_process_vm_writev
 	data8 sys_accept4
-	data8 sys_finit_module			// 1335
-	data8 sys_sched_setattr
-	data8 sys_sched_getattr
-	data8 sys_renameat2
-	data8 sys_getrandom
-	data8 sys_memfd_create			// 1340
-	data8 sys_bpf
-	data8 sys_execveat
-	data8 sys_userfaultfd
-	data8 sys_membarrier
-	data8 sys_kcmp				// 1345
-	data8 sys_mlock2
-	data8 sys_copy_file_range
-	data8 sys_preadv2
-	data8 sys_pwritev2
 
 	.org sys_call_table + 8*NR_syscalls	// guard against failures to increase NR_syscalls
+#endif /* __IA64_ASM_PARAVIRTUALIZED_NATIVE */

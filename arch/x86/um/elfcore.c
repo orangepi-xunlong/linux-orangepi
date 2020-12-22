@@ -11,7 +11,8 @@ Elf32_Half elf_core_extra_phdrs(void)
 	return vsyscall_ehdr ? (((struct elfhdr *)vsyscall_ehdr)->e_phnum) : 0;
 }
 
-int elf_core_write_extra_phdrs(struct coredump_params *cprm, loff_t offset)
+int elf_core_write_extra_phdrs(struct file *file, loff_t offset, size_t *size,
+			       unsigned long limit)
 {
 	if ( vsyscall_ehdr ) {
 		const struct elfhdr *const ehdrp =
@@ -31,14 +32,17 @@ int elf_core_write_extra_phdrs(struct coredump_params *cprm, loff_t offset)
 				phdr.p_offset += ofs;
 			}
 			phdr.p_paddr = 0; /* match other core phdrs */
-			if (!dump_emit(cprm, &phdr, sizeof(phdr)))
+			*size += sizeof(phdr);
+			if (*size > limit
+			    || !dump_write(file, &phdr, sizeof(phdr)))
 				return 0;
 		}
 	}
 	return 1;
 }
 
-int elf_core_write_extra_data(struct coredump_params *cprm)
+int elf_core_write_extra_data(struct file *file, size_t *size,
+			      unsigned long limit)
 {
 	if ( vsyscall_ehdr ) {
 		const struct elfhdr *const ehdrp =
@@ -51,7 +55,10 @@ int elf_core_write_extra_data(struct coredump_params *cprm)
 			if (phdrp[i].p_type == PT_LOAD) {
 				void *addr = (void *) phdrp[i].p_vaddr;
 				size_t filesz = phdrp[i].p_filesz;
-				if (!dump_emit(cprm, addr, filesz))
+
+				*size += filesz;
+				if (*size > limit
+				    || !dump_write(file, addr, filesz))
 					return 0;
 			}
 		}

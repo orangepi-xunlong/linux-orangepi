@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -51,7 +51,6 @@
  *
  * Note: The order of these include files is important.
  */
-#include <acpi/acconfig.h>	/* Global configuration constants */
 #include "acmacros.h"		/* C macros */
 #include "aclocal.h"		/* Internal data types */
 #include "acobject.h"		/* ACPI internal object */
@@ -59,8 +58,5 @@
 #include "acglobal.h"		/* All global variables */
 #include "achware.h"		/* Hardware defines and interfaces */
 #include "acutils.h"		/* Utility interfaces */
-#ifndef ACPI_USE_SYSTEM_CLIBRARY
-#include "acclib.h"		/* C library interfaces */
-#endif				/* !ACPI_USE_SYSTEM_CLIBRARY */
 
 #endif				/* __ACCOMMON_H__ */

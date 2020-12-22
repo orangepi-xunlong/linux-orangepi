@@ -320,29 +320,21 @@ static union iucv_param *iucv_param_irq[NR_CPUS];
  *
  * Returns the result of the CP IUCV call.
  */
-static inline int __iucv_call_b2f0(int command, union iucv_param *parm)
+static inline int iucv_call_b2f0(int command, union iucv_param *parm)
 {
 	register unsigned long reg0 asm ("0");
 	register unsigned long reg1 asm ("1");
 	int ccode;
 
 	reg0 = command;
-	reg1 = (unsigned long)parm;
+	reg1 = virt_to_phys(parm);
 	asm volatile(
 		"	.long 0xb2f01000\n"
 		"	ipm	%0\n"
 		"	srl	%0,28\n"
 		: "=d" (ccode), "=m" (*parm), "+d" (reg0), "+a" (reg1)
 		:  "m" (*parm) : "cc");
-	return ccode;
-}
-
-static inline int iucv_call_b2f0(int command, union iucv_param *parm)
-{
-	int ccode;
-
-	ccode = __iucv_call_b2f0(command, parm);
-	return ccode == 1 ? parm->ctrl.iprcode : ccode;
+	return (ccode == 1) ? parm->ctrl.iprcode : ccode;
 }
 
 /**
@@ -353,12 +345,16 @@ static inline int iucv_call_b2f0(int command, union iucv_param *parm)
  * Returns the maximum number of connections or -EPERM is IUCV is not
  * available.
  */
-static int __iucv_query_maxconn(void *param, unsigned long *max_pathid)
+static int iucv_query_maxconn(void)
 {
 	register unsigned long reg0 asm ("0");
 	register unsigned long reg1 asm ("1");
+	void *param;
 	int ccode;
 
+	param = kzalloc(sizeof(union iucv_param), GFP_KERNEL|GFP_DMA);
+	if (!param)
+		return -ENOMEM;
 	reg0 = IUCV_QUERY;
 	reg1 = (unsigned long) param;
 	asm volatile (
@@ -366,22 +362,8 @@ static int __iucv_query_maxconn(void *param, unsigned long *max_pathid)
 		"	ipm	%0\n"
 		"	srl	%0,28\n"
 		: "=d" (ccode), "+d" (reg0), "+d" (reg1) : : "cc");
-	*max_pathid = reg1;
-	return ccode;
-}
-
-static int iucv_query_maxconn(void)
-{
-	unsigned long max_pathid;
-	void *param;
-	int ccode;
-
-	param = kzalloc(sizeof(union iucv_param), GFP_KERNEL | GFP_DMA);
-	if (!param)
-		return -ENOMEM;
-	ccode = __iucv_query_maxconn(param, &max_pathid);
 	if (ccode == 0)
-		iucv_max_pathid = max_pathid;
+		iucv_max_pathid = reg1;
 	kfree(param);
 	return ccode ? -EPERM : 0;
 }
@@ -511,8 +493,8 @@ static void iucv_declare_cpu(void *data)
 			err = "Paging or storage error";
 			break;
 		}
-		pr_warn("Defining an interrupt buffer on CPU %i failed with 0x%02x (%s)\n",
-			cpu, rc, err);
+		pr_warning("Defining an interrupt buffer on CPU %i"
+			   " failed with 0x%02x (%s)\n", cpu, rc, err);
 		return;
 	}
 
@@ -639,43 +621,7 @@ static void iucv_disable(void)
 	put_online_cpus();
 }
 
-static void free_iucv_data(int cpu)
-{
-	kfree(iucv_param_irq[cpu]);
-	iucv_param_irq[cpu] = NULL;
-	kfree(iucv_param[cpu]);
-	iucv_param[cpu] = NULL;
-	kfree(iucv_irq_data[cpu]);
-	iucv_irq_data[cpu] = NULL;
-}
-
-static int alloc_iucv_data(int cpu)
-{
-	/* Note: GFP_DMA used to get memory below 2G */
-	iucv_irq_data[cpu] = kmalloc_node(sizeof(struct iucv_irq_data),
-			     GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
-	if (!iucv_irq_data[cpu])
-		goto out_free;
-
-	/* Allocate parameter blocks. */
-	iucv_param[cpu] = kmalloc_node(sizeof(union iucv_param),
-			  GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
-	if (!iucv_param[cpu])
-		goto out_free;
-
-	iucv_param_irq[cpu] = kmalloc_node(sizeof(union iucv_param),
-			  GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
-	if (!iucv_param_irq[cpu])
-		goto out_free;
-
-	return 0;
-
-out_free:
-	free_iucv_data(cpu);
-	return -ENOMEM;
-}
-
-static int iucv_cpu_notify(struct notifier_block *self,
+static int __cpuinit iucv_cpu_notify(struct notifier_block *self,
 				     unsigned long action, void *hcpu)
 {
 	cpumask_t cpumask;
@@ -684,14 +630,38 @@ static int iucv_cpu_notify(struct notifier_block *self,
 	switch (action) {
 	case CPU_UP_PREPARE:
 	case CPU_UP_PREPARE_FROZEN:
-		if (alloc_iucv_data(cpu))
+		iucv_irq_data[cpu] = kmalloc_node(sizeof(struct iucv_irq_data),
+					GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
+		if (!iucv_irq_data[cpu])
 			return notifier_from_errno(-ENOMEM);
+
+		iucv_param[cpu] = kmalloc_node(sizeof(union iucv_param),
+				     GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
+		if (!iucv_param[cpu]) {
+			kfree(iucv_irq_data[cpu]);
+			iucv_irq_data[cpu] = NULL;
+			return notifier_from_errno(-ENOMEM);
+		}
+		iucv_param_irq[cpu] = kmalloc_node(sizeof(union iucv_param),
+					GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
+		if (!iucv_param_irq[cpu]) {
+			kfree(iucv_param[cpu]);
+			iucv_param[cpu] = NULL;
+			kfree(iucv_irq_data[cpu]);
+			iucv_irq_data[cpu] = NULL;
+			return notifier_from_errno(-ENOMEM);
+		}
 		break;
 	case CPU_UP_CANCELED:
 	case CPU_UP_CANCELED_FROZEN:
 	case CPU_DEAD:
 	case CPU_DEAD_FROZEN:
-		free_iucv_data(cpu);
+		kfree(iucv_param_irq[cpu]);
+		iucv_param_irq[cpu] = NULL;
+		kfree(iucv_param[cpu]);
+		iucv_param[cpu] = NULL;
+		kfree(iucv_irq_data[cpu]);
+		iucv_irq_data[cpu] = NULL;
 		break;
 	case CPU_ONLINE:
 	case CPU_ONLINE_FROZEN:
@@ -731,7 +701,7 @@ static struct notifier_block __refdata iucv_cpu_notifier = {
  *
  * Sever an iucv path to free up the pathid. Used internally.
  */
-static int iucv_sever_pathid(u16 pathid, u8 *userdata)
+static int iucv_sever_pathid(u16 pathid, u8 userdata[16])
 {
 	union iucv_param *parm;
 
@@ -861,11 +831,8 @@ static int iucv_reboot_event(struct notifier_block *this,
 {
 	int i;
 
-	if (cpumask_empty(&iucv_irq_cpumask))
-		return NOTIFY_DONE;
-
 	get_online_cpus();
-	on_each_cpu_mask(&iucv_irq_cpumask, iucv_block_cpu, NULL, 1);
+	on_each_cpu(iucv_block_cpu, NULL, 1);
 	preempt_disable();
 	for (i = 0; i < iucv_max_pathid; i++) {
 		if (iucv_path_table[i])
@@ -894,7 +861,7 @@ static struct notifier_block iucv_reboot_notifier = {
  * Returns the result of the CP IUCV call.
  */
 int iucv_path_accept(struct iucv_path *path, struct iucv_handler *handler,
-		     u8 *userdata, void *private)
+		     u8 userdata[16], void *private)
 {
 	union iucv_param *parm;
 	int rc;
@@ -941,7 +908,7 @@ EXPORT_SYMBOL(iucv_path_accept);
  * Returns the result of the CP IUCV call.
  */
 int iucv_path_connect(struct iucv_path *path, struct iucv_handler *handler,
-		      u8 *userid, u8 *system, u8 *userdata,
+		      u8 userid[8], u8 system[8], u8 userdata[16],
 		      void *private)
 {
 	union iucv_param *parm;
@@ -1003,7 +970,7 @@ EXPORT_SYMBOL(iucv_path_connect);
  *
  * Returns the result from the CP IUCV call.
  */
-int iucv_path_quiesce(struct iucv_path *path, u8 *userdata)
+int iucv_path_quiesce(struct iucv_path *path, u8 userdata[16])
 {
 	union iucv_param *parm;
 	int rc;
@@ -1035,7 +1002,7 @@ EXPORT_SYMBOL(iucv_path_quiesce);
  *
  * Returns the result from the CP IUCV call.
  */
-int iucv_path_resume(struct iucv_path *path, u8 *userdata)
+int iucv_path_resume(struct iucv_path *path, u8 userdata[16])
 {
 	union iucv_param *parm;
 	int rc;
@@ -1065,7 +1032,7 @@ out:
  *
  * Returns the result from the CP IUCV call.
  */
-int iucv_path_sever(struct iucv_path *path, u8 *userdata)
+int iucv_path_sever(struct iucv_path *path, u8 userdata[16])
 {
 	int rc;
 
@@ -1839,7 +1806,7 @@ static void iucv_external_interrupt(struct ext_code ext_code,
 	struct iucv_irq_data *p;
 	struct iucv_irq_list *work;
 
-	inc_irq_stat(IRQEXT_IUC);
+	kstat_cpu(smp_processor_id()).irqs[EXTINT_IUC]++;
 	p = iucv_irq_data[smp_processor_id()];
 	if (p->ippathid >= iucv_max_pathid) {
 		WARN_ON(p->ippathid >= iucv_max_pathid);
@@ -1849,7 +1816,7 @@ static void iucv_external_interrupt(struct ext_code ext_code,
 	BUG_ON(p->iptype  < 0x01 || p->iptype > 0x09);
 	work = kmalloc(sizeof(struct iucv_irq_list), GFP_ATOMIC);
 	if (!work) {
-		pr_warn("iucv_external_interrupt: out of memory\n");
+		pr_warning("iucv_external_interrupt: out of memory\n");
 		return;
 	}
 	memcpy(&work->data, p, sizeof(work->data));
@@ -1992,7 +1959,8 @@ static int iucv_pm_restore(struct device *dev)
 	printk(KERN_WARNING "iucv_pm_restore %p\n", iucv_path_table);
 #endif
 	if ((iucv_pm_state != IUCV_PM_RESTORING) && iucv_path_table)
-		pr_warn("Suspending Linux did not completely close all IUCV connections\n");
+		pr_warning("Suspending Linux did not completely close all IUCV "
+			"connections\n");
 	iucv_pm_state = IUCV_PM_RESTORING;
 	if (cpumask_empty(&iucv_irq_cpumask)) {
 		rc = iucv_query_maxconn();
@@ -2045,7 +2013,7 @@ static int __init iucv_init(void)
 	rc = iucv_query_maxconn();
 	if (rc)
 		goto out_ctl;
-	rc = register_external_irq(EXT_IRQ_IUCV, iucv_external_interrupt);
+	rc = register_external_interrupt(0x4000, iucv_external_interrupt);
 	if (rc)
 		goto out_ctl;
 	iucv_root = root_device_register("iucv");
@@ -2054,20 +2022,33 @@ static int __init iucv_init(void)
 		goto out_int;
 	}
 
-	cpu_notifier_register_begin();
-
 	for_each_online_cpu(cpu) {
-		if (alloc_iucv_data(cpu)) {
+		/* Note: GFP_DMA used to get memory below 2G */
+		iucv_irq_data[cpu] = kmalloc_node(sizeof(struct iucv_irq_data),
+				     GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
+		if (!iucv_irq_data[cpu]) {
 			rc = -ENOMEM;
 			goto out_free;
 		}
+
+		/* Allocate parameter blocks. */
+		iucv_param[cpu] = kmalloc_node(sizeof(union iucv_param),
+				  GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
+		if (!iucv_param[cpu]) {
+			rc = -ENOMEM;
+			goto out_free;
+		}
+		iucv_param_irq[cpu] = kmalloc_node(sizeof(union iucv_param),
+				  GFP_KERNEL|GFP_DMA, cpu_to_node(cpu));
+		if (!iucv_param_irq[cpu]) {
+			rc = -ENOMEM;
+			goto out_free;
+		}
+
 	}
-	rc = __register_hotcpu_notifier(&iucv_cpu_notifier);
+	rc = register_hotcpu_notifier(&iucv_cpu_notifier);
 	if (rc)
 		goto out_free;
-
-	cpu_notifier_register_done();
-
 	rc = register_reboot_notifier(&iucv_reboot_notifier);
 	if (rc)
 		goto out_cpu;
@@ -2085,17 +2066,19 @@ static int __init iucv_init(void)
 out_reboot:
 	unregister_reboot_notifier(&iucv_reboot_notifier);
 out_cpu:
-	cpu_notifier_register_begin();
-	__unregister_hotcpu_notifier(&iucv_cpu_notifier);
+	unregister_hotcpu_notifier(&iucv_cpu_notifier);
 out_free:
-	for_each_possible_cpu(cpu)
-		free_iucv_data(cpu);
-
-	cpu_notifier_register_done();
-
+	for_each_possible_cpu(cpu) {
+		kfree(iucv_param_irq[cpu]);
+		iucv_param_irq[cpu] = NULL;
+		kfree(iucv_param[cpu]);
+		iucv_param[cpu] = NULL;
+		kfree(iucv_irq_data[cpu]);
+		iucv_irq_data[cpu] = NULL;
+	}
 	root_device_unregister(iucv_root);
 out_int:
-	unregister_external_irq(EXT_IRQ_IUCV, iucv_external_interrupt);
+	unregister_external_interrupt(0x4000, iucv_external_interrupt);
 out_ctl:
 	ctl_clear_bit(0, 1);
 out:
@@ -2119,14 +2102,18 @@ static void __exit iucv_exit(void)
 		kfree(p);
 	spin_unlock_irq(&iucv_queue_lock);
 	unregister_reboot_notifier(&iucv_reboot_notifier);
-	cpu_notifier_register_begin();
-	__unregister_hotcpu_notifier(&iucv_cpu_notifier);
-	for_each_possible_cpu(cpu)
-		free_iucv_data(cpu);
-	cpu_notifier_register_done();
+	unregister_hotcpu_notifier(&iucv_cpu_notifier);
+	for_each_possible_cpu(cpu) {
+		kfree(iucv_param_irq[cpu]);
+		iucv_param_irq[cpu] = NULL;
+		kfree(iucv_param[cpu]);
+		iucv_param[cpu] = NULL;
+		kfree(iucv_irq_data[cpu]);
+		iucv_irq_data[cpu] = NULL;
+	}
 	root_device_unregister(iucv_root);
 	bus_unregister(&iucv_bus);
-	unregister_external_irq(EXT_IRQ_IUCV, iucv_external_interrupt);
+	unregister_external_interrupt(0x4000, iucv_external_interrupt);
 }
 
 subsys_initcall(iucv_init);

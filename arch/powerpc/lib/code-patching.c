@@ -13,47 +13,17 @@
 #include <linux/mm.h>
 #include <asm/page.h>
 #include <asm/code-patching.h>
-#include <asm/uaccess.h>
-#include <asm/setup.h>
-#include <asm/sections.h>
 
 
-int patch_instruction(unsigned int *addr, unsigned int instr)
+void patch_instruction(unsigned int *addr, unsigned int instr)
 {
-	int err;
-
-	/* Make sure we aren't patching a freed init section */
-	if (init_mem_is_free && init_section_contains(addr, 4)) {
-		pr_debug("Skipping init section patching addr: 0x%px\n", addr);
-		return 0;
-	}
-
-	__put_user_size(instr, addr, 4, err);
-	if (err)
-		return err;
+	*addr = instr;
 	asm ("dcbst 0, %0; sync; icbi 0,%0; sync; isync" : : "r" (addr));
-	return 0;
 }
 
-int patch_branch(unsigned int *addr, unsigned long target, int flags)
+void patch_branch(unsigned int *addr, unsigned long target, int flags)
 {
-	return patch_instruction(addr, create_branch(addr, target, flags));
-}
-
-int patch_branch_site(s32 *site, unsigned long target, int flags)
-{
-	unsigned int *addr;
-
-	addr = (unsigned int *)((unsigned long)site + *site);
-	return patch_instruction(addr, create_branch(addr, target, flags));
-}
-
-int patch_instruction_site(s32 *site, unsigned int instr)
-{
-	unsigned int *addr;
-
-	addr = (unsigned int *)((unsigned long)site + *site);
-	return patch_instruction(addr, instr);
+	patch_instruction(addr, create_branch(addr, target, flags));
 }
 
 unsigned int create_branch(const unsigned int *addr,
@@ -117,11 +87,6 @@ int instr_is_relative_branch(unsigned int instr)
 		return 0;
 
 	return instr_is_branch_iform(instr) || instr_is_branch_bform(instr);
-}
-
-int instr_is_relative_link_branch(unsigned int instr)
-{
-	return instr_is_relative_branch(instr) && (instr & BRANCH_SET_LINK);
 }
 
 static unsigned long branch_iform_target(const unsigned int *instr)
@@ -188,21 +153,6 @@ unsigned int translate_branch(const unsigned int *dest, const unsigned int *src)
 	return 0;
 }
 
-#ifdef CONFIG_PPC_BOOK3E_64
-void __patch_exception(int exc, unsigned long addr)
-{
-	extern unsigned int interrupt_base_book3e;
-	unsigned int *ibase = &interrupt_base_book3e;
-
-	/* Our exceptions vectors start with a NOP and -then- a branch
-	 * to deal with single stepping from userspace which stops on
-	 * the second instruction. Thus we need to patch the second
-	 * instruction of the exception, not the first one
-	 */
-
-	patch_branch(ibase + (exc / 4) + 1, addr, 0);
-}
-#endif
 
 #ifdef CONFIG_CODE_PATCHING_SELFTEST
 

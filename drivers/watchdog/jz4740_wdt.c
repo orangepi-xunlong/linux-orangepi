@@ -17,14 +17,15 @@
 #include <linux/moduleparam.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
+#include <linux/miscdevice.h>
 #include <linux/watchdog.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/device.h>
 #include <linux/clk.h>
 #include <linux/slab.h>
 #include <linux/err.h>
-#include <linux/of.h>
 
 #include <asm/mach-jz4740/timer.h>
 
@@ -143,15 +144,7 @@ static const struct watchdog_ops jz4740_wdt_ops = {
 	.set_timeout = jz4740_wdt_set_timeout,
 };
 
-#ifdef CONFIG_OF
-static const struct of_device_id jz4740_wdt_of_matches[] = {
-	{ .compatible = "ingenic,jz4740-watchdog", },
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, jz4740_wdt_of_matches)
-#endif
-
-static int jz4740_wdt_probe(struct platform_device *pdev)
+static int __devinit jz4740_wdt_probe(struct platform_device *pdev)
 {
 	struct jz4740_wdt_drvdata *drvdata;
 	struct watchdog_device *jz4740_wdt;
@@ -160,8 +153,10 @@ static int jz4740_wdt_probe(struct platform_device *pdev)
 
 	drvdata = devm_kzalloc(&pdev->dev, sizeof(struct jz4740_wdt_drvdata),
 			       GFP_KERNEL);
-	if (!drvdata)
+	if (!drvdata) {
+		dev_err(&pdev->dev, "Unable to alloacate watchdog device\n");
 		return -ENOMEM;
+	}
 
 	if (heartbeat < 1 || heartbeat > MAX_HEARTBEAT)
 		heartbeat = DEFAULT_HEARTBEAT;
@@ -172,18 +167,17 @@ static int jz4740_wdt_probe(struct platform_device *pdev)
 	jz4740_wdt->timeout = heartbeat;
 	jz4740_wdt->min_timeout = 1;
 	jz4740_wdt->max_timeout = MAX_HEARTBEAT;
-	jz4740_wdt->parent = &pdev->dev;
 	watchdog_set_nowayout(jz4740_wdt, nowayout);
 	watchdog_set_drvdata(jz4740_wdt, drvdata);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	drvdata->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(drvdata->base)) {
-		ret = PTR_ERR(drvdata->base);
+	drvdata->base = devm_request_and_ioremap(&pdev->dev, res);
+	if (drvdata->base == NULL) {
+		ret = -EBUSY;
 		goto err_out;
 	}
 
-	drvdata->rtc_clk = clk_get(&pdev->dev, "rtc");
+	drvdata->rtc_clk = clk_get(NULL, "rtc");
 	if (IS_ERR(drvdata->rtc_clk)) {
 		dev_err(&pdev->dev, "cannot find RTC clock\n");
 		ret = PTR_ERR(drvdata->rtc_clk);
@@ -203,7 +197,7 @@ err_out:
 	return ret;
 }
 
-static int jz4740_wdt_remove(struct platform_device *pdev)
+static int __devexit jz4740_wdt_remove(struct platform_device *pdev)
 {
 	struct jz4740_wdt_drvdata *drvdata = platform_get_drvdata(pdev);
 
@@ -216,10 +210,10 @@ static int jz4740_wdt_remove(struct platform_device *pdev)
 
 static struct platform_driver jz4740_wdt_driver = {
 	.probe = jz4740_wdt_probe,
-	.remove = jz4740_wdt_remove,
+	.remove = __devexit_p(jz4740_wdt_remove),
 	.driver = {
 		.name = "jz4740-wdt",
-		.of_match_table = of_match_ptr(jz4740_wdt_of_matches),
+		.owner	= THIS_MODULE,
 	},
 };
 
@@ -228,4 +222,5 @@ module_platform_driver(jz4740_wdt_driver);
 MODULE_AUTHOR("Paul Cercueil <paul@crapouillou.net>");
 MODULE_DESCRIPTION("jz4740 Watchdog Driver");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 MODULE_ALIAS("platform:jz4740-wdt");

@@ -2,9 +2,9 @@
 #include <asm/cache.h>
 
 #include "entry.h"
-#include <asm/native/inst.h>
+#include "paravirt_inst.h"
 
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
 /* read ar.itc in advance, and use it before leaving bank 0 */
 #define ACCOUNT_GET_STAMP				\
 (pUStk) mov.m r20=ar.itc;

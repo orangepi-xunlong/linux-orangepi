@@ -1,5 +1,5 @@
 /*
- * Linux network driver for QLogic BR-series Converged Network Adapter.
+ * Linux network driver for Brocade Converged Network Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -11,33 +11,42 @@
  * General Public License for more details.
  */
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014-2015 QLogic Corporation
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  */
 #ifndef __BFA_DEFS_MFG_COMM_H__
 #define __BFA_DEFS_MFG_COMM_H__
 
 #include "bfa_defs.h"
 
-/* Manufacturing block version */
+/**
+ * Manufacturing block version
+ */
 #define BFA_MFG_VERSION				3
 #define BFA_MFG_VERSION_UNINIT			0xFF
 
-/* Manufacturing block encrypted version */
+/**
+ * Manufacturing block encrypted version
+ */
 #define BFA_MFG_ENC_VER				2
 
-/* Manufacturing block version 1 length */
+/**
+ * Manufacturing block version 1 length
+ */
 #define BFA_MFG_VER1_LEN			128
 
-/* Manufacturing block header length */
+/**
+ * Manufacturing block header length
+ */
 #define BFA_MFG_HDR_LEN				4
 
 #define BFA_MFG_SERIALNUM_SIZE			11
 #define STRSZ(_n)				(((_n) + 4) & ~3)
 
-/* Manufacturing card type */
+/**
+ * Manufacturing card type
+ */
 enum {
 	BFA_MFG_TYPE_CB_MAX  = 825,      /*!< Crossbow card type max	*/
 	BFA_MFG_TYPE_FC8P2   = 825,      /*!< 8G 2port FC card		*/
@@ -59,7 +68,11 @@ enum {
 	BFA_MFG_TYPE_INVALID = 0,	 /*!< Invalid card type		*/
 };
 
-/* Check if Mezz card */
+#pragma pack(1)
+
+/**
+ * Check if Mezz card
+ */
 #define bfa_mfg_is_mezz(type) (( \
 	(type) == BFA_MFG_TYPE_JAYHAWK || \
 	(type) == BFA_MFG_TYPE_WANCHESE || \
@@ -75,7 +88,7 @@ enum {
 	CB_GPIO_FC4P2   = (4),		/*!< 4G 2port FC card		*/
 	CB_GPIO_FC4P1   = (5),		/*!< 4G 1port FC card		*/
 	CB_GPIO_DFLY    = (6),		/*!< 8G 2port FC mezzanine card	*/
-	CB_GPIO_PROTO   = BIT(7)	/*!< 8G 2port FC prototypes	*/
+	CB_GPIO_PROTO   = (1 << 7)	/*!< 8G 2port FC prototypes	*/
 };
 
 #define bfa_mfg_adapter_prop_init_gpio(gpio, card_type, prop)	\
@@ -84,7 +97,7 @@ do {								\
 		(prop) |= BFI_ADAPTER_PROTO;			\
 		(gpio) &= ~CB_GPIO_PROTO;			\
 	}							\
-	switch (gpio) {						\
+	switch ((gpio)) {					\
 	case CB_GPIO_TTV:					\
 		(prop) |= BFI_ADAPTER_TTV;			\
 	case CB_GPIO_DFLY:					\
@@ -114,7 +127,9 @@ do {								\
 	}							\
 } while (0)
 
-/* VPD data length */
+/**
+ * VPD data length
+ */
 #define BFA_MFG_VPD_LEN			512
 #define BFA_MFG_VPD_LEN_INVALID		0
 
@@ -122,7 +137,9 @@ do {								\
 #define BFA_MFG_VPD_PCI_VER_MASK	0x07	/*!< version mask 3 bits */
 #define BFA_MFG_VPD_PCI_VDR_MASK	0xf8	/*!< vendor mask 5 bits */
 
-/* VPD vendor tag */
+/**
+ * VPD vendor tag
+ */
 enum {
 	BFA_MFG_VPD_UNKNOWN	= 0,     /*!< vendor unknown		*/
 	BFA_MFG_VPD_IBM		= 1,     /*!< vendor IBM		*/
@@ -134,7 +151,8 @@ enum {
 	BFA_MFG_VPD_PCI_BRCD	= 0xf8,  /*!< PCI VPD Brocade		*/
 };
 
-/* BFA adapter flash vpd data definition.
+/**
+ * @brief BFA adapter flash vpd data definition.
  *
  * All numerical fields are in big-endian format.
  */
@@ -146,6 +164,8 @@ struct bfa_mfg_vpd {
 	u8	len;		/*!< vpd data length excluding header */
 	u8	rsv;
 	u8		data[BFA_MFG_VPD_LEN];	/*!< vpd data */
-} __packed;
+};
+
+#pragma pack()
 
 #endif /* __BFA_DEFS_MFG_H__ */

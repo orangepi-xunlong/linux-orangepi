@@ -4,7 +4,8 @@
  * This file contains generic high level protocol identifier and PR
  * handlers for TCM fabric modules
  *
- * (c) Copyright 2010-2013 Datera, Inc.
+ * Copyright (c) 2010 Rising Tide Systems, Inc.
+ * Copyright (c) 2010 Linux-iSCSI.org
  *
  * Nicholas A. Bellinger <nab@linux-iscsi.org>
  *
@@ -24,45 +25,134 @@
  *
  ******************************************************************************/
 
-/*
- * See SPC4, section 7.5 "Protocol specific parameters" for details
- * on the formats implemented in this file.
- */
-
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/spinlock.h>
 #include <linux/export.h>
-
-#include <scsi/scsi_proto.h>
+#include <scsi/scsi.h>
+#include <scsi/scsi_cmnd.h>
 
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
+#include <target/target_core_configfs.h>
 
 #include "target_core_internal.h"
 #include "target_core_pr.h"
 
+/*
+ * Handlers for Serial Attached SCSI (SAS)
+ */
+u8 sas_get_fabric_proto_ident(struct se_portal_group *se_tpg)
+{
+	/*
+	 * Return a SAS Serial SCSI Protocol identifier for loopback operations
+	 * This is defined in  section 7.5.1 Table 362 in spc4r17
+	 */
+	return 0x6;
+}
+EXPORT_SYMBOL(sas_get_fabric_proto_ident);
 
-static int sas_get_pr_transport_id(
-	struct se_node_acl *nacl,
+u32 sas_get_pr_transport_id(
+	struct se_portal_group *se_tpg,
+	struct se_node_acl *se_nacl,
+	struct t10_pr_registration *pr_reg,
 	int *format_code,
 	unsigned char *buf)
 {
+	unsigned char *ptr;
 	int ret;
 
-	/* Skip over 'naa. prefix */
-	ret = hex2bin(&buf[4], &nacl->initiatorname[4], 8);
-	if (ret) {
-		pr_debug("%s: invalid hex string\n", __func__);
-		return ret;
-	}
+	/*
+	 * Set PROTOCOL IDENTIFIER to 6h for SAS
+	 */
+	buf[0] = 0x06;
+	/*
+	 * From spc4r17, 7.5.4.7 TransportID for initiator ports using SCSI
+	 * over SAS Serial SCSI Protocol
+	 */
+	ptr = &se_nacl->initiatorname[4]; /* Skip over 'naa. prefix */
 
+	ret = hex2bin(&buf[4], ptr, 8);
+	if (ret < 0)
+		pr_debug("sas transport_id: invalid hex string\n");
+
+	/*
+	 * The SAS Transport ID is a hardcoded 24-byte length
+	 */
 	return 24;
 }
+EXPORT_SYMBOL(sas_get_pr_transport_id);
 
-static int fc_get_pr_transport_id(
+u32 sas_get_pr_transport_id_len(
+	struct se_portal_group *se_tpg,
 	struct se_node_acl *se_nacl,
+	struct t10_pr_registration *pr_reg,
+	int *format_code)
+{
+	*format_code = 0;
+	/*
+	 * From spc4r17, 7.5.4.7 TransportID for initiator ports using SCSI
+	 * over SAS Serial SCSI Protocol
+	 *
+	 * The SAS Transport ID is a hardcoded 24-byte length
+	 */
+	return 24;
+}
+EXPORT_SYMBOL(sas_get_pr_transport_id_len);
+
+/*
+ * Used for handling SCSI fabric dependent TransportIDs in SPC-3 and above
+ * Persistent Reservation SPEC_I_PT=1 and PROUT REGISTER_AND_MOVE operations.
+ */
+char *sas_parse_pr_out_transport_id(
+	struct se_portal_group *se_tpg,
+	const char *buf,
+	u32 *out_tid_len,
+	char **port_nexus_ptr)
+{
+	/*
+	 * Assume the FORMAT CODE 00b from spc4r17, 7.5.4.7 TransportID
+	 * for initiator ports using SCSI over SAS Serial SCSI Protocol
+	 *
+	 * The TransportID for a SAS Initiator Port is of fixed size of
+	 * 24 bytes, and SAS does not contain a I_T nexus identifier,
+	 * so we return the **port_nexus_ptr set to NULL.
+	 */
+	*port_nexus_ptr = NULL;
+	*out_tid_len = 24;
+
+	return (char *)&buf[4];
+}
+EXPORT_SYMBOL(sas_parse_pr_out_transport_id);
+
+/*
+ * Handlers for Fibre Channel Protocol (FCP)
+ */
+u8 fc_get_fabric_proto_ident(struct se_portal_group *se_tpg)
+{
+	return 0x0;	/* 0 = fcp-2 per SPC4 section 7.5.1 */
+}
+EXPORT_SYMBOL(fc_get_fabric_proto_ident);
+
+u32 fc_get_pr_transport_id_len(
+	struct se_portal_group *se_tpg,
+	struct se_node_acl *se_nacl,
+	struct t10_pr_registration *pr_reg,
+	int *format_code)
+{
+	*format_code = 0;
+	/*
+	 * The FC Transport ID is a hardcoded 24-byte length
+	 */
+	return 24;
+}
+EXPORT_SYMBOL(fc_get_pr_transport_id_len);
+
+u32 fc_get_pr_transport_id(
+	struct se_portal_group *se_tpg,
+	struct se_node_acl *se_nacl,
+	struct t10_pr_registration *pr_reg,
 	int *format_code,
 	unsigned char *buf)
 {
@@ -71,20 +161,24 @@ static int fc_get_pr_transport_id(
 	u32 off = 8;
 
 	/*
+	 * PROTOCOL IDENTIFIER is 0h for FCP-2
+	 *
+	 * From spc4r17, 7.5.4.2 TransportID for initiator ports using
+	 * SCSI over Fibre Channel
+	 *
 	 * We convert the ASCII formatted N Port name into a binary
 	 * encoded TransportID.
 	 */
 	ptr = &se_nacl->initiatorname[0];
+
 	for (i = 0; i < 24; ) {
 		if (!strncmp(&ptr[i], ":", 1)) {
 			i++;
 			continue;
 		}
 		ret = hex2bin(&buf[off++], &ptr[i], 1);
-		if (ret < 0) {
-			pr_debug("%s: invalid hex string\n", __func__);
-			return ret;
-		}
+		if (ret < 0)
+			pr_debug("fc transport_id: invalid hex string\n");
 		i += 2;
 	}
 	/*
@@ -92,52 +186,42 @@ static int fc_get_pr_transport_id(
 	 */
 	return 24;
 }
+EXPORT_SYMBOL(fc_get_pr_transport_id);
 
-static int sbp_get_pr_transport_id(
-	struct se_node_acl *nacl,
-	int *format_code,
-	unsigned char *buf)
+char *fc_parse_pr_out_transport_id(
+	struct se_portal_group *se_tpg,
+	const char *buf,
+	u32 *out_tid_len,
+	char **port_nexus_ptr)
 {
-	int ret;
+	/*
+	 * The TransportID for a FC N Port is of fixed size of
+	 * 24 bytes, and FC does not contain a I_T nexus identifier,
+	 * so we return the **port_nexus_ptr set to NULL.
+	 */
+	*port_nexus_ptr = NULL;
+	*out_tid_len = 24;
 
-	ret = hex2bin(&buf[8], nacl->initiatorname, 8);
-	if (ret) {
-		pr_debug("%s: invalid hex string\n", __func__);
-		return ret;
-	}
-
-	return 24;
+	 return (char *)&buf[8];
 }
+EXPORT_SYMBOL(fc_parse_pr_out_transport_id);
 
-static int srp_get_pr_transport_id(
-	struct se_node_acl *nacl,
-	int *format_code,
-	unsigned char *buf)
+/*
+ * Handlers for Internet Small Computer Systems Interface (iSCSI)
+ */
+
+u8 iscsi_get_fabric_proto_ident(struct se_portal_group *se_tpg)
 {
-	const char *p;
-	unsigned len, count, leading_zero_bytes;
-	int rc;
-
-	p = nacl->initiatorname;
-	if (strncasecmp(p, "0x", 2) == 0)
-		p += 2;
-	len = strlen(p);
-	if (len % 2)
-		return -EINVAL;
-
-	count = min(len / 2, 16U);
-	leading_zero_bytes = 16 - count;
-	memset(buf + 8, 0, leading_zero_bytes);
-	rc = hex2bin(buf + 8 + leading_zero_bytes, p, count);
-	if (rc < 0) {
-		pr_debug("hex2bin failed for %s: %d\n", __func__, rc);
-		return rc;
-	}
-
-	return 24;
+	/*
+	 * This value is defined for "Internet SCSI (iSCSI)"
+	 * in spc4r17 section 7.5.1 Table 362
+	 */
+	return 0x5;
 }
+EXPORT_SYMBOL(iscsi_get_fabric_proto_ident);
 
-static int iscsi_get_pr_transport_id(
+u32 iscsi_get_pr_transport_id(
+	struct se_portal_group *se_tpg,
 	struct se_node_acl *se_nacl,
 	struct t10_pr_registration *pr_reg,
 	int *format_code,
@@ -147,6 +231,10 @@ static int iscsi_get_pr_transport_id(
 	u16 len = 0;
 
 	spin_lock_irq(&se_nacl->nacl_sess_lock);
+	/*
+	 * Set PROTOCOL IDENTIFIER to 5h for iSCSI
+	*/
+	buf[0] = 0x05;
 	/*
 	 * From spc4r17 Section 7.5.4.6: TransportID for initiator
 	 * ports using SCSI over iSCSI.
@@ -226,8 +314,10 @@ static int iscsi_get_pr_transport_id(
 
 	return len;
 }
+EXPORT_SYMBOL(iscsi_get_pr_transport_id);
 
-static int iscsi_get_pr_transport_id_len(
+u32 iscsi_get_pr_transport_id_len(
+	struct se_portal_group *se_tpg,
 	struct se_node_acl *se_nacl,
 	struct t10_pr_registration *pr_reg,
 	int *format_code)
@@ -248,7 +338,7 @@ static int iscsi_get_pr_transport_id_len(
 	 * 00b: iSCSI Initiator device TransportID format
 	 */
 	if (pr_reg->isid_present_at_reg) {
-		len += 5; /* For ",i,0x" ASCII separator */
+		len += 5; /* For ",i,0x" ASCII seperator */
 		len += 7; /* For iSCSI Initiator Session ID + Null terminator */
 		*format_code = 1;
 	} else
@@ -270,8 +360,9 @@ static int iscsi_get_pr_transport_id_len(
 
 	return len;
 }
+EXPORT_SYMBOL(iscsi_get_pr_transport_id_len);
 
-static char *iscsi_parse_pr_out_transport_id(
+char *iscsi_parse_pr_out_transport_id(
 	struct se_portal_group *se_tpg,
 	const char *buf,
 	u32 *out_tid_len,
@@ -304,9 +395,9 @@ static char *iscsi_parse_pr_out_transport_id(
 	 * If the caller wants the TransportID Length, we set that value for the
 	 * entire iSCSI Tarnsport ID now.
 	 */
-	if (out_tid_len) {
-		/* The shift works thanks to integer promotion rules */
-		add_len = (buf[2] << 8) | buf[3];
+	 if (out_tid_len != NULL) {
+		add_len = ((buf[2] >> 8) & 0xff);
+		add_len |= (buf[3] & 0xff);
 
 		tid_len = strlen(&buf[4]);
 		tid_len += 4; /* Add four bytes for iSCSI Transport ID header */
@@ -324,20 +415,20 @@ static char *iscsi_parse_pr_out_transport_id(
 			*out_tid_len = (add_len + 4);
 	}
 	/*
-	 * Check for ',i,0x' separator between iSCSI Name and iSCSI Initiator
+	 * Check for ',i,0x' seperator between iSCSI Name and iSCSI Initiator
 	 * Session ID as defined in Table 390 - iSCSI initiator port TransportID
 	 * format.
 	 */
 	if (format_code == 0x40) {
 		p = strstr(&buf[4], ",i,0x");
 		if (!p) {
-			pr_err("Unable to locate \",i,0x\" separator"
+			pr_err("Unable to locate \",i,0x\" seperator"
 				" for Initiator port identifier: %s\n",
 				&buf[4]);
 			return NULL;
 		}
 		*p = '\0'; /* Terminate iSCSI Name */
-		p += 5; /* Skip over ",i,0x" separator */
+		p += 5; /* Skip over ",i,0x" seperator */
 
 		*port_nexus_ptr = p;
 		/*
@@ -358,79 +449,4 @@ static char *iscsi_parse_pr_out_transport_id(
 
 	return (char *)&buf[4];
 }
-
-int target_get_pr_transport_id_len(struct se_node_acl *nacl,
-		struct t10_pr_registration *pr_reg, int *format_code)
-{
-	switch (nacl->se_tpg->proto_id) {
-	case SCSI_PROTOCOL_FCP:
-	case SCSI_PROTOCOL_SBP:
-	case SCSI_PROTOCOL_SRP:
-	case SCSI_PROTOCOL_SAS:
-		break;
-	case SCSI_PROTOCOL_ISCSI:
-		return iscsi_get_pr_transport_id_len(nacl, pr_reg, format_code);
-	default:
-		pr_err("Unknown proto_id: 0x%02x\n", nacl->se_tpg->proto_id);
-		return -EINVAL;
-	}
-
-	/*
-	 * Most transports use a fixed length 24 byte identifier.
-	 */
-	*format_code = 0;
-	return 24;
-}
-
-int target_get_pr_transport_id(struct se_node_acl *nacl,
-		struct t10_pr_registration *pr_reg, int *format_code,
-		unsigned char *buf)
-{
-	switch (nacl->se_tpg->proto_id) {
-	case SCSI_PROTOCOL_SAS:
-		return sas_get_pr_transport_id(nacl, format_code, buf);
-	case SCSI_PROTOCOL_SBP:
-		return sbp_get_pr_transport_id(nacl, format_code, buf);
-	case SCSI_PROTOCOL_SRP:
-		return srp_get_pr_transport_id(nacl, format_code, buf);
-	case SCSI_PROTOCOL_FCP:
-		return fc_get_pr_transport_id(nacl, format_code, buf);
-	case SCSI_PROTOCOL_ISCSI:
-		return iscsi_get_pr_transport_id(nacl, pr_reg, format_code,
-				buf);
-	default:
-		pr_err("Unknown proto_id: 0x%02x\n", nacl->se_tpg->proto_id);
-		return -EINVAL;
-	}
-}
-
-const char *target_parse_pr_out_transport_id(struct se_portal_group *tpg,
-		const char *buf, u32 *out_tid_len, char **port_nexus_ptr)
-{
-	u32 offset;
-
-	switch (tpg->proto_id) {
-	case SCSI_PROTOCOL_SAS:
-		/*
-		 * Assume the FORMAT CODE 00b from spc4r17, 7.5.4.7 TransportID
-		 * for initiator ports using SCSI over SAS Serial SCSI Protocol.
-		 */
-		offset = 4;
-		break;
-	case SCSI_PROTOCOL_SBP:
-	case SCSI_PROTOCOL_SRP:
-	case SCSI_PROTOCOL_FCP:
-		offset = 8;
-		break;
-	case SCSI_PROTOCOL_ISCSI:
-		return iscsi_parse_pr_out_transport_id(tpg, buf, out_tid_len,
-					port_nexus_ptr);
-	default:
-		pr_err("Unknown proto_id: 0x%02x\n", tpg->proto_id);
-		return NULL;
-	}
-
-	*port_nexus_ptr = NULL;
-	*out_tid_len = 24;
-	return buf + offset;
-}
+EXPORT_SYMBOL(iscsi_parse_pr_out_transport_id);

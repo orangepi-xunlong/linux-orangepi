@@ -1,11 +1,12 @@
+
 /******************************************************************************
  *
- * Module Name: exstorob - AML object store support, store to object
+ * Module Name: exstorob - AML Interpreter object store support, store to object
  *
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -100,23 +101,23 @@ acpi_ex_store_buffer_to_buffer(union acpi_operand_object *source_desc,
 
 		/* Clear existing buffer and copy in the new one */
 
-		memset(target_desc->buffer.pointer, 0,
-		       target_desc->buffer.length);
-		memcpy(target_desc->buffer.pointer, buffer, length);
+		ACPI_MEMSET(target_desc->buffer.pointer, 0,
+			    target_desc->buffer.length);
+		ACPI_MEMCPY(target_desc->buffer.pointer, buffer, length);
 
 #ifdef ACPI_OBSOLETE_BEHAVIOR
 		/*
 		 * NOTE: ACPI versions up to 3.0 specified that the buffer must be
-		 * truncated if the string is smaller than the buffer. However, "other"
+		 * truncated if the string is smaller than the buffer.  However, "other"
 		 * implementations of ACPI never did this and thus became the defacto
-		 * standard. ACPI 3.0A changes this behavior such that the buffer
+		 * standard. ACPI 3.0_a changes this behavior such that the buffer
 		 * is no longer truncated.
 		 */
 
 		/*
 		 * OBSOLETE BEHAVIOR:
 		 * If the original source was a string, we must truncate the buffer,
-		 * according to the ACPI spec. Integer-to-Buffer and Buffer-to-Buffer
+		 * according to the ACPI spec.  Integer-to-Buffer and Buffer-to-Buffer
 		 * copy must not truncate the original buffer.
 		 */
 		if (original_src_type == ACPI_TYPE_STRING) {
@@ -129,8 +130,8 @@ acpi_ex_store_buffer_to_buffer(union acpi_operand_object *source_desc,
 	} else {
 		/* Truncate the source, copy only what will fit */
 
-		memcpy(target_desc->buffer.pointer, buffer,
-		       target_desc->buffer.length);
+		ACPI_MEMCPY(target_desc->buffer.pointer, buffer,
+			    target_desc->buffer.length);
 
 		ACPI_DEBUG_PRINT((ACPI_DB_INFO,
 				  "Truncating source buffer from %X to %X\n",
@@ -187,9 +188,9 @@ acpi_ex_store_string_to_string(union acpi_operand_object *source_desc,
 		 * String will fit in existing non-static buffer.
 		 * Clear old string and copy in the new one
 		 */
-		memset(target_desc->string.pointer, 0,
-		       (acpi_size)target_desc->string.length + 1);
-		memcpy(target_desc->string.pointer, buffer, length);
+		ACPI_MEMSET(target_desc->string.pointer, 0,
+			    (acpi_size) target_desc->string.length + 1);
+		ACPI_MEMCPY(target_desc->string.pointer, buffer, length);
 	} else {
 		/*
 		 * Free the current buffer, then allocate a new buffer
@@ -203,15 +204,14 @@ acpi_ex_store_string_to_string(union acpi_operand_object *source_desc,
 			ACPI_FREE(target_desc->string.pointer);
 		}
 
-		target_desc->string.pointer =
-		    ACPI_ALLOCATE_ZEROED((acpi_size)length + 1);
-
+		target_desc->string.pointer = ACPI_ALLOCATE_ZEROED((acpi_size)
+								   length + 1);
 		if (!target_desc->string.pointer) {
 			return_ACPI_STATUS(AE_NO_MEMORY);
 		}
 
 		target_desc->common.flags &= ~AOPOBJ_STATIC_POINTER;
-		memcpy(target_desc->string.pointer, buffer, length);
+		ACPI_MEMCPY(target_desc->string.pointer, buffer, length);
 	}
 
 	/* Set the new target length */

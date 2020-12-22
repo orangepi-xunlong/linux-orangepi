@@ -58,12 +58,34 @@ static void cpuid_smp_cpuid(void *cmd_block)
 		    &cmd->eax, &cmd->ebx, &cmd->ecx, &cmd->edx);
 }
 
+static loff_t cpuid_seek(struct file *file, loff_t offset, int orig)
+{
+	loff_t ret;
+	struct inode *inode = file->f_mapping->host;
+
+	mutex_lock(&inode->i_mutex);
+	switch (orig) {
+	case 0:
+		file->f_pos = offset;
+		ret = file->f_pos;
+		break;
+	case 1:
+		file->f_pos += offset;
+		ret = file->f_pos;
+		break;
+	default:
+		ret = -EINVAL;
+	}
+	mutex_unlock(&inode->i_mutex);
+	return ret;
+}
+
 static ssize_t cpuid_read(struct file *file, char __user *buf,
 			  size_t count, loff_t *ppos)
 {
 	char __user *tmp = buf;
 	struct cpuid_regs cmd;
-	int cpu = iminor(file_inode(file));
+	int cpu = iminor(file->f_path.dentry->d_inode);
 	u64 pos = *ppos;
 	ssize_t bytes = 0;
 	int err = 0;
@@ -94,7 +116,7 @@ static int cpuid_open(struct inode *inode, struct file *file)
 	unsigned int cpu;
 	struct cpuinfo_x86 *c;
 
-	cpu = iminor(file_inode(file));
+	cpu = iminor(file->f_path.dentry->d_inode);
 	if (cpu >= nr_cpu_ids || !cpu_online(cpu))
 		return -ENXIO;	/* No such CPU */
 
@@ -110,18 +132,18 @@ static int cpuid_open(struct inode *inode, struct file *file)
  */
 static const struct file_operations cpuid_fops = {
 	.owner = THIS_MODULE,
-	.llseek = no_seek_end_llseek,
+	.llseek = cpuid_seek,
 	.read = cpuid_read,
 	.open = cpuid_open,
 };
 
-static int cpuid_device_create(int cpu)
+static __cpuinit int cpuid_device_create(int cpu)
 {
 	struct device *dev;
 
 	dev = device_create(cpuid_class, NULL, MKDEV(CPUID_MAJOR, cpu), NULL,
 			    "cpu%d", cpu);
-	return PTR_ERR_OR_ZERO(dev);
+	return IS_ERR(dev) ? PTR_ERR(dev) : 0;
 }
 
 static void cpuid_device_destroy(int cpu)
@@ -129,8 +151,9 @@ static void cpuid_device_destroy(int cpu)
 	device_destroy(cpuid_class, MKDEV(CPUID_MAJOR, cpu));
 }
 
-static int cpuid_class_cpu_callback(struct notifier_block *nfb,
-				    unsigned long action, void *hcpu)
+static int __cpuinit cpuid_class_cpu_callback(struct notifier_block *nfb,
+					      unsigned long action,
+					      void *hcpu)
 {
 	unsigned int cpu = (unsigned long)hcpu;
 	int err = 0;
@@ -148,7 +171,7 @@ static int cpuid_class_cpu_callback(struct notifier_block *nfb,
 	return notifier_from_errno(err);
 }
 
-static struct notifier_block cpuid_class_cpu_notifier =
+static struct notifier_block __refdata cpuid_class_cpu_notifier =
 {
 	.notifier_call = cpuid_class_cpu_callback,
 };
@@ -176,15 +199,12 @@ static int __init cpuid_init(void)
 		goto out_chrdev;
 	}
 	cpuid_class->devnode = cpuid_devnode;
-
-	cpu_notifier_register_begin();
 	for_each_online_cpu(i) {
 		err = cpuid_device_create(i);
 		if (err != 0)
 			goto out_class;
 	}
-	__register_hotcpu_notifier(&cpuid_class_cpu_notifier);
-	cpu_notifier_register_done();
+	register_hotcpu_notifier(&cpuid_class_cpu_notifier);
 
 	err = 0;
 	goto out;
@@ -194,7 +214,6 @@ out_class:
 	for_each_online_cpu(i) {
 		cpuid_device_destroy(i);
 	}
-	cpu_notifier_register_done();
 	class_destroy(cpuid_class);
 out_chrdev:
 	__unregister_chrdev(CPUID_MAJOR, 0, NR_CPUS, "cpu/cpuid");
@@ -206,13 +225,11 @@ static void __exit cpuid_exit(void)
 {
 	int cpu = 0;
 
-	cpu_notifier_register_begin();
 	for_each_online_cpu(cpu)
 		cpuid_device_destroy(cpu);
 	class_destroy(cpuid_class);
 	__unregister_chrdev(CPUID_MAJOR, 0, NR_CPUS, "cpu/cpuid");
-	__unregister_hotcpu_notifier(&cpuid_class_cpu_notifier);
-	cpu_notifier_register_done();
+	unregister_hotcpu_notifier(&cpuid_class_cpu_notifier);
 }
 
 module_init(cpuid_init);

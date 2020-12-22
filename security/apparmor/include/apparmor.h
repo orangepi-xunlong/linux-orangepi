@@ -15,7 +15,6 @@
 #ifndef __APPARMOR_H
 #define __APPARMOR_H
 
-#include <linux/slab.h>
 #include <linux/fs.h>
 
 #include "match.h"
@@ -30,14 +29,14 @@
 #define AA_CLASS_NET		4
 #define AA_CLASS_RLIMITS	5
 #define AA_CLASS_DOMAIN		6
+#define AA_CLASS_MOUNT		7
 
-#define AA_CLASS_LAST		AA_CLASS_DOMAIN
+#define AA_CLASS_LAST		AA_CLASS_MOUNT
 
 /* Control parameters settable through module/boot flags */
 extern enum audit_mode aa_g_audit;
 extern bool aa_g_audit_header;
 extern bool aa_g_debug;
-extern bool aa_g_hash_policy;
 extern bool aa_g_lock_policy;
 extern bool aa_g_logsyscall;
 extern bool aa_g_paranoid_load;
@@ -66,23 +65,9 @@ extern int apparmor_initialized __initdata;
 /* fn's in lib */
 char *aa_split_fqname(char *args, char **ns_name);
 void aa_info_message(const char *str);
-void *__aa_kvmalloc(size_t size, gfp_t flags);
+void *kvmalloc(size_t size);
+void kvfree(void *buffer);
 
-static inline void *kvmalloc(size_t size)
-{
-	return __aa_kvmalloc(size, 0);
-}
-
-static inline void *kvzalloc(size_t size)
-{
-	return __aa_kvmalloc(size, __GFP_ZERO);
-}
-
-/* returns 0 if kref not incremented */
-static inline int kref_get_not0(struct kref *kref)
-{
-	return atomic_inc_not_zero(&kref->refcount);
-}
 
 /**
  * aa_strneq - compare null terminated @str to a non null terminated substring
@@ -113,9 +98,9 @@ static inline unsigned int aa_dfa_null_transition(struct aa_dfa *dfa,
 	return aa_dfa_next(dfa, start, 0);
 }
 
-static inline bool mediated_filesystem(struct dentry *dentry)
+static inline bool mediated_filesystem(struct inode *inode)
 {
-	return !(dentry->d_sb->s_flags & MS_NOUSER);
+	return !(inode->i_sb->s_flags & MS_NOUSER);
 }
 
 #endif /* __APPARMOR_H */

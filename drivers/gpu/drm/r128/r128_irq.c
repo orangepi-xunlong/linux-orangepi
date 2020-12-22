@@ -30,21 +30,22 @@
  *    Eric Anholt <anholt@FreeBSD.org>
  */
 
-#include <drm/drmP.h>
-#include <drm/r128_drm.h>
+#include "drmP.h"
+#include "drm.h"
+#include "r128_drm.h"
 #include "r128_drv.h"
 
-u32 r128_get_vblank_counter(struct drm_device *dev, unsigned int pipe)
+u32 r128_get_vblank_counter(struct drm_device *dev, int crtc)
 {
 	const drm_r128_private_t *dev_priv = dev->dev_private;
 
-	if (pipe != 0)
+	if (crtc != 0)
 		return 0;
 
 	return atomic_read(&dev_priv->vbl_received);
 }
 
-irqreturn_t r128_driver_irq_handler(int irq, void *arg)
+irqreturn_t r128_driver_irq_handler(DRM_IRQ_ARGS)
 {
 	struct drm_device *dev = (struct drm_device *) arg;
 	drm_r128_private_t *dev_priv = (drm_r128_private_t *) dev->dev_private;
@@ -62,12 +63,12 @@ irqreturn_t r128_driver_irq_handler(int irq, void *arg)
 	return IRQ_NONE;
 }
 
-int r128_enable_vblank(struct drm_device *dev, unsigned int pipe)
+int r128_enable_vblank(struct drm_device *dev, int crtc)
 {
 	drm_r128_private_t *dev_priv = dev->dev_private;
 
-	if (pipe != 0) {
-		DRM_ERROR("%s:  bad crtc %u\n", __func__, pipe);
+	if (crtc != 0) {
+		DRM_ERROR("%s:  bad crtc %d\n", __func__, crtc);
 		return -EINVAL;
 	}
 
@@ -75,10 +76,10 @@ int r128_enable_vblank(struct drm_device *dev, unsigned int pipe)
 	return 0;
 }
 
-void r128_disable_vblank(struct drm_device *dev, unsigned int pipe)
+void r128_disable_vblank(struct drm_device *dev, int crtc)
 {
-	if (pipe != 0)
-		DRM_ERROR("%s:  bad crtc %u\n", __func__, pipe);
+	if (crtc != 0)
+		DRM_ERROR("%s:  bad crtc %d\n", __func__, crtc);
 
 	/*
 	 * FIXME: implement proper interrupt disable by using the vblank

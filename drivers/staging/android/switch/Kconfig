@@ -1,0 +1,34 @@
+menuconfig ANDROID_SWITCH
+	tristate "Android Switch class support"
+	help
+	  Say Y here to enable Android switch class support. This allows
+	  monitoring switches by userspace via sysfs and uevent.
+
+config SWITCH_HEADSET
+	tristate "swith headset support"
+	help
+	  Say Y here to enable GPIO based switch support.
+
+config ANDROID_SWITCH_GPIO
+	tristate "Android GPIO Switch support"
+	depends on GENERIC_GPIO && ANDROID_SWITCH
+	help
+	  Say Y here to enable GPIO based switch support.
+
+config SUNXI_SWITCH_GPIO
+	bool "SUNXI GPIO Switch support"
+	depends on ARCH_SUN8IW6
+	help
+	  Say Y here to enable GPIO based switch support.
+
+config ANDROID_SWITCH_GPIO_TS3A225
+	tristate "ts3a225 Switch support"
+	depends on ARCH_SUN8IW6 && SUNXI_SWITCH_GPIO
+	help
+	  Say Y here to enable GPIO based switch support.
+
+config SOC_SWITCH_GPIO
+	tristate "GPIO Switch support"
+	depends on ARCH_SUN8IW6 && SUNXI_SWITCH_GPIO
+	help
+	  Say Y here to enable GPIO based switch support.

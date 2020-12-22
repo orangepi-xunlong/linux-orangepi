@@ -13,8 +13,8 @@
  *
  */
 
-#ifndef __SUNXI_USB_CONFIG_H__
-#define __SUNXI_USB_CONFIG_H__
+#ifndef  __SUNXI_USB_CONFIG_H__
+#define  __SUNXI_USB_CONFIG_H__
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -27,18 +27,17 @@
 #include  "sunxi_usb_typedef.h"
 #include  "sunxi_usb_debug.h"
 #include  "sunxi_usb_bsp.h"
+#include  "sunxi_sys_reg.h"
 
 #include  "sunxi_usb_board.h"
 #include  "sunxi_udc.h"
-#include  <linux/sunxi-gpio.h>
+#include  "sunxi_hcd.h"
+#include  <mach/sys_config.h>
 #include  <linux/gpio.h>
 
-#if defined(CONFIG_USB_SUNXI_HCD0)
-#include "sunxi_hcd.h"
+#if defined (CONFIG_FPGA_V4_PLATFORM) || defined (CONFIG_FPGA_V7_PLATFORM)
+#define   SUNXI_USB_FPGA
 #endif
 
-#if defined(CONFIG_FPGA_V4_PLATFORM) || defined(CONFIG_FPGA_V7_PLATFORM)
-#define SUNXI_USB_FPGA
-#endif
+#endif   //__SUNXI_USB_CONFIG_H__
 
-#endif /* __SUNXI_USB_CONFIG_H__ */

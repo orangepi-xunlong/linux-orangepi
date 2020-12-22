@@ -51,6 +51,8 @@ MODULE_PARM_DESC(data_debug_level,
 		 "Enable data path debug tracing if > 0");
 #endif
 
+static DEFINE_MUTEX(pkey_mutex);
+
 struct ipoib_ah *ipoib_create_ah(struct net_device *dev,
 				 struct ib_pd *pd, struct ib_ah_attr *attr)
 {
@@ -92,9 +94,39 @@ void ipoib_free_ah(struct kref *kref)
 static void ipoib_ud_dma_unmap_rx(struct ipoib_dev_priv *priv,
 				  u64 mapping[IPOIB_UD_RX_SG])
 {
-	ib_dma_unmap_single(priv->ca, mapping[0],
-			    IPOIB_UD_BUF_SIZE(priv->max_ib_mtu),
-			    DMA_FROM_DEVICE);
+	if (ipoib_ud_need_sg(priv->max_ib_mtu)) {
+		ib_dma_unmap_single(priv->ca, mapping[0], IPOIB_UD_HEAD_SIZE,
+				    DMA_FROM_DEVICE);
+		ib_dma_unmap_page(priv->ca, mapping[1], PAGE_SIZE,
+				  DMA_FROM_DEVICE);
+	} else
+		ib_dma_unmap_single(priv->ca, mapping[0],
+				    IPOIB_UD_BUF_SIZE(priv->max_ib_mtu),
+				    DMA_FROM_DEVICE);
+}
+
+static void ipoib_ud_skb_put_frags(struct ipoib_dev_priv *priv,
+				   struct sk_buff *skb,
+				   unsigned int length)
+{
+	if (ipoib_ud_need_sg(priv->max_ib_mtu)) {
+		skb_frag_t *frag = &skb_shinfo(skb)->frags[0];
+		unsigned int size;
+		/*
+		 * There is only two buffers needed for max_payload = 4K,
+		 * first buf size is IPOIB_UD_HEAD_SIZE
+		 */
+		skb->tail += IPOIB_UD_HEAD_SIZE;
+		skb->len  += length;
+
+		size = length - IPOIB_UD_HEAD_SIZE;
+
+		skb_frag_size_set(frag, size);
+		skb->data_len += size;
+		skb->truesize += size;
+	} else
+		skb_put(skb, length);
+
 }
 
 static int ipoib_ib_post_receive(struct net_device *dev, int id)
@@ -126,17 +158,21 @@ static struct sk_buff *ipoib_alloc_rx_skb(struct net_device *dev, int id)
 	int buf_size;
 	u64 *mapping;
 
-	buf_size = IPOIB_UD_BUF_SIZE(priv->max_ib_mtu);
+	if (ipoib_ud_need_sg(priv->max_ib_mtu))
+		buf_size = IPOIB_UD_HEAD_SIZE;
+	else
+		buf_size = IPOIB_UD_BUF_SIZE(priv->max_ib_mtu);
 
-	skb = dev_alloc_skb(buf_size + IPOIB_HARD_LEN);
+	skb = dev_alloc_skb(buf_size + 4);
 	if (unlikely(!skb))
 		return NULL;
 
 	/*
-	 * the IP header will be at IPOIP_HARD_LEN + IB_GRH_BYTES, that is
-	 * 64 bytes aligned
+	 * IB will leave a 40 byte gap for a GRH and IPoIB adds a 4 byte
+	 * header.  So we need 4 more bytes to get to 48 and align the
+	 * IP header to a multiple of 16.
 	 */
-	skb_reserve(skb, sizeof(struct ipoib_pseudo_header));
+	skb_reserve(skb, 4);
 
 	mapping = priv->rx_ring[id].mapping;
 	mapping[0] = ib_dma_map_single(priv->ca, skb->data, buf_size,
@@ -144,8 +180,23 @@ static struct sk_buff *ipoib_alloc_rx_skb(struct net_device *dev, int id)
 	if (unlikely(ib_dma_mapping_error(priv->ca, mapping[0])))
 		goto error;
 
+	if (ipoib_ud_need_sg(priv->max_ib_mtu)) {
+		struct page *page = alloc_page(GFP_ATOMIC);
+		if (!page)
+			goto partial_error;
+		skb_fill_page_desc(skb, 0, page, 0, PAGE_SIZE);
+		mapping[1] =
+			ib_dma_map_page(priv->ca, page,
+					0, PAGE_SIZE, DMA_FROM_DEVICE);
+		if (unlikely(ib_dma_mapping_error(priv->ca, mapping[1])))
+			goto partial_error;
+	}
+
 	priv->rx_ring[id].skb = skb;
 	return skb;
+
+partial_error:
+	ib_dma_unmap_single(priv->ca, mapping[0], buf_size, DMA_FROM_DEVICE);
 error:
 	dev_kfree_skb_any(skb);
 	return NULL;
@@ -177,7 +228,6 @@ static void ipoib_ib_handle_rx_wc(struct net_device *dev, struct ib_wc *wc)
 	struct sk_buff *skb;
 	u64 mapping[IPOIB_UD_RX_SG];
 	union ib_gid *dgid;
-	union ib_gid *sgid;
 
 	ipoib_dbg_data(priv, "recv completion: id %d, status: %d\n",
 		       wr_id, wc->status);
@@ -201,6 +251,13 @@ static void ipoib_ib_handle_rx_wc(struct net_device *dev, struct ib_wc *wc)
 		return;
 	}
 
+	/*
+	 * Drop packets that this interface sent, ie multicast packets
+	 * that the HCA has replicated.
+	 */
+	if (wc->slid == priv->local_lid && wc->src_qp == priv->qp->qp_num)
+		goto repost;
+
 	memcpy(mapping, priv->rx_ring[wr_id].mapping,
 	       IPOIB_UD_RX_SG * sizeof *mapping);
 
@@ -217,8 +274,7 @@ static void ipoib_ib_handle_rx_wc(struct net_device *dev, struct ib_wc *wc)
 		       wc->byte_len, wc->slid);
 
 	ipoib_ud_dma_unmap_rx(priv, mapping);
-
-	skb_put(skb, wc->byte_len);
+	ipoib_ud_skb_put_frags(priv, skb, wc->byte_len);
 
 	/* First byte of dgid signals multicast when 0xff */
 	dgid = &((struct ib_grh *)skb->data)->dgid;
@@ -230,29 +286,11 @@ static void ipoib_ib_handle_rx_wc(struct net_device *dev, struct ib_wc *wc)
 	else
 		skb->pkt_type = PACKET_MULTICAST;
 
-	sgid = &((struct ib_grh *)skb->data)->sgid;
-
-	/*
-	 * Drop packets that this interface sent, ie multicast packets
-	 * that the HCA has replicated.
-	 */
-	if (wc->slid == priv->local_lid && wc->src_qp == priv->qp->qp_num) {
-		int need_repost = 1;
-
-		if ((wc->wc_flags & IB_WC_GRH) &&
-		    sgid->global.interface_id != priv->local_gid.global.interface_id)
-			need_repost = 0;
-
-		if (need_repost) {
-			dev_kfree_skb_any(skb);
-			goto repost;
-		}
-	}
-
 	skb_pull(skb, IB_GRH_BYTES);
 
 	skb->protocol = ((struct ipoib_header *) skb->data)->proto;
-	skb_add_pseudo_hdr(skb);
+	skb_reset_mac_header(skb);
+	skb_pull(skb, IPOIB_ENCAP_LEN);
 
 	++dev->stats.rx_packets;
 	dev->stats.rx_bytes += skb->len;
@@ -270,7 +308,8 @@ repost:
 			   "for buf %d\n", wr_id);
 }
 
-int ipoib_dma_map_tx(struct ib_device *ca, struct ipoib_tx_buf *tx_req)
+static int ipoib_dma_map_tx(struct ib_device *ca,
+			    struct ipoib_tx_buf *tx_req)
 {
 	struct sk_buff *skb = tx_req->skb;
 	u64 *mapping = tx_req->mapping;
@@ -311,8 +350,8 @@ partial_error:
 	return -EIO;
 }
 
-void ipoib_dma_unmap_tx(struct ipoib_dev_priv *priv,
-			struct ipoib_tx_buf *tx_req)
+static void ipoib_dma_unmap_tx(struct ib_device *ca,
+			       struct ipoib_tx_buf *tx_req)
 {
 	struct sk_buff *skb = tx_req->skb;
 	u64 *mapping = tx_req->mapping;
@@ -320,8 +359,7 @@ void ipoib_dma_unmap_tx(struct ipoib_dev_priv *priv,
 	int off;
 
 	if (skb_headlen(skb)) {
-		ib_dma_unmap_single(priv->ca, mapping[0], skb_headlen(skb),
-				    DMA_TO_DEVICE);
+		ib_dma_unmap_single(ca, mapping[0], skb_headlen(skb), DMA_TO_DEVICE);
 		off = 1;
 	} else
 		off = 0;
@@ -329,54 +367,9 @@ void ipoib_dma_unmap_tx(struct ipoib_dev_priv *priv,
 	for (i = 0; i < skb_shinfo(skb)->nr_frags; ++i) {
 		const skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
 
-		ib_dma_unmap_page(priv->ca, mapping[i + off],
-				  skb_frag_size(frag), DMA_TO_DEVICE);
+		ib_dma_unmap_page(ca, mapping[i + off], skb_frag_size(frag),
+				  DMA_TO_DEVICE);
 	}
-}
-
-/*
- * As the result of a completion error the QP Can be transferred to SQE states.
- * The function checks if the (send)QP is in SQE state and
- * moves it back to RTS state, that in order to have it functional again.
- */
-static void ipoib_qp_state_validate_work(struct work_struct *work)
-{
-	struct ipoib_qp_state_validate *qp_work =
-		container_of(work, struct ipoib_qp_state_validate, work);
-
-	struct ipoib_dev_priv *priv = qp_work->priv;
-	struct ib_qp_attr qp_attr;
-	struct ib_qp_init_attr query_init_attr;
-	int ret;
-
-	ret = ib_query_qp(priv->qp, &qp_attr, IB_QP_STATE, &query_init_attr);
-	if (ret) {
-		ipoib_warn(priv, "%s: Failed to query QP ret: %d\n",
-			   __func__, ret);
-		goto free_res;
-	}
-	pr_info("%s: QP: 0x%x is in state: %d\n",
-		__func__, priv->qp->qp_num, qp_attr.qp_state);
-
-	/* currently support only in SQE->RTS transition*/
-	if (qp_attr.qp_state == IB_QPS_SQE) {
-		qp_attr.qp_state = IB_QPS_RTS;
-
-		ret = ib_modify_qp(priv->qp, &qp_attr, IB_QP_STATE);
-		if (ret) {
-			pr_warn("failed(%d) modify QP:0x%x SQE->RTS\n",
-				ret, priv->qp->qp_num);
-			goto free_res;
-		}
-		pr_info("%s: QP: 0x%x moved from IB_QPS_SQE to IB_QPS_RTS\n",
-			__func__, priv->qp->qp_num);
-	} else {
-		pr_warn("QP (%d) will stay in state: %d\n",
-			priv->qp->qp_num, qp_attr.qp_state);
-	}
-
-free_res:
-	kfree(qp_work);
 }
 
 static void ipoib_ib_handle_tx_wc(struct net_device *dev, struct ib_wc *wc)
@@ -396,7 +389,7 @@ static void ipoib_ib_handle_tx_wc(struct net_device *dev, struct ib_wc *wc)
 
 	tx_req = &priv->tx_ring[wr_id];
 
-	ipoib_dma_unmap_tx(priv, tx_req);
+	ipoib_dma_unmap_tx(priv->ca, tx_req);
 
 	++dev->stats.tx_packets;
 	dev->stats.tx_bytes += tx_req->skb->len;
@@ -410,22 +403,10 @@ static void ipoib_ib_handle_tx_wc(struct net_device *dev, struct ib_wc *wc)
 		netif_wake_queue(dev);
 
 	if (wc->status != IB_WC_SUCCESS &&
-	    wc->status != IB_WC_WR_FLUSH_ERR) {
-		struct ipoib_qp_state_validate *qp_work;
+	    wc->status != IB_WC_WR_FLUSH_ERR)
 		ipoib_warn(priv, "failed send event "
 			   "(status=%d, wrid=%d vend_err %x)\n",
 			   wc->status, wr_id, wc->vendor_err);
-		qp_work = kzalloc(sizeof(*qp_work), GFP_ATOMIC);
-		if (!qp_work) {
-			ipoib_warn(priv, "%s Failed alloc ipoib_qp_state_validate for qp: 0x%x\n",
-				   __func__, priv->qp->qp_num);
-			return;
-		}
-
-		INIT_WORK(&qp_work->work, ipoib_qp_state_validate_work);
-		qp_work->priv = priv;
-		queue_work(priv->wq, &qp_work->work);
-	}
 }
 
 static int poll_tx(struct ipoib_dev_priv *priv)
@@ -521,23 +502,37 @@ static inline int post_send(struct ipoib_dev_priv *priv,
 			    void *head, int hlen)
 {
 	struct ib_send_wr *bad_wr;
+	int i, off;
 	struct sk_buff *skb = tx_req->skb;
+	skb_frag_t *frags = skb_shinfo(skb)->frags;
+	int nr_frags = skb_shinfo(skb)->nr_frags;
+	u64 *mapping = tx_req->mapping;
 
-	ipoib_build_sge(priv, tx_req);
+	if (skb_headlen(skb)) {
+		priv->tx_sge[0].addr         = mapping[0];
+		priv->tx_sge[0].length       = skb_headlen(skb);
+		off = 1;
+	} else
+		off = 0;
 
-	priv->tx_wr.wr.wr_id	= wr_id;
-	priv->tx_wr.remote_qpn	= qpn;
-	priv->tx_wr.ah		= address;
+	for (i = 0; i < nr_frags; ++i) {
+		priv->tx_sge[i + off].addr = mapping[i + off];
+		priv->tx_sge[i + off].length = skb_frag_size(&frags[i]);
+	}
+	priv->tx_wr.num_sge	     = nr_frags + off;
+	priv->tx_wr.wr_id 	     = wr_id;
+	priv->tx_wr.wr.ud.remote_qpn = qpn;
+	priv->tx_wr.wr.ud.ah 	     = address;
 
 	if (head) {
-		priv->tx_wr.mss		= skb_shinfo(skb)->gso_size;
-		priv->tx_wr.header	= head;
-		priv->tx_wr.hlen	= hlen;
-		priv->tx_wr.wr.opcode	= IB_WR_LSO;
+		priv->tx_wr.wr.ud.mss	 = skb_shinfo(skb)->gso_size;
+		priv->tx_wr.wr.ud.header = head;
+		priv->tx_wr.wr.ud.hlen	 = hlen;
+		priv->tx_wr.opcode	 = IB_WR_LSO;
 	} else
-		priv->tx_wr.wr.opcode	= IB_WR_SEND;
+		priv->tx_wr.opcode	 = IB_WR_SEND;
 
-	return ib_post_send(priv->qp, &priv->tx_wr.wr, &bad_wr);
+	return ib_post_send(priv->qp, &priv->tx_wr, &bad_wr);
 }
 
 void ipoib_send(struct net_device *dev, struct sk_buff *skb,
@@ -547,7 +542,6 @@ void ipoib_send(struct net_device *dev, struct sk_buff *skb,
 	struct ipoib_tx_buf *tx_req;
 	int hlen, rc;
 	void *phead;
-	unsigned usable_sge = priv->max_send_sge - !!skb_headlen(skb);
 
 	if (skb_is_gso(skb)) {
 		hlen = skb_transport_offset(skb) + tcp_hdrlen(skb);
@@ -571,23 +565,6 @@ void ipoib_send(struct net_device *dev, struct sk_buff *skb,
 		phead = NULL;
 		hlen  = 0;
 	}
-	if (skb_shinfo(skb)->nr_frags > usable_sge) {
-		if (skb_linearize(skb) < 0) {
-			ipoib_warn(priv, "skb could not be linearized\n");
-			++dev->stats.tx_dropped;
-			++dev->stats.tx_errors;
-			dev_kfree_skb_any(skb);
-			return;
-		}
-		/* Does skb_linearize return ok without reducing nr_frags? */
-		if (skb_shinfo(skb)->nr_frags > usable_sge) {
-			ipoib_warn(priv, "too many frags after skb linearize\n");
-			++dev->stats.tx_dropped;
-			++dev->stats.tx_errors;
-			dev_kfree_skb_any(skb);
-			return;
-		}
-	}
 
 	ipoib_dbg_data(priv, "sending packet, length=%d address=%p qpn=0x%06x\n",
 		       skb->len, address, qpn);
@@ -608,9 +585,9 @@ void ipoib_send(struct net_device *dev, struct sk_buff *skb,
 	}
 
 	if (skb->ip_summed == CHECKSUM_PARTIAL)
-		priv->tx_wr.wr.send_flags |= IB_SEND_IP_CSUM;
+		priv->tx_wr.send_flags |= IB_SEND_IP_CSUM;
 	else
-		priv->tx_wr.wr.send_flags &= ~IB_SEND_IP_CSUM;
+		priv->tx_wr.send_flags &= ~IB_SEND_IP_CSUM;
 
 	if (++priv->tx_outstanding == ipoib_sendq_size) {
 		ipoib_dbg(priv, "TX ring full, stopping kernel net queue\n");
@@ -619,24 +596,23 @@ void ipoib_send(struct net_device *dev, struct sk_buff *skb,
 		netif_stop_queue(dev);
 	}
 
-	skb_orphan(skb);
-	skb_dst_drop(skb);
-
 	rc = post_send(priv, priv->tx_head & (ipoib_sendq_size - 1),
 		       address->ah, qpn, tx_req, phead, hlen);
 	if (unlikely(rc)) {
 		ipoib_warn(priv, "post_send failed, error %d\n", rc);
 		++dev->stats.tx_errors;
 		--priv->tx_outstanding;
-		ipoib_dma_unmap_tx(priv, tx_req);
+		ipoib_dma_unmap_tx(priv->ca, tx_req);
 		dev_kfree_skb_any(skb);
 		if (netif_queue_stopped(dev))
 			netif_wake_queue(dev);
 	} else {
-		netif_trans_update(dev);
+		dev->trans_start = jiffies;
 
 		address->last_send = priv->tx_head;
 		++priv->tx_head;
+		skb_orphan(skb);
+
 	}
 
 	if (unlikely(priv->tx_outstanding > MAX_SEND_CQE))
@@ -674,25 +650,8 @@ void ipoib_reap_ah(struct work_struct *work)
 	__ipoib_reap_ah(dev);
 
 	if (!test_bit(IPOIB_STOP_REAPER, &priv->flags))
-		queue_delayed_work(priv->wq, &priv->ah_reap_task,
+		queue_delayed_work(ipoib_workqueue, &priv->ah_reap_task,
 				   round_jiffies_relative(HZ));
-}
-
-static void ipoib_flush_ah(struct net_device *dev)
-{
-	struct ipoib_dev_priv *priv = netdev_priv(dev);
-
-	cancel_delayed_work(&priv->ah_reap_task);
-	flush_workqueue(priv->wq);
-	ipoib_reap_ah(&priv->ah_reap_task.work);
-}
-
-static void ipoib_stop_ah(struct net_device *dev)
-{
-	struct ipoib_dev_priv *priv = netdev_priv(dev);
-
-	set_bit(IPOIB_STOP_REAPER, &priv->flags);
-	ipoib_flush_ah(dev);
 }
 
 static void ipoib_ib_tx_timer_func(unsigned long ctx)
@@ -705,13 +664,12 @@ int ipoib_ib_dev_open(struct net_device *dev)
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	int ret;
 
-	ipoib_pkey_dev_check_presence(dev);
-
-	if (!test_bit(IPOIB_PKEY_ASSIGNED, &priv->flags)) {
-		ipoib_warn(priv, "P_Key 0x%04x is %s\n", priv->pkey,
-			   (!(priv->pkey & 0x7fff) ? "Invalid" : "not found"));
+	if (ib_find_pkey(priv->ca, priv->port, priv->pkey, &priv->pkey_index)) {
+		ipoib_warn(priv, "P_Key 0x%04x not found\n", priv->pkey);
+		clear_bit(IPOIB_PKEY_ASSIGNED, &priv->flags);
 		return -1;
 	}
+	set_bit(IPOIB_PKEY_ASSIGNED, &priv->flags);
 
 	ret = ipoib_init_qp(dev);
 	if (ret) {
@@ -722,37 +680,33 @@ int ipoib_ib_dev_open(struct net_device *dev)
 	ret = ipoib_ib_post_receives(dev);
 	if (ret) {
 		ipoib_warn(priv, "ipoib_ib_post_receives returned %d\n", ret);
-		goto dev_stop;
+		ipoib_ib_dev_stop(dev, 1);
+		return -1;
 	}
 
 	ret = ipoib_cm_dev_open(dev);
 	if (ret) {
 		ipoib_warn(priv, "ipoib_cm_dev_open returned %d\n", ret);
-		goto dev_stop;
+		ipoib_ib_dev_stop(dev, 1);
+		return -1;
 	}
 
 	clear_bit(IPOIB_STOP_REAPER, &priv->flags);
-	queue_delayed_work(priv->wq, &priv->ah_reap_task,
+	queue_delayed_work(ipoib_workqueue, &priv->ah_reap_task,
 			   round_jiffies_relative(HZ));
 
 	if (!test_and_set_bit(IPOIB_FLAG_INITIALIZED, &priv->flags))
 		napi_enable(&priv->napi);
 
 	return 0;
-dev_stop:
-	if (!test_and_set_bit(IPOIB_FLAG_INITIALIZED, &priv->flags))
-		napi_enable(&priv->napi);
-	ipoib_ib_dev_stop(dev);
-	return -1;
 }
 
-void ipoib_pkey_dev_check_presence(struct net_device *dev)
+static void ipoib_pkey_dev_check_presence(struct net_device *dev)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
+	u16 pkey_index = 0;
 
-	if (!(priv->pkey & 0x7fff) ||
-	    ib_find_pkey(priv->ca, priv->port, priv->pkey,
-			 &priv->pkey_index))
+	if (ib_find_pkey(priv->ca, priv->port, priv->pkey, &pkey_index))
 		clear_bit(IPOIB_PKEY_ASSIGNED, &priv->flags);
 	else
 		set_bit(IPOIB_PKEY_ASSIGNED, &priv->flags);
@@ -774,7 +728,7 @@ int ipoib_ib_dev_up(struct net_device *dev)
 	return ipoib_mcast_start_thread(dev);
 }
 
-int ipoib_ib_dev_down(struct net_device *dev)
+int ipoib_ib_dev_down(struct net_device *dev, int flush)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 
@@ -783,7 +737,17 @@ int ipoib_ib_dev_down(struct net_device *dev)
 	clear_bit(IPOIB_FLAG_OPER_UP, &priv->flags);
 	netif_carrier_off(dev);
 
-	ipoib_mcast_stop_thread(dev);
+	/* Shutdown the P_Key thread if still active */
+	if (!test_bit(IPOIB_PKEY_ASSIGNED, &priv->flags)) {
+		mutex_lock(&pkey_mutex);
+		set_bit(IPOIB_PKEY_STOP, &priv->flags);
+		cancel_delayed_work(&priv->pkey_poll_task);
+		mutex_unlock(&pkey_mutex);
+		if (flush)
+			flush_workqueue(ipoib_workqueue);
+	}
+
+	ipoib_mcast_stop_thread(dev, flush);
 	ipoib_mcast_dev_flush(dev);
 
 	ipoib_flush_paths(dev);
@@ -843,7 +807,7 @@ void ipoib_drain_cq(struct net_device *dev)
 	local_bh_enable();
 }
 
-int ipoib_ib_dev_stop(struct net_device *dev)
+int ipoib_ib_dev_stop(struct net_device *dev, int flush)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	struct ib_qp_attr qp_attr;
@@ -879,7 +843,7 @@ int ipoib_ib_dev_stop(struct net_device *dev)
 			while ((int) priv->tx_tail - (int) priv->tx_head < 0) {
 				tx_req = &priv->tx_ring[priv->tx_tail &
 							(ipoib_sendq_size - 1)];
-				ipoib_dma_unmap_tx(priv, tx_req);
+				ipoib_dma_unmap_tx(priv->ca, tx_req);
 				dev_kfree_skb_any(tx_req->skb);
 				++priv->tx_tail;
 				--priv->tx_outstanding;
@@ -913,7 +877,24 @@ timeout:
 	if (ib_modify_qp(priv->qp, &qp_attr, IB_QP_STATE))
 		ipoib_warn(priv, "Failed to modify QP to RESET state\n");
 
-	ipoib_flush_ah(dev);
+	/* Wait for all AHs to be reaped */
+	set_bit(IPOIB_STOP_REAPER, &priv->flags);
+	cancel_delayed_work(&priv->ah_reap_task);
+	if (flush)
+		flush_workqueue(ipoib_workqueue);
+
+	begin = jiffies;
+
+	while (!list_empty(&priv->dead_ahs)) {
+		__ipoib_reap_ah(dev);
+
+		if (time_after(jiffies, begin + HZ)) {
+			ipoib_warn(priv, "timing out; will leak address handles\n");
+			break;
+		}
+
+		msleep(1);
+	}
 
 	ib_req_notify_cq(priv->recv_cq, IB_CQ_NEXT_COMP);
 
@@ -946,245 +927,63 @@ int ipoib_ib_dev_init(struct net_device *dev, struct ib_device *ca, int port)
 	return 0;
 }
 
-/*
- * Takes whatever value which is in pkey index 0 and updates priv->pkey
- * returns 0 if the pkey value was changed.
- */
-static inline int update_parent_pkey(struct ipoib_dev_priv *priv)
-{
-	int result;
-	u16 prev_pkey;
-
-	prev_pkey = priv->pkey;
-	result = ib_query_pkey(priv->ca, priv->port, 0, &priv->pkey);
-	if (result) {
-		ipoib_warn(priv, "ib_query_pkey port %d failed (ret = %d)\n",
-			   priv->port, result);
-		return result;
-	}
-
-	priv->pkey |= 0x8000;
-
-	if (prev_pkey != priv->pkey) {
-		ipoib_dbg(priv, "pkey changed from 0x%x to 0x%x\n",
-			  prev_pkey, priv->pkey);
-		/*
-		 * Update the pkey in the broadcast address, while making sure to set
-		 * the full membership bit, so that we join the right broadcast group.
-		 */
-		priv->dev->broadcast[8] = priv->pkey >> 8;
-		priv->dev->broadcast[9] = priv->pkey & 0xff;
-		return 0;
-	}
-
-	return 1;
-}
-/*
- * returns 0 if pkey value was found in a different slot.
- */
-static inline int update_child_pkey(struct ipoib_dev_priv *priv)
-{
-	u16 old_index = priv->pkey_index;
-
-	priv->pkey_index = 0;
-	ipoib_pkey_dev_check_presence(priv->dev);
-
-	if (test_bit(IPOIB_PKEY_ASSIGNED, &priv->flags) &&
-	    (old_index == priv->pkey_index))
-		return 1;
-	return 0;
-}
-
-/*
- * returns true if the device address of the ipoib interface has changed and the
- * new address is a valid one (i.e in the gid table), return false otherwise.
- */
-static bool ipoib_dev_addr_changed_valid(struct ipoib_dev_priv *priv)
-{
-	union ib_gid search_gid;
-	union ib_gid gid0;
-	union ib_gid *netdev_gid;
-	int err;
-	u16 index;
-	u8 port;
-	bool ret = false;
-
-	netdev_gid = (union ib_gid *)(priv->dev->dev_addr + 4);
-	if (ib_query_gid(priv->ca, priv->port, 0, &gid0, NULL))
-		return false;
-
-	netif_addr_lock_bh(priv->dev);
-
-	/* The subnet prefix may have changed, update it now so we won't have
-	 * to do it later
-	 */
-	priv->local_gid.global.subnet_prefix = gid0.global.subnet_prefix;
-	netdev_gid->global.subnet_prefix = gid0.global.subnet_prefix;
-	search_gid.global.subnet_prefix = gid0.global.subnet_prefix;
-
-	search_gid.global.interface_id = priv->local_gid.global.interface_id;
-
-	netif_addr_unlock_bh(priv->dev);
-
-	err = ib_find_gid(priv->ca, &search_gid, IB_GID_TYPE_IB,
-			  priv->dev, &port, &index);
-
-	netif_addr_lock_bh(priv->dev);
-
-	if (search_gid.global.interface_id !=
-	    priv->local_gid.global.interface_id)
-		/* There was a change while we were looking up the gid, bail
-		 * here and let the next work sort this out
-		 */
-		goto out;
-
-	/* The next section of code needs some background:
-	 * Per IB spec the port GUID can't change if the HCA is powered on.
-	 * port GUID is the basis for GID at index 0 which is the basis for
-	 * the default device address of a ipoib interface.
-	 *
-	 * so it seems the flow should be:
-	 * if user_changed_dev_addr && gid in gid tbl
-	 *	set bit dev_addr_set
-	 *	return true
-	 * else
-	 *	return false
-	 *
-	 * The issue is that there are devices that don't follow the spec,
-	 * they change the port GUID when the HCA is powered, so in order
-	 * not to break userspace applications, We need to check if the
-	 * user wanted to control the device address and we assume that
-	 * if he sets the device address back to be based on GID index 0,
-	 * he no longer wishs to control it.
-	 *
-	 * If the user doesn't control the the device address,
-	 * IPOIB_FLAG_DEV_ADDR_SET is set and ib_find_gid failed it means
-	 * the port GUID has changed and GID at index 0 has changed
-	 * so we need to change priv->local_gid and priv->dev->dev_addr
-	 * to reflect the new GID.
-	 */
-	if (!test_bit(IPOIB_FLAG_DEV_ADDR_SET, &priv->flags)) {
-		if (!err && port == priv->port) {
-			set_bit(IPOIB_FLAG_DEV_ADDR_SET, &priv->flags);
-			if (index == 0)
-				clear_bit(IPOIB_FLAG_DEV_ADDR_CTRL,
-					  &priv->flags);
-			else
-				set_bit(IPOIB_FLAG_DEV_ADDR_CTRL, &priv->flags);
-			ret = true;
-		} else {
-			ret = false;
-		}
-	} else {
-		if (!err && port == priv->port) {
-			ret = true;
-		} else {
-			if (!test_bit(IPOIB_FLAG_DEV_ADDR_CTRL, &priv->flags)) {
-				memcpy(&priv->local_gid, &gid0,
-				       sizeof(priv->local_gid));
-				memcpy(priv->dev->dev_addr + 4, &gid0,
-				       sizeof(priv->local_gid));
-				ret = true;
-			}
-		}
-	}
-
-out:
-	netif_addr_unlock_bh(priv->dev);
-
-	return ret;
-}
-
 static void __ipoib_ib_dev_flush(struct ipoib_dev_priv *priv,
-				enum ipoib_flush_level level,
-				int nesting)
+				enum ipoib_flush_level level)
 {
 	struct ipoib_dev_priv *cpriv;
 	struct net_device *dev = priv->dev;
-	int result;
+	u16 new_index;
 
-	down_read_nested(&priv->vlan_rwsem, nesting);
+	mutex_lock(&priv->vlan_mutex);
 
 	/*
 	 * Flush any child interfaces too -- they might be up even if
 	 * the parent is down.
 	 */
 	list_for_each_entry(cpriv, &priv->child_intfs, list)
-		__ipoib_ib_dev_flush(cpriv, level, nesting + 1);
+		__ipoib_ib_dev_flush(cpriv, level);
 
-	up_read(&priv->vlan_rwsem);
+	mutex_unlock(&priv->vlan_mutex);
 
-	if (!test_bit(IPOIB_FLAG_INITIALIZED, &priv->flags) &&
-	    level != IPOIB_FLUSH_HEAVY) {
-		/* Make sure the dev_addr is set even if not flushing */
-		if (level == IPOIB_FLUSH_LIGHT)
-			ipoib_dev_addr_changed_valid(priv);
+	if (!test_bit(IPOIB_FLAG_INITIALIZED, &priv->flags)) {
 		ipoib_dbg(priv, "Not flushing - IPOIB_FLAG_INITIALIZED not set.\n");
 		return;
 	}
 
 	if (!test_bit(IPOIB_FLAG_ADMIN_UP, &priv->flags)) {
-		/* interface is down. update pkey and leave. */
-		if (level == IPOIB_FLUSH_HEAVY) {
-			if (!test_bit(IPOIB_FLAG_SUBINTERFACE, &priv->flags))
-				update_parent_pkey(priv);
-			else
-				update_child_pkey(priv);
-		} else if (level == IPOIB_FLUSH_LIGHT)
-			ipoib_dev_addr_changed_valid(priv);
 		ipoib_dbg(priv, "Not flushing - IPOIB_FLAG_ADMIN_UP not set.\n");
 		return;
 	}
 
 	if (level == IPOIB_FLUSH_HEAVY) {
-		/* child devices chase their origin pkey value, while non-child
-		 * (parent) devices should always takes what present in pkey index 0
-		 */
-		if (test_bit(IPOIB_FLAG_SUBINTERFACE, &priv->flags)) {
-			result = update_child_pkey(priv);
-			if (result) {
-				/* restart QP only if P_Key index is changed */
-				ipoib_dbg(priv, "Not flushing - P_Key index not changed.\n");
+		if (ib_find_pkey(priv->ca, priv->port, priv->pkey, &new_index)) {
+			clear_bit(IPOIB_PKEY_ASSIGNED, &priv->flags);
+			ipoib_ib_dev_down(dev, 0);
+			ipoib_ib_dev_stop(dev, 0);
+			if (ipoib_pkey_dev_delay_open(dev))
 				return;
-			}
-
-		} else {
-			result = update_parent_pkey(priv);
-			/* restart QP only if P_Key value changed */
-			if (result) {
-				ipoib_dbg(priv, "Not flushing - P_Key value not changed.\n");
-				return;
-			}
 		}
+
+		/* restart QP only if P_Key index is changed */
+		if (test_and_set_bit(IPOIB_PKEY_ASSIGNED, &priv->flags) &&
+		    new_index == priv->pkey_index) {
+			ipoib_dbg(priv, "Not flushing - P_Key index not changed.\n");
+			return;
+		}
+		priv->pkey_index = new_index;
 	}
 
 	if (level == IPOIB_FLUSH_LIGHT) {
-		int oper_up;
 		ipoib_mark_paths_invalid(dev);
-		/* Set IPoIB operation as down to prevent races between:
-		 * the flush flow which leaves MCG and on the fly joins
-		 * which can happen during that time. mcast restart task
-		 * should deal with join requests we missed.
-		 */
-		oper_up = test_and_clear_bit(IPOIB_FLAG_OPER_UP, &priv->flags);
 		ipoib_mcast_dev_flush(dev);
-		if (oper_up)
-			set_bit(IPOIB_FLAG_OPER_UP, &priv->flags);
-		ipoib_flush_ah(dev);
 	}
 
 	if (level >= IPOIB_FLUSH_NORMAL)
-		ipoib_ib_dev_down(dev);
+		ipoib_ib_dev_down(dev, 0);
 
 	if (level == IPOIB_FLUSH_HEAVY) {
-		if (test_bit(IPOIB_FLAG_INITIALIZED, &priv->flags))
-			ipoib_ib_dev_stop(dev);
-
-		if (ipoib_ib_dev_open(dev))
-			return;
-
-		if (netif_queue_stopped(dev))
-			netif_start_queue(dev);
+		ipoib_ib_dev_stop(dev, 0);
+		ipoib_ib_dev_open(dev);
 	}
 
 	/*
@@ -1194,8 +993,7 @@ static void __ipoib_ib_dev_flush(struct ipoib_dev_priv *priv,
 	if (test_bit(IPOIB_FLAG_ADMIN_UP, &priv->flags)) {
 		if (level >= IPOIB_FLUSH_NORMAL)
 			ipoib_ib_dev_up(dev);
-		if (ipoib_dev_addr_changed_valid(priv))
-			ipoib_mcast_restart_task(&priv->restart_task);
+		ipoib_mcast_restart_task(&priv->restart_task);
 	}
 }
 
@@ -1204,7 +1002,7 @@ void ipoib_ib_dev_flush_light(struct work_struct *work)
 	struct ipoib_dev_priv *priv =
 		container_of(work, struct ipoib_dev_priv, flush_light);
 
-	__ipoib_ib_dev_flush(priv, IPOIB_FLUSH_LIGHT, 0);
+	__ipoib_ib_dev_flush(priv, IPOIB_FLUSH_LIGHT);
 }
 
 void ipoib_ib_dev_flush_normal(struct work_struct *work)
@@ -1212,7 +1010,7 @@ void ipoib_ib_dev_flush_normal(struct work_struct *work)
 	struct ipoib_dev_priv *priv =
 		container_of(work, struct ipoib_dev_priv, flush_normal);
 
-	__ipoib_ib_dev_flush(priv, IPOIB_FLUSH_NORMAL, 0);
+	__ipoib_ib_dev_flush(priv, IPOIB_FLUSH_NORMAL);
 }
 
 void ipoib_ib_dev_flush_heavy(struct work_struct *work)
@@ -1220,9 +1018,7 @@ void ipoib_ib_dev_flush_heavy(struct work_struct *work)
 	struct ipoib_dev_priv *priv =
 		container_of(work, struct ipoib_dev_priv, flush_heavy);
 
-	rtnl_lock();
-	__ipoib_ib_dev_flush(priv, IPOIB_FLUSH_HEAVY, 0);
-	rtnl_unlock();
+	__ipoib_ib_dev_flush(priv, IPOIB_FLUSH_HEAVY);
 }
 
 void ipoib_ib_dev_cleanup(struct net_device *dev)
@@ -1230,24 +1026,61 @@ void ipoib_ib_dev_cleanup(struct net_device *dev)
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 
 	ipoib_dbg(priv, "cleaning up ib_dev\n");
-	/*
-	 * We must make sure there are no more (path) completions
-	 * that may wish to touch priv fields that are no longer valid
-	 */
-	ipoib_flush_paths(dev);
 
-	ipoib_mcast_stop_thread(dev);
+	ipoib_mcast_stop_thread(dev, 1);
 	ipoib_mcast_dev_flush(dev);
-
-	/*
-	 * All of our ah references aren't free until after
-	 * ipoib_mcast_dev_flush(), ipoib_flush_paths, and
-	 * the neighbor garbage collection is stopped and reaped.
-	 * That should all be done now, so make a final ah flush.
-	 */
-	ipoib_stop_ah(dev);
 
 	ipoib_transport_dev_cleanup(dev);
 }
 
+/*
+ * Delayed P_Key Assigment Interim Support
+ *
+ * The following is initial implementation of delayed P_Key assigment
+ * mechanism. It is using the same approach implemented for the multicast
+ * group join. The single goal of this implementation is to quickly address
+ * Bug #2507. This implementation will probably be removed when the P_Key
+ * change async notification is available.
+ */
 
+void ipoib_pkey_poll(struct work_struct *work)
+{
+	struct ipoib_dev_priv *priv =
+		container_of(work, struct ipoib_dev_priv, pkey_poll_task.work);
+	struct net_device *dev = priv->dev;
+
+	ipoib_pkey_dev_check_presence(dev);
+
+	if (test_bit(IPOIB_PKEY_ASSIGNED, &priv->flags))
+		ipoib_open(dev);
+	else {
+		mutex_lock(&pkey_mutex);
+		if (!test_bit(IPOIB_PKEY_STOP, &priv->flags))
+			queue_delayed_work(ipoib_workqueue,
+					   &priv->pkey_poll_task,
+					   HZ);
+		mutex_unlock(&pkey_mutex);
+	}
+}
+
+int ipoib_pkey_dev_delay_open(struct net_device *dev)
+{
+	struct ipoib_dev_priv *priv = netdev_priv(dev);
+
+	/* Look for the interface pkey value in the IB Port P_Key table and */
+	/* set the interface pkey assigment flag                            */
+	ipoib_pkey_dev_check_presence(dev);
+
+	/* P_Key value not assigned yet - start polling */
+	if (!test_bit(IPOIB_PKEY_ASSIGNED, &priv->flags)) {
+		mutex_lock(&pkey_mutex);
+		clear_bit(IPOIB_PKEY_STOP, &priv->flags);
+		queue_delayed_work(ipoib_workqueue,
+				   &priv->pkey_poll_task,
+				   HZ);
+		mutex_unlock(&pkey_mutex);
+		return 1;
+	}
+
+	return 0;
+}

@@ -49,9 +49,10 @@ static bool generic_invert_tuple(struct nf_conntrack_tuple *tuple,
 	return true;
 }
 
-static void generic_print_tuple(struct seq_file *s,
-				const struct nf_conntrack_tuple *tuple)
+static int generic_print_tuple(struct seq_file *s,
+			    const struct nf_conntrack_tuple *tuple)
 {
+	return 0;
 }
 
 static int generic_get_l4proto(const struct sk_buff *skb, unsigned int nhoff,

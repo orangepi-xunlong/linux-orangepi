@@ -19,17 +19,51 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 
-#include "soc.h"
+#include <plat/omap_device.h>
+#include <plat/omap-pm.h>
+
+#ifdef CONFIG_PM_RUNTIME
+static int omap1_pm_runtime_suspend(struct device *dev)
+{
+	int ret;
+
+	dev_dbg(dev, "%s\n", __func__);
+
+	ret = pm_generic_runtime_suspend(dev);
+	if (ret)
+		return ret;
+
+	ret = pm_clk_suspend(dev);
+	if (ret) {
+		pm_generic_runtime_resume(dev);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int omap1_pm_runtime_resume(struct device *dev)
+{
+	dev_dbg(dev, "%s\n", __func__);
+
+	pm_clk_resume(dev);
+	return pm_generic_runtime_resume(dev);
+}
 
 static struct dev_pm_domain default_pm_domain = {
 	.ops = {
-		USE_PM_CLK_RUNTIME_OPS
+		.runtime_suspend = omap1_pm_runtime_suspend,
+		.runtime_resume = omap1_pm_runtime_resume,
 		USE_PLATFORM_PM_SLEEP_OPS
 	},
 };
+#define OMAP1_PM_DOMAIN (&default_pm_domain)
+#else
+#define OMAP1_PM_DOMAIN NULL
+#endif /* CONFIG_PM_RUNTIME */
 
 static struct pm_clk_notifier_block platform_bus_notifier = {
-	.pm_domain = &default_pm_domain,
+	.pm_domain = OMAP1_PM_DOMAIN,
 	.con_ids = { "ick", "fck", NULL, },
 };
 

@@ -49,7 +49,7 @@
 #include "nfs4_fs.h"
 #include "delegation.h"
 
-#define NFSDBG_FACILITY		NFSDBG_STATE
+#define NFSDBG_FACILITY	NFSDBG_PROC
 
 void
 nfs4_renew_state(struct work_struct *work)
@@ -125,7 +125,8 @@ nfs4_schedule_state_renewal(struct nfs_client *clp)
 		timeout = 5 * HZ;
 	dprintk("%s: requeueing work. Lease period = %ld\n",
 			__func__, (timeout + HZ - 1) / HZ);
-	mod_delayed_work(system_wq, &clp->cl_renewd, timeout);
+	cancel_delayed_work(&clp->cl_renewd);
+	schedule_delayed_work(&clp->cl_renewd, timeout);
 	set_bit(NFS_CS_RENEWD, &clp->cl_res_state);
 	spin_unlock(&clp->cl_lock);
 }
@@ -134,26 +135,6 @@ void
 nfs4_kill_renewd(struct nfs_client *clp)
 {
 	cancel_delayed_work_sync(&clp->cl_renewd);
-}
-
-/**
- * nfs4_set_lease_period - Sets the lease period on a nfs_client
- *
- * @clp: pointer to nfs_client
- * @lease: new value for lease period
- * @lastrenewed: time at which lease was last renewed
- */
-void nfs4_set_lease_period(struct nfs_client *clp,
-		unsigned long lease,
-		unsigned long lastrenewed)
-{
-	spin_lock(&clp->cl_lock);
-	clp->cl_lease_time = lease;
-	clp->cl_last_renewal = lastrenewed;
-	spin_unlock(&clp->cl_lock);
-
-	/* Cap maximum reconnect timeout at 1/2 lease period */
-	rpc_cap_max_reconnect_timeout(clp->cl_rpcclient, lease >> 1);
 }
 
 /*

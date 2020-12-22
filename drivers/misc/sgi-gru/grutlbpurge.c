@@ -280,10 +280,11 @@ static struct mmu_notifier *mmu_find_ops(struct mm_struct *mm,
 			const struct mmu_notifier_ops *ops)
 {
 	struct mmu_notifier *mn, *gru_mn = NULL;
+	struct hlist_node *n;
 
 	if (mm->mmu_notifier_mm) {
 		rcu_read_lock();
-		hlist_for_each_entry_rcu(mn, &mm->mmu_notifier_mm->list,
+		hlist_for_each_entry_rcu(mn, n, &mm->mmu_notifier_mm->list,
 					 hlist)
 		    if (mn->ops == ops) {
 			gru_mn = mn;
@@ -306,20 +307,19 @@ struct gru_mm_struct *gru_register_mmu_notifier(void)
 		atomic_inc(&gms->ms_refcnt);
 	} else {
 		gms = kzalloc(sizeof(*gms), GFP_KERNEL);
-		if (!gms)
-			return ERR_PTR(-ENOMEM);
-		STAT(gms_alloc);
-		spin_lock_init(&gms->ms_asid_lock);
-		gms->ms_notifier.ops = &gru_mmuops;
-		atomic_set(&gms->ms_refcnt, 1);
-		init_waitqueue_head(&gms->ms_wait_queue);
-		err = __mmu_notifier_register(&gms->ms_notifier, current->mm);
-		if (err)
-			goto error;
+		if (gms) {
+			STAT(gms_alloc);
+			spin_lock_init(&gms->ms_asid_lock);
+			gms->ms_notifier.ops = &gru_mmuops;
+			atomic_set(&gms->ms_refcnt, 1);
+			init_waitqueue_head(&gms->ms_wait_queue);
+			err = __mmu_notifier_register(&gms->ms_notifier, current->mm);
+			if (err)
+				goto error;
+		}
 	}
-	if (gms)
-		gru_dbg(grudev, "gms %p, refcnt %d\n", gms,
-			atomic_read(&gms->ms_refcnt));
+	gru_dbg(grudev, "gms %p, refcnt %d\n", gms,
+		atomic_read(&gms->ms_refcnt));
 	return gms;
 error:
 	kfree(gms);

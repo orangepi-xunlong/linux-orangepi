@@ -39,8 +39,8 @@
 #include <linux/spi/max7301.h>
 #include <linux/spi/mc33880.h>
 
-#include <linux/platform_data/media/timb_radio.h>
-#include <linux/platform_data/media/timb_video.h>
+#include <media/timb_radio.h>
+#include <media/timb_video.h>
 
 #include <linux/timb_dma.h>
 
@@ -75,21 +75,21 @@ static struct i2c_board_info timberdale_i2c_board_info[] = {
 	},
 };
 
-static struct xiic_i2c_platform_data
+static __devinitdata struct xiic_i2c_platform_data
 timberdale_xiic_platform_data = {
 	.devices = timberdale_i2c_board_info,
 	.num_devices = ARRAY_SIZE(timberdale_i2c_board_info)
 };
 
-static struct ocores_i2c_platform_data
+static __devinitdata struct ocores_i2c_platform_data
 timberdale_ocores_platform_data = {
-	.reg_shift = 2,
+	.regstep = 4,
 	.clock_khz = 62500,
 	.devices = timberdale_i2c_board_info,
 	.num_devices = ARRAY_SIZE(timberdale_i2c_board_info)
 };
 
-static const struct resource timberdale_xiic_resources[] = {
+static const __devinitconst struct resource timberdale_xiic_resources[] = {
 	{
 		.start	= XIICOFFSET,
 		.end	= XIICEND,
@@ -102,7 +102,7 @@ static const struct resource timberdale_xiic_resources[] = {
 	},
 };
 
-static const struct resource timberdale_ocores_resources[] = {
+static const __devinitconst struct resource timberdale_ocores_resources[] = {
 	{
 		.start	= OCORESOFFSET,
 		.end	= OCORESEND,
@@ -115,11 +115,11 @@ static const struct resource timberdale_ocores_resources[] = {
 	},
 };
 
-static const struct max7301_platform_data timberdale_max7301_platform_data = {
+const struct max7301_platform_data timberdale_max7301_platform_data = {
 	.base = 200
 };
 
-static const struct mc33880_platform_data timberdale_mc33880_platform_data = {
+const struct mc33880_platform_data timberdale_mc33880_platform_data = {
 	.base = 100
 };
 
@@ -143,14 +143,15 @@ static struct spi_board_info timberdale_spi_8bit_board_info[] = {
 	},
 };
 
-static struct xspi_platform_data timberdale_xspi_platform_data = {
+static __devinitdata struct xspi_platform_data timberdale_xspi_platform_data = {
 	.num_chipselect = 3,
+	.little_endian = true,
 	/* bits per word and devices will be filled in runtime depending
 	 * on the HW config
 	 */
 };
 
-static const struct resource timberdale_spi_resources[] = {
+static const __devinitconst struct resource timberdale_spi_resources[] = {
 	{
 		.start 	= SPIOFFSET,
 		.end	= SPIEND,
@@ -163,13 +164,13 @@ static const struct resource timberdale_spi_resources[] = {
 	},
 };
 
-static struct ks8842_platform_data
+static __devinitdata struct ks8842_platform_data
 	timberdale_ks8842_platform_data = {
 	.rx_dma_channel = DMA_ETH_RX,
 	.tx_dma_channel = DMA_ETH_TX
 };
 
-static const struct resource timberdale_eth_resources[] = {
+static const __devinitconst struct resource timberdale_eth_resources[] = {
 	{
 		.start	= ETHOFFSET,
 		.end	= ETHEND,
@@ -182,14 +183,14 @@ static const struct resource timberdale_eth_resources[] = {
 	},
 };
 
-static struct timbgpio_platform_data
+static __devinitdata struct timbgpio_platform_data
 	timberdale_gpio_platform_data = {
 	.gpio_base = 0,
 	.nr_pins = GPIO_NR_PINS,
 	.irq_base = 200,
 };
 
-static const struct resource timberdale_gpio_resources[] = {
+static const __devinitconst struct resource timberdale_gpio_resources[] = {
 	{
 		.start	= GPIOOFFSET,
 		.end	= GPIOEND,
@@ -202,7 +203,7 @@ static const struct resource timberdale_gpio_resources[] = {
 	},
 };
 
-static const struct resource timberdale_mlogicore_resources[] = {
+static const __devinitconst struct resource timberdale_mlogicore_resources[] = {
 	{
 		.start	= MLCOREOFFSET,
 		.end	= MLCOREEND,
@@ -220,7 +221,7 @@ static const struct resource timberdale_mlogicore_resources[] = {
 	},
 };
 
-static const struct resource timberdale_uart_resources[] = {
+static const __devinitconst struct resource timberdale_uart_resources[] = {
 	{
 		.start	= UARTOFFSET,
 		.end	= UARTEND,
@@ -233,7 +234,7 @@ static const struct resource timberdale_uart_resources[] = {
 	},
 };
 
-static const struct resource timberdale_uartlite_resources[] = {
+static const __devinitconst struct resource timberdale_uartlite_resources[] = {
 	{
 		.start	= UARTLITEOFFSET,
 		.end	= UARTLITEEND,
@@ -246,13 +247,13 @@ static const struct resource timberdale_uartlite_resources[] = {
 	},
 };
 
-static struct i2c_board_info timberdale_adv7180_i2c_board_info = {
+static __devinitdata struct i2c_board_info timberdale_adv7180_i2c_board_info = {
 	/* Requires jumper JP9 to be off */
 	I2C_BOARD_INFO("adv7180", 0x42 >> 1),
 	.irq = IRQ_TIMBERDALE_ADV7180
 };
 
-static struct timb_video_platform_data
+static __devinitdata struct timb_video_platform_data
 	timberdale_video_platform_data = {
 	.dma_channel = DMA_VIDEO_RX,
 	.i2c_adapter = 0,
@@ -261,7 +262,7 @@ static struct timb_video_platform_data
 	}
 };
 
-static const struct resource
+static const __devinitconst struct resource
 timberdale_radio_resources[] = {
 	{
 		.start	= RDSOFFSET,
@@ -275,22 +276,22 @@ timberdale_radio_resources[] = {
 	},
 };
 
-static struct i2c_board_info timberdale_tef6868_i2c_board_info = {
+static __devinitdata struct i2c_board_info timberdale_tef6868_i2c_board_info = {
 	I2C_BOARD_INFO("tef6862", 0x60)
 };
 
-static struct i2c_board_info timberdale_saa7706_i2c_board_info = {
+static __devinitdata struct i2c_board_info timberdale_saa7706_i2c_board_info = {
 	I2C_BOARD_INFO("saa7706h", 0x1C)
 };
 
-static struct timb_radio_platform_data
+static __devinitdata struct timb_radio_platform_data
 	timberdale_radio_platform_data = {
 	.i2c_adapter = 0,
 	.tuner = &timberdale_tef6868_i2c_board_info,
 	.dsp = &timberdale_saa7706_i2c_board_info
 };
 
-static const struct resource timberdale_video_resources[] = {
+static const __devinitconst struct resource timberdale_video_resources[] = {
 	{
 		.start	= LOGIWOFFSET,
 		.end	= LOGIWEND,
@@ -302,7 +303,7 @@ static const struct resource timberdale_video_resources[] = {
 	*/
 };
 
-static struct timb_dma_platform_data timb_dma_platform_data = {
+static __devinitdata struct timb_dma_platform_data timb_dma_platform_data = {
 	.nr_channels = 10,
 	.channels = {
 		{
@@ -361,7 +362,7 @@ static struct timb_dma_platform_data timb_dma_platform_data = {
 	}
 };
 
-static const struct resource timberdale_dma_resources[] = {
+static const __devinitconst struct resource timberdale_dma_resources[] = {
 	{
 		.start	= DMAOFFSET,
 		.end	= DMAEND,
@@ -374,7 +375,7 @@ static const struct resource timberdale_dma_resources[] = {
 	},
 };
 
-static const struct mfd_cell timberdale_cells_bar0_cfg0[] = {
+static __devinitdata struct mfd_cell timberdale_cells_bar0_cfg0[] = {
 	{
 		.name = "timb-dma",
 		.num_resources = ARRAY_SIZE(timberdale_dma_resources),
@@ -431,7 +432,7 @@ static const struct mfd_cell timberdale_cells_bar0_cfg0[] = {
 	},
 };
 
-static const struct mfd_cell timberdale_cells_bar0_cfg1[] = {
+static __devinitdata struct mfd_cell timberdale_cells_bar0_cfg1[] = {
 	{
 		.name = "timb-dma",
 		.num_resources = ARRAY_SIZE(timberdale_dma_resources),
@@ -498,7 +499,7 @@ static const struct mfd_cell timberdale_cells_bar0_cfg1[] = {
 	},
 };
 
-static const struct mfd_cell timberdale_cells_bar0_cfg2[] = {
+static __devinitdata struct mfd_cell timberdale_cells_bar0_cfg2[] = {
 	{
 		.name = "timb-dma",
 		.num_resources = ARRAY_SIZE(timberdale_dma_resources),
@@ -548,7 +549,7 @@ static const struct mfd_cell timberdale_cells_bar0_cfg2[] = {
 	},
 };
 
-static const struct mfd_cell timberdale_cells_bar0_cfg3[] = {
+static __devinitdata struct mfd_cell timberdale_cells_bar0_cfg3[] = {
 	{
 		.name = "timb-dma",
 		.num_resources = ARRAY_SIZE(timberdale_dma_resources),
@@ -605,7 +606,7 @@ static const struct mfd_cell timberdale_cells_bar0_cfg3[] = {
 	},
 };
 
-static const struct resource timberdale_sdhc_resources[] = {
+static const __devinitconst struct resource timberdale_sdhc_resources[] = {
 	/* located in bar 1 and bar 2 */
 	{
 		.start	= SDHC0OFFSET,
@@ -619,7 +620,7 @@ static const struct resource timberdale_sdhc_resources[] = {
 	},
 };
 
-static const struct mfd_cell timberdale_cells_bar1[] = {
+static __devinitdata struct mfd_cell timberdale_cells_bar1[] = {
 	{
 		.name = "sdhci",
 		.num_resources = ARRAY_SIZE(timberdale_sdhc_resources),
@@ -627,7 +628,7 @@ static const struct mfd_cell timberdale_cells_bar1[] = {
 	},
 };
 
-static const struct mfd_cell timberdale_cells_bar2[] = {
+static __devinitdata struct mfd_cell timberdale_cells_bar2[] = {
 	{
 		.name = "sdhci",
 		.num_resources = ARRAY_SIZE(timberdale_sdhc_resources),
@@ -649,7 +650,7 @@ static DEVICE_ATTR(fw_ver, S_IRUGO, show_fw_ver, NULL);
 
 /*--------------------------------------------------------------------------*/
 
-static int timb_probe(struct pci_dev *dev,
+static int __devinit timb_probe(struct pci_dev *dev,
 	const struct pci_device_id *id)
 {
 	struct timberdale_device *priv;
@@ -678,7 +679,7 @@ static int timb_probe(struct pci_dev *dev,
 	priv->ctl_mapbase = mapbase + CHIPCTLOFFSET;
 	if (!request_mem_region(priv->ctl_mapbase, CHIPCTLSIZE, "timb-ctl")) {
 		dev_err(&dev->dev, "Failed to request ctl mem\n");
-		goto err_start;
+		goto err_request;
 	}
 
 	priv->ctl_membase = ioremap(priv->ctl_mapbase, CHIPCTLSIZE);
@@ -715,7 +716,7 @@ static int timb_probe(struct pci_dev *dev,
 	for (i = 0; i < TIMBERDALE_NR_IRQS; i++)
 		msix_entries[i].entry = i;
 
-	err = pci_enable_msix_exact(dev, msix_entries, TIMBERDALE_NR_IRQS);
+	err = pci_enable_msix(dev, msix_entries, TIMBERDALE_NR_IRQS);
 	if (err) {
 		dev_err(&dev->dev,
 			"MSI-X init failed: %d, expected entries: %d\n",
@@ -756,31 +757,32 @@ static int timb_probe(struct pci_dev *dev,
 		err = mfd_add_devices(&dev->dev, -1,
 			timberdale_cells_bar0_cfg0,
 			ARRAY_SIZE(timberdale_cells_bar0_cfg0),
-			&dev->resource[0], msix_entries[0].vector, NULL);
+			&dev->resource[0], msix_entries[0].vector);
 		break;
 	case TIMB_HW_VER1:
 		err = mfd_add_devices(&dev->dev, -1,
 			timberdale_cells_bar0_cfg1,
 			ARRAY_SIZE(timberdale_cells_bar0_cfg1),
-			&dev->resource[0], msix_entries[0].vector, NULL);
+			&dev->resource[0], msix_entries[0].vector);
 		break;
 	case TIMB_HW_VER2:
 		err = mfd_add_devices(&dev->dev, -1,
 			timberdale_cells_bar0_cfg2,
 			ARRAY_SIZE(timberdale_cells_bar0_cfg2),
-			&dev->resource[0], msix_entries[0].vector, NULL);
+			&dev->resource[0], msix_entries[0].vector);
 		break;
 	case TIMB_HW_VER3:
 		err = mfd_add_devices(&dev->dev, -1,
 			timberdale_cells_bar0_cfg3,
 			ARRAY_SIZE(timberdale_cells_bar0_cfg3),
-			&dev->resource[0], msix_entries[0].vector, NULL);
+			&dev->resource[0], msix_entries[0].vector);
 		break;
 	default:
 		dev_err(&dev->dev, "Uknown IP setup: %d.%d.%d\n",
 			priv->fw.major, priv->fw.minor, ip_setup);
 		err = -ENODEV;
 		goto err_mfd;
+		break;
 	}
 
 	if (err) {
@@ -790,7 +792,7 @@ static int timb_probe(struct pci_dev *dev,
 
 	err = mfd_add_devices(&dev->dev, 0,
 		timberdale_cells_bar1, ARRAY_SIZE(timberdale_cells_bar1),
-		&dev->resource[1], msix_entries[0].vector, NULL);
+		&dev->resource[1], msix_entries[0].vector);
 	if (err) {
 		dev_err(&dev->dev, "mfd_add_devices failed: %d\n", err);
 		goto err_mfd2;
@@ -801,7 +803,7 @@ static int timb_probe(struct pci_dev *dev,
 		((priv->fw.config & TIMB_HW_VER_MASK) == TIMB_HW_VER3)) {
 		err = mfd_add_devices(&dev->dev, 1, timberdale_cells_bar2,
 			ARRAY_SIZE(timberdale_cells_bar2),
-			&dev->resource[2], msix_entries[0].vector, NULL);
+			&dev->resource[2], msix_entries[0].vector);
 		if (err) {
 			dev_err(&dev->dev, "mfd_add_devices failed: %d\n", err);
 			goto err_mfd2;
@@ -828,14 +830,17 @@ err_config:
 	iounmap(priv->ctl_membase);
 err_ioremap:
 	release_mem_region(priv->ctl_mapbase, CHIPCTLSIZE);
+err_request:
+	pci_set_drvdata(dev, NULL);
 err_start:
 	pci_disable_device(dev);
 err_enable:
 	kfree(priv);
+	pci_set_drvdata(dev, NULL);
 	return -ENODEV;
 }
 
-static void timb_remove(struct pci_dev *dev)
+static void __devexit timb_remove(struct pci_dev *dev)
 {
 	struct timberdale_device *priv = pci_get_drvdata(dev);
 
@@ -848,10 +853,11 @@ static void timb_remove(struct pci_dev *dev)
 
 	pci_disable_msix(dev);
 	pci_disable_device(dev);
+	pci_set_drvdata(dev, NULL);
 	kfree(priv);
 }
 
-static const struct pci_device_id timberdale_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(timberdale_pci_tbl) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_TIMB, PCI_DEVICE_ID_TIMB) },
 	{ 0 }
 };
@@ -861,10 +867,37 @@ static struct pci_driver timberdale_pci_driver = {
 	.name = DRIVER_NAME,
 	.id_table = timberdale_pci_tbl,
 	.probe = timb_probe,
-	.remove = timb_remove,
+	.remove = __devexit_p(timb_remove),
 };
 
-module_pci_driver(timberdale_pci_driver);
+static int __init timberdale_init(void)
+{
+	int err;
+
+	err = pci_register_driver(&timberdale_pci_driver);
+	if (err < 0) {
+		printk(KERN_ERR
+			"Failed to register PCI driver for %s device.\n",
+			timberdale_pci_driver.name);
+		return -ENODEV;
+	}
+
+	printk(KERN_INFO "Driver for %s has been successfully registered.\n",
+		timberdale_pci_driver.name);
+
+	return 0;
+}
+
+static void __exit timberdale_exit(void)
+{
+	pci_unregister_driver(&timberdale_pci_driver);
+
+	printk(KERN_INFO "Driver for %s has been successfully unregistered.\n",
+		timberdale_pci_driver.name);
+}
+
+module_init(timberdale_init);
+module_exit(timberdale_exit);
 
 MODULE_AUTHOR("Mocean Laboratories <info@mocean-labs.com>");
 MODULE_VERSION(DRV_VERSION);

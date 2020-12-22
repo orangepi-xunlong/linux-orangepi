@@ -24,11 +24,7 @@
 #ifndef __LINUX_IMX21_HCD_H__
 #define __LINUX_IMX21_HCD_H__
 
-#ifdef CONFIG_DYNAMIC_DEBUG
-#define DEBUG
-#endif
-
-#include <linux/platform_data/usb-mx2.h>
+#include <mach/mx21-usbhost.h>
 
 #define NUM_ISO_ETDS 	2
 #define USB_NUM_ETD	32

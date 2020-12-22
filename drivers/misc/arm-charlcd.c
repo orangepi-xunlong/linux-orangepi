@@ -8,9 +8,9 @@
  * Author: Linus Walleij <triad@df.lth.se>
  */
 #include <linux/init.h>
+#include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
-#include <linux/of.h>
 #include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/io.h>
@@ -291,13 +291,13 @@ static int __init charlcd_probe(struct platform_device *pdev)
 	lcd->virtbase = ioremap(lcd->phybase, lcd->physize);
 	if (!lcd->virtbase) {
 		ret = -ENOMEM;
-		goto out_no_memregion;
+		goto out_no_remap;
 	}
 
 	lcd->irq = platform_get_irq(pdev, 0);
 	/* If no IRQ is supplied, we'll survive without it */
 	if (lcd->irq >= 0) {
-		if (request_irq(lcd->irq, charlcd_interrupt, 0,
+		if (request_irq(lcd->irq, charlcd_interrupt, IRQF_DISABLED,
 				DRIVERNAME, lcd)) {
 			ret = -EIO;
 			goto out_no_irq;
@@ -320,11 +320,28 @@ static int __init charlcd_probe(struct platform_device *pdev)
 
 out_no_irq:
 	iounmap(lcd->virtbase);
+out_no_remap:
+	platform_set_drvdata(pdev, NULL);
 out_no_memregion:
 	release_mem_region(lcd->phybase, SZ_4K);
 out_no_resource:
 	kfree(lcd);
 	return ret;
+}
+
+static int __exit charlcd_remove(struct platform_device *pdev)
+{
+	struct charlcd *lcd = platform_get_drvdata(pdev);
+
+	if (lcd) {
+		free_irq(lcd->irq, lcd);
+		iounmap(lcd->virtbase);
+		release_mem_region(lcd->phybase, lcd->physize);
+		platform_set_drvdata(pdev, NULL);
+		kfree(lcd);
+	}
+
+	return 0;
 }
 
 static int charlcd_suspend(struct device *dev)
@@ -352,17 +369,28 @@ static const struct dev_pm_ops charlcd_pm_ops = {
 	.resume = charlcd_resume,
 };
 
-static const struct of_device_id charlcd_match[] = {
-	{ .compatible = "arm,versatile-lcd", },
-	{}
-};
-
 static struct platform_driver charlcd_driver = {
 	.driver = {
 		.name = DRIVERNAME,
+		.owner = THIS_MODULE,
 		.pm = &charlcd_pm_ops,
-		.suppress_bind_attrs = true,
-		.of_match_table = of_match_ptr(charlcd_match),
 	},
+	.remove = __exit_p(charlcd_remove),
 };
-builtin_platform_driver_probe(charlcd_driver, charlcd_probe);
+
+static int __init charlcd_init(void)
+{
+	return platform_driver_probe(&charlcd_driver, charlcd_probe);
+}
+
+static void __exit charlcd_exit(void)
+{
+	platform_driver_unregister(&charlcd_driver);
+}
+
+module_init(charlcd_init);
+module_exit(charlcd_exit);
+
+MODULE_AUTHOR("Linus Walleij <triad@df.lth.se>");
+MODULE_DESCRIPTION("ARM Character LCD Driver");
+MODULE_LICENSE("GPL v2");

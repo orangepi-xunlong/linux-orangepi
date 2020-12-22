@@ -1,3 +1,4 @@
+
 /******************************************************************************
  *
  * Name: acobject.h - Definition of union acpi_operand_object  (Internal object only)
@@ -5,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -93,10 +94,9 @@
 #define AOPOBJ_AML_CONSTANT         0x01	/* Integer is an AML constant */
 #define AOPOBJ_STATIC_POINTER       0x02	/* Data is part of an ACPI table, don't delete */
 #define AOPOBJ_DATA_VALID           0x04	/* Object is initialized and data is valid */
-#define AOPOBJ_OBJECT_INITIALIZED   0x08	/* Region is initialized */
-#define AOPOBJ_REG_CONNECTED        0x10	/* _REG was run */
-#define AOPOBJ_SETUP_COMPLETE       0x20	/* Region setup is complete */
-#define AOPOBJ_INVALID              0x40	/* Host OS won't allow a Region address */
+#define AOPOBJ_OBJECT_INITIALIZED   0x08	/* Region is initialized, _REG was run */
+#define AOPOBJ_SETUP_COMPLETE       0x10	/* Region setup is complete */
+#define AOPOBJ_INVALID              0x20	/* Host OS won't allow a Region address */
 
 /******************************************************************************
  *
@@ -113,8 +113,8 @@ struct acpi_object_integer {
 };
 
 /*
- * Note: The String and Buffer object must be identical through the
- * pointer and length elements. There is code that depends on this.
+ * Note: The String and Buffer object must be identical through the Pointer
+ * and length elements.  There is code that depends on this.
  *
  * Fields common to both Strings and Buffers
  */
@@ -177,10 +177,9 @@ struct acpi_object_method {
 	u8 param_count;
 	u8 sync_level;
 	union acpi_operand_object *mutex;
-	union acpi_operand_object *node;
 	u8 *aml_start;
 	union {
-		acpi_internal_method implementation;
+		ACPI_INTERNAL_METHOD implementation;
 		union acpi_operand_object *handler;
 	} dispatch;
 
@@ -195,12 +194,11 @@ struct acpi_object_method {
 #define ACPI_METHOD_INTERNAL_ONLY       0x02	/* Method is implemented internally (_OSI) */
 #define ACPI_METHOD_SERIALIZED          0x04	/* Method is serialized */
 #define ACPI_METHOD_SERIALIZED_PENDING  0x08	/* Method is to be marked serialized */
-#define ACPI_METHOD_IGNORE_SYNC_LEVEL   0x10	/* Method was auto-serialized at table load time */
-#define ACPI_METHOD_MODIFIED_NAMESPACE  0x20	/* Method modified the namespace */
+#define ACPI_METHOD_MODIFIED_NAMESPACE  0x10	/* Method modified the namespace */
 
 /******************************************************************************
  *
- * Objects that can be notified. All share a common notify_info area.
+ * Objects that can be notified.  All share a common notify_info area.
  *
  *****************************************************************************/
 
@@ -208,7 +206,8 @@ struct acpi_object_method {
  * Common fields for objects that support ASL notifications
  */
 #define ACPI_COMMON_NOTIFY_INFO \
-	union acpi_operand_object       *notify_list[2];    /* Handlers for system/device notifies */\
+	union acpi_operand_object       *system_notify;     /* Handler for system notifies */\
+	union acpi_operand_object       *device_notify;     /* Handler for driver notifies */\
 	union acpi_operand_object       *handler;	/* Handler for Address space */
 
 struct acpi_object_notify_common {	/* COMMON NOTIFY for POWER, PROCESSOR, DEVICE, and THERMAL */
@@ -237,7 +236,7 @@ ACPI_OBJECT_COMMON_HEADER ACPI_COMMON_NOTIFY_INFO};
 
 /******************************************************************************
  *
- * Fields. All share a common header/info field.
+ * Fields.  All share a common header/info field.
  *
  *****************************************************************************/
 
@@ -266,7 +265,6 @@ struct acpi_object_region_field {
 	ACPI_OBJECT_COMMON_HEADER ACPI_COMMON_FIELD_INFO u16 resource_length;
 	union acpi_operand_object *region_obj;	/* Containing op_region object */
 	u8 *resource_buffer;	/* resource_template for serial regions/fields */
-	u16 pin_number_index;	/* Index relative to previous Connection/Template */
 };
 
 struct acpi_object_bank_field {
@@ -298,10 +296,10 @@ struct acpi_object_buffer_field {
 
 struct acpi_object_notify_handler {
 	ACPI_OBJECT_COMMON_HEADER struct acpi_namespace_node *node;	/* Parent device */
-	u32 handler_type;	/* Type: Device/System/Both */
-	acpi_notify_handler handler;	/* Handler address */
+	u32 handler_type;
+	acpi_notify_handler handler;
 	void *context;
-	union acpi_operand_object *next[2];	/* Device and System handler lists */
+	struct acpi_object_notify_handler *next;
 };
 
 struct acpi_object_addr_handler {
@@ -311,7 +309,7 @@ struct acpi_object_addr_handler {
 	struct acpi_namespace_node *node;	/* Parent device */
 	void *context;
 	acpi_adr_space_setup setup;
-	union acpi_operand_object *region_list;	/* Regions using this handler */
+	union acpi_operand_object *region_list;	/* regions using this handler */
 	union acpi_operand_object *next;
 };
 
@@ -337,7 +335,6 @@ struct acpi_object_reference {
 	void *object;		/* name_op=>HANDLE to obj, index_op=>union acpi_operand_object */
 	struct acpi_namespace_node *node;	/* ref_of or Namepath */
 	union acpi_operand_object **where;	/* Target of Index */
-	u8 *index_pointer;	/* Used for Buffers and Strings */
 	u32 value;		/* Used for Local/Arg/Index/ddb_handle */
 };
 
@@ -385,7 +382,7 @@ struct acpi_object_cache_list {
 
 /******************************************************************************
  *
- * union acpi_operand_object descriptor - a giant union of all of the above
+ * union acpi_operand_object Descriptor - a giant union of all of the above
  *
  *****************************************************************************/
 

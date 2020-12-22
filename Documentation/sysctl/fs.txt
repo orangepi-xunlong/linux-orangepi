@@ -32,12 +32,6 @@ Currently, these files are in /proc/sys/fs:
 - nr_open
 - overflowuid
 - overflowgid
-- pipe-user-pages-hard
-- pipe-user-pages-soft
-- protected_fifos
-- protected_hardlinks
-- protected_regular
-- protected_symlinks
 - suid_dumpable
 - super-max
 - super-nr
@@ -163,123 +157,22 @@ The default is 65534.
 
 ==============================================================
 
-pipe-user-pages-hard:
-
-Maximum total number of pages a non-privileged user may allocate for pipes.
-Once this limit is reached, no new pipes may be allocated until usage goes
-below the limit again. When set to 0, no limit is applied, which is the default
-setting.
-
-==============================================================
-
-pipe-user-pages-soft:
-
-Maximum total number of pages a non-privileged user may allocate for pipes
-before the pipe size gets limited to a single page. Once this limit is reached,
-new pipes will be limited to a single page in size for this user in order to
-limit total memory usage, and trying to increase them using fcntl() will be
-denied until usage goes below the limit again. The default value allows to
-allocate up to 1024 pipes at their default size. When set to 0, no limit is
-applied.
-
-==============================================================
-
-protected_fifos:
-
-The intent of this protection is to avoid unintentional writes to
-an attacker-controlled FIFO, where a program expected to create a regular
-file.
-
-When set to "0", writing to FIFOs is unrestricted.
-
-When set to "1" don't allow O_CREAT open on FIFOs that we don't own
-in world writable sticky directories, unless they are owned by the
-owner of the directory.
-
-When set to "2" it also applies to group writable sticky directories.
-
-This protection is based on the restrictions in Openwall.
-
-==============================================================
-
-protected_hardlinks:
-
-A long-standing class of security issues is the hardlink-based
-time-of-check-time-of-use race, most commonly seen in world-writable
-directories like /tmp. The common method of exploitation of this flaw
-is to cross privilege boundaries when following a given hardlink (i.e. a
-root process follows a hardlink created by another user). Additionally,
-on systems without separated partitions, this stops unauthorized users
-from "pinning" vulnerable setuid/setgid files against being upgraded by
-the administrator, or linking to special files.
-
-When set to "0", hardlink creation behavior is unrestricted.
-
-When set to "1" hardlinks cannot be created by users if they do not
-already own the source file, or do not have read/write access to it.
-
-This protection is based on the restrictions in Openwall and grsecurity.
-
-==============================================================
-
-protected_regular:
-
-This protection is similar to protected_fifos, but it
-avoids writes to an attacker-controlled regular file, where a program
-expected to create one.
-
-When set to "0", writing to regular files is unrestricted.
-
-When set to "1" don't allow O_CREAT open on regular files that we
-don't own in world writable sticky directories, unless they are
-owned by the owner of the directory.
-
-When set to "2" it also applies to group writable sticky directories.
-
-==============================================================
-
-protected_symlinks:
-
-A long-standing class of security issues is the symlink-based
-time-of-check-time-of-use race, most commonly seen in world-writable
-directories like /tmp. The common method of exploitation of this flaw
-is to cross privilege boundaries when following a given symlink (i.e. a
-root process follows a symlink belonging to another user). For a likely
-incomplete list of hundreds of examples across the years, please see:
-http://cve.mitre.org/cgi-bin/cvekey.cgi?keyword=/tmp
-
-When set to "0", symlink following behavior is unrestricted.
-
-When set to "1" symlinks are permitted to be followed only when outside
-a sticky world-writable directory, or when the uid of the symlink and
-follower match, or when the directory owner matches the symlink's owner.
-
-This protection is based on the restrictions in Openwall and grsecurity.
-
-==============================================================
-
 suid_dumpable:
 
 This value can be used to query and set the core dump mode for setuid
 or otherwise protected/tainted binaries. The modes are
 
 0 - (default) - traditional behaviour. Any process which has changed
-	privilege levels or is execute only will not be dumped.
+	privilege levels or is execute only will not be dumped
 1 - (debug) - all processes dump core when possible. The core dump is
 	owned by the current user and no security is applied. This is
 	intended for system debugging situations only. Ptrace is unchecked.
-	This is insecure as it allows regular users to examine the memory
-	contents of privileged processes.
 2 - (suidsafe) - any binary which normally would not be dumped is dumped
-	anyway, but only if the "core_pattern" kernel sysctl is set to
-	either a pipe handler or a fully qualified path. (For more details
-	on this limitation, see CVE-2006-2451.) This mode is appropriate
-	when administrators are attempting to debug problems in a normal
-	environment, and either have a core dump pipe handler that knows
-	to treat privileged core dumps with care, or specific directory
-	defined for catching core dumps. If a core dump happens without
-	a pipe handler or fully qualifid path, a message will be emitted
-	to syslog warning about the lack of a correct setting.
+	readable by root only. This allows the end user to remove
+	such a dump but not access it directly. For security reasons
+	core dumps in this mode will not overwrite one another or
+	other files. This mode is appropriate when administrators are
+	attempting to debug problems in a normal environment.
 
 ==============================================================
 
@@ -298,13 +191,6 @@ aio-nr & aio-max-nr:
 aio-nr shows the current system-wide number of asynchronous io
 requests.  aio-max-nr allows you to change the maximum value
 aio-nr can grow to.
-
-==============================================================
-
-mount-max:
-
-This denotes the maximum number of mounts that may exist
-in a mount namespace.
 
 ==============================================================
 
@@ -339,13 +225,6 @@ a queue must be less or equal then msg_max.
 maximum  message size value (it is every  message queue's attribute set during
 its creation).
 
-/proc/sys/fs/mqueue/msg_default is  a read/write  file for setting/getting the
-default number of messages in a queue value if attr parameter of mq_open(2) is
-NULL. If it exceed msg_max, the default value is initialized msg_max.
-
-/proc/sys/fs/mqueue/msgsize_default is a read/write file for setting/getting
-the default message size value if attr parameter of mq_open(2) is NULL. If it
-exceed msgsize_max, the default value is initialized msgsize_max.
 
 4. /proc/sys/fs/epoll - Configuration options for the epoll interface
 --------------------------------------------------------

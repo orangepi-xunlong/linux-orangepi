@@ -26,9 +26,9 @@
 #include <asm/prom.h>
 #include <asm/mpc52xx.h>
 
-#include <linux/fsl/bestcomm/bestcomm.h>
-#include <linux/fsl/bestcomm/bestcomm_priv.h>
-#include <linux/fsl/bestcomm/ata.h>
+#include <sysdev/bestcomm/bestcomm.h>
+#include <sysdev/bestcomm/bestcomm_priv.h>
+#include <sysdev/bestcomm/ata.h>
 
 #define DRV_NAME	"mpc52xx_ata"
 
@@ -621,10 +621,9 @@ static struct ata_port_operations mpc52xx_ata_port_ops = {
 	.qc_prep		= ata_noop_qc_prep,
 };
 
-static int mpc52xx_ata_init_one(struct device *dev,
-				struct mpc52xx_ata_priv *priv,
-				unsigned long raw_ata_regs,
-				int mwdma_mask, int udma_mask)
+static int __devinit
+mpc52xx_ata_init_one(struct device *dev, struct mpc52xx_ata_priv *priv,
+		     unsigned long raw_ata_regs, int mwdma_mask, int udma_mask)
 {
 	struct ata_host *host;
 	struct ata_port *ap;
@@ -664,11 +663,24 @@ static int mpc52xx_ata_init_one(struct device *dev,
 				 &mpc52xx_ata_sht);
 }
 
+static struct mpc52xx_ata_priv *
+mpc52xx_ata_remove_one(struct device *dev)
+{
+	struct ata_host *host = dev_get_drvdata(dev);
+	struct mpc52xx_ata_priv *priv = host->private_data;
+
+	ata_host_detach(host);
+
+	return priv;
+}
+
+
 /* ======================================================================== */
 /* OF Platform driver                                                       */
 /* ======================================================================== */
 
-static int mpc52xx_ata_probe(struct platform_device *op)
+static int __devinit
+mpc52xx_ata_probe(struct platform_device *op)
 {
 	unsigned int ipb_freq;
 	struct resource res_mem;
@@ -803,12 +815,11 @@ static int mpc52xx_ata_probe(struct platform_device *op)
 static int
 mpc52xx_ata_remove(struct platform_device *op)
 {
-	struct ata_host *host = platform_get_drvdata(op);
-	struct mpc52xx_ata_priv *priv = host->private_data;
+	struct mpc52xx_ata_priv *priv;
 	int task_irq;
 
 	/* Deregister the ATA interface */
-	ata_platform_remove_one(op);
+	priv = mpc52xx_ata_remove_one(&op->dev);
 
 	/* Clean up DMA */
 	task_irq = bcom_get_task_irq(priv->dmatsk);
@@ -819,11 +830,13 @@ mpc52xx_ata_remove(struct platform_device *op)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
+
+#ifdef CONFIG_PM
+
 static int
 mpc52xx_ata_suspend(struct platform_device *op, pm_message_t state)
 {
-	struct ata_host *host = platform_get_drvdata(op);
+	struct ata_host *host = dev_get_drvdata(&op->dev);
 
 	return ata_host_suspend(host, state);
 }
@@ -831,7 +844,7 @@ mpc52xx_ata_suspend(struct platform_device *op, pm_message_t state)
 static int
 mpc52xx_ata_resume(struct platform_device *op)
 {
-	struct ata_host *host = platform_get_drvdata(op);
+	struct ata_host *host = dev_get_drvdata(&op->dev);
 	struct mpc52xx_ata_priv *priv = host->private_data;
 	int rv;
 
@@ -845,7 +858,9 @@ mpc52xx_ata_resume(struct platform_device *op)
 
 	return 0;
 }
+
 #endif
+
 
 static struct of_device_id mpc52xx_ata_of_match[] = {
 	{ .compatible = "fsl,mpc5200-ata", },
@@ -857,12 +872,13 @@ static struct of_device_id mpc52xx_ata_of_match[] = {
 static struct platform_driver mpc52xx_ata_of_platform_driver = {
 	.probe		= mpc52xx_ata_probe,
 	.remove		= mpc52xx_ata_remove,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend	= mpc52xx_ata_suspend,
 	.resume		= mpc52xx_ata_resume,
 #endif
 	.driver		= {
 		.name	= DRV_NAME,
+		.owner	= THIS_MODULE,
 		.of_match_table = mpc52xx_ata_of_match,
 	},
 };

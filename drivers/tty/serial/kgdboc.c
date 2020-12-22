@@ -45,7 +45,7 @@ static int kgdboc_reset_connect(struct input_handler *handler,
 {
 	input_reset_device(dev);
 
-	/* Return an error - we do not want to bind, just to reset */
+	/* Retrun an error - we do not want to bind, just to reset */
 	return -ENODEV;
 }
 
@@ -97,8 +97,7 @@ static void kgdboc_restore_input(void)
 
 static int kgdboc_register_kbd(char **cptr)
 {
-	if (strncmp(*cptr, "kbd", 3) == 0 ||
-		strncmp(*cptr, "kdb", 3) == 0) {
+	if (strncmp(*cptr, "kbd", 3) == 0) {
 		if (kdb_poll_idx < KDB_POLL_FUNC_MAX) {
 			kdb_poll_funcs[kdb_poll_idx] = kdb_get_kbd_char;
 			kdb_poll_idx++;
@@ -123,7 +122,7 @@ static void kgdboc_unregister_kbd(void)
 			i--;
 		}
 	}
-	flush_work(&kgdboc_restore_input_work);
+	flush_work_sync(&kgdboc_restore_input_work);
 }
 #else /* ! CONFIG_KDB_KEYBOARD */
 #define kgdboc_register_kbd(x) 0
@@ -131,10 +130,21 @@ static void kgdboc_unregister_kbd(void)
 #define kgdboc_restore_input()
 #endif /* ! CONFIG_KDB_KEYBOARD */
 
+static int kgdboc_option_setup(char *opt)
+{
+	if (strlen(opt) >= MAX_CONFIG_LEN) {
+		printk(KERN_ERR "kgdboc: config string too long\n");
+		return -ENOSPC;
+	}
+	strcpy(config, opt);
+
+	return 0;
+}
+
+__setup("kgdboc=", kgdboc_option_setup);
+
 static void cleanup_kgdboc(void)
 {
-	if (kgdb_unregister_nmi_console())
-		return;
 	kgdboc_unregister_kbd();
 	if (configured == 1)
 		kgdb_unregister_io_module(&kgdboc_io_ops);
@@ -144,15 +154,15 @@ static int configure_kgdboc(void)
 {
 	struct tty_driver *p;
 	int tty_line = 0;
-	int err = -ENODEV;
+	int err;
 	char *cptr = config;
 	struct console *cons;
 
-	if (!strlen(config) || isspace(config[0])) {
-		err = 0;
+	err = kgdboc_option_setup(config);
+	if (err || !strlen(config) || isspace(config[0]))
 		goto noconfig;
-	}
 
+	err = -ENODEV;
 	kgdboc_io_ops.is_console = 0;
 	kgdb_tty_driver = NULL;
 
@@ -188,18 +198,11 @@ do_register:
 	if (err)
 		goto noconfig;
 
-	err = kgdb_register_nmi_console();
-	if (err)
-		goto nmi_con_failed;
-
 	configured = 1;
 
 	return 0;
 
-nmi_con_failed:
-	kgdb_unregister_io_module(&kgdboc_io_ops);
 noconfig:
-	kgdboc_unregister_kbd();
 	config[0] = 0;
 	configured = 0;
 	cleanup_kgdboc();
@@ -232,10 +235,9 @@ static void kgdboc_put_char(u8 chr)
 					kgdb_tty_line, chr);
 }
 
-static int param_set_kgdboc_var(const char *kmessage,
-				const struct kernel_param *kp)
+static int param_set_kgdboc_var(const char *kmessage, struct kernel_param *kp)
 {
-	size_t len = strlen(kmessage);
+	int len = strlen(kmessage);
 
 	if (len >= MAX_CONFIG_LEN) {
 		printk(KERN_ERR "kgdboc: config string too long\n");
@@ -257,7 +259,7 @@ static int param_set_kgdboc_var(const char *kmessage,
 
 	strcpy(config, kmessage);
 	/* Chop out \n char as a result of echo */
-	if (len && config[len - 1] == '\n')
+	if (config[len - 1] == '\n')
 		config[len - 1] = '\0';
 
 	if (configured == 1)
@@ -301,25 +303,6 @@ static struct kgdb_io kgdboc_io_ops = {
 };
 
 #ifdef CONFIG_KGDB_SERIAL_CONSOLE
-static int kgdboc_option_setup(char *opt)
-{
-	if (!opt) {
-		pr_err("config string not provided\n");
-		return -EINVAL;
-	}
-
-	if (strlen(opt) >= MAX_CONFIG_LEN) {
-		pr_err("config string too long\n");
-		return -ENOSPC;
-	}
-	strcpy(config, opt);
-
-	return 0;
-}
-
-__setup("kgdboc=", kgdboc_option_setup);
-
-
 /* This is only available if kgdboc is a built in for early debugging */
 static int __init kgdboc_early_init(char *opt)
 {

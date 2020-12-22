@@ -154,6 +154,14 @@ void __init puv3_pci_adjust_zones(unsigned long *zone_size,
 	zhole_size[0] = 0;
 }
 
+void __devinit pcibios_update_irq(struct pci_dev *dev, int irq)
+{
+	if (debug_pci)
+		printk(KERN_DEBUG "PCI: Assigning IRQ %02d to %s\n",
+				irq, pci_name(dev));
+	pci_write_config_byte(dev, PCI_INTERRUPT_LINE, irq);
+}
+
 /*
  * If the bus contains any of these devices, then we must not turn on
  * parity checking of any kind.
@@ -167,7 +175,7 @@ static inline int pdev_bad_for_parity(struct pci_dev *dev)
  * pcibios_fixup_bus - Called after each bus is probed,
  * but before its children are examined.
  */
-void pcibios_fixup_bus(struct pci_bus *bus)
+void __devinit pcibios_fixup_bus(struct pci_bus *bus)
 {
 	struct pci_dev *dev;
 	u16 features = PCI_COMMAND_SERR
@@ -250,7 +258,9 @@ void pcibios_fixup_bus(struct pci_bus *bus)
 	printk(KERN_INFO "PCI: bus%d: Fast back to back transfers %sabled\n",
 		bus->number, (features & PCI_COMMAND_FAST_BACK) ? "en" : "dis");
 }
+#ifdef CONFIG_HOTPLUG
 EXPORT_SYMBOL(pcibios_fixup_bus);
+#endif
 
 static int __init pci_common_init(void)
 {
@@ -265,17 +275,34 @@ static int __init pci_common_init(void)
 
 	pci_fixup_irqs(pci_common_swizzle, pci_puv3_map_irq);
 
-	pci_bus_size_bridges(puv3_bus);
-	pci_bus_assign_resources(puv3_bus);
+	if (!pci_has_flag(PCI_PROBE_ONLY)) {
+		/*
+		 * Size the bridge windows.
+		 */
+		pci_bus_size_bridges(puv3_bus);
+
+		/*
+		 * Assign resources.
+		 */
+		pci_bus_assign_resources(puv3_bus);
+	}
+
+	/*
+	 * Tell drivers about devices found.
+	 */
 	pci_bus_add_devices(puv3_bus);
+
 	return 0;
 }
 subsys_initcall(pci_common_init);
 
-char * __init pcibios_setup(char *str)
+char * __devinit pcibios_setup(char *str)
 {
 	if (!strcmp(str, "debug")) {
 		debug_pci = 1;
+		return NULL;
+	} else if (!strcmp(str, "firmware")) {
+		pci_add_flags(PCI_PROBE_ONLY);
 		return NULL;
 	}
 	return str;

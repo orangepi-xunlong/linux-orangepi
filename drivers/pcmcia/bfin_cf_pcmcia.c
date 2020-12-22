@@ -36,10 +36,10 @@
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/io.h>
-#include <linux/gpio.h>
 
 #include <pcmcia/ss.h>
 #include <pcmcia/cisreg.h>
+#include <asm/gpio.h>
 
 #define	SZ_1K	0x00000400
 #define	SZ_8K	0x00002000
@@ -195,7 +195,7 @@ static struct pccard_operations bfin_cf_ops = {
 
 /*--------------------------------------------------------------------------*/
 
-static int bfin_cf_probe(struct platform_device *pdev)
+static int __devinit bfin_cf_probe(struct platform_device *pdev)
 {
 	struct bfin_cf_socket *cf;
 	struct resource *io_mem, *attr_mem;
@@ -286,7 +286,7 @@ fail0:
 	return status;
 }
 
-static int bfin_cf_remove(struct platform_device *pdev)
+static int __devexit bfin_cf_remove(struct platform_device *pdev)
 {
 	struct bfin_cf_socket *cf = platform_get_drvdata(pdev);
 
@@ -303,10 +303,11 @@ static int bfin_cf_remove(struct platform_device *pdev)
 
 static struct platform_driver bfin_cf_driver = {
 	.driver = {
-		   .name = driver_name,
+		   .name = (char *)driver_name,
+		   .owner = THIS_MODULE,
 		   },
 	.probe = bfin_cf_probe,
-	.remove = bfin_cf_remove,
+	.remove = __devexit_p(bfin_cf_remove),
 };
 
 module_platform_driver(bfin_cf_driver);

@@ -25,7 +25,6 @@
 #include <linux/module.h>
 #include <linux/syscalls.h>
 #include <linux/rcupdate.h>
-#include <linux/binfmts.h>
 
 #include <asm/spu.h>
 
@@ -70,6 +69,8 @@ SYSCALL_DEFINE4(spu_create, const char __user *, name, unsigned int, flags,
 	umode_t, mode, int, neighbor_fd)
 {
 	long ret;
+	struct file *neighbor;
+	int fput_needed;
 	struct spufs_calls *calls;
 
 	calls = spufs_calls_get();
@@ -77,11 +78,11 @@ SYSCALL_DEFINE4(spu_create, const char __user *, name, unsigned int, flags,
 		return -ENOSYS;
 
 	if (flags & SPU_CREATE_AFFINITY_SPU) {
-		struct fd neighbor = fdget(neighbor_fd);
 		ret = -EBADF;
-		if (neighbor.file) {
-			ret = calls->create_thread(name, flags, mode, neighbor.file);
-			fdput(neighbor);
+		neighbor = fget_light(neighbor_fd, &fput_needed);
+		if (neighbor) {
+			ret = calls->create_thread(name, flags, mode, neighbor);
+			fput_light(neighbor, fput_needed);
 		}
 	} else
 		ret = calls->create_thread(name, flags, mode, NULL);
@@ -93,7 +94,8 @@ SYSCALL_DEFINE4(spu_create, const char __user *, name, unsigned int, flags,
 asmlinkage long sys_spu_run(int fd, __u32 __user *unpc, __u32 __user *ustatus)
 {
 	long ret;
-	struct fd arg;
+	struct file *filp;
+	int fput_needed;
 	struct spufs_calls *calls;
 
 	calls = spufs_calls_get();
@@ -101,17 +103,16 @@ asmlinkage long sys_spu_run(int fd, __u32 __user *unpc, __u32 __user *ustatus)
 		return -ENOSYS;
 
 	ret = -EBADF;
-	arg = fdget(fd);
-	if (arg.file) {
-		ret = calls->spu_run(arg.file, unpc, ustatus);
-		fdput(arg);
+	filp = fget_light(fd, &fput_needed);
+	if (filp) {
+		ret = calls->spu_run(filp, unpc, ustatus);
+		fput_light(filp, fput_needed);
 	}
 
 	spufs_calls_put(calls);
 	return ret;
 }
 
-#ifdef CONFIG_COREDUMP
 int elf_coredump_extra_notes_size(void)
 {
 	struct spufs_calls *calls;
@@ -128,7 +129,7 @@ int elf_coredump_extra_notes_size(void)
 	return ret;
 }
 
-int elf_coredump_extra_notes_write(struct coredump_params *cprm)
+int elf_coredump_extra_notes_write(struct file *file, loff_t *foffset)
 {
 	struct spufs_calls *calls;
 	int ret;
@@ -137,13 +138,12 @@ int elf_coredump_extra_notes_write(struct coredump_params *cprm)
 	if (!calls)
 		return 0;
 
-	ret = calls->coredump_extra_notes_write(cprm);
+	ret = calls->coredump_extra_notes_write(file, foffset);
 
 	spufs_calls_put(calls);
 
 	return ret;
 }
-#endif
 
 void notify_spus_active(void)
 {
@@ -172,7 +172,7 @@ EXPORT_SYMBOL_GPL(register_spu_syscalls);
 void unregister_spu_syscalls(struct spufs_calls *calls)
 {
 	BUG_ON(spufs_calls->owner != calls->owner);
-	RCU_INIT_POINTER(spufs_calls, NULL);
+	rcu_assign_pointer(spufs_calls, NULL);
 	synchronize_rcu();
 }
 EXPORT_SYMBOL_GPL(unregister_spu_syscalls);

@@ -1,14 +1,6 @@
 /*
  * IO mappings for OMAP2+
  *
- * IO definitions for TI OMAP processors and boards
- *
- * Copied from arch/arm/mach-sa1100/include/mach/io.h
- * Copyright (C) 1997-1999 Russell King
- *
- * Copyright (C) 2009-2012 Texas Instruments
- * Added OMAP4/5 support - Santosh Shilimkar <santosh.shilimkar@ti.com>
- *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
  * Free Software Foundation; either version 2 of the License, or (at your
@@ -44,6 +36,9 @@
 
 #define OMAP4_L3_PER_IO_OFFSET	0xb1100000
 #define OMAP4_L3_PER_IO_ADDRESS(pa)	IOMEM((pa) + OMAP4_L3_PER_IO_OFFSET)
+
+#define OMAP4_GPMC_IO_OFFSET		0xa9000000
+#define OMAP4_GPMC_IO_ADDRESS(pa)	IOMEM((pa) + OMAP4_GPMC_IO_OFFSET)
 
 #define OMAP2_EMU_IO_OFFSET		0xaa800000	/* Emulation */
 #define OMAP2_EMU_IO_ADDRESS(pa)	IOMEM((pa) + OMAP2_EMU_IO_OFFSET)
@@ -174,86 +169,29 @@
 						/* 0x49000000 --> 0xfb000000 */
 #define L4_ABE_44XX_VIRT	(L4_ABE_44XX_PHYS + OMAP2_L4_IO_OFFSET)
 #define L4_ABE_44XX_SIZE	SZ_1M
-/*
- * ----------------------------------------------------------------------------
- * Omap5 specific IO mapping
- * ----------------------------------------------------------------------------
- */
-#define L3_54XX_PHYS		L3_54XX_BASE	/* 0x44000000 --> 0xf8000000 */
-#define L3_54XX_VIRT		(L3_54XX_PHYS + OMAP4_L3_IO_OFFSET)
-#define L3_54XX_SIZE		SZ_1M
 
-#define L4_54XX_PHYS		L4_54XX_BASE	/* 0x4a000000 --> 0xfc000000 */
-#define L4_54XX_VIRT		(L4_54XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_54XX_SIZE		SZ_4M
+#define L4_EMU_44XX_PHYS	L4_EMU_44XX_BASE
+						/* 0x54000000 --> 0xfe800000 */
+#define L4_EMU_44XX_VIRT	(L4_EMU_44XX_PHYS + OMAP2_EMU_IO_OFFSET)
+#define L4_EMU_44XX_SIZE	SZ_8M
 
-#define L4_WK_54XX_PHYS		L4_WK_54XX_BASE	/* 0x4ae00000 --> 0xfce00000 */
-#define L4_WK_54XX_VIRT		(L4_WK_54XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_WK_54XX_SIZE		SZ_2M
+#define OMAP44XX_GPMC_PHYS	OMAP44XX_GPMC_BASE
+						/* 0x50000000 --> 0xf9000000 */
+#define OMAP44XX_GPMC_VIRT	(OMAP44XX_GPMC_PHYS + OMAP4_GPMC_IO_OFFSET)
+#define OMAP44XX_GPMC_SIZE	SZ_1M
 
-#define L4_PER_54XX_PHYS	L4_PER_54XX_BASE /* 0x48000000 --> 0xfa000000 */
-#define L4_PER_54XX_VIRT	(L4_PER_54XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_PER_54XX_SIZE	SZ_4M
 
-/*
- * ----------------------------------------------------------------------------
- * DRA7xx specific IO mapping
- * ----------------------------------------------------------------------------
- */
-/*
- * L3_MAIN_SN_DRA7XX_PHYS 0x44000000 --> 0xf8000000
- * The overall space is 24MiB (0x4400_0000<->0x457F_FFFF), but mapping
- * everything is just inefficient, since, there are too many address holes.
- */
-#define L3_MAIN_SN_DRA7XX_PHYS		L3_MAIN_SN_DRA7XX_BASE
-#define L3_MAIN_SN_DRA7XX_VIRT		(L3_MAIN_SN_DRA7XX_PHYS + OMAP4_L3_IO_OFFSET)
-#define L3_MAIN_SN_DRA7XX_SIZE		SZ_1M
+#define OMAP44XX_EMIF1_PHYS	OMAP44XX_EMIF1_BASE
+						/* 0x4c000000 --> 0xfd100000 */
+#define OMAP44XX_EMIF1_VIRT	(OMAP44XX_EMIF1_PHYS + OMAP4_L3_PER_IO_OFFSET)
+#define OMAP44XX_EMIF1_SIZE	SZ_1M
 
-/*
- * L4_PER1_DRA7XX_PHYS	(0x4800_000<>0x480D_2FFF) -> 0.82MiB (alloc 1MiB)
- *	(0x48000000<->0x48100000) <=> (0xFA000000<->0xFA100000)
- */
-#define L4_PER1_DRA7XX_PHYS		L4_PER1_DRA7XX_BASE
-#define L4_PER1_DRA7XX_VIRT		(L4_PER1_DRA7XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_PER1_DRA7XX_SIZE		SZ_1M
+#define OMAP44XX_EMIF2_PHYS	OMAP44XX_EMIF2_BASE
+						/* 0x4d000000 --> 0xfd200000 */
+#define OMAP44XX_EMIF2_SIZE	SZ_1M
+#define OMAP44XX_EMIF2_VIRT	(OMAP44XX_EMIF1_VIRT + OMAP44XX_EMIF1_SIZE)
 
-/*
- * L4_CFG_MPU_DRA7XX_PHYS	(0x48210000<>0x482A_F2FF) -> 0.62MiB (alloc 1MiB)
- *	(0x48210000<->0x48310000) <=> (0xFA210000<->0xFA310000)
- * NOTE: This is a bit of an orphan memory map sitting isolated in TRM
- */
-#define L4_CFG_MPU_DRA7XX_PHYS		L4_CFG_MPU_DRA7XX_BASE
-#define L4_CFG_MPU_DRA7XX_VIRT		(L4_CFG_MPU_DRA7XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_CFG_MPU_DRA7XX_SIZE		SZ_1M
-
-/*
- * L4_PER2_DRA7XX_PHYS	(0x4840_0000<>0x4848_8FFF) -> .53MiB (alloc 1MiB)
- *	(0x48400000<->0x48500000) <=> (0xFA400000<->0xFA500000)
- */
-#define L4_PER2_DRA7XX_PHYS		L4_PER2_DRA7XX_BASE
-#define L4_PER2_DRA7XX_VIRT		(L4_PER2_DRA7XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_PER2_DRA7XX_SIZE		SZ_1M
-
-/*
- * L4_PER3_DRA7XX_PHYS	(0x4880_0000<>0x489E_0FFF) -> 1.87MiB (alloc 2MiB)
- *	(0x48800000<->0x48A00000) <=> (0xFA800000<->0xFAA00000)
- */
-#define L4_PER3_DRA7XX_PHYS		L4_PER3_DRA7XX_BASE
-#define L4_PER3_DRA7XX_VIRT		(L4_PER3_DRA7XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_PER3_DRA7XX_SIZE		SZ_2M
-
-/*
- * L4_CFG_DRA7XX_PHYS	(0x4A00_0000<>0x4A22_BFFF) ->2.17MiB (alloc 3MiB)?
- *	(0x4A000000<->0x4A300000) <=> (0xFC000000<->0xFC300000)
- */
-#define L4_CFG_DRA7XX_PHYS		L4_CFG_DRA7XX_BASE
-#define L4_CFG_DRA7XX_VIRT		(L4_CFG_DRA7XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_CFG_DRA7XX_SIZE		(SZ_1M + SZ_2M)
-
-/*
- * L4_WKUP_DRA7XX_PHYS	(0x4AE0_0000<>0x4AE3_EFFF) -> .24 mb (alloc 1MiB)?
- *	(0x4AE00000<->4AF00000)	<=> (0xFCE00000<->0xFCF00000)
- */
-#define L4_WKUP_DRA7XX_PHYS		L4_WKUP_DRA7XX_BASE
-#define L4_WKUP_DRA7XX_VIRT		(L4_WKUP_DRA7XX_PHYS + OMAP2_L4_IO_OFFSET)
-#define L4_WKUP_DRA7XX_SIZE		SZ_1M
+#define OMAP44XX_DMM_PHYS	OMAP44XX_DMM_BASE
+						/* 0x4e000000 --> 0xfd300000 */
+#define OMAP44XX_DMM_SIZE	SZ_1M
+#define OMAP44XX_DMM_VIRT	(OMAP44XX_EMIF2_VIRT + OMAP44XX_EMIF2_SIZE)

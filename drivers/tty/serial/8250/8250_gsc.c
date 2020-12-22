@@ -26,14 +26,9 @@
 
 static int __init serial_init_chip(struct parisc_device *dev)
 {
-	struct uart_8250_port uart;
+	struct uart_port port;
 	unsigned long address;
 	int err;
-
-#ifdef CONFIG_64BIT
-	if (!dev->irq && (dev->id.sversion == 0xad))
-		dev->irq = iosapic_serial_irq(dev);
-#endif
 
 	if (!dev->irq) {
 		/* We find some unattached serial ports by walking native
@@ -42,7 +37,7 @@ static int __init serial_init_chip(struct parisc_device *dev)
 		 * the user what they're missing.
 		 */
 		if (parisc_parent(dev)->id.hw_type != HPHW_IOA)
-			dev_info(&dev->dev,
+			printk(KERN_INFO
 				"Serial: device 0x%llx not configured.\n"
 				"Enable support for Wax, Lasi, Asp or Dino.\n",
 				(unsigned long long)dev->hpa.start);
@@ -53,23 +48,21 @@ static int __init serial_init_chip(struct parisc_device *dev)
 	if (dev->id.sversion != 0x8d)
 		address += 0x800;
 
-	memset(&uart, 0, sizeof(uart));
-	uart.port.iotype	= UPIO_MEM;
+	memset(&port, 0, sizeof(port));
+	port.iotype	= UPIO_MEM;
 	/* 7.272727MHz on Lasi.  Assumed the same for Dino, Wax and Timi. */
-	uart.port.uartclk	= (dev->id.sversion != 0xad) ?
-					7272727 : 1843200;
-	uart.port.mapbase	= address;
-	uart.port.membase	= ioremap_nocache(address, 16);
-	uart.port.irq	= dev->irq;
-	uart.port.flags	= UPF_BOOT_AUTOCONF;
-	uart.port.dev	= &dev->dev;
+	port.uartclk	= 7272727;
+	port.mapbase	= address;
+	port.membase	= ioremap_nocache(address, 16);
+	port.irq	= dev->irq;
+	port.flags	= UPF_BOOT_AUTOCONF;
+	port.dev	= &dev->dev;
 
-	err = serial8250_register_8250_port(&uart);
+	err = serial8250_register_port(&port);
 	if (err < 0) {
-		dev_warn(&dev->dev,
-			"serial8250_register_8250_port returned error %d\n",
-			err);
-		iounmap(uart.port.membase);
+		printk(KERN_WARNING
+			"serial8250_register_port returned error %d\n", err);
+		iounmap(port.membase);
 		return err;
 	}
 
@@ -80,7 +73,6 @@ static struct parisc_device_id serial_tbl[] = {
 	{ HPHW_FIO, HVERSION_REV_ANY_ID, HVERSION_ANY_ID, 0x00075 },
 	{ HPHW_FIO, HVERSION_REV_ANY_ID, HVERSION_ANY_ID, 0x0008c },
 	{ HPHW_FIO, HVERSION_REV_ANY_ID, HVERSION_ANY_ID, 0x0008d },
-	{ HPHW_FIO, HVERSION_REV_ANY_ID, HVERSION_ANY_ID, 0x000ad },
 	{ 0 }
 };
 

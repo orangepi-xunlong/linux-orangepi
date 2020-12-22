@@ -60,7 +60,6 @@
 MODULE_AUTHOR("Wolfgang Grandegger <wg@grandegger.com>");
 MODULE_DESCRIPTION("Socket-CAN driver for CC770 on the platform bus");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:" DRV_NAME);
 
 #define CC770_PLATFORM_CAN_CLOCK  16000000
 
@@ -75,8 +74,8 @@ static void cc770_platform_write_reg(const struct cc770_priv *priv, int reg,
 	iowrite8(val, priv->reg_base + reg);
 }
 
-static int cc770_get_of_node_data(struct platform_device *pdev,
-				  struct cc770_priv *priv)
+static int __devinit cc770_get_of_node_data(struct platform_device *pdev,
+					    struct cc770_priv *priv)
 {
 	struct device_node *np = pdev->dev.of_node;
 	const u32 *prop;
@@ -148,14 +147,14 @@ static int cc770_get_of_node_data(struct platform_device *pdev,
 	return 0;
 }
 
-static int cc770_get_platform_data(struct platform_device *pdev,
-				   struct cc770_priv *priv)
+static int __devinit cc770_get_platform_data(struct platform_device *pdev,
+					     struct cc770_priv *priv)
 {
 
-	struct cc770_platform_data *pdata = dev_get_platdata(&pdev->dev);
+	struct cc770_platform_data *pdata = pdev->dev.platform_data;
 
 	priv->can.clock.freq = pdata->osc_freq;
-	if (priv->cpu_interface & CPUIF_DSC)
+	if (priv->cpu_interface | CPUIF_DSC)
 		priv->can.clock.freq /= 2;
 	priv->clkout = pdata->cor;
 	priv->bus_config = pdata->bcr;
@@ -164,7 +163,7 @@ static int cc770_get_platform_data(struct platform_device *pdev,
 	return 0;
 }
 
-static int cc770_platform_probe(struct platform_device *pdev)
+static int __devinit cc770_platform_probe(struct platform_device *pdev)
 {
 	struct net_device *dev;
 	struct cc770_priv *priv;
@@ -203,7 +202,7 @@ static int cc770_platform_probe(struct platform_device *pdev)
 
 	if (pdev->dev.of_node)
 		err = cc770_get_of_node_data(pdev, priv);
-	else if (dev_get_platdata(&pdev->dev))
+	else if (pdev->dev.platform_data)
 		err = cc770_get_platform_data(pdev, priv);
 	else
 		err = -ENODEV;
@@ -216,7 +215,7 @@ static int cc770_platform_probe(struct platform_device *pdev)
 		 priv->reg_base, dev->irq, priv->can.clock.freq,
 		 priv->cpu_interface, priv->bus_config, priv->clkout);
 
-	platform_set_drvdata(pdev, dev);
+	dev_set_drvdata(&pdev->dev, dev);
 	SET_NETDEV_DEV(dev, &pdev->dev);
 
 	err = register_cc770dev(dev);
@@ -238,9 +237,9 @@ exit_release_mem:
 	return err;
 }
 
-static int cc770_platform_remove(struct platform_device *pdev)
+static int __devexit cc770_platform_remove(struct platform_device *pdev)
 {
-	struct net_device *dev = platform_get_drvdata(pdev);
+	struct net_device *dev = dev_get_drvdata(&pdev->dev);
 	struct cc770_priv *priv = netdev_priv(dev);
 	struct resource *mem;
 
@@ -254,20 +253,20 @@ static int cc770_platform_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id cc770_platform_table[] = {
+static struct of_device_id __devinitdata cc770_platform_table[] = {
 	{.compatible = "bosch,cc770"}, /* CC770 from Bosch */
 	{.compatible = "intc,82527"},  /* AN82527 from Intel CP */
 	{},
 };
-MODULE_DEVICE_TABLE(of, cc770_platform_table);
 
 static struct platform_driver cc770_platform_driver = {
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = cc770_platform_table,
 	},
 	.probe = cc770_platform_probe,
-	.remove = cc770_platform_remove,
+	.remove = __devexit_p(cc770_platform_remove),
 };
 
 module_platform_driver(cc770_platform_driver);

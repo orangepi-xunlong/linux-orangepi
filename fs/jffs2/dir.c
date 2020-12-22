@@ -22,12 +22,12 @@
 #include <linux/time.h>
 #include "nodelist.h"
 
-static int jffs2_readdir (struct file *, struct dir_context *);
+static int jffs2_readdir (struct file *, void *, filldir_t);
 
 static int jffs2_create (struct inode *,struct dentry *,umode_t,
-			 bool);
+			 struct nameidata *);
 static struct dentry *jffs2_lookup (struct inode *,struct dentry *,
-				    unsigned int);
+				    struct nameidata *);
 static int jffs2_link (struct dentry *,struct inode *,struct dentry *);
 static int jffs2_unlink (struct inode *,struct dentry *);
 static int jffs2_symlink (struct inode *,struct dentry *,const char *);
@@ -35,13 +35,12 @@ static int jffs2_mkdir (struct inode *,struct dentry *,umode_t);
 static int jffs2_rmdir (struct inode *,struct dentry *);
 static int jffs2_mknod (struct inode *,struct dentry *,umode_t,dev_t);
 static int jffs2_rename (struct inode *, struct dentry *,
-			 struct inode *, struct dentry *,
-			 unsigned int);
+			 struct inode *, struct dentry *);
 
 const struct file_operations jffs2_dir_operations =
 {
 	.read =		generic_read_dir,
-	.iterate_shared=jffs2_readdir,
+	.readdir =	jffs2_readdir,
 	.unlocked_ioctl=jffs2_ioctl,
 	.fsync =	jffs2_fsync,
 	.llseek =	generic_file_llseek,
@@ -60,9 +59,11 @@ const struct inode_operations jffs2_dir_inode_operations =
 	.mknod =	jffs2_mknod,
 	.rename =	jffs2_rename,
 	.get_acl =	jffs2_get_acl,
-	.set_acl =	jffs2_set_acl,
 	.setattr =	jffs2_setattr,
+	.setxattr =	jffs2_setxattr,
+	.getxattr =	jffs2_getxattr,
 	.listxattr =	jffs2_listxattr,
+	.removexattr =	jffs2_removexattr
 };
 
 /***********************************************************************/
@@ -73,13 +74,12 @@ const struct inode_operations jffs2_dir_inode_operations =
    nice and simple
 */
 static struct dentry *jffs2_lookup(struct inode *dir_i, struct dentry *target,
-				   unsigned int flags)
+				   struct nameidata *nd)
 {
 	struct jffs2_inode_info *dir_f;
 	struct jffs2_full_dirent *fd = NULL, *fd_list;
 	uint32_t ino = 0;
 	struct inode *inode = NULL;
-	unsigned int nhash;
 
 	jffs2_dbg(1, "jffs2_lookup()\n");
 
@@ -88,14 +88,11 @@ static struct dentry *jffs2_lookup(struct inode *dir_i, struct dentry *target,
 
 	dir_f = JFFS2_INODE_INFO(dir_i);
 
-	/* The 'nhash' on the fd_list is not the same as the dentry hash */
-	nhash = full_name_hash(NULL, target->d_name.name, target->d_name.len);
-
 	mutex_lock(&dir_f->sem);
 
 	/* NB: The 2.2 backport will need to explicitly check for '.' and '..' here */
-	for (fd_list = dir_f->dents; fd_list && fd_list->nhash <= nhash; fd_list = fd_list->next) {
-		if (fd_list->nhash == nhash &&
+	for (fd_list = dir_f->dents; fd_list && fd_list->nhash <= target->d_name.hash; fd_list = fd_list->next) {
+		if (fd_list->nhash == target->d_name.hash &&
 		    (!fd || fd_list->version > fd->version) &&
 		    strlen(fd_list->name) == target->d_name.len &&
 		    !strncmp(fd_list->name, target->d_name.name, target->d_name.len)) {
@@ -117,40 +114,60 @@ static struct dentry *jffs2_lookup(struct inode *dir_i, struct dentry *target,
 /***********************************************************************/
 
 
-static int jffs2_readdir(struct file *file, struct dir_context *ctx)
+static int jffs2_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
-	struct inode *inode = file_inode(file);
-	struct jffs2_inode_info *f = JFFS2_INODE_INFO(inode);
+	struct jffs2_inode_info *f;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct jffs2_full_dirent *fd;
-	unsigned long curofs = 1;
+	unsigned long offset, curofs;
 
-	jffs2_dbg(1, "jffs2_readdir() for dir_i #%lu\n", inode->i_ino);
+	jffs2_dbg(1, "jffs2_readdir() for dir_i #%lu\n",
+		  filp->f_path.dentry->d_inode->i_ino);
 
-	if (!dir_emit_dots(file, ctx))
-		return 0;
+	f = JFFS2_INODE_INFO(inode);
 
+	offset = filp->f_pos;
+
+	if (offset == 0) {
+		jffs2_dbg(1, "Dirent 0: \".\", ino #%lu\n", inode->i_ino);
+		if (filldir(dirent, ".", 1, 0, inode->i_ino, DT_DIR) < 0)
+			goto out;
+		offset++;
+	}
+	if (offset == 1) {
+		unsigned long pino = parent_ino(filp->f_path.dentry);
+		jffs2_dbg(1, "Dirent 1: \"..\", ino #%lu\n", pino);
+		if (filldir(dirent, "..", 2, 1, pino, DT_DIR) < 0)
+			goto out;
+		offset++;
+	}
+
+	curofs=1;
 	mutex_lock(&f->sem);
 	for (fd = f->dents; fd; fd = fd->next) {
+
 		curofs++;
-		/* First loop: curofs = 2; pos = 2 */
-		if (curofs < ctx->pos) {
+		/* First loop: curofs = 2; offset = 2 */
+		if (curofs < offset) {
 			jffs2_dbg(2, "Skipping dirent: \"%s\", ino #%u, type %d, because curofs %ld < offset %ld\n",
-				  fd->name, fd->ino, fd->type, curofs, (unsigned long)ctx->pos);
+				  fd->name, fd->ino, fd->type, curofs, offset);
 			continue;
 		}
 		if (!fd->ino) {
 			jffs2_dbg(2, "Skipping deletion dirent \"%s\"\n",
 				  fd->name);
-			ctx->pos++;
+			offset++;
 			continue;
 		}
 		jffs2_dbg(2, "Dirent %ld: \"%s\", ino #%u, type %d\n",
-			  (unsigned long)ctx->pos, fd->name, fd->ino, fd->type);
-		if (!dir_emit(ctx, fd->name, strlen(fd->name), fd->ino, fd->type))
+			  offset, fd->name, fd->ino, fd->type);
+		if (filldir(dirent, fd->name, strlen(fd->name), offset, fd->ino, fd->type) < 0)
 			break;
-		ctx->pos++;
+		offset++;
 	}
 	mutex_unlock(&f->sem);
+ out:
+	filp->f_pos = offset;
 	return 0;
 }
 
@@ -158,7 +175,7 @@ static int jffs2_readdir(struct file *file, struct dir_context *ctx)
 
 
 static int jffs2_create(struct inode *dir_i, struct dentry *dentry,
-			umode_t mode, bool excl)
+			umode_t mode, struct nameidata *nd)
 {
 	struct jffs2_raw_inode *ri;
 	struct jffs2_inode_info *f, *dir_f;
@@ -209,7 +226,8 @@ static int jffs2_create(struct inode *dir_i, struct dentry *dentry,
 		  __func__, inode->i_ino, inode->i_mode, inode->i_nlink,
 		  f->inocache->pino_nlink, inode->i_mapping->nrpages);
 
-	d_instantiate_new(dentry, inode);
+	d_instantiate(dentry, inode);
+	unlock_new_inode(inode);
 	return 0;
 
  fail:
@@ -225,14 +243,14 @@ static int jffs2_unlink(struct inode *dir_i, struct dentry *dentry)
 {
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(dir_i->i_sb);
 	struct jffs2_inode_info *dir_f = JFFS2_INODE_INFO(dir_i);
-	struct jffs2_inode_info *dead_f = JFFS2_INODE_INFO(d_inode(dentry));
+	struct jffs2_inode_info *dead_f = JFFS2_INODE_INFO(dentry->d_inode);
 	int ret;
 	uint32_t now = get_seconds();
 
 	ret = jffs2_do_unlink(c, dir_f, dentry->d_name.name,
 			      dentry->d_name.len, dead_f, now);
 	if (dead_f->inocache)
-		set_nlink(d_inode(dentry), dead_f->inocache->pino_nlink);
+		set_nlink(dentry->d_inode, dead_f->inocache->pino_nlink);
 	if (!ret)
 		dir_i->i_mtime = dir_i->i_ctime = ITIME(now);
 	return ret;
@@ -242,8 +260,8 @@ static int jffs2_unlink(struct inode *dir_i, struct dentry *dentry)
 
 static int jffs2_link (struct dentry *old_dentry, struct inode *dir_i, struct dentry *dentry)
 {
-	struct jffs2_sb_info *c = JFFS2_SB_INFO(old_dentry->d_sb);
-	struct jffs2_inode_info *f = JFFS2_INODE_INFO(d_inode(old_dentry));
+	struct jffs2_sb_info *c = JFFS2_SB_INFO(old_dentry->d_inode->i_sb);
+	struct jffs2_inode_info *f = JFFS2_INODE_INFO(old_dentry->d_inode);
 	struct jffs2_inode_info *dir_f = JFFS2_INODE_INFO(dir_i);
 	int ret;
 	uint8_t type;
@@ -253,11 +271,11 @@ static int jffs2_link (struct dentry *old_dentry, struct inode *dir_i, struct de
 	if (!f->inocache)
 		return -EIO;
 
-	if (d_is_dir(old_dentry))
+	if (S_ISDIR(old_dentry->d_inode->i_mode))
 		return -EPERM;
 
 	/* XXX: This is ugly */
-	type = (d_inode(old_dentry)->i_mode & S_IFMT) >> 12;
+	type = (old_dentry->d_inode->i_mode & S_IFMT) >> 12;
 	if (!type) type = DT_REG;
 
 	now = get_seconds();
@@ -265,11 +283,11 @@ static int jffs2_link (struct dentry *old_dentry, struct inode *dir_i, struct de
 
 	if (!ret) {
 		mutex_lock(&f->sem);
-		set_nlink(d_inode(old_dentry), ++f->inocache->pino_nlink);
+		set_nlink(old_dentry->d_inode, ++f->inocache->pino_nlink);
 		mutex_unlock(&f->sem);
-		d_instantiate(dentry, d_inode(old_dentry));
+		d_instantiate(dentry, old_dentry->d_inode);
 		dir_i->i_mtime = dir_i->i_ctime = ITIME(now);
-		ihold(d_inode(old_dentry));
+		ihold(old_dentry->d_inode);
 	}
 	return ret;
 }
@@ -355,7 +373,6 @@ static int jffs2_symlink (struct inode *dir_i, struct dentry *dentry, const char
 		ret = -ENOMEM;
 		goto fail;
 	}
-	inode->i_link = f->target;
 
 	jffs2_dbg(1, "%s(): symlink's target '%s' cached\n",
 		  __func__, (char *)f->target);
@@ -429,7 +446,8 @@ static int jffs2_symlink (struct inode *dir_i, struct dentry *dentry, const char
 	mutex_unlock(&dir_f->sem);
 	jffs2_complete_reservation(c);
 
-	d_instantiate_new(dentry, inode);
+	d_instantiate(dentry, inode);
+	unlock_new_inode(inode);
 	return 0;
 
  fail:
@@ -573,7 +591,8 @@ static int jffs2_mkdir (struct inode *dir_i, struct dentry *dentry, umode_t mode
 	mutex_unlock(&dir_f->sem);
 	jffs2_complete_reservation(c);
 
-	d_instantiate_new(dentry, inode);
+	d_instantiate(dentry, inode);
+	unlock_new_inode(inode);
 	return 0;
 
  fail:
@@ -585,7 +604,7 @@ static int jffs2_rmdir (struct inode *dir_i, struct dentry *dentry)
 {
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(dir_i->i_sb);
 	struct jffs2_inode_info *dir_f = JFFS2_INODE_INFO(dir_i);
-	struct jffs2_inode_info *f = JFFS2_INODE_INFO(d_inode(dentry));
+	struct jffs2_inode_info *f = JFFS2_INODE_INFO(dentry->d_inode);
 	struct jffs2_full_dirent *fd;
 	int ret;
 	uint32_t now = get_seconds();
@@ -599,7 +618,7 @@ static int jffs2_rmdir (struct inode *dir_i, struct dentry *dentry)
 			      dentry->d_name.len, f, now);
 	if (!ret) {
 		dir_i->i_mtime = dir_i->i_ctime = ITIME(now);
-		clear_nlink(d_inode(dentry));
+		clear_nlink(dentry->d_inode);
 		drop_nlink(dir_i);
 	}
 	return ret;
@@ -619,6 +638,9 @@ static int jffs2_mknod (struct inode *dir_i, struct dentry *dentry, umode_t mode
 	int devlen = 0;
 	uint32_t alloclen;
 	int ret;
+
+	if (!new_valid_dev(rdev))
+		return -EINVAL;
 
 	ri = jffs2_alloc_raw_inode();
 	if (!ri)
@@ -744,7 +766,8 @@ static int jffs2_mknod (struct inode *dir_i, struct dentry *dentry, umode_t mode
 	mutex_unlock(&dir_f->sem);
 	jffs2_complete_reservation(c);
 
-	d_instantiate_new(dentry, inode);
+	d_instantiate(dentry, inode);
+	unlock_new_inode(inode);
 	return 0;
 
  fail:
@@ -753,8 +776,7 @@ static int jffs2_mknod (struct inode *dir_i, struct dentry *dentry, umode_t mode
 }
 
 static int jffs2_rename (struct inode *old_dir_i, struct dentry *old_dentry,
-			 struct inode *new_dir_i, struct dentry *new_dentry,
-			 unsigned int flags)
+			 struct inode *new_dir_i, struct dentry *new_dentry)
 {
 	int ret;
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(old_dir_i->i_sb);
@@ -762,17 +784,14 @@ static int jffs2_rename (struct inode *old_dir_i, struct dentry *old_dentry,
 	uint8_t type;
 	uint32_t now;
 
-	if (flags & ~RENAME_NOREPLACE)
-		return -EINVAL;
-
 	/* The VFS will check for us and prevent trying to rename a
 	 * file over a directory and vice versa, but if it's a directory,
 	 * the VFS can't check whether the victim is empty. The filesystem
 	 * needs to do that for itself.
 	 */
-	if (d_really_is_positive(new_dentry)) {
-		victim_f = JFFS2_INODE_INFO(d_inode(new_dentry));
-		if (d_is_dir(new_dentry)) {
+	if (new_dentry->d_inode) {
+		victim_f = JFFS2_INODE_INFO(new_dentry->d_inode);
+		if (S_ISDIR(new_dentry->d_inode->i_mode)) {
 			struct jffs2_full_dirent *fd;
 
 			mutex_lock(&victim_f->sem);
@@ -794,12 +813,12 @@ static int jffs2_rename (struct inode *old_dir_i, struct dentry *old_dentry,
 	/* Make a hard link */
 
 	/* XXX: This is ugly */
-	type = (d_inode(old_dentry)->i_mode & S_IFMT) >> 12;
+	type = (old_dentry->d_inode->i_mode & S_IFMT) >> 12;
 	if (!type) type = DT_REG;
 
 	now = get_seconds();
 	ret = jffs2_do_link(c, JFFS2_INODE_INFO(new_dir_i),
-			    d_inode(old_dentry)->i_ino, type,
+			    old_dentry->d_inode->i_ino, type,
 			    new_dentry->d_name.name, new_dentry->d_name.len, now);
 
 	if (ret)
@@ -807,15 +826,15 @@ static int jffs2_rename (struct inode *old_dir_i, struct dentry *old_dentry,
 
 	if (victim_f) {
 		/* There was a victim. Kill it off nicely */
-		if (d_is_dir(new_dentry))
-			clear_nlink(d_inode(new_dentry));
+		if (S_ISDIR(new_dentry->d_inode->i_mode))
+			clear_nlink(new_dentry->d_inode);
 		else
-			drop_nlink(d_inode(new_dentry));
+			drop_nlink(new_dentry->d_inode);
 		/* Don't oops if the victim was a dirent pointing to an
 		   inode which didn't exist. */
 		if (victim_f->inocache) {
 			mutex_lock(&victim_f->sem);
-			if (d_is_dir(new_dentry))
+			if (S_ISDIR(new_dentry->d_inode->i_mode))
 				victim_f->inocache->pino_nlink = 0;
 			else
 				victim_f->inocache->pino_nlink--;
@@ -825,7 +844,7 @@ static int jffs2_rename (struct inode *old_dir_i, struct dentry *old_dentry,
 
 	/* If it was a directory we moved, and there was no victim,
 	   increase i_nlink on its new parent */
-	if (d_is_dir(old_dentry) && !victim_f)
+	if (S_ISDIR(old_dentry->d_inode->i_mode) && !victim_f)
 		inc_nlink(new_dir_i);
 
 	/* Unlink the original */
@@ -836,28 +855,23 @@ static int jffs2_rename (struct inode *old_dir_i, struct dentry *old_dentry,
 
 	if (ret) {
 		/* Oh shit. We really ought to make a single node which can do both atomically */
-		struct jffs2_inode_info *f = JFFS2_INODE_INFO(d_inode(old_dentry));
+		struct jffs2_inode_info *f = JFFS2_INODE_INFO(old_dentry->d_inode);
 		mutex_lock(&f->sem);
-		inc_nlink(d_inode(old_dentry));
-		if (f->inocache && !d_is_dir(old_dentry))
+		inc_nlink(old_dentry->d_inode);
+		if (f->inocache && !S_ISDIR(old_dentry->d_inode->i_mode))
 			f->inocache->pino_nlink++;
 		mutex_unlock(&f->sem);
 
 		pr_notice("%s(): Link succeeded, unlink failed (err %d). You now have a hard link\n",
 			  __func__, ret);
-		/*
-		 * We can't keep the target in dcache after that.
-		 * For one thing, we can't afford dentry aliases for directories.
-		 * For another, if there was a victim, we _can't_ set new inode
-		 * for that sucker and we have to trigger mount eviction - the
-		 * caller won't do it on its own since we are returning an error.
-		 */
-		d_invalidate(new_dentry);
+		/* Might as well let the VFS know */
+		d_instantiate(new_dentry, old_dentry->d_inode);
+		ihold(old_dentry->d_inode);
 		new_dir_i->i_mtime = new_dir_i->i_ctime = ITIME(now);
 		return ret;
 	}
 
-	if (d_is_dir(old_dentry))
+	if (S_ISDIR(old_dentry->d_inode->i_mode))
 		drop_nlink(old_dir_i);
 
 	new_dir_i->i_mtime = new_dir_i->i_ctime = old_dir_i->i_mtime = old_dir_i->i_ctime = ITIME(now);

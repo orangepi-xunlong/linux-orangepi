@@ -25,7 +25,8 @@ static int __init pci_eisa_init(struct pci_dev *pdev)
 	struct resource *res, *bus_res = NULL;
 
 	if ((rc = pci_enable_device (pdev))) {
-		dev_err(&pdev->dev, "Could not enable device\n");
+		printk (KERN_ERR "pci_eisa : Could not enable device %s\n",
+			pci_name(pdev));
 		return rc;
 	}
 
@@ -58,7 +59,7 @@ static int __init pci_eisa_init(struct pci_dev *pdev)
 	dev_set_drvdata(pci_eisa_root.dev, &pci_eisa_root);
 
 	if (eisa_root_register (&pci_eisa_root)) {
-		dev_err(&pdev->dev, "Could not register EISA root\n");
+		printk (KERN_ERR "pci_eisa : Could not register EISA root\n");
 		return -1;
 	}
 

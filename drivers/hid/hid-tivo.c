@@ -64,7 +64,6 @@ static const struct hid_device_id tivo_devices[] = {
 	/* TiVo Slide Bluetooth remote, pairs with a Broadcom dongle */
 	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_TIVO, USB_DEVICE_ID_TIVO_SLIDE_BT) },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_TIVO, USB_DEVICE_ID_TIVO_SLIDE) },
-	{ HID_USB_DEVICE(USB_VENDOR_ID_TIVO, USB_DEVICE_ID_TIVO_SLIDE_PRO) },
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, tivo_devices);
@@ -74,7 +73,18 @@ static struct hid_driver tivo_driver = {
 	.id_table = tivo_devices,
 	.input_mapping = tivo_input_mapping,
 };
-module_hid_driver(tivo_driver);
 
+static int __init tivo_init(void)
+{
+	return hid_register_driver(&tivo_driver);
+}
+
+static void __exit tivo_exit(void)
+{
+	hid_unregister_driver(&tivo_driver);
+}
+
+module_init(tivo_init);
+module_exit(tivo_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jarod Wilson <jarod@redhat.com>");

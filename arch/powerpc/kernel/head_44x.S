@@ -39,7 +39,6 @@
 #include <asm/asm-offsets.h>
 #include <asm/ptrace.h>
 #include <asm/synch.h>
-#include <asm/export.h>
 #include "head_booke.h"
 
 
@@ -249,11 +248,10 @@ _ENTRY(_start);
 
 interrupt_base:
 	/* Critical Input Interrupt */
-	CRITICAL_EXCEPTION(0x0100, CRITICAL, CriticalInput, unknown_exception)
+	CRITICAL_EXCEPTION(0x0100, CriticalInput, unknown_exception)
 
 	/* Machine Check Interrupt */
-	CRITICAL_EXCEPTION(0x0200, MACHINE_CHECK, MachineCheck, \
-			   machine_check_exception)
+	CRITICAL_EXCEPTION(0x0200, MachineCheck, machine_check_exception)
 	MCHECK_EXCEPTION(0x0210, MachineCheckA, machine_check_exception)
 
 	/* Data Storage Interrupt */
@@ -263,8 +261,7 @@ interrupt_base:
 	INSTRUCTION_STORAGE_EXCEPTION
 
 	/* External Input Interrupt */
-	EXCEPTION(0x0500, BOOKE_INTERRUPT_EXTERNAL, ExternalInput, \
-		  do_IRQ, EXC_XFER_LITE)
+	EXCEPTION(0x0500, ExternalInput, do_IRQ, EXC_XFER_LITE)
 
 	/* Alignment Interrupt */
 	ALIGNMENT_EXCEPTION
@@ -276,32 +273,29 @@ interrupt_base:
 #ifdef CONFIG_PPC_FPU
 	FP_UNAVAILABLE_EXCEPTION
 #else
-	EXCEPTION(0x2010, BOOKE_INTERRUPT_FP_UNAVAIL, \
-		  FloatingPointUnavailable, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2010, FloatingPointUnavailable, unknown_exception, EXC_XFER_EE)
 #endif
 	/* System Call Interrupt */
 	START_EXCEPTION(SystemCall)
-	NORMAL_EXCEPTION_PROLOG(BOOKE_INTERRUPT_SYSCALL)
+	NORMAL_EXCEPTION_PROLOG
 	EXC_XFER_EE_LITE(0x0c00, DoSyscall)
 
 	/* Auxiliary Processor Unavailable Interrupt */
-	EXCEPTION(0x2020, BOOKE_INTERRUPT_AP_UNAVAIL, \
-		  AuxillaryProcessorUnavailable, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2020, AuxillaryProcessorUnavailable, unknown_exception, EXC_XFER_EE)
 
 	/* Decrementer Interrupt */
 	DECREMENTER_EXCEPTION
 
 	/* Fixed Internal Timer Interrupt */
 	/* TODO: Add FIT support */
-	EXCEPTION(0x1010, BOOKE_INTERRUPT_FIT, FixedIntervalTimer, \
-		  unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1010, FixedIntervalTimer, unknown_exception, EXC_XFER_EE)
 
 	/* Watchdog Timer Interrupt */
 	/* TODO: Add watchdog support */
 #ifdef CONFIG_BOOKE_WDT
-	CRITICAL_EXCEPTION(0x1020, WATCHDOG, WatchdogTimer, WatchdogException)
+	CRITICAL_EXCEPTION(0x1020, WatchdogTimer, WatchdogException)
 #else
-	CRITICAL_EXCEPTION(0x1020, WATCHDOG, WatchdogTimer, unknown_exception)
+	CRITICAL_EXCEPTION(0x1020, WatchdogTimer, unknown_exception)
 #endif
 
 	/* Data TLB Error Interrupt */
@@ -770,8 +764,6 @@ finish_tlb_load_47x:
 	 */
 	DEBUG_CRIT_EXCEPTION
 
-interrupt_end:
-
 /*
  * Global functions
  */
@@ -784,6 +776,24 @@ _GLOBAL(__fixup_440A_mcheck)
 	mtspr	SPRN_IVOR1,r3
 	sync
 	blr
+
+/*
+ * extern void giveup_altivec(struct task_struct *prev)
+ *
+ * The 44x core does not have an AltiVec unit.
+ */
+_GLOBAL(giveup_altivec)
+	blr
+
+/*
+ * extern void giveup_fpu(struct task_struct *prev)
+ *
+ * The 44x core does not have an FPU.
+ */
+#ifndef CONFIG_PPC_FPU
+_GLOBAL(giveup_fpu)
+	blr
+#endif
 
 _GLOBAL(set_context)
 
@@ -807,7 +817,7 @@ _GLOBAL(set_context)
 _GLOBAL(init_cpu_state)
 	mflr	r22
 #ifdef CONFIG_PPC_47x
-	/* We use the PVR to differentiate 44x cores from 476 */
+	/* We use the PVR to differenciate 44x cores from 476 */
 	mfspr	r3,SPRN_PVR
 	srwi	r3,r3,16
 	cmplwi	cr0,r3,PVR_476FPE@h
@@ -1211,12 +1221,10 @@ clear_utlb_entry:
 
 	/* We configure icbi to invalidate 128 bytes at a time since the
 	 * current 32-bit kernel code isn't too happy with icache != dcache
-	 * block size. We also disable the BTAC as this can cause errors
-	 * in some circumstances (see IBM Erratum 47).
+	 * block size
 	 */
 	mfspr	r3,SPRN_CCR0
 	oris	r3,r3,0x0020
-	ori	r3,r3,0x0040
 	mtspr	SPRN_CCR0,r3
 	isync
 
@@ -1255,7 +1263,6 @@ sdata:
 	.globl	empty_zero_page
 empty_zero_page:
 	.space	PAGE_SIZE
-EXPORT_SYMBOL(empty_zero_page)
 
 /*
  * To support >32-bit physical addresses, we use an 8KB pgdir.

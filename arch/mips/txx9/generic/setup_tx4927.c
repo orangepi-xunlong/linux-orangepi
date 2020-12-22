@@ -29,8 +29,8 @@ static void __init tx4927_wdr_init(void)
 {
 	/* report watchdog reset status */
 	if (____raw_readq(&tx4927_ccfgptr->ccfg) & TX4927_CCFG_WDRST)
-		pr_warn("Watchdog reset detected at 0x%lx\n",
-			read_c0_errorepc());
+		pr_warning("Watchdog reset detected at 0x%lx\n",
+			   read_c0_errorepc());
 	/* clear WatchDogReset (W1C) */
 	tx4927_ccfg_set(TX4927_CCFG_WDRST);
 	/* do reset on watchdog */
@@ -215,6 +215,7 @@ void __init tx4927_setup(void)
 		txx9_tmr_init(TX4927_TMR_REG(i) & 0xfffffffffULL);
 
 	/* PIO */
+	txx9_gpio_init(TX4927_PIO_REG & 0xfffffffffULL, 0, TX4927_NUM_PIO);
 	__raw_writel(0, &tx4927_pioptr->maskcpu);
 	__raw_writel(0, &tx4927_pioptr->maskext);
 
@@ -249,7 +250,7 @@ void __init tx4927_mtd_init(int ch)
 	unsigned long size = txx9_ce_res[ch].end - start + 1;
 
 	if (!(TX4927_EBUSC_CR(ch) & 0x8))
-		return; /* disabled */
+		return;	/* disabled */
 	txx9_physmap_flash_init(ch, start, size, &pdata);
 }
 

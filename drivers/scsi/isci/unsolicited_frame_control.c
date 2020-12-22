@@ -57,19 +57,31 @@
 #include "unsolicited_frame_control.h"
 #include "registers.h"
 
-void sci_unsolicited_frame_control_construct(struct isci_host *ihost)
+int sci_unsolicited_frame_control_construct(struct isci_host *ihost)
 {
 	struct sci_unsolicited_frame_control *uf_control = &ihost->uf_control;
 	struct sci_unsolicited_frame *uf;
-	dma_addr_t dma = ihost->ufi_dma;
-	void *virt = ihost->ufi_buf;
-	int i;
+	u32 buf_len, header_len, i;
+	dma_addr_t dma;
+	size_t size;
+	void *virt;
+
+	/*
+	 * Prepare all of the memory sizes for the UF headers, UF address
+	 * table, and UF buffers themselves.
+	 */
+	buf_len = SCU_MAX_UNSOLICITED_FRAMES * SCU_UNSOLICITED_FRAME_BUFFER_SIZE;
+	header_len = SCU_MAX_UNSOLICITED_FRAMES * sizeof(struct scu_unsolicited_frame_header);
+	size = buf_len + header_len + SCU_MAX_UNSOLICITED_FRAMES * sizeof(uf_control->address_table.array[0]);
 
 	/*
 	 * The Unsolicited Frame buffers are set at the start of the UF
 	 * memory descriptor entry. The headers and address table will be
 	 * placed after the buffers.
 	 */
+	virt = dmam_alloc_coherent(&ihost->pdev->dev, size, &dma, GFP_KERNEL);
+	if (!virt)
+		return -ENOMEM;
 
 	/*
 	 * Program the location of the UF header table into the SCU.
@@ -81,8 +93,8 @@ void sci_unsolicited_frame_control_construct(struct isci_host *ihost)
 	 *   headers, since we program the UF address table pointers to
 	 *   NULL.
 	 */
-	uf_control->headers.physical_address = dma + SCI_UFI_BUF_SIZE;
-	uf_control->headers.array = virt + SCI_UFI_BUF_SIZE;
+	uf_control->headers.physical_address = dma + buf_len;
+	uf_control->headers.array = virt + buf_len;
 
 	/*
 	 * Program the location of the UF address table into the SCU.
@@ -91,8 +103,8 @@ void sci_unsolicited_frame_control_construct(struct isci_host *ihost)
 	 *   byte boundary already due to above programming headers being on a
 	 *   64-bit boundary and headers are on a 64-bytes in size.
 	 */
-	uf_control->address_table.physical_address = dma + SCI_UFI_BUF_SIZE + SCI_UFI_HDR_SIZE;
-	uf_control->address_table.array = virt + SCI_UFI_BUF_SIZE + SCI_UFI_HDR_SIZE;
+	uf_control->address_table.physical_address = dma + buf_len + header_len;
+	uf_control->address_table.array = virt + buf_len + header_len;
 	uf_control->get = 0;
 
 	/*
@@ -123,6 +135,8 @@ void sci_unsolicited_frame_control_construct(struct isci_host *ihost)
 		virt += SCU_UNSOLICITED_FRAME_BUFFER_SIZE;
 		dma += SCU_UNSOLICITED_FRAME_BUFFER_SIZE;
 	}
+
+	return 0;
 }
 
 enum sci_status sci_unsolicited_frame_control_get_header(struct sci_unsolicited_frame_control *uf_control,

@@ -48,6 +48,7 @@ typedef unsigned long mm_segment_t;
 
 struct thread_info {
 	struct task_struct	*task;		/* main task structure */
+	struct exec_domain	*exec_domain;	/* execution domain */
 	unsigned long		flags;		/* low level flags */
 	__u32			cpu;		/* current CPU */
 	__s32			preempt_count; /* 0 => preemptable, <0 => BUG */
@@ -56,6 +57,7 @@ struct thread_info {
 					       0-0x7FFFFFFF for user-thead
 					       0-0xFFFFFFFF for kernel-thread
 					     */
+	struct restart_block    restart_block;
 	__u8			supervisor_stack[0];
 
 	/* saved context data */
@@ -72,10 +74,14 @@ struct thread_info {
 #define INIT_THREAD_INFO(tsk)				\
 {							\
 	.task		= &tsk,				\
+	.exec_domain	= &default_exec_domain,		\
 	.flags		= 0,				\
 	.cpu		= 0,				\
 	.preempt_count	= 1,				\
 	.addr_limit	= KERNEL_DS,			\
+	.restart_block  = {				\
+			  .fn = do_no_restart_syscall,	\
+	},						\
 	.ksp            = 0,                            \
 }
 
@@ -115,6 +121,7 @@ register struct thread_info *current_thread_info_reg asm("r10");
 #define _TIF_SIGPENDING		(1<<TIF_SIGPENDING)
 #define _TIF_NEED_RESCHED	(1<<TIF_NEED_RESCHED)
 #define _TIF_SINGLESTEP		(1<<TIF_SINGLESTEP)
+#define _TIF_RESTORE_SIGMASK     (1<<TIF_RESTORE_SIGMASK)
 #define _TIF_POLLING_NRFLAG	(1<<TIF_POLLING_NRFLAG)
 
 

@@ -13,7 +13,6 @@
  */
 
 #include <linux/types.h>
-#include <linux/jump_label.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/init.h>
@@ -21,10 +20,7 @@
 #include <asm/code-patching.h>
 #include <asm/page.h>
 #include <asm/sections.h>
-#include <asm/setup.h>
-#include <asm/security_features.h>
-#include <asm/firmware.h>
-#include <asm/setup.h>
+
 
 struct fixup_entry {
 	unsigned long	mask;
@@ -56,7 +52,7 @@ static int patch_alt_instruction(unsigned int *src, unsigned int *dest,
 		unsigned int *target = (unsigned int *)branch_target(src);
 
 		/* Branch within the section doesn't need translating */
-		if (target < alt_start || target > alt_end) {
+		if (target < alt_start || target >= alt_end) {
 			instr = translate_branch(dest, src);
 			if (!instr)
 				return 1;
@@ -117,261 +113,6 @@ void do_feature_fixups(unsigned long value, void *fixup_start, void *fixup_end)
 	}
 }
 
-#ifdef CONFIG_PPC_BOOK3S_64
-void do_stf_entry_barrier_fixups(enum stf_barrier_type types)
-{
-	unsigned int instrs[3], *dest;
-	long *start, *end;
-	int i;
-
-	start = PTRRELOC(&__start___stf_entry_barrier_fixup),
-	end = PTRRELOC(&__stop___stf_entry_barrier_fixup);
-
-	instrs[0] = 0x60000000; /* nop */
-	instrs[1] = 0x60000000; /* nop */
-	instrs[2] = 0x60000000; /* nop */
-
-	i = 0;
-	if (types & STF_BARRIER_FALLBACK) {
-		instrs[i++] = 0x7d4802a6; /* mflr r10		*/
-		instrs[i++] = 0x60000000; /* branch patched below */
-		instrs[i++] = 0x7d4803a6; /* mtlr r10		*/
-	} else if (types & STF_BARRIER_EIEIO) {
-		instrs[i++] = 0x7e0006ac; /* eieio + bit 6 hint */
-	} else if (types & STF_BARRIER_SYNC_ORI) {
-		instrs[i++] = 0x7c0004ac; /* hwsync		*/
-		instrs[i++] = 0xe94d0000; /* ld r10,0(r13)	*/
-		instrs[i++] = 0x63ff0000; /* ori 31,31,0 speculation barrier */
-	}
-
-	for (i = 0; start < end; start++, i++) {
-		dest = (void *)start + *start;
-
-		pr_devel("patching dest %lx\n", (unsigned long)dest);
-
-		patch_instruction(dest, instrs[0]);
-
-		if (types & STF_BARRIER_FALLBACK)
-			patch_branch(dest + 1, (unsigned long)&stf_barrier_fallback,
-				     BRANCH_SET_LINK);
-		else
-			patch_instruction(dest + 1, instrs[1]);
-
-		patch_instruction(dest + 2, instrs[2]);
-	}
-
-	printk(KERN_DEBUG "stf-barrier: patched %d entry locations (%s barrier)\n", i,
-		(types == STF_BARRIER_NONE)                  ? "no" :
-		(types == STF_BARRIER_FALLBACK)              ? "fallback" :
-		(types == STF_BARRIER_EIEIO)                 ? "eieio" :
-		(types == (STF_BARRIER_SYNC_ORI))            ? "hwsync"
-		                                           : "unknown");
-}
-
-void do_stf_exit_barrier_fixups(enum stf_barrier_type types)
-{
-	unsigned int instrs[6], *dest;
-	long *start, *end;
-	int i;
-
-	start = PTRRELOC(&__start___stf_exit_barrier_fixup),
-	end = PTRRELOC(&__stop___stf_exit_barrier_fixup);
-
-	instrs[0] = 0x60000000; /* nop */
-	instrs[1] = 0x60000000; /* nop */
-	instrs[2] = 0x60000000; /* nop */
-	instrs[3] = 0x60000000; /* nop */
-	instrs[4] = 0x60000000; /* nop */
-	instrs[5] = 0x60000000; /* nop */
-
-	i = 0;
-	if (types & STF_BARRIER_FALLBACK || types & STF_BARRIER_SYNC_ORI) {
-		if (cpu_has_feature(CPU_FTR_HVMODE)) {
-			instrs[i++] = 0x7db14ba6; /* mtspr 0x131, r13 (HSPRG1) */
-			instrs[i++] = 0x7db04aa6; /* mfspr r13, 0x130 (HSPRG0) */
-		} else {
-			instrs[i++] = 0x7db243a6; /* mtsprg 2,r13	*/
-			instrs[i++] = 0x7db142a6; /* mfsprg r13,1    */
-	        }
-		instrs[i++] = 0x7c0004ac; /* hwsync		*/
-		instrs[i++] = 0xe9ad0000; /* ld r13,0(r13)	*/
-		instrs[i++] = 0x63ff0000; /* ori 31,31,0 speculation barrier */
-		if (cpu_has_feature(CPU_FTR_HVMODE)) {
-			instrs[i++] = 0x7db14aa6; /* mfspr r13, 0x131 (HSPRG1) */
-		} else {
-			instrs[i++] = 0x7db242a6; /* mfsprg r13,2 */
-		}
-	} else if (types & STF_BARRIER_EIEIO) {
-		instrs[i++] = 0x7e0006ac; /* eieio + bit 6 hint */
-	}
-
-	for (i = 0; start < end; start++, i++) {
-		dest = (void *)start + *start;
-
-		pr_devel("patching dest %lx\n", (unsigned long)dest);
-
-		patch_instruction(dest, instrs[0]);
-		patch_instruction(dest + 1, instrs[1]);
-		patch_instruction(dest + 2, instrs[2]);
-		patch_instruction(dest + 3, instrs[3]);
-		patch_instruction(dest + 4, instrs[4]);
-		patch_instruction(dest + 5, instrs[5]);
-	}
-	printk(KERN_DEBUG "stf-barrier: patched %d exit locations (%s barrier)\n", i,
-		(types == STF_BARRIER_NONE)                  ? "no" :
-		(types == STF_BARRIER_FALLBACK)              ? "fallback" :
-		(types == STF_BARRIER_EIEIO)                 ? "eieio" :
-		(types == (STF_BARRIER_SYNC_ORI))            ? "hwsync"
-		                                           : "unknown");
-}
-
-
-void do_stf_barrier_fixups(enum stf_barrier_type types)
-{
-	do_stf_entry_barrier_fixups(types);
-	do_stf_exit_barrier_fixups(types);
-}
-
-void do_rfi_flush_fixups(enum l1d_flush_type types)
-{
-	unsigned int instrs[3], *dest;
-	long *start, *end;
-	int i;
-
-	start = PTRRELOC(&__start___rfi_flush_fixup),
-	end = PTRRELOC(&__stop___rfi_flush_fixup);
-
-	instrs[0] = 0x60000000; /* nop */
-	instrs[1] = 0x60000000; /* nop */
-	instrs[2] = 0x60000000; /* nop */
-
-	if (types & L1D_FLUSH_FALLBACK)
-		/* b .+16 to fallback flush */
-		instrs[0] = 0x48000010;
-
-	i = 0;
-	if (types & L1D_FLUSH_ORI) {
-		instrs[i++] = 0x63ff0000; /* ori 31,31,0 speculation barrier */
-		instrs[i++] = 0x63de0000; /* ori 30,30,0 L1d flush*/
-	}
-
-	if (types & L1D_FLUSH_MTTRIG)
-		instrs[i++] = 0x7c12dba6; /* mtspr TRIG2,r0 (SPR #882) */
-
-	for (i = 0; start < end; start++, i++) {
-		dest = (void *)start + *start;
-
-		pr_devel("patching dest %lx\n", (unsigned long)dest);
-
-		patch_instruction(dest, instrs[0]);
-		patch_instruction(dest + 1, instrs[1]);
-		patch_instruction(dest + 2, instrs[2]);
-	}
-
-	printk(KERN_DEBUG "rfi-flush: patched %d locations (%s flush)\n", i,
-		(types == L1D_FLUSH_NONE)       ? "no" :
-		(types == L1D_FLUSH_FALLBACK)   ? "fallback displacement" :
-		(types &  L1D_FLUSH_ORI)        ? (types & L1D_FLUSH_MTTRIG)
-							? "ori+mttrig type"
-							: "ori type" :
-		(types &  L1D_FLUSH_MTTRIG)     ? "mttrig type"
-						: "unknown");
-}
-
-void do_barrier_nospec_fixups_range(bool enable, void *fixup_start, void *fixup_end)
-{
-	unsigned int instr, *dest;
-	long *start, *end;
-	int i;
-
-	start = fixup_start;
-	end = fixup_end;
-
-	instr = 0x60000000; /* nop */
-
-	if (enable) {
-		pr_info("barrier-nospec: using ORI speculation barrier\n");
-		instr = 0x63ff0000; /* ori 31,31,0 speculation barrier */
-	}
-
-	for (i = 0; start < end; start++, i++) {
-		dest = (void *)start + *start;
-
-		pr_devel("patching dest %lx\n", (unsigned long)dest);
-		patch_instruction(dest, instr);
-	}
-
-	printk(KERN_DEBUG "barrier-nospec: patched %d locations\n", i);
-}
-
-#endif /* CONFIG_PPC_BOOK3S_64 */
-
-#ifdef CONFIG_PPC_BARRIER_NOSPEC
-void do_barrier_nospec_fixups(bool enable)
-{
-	void *start, *end;
-
-	start = PTRRELOC(&__start___barrier_nospec_fixup),
-	end = PTRRELOC(&__stop___barrier_nospec_fixup);
-
-	do_barrier_nospec_fixups_range(enable, start, end);
-}
-#endif /* CONFIG_PPC_BARRIER_NOSPEC */
-
-#ifdef CONFIG_PPC_FSL_BOOK3E
-void do_barrier_nospec_fixups_range(bool enable, void *fixup_start, void *fixup_end)
-{
-	unsigned int instr[2], *dest;
-	long *start, *end;
-	int i;
-
-	start = fixup_start;
-	end = fixup_end;
-
-	instr[0] = PPC_INST_NOP;
-	instr[1] = PPC_INST_NOP;
-
-	if (enable) {
-		pr_info("barrier-nospec: using isync; sync as speculation barrier\n");
-		instr[0] = PPC_INST_ISYNC;
-		instr[1] = PPC_INST_SYNC;
-	}
-
-	for (i = 0; start < end; start++, i++) {
-		dest = (void *)start + *start;
-
-		pr_devel("patching dest %lx\n", (unsigned long)dest);
-		patch_instruction(dest, instr[0]);
-		patch_instruction(dest + 1, instr[1]);
-	}
-
-	printk(KERN_DEBUG "barrier-nospec: patched %d locations\n", i);
-}
-
-static void patch_btb_flush_section(long *curr)
-{
-	unsigned int *start, *end;
-
-	start = (void *)curr + *curr;
-	end = (void *)curr + *(curr + 1);
-	for (; start < end; start++) {
-		pr_devel("patching dest %lx\n", (unsigned long)start);
-		patch_instruction(start, PPC_INST_NOP);
-	}
-}
-
-void do_btb_flush_fixups(void)
-{
-	long *start, *end;
-
-	start = PTRRELOC(&__start__btb_flush_fixup);
-	end = PTRRELOC(&__stop__btb_flush_fixup);
-
-	for (; start < end; start += 2)
-		patch_btb_flush_section(start);
-}
-#endif /* CONFIG_PPC_FSL_BOOK3E */
-
 void do_lwsync_fixups(unsigned long value, void *fixup_start, void *fixup_end)
 {
 	long *start, *end;
@@ -389,7 +130,7 @@ void do_lwsync_fixups(unsigned long value, void *fixup_start, void *fixup_end)
 	}
 }
 
-static void do_final_fixups(void)
+void do_final_fixups(void)
 {
 #if defined(CONFIG_PPC64) && defined(CONFIG_RELOCATABLE)
 	int *src, *dest;
@@ -410,70 +151,6 @@ static void do_final_fixups(void)
 #endif
 }
 
-static unsigned long __initdata saved_cpu_features;
-static unsigned int __initdata saved_mmu_features;
-#ifdef CONFIG_PPC64
-static unsigned long __initdata saved_firmware_features;
-#endif
-
-void __init apply_feature_fixups(void)
-{
-	struct cpu_spec *spec = PTRRELOC(*PTRRELOC(&cur_cpu_spec));
-
-	*PTRRELOC(&saved_cpu_features) = spec->cpu_features;
-	*PTRRELOC(&saved_mmu_features) = spec->mmu_features;
-
-	/*
-	 * Apply the CPU-specific and firmware specific fixups to kernel text
-	 * (nop out sections not relevant to this CPU or this firmware).
-	 */
-	do_feature_fixups(spec->cpu_features,
-			  PTRRELOC(&__start___ftr_fixup),
-			  PTRRELOC(&__stop___ftr_fixup));
-
-	do_feature_fixups(spec->mmu_features,
-			  PTRRELOC(&__start___mmu_ftr_fixup),
-			  PTRRELOC(&__stop___mmu_ftr_fixup));
-
-	do_lwsync_fixups(spec->cpu_features,
-			 PTRRELOC(&__start___lwsync_fixup),
-			 PTRRELOC(&__stop___lwsync_fixup));
-
-#ifdef CONFIG_PPC64
-	saved_firmware_features = powerpc_firmware_features;
-	do_feature_fixups(powerpc_firmware_features,
-			  &__start___fw_ftr_fixup, &__stop___fw_ftr_fixup);
-#endif
-	do_final_fixups();
-}
-
-void __init setup_feature_keys(void)
-{
-	/*
-	 * Initialise jump label. This causes all the cpu/mmu_has_feature()
-	 * checks to take on their correct polarity based on the current set of
-	 * CPU/MMU features.
-	 */
-	jump_label_init();
-	cpu_feature_keys_init();
-	mmu_feature_keys_init();
-}
-
-static int __init check_features(void)
-{
-	WARN(saved_cpu_features != cur_cpu_spec->cpu_features,
-	     "CPU features changed after feature patching!\n");
-	WARN(saved_mmu_features != cur_cpu_spec->mmu_features,
-	     "MMU features changed after feature patching!\n");
-#ifdef CONFIG_PPC64
-	WARN(saved_firmware_features != powerpc_firmware_features,
-	     "Firmware features changed after feature patching!\n");
-#endif
-
-	return 0;
-}
-late_initcall(check_features);
-
 #ifdef CONFIG_FTR_FIXUP_SELFTEST
 
 #define check(x)	\
@@ -487,7 +164,7 @@ static long calc_offset(struct fixup_entry *entry, unsigned int *p)
 	return (unsigned long)p - (unsigned long)entry;
 }
 
-static void test_basic_patching(void)
+void test_basic_patching(void)
 {
 	extern unsigned int ftr_fixup_test1;
 	extern unsigned int end_ftr_fixup_test1;

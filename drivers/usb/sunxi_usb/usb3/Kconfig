@@ -1,0 +1,34 @@
+config USB_SUNXI
+	tristate "SUNXI USB3 DRD Core Support"
+	depends on (USB && USB_GADGET)
+	select USB_OTG_UTILS
+	select USB_GADGET_DUALSPEED
+	select USB_GADGET_SUPERSPEED
+	select USB_XHCI_PLATFORM
+	help
+	  Say Y or M here if your system has a Dual Role SuperSpeed
+	  USB controller based on the DesignWare USB3 IP Core.
+
+	  If you choose to build this driver is a dynamically linked
+	  module, the module will be called sunxi.ko.
+
+if USB_SUNXI
+
+config USB_XHCI_ENHANCE
+    bool "Enhance for xhci controlle"
+    depends on ARCH_SUN9IW1
+	help
+	  Say Y here to susport special usb3 udev on SUNXI Driver.
+
+config USB_SUNXI_DEBUG
+	bool "Enable Debugging Messages"
+	help
+	  Say Y here to enable debugging messages on SUNXI Driver.
+
+config USB_SUNXI_VERBOSE
+	bool "Enable Verbose Debugging Messages"
+	depends on USB_SUNXI_DEBUG
+	help
+	  Say Y here to enable verbose debugging messages on SUNXI Driver.
+
+endif

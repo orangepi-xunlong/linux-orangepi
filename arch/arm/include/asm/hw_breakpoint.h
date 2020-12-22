@@ -51,7 +51,6 @@ static inline void decode_ctrl_reg(u32 reg,
 #define ARM_DEBUG_ARCH_V7_ECP14	3
 #define ARM_DEBUG_ARCH_V7_MM	4
 #define ARM_DEBUG_ARCH_V7_1	5
-#define ARM_DEBUG_ARCH_V8	6
 
 /* Breakpoint */
 #define ARM_BREAKPOINT_EXECUTE	0
@@ -86,9 +85,6 @@ static inline void decode_ctrl_reg(u32 reg,
 #define ARM_DSCR_HDBGEN		(1 << 14)
 #define ARM_DSCR_MDBGEN		(1 << 15)
 
-/* OSLSR os lock model bits */
-#define ARM_OSLSR_OSLM0		(1 << 0)
-
 /* opcode2 numbers for the co-processor instructions. */
 #define ARM_OP2_BVR		4
 #define ARM_OP2_BCR		5
@@ -102,18 +98,19 @@ static inline void decode_ctrl_reg(u32 reg,
 #define ARM_BASE_WCR		112
 
 /* Accessor macros for the debug registers. */
-#define ARM_DBG_READ(N, M, OP2, VAL) do {\
-	asm volatile("mrc p14, 0, %0, " #N "," #M ", " #OP2 : "=r" (VAL));\
+#define ARM_DBG_READ(M, OP2, VAL) do {\
+	asm volatile("mrc p14, 0, %0, c0," #M ", " #OP2 : "=r" (VAL));\
 } while (0)
 
-#define ARM_DBG_WRITE(N, M, OP2, VAL) do {\
-	asm volatile("mcr p14, 0, %0, " #N "," #M ", " #OP2 : : "r" (VAL));\
+#define ARM_DBG_WRITE(M, OP2, VAL) do {\
+	asm volatile("mcr p14, 0, %0, c0," #M ", " #OP2 : : "r" (VAL));\
 } while (0)
 
 struct notifier_block;
 struct perf_event;
 struct pmu;
 
+extern struct pmu perf_ops_bp;
 extern int arch_bp_generic_fields(struct arch_hw_breakpoint_ctrl ctrl,
 				  int *gen_len, int *gen_type);
 extern int arch_check_bp_in_kernelspace(struct perf_event *bp);

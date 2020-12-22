@@ -56,8 +56,8 @@ static int atl1c_get_settings(struct net_device *netdev,
 		else
 			ecmd->duplex = DUPLEX_HALF;
 	} else {
-		ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
-		ecmd->duplex = DUPLEX_UNKNOWN;
+		ethtool_cmd_speed_set(ecmd, -1);
+		ecmd->duplex = -1;
 	}
 
 	ecmd->autoneg = AUTONEG_ENABLE;
@@ -141,7 +141,8 @@ static void atl1c_get_regs(struct net_device *netdev,
 
 	memset(p, 0, AT_REGS_LEN);
 
-	regs->version = 1;
+	regs->version = 0;
+	AT_READ_REG(hw, REG_VPD_CAP, 		  p++);
 	AT_READ_REG(hw, REG_PM_CTRL, 		  p++);
 	AT_READ_REG(hw, REG_MAC_HALF_DUPLX_CTRL,  p++);
 	AT_READ_REG(hw, REG_TWSI_CTRL, 		  p++);
@@ -153,7 +154,7 @@ static void atl1c_get_regs(struct net_device *netdev,
 	AT_READ_REG(hw, REG_LINK_CTRL, 		  p++);
 	AT_READ_REG(hw, REG_IDLE_STATUS, 	  p++);
 	AT_READ_REG(hw, REG_MDIO_CTRL, 		  p++);
-	AT_READ_REG(hw, REG_SERDES,		  p++);
+	AT_READ_REG(hw, REG_SERDES_LOCK, 	  p++);
 	AT_READ_REG(hw, REG_MAC_CTRL, 		  p++);
 	AT_READ_REG(hw, REG_MAC_IPG_IFG, 	  p++);
 	AT_READ_REG(hw, REG_MAC_STA_ADDR, 	  p++);
@@ -166,9 +167,9 @@ static void atl1c_get_regs(struct net_device *netdev,
 	AT_READ_REG(hw, REG_WOL_CTRL, 		  p++);
 
 	atl1c_read_phy_reg(hw, MII_BMCR, &phy_data);
-	regs_buff[AT_REGS_LEN/sizeof(u32) - 2] = (u32) phy_data;
+	regs_buff[73] =	(u32) phy_data;
 	atl1c_read_phy_reg(hw, MII_BMSR, &phy_data);
-	regs_buff[AT_REGS_LEN/sizeof(u32) - 1] = (u32) phy_data;
+	regs_buff[74] = (u32) phy_data;
 }
 
 static int atl1c_get_eeprom_len(struct net_device *netdev)
@@ -233,6 +234,10 @@ static void atl1c_get_drvinfo(struct net_device *netdev,
 		sizeof(drvinfo->version));
 	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev),
 		sizeof(drvinfo->bus_info));
+	drvinfo->n_stats = 0;
+	drvinfo->testinfo_len = 0;
+	drvinfo->regdump_len = atl1c_get_regs_len(netdev);
+	drvinfo->eedump_len = atl1c_get_eeprom_len(netdev);
 }
 
 static void atl1c_get_wol(struct net_device *netdev,
@@ -301,5 +306,5 @@ static const struct ethtool_ops atl1c_ethtool_ops = {
 
 void atl1c_set_ethtool_ops(struct net_device *netdev)
 {
-	netdev->ethtool_ops = &atl1c_ethtool_ops;
+	SET_ETHTOOL_OPS(netdev, &atl1c_ethtool_ops);
 }

@@ -35,7 +35,9 @@
 
 struct mn10300_cpuinfo boot_cpu_data;
 
-static char __initdata cmd_line[COMMAND_LINE_SIZE];
+/* For PCI or other memory-mapped resources */
+unsigned long pci_mem_start = 0x18000000;
+
 char redboot_command_line[COMMAND_LINE_SIZE] =
 	"console=ttyS0,115200 root=/dev/mtdblock3 rw";
 
@@ -72,19 +74,45 @@ static const char *const mn10300_cputypes[] = {
 };
 
 /*
- * Pick out the memory size.  We look for mem=size,
- * where size is "size[KkMm]"
+ *
  */
-static int __init early_mem(char *p)
+static void __init parse_mem_cmdline(char **cmdline_p)
 {
-	memory_size = memparse(p, &p);
+	char *from, *to, c;
+
+	/* save unparsed command line copy for /proc/cmdline */
+	strcpy(boot_command_line, redboot_command_line);
+
+	/* see if there's an explicit memory size option */
+	from = redboot_command_line;
+	to = redboot_command_line;
+	c = ' ';
+
+	for (;;) {
+		if (c == ' ' && !memcmp(from, "mem=", 4)) {
+			if (to != redboot_command_line)
+				to--;
+			memory_size = memparse(from + 4, &from);
+		}
+
+		c = *(from++);
+		if (!c)
+			break;
+
+		*(to++) = c;
+	}
+
+	*to = '\0';
+	*cmdline_p = redboot_command_line;
 
 	if (memory_size == 0)
 		panic("Memory size not known\n");
 
-	return 0;
+	memory_end = (unsigned long) CONFIG_KERNEL_RAM_BASE_ADDRESS +
+		memory_size;
+	if (memory_end > phys_memory_end)
+		memory_end = phys_memory_end;
 }
-early_param("mem", early_mem);
 
 /*
  * architecture specific setup
@@ -97,20 +125,7 @@ void __init setup_arch(char **cmdline_p)
 	cpu_init();
 	unit_setup();
 	smp_init_cpus();
-
-	/* save unparsed command line copy for /proc/cmdline */
-	strlcpy(boot_command_line, redboot_command_line, COMMAND_LINE_SIZE);
-
-	/* populate cmd_line too for later use, preserving boot_command_line */
-	strlcpy(cmd_line, boot_command_line, COMMAND_LINE_SIZE);
-	*cmdline_p = cmd_line;
-
-	parse_early_param();
-
-	memory_end = (unsigned long) CONFIG_KERNEL_RAM_BASE_ADDRESS +
-		memory_size;
-	if (memory_end > phys_memory_end)
-		memory_end = phys_memory_end;
+	parse_mem_cmdline(cmdline_p);
 
 	init_mm.start_code = (unsigned long)&_text;
 	init_mm.end_code = (unsigned long) &_etext;

@@ -94,25 +94,26 @@ static void ps3disk_scatter_gather(struct ps3_storage_device *dev,
 {
 	unsigned int offset = 0;
 	struct req_iterator iter;
-	struct bio_vec bvec;
+	struct bio_vec *bvec;
 	unsigned int i = 0;
 	size_t size;
 	void *buf;
 
 	rq_for_each_segment(bvec, req, iter) {
 		unsigned long flags;
-		dev_dbg(&dev->sbd.core, "%s:%u: bio %u: %u sectors from %lu\n",
-			__func__, __LINE__, i, bio_sectors(iter.bio),
-			iter.bio->bi_iter.bi_sector);
+		dev_dbg(&dev->sbd.core,
+			"%s:%u: bio %u: %u segs %u sectors from %lu\n",
+			__func__, __LINE__, i, bio_segments(iter.bio),
+			bio_sectors(iter.bio), iter.bio->bi_sector);
 
-		size = bvec.bv_len;
-		buf = bvec_kmap_irq(&bvec, &flags);
+		size = bvec->bv_len;
+		buf = bvec_kmap_irq(bvec, &flags);
 		if (gather)
 			memcpy(dev->bounce_buf+offset, buf, size);
 		else
 			memcpy(buf, dev->bounce_buf+offset, size);
 		offset += size;
-		flush_kernel_dcache_page(bvec.bv_page);
+		flush_kernel_dcache_page(bvec->bv_page);
 		bvec_kunmap_irq(buf, &flags);
 		i++;
 	}
@@ -129,7 +130,7 @@ static int ps3disk_submit_request_sg(struct ps3_storage_device *dev,
 
 #ifdef DEBUG
 	unsigned int n = 0;
-	struct bio_vec bv;
+	struct bio_vec *bv;
 	struct req_iterator iter;
 
 	rq_for_each_segment(bv, req, iter)
@@ -196,7 +197,7 @@ static void ps3disk_do_request(struct ps3_storage_device *dev,
 	dev_dbg(&dev->sbd.core, "%s:%u\n", __func__, __LINE__);
 
 	while ((req = blk_fetch_request(q))) {
-		if (req_op(req) == REQ_OP_FLUSH) {
+		if (req->cmd_flags & REQ_FLUSH) {
 			if (ps3disk_submit_flush_request(dev, req))
 				break;
 		} else if (req->cmd_type == REQ_TYPE_FS) {
@@ -256,7 +257,7 @@ static irqreturn_t ps3disk_interrupt(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-	if (req_op(req) == REQ_OP_FLUSH) {
+	if (req->cmd_flags & REQ_FLUSH) {
 		read = 0;
 		op = "flush";
 	} else {
@@ -400,7 +401,7 @@ static unsigned long ps3disk_mask;
 
 static DEFINE_MUTEX(ps3disk_mask_mutex);
 
-static int ps3disk_probe(struct ps3_system_bus_device *_dev)
+static int __devinit ps3disk_probe(struct ps3_system_bus_device *_dev)
 {
 	struct ps3_storage_device *dev = to_ps3_storage_device(&_dev->core);
 	struct ps3disk_private *priv;
@@ -468,7 +469,7 @@ static int ps3disk_probe(struct ps3_system_bus_device *_dev)
 	blk_queue_dma_alignment(queue, dev->blk_size-1);
 	blk_queue_logical_block_size(queue, dev->blk_size);
 
-	blk_queue_write_cache(queue, true, false);
+	blk_queue_flush(queue, REQ_FLUSH);
 
 	blk_queue_max_segments(queue, -1);
 	blk_queue_max_segment_size(queue, dev->bounce_size);
@@ -487,6 +488,7 @@ static int ps3disk_probe(struct ps3_system_bus_device *_dev)
 	gendisk->fops = &ps3disk_fops;
 	gendisk->queue = queue;
 	gendisk->private_data = dev;
+	gendisk->driverfs_dev = &dev->sbd.core;
 	snprintf(gendisk->disk_name, sizeof(gendisk->disk_name), PS3DISK_NAME,
 		 devidx+'a');
 	priv->blocking_factor = dev->blk_size >> 9;
@@ -498,7 +500,7 @@ static int ps3disk_probe(struct ps3_system_bus_device *_dev)
 		 gendisk->disk_name, priv->model, priv->raw_capacity >> 11,
 		 get_capacity(gendisk) >> 11);
 
-	device_add_disk(&dev->sbd.core, gendisk);
+	add_disk(gendisk);
 	return 0;
 
 fail_cleanup_queue:

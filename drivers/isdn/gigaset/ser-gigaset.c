@@ -67,7 +67,8 @@ static int write_modem(struct cardstate *cs)
 	struct sk_buff *skb = bcs->tx_skb;
 	int sent = -EOPNOTSUPP;
 
-	WARN_ON(!tty || !tty->ops || !skb);
+	if (!tty || !tty->driver || !skb)
+		return -EINVAL;
 
 	if (!skb->len) {
 		dev_kfree_skb_any(skb);
@@ -108,7 +109,8 @@ static int send_cb(struct cardstate *cs)
 	unsigned long flags;
 	int sent = 0;
 
-	WARN_ON(!tty || !tty->ops);
+	if (!tty || !tty->driver)
+		return -EFAULT;
 
 	cb = cs->cmdbuf;
 	if (!cb)
@@ -338,16 +340,17 @@ static int gigaset_initbcshw(struct bc_state *bcs)
 {
 	/* unused */
 	bcs->hw.ser = NULL;
-	return 0;
+	return 1;
 }
 
 /*
  * Free B channel structure
  * Called by "gigaset_freebcs" in common.c
  */
-static void gigaset_freebcshw(struct bc_state *bcs)
+static int gigaset_freebcshw(struct bc_state *bcs)
 {
 	/* unused */
+	return 1;
 }
 
 /*
@@ -388,7 +391,7 @@ static int gigaset_initcshw(struct cardstate *cs)
 	scs = kzalloc(sizeof(struct ser_cardstate), GFP_KERNEL);
 	if (!scs) {
 		pr_err("out of memory\n");
-		return -ENOMEM;
+		return 0;
 	}
 	cs->hw.ser = scs;
 
@@ -400,12 +403,12 @@ static int gigaset_initcshw(struct cardstate *cs)
 		pr_err("error %d registering platform device\n", rc);
 		kfree(cs->hw.ser);
 		cs->hw.ser = NULL;
-		return rc;
+		return 0;
 	}
 
 	tasklet_init(&cs->write_tasklet,
 		     gigaset_modem_fill, (unsigned long) cs);
-	return 0;
+	return 1;
 }
 
 /*
@@ -422,9 +425,7 @@ static int gigaset_set_modem_ctrl(struct cardstate *cs, unsigned old_state,
 	struct tty_struct *tty = cs->hw.ser->tty;
 	unsigned int set, clear;
 
-	WARN_ON(!tty || !tty->ops);
-	/* tiocmset is an optional tty driver method */
-	if (!tty->ops->tiocmset)
+	if (!tty || !tty->driver || !tty->ops->tiocmset)
 		return -EINVAL;
 	set = new_state & ~old_state;
 	clear = old_state & ~new_state;
@@ -494,7 +495,6 @@ static int
 gigaset_tty_open(struct tty_struct *tty)
 {
 	struct cardstate *cs;
-	int rc;
 
 	gig_dbg(DEBUG_INIT, "Starting HLL for Gigaset M101");
 
@@ -507,34 +507,22 @@ gigaset_tty_open(struct tty_struct *tty)
 
 	/* allocate memory for our device state and initialize it */
 	cs = gigaset_initcs(driver, 1, 1, 0, cidmode, GIGASET_MODULENAME);
-	if (!cs) {
-		rc = -ENODEV;
+	if (!cs)
 		goto error;
-	}
 
 	cs->dev = &cs->hw.ser->dev.dev;
 	cs->hw.ser->tty = tty;
 	atomic_set(&cs->hw.ser->refcnt, 1);
 	init_completion(&cs->hw.ser->dead_cmp);
-	tty->disc_data = cs;
 
-	/* Set the amount of data we're willing to receive per call
-	 * from the hardware driver to half of the input buffer size
-	 * to leave some reserve.
-	 * Note: We don't do flow control towards the hardware driver.
-	 * If more data is received than will fit into the input buffer,
-	 * it will be dropped and an error will be logged. This should
-	 * never happen as the device is slow and the buffer size ample.
-	 */
-	tty->receive_room = RBUFSIZE/2;
+	tty->disc_data = cs;
 
 	/* OK.. Initialization of the datastructures and the HW is done.. Now
 	 * startup system and notify the LL that we are ready to run
 	 */
 	if (startmode == SM_LOCKED)
 		cs->mstate = MS_LOCKED;
-	rc = gigaset_start(cs);
-	if (rc < 0) {
+	if (!gigaset_start(cs)) {
 		tasklet_kill(&cs->write_tasklet);
 		goto error;
 	}
@@ -546,7 +534,7 @@ error:
 	gig_dbg(DEBUG_INIT, "Startup of HLL failed");
 	tty->disc_data = NULL;
 	gigaset_freecs(cs);
-	return rc;
+	return -ENODEV;
 }
 
 /*
@@ -596,6 +584,28 @@ static int gigaset_tty_hangup(struct tty_struct *tty)
 {
 	gigaset_tty_close(tty);
 	return 0;
+}
+
+/*
+ * Read on the tty.
+ * Unused, received data goes only to the Gigaset driver.
+ */
+static ssize_t
+gigaset_tty_read(struct tty_struct *tty, struct file *file,
+		 unsigned char __user *buf, size_t count)
+{
+	return -EAGAIN;
+}
+
+/*
+ * Write on the tty.
+ * Unused, transmit data comes only from the Gigaset driver.
+ */
+static ssize_t
+gigaset_tty_write(struct tty_struct *tty, struct file *file,
+		  const unsigned char *buf, size_t count)
+{
+	return -EAGAIN;
 }
 
 /*
@@ -731,6 +741,8 @@ static struct tty_ldisc_ops gigaset_ldisc = {
 	.open		= gigaset_tty_open,
 	.close		= gigaset_tty_close,
 	.hangup		= gigaset_tty_hangup,
+	.read		= gigaset_tty_read,
+	.write		= gigaset_tty_write,
 	.ioctl		= gigaset_tty_ioctl,
 	.receive_buf	= gigaset_tty_receive,
 	.write_wakeup	= gigaset_tty_wakeup,
@@ -755,10 +767,8 @@ static int __init ser_gigaset_init(void)
 	driver = gigaset_initdriver(GIGASET_MINOR, GIGASET_MINORS,
 				    GIGASET_MODULENAME, GIGASET_DEVNAME,
 				    &ops, THIS_MODULE);
-	if (!driver) {
-		rc = -ENOMEM;
+	if (!driver)
 		goto error;
-	}
 
 	rc = tty_register_ldisc(N_GIGASET_M101, &gigaset_ldisc);
 	if (rc != 0) {

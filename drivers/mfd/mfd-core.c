@@ -14,14 +14,10 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/acpi.h>
-#include <linux/property.h>
 #include <linux/mfd/core.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/irqdomain.h>
-#include <linux/of.h>
-#include <linux/regulator/consumer.h>
 
 static struct device_type mfd_dev_type = {
 	.name	= "mfd_device",
@@ -65,8 +61,7 @@ int mfd_cell_disable(struct platform_device *pdev)
 EXPORT_SYMBOL(mfd_cell_disable);
 
 static int mfd_platform_add_cell(struct platform_device *pdev,
-				 const struct mfd_cell *cell,
-				 atomic_t *usage_count)
+				 const struct mfd_cell *cell)
 {
 	if (!cell)
 		return 0;
@@ -75,86 +70,20 @@ static int mfd_platform_add_cell(struct platform_device *pdev,
 	if (!pdev->mfd_cell)
 		return -ENOMEM;
 
-	pdev->mfd_cell->usage_count = usage_count;
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_ACPI)
-static void mfd_acpi_add_device(const struct mfd_cell *cell,
-				struct platform_device *pdev)
-{
-	const struct mfd_cell_acpi_match *match = cell->acpi_match;
-	struct acpi_device *parent, *child;
-	struct acpi_device *adev;
-
-	parent = ACPI_COMPANION(pdev->dev.parent);
-	if (!parent)
-		return;
-
-	/*
-	 * MFD child device gets its ACPI handle either from the ACPI device
-	 * directly under the parent that matches the either _HID or _CID, or
-	 * _ADR or it will use the parent handle if is no ID is given.
-	 *
-	 * Note that use of _ADR is a grey area in the ACPI specification,
-	 * though Intel Galileo Gen2 is using it to distinguish the children
-	 * devices.
-	 */
-	adev = parent;
-	if (match) {
-		if (match->pnpid) {
-			struct acpi_device_id ids[2] = {};
-
-			strlcpy(ids[0].id, match->pnpid, sizeof(ids[0].id));
-			list_for_each_entry(child, &parent->children, node) {
-				if (!acpi_match_device_ids(child, ids)) {
-					adev = child;
-					break;
-				}
-			}
-		} else {
-			unsigned long long adr;
-			acpi_status status;
-
-			list_for_each_entry(child, &parent->children, node) {
-				status = acpi_evaluate_integer(child->handle,
-							       "_ADR", NULL,
-							       &adr);
-				if (ACPI_SUCCESS(status) && match->adr == adr) {
-					adev = child;
-					break;
-				}
-			}
-		}
-	}
-
-	ACPI_COMPANION_SET(&pdev->dev, adev);
-}
-#else
-static inline void mfd_acpi_add_device(const struct mfd_cell *cell,
-				       struct platform_device *pdev)
-{
-}
-#endif
-
 static int mfd_add_device(struct device *parent, int id,
-			  const struct mfd_cell *cell, atomic_t *usage_count,
+			  const struct mfd_cell *cell,
 			  struct resource *mem_base,
-			  int irq_base, struct irq_domain *domain)
+			  int irq_base)
 {
 	struct resource *res;
 	struct platform_device *pdev;
-	struct device_node *np = NULL;
 	int ret = -ENOMEM;
-	int platform_id;
 	int r;
 
-	if (id == PLATFORM_DEVID_AUTO)
-		platform_id = id;
-	else
-		platform_id = id + cell->id;
-
-	pdev = platform_device_alloc(cell->name, platform_id);
+	pdev = platform_device_alloc(cell->name, id + cell->id);
 	if (!pdev)
 		goto fail_alloc;
 
@@ -164,44 +93,17 @@ static int mfd_add_device(struct device *parent, int id,
 
 	pdev->dev.parent = parent;
 	pdev->dev.type = &mfd_dev_type;
-	pdev->dev.dma_mask = parent->dma_mask;
-	pdev->dev.dma_parms = parent->dma_parms;
-	pdev->dev.coherent_dma_mask = parent->coherent_dma_mask;
-
-	ret = regulator_bulk_register_supply_alias(
-			&pdev->dev, cell->parent_supplies,
-			parent, cell->parent_supplies,
-			cell->num_parent_supplies);
-	if (ret < 0)
-		goto fail_res;
-
-	if (parent->of_node && cell->of_compatible) {
-		for_each_child_of_node(parent->of_node, np) {
-			if (of_device_is_compatible(np, cell->of_compatible)) {
-				pdev->dev.of_node = np;
-				break;
-			}
-		}
-	}
-
-	mfd_acpi_add_device(cell, pdev);
 
 	if (cell->pdata_size) {
 		ret = platform_device_add_data(pdev,
 					cell->platform_data, cell->pdata_size);
 		if (ret)
-			goto fail_alias;
+			goto fail_res;
 	}
 
-	if (cell->properties) {
-		ret = platform_device_add_properties(pdev, cell->properties);
-		if (ret)
-			goto fail_alias;
-	}
-
-	ret = mfd_platform_add_cell(pdev, cell, usage_count);
+	ret = mfd_platform_add_cell(pdev, cell);
 	if (ret)
-		goto fail_alias;
+		goto fail_res;
 
 	for (r = 0; r < cell->num_resources; r++) {
 		res[r].name = cell->resources[r].name;
@@ -215,18 +117,10 @@ static int mfd_add_device(struct device *parent, int id,
 			res[r].end = mem_base->start +
 				cell->resources[r].end;
 		} else if (cell->resources[r].flags & IORESOURCE_IRQ) {
-			if (domain) {
-				/* Unable to create mappings for IRQ ranges. */
-				WARN_ON(cell->resources[r].start !=
-					cell->resources[r].end);
-				res[r].start = res[r].end = irq_create_mapping(
-					domain, cell->resources[r].start);
-			} else {
-				res[r].start = irq_base +
-					cell->resources[r].start;
-				res[r].end   = irq_base +
-					cell->resources[r].end;
-			}
+			res[r].start = irq_base +
+				cell->resources[r].start;
+			res[r].end   = irq_base +
+				cell->resources[r].end;
 		} else {
 			res[r].parent = cell->resources[r].parent;
 			res[r].start = cell->resources[r].start;
@@ -234,21 +128,19 @@ static int mfd_add_device(struct device *parent, int id,
 		}
 
 		if (!cell->ignore_resource_conflicts) {
-			if (has_acpi_companion(&pdev->dev)) {
-				ret = acpi_check_resource_conflict(&res[r]);
-				if (ret)
-					goto fail_alias;
-			}
+			ret = acpi_check_resource_conflict(&res[r]);
+			if (ret)
+				goto fail_res;
 		}
 	}
 
 	ret = platform_device_add_resources(pdev, res, cell->num_resources);
 	if (ret)
-		goto fail_alias;
+		goto fail_res;
 
 	ret = platform_device_add(pdev);
 	if (ret)
-		goto fail_alias;
+		goto fail_res;
 
 	if (cell->pm_runtime_no_callbacks)
 		pm_runtime_no_callbacks(&pdev->dev);
@@ -257,10 +149,6 @@ static int mfd_add_device(struct device *parent, int id,
 
 	return 0;
 
-fail_alias:
-	regulator_bulk_unregister_supply_alias(&pdev->dev,
-					       cell->parent_supplies,
-					       cell->num_parent_supplies);
 fail_res:
 	kfree(res);
 fail_device:
@@ -270,12 +158,12 @@ fail_alloc:
 }
 
 int mfd_add_devices(struct device *parent, int id,
-		    const struct mfd_cell *cells, int n_devs,
+		    struct mfd_cell *cells, int n_devs,
 		    struct resource *mem_base,
-		    int irq_base, struct irq_domain *domain)
+		    int irq_base)
 {
 	int i;
-	int ret;
+	int ret = 0;
 	atomic_t *cnts;
 
 	/* initialize reference counting for all cells */
@@ -285,19 +173,15 @@ int mfd_add_devices(struct device *parent, int id,
 
 	for (i = 0; i < n_devs; i++) {
 		atomic_set(&cnts[i], 0);
-		ret = mfd_add_device(parent, id, cells + i, cnts + i, mem_base,
-				     irq_base, domain);
+		cells[i].usage_count = &cnts[i];
+		ret = mfd_add_device(parent, id, cells + i, mem_base, irq_base);
 		if (ret)
-			goto fail;
+			break;
 	}
 
-	return 0;
-
-fail:
-	if (i)
+	if (ret)
 		mfd_remove_devices(parent);
-	else
-		kfree(cnts);
+
 	return ret;
 }
 EXPORT_SYMBOL(mfd_add_devices);
@@ -314,9 +198,6 @@ static int mfd_remove_devices_fn(struct device *dev, void *c)
 	pdev = to_platform_device(dev);
 	cell = mfd_get_cell(pdev);
 
-	regulator_bulk_unregister_supply_alias(dev, cell->parent_supplies,
-					       cell->num_parent_supplies);
-
 	/* find the base address of usage_count pointers (for freeing) */
 	if (!*usage_count || (cell->usage_count < *usage_count))
 		*usage_count = cell->usage_count;
@@ -329,48 +210,10 @@ void mfd_remove_devices(struct device *parent)
 {
 	atomic_t *cnts = NULL;
 
-	device_for_each_child_reverse(parent, &cnts, mfd_remove_devices_fn);
+	device_for_each_child(parent, &cnts, mfd_remove_devices_fn);
 	kfree(cnts);
 }
 EXPORT_SYMBOL(mfd_remove_devices);
-
-static void devm_mfd_dev_release(struct device *dev, void *res)
-{
-	mfd_remove_devices(dev);
-}
-
-/**
- * devm_mfd_add_devices - Resource managed version of mfd_add_devices()
- *
- * Returns 0 on success or an appropriate negative error number on failure.
- * All child-devices of the MFD will automatically be removed when it gets
- * unbinded.
- */
-int devm_mfd_add_devices(struct device *dev, int id,
-			 const struct mfd_cell *cells, int n_devs,
-			 struct resource *mem_base,
-			 int irq_base, struct irq_domain *domain)
-{
-	struct device **ptr;
-	int ret;
-
-	ptr = devres_alloc(devm_mfd_dev_release, sizeof(*ptr), GFP_KERNEL);
-	if (!ptr)
-		return -ENOMEM;
-
-	ret = mfd_add_devices(dev, id, cells, n_devs, mem_base,
-			      irq_base, domain);
-	if (ret < 0) {
-		devres_free(ptr);
-		return ret;
-	}
-
-	*ptr = dev;
-	devres_add(dev, ptr);
-
-	return ret;
-}
-EXPORT_SYMBOL(devm_mfd_add_devices);
 
 int mfd_clone_cell(const char *cell, const char **clones, size_t n_clones)
 {
@@ -393,13 +236,10 @@ int mfd_clone_cell(const char *cell, const char **clones, size_t n_clones)
 	for (i = 0; i < n_clones; i++) {
 		cell_entry.name = clones[i];
 		/* don't give up if a single call fails; just report error */
-		if (mfd_add_device(pdev->dev.parent, -1, &cell_entry,
-				   cell_entry.usage_count, NULL, 0, NULL))
+		if (mfd_add_device(pdev->dev.parent, -1, &cell_entry, NULL, 0))
 			dev_err(dev, "failed to create platform device '%s'\n",
 					clones[i]);
 	}
-
-	put_device(dev);
 
 	return 0;
 }

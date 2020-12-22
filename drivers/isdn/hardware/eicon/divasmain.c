@@ -150,12 +150,12 @@ MODULE_DEVICE_TABLE(pci, divas_pci_tbl);
 
 static int divas_init_one(struct pci_dev *pdev,
 			  const struct pci_device_id *ent);
-static void divas_remove_one(struct pci_dev *pdev);
+static void __devexit divas_remove_one(struct pci_dev *pdev);
 
 static struct pci_driver diva_pci_driver = {
 	.name     = "divas",
 	.probe    = divas_init_one,
-	.remove   = divas_remove_one,
+	.remove   = __devexit_p(divas_remove_one),
 	.id_table = divas_pci_tbl,
 };
 
@@ -445,32 +445,32 @@ void divasa_unmap_pci_bar(void __iomem *bar)
 /*********************************************************
  ** I/O port access
  *********************************************************/
-inline byte inpp(void __iomem *addr)
+byte __inline__ inpp(void __iomem *addr)
 {
 	return (inb((unsigned long) addr));
 }
 
-inline word inppw(void __iomem *addr)
+word __inline__ inppw(void __iomem *addr)
 {
 	return (inw((unsigned long) addr));
 }
 
-inline void inppw_buffer(void __iomem *addr, void *P, int length)
+void __inline__ inppw_buffer(void __iomem *addr, void *P, int length)
 {
 	insw((unsigned long) addr, (word *) P, length >> 1);
 }
 
-inline void outppw_buffer(void __iomem *addr, void *P, int length)
+void __inline__ outppw_buffer(void __iomem *addr, void *P, int length)
 {
 	outsw((unsigned long) addr, (word *) P, length >> 1);
 }
 
-inline void outppw(void __iomem *addr, word w)
+void __inline__ outppw(void __iomem *addr, word w)
 {
 	outw(w, (unsigned long) addr);
 }
 
-inline void outpp(void __iomem *addr, word p)
+void __inline__ outpp(void __iomem *addr, word p)
 {
 	outb(p, (unsigned long) addr);
 }
@@ -481,7 +481,7 @@ inline void outpp(void __iomem *addr, word p)
 int diva_os_register_irq(void *context, byte irq, const char *name)
 {
 	int result = request_irq(irq, diva_os_irq_wrapper,
-				 IRQF_SHARED, name, context);
+				 IRQF_DISABLED | IRQF_SHARED, name, context);
 	return (result);
 }
 
@@ -591,22 +591,19 @@ static int divas_release(struct inode *inode, struct file *file)
 static ssize_t divas_write(struct file *file, const char __user *buf,
 			   size_t count, loff_t *ppos)
 {
-	diva_xdi_um_cfg_cmd_t msg;
 	int ret = -EINVAL;
 
 	if (!file->private_data) {
 		file->private_data = diva_xdi_open_adapter(file, buf,
-							   count, &msg,
+							   count,
 							   xdi_copy_from_user);
-		if (!file->private_data)
-			return (-ENODEV);
-		ret = diva_xdi_write(file->private_data, file,
-				     buf, count, &msg, xdi_copy_from_user);
-	} else {
-		ret = diva_xdi_write(file->private_data, file,
-				     buf, count, NULL, xdi_copy_from_user);
+	}
+	if (!file->private_data) {
+		return (-ENODEV);
 	}
 
+	ret = diva_xdi_write(file->private_data, file,
+			     buf, count, xdi_copy_from_user);
 	switch (ret) {
 	case -1:		/* Message should be removed from rx mailbox first */
 		ret = -EBUSY;
@@ -625,12 +622,11 @@ static ssize_t divas_write(struct file *file, const char __user *buf,
 static ssize_t divas_read(struct file *file, char __user *buf,
 			  size_t count, loff_t *ppos)
 {
-	diva_xdi_um_cfg_cmd_t msg;
 	int ret = -EINVAL;
 
 	if (!file->private_data) {
 		file->private_data = diva_xdi_open_adapter(file, buf,
-							   count, &msg,
+							   count,
 							   xdi_copy_from_user);
 	}
 	if (!file->private_data) {
@@ -677,7 +673,7 @@ static void divas_unregister_chrdev(void)
 	unregister_chrdev(major, DEVNAME);
 }
 
-static int __init divas_register_chrdev(void)
+static int DIVA_INIT_FUNCTION divas_register_chrdev(void)
 {
 	if ((major = register_chrdev(0, DEVNAME, &divas_fops)) < 0)
 	{
@@ -692,7 +688,8 @@ static int __init divas_register_chrdev(void)
 /* --------------------------------------------------------------------------
    PCI driver section
    -------------------------------------------------------------------------- */
-static int divas_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit divas_init_one(struct pci_dev *pdev,
+				    const struct pci_device_id *ent)
 {
 	void *pdiva = NULL;
 	u8 pci_latency;
@@ -752,7 +749,7 @@ static int divas_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return (0);
 }
 
-static void divas_remove_one(struct pci_dev *pdev)
+static void __devexit divas_remove_one(struct pci_dev *pdev)
 {
 	void *pdiva = pci_get_drvdata(pdev);
 
@@ -770,7 +767,7 @@ static void divas_remove_one(struct pci_dev *pdev)
 /* --------------------------------------------------------------------------
    Driver Load / Startup
    -------------------------------------------------------------------------- */
-static int __init divas_init(void)
+static int DIVA_INIT_FUNCTION divas_init(void)
 {
 	char tmprev[50];
 	int ret = 0;
@@ -834,7 +831,7 @@ out:
 /* --------------------------------------------------------------------------
    Driver Unload
    -------------------------------------------------------------------------- */
-static void __exit divas_exit(void)
+static void DIVA_EXIT_FUNCTION divas_exit(void)
 {
 	pci_unregister_driver(&diva_pci_driver);
 	remove_divas_proc();

@@ -24,7 +24,7 @@ NOBUILDID=0000000000000000000000000000000000000000
 perf buildid-list -i $PERF_DATA --with-hits | grep -v "^$NOBUILDID " > $BUILDIDS
 if [ ! -s $BUILDIDS ] ; then
 	echo "perf archive: no build-ids found"
-	rm $BUILDIDS || true
+	rm -f $BUILDIDS
 	exit 1
 fi
 
@@ -39,8 +39,8 @@ while read build_id ; do
 	echo ${filename#$PERF_BUILDID_LINKDIR} >> $MANIFEST
 done
 
-tar cjf $PERF_DATA.tar.bz2 -C $PERF_BUILDID_DIR -T $MANIFEST
-rm $MANIFEST $BUILDIDS || true
+tar cfj $PERF_DATA.tar.bz2 -C $PERF_BUILDID_DIR -T $MANIFEST
+rm -f $MANIFEST $BUILDIDS
 echo -e "Now please run:\n"
 echo -e "$ tar xvf $PERF_DATA.tar.bz2 -C ~/.debug\n"
 echo "wherever you need to run 'perf report' on."

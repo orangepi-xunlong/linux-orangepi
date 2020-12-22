@@ -43,18 +43,15 @@ DEFINE_EVENT(timer_class, timer_init,
  */
 TRACE_EVENT(timer_start,
 
-	TP_PROTO(struct timer_list *timer,
-		unsigned long expires,
-		unsigned int flags),
+	TP_PROTO(struct timer_list *timer, unsigned long expires),
 
-	TP_ARGS(timer, expires, flags),
+	TP_ARGS(timer, expires),
 
 	TP_STRUCT__entry(
 		__field( void *,	timer		)
 		__field( void *,	function	)
 		__field( unsigned long,	expires		)
 		__field( unsigned long,	now		)
-		__field( unsigned int,	flags		)
 	),
 
 	TP_fast_assign(
@@ -62,12 +59,11 @@ TRACE_EVENT(timer_start,
 		__entry->function	= timer->function;
 		__entry->expires	= expires;
 		__entry->now		= jiffies;
-		__entry->flags		= flags;
 	),
 
-	TP_printk("timer=%p function=%pf expires=%lu [timeout=%ld] flags=0x%08x",
+	TP_printk("timer=%p function=%pf expires=%lu [timeout=%ld]",
 		  __entry->timer, __entry->function, __entry->expires,
-		  (long)__entry->expires - __entry->now, __entry->flags)
+		  (long)__entry->expires - __entry->now)
 );
 
 /**
@@ -125,23 +121,9 @@ DEFINE_EVENT(timer_class, timer_cancel,
 	TP_ARGS(timer)
 );
 
-#define decode_clockid(type)						\
-	__print_symbolic(type,						\
-		{ CLOCK_REALTIME,	"CLOCK_REALTIME"	},	\
-		{ CLOCK_MONOTONIC,	"CLOCK_MONOTONIC"	},	\
-		{ CLOCK_BOOTTIME,	"CLOCK_BOOTTIME"	},	\
-		{ CLOCK_TAI,		"CLOCK_TAI"		})
-
-#define decode_hrtimer_mode(mode)					\
-	__print_symbolic(mode,						\
-		{ HRTIMER_MODE_ABS,		"ABS"		},	\
-		{ HRTIMER_MODE_REL,		"REL"		},	\
-		{ HRTIMER_MODE_ABS_PINNED,	"ABS|PINNED"	},	\
-		{ HRTIMER_MODE_REL_PINNED,	"REL|PINNED"	})
-
 /**
  * hrtimer_init - called when the hrtimer is initialized
- * @hrtimer:	pointer to struct hrtimer
+ * @timer:	pointer to struct hrtimer
  * @clockid:	the hrtimers clock
  * @mode:	the hrtimers mode
  */
@@ -165,13 +147,15 @@ TRACE_EVENT(hrtimer_init,
 	),
 
 	TP_printk("hrtimer=%p clockid=%s mode=%s", __entry->hrtimer,
-		  decode_clockid(__entry->clockid),
-		  decode_hrtimer_mode(__entry->mode))
+		  __entry->clockid == CLOCK_REALTIME ?
+			"CLOCK_REALTIME" : "CLOCK_MONOTONIC",
+		  __entry->mode == HRTIMER_MODE_ABS ?
+			"HRTIMER_MODE_ABS" : "HRTIMER_MODE_REL")
 );
 
 /**
  * hrtimer_start - called when the hrtimer is started
- * @hrtimer: pointer to struct hrtimer
+ * @timer: pointer to struct hrtimer
  */
 TRACE_EVENT(hrtimer_start,
 
@@ -202,8 +186,8 @@ TRACE_EVENT(hrtimer_start,
 );
 
 /**
- * hrtimer_expire_entry - called immediately before the hrtimer callback
- * @hrtimer:	pointer to struct hrtimer
+ * htimmer_expire_entry - called immediately before the hrtimer callback
+ * @timer:	pointer to struct hrtimer
  * @now:	pointer to variable which contains current time of the
  *		timers base.
  *
@@ -250,7 +234,7 @@ DECLARE_EVENT_CLASS(hrtimer_class,
 
 /**
  * hrtimer_expire_exit - called immediately after the hrtimer callback returns
- * @hrtimer:	pointer to struct hrtimer
+ * @timer:	pointer to struct hrtimer
  *
  * When used in combination with the hrtimer_expire_entry tracepoint we can
  * determine the runtime of the callback function.
@@ -338,61 +322,6 @@ TRACE_EVENT(itimer_expire,
 	TP_printk("which=%d pid=%d now=%llu", __entry->which,
 		  (int) __entry->pid, (unsigned long long)__entry->now)
 );
-
-#ifdef CONFIG_NO_HZ_COMMON
-
-#define TICK_DEP_NAMES					\
-		tick_dep_mask_name(NONE)		\
-		tick_dep_name(POSIX_TIMER)		\
-		tick_dep_name(PERF_EVENTS)		\
-		tick_dep_name(SCHED)			\
-		tick_dep_name_end(CLOCK_UNSTABLE)
-
-#undef tick_dep_name
-#undef tick_dep_mask_name
-#undef tick_dep_name_end
-
-/* The MASK will convert to their bits and they need to be processed too */
-#define tick_dep_name(sdep) TRACE_DEFINE_ENUM(TICK_DEP_BIT_##sdep); \
-	TRACE_DEFINE_ENUM(TICK_DEP_MASK_##sdep);
-#define tick_dep_name_end(sdep)  TRACE_DEFINE_ENUM(TICK_DEP_BIT_##sdep); \
-	TRACE_DEFINE_ENUM(TICK_DEP_MASK_##sdep);
-/* NONE only has a mask defined for it */
-#define tick_dep_mask_name(sdep) TRACE_DEFINE_ENUM(TICK_DEP_MASK_##sdep);
-
-TICK_DEP_NAMES
-
-#undef tick_dep_name
-#undef tick_dep_mask_name
-#undef tick_dep_name_end
-
-#define tick_dep_name(sdep) { TICK_DEP_MASK_##sdep, #sdep },
-#define tick_dep_mask_name(sdep) { TICK_DEP_MASK_##sdep, #sdep },
-#define tick_dep_name_end(sdep) { TICK_DEP_MASK_##sdep, #sdep }
-
-#define show_tick_dep_name(val)				\
-	__print_symbolic(val, TICK_DEP_NAMES)
-
-TRACE_EVENT(tick_stop,
-
-	TP_PROTO(int success, int dependency),
-
-	TP_ARGS(success, dependency),
-
-	TP_STRUCT__entry(
-		__field( int ,		success	)
-		__field( int ,		dependency )
-	),
-
-	TP_fast_assign(
-		__entry->success	= success;
-		__entry->dependency	= dependency;
-	),
-
-	TP_printk("success=%d dependency=%s",  __entry->success, \
-			show_tick_dep_name(__entry->dependency))
-);
-#endif
 
 #endif /*  _TRACE_TIMER_H */
 

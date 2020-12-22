@@ -33,10 +33,8 @@ SECTIONS
 #ifndef CONFIG_SCHEDULE_L1
 		SCHED_TEXT
 #endif
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		IRQENTRY_TEXT
-		SOFTIRQENTRY_TEXT
 		KPROBES_TEXT
 #ifdef CONFIG_ROMKERNEL
 		__sinittext = .;
@@ -147,7 +145,7 @@ SECTIONS
 
 	.text_l1 L1_CODE_START : AT(LOADADDR(.exit.data) + SIZEOF(.exit.data))
 #else
-	.init.data : AT(__data_lma + __data_len + 32)
+	.init.data : AT(__data_lma + __data_len)
 	{
 		__sinitdata = .;
 		INIT_DATA

@@ -47,9 +47,9 @@ static void sas_queue_event(int event, unsigned long *pending,
 	if (!test_and_set_bit(event, pending)) {
 		unsigned long flags;
 
-		spin_lock_irqsave(&ha->lock, flags);
+		spin_lock_irqsave(&ha->state_lock, flags);
 		sas_queue_work(ha, work);
-		spin_unlock_irqrestore(&ha->lock, flags);
+		spin_unlock_irqrestore(&ha->state_lock, flags);
 	}
 }
 
@@ -61,18 +61,18 @@ void __sas_drain_work(struct sas_ha_struct *ha)
 
 	set_bit(SAS_HA_DRAINING, &ha->state);
 	/* flush submitters */
-	spin_lock_irq(&ha->lock);
-	spin_unlock_irq(&ha->lock);
+	spin_lock_irq(&ha->state_lock);
+	spin_unlock_irq(&ha->state_lock);
 
 	drain_workqueue(wq);
 
-	spin_lock_irq(&ha->lock);
+	spin_lock_irq(&ha->state_lock);
 	clear_bit(SAS_HA_DRAINING, &ha->state);
 	list_for_each_entry_safe(sw, _sw, &ha->defer_q, drain_node) {
 		list_del_init(&sw->drain_node);
 		sas_queue_work(ha, sw);
 	}
-	spin_unlock_irq(&ha->lock);
+	spin_unlock_irq(&ha->state_lock);
 }
 
 int sas_drain_work(struct sas_ha_struct *ha)
@@ -134,7 +134,7 @@ static void notify_port_event(struct asd_sas_phy *phy, enum port_event event)
 			&phy->port_events[event].work, ha);
 }
 
-void sas_notify_phy_event(struct asd_sas_phy *phy, enum phy_event event)
+static void notify_phy_event(struct asd_sas_phy *phy, enum phy_event event)
 {
 	struct sas_ha_struct *ha = phy->ha;
 
@@ -159,7 +159,7 @@ int sas_init_events(struct sas_ha_struct *sas_ha)
 
 	sas_ha->notify_ha_event = notify_ha_event;
 	sas_ha->notify_port_event = notify_port_event;
-	sas_ha->notify_phy_event = sas_notify_phy_event;
+	sas_ha->notify_phy_event = notify_phy_event;
 
 	return 0;
 }

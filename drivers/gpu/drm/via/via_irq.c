@@ -35,8 +35,9 @@
  * The refresh rate is also calculated for video playback sync purposes.
  */
 
-#include <drm/drmP.h>
-#include <drm/via_drm.h>
+#include "drmP.h"
+#include "drm.h"
+#include "via_drm.h"
 #include "via_drv.h"
 
 #define VIA_REG_INTERRUPT       0x200
@@ -95,17 +96,16 @@ static unsigned time_diff(struct timeval *now, struct timeval *then)
 		1000000 - (then->tv_usec - now->tv_usec);
 }
 
-u32 via_get_vblank_counter(struct drm_device *dev, unsigned int pipe)
+u32 via_get_vblank_counter(struct drm_device *dev, int crtc)
 {
 	drm_via_private_t *dev_priv = dev->dev_private;
-
-	if (pipe != 0)
+	if (crtc != 0)
 		return 0;
 
 	return atomic_read(&dev_priv->vbl_received);
 }
 
-irqreturn_t via_driver_irq_handler(int irq, void *arg)
+irqreturn_t via_driver_irq_handler(DRM_IRQ_ARGS)
 {
 	struct drm_device *dev = (struct drm_device *) arg;
 	drm_via_private_t *dev_priv = (drm_via_private_t *) dev->dev_private;
@@ -139,7 +139,7 @@ irqreturn_t via_driver_irq_handler(int irq, void *arg)
 	for (i = 0; i < dev_priv->num_irqs; ++i) {
 		if (status & cur_irq->pending_mask) {
 			atomic_inc(&cur_irq->irq_received);
-			wake_up(&cur_irq->irq_queue);
+			DRM_WAKEUP(&cur_irq->irq_queue);
 			handled = 1;
 			if (dev_priv->irq_map[drm_via_irq_dma0_td] == i)
 				via_dmablit_handler(dev, 0, 1);
@@ -171,13 +171,13 @@ static __inline__ void viadrv_acknowledge_irqs(drm_via_private_t *dev_priv)
 	}
 }
 
-int via_enable_vblank(struct drm_device *dev, unsigned int pipe)
+int via_enable_vblank(struct drm_device *dev, int crtc)
 {
 	drm_via_private_t *dev_priv = dev->dev_private;
 	u32 status;
 
-	if (pipe != 0) {
-		DRM_ERROR("%s:  bad crtc %u\n", __func__, pipe);
+	if (crtc != 0) {
+		DRM_ERROR("%s:  bad crtc %d\n", __func__, crtc);
 		return -EINVAL;
 	}
 
@@ -190,7 +190,7 @@ int via_enable_vblank(struct drm_device *dev, unsigned int pipe)
 	return 0;
 }
 
-void via_disable_vblank(struct drm_device *dev, unsigned int pipe)
+void via_disable_vblank(struct drm_device *dev, int crtc)
 {
 	drm_via_private_t *dev_priv = dev->dev_private;
 	u32 status;
@@ -201,8 +201,8 @@ void via_disable_vblank(struct drm_device *dev, unsigned int pipe)
 	VIA_WRITE8(0x83d4, 0x11);
 	VIA_WRITE8(0x83d5, VIA_READ8(0x83d5) & ~0x30);
 
-	if (pipe != 0)
-		DRM_ERROR("%s:  bad crtc %u\n", __func__, pipe);
+	if (crtc != 0)
+		DRM_ERROR("%s:  bad crtc %d\n", __func__, crtc);
 }
 
 static int
@@ -240,12 +240,12 @@ via_driver_irq_wait(struct drm_device *dev, unsigned int irq, int force_sequence
 	cur_irq = dev_priv->via_irqs + real_irq;
 
 	if (masks[real_irq][2] && !force_sequence) {
-		DRM_WAIT_ON(ret, cur_irq->irq_queue, 3 * HZ,
+		DRM_WAIT_ON(ret, cur_irq->irq_queue, 3 * DRM_HZ,
 			    ((VIA_READ(masks[irq][2]) & masks[irq][3]) ==
 			     masks[irq][4]));
 		cur_irq_sequence = atomic_read(&cur_irq->irq_received);
 	} else {
-		DRM_WAIT_ON(ret, cur_irq->irq_queue, 3 * HZ,
+		DRM_WAIT_ON(ret, cur_irq->irq_queue, 3 * DRM_HZ,
 			    (((cur_irq_sequence =
 			       atomic_read(&cur_irq->irq_received)) -
 			      *sequence) <= (1 << 23)));
@@ -288,7 +288,7 @@ void via_driver_irq_preinstall(struct drm_device *dev)
 			atomic_set(&cur_irq->irq_received, 0);
 			cur_irq->enable_mask = dev_priv->irq_masks[i][0];
 			cur_irq->pending_mask = dev_priv->irq_masks[i][1];
-			init_waitqueue_head(&cur_irq->irq_queue);
+			DRM_INIT_WAITQUEUE(&cur_irq->irq_queue);
 			dev_priv->irq_enable_mask |= cur_irq->enable_mask;
 			dev_priv->irq_pending_mask |= cur_irq->pending_mask;
 			cur_irq++;

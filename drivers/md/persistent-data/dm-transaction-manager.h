@@ -38,17 +38,18 @@ struct dm_transaction_manager *dm_tm_create_non_blocking_clone(struct dm_transac
 /*
  * We use a 2-phase commit here.
  *
- * i) Make all changes for the transaction *except* for the superblock.
- * Then call dm_tm_pre_commit() to flush them to disk.
+ * i) In the first phase the block manager is told to start flushing, and
+ * the changes to the space map are written to disk.  You should interrogate
+ * your particular space map to get detail of its root node etc. to be
+ * included in your superblock.
  *
- * ii) Lock your superblock.  Update.  Then call dm_tm_commit() which will
- * unlock the superblock and flush it.  No other blocks should be updated
- * during this period.  Care should be taken to never unlock a partially
- * updated superblock; perform any operations that could fail *before* you
- * take the superblock lock.
+ * ii) @root will be committed last.  You shouldn't use more than the
+ * first 512 bytes of @root if you wish the transaction to survive a power
+ * failure.  You *must* have a write lock held on @root for both stage (i)
+ * and (ii).  The commit will drop the write lock.
  */
 int dm_tm_pre_commit(struct dm_transaction_manager *tm);
-int dm_tm_commit(struct dm_transaction_manager *tm, struct dm_block *superblock);
+int dm_tm_commit(struct dm_transaction_manager *tm, struct dm_block *root);
 
 /*
  * These methods are the only way to get hold of a writeable block.
@@ -94,7 +95,7 @@ int dm_tm_read_lock(struct dm_transaction_manager *tm, dm_block_t b,
 		    struct dm_block_validator *v,
 		    struct dm_block **result);
 
-void dm_tm_unlock(struct dm_transaction_manager *tm, struct dm_block *b);
+int dm_tm_unlock(struct dm_transaction_manager *tm, struct dm_block *b);
 
 /*
  * Functions for altering the reference count of a block directly.
@@ -109,29 +110,21 @@ int dm_tm_ref(struct dm_transaction_manager *tm, dm_block_t b,
 struct dm_block_manager *dm_tm_get_bm(struct dm_transaction_manager *tm);
 
 /*
- * If you're using a non-blocking clone the tm will build up a list of
- * requested blocks that weren't in core.  This call will request those
- * blocks to be prefetched.
- */
-void dm_tm_issue_prefetches(struct dm_transaction_manager *tm);
-
-/*
  * A little utility that ties the knot by producing a transaction manager
  * that has a space map managed by the transaction manager...
  *
  * Returns a tm that has an open transaction to write the new disk sm.
  * Caller should store the new sm root and commit.
- *
- * The superblock location is passed so the metadata space map knows it
- * shouldn't be used.
  */
 int dm_tm_create_with_sm(struct dm_block_manager *bm, dm_block_t sb_location,
+			 struct dm_block_validator *sb_validator,
 			 struct dm_transaction_manager **tm,
-			 struct dm_space_map **sm);
+			 struct dm_space_map **sm, struct dm_block **sblock);
 
 int dm_tm_open_with_sm(struct dm_block_manager *bm, dm_block_t sb_location,
-		       void *sm_root, size_t root_len,
+		       struct dm_block_validator *sb_validator,
+		       size_t root_offset, size_t root_max_len,
 		       struct dm_transaction_manager **tm,
-		       struct dm_space_map **sm);
+		       struct dm_space_map **sm, struct dm_block **sblock);
 
 #endif	/* _LINUX_DM_TRANSACTION_MANAGER_H */

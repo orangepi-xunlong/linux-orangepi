@@ -13,8 +13,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Originally written by Koji Sato.
- * Two allocators were unified by Ryusuke Konishi and Amagai Yoshiji.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * Original code was written by Koji Sato <koji@osrg.net>.
+ * Two allocators were unified by Ryusuke Konishi <ryusuke@osrg.net>,
+ *                                Amagai Yoshiji <amagai@osrg.net>.
  */
 
 #ifndef _NILFS_ALLOC_H
@@ -37,13 +42,11 @@ nilfs_palloc_entries_per_group(const struct inode *inode)
 	return 1UL << (inode->i_blkbits + 3 /* log2(8 = CHAR_BITS) */);
 }
 
-int nilfs_palloc_init_blockgroup(struct inode *, unsigned int);
+int nilfs_palloc_init_blockgroup(struct inode *, unsigned);
 int nilfs_palloc_get_entry_block(struct inode *, __u64, int,
 				 struct buffer_head **);
 void *nilfs_palloc_block_get_entry(const struct inode *, __u64,
 				   const struct buffer_head *, void *);
-
-int nilfs_palloc_count_max_entries(struct inode *, u64, u64 *);
 
 /**
  * nilfs_palloc_req - persistent allocator request and reply
@@ -72,25 +75,16 @@ int nilfs_palloc_freev(struct inode *, __u64 *, size_t);
 #define nilfs_set_bit_atomic		ext2_set_bit_atomic
 #define nilfs_clear_bit_atomic		ext2_clear_bit_atomic
 #define nilfs_find_next_zero_bit	find_next_zero_bit_le
-#define nilfs_find_next_bit		find_next_bit_le
 
-/**
- * struct nilfs_bh_assoc - block offset and buffer head association
- * @blkoff: block offset
- * @bh: buffer head
+/*
+ * persistent object allocator cache
  */
+
 struct nilfs_bh_assoc {
 	unsigned long blkoff;
 	struct buffer_head *bh;
 };
 
-/**
- * struct nilfs_palloc_cache - persistent object allocator cache
- * @lock: cache protecting lock
- * @prev_desc: blockgroup descriptors cache
- * @prev_bitmap: blockgroup bitmap cache
- * @prev_entry: translation entries cache
- */
 struct nilfs_palloc_cache {
 	spinlock_t lock;
 	struct nilfs_bh_assoc prev_desc;

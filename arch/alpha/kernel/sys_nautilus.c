@@ -39,6 +39,7 @@
 #include <asm/irq.h>
 #include <asm/mmu_context.h>
 #include <asm/io.h>
+#include <asm/pci.h>
 #include <asm/pgtable.h>
 #include <asm/core_irongate.h>
 #include <asm/hwrpb.h>
@@ -184,6 +185,7 @@ nautilus_machine_check(unsigned long vector, unsigned long la_ptr)
 	mb();
 }
 
+extern void free_reserved_mem(void *, void *);
 extern void pcibios_claim_one_bus(struct pci_bus *);
 
 static struct resource irongate_io = {
@@ -206,9 +208,6 @@ nautilus_init_pci(void)
 
 	/* Scan our single hose.  */
 	bus = pci_scan_bus(0, alpha_mv.pci_ops, hose);
-	if (!bus)
-		return;
-
 	hose->bus = bus;
 	pcibios_claim_one_bus(bus);
 
@@ -240,8 +239,8 @@ nautilus_init_pci(void)
 	if (pci_mem < memtop)
 		memtop = pci_mem;
 	if (memtop > alpha_mv.min_mem_address) {
-		free_reserved_area(__va(alpha_mv.min_mem_address),
-				   __va(memtop), -1, NULL);
+		free_reserved_mem(__va(alpha_mv.min_mem_address),
+				  __va(memtop));
 		printk("nautilus_init_pci: %ldk freed\n",
 			(memtop - alpha_mv.min_mem_address) >> 10);
 	}
@@ -255,7 +254,6 @@ nautilus_init_pci(void)
 	   for the root bus, so just clear it. */
 	bus->self = NULL;
 	pci_fixup_irqs(alpha_mv.pci_swizzle, alpha_mv.pci_map_irq);
-	pci_bus_add_devices(bus);
 }
 
 /*

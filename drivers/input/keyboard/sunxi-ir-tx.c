@@ -1,93 +1,97 @@
 /*
  * drivers/input/keyboard/sunxi-ir-tx.c
  *
- * Copyright (c) 2013-2018 Allwinnertech Co., Ltd.
+ * Copyright (C) 2013-2014 allwinner.
+ *	Li Ming<liming@allwinnertech.com>
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License version 2 as
+ *  published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/cdev.h>
-#include <linux/uaccess.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/clk.h>
-#include <linux/of_gpio.h>
-#include <linux/of_platform.h>
-#include <linux/of_irq.h>
-#include <linux/of_address.h>
+#include <linux/clk/clk-sun9iw1.h>
 #include <linux/timer.h>
 #include <linux/gpio.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/pm.h>
+#include <mach/irqs.h>
+#include <mach/sys_config.h>
 #include <asm/io.h>
 #include "sunxi-ir-tx.h"
 
-static u32 debug_mask;
-#define dprintk(level_mask, fmt, arg...)				\
-do {									\
-	if (unlikely(debug_mask & level_mask))				\
-		pr_warn("%s()%d - "fmt, __func__, __LINE__, ##arg);	\
-} while (0)
+static u32 debug_mask = 0;
+#define dprintk(level_mask, fmt, arg...)	if (unlikely(debug_mask & level_mask)) \
+	printk(KERN_DEBUG fmt , ## arg)
 
-#define IRTX_ERR(fmt, arg...) pr_err("%s()%d - "fmt, __func__, __LINE__, ##arg)
-
-struct ir_tx_dev {
-	struct device *dev;
-	struct cdev cdev;
-	dev_t chrdev;
-};
-
-struct ir_raw_buffer {
-	unsigned long tx_dcnt;
-	unsigned char tx_buf[IR_TX_RAW_BUF_SIZE];
+struct ir_tx_info{
+	int ir_used;
+	struct gpio_config ir_tx_gpio;
 };
 
 struct sunxi_ir_tx_data {
-	void __iomem *reg_base;
-	struct platform_device	*pdev;
-	struct clk *mclk;
-	struct clk *pclk;
-	struct regulator *suply;
-	struct pinctrl *pctrl;
-	u32 suply_vol;
-	int irq_num;
+	void __iomem *base_addr;
+	struct clk *clk;
+	struct clk *clk_src;
+	struct pinctrl *pinctrl;
+	struct ir_tx_info ir_info;
 };
-
-static struct class            *ir_tx_class;
-static struct ir_tx_dev        *ir_tx_dev;
 static struct sunxi_ir_tx_data *ir_tx_data;
-static struct ir_raw_buffer     ir_rawbuf;
-
-__inline int ir_tx_fifo_empty(void)
+struct ir_raw_buffer
 {
-	return(readl(ir_tx_data->reg_base + IR_TX_TACR) == IR_TX_FIFO_SIZE);
+	unsigned long tx_dcnt;
+	unsigned char tx_buf[IR_RAW_BUF_SIZE];
+};
+static struct ir_raw_buffer	ir_rawbuf;
+static char ir_tx_dev_name[] = "cir";
+
+static void send_ir_code(unsigned int ir_tx_code);
+
+static ssize_t sunxi_ir_tx_send_data(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	unsigned long data;
+	int error;
+
+	error = strict_strtoul(buf, 10, &data);
+	if (error)
+		return error;
+
+	printk("%s : data = 0x%lx\n", __func__, data);
+
+	send_ir_code((unsigned int)data);
+
+	return count;
 }
 
- __inline int ir_tx_fifo_full(void)
-{
-	unsigned int reg_val;
+static DEVICE_ATTR(ir_tx, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+		NULL, sunxi_ir_tx_send_data);
 
-	reg_val = readl(ir_tx_data->reg_base + IR_TX_TACR);
-	dprintk(DEBUG_INFO, "%3u bytes fifo available\n", reg_val);
-	if (reg_val == 0)
-		return 1;
-	else
-		return 0;
+static struct attribute *ir_tx_attributes[] = {
+	&dev_attr_ir_tx.attr,
+	NULL
+};
+
+static struct attribute_group ir_tx_attribute_group = {
+	.attrs = ir_tx_attributes
+};
+
+__inline int ir_txfifo_empty(void)
+{
+	return((readl(ir_tx_data->base_addr + IR_TX_TACR)) == IR_TX_FIFO_SIZE);
+}
+
+ __inline int ir_txfifo_full(void)
+{
+	return((readl(ir_tx_data->base_addr + IR_TX_TACR)) == 0);
 }
 
 __inline void ir_tx_reset_rawbuffer(void)
@@ -95,596 +99,407 @@ __inline void ir_tx_reset_rawbuffer(void)
 	ir_rawbuf.tx_dcnt = 0;
 }
 
-void ir_tx_packet_handler(unsigned char address, unsigned char command)
+static void ir_tx_packet_handler(unsigned int ir_tx_code)
 {
-	unsigned int  i, j;
-	unsigned int  count = 0;
+	unsigned int i,j;
 	unsigned char buffer[256];
+	unsigned int count=0;
 	unsigned char tx_code[4];
-
 	ir_tx_reset_rawbuffer();
 
-	tx_code[0] = address;
-	tx_code[1] = ~address;
-	tx_code[2] = command;
-	tx_code[3] = ~command;
-
-	dprintk(DEBUG_INIT, "addr: 0x%x  addr': 0x%x  cmd: 0x%x  cmd': 0x%x\n",
-			tx_code[0], tx_code[1], tx_code[2], tx_code[3]);
+	tx_code[0]=(unsigned char)(ir_tx_code&0xff);
+	tx_code[1]=(unsigned char)(ir_tx_code>>8);
+	tx_code[2]=(unsigned char)(ir_tx_code>>16);
+	tx_code[3]=(unsigned char)(ir_tx_code>>24);
 
 	/* go encoding */
-	if (IR_TX_CLK_Ts == 1) {
-		buffer[count++] = 0xff;
-		buffer[count++] = 0xff;
-		buffer[count++] = 0xff;
-		buffer[count++] = 0xa5;
-		buffer[count++] = 0x7f;
-		buffer[count++] = 0x54;
-		for (j = 0; j < 4; j++) {
-			for (i = 0; i < 8; i++) {
-				if (tx_code[j] & 0x01) {
-					buffer[count++] = 0x99;
-					buffer[count++] = 0x4d;
+	if (CLK_Ts == 1) {
+		buffer[count++]=0xff;  /*424��ʱ������(21.35us)�ĸߵ�ƽ��9ms*/
+		buffer[count++]=0xff;
+		buffer[count++]=0xff;
+		buffer[count++]=0xa5;
+		buffer[count++]=0x7f;  /*212��ʱ������(21.35us)�ĵ͵�ƽ��4.5ms*/
+		buffer[count++]=0x54;
+
+		for (j=0; j<4; j++) {
+			for (i=0; i<8;i++ ) {
+				if (tx_code[j]&0x01) {
+					/* ����1��560us�ߵ�ƽ��13*Ts����1680us�͵�ƽ��39*Ts��*/
+					buffer[count++]=0x99;
+					buffer[count++]=0x4d;
 				} else {
-					buffer[count++] = 0x99;
-					buffer[count++] = 0x19;
+					buffer[count++]=0x99;
+					buffer[count++]=0x19;
 				}
-				tx_code[j] = tx_code[j] >> 1;
+				tx_code[j]=tx_code[j]>>1;
 			}
 		}
-		buffer[count++] = 0x99;
-		buffer[count++] = 0x7f;
-		buffer[count++] = 0x7f;
-		buffer[count++] = 0x7f;
-		buffer[count++] = 0x7f;
-		buffer[count++] = 0x7f;
-		buffer[count++] = 0x7f;
+		buffer[count++]=0x99;
+		buffer[count++]=0x7f;
+		buffer[count++]=0x7f;
+		buffer[count++]=0x7f;
+		buffer[count++]=0x7f;
+		buffer[count++]=0x7f;
+		buffer[count++]=0x7f;
 	} else {
-		for (j = 0; j < 4; j++) {
-			if (IR_TX_CYCLE_TYPE == 0 && j % 4 == 0) {
-				buffer[count++] = 0xff;
-				buffer[count++] = 0xff;
-				buffer[count++] = 0xff;
-				buffer[count++] = 0xab;
-				buffer[count++] = 0x7f;
-				buffer[count++] = 0x55;
+		for (j=0; j<4; j++) {
+			if (IR_CYCLE_TYPE==0&&j%4==0) {
+				buffer[count++]=0xff;  /*424��ʱ������(21.35us)�ĸߵ�ƽ��9ms*/
+				buffer[count++]=0xff;
+				buffer[count++]=0xff;
+				buffer[count++]=0xab;
+				buffer[count++]=0x7f;  /*212��ʱ������(21.35us)�ĵ͵�ƽ��4.5ms*/
+				buffer[count++]=0x55;
 			}
-			for (i = 0; i < 8; i++) {
-				if (tx_code[j] & 0x01) {
-					buffer[count++] = 0x9a;
-					buffer[count++] = 0x4e;
-				} else {
-					buffer[count++] = 0x9a;
-					buffer[count++] = 0x1a;
+			for (i=0; i<8; i++) {
+				if (tx_code[j]&0x01) {
+					/* ����1��560us�ߵ�ƽ��13*Ts����1680us�͵�ƽ��39*Ts��*/
+					buffer[count++]=0x9a;
+					buffer[count++]=0x4e;
 				}
-				tx_code[j] = tx_code[j] >> 1;
+				else
+				{
+					buffer[count++]=0x9a;
+					buffer[count++]=0x1a;
+				}
+				tx_code[j]>>1;
 			}
 		}
-		if (IR_TX_CYCLE_TYPE == 0)
-			buffer[count++] = 0x9a;
-	}
-
-	for (i = 0; i < count; i++)
-		ir_rawbuf.tx_buf[ir_rawbuf.tx_dcnt++] = buffer[i];
-
-	dprintk(DEBUG_INFO, "tx_dcnt = %ld\n", ir_rawbuf.tx_dcnt);
-}
-
-static int send_ir_code(unsigned char address, unsigned char command)
-{
-	unsigned int i = 0, idle_threshold;
-	u32 tmp;
-
-	writel(IR_TX_GL_VALUE, ir_tx_data->reg_base + IR_TX_GLR);
-	idle_threshold = (readl(ir_tx_data->reg_base + IR_TX_IDC_H) << 8)
-		| readl(ir_tx_data->reg_base + IR_TX_IDC_L);
-	dprintk(DEBUG_INFO, "enter\n");
-	dprintk(DEBUG_INFO, "idle_threshold = %d\n", idle_threshold);
-	ir_tx_packet_handler(address, command);
-	writel((ir_rawbuf.tx_dcnt - 1), ir_tx_data->reg_base + IR_TX_TR);
-
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_GLR   = 0x%2x\n", IR_TX_GLR,
-			readl(ir_tx_data->reg_base + IR_TX_GLR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_MCR   = 0x%2x\n", IR_TX_MCR,
-			readl(ir_tx_data->reg_base + IR_TX_MCR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_CR    = 0x%2x\n", IR_TX_CR,
-			readl(ir_tx_data->reg_base + IR_TX_CR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_IDC_H = 0x%2x\n", IR_TX_IDC_H,
-			readl(ir_tx_data->reg_base + IR_TX_IDC_H));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_IDC_L = 0x%2x\n", IR_TX_IDC_L,
-			readl(ir_tx_data->reg_base + IR_TX_IDC_L));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_ICR_H = 0x%2x\n", IR_TX_ICR_H,
-			readl(ir_tx_data->reg_base + IR_TX_ICR_H));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_ICR_L = 0x%2x\n", IR_TX_ICR_L,
-			readl(ir_tx_data->reg_base + IR_TX_ICR_L));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_TELR  = 0x%2x\n", IR_TX_TELR,
-			readl(ir_tx_data->reg_base + IR_TX_TELR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_INTC  = 0x%2x\n", IR_TX_INTC,
-			readl(ir_tx_data->reg_base + IR_TX_INTC));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_TACR  = 0x%2x\n", IR_TX_TACR,
-			readl(ir_tx_data->reg_base + IR_TX_TACR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_STAR  = 0x%2x\n", IR_TX_STAR,
-			readl(ir_tx_data->reg_base + IR_TX_STAR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_TR    = 0x%2x\n", IR_TX_TR,
-			readl(ir_tx_data->reg_base + IR_TX_TR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_DMAC  = 0x%2x\n", IR_TX_DMAC,
-			readl(ir_tx_data->reg_base + IR_TX_DMAC));
-
-	if (ir_rawbuf.tx_dcnt <= IR_TX_FIFO_SIZE)
-		for (i = 0; i < ir_rawbuf.tx_dcnt; i++) {
-			writeb(ir_rawbuf.tx_buf[i],
-					ir_tx_data->reg_base + IR_TX_FIFO_DR);
+		if (IR_CYCLE_TYPE == 0) {
+			buffer[count++]=0x9a;
 		}
-	else {
-		dprintk(DEBUG_INFO, "invalid packet\n");
-		return -1;
 	}
 
-	dprintk(DEBUG_INFO, "%3u bytes fifo available\n",
-			readl(ir_tx_data->reg_base + IR_TX_TACR));
+	for (i=0; i<count; i++) {
+		ir_rawbuf.tx_buf[ir_rawbuf.tx_dcnt++]=buffer[i];
+	}
+	printk("%s: tx_dcnt = %ld\n", __func__, ir_rawbuf.tx_dcnt);
+  }
 
-	if (IR_TX_CYCLE_TYPE) {
-		for (i = 0; i < ir_rawbuf.tx_dcnt; i++)
-			dprintk(DEBUG_INFO, "%d, ir txbuffer code = 0x%x!\n",
-					i, ir_rawbuf.tx_buf[i]);
-		tmp = readl(ir_tx_data->reg_base + IR_TX_CR);
+static void send_ir_code(unsigned int ir_tx_code)
+{
+	unsigned int i = 0;
+	u32 tmp;
+	unsigned int idle_threshold;
+	idle_threshold = (readl(ir_tx_data->base_addr +IR_TX_IDC_H)<<8) | readl(ir_tx_data->base_addr +IR_TX_IDC_L);
+
+	printk("%s : enter\n", __func__);
+
+	ir_tx_packet_handler(ir_tx_code);
+
+	for (i=0;i<ir_rawbuf.tx_dcnt;i++) {
+		while(ir_txfifo_full()){printk("%s: fifo full\n", __func__);}
+		writeb(ir_rawbuf.tx_buf[i],ir_tx_data->base_addr+IR_TX_FIFO_DR);
+	}
+
+	if (IR_CYCLE_TYPE) {
+		for(i=0;i<ir_rawbuf.tx_dcnt;i++)
+		printk("%d,ir txbuffer code = 0x%x!\n",i, ir_rawbuf.tx_buf[i]);
+		tmp = readl(ir_tx_data->base_addr + IR_TX_CR);
 		tmp |= (0x01<<7);
-		writel(tmp, ir_tx_data->reg_base + IR_TX_CR);
-	} else
-		while (!ir_tx_fifo_empty())
-			dprintk(DEBUG_INFO,
-				"fifo under run. %3u bytes fifo available\n",
-				readl(ir_tx_data->reg_base + IR_TX_TACR));
-
-	//wait idle finish
-	while ((readl(ir_tx_data->reg_base + IR_TX_ICR_H) << 8
-				| readl(ir_tx_data->reg_base + IR_TX_ICR_L))
-				< idle_threshold)
-		dprintk(DEBUG_INFO, "wait idle\n");
-
-	dprintk(DEBUG_INFO, "finish\n");
-	return 0;
+		writel(tmp, ir_tx_data->base_addr + IR_TX_CR);
+	} else {
+		while(!(ir_txfifo_empty())){};
+	}
+	while((readl(ir_tx_data->base_addr +IR_TX_ICR_H)<<8 | readl(ir_tx_data->base_addr +IR_TX_ICR_L)) < idle_threshold){};  //wait idle finish
 }
 
 static inline unsigned long ir_tx_get_intsta(void)
 {
-	return readl(ir_tx_data->reg_base + IR_TX_STAR);
+	return (readl(ir_tx_data->base_addr + IR_TX_STAR));
 }
 
 static inline void ir_tx_clr_intsta(unsigned long bitmap)
 {
-	unsigned long tmp = readl(ir_tx_data->reg_base + IR_TX_STAR);
+	unsigned long tmp = readl(ir_tx_data->base_addr + IR_TX_STAR);
 
 	tmp &= ~0xff;
 	tmp |= bitmap&0xff;
-	writel(tmp, ir_tx_data->reg_base + IR_TX_STAR);
+	writel(tmp, ir_tx_data->base_addr + IR_TX_STAR);
 }
 
 static irqreturn_t ir_tx_irq_service(int irqno, void *dev_id)
 {
 	unsigned long intsta = ir_tx_get_intsta();
 
-	dprintk(DEBUG_INFO, "IR TX IRQ Serve 0x%lx\n", intsta);
+	dprintk(DEBUG_INT, "IR TX IRQ Serve 0x%lx\n", intsta);
 
 	ir_tx_clr_intsta(intsta);
+
+	if (intsta & 0x01) {
+	};
 
 	return IRQ_HANDLED;
 }
 
-static void ir_tx_reg_clear(struct sunxi_ir_tx_data *ir_tx_data)
+static void sunxi_ir_tx_clk_cfg(struct sunxi_ir_tx_data *ir_data)
 {
-	writel(0, ir_tx_data->reg_base + IR_TX_GLR);
-}
-
-static void ir_tx_reg_cfg(struct sunxi_ir_tx_data *ir_tx_data)
-{
-	writel(IR_TX_MC_VALUE, ir_tx_data->reg_base + IR_TX_MCR);
-	writel(IR_TX_CLK_VALUE, ir_tx_data->reg_base + IR_TX_CR);
-	writel(IR_TX_IDC_H_VALUE, ir_tx_data->reg_base + IR_TX_IDC_H);
-	writel(IR_TX_IDC_L_VALUE, ir_tx_data->reg_base + IR_TX_IDC_L);
-	writel(IR_TX_STA_VALUE, ir_tx_data->reg_base + IR_TX_STAR);
-	writel(IR_TX_INT_C_VALUE, ir_tx_data->reg_base + IR_TX_INTC);
-	writel(IR_TX_GL_VALUE, ir_tx_data->reg_base + IR_TX_GLR);
-
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_GLR   = 0x%2x\n", IR_TX_GLR,
-			readl(ir_tx_data->reg_base + IR_TX_GLR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_MCR   = 0x%2x\n", IR_TX_MCR,
-			readl(ir_tx_data->reg_base + IR_TX_MCR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_CR    = 0x%2x\n", IR_TX_CR,
-			readl(ir_tx_data->reg_base + IR_TX_CR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_IDC_H = 0x%2x\n", IR_TX_IDC_H,
-			readl(ir_tx_data->reg_base + IR_TX_IDC_H));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_IDC_L = 0x%2x\n", IR_TX_IDC_L,
-			readl(ir_tx_data->reg_base + IR_TX_IDC_L));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_ICR_H = 0x%2x\n", IR_TX_ICR_H,
-			readl(ir_tx_data->reg_base + IR_TX_ICR_H));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_ICR_L = 0x%2x\n", IR_TX_ICR_L,
-			readl(ir_tx_data->reg_base + IR_TX_ICR_L));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_TELR  = 0x%2x\n", IR_TX_TELR,
-			readl(ir_tx_data->reg_base + IR_TX_TELR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_INTC  = 0x%2x\n", IR_TX_INTC,
-			readl(ir_tx_data->reg_base + IR_TX_INTC));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_TACR  = 0x%2x\n", IR_TX_TACR,
-			readl(ir_tx_data->reg_base + IR_TX_TACR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_STAR  = 0x%2x\n", IR_TX_STAR,
-			readl(ir_tx_data->reg_base + IR_TX_STAR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_TR    = 0x%2x\n", IR_TX_TR,
-			readl(ir_tx_data->reg_base + IR_TX_TR));
-	dprintk(DEBUG_INIT, "Offset: 0x%2x IR_TX_DMAC  = 0x%2x\n", IR_TX_DMAC,
-			readl(ir_tx_data->reg_base + IR_TX_DMAC));
-
-}
-
-static void ir_tx_clk_cfg(struct sunxi_ir_tx_data *ir_tx_data)
-{
-
 	unsigned long rate = 0;
 
-	rate = clk_get_rate(ir_tx_data->pclk);
-	dprintk(DEBUG_INIT, "get ir parent rate %dHZ\n", (__u32)rate);
+	ir_data->clk_src = clk_get(NULL, HOSC_CLK);
+	if (!ir_data->clk_src || IS_ERR(ir_data->clk_src)) {
+		printk(KERN_DEBUG "try to get ir_tx_clk_source clock failed!\n");
+		return;
+	}
 
-	if (clk_set_parent(ir_tx_data->mclk, ir_tx_data->pclk))
-		IRTX_ERR("set ir_clk parent failed!\n");
+	rate = clk_get_rate(ir_data->clk_src);
+	dprintk(DEBUG_INIT, "%s: get ir_tx_clk_source rate %dHZ\n", __func__, (__u32)rate);
 
-	if (clk_set_rate(ir_tx_data->mclk, IR_TX_CLK))
-		IRTX_ERR("set ir clock freq to %d failed!\n", IR_TX_CLK);
+	ir_data->clk = clk_get(NULL, "cirtx");
+	if (!ir_data->clk || IS_ERR(ir_data->clk)) {
+		printk(KERN_DEBUG "try to get ir tx clock failed!\n");
+		return;
+	}
 
-	rate = clk_get_rate(ir_tx_data->mclk);
-	dprintk(DEBUG_INIT, "get ir_clk rate %dHZ\n", (__u32)rate);
+	if(clk_set_parent(ir_data->clk, ir_data->clk_src))
+		printk("%s: set ir_tx_clk parent to ir_clk_source failed!\n", __func__);
 
-	if (clk_prepare_enable(ir_tx_data->mclk))
-		IRTX_ERR("try to enable ir_clk failed!\n");
+	if (clk_set_rate(ir_data->clk, 6000000)) {
+		printk(KERN_DEBUG "set ir tx clock freq to 3M failed!\n");
+	}
+
+	if (clk_prepare_enable(ir_data->clk)) {
+		printk(KERN_DEBUG "try to enable ir_tx_clk failed!\n");
+	}
+
+	return;
 }
 
-static void ir_tx_clk_uncfg(struct sunxi_ir_tx_data *ir_tx_data)
+static void sunxi_ir_tx_clk_uncfg(struct sunxi_ir_tx_data *ir_data)
 {
 
-	if (IS_ERR(ir_tx_data->mclk) || ir_tx_data->mclk == NULL)
-		IRTX_ERR("ir_clk handle is invalid, just return!\n");
-	else {
-		clk_disable_unprepare(ir_tx_data->mclk);
-		clk_put(ir_tx_data->mclk);
-		ir_tx_data->mclk = NULL;
+	if(NULL == ir_data->clk || IS_ERR(ir_data->clk)) {
+		printk("ir_tx_clk handle is invalid, just return!\n");
+		return;
+	} else {
+		clk_disable_unprepare(ir_data->clk);
+		clk_put(ir_data->clk);
+		ir_data->clk = NULL;
 	}
 
-	if (IS_ERR(ir_tx_data->pclk) || ir_tx_data->pclk == NULL)
-		IRTX_ERR("ir_clk_source handle is invalid, just return!\n");
-	else {
-		clk_put(ir_tx_data->pclk);
-		ir_tx_data->pclk = NULL;
+	if(NULL == ir_data->clk_src || IS_ERR(ir_data->clk_src)) {
+		printk("ir_tx_clk_source handle is invalid, just return!\n");
+		return;
+	} else {
+		clk_put(ir_data->clk_src);
+		ir_data->clk_src = NULL;
 	}
+	return;
 }
 
-static int ir_tx_select_gpio_state(struct pinctrl *pctrl, char *name)
-{
-	int ret = 0;
-	struct pinctrl_state *pctrl_state = NULL;
 
-	pctrl_state = pinctrl_lookup_state(pctrl, name);
-	if (IS_ERR(pctrl_state)) {
-		IRTX_ERR("IR_TX pinctrl_lookup_state(%s) failed! return %p \n",
-				name, pctrl_state);
-		return -1;
+static void sunxi_ir_tx_reg_clear(struct sunxi_ir_tx_data *ir_data)
+{
+	writel(0, ir_data->base_addr + IR_TX_GLR);
+}
+
+static void sunxi_ir_tx_reg_init(struct sunxi_ir_tx_data *ir_data)
+{
+	writel(IR_TX_MC_VALUE, ir_data->base_addr + IR_TX_MCR);
+	writel(IR_TX_C_VALUE, ir_data->base_addr + IR_TX_CR);
+	writel(IR_TX_IDC_H_VALUE, ir_data->base_addr + IR_TX_IDC_H);
+	writel(IR_TX_IDC_L_VALUE, ir_data->base_addr + IR_TX_IDC_L);
+	writel(IR_TX_TEL_VALUE, ir_data->base_addr + IR_TX_TELR);
+	writel(IR_TX_STA_VALUE, ir_data->base_addr + IR_TX_STAR);
+	writel(IR_TX_INT_C_VALUE, ir_data->base_addr + IR_TX_INT_CR);
+	writel(IR_TX_T_VALUE, ir_data->base_addr + IR_TX_TR);
+	writel(IR_TX_GL_VALUE, ir_data->base_addr + IR_TX_GLR);
+
+	dprintk(DEBUG_INIT, "IR_TX_GLR = 0x%x\n", readl(ir_data->base_addr + IR_TX_GLR));
+	dprintk(DEBUG_INIT, "IR_TX_MCR = 0x%x\n", readl(ir_data->base_addr + IR_TX_MCR));
+	dprintk(DEBUG_INIT, "IR_TX_CR = 0x%x\n", readl(ir_data->base_addr + IR_TX_CR));
+	dprintk(DEBUG_INIT, "IR_TX_IDC_L = 0x%x\n", readl(ir_data->base_addr + IR_TX_IDC_L));
+	dprintk(DEBUG_INIT, "IR_TX_TELR = 0x%x\n", readl(ir_data->base_addr + IR_TX_TELR));
+	dprintk(DEBUG_INIT, "IR_TX_INT_CR = 0x%x\n", readl(ir_data->base_addr + IR_TX_INT_CR));
+	dprintk(DEBUG_INIT, "IR_TX_TR = 0x%x\n", readl(ir_data->base_addr + IR_TX_TR));
+}
+
+static int ir_tx_fetch_sysconfig_para(struct sunxi_ir_tx_data *ir_data)
+{
+	int ret = -1;
+	script_item_u	val;
+	script_item_value_type_e  type;
+
+	type = script_get_item("cir", "ir_used", &val);
+
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		pr_err("%s: type err  device_used = %d. \n", __func__, val.val);
+		goto script_get_err;
+	}
+	ir_data->ir_info.ir_used = val.val;
+
+	if (1 == ir_data->ir_info.ir_used) {
+		type = script_get_item("cir", "ir_tx", &val);
+		if(SCIRPT_ITEM_VALUE_TYPE_PIO != type){
+			pr_err("%s: IR TX gpio type err! \n", __func__);
+			goto script_get_err;
+		}
+		ir_data->ir_info.ir_tx_gpio = val.gpio;
+
+		ret = 0;
+
+	} else {
+		pr_err("%s: ir_tx_unused. \n",  __func__);
+		ret = -1;
 	}
 
-	ret = pinctrl_select_state(pctrl, pctrl_state);
-	if (ret < 0)
-		IRTX_ERR("IR_TX pinctrl_select_state(%s) failed! return %d \n",
-				name, ret);
+	return ret;
 
+script_get_err:
+	pr_notice("=========script_get_err============\n");
 	return ret;
 }
 
-static int ir_tx_request_gpio(struct sunxi_ir_tx_data *ir_tx_data)
+#ifdef CONFIG_PM
+static int sunxi_ir_tx_suspend(struct platform_device *pdev, pm_message_t state)
 {
-	ir_tx_data->pctrl = devm_pinctrl_get(&ir_tx_data->pdev->dev);
-	if (IS_ERR(ir_tx_data->pctrl)) {
-		IRTX_ERR("devm_pinctrl_get() failed!\n");
+	dprintk(DEBUG_SUSPEND, "enter: %s. \n", __func__);
+
+	sunxi_ir_tx_reg_clear(ir_tx_data);
+
+	disable_irq_nosync(IR_TX_IRQNO);
+
+	if(NULL == ir_tx_data->clk || IS_ERR(ir_tx_data->clk)) {
+		printk("ir_tx_clk handle is invalid, just return!\n");
 		return -1;
+	} else {
+		clk_disable_unprepare(ir_tx_data->clk);
 	}
-
-	return ir_tx_select_gpio_state(ir_tx_data->pctrl,
-			PINCTRL_STATE_DEFAULT);
-}
-
-static int ir_tx_setup(struct sunxi_ir_tx_data *ir_tx_data)
-{
-	int ret = 0;
-
-	ret = ir_tx_request_gpio(ir_tx_data);
-	if (ret < 0) {
-		IRTX_ERR("request gpio failed!\n");
-		return -1;
-	}
-
-	ir_tx_clk_cfg(ir_tx_data);
-	ir_tx_reg_cfg(ir_tx_data);
-
 	return 0;
-}
+};
 
-static int sunxi_ir_tx_startup(struct platform_device *pdev,
-				struct sunxi_ir_tx_data *ir_tx_data)
+static int sunxi_ir_tx_resume(struct platform_device *pdev)
 {
-	struct device_node *np = NULL;
-	int ret = 0;
+	dprintk(DEBUG_SUSPEND, "enter: %s. \n", __func__);
 
-	np = pdev->dev.of_node;
-
-	ir_tx_data->reg_base = of_iomap(np, 0);
-	if (ir_tx_data->reg_base == NULL) {
-		IRTX_ERR("Failed to ioremap() io memory region.\n");
-		ret = -EBUSY;
-	} else
-		dprintk(DEBUG_INIT, "base: %p !\n", ir_tx_data->reg_base);
-
-	ir_tx_data->irq_num = irq_of_parse_and_map(np, 0);
-	if (ir_tx_data->irq_num == 0) {
-		IRTX_ERR("Failed to map irq.\n");
-		ret = -EBUSY;
-	} else
-		dprintk(DEBUG_INIT, "irq num: %d !\n", ir_tx_data->irq_num);
-
-	ir_tx_data->pclk = of_clk_get(np, 0);
-	ir_tx_data->mclk = of_clk_get(np, 1);
-	if (IS_ERR_OR_NULL(ir_tx_data->pclk) ||
-		IS_ERR_OR_NULL(ir_tx_data->mclk)) {
-		IRTX_ERR("Failed to get clk.\n");
-		ret = -EBUSY;
-	}
-
-	return ret;
-}
+	sunxi_ir_tx_clk_cfg(ir_tx_data);
+	sunxi_ir_tx_reg_init(ir_tx_data);
+	enable_irq(IR_TX_IRQNO);
+	return 0;
+};
+#endif
 
 static int  sunxi_ir_tx_probe(struct platform_device *pdev)
 {
-	int ret = 0;
+	int err = 0;
 
-	ir_tx_data = kzalloc(sizeof(*ir_tx_data), GFP_KERNEL);
-	if (IS_ERR_OR_NULL(ir_tx_data)) {
-		IRTX_ERR("not enough memory for ir tx data\n");
-		return -ENOMEM;
-	}
-	if (pdev->dev.of_node)
-		/* get dt and sysconfig */
-		ret = sunxi_ir_tx_startup(pdev, ir_tx_data);
-	else {
-		IRTX_ERR("device tree err!\n");
-		return -EBUSY;
-	}
-	if (ret < 0)
-		goto err_startup;
+	pdev->dev.init_name = &ir_tx_dev_name[0];
 
-	ir_tx_data->pdev = pdev;
-
-	if (ir_tx_setup(ir_tx_data)) {
-		IRTX_ERR("ir_tx_setup failed.\n");
-		return -EIO;
+	ir_tx_data->pinctrl = devm_pinctrl_get_select_default(&pdev->dev);
+	if (IS_ERR_OR_NULL(ir_tx_data->pinctrl)) {
+		printk(KERN_ERR "%s :request pinctrl handle failed\n", __func__);
+		err =  -EINVAL;
+		goto fail;
 	}
 
-	platform_set_drvdata(pdev, ir_tx_data);
-	if (request_irq(ir_tx_data->irq_num,  ir_tx_irq_service, 0,
-				"RemoteIR_TX", ir_tx_data)) {
-		IRTX_ERR(" request irq fail.\n");
-		ret = -EBUSY;
-		goto err_request_irq;
+	sunxi_ir_tx_clk_cfg(ir_tx_data);
+
+	sunxi_ir_tx_reg_init(ir_tx_data);
+
+	if (request_irq(IR_TX_IRQNO, ir_tx_irq_service, 0, "RemoteIR_TX",
+			&pdev->dev)) {
+		err = -EBUSY;
+		goto fail1;
 	}
 
-	if (ret) {
-		IRTX_ERR("cteate sysfs node failed\n");
-		goto err_create_grp;
+	err = sysfs_create_group(&pdev->dev.kobj, &ir_tx_attribute_group);
+	if (err) {
+		printk(KERN_ERR "%s: cteate sysfs node failed\n", __func__);
+		goto fial2;
 	}
 
 	return 0;
-
-err_create_grp:
-	free_irq(ir_tx_data->irq_num, &pdev->dev);
-
-err_request_irq:
-	platform_set_drvdata(pdev, NULL);
-	ir_tx_clk_uncfg(ir_tx_data);
-	ir_tx_reg_clear(ir_tx_data);
-
-err_startup:
-	kfree(ir_tx_data);
-	return ret;
+fial2:
+	free_irq(IR_TX_IRQNO, &pdev->dev);
+fail1:
+	sunxi_ir_tx_reg_clear(ir_tx_data);
+	sunxi_ir_tx_clk_uncfg(ir_tx_data);
+	if (!IS_ERR_OR_NULL(ir_tx_data->pinctrl))
+		devm_pinctrl_put(ir_tx_data->pinctrl);
+fail:
+	return err;
 }
 
 static int sunxi_ir_tx_remove(struct platform_device *pdev)
 {
-	struct sunxi_ir_tx_data *ir_tx_data = platform_get_drvdata(pdev);
-
-	free_irq(ir_tx_data->irq_num, &pdev->dev);
-	devm_pinctrl_put(ir_tx_data->pctrl);
-
-	ir_tx_reg_clear(ir_tx_data);
-	ir_tx_clk_uncfg(ir_tx_data);
-
-	platform_set_drvdata(pdev, NULL);
-	kfree(ir_tx_data);
-
-
+	sysfs_remove_group(&pdev->dev.kobj, &ir_tx_attribute_group);
+	free_irq(IR_TX_IRQNO, &pdev->dev);
+	sunxi_ir_tx_reg_clear(ir_tx_data);
+	sunxi_ir_tx_clk_uncfg(ir_tx_data);
+	if (!IS_ERR_OR_NULL(ir_tx_data->pinctrl))
+		devm_pinctrl_put(ir_tx_data->pinctrl);
 	return 0;
 }
 
-static const struct of_device_id sunxi_ir_tx_match[] = {
-	{ .compatible = "allwinner,ir_tx", },
-	{ },
+
+static struct platform_device sunxi_ir_tx_device = {
+	.name		    = IR_TX_DEV_NAME,
+	.id		        = PLATFORM_DEVID_NONE,
 };
-MODULE_DEVICE_TABLE(of, sunxi_ir_recv_of_match);
-
-#ifdef CONFIG_PM
-static int sunxi_ir_tx_suspend(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct sunxi_ir_tx_data *ir_tx_data = platform_get_drvdata(pdev);
-
-	dprintk(DEBUG_SUSPEND, "enter\n");
-	ir_tx_reg_clear(ir_tx_data);
-
-	disable_irq_nosync(ir_tx_data->irq_num);
-
-	if (IS_ERR_OR_NULL(ir_tx_data->mclk)) {
-		IRTX_ERR("clk handle is invalid, just return!\n");
-		return -1;
-	}
-	clk_disable_unprepare(ir_tx_data->mclk);
-
-	ir_tx_select_gpio_state(ir_tx_data->pctrl, PINCTRL_STATE_SLEEP);
-
-
-	return 0;
-};
-
-static int sunxi_ir_tx_resume(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct sunxi_ir_tx_data *ir_tx_data = platform_get_drvdata(pdev);
-
-	dprintk(DEBUG_INIT, "enter\n");
-
-	clk_prepare_enable(ir_tx_data->mclk);
-	enable_irq(ir_tx_data->irq_num);
-
-	if (ir_tx_setup(ir_tx_data))
-		return -1;
-
-	return 0;
-};
-
-static const struct dev_pm_ops sunxi_ir_tx_pm_ops = {
-	.suspend        = sunxi_ir_tx_suspend,
-	.resume         = sunxi_ir_tx_resume,
-};
-#endif
 
 static struct platform_driver sunxi_ir_tx_driver = {
-	.probe  = sunxi_ir_tx_probe,
-	.remove = sunxi_ir_tx_remove,
-	.driver = {
-		.name   = SUNXI_IR_TX_DRIVER_NAME,
-		.owner  = THIS_MODULE,
-		.of_match_table = sunxi_ir_tx_match,
-#ifdef CONFIG_PM
-		.pm	= &sunxi_ir_tx_pm_ops,
-#endif
+	.driver		= {
+		.name	= IR_TX_DEV_NAME,
+		.owner	= THIS_MODULE,
 	},
-};
-
-static int ir_tx_open(struct inode *inode, struct file *filp)
-{
-	filp->private_data = ir_tx_data;
-	return 0;
-}
-
-static int ir_tx_release(struct inode *inode, struct file *filp)
-{
-	return 0;
-}
-
-static long  ir_tx_unlocked_ioctl(struct file *filp, unsigned int cmd,
-		unsigned long arg)
-{
-	unsigned int size;
-	struct cmd *code;
-
-	switch (cmd) {
-	case IR_TX_IOCSEND:
-		size = _IOC_SIZE(cmd);
-		code = (struct cmd *)kzalloc(size, GFP_KERNEL);
-		if (IS_ERR_OR_NULL(code)) {
-			IRTX_ERR("not enough memory for ir code\n");
-			return -ENOMEM;
-		}
-		if (copy_from_user(code, (void __user *)arg, size)) {
-			IRTX_ERR("copy buffer err\n");
-			return -ENOMEM;
-		}
-		send_ir_code(code->address, code->command);
-		kfree(code);
-		break;
-	default:
-		IRTX_ERR("give us a err cmd\n");
-		return -ENOTTY;
-	}
-	return 0;
-}
-
-static const struct file_operations ir_tx_fops = {
-	.owner		= THIS_MODULE,
-	.unlocked_ioctl	= ir_tx_unlocked_ioctl,
-	.open		= ir_tx_open,
-	.release	= ir_tx_release,
+	.probe		= sunxi_ir_tx_probe,
+	.remove		= sunxi_ir_tx_remove,
+#ifdef CONFIG_PM
+	.suspend	= sunxi_ir_tx_suspend,
+	.resume		= sunxi_ir_tx_resume,
+#endif
 };
 
 static int __init ir_tx_init(void)
 {
 	int err = 0;
-	struct device *dev;
 
-	ir_tx_dev = kzalloc(sizeof(struct ir_tx_dev), GFP_KERNEL);
-	if (ir_tx_dev == NULL) {
-		IRTX_ERR("kzalloc failed!\n");
-		return -ENOMEM;
+	ir_tx_data = kzalloc(sizeof(*ir_tx_data), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(ir_tx_data)) {
+		printk(KERN_ERR "ir_tx_data: not enough memory for device\n");
+		err = -ENOMEM;
+		goto fail1;
 	}
 
-	err = alloc_chrdev_region(&ir_tx_dev->chrdev, 0, 1, "ir_tx-dev");
+	ir_tx_data->base_addr = (void __iomem *)IR_TX_BASSADDRESS;
 
-	if (err) {
-		IRTX_ERR("alloc_chrdev_region failed!\n");
-		goto alloc_chrdev_err;
+	if (ir_tx_fetch_sysconfig_para(ir_tx_data)) {
+		printk(KERN_ERR "%s: fetch sysconfig err\n", __func__);
+		return -1;
 	}
 
-	cdev_init(&(ir_tx_dev->cdev), &ir_tx_fops);
-	ir_tx_dev->cdev.owner = THIS_MODULE;
-	err = cdev_add(&(ir_tx_dev->cdev), ir_tx_dev->chrdev, 1);
-	if (err) {
-		IRTX_ERR("cdev_add failed!\n");
-		goto cdev_add_err;
+	err = platform_driver_register(&sunxi_ir_tx_driver);
+	if (IS_ERR_VALUE(err)) {
+		printk(KERN_ERR "register sunxi arisc platform driver failed\n");
+		goto fail2;
 	}
-
-	ir_tx_class = class_create(THIS_MODULE, "ir_tx_char_class");
-	if (IS_ERR(ir_tx_class)) {
-		err = PTR_ERR(ir_tx_class);
-		IRTX_ERR("class_create failed!\n");
-		goto class_err;
-	}
-
-	dev = device_create(ir_tx_class, NULL, ir_tx_dev->chrdev, NULL,
-			"ir_tx%d", 0);
-	if (IS_ERR(dev)) {
-		err = PTR_ERR(dev);
-		IRTX_ERR("device_create failed!\n");
-		goto device_err;
+	err = platform_device_register(&sunxi_ir_tx_device);
+	if (IS_ERR_VALUE(err)) {
+		printk(KERN_ERR "register sunxi arisc platform device failed\n");
+		goto fail3;
 	}
 
 	return 0;
-
-device_err:
-	device_destroy(ir_tx_class, ir_tx_dev->chrdev);
-class_err:
-	cdev_del(&(ir_tx_dev->cdev));
-cdev_add_err:
-	unregister_chrdev_region(ir_tx_dev->chrdev, 1);
-alloc_chrdev_err:
-	kfree(ir_tx_dev);
-
+fail3:
+	platform_driver_unregister(&sunxi_ir_tx_driver);
+fail2:
+	kfree(ir_tx_data);
+fail1:
 	return err;
+
 }
 
 static void __exit ir_tx_exit(void)
 {
-	cdev_del(&(ir_tx_dev->cdev));
-	unregister_chrdev_region(ir_tx_dev->chrdev, 1);
-	device_destroy(ir_tx_class, ir_tx_dev->chrdev);
-	class_destroy(ir_tx_class);
-	kfree(ir_tx_dev);
+	platform_device_unregister(&sunxi_ir_tx_device);
+	platform_driver_unregister(&sunxi_ir_tx_driver);
+	kfree(ir_tx_data);
+	printk(KERN_INFO "%s: module unloaded\n", __func__);
 }
 
 module_init(ir_tx_init);
 module_exit(ir_tx_exit);
-module_param_named(debug, debug_mask, int, 0664);
-module_platform_driver(sunxi_ir_tx_driver);
+module_param_named(debug_mask, debug_mask, int, 0644);
+MODULE_DESCRIPTION("Remote IR TX driver");
 MODULE_AUTHOR("Li Ming");
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Remote IR TX driver");

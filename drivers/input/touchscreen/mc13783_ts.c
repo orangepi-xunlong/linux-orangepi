@@ -229,9 +229,11 @@ err_free_mem:
 	return ret;
 }
 
-static int mc13783_ts_remove(struct platform_device *pdev)
+static int __devexit mc13783_ts_remove(struct platform_device *pdev)
 {
 	struct mc13783_ts_priv *priv = platform_get_drvdata(pdev);
+
+	platform_set_drvdata(pdev, NULL);
 
 	destroy_workqueue(priv->workq);
 	input_unregister_device(priv->idev);
@@ -241,13 +243,24 @@ static int mc13783_ts_remove(struct platform_device *pdev)
 }
 
 static struct platform_driver mc13783_ts_driver = {
-	.remove		= mc13783_ts_remove,
+	.remove		= __devexit_p(mc13783_ts_remove),
 	.driver		= {
+		.owner	= THIS_MODULE,
 		.name	= MC13783_TS_NAME,
 	},
 };
 
-module_platform_driver_probe(mc13783_ts_driver, mc13783_ts_probe);
+static int __init mc13783_ts_init(void)
+{
+	return platform_driver_probe(&mc13783_ts_driver, &mc13783_ts_probe);
+}
+module_init(mc13783_ts_init);
+
+static void __exit mc13783_ts_exit(void)
+{
+	platform_driver_unregister(&mc13783_ts_driver);
+}
+module_exit(mc13783_ts_exit);
 
 MODULE_DESCRIPTION("MC13783 input touchscreen driver");
 MODULE_AUTHOR("Sascha Hauer <s.hauer@pengutronix.de>");

@@ -29,7 +29,6 @@
 #include <linux/average.h>
 #include <linux/leds.h>
 #include <net/mac80211.h>
-#include <net/cfg80211.h>
 
 /* RX/TX descriptor hw structs
  * TODO: Driver part should only see sw structs */
@@ -77,29 +76,26 @@
   GENERIC DRIVER DEFINITIONS
 \****************************/
 
-#define ATH5K_PRINTF(fmt, ...)						\
-	pr_warn("%s: " fmt, __func__, ##__VA_ARGS__)
+#define ATH5K_PRINTF(fmt, ...) \
+	printk(KERN_WARNING "%s: " fmt, __func__, ##__VA_ARGS__)
 
-void __printf(3, 4)
-_ath5k_printk(const struct ath5k_hw *ah, const char *level,
-	      const char *fmt, ...);
+#define ATH5K_PRINTK(_sc, _level, _fmt, ...) \
+	printk(_level "ath5k %s: " _fmt, \
+		((_sc) && (_sc)->hw) ? wiphy_name((_sc)->hw->wiphy) : "", \
+		##__VA_ARGS__)
 
-#define ATH5K_PRINTK(_sc, _level, _fmt, ...)				\
-	_ath5k_printk(_sc, _level, _fmt, ##__VA_ARGS__)
+#define ATH5K_PRINTK_LIMIT(_sc, _level, _fmt, ...) do { \
+	if (net_ratelimit()) \
+		ATH5K_PRINTK(_sc, _level, _fmt, ##__VA_ARGS__); \
+	} while (0)
 
-#define ATH5K_PRINTK_LIMIT(_sc, _level, _fmt, ...)			\
-do {									\
-	if (net_ratelimit())						\
-		ATH5K_PRINTK(_sc, _level, _fmt, ##__VA_ARGS__); 	\
-} while (0)
-
-#define ATH5K_INFO(_sc, _fmt, ...)					\
+#define ATH5K_INFO(_sc, _fmt, ...) \
 	ATH5K_PRINTK(_sc, KERN_INFO, _fmt, ##__VA_ARGS__)
 
-#define ATH5K_WARN(_sc, _fmt, ...)					\
+#define ATH5K_WARN(_sc, _fmt, ...) \
 	ATH5K_PRINTK_LIMIT(_sc, KERN_WARNING, _fmt, ##__VA_ARGS__)
 
-#define ATH5K_ERR(_sc, _fmt, ...)					\
+#define ATH5K_ERR(_sc, _fmt, ...) \
 	ATH5K_PRINTK_LIMIT(_sc, KERN_ERR, _fmt, ##__VA_ARGS__)
 
 /*
@@ -1252,8 +1248,6 @@ struct ath5k_statistics {
 #define ATH5K_TXQ_LEN_MAX	(ATH_TXBUF / 4)		/* bufs per queue */
 #define ATH5K_TXQ_LEN_LOW	(ATH5K_TXQ_LEN_MAX / 2)	/* low mark */
 
-DECLARE_EWMA(beacon_rssi, 1024, 8)
-
 /* Driver state associated with an instance of a device */
 struct ath5k_hw {
 	struct ath_common       common;
@@ -1265,10 +1259,10 @@ struct ath5k_hw {
 	void __iomem		*iobase;	/* address of the device */
 	struct mutex		lock;		/* dev-level lock */
 	struct ieee80211_hw	*hw;		/* IEEE 802.11 common */
-	struct ieee80211_supported_band sbands[NUM_NL80211_BANDS];
+	struct ieee80211_supported_band sbands[IEEE80211_NUM_BANDS];
 	struct ieee80211_channel channels[ATH_CHAN_MAX];
-	struct ieee80211_rate	rates[NUM_NL80211_BANDS][AR5K_MAX_RATES];
-	s8			rate_idx[NUM_NL80211_BANDS][AR5K_MAX_RATES];
+	struct ieee80211_rate	rates[IEEE80211_NUM_BANDS][AR5K_MAX_RATES];
+	s8			rate_idx[IEEE80211_NUM_BANDS][AR5K_MAX_RATES];
 	enum nl80211_iftype	opmode;
 
 #ifdef CONFIG_ATH5K_DEBUG
@@ -1282,12 +1276,11 @@ struct ath5k_hw {
 
 	DECLARE_BITMAP(status, 4);
 #define ATH_STAT_INVALID	0		/* disable hardware accesses */
+#define ATH_STAT_PROMISC	1
 #define ATH_STAT_LEDSOFT	2		/* enable LED gpio status */
 #define ATH_STAT_STARTED	3		/* opened & irqs enabled */
-#define ATH_STAT_RESET		4		/* hw reset */
 
 	unsigned int		filter_flags;	/* HW flags, AR5K_RX_FILTER_* */
-	unsigned int		fif_filter_flags; /* Current FIF_* filter flags */
 	struct ieee80211_channel *curchan;	/* current h/w channel */
 
 	u16			nvifs;
@@ -1335,6 +1328,7 @@ struct ath5k_hw {
 	unsigned int		nexttbtt;	/* next beacon time in TU */
 	struct ath5k_txq	*cabq;		/* content after beacon */
 
+	int			power_level;	/* Requested tx power in dBm */
 	bool			assoc;		/* associate state */
 	bool			enable_beacon;	/* true if beacons are on */
 
@@ -1367,7 +1361,7 @@ struct ath5k_hw {
 	u8			ah_retry_long;
 	u8			ah_retry_short;
 
-	bool			ah_use_32khz_clock;
+	u32			ah_use_32khz_clock;
 
 	u8			ah_coverage_class;
 	bool			ah_ack_bitrate_high;
@@ -1428,13 +1422,12 @@ struct ath5k_hw {
 		/* Value in dB units */
 		s16		txp_cck_ofdm_pwr_delta;
 		bool		txp_setup;
-		int		txp_requested;	/* Requested tx power in dBm */
 	} ah_txpower;
 
 	struct ath5k_nfcal_hist ah_nfcal_hist;
 
 	/* average beacon RSSI in our BSS (used by ANI) */
-	struct ewma_beacon_rssi	ah_beacon_rssi_avg;
+	struct ewma		ah_beacon_rssi_avg;
 
 	/* noise floor from last periodic calibration */
 	s32			ah_noise_floor;
@@ -1527,12 +1520,11 @@ int ath5k_hw_dma_stop(struct ath5k_hw *ah);
 /* EEPROM access functions */
 int ath5k_eeprom_init(struct ath5k_hw *ah);
 void ath5k_eeprom_detach(struct ath5k_hw *ah);
-int ath5k_eeprom_mode_from_channel(struct ath5k_hw *ah,
-		struct ieee80211_channel *channel);
+
 
 /* Protocol Control Unit Functions */
 /* Helpers */
-int ath5k_hw_get_frame_duration(struct ath5k_hw *ah, enum nl80211_band band,
+int ath5k_hw_get_frame_duration(struct ath5k_hw *ah,
 		int len, struct ieee80211_rate *rate, bool shortpre);
 unsigned int ath5k_hw_get_default_slottime(struct ath5k_hw *ah);
 unsigned int ath5k_hw_get_default_sifs(struct ath5k_hw *ah);
@@ -1611,7 +1603,7 @@ int ath5k_hw_write_initvals(struct ath5k_hw *ah, u8 mode, bool change_channel);
 
 /* PHY functions */
 /* Misc PHY functions */
-u16 ath5k_hw_radio_revision(struct ath5k_hw *ah, enum nl80211_band band);
+u16 ath5k_hw_radio_revision(struct ath5k_hw *ah, enum ieee80211_band band);
 int ath5k_hw_phy_disable(struct ath5k_hw *ah);
 /* Gain_F optimization */
 enum ath5k_rfgain ath5k_hw_gainf_calibrate(struct ath5k_hw *ah);
@@ -1649,7 +1641,7 @@ static inline struct ath_regulatory *ath5k_hw_regulatory(struct ath5k_hw *ah)
 	return &(ath5k_hw_common(ah)->regulatory);
 }
 
-#ifdef CONFIG_ATH5K_AHB
+#ifdef CONFIG_ATHEROS_AR231X
 #define AR5K_AR2315_PCI_BASE	((void __iomem *)0xb0100000)
 
 static inline void __iomem *ath5k_ahb_reg(struct ath5k_hw *ah, u16 reg)

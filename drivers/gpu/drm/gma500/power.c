@@ -110,8 +110,6 @@ static void gma_resume_display(struct pci_dev *pdev)
 	PSB_WVDC32(dev_priv->pge_ctl | _PSB_PGETBL_ENABLED, PSB_PGETBL_CTL);
 	pci_write_config_word(pdev, PSB_GMCH_CTRL,
 			dev_priv->gmch_ctrl | _PSB_GMCH_ENABLED);
-
-	psb_gtt_restore(dev); /* Rebuild our GTT mappings */
 	dev_priv->ops->restore_regs(dev);
 }
 
@@ -187,7 +185,7 @@ static bool gma_resume_pci(struct pci_dev *pdev)
  */
 int gma_power_suspend(struct device *_dev)
 {
-	struct pci_dev *pdev = to_pci_dev(_dev);
+	struct pci_dev *pdev = container_of(_dev, struct pci_dev, dev);
 	struct drm_device *dev = pci_get_drvdata(pdev);
 	struct drm_psb_private *dev_priv = dev->dev_private;
 
@@ -214,7 +212,7 @@ int gma_power_suspend(struct device *_dev)
  */
 int gma_power_resume(struct device *_dev)
 {
-	struct pci_dev *pdev = to_pci_dev(_dev);
+	struct pci_dev *pdev = container_of(_dev, struct pci_dev, dev);
 	struct drm_device *dev = pci_get_drvdata(pdev);
 
 	mutex_lock(&power_mutex);
@@ -314,19 +312,4 @@ int psb_runtime_idle(struct device *dev)
 		return 0;
 	else
 		return 1;
-}
-
-int gma_power_thaw(struct device *_dev)
-{
-	return gma_power_resume(_dev);
-}
-
-int gma_power_freeze(struct device *_dev)
-{
-	return gma_power_suspend(_dev);
-}
-
-int gma_power_restore(struct device *_dev)
-{
-	return gma_power_resume(_dev);
 }

@@ -70,7 +70,7 @@ xpc_get_rsvd_page_pa(int nasid)
 	unsigned long rp_pa = nasid;	/* seed with nasid */
 	size_t len = 0;
 	size_t buf_len = 0;
-	void *buf = buf;
+	void *buf = NULL;
 	void *buf_base = NULL;
 	enum xp_retval (*get_partition_rsvd_page_pa)
 		(void *, u64 *, unsigned long *, size_t *) =
@@ -408,7 +408,7 @@ xpc_mark_partition_inactive(struct xpc_partition *part)
 void
 xpc_discovery(void)
 {
-	void *remote_rp_base;
+	void *remote_rp_base = NULL;
 	struct xpc_rsvd_page *remote_rp;
 	unsigned long remote_rp_pa;
 	int region;
@@ -422,8 +422,11 @@ xpc_discovery(void)
 	remote_rp = xpc_kmalloc_cacheline_aligned(XPC_RP_HEADER_SIZE +
 						  xpc_nasid_mask_nbytes,
 						  GFP_KERNEL, &remote_rp_base);
-	if (remote_rp == NULL)
+	if (remote_rp == NULL){
+		if(NULL != remote_rp_base)
+			kfree(remote_rp_base);
 		return;
+	}
 
 	discovered_nasids = kzalloc(sizeof(long) * xpc_nasid_mask_nlongs,
 				    GFP_KERNEL);

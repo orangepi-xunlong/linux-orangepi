@@ -41,12 +41,12 @@
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 
-#include "pxa300.h"
-#include <linux/platform_data/video-pxafb.h>
-#include <linux/platform_data/mmc-pxamci.h>
-#include <linux/platform_data/keypad-pxa27x.h>
-#include "littleton.h"
-#include <linux/platform_data/mtd-nand-pxa3xx.h>
+#include <mach/pxa300.h>
+#include <mach/pxafb.h>
+#include <mach/mmc.h>
+#include <plat/pxa27x_keypad.h>
+#include <mach/littleton.h>
+#include <plat/pxa3xx_nand.h>
 
 #include "generic.h"
 
@@ -183,7 +183,7 @@ static struct pxafb_mach_info littleton_lcd_info = {
 	.lcd_conn		= LCD_COLOR_TFT_16BPP,
 };
 
-static void __init littleton_init_lcd(void)
+static void littleton_init_lcd(void)
 {
 	pxa_set_fb_info(NULL, &littleton_lcd_info);
 }
@@ -222,7 +222,7 @@ static inline void littleton_init_spi(void) {}
 #endif
 
 #if defined(CONFIG_KEYBOARD_PXA27x) || defined(CONFIG_KEYBOARD_PXA27x_MODULE)
-static const unsigned int littleton_matrix_key_map[] = {
+static unsigned int littleton_matrix_key_map[] = {
 	/* KEY(row, col, key_code) */
 	KEY(1, 3, KEY_0), KEY(0, 0, KEY_1), KEY(1, 0, KEY_2), KEY(2, 0, KEY_3),
 	KEY(0, 1, KEY_4), KEY(1, 1, KEY_5), KEY(2, 1, KEY_6), KEY(0, 2, KEY_7),
@@ -249,15 +249,11 @@ static const unsigned int littleton_matrix_key_map[] = {
 	KEY(3, 1, KEY_F23),	/* soft2 */
 };
 
-static struct matrix_keymap_data littleton_matrix_keymap_data = {
-	.keymap			= littleton_matrix_key_map,
-	.keymap_size		= ARRAY_SIZE(littleton_matrix_key_map),
-};
-
 static struct pxa27x_keypad_platform_data littleton_keypad_info = {
 	.matrix_key_rows	= 6,
 	.matrix_key_cols	= 5,
-	.matrix_keymap_data	= &littleton_matrix_keymap_data,
+	.matrix_key_map		= littleton_matrix_key_map,
+	.matrix_key_map_size	= ARRAY_SIZE(littleton_matrix_key_map),
 
 	.enable_rotary0		= 1,
 	.rotary0_up_key		= KEY_UP,
@@ -447,7 +443,7 @@ MACHINE_START(LITTLETON, "Marvell Form Factor Development Platform (aka Littleto
 	.nr_irqs	= LITTLETON_NR_IRQS,
 	.init_irq	= pxa3xx_init_irq,
 	.handle_irq	= pxa3xx_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= littleton_init,
 	.restart	= pxa_restart,
 MACHINE_END

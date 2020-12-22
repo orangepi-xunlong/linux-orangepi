@@ -3,7 +3,7 @@
  *  JZ4740 platform devices
  *
  *  This program is free software; you can redistribute it and/or modify it
- *  under  the terms of the GNU General	 Public License as published by the
+ *  under  the terms of the GNU General  Public License as published by the
  *  Free Software Foundation;  either version 2 of the License, or (at your
  *  option) any later version.
  *
@@ -13,15 +13,13 @@
  *
  */
 
-#include <linux/clk.h>
 #include <linux/device.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/resource.h>
 
 #include <linux/dma-mapping.h>
-
-#include <linux/usb/musb.h>
 
 #include <asm/mach-jz4740/platform.h>
 #include <asm/mach-jz4740/base.h>
@@ -30,37 +28,57 @@
 #include <linux/serial_core.h>
 #include <linux/serial_8250.h>
 
+#include "serial.h"
 #include "clock.h"
 
-/* USB Device Controller */
-struct platform_device jz4740_udc_xceiv_device = {
-	.name = "usb_phy_generic",
-	.id   = 0,
+/* OHCI controller */
+static struct resource jz4740_usb_ohci_resources[] = {
+	{
+		.start	= JZ4740_UHC_BASE_ADDR,
+		.end	= JZ4740_UHC_BASE_ADDR + 0x1000 - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= JZ4740_IRQ_UHC,
+		.end	= JZ4740_IRQ_UHC,
+		.flags	= IORESOURCE_IRQ,
+	},
 };
 
-static struct resource jz4740_udc_resources[] = {
-	[0] = {
-		.start = JZ4740_UDC_BASE_ADDR,
-		.end   = JZ4740_UDC_BASE_ADDR + 0x10000 - 1,
-		.flags = IORESOURCE_MEM,
+struct platform_device jz4740_usb_ohci_device = {
+	.name		= "jz4740-ohci",
+	.id		= -1,
+	.dev = {
+		.dma_mask = &jz4740_usb_ohci_device.dev.coherent_dma_mask,
+		.coherent_dma_mask = DMA_BIT_MASK(32),
 	},
-	[1] = {
-		.start = JZ4740_IRQ_UDC,
-		.end   = JZ4740_IRQ_UDC,
-		.flags = IORESOURCE_IRQ,
-		.name  = "mc",
+	.num_resources	= ARRAY_SIZE(jz4740_usb_ohci_resources),
+	.resource	= jz4740_usb_ohci_resources,
+};
+
+/* UDC (USB gadget controller) */
+static struct resource jz4740_usb_gdt_resources[] = {
+	{
+		.start	= JZ4740_UDC_BASE_ADDR,
+		.end	= JZ4740_UDC_BASE_ADDR + 0x1000 - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= JZ4740_IRQ_UDC,
+		.end	= JZ4740_IRQ_UDC,
+		.flags	= IORESOURCE_IRQ,
 	},
 };
 
 struct platform_device jz4740_udc_device = {
-	.name = "musb-jz4740",
-	.id   = -1,
-	.dev  = {
-		.dma_mask          = &jz4740_udc_device.dev.coherent_dma_mask,
+	.name		= "jz-udc",
+	.id		= -1,
+	.dev = {
+		.dma_mask = &jz4740_udc_device.dev.coherent_dma_mask,
 		.coherent_dma_mask = DMA_BIT_MASK(32),
 	},
-	.num_resources = ARRAY_SIZE(jz4740_udc_resources),
-	.resource      = jz4740_udc_resources,
+	.num_resources	= ARRAY_SIZE(jz4740_usb_gdt_resources),
+	.resource	= jz4740_usb_gdt_resources,
 };
 
 /* MMC/SD controller */
@@ -84,7 +102,7 @@ struct platform_device jz4740_mmc_device = {
 		.dma_mask = &jz4740_mmc_device.dev.coherent_dma_mask,
 		.coherent_dma_mask = DMA_BIT_MASK(32),
 	},
-	.num_resources	= ARRAY_SIZE(jz4740_mmc_resources),
+	.num_resources  = ARRAY_SIZE(jz4740_mmc_resources),
 	.resource	= jz4740_mmc_resources,
 };
 
@@ -96,7 +114,7 @@ static struct resource jz4740_rtc_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		.start	= JZ4740_IRQ_RTC,
+		.start  = JZ4740_IRQ_RTC,
 		.end	= JZ4740_IRQ_RTC,
 		.flags	= IORESOURCE_IRQ,
 	},
@@ -126,7 +144,7 @@ static struct resource jz4740_i2c_resources[] = {
 struct platform_device jz4740_i2c_device = {
 	.name		= "jz4740-i2c",
 	.id		= 0,
-	.num_resources	= ARRAY_SIZE(jz4740_i2c_resources),
+	.num_resources  = ARRAY_SIZE(jz4740_i2c_resources),
 	.resource	= jz4740_i2c_resources,
 };
 
@@ -139,27 +157,9 @@ static struct resource jz4740_nand_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		.name	= "bank1",
+		.name	= "bank",
 		.start	= 0x18000000,
 		.end	= 0x180C0000 - 1,
-		.flags = IORESOURCE_MEM,
-	},
-	{
-		.name	= "bank2",
-		.start	= 0x14000000,
-		.end	= 0x140C0000 - 1,
-		.flags = IORESOURCE_MEM,
-	},
-	{
-		.name	= "bank3",
-		.start	= 0x0C000000,
-		.end	= 0x0C0C0000 - 1,
-		.flags = IORESOURCE_MEM,
-	},
-	{
-		.name	= "bank4",
-		.start	= 0x08000000,
-		.end	= 0x080C0000 - 1,
 		.flags = IORESOURCE_MEM,
 	},
 };
@@ -254,6 +254,42 @@ struct platform_device jz4740_adc_device = {
 	.resource	= jz4740_adc_resources,
 };
 
+/* Serial */
+#define JZ4740_UART_DATA(_id) \
+	{ \
+		.flags = UPF_SKIP_TEST | UPF_IOREMAP | UPF_FIXED_TYPE, \
+		.iotype = UPIO_MEM, \
+		.regshift = 2, \
+		.serial_out = jz4740_serial_out, \
+		.type = PORT_16550, \
+		.mapbase = JZ4740_UART ## _id ## _BASE_ADDR, \
+		.irq = JZ4740_IRQ_UART ## _id, \
+	}
+
+static struct plat_serial8250_port jz4740_uart_data[] = {
+	JZ4740_UART_DATA(0),
+	JZ4740_UART_DATA(1),
+	{},
+};
+
+static struct platform_device jz4740_uart_device = {
+	.name = "serial8250",
+	.id = 0,
+	.dev = {
+		.platform_data = jz4740_uart_data,
+	},
+};
+
+void jz4740_serial_device_register(void)
+{
+	struct plat_serial8250_port *p;
+
+	for (p = jz4740_uart_data; p->flags != 0; ++p)
+		p->uartclk = jz4740_clock_bdata.ext_rate;
+
+	platform_device_register(&jz4740_uart_device);
+}
+
 /* Watchdog */
 static struct resource jz4740_wdt_resources[] = {
 	{
@@ -264,35 +300,8 @@ static struct resource jz4740_wdt_resources[] = {
 };
 
 struct platform_device jz4740_wdt_device = {
-	.name	       = "jz4740-wdt",
-	.id	       = -1,
+	.name          = "jz4740-wdt",
+	.id            = -1,
 	.num_resources = ARRAY_SIZE(jz4740_wdt_resources),
 	.resource      = jz4740_wdt_resources,
-};
-
-/* PWM */
-struct platform_device jz4740_pwm_device = {
-	.name = "jz4740-pwm",
-	.id   = -1,
-};
-
-/* DMA */
-static struct resource jz4740_dma_resources[] = {
-	{
-		.start	= JZ4740_DMAC_BASE_ADDR,
-		.end	= JZ4740_DMAC_BASE_ADDR + 0x400 - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= JZ4740_IRQ_DMAC,
-		.end	= JZ4740_IRQ_DMAC,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-struct platform_device jz4740_dma_device = {
-	.name		= "jz4740-dma",
-	.id		= -1,
-	.num_resources	= ARRAY_SIZE(jz4740_dma_resources),
-	.resource	= jz4740_dma_resources,
 };

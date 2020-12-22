@@ -1,0 +1,11 @@
+#
+# sunxi cpus test configuration.
+#
+
+config SUNXI_CPUS_TEST
+	tristate "sunxi cpus test driver"
+	default m
+	help
+	Nothing help.
+
+	

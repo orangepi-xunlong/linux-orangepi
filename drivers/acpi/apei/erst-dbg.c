@@ -17,6 +17,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/kernel.h>
@@ -107,17 +111,8 @@ retry_next:
 	if (rc)
 		goto out;
 	/* no more record */
-	if (id == APEI_ERST_INVALID_RECORD_ID) {
-		/*
-		 * If the persistent store is empty initially, the function
-		 * 'erst_read' below will return "-ENOENT" value. This causes
-		 * 'retry_next' label is entered again. The returned value
-		 * should be zero indicating the read operation is EOF.
-		 */
-		len = 0;
-
+	if (id == APEI_ERST_INVALID_RECORD_ID)
 		goto out;
-	}
 retry:
 	rc = len = erst_read(id, erst_dbg_buf, erst_dbg_buf_len);
 	/* The record may be cleared by others, try read next record */

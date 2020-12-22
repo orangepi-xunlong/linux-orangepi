@@ -24,12 +24,13 @@ struct cb710_mmc_reader {
 
 static inline struct mmc_host *cb710_slot_to_mmc(struct cb710_slot *slot)
 {
-	return platform_get_drvdata(&slot->pdev);
+	return dev_get_drvdata(&slot->pdev.dev);
 }
 
 static inline struct cb710_slot *cb710_mmc_to_slot(struct mmc_host *mmc)
 {
-	struct platform_device *pdev = to_platform_device(mmc_dev(mmc));
+	struct platform_device *pdev = container_of(mmc_dev(mmc),
+		struct platform_device, dev);
 	return cb710_pdev_to_slot(pdev);
 }
 

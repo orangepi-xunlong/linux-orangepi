@@ -45,6 +45,7 @@ int mlx4_ib_db_map_user(struct mlx4_ib_ucontext *context, unsigned long virt,
 			struct mlx4_db *db)
 {
 	struct mlx4_ib_user_db_page *page;
+	struct ib_umem_chunk *chunk;
 	int err = 0;
 
 	mutex_lock(&context->db_page_mutex);
@@ -72,7 +73,8 @@ int mlx4_ib_db_map_user(struct mlx4_ib_ucontext *context, unsigned long virt,
 	list_add(&page->list, &context->db_page_list);
 
 found:
-	db->dma = sg_dma_address(page->umem->sg_head.sgl) + (virt & ~PAGE_MASK);
+	chunk = list_entry(page->umem->chunk_list.next, struct ib_umem_chunk, list);
+	db->dma		= sg_dma_address(chunk->page_list) + (virt & ~PAGE_MASK);
 	db->u.user_page = page;
 	++page->refcnt;
 

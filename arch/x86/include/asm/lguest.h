@@ -11,21 +11,29 @@
 
 #define GUEST_PL 1
 
-/* Page for Switcher text itself, then two pages per cpu */
-#define SWITCHER_TEXT_PAGES (1)
-#define SWITCHER_STACK_PAGES (2 * nr_cpu_ids)
-#define TOTAL_SWITCHER_PAGES (SWITCHER_TEXT_PAGES + SWITCHER_STACK_PAGES)
+/* Every guest maps the core switcher code. */
+#define SHARED_SWITCHER_PAGES \
+	DIV_ROUND_UP(end_switcher_text - start_switcher_text, PAGE_SIZE)
+/* Pages for switcher itself, then two pages per cpu */
+#define TOTAL_SWITCHER_PAGES (SHARED_SWITCHER_PAGES + 2 * nr_cpu_ids)
 
-/* Where we map the Switcher, in both Host and Guest. */
-extern unsigned long switcher_addr;
+/* We map at -4M (-2M for PAE) for ease of mapping (one PTE page). */
+#ifdef CONFIG_X86_PAE
+#define SWITCHER_ADDR 0xFFE00000
+#else
+#define SWITCHER_ADDR 0xFFC00000
+#endif
 
 /* Found in switcher.S */
 extern unsigned long default_idt_entries[];
 
-/* Declarations for definitions in arch/x86/lguest/head_32.S */
-extern char lguest_noirq_iret[];
+/* Declarations for definitions in lguest_guest.S */
+extern char lguest_noirq_start[], lguest_noirq_end[];
 extern const char lgstart_cli[], lgend_cli[];
+extern const char lgstart_sti[], lgend_sti[];
+extern const char lgstart_popf[], lgend_popf[];
 extern const char lgstart_pushf[], lgend_pushf[];
+extern const char lgstart_iret[], lgend_iret[];
 
 extern void lguest_iret(void);
 extern void lguest_init(void);

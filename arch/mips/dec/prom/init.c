@@ -13,7 +13,6 @@
 
 #include <asm/bootinfo.h>
 #include <asm/cpu.h>
-#include <asm/cpu-type.h>
 #include <asm/processor.h>
 
 #include <asm/dec/prom.h>

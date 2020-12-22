@@ -12,10 +12,14 @@
 #ifndef __ASM_MACH_IRQS_H
 #define __ASM_MACH_IRQS_H
 
-#include <asm/irq.h>
-
+#ifdef CONFIG_PXA_HAVE_ISA_IRQS
 #define PXA_ISA_IRQ(x)	(x)
-#define PXA_IRQ(x)	(NR_IRQS_LEGACY + (x))
+#define PXA_ISA_IRQ_NUM	(16)
+#else
+#define PXA_ISA_IRQ_NUM	(0)
+#endif
+
+#define PXA_IRQ(x)	(PXA_ISA_IRQ_NUM + (x))
 
 #define IRQ_SSP3	PXA_IRQ(0)	/* SSP3 service request */
 #define IRQ_MSL		PXA_IRQ(1)	/* MSL Interface interrupt */
@@ -80,6 +84,7 @@
 #define IRQ_PXA935_MMC0	PXA_IRQ(72)	/* MMC0 Controller (PXA935) */
 #define IRQ_PXA935_MMC1	PXA_IRQ(73)	/* MMC1 Controller (PXA935) */
 #define IRQ_PXA935_MMC2	PXA_IRQ(74)	/* MMC2 Controller (PXA935) */
+#define IRQ_PXA955_MMC3	PXA_IRQ(75)	/* MMC3 Controller (PXA955) */
 #define IRQ_U2P		PXA_IRQ(93)	/* USB PHY D+/D- Lines (PXA935) */
 
 #define PXA_GPIO_IRQ_BASE	PXA_IRQ(96)

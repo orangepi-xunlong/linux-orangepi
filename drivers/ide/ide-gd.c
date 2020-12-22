@@ -250,7 +250,7 @@ static int ide_gd_unlocked_open(struct block_device *bdev, fmode_t mode)
 }
 
 
-static void ide_gd_release(struct gendisk *disk, fmode_t mode)
+static int ide_gd_release(struct gendisk *disk, fmode_t mode)
 {
 	struct ide_disk_obj *idkp = ide_drv_g(disk, ide_disk_obj);
 	ide_drive_t *drive = idkp->drive;
@@ -270,6 +270,8 @@ static void ide_gd_release(struct gendisk *disk, fmode_t mode)
 
 	ide_disk_put(idkp);
 	mutex_unlock(&ide_gd_mutex);
+
+	return 0;
 }
 
 static int ide_gd_getgeo(struct block_device *bdev, struct hd_geometry *geo)
@@ -392,7 +394,7 @@ static int ide_gd_probe(ide_drive_t *drive)
 
 	idkp->dev.parent = &drive->gendev;
 	idkp->dev.release = ide_disk_release;
-	dev_set_name(&idkp->dev, "%s", dev_name(&drive->gendev));
+	dev_set_name(&idkp->dev, dev_name(&drive->gendev));
 
 	if (device_register(&idkp->dev))
 		goto out_free_disk;
@@ -412,11 +414,12 @@ static int ide_gd_probe(ide_drive_t *drive)
 	set_capacity(g, ide_gd_capacity(drive));
 
 	g->minors = IDE_DISK_MINORS;
+	g->driverfs_dev = &drive->gendev;
 	g->flags |= GENHD_FL_EXT_DEVT;
 	if (drive->dev_flags & IDE_DFLAG_REMOVABLE)
 		g->flags = GENHD_FL_REMOVABLE;
 	g->fops = &ide_gd_ops;
-	device_add_disk(&drive->gendev, g);
+	add_disk(g);
 	return 0;
 
 out_free_disk:

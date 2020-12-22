@@ -295,7 +295,7 @@ dsp_cmx_del_conf_member(struct dsp *dsp)
 		}
 	}
 	printk(KERN_WARNING
-	       "%s: dsp is not present in its own conf_member list.\n",
+	       "%s: dsp is not present in its own conf_meber list.\n",
 	       __func__);
 
 	return -EINVAL;
@@ -506,7 +506,7 @@ dsp_cmx_hardware(struct dsp_conf *conf, struct dsp *dsp)
 		       __func__, conf->id);
 
 	if (list_empty(&conf->mlist)) {
-		printk(KERN_ERR "%s: conference without members\n",
+		printk(KERN_ERR "%s: conference whithout members\n",
 		       __func__);
 		return;
 	}
@@ -742,8 +742,8 @@ dsp_cmx_hardware(struct dsp_conf *conf, struct dsp *dsp)
 					       member->dsp->pcm_slot_tx,
 					       member->dsp->pcm_bank_tx,
 					       member->dsp->pcm_bank_rx);
-				conf->hardware = 1;
-				conf->software = tx_data;
+				conf->hardware = 0;
+				conf->software = 1;
 				return;
 			}
 			/* find a new slot */
@@ -834,8 +834,8 @@ dsp_cmx_hardware(struct dsp_conf *conf, struct dsp *dsp)
 					       nextm->dsp->name,
 					       member->dsp->pcm_slot_tx,
 					       member->dsp->pcm_slot_rx);
-				conf->hardware = 1;
-				conf->software = tx_data;
+				conf->hardware = 0;
+				conf->software = 1;
 				return;
 			}
 			/* find two new slot */
@@ -939,11 +939,8 @@ dsp_cmx_hardware(struct dsp_conf *conf, struct dsp *dsp)
 	/* for more than two members.. */
 
 	/* if all members already have the same conference */
-	if (all_conf) {
-		conf->hardware = 1;
-		conf->software = tx_data;
+	if (all_conf)
 		return;
-	}
 
 	/*
 	 * if there is an existing conference, but not all members have joined
@@ -1016,8 +1013,6 @@ dsp_cmx_hardware(struct dsp_conf *conf, struct dsp *dsp)
 			dsp_cmx_hw_message(member->dsp,
 					   MISDN_CTRL_HFC_CONF_JOIN, current_conf, 0, 0, 0);
 		}
-		conf->hardware = 1;
-		conf->software = tx_data;
 		return;
 	}
 
@@ -1333,7 +1328,7 @@ dsp_cmx_send_member(struct dsp *dsp, int len, s32 *c, int members)
 		}
 		if (dsp->conf && dsp->conf->software && dsp->conf->hardware)
 			tx_data_only = 1;
-		if (dsp->echo.software && dsp->echo.hardware)
+		if (dsp->conf->software && dsp->echo.hardware)
 			tx_data_only = 1;
 	}
 
@@ -1454,63 +1449,66 @@ dsp_cmx_send_member(struct dsp *dsp, int len, s32 *c, int members)
 #ifdef CMX_CONF_DEBUG
 	if (0) {
 #else
-	if (members == 2) {
+		if (members == 2) {
 #endif
-		/* "other" becomes other party */
-		other = (list_entry(conf->mlist.next,
-				    struct dsp_conf_member, list))->dsp;
-		if (other == member)
-			other = (list_entry(conf->mlist.prev,
-				    struct dsp_conf_member, list))->dsp;
-		o_q = other->rx_buff; /* received data */
-		o_rr = (other->rx_R + len) & CMX_BUFF_MASK;
-		/* end of rx-pointer */
-		o_r = (o_rr - rr + r) & CMX_BUFF_MASK;
-		/* start rx-pointer at current read position*/
-		/* -> if echo is NOT enabled */
-		if (!dsp->echo.software) {
-			/*
-			 * -> copy other member's rx-data,
-			 * if tx-data is available, mix
-			 */
-			while (o_r != o_rr && t != tt) {
-				*d++ = dsp_audio_mix_law[(p[t] << 8) | o_q[o_r]];
-				t = (t + 1) & CMX_BUFF_MASK;
-				o_r = (o_r + 1) & CMX_BUFF_MASK;
+			/* "other" becomes other party */
+			other = (list_entry(conf->mlist.next,
+					    struct dsp_conf_member, list))->dsp;
+			if (other == member)
+				other = (list_entry(conf->mlist.prev,
+						    struct dsp_conf_member, list))->dsp;
+			o_q = other->rx_buff; /* received data */
+			o_rr = (other->rx_R + len) & CMX_BUFF_MASK;
+			/* end of rx-pointer */
+			o_r = (o_rr - rr + r) & CMX_BUFF_MASK;
+			/* start rx-pointer at current read position*/
+			/* -> if echo is NOT enabled */
+			if (!dsp->echo.software) {
+				/*
+				 * -> copy other member's rx-data,
+				 * if tx-data is available, mix
+				 */
+				while (o_r != o_rr && t != tt) {
+					*d++ = dsp_audio_mix_law[(p[t] << 8) | o_q[o_r]];
+					t = (t + 1) & CMX_BUFF_MASK;
+					o_r = (o_r + 1) & CMX_BUFF_MASK;
+				}
+				while (o_r != o_rr) {
+					*d++ = o_q[o_r];
+					o_r = (o_r + 1) & CMX_BUFF_MASK;
+				}
+				/* -> if echo is enabled */
+			} else {
+				/*
+				 * -> mix other member's rx-data with echo,
+				 * if tx-data is available, mix
+				 */
+				while (r != rr && t != tt) {
+					sample = dsp_audio_law_to_s32[p[t]] +
+						dsp_audio_law_to_s32[q[r]] +
+						dsp_audio_law_to_s32[o_q[o_r]];
+					if (sample < -32768)
+						sample = -32768;
+					else if (sample > 32767)
+						sample = 32767;
+					*d++ = dsp_audio_s16_to_law[sample & 0xffff];
+					/* tx-data + rx_data + echo */
+					t = (t + 1) & CMX_BUFF_MASK;
+					r = (r + 1) & CMX_BUFF_MASK;
+					o_r = (o_r + 1) & CMX_BUFF_MASK;
+				}
+				while (r != rr) {
+					*d++ = dsp_audio_mix_law[(q[r] << 8) | o_q[o_r]];
+					r = (r + 1) & CMX_BUFF_MASK;
+					o_r = (o_r + 1) & CMX_BUFF_MASK;
+				}
 			}
-			while (o_r != o_rr) {
-				*d++ = o_q[o_r];
-				o_r = (o_r + 1) & CMX_BUFF_MASK;
-			}
-			/* -> if echo is enabled */
-		} else {
-			/*
-			 * -> mix other member's rx-data with echo,
-			 * if tx-data is available, mix
-			 */
-			while (r != rr && t != tt) {
-				sample = dsp_audio_law_to_s32[p[t]] +
-					dsp_audio_law_to_s32[q[r]] +
-					dsp_audio_law_to_s32[o_q[o_r]];
-				if (sample < -32768)
-					sample = -32768;
-				else if (sample > 32767)
-					sample = 32767;
-				*d++ = dsp_audio_s16_to_law[sample & 0xffff];
-				/* tx-data + rx_data + echo */
-				t = (t + 1) & CMX_BUFF_MASK;
-				r = (r + 1) & CMX_BUFF_MASK;
-				o_r = (o_r + 1) & CMX_BUFF_MASK;
-			}
-			while (r != rr) {
-				*d++ = dsp_audio_mix_law[(q[r] << 8) | o_q[o_r]];
-				r = (r + 1) & CMX_BUFF_MASK;
-				o_r = (o_r + 1) & CMX_BUFF_MASK;
-			}
+			dsp->tx_R = t;
+			goto send_packet;
 		}
-		dsp->tx_R = t;
-		goto send_packet;
+#ifdef DSP_NEVER_DEFINED
 	}
+#endif
 	/* PROCESS DATA (three or more members) */
 	/* -> if echo is NOT enabled */
 	if (!dsp->echo.software) {
@@ -1621,7 +1619,7 @@ send_packet:
 
 static u32	jittercount; /* counter for jitter check */
 struct timer_list dsp_spl_tl;
-unsigned long	dsp_spl_jiffies; /* calculate the next time to fire */
+u32	dsp_spl_jiffies; /* calculate the next time to fire */
 static u16	dsp_count; /* last sample count */
 static int	dsp_count_valid; /* if we have last sample count */
 

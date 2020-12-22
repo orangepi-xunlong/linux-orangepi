@@ -41,7 +41,6 @@
 #include <asm/ppc_asm.h>
 #include <asm/asm-offsets.h>
 #include <asm/ptrace.h>
-#include <asm/export.h>
 
 /* As with the other PowerPC ports, it is expected that when code
  * execution begins here, the following registers contain valid, yet
@@ -431,18 +430,30 @@ label:
 	EXCEPTION(0x0F00, Trap_0F, unknown_exception, EXC_XFER_EE)
 
 /* 0x1000 - Programmable Interval Timer (PIT) Exception */
-	. = 0x1000
-	b Decrementer
+	START_EXCEPTION(0x1000, Decrementer)
+	NORMAL_EXCEPTION_PROLOG
+	lis	r0,TSR_PIS@h
+	mtspr	SPRN_TSR,r0		/* Clear the PIT exception */
+	addi	r3,r1,STACK_FRAME_OVERHEAD
+	EXC_XFER_LITE(0x1000, timer_interrupt)
+
+#if 0
+/* NOTE:
+ * FIT and WDT handlers are not implemented yet.
+ */
 
 /* 0x1010 - Fixed Interval Timer (FIT) Exception
 */
-	. = 0x1010
-	b FITException
+	STND_EXCEPTION(0x1010,	FITException,		unknown_exception)
 
 /* 0x1020 - Watchdog Timer (WDT) Exception
 */
-	. = 0x1020
-	b WDTException
+#ifdef CONFIG_BOOKE_WDT
+	CRITICAL_EXCEPTION(0x1020, WDTException, WatchdogException)
+#else
+	CRITICAL_EXCEPTION(0x1020, WDTException, unknown_exception)
+#endif
+#endif
 
 /* 0x1100 - Data TLB Miss Exception
  * As the name implies, translation is not in the MMU, so search the
@@ -727,29 +738,6 @@ label:
 		(MSR_KERNEL & ~(MSR_ME|MSR_DE|MSR_CE)), \
 		NOCOPY, crit_transfer_to_handler, ret_from_crit_exc)
 
-	/* Programmable Interval Timer (PIT) Exception. (from 0x1000) */
-Decrementer:
-	NORMAL_EXCEPTION_PROLOG
-	lis	r0,TSR_PIS@h
-	mtspr	SPRN_TSR,r0		/* Clear the PIT exception */
-	addi	r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_LITE(0x1000, timer_interrupt)
-
-	/* Fixed Interval Timer (FIT) Exception. (from 0x1010) */
-FITException:
-	NORMAL_EXCEPTION_PROLOG
-	addi	r3,r1,STACK_FRAME_OVERHEAD;
-	EXC_XFER_EE(0x1010, unknown_exception)
-
-	/* Watchdog Timer (WDT) Exception. (from 0x1020) */
-WDTException:
-	CRITICAL_EXCEPTION_PROLOG;
-	addi	r3,r1,STACK_FRAME_OVERHEAD;
-	EXC_XFER_TEMPLATE(WatchdogException, 0x1020+2,
-	                  (MSR_KERNEL & ~(MSR_ME|MSR_DE|MSR_CE)),
-			  NOCOPY, crit_transfer_to_handler,
-			  ret_from_crit_exc)
-
 /*
  * The other Data TLB exceptions bail out to this point
  * if they can't resolve the lightweight TLB fault.
@@ -822,6 +810,14 @@ finish_tlb_load:
 	PPC405_ERR77_SYNC
 	rfi			/* Should sync shadow TLBs */
 	b	.		/* prevent prefetch past rfi */
+
+/* extern void giveup_fpu(struct task_struct *prev)
+ *
+ * The PowerPC 4xx family of processors do not have an FPU, so this just
+ * returns.
+ */
+_ENTRY(giveup_fpu)
+	blr
 
 /* This is where the main kernel code starts.
  */
@@ -931,6 +927,25 @@ initial_mmu:
 	tlbwe	r4,r0,TLB_DATA		/* Load the data portion of the entry */
 	tlbwe	r3,r0,TLB_TAG		/* Load the tag portion of the entry */
 
+#if defined(CONFIG_SERIAL_TEXT_DEBUG) && defined(SERIAL_DEBUG_IO_BASE)
+
+	/* Load a TLB entry for the UART, so that ppc4xx_progress() can use
+	 * the UARTs nice and early.  We use a 4k real==virtual mapping. */
+
+	lis	r3,SERIAL_DEBUG_IO_BASE@h
+	ori	r3,r3,SERIAL_DEBUG_IO_BASE@l
+	mr	r4,r3
+	clrrwi	r4,r4,12
+	ori	r4,r4,(TLB_WR|TLB_I|TLB_M|TLB_G)
+
+	clrrwi	r3,r3,12
+	ori	r3,r3,(TLB_VALID | TLB_PAGESZ(PAGESZ_4K))
+
+	li	r0,0			/* TLB slot 0 */
+	tlbwe	r4,r0,TLB_DATA
+	tlbwe	r3,r0,TLB_TAG
+#endif /* CONFIG_SERIAL_DEBUG_TEXT && SERIAL_DEBUG_IO_BASE */
+
 	isync
 
 	/* Establish the exception vector base
@@ -972,7 +987,6 @@ sdata:
 	.globl	empty_zero_page
 empty_zero_page:
 	.space	4096
-EXPORT_SYMBOL(empty_zero_page)
 	.globl	swapper_pg_dir
 swapper_pg_dir:
 	.space	PGD_TABLE_SIZE

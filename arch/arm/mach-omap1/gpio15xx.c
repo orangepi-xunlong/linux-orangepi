@@ -17,15 +17,12 @@
  */
 
 #include <linux/gpio.h>
-#include <linux/platform_data/gpio-omap.h>
-
-#include <mach/irqs.h>
 
 #define OMAP1_MPUIO_VBASE		OMAP1_MPUIO_BASE
 #define OMAP1510_GPIO_BASE		0xFFFCE000
 
 /* gpio1 */
-static struct resource omap15xx_mpu_gpio_resources[] = {
+static struct __initdata resource omap15xx_mpu_gpio_resources[] = {
 	{
 		.start	= OMAP1_MPUIO_VBASE,
 		.end	= OMAP1_MPUIO_VBASE + SZ_2K - 1,
@@ -48,7 +45,8 @@ static struct omap_gpio_reg_offs omap15xx_mpuio_regs = {
 	.irqctrl	= OMAP_MPUIO_GPIO_INT_EDGE,
 };
 
-static struct omap_gpio_platform_data omap15xx_mpu_gpio_config = {
+static struct __initdata omap_gpio_platform_data omap15xx_mpu_gpio_config = {
+	.virtual_irq_start	= IH_MPUIO_BASE,
 	.is_mpuio		= true,
 	.bank_width		= 16,
 	.bank_stride		= 1,
@@ -66,7 +64,7 @@ static struct platform_device omap15xx_mpu_gpio = {
 };
 
 /* gpio2 */
-static struct resource omap15xx_gpio_resources[] = {
+static struct __initdata resource omap15xx_gpio_resources[] = {
 	{
 		.start	= OMAP1510_GPIO_BASE,
 		.end	= OMAP1510_GPIO_BASE + SZ_2K - 1,
@@ -90,7 +88,8 @@ static struct omap_gpio_reg_offs omap15xx_gpio_regs = {
 	.pinctrl	= OMAP1510_GPIO_PIN_CONTROL,
 };
 
-static struct omap_gpio_platform_data omap15xx_gpio_config = {
+static struct __initdata omap_gpio_platform_data omap15xx_gpio_config = {
+	.virtual_irq_start	= IH_GPIO_BASE,
 	.bank_width		= 16,
 	.regs                   = &omap15xx_gpio_regs,
 };

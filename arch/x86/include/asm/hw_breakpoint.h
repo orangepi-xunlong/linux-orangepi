@@ -1,8 +1,7 @@
 #ifndef	_I386_HW_BREAKPOINT_H
 #define	_I386_HW_BREAKPOINT_H
 
-#include <uapi/asm/hw_breakpoint.h>
-
+#ifdef	__KERNEL__
 #define	__ARCH_HW_BREAKPOINT_H
 
 /*
@@ -12,7 +11,6 @@
  */
 struct arch_hw_breakpoint {
 	unsigned long	address;
-	unsigned long	mask;
 	u8		len;
 	u8		type;
 };
@@ -73,4 +71,6 @@ extern int arch_bp_generic_fields(int x86_len, int x86_type,
 
 extern struct pmu perf_ops_bp;
 
+#endif	/* __KERNEL__ */
 #endif	/* _I386_HW_BREAKPOINT_H */
+

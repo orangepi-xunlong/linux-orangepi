@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,8 +41,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#define EXPORT_ACPI_INTERFACES
-
+#include <linux/export.h>
 #include <acpi/acpi.h>
 #include "accommon.h"
 #include "actables.h"
@@ -62,6 +61,7 @@ ACPI_MODULE_NAME("evxfevnt")
  * DESCRIPTION: Transfers the system into ACPI mode.
  *
  ******************************************************************************/
+
 acpi_status acpi_enable(void)
 {
 	acpi_status status;
@@ -71,14 +71,8 @@ acpi_status acpi_enable(void)
 
 	/* ACPI tables must be present */
 
-	if (acpi_gbl_fadt_index == ACPI_INVALID_TABLE_INDEX) {
+	if (!acpi_tb_tables_loaded()) {
 		return_ACPI_STATUS(AE_NO_ACPI_TABLES);
-	}
-
-	/* If the Hardware Reduced flag is set, machine is always in acpi mode */
-
-	if (acpi_gbl_reduced_hardware) {
-		return_ACPI_STATUS(AE_OK);
 	}
 
 	/* Check current mode */
@@ -133,12 +127,6 @@ acpi_status acpi_disable(void)
 
 	ACPI_FUNCTION_TRACE(acpi_disable);
 
-	/* If the Hardware Reduced flag is set, machine is always in acpi mode */
-
-	if (acpi_gbl_reduced_hardware) {
-		return_ACPI_STATUS(AE_OK);
-	}
-
 	if (acpi_hw_get_mode() == ACPI_SYS_MODE_LEGACY) {
 		ACPI_DEBUG_PRINT((ACPI_DB_INIT,
 				  "System is already in legacy (non-ACPI) mode\n"));
@@ -165,8 +153,8 @@ ACPI_EXPORT_SYMBOL(acpi_disable)
  *
  * FUNCTION:    acpi_enable_event
  *
- * PARAMETERS:  event           - The fixed eventto be enabled
- *              flags           - Reserved
+ * PARAMETERS:  Event           - The fixed eventto be enabled
+ *              Flags           - Reserved
  *
  * RETURN:      Status
  *
@@ -179,12 +167,6 @@ acpi_status acpi_enable_event(u32 event, u32 flags)
 	u32 value;
 
 	ACPI_FUNCTION_TRACE(acpi_enable_event);
-
-	/* If Hardware Reduced flag is set, there are no fixed events */
-
-	if (acpi_gbl_reduced_hardware) {
-		return_ACPI_STATUS(AE_OK);
-	}
 
 	/* Decode the Fixed Event */
 
@@ -228,8 +210,8 @@ ACPI_EXPORT_SYMBOL(acpi_enable_event)
  *
  * FUNCTION:    acpi_disable_event
  *
- * PARAMETERS:  event           - The fixed event to be disabled
- *              flags           - Reserved
+ * PARAMETERS:  Event           - The fixed eventto be enabled
+ *              Flags           - Reserved
  *
  * RETURN:      Status
  *
@@ -242,12 +224,6 @@ acpi_status acpi_disable_event(u32 event, u32 flags)
 	u32 value;
 
 	ACPI_FUNCTION_TRACE(acpi_disable_event);
-
-	/* If Hardware Reduced flag is set, there are no fixed events */
-
-	if (acpi_gbl_reduced_hardware) {
-		return_ACPI_STATUS(AE_OK);
-	}
 
 	/* Decode the Fixed Event */
 
@@ -289,7 +265,7 @@ ACPI_EXPORT_SYMBOL(acpi_disable_event)
  *
  * FUNCTION:    acpi_clear_event
  *
- * PARAMETERS:  event           - The fixed event to be cleared
+ * PARAMETERS:  Event           - The fixed event to be cleared
  *
  * RETURN:      Status
  *
@@ -301,12 +277,6 @@ acpi_status acpi_clear_event(u32 event)
 	acpi_status status = AE_OK;
 
 	ACPI_FUNCTION_TRACE(acpi_clear_event);
-
-	/* If Hardware Reduced flag is set, there are no fixed events */
-
-	if (acpi_gbl_reduced_hardware) {
-		return_ACPI_STATUS(AE_OK);
-	}
 
 	/* Decode the Fixed Event */
 
@@ -331,7 +301,7 @@ ACPI_EXPORT_SYMBOL(acpi_clear_event)
  *
  * FUNCTION:    acpi_get_event_status
  *
- * PARAMETERS:  event           - The fixed event
+ * PARAMETERS:  Event           - The fixed event
  *              event_status    - Where the current status of the event will
  *                                be returned
  *
@@ -342,9 +312,8 @@ ACPI_EXPORT_SYMBOL(acpi_clear_event)
  ******************************************************************************/
 acpi_status acpi_get_event_status(u32 event, acpi_event_status * event_status)
 {
-	acpi_status status;
-	acpi_event_status local_event_status = 0;
-	u32 in_byte;
+	acpi_status status = AE_OK;
+	u32 value;
 
 	ACPI_FUNCTION_TRACE(acpi_get_event_status);
 
@@ -358,41 +327,29 @@ acpi_status acpi_get_event_status(u32 event, acpi_event_status * event_status)
 		return_ACPI_STATUS(AE_BAD_PARAMETER);
 	}
 
-	/* Fixed event currently can be dispatched? */
-
-	if (acpi_gbl_fixed_event_handlers[event].handler) {
-		local_event_status |= ACPI_EVENT_FLAG_HAS_HANDLER;
-	}
-
-	/* Fixed event currently enabled? */
+	/* Get the status of the requested fixed event */
 
 	status =
 	    acpi_read_bit_register(acpi_gbl_fixed_event_info[event].
-				   enable_register_id, &in_byte);
-	if (ACPI_FAILURE(status)) {
+			      enable_register_id, &value);
+	if (ACPI_FAILURE(status))
 		return_ACPI_STATUS(status);
-	}
 
-	if (in_byte) {
-		local_event_status |=
-		    (ACPI_EVENT_FLAG_ENABLED | ACPI_EVENT_FLAG_ENABLE_SET);
-	}
-
-	/* Fixed event currently active? */
+	*event_status = value;
 
 	status =
 	    acpi_read_bit_register(acpi_gbl_fixed_event_info[event].
-				   status_register_id, &in_byte);
-	if (ACPI_FAILURE(status)) {
+			      status_register_id, &value);
+	if (ACPI_FAILURE(status))
 		return_ACPI_STATUS(status);
-	}
 
-	if (in_byte) {
-		local_event_status |= ACPI_EVENT_FLAG_STATUS_SET;
-	}
+	if (value)
+		*event_status |= ACPI_EVENT_FLAG_SET;
 
-	(*event_status) = local_event_status;
-	return_ACPI_STATUS(AE_OK);
+	if (acpi_gbl_fixed_event_handlers[event].handler)
+		*event_status |= ACPI_EVENT_FLAG_HANDLE;
+
+	return_ACPI_STATUS(status);
 }
 
 ACPI_EXPORT_SYMBOL(acpi_get_event_status)

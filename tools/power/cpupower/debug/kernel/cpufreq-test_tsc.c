@@ -18,15 +18,18 @@
  * 5.) if the third value, "diff_pmtmr", changes between 2. and 4., the
  *     TSC-based delay routine on the Linux kernel does not correctly
  *     handle the cpufreq transition. Please report this to
- *     linux-pm@vger.kernel.org
+ *     cpufreq@vger.kernel.org
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/delay.h>
-#include <linux/acpi.h>
+
 #include <asm/io.h>
+
+#include <acpi/acpi_bus.h>
+#include <acpi/acpi_drivers.h>
 
 static int pm_tmr_ioport = 0;
 
@@ -81,11 +84,11 @@ static int __init cpufreq_test_tsc(void)
 
 	printk(KERN_DEBUG "start--> \n");
 	then = read_pmtmr();
-	then_tsc = rdtsc();
+        rdtscll(then_tsc);
 	for (i=0;i<20;i++) {
 		mdelay(100);
 		now = read_pmtmr();
-		now_tsc = rdtsc();
+		rdtscll(now_tsc);
 		diff = (now - then) & 0xFFFFFF;
 		diff_tsc = now_tsc - then_tsc;
 		printk(KERN_DEBUG "t1: %08u t2: %08u diff_pmtmr: %08u diff_tsc: %016llu\n", then, now, diff, diff_tsc);

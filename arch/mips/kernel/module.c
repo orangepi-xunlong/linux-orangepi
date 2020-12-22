@@ -20,11 +20,9 @@
 
 #undef DEBUG
 
-#include <linux/extable.h>
 #include <linux/moduleloader.h>
 #include <linux/elf.h>
 #include <linux/mm.h>
-#include <linux/numa.h>
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
@@ -41,6 +39,8 @@ struct mips_hi16 {
 	Elf_Addr value;
 };
 
+static struct mips_hi16 *mips_hi16_list;
+
 static LIST_HEAD(dbe_list);
 static DEFINE_SPINLOCK(dbe_lock);
 
@@ -48,12 +48,12 @@ static DEFINE_SPINLOCK(dbe_lock);
 void *module_alloc(unsigned long size)
 {
 	return __vmalloc_node_range(size, 1, MODULE_START, MODULE_END,
-				GFP_KERNEL, PAGE_KERNEL, 0, NUMA_NO_NODE,
+				GFP_KERNEL, PAGE_KERNEL, -1,
 				__builtin_return_address(0));
 }
 #endif
 
-int apply_r_mips_none(struct module *me, u32 *location, Elf_Addr v)
+static int apply_r_mips_none(struct module *me, u32 *location, Elf_Addr v)
 {
 	return 0;
 }
@@ -61,6 +61,13 @@ int apply_r_mips_none(struct module *me, u32 *location, Elf_Addr v)
 static int apply_r_mips_32_rel(struct module *me, u32 *location, Elf_Addr v)
 {
 	*location += v;
+
+	return 0;
+}
+
+static int apply_r_mips_32_rela(struct module *me, u32 *location, Elf_Addr v)
+{
+	*location = v;
 
 	return 0;
 }
@@ -74,13 +81,34 @@ static int apply_r_mips_26_rel(struct module *me, u32 *location, Elf_Addr v)
 	}
 
 	if ((v & 0xf0000000) != (((unsigned long)location + 4) & 0xf0000000)) {
-		pr_err("module %s: relocation overflow\n",
+		printk(KERN_ERR
+		       "module %s: relocation overflow\n",
 		       me->name);
 		return -ENOEXEC;
 	}
 
 	*location = (*location & ~0x03ffffff) |
-		    ((*location + (v >> 2)) & 0x03ffffff);
+	            ((*location + (v >> 2)) & 0x03ffffff);
+
+	return 0;
+}
+
+static int apply_r_mips_26_rela(struct module *me, u32 *location, Elf_Addr v)
+{
+	if (v % 4) {
+		pr_err("module %s: dangerous R_MIPS_26 RELArelocation\n",
+		       me->name);
+		return -ENOEXEC;
+	}
+
+	if ((v & 0xf0000000) != (((unsigned long)location + 4) & 0xf0000000)) {
+		printk(KERN_ERR
+		       "module %s: relocation overflow\n",
+		       me->name);
+		return -ENOEXEC;
+	}
+
+	*location = (*location & ~0x03ffffff) | ((v >> 2) & 0x03ffffff);
 
 	return 0;
 }
@@ -100,34 +128,32 @@ static int apply_r_mips_hi16_rel(struct module *me, u32 *location, Elf_Addr v)
 
 	n->addr = (Elf_Addr *)location;
 	n->value = v;
-	n->next = me->arch.r_mips_hi16_list;
-	me->arch.r_mips_hi16_list = n;
+	n->next = mips_hi16_list;
+	mips_hi16_list = n;
 
 	return 0;
 }
 
-static void free_relocation_chain(struct mips_hi16 *l)
+static int apply_r_mips_hi16_rela(struct module *me, u32 *location, Elf_Addr v)
 {
-	struct mips_hi16 *next;
+	*location = (*location & 0xffff0000) |
+	            ((((long long) v + 0x8000LL) >> 16) & 0xffff);
 
-	while (l) {
-		next = l->next;
-		kfree(l);
-		l = next;
-	}
+	return 0;
 }
 
 static int apply_r_mips_lo16_rel(struct module *me, u32 *location, Elf_Addr v)
 {
 	unsigned long insnlo = *location;
-	struct mips_hi16 *l;
 	Elf_Addr val, vallo;
 
-	/* Sign extend the addend we extract from the lo insn.	*/
+	/* Sign extend the addend we extract from the lo insn.  */
 	vallo = ((insnlo & 0xffff) ^ 0x8000) - 0x8000;
 
-	if (me->arch.r_mips_hi16_list != NULL) {
-		l = me->arch.r_mips_hi16_list;
+	if (mips_hi16_list != NULL) {
+		struct mips_hi16 *l;
+
+		l = mips_hi16_list;
 		while (l != NULL) {
 			struct mips_hi16 *next;
 			unsigned long insn;
@@ -162,11 +188,11 @@ static int apply_r_mips_lo16_rel(struct module *me, u32 *location, Elf_Addr v)
 			l = next;
 		}
 
-		me->arch.r_mips_hi16_list = NULL;
+		mips_hi16_list = NULL;
 	}
 
 	/*
-	 * Ok, we're done with the HI16 relocs.	 Now deal with the LO16.
+	 * Ok, we're done with the HI16 relocs.  Now deal with the LO16.
 	 */
 	val = v + vallo;
 	insnlo = (insnlo & ~0xffff) | (val & 0xffff);
@@ -175,58 +201,41 @@ static int apply_r_mips_lo16_rel(struct module *me, u32 *location, Elf_Addr v)
 	return 0;
 
 out_danger:
-	free_relocation_chain(l);
-	me->arch.r_mips_hi16_list = NULL;
-
 	pr_err("module %s: dangerous R_MIPS_LO16 REL relocation\n", me->name);
 
 	return -ENOEXEC;
 }
 
-static int apply_r_mips_pc_rel(struct module *me, u32 *location, Elf_Addr v,
-			       unsigned bits)
+static int apply_r_mips_lo16_rela(struct module *me, u32 *location, Elf_Addr v)
 {
-	unsigned long mask = GENMASK(bits - 1, 0);
-	unsigned long se_bits;
-	long offset;
-
-	if (v % 4) {
-		pr_err("module %s: dangerous R_MIPS_PC%u REL relocation\n",
-		       me->name, bits);
-		return -ENOEXEC;
-	}
-
-	/* retrieve & sign extend implicit addend */
-	offset = *location & mask;
-	offset |= (offset & BIT(bits - 1)) ? ~mask : 0;
-
-	offset += ((long)v - (long)location) >> 2;
-
-	/* check the sign bit onwards are identical - ie. we didn't overflow */
-	se_bits = (offset & BIT(bits - 1)) ? ~0ul : 0;
-	if ((offset & ~mask) != (se_bits & ~mask)) {
-		pr_err("module %s: relocation overflow\n", me->name);
-		return -ENOEXEC;
-	}
-
-	*location = (*location & ~mask) | (offset & mask);
+	*location = (*location & 0xffff0000) | (v & 0xffff);
 
 	return 0;
 }
 
-static int apply_r_mips_pc16_rel(struct module *me, u32 *location, Elf_Addr v)
+static int apply_r_mips_64_rela(struct module *me, u32 *location, Elf_Addr v)
 {
-	return apply_r_mips_pc_rel(me, location, v, 16);
+	*(Elf_Addr *)location = v;
+
+	return 0;
 }
 
-static int apply_r_mips_pc21_rel(struct module *me, u32 *location, Elf_Addr v)
+static int apply_r_mips_higher_rela(struct module *me, u32 *location,
+				    Elf_Addr v)
 {
-	return apply_r_mips_pc_rel(me, location, v, 21);
+	*location = (*location & 0xffff0000) |
+	            ((((long long) v + 0x80008000LL) >> 32) & 0xffff);
+
+	return 0;
 }
 
-static int apply_r_mips_pc26_rel(struct module *me, u32 *location, Elf_Addr v)
+static int apply_r_mips_highest_rela(struct module *me, u32 *location,
+				     Elf_Addr v)
 {
-	return apply_r_mips_pc_rel(me, location, v, 26);
+	*location = (*location & 0xffff0000) |
+	            ((((long long) v + 0x800080008000LL) >> 48) & 0xffff);
+
+	return 0;
 }
 
 static int (*reloc_handlers_rel[]) (struct module *me, u32 *location,
@@ -235,10 +244,19 @@ static int (*reloc_handlers_rel[]) (struct module *me, u32 *location,
 	[R_MIPS_32]		= apply_r_mips_32_rel,
 	[R_MIPS_26]		= apply_r_mips_26_rel,
 	[R_MIPS_HI16]		= apply_r_mips_hi16_rel,
-	[R_MIPS_LO16]		= apply_r_mips_lo16_rel,
-	[R_MIPS_PC16]		= apply_r_mips_pc16_rel,
-	[R_MIPS_PC21_S2]	= apply_r_mips_pc21_rel,
-	[R_MIPS_PC26_S2]	= apply_r_mips_pc26_rel,
+	[R_MIPS_LO16]		= apply_r_mips_lo16_rel
+};
+
+static int (*reloc_handlers_rela[]) (struct module *me, u32 *location,
+				Elf_Addr v) = {
+	[R_MIPS_NONE]		= apply_r_mips_none,
+	[R_MIPS_32]		= apply_r_mips_32_rela,
+	[R_MIPS_26]		= apply_r_mips_26_rela,
+	[R_MIPS_HI16]		= apply_r_mips_hi16_rela,
+	[R_MIPS_LO16]		= apply_r_mips_lo16_rela,
+	[R_MIPS_64]		= apply_r_mips_64_rela,
+	[R_MIPS_HIGHER]		= apply_r_mips_higher_rela,
+	[R_MIPS_HIGHEST]	= apply_r_mips_highest_rela
 };
 
 int apply_relocate(Elf_Shdr *sechdrs, const char *strtab,
@@ -246,17 +264,15 @@ int apply_relocate(Elf_Shdr *sechdrs, const char *strtab,
 		   struct module *me)
 {
 	Elf_Mips_Rel *rel = (void *) sechdrs[relsec].sh_addr;
-	int (*handler)(struct module *me, u32 *location, Elf_Addr v);
 	Elf_Sym *sym;
 	u32 *location;
-	unsigned int i, type;
+	unsigned int i;
 	Elf_Addr v;
 	int res;
 
 	pr_debug("Applying relocate section %u to %u\n", relsec,
 	       sechdrs[relsec].sh_info);
 
-	me->arch.r_mips_hi16_list = NULL;
 	for (i = 0; i < sechdrs[relsec].sh_size / sizeof(*rel); i++) {
 		/* This is where to make the change */
 		location = (void *)sechdrs[sechdrs[relsec].sh_info].sh_addr
@@ -264,45 +280,60 @@ int apply_relocate(Elf_Shdr *sechdrs, const char *strtab,
 		/* This is the symbol it is referring to */
 		sym = (Elf_Sym *)sechdrs[symindex].sh_addr
 			+ ELF_MIPS_R_SYM(rel[i]);
-		if (sym->st_value >= -MAX_ERRNO) {
+		if (IS_ERR_VALUE(sym->st_value)) {
 			/* Ignore unresolved weak symbol */
 			if (ELF_ST_BIND(sym->st_info) == STB_WEAK)
 				continue;
-			pr_warn("%s: Unknown symbol %s\n",
-				me->name, strtab + sym->st_name);
+			printk(KERN_WARNING "%s: Unknown symbol %s\n",
+			       me->name, strtab + sym->st_name);
 			return -ENOENT;
 		}
 
-		type = ELF_MIPS_R_TYPE(rel[i]);
-
-		if (type < ARRAY_SIZE(reloc_handlers_rel))
-			handler = reloc_handlers_rel[type];
-		else
-			handler = NULL;
-
-		if (!handler) {
-			pr_err("%s: Unknown relocation type %u\n",
-			       me->name, type);
-			return -EINVAL;
-		}
-
 		v = sym->st_value;
-		res = handler(me, location, v);
+
+		res = reloc_handlers_rel[ELF_MIPS_R_TYPE(rel[i])](me, location, v);
 		if (res)
 			return res;
 	}
 
-	/*
-	 * Normally the hi16 list should be deallocated at this point.	A
-	 * malformed binary however could contain a series of R_MIPS_HI16
-	 * relocations not followed by a R_MIPS_LO16 relocation.  In that
-	 * case, free up the list and return an error.
-	 */
-	if (me->arch.r_mips_hi16_list) {
-		free_relocation_chain(me->arch.r_mips_hi16_list);
-		me->arch.r_mips_hi16_list = NULL;
+	return 0;
+}
 
-		return -ENOEXEC;
+int apply_relocate_add(Elf_Shdr *sechdrs, const char *strtab,
+		       unsigned int symindex, unsigned int relsec,
+		       struct module *me)
+{
+	Elf_Mips_Rela *rel = (void *) sechdrs[relsec].sh_addr;
+	Elf_Sym *sym;
+	u32 *location;
+	unsigned int i;
+	Elf_Addr v;
+	int res;
+
+	pr_debug("Applying relocate section %u to %u\n", relsec,
+	       sechdrs[relsec].sh_info);
+
+	for (i = 0; i < sechdrs[relsec].sh_size / sizeof(*rel); i++) {
+		/* This is where to make the change */
+		location = (void *)sechdrs[sechdrs[relsec].sh_info].sh_addr
+			+ rel[i].r_offset;
+		/* This is the symbol it is referring to */
+		sym = (Elf_Sym *)sechdrs[symindex].sh_addr
+			+ ELF_MIPS_R_SYM(rel[i]);
+		if (IS_ERR_VALUE(sym->st_value)) {
+			/* Ignore unresolved weak symbol */
+			if (ELF_ST_BIND(sym->st_info) == STB_WEAK)
+				continue;
+			printk(KERN_WARNING "%s: Unknown symbol %s\n",
+			       me->name, strtab + sym->st_name);
+			return -ENOENT;
+		}
+
+		v = sym->st_value + rel[i].r_addend;
+
+		res = reloc_handlers_rela[ELF_MIPS_R_TYPE(rel[i])](me, location, v);
+		if (res)
+			return res;
 	}
 
 	return 0;
@@ -324,7 +355,7 @@ const struct exception_table_entry *search_module_dbetables(unsigned long addr)
 	spin_unlock_irqrestore(&dbe_lock, flags);
 
 	/* Now, if we found one, we are running inside it now, hence
-	   we cannot unload the module, hence no refcnt needed. */
+           we cannot unload the module, hence no refcnt needed. */
 	return e;
 }
 

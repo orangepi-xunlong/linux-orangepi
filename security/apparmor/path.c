@@ -25,6 +25,7 @@
 #include "include/path.h"
 #include "include/policy.h"
 
+
 /* modified from dcache.c */
 static int prepend(char **buffer, int buflen, const char *str, int namelen)
 {
@@ -37,38 +38,6 @@ static int prepend(char **buffer, int buflen, const char *str, int namelen)
 }
 
 #define CHROOT_NSCONNECT (PATH_CHROOT_REL | PATH_CHROOT_NSCONNECT)
-
-/* If the path is not connected to the expected root,
- * check if it is a sysctl and handle specially else remove any
- * leading / that __d_path may have returned.
- * Unless
- *     specifically directed to connect the path,
- * OR
- *     if in a chroot and doing chroot relative paths and the path
- *     resolves to the namespace root (would be connected outside
- *     of chroot) and specifically directed to connect paths to
- *     namespace root.
- */
-static int disconnect(const struct path *path, char *buf, char **name,
-		      int flags)
-{
-	int error = 0;
-
-	if (!(flags & PATH_CONNECT_PATH) &&
-	    !(((flags & CHROOT_NSCONNECT) == CHROOT_NSCONNECT) &&
-	      our_mnt(path->mnt))) {
-		/* disconnected path, don't return pathname starting
-		 * with '/'
-		 */
-		error = -EACCES;
-		if (**name == '/')
-			*name = *name + 1;
-	} else if (**name != '/')
-		/* CONNECT_PATH with missing root */
-		error = prepend(name, *name - buf, "/", 1);
-
-	return error;
-}
 
 /**
  * d_namespace_path - lookup a name associated with a given path
@@ -84,7 +53,7 @@ static int disconnect(const struct path *path, char *buf, char **name,
  *          When no error the path name is returned in @name which points to
  *          to a position in @buf
  */
-static int d_namespace_path(const struct path *path, char *buf, int buflen,
+static int d_namespace_path(struct path *path, char *buf, int buflen,
 			    char **name, int flags)
 {
 	char *res;
@@ -105,8 +74,7 @@ static int d_namespace_path(const struct path *path, char *buf, int buflen,
 			 * control instead of hard coded /proc
 			 */
 			return prepend(name, *name - buf, "/proc", 5);
-		} else
-			return disconnect(path, buf, name, flags);
+		}
 		return 0;
 	}
 
@@ -126,8 +94,6 @@ static int d_namespace_path(const struct path *path, char *buf, int buflen,
 	 * be returned.
 	 */
 	if (!res || IS_ERR(res)) {
-		if (PTR_ERR(res) == -ENAMETOOLONG)
-			return -ENAMETOOLONG;
 		connected = 0;
 		res = dentry_path_raw(path->dentry, buf, buflen);
 		if (IS_ERR(res)) {
@@ -146,14 +112,35 @@ static int d_namespace_path(const struct path *path, char *buf, int buflen,
 	 *    security_path hooks as a deleted dentry except without an inode
 	 *    allocated.
 	 */
-	if (d_unlinked(path->dentry) && d_is_positive(path->dentry) &&
+	if (d_unlinked(path->dentry) && path->dentry->d_inode &&
 	    !(flags & PATH_MEDIATE_DELETED)) {
 			error = -ENOENT;
 			goto out;
 	}
 
-	if (!connected)
-		error = disconnect(path, buf, name, flags);
+	/* If the path is not connected to the expected root,
+	 * check if it is a sysctl and handle specially else remove any
+	 * leading / that __d_path may have returned.
+	 * Unless
+	 *     specifically directed to connect the path,
+	 * OR
+	 *     if in a chroot and doing chroot relative paths and the path
+	 *     resolves to the namespace root (would be connected outside
+	 *     of chroot) and specifically directed to connect paths to
+	 *     namespace root.
+	 */
+	if (!connected) {
+		if (!(flags & PATH_CONNECT_PATH) &&
+			   !(((flags & CHROOT_NSCONNECT) == CHROOT_NSCONNECT) &&
+			     our_mnt(path->mnt))) {
+			/* disconnected path, don't return pathname starting
+			 * with '/'
+			 */
+			error = -EACCES;
+			if (*res == '/')
+				*name = res + 1;
+		}
+	}
 
 out:
 	return error;
@@ -169,7 +156,7 @@ out:
  *
  * Returns: %0 else error on failure
  */
-static int get_name_to_buffer(const struct path *path, int flags, char *buffer,
+static int get_name_to_buffer(struct path *path, int flags, char *buffer,
 			      int size, char **name, const char **info)
 {
 	int adjust = (flags & PATH_IS_DIR) ? 1 : 0;
@@ -185,7 +172,7 @@ static int get_name_to_buffer(const struct path *path, int flags, char *buffer,
 	if (info && error) {
 		if (error == -ENOENT)
 			*info = "Failed name lookup - deleted entry";
-		else if (error == -EACCES)
+		else if (error == -ESTALE)
 			*info = "Failed name lookup - disconnected path";
 		else if (error == -ENAMETOOLONG)
 			*info = "Failed name lookup - name too long";
@@ -215,8 +202,8 @@ static int get_name_to_buffer(const struct path *path, int flags, char *buffer,
  *
  * Returns: %0 else error code if could retrieve name
  */
-int aa_path_name(const struct path *path, int flags, char **buffer,
-		 const char **name, const char **info)
+int aa_path_name(struct path *path, int flags, char **buffer, const char **name,
+		 const char **info)
 {
 	char *buf, *str = NULL;
 	int size = 256;

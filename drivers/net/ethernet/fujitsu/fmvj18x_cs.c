@@ -35,6 +35,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/ptrace.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -99,23 +100,23 @@ static const struct ethtool_ops netdev_ethtool_ops;
 /*
     card type
  */
-enum cardtype { MBH10302, MBH10304, TDK, CONTEC, LA501, UNGERMANN,
+typedef enum { MBH10302, MBH10304, TDK, CONTEC, LA501, UNGERMANN, 
 	       XXX10304, NEC, KME
-};
+} cardtype_t;
 
 /*
     driver specific data structure
 */
-struct local_info {
+typedef struct local_info_t {
 	struct pcmcia_device	*p_dev;
     long open_time;
     uint tx_started:1;
     uint tx_queue;
     u_short tx_queue_len;
-    enum cardtype cardtype;
+    cardtype_t cardtype;
     u_short sent;
     u_char __iomem *base;
-};
+} local_info_t;
 
 #define MC_FILTERBREAK 64
 
@@ -232,13 +233,13 @@ static const struct net_device_ops fjn_netdev_ops = {
 
 static int fmvj18x_probe(struct pcmcia_device *link)
 {
-    struct local_info *lp;
+    local_info_t *lp;
     struct net_device *dev;
 
     dev_dbg(&link->dev, "fmvj18x_attach()\n");
 
     /* Make up a FMVJ18x specific data structure */
-    dev = alloc_etherdev(sizeof(struct local_info));
+    dev = alloc_etherdev(sizeof(local_info_t));
     if (!dev)
 	return -ENOMEM;
     lp = netdev_priv(dev);
@@ -256,7 +257,7 @@ static int fmvj18x_probe(struct pcmcia_device *link)
     dev->netdev_ops = &fjn_netdev_ops;
     dev->watchdog_timeo = TX_TIMEOUT;
 
-    dev->ethtool_ops = &netdev_ethtool_ops;
+    SET_ETHTOOL_OPS(dev, &netdev_ethtool_ops);
 
     return fmvj18x_config(link);
 } /* fmvj18x_attach */
@@ -327,10 +328,10 @@ static int fmvj18x_ioprobe(struct pcmcia_device *p_dev, void *priv_data)
 static int fmvj18x_config(struct pcmcia_device *link)
 {
     struct net_device *dev = link->priv;
-    struct local_info *lp = netdev_priv(dev);
+    local_info_t *lp = netdev_priv(dev);
     int i, ret;
     unsigned int ioaddr;
-    enum cardtype cardtype;
+    cardtype_t cardtype;
     char *card_name = "unknown";
     u8 *buf;
     size_t len;
@@ -469,8 +470,8 @@ static int fmvj18x_config(struct pcmcia_device *link)
 		    goto failed;
 	    }
 	    /* Read MACID from CIS */
-	    for (i = 0; i < 6; i++)
-		    dev->dev_addr[i] = buf[i + 5];
+	    for (i = 5; i < 11; i++)
+		    dev->dev_addr[i] = buf[i];
 	    kfree(buf);
 	} else {
 	    if (pcmcia_get_mac_from_cis(link, dev))
@@ -584,7 +585,7 @@ static int fmvj18x_setup_mfc(struct pcmcia_device *link)
     int i;
     struct net_device *dev = link->priv;
     unsigned int ioaddr;
-    struct local_info *lp = netdev_priv(dev);
+    local_info_t *lp = netdev_priv(dev);
 
     /* Allocate a small memory window */
     link->resource[3]->flags = WIN_DATA_WIDTH_8|WIN_MEMORY_TYPE_AM|WIN_ENABLE;
@@ -626,7 +627,7 @@ static void fmvj18x_release(struct pcmcia_device *link)
 {
 
     struct net_device *dev = link->priv;
-    struct local_info *lp = netdev_priv(dev);
+    local_info_t *lp = netdev_priv(dev);
     u_char __iomem *tmp;
 
     dev_dbg(&link->dev, "fmvj18x_release\n");
@@ -704,14 +705,26 @@ static struct pcmcia_driver fmvj18x_cs_driver = {
 	.suspend	= fmvj18x_suspend,
 	.resume		= fmvj18x_resume,
 };
-module_pcmcia_driver(fmvj18x_cs_driver);
+
+static int __init init_fmvj18x_cs(void)
+{
+	return pcmcia_register_driver(&fmvj18x_cs_driver);
+}
+
+static void __exit exit_fmvj18x_cs(void)
+{
+	pcmcia_unregister_driver(&fmvj18x_cs_driver);
+}
+
+module_init(init_fmvj18x_cs);
+module_exit(exit_fmvj18x_cs);
 
 /*====================================================================*/
 
 static irqreturn_t fjn_interrupt(int dummy, void *dev_id)
 {
     struct net_device *dev = dev_id;
-    struct local_info *lp = netdev_priv(dev);
+    local_info_t *lp = netdev_priv(dev);
     unsigned int ioaddr;
     unsigned short tx_stat, rx_stat;
 
@@ -746,7 +759,7 @@ static irqreturn_t fjn_interrupt(int dummy, void *dev_id)
 	    lp->sent = lp->tx_queue ;
 	    lp->tx_queue = 0;
 	    lp->tx_queue_len = 0;
-	    netif_trans_update(dev);
+	    dev->trans_start = jiffies;
 	} else {
 	    lp->tx_started = 0;
 	}
@@ -772,7 +785,7 @@ static irqreturn_t fjn_interrupt(int dummy, void *dev_id)
 
 static void fjn_tx_timeout(struct net_device *dev)
 {
-    struct local_info *lp = netdev_priv(dev);
+    struct local_info_t *lp = netdev_priv(dev);
     unsigned int ioaddr = dev->base_addr;
 
     netdev_notice(dev, "transmit timed out with status %04x, %s?\n",
@@ -802,7 +815,7 @@ static void fjn_tx_timeout(struct net_device *dev)
 static netdev_tx_t fjn_start_xmit(struct sk_buff *skb,
 					struct net_device *dev)
 {
-    struct local_info *lp = netdev_priv(dev);
+    struct local_info_t *lp = netdev_priv(dev);
     unsigned int ioaddr = dev->base_addr;
     short length = skb->len;
     
@@ -874,7 +887,7 @@ static netdev_tx_t fjn_start_xmit(struct sk_buff *skb,
 
 static void fjn_reset(struct net_device *dev)
 {
-    struct local_info *lp = netdev_priv(dev);
+    struct local_info_t *lp = netdev_priv(dev);
     unsigned int ioaddr = dev->base_addr;
     int i;
 
@@ -990,6 +1003,8 @@ static void fjn_rx(struct net_device *dev)
 	    }
 	    skb = netdev_alloc_skb(dev, pkt_len + 2);
 	    if (skb == NULL) {
+		netdev_notice(dev, "Memory squeeze, dropping packet (len %d)\n",
+			      pkt_len);
 		outb(F_SKP_PKT, ioaddr + RX_SKIP);
 		dev->stats.rx_dropped++;
 		break;
@@ -1058,7 +1073,7 @@ static int fjn_config(struct net_device *dev, struct ifmap *map){
 
 static int fjn_open(struct net_device *dev)
 {
-    struct local_info *lp = netdev_priv(dev);
+    struct local_info_t *lp = netdev_priv(dev);
     struct pcmcia_device *link = lp->p_dev;
 
     pr_debug("fjn_open('%s').\n", dev->name);
@@ -1083,7 +1098,7 @@ static int fjn_open(struct net_device *dev)
 
 static int fjn_close(struct net_device *dev)
 {
-    struct local_info *lp = netdev_priv(dev);
+    struct local_info_t *lp = netdev_priv(dev);
     struct pcmcia_device *link = lp->p_dev;
     unsigned int ioaddr = dev->base_addr;
 

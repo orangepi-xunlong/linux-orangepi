@@ -2,38 +2,12 @@
 #define _LINUX_SCATTERLIST_H
 
 #include <linux/string.h>
-#include <linux/types.h>
 #include <linux/bug.h>
 #include <linux/mm.h>
+
+#include <asm/types.h>
+#include <asm/scatterlist.h>
 #include <asm/io.h>
-
-struct scatterlist {
-#ifdef CONFIG_DEBUG_SG
-	unsigned long	sg_magic;
-#endif
-	unsigned long	page_link;
-	unsigned int	offset;
-	unsigned int	length;
-	dma_addr_t	dma_address;
-#ifdef CONFIG_NEED_SG_DMA_LENGTH
-	unsigned int	dma_length;
-#endif
-};
-
-/*
- * These macros should be used after a dma_map_sg call has been done
- * to get bus addresses of each of the SG entries and their lengths.
- * You should only work with the number of sg entries dma_map_sg
- * returns, or alternatively stop on the first sg_dma_len(sg) which
- * is 0.
- */
-#define sg_dma_address(sg)	((sg)->dma_address)
-
-#ifdef CONFIG_NEED_SG_DMA_LENGTH
-#define sg_dma_len(sg)		((sg)->dma_length)
-#else
-#define sg_dma_len(sg)		((sg)->length)
-#endif
 
 struct sg_table {
 	struct scatterlist *sgl;	/* the list */
@@ -44,9 +18,10 @@ struct sg_table {
 /*
  * Notes on SG table design.
  *
- * We use the unsigned long page_link field in the scatterlist struct to place
- * the page pointer AND encode information about the sg table as well. The two
- * lower bits are reserved for this information.
+ * Architectures must provide an unsigned long page_link field in the
+ * scatterlist struct. We use that to place the page pointer AND encode
+ * information about the sg table as well. The two lower bits are reserved
+ * for this information.
  *
  * If bit 0 is set, then the page_link contains a pointer to the next sg
  * table list. Otherwise the next entry is at sg + 1.
@@ -136,9 +111,6 @@ static inline struct page *sg_page(struct scatterlist *sg)
 static inline void sg_set_buf(struct scatterlist *sg, const void *buf,
 			      unsigned int buflen)
 {
-#ifdef CONFIG_DEBUG_SG
-	BUG_ON(!virt_addr_valid(buf));
-#endif
 	sg_set_page(sg, virt_to_page(buf), buflen, offset_in_page(buf));
 }
 
@@ -161,6 +133,10 @@ static inline void sg_set_buf(struct scatterlist *sg, const void *buf,
 static inline void sg_chain(struct scatterlist *prv, unsigned int prv_nents,
 			    struct scatterlist *sgl)
 {
+#ifndef ARCH_HAS_SG_CHAIN
+	BUG();
+#endif
+
 	/*
 	 * offset and length are unused for chain entry.  Clear them.
 	 */
@@ -196,22 +172,6 @@ static inline void sg_mark_end(struct scatterlist *sg)
 }
 
 /**
- * sg_unmark_end - Undo setting the end of the scatterlist
- * @sg:		 SG entryScatterlist
- *
- * Description:
- *   Removes the termination marker from the given entry of the scatterlist.
- *
- **/
-static inline void sg_unmark_end(struct scatterlist *sg)
-{
-#ifdef CONFIG_DEBUG_SG
-	BUG_ON(sg->sg_magic != SG_MAGIC);
-#endif
-	sg->page_link &= ~0x02;
-}
-
-/**
  * sg_phys - Return physical address of an sg entry
  * @sg:	     SG entry
  *
@@ -241,43 +201,24 @@ static inline void *sg_virt(struct scatterlist *sg)
 	return page_address(sg_page(sg)) + sg->offset;
 }
 
-int sg_nents(struct scatterlist *sg);
-int sg_nents_for_len(struct scatterlist *sg, u64 len);
 struct scatterlist *sg_next(struct scatterlist *);
 struct scatterlist *sg_last(struct scatterlist *s, unsigned int);
 void sg_init_table(struct scatterlist *, unsigned int);
 void sg_init_one(struct scatterlist *, const void *, unsigned int);
-int sg_split(struct scatterlist *in, const int in_mapped_nents,
-	     const off_t skip, const int nb_splits,
-	     const size_t *split_sizes,
-	     struct scatterlist **out, int *out_mapped_nents,
-	     gfp_t gfp_mask);
 
 typedef struct scatterlist *(sg_alloc_fn)(unsigned int, gfp_t);
 typedef void (sg_free_fn)(struct scatterlist *, unsigned int);
 
-void __sg_free_table(struct sg_table *, unsigned int, bool, sg_free_fn *);
+void __sg_free_table(struct sg_table *, unsigned int, sg_free_fn *);
 void sg_free_table(struct sg_table *);
-int __sg_alloc_table(struct sg_table *, unsigned int, unsigned int,
-		     struct scatterlist *, gfp_t, sg_alloc_fn *);
+int __sg_alloc_table(struct sg_table *, unsigned int, unsigned int, gfp_t,
+		     sg_alloc_fn *);
 int sg_alloc_table(struct sg_table *, unsigned int, gfp_t);
-int sg_alloc_table_from_pages(struct sg_table *sgt,
-	struct page **pages, unsigned int n_pages,
-	unsigned long offset, unsigned long size,
-	gfp_t gfp_mask);
-
-size_t sg_copy_buffer(struct scatterlist *sgl, unsigned int nents, void *buf,
-		      size_t buflen, off_t skip, bool to_buffer);
 
 size_t sg_copy_from_buffer(struct scatterlist *sgl, unsigned int nents,
-			   const void *buf, size_t buflen);
+			   void *buf, size_t buflen);
 size_t sg_copy_to_buffer(struct scatterlist *sgl, unsigned int nents,
 			 void *buf, size_t buflen);
-
-size_t sg_pcopy_from_buffer(struct scatterlist *sgl, unsigned int nents,
-			    const void *buf, size_t buflen, off_t skip);
-size_t sg_pcopy_to_buffer(struct scatterlist *sgl, unsigned int nents,
-			  void *buf, size_t buflen, off_t skip);
 
 /*
  * Maximum number of entries that will be allocated in one piece, if
@@ -285,84 +226,6 @@ size_t sg_pcopy_to_buffer(struct scatterlist *sgl, unsigned int nents,
  */
 #define SG_MAX_SINGLE_ALLOC		(PAGE_SIZE / sizeof(struct scatterlist))
 
-/*
- * The maximum number of SG segments that we will put inside a
- * scatterlist (unless chaining is used). Should ideally fit inside a
- * single page, to avoid a higher order allocation.  We could define this
- * to SG_MAX_SINGLE_ALLOC to pack correctly at the highest order.  The
- * minimum value is 32
- */
-#define SG_CHUNK_SIZE	128
-
-/*
- * Like SG_CHUNK_SIZE, but for archs that have sg chaining. This limit
- * is totally arbitrary, a setting of 2048 will get you at least 8mb ios.
- */
-#ifdef CONFIG_ARCH_HAS_SG_CHAIN
-#define SG_MAX_SEGMENTS	2048
-#else
-#define SG_MAX_SEGMENTS	SG_CHUNK_SIZE
-#endif
-
-#ifdef CONFIG_SG_POOL
-void sg_free_table_chained(struct sg_table *table, bool first_chunk);
-int sg_alloc_table_chained(struct sg_table *table, int nents,
-			   struct scatterlist *first_chunk);
-#endif
-
-/*
- * sg page iterator
- *
- * Iterates over sg entries page-by-page.  On each successful iteration,
- * you can call sg_page_iter_page(@piter) and sg_page_iter_dma_address(@piter)
- * to get the current page and its dma address. @piter->sg will point to the
- * sg holding this page and @piter->sg_pgoffset to the page's page offset
- * within the sg. The iteration will stop either when a maximum number of sg
- * entries was reached or a terminating sg (sg_last(sg) == true) was reached.
- */
-struct sg_page_iter {
-	struct scatterlist	*sg;		/* sg holding the page */
-	unsigned int		sg_pgoffset;	/* page offset within the sg */
-
-	/* these are internal states, keep away */
-	unsigned int		__nents;	/* remaining sg entries */
-	int			__pg_advance;	/* nr pages to advance at the
-						 * next step */
-};
-
-bool __sg_page_iter_next(struct sg_page_iter *piter);
-void __sg_page_iter_start(struct sg_page_iter *piter,
-			  struct scatterlist *sglist, unsigned int nents,
-			  unsigned long pgoffset);
-/**
- * sg_page_iter_page - get the current page held by the page iterator
- * @piter:	page iterator holding the page
- */
-static inline struct page *sg_page_iter_page(struct sg_page_iter *piter)
-{
-	return nth_page(sg_page(piter->sg), piter->sg_pgoffset);
-}
-
-/**
- * sg_page_iter_dma_address - get the dma address of the current page held by
- * the page iterator.
- * @piter:	page iterator holding the page
- */
-static inline dma_addr_t sg_page_iter_dma_address(struct sg_page_iter *piter)
-{
-	return sg_dma_address(piter->sg) + (piter->sg_pgoffset << PAGE_SHIFT);
-}
-
-/**
- * for_each_sg_page - iterate over the pages of the given sg list
- * @sglist:	sglist to iterate over
- * @piter:	page iterator to hold current page, sg, sg_pgoffset
- * @nents:	maximum number of sg entries to iterate over
- * @pgoffset:	starting page offset
- */
-#define for_each_sg_page(sglist, piter, nents, pgoffset)		   \
-	for (__sg_page_iter_start((piter), (sglist), (nents), (pgoffset)); \
-	     __sg_page_iter_next(piter);)
 
 /*
  * Mapping sg iterator
@@ -390,17 +253,16 @@ struct sg_mapping_iter {
 	void			*addr;		/* pointer to the mapped area */
 	size_t			length;		/* length of the mapped area */
 	size_t			consumed;	/* number of consumed bytes */
-	struct sg_page_iter	piter;		/* page iterator */
 
 	/* these are internal states, keep away */
-	unsigned int		__offset;	/* offset within page */
-	unsigned int		__remaining;	/* remaining bytes on page */
+	struct scatterlist	*__sg;		/* current entry */
+	unsigned int		__nents;	/* nr of remaining entries */
+	unsigned int		__offset;	/* offset within sg */
 	unsigned int		__flags;
 };
 
 void sg_miter_start(struct sg_mapping_iter *miter, struct scatterlist *sgl,
 		    unsigned int nents, unsigned int flags);
-bool sg_miter_skip(struct sg_mapping_iter *miter, off_t offset);
 bool sg_miter_next(struct sg_mapping_iter *miter);
 void sg_miter_stop(struct sg_mapping_iter *miter);
 

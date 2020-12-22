@@ -24,7 +24,6 @@
 #include <linux/platform_device.h>
 #include <linux/input.h>
 #include <linux/mfd/intel_msic.h>
-#include <linux/pm_wakeirq.h>
 
 #define DRIVER_NAME "msic_power_btn"
 
@@ -57,7 +56,7 @@ static irqreturn_t mfld_pb_isr(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int mfld_pb_probe(struct platform_device *pdev)
+static int __devinit mfld_pb_probe(struct platform_device *pdev)
 {
 	struct input_dev *input;
 	int irq = platform_get_irq(pdev, 0);
@@ -67,8 +66,10 @@ static int mfld_pb_probe(struct platform_device *pdev)
 		return -EINVAL;
 
 	input = input_allocate_device();
-	if (!input)
+	if (!input) {
+		dev_err(&pdev->dev, "Input device allocation error\n");
 		return -ENOMEM;
+	}
 
 	input->name = pdev->name;
 	input->phys = "power-button/input0";
@@ -77,16 +78,13 @@ static int mfld_pb_probe(struct platform_device *pdev)
 
 	input_set_capability(input, EV_KEY, KEY_POWER);
 
-	error = request_threaded_irq(irq, NULL, mfld_pb_isr, IRQF_ONESHOT,
-				     DRIVER_NAME, input);
+	error = request_threaded_irq(irq, NULL, mfld_pb_isr, IRQF_NO_SUSPEND,
+			DRIVER_NAME, input);
 	if (error) {
 		dev_err(&pdev->dev, "Unable to request irq %d for mfld power"
 				"button\n", irq);
 		goto err_free_input;
 	}
-
-	device_init_wakeup(&pdev->dev, true);
-	dev_pm_set_wake_irq(&pdev->dev, irq);
 
 	error = input_register_device(input);
 	if (error) {
@@ -123,15 +121,14 @@ err_free_input:
 	return error;
 }
 
-static int mfld_pb_remove(struct platform_device *pdev)
+static int __devexit mfld_pb_remove(struct platform_device *pdev)
 {
 	struct input_dev *input = platform_get_drvdata(pdev);
 	int irq = platform_get_irq(pdev, 0);
 
-	dev_pm_clear_wake_irq(&pdev->dev);
-	device_init_wakeup(&pdev->dev, false);
 	free_irq(irq, input);
 	input_unregister_device(input);
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }
@@ -139,9 +136,10 @@ static int mfld_pb_remove(struct platform_device *pdev)
 static struct platform_driver mfld_pb_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 	},
 	.probe	= mfld_pb_probe,
-	.remove	= mfld_pb_remove,
+	.remove	= __devexit_p(mfld_pb_remove),
 };
 
 module_platform_driver(mfld_pb_driver);

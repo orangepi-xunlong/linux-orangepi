@@ -15,20 +15,13 @@
  *   the GNU Lesser General Public License for more details.
  *
  *   You should have received a copy of the GNU Lesser General Public License
- *   along with this library; if not, see <http://www.gnu.org/licenses/>.
+ *   along with this library; if not, write to the Free Software
+ *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/compiler.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
-
-/*
- * Layout of key payload words.
- */
-enum {
-	dns_key_data,
-	dns_key_error,
-};
 
 /*
  * dns_key.c
@@ -38,7 +31,7 @@ extern const struct cred *dns_resolver_cache;
 /*
  * debug tracing
  */
-extern unsigned int dns_resolver_debug;
+extern unsigned dns_resolver_debug;
 
 #define	kdebug(FMT, ...)				\
 do {							\

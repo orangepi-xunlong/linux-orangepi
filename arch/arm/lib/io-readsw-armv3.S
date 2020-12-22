@@ -27,11 +27,11 @@
 		strb	r3, [r1], #1
 
 		subs	r2, r2, #1
-		reteq	lr
+		moveq	pc, lr
 
 ENTRY(__raw_readsw)
 		teq	r2, #0		@ do we have to check for the zero len?
-		reteq	lr
+		moveq	pc, lr
 		tst	r1, #3
 		bne	.Linsw_align
 

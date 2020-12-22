@@ -19,7 +19,7 @@
 #include <linux/netdevice.h>
 #include <linux/netfilter.h>
 #include <linux/spinlock.h>
-#include <net/netlink.h>
+#include <linux/netlink.h>
 #include <linux/netfilter_decnet.h>
 
 #include <net/sock.h>
@@ -39,26 +39,27 @@ static struct sk_buff *dnrmg_build_message(struct sk_buff *rt_skb, int *errp)
 	unsigned char *ptr;
 	struct nf_dn_rtmsg *rtm;
 
-	size = NLMSG_ALIGN(rt_skb->len) +
-	       NLMSG_ALIGN(sizeof(struct nf_dn_rtmsg));
-	skb = nlmsg_new(size, GFP_ATOMIC);
-	if (!skb) {
-		*errp = -ENOMEM;
-		return NULL;
-	}
+	size = NLMSG_SPACE(rt_skb->len);
+	size += NLMSG_ALIGN(sizeof(struct nf_dn_rtmsg));
+	skb = alloc_skb(size, GFP_ATOMIC);
+	if (!skb)
+		goto nlmsg_failure;
 	old_tail = skb->tail;
-	nlh = nlmsg_put(skb, 0, 0, 0, size, 0);
-	if (!nlh) {
-		kfree_skb(skb);
-		*errp = -ENOMEM;
-		return NULL;
-	}
-	rtm = (struct nf_dn_rtmsg *)nlmsg_data(nlh);
+	nlh = NLMSG_PUT(skb, 0, 0, 0, size - sizeof(*nlh));
+	rtm = (struct nf_dn_rtmsg *)NLMSG_DATA(nlh);
 	rtm->nfdn_ifindex = rt_skb->dev->ifindex;
 	ptr = NFDN_RTMSG(rtm);
 	skb_copy_from_linear_data(rt_skb, ptr, rt_skb->len);
 	nlh->nlmsg_len = skb->tail - old_tail;
 	return skb;
+
+nlmsg_failure:
+	if (skb)
+		kfree_skb(skb);
+	*errp = -ENOMEM;
+	if (net_ratelimit())
+		printk(KERN_ERR "dn_rtmsg: error creating netlink message\n");
+	return NULL;
 }
 
 static void dnrmg_send_peer(struct sk_buff *skb)
@@ -87,9 +88,11 @@ static void dnrmg_send_peer(struct sk_buff *skb)
 }
 
 
-static unsigned int dnrmg_hook(void *priv,
+static unsigned int dnrmg_hook(unsigned int hook,
 			struct sk_buff *skb,
-			const struct nf_hook_state *state)
+			const struct net_device *in,
+			const struct net_device *out,
+			int (*okfn)(struct sk_buff *))
 {
 	dnrmg_send_peer(skb);
 	return NF_ACCEPT;
@@ -102,12 +105,10 @@ static inline void dnrmg_receive_user_skb(struct sk_buff *skb)
 {
 	struct nlmsghdr *nlh = nlmsg_hdr(skb);
 
-	if (skb->len < sizeof(*nlh) ||
-	    nlh->nlmsg_len < sizeof(*nlh) ||
-	    skb->len < nlh->nlmsg_len)
+	if (nlh->nlmsg_len < sizeof(*nlh) || skb->len < nlh->nlmsg_len)
 		return;
 
-	if (!netlink_capable(skb, CAP_NET_ADMIN))
+	if (!capable(CAP_NET_ADMIN))
 		RCV_SKB_FAIL(-EPERM);
 
 	/* Eventually we might send routing messages too */
@@ -117,7 +118,7 @@ static inline void dnrmg_receive_user_skb(struct sk_buff *skb)
 
 static struct nf_hook_ops dnrmg_ops __read_mostly = {
 	.hook		= dnrmg_hook,
-	.pf		= NFPROTO_DECNET,
+	.pf		= PF_DECnet,
 	.hooknum	= NF_DN_ROUTE,
 	.priority	= NF_DN_PRI_DNRTMSG,
 };
@@ -125,12 +126,11 @@ static struct nf_hook_ops dnrmg_ops __read_mostly = {
 static int __init dn_rtmsg_init(void)
 {
 	int rv = 0;
-	struct netlink_kernel_cfg cfg = {
-		.groups	= DNRNG_NLGRP_MAX,
-		.input	= dnrmg_receive_user_skb,
-	};
 
-	dnrmg = netlink_kernel_create(&init_net, NETLINK_DNRTMSG, &cfg);
+	dnrmg = netlink_kernel_create(&init_net,
+				      NETLINK_DNRTMSG, DNRNG_NLGRP_MAX,
+				      dnrmg_receive_user_skb,
+				      NULL, THIS_MODULE);
 	if (dnrmg == NULL) {
 		printk(KERN_ERR "dn_rtmsg: Cannot create netlink socket");
 		return -ENOMEM;

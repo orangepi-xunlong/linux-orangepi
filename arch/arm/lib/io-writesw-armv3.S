@@ -28,11 +28,11 @@
 		orr	r3, r3, r3, lsl #16
 		str	r3, [r0]
 		subs	r2, r2, #1
-		reteq	lr
+		moveq	pc, lr
 
 ENTRY(__raw_writesw)
 		teq	r2, #0		@ do we have to check for the zero len?
-		reteq	lr
+		moveq	pc, lr
 		tst	r1, #3
 		bne	.Loutsw_align
 

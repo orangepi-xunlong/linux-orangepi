@@ -63,8 +63,9 @@ static inline __sum16 ip_fast_csum(const void *iph, unsigned int ihl)
  */
 
 static inline __sum16 csum_tcpudp_magic(__be32 saddr, __be32 daddr,
-					__u32 len, __u8 proto,
-					__wsum sum)
+						   unsigned short len,
+						   unsigned short proto,
+						   __wsum sum)
 {
 	return csum_fold(csum_tcpudp_nofold(saddr,daddr,len,proto,sum));
 }

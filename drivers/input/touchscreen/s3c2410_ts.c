@@ -28,6 +28,7 @@
 #include <linux/module.h>
 #include <linux/gpio.h>
 #include <linux/input.h>
+#include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
@@ -36,7 +37,7 @@
 
 #include <plat/adc.h>
 #include <plat/regs-adc.h>
-#include <linux/platform_data/touchscreen-s3c2410.h>
+#include <plat/ts.h>
 
 #define TSC_SLEEP  (S3C2410_ADCTSC_PULL_UP_DISABLE | S3C2410_ADCTSC_XY_PST(0))
 
@@ -237,7 +238,7 @@ static void s3c24xx_ts_select(struct s3c_adc_client *client, unsigned select)
  * Initialise, find and allocate any resources we need to run and then
  * register with the ADC and input systems.
  */
-static int s3c2410ts_probe(struct platform_device *pdev)
+static int __devinit s3c2410ts_probe(struct platform_device *pdev)
 {
 	struct s3c2410_ts_mach_info *info;
 	struct device *dev = &pdev->dev;
@@ -250,7 +251,7 @@ static int s3c2410ts_probe(struct platform_device *pdev)
 
 	ts.dev = dev;
 
-	info = dev_get_platdata(&pdev->dev);
+	info = pdev->dev.platform_data;
 	if (!info) {
 		dev_err(dev, "no platform data, cannot attach\n");
 		return -EINVAL;
@@ -264,7 +265,7 @@ static int s3c2410ts_probe(struct platform_device *pdev)
 		return -ENOENT;
 	}
 
-	clk_prepare_enable(ts.clock);
+	clk_enable(ts.clock);
 	dev_dbg(dev, "got and enabled clocks\n");
 
 	ts.irq_tc = ret = platform_get_irq(pdev, 0);
@@ -364,12 +365,12 @@ static int s3c2410ts_probe(struct platform_device *pdev)
  *
  * Free up our state ready to be removed.
  */
-static int s3c2410ts_remove(struct platform_device *pdev)
+static int __devexit s3c2410ts_remove(struct platform_device *pdev)
 {
 	free_irq(ts.irq_tc, ts.input);
 	del_timer_sync(&touch_timer);
 
-	clk_disable_unprepare(ts.clock);
+	clk_disable(ts.clock);
 	clk_put(ts.clock);
 
 	input_unregister_device(ts.input);
@@ -391,7 +392,7 @@ static int s3c2410ts_suspend(struct device *dev)
 static int s3c2410ts_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct s3c2410_ts_mach_info *info = dev_get_platdata(&pdev->dev);
+	struct s3c2410_ts_mach_info *info = pdev->dev.platform_data;
 
 	clk_enable(ts.clock);
 	enable_irq(ts.irq_tc);
@@ -405,13 +406,13 @@ static int s3c2410ts_resume(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops s3c_ts_pmops = {
+static struct dev_pm_ops s3c_ts_pmops = {
 	.suspend	= s3c2410ts_suspend,
 	.resume		= s3c2410ts_resume,
 };
 #endif
 
-static const struct platform_device_id s3cts_driver_ids[] = {
+static struct platform_device_id s3cts_driver_ids[] = {
 	{ "s3c2410-ts", 0 },
 	{ "s3c2440-ts", 0 },
 	{ "s3c64xx-ts", FEAT_PEN_IRQ },
@@ -422,13 +423,14 @@ MODULE_DEVICE_TABLE(platform, s3cts_driver_ids);
 static struct platform_driver s3c_ts_driver = {
 	.driver         = {
 		.name   = "samsung-ts",
+		.owner  = THIS_MODULE,
 #ifdef CONFIG_PM
 		.pm	= &s3c_ts_pmops,
 #endif
 	},
 	.id_table	= s3cts_driver_ids,
 	.probe		= s3c2410ts_probe,
-	.remove		= s3c2410ts_remove,
+	.remove		= __devexit_p(s3c2410ts_remove),
 };
 module_platform_driver(s3c_ts_driver);
 

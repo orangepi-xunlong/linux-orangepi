@@ -36,8 +36,8 @@
 #include <scsi/scsi_host.h>
 #include <linux/libata.h>
 #include <linux/platform_device.h>
-#include <linux/gpio.h>
 #include <asm/dma.h>
+#include <asm/gpio.h>
 #include <asm/portmux.h>
 
 #define DRV_NAME		"pata-bf54x"
@@ -1538,7 +1538,7 @@ static unsigned short atapi_io_port[] = {
  *		- IRQ	   (IORESOURCE_IRQ)
  *
  */
-static int bfin_atapi_probe(struct platform_device *pdev)
+static int __devinit bfin_atapi_probe(struct platform_device *pdev)
 {
 	int board_idx = 0;
 	struct resource *res;
@@ -1596,7 +1596,7 @@ static int bfin_atapi_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	platform_set_drvdata(pdev, host);
+	dev_set_drvdata(&pdev->dev, host);
 
 	return 0;
 }
@@ -1608,21 +1608,23 @@ static int bfin_atapi_probe(struct platform_device *pdev)
  *	A bfin atapi device has been unplugged. Perform the needed
  *	cleanup. Also called on module unload for any active devices.
  */
-static int bfin_atapi_remove(struct platform_device *pdev)
+static int __devexit bfin_atapi_remove(struct platform_device *pdev)
 {
-	struct ata_host *host = platform_get_drvdata(pdev);
+	struct device *dev = &pdev->dev;
+	struct ata_host *host = dev_get_drvdata(dev);
 
 	ata_host_detach(host);
+	dev_set_drvdata(&pdev->dev, NULL);
 
 	peripheral_free_list(atapi_io_port);
 
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int bfin_atapi_suspend(struct platform_device *pdev, pm_message_t state)
 {
-	struct ata_host *host = platform_get_drvdata(pdev);
+	struct ata_host *host = dev_get_drvdata(&pdev->dev);
 	if (host)
 		return ata_host_suspend(host, state);
 	else
@@ -1631,7 +1633,7 @@ static int bfin_atapi_suspend(struct platform_device *pdev, pm_message_t state)
 
 static int bfin_atapi_resume(struct platform_device *pdev)
 {
-	struct ata_host *host = platform_get_drvdata(pdev);
+	struct ata_host *host = dev_get_drvdata(&pdev->dev);
 	int ret;
 
 	if (host) {
@@ -1652,11 +1654,12 @@ static int bfin_atapi_resume(struct platform_device *pdev)
 
 static struct platform_driver bfin_atapi_driver = {
 	.probe			= bfin_atapi_probe,
-	.remove			= bfin_atapi_remove,
+	.remove			= __devexit_p(bfin_atapi_remove),
 	.suspend		= bfin_atapi_suspend,
 	.resume			= bfin_atapi_resume,
 	.driver = {
 		.name		= DRV_NAME,
+		.owner		= THIS_MODULE,
 	},
 };
 

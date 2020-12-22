@@ -1,6 +1,9 @@
 #ifndef _LINUX_POLL_H
 #define _LINUX_POLL_H
 
+#include <asm/poll.h>
+
+#ifdef __KERNEL__
 
 #include <linux/compiler.h>
 #include <linux/ktime.h>
@@ -9,7 +12,6 @@
 #include <linux/fs.h>
 #include <linux/sysctl.h>
 #include <asm/uaccess.h>
-#include <uapi/linux/poll.h>
 
 extern struct ctl_table epoll_table[]; /* for sysctl */
 /* ~832 bytes of stack space used max in sys_select/sys_poll before allocating
@@ -96,7 +98,7 @@ extern void poll_initwait(struct poll_wqueues *pwq);
 extern void poll_freewait(struct poll_wqueues *pwq);
 extern int poll_schedule_timeout(struct poll_wqueues *pwq, int state,
 				 ktime_t *expires, unsigned long slack);
-extern u64 select_estimate_accuracy(struct timespec64 *tv);
+extern long select_estimate_accuracy(struct timespec *tv);
 
 
 static inline int poll_schedule(struct poll_wqueues *pwq, int state)
@@ -153,13 +155,14 @@ void zero_fd_set(unsigned long nr, unsigned long *fdset)
 
 #define MAX_INT64_SECONDS (((s64)(~((u64)0)>>1)/HZ)-1)
 
-extern int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time);
+extern int do_select(int n, fd_set_bits *fds, struct timespec *end_time);
 extern int do_sys_poll(struct pollfd __user * ufds, unsigned int nfds,
-		       struct timespec64 *end_time);
+		       struct timespec *end_time);
 extern int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,
-			   fd_set __user *exp, struct timespec64 *end_time);
+			   fd_set __user *exp, struct timespec *end_time);
 
-extern int poll_select_set_timeout(struct timespec64 *to, time64_t sec,
-				   long nsec);
+extern int poll_select_set_timeout(struct timespec *to, long sec, long nsec);
+
+#endif /* KERNEL */
 
 #endif /* _LINUX_POLL_H */

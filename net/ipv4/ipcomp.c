@@ -23,7 +23,7 @@
 #include <net/protocol.h>
 #include <net/sock.h>
 
-static int ipcomp4_err(struct sk_buff *skb, u32 info)
+static void ipcomp4_err(struct sk_buff *skb, u32 info)
 {
 	struct net *net = dev_net(skb->dev);
 	__be32 spi;
@@ -31,29 +31,18 @@ static int ipcomp4_err(struct sk_buff *skb, u32 info)
 	struct ip_comp_hdr *ipch = (struct ip_comp_hdr *)(skb->data+(iph->ihl<<2));
 	struct xfrm_state *x;
 
-	switch (icmp_hdr(skb)->type) {
-	case ICMP_DEST_UNREACH:
-		if (icmp_hdr(skb)->code != ICMP_FRAG_NEEDED)
-			return 0;
-	case ICMP_REDIRECT:
-		break;
-	default:
-		return 0;
-	}
+	if (icmp_hdr(skb)->type != ICMP_DEST_UNREACH ||
+	    icmp_hdr(skb)->code != ICMP_FRAG_NEEDED)
+		return;
 
 	spi = htonl(ntohs(ipch->cpi));
 	x = xfrm_state_lookup(net, skb->mark, (const xfrm_address_t *)&iph->daddr,
 			      spi, IPPROTO_COMP, AF_INET);
 	if (!x)
-		return 0;
-
-	if (icmp_hdr(skb)->type == ICMP_DEST_UNREACH)
-		ipv4_update_pmtu(skb, net, info, 0, 0, IPPROTO_COMP, 0);
-	else
-		ipv4_redirect(skb, net, 0, 0, IPPROTO_COMP, 0);
+		return;
+	NETDEBUG(KERN_DEBUG "pmtu discovery on SA IPCOMP/%08x/%pI4\n",
+		 spi, &iph->daddr);
 	xfrm_state_put(x);
-
-	return 0;
 }
 
 /* We always hold one tunnel user reference to indicate a tunnel */
@@ -63,7 +52,7 @@ static struct xfrm_state *ipcomp_tunnel_create(struct xfrm_state *x)
 	struct xfrm_state *t;
 
 	t = xfrm_state_alloc(net);
-	if (!t)
+	if (t == NULL)
 		goto out;
 
 	t->id.proto = IPPROTO_IPIP;
@@ -74,7 +63,6 @@ static struct xfrm_state *ipcomp_tunnel_create(struct xfrm_state *x)
 	t->props.mode = x->props.mode;
 	t->props.saddr.a4 = x->props.saddr.a4;
 	t->props.flags = x->props.flags;
-	t->props.extra_flags = x->props.extra_flags;
 	memcpy(&t->mark, &x->mark, sizeof(t->mark));
 
 	if (xfrm_init_state(t))
@@ -149,11 +137,6 @@ out:
 	return err;
 }
 
-static int ipcomp4_rcv_cb(struct sk_buff *skb, int err)
-{
-	return 0;
-}
-
 static const struct xfrm_type ipcomp_type = {
 	.description	= "IPCOMP4",
 	.owner		= THIS_MODULE,
@@ -164,12 +147,10 @@ static const struct xfrm_type ipcomp_type = {
 	.output		= ipcomp_output
 };
 
-static struct xfrm4_protocol ipcomp4_protocol = {
+static const struct net_protocol ipcomp4_protocol = {
 	.handler	=	xfrm4_rcv,
-	.input_handler	=	xfrm_input,
-	.cb_handler	=	ipcomp4_rcv_cb,
 	.err_handler	=	ipcomp4_err,
-	.priority	=	0,
+	.no_policy	=	1,
 };
 
 static int __init ipcomp4_init(void)
@@ -178,7 +159,7 @@ static int __init ipcomp4_init(void)
 		pr_info("%s: can't add xfrm type\n", __func__);
 		return -EAGAIN;
 	}
-	if (xfrm4_protocol_register(&ipcomp4_protocol, IPPROTO_COMP) < 0) {
+	if (inet_add_protocol(&ipcomp4_protocol, IPPROTO_COMP) < 0) {
 		pr_info("%s: can't add protocol\n", __func__);
 		xfrm_unregister_type(&ipcomp_type, AF_INET);
 		return -EAGAIN;
@@ -188,7 +169,7 @@ static int __init ipcomp4_init(void)
 
 static void __exit ipcomp4_fini(void)
 {
-	if (xfrm4_protocol_deregister(&ipcomp4_protocol, IPPROTO_COMP) < 0)
+	if (inet_del_protocol(&ipcomp4_protocol, IPPROTO_COMP) < 0)
 		pr_info("%s: can't remove protocol\n", __func__);
 	if (xfrm_unregister_type(&ipcomp_type, AF_INET) < 0)
 		pr_info("%s: can't remove xfrm type\n", __func__);

@@ -18,8 +18,6 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/threads.h>
@@ -56,33 +54,38 @@ static unsigned char do_get_bits(void);
 #define DRIVER_NAME "lirc_bt829"
 
 static bool debug;
+#define dprintk(fmt, args...)						 \
+	do {								 \
+		if (debug)						 \
+			printk(KERN_DEBUG DRIVER_NAME ": "fmt, ## args); \
+	} while (0)
 
 static int atir_minor;
-static phys_addr_t pci_addr_phys;
-static unsigned char __iomem *pci_addr_lin;
+static unsigned long pci_addr_phys;
+static unsigned char *pci_addr_lin;
 
 static struct lirc_driver atir_driver;
 
 static struct pci_dev *do_pci_probe(void)
 {
 	struct pci_dev *my_dev;
-
 	my_dev = pci_get_device(PCI_VENDOR_ID_ATI,
 				PCI_DEVICE_ID_ATI_264VT, NULL);
 	if (my_dev) {
-		pr_err("Using device: %s\n", pci_name(my_dev));
+		printk(KERN_ERR DRIVER_NAME ": Using device: %s\n",
+		       pci_name(my_dev));
 		pci_addr_phys = 0;
 		if (my_dev->resource[0].flags & IORESOURCE_MEM) {
 			pci_addr_phys = my_dev->resource[0].start;
-			pr_info("memory at %pa\n", &pci_addr_phys);
+			printk(KERN_INFO DRIVER_NAME ": memory at 0x%08X\n",
+			       (unsigned int)pci_addr_phys);
 		}
 		if (pci_addr_phys == 0) {
-			pr_err("no memory resource ?\n");
-			pci_dev_put(my_dev);
+			printk(KERN_ERR DRIVER_NAME ": no memory resource ?\n");
 			return NULL;
 		}
 	} else {
-		pr_err("pci_probe failed\n");
+		printk(KERN_ERR DRIVER_NAME ": pci_probe failed\n");
 		return NULL;
 	}
 	return my_dev;
@@ -92,11 +95,10 @@ static int atir_add_to_buf(void *data, struct lirc_buffer *buf)
 {
 	unsigned char key;
 	int status;
-
 	status = poll_main();
 	key = (status >> 8) & 0xFF;
 	if (status & 0xFF) {
-		dev_dbg(atir_driver.dev, "reading key %02X\n", key);
+		dprintk("reading key %02X\n", key);
 		lirc_buffer_write(buf, &key);
 		return 0;
 	}
@@ -105,38 +107,31 @@ static int atir_add_to_buf(void *data, struct lirc_buffer *buf)
 
 static int atir_set_use_inc(void *data)
 {
-	dev_dbg(atir_driver.dev, "driver is opened\n");
+	dprintk("driver is opened\n");
 	return 0;
 }
 
 static void atir_set_use_dec(void *data)
 {
-	dev_dbg(atir_driver.dev, "driver is closed\n");
+	dprintk("driver is closed\n");
 }
 
 int init_module(void)
 {
 	struct pci_dev *pdev;
-	int rc;
 
 	pdev = do_pci_probe();
-	if (!pdev)
+	if (pdev == NULL)
 		return -ENODEV;
 
-	rc = pci_enable_device(pdev);
-	if (rc)
-		goto err_put_dev;
-
-	if (!atir_init_start()) {
-		rc = -ENODEV;
-		goto err_disable;
-	}
+	if (!atir_init_start())
+		return -ENODEV;
 
 	strcpy(atir_driver.name, "ATIR");
 	atir_driver.minor       = -1;
 	atir_driver.code_length = 8;
 	atir_driver.sample_rate = 10;
-	atir_driver.data        = NULL;
+	atir_driver.data        = 0;
 	atir_driver.add_to_buf  = atir_add_to_buf;
 	atir_driver.set_use_inc = atir_set_use_inc;
 	atir_driver.set_use_dec = atir_set_use_dec;
@@ -145,39 +140,26 @@ int init_module(void)
 
 	atir_minor = lirc_register_driver(&atir_driver);
 	if (atir_minor < 0) {
-		pr_err("failed to register driver!\n");
-		rc = atir_minor;
-		goto err_unmap;
+		printk(KERN_ERR DRIVER_NAME ": failed to register driver!\n");
+		return atir_minor;
 	}
-	dev_dbg(atir_driver.dev, "driver is registered on minor %d\n",
-				atir_minor);
+	dprintk("driver is registered on minor %d\n", atir_minor);
 
 	return 0;
-
-err_unmap:
-	iounmap(pci_addr_lin);
-err_disable:
-	pci_disable_device(pdev);
-err_put_dev:
-	pci_dev_put(pdev);
-	return rc;
 }
+
 
 void cleanup_module(void)
 {
-	struct pci_dev *pdev = to_pci_dev(atir_driver.dev);
-
 	lirc_unregister_driver(atir_minor);
-	iounmap(pci_addr_lin);
-	pci_disable_device(pdev);
-	pci_dev_put(pdev);
 }
+
 
 static int atir_init_start(void)
 {
 	pci_addr_lin = ioremap(pci_addr_phys + DATA_PCI_OFF, 0x400);
-	if (!pci_addr_lin) {
-		pr_info("pci mem must be mapped\n");
+	if (pci_addr_lin == 0) {
+		printk(KERN_INFO DRIVER_NAME ": pci mem must be mapped\n");
 		return 0;
 	}
 	return 1;
@@ -185,10 +167,11 @@ static int atir_init_start(void)
 
 static void cycle_delay(int cycle)
 {
-	udelay(WAIT_CYCLE * cycle);
+	udelay(WAIT_CYCLE*cycle);
 }
 
-static int poll_main(void)
+
+static int poll_main()
 {
 	unsigned char status_high, status_low;
 
@@ -224,7 +207,6 @@ static void do_i2c_start(void)
 static void do_i2c_stop(void)
 {
 	unsigned char bits;
-
 	bits =  do_get_bits() & 0xFD;
 	do_set_bits(bits);
 	cycle_delay(1);
@@ -329,7 +311,6 @@ static unsigned char seems_rd_byte(void)
 static void do_set_bits(unsigned char new_bits)
 {
 	int reg_val;
-
 	reg_val = read_index(0x34);
 	if (new_bits & 2) {
 		reg_val &= 0xFFFFFFDF;
@@ -379,16 +360,17 @@ static unsigned char do_get_bits(void)
 
 static unsigned int read_index(unsigned char index)
 {
-	unsigned char __iomem *addr;
+	unsigned char *addr;
+	unsigned int value;
 	/*  addr = pci_addr_lin + DATA_PCI_OFF + ((index & 0xFF) << 2); */
 	addr = pci_addr_lin + ((index & 0xFF) << 2);
-	return readl(addr);
+	value = readl(addr);
+	return value;
 }
 
 static void write_index(unsigned char index, unsigned int reg_val)
 {
-	unsigned char __iomem *addr;
-
+	unsigned char *addr;
 	addr = pci_addr_lin + ((index & 0xFF) << 2);
 	writel(reg_val, addr);
 }

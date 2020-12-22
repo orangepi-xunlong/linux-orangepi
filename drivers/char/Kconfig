@@ -7,13 +7,17 @@ menu "Character devices"
 source "drivers/tty/Kconfig"
 
 config DEVMEM
-	bool "/dev/mem virtual device support"
+	bool "Memory device driver"
 	default y
 	help
-	  Say Y here if you want to support the /dev/mem device.
-	  The /dev/mem device is used to access areas of physical
-	  memory.
-	  When in doubt, say "Y".
+	  The memory driver provides two character devices, mem and kmem, which
+	  provide access to the system's memory. The mem device is a view of
+	  physical memory, and each byte in the device corresponds to the
+	  matching physical address. The kmem device is the same as mem, but
+	  the addresses correspond to the kernel's virtual address space rather
+	  than physical memory. These devices are standard parts of a Linux
+	  system and most users should say Y here. You might say N if very
+	  security conscience or memory is tight.
 
 config DEVKMEM
 	bool "/dev/kmem virtual device support"
@@ -23,6 +27,18 @@ config DEVKMEM
 	  /dev/kmem device is rarely used, but can be used for certain
 	  kind of kernel debugging operations.
 	  When in doubt, say "N".
+
+config STALDRV
+	bool "Stallion multiport serial support"
+	depends on SERIAL_NONSTANDARD
+	help
+	  Stallion cards give you many serial ports.  You would need something
+	  like this to connect more than two modems to your Linux box, for
+	  instance in order to become a dial-in server.  If you say Y here,
+	  you will be asked for your specific card model in the next
+	  questions.  Make sure to read <file:Documentation/serial/stallion.txt>
+	  in this case.  If you have never heard about all this, it's safe to
+	  say N.
 
 config SGI_SNSC
 	bool "SGI Altix system controller communication support"
@@ -49,8 +65,8 @@ config SGI_MBCS
 source "drivers/tty/serial/Kconfig"
 
 config TTY_PRINTK
-	tristate "TTY driver to output user messages via printk"
-	depends on EXPERT && TTY
+	bool "TTY driver to output user messages via printk"
+	depends on EXPERT
 	default n
 	---help---
 	  If you say Y here, the support for writing user messages (i.e.
@@ -156,7 +172,7 @@ source "drivers/tty/hvc/Kconfig"
 
 config VIRTIO_CONSOLE
 	tristate "Virtio console"
-	depends on VIRTIO && TTY
+	depends on VIRTIO
 	select HVC_DRIVER
 	help
 	  Virtio console for use with lguest and other hypervisors.
@@ -177,20 +193,6 @@ config IBM_BSR
 	  This devices exposes a hardware mechanism for fast synchronization
 	  of threads across a large system which avoids bouncing a cacheline
 	  between several cores on a system
-
-config POWERNV_OP_PANEL
-	tristate "IBM POWERNV Operator Panel Display support"
-	depends on PPC_POWERNV
-	default m
-	help
-	  If you say Y here, a special character device node, /dev/op_panel,
-	  will be created which exposes the operator panel display on IBM
-	  Power Systems machines with FSPs.
-
-	  If you don't require access to the operator panel display from user
-	  space, say N.
-
-	  If unsure, say M here to build it as a module called powernv-op-panel.
 
 source "drivers/char/ipmi/Kconfig"
 
@@ -293,7 +295,8 @@ if RTC_LIB=n
 
 config RTC
 	tristate "Enhanced Real Time Clock Support (legacy PC RTC driver)"
-	depends on ALPHA || (MIPS && MACH_LOONGSON64)
+	depends on !PPC && !PARISC && !IA64 && !M68K && !SPARC && !FRV \
+			&& !ARM && !SUPERH && !S390 && !AVR32 && !BLACKFIN && !UML
 	---help---
 	  If you say Y here and create a character special file /dev/rtc with
 	  major number 10 and minor number 135 using mknod ("man mknod"), you
@@ -339,6 +342,31 @@ config JS_RTC
 	  To compile this driver as a module, choose M here: the
 	  module will be called js-rtc.
 
+config GEN_RTC
+	tristate "Generic /dev/rtc emulation"
+	depends on RTC!=y && !IA64 && !ARM && !M32R && !MIPS && !SPARC && !FRV && !S390 && !SUPERH && !AVR32 && !BLACKFIN && !UML
+	---help---
+	  If you say Y here and create a character special file /dev/rtc with
+	  major number 10 and minor number 135 using mknod ("man mknod"), you
+	  will get access to the real time clock (or hardware clock) built
+	  into your computer.
+
+	  It reports status information via the file /proc/driver/rtc and its
+	  behaviour is set by various ioctls on /dev/rtc. If you enable the
+	  "extended RTC operation" below it will also provide an emulation
+	  for RTC_UIE which is required by some programs and may improve
+	  precision in some cases.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called genrtc.
+
+config GEN_RTC_X
+	bool "Extended RTC operation"
+	depends on GEN_RTC
+	help
+	  Provides an emulation for RTC_UIE which is required by some programs
+	  and may improve precision of the generic RTC support in some cases.
+
 config EFI_RTC
 	bool "EFI Real Time Clock Services"
 	depends on IA64
@@ -377,7 +405,6 @@ config XILINX_HWICAP
 
 config R3964
 	tristate "Siemens R3964 line discipline"
-	depends on TTY && BROKEN
 	---help---
 	  This driver allows synchronous communication with devices using the
 	  Siemens R3964 packet protocol. Unless you are dealing with special
@@ -404,8 +431,8 @@ config APPLICOM
 	  If unsure, say N.
 
 config SONYPI
-	tristate "Sony Vaio Programmable I/O Control Device support"
-	depends on X86_32 && PCI && INPUT
+	tristate "Sony Vaio Programmable I/O Control Device support (EXPERIMENTAL)"
+	depends on EXPERIMENTAL && X86 && PCI && INPUT && !64BIT
 	---help---
 	  This driver enables access to the Sony Programmable I/O Control
 	  Device which can be found in many (all ?) Sony Vaio laptops.
@@ -425,7 +452,7 @@ source "drivers/char/pcmcia/Kconfig"
 
 config MWAVE
 	tristate "ACP Modem (Mwave) support"
-	depends on X86 && TTY
+	depends on X86
 	select SERIAL_8250
 	---help---
 	  The ACP modem (Mwave) for Linux is a WinModem. It is composed of a
@@ -496,7 +523,6 @@ config RAW_DRIVER
 config MAX_RAW_DEVS
 	int "Maximum number of RAW devices to support (1-65536)"
 	depends on RAW_DRIVER
-	range 1 65536
 	default "256"
 	help
 	  The maximum number of RAW devices that are supported.
@@ -520,16 +546,10 @@ config HPET_MMAP
 	  If you say Y here, user applications will be able to mmap
 	  the HPET registers.
 
-config HPET_MMAP_DEFAULT
-	bool "Enable HPET MMAP access by default"
-	default y
-	depends on HPET_MMAP
-	help
 	  In some hardware implementations, the page containing HPET
 	  registers may also contain other things that shouldn't be
-	  exposed to the user.  This option selects the default (if
-	  kernel parameter hpet_mmap is not set) user access to the
-	  registers for applications that require it.
+	  exposed to the user.  If this applies to your hardware,
+	  say N here.
 
 config HANGCHECK_TIMER
 	tristate "Hangcheck timer"
@@ -559,7 +579,7 @@ source "drivers/char/tpm/Kconfig"
 
 config TELCLOCK
 	tristate "Telecom clock driver for ATCA SBC"
-	depends on X86
+	depends on EXPERIMENTAL && X86
 	default n
 	help
 	  The telecom clock device is specific to the MPCBL0010 and MPCBL0050
@@ -571,14 +591,32 @@ config TELCLOCK
 	  controlling the behavior of this hardware.
 
 config DEVPORT
-	bool "/dev/port character device"
+	bool
+	depends on !M68K
 	depends on ISA || PCI
 	default y
-	help
-	  Say Y here if you want to support the /dev/port device. The /dev/port
-	  device is similar to /dev/mem, but for I/O ports.
+
+config DCC_TTY
+	tristate "DCC tty driver"
+	depends on ARM
 
 source "drivers/s390/char/Kconfig"
+
+config RAMOOPS
+	tristate "Log panic/oops to a RAM buffer"
+	depends on HAS_IOMEM
+	default n
+	help
+	  This enables panic and oops messages to be logged to a circular
+	  buffer in RAM where it can be read back at some later point.
+
+config MSM_SMD_PKT
+	bool "Enable device interface for some SMD packet ports"
+	default n
+	depends on MSM_SMD
+	help
+	  Enables userspace clients to read and write to some packet SMD
+	  ports via device interface for MSM chipset.
 
 config TILE_SROM
 	bool "Character-device access via hypervisor to the Tilera SPI ROM"
@@ -591,14 +629,51 @@ config TILE_SROM
 	  device appear much like a simple EEPROM, and knows
 	  how to partition a single ROM for multiple purposes.
 
-source "drivers/char/xillybus/Kconfig"
-source "drivers/char/sunxi-scr/Kconfig"
-source "drivers/char/sunxi-sysinfo/Kconfig"
-source "drivers/char/dump_reg/Kconfig"
-source "drivers/char/timer_test/Kconfig"
-source "drivers/char/sunxi_tr/Kconfig"
-source "drivers/char/sunxi-di/Kconfig"
+config SUNXI_D7S
+	tristate "Sunxi display 7 segment for sun8iw7"
+	depends on ARCH_SUN8IW7
+	default n
+	---help---
+	  Sunxi display 7 segment for h3.
+
+config MATRIX_GPIO_INT
+	tristate "Matrix GPIO int sensor module"
+	default m
+	---help---
+	  Driver for Matrix GPIO int sensor module.
+
+config MATRIX_PWM
+	tristate "Matrix PWM module"
+	default m
+	---help---
+	  Driver for Matrix PWM module.
+
+config MATRIX_ROTARY_ENCODER
+	tristate "Matrix rotary encoder"
+	default m
+	---help---
+	  Driver for Matrix rotary encoder.
+
+config MATRIX_HCSR04
+	tristate "Matrix hcsr04"
+	default m
+	---help---
+	  Driver for Matrix hcsr04.
+	  
 source "drivers/char/sunxi_g2d/Kconfig"
-source "drivers/char/tda7729/Kconfig"
+source "drivers/char/sunxi_ir_cut/Kconfig"
+source "drivers/char/cma_test/Kconfig"
+source "drivers/char/arisc_test/Kconfig"
+source "drivers/char/sunxi_module/Kconfig"
+source "drivers/char/timer_test/Kconfig"
+#source "drivers/char/sunxi_pinctrl_test/Kconfig"
+source "drivers/char/dma_test/Kconfig"
+source "drivers/char/sunxi_tr/Kconfig"
+source "drivers/char/sunxi-scr/Kconfig"
+source "drivers/char/sunxi-di/Kconfig"
+source "drivers/char/sunxi_soc_info/Kconfig"
+source "drivers/char/sunxi_id/Kconfig"
+source "drivers/char/sunxi_key/Kconfig"
+
 endmenu
 

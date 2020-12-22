@@ -3,7 +3,7 @@
  *  JZ4740 IRQ definitions
  *
  *  This program is free software; you can redistribute it and/or modify it
- *  under  the terms of the GNU General	 Public License as published by the
+ *  under  the terms of the GNU General  Public License as published by the
  *  Free Software Foundation;  either version 2 of the License, or (at your
  *  option) any later version.
  *
@@ -18,12 +18,6 @@
 
 #define MIPS_CPU_IRQ_BASE 0
 #define JZ4740_IRQ_BASE 8
-
-#ifdef CONFIG_MACH_JZ4740
-# define NR_INTC_IRQS	32
-#else
-# define NR_INTC_IRQS	64
-#endif
 
 /* 1st-level interrupts */
 #define JZ4740_IRQ(x)		(JZ4740_IRQ_BASE + (x))
@@ -50,15 +44,13 @@
 #define JZ4740_IRQ_IPU		JZ4740_IRQ(29)
 #define JZ4740_IRQ_LCD		JZ4740_IRQ(30)
 
-#define JZ4780_IRQ_TCU2		JZ4740_IRQ(25)
-
 /* 2nd-level interrupts */
-#define JZ4740_IRQ_DMA(x)	(JZ4740_IRQ(NR_INTC_IRQS) + (x))
+#define JZ4740_IRQ_DMA(x)	(JZ4740_IRQ(32) + (x))
 
 #define JZ4740_IRQ_INTC_GPIO(x) (JZ4740_IRQ_GPIO0 - (x))
-#define JZ4740_IRQ_GPIO(x)	(JZ4740_IRQ(NR_INTC_IRQS + 16) + (x))
+#define JZ4740_IRQ_GPIO(x)	(JZ4740_IRQ(48) + (x))
 
-#define JZ4740_IRQ_ADC_BASE	JZ4740_IRQ(NR_INTC_IRQS + 144)
+#define JZ4740_IRQ_ADC_BASE	JZ4740_IRQ(176)
 
 #define NR_IRQS (JZ4740_IRQ_ADC_BASE + 6)
 

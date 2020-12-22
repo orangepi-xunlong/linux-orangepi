@@ -49,6 +49,7 @@
 #include <asm/machvec.h>
 #include <asm/mca.h>
 #include <asm/page.h>
+#include <asm/paravirt.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
@@ -74,6 +75,13 @@
 #endif
 
 /*
+ * Store all idle threads, this can be reused instead of creating
+ * a new thread. Also avoids complicated thread destroy functionality
+ * for idle threads.
+ */
+struct task_struct *idle_thread_array[NR_CPUS];
+
+/*
  * Global array allocated for NR_CPUS at boot time
  */
 struct sal_to_os_boot sal_boot_rendez_state[NR_CPUS];
@@ -86,7 +94,13 @@ struct sal_to_os_boot *sal_state_for_booting_cpu = &sal_boot_rendez_state[0];
 
 #define set_brendez_area(x) (sal_state_for_booting_cpu = &sal_boot_rendez_state[(x)]);
 
+#define get_idle_for_cpu(x)		(idle_thread_array[(x)])
+#define set_idle_for_cpu(x,p)	(idle_thread_array[(x)] = (p))
+
 #else
+
+#define get_idle_for_cpu(x)		(NULL)
+#define set_idle_for_cpu(x,p)
 #define set_brendez_area(x)
 #endif
 
@@ -126,7 +140,7 @@ int smp_num_siblings = 1;
 volatile int ia64_cpu_to_sapicid[NR_CPUS];
 EXPORT_SYMBOL(ia64_cpu_to_sapicid);
 
-static cpumask_t cpu_callin_map;
+static volatile cpumask_t cpu_callin_map;
 
 struct smp_boot_data smp_boot_data __initdata;
 
@@ -346,11 +360,12 @@ ia64_sync_itc (unsigned int master)
 /*
  * Ideally sets up per-cpu profiling hooks.  Doesn't do much now...
  */
-static inline void smp_setup_percpu_timer(void)
+static inline void __devinit
+smp_setup_percpu_timer (void)
 {
 }
 
-static void
+static void __cpuinit
 smp_callin (void)
 {
 	int cpuid, phys_id, itc_master;
@@ -380,6 +395,7 @@ smp_callin (void)
 	set_numa_node(cpu_to_node_map[cpuid]);
 	set_numa_mem(local_memory_node(cpu_to_node_map[cpuid]));
 
+	ipi_call_lock_irq();
 	spin_lock(&vector_lock);
 	/* Setup the per cpu irq handling data structures */
 	__setup_vector_irq(cpuid);
@@ -387,6 +403,7 @@ smp_callin (void)
 	set_cpu_online(cpuid, true);
 	per_cpu(cpu_state, cpuid) = CPU_ONLINE;
 	spin_unlock(&vector_lock);
+	ipi_call_unlock_irq();
 
 	smp_setup_percpu_timer();
 
@@ -433,7 +450,7 @@ smp_callin (void)
 	/*
 	 * Allow the master to continue.
 	 */
-	cpumask_set_cpu(cpuid, &cpu_callin_map);
+	cpu_set(cpuid, cpu_callin_map);
 	Dprintk("Stack on CPU %d at about %p\n",cpuid, &cpuid);
 }
 
@@ -441,7 +458,7 @@ smp_callin (void)
 /*
  * Activate a secondary processor.  head.S calls this.
  */
-int
+int __cpuinit
 start_secondary (void *unused)
 {
 	/* Early console may use I/O ports */
@@ -454,16 +471,63 @@ start_secondary (void *unused)
 	preempt_disable();
 	smp_callin();
 
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_idle();
 	return 0;
 }
 
-static int
-do_boot_cpu (int sapicid, int cpu, struct task_struct *idle)
+struct pt_regs * __cpuinit idle_regs(struct pt_regs *regs)
+{
+	return NULL;
+}
+
+struct create_idle {
+	struct work_struct work;
+	struct task_struct *idle;
+	struct completion done;
+	int cpu;
+};
+
+void __cpuinit
+do_fork_idle(struct work_struct *work)
+{
+	struct create_idle *c_idle =
+		container_of(work, struct create_idle, work);
+
+	c_idle->idle = fork_idle(c_idle->cpu);
+	complete(&c_idle->done);
+}
+
+static int __cpuinit
+do_boot_cpu (int sapicid, int cpu)
 {
 	int timeout;
+	struct create_idle c_idle = {
+		.work = __WORK_INITIALIZER(c_idle.work, do_fork_idle),
+		.cpu	= cpu,
+		.done	= COMPLETION_INITIALIZER(c_idle.done),
+	};
 
-	task_for_booting_cpu = idle;
+	/*
+	 * We can't use kernel_thread since we must avoid to
+	 * reschedule the child.
+	 */
+ 	c_idle.idle = get_idle_for_cpu(cpu);
+ 	if (c_idle.idle) {
+		init_idle(c_idle.idle, cpu);
+ 		goto do_rest;
+	}
+
+	schedule_work(&c_idle.work);
+	wait_for_completion(&c_idle.done);
+
+	if (IS_ERR(c_idle.idle))
+		panic("failed fork for CPU %d", cpu);
+
+	set_idle_for_cpu(cpu, c_idle.idle);
+
+do_rest:
+	task_for_booting_cpu = c_idle.idle;
+
 	Dprintk("Sending wakeup vector %lu to AP 0x%x/0x%x.\n", ap_wakeup_vector, cpu, sapicid);
 
 	set_brendez_area(cpu);
@@ -474,14 +538,13 @@ do_boot_cpu (int sapicid, int cpu, struct task_struct *idle)
 	 */
 	Dprintk("Waiting on callin_map ...");
 	for (timeout = 0; timeout < 100000; timeout++) {
-		if (cpumask_test_cpu(cpu, &cpu_callin_map))
+		if (cpu_isset(cpu, cpu_callin_map))
 			break;  /* It has booted */
-		barrier(); /* Make sure we re-read cpu_callin_map */
 		udelay(100);
 	}
 	Dprintk("\n");
 
-	if (!cpumask_test_cpu(cpu, &cpu_callin_map)) {
+	if (!cpu_isset(cpu, cpu_callin_map)) {
 		printk(KERN_ERR "Processor 0x%x/0x%x is stuck.\n", cpu, sapicid);
 		ia64_cpu_to_sapicid[cpu] = -1;
 		set_cpu_online(cpu, false);  /* was set in smp_callin() */
@@ -541,7 +604,7 @@ smp_prepare_cpus (unsigned int max_cpus)
 
 	smp_setup_percpu_timer();
 
-	cpumask_set_cpu(0, &cpu_callin_map);
+	cpu_set(0, cpu_callin_map);
 
 	local_cpu_data->loops_per_jiffy = loops_per_jiffy;
 	ia64_cpu_to_sapicid[0] = boot_cpu_id;
@@ -562,12 +625,13 @@ smp_prepare_cpus (unsigned int max_cpus)
 	}
 }
 
-void smp_prepare_boot_cpu(void)
+void __devinit smp_prepare_boot_cpu(void)
 {
 	set_cpu_online(smp_processor_id(), true);
-	cpumask_set_cpu(smp_processor_id(), &cpu_callin_map);
+	cpu_set(smp_processor_id(), cpu_callin_map);
 	set_numa_node(cpu_to_node_map[smp_processor_id()]);
 	per_cpu(cpu_state, smp_processor_id()) = CPU_ONLINE;
+	paravirt_post_smp_prepare_boot_cpu();
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -576,10 +640,10 @@ clear_cpu_sibling_map(int cpu)
 {
 	int i;
 
-	for_each_cpu(i, &per_cpu(cpu_sibling_map, cpu))
-		cpumask_clear_cpu(cpu, &per_cpu(cpu_sibling_map, i));
-	for_each_cpu(i, &cpu_core_map[cpu])
-		cpumask_clear_cpu(cpu, &cpu_core_map[i]);
+	for_each_cpu_mask(i, per_cpu(cpu_sibling_map, cpu))
+		cpu_clear(cpu, per_cpu(cpu_sibling_map, i));
+	for_each_cpu_mask(i, cpu_core_map[cpu])
+		cpu_clear(cpu, cpu_core_map[i]);
 
 	per_cpu(cpu_sibling_map, cpu) = cpu_core_map[cpu] = CPU_MASK_NONE;
 }
@@ -591,12 +655,12 @@ remove_siblinginfo(int cpu)
 
 	if (cpu_data(cpu)->threads_per_core == 1 &&
 	    cpu_data(cpu)->cores_per_socket == 1) {
-		cpumask_clear_cpu(cpu, &cpu_core_map[cpu]);
-		cpumask_clear_cpu(cpu, &per_cpu(cpu_sibling_map, cpu));
+		cpu_clear(cpu, cpu_core_map[cpu]);
+		cpu_clear(cpu, per_cpu(cpu_sibling_map, cpu));
 		return;
 	}
 
-	last = (cpumask_weight(&cpu_core_map[cpu]) == 1 ? 1 : 0);
+	last = (cpus_weight(cpu_core_map[cpu]) == 1 ? 1 : 0);
 
 	/* remove it from all sibling map's */
 	clear_cpu_sibling_map(cpu);
@@ -672,7 +736,7 @@ int __cpu_disable(void)
 	remove_siblinginfo(cpu);
 	fixup_irqs();
 	local_flush_tlb_all();
-	cpumask_clear_cpu(cpu, &cpu_callin_map);
+	cpu_clear(cpu, cpu_callin_map);
 	return 0;
 }
 
@@ -711,26 +775,25 @@ smp_cpus_done (unsigned int dummy)
 	       (int)num_online_cpus(), bogosum/(500000/HZ), (bogosum/(5000/HZ))%100);
 }
 
-static inline void set_cpu_sibling_map(int cpu)
+static inline void __devinit
+set_cpu_sibling_map(int cpu)
 {
 	int i;
 
 	for_each_online_cpu(i) {
 		if ((cpu_data(cpu)->socket_id == cpu_data(i)->socket_id)) {
-			cpumask_set_cpu(i, &cpu_core_map[cpu]);
-			cpumask_set_cpu(cpu, &cpu_core_map[i]);
+			cpu_set(i, cpu_core_map[cpu]);
+			cpu_set(cpu, cpu_core_map[i]);
 			if (cpu_data(cpu)->core_id == cpu_data(i)->core_id) {
-				cpumask_set_cpu(i,
-						&per_cpu(cpu_sibling_map, cpu));
-				cpumask_set_cpu(cpu,
-						&per_cpu(cpu_sibling_map, i));
+				cpu_set(i, per_cpu(cpu_sibling_map, cpu));
+				cpu_set(cpu, per_cpu(cpu_sibling_map, i));
 			}
 		}
 	}
 }
 
-int
-__cpu_up(unsigned int cpu, struct task_struct *tidle)
+int __cpuinit
+__cpu_up (unsigned int cpu)
 {
 	int ret;
 	int sapicid;
@@ -743,19 +806,19 @@ __cpu_up(unsigned int cpu, struct task_struct *tidle)
 	 * Already booted cpu? not valid anymore since we dont
 	 * do idle loop tightspin anymore.
 	 */
-	if (cpumask_test_cpu(cpu, &cpu_callin_map))
+	if (cpu_isset(cpu, cpu_callin_map))
 		return -EINVAL;
 
 	per_cpu(cpu_state, cpu) = CPU_UP_PREPARE;
 	/* Processor goes to start_secondary(), sets online flag */
-	ret = do_boot_cpu(sapicid, cpu, tidle);
+	ret = do_boot_cpu(sapicid, cpu);
 	if (ret < 0)
 		return ret;
 
 	if (cpu_data(cpu)->threads_per_core == 1 &&
 	    cpu_data(cpu)->cores_per_socket == 1) {
-		cpumask_set_cpu(cpu, &per_cpu(cpu_sibling_map, cpu));
-		cpumask_set_cpu(cpu, &cpu_core_map[cpu]);
+		cpu_set(cpu, per_cpu(cpu_sibling_map, cpu));
+		cpu_set(cpu, cpu_core_map[cpu]);
 		return 0;
 	}
 
@@ -792,7 +855,8 @@ init_smp_config(void)
  * identify_siblings(cpu) gets called from identify_cpu. This populates the 
  * information related to logical execution units in per_cpu_data structure.
  */
-void identify_siblings(struct cpuinfo_ia64 *c)
+void __devinit
+identify_siblings(struct cpuinfo_ia64 *c)
 {
 	long status;
 	u16 pltid;

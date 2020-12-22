@@ -26,19 +26,6 @@
 #include "../w1_int.h"
 
 /**
- * Allow the active pullup to be disabled, default is enabled.
- *
- * Note from the DS2482 datasheet:
- * The APU bit controls whether an active pullup (controlled slew-rate
- * transistor) or a passive pullup (Rwpu resistor) will be used to drive
- * a 1-Wire line from low to high. When APU = 0, active pullup is disabled
- * (resistor mode). Active Pullup should always be selected unless there is
- * only a single slave on the 1-Wire line.
- */
-static int ds2482_active_pullup = 1;
-module_param_named(active_pullup, ds2482_active_pullup, int, 0644);
-
-/**
  * The DS2482 registers - there are 3 registers that are addressed by a read
  * pointer. The read pointer is set by the last command executed.
  *
@@ -66,10 +53,10 @@ module_param_named(active_pullup, ds2482_active_pullup, int, 0644);
  * The top 4 bits always read 0.
  * To write, the top nibble must be the 1's compl. of the low nibble.
  */
-#define DS2482_REG_CFG_1WS		0x08	/* 1-wire speed */
-#define DS2482_REG_CFG_SPU		0x04	/* strong pull-up */
-#define DS2482_REG_CFG_PPM		0x02	/* presence pulse masking */
-#define DS2482_REG_CFG_APU		0x01	/* active pull-up */
+#define DS2482_REG_CFG_1WS		0x08
+#define DS2482_REG_CFG_SPU		0x04
+#define DS2482_REG_CFG_PPM		0x02
+#define DS2482_REG_CFG_APU		0x01
 
 
 /**
@@ -109,7 +96,6 @@ static const struct i2c_device_id ds2482_id[] = {
 	{ "ds2482", 0 },
 	{ }
 };
-MODULE_DEVICE_TABLE(i2c, ds2482_id);
 
 static const struct dev_pm_ops ds2482_pm_ops = {
 	.suspend = ds2482_suspend,
@@ -118,6 +104,7 @@ static const struct dev_pm_ops ds2482_pm_ops = {
 
 static struct i2c_driver ds2482_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "ds2482",
 		.pm = &ds2482_pm_ops,
 	},
@@ -152,20 +139,6 @@ struct ds2482_data {
 	u8			read_prt;	/* see DS2482_PTR_CODE_xxx */
 	u8			reg_config;
 };
-
-
-/**
- * Helper to calculate values for configuration register
- * @param conf the raw config value
- * @return the value w/ complements that can be written to register
- */
-static inline u8 ds2482_calculate_config(u8 conf)
-{
-	if (ds2482_active_pullup)
-		conf |= DS2482_REG_CFG_APU;
-
-	return conf | ((~conf & 0x0f) << 4);
-}
 
 
 /**
@@ -252,7 +225,7 @@ static int ds2482_wait_1wire_idle(struct ds2482_data *pdev)
 	}
 
 	if (retries >= DS2482_WAIT_IDLE_TIMEOUT)
-		pr_err("%s: timeout on channel %d\n",
+		printk(KERN_ERR "%s: timeout on channel %d\n",
 		       __func__, pdev->channel);
 
 	return temp;
@@ -436,36 +409,10 @@ static u8 ds2482_w1_reset_bus(void *data)
 		/* If the chip did reset since detect, re-config it */
 		if (err & DS2482_REG_STS_RST)
 			ds2482_send_cmd_data(pdev, DS2482_CMD_WRITE_CONFIG,
-					     ds2482_calculate_config(0x00));
+					     0xF0);
 	}
 
 	mutex_unlock(&pdev->access_lock);
-
-	return retval;
-}
-
-static u8 ds2482_w1_set_pullup(void *data, int delay)
-{
-	struct ds2482_w1_chan *pchan = data;
-	struct ds2482_data    *pdev = pchan->pdev;
-	u8 retval = 1;
-
-	/* if delay is non-zero activate the pullup,
-	 * the strong pullup will be automatically deactivated
-	 * by the master, so do not explicitly deactive it
-	 */
-	if (delay) {
-		/* both waits are crucial, otherwise devices might not be
-		 * powered long enough, causing e.g. a w1_therm sensor to
-		 * provide wrong conversion results
-		 */
-		ds2482_wait_1wire_idle(pdev);
-		/* note: it seems like both SPU and APU have to be set! */
-		retval = ds2482_send_cmd_data(pdev, DS2482_CMD_WRITE_CONFIG,
-			ds2482_calculate_config(DS2482_REG_CFG_SPU |
-						DS2482_REG_CFG_APU));
-		ds2482_wait_1wire_idle(pdev);
-	}
 
 	return retval;
 }
@@ -535,8 +482,7 @@ static int ds2482_probe(struct i2c_client *client,
 		data->w1_count = 8;
 
 	/* Set all config items to 0 (off) */
-	ds2482_send_cmd_data(data, DS2482_CMD_WRITE_CONFIG,
-		ds2482_calculate_config(0x00));
+	ds2482_send_cmd_data(data, DS2482_CMD_WRITE_CONFIG, 0xF0);
 
 	mutex_init(&data->access_lock);
 
@@ -552,7 +498,6 @@ static int ds2482_probe(struct i2c_client *client,
 		data->w1_ch[idx].w1_bm.touch_bit  = ds2482_w1_touch_bit;
 		data->w1_ch[idx].w1_bm.triplet    = ds2482_w1_triplet;
 		data->w1_ch[idx].w1_bm.reset_bus  = ds2482_w1_reset_bus;
-		data->w1_ch[idx].w1_bm.set_pullup = ds2482_w1_set_pullup;
 
 		err = w1_add_master_device(&data->w1_ch[idx].w1_bm);
 		if (err) {
@@ -605,10 +550,19 @@ static int ds2482_remove(struct i2c_client *client)
 	return 0;
 }
 
-module_i2c_driver(ds2482_driver);
+static int __init sensors_ds2482_init(void)
+{
+	return i2c_add_driver(&ds2482_driver);
+}
 
-MODULE_PARM_DESC(active_pullup, "Active pullup (apply to all buses): " \
-				"0-disable, 1-enable (default)");
+static void __exit sensors_ds2482_exit(void)
+{
+	i2c_del_driver(&ds2482_driver);
+}
+
 MODULE_AUTHOR("Ben Gardner <bgardner@wabtec.com>");
 MODULE_DESCRIPTION("DS2482 driver");
 MODULE_LICENSE("GPL");
+
+module_init(sensors_ds2482_init);
+module_exit(sensors_ds2482_exit);

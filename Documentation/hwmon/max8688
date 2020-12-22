@@ -7,13 +7,13 @@ Supported chips:
     Addresses scanned: -
     Datasheet: http://datasheets.maxim-ic.com/en/ds/MAX8688.pdf
 
-Author: Guenter Roeck <linux@roeck-us.net>
+Author: Guenter Roeck <guenter.roeck@ericsson.com>
 
 
 Description
 -----------
 
-This driver supports hardware monitoring for Maxim MAX8688 Digital Power-Supply
+This driver supports hardware montoring for Maxim MAX8688 Digital Power-Supply
 Controller/Monitor with PMBus Interface.
 
 The driver is a client driver to the core PMBus driver. Please see

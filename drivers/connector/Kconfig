@@ -12,7 +12,7 @@ menuconfig CONNECTOR
 if CONNECTOR
 
 config PROC_EVENTS
-	bool "Report process events to userspace"
+	boolean "Report process events to userspace"
 	depends on CONNECTOR=y
 	default y
 	---help---

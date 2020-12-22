@@ -12,6 +12,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
  *
  * File: int.h
  *
@@ -26,32 +30,43 @@
 #ifndef __INT_H__
 #define __INT_H__
 
+#include "ttype.h"
 #include "device.h"
 
-struct vnt_interrupt_data {
-	u8 tsr0;
-	u8 pkt0;
-	u16 time0;
-	u8 tsr1;
-	u8 pkt1;
-	u16 time1;
-	u8 tsr2;
-	u8 pkt2;
-	u16 time2;
-	u8 tsr3;
-	u8 pkt3;
-	u16 time3;
-	__le64 tsf;
-	u8 isr0;
-	u8 isr1;
-	u8 rts_success;
-	u8 rts_fail;
-	u8 ack_fail;
-	u8 fcs_err;
-	u8 sw[2];
-} __packed;
+/*---------------------  Export Definitions -------------------------*/
+typedef struct tagSINTData {
+    BYTE    byTSR0;
+    BYTE    byPkt0;
+    WORD    wTime0;
+    BYTE    byTSR1;
+    BYTE    byPkt1;
+    WORD    wTime1;
+    BYTE    byTSR2;
+    BYTE    byPkt2;
+    WORD    wTime2;
+    BYTE    byTSR3;
+    BYTE    byPkt3;
+    WORD    wTime3;
+    DWORD   dwLoTSF;
+    DWORD   dwHiTSF;
+    BYTE    byISR0;
+    BYTE    byISR1;
+    BYTE    byRTSSuccess;
+    BYTE    byRTSFail;
+    BYTE    byACKFail;
+    BYTE    byFCSErr;
+    BYTE    abySW[2];
+} __attribute__ ((__packed__))
+SINTData, *PSINTData;
 
-void vnt_int_start_interrupt(struct vnt_private *);
-void vnt_int_process_data(struct vnt_private *);
+
+/*---------------------  Export Classes  ----------------------------*/
+
+/*---------------------  Export Variables  --------------------------*/
+
+/*---------------------  Export Functions  --------------------------*/
+
+void INTvWorkItem(void *Context);
+void INTnsProcessData(PSDevice pDevice);
 
 #endif /* __INT_H__ */

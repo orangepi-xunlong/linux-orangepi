@@ -20,13 +20,12 @@
 #include <linux/backlight.h>
 #include <drm/drmP.h>
 #include <drm/drm.h>
-#include <drm/gma_drm.h>
+#include "gma_drm.h"
 #include "psb_drv.h"
 #include "psb_reg.h"
 #include "psb_intel_reg.h"
 #include "intel_bios.h"
-#include "psb_device.h"
-#include "gma_device.h"
+
 
 static int psb_output_init(struct drm_device *dev)
 {
@@ -145,10 +144,6 @@ static int psb_backlight_init(struct drm_device *dev)
 	psb_backlight_device->props.max_brightness = 100;
 	backlight_update_status(psb_backlight_device);
 	dev_priv->backlight_device = psb_backlight_device;
-
-	/* This must occur after the backlight is properly initialised */
-	psb_lid_timer_init(dev_priv);
-
 	return 0;
 }
 
@@ -181,7 +176,7 @@ static int psb_save_display_registers(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
 	struct drm_crtc *crtc;
-	struct gma_connector *connector;
+	struct drm_connector *connector;
 	struct psb_state *regs = &dev_priv->regs.psb;
 
 	/* Display arbitration control + watermarks */
@@ -195,17 +190,17 @@ static int psb_save_display_registers(struct drm_device *dev)
 	regs->saveCHICKENBIT = PSB_RVDC32(DSPCHICKENBIT);
 
 	/* Save crtc and output state */
-	drm_modeset_lock_all(dev);
+	mutex_lock(&dev->mode_config.mutex);
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head) {
 		if (drm_helper_crtc_in_use(crtc))
-			dev_priv->ops->save_crtc(crtc);
+			crtc->funcs->save(crtc);
 	}
 
-	list_for_each_entry(connector, &dev->mode_config.connector_list, base.head)
-		if (connector->save)
-			connector->save(&connector->base);
+	list_for_each_entry(connector, &dev->mode_config.connector_list, head)
+		if (connector->funcs->save)
+			connector->funcs->save(connector);
 
-	drm_modeset_unlock_all(dev);
+	mutex_unlock(&dev->mode_config.mutex);
 	return 0;
 }
 
@@ -219,7 +214,7 @@ static int psb_restore_display_registers(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
 	struct drm_crtc *crtc;
-	struct gma_connector *connector;
+	struct drm_connector *connector;
 	struct psb_state *regs = &dev_priv->regs.psb;
 
 	/* Display arbitration + watermarks */
@@ -235,16 +230,16 @@ static int psb_restore_display_registers(struct drm_device *dev)
 	/*make sure VGA plane is off. it initializes to on after reset!*/
 	PSB_WVDC32(0x80000000, VGACNTRL);
 
-	drm_modeset_lock_all(dev);
+	mutex_lock(&dev->mode_config.mutex);
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head)
 		if (drm_helper_crtc_in_use(crtc))
-			dev_priv->ops->restore_crtc(crtc);
+			crtc->funcs->restore(crtc);
 
-	list_for_each_entry(connector, &dev->mode_config.connector_list, base.head)
-		if (connector->restore)
-			connector->restore(&connector->base);
+	list_for_each_entry(connector, &dev->mode_config.connector_list, head)
+		if (connector->funcs->restore)
+			connector->funcs->restore(connector);
 
-	drm_modeset_unlock_all(dev);
+	mutex_unlock(&dev->mode_config.mutex);
 	return 0;
 }
 
@@ -258,73 +253,55 @@ static int psb_power_up(struct drm_device *dev)
 	return 0;
 }
 
-/* Poulsbo */
-static const struct psb_offset psb_regmap[2] = {
-	{
-		.fp0 = FPA0,
-		.fp1 = FPA1,
-		.cntr = DSPACNTR,
-		.conf = PIPEACONF,
-		.src = PIPEASRC,
-		.dpll = DPLL_A,
-		.htotal = HTOTAL_A,
-		.hblank = HBLANK_A,
-		.hsync = HSYNC_A,
-		.vtotal = VTOTAL_A,
-		.vblank = VBLANK_A,
-		.vsync = VSYNC_A,
-		.stride = DSPASTRIDE,
-		.size = DSPASIZE,
-		.pos = DSPAPOS,
-		.base = DSPABASE,
-		.surf = DSPASURF,
-		.addr = DSPABASE,
-		.status = PIPEASTAT,
-		.linoff = DSPALINOFF,
-		.tileoff = DSPATILEOFF,
-		.palette = PALETTE_A,
-	},
-	{
-		.fp0 = FPB0,
-		.fp1 = FPB1,
-		.cntr = DSPBCNTR,
-		.conf = PIPEBCONF,
-		.src = PIPEBSRC,
-		.dpll = DPLL_B,
-		.htotal = HTOTAL_B,
-		.hblank = HBLANK_B,
-		.hsync = HSYNC_B,
-		.vtotal = VTOTAL_B,
-		.vblank = VBLANK_B,
-		.vsync = VSYNC_B,
-		.stride = DSPBSTRIDE,
-		.size = DSPBSIZE,
-		.pos = DSPBPOS,
-		.base = DSPBBASE,
-		.surf = DSPBSURF,
-		.addr = DSPBBASE,
-		.status = PIPEBSTAT,
-		.linoff = DSPBLINOFF,
-		.tileoff = DSPBTILEOFF,
-		.palette = PALETTE_B,
+static void psb_get_core_freq(struct drm_device *dev)
+{
+	uint32_t clock;
+	struct pci_dev *pci_root = pci_get_bus_and_slot(0, 0);
+	struct drm_psb_private *dev_priv = dev->dev_private;
+
+	/*pci_write_config_dword(pci_root, 0xD4, 0x00C32004);*/
+	/*pci_write_config_dword(pci_root, 0xD0, 0xE0033000);*/
+
+	pci_write_config_dword(pci_root, 0xD0, 0xD0050300);
+	pci_read_config_dword(pci_root, 0xD4, &clock);
+	pci_dev_put(pci_root);
+
+	switch (clock & 0x07) {
+	case 0:
+		dev_priv->core_freq = 100;
+		break;
+	case 1:
+		dev_priv->core_freq = 133;
+		break;
+	case 2:
+		dev_priv->core_freq = 150;
+		break;
+	case 3:
+		dev_priv->core_freq = 178;
+		break;
+	case 4:
+		dev_priv->core_freq = 200;
+		break;
+	case 5:
+	case 6:
+	case 7:
+		dev_priv->core_freq = 266;
+	default:
+		dev_priv->core_freq = 0;
 	}
-};
+}
 
 static int psb_chip_setup(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
-	dev_priv->regmap = psb_regmap;
-	gma_get_core_freq(dev);
+	psb_get_core_freq(dev);
 	gma_intel_setup_gmbus(dev);
-	psb_intel_opregion_init(dev);
+	gma_intel_opregion_init(dev);
 	psb_intel_init_bios(dev);
 	return 0;
 }
 
 static void psb_chip_teardown(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
-	psb_lid_timer_takedown(dev_priv);
 	gma_intel_teardown_gmbus(dev);
 }
 
@@ -333,17 +310,12 @@ const struct psb_ops psb_chip_ops = {
 	.accel_2d = 1,
 	.pipes = 2,
 	.crtcs = 2,
-	.hdmi_mask = (1 << 0),
-	.lvds_mask = (1 << 1),
-	.sdvo_mask = (1 << 0),
-	.cursor_needs_phys = 1,
 	.sgx_offset = PSB_SGX_OFFSET,
 	.chip_setup = psb_chip_setup,
 	.chip_teardown = psb_chip_teardown,
 
 	.crtc_helper = &psb_intel_helper_funcs,
 	.crtc_funcs = &psb_intel_crtc_funcs,
-	.clock_funcs = &psb_clock_funcs,
 
 	.output_init = psb_output_init,
 
@@ -354,8 +326,6 @@ const struct psb_ops psb_chip_ops = {
 	.init_pm = psb_init_pm,
 	.save_regs = psb_save_display_registers,
 	.restore_regs = psb_restore_display_registers,
-	.save_crtc = gma_crtc_save,
-	.restore_crtc = gma_crtc_restore,
 	.power_down = psb_power_down,
 	.power_up = psb_power_up,
 };

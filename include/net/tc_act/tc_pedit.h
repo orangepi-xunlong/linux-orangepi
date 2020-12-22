@@ -4,11 +4,12 @@
 #include <net/act_api.h>
 
 struct tcf_pedit {
-	struct tc_action	common;
+	struct tcf_common	common;
 	unsigned char		tcfp_nkeys;
 	unsigned char		tcfp_flags;
 	struct tc_pedit_key	*tcfp_keys;
 };
-#define to_pedit(a) ((struct tcf_pedit *)a)
+#define to_pedit(pc) \
+	container_of(pc, struct tcf_pedit, common)
 
 #endif /* __NET_TC_PED_H */

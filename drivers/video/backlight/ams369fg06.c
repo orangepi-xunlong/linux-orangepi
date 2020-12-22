@@ -10,16 +10,25 @@
  * under the terms of the GNU General Public License as published by the
  * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
-#include <linux/backlight.h>
-#include <linux/delay.h>
-#include <linux/fb.h>
-#include <linux/gpio.h>
-#include <linux/lcd.h>
-#include <linux/module.h>
-#include <linux/spi/spi.h>
 #include <linux/wait.h>
+#include <linux/module.h>
+#include <linux/fb.h>
+#include <linux/delay.h>
+#include <linux/gpio.h>
+#include <linux/spi/spi.h>
+#include <linux/lcd.h>
+#include <linux/backlight.h>
 
 #define SLEEPMSEC		0x1000
 #define ENDDEF			0x2000
@@ -201,9 +210,8 @@ static int ams369fg06_panel_send_sequence(struct ams369fg06 *lcd,
 			ret = ams369fg06_spi_write(lcd, wbuf[i], wbuf[i+1]);
 			if (ret)
 				break;
-		} else {
-			msleep(wbuf[i+1]);
-		}
+		} else
+			mdelay(wbuf[i+1]);
 		i += 2;
 	}
 
@@ -305,30 +313,42 @@ static int ams369fg06_ldi_disable(struct ams369fg06 *lcd)
 
 static int ams369fg06_power_is_on(int power)
 {
-	return power <= FB_BLANK_NORMAL;
+	return ((power) <= FB_BLANK_NORMAL);
 }
 
 static int ams369fg06_power_on(struct ams369fg06 *lcd)
 {
 	int ret = 0;
-	struct lcd_platform_data *pd;
-	struct backlight_device *bd;
+	struct lcd_platform_data *pd = NULL;
+	struct backlight_device *bd = NULL;
 
 	pd = lcd->lcd_pd;
-	bd = lcd->bd;
+	if (!pd) {
+		dev_err(lcd->dev, "platform data is NULL.\n");
+		return -EFAULT;
+	}
 
-	if (pd->power_on) {
+	bd = lcd->bd;
+	if (!bd) {
+		dev_err(lcd->dev, "backlight device is NULL.\n");
+		return -EFAULT;
+	}
+
+	if (!pd->power_on) {
+		dev_err(lcd->dev, "power_on is NULL.\n");
+		return -EFAULT;
+	} else {
 		pd->power_on(lcd->ld, 1);
-		msleep(pd->power_on_delay);
+		mdelay(pd->power_on_delay);
 	}
 
 	if (!pd->reset) {
 		dev_err(lcd->dev, "reset is NULL.\n");
-		return -EINVAL;
+		return -EFAULT;
+	} else {
+		pd->reset(lcd->ld);
+		mdelay(pd->reset_delay);
 	}
-
-	pd->reset(lcd->ld);
-	msleep(pd->reset_delay);
 
 	ret = ams369fg06_ldi_init(lcd);
 	if (ret) {
@@ -354,10 +374,14 @@ static int ams369fg06_power_on(struct ams369fg06 *lcd)
 
 static int ams369fg06_power_off(struct ams369fg06 *lcd)
 {
-	int ret;
-	struct lcd_platform_data *pd;
+	int ret = 0;
+	struct lcd_platform_data *pd = NULL;
 
 	pd = lcd->lcd_pd;
+	if (!pd) {
+		dev_err(lcd->dev, "platform data is NULL\n");
+		return -EFAULT;
+	}
 
 	ret = ams369fg06_ldi_disable(lcd);
 	if (ret) {
@@ -365,9 +389,12 @@ static int ams369fg06_power_off(struct ams369fg06 *lcd)
 		return -EIO;
 	}
 
-	msleep(pd->power_off_delay);
+	mdelay(pd->power_off_delay);
 
-	if (pd->power_on)
+	if (!pd->power_on) {
+		dev_err(lcd->dev, "power_on is NULL.\n");
+		return -EFAULT;
+	} else
 		pd->power_on(lcd->ld, 0);
 
 	return 0;
@@ -410,11 +437,16 @@ static int ams369fg06_set_power(struct lcd_device *ld, int power)
 	return ams369fg06_power(lcd, power);
 }
 
+static int ams369fg06_get_brightness(struct backlight_device *bd)
+{
+	return bd->props.brightness;
+}
+
 static int ams369fg06_set_brightness(struct backlight_device *bd)
 {
 	int ret = 0;
 	int brightness = bd->props.brightness;
-	struct ams369fg06 *lcd = bl_get_data(bd);
+	struct ams369fg06 *lcd = dev_get_drvdata(&bd->dev);
 
 	if (brightness < MIN_BRIGHTNESS ||
 		brightness > bd->props.max_brightness) {
@@ -438,10 +470,11 @@ static struct lcd_ops ams369fg06_lcd_ops = {
 };
 
 static const struct backlight_ops ams369fg06_backlight_ops = {
+	.get_brightness = ams369fg06_get_brightness,
 	.update_status = ams369fg06_set_brightness,
 };
 
-static int ams369fg06_probe(struct spi_device *spi)
+static int __devinit ams369fg06_probe(struct spi_device *spi)
 {
 	int ret = 0;
 	struct ams369fg06 *lcd = NULL;
@@ -449,7 +482,7 @@ static int ams369fg06_probe(struct spi_device *spi)
 	struct backlight_device *bd = NULL;
 	struct backlight_properties props;
 
-	lcd = devm_kzalloc(&spi->dev, sizeof(struct ams369fg06), GFP_KERNEL);
+	lcd = kzalloc(sizeof(struct ams369fg06), GFP_KERNEL);
 	if (!lcd)
 		return -ENOMEM;
 
@@ -459,22 +492,24 @@ static int ams369fg06_probe(struct spi_device *spi)
 	ret = spi_setup(spi);
 	if (ret < 0) {
 		dev_err(&spi->dev, "spi setup failed.\n");
-		return ret;
+		goto out_free_lcd;
 	}
 
 	lcd->spi = spi;
 	lcd->dev = &spi->dev;
 
-	lcd->lcd_pd = dev_get_platdata(&spi->dev);
+	lcd->lcd_pd = spi->dev.platform_data;
 	if (!lcd->lcd_pd) {
 		dev_err(&spi->dev, "platform data is NULL\n");
-		return -EINVAL;
+		goto out_free_lcd;
 	}
 
-	ld = devm_lcd_device_register(&spi->dev, "ams369fg06", &spi->dev, lcd,
-					&ams369fg06_lcd_ops);
-	if (IS_ERR(ld))
-		return PTR_ERR(ld);
+	ld = lcd_device_register("ams369fg06", &spi->dev, lcd,
+		&ams369fg06_lcd_ops);
+	if (IS_ERR(ld)) {
+		ret = PTR_ERR(ld);
+		goto out_free_lcd;
+	}
 
 	lcd->ld = ld;
 
@@ -482,11 +517,12 @@ static int ams369fg06_probe(struct spi_device *spi)
 	props.type = BACKLIGHT_RAW;
 	props.max_brightness = MAX_BRIGHTNESS;
 
-	bd = devm_backlight_device_register(&spi->dev, "ams369fg06-bl",
-					&spi->dev, lcd,
-					&ams369fg06_backlight_ops, &props);
-	if (IS_ERR(bd))
-		return PTR_ERR(bd);
+	bd = backlight_device_register("ams369fg06-bl", &spi->dev, lcd,
+		&ams369fg06_backlight_ops, &props);
+	if (IS_ERR(bd)) {
+		ret =  PTR_ERR(bd);
+		goto out_lcd_unregister;
+	}
 
 	bd->props.brightness = DEFAULT_BRIGHTNESS;
 	lcd->bd = bd;
@@ -500,55 +536,82 @@ static int ams369fg06_probe(struct spi_device *spi)
 		lcd->power = FB_BLANK_POWERDOWN;
 
 		ams369fg06_power(lcd, FB_BLANK_UNBLANK);
-	} else {
+	} else
 		lcd->power = FB_BLANK_UNBLANK;
-	}
 
-	spi_set_drvdata(spi, lcd);
+	dev_set_drvdata(&spi->dev, lcd);
 
 	dev_info(&spi->dev, "ams369fg06 panel driver has been probed.\n");
 
 	return 0;
+
+out_lcd_unregister:
+	lcd_device_unregister(ld);
+out_free_lcd:
+	kfree(lcd);
+	return ret;
 }
 
-static int ams369fg06_remove(struct spi_device *spi)
+static int __devexit ams369fg06_remove(struct spi_device *spi)
 {
-	struct ams369fg06 *lcd = spi_get_drvdata(spi);
+	struct ams369fg06 *lcd = dev_get_drvdata(&spi->dev);
 
 	ams369fg06_power(lcd, FB_BLANK_POWERDOWN);
+	backlight_device_unregister(lcd->bd);
+	lcd_device_unregister(lcd->ld);
+	kfree(lcd);
+
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int ams369fg06_suspend(struct device *dev)
-{
-	struct ams369fg06 *lcd = dev_get_drvdata(dev);
+#if defined(CONFIG_PM)
+static unsigned int before_power;
 
-	dev_dbg(dev, "lcd->power = %d\n", lcd->power);
+static int ams369fg06_suspend(struct spi_device *spi, pm_message_t mesg)
+{
+	int ret = 0;
+	struct ams369fg06 *lcd = dev_get_drvdata(&spi->dev);
+
+	dev_dbg(&spi->dev, "lcd->power = %d\n", lcd->power);
+
+	before_power = lcd->power;
 
 	/*
 	 * when lcd panel is suspend, lcd panel becomes off
 	 * regardless of status.
 	 */
-	return ams369fg06_power(lcd, FB_BLANK_POWERDOWN);
+	ret = ams369fg06_power(lcd, FB_BLANK_POWERDOWN);
+
+	return ret;
 }
 
-static int ams369fg06_resume(struct device *dev)
+static int ams369fg06_resume(struct spi_device *spi)
 {
-	struct ams369fg06 *lcd = dev_get_drvdata(dev);
+	int ret = 0;
+	struct ams369fg06 *lcd = dev_get_drvdata(&spi->dev);
 
-	lcd->power = FB_BLANK_POWERDOWN;
+	/*
+	 * after suspended, if lcd panel status is FB_BLANK_UNBLANK
+	 * (at that time, before_power is FB_BLANK_UNBLANK) then
+	 * it changes that status to FB_BLANK_POWERDOWN to get lcd on.
+	 */
+	if (before_power == FB_BLANK_UNBLANK)
+		lcd->power = FB_BLANK_POWERDOWN;
 
-	return ams369fg06_power(lcd, FB_BLANK_UNBLANK);
+	dev_dbg(&spi->dev, "before_power = %d\n", before_power);
+
+	ret = ams369fg06_power(lcd, before_power);
+
+	return ret;
 }
+#else
+#define ams369fg06_suspend	NULL
+#define ams369fg06_resume	NULL
 #endif
-
-static SIMPLE_DEV_PM_OPS(ams369fg06_pm_ops, ams369fg06_suspend,
-			ams369fg06_resume);
 
 static void ams369fg06_shutdown(struct spi_device *spi)
 {
-	struct ams369fg06 *lcd = spi_get_drvdata(spi);
+	struct ams369fg06 *lcd = dev_get_drvdata(&spi->dev);
 
 	ams369fg06_power(lcd, FB_BLANK_POWERDOWN);
 }
@@ -556,11 +619,14 @@ static void ams369fg06_shutdown(struct spi_device *spi)
 static struct spi_driver ams369fg06_driver = {
 	.driver = {
 		.name	= "ams369fg06",
-		.pm	= &ams369fg06_pm_ops,
+		.bus	= &spi_bus_type,
+		.owner	= THIS_MODULE,
 	},
 	.probe		= ams369fg06_probe,
-	.remove		= ams369fg06_remove,
+	.remove		= __devexit_p(ams369fg06_remove),
 	.shutdown	= ams369fg06_shutdown,
+	.suspend	= ams369fg06_suspend,
+	.resume		= ams369fg06_resume,
 };
 
 module_spi_driver(ams369fg06_driver);

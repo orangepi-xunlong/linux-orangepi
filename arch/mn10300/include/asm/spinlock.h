@@ -12,8 +12,6 @@
 #define _ASM_SPINLOCK_H
 
 #include <linux/atomic.h>
-#include <asm/barrier.h>
-#include <asm/processor.h>
 #include <asm/rwlock.h>
 #include <asm/page.h>
 
@@ -25,11 +23,7 @@
  */
 
 #define arch_spin_is_locked(x)	(*(volatile signed char *)(&(x)->slock) != 0)
-
-static inline void arch_spin_unlock_wait(arch_spinlock_t *lock)
-{
-	smp_cond_load_acquire(&lock->slock, !VAL);
-}
+#define arch_spin_unlock_wait(x) do { barrier(); } while (arch_spin_is_locked(x))
 
 static inline void arch_spin_unlock(arch_spinlock_t *lock)
 {

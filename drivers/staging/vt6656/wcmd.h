@@ -12,6 +12,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  *
  * File: wcmd.h
  *
@@ -26,35 +29,105 @@
 #ifndef __WCMD_H__
 #define __WCMD_H__
 
-#include "device.h"
+#include "ttype.h"
+#include "80211hdr.h"
+#include "80211mgr.h"
 
-/* Command code */
-enum vnt_cmd {
-	WLAN_CMD_INIT_MAC80211,
-	WLAN_CMD_SETPOWER,
-	WLAN_CMD_TBTT_WAKEUP,
-	WLAN_CMD_BECON_SEND,
-	WLAN_CMD_CHANGE_ANTENNA
-};
+/*---------------------  Export Definitions -------------------------*/
+
+
+
+#define AUTHENTICATE_TIMEOUT   1000 //ms
+#define ASSOCIATE_TIMEOUT      1000 //ms
+
+
+// Command code
+typedef enum tagCMD_CODE {
+    WLAN_CMD_BSSID_SCAN,
+    WLAN_CMD_SSID,
+    WLAN_CMD_DISASSOCIATE,
+    WLAN_CMD_DEAUTH,
+    WLAN_CMD_RX_PSPOLL,
+    WLAN_CMD_RADIO,
+    WLAN_CMD_CHANGE_BBSENSITIVITY,
+    WLAN_CMD_SETPOWER,
+    WLAN_CMD_TBTT_WAKEUP,
+    WLAN_CMD_BECON_SEND,
+    WLAN_CMD_CHANGE_ANTENNA,
+    WLAN_CMD_REMOVE_ALLKEY,
+    WLAN_CMD_MAC_DISPOWERSAVING,
+    WLAN_CMD_11H_CHSW,
+    WLAN_CMD_RUN_AP
+} CMD_CODE, *PCMD_CODE;
 
 #define CMD_Q_SIZE              32
 
-/* Command state */
-enum vnt_cmd_state {
-	WLAN_CMD_INIT_MAC80211_START,
-	WLAN_CMD_SETPOWER_START,
-	WLAN_CMD_TBTT_WAKEUP_START,
-	WLAN_CMD_BECON_SEND_START,
-	WLAN_CMD_CHANGE_ANTENNA_START,
-	WLAN_CMD_IDLE
-};
+typedef enum tagCMD_STATUS {
 
-struct vnt_private;
+    CMD_STATUS_SUCCESS = 0,
+    CMD_STATUS_FAILURE,
+    CMD_STATUS_RESOURCES,
+    CMD_STATUS_TIMEOUT,
+    CMD_STATUS_PENDING
 
-void vnt_reset_command_timer(struct vnt_private *);
+} CMD_STATUS, *PCMD_STATUS;
 
-int vnt_schedule_command(struct vnt_private *, enum vnt_cmd);
+typedef struct tagCMD_ITEM {
+    CMD_CODE eCmd;
+    BYTE     abyCmdDesireSSID[WLAN_IEHDR_LEN + WLAN_SSID_MAXLEN + 1];
+    BOOL     bNeedRadioOFF;
+    BOOL     bRadioCmd;
+    BOOL     bForceSCAN;
+    WORD     wDeAuthenReason;
+} CMD_ITEM, *PCMD_ITEM;
 
-void vnt_run_command(struct work_struct *work);
+// Command state
+typedef enum tagCMD_STATE {
+    WLAN_CMD_SCAN_START,
+    WLAN_CMD_SCAN_END,
+    WLAN_CMD_DISASSOCIATE_START,
+    WLAN_CMD_DEAUTHEN_START,
+    WLAN_CMD_SSID_START,
+    WLAN_AUTHENTICATE_WAIT,
+    WLAN_ASSOCIATE_WAIT,
+    WLAN_DISASSOCIATE_WAIT,
+    WLAN_CMD_TX_PSPACKET_START,
+    WLAN_CMD_RADIO_START,
+    WLAN_CMD_CHANGE_BBSENSITIVITY_START,
+    WLAN_CMD_SETPOWER_START,
+    WLAN_CMD_AP_MODE_START,
+    WLAN_CMD_TBTT_WAKEUP_START,
+    WLAN_CMD_BECON_SEND_START,
+    WLAN_CMD_CHANGE_ANTENNA_START,
+    WLAN_CMD_REMOVE_ALLKEY_START,
+    WLAN_CMD_MAC_DISPOWERSAVING_START,
+    WLAN_CMD_11H_CHSW_START,
+    WLAN_CMD_IDLE
+} CMD_STATE, *PCMD_STATE;
+
+/*---------------------  Export Classes  ----------------------------*/
+
+/*---------------------  Export Variables  --------------------------*/
+
+/*---------------------  Export Types  ------------------------------*/
+
+/*---------------------  Export Functions  --------------------------*/
+
+void vResetCommandTimer(void *hDeviceContext);
+
+BOOL bScheduleCommand(void *hDeviceContext,
+		      CMD_CODE eCommand,
+		      PBYTE pbyItem0);
+
+void vRunCommand(void *hDeviceContext);
+
+/*
+void
+WCMDvCommandThread(
+    void * Context
+    );
+*/
+
+void BSSvSecondTxData(void *hDeviceContext);
 
 #endif /* __WCMD_H__ */

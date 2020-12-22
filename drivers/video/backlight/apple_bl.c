@@ -16,8 +16,6 @@
  *  get at the firmware code in order to figure out what it's actually doing.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -27,7 +25,6 @@
 #include <linux/pci.h>
 #include <linux/acpi.h>
 #include <linux/atomic.h>
-#include <linux/apple_bl.h>
 
 static struct backlight_device *apple_backlight_device;
 
@@ -41,6 +38,8 @@ struct hw_data {
 };
 
 static const struct hw_data *hw_data;
+
+#define DRIVER "apple_backlight: "
 
 /* Module parameters. */
 static int debug;
@@ -61,7 +60,8 @@ static int intel_chipset_send_intensity(struct backlight_device *bd)
 	int intensity = bd->props.brightness;
 
 	if (debug)
-		pr_debug("setting brightness to %d\n", intensity);
+		printk(KERN_DEBUG DRIVER "setting brightness to %d\n",
+		       intensity);
 
 	intel_chipset_set_brightness(intensity);
 	return 0;
@@ -76,7 +76,8 @@ static int intel_chipset_get_intensity(struct backlight_device *bd)
 	intensity = inb(0xb3) >> 4;
 
 	if (debug)
-		pr_debug("read brightness of %d\n", intensity);
+		printk(KERN_DEBUG DRIVER "read brightness of %d\n",
+		       intensity);
 
 	return intensity;
 }
@@ -106,7 +107,8 @@ static int nvidia_chipset_send_intensity(struct backlight_device *bd)
 	int intensity = bd->props.brightness;
 
 	if (debug)
-		pr_debug("setting brightness to %d\n", intensity);
+		printk(KERN_DEBUG DRIVER "setting brightness to %d\n",
+		       intensity);
 
 	nvidia_chipset_set_brightness(intensity);
 	return 0;
@@ -121,7 +123,8 @@ static int nvidia_chipset_get_intensity(struct backlight_device *bd)
 	intensity = inb(0x52f) >> 4;
 
 	if (debug)
-		pr_debug("read brightness of %d\n", intensity);
+		printk(KERN_DEBUG DRIVER "read brightness of %d\n",
+		       intensity);
 
 	return intensity;
 }
@@ -137,7 +140,7 @@ static const struct hw_data nvidia_chipset_data = {
 	.set_brightness = nvidia_chipset_set_brightness,
 };
 
-static int apple_bl_add(struct acpi_device *dev)
+static int __devinit apple_bl_add(struct acpi_device *dev)
 {
 	struct backlight_properties props;
 	struct pci_dev *host;
@@ -146,7 +149,7 @@ static int apple_bl_add(struct acpi_device *dev)
 	host = pci_get_bus_and_slot(0, 0);
 
 	if (!host) {
-		pr_err("unable to find PCI host\n");
+		printk(KERN_ERR DRIVER "unable to find PCI host\n");
 		return -ENODEV;
 	}
 
@@ -158,7 +161,7 @@ static int apple_bl_add(struct acpi_device *dev)
 	pci_dev_put(host);
 
 	if (!hw_data) {
-		pr_err("unknown hardware\n");
+		printk(KERN_ERR DRIVER "unknown hardware\n");
 		return -ENODEV;
 	}
 
@@ -196,7 +199,7 @@ static int apple_bl_add(struct acpi_device *dev)
 	return 0;
 }
 
-static int apple_bl_remove(struct acpi_device *dev)
+static int __devexit apple_bl_remove(struct acpi_device *dev, int type)
 {
 	backlight_device_unregister(apple_backlight_device);
 

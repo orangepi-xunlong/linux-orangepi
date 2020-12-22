@@ -15,7 +15,6 @@
 #include <linux/kmod.h>
 #include <linux/etherdevice.h>
 #include <linux/rtnetlink.h>
-#include <net/switchdev.h>
 
 #include "br_private.h"
 #include "br_private_stp.h"
@@ -36,39 +35,26 @@ static inline port_id br_make_port_id(__u8 priority, __u16 port_no)
 /* called under bridge lock */
 void br_init_port(struct net_bridge_port *p)
 {
-	struct switchdev_attr attr = {
-		.orig_dev = p->dev,
-		.id = SWITCHDEV_ATTR_ID_BRIDGE_AGEING_TIME,
-		.flags = SWITCHDEV_F_SKIP_EOPNOTSUPP | SWITCHDEV_F_DEFER,
-		.u.ageing_time = jiffies_to_clock_t(p->br->ageing_time),
-	};
-	int err;
-
 	p->port_id = br_make_port_id(p->priority, p->port_no);
 	br_become_designated_port(p);
-	br_set_state(p, BR_STATE_BLOCKING);
+	p->state = BR_STATE_BLOCKING;
 	p->topology_change_ack = 0;
 	p->config_pending = 0;
-
-	err = switchdev_port_attr_set(p->dev, &attr);
-	if (err && err != -EOPNOTSUPP)
-		netdev_err(p->dev, "failed to set HW ageing time\n");
 }
 
-/* NO locks held */
+/* called under bridge lock */
 void br_stp_enable_bridge(struct net_bridge *br)
 {
 	struct net_bridge_port *p;
 
 	spin_lock_bh(&br->lock);
-	if (br->stp_enabled == BR_KERNEL_STP)
-		mod_timer(&br->hello_timer, jiffies + br->hello_time);
+	mod_timer(&br->hello_timer, jiffies + br->hello_time);
 	mod_timer(&br->gc_timer, jiffies + HZ/10);
 
 	br_config_bpdu_generation(br);
 
 	list_for_each_entry(p, &br->port_list, list) {
-		if (netif_running(p->dev) && netif_oper_up(p->dev))
+		if ((p->dev->flags & IFF_UP) && netif_carrier_ok(p->dev))
 			br_stp_enable_port(p);
 
 	}
@@ -102,6 +88,7 @@ void br_stp_enable_port(struct net_bridge_port *p)
 {
 	br_init_port(p);
 	br_port_state_selection(p->br);
+	br_log_state(p);
 	br_ifinfo_notify(RTM_NEWLINK, p);
 }
 
@@ -113,17 +100,18 @@ void br_stp_disable_port(struct net_bridge_port *p)
 
 	wasroot = br_is_root_bridge(br);
 	br_become_designated_port(p);
-	br_set_state(p, BR_STATE_DISABLED);
+	p->state = BR_STATE_DISABLED;
 	p->topology_change_ack = 0;
 	p->config_pending = 0;
 
+	br_log_state(p);
 	br_ifinfo_notify(RTM_NEWLINK, p);
 
 	del_timer(&p->message_age_timer);
 	del_timer(&p->forward_delay_timer);
 	del_timer(&p->hold_timer);
 
-	br_fdb_delete_by_port(br, p, 0, 0);
+	br_fdb_delete_by_port(br, p, 0);
 	br_multicast_disable_port(p);
 
 	br_configuration_update(br);
@@ -134,36 +122,13 @@ void br_stp_disable_port(struct net_bridge_port *p)
 		br_become_root_bridge(br);
 }
 
-static int br_stp_call_user(struct net_bridge *br, char *arg)
-{
-	char *argv[] = { BR_STP_PROG, br->dev->name, arg, NULL };
-	char *envp[] = { NULL };
-	int rc;
-
-	/* call userspace STP and report program errors */
-	rc = call_usermodehelper(BR_STP_PROG, argv, envp, UMH_WAIT_PROC);
-	if (rc > 0) {
-		if (rc & 0xff)
-			br_debug(br, BR_STP_PROG " received signal %d\n",
-				 rc & 0x7f);
-		else
-			br_debug(br, BR_STP_PROG " exited with code %d\n",
-				 (rc >> 8) & 0xff);
-	}
-
-	return rc;
-}
-
 static void br_stp_start(struct net_bridge *br)
 {
-	struct net_bridge_port *p;
-	int err = -ENOENT;
+	int r;
+	char *argv[] = { BR_STP_PROG, br->dev->name, "start", NULL };
+	char *envp[] = { NULL };
 
-	if (net_eq(dev_net(br->dev), &init_net))
-		err = br_stp_call_user(br, "start");
-
-	if (err && err != -ENOENT)
-		br_err(br, "failed to start userspace STP (%d)\n", err);
+	r = call_usermodehelper(BR_STP_PROG, argv, envp, UMH_WAIT_PROC);
 
 	spin_lock_bh(&br->lock);
 
@@ -172,21 +137,14 @@ static void br_stp_start(struct net_bridge *br)
 	else if (br->bridge_forward_delay > BR_MAX_FORWARD_DELAY)
 		__br_set_forward_delay(br, BR_MAX_FORWARD_DELAY);
 
-	if (!err) {
+	if (r == 0) {
 		br->stp_enabled = BR_USER_STP;
 		br_debug(br, "userspace STP started\n");
-
-		/* Stop hello and hold timers */
-		del_timer(&br->hello_timer);
-		list_for_each_entry(p, &br->port_list, list)
-			del_timer(&p->hold_timer);
 	} else {
 		br->stp_enabled = BR_KERNEL_STP;
 		br_debug(br, "using kernel STP\n");
 
 		/* To start timers on any ports left in blocking */
-		if (br->dev->flags & IFF_UP)
-			mod_timer(&br->hello_timer, jiffies + br->hello_time);
 		br_port_state_selection(br);
 	}
 
@@ -195,19 +153,15 @@ static void br_stp_start(struct net_bridge *br)
 
 static void br_stp_stop(struct net_bridge *br)
 {
-	struct net_bridge_port *p;
-	int err;
+	int r;
+	char *argv[] = { BR_STP_PROG, br->dev->name, "stop", NULL };
+	char *envp[] = { NULL };
 
 	if (br->stp_enabled == BR_USER_STP) {
-		err = br_stp_call_user(br, "stop");
-		if (err)
-			br_err(br, "failed to stop userspace STP (%d)\n", err);
+		r = call_usermodehelper(BR_STP_PROG, argv, envp, UMH_WAIT_PROC);
+		br_info(br, "userspace STP stopped, return code %d\n", r);
 
 		/* To start timers on any ports left in blocking */
-		mod_timer(&br->hello_timer, jiffies + br->hello_time);
-		list_for_each_entry(p, &br->port_list, list)
-			mod_timer(&p->hold_timer,
-				  round_jiffies(jiffies + BR_HOLD_TIME));
 		spin_lock_bh(&br->lock);
 		br_port_state_selection(br);
 		spin_unlock_bh(&br->lock);
@@ -232,7 +186,7 @@ void br_stp_set_enabled(struct net_bridge *br, unsigned long val)
 /* called under bridge lock */
 void br_stp_change_bridge_id(struct net_bridge *br, const unsigned char *addr)
 {
-	/* should be aligned on 2 bytes for ether_addr_equal() */
+	/* should be aligned on 2 bytes for compare_ether_addr() */
 	unsigned short oldaddr_aligned[ETH_ALEN >> 1];
 	unsigned char *oldaddr = (unsigned char *)oldaddr_aligned;
 	struct net_bridge_port *p;
@@ -240,18 +194,17 @@ void br_stp_change_bridge_id(struct net_bridge *br, const unsigned char *addr)
 
 	wasroot = br_is_root_bridge(br);
 
-	br_fdb_change_mac_address(br, addr);
-
 	memcpy(oldaddr, br->bridge_id.addr, ETH_ALEN);
 	memcpy(br->bridge_id.addr, addr, ETH_ALEN);
 	memcpy(br->dev->dev_addr, addr, ETH_ALEN);
 
 	list_for_each_entry(p, &br->port_list, list) {
-		if (ether_addr_equal(p->designated_bridge.addr, oldaddr))
+		if (!compare_ether_addr(p->designated_bridge.addr, oldaddr))
 			memcpy(p->designated_bridge.addr, addr, ETH_ALEN);
 
-		if (ether_addr_equal(p->designated_root.addr, oldaddr))
+		if (!compare_ether_addr(p->designated_root.addr, oldaddr))
 			memcpy(p->designated_root.addr, addr, ETH_ALEN);
+
 	}
 
 	br_configuration_update(br);
@@ -260,7 +213,7 @@ void br_stp_change_bridge_id(struct net_bridge *br, const unsigned char *addr)
 		br_become_root_bridge(br);
 }
 
-/* should be aligned on 2 bytes for ether_addr_equal() */
+/* should be aligned on 2 bytes for compare_ether_addr() */
 static const unsigned short br_mac_zero_aligned[ETH_ALEN >> 1];
 
 /* called under bridge lock */
@@ -272,7 +225,7 @@ bool br_stp_recalculate_bridge_id(struct net_bridge *br)
 	struct net_bridge_port *p;
 
 	/* user has chosen a value so keep it */
-	if (br->dev->addr_assign_type == NET_ADDR_SET)
+	if (br->flags & BR_SET_MAC_ADDR)
 		return false;
 
 	list_for_each_entry(p, &br->port_list, list) {
@@ -282,7 +235,7 @@ bool br_stp_recalculate_bridge_id(struct net_bridge *br)
 
 	}
 
-	if (ether_addr_equal(br->bridge_id.addr, addr))
+	if (compare_ether_addr(br->bridge_id.addr, addr) == 0)
 		return false;	/* no change */
 
 	br_stp_change_bridge_id(br, addr);
@@ -346,7 +299,6 @@ int br_stp_set_path_cost(struct net_bridge_port *p, unsigned long path_cost)
 	    path_cost > BR_MAX_PATH_COST)
 		return -ERANGE;
 
-	p->flags |= BR_ADMIN_COST;
 	p->path_cost = path_cost;
 	br_configuration_update(p->br);
 	br_port_state_selection(p->br);

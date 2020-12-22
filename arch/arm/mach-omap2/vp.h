@@ -21,6 +21,15 @@
 
 struct voltagedomain;
 
+/*
+ * Voltage Processor (VP) identifiers
+ */
+#define OMAP3_VP_VDD_MPU_ID 0
+#define OMAP3_VP_VDD_CORE_ID 1
+#define OMAP4_VP_VDD_CORE_ID 0
+#define OMAP4_VP_VDD_IVA_ID 1
+#define OMAP4_VP_VDD_MPU_ID 2
+
 /* XXX document */
 #define VP_IDLE_TIMEOUT		200
 #define VP_TRANXDONE_TIMEOUT	300
@@ -107,13 +116,6 @@ extern struct omap_vp_instance omap3_vp_core;
 extern struct omap_vp_instance omap4_vp_mpu;
 extern struct omap_vp_instance omap4_vp_iva;
 extern struct omap_vp_instance omap4_vp_core;
-
-extern struct omap_vp_param omap3_mpu_vp_data;
-extern struct omap_vp_param omap3_core_vp_data;
-
-extern struct omap_vp_param omap4_mpu_vp_data;
-extern struct omap_vp_param omap4_iva_vp_data;
-extern struct omap_vp_param omap4_core_vp_data;
 
 void omap_vp_init(struct voltagedomain *voltdm);
 void omap_vp_enable(struct voltagedomain *voltdm);

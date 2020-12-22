@@ -23,12 +23,10 @@
  */
 
 #include <linux/threads.h>
-#include <linux/init.h>
 #include <asm/reg.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
 #include <asm/ppc_asm.h>
-#include <asm/head-64.h>
 #include <asm/asm-offsets.h>
 #include <asm/bug.h>
 #include <asm/cputable.h>
@@ -41,9 +39,6 @@
 #include <asm/kvm_book3s_asm.h>
 #include <asm/ptrace.h>
 #include <asm/hw_irq.h>
-#include <asm/cputhreads.h>
-#include <asm/ppc-opcode.h>
-#include <asm/export.h>
 
 /* The physical memory is laid out such that the secondary processor
  * spin code sits at 0x0000...0x00ff. On server, the vectors follow
@@ -67,29 +62,23 @@
  *   2. The kernel is entered at __start
  */
 
-OPEN_FIXED_SECTION(first_256B, 0x0, 0x100)
-USE_FIXED_SECTION(first_256B)
-	/*
-	 * Offsets are relative from the start of fixed section, and
-	 * first_256B starts at 0. Offsets are a bit easier to use here
-	 * than the fixed section entry macros.
-	 */
-	. = 0x0
+	.text
+	.globl  _stext
+_stext:
 _GLOBAL(__start)
 	/* NOP this out unconditionally */
 BEGIN_FTR_SECTION
-	FIXUP_ENDIAN
-	b	__start_initialization_multiplatform
+	b	.__start_initialization_multiplatform
 END_FTR_SECTION(0, 1)
 
 	/* Catch branch to 0 in real mode */
 	trap
 
-	/* Secondary processors spin on this value until it becomes non-zero.
-	 * When non-zero, it contains the real address of the function the cpu
-	 * should jump to.
+	/* Secondary processors spin on this value until it becomes nonzero.
+	 * When it does it contains the real address of the descriptor
+	 * of the function that the cpu should jump to to continue
+	 * initialization.
 	 */
-	.balign 8
 	.globl  __secondary_hold_spinloop
 __secondary_hold_spinloop:
 	.llong	0x0
@@ -111,7 +100,6 @@ __secondary_hold_acknowledge:
 	. = 0x5c
 	.globl	__run_at_load
 __run_at_load:
-DEFINE_FIXED_SYMBOL(__run_at_load)
 	.long	0x72756e30	/* "run0" -- relocate to 0 by default */
 #endif
 
@@ -127,7 +115,6 @@ DEFINE_FIXED_SYMBOL(__run_at_load)
  */
 	.globl	__secondary_hold
 __secondary_hold:
-	FIXUP_ENDIAN
 #ifndef CONFIG_PPC_BOOK3E
 	mfmsr	r24
 	ori	r24,r24,MSR_RI
@@ -135,52 +122,35 @@ __secondary_hold:
 #endif
 	/* Grab our physical cpu number */
 	mr	r24,r3
-	/* stash r4 for book3e */
-	mr	r25,r4
 
 	/* Tell the master cpu we're here */
 	/* Relocation is off & we are located at an address less */
 	/* than 0x100, so only need to grab low order offset.    */
-	std	r24,(ABS_ADDR(__secondary_hold_acknowledge))(0)
+	std	r24,__secondary_hold_acknowledge-_stext(0)
 	sync
 
-	li	r26,0
-#ifdef CONFIG_PPC_BOOK3E
-	tovirt(r26,r26)
-#endif
 	/* All secondary cpus wait here until told to start. */
-100:	ld	r12,(ABS_ADDR(__secondary_hold_spinloop))(r26)
-	cmpdi	0,r12,0
+100:	ld	r4,__secondary_hold_spinloop-_stext(0)
+	cmpdi	0,r4,0
 	beq	100b
 
 #if defined(CONFIG_SMP) || defined(CONFIG_KEXEC)
-#ifdef CONFIG_PPC_BOOK3E
-	tovirt(r12,r12)
-#endif
-	mtctr	r12
+	ld	r4,0(r4)		/* deref function descriptor */
+	mtctr	r4
 	mr	r3,r24
-	/*
-	 * it may be the case that other platforms have r4 right to
-	 * begin with, this gives us some safety in case it is not
-	 */
-#ifdef CONFIG_PPC_BOOK3E
-	mr	r4,r25
-#else
 	li	r4,0
-#endif
 	/* Make sure that patched code is visible */
 	isync
 	bctr
 #else
 	BUG_OPCODE
 #endif
-CLOSE_FIXED_SECTION(first_256B)
 
 /* This value is used to mark exception frames on the stack. */
 	.section ".toc","aw"
 exception_marker:
 	.tc	ID_72656773_68657265[TC],0x7265677368657265
-	.previous
+	.text
 
 /*
  * On server, we include the exception vectors code here as it
@@ -189,122 +159,21 @@ exception_marker:
  */
 #ifdef CONFIG_PPC_BOOK3S
 #include "exceptions-64s.S"
-#else
-OPEN_TEXT_SECTION(0x100)
-#endif
-
-USE_TEXT_SECTION()
-
-#ifdef CONFIG_PPC_BOOK3E
-/*
- * The booting_thread_hwid holds the thread id we want to boot in cpu
- * hotplug case. It is set by cpu hotplug code, and is invalid by default.
- * The thread id is the same as the initial value of SPRN_PIR[THREAD_ID]
- * bit field.
- */
-	.globl	booting_thread_hwid
-booting_thread_hwid:
-	.long  INVALID_THREAD_HWID
-	.align 3
-/*
- * start a thread in the same core
- * input parameters:
- * r3 = the thread physical id
- * r4 = the entry point where thread starts
- */
-_GLOBAL(book3e_start_thread)
-	LOAD_REG_IMMEDIATE(r5, MSR_KERNEL)
-	cmpwi	r3, 0
-	beq	10f
-	cmpwi	r3, 1
-	beq	11f
-	/* If the thread id is invalid, just exit. */
-	b	13f
-10:
-	MTTMR(TMRN_IMSR0, 5)
-	MTTMR(TMRN_INIA0, 4)
-	b	12f
-11:
-	MTTMR(TMRN_IMSR1, 5)
-	MTTMR(TMRN_INIA1, 4)
-12:
-	isync
-	li	r6, 1
-	sld	r6, r6, r3
-	mtspr	SPRN_TENS, r6
-13:
-	blr
-
-/*
- * stop a thread in the same core
- * input parameter:
- * r3 = the thread physical id
- */
-_GLOBAL(book3e_stop_thread)
-	cmpwi	r3, 0
-	beq	10f
-	cmpwi	r3, 1
-	beq	10f
-	/* If the thread id is invalid, just exit. */
-	b	13f
-10:
-	li	r4, 1
-	sld	r4, r4, r3
-	mtspr	SPRN_TENC, r4
-13:
-	blr
-
-_GLOBAL(fsl_secondary_thread_init)
-	mfspr	r4,SPRN_BUCSR
-
-	/* Enable branch prediction */
-	lis     r3,BUCSR_INIT@h
-	ori     r3,r3,BUCSR_INIT@l
-	mtspr   SPRN_BUCSR,r3
-	isync
-
-	/*
-	 * Fix PIR to match the linear numbering in the device tree.
-	 *
-	 * On e6500, the reset value of PIR uses the low three bits for
-	 * the thread within a core, and the upper bits for the core
-	 * number.  There are two threads per core, so shift everything
-	 * but the low bit right by two bits so that the cpu numbering is
-	 * continuous.
-	 *
-	 * If the old value of BUCSR is non-zero, this thread has run
-	 * before.  Thus, we assume we are coming from kexec or a similar
-	 * scenario, and PIR is already set to the correct value.  This
-	 * is a bit of a hack, but there are limited opportunities for
-	 * getting information into the thread and the alternatives
-	 * seemed like they'd be overkill.  We can't tell just by looking
-	 * at the old PIR value which state it's in, since the same value
-	 * could be valid for one thread out of reset and for a different
-	 * thread in Linux.
-	 */
-
-	mfspr	r3, SPRN_PIR
-	cmpwi	r4,0
-	bne	1f
-	rlwimi	r3, r3, 30, 2, 30
-	mtspr	SPRN_PIR, r3
-1:
 #endif
 
 _GLOBAL(generic_secondary_thread_init)
 	mr	r24,r3
 
 	/* turn on 64-bit mode */
-	bl	enable_64b_mode
+	bl	.enable_64b_mode
 
 	/* get a valid TOC pointer, wherever we're mapped at */
-	bl	relative_toc
-	tovirt(r2,r2)
+	bl	.relative_toc
 
 #ifdef CONFIG_PPC_BOOK3E
 	/* Book3E initialization */
 	mr	r3,r24
-	bl	book3e_secondary_thread_init
+	bl	.book3e_secondary_thread_init
 #endif
 	b	generic_secondary_common_init
 
@@ -318,60 +187,20 @@ _GLOBAL(generic_secondary_thread_init)
  * as SCOM before entry).
  */
 _GLOBAL(generic_secondary_smp_init)
-	FIXUP_ENDIAN
 	mr	r24,r3
 	mr	r25,r4
 
 	/* turn on 64-bit mode */
-	bl	enable_64b_mode
+	bl	.enable_64b_mode
 
 	/* get a valid TOC pointer, wherever we're mapped at */
-	bl	relative_toc
-	tovirt(r2,r2)
+	bl	.relative_toc
 
 #ifdef CONFIG_PPC_BOOK3E
 	/* Book3E initialization */
 	mr	r3,r24
 	mr	r4,r25
-	bl	book3e_secondary_core_init
-
-/*
- * After common core init has finished, check if the current thread is the
- * one we wanted to boot. If not, start the specified thread and stop the
- * current thread.
- */
-	LOAD_REG_ADDR(r4, booting_thread_hwid)
-	lwz     r3, 0(r4)
-	li	r5, INVALID_THREAD_HWID
-	cmpw	r3, r5
-	beq	20f
-
-	/*
-	 * The value of booting_thread_hwid has been stored in r3,
-	 * so make it invalid.
-	 */
-	stw	r5, 0(r4)
-
-	/*
-	 * Get the current thread id and check if it is the one we wanted.
-	 * If not, start the one specified in booting_thread_hwid and stop
-	 * the current thread.
-	 */
-	mfspr	r8, SPRN_TIR
-	cmpw	r3, r8
-	beq	20f
-
-	/* start the specified thread */
-	LOAD_REG_ADDR(r5, fsl_secondary_thread_init)
-	ld	r4, 0(r5)
-	bl	book3e_start_thread
-
-	/* stop the current thread */
-	mr	r3, r8
-	bl	book3e_stop_thread
-10:
-	b	10b
-20:
+	bl	.book3e_secondary_core_init
 #endif
 
 generic_secondary_common_init:
@@ -383,7 +212,7 @@ generic_secondary_common_init:
 	ld	r13,0(r13)		/* Get base vaddr of paca array	 */
 #ifndef CONFIG_SMP
 	addi	r13,r13,PACA_SIZE	/* know r13 if used accidentally */
-	b	kexec_wait		/* wait for next kernel if !SMP	 */
+	b	.kexec_wait		/* wait for next kernel if !SMP	 */
 #else
 	LOAD_REG_ADDR(r7, nr_cpu_ids)	/* Load nr_cpu_ids address       */
 	lwz	r7,0(r7)		/* also the max paca allocated 	 */
@@ -397,7 +226,7 @@ generic_secondary_common_init:
 	blt	1b
 
 	mr	r3,r24			/* not found, copy phys to r3	 */
-	b	kexec_wait		/* next kernel might do better	 */
+	b	.kexec_wait		/* next kernel might do better	 */
 
 2:	SET_PACA(r13)
 #ifdef CONFIG_PPC_BOOK3E
@@ -411,13 +240,11 @@ generic_secondary_common_init:
 	/* See if we need to call a cpu state restore handler */
 	LOAD_REG_ADDR(r23, cur_cpu_spec)
 	ld	r23,0(r23)
-	ld	r12,CPU_SPEC_RESTORE(r23)
-	cmpdi	0,r12,0
+	ld	r23,CPU_SPEC_RESTORE(r23)
+	cmpdi	0,r23,0
 	beq	3f
-#ifdef PPC64_ELF_ABI_v1
-	ld	r12,0(r12)
-#endif
-	mtctr	r12
+	ld	r23,0(r23)
+	mtctr	r23
 	bctrl
 
 3:	LOAD_REG_ADDR(r3, spinning_secondaries) /* Decrement spinning_secondaries */
@@ -448,7 +275,7 @@ generic_secondary_common_init:
  * Assumes we're mapped EA == RA if the MMU is on.
  */
 #ifdef CONFIG_PPC_BOOK3S
-__mmu_off:
+_STATIC(__mmu_off)
 	mfmsr	r3
 	andi.	r0,r3,MSR_IR|MSR_DR
 	beqlr
@@ -473,12 +300,12 @@ __mmu_off:
  *                 DT block, r4 is a physical pointer to the kernel itself
  *
  */
-__start_initialization_multiplatform:
+_GLOBAL(__start_initialization_multiplatform)
 	/* Make sure we are running in 64 bits mode */
-	bl	enable_64b_mode
+	bl	.enable_64b_mode
 
 	/* Get TOC pointer (current runtime address) */
-	bl	relative_toc
+	bl	.relative_toc
 
 	/* find out where we are now */
 	bcl	20,31,$+4
@@ -491,7 +318,7 @@ __start_initialization_multiplatform:
 	 */
 	cmpldi	cr0,r5,0
 	beq	1f
-	b	__boot_from_prom		/* yes -> prom */
+	b	.__boot_from_prom		/* yes -> prom */
 1:
 	/* Save parameters */
 	mr	r31,r3
@@ -503,8 +330,8 @@ __start_initialization_multiplatform:
 #endif
 
 #ifdef CONFIG_PPC_BOOK3E
-	bl	start_initialization_book3e
-	b	__after_prom_start
+	bl	.start_initialization_book3e
+	b	.__after_prom_start
 #else
 	/* Setup some critical 970 SPRs before switching MMU off */
 	mfspr	r0,SPRN_PVR
@@ -517,15 +344,15 @@ __start_initialization_multiplatform:
 	beq	1f
 	cmpwi	r0,0x45		/* 970GX */
 	bne	2f
-1:	bl	__cpu_preinit_ppc970
+1:	bl	.__cpu_preinit_ppc970
 2:
 
 	/* Switch off MMU if not already off */
-	bl	__mmu_off
-	b	__after_prom_start
+	bl	.__mmu_off
+	b	.__after_prom_start
 #endif /* CONFIG_PPC_BOOK3E */
 
-__boot_from_prom:
+_INIT_STATIC(__boot_from_prom)
 #ifdef CONFIG_PPC_OF_BOOT_TRAMPOLINE
 	/* Save parameters */
 	mr	r31,r3
@@ -544,7 +371,7 @@ __boot_from_prom:
 #ifdef CONFIG_RELOCATABLE
 	/* Relocate code for where we are now */
 	mr	r3,r26
-	bl	relocate
+	bl	.relocate
 #endif
 
 	/* Restore parameters */
@@ -556,34 +383,24 @@ __boot_from_prom:
 
 	/* Do all of the interaction with OF client interface */
 	mr	r8,r26
-	bl	prom_init
+	bl	.prom_init
 #endif /* #CONFIG_PPC_OF_BOOT_TRAMPOLINE */
 
 	/* We never return. We also hit that trap if trying to boot
 	 * from OF while CONFIG_PPC_OF_BOOT_TRAMPOLINE isn't selected */
 	trap
 
-__after_prom_start:
+_STATIC(__after_prom_start)
 #ifdef CONFIG_RELOCATABLE
 	/* process relocations for the final address of the kernel */
 	lis	r25,PAGE_OFFSET@highest	/* compute virtual base of kernel */
 	sldi	r25,r25,32
-#if defined(CONFIG_PPC_BOOK3E)
-	tovirt(r26,r26)		/* on booke, we already run at PAGE_OFFSET */
-#endif
-	lwz	r7,(FIXED_SYMBOL_ABS_ADDR(__run_at_load))(r26)
-#if defined(CONFIG_PPC_BOOK3E)
-	tophys(r26,r26)
-#endif
+	lwz	r7,__run_at_load-_stext(r26)
 	cmplwi	cr0,r7,1	/* flagged to stay where we are ? */
 	bne	1f
 	add	r25,r25,r26
 1:	mr	r3,r25
-	bl	relocate
-#if defined(CONFIG_PPC_BOOK3E)
-	/* IVPR needs to be set after relocation. */
-	bl	init_core_book3e
-#endif
+	bl	.relocate
 #endif
 
 /*
@@ -595,15 +412,15 @@ __after_prom_start:
  */
 	li	r3,0			/* target addr */
 #ifdef CONFIG_PPC_BOOK3E
-	tovirt(r3,r3)		/* on booke, we already run at PAGE_OFFSET */
+	tovirt(r3,r3)			/* on booke, we already run at PAGE_OFFSET */
 #endif
 	mr.	r4,r26			/* In some cases the loader may  */
-#if defined(CONFIG_PPC_BOOK3E)
-	tovirt(r4,r4)
-#endif
 	beq	9f			/* have already put us at zero */
 	li	r6,0x100		/* Start offset, the first 0x100 */
 					/* bytes were copied earlier.	 */
+#ifdef CONFIG_PPC_BOOK3E
+	tovirt(r6,r6)			/* on booke, we already run at PAGE_OFFSET */
+#endif
 
 #ifdef CONFIG_RELOCATABLE
 /*
@@ -611,51 +428,34 @@ __after_prom_start:
  * variable __run_at_load, if it is set the kernel is treated as relocatable
  * kernel, otherwise it will be moved to PHYSICAL_START
  */
-#if defined(CONFIG_PPC_BOOK3E)
-	tovirt(r26,r26)		/* on booke, we already run at PAGE_OFFSET */
-#endif
-	lwz	r7,(FIXED_SYMBOL_ABS_ADDR(__run_at_load))(r26)
+	lwz	r7,__run_at_load-_stext(r26)
 	cmplwi	cr0,r7,1
 	bne	3f
 
-#ifdef CONFIG_PPC_BOOK3E
-	LOAD_REG_ADDR(r5, __end_interrupts)
-	LOAD_REG_ADDR(r11, _stext)
-	sub	r5,r5,r11
-#else
-	/* just copy interrupts */
-	LOAD_REG_IMMEDIATE(r5, FIXED_SYMBOL_ABS_ADDR(__end_interrupts))
-#endif
+	li	r5,__end_interrupts - _stext	/* just copy interrupts */
 	b	5f
 3:
 #endif
-	/* # bytes of memory to copy */
-	lis	r5,(ABS_ADDR(copy_to_here))@ha
-	addi	r5,r5,(ABS_ADDR(copy_to_here))@l
+	lis	r5,(copy_to_here - _stext)@ha
+	addi	r5,r5,(copy_to_here - _stext)@l /* # bytes of memory to copy */
 
-	bl	copy_and_flush		/* copy the first n bytes	 */
+	bl	.copy_and_flush		/* copy the first n bytes	 */
 					/* this includes the code being	 */
 					/* executed here.		 */
-	/* Jump to the copy of this code that we just made */
-	addis	r8,r3,(ABS_ADDR(4f))@ha
-	addi	r12,r8,(ABS_ADDR(4f))@l
-	mtctr	r12
+	addis	r8,r3,(4f - _stext)@ha	/* Jump to the copy of this code */
+	addi	r8,r8,(4f - _stext)@l	/* that we just made */
+	mtctr	r8
 	bctr
 
 .balign 8
-p_end: .llong _end - copy_to_here
+p_end:	.llong	_end - _stext
 
-4:
-	/*
-	 * Now copy the rest of the kernel up to _end, add
-	 * _end - copy_to_here to the copy limit and run again.
-	 */
-	addis   r8,r26,(ABS_ADDR(p_end))@ha
-	ld      r8,(ABS_ADDR(p_end))@l(r8)
-	add	r5,r5,r8
-5:	bl	copy_and_flush		/* copy the rest */
+4:	/* Now copy the rest of the kernel up to _end */
+	addis	r5,r26,(p_end - _stext)@ha
+	ld	r5,(p_end - _stext)@l(r5)	/* get _end */
+5:	bl	.copy_and_flush		/* copy the rest */
 
-9:	b	start_here_multiplatform
+9:	b	.start_here_multiplatform
 
 /*
  * Copy routine used to copy the kernel to start at physical address 0
@@ -719,7 +519,7 @@ __secondary_start_pmac_0:
 	
 _GLOBAL(pmac_secondary_start)
 	/* turn on 64-bit mode */
-	bl	enable_64b_mode
+	bl	.enable_64b_mode
 
 	li	r0,0
 	mfspr	r3,SPRN_HID4
@@ -731,11 +531,10 @@ _GLOBAL(pmac_secondary_start)
 	slbia
 
 	/* get TOC pointer (real address) */
-	bl	relative_toc
-	tovirt(r2,r2)
+	bl	.relative_toc
 
 	/* Copy some CPU settings from CPU 0 */
-	bl	__restore_cpu_ppc970
+	bl	.__restore_cpu_ppc970
 
 	/* pSeries do that early though I don't think we really need it */
 	mfmsr	r3
@@ -793,8 +592,8 @@ __secondary_start:
 	addi	r14,r14,THREAD_SIZE-STACK_FRAME_OVERHEAD
 	std	r14,PACAKSAVE(r13)
 
-	/* Do early setup for that CPU (SLB and hash table pointer) */
-	bl	early_setup_secondary
+	/* Do early setup for that CPU (stab, slb, hash table pointer) */
+	bl	.early_setup_secondary
 
 	/*
 	 * setup the new stack pointer, but *don't* use this until
@@ -814,7 +613,7 @@ __secondary_start:
 	stb	r0,PACAIRQHAPPENED(r13)
 
 	/* enable MMU and jump to start_secondary */
-	LOAD_REG_ADDR(r3, start_secondary_prolog)
+	LOAD_REG_ADDR(r3, .start_secondary_prolog)
 	LOAD_REG_IMMEDIATE(r4, MSR_KERNEL)
 
 	mtspr	SPRN_SRR0,r3
@@ -827,11 +626,11 @@ __secondary_start:
  * zero the stack back-chain pointer and get the TOC virtual address
  * before going into C code.
  */
-start_secondary_prolog:
+_GLOBAL(start_secondary_prolog)
 	ld	r2,PACATOC(r13)
 	li	r3,0
 	std	r3,0(r1)		/* Zero the stack frame pointer	*/
-	bl	start_secondary
+	bl	.start_secondary
 	b	.
 /*
  * Reset stack pointer and call start_secondary
@@ -842,14 +641,14 @@ _GLOBAL(start_secondary_resume)
 	ld	r1,PACAKSAVE(r13)	/* Reload kernel stack pointer */
 	li	r3,0
 	std	r3,0(r1)		/* Zero the stack frame pointer	*/
-	bl	start_secondary
+	bl	.start_secondary
 	b	.
 #endif
 
 /*
  * This subroutine clobbers r11 and r12
  */
-enable_64b_mode:
+_GLOBAL(enable_64b_mode)
 	mfmsr	r11			/* grab the current MSR */
 #ifdef CONFIG_PPC_BOOK3E
 	oris	r11,r11,0x8000		/* CM bit set, we'll set ICM later */
@@ -867,13 +666,6 @@ enable_64b_mode:
  * This puts the TOC pointer into r2, offset by 0x8000 (as expected
  * by the toolchain).  It computes the correct value for wherever we
  * are running at the moment, using position-independent code.
- *
- * Note: The compiler constructs pointers using offsets from the
- * TOC in -mcmodel=medium mode. After we relocate to 0 but before
- * the MMU is on we need our TOC to be a virtual address otherwise
- * these pointers will be real addresses which may get stored and
- * accessed later with the MMU on. We use tovirt() at the call
- * sites to handle this.
  */
 _GLOBAL(relative_toc)
 	mflr	r0
@@ -884,16 +676,14 @@ _GLOBAL(relative_toc)
 	mtlr	r0
 	blr
 
-.balign 8
 p_toc:	.llong	__toc_start + 0x8000 - 0b
 
 /*
  * This is where the main kernel code starts.
  */
-start_here_multiplatform:
-	/* set up the TOC */
-	bl      relative_toc
-	tovirt(r2,r2)
+_INIT_STATIC(start_here_multiplatform)
+	/* set up the TOC (real address) */
+	bl	.relative_toc
 
 	/* Clear out the BSS. It may have been done in prom_init,
 	 * already but that's irrelevant since prom_init will soon
@@ -915,7 +705,6 @@ start_here_multiplatform:
 
 #ifdef CONFIG_PPC_EARLY_DEBUG_OPAL
 	/* Setup OPAL entry */
-	LOAD_REG_ADDR(r11, opal)
 	std	r28,0(r11);
 	std	r29,8(r11);
 #endif
@@ -946,30 +735,30 @@ start_here_multiplatform:
 	li	r0,0
 	stdu	r0,-STACK_FRAME_OVERHEAD(r1)
 
-	/*
-	 * Do very early kernel initializations, including initial hash table
-	 * and SLB setup before we turn on relocation.
-	 */
+	/* Do very early kernel initializations, including initial hash table,
+	 * stab and slb setup before we turn on relocation.	*/
 
 	/* Restore parameters passed from prom_init/kexec */
 	mr	r3,r31
-	bl	early_setup		/* also sets r13 and SPRG_PACA */
+	bl	.early_setup		/* also sets r13 and SPRG_PACA */
 
-	LOAD_REG_ADDR(r3, start_here_common)
+	LOAD_REG_ADDR(r3, .start_here_common)
 	ld	r4,PACAKMSR(r13)
 	mtspr	SPRN_SRR0,r3
 	mtspr	SPRN_SRR1,r4
 	RFI
 	b	.	/* prevent speculative execution */
-
+	
 	/* This is where all platforms converge execution */
-
-start_here_common:
+_INIT_GLOBAL(start_here_common)
 	/* relocation is on at this point */
 	std	r1,PACAKSAVE(r13)
 
 	/* Load the TOC (virtual address) */
 	ld	r2,PACATOC(r13)
+
+	/* Do more system initializations in virtual mode */
+	bl	.setup_system
 
 	/* Mark interrupts soft and hard disabled (they might be enabled
 	 * in the PACA when doing hotplug)
@@ -980,7 +769,7 @@ start_here_common:
 	stb	r0,PACAIRQHAPPENED(r13)
 
 	/* Generic kernel entry */
-	bl	start_kernel
+	bl	.start_kernel
 
 	/* Not reached */
 	BUG_OPCODE
@@ -990,17 +779,13 @@ start_here_common:
  * This stuff goes at the beginning of the bss, which is page-aligned.
  */
 	.section ".bss"
-/*
- * pgd dir should be aligned to PGD_TABLE_SIZE which is 64K.
- * We will need to find a better way to fix this
- */
-	.align	16
 
-	.globl	swapper_pg_dir
-swapper_pg_dir:
-	.space	PGD_TABLE_SIZE
+	.align	PAGE_SHIFT
 
 	.globl	empty_zero_page
 empty_zero_page:
 	.space	PAGE_SIZE
-EXPORT_SYMBOL(empty_zero_page)
+
+	.globl	swapper_pg_dir
+swapper_pg_dir:
+	.space	PGD_TABLE_SIZE

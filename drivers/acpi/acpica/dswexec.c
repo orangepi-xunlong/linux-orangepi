@@ -6,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -57,7 +57,7 @@ ACPI_MODULE_NAME("dswexec")
 /*
  * Dispatch table for opcode classes
  */
-static acpi_execute_op acpi_gbl_op_type_dispatch[] = {
+static ACPI_EXECUTE_OP acpi_gbl_op_type_dispatch[] = {
 	acpi_ex_opcode_0A_0T_1R,
 	acpi_ex_opcode_1A_0T_0R,
 	acpi_ex_opcode_1A_0T_1R,
@@ -133,8 +133,7 @@ acpi_ds_get_predicate_value(struct acpi_walk_state *walk_state,
 	 * Result of predicate evaluation must be an Integer
 	 * object. Implicitly convert the argument if necessary.
 	 */
-	status = acpi_ex_convert_to_integer(obj_desc, &local_obj_desc,
-					    ACPI_STRTOUL_BASE16);
+	status = acpi_ex_convert_to_integer(obj_desc, &local_obj_desc, 16);
 	if (ACPI_FAILURE(status)) {
 		goto cleanup;
 	}
@@ -150,7 +149,7 @@ acpi_ds_get_predicate_value(struct acpi_walk_state *walk_state,
 
 	/* Truncate the predicate to 32-bits if necessary */
 
-	(void)acpi_ex_truncate_for32bit_table(local_obj_desc);
+	acpi_ex_truncate_for32bit_table(local_obj_desc);
 
 	/*
 	 * Save the result of the predicate evaluation on
@@ -171,16 +170,16 @@ acpi_ds_get_predicate_value(struct acpi_walk_state *walk_state,
 
 	(void)acpi_ds_do_implicit_return(local_obj_desc, walk_state, TRUE);
 
-cleanup:
+      cleanup:
 
-	ACPI_DEBUG_PRINT((ACPI_DB_EXEC,
-			  "Completed a predicate eval=%X Op=%p\n",
+	ACPI_DEBUG_PRINT((ACPI_DB_EXEC, "Completed a predicate eval=%X Op=%p\n",
 			  walk_state->control_state->common.value,
 			  walk_state->op));
 
 	/* Break to debugger to display result */
 
-	acpi_db_display_result_object(local_obj_desc, walk_state);
+	ACPI_DEBUGGER_EXEC(acpi_db_display_result_object
+			   (local_obj_desc, walk_state));
 
 	/*
 	 * Delete the predicate result object (we know that
@@ -205,7 +204,7 @@ cleanup:
  * RETURN:      Status
  *
  * DESCRIPTION: Descending callback used during the execution of control
- *              methods. This is where most operators and operands are
+ *              methods.  This is where most operators and operands are
  *              dispatched to the interpreter.
  *
  ****************************************************************************/
@@ -265,8 +264,8 @@ acpi_ds_exec_begin_op(struct acpi_walk_state *walk_state,
 	    (walk_state->control_state->common.state ==
 	     ACPI_CONTROL_CONDITIONAL_EXECUTING)) {
 		ACPI_DEBUG_PRINT((ACPI_DB_EXEC,
-				  "Exec predicate Op=%p State=%p\n",
-				  op, walk_state));
+				  "Exec predicate Op=%p State=%p\n", op,
+				  walk_state));
 
 		walk_state->control_state->common.state =
 		    ACPI_CONTROL_PREDICATE_EXECUTING;
@@ -298,7 +297,7 @@ acpi_ds_exec_begin_op(struct acpi_walk_state *walk_state,
 		if (walk_state->walk_type & ACPI_WALK_METHOD) {
 			/*
 			 * Found a named object declaration during method execution;
-			 * we must enter this object into the namespace. The created
+			 * we must enter this object into the namespace.  The created
 			 * object is temporary and will be deleted upon completion of
 			 * the execution of this method.
 			 *
@@ -328,7 +327,6 @@ acpi_ds_exec_begin_op(struct acpi_walk_state *walk_state,
 		break;
 
 	default:
-
 		break;
 	}
 
@@ -336,7 +334,7 @@ acpi_ds_exec_begin_op(struct acpi_walk_state *walk_state,
 
 	return_ACPI_STATUS(status);
 
-error_exit:
+      error_exit:
 	status = acpi_ds_method_error(status, walk_state);
 	return_ACPI_STATUS(status);
 }
@@ -350,7 +348,7 @@ error_exit:
  * RETURN:      Status
  *
  * DESCRIPTION: Ascending callback used during the execution of control
- *              methods. The only thing we really need to do here is to
+ *              methods.  The only thing we really need to do here is to
  *              notice the beginning of IF, ELSE, and WHILE blocks.
  *
  ****************************************************************************/
@@ -387,10 +385,11 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
 
 	/* Call debugger for single step support (DEBUG build only) */
 
-	status = acpi_db_single_step(walk_state, op, op_class);
-	if (ACPI_FAILURE(status)) {
-		return_ACPI_STATUS(status);
-	}
+	ACPI_DEBUGGER_EXEC(status =
+			   acpi_db_single_step(walk_state, op, op_class));
+	ACPI_DEBUGGER_EXEC(if (ACPI_FAILURE(status)) {
+			   return_ACPI_STATUS(status);}
+	) ;
 
 	/* Decode the Opcode Class */
 
@@ -433,7 +432,7 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
 		if (ACPI_SUCCESS(status)) {
 			/*
 			 * Dispatch the request to the appropriate interpreter handler
-			 * routine. There is one routine per opcode "type" based upon the
+			 * routine.  There is one routine per opcode "type" based upon the
 			 * number of opcode arguments and return type.
 			 */
 			status =
@@ -489,6 +488,7 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
 			break;
 
 		case AML_TYPE_METHOD_CALL:
+
 			/*
 			 * If the method is referenced from within a package
 			 * declaration, it is not a invocation of the method, just
@@ -502,8 +502,9 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
 						  "Method Reference in a Package, Op=%p\n",
 						  op));
 
-				op->common.node = (struct acpi_namespace_node *)
-				    op->asl.value.arg->asl.node;
+				op->common.node =
+				    (struct acpi_namespace_node *)op->asl.value.
+				    arg->asl.node;
 				acpi_ut_add_reference(op->asl.value.arg->asl.
 						      node->object);
 				return_ACPI_STATUS(AE_OK);
@@ -581,12 +582,13 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
 
 			switch (op->common.parent->common.aml_opcode) {
 			case AML_NAME_OP:
+
 				/*
 				 * Put the Node on the object stack (Contains the ACPI Name
 				 * of this object)
 				 */
-				walk_state->operands[0] = (void *)
-				    op->common.parent->common.node;
+				walk_state->operands[0] =
+				    (void *)op->common.parent->common.node;
 				walk_state->num_operands = 1;
 
 				status = acpi_ds_create_node(walk_state,
@@ -691,8 +693,7 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
 		default:
 
 			ACPI_ERROR((AE_INFO,
-				    "Unimplemented opcode, class=0x%X "
-				    "type=0x%X Opcode=0x%X Op=%p",
+				    "Unimplemented opcode, class=0x%X type=0x%X Opcode=-0x%X Op=%p",
 				    op_class, op_type, op->common.aml_opcode,
 				    op));
 
@@ -705,7 +706,7 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
 	 * ACPI 2.0 support for 64-bit integers: Truncate numeric
 	 * result value if we are executing from a 32-bit ACPI table
 	 */
-	(void)acpi_ex_truncate_for32bit_table(walk_state->result_obj);
+	acpi_ex_truncate_for32bit_table(walk_state->result_obj);
 
 	/*
 	 * Check if we just completed the evaluation of a
@@ -722,14 +723,14 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
 		walk_state->result_obj = NULL;
 	}
 
-cleanup:
+      cleanup:
 
 	if (walk_state->result_obj) {
 
 		/* Break to debugger to display result */
 
-		acpi_db_display_result_object(walk_state->result_obj,
-					      walk_state);
+		ACPI_DEBUGGER_EXEC(acpi_db_display_result_object
+				   (walk_state->result_obj, walk_state));
 
 		/*
 		 * Delete the result op if and only if:

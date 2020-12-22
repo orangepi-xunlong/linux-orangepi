@@ -7,7 +7,6 @@
  *     Copyright IBM Corp. 2003, 2009
  */
 
-#include <linux/module.h>
 #include <linux/console.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -31,14 +30,12 @@
 
 static struct raw3270_fn con3270_fn;
 
-static bool auto_update = 1;
-module_param(auto_update, bool, 0);
-
 /*
  * Main 3270 console view data structure.
  */
 struct con3270 {
 	struct raw3270_view view;
+	spinlock_t lock;
 	struct list_head freemem;	/* list of free memory for strings. */
 
 	/* Output stuff. */
@@ -124,12 +121,7 @@ con3270_create_status(struct con3270 *cp)
 static void
 con3270_update_string(struct con3270 *cp, struct string *s, int nr)
 {
-	if (s->len < 4) {
-		/* This indicates a bug, but printing a warning would
-		 * cause a deadlock. */
-		return;
-	}
-	if (s->string[s->len - 4] != TO_RA)
+	if (s->len >= cp->view.cols - 5)
 		return;
 	raw3270_buffer_address(cp->view.dev, s->string + s->len - 3,
 			       cp->view.cols * (nr + 1));
@@ -213,8 +205,6 @@ con3270_update(struct con3270 *cp)
 	struct string *s, *n;
 	int rc;
 
-	if (!auto_update && !raw3270_view_active(&cp->view))
-		return;
 	if (cp->view.dev)
 		raw3270_activate_view(&cp->view);
 
@@ -405,7 +395,7 @@ con3270_deactivate(struct raw3270_view *view)
 	del_timer(&cp->timer);
 }
 
-static void
+static int
 con3270_irq(struct con3270 *cp, struct raw3270_request *rq, struct irb *irb)
 {
 	/* Handle ATTN. Schedule tasklet to read aid. */
@@ -418,11 +408,8 @@ con3270_irq(struct con3270 *cp, struct raw3270_request *rq, struct irb *irb)
 		else
 			/* Normal end. Copy residual count. */
 			rq->rescnt = irb->scsw.cmd.count;
-	} else if (irb->scsw.cmd.dstat & DEV_STAT_DEV_END) {
-		/* Interrupt without an outstanding request -> update all */
-		cp->update_flags = CON_UPDATE_ALL;
-		con3270_set_timer(cp, 1);
 	}
+	return RAW3270_IO_DONE;
 }
 
 /* Console view to a 3270 device. */
@@ -465,11 +452,11 @@ con3270_cline_end(struct con3270 *cp)
 		cp->cline->len + 4 : cp->view.cols;
 	s = con3270_alloc_string(cp, size);
 	memcpy(s->string, cp->cline->string, cp->cline->len);
-	if (cp->cline->len < cp->view.cols - 5) {
+	if (s->len < cp->view.cols - 5) {
 		s->string[s->len - 4] = TO_RA;
 		s->string[s->len - 1] = 0;
 	} else {
-		while (--size >= cp->cline->len)
+		while (--size > cp->cline->len)
 			s->string[size] = cp->view.ascebc[' '];
 	}
 	/* Replace cline with allocated line s and reset cline. */
@@ -543,7 +530,6 @@ con3270_flush(void)
 	if (!cp->view.dev)
 		return;
 	raw3270_pm_unfreeze(&cp->view);
-	raw3270_activate_view(&cp->view);
 	spin_lock_irqsave(&cp->view.lock, flags);
 	con3270_wait_write(cp);
 	cp->nr_up = 0;
@@ -591,6 +577,7 @@ static struct console con3270 = {
 static int __init
 con3270_init(void)
 {
+	struct ccw_device *cdev;
 	struct raw3270 *rp;
 	void *cbuf;
 	int i;
@@ -605,13 +592,14 @@ con3270_init(void)
 		cpcmd("TERM AUTOCR OFF", NULL, 0, NULL);
 	}
 
-	rp = raw3270_setup_console();
+	cdev = ccw_device_probe_console();
+	if (IS_ERR(cdev))
+		return -ENODEV;
+	rp = raw3270_setup_console(cdev);
 	if (IS_ERR(rp))
 		return PTR_ERR(rp);
 
 	condev = kzalloc(sizeof(struct con3270), GFP_KERNEL | GFP_DMA);
-	if (!condev)
-		return -ENOMEM;
 	condev->view.dev = rp;
 
 	condev->read = raw3270_request_alloc(0);

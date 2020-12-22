@@ -13,7 +13,17 @@
 #ifndef _ASM_C6X_MODULE_H
 #define _ASM_C6X_MODULE_H
 
-#include <asm-generic/module.h>
+#define Elf_Shdr	Elf32_Shdr
+#define Elf_Sym		Elf32_Sym
+#define Elf_Ehdr	Elf32_Ehdr
+#define Elf_Addr	Elf32_Addr
+#define Elf_Word	Elf32_Word
+
+/*
+ * This file contains the C6x architecture specific module code.
+ */
+struct mod_arch_specific {
+};
 
 struct loaded_sections {
 	unsigned int new_vaddr;

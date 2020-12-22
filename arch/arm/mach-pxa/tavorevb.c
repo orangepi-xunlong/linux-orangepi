@@ -18,15 +18,14 @@
 #include <linux/clk.h>
 #include <linux/gpio.h>
 #include <linux/smc91x.h>
-#include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include "pxa930.h"
-#include <linux/platform_data/video-pxafb.h>
-#include <linux/platform_data/keypad-pxa27x.h>
+#include <mach/pxa930.h>
+#include <mach/pxafb.h>
+#include <plat/pxa27x_keypad.h>
 
 #include "devices.h"
 #include "generic.h"
@@ -107,7 +106,7 @@ static struct platform_device smc91x_device = {
 };
 
 #if defined(CONFIG_KEYBOARD_PXA27x) || defined(CONFIG_KEYBOARD_PXA27x_MODULE)
-static const unsigned int tavorevb_matrix_key_map[] = {
+static unsigned int tavorevb_matrix_key_map[] = {
 	/* KEY(row, col, key_code) */
 	KEY(0, 4, KEY_A), KEY(0, 5, KEY_B), KEY(0, 6, KEY_C),
 	KEY(1, 4, KEY_E), KEY(1, 5, KEY_F), KEY(1, 6, KEY_G),
@@ -148,15 +147,11 @@ static const unsigned int tavorevb_matrix_key_map[] = {
 	KEY(3, 3, KEY_F23),	/* soft2 */
 };
 
-static struct matrix_keymap_data tavorevb_matrix_keymap_data = {
-	.keymap		= tavorevb_matrix_key_map,
-	.keymap_size	= ARRAY_SIZE(tavorevb_matrix_key_map),
-};
-
 static struct pxa27x_keypad_platform_data tavorevb_keypad_info = {
 	.matrix_key_rows	= 7,
 	.matrix_key_cols	= 7,
-	.matrix_keymap_data	= &tavorevb_matrix_keymap_data,
+	.matrix_key_map		= tavorevb_matrix_key_map,
+	.matrix_key_map_size	= ARRAY_SIZE(tavorevb_matrix_key_map),
 	.debounce_interval	= 30,
 };
 
@@ -169,25 +164,20 @@ static inline void tavorevb_init_keypad(void) {}
 #endif /* CONFIG_KEYBOARD_PXA27x || CONFIG_KEYBOARD_PXA27x_MODULE */
 
 #if defined(CONFIG_FB_PXA) || defined(CONFIG_FB_PXA_MODULE)
-static struct pwm_lookup tavorevb_pwm_lookup[] = {
-	PWM_LOOKUP("pxa27x-pwm.0", 1, "pwm-backlight.0", NULL, 100000,
-		   PWM_POLARITY_NORMAL),
-	PWM_LOOKUP("pxa27x-pwm.0", 0, "pwm-backlight.1", NULL, 100000,
-		   PWM_POLARITY_NORMAL),
-};
-
 static struct platform_pwm_backlight_data tavorevb_backlight_data[] = {
 	[0] = {
 		/* primary backlight */
+		.pwm_id		= 2,
 		.max_brightness	= 100,
 		.dft_brightness	= 100,
-		.enable_gpio	= -1,
+		.pwm_period_ns	= 100000,
 	},
 	[1] = {
 		/* secondary backlight */
+		.pwm_id		= 0,
 		.max_brightness	= 100,
 		.dft_brightness	= 100,
-		.enable_gpio	= -1,
+		.pwm_period_ns	= 100000,
 	},
 };
 
@@ -474,7 +464,6 @@ static struct pxafb_mach_info tavorevb_lcd_info = {
 
 static void __init tavorevb_init_lcd(void)
 {
-	pwm_add_table(tavorevb_pwm_lookup, ARRAY_SIZE(tavorevb_pwm_lookup));
 	platform_device_register(&tavorevb_backlight_devices[0]);
 	platform_device_register(&tavorevb_backlight_devices[1]);
 	pxa_set_fb_info(NULL, &tavorevb_lcd_info);
@@ -505,7 +494,7 @@ MACHINE_START(TAVOREVB, "PXA930 Evaluation Board (aka TavorEVB)")
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq       = pxa3xx_init_irq,
 	.handle_irq       = pxa3xx_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer          = &pxa_timer,
 	.init_machine   = tavorevb_init,
 	.restart	= pxa_restart,
 MACHINE_END

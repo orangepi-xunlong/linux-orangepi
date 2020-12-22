@@ -7,7 +7,8 @@
  * kernel and insert a module (lg.ko) which allows us to run other Linux
  * kernels the same way we'd run processes.  We call the first kernel the Host,
  * and the others the Guests.  The program which sets up and configures Guests
- * (such as the example in tools/lguest/lguest.c) is called the Launcher.
+ * (such as the example in Documentation/virtual/lguest/lguest.c) is called the
+ * Launcher.
  *
  * Secondly, we only run specially modified Guests, not normal kernels: setting
  * CONFIG_LGUEST_GUEST to "y" compiles this file into the kernel so it knows
@@ -56,9 +57,6 @@
 #include <linux/virtio_console.h>
 #include <linux/pm.h>
 #include <linux/export.h>
-#include <linux/pci.h>
-#include <linux/virtio_pci.h>
-#include <asm/acpi.h>
 #include <asm/apic.h>
 #include <asm/lguest.h>
 #include <asm/paravirt.h>
@@ -70,12 +68,10 @@
 #include <asm/e820.h>
 #include <asm/mce.h>
 #include <asm/io.h>
-#include <asm/fpu/api.h>
+#include <asm/i387.h>
 #include <asm/stackprotector.h>
 #include <asm/reboot.h>		/* for struct machine_ops */
 #include <asm/kvm_para.h>
-#include <asm/pci_x86.h>
-#include <asm/pci-direct.h>
 
 /*G:010
  * Welcome to the Guest!
@@ -87,10 +83,11 @@
 
 struct lguest_data lguest_data = {
 	.hcall_status = { [0 ... LHCALL_RING_SIZE-1] = 0xFF },
-	.noirq_iret = (u32)lguest_noirq_iret,
+	.noirq_start = (u32)lguest_noirq_start,
+	.noirq_end = (u32)lguest_noirq_end,
 	.kernel_address = PAGE_OFFSET,
 	.blocked_interrupts = { 1 }, /* Block timer interrupts */
-	.syscall_vec = IA32_SYSCALL_VECTOR,
+	.syscall_vec = SYSCALL_VECTOR,
 };
 
 /*G:037
@@ -237,13 +234,13 @@ static void lguest_end_context_switch(struct task_struct *next)
  * flags word contains all kind of stuff, but in practice Linux only cares
  * about the interrupt flag.  Our "save_flags()" just returns that.
  */
-asmlinkage __visible unsigned long lguest_save_fl(void)
+static unsigned long save_fl(void)
 {
 	return lguest_data.irq_enabled;
 }
 
 /* Interrupts go off... */
-asmlinkage __visible void lguest_irq_disable(void)
+static void irq_disable(void)
 {
 	lguest_data.irq_enabled = 0;
 }
@@ -257,11 +254,11 @@ asmlinkage __visible void lguest_irq_disable(void)
  * PV_CALLEE_SAVE_REGS_THUNK(), which pushes %eax onto the stack, calls the
  * C function, then restores it.
  */
-PV_CALLEE_SAVE_REGS_THUNK(lguest_save_fl);
-PV_CALLEE_SAVE_REGS_THUNK(lguest_irq_disable);
+PV_CALLEE_SAVE_REGS_THUNK(save_fl);
+PV_CALLEE_SAVE_REGS_THUNK(irq_disable);
 /*:*/
 
-/* These are in head_32.S */
+/* These are in i386_head.S */
 extern void lg_irq_enable(void);
 extern void lg_restore_fl(unsigned long flags);
 
@@ -555,8 +552,7 @@ static void lguest_write_cr3(unsigned long cr3)
 	current_cr3 = cr3;
 
 	/* These two page tables are simple, linear, and used during boot */
-	if (cr3 != __pa_symbol(swapper_pg_dir) &&
-	    cr3 != __pa_symbol(initial_page_table))
+	if (cr3 != __pa(swapper_pg_dir) && cr3 != __pa(initial_page_table))
 		cr3_changed = true;
 }
 
@@ -836,65 +832,20 @@ static struct irq_chip lguest_irq_controller = {
 };
 
 /*
- * Interrupt descriptors are allocated as-needed, but low-numbered ones are
- * reserved by the generic x86 code.  So we ignore irq_alloc_desc_at if it
- * tells us the irq is already used: other errors (ie. ENOMEM) we take
- * seriously.
- */
-static int lguest_setup_irq(unsigned int irq)
-{
-	struct irq_desc *desc;
-	int err;
-
-	/* Returns -ve error or vector number. */
-	err = irq_alloc_desc_at(irq, 0);
-	if (err < 0 && err != -EEXIST)
-		return err;
-
-	/*
-	 * Tell the Linux infrastructure that the interrupt is
-	 * controlled by our level-based lguest interrupt controller.
-	 */
-	irq_set_chip_and_handler_name(irq, &lguest_irq_controller,
-				      handle_level_irq, "level");
-
-	/* Some systems map "vectors" to interrupts weirdly.  Not us! */
-	desc = irq_to_desc(irq);
-	__this_cpu_write(vector_irq[FIRST_EXTERNAL_VECTOR + irq], desc);
-	return 0;
-}
-
-static int lguest_enable_irq(struct pci_dev *dev)
-{
-	int err;
-	u8 line = 0;
-
-	/* We literally use the PCI interrupt line as the irq number. */
-	pci_read_config_byte(dev, PCI_INTERRUPT_LINE, &line);
-	err = lguest_setup_irq(line);
-	if (!err)
-		dev->irq = line;
-	return err;
-}
-
-/* We don't do hotplug PCI, so this shouldn't be called. */
-static void lguest_disable_irq(struct pci_dev *dev)
-{
-	WARN_ON(1);
-}
-
-/*
  * This sets up the Interrupt Descriptor Table (IDT) entry for each hardware
- * interrupt (except 128, which is used for system calls).
+ * interrupt (except 128, which is used for system calls), and then tells the
+ * Linux infrastructure that each interrupt is controlled by our level-based
+ * lguest interrupt controller.
  */
 static void __init lguest_init_IRQ(void)
 {
 	unsigned int i;
 
-	for (i = FIRST_EXTERNAL_VECTOR; i < FIRST_SYSTEM_VECTOR; i++) {
-		if (i != IA32_SYSCALL_VECTOR)
-			set_intr_gate(i, irq_entries_start +
-					8 * (i - FIRST_EXTERNAL_VECTOR));
+	for (i = FIRST_EXTERNAL_VECTOR; i < NR_VECTORS; i++) {
+		/* Some systems map "vectors" to interrupts weirdly.  Not us! */
+		__this_cpu_write(vector_irq[i], i - FIRST_EXTERNAL_VECTOR);
+		if (i != SYSCALL_VECTOR)
+			set_intr_gate(i, interrupt[i - FIRST_EXTERNAL_VECTOR]);
 	}
 
 	/*
@@ -905,14 +856,34 @@ static void __init lguest_init_IRQ(void)
 }
 
 /*
+ * Interrupt descriptors are allocated as-needed, but low-numbered ones are
+ * reserved by the generic x86 code.  So we ignore irq_alloc_desc_at if it
+ * tells us the irq is already used: other errors (ie. ENOMEM) we take
+ * seriously.
+ */
+int lguest_setup_irq(unsigned int irq)
+{
+	int err;
+
+	/* Returns -ve error or vector number. */
+	err = irq_alloc_desc_at(irq, 0);
+	if (err < 0 && err != -EEXIST)
+		return err;
+
+	irq_set_chip_and_handler_name(irq, &lguest_irq_controller,
+				      handle_level_irq, "level");
+	return 0;
+}
+
+/*
  * Time.
  *
  * It would be far better for everyone if the Guest had its own clock, but
  * until then the Host gives us the time on every interrupt.
  */
-static void lguest_get_wallclock(struct timespec *now)
+static unsigned long lguest_get_wallclock(void)
 {
-	*now = lguest_data.time;
+	return lguest_data.time.tv_sec;
 }
 
 /*
@@ -991,11 +962,23 @@ static int lguest_clockevent_set_next_event(unsigned long delta,
 	return 0;
 }
 
-static int lguest_clockevent_shutdown(struct clock_event_device *evt)
+static void lguest_clockevent_set_mode(enum clock_event_mode mode,
+                                      struct clock_event_device *evt)
 {
-	/* A 0 argument shuts the clock down. */
-	hcall(LHCALL_SET_CLOCKEVENT, 0, 0, 0, 0);
-	return 0;
+	switch (mode) {
+	case CLOCK_EVT_MODE_UNUSED:
+	case CLOCK_EVT_MODE_SHUTDOWN:
+		/* A 0 argument shuts the clock down. */
+		hcall(LHCALL_SET_CLOCKEVENT, 0, 0, 0, 0);
+		break;
+	case CLOCK_EVT_MODE_ONESHOT:
+		/* This is what we expect. */
+		break;
+	case CLOCK_EVT_MODE_PERIODIC:
+		BUG();
+	case CLOCK_EVT_MODE_RESUME:
+		break;
+	}
 }
 
 /* This describes our primitive timer chip. */
@@ -1003,7 +986,7 @@ static struct clock_event_device lguest_clockevent = {
 	.name                   = "lguest",
 	.features               = CLOCK_EVT_FEAT_ONESHOT,
 	.set_next_event         = lguest_clockevent_set_next_event,
-	.set_state_shutdown	= lguest_clockevent_shutdown,
+	.set_mode               = lguest_clockevent_set_mode,
 	.rating                 = INT_MAX,
 	.mult                   = 1,
 	.shift                  = 0,
@@ -1015,7 +998,7 @@ static struct clock_event_device lguest_clockevent = {
  * This is the Guest timer interrupt handler (hardware interrupt 0).  We just
  * call the clockevent infrastructure and it does whatever needs doing.
  */
-static void lguest_time_irq(struct irq_desc *desc)
+static void lguest_time_irq(unsigned int irq, struct irq_desc *desc)
 {
 	unsigned long flags;
 
@@ -1034,8 +1017,7 @@ static void lguest_time_irq(struct irq_desc *desc)
 static void lguest_time_init(void)
 {
 	/* Set up the timer interrupt (0) to go to our simple timer routine */
-	if (lguest_setup_irq(0) != 0)
-		panic("Could not set up timer irq");
+	lguest_setup_irq(0);
 	irq_set_handler(0, lguest_time_irq);
 
 	clocksource_register_hz(&lguest_clock, NSEC_PER_SEC);
@@ -1071,16 +1053,9 @@ static void lguest_load_sp0(struct tss_struct *tss,
 {
 	lazy_hcall3(LHCALL_SET_STACK, __KERNEL_DS | 0x1, thread->sp0,
 		   THREAD_SIZE / PAGE_SIZE);
-	tss->x86_tss.sp0 = thread->sp0;
 }
 
 /* Let's just say, I wouldn't do debugging under a Guest. */
-static unsigned long lguest_get_debugreg(int regno)
-{
-	/* FIXME: Implement */
-	return 0;
-}
-
 static void lguest_set_debugreg(int regno, unsigned long value)
 {
 	/* FIXME: Implement */
@@ -1200,129 +1175,25 @@ static __init char *lguest_memory_setup(void)
 	return "LGUEST";
 }
 
-/* Offset within PCI config space of BAR access capability. */
-static int console_cfg_offset = 0;
-static int console_access_cap;
-
-/* Set up so that we access off in bar0 (on bus 0, device 1, function 0) */
-static void set_cfg_window(u32 cfg_offset, u32 off)
-{
-	write_pci_config_byte(0, 1, 0,
-			      cfg_offset + offsetof(struct virtio_pci_cap, bar),
-			      0);
-	write_pci_config(0, 1, 0,
-			 cfg_offset + offsetof(struct virtio_pci_cap, length),
-			 4);
-	write_pci_config(0, 1, 0,
-			 cfg_offset + offsetof(struct virtio_pci_cap, offset),
-			 off);
-}
-
-static void write_bar_via_cfg(u32 cfg_offset, u32 off, u32 val)
-{
-	/*
-	 * We could set this up once, then leave it; nothing else in the *
-	 * kernel should touch these registers.  But if it went wrong, that
-	 * would be a horrible bug to find.
-	 */
-	set_cfg_window(cfg_offset, off);
-	write_pci_config(0, 1, 0,
-			 cfg_offset + sizeof(struct virtio_pci_cap), val);
-}
-
-static void probe_pci_console(void)
-{
-	u8 cap, common_cap = 0, device_cap = 0;
-	u32 device_len;
-
-	/* Avoid recursive printk into here. */
-	console_cfg_offset = -1;
-
-	if (!early_pci_allowed()) {
-		printk(KERN_ERR "lguest: early PCI access not allowed!\n");
-		return;
-	}
-
-	/* We expect a console PCI device at BUS0, slot 1. */
-	if (read_pci_config(0, 1, 0, 0) != 0x10431AF4) {
-		printk(KERN_ERR "lguest: PCI device is %#x!\n",
-		       read_pci_config(0, 1, 0, 0));
-		return;
-	}
-
-	/* Find the capabilities we need (must be in bar0) */
-	cap = read_pci_config_byte(0, 1, 0, PCI_CAPABILITY_LIST);
-	while (cap) {
-		u8 vndr = read_pci_config_byte(0, 1, 0, cap);
-		if (vndr == PCI_CAP_ID_VNDR) {
-			u8 type, bar;
-
-			type = read_pci_config_byte(0, 1, 0,
-			    cap + offsetof(struct virtio_pci_cap, cfg_type));
-			bar = read_pci_config_byte(0, 1, 0,
-			    cap + offsetof(struct virtio_pci_cap, bar));
-
-			switch (type) {
-			case VIRTIO_PCI_CAP_DEVICE_CFG:
-				if (bar == 0)
-					device_cap = cap;
-				break;
-			case VIRTIO_PCI_CAP_PCI_CFG:
-				console_access_cap = cap;
-				break;
-			}
-		}
-		cap = read_pci_config_byte(0, 1, 0, cap + PCI_CAP_LIST_NEXT);
-	}
-	if (!device_cap || !console_access_cap) {
-		printk(KERN_ERR "lguest: No caps (%u/%u/%u) in console!\n",
-		       common_cap, device_cap, console_access_cap);
-		return;
-	}
-
-	/*
-	 * Note that we can't check features, until we've set the DRIVER
-	 * status bit.  We don't want to do that until we have a real driver,
-	 * so we just check that the device-specific config has room for
-	 * emerg_wr.  If it doesn't support VIRTIO_CONSOLE_F_EMERG_WRITE
-	 * it should ignore the access.
-	 */
-	device_len = read_pci_config(0, 1, 0,
-			device_cap + offsetof(struct virtio_pci_cap, length));
-	if (device_len < (offsetof(struct virtio_console_config, emerg_wr)
-			  + sizeof(u32))) {
-		printk(KERN_ERR "lguest: console missing emerg_wr field\n");
-		return;
-	}
-
-	console_cfg_offset = read_pci_config(0, 1, 0,
-			device_cap + offsetof(struct virtio_pci_cap, offset));
-	printk(KERN_INFO "lguest: Console via virtio-pci emerg_wr\n");
-}
-
 /*
  * We will eventually use the virtio console device to produce console output,
- * but before that is set up we use the virtio PCI console's backdoor mmio
- * access and the "emergency" write facility (which is legal even before the
- * device is configured).
+ * but before that is set up we use LHCALL_NOTIFY on normal memory to produce
+ * console output.
  */
 static __init int early_put_chars(u32 vtermno, const char *buf, int count)
 {
-	/* If we couldn't find PCI console, forget it. */
-	if (console_cfg_offset < 0)
-		return count;
+	char scratch[17];
+	unsigned int len = count;
 
-	if (unlikely(!console_cfg_offset)) {
-		probe_pci_console();
-		if (console_cfg_offset < 0)
-			return count;
-	}
+	/* We use a nul-terminated string, so we make a copy.  Icky, huh? */
+	if (len > sizeof(scratch) - 1)
+		len = sizeof(scratch) - 1;
+	scratch[len] = '\0';
+	memcpy(scratch, buf, len);
+	hcall(LHCALL_NOTIFY, __pa(scratch), 0, 0, 0);
 
-	write_bar_via_cfg(console_access_cap,
-			  console_cfg_offset
-			  + offsetof(struct virtio_console_config, emerg_wr),
-			  buf[0]);
-	return 1;
+	/* This routine returns the number of bytes actually written. */
+	return len;
 }
 
 /*
@@ -1355,7 +1226,7 @@ static void lguest_restart(char *reason)
  * fit comfortably.
  *
  * First we need assembly templates of each of the patchable Guest operations,
- * and these are in head_32.S.
+ * and these are in i386_head.S.
  */
 
 /*G:060 We construct a table from the assembler templates: */
@@ -1401,6 +1272,8 @@ __init void lguest_init(void)
 {
 	/* We're under lguest. */
 	pv_info.name = "lguest";
+	/* Paravirt is enabled. */
+	pv_info.paravirt_enabled = 1;
 	/* We're running at privilege level 1, not 0 as normal. */
 	pv_info.kernel_rpl = 1;
 	/* Everyone except Xen runs with this set. */
@@ -1412,9 +1285,9 @@ __init void lguest_init(void)
 	 */
 
 	/* Interrupt-related operations */
-	pv_irq_ops.save_fl = PV_CALLEE_SAVE(lguest_save_fl);
+	pv_irq_ops.save_fl = PV_CALLEE_SAVE(save_fl);
 	pv_irq_ops.restore_fl = __PV_IS_CALLEE_SAVE(lg_restore_fl);
-	pv_irq_ops.irq_disable = PV_CALLEE_SAVE(lguest_irq_disable);
+	pv_irq_ops.irq_disable = PV_CALLEE_SAVE(irq_disable);
 	pv_irq_ops.irq_enable = __PV_IS_CALLEE_SAVE(lg_irq_enable);
 	pv_irq_ops.safe_halt = lguest_safe_halt;
 
@@ -1430,7 +1303,6 @@ __init void lguest_init(void)
 	pv_cpu_ops.load_tr_desc = lguest_load_tr_desc;
 	pv_cpu_ops.set_ldt = lguest_set_ldt;
 	pv_cpu_ops.load_tls = lguest_load_tls;
-	pv_cpu_ops.get_debugreg = lguest_get_debugreg;
 	pv_cpu_ops.set_debugreg = lguest_set_debugreg;
 	pv_cpu_ops.clts = lguest_clts;
 	pv_cpu_ops.read_cr0 = lguest_read_cr0;
@@ -1463,6 +1335,7 @@ __init void lguest_init(void)
 	pv_mmu_ops.lazy_mode.leave = lguest_leave_lazy_mmu_mode;
 	pv_mmu_ops.lazy_mode.flush = paravirt_flush_lazy_mmu;
 	pv_mmu_ops.pte_update = lguest_pte_update;
+	pv_mmu_ops.pte_update_defer = lguest_pte_update;
 
 #ifdef CONFIG_X86_LOCAL_APIC
 	/* APIC read/write intercepts */
@@ -1510,8 +1383,22 @@ __init void lguest_init(void)
 	 */
 	reserve_top_address(lguest_data.reserve_mem);
 
+	/*
+	 * If we don't initialize the lock dependency checker now, it crashes
+	 * atomic_notifier_chain_register, then paravirt_disable_iospace.
+	 */
+	lockdep_init();
+
 	/* Hook in our special panic hypercall code. */
 	atomic_notifier_chain_register(&panic_notifier_list, &paniced);
+
+	/*
+	 * The IDE code spends about 3 seconds probing for disks: if we reserve
+	 * all the I/O ports up front it can't get them and so doesn't probe.
+	 * Other device drivers are similar (but less severe).  This cuts the
+	 * kernel boot time on my machine from 4.1 seconds to 0.45 seconds.
+	 */
+	paravirt_disable_iospace();
 
 	/*
 	 * This is messy CPU setup stuff which the native boot code does before
@@ -1519,14 +1406,14 @@ __init void lguest_init(void)
 	 */
 	cpu_detect(&new_cpu_data);
 	/* head.S usually sets up the first capability word, so do it here. */
-	new_cpu_data.x86_capability[CPUID_1_EDX] = cpuid_edx(1);
+	new_cpu_data.x86_capability[0] = cpuid_edx(1);
 
 	/* Math is always hard! */
-	set_cpu_cap(&new_cpu_data, X86_FEATURE_FPU);
+	new_cpu_data.hard_math = 1;
 
 	/* We don't have features.  We have puppies!  Puppies! */
 #ifdef CONFIG_X86_MCE
-	mca_cfg.disabled = true;
+	mce_disabled = 1;
 #endif
 #ifdef CONFIG_ACPI
 	acpi_disabled = 1;
@@ -1541,13 +1428,6 @@ __init void lguest_init(void)
 
 	/* Register our very early console. */
 	virtio_cons_early_init(early_put_chars);
-
-	/* Don't let ACPI try to control our PCI interrupts. */
-	disable_acpi();
-
-	/* We control them ourselves, by overriding these two hooks. */
-	pcibios_enable_irq = lguest_enable_irq;
-	pcibios_disable_irq = lguest_disable_irq;
 
 	/*
 	 * Last of all, we set the power management poweroff hook to point to

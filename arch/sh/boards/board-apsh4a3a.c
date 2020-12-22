@@ -13,8 +13,6 @@
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/mtd/physmap.h>
-#include <linux/regulator/fixed.h>
-#include <linux/regulator/machine.h>
 #include <linux/smsc911x.h>
 #include <linux/irq.h>
 #include <linux/clk.h>
@@ -68,12 +66,6 @@ static struct platform_device nor_flash_device = {
 	.resource	= nor_flash_resources,
 };
 
-/* Dummy supplies, where voltage doesn't matter */
-static struct regulator_consumer_supply dummy_supplies[] = {
-	REGULATOR_SUPPLY("vddvario", "smsc911x"),
-	REGULATOR_SUPPLY("vdd33a", "smsc911x"),
-};
-
 static struct resource smsc911x_resources[] = {
 	[0] = {
 		.name		= "smsc911x-memory",
@@ -113,8 +105,6 @@ static struct platform_device *apsh4a3a_devices[] __initdata = {
 
 static int __init apsh4a3a_devices_setup(void)
 {
-	regulator_register_fixed(0, dummy_supplies, ARRAY_SIZE(dummy_supplies));
-
 	return platform_add_devices(apsh4a3a_devices,
 				    ARRAY_SIZE(apsh4a3a_devices));
 }

@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/types.h>
+#include <linux/miscdevice.h>
 #include <linux/watchdog.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -112,7 +113,7 @@ static int __init txx9wdt_probe(struct platform_device *dev)
 		txx9_imclk = NULL;
 		goto exit;
 	}
-	ret = clk_prepare_enable(txx9_imclk);
+	ret = clk_enable(txx9_imclk);
 	if (ret) {
 		clk_put(txx9_imclk);
 		txx9_imclk = NULL;
@@ -120,9 +121,9 @@ static int __init txx9wdt_probe(struct platform_device *dev)
 	}
 
 	res = platform_get_resource(dev, IORESOURCE_MEM, 0);
-	txx9wdt_reg = devm_ioremap_resource(&dev->dev, res);
-	if (IS_ERR(txx9wdt_reg)) {
-		ret = PTR_ERR(txx9wdt_reg);
+	txx9wdt_reg = devm_request_and_ioremap(&dev->dev, res);
+	if (!txx9wdt_reg) {
+		ret = -EBUSY;
 		goto exit;
 	}
 
@@ -131,7 +132,6 @@ static int __init txx9wdt_probe(struct platform_device *dev)
 	txx9wdt.timeout = timeout;
 	txx9wdt.min_timeout = 1;
 	txx9wdt.max_timeout = WD_MAX_TIMEOUT;
-	txx9wdt.parent = &dev->dev;
 	watchdog_set_nowayout(&txx9wdt, nowayout);
 
 	ret = watchdog_register_device(&txx9wdt);
@@ -144,7 +144,7 @@ static int __init txx9wdt_probe(struct platform_device *dev)
 	return 0;
 exit:
 	if (txx9_imclk) {
-		clk_disable_unprepare(txx9_imclk);
+		clk_disable(txx9_imclk);
 		clk_put(txx9_imclk);
 	}
 	return ret;
@@ -153,7 +153,7 @@ exit:
 static int __exit txx9wdt_remove(struct platform_device *dev)
 {
 	watchdog_unregister_device(&txx9wdt);
-	clk_disable_unprepare(txx9_imclk);
+	clk_disable(txx9_imclk);
 	clk_put(txx9_imclk);
 	return 0;
 }
@@ -168,11 +168,24 @@ static struct platform_driver txx9wdt_driver = {
 	.shutdown = txx9wdt_shutdown,
 	.driver = {
 		.name = "txx9wdt",
+		.owner = THIS_MODULE,
 	},
 };
 
-module_platform_driver_probe(txx9wdt_driver, txx9wdt_probe);
+static int __init watchdog_init(void)
+{
+	return platform_driver_probe(&txx9wdt_driver, txx9wdt_probe);
+}
+
+static void __exit watchdog_exit(void)
+{
+	platform_driver_unregister(&txx9wdt_driver);
+}
+
+module_init(watchdog_init);
+module_exit(watchdog_exit);
 
 MODULE_DESCRIPTION("TXx9 Watchdog Driver");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 MODULE_ALIAS("platform:txx9wdt");

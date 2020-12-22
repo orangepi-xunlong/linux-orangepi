@@ -3,44 +3,53 @@
 #
 
 # Common objects
-obj-y				:= timer.o
+obj-y				:= timer.o console.o clock.o
 
 # CPU objects
-obj-$(CONFIG_ARCH_SH73A0)	+= setup-sh73a0.o
-obj-$(CONFIG_ARCH_R8A73A4)	+= setup-r8a73a4.o
-obj-$(CONFIG_ARCH_R8A7740)	+= setup-r8a7740.o
-obj-$(CONFIG_ARCH_R8A7778)	+= setup-r8a7778.o
-obj-$(CONFIG_ARCH_R8A7779)	+= setup-r8a7779.o pm-r8a7779.o
-obj-$(CONFIG_ARCH_R8A7790)	+= setup-r8a7790.o
-obj-$(CONFIG_ARCH_R8A7791)	+= setup-r8a7791.o
-obj-$(CONFIG_ARCH_R8A7792)	+= setup-r8a7792.o
-obj-$(CONFIG_ARCH_R8A7793)	+= setup-r8a7793.o
-obj-$(CONFIG_ARCH_R8A7794)	+= setup-r8a7794.o
-obj-$(CONFIG_ARCH_EMEV2)	+= setup-emev2.o
-obj-$(CONFIG_ARCH_R7S72100)	+= setup-r7s72100.o
-
-# CPU reset vector handling objects
-cpu-y				:= platsmp.o headsmp.o
-
-# Shared SoC family objects
-obj-$(CONFIG_ARCH_RCAR_GEN2)	+= setup-rcar-gen2.o platsmp-apmu.o $(cpu-y)
-CFLAGS_setup-rcar-gen2.o	+= -march=armv7-a
-obj-$(CONFIG_ARCH_R8A7790)	+= regulator-quirk-rcar-gen2.o
-obj-$(CONFIG_ARCH_R8A7791)	+= regulator-quirk-rcar-gen2.o
-obj-$(CONFIG_ARCH_R8A7793)	+= regulator-quirk-rcar-gen2.o
+obj-$(CONFIG_ARCH_SH7367)	+= setup-sh7367.o clock-sh7367.o intc-sh7367.o
+obj-$(CONFIG_ARCH_SH7377)	+= setup-sh7377.o clock-sh7377.o intc-sh7377.o
+obj-$(CONFIG_ARCH_SH7372)	+= setup-sh7372.o clock-sh7372.o intc-sh7372.o
+obj-$(CONFIG_ARCH_SH73A0)	+= setup-sh73a0.o clock-sh73a0.o intc-sh73a0.o
+obj-$(CONFIG_ARCH_R8A7740)	+= setup-r8a7740.o clock-r8a7740.o intc-r8a7740.o
+obj-$(CONFIG_ARCH_R8A7779)	+= setup-r8a7779.o clock-r8a7779.o intc-r8a7779.o
 
 # SMP objects
-smp-y				:= $(cpu-y)
-smp-$(CONFIG_ARCH_SH73A0)	+= smp-sh73a0.o headsmp-scu.o platsmp-scu.o
-smp-$(CONFIG_ARCH_R8A7779)	+= smp-r8a7779.o headsmp-scu.o platsmp-scu.o
-smp-$(CONFIG_ARCH_R8A7790)	+= smp-r8a7790.o
-smp-$(CONFIG_ARCH_R8A7791)	+= smp-r8a7791.o
-smp-$(CONFIG_ARCH_EMEV2)	+= smp-emev2.o headsmp-scu.o platsmp-scu.o
+smp-y				:= platsmp.o headsmp.o
+smp-$(CONFIG_HOTPLUG_CPU)	+= hotplug.o
+smp-$(CONFIG_ARCH_SH73A0)	+= smp-sh73a0.o
+smp-$(CONFIG_ARCH_R8A7779)	+= smp-r8a7779.o
+
+# Pinmux setup
+pfc-y				:=
+pfc-$(CONFIG_ARCH_SH7367)	+= pfc-sh7367.o
+pfc-$(CONFIG_ARCH_SH7377)	+= pfc-sh7377.o
+pfc-$(CONFIG_ARCH_SH7372)	+= pfc-sh7372.o
+pfc-$(CONFIG_ARCH_SH73A0)	+= pfc-sh73a0.o
+pfc-$(CONFIG_ARCH_R8A7740)	+= pfc-r8a7740.o
+pfc-$(CONFIG_ARCH_R8A7779)	+= pfc-r8a7779.o
+
+# IRQ objects
+obj-$(CONFIG_ARCH_SH7367)	+= entry-intc.o
+obj-$(CONFIG_ARCH_SH7377)	+= entry-intc.o
+obj-$(CONFIG_ARCH_SH7372)	+= entry-intc.o
+obj-$(CONFIG_ARCH_R8A7740)	+= entry-intc.o
 
 # PM objects
 obj-$(CONFIG_SUSPEND)		+= suspend.o
-obj-$(CONFIG_PM_RMOBILE)	+= pm-rmobile.o
-obj-$(CONFIG_ARCH_RCAR_GEN2)	+= pm-rcar-gen2.o
+obj-$(CONFIG_CPU_IDLE)		+= cpuidle.o
+obj-$(CONFIG_ARCH_SH7372)	+= pm-sh7372.o sleep-sh7372.o
+obj-$(CONFIG_ARCH_R8A7779)	+= pm-r8a7779.o
+
+# Board objects
+obj-$(CONFIG_MACH_G3EVM)	+= board-g3evm.o
+obj-$(CONFIG_MACH_G4EVM)	+= board-g4evm.o
+obj-$(CONFIG_MACH_AP4EVB)	+= board-ap4evb.o
+obj-$(CONFIG_MACH_AG5EVM)	+= board-ag5evm.o
+obj-$(CONFIG_MACH_MACKEREL)	+= board-mackerel.o
+obj-$(CONFIG_MACH_KOTA2)	+= board-kota2.o
+obj-$(CONFIG_MACH_BONITO)	+= board-bonito.o
+obj-$(CONFIG_MACH_MARZEN)	+= board-marzen.o
 
 # Framework support
 obj-$(CONFIG_SMP)		+= $(smp-y)
+obj-$(CONFIG_GENERIC_GPIO)	+= $(pfc-y)

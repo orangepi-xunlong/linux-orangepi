@@ -22,10 +22,9 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#include <mach/mux.h>
-
-#include <mach/usb.h>
-
+#include <plat/mux.h>
+#include <plat/usb.h>
+#include <plat/board.h>
 #include "common.h"
 
 /* assume no Mini-AB port */
@@ -51,6 +50,9 @@ static struct omap_usb_config generic1610_usb_config __initdata = {
 };
 #endif
 
+static struct omap_board_config_kernel generic_config[] __initdata = {
+};
+
 static void __init omap_generic_init(void)
 {
 #ifdef CONFIG_ARCH_OMAP15XX
@@ -72,6 +74,8 @@ static void __init omap_generic_init(void)
 	}
 #endif
 
+	omap_board_config = generic_config;
+	omap_board_config_size = ARRAY_SIZE(generic_config);
 	omap_serial_init();
 	omap_register_i2c_bus(1, 100, NULL, 0);
 }
@@ -81,10 +85,9 @@ MACHINE_START(OMAP_GENERIC, "Generic OMAP1510/1610/1710")
 	.atag_offset	= 0x100,
 	.map_io		= omap16xx_map_io,
 	.init_early	= omap1_init_early,
+	.reserve	= omap_reserve,
 	.init_irq	= omap1_init_irq,
-	.handle_irq	= omap1_handle_irq,
 	.init_machine	= omap_generic_init,
-	.init_late	= omap1_init_late,
-	.init_time	= omap1_timer_init,
+	.timer		= &omap1_timer,
 	.restart	= omap1_restart,
 MACHINE_END

@@ -29,6 +29,7 @@
 
 #include <linux/delay.h>
 #include <linux/types.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/in.h>
 #include <linux/kernel.h>
@@ -42,7 +43,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/wireless.h>
-#include <net/cfg80211.h>
+#include <linux/ieee80211.h>
 
 #include <net/iw_handler.h>
 
@@ -378,7 +379,8 @@ static int wl3501_esbq_exec(struct wl3501_card *this, void *sig, int sig_size)
 	return rc;
 }
 
-static int wl3501_request_mib(struct wl3501_card *this, u8 index, void *bf)
+static int wl3501_get_mib_value(struct wl3501_card *this, u8 index,
+				void *bf, int size)
 {
 	struct wl3501_get_req sig = {
 		.sig_id	    = WL3501_SIG_GET_REQ,
@@ -394,30 +396,18 @@ static int wl3501_request_mib(struct wl3501_card *this, u8 index, void *bf)
 			wl3501_set_to_wla(this, ptr, &sig, sizeof(sig));
 			wl3501_esbq_req(this, &ptr);
 			this->sig_get_confirm.mib_status = 255;
-			rc = 0;
+			spin_unlock_irqrestore(&this->lock, flags);
+			rc = wait_event_interruptible(this->wait,
+				this->sig_get_confirm.mib_status != 255);
+			if (!rc)
+				memcpy(bf, this->sig_get_confirm.mib_value,
+				       size);
+			goto out;
 		}
 	}
 	spin_unlock_irqrestore(&this->lock, flags);
-
+out:
 	return rc;
-}
-
-static int wl3501_get_mib_value(struct wl3501_card *this, u8 index,
-				void *bf, int size)
-{
-	int rc;
-
-	rc = wl3501_request_mib(this, index, bf);
-	if (rc)
-		return rc;
-
-	rc = wait_event_interruptible(this->wait,
-		this->sig_get_confirm.mib_status != 255);
-	if (rc)
-		return rc;
-
-	memcpy(bf, this->sig_get_confirm.mib_value, size);
-	return 0;
 }
 
 static int wl3501_pwr_mgmt(struct wl3501_card *this, int suspend)
@@ -683,7 +673,8 @@ static void wl3501_mgmt_scan_confirm(struct wl3501_card *this, u16 addr)
 				matchflag = 1;
 			if (matchflag) {
 				for (i = 0; i < this->bss_cnt; i++) {
-					if (ether_addr_equal_unaligned(this->bss_set[i].bssid, sig.bssid)) {
+					if (!memcmp(this->bss_set[i].bssid,
+						    sig.bssid, ETH_ALEN)) {
 						matchflag = 0;
 						break;
 					}
@@ -1258,9 +1249,7 @@ static int wl3501_reset(struct net_device *dev)
 {
 	struct wl3501_card *this = netdev_priv(dev);
 	int rc = -ENODEV;
-	unsigned long flags;
 
-	spin_lock_irqsave(&this->lock, flags);
 	wl3501_block_interrupt(this);
 
 	if (wl3501_init_firmware(this)) {
@@ -1282,22 +1271,25 @@ static int wl3501_reset(struct net_device *dev)
 	pr_debug("%s: device reset", dev->name);
 	rc = 0;
 out:
-	spin_unlock_irqrestore(&this->lock, flags);
 	return rc;
 }
 
 static void wl3501_tx_timeout(struct net_device *dev)
 {
+	struct wl3501_card *this = netdev_priv(dev);
 	struct net_device_stats *stats = &dev->stats;
+	unsigned long flags;
 	int rc;
 
 	stats->tx_errors++;
+	spin_lock_irqsave(&this->lock, flags);
 	rc = wl3501_reset(dev);
+	spin_unlock_irqrestore(&this->lock, flags);
 	if (rc)
 		printk(KERN_ERR "%s: Error %d resetting card on Tx timeout!\n",
 		       dev->name, rc);
 	else {
-		netif_trans_update(dev); /* prevent tx timeout */
+		dev->trans_start = jiffies; /* prevent tx timeout */
 		netif_wake_queue(dev);
 	}
 }
@@ -1463,8 +1455,7 @@ static int wl3501_get_freq(struct net_device *dev, struct iw_request_info *info,
 {
 	struct wl3501_card *this = netdev_priv(dev);
 
-	wrqu->freq.m = 100000 *
-		ieee80211_channel_to_frequency(this->chan, NL80211_BAND_2GHZ);
+	wrqu->freq.m = ieee80211_dsss_chan_to_freq(this->chan) * 100000;
 	wrqu->freq.e = 1;
 	return 0;
 }
@@ -1529,12 +1520,13 @@ static int wl3501_set_wap(struct net_device *dev, struct iw_request_info *info,
 			  union iwreq_data *wrqu, char *extra)
 {
 	struct wl3501_card *this = netdev_priv(dev);
+	static const u8 bcast[ETH_ALEN] = { 255, 255, 255, 255, 255, 255 };
 	int rc = -EINVAL;
 
 	/* FIXME: we support other ARPHRDs...*/
 	if (wrqu->ap_addr.sa_family != ARPHRD_ETHER)
 		goto out;
-	if (is_broadcast_ether_addr(wrqu->ap_addr.sa_data)) {
+	if (!memcmp(bcast, wrqu->ap_addr.sa_data, ETH_ALEN)) {
 		/* FIXME: rescan? */
 	} else
 		memcpy(this->bssid, wrqu->ap_addr.sa_data, ETH_ALEN);
@@ -2022,7 +2014,19 @@ static struct pcmcia_driver wl3501_driver = {
 	.suspend	= wl3501_suspend,
 	.resume		= wl3501_resume,
 };
-module_pcmcia_driver(wl3501_driver);
+
+static int __init wl3501_init_module(void)
+{
+	return pcmcia_register_driver(&wl3501_driver);
+}
+
+static void __exit wl3501_exit_module(void)
+{
+	pcmcia_unregister_driver(&wl3501_driver);
+}
+
+module_init(wl3501_init_module);
+module_exit(wl3501_exit_module);
 
 MODULE_AUTHOR("Fox Chen <mhchen@golf.ccl.itri.org.tw>, "
 	      "Arnaldo Carvalho de Melo <acme@conectiva.com.br>,"

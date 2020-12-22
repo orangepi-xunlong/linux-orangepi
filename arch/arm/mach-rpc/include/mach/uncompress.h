@@ -76,7 +76,7 @@ int white;
 /*
  * This does not append a newline
  */
-static inline void putc(int c)
+static void putc(int c)
 {
 	extern void ll_write_char(char *, char c, char white);
 	int x,y;
@@ -189,3 +189,8 @@ static void arch_decomp_setup(void)
 	if (nr_pages * page_size < 4096*1024) error("<4M of mem\n");
 }
 #endif
+
+/*
+ * nothing to do
+ */
+#define arch_decomp_wdog()

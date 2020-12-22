@@ -16,6 +16,10 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  General Public License for more details.
  *
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+ *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -23,55 +27,112 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/types.h>
-#include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
 #include <linux/pci.h>
 #include <linux/pci-acpi.h>
 #include <linux/pci-aspm.h>
-#include <linux/dmar.h>
 #include <linux/acpi.h>
 #include <linux/slab.h>
-#include <linux/dmi.h>
-#include <acpi/apei.h>	/* for acpi_hest_init() */
+#include <acpi/acpi_bus.h>
+#include <acpi/acpi_drivers.h>
+#include <acpi/apei.h>
 
-#include "internal.h"
+#define PREFIX "ACPI: "
 
 #define _COMPONENT		ACPI_PCI_COMPONENT
 ACPI_MODULE_NAME("pci_root");
 #define ACPI_PCI_ROOT_CLASS		"pci_bridge"
 #define ACPI_PCI_ROOT_DEVICE_NAME	"PCI Root Bridge"
-static int acpi_pci_root_add(struct acpi_device *device,
-			     const struct acpi_device_id *not_used);
-static void acpi_pci_root_remove(struct acpi_device *device);
+static int acpi_pci_root_add(struct acpi_device *device);
+static int acpi_pci_root_remove(struct acpi_device *device, int type);
+static int acpi_pci_root_start(struct acpi_device *device);
 
-static int acpi_pci_root_scan_dependent(struct acpi_device *adev)
-{
-	acpiphp_check_host_bridge(adev);
-	return 0;
-}
-
-#define ACPI_PCIE_REQ_SUPPORT (OSC_PCI_EXT_CONFIG_SUPPORT \
-				| OSC_PCI_ASPM_SUPPORT \
-				| OSC_PCI_CLOCK_PM_SUPPORT \
-				| OSC_PCI_MSI_SUPPORT)
+#define ACPI_PCIE_REQ_SUPPORT (OSC_EXT_PCI_CONFIG_SUPPORT \
+				| OSC_ACTIVE_STATE_PWR_SUPPORT \
+				| OSC_CLOCK_PWR_CAPABILITY_SUPPORT \
+				| OSC_MSI_SUPPORT)
 
 static const struct acpi_device_id root_device_ids[] = {
 	{"PNP0A03", 0},
 	{"", 0},
 };
+MODULE_DEVICE_TABLE(acpi, root_device_ids);
 
-static struct acpi_scan_handler pci_root_handler = {
+static struct acpi_driver acpi_pci_root_driver = {
+	.name = "pci_root",
+	.class = ACPI_PCI_ROOT_CLASS,
 	.ids = root_device_ids,
-	.attach = acpi_pci_root_add,
-	.detach = acpi_pci_root_remove,
-	.hotplug = {
-		.enabled = true,
-		.scan_dependent = acpi_pci_root_scan_dependent,
-	},
+	.ops = {
+		.add = acpi_pci_root_add,
+		.remove = acpi_pci_root_remove,
+		.start = acpi_pci_root_start,
+		},
 };
 
+static LIST_HEAD(acpi_pci_roots);
+
+static struct acpi_pci_driver *sub_driver;
 static DEFINE_MUTEX(osc_lock);
+
+int acpi_pci_register_driver(struct acpi_pci_driver *driver)
+{
+	int n = 0;
+	struct acpi_pci_root *root;
+
+	struct acpi_pci_driver **pptr = &sub_driver;
+	while (*pptr)
+		pptr = &(*pptr)->next;
+	*pptr = driver;
+
+	if (!driver->add)
+		return 0;
+
+	list_for_each_entry(root, &acpi_pci_roots, node) {
+		driver->add(root->device->handle);
+		n++;
+	}
+
+	return n;
+}
+
+EXPORT_SYMBOL(acpi_pci_register_driver);
+
+void acpi_pci_unregister_driver(struct acpi_pci_driver *driver)
+{
+	struct acpi_pci_root *root;
+
+	struct acpi_pci_driver **pptr = &sub_driver;
+	while (*pptr) {
+		if (*pptr == driver)
+			break;
+		pptr = &(*pptr)->next;
+	}
+	BUG_ON(!*pptr);
+	*pptr = (*pptr)->next;
+
+	if (!driver->remove)
+		return;
+
+	list_for_each_entry(root, &acpi_pci_roots, node)
+		driver->remove(root->device->handle);
+}
+
+EXPORT_SYMBOL(acpi_pci_unregister_driver);
+
+acpi_handle acpi_get_pci_rootbridge_handle(unsigned int seg, unsigned int bus)
+{
+	struct acpi_pci_root *root;
+	
+	list_for_each_entry(root, &acpi_pci_roots, node)
+		if ((root->segment == (u16) seg) &&
+		    (root->secondary.start == (u16) bus))
+			return root->device->handle;
+	return NULL;		
+}
+
+EXPORT_SYMBOL_GPL(acpi_get_pci_rootbridge_handle);
 
 /**
  * acpi_is_root_bridge - determine whether an ACPI CA node is a PCI root bridge
@@ -102,16 +163,17 @@ get_root_bridge_busnr_callback(struct acpi_resource *resource, void *data)
 {
 	struct resource *res = data;
 	struct acpi_resource_address64 address;
-	acpi_status status;
 
-	status = acpi_resource_to_address64(resource, &address);
-	if (ACPI_FAILURE(status))
+	if (resource->type != ACPI_RESOURCE_TYPE_ADDRESS16 &&
+	    resource->type != ACPI_RESOURCE_TYPE_ADDRESS32 &&
+	    resource->type != ACPI_RESOURCE_TYPE_ADDRESS64)
 		return AE_OK;
 
-	if ((address.address.address_length > 0) &&
+	acpi_resource_to_address64(resource, &address);
+	if ((address.address_length > 0) &&
 	    (address.resource_type == ACPI_BUS_NUMBER_RANGE)) {
-		res->start = address.address.minimum;
-		res->end = address.address.minimum + address.address.address_length - 1;
+		res->start = address.minimum;
+		res->end = address.minimum + address.address_length - 1;
 	}
 
 	return AE_OK;
@@ -133,53 +195,19 @@ static acpi_status try_get_root_bridge_busnr(acpi_handle handle,
 	return AE_OK;
 }
 
-struct pci_osc_bit_struct {
-	u32 bit;
-	char *desc;
-};
-
-static struct pci_osc_bit_struct pci_osc_support_bit[] = {
-	{ OSC_PCI_EXT_CONFIG_SUPPORT, "ExtendedConfig" },
-	{ OSC_PCI_ASPM_SUPPORT, "ASPM" },
-	{ OSC_PCI_CLOCK_PM_SUPPORT, "ClockPM" },
-	{ OSC_PCI_SEGMENT_GROUPS_SUPPORT, "Segments" },
-	{ OSC_PCI_MSI_SUPPORT, "MSI" },
-};
-
-static struct pci_osc_bit_struct pci_osc_control_bit[] = {
-	{ OSC_PCI_EXPRESS_NATIVE_HP_CONTROL, "PCIeHotplug" },
-	{ OSC_PCI_SHPC_NATIVE_HP_CONTROL, "SHPCHotplug" },
-	{ OSC_PCI_EXPRESS_PME_CONTROL, "PME" },
-	{ OSC_PCI_EXPRESS_AER_CONTROL, "AER" },
-	{ OSC_PCI_EXPRESS_CAPABILITY_CONTROL, "PCIeCapability" },
-};
-
-static void decode_osc_bits(struct acpi_pci_root *root, char *msg, u32 word,
-			    struct pci_osc_bit_struct *table, int size)
+static void acpi_pci_bridge_scan(struct acpi_device *device)
 {
-	char buf[80];
-	int i, len = 0;
-	struct pci_osc_bit_struct *entry;
+	int status;
+	struct acpi_device *child = NULL;
 
-	buf[0] = '\0';
-	for (i = 0, entry = table; i < size; i++, entry++)
-		if (word & entry->bit)
-			len += snprintf(buf + len, sizeof(buf) - len, "%s%s",
-					len ? " " : "", entry->desc);
-
-	dev_info(&root->device->dev, "_OSC: %s [%s]\n", msg, buf);
-}
-
-static void decode_osc_support(struct acpi_pci_root *root, char *msg, u32 word)
-{
-	decode_osc_bits(root, msg, word, pci_osc_support_bit,
-			ARRAY_SIZE(pci_osc_support_bit));
-}
-
-static void decode_osc_control(struct acpi_pci_root *root, char *msg, u32 word)
-{
-	decode_osc_bits(root, msg, word, pci_osc_control_bit,
-			ARRAY_SIZE(pci_osc_control_bit));
+	if (device->flags.bus_address)
+		if (device->parent && device->parent->ops.bind) {
+			status = device->parent->ops.bind(device);
+			if (!status) {
+				list_for_each_entry(child, &device->children, node)
+					acpi_pci_bridge_scan(child);
+			}
+		}
 }
 
 static u8 pci_osc_uuid_str[] = "33DB4D5B-1FF7-401C-9657-7441C03DD766";
@@ -213,14 +241,14 @@ static acpi_status acpi_pci_query_osc(struct acpi_pci_root *root,
 	support &= OSC_PCI_SUPPORT_MASKS;
 	support |= root->osc_support_set;
 
-	capbuf[OSC_QUERY_DWORD] = OSC_QUERY_ENABLE;
-	capbuf[OSC_SUPPORT_DWORD] = support;
+	capbuf[OSC_QUERY_TYPE] = OSC_QUERY_ENABLE;
+	capbuf[OSC_SUPPORT_TYPE] = support;
 	if (control) {
 		*control &= OSC_PCI_CONTROL_MASKS;
-		capbuf[OSC_CONTROL_DWORD] = *control | root->osc_control_set;
+		capbuf[OSC_CONTROL_TYPE] = *control | root->osc_control_set;
 	} else {
 		/* Run _OSC query only with existing controls. */
-		capbuf[OSC_CONTROL_DWORD] = root->osc_control_set;
+		capbuf[OSC_CONTROL_TYPE] = root->osc_control_set;
 	}
 
 	status = acpi_pci_run_osc(root->device->handle, capbuf, &result);
@@ -235,7 +263,11 @@ static acpi_status acpi_pci_query_osc(struct acpi_pci_root *root,
 static acpi_status acpi_pci_osc_support(struct acpi_pci_root *root, u32 flags)
 {
 	acpi_status status;
+	acpi_handle tmp;
 
+	status = acpi_get_handle(root->device->handle, "_OSC", &tmp);
+	if (ACPI_FAILURE(status))
+		return status;
 	mutex_lock(&osc_lock);
 	status = acpi_pci_query_osc(root, flags, NULL);
 	mutex_unlock(&osc_lock);
@@ -245,15 +277,12 @@ static acpi_status acpi_pci_osc_support(struct acpi_pci_root *root, u32 flags)
 struct acpi_pci_root *acpi_pci_find_root(acpi_handle handle)
 {
 	struct acpi_pci_root *root;
-	struct acpi_device *device;
 
-	if (acpi_bus_get_device(handle, &device) ||
-	    acpi_match_device_ids(device, root_device_ids))
-		return NULL;
-
-	root = acpi_driver_data(device);
-
-	return root;
+	list_for_each_entry(root, &acpi_pci_roots, node) {
+		if (root->device->handle == handle)
+			return root;
+	}
+	return NULL;
 }
 EXPORT_SYMBOL_GPL(acpi_pci_find_root);
 
@@ -367,8 +396,9 @@ EXPORT_SYMBOL_GPL(acpi_get_pci_dev);
 acpi_status acpi_pci_osc_control_set(acpi_handle handle, u32 *mask, u32 req)
 {
 	struct acpi_pci_root *root;
-	acpi_status status = AE_OK;
+	acpi_status status;
 	u32 ctrl, capbuf[3];
+	acpi_handle tmp;
 
 	if (!mask)
 		return AE_BAD_PARAMETER;
@@ -380,6 +410,10 @@ acpi_status acpi_pci_osc_control_set(acpi_handle handle, u32 *mask, u32 req)
 	root = acpi_pci_find_root(handle);
 	if (!root)
 		return AE_NOT_EXIST;
+
+	status = acpi_get_handle(handle, "_OSC", &tmp);
+	if (ACPI_FAILURE(status))
+		return status;
 
 	mutex_lock(&osc_lock);
 
@@ -395,21 +429,17 @@ acpi_status acpi_pci_osc_control_set(acpi_handle handle, u32 *mask, u32 req)
 			goto out;
 		if (ctrl == *mask)
 			break;
-		decode_osc_control(root, "platform does not support",
-				   ctrl & ~(*mask));
 		ctrl = *mask;
 	}
 
 	if ((ctrl & req) != req) {
-		decode_osc_control(root, "not requesting control; platform does not support",
-				   req & ~(ctrl));
 		status = AE_SUPPORT;
 		goto out;
 	}
 
-	capbuf[OSC_QUERY_DWORD] = 0;
-	capbuf[OSC_SUPPORT_DWORD] = root->osc_support_set;
-	capbuf[OSC_CONTROL_DWORD] = ctrl;
+	capbuf[OSC_QUERY_TYPE] = 0;
+	capbuf[OSC_SUPPORT_TYPE] = root->osc_support_set;
+	capbuf[OSC_CONTROL_TYPE] = ctrl;
 	status = acpi_pci_run_osc(handle, capbuf, mask);
 	if (ACPI_SUCCESS(status))
 		root->osc_control_set = *mask;
@@ -419,130 +449,32 @@ out:
 }
 EXPORT_SYMBOL(acpi_pci_osc_control_set);
 
-static void negotiate_os_control(struct acpi_pci_root *root, int *no_aspm)
-{
-	u32 support, control, requested;
-	acpi_status status;
-	struct acpi_device *device = root->device;
-	acpi_handle handle = device->handle;
-
-	/*
-	 * Apple always return failure on _OSC calls when _OSI("Darwin") has
-	 * been called successfully. We know the feature set supported by the
-	 * platform, so avoid calling _OSC at all
-	 */
-
-	if (dmi_match(DMI_SYS_VENDOR, "Apple Inc.")) {
-		root->osc_control_set = ~OSC_PCI_EXPRESS_PME_CONTROL;
-		decode_osc_control(root, "OS assumes control of",
-				   root->osc_control_set);
-		return;
-	}
-
-	/*
-	 * All supported architectures that use ACPI have support for
-	 * PCI domains, so we indicate this in _OSC support capabilities.
-	 */
-	support = OSC_PCI_SEGMENT_GROUPS_SUPPORT;
-	if (pci_ext_cfg_avail())
-		support |= OSC_PCI_EXT_CONFIG_SUPPORT;
-	if (pcie_aspm_support_enabled())
-		support |= OSC_PCI_ASPM_SUPPORT | OSC_PCI_CLOCK_PM_SUPPORT;
-	if (pci_msi_enabled())
-		support |= OSC_PCI_MSI_SUPPORT;
-
-	decode_osc_support(root, "OS supports", support);
-	status = acpi_pci_osc_support(root, support);
-	if (ACPI_FAILURE(status)) {
-		dev_info(&device->dev, "_OSC failed (%s); disabling ASPM\n",
-			 acpi_format_exception(status));
-		*no_aspm = 1;
-		return;
-	}
-
-	if (pcie_ports_disabled) {
-		dev_info(&device->dev, "PCIe port services disabled; not requesting _OSC control\n");
-		return;
-	}
-
-	if ((support & ACPI_PCIE_REQ_SUPPORT) != ACPI_PCIE_REQ_SUPPORT) {
-		decode_osc_support(root, "not requesting OS control; OS requires",
-				   ACPI_PCIE_REQ_SUPPORT);
-		return;
-	}
-
-	control = OSC_PCI_EXPRESS_CAPABILITY_CONTROL
-		| OSC_PCI_EXPRESS_PME_CONTROL;
-
-	if (IS_ENABLED(CONFIG_HOTPLUG_PCI_PCIE))
-		control |= OSC_PCI_EXPRESS_NATIVE_HP_CONTROL;
-
-	if (pci_aer_available()) {
-		if (aer_acpi_firmware_first())
-			dev_info(&device->dev,
-				 "PCIe AER handled by firmware\n");
-		else
-			control |= OSC_PCI_EXPRESS_AER_CONTROL;
-	}
-
-	requested = control;
-	status = acpi_pci_osc_control_set(handle, &control,
-					  OSC_PCI_EXPRESS_CAPABILITY_CONTROL);
-	if (ACPI_SUCCESS(status)) {
-		decode_osc_control(root, "OS now controls", control);
-		if (acpi_gbl_FADT.boot_flags & ACPI_FADT_NO_ASPM) {
-			/*
-			 * We have ASPM control, but the FADT indicates that
-			 * it's unsupported. Leave existing configuration
-			 * intact and prevent the OS from touching it.
-			 */
-			dev_info(&device->dev, "FADT indicates ASPM is unsupported, using BIOS configuration\n");
-			*no_aspm = 1;
-		}
-	} else {
-		decode_osc_control(root, "OS requested", requested);
-		decode_osc_control(root, "platform willing to grant", control);
-		dev_info(&device->dev, "_OSC failed (%s); disabling ASPM\n",
-			acpi_format_exception(status));
-
-		/*
-		 * We want to disable ASPM here, but aspm_disabled
-		 * needs to remain in its state from boot so that we
-		 * properly handle PCIe 1.1 devices.  So we set this
-		 * flag here, to defer the action until after the ACPI
-		 * root scan.
-		 */
-		*no_aspm = 1;
-	}
-}
-
-static int acpi_pci_root_add(struct acpi_device *device,
-			     const struct acpi_device_id *not_used)
+static int __devinit acpi_pci_root_add(struct acpi_device *device)
 {
 	unsigned long long segment, bus;
 	acpi_status status;
 	int result;
 	struct acpi_pci_root *root;
-	acpi_handle handle = device->handle;
-	int no_aspm = 0;
-	bool hotadd = system_state != SYSTEM_BOOTING;
+	acpi_handle handle;
+	struct acpi_device *child;
+	u32 flags, base_flags;
 
 	root = kzalloc(sizeof(struct acpi_pci_root), GFP_KERNEL);
 	if (!root)
 		return -ENOMEM;
 
 	segment = 0;
-	status = acpi_evaluate_integer(handle, METHOD_NAME__SEG, NULL,
+	status = acpi_evaluate_integer(device->handle, METHOD_NAME__SEG, NULL,
 				       &segment);
 	if (ACPI_FAILURE(status) && status != AE_NOT_FOUND) {
-		dev_err(&device->dev,  "can't evaluate _SEG\n");
+		printk(KERN_ERR PREFIX "can't evaluate _SEG\n");
 		result = -ENODEV;
 		goto end;
 	}
 
 	/* Check _CRS first, then _BBN.  If no _BBN, default to zero. */
 	root->secondary.flags = IORESOURCE_BUS;
-	status = try_get_root_bridge_busnr(handle, &root->secondary);
+	status = try_get_root_bridge_busnr(device->handle, &root->secondary);
 	if (ACPI_FAILURE(status)) {
 		/*
 		 * We need both the start and end of the downstream bus range
@@ -551,371 +483,185 @@ static int acpi_pci_root_add(struct acpi_device *device,
 		 * can do is assume [_BBN-0xFF] or [0-0xFF].
 		 */
 		root->secondary.end = 0xFF;
-		dev_warn(&device->dev,
-			 FW_BUG "no secondary bus range in _CRS\n");
-		status = acpi_evaluate_integer(handle, METHOD_NAME__BBN,
+		printk(KERN_WARNING FW_BUG PREFIX
+		       "no secondary bus range in _CRS\n");
+		status = acpi_evaluate_integer(device->handle, METHOD_NAME__BBN,
 					       NULL, &bus);
 		if (ACPI_SUCCESS(status))
 			root->secondary.start = bus;
 		else if (status == AE_NOT_FOUND)
 			root->secondary.start = 0;
 		else {
-			dev_err(&device->dev, "can't evaluate _BBN\n");
+			printk(KERN_ERR PREFIX "can't evaluate _BBN\n");
 			result = -ENODEV;
 			goto end;
 		}
 	}
 
+	INIT_LIST_HEAD(&root->node);
 	root->device = device;
 	root->segment = segment & 0xFFFF;
 	strcpy(acpi_device_name(device), ACPI_PCI_ROOT_DEVICE_NAME);
 	strcpy(acpi_device_class(device), ACPI_PCI_ROOT_CLASS);
 	device->driver_data = root;
 
-	if (hotadd && dmar_device_add(handle)) {
-		result = -ENXIO;
-		goto end;
-	}
-
-	pr_info(PREFIX "%s [%s] (domain %04x %pR)\n",
-	       acpi_device_name(device), acpi_device_bid(device),
-	       root->segment, &root->secondary);
-
-	root->mcfg_addr = acpi_pci_root_get_mcfg_addr(handle);
-
-	negotiate_os_control(root, &no_aspm);
+	/*
+	 * All supported architectures that use ACPI have support for
+	 * PCI domains, so we indicate this in _OSC support capabilities.
+	 */
+	flags = base_flags = OSC_PCI_SEGMENT_GROUPS_SUPPORT;
+	acpi_pci_osc_support(root, flags);
 
 	/*
 	 * TBD: Need PCI interface for enumeration/configuration of roots.
 	 */
 
+	/* TBD: Locking */
+	list_add_tail(&root->node, &acpi_pci_roots);
+
+	printk(KERN_INFO PREFIX "%s [%s] (domain %04x %pR)\n",
+	       acpi_device_name(device), acpi_device_bid(device),
+	       root->segment, &root->secondary);
+
 	/*
 	 * Scan the Root Bridge
 	 * --------------------
 	 * Must do this prior to any attempt to bind the root device, as the
-	 * PCI namespace does not get created until this call is made (and
+	 * PCI namespace does not get created until this call is made (and 
 	 * thus the root bridge's pci_dev does not exist).
 	 */
 	root->bus = pci_acpi_scan_root(root);
 	if (!root->bus) {
-		dev_err(&device->dev,
-			"Bus %04x:%02x not present in PCI namespace\n",
-			root->segment, (unsigned int)root->secondary.start);
-		device->driver_data = NULL;
+		printk(KERN_ERR PREFIX
+			    "Bus %04x:%02x not present in PCI namespace\n",
+			    root->segment, (unsigned int)root->secondary.start);
 		result = -ENODEV;
-		goto remove_dmar;
+		goto end;
 	}
 
-	if (no_aspm)
-		pcie_no_aspm();
+	/*
+	 * Attach ACPI-PCI Context
+	 * -----------------------
+	 * Thus binding the ACPI and PCI devices.
+	 */
+	result = acpi_pci_bind_root(device);
+	if (result)
+		goto end;
 
-	pci_acpi_add_bus_pm_notifier(device);
+	/*
+	 * PCI Routing Table
+	 * -----------------
+	 * Evaluate and parse _PRT, if exists.
+	 */
+	status = acpi_get_handle(device->handle, METHOD_NAME__PRT, &handle);
+	if (ACPI_SUCCESS(status))
+		result = acpi_pci_irq_add_prt(device->handle, root->bus);
+
+	/*
+	 * Scan and bind all _ADR-Based Devices
+	 */
+	list_for_each_entry(child, &device->children, node)
+		acpi_pci_bridge_scan(child);
+
+	/* Indicate support for various _OSC capabilities. */
+	if (pci_ext_cfg_avail(root->bus->self))
+		flags |= OSC_EXT_PCI_CONFIG_SUPPORT;
+	if (pcie_aspm_support_enabled())
+		flags |= OSC_ACTIVE_STATE_PWR_SUPPORT |
+			OSC_CLOCK_PWR_CAPABILITY_SUPPORT;
+	if (pci_msi_enabled())
+		flags |= OSC_MSI_SUPPORT;
+	if (flags != base_flags)
+		acpi_pci_osc_support(root, flags);
+
+	if (!pcie_ports_disabled
+	    && (flags & ACPI_PCIE_REQ_SUPPORT) == ACPI_PCIE_REQ_SUPPORT) {
+		flags = OSC_PCI_EXPRESS_CAP_STRUCTURE_CONTROL
+			| OSC_PCI_EXPRESS_NATIVE_HP_CONTROL
+			| OSC_PCI_EXPRESS_PME_CONTROL;
+
+		if (pci_aer_available()) {
+			if (aer_acpi_firmware_first())
+				dev_dbg(root->bus->bridge,
+					"PCIe errors handled by BIOS.\n");
+			else
+				flags |= OSC_PCI_EXPRESS_AER_CONTROL;
+		}
+
+		dev_info(root->bus->bridge,
+			"Requesting ACPI _OSC control (0x%02x)\n", flags);
+
+		status = acpi_pci_osc_control_set(device->handle, &flags,
+					OSC_PCI_EXPRESS_CAP_STRUCTURE_CONTROL);
+		if (ACPI_SUCCESS(status)) {
+			dev_info(root->bus->bridge,
+				"ACPI _OSC control (0x%02x) granted\n", flags);
+			if (acpi_gbl_FADT.boot_flags & ACPI_FADT_NO_ASPM) {
+				/*
+				 * We have ASPM control, but the FADT indicates
+				 * that it's unsupported. Clear it.
+				 */
+				pcie_clear_aspm(root->bus);
+			}
+		} else {
+			dev_info(root->bus->bridge,
+				"ACPI _OSC request failed (%s), "
+				"returned control mask: 0x%02x\n",
+				acpi_format_exception(status), flags);
+			pr_info("ACPI _OSC control for PCIe not granted, "
+				"disabling ASPM\n");
+			pcie_no_aspm();
+		}
+	} else {
+		dev_info(root->bus->bridge,
+			 "Unable to request _OSC control "
+			 "(_OSC support mask: 0x%02x)\n", flags);
+	}
+
+	pci_acpi_add_bus_pm_notifier(device, root->bus);
 	if (device->wakeup.flags.run_wake)
 		device_set_run_wake(root->bus->bridge, true);
 
-	if (hotadd) {
-		pcibios_resource_survey_bus(root->bus);
-		pci_assign_unassigned_root_bus_resources(root->bus);
-		/*
-		 * This is only called for the hotadd case. For the boot-time
-		 * case, we need to wait until after PCI initialization in
-		 * order to deal with IOAPICs mapped in on a PCI BAR.
-		 *
-		 * This is currently x86-specific, because acpi_ioapic_add()
-		 * is an empty function without CONFIG_ACPI_HOTPLUG_IOAPIC.
-		 * And CONFIG_ACPI_HOTPLUG_IOAPIC depends on CONFIG_X86_IO_APIC
-		 * (see drivers/acpi/Kconfig).
-		 */
-		acpi_ioapic_add(root->device->handle);
-	}
+	return 0;
 
-	pci_lock_rescan_remove();
-	pci_bus_add_devices(root->bus);
-	pci_unlock_rescan_remove();
-	return 1;
-
-remove_dmar:
-	if (hotadd)
-		dmar_device_remove(handle);
 end:
+	if (!list_empty(&root->node))
+		list_del(&root->node);
 	kfree(root);
 	return result;
 }
 
-static void acpi_pci_root_remove(struct acpi_device *device)
+static int acpi_pci_root_start(struct acpi_device *device)
 {
 	struct acpi_pci_root *root = acpi_driver_data(device);
 
-	pci_lock_rescan_remove();
+	pci_bus_add_devices(root->bus);
+	return 0;
+}
 
-	pci_stop_root_bus(root->bus);
-
-	WARN_ON(acpi_ioapic_remove(root));
+static int acpi_pci_root_remove(struct acpi_device *device, int type)
+{
+	struct acpi_pci_root *root = acpi_driver_data(device);
 
 	device_set_run_wake(root->bus->bridge, false);
 	pci_acpi_remove_bus_pm_notifier(device);
 
-	pci_remove_root_bus(root->bus);
-
-	dmar_device_remove(device->handle);
-
-	pci_unlock_rescan_remove();
-
 	kfree(root);
+	return 0;
 }
 
-/*
- * Following code to support acpi_pci_root_create() is copied from
- * arch/x86/pci/acpi.c and modified so it could be reused by x86, IA64
- * and ARM64.
- */
-static void acpi_pci_root_validate_resources(struct device *dev,
-					     struct list_head *resources,
-					     unsigned long type)
-{
-	LIST_HEAD(list);
-	struct resource *res1, *res2, *root = NULL;
-	struct resource_entry *tmp, *entry, *entry2;
-
-	BUG_ON((type & (IORESOURCE_MEM | IORESOURCE_IO)) == 0);
-	root = (type & IORESOURCE_MEM) ? &iomem_resource : &ioport_resource;
-
-	list_splice_init(resources, &list);
-	resource_list_for_each_entry_safe(entry, tmp, &list) {
-		bool free = false;
-		resource_size_t end;
-
-		res1 = entry->res;
-		if (!(res1->flags & type))
-			goto next;
-
-		/* Exclude non-addressable range or non-addressable portion */
-		end = min(res1->end, root->end);
-		if (end <= res1->start) {
-			dev_info(dev, "host bridge window %pR (ignored, not CPU addressable)\n",
-				 res1);
-			free = true;
-			goto next;
-		} else if (res1->end != end) {
-			dev_info(dev, "host bridge window %pR ([%#llx-%#llx] ignored, not CPU addressable)\n",
-				 res1, (unsigned long long)end + 1,
-				 (unsigned long long)res1->end);
-			res1->end = end;
-		}
-
-		resource_list_for_each_entry(entry2, resources) {
-			res2 = entry2->res;
-			if (!(res2->flags & type))
-				continue;
-
-			/*
-			 * I don't like throwing away windows because then
-			 * our resources no longer match the ACPI _CRS, but
-			 * the kernel resource tree doesn't allow overlaps.
-			 */
-			if (resource_overlaps(res1, res2)) {
-				res2->start = min(res1->start, res2->start);
-				res2->end = max(res1->end, res2->end);
-				dev_info(dev, "host bridge window expanded to %pR; %pR ignored\n",
-					 res2, res1);
-				free = true;
-				goto next;
-			}
-		}
-
-next:
-		resource_list_del(entry);
-		if (free)
-			resource_list_free_entry(entry);
-		else
-			resource_list_add_tail(entry, resources);
-	}
-}
-
-static void acpi_pci_root_remap_iospace(struct resource_entry *entry)
-{
-#ifdef PCI_IOBASE
-	struct resource *res = entry->res;
-	resource_size_t cpu_addr = res->start;
-	resource_size_t pci_addr = cpu_addr - entry->offset;
-	resource_size_t length = resource_size(res);
-	unsigned long port;
-
-	if (pci_register_io_range(cpu_addr, length))
-		goto err;
-
-	port = pci_address_to_pio(cpu_addr);
-	if (port == (unsigned long)-1)
-		goto err;
-
-	res->start = port;
-	res->end = port + length - 1;
-	entry->offset = port - pci_addr;
-
-	if (pci_remap_iospace(res, cpu_addr) < 0)
-		goto err;
-
-	pr_info("Remapped I/O %pa to %pR\n", &cpu_addr, res);
-	return;
-err:
-	res->flags |= IORESOURCE_DISABLED;
-#endif
-}
-
-int acpi_pci_probe_root_resources(struct acpi_pci_root_info *info)
-{
-	int ret;
-	struct list_head *list = &info->resources;
-	struct acpi_device *device = info->bridge;
-	struct resource_entry *entry, *tmp;
-	unsigned long flags;
-
-	flags = IORESOURCE_IO | IORESOURCE_MEM | IORESOURCE_MEM_8AND16BIT;
-	ret = acpi_dev_get_resources(device, list,
-				     acpi_dev_filter_resource_type_cb,
-				     (void *)flags);
-	if (ret < 0)
-		dev_warn(&device->dev,
-			 "failed to parse _CRS method, error code %d\n", ret);
-	else if (ret == 0)
-		dev_dbg(&device->dev,
-			"no IO and memory resources present in _CRS\n");
-	else {
-		resource_list_for_each_entry_safe(entry, tmp, list) {
-			if (entry->res->flags & IORESOURCE_IO)
-				acpi_pci_root_remap_iospace(entry);
-
-			if (entry->res->flags & IORESOURCE_DISABLED)
-				resource_list_destroy_entry(entry);
-			else
-				entry->res->name = info->name;
-		}
-		acpi_pci_root_validate_resources(&device->dev, list,
-						 IORESOURCE_MEM);
-		acpi_pci_root_validate_resources(&device->dev, list,
-						 IORESOURCE_IO);
-	}
-
-	return ret;
-}
-
-static void pci_acpi_root_add_resources(struct acpi_pci_root_info *info)
-{
-	struct resource_entry *entry, *tmp;
-	struct resource *res, *conflict, *root = NULL;
-
-	resource_list_for_each_entry_safe(entry, tmp, &info->resources) {
-		res = entry->res;
-		if (res->flags & IORESOURCE_MEM)
-			root = &iomem_resource;
-		else if (res->flags & IORESOURCE_IO)
-			root = &ioport_resource;
-		else
-			continue;
-
-		/*
-		 * Some legacy x86 host bridge drivers use iomem_resource and
-		 * ioport_resource as default resource pool, skip it.
-		 */
-		if (res == root)
-			continue;
-
-		conflict = insert_resource_conflict(root, res);
-		if (conflict) {
-			dev_info(&info->bridge->dev,
-				 "ignoring host bridge window %pR (conflicts with %s %pR)\n",
-				 res, conflict->name, conflict);
-			resource_list_destroy_entry(entry);
-		}
-	}
-}
-
-static void __acpi_pci_root_release_info(struct acpi_pci_root_info *info)
-{
-	struct resource *res;
-	struct resource_entry *entry, *tmp;
-
-	if (!info)
-		return;
-
-	resource_list_for_each_entry_safe(entry, tmp, &info->resources) {
-		res = entry->res;
-		if (res->parent &&
-		    (res->flags & (IORESOURCE_MEM | IORESOURCE_IO)))
-			release_resource(res);
-		resource_list_destroy_entry(entry);
-	}
-
-	info->ops->release_info(info);
-}
-
-static void acpi_pci_root_release_info(struct pci_host_bridge *bridge)
-{
-	struct resource *res;
-	struct resource_entry *entry;
-
-	resource_list_for_each_entry(entry, &bridge->windows) {
-		res = entry->res;
-		if (res->flags & IORESOURCE_IO)
-			pci_unmap_iospace(res);
-		if (res->parent &&
-		    (res->flags & (IORESOURCE_MEM | IORESOURCE_IO)))
-			release_resource(res);
-	}
-	__acpi_pci_root_release_info(bridge->release_data);
-}
-
-struct pci_bus *acpi_pci_root_create(struct acpi_pci_root *root,
-				     struct acpi_pci_root_ops *ops,
-				     struct acpi_pci_root_info *info,
-				     void *sysdata)
-{
-	int ret, busnum = root->secondary.start;
-	struct acpi_device *device = root->device;
-	int node = acpi_get_node(device->handle);
-	struct pci_bus *bus;
-
-	info->root = root;
-	info->bridge = device;
-	info->ops = ops;
-	INIT_LIST_HEAD(&info->resources);
-	snprintf(info->name, sizeof(info->name), "PCI Bus %04x:%02x",
-		 root->segment, busnum);
-
-	if (ops->init_info && ops->init_info(info))
-		goto out_release_info;
-	if (ops->prepare_resources)
-		ret = ops->prepare_resources(info);
-	else
-		ret = acpi_pci_probe_root_resources(info);
-	if (ret < 0)
-		goto out_release_info;
-
-	pci_acpi_root_add_resources(info);
-	pci_add_resource(&info->resources, &root->secondary);
-	bus = pci_create_root_bus(NULL, busnum, ops->pci_ops,
-				  sysdata, &info->resources);
-	if (!bus)
-		goto out_release_info;
-
-	pci_scan_child_bus(bus);
-	pci_set_host_bridge_release(to_pci_host_bridge(bus->bridge),
-				    acpi_pci_root_release_info, info);
-	if (node != NUMA_NO_NODE)
-		dev_printk(KERN_DEBUG, &bus->dev, "on NUMA node %d\n", node);
-	return bus;
-
-out_release_info:
-	__acpi_pci_root_release_info(info);
-	return NULL;
-}
-
-void __init acpi_pci_root_init(void)
+static int __init acpi_pci_root_init(void)
 {
 	acpi_hest_init();
+
 	if (acpi_pci_disabled)
-		return;
+		return 0;
 
 	pci_acpi_crs_quirks();
-	acpi_scan_add_handler_with_hotplug(&pci_root_handler, "pci_root");
+	if (acpi_bus_register_driver(&acpi_pci_root_driver) < 0)
+		return -ENODEV;
+
+	return 0;
 }
+
+subsys_initcall(acpi_pci_root_init);

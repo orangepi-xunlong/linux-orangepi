@@ -13,16 +13,18 @@
 
 #include <linux/compiler.h>
 #include <asm/byteorder.h>
-#include <asm/barrier.h>
 
-int test_and_set_bit(unsigned long nr, volatile unsigned long *addr);
-int test_and_clear_bit(unsigned long nr, volatile unsigned long *addr);
-int test_and_change_bit(unsigned long nr, volatile unsigned long *addr);
-void set_bit(unsigned long nr, volatile unsigned long *addr);
-void clear_bit(unsigned long nr, volatile unsigned long *addr);
-void change_bit(unsigned long nr, volatile unsigned long *addr);
+extern int test_and_set_bit(unsigned long nr, volatile unsigned long *addr);
+extern int test_and_clear_bit(unsigned long nr, volatile unsigned long *addr);
+extern int test_and_change_bit(unsigned long nr, volatile unsigned long *addr);
+extern void set_bit(unsigned long nr, volatile unsigned long *addr);
+extern void clear_bit(unsigned long nr, volatile unsigned long *addr);
+extern void change_bit(unsigned long nr, volatile unsigned long *addr);
 
 #include <asm-generic/bitops/non-atomic.h>
+
+#define smp_mb__before_clear_bit()	barrier()
+#define smp_mb__after_clear_bit()	barrier()
 
 #include <asm-generic/bitops/fls.h>
 #include <asm-generic/bitops/__fls.h>
@@ -30,8 +32,8 @@ void change_bit(unsigned long nr, volatile unsigned long *addr);
 
 #ifdef __KERNEL__
 
-int ffs(int x);
-unsigned long __ffs(unsigned long);
+extern int ffs(int x);
+extern unsigned long __ffs(unsigned long);
 
 #include <asm-generic/bitops/ffz.h>
 #include <asm-generic/bitops/sched.h>
@@ -41,10 +43,10 @@ unsigned long __ffs(unsigned long);
  * of bits set) of a N-bit word
  */
 
-unsigned long __arch_hweight64(__u64 w);
-unsigned int __arch_hweight32(unsigned int w);
-unsigned int __arch_hweight16(unsigned int w);
-unsigned int __arch_hweight8(unsigned int w);
+extern unsigned long __arch_hweight64(__u64 w);
+extern unsigned int __arch_hweight32(unsigned int w);
+extern unsigned int __arch_hweight16(unsigned int w);
+extern unsigned int __arch_hweight8(unsigned int w);
 
 #include <asm-generic/bitops/const_hweight.h>
 #include <asm-generic/bitops/lock.h>

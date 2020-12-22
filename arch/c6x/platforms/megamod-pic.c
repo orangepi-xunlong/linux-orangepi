@@ -93,11 +93,10 @@ static struct irq_chip megamod_chip = {
 	.irq_unmask	= unmask_megamod,
 };
 
-static void megamod_irq_cascade(struct irq_desc *desc)
+static void megamod_irq_cascade(unsigned int irq, struct irq_desc *desc)
 {
 	struct megamod_cascade_data *cascade;
 	struct megamod_pic *pic;
-	unsigned int irq;
 	u32 events;
 	int n, idx;
 
@@ -178,7 +177,7 @@ static void __init set_megamod_mux(struct megamod_pic *pic, int src, int output)
 static void __init parse_priority_map(struct megamod_pic *pic,
 				      int *mapping, int size)
 {
-	struct device_node *np = irq_domain_get_of_node(pic->irqhost);
+	struct device_node *np = pic->irqhost->of_node;
 	const __be32 *map;
 	int i, maplen;
 	u32 val;
@@ -244,37 +243,27 @@ static struct megamod_pic * __init init_megamod_pic(struct device_node *np)
 	 * as their interrupt parent.
 	 */
 	for (i = 0; i < NR_COMBINERS; i++) {
-		struct irq_data *irq_data;
-		irq_hw_number_t hwirq;
 
 		irq = irq_of_parse_and_map(np, i);
 		if (irq == NO_IRQ)
 			continue;
 
-		irq_data = irq_get_irq_data(irq);
-		if (!irq_data) {
-			pr_err("%s: combiner-%d no irq_data for virq %d!\n",
-			       np->full_name, i, irq);
-			continue;
-		}
-
-		hwirq = irq_data->hwirq;
-
 		/*
-		 * Check that device tree provided something in the range
-		 * of the core priority interrupts (4 - 15).
+		 * We count on the core priority interrupts (4 - 15) being
+		 * direct mapped. Check that device tree provided something
+		 * in that range.
 		 */
-		if (hwirq < 4 || hwirq >= NR_PRIORITY_IRQS) {
-			pr_err("%s: combiner-%d core irq %ld out of range!\n",
-			       np->full_name, i, hwirq);
+		if (irq < 4 || irq >= NR_PRIORITY_IRQS) {
+			pr_err("%s: combiner-%d virq %d out of range!\n",
+				 np->full_name, i, irq);
 			continue;
 		}
 
 		/* record the mapping */
-		mapping[hwirq - 4] = i;
+		mapping[irq - 4] = i;
 
-		pr_debug("%s: combiner-%d cascading to hwirq %ld\n",
-			 np->full_name, i, hwirq);
+		pr_debug("%s: combiner-%d cascading to virq %d\n",
+			 np->full_name, i, irq);
 
 		cascade_data[i].pic = pic;
 		cascade_data[i].index = i;
@@ -283,8 +272,8 @@ static struct megamod_pic * __init init_megamod_pic(struct device_node *np)
 		soc_writel(~0, &pic->regs->evtmask[i]);
 		soc_writel(~0, &pic->regs->evtclr[i]);
 
-		irq_set_chained_handler_and_data(irq, megamod_irq_cascade,
-						 &cascade_data[i]);
+		irq_set_handler_data(irq, &cascade_data[i]);
+		irq_set_chained_handler(irq, megamod_irq_cascade);
 	}
 
 	/* Finally, set up the MUX registers */

@@ -3,8 +3,7 @@
    Written by Corey Thomas
 */
 
-#ifndef _RAY_CS_H_
-#define _RAY_CS_H_
+#ifndef RAYLINK_H
 
 struct beacon_rx {
     struct mac_header mac;
@@ -70,4 +69,4 @@ typedef struct ray_dev_t {
 } ray_dev_t;
 /*****************************************************************************/
 
-#endif /* _RAY_CS_H_ */
+#endif /* RAYLINK_H */

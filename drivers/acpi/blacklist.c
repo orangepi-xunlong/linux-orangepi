@@ -3,7 +3,7 @@
  *
  *  Check to see if the given machine has a known bad ACPI BIOS
  *  or if the BIOS is too old.
- *  Check given machine against acpi_rev_dmi_table[].
+ *  Check given machine against acpi_osi_dmi_table[].
  *
  *  Copyright (C) 2004 Len Brown <len.brown@intel.com>
  *  Copyright (C) 2002 Andy Grover <andrew.grover@intel.com>
@@ -20,12 +20,17 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  General Public License for more details.
  *
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+ *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/acpi.h>
+#include <acpi/acpi_bus.h>
 #include <linux/dmi.h>
 
 #include "internal.h"
@@ -47,7 +52,7 @@ struct acpi_blacklist_item {
 	u32 is_critical_error;
 };
 
-static struct dmi_system_id acpi_rev_dmi_table[] __initdata;
+static struct dmi_system_id acpi_osi_dmi_table[] __initdata;
 
 /*
  * POLICY: If *anything* doesn't work, put it on the blacklist.
@@ -69,6 +74,39 @@ static struct acpi_blacklist_item acpi_blacklist[] __initdata = {
 
 	{""}
 };
+
+#if	CONFIG_ACPI_BLACKLIST_YEAR
+
+static int __init blacklist_by_year(void)
+{
+	int year;
+
+	/* Doesn't exist? Likely an old system */
+	if (!dmi_get_date(DMI_BIOS_DATE, &year, NULL, NULL)) {
+		printk(KERN_ERR PREFIX "no DMI BIOS year, "
+			"acpi=force is required to enable ACPI\n" );
+		return 1;
+	}
+	/* 0? Likely a buggy new BIOS */
+	if (year == 0) {
+		printk(KERN_ERR PREFIX "DMI BIOS year==0, "
+			"assuming ACPI-capable machine\n" );
+		return 0;
+	}
+	if (year < CONFIG_ACPI_BLACKLIST_YEAR) {
+		printk(KERN_ERR PREFIX "BIOS age (%d) fails cutoff (%d), "
+		       "acpi=force is required to enable ACPI\n",
+		       year, CONFIG_ACPI_BLACKLIST_YEAR);
+		return 1;
+	}
+	return 0;
+}
+#else
+static inline int blacklist_by_year(void)
+{
+	return 0;
+}
+#endif
 
 int __init acpi_blacklisted(void)
 {
@@ -128,67 +166,180 @@ int __init acpi_blacklisted(void)
 		}
 	}
 
-	(void)early_acpi_osi_init();
-	dmi_check_system(acpi_rev_dmi_table);
+	blacklisted += blacklist_by_year();
+
+	dmi_check_system(acpi_osi_dmi_table);
 
 	return blacklisted;
 }
 #ifdef CONFIG_DMI
-#ifdef CONFIG_ACPI_REV_OVERRIDE_POSSIBLE
-static int __init dmi_enable_rev_override(const struct dmi_system_id *d)
+static int __init dmi_enable_osi_linux(const struct dmi_system_id *d)
 {
-	printk(KERN_NOTICE PREFIX "DMI detected: %s (force ACPI _REV to 5)\n",
-	       d->ident);
-	acpi_rev_override_setup(NULL);
+	acpi_dmi_osi_linux(1, d);	/* enable */
 	return 0;
 }
-#endif
+static int __init dmi_disable_osi_vista(const struct dmi_system_id *d)
+{
+	printk(KERN_NOTICE PREFIX "DMI detected: %s\n", d->ident);
+	acpi_osi_setup("!Windows 2006");
+	acpi_osi_setup("!Windows 2006 SP1");
+	acpi_osi_setup("!Windows 2006 SP2");
+	return 0;
+}
+static int __init dmi_disable_osi_win7(const struct dmi_system_id *d)
+{
+	printk(KERN_NOTICE PREFIX "DMI detected: %s\n", d->ident);
+	acpi_osi_setup("!Windows 2009");
+	return 0;
+}
 
-static struct dmi_system_id acpi_rev_dmi_table[] __initdata = {
-#ifdef CONFIG_ACPI_REV_OVERRIDE_POSSIBLE
+static struct dmi_system_id acpi_osi_dmi_table[] __initdata = {
+	{
+	.callback = dmi_disable_osi_vista,
+	.ident = "Fujitsu Siemens",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "FUJITSU SIEMENS"),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "ESPRIMO Mobile V5505"),
+		},
+	},
+	{
 	/*
-	 * DELL XPS 13 (2015) switches sound between HDA and I2S
-	 * depending on the ACPI _REV callback. If userspace supports
-	 * I2S sufficiently (or if you do not care about sound), you
-	 * can safely disable this quirk.
+	 * There have a NVIF method in MSI GX723 DSDT need call by Nvidia
+	 * driver (e.g. nouveau) when user press brightness hotkey.
+	 * Currently, nouveau driver didn't do the job and it causes there
+	 * have a infinite while loop in DSDT when user press hotkey.
+	 * We add MSI GX723's dmi information to this table for workaround
+	 * this issue.
+	 * Will remove MSI GX723 from the table after nouveau grows support.
+	 */
+	.callback = dmi_disable_osi_vista,
+	.ident = "MSI GX723",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "Micro-Star International"),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "GX723"),
+		},
+	},
+	{
+	.callback = dmi_disable_osi_vista,
+	.ident = "Sony VGN-NS10J_S",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "Sony Corporation"),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "VGN-NS10J_S"),
+		},
+	},
+	{
+	.callback = dmi_disable_osi_vista,
+	.ident = "Sony VGN-SR290J",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "Sony Corporation"),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "VGN-SR290J"),
+		},
+	},
+	{
+	.callback = dmi_disable_osi_vista,
+	.ident = "VGN-NS50B_L",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "Sony Corporation"),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "VGN-NS50B_L"),
+		},
+	},
+	{
+	.callback = dmi_disable_osi_vista,
+	.ident = "Toshiba Satellite L355",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "TOSHIBA"),
+		     DMI_MATCH(DMI_PRODUCT_VERSION, "Satellite L355"),
+		},
+	},
+	{
+	.callback = dmi_disable_osi_win7,
+	.ident = "ASUS K50IJ",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK Computer Inc."),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "K50IJ"),
+		},
+	},
+	{
+	.callback = dmi_disable_osi_vista,
+	.ident = "Toshiba P305D",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "TOSHIBA"),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "Satellite P305D"),
+		},
+	},
+
+	/*
+	 * BIOS invocation of _OSI(Linux) is almost always a BIOS bug.
+	 * Linux ignores it, except for the machines enumerated below.
+	 */
+
+	/*
+	 * Lenovo has a mix of systems OSI(Linux) situations
+	 * and thus we can not wildcard the vendor.
+	 *
+	 * _OSI(Linux) helps sound
+	 * DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad R61"),
+	 * DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T61"),
+	 * T400, T500
+	 * _OSI(Linux) has Linux specific hooks
+	 * DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad X61"),
+	 * _OSI(Linux) is a NOP:
+	 * DMI_MATCH(DMI_PRODUCT_VERSION, "3000 N100"),
+	 * DMI_MATCH(DMI_PRODUCT_VERSION, "LENOVO3000 V100"),
 	 */
 	{
-	 .callback = dmi_enable_rev_override,
-	 .ident = "DELL XPS 13 (2015)",
-	 .matches = {
-		      DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		      DMI_MATCH(DMI_PRODUCT_NAME, "XPS 13 9343"),
+	.callback = dmi_enable_osi_linux,
+	.ident = "Lenovo ThinkPad R61",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		     DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad R61"),
 		},
 	},
 	{
-	 .callback = dmi_enable_rev_override,
-	 .ident = "DELL Precision 5520",
-	 .matches = {
-		      DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		      DMI_MATCH(DMI_PRODUCT_NAME, "Precision 5520"),
+	.callback = dmi_enable_osi_linux,
+	.ident = "Lenovo ThinkPad T61",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		     DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T61"),
 		},
 	},
 	{
-	 .callback = dmi_enable_rev_override,
-	 .ident = "DELL Precision 3520",
-	 .matches = {
-		      DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		      DMI_MATCH(DMI_PRODUCT_NAME, "Precision 3520"),
+	.callback = dmi_enable_osi_linux,
+	.ident = "Lenovo ThinkPad X61",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		     DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad X61"),
+		},
+	},
+	{
+	.callback = dmi_enable_osi_linux,
+	.ident = "Lenovo ThinkPad T400",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		     DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T400"),
+		},
+	},
+	{
+	.callback = dmi_enable_osi_linux,
+	.ident = "Lenovo ThinkPad T500",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		     DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T500"),
 		},
 	},
 	/*
-	 * Resolves a quirk with the Dell Latitude 3350 that
-	 * causes the ethernet adapter to not function.
+	 * Without this this EEEpc exports a non working WMI interface, with
+	 * this it exports a working "good old" eeepc_laptop interface, fixing
+	 * both brightness control, and rfkill not working.
 	 */
 	{
-	 .callback = dmi_enable_rev_override,
-	 .ident = "DELL Latitude 3350",
-	 .matches = {
-		      DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		      DMI_MATCH(DMI_PRODUCT_NAME, "Latitude 3350"),
+	.callback = dmi_enable_osi_linux,
+	.ident = "Asus EEE PC 1015PX",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK Computer INC."),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "1015PX"),
 		},
 	},
-#endif
 	{}
 };
 

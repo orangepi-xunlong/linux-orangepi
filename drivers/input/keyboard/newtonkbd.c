@@ -29,6 +29,7 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/input.h>
+#include <linux/init.h>
 #include <linux/serio.h>
 
 #define DRIVER_DESC	"Newton keyboard driver"
@@ -165,4 +166,15 @@ static struct serio_driver nkbd_drv = {
 	.disconnect	= nkbd_disconnect,
 };
 
-module_serio_driver(nkbd_drv);
+static int __init nkbd_init(void)
+{
+	return serio_register_driver(&nkbd_drv);
+}
+
+static void __exit nkbd_exit(void)
+{
+	serio_unregister_driver(&nkbd_drv);
+}
+
+module_init(nkbd_init);
+module_exit(nkbd_exit);

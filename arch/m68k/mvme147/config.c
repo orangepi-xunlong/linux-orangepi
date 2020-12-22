@@ -26,19 +26,18 @@
 #include <linux/interrupt.h>
 
 #include <asm/bootinfo.h>
-#include <asm/bootinfo-vme.h>
-#include <asm/byteorder.h>
 #include <asm/pgtable.h>
 #include <asm/setup.h>
 #include <asm/irq.h>
 #include <asm/traps.h>
+#include <asm/rtc.h>
 #include <asm/machdep.h>
 #include <asm/mvme147hw.h>
 
 
 static void mvme147_get_model(char *model);
 extern void mvme147_sched_init(irq_handler_t handler);
-extern u32 mvme147_gettimeoffset(void);
+extern unsigned long mvme147_gettimeoffset (void);
 extern int mvme147_hwclk (int, struct rtc_time *);
 extern int mvme147_set_clock_mmss (unsigned long);
 extern void mvme147_reset (void);
@@ -52,10 +51,9 @@ static int bcd2int (unsigned char b);
 irq_handler_t tick_handler;
 
 
-int __init mvme147_parse_bootinfo(const struct bi_record *bi)
+int mvme147_parse_bootinfo(const struct bi_record *bi)
 {
-	uint16_t tag = be16_to_cpu(bi->tag);
-	if (tag == BI_VME_TYPE || tag == BI_VME_BRDINFO)
+	if (bi->tag == BI_VME_TYPE || bi->tag == BI_VME_BRDINFO)
 		return 0;
 	else
 		return 1;
@@ -90,7 +88,7 @@ void __init config_mvme147(void)
 	mach_max_dma_address	= 0x01000000;
 	mach_sched_init		= mvme147_sched_init;
 	mach_init_IRQ		= mvme147_init_IRQ;
-	arch_gettimeoffset	= mvme147_gettimeoffset;
+	mach_gettimeoffset	= mvme147_gettimeoffset;
 	mach_hwclk		= mvme147_hwclk;
 	mach_set_clock_mmss	= mvme147_set_clock_mmss;
 	mach_reset		= mvme147_reset;
@@ -129,7 +127,7 @@ void mvme147_sched_init (irq_handler_t timer_routine)
 
 /* This is always executed with interrupts disabled.  */
 /* XXX There are race hazards in this code XXX */
-u32 mvme147_gettimeoffset(void)
+unsigned long mvme147_gettimeoffset (void)
 {
 	volatile unsigned short *cp = (volatile unsigned short *)0xfffe1012;
 	unsigned short n;
@@ -139,7 +137,7 @@ u32 mvme147_gettimeoffset(void)
 		n = *cp;
 
 	n -= PCC_TIMER_PRELOAD;
-	return ((unsigned long)n * 25 / 4) * 1000;
+	return (unsigned long)n * 25 / 4;
 }
 
 static int bcd2int (unsigned char b)
@@ -166,4 +164,50 @@ int mvme147_hwclk(int op, struct rtc_time *t)
 int mvme147_set_clock_mmss (unsigned long nowtime)
 {
 	return 0;
+}
+
+/*-------------------  Serial console stuff ------------------------*/
+
+static void scc_delay (void)
+{
+	int n;
+	volatile int trash;
+
+	for (n = 0; n < 20; n++)
+		trash = n;
+}
+
+static void scc_write (char ch)
+{
+	volatile char *p = (volatile char *)M147_SCC_A_ADDR;
+
+	do {
+		scc_delay();
+	}
+	while (!(*p & 4));
+	scc_delay();
+	*p = 8;
+	scc_delay();
+	*p = ch;
+}
+
+
+void m147_scc_write (struct console *co, const char *str, unsigned count)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	while (count--)
+	{
+		if (*str == '\n')
+			scc_write ('\r');
+		scc_write (*str++);
+	}
+	local_irq_restore(flags);
+}
+
+void mvme147_init_console_port (struct console *co, int cflag)
+{
+	co->write    = m147_scc_write;
 }

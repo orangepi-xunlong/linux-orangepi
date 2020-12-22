@@ -19,6 +19,7 @@
 #define KDB_CMD_GO	(-1001)
 #define KDB_CMD_CPU	(-1002)
 #define KDB_CMD_SS	(-1003)
+#define KDB_CMD_SSB	(-1004)
 #define KDB_CMD_KGDB (-1005)
 
 /* Internal debug flags */
@@ -83,7 +84,7 @@ typedef struct __ksymtab {
 		unsigned long sym_start;
 		unsigned long sym_end;
 		} kdb_symtab_t;
-extern int kallsyms_symbol_next(char *prefix_name, int flag, int buf_size);
+extern int kallsyms_symbol_next(char *prefix_name, int flag);
 extern int kallsyms_symbol_complete(char *prefix_name, int max_len);
 
 /* Exported Symbols for kernel loadable modules to use. */
@@ -124,6 +125,8 @@ extern int kdb_state;
 						 * kdb control */
 #define KDB_STATE_HOLD_CPU	0x00000010	/* Hold this cpu inside kdb */
 #define KDB_STATE_DOING_SS	0x00000020	/* Doing ss command */
+#define KDB_STATE_DOING_SSB	0x00000040	/* Doing ssb command,
+						 * DOING_SS is also set */
 #define KDB_STATE_SSBPT		0x00000080	/* Install breakpoint
 						 * after one ss, independent of
 						 * DOING_SS */
@@ -172,9 +175,10 @@ typedef struct _kdbtab {
 	kdb_func_t cmd_func;		/* Function to execute command */
 	char    *cmd_usage;		/* Usage String for this command */
 	char    *cmd_help;		/* Help message for this command */
+	short    cmd_flags;		/* Parsing flags */
 	short    cmd_minlen;		/* Minimum legal # command
 					 * chars required */
-	kdb_cmdflags_t cmd_flags;	/* Command behaviour flags */
+	kdb_repeat_t cmd_repeat;	/* Does command auto repeat on enter? */
 } kdbtab_t;
 
 extern int kdb_bt(int, const char **);	/* KDB display back trace */
@@ -187,6 +191,7 @@ extern void kdb_bp_remove(void);
 typedef enum {
 	KDB_DB_BPT,	/* Breakpoint */
 	KDB_DB_SS,	/* Single-step trap */
+	KDB_DB_SSB,	/* Single step to branch */
 	KDB_DB_SSBPT,	/* Single step over breakpoint */
 	KDB_DB_NOBPT	/* Spurious breakpoint */
 } kdb_dbtrap_t;
@@ -196,12 +201,11 @@ extern int kdb_main_loop(kdb_reason_t, kdb_reason_t,
 
 /* Miscellaneous functions and data areas */
 extern int kdb_grepping_flag;
-#define KDB_GREPPING_FLAG_SEARCH 0x8000
 extern char kdb_grep_string[];
-#define KDB_GREP_STRLEN 256
 extern int kdb_grep_leading;
 extern int kdb_grep_trailing;
 extern char *kdb_cmds[];
+extern void kdb_syslog_data(char *syslog_data[]);
 extern unsigned long kdb_task_state_string(const char *);
 extern char kdb_task_state_char (const struct task_struct *);
 extern unsigned long kdb_task_state(const struct task_struct *p,
@@ -211,7 +215,7 @@ extern void kdb_ps1(const struct task_struct *p);
 extern void kdb_print_nameval(const char *name, unsigned long val);
 extern void kdb_send_sig_info(struct task_struct *p, struct siginfo *info);
 extern void kdb_meminfo_proc_show(void);
-extern char *kdb_getstr(char *, size_t, const char *);
+extern char *kdb_getstr(char *, size_t, char *);
 extern void kdb_gdb_state_pass(char *buf);
 
 /* Defines for kdb_symbol_print */

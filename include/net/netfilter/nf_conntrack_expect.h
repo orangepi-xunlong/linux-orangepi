@@ -4,13 +4,10 @@
 
 #ifndef _NF_CONNTRACK_EXPECT_H
 #define _NF_CONNTRACK_EXPECT_H
-
 #include <net/netfilter/nf_conntrack.h>
-#include <net/netfilter/nf_conntrack_zones.h>
 
 extern unsigned int nf_ct_expect_hsize;
 extern unsigned int nf_ct_expect_max;
-extern struct hlist_head *nf_ct_expect_hash;
 
 struct nf_conntrack_expect {
 	/* Conntrack expectation list member */
@@ -46,7 +43,7 @@ struct nf_conntrack_expect {
 	unsigned int class;
 
 #ifdef CONFIG_NF_NAT_NEEDED
-	union nf_inet_addr saved_addr;
+	__be32 saved_ip;
 	/* This is the original per-proto part, used to map the
 	 * expected connection the way the recipient expects. */
 	union nf_conntrack_man_proto saved_proto;
@@ -62,39 +59,31 @@ static inline struct net *nf_ct_exp_net(struct nf_conntrack_expect *exp)
 	return nf_ct_net(exp->master);
 }
 
-#define NF_CT_EXP_POLICY_NAME_LEN	16
-
 struct nf_conntrack_expect_policy {
 	unsigned int	max_expected;
 	unsigned int	timeout;
-	char		name[NF_CT_EXP_POLICY_NAME_LEN];
+	const char	*name;
 };
 
 #define NF_CT_EXPECT_CLASS_DEFAULT	0
 
-int nf_conntrack_expect_pernet_init(struct net *net);
-void nf_conntrack_expect_pernet_fini(struct net *net);
-
-int nf_conntrack_expect_init(void);
-void nf_conntrack_expect_fini(void);
+int nf_conntrack_expect_init(struct net *net);
+void nf_conntrack_expect_fini(struct net *net);
 
 struct nf_conntrack_expect *
-__nf_ct_expect_find(struct net *net,
-		    const struct nf_conntrack_zone *zone,
+__nf_ct_expect_find(struct net *net, u16 zone,
 		    const struct nf_conntrack_tuple *tuple);
 
 struct nf_conntrack_expect *
-nf_ct_expect_find_get(struct net *net,
-		      const struct nf_conntrack_zone *zone,
+nf_ct_expect_find_get(struct net *net, u16 zone,
 		      const struct nf_conntrack_tuple *tuple);
 
 struct nf_conntrack_expect *
-nf_ct_find_expectation(struct net *net,
-		       const struct nf_conntrack_zone *zone,
+nf_ct_find_expectation(struct net *net, u16 zone,
 		       const struct nf_conntrack_tuple *tuple);
 
 void nf_ct_unlink_expect_report(struct nf_conntrack_expect *exp,
-				u32 portid, int report);
+				u32 pid, int report);
 static inline void nf_ct_unlink_expect(struct nf_conntrack_expect *exp)
 {
 	nf_ct_unlink_expect_report(exp, 0, 0);
@@ -112,7 +101,7 @@ void nf_ct_expect_init(struct nf_conntrack_expect *, unsigned int, u_int8_t,
 		       u_int8_t, const __be16 *, const __be16 *);
 void nf_ct_expect_put(struct nf_conntrack_expect *exp);
 int nf_ct_expect_related_report(struct nf_conntrack_expect *expect, 
-				u32 portid, int report);
+				u32 pid, int report);
 static inline int nf_ct_expect_related(struct nf_conntrack_expect *expect)
 {
 	return nf_ct_expect_related_report(expect, 0, 0);

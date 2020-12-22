@@ -714,7 +714,7 @@ void tomoyo_get_attributes(struct tomoyo_obj_info *obj)
 			dentry = dget_parent(dentry);
 			break;
 		}
-		inode = d_backing_inode(dentry);
+		inode = dentry->d_inode;
 		if (inode) {
 			struct tomoyo_mini_stat *stat = &obj->stat[i];
 			stat->uid  = inode->i_uid;
@@ -813,28 +813,28 @@ bool tomoyo_condition(struct tomoyo_request_info *r,
 			unsigned long value = 0;
 			switch (index) {
 			case TOMOYO_TASK_UID:
-				value = from_kuid(&init_user_ns, current_uid());
+				value = current_uid();
 				break;
 			case TOMOYO_TASK_EUID:
-				value = from_kuid(&init_user_ns, current_euid());
+				value = current_euid();
 				break;
 			case TOMOYO_TASK_SUID:
-				value = from_kuid(&init_user_ns, current_suid());
+				value = current_suid();
 				break;
 			case TOMOYO_TASK_FSUID:
-				value = from_kuid(&init_user_ns, current_fsuid());
+				value = current_fsuid();
 				break;
 			case TOMOYO_TASK_GID:
-				value = from_kgid(&init_user_ns, current_gid());
+				value = current_gid();
 				break;
 			case TOMOYO_TASK_EGID:
-				value = from_kgid(&init_user_ns, current_egid());
+				value = current_egid();
 				break;
 			case TOMOYO_TASK_SGID:
-				value = from_kgid(&init_user_ns, current_sgid());
+				value = current_sgid();
 				break;
 			case TOMOYO_TASK_FSGID:
-				value = from_kgid(&init_user_ns, current_fsgid());
+				value = current_fsgid();
 				break;
 			case TOMOYO_TASK_PID:
 				value = tomoyo_sys_getpid();
@@ -970,13 +970,13 @@ bool tomoyo_condition(struct tomoyo_request_info *r,
 					case TOMOYO_PATH2_UID:
 					case TOMOYO_PATH1_PARENT_UID:
 					case TOMOYO_PATH2_PARENT_UID:
-						value = from_kuid(&init_user_ns, stat->uid);
+						value = stat->uid;
 						break;
 					case TOMOYO_PATH1_GID:
 					case TOMOYO_PATH2_GID:
 					case TOMOYO_PATH1_PARENT_GID:
 					case TOMOYO_PATH2_PARENT_GID:
-						value = from_kgid(&init_user_ns, stat->gid);
+						value = stat->gid;
 						break;
 					case TOMOYO_PATH1_INO:
 					case TOMOYO_PATH2_INO:

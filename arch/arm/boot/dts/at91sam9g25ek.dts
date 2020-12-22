@@ -7,63 +7,43 @@
  * Licensed under GPLv2 or later.
  */
 /dts-v1/;
-#include "at91sam9g25.dtsi"
-#include "at91sam9x5ek.dtsi"
+/include/ "at91sam9x5.dtsi"
+/include/ "at91sam9x5cm.dtsi"
 
 / {
 	model = "Atmel AT91SAM9G25-EK";
 	compatible = "atmel,at91sam9g25ek", "atmel,at91sam9x5ek", "atmel,at91sam9x5", "atmel,at91sam9";
 
+	chosen {
+		bootargs = "128M console=ttyS0,115200 root=/dev/mtdblock1 rw rootfstype=ubifs ubi.mtd=1 root=ubi0:rootfs";
+	};
+
 	ahb {
 		apb {
-			spi0: spi@f0000000 {
-				status = "disabled";
+			dbgu: serial@fffff200 {
+				status = "okay";
 			};
 
-			mmc1: mmc@f000c000 {
-				status = "disabled";
-			};
-
-			i2c0: i2c@f8010000 {
-				ov2640: camera@0x30 {
-					compatible = "ovti,ov2640";
-					reg = <0x30>;
-					pinctrl-names = "default";
-					pinctrl-0 = <&pinctrl_pck0_as_isi_mck &pinctrl_sensor_power &pinctrl_sensor_reset>;
-					resetb-gpios = <&pioA 7 GPIO_ACTIVE_LOW>;
-					pwdn-gpios = <&pioA 13 GPIO_ACTIVE_HIGH>;
-					clocks = <&pck0>;
-					clock-names = "xvclk";
-					assigned-clocks = <&pck0>;
-					assigned-clock-rates = <25000000>;
-					status = "okay";
-
-					port {
-						ov2640_0: endpoint {
-							remote-endpoint = <&isi_0>;
-							bus-width = <8>;
-						};
-					};
-				};
+			usart0: serial@f801c000 {
+				status = "okay";
 			};
 
 			macb0: ethernet@f802c000 {
 				phy-mode = "rmii";
 				status = "okay";
 			};
+		};
 
-			isi: isi@f8048000 {
-				status = "okay";
-				port {
-					isi_0: endpoint@0 {
-						reg = <0>;
-						remote-endpoint = <&ov2640_0>;
-						bus-width = <8>;
-						vsync-active = <1>;
-						hsync-active = <1>;
-					};
-				};
-			};
+		usb0: ohci@00600000 {
+			status = "okay";
+			num-ports = <2>;
+			atmel,vbus-gpio = <&pioD 19 1
+					   &pioD 20 1
+					  >;
+		};
+
+		usb1: ehci@00700000 {
+			status = "okay";
 		};
 	};
 };

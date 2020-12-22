@@ -26,6 +26,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/usb/input.h>
 
 #define DRIVER_AUTHOR   "Xing Wei <weixing@hanwang.com.cn>"
@@ -62,7 +63,6 @@ MODULE_LICENSE(DRIVER_LICENSE);
 enum hanwang_tablet_type {
 	HANWANG_ART_MASTER_III,
 	HANWANG_ART_MASTER_HD,
-	HANWANG_ART_MASTER_II,
 };
 
 struct hanwang {
@@ -99,8 +99,6 @@ static const struct hanwang_features features_array[] = {
 	  ART_MASTER_PKGLEN_MAX, 0x7f00, 0x4f60, 0x3f, 0x7f, 2048 },
 	{ 0x8401, "Hanwang Art Master HD 5012", HANWANG_ART_MASTER_HD,
 	  ART_MASTER_PKGLEN_MAX, 0x678e, 0x4150, 0x3f, 0x7f, 1024 },
-	{ 0x8503, "Hanwang Art Master II", HANWANG_ART_MASTER_II,
-	  ART_MASTER_PKGLEN_MAX, 0x27de, 0x1cfe, 0x3f, 0x7f, 1024 },
 };
 
 static const int hw_eventtypes[] = {
@@ -129,30 +127,14 @@ static void hanwang_parse_packet(struct hanwang *hanwang)
 	struct usb_device *dev = hanwang->usbdev;
 	enum hanwang_tablet_type type = hanwang->features->type;
 	int i;
-	u16 p;
-
-	if (type == HANWANG_ART_MASTER_II) {
-		hanwang->current_tool = BTN_TOOL_PEN;
-		hanwang->current_id = STYLUS_DEVICE_ID;
-	}
+	u16 x, y, p;
 
 	switch (data[0]) {
 	case 0x02:	/* data packet */
 		switch (data[1]) {
 		case 0x80:	/* tool prox out */
-			if (type != HANWANG_ART_MASTER_II) {
-				hanwang->current_id = 0;
-				input_report_key(input_dev,
-						 hanwang->current_tool, 0);
-			}
-			break;
-
-		case 0x00:	/* artmaster ii pen leave */
-			if (type == HANWANG_ART_MASTER_II) {
-				hanwang->current_id = 0;
-				input_report_key(input_dev,
-						 hanwang->current_tool, 0);
-			}
+			hanwang->current_id = 0;
+			input_report_key(input_dev, hanwang->current_tool, 0);
 			break;
 
 		case 0xc2:	/* first time tool prox in */
@@ -172,12 +154,15 @@ static void hanwang_parse_packet(struct hanwang *hanwang)
 			default:
 				hanwang->current_id = 0;
 				dev_dbg(&dev->dev,
-					"unknown tablet tool %02x\n", data[0]);
+					"unknown tablet tool %02x ", data[0]);
 				break;
 			}
 			break;
 
 		default:	/* tool data packet */
+			x = (data[2] << 8) | data[3];
+			y = (data[4] << 8) | data[5];
+
 			switch (type) {
 			case HANWANG_ART_MASTER_III:
 				p = (data[6] << 3) |
@@ -186,7 +171,6 @@ static void hanwang_parse_packet(struct hanwang *hanwang)
 				break;
 
 			case HANWANG_ART_MASTER_HD:
-			case HANWANG_ART_MASTER_II:
 				p = (data[7] >> 6) | (data[6] << 2);
 				break;
 
@@ -196,23 +180,17 @@ static void hanwang_parse_packet(struct hanwang *hanwang)
 			}
 
 			input_report_abs(input_dev, ABS_X,
-					 be16_to_cpup((__be16 *)&data[2]));
+						le16_to_cpup((__le16 *)&x));
 			input_report_abs(input_dev, ABS_Y,
-					 be16_to_cpup((__be16 *)&data[4]));
-			input_report_abs(input_dev, ABS_PRESSURE, p);
+						le16_to_cpup((__le16 *)&y));
+			input_report_abs(input_dev, ABS_PRESSURE,
+						le16_to_cpup((__le16 *)&p));
 			input_report_abs(input_dev, ABS_TILT_X, data[7] & 0x3f);
 			input_report_abs(input_dev, ABS_TILT_Y, data[8] & 0x7f);
 			input_report_key(input_dev, BTN_STYLUS, data[1] & 0x02);
-
-			if (type != HANWANG_ART_MASTER_II)
-				input_report_key(input_dev, BTN_STYLUS2,
-						 data[1] & 0x04);
-			else
-				input_report_key(input_dev, BTN_TOOL_PEN, 1);
-
+			input_report_key(input_dev, BTN_STYLUS2, data[1] & 0x04);
 			break;
 		}
-
 		input_report_abs(input_dev, ABS_MISC, hanwang->current_id);
 		input_event(input_dev, EV_MSC, MSC_SERIAL,
 				hanwang->features->pid);
@@ -224,8 +202,8 @@ static void hanwang_parse_packet(struct hanwang *hanwang)
 
 		switch (type) {
 		case HANWANG_ART_MASTER_III:
-			input_report_key(input_dev, BTN_TOOL_FINGER,
-					 data[1] || data[2] || data[3]);
+			input_report_key(input_dev, BTN_TOOL_FINGER, data[1] ||
+							data[2] || data[3]);
 			input_report_abs(input_dev, ABS_WHEEL, data[1]);
 			input_report_key(input_dev, BTN_0, data[2]);
 			for (i = 0; i < 8; i++)
@@ -249,10 +227,6 @@ static void hanwang_parse_packet(struct hanwang *hanwang)
 					 BTN_5 + i, data[6] & (1 << i));
 			}
 			break;
-
-		case HANWANG_ART_MASTER_II:
-			dev_dbg(&dev->dev, "error packet  %02x\n", data[0]);
-			return;
 		}
 
 		input_report_abs(input_dev, ABS_MISC, hanwang->current_id);
@@ -260,7 +234,7 @@ static void hanwang_parse_packet(struct hanwang *hanwang)
 		break;
 
 	default:
-		dev_dbg(&dev->dev, "error packet  %02x\n", data[0]);
+		dev_dbg(&dev->dev, "error packet  %02x ", data[0]);
 		break;
 	}
 
@@ -339,9 +313,6 @@ static int hanwang_probe(struct usb_interface *intf, const struct usb_device_id 
 	struct input_dev *input_dev;
 	int error;
 	int i;
-
-	if (intf->cur_altsetting->desc.bNumEndpoints < 1)
-		return -ENODEV;
 
 	hanwang = kzalloc(sizeof(struct hanwang), GFP_KERNEL);
 	input_dev = input_allocate_device();

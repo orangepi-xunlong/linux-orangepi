@@ -62,8 +62,6 @@ enum rdma_cm_event_type {
 	RDMA_CM_EVENT_TIMEWAIT_EXIT
 };
 
-const char *__attribute_const__ rdma_event_msg(enum rdma_cm_event_type event);
-
 enum rdma_port_space {
 	RDMA_PS_SDP   = 0x0001,
 	RDMA_PS_IPOIB = 0x0002,
@@ -71,11 +69,6 @@ enum rdma_port_space {
 	RDMA_PS_TCP   = 0x0106,
 	RDMA_PS_UDP   = 0x0111,
 };
-
-#define RDMA_IB_IP_PS_MASK   0xFFFFFFFFFFFF0000ULL
-#define RDMA_IB_IP_PS_TCP    0x0000000001060000ULL
-#define RDMA_IB_IP_PS_UDP    0x0000000001110000ULL
-#define RDMA_IB_IP_PS_IB     0x00000000013F0000ULL
 
 struct rdma_addr {
 	struct sockaddr_storage src_addr;
@@ -100,7 +93,6 @@ struct rdma_conn_param {
 	/* Fields below ignored if a QP is created on the rdma_cm_id. */
 	u8 srq;
 	u32 qp_num;
-	u32 qkey;
 };
 
 struct rdma_ud_param {
@@ -160,17 +152,13 @@ struct rdma_cm_id {
 /**
  * rdma_create_id - Create an RDMA identifier.
  *
- * @net: The network namespace in which to create the new id.
  * @event_handler: User callback invoked to report events associated with the
  *   returned rdma_id.
  * @context: User specified context associated with the id.
  * @ps: RDMA port space.
  * @qp_type: type of queue pair associated with the id.
- *
- * The id holds a reference on the network namespace until it is destroyed.
  */
-struct rdma_cm_id *rdma_create_id(struct net *net,
-				  rdma_cm_event_handler event_handler,
+struct rdma_cm_id *rdma_create_id(rdma_cm_event_handler event_handler,
 				  void *context, enum rdma_port_space ps,
 				  enum ib_qp_type qp_type);
 
@@ -333,13 +321,11 @@ int rdma_disconnect(struct rdma_cm_id *id);
  *   address.
  * @id: Communication identifier associated with the request.
  * @addr: Multicast address identifying the group to join.
- * @join_state: Multicast JoinState bitmap requested by port.
- *		Bitmap is based on IB_SA_MCMEMBER_REC_JOIN_STATE bits.
  * @context: User-defined context associated with the join request, returned
  * to the user through the private_data pointer in multicast events.
  */
 int rdma_join_multicast(struct rdma_cm_id *id, struct sockaddr *addr,
-			u8 join_state, void *context);
+			void *context);
 
 /**
  * rdma_leave_multicast - Leave the multicast group specified by the given
@@ -370,22 +356,5 @@ void rdma_set_service_type(struct rdma_cm_id *id, int tos);
  * Reuse must be set before an address is bound to the id.
  */
 int rdma_set_reuseaddr(struct rdma_cm_id *id, int reuse);
-
-/**
- * rdma_set_afonly - Specify that listens are restricted to the
- *    bound address family only.
- * @id: Communication identifer to configure.
- * @afonly: Value indicating if listens are restricted.
- *
- * Must be set before identifier is in the listening state.
- */
-int rdma_set_afonly(struct rdma_cm_id *id, int afonly);
-
- /**
- * rdma_get_service_id - Return the IB service ID for a specified address.
- * @id: Communication identifier associated with the address.
- * @addr: Address for the service ID.
- */
-__be64 rdma_get_service_id(struct rdma_cm_id *id, struct sockaddr *addr);
 
 #endif /* RDMA_CM_H */

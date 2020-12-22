@@ -116,6 +116,7 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
 #include <linux/device.h>
@@ -187,6 +188,7 @@ struct ks959_cb {
 	__u8 *rx_buf;
 	__u8 rx_variable_xormask;
 	iobuff_t rx_unwrap_buff;
+	struct timeval rx_time;
 
 	struct usb_ctrlrequest *speed_setuprequest;
 	struct urb *speed_urb;
@@ -245,9 +247,8 @@ static void ks959_speed_irq(struct urb *urb)
 {
 	/* unlink, shutdown, unplug, other nasties */
 	if (urb->status != 0) {
-		dev_err(&urb->dev->dev,
-			"ks959_speed_irq: urb asynchronously failed - %d\n",
-			urb->status);
+		err("ks959_speed_irq: urb asynchronously failed - %d",
+		    urb->status);
 	}
 }
 
@@ -331,16 +332,14 @@ static void ks959_send_irq(struct urb *urb)
 
 	/* in process of stopping, just drop data */
 	if (!netif_running(kingsun->netdev)) {
-		dev_err(&kingsun->usbdev->dev,
-			"ks959_send_irq: Network not running!\n");
+		err("ks959_send_irq: Network not running!");
 		return;
 	}
 
 	/* unlink, shutdown, unplug, other nasties */
 	if (urb->status != 0) {
-		dev_err(&kingsun->usbdev->dev,
-			"ks959_send_irq: urb asynchronously failed - %d\n",
-			urb->status);
+		err("ks959_send_irq: urb asynchronously failed - %d",
+		    urb->status);
 		return;
 	}
 
@@ -359,9 +358,8 @@ static void ks959_send_irq(struct urb *urb)
 		if (kingsun->tx_buf_clear_used > 0) {
 			/* There is more data to be sent */
 			if ((ret = ks959_submit_tx_fragment(kingsun)) != 0) {
-				dev_err(&kingsun->usbdev->dev,
-					"ks959_send_irq: failed tx_urb submit: %d\n",
-					ret);
+				err("ks959_send_irq: failed tx_urb submit: %d",
+				    ret);
 				switch (ret) {
 				case -ENODEV:
 				case -EPIPE:
@@ -409,8 +407,7 @@ static netdev_tx_t ks959_hard_xmit(struct sk_buff *skb,
 	kingsun->tx_buf_clear_used = wraplen;
 
 	if ((ret = ks959_submit_tx_fragment(kingsun)) != 0) {
-		dev_err(&kingsun->usbdev->dev,
-			"ks959_hard_xmit: failed tx_urb submit: %d\n", ret);
+		err("ks959_hard_xmit: failed tx_urb submit: %d", ret);
 		switch (ret) {
 		case -ENODEV:
 		case -EPIPE:
@@ -445,9 +442,8 @@ static void ks959_rcv_irq(struct urb *urb)
 
 	/* unlink, shutdown, unplug, other nasties */
 	if (urb->status != 0) {
-		dev_err(&kingsun->usbdev->dev,
-			"kingsun_rcv_irq: urb asynchronously failed - %d\n",
-			urb->status);
+		err("kingsun_rcv_irq: urb asynchronously failed - %d",
+		    urb->status);
 		kingsun->receiving = 0;
 		return;
 	}
@@ -475,6 +471,7 @@ static void ks959_rcv_irq(struct urb *urb)
 						  bytes[i]);
 			}
 		}
+		do_gettimeofday(&kingsun->rx_time);
 		kingsun->receiving =
 		    (kingsun->rx_unwrap_buff.state != OUTSIDE_FRAME) ? 1 : 0;
 	}
@@ -512,6 +509,7 @@ static int ks959_net_open(struct net_device *netdev)
 
 	skb_reserve(kingsun->rx_unwrap_buff.skb, 1);
 	kingsun->rx_unwrap_buff.head = kingsun->rx_unwrap_buff.skb->data;
+	do_gettimeofday(&kingsun->rx_time);
 
 	kingsun->rx_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!kingsun->rx_urb)
@@ -538,8 +536,7 @@ static int ks959_net_open(struct net_device *netdev)
 	sprintf(hwname, "usb#%d", kingsun->usbdev->devnum);
 	kingsun->irlap = irlap_open(netdev, &kingsun->qos, hwname);
 	if (!kingsun->irlap) {
-		err = -ENOMEM;
-		dev_err(&kingsun->usbdev->dev, "irlap_open failed\n");
+		err("ks959-sir: irlap_open failed");
 		goto free_mem;
 	}
 
@@ -552,8 +549,7 @@ static int ks959_net_open(struct net_device *netdev)
 	kingsun->rx_urb->status = 0;
 	err = usb_submit_urb(kingsun->rx_urb, GFP_KERNEL);
 	if (err) {
-		dev_err(&kingsun->usbdev->dev,
-			"first urb-submit failed: %d\n", err);
+		err("ks959-sir: first urb-submit failed: %d", err);
 		goto close_irlap;
 	}
 

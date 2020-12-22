@@ -3,16 +3,41 @@
 #
 
 menuconfig HOTPLUG_PCI
-	bool "Support for PCI Hotplug"
-	depends on PCI && SYSFS
+	tristate "Support for PCI Hotplug"
+	depends on PCI && HOTPLUG && SYSFS
 	---help---
 	  Say Y here if you have a motherboard with a PCI Hotplug controller.
 	  This allows you to add and remove PCI cards while the machine is
 	  powered up and running.
 
+	  To compile this driver as a module, choose M here: the
+	  module will be called pci_hotplug.
+
 	  When in doubt, say N.
 
 if HOTPLUG_PCI
+
+config HOTPLUG_PCI_FAKE
+	tristate "Fake PCI Hotplug driver"
+	help
+	  Say Y here if you want to use the fake PCI hotplug driver. It can
+	  be used to simulate PCI hotplug events if even if your system is
+	  not PCI hotplug capable.
+
+	  This driver will "emulate" removing PCI devices from the system.
+	  If the "power" file is written to with "0" then the specified PCI
+	  device will be completely removed from the kernel.
+
+	  WARNING, this does NOT turn off the power to the PCI device.
+	  This is a "logical" removal, not a physical or electrical
+	  removal.
+
+	  Use this module at your own risk.  You have been warned!
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called fakephp.
+
+	  When in doubt, say N.
 
 config HOTPLUG_PCI_COMPAQ
 	tristate "Compaq PCI Hotplug driver"
@@ -49,11 +74,14 @@ config HOTPLUG_PCI_IBM
 	  When in doubt, say N.
 
 config HOTPLUG_PCI_ACPI
-	bool "ACPI PCI Hotplug driver"
-	depends on HOTPLUG_PCI=y && ((!ACPI_DOCK && ACPI) || (ACPI_DOCK))
+	tristate "ACPI PCI Hotplug driver"
+	depends on (!ACPI_DOCK && ACPI) || (ACPI_DOCK)
 	help
 	  Say Y here if you have a system that supports PCI Hotplug using
 	  ACPI.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called acpiphp.
 
 	  When in doubt, say N.
 
@@ -113,22 +141,9 @@ config HOTPLUG_PCI_SHPC
 
 	  When in doubt, say N.
 
-config HOTPLUG_PCI_POWERNV
-	tristate "PowerPC PowerNV PCI Hotplug driver"
-	depends on PPC_POWERNV && EEH
-	select OF_DYNAMIC
-	help
-	  Say Y here if you run PowerPC PowerNV platform that supports
-	  PCI Hotplug
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called pnv-php.
-
-	  When in doubt, say N.
-
 config HOTPLUG_PCI_RPA
 	tristate "RPA PCI Hotplug driver"
-	depends on PPC_PSERIES && EEH
+	depends on PPC_PSERIES && EEH && !HOTPLUG_PCI_FAKE
 	help
 	  Say Y here if you have a RPA system that supports PCI Hotplug.
 
@@ -146,8 +161,8 @@ config HOTPLUG_PCI_RPA_DLPAR
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called rpadlpar_io.
-
-	  When in doubt, say N.
+ 
+ 	  When in doubt, say N.
 
 config HOTPLUG_PCI_SGI
 	tristate "SGI PCI Hotplug Support"
@@ -157,16 +172,5 @@ config HOTPLUG_PCI_SGI
 	  Driver for PCI devices.
 
 	  When in doubt, say N.
-
-config HOTPLUG_PCI_S390
-	bool "System z PCI Hotplug Support"
-	depends on S390 && 64BIT
-	help
-	  Say Y here if you want to use the System z PCI Hotplug
-	  driver for PCI devices. Without this driver it is not
-	  possible to access stand-by PCI functions nor to deconfigure
-	  PCI functions.
-
-	  When in doubt, say Y.
 
 endif # HOTPLUG_PCI

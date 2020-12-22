@@ -11,7 +11,7 @@
 #include <linux/module.h>
 #include <linux/io.h>
 
-unsigned long sh_io_port_base __read_mostly = -1;
+const unsigned long sh_io_port_base __read_mostly = -1;
 EXPORT_SYMBOL(sh_io_port_base);
 
 void __iomem *__ioport_map(unsigned long addr, unsigned int size)

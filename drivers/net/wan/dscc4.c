@@ -551,7 +551,7 @@ static int dscc4_wait_ack_cec(struct dscc4_dev_priv *dpriv,
 			       msg, i);
 			goto done;
 		}
-		schedule_timeout_uninterruptible(msecs_to_jiffies(100));
+		schedule_timeout_uninterruptible(10);
 		rmb();
 	} while (++i > 0);
 	netdev_err(dev, "%s timeout\n", msg);
@@ -596,7 +596,7 @@ static inline int dscc4_xpr_ack(struct dscc4_dev_priv *dpriv)
 		    (dpriv->iqtx[cur] & cpu_to_le32(Xpr)))
 			break;
 		smp_rmb();
-		schedule_timeout_uninterruptible(msecs_to_jiffies(100));
+		schedule_timeout_uninterruptible(10);
 	} while (++i > 0);
 
 	return (i >= 0 ) ? i : -EAGAIN;
@@ -699,13 +699,16 @@ static void dscc4_free1(struct pci_dev *pdev)
 	for (i = 0; i < dev_per_card; i++)
 		unregister_hdlc_device(dscc4_to_dev(root + i));
 
+	pci_set_drvdata(pdev, NULL);
+
 	for (i = 0; i < dev_per_card; i++)
 		free_netdev(root[i].dev);
 	kfree(root);
 	kfree(ppriv);
 }
 
-static int dscc4_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit dscc4_init_one(struct pci_dev *pdev,
+				  const struct pci_device_id *ent)
 {
 	struct dscc4_pci_priv *priv;
 	struct dscc4_dev_priv *dpriv;
@@ -771,14 +774,13 @@ static int dscc4_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	/* Global interrupt queue */
 	writel((u32)(((IRQ_RING_SIZE >> 5) - 1) << 20), ioaddr + IQLENR1);
-
-	rc = -ENOMEM;
-
 	priv->iqcfg = (__le32 *) pci_alloc_consistent(pdev,
 		IRQ_RING_SIZE*sizeof(__le32), &priv->iqcfg_dma);
 	if (!priv->iqcfg)
 		goto err_free_irq_5;
 	writel(priv->iqcfg_dma, ioaddr + IQCFG);
+
+	rc = -ENOMEM;
 
 	/*
 	 * SCC 0-3 private rx/tx irq structures
@@ -1033,7 +1035,7 @@ static void dscc4_pci_reset(struct pci_dev *pdev, void __iomem *ioaddr)
 	/* Flush posted writes */
 	readl(ioaddr + GSTAR);
 
-	schedule_timeout_uninterruptible(msecs_to_jiffies(100));
+	schedule_timeout_uninterruptible(10);
 
 	for (i = 0; i < 16; i++)
 		pci_write_config_dword(pdev, i << 2, dscc4_pci_config_store[i]);
@@ -1046,6 +1048,7 @@ static void dscc4_pci_reset(struct pci_dev *pdev, void __iomem *ioaddr)
 static int dscc4_open(struct net_device *dev)
 {
 	struct dscc4_dev_priv *dpriv = dscc4_priv(dev);
+	struct dscc4_pci_priv *ppriv;
 	int ret = -EAGAIN;
 
 	if ((dscc4_loopback_check(dpriv) < 0))
@@ -1053,6 +1056,8 @@ static int dscc4_open(struct net_device *dev)
 
 	if ((ret = hdlc_open(dev)))
 		goto err;
+
+	ppriv = dpriv->pci_priv;
 
 	/*
 	 * Due to various bugs, there is no way to reliably reset a
@@ -1626,7 +1631,7 @@ try:
 		if (state & Xpr) {
 			void __iomem *scc_addr;
 			unsigned long ring;
-			unsigned int i;
+			int i;
 
 			/*
 			 * - the busy condition happens (sometimes);
@@ -1962,7 +1967,7 @@ err_out:
 	return -ENOMEM;
 }
 
-static void dscc4_remove_one(struct pci_dev *pdev)
+static void __devexit dscc4_remove_one(struct pci_dev *pdev)
 {
 	struct dscc4_pci_priv *ppriv;
 	struct dscc4_dev_priv *root;
@@ -2036,7 +2041,7 @@ static int __init dscc4_setup(char *str)
 __setup("dscc4.setup=", dscc4_setup);
 #endif
 
-static const struct pci_device_id dscc4_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(dscc4_pci_tbl) = {
 	{ PCI_VENDOR_ID_SIEMENS, PCI_DEVICE_ID_SIEMENS_DSCC4,
 	        PCI_ANY_ID, PCI_ANY_ID, },
 	{ 0,}
@@ -2047,7 +2052,18 @@ static struct pci_driver dscc4_driver = {
 	.name		= DRV_NAME,
 	.id_table	= dscc4_pci_tbl,
 	.probe		= dscc4_init_one,
-	.remove		= dscc4_remove_one,
+	.remove		= __devexit_p(dscc4_remove_one),
 };
 
-module_pci_driver(dscc4_driver);
+static int __init dscc4_init_module(void)
+{
+	return pci_register_driver(&dscc4_driver);
+}
+
+static void __exit dscc4_cleanup_module(void)
+{
+	pci_unregister_driver(&dscc4_driver);
+}
+
+module_init(dscc4_init_module);
+module_exit(dscc4_cleanup_module);

@@ -1,9 +1,10 @@
 /*
+ *  arch/s390/kernel/ebcdic.c
  *    ECBDIC -> ASCII, ASCII -> ECBDIC,
  *    upper to lower case (EBCDIC) conversion tables.
  *
  *  S390 version
- *    Copyright IBM Corp. 1999
+ *    Copyright (C) 1999 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Martin Schwidefsky <schwidefsky@de.ibm.com>
  *               Martin Peschke <peschke@fh-brandenburg.de>
  */

@@ -14,7 +14,6 @@
 
 enum integrity_status {
 	INTEGRITY_PASS = 0,
-	INTEGRITY_PASS_IMMUTABLE,
 	INTEGRITY_FAIL,
 	INTEGRITY_NOLABEL,
 	INTEGRITY_NOXATTRS,
@@ -23,25 +22,18 @@ enum integrity_status {
 
 /* List of EVM protected security xattrs */
 #ifdef CONFIG_INTEGRITY
-extern struct integrity_iint_cache *integrity_inode_get(struct inode *inode);
+extern int integrity_inode_alloc(struct inode *inode);
 extern void integrity_inode_free(struct inode *inode);
-extern void __init integrity_load_keys(void);
 
 #else
-static inline struct integrity_iint_cache *
-				integrity_inode_get(struct inode *inode)
+static inline int integrity_inode_alloc(struct inode *inode)
 {
-	return NULL;
+	return 0;
 }
 
 static inline void integrity_inode_free(struct inode *inode)
 {
 	return;
 }
-
-static inline void integrity_load_keys(void)
-{
-}
-#endif /* CONFIG_INTEGRITY */
-
+#endif /* CONFIG_INTEGRITY_H */
 #endif /* _LINUX_INTEGRITY_H */

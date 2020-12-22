@@ -9,7 +9,7 @@
  * published by the Free Software Foundation.
  */
 #include <linux/kernel.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
 #include <linux/mfd/max8925.h>
@@ -37,7 +37,7 @@ static inline int max8925_read_device(struct i2c_client *i2c,
 static inline int max8925_write_device(struct i2c_client *i2c,
 				       int reg, int bytes, void *src)
 {
-	unsigned char buf[9];
+	unsigned char buf[bytes + 1];
 	int ret;
 
 	buf[0] = (unsigned char)reg;
@@ -133,44 +133,20 @@ static const struct i2c_device_id max8925_id_table[] = {
 	{ "max8925", 0 },
 	{ },
 };
+MODULE_DEVICE_TABLE(i2c, max8925_id_table);
 
-static int max8925_dt_init(struct device_node *np, struct device *dev,
-			   struct max8925_platform_data *pdata)
-{
-	int ret;
-
-	ret = of_property_read_u32(np, "maxim,tsc-irq", &pdata->tsc_irq);
-	if (ret) {
-		dev_err(dev, "Not found maxim,tsc-irq property\n");
-		return -EINVAL;
-	}
-	return 0;
-}
-
-static int max8925_probe(struct i2c_client *client,
+static int __devinit max8925_probe(struct i2c_client *client,
 				   const struct i2c_device_id *id)
 {
-	struct max8925_platform_data *pdata = dev_get_platdata(&client->dev);
+	struct max8925_platform_data *pdata = client->dev.platform_data;
 	static struct max8925_chip *chip;
-	struct device_node *node = client->dev.of_node;
 
-	if (node && !pdata) {
-		/* parse DT to get platform data */
-		pdata = devm_kzalloc(&client->dev,
-				     sizeof(struct max8925_platform_data),
-				     GFP_KERNEL);
-		if (!pdata)
-			return -ENOMEM;
-
-		if (max8925_dt_init(node, &client->dev, pdata))
-			return -EINVAL;
-	} else if (!pdata) {
+	if (!pdata) {
 		pr_info("%s: platform data is missing\n", __func__);
 		return -EINVAL;
 	}
 
-	chip = devm_kzalloc(&client->dev,
-			    sizeof(struct max8925_chip), GFP_KERNEL);
+	chip = kzalloc(sizeof(struct max8925_chip), GFP_KERNEL);
 	if (chip == NULL)
 		return -ENOMEM;
 	chip->i2c = client;
@@ -201,20 +177,21 @@ static int max8925_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int max8925_remove(struct i2c_client *client)
+static int __devexit max8925_remove(struct i2c_client *client)
 {
 	struct max8925_chip *chip = i2c_get_clientdata(client);
 
 	max8925_device_exit(chip);
 	i2c_unregister_device(chip->adc);
 	i2c_unregister_device(chip->rtc);
+	kfree(chip);
 	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
 static int max8925_suspend(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct max8925_chip *chip = i2c_get_clientdata(client);
 
 	if (device_may_wakeup(dev) && chip->wakeup_flag)
@@ -224,7 +201,7 @@ static int max8925_suspend(struct device *dev)
 
 static int max8925_resume(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct max8925_chip *chip = i2c_get_clientdata(client);
 
 	if (device_may_wakeup(dev) && chip->wakeup_flag)
@@ -235,19 +212,14 @@ static int max8925_resume(struct device *dev)
 
 static SIMPLE_DEV_PM_OPS(max8925_pm_ops, max8925_suspend, max8925_resume);
 
-static const struct of_device_id max8925_dt_ids[] = {
-	{ .compatible = "maxim,max8925", },
-	{},
-};
-
 static struct i2c_driver max8925_driver = {
 	.driver	= {
 		.name	= "max8925",
+		.owner	= THIS_MODULE,
 		.pm     = &max8925_pm_ops,
-		.of_match_table = max8925_dt_ids,
 	},
 	.probe		= max8925_probe,
-	.remove		= max8925_remove,
+	.remove		= __devexit_p(max8925_remove),
 	.id_table	= max8925_id_table,
 };
 
@@ -258,7 +230,16 @@ static int __init max8925_i2c_init(void)
 	ret = i2c_add_driver(&max8925_driver);
 	if (ret != 0)
 		pr_err("Failed to register MAX8925 I2C driver: %d\n", ret);
-
 	return ret;
 }
 subsys_initcall(max8925_i2c_init);
+
+static void __exit max8925_i2c_exit(void)
+{
+	i2c_del_driver(&max8925_driver);
+}
+module_exit(max8925_i2c_exit);
+
+MODULE_DESCRIPTION("I2C Driver for Maxim 8925");
+MODULE_AUTHOR("Haojian Zhuang <haojian.zhuang@marvell.com>");
+MODULE_LICENSE("GPL");

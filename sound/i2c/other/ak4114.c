@@ -60,7 +60,7 @@ static void reg_dump(struct ak4114 *ak4114)
 
 	printk(KERN_DEBUG "AK4114 REG DUMP:\n");
 	for (i = 0; i < 0x20; i++)
-		printk(KERN_DEBUG "reg[%02x] = %02x (%02x)\n", i, reg_read(ak4114, i), i < ARRAY_SIZE(ak4114->regmap) ? ak4114->regmap[i] : 0);
+		printk(KERN_DEBUG "reg[%02x] = %02x (%02x)\n", i, reg_read(ak4114, i), i < sizeof(ak4114->regmap) ? ak4114->regmap[i] : 0);
 }
 #endif
 
@@ -80,7 +80,7 @@ static int snd_ak4114_dev_free(struct snd_device *device)
 
 int snd_ak4114_create(struct snd_card *card,
 		      ak4114_read_t *read, ak4114_write_t *write,
-		      const unsigned char pgm[6], const unsigned char txcsb[5],
+		      const unsigned char pgm[7], const unsigned char txcsb[5],
 		      void *private_data, struct ak4114 **r_ak4114)
 {
 	struct ak4114 *chip;
@@ -100,9 +100,8 @@ int snd_ak4114_create(struct snd_card *card,
 	chip->private_data = private_data;
 	INIT_DELAYED_WORK(&chip->work, ak4114_stats);
 	atomic_set(&chip->wq_processing, 0);
-	mutex_init(&chip->reinit_mutex);
 
-	for (reg = 0; reg < 6; reg++)
+	for (reg = 0; reg < 7; reg++)
 		chip->regmap[reg] = pgm[reg];
 	for (reg = 0; reg < 5; reg++)
 		chip->txcsb[reg] = txcsb[reg];
@@ -112,7 +111,7 @@ int snd_ak4114_create(struct snd_card *card,
 	chip->rcs0 = reg_read(chip, AK4114_REG_RCS0) & ~(AK4114_QINT | AK4114_CINT);
 	chip->rcs1 = reg_read(chip, AK4114_REG_RCS1);
 
-	if ((err = snd_device_new(card, SNDRV_DEV_CODEC, chip, &ops)) < 0)
+	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, chip, &ops)) < 0)
 		goto __fail;
 
 	if (r_ak4114)
@@ -121,9 +120,8 @@ int snd_ak4114_create(struct snd_card *card,
 
       __fail:
 	snd_ak4114_free(chip);
-	return err;
+	return err < 0 ? err : -EIO;
 }
-EXPORT_SYMBOL(snd_ak4114_create);
 
 void snd_ak4114_reg_write(struct ak4114 *chip, unsigned char reg, unsigned char mask, unsigned char val)
 {
@@ -133,7 +131,6 @@ void snd_ak4114_reg_write(struct ak4114 *chip, unsigned char reg, unsigned char 
 		reg_write(chip, reg,
 			  (chip->txcsb[reg-AK4114_REG_TXCSB0] & ~mask) | val);
 }
-EXPORT_SYMBOL(snd_ak4114_reg_write);
 
 static void ak4114_init_regs(struct ak4114 *chip)
 {
@@ -145,7 +142,7 @@ static void ak4114_init_regs(struct ak4114 *chip)
 	/* release reset, but leave powerdown */
 	reg_write(chip, AK4114_REG_PWRDN, (old | AK4114_RST) & ~AK4114_PWN);
 	udelay(200);
-	for (reg = 1; reg < 6; reg++)
+	for (reg = 1; reg < 7; reg++)
 		reg_write(chip, reg, chip->regmap[reg]);
 	for (reg = 0; reg < 5; reg++)
 		reg_write(chip, reg + AK4114_REG_TXCSB0, chip->txcsb[reg]);
@@ -157,14 +154,11 @@ void snd_ak4114_reinit(struct ak4114 *chip)
 {
 	if (atomic_inc_return(&chip->wq_processing) == 1)
 		cancel_delayed_work_sync(&chip->work);
-	mutex_lock(&chip->reinit_mutex);
 	ak4114_init_regs(chip);
-	mutex_unlock(&chip->reinit_mutex);
 	/* bring up statistics / event queing */
 	if (atomic_dec_and_test(&chip->wq_processing))
 		schedule_delayed_work(&chip->work, HZ / 10);
 }
-EXPORT_SYMBOL(snd_ak4114_reinit);
 
 static unsigned int external_rate(unsigned char rcs1)
 {
@@ -405,7 +399,7 @@ static struct snd_kcontrol_new snd_ak4114_iec958_controls[] = {
 },
 {
 	.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
-	.name =		"IEC958 Preamble Capture Default",
+	.name =		"IEC958 Preample Capture Default",
 	.access =	SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 	.info =		snd_ak4114_spdif_pinfo,
 	.get =		snd_ak4114_spdif_pget,
@@ -509,7 +503,6 @@ int snd_ak4114_build(struct ak4114 *ak4114,
 	schedule_delayed_work(&ak4114->work, HZ / 10);
 	return 0;
 }
-EXPORT_SYMBOL(snd_ak4114_build);
 
 /* notify kcontrols if any parameters are changed */
 static void ak4114_notify(struct ak4114 *ak4114,
@@ -565,7 +558,6 @@ int snd_ak4114_external_rate(struct ak4114 *ak4114)
 	rcs1 = reg_read(ak4114, AK4114_REG_RCS1);
 	return external_rate(rcs1);
 }
-EXPORT_SYMBOL(snd_ak4114_external_rate);
 
 int snd_ak4114_check_rate_and_errors(struct ak4114 *ak4114, unsigned int flags)
 {
@@ -613,7 +605,6 @@ int snd_ak4114_check_rate_and_errors(struct ak4114 *ak4114, unsigned int flags)
 	}
 	return res;
 }
-EXPORT_SYMBOL(snd_ak4114_check_rate_and_errors);
 
 static void ak4114_stats(struct work_struct *work)
 {
@@ -625,18 +616,9 @@ static void ak4114_stats(struct work_struct *work)
 		schedule_delayed_work(&chip->work, HZ / 10);
 }
 
-#ifdef CONFIG_PM
-void snd_ak4114_suspend(struct ak4114 *chip)
-{
-	atomic_inc(&chip->wq_processing); /* don't schedule new work */
-	cancel_delayed_work_sync(&chip->work);
-}
-EXPORT_SYMBOL(snd_ak4114_suspend);
-
-void snd_ak4114_resume(struct ak4114 *chip)
-{
-	atomic_dec(&chip->wq_processing);
-	snd_ak4114_reinit(chip);
-}
-EXPORT_SYMBOL(snd_ak4114_resume);
-#endif
+EXPORT_SYMBOL(snd_ak4114_create);
+EXPORT_SYMBOL(snd_ak4114_reg_write);
+EXPORT_SYMBOL(snd_ak4114_reinit);
+EXPORT_SYMBOL(snd_ak4114_build);
+EXPORT_SYMBOL(snd_ak4114_external_rate);
+EXPORT_SYMBOL(snd_ak4114_check_rate_and_errors);

@@ -16,6 +16,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/input.h>
@@ -52,7 +53,7 @@ pcf50633_input_irq(int irq, void *data)
 	input_sync(input->input_dev);
 }
 
-static int pcf50633_input_probe(struct platform_device *pdev)
+static int __devinit pcf50633_input_probe(struct platform_device *pdev)
 {
 	struct pcf50633_input *input;
 	struct input_dev *input_dev;
@@ -92,7 +93,7 @@ static int pcf50633_input_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int pcf50633_input_remove(struct platform_device *pdev)
+static int __devexit pcf50633_input_remove(struct platform_device *pdev)
 {
 	struct pcf50633_input *input  = platform_get_drvdata(pdev);
 
@@ -110,7 +111,7 @@ static struct platform_driver pcf50633_input_driver = {
 		.name = "pcf50633-input",
 	},
 	.probe = pcf50633_input_probe,
-	.remove = pcf50633_input_remove,
+	.remove = __devexit_p(pcf50633_input_remove),
 };
 module_platform_driver(pcf50633_input_driver);
 

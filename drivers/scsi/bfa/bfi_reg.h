@@ -1,10 +1,9 @@
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014- QLogic Corporation.
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  *
- * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
+ * Linux driver for Brocade Fibre Channel Host Bus Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -17,7 +16,7 @@
  */
 
 /*
- * bfi_reg.h ASIC register defines for all QLogic BR-series adapter ASICs
+ * bfi_reg.h ASIC register defines for all Brocade adapter ASICs
  */
 
 #ifndef __BFI_REG_H__
@@ -339,7 +338,6 @@ enum {
 #define __A2T_AHB_LOAD			0x00000800
 #define __WGN_READY			0x00000400
 #define __GLBL_PF_VF_CFG_RDY		0x00000200
-#define CT2_NFC_STS_REG			0x00027410
 #define CT2_NFC_CSR_CLR_REG		0x00027420
 #define CT2_NFC_CSR_SET_REG		0x00027424
 #define __HALT_NFC_CONTROLLER		0x00000002
@@ -357,8 +355,6 @@ enum {
 	(CT2_CSI_MAC0_CONTROL_REG +	\
 	(__n) * (CT2_CSI_MAC1_CONTROL_REG - CT2_CSI_MAC0_CONTROL_REG))
 
-#define CT2_NFC_FLASH_STS_REG		0x00014834
-#define __FLASH_PLL_INIT_AND_RESET_IN_PROGRESS	0x00000020
 /*
  * Name semaphore registers based on usage
  */

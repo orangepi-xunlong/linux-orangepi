@@ -484,6 +484,7 @@ typedef int VOID;
  * |                                                     |G|L|E|U|X|
  * +-------+-------+-------+-------+-------+-------+-------+-------+
  */
+#define Allexception(object) (object)
 #define Greaterthanbit(object) Bitfield_extract( 27, 1,object)
 #define Lessthanbit(object) Bitfield_extract( 28, 1,object)
 #define Equalbit(object) Bitfield_extract( 29, 1,object)

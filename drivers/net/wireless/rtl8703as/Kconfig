@@ -1,0 +1,6 @@
+config RTL8723BS_VQ0
+	tristate "Realtek 8723BS_VQ0 WiFi"
+	select WIRELESS_EXT
+	select WEXT_PRIV
+	---help---
+	  Help message of RTL8723BS_VQ0

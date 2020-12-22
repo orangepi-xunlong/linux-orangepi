@@ -11,7 +11,8 @@
 #define _BFIN_MAC_H_
 
 #include <linux/net_tstamp.h>
-#include <linux/ptp_clock_kernel.h>
+#include <linux/clocksource.h>
+#include <linux/timecompare.h>
 #include <linux/timer.h>
 #include <linux/etherdevice.h>
 #include <linux/bfin_mac.h>
@@ -26,7 +27,6 @@
 #endif
 
 #define TX_RECLAIM_JIFFIES (HZ / 5)
-#define BFIN_MAC_RX_IRQ_DISABLED	1
 
 struct dma_descriptor {
 	struct dma_descriptor *next_dma_desc;
@@ -81,8 +81,6 @@ struct bfin_mac_local {
 	int irq_wake_requested;
 	struct timer_list tx_reclaim_timer;
 	struct net_device *ndev;
-	struct napi_struct napi;
-	unsigned long flags;
 
 	/* Data for EMAC_VLAN1 regs */
 	u16 vlan1_mask, vlan2_mask;
@@ -92,20 +90,17 @@ struct bfin_mac_local {
 	int old_speed;
 	int old_duplex;
 
+	struct phy_device *phydev;
 	struct mii_bus *mii_bus;
 
 #if defined(CONFIG_BFIN_MAC_USE_HWSTAMP)
-	u32 addend;
-	unsigned int shift;
-	s32 max_ppb;
+	struct cyclecounter cycles;
+	struct timecounter clock;
+	struct timecompare compare;
 	struct hwtstamp_config stamp_cfg;
-	struct ptp_clock_info caps;
-	struct ptp_clock *clock;
-	int phc_index;
-	spinlock_t phc_lock; /* protects time lo/hi registers */
 #endif
 };
 
-int bfin_get_ether_addr(char *addr);
+extern int bfin_get_ether_addr(char *addr);
 
 #endif

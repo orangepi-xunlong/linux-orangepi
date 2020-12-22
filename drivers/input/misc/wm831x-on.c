@@ -18,6 +18,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -68,15 +69,14 @@ static irqreturn_t wm831x_on_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int wm831x_on_probe(struct platform_device *pdev)
+static int __devinit wm831x_on_probe(struct platform_device *pdev)
 {
 	struct wm831x *wm831x = dev_get_drvdata(pdev->dev.parent);
 	struct wm831x_on *wm831x_on;
-	int irq = wm831x_irq(wm831x, platform_get_irq(pdev, 0));
+	int irq = platform_get_irq(pdev, 0);
 	int ret;
 
-	wm831x_on = devm_kzalloc(&pdev->dev, sizeof(struct wm831x_on),
-				 GFP_KERNEL);
+	wm831x_on = kzalloc(sizeof(struct wm831x_on), GFP_KERNEL);
 	if (!wm831x_on) {
 		dev_err(&pdev->dev, "Can't allocate data\n");
 		return -ENOMEM;
@@ -85,7 +85,7 @@ static int wm831x_on_probe(struct platform_device *pdev)
 	wm831x_on->wm831x = wm831x;
 	INIT_DELAYED_WORK(&wm831x_on->work, wm831x_poll_on);
 
-	wm831x_on->dev = devm_input_allocate_device(&pdev->dev);
+	wm831x_on->dev = input_allocate_device();
 	if (!wm831x_on->dev) {
 		dev_err(&pdev->dev, "Can't allocate input dev\n");
 		ret = -ENOMEM;
@@ -99,8 +99,7 @@ static int wm831x_on_probe(struct platform_device *pdev)
 	wm831x_on->dev->dev.parent = &pdev->dev;
 
 	ret = request_threaded_irq(irq, NULL, wm831x_on_irq,
-				   IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-				   "wm831x_on",
+				   IRQF_TRIGGER_RISING, "wm831x_on",
 				   wm831x_on);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Unable to request IRQ: %d\n", ret);
@@ -119,26 +118,31 @@ static int wm831x_on_probe(struct platform_device *pdev)
 err_irq:
 	free_irq(irq, wm831x_on);
 err_input_dev:
+	input_free_device(wm831x_on->dev);
 err:
+	kfree(wm831x_on);
 	return ret;
 }
 
-static int wm831x_on_remove(struct platform_device *pdev)
+static int __devexit wm831x_on_remove(struct platform_device *pdev)
 {
 	struct wm831x_on *wm831x_on = platform_get_drvdata(pdev);
 	int irq = platform_get_irq(pdev, 0);
 
 	free_irq(irq, wm831x_on);
 	cancel_delayed_work_sync(&wm831x_on->work);
+	input_unregister_device(wm831x_on->dev);
+	kfree(wm831x_on);
 
 	return 0;
 }
 
 static struct platform_driver wm831x_on_driver = {
 	.probe		= wm831x_on_probe,
-	.remove		= wm831x_on_remove,
+	.remove		= __devexit_p(wm831x_on_remove),
 	.driver		= {
 		.name	= "wm831x-on",
+		.owner	= THIS_MODULE,
 	},
 };
 module_platform_driver(wm831x_on_driver);

@@ -45,7 +45,7 @@
 
 static int hippi_header(struct sk_buff *skb, struct net_device *dev,
 			unsigned short type,
-			const void *daddr, const void *saddr, unsigned int len)
+			const void *daddr, const void *saddr, unsigned len)
 {
 	struct hippi_hdr *hip = (struct hippi_hdr *)skb_push(skb, HIPPI_HLEN);
 	struct hippi_cb *hcb = (struct hippi_cb *) skb->cb;
@@ -87,6 +87,33 @@ static int hippi_header(struct sk_buff *skb, struct net_device *dev,
 	}
 	hcb->ifield = 0;
 	return -((int)HIPPI_HLEN);
+}
+
+
+/*
+ * Rebuild the HIPPI MAC header. This is called after an ARP has
+ * completed on this sk_buff. We now let ARP fill in the other fields.
+ */
+
+static int hippi_rebuild_header(struct sk_buff *skb)
+{
+	struct hippi_hdr *hip = (struct hippi_hdr *)skb->data;
+
+	/*
+	 * Only IP is currently supported
+	 */
+
+	if(hip->snap.ethertype != htons(ETH_P_IP))
+	{
+		printk(KERN_DEBUG "%s: unable to resolve type %X addresses.\n",skb->dev->name,ntohs(hip->snap.ethertype));
+		return 0;
+	}
+
+	/*
+	 * We don't support dynamic ARP on HIPPI, but we use the ARP
+	 * static ARP tables to hold the I-FIELDs.
+	 */
+	return arp_find(hip->le.daddr, skb);
 }
 
 
@@ -145,20 +172,21 @@ EXPORT_SYMBOL(hippi_mac_addr);
 int hippi_neigh_setup_dev(struct net_device *dev, struct neigh_parms *p)
 {
 	/* Never send broadcast/multicast ARP messages */
-	NEIGH_VAR_INIT(p, MCAST_PROBES, 0);
+	p->mcast_probes = 0;
 
 	/* In IPv6 unicast probes are valid even on NBMA,
 	* because they are encapsulated in normal IPv6 protocol.
 	* Should be a generic flag.
 	*/
 	if (p->tbl->family != AF_INET6)
-		NEIGH_VAR_INIT(p, UCAST_PROBES, 0);
+		p->ucast_probes = 0;
 	return 0;
 }
 EXPORT_SYMBOL(hippi_neigh_setup_dev);
 
 static const struct header_ops hippi_header_ops = {
 	.create		= hippi_header,
+	.rebuild	= hippi_rebuild_header,
 };
 
 
@@ -200,8 +228,7 @@ static void hippi_setup(struct net_device *dev)
 
 struct net_device *alloc_hippi_dev(int sizeof_priv)
 {
-	return alloc_netdev(sizeof_priv, "hip%d", NET_NAME_UNKNOWN,
-			    hippi_setup);
+	return alloc_netdev(sizeof_priv, "hip%d", hippi_setup);
 }
 
 EXPORT_SYMBOL(alloc_hippi_dev);

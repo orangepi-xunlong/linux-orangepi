@@ -1,0 +1,33 @@
+
+config CSI_VFE
+	tristate "v4l2 driver for SUNXI"
+	default m
+	select VIDEOBUF_DMA_CONTIG
+		
+if ARCH_SUN8IW8
+
+menu "Sensor CSI"
+config OV2710_MIPI
+	tristate "ov2710_mipi"
+	default n
+config OV4689
+	tristate "ov4689"
+	default n
+config OV4689_60FPS
+	tristate "ov4689 60fps"
+	default n
+config AR0330_MIPI
+	tristate "ar0330 mipi"
+	default n
+config OV4689_SDV
+	tristate "ov4689 sdv"
+	default n
+config GC1004_MIPI
+	tristate "gc1004_mipi"
+	default n	
+config H22_MIPI
+	tristate "h22_mipi"
+	default n
+endmenu
+
+endif	

@@ -13,8 +13,9 @@
 #define _ASM_IRQFLAGS_H
 
 #include <asm/cpu-regs.h>
-/* linux/smp.h <- linux/irqflags.h needs asm/smp.h first */
-#include <asm/smp.h>
+#ifndef __ASSEMBLY__
+#include <linux/smp.h>
+#endif
 
 /*
  * interrupt control

@@ -232,7 +232,7 @@ static int pcf50633_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	return ret;
 }
 
-static const struct rtc_class_ops pcf50633_rtc_ops = {
+static struct rtc_class_ops pcf50633_rtc_ops = {
 	.read_time		= pcf50633_rtc_read_time,
 	.set_time		= pcf50633_rtc_set_time,
 	.read_alarm		= pcf50633_rtc_read_alarm,
@@ -248,33 +248,40 @@ static void pcf50633_rtc_irq(int irq, void *data)
 	rtc->alarm_pending = 1;
 }
 
-static int pcf50633_rtc_probe(struct platform_device *pdev)
+static int __devinit pcf50633_rtc_probe(struct platform_device *pdev)
 {
 	struct pcf50633_rtc *rtc;
 
-	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
+	rtc = kzalloc(sizeof(*rtc), GFP_KERNEL);
 	if (!rtc)
 		return -ENOMEM;
 
 	rtc->pcf = dev_to_pcf50633(pdev->dev.parent);
 	platform_set_drvdata(pdev, rtc);
-	rtc->rtc_dev = devm_rtc_device_register(&pdev->dev, "pcf50633-rtc",
+	rtc->rtc_dev = rtc_device_register("pcf50633-rtc", &pdev->dev,
 				&pcf50633_rtc_ops, THIS_MODULE);
 
-	if (IS_ERR(rtc->rtc_dev))
-		return PTR_ERR(rtc->rtc_dev);
+	if (IS_ERR(rtc->rtc_dev)) {
+		int ret =  PTR_ERR(rtc->rtc_dev);
+		kfree(rtc);
+		return ret;
+	}
 
 	pcf50633_register_irq(rtc->pcf, PCF50633_IRQ_ALARM,
 					pcf50633_rtc_irq, rtc);
 	return 0;
 }
 
-static int pcf50633_rtc_remove(struct platform_device *pdev)
+static int __devexit pcf50633_rtc_remove(struct platform_device *pdev)
 {
 	struct pcf50633_rtc *rtc;
 
 	rtc = platform_get_drvdata(pdev);
+
 	pcf50633_free_irq(rtc->pcf, PCF50633_IRQ_ALARM);
+
+	rtc_device_unregister(rtc->rtc_dev);
+	kfree(rtc);
 
 	return 0;
 }
@@ -284,7 +291,7 @@ static struct platform_driver pcf50633_rtc_driver = {
 		.name = "pcf50633-rtc",
 	},
 	.probe = pcf50633_rtc_probe,
-	.remove = pcf50633_rtc_remove,
+	.remove = __devexit_p(pcf50633_rtc_remove),
 };
 
 module_platform_driver(pcf50633_rtc_driver);

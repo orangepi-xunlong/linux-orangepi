@@ -40,7 +40,7 @@
 #ifndef __CVMX_WQE_H__
 #define __CVMX_WQE_H__
 
-#include <asm/octeon/cvmx-packet.h>
+#include "cvmx-packet.h"
 
 
 #define OCT_TAG_TYPE_STRING(x)						\
@@ -57,7 +57,6 @@ typedef union {
 
 	/* Use this struct if the hardware determines that the packet is IP */
 	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
 		/* HW sets this to the number of buffers used by this packet */
 		uint64_t bufs:8;
 		/* HW sets to the number of L2 bytes prior to the IP */
@@ -102,23 +101,23 @@ typedef union {
 		 * - 1 = Malformed L4
 		 * - 2 = L4 Checksum Error: the L4 checksum value is
 		 * - 3 = UDP Length Error: The UDP length field would
-		 *	 make the UDP data longer than what remains in
-		 *	 the IP packet (as defined by the IP header
-		 *	 length field).
+		 *       make the UDP data longer than what remains in
+		 *       the IP packet (as defined by the IP header
+		 *       length field).
 		 * - 4 = Bad L4 Port: either the source or destination
-		 *	 TCP/UDP port is 0.
+		 *       TCP/UDP port is 0.
 		 * - 8 = TCP FIN Only: the packet is TCP and only the
-		 *	 FIN flag set.
+		 *       FIN flag set.
 		 * - 9 = TCP No Flags: the packet is TCP and no flags
-		 *	 are set.
+		 *       are set.
 		 * - 10 = TCP FIN RST: the packet is TCP and both FIN
-		 *	  and RST are set.
+		 *        and RST are set.
 		 * - 11 = TCP SYN URG: the packet is TCP and both SYN
-		 *	  and URG are set.
+		 *        and URG are set.
 		 * - 12 = TCP SYN RST: the packet is TCP and both SYN
-		 *	  and RST are set.
+		 *        and RST are set.
 		 * - 13 = TCP SYN FIN: the packet is TCP and both SYN
-		 *	  and FIN are set.
+		 *        and FIN are set.
 		 */
 		uint64_t L4_error:1;
 		/* set if the packet is a fragment */
@@ -128,16 +127,16 @@ typedef union {
 		 * failure indicated in err_code below, decode:
 		 *
 		 * - 1 = Not IP: the IP version field is neither 4 nor
-		 *	 6.
+		 *       6.
 		 * - 2 = IPv4 Header Checksum Error: the IPv4 header
-		 *	 has a checksum violation.
+		 *       has a checksum violation.
 		 * - 3 = IP Malformed Header: the packet is not long
-		 *	 enough to contain the IP header.
+		 *       enough to contain the IP header.
 		 * - 4 = IP Malformed: the packet is not long enough
 		 *	 to contain the bytes indicated by the IP
 		 *	 header. Pad is allowed.
 		 * - 5 = IP TTL Hop: the IPv4 TTL field or the IPv6
-		 *	 Hop Count field are zero.
+		 *       Hop Count field are zero.
 		 * - 6 = IP Options
 		 */
 		uint64_t IP_exc:1;
@@ -167,92 +166,13 @@ typedef union {
 		 * the slow path */
 		/* type is cvmx_pip_err_t */
 		uint64_t err_code:8;
-#else
-	        uint64_t err_code:8;
-	        uint64_t rcv_error:1;
-	        uint64_t not_IP:1;
-	        uint64_t is_mcast:1;
-	        uint64_t is_bcast:1;
-	        uint64_t IP_exc:1;
-	        uint64_t is_frag:1;
-	        uint64_t L4_error:1;
-	        uint64_t software:1;
-	        uint64_t is_v6:1;
-	        uint64_t dec_ipsec:1;
-	        uint64_t tcp_or_udp:1;
-	        uint64_t dec_ipcomp:1;
-	        uint64_t unassigned2:4;
-	        uint64_t unassigned2a:4;
-	        uint64_t pr:4;
-	        uint64_t vlan_id:12;
-	        uint64_t vlan_cfi:1;
-	        uint64_t unassigned:1;
-	        uint64_t vlan_stacked:1;
-	        uint64_t vlan_valid:1;
-	        uint64_t ip_offset:8;
-	        uint64_t bufs:8;
-#endif
 	} s;
-	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
-		uint64_t bufs:8;
-		uint64_t ip_offset:8;
-		uint64_t vlan_valid:1;
-		uint64_t vlan_stacked:1;
-		uint64_t unassigned:1;
-		uint64_t vlan_cfi:1;
-		uint64_t vlan_id:12;
-		uint64_t port:12;		/* MAC/PIP port number. */
-		uint64_t dec_ipcomp:1;
-		uint64_t tcp_or_udp:1;
-		uint64_t dec_ipsec:1;
-		uint64_t is_v6:1;
-		uint64_t software:1;
-		uint64_t L4_error:1;
-		uint64_t is_frag:1;
-		uint64_t IP_exc:1;
-		uint64_t is_bcast:1;
-		uint64_t is_mcast:1;
-		uint64_t not_IP:1;
-		uint64_t rcv_error:1;
-		uint64_t err_code:8;
-#else
-		uint64_t err_code:8;
-		uint64_t rcv_error:1;
-		uint64_t not_IP:1;
-		uint64_t is_mcast:1;
-		uint64_t is_bcast:1;
-		uint64_t IP_exc:1;
-		uint64_t is_frag:1;
-		uint64_t L4_error:1;
-		uint64_t software:1;
-		uint64_t is_v6:1;
-		uint64_t dec_ipsec:1;
-		uint64_t tcp_or_udp:1;
-		uint64_t dec_ipcomp:1;
-		uint64_t port:12;
-		uint64_t vlan_id:12;
-		uint64_t vlan_cfi:1;
-		uint64_t unassigned:1;
-		uint64_t vlan_stacked:1;
-		uint64_t vlan_valid:1;
-		uint64_t ip_offset:8;
-		uint64_t bufs:8;
-#endif
-	} s_cn68xx;
 
 	/* use this to get at the 16 vlan bits */
 	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
 		uint64_t unused1:16;
 		uint64_t vlan:16;
 		uint64_t unused2:32;
-#else
-	        uint64_t unused2:32;
-	        uint64_t vlan:16;
-	        uint64_t unused1:16;
-
-#endif
 	} svlan;
 
 	/*
@@ -260,7 +180,6 @@ typedef union {
 	 * the packet is ip.
 	 */
 	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
 		/*
 		 * HW sets this to the number of buffers used by this
 		 * packet.
@@ -324,46 +243,46 @@ typedef union {
 		 * decode:
 		 *
 		 * - 1 = partial error: a packet was partially
-		 *	 received, but internal buffering / bandwidth
-		 *	 was not adequate to receive the entire
-		 *	 packet.
+		 *       received, but internal buffering / bandwidth
+		 *       was not adequate to receive the entire
+		 *       packet.
 		 * - 2 = jabber error: the RGMII packet was too large
-		 *	 and is truncated.
+		 *       and is truncated.
 		 * - 3 = overrun error: the RGMII packet is longer
-		 *	 than allowed and had an FCS error.
+		 *       than allowed and had an FCS error.
 		 * - 4 = oversize error: the RGMII packet is longer
-		 *	 than allowed.
+		 *       than allowed.
 		 * - 5 = alignment error: the RGMII packet is not an
-		 *	 integer number of bytes
-		 *	 and had an FCS error (100M and 10M only).
+		 *       integer number of bytes
+		 *       and had an FCS error (100M and 10M only).
 		 * - 6 = fragment error: the RGMII packet is shorter
-		 *	 than allowed and had an FCS error.
+		 *       than allowed and had an FCS error.
 		 * - 7 = GMX FCS error: the RGMII packet had an FCS
-		 *	 error.
+		 *       error.
 		 * - 8 = undersize error: the RGMII packet is shorter
-		 *	 than allowed.
+		 *       than allowed.
 		 * - 9 = extend error: the RGMII packet had an extend
-		 *	 error.
+		 *       error.
 		 * - 10 = length mismatch error: the RGMII packet had
-		 *	  a length that did not match the length field
-		 *	  in the L2 HDR.
+		 *        a length that did not match the length field
+		 *        in the L2 HDR.
 		 * - 11 = RGMII RX error/SPI4 DIP4 Error: the RGMII
-		 *	  packet had one or more data reception errors
-		 *	  (RXERR) or the SPI4 packet had one or more
-		 *	  DIP4 errors.
+		 * 	  packet had one or more data reception errors
+		 * 	  (RXERR) or the SPI4 packet had one or more
+		 * 	  DIP4 errors.
 		 * - 12 = RGMII skip error/SPI4 Abort Error: the RGMII
-		 *	  packet was not large enough to cover the
-		 *	  skipped bytes or the SPI4 packet was
-		 *	  terminated with an About EOPS.
+		 *        packet was not large enough to cover the
+		 *        skipped bytes or the SPI4 packet was
+		 *        terminated with an About EOPS.
 		 * - 13 = RGMII nibble error/SPI4 Port NXA Error: the
-		 *	  RGMII packet had a studder error (data not
-		 *	  repeated - 10/100M only) or the SPI4 packet
-		 *	  was sent to an NXA.
+		 *        RGMII packet had a studder error (data not
+		 *        repeated - 10/100M only) or the SPI4 packet
+		 *        was sent to an NXA.
 		 * - 16 = FCS error: a SPI4.2 packet had an FCS error.
 		 * - 17 = Skip error: a packet was not large enough to
-		 *	  cover the skipped bytes.
+		 *        cover the skipped bytes.
 		 * - 18 = L2 header malformed: the packet is not long
-		 *	  enough to contain the L2.
+		 *        enough to contain the L2.
 		 */
 
 		uint64_t rcv_error:1;
@@ -377,170 +296,9 @@ typedef union {
 		 */
 		/* type is cvmx_pip_err_t (union, so can't use directly */
 		uint64_t err_code:8;
-#else
-	        uint64_t err_code:8;
-	        uint64_t rcv_error:1;
-	        uint64_t not_IP:1;
-	        uint64_t is_mcast:1;
-	        uint64_t is_bcast:1;
-	        uint64_t is_arp:1;
-	        uint64_t is_rarp:1;
-	        uint64_t unassigned3:1;
-	        uint64_t software:1;
-	        uint64_t unassigned2:4;
-	        uint64_t unassigned2a:8;
-	        uint64_t pr:4;
-	        uint64_t vlan_id:12;
-	        uint64_t vlan_cfi:1;
-	        uint64_t unassigned:1;
-	        uint64_t vlan_stacked:1;
-	        uint64_t vlan_valid:1;
-	        uint64_t unused:8;
-	        uint64_t bufs:8;
-#endif
 	} snoip;
 
 } cvmx_pip_wqe_word2;
-
-union cvmx_pip_wqe_word0 {
-	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
-		/**
-		 * raw chksum result generated by the HW
-		 */
-		uint16_t hw_chksum;
-		/**
-		 * Field unused by hardware - available for software
-		 */
-		uint8_t unused;
-		/**
-		 * Next pointer used by hardware for list maintenance.
-		 * May be written/read by HW before the work queue
-		 * entry is scheduled to a PP (Only 36 bits used in
-		 * Octeon 1)
-		 */
-		uint64_t next_ptr:40;
-#else
-		uint64_t next_ptr:40;
-		uint8_t unused;
-		uint16_t hw_chksum;
-#endif
-	} cn38xx;
-	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
-		uint64_t l4ptr:8;       /* 56..63 */
-		uint64_t unused0:8;     /* 48..55 */
-		uint64_t l3ptr:8;       /* 40..47 */
-		uint64_t l2ptr:8;       /* 32..39 */
-		uint64_t unused1:18;    /* 14..31 */
-		uint64_t bpid:6;        /* 8..13 */
-		uint64_t unused2:2;     /* 6..7 */
-		uint64_t pknd:6;        /* 0..5 */
-#else
-		uint64_t pknd:6;        /* 0..5 */
-		uint64_t unused2:2;     /* 6..7 */
-		uint64_t bpid:6;        /* 8..13 */
-		uint64_t unused1:18;    /* 14..31 */
-		uint64_t l2ptr:8;       /* 32..39 */
-		uint64_t l3ptr:8;       /* 40..47 */
-		uint64_t unused0:8;     /* 48..55 */
-		uint64_t l4ptr:8;       /* 56..63 */
-#endif
-	} cn68xx;
-};
-
-union cvmx_wqe_word0 {
-	uint64_t u64;
-	union cvmx_pip_wqe_word0 pip;
-};
-
-union cvmx_wqe_word1 {
-	uint64_t u64;
-	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
-		uint64_t len:16;
-		uint64_t varies:14;
-		/**
-		 * the type of the tag (ORDERED, ATOMIC, NULL)
-		 */
-		uint64_t tag_type:2;
-		uint64_t tag:32;
-#else
-		uint64_t tag:32;
-		uint64_t tag_type:2;
-		uint64_t varies:14;
-		uint64_t len:16;
-#endif
-	};
-	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
-		uint64_t len:16;
-		uint64_t zero_0:1;
-		/**
-		 * HW sets this to what it thought the priority of
-		 * the input packet was
-		 */
-		uint64_t qos:3;
-
-		uint64_t zero_1:1;
-		/**
-		 * the group that the work queue entry will be scheduled to
-		 */
-		uint64_t grp:6;
-		uint64_t zero_2:3;
-		uint64_t tag_type:2;
-		uint64_t tag:32;
-#else
-		uint64_t tag:32;
-		uint64_t tag_type:2;
-		uint64_t zero_2:3;
-		uint64_t grp:6;
-		uint64_t zero_1:1;
-		uint64_t qos:3;
-		uint64_t zero_0:1;
-		uint64_t len:16;
-#endif
-	} cn68xx;
-	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
-		/**
-		 * HW sets to the total number of bytes in the packet
-		 */
-		uint64_t len:16;
-		/**
-		 * HW sets this to input physical port
-		 */
-		uint64_t ipprt:6;
-
-		/**
-		 * HW sets this to what it thought the priority of
-		 * the input packet was
-		 */
-		uint64_t qos:3;
-
-		/**
-		 * the group that the work queue entry will be scheduled to
-		 */
-		uint64_t grp:4;
-		/**
-		 * the type of the tag (ORDERED, ATOMIC, NULL)
-		 */
-		uint64_t tag_type:3;
-		/**
-		 * the synchronization/ordering tag
-		 */
-		uint64_t tag:32;
-#else
-		uint64_t tag:32;
-		uint64_t tag_type:2;
-		uint64_t zero_2:1;
-		uint64_t grp:4;
-		uint64_t qos:3;
-		uint64_t ipprt:6;
-		uint64_t len:16;
-#endif
-	} cn38xx;
-};
 
 /**
  * Work queue entry format
@@ -551,20 +309,61 @@ typedef struct {
 
     /*****************************************************************
      * WORD 0
-     *	HW WRITE: the following 64 bits are filled by HW when a packet arrives
+     *  HW WRITE: the following 64 bits are filled by HW when a packet arrives
      */
-	union cvmx_wqe_word0 word0;
+
+    /**
+     * raw chksum result generated by the HW
+     */
+	uint16_t hw_chksum;
+    /**
+     * Field unused by hardware - available for software
+     */
+	uint8_t unused;
+    /**
+     * Next pointer used by hardware for list maintenance.
+     * May be written/read by HW before the work queue
+     *           entry is scheduled to a PP
+     * (Only 36 bits used in Octeon 1)
+     */
+	uint64_t next_ptr:40;
 
     /*****************************************************************
      * WORD 1
-     *	HW WRITE: the following 64 bits are filled by HW when a packet arrives
+     *  HW WRITE: the following 64 bits are filled by HW when a packet arrives
      */
-	union cvmx_wqe_word1 word1;
+
+    /**
+     * HW sets to the total number of bytes in the packet
+     */
+	uint64_t len:16;
+    /**
+     * HW sets this to input physical port
+     */
+	uint64_t ipprt:6;
+
+    /**
+     * HW sets this to what it thought the priority of the input packet was
+     */
+	uint64_t qos:3;
+
+    /**
+     * the group that the work queue entry will be scheduled to
+     */
+	uint64_t grp:4;
+    /**
+     * the type of the tag (ORDERED, ATOMIC, NULL)
+     */
+	uint64_t tag_type:3;
+    /**
+     * the synchronization/ordering tag
+     */
+	uint64_t tag:32;
 
     /**
      * WORD 2 HW WRITE: the following 64-bits are filled in by
-     *	 hardware when a packet arrives This indicates a variety of
-     *	 status and error conditions.
+     *   hardware when a packet arrives This indicates a variety of
+     *   status and error conditions.
      */
 	cvmx_pip_wqe_word2 word2;
 
@@ -574,15 +373,15 @@ typedef struct {
 	union cvmx_buf_ptr packet_ptr;
 
     /**
-     *	 HW WRITE: octeon will fill in a programmable amount from the
-     *		   packet, up to (at most, but perhaps less) the amount
-     *		   needed to fill the work queue entry to 128 bytes
+     *   HW WRITE: octeon will fill in a programmable amount from the
+     *             packet, up to (at most, but perhaps less) the amount
+     *             needed to fill the work queue entry to 128 bytes
      *
-     *	 If the packet is recognized to be IP, the hardware starts
-     *	 (except that the IPv4 header is padded for appropriate
-     *	 alignment) writing here where the IP header starts.  If the
-     *	 packet is not recognized to be IP, the hardware starts
-     *	 writing the beginning of the packet here.
+     *   If the packet is recognized to be IP, the hardware starts
+     *   (except that the IPv4 header is padded for appropriate
+     *   alignment) writing here where the IP header starts.  If the
+     *   packet is not recognized to be IP, the hardware starts
+     *   writing the beginning of the packet here.
      */
 	uint8_t packet_data[96];
 
@@ -594,65 +393,5 @@ typedef struct {
      */
 
 } CVMX_CACHE_LINE_ALIGNED cvmx_wqe_t;
-
-static inline int cvmx_wqe_get_port(cvmx_wqe_t *work)
-{
-	int port;
-
-	if (octeon_has_feature(OCTEON_FEATURE_CN68XX_WQE))
-		port = work->word2.s_cn68xx.port;
-	else
-		port = work->word1.cn38xx.ipprt;
-
-	return port;
-}
-
-static inline void cvmx_wqe_set_port(cvmx_wqe_t *work, int port)
-{
-	if (octeon_has_feature(OCTEON_FEATURE_CN68XX_WQE))
-		work->word2.s_cn68xx.port = port;
-	else
-		work->word1.cn38xx.ipprt = port;
-}
-
-static inline int cvmx_wqe_get_grp(cvmx_wqe_t *work)
-{
-	int grp;
-
-	if (octeon_has_feature(OCTEON_FEATURE_CN68XX_WQE))
-		grp = work->word1.cn68xx.grp;
-	else
-		grp = work->word1.cn38xx.grp;
-
-	return grp;
-}
-
-static inline void cvmx_wqe_set_grp(cvmx_wqe_t *work, int grp)
-{
-	if (octeon_has_feature(OCTEON_FEATURE_CN68XX_WQE))
-		work->word1.cn68xx.grp = grp;
-	else
-		work->word1.cn38xx.grp = grp;
-}
-
-static inline int cvmx_wqe_get_qos(cvmx_wqe_t *work)
-{
-	int qos;
-
-	if (octeon_has_feature(OCTEON_FEATURE_CN68XX_WQE))
-		qos = work->word1.cn68xx.qos;
-	else
-		qos = work->word1.cn38xx.qos;
-
-	return qos;
-}
-
-static inline void cvmx_wqe_set_qos(cvmx_wqe_t *work, int qos)
-{
-	if (octeon_has_feature(OCTEON_FEATURE_CN68XX_WQE))
-		work->word1.cn68xx.qos = qos;
-	else
-		work->word1.cn38xx.qos = qos;
-}
 
 #endif /* __CVMX_WQE_H__ */

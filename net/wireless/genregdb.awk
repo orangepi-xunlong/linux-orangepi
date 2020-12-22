@@ -33,59 +33,55 @@ BEGIN {
 	regdb = "const struct ieee80211_regdomain *reg_regdb[] = {\n"
 }
 
-function parse_country_head() {
+/^[ \t]*#/ {
+	# Ignore
+}
+
+!active && /^[ \t]*$/ {
+	# Ignore
+}
+
+!active && /country/ {
 	country=$2
 	sub(/:/, "", country)
 	printf "static const struct ieee80211_regdomain regdom_%s = {\n", country
 	printf "\t.alpha2 = \"%s\",\n", country
-	if ($NF ~ /DFS-ETSI/)
-		printf "\t.dfs_region = NL80211_DFS_ETSI,\n"
-	else if ($NF ~ /DFS-FCC/)
-		printf "\t.dfs_region = NL80211_DFS_FCC,\n"
-	else if ($NF ~ /DFS-JP/)
-		printf "\t.dfs_region = NL80211_DFS_JP,\n"
 	printf "\t.reg_rules = {\n"
 	active = 1
 	regdb = regdb "\t&regdom_" country ",\n"
 }
 
-function parse_reg_rule()
-{
-	flag_starts_at = 7
-
+active && /^[ \t]*\(/ {
 	start = $1
 	sub(/\(/, "", start)
 	end = $3
 	bw = $5
 	sub(/\),/, "", bw)
-	gain = 0
-	power = $6
+	gain = $6
+	sub(/\(/, "", gain)
+	sub(/,/, "", gain)
+	power = $7
+	sub(/\)/, "", power)
+	sub(/,/, "", power)
 	# power might be in mW...
-	units = $7
-	dfs_cac = 0
-
-	sub(/\(/, "", power)
-	sub(/\),/, "", power)
-	sub(/\),/, "", units)
+	units = $8
 	sub(/\)/, "", units)
-
+	sub(/,/, "", units)
 	if (units == "mW") {
-		flag_starts_at = 8
-		power = 10 * log(power)/log(10)
-		if ($8 ~ /[[:digit:]]/) {
-			flag_starts_at = 9
-			dfs_cac = $8
-		}
-	} else {
-		if ($7 ~ /[[:digit:]]/) {
-			flag_starts_at = 8
-			dfs_cac = $7
+		if (power == 100) {
+			power = 20
+		} else if (power == 200) {
+			power = 23
+		} else if (power == 500) {
+			power = 27
+		} else if (power == 1000) {
+			power = 30
+		} else {
+			print "Unknown power value in database!"
 		}
 	}
-	sub(/\(/, "", dfs_cac)
-	sub(/\),/, "", dfs_cac)
 	flagstr = ""
-	for (i=flag_starts_at; i<=NF; i++)
+	for (i=8; i<=NF; i++)
 		flagstr = flagstr $i
 	split(flagstr, flagarray, ",")
 	flags = ""
@@ -105,23 +101,17 @@ function parse_reg_rule()
 		} else if (flagarray[arg] == "PTMP-ONLY") {
 			flags = flags "\n\t\t\tNL80211_RRF_PTMP_ONLY | "
 		} else if (flagarray[arg] == "PASSIVE-SCAN") {
-			flags = flags "\n\t\t\tNL80211_RRF_NO_IR | "
+			flags = flags "\n\t\t\tNL80211_RRF_PASSIVE_SCAN | "
 		} else if (flagarray[arg] == "NO-IBSS") {
-			flags = flags "\n\t\t\tNL80211_RRF_NO_IR | "
-		} else if (flagarray[arg] == "NO-IR") {
-			flags = flags "\n\t\t\tNL80211_RRF_NO_IR | "
-		} else if (flagarray[arg] == "AUTO-BW") {
-			flags = flags "\n\t\t\tNL80211_RRF_AUTO_BW | "
+			flags = flags "\n\t\t\tNL80211_RRF_NO_IBSS | "
 		}
-
 	}
 	flags = flags "0"
-	printf "\t\tREG_RULE_EXT(%d, %d, %d, %d, %.0f, %d, %s),\n", start, end, bw, gain, power, dfs_cac, flags
+	printf "\t\tREG_RULE(%d, %d, %d, %d, %d, %s),\n", start, end, bw, gain, power, flags
 	rules++
 }
 
-function print_tail_country()
-{
+active && /^[ \t]*$/ {
 	active = 0
 	printf "\t},\n"
 	printf "\t.n_reg_rules = %d\n", rules
@@ -129,29 +119,7 @@ function print_tail_country()
 	rules = 0;
 }
 
-/^[ \t]*#/ {
-	# Ignore
-}
-
-!active && /^[ \t]*$/ {
-	# Ignore
-}
-
-!active && /country/ {
-	parse_country_head()
-}
-
-active && /^[ \t]*\(/ {
-	parse_reg_rule()
-}
-
-active && /^[ \t]*$/ {
-	print_tail_country()
-}
-
 END {
-	if (active)
-		print_tail_country()
 	print regdb "};"
 	print ""
 	print "int reg_regdb_size = ARRAY_SIZE(reg_regdb);"

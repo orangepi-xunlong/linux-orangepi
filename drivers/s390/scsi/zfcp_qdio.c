@@ -3,7 +3,7 @@
  *
  * Setup and helper functions to access QDIO.
  *
- * Copyright IBM Corp. 2002, 2010
+ * Copyright IBM Corporation 2002, 2010
  */
 
 #define KMSG_COMPONENT "zfcp"
@@ -14,9 +14,26 @@
 #include "zfcp_ext.h"
 #include "zfcp_qdio.h"
 
-static bool enable_multibuffer = 1;
+#define QBUFF_PER_PAGE		(PAGE_SIZE / sizeof(struct qdio_buffer))
+
+static bool enable_multibuffer;
 module_param_named(datarouter, enable_multibuffer, bool, 0400);
-MODULE_PARM_DESC(datarouter, "Enable hardware data router support (default on)");
+MODULE_PARM_DESC(datarouter, "Enable hardware data router support");
+
+static int zfcp_qdio_buffers_enqueue(struct qdio_buffer **sbal)
+{
+	int pos;
+
+	for (pos = 0; pos < QDIO_MAX_BUFFERS_PER_Q; pos += QBUFF_PER_PAGE) {
+		sbal[pos] = (struct qdio_buffer *) get_zeroed_page(GFP_KERNEL);
+		if (!sbal[pos])
+			return -ENOMEM;
+	}
+	for (pos = 0; pos < QDIO_MAX_BUFFERS_PER_Q; pos++)
+		if (pos % QBUFF_PER_PAGE)
+			sbal[pos] = sbal[pos - 1] + 1;
+	return 0;
+}
 
 static void zfcp_qdio_handler_error(struct zfcp_qdio *qdio, char *id,
 				    unsigned int qdio_err)
@@ -51,7 +68,7 @@ static inline void zfcp_qdio_account(struct zfcp_qdio *qdio)
 	unsigned long long now, span;
 	int used;
 
-	now = get_tod_clock_monotonic();
+	now = get_clock_monotonic();
 	span = (now - qdio->req_q_time) >> 12;
 	used = QDIO_MAX_BUFFERS_PER_Q - atomic_read(&qdio->req_q_free);
 	qdio->req_q_util += used * span;
@@ -309,30 +326,15 @@ static void zfcp_qdio_setup_init_data(struct qdio_initialize *id,
 static int zfcp_qdio_allocate(struct zfcp_qdio *qdio)
 {
 	struct qdio_initialize init_data;
-	int ret;
 
-	ret = qdio_alloc_buffers(qdio->req_q, QDIO_MAX_BUFFERS_PER_Q);
-	if (ret)
+	if (zfcp_qdio_buffers_enqueue(qdio->req_q) ||
+	    zfcp_qdio_buffers_enqueue(qdio->res_q))
 		return -ENOMEM;
-
-	ret = qdio_alloc_buffers(qdio->res_q, QDIO_MAX_BUFFERS_PER_Q);
-	if (ret)
-		goto free_req_q;
 
 	zfcp_qdio_setup_init_data(&init_data, qdio);
 	init_waitqueue_head(&qdio->req_q_wq);
 
-	ret = qdio_allocate(&init_data);
-	if (ret)
-		goto free_res_q;
-
-	return 0;
-
-free_res_q:
-	qdio_free_buffers(qdio->res_q, QDIO_MAX_BUFFERS_PER_Q);
-free_req_q:
-	qdio_free_buffers(qdio->req_q, QDIO_MAX_BUFFERS_PER_Q);
-	return ret;
+	return qdio_allocate(&init_data);
 }
 
 /**
@@ -349,7 +351,7 @@ void zfcp_qdio_close(struct zfcp_qdio *qdio)
 
 	/* clear QDIOUP flag, thus do_QDIO is not called during qdio_shutdown */
 	spin_lock_irq(&qdio->req_q_lock);
-	atomic_andnot(ZFCP_STATUS_ADAPTER_QDIOUP, &adapter->status);
+	atomic_clear_mask(ZFCP_STATUS_ADAPTER_QDIOUP, &adapter->status);
 	spin_unlock_irq(&qdio->req_q_lock);
 
 	wake_up(&qdio->req_q_wq);
@@ -384,7 +386,7 @@ int zfcp_qdio_open(struct zfcp_qdio *qdio)
 	if (atomic_read(&adapter->status) & ZFCP_STATUS_ADAPTER_QDIOUP)
 		return -EIO;
 
-	atomic_andnot(ZFCP_STATUS_ADAPTER_SIOSL_ISSUED,
+	atomic_clear_mask(ZFCP_STATUS_ADAPTER_SIOSL_ISSUED,
 			  &qdio->adapter->status);
 
 	zfcp_qdio_setup_init_data(&init_data, qdio);
@@ -396,14 +398,14 @@ int zfcp_qdio_open(struct zfcp_qdio *qdio)
 		goto failed_qdio;
 
 	if (ssqd.qdioac2 & CHSC_AC2_DATA_DIV_ENABLED)
-		atomic_or(ZFCP_STATUS_ADAPTER_DATA_DIV_ENABLED,
+		atomic_set_mask(ZFCP_STATUS_ADAPTER_DATA_DIV_ENABLED,
 				&qdio->adapter->status);
 
 	if (ssqd.qdioac2 & CHSC_AC2_MULTI_BUFFER_ENABLED) {
-		atomic_or(ZFCP_STATUS_ADAPTER_MB_ACT, &adapter->status);
+		atomic_set_mask(ZFCP_STATUS_ADAPTER_MB_ACT, &adapter->status);
 		qdio->max_sbale_per_sbal = QDIO_MAX_ELEMENTS_PER_BUFFER;
 	} else {
-		atomic_andnot(ZFCP_STATUS_ADAPTER_MB_ACT, &adapter->status);
+		atomic_clear_mask(ZFCP_STATUS_ADAPTER_MB_ACT, &adapter->status);
 		qdio->max_sbale_per_sbal = QDIO_MAX_ELEMENTS_PER_BUFFER - 1;
 	}
 
@@ -427,7 +429,7 @@ int zfcp_qdio_open(struct zfcp_qdio *qdio)
 	/* set index of first available SBALS / number of available SBALS */
 	qdio->req_q_idx = 0;
 	atomic_set(&qdio->req_q_free, QDIO_MAX_BUFFERS_PER_Q);
-	atomic_or(ZFCP_STATUS_ADAPTER_QDIOUP, &qdio->adapter->status);
+	atomic_set_mask(ZFCP_STATUS_ADAPTER_QDIOUP, &qdio->adapter->status);
 
 	if (adapter->scsi_host) {
 		adapter->scsi_host->sg_tablesize = qdio->max_sbale_per_req;
@@ -446,14 +448,19 @@ failed_establish:
 
 void zfcp_qdio_destroy(struct zfcp_qdio *qdio)
 {
+	int p;
+
 	if (!qdio)
 		return;
 
 	if (qdio->adapter->ccw_device)
 		qdio_free(qdio->adapter->ccw_device);
 
-	qdio_free_buffers(qdio->req_q, QDIO_MAX_BUFFERS_PER_Q);
-	qdio_free_buffers(qdio->res_q, QDIO_MAX_BUFFERS_PER_Q);
+	for (p = 0; p < QDIO_MAX_BUFFERS_PER_Q; p += QBUFF_PER_PAGE) {
+		free_page((unsigned long) qdio->req_q[p]);
+		free_page((unsigned long) qdio->res_q[p]);
+	}
+
 	kfree(qdio);
 }
 
@@ -468,7 +475,7 @@ int zfcp_qdio_setup(struct zfcp_adapter *adapter)
 	qdio->adapter = adapter;
 
 	if (zfcp_qdio_allocate(qdio)) {
-		kfree(qdio);
+		zfcp_qdio_destroy(qdio);
 		return -ENOMEM;
 	}
 
@@ -499,6 +506,6 @@ void zfcp_qdio_siosl(struct zfcp_adapter *adapter)
 
 	rc = ccw_device_siosl(adapter->ccw_device);
 	if (!rc)
-		atomic_or(ZFCP_STATUS_ADAPTER_SIOSL_ISSUED,
+		atomic_set_mask(ZFCP_STATUS_ADAPTER_SIOSL_ISSUED,
 				&adapter->status);
 }

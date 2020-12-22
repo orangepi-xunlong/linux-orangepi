@@ -14,7 +14,6 @@
  */
 
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
 #include <linux/ctype.h>
 #include <linux/genhd.h>
 
@@ -34,7 +33,6 @@
 #include "efi.h"
 #include "karma.h"
 #include "sysv68.h"
-#include "cmdline.h"
 
 int warn_no_part = 1; /*This is ugly: should make genhd removable media aware*/
 
@@ -66,9 +64,6 @@ static int (*check_part[])(struct parsed_partitions *) = {
 	adfspart_check_ADFS,
 #endif
 
-#ifdef CONFIG_CMDLINE_PARTITION
-	cmdline_partition,
-#endif
 #ifdef CONFIG_EFI_PARTITION
 	efi_partition,		/* this must come before msdos */
 #endif
@@ -111,45 +106,18 @@ static int (*check_part[])(struct parsed_partitions *) = {
 	NULL
 };
 
-static struct parsed_partitions *allocate_partitions(struct gendisk *hd)
-{
-	struct parsed_partitions *state;
-	int nr;
-
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
-	if (!state)
-		return NULL;
-
-	nr = disk_max_parts(hd);
-	state->parts = vzalloc(nr * sizeof(state->parts[0]));
-	if (!state->parts) {
-		kfree(state);
-		return NULL;
-	}
-
-	state->limit = nr;
-
-	return state;
-}
-
-void free_partitions(struct parsed_partitions *state)
-{
-	vfree(state->parts);
-	kfree(state);
-}
-
 struct parsed_partitions *
 check_partition(struct gendisk *hd, struct block_device *bdev)
 {
 	struct parsed_partitions *state;
 	int i, res, err;
 
-	state = allocate_partitions(hd);
+	state = kzalloc(sizeof(struct parsed_partitions), GFP_KERNEL);
 	if (!state)
 		return NULL;
 	state->pp_buf = (char *)__get_free_page(GFP_KERNEL);
 	if (!state->pp_buf) {
-		free_partitions(state);
+		kfree(state);
 		return NULL;
 	}
 	state->pp_buf[0] = '\0';
@@ -160,9 +128,10 @@ check_partition(struct gendisk *hd, struct block_device *bdev)
 	if (isdigit(state->name[strlen(state->name)-1]))
 		sprintf(state->name, "p");
 
+	state->limit = disk_max_parts(hd);
 	i = res = err = 0;
 	while (!res && check_part[i]) {
-		memset(state->parts, 0, state->limit * sizeof(state->parts[0]));
+		memset(&state->parts, 0, sizeof(state->parts));
 		res = check_part[i++](state);
 		if (res < 0) {
 			/* We have hit an I/O error which we don't report now.
@@ -184,14 +153,14 @@ check_partition(struct gendisk *hd, struct block_device *bdev)
 	if (err)
 	/* The partition is unrecognized. So report I/O errors if there were any */
 		res = err;
-	if (res) {
-		if (warn_no_part)
-			strlcat(state->pp_buf,
-				" unable to read partition table\n", PAGE_SIZE);
-		printk(KERN_INFO "%s", state->pp_buf);
-	}
+	if (!res)
+		strlcat(state->pp_buf, " unknown partition table\n", PAGE_SIZE);
+	else if (warn_no_part)
+		strlcat(state->pp_buf, " unable to read partition table\n", PAGE_SIZE);
+
+	printk(KERN_INFO "%s", state->pp_buf);
 
 	free_page((unsigned long)state->pp_buf);
-	free_partitions(state);
+	kfree(state);
 	return ERR_PTR(res);
 }

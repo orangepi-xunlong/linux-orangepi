@@ -13,7 +13,9 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
+ * USA
 
 Module Name:
 
@@ -614,7 +616,7 @@ typedef enum {
 /* Assume contoller gets data 10 times the maximum processing time */
 #define  REPEAT_CNT			10
 
-/* amd8111e descriptor flag definitions */
+/* amd8111e decriptor flag definitions */
 typedef enum {
 
 	OWN_BIT		=	(1 << 15),
@@ -751,7 +753,7 @@ struct amd8111e_priv{
 	const char *name;
 	struct pci_dev *pci_dev;	/* Ptr to the associated pci_dev */
 	struct net_device* amd8111e_net_dev; 	/* ptr to associated net_device */
-	/* Transmit and receive skbs */
+	/* Transmit and recive skbs */
 	struct sk_buff *tx_skbuff[NUM_TX_BUFFERS];
 	struct sk_buff *rx_skbuff[NUM_RX_BUFFERS];
 	/* Transmit and receive dma mapped addr */

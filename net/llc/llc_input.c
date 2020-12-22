@@ -42,7 +42,6 @@ static void (*llc_type_handlers[2])(struct llc_sap *sap,
 void llc_add_pack(int type, void (*handler)(struct llc_sap *sap,
 					    struct sk_buff *skb))
 {
-	smp_wmb(); /* ensure initialisation is complete before it's called */
 	if (type == LLC_DEST_SAP || type == LLC_DEST_CONN)
 		llc_type_handlers[type - 1] = handler;
 }
@@ -51,19 +50,11 @@ void llc_remove_pack(int type)
 {
 	if (type == LLC_DEST_SAP || type == LLC_DEST_CONN)
 		llc_type_handlers[type - 1] = NULL;
-	synchronize_net();
 }
 
 void llc_set_station_handler(void (*handler)(struct sk_buff *skb))
 {
-	/* Ensure initialisation is complete before it's called */
-	if (handler)
-		smp_wmb();
-
 	llc_station_handler = handler;
-
-	if (!handler)
-		synchronize_net();
 }
 
 /**
@@ -159,8 +150,6 @@ int llc_rcv(struct sk_buff *skb, struct net_device *dev,
 	int dest;
 	int (*rcv)(struct sk_buff *, struct net_device *,
 		   struct packet_type *, struct net_device *);
-	void (*sta_handler)(struct sk_buff *skb);
-	void (*sap_handler)(struct llc_sap *sap, struct sk_buff *skb);
 
 	if (!net_eq(dev_net(dev), &init_net))
 		goto drop;
@@ -193,8 +182,7 @@ int llc_rcv(struct sk_buff *skb, struct net_device *dev,
 	 */
 	rcv = rcu_dereference(sap->rcv_func);
 	dest = llc_pdu_type(skb);
-	sap_handler = dest ? ACCESS_ONCE(llc_type_handlers[dest - 1]) : NULL;
-	if (unlikely(!sap_handler)) {
+	if (unlikely(!dest || !llc_type_handlers[dest - 1])) {
 		if (rcv)
 			rcv(skb, dev, pt, orig_dev);
 		else
@@ -205,7 +193,7 @@ int llc_rcv(struct sk_buff *skb, struct net_device *dev,
 			if (cskb)
 				rcv(cskb, dev, pt, orig_dev);
 		}
-		sap_handler(sap, skb);
+		llc_type_handlers[dest - 1](sap, skb);
 	}
 	llc_sap_put(sap);
 out:
@@ -214,10 +202,9 @@ drop:
 	kfree_skb(skb);
 	goto out;
 handle_station:
-	sta_handler = ACCESS_ONCE(llc_station_handler);
-	if (!sta_handler)
+	if (!llc_station_handler)
 		goto drop;
-	sta_handler(skb);
+	llc_station_handler(skb);
 	goto out;
 }
 

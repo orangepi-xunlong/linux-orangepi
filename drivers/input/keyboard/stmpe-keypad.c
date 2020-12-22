@@ -6,6 +6,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
@@ -45,14 +46,13 @@
 #define STMPE_KEYPAD_MAX_ROWS		8
 #define STMPE_KEYPAD_MAX_COLS		8
 #define STMPE_KEYPAD_ROW_SHIFT		3
-#define STMPE_KEYPAD_KEYMAP_MAX_SIZE \
+#define STMPE_KEYPAD_KEYMAP_SIZE	\
 	(STMPE_KEYPAD_MAX_ROWS * STMPE_KEYPAD_MAX_COLS)
 
 /**
  * struct stmpe_keypad_variant - model-specific attributes
  * @auto_increment: whether the KPC_DATA_BYTE register address
  *		    auto-increments on multiple read
- * @set_pullup: whether the pins need to have their pull-ups set
  * @num_data: number of data bytes
  * @num_normal_data: number of normal keys' data bytes
  * @max_cols: maximum number of columns supported
@@ -62,7 +62,6 @@
  */
 struct stmpe_keypad_variant {
 	bool		auto_increment;
-	bool		set_pullup;
 	int		num_data;
 	int		num_normal_data;
 	int		max_cols;
@@ -83,17 +82,15 @@ static const struct stmpe_keypad_variant stmpe_keypad_variants[] = {
 	},
 	[STMPE2401] = {
 		.auto_increment		= false,
-		.set_pullup		= true,
 		.num_data		= 3,
 		.num_normal_data	= 2,
 		.max_cols		= 8,
 		.max_rows		= 12,
 		.col_gpios		= 0x0000ff,	/* GPIO 0 - 7*/
-		.row_gpios		= 0x1f7f00,	/* GPIO 8-14, 16-20 */
+		.row_gpios		= 0x1fef00,	/* GPIO 8-14, 16-20 */
 	},
 	[STMPE2403] = {
 		.auto_increment		= true,
-		.set_pullup		= true,
 		.num_data		= 5,
 		.num_normal_data	= 3,
 		.max_cols		= 8,
@@ -103,30 +100,16 @@ static const struct stmpe_keypad_variant stmpe_keypad_variants[] = {
 	},
 };
 
-/**
- * struct stmpe_keypad - STMPE keypad state container
- * @stmpe: pointer to parent STMPE device
- * @input: spawned input device
- * @variant: STMPE variant
- * @debounce_ms: debounce interval, in ms.  Maximum is
- *		 %STMPE_KEYPAD_MAX_DEBOUNCE.
- * @scan_count: number of key scanning cycles to confirm key data.
- *		Maximum is %STMPE_KEYPAD_MAX_SCAN_COUNT.
- * @no_autorepeat: disable key autorepeat
- * @rows: bitmask for the rows
- * @cols: bitmask for the columns
- * @keymap: the keymap
- */
 struct stmpe_keypad {
 	struct stmpe *stmpe;
 	struct input_dev *input;
 	const struct stmpe_keypad_variant *variant;
-	unsigned int debounce_ms;
-	unsigned int scan_count;
-	bool no_autorepeat;
+	const struct stmpe_keypad_platform_data *plat;
+
 	unsigned int rows;
 	unsigned int cols;
-	unsigned short keymap[STMPE_KEYPAD_KEYMAP_MAX_SIZE];
+
+	unsigned short keymap[STMPE_KEYPAD_KEYMAP_SIZE];
 };
 
 static int stmpe_keypad_read_data(struct stmpe_keypad *keypad, u8 *data)
@@ -183,16 +166,13 @@ static irqreturn_t stmpe_keypad_irq(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static int stmpe_keypad_altfunc_init(struct stmpe_keypad *keypad)
+static int __devinit stmpe_keypad_altfunc_init(struct stmpe_keypad *keypad)
 {
 	const struct stmpe_keypad_variant *variant = keypad->variant;
 	unsigned int col_gpios = variant->col_gpios;
 	unsigned int row_gpios = variant->row_gpios;
 	struct stmpe *stmpe = keypad->stmpe;
-	u8 pureg = stmpe->regs[STMPE_IDX_GPPUR_LSB];
 	unsigned int pins = 0;
-	unsigned int pu_pins = 0;
-	int ret;
 	int i;
 
 	/*
@@ -209,10 +189,8 @@ static int stmpe_keypad_altfunc_init(struct stmpe_keypad *keypad)
 	for (i = 0; i < variant->max_cols; i++) {
 		int num = __ffs(col_gpios);
 
-		if (keypad->cols & (1 << i)) {
+		if (keypad->cols & (1 << i))
 			pins |= 1 << num;
-			pu_pins |= 1 << num;
-		}
 
 		col_gpios &= ~(1 << num);
 	}
@@ -226,43 +204,20 @@ static int stmpe_keypad_altfunc_init(struct stmpe_keypad *keypad)
 		row_gpios &= ~(1 << num);
 	}
 
-	ret = stmpe_set_altfunc(stmpe, pins, STMPE_BLOCK_KEYPAD);
-	if (ret)
-		return ret;
-
-	/*
-	 * On STMPE24xx, set pin bias to pull-up on all keypad input
-	 * pins (columns), this incidentally happen to be maximum 8 pins
-	 * and placed at GPIO0-7 so only the LSB of the pull up register
-	 * ever needs to be written.
-	 */
-	if (variant->set_pullup) {
-		u8 val;
-
-		ret = stmpe_reg_read(stmpe, pureg);
-		if (ret)
-			return ret;
-
-		/* Do not touch unused pins, may be used for GPIO */
-		val = ret & ~pu_pins;
-		val |= pu_pins;
-
-		ret = stmpe_reg_write(stmpe, pureg, val);
-	}
-
-	return 0;
+	return stmpe_set_altfunc(stmpe, pins, STMPE_BLOCK_KEYPAD);
 }
 
-static int stmpe_keypad_chip_init(struct stmpe_keypad *keypad)
+static int __devinit stmpe_keypad_chip_init(struct stmpe_keypad *keypad)
 {
+	const struct stmpe_keypad_platform_data *plat = keypad->plat;
 	const struct stmpe_keypad_variant *variant = keypad->variant;
 	struct stmpe *stmpe = keypad->stmpe;
 	int ret;
 
-	if (keypad->debounce_ms > STMPE_KEYPAD_MAX_DEBOUNCE)
+	if (plat->debounce_ms > STMPE_KEYPAD_MAX_DEBOUNCE)
 		return -EINVAL;
 
-	if (keypad->scan_count > STMPE_KEYPAD_MAX_SCAN_COUNT)
+	if (plat->scan_count > STMPE_KEYPAD_MAX_SCAN_COUNT)
 		return -EINVAL;
 
 	ret = stmpe_enable(stmpe, STMPE_BLOCK_KEYPAD);
@@ -291,7 +246,7 @@ static int stmpe_keypad_chip_init(struct stmpe_keypad *keypad)
 
 	ret = stmpe_set_bits(stmpe, STMPE_KPC_CTRL_MSB,
 			     STMPE_KPC_CTRL_MSB_SCAN_COUNT,
-			     keypad->scan_count << 4);
+			     plat->scan_count << 4);
 	if (ret < 0)
 		return ret;
 
@@ -299,107 +254,110 @@ static int stmpe_keypad_chip_init(struct stmpe_keypad *keypad)
 			      STMPE_KPC_CTRL_LSB_SCAN |
 			      STMPE_KPC_CTRL_LSB_DEBOUNCE,
 			      STMPE_KPC_CTRL_LSB_SCAN |
-			      (keypad->debounce_ms << 1));
+			      (plat->debounce_ms << 1));
 }
 
-static void stmpe_keypad_fill_used_pins(struct stmpe_keypad *keypad,
-					u32 used_rows, u32 used_cols)
-{
-	int row, col;
-
-	for (row = 0; row < used_rows; row++) {
-		for (col = 0; col < used_cols; col++) {
-			int code = MATRIX_SCAN_CODE(row, col,
-						    STMPE_KEYPAD_ROW_SHIFT);
-			if (keypad->keymap[code] != KEY_RESERVED) {
-				keypad->rows |= 1 << row;
-				keypad->cols |= 1 << col;
-			}
-		}
-	}
-}
-
-static int stmpe_keypad_probe(struct platform_device *pdev)
+static int __devinit stmpe_keypad_probe(struct platform_device *pdev)
 {
 	struct stmpe *stmpe = dev_get_drvdata(pdev->dev.parent);
-	struct device_node *np = pdev->dev.of_node;
+	struct stmpe_keypad_platform_data *plat;
 	struct stmpe_keypad *keypad;
 	struct input_dev *input;
-	u32 rows;
-	u32 cols;
-	int error;
+	int ret;
 	int irq;
+	int i;
+
+	plat = stmpe->pdata->keypad;
+	if (!plat)
+		return -ENODEV;
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
 
-	keypad = devm_kzalloc(&pdev->dev, sizeof(struct stmpe_keypad),
-			      GFP_KERNEL);
+	keypad = kzalloc(sizeof(struct stmpe_keypad), GFP_KERNEL);
 	if (!keypad)
 		return -ENOMEM;
 
-	keypad->stmpe = stmpe;
-	keypad->variant = &stmpe_keypad_variants[stmpe->partnum];
-
-	of_property_read_u32(np, "debounce-interval", &keypad->debounce_ms);
-	of_property_read_u32(np, "st,scan-count", &keypad->scan_count);
-	keypad->no_autorepeat = of_property_read_bool(np, "st,no-autorepeat");
-
-	input = devm_input_allocate_device(&pdev->dev);
-	if (!input)
-		return -ENOMEM;
+	input = input_allocate_device();
+	if (!input) {
+		ret = -ENOMEM;
+		goto out_freekeypad;
+	}
 
 	input->name = "STMPE keypad";
 	input->id.bustype = BUS_I2C;
 	input->dev.parent = &pdev->dev;
 
-	error = matrix_keypad_parse_of_params(&pdev->dev, &rows, &cols);
-	if (error)
-		return error;
-
-	error = matrix_keypad_build_keymap(NULL, NULL, rows, cols,
-					   keypad->keymap, input);
-	if (error)
-		return error;
-
 	input_set_capability(input, EV_MSC, MSC_SCAN);
-	if (!keypad->no_autorepeat)
+
+	__set_bit(EV_KEY, input->evbit);
+	if (!plat->no_autorepeat)
 		__set_bit(EV_REP, input->evbit);
 
-	stmpe_keypad_fill_used_pins(keypad, rows, cols);
+	input->keycode = keypad->keymap;
+	input->keycodesize = sizeof(keypad->keymap[0]);
+	input->keycodemax = ARRAY_SIZE(keypad->keymap);
 
-	keypad->input = input;
+	matrix_keypad_build_keymap(plat->keymap_data, STMPE_KEYPAD_ROW_SHIFT,
+				   input->keycode, input->keybit);
 
-	error = stmpe_keypad_chip_init(keypad);
-	if (error < 0)
-		return error;
+	for (i = 0; i < plat->keymap_data->keymap_size; i++) {
+		unsigned int key = plat->keymap_data->keymap[i];
 
-	error = devm_request_threaded_irq(&pdev->dev, irq,
-					  NULL, stmpe_keypad_irq,
-					  IRQF_ONESHOT, "stmpe-keypad", keypad);
-	if (error) {
-		dev_err(&pdev->dev, "unable to get irq: %d\n", error);
-		return error;
+		keypad->cols |= 1 << KEY_COL(key);
+		keypad->rows |= 1 << KEY_ROW(key);
 	}
 
-	error = input_register_device(input);
-	if (error) {
+	keypad->stmpe = stmpe;
+	keypad->plat = plat;
+	keypad->input = input;
+	keypad->variant = &stmpe_keypad_variants[stmpe->partnum];
+
+	ret = stmpe_keypad_chip_init(keypad);
+	if (ret < 0)
+		goto out_freeinput;
+
+	ret = input_register_device(input);
+	if (ret) {
 		dev_err(&pdev->dev,
-			"unable to register input device: %d\n", error);
-		return error;
+			"unable to register input device: %d\n", ret);
+		goto out_freeinput;
+	}
+
+	ret = request_threaded_irq(irq, NULL, stmpe_keypad_irq, IRQF_ONESHOT,
+				   "stmpe-keypad", keypad);
+	if (ret) {
+		dev_err(&pdev->dev, "unable to get irq: %d\n", ret);
+		goto out_unregisterinput;
 	}
 
 	platform_set_drvdata(pdev, keypad);
 
 	return 0;
+
+out_unregisterinput:
+	input_unregister_device(input);
+	input = NULL;
+out_freeinput:
+	input_free_device(input);
+out_freekeypad:
+	kfree(keypad);
+	return ret;
 }
 
-static int stmpe_keypad_remove(struct platform_device *pdev)
+static int __devexit stmpe_keypad_remove(struct platform_device *pdev)
 {
 	struct stmpe_keypad *keypad = platform_get_drvdata(pdev);
+	struct stmpe *stmpe = keypad->stmpe;
+	int irq = platform_get_irq(pdev, 0);
 
-	stmpe_disable(keypad->stmpe, STMPE_BLOCK_KEYPAD);
+	stmpe_disable(stmpe, STMPE_BLOCK_KEYPAD);
+
+	free_irq(irq, keypad);
+	input_unregister_device(keypad->input);
+	platform_set_drvdata(pdev, NULL);
+	kfree(keypad);
 
 	return 0;
 }
@@ -408,7 +366,7 @@ static struct platform_driver stmpe_keypad_driver = {
 	.driver.name	= "stmpe-keypad",
 	.driver.owner	= THIS_MODULE,
 	.probe		= stmpe_keypad_probe,
-	.remove		= stmpe_keypad_remove,
+	.remove		= __devexit_p(stmpe_keypad_remove),
 };
 module_platform_driver(stmpe_keypad_driver);
 

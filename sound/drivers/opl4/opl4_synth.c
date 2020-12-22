@@ -33,7 +33,7 @@
 
 #include "opl4_local.h"
 #include <linux/delay.h>
-#include <linux/io.h>
+#include <asm/io.h>
 #include <sound/asoundef.h>
 
 /* GM2 controllers */
@@ -504,7 +504,8 @@ void snd_opl4_note_on(void *private_data, int note, int vel, struct snd_midi_cha
 	spin_lock_irqsave(&opl4->reg_lock, flags);
 	for (i = 0; i < voices; i++) {
 		voice[i] = snd_opl4_get_voice(opl4);
-		list_move_tail(&voice[i]->list, &opl4->on_voices);
+		list_del(&voice[i]->list);
+		list_add_tail(&voice[i]->list, &opl4->on_voices);
 		voice[i]->chan = chan;
 		voice[i]->note = note;
 		voice[i]->velocity = vel & 0x7f;
@@ -554,7 +555,8 @@ void snd_opl4_note_on(void *private_data, int note, int vel, struct snd_midi_cha
 
 static void snd_opl4_voice_off(struct snd_opl4 *opl4, struct opl4_voice *voice)
 {
-	list_move_tail(&voice->list, &opl4->off_voices);
+	list_del(&voice->list);
+	list_add_tail(&voice->list, &opl4->off_voices);
 
 	voice->reg_misc &= ~OPL4_KEY_ON_BIT;
 	snd_opl4_write(opl4, OPL4_REG_MISC + voice->number, voice->reg_misc);
@@ -569,7 +571,8 @@ void snd_opl4_note_off(void *private_data, int note, int vel, struct snd_midi_ch
 
 static void snd_opl4_terminate_voice(struct snd_opl4 *opl4, struct opl4_voice *voice)
 {
-	list_move_tail(&voice->list, &opl4->off_voices);
+	list_del(&voice->list);
+	list_add_tail(&voice->list, &opl4->off_voices);
 
 	voice->reg_misc = (voice->reg_misc & ~OPL4_KEY_ON_BIT) | OPL4_DAMP_BIT;
 	snd_opl4_write(opl4, OPL4_REG_MISC + voice->number, voice->reg_misc);

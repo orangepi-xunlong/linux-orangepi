@@ -11,6 +11,7 @@
 
 #define pcibios_assign_all_busses(void) 1
 
+extern unsigned long pci_mem_start;
 #define PCIBIOS_MIN_IO		0x1000
 #define PCIBIOS_MIN_MEM		0x10000000
 
@@ -18,8 +19,10 @@
 
 void pcibios_config_init(void);
 struct pci_bus * pcibios_scan_root(int bus);
+int pcibios_assign_resources(void);
 
 void pcibios_set_master(struct pci_dev *dev);
+void pcibios_penalize_isa_irq(int irq);
 struct irq_routing_table *pcibios_get_irq_routing_table(void);
 int pcibios_set_irq_routing(struct pci_dev *dev, int pin, int irq);
 
@@ -29,7 +32,7 @@ int pcibios_set_irq_routing(struct pci_dev *dev, int pin, int irq);
 
 #include <linux/types.h>
 #include <linux/slab.h>
-#include <linux/scatterlist.h>
+#include <asm/scatterlist.h>
 #include <linux/string.h>
 #include <asm/io.h>
 
@@ -47,6 +50,9 @@ extern int pci_mmap_page_range(struct pci_dev *dev, struct vm_area_struct *vma,
 
 
 #endif /* __KERNEL__ */
+
+/* implement the pci_ DMA API in terms of the generic device dma_ one */
+#include <asm-generic/pci-dma-compat.h>
 
 /* generic pci stuff */
 #include <asm-generic/pci.h>

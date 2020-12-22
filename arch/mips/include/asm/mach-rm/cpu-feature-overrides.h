@@ -15,6 +15,7 @@
 #define cpu_has_tlb		1
 #define cpu_has_4kex		1
 #define cpu_has_4k_cache	1
+#define cpu_has_fpu		1
 #define cpu_has_32fpr		1
 #define cpu_has_counter		1
 #define cpu_has_watch		0
@@ -29,7 +30,6 @@
 #define cpu_has_dc_aliases	(PAGE_SIZE < 0x4000)
 #define cpu_has_ic_fills_f_dc	0
 #define cpu_has_dsp		0
-#define cpu_has_dsp2		0
 #define cpu_has_nofpuex		0
 #define cpu_has_64bits		1
 #define cpu_has_mipsmt		0

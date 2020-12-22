@@ -12,6 +12,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
  *
  * File: channel.h
  *
@@ -26,8 +30,26 @@
 #ifndef _CHANNEL_H_
 #define _CHANNEL_H_
 
-#include "device.h"
+#include "ttype.h"
 
-void vnt_init_bands(struct vnt_private *);
+/*---------------------  Export Definitions -------------------------*/
+
+/*---------------------  Export Classes  ----------------------------*/
+
+typedef struct tagSChannelTblElement {
+    BYTE    byChannelNumber;
+    unsigned int    uFrequency;
+    BOOL    bValid;
+} SChannelTblElement, *PSChannelTblElement;
+
+/*---------------------  Export Variables  --------------------------*/
+
+/*---------------------  Export Functions  --------------------------*/
+
+BOOL    ChannelValid(unsigned int CountryCode, unsigned int ChannelNum);
+void    CHvInitChannelTable(void *pDeviceHandler);
+BYTE    CHbyGetChannelMapping(BYTE byChannelNumber);
+
+BOOL CHvChannelGetList(unsigned int uCountryCodeIdx, PBYTE pbyChannelTable);
 
 #endif  /* _CHANNEL_H_ */

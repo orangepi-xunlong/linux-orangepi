@@ -10,8 +10,6 @@
  * published by the Free Software Foundation.
  */
 
-#include <mach/irqs.h>
-
 #define LUBBOCK_ETH_PHYS	PXA_CS3_PHYS
 
 #define LUBBOCK_FPGA_PHYS	PXA_CS2_PHYS

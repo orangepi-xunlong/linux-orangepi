@@ -23,7 +23,6 @@
 #include <linux/bcd.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/of.h>
 
 /*
  * Register definitions
@@ -79,6 +78,7 @@
 
 struct vt8500_rtc {
 	void __iomem		*regbase;
+	struct resource		*res;
 	int			irq_alarm;
 	struct rtc_device	*rtc;
 	spinlock_t		lock;		/* Protects this structure */
@@ -136,7 +136,7 @@ static int vt8500_rtc_set_time(struct device *dev, struct rtc_time *tm)
 		return -EINVAL;
 	}
 
-	writel((bin2bcd(tm->tm_year % 100) << DATE_YEAR_S)
+	writel((bin2bcd(tm->tm_year - 100) << DATE_YEAR_S)
 		| (bin2bcd(tm->tm_mon + 1) << DATE_MONTH_S)
 		| (bin2bcd(tm->tm_mday))
 		| ((tm->tm_year >= 200) << DATE_CENTURY_S),
@@ -205,80 +205,110 @@ static const struct rtc_class_ops vt8500_rtc_ops = {
 	.alarm_irq_enable = vt8500_alarm_irq_enable,
 };
 
-static int vt8500_rtc_probe(struct platform_device *pdev)
+static int __devinit vt8500_rtc_probe(struct platform_device *pdev)
 {
 	struct vt8500_rtc *vt8500_rtc;
-	struct resource	*res;
 	int ret;
 
-	vt8500_rtc = devm_kzalloc(&pdev->dev,
-			   sizeof(struct vt8500_rtc), GFP_KERNEL);
+	vt8500_rtc = kzalloc(sizeof(struct vt8500_rtc), GFP_KERNEL);
 	if (!vt8500_rtc)
 		return -ENOMEM;
 
 	spin_lock_init(&vt8500_rtc->lock);
 	platform_set_drvdata(pdev, vt8500_rtc);
 
+	vt8500_rtc->res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!vt8500_rtc->res) {
+		dev_err(&pdev->dev, "No I/O memory resource defined\n");
+		ret = -ENXIO;
+		goto err_free;
+	}
+
 	vt8500_rtc->irq_alarm = platform_get_irq(pdev, 0);
 	if (vt8500_rtc->irq_alarm < 0) {
 		dev_err(&pdev->dev, "No alarm IRQ resource defined\n");
-		return vt8500_rtc->irq_alarm;
+		ret = -ENXIO;
+		goto err_free;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	vt8500_rtc->regbase = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(vt8500_rtc->regbase))
-		return PTR_ERR(vt8500_rtc->regbase);
+	vt8500_rtc->res = request_mem_region(vt8500_rtc->res->start,
+					     resource_size(vt8500_rtc->res),
+					     "vt8500-rtc");
+	if (vt8500_rtc->res == NULL) {
+		dev_err(&pdev->dev, "failed to request I/O memory\n");
+		ret = -EBUSY;
+		goto err_free;
+	}
+
+	vt8500_rtc->regbase = ioremap(vt8500_rtc->res->start,
+				      resource_size(vt8500_rtc->res));
+	if (!vt8500_rtc->regbase) {
+		dev_err(&pdev->dev, "Unable to map RTC I/O memory\n");
+		ret = -EBUSY;
+		goto err_release;
+	}
 
 	/* Enable RTC and set it to 24-hour mode */
 	writel(VT8500_RTC_CR_ENABLE,
 	       vt8500_rtc->regbase + VT8500_RTC_CR);
 
-	vt8500_rtc->rtc = devm_rtc_device_register(&pdev->dev, "vt8500-rtc",
+	vt8500_rtc->rtc = rtc_device_register("vt8500-rtc", &pdev->dev,
 					      &vt8500_rtc_ops, THIS_MODULE);
 	if (IS_ERR(vt8500_rtc->rtc)) {
 		ret = PTR_ERR(vt8500_rtc->rtc);
 		dev_err(&pdev->dev,
 			"Failed to register RTC device -> %d\n", ret);
-		goto err_return;
+		goto err_unmap;
 	}
 
-	ret = devm_request_irq(&pdev->dev, vt8500_rtc->irq_alarm,
-				vt8500_rtc_irq, 0, "rtc alarm", vt8500_rtc);
+	ret = request_irq(vt8500_rtc->irq_alarm, vt8500_rtc_irq, 0,
+			  "rtc alarm", vt8500_rtc);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "can't get irq %i, err %d\n",
 			vt8500_rtc->irq_alarm, ret);
-		goto err_return;
+		goto err_unreg;
 	}
 
 	return 0;
 
-err_return:
+err_unreg:
+	rtc_device_unregister(vt8500_rtc->rtc);
+err_unmap:
+	iounmap(vt8500_rtc->regbase);
+err_release:
+	release_mem_region(vt8500_rtc->res->start,
+			   resource_size(vt8500_rtc->res));
+err_free:
+	kfree(vt8500_rtc);
 	return ret;
 }
 
-static int vt8500_rtc_remove(struct platform_device *pdev)
+static int __devexit vt8500_rtc_remove(struct platform_device *pdev)
 {
 	struct vt8500_rtc *vt8500_rtc = platform_get_drvdata(pdev);
 
+	free_irq(vt8500_rtc->irq_alarm, vt8500_rtc);
+
+	rtc_device_unregister(vt8500_rtc->rtc);
+
 	/* Disable alarm matching */
 	writel(0, vt8500_rtc->regbase + VT8500_RTC_IS);
+	iounmap(vt8500_rtc->regbase);
+	release_mem_region(vt8500_rtc->res->start,
+			   resource_size(vt8500_rtc->res));
+
+	kfree(vt8500_rtc);
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }
 
-static const struct of_device_id wmt_dt_ids[] = {
-	{ .compatible = "via,vt8500-rtc", },
-	{}
-};
-MODULE_DEVICE_TABLE(of, wmt_dt_ids);
-
 static struct platform_driver vt8500_rtc_driver = {
 	.probe		= vt8500_rtc_probe,
-	.remove		= vt8500_rtc_remove,
+	.remove		= __devexit_p(vt8500_rtc_remove),
 	.driver		= {
 		.name	= "vt8500-rtc",
-		.of_match_table = wmt_dt_ids,
+		.owner	= THIS_MODULE,
 	},
 };
 
@@ -286,5 +316,5 @@ module_platform_driver(vt8500_rtc_driver);
 
 MODULE_AUTHOR("Alexey Charkov <alchark@gmail.com>");
 MODULE_DESCRIPTION("VIA VT8500 SoC Realtime Clock Driver (RTC)");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:vt8500-rtc");

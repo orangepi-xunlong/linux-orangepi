@@ -7,6 +7,7 @@
  * Copyright (C) 1999 Silicon Graphics, Inc.
  */
 #include <asm/mipsregs.h>
+#include <asm/page.h>
 #include <asm/regdef.h>
 #include <asm/stackframe.h>
 

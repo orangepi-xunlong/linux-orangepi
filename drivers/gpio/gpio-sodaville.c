@@ -3,8 +3,6 @@
  *
  *  Copyright (c) 2010, 2011 Intel Corporation
  *
- *  Author: Hans J. Koch <hjk@linutronix.de>
- *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License 2 as published
  *  by the Free Software Foundation.
@@ -12,15 +10,17 @@
  */
 
 #include <linux/errno.h>
+#include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <linux/of_irq.h>
-#include <linux/gpio/driver.h>
+#include <linux/basic_mmio_gpio.h>
 
 #define DRV_NAME		"sdv_gpio"
 #define SDV_NUM_PUB_GPIOS	12
@@ -43,7 +43,7 @@ struct sdv_gpio_chip_data {
 	void __iomem *gpio_pub_base;
 	struct irq_domain *id;
 	struct irq_chip_generic *gc;
-	struct gpio_chip chip;
+	struct bgpio_chip bgpio;
 };
 
 static int sdv_gpio_pub_set_type(struct irq_data *d, unsigned int type)
@@ -102,7 +102,7 @@ static int sdv_xlate(struct irq_domain *h, struct device_node *node,
 {
 	u32 line, type;
 
-	if (node != irq_domain_get_of_node(h))
+	if (node != h->of_node)
 		return -EINVAL;
 
 	if (intsize < 2)
@@ -125,11 +125,11 @@ static int sdv_xlate(struct irq_domain *h, struct device_node *node,
 	return 0;
 }
 
-static const struct irq_domain_ops irq_domain_sdv_ops = {
+static struct irq_domain_ops irq_domain_sdv_ops = {
 	.xlate = sdv_xlate,
 };
 
-static int sdv_register_irqsupport(struct sdv_gpio_chip_data *sd,
+static __devinit int sdv_register_irqsupport(struct sdv_gpio_chip_data *sd,
 		struct pci_dev *pdev)
 {
 	struct irq_chip_type *ct;
@@ -176,10 +176,8 @@ static int sdv_register_irqsupport(struct sdv_gpio_chip_data *sd,
 
 	sd->id = irq_domain_add_legacy(pdev->dev.of_node, SDV_NUM_PUB_GPIOS,
 				sd->irq_base, 0, &irq_domain_sdv_ops, sd);
-	if (!sd->id) {
-		ret = -ENODEV;
+	if (!sd->id)
 		goto out_free_irq;
-	}
 	return 0;
 out_free_irq:
 	free_irq(pdev->irq, sd);
@@ -188,7 +186,7 @@ out_free_desc:
 	return ret;
 }
 
-static int sdv_gpio_probe(struct pci_dev *pdev,
+static int __devinit sdv_gpio_probe(struct pci_dev *pdev,
 					const struct pci_device_id *pci_id)
 {
 	struct sdv_gpio_chip_data *sd;
@@ -214,10 +212,8 @@ static int sdv_gpio_probe(struct pci_dev *pdev,
 	}
 
 	addr = pci_resource_start(pdev, GPIO_BAR);
-	if (!addr) {
-		ret = -ENODEV;
+	if (!addr)
 		goto release_reg;
-	}
 	sd->gpio_pub_base = ioremap(addr, pci_resource_len(pdev, GPIO_BAR));
 
 	prop = of_get_property(pdev->dev.of_node, "intel,muxctl", &len);
@@ -226,14 +222,14 @@ static int sdv_gpio_probe(struct pci_dev *pdev,
 		writel(mux_val, sd->gpio_pub_base + GPMUXCTL);
 	}
 
-	ret = bgpio_init(&sd->chip, &pdev->dev, 4,
+	ret = bgpio_init(&sd->bgpio, &pdev->dev, 4,
 			sd->gpio_pub_base + GPINR, sd->gpio_pub_base + GPOUTR,
-			NULL, sd->gpio_pub_base + GPOER, NULL, 0);
+			NULL, sd->gpio_pub_base + GPOER, NULL, false);
 	if (ret)
 		goto unmap;
-	sd->chip.ngpio = SDV_NUM_PUB_GPIOS;
+	sd->bgpio.gc.ngpio = SDV_NUM_PUB_GPIOS;
 
-	ret = gpiochip_add_data(&sd->chip, sd);
+	ret = gpiochip_add(&sd->bgpio.gc);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "gpiochip_add() failed.\n");
 		goto unmap;
@@ -258,17 +254,46 @@ done:
 	return ret;
 }
 
-static const struct pci_device_id sdv_gpio_pci_ids[] = {
+static void sdv_gpio_remove(struct pci_dev *pdev)
+{
+	struct sdv_gpio_chip_data *sd = pci_get_drvdata(pdev);
+
+	free_irq(pdev->irq, sd);
+	irq_free_descs(sd->irq_base, SDV_NUM_PUB_GPIOS);
+
+	if (gpiochip_remove(&sd->bgpio.gc))
+		dev_err(&pdev->dev, "gpiochip_remove() failed.\n");
+
+	pci_release_region(pdev, GPIO_BAR);
+	iounmap(sd->gpio_pub_base);
+	pci_disable_device(pdev);
+	kfree(sd);
+}
+
+static struct pci_device_id sdv_gpio_pci_ids[] __devinitdata = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_SDV_GPIO) },
 	{ 0, },
 };
 
 static struct pci_driver sdv_gpio_driver = {
-	.driver = {
-		.suppress_bind_attrs = true,
-	},
 	.name = DRV_NAME,
 	.id_table = sdv_gpio_pci_ids,
 	.probe = sdv_gpio_probe,
+	.remove = sdv_gpio_remove,
 };
-builtin_pci_driver(sdv_gpio_driver);
+
+static int __init sdv_gpio_init(void)
+{
+	return pci_register_driver(&sdv_gpio_driver);
+}
+module_init(sdv_gpio_init);
+
+static void __exit sdv_gpio_exit(void)
+{
+	pci_unregister_driver(&sdv_gpio_driver);
+}
+module_exit(sdv_gpio_exit);
+
+MODULE_AUTHOR("Hans J. Koch <hjk@linutronix.de>");
+MODULE_DESCRIPTION("GPIO interface for Intel Sodaville SoCs");
+MODULE_LICENSE("GPL v2");

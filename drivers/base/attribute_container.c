@@ -12,6 +12,7 @@
  */
 
 #include <linux/attribute_container.h>
+#include <linux/init.h>
 #include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -74,9 +75,9 @@ int
 attribute_container_register(struct attribute_container *cont)
 {
 	INIT_LIST_HEAD(&cont->node);
-	klist_init(&cont->containers, internal_container_klist_get,
+	klist_init(&cont->containers,internal_container_klist_get,
 		   internal_container_klist_put);
-
+		
 	mutex_lock(&attribute_container_mutex);
 	list_add_tail(&cont->node, &attribute_container_list);
 	mutex_unlock(&attribute_container_mutex);
@@ -94,7 +95,6 @@ int
 attribute_container_unregister(struct attribute_container *cont)
 {
 	int retval = -EBUSY;
-
 	mutex_lock(&attribute_container_mutex);
 	spin_lock(&cont->containers.k_lock);
 	if (!list_empty(&cont->containers.k_list))
@@ -105,14 +105,14 @@ attribute_container_unregister(struct attribute_container *cont)
 	spin_unlock(&cont->containers.k_lock);
 	mutex_unlock(&attribute_container_mutex);
 	return retval;
-
+		
 }
 EXPORT_SYMBOL_GPL(attribute_container_unregister);
 
 /* private function used as class release */
 static void attribute_container_release(struct device *classdev)
 {
-	struct internal_container *ic
+	struct internal_container *ic 
 		= container_of(classdev, struct internal_container, classdev);
 	struct device *dev = classdev->parent;
 
@@ -158,7 +158,7 @@ attribute_container_add_device(struct device *dev,
 
 		ic = kzalloc(sizeof(*ic), GFP_KERNEL);
 		if (!ic) {
-			dev_err(dev, "failed to allocate class container\n");
+			dev_printk(KERN_ERR, dev, "failed to allocate class container\n");
 			continue;
 		}
 
@@ -167,7 +167,7 @@ attribute_container_add_device(struct device *dev,
 		ic->classdev.parent = get_device(dev);
 		ic->classdev.class = cont->class;
 		cont->class->dev_release = attribute_container_release;
-		dev_set_name(&ic->classdev, "%s", dev_name(dev));
+		dev_set_name(&ic->classdev, dev_name(dev));
 		if (fn)
 			fn(cont, dev, &ic->classdev);
 		else
@@ -185,8 +185,8 @@ attribute_container_add_device(struct device *dev,
 		struct klist_node *n = klist_next(iter); \
 		n ? container_of(n, typeof(*pos), member) : \
 			({ klist_iter_exit(iter) ; NULL; }); \
-	})) != NULL;)
-
+	}) ) != NULL; )
+			
 
 /**
  * attribute_container_remove_device - make device eligible for removal.
@@ -243,12 +243,12 @@ attribute_container_remove_device(struct device *dev,
  * @dev:  The generic device to run the trigger for
  * @fn	  the function to execute for each classdev.
  *
- * This function is for executing a trigger when you need to know both
+ * This funcion is for executing a trigger when you need to know both
  * the container and the classdev.  If you only care about the
  * container, then use attribute_container_trigger() instead.
  */
 void
-attribute_container_device_trigger(struct device *dev,
+attribute_container_device_trigger(struct device *dev, 
 				   int (*fn)(struct attribute_container *,
 					     struct device *,
 					     struct device *))
@@ -350,7 +350,6 @@ int
 attribute_container_add_class_device(struct device *classdev)
 {
 	int error = device_add(classdev);
-
 	if (error)
 		return error;
 	return attribute_container_add_attrs(classdev);

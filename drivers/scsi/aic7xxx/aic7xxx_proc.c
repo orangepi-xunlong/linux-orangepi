@@ -43,12 +43,16 @@
 #include "aic7xxx_inline.h"
 #include "aic7xxx_93cx6.h"
 
+static void	copy_mem_info(struct info_str *info, char *data, int len);
+static int	copy_info(struct info_str *info, char *fmt, ...);
 static void	ahc_dump_target_state(struct ahc_softc *ahc,
-				      struct seq_file *m,
+				      struct info_str *info,
 				      u_int our_id, char channel,
 				      u_int target_id, u_int target_offset);
-static void	ahc_dump_device_state(struct seq_file *m,
+static void	ahc_dump_device_state(struct info_str *info,
 				      struct scsi_device *dev);
+static int	ahc_proc_write_seeprom(struct ahc_softc *ahc,
+				       char *buffer, int length);
 
 /*
  * Table of syncrates that don't follow the "divisible by 4"
@@ -90,8 +94,51 @@ ahc_calc_syncsrate(u_int period_factor)
 	return (10000000 / (period_factor * 4 * 10));
 }
 
+
 static void
-ahc_format_transinfo(struct seq_file *m, struct ahc_transinfo *tinfo)
+copy_mem_info(struct info_str *info, char *data, int len)
+{
+	if (info->pos + len > info->offset + info->length)
+		len = info->offset + info->length - info->pos;
+
+	if (info->pos + len < info->offset) {
+		info->pos += len;
+		return;
+	}
+
+	if (info->pos < info->offset) {
+		off_t partial;
+
+		partial = info->offset - info->pos;
+		data += partial;
+		info->pos += partial;
+		len  -= partial;
+	}
+
+	if (len > 0) {
+		memcpy(info->buffer, data, len);
+		info->pos += len;
+		info->buffer += len;
+	}
+}
+
+static int
+copy_info(struct info_str *info, char *fmt, ...)
+{
+	va_list args;
+	char buf[256];
+	int len;
+
+	va_start(args, fmt);
+	len = vsprintf(buf, fmt, args);
+	va_end(args);
+
+	copy_mem_info(info, buf, len);
+	return (len);
+}
+
+static void
+ahc_format_transinfo(struct info_str *info, struct ahc_transinfo *tinfo)
 {
 	u_int speed;
 	u_int freq;
@@ -106,12 +153,12 @@ ahc_format_transinfo(struct seq_file *m, struct ahc_transinfo *tinfo)
 	speed *= (0x01 << tinfo->width);
         mb = speed / 1000;
         if (mb > 0)
-		seq_printf(m, "%d.%03dMB/s transfers", mb, speed % 1000);
+		copy_info(info, "%d.%03dMB/s transfers", mb, speed % 1000);
         else
-		seq_printf(m, "%dKB/s transfers", speed);
+		copy_info(info, "%dKB/s transfers", speed);
 
 	if (freq != 0) {
-		seq_printf(m, " (%d.%03dMHz%s, offset %d",
+		copy_info(info, " (%d.%03dMHz%s, offset %d",
 			 freq / 1000, freq % 1000,
 			 (tinfo->ppr_options & MSG_EXT_PPR_DT_REQ) != 0
 			 ? " DT" : "", tinfo->offset);
@@ -119,19 +166,19 @@ ahc_format_transinfo(struct seq_file *m, struct ahc_transinfo *tinfo)
 
 	if (tinfo->width > 0) {
 		if (freq != 0) {
-			seq_puts(m, ", ");
+			copy_info(info, ", ");
 		} else {
-			seq_puts(m, " (");
+			copy_info(info, " (");
 		}
-		seq_printf(m, "%dbit)", 8 * (0x01 << tinfo->width));
+		copy_info(info, "%dbit)", 8 * (0x01 << tinfo->width));
 	} else if (freq != 0) {
-		seq_putc(m, ')');
+		copy_info(info, ")");
 	}
-	seq_putc(m, '\n');
+	copy_info(info, "\n");
 }
 
 static void
-ahc_dump_target_state(struct ahc_softc *ahc, struct seq_file *m,
+ahc_dump_target_state(struct ahc_softc *ahc, struct info_str *info,
 		      u_int our_id, char channel, u_int target_id,
 		      u_int target_offset)
 {
@@ -143,18 +190,18 @@ ahc_dump_target_state(struct ahc_softc *ahc, struct seq_file *m,
 	tinfo = ahc_fetch_transinfo(ahc, channel, our_id,
 				    target_id, &tstate);
 	if ((ahc->features & AHC_TWIN) != 0)
-		seq_printf(m, "Channel %c ", channel);
-	seq_printf(m, "Target %d Negotiation Settings\n", target_id);
-	seq_puts(m, "\tUser: ");
-	ahc_format_transinfo(m, &tinfo->user);
+		copy_info(info, "Channel %c ", channel);
+	copy_info(info, "Target %d Negotiation Settings\n", target_id);
+	copy_info(info, "\tUser: ");
+	ahc_format_transinfo(info, &tinfo->user);
 	starget = ahc->platform_data->starget[target_offset];
 	if (!starget)
 		return;
 
-	seq_puts(m, "\tGoal: ");
-	ahc_format_transinfo(m, &tinfo->goal);
-	seq_puts(m, "\tCurr: ");
-	ahc_format_transinfo(m, &tinfo->curr);
+	copy_info(info, "\tGoal: ");
+	ahc_format_transinfo(info, &tinfo->goal);
+	copy_info(info, "\tCurr: ");
+	ahc_format_transinfo(info, &tinfo->curr);
 
 	for (lun = 0; lun < AHC_NUM_LUNS; lun++) {
 		struct scsi_device *sdev;
@@ -164,30 +211,29 @@ ahc_dump_target_state(struct ahc_softc *ahc, struct seq_file *m,
 		if (sdev == NULL)
 			continue;
 
-		ahc_dump_device_state(m, sdev);
+		ahc_dump_device_state(info, sdev);
 	}
 }
 
 static void
-ahc_dump_device_state(struct seq_file *m, struct scsi_device *sdev)
+ahc_dump_device_state(struct info_str *info, struct scsi_device *sdev)
 {
 	struct ahc_linux_device *dev = scsi_transport_device_data(sdev);
 
-	seq_printf(m, "\tChannel %c Target %d Lun %d Settings\n",
+	copy_info(info, "\tChannel %c Target %d Lun %d Settings\n",
 		  sdev->sdev_target->channel + 'A',
-		   sdev->sdev_target->id, (u8)sdev->lun);
+		  sdev->sdev_target->id, sdev->lun);
 
-	seq_printf(m, "\t\tCommands Queued %ld\n", dev->commands_issued);
-	seq_printf(m, "\t\tCommands Active %d\n", dev->active);
-	seq_printf(m, "\t\tCommand Openings %d\n", dev->openings);
-	seq_printf(m, "\t\tMax Tagged Openings %d\n", dev->maxtags);
-	seq_printf(m, "\t\tDevice Queue Frozen Count %d\n", dev->qfrozen);
+	copy_info(info, "\t\tCommands Queued %ld\n", dev->commands_issued);
+	copy_info(info, "\t\tCommands Active %d\n", dev->active);
+	copy_info(info, "\t\tCommand Openings %d\n", dev->openings);
+	copy_info(info, "\t\tMax Tagged Openings %d\n", dev->maxtags);
+	copy_info(info, "\t\tDevice Queue Frozen Count %d\n", dev->qfrozen);
 }
 
-int
-ahc_proc_write_seeprom(struct Scsi_Host *shost, char *buffer, int length)
+static int
+ahc_proc_write_seeprom(struct ahc_softc *ahc, char *buffer, int length)
 {
-	struct	ahc_softc *ahc = *(struct ahc_softc **)shost->hostdata;
 	struct seeprom_descriptor sd;
 	int have_seeprom;
 	u_long s;
@@ -286,36 +332,53 @@ done:
  * Return information to handle /proc support for the driver.
  */
 int
-ahc_linux_show_info(struct seq_file *m, struct Scsi_Host *shost)
+ahc_linux_proc_info(struct Scsi_Host *shost, char *buffer, char **start,
+		    off_t offset, int length, int inout)
 {
 	struct	ahc_softc *ahc = *(struct ahc_softc **)shost->hostdata;
+	struct	info_str info;
 	char	ahc_info[256];
 	u_int	max_targ;
 	u_int	i;
+	int	retval;
 
-	seq_printf(m, "Adaptec AIC7xxx driver version: %s\n",
+	 /* Has data been written to the file? */ 
+	if (inout == TRUE) {
+		retval = ahc_proc_write_seeprom(ahc, buffer, length);
+		goto done;
+	}
+
+	if (start)
+		*start = buffer;
+
+	info.buffer	= buffer;
+	info.length	= length;
+	info.offset	= offset;
+	info.pos	= 0;
+
+	copy_info(&info, "Adaptec AIC7xxx driver version: %s\n",
 		  AIC7XXX_DRIVER_VERSION);
-	seq_printf(m, "%s\n", ahc->description);
+	copy_info(&info, "%s\n", ahc->description);
 	ahc_controller_info(ahc, ahc_info);
-	seq_printf(m, "%s\n", ahc_info);
-	seq_printf(m, "Allocated SCBs: %d, SG List Length: %d\n\n",
+	copy_info(&info, "%s\n", ahc_info);
+	copy_info(&info, "Allocated SCBs: %d, SG List Length: %d\n\n",
 		  ahc->scb_data->numscbs, AHC_NSEG);
 
 
 	if (ahc->seep_config == NULL)
-		seq_puts(m, "No Serial EEPROM\n");
+		copy_info(&info, "No Serial EEPROM\n");
 	else {
-		seq_puts(m, "Serial EEPROM:\n");
+		copy_info(&info, "Serial EEPROM:\n");
 		for (i = 0; i < sizeof(*ahc->seep_config)/2; i++) {
 			if (((i % 8) == 0) && (i != 0)) {
-				seq_putc(m, '\n');
+				copy_info(&info, "\n");
 			}
-			seq_printf(m, "0x%.4x ",
+			copy_info(&info, "0x%.4x ",
 				  ((uint16_t*)ahc->seep_config)[i]);
 		}
-		seq_putc(m, '\n');
+		copy_info(&info, "\n");
 	}
-	seq_putc(m, '\n');
+	copy_info(&info, "\n");
 
 	max_targ = 16;
 	if ((ahc->features & (AHC_WIDE|AHC_TWIN)) == 0)
@@ -335,8 +398,10 @@ ahc_linux_show_info(struct seq_file *m, struct Scsi_Host *shost)
 			target_id = i % 8;
 		}
 
-		ahc_dump_target_state(ahc, m, our_id,
+		ahc_dump_target_state(ahc, &info, our_id,
 				      channel, target_id, i);
 	}
-	return 0;
+	retval = info.pos > info.offset ? info.pos - info.offset : 0;
+done:
+	return (retval);
 }

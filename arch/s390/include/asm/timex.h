@@ -1,6 +1,8 @@
 /*
+ *  include/asm-s390/timex.h
+ *
  *  S390 version
- *    Copyright IBM Corp. 1999
+ *    Copyright (C) 1999 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *
  *  Derived from "include/asm-i386/timex.h"
  *    Copyright (C) 1992, Linus Torvalds
@@ -10,13 +12,12 @@
 #define _ASM_S390_TIMEX_H
 
 #include <asm/lowcore.h>
-#include <linux/time64.h>
 
 /* The value of the TOD clock for 1.1.1970. */
 #define TOD_UNIX_EPOCH 0x7d91048bca000000ULL
 
 /* Inline functions for clock register access. */
-static inline int set_tod_clock(__u64 time)
+static inline int set_clock(__u64 time)
 {
 	int cc;
 
@@ -28,7 +29,7 @@ static inline int set_tod_clock(__u64 time)
 	return cc;
 }
 
-static inline int store_tod_clock(__u64 *time)
+static inline int store_clock(__u64 *time)
 {
 	int cc;
 
@@ -52,70 +53,6 @@ static inline void store_clock_comparator(__u64 *time)
 
 void clock_comparator_work(void);
 
-void __init ptff_init(void);
-
-extern unsigned char ptff_function_mask[16];
-extern unsigned long lpar_offset;
-extern unsigned long initial_leap_seconds;
-
-/* Function codes for the ptff instruction. */
-#define PTFF_QAF	0x00	/* query available functions */
-#define PTFF_QTO	0x01	/* query tod offset */
-#define PTFF_QSI	0x02	/* query steering information */
-#define PTFF_QUI	0x04	/* query UTC information */
-#define PTFF_ATO	0x40	/* adjust tod offset */
-#define PTFF_STO	0x41	/* set tod offset */
-#define PTFF_SFS	0x42	/* set fine steering rate */
-#define PTFF_SGS	0x43	/* set gross steering rate */
-
-/* Query TOD offset result */
-struct ptff_qto {
-	unsigned long long physical_clock;
-	unsigned long long tod_offset;
-	unsigned long long logical_tod_offset;
-	unsigned long long tod_epoch_difference;
-} __packed;
-
-static inline int ptff_query(unsigned int nr)
-{
-	unsigned char *ptr;
-
-	ptr = ptff_function_mask + (nr >> 3);
-	return (*ptr & (0x80 >> (nr & 7))) != 0;
-}
-
-/* Query UTC information result */
-struct ptff_qui {
-	unsigned int tm : 2;
-	unsigned int ts : 2;
-	unsigned int : 28;
-	unsigned int pad_0x04;
-	unsigned long leap_event;
-	short old_leap;
-	short new_leap;
-	unsigned int pad_0x14;
-	unsigned long prt[5];
-	unsigned long cst[3];
-	unsigned int skew;
-	unsigned int pad_0x5c[41];
-} __packed;
-
-static inline int ptff(void *ptff_block, size_t len, unsigned int func)
-{
-	typedef struct { char _[len]; } addrtype;
-	register unsigned int reg0 asm("0") = func;
-	register unsigned long reg1 asm("1") = (unsigned long) ptff_block;
-	int rc;
-
-	asm volatile(
-		"	.word	0x0104\n"
-		"	ipm	%0\n"
-		"	srl	%0,28\n"
-		: "=d" (rc), "+m" (*(addrtype *) ptff_block)
-		: "d" (reg0), "d" (reg1) : "cc");
-	return rc;
-}
-
 static inline unsigned long long local_tick_disable(void)
 {
 	unsigned long long old;
@@ -132,51 +69,54 @@ static inline void local_tick_enable(unsigned long long comp)
 	set_clock_comparator(S390_lowcore.clock_comparator);
 }
 
-#define CLOCK_TICK_RATE		1193180 /* Underlying HZ */
-#define STORE_CLOCK_EXT_SIZE	16	/* stcke writes 16 bytes */
+#define CLOCK_TICK_RATE	1193180 /* Underlying HZ */
 
 typedef unsigned long long cycles_t;
 
-static inline void get_tod_clock_ext(char *clk)
+static inline unsigned long long get_clock (void)
 {
-	typedef struct { char _[STORE_CLOCK_EXT_SIZE]; } addrtype;
-
-	asm volatile("stcke %0" : "=Q" (*(addrtype *) clk) : : "cc");
-}
-
-static inline unsigned long long get_tod_clock(void)
-{
-	unsigned char clk[STORE_CLOCK_EXT_SIZE];
-
-	get_tod_clock_ext(clk);
-	return *((unsigned long long *)&clk[1]);
-}
-
-static inline unsigned long long get_tod_clock_fast(void)
-{
-#ifdef CONFIG_HAVE_MARCH_Z9_109_FEATURES
 	unsigned long long clk;
 
-	asm volatile("stckf %0" : "=Q" (clk) : : "cc");
+	asm volatile("stck %0" : "=Q" (clk) : : "cc");
 	return clk;
-#else
-	return get_tod_clock();
-#endif
+}
+
+static inline void get_clock_ext(char *clk)
+{
+	asm volatile("stcke %0" : "=Q" (*clk) : : "cc");
+}
+
+static inline unsigned long long get_clock_fast(void)
+{
+	unsigned long long clk;
+
+	if (MACHINE_HAS_STCKF)
+		asm volatile(".insn	s,0xb27c0000,%0" : "=Q" (clk) : : "cc");
+	else
+		clk = get_clock();
+	return clk;
+}
+
+static inline unsigned long long get_clock_xt(void)
+{
+	unsigned char clk[16];
+	get_clock_ext(clk);
+	return *((unsigned long long *)&clk[1]);
 }
 
 static inline cycles_t get_cycles(void)
 {
-	return (cycles_t) get_tod_clock() >> 2;
+	return (cycles_t) get_clock() >> 2;
 }
 
-int get_phys_clock(unsigned long long *clock);
+int get_sync_clock(unsigned long long *clock);
 void init_cpu_timer(void);
 unsigned long long monotonic_clock(void);
 
-void tod_to_timeval(__u64 todval, struct timespec64 *xt);
+void tod_to_timeval(__u64, struct timespec *);
 
 static inline
-void stck_to_timespec64(unsigned long long stck, struct timespec64 *ts)
+void stck_to_timespec(unsigned long long stck, struct timespec *ts)
 {
 	tod_to_timeval(stck - TOD_UNIX_EPOCH, ts);
 }
@@ -192,9 +132,9 @@ extern u64 sched_clock_base_cc;
  * function, otherwise the returned value is not guaranteed to
  * be monotonic.
  */
-static inline unsigned long long get_tod_clock_monotonic(void)
+static inline unsigned long long get_clock_monotonic(void)
 {
-	return get_tod_clock() - sched_clock_base_cc;
+	return get_clock_xt() - sched_clock_base_cc;
 }
 
 /**

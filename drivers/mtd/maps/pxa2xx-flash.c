@@ -13,6 +13,7 @@
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/map.h>
@@ -44,11 +45,13 @@ struct pxa2xx_flash_info {
 	struct map_info		map;
 };
 
-static const char * const probes[] = { "RedBoot", "cmdlinepart", NULL };
 
-static int pxa2xx_flash_probe(struct platform_device *pdev)
+static const char *probes[] = { "RedBoot", "cmdlinepart", NULL };
+
+
+static int __devinit pxa2xx_flash_probe(struct platform_device *pdev)
 {
-	struct flash_platform_data *flash = dev_get_platdata(&pdev->dev);
+	struct flash_platform_data *flash = pdev->dev.platform_data;
 	struct pxa2xx_flash_info *info;
 	struct resource *res;
 
@@ -60,7 +63,7 @@ static int pxa2xx_flash_probe(struct platform_device *pdev)
 	if (!info)
 		return -ENOMEM;
 
-	info->map.name = flash->name;
+	info->map.name = (char *) flash->name;
 	info->map.bankwidth = flash->width;
 	info->map.phys = res->start;
 	info->map.size = resource_size(res);
@@ -93,7 +96,7 @@ static int pxa2xx_flash_probe(struct platform_device *pdev)
 			iounmap(info->map.cached);
 		return -EIO;
 	}
-	info->mtd->dev.parent = &pdev->dev;
+	info->mtd->owner = THIS_MODULE;
 
 	mtd_device_parse_register(info->mtd, probes, NULL, flash->parts,
 				  flash->nr_parts);
@@ -102,9 +105,11 @@ static int pxa2xx_flash_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int pxa2xx_flash_remove(struct platform_device *dev)
+static int __devexit pxa2xx_flash_remove(struct platform_device *dev)
 {
 	struct pxa2xx_flash_info *info = platform_get_drvdata(dev);
+
+	platform_set_drvdata(dev, NULL);
 
 	mtd_device_unregister(info->mtd);
 
@@ -131,9 +136,10 @@ static void pxa2xx_flash_shutdown(struct platform_device *dev)
 static struct platform_driver pxa2xx_flash_driver = {
 	.driver = {
 		.name		= "pxa2xx-flash",
+		.owner		= THIS_MODULE,
 	},
 	.probe		= pxa2xx_flash_probe,
-	.remove		= pxa2xx_flash_remove,
+	.remove		= __devexit_p(pxa2xx_flash_remove),
 	.shutdown	= pxa2xx_flash_shutdown,
 };
 

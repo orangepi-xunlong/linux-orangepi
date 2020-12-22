@@ -582,7 +582,7 @@
 #define SPI_PL_BIT_R_R		(2<<7)	/* right channel = right */
 #define SPI_PL_BIT_R_C		(3<<7)	/* right channel = (L+R)/2 */
 #define SPI_IZD_REG		2
-#define SPI_IZD_BIT		(0<<4)	/* infinite zero detect */
+#define SPI_IZD_BIT		(1<<4)	/* infinite zero detect */
 
 #define SPI_FMT_REG		3
 #define SPI_FMT_BIT_RJ		(0<<0)	/* right justified mode */
@@ -710,7 +710,7 @@ struct snd_ca0106 {
 
 	u16 spi_dac_reg[16];
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 #define NUM_SAVED_VOLUMES	9
 	unsigned int saved_vol[NUM_SAVED_VOLUMES];
 #endif
@@ -733,7 +733,7 @@ int snd_ca0106_i2c_write(struct snd_ca0106 *emu, u32 reg, u32 value);
 int snd_ca0106_spi_write(struct snd_ca0106 * emu,
 				   unsigned int data);
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 void snd_ca0106_mixer_suspend(struct snd_ca0106 *chip);
 void snd_ca0106_mixer_resume(struct snd_ca0106 *chip);
 #else

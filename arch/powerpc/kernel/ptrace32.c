@@ -39,10 +39,35 @@
  * in exit.c or in signal.c.
  */
 
+/*
+ * Here are the old "legacy" powerpc specific getregs/setregs ptrace calls,
+ * we mark them as obsolete now, they will be removed in a future version
+ */
+static long compat_ptrace_old(struct task_struct *child, long request,
+			      long addr, long data)
+{
+	switch (request) {
+	case PPC_PTRACE_GETREGS:	/* Get GPRs 0 - 31. */
+		return copy_regset_to_user(child,
+					   task_user_regset_view(current), 0,
+					   0, 32 * sizeof(compat_long_t),
+					   compat_ptr(data));
+
+	case PPC_PTRACE_SETREGS:	/* Set GPRs 0 - 31. */
+		return copy_regset_from_user(child,
+					     task_user_regset_view(current), 0,
+					     0, 32 * sizeof(compat_long_t),
+					     compat_ptr(data));
+	}
+
+	return -EPERM;
+}
+
 /* Macros to workout the correct index for the FPR in the thread struct */
 #define FPRNUMBER(i) (((i) - PT_FPR0) >> 1)
 #define FPRHALF(i) (((i) - PT_FPR0) & 1)
 #define FPRINDEX(i) TS_FPRWIDTH * FPRNUMBER(i) * 2 + FPRHALF(i)
+#define FPRINDEX_3264(i) (TS_FPRWIDTH * ((i) - PT_FPR0))
 
 long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 			compat_ulong_t caddr, compat_ulong_t cdata)
@@ -73,8 +98,8 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 		if (get_user(addrOthers, (u32 __user * __user *)addr) != 0)
 			break;
 
-		copied = ptrace_access_vm(child, (u64)addrOthers, &tmp,
-				sizeof(tmp), FOLL_FORCE);
+		copied = access_process_vm(child, (u64)addrOthers, &tmp,
+				sizeof(tmp), 0);
 		if (copied != sizeof(tmp))
 			break;
 		ret = put_user(tmp, (u32 __user *)data);
@@ -94,9 +119,7 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 
 		CHECK_FULL_REGS(child->thread.regs);
 		if (index < PT_FPR0) {
-			ret = ptrace_get_reg(child, index, &tmp);
-			if (ret)
-				break;
+			tmp = ptrace_get_reg(child, index);
 		} else {
 			flush_fp_to_thread(child);
 			/*
@@ -104,7 +127,7 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 			 * to be an array of unsigned int (32 bits) - the
 			 * index passed in is based on this assumption.
 			 */
-			tmp = ((unsigned int *)child->thread.fp_state.fpr)
+			tmp = ((unsigned int *)child->thread.fpr)
 				[FPRINDEX(index)];
 		}
 		ret = put_user((unsigned int)tmp, (u32 __user *)data);
@@ -146,13 +169,10 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 		if (numReg >= PT_FPR0) {
 			flush_fp_to_thread(child);
 			/* get 64 bit FPR */
-			tmp = child->thread.fp_state.fpr[numReg - PT_FPR0][0];
+			tmp = ((u64 *)child->thread.fpr)
+				[FPRINDEX_3264(numReg)];
 		} else { /* register within PT_REGS struct */
-			unsigned long tmp2;
-			ret = ptrace_get_reg(child, numReg, &tmp2);
-			if (ret)
-				break;
-			tmp = tmp2;
+			tmp = ptrace_get_reg(child, numReg);
 		} 
 		reg32bits = ((u32*)&tmp)[part];
 		ret = put_user(reg32bits, (u32 __user *)data);
@@ -178,9 +198,8 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 		if (get_user(addrOthers, (u32 __user * __user *)addr) != 0)
 			break;
 		ret = 0;
-		if (ptrace_access_vm(child, (u64)addrOthers, &tmp,
-					sizeof(tmp),
-					FOLL_FORCE | FOLL_WRITE) == sizeof(tmp))
+		if (access_process_vm(child, (u64)addrOthers, &tmp,
+					sizeof(tmp), 1) == sizeof(tmp))
 			break;
 		ret = -EIO;
 		break;
@@ -206,7 +225,7 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 			 * to be an array of unsigned int (32 bits) - the
 			 * index passed in is based on this assumption.
 			 */
-			((unsigned int *)child->thread.fp_state.fpr)
+			((unsigned int *)child->thread.fpr)
 				[FPRINDEX(index)] = data;
 			ret = 0;
 		}
@@ -237,10 +256,7 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 			break;
 		CHECK_FULL_REGS(child->thread.regs);
 		if (numReg < PT_FPR0) {
-			unsigned long freg;
-			ret = ptrace_get_reg(child, numReg, &freg);
-			if (ret)
-				break;
+			unsigned long freg = ptrace_get_reg(child, numReg);
 			if (index % 2)
 				freg = (freg & ~0xfffffffful) | (data & 0xfffffffful);
 			else
@@ -250,7 +266,8 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 			u64 *tmp;
 			flush_fp_to_thread(child);
 			/* get 64 bit FPR ... */
-			tmp = &child->thread.fp_state.fpr[numReg - PT_FPR0][0];
+			tmp = &(((u64 *)child->thread.fpr)
+				[FPRINDEX_3264(numReg)]);
 			/* ... write the 32 bit part we want */
 			((u32 *)tmp)[index % 2] = data;
 			ret = 0;
@@ -259,20 +276,14 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 	}
 
 	case PTRACE_GET_DEBUGREG: {
-#ifndef CONFIG_PPC_ADV_DEBUG_REGS
-		unsigned long dabr_fake;
-#endif
 		ret = -EINVAL;
 		/* We only support one DABR and no IABRS at the moment */
 		if (addr > 0)
 			break;
 #ifdef CONFIG_PPC_ADV_DEBUG_REGS
-		ret = put_user(child->thread.debug.dac1, (u32 __user *)data);
+		ret = put_user(child->thread.dac1, (u32 __user *)data);
 #else
-		dabr_fake = (
-			(child->thread.hw_brk.address & (~HW_BRK_TYPE_DABR)) |
-			(child->thread.hw_brk.type & HW_BRK_TYPE_DABR));
-		ret = put_user(dabr_fake, (u32 __user *)data);
+		ret = put_user(child->thread.dabr, (u32 __user *)data);
 #endif
 		break;
 	}
@@ -297,6 +308,8 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 	case PTRACE_SETVSRREGS:
 	case PTRACE_GETREGS64:
 	case PTRACE_SETREGS64:
+	case PPC_PTRACE_GETFPREGS:
+	case PPC_PTRACE_SETFPREGS:
 	case PTRACE_KILL:
 	case PTRACE_SINGLESTEP:
 	case PTRACE_DETACH:
@@ -307,6 +320,12 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 	case PPC_PTRACE_SETHWDEBUG:
 	case PPC_PTRACE_DELHWDEBUG:
 		ret = arch_ptrace(child, request, addr, data);
+		break;
+
+	/* Old reverse args ptrace callss */
+	case PPC_PTRACE_GETREGS: /* Get GPRs 0 - 31. */
+	case PPC_PTRACE_SETREGS: /* Set GPRs 0 - 31. */
+		ret = compat_ptrace_old(child, request, addr, data);
 		break;
 
 	default:

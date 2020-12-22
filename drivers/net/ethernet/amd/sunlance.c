@@ -80,6 +80,7 @@ static char lancestr[] = "LANCE";
 #include <linux/in.h>
 #include <linux/string.h>
 #include <linux/delay.h>
+#include <linux/init.h>
 #include <linux/crc32.h>
 #include <linux/errno.h>
 #include <linux/socket.h> /* Used for the temporal inet entries and routing */
@@ -535,6 +536,8 @@ static void lance_rx_dvma(struct net_device *dev)
 			skb = netdev_alloc_skb(dev, len + 2);
 
 			if (skb == NULL) {
+				printk(KERN_INFO "%s: Memory squeeze, deferring packet.\n",
+				       dev->name);
 				dev->stats.rx_dropped++;
 				rd->mblength = 0;
 				rd->rmd1_bits = LE_R1_OWN;
@@ -705,6 +708,8 @@ static void lance_rx_pio(struct net_device *dev)
 			skb = netdev_alloc_skb(dev, len + 2);
 
 			if (skb == NULL) {
+				printk(KERN_INFO "%s: Memory squeeze, deferring packet.\n",
+				       dev->name);
 				dev->stats.rx_dropped++;
 				sbus_writew(0, &rd->mblength);
 				sbus_writeb(LE_R1_OWN, &rd->rmd1_bits);
@@ -997,7 +1002,7 @@ static int lance_reset(struct net_device *dev)
 	}
 	lp->init_ring(dev);
 	load_csrs(lp);
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	status = init_restart_lance(lp);
 	return status;
 }
@@ -1279,8 +1284,8 @@ static void lance_free_hwresources(struct lance_private *lp)
 /* Ethtool support... */
 static void sparc_lance_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, "sunlance", sizeof(info->driver));
-	strlcpy(info->version, "2.02", sizeof(info->version));
+	strcpy(info->driver, "sunlance");
+	strcpy(info->version, "2.02");
 }
 
 static const struct ethtool_ops sparc_lance_ethtool_ops = {
@@ -1299,9 +1304,9 @@ static const struct net_device_ops sparc_lance_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
-static int sparc_lance_probe_one(struct platform_device *op,
-				 struct platform_device *ledma,
-				 struct platform_device *lebuffer)
+static int __devinit sparc_lance_probe_one(struct platform_device *op,
+					   struct platform_device *ledma,
+					   struct platform_device *lebuffer)
 {
 	struct device_node *dp = op->dev.of_node;
 	static unsigned version_printed;
@@ -1372,9 +1377,10 @@ static int sparc_lance_probe_one(struct platform_device *op,
 			dma_alloc_coherent(&op->dev,
 					   sizeof(struct lance_init_block),
 					   &lp->init_block_dvma, GFP_ATOMIC);
-		if (!lp->init_block_mem)
+		if (!lp->init_block_mem) {
+			printk(KERN_ERR "SunLance: Cannot allocate consistent DMA memory.\n");
 			goto fail;
-
+		}
 		lp->pio_buffer = 0;
 		lp->init_ring = lance_init_ring_dvma;
 		lp->rx = lance_rx_dvma;
@@ -1419,7 +1425,7 @@ static int sparc_lance_probe_one(struct platform_device *op,
 
 			prop = of_get_property(nd, "tpe-link-test?", NULL);
 			if (!prop)
-				goto node_put;
+				goto no_link_test;
 
 			if (strcmp(prop, "true")) {
 				printk(KERN_NOTICE "SunLance: warning: overriding option "
@@ -1428,8 +1434,6 @@ static int sparc_lance_probe_one(struct platform_device *op,
 				       "to ecd@skynet.be\n");
 				auxio_set_lte(AUXIO_LTE_ON);
 			}
-node_put:
-			of_node_put(nd);
 no_link_test:
 			lp->auto_select = 1;
 			lp->tpe = 0;
@@ -1471,7 +1475,7 @@ no_link_test:
 		goto fail;
 	}
 
-	platform_set_drvdata(op, lp);
+	dev_set_drvdata(&op->dev, lp);
 
 	printk(KERN_INFO "%s: LANCE %pM\n",
 	       dev->name, dev->dev_addr);
@@ -1484,7 +1488,7 @@ fail:
 	return -ENODEV;
 }
 
-static int sunlance_sbus_probe(struct platform_device *op)
+static int __devinit sunlance_sbus_probe(struct platform_device *op)
 {
 	struct platform_device *parent = to_platform_device(op->dev.parent);
 	struct device_node *parent_dp = parent->dev.of_node;
@@ -1500,9 +1504,9 @@ static int sunlance_sbus_probe(struct platform_device *op)
 	return err;
 }
 
-static int sunlance_sbus_remove(struct platform_device *op)
+static int __devexit sunlance_sbus_remove(struct platform_device *op)
 {
-	struct lance_private *lp = platform_get_drvdata(op);
+	struct lance_private *lp = dev_get_drvdata(&op->dev);
 	struct net_device *net_dev = lp->dev;
 
 	unregister_netdev(net_dev);
@@ -1510,6 +1514,8 @@ static int sunlance_sbus_remove(struct platform_device *op)
 	lance_free_hwresources(lp);
 
 	free_netdev(net_dev);
+
+	dev_set_drvdata(&op->dev, NULL);
 
 	return 0;
 }
@@ -1526,10 +1532,11 @@ MODULE_DEVICE_TABLE(of, sunlance_sbus_match);
 static struct platform_driver sunlance_sbus_driver = {
 	.driver = {
 		.name = "sunlance",
+		.owner = THIS_MODULE,
 		.of_match_table = sunlance_sbus_match,
 	},
 	.probe		= sunlance_sbus_probe,
-	.remove		= sunlance_sbus_remove,
+	.remove		= __devexit_p(sunlance_sbus_remove),
 };
 
 module_platform_driver(sunlance_sbus_driver);

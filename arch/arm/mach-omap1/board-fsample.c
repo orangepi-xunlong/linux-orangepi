@@ -27,16 +27,17 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#include <mach/tc.h>
-#include <mach/mux.h>
-#include "flash.h"
-#include <linux/platform_data/keypad-omap.h>
+#include <plat/tc.h>
+#include <plat/mux.h>
+#include <plat/flash.h>
+#include <plat/fpga.h>
+#include <plat/keypad.h>
+#include <plat/board.h>
 
 #include <mach/hardware.h>
 
 #include "iomap.h"
 #include "common.h"
-#include "fpga.h"
 
 /* fsample is pretty close to p2-sample */
 
@@ -123,9 +124,9 @@ static struct resource smc91x_resources[] = {
 
 static void __init fsample_init_smc91x(void)
 {
-	__raw_writeb(1, H2P2_DBG_FPGA_LAN_RESET);
+	fpga_write(1, H2P2_DBG_FPGA_LAN_RESET);
 	mdelay(50);
-	__raw_writeb(__raw_readb(H2P2_DBG_FPGA_LAN_RESET) & ~1,
+	fpga_write(fpga_read(H2P2_DBG_FPGA_LAN_RESET) & ~1,
 		   H2P2_DBG_FPGA_LAN_RESET);
 	mdelay(50);
 }
@@ -184,6 +185,20 @@ static struct platform_device nor_device = {
 	.resource	= &nor_resource,
 };
 
+static void nand_cmd_ctl(struct mtd_info *mtd, int cmd,	unsigned int ctrl)
+{
+	struct nand_chip *this = mtd->priv;
+	unsigned long mask;
+
+	if (cmd == NAND_CMD_NONE)
+		return;
+
+	mask = (ctrl & NAND_CLE) ? 0x02 : 0;
+	if (ctrl & NAND_ALE)
+		mask |= 0x04;
+	writeb(cmd, (unsigned long)this->IO_ADDR_W | mask);
+}
+
 #define FSAMPLE_NAND_RB_GPIO_PIN	62
 
 static int nand_dev_ready(struct mtd_info *mtd)
@@ -191,14 +206,17 @@ static int nand_dev_ready(struct mtd_info *mtd)
 	return gpio_get_value(FSAMPLE_NAND_RB_GPIO_PIN);
 }
 
+static const char *part_probes[] = { "cmdlinepart", NULL };
+
 static struct platform_nand_data nand_data = {
 	.chip	= {
 		.nr_chips		= 1,
 		.chip_offset		= 0,
 		.options		= NAND_SAMSUNG_LP_OPTIONS,
+		.part_probe_types	= part_probes,
 	},
 	.ctrl	= {
-		.cmd_ctrl	= omap1_nand_cmd_ctl,
+		.cmd_ctrl	= nand_cmd_ctl,
 		.dev_ready	= nand_dev_ready,
 	},
 };
@@ -307,7 +325,8 @@ static void __init omap_fsample_init(void)
 
 	fsample_init_smc91x();
 
-	BUG_ON(gpio_request(FSAMPLE_NAND_RB_GPIO_PIN, "NAND ready") < 0);
+	if (gpio_request(FSAMPLE_NAND_RB_GPIO_PIN, "NAND ready") < 0)
+		BUG();
 	gpio_direction_input(FSAMPLE_NAND_RB_GPIO_PIN);
 
 	omap_cfg_reg(L3_1610_FLASH_CS2B_OE);
@@ -361,10 +380,9 @@ MACHINE_START(OMAP_FSAMPLE, "OMAP730 F-Sample")
 	.atag_offset	= 0x100,
 	.map_io		= omap_fsample_map_io,
 	.init_early	= omap1_init_early,
+	.reserve	= omap_reserve,
 	.init_irq	= omap1_init_irq,
-	.handle_irq	= omap1_handle_irq,
 	.init_machine	= omap_fsample_init,
-	.init_late	= omap1_init_late,
-	.init_time	= omap1_timer_init,
+	.timer		= &omap1_timer,
 	.restart	= omap1_restart,
 MACHINE_END

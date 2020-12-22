@@ -1,7 +1,7 @@
 /*
  * linux/security/fivm/fivm_dev.c
  *
- * Copyright (C) 2014 Allwinner Ltd.
+ * Copyright (C) 2014 Allwinner Ltd. 
  *
  * Author: ryan.chen <ryanchen@allwinnertech.com>
  *
@@ -21,22 +21,16 @@
 #include <linux/fs.h>
 #include <linux/device.h>
 #include <linux/cdev.h>
-#include <linux/compat.h>
-#include <linux/uaccess.h>
 
 #include "fivm.h"
 
 #define CMD_FIVM_INIT		_IO('M', 0)
 #define CMD_FIVM_ENABLE		_IO('M', 1)
-#define CMD_FIVM_SET		_IOR('M', 2, struct fivm_param)
+#define CMD_FIVM_SET		_IO('M', 2)
 
-#ifdef CONFIG_COMPAT
-#define CMD_FIVM_SET32		_IOR('M', 2, struct fivm_param_t32)
-#endif
-
-static dev_t dev;
-static struct cdev c_dev;
-static struct class *cl;
+static dev_t dev; 
+static struct cdev c_dev; 
+static struct class *cl; 
 
 static int fivm_open(struct inode *i, struct file *f)
 {
@@ -49,108 +43,67 @@ static int fivm_close(struct inode *i, struct file *f)
 
 extern int fivm_init(void);
 static long fivm_ioctl (
-		struct file *file,
-		unsigned int cmd,
-		unsigned long arg)
-{
-	int rc = 0;
-	switch (cmd) {
-	case CMD_FIVM_ENABLE:
-		rc = fivm_enable();
-		break;
-	case CMD_FIVM_SET:
-		rc = fivm_set((void *)arg);
-		break;
-	default:
-		rc = -EINVAL;
-		break;
-	}
-	return rc;
-}
-#ifdef CONFIG_COMPAT
-static long fivm_compat_ioctl(struct file *file,
-				unsigned int cmd,
-				unsigned long arg
+		struct file *file, 
+		unsigned int cmd, 
+		unsigned long arg
 		)
 {
 	int rc = 0;
-	struct fivm_param_t32		param_t32;
-	struct fivm_param  __user	*param;
-
-	switch (cmd) {
-	case CMD_FIVM_ENABLE:
+	switch(cmd){
+		case CMD_FIVM_ENABLE:
 			rc = fivm_enable();
+			break ;
+		case CMD_FIVM_SET:
+			rc = fivm_set(arg);
 			break;
-	case CMD_FIVM_SET32:
-			if (copy_from_user(&param_t32,
-						(const void __user *)arg,
-						sizeof(param_t32))) {
-				pr_err("wrong copy from user param\n");
-				return -EFAULT;
-			}
+		default:
+			rc = - EINVAL;
+			break;
 
-			param = compat_alloc_user_space(sizeof(*param));
-			if (!access_ok(VERIFY_READ, param, sizeof(*param))) {
-				pr_err("access read fail for param\n");
-				return -EINVAL;
-			}
-			put_user(compat_ptr(param_t32.sig_head),
-					&param->sig_head);
-			put_user(param_t32.sig_head_size,
-						&param->sig_head_size);
-			put_user(compat_ptr(param_t32.sig_table),
-					&param->sig_table);
-			put_user(param_t32.sig_table_size,
-					&param->sig_table_size);
-
-			rc = fivm_set((void *)param);
-			break;
-	default:
-			rc = -EINVAL;
-			break;
 	}
-	return rc;
+	return rc ;
 }
-#endif
-static const struct file_operations fivm_fops = {
+static struct file_operations pugs_fops =
+{
+
 	.owner = THIS_MODULE,
 	.open = fivm_open,
 	.release = fivm_close,
-	.unlocked_ioctl = fivm_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl = fivm_compat_ioctl,
-#endif
+	.unlocked_ioctl= fivm_ioctl,
 };
 
 static int __init fivm_dev_init(void) /* Constructor */
 {
-	if (alloc_chrdev_region(&dev, 0, 1, "fivm_dev") < 0) {
+	if (alloc_chrdev_region(&dev, 0, 1, "fivm_dev") < 0)
+	{
 		pr_err("fivm chrdev create fail\n");
 		return -1;
 	}
-	cl = class_create(THIS_MODULE, "fivm_drv");
-	if (!cl) {
+	if ((cl = class_create(THIS_MODULE, "fivm_drv")) == NULL)
+	{
 		pr_err("fivm class create fail\n");
 		unregister_chrdev_region(dev, 1);
 		return -1;
 	}
-	if (device_create(cl, NULL, dev, NULL, "fivm") == NULL) {
+	if (device_create(cl, NULL, dev, NULL, "fivm") == NULL)
+	{
 		pr_err("fivm device create fail\n");
 		class_destroy(cl);
 		unregister_chrdev_region(dev, 1);
 		return -1;
 	}
-	cdev_init(&c_dev, &fivm_fops);
-	if (cdev_add(&c_dev, dev, 1) == -1) {
+	cdev_init(&c_dev, &pugs_fops);
+	if (cdev_add(&c_dev, dev, 1) == -1)
+	{
 		pr_err("fivm cdev add fail\n");
 		device_destroy(cl, dev);
 		class_destroy(cl);
 		unregister_chrdev_region(dev, 1);
 		return -1;
 	}
-	if (fivm_init() < 0) {
+	if( fivm_init() <0 ){
 		pr_err("fivm init fail\n");
-		return -1;
+		return -1 ;
 	}
 
 	pr_info("FIVM device register ok \n");

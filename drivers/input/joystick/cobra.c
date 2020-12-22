@@ -29,6 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/gameport.h>
 #include <linux/input.h>
 #include <linux/jiffies.h>
@@ -260,4 +261,15 @@ static struct gameport_driver cobra_drv = {
 	.disconnect	= cobra_disconnect,
 };
 
-module_gameport_driver(cobra_drv);
+static int __init cobra_init(void)
+{
+	return gameport_register_driver(&cobra_drv);
+}
+
+static void __exit cobra_exit(void)
+{
+	gameport_unregister_driver(&cobra_drv);
+}
+
+module_init(cobra_init);
+module_exit(cobra_exit);

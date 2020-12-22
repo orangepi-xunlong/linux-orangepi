@@ -18,10 +18,9 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/cpufeature.h>
-#include <asm/cpacf.h>
 
 #include "sha.h"
+#include "crypt_s390.h"
 
 static int sha512_init(struct shash_desc *desc)
 {
@@ -36,7 +35,7 @@ static int sha512_init(struct shash_desc *desc)
 	*(__u64 *)&ctx->state[12] = 0x1f83d9abfb41bd6bULL;
 	*(__u64 *)&ctx->state[14] = 0x5be0cd19137e2179ULL;
 	ctx->count = 0;
-	ctx->func = CPACF_KIMD_SHA_512;
+	ctx->func = KIMD_SHA_512;
 
 	return 0;
 }
@@ -64,7 +63,7 @@ static int sha512_import(struct shash_desc *desc, const void *in)
 
 	memcpy(sctx->state, ictx->state, sizeof(ictx->state));
 	memcpy(sctx->buf, ictx->buf, sizeof(ictx->buf));
-	sctx->func = CPACF_KIMD_SHA_512;
+	sctx->func = KIMD_SHA_512;
 	return 0;
 }
 
@@ -80,14 +79,14 @@ static struct shash_alg sha512_alg = {
 	.base		=	{
 		.cra_name	=	"sha512",
 		.cra_driver_name=	"sha512-s390",
-		.cra_priority	=	300,
+		.cra_priority	=	CRYPT_S390_PRIORITY,
 		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize	=	SHA512_BLOCK_SIZE,
 		.cra_module	=	THIS_MODULE,
 	}
 };
 
-MODULE_ALIAS_CRYPTO("sha512");
+MODULE_ALIAS("sha512");
 
 static int sha384_init(struct shash_desc *desc)
 {
@@ -102,7 +101,7 @@ static int sha384_init(struct shash_desc *desc)
 	*(__u64 *)&ctx->state[12] = 0xdb0c2e0d64f98fa7ULL;
 	*(__u64 *)&ctx->state[14] = 0x47b5481dbefa4fa4ULL;
 	ctx->count = 0;
-	ctx->func = CPACF_KIMD_SHA_512;
+	ctx->func = KIMD_SHA_512;
 
 	return 0;
 }
@@ -119,7 +118,7 @@ static struct shash_alg sha384_alg = {
 	.base		=	{
 		.cra_name	=	"sha384",
 		.cra_driver_name=	"sha384-s390",
-		.cra_priority	=	300,
+		.cra_priority	=	CRYPT_S390_PRIORITY,
 		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize	=	SHA384_BLOCK_SIZE,
 		.cra_ctxsize	=	sizeof(struct s390_sha_ctx),
@@ -127,13 +126,13 @@ static struct shash_alg sha384_alg = {
 	}
 };
 
-MODULE_ALIAS_CRYPTO("sha384");
+MODULE_ALIAS("sha384");
 
 static int __init init(void)
 {
 	int ret;
 
-	if (!cpacf_query_func(CPACF_KIMD, CPACF_KIMD_SHA_512))
+	if (!crypt_s390_func_available(KIMD_SHA_512, CRYPT_S390_MSA))
 		return -EOPNOTSUPP;
 	if ((ret = crypto_register_shash(&sha512_alg)) < 0)
 		goto out;
@@ -149,7 +148,7 @@ static void __exit fini(void)
 	crypto_unregister_shash(&sha384_alg);
 }
 
-module_cpu_feature_match(MSA, init);
+module_init(init);
 module_exit(fini);
 
 MODULE_LICENSE("GPL");

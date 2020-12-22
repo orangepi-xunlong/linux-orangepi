@@ -15,6 +15,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
  * specificly written as a driver for the speakup screenreview
  * package it's not a general device driver.
  * This driver is for the RC Systems DoubleTalk PC internal synthesizer.
@@ -63,34 +67,34 @@ static struct var_t vars[] = {
  * These attributes will appear in /sys/accessibility/speakup/dtlk.
  */
 static struct kobj_attribute caps_start_attribute =
-	__ATTR(caps_start, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(caps_start, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute caps_stop_attribute =
-	__ATTR(caps_stop, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(caps_stop, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute freq_attribute =
-	__ATTR(freq, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(freq, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute pitch_attribute =
-	__ATTR(pitch, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(pitch, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute punct_attribute =
-	__ATTR(punct, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(punct, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute rate_attribute =
-	__ATTR(rate, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(rate, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute tone_attribute =
-	__ATTR(tone, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(tone, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute voice_attribute =
-	__ATTR(voice, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(voice, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute vol_attribute =
-	__ATTR(vol, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(vol, USER_RW, spk_var_show, spk_var_store);
 
 static struct kobj_attribute delay_time_attribute =
-	__ATTR(delay_time, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(delay_time, ROOT_W, spk_var_show, spk_var_store);
 static struct kobj_attribute direct_attribute =
-	__ATTR(direct, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(direct, USER_RW, spk_var_show, spk_var_store);
 static struct kobj_attribute full_time_attribute =
-	__ATTR(full_time, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(full_time, ROOT_W, spk_var_show, spk_var_store);
 static struct kobj_attribute jiffy_delta_attribute =
-	__ATTR(jiffy_delta, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(jiffy_delta, ROOT_W, spk_var_show, spk_var_store);
 static struct kobj_attribute trigger_time_attribute =
-	__ATTR(trigger_time, S_IWUSR|S_IRUGO, spk_var_show, spk_var_store);
+	__ATTR(trigger_time, ROOT_W, spk_var_show, spk_var_store);
 
 /*
  * Create a group of attributes so that we can create and destroy them all
@@ -170,7 +174,6 @@ static inline bool synth_full(void)
 static void spk_out(const char ch)
 {
 	int timeout = SPK_XMITR_TIMEOUT;
-
 	while (!synth_writable()) {
 		if (!--timeout)
 			break;
@@ -197,42 +200,42 @@ static void do_catch_up(struct spk_synth *synth)
 
 	jiffy_delta = spk_get_var(JIFFY);
 	delay_time = spk_get_var(DELAY);
-	spin_lock_irqsave(&speakup_info.spinlock, flags);
+	spk_lock(flags);
 	jiffy_delta_val = jiffy_delta->u.n.value;
-	spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+	spk_unlock(flags);
 	jiff_max = jiffies + jiffy_delta_val;
 	while (!kthread_should_stop()) {
-		spin_lock_irqsave(&speakup_info.spinlock, flags);
+		spk_lock(flags);
 		if (speakup_info.flushing) {
 			speakup_info.flushing = 0;
-			spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+			spk_unlock(flags);
 			synth->flush(synth);
 			continue;
 		}
 		if (synth_buffer_empty()) {
-			spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+			spk_unlock(flags);
 			break;
 		}
 		set_current_state(TASK_INTERRUPTIBLE);
 		delay_time_val = delay_time->u.n.value;
-		spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+		spk_unlock(flags);
 		if (synth_full()) {
 			schedule_timeout(msecs_to_jiffies(delay_time_val));
 			continue;
 		}
 		set_current_state(TASK_RUNNING);
-		spin_lock_irqsave(&speakup_info.spinlock, flags);
+		spk_lock(flags);
 		ch = synth_buffer_getc();
-		spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+		spk_unlock(flags);
 		if (ch == '\n')
 			ch = PROCSPEECH;
 		spk_out(ch);
-		if (time_after_eq(jiffies, jiff_max) && (ch == SPACE)) {
+		if ((jiffies >= jiff_max) && (ch == SPACE)) {
 			spk_out(PROCSPEECH);
-			spin_lock_irqsave(&speakup_info.spinlock, flags);
+			spk_lock(flags);
 			delay_time_val = delay_time->u.n.value;
 			jiffy_delta_val = jiffy_delta->u.n.value;
-			spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+			spk_unlock(flags);
 			schedule_timeout(msecs_to_jiffies(delay_time_val));
 			jiff_max = jiffies + jiffy_delta_val;
 		}
@@ -243,7 +246,6 @@ static void do_catch_up(struct spk_synth *synth)
 static const char *synth_immediate(struct spk_synth *synth, const char *buf)
 {
 	u_char ch;
-
 	while ((ch = (u_char)*buf)) {
 		if (synth_full())
 			return buf;
@@ -252,7 +254,7 @@ static const char *synth_immediate(struct spk_synth *synth, const char *buf)
 		spk_out(ch);
 		buf++;
 	}
-	return NULL;
+	return 0;
 }
 
 static void synth_flush(struct spk_synth *synth)
@@ -265,7 +267,6 @@ static void synth_flush(struct spk_synth *synth)
 static char synth_read_tts(void)
 {
 	u_char ch;
-
 	while (!synth_readable())
 		cpu_relax();
 	ch = synth_status & 0x7f;
@@ -282,7 +283,6 @@ static struct synth_settings *synth_interrogate(struct spk_synth *synth)
 	static char buf[sizeof(struct synth_settings) + 1];
 	int total, i;
 	static struct synth_settings status;
-
 	synth_immediate(synth, "\x18\x01?");
 	for (total = 0, i = 0; i < 50; i++) {
 		buf[total] = synth_read_tts();
@@ -321,10 +321,9 @@ static struct synth_settings *synth_interrogate(struct spk_synth *synth)
 
 static int synth_probe(struct spk_synth *synth)
 {
-	unsigned int port_val = 0;
+		unsigned int port_val = 0;
 	int i = 0;
 	struct synth_settings *sp;
-
 	pr_info("Probing for DoubleTalk.\n");
 	if (port_forced) {
 		speakup_info.port_tts = port_forced;
@@ -357,8 +356,7 @@ static int synth_probe(struct spk_synth *synth)
 	port_val &= 0xfbff;
 	if (port_val != 0x107f) {
 		pr_info("DoubleTalk PC: not found\n");
-		if (synth_lpc)
-			synth_release_region(synth_lpc, SYNTH_IO_EXTENT);
+		synth_release_region(synth_lpc, SYNTH_IO_EXTENT);
 		return -ENODEV;
 	}
 	while (inw_p(synth_lpc) != 0x147f)
@@ -366,7 +364,7 @@ static int synth_probe(struct spk_synth *synth)
 	sp = synth_interrogate(synth);
 	pr_info("%s: %03x-%03x, ROM ver %s, s/n %u, driver: %s\n",
 		synth->long_name, synth_lpc, synth_lpc+SYNTH_IO_EXTENT - 1,
-		sp->rom_version, sp->serial_number, synth->version);
+	 sp->rom_version, sp->serial_number, synth->version);
 	synth->alive = 1;
 	return 0;
 }
@@ -384,8 +382,18 @@ module_param_named(start, synth_dtlk.startup, short, S_IRUGO);
 MODULE_PARM_DESC(port, "Set the port for the synthesizer (override probing).");
 MODULE_PARM_DESC(start, "Start the synthesizer once it is loaded.");
 
-module_spk_synth(synth_dtlk);
+static int __init dtlk_init(void)
+{
+	return synth_add(&synth_dtlk);
+}
 
+static void __exit dtlk_exit(void)
+{
+	synth_remove(&synth_dtlk);
+}
+
+module_init(dtlk_init);
+module_exit(dtlk_exit);
 MODULE_AUTHOR("Kirk Reiser <kirk@braille.uwo.ca>");
 MODULE_AUTHOR("David Borowski");
 MODULE_DESCRIPTION("Speakup support for DoubleTalk PC synthesizers");

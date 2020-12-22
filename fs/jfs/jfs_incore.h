@@ -38,8 +38,8 @@
 struct jfs_inode_info {
 	int	fileset;	/* fileset number (always 16)*/
 	uint	mode2;		/* jfs-specific mode		*/
-	kuid_t	saved_uid;	/* saved for uid mount option */
-	kgid_t	saved_gid;	/* saved for gid mount option */
+	uint	saved_uid;	/* saved for uid mount option */
+	uint	saved_gid;	/* saved for gid mount option */
 	pxd_t	ixpxd;		/* inode extent descriptor	*/
 	dxd_t	acl;		/* dxd describing acl	*/
 	dxd_t	ea;		/* dxd describing ea	*/
@@ -94,9 +94,6 @@ struct jfs_inode_info {
 			unchar _inline_ea[128];	/* 128: inline extended attr */
 		} link;
 	} u;
-#ifdef CONFIG_QUOTA
-	struct dquot *i_dquot[MAXQUOTAS];
-#endif
 	u32 dev;	/* will die when we get wide dev_t */
 	struct inode	vfs_inode;
 };
@@ -195,10 +192,9 @@ struct jfs_sb_info {
 	uint		state;		/* mount/recovery state	*/
 	unsigned long	flag;		/* mount time flags */
 	uint		p_state;	/* state prior to going no integrity */
-	kuid_t		uid;		/* uid to override on-disk uid */
-	kgid_t		gid;		/* gid to override on-disk gid */
+	uint		uid;		/* uid to override on-disk uid */
+	uint		gid;		/* gid to override on-disk gid */
 	uint		umask;		/* umask to override on-disk umask */
-	uint		minblks_trim;	/* minimum blocks, for online trim */
 };
 
 /* jfs_sb_info commit_state */
@@ -206,7 +202,7 @@ struct jfs_sb_info {
 
 static inline struct jfs_inode_info *JFS_IP(struct inode *inode)
 {
-	return container_of(inode, struct jfs_inode_info, vfs_inode);
+	return list_entry(inode, struct jfs_inode_info, vfs_inode);
 }
 
 static inline int jfs_dirtable_inline(struct inode *inode)

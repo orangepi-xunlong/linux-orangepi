@@ -70,12 +70,12 @@
 #include <linux/seq_file.h>
 
 
-static void faulty_fail(struct bio *bio)
+static void faulty_fail(struct bio *bio, int error)
 {
 	struct bio *b = bio->bi_private;
 
-	b->bi_iter.bi_size = bio->bi_iter.bi_size;
-	b->bi_iter.bi_sector = bio->bi_iter.bi_sector;
+	b->bi_size = bio->bi_size;
+	b->bi_sector = bio->bi_sector;
 
 	bio_put(bio);
 
@@ -170,7 +170,7 @@ static void add_sector(struct faulty_conf *conf, sector_t start, int mode)
 		conf->nfaults = n+1;
 }
 
-static void faulty_make_request(struct mddev *mddev, struct bio *bio)
+static void make_request(struct mddev *mddev, struct bio *bio)
 {
 	struct faulty_conf *conf = mddev->private;
 	int failit = 0;
@@ -181,35 +181,32 @@ static void faulty_make_request(struct mddev *mddev, struct bio *bio)
 			/* special case - don't decrement, don't generic_make_request,
 			 * just fail immediately
 			 */
-			bio_io_error(bio);
+			bio_endio(bio, -EIO);
 			return;
 		}
 
-		if (check_sector(conf, bio->bi_iter.bi_sector,
-				 bio_end_sector(bio), WRITE))
+		if (check_sector(conf, bio->bi_sector, bio->bi_sector+(bio->bi_size>>9),
+				 WRITE))
 			failit = 1;
 		if (check_mode(conf, WritePersistent)) {
-			add_sector(conf, bio->bi_iter.bi_sector,
-				   WritePersistent);
+			add_sector(conf, bio->bi_sector, WritePersistent);
 			failit = 1;
 		}
 		if (check_mode(conf, WriteTransient))
 			failit = 1;
 	} else {
 		/* read request */
-		if (check_sector(conf, bio->bi_iter.bi_sector,
-				 bio_end_sector(bio), READ))
+		if (check_sector(conf, bio->bi_sector, bio->bi_sector + (bio->bi_size>>9),
+				 READ))
 			failit = 1;
 		if (check_mode(conf, ReadTransient))
 			failit = 1;
 		if (check_mode(conf, ReadPersistent)) {
-			add_sector(conf, bio->bi_iter.bi_sector,
-				   ReadPersistent);
+			add_sector(conf, bio->bi_sector, ReadPersistent);
 			failit = 1;
 		}
 		if (check_mode(conf, ReadFixable)) {
-			add_sector(conf, bio->bi_iter.bi_sector,
-				   ReadFixable);
+			add_sector(conf, bio->bi_sector, ReadFixable);
 			failit = 1;
 		}
 	}
@@ -226,7 +223,7 @@ static void faulty_make_request(struct mddev *mddev, struct bio *bio)
 	generic_make_request(bio);
 }
 
-static void faulty_status(struct seq_file *seq, struct mddev *mddev)
+static void status(struct seq_file *seq, struct mddev *mddev)
 {
 	struct faulty_conf *conf = mddev->private;
 	int n;
@@ -259,7 +256,7 @@ static void faulty_status(struct seq_file *seq, struct mddev *mddev)
 }
 
 
-static int faulty_reshape(struct mddev *mddev)
+static int reshape(struct mddev *mddev)
 {
 	int mode = mddev->new_layout & ModeMask;
 	int count = mddev->new_layout >> ModeShift;
@@ -299,7 +296,7 @@ static sector_t faulty_size(struct mddev *mddev, sector_t sectors, int raid_disk
 	return sectors;
 }
 
-static int faulty_run(struct mddev *mddev)
+static int run(struct mddev *mddev)
 {
 	struct md_rdev *rdev;
 	int i;
@@ -318,25 +315,24 @@ static int faulty_run(struct mddev *mddev)
 	}
 	conf->nfaults = 0;
 
-	rdev_for_each(rdev, mddev) {
+	rdev_for_each(rdev, mddev)
 		conf->rdev = rdev;
-		disk_stack_limits(mddev->gendisk, rdev->bdev,
-				  rdev->data_offset << 9);
-	}
 
 	md_set_array_sectors(mddev, faulty_size(mddev, 0, 0));
 	mddev->private = conf;
 
-	faulty_reshape(mddev);
+	reshape(mddev);
 
 	return 0;
 }
 
-static void faulty_free(struct mddev *mddev, void *priv)
+static int stop(struct mddev *mddev)
 {
-	struct faulty_conf *conf = priv;
+	struct faulty_conf *conf = mddev->private;
 
 	kfree(conf);
+	mddev->private = NULL;
+	return 0;
 }
 
 static struct md_personality faulty_personality =
@@ -344,11 +340,11 @@ static struct md_personality faulty_personality =
 	.name		= "faulty",
 	.level		= LEVEL_FAULTY,
 	.owner		= THIS_MODULE,
-	.make_request	= faulty_make_request,
-	.run		= faulty_run,
-	.free		= faulty_free,
-	.status		= faulty_status,
-	.check_reshape	= faulty_reshape,
+	.make_request	= make_request,
+	.run		= run,
+	.stop		= stop,
+	.status		= status,
+	.check_reshape	= reshape,
 	.size		= faulty_size,
 };
 

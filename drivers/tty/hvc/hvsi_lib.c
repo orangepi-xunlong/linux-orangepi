@@ -1,4 +1,5 @@
 #include <linux/types.h>
+#include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/console.h>
@@ -8,7 +9,7 @@
 
 static int hvsi_send_packet(struct hvsi_priv *pv, struct hvsi_header *packet)
 {
-	packet->seqno = cpu_to_be16(atomic_inc_return(&pv->seqno));
+	packet->seqno = atomic_inc_return(&pv->seqno);
 
 	/* Assumes that always succeeds, works in practice */
 	return pv->put_chars(pv->termno, (char *)packet, packet->len);
@@ -27,7 +28,7 @@ static void hvsi_start_handshake(struct hvsi_priv *pv)
 	/* Send version query */
 	q.hdr.type = VS_QUERY_PACKET_HEADER;
 	q.hdr.len = sizeof(struct hvsi_query);
-	q.verb = cpu_to_be16(VSV_SEND_VERSION_NUMBER);
+	q.verb = VSV_SEND_VERSION_NUMBER;
 	hvsi_send_packet(pv, &q.hdr);
 }
 
@@ -39,7 +40,7 @@ static int hvsi_send_close(struct hvsi_priv *pv)
 
 	ctrl.hdr.type = VS_CONTROL_PACKET_HEADER;
 	ctrl.hdr.len = sizeof(struct hvsi_control);
-	ctrl.verb = cpu_to_be16(VSV_CLOSE_PROTOCOL);
+	ctrl.verb = VSV_CLOSE_PROTOCOL;
 	return hvsi_send_packet(pv, &ctrl.hdr);
 }
 
@@ -68,14 +69,14 @@ static void hvsi_got_control(struct hvsi_priv *pv)
 {
 	struct hvsi_control *pkt = (struct hvsi_control *)pv->inbuf;
 
-	switch (be16_to_cpu(pkt->verb)) {
+	switch (pkt->verb) {
 	case VSV_CLOSE_PROTOCOL:
 		/* We restart the handshaking */
 		hvsi_start_handshake(pv);
 		break;
 	case VSV_MODEM_CTL_UPDATE:
 		/* Transition of carrier detect */
-		hvsi_cd_change(pv, be32_to_cpu(pkt->word) & HVSI_TSCD);
+		hvsi_cd_change(pv, pkt->word & HVSI_TSCD);
 		break;
 	}
 }
@@ -86,7 +87,7 @@ static void hvsi_got_query(struct hvsi_priv *pv)
 	struct hvsi_query_response r;
 
 	/* We only handle version queries */
-	if (be16_to_cpu(pkt->verb) != VSV_SEND_VERSION_NUMBER)
+	if (pkt->verb != VSV_SEND_VERSION_NUMBER)
 		return;
 
 	pr_devel("HVSI@%x: Got version query, sending response...\n",
@@ -95,7 +96,7 @@ static void hvsi_got_query(struct hvsi_priv *pv)
 	/* Send version response */
 	r.hdr.type = VS_QUERY_RESPONSE_PACKET_HEADER;
 	r.hdr.len = sizeof(struct hvsi_query_response);
-	r.verb = cpu_to_be16(VSV_SEND_VERSION_NUMBER);
+	r.verb = VSV_SEND_VERSION_NUMBER;
 	r.u.version = HVSI_VERSION;
 	r.query_seqno = pkt->hdr.seqno;
 	hvsi_send_packet(pv, &r.hdr);
@@ -111,7 +112,7 @@ static void hvsi_got_response(struct hvsi_priv *pv)
 
 	switch(r->verb) {
 	case VSV_SEND_MODEM_CTL_STATUS:
-		hvsi_cd_change(pv, be32_to_cpu(r->u.mctrl_word) & HVSI_TSCD);
+		hvsi_cd_change(pv, r->u.mctrl_word & HVSI_TSCD);
 		pv->mctrl_update = 1;
 		break;
 	}
@@ -264,7 +265,8 @@ int hvsilib_read_mctrl(struct hvsi_priv *pv)
 	pv->mctrl_update = 0;
 	q.hdr.type = VS_QUERY_PACKET_HEADER;
 	q.hdr.len = sizeof(struct hvsi_query);
-	q.verb = cpu_to_be16(VSV_SEND_MODEM_CTL_STATUS);
+	q.hdr.seqno = atomic_inc_return(&pv->seqno);
+	q.verb = VSV_SEND_MODEM_CTL_STATUS;
 	rc = hvsi_send_packet(pv, &q.hdr);
 	if (rc <= 0) {
 		pr_devel("HVSI@%x: Error %d...\n", pv->termno, rc);
@@ -302,9 +304,9 @@ int hvsilib_write_mctrl(struct hvsi_priv *pv, int dtr)
 
 	ctrl.hdr.type = VS_CONTROL_PACKET_HEADER,
 	ctrl.hdr.len = sizeof(struct hvsi_control);
-	ctrl.verb = cpu_to_be16(VSV_SET_MODEM_CTL);
-	ctrl.mask = cpu_to_be32(HVSI_TSDTR);
-	ctrl.word = cpu_to_be32(dtr ? HVSI_TSDTR : 0);
+	ctrl.verb = VSV_SET_MODEM_CTL;
+	ctrl.mask = HVSI_TSDTR;
+	ctrl.word = dtr ? HVSI_TSDTR : 0;
 	return hvsi_send_packet(pv, &ctrl.hdr);
 }
 
@@ -375,7 +377,7 @@ int hvsilib_open(struct hvsi_priv *pv, struct hvc_struct *hp)
 	pr_devel("HVSI@%x: open !\n", pv->termno);
 
 	/* Keep track of the tty data structure */
-	pv->tty = tty_port_tty_get(&hp->port);
+	pv->tty = tty_kref_get(hp->tty);
 
 	hvsilib_establish(pv);
 
@@ -398,14 +400,15 @@ void hvsilib_close(struct hvsi_priv *pv, struct hvc_struct *hp)
 		spin_unlock_irqrestore(&hp->lock, flags);
 
 		/* Clear our own DTR */
-		if (!pv->tty || (pv->tty->termios.c_cflag & HUPCL))
+		if (!pv->tty || (pv->tty->termios->c_cflag & HUPCL))
 			hvsilib_write_mctrl(pv, 0);
 
 		/* Tear down the connection */
 		hvsi_send_close(pv);
 	}
 
-	tty_kref_put(pv->tty);
+	if (pv->tty)
+		tty_kref_put(pv->tty);
 	pv->tty = NULL;
 }
 

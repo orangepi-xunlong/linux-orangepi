@@ -21,8 +21,6 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/gfp.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/list.h>
 #include <linux/slab.h>
@@ -55,6 +53,10 @@
 			    SNDRV_PCM_FMTBIT_S32_BE     | \
 			    SNDRV_PCM_FMTBIT_U32_LE     | \
 			    SNDRV_PCM_FMTBIT_U32_BE)
+
+#define FSLDMA_PCM_RATES (SNDRV_PCM_RATE_5512 | SNDRV_PCM_RATE_8000_192000 | \
+			  SNDRV_PCM_RATE_CONTINUOUS)
+
 struct dma_object {
 	struct snd_soc_platform_driver dai;
 	dma_addr_t ssi_stx_phys;
@@ -136,6 +138,9 @@ static const struct snd_pcm_hardware fsl_dma_hardware = {
 				  SNDRV_PCM_INFO_JOINT_DUPLEX |
 				  SNDRV_PCM_INFO_PAUSE,
 	.formats		= FSLDMA_PCM_FORMATS,
+	.rates  		= FSLDMA_PCM_RATES,
+	.rate_min       	= 5512,
+	.rate_max       	= 192000,
 	.period_bytes_min       = 512,  	/* A reasonable limit */
 	.period_bytes_max       = (u32) -1,
 	.periods_min    	= NUM_DMA_LINKS,
@@ -151,7 +156,14 @@ static const struct snd_pcm_hardware fsl_dma_hardware = {
  */
 static void fsl_dma_abort_stream(struct snd_pcm_substream *substream)
 {
-	snd_pcm_stop_xrun(substream);
+	unsigned long flags;
+
+	snd_pcm_stream_lock_irqsave(substream, flags);
+
+	if (snd_pcm_running(substream))
+		snd_pcm_stop(substream, SNDRV_PCM_STATE_XRUN);
+
+	snd_pcm_stream_unlock_irqrestore(substream, flags);
 }
 
 /**
@@ -286,11 +298,14 @@ static int fsl_dma_new(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_card *card = rtd->card->snd_card;
 	struct snd_pcm *pcm = rtd->pcm;
+	static u64 fsl_dma_dmamask = DMA_BIT_MASK(36);
 	int ret;
 
-	ret = dma_coerce_mask_and_coherent(card->dev, DMA_BIT_MASK(36));
-	if (ret)
-		return ret;
+	if (!card->dev->dma_mask)
+		card->dev->dma_mask = &fsl_dma_dmamask;
+
+	if (!card->dev->coherent_dma_mask)
+		card->dev->coherent_dma_mask = fsl_dma_dmamask;
 
 	/* Some codecs have separate DAIs for playback and capture, so we
 	 * should allocate a DMA buffer only for the streams that are valid.
@@ -445,7 +460,7 @@ static int fsl_dma_open(struct snd_pcm_substream *substream)
 		return ret;
 	}
 
-	dma->assigned = true;
+	dma->assigned = 1;
 
 	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
 	snd_soc_set_runtime_hwparams(substream, &fsl_dma_hardware);
@@ -808,13 +823,19 @@ static int fsl_dma_close(struct snd_pcm_substream *substream)
 		if (dma_private->irq)
 			free_irq(dma_private->irq, dma_private);
 
+		if (dma_private->ld_buf_phys) {
+			dma_unmap_single(dev, dma_private->ld_buf_phys,
+					 sizeof(dma_private->link),
+					 DMA_TO_DEVICE);
+		}
+
 		/* Deallocate the fsl_dma_private structure */
 		dma_free_coherent(dev, sizeof(struct fsl_dma_private),
 				  dma_private, dma_private->ld_buf_phys);
 		substream->runtime->private_data = NULL;
 	}
 
-	dma->assigned = false;
+	dma->assigned = 0;
 
 	return 0;
 }
@@ -838,7 +859,7 @@ static void fsl_dma_free_dma_buffers(struct snd_pcm *pcm)
 }
 
 /**
- * find_ssi_node -- returns the SSI node that points to its DMA channel node
+ * find_ssi_node -- returns the SSI node that points to his DMA channel node
  *
  * Although this DMA driver attempts to operate independently of the other
  * devices, it still needs to determine some information about the SSI device
@@ -879,7 +900,7 @@ static struct snd_pcm_ops fsl_dma_ops = {
 	.pointer	= fsl_dma_pointer,
 };
 
-static int fsl_soc_dma_probe(struct platform_device *pdev)
+static int __devinit fsl_soc_dma_probe(struct platform_device *pdev)
  {
 	struct dma_object *dma;
 	struct device_node *np = pdev->dev.of_node;
@@ -916,8 +937,8 @@ static int fsl_soc_dma_probe(struct platform_device *pdev)
 	dma->dai.pcm_free = fsl_dma_free_dma_buffers;
 
 	/* Store the SSI-specific information that we need */
-	dma->ssi_stx_phys = res.start + CCSR_SSI_STX0;
-	dma->ssi_srx_phys = res.start + CCSR_SSI_SRX0;
+	dma->ssi_stx_phys = res.start + offsetof(struct ccsr_ssi, stx0);
+	dma->ssi_srx_phys = res.start + offsetof(struct ccsr_ssi, srx0);
 
 	iprop = of_get_property(ssi_np, "fsl,fifo-depth", NULL);
 	if (iprop)
@@ -943,7 +964,7 @@ static int fsl_soc_dma_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int fsl_soc_dma_remove(struct platform_device *pdev)
+static int __devexit fsl_soc_dma_remove(struct platform_device *pdev)
 {
 	struct dma_object *dma = dev_get_drvdata(&pdev->dev);
 
@@ -964,10 +985,11 @@ MODULE_DEVICE_TABLE(of, fsl_soc_dma_ids);
 static struct platform_driver fsl_soc_dma_driver = {
 	.driver = {
 		.name = "fsl-pcm-audio",
+		.owner = THIS_MODULE,
 		.of_match_table = fsl_soc_dma_ids,
 	},
 	.probe = fsl_soc_dma_probe,
-	.remove = fsl_soc_dma_remove,
+	.remove = __devexit_p(fsl_soc_dma_remove),
 };
 
 module_platform_driver(fsl_soc_dma_driver);

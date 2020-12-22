@@ -55,8 +55,7 @@ xt_cluster_hash(const struct nf_conn *ct,
 		WARN_ON(1);
 		break;
 	}
-
-	return reciprocal_scale(hash, info->total_nodes);
+	return (((u64)hash * info->total_nodes) >> 32);
 }
 
 static inline bool

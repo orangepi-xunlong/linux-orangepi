@@ -21,69 +21,114 @@
 #include <linux/uaccess.h>
 #include <linux/freezer.h>
 #include <linux/seq_file.h>
-#include <linux/mutex.h>
 
-/*
- * A cgroup is freezing if any FREEZING flags are set.  FREEZING_SELF is
- * set if "FROZEN" is written to freezer.state cgroupfs file, and cleared
- * for "THAWED".  FREEZING_PARENT is set if the parent freezer is FREEZING
- * for whatever reason.  IOW, a cgroup has FREEZING_PARENT set if one of
- * its ancestors has FREEZING_SELF set.
- */
-enum freezer_state_flags {
-	CGROUP_FREEZER_ONLINE	= (1 << 0), /* freezer is fully online */
-	CGROUP_FREEZING_SELF	= (1 << 1), /* this freezer is freezing */
-	CGROUP_FREEZING_PARENT	= (1 << 2), /* the parent freezer is freezing */
-	CGROUP_FROZEN		= (1 << 3), /* this and its descendants frozen */
-
-	/* mask for all FREEZING flags */
-	CGROUP_FREEZING		= CGROUP_FREEZING_SELF | CGROUP_FREEZING_PARENT,
+enum freezer_state {
+	CGROUP_THAWED = 0,
+	CGROUP_FREEZING,
+	CGROUP_FROZEN,
 };
 
 struct freezer {
-	struct cgroup_subsys_state	css;
-	unsigned int			state;
+	struct cgroup_subsys_state css;
+	enum freezer_state state;
+	spinlock_t lock; /* protects _writes_ to state */
 };
 
-static DEFINE_MUTEX(freezer_mutex);
-
-static inline struct freezer *css_freezer(struct cgroup_subsys_state *css)
+static inline struct freezer *cgroup_freezer(
+		struct cgroup *cgroup)
 {
-	return css ? container_of(css, struct freezer, css) : NULL;
+	return container_of(
+		cgroup_subsys_state(cgroup, freezer_subsys_id),
+		struct freezer, css);
 }
 
 static inline struct freezer *task_freezer(struct task_struct *task)
 {
-	return css_freezer(task_css(task, freezer_cgrp_id));
-}
-
-static struct freezer *parent_freezer(struct freezer *freezer)
-{
-	return css_freezer(freezer->css.parent);
+	return container_of(task_subsys_state(task, freezer_subsys_id),
+			    struct freezer, css);
 }
 
 bool cgroup_freezing(struct task_struct *task)
 {
+	enum freezer_state state;
 	bool ret;
 
 	rcu_read_lock();
-	ret = task_freezer(task)->state & CGROUP_FREEZING;
+	state = task_freezer(task)->state;
+	ret = state == CGROUP_FREEZING || state == CGROUP_FROZEN;
 	rcu_read_unlock();
 
 	return ret;
 }
 
-static const char *freezer_state_strs(unsigned int state)
-{
-	if (state & CGROUP_FROZEN)
-		return "FROZEN";
-	if (state & CGROUP_FREEZING)
-		return "FREEZING";
-	return "THAWED";
+/*
+ * cgroups_write_string() limits the size of freezer state strings to
+ * CGROUP_LOCAL_BUFFER_SIZE
+ */
+static const char *freezer_state_strs[] = {
+	"THAWED",
+	"FREEZING",
+	"FROZEN",
 };
 
-static struct cgroup_subsys_state *
-freezer_css_alloc(struct cgroup_subsys_state *parent_css)
+/*
+ * State diagram
+ * Transitions are caused by userspace writes to the freezer.state file.
+ * The values in parenthesis are state labels. The rest are edge labels.
+ *
+ * (THAWED) --FROZEN--> (FREEZING) --FROZEN--> (FROZEN)
+ *    ^ ^                    |                     |
+ *    | \_______THAWED_______/                     |
+ *    \__________________________THAWED____________/
+ */
+
+struct cgroup_subsys freezer_subsys;
+
+/* Locks taken and their ordering
+ * ------------------------------
+ * cgroup_mutex (AKA cgroup_lock)
+ * freezer->lock
+ * css_set_lock
+ * task->alloc_lock (AKA task_lock)
+ * task->sighand->siglock
+ *
+ * cgroup code forces css_set_lock to be taken before task->alloc_lock
+ *
+ * freezer_create(), freezer_destroy():
+ * cgroup_mutex [ by cgroup core ]
+ *
+ * freezer_can_attach():
+ * cgroup_mutex (held by caller of can_attach)
+ *
+ * freezer_fork() (preserving fork() performance means can't take cgroup_mutex):
+ * freezer->lock
+ *  sighand->siglock (if the cgroup is freezing)
+ *
+ * freezer_read():
+ * cgroup_mutex
+ *  freezer->lock
+ *   write_lock css_set_lock (cgroup iterator start)
+ *    task->alloc_lock
+ *   read_lock css_set_lock (cgroup iterator start)
+ *
+ * freezer_write() (freeze):
+ * cgroup_mutex
+ *  freezer->lock
+ *   write_lock css_set_lock (cgroup iterator start)
+ *    task->alloc_lock
+ *   read_lock css_set_lock (cgroup iterator start)
+ *    sighand->siglock (fake signal delivery inside freeze_task())
+ *
+ * freezer_write() (unfreeze):
+ * cgroup_mutex
+ *  freezer->lock
+ *   write_lock css_set_lock (cgroup iterator start)
+ *    task->alloc_lock
+ *   read_lock css_set_lock (cgroup iterator start)
+ *    task->alloc_lock (inside __thaw_task(), prevents race with refrigerator())
+ *     sighand->siglock
+ */
+static struct cgroup_subsys_state *freezer_create(struct cgroup *cgroup)
 {
 	struct freezer *freezer;
 
@@ -91,391 +136,241 @@ freezer_css_alloc(struct cgroup_subsys_state *parent_css)
 	if (!freezer)
 		return ERR_PTR(-ENOMEM);
 
+	spin_lock_init(&freezer->lock);
+	freezer->state = CGROUP_THAWED;
 	return &freezer->css;
 }
 
-/**
- * freezer_css_online - commit creation of a freezer css
- * @css: css being created
- *
- * We're committing to creation of @css.  Mark it online and inherit
- * parent's freezing state while holding both parent's and our
- * freezer->lock.
- */
-static int freezer_css_online(struct cgroup_subsys_state *css)
+static void freezer_destroy(struct cgroup *cgroup)
 {
-	struct freezer *freezer = css_freezer(css);
-	struct freezer *parent = parent_freezer(freezer);
+	struct freezer *freezer = cgroup_freezer(cgroup);
 
-	mutex_lock(&freezer_mutex);
-
-	freezer->state |= CGROUP_FREEZER_ONLINE;
-
-	if (parent && (parent->state & CGROUP_FREEZING)) {
-		freezer->state |= CGROUP_FREEZING_PARENT | CGROUP_FROZEN;
-		atomic_inc(&system_freezing_cnt);
-	}
-
-	mutex_unlock(&freezer_mutex);
-	return 0;
-}
-
-/**
- * freezer_css_offline - initiate destruction of a freezer css
- * @css: css being destroyed
- *
- * @css is going away.  Mark it dead and decrement system_freezing_count if
- * it was holding one.
- */
-static void freezer_css_offline(struct cgroup_subsys_state *css)
-{
-	struct freezer *freezer = css_freezer(css);
-
-	mutex_lock(&freezer_mutex);
-
-	if (freezer->state & CGROUP_FREEZING)
+	if (freezer->state != CGROUP_THAWED)
 		atomic_dec(&system_freezing_cnt);
-
-	freezer->state = 0;
-
-	mutex_unlock(&freezer_mutex);
+	kfree(freezer);
 }
 
-static void freezer_css_free(struct cgroup_subsys_state *css)
+/* task is frozen or will freeze immediately when next it gets woken */
+static bool is_task_frozen_enough(struct task_struct *task)
 {
-	kfree(css_freezer(css));
+	return frozen(task) ||
+		(task_is_stopped_or_traced(task) && freezing(task));
 }
 
 /*
- * Tasks can be migrated into a different freezer anytime regardless of its
- * current state.  freezer_attach() is responsible for making new tasks
- * conform to the current state.
- *
- * Freezer state changes and task migration are synchronized via
- * @freezer->lock.  freezer_attach() makes the new tasks conform to the
- * current state and all following state changes can see the new tasks.
+ * The call to cgroup_lock() in the freezer.state write method prevents
+ * a write to that file racing against an attach, and hence the
+ * can_attach() result will remain valid until the attach completes.
  */
-static void freezer_attach(struct cgroup_taskset *tset)
+static int freezer_can_attach(struct cgroup *new_cgroup,
+			      struct cgroup_taskset *tset)
 {
+	struct freezer *freezer;
 	struct task_struct *task;
-	struct cgroup_subsys_state *new_css;
-
-	mutex_lock(&freezer_mutex);
 
 	/*
-	 * Make the new tasks conform to the current state of @new_css.
-	 * For simplicity, when migrating any task to a FROZEN cgroup, we
-	 * revert it to FREEZING and let update_if_frozen() determine the
-	 * correct state later.
-	 *
-	 * Tasks in @tset are on @new_css but may not conform to its
-	 * current state before executing the following - !frozen tasks may
-	 * be visible in a FROZEN cgroup and frozen tasks in a THAWED one.
+	 * Anything frozen can't move or be moved to/from.
 	 */
-	cgroup_taskset_for_each(task, new_css, tset) {
-		struct freezer *freezer = css_freezer(new_css);
+	cgroup_taskset_for_each(task, new_cgroup, tset)
+		if (cgroup_freezing(task))
+			return -EBUSY;
 
-		if (!(freezer->state & CGROUP_FREEZING)) {
-			__thaw_task(task);
-		} else {
-			freeze_task(task);
-			/* clear FROZEN and propagate upwards */
-			while (freezer && (freezer->state & CGROUP_FROZEN)) {
-				freezer->state &= ~CGROUP_FROZEN;
-				freezer = parent_freezer(freezer);
-			}
-		}
-	}
+	freezer = cgroup_freezer(new_cgroup);
+	if (freezer->state != CGROUP_THAWED)
+		return -EBUSY;
 
-	mutex_unlock(&freezer_mutex);
+	return 0;
 }
 
-/**
- * freezer_fork - cgroup post fork callback
- * @task: a task which has just been forked
- *
- * @task has just been created and should conform to the current state of
- * the cgroup_freezer it belongs to.  This function may race against
- * freezer_attach().  Losing to freezer_attach() means that we don't have
- * to do anything as freezer_attach() will put @task into the appropriate
- * state.
- */
 static void freezer_fork(struct task_struct *task)
 {
 	struct freezer *freezer;
 
-	/*
-	 * The root cgroup is non-freezable, so we can skip locking the
-	 * freezer.  This is safe regardless of race with task migration.
-	 * If we didn't race or won, skipping is obviously the right thing
-	 * to do.  If we lost and root is the new cgroup, noop is still the
-	 * right thing to do.
-	 */
-	if (task_css_is_root(task, freezer_cgrp_id))
-		return;
-
-	mutex_lock(&freezer_mutex);
 	rcu_read_lock();
-
 	freezer = task_freezer(task);
-	if (freezer->state & CGROUP_FREEZING)
+
+	/*
+	 * The root cgroup is non-freezable, so we can skip the
+	 * following check.
+	 */
+	if (!freezer->css.cgroup->parent)
+		goto out;
+
+	spin_lock_irq(&freezer->lock);
+	BUG_ON(freezer->state == CGROUP_FROZEN);
+
+	/* Locking avoids race with FREEZING -> THAWED transitions. */
+	if (freezer->state == CGROUP_FREEZING)
 		freeze_task(task);
 
+	spin_unlock_irq(&freezer->lock);
+out:
 	rcu_read_unlock();
-	mutex_unlock(&freezer_mutex);
 }
 
-/**
- * update_if_frozen - update whether a cgroup finished freezing
- * @css: css of interest
- *
- * Once FREEZING is initiated, transition to FROZEN is lazily updated by
- * calling this function.  If the current state is FREEZING but not FROZEN,
- * this function checks whether all tasks of this cgroup and the descendant
- * cgroups finished freezing and, if so, sets FROZEN.
- *
- * The caller is responsible for grabbing RCU read lock and calling
- * update_if_frozen() on all descendants prior to invoking this function.
- *
- * Task states and freezer state might disagree while tasks are being
- * migrated into or out of @css, so we can't verify task states against
- * @freezer state here.  See freezer_attach() for details.
+/*
+ * caller must hold freezer->lock
  */
-static void update_if_frozen(struct cgroup_subsys_state *css)
+static void update_if_frozen(struct cgroup *cgroup,
+				 struct freezer *freezer)
 {
-	struct freezer *freezer = css_freezer(css);
-	struct cgroup_subsys_state *pos;
-	struct css_task_iter it;
+	struct cgroup_iter it;
 	struct task_struct *task;
+	unsigned int nfrozen = 0, ntotal = 0;
+	enum freezer_state old_state = freezer->state;
 
-	lockdep_assert_held(&freezer_mutex);
-
-	if (!(freezer->state & CGROUP_FREEZING) ||
-	    (freezer->state & CGROUP_FROZEN))
-		return;
-
-	/* are all (live) children frozen? */
-	rcu_read_lock();
-	css_for_each_child(pos, css) {
-		struct freezer *child = css_freezer(pos);
-
-		if ((child->state & CGROUP_FREEZER_ONLINE) &&
-		    !(child->state & CGROUP_FROZEN)) {
-			rcu_read_unlock();
-			return;
-		}
-	}
-	rcu_read_unlock();
-
-	/* are all tasks frozen? */
-	css_task_iter_start(css, &it);
-
-	while ((task = css_task_iter_next(&it))) {
-		if (freezing(task)) {
-			/*
-			 * freezer_should_skip() indicates that the task
-			 * should be skipped when determining freezing
-			 * completion.  Consider it frozen in addition to
-			 * the usual frozen condition.
-			 */
-			if (!frozen(task) && !freezer_should_skip(task))
-				goto out_iter_end;
-		}
+	cgroup_iter_start(cgroup, &it);
+	while ((task = cgroup_iter_next(cgroup, &it))) {
+		ntotal++;
+		if (freezing(task) && is_task_frozen_enough(task))
+			nfrozen++;
 	}
 
-	freezer->state |= CGROUP_FROZEN;
-out_iter_end:
-	css_task_iter_end(&it);
+	if (old_state == CGROUP_THAWED) {
+		BUG_ON(nfrozen > 0);
+	} else if (old_state == CGROUP_FREEZING) {
+		if (nfrozen == ntotal)
+			freezer->state = CGROUP_FROZEN;
+	} else { /* old_state == CGROUP_FROZEN */
+		BUG_ON(nfrozen != ntotal);
+	}
+
+	cgroup_iter_end(cgroup, &it);
 }
 
-static int freezer_read(struct seq_file *m, void *v)
+static int freezer_read(struct cgroup *cgroup, struct cftype *cft,
+			struct seq_file *m)
 {
-	struct cgroup_subsys_state *css = seq_css(m), *pos;
+	struct freezer *freezer;
+	enum freezer_state state;
 
-	mutex_lock(&freezer_mutex);
-	rcu_read_lock();
+	if (!cgroup_lock_live_group(cgroup))
+		return -ENODEV;
 
-	/* update states bottom-up */
-	css_for_each_descendant_post(pos, css) {
-		if (!css_tryget_online(pos))
-			continue;
-		rcu_read_unlock();
-
-		update_if_frozen(pos);
-
-		rcu_read_lock();
-		css_put(pos);
+	freezer = cgroup_freezer(cgroup);
+	spin_lock_irq(&freezer->lock);
+	state = freezer->state;
+	if (state == CGROUP_FREEZING) {
+		/* We change from FREEZING to FROZEN lazily if the cgroup was
+		 * only partially frozen when we exitted write. */
+		update_if_frozen(cgroup, freezer);
+		state = freezer->state;
 	}
+	spin_unlock_irq(&freezer->lock);
+	cgroup_unlock();
 
-	rcu_read_unlock();
-	mutex_unlock(&freezer_mutex);
-
-	seq_puts(m, freezer_state_strs(css_freezer(css)->state));
+	seq_puts(m, freezer_state_strs[state]);
 	seq_putc(m, '\n');
 	return 0;
 }
 
-static void freeze_cgroup(struct freezer *freezer)
+static int try_to_freeze_cgroup(struct cgroup *cgroup, struct freezer *freezer)
 {
-	struct css_task_iter it;
+	struct cgroup_iter it;
 	struct task_struct *task;
+	unsigned int num_cant_freeze_now = 0;
 
-	css_task_iter_start(&freezer->css, &it);
-	while ((task = css_task_iter_next(&it)))
-		freeze_task(task);
-	css_task_iter_end(&it);
-}
-
-static void unfreeze_cgroup(struct freezer *freezer)
-{
-	struct css_task_iter it;
-	struct task_struct *task;
-
-	css_task_iter_start(&freezer->css, &it);
-	while ((task = css_task_iter_next(&it)))
-		__thaw_task(task);
-	css_task_iter_end(&it);
-}
-
-/**
- * freezer_apply_state - apply state change to a single cgroup_freezer
- * @freezer: freezer to apply state change to
- * @freeze: whether to freeze or unfreeze
- * @state: CGROUP_FREEZING_* flag to set or clear
- *
- * Set or clear @state on @cgroup according to @freeze, and perform
- * freezing or thawing as necessary.
- */
-static void freezer_apply_state(struct freezer *freezer, bool freeze,
-				unsigned int state)
-{
-	/* also synchronizes against task migration, see freezer_attach() */
-	lockdep_assert_held(&freezer_mutex);
-
-	if (!(freezer->state & CGROUP_FREEZER_ONLINE))
-		return;
-
-	if (freeze) {
-		if (!(freezer->state & CGROUP_FREEZING))
-			atomic_inc(&system_freezing_cnt);
-		freezer->state |= state;
-		freeze_cgroup(freezer);
-	} else {
-		bool was_freezing = freezer->state & CGROUP_FREEZING;
-
-		freezer->state &= ~state;
-
-		if (!(freezer->state & CGROUP_FREEZING)) {
-			if (was_freezing)
-				atomic_dec(&system_freezing_cnt);
-			freezer->state &= ~CGROUP_FROZEN;
-			unfreeze_cgroup(freezer);
-		}
-	}
-}
-
-/**
- * freezer_change_state - change the freezing state of a cgroup_freezer
- * @freezer: freezer of interest
- * @freeze: whether to freeze or thaw
- *
- * Freeze or thaw @freezer according to @freeze.  The operations are
- * recursive - all descendants of @freezer will be affected.
- */
-static void freezer_change_state(struct freezer *freezer, bool freeze)
-{
-	struct cgroup_subsys_state *pos;
-
-	/*
-	 * Update all its descendants in pre-order traversal.  Each
-	 * descendant will try to inherit its parent's FREEZING state as
-	 * CGROUP_FREEZING_PARENT.
-	 */
-	mutex_lock(&freezer_mutex);
-	rcu_read_lock();
-	css_for_each_descendant_pre(pos, &freezer->css) {
-		struct freezer *pos_f = css_freezer(pos);
-		struct freezer *parent = parent_freezer(pos_f);
-
-		if (!css_tryget_online(pos))
+	cgroup_iter_start(cgroup, &it);
+	while ((task = cgroup_iter_next(cgroup, &it))) {
+		if (!freeze_task(task))
 			continue;
-		rcu_read_unlock();
-
-		if (pos_f == freezer)
-			freezer_apply_state(pos_f, freeze,
-					    CGROUP_FREEZING_SELF);
-		else
-			freezer_apply_state(pos_f,
-					    parent->state & CGROUP_FREEZING,
-					    CGROUP_FREEZING_PARENT);
-
-		rcu_read_lock();
-		css_put(pos);
+		if (is_task_frozen_enough(task))
+			continue;
+		if (!freezing(task) && !freezer_should_skip(task))
+			num_cant_freeze_now++;
 	}
-	rcu_read_unlock();
-	mutex_unlock(&freezer_mutex);
+	cgroup_iter_end(cgroup, &it);
+
+	return num_cant_freeze_now ? -EBUSY : 0;
 }
 
-static ssize_t freezer_write(struct kernfs_open_file *of,
-			     char *buf, size_t nbytes, loff_t off)
+static void unfreeze_cgroup(struct cgroup *cgroup, struct freezer *freezer)
 {
-	bool freeze;
+	struct cgroup_iter it;
+	struct task_struct *task;
 
-	buf = strstrip(buf);
+	cgroup_iter_start(cgroup, &it);
+	while ((task = cgroup_iter_next(cgroup, &it)))
+		__thaw_task(task);
+	cgroup_iter_end(cgroup, &it);
+}
 
-	if (strcmp(buf, freezer_state_strs(0)) == 0)
-		freeze = false;
-	else if (strcmp(buf, freezer_state_strs(CGROUP_FROZEN)) == 0)
-		freeze = true;
+static int freezer_change_state(struct cgroup *cgroup,
+				enum freezer_state goal_state)
+{
+	struct freezer *freezer;
+	int retval = 0;
+
+	freezer = cgroup_freezer(cgroup);
+
+	spin_lock_irq(&freezer->lock);
+
+	update_if_frozen(cgroup, freezer);
+
+	switch (goal_state) {
+	case CGROUP_THAWED:
+		if (freezer->state != CGROUP_THAWED)
+			atomic_dec(&system_freezing_cnt);
+		freezer->state = CGROUP_THAWED;
+		unfreeze_cgroup(cgroup, freezer);
+		break;
+	case CGROUP_FROZEN:
+		if (freezer->state == CGROUP_THAWED)
+			atomic_inc(&system_freezing_cnt);
+		freezer->state = CGROUP_FREEZING;
+		retval = try_to_freeze_cgroup(cgroup, freezer);
+		break;
+	default:
+		BUG();
+	}
+
+	spin_unlock_irq(&freezer->lock);
+
+	return retval;
+}
+
+static int freezer_write(struct cgroup *cgroup,
+			 struct cftype *cft,
+			 const char *buffer)
+{
+	int retval;
+	enum freezer_state goal_state;
+
+	if (strcmp(buffer, freezer_state_strs[CGROUP_THAWED]) == 0)
+		goal_state = CGROUP_THAWED;
+	else if (strcmp(buffer, freezer_state_strs[CGROUP_FROZEN]) == 0)
+		goal_state = CGROUP_FROZEN;
 	else
 		return -EINVAL;
 
-	freezer_change_state(css_freezer(of_css(of)), freeze);
-	return nbytes;
-}
-
-static u64 freezer_self_freezing_read(struct cgroup_subsys_state *css,
-				      struct cftype *cft)
-{
-	struct freezer *freezer = css_freezer(css);
-
-	return (bool)(freezer->state & CGROUP_FREEZING_SELF);
-}
-
-static u64 freezer_parent_freezing_read(struct cgroup_subsys_state *css,
-					struct cftype *cft)
-{
-	struct freezer *freezer = css_freezer(css);
-
-	return (bool)(freezer->state & CGROUP_FREEZING_PARENT);
+	if (!cgroup_lock_live_group(cgroup))
+		return -ENODEV;
+	retval = freezer_change_state(cgroup, goal_state);
+	cgroup_unlock();
+	return retval;
 }
 
 static struct cftype files[] = {
 	{
 		.name = "state",
-		.flags = CFTYPE_NOT_ON_ROOT,
-		.seq_show = freezer_read,
-		.write = freezer_write,
+		.read_seq_string = freezer_read,
+		.write_string = freezer_write,
 	},
-	{
-		.name = "self_freezing",
-		.flags = CFTYPE_NOT_ON_ROOT,
-		.read_u64 = freezer_self_freezing_read,
-	},
-	{
-		.name = "parent_freezing",
-		.flags = CFTYPE_NOT_ON_ROOT,
-		.read_u64 = freezer_parent_freezing_read,
-	},
-	{ }	/* terminate */
 };
 
-struct cgroup_subsys freezer_cgrp_subsys = {
-	.css_alloc	= freezer_css_alloc,
-	.css_online	= freezer_css_online,
-	.css_offline	= freezer_css_offline,
-	.css_free	= freezer_css_free,
-	.attach		= freezer_attach,
+static int freezer_populate(struct cgroup_subsys *ss, struct cgroup *cgroup)
+{
+	if (!cgroup->parent)
+		return 0;
+	return cgroup_add_files(cgroup, ss, files, ARRAY_SIZE(files));
+}
+
+struct cgroup_subsys freezer_subsys = {
+	.name		= "freezer",
+	.create		= freezer_create,
+	.destroy	= freezer_destroy,
+	.populate	= freezer_populate,
+	.subsys_id	= freezer_subsys_id,
+	.can_attach	= freezer_can_attach,
 	.fork		= freezer_fork,
-	.legacy_cftypes	= files,
 };

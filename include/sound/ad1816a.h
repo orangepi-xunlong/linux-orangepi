@@ -20,9 +20,9 @@
     Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
 */
 
-#include <sound/control.h>
-#include <sound/pcm.h>
-#include <sound/timer.h>
+#include "control.h"
+#include "pcm.h"
+#include "timer.h"
 
 #define AD1816A_REG(r)			(chip->port + r)
 
@@ -147,9 +147,6 @@ struct snd_ad1816a {
 	unsigned int c_dma_size;
 
 	struct snd_timer *timer;
-#ifdef CONFIG_PM
-	unsigned short image[48];
-#endif
 };
 
 
@@ -168,14 +165,11 @@ struct snd_ad1816a {
 
 extern int snd_ad1816a_create(struct snd_card *card, unsigned long port,
 			      int irq, int dma1, int dma2,
-			      struct snd_ad1816a *chip);
+			      struct snd_ad1816a **chip);
 
-extern int snd_ad1816a_pcm(struct snd_ad1816a *chip, int device);
+extern int snd_ad1816a_pcm(struct snd_ad1816a *chip, int device, struct snd_pcm **rpcm);
 extern int snd_ad1816a_mixer(struct snd_ad1816a *chip);
-extern int snd_ad1816a_timer(struct snd_ad1816a *chip, int device);
-#ifdef CONFIG_PM
-extern void snd_ad1816a_suspend(struct snd_ad1816a *chip);
-extern void snd_ad1816a_resume(struct snd_ad1816a *chip);
-#endif
+extern int snd_ad1816a_timer(struct snd_ad1816a *chip, int device,
+			     struct snd_timer **rtimer);
 
 #endif	/* __SOUND_AD1816A_H */

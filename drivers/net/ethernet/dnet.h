@@ -216,6 +216,7 @@ struct dnet {
 
 	/* PHY stuff */
 	struct mii_bus			*mii_bus;
+	struct phy_device		*phy_dev;
 	unsigned int			link;
 	unsigned int			speed;
 	unsigned int			duplex;

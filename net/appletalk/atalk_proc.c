@@ -178,13 +178,12 @@ static int atalk_seq_socket_show(struct seq_file *seq, void *v)
 	at = at_sk(s);
 
 	seq_printf(seq, "%02X   %04X:%02X:%02X  %04X:%02X:%02X  %08X:%08X "
-			"%02X %u\n",
+			"%02X %d\n",
 		   s->sk_type, ntohs(at->src_net), at->src_node, at->src_port,
 		   ntohs(at->dest_net), at->dest_node, at->dest_port,
 		   sk_wmem_alloc_get(s),
 		   sk_rmem_alloc_get(s),
-		   s->sk_state,
-		   from_kuid_munged(seq_user_ns(seq), sock_i_uid(s)));
+		   s->sk_state, SOCK_INODE(s->sk_socket)->i_uid);
 out:
 	return 0;
 }
@@ -293,7 +292,7 @@ out_interface:
 	goto out;
 }
 
-void atalk_proc_exit(void)
+void __exit atalk_proc_exit(void)
 {
 	remove_proc_entry("interface", atalk_proc_dir);
 	remove_proc_entry("route", atalk_proc_dir);

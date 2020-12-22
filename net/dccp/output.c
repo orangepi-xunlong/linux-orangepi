@@ -138,7 +138,7 @@ static int dccp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 
 		DCCP_INC_STATS(DCCP_MIB_OUTSEGS);
 
-		err = icsk->icsk_af_ops->queue_xmit(sk, skb, &inet->cork.fl);
+		err = icsk->icsk_af_ops->queue_xmit(skb, &inet->cork.fl);
 		return net_xmit_eval(err);
 	}
 	return -ENOBUFS;
@@ -201,7 +201,7 @@ void dccp_write_space(struct sock *sk)
 
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
-	if (skwq_has_sleeper(wq))
+	if (wq_has_sleeper(wq))
 		wake_up_interruptible(&wq->wait);
 	/* Should agree with poll, otherwise some programs break */
 	if (sock_writeable(sk))
@@ -214,7 +214,6 @@ void dccp_write_space(struct sock *sk)
  * dccp_wait_for_ccid  -  Await CCID send permission
  * @sk:    socket to wait for
  * @delay: timeout in jiffies
- *
  * This is used by CCIDs which need to delay the send time in process context.
  */
 static int dccp_wait_for_ccid(struct sock *sk, unsigned long delay)
@@ -390,7 +389,7 @@ int dccp_retransmit_skb(struct sock *sk)
 	return dccp_transmit_skb(sk, skb_clone(sk->sk_send_head, GFP_ATOMIC));
 }
 
-struct sk_buff *dccp_make_response(const struct sock *sk, struct dst_entry *dst,
+struct sk_buff *dccp_make_response(struct sock *sk, struct dst_entry *dst,
 				   struct request_sock *req)
 {
 	struct dccp_hdr *dh;
@@ -398,18 +397,13 @@ struct sk_buff *dccp_make_response(const struct sock *sk, struct dst_entry *dst,
 	const u32 dccp_header_size = sizeof(struct dccp_hdr) +
 				     sizeof(struct dccp_hdr_ext) +
 				     sizeof(struct dccp_hdr_response);
-	struct sk_buff *skb;
-
-	/* sk is marked const to clearly express we dont hold socket lock.
-	 * sock_wmalloc() will atomically change sk->sk_wmem_alloc,
-	 * it is safe to promote sk to non const.
-	 */
-	skb = sock_wmalloc((struct sock *)sk, MAX_DCCP_HEADER, 1,
-			   GFP_ATOMIC);
-	if (!skb)
+	struct sk_buff *skb = sock_wmalloc(sk, sk->sk_prot->max_header, 1,
+					   GFP_ATOMIC);
+	if (skb == NULL)
 		return NULL;
 
-	skb_reserve(skb, MAX_DCCP_HEADER);
+	/* Reserve space for headers. */
+	skb_reserve(skb, sk->sk_prot->max_header);
 
 	skb_dst_set(skb, dst_clone(dst));
 
@@ -429,8 +423,8 @@ struct sk_buff *dccp_make_response(const struct sock *sk, struct dst_entry *dst,
 	/* Build and checksum header */
 	dh = dccp_zeroed_hdr(skb, dccp_header_size);
 
-	dh->dccph_sport	= htons(inet_rsk(req)->ir_num);
-	dh->dccph_dport	= inet_rsk(req)->ir_rmt_port;
+	dh->dccph_sport	= inet_rsk(req)->loc_port;
+	dh->dccph_dport	= inet_rsk(req)->rmt_port;
 	dh->dccph_doff	= (dccp_header_size +
 			   DCCP_SKB_CB(skb)->dccpd_opt_len) / 4;
 	dh->dccph_type	= DCCP_PKT_RESPONSE;

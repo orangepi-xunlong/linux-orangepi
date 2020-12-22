@@ -1,0 +1,9 @@
+if ARCH_SUNXI
+
+config SUNXIOOPS
+	bool "Log panic/oops to a partition"
+	default n
+	help
+	  This enables panic and oops messages to be logged to a partition where it can be read back at some later point.
+
+endif

@@ -11,42 +11,66 @@ menuconfig USB_SUNXI_USB
     tristate "SUNXI USB2.0 Dual Role Controller support"
     depends on ARCH_SUNXI
     help
-      SUNXI USB2.0 Dual Role Controller
-
-      This option is of interest only to developers who need to
-      develop on AllWinner SoC.
-
-      If unsure, say N.
+        SUNXI USB2.0 Dual Role Controller
 
 config USB_SUNXI_USB_MANAGER
     tristate "SUNXI USB2.0 Manager"
-    depends on USB_SUNXI_USB && USB_SUNXI_UDC0 && USB_SUNXI_HCI
+    depends on USB_SUNXI_USB
     help
-      manager all usb controller.
+        manager all usb controller.
 
-      This option is of interest only to developers who need to
-      develop on AllWinner SoC.
+#---------------------------------------------
+#-
+#- usb0 mode slecet.
+#-
+#---------------------------------------------
+choice
 
-      If unsure, say N.
+    prompt "USB0 Controller support"
+    depends on (USB_SUNXI_USB && USB_SUNXI_USB_MANAGER)
+    help
+        usb0 Controller mode slecet. choice "device only", then usb0 can only use for device.
+        choice "host only", then usb0 can only use for host. choice "OTG", then usb0 can only
+        use device and host.
+
+config USB_SUNXI_USB0_NULL
+    boolean "usb manager not support"
+    help
+        usb0 do not monitor hardware, then drvier insmod shoud by application.
+
+config USB_SUNXI_USB0_DEVICE_ONLY
+    boolean "device only support"
+    help
+        usb0 can only use for device.
+
+config USB_SUNXI_USB0_HOST_ONLY
+    boolean "host only support"
+    help
+        usb0 can only use for host.
+
+config USB_SUNXI_USB0_OTG
+    boolean "otg support"
+    help
+        usb0 can only use for device and host.
+
+
+endchoice
 
 config USB_SUNXI_USB_DEBUG
     tristate "SUNXI USB driver debug message"
     depends on USB_SUNXI_USB
     help
-      SUNXI USB driver debug message.
+        SUNXI USB driver debug message.
 
-      This option is of interest only to developers who need to
-      develop on AllWinner SoC.
+config UDC_HIGH_BANDWITH_ISO
+    tristate "SUNXI UDC HIGH BANDWITH ISO"
+    depends on USB_SUNXI_USB && ARCH_SUN8IW6
+    help
+       udc support high bandwidth iso .
 
-      If unsure, say N.
-
-config USB_SUNXI_USB_ADB
-    tristate "SUNXI USB driver use adb source"
+config USB_SUNXI_HOST
+    tristate "SUNXI USB HOST driver"
     depends on USB_SUNXI_USB
     help
-      SUNXI USB driver debug message.
+        SUNXI USB driver debug message.
 
-      This option is of interest only to developers who need to
-      develop on AllWinner SoC.
-
-      If unsure, say N.

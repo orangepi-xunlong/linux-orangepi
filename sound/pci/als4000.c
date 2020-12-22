@@ -65,7 +65,7 @@
  * - power management? (card can do voice wakeup according to datasheet!!)
  */
 
-#include <linux/io.h>
+#include <asm/io.h>
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/gameport.h>
@@ -116,7 +116,7 @@ struct snd_card_als4000 {
 #endif
 };
 
-static const struct pci_device_id snd_als4000_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(snd_als4000_ids) = {
 	{ 0x4005, 0x4000, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0, },   /* ALS4000 */
 	{ 0, }
 };
@@ -578,7 +578,7 @@ static irqreturn_t snd_als4000_interrupt(int irq, void *dev_id)
 		snd_als4k_iobase_readb(chip->alt_port,
 					ALS4K_IOB_16_ACK_FOR_CR1E);
 
-	/* dev_dbg(chip->card->dev, "als4000: irq 0x%04x 0x%04x\n",
+	/* printk(KERN_INFO "als4000: irq 0x%04x 0x%04x\n",
 					 pci_irqstatus, sb_irqstatus); */
 
 	/* only ack the things we actually handled above */
@@ -672,7 +672,7 @@ static int snd_als4000_capture_close(struct snd_pcm_substream *substream)
 
 /******************************************************************/
 
-static const struct snd_pcm_ops snd_als4000_playback_ops = {
+static struct snd_pcm_ops snd_als4000_playback_ops = {
 	.open =		snd_als4000_playback_open,
 	.close =	snd_als4000_playback_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -683,7 +683,7 @@ static const struct snd_pcm_ops snd_als4000_playback_ops = {
 	.pointer =	snd_als4000_playback_pointer
 };
 
-static const struct snd_pcm_ops snd_als4000_capture_ops = {
+static struct snd_pcm_ops snd_als4000_capture_ops = {
 	.open =		snd_als4000_capture_open,
 	.close =	snd_als4000_capture_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -694,7 +694,7 @@ static const struct snd_pcm_ops snd_als4000_capture_ops = {
 	.pointer =	snd_als4000_capture_pointer
 };
 
-static int snd_als4000_pcm(struct snd_sb *chip, int device)
+static int __devinit snd_als4000_pcm(struct snd_sb *chip, int device)
 {
 	struct snd_pcm *pcm;
 	int err;
@@ -770,7 +770,7 @@ static void snd_als4000_configure(struct snd_sb *chip)
 }
 
 #ifdef SUPPORT_JOYSTICK
-static int snd_als4000_create_gameport(struct snd_card_als4000 *acard, int dev)
+static int __devinit snd_als4000_create_gameport(struct snd_card_als4000 *acard, int dev)
 {
 	struct gameport *gp;
 	struct resource *r;
@@ -791,13 +791,13 @@ static int snd_als4000_create_gameport(struct snd_card_als4000 *acard, int dev)
 	}
 
 	if (!r) {
-		dev_warn(&acard->pci->dev, "cannot reserve joystick ports\n");
+		printk(KERN_WARNING "als4000: cannot reserve joystick ports\n");
 		return -EBUSY;
 	}
 
 	acard->gameport = gp = gameport_allocate_port();
 	if (!gp) {
-		dev_err(&acard->pci->dev, "cannot allocate memory for gameport\n");
+		printk(KERN_ERR "als4000: cannot allocate memory for gameport\n");
 		release_and_free_resource(r);
 		return -ENOMEM;
 	}
@@ -847,8 +847,8 @@ static void snd_card_als4000_free( struct snd_card *card )
 	pci_disable_device(acard->pci);
 }
 
-static int snd_card_als4000_probe(struct pci_dev *pci,
-				  const struct pci_device_id *pci_id)
+static int __devinit snd_card_als4000_probe(struct pci_dev *pci,
+					  const struct pci_device_id *pci_id)
 {
 	static int dev;
 	struct snd_card *card;
@@ -871,9 +871,9 @@ static int snd_card_als4000_probe(struct pci_dev *pci,
 		return err;
 	}
 	/* check, if we can restrict PCI DMA transfers to 24 bits */
-	if (dma_set_mask(&pci->dev, DMA_BIT_MASK(24)) < 0 ||
-	    dma_set_coherent_mask(&pci->dev, DMA_BIT_MASK(24)) < 0) {
-		dev_err(&pci->dev, "architecture does not support 24bit PCI busmaster DMA\n");
+	if (pci_set_dma_mask(pci, DMA_BIT_MASK(24)) < 0 ||
+	    pci_set_consistent_dma_mask(pci, DMA_BIT_MASK(24)) < 0) {
+		snd_printk(KERN_ERR "architecture does not support 24bit PCI busmaster DMA\n");
 		pci_disable_device(pci);
 		return -ENXIO;
 	}
@@ -888,9 +888,9 @@ static int snd_card_als4000_probe(struct pci_dev *pci,
 	pci_write_config_word(pci, PCI_COMMAND, word | PCI_COMMAND_IO);
 	pci_set_master(pci);
 	
-	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
-			   sizeof(*acard) /* private_data: acard */,
-			   &card);
+	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 
+			      sizeof(*acard) /* private_data: acard */,
+			      &card);
 	if (err < 0) {
 		pci_release_regions(pci);
 		pci_disable_device(pci);
@@ -920,6 +920,7 @@ static int snd_card_als4000_probe(struct pci_dev *pci,
 
 	chip->pci = pci;
 	chip->alt_port = iobase;
+	snd_card_set_dev(card, &pci->dev);
 
 	snd_als4000_configure(chip);
 
@@ -933,7 +934,7 @@ static int snd_card_als4000_probe(struct pci_dev *pci,
 					MPU401_INFO_INTEGRATED |
 					MPU401_INFO_IRQ_HOOK,
 					-1, &chip->rmidi)) < 0) {
-		dev_err(&pci->dev, "no MPU-401 device at 0x%lx?\n",
+		printk(KERN_ERR "als4000: no MPU-401 device at 0x%lx?\n",
 				iobase + ALS4K_IOB_30_MIDI_DATA);
 		goto out_err;
 	}
@@ -954,7 +955,7 @@ static int snd_card_als4000_probe(struct pci_dev *pci,
 				iobase + ALS4K_IOB_10_ADLIB_ADDR0,
 				iobase + ALS4K_IOB_12_ADLIB_ADDR2,
 			    OPL3_HW_AUTO, 1, &opl3) < 0) {
-		dev_err(&pci->dev, "no OPL device at 0x%lx-0x%lx?\n",
+		printk(KERN_ERR "als4000: no OPL device at 0x%lx-0x%lx?\n",
 			   iobase + ALS4K_IOB_10_ADLIB_ADDR0,
 			   iobase + ALS4K_IOB_12_ADLIB_ADDR2);
 	} else {
@@ -980,15 +981,16 @@ out:
 	return err;
 }
 
-static void snd_card_als4000_remove(struct pci_dev *pci)
+static void __devexit snd_card_als4000_remove(struct pci_dev *pci)
 {
 	snd_card_free(pci_get_drvdata(pci));
+	pci_set_drvdata(pci, NULL);
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int snd_als4000_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int snd_als4000_suspend(struct pci_dev *pci, pm_message_t state)
 {
-	struct snd_card *card = dev_get_drvdata(dev);
+	struct snd_card *card = pci_get_drvdata(pci);
 	struct snd_card_als4000 *acard = card->private_data;
 	struct snd_sb *chip = acard->chip;
 
@@ -996,14 +998,28 @@ static int snd_als4000_suspend(struct device *dev)
 	
 	snd_pcm_suspend_all(chip->pcm);
 	snd_sbmixer_suspend(chip);
+
+	pci_disable_device(pci);
+	pci_save_state(pci);
+	pci_set_power_state(pci, pci_choose_state(pci, state));
 	return 0;
 }
 
-static int snd_als4000_resume(struct device *dev)
+static int snd_als4000_resume(struct pci_dev *pci)
 {
-	struct snd_card *card = dev_get_drvdata(dev);
+	struct snd_card *card = pci_get_drvdata(pci);
 	struct snd_card_als4000 *acard = card->private_data;
 	struct snd_sb *chip = acard->chip;
+
+	pci_set_power_state(pci, PCI_D0);
+	pci_restore_state(pci);
+	if (pci_enable_device(pci) < 0) {
+		printk(KERN_ERR "als4000: pci_enable_device failed, "
+		       "disabling device\n");
+		snd_card_disconnect(card);
+		return -EIO;
+	}
+	pci_set_master(pci);
 
 	snd_als4000_configure(chip);
 	snd_sbdsp_reset(chip);
@@ -1017,21 +1033,29 @@ static int snd_als4000_resume(struct device *dev)
 	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
+#endif /* CONFIG_PM */
 
-static SIMPLE_DEV_PM_OPS(snd_als4000_pm, snd_als4000_suspend, snd_als4000_resume);
-#define SND_ALS4000_PM_OPS	&snd_als4000_pm
-#else
-#define SND_ALS4000_PM_OPS	NULL
-#endif /* CONFIG_PM_SLEEP */
 
-static struct pci_driver als4000_driver = {
+static struct pci_driver driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = snd_als4000_ids,
 	.probe = snd_card_als4000_probe,
-	.remove = snd_card_als4000_remove,
-	.driver = {
-		.pm = SND_ALS4000_PM_OPS,
-	},
+	.remove = __devexit_p(snd_card_als4000_remove),
+#ifdef CONFIG_PM
+	.suspend = snd_als4000_suspend,
+	.resume = snd_als4000_resume,
+#endif
 };
 
-module_pci_driver(als4000_driver);
+static int __init alsa_card_als4000_init(void)
+{
+	return pci_register_driver(&driver);
+}
+
+static void __exit alsa_card_als4000_exit(void)
+{
+	pci_unregister_driver(&driver);
+}
+
+module_init(alsa_card_als4000_init)
+module_exit(alsa_card_als4000_exit)

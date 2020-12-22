@@ -18,18 +18,17 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 
-#include <asm/machdep.h>
 #include <asm/rtas.h>
 #include "pseries.h"
 
 static struct kobject *mobility_kobj;
 
 struct update_props_workarea {
-	__be32 phandle;
-	__be32 state;
-	__be64 reserved;
-	__be32 nprops;
-} __packed;
+	u32 phandle;
+	u32 state;
+	u64 reserved;
+	u32 nprops;
+};
 
 #define NODE_ACTION_MASK	0xff000000
 #define NODE_COUNT_MASK		0x00ffffff
@@ -38,32 +37,29 @@ struct update_props_workarea {
 #define UPDATE_DT_NODE	0x02000000
 #define ADD_DT_NODE	0x03000000
 
-#define MIGRATION_SCOPE	(1)
-
-static int mobility_rtas_call(int token, char *buf, s32 scope)
+static int mobility_rtas_call(int token, char *buf)
 {
 	int rc;
 
 	spin_lock(&rtas_data_buf_lock);
 
 	memcpy(rtas_data_buf, buf, RTAS_DATA_BUF_SIZE);
-	rc = rtas_call(token, 2, 1, NULL, rtas_data_buf, scope);
+	rc = rtas_call(token, 2, 1, NULL, rtas_data_buf, 1);
 	memcpy(buf, rtas_data_buf, RTAS_DATA_BUF_SIZE);
 
 	spin_unlock(&rtas_data_buf_lock);
 	return rc;
 }
 
-static int delete_dt_node(__be32 phandle)
+static int delete_dt_node(u32 phandle)
 {
 	struct device_node *dn;
 
-	dn = of_find_node_by_phandle(be32_to_cpu(phandle));
+	dn = of_find_node_by_phandle(phandle);
 	if (!dn)
 		return -ENOENT;
 
 	dlpar_detach_node(dn);
-	of_node_put(dn);
 	return 0;
 }
 
@@ -71,6 +67,7 @@ static int update_dt_property(struct device_node *dn, struct property **prop,
 			      const char *name, u32 vd, char *value)
 {
 	struct property *new_prop = *prop;
+	struct property *old_prop;
 	int more = 0;
 
 	/* A negative 'vd' value indicates that only part of the new property
@@ -120,24 +117,27 @@ static int update_dt_property(struct device_node *dn, struct property **prop,
 	}
 
 	if (!more) {
-		of_update_property(dn, new_prop);
-		*prop = NULL;
+		old_prop = of_find_property(dn, new_prop->name, NULL);
+		if (old_prop)
+			prom_update_property(dn, new_prop, old_prop);
+		else
+			prom_add_property(dn, new_prop);
+
+		new_prop = NULL;
 	}
 
 	return 0;
 }
 
-static int update_dt_node(__be32 phandle, s32 scope)
+static int update_dt_node(u32 phandle)
 {
 	struct update_props_workarea *upwa;
 	struct device_node *dn;
 	struct property *prop = NULL;
-	int i, rc, rtas_rc;
+	int i, rc;
 	char *prop_data;
 	char *rtas_buf;
 	int update_properties_token;
-	u32 nprops;
-	u32 vd;
 
 	update_properties_token = rtas_token("ibm,update-properties");
 	if (update_properties_token == RTAS_UNKNOWN_SERVICE)
@@ -147,7 +147,7 @@ static int update_dt_node(__be32 phandle, s32 scope)
 	if (!rtas_buf)
 		return -ENOMEM;
 
-	dn = of_find_node_by_phandle(be32_to_cpu(phandle));
+	dn = of_find_node_by_phandle(phandle);
 	if (!dn) {
 		kfree(rtas_buf);
 		return -ENOENT;
@@ -157,33 +157,19 @@ static int update_dt_node(__be32 phandle, s32 scope)
 	upwa->phandle = phandle;
 
 	do {
-		rtas_rc = mobility_rtas_call(update_properties_token, rtas_buf,
-					scope);
-		if (rtas_rc < 0)
+		rc = mobility_rtas_call(update_properties_token, rtas_buf);
+		if (rc < 0)
 			break;
 
 		prop_data = rtas_buf + sizeof(*upwa);
-		nprops = be32_to_cpu(upwa->nprops);
 
-		/* On the first call to ibm,update-properties for a node the
-		 * the first property value descriptor contains an empty
-		 * property name, the property value length encoded as u32,
-		 * and the property value is the node path being updated.
-		 */
-		if (*prop_data == 0) {
-			prop_data++;
-			vd = be32_to_cpu(*(__be32 *)prop_data);
-			prop_data += vd + sizeof(vd);
-			nprops--;
-		}
-
-		for (i = 0; i < nprops; i++) {
+		for (i = 0; i < upwa->nprops; i++) {
 			char *prop_name;
+			u32 vd;
 
-			prop_name = prop_data;
+			prop_name = prop_data + 1;
 			prop_data += strlen(prop_name) + 1;
-			vd = be32_to_cpu(*(__be32 *)prop_data);
-			prop_data += sizeof(vd);
+			vd = *prop_data++;
 
 			switch (vd) {
 			case 0x00000000:
@@ -191,8 +177,8 @@ static int update_dt_node(__be32 phandle, s32 scope)
 				break;
 
 			case 0x80000000:
-				of_remove_property(dn, of_find_property(dn,
-							prop_name, NULL));
+				prop = of_find_property(dn, prop_name, NULL);
+				prom_remove_property(dn, prop);
 				prop = NULL;
 				break;
 
@@ -207,29 +193,30 @@ static int update_dt_node(__be32 phandle, s32 scope)
 				prop_data += vd;
 			}
 		}
-	} while (rtas_rc == 1);
+	} while (rc == 1);
 
 	of_node_put(dn);
 	kfree(rtas_buf);
 	return 0;
 }
 
-static int add_dt_node(__be32 parent_phandle, __be32 drc_index)
+static int add_dt_node(u32 parent_phandle, u32 drc_index)
 {
 	struct device_node *dn;
 	struct device_node *parent_dn;
 	int rc;
 
-	parent_dn = of_find_node_by_phandle(be32_to_cpu(parent_phandle));
-	if (!parent_dn)
+	dn = dlpar_configure_connector(drc_index);
+	if (!dn)
 		return -ENOENT;
 
-	dn = dlpar_configure_connector(drc_index, parent_dn);
-	if (!dn) {
-		of_node_put(parent_dn);
+	parent_dn = of_find_node_by_phandle(parent_phandle);
+	if (!parent_dn) {
+		dlpar_free_cc_nodes(dn);
 		return -ENOENT;
 	}
 
+	dn->parent = parent_dn;
 	rc = dlpar_attach_node(dn);
 	if (rc)
 		dlpar_free_cc_nodes(dn);
@@ -238,10 +225,10 @@ static int add_dt_node(__be32 parent_phandle, __be32 drc_index)
 	return rc;
 }
 
-int pseries_devicetree_update(s32 scope)
+static int pseries_devicetree_update(void)
 {
 	char *rtas_buf;
-	__be32 *data;
+	u32 *data;
 	int update_nodes_token;
 	int rc;
 
@@ -254,28 +241,28 @@ int pseries_devicetree_update(s32 scope)
 		return -ENOMEM;
 
 	do {
-		rc = mobility_rtas_call(update_nodes_token, rtas_buf, scope);
+		rc = mobility_rtas_call(update_nodes_token, rtas_buf);
 		if (rc && rc != 1)
 			break;
 
-		data = (__be32 *)rtas_buf + 4;
-		while (be32_to_cpu(*data) & NODE_ACTION_MASK) {
+		data = (u32 *)rtas_buf + 4;
+		while (*data & NODE_ACTION_MASK) {
 			int i;
-			u32 action = be32_to_cpu(*data) & NODE_ACTION_MASK;
-			u32 node_count = be32_to_cpu(*data) & NODE_COUNT_MASK;
+			u32 action = *data & NODE_ACTION_MASK;
+			int node_count = *data & NODE_COUNT_MASK;
 
 			data++;
 
 			for (i = 0; i < node_count; i++) {
-				__be32 phandle = *data++;
-				__be32 drc_index;
+				u32 phandle = *data++;
+				u32 drc_index;
 
 				switch (action) {
 				case DELETE_DT_NODE:
 					delete_dt_node(phandle);
 					break;
 				case UPDATE_DT_NODE:
-					update_dt_node(phandle, scope);
+					update_dt_node(phandle);
 					break;
 				case ADD_DT_NODE:
 					drc_index = *data++;
@@ -295,6 +282,13 @@ void post_mobility_fixup(void)
 	int rc;
 	int activate_fw_token;
 
+	rc = pseries_devicetree_update();
+	if (rc) {
+		printk(KERN_ERR "Initial post-mobility device tree update "
+		       "failed: %d\n", rc);
+		return;
+	}
+
 	activate_fw_token = rtas_token("ibm,activate-firmware");
 	if (activate_fw_token == RTAS_UNKNOWN_SERVICE) {
 		printk(KERN_ERR "Could not make post-mobility "
@@ -302,20 +296,16 @@ void post_mobility_fixup(void)
 		return;
 	}
 
-	do {
-		rc = rtas_call(activate_fw_token, 0, 1, NULL);
-	} while (rtas_busy_delay(rc));
-
-	if (rc)
+	rc = rtas_call(activate_fw_token, 0, 1, NULL);
+	if (!rc) {
+		rc = pseries_devicetree_update();
+		if (rc)
+			printk(KERN_ERR "Secondary post-mobility device tree "
+			       "update failed: %d\n", rc);
+	} else {
 		printk(KERN_ERR "Post-mobility activate-fw failed: %d\n", rc);
-
-	rc = pseries_devicetree_update(MIGRATION_SCOPE);
-	if (rc)
-		printk(KERN_ERR "Post-mobility device tree update "
-			"failed: %d\n", rc);
-
-	/* Possibly switch to a new RFI flush type */
-	pseries_setup_rfi_flush();
+		return;
+	}
 
 	return;
 }
@@ -323,36 +313,40 @@ void post_mobility_fixup(void)
 static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
 			     const char *buf, size_t count)
 {
+	struct rtas_args args;
 	u64 streamid;
 	int rc;
 
-	rc = kstrtou64(buf, 0, &streamid);
+	rc = strict_strtoull(buf, 0, &streamid);
 	if (rc)
 		return rc;
+
+	memset(&args, 0, sizeof(args));
+	args.token = rtas_token("ibm,suspend-me");
+	args.nargs = 2;
+	args.nret = 1;
+
+	args.args[0] = streamid >> 32 ;
+	args.args[1] = streamid & 0xffffffff;
+	args.rets = &args.args[args.nargs];
 
 	do {
-		rc = rtas_ibm_suspend_me(streamid);
-		if (rc == -EAGAIN)
+		args.rets[0] = 0;
+		rc = rtas_ibm_suspend_me(&args);
+		if (!rc && args.rets[0] == RTAS_NOT_SUSPENDABLE)
 			ssleep(1);
-	} while (rc == -EAGAIN);
+	} while (!rc && args.rets[0] == RTAS_NOT_SUSPENDABLE);
 
 	if (rc)
 		return rc;
+	else if (args.rets[0])
+		return args.rets[0];
 
 	post_mobility_fixup();
 	return count;
 }
 
-/*
- * Used by drmgr to determine the kernel behavior of the migration interface.
- *
- * Version 1: Performs all PAPR requirements for migration including
- *	firmware activation and device tree update.
- */
-#define MIGRATION_API_VERSION	1
-
 static CLASS_ATTR(migration, S_IWUSR, NULL, migrate_store);
-static CLASS_ATTR_STRING(api_version, S_IRUGO, __stringify(MIGRATION_API_VERSION));
 
 static int __init mobility_sysfs_init(void)
 {
@@ -363,13 +357,7 @@ static int __init mobility_sysfs_init(void)
 		return -ENOMEM;
 
 	rc = sysfs_create_file(mobility_kobj, &class_attr_migration.attr);
-	if (rc)
-		pr_err("mobility: unable to create migration sysfs file (%d)\n", rc);
 
-	rc = sysfs_create_file(mobility_kobj, &class_attr_api_version.attr.attr);
-	if (rc)
-		pr_err("mobility: unable to create api_version sysfs file (%d)\n", rc);
-
-	return 0;
+	return rc;
 }
-machine_device_initcall(pseries, mobility_sysfs_init);
+device_initcall(mobility_sysfs_init);

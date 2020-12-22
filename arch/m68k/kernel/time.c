@@ -11,10 +11,8 @@
  */
 
 #include <linux/errno.h>
-#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/sched.h>
-#include <linux/sched/loadavg.h>
 #include <linux/kernel.h>
 #include <linux/param.h>
 #include <linux/string.h>
@@ -29,11 +27,6 @@
 #include <linux/time.h>
 #include <linux/timex.h>
 #include <linux/profile.h>
-
-
-unsigned long (*mach_random_get_entropy)(void);
-EXPORT_SYMBOL_GPL(mach_random_get_entropy);
-
 
 /*
  * timer_interrupt() needs to keep up the real-time clock,
@@ -87,49 +80,17 @@ void read_persistent_clock(struct timespec *ts)
 	}
 }
 
-#if defined(CONFIG_ARCH_USES_GETTIMEOFFSET) && IS_ENABLED(CONFIG_RTC_DRV_GENERIC)
-static int rtc_generic_get_time(struct device *dev, struct rtc_time *tm)
+void __init time_init(void)
 {
-	mach_hwclk(0, tm);
-	return rtc_valid_tm(tm);
+	mach_sched_init(timer_interrupt);
 }
 
-static int rtc_generic_set_time(struct device *dev, struct rtc_time *tm)
+#ifdef CONFIG_M68KCLASSIC
+
+u32 arch_gettimeoffset(void)
 {
-	if (mach_hwclk(1, tm) < 0)
-		return -EOPNOTSUPP;
-	return 0;
+	return mach_gettimeoffset() * 1000;
 }
-
-static int rtc_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
-{
-	struct rtc_pll_info pll;
-	struct rtc_pll_info __user *argp = (void __user *)arg;
-
-	switch (cmd) {
-	case RTC_PLL_GET:
-		if (!mach_get_rtc_pll || mach_get_rtc_pll(&pll))
-			return -EINVAL;
-		return copy_to_user(argp, &pll, sizeof pll) ? -EFAULT : 0;
-
-	case RTC_PLL_SET:
-		if (!mach_set_rtc_pll)
-			return -EINVAL;
-		if (!capable(CAP_SYS_TIME))
-			return -EACCES;
-		if (copy_from_user(&pll, argp, sizeof(pll)))
-			return -EFAULT;
-		return mach_set_rtc_pll(&pll);
-	}
-
-	return -ENOIOCTLCMD;
-}
-
-static const struct rtc_class_ops generic_rtc_ops = {
-	.ioctl = rtc_ioctl,
-	.read_time = rtc_generic_get_time,
-	.set_time = rtc_generic_set_time,
-};
 
 static int __init rtc_init(void)
 {
@@ -138,17 +99,13 @@ static int __init rtc_init(void)
 	if (!mach_hwclk)
 		return -ENODEV;
 
-	pdev = platform_device_register_data(NULL, "rtc-generic", -1,
-					     &generic_rtc_ops,
-					     sizeof(generic_rtc_ops));
-	return PTR_ERR_OR_ZERO(pdev);
+	pdev = platform_device_register_simple("rtc-generic", -1, NULL, 0);
+	if (IS_ERR(pdev))
+		return PTR_ERR(pdev);
+
+	return 0;
 }
 
 module_init(rtc_init);
 
-#endif /* CONFIG_ARCH_USES_GETTIMEOFFSET */
-
-void __init time_init(void)
-{
-	mach_sched_init(timer_interrupt);
-}
+#endif /* CONFIG_M68KCLASSIC */

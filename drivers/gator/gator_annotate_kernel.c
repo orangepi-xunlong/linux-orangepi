@@ -1,5 +1,5 @@
 /**
- * Copyright (C) ARM Limited 2012-2016. All rights reserved.
+ * Copyright (C) ARM Limited 2012. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -7,194 +7,84 @@
  *
  */
 
-#define ESCAPE_CODE 0x1c
-#define STRING_ANNOTATION 0x06
-#define NAME_CHANNEL_ANNOTATION 0x07
-#define NAME_GROUP_ANNOTATION 0x08
-#define VISUAL_ANNOTATION 0x04
-#define MARKER_ANNOTATION 0x05
-
-static void kannotate_write(const char *ptr, unsigned int size)
+static void kannotate_write(char* ptr, unsigned int size)
 {
-    int retval;
-    int pos = 0;
-    loff_t offset = 0;
-
-    while (pos < size) {
-        retval = annotate_write(NULL, &ptr[pos], size - pos, &offset);
-        if (retval < 0) {
-            pr_warning("gator: kannotate_write failed with return value %d\n", retval);
-            return;
-        }
-        pos += retval;
-    }
+	int retval;
+	int pos = 0;
+	loff_t offset = 0;
+	while (pos < size) {
+		 retval = annotate_write(NULL, &ptr[pos], size - pos, &offset);
+		 if (retval < 0) {
+			 printk(KERN_WARNING "gator: kannotate_write failed with return value %d\n", retval);
+			 return;
+		 }
+		 pos += retval;
+	}
 }
 
-static void marshal_u16(char *buf, u16 val)
+// String annotation
+void gator_annotate(char* string)
 {
-    buf[0] = val & 0xff;
-    buf[1] = (val >> 8) & 0xff;
-}
-
-static void marshal_u32(char *buf, u32 val)
-{
-    buf[0] = val & 0xff;
-    buf[1] = (val >> 8) & 0xff;
-    buf[2] = (val >> 16) & 0xff;
-    buf[3] = (val >> 24) & 0xff;
-}
-
-void gator_annotate_channel(int channel, const char *str)
-{
-    const u16 str_size = strlen(str) & 0xffff;
-    char header[8];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = STRING_ANNOTATION;
-    marshal_u32(header + 2, channel);
-    marshal_u16(header + 6, str_size);
-    kannotate_write(header, sizeof(header));
-    kannotate_write(str, str_size);
-}
-EXPORT_SYMBOL(gator_annotate_channel);
-
-void gator_annotate(const char *str)
-{
-    gator_annotate_channel(0, str);
+	kannotate_write(string, strlen(string) + 1);
 }
 EXPORT_SYMBOL(gator_annotate);
 
-void gator_annotate_channel_color(int channel, int color, const char *str)
+// String annotation with color
+void gator_annotate_color(int color, char* string)
 {
-    const u16 str_size = (strlen(str) + 4) & 0xffff;
-    char header[12];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = STRING_ANNOTATION;
-    marshal_u32(header + 2, channel);
-    marshal_u16(header + 6, str_size);
-    marshal_u32(header + 8, color);
-    kannotate_write(header, sizeof(header));
-    kannotate_write(str, str_size - 4);
-}
-EXPORT_SYMBOL(gator_annotate_channel_color);
-
-void gator_annotate_color(int color, const char *str)
-{
-    gator_annotate_channel_color(0, color, str);
+	kannotate_write((char*)&color, sizeof(color));
+	kannotate_write(string, strlen(string) + 1);
 }
 EXPORT_SYMBOL(gator_annotate_color);
 
-void gator_annotate_channel_end(int channel)
-{
-    char header[8];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = STRING_ANNOTATION;
-    marshal_u32(header + 2, channel);
-    marshal_u16(header + 6, 0);
-    kannotate_write(header, sizeof(header));
-}
-EXPORT_SYMBOL(gator_annotate_channel_end);
-
+// Terminate an annotation
 void gator_annotate_end(void)
 {
-    gator_annotate_channel_end(0);
+	char nul = 0;
+	kannotate_write(&nul, sizeof(nul));
 }
 EXPORT_SYMBOL(gator_annotate_end);
 
-void gator_annotate_name_channel(int channel, int group, const char *str)
+// Image annotation with optional string
+void gator_annotate_visual(char* data, unsigned int length, char* string)
 {
-    const u16 str_size = strlen(str) & 0xffff;
-    char header[12];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = NAME_CHANNEL_ANNOTATION;
-    marshal_u32(header + 2, channel);
-    marshal_u32(header + 6, group);
-    marshal_u16(header + 10, str_size);
-    kannotate_write(header, sizeof(header));
-    kannotate_write(str, str_size);
-}
-EXPORT_SYMBOL(gator_annotate_name_channel);
-
-void gator_annotate_name_group(int group, const char *str)
-{
-    const u16 str_size = strlen(str) & 0xffff;
-    char header[8];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = NAME_GROUP_ANNOTATION;
-    marshal_u32(header + 2, group);
-    marshal_u16(header + 6, str_size);
-    kannotate_write(header, sizeof(header));
-    kannotate_write(str, str_size);
-}
-EXPORT_SYMBOL(gator_annotate_name_group);
-
-void gator_annotate_visual(const char *data, unsigned int length, const char *str)
-{
-    const u16 str_size = strlen(str) & 0xffff;
-    char header[4];
-    char header_length[4];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = VISUAL_ANNOTATION;
-    marshal_u16(header + 2, str_size);
-    marshal_u32(header_length, length);
-    kannotate_write(header, sizeof(header));
-    kannotate_write(str, str_size);
-    kannotate_write(header_length, sizeof(header_length));
-    kannotate_write(data, length);
+	long long visual_annotation = 0x011c | (strlen(string) << 16) | ((long long)length << 32);
+	kannotate_write((char*)&visual_annotation, 8);
+	kannotate_write(string, strlen(string));
+	kannotate_write(data, length);
 }
 EXPORT_SYMBOL(gator_annotate_visual);
 
+// Marker annotation
 void gator_annotate_marker(void)
 {
-    char header[4];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = MARKER_ANNOTATION;
-    marshal_u16(header + 2, 0);
-    kannotate_write(header, sizeof(header));
+	int marker_annotation = 0x00021c;
+	kannotate_write((char*)&marker_annotation, 3);
 }
 EXPORT_SYMBOL(gator_annotate_marker);
 
-void gator_annotate_marker_str(const char *str)
+// Marker annotation with a string
+void gator_annotate_marker_str(char* string)
 {
-    const u16 str_size = strlen(str) & 0xffff;
-    char header[4];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = MARKER_ANNOTATION;
-    marshal_u16(header + 2, str_size);
-    kannotate_write(header, sizeof(header));
-    kannotate_write(str, str_size);
+	int marker_annotation = 0x021c;
+	kannotate_write((char*)&marker_annotation, 2);
+	kannotate_write(string, strlen(string) + 1);
 }
 EXPORT_SYMBOL(gator_annotate_marker_str);
 
+// Marker annotation with a color
 void gator_annotate_marker_color(int color)
 {
-    char header[8];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = MARKER_ANNOTATION;
-    marshal_u16(header + 2, 4);
-    marshal_u32(header + 4, color);
-    kannotate_write(header, sizeof(header));
+	long long marker_annotation = (0x021c | ((long long)color << 16)) & 0x0000ffffffffffffLL;
+	kannotate_write((char*)&marker_annotation, 7);
 }
 EXPORT_SYMBOL(gator_annotate_marker_color);
 
-void gator_annotate_marker_color_str(int color, const char *str)
+// Marker annotationw ith a string and color
+void gator_annotate_marker_color_str(int color, char* string)
 {
-    const u16 str_size = (strlen(str) + 4) & 0xffff;
-    char header[8];
-
-    header[0] = ESCAPE_CODE;
-    header[1] = MARKER_ANNOTATION;
-    marshal_u16(header + 2, str_size);
-    marshal_u32(header + 4, color);
-    kannotate_write(header, sizeof(header));
-    kannotate_write(str, str_size - 4);
+	long long marker_annotation = 0x021c | ((long long)color << 16);
+	kannotate_write((char*)&marker_annotation, 6);
+	kannotate_write(string, strlen(string) + 1);
 }
 EXPORT_SYMBOL(gator_annotate_marker_color_str);

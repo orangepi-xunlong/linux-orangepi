@@ -24,12 +24,12 @@
  */
 static u32 get_int_prop(struct device_node *np, const char *name, u32 def)
 {
-	const __be32 *prop;
+	const u32 *prop;
 	int len;
 
 	prop = of_get_property(np, name, &len);
 	if (prop && len >= 4)
-		return of_read_number(prop, 1);
+		return *prop;
 	return def;
 }
 
@@ -38,7 +38,7 @@ static u32 get_int_prop(struct device_node *np, const char *name, u32 def)
  * @addr0: value of 1st cell of a device tree PCI address.
  * @bridge: Set this flag if the address is from a bridge 'ranges' property
  */
-static unsigned int pci_parse_of_flags(u32 addr0, int bridge)
+unsigned int pci_parse_of_flags(u32 addr0, int bridge)
 {
 	unsigned int flags = 0;
 
@@ -77,7 +77,7 @@ static void of_pci_parse_addrs(struct device_node *node, struct pci_dev *dev)
 	unsigned int flags;
 	struct pci_bus_region region;
 	struct resource *res;
-	const __be32 *addrs;
+	const u32 *addrs;
 	u32 i;
 	int proplen;
 
@@ -86,14 +86,14 @@ static void of_pci_parse_addrs(struct device_node *node, struct pci_dev *dev)
 		return;
 	pr_debug("    parse addresses (%d bytes) @ %p\n", proplen, addrs);
 	for (; proplen >= 20; proplen -= 20, addrs += 5) {
-		flags = pci_parse_of_flags(of_read_number(addrs, 1), 0);
+		flags = pci_parse_of_flags(addrs[0], 0);
 		if (!flags)
 			continue;
 		base = of_read_number(&addrs[1], 2);
 		size = of_read_number(&addrs[3], 2);
 		if (!size)
 			continue;
-		i = of_read_number(addrs, 1) & 0xff;
+		i = addrs[0] & 0xff;
 		pr_debug("  base: %llx, size: %llx, i: %x\n",
 			 (unsigned long long)base,
 			 (unsigned long long)size, i);
@@ -102,7 +102,7 @@ static void of_pci_parse_addrs(struct device_node *node, struct pci_dev *dev)
 			res = &dev->resource[(i - PCI_BASE_ADDRESS_0) >> 2];
 		} else if (i == dev->rom_base_reg) {
 			res = &dev->resource[PCI_ROM_RESOURCE];
-			flags |= IORESOURCE_READONLY;
+			flags |= IORESOURCE_READONLY | IORESOURCE_CACHEABLE;
 		} else {
 			printk(KERN_ERR "PCI: bad cfg reg num 0x%x\n", i);
 			continue;
@@ -126,8 +126,9 @@ struct pci_dev *of_create_pci_dev(struct device_node *node,
 {
 	struct pci_dev *dev;
 	const char *type;
+	struct pci_slot *slot;
 
-	dev = pci_alloc_dev(bus);
+	dev = alloc_pci_dev();
 	if (!dev)
 		return NULL;
 	type = of_get_property(node, "device_type", NULL);
@@ -136,6 +137,7 @@ struct pci_dev *of_create_pci_dev(struct device_node *node,
 
 	pr_debug("    create device, devfn: %x, type: %s\n", devfn, type);
 
+	dev->bus = bus;
 	dev->dev.of_node = of_node_get(node);
 	dev->dev.parent = bus->bridge;
 	dev->dev.bus = &pci_bus_type;
@@ -144,7 +146,10 @@ struct pci_dev *of_create_pci_dev(struct device_node *node,
 	dev->needs_freset = 0;		/* pcie fundamental reset required */
 	set_pcie_port_type(dev);
 
-	pci_dev_assign_slot(dev);
+	list_for_each_entry(slot, &dev->bus->slots, list)
+		if (PCI_SLOT(dev->devfn) == slot->number)
+			dev->slot = slot;
+
 	dev->vendor = get_int_prop(node, "vendor-id", 0xffff);
 	dev->device = get_int_prop(node, "device-id", 0xffff);
 	dev->subsystem_vendor = get_int_prop(node, "subsystem-vendor-id", 0);
@@ -160,7 +165,7 @@ struct pci_dev *of_create_pci_dev(struct device_node *node,
 	pr_debug("    class: 0x%x\n", dev->class);
 	pr_debug("    revision: 0x%x\n", dev->revision);
 
-	dev->current_state = PCI_UNKNOWN;	/* unknown power state */
+	dev->current_state = 4;		/* unknown power state */
 	dev->error_state = pci_channel_io_normal;
 	dev->dma_mask = 0xffffffff;
 
@@ -178,7 +183,7 @@ struct pci_dev *of_create_pci_dev(struct device_node *node,
 		dev->hdr_type = PCI_HEADER_TYPE_NORMAL;
 		dev->rom_base_reg = PCI_ROM_ADDRESS;
 		/* Maybe do a default OF mapping here */
-		dev->irq = 0;
+		dev->irq = NO_IRQ;
 	}
 
 	of_pci_parse_addrs(node, dev);
@@ -193,18 +198,18 @@ EXPORT_SYMBOL(of_create_pci_dev);
 
 /**
  * of_scan_pci_bridge - Set up a PCI bridge and scan for child nodes
+ * @node: device tree node of bridge
  * @dev: pci_dev structure for the bridge
  *
  * of_scan_bus() calls this routine for each PCI bridge that it finds, and
  * this routine in turn call of_scan_bus() recusively to scan for more child
  * devices.
  */
-void of_scan_pci_bridge(struct pci_dev *dev)
+void __devinit of_scan_pci_bridge(struct pci_dev *dev)
 {
 	struct device_node *node = dev->dev.of_node;
 	struct pci_bus *bus;
-	struct pci_controller *phb;
-	const __be32 *busrange, *ranges;
+	const u32 *busrange, *ranges;
 	int len, i, mode;
 	struct pci_bus_region region;
 	struct resource *res;
@@ -227,21 +232,15 @@ void of_scan_pci_bridge(struct pci_dev *dev)
 		return;
 	}
 
-	bus = pci_find_bus(pci_domain_nr(dev->bus),
-			   of_read_number(busrange, 1));
+	bus = pci_add_new_bus(dev->bus, dev, busrange[0]);
 	if (!bus) {
-		bus = pci_add_new_bus(dev->bus, dev,
-				      of_read_number(busrange, 1));
-		if (!bus) {
-			printk(KERN_ERR "Failed to create pci bus for %s\n",
-			       node->full_name);
-			return;
-		}
+		printk(KERN_ERR "Failed to create pci bus for %s\n",
+		       node->full_name);
+		return;
 	}
 
 	bus->primary = dev->bus->number;
-	pci_bus_insert_busn_res(bus, of_read_number(busrange, 1),
-				of_read_number(busrange+1, 1));
+	bus->subordinate = busrange[1];
 	bus->bridge_ctl = 0;
 
 	/* parse ranges property */
@@ -254,7 +253,7 @@ void of_scan_pci_bridge(struct pci_dev *dev)
 	}
 	i = 1;
 	for (; len >= 32; len -= 32, ranges += 8) {
-		flags = pci_parse_of_flags(of_read_number(ranges, 1), 1);
+		flags = pci_parse_of_flags(ranges[0], 1);
 		size = of_read_number(&ranges[6], 2);
 		if (flags == 0 || size == 0)
 			continue;
@@ -283,11 +282,9 @@ void of_scan_pci_bridge(struct pci_dev *dev)
 		bus->number);
 	pr_debug("    bus name: %s\n", bus->name);
 
-	phb = pci_bus_to_host(bus);
-
 	mode = PCI_PROBE_NORMAL;
-	if (phb->controller_ops.probe_mode)
-		mode = phb->controller_ops.probe_mode(bus);
+	if (ppc_md.pci_probe_mode)
+		mode = ppc_md.pci_probe_mode(bus);
 	pr_debug("    probe mode: %d\n", mode);
 
 	if (mode == PCI_PROBE_DEVTREE)
@@ -297,57 +294,18 @@ void of_scan_pci_bridge(struct pci_dev *dev)
 }
 EXPORT_SYMBOL(of_scan_pci_bridge);
 
-static struct pci_dev *of_scan_pci_dev(struct pci_bus *bus,
-			    struct device_node *dn)
-{
-	struct pci_dev *dev = NULL;
-	const __be32 *reg;
-	int reglen, devfn;
-#ifdef CONFIG_EEH
-	struct eeh_dev *edev = pdn_to_eeh_dev(PCI_DN(dn));
-#endif
-
-	pr_debug("  * %s\n", dn->full_name);
-	if (!of_device_is_available(dn))
-		return NULL;
-
-	reg = of_get_property(dn, "reg", &reglen);
-	if (reg == NULL || reglen < 20)
-		return NULL;
-	devfn = (of_read_number(reg, 1) >> 8) & 0xff;
-
-	/* Check if the PCI device is already there */
-	dev = pci_get_slot(bus, devfn);
-	if (dev) {
-		pci_dev_put(dev);
-		return dev;
-	}
-
-	/* Device removed permanently ? */
-#ifdef CONFIG_EEH
-	if (edev && (edev->mode & EEH_DEV_REMOVED))
-		return NULL;
-#endif
-
-	/* create a new pci_dev for this device */
-	dev = of_create_pci_dev(dn, bus, devfn);
-	if (!dev)
-		return NULL;
-
-	pr_debug("  dev header type: %x\n", dev->hdr_type);
-	return dev;
-}
-
 /**
  * __of_scan_bus - given a PCI bus node, setup bus and scan for child devices
  * @node: device tree node for the PCI bus
  * @bus: pci_bus structure for the PCI bus
  * @rescan_existing: Flag indicating bus has already been set up
  */
-static void __of_scan_bus(struct device_node *node, struct pci_bus *bus,
-			  int rescan_existing)
+static void __devinit __of_scan_bus(struct device_node *node,
+				    struct pci_bus *bus, int rescan_existing)
 {
 	struct device_node *child;
+	const u32 *reg;
+	int reglen, devfn;
 	struct pci_dev *dev;
 
 	pr_debug("of_scan_bus(%s) bus no %d...\n",
@@ -355,7 +313,16 @@ static void __of_scan_bus(struct device_node *node, struct pci_bus *bus,
 
 	/* Scan direct children */
 	for_each_child_of_node(node, child) {
-		dev = of_scan_pci_dev(bus, child);
+		pr_debug("  * %s\n", child->full_name);
+		if (!of_device_is_available(child))
+			continue;
+		reg = of_get_property(child, "reg", &reglen);
+		if (reg == NULL || reglen < 20)
+			continue;
+		devfn = (reg[0] >> 8) & 0xff;
+
+		/* create a new pci_dev for this device */
+		dev = of_create_pci_dev(child, bus, devfn);
 		if (!dev)
 			continue;
 		pr_debug("    dev header type: %x\n", dev->hdr_type);
@@ -370,7 +337,8 @@ static void __of_scan_bus(struct device_node *node, struct pci_bus *bus,
 
 	/* Now scan child busses */
 	list_for_each_entry(dev, &bus->devices, bus_list) {
-		if (pci_is_bridge(dev)) {
+		if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE ||
+		    dev->hdr_type == PCI_HEADER_TYPE_CARDBUS) {
 			of_scan_pci_bridge(dev);
 		}
 	}
@@ -381,7 +349,8 @@ static void __of_scan_bus(struct device_node *node, struct pci_bus *bus,
  * @node: device tree node for the PCI bus
  * @bus: pci_bus structure for the PCI bus
  */
-void of_scan_bus(struct device_node *node, struct pci_bus *bus)
+void __devinit of_scan_bus(struct device_node *node,
+			   struct pci_bus *bus)
 {
 	__of_scan_bus(node, bus, 0);
 }
@@ -395,7 +364,8 @@ EXPORT_SYMBOL_GPL(of_scan_bus);
  * Same as of_scan_bus, but for a pci_bus structure that has already been
  * setup.
  */
-void of_rescan_bus(struct device_node *node, struct pci_bus *bus)
+void __devinit of_rescan_bus(struct device_node *node,
+			     struct pci_bus *bus)
 {
 	__of_scan_bus(node, bus, 1);
 }

@@ -178,7 +178,6 @@ static int tcf_em_validate(struct tcf_proto *tp,
 	struct tcf_ematch_hdr *em_hdr = nla_data(nla);
 	int data_len = nla_len(nla) - sizeof(*em_hdr);
 	void *data = (void *) em_hdr + sizeof(*em_hdr);
-	struct net *net = dev_net(qdisc_dev(tp->q));
 
 	if (!TCF_EM_REL_VALID(em_hdr->flags))
 		goto errout;
@@ -228,7 +227,6 @@ static int tcf_em_validate(struct tcf_proto *tp,
 				 * to replay the request.
 				 */
 				module_put(em->ops->owner);
-				em->ops = NULL;
 				err = -EAGAIN;
 			}
 #endif
@@ -242,7 +240,7 @@ static int tcf_em_validate(struct tcf_proto *tp,
 			goto errout;
 
 		if (em->ops->change) {
-			err = em->ops->change(net, data, data_len, em);
+			err = em->ops->change(tp, data, data_len, em);
 			if (err < 0)
 				goto errout;
 		} else if (data_len > 0) {
@@ -273,7 +271,6 @@ static int tcf_em_validate(struct tcf_proto *tp,
 	em->matchid = em_hdr->matchid;
 	em->flags = em_hdr->flags;
 	em->datalen = data_len;
-	em->net = net;
 
 	err = 0;
 errout:
@@ -381,7 +378,7 @@ errout:
 	return err;
 
 errout_abort:
-	tcf_em_tree_destroy(tree);
+	tcf_em_tree_destroy(tp, tree);
 	return err;
 }
 EXPORT_SYMBOL(tcf_em_tree_validate);
@@ -396,7 +393,7 @@ EXPORT_SYMBOL(tcf_em_tree_validate);
  * tcf_em_tree_validate()/tcf_em_tree_change(). You must ensure that
  * the ematch tree is not in use before calling this function.
  */
-void tcf_em_tree_destroy(struct tcf_ematch_tree *tree)
+void tcf_em_tree_destroy(struct tcf_proto *tp, struct tcf_ematch_tree *tree)
 {
 	int i;
 
@@ -408,7 +405,7 @@ void tcf_em_tree_destroy(struct tcf_ematch_tree *tree)
 
 		if (em->ops) {
 			if (em->ops->destroy)
-				em->ops->destroy(em);
+				em->ops->destroy(tp, em);
 			else if (!tcf_em_is_simple(em))
 				kfree((void *) em->data);
 			module_put(em->ops->owner);
@@ -444,8 +441,7 @@ int tcf_em_tree_dump(struct sk_buff *skb, struct tcf_ematch_tree *tree, int tlv)
 	if (top_start == NULL)
 		goto nla_put_failure;
 
-	if (nla_put(skb, TCA_EMATCH_TREE_HDR, sizeof(tree->hdr), &tree->hdr))
-		goto nla_put_failure;
+	NLA_PUT(skb, TCA_EMATCH_TREE_HDR, sizeof(tree->hdr), &tree->hdr);
 
 	list_start = nla_nest_start(skb, TCA_EMATCH_TREE_LIST);
 	if (list_start == NULL)
@@ -461,8 +457,7 @@ int tcf_em_tree_dump(struct sk_buff *skb, struct tcf_ematch_tree *tree, int tlv)
 			.flags = em->flags
 		};
 
-		if (nla_put(skb, i + 1, sizeof(em_hdr), &em_hdr))
-			goto nla_put_failure;
+		NLA_PUT(skb, i + 1, sizeof(em_hdr), &em_hdr);
 
 		if (em->ops && em->ops->dump) {
 			if (em->ops->dump(skb, em) < 0)
@@ -529,12 +524,9 @@ pop_stack:
 		match_idx = stack[--stackp];
 		cur_match = tcf_em_get_match(tree, match_idx);
 
-		if (tcf_em_is_inverted(cur_match))
-			res = !res;
-
-		if (tcf_em_early_end(cur_match, res)) {
+		if (tcf_em_early_end(cur_match, res))
 			goto pop_stack;
-		} else {
+		else {
 			match_idx++;
 			goto proceed;
 		}
@@ -543,7 +535,9 @@ pop_stack:
 	return res;
 
 stack_overflow:
-	net_warn_ratelimited("tc ematch: local stack overflow, increase NET_EMATCH_STACK\n");
+	if (net_ratelimit())
+		pr_warning("tc ematch: local stack overflow,"
+			   " increase NET_EMATCH_STACK\n");
 	return -1;
 }
 EXPORT_SYMBOL(__tcf_em_tree_match);

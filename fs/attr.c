@@ -14,25 +14,21 @@
 #include <linux/fcntl.h>
 #include <linux/security.h>
 #include <linux/evm.h>
-#include <linux/ima.h>
 
 /**
- * setattr_prepare - check if attribute changes to a dentry are allowed
- * @dentry:	dentry to check
+ * inode_change_ok - check if attribute changes to an inode are allowed
+ * @inode:	inode to check
  * @attr:	attributes to change
  *
  * Check if we are allowed to change the attributes contained in @attr
- * in the given dentry.  This includes the normal unix access permission
- * checks, as well as checks for rlimits and others. The function also clears
- * SGID bit from mode if user is not allowed to set it. Also file capabilities
- * and IMA extended attributes are cleared if ATTR_KILL_PRIV is set.
+ * in the given inode.  This includes the normal unix access permission
+ * checks, as well as checks for rlimits and others.
  *
  * Should be called as the first thing in ->setattr implementations,
  * possibly after taking additional locks.
  */
-int setattr_prepare(struct dentry *dentry, struct iattr *attr)
+int inode_change_ok(const struct inode *inode, struct iattr *attr)
 {
-	struct inode *inode = d_inode(dentry);
 	unsigned int ia_valid = attr->ia_valid;
 
 	/*
@@ -47,20 +43,19 @@ int setattr_prepare(struct dentry *dentry, struct iattr *attr)
 
 	/* If force is set do it anyway. */
 	if (ia_valid & ATTR_FORCE)
-		goto kill_priv;
+		return 0;
 
 	/* Make sure a caller can chown. */
 	if ((ia_valid & ATTR_UID) &&
-	    (!uid_eq(current_fsuid(), inode->i_uid) ||
-	     !uid_eq(attr->ia_uid, inode->i_uid)) &&
-	    !capable_wrt_inode_uidgid(inode, CAP_CHOWN))
+	    (current_fsuid() != inode->i_uid ||
+	     attr->ia_uid != inode->i_uid) && !capable(CAP_CHOWN))
 		return -EPERM;
 
 	/* Make sure caller can chgrp. */
 	if ((ia_valid & ATTR_GID) &&
-	    (!uid_eq(current_fsuid(), inode->i_uid) ||
-	    (!in_group_p(attr->ia_gid) && !gid_eq(attr->ia_gid, inode->i_gid))) &&
-	    !capable_wrt_inode_uidgid(inode, CAP_CHOWN))
+	    (current_fsuid() != inode->i_uid ||
+	    (!in_group_p(attr->ia_gid) && attr->ia_gid != inode->i_gid)) &&
+	    !capable(CAP_CHOWN))
 		return -EPERM;
 
 	/* Make sure a caller can chmod. */
@@ -69,8 +64,7 @@ int setattr_prepare(struct dentry *dentry, struct iattr *attr)
 			return -EPERM;
 		/* Also check the setgid bit! */
 		if (!in_group_p((ia_valid & ATTR_GID) ? attr->ia_gid :
-				inode->i_gid) &&
-		    !capable_wrt_inode_uidgid(inode, CAP_FSETID))
+				inode->i_gid) && !capable(CAP_FSETID))
 			attr->ia_mode &= ~S_ISGID;
 	}
 
@@ -80,19 +74,9 @@ int setattr_prepare(struct dentry *dentry, struct iattr *attr)
 			return -EPERM;
 	}
 
-kill_priv:
-	/* User has permission for the change */
-	if (ia_valid & ATTR_KILL_PRIV) {
-		int error;
-
-		error = security_inode_killpriv(dentry);
-		if (error)
-			return error;
-	}
-
 	return 0;
 }
-EXPORT_SYMBOL(setattr_prepare);
+EXPORT_SYMBOL(inode_change_ok);
 
 /**
  * inode_newsize_ok - may this inode be truncated to a given size
@@ -172,35 +156,14 @@ void setattr_copy(struct inode *inode, const struct iattr *attr)
 	if (ia_valid & ATTR_MODE) {
 		umode_t mode = attr->ia_mode;
 
-		if (!in_group_p(inode->i_gid) &&
-		    !capable_wrt_inode_uidgid(inode, CAP_FSETID))
+		if (!in_group_p(inode->i_gid) && !capable(CAP_FSETID))
 			mode &= ~S_ISGID;
 		inode->i_mode = mode;
 	}
 }
 EXPORT_SYMBOL(setattr_copy);
 
-/**
- * notify_change - modify attributes of a filesytem object
- * @dentry:	object affected
- * @iattr:	new attributes
- * @delegated_inode: returns inode, if the inode is delegated
- *
- * The caller must hold the i_mutex on the affected object.
- *
- * If notify_change discovers a delegation in need of breaking,
- * it will return -EWOULDBLOCK and return a reference to the inode in
- * delegated_inode.  The caller should then break the delegation and
- * retry.  Because breaking a delegation may take a long time, the
- * caller should drop the i_mutex before doing so.
- *
- * Alternatively, a caller may pass NULL for delegated_inode.  This may
- * be appropriate for callers that expect the underlying filesystem not
- * to be NFS exported.  Also, passing NULL is fine for callers holding
- * the file open for write, as there can be no conflicting delegation in
- * that case.
- */
-int notify_change2(struct vfsmount *mnt, struct dentry * dentry, struct iattr * attr, struct inode **delegated_inode)
+int notify_change(struct dentry * dentry, struct iattr * attr)
 {
 	struct inode *inode = dentry->d_inode;
 	umode_t mode = inode->i_mode;
@@ -208,26 +171,14 @@ int notify_change2(struct vfsmount *mnt, struct dentry * dentry, struct iattr * 
 	struct timespec now;
 	unsigned int ia_valid = attr->ia_valid;
 
-	WARN_ON_ONCE(!inode_is_locked(inode));
-
 	if (ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID | ATTR_TIMES_SET)) {
 		if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 			return -EPERM;
 	}
 
-	/*
-	 * If utimes(2) and friends are called with times == NULL (or both
-	 * times are UTIME_NOW), then we need to check for write permission
-	 */
-	if (ia_valid & ATTR_TOUCH) {
-		if (IS_IMMUTABLE(inode))
-			return -EPERM;
-
-		if (!inode_owner_or_capable(inode)) {
-			error = inode_permission2(mnt, inode, MAY_WRITE);
-			if (error)
-				return error;
-		}
+	if ((ia_valid & ATTR_SIZE) && IS_I_VERSION(inode)) {
+		if (attr->ia_size != inode->i_size)
+			inode_inc_iversion(inode);
 	}
 
 	if ((ia_valid & ATTR_MODE)) {
@@ -237,7 +188,7 @@ int notify_change2(struct vfsmount *mnt, struct dentry * dentry, struct iattr * 
 			inode->i_flags &= ~S_NOSEC;
 	}
 
-	now = current_time(inode);
+	now = current_fs_time(inode->i_sb);
 
 	attr->ia_ctime = now;
 	if (!(ia_valid & ATTR_ATIME_SET))
@@ -245,11 +196,13 @@ int notify_change2(struct vfsmount *mnt, struct dentry * dentry, struct iattr * 
 	if (!(ia_valid & ATTR_MTIME_SET))
 		attr->ia_mtime = now;
 	if (ia_valid & ATTR_KILL_PRIV) {
+		attr->ia_valid &= ~ATTR_KILL_PRIV;
+		ia_valid &= ~ATTR_KILL_PRIV;
 		error = security_inode_need_killpriv(dentry);
-		if (error < 0)
+		if (error > 0)
+			error = security_inode_killpriv(dentry);
+		if (error)
 			return error;
-		if (error == 0)
-			ia_valid = attr->ia_valid &= ~ATTR_KILL_PRIV;
 	}
 
 	/*
@@ -281,51 +234,21 @@ int notify_change2(struct vfsmount *mnt, struct dentry * dentry, struct iattr * 
 	if (!(attr->ia_valid & ~(ATTR_KILL_SUID | ATTR_KILL_SGID)))
 		return 0;
 
-	/*
-	 * Verify that uid/gid changes are valid in the target
-	 * namespace of the superblock.
-	 */
-	if (ia_valid & ATTR_UID &&
-	    !kuid_has_mapping(inode->i_sb->s_user_ns, attr->ia_uid))
-		return -EOVERFLOW;
-	if (ia_valid & ATTR_GID &&
-	    !kgid_has_mapping(inode->i_sb->s_user_ns, attr->ia_gid))
-		return -EOVERFLOW;
-
-	/* Don't allow modifications of files with invalid uids or
-	 * gids unless those uids & gids are being made valid.
-	 */
-	if (!(ia_valid & ATTR_UID) && !uid_valid(inode->i_uid))
-		return -EOVERFLOW;
-	if (!(ia_valid & ATTR_GID) && !gid_valid(inode->i_gid))
-		return -EOVERFLOW;
-
 	error = security_inode_setattr(dentry, attr);
 	if (error)
 		return error;
-	error = try_break_deleg(inode, delegated_inode);
-	if (error)
-		return error;
 
-	if (mnt && inode->i_op->setattr2)
-		error = inode->i_op->setattr2(mnt, dentry, attr);
-	else if (inode->i_op->setattr)
+	if (inode->i_op->setattr)
 		error = inode->i_op->setattr(dentry, attr);
 	else
 		error = simple_setattr(dentry, attr);
 
 	if (!error) {
 		fsnotify_change(dentry, ia_valid);
-		ima_inode_post_setattr(dentry);
 		evm_inode_post_setattr(dentry, ia_valid);
 	}
 
 	return error;
 }
-EXPORT_SYMBOL(notify_change2);
 
-int notify_change(struct dentry * dentry, struct iattr * attr, struct inode **delegated_inode)
-{
-	return notify_change2(NULL, dentry, attr, delegated_inode);
-}
 EXPORT_SYMBOL(notify_change);

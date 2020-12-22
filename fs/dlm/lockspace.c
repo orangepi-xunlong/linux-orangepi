@@ -35,11 +35,8 @@ static struct task_struct *	scand_task;
 static ssize_t dlm_control_store(struct dlm_ls *ls, const char *buf, size_t len)
 {
 	ssize_t ret = len;
-	int n;
-	int rc = kstrtoint(buf, 0, &n);
+	int n = simple_strtol(buf, NULL, 0);
 
-	if (rc)
-		return rc;
 	ls = dlm_find_lockspace_local(ls->ls_local_handle);
 	if (!ls)
 		return -EINVAL;
@@ -60,10 +57,7 @@ static ssize_t dlm_control_store(struct dlm_ls *ls, const char *buf, size_t len)
 
 static ssize_t dlm_event_store(struct dlm_ls *ls, const char *buf, size_t len)
 {
-	int rc = kstrtoint(buf, 0, &ls->ls_uevent_result);
-
-	if (rc)
-		return rc;
+	ls->ls_uevent_result = simple_strtol(buf, NULL, 0);
 	set_bit(LSFL_UEVENT_WAIT, &ls->ls_flags);
 	wake_up(&ls->ls_uevent_wait);
 	return len;
@@ -76,27 +70,7 @@ static ssize_t dlm_id_show(struct dlm_ls *ls, char *buf)
 
 static ssize_t dlm_id_store(struct dlm_ls *ls, const char *buf, size_t len)
 {
-	int rc = kstrtouint(buf, 0, &ls->ls_global_id);
-
-	if (rc)
-		return rc;
-	return len;
-}
-
-static ssize_t dlm_nodir_show(struct dlm_ls *ls, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%u\n", dlm_no_directory(ls));
-}
-
-static ssize_t dlm_nodir_store(struct dlm_ls *ls, const char *buf, size_t len)
-{
-	int val;
-	int rc = kstrtoint(buf, 0, &val);
-
-	if (rc)
-		return rc;
-	if (val == 1)
-		set_bit(LSFL_NODIR, &ls->ls_flags);
+	ls->ls_global_id = simple_strtoul(buf, NULL, 0);
 	return len;
 }
 
@@ -133,12 +107,6 @@ static struct dlm_attr dlm_attr_id = {
 	.store = dlm_id_store
 };
 
-static struct dlm_attr dlm_attr_nodir = {
-	.attr  = {.name = "nodir", .mode = S_IRUGO | S_IWUSR},
-	.show  = dlm_nodir_show,
-	.store = dlm_nodir_store
-};
-
 static struct dlm_attr dlm_attr_recover_status = {
 	.attr  = {.name = "recover_status", .mode = S_IRUGO},
 	.show  = dlm_recover_status_show
@@ -153,7 +121,6 @@ static struct attribute *dlm_attrs[] = {
 	&dlm_attr_control.attr,
 	&dlm_attr_event.attr,
 	&dlm_attr_id.attr,
-	&dlm_attr_nodir.attr,
 	&dlm_attr_recover_status.attr,
 	&dlm_attr_recover_nodeid.attr,
 	NULL,
@@ -203,7 +170,7 @@ static int do_uevent(struct dlm_ls *ls, int in)
 	else
 		kobject_uevent(&ls->ls_kobj, KOBJ_OFFLINE);
 
-	log_rinfo(ls, "%s the lockspace group...", in ? "joining" : "leaving");
+	log_debug(ls, "%s the lockspace group...", in ? "joining" : "leaving");
 
 	/* dlm_controld will see the uevent, do the necessary group management
 	   and then write to sysfs to wake us */
@@ -211,7 +178,7 @@ static int do_uevent(struct dlm_ls *ls, int in)
 	error = wait_event_interruptible(ls->ls_uevent_wait,
 			test_and_clear_bit(LSFL_UEVENT_WAIT, &ls->ls_flags));
 
-	log_rinfo(ls, "group event done %d %d", error, ls->ls_uevent_result);
+	log_debug(ls, "group event done %d %d", error, ls->ls_uevent_result);
 
 	if (error)
 		goto out;
@@ -519,17 +486,19 @@ static int new_lockspace(const char *name, const char *cluster,
 		spin_lock_init(&ls->ls_rsbtbl[i].lock);
 	}
 
-	spin_lock_init(&ls->ls_remove_spin);
-
-	for (i = 0; i < DLM_REMOVE_NAMES_MAX; i++) {
-		ls->ls_remove_names[i] = kzalloc(DLM_RESNAME_MAXLEN+1,
-						 GFP_KERNEL);
-		if (!ls->ls_remove_names[i])
-			goto out_rsbtbl;
-	}
-
 	idr_init(&ls->ls_lkbidr);
 	spin_lock_init(&ls->ls_lkbidr_spin);
+
+	size = dlm_config.ci_dirtbl_size;
+	ls->ls_dirtbl_size = size;
+
+	ls->ls_dirtbl = vmalloc(sizeof(struct dlm_dirtable) * size);
+	if (!ls->ls_dirtbl)
+		goto out_lkbfree;
+	for (i = 0; i < size; i++) {
+		INIT_LIST_HEAD(&ls->ls_dirtbl[i].list);
+		spin_lock_init(&ls->ls_dirtbl[i].lock);
+	}
 
 	INIT_LIST_HEAD(&ls->ls_waiters);
 	mutex_init(&ls->ls_waiters_mutex);
@@ -578,7 +547,7 @@ static int new_lockspace(const char *name, const char *cluster,
 
 	ls->ls_recover_buf = kmalloc(dlm_config.ci_buffer_size, GFP_NOFS);
 	if (!ls->ls_recover_buf)
-		goto out_lkbidr;
+		goto out_dirfree;
 
 	ls->ls_slot = 0;
 	ls->ls_num_slots = 0;
@@ -587,13 +556,13 @@ static int new_lockspace(const char *name, const char *cluster,
 
 	INIT_LIST_HEAD(&ls->ls_recover_list);
 	spin_lock_init(&ls->ls_recover_list_lock);
-	idr_init(&ls->ls_recover_idr);
-	spin_lock_init(&ls->ls_recover_idr_lock);
 	ls->ls_recover_list_count = 0;
 	ls->ls_local_handle = ls;
 	init_waitqueue_head(&ls->ls_wait_general);
 	INIT_LIST_HEAD(&ls->ls_root_list);
 	init_rwsem(&ls->ls_root_sem);
+
+	down_write(&ls->ls_in_recovery);
 
 	spin_lock(&lslist_lock);
 	ls->ls_create_count = 1;
@@ -608,23 +577,12 @@ static int new_lockspace(const char *name, const char *cluster,
 		}
 	}
 
-	init_waitqueue_head(&ls->ls_recover_lock_wait);
-
-	/*
-	 * Once started, dlm_recoverd first looks for ls in lslist, then
-	 * initializes ls_in_recovery as locked in "down" mode.  We need
-	 * to wait for the wakeup from dlm_recoverd because in_recovery
-	 * has to start out in down mode.
-	 */
-
+	/* needs to find ls in lslist */
 	error = dlm_recoverd_start(ls);
 	if (error) {
 		log_error(ls, "can't start dlm_recoverd %d", error);
 		goto out_callback;
 	}
-
-	wait_event(ls->ls_recover_lock_wait,
-		   test_bit(LSFL_RECOVER_LOCK, &ls->ls_flags));
 
 	ls->ls_kobj.kset = dlm_kset;
 	error = kobject_init_and_add(&ls->ls_kobj, &dlm_ktype, NULL,
@@ -653,7 +611,7 @@ static int new_lockspace(const char *name, const char *cluster,
 
 	dlm_create_debug_file(ls);
 
-	log_rinfo(ls, "join complete");
+	log_debug(ls, "join complete");
 	*lockspace = ls;
 	return 0;
 
@@ -669,15 +627,11 @@ static int new_lockspace(const char *name, const char *cluster,
 	spin_lock(&lslist_lock);
 	list_del(&ls->ls_list);
 	spin_unlock(&lslist_lock);
-	idr_destroy(&ls->ls_recover_idr);
 	kfree(ls->ls_recover_buf);
- out_lkbidr:
+ out_dirfree:
+	vfree(ls->ls_dirtbl);
+ out_lkbfree:
 	idr_destroy(&ls->ls_lkbidr);
- out_rsbtbl:
-	for (i = 0; i < DLM_REMOVE_NAMES_MAX; i++) {
-		if (ls->ls_remove_names[i])
-			kfree(ls->ls_remove_names[i]);
-	}
 	vfree(ls->ls_rsbtbl);
  out_lsfree:
 	if (do_unreg)
@@ -719,7 +673,9 @@ static int lkb_idr_is_local(int id, void *p, void *data)
 {
 	struct dlm_lkb *lkb = p;
 
-	return lkb->lkb_nodeid == 0 && lkb->lkb_grmode != DLM_LOCK_IV;
+	if (!lkb->lkb_nodeid)
+		return 1;
+	return 0;
 }
 
 static int lkb_idr_is_any(int id, void *p, void *data)
@@ -803,10 +759,18 @@ static int release_lockspace(struct dlm_ls *ls, int force)
 	kfree(ls->ls_recover_buf);
 
 	/*
+	 * Free direntry structs.
+	 */
+
+	dlm_dir_clear(ls);
+	vfree(ls->ls_dirtbl);
+
+	/*
 	 * Free all lkb's in idr
 	 */
 
 	idr_for_each(&ls->ls_lkbidr, lkb_idr_free, ls);
+	idr_remove_all(&ls->ls_lkbidr);
 	idr_destroy(&ls->ls_lkbidr);
 
 	/*
@@ -829,9 +793,6 @@ static int release_lockspace(struct dlm_ls *ls, int force)
 
 	vfree(ls->ls_rsbtbl);
 
-	for (i = 0; i < DLM_REMOVE_NAMES_MAX; i++)
-		kfree(ls->ls_remove_names[i]);
-
 	while (!list_empty(&ls->ls_new_rsb)) {
 		rsb = list_first_entry(&ls->ls_new_rsb, struct dlm_rsb,
 				       res_hashchain);
@@ -845,10 +806,11 @@ static int release_lockspace(struct dlm_ls *ls, int force)
 
 	dlm_purge_requestqueue(ls);
 	kfree(ls->ls_recover_args);
+	dlm_clear_free_entries(ls);
 	dlm_clear_members(ls);
 	dlm_clear_members_gone(ls);
 	kfree(ls->ls_node_array);
-	log_rinfo(ls, "release_lockspace final free");
+	log_debug(ls, "release_lockspace final free");
 	kobject_put(&ls->ls_kobj);
 	/* The ls structure will be freed when the kobject is done with */
 
@@ -894,24 +856,17 @@ int dlm_release_lockspace(void *lockspace, int force)
 void dlm_stop_lockspaces(void)
 {
 	struct dlm_ls *ls;
-	int count;
 
  restart:
-	count = 0;
 	spin_lock(&lslist_lock);
 	list_for_each_entry(ls, &lslist, ls_list) {
-		if (!test_bit(LSFL_RUNNING, &ls->ls_flags)) {
-			count++;
+		if (!test_bit(LSFL_RUNNING, &ls->ls_flags))
 			continue;
-		}
 		spin_unlock(&lslist_lock);
 		log_error(ls, "no userland control daemon, stopping lockspace");
 		dlm_ls_stop(ls);
 		goto restart;
 	}
 	spin_unlock(&lslist_lock);
-
-	if (count)
-		log_print("dlm user daemon left %d lockspaces", count);
 }
 

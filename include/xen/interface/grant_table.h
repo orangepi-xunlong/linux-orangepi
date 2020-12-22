@@ -310,7 +310,7 @@ struct gnttab_setup_table {
     uint32_t nr_frames;
     /* OUT parameters. */
     int16_t  status;              /* GNTST_* */
-    GUEST_HANDLE(xen_pfn_t) frame_list;
+    GUEST_HANDLE(ulong) frame_list;
 };
 DEFINE_GUEST_HANDLE_STRUCT(gnttab_setup_table);
 
@@ -338,7 +338,7 @@ DEFINE_GUEST_HANDLE_STRUCT(gnttab_dump_table);
 #define GNTTABOP_transfer                4
 struct gnttab_transfer {
     /* IN parameters. */
-    xen_pfn_t mfn;
+    unsigned long mfn;
     domid_t       domid;
     grant_ref_t   ref;
     /* OUT parameters. */
@@ -375,7 +375,7 @@ struct gnttab_copy {
 	struct {
 		union {
 			grant_ref_t ref;
-			xen_pfn_t   gmfn;
+			unsigned long   gmfn;
 		} u;
 		domid_t  domid;
 		uint16_t offset;
@@ -479,25 +479,6 @@ struct gnttab_get_version {
 DEFINE_GUEST_HANDLE_STRUCT(gnttab_get_version);
 
 /*
- * Issue one or more cache maintenance operations on a portion of a
- * page granted to the calling domain by a foreign domain.
- */
-#define GNTTABOP_cache_flush          12
-struct gnttab_cache_flush {
-    union {
-        uint64_t dev_bus_addr;
-        grant_ref_t ref;
-    } a;
-    uint16_t offset;   /* offset from start of grant */
-    uint16_t length;   /* size within the grant */
-#define GNTTAB_CACHE_CLEAN          (1<<0)
-#define GNTTAB_CACHE_INVAL          (1<<1)
-#define GNTTAB_CACHE_SOURCE_GREF    (1<<31)
-    uint32_t op;
-};
-DEFINE_GUEST_HANDLE_STRUCT(gnttab_cache_flush);
-
-/*
  * Bitfield values for update_pin_status.flags.
  */
  /* Map the grant entry for access by I/O devices. */
@@ -526,13 +507,6 @@ DEFINE_GUEST_HANDLE_STRUCT(gnttab_cache_flush);
 #define GNTMAP_contains_pte     (1<<_GNTMAP_contains_pte)
 
 /*
- * Bits to be placed in guest kernel available PTE bits (architecture
- * dependent; only supported when XENFEAT_gnttab_map_avail_bits is set).
- */
-#define _GNTMAP_guest_avail0    (16)
-#define GNTMAP_guest_avail_mask ((uint32_t)~0 << _GNTMAP_guest_avail0)
-
-/*
  * Values for error status returns. All errors are -ve.
  */
 #define GNTST_okay             (0)  /* Normal return.                        */
@@ -545,9 +519,7 @@ DEFINE_GUEST_HANDLE_STRUCT(gnttab_cache_flush);
 #define GNTST_no_device_space  (-7) /* Out of space in I/O MMU.              */
 #define GNTST_permission_denied (-8) /* Not enough privilege for operation.  */
 #define GNTST_bad_page         (-9) /* Specified page was invalid for op.    */
-#define GNTST_bad_copy_arg    (-10) /* copy arguments cross page boundary.   */
-#define GNTST_address_too_big (-11) /* transfer page address too large.      */
-#define GNTST_eagain          (-12) /* Operation not done; try again.        */
+#define GNTST_bad_copy_arg    (-10) /* copy arguments cross page boundary */
 
 #define GNTTABOP_error_msgs {                   \
     "okay",                                     \
@@ -560,9 +532,7 @@ DEFINE_GUEST_HANDLE_STRUCT(gnttab_cache_flush);
     "no spare translation slot in the I/O MMU", \
     "permission denied",                        \
     "bad page",                                 \
-    "copy arguments cross page boundary",       \
-    "page address size too large",              \
-    "operation not done; try again"             \
+    "copy arguments cross page boundary"        \
 }
 
 #endif /* __XEN_PUBLIC_GRANT_TABLE_H__ */

@@ -11,9 +11,9 @@
 #include <linux/memory.h>
 #include <linux/gfp.h>
 #include <linux/dmapool.h>
-#include <linux/dmaengine.h>
+#include <mach/coh901318.h>
 
-#include "coh901318.h"
+#include "coh901318_lli.h"
 
 #if (defined(CONFIG_DEBUG_FS) && defined(CONFIG_U300_DEBUG))
 #define DEBUGFS_POOL_COUNTER_RESET(pool) (pool->debugfs_pool_counter = 0)
@@ -61,7 +61,7 @@ coh901318_lli_alloc(struct coh901318_pool *pool, unsigned int len)
 	dma_addr_t phy;
 
 	if (len == 0)
-		return NULL;
+		goto err;
 
 	spin_lock(&pool->lock);
 
@@ -75,7 +75,7 @@ coh901318_lli_alloc(struct coh901318_pool *pool, unsigned int len)
 	lli = head;
 	lli->phy_this = phy;
 	lli->link_addr = 0x00000000;
-	lli->virt_link_addr = NULL;
+	lli->virt_link_addr = 0x00000000U;
 
 	for (i = 1; i < len; i++) {
 		lli_prev = lli;
@@ -88,7 +88,7 @@ coh901318_lli_alloc(struct coh901318_pool *pool, unsigned int len)
 		DEBUGFS_POOL_COUNTER_ADD(pool, 1);
 		lli->phy_this = phy;
 		lli->link_addr = 0x00000000;
-		lli->virt_link_addr = NULL;
+		lli->virt_link_addr = 0x00000000U;
 
 		lli_prev->link_addr = phy;
 		lli_prev->virt_link_addr = lli;
@@ -270,10 +270,10 @@ coh901318_lli_fill_sg(struct coh901318_pool *pool,
 
 		if (dir == DMA_MEM_TO_DEV)
 			/* increment source address */
-			src = sg_dma_address(sg);
+			src = sg_phys(sg);
 		else
 			/* increment destination address */
-			dst = sg_dma_address(sg);
+			dst =  sg_phys(sg);
 
 		bytes_to_transfer = sg_dma_len(sg);
 

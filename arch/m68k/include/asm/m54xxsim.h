@@ -8,10 +8,6 @@
 #define	CPU_NAME		"COLDFIRE(m54xx)"
 #define	CPU_INSTR_PER_JIFFY	2
 #define	MCF_BUSCLK		(MCF_CLK / 2)
-#define	MACHINE			MACH_M54XX
-#define	FPUTYPE			FPU_COLDFIRE
-#define	IOMEMBASE		MCF_MBAR
-#define	IOMEMSIZE		0x01000000
 
 #include <asm/m54xxacr.h>
 
@@ -51,23 +47,11 @@
 #define MCF_IRQ_UART3		(MCFINT_VECBASE + 32)
 
 /*
- *	Slice Timer support.
- */
-#define MCFSLT_TIMER0		(MCF_MBAR + 0x900)	/* Base addr TIMER0 */
-#define MCFSLT_TIMER1		(MCF_MBAR + 0x910)	/* Base addr TIMER1 */
-
-/*
  *	Generic GPIO support
  */
-#define MCFGPIO_PODR		(MCF_MBAR + 0xA00)
-#define MCFGPIO_PDDR		(MCF_MBAR + 0xA10)
-#define MCFGPIO_PPDR		(MCF_MBAR + 0xA20)
-#define MCFGPIO_SETR		(MCF_MBAR + 0xA20)
-#define MCFGPIO_CLRR		(MCF_MBAR + 0xA30)
-
-#define MCFGPIO_PIN_MAX		136	/* 128 gpio + 8 eport */
-#define MCFGPIO_IRQ_MAX		8
-#define MCFGPIO_IRQ_VECBASE	MCFINT_VECBASE
+#define MCFGPIO_PIN_MAX		0	/* I am too lazy to count */
+#define MCFGPIO_IRQ_MAX		-1
+#define MCFGPIO_IRQ_VECBASE	-1
 
 /*
  *	EDGE Port support.
@@ -80,25 +64,15 @@
 #define	MCFEPORT_EPFR		(MCF_MBAR + 0xf0c)	/* Flags */
 
 /*
- *	Pin Assignment register definitions
+ *	Some PSC related definitions
  */
-#define MCFGPIO_PAR_FBCTL	(MCF_MBAR + 0xA40)
-#define MCFGPIO_PAR_FBCS	(MCF_MBAR + 0xA42)
-#define MCFGPIO_PAR_DMA		(MCF_MBAR + 0xA43)
-#define MCFGPIO_PAR_FECI2CIRQ	(MCF_MBAR + 0xA44)
-#define MCFGPIO_PAR_PCIBG	(MCF_MBAR + 0xA48)	/* PCI bus grant */
-#define MCFGPIO_PAR_PCIBR	(MCF_MBAR + 0xA4A)	/* PCI */
-#define MCFGPIO_PAR_PSC0	(MCF_MBAR + 0xA4F)
-#define MCFGPIO_PAR_PSC1	(MCF_MBAR + 0xA4E)
-#define MCFGPIO_PAR_PSC2	(MCF_MBAR + 0xA4D)
-#define MCFGPIO_PAR_PSC3	(MCF_MBAR + 0xA4C)
-#define MCFGPIO_PAR_DSPI	(MCF_MBAR + 0xA50)
-#define MCFGPIO_PAR_TIMER	(MCF_MBAR + 0xA52)
-
+#define MCF_PAR_PSC(x)		(0x000A4F-((x)&0x3))
 #define MCF_PAR_SDA		(0x0008)
 #define MCF_PAR_SCL		(0x0004)
 #define MCF_PAR_PSC_TXD		(0x04)
 #define MCF_PAR_PSC_RXD		(0x08)
+#define MCF_PAR_PSC_RTS(x)	(((x)&0x03)<<4)
+#define MCF_PAR_PSC_CTS(x)	(((x)&0x03)<<6)
 #define MCF_PAR_PSC_CTS_GPIO	(0x00)
 #define MCF_PAR_PSC_CTS_BCLK	(0x80)
 #define MCF_PAR_PSC_CTS_CTS	(0xC0)

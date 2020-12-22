@@ -99,18 +99,9 @@ static int cy8ctmg110_read_regs(struct cy8ctmg110 *tsc,
 	int ret;
 	struct i2c_msg msg[2] = {
 		/* first write slave position to i2c devices */
-		{
-			.addr = client->addr,
-			.len = 1,
-			.buf = &cmd
-		},
+		{ client->addr, 0, 1, &cmd },
 		/* Second read data from position */
-		{
-			.addr = client->addr,
-			.flags = I2C_M_RD,
-			.len = len,
-			.buf = data
-		}
+		{ client->addr, I2C_M_RD, len, data }
 	};
 
 	ret = i2c_transfer(client->adapter, msg, 2);
@@ -175,10 +166,10 @@ static irqreturn_t cy8ctmg110_irq_thread(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int cy8ctmg110_probe(struct i2c_client *client,
+static int __devinit cy8ctmg110_probe(struct i2c_client *client,
 					const struct i2c_device_id *id)
 {
-	const struct cy8ctmg110_pdata *pdata = dev_get_platdata(&client->dev);
+	const struct cy8ctmg110_pdata *pdata = client->dev.platform_data;
 	struct cy8ctmg110 *ts;
 	struct input_dev *input_dev;
 	int err;
@@ -260,8 +251,7 @@ static int cy8ctmg110_probe(struct i2c_client *client,
 	}
 
 	err = request_threaded_irq(client->irq, NULL, cy8ctmg110_irq_thread,
-				   IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-				   "touch_reset_key", ts);
+				   IRQF_TRIGGER_RISING, "touch_reset_key", ts);
 	if (err < 0) {
 		dev_err(&client->dev,
 			"irq %d busy? error %d\n", client->irq, err);
@@ -291,7 +281,8 @@ err_free_mem:
 	return err;
 }
 
-static int __maybe_unused cy8ctmg110_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int cy8ctmg110_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct cy8ctmg110 *ts = i2c_get_clientdata(client);
@@ -305,7 +296,7 @@ static int __maybe_unused cy8ctmg110_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused cy8ctmg110_resume(struct device *dev)
+static int cy8ctmg110_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct cy8ctmg110 *ts = i2c_get_clientdata(client);
@@ -320,8 +311,9 @@ static int __maybe_unused cy8ctmg110_resume(struct device *dev)
 }
 
 static SIMPLE_DEV_PM_OPS(cy8ctmg110_pm, cy8ctmg110_suspend, cy8ctmg110_resume);
+#endif
 
-static int cy8ctmg110_remove(struct i2c_client *client)
+static int __devexit cy8ctmg110_remove(struct i2c_client *client)
 {
 	struct cy8ctmg110 *ts = i2c_get_clientdata(client);
 
@@ -347,12 +339,15 @@ MODULE_DEVICE_TABLE(i2c, cy8ctmg110_idtable);
 
 static struct i2c_driver cy8ctmg110_driver = {
 	.driver		= {
+		.owner	= THIS_MODULE,
 		.name	= CY8CTMG110_DRIVER_NAME,
+#ifdef CONFIG_PM
 		.pm	= &cy8ctmg110_pm,
+#endif
 	},
 	.id_table	= cy8ctmg110_idtable,
 	.probe		= cy8ctmg110_probe,
-	.remove		= cy8ctmg110_remove,
+	.remove		= __devexit_p(cy8ctmg110_remove),
 };
 
 module_i2c_driver(cy8ctmg110_driver);

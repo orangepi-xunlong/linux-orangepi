@@ -37,6 +37,7 @@
 
 
 #include <linux/device.h>
+#include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
@@ -210,6 +211,11 @@ static bool gpio3;
 module_param(gpio3, bool, 0);
 MODULE_PARM_DESC(gpio3, "If gpio3 is set to 1 AUX3 acts as GPIO3");
 
+/*
+ * ad7877_read/write are only used for initial setup and for sysfs controls.
+ * The main traffic is done using spi_async() in the interrupt handler.
+ */
+
 static int ad7877_read(struct spi_device *spi, u16 reg)
 {
 	struct ser_req *req;
@@ -267,7 +273,7 @@ static int ad7877_write(struct spi_device *spi, u16 reg, u16 val)
 
 static int ad7877_read_adc(struct spi_device *spi, unsigned command)
 {
-	struct ad7877 *ts = spi_get_drvdata(spi);
+	struct ad7877 *ts = dev_get_drvdata(&spi->dev);
 	struct ser_req *req;
 	int status;
 	int sample;
@@ -676,11 +682,11 @@ static void ad7877_setup_ts_def_msg(struct spi_device *spi, struct ad7877 *ts)
 	}
 }
 
-static int ad7877_probe(struct spi_device *spi)
+static int __devinit ad7877_probe(struct spi_device *spi)
 {
 	struct ad7877			*ts;
 	struct input_dev		*input_dev;
-	struct ad7877_platform_data	*pdata = dev_get_platdata(&spi->dev);
+	struct ad7877_platform_data	*pdata = spi->dev.platform_data;
 	int				err;
 	u16				verify;
 
@@ -714,7 +720,7 @@ static int ad7877_probe(struct spi_device *spi)
 		goto err_free_mem;
 	}
 
-	spi_set_drvdata(spi, ts);
+	dev_set_drvdata(&spi->dev, ts);
 	ts->spi = spi;
 	ts->input = input_dev;
 
@@ -800,12 +806,13 @@ err_free_irq:
 err_free_mem:
 	input_free_device(input_dev);
 	kfree(ts);
+	dev_set_drvdata(&spi->dev, NULL);
 	return err;
 }
 
-static int ad7877_remove(struct spi_device *spi)
+static int __devexit ad7877_remove(struct spi_device *spi)
 {
-	struct ad7877 *ts = spi_get_drvdata(spi);
+	struct ad7877 *ts = dev_get_drvdata(&spi->dev);
 
 	sysfs_remove_group(&spi->dev.kobj, &ad7877_attr_group);
 
@@ -816,11 +823,13 @@ static int ad7877_remove(struct spi_device *spi)
 	kfree(ts);
 
 	dev_dbg(&spi->dev, "unregistered touchscreen\n");
+	dev_set_drvdata(&spi->dev, NULL);
 
 	return 0;
 }
 
-static int __maybe_unused ad7877_suspend(struct device *dev)
+#ifdef CONFIG_PM_SLEEP
+static int ad7877_suspend(struct device *dev)
 {
 	struct ad7877 *ts = dev_get_drvdata(dev);
 
@@ -829,7 +838,7 @@ static int __maybe_unused ad7877_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused ad7877_resume(struct device *dev)
+static int ad7877_resume(struct device *dev)
 {
 	struct ad7877 *ts = dev_get_drvdata(dev);
 
@@ -837,16 +846,18 @@ static int __maybe_unused ad7877_resume(struct device *dev)
 
 	return 0;
 }
+#endif
 
 static SIMPLE_DEV_PM_OPS(ad7877_pm, ad7877_suspend, ad7877_resume);
 
 static struct spi_driver ad7877_driver = {
 	.driver = {
 		.name	= "ad7877",
+		.owner	= THIS_MODULE,
 		.pm	= &ad7877_pm,
 	},
 	.probe		= ad7877_probe,
-	.remove		= ad7877_remove,
+	.remove		= __devexit_p(ad7877_remove),
 };
 
 module_spi_driver(ad7877_driver);

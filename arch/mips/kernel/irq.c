@@ -25,7 +25,47 @@
 #include <linux/atomic.h>
 #include <asm/uaccess.h>
 
-void *irq_stack[NR_CPUS];
+#ifdef CONFIG_KGDB
+int kgdb_early_setup;
+#endif
+
+static unsigned long irq_map[NR_IRQS / BITS_PER_LONG];
+
+int allocate_irqno(void)
+{
+	int irq;
+
+again:
+	irq = find_first_zero_bit(irq_map, NR_IRQS);
+
+	if (irq >= NR_IRQS)
+		return -ENOSPC;
+
+	if (test_and_set_bit(irq, irq_map))
+		goto again;
+
+	return irq;
+}
+
+/*
+ * Allocate the 16 legacy interrupts for i8259 devices.  This happens early
+ * in the kernel initialization so treating allocation failure as BUG() is
+ * ok.
+ */
+void __init alloc_legacy_irqno(void)
+{
+	int i;
+
+	for (i = 0; i <= 16; i++)
+		BUG_ON(test_and_set_bit(i, irq_map));
+}
+
+void free_irqno(unsigned int irq)
+{
+	smp_mb__before_clear_bit();
+	clear_bit(irq, irq_map);
+	smp_mb__after_clear_bit();
+}
 
 /*
  * 'what should we do if we get a hw irq event on an illegal vector'.
@@ -33,6 +73,7 @@ void *irq_stack[NR_CPUS];
  */
 void ack_bad_irq(unsigned int irq)
 {
+	smtc_im_ack_irq(irq);
 	printk("unexpected IRQ # %d\n", irq);
 }
 
@@ -52,23 +93,21 @@ asmlinkage void spurious_interrupt(void)
 void __init init_IRQ(void)
 {
 	int i;
-	unsigned int order = get_order(IRQ_STACK_SIZE);
+
+#ifdef CONFIG_KGDB
+	if (kgdb_early_setup)
+		return;
+#endif
 
 	for (i = 0; i < NR_IRQS; i++)
 		irq_set_noprobe(i);
 
-	if (cpu_has_veic)
-		clear_c0_status(ST0_IM);
-
 	arch_init_irq();
 
-	for_each_possible_cpu(i) {
-		void *s = (void *)__get_free_pages(GFP_KERNEL, order);
-
-		irq_stack[i] = s;
-		pr_debug("CPU%d IRQ stack at 0x%p - 0x%p\n", i,
-			irq_stack[i], irq_stack[i] + IRQ_STACK_SIZE);
-	}
+#ifdef CONFIG_KGDB
+	if (!kgdb_early_setup)
+		kgdb_early_setup = 1;
+#endif
 }
 
 #ifdef CONFIG_DEBUG_STACKOVERFLOW
@@ -103,7 +142,23 @@ void __irq_entry do_IRQ(unsigned int irq)
 {
 	irq_enter();
 	check_stack_overflow();
+	if (!smtc_handle_on_other_cpu(irq))
+		generic_handle_irq(irq);
+	irq_exit();
+}
+
+#ifdef CONFIG_MIPS_MT_SMTC_IRQAFF
+/*
+ * To avoid inefficient and in some cases pathological re-checking of
+ * IRQ affinity, we have this variant that skips the affinity check.
+ */
+
+void __irq_entry do_IRQ_no_affinity(unsigned int irq)
+{
+	irq_enter();
+	smtc_im_backstop(irq);
 	generic_handle_irq(irq);
 	irq_exit();
 }
 
+#endif /* CONFIG_MIPS_MT_SMTC_IRQAFF */

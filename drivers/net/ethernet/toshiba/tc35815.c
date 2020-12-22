@@ -38,6 +38,7 @@ static const char *version = "tc35815.c:v" DRV_VERSION "\n";
 #include <linux/string.h>
 #include <linux/spinlock.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
@@ -59,13 +60,13 @@ enum tc35815_chiptype {
 /* indexed by tc35815_chiptype, above */
 static const struct {
 	const char *name;
-} chip_info[] = {
+} chip_info[] __devinitdata = {
 	{ "TOSHIBA TC35815CF 10/100BaseTX" },
 	{ "TOSHIBA TC35815 with Wake on LAN" },
 	{ "TOSHIBA TC35815/TX4939" },
 };
 
-static const struct pci_device_id tc35815_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(tc35815_pci_tbl) = {
 	{PCI_DEVICE(PCI_VENDOR_ID_TOSHIBA_2, PCI_DEVICE_ID_TOSHIBA_TC35815CF), .driver_data = TC35815CF },
 	{PCI_DEVICE(PCI_VENDOR_ID_TOSHIBA_2, PCI_DEVICE_ID_TOSHIBA_TC35815_NWU), .driver_data = TC35815_NWU },
 	{PCI_DEVICE(PCI_VENDOR_ID_TOSHIBA_2, PCI_DEVICE_ID_TOSHIBA_TC35815_TX4939), .driver_data = TC35815_TX4939 },
@@ -280,7 +281,7 @@ struct tc35815_regs {
  * Descriptors
  */
 
-/* Frame descriptor */
+/* Frame descripter */
 struct FDesc {
 	volatile __u32 FDNext;
 	volatile __u32 FDSystem;
@@ -288,7 +289,7 @@ struct FDesc {
 	volatile __u32 FDCtl;
 };
 
-/* Buffer descriptor */
+/* Buffer descripter */
 struct BDesc {
 	volatile __u32 BuffData;
 	volatile __u32 BDCtl;
@@ -296,7 +297,7 @@ struct BDesc {
 
 #define FD_ALIGN	16
 
-/* Frame Descriptor bit assign ---------------------------------------------- */
+/* Frame Descripter bit assign ---------------------------------------------- */
 #define FD_FDLength_MASK       0x0000FFFF /* Length MASK		     */
 #define FD_BDCnt_MASK	       0x001F0000 /* BD count MASK in FD	     */
 #define FD_FrmOpt_MASK	       0x7C000000 /* Frame option MASK		     */
@@ -309,7 +310,7 @@ struct BDesc {
 #define FD_Next_EOL	       0x00000001 /* FD EOL indicator		     */
 #define FD_BDCnt_SHIFT	       16
 
-/* Buffer Descriptor bit assign --------------------------------------------- */
+/* Buffer Descripter bit assign --------------------------------------------- */
 #define BD_BuffLength_MASK     0x0000FFFF /* Receive Data Size		     */
 #define BD_RxBDID_MASK	       0x00FF0000 /* BD ID Number MASK		     */
 #define BD_RxBDSeqN_MASK       0x7F000000 /* Rx BD Sequence Number	     */
@@ -405,6 +406,7 @@ struct tc35815_local {
 	spinlock_t rx_lock;
 
 	struct mii_bus *mii_bus;
+	struct phy_device *phy_dev;
 	int duplex;
 	int speed;
 	int link;
@@ -538,7 +540,7 @@ static int tc_mdio_write(struct mii_bus *bus, int mii_id, int regnum, u16 val)
 static void tc_handle_link_change(struct net_device *dev)
 {
 	struct tc35815_local *lp = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
+	struct phy_device *phydev = lp->phy_dev;
 	unsigned long flags;
 	int status_change = 0;
 
@@ -607,25 +609,41 @@ static void tc_handle_link_change(struct net_device *dev)
 static int tc_mii_probe(struct net_device *dev)
 {
 	struct tc35815_local *lp = netdev_priv(dev);
-	struct phy_device *phydev;
+	struct phy_device *phydev = NULL;
+	int phy_addr;
 	u32 dropmask;
 
-	phydev = phy_find_first(lp->mii_bus);
+	/* find the first phy */
+	for (phy_addr = 0; phy_addr < PHY_MAX_ADDR; phy_addr++) {
+		if (lp->mii_bus->phy_map[phy_addr]) {
+			if (phydev) {
+				printk(KERN_ERR "%s: multiple PHYs found\n",
+				       dev->name);
+				return -EINVAL;
+			}
+			phydev = lp->mii_bus->phy_map[phy_addr];
+			break;
+		}
+	}
+
 	if (!phydev) {
 		printk(KERN_ERR "%s: no PHY found\n", dev->name);
 		return -ENODEV;
 	}
 
 	/* attach the mac to the phy */
-	phydev = phy_connect(dev, phydev_name(phydev),
-			     &tc_handle_link_change,
-			     lp->chiptype == TC35815_TX4939 ? PHY_INTERFACE_MODE_RMII : PHY_INTERFACE_MODE_MII);
+	phydev = phy_connect(dev, dev_name(&phydev->dev),
+			     &tc_handle_link_change, 0,
+			     lp->chiptype == TC35815_TX4939 ?
+			     PHY_INTERFACE_MODE_RMII : PHY_INTERFACE_MODE_MII);
 	if (IS_ERR(phydev)) {
 		printk(KERN_ERR "%s: Could not attach to PHY\n", dev->name);
 		return PTR_ERR(phydev);
 	}
-
-	phy_attached_info(phydev);
+	printk(KERN_INFO "%s: attached PHY driver [%s] "
+		"(mii_bus:phy_addr=%s, id=%x)\n",
+		dev->name, phydev->drv->name, dev_name(&phydev->dev),
+		phydev->phy_id);
 
 	/* mask with MAC supported features */
 	phydev->supported &= PHY_BASIC_FEATURES;
@@ -644,6 +662,7 @@ static int tc_mii_probe(struct net_device *dev)
 	lp->link = 0;
 	lp->speed = 0;
 	lp->duplex = -1;
+	lp->phy_dev = phydev;
 
 	return 0;
 }
@@ -652,6 +671,7 @@ static int tc_mii_init(struct net_device *dev)
 {
 	struct tc35815_local *lp = netdev_priv(dev);
 	int err;
+	int i;
 
 	lp->mii_bus = mdiobus_alloc();
 	if (lp->mii_bus == NULL) {
@@ -666,9 +686,18 @@ static int tc_mii_init(struct net_device *dev)
 		 (lp->pci_dev->bus->number << 8) | lp->pci_dev->devfn);
 	lp->mii_bus->priv = dev;
 	lp->mii_bus->parent = &lp->pci_dev->dev;
+	lp->mii_bus->irq = kmalloc(sizeof(int) * PHY_MAX_ADDR, GFP_KERNEL);
+	if (!lp->mii_bus->irq) {
+		err = -ENOMEM;
+		goto err_out_free_mii_bus;
+	}
+
+	for (i = 0; i < PHY_MAX_ADDR; i++)
+		lp->mii_bus->irq[i] = PHY_POLL;
+
 	err = mdiobus_register(lp->mii_bus);
 	if (err)
-		goto err_out_free_mii_bus;
+		goto err_out_free_mdio_irq;
 	err = tc_mii_probe(dev);
 	if (err)
 		goto err_out_unregister_bus;
@@ -676,6 +705,8 @@ static int tc_mii_init(struct net_device *dev)
 
 err_out_unregister_bus:
 	mdiobus_unregister(lp->mii_bus);
+err_out_free_mdio_irq:
+	kfree(lp->mii_bus->irq);
 err_out_free_mii_bus:
 	mdiobus_free(lp->mii_bus);
 err_out:
@@ -688,7 +719,7 @@ err_out:
  * should provide a "tc35815-mac" device with a MAC address in its
  * platform_data.
  */
-static int tc35815_mac_match(struct device *dev, void *data)
+static int __devinit tc35815_mac_match(struct device *dev, void *data)
 {
 	struct platform_device *plat_dev = to_platform_device(dev);
 	struct pci_dev *pci_dev = data;
@@ -696,7 +727,7 @@ static int tc35815_mac_match(struct device *dev, void *data)
 	return !strcmp(plat_dev->name, "tc35815-mac") && plat_dev->id == id;
 }
 
-static int tc35815_read_plat_dev_addr(struct net_device *dev)
+static int __devinit tc35815_read_plat_dev_addr(struct net_device *dev)
 {
 	struct tc35815_local *lp = netdev_priv(dev);
 	struct device *pd = bus_find_device(&platform_bus_type, NULL,
@@ -710,13 +741,13 @@ static int tc35815_read_plat_dev_addr(struct net_device *dev)
 	return -ENODEV;
 }
 #else
-static int tc35815_read_plat_dev_addr(struct net_device *dev)
+static int __devinit tc35815_read_plat_dev_addr(struct net_device *dev)
 {
 	return -ENODEV;
 }
 #endif
 
-static int tc35815_init_dev_addr(struct net_device *dev)
+static int __devinit tc35815_init_dev_addr(struct net_device *dev)
 {
 	struct tc35815_regs __iomem *tr =
 		(struct tc35815_regs __iomem *)dev->base_addr;
@@ -754,8 +785,8 @@ static const struct net_device_ops tc35815_netdev_ops = {
 #endif
 };
 
-static int tc35815_init_one(struct pci_dev *pdev,
-			    const struct pci_device_id *ent)
+static int __devinit tc35815_init_one(struct pci_dev *pdev,
+				      const struct pci_device_id *ent)
 {
 	void __iomem *ioaddr = NULL;
 	struct net_device *dev;
@@ -825,6 +856,7 @@ static int tc35815_init_one(struct pci_dev *pdev,
 	if (rc)
 		goto err_out;
 
+	memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 	printk(KERN_INFO "%s: %s at 0x%lx, %pM, IRQ %d\n",
 		dev->name,
 		chip_info[ent->driver_data].name,
@@ -846,16 +878,18 @@ err_out:
 }
 
 
-static void tc35815_remove_one(struct pci_dev *pdev)
+static void __devexit tc35815_remove_one(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct tc35815_local *lp = netdev_priv(dev);
 
-	phy_disconnect(dev->phydev);
+	phy_disconnect(lp->phy_dev);
 	mdiobus_unregister(lp->mii_bus);
+	kfree(lp->mii_bus->irq);
 	mdiobus_free(lp->mii_bus);
 	unregister_netdev(dev);
 	free_netdev(dev);
+	pci_set_drvdata(pdev, NULL);
 }
 
 static int
@@ -1139,12 +1173,19 @@ static int tc35815_tx_full(struct net_device *dev)
 static void tc35815_restart(struct net_device *dev)
 {
 	struct tc35815_local *lp = netdev_priv(dev);
-	int ret;
 
-	if (dev->phydev) {
-		ret = phy_init_hw(dev->phydev);
-		if (ret)
-			printk(KERN_ERR "%s: PHY init failed.\n", dev->name);
+	if (lp->phy_dev) {
+		int timeout;
+
+		phy_write(lp->phy_dev, MII_BMCR, BMCR_RESET);
+		timeout = 100;
+		while (--timeout) {
+			if (!(phy_read(lp->phy_dev, MII_BMCR) & BMCR_RESET))
+				break;
+			udelay(1);
+		}
+		if (!timeout)
+			printk(KERN_ERR "%s: BMCR reset failed.\n", dev->name);
 	}
 
 	spin_lock_bh(&lp->rx_lock);
@@ -1234,7 +1275,7 @@ tc35815_open(struct net_device *dev)
 
 	netif_carrier_off(dev);
 	/* schedule a link state check */
-	phy_start(dev->phydev);
+	phy_start(lp->phy_dev);
 
 	/* We are now ready to accept transmit requeusts from
 	 * the queueing layer of the networking.
@@ -1385,7 +1426,7 @@ static int tc35815_do_interrupt(struct net_device *dev, u32 status, int limit)
 	if (status & Int_IntExBD) {
 		if (netif_msg_rx_err(lp))
 			dev_warn(&dev->dev,
-				 "Excessive Buffer Descriptors (%#x).\n",
+				 "Excessive Buffer Descriptiors (%#x).\n",
 				 status);
 		dev->stats.rx_length_errors++;
 		ret = 0;
@@ -1615,9 +1656,6 @@ static int tc35815_poll(struct napi_struct *napi, int budget)
 	int received = 0, handled;
 	u32 status;
 
-	if (budget <= 0)
-		return received;
-
 	spin_lock(&lp->rx_lock);
 	status = tc_readl(&tr->Int_Src);
 	do {
@@ -1817,8 +1855,8 @@ tc35815_close(struct net_device *dev)
 
 	netif_stop_queue(dev);
 	napi_disable(&lp->napi);
-	if (dev->phydev)
-		phy_stop(dev->phydev);
+	if (lp->phy_dev)
+		phy_stop(lp->phy_dev);
 	cancel_work_sync(&lp->restart_work);
 
 	/* Flush the Tx and disable Rx here. */
@@ -1938,10 +1976,27 @@ tc35815_set_multicast_list(struct net_device *dev)
 static void tc35815_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
 	struct tc35815_local *lp = netdev_priv(dev);
+	strcpy(info->driver, MODNAME);
+	strcpy(info->version, DRV_VERSION);
+	strcpy(info->bus_info, pci_name(lp->pci_dev));
+}
 
-	strlcpy(info->driver, MODNAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
-	strlcpy(info->bus_info, pci_name(lp->pci_dev), sizeof(info->bus_info));
+static int tc35815_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct tc35815_local *lp = netdev_priv(dev);
+
+	if (!lp->phy_dev)
+		return -ENODEV;
+	return phy_ethtool_gset(lp->phy_dev, cmd);
+}
+
+static int tc35815_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct tc35815_local *lp = netdev_priv(dev);
+
+	if (!lp->phy_dev)
+		return -ENODEV;
+	return phy_ethtool_sset(lp->phy_dev, cmd);
 }
 
 static u32 tc35815_get_msglevel(struct net_device *dev)
@@ -1993,23 +2048,25 @@ static void tc35815_get_strings(struct net_device *dev, u32 stringset, u8 *data)
 
 static const struct ethtool_ops tc35815_ethtool_ops = {
 	.get_drvinfo		= tc35815_get_drvinfo,
+	.get_settings		= tc35815_get_settings,
+	.set_settings		= tc35815_set_settings,
 	.get_link		= ethtool_op_get_link,
 	.get_msglevel		= tc35815_get_msglevel,
 	.set_msglevel		= tc35815_set_msglevel,
 	.get_strings		= tc35815_get_strings,
 	.get_sset_count		= tc35815_get_sset_count,
 	.get_ethtool_stats	= tc35815_get_ethtool_stats,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
 static int tc35815_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
+	struct tc35815_local *lp = netdev_priv(dev);
+
 	if (!netif_running(dev))
 		return -EINVAL;
-	if (!dev->phydev)
+	if (!lp->phy_dev)
 		return -ENODEV;
-	return phy_mii_ioctl(dev->phydev, rq, cmd);
+	return phy_mii_ioctl(lp->phy_dev, rq, cmd);
 }
 
 static void tc35815_chip_reset(struct net_device *dev)
@@ -2094,7 +2151,7 @@ static void tc35815_chip_init(struct net_device *dev)
 	if (lp->chiptype == TC35815_TX4939)
 		txctl &= ~Tx_EnLCarr;
 	/* WORKAROUND: ignore LostCrS in full duplex operation */
-	if (!dev->phydev || !lp->link || lp->duplex == DUPLEX_FULL)
+	if (!lp->phy_dev || !lp->link || lp->duplex == DUPLEX_FULL)
 		txctl &= ~Tx_EnLCarr;
 	tc_writel(txctl, &tr->Tx_Ctl);
 }
@@ -2110,8 +2167,8 @@ static int tc35815_suspend(struct pci_dev *pdev, pm_message_t state)
 	if (!netif_running(dev))
 		return 0;
 	netif_device_detach(dev);
-	if (dev->phydev)
-		phy_stop(dev->phydev);
+	if (lp->phy_dev)
+		phy_stop(lp->phy_dev);
 	spin_lock_irqsave(&lp->lock, flags);
 	tc35815_chip_reset(dev);
 	spin_unlock_irqrestore(&lp->lock, flags);
@@ -2122,6 +2179,7 @@ static int tc35815_suspend(struct pci_dev *pdev, pm_message_t state)
 static int tc35815_resume(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
+	struct tc35815_local *lp = netdev_priv(dev);
 
 	pci_restore_state(pdev);
 	if (!netif_running(dev))
@@ -2129,8 +2187,8 @@ static int tc35815_resume(struct pci_dev *pdev)
 	pci_set_power_state(pdev, PCI_D0);
 	tc35815_restart(dev);
 	netif_carrier_off(dev);
-	if (dev->phydev)
-		phy_start(dev->phydev);
+	if (lp->phy_dev)
+		phy_start(lp->phy_dev);
 	netif_device_attach(dev);
 	return 0;
 }
@@ -2140,7 +2198,7 @@ static struct pci_driver tc35815_pci_driver = {
 	.name		= MODNAME,
 	.id_table	= tc35815_pci_tbl,
 	.probe		= tc35815_init_one,
-	.remove		= tc35815_remove_one,
+	.remove		= __devexit_p(tc35815_remove_one),
 #ifdef CONFIG_PM
 	.suspend	= tc35815_suspend,
 	.resume		= tc35815_resume,
@@ -2152,6 +2210,18 @@ MODULE_PARM_DESC(speed, "0:auto, 10:10Mbps, 100:100Mbps");
 module_param_named(duplex, options.duplex, int, 0);
 MODULE_PARM_DESC(duplex, "0:auto, 1:half, 2:full");
 
-module_pci_driver(tc35815_pci_driver);
+static int __init tc35815_init_module(void)
+{
+	return pci_register_driver(&tc35815_pci_driver);
+}
+
+static void __exit tc35815_cleanup_module(void)
+{
+	pci_unregister_driver(&tc35815_pci_driver);
+}
+
+module_init(tc35815_init_module);
+module_exit(tc35815_cleanup_module);
+
 MODULE_DESCRIPTION("TOSHIBA TC35815 PCI 10M/100M Ethernet driver");
 MODULE_LICENSE("GPL");

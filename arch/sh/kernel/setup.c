@@ -29,8 +29,6 @@
 #include <linux/delay.h>
 #include <linux/platform_device.h>
 #include <linux/memblock.h>
-#include <linux/of.h>
-#include <linux/of_fdt.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/page.h>
@@ -80,17 +78,17 @@ static char __initdata command_line[COMMAND_LINE_SIZE] = { 0, };
 
 static struct resource code_resource = {
 	.name = "Kernel code",
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
 };
 
 static struct resource data_resource = {
 	.name = "Kernel data",
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
 };
 
 static struct resource bss_resource = {
 	.name	= "Kernel bss",
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM,
 };
 
 unsigned long memory_start;
@@ -174,8 +172,7 @@ disable:
 #endif
 }
 
-#ifndef CONFIG_GENERIC_CALIBRATE_DELAY
-void calibrate_delay(void)
+void __cpuinit calibrate_delay(void)
 {
 	struct clk *clk = clk_get(NULL, "cpu_clk");
 
@@ -190,7 +187,6 @@ void calibrate_delay(void)
 			 (loops_per_jiffy/(5000/HZ)) % 100,
 			 loops_per_jiffy);
 }
-#endif
 
 void __init __add_active_range(unsigned int nid, unsigned long start_pfn,
 						unsigned long end_pfn)
@@ -206,7 +202,7 @@ void __init __add_active_range(unsigned int nid, unsigned long start_pfn,
 	res->name = "System RAM";
 	res->start = start;
 	res->end = end - 1;
-	res->flags = IORESOURCE_SYSTEM_RAM | IORESOURCE_BUSY;
+	res->flags = IORESOURCE_MEM | IORESOURCE_BUSY;
 
 	if (request_resource(&iomem_resource, res)) {
 		pr_err("unable to request memory_resource 0x%lx 0x%lx\n",
@@ -234,40 +230,13 @@ void __init __add_active_range(unsigned int nid, unsigned long start_pfn,
 	pmb_bolt_mapping((unsigned long)__va(start), start, end - start,
 			 PAGE_KERNEL);
 
-	memblock_set_node(PFN_PHYS(start_pfn), PFN_PHYS(end_pfn - start_pfn),
-			  &memblock.memory, nid);
+	memblock_set_node(PFN_PHYS(start_pfn),
+			  PFN_PHYS(end_pfn - start_pfn), nid);
 }
 
 void __init __weak plat_early_device_setup(void)
 {
 }
-
-#ifdef CONFIG_OF_FLATTREE
-void __ref sh_fdt_init(phys_addr_t dt_phys)
-{
-	static int done = 0;
-	void *dt_virt;
-
-	/* Avoid calling an __init function on secondary cpus. */
-	if (done) return;
-
-#ifdef CONFIG_USE_BUILTIN_DTB
-	dt_virt = __dtb_start;
-#else
-	dt_virt = phys_to_virt(dt_phys);
-#endif
-
-	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
-		pr_crit("Error: invalid device tree blob"
-			" at physical address %p\n", (void *)dt_phys);
-
-		while (true)
-			cpu_relax();
-	}
-
-	done = 1;
-}
-#endif
 
 void __init setup_arch(char **cmdline_p)
 {
@@ -304,7 +273,7 @@ void __init setup_arch(char **cmdline_p)
 	data_resource.start = virt_to_phys(_etext);
 	data_resource.end = virt_to_phys(_edata)-1;
 	bss_resource.start = virt_to_phys(__bss_start);
-	bss_resource.end = virt_to_phys(__bss_stop)-1;
+	bss_resource.end = virt_to_phys(_ebss)-1;
 
 #ifdef CONFIG_CMDLINE_OVERWRITE
 	strlcpy(command_line, CONFIG_CMDLINE, sizeof(command_line));

@@ -32,6 +32,7 @@
 
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/net.h>
 #include <linux/netdevice.h>
@@ -161,12 +162,12 @@ static struct platform_driver tsi_eth_driver = {
 	.remove = tsi108_ether_remove,
 	.driver	= {
 		.name = "tsi-ethernet",
+		.owner = THIS_MODULE,
 	},
 };
 
 static void tsi108_timed_checker(unsigned long dev_ptr);
 
-#ifdef DEBUG
 static void dump_eth_one(struct net_device *dev)
 {
 	struct tsi108_prv_data *data = netdev_priv(dev);
@@ -191,7 +192,6 @@ static void dump_eth_one(struct net_device *dev)
 	       TSI_READ(TSI108_EC_RXESTAT),
 	       TSI_READ(TSI108_EC_RXERR), data->rxpending);
 }
-#endif
 
 /* Synchronization is needed between the thread and up/down events.
  * Note that the PHY is accessed through the same registers for both
@@ -1308,17 +1308,27 @@ static int tsi108_open(struct net_device *dev)
 		       data->id, dev->irq, dev->name);
 	}
 
-	data->rxring = dma_zalloc_coherent(NULL, rxring_size, &data->rxdma,
-					   GFP_KERNEL);
-	if (!data->rxring)
-		return -ENOMEM;
+	data->rxring = dma_alloc_coherent(NULL, rxring_size,
+			&data->rxdma, GFP_KERNEL);
 
-	data->txring = dma_zalloc_coherent(NULL, txring_size, &data->txdma,
-					   GFP_KERNEL);
-	if (!data->txring) {
-		pci_free_consistent(NULL, rxring_size, data->rxring,
-				    data->rxdma);
+	if (!data->rxring) {
+		printk(KERN_DEBUG
+		       "TSI108_ETH: failed to allocate memory for rxring!\n");
 		return -ENOMEM;
+	} else {
+		memset(data->rxring, 0, rxring_size);
+	}
+
+	data->txring = dma_alloc_coherent(NULL, txring_size,
+			&data->txdma, GFP_KERNEL);
+
+	if (!data->txring) {
+		printk(KERN_DEBUG
+		       "TSI108_ETH: failed to allocate memory for txring!\n");
+		pci_free_consistent(0, rxring_size, data->rxring, data->rxdma);
+		return -ENOMEM;
+	} else {
+		memset(data->txring, 0, txring_size);
 	}
 
 	for (i = 0; i < TSI108_RXRING_LEN; i++) {
@@ -1348,6 +1358,7 @@ static int tsi108_open(struct net_device *dev)
 			break;
 		}
 
+		data->rxskbs[i] = skb;
 		data->rxskbs[i] = skb;
 		data->rxring[i].buf0 = virt_to_phys(data->rxskbs[i]->data);
 		data->rxring[i].misc = TSI108_RX_OWN | TSI108_RX_INT;
@@ -1559,7 +1570,7 @@ tsi108_init_one(struct platform_device *pdev)
 	hw_info *einfo;
 	int err = 0;
 
-	einfo = dev_get_platdata(&pdev->dev);
+	einfo = pdev->dev.platform_data;
 
 	if (NULL == einfo) {
 		printk(KERN_ERR "tsi-eth %d: Missing additional data!\n",
@@ -1683,6 +1694,7 @@ static int tsi108_ether_remove(struct platform_device *pdev)
 
 	unregister_netdev(dev);
 	tsi108_stop_ethernet(dev);
+	platform_set_drvdata(pdev, NULL);
 	iounmap(priv->regs);
 	iounmap(priv->phyregs);
 	free_netdev(dev);

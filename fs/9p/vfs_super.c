@@ -87,9 +87,9 @@ v9fs_fill_super(struct super_block *sb, struct v9fs_session_info *v9ses,
 		sb->s_op = &v9fs_super_ops;
 	sb->s_bdi = &v9ses->bdi;
 	if (v9ses->cache)
-		sb->s_bdi->ra_pages = (VM_MAX_READAHEAD * 1024)/PAGE_SIZE;
+		sb->s_bdi->ra_pages = (VM_MAX_READAHEAD * 1024)/PAGE_CACHE_SIZE;
 
-	sb->s_flags |= MS_ACTIVE | MS_DIRSYNC | MS_NOATIME;
+	sb->s_flags = flags | MS_ACTIVE | MS_DIRSYNC | MS_NOATIME;
 	if (!v9ses->cache)
 		sb->s_flags |= MS_SYNCHRONOUS;
 
@@ -130,17 +130,21 @@ static struct dentry *v9fs_mount(struct file_system_type *fs_type, int flags,
 	fid = v9fs_session_init(v9ses, dev_name, data);
 	if (IS_ERR(fid)) {
 		retval = PTR_ERR(fid);
-		goto free_session;
+		/*
+		 * we need to call session_close to tear down some
+		 * of the data structure setup by session_init
+		 */
+		goto close_session;
 	}
 
-	sb = sget(fs_type, NULL, v9fs_set_super, flags, v9ses);
+	sb = sget(fs_type, NULL, v9fs_set_super, v9ses);
 	if (IS_ERR(sb)) {
 		retval = PTR_ERR(sb);
 		goto clunk_fid;
 	}
 	v9fs_fill_super(sb, v9ses, flags, data);
 
-	if (v9ses->cache == CACHE_LOOSE || v9ses->cache == CACHE_FSCACHE)
+	if (v9ses->cache)
 		sb->s_d_op = &v9fs_cached_dentry_operations;
 	else
 		sb->s_d_op = &v9fs_dentry_operations;
@@ -164,8 +168,8 @@ static struct dentry *v9fs_mount(struct file_system_type *fs_type, int flags,
 			retval = PTR_ERR(st);
 			goto release_sb;
 		}
-		d_inode(root)->i_ino = v9fs_qid2ino(&st->qid);
-		v9fs_stat2inode_dotl(st, d_inode(root), 0);
+		root->d_inode->i_ino = v9fs_qid2ino(&st->qid);
+		v9fs_stat2inode_dotl(st, root->d_inode);
 		kfree(st);
 	} else {
 		struct p9_wstat *st = NULL;
@@ -175,8 +179,8 @@ static struct dentry *v9fs_mount(struct file_system_type *fs_type, int flags,
 			goto release_sb;
 		}
 
-		d_inode(root)->i_ino = v9fs_qid2ino(&st->qid);
-		v9fs_stat2inode(st, d_inode(root), sb, 0);
+		root->d_inode->i_ino = v9fs_qid2ino(&st->qid);
+		v9fs_stat2inode(st, root->d_inode, sb);
 
 		p9stat_free(st);
 		kfree(st);
@@ -191,8 +195,8 @@ static struct dentry *v9fs_mount(struct file_system_type *fs_type, int flags,
 
 clunk_fid:
 	p9_client_clunk(fid);
+close_session:
 	v9fs_session_close(v9ses);
-free_session:
 	kfree(v9ses);
 	return ERR_PTR(retval);
 
@@ -278,7 +282,7 @@ static int v9fs_drop_inode(struct inode *inode)
 {
 	struct v9fs_session_info *v9ses;
 	v9ses = v9fs_inode2v9ses(inode);
-	if (v9ses->cache == CACHE_LOOSE || v9ses->cache == CACHE_FSCACHE)
+	if (v9ses->cache)
 		return generic_drop_inode(inode);
 	/*
 	 * in case of non cached mode always drop the
@@ -321,12 +325,10 @@ static int v9fs_write_inode_dotl(struct inode *inode,
 	 * send an fsync request to server irrespective of
 	 * wbc->sync_mode.
 	 */
+	p9_debug(P9_DEBUG_VFS, "%s: inode %p\n", __func__, inode);
 	v9inode = V9FS_I(inode);
-	p9_debug(P9_DEBUG_VFS, "%s: inode %p, writeback_fid %p\n",
-		 __func__, inode, v9inode->writeback_fid);
 	if (!v9inode->writeback_fid)
 		return 0;
-
 	ret = p9_client_fsync(v9inode->writeback_fid, 0);
 	if (ret < 0) {
 		__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
@@ -361,6 +363,5 @@ struct file_system_type v9fs_fs_type = {
 	.mount = v9fs_mount,
 	.kill_sb = v9fs_kill_super,
 	.owner = THIS_MODULE,
-	.fs_flags = FS_RENAME_DOES_D_MOVE,
+	.fs_flags = FS_RENAME_DOES_D_MOVE|FS_REVAL_DOT,
 };
-MODULE_ALIAS_FS("9p");

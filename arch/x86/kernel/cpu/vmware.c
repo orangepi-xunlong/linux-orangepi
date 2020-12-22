@@ -22,13 +22,10 @@
  */
 
 #include <linux/dmi.h>
-#include <linux/init.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <asm/div64.h>
 #include <asm/x86_init.h>
 #include <asm/hypervisor.h>
-#include <asm/timer.h>
-#include <asm/apic.h>
 
 #define CPUID_VMWARE_INFO_LEAF	0x40000000
 #define VMWARE_HYPERVISOR_MAGIC	0x564D5868
@@ -36,9 +33,6 @@
 
 #define VMWARE_PORT_CMD_GETVERSION	10
 #define VMWARE_PORT_CMD_GETHZ		45
-#define VMWARE_PORT_CMD_GETVCPU_INFO	68
-#define VMWARE_PORT_CMD_LEGACY_X2APIC	3
-#define VMWARE_PORT_CMD_VCPU_RESERVED	31
 
 #define VMWARE_PORT(cmd, eax, ebx, ecx, edx)				\
 	__asm__("inl (%%dx)" :						\
@@ -65,7 +59,7 @@ static unsigned long vmware_get_tsc_khz(void)
 	tsc_hz = eax | (((uint64_t)ebx) << 32);
 	do_div(tsc_hz, 1000);
 	BUG_ON(tsc_hz >> 32);
-	pr_info("TSC freq read from hypervisor : %lu.%03lu MHz\n",
+	printk(KERN_INFO "TSC freq read from hypervisor : %lu.%03lu MHz\n",
 			 (unsigned long) tsc_hz / 1000,
 			 (unsigned long) tsc_hz % 1000);
 
@@ -84,21 +78,11 @@ static void __init vmware_platform_setup(void)
 
 	VMWARE_PORT(GETHZ, eax, ebx, ecx, edx);
 
-	if (ebx != UINT_MAX) {
+	if (ebx != UINT_MAX)
 		x86_platform.calibrate_tsc = vmware_get_tsc_khz;
-#ifdef CONFIG_X86_LOCAL_APIC
-		/* Skip lapic calibration since we know the bus frequency. */
-		lapic_timer_frequency = ecx / HZ;
-		pr_info("Host bus clock speed read from hypervisor : %u Hz\n",
-			ecx);
-#endif
-	} else {
-		pr_warn("Failed to get TSC freq from the hypervisor\n");
-	}
-
-#ifdef CONFIG_X86_IO_APIC
-	no_timer_check = 1;
-#endif
+	else
+		printk(KERN_WARNING
+		       "Failed to get TSC freq from the hypervisor\n");
 }
 
 /*
@@ -106,21 +90,21 @@ static void __init vmware_platform_setup(void)
  * serial key should be enough, as this will always have a VMware
  * specific string when running under VMware hypervisor.
  */
-static uint32_t __init vmware_platform(void)
+static bool __init vmware_platform(void)
 {
-	if (boot_cpu_has(X86_FEATURE_HYPERVISOR)) {
+	if (cpu_has_hypervisor) {
 		unsigned int eax;
 		unsigned int hyper_vendor_id[3];
 
 		cpuid(CPUID_VMWARE_INFO_LEAF, &eax, &hyper_vendor_id[0],
 		      &hyper_vendor_id[1], &hyper_vendor_id[2]);
 		if (!memcmp(hyper_vendor_id, "VMwareVMware", 12))
-			return CPUID_VMWARE_INFO_LEAF;
+			return true;
 	} else if (dmi_available && dmi_name_in_serial("VMware") &&
 		   __vmware_platform())
-		return 1;
+		return true;
 
-	return 0;
+	return false;
 }
 
 /*
@@ -135,19 +119,10 @@ static uint32_t __init vmware_platform(void)
  * so that the kernel could just trust the hypervisor with providing a
  * reliable virtual TSC that is suitable for timekeeping.
  */
-static void vmware_set_cpu_features(struct cpuinfo_x86 *c)
+static void __cpuinit vmware_set_cpu_features(struct cpuinfo_x86 *c)
 {
 	set_cpu_cap(c, X86_FEATURE_CONSTANT_TSC);
 	set_cpu_cap(c, X86_FEATURE_TSC_RELIABLE);
-}
-
-/* Checks if hypervisor supports x2apic without VT-D interrupt remapping. */
-static bool __init vmware_legacy_x2apic_available(void)
-{
-	uint32_t eax, ebx, ecx, edx;
-	VMWARE_PORT(GETVCPU_INFO, eax, ebx, ecx, edx);
-	return (eax & (1 << VMWARE_PORT_CMD_VCPU_RESERVED)) == 0 &&
-	       (eax & (1 << VMWARE_PORT_CMD_LEGACY_X2APIC)) != 0;
 }
 
 const __refconst struct hypervisor_x86 x86_hyper_vmware = {
@@ -155,6 +130,5 @@ const __refconst struct hypervisor_x86 x86_hyper_vmware = {
 	.detect			= vmware_platform,
 	.set_cpu_features	= vmware_set_cpu_features,
 	.init_platform		= vmware_platform_setup,
-	.x2apic_available	= vmware_legacy_x2apic_available,
 };
 EXPORT_SYMBOL(x86_hyper_vmware);

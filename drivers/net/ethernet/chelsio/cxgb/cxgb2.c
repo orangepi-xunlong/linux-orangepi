@@ -11,7 +11,8 @@
  * published by the Free Software Foundation.                                *
  *                                                                           *
  * You should have received a copy of the GNU General Public License along   *
- * with this program; if not, see <http://www.gnu.org/licenses/>.            *
+ * with this program; if not, write to the Free Software Foundation, Inc.,   *
+ * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.                 *
  *                                                                           *
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR IMPLIED    *
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF      *
@@ -37,6 +38,7 @@
 
 #include "common.h"
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -129,7 +131,7 @@ static void t1_set_rxmode(struct net_device *dev)
 static void link_report(struct port_info *p)
 {
 	if (!netif_carrier_ok(p->dev))
-		netdev_info(p->dev, "link down\n");
+		printk(KERN_INFO "%s: link down\n", p->dev->name);
 	else {
 		const char *s = "10Mbps";
 
@@ -139,9 +141,9 @@ static void link_report(struct port_info *p)
 			case SPEED_100:   s = "100Mbps"; break;
 		}
 
-		netdev_info(p->dev, "link up, %s, %s-duplex\n",
-			    s, p->link_config.duplex == DUPLEX_FULL
-			    ? "full" : "half");
+		printk(KERN_INFO "%s: link up, %s, %s-duplex\n",
+		       p->dev->name, s,
+		       p->link_config.duplex == DUPLEX_FULL ? "full" : "half");
 	}
 }
 
@@ -281,7 +283,7 @@ static int cxgb_close(struct net_device *dev)
 	if (adapter->params.stats_update_period &&
 	    !(adapter->open_device_map & PORT_MASK)) {
 		/* Stop statistics accumulation. */
-		smp_mb__after_atomic();
+		smp_mb__after_clear_bit();
 		spin_lock(&adapter->work_lock);   /* sync with update task */
 		spin_unlock(&adapter->work_lock);
 		cancel_mac_stats_update(adapter);
@@ -354,7 +356,7 @@ static void set_msglevel(struct net_device *dev, u32 val)
 	adapter->msg_enable = val;
 }
 
-static const char stats_strings[][ETH_GSTRING_LEN] = {
+static char stats_strings[][ETH_GSTRING_LEN] = {
 	"TxOctetsOK",
 	"TxOctetsBad",
 	"TxUnicastFramesOK",
@@ -580,8 +582,8 @@ static int get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 		ethtool_cmd_speed_set(cmd, p->link_config.speed);
 		cmd->duplex = p->link_config.duplex;
 	} else {
-		ethtool_cmd_speed_set(cmd, SPEED_UNKNOWN);
-		cmd->duplex = DUPLEX_UNKNOWN;
+		ethtool_cmd_speed_set(cmd, -1);
+		cmd->duplex = -1;
 	}
 
 	cmd->port = (cmd->supported & SUPPORTED_TP) ? PORT_TP : PORT_FIBRE;
@@ -854,10 +856,10 @@ static netdev_features_t t1_fix_features(struct net_device *dev,
 	 * Since there is no support for separate rx/tx vlan accel
 	 * enable/disable make sure tx flag is always in same state as rx.
 	 */
-	if (features & NETIF_F_HW_VLAN_CTAG_RX)
-		features |= NETIF_F_HW_VLAN_CTAG_TX;
+	if (features & NETIF_F_HW_VLAN_RX)
+		features |= NETIF_F_HW_VLAN_TX;
 	else
-		features &= ~NETIF_F_HW_VLAN_CTAG_TX;
+		features &= ~NETIF_F_HW_VLAN_TX;
 
 	return features;
 }
@@ -867,7 +869,7 @@ static int t1_set_features(struct net_device *dev, netdev_features_t features)
 	netdev_features_t changed = dev->features ^ features;
 	struct adapter *adapter = dev->ml_priv;
 
-	if (changed & NETIF_F_HW_VLAN_CTAG_RX)
+	if (changed & NETIF_F_HW_VLAN_RX)
 		t1_vlan_mode(adapter, features);
 
 	return 0;
@@ -972,15 +974,22 @@ static const struct net_device_ops cxgb_netdev_ops = {
 #endif
 };
 
-static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit init_one(struct pci_dev *pdev,
+			      const struct pci_device_id *ent)
 {
+	static int version_printed;
+
 	int i, err, pci_using_dac = 0;
 	unsigned long mmio_start, mmio_len;
 	const struct board_info *bi;
 	struct adapter *adapter = NULL;
 	struct port_info *pi;
 
-	pr_info_once("%s - version %s\n", DRV_DESCRIPTION, DRV_VERSION);
+	if (!version_printed) {
+		printk(KERN_INFO "%s - version %s\n", DRV_DESCRIPTION,
+		       DRV_VERSION);
+		++version_printed;
+	}
 
 	err = pci_enable_device(pdev);
 	if (err)
@@ -1083,9 +1092,8 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 			netdev->features |= NETIF_F_HIGHDMA;
 		if (vlan_tso_capable(adapter)) {
 			netdev->features |=
-				NETIF_F_HW_VLAN_CTAG_TX |
-				NETIF_F_HW_VLAN_CTAG_RX;
-			netdev->hw_features |= NETIF_F_HW_VLAN_CTAG_RX;
+				NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX;
+			netdev->hw_features |= NETIF_F_HW_VLAN_RX;
 
 			/* T204: disable TSO */
 			if (!(is_T2(adapter)) || bi->port_number != 4) {
@@ -1100,7 +1108,7 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 		netif_napi_add(netdev, &adapter->napi, t1_poll, 64);
 
-		netdev->ethtool_ops = &t1_ethtool_ops;
+		SET_ETHTOOL_OPS(netdev, &t1_ethtool_ops);
 	}
 
 	if (t1_init_sw_modules(adapter, bi) < 0) {
@@ -1117,8 +1125,8 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	for (i = 0; i < bi->port_number; ++i) {
 		err = register_netdev(adapter->port[i].dev);
 		if (err)
-			pr_warn("%s: cannot register net device %s, skipping\n",
-				pci_name(pdev), adapter->port[i].dev->name);
+			pr_warning("%s: cannot register net device %s, skipping\n",
+				   pci_name(pdev), adapter->port[i].dev->name);
 		else {
 			/*
 			 * Change the name we use for messages to the name of
@@ -1136,10 +1144,10 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto out_release_adapter_res;
 	}
 
-	pr_info("%s: %s (rev %d), %s %dMHz/%d-bit\n",
-		adapter->name, bi->desc, adapter->params.chip_revision,
-		adapter->params.pci.is_pcix ? "PCIX" : "PCI",
-		adapter->params.pci.speed, adapter->params.pci.width);
+	printk(KERN_INFO "%s: %s (rev %d), %s %dMHz/%d-bit\n", adapter->name,
+	       bi->desc, adapter->params.chip_revision,
+	       adapter->params.pci.is_pcix ? "PCIX" : "PCI",
+	       adapter->params.pci.speed, adapter->params.pci.width);
 
 	/*
 	 * Set the T1B ASIC and memory clocks.
@@ -1166,6 +1174,7 @@ out_free_dev:
 	pci_release_regions(pdev);
 out_disable_pdev:
 	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
 	return err;
 }
 
@@ -1323,7 +1332,7 @@ static inline void t1_sw_reset(struct pci_dev *pdev)
 	pci_write_config_dword(pdev, A_PCICFG_PM_CSR, 0);
 }
 
-static void remove_one(struct pci_dev *pdev)
+static void __devexit remove_one(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct adapter *adapter = dev->ml_priv;
@@ -1344,14 +1353,26 @@ static void remove_one(struct pci_dev *pdev)
 
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
 	t1_sw_reset(pdev);
 }
 
-static struct pci_driver cxgb_pci_driver = {
+static struct pci_driver driver = {
 	.name     = DRV_NAME,
 	.id_table = t1_pci_tbl,
 	.probe    = init_one,
-	.remove   = remove_one,
+	.remove   = __devexit_p(remove_one),
 };
 
-module_pci_driver(cxgb_pci_driver);
+static int __init t1_init_module(void)
+{
+	return pci_register_driver(&driver);
+}
+
+static void __exit t1_cleanup_module(void)
+{
+	pci_unregister_driver(&driver);
+}
+
+module_init(t1_init_module);
+module_exit(t1_cleanup_module);

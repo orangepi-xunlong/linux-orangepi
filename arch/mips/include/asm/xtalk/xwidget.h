@@ -45,12 +45,12 @@
 #define WIDGET_PENDING			0x0000001f
 
 /* WIDGET_ERR_UPPER_ADDR */
-#define WIDGET_ERR_UPPER_ADDR_ONLY	0x0000ffff
+#define	WIDGET_ERR_UPPER_ADDR_ONLY	0x0000ffff
 
 /* WIDGET_CONTROL */
 #define WIDGET_F_BAD_PKT		0x00010000
 #define WIDGET_LLP_XBAR_CRD		0x0000f000
-#define WIDGET_LLP_XBAR_CRD_SHFT	12
+#define	WIDGET_LLP_XBAR_CRD_SHFT	12
 #define WIDGET_CLR_RLLP_CNT		0x00000800
 #define WIDGET_CLR_TLLP_CNT		0x00000400
 #define WIDGET_SYS_END			0x00000200
@@ -84,122 +84,10 @@
 #define WIDGET_LLP_MAXBURST		0x000003ff
 #define WIDGET_LLP_MAXBURST_SHFT	0
 
-/* Xtalk Widget Device Mfgr Nums */
-#define WIDGET_XBOW_MFGR_NUM	0x0      /* IP30 XBow Chip */
-#define WIDGET_XXBOW_MFGR_NUM	0x0      /* IP35 Xbow + XBridge Chip */
-#define WIDGET_ODYS_MFGR_NUM	0x023    /* Odyssey / VPro GFX */
-#define WIDGET_TPU_MFGR_NUM	0x024    /* Tensor Processor Unit */
-#define WIDGET_XBRDG_MFGR_NUM	0x024    /* IP35 XBridge Chip */
-#define WIDGET_HEART_MFGR_NUM	0x036    /* IP30 HEART Chip */
-#define WIDGET_BRIDG_MFGR_NUM	0x036    /* PCI Bridge */
-#define WIDGET_HUB_MFGR_NUM	0x036    /* IP27 Hub Chip */
-#define WIDGET_BDRCK_MFGR_NUM	0x036    /* IP35 Bedrock Chip */
-#define WIDGET_IMPCT_MFGR_NUM	0x2aa    /* HQ4 / Impact GFX */
-#define WIDGET_KONA_MFGR_NUM	0x2aa    /* InfiniteReality3 / Kona GFX */
-#define WIDGET_NULL_MFGR_NUM	-1       /* NULL */
-
-/* Xtalk Widget Device Part Nums */
-#define WIDGET_XBOW_PART_NUM	0x0000
-#define WIDGET_HEART_PART_NUM	0xc001
-#define WIDGET_BRIDG_PART_NUM	0xc002
-#define WIDGET_IMPCT_PART_NUM	0xc003
-#define WIDGET_ODYS_PART_NUM	0xc013
-#define WIDGET_HUB_PART_NUM	0xc101
-#define WIDGET_KONA_PART_NUM	0xc102
-#define WIDGET_BDRCK_PART_NUM	0xc110
-#define WIDGET_TPU_PART_NUM	0xc202
-#define WIDGET_XXBOW_PART_NUM	0xd000
-#define WIDGET_XBRDG_PART_NUM	0xd002
-#define WIDGET_NULL_PART_NUM	-1
-
-/* For Xtalk Widget identification */
-struct widget_ident {
-	u32 mfgr;
-	u32 part;
-	char *name;
-	char *revs[16];
-};
-
-/* Known Xtalk Widgets */
-static const struct widget_ident __initconst widget_idents[] = {
-	{
-		WIDGET_XBOW_MFGR_NUM,
-		WIDGET_XBOW_PART_NUM,
-		"xbow",
-		{NULL, "1.0", "1.1", "1.2", "1.3", "2.0", NULL},
-	},
-	{
-		WIDGET_HEART_MFGR_NUM,
-		WIDGET_HEART_PART_NUM,
-		"heart",
-		{NULL, "A", "B", "C", "D", "E", "F", NULL},
-	},
-	{
-		WIDGET_BRIDG_MFGR_NUM,
-		WIDGET_BRIDG_PART_NUM,
-		"bridge",
-		{NULL, "A", "B", "C", "D", NULL},
-	},
-	{
-		WIDGET_IMPCT_MFGR_NUM,
-		WIDGET_IMPCT_PART_NUM,
-		"impact",
-		{NULL, "A", "B", NULL},
-	},
-	{
-		WIDGET_ODYS_MFGR_NUM,
-		WIDGET_ODYS_PART_NUM,
-		"odyssey",
-		{NULL, "A", "B", NULL},
-	},
-	{
-		WIDGET_HUB_MFGR_NUM,
-		WIDGET_HUB_PART_NUM,
-		"hub",
-		{NULL, "1.0", "2.0", "2.1", "2.2", "2.3", "2.4", NULL},
-	},
-	{
-		WIDGET_KONA_MFGR_NUM,
-		WIDGET_KONA_PART_NUM,
-		"kona",
-		{NULL},
-	},
-	{
-		WIDGET_BDRCK_MFGR_NUM,
-		WIDGET_BDRCK_PART_NUM,
-		"bedrock",
-		{NULL, "1.0", "1.1", NULL},
-	},
-	{
-		WIDGET_TPU_MFGR_NUM,
-		WIDGET_TPU_PART_NUM,
-		"tpu",
-		{"0", NULL},
-	},
-	{
-		WIDGET_XXBOW_MFGR_NUM,
-		WIDGET_XXBOW_PART_NUM,
-		"xxbow",
-		{NULL, "1.0", "2.0", NULL},
-	},
-	{
-		WIDGET_XBRDG_MFGR_NUM,
-		WIDGET_XBRDG_PART_NUM,
-		"xbridge",
-		{NULL, "A", "B", NULL},
-	},
-	{
-		WIDGET_NULL_MFGR_NUM,
-		WIDGET_NULL_PART_NUM,
-		NULL,
-		{NULL},
-	}
-};
-
 /*
  * according to the crosstalk spec, only 32-bits access to the widget
- * configuration registers is allowed.	some widgets may allow 64-bits
- * access but software should not depend on it.	 registers beyond the
+ * configuration registers is allowed.  some widgets may allow 64-bits
+ * access but software should not depend on it.  registers beyond the
  * widget target flush register are widget dependent thus will not be
  * defined here
  */

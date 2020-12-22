@@ -17,7 +17,6 @@
 
 #include <asm/bootinfo.h>
 #include <asm/reboot.h>
-#include <asm/setup.h>
 #include <asm/gt64120.h>
 
 #include <cobalt.h>
@@ -42,8 +41,8 @@ const char *get_system_type(void)
 
 /*
  * Cobalt doesn't have PS/2 keyboard/mouse interfaces,
- * keyboard controller is never used.
- * Also PCI-ISA bridge DMA controller is never used.
+ * keyboard conntroller is never used.
+ * Also PCI-ISA bridge DMA contoroller is never used.
  */
 static struct resource cobalt_reserved_resources[] = {
 	{	/* dma1 */
@@ -113,8 +112,6 @@ void __init prom_init(void)
 	}
 
 	add_memory_region(0x0, memsz, BOOT_MEM_RAM);
-
-	setup_8250_early_printk_port(CKSEG1ADDR(0x1c800000), 0, 0);
 }
 
 void __init prom_free_prom_memory(void)

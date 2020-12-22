@@ -66,10 +66,9 @@ int atom_debug = 0;
 static int atom_execute_table_locked(struct atom_context *ctx, int index, uint32_t * params);
 int atom_execute_table(struct atom_context *ctx, int index, uint32_t * params);
 
-static uint32_t atom_arg_mask[8] = {
-	0xFFFFFFFF, 0x0000FFFF, 0x00FFFF00, 0xFFFF0000,
-	0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000
-};
+static uint32_t atom_arg_mask[8] =
+    { 0xFFFFFFFF, 0xFFFF, 0xFFFF00, 0xFFFF0000, 0xFF, 0xFF00, 0xFF0000,
+0xFF000000 };
 static int atom_arg_shift[8] = { 0, 0, 8, 16, 0, 8, 16, 24 };
 
 static int atom_dst_to_src[8][4] = {
@@ -1218,7 +1217,7 @@ free:
 	return ret;
 }
 
-int atom_execute_table_scratch_unlocked(struct atom_context *ctx, int index, uint32_t * params)
+int atom_execute_table(struct atom_context *ctx, int index, uint32_t * params)
 {
 	int r;
 
@@ -1239,22 +1238,11 @@ int atom_execute_table_scratch_unlocked(struct atom_context *ctx, int index, uin
 	return r;
 }
 
-int atom_execute_table(struct atom_context *ctx, int index, uint32_t * params)
-{
-	int r;
-	mutex_lock(&ctx->scratch_mutex);
-	r = atom_execute_table_scratch_unlocked(ctx, index, params);
-	mutex_unlock(&ctx->scratch_mutex);
-	return r;
-}
-
 static int atom_iio_len[] = { 1, 2, 3, 3, 3, 3, 4, 4, 4, 3 };
 
 static void atom_index_iio(struct atom_context *ctx, int base)
 {
 	ctx->iio = kzalloc(2 * 256, GFP_KERNEL);
-	if (!ctx->iio)
-		return;
 	while (CU8(base) == ATOM_IIO_START) {
 		ctx->iio[CU8(base + 1)] = base + 2;
 		base += 2;
@@ -1304,10 +1292,6 @@ struct atom_context *atom_parse(struct card_info *card, void *bios)
 	ctx->cmd_table = CU16(base + ATOM_ROM_CMD_PTR);
 	ctx->data_table = CU16(base + ATOM_ROM_DATA_PTR);
 	atom_index_iio(ctx, CU16(ctx->data_table + ATOM_DATA_IIO_PTR) + 4);
-	if (!ctx->iio) {
-		atom_destroy(ctx);
-		return NULL;
-	}
 
 	str = CSTR(CU16(base + ATOM_ROM_MSG_PTR));
 	while (*str && ((*str == '\n') || (*str == '\r')))
@@ -1356,7 +1340,8 @@ int atom_asic_init(struct atom_context *ctx)
 
 void atom_destroy(struct atom_context *ctx)
 {
-	kfree(ctx->iio);
+	if (ctx->iio)
+		kfree(ctx->iio);
 	kfree(ctx);
 }
 

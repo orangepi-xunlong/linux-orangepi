@@ -253,7 +253,7 @@ Teles_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 
 #ifdef __ISAPNP__
 
-static struct isapnp_device_id teles_ids[] = {
+static struct isapnp_device_id teles_ids[] __devinitdata = {
 	{ ISAPNP_VENDOR('T', 'A', 'G'), ISAPNP_FUNCTION(0x2110),
 	  ISAPNP_VENDOR('T', 'A', 'G'), ISAPNP_FUNCTION(0x2110),
 	  (unsigned long) "Teles 16.3 PnP" },
@@ -266,11 +266,12 @@ static struct isapnp_device_id teles_ids[] = {
 	{ 0, }
 };
 
-static struct isapnp_device_id *ipid = &teles_ids[0];
-static struct pnp_card *pnp_c = NULL;
+static struct isapnp_device_id *ipid __devinitdata = &teles_ids[0];
+static struct pnp_card *pnp_c __devinitdata = NULL;
 #endif
 
-int setup_teles3(struct IsdnCard *card)
+int __devinit
+setup_teles3(struct IsdnCard *card)
 {
 	u_char val;
 	struct IsdnCardState *cs = card->cs;

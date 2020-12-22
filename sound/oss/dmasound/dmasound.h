@@ -239,6 +239,7 @@ struct sound_queue {
     int busy, syncing, xruns, died;
 };
 
+#define SLEEP(queue)		interruptible_sleep_on_timeout(&queue, HZ)
 #define WAKE_UP(queue)		(wake_up_interruptible(&queue))
 
 extern struct sound_queue dmasound_write_sq;

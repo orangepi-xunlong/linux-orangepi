@@ -1,12 +1,9 @@
 #include "cache.h"
-#include "util.h"
-#include "config.h"
 
 static const char *alias_key;
 static char *alias_val;
 
-static int alias_lookup_cb(const char *k, const char *v,
-			   void *cb __maybe_unused)
+static int alias_lookup_cb(const char *k, const char *v, void *cb __used)
 {
 	if (!prefixcmp(k, "alias.") && !strcmp(k+6, alias_key)) {
 		if (!v)
@@ -57,7 +54,8 @@ int split_cmdline(char *cmdline, const char ***argv)
 				src++;
 				c = cmdline[src];
 				if (!c) {
-					zfree(argv);
+					free(*argv);
+					*argv = NULL;
 					return error("cmdline ends with \\");
 				}
 			}
@@ -69,7 +67,8 @@ int split_cmdline(char *cmdline, const char ***argv)
 	cmdline[dst] = 0;
 
 	if (quoted) {
-		zfree(argv);
+		free(*argv);
+		*argv = NULL;
 		return error("unclosed quote");
 	}
 

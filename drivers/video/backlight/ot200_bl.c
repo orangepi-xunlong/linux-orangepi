@@ -14,7 +14,6 @@
 #include <linux/fb.h>
 #include <linux/backlight.h>
 #include <linux/gpio.h>
-#include <linux/platform_device.h>
 #include <linux/cs5535.h>
 
 static struct cs5535_mfgpt_timer *pwm_timer;
@@ -85,8 +84,7 @@ static int ot200_backlight_probe(struct platform_device *pdev)
 	int retval = 0;
 
 	/* request gpio */
-	if (devm_gpio_request(&pdev->dev, GPIO_DIMM,
-				"ot200 backlight dimmer") < 0) {
+	if (gpio_request(GPIO_DIMM, "ot200 backlight dimmer") < 0) {
 		dev_err(&pdev->dev, "failed to request GPIO %d\n", GPIO_DIMM);
 		return -ENODEV;
 	}
@@ -95,13 +93,14 @@ static int ot200_backlight_probe(struct platform_device *pdev)
 	pwm_timer = cs5535_mfgpt_alloc_timer(7, MFGPT_DOMAIN_ANY);
 	if (!pwm_timer) {
 		dev_err(&pdev->dev, "MFGPT 7 not available\n");
-		return -ENODEV;
+		retval = -ENODEV;
+		goto error_mfgpt_alloc;
 	}
 
-	data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data) {
 		retval = -ENOMEM;
-		goto error_devm_kzalloc;
+		goto error_kzalloc;
 	}
 
 	/* setup gpio */
@@ -118,26 +117,34 @@ static int ot200_backlight_probe(struct platform_device *pdev)
 	props.brightness = 100;
 	props.type = BACKLIGHT_RAW;
 
-	bl = devm_backlight_device_register(&pdev->dev, dev_name(&pdev->dev),
-					&pdev->dev, data, &ot200_backlight_ops,
-					&props);
+	bl = backlight_device_register(dev_name(&pdev->dev), &pdev->dev, data,
+					&ot200_backlight_ops, &props);
 	if (IS_ERR(bl)) {
 		dev_err(&pdev->dev, "failed to register backlight\n");
 		retval = PTR_ERR(bl);
-		goto error_devm_kzalloc;
+		goto error_backlight_device_register;
 	}
 
 	platform_set_drvdata(pdev, bl);
 
 	return 0;
 
-error_devm_kzalloc:
+error_backlight_device_register:
+	kfree(data);
+error_kzalloc:
 	cs5535_mfgpt_free_timer(pwm_timer);
+error_mfgpt_alloc:
+	gpio_free(GPIO_DIMM);
 	return retval;
 }
 
 static int ot200_backlight_remove(struct platform_device *pdev)
 {
+	struct backlight_device *bl = platform_get_drvdata(pdev);
+	struct ot200_backlight_data *data = bl_get_data(bl);
+
+	backlight_device_unregister(bl);
+
 	/* on module unload set brightness to 100% */
 	cs5535_mfgpt_write(pwm_timer, MFGPT_REG_COUNTER, 0);
 	cs5535_mfgpt_write(pwm_timer, MFGPT_REG_SETUP, MFGPT_SETUP_CNTEN);
@@ -145,13 +152,16 @@ static int ot200_backlight_remove(struct platform_device *pdev)
 		MAX_COMP2 - dim_table[100]);
 
 	cs5535_mfgpt_free_timer(pwm_timer);
+	gpio_free(GPIO_DIMM);
 
+	kfree(data);
 	return 0;
 }
 
 static struct platform_driver ot200_backlight_driver = {
 	.driver		= {
 		.name	= "ot200-backlight",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= ot200_backlight_probe,
 	.remove		= ot200_backlight_remove,

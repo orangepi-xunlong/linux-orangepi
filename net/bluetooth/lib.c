@@ -26,7 +26,12 @@
 
 #define pr_fmt(fmt) "Bluetooth: " fmt
 
-#include <linux/export.h>
+#include <linux/module.h>
+
+#include <linux/kernel.h>
+#include <linux/stddef.h>
+#include <linux/string.h>
+#include <asm/errno.h>
 
 #include <net/bluetooth/bluetooth.h>
 
@@ -40,6 +45,20 @@ void baswap(bdaddr_t *dst, bdaddr_t *src)
 		d[i] = s[5 - i];
 }
 EXPORT_SYMBOL(baswap);
+
+char *batostr(bdaddr_t *ba)
+{
+	static char str[2][18];
+	static int i = 1;
+
+	i ^= 1;
+	sprintf(str[i], "%2.2X:%2.2X:%2.2X:%2.2X:%2.2X:%2.2X",
+		ba->b[5], ba->b[4], ba->b[3],
+		ba->b[2], ba->b[1], ba->b[0]);
+
+	return str[i];
+}
+EXPORT_SYMBOL(batostr);
 
 /* Bluetooth error codes to Unix errno mapping */
 int bt_to_errno(__u16 code)
@@ -58,7 +77,6 @@ int bt_to_errno(__u16 code)
 		return EIO;
 
 	case 0x04:
-	case 0x3c:
 		return EHOSTDOWN;
 
 	case 0x05:
@@ -135,66 +153,40 @@ int bt_to_errno(__u16 code)
 }
 EXPORT_SYMBOL(bt_to_errno);
 
-void bt_info(const char *format, ...)
+int bt_info(const char *format, ...)
 {
 	struct va_format vaf;
 	va_list args;
+	int r;
 
 	va_start(args, format);
 
 	vaf.fmt = format;
 	vaf.va = &args;
 
-	pr_info("%pV", &vaf);
+	r = pr_info("%pV", &vaf);
 
 	va_end(args);
+
+	return r;
 }
 EXPORT_SYMBOL(bt_info);
 
-void bt_warn(const char *format, ...)
+int bt_err(const char *format, ...)
 {
 	struct va_format vaf;
 	va_list args;
+	int r;
 
 	va_start(args, format);
 
 	vaf.fmt = format;
 	vaf.va = &args;
 
-	pr_warn("%pV", &vaf);
+	r = pr_err("%pV", &vaf);
 
 	va_end(args);
-}
-EXPORT_SYMBOL(bt_warn);
 
-void bt_err(const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_err("%pV", &vaf);
-
-	va_end(args);
+	return r;
 }
 EXPORT_SYMBOL(bt_err);
-
-void bt_err_ratelimited(const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_err_ratelimited("%pV", &vaf);
-
-	va_end(args);
-}
-EXPORT_SYMBOL(bt_err_ratelimited);

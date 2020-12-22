@@ -1,3 +1,0 @@
-obj-$(CONFIG_VIDEO_GOOGLE_VP9_DECODER_SUNXI) += google_vp9.o
-
-

@@ -24,12 +24,15 @@
 #include <linux/kernel.h>
 #include <linux/gfp.h>
 #include <linux/mm.h>
+#include <linux/init.h>
 #include <linux/percpu.h>
 #include <linux/hardirq.h>
 #include <linux/hugetlb.h>
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/tlb.h>
+
+#include "mmu_decl.h"
 
 static inline int is_exec_fault(void)
 {
@@ -38,28 +41,17 @@ static inline int is_exec_fault(void)
 
 /* We only try to do i/d cache coherency on stuff that looks like
  * reasonably "normal" PTEs. We currently require a PTE to be present
- * and we avoid _PAGE_SPECIAL and cache inhibited pte. We also only do that
+ * and we avoid _PAGE_SPECIAL and _PAGE_NO_CACHE. We also only do that
  * on userspace PTEs
  */
 static inline int pte_looks_normal(pte_t pte)
 {
-
-#if defined(CONFIG_PPC_BOOK3S_64)
-	if ((pte_val(pte) & (_PAGE_PRESENT | _PAGE_SPECIAL)) == _PAGE_PRESENT) {
-		if (pte_ci(pte))
-			return 0;
-		if (pte_user(pte))
-			return 1;
-	}
-	return 0;
-#else
 	return (pte_val(pte) &
-		(_PAGE_PRESENT | _PAGE_SPECIAL | _PAGE_NO_CACHE | _PAGE_USER)) ==
-		(_PAGE_PRESENT | _PAGE_USER);
-#endif
+	    (_PAGE_PRESENT | _PAGE_SPECIAL | _PAGE_NO_CACHE | _PAGE_USER)) ==
+	    (_PAGE_PRESENT | _PAGE_USER);
 }
 
-static struct page *maybe_pte_to_page(pte_t pte)
+struct page * maybe_pte_to_page(pte_t pte)
 {
 	unsigned long pfn = pte_pfn(pte);
 	struct page *page;
@@ -80,11 +72,8 @@ static struct page *maybe_pte_to_page(pte_t pte)
  * support falls into the same category.
  */
 
-static pte_t set_pte_filter(pte_t pte)
+static pte_t set_pte_filter(pte_t pte, unsigned long addr)
 {
-	if (radix_enabled())
-		return pte;
-
 	pte = __pte(pte_val(pte) & ~_PAGE_HPTEFLAGS);
 	if (pte_looks_normal(pte) && !(cpu_has_feature(CPU_FTR_COHERENT_ICACHE) ||
 				       cpu_has_feature(CPU_FTR_NOEXECUTE))) {
@@ -92,6 +81,17 @@ static pte_t set_pte_filter(pte_t pte)
 		if (!pg)
 			return pte;
 		if (!test_bit(PG_arch_1, &pg->flags)) {
+#ifdef CONFIG_8xx
+			/* On 8xx, cache control instructions (particularly
+			 * "dcbst" from flush_dcache_icache) fault as write
+			 * operation if there is an unpopulated TLB entry
+			 * for the address in question. To workaround that,
+			 * we invalidate the TLB here, thus avoiding dcbst
+			 * misbehaviour.
+			 */
+			/* 8xx doesn't care about PID, size or ind args */
+			_tlbil_va(addr, 0, 0, 0);
+#endif /* CONFIG_8xx */
 			flush_dcache_icache_page(pg);
 			set_bit(PG_arch_1, &pg->flags);
 		}
@@ -111,7 +111,7 @@ static pte_t set_access_flags_filter(pte_t pte, struct vm_area_struct *vma,
  * as we don't have two bits to spare for _PAGE_EXEC and _PAGE_HWEXEC so
  * instead we "filter out" the exec permission for non clean pages.
  */
-static pte_t set_pte_filter(pte_t pte)
+static pte_t set_pte_filter(pte_t pte, unsigned long addr)
 {
 	struct page *pg;
 
@@ -186,23 +186,14 @@ static pte_t set_access_flags_filter(pte_t pte, struct vm_area_struct *vma,
 void set_pte_at(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
 		pte_t pte)
 {
-	/*
-	 * When handling numa faults, we already have the pte marked
-	 * _PAGE_PRESENT, but we can be sure that it is not in hpte.
-	 * Hence we can use set_pte_at for them.
-	 */
-	VM_WARN_ON(pte_present(*ptep) && !pte_protnone(*ptep));
-
-	/*
-	 * Add the pte bit when tryint set a pte
-	 */
-	pte = __pte(pte_val(pte) | _PAGE_PTE);
-
+#ifdef CONFIG_DEBUG_VM
+	WARN_ON(pte_present(*ptep));
+#endif
 	/* Note: mm->context.id might not yet have been assigned as
 	 * this context might not have been activated yet when this
 	 * is called.
 	 */
-	pte = set_pte_filter(pte);
+	pte = set_pte_filter(pte, addr);
 
 	/* Perform the setting of the PTE */
 	__set_pte_at(mm, addr, ptep, pte, 0);
@@ -224,8 +215,8 @@ int ptep_set_access_flags(struct vm_area_struct *vma, unsigned long address,
 	if (changed) {
 		if (!is_vm_hugetlb_page(vma))
 			assert_pte_locked(vma->vm_mm, address);
-		__ptep_set_access_flags(vma->vm_mm, ptep, entry);
-		flush_tlb_page(vma, address);
+		__ptep_set_access_flags(ptep, entry);
+		flush_tlb_page_nohash(vma, address);
 	}
 	return changed;
 }
@@ -244,24 +235,8 @@ void assert_pte_locked(struct mm_struct *mm, unsigned long addr)
 	pud = pud_offset(pgd, addr);
 	BUG_ON(pud_none(*pud));
 	pmd = pmd_offset(pud, addr);
-	/*
-	 * khugepaged to collapse normal pages to hugepage, first set
-	 * pmd to none to force page fault/gup to take mmap_sem. After
-	 * pmd is set to none, we do a pte_clear which does this assertion
-	 * so if we find pmd none, return.
-	 */
-	if (pmd_none(*pmd))
-		return;
 	BUG_ON(!pmd_present(*pmd));
 	assert_spin_locked(pte_lockptr(mm, pmd));
 }
 #endif /* CONFIG_DEBUG_VM */
 
-unsigned long vmalloc_to_phys(void *va)
-{
-	unsigned long pfn = vmalloc_to_pfn(va);
-
-	BUG_ON(!pfn);
-	return __pa(pfn_to_kaddr(pfn)) + offset_in_page(va);
-}
-EXPORT_SYMBOL_GPL(vmalloc_to_phys);

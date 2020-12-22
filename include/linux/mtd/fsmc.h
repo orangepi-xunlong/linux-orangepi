@@ -103,6 +103,24 @@
 
 #define FSMC_BUSY_WAIT_TIMEOUT	(1 * HZ)
 
+/*
+ * There are 13 bytes of ecc for every 512 byte block in FSMC version 8
+ * and it has to be read consecutively and immediately after the 512
+ * byte data block for hardware to generate the error bit offsets
+ * Managing the ecc bytes in the following way is easier. This way is
+ * similar to oobfree structure maintained already in u-boot nand driver
+ */
+#define MAX_ECCPLACE_ENTRIES	32
+
+struct fsmc_nand_eccplace {
+	uint8_t offset;
+	uint8_t length;
+};
+
+struct fsmc_eccplace {
+	struct fsmc_nand_eccplace eccplace[MAX_ECCPLACE_ENTRIES];
+};
+
 struct fsmc_nand_timings {
 	uint8_t tclr;
 	uint8_t tar;
@@ -119,7 +137,6 @@ enum access_mode {
 
 /**
  * fsmc_nand_platform_data - platform specific NAND controller config
- * @nand_timings: timing setup for the physical NAND interface
  * @partitions: partition table for the platform, use a default fallback
  * if this is NULL
  * @nr_partitions: the number of partitions in the previous entry
@@ -138,6 +155,9 @@ struct fsmc_nand_platform_data {
 	unsigned int		width;
 	unsigned int		bank;
 
+	/* CLE, ALE offsets */
+	unsigned int		cle_off;
+	unsigned int		ale_off;
 	enum access_mode	mode;
 
 	void			(*select_bank)(uint32_t bank, uint32_t busw);

@@ -36,6 +36,7 @@
 #define CE_BIT 12
 
 struct mtd_info_wrapper {
+	struct mtd_info info;
 	struct nand_chip chip;
 };
 
@@ -51,7 +52,7 @@ static void crisv32_hwcontrol(struct mtd_info *mtd, int cmd,
 {
 	unsigned long flags;
 	reg_pio_rw_dout dout;
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 
 	local_irq_save(flags);
 
@@ -147,7 +148,10 @@ struct mtd_info *__init crisv32_nand_flash_probe(void)
 
 	/* Get pointer to private data */
 	this = &wrapper->chip;
-	crisv32_mtd = nand_to_mtd(this);
+	crisv32_mtd = &wrapper->info;
+
+	/* Link the private data with the MTD structure */
+	crisv32_mtd->priv = this;
 
 	/* Set address of NAND IO lines */
 	this->IO_ADDR_R = read_cs;
@@ -157,7 +161,6 @@ struct mtd_info *__init crisv32_nand_flash_probe(void)
 	/* 20 us command delay time */
 	this->chip_delay = 20;
 	this->ecc.mode = NAND_ECC_SOFT;
-	this->ecc.algo = NAND_ECC_HAMMING;
 
 	/* Enable the following for a flash based bad block table */
 	/* this->bbt_options = NAND_BBT_USE_FLASH; */

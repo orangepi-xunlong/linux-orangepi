@@ -253,8 +253,10 @@ BKM_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 	return (0);
 }
 
-static int a4t_pci_probe(struct pci_dev *dev_a4t, struct IsdnCardState *cs,
-			 u_int *found, u_int *pci_memaddr)
+static int __devinit a4t_pci_probe(struct pci_dev *dev_a4t,
+				   struct IsdnCardState *cs,
+				   u_int *found,
+				   u_int *pci_memaddr)
 {
 	u16 sub_sys;
 	u16 sub_vendor;
@@ -273,8 +275,9 @@ static int a4t_pci_probe(struct pci_dev *dev_a4t, struct IsdnCardState *cs,
 	return (-1);			/* continue looping */
 }
 
-static int a4t_cs_init(struct IsdnCard *card, struct IsdnCardState *cs,
-		       u_int pci_memaddr)
+static int __devinit a4t_cs_init(struct IsdnCard *card,
+				 struct IsdnCardState *cs,
+				 u_int pci_memaddr)
 {
 	I20_REGISTER_FILE *pI20_Regs;
 
@@ -320,9 +323,10 @@ static int a4t_cs_init(struct IsdnCard *card, struct IsdnCardState *cs,
 	return (1);
 }
 
-static struct pci_dev *dev_a4t = NULL;
+static struct pci_dev *dev_a4t __devinitdata = NULL;
 
-int setup_bkm_a4t(struct IsdnCard *card)
+int __devinit
+setup_bkm_a4t(struct IsdnCard *card)
 {
 	struct IsdnCardState *cs = card->cs;
 	char tmp[64];

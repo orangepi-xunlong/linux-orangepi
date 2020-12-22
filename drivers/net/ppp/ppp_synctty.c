@@ -105,15 +105,64 @@ static const struct ppp_channel_ops sync_ops = {
 };
 
 /*
- * Utility procedure to print a buffer in hex/ascii
+ * Utility procedures to print a buffer in hex/ascii
  */
+static void
+ppp_print_hex (register __u8 * out, const __u8 * in, int count)
+{
+	register __u8 next_ch;
+	static const char hex[] = "0123456789ABCDEF";
+
+	while (count-- > 0) {
+		next_ch = *in++;
+		*out++ = hex[(next_ch >> 4) & 0x0F];
+		*out++ = hex[next_ch & 0x0F];
+		++out;
+	}
+}
+
+static void
+ppp_print_char (register __u8 * out, const __u8 * in, int count)
+{
+	register __u8 next_ch;
+
+	while (count-- > 0) {
+		next_ch = *in++;
+
+		if (next_ch < 0x20 || next_ch > 0x7e)
+			*out++ = '.';
+		else {
+			*out++ = next_ch;
+			if (next_ch == '%')   /* printk/syslogd has a bug !! */
+				*out++ = '%';
+		}
+	}
+	*out = '\0';
+}
+
 static void
 ppp_print_buffer (const char *name, const __u8 *buf, int count)
 {
+	__u8 line[44];
+
 	if (name != NULL)
 		printk(KERN_DEBUG "ppp_synctty: %s, count = %d\n", name, count);
 
-	print_hex_dump_bytes("", DUMP_PREFIX_NONE, buf, count);
+	while (count > 8) {
+		memset (line, 32, 44);
+		ppp_print_hex (line, buf, 8);
+		ppp_print_char (&line[8 * 3], buf, 8);
+		printk(KERN_DEBUG "%s\n", line);
+		count -= 8;
+		buf += 8;
+	}
+
+	if (count > 0) {
+		memset (line, 32, 44);
+		ppp_print_hex (line, buf, count);
+		ppp_print_char (&line[8 * 3], buf, count);
+		printk(KERN_DEBUG "%s\n", line);
+	}
 }
 
 
@@ -306,7 +355,7 @@ ppp_synctty_ioctl(struct tty_struct *tty, struct file *file,
 		/* flush our buffers and the serial port's buffer */
 		if (arg == TCIOFLUSH || arg == TCOFLUSH)
 			ppp_sync_flush_output(ap);
-		err = n_tty_ioctl_helper(tty, file, cmd, arg);
+		err = tty_perform_flush(tty, arg);
 		break;
 
 	case FIONREAD:
@@ -539,7 +588,7 @@ ppp_sync_txmunge(struct syncppp *ap, struct sk_buff *skb)
 			skb_reserve(npkt,2);
 			skb_copy_from_linear_data(skb,
 				      skb_put(npkt, skb->len), skb->len);
-			consume_skb(skb);
+			kfree_skb(skb);
 			skb = npkt;
 		}
 		skb_push(skb,2);
@@ -607,7 +656,7 @@ ppp_sync_push(struct syncppp *ap)
 			if (sent < ap->tpkt->len) {
 				tty_stuffed = 1;
 			} else {
-				consume_skb(ap->tpkt);
+				kfree_skb(ap->tpkt);
 				ap->tpkt = NULL;
 				clear_bit(XMIT_FULL, &ap->xmit_flags);
 				done = 1;
@@ -709,10 +758,11 @@ ppp_sync_input(struct syncppp *ap, const unsigned char *buf,
 		p = skb_pull(skb, 2);
 	}
 
-	/* PPP packet length should be >= 2 bytes when protocol field is not
-	 * compressed.
-	 */
-	if (!(p[0] & 0x01) && skb->len < 2)
+	/* decompress protocol field if compressed */
+	if (p[0] & 1) {
+		/* protocol is compressed */
+		skb_push(skb, 1)[0] = 0;
+	} else if (skb->len < 2)
 		goto err;
 
 	/* queue the frame to be processed */

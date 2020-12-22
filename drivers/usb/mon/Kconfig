@@ -4,6 +4,7 @@
 
 config USB_MON
 	tristate "USB Monitor"
+	depends on USB
 	help
 	  If you select this option, a component which captures the USB traffic
 	  between peripheral-specific drivers and HC drivers will be built.

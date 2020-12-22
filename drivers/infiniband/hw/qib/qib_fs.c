@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2012 Intel Corporation. All rights reserved.
- * Copyright (c) 2006 - 2012 QLogic Corporation. All rights reserved.
+ * Copyright (c) 2006, 2007, 2008, 2009 QLogic Corporation. All rights reserved.
  * Copyright (c) 2006 PathScale, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
@@ -45,7 +44,7 @@
 
 static struct super_block *qib_super;
 
-#define private2dd(file) (file_inode(file)->i_private)
+#define private2dd(file) ((file)->f_dentry->d_inode->i_private)
 
 static int qibfs_mknod(struct inode *dir, struct dentry *dentry,
 		       umode_t mode, const struct file_operations *fops,
@@ -61,10 +60,10 @@ static int qibfs_mknod(struct inode *dir, struct dentry *dentry,
 
 	inode->i_ino = get_next_ino();
 	inode->i_mode = mode;
-	inode->i_uid = GLOBAL_ROOT_UID;
-	inode->i_gid = GLOBAL_ROOT_GID;
+	inode->i_uid = 0;
+	inode->i_gid = 0;
 	inode->i_blocks = 0;
-	inode->i_atime = current_time(inode);
+	inode->i_atime = CURRENT_TIME;
 	inode->i_mtime = inode->i_atime;
 	inode->i_ctime = inode->i_atime;
 	inode->i_private = data;
@@ -89,14 +88,15 @@ static int create_file(const char *name, umode_t mode,
 {
 	int error;
 
-	inode_lock(d_inode(parent));
+	*dentry = NULL;
+	mutex_lock(&parent->d_inode->i_mutex);
 	*dentry = lookup_one_len(name, parent, strlen(name));
 	if (!IS_ERR(*dentry))
-		error = qibfs_mknod(d_inode(parent), *dentry,
+		error = qibfs_mknod(parent->d_inode, *dentry,
 				    mode, fops, data);
 	else
 		error = PTR_ERR(*dentry);
-	inode_unlock(d_inode(parent));
+	mutex_unlock(&parent->d_inode->i_mutex);
 
 	return error;
 }
@@ -104,9 +104,8 @@ static int create_file(const char *name, umode_t mode,
 static ssize_t driver_stats_read(struct file *file, char __user *buf,
 				 size_t count, loff_t *ppos)
 {
-	qib_stats.sps_ints = qib_sps_ints();
 	return simple_read_from_buffer(buf, count, ppos, &qib_stats,
-				       sizeof(qib_stats));
+				       sizeof qib_stats);
 }
 
 /*
@@ -133,7 +132,7 @@ static ssize_t driver_names_read(struct file *file, char __user *buf,
 				 size_t count, loff_t *ppos)
 {
 	return simple_read_from_buffer(buf, count, ppos, qib_statnames,
-		sizeof(qib_statnames) - 1); /* no null */
+		sizeof qib_statnames - 1); /* no null */
 }
 
 static const struct file_operations driver_ops[] = {
@@ -171,7 +170,7 @@ static const struct file_operations cntr_ops[] = {
 };
 
 /*
- * Could use file_inode(file)->i_ino to figure out which file,
+ * Could use file->f_dentry->d_inode->i_ino to figure out which file,
  * instead of separate routine for each, but for now, this works...
  */
 
@@ -328,12 +327,26 @@ static ssize_t flash_write(struct file *file, const char __user *buf,
 
 	pos = *ppos;
 
-	if (pos != 0 || count != sizeof(struct qib_flash))
-		return -EINVAL;
+	if (pos != 0) {
+		ret = -EINVAL;
+		goto bail;
+	}
 
-	tmp = memdup_user(buf, count);
-	if (IS_ERR(tmp))
-		return PTR_ERR(tmp);
+	if (count != sizeof(struct qib_flash)) {
+		ret = -EINVAL;
+		goto bail;
+	}
+
+	tmp = kmalloc(count, GFP_KERNEL);
+	if (!tmp) {
+		ret = -ENOMEM;
+		goto bail;
+	}
+
+	if (copy_from_user(tmp, buf, count)) {
+		ret = -EFAULT;
+		goto bail_tmp;
+	}
 
 	dd = private2dd(file);
 	if (qib_eeprom_write(dd, pos, tmp, count)) {
@@ -347,6 +360,8 @@ static ssize_t flash_write(struct file *file, const char __user *buf,
 
 bail_tmp:
 	kfree(tmp);
+
+bail:
 	return ret;
 }
 
@@ -363,11 +378,11 @@ static int add_cntr_files(struct super_block *sb, struct qib_devdata *dd)
 	int ret, i;
 
 	/* create the per-unit directory */
-	snprintf(unit, sizeof(unit), "%u", dd->unit);
+	snprintf(unit, sizeof unit, "%u", dd->unit);
 	ret = create_file(unit, S_IFDIR|S_IRUGO|S_IXUGO, sb->s_root, &dir,
 			  &simple_dir_operations, dd);
 	if (ret) {
-		pr_err("create_file(%s) failed: %d\n", unit, ret);
+		printk(KERN_ERR "create_file(%s) failed: %d\n", unit, ret);
 		goto bail;
 	}
 
@@ -375,21 +390,21 @@ static int add_cntr_files(struct super_block *sb, struct qib_devdata *dd)
 	ret = create_file("counters", S_IFREG|S_IRUGO, dir, &tmp,
 			  &cntr_ops[0], dd);
 	if (ret) {
-		pr_err("create_file(%s/counters) failed: %d\n",
+		printk(KERN_ERR "create_file(%s/counters) failed: %d\n",
 		       unit, ret);
 		goto bail;
 	}
 	ret = create_file("counter_names", S_IFREG|S_IRUGO, dir, &tmp,
 			  &cntr_ops[1], dd);
 	if (ret) {
-		pr_err("create_file(%s/counter_names) failed: %d\n",
+		printk(KERN_ERR "create_file(%s/counter_names) failed: %d\n",
 		       unit, ret);
 		goto bail;
 	}
 	ret = create_file("portcounter_names", S_IFREG|S_IRUGO, dir, &tmp,
 			  &portcntr_ops[0], dd);
 	if (ret) {
-		pr_err("create_file(%s/%s) failed: %d\n",
+		printk(KERN_ERR "create_file(%s/%s) failed: %d\n",
 		       unit, "portcounter_names", ret);
 		goto bail;
 	}
@@ -401,7 +416,7 @@ static int add_cntr_files(struct super_block *sb, struct qib_devdata *dd)
 		ret = create_file(fname, S_IFREG|S_IRUGO, dir, &tmp,
 				  &portcntr_ops[i], dd);
 		if (ret) {
-			pr_err("create_file(%s/%s) failed: %d\n",
+			printk(KERN_ERR "create_file(%s/%s) failed: %d\n",
 				unit, fname, ret);
 			goto bail;
 		}
@@ -411,7 +426,7 @@ static int add_cntr_files(struct super_block *sb, struct qib_devdata *dd)
 		ret = create_file(fname, S_IFREG|S_IRUGO, dir, &tmp,
 				  &qsfp_ops[i - 1], dd);
 		if (ret) {
-			pr_err("create_file(%s/%s) failed: %d\n",
+			printk(KERN_ERR "create_file(%s/%s) failed: %d\n",
 				unit, fname, ret);
 			goto bail;
 		}
@@ -420,7 +435,7 @@ static int add_cntr_files(struct super_block *sb, struct qib_devdata *dd)
 	ret = create_file("flash", S_IFREG|S_IWUSR|S_IRUGO, dir, &tmp,
 			  &flash_ops, dd);
 	if (ret)
-		pr_err("create_file(%s/flash) failed: %d\n",
+		printk(KERN_ERR "create_file(%s/flash) failed: %d\n",
 			unit, ret);
 bail:
 	return ret;
@@ -439,14 +454,14 @@ static int remove_file(struct dentry *parent, char *name)
 	}
 
 	spin_lock(&tmp->d_lock);
-	if (simple_positive(tmp)) {
+	if (!(d_unhashed(tmp) && tmp->d_inode)) {
+		dget_dlock(tmp);
 		__d_drop(tmp);
 		spin_unlock(&tmp->d_lock);
-		simple_unlink(d_inode(parent), tmp);
+		simple_unlink(parent->d_inode, tmp);
 	} else {
 		spin_unlock(&tmp->d_lock);
 	}
-	dput(tmp);
 
 	ret = 0;
 bail:
@@ -465,17 +480,16 @@ static int remove_device_files(struct super_block *sb,
 	int ret, i;
 
 	root = dget(sb->s_root);
-	inode_lock(d_inode(root));
-	snprintf(unit, sizeof(unit), "%u", dd->unit);
+	mutex_lock(&root->d_inode->i_mutex);
+	snprintf(unit, sizeof unit, "%u", dd->unit);
 	dir = lookup_one_len(unit, root, strlen(unit));
 
 	if (IS_ERR(dir)) {
 		ret = PTR_ERR(dir);
-		pr_err("Lookup of %s failed\n", unit);
+		printk(KERN_ERR "Lookup of %s failed\n", unit);
 		goto bail;
 	}
 
-	inode_lock(d_inode(dir));
 	remove_file(dir, "counters");
 	remove_file(dir, "counter_names");
 	remove_file(dir, "portcounter_names");
@@ -490,13 +504,11 @@ static int remove_device_files(struct super_block *sb,
 		}
 	}
 	remove_file(dir, "flash");
-	inode_unlock(d_inode(dir));
-	ret = simple_rmdir(d_inode(root), dir);
 	d_delete(dir);
-	dput(dir);
+	ret = simple_rmdir(root->d_inode, dir);
 
 bail:
-	inode_unlock(d_inode(root));
+	mutex_unlock(&root->d_inode->i_mutex);
 	dput(root);
 	return ret;
 }
@@ -520,7 +532,7 @@ static int qibfs_fill_super(struct super_block *sb, void *data, int silent)
 
 	ret = simple_fill_super(sb, QIBFS_MAGIC, files);
 	if (ret) {
-		pr_err("simple_fill_super failed: %d\n", ret);
+		printk(KERN_ERR "simple_fill_super failed: %d\n", ret);
 		goto bail;
 	}
 
@@ -544,7 +556,6 @@ static struct dentry *qibfs_mount(struct file_system_type *fs_type, int flags,
 			const char *dev_name, void *data)
 {
 	struct dentry *ret;
-
 	ret = mount_single(fs_type, flags, data, qibfs_fill_super);
 	if (!IS_ERR(ret))
 		qib_super = ret->d_sb;
@@ -592,7 +603,6 @@ static struct file_system_type qibfs_fs_type = {
 	.mount =        qibfs_mount,
 	.kill_sb =      qibfs_kill_super,
 };
-MODULE_ALIAS_FS("ipathfs");
 
 int __init qib_init_qibfs(void)
 {

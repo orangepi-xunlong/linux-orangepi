@@ -25,8 +25,8 @@
  *
  */
 
-#include <sound/info.h>
-#include <sound/control.h>
+#include "info.h"
+#include "control.h"
 
 /*
  *  ASAHI KASEI - AK4531 codec

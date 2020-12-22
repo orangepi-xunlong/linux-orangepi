@@ -19,7 +19,7 @@
  */
 
 #define ACM_TTY_MAJOR		166
-#define ACM_TTY_MINORS		256
+#define ACM_TTY_MINORS		32
 
 /*
  * Requests.
@@ -95,6 +95,7 @@ struct acm {
 	struct urb *read_urbs[ACM_NR];
 	struct acm_rb read_buffers[ACM_NR];
 	int rx_buflimit;
+	int rx_endpoint;
 	spinlock_t read_lock;
 	int write_used;					/* number of non-empty write buffers */
 	int transmitting;
@@ -105,9 +106,6 @@ struct acm {
 	struct work_struct work;			/* work queue entry for line discipline waking up */
 	unsigned int ctrlin;				/* input control lines (DCD, DSR, RI, break, overruns) */
 	unsigned int ctrlout;				/* output control lines (DTR, RTS) */
-	struct async_icount iocount;			/* counters for control line changes */
-	struct async_icount oldcount;			/* for comparison of counter */
-	wait_queue_head_t wioctl;			/* for ioctl */
 	unsigned int writesize;				/* max packet size for the output bulk endpoint */
 	unsigned int readsize,ctrlsize;			/* buffer sizes for freeing */
 	unsigned int minor;				/* acm minor number */
@@ -120,18 +118,13 @@ struct acm {
 	unsigned int throttle_req:1;			/* throttle requested */
 	u8 bInterval;
 	struct usb_anchor delayed;			/* writes queued for a device about to be woken */
-	unsigned long quirks;
 };
 
 #define CDC_DATA_INTERFACE_TYPE	0x0a
 
 /* constants describing various quirks and errors */
-#define NO_UNION_NORMAL			BIT(0)
-#define SINGLE_RX_URB			BIT(1)
-#define NO_CAP_LINE			BIT(2)
-#define NO_DATA_INTERFACE		BIT(4)
-#define IGNORE_DEVICE			BIT(5)
-#define QUIRK_CONTROL_LINE_STATE	BIT(6)
-#define CLEAR_HALT_CONDITIONS		BIT(7)
-#define SEND_ZERO_PACKET		BIT(8)
-#define DISABLE_ECHO			BIT(9)
+#define NO_UNION_NORMAL			1
+#define SINGLE_RX_URB			2
+#define NO_CAP_LINE			4
+#define NOT_A_MODEM			8
+#define NO_DATA_INTERFACE		16

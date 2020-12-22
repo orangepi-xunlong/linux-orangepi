@@ -27,10 +27,10 @@
 #include <linux/io.h>
 
 #include <asm/mach-types.h>
-#include "pm.h"
+#include <mach/pm.h>
 #include <mach/pxa2xx-regs.h>
-#include "regs-rtc.h"
-#include "sharpsl_pm.h"
+#include <mach/regs-rtc.h>
+#include <mach/sharpsl_pm.h>
 
 /*
  * Constants
@@ -55,6 +55,7 @@
 #ifdef CONFIG_PM
 static int sharpsl_off_charge_battery(void);
 static int sharpsl_check_battery_voltage(void);
+static int sharpsl_fatal_check(void);
 #endif
 static int sharpsl_check_battery_temp(void);
 static int sharpsl_ac_check(void);
@@ -578,8 +579,8 @@ static int sharpsl_ac_check(void)
 static int sharpsl_pm_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	sharpsl_pm.flags |= SHARPSL_SUSPENDED;
-	flush_delayed_work(&toggle_charger);
-	flush_delayed_work(&sharpsl_bat);
+	flush_delayed_work_sync(&toggle_charger);
+	flush_delayed_work_sync(&sharpsl_bat);
 
 	if (sharpsl_pm.charge_mode == CHRG_ON)
 		sharpsl_pm.flags |= SHARPSL_DO_OFFLINE_CHRG;
@@ -685,6 +686,53 @@ static int corgi_pxa_pm_enter(suspend_state_t state)
 	return 0;
 }
 
+/*
+ * Check for fatal battery errors
+ * Fatal returns -1
+ */
+static int sharpsl_fatal_check(void)
+{
+	int buff[5], temp, i, acin;
+
+	dev_dbg(sharpsl_pm.dev, "sharpsl_fatal_check entered\n");
+
+	/* Check AC-Adapter */
+	acin = sharpsl_pm.machinfo->read_devdata(SHARPSL_STATUS_ACIN);
+
+	if (acin && (sharpsl_pm.charge_mode == CHRG_ON)) {
+		sharpsl_pm.machinfo->charge(0);
+		udelay(100);
+		sharpsl_pm.machinfo->discharge(1);	/* enable discharge */
+		mdelay(SHARPSL_WAIT_DISCHARGE_ON);
+	}
+
+	if (sharpsl_pm.machinfo->discharge1)
+		sharpsl_pm.machinfo->discharge1(1);
+
+	/* Check battery : check inserting battery ? */
+	for (i = 0; i < 5; i++) {
+		buff[i] = sharpsl_pm.machinfo->read_devdata(SHARPSL_BATT_VOLT);
+		mdelay(SHARPSL_CHECK_BATTERY_WAIT_TIME_VOLT);
+	}
+
+	if (sharpsl_pm.machinfo->discharge1)
+		sharpsl_pm.machinfo->discharge1(0);
+
+	if (acin && (sharpsl_pm.charge_mode == CHRG_ON)) {
+		udelay(100);
+		sharpsl_pm.machinfo->charge(1);
+		sharpsl_pm.machinfo->discharge(0);
+	}
+
+	temp = get_select_val(buff);
+	dev_dbg(sharpsl_pm.dev, "sharpsl_fatal_check: acin: %d, discharge voltage: %d, no discharge: %ld\n", acin, temp, sharpsl_pm.machinfo->read_devdata(SHARPSL_BATT_VOLT));
+
+	if ((acin && (temp < sharpsl_pm.machinfo->fatal_acin_volt)) ||
+			(!acin && (temp < sharpsl_pm.machinfo->fatal_noacin_volt)))
+		return -1;
+	return 0;
+}
+
 static int sharpsl_off_charge_error(void)
 {
 	dev_err(sharpsl_pm.dev, "Offline Charger: Error occurred.\n");
@@ -744,7 +792,7 @@ static int sharpsl_off_charge_battery(void)
 		time = RCNR;
 		while (1) {
 			/* Check if any wakeup event had occurred */
-			if (sharpsl_pm.machinfo->charger_wakeup())
+			if (sharpsl_pm.machinfo->charger_wakeup() != 0)
 				return 0;
 			/* Check for timeout */
 			if ((RCNR - time) > SHARPSL_WAIT_CO_TIME)
@@ -829,9 +877,9 @@ static const struct platform_suspend_ops sharpsl_pm_ops = {
 };
 #endif
 
-static int sharpsl_pm_probe(struct platform_device *pdev)
+static int __devinit sharpsl_pm_probe(struct platform_device *pdev)
 {
-	int ret, irq;
+	int ret;
 
 	if (!pdev->dev.platform_data)
 		return -EINVAL;
@@ -841,9 +889,11 @@ static int sharpsl_pm_probe(struct platform_device *pdev)
 	sharpsl_pm.charge_mode = CHRG_OFF;
 	sharpsl_pm.flags = 0;
 
-	setup_timer(&sharpsl_pm.ac_timer, sharpsl_ac_timer, 0UL);
+	init_timer(&sharpsl_pm.ac_timer);
+	sharpsl_pm.ac_timer.function = sharpsl_ac_timer;
 
-	setup_timer(&sharpsl_pm.chrg_full_timer, sharpsl_chrg_full_timer, 0UL);
+	init_timer(&sharpsl_pm.chrg_full_timer);
+	sharpsl_pm.chrg_full_timer.function = sharpsl_chrg_full_timer;
 
 	led_trigger_register_simple("sharpsl-charge", &sharpsl_charge_led_trigger);
 
@@ -857,28 +907,24 @@ static int sharpsl_pm_probe(struct platform_device *pdev)
 	gpio_direction_input(sharpsl_pm.machinfo->gpio_batlock);
 
 	/* Register interrupt handlers */
-	irq = gpio_to_irq(sharpsl_pm.machinfo->gpio_acin);
-	if (request_irq(irq, sharpsl_ac_isr, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "AC Input Detect", sharpsl_ac_isr)) {
-		dev_err(sharpsl_pm.dev, "Could not get irq %d.\n", irq);
+	if (request_irq(PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_acin), sharpsl_ac_isr, IRQF_DISABLED | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "AC Input Detect", sharpsl_ac_isr)) {
+		dev_err(sharpsl_pm.dev, "Could not get irq %d.\n", PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_acin));
 	}
 
-	irq = gpio_to_irq(sharpsl_pm.machinfo->gpio_batlock);
-	if (request_irq(irq, sharpsl_fatal_isr, IRQF_TRIGGER_FALLING, "Battery Cover", sharpsl_fatal_isr)) {
-		dev_err(sharpsl_pm.dev, "Could not get irq %d.\n", irq);
+	if (request_irq(PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_batlock), sharpsl_fatal_isr, IRQF_DISABLED | IRQF_TRIGGER_FALLING, "Battery Cover", sharpsl_fatal_isr)) {
+		dev_err(sharpsl_pm.dev, "Could not get irq %d.\n", PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_batlock));
 	}
 
 	if (sharpsl_pm.machinfo->gpio_fatal) {
-		irq = gpio_to_irq(sharpsl_pm.machinfo->gpio_fatal);
-		if (request_irq(irq, sharpsl_fatal_isr, IRQF_TRIGGER_FALLING, "Fatal Battery", sharpsl_fatal_isr)) {
-			dev_err(sharpsl_pm.dev, "Could not get irq %d.\n", irq);
+		if (request_irq(PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_fatal), sharpsl_fatal_isr, IRQF_DISABLED | IRQF_TRIGGER_FALLING, "Fatal Battery", sharpsl_fatal_isr)) {
+			dev_err(sharpsl_pm.dev, "Could not get irq %d.\n", PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_fatal));
 		}
 	}
 
 	if (sharpsl_pm.machinfo->batfull_irq) {
 		/* Register interrupt handler. */
-		irq = gpio_to_irq(sharpsl_pm.machinfo->gpio_batfull);
-		if (request_irq(irq, sharpsl_chrg_full_isr, IRQF_TRIGGER_RISING, "CO", sharpsl_chrg_full_isr)) {
-			dev_err(sharpsl_pm.dev, "Could not get irq %d.\n", irq);
+		if (request_irq(PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_batfull), sharpsl_chrg_full_isr, IRQF_DISABLED | IRQF_TRIGGER_RISING, "CO", sharpsl_chrg_full_isr)) {
+			dev_err(sharpsl_pm.dev, "Could not get irq %d.\n", PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_batfull));
 		}
 	}
 
@@ -907,14 +953,14 @@ static int sharpsl_pm_remove(struct platform_device *pdev)
 
 	led_trigger_unregister_simple(sharpsl_charge_led_trigger);
 
-	free_irq(gpio_to_irq(sharpsl_pm.machinfo->gpio_acin), sharpsl_ac_isr);
-	free_irq(gpio_to_irq(sharpsl_pm.machinfo->gpio_batlock), sharpsl_fatal_isr);
+	free_irq(PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_acin), sharpsl_ac_isr);
+	free_irq(PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_batlock), sharpsl_fatal_isr);
 
 	if (sharpsl_pm.machinfo->gpio_fatal)
-		free_irq(gpio_to_irq(sharpsl_pm.machinfo->gpio_fatal), sharpsl_fatal_isr);
+		free_irq(PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_fatal), sharpsl_fatal_isr);
 
 	if (sharpsl_pm.machinfo->batfull_irq)
-		free_irq(gpio_to_irq(sharpsl_pm.machinfo->gpio_batfull), sharpsl_chrg_full_isr);
+		free_irq(PXA_GPIO_TO_IRQ(sharpsl_pm.machinfo->gpio_batfull), sharpsl_chrg_full_isr);
 
 	gpio_free(sharpsl_pm.machinfo->gpio_batlock);
 	gpio_free(sharpsl_pm.machinfo->gpio_batfull);
@@ -939,7 +985,7 @@ static struct platform_driver sharpsl_pm_driver = {
 	},
 };
 
-static int sharpsl_pm_init(void)
+static int __devinit sharpsl_pm_init(void)
 {
 	return platform_driver_register(&sharpsl_pm_driver);
 }

@@ -72,6 +72,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
@@ -604,9 +605,9 @@ static void it821x_display_disk(int n, u8 *buf)
 {
 	unsigned char id[41];
 	int mode = 0;
-	const char *mtype = "";
+	char *mtype = "";
 	char mbuf[8];
-	const char *cbl = "(40 wire cable)";
+	char *cbl = "(40 wire cable)";
 
 	static const char *types[5] = {
 		"RAID0", "RAID1", "RAID 0+1", "JBOD", "DISK"
@@ -903,7 +904,7 @@ static int it821x_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	};
 
 	const struct ata_port_info *ppi[] = { NULL, NULL };
-	static const char *mode[2] = { "pass through", "smart" };
+	static char *mode[2] = { "pass through", "smart" };
 	int rc;
 
 	rc = pcim_enable_device(pdev);
@@ -935,10 +936,10 @@ static int it821x_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	return ata_pci_bmdma_init_one(pdev, ppi, &it821x_sht, NULL, 0);
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int it821x_reinit_one(struct pci_dev *pdev)
 {
-	struct ata_host *host = pci_get_drvdata(pdev);
+	struct ata_host *host = dev_get_drvdata(&pdev->dev);
 	int rc;
 
 	rc = ata_pci_device_do_resume(pdev);
@@ -965,13 +966,21 @@ static struct pci_driver it821x_pci_driver = {
 	.id_table	= it821x,
 	.probe 		= it821x_init_one,
 	.remove		= ata_pci_remove_one,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend	= ata_pci_device_suspend,
 	.resume		= it821x_reinit_one,
 #endif
 };
 
-module_pci_driver(it821x_pci_driver);
+static int __init it821x_init(void)
+{
+	return pci_register_driver(&it821x_pci_driver);
+}
+
+static void __exit it821x_exit(void)
+{
+	pci_unregister_driver(&it821x_pci_driver);
+}
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("low-level driver for the IT8211/IT8212 IDE RAID controller");
@@ -979,5 +988,9 @@ MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, it821x);
 MODULE_VERSION(DRV_VERSION);
 
+
 module_param_named(noraid, it8212_noraid, int, S_IRUGO);
 MODULE_PARM_DESC(noraid, "Force card into bypass mode");
+
+module_init(it821x_init);
+module_exit(it821x_exit);

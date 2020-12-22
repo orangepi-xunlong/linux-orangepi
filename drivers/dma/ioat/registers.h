@@ -11,6 +11,10 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ *
  * The full GNU General Public License is included in this distribution in the
  * file called COPYING.
  */
@@ -25,13 +29,6 @@
 #define IOAT_PCI_DMAUNCERRSTS_OFFSET		0x148
 #define IOAT_PCI_CHANERR_INT_OFFSET		0x180
 #define IOAT_PCI_CHANERRMASK_INT_OFFSET		0x184
-
-/* PCIe config registers */
-
-/* EXPCAPID + N */
-#define IOAT_DEVCTRL_OFFSET			0x8
-/* relaxed ordering enable */
-#define IOAT_DEVCTRL_ROE			0x10
 
 /* MMIO Device Registers */
 #define IOAT_CHANCNT_OFFSET			0x00	/*  8-bit */
@@ -82,8 +79,6 @@
 #define IOAT_CAP_APIC				0x00000080
 #define IOAT_CAP_XOR				0x00000100
 #define IOAT_CAP_PQ				0x00000200
-#define IOAT_CAP_DWBES				0x00002000
-#define IOAT_CAP_RAID16SS			0x00020000
 
 #define IOAT_CHANNEL_MMIO_SIZE			0x80	/* Each Channel MMIO space is this size */
 
@@ -98,17 +93,25 @@
 #define IOAT_CHANCTRL_ERR_COMPLETION_EN		0x0004
 #define IOAT_CHANCTRL_INT_REARM			0x0001
 #define IOAT_CHANCTRL_RUN			(IOAT_CHANCTRL_INT_REARM |\
-						 IOAT_CHANCTRL_ERR_INT_EN |\
-						 IOAT_CHANCTRL_ERR_COMPLETION_EN |\
 						 IOAT_CHANCTRL_ANY_ERR_ABORT_EN)
 
 #define IOAT_DMA_COMP_OFFSET			0x02	/* 16-bit DMA channel compatibility */
 #define IOAT_DMA_COMP_V1			0x0001	/* Compatibility with DMA version 1 */
 #define IOAT_DMA_COMP_V2			0x0002	/* Compatibility with DMA version 2 */
 
-/* IOAT1 define left for i7300_idle driver to not fail compiling */
-#define IOAT1_CHANSTS_OFFSET		0x04
-#define IOAT_CHANSTS_OFFSET		0x08	/* 64-bit Channel Status Register */
+
+#define IOAT1_CHANSTS_OFFSET		0x04	/* 64-bit Channel Status Register */
+#define IOAT2_CHANSTS_OFFSET		0x08	/* 64-bit Channel Status Register */
+#define IOAT_CHANSTS_OFFSET(ver)		((ver) < IOAT_VER_2_0 \
+						? IOAT1_CHANSTS_OFFSET : IOAT2_CHANSTS_OFFSET)
+#define IOAT1_CHANSTS_OFFSET_LOW	0x04
+#define IOAT2_CHANSTS_OFFSET_LOW	0x08
+#define IOAT_CHANSTS_OFFSET_LOW(ver)		((ver) < IOAT_VER_2_0 \
+						? IOAT1_CHANSTS_OFFSET_LOW : IOAT2_CHANSTS_OFFSET_LOW)
+#define IOAT1_CHANSTS_OFFSET_HIGH	0x08
+#define IOAT2_CHANSTS_OFFSET_HIGH	0x0C
+#define IOAT_CHANSTS_OFFSET_HIGH(ver)		((ver) < IOAT_VER_2_0 \
+						? IOAT1_CHANSTS_OFFSET_HIGH : IOAT2_CHANSTS_OFFSET_HIGH)
 #define IOAT_CHANSTS_COMPLETED_DESCRIPTOR_ADDR	(~0x3fULL)
 #define IOAT_CHANSTS_SOFT_ERR			0x10ULL
 #define IOAT_CHANSTS_UNAFFILIATED_ERR		0x8ULL
@@ -240,8 +243,6 @@
 #define IOAT_CHANERR_DESCRIPTOR_COUNT_ERR	0x40000
 
 #define IOAT_CHANERR_HANDLE_MASK (IOAT_CHANERR_XOR_P_OR_CRC_ERR | IOAT_CHANERR_XOR_Q_ERR)
-#define IOAT_CHANERR_RECOVER_MASK (IOAT_CHANERR_READ_DATA_ERR | \
-				   IOAT_CHANERR_WRITE_DATA_ERR)
 
 #define IOAT_CHANERR_MASK_OFFSET		0x2C	/* 32-bit Channel Error Register */
 

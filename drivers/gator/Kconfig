@@ -1,46 +1,28 @@
-config GATOR
-	tristate "Gator module for ARM's Streamline Performance Analyzer"
-	default m if (ARM || ARM64)
-	depends on PROFILING
-	depends on HIGH_RES_TIMERS
-	depends on PERF_EVENTS
-	depends on HW_PERF_EVENTS || !(ARM || ARM64)
-	select TRACING
-	help
-	  Gator module for ARM's Streamline Performance Analyzer
+#
+# gator driver configuration
+#
 
-config GATOR_WITH_MALI_SUPPORT
-	bool
-
-choice
-	prompt "Enable Mali GPU support in Gator"
-	depends on GATOR
-	optional
-	help
-	  Enable Mali GPU support in Gator
-
-config GATOR_MALI_4XXMP
-	bool "Mali-400MP or Mali-450MP"
-	select GATOR_WITH_MALI_SUPPORT
-
-config GATOR_MALI_MIDGARD
-	bool "Mali-T60x, Mali-T62x, Mali-T72x or Mali-T76x"
-	select GATOR_WITH_MALI_SUPPORT
-
-endchoice
-
-config GATOR_MALI_4XXMP_PATH
-	string "Path to Mali driver"
-	depends on GATOR_MALI_4XXMP
-	default "drivers/gpu/arm/mali400mp"
-	help
-	  The gator code adds this to its include path so it can get the Mali
-	  trace headers with: #include "linux/mali_linux_trace.h"
-
-config GATOR_MALI_MIDGARD_PATH
-	string "Path to Mali driver"
-	depends on GATOR_MALI_MIDGARD
-	default "drivers/gpu/arm/midgard"
-	help
-	  The gator code adds this to its include path so it can get the Mali
-	  trace headers with: #include "linux/mali_linux_trace.h"
+config GATOR_PERF
+        tristate "Gator driver for DS-5"
+        default n
+        select PROFILING
+        select TRACEPOINTS
+        select RING_BUFFER
+        select EVENT_TRACING
+        select EVENT_POWER_TRACING_DEPRECATED
+        select CONTEXT_SWITCH_TRACER
+        select TRACING
+        select FTRACE
+        select ENABLE_DEFAULT_TRACERS
+        select BRANCH_PROFILE_NONE
+        select PERF_EVENTS
+        ---help---
+          Gator driver is a driver for streamline, which is
+          a function in arm's DS-5.
+          Strongly recommended that it should be configured
+          as a module!
+          NOTE
+          Enable the High Resolution Timer Support option.
+          Enable Use local timer interrupts if you are using
+          a Symmetric MultiProcessing (SMP) target.
+          

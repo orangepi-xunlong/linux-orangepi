@@ -31,15 +31,10 @@
  * No other registers are examined or changed.
  */
 _GLOBAL(slb_allocate_realmode)
-	/*
-	 * check for bad kernel/user address
-	 * (ea & ~REGION_MASK) >= PGTABLE_RANGE
-	 */
-	rldicr. r9,r3,4,(63 - H_PGTABLE_EADDR_SIZE - 4)
-	bne-	8f
+	/* r3 = faulting address */
 
 	srdi	r9,r3,60		/* get region */
-	srdi	r10,r3,SID_SHIFT	/* get esid */
+	srdi	r10,r3,28		/* get esid */
 	cmpldi	cr7,r9,0xc		/* cmp PAGE_OFFSET for later use */
 
 	/* r3 = address, r10 = esid, cr7 = <> PAGE_OFFSET */
@@ -59,17 +54,8 @@ _GLOBAL(slb_allocate_realmode)
 	/* Linear mapping encoding bits, the "li" instruction below will
 	 * be patched by the kernel at boot
 	 */
-.globl slb_miss_kernel_load_linear
-slb_miss_kernel_load_linear:
+_GLOBAL(slb_miss_kernel_load_linear)
 	li	r11,0
-	/*
-	 * context = (MAX_USER_CONTEXT) + ((ea >> 60) - 0xc) + 1
-	 * r9 = region id.
-	 */
-	addis	r9,r9,(MAX_USER_CONTEXT - 0xc + 1)@ha
-	addi	r9,r9,(MAX_USER_CONTEXT - 0xc + 1)@l
-
-
 BEGIN_FTR_SECTION
 	b	slb_finish_load
 END_MMU_FTR_SECTION_IFCLR(MMU_FTR_1T_SEGMENT)
@@ -80,8 +66,7 @@ END_MMU_FTR_SECTION_IFCLR(MMU_FTR_1T_SEGMENT)
 	/* Check virtual memmap region. To be patches at kernel boot */
 	cmpldi	cr0,r9,0xf
 	bne	1f
-.globl slb_miss_kernel_load_vmemmap
-slb_miss_kernel_load_vmemmap:
+_GLOBAL(slb_miss_kernel_load_vmemmap)
 	li	r11,0
 	b	6f
 1:
@@ -91,33 +76,26 @@ slb_miss_kernel_load_vmemmap:
 	 * can be demoted from 64K -> 4K dynamically on some machines
 	 */
 	clrldi	r11,r10,48
-	cmpldi	r11,(H_VMALLOC_SIZE >> 28) - 1
+	cmpldi	r11,(VMALLOC_SIZE >> 28) - 1
 	bgt	5f
 	lhz	r11,PACAVMALLOCSLLP(r13)
 	b	6f
 5:
 	/* IO mapping */
-.globl slb_miss_kernel_load_io
-slb_miss_kernel_load_io:
+	_GLOBAL(slb_miss_kernel_load_io)
 	li	r11,0
 6:
-	/*
-	 * context = (MAX_USER_CONTEXT) + ((ea >> 60) - 0xc) + 1
-	 * r9 = region id.
-	 */
-	addis	r9,r9,(MAX_USER_CONTEXT - 0xc + 1)@ha
-	addi	r9,r9,(MAX_USER_CONTEXT - 0xc + 1)@l
-
 BEGIN_FTR_SECTION
 	b	slb_finish_load
 END_MMU_FTR_SECTION_IFCLR(MMU_FTR_1T_SEGMENT)
 	b	slb_finish_load_1T
 
-0:	/*
-	 * For userspace addresses, make sure this is region 0.
+0:	/* user address: proto-VSID = context << 15 | ESID. First check
+	 * if the address is within the boundaries of the user region
 	 */
-	cmpdi	r9, 0
-	bne	8f
+	srdi.	r9,r10,USER_ESID_BITS
+	bne-	8f			/* invalid ea bits set */
+
 
 	/* when using slices, we extract the psize off the slice bitmaps
 	 * and then we need to get the sllp encoding off the mmu_psize_defs
@@ -130,31 +108,17 @@ END_MMU_FTR_SECTION_IFCLR(MMU_FTR_1T_SEGMENT)
 	 * between 4k and 64k standard page size
 	 */
 #ifdef CONFIG_PPC_MM_SLICES
-	/* r10 have esid */
 	cmpldi	r10,16
-	/* below SLICE_LOW_TOP */
-	blt	5f
-	/*
-	 * Handle hpsizes,
-	 * r9 is get_paca()->context.high_slices_psize[index], r11 is mask_index
-	 */
-	srdi    r11,r10,(SLICE_HIGH_SHIFT - SLICE_LOW_SHIFT + 1) /* index */
-	addi	r9,r11,PACAHIGHSLICEPSIZE
-	lbzx	r9,r13,r9		/* r9 is hpsizes[r11] */
-	/* r11 = (r10 >> (SLICE_HIGH_SHIFT - SLICE_LOW_SHIFT)) & 0x1 */
-	rldicl	r11,r10,(64 - (SLICE_HIGH_SHIFT - SLICE_LOW_SHIFT)),63
-	b	6f
 
-5:
-	/*
-	 * Handle lpsizes
-	 * r9 is get_paca()->context.low_slices_psize, r11 is index
-	 */
+	/* Get the slice index * 4 in r11 and matching slice size mask in r9 */
 	ld	r9,PACALOWSLICESPSIZE(r13)
-	mr	r11,r10
-6:
-	sldi	r11,r11,2  /* index * 4 */
-	/* Extract the psize and multiply to get an array offset */
+	sldi	r11,r10,2
+	blt	5f
+	ld	r9,PACAHIGHSLICEPSIZE(r13)
+	srdi	r11,r10,(SLICE_HIGH_SHIFT - SLICE_LOW_SHIFT - 2)
+	andi.	r11,r11,0x3c
+
+5:	/* Extract the psize and multiply to get an array offset */
 	srd	r9,r9,r11
 	andi.	r9,r9,0xf
 	mulli	r9,r9,MMUPSIZEDEFSIZE
@@ -174,27 +138,78 @@ END_MMU_FTR_SECTION_IFCLR(MMU_FTR_1T_SEGMENT)
 	ld	r9,PACACONTEXTID(r13)
 BEGIN_FTR_SECTION
 	cmpldi	r10,0x1000
+END_MMU_FTR_SECTION_IFSET(MMU_FTR_1T_SEGMENT)
+	rldimi	r10,r9,USER_ESID_BITS,0
+BEGIN_FTR_SECTION
 	bge	slb_finish_load_1T
 END_MMU_FTR_SECTION_IFSET(MMU_FTR_1T_SEGMENT)
 	b	slb_finish_load
 
-8:	/* invalid EA - return an error indication */
-	crset	4*cr0+eq		/* indicate failure */
-	blr
+8:	/* invalid EA */
+	li	r10,0			/* BAD_VSID */
+	li	r11,SLB_VSID_USER	/* flags don't much matter */
+	b	slb_finish_load
+
+#ifdef __DISABLED__
+
+/* void slb_allocate_user(unsigned long ea);
+ *
+ * Create an SLB entry for the given EA (user or kernel).
+ * 	r3 = faulting address, r13 = PACA
+ *	r9, r10, r11 are clobbered by this function
+ * No other registers are examined or changed.
+ *
+ * It is called with translation enabled in order to be able to walk the
+ * page tables. This is not currently used.
+ */
+_GLOBAL(slb_allocate_user)
+	/* r3 = faulting address */
+	srdi	r10,r3,28		/* get esid */
+
+	crset	4*cr7+lt		/* set "user" flag for later */
+
+	/* check if we fit in the range covered by the pagetables*/
+	srdi.	r9,r3,PGTABLE_EADDR_SIZE
+	crnot	4*cr0+eq,4*cr0+eq
+	beqlr
+
+	/* now we need to get to the page tables in order to get the page
+	 * size encoding from the PMD. In the future, we'll be able to deal
+	 * with 1T segments too by getting the encoding from the PGD instead
+	 */
+	ld	r9,PACAPGDIR(r13)
+	cmpldi	cr0,r9,0
+	beqlr
+	rlwinm	r11,r10,8,25,28
+	ldx	r9,r9,r11		/* get pgd_t */
+	cmpldi	cr0,r9,0
+	beqlr
+	rlwinm	r11,r10,3,17,28
+	ldx	r9,r9,r11		/* get pmd_t */
+	cmpldi	cr0,r9,0
+	beqlr
+
+	/* build vsid flags */
+	andi.	r11,r9,SLB_VSID_LLP
+	ori	r11,r11,SLB_VSID_USER
+
+	/* get context to calculate proto-VSID */
+	ld	r9,PACACONTEXTID(r13)
+	rldimi	r10,r9,USER_ESID_BITS,0
+
+	/* fall through slb_finish_load */
+
+#endif /* __DISABLED__ */
+
 
 /*
  * Finish loading of an SLB entry and return
  *
- * r3 = EA, r9 = context, r10 = ESID, r11 = flags, clobbers r9, cr7 = <> PAGE_OFFSET
+ * r3 = EA, r10 = proto-VSID, r11 = flags, clobbers r9, cr7 = <> PAGE_OFFSET
  */
 slb_finish_load:
-	rldimi  r10,r9,ESID_BITS,0
 	ASM_VSID_SCRAMBLE(r10,r9,256M)
-	/*
-	 * bits above VSID_BITS_256M need to be ignored from r10
-	 * also combine VSID and flags
-	 */
-	rldimi	r11,r10,SLB_VSID_SHIFT,(64 - (SLB_VSID_SHIFT + VSID_BITS_256M))
+	rldimi	r11,r10,SLB_VSID_SHIFT,16	/* combine VSID and flags */
 
 	/* r3 = EA, r11 = VSID data */
 	/*
@@ -206,8 +221,7 @@ slb_finish_load:
 7:	ld	r10,PACASTABRR(r13)
 	addi	r10,r10,1
 	/* This gets soft patched on boot. */
-.globl slb_compare_rr_to_size
-slb_compare_rr_to_size:
+_GLOBAL(slb_compare_rr_to_size)
 	cmpldi	r10,0
 
 	blt+	4f
@@ -238,10 +252,10 @@ slb_compare_rr_to_size:
 	bge	1f
 
 	/* still room in the slb cache */
-	sldi	r11,r3,2		/* r11 = offset * sizeof(u32) */
-	srdi    r10,r10,28		/* get the 36 bits of the ESID */
-	add	r11,r11,r13		/* r11 = (u32 *)paca + offset */
-	stw	r10,PACASLBCACHE(r11)	/* paca->slb_cache[offset] = esid */
+	sldi	r11,r3,1		/* r11 = offset * sizeof(u16) */
+	rldicl	r10,r10,36,28		/* get low 16 bits of the ESID */
+	add	r11,r11,r13		/* r11 = (u16 *)paca + offset */
+	sth	r10,PACASLBCACHE(r11)	/* paca->slb_cache[offset] = esid */
 	addi	r3,r3,1			/* offset++ */
 	b	2f
 1:					/* offset >= SLB_CACHE_ENTRIES */
@@ -254,17 +268,12 @@ slb_compare_rr_to_size:
 /*
  * Finish loading of a 1T SLB entry (for the kernel linear mapping) and return.
  *
- * r3 = EA, r9 = context, r10 = ESID(256MB), r11 = flags, clobbers r9
+ * r3 = EA, r10 = proto-VSID, r11 = flags, clobbers r9
  */
 slb_finish_load_1T:
-	srdi	r10,r10,(SID_SHIFT_1T - SID_SHIFT)	/* get 1T ESID */
-	rldimi  r10,r9,ESID_BITS_1T,0
+	srdi	r10,r10,40-28		/* get 1T ESID */
 	ASM_VSID_SCRAMBLE(r10,r9,1T)
-	/*
-	 * bits above VSID_BITS_1T need to be ignored from r10
-	 * also combine VSID and flags
-	 */
-	rldimi	r11,r10,SLB_VSID_SHIFT_1T,(64 - (SLB_VSID_SHIFT_1T + VSID_BITS_1T))
+	rldimi	r11,r10,SLB_VSID_SHIFT_1T,16	/* combine VSID and flags */
 	li	r10,MMU_SEGSIZE_1T
 	rldimi	r11,r10,SLB_VSID_SSIZE_SHIFT,0	/* insert segment size */
 

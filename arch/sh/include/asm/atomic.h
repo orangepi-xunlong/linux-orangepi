@@ -1,12 +1,6 @@
 #ifndef __ASM_SH_ATOMIC_H
 #define __ASM_SH_ATOMIC_H
 
-#if defined(CONFIG_CPU_J2)
-
-#include <asm-generic/atomic.h>
-
-#else
-
 /*
  * Atomic operations that C can't guarantee us.  Useful for
  * resource counting etc..
@@ -16,12 +10,11 @@
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include <asm/cmpxchg.h>
-#include <asm/barrier.h>
 
 #define ATOMIC_INIT(i)	{ (i) }
 
-#define atomic_read(v)		READ_ONCE((v)->counter)
-#define atomic_set(v,i)		WRITE_ONCE((v)->counter, (i))
+#define atomic_read(v)		(*(volatile int *)&(v)->counter)
+#define atomic_set(v,i)		((v)->counter = (i))
 
 #if defined(CONFIG_GUSA_RB)
 #include <asm/atomic-grb.h>
@@ -69,6 +62,9 @@ static inline int __atomic_add_unless(atomic_t *v, int a, int u)
 	return c;
 }
 
-#endif /* CONFIG_CPU_J2 */
+#define smp_mb__before_atomic_dec()	smp_mb()
+#define smp_mb__after_atomic_dec()	smp_mb()
+#define smp_mb__before_atomic_inc()	smp_mb()
+#define smp_mb__after_atomic_inc()	smp_mb()
 
 #endif /* __ASM_SH_ATOMIC_H */

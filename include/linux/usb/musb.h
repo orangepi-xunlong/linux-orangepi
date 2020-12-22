@@ -76,9 +76,6 @@ struct musb_hdrc_config {
 	unsigned	dma:1 __deprecated; /* supports DMA */
 	unsigned	vendor_req:1 __deprecated; /* vendor registers required */
 
-	/* need to explicitly de-assert the port reset after resume? */
-	unsigned	host_port_deassert_reset_at_resume:1;
-
 	u8		num_eps;	/* number of endpoints _with_ ep0 */
 	u8		dma_channels __deprecated; /* number of dma channels */
 	u8		dyn_fifo_size;	/* dynamic size in bytes */
@@ -95,7 +92,7 @@ struct musb_hdrc_config {
 	/* musb CLKIN in Blackfin in MHZ */
 	unsigned char   clkin;
 #endif
-	u32		maximum_speed;
+
 };
 
 struct musb_hdrc_platform_data {
@@ -124,7 +121,7 @@ struct musb_hdrc_platform_data {
 	int		(*set_power)(int state);
 
 	/* MUSB configuration-specific details */
-	const struct musb_hdrc_config *config;
+	struct musb_hdrc_config	*config;
 
 	/* Architecture specific board data	*/
 	void		*board_data;
@@ -133,22 +130,6 @@ struct musb_hdrc_platform_data {
 	const void	*platform_ops;
 };
 
-enum musb_vbus_id_status {
-	MUSB_UNKNOWN = 0,
-	MUSB_ID_GROUND,
-	MUSB_ID_FLOAT,
-	MUSB_VBUS_VALID,
-	MUSB_VBUS_OFF,
-};
-
-#if IS_ENABLED(CONFIG_USB_MUSB_HDRC)
-int musb_mailbox(enum musb_vbus_id_status status);
-#else
-static inline int musb_mailbox(enum musb_vbus_id_status status)
-{
-	return 0;
-}
-#endif
 
 /* TUSB 6010 support */
 

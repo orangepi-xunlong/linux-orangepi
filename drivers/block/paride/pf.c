@@ -211,7 +211,7 @@ static int pf_ioctl(struct block_device *bdev, fmode_t mode,
 		    unsigned int cmd, unsigned long arg);
 static int pf_getgeo(struct block_device *bdev, struct hd_geometry *geo);
 
-static void pf_release(struct gendisk *disk, fmode_t mode);
+static int pf_release(struct gendisk *disk, fmode_t mode);
 
 static int pf_detect(void);
 static void do_pf_read(void);
@@ -264,7 +264,6 @@ static int pf_cmd;		/* current command READ/WRITE */
 static struct pf_unit *pf_current;/* unit of current request */
 static int pf_mask;		/* stopper for pseudo-int */
 static char *pf_buf;		/* buffer for request in progress */
-static void *par_drv;		/* reference of parport driver */
 
 /* kernel glue structures */
 
@@ -361,15 +360,14 @@ static int pf_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd, u
 	return 0;
 }
 
-static void pf_release(struct gendisk *disk, fmode_t mode)
+static int pf_release(struct gendisk *disk, fmode_t mode)
 {
 	struct pf_unit *pf = disk->private_data;
 
 	mutex_lock(&pf_mutex);
 	if (pf->access <= 0) {
 		mutex_unlock(&pf_mutex);
-		WARN_ON(1);
-		return;
+		return -EINVAL;
 	}
 
 	pf->access--;
@@ -378,6 +376,8 @@ static void pf_release(struct gendisk *disk, fmode_t mode)
 		pf_lock(pf, 0);
 
 	mutex_unlock(&pf_mutex);
+	return 0;
+
 }
 
 static unsigned int pf_check_events(struct gendisk *disk, unsigned int clearing)
@@ -704,11 +704,6 @@ static int pf_detect(void)
 	printk("%s: %s version %s, major %d, cluster %d, nice %d\n",
 	       name, name, PF_VERSION, major, cluster, nice);
 
-	par_drv = pi_register_driver(name);
-	if (!par_drv) {
-		pr_err("failed to register %s driver\n", name);
-		return -1;
-	}
 	k = 0;
 	if (pf_drive_count == 0) {
 		if (pi_init(pf->pi, 1, -1, -1, -1, -1, -1, pf_scratch, PI_PF,
@@ -741,7 +736,6 @@ static int pf_detect(void)
 	printk("%s: No ATAPI disk detected\n", name);
 	for (pf = units, unit = 0; unit < PF_UNITS; pf++, unit++)
 		put_disk(pf->disk);
-	pi_unregister_driver(par_drv);
 	return -1;
 }
 
@@ -802,7 +796,7 @@ repeat:
 	}
 
 	pf_cmd = rq_data_dir(pf_req);
-	pf_buf = bio_data(pf_req->bio);
+	pf_buf = pf_req->buffer;
 	pf_retries = 0;
 
 	pf_busy = 1;
@@ -834,7 +828,7 @@ static int pf_next_buf(void)
 		if (!pf_req)
 			return 1;
 		pf_count = blk_rq_cur_sectors(pf_req);
-		pf_buf = bio_data(pf_req->bio);
+		pf_buf = pf_req->buffer;
 	}
 	return 0;
 }

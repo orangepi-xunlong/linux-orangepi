@@ -1,0 +1,12 @@
+#
+# sunxi module driver configuration.
+#
+config SUNXI_MODULE
+	tristate "sunxi module driver"
+	depends on ARCH_SUNXI
+	help
+	  sunxi module driver support sunxi family SOCs.
+	  add sunxi-moudle to manage all module's information include
+	  firmware version and commit information and so on.
+	  Set y here to support the sunxi module driver.
+	  If unsure, set N.

@@ -30,8 +30,10 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/input.h>
+#include <linux/usb.h>
 #include <linux/hid.h>
 
+#include "usbhid/usbhid.h"
 #include "hid-lg.h"
 
 struct dev_type {
@@ -87,7 +89,7 @@ static int hid_lgff_play(struct input_dev *dev, void *data, struct ff_effect *ef
 		report->field[0]->value[2] = x;
 		report->field[0]->value[3] = y;
 		dbg_hid("(x, y)=(%04x, %04x)\n", x, y);
-		hid_hw_request(hid, report, HID_REQ_SET_REPORT);
+		usbhid_submit_report(hid, report, USB_DIR_OUT);
 		break;
 
 	case FF_RUMBLE:
@@ -102,7 +104,7 @@ static int hid_lgff_play(struct input_dev *dev, void *data, struct ff_effect *ef
 		report->field[0]->value[2] = left;
 		report->field[0]->value[3] = right;
 		dbg_hid("(left, right)=(%04x, %04x)\n", left, right);
-		hid_hw_request(hid, report, HID_REQ_SET_REPORT);
+		usbhid_submit_report(hid, report, USB_DIR_OUT);
 		break;
 	}
 	return 0;
@@ -122,7 +124,7 @@ static void hid_lgff_set_autocenter(struct input_dev *dev, u16 magnitude)
 	*value++ = 0x80;
 	*value++ = 0x00;
 	*value = 0x00;
-	hid_hw_request(hid, report, HID_REQ_SET_REPORT);
+	usbhid_submit_report(hid, report, USB_DIR_OUT);
 }
 
 int lgff_init(struct hid_device* hid)

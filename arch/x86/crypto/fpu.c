@@ -17,8 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/crypto.h>
-#include <asm/fpu/api.h>
+#include <asm/i387.h>
 
 struct crypto_fpu_ctx {
 	struct crypto_blkcipher *child;
@@ -156,9 +155,7 @@ int __init crypto_fpu_init(void)
 	return crypto_register_template(&crypto_fpu_tmpl);
 }
 
-void crypto_fpu_exit(void)
+void __exit crypto_fpu_exit(void)
 {
 	crypto_unregister_template(&crypto_fpu_tmpl);
 }
-
-MODULE_ALIAS_CRYPTO("fpu");

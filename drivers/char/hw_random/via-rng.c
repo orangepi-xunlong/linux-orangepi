@@ -29,11 +29,10 @@
 #include <linux/kernel.h>
 #include <linux/hw_random.h>
 #include <linux/delay.h>
-#include <asm/cpu_device_id.h>
 #include <asm/io.h>
 #include <asm/msr.h>
 #include <asm/cpufeature.h>
-#include <asm/fpu/api.h>
+#include <asm/i387.h>
 
 
 
@@ -140,8 +139,8 @@ static int via_rng_init(struct hwrng *rng)
 	 * RNG configuration like it used to be the case in this
 	 * register */
 	if ((c->x86 == 6) && (c->x86_model >= 0x0f)) {
-		if (!boot_cpu_has(X86_FEATURE_XSTORE_EN)) {
-			pr_err(PFX "can't enable hardware RNG "
+		if (!cpu_has_xstore_enabled) {
+			printk(KERN_ERR PFX "can't enable hardware RNG "
 				"if XSTORE is not enabled\n");
 			return -ENODEV;
 		}
@@ -166,7 +165,7 @@ static int via_rng_init(struct hwrng *rng)
 	/* Enable secondary noise source on CPUs where it is present. */
 
 	/* Nehemiah stepping 8 and higher */
-	if ((c->x86_model == 9) && (c->x86_stepping > 7))
+	if ((c->x86_model == 9) && (c->x86_mask > 7))
 		lo |= VIA_NOISESRC2;
 
 	/* Esther */
@@ -180,7 +179,7 @@ static int via_rng_init(struct hwrng *rng)
 	   unneeded */
 	rdmsr(MSR_VIA_RNG, lo, hi);
 	if ((lo & VIA_RNG_ENABLE) == 0) {
-		pr_err(PFX "cannot enable VIA C3 RNG, aborting\n");
+		printk(KERN_ERR PFX "cannot enable VIA C3 RNG, aborting\n");
 		return -ENODEV;
 	}
 
@@ -200,13 +199,12 @@ static int __init mod_init(void)
 {
 	int err;
 
-	if (!boot_cpu_has(X86_FEATURE_XSTORE))
+	if (!cpu_has_xstore)
 		return -ENODEV;
-
-	pr_info("VIA RNG detected\n");
+	printk(KERN_INFO "VIA RNG detected\n");
 	err = hwrng_register(&via_rng);
 	if (err) {
-		pr_err(PFX "RNG registering failed (%d)\n",
+		printk(KERN_ERR PFX "RNG registering failed (%d)\n",
 		       err);
 		goto out;
 	}
@@ -222,11 +220,5 @@ static void __exit mod_exit(void)
 module_init(mod_init);
 module_exit(mod_exit);
 
-static struct x86_cpu_id __maybe_unused via_rng_cpu_id[] = {
-	X86_FEATURE_MATCH(X86_FEATURE_XSTORE),
-	{}
-};
-
 MODULE_DESCRIPTION("H/W RNG driver for VIA CPU with PadLock");
 MODULE_LICENSE("GPL");
-MODULE_DEVICE_TABLE(x86cpu, via_rng_cpu_id);

@@ -14,13 +14,13 @@
  *
  */
 
-#ifndef	_LINUX_GOODIX_TOUCH_H
-#define	_LINUX_GOODIX_TOUCH_H
+#ifndef 	_LINUX_GOODIX_TOUCH_H
+#define		_LINUX_GOODIX_TOUCH_H
 
 #define GOODIX_I2C_NAME "Goodix-TS"
 #define GUITAR_GT80X
-#define TOUCH_MAX_HEIGHT	7680
-#define TOUCH_MAX_WIDTH		5120
+#define TOUCH_MAX_HEIGHT 	7680	
+#define TOUCH_MAX_WIDTH	 	5120
 
 #define GTP_HAVE_TOUCH_KEY    0
 #if GTP_HAVE_TOUCH_KEY
@@ -32,23 +32,23 @@
 
 #define GOODIX_MULTI_TOUCH
 #ifndef GOODIX_MULTI_TOUCH
-#define MAX_FINGER_NUM 5
+	#define MAX_FINGER_NUM 5
 #else
-#define MAX_FINGER_NUM 5
+	#define MAX_FINGER_NUM 5				//最大支持手指数(<=5)
 #endif
 #if defined(INT_PORT)
 	#if MAX_FINGER_NUM <= 3
-	#define READ_BYTES_NUM (1+2+MAX_FINGER_NUM*5)
+	#define READ_BYTES_NUM 1+2+MAX_FINGER_NUM*5
 	#elif MAX_FINGER_NUM == 4
-	#define READ_BYTES_NUM (1+28)
+	#define READ_BYTES_NUM 1+28
 	#elif MAX_FINGER_NUM == 5
-	#define READ_BYTES_NUM (1+34)
+	#define READ_BYTES_NUM 1+34
 	#endif
-#else
-	#define READ_BYTES_NUM (1+34)
+#else	
+	#define READ_BYTES_NUM 1+34
 #endif
 
-/* #define swap(x, y) do { typeof(x) z = x; x = y; y = z; } while (0) */
+//#define swap(x, y) do { typeof(x) z = x; x = y; y = z; } while (0)
 
 enum finger_state {
 #define FLAG_MASK 0x01
@@ -58,8 +58,10 @@ enum finger_state {
 };
 
 
-struct point_node {
+struct point_node
+{
 	uint8_t id;
+	//uint8_t retry;
 	enum finger_state state;
 	uint8_t pressure;
 	unsigned int x;
@@ -77,20 +79,20 @@ struct ts_event {
 	u16	x5;
 	u16	y5;
 	u16	pressure;
-	u8	touch_point;
+    u8  touch_point;
 };
 
 /* Notice: This definition used by platform_data.
  * It should be move this struct info to platform head file such as plat/ts.h.
- * If not used in client, it will be NULL in function of goodix_ts_probe.
- */
+ * If not used in client, it will be NULL in function of goodix_ts_probe. 
+ */ 
 struct goodix_i2c_platform_data {
-	uint32_t gpio_irq;		/* IRQ port, use macro such as "gpio_to_irq" to get Interrupt Number. */
-	uint32_t irq_cfg;		/* IRQ port config, must refer to master's Datasheet. */
-	uint32_t gpio_shutdown;		/* Shutdown port number */
-	uint32_t shutdown_cfg;		/* Shutdown port config */
-	uint32_t screen_width;		/* screen width */
-	uint32_t screen_height;		/* screen height */
-};
+	uint32_t gpio_irq;			//IRQ port, use macro such as "gpio_to_irq" to get Interrupt Number.
+	uint32_t irq_cfg;			//IRQ port config, must refer to master's Datasheet.
+	uint32_t gpio_shutdown;		        //Shutdown port number
+	uint32_t shutdown_cfg;		        //Shutdown port config
+	uint32_t screen_width;		        //screen width
+	uint32_t screen_height;		        //screen height
+}; 
 
 #endif /* _LINUX_GOODIX_TOUCH_H */

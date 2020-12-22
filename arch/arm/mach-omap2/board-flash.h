@@ -12,6 +12,7 @@
  */
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
+#include <plat/gpmc.h>
 
 #define PDC_NOR		1
 #define PDC_NAND	2
@@ -23,7 +24,10 @@ struct flash_partitions {
 	int nr_parts;
 };
 
-#if IS_ENABLED(CONFIG_MTD_NAND_OMAP2) || IS_ENABLED(CONFIG_MTD_ONENAND_OMAP2)
+#if defined(CONFIG_MTD_NAND_OMAP2) || \
+		defined(CONFIG_MTD_NAND_OMAP2_MODULE) || \
+		defined(CONFIG_MTD_ONENAND_OMAP2) || \
+		defined(CONFIG_MTD_ONENAND_OMAP2_MODULE)
 extern void board_flash_init(struct flash_partitions [],
 				char chip_sel[][GPMC_CS_NUM], int nand_type);
 #else
@@ -33,24 +37,13 @@ static inline void board_flash_init(struct flash_partitions part[],
 }
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_NAND_OMAP2)
+#if defined(CONFIG_MTD_NAND_OMAP2) || \
+		defined(CONFIG_MTD_NAND_OMAP2_MODULE)
 extern void board_nand_init(struct mtd_partition *nand_parts,
-		u8 nr_parts, u8 cs, int nand_type, struct gpmc_timings *gpmc_t);
-extern struct gpmc_timings nand_default_timings[];
+					u8 nr_parts, u8 cs, int nand_type);
 #else
 static inline void board_nand_init(struct mtd_partition *nand_parts,
-		u8 nr_parts, u8 cs, int nand_type, struct gpmc_timings *gpmc_t)
-{
-}
-#define	nand_default_timings	NULL
-#endif
-
-#if IS_ENABLED(CONFIG_MTD_ONENAND_OMAP2)
-extern void board_onenand_init(struct mtd_partition *nand_parts,
-					u8 nr_parts, u8 cs);
-#else
-static inline void board_onenand_init(struct mtd_partition *nand_parts,
-					u8 nr_parts, u8 cs)
+					u8 nr_parts, u8 cs, int nand_type)
 {
 }
 #endif

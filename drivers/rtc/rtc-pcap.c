@@ -139,14 +139,13 @@ static const struct rtc_class_ops pcap_rtc_ops = {
 	.alarm_irq_enable = pcap_rtc_alarm_irq_enable,
 };
 
-static int __init pcap_rtc_probe(struct platform_device *pdev)
+static int __devinit pcap_rtc_probe(struct platform_device *pdev)
 {
 	struct pcap_rtc *pcap_rtc;
 	int timer_irq, alarm_irq;
 	int err = -ENOMEM;
 
-	pcap_rtc = devm_kzalloc(&pdev->dev, sizeof(struct pcap_rtc),
-				GFP_KERNEL);
+	pcap_rtc = kmalloc(sizeof(struct pcap_rtc), GFP_KERNEL);
 	if (!pcap_rtc)
 		return err;
 
@@ -154,40 +153,68 @@ static int __init pcap_rtc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, pcap_rtc);
 
-	pcap_rtc->rtc = devm_rtc_device_register(&pdev->dev, "pcap",
-					&pcap_rtc_ops, THIS_MODULE);
-	if (IS_ERR(pcap_rtc->rtc))
-		return PTR_ERR(pcap_rtc->rtc);
+	pcap_rtc->rtc = rtc_device_register("pcap", &pdev->dev,
+				  &pcap_rtc_ops, THIS_MODULE);
+	if (IS_ERR(pcap_rtc->rtc)) {
+		err = PTR_ERR(pcap_rtc->rtc);
+		goto fail_rtc;
+	}
+
 
 	timer_irq = pcap_to_irq(pcap_rtc->pcap, PCAP_IRQ_1HZ);
 	alarm_irq = pcap_to_irq(pcap_rtc->pcap, PCAP_IRQ_TODA);
 
-	err = devm_request_irq(&pdev->dev, timer_irq, pcap_rtc_irq, 0,
-				"RTC Timer", pcap_rtc);
+	err = request_irq(timer_irq, pcap_rtc_irq, 0, "RTC Timer", pcap_rtc);
 	if (err)
-		return err;
+		goto fail_timer;
 
-	err = devm_request_irq(&pdev->dev, alarm_irq, pcap_rtc_irq, 0,
-				"RTC Alarm", pcap_rtc);
+	err = request_irq(alarm_irq, pcap_rtc_irq, 0, "RTC Alarm", pcap_rtc);
 	if (err)
-		return err;
+		goto fail_alarm;
 
 	return 0;
+fail_alarm:
+	free_irq(timer_irq, pcap_rtc);
+fail_timer:
+	rtc_device_unregister(pcap_rtc->rtc);
+fail_rtc:
+	platform_set_drvdata(pdev, NULL);
+	kfree(pcap_rtc);
+	return err;
 }
 
-static int __exit pcap_rtc_remove(struct platform_device *pdev)
+static int __devexit pcap_rtc_remove(struct platform_device *pdev)
 {
+	struct pcap_rtc *pcap_rtc = platform_get_drvdata(pdev);
+
+	free_irq(pcap_to_irq(pcap_rtc->pcap, PCAP_IRQ_1HZ), pcap_rtc);
+	free_irq(pcap_to_irq(pcap_rtc->pcap, PCAP_IRQ_TODA), pcap_rtc);
+	rtc_device_unregister(pcap_rtc->rtc);
+	kfree(pcap_rtc);
+
 	return 0;
 }
 
 static struct platform_driver pcap_rtc_driver = {
-	.remove = __exit_p(pcap_rtc_remove),
+	.remove = __devexit_p(pcap_rtc_remove),
 	.driver = {
 		.name  = "pcap-rtc",
+		.owner = THIS_MODULE,
 	},
 };
 
-module_platform_driver_probe(pcap_rtc_driver, pcap_rtc_probe);
+static int __init rtc_pcap_init(void)
+{
+	return platform_driver_probe(&pcap_rtc_driver, pcap_rtc_probe);
+}
+
+static void __exit rtc_pcap_exit(void)
+{
+	platform_driver_unregister(&pcap_rtc_driver);
+}
+
+module_init(rtc_pcap_init);
+module_exit(rtc_pcap_exit);
 
 MODULE_DESCRIPTION("Motorola pcap rtc driver");
 MODULE_AUTHOR("guiming zhuo <gmzhuo@gmail.com>");

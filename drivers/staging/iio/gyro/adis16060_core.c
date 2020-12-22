@@ -15,8 +15,8 @@
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 
-#include <linux/iio/iio.h>
-#include <linux/iio/sysfs.h>
+#include "../iio.h"
+#include "../sysfs.h"
 
 #define ADIS16060_GYRO		0x20 /* Measure Angular Rate (Gyro) */
 #define ADIS16060_TEMP_OUT	0x10 /* Measure Temperature */
@@ -67,7 +67,7 @@ static int adis16060_spi_read(struct iio_dev *indio_dev, u16 *val)
 	 * starts to place data MSB first on the DOUT line at
 	 * the 6th falling edge of SCLK
 	 */
-	if (!ret)
+	if (ret == 0)
 		*val = ((st->buf[0] & 0x3) << 12) |
 			(st->buf[1] << 4) |
 			((st->buf[2] >> 4) & 0xF);
@@ -85,17 +85,15 @@ static int adis16060_read_raw(struct iio_dev *indio_dev,
 	int ret;
 
 	switch (mask) {
-	case IIO_CHAN_INFO_RAW:
+	case 0:
 		/* Take the iio_dev status lock */
 		mutex_lock(&indio_dev->mlock);
 		ret = adis16060_spi_write(indio_dev, chan->address);
-		if (ret < 0)
-			goto out_unlock;
-
+		if (ret < 0) {
+			mutex_unlock(&indio_dev->mlock);
+			return ret;
+		}
 		ret = adis16060_spi_read(indio_dev, &tval);
-		if (ret < 0)
-			goto out_unlock;
-
 		mutex_unlock(&indio_dev->mlock);
 		*val = tval;
 		return IIO_VAL_INT;
@@ -110,10 +108,6 @@ static int adis16060_read_raw(struct iio_dev *indio_dev,
 	}
 
 	return -EINVAL;
-
-out_unlock:
-	mutex_unlock(&indio_dev->mlock);
-	return ret;
 }
 
 static const struct iio_info adis16060_info = {
@@ -126,40 +120,39 @@ static const struct iio_chan_spec adis16060_channels[] = {
 		.type = IIO_ANGL_VEL,
 		.modified = 1,
 		.channel2 = IIO_MOD_Z,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 		.address = ADIS16060_GYRO,
 	}, {
 		.type = IIO_VOLTAGE,
 		.indexed = 1,
 		.channel = 0,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 		.address = ADIS16060_AIN1,
 	}, {
 		.type = IIO_VOLTAGE,
 		.indexed = 1,
 		.channel = 1,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 		.address = ADIS16060_AIN2,
 	}, {
 		.type = IIO_TEMP,
 		.indexed = 1,
 		.channel = 0,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
-		BIT(IIO_CHAN_INFO_OFFSET) | BIT(IIO_CHAN_INFO_SCALE),
+		.info_mask = IIO_CHAN_INFO_OFFSET_SEPARATE_BIT |
+		IIO_CHAN_INFO_SCALE_SEPARATE_BIT,
 		.address = ADIS16060_TEMP_OUT,
 	}
 };
 
-static int adis16060_r_probe(struct spi_device *spi)
+static int __devinit adis16060_r_probe(struct spi_device *spi)
 {
 	int ret;
 	struct adis16060_state *st;
 	struct iio_dev *indio_dev;
 
 	/* setup the industrialio driver allocated elements */
-	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
-	if (!indio_dev)
-		return -ENOMEM;
+	indio_dev = iio_allocate_device(sizeof(*st));
+	if (indio_dev == NULL) {
+		ret = -ENOMEM;
+		goto error_ret;
+	}
 	/* this is only used for removal purposes */
 	spi_set_drvdata(spi, indio_dev);
 	st = iio_priv(indio_dev);
@@ -173,20 +166,33 @@ static int adis16060_r_probe(struct spi_device *spi)
 	indio_dev->channels = adis16060_channels;
 	indio_dev->num_channels = ARRAY_SIZE(adis16060_channels);
 
-	ret = devm_iio_device_register(&spi->dev, indio_dev);
+	ret = iio_device_register(indio_dev);
 	if (ret)
-		return ret;
+		goto error_free_dev;
 
 	adis16060_iio_dev = indio_dev;
 	return 0;
+
+error_free_dev:
+	iio_free_device(indio_dev);
+error_ret:
+	return ret;
 }
 
-static int adis16060_w_probe(struct spi_device *spi)
+/* fixme, confirm ordering in this function */
+static int adis16060_r_remove(struct spi_device *spi)
+{
+	iio_device_unregister(spi_get_drvdata(spi));
+	iio_free_device(spi_get_drvdata(spi));
+
+	return 0;
+}
+
+static int __devinit adis16060_w_probe(struct spi_device *spi)
 {
 	int ret;
 	struct iio_dev *indio_dev = adis16060_iio_dev;
 	struct adis16060_state *st;
-
 	if (!indio_dev) {
 		ret =  -ENODEV;
 		goto error_ret;
@@ -208,16 +214,19 @@ static int adis16060_w_remove(struct spi_device *spi)
 static struct spi_driver adis16060_r_driver = {
 	.driver = {
 		.name = "adis16060_r",
+		.owner = THIS_MODULE,
 	},
 	.probe = adis16060_r_probe,
+	.remove = __devexit_p(adis16060_r_remove),
 };
 
 static struct spi_driver adis16060_w_driver = {
 	.driver = {
 		.name = "adis16060_w",
+		.owner = THIS_MODULE,
 	},
 	.probe = adis16060_w_probe,
-	.remove = adis16060_w_remove,
+	.remove = __devexit_p(adis16060_w_remove),
 };
 
 static __init int adis16060_init(void)

@@ -188,7 +188,6 @@ static void r592_host_reset(struct r592_device *dev)
 	r592_set_mode(dev, dev->parallel_mode);
 }
 
-#ifdef CONFIG_PM_SLEEP
 /* Disable all hardware interrupts */
 static void r592_clear_interrupts(struct r592_device *dev)
 {
@@ -196,7 +195,6 @@ static void r592_clear_interrupts(struct r592_device *dev)
 	r592_clear_reg_mask(dev, R592_REG_MSC, IRQ_ALL_ACK_MASK);
 	r592_clear_reg_mask(dev, R592_REG_MSC, IRQ_ALL_EN_MASK);
 }
-#endif
 
 /* Tests if there is an CRC error */
 static int r592_test_io_error(struct r592_device *dev)
@@ -292,13 +290,14 @@ static int r592_transfer_fifo_dma(struct r592_device *dev)
 	dbg_verbose("doing dma transfer");
 
 	dev->dma_error = 0;
-	reinit_completion(&dev->dma_done);
+	INIT_COMPLETION(dev->dma_done);
 
 	/* TODO: hidden assumption about nenth beeing always 1 */
 	sg_count = dma_map_sg(&dev->pci_dev->dev, &dev->req->sg, 1, is_write ?
 		PCI_DMA_TODEVICE : PCI_DMA_FROMDEVICE);
 
-	if (sg_count != 1 || sg_dma_len(&dev->req->sg) < R592_LFIFO_SIZE) {
+	if (sg_count != 1 ||
+			(sg_dma_len(&dev->req->sg) < dev->req->sg.length)) {
 		message("problem in dma_map_sg");
 		return -EIO;
 	}
@@ -455,7 +454,7 @@ static int r592_transfer_fifo_pio(struct r592_device *dev)
 /* Executes one TPC (data is read/written from small or large fifo) */
 static void r592_execute_tpc(struct r592_device *dev)
 {
-	bool is_write;
+	bool is_write = dev->req->tpc >= MS_TPC_SET_RW_REG_ADRS;
 	int len, error;
 	u32 status, reg;
 
@@ -464,7 +463,6 @@ static void r592_execute_tpc(struct r592_device *dev)
 		return;
 	}
 
-	is_write = dev->req->tpc >= MS_TPC_SET_RW_REG_ADRS;
 	len = dev->req->long_data ?
 		dev->req->sg.length : dev->req->data_len;
 
@@ -753,7 +751,7 @@ static int r592_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto error2;
 
 	pci_set_master(pdev);
-	error = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+	error = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
 	if (error)
 		goto error3;
 
@@ -786,8 +784,8 @@ static int r592_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	/* This is just a precation, so don't fail */
-	dev->dummy_dma_page = dma_alloc_coherent(&pdev->dev, PAGE_SIZE,
-		&dev->dummy_dma_page_physical_address, GFP_KERNEL);
+	dev->dummy_dma_page = pci_alloc_consistent(pdev, PAGE_SIZE,
+		&dev->dummy_dma_page_physical_address);
 	r592_stop_dma(dev , 0);
 
 	if (request_irq(dev->irq, &r592_irq, IRQF_SHARED,
@@ -804,7 +802,7 @@ error7:
 	free_irq(dev->irq, dev);
 error6:
 	if (dev->dummy_dma_page)
-		dma_free_coherent(&pdev->dev, PAGE_SIZE, dev->dummy_dma_page,
+		pci_free_consistent(pdev, PAGE_SIZE, dev->dummy_dma_page,
 			dev->dummy_dma_page_physical_address);
 
 	kthread_stop(dev->io_thread);
@@ -844,11 +842,11 @@ static void r592_remove(struct pci_dev *pdev)
 	memstick_free_host(dev->host);
 
 	if (dev->dummy_dma_page)
-		dma_free_coherent(&pdev->dev, PAGE_SIZE, dev->dummy_dma_page,
+		pci_free_consistent(pdev, PAGE_SIZE, dev->dummy_dma_page,
 			dev->dummy_dma_page_physical_address);
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int r592_suspend(struct device *core_dev)
 {
 	struct pci_dev *pdev = to_pci_dev(core_dev);
@@ -871,9 +869,9 @@ static int r592_resume(struct device *core_dev)
 	r592_update_card_detect(dev);
 	return 0;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(r592_pm_ops, r592_suspend, r592_resume);
+SIMPLE_DEV_PM_OPS(r592_pm_ops, r592_suspend, r592_resume);
+#endif
 
 MODULE_DEVICE_TABLE(pci, r592_pci_id_tbl);
 
@@ -882,10 +880,23 @@ static struct pci_driver r852_pci_driver = {
 	.id_table	= r592_pci_id_tbl,
 	.probe		= r592_probe,
 	.remove		= r592_remove,
+#ifdef CONFIG_PM
 	.driver.pm	= &r592_pm_ops,
+#endif
 };
 
-module_pci_driver(r852_pci_driver);
+static __init int r592_module_init(void)
+{
+	return pci_register_driver(&r852_pci_driver);
+}
+
+static void __exit r592_module_exit(void)
+{
+	pci_unregister_driver(&r852_pci_driver);
+}
+
+module_init(r592_module_init);
+module_exit(r592_module_exit);
 
 module_param_named(enable_dma, r592_enable_dma, bool, S_IRUGO);
 MODULE_PARM_DESC(enable_dma, "Enable usage of the DMA (default)");

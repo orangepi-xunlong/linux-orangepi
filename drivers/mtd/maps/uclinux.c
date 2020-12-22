@@ -4,13 +4,11 @@
  *	uclinux.c -- generic memory mapped MTD driver for uclinux
  *
  *	(C) Copyright 2002, Greg Ungerer (gerg@snapgear.com)
- *
- *      License: GPL
  */
 
 /****************************************************************************/
 
-#include <linux/moduleparam.h>
+#include <linux/module.h>
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -21,29 +19,16 @@
 #include <linux/mtd/map.h>
 #include <linux/mtd/partitions.h>
 #include <asm/io.h>
-#include <asm/sections.h>
 
 /****************************************************************************/
 
-#ifdef CONFIG_MTD_ROM
-#define MAP_NAME "rom"
-#else
-#define MAP_NAME "ram"
-#endif
-
-/*
- * Blackfin uses uclinux_ram_map during startup, so it must not be static.
- * Provide a dummy declaration to make sparse happy.
- */
-extern struct map_info uclinux_ram_map;
+extern char _ebss;
 
 struct map_info uclinux_ram_map = {
-	.name = MAP_NAME,
+	.name = "RAM",
+	.phys = (unsigned long)&_ebss,
 	.size = 0,
 };
-
-static unsigned long physaddr = -1;
-module_param(physaddr, ulong, S_IRUGO);
 
 static struct mtd_info *uclinux_ram_mtdinfo;
 
@@ -76,37 +61,26 @@ static int __init uclinux_mtd_init(void)
 	struct map_info *mapp;
 
 	mapp = &uclinux_ram_map;
-
-	if (physaddr == -1)
-		mapp->phys = (resource_size_t)__bss_stop;
-	else
-		mapp->phys = physaddr;
-
 	if (!mapp->size)
 		mapp->size = PAGE_ALIGN(ntohl(*((unsigned long *)(mapp->phys + 8))));
 	mapp->bankwidth = 4;
 
-	printk("uclinux[mtd]: probe address=0x%x size=0x%x\n",
+	printk("uclinux[mtd]: RAM probe address=0x%x size=0x%x\n",
 	       	(int) mapp->phys, (int) mapp->size);
 
-	/*
-	 * The filesystem is guaranteed to be in direct mapped memory. It is
-	 * directly following the kernels own bss region. Following the same
-	 * mechanism used by architectures setting up traditional initrds we
-	 * use phys_to_virt to get the virtual address of its start.
-	 */
-	mapp->virt = phys_to_virt(mapp->phys);
+	mapp->virt = ioremap_nocache(mapp->phys, mapp->size);
 
 	if (mapp->virt == 0) {
-		printk("uclinux[mtd]: no virtual mapping?\n");
+		printk("uclinux[mtd]: ioremap_nocache() failed\n");
 		return(-EIO);
 	}
 
 	simple_map_init(mapp);
 
-	mtd = do_map_probe("map_" MAP_NAME, mapp);
+	mtd = do_map_probe("map_ram", mapp);
 	if (!mtd) {
 		printk("uclinux[mtd]: failed to find a mapping?\n");
+		iounmap(mapp->virt);
 		return(-ENXIO);
 	}
 
@@ -119,6 +93,29 @@ static int __init uclinux_mtd_init(void)
 
 	return(0);
 }
-device_initcall(uclinux_mtd_init);
+
+/****************************************************************************/
+
+static void __exit uclinux_mtd_cleanup(void)
+{
+	if (uclinux_ram_mtdinfo) {
+		mtd_device_unregister(uclinux_ram_mtdinfo);
+		map_destroy(uclinux_ram_mtdinfo);
+		uclinux_ram_mtdinfo = NULL;
+	}
+	if (uclinux_ram_map.virt) {
+		iounmap((void *) uclinux_ram_map.virt);
+		uclinux_ram_map.virt = 0;
+	}
+}
+
+/****************************************************************************/
+
+module_init(uclinux_mtd_init);
+module_exit(uclinux_mtd_cleanup);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Greg Ungerer <gerg@snapgear.com>");
+MODULE_DESCRIPTION("Generic RAM based MTD for uClinux");
 
 /****************************************************************************/

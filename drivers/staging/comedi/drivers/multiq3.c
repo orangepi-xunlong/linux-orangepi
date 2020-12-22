@@ -1,183 +1,211 @@
 /*
- * multiq3.c
- * Hardware driver for Quanser Consulting MultiQ-3 board
- *
- * COMEDI - Linux Control and Measurement Device Interface
- * Copyright (C) 1999 Anders Blomdell <anders.blomdell@control.lth.se>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+   comedi/drivers/multiq3.c
+   Hardware driver for Quanser Consulting MultiQ-3 board
 
+   COMEDI - Linux Control and Measurement Device Interface
+   Copyright (C) 1999 Anders Blomdell <anders.blomdell@control.lth.se>
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+ */
 /*
- * Driver: multiq3
- * Description: Quanser Consulting MultiQ-3
- * Devices: [Quanser Consulting] MultiQ-3 (multiq3)
- * Author: Anders Blomdell <anders.blomdell@control.lth.se>
- * Status: works
- *
- * Configuration Options:
- *  [0] - I/O port base address
- *  [1] - IRQ (not used)
- *  [2] - Number of optional encoder chips installed on board
- *	  0 = none
- *	  1 = 2 inputs (Model -2E)
- *	  2 = 4 inputs (Model -4E)
- *	  3 = 6 inputs (Model -6E)
- *	  4 = 8 inputs (Model -8E)
- */
+Driver: multiq3
+Description: Quanser Consulting MultiQ-3
+Author: Anders Blomdell <anders.blomdell@control.lth.se>
+Status: works
+Devices: [Quanser Consulting] MultiQ-3 (multiq3)
 
-#include <linux/module.h>
+*/
 
+#include <linux/interrupt.h>
 #include "../comedidev.h"
 
-/*
- * Register map
- */
-#define MULTIQ3_DI_REG			0x00
-#define MULTIQ3_DO_REG			0x00
-#define MULTIQ3_AO_REG			0x02
-#define MULTIQ3_AI_REG			0x04
-#define MULTIQ3_AI_CONV_REG		0x04
-#define MULTIQ3_STATUS_REG		0x06
-#define MULTIQ3_STATUS_EOC		BIT(3)
-#define MULTIQ3_STATUS_EOC_I		BIT(4)
-#define MULTIQ3_CTRL_REG		0x06
-#define MULTIQ3_CTRL_AO_CHAN(x)		(((x) & 0x7) << 0)
-#define MULTIQ3_CTRL_RC(x)		(((x) & 0x3) << 0)
-#define MULTIQ3_CTRL_AI_CHAN(x)		(((x) & 0x7) << 3)
-#define MULTIQ3_CTRL_E_CHAN(x)		(((x) & 0x7) << 3)
-#define MULTIQ3_CTRL_EN			BIT(6)
-#define MULTIQ3_CTRL_AZ			BIT(7)
-#define MULTIQ3_CTRL_CAL		BIT(8)
-#define MULTIQ3_CTRL_SH			BIT(9)
-#define MULTIQ3_CTRL_CLK		BIT(10)
-#define MULTIQ3_CTRL_LD			(3 << 11)
-#define MULTIQ3_CLK_REG			0x08
-#define MULTIQ3_ENC_DATA_REG		0x0c
-#define MULTIQ3_ENC_CTRL_REG		0x0e
+#include <linux/ioport.h>
+
+#define MULTIQ3_SIZE 16
 
 /*
- * Encoder chip commands (from the programming manual)
+ * MULTIQ-3 port offsets
  */
-#define MULTIQ3_CLOCK_DATA		0x00	/* FCK frequency divider */
-#define MULTIQ3_CLOCK_SETUP		0x18	/* xfer PR0 to PSC */
-#define MULTIQ3_INPUT_SETUP		0x41	/* enable inputs A and B */
-#define MULTIQ3_QUAD_X4			0x38	/* quadrature */
-#define MULTIQ3_BP_RESET		0x01	/* reset byte pointer */
-#define MULTIQ3_CNTR_RESET		0x02	/* reset counter */
-#define MULTIQ3_TRSFRPR_CTR		0x08	/* xfre preset reg to counter */
-#define MULTIQ3_TRSFRCNTR_OL		0x10	/* xfer CNTR to OL (x and y) */
-#define MULTIQ3_EFLAG_RESET		0x06	/* reset E bit of flag reg */
+#define MULTIQ3_DIGIN_PORT 0
+#define MULTIQ3_DIGOUT_PORT 0
+#define MULTIQ3_DAC_DATA 2
+#define MULTIQ3_AD_DATA 4
+#define MULTIQ3_AD_CS 4
+#define MULTIQ3_STATUS 6
+#define MULTIQ3_CONTROL 6
+#define MULTIQ3_CLK_DATA 8
+#define MULTIQ3_ENC_DATA 12
+#define MULTIQ3_ENC_CONTROL 14
 
-static void multiq3_set_ctrl(struct comedi_device *dev, unsigned int bits)
+/*
+ * flags for CONTROL register
+ */
+#define MULTIQ3_AD_MUX_EN      0x0040
+#define MULTIQ3_AD_AUTOZ       0x0080
+#define MULTIQ3_AD_AUTOCAL     0x0100
+#define MULTIQ3_AD_SH          0x0200
+#define MULTIQ3_AD_CLOCK_4M    0x0400
+#define MULTIQ3_DA_LOAD                0x1800
+
+#define MULTIQ3_CONTROL_MUST    0x0600
+
+/*
+ * flags for STATUS register
+ */
+#define MULTIQ3_STATUS_EOC      0x008
+#define MULTIQ3_STATUS_EOC_I    0x010
+
+/*
+ * flags for encoder control
+ */
+#define MULTIQ3_CLOCK_DATA      0x00
+#define MULTIQ3_CLOCK_SETUP     0x18
+#define MULTIQ3_INPUT_SETUP     0x41
+#define MULTIQ3_QUAD_X4         0x38
+#define MULTIQ3_BP_RESET        0x01
+#define MULTIQ3_CNTR_RESET      0x02
+#define MULTIQ3_TRSFRPR_CTR     0x08
+#define MULTIQ3_TRSFRCNTR_OL    0x10
+#define MULTIQ3_EFLAG_RESET     0x06
+
+#define MULTIQ3_TIMEOUT 30
+
+static int multiq3_attach(struct comedi_device *dev,
+			  struct comedi_devconfig *it);
+static int multiq3_detach(struct comedi_device *dev);
+static struct comedi_driver driver_multiq3 = {
+	.driver_name = "multiq3",
+	.module = THIS_MODULE,
+	.attach = multiq3_attach,
+	.detach = multiq3_detach,
+};
+
+static int __init driver_multiq3_init_module(void)
 {
-	/*
-	 * According to the programming manual, the SH and CLK bits should
-	 * be kept high at all times.
-	 */
-	outw(MULTIQ3_CTRL_SH | MULTIQ3_CTRL_CLK | bits,
-	     dev->iobase + MULTIQ3_CTRL_REG);
+	return comedi_driver_register(&driver_multiq3);
 }
 
-static int multiq3_ai_status(struct comedi_device *dev,
-			     struct comedi_subdevice *s,
-			     struct comedi_insn *insn,
-			     unsigned long context)
+static void __exit driver_multiq3_cleanup_module(void)
 {
-	unsigned int status;
-
-	status = inw(dev->iobase + MULTIQ3_STATUS_REG);
-	if (status & context)
-		return 0;
-	return -EBUSY;
+	comedi_driver_unregister(&driver_multiq3);
 }
+
+module_init(driver_multiq3_init_module);
+module_exit(driver_multiq3_cleanup_module);
+
+struct multiq3_private {
+	unsigned int ao_readback[2];
+};
+#define devpriv ((struct multiq3_private *)dev->private)
 
 static int multiq3_ai_insn_read(struct comedi_device *dev,
 				struct comedi_subdevice *s,
-				struct comedi_insn *insn,
-				unsigned int *data)
+				struct comedi_insn *insn, unsigned int *data)
 {
-	unsigned int chan = CR_CHAN(insn->chanspec);
-	unsigned int val;
-	int ret;
-	int i;
+	int i, n;
+	int chan;
+	unsigned int hi, lo;
 
-	multiq3_set_ctrl(dev, MULTIQ3_CTRL_EN | MULTIQ3_CTRL_AI_CHAN(chan));
+	chan = CR_CHAN(insn->chanspec);
+	outw(MULTIQ3_CONTROL_MUST | MULTIQ3_AD_MUX_EN | (chan << 3),
+	     dev->iobase + MULTIQ3_CONTROL);
 
-	ret = comedi_timeout(dev, s, insn, multiq3_ai_status,
-			     MULTIQ3_STATUS_EOC);
-	if (ret)
-		return ret;
+	for (i = 0; i < MULTIQ3_TIMEOUT; i++) {
+		if (inw(dev->iobase + MULTIQ3_STATUS) & MULTIQ3_STATUS_EOC)
+			break;
+	}
+	if (i == MULTIQ3_TIMEOUT)
+		return -ETIMEDOUT;
 
-	for (i = 0; i < insn->n; i++) {
-		outw(0, dev->iobase + MULTIQ3_AI_CONV_REG);
+	for (n = 0; n < insn->n; n++) {
+		outw(0, dev->iobase + MULTIQ3_AD_CS);
+		for (i = 0; i < MULTIQ3_TIMEOUT; i++) {
+			if (inw(dev->iobase +
+				MULTIQ3_STATUS) & MULTIQ3_STATUS_EOC_I)
+				break;
+		}
+		if (i == MULTIQ3_TIMEOUT)
+			return -ETIMEDOUT;
 
-		ret = comedi_timeout(dev, s, insn, multiq3_ai_status,
-				     MULTIQ3_STATUS_EOC_I);
-		if (ret)
-			return ret;
-
-		/* get a 16-bit sample; mask it to the subdevice resolution */
-		val = inb(dev->iobase + MULTIQ3_AI_REG) << 8;
-		val |= inb(dev->iobase + MULTIQ3_AI_REG);
-		val &= s->maxdata;
-
-		/* munge the 2's complement value to offset binary */
-		data[i] = comedi_offset_munge(s, val);
+		hi = inb(dev->iobase + MULTIQ3_AD_CS);
+		lo = inb(dev->iobase + MULTIQ3_AD_CS);
+		data[n] = (((hi << 8) | lo) + 0x1000) & 0x1fff;
 	}
 
-	return insn->n;
+	return n;
+}
+
+static int multiq3_ao_insn_read(struct comedi_device *dev,
+				struct comedi_subdevice *s,
+				struct comedi_insn *insn, unsigned int *data)
+{
+	int i;
+	int chan = CR_CHAN(insn->chanspec);
+
+	for (i = 0; i < insn->n; i++)
+		data[i] = devpriv->ao_readback[chan];
+
+	return i;
 }
 
 static int multiq3_ao_insn_write(struct comedi_device *dev,
 				 struct comedi_subdevice *s,
-				 struct comedi_insn *insn,
-				 unsigned int *data)
+				 struct comedi_insn *insn, unsigned int *data)
 {
-	unsigned int chan = CR_CHAN(insn->chanspec);
-	unsigned int val = s->readback[chan];
 	int i;
+	int chan = CR_CHAN(insn->chanspec);
 
 	for (i = 0; i < insn->n; i++) {
-		val = data[i];
-		multiq3_set_ctrl(dev, MULTIQ3_CTRL_LD |
-				      MULTIQ3_CTRL_AO_CHAN(chan));
-		outw(val, dev->iobase + MULTIQ3_AO_REG);
-		multiq3_set_ctrl(dev, 0);
-	}
-	s->readback[chan] = val;
+		outw(MULTIQ3_CONTROL_MUST | MULTIQ3_DA_LOAD | chan,
+		     dev->iobase + MULTIQ3_CONTROL);
+		outw(data[i], dev->iobase + MULTIQ3_DAC_DATA);
+		outw(MULTIQ3_CONTROL_MUST, dev->iobase + MULTIQ3_CONTROL);
 
-	return insn->n;
+		devpriv->ao_readback[chan] = data[i];
+	}
+
+	return i;
 }
 
 static int multiq3_di_insn_bits(struct comedi_device *dev,
 				struct comedi_subdevice *s,
 				struct comedi_insn *insn, unsigned int *data)
 {
-	data[1] = inw(dev->iobase + MULTIQ3_DI_REG);
+	if (insn->n != 2)
+		return -EINVAL;
 
-	return insn->n;
+	data[1] = inw(dev->iobase + MULTIQ3_DIGIN_PORT);
+
+	return 2;
 }
 
 static int multiq3_do_insn_bits(struct comedi_device *dev,
 				struct comedi_subdevice *s,
-				struct comedi_insn *insn,
-				unsigned int *data)
+				struct comedi_insn *insn, unsigned int *data)
 {
-	if (comedi_dio_update_state(s, data))
-		outw(s->state, dev->iobase + MULTIQ3_DO_REG);
+	if (insn->n != 2)
+		return -EINVAL;
+
+	s->state &= ~data[0];
+	s->state |= (data[0] & data[1]);
+	outw(s->state, dev->iobase + MULTIQ3_DIGOUT_PORT);
 
 	data[1] = s->state;
 
-	return insn->n;
+	return 2;
 }
 
 static int multiq3_encoder_insn_read(struct comedi_device *dev,
@@ -185,157 +213,143 @@ static int multiq3_encoder_insn_read(struct comedi_device *dev,
 				     struct comedi_insn *insn,
 				     unsigned int *data)
 {
-	unsigned int chan = CR_CHAN(insn->chanspec);
-	unsigned int val;
-	int i;
+	int n;
+	int chan = CR_CHAN(insn->chanspec);
+	int control = MULTIQ3_CONTROL_MUST | MULTIQ3_AD_MUX_EN | (chan << 3);
 
-	for (i = 0; i < insn->n; i++) {
-		/* select encoder channel */
-		multiq3_set_ctrl(dev, MULTIQ3_CTRL_EN |
-				      MULTIQ3_CTRL_E_CHAN(chan));
-
-		/* reset the byte pointer */
-		outb(MULTIQ3_BP_RESET, dev->iobase + MULTIQ3_ENC_CTRL_REG);
-
-		/* latch the data */
-		outb(MULTIQ3_TRSFRCNTR_OL, dev->iobase + MULTIQ3_ENC_CTRL_REG);
-
-		/* read the 24-bit encoder data (lsb/mid/msb) */
-		val = inb(dev->iobase + MULTIQ3_ENC_DATA_REG);
-		val |= (inb(dev->iobase + MULTIQ3_ENC_DATA_REG) << 8);
-		val |= (inb(dev->iobase + MULTIQ3_ENC_DATA_REG) << 16);
-
-		/*
-		 * Munge the data so that the reset value is in the middle
-		 * of the maxdata range, i.e.:
-		 *
-		 * real value	comedi value
-		 * 0xffffff	0x7fffff	1 negative count
-		 * 0x000000	0x800000	reset value
-		 * 0x000001	0x800001	1 positive count
-		 *
-		 * It's possible for the 24-bit counter to overflow but it
-		 * would normally take _quite_ a few turns. A 2000 line
-		 * encoder in quadrature results in 8000 counts/rev. So about
-		 * 1048 turns in either direction can be measured without
-		 * an overflow.
-		 */
-		data[i] = (val + ((s->maxdata + 1) >> 1)) & s->maxdata;
+	for (n = 0; n < insn->n; n++) {
+		int value;
+		outw(control, dev->iobase + MULTIQ3_CONTROL);
+		outb(MULTIQ3_BP_RESET, dev->iobase + MULTIQ3_ENC_CONTROL);
+		outb(MULTIQ3_TRSFRCNTR_OL, dev->iobase + MULTIQ3_ENC_CONTROL);
+		value = inb(dev->iobase + MULTIQ3_ENC_DATA);
+		value |= (inb(dev->iobase + MULTIQ3_ENC_DATA) << 8);
+		value |= (inb(dev->iobase + MULTIQ3_ENC_DATA) << 16);
+		data[n] = (value + 0x800000) & 0xffffff;
 	}
 
-	return insn->n;
+	return n;
 }
 
-static void multiq3_encoder_reset(struct comedi_device *dev,
-				  unsigned int chan)
+static void encoder_reset(struct comedi_device *dev)
 {
-	multiq3_set_ctrl(dev, MULTIQ3_CTRL_EN | MULTIQ3_CTRL_E_CHAN(chan));
-	outb(MULTIQ3_EFLAG_RESET, dev->iobase + MULTIQ3_ENC_CTRL_REG);
-	outb(MULTIQ3_BP_RESET, dev->iobase + MULTIQ3_ENC_CTRL_REG);
-	outb(MULTIQ3_CLOCK_DATA, dev->iobase + MULTIQ3_ENC_DATA_REG);
-	outb(MULTIQ3_CLOCK_SETUP, dev->iobase + MULTIQ3_ENC_CTRL_REG);
-	outb(MULTIQ3_INPUT_SETUP, dev->iobase + MULTIQ3_ENC_CTRL_REG);
-	outb(MULTIQ3_QUAD_X4, dev->iobase + MULTIQ3_ENC_CTRL_REG);
-	outb(MULTIQ3_CNTR_RESET, dev->iobase + MULTIQ3_ENC_CTRL_REG);
-}
-
-static int multiq3_encoder_insn_config(struct comedi_device *dev,
-				       struct comedi_subdevice *s,
-				       struct comedi_insn *insn,
-				       unsigned int *data)
-{
-	unsigned int chan = CR_CHAN(insn->chanspec);
-
-	switch (data[0]) {
-	case INSN_CONFIG_RESET:
-		multiq3_encoder_reset(dev, chan);
-		break;
-	default:
-		return -EINVAL;
+	int chan;
+	for (chan = 0; chan < dev->subdevices[4].n_chan; chan++) {
+		int control =
+		    MULTIQ3_CONTROL_MUST | MULTIQ3_AD_MUX_EN | (chan << 3);
+		outw(control, dev->iobase + MULTIQ3_CONTROL);
+		outb(MULTIQ3_EFLAG_RESET, dev->iobase + MULTIQ3_ENC_CONTROL);
+		outb(MULTIQ3_BP_RESET, dev->iobase + MULTIQ3_ENC_CONTROL);
+		outb(MULTIQ3_CLOCK_DATA, dev->iobase + MULTIQ3_ENC_DATA);
+		outb(MULTIQ3_CLOCK_SETUP, dev->iobase + MULTIQ3_ENC_CONTROL);
+		outb(MULTIQ3_INPUT_SETUP, dev->iobase + MULTIQ3_ENC_CONTROL);
+		outb(MULTIQ3_QUAD_X4, dev->iobase + MULTIQ3_ENC_CONTROL);
+		outb(MULTIQ3_CNTR_RESET, dev->iobase + MULTIQ3_ENC_CONTROL);
 	}
-
-	return insn->n;
 }
+
+/*
+   options[0] - I/O port
+   options[1] - irq
+   options[2] - number of encoder chips installed
+ */
 
 static int multiq3_attach(struct comedi_device *dev,
 			  struct comedi_devconfig *it)
 {
+	int result = 0;
+	unsigned long iobase;
+	unsigned int irq;
 	struct comedi_subdevice *s;
-	int ret;
-	int i;
 
-	ret = comedi_request_region(dev, it->options[0], 0x10);
-	if (ret)
-		return ret;
+	iobase = it->options[0];
+	printk(KERN_INFO "comedi%d: multiq3: 0x%04lx ", dev->minor, iobase);
+	if (!request_region(iobase, MULTIQ3_SIZE, "multiq3")) {
+		printk(KERN_ERR "comedi%d: I/O port conflict\n", dev->minor);
+		return -EIO;
+	}
 
-	ret = comedi_alloc_subdevices(dev, 5);
-	if (ret)
-		return ret;
+	dev->iobase = iobase;
 
-	/* Analog Input subdevice */
-	s = &dev->subdevices[0];
-	s->type		= COMEDI_SUBD_AI;
-	s->subdev_flags	= SDF_READABLE | SDF_GROUND;
-	s->n_chan	= 8;
-	s->maxdata	= 0x1fff;
-	s->range_table	= &range_bipolar5;
-	s->insn_read	= multiq3_ai_insn_read;
+	irq = it->options[1];
+	if (irq)
+		printk(KERN_WARNING "comedi%d: irq = %u ignored\n",
+			dev->minor, irq);
+	else
+		printk(KERN_WARNING "comedi%d: no irq\n", dev->minor);
+	dev->board_name = "multiq3";
+	result = alloc_subdevices(dev, 5);
+	if (result < 0)
+		return result;
 
-	/* Analog Output subdevice */
-	s = &dev->subdevices[1];
-	s->type		= COMEDI_SUBD_AO;
-	s->subdev_flags	= SDF_WRITABLE;
-	s->n_chan	= 8;
-	s->maxdata	= 0x0fff;
-	s->range_table	= &range_bipolar5;
-	s->insn_write	= multiq3_ao_insn_write;
+	result = alloc_private(dev, sizeof(struct multiq3_private));
+	if (result < 0)
+		return result;
 
-	ret = comedi_alloc_subdev_readback(s);
-	if (ret)
-		return ret;
+	s = dev->subdevices + 0;
+	/* ai subdevice */
+	s->type = COMEDI_SUBD_AI;
+	s->subdev_flags = SDF_READABLE | SDF_GROUND;
+	s->n_chan = 8;
+	s->insn_read = multiq3_ai_insn_read;
+	s->maxdata = 0x1fff;
+	s->range_table = &range_bipolar5;
 
-	/* Digital Input subdevice */
-	s = &dev->subdevices[2];
-	s->type		= COMEDI_SUBD_DI;
-	s->subdev_flags	= SDF_READABLE;
-	s->n_chan	= 16;
-	s->maxdata	= 1;
-	s->range_table	= &range_digital;
-	s->insn_bits	= multiq3_di_insn_bits;
+	s = dev->subdevices + 1;
+	/* ao subdevice */
+	s->type = COMEDI_SUBD_AO;
+	s->subdev_flags = SDF_WRITABLE;
+	s->n_chan = 8;
+	s->insn_read = multiq3_ao_insn_read;
+	s->insn_write = multiq3_ao_insn_write;
+	s->maxdata = 0xfff;
+	s->range_table = &range_bipolar5;
 
-	/* Digital Output subdevice */
-	s = &dev->subdevices[3];
-	s->type		= COMEDI_SUBD_DO;
-	s->subdev_flags	= SDF_WRITABLE;
-	s->n_chan	= 16;
-	s->maxdata	= 1;
-	s->range_table	= &range_digital;
-	s->insn_bits	= multiq3_do_insn_bits;
+	s = dev->subdevices + 2;
+	/* di subdevice */
+	s->type = COMEDI_SUBD_DI;
+	s->subdev_flags = SDF_READABLE;
+	s->n_chan = 16;
+	s->insn_bits = multiq3_di_insn_bits;
+	s->maxdata = 1;
+	s->range_table = &range_digital;
 
-	/* Encoder (Counter) subdevice */
-	s = &dev->subdevices[4];
-	s->type		= COMEDI_SUBD_COUNTER;
-	s->subdev_flags	= SDF_READABLE | SDF_LSAMPL;
-	s->n_chan	= it->options[2] * 2;
-	s->maxdata	= 0x00ffffff;
-	s->range_table	= &range_unknown;
-	s->insn_read	= multiq3_encoder_insn_read;
-	s->insn_config	= multiq3_encoder_insn_config;
+	s = dev->subdevices + 3;
+	/* do subdevice */
+	s->type = COMEDI_SUBD_DO;
+	s->subdev_flags = SDF_WRITABLE;
+	s->n_chan = 16;
+	s->insn_bits = multiq3_do_insn_bits;
+	s->maxdata = 1;
+	s->range_table = &range_digital;
+	s->state = 0;
 
-	for (i = 0; i < s->n_chan; i++)
-		multiq3_encoder_reset(dev, i);
+	s = dev->subdevices + 4;
+	/* encoder (counter) subdevice */
+	s->type = COMEDI_SUBD_COUNTER;
+	s->subdev_flags = SDF_READABLE | SDF_LSAMPL;
+	s->n_chan = it->options[2] * 2;
+	s->insn_read = multiq3_encoder_insn_read;
+	s->maxdata = 0xffffff;
+	s->range_table = &range_unknown;
+
+	encoder_reset(dev);
 
 	return 0;
 }
 
-static struct comedi_driver multiq3_driver = {
-	.driver_name	= "multiq3",
-	.module		= THIS_MODULE,
-	.attach		= multiq3_attach,
-	.detach		= comedi_legacy_detach,
-};
-module_comedi_driver(multiq3_driver);
+static int multiq3_detach(struct comedi_device *dev)
+{
+	printk(KERN_INFO "comedi%d: multiq3: remove\n", dev->minor);
+
+	if (dev->iobase)
+		release_region(dev->iobase, MULTIQ3_SIZE);
+	if (dev->irq)
+		free_irq(dev->irq, dev);
+
+	return 0;
+}
 
 MODULE_AUTHOR("Comedi http://www.comedi.org");
-MODULE_DESCRIPTION("Comedi driver for Quanser Consulting MultiQ-3 board");
+MODULE_DESCRIPTION("Comedi low-level driver");
 MODULE_LICENSE("GPL");

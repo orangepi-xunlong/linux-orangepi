@@ -30,13 +30,16 @@
 
 MODULE_LICENSE("GPL");
 
+EXPORT_SYMBOL_GPL(nfsacl_encode);
+EXPORT_SYMBOL_GPL(nfsacl_decode);
+
 struct nfsacl_encode_desc {
 	struct xdr_array2_desc desc;
 	unsigned int count;
 	struct posix_acl *acl;
 	int typeflag;
-	kuid_t uid;
-	kgid_t gid;
+	uid_t uid;
+	gid_t gid;
 };
 
 struct nfsacl_simple_acl {
@@ -57,16 +60,14 @@ xdr_nfsace_encode(struct xdr_array2_desc *desc, void *elem)
 	*p++ = htonl(entry->e_tag | nfsacl_desc->typeflag);
 	switch(entry->e_tag) {
 		case ACL_USER_OBJ:
-			*p++ = htonl(from_kuid(&init_user_ns, nfsacl_desc->uid));
+			*p++ = htonl(nfsacl_desc->uid);
 			break;
 		case ACL_GROUP_OBJ:
-			*p++ = htonl(from_kgid(&init_user_ns, nfsacl_desc->gid));
+			*p++ = htonl(nfsacl_desc->gid);
 			break;
 		case ACL_USER:
-			*p++ = htonl(from_kuid(&init_user_ns, entry->e_uid));
-			break;
 		case ACL_GROUP:
-			*p++ = htonl(from_kgid(&init_user_ns, entry->e_gid));
+			*p++ = htonl(entry->e_id);
 			break;
 		default:  /* Solaris depends on that! */
 			*p++ = 0;
@@ -133,7 +134,6 @@ int nfsacl_encode(struct xdr_buf *buf, unsigned int base, struct inode *inode,
 			  nfsacl_desc.desc.array_len;
 	return err;
 }
-EXPORT_SYMBOL_GPL(nfsacl_encode);
 
 struct nfsacl_decode_desc {
 	struct xdr_array2_desc desc;
@@ -148,7 +148,6 @@ xdr_nfsace_decode(struct xdr_array2_desc *desc, void *elem)
 		(struct nfsacl_decode_desc *) desc;
 	__be32 *p = elem;
 	struct posix_acl_entry *entry;
-	unsigned int id;
 
 	if (!nfsacl_desc->acl) {
 		if (desc->array_len > NFS_ACL_MAX_ENTRIES)
@@ -161,22 +160,14 @@ xdr_nfsace_decode(struct xdr_array2_desc *desc, void *elem)
 
 	entry = &nfsacl_desc->acl->a_entries[nfsacl_desc->count++];
 	entry->e_tag = ntohl(*p++) & ~NFS_ACL_DEFAULT;
-	id = ntohl(*p++);
+	entry->e_id = ntohl(*p++);
 	entry->e_perm = ntohl(*p++);
 
 	switch(entry->e_tag) {
-		case ACL_USER:
-			entry->e_uid = make_kuid(&init_user_ns, id);
-			if (!uid_valid(entry->e_uid))
-				return -EINVAL;
-			break;
-		case ACL_GROUP:
-			entry->e_gid = make_kgid(&init_user_ns, id);
-			if (!gid_valid(entry->e_gid))
-				return -EINVAL;
-			break;
 		case ACL_USER_OBJ:
+		case ACL_USER:
 		case ACL_GROUP_OBJ:
+		case ACL_GROUP:
 		case ACL_OTHER:
 			if (entry->e_perm & ~S_IRWXO)
 				return -EINVAL;
@@ -199,13 +190,9 @@ cmp_acl_entry(const void *x, const void *y)
 
 	if (a->e_tag != b->e_tag)
 		return a->e_tag - b->e_tag;
-	else if ((a->e_tag == ACL_USER) && uid_gt(a->e_uid, b->e_uid))
+	else if (a->e_id > b->e_id)
 		return 1;
-	else if ((a->e_tag == ACL_USER) && uid_lt(a->e_uid, b->e_uid))
-		return -1;
-	else if ((a->e_tag == ACL_GROUP) && gid_gt(a->e_gid, b->e_gid))
-		return 1;
-	else if ((a->e_tag == ACL_GROUP) && gid_lt(a->e_gid, b->e_gid))
+	else if (a->e_id < b->e_id)
 		return -1;
 	else
 		return 0;
@@ -226,18 +213,22 @@ posix_acl_from_nfsacl(struct posix_acl *acl)
 	sort(acl->a_entries, acl->a_count, sizeof(struct posix_acl_entry),
 	     cmp_acl_entry, NULL);
 
-	/* Find the ACL_GROUP_OBJ and ACL_MASK entries. */
+	/* Clear undefined identifier fields and find the ACL_GROUP_OBJ
+	   and ACL_MASK entries. */
 	FOREACH_ACL_ENTRY(pa, acl, pe) {
 		switch(pa->e_tag) {
 			case ACL_USER_OBJ:
+				pa->e_id = ACL_UNDEFINED_ID;
 				break;
 			case ACL_GROUP_OBJ:
+				pa->e_id = ACL_UNDEFINED_ID;
 				group_obj = pa;
 				break;
 			case ACL_MASK:
 				mask = pa;
 				/* fall through */
 			case ACL_OTHER:
+				pa->e_id = ACL_UNDEFINED_ID;
 				break;
 		}
 	}
@@ -293,4 +284,3 @@ int nfsacl_decode(struct xdr_buf *buf, unsigned int base, unsigned int *aclcnt,
 	return 8 + nfsacl_desc.desc.elem_size *
 		   nfsacl_desc.desc.array_len;
 }
-EXPORT_SYMBOL_GPL(nfsacl_decode);

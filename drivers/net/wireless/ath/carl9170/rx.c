@@ -37,6 +37,7 @@
  *    OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/etherdevice.h>
@@ -160,8 +161,11 @@ static void carl9170_cmd_callback(struct ar9170 *ar, u32 len, void *buffer)
 
 void carl9170_handle_command_response(struct ar9170 *ar, void *buf, u32 len)
 {
-	struct carl9170_rsp *cmd = buf;
+	struct carl9170_rsp *cmd = (void *) buf;
 	struct ieee80211_vif *vif;
+
+	if (carl9170_check_sequence(ar, cmd->hdr.seq))
+		return;
 
 	if ((cmd->hdr.cmd & CARL9170_RSP_FLAG) != CARL9170_RSP_FLAG) {
 		if (!(cmd->hdr.cmd & CARL9170_CMD_ASYNC_FLAG))
@@ -202,7 +206,6 @@ void carl9170_handle_command_response(struct ar9170 *ar, void *buf, u32 len)
 
 		case NL80211_IFTYPE_AP:
 		case NL80211_IFTYPE_ADHOC:
-		case NL80211_IFTYPE_MESH_POINT:
 			carl9170_update_beacon(ar, true);
 			break;
 
@@ -417,7 +420,7 @@ static int carl9170_rx_mac_status(struct ar9170 *ar,
 
 			return -EINVAL;
 		}
-		if (status->band == NL80211_BAND_2GHZ)
+		if (status->band == IEEE80211_BAND_2GHZ)
 			status->rate_idx += 4;
 		break;
 
@@ -453,7 +456,7 @@ static void carl9170_rx_phy_status(struct ar9170 *ar,
 	/* post-process RSSI */
 	for (i = 0; i < 7; i++)
 		if (phy->rssi[i] & 0x80)
-			phy->rssi[i] = ((~phy->rssi[i] & 0x7f) + 1) & 0x7f;
+			phy->rssi[i] = ((phy->rssi[i] & 0x7f) + 1) & 0x7f;
 
 	/* TODO: we could do something with phy_errors */
 	status->signal = ar->noise[0] + phy->rssi_combined;
@@ -517,9 +520,8 @@ static u8 *carl9170_find_ie(u8 *data, unsigned int len, u8 ie)
  */
 static void carl9170_ps_beacon(struct ar9170 *ar, void *data, unsigned int len)
 {
-	struct ieee80211_hdr *hdr = data;
+	struct ieee80211_hdr *hdr = (void *) data;
 	struct ieee80211_tim_ie *tim_ie;
-	struct ath_common *common = &ar->common;
 	u8 *tim;
 	u8 tim_len;
 	bool cam;
@@ -527,13 +529,17 @@ static void carl9170_ps_beacon(struct ar9170 *ar, void *data, unsigned int len)
 	if (likely(!(ar->hw->conf.flags & IEEE80211_CONF_PS)))
 		return;
 
+	/* check if this really is a beacon */
+	if (!ieee80211_is_beacon(hdr->frame_control))
+		return;
+
 	/* min. beacon length + FCS_LEN */
 	if (len <= 40 + FCS_LEN)
 		return;
 
-	/* check if this really is a beacon */
 	/* and only beacons from the associated BSSID, please */
-	if (!ath_is_mybeacon(common, hdr) || !common->curaid)
+	if (compare_ether_addr(hdr->addr3, ar->common.curbssid) ||
+	    !ar->common.curaid)
 		return;
 
 	ar->ps.last_beacon = jiffies;
@@ -570,55 +576,7 @@ static void carl9170_ps_beacon(struct ar9170 *ar, void *data, unsigned int len)
 	}
 }
 
-static void carl9170_ba_check(struct ar9170 *ar, void *data, unsigned int len)
-{
-	struct ieee80211_bar *bar = data;
-	struct carl9170_bar_list_entry *entry;
-	unsigned int queue;
-
-	if (likely(!ieee80211_is_back(bar->frame_control)))
-		return;
-
-	if (len <= sizeof(*bar) + FCS_LEN)
-		return;
-
-	queue = TID_TO_WME_AC(((le16_to_cpu(bar->control) &
-		IEEE80211_BAR_CTRL_TID_INFO_MASK) >>
-		IEEE80211_BAR_CTRL_TID_INFO_SHIFT) & 7);
-
-	rcu_read_lock();
-	list_for_each_entry_rcu(entry, &ar->bar_list[queue], list) {
-		struct sk_buff *entry_skb = entry->skb;
-		struct _carl9170_tx_superframe *super = (void *)entry_skb->data;
-		struct ieee80211_bar *entry_bar = (void *)super->frame_data;
-
-#define TID_CHECK(a, b) (						\
-	((a) & cpu_to_le16(IEEE80211_BAR_CTRL_TID_INFO_MASK)) ==	\
-	((b) & cpu_to_le16(IEEE80211_BAR_CTRL_TID_INFO_MASK)))		\
-
-		if (bar->start_seq_num == entry_bar->start_seq_num &&
-		    TID_CHECK(bar->control, entry_bar->control) &&
-		    ether_addr_equal_64bits(bar->ra, entry_bar->ta) &&
-		    ether_addr_equal_64bits(bar->ta, entry_bar->ra)) {
-			struct ieee80211_tx_info *tx_info;
-
-			tx_info = IEEE80211_SKB_CB(entry_skb);
-			tx_info->flags |= IEEE80211_TX_STAT_ACK;
-
-			spin_lock_bh(&ar->bar_list_lock[queue]);
-			list_del_rcu(&entry->list);
-			spin_unlock_bh(&ar->bar_list_lock[queue]);
-			kfree_rcu(entry, head);
-			break;
-		}
-	}
-	rcu_read_unlock();
-
-#undef TID_CHECK
-}
-
-static bool carl9170_ampdu_check(struct ar9170 *ar, u8 *buf, u8 ms,
-				 struct ieee80211_rx_status *rx_status)
+static bool carl9170_ampdu_check(struct ar9170 *ar, u8 *buf, u8 ms)
 {
 	__le16 fc;
 
@@ -630,9 +588,6 @@ static bool carl9170_ampdu_check(struct ar9170 *ar, u8 *buf, u8 ms,
 		 */
 		return true;
 	}
-
-	rx_status->flag |= RX_FLAG_AMPDU_DETAILS | RX_FLAG_AMPDU_LAST_KNOWN;
-	rx_status->ampdu_reference = ar->ampdu_ref;
 
 	/*
 	 * "802.11n - 7.4a.3 A-MPDU contents" describes in which contexts
@@ -656,35 +611,6 @@ static bool carl9170_ampdu_check(struct ar9170 *ar, u8 *buf, u8 ms,
 	return false;
 }
 
-static int carl9170_handle_mpdu(struct ar9170 *ar, u8 *buf, int len,
-				struct ieee80211_rx_status *status)
-{
-	struct sk_buff *skb;
-
-	/* (driver) frame trap handler
-	 *
-	 * Because power-saving mode handing has to be implemented by
-	 * the driver/firmware. We have to check each incoming beacon
-	 * from the associated AP, if there's new data for us (either
-	 * broadcast/multicast or unicast) we have to react quickly.
-	 *
-	 * So, if you have you want to add additional frame trap
-	 * handlers, this would be the perfect place!
-	 */
-
-	carl9170_ps_beacon(ar, buf, len);
-
-	carl9170_ba_check(ar, buf, len);
-
-	skb = carl9170_rx_copy_data(buf, len);
-	if (!skb)
-		return -ENOMEM;
-
-	memcpy(IEEE80211_SKB_RXCB(skb), status, sizeof(*status));
-	ieee80211_rx(ar->hw, skb);
-	return 0;
-}
-
 /*
  * If the frame alignment is right (or the kernel has
  * CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS), and there
@@ -694,12 +620,14 @@ static int carl9170_handle_mpdu(struct ar9170 *ar, u8 *buf, int len,
  * mode, and we need to observe the proper ordering,
  * this is non-trivial.
  */
-static void carl9170_rx_untie_data(struct ar9170 *ar, u8 *buf, int len)
+
+static void carl9170_handle_mpdu(struct ar9170 *ar, u8 *buf, int len)
 {
 	struct ar9170_rx_head *head;
 	struct ar9170_rx_macstatus *mac;
 	struct ar9170_rx_phystatus *phy = NULL;
 	struct ieee80211_rx_status status;
+	struct sk_buff *skb;
 	int mpdu_len;
 	u8 mac_status;
 
@@ -709,15 +637,12 @@ static void carl9170_rx_untie_data(struct ar9170 *ar, u8 *buf, int len)
 	if (unlikely(len < sizeof(*mac)))
 		goto drop;
 
-	memset(&status, 0, sizeof(status));
-
 	mpdu_len = len - sizeof(*mac);
 
 	mac = (void *)(buf + mpdu_len);
 	mac_status = mac->status;
 	switch (mac_status & AR9170_RX_STATUS_MPDU) {
 	case AR9170_RX_STATUS_MPDU_FIRST:
-		ar->ampdu_ref++;
 		/* Aggregated MPDUs start with an PLCP header */
 		if (likely(mpdu_len >= sizeof(struct ar9170_rx_head))) {
 			head = (void *) buf;
@@ -748,13 +673,12 @@ static void carl9170_rx_untie_data(struct ar9170 *ar, u8 *buf, int len)
 		break;
 
 	case AR9170_RX_STATUS_MPDU_LAST:
-		status.flag |= RX_FLAG_AMPDU_IS_LAST;
-
 		/*
 		 * The last frame of an A-MPDU has an extra tail
 		 * which does contain the phy status of the whole
 		 * aggregate.
 		 */
+
 		if (likely(mpdu_len >= sizeof(struct ar9170_rx_phystatus))) {
 			mpdu_len -= sizeof(struct ar9170_rx_phystatus);
 			phy = (void *)(buf + mpdu_len);
@@ -802,21 +726,26 @@ static void carl9170_rx_untie_data(struct ar9170 *ar, u8 *buf, int len)
 	if (unlikely(mpdu_len < (2 + 2 + ETH_ALEN + FCS_LEN)))
 		goto drop;
 
+	memset(&status, 0, sizeof(status));
 	if (unlikely(carl9170_rx_mac_status(ar, head, mac, &status)))
 		goto drop;
 
-	if (!carl9170_ampdu_check(ar, buf, mac_status, &status))
+	if (!carl9170_ampdu_check(ar, buf, mac_status))
 		goto drop;
 
 	if (phy)
 		carl9170_rx_phy_status(ar, phy, &status);
-	else
-		status.flag |= RX_FLAG_NO_SIGNAL_VAL;
 
-	if (carl9170_handle_mpdu(ar, buf, mpdu_len, &status))
+	carl9170_ps_beacon(ar, buf, mpdu_len);
+
+	skb = carl9170_rx_copy_data(buf, mpdu_len);
+	if (!skb)
 		goto drop;
 
+	memcpy(IEEE80211_SKB_RXCB(skb), &status, sizeof(status));
+	ieee80211_rx(ar->hw, skb);
 	return;
+
 drop:
 	ar->rx_dropped++;
 }
@@ -832,9 +761,6 @@ static void carl9170_rx_untie_cmds(struct ar9170 *ar, const u8 *respbuf,
 
 		i += cmd->hdr.len + 4;
 		if (unlikely(i > resplen))
-			break;
-
-		if (carl9170_check_sequence(ar, cmd->hdr.seq))
 			break;
 
 		carl9170_handle_command_response(ar, cmd, cmd->hdr.len + 4);
@@ -868,7 +794,7 @@ static void __carl9170_rx(struct ar9170 *ar, u8 *buf, unsigned int len)
 	if (i == 12)
 		carl9170_rx_untie_cmds(ar, buf, len);
 	else
-		carl9170_rx_untie_data(ar, buf, len);
+		carl9170_handle_mpdu(ar, buf, len);
 }
 
 static void carl9170_rx_stream(struct ar9170 *ar, void *buf, unsigned int len)

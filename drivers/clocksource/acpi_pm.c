@@ -73,7 +73,7 @@ static struct clocksource clocksource_acpi_pm = {
 
 
 #ifdef CONFIG_PCI
-static int acpi_pm_good;
+static int __devinitdata acpi_pm_good;
 static int __init acpi_pm_good_setup(char *__str)
 {
 	acpi_pm_good = 1;
@@ -102,15 +102,17 @@ static inline void acpi_pm_need_workaround(void)
  * incorrect when read). As a result, the ACPI free running count up
  * timer specification is violated due to erroneous reads.
  */
-static void acpi_pm_check_blacklist(struct pci_dev *dev)
+static void __devinit acpi_pm_check_blacklist(struct pci_dev *dev)
 {
 	if (acpi_pm_good)
 		return;
 
 	/* the bug has been fixed in PIIX4M */
 	if (dev->revision < 3) {
-		pr_warn("* Found PM-Timer Bug on the chipset. Due to workarounds for a bug,\n"
-			"* this clock source is slow. Consider trying other clock sources\n");
+		printk(KERN_WARNING "* Found PM-Timer Bug on the chipset."
+		       " Due to workarounds for a bug,\n"
+		       "* this clock source is slow. Consider trying"
+		       " other clock sources\n");
 
 		acpi_pm_need_workaround();
 	}
@@ -118,14 +120,17 @@ static void acpi_pm_check_blacklist(struct pci_dev *dev)
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB_3,
 			acpi_pm_check_blacklist);
 
-static void acpi_pm_check_graylist(struct pci_dev *dev)
+static void __devinit acpi_pm_check_graylist(struct pci_dev *dev)
 {
 	if (acpi_pm_good)
 		return;
 
-	pr_warn("* The chipset may have PM-Timer Bug. Due to workarounds for a bug,\n"
-		"* this clock source is slow. If you are sure your timer does not have\n"
-		"* this bug, please use \"acpi_pm_good\" to disable the workaround\n");
+	printk(KERN_WARNING "* The chipset may have PM-Timer Bug. Due to"
+	       " workarounds for a bug,\n"
+	       "* this clock source is slow. If you are sure your timer"
+	       " does not have\n"
+	       "* this bug, please use \"acpi_pm_good\" to disable the"
+	       " workaround\n");
 
 	acpi_pm_need_workaround();
 }
@@ -157,7 +162,8 @@ static int verify_pmtmr_rate(void)
 	/* Check that the PMTMR delta is within 5% of what we expect */
 	if (delta < (PMTMR_EXPECTED_RATE * 19) / 20 ||
 	    delta > (PMTMR_EXPECTED_RATE * 21) / 20) {
-		pr_info("PM-Timer running at invalid rate: %lu%% of normal - aborting.\n",
+		printk(KERN_INFO "PM-Timer running at invalid rate: %lu%% "
+			"of normal - aborting.\n",
 			100UL * delta / PMTMR_EXPECTED_RATE);
 		return -1;
 	}
@@ -193,14 +199,15 @@ static int __init init_acpi_pm_clocksource(void)
 				break;
 			if ((value2 < value1) && ((value2) < 0xFFF))
 				break;
-			pr_info("PM-Timer had inconsistent results: %#llx, %#llx - aborting.\n",
-				value1, value2);
+			printk(KERN_INFO "PM-Timer had inconsistent results:"
+			       " 0x%#llx, 0x%#llx - aborting.\n",
+			       value1, value2);
 			pmtmr_ioport = 0;
 			return -EINVAL;
 		}
 		if (i == ACPI_PM_READ_CHECKS) {
-			pr_info("PM-Timer failed consistency check  (%#llx) - aborting.\n",
-				value1);
+			printk(KERN_INFO "PM-Timer failed consistency check "
+			       " (0x%#llx) - aborting.\n", value1);
 			pmtmr_ioport = 0;
 			return -ENODEV;
 		}
@@ -226,15 +233,16 @@ fs_initcall(init_acpi_pm_clocksource);
  */
 static int __init parse_pmtmr(char *arg)
 {
-	unsigned int base;
-	int ret;
+	unsigned long base;
 
-	ret = kstrtouint(arg, 16, &base);
-	if (ret)
-		return ret;
-
-	pr_info("PMTMR IOPort override: 0x%04x -> 0x%04x\n", pmtmr_ioport,
-		base);
+	if (strict_strtoul(arg, 16, &base))
+		return -EINVAL;
+#ifdef CONFIG_X86_64
+	if (base > UINT_MAX)
+		return -ERANGE;
+#endif
+	printk(KERN_INFO "PMTMR IOPort override: 0x%04x -> 0x%04lx\n",
+	       pmtmr_ioport, base);
 	pmtmr_ioport = base;
 
 	return 1;

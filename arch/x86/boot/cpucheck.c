@@ -24,12 +24,12 @@
 # include "boot.h"
 #endif
 #include <linux/types.h>
-#include <asm/intel-family.h>
 #include <asm/processor-flags.h>
 #include <asm/required-features.h>
 #include <asm/msr-index.h>
-#include "string.h"
 
+struct cpu_features cpu;
+static u32 cpu_vendor[3];
 static u32 err_flags[NCAPINTS];
 
 static const int req_level = CONFIG_X86_MINIMUM_CPU_FAMILY;
@@ -69,15 +69,92 @@ static int is_transmeta(void)
 	       cpu_vendor[2] == A32('M', 'x', '8', '6');
 }
 
-static int is_intel(void)
+static int has_fpu(void)
 {
-	return cpu_vendor[0] == A32('G', 'e', 'n', 'u') &&
-	       cpu_vendor[1] == A32('i', 'n', 'e', 'I') &&
-	       cpu_vendor[2] == A32('n', 't', 'e', 'l');
+	u16 fcw = -1, fsw = -1;
+	u32 cr0;
+
+	asm("movl %%cr0,%0" : "=r" (cr0));
+	if (cr0 & (X86_CR0_EM|X86_CR0_TS)) {
+		cr0 &= ~(X86_CR0_EM|X86_CR0_TS);
+		asm volatile("movl %0,%%cr0" : : "r" (cr0));
+	}
+
+	asm volatile("fninit ; fnstsw %0 ; fnstcw %1"
+		     : "+m" (fsw), "+m" (fcw));
+
+	return fsw == 0 && (fcw & 0x103f) == 0x003f;
+}
+
+static int has_eflag(u32 mask)
+{
+	u32 f0, f1;
+
+	asm("pushfl ; "
+	    "pushfl ; "
+	    "popl %0 ; "
+	    "movl %0,%1 ; "
+	    "xorl %2,%1 ; "
+	    "pushl %1 ; "
+	    "popfl ; "
+	    "pushfl ; "
+	    "popl %1 ; "
+	    "popfl"
+	    : "=&r" (f0), "=&r" (f1)
+	    : "ri" (mask));
+
+	return !!((f0^f1) & mask);
+}
+
+static void get_flags(void)
+{
+	u32 max_intel_level, max_amd_level;
+	u32 tfms;
+
+	if (has_fpu())
+		set_bit(X86_FEATURE_FPU, cpu.flags);
+
+	if (has_eflag(X86_EFLAGS_ID)) {
+		asm("cpuid"
+		    : "=a" (max_intel_level),
+		      "=b" (cpu_vendor[0]),
+		      "=d" (cpu_vendor[1]),
+		      "=c" (cpu_vendor[2])
+		    : "a" (0));
+
+		if (max_intel_level >= 0x00000001 &&
+		    max_intel_level <= 0x0000ffff) {
+			asm("cpuid"
+			    : "=a" (tfms),
+			      "=c" (cpu.flags[4]),
+			      "=d" (cpu.flags[0])
+			    : "a" (0x00000001)
+			    : "ebx");
+			cpu.level = (tfms >> 8) & 15;
+			cpu.model = (tfms >> 4) & 15;
+			if (cpu.level >= 6)
+				cpu.model += ((tfms >> 16) & 0xf) << 4;
+		}
+
+		asm("cpuid"
+		    : "=a" (max_amd_level)
+		    : "a" (0x80000000)
+		    : "ebx", "ecx", "edx");
+
+		if (max_amd_level >= 0x80000001 &&
+		    max_amd_level <= 0x8000ffff) {
+			u32 eax = 0x80000001;
+			asm("cpuid"
+			    : "+a" (eax),
+			      "=c" (cpu.flags[6]),
+			      "=d" (cpu.flags[1])
+			    : : "ebx");
+		}
+	}
 }
 
 /* Returns a bitmask of which words we have error bits in */
-static int check_cpuflags(void)
+static int check_flags(void)
 {
 	u32 err;
 	int i;
@@ -110,8 +187,8 @@ int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr)
 	if (has_eflag(X86_EFLAGS_AC))
 		cpu.level = 4;
 
-	get_cpuflags();
-	err = check_cpuflags();
+	get_flags();
+	err = check_flags();
 
 	if (test_bit(X86_FEATURE_LM, cpu.flags))
 		cpu.level = 64;
@@ -130,8 +207,8 @@ int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr)
 		eax &= ~(1 << 15);
 		asm("wrmsr" : : "a" (eax), "d" (edx), "c" (ecx));
 
-		get_cpuflags();	/* Make sure it really did something */
-		err = check_cpuflags();
+		get_flags();	/* Make sure it really did something */
+		err = check_flags();
 	} else if (err == 0x01 &&
 		   !(err_flags[0] & ~(1 << X86_FEATURE_CX8)) &&
 		   is_centaur() && cpu.model >= 6) {
@@ -146,7 +223,7 @@ int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr)
 		asm("wrmsr" : : "a" (eax), "d" (edx), "c" (ecx));
 
 		set_bit(X86_FEATURE_CX8, cpu.flags);
-		err = check_cpuflags();
+		err = check_flags();
 	} else if (err == 0x01 && is_transmeta()) {
 		/* Transmeta might have masked feature bits in word 0 */
 
@@ -161,23 +238,8 @@ int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr)
 		    : : "ecx", "ebx");
 		asm("wrmsr" : : "a" (eax), "d" (edx), "c" (ecx));
 
-		err = check_cpuflags();
-	} else if (err == 0x01 &&
-		   !(err_flags[0] & ~(1 << X86_FEATURE_PAE)) &&
-		   is_intel() && cpu.level == 6 &&
-		   (cpu.model == 9 || cpu.model == 13)) {
-		/* PAE is disabled on this Pentium M but can be forced */
-		if (cmdline_find_option_bool("forcepae")) {
-			puts("WARNING: Forcing PAE in CPU flags\n");
-			set_bit(X86_FEATURE_PAE, cpu.flags);
-			err = check_cpuflags();
-		}
-		else {
-			puts("WARNING: PAE disabled. Use parameter 'forcepae' to enable at your own risk!\n");
-		}
+		err = check_flags();
 	}
-	if (!err)
-		err = check_knl_erratum();
 
 	if (err_flags_ptr)
 		*err_flags_ptr = err ? err_flags : NULL;
@@ -188,33 +250,3 @@ int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr)
 
 	return (cpu.level < req_level || err) ? -1 : 0;
 }
-
-int check_knl_erratum(void)
-{
-	/*
-	 * First check for the affected model/family:
-	 */
-	if (!is_intel() ||
-	    cpu.family != 6 ||
-	    cpu.model != INTEL_FAM6_XEON_PHI_KNL)
-		return 0;
-
-	/*
-	 * This erratum affects the Accessed/Dirty bits, and can
-	 * cause stray bits to be set in !Present PTEs.  We have
-	 * enough bits in our 64-bit PTEs (which we have on real
-	 * 64-bit mode or PAE) to avoid using these troublesome
-	 * bits.  But, we do not have enough space in our 32-bit
-	 * PTEs.  So, refuse to run on 32-bit non-PAE kernels.
-	 */
-	if (IS_ENABLED(CONFIG_X86_64) || IS_ENABLED(CONFIG_X86_PAE))
-		return 0;
-
-	puts("This 32-bit kernel can not run on this Xeon Phi x200\n"
-	     "processor due to a processor erratum.  Use a 64-bit\n"
-	     "kernel, or enable PAE in this 32-bit kernel.\n\n");
-
-	return -1;
-}
-
-

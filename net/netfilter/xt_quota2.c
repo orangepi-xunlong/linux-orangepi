@@ -17,31 +17,11 @@
 #include <linux/skbuff.h>
 #include <linux/spinlock.h>
 #include <asm/atomic.h>
-#include <net/netlink.h>
 
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter/xt_quota2.h>
-
 #ifdef CONFIG_NETFILTER_XT_MATCH_QUOTA2_LOG
-/* For compatibility, these definitions are copied from the
- * deprecated header file <linux/netfilter_ipv4/ipt_ULOG.h> */
-#define ULOG_MAC_LEN	80
-#define ULOG_PREFIX_LEN	32
-
-/* Format of the ULOG packets passed through netlink */
-typedef struct ulog_packet_msg {
-	unsigned long mark;
-	long timestamp_sec;
-	long timestamp_usec;
-	unsigned int hook;
-	char indev_name[IFNAMSIZ];
-	char outdev_name[IFNAMSIZ];
-	size_t data_len;
-	char prefix[ULOG_PREFIX_LEN];
-	unsigned char mac_len;
-	unsigned char mac[ULOG_MAC_LEN];
-	unsigned char payload[0];
-} ulog_packet_msg_t;
+#include <linux/netfilter_ipv4/ipt_ULOG.h>
 #endif
 
 /**
@@ -71,9 +51,12 @@ static DEFINE_SPINLOCK(counter_list_lock);
 
 static struct proc_dir_entry *proc_xt_quota;
 static unsigned int quota_list_perms = S_IRUGO | S_IWUSR;
-static kuid_t quota_list_uid = KUIDT_INIT(0);
-static kgid_t quota_list_gid = KGIDT_INIT(0);
+static unsigned int quota_list_uid   = 0;
+static unsigned int quota_list_gid   = 0;
 module_param_named(perms, quota_list_perms, uint, S_IRUGO | S_IWUSR);
+module_param_named(uid, quota_list_uid, uint, S_IRUGO | S_IWUSR);
+module_param_named(gid, quota_list_gid, uint, S_IRUGO | S_IWUSR);
+
 
 #ifdef CONFIG_NETFILTER_XT_MATCH_QUOTA2_LOG
 static void quota2_log(unsigned int hooknum,
@@ -98,14 +81,10 @@ static void quota2_log(unsigned int hooknum,
 		return;
 	}
 
-	nlh = nlmsg_put(log_skb, /*pid*/0, /*seq*/0, qlog_nl_event,
-			sizeof(*pm), 0);
-	if (!nlh) {
-		pr_err("xt_quota2: nlmsg_put failed\n");
-		kfree_skb(log_skb);
-		return;
-	}
-	pm = nlmsg_data(nlh);
+	/* NLMSG_PUT() uses "goto nlmsg_failure" */
+	nlh = NLMSG_PUT(log_skb, /*pid*/0, /*seq*/0, qlog_nl_event,
+			sizeof(*pm));
+	pm = NLMSG_DATA(nlh);
 	if (skb->tstamp.tv64 == 0)
 		__net_timestamp((struct sk_buff *)skb);
 	pm->data_len = 0;
@@ -127,6 +106,9 @@ static void quota2_log(unsigned int hooknum,
 	NETLINK_CB(log_skb).dst_group = 1;
 	pr_debug("throwing 1 packets to netlink group 1\n");
 	netlink_broadcast(nflognl, log_skb, 0, 1, GFP_ATOMIC);
+
+nlmsg_failure:  /* Used within NLMSG_PUT() */
+	pr_debug("xt_quota2: error during NLMSG_PUT\n");
 }
 #else
 static void quota2_log(unsigned int hooknum,
@@ -138,23 +120,22 @@ static void quota2_log(unsigned int hooknum,
 }
 #endif  /* if+else CONFIG_NETFILTER_XT_MATCH_QUOTA2_LOG */
 
-static ssize_t quota_proc_read(struct file *file, char __user *buf,
-			   size_t size, loff_t *ppos)
+static int quota_proc_read(char *page, char **start, off_t offset,
+                           int count, int *eof, void *data)
 {
-	struct xt_quota_counter *e = PDE_DATA(file_inode(file));
-	char tmp[24];
-	size_t tmp_size;
+	struct xt_quota_counter *e = data;
+	int ret;
 
 	spin_lock_bh(&e->lock);
-	tmp_size = scnprintf(tmp, sizeof(tmp), "%llu\n", e->quota);
+	ret = snprintf(page, PAGE_SIZE, "%llu\n", e->quota);
 	spin_unlock_bh(&e->lock);
-	return simple_read_from_buffer(buf, size, ppos, tmp, tmp_size);
+	return ret;
 }
 
-static ssize_t quota_proc_write(struct file *file, const char __user *input,
-                            size_t size, loff_t *ppos)
+static int quota_proc_write(struct file *file, const char __user *input,
+                            unsigned long size, void *data)
 {
-	struct xt_quota_counter *e = PDE_DATA(file_inode(file));
+	struct xt_quota_counter *e = data;
 	char buf[sizeof("18446744073709551616")];
 
 	if (size > sizeof(buf))
@@ -168,12 +149,6 @@ static ssize_t quota_proc_write(struct file *file, const char __user *input,
 	spin_unlock_bh(&e->lock);
 	return size;
 }
-
-static const struct file_operations q2_counter_fops = {
-	.read		= quota_proc_read,
-	.write		= quota_proc_write,
-	.llseek		= default_llseek,
-};
 
 static struct xt_quota_counter *
 q2_new_counter(const struct xt_quota_mtinfo2 *q, bool anon)
@@ -238,8 +213,8 @@ q2_get_counter(const struct xt_quota_mtinfo2 *q)
 	spin_unlock_bh(&counter_list_lock);
 
 	/* create_proc_entry() is not spin_lock happy */
-	p = e->procfs_entry = proc_create_data(e->name, quota_list_perms,
-	                      proc_xt_quota, &q2_counter_fops, e);
+	p = e->procfs_entry = create_proc_entry(e->name, quota_list_perms,
+	                      proc_xt_quota);
 
 	if (IS_ERR_OR_NULL(p)) {
 		spin_lock_bh(&counter_list_lock);
@@ -247,7 +222,11 @@ q2_get_counter(const struct xt_quota_mtinfo2 *q)
 		spin_unlock_bh(&counter_list_lock);
 		goto out;
 	}
-	proc_set_user(p, quota_list_uid, quota_list_gid);
+	p->data         = e;
+	p->read_proc    = quota_proc_read;
+	p->write_proc   = quota_proc_write;
+	p->uid          = quota_list_uid;
+	p->gid          = quota_list_gid;
 	return e;
 
  out:
@@ -369,7 +348,9 @@ static int __init quota_mt2_init(void)
 	pr_debug("xt_quota2: init()");
 
 #ifdef CONFIG_NETFILTER_XT_MATCH_QUOTA2_LOG
-	nflognl = netlink_kernel_create(&init_net, NETLINK_NFLOG, NULL);
+	nflognl = netlink_kernel_create(&init_net,
+					NETLINK_NFLOG, 1, NULL,
+					NULL, THIS_MODULE);
 	if (!nflognl)
 		return -ENOMEM;
 #endif

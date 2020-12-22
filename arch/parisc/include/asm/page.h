@@ -21,16 +21,15 @@
 #include <asm/types.h>
 #include <asm/cache.h>
 
-#define clear_page(page)	clear_page_asm((void *)(page))
-#define copy_page(to, from)	copy_page_asm((void *)(to), (void *)(from))
+#define clear_page(page)	memset((void *)(page), 0, PAGE_SIZE)
+#define copy_page(to,from)      copy_user_page_asm((void *)(to), (void *)(from))
 
 struct page;
 
-void clear_page_asm(void *page);
-void copy_page_asm(void *to, void *from);
-#define clear_user_page(vto, vaddr, page) clear_page_asm(vto)
+void copy_user_page_asm(void *to, void *from);
 void copy_user_page(void *vto, void *vfrom, unsigned long vaddr,
-			struct page *pg);
+			   struct page *pg);
+void clear_user_page(void *page, unsigned long vaddr, struct page *pg);
 
 /*
  * These are used to make use of C type-checking..
@@ -145,22 +144,11 @@ extern int npmem_ranges;
 #endif /* CONFIG_DISCONTIGMEM */
 
 #ifdef CONFIG_HUGETLB_PAGE
-#define HPAGE_SHIFT		PMD_SHIFT /* fixed for transparent huge pages */
+#define HPAGE_SHIFT		22	/* 4MB (is this fixed?) */
 #define HPAGE_SIZE      	((1UL) << HPAGE_SHIFT)
 #define HPAGE_MASK		(~(HPAGE_SIZE - 1))
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
-
-#if defined(CONFIG_64BIT) && defined(CONFIG_PARISC_PAGE_SIZE_4KB)
-# define REAL_HPAGE_SHIFT	20 /* 20 = 1MB */
-# define _HUGE_PAGE_SIZE_ENCODING_DEFAULT _PAGE_SIZE_ENCODING_1M
-#elif !defined(CONFIG_64BIT) && defined(CONFIG_PARISC_PAGE_SIZE_4KB)
-# define REAL_HPAGE_SHIFT	22 /* 22 = 4MB */
-# define _HUGE_PAGE_SIZE_ENCODING_DEFAULT _PAGE_SIZE_ENCODING_4M
-#else
-# define REAL_HPAGE_SHIFT	24 /* 24 = 16MB */
-# define _HUGE_PAGE_SIZE_ENCODING_DEFAULT _PAGE_SIZE_ENCODING_16M
 #endif
-#endif /* CONFIG_HUGETLB_PAGE */
 
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 

@@ -11,7 +11,6 @@
 #include <linux/interrupt.h>
 #include <linux/time.h>
 #include <linux/delay.h>
-#include <linux/platform_device.h>
 #include <linux/swiotlb.h>
 
 #include <asm/time.h>
@@ -30,8 +29,8 @@
  * addresses. Use PCI endian swapping 1 so no address swapping is
  * necessary. The Linux io routines will endian swap the data.
  */
-#define OCTEON_PCI_IOSPACE_BASE	    0x80011a0400000000ull
-#define OCTEON_PCI_IOSPACE_SIZE	    (1ull<<32)
+#define OCTEON_PCI_IOSPACE_BASE     0x80011a0400000000ull
+#define OCTEON_PCI_IOSPACE_SIZE     (1ull<<32)
 
 /* Octeon't PCI controller uses did=3, subdid=3 for PCI memory. */
 #define OCTEON_PCI_MEMSPACE_OFFSET  (0x00011b0000000000ull)
@@ -59,7 +58,7 @@ union octeon_pci_address {
 	} s;
 };
 
-int __initconst (*octeon_pcibios_map_irq)(const struct pci_dev *dev,
+int __initdata (*octeon_pcibios_map_irq)(const struct pci_dev *dev,
 					 u8 slot, u8 pin);
 enum octeon_dma_bar_type octeon_dma_bar_type = OCTEON_DMA_BAR_TYPE_INVALID;
 
@@ -68,10 +67,10 @@ enum octeon_dma_bar_type octeon_dma_bar_type = OCTEON_DMA_BAR_TYPE_INVALID;
  *
  * @dev:    The Linux PCI device structure for the device to map
  * @slot:   The slot number for this device on __BUS 0__. Linux
- *		 enumerates through all the bridges and figures out the
- *		 slot on Bus 0 where this device eventually hooks to.
+ *               enumerates through all the bridges and figures out the
+ *               slot on Bus 0 where this device eventually hooks to.
  * @pin:    The PCI interrupt pin read from the device, then swizzled
- *		 as it goes through each bridge.
+ *               as it goes through each bridge.
  * Returns Interrupt number for the device
  */
 int __init pcibios_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
@@ -118,11 +117,16 @@ int pcibios_plat_dev_init(struct pci_dev *dev)
 	}
 
 	/* Enable the PCIe normal error reporting */
-	config = PCI_EXP_DEVCTL_CERE; /* Correctable Error Reporting */
-	config |= PCI_EXP_DEVCTL_NFERE; /* Non-Fatal Error Reporting */
-	config |= PCI_EXP_DEVCTL_FERE;	/* Fatal Error Reporting */
-	config |= PCI_EXP_DEVCTL_URRE;	/* Unsupported Request */
-	pcie_capability_set_word(dev, PCI_EXP_DEVCTL, config);
+	pos = pci_find_capability(dev, PCI_CAP_ID_EXP);
+	if (pos) {
+		/* Update Device Control */
+		pci_read_config_word(dev, pos + PCI_EXP_DEVCTL, &config);
+		config |= PCI_EXP_DEVCTL_CERE; /* Correctable Error Reporting */
+		config |= PCI_EXP_DEVCTL_NFERE; /* Non-Fatal Error Reporting */
+		config |= PCI_EXP_DEVCTL_FERE;  /* Fatal Error Reporting */
+		config |= PCI_EXP_DEVCTL_URRE;  /* Unsupported Request */
+		pci_write_config_word(dev, pos + PCI_EXP_DEVCTL, config);
+	}
 
 	/* Find the Advanced Error Reporting capability */
 	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ERR);
@@ -204,8 +208,6 @@ const char *octeon_get_pci_interrupts(void)
 	 * Interrupt Number (INTA# = 0, INTB# = 1, INTC# = 2, and
 	 * INTD# = 3)
 	 */
-	if (of_machine_is_compatible("dlink,dsr-500n"))
-		return "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
 	switch (octeon_bootinfo->board_type) {
 	case CVMX_BOARD_TYPE_NAO38:
 		/* This is really the NAC38 */
@@ -216,8 +218,6 @@ const char *octeon_get_pci_interrupts(void)
 		return "AAABAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 	case CVMX_BOARD_TYPE_BBGW_REF:
 		return "AABCD";
-	case CVMX_BOARD_TYPE_CUST_DSR1000N:
-		return "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
 	case CVMX_BOARD_TYPE_THUNDER:
 	case CVMX_BOARD_TYPE_EBH3000:
 	default:
@@ -230,10 +230,10 @@ const char *octeon_get_pci_interrupts(void)
  *
  * @dev:    The Linux PCI device structure for the device to map
  * @slot:   The slot number for this device on __BUS 0__. Linux
- *		 enumerates through all the bridges and figures out the
- *		 slot on Bus 0 where this device eventually hooks to.
+ *               enumerates through all the bridges and figures out the
+ *               slot on Bus 0 where this device eventually hooks to.
  * @pin:    The PCI interrupt pin read from the device, then swizzled
- *		 as it goes through each bridge.
+ *               as it goes through each bridge.
  * Returns Interrupt number for the device
  */
 int __init octeon_pci_pcibios_map_irq(const struct pci_dev *dev,
@@ -275,6 +275,9 @@ static int octeon_read_config(struct pci_bus *bus, unsigned int devfn,
 	pci_addr.s.func = devfn & 0x7;
 	pci_addr.s.reg = reg;
 
+#if PCI_CONFIG_SPACE_DELAY
+	udelay(PCI_CONFIG_SPACE_DELAY);
+#endif
 	switch (size) {
 	case 4:
 		*val = le32_to_cpu(cvmx_read64_uint32(pci_addr.u64));
@@ -309,6 +312,9 @@ static int octeon_write_config(struct pci_bus *bus, unsigned int devfn,
 	pci_addr.s.func = devfn & 0x7;
 	pci_addr.s.reg = reg;
 
+#if PCI_CONFIG_SPACE_DELAY
+	udelay(PCI_CONFIG_SPACE_DELAY);
+#endif
 	switch (size) {
 	case 4:
 		cvmx_write64_uint32(pci_addr.u64, cpu_to_le32(val));
@@ -325,8 +331,8 @@ static int octeon_write_config(struct pci_bus *bus, unsigned int devfn,
 
 
 static struct pci_ops octeon_pci_ops = {
-	.read	= octeon_read_config,
-	.write	= octeon_write_config,
+	octeon_read_config,
+	octeon_write_config,
 };
 
 static struct resource octeon_pci_mem_resource = {
@@ -402,8 +408,8 @@ static void octeon_pci_initialize(void)
 		ctl_status_2.s.bb1_siz = 1;  /* BAR1 is 2GB */
 		ctl_status_2.s.bb_ca = 1;    /* Don't use L2 with big bars */
 		ctl_status_2.s.bb_es = 1;    /* Big bar in byte swap mode */
-		ctl_status_2.s.bb1 = 1;	     /* BAR1 is big */
-		ctl_status_2.s.bb0 = 1;	     /* BAR0 is big */
+		ctl_status_2.s.bb1 = 1;      /* BAR1 is big */
+		ctl_status_2.s.bb0 = 1;      /* BAR0 is big */
 	}
 
 	octeon_npi_write32(CVMX_NPI_PCI_CTL_STATUS_2, ctl_status_2.u32);
@@ -444,7 +450,7 @@ static void octeon_pci_initialize(void)
 		 * count. [1..31] and 0=32.  NOTE: If the user
 		 * programs these bits beyond the Designed Maximum
 		 * outstanding count, then the designed maximum table
-		 * depth will be used instead.	No additional
+		 * depth will be used instead.  No additional
 		 * Deferred/Split transactions will be accepted if
 		 * this outstanding maximum count is
 		 * reached. Furthermore, no additional deferred/split
@@ -454,7 +460,7 @@ static void octeon_pci_initialize(void)
 		cfg19.s.tdomc = 4;
 		/*
 		 * Master Deferred Read Request Outstanding Max Count
-		 * (PCI only).	CR4C[26:24] Max SAC cycles MAX DAC
+		 * (PCI only).  CR4C[26:24] Max SAC cycles MAX DAC
 		 * cycles 000 8 4 001 1 0 010 2 1 011 3 1 100 4 2 101
 		 * 5 2 110 6 3 111 7 3 For example, if these bits are
 		 * programmed to 100, the core can support 2 DAC
@@ -548,7 +554,7 @@ static void octeon_pci_initialize(void)
 
 	/*
 	 * Affects PCI performance when OCTEON services reads to its
-	 * BAR1/BAR2. Refer to Section 10.6.1.	The recommended values are
+	 * BAR1/BAR2. Refer to Section 10.6.1.  The recommended values are
 	 * 0x22, 0x33, and 0x33 for PCI_READ_CMD_6, PCI_READ_CMD_C, and
 	 * PCI_READ_CMD_E, respectively. Unfortunately due to errata DDR-700,
 	 * these values need to be changed so they won't possibly prefetch off
@@ -573,11 +579,6 @@ static int __init octeon_pci_setup(void)
 	if (octeon_has_feature(OCTEON_FEATURE_PCIE))
 		return 0;
 
-	if (!octeon_is_pci_host()) {
-		pr_notice("Not in host mode, PCI Controller not initialized\n");
-		return 0;
-	}
-
 	/* Point pcibios_map_irq() to the PCI version of it */
 	octeon_pcibios_map_irq = octeon_pci_pcibios_map_irq;
 
@@ -593,6 +594,10 @@ static int __init octeon_pci_setup(void)
 	set_io_port_base(OCTEON_PCI_IOSPACE_BASE);
 	ioport_resource.start = 0;
 	ioport_resource.end = OCTEON_PCI_IOSPACE_SIZE - 1;
+	if (!octeon_is_pci_host()) {
+		pr_notice("Not in host mode, PCI Controller not initialized\n");
+		return 0;
+	}
 
 	pr_notice("%s Octeon big bar support\n",
 		  (octeon_dma_bar_type ==
@@ -703,10 +708,6 @@ static int __init octeon_pci_setup(void)
 	 * was setup properly.
 	 */
 	cvmx_write_csr(CVMX_NPI_PCI_INT_SUM2, -1);
-
-	if (IS_ERR(platform_device_register_simple("octeon_pci_edac",
-						   -1, NULL, 0)))
-		pr_err("Registration of co_pci_edac failed!\n");
 
 	octeon_pci_dma_init();
 

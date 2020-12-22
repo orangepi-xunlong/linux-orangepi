@@ -22,22 +22,27 @@
 *.lst
 *.symtypes
 *.order
+*.map
+modules.builtin
+Module.symvers
+Module.markers
 *.elf
 *.bin
-*.tar
 *.bz2
 *.lzma
 *.xz
-*.lz4
 *.lzo
 *.patch
 *.gcno
-*.ll
-modules.builtin
-Module.symvers
-*.dwo
-*.su
-*.c.[012]*.*
+standby.code
+resume1.code
+
+#
+# Gcov files
+#
+*.gcda
+*.gcno
+*.gcov
 
 #
 # Top-level generic files
@@ -46,11 +51,10 @@ Module.symvers
 /TAGS
 /linux
 /vmlinux
-/vmlinux.32
-/vmlinux-gdb.py
 /vmlinuz
 /System.map
 /Module.markers
+/Module.symvers
 
 #
 # Debian directory (make deb-pkg)
@@ -58,21 +62,16 @@ Module.symvers
 /debian/
 
 #
-# tar directory (make tar*-pkg)
-#
-/tar-install/
-
-#
-# git files that we don't want to ignore even if they are dot-files
+# git files that we don't want to ignore even it they are dot-files
 #
 !.gitignore
 !.mailmap
-!.cocciconfig
 
 #
 # Generated include files
 #
 include/config
+include/linux/version.h
 include/generated
 arch/*/include/generated
 
@@ -93,31 +92,14 @@ GRTAGS
 GSYMS
 GTAGS
 
-# id-utils files
-ID
-
 *.orig
 *~
 \#*#
 
-#
-# Leavings from module signing
-#
-extra_certificates
-signing_key.pem
-signing_key.priv
-signing_key.x509
-x509.genkey
-
-# Kconfig presets
-all.config
-
-# Kdevelop4
-*.kdev4
-
-# Do not track output folder.
-/output
-
-# ignore gator md5 data
-drivers/gator/gator_src_md5.h
-
+# lichee ingnore files
+skel/
+output/
+bImage
+*.swp
+drivers/arisc/binary/arisc
+modules/eurasia_km/eurasiacon/binary2_sunxi_android_release/

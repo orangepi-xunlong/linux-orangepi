@@ -118,12 +118,8 @@ static ssize_t ams_input_store_joystick(struct device *dev,
 {
 	unsigned long enable;
 	int error = 0;
-	int ret;
 
-	ret = kstrtoul(buf, 0, &enable);
-	if (ret)
-		return ret;
-	if (enable > 1)
+	if (strict_strtoul(buf, 0, &enable) || enable > 1)
 		return -EINVAL;
 
 	mutex_lock(&ams_input_mutex);

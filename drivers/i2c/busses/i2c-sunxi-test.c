@@ -9,7 +9,6 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  */
-
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -23,331 +22,153 @@
 #include <linux/jiffies.h>
 #include <linux/of.h>
 #include <linux/i2c.h>
-#include <linux/cdev.h>
-#include <linux/device.h>
-#include <linux/uaccess.h>
-#include <asm/io.h>
-#include <linux/i2c-dev.h>
-#include "i2c-sunxi.h"
+#include <linux/i2c/at24.h>
 
-static u32 debug_mask;
-#define dprintk(level_mask, fmt, arg...)				\
-do {									\
-	if (unlikely(debug_mask & level_mask))				\
-		pr_warn("%s()%d - "fmt, __func__, __LINE__, ##arg);	\
-} while (0)
 
-#define I2C_ERR(fmt, arg...)	pr_warn("%s()%d - "fmt,			\
-		__func__, __LINE__, ##arg)
-#define TWI_ID			0
-#define EEPROM_NAME_SIZE	6
-#define I2C_TEST	_IOR('i', 1, struct at24_data)
+#define EEPROM_ATTR(_name)       \
+{									\
+	.attr = { .name = #_name,.mode = 0444 },    \
+	.show =  _name##_show,          \
+}
 
-struct at24_data {
-	unsigned int	len, num;
-	unsigned char	flags, command, value, *buf;
-};
-
-struct at24_dev {
-	struct device *dev;
-	struct cdev cdev;
-	dev_t chrdev;
-};
-
-static struct class *at24_class;
-static struct at24_dev *at24_dev;
 struct i2c_client *this_client;
-static __u32 twi_id = TWI_ID;
-static const unsigned short i2c_address[] = {0x50, I2C_CLIENT_END};
+
 static const struct i2c_device_id at24_ids[] = {
 	{ "24c16", 0 },
 	{ /* END OF LIST */ }
 };
 MODULE_DEVICE_TABLE(i2c, at24_ids);
 
-/*
- * at24_detect - Device detection callback for automatic device creation
- * return value:
- *                    = 0; success;
- *                    < 0; err
- */
-static int at24_detect(struct i2c_client *client, struct i2c_board_info *info)
+
+static int eeprom_i2c_rxdata(char *rxdata, int length)
 {
-	struct i2c_adapter *adapter = client->adapter;
+	int ret;
 
-	dprintk(DEBUG_INFO, "detecting\n");
-	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
-		I2C_ERR("function err\n");
-		return -ENODEV;
-	}
-	if (twi_id == adapter->nr) {
-		dprintk(DEBUG_INFO, "twi_id = %d\n", twi_id);
-		strlcpy(info->type, "24c16", EEPROM_NAME_SIZE);
-	}
+	struct i2c_msg msgs[] = {
+		{
+			.addr	= this_client->addr,
+			.flags	= 0,
+			.len	= 1,
+			.buf	= &rxdata[0],
+		},
+		{
+			.addr	= this_client->addr,
+			.flags	= I2C_M_RD,
+			.len	= length,
+			.buf	= &rxdata[1],
+		},
+	};
 
-	return 0;
-}
+	ret = i2c_transfer(this_client->adapter, msgs, 2);
+	if (ret < 0)
+		pr_info("%s i2c read eeprom error: %d\n", __func__, ret);
 
-/*
- * at24_ioctl -
- * return value:
- *                    = 0; success;
- *                    < 0; err
- */
-static long at24_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	struct i2c_client *client = file->private_data;
-	struct i2c_adapter *adapter = client->adapter;
-	struct at24_data *at24;
-	struct i2c_msg *msgs = NULL;
-	unsigned int size, i = 0;
-	unsigned char *buf = NULL;
-	int ret = 0;
-
-	at24 = kzalloc(sizeof(at24), GFP_KERNEL);
-	if (!at24) {
-		I2C_ERR("kzalloc failed\n");
-		return -ENOMEM;
-	}
-
-	switch (cmd) {
-	case I2C_TEST:
-		size = _IOC_SIZE(cmd);
-		if (copy_from_user(at24, (void __user *)arg, size)) {
-			I2C_ERR("copy buffer err\n");
-			return -ENOMEM;
-		}
-
-		dprintk(DEBUG_INFO, "at24: flg = 0x%x, num = %d, len = %d\n",
-				at24->flags, at24->num, at24->len);
-		dprintk(DEBUG_INFO, "      cmm = 0x%x, val = 0x%x\n",
-				at24->command, at24->value);
-
-		if (at24->num == 1) {
-			if (at24->flags == 1) {
-				/* 1 msgs read */
-				buf = kzalloc(sizeof(buf)*(at24->len),
-						GFP_KERNEL);
-				if (!buf) {
-					I2C_ERR("kzalloc failed\n");
-					return -ENOMEM;
-				}
-
-				ret = i2c_master_recv(client, buf, at24->len);
-				if (ret > 0)
-					ret = copy_to_user(at24->buf, buf,
-						at24->len) ? -EFAULT : 0;
-			} else if (at24->flags == 0) {
-				/* 1 msgs write */
-				buf = kzalloc(at24->len + 1, GFP_KERNEL);
-				if (!buf) {
-					I2C_ERR("kzalloc failed\n");
-					return -ENOMEM;
-				}
-
-				buf[0] = at24->command;
-				if (at24->len) {
-					for (i = 0; i < at24->len; i++)
-						buf[i + 1] = at24->value;
-				}
-				at24->len += 1;
-				i2c_master_send(client, buf, at24->len);
-				ret = 0;
-			} else {
-				I2C_ERR("err flags : 0x%x\n", at24->flags);
-				return -EINVAL;
-			}
-			kfree(buf);
-		} else if (at24->num == 2) {
-			/* 2 msgs read */
-			msgs = kzalloc(sizeof(msgs)*2, GFP_KERNEL);
-			buf = kzalloc(at24->len, GFP_KERNEL);
-			if (!buf || !msgs) {
-				I2C_ERR("kzalloc failed\n");
-				return -ENOMEM;
-			}
-
-			msgs[0].addr = client->addr;
-			msgs[0].len  = 1;
-			msgs[0].buf  = &(at24->command);
-			msgs[1].addr  = client->addr;
-			msgs[1].flags |= I2C_M_RD,
-			msgs[1].len   = at24->len;
-			msgs[1].buf   = buf;
-
-			ret = i2c_transfer(adapter, msgs, at24->num);
-			if (ret < 0) {
-				kfree(buf);
-				kfree(msgs);
-				buf = NULL;
-				msgs = NULL;
-				return ret;
-			}
-
-			if (ret > 0)
-				ret = copy_to_user(at24->buf, buf, at24->len)
-					? -EFAULT : 0;
-			kfree(buf);
-			kfree(msgs);
-			buf = NULL;
-			msgs = NULL;
-		} else {
-			/* n msgs write */
-			struct i2c_msg msga[at24->num];
-
-			for (i = 0; i < at24->num; i++) {
-				msga[i].addr = client->addr;
-				msga[i].len = 2;
-				msga[i].buf = kzalloc(2, GFP_KERNEL);
-				if (!(msga[i].buf)) {
-					I2C_ERR("kzalloc failed\n");
-					return -ENOMEM;
-				}
-				(msga[i].buf)[0] = at24->command + i*2;
-				(msga[i].buf)[1] = at24->value;
-			}
-			ret = i2c_transfer(adapter, msga, at24->num);
-			if (ret == at24->num)
-				ret = 0;
-			else
-				return ret;
-		}
-		break;
-	default:
-		I2C_ERR("ERR FORMAT\n");
-		return -ENOTTY;
-	}
-	kfree(at24);
 	return ret;
 }
 
-static int at24_open(struct inode *inode, struct file *file)
+static int eeprom_i2c_txdata(char *txdata, int length)
 {
-	dprintk(DEBUG_INFO, "open\n");
+	int ret;
 
-	if (this_client)
-		file->private_data = this_client;
-	else {
-		I2C_ERR("no such dev\n");
-		return -ENODEV;
-	}
+	struct i2c_msg msg[] = {
+		{
+			.addr	= this_client->addr,
+			.flags	= 0,
+			.len	= length,
+			.buf	= txdata,
+		},
+	};
+
+	ret = i2c_transfer(this_client->adapter, msg, 1);
+	if (ret < 0)
+		pr_err("%s i2c write eeprom error: %d\n", __func__, ret);
 
 	return 0;
 }
 
-static int at24_release(struct inode *inode, struct file *file)
+static ssize_t read_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf)
 {
-	return 0;
+  	u8 rxdata[4];
+
+	rxdata[0] = 0x1;
+  	eeprom_i2c_rxdata(rxdata, 3);
+
+	return sprintf(buf, "Read data : 0x%x, 0x%x, 0x%x, 0x%x\n",
+				rxdata[0], rxdata[1], rxdata[2], rxdata[3]);
 }
 
-static const struct file_operations at24_fops = {
-	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
-	.unlocked_ioctl	= at24_ioctl,
-	.open		= at24_open,
-	.release	= at24_release,
+static ssize_t write_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf)
+{
+	static u8 txdata[4] = {0x1, 0xAA, 0xBB, 0xCC};
+
+	txdata[1]++;
+	txdata[2]++;
+	txdata[3]++;
+	eeprom_i2c_txdata(txdata,4);
+
+	return sprintf(buf, "Write data: 0x%x, 0x%x, 0x%x, 0x%x\n",
+				txdata[0], txdata[1], txdata[2], txdata[3]);
+}
+
+static struct kobj_attribute read	= EEPROM_ATTR(read);
+static struct kobj_attribute write	= EEPROM_ATTR(write);
+
+static const struct attribute *test_attrs[] = {
+	&read.attr,
+	&write.attr,
+	NULL,
 };
 
 static int at24_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
-	int err = 0;
-	struct device *dev;
-
+	int err;
 	this_client = client;
-
-	dprintk(DEBUG_INIT, "begin probe\n");
-
-	at24_dev = kzalloc(sizeof(struct at24_dev), GFP_KERNEL);
-	if (at24_dev == NULL) {
-		I2C_ERR("kzalloc failed\n");
-		return -ENOMEM;
+	printk("1..at24_probe \n");
+	err = sysfs_create_files(&client->dev.kobj,test_attrs);
+	printk("2..at24_probe \n");
+	if(err){
+		printk("sysfs_create_files failed\n");
 	}
-
-	err = alloc_chrdev_region(&at24_dev->chrdev, 0, 1, "at24-dev");
-
-	if (err) {
-		I2C_ERR("alloc_chrdev_region failed\n");
-		goto alloc_chrdev_err;
-	}
-
-	cdev_init(&(at24_dev->cdev), &at24_fops);
-	at24_dev->cdev.owner = THIS_MODULE;
-	err = cdev_add(&(at24_dev->cdev), at24_dev->chrdev, 1);
-	if (err) {
-		I2C_ERR("cdev_add failed\n");
-		goto cdev_add_err;
-	}
-
-	at24_class = class_create(THIS_MODULE, "at24_char_class");
-	if (IS_ERR(at24_class)) {
-		err = PTR_ERR(at24_class);
-		I2C_ERR("class_create failed\n");
-		goto class_err;
-	}
-
-	dev = device_create(at24_class, NULL, at24_dev->chrdev, NULL,
-			"at24");
-	if (IS_ERR(dev)) {
-		err = PTR_ERR(dev);
-		I2C_ERR("device_create failed\n");
-		goto device_err;
-	}
-
-	dprintk(DEBUG_INFO, "ok\n");
+	printk("3..at24_probe \n");
 	return 0;
-
-device_err:
-	device_destroy(at24_class, at24_dev->chrdev);
-class_err:
-	cdev_del(&(at24_dev->cdev));
-cdev_add_err:
-	unregister_chrdev_region(at24_dev->chrdev, 1);
-alloc_chrdev_err:
-	kfree(at24_dev);
-
-	return err;
 }
 
 static int at24_remove(struct i2c_client *client)
 {
+	sysfs_remove_files(&client->dev.kobj,test_attrs);
 	return 0;
 }
 
 /*-------------------------------------------------------------------------*/
 
 static struct i2c_driver at24_driver = {
-	.class = I2C_CLASS_SPD,
 	.driver = {
-		.name = "24c16",
+		.name = "at24",
 		.owner = THIS_MODULE,
 	},
 	.probe = at24_probe,
 	.remove = at24_remove,
 	.id_table = at24_ids,
-	.detect		= at24_detect,
-	.address_list	= i2c_address,
 };
 
 static int __init at24_init(void)
 {
-	dprintk(DEBUG_INIT, "begin init\n");
+	printk("%s    %d\n", __func__, __LINE__);
+	
 	return i2c_add_driver(&at24_driver);
-
 }
+module_init(at24_init);
 
 static void __exit at24_exit(void)
 {
-	cdev_del(&(at24_dev->cdev));
-	unregister_chrdev_region(at24_dev->chrdev, 1);
-	device_destroy(at24_class, at24_dev->chrdev);
-	class_destroy(at24_class);
-	kfree(at24_dev);
+	printk("%s()%d - \n", __func__, __LINE__);
+
 	i2c_del_driver(&at24_driver);
 }
-
-module_init(at24_init);
 module_exit(at24_exit);
-module_param_named(debug, debug_mask, int, 0664);
+
 MODULE_DESCRIPTION("24C16 simple test");
 MODULE_AUTHOR("pannan");
 MODULE_LICENSE("GPL");

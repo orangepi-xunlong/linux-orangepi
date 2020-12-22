@@ -120,6 +120,7 @@ __vxge_hw_device_register_poll(void __iomem *reg, u64 mask, u32 max_millis)
 {
 	u64 val64;
 	u32 i = 0;
+	enum vxge_hw_status ret = VXGE_HW_FAIL;
 
 	udelay(10);
 
@@ -138,7 +139,7 @@ __vxge_hw_device_register_poll(void __iomem *reg, u64 mask, u32 max_millis)
 		mdelay(1);
 	} while (++i <= max_millis);
 
-	return VXGE_HW_FAIL;
+	return ret;
 }
 
 static inline enum vxge_hw_status
@@ -756,7 +757,7 @@ __vxge_hw_verify_pci_e_info(struct __vxge_hw_device *hldev)
 	u16 lnk;
 
 	/* Get the negotiated link width and speed from PCI config space */
-	pcie_capability_read_word(dev, PCI_EXP_LNKSTA, &lnk);
+	pci_read_config_word(dev, dev->pcie_cap + PCI_EXP_LNKSTA, &lnk);
 
 	if ((lnk & PCI_EXP_LNKSTA_CLS) != 1)
 		return VXGE_HW_ERR_INVALID_PCI_INFO;
@@ -808,7 +809,7 @@ __vxge_hw_vpath_fw_ver_get(struct __vxge_hw_virtualpath *vpath,
 	struct vxge_hw_device_date *fw_date = &hw_info->fw_date;
 	struct vxge_hw_device_version *flash_version = &hw_info->flash_version;
 	struct vxge_hw_device_date *flash_date = &hw_info->flash_date;
-	u64 data0 = 0, data1 = 0, steer_ctrl = 0;
+	u64 data0, data1 = 0, steer_ctrl = 0;
 	enum vxge_hw_status status;
 
 	status = vxge_hw_vpath_fw_api(vpath,
@@ -992,7 +993,7 @@ exit:
  * for the driver, FW version information, and the first mac address for
  * each vpath
  */
-enum vxge_hw_status
+enum vxge_hw_status __devinit
 vxge_hw_device_hw_info_get(void __iomem *bar0,
 			   struct vxge_hw_device_hw_info *hw_info)
 {
@@ -1309,7 +1310,7 @@ __vxge_hw_device_config_check(struct vxge_hw_device_config *new_config)
  * When done, the driver allocates sizeof(struct __vxge_hw_device) bytes for HW
  * to enable the latter to perform Titan hardware initialization.
  */
-enum vxge_hw_status
+enum vxge_hw_status __devinit
 vxge_hw_device_initialize(
 	struct __vxge_hw_device **devh,
 	struct vxge_hw_device_attr *attr,
@@ -1681,10 +1682,12 @@ enum vxge_hw_status vxge_hw_driver_stats_get(
 			struct __vxge_hw_device *hldev,
 			struct vxge_hw_device_stats_sw_info *sw_stats)
 {
+	enum vxge_hw_status status = VXGE_HW_OK;
+
 	memcpy(sw_stats, &hldev->stats.sw_dev_info_stats,
 		sizeof(struct vxge_hw_device_stats_sw_info));
 
-	return VXGE_HW_OK;
+	return status;
 }
 
 /*
@@ -1979,7 +1982,7 @@ u16 vxge_hw_device_link_width_get(struct __vxge_hw_device *hldev)
 	struct pci_dev *dev = hldev->pdev;
 	u16 lnk;
 
-	pcie_capability_read_word(dev, PCI_EXP_LNKSTA, &lnk);
+	pci_read_config_word(dev, dev->pcie_cap + PCI_EXP_LNKSTA, &lnk);
 	return (lnk & VXGE_HW_PCI_EXP_LNKCAP_LNK_WIDTH) >> 4;
 }
 
@@ -2145,7 +2148,7 @@ __vxge_hw_ring_mempool_item_alloc(struct vxge_hw_mempool *mempoolh,
  * __vxge_hw_ring_replenish - Initial replenish of RxDs
  * This function replenishes the RxDs from reserve array to work array
  */
-static enum vxge_hw_status
+enum vxge_hw_status
 vxge_hw_ring_replenish(struct __vxge_hw_ring *ring)
 {
 	void *rxd;
@@ -2343,7 +2346,7 @@ void __vxge_hw_blockpool_blocks_add(struct __vxge_hw_blockpool *blockpool)
 
 	for (i = 0; i < nreq; i++)
 		vxge_os_dma_malloc_async(
-			(blockpool->hldev)->pdev,
+			((struct __vxge_hw_device *)blockpool->hldev)->pdev,
 			blockpool->hldev, VXGE_HW_BLOCK_SIZE);
 }
 
@@ -2425,13 +2428,13 @@ __vxge_hw_blockpool_blocks_remove(struct __vxge_hw_blockpool *blockpool)
 			break;
 
 		pci_unmap_single(
-			(blockpool->hldev)->pdev,
+			((struct __vxge_hw_device *)blockpool->hldev)->pdev,
 			((struct __vxge_hw_blockpool_entry *)p)->dma_addr,
 			((struct __vxge_hw_blockpool_entry *)p)->length,
 			PCI_DMA_BIDIRECTIONAL);
 
 		vxge_os_dma_free(
-			(blockpool->hldev)->pdev,
+			((struct __vxge_hw_device *)blockpool->hldev)->pdev,
 			((struct __vxge_hw_blockpool_entry *)p)->memblock,
 			&((struct __vxge_hw_blockpool_entry *)p)->acc_handle);
 
@@ -2914,7 +2917,7 @@ exit:
  * vxge_hw_device_config_default_get - Initialize device config with defaults.
  * Initialize Titan device config with default values.
  */
-enum vxge_hw_status
+enum vxge_hw_status __devinit
 vxge_hw_device_config_default_get(struct vxge_hw_device_config *device_config)
 {
 	u32 i;
@@ -3225,6 +3228,7 @@ enum vxge_hw_status
 vxge_hw_vpath_strip_fcs_check(struct __vxge_hw_device *hldev, u64 vpath_mask)
 {
 	struct vxge_hw_vpmgmt_reg       __iomem *vpmgmt_reg;
+	enum vxge_hw_status status = VXGE_HW_OK;
 	int i = 0, j = 0;
 
 	for (i = 0; i < VXGE_HW_MAX_VIRTUAL_PATHS; i++) {
@@ -3237,7 +3241,7 @@ vxge_hw_vpath_strip_fcs_check(struct __vxge_hw_device *hldev, u64 vpath_mask)
 				return VXGE_HW_FAIL;
 		}
 	}
-	return VXGE_HW_OK;
+	return status;
 }
 /*
  * vxge_hw_mgmt_reg_Write - Write Titan register.
@@ -3975,6 +3979,7 @@ __vxge_hw_vpath_mgmt_read(
 {
 	u32 i, mtu = 0, max_pyld = 0;
 	u64 val64;
+	enum vxge_hw_status status = VXGE_HW_OK;
 
 	for (i = 0; i < VXGE_HW_MAC_MAX_MAC_PORT_ID; i++) {
 
@@ -4004,7 +4009,7 @@ __vxge_hw_vpath_mgmt_read(
 	else
 		VXGE_HW_DEVICE_LINK_STATE_SET(vpath->hldev, VXGE_HW_LINK_DOWN);
 
-	return VXGE_HW_OK;
+	return status;
 }
 
 /*
@@ -4034,13 +4039,14 @@ static enum vxge_hw_status
 __vxge_hw_vpath_reset(struct __vxge_hw_device *hldev, u32 vp_id)
 {
 	u64 val64;
+	enum vxge_hw_status status = VXGE_HW_OK;
 
 	val64 = VXGE_HW_CMN_RSTHDLR_CFG0_SW_RESET_VPATH(1 << (16 - vp_id));
 
 	__vxge_hw_pio_mem_write32_upper((u32)vxge_bVALn(val64, 0, 32),
 				&hldev->common_reg->cmn_rsthdlr_cfg0);
 
-	return VXGE_HW_OK;
+	return status;
 }
 
 /*
@@ -4053,7 +4059,7 @@ __vxge_hw_vpath_sw_reset(struct __vxge_hw_device *hldev, u32 vp_id)
 	enum vxge_hw_status status = VXGE_HW_OK;
 	struct __vxge_hw_virtualpath *vpath;
 
-	vpath = &hldev->virtual_paths[vp_id];
+	vpath = (struct __vxge_hw_virtualpath *)&hldev->virtual_paths[vp_id];
 
 	if (vpath->ringh) {
 		status = __vxge_hw_ring_reset(vpath->ringh);
@@ -4221,6 +4227,7 @@ static enum vxge_hw_status
 __vxge_hw_vpath_mac_configure(struct __vxge_hw_device *hldev, u32 vp_id)
 {
 	u64 val64;
+	enum vxge_hw_status status = VXGE_HW_OK;
 	struct __vxge_hw_virtualpath *vpath;
 	struct vxge_hw_vp_config *vp_config;
 	struct vxge_hw_vpath_reg __iomem *vp_reg;
@@ -4276,7 +4283,7 @@ __vxge_hw_vpath_mac_configure(struct __vxge_hw_device *hldev, u32 vp_id)
 
 		writeq(val64, &vp_reg->rxmac_vcfg1);
 	}
-	return VXGE_HW_OK;
+	return status;
 }
 
 /*
@@ -4288,6 +4295,7 @@ static enum vxge_hw_status
 __vxge_hw_vpath_tim_configure(struct __vxge_hw_device *hldev, u32 vp_id)
 {
 	u64 val64;
+	enum vxge_hw_status status = VXGE_HW_OK;
 	struct __vxge_hw_virtualpath *vpath;
 	struct vxge_hw_vpath_reg __iomem *vp_reg;
 	struct vxge_hw_vp_config *config;
@@ -4537,7 +4545,7 @@ __vxge_hw_vpath_tim_configure(struct __vxge_hw_device *hldev, u32 vp_id)
 	val64 |= VXGE_HW_TIM_WRKLD_CLC_CNT_RX_TX(3);
 	writeq(val64, &vp_reg->tim_wrkld_clc);
 
-	return VXGE_HW_OK;
+	return status;
 }
 
 /*
@@ -4637,7 +4645,7 @@ static void __vxge_hw_vp_terminate(struct __vxge_hw_device *hldev, u32 vp_id)
 	vpath->ringh = NULL;
 	vpath->fifoh = NULL;
 	memset(&vpath->vpath_handles, 0, sizeof(struct list_head));
-	vpath->stats_block = NULL;
+	vpath->stats_block = 0;
 	vpath->hw_stats = NULL;
 	vpath->hw_stats_sav = NULL;
 	vpath->sw_stats = NULL;

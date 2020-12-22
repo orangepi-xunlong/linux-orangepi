@@ -24,22 +24,21 @@
 #include <linux/dm9000.h>
 #include <linux/ucb1400.h>
 #include <linux/ata_platform.h>
-#include <linux/regulator/machine.h>
 #include <linux/regulator/max1586.h>
 #include <linux/i2c/pxa-i2c.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include "pxa27x.h"
+#include <mach/pxa27x.h>
 #include <mach/audio.h>
 #include <mach/vpac270.h>
-#include <linux/platform_data/mmc-pxamci.h>
-#include <linux/platform_data/video-pxafb.h>
-#include <linux/platform_data/usb-ohci-pxa27x.h>
-#include "pxa27x-udc.h"
-#include "udc.h"
-#include <linux/platform_data/ata-pxa.h>
+#include <mach/mmc.h>
+#include <mach/pxafb.h>
+#include <mach/ohci.h>
+#include <mach/pxa27x-udc.h>
+#include <mach/udc.h>
+#include <mach/pata_pxa.h>
 
 #include "generic.h"
 #include "devices.h"
@@ -641,7 +640,9 @@ static inline void vpac270_ide_init(void) {}
 #if defined(CONFIG_REGULATOR_MAX1586) || \
     defined(CONFIG_REGULATOR_MAX1586_MODULE)
 static struct regulator_consumer_supply vpac270_max1587a_consumers[] = {
-	REGULATOR_SUPPLY("vcc_core", NULL),
+	{
+		.supply	= "vcc_core",
+	}
 };
 
 static struct regulator_init_data vpac270_max1587a_v3_info = {
@@ -712,8 +713,6 @@ static void __init vpac270_init(void)
 	vpac270_ts_init();
 	vpac270_rtc_init();
 	vpac270_ide_init();
-
-	regulator_has_full_constraints();
 }
 
 MACHINE_START(VPAC270, "Voipac PXA270")
@@ -722,7 +721,7 @@ MACHINE_START(VPAC270, "Voipac PXA270")
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa27x_init_irq,
 	.handle_irq	= pxa27x_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= vpac270_init,
 	.restart	= pxa_restart,
 MACHINE_END

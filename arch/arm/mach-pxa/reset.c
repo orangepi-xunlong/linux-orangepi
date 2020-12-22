@@ -78,10 +78,9 @@ static void do_gpio_reset(void)
 static void do_hw_reset(void)
 {
 	/* Initialize the watchdog and let it fire */
-	writel_relaxed(OWER_WME, OWER);
-	writel_relaxed(OSSR_M3, OSSR);
-	/* ... in 100 ms */
-	writel_relaxed(readl_relaxed(OSCR) + 368640, OSMR3);
+	OWER = OWER_WME;
+	OSSR = OSSR_M3;
+	OSMR3 = OSCR + 368640;	/* ... in 100 ms */
 	/*
 	 * SDRAM hangs on watchdog reset on Marvell PXA270 (erratum 71)
 	 * we put SDRAM into self-refresh to prevent that
@@ -90,7 +89,7 @@ static void do_hw_reset(void)
 		writel_relaxed(MDREFR_SLFRSH, MDREFR);
 }
 
-void pxa_restart(enum reboot_mode mode, const char *cmd)
+void pxa_restart(char mode, const char *cmd)
 {
 	local_irq_disable();
 	local_fiq_disable();
@@ -98,14 +97,14 @@ void pxa_restart(enum reboot_mode mode, const char *cmd)
 	clear_reset_status(RESET_STATUS_ALL);
 
 	switch (mode) {
-	case REBOOT_SOFT:
+	case 's':
 		/* Jump into ROM at address 0 */
 		soft_restart(0);
 		break;
-	case REBOOT_GPIO:
+	case 'g':
 		do_gpio_reset();
 		break;
-	case REBOOT_HARD:
+	case 'h':
 	default:
 		do_hw_reset();
 		break;

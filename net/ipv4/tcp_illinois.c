@@ -6,7 +6,7 @@
  * The algorithm is described in:
  * "TCP-Illinois: A Loss and Delay-Based Congestion Control Algorithm
  *  for High-Speed Networks"
- * http://tamerbasar.csl.illinois.edu/LiuBasarSrikantPerfEvalArtJun2008.pdf
+ * http://www.ifp.illinois.edu/~srikant/Papers/liubassri06perf.pdf
  *
  * Implemented from description in paper and ns-2 simulation.
  * Copyright (C) 2007 Stephen Hemminger <shemminger@linux-foundation.org>
@@ -23,6 +23,7 @@
 #define ALPHA_MIN	((3*ALPHA_SCALE)/10)	/* ~0.3 */
 #define ALPHA_MAX	(10*ALPHA_SCALE)	/* 10.0 */
 #define ALPHA_BASE	ALPHA_SCALE		/* 1.0 */
+#define U32_MAX		((u32)~0U)
 #define RTT_MAX		(U32_MAX / ALPHA_MAX)	/* 3.3 secs */
 
 #define BETA_SHIFT	6
@@ -82,31 +83,30 @@ static void tcp_illinois_init(struct sock *sk)
 }
 
 /* Measure RTT for each ack. */
-static void tcp_illinois_acked(struct sock *sk, const struct ack_sample *sample)
+static void tcp_illinois_acked(struct sock *sk, u32 pkts_acked, s32 rtt)
 {
 	struct illinois *ca = inet_csk_ca(sk);
-	s32 rtt_us = sample->rtt_us;
 
-	ca->acked = sample->pkts_acked;
+	ca->acked = pkts_acked;
 
 	/* dup ack, no rtt sample */
-	if (rtt_us < 0)
+	if (rtt < 0)
 		return;
 
 	/* ignore bogus values, this prevents wraparound in alpha math */
-	if (rtt_us > RTT_MAX)
-		rtt_us = RTT_MAX;
+	if (rtt > RTT_MAX)
+		rtt = RTT_MAX;
 
 	/* keep track of minimum RTT seen so far */
-	if (ca->base_rtt > rtt_us)
-		ca->base_rtt = rtt_us;
+	if (ca->base_rtt > rtt)
+		ca->base_rtt = rtt;
 
 	/* and max */
-	if (ca->max_rtt < rtt_us)
-		ca->max_rtt = rtt_us;
+	if (ca->max_rtt < rtt)
+		ca->max_rtt = rtt;
 
 	++ca->cnt_rtt;
-	ca->sum_rtt += rtt_us;
+	ca->sum_rtt += rtt;
 }
 
 /* Maximum queuing delay */
@@ -256,7 +256,7 @@ static void tcp_illinois_state(struct sock *sk, u8 new_state)
 /*
  * Increase window in response to successful acknowledgment.
  */
-static void tcp_illinois_cong_avoid(struct sock *sk, u32 ack, u32 acked)
+static void tcp_illinois_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct illinois *ca = inet_csk_ca(sk);
@@ -265,12 +265,12 @@ static void tcp_illinois_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 		update_params(sk);
 
 	/* RFC2861 only increase cwnd if fully utilized */
-	if (!tcp_is_cwnd_limited(sk))
+	if (!tcp_is_cwnd_limited(sk, in_flight))
 		return;
 
 	/* In slow start */
-	if (tcp_in_slow_start(tp))
-		tcp_slow_start(tp, acked);
+	if (tp->snd_cwnd <= tp->snd_ssthresh)
+		tcp_slow_start(tp);
 
 	else {
 		u32 delta;
@@ -285,7 +285,7 @@ static void tcp_illinois_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 		delta = (tp->snd_cwnd_cnt * ca->alpha) >> ALPHA_SHIFT;
 		if (delta >= tp->snd_cwnd) {
 			tp->snd_cwnd = min(tp->snd_cwnd + delta / tp->snd_cwnd,
-					   (u32)tp->snd_cwnd_clamp);
+					   (u32) tp->snd_cwnd_clamp);
 			tp->snd_cwnd_cnt = 0;
 		}
 	}
@@ -300,33 +300,35 @@ static u32 tcp_illinois_ssthresh(struct sock *sk)
 	return max(tp->snd_cwnd - ((tp->snd_cwnd * ca->beta) >> BETA_SHIFT), 2U);
 }
 
+
 /* Extract info for Tcp socket info provided via netlink. */
-static size_t tcp_illinois_info(struct sock *sk, u32 ext, int *attr,
-				union tcp_cc_info *info)
+static void tcp_illinois_info(struct sock *sk, u32 ext,
+			      struct sk_buff *skb)
 {
 	const struct illinois *ca = inet_csk_ca(sk);
 
 	if (ext & (1 << (INET_DIAG_VEGASINFO - 1))) {
-		info->vegas.tcpv_enabled = 1;
-		info->vegas.tcpv_rttcnt = ca->cnt_rtt;
-		info->vegas.tcpv_minrtt = ca->base_rtt;
-		info->vegas.tcpv_rtt = 0;
+		struct tcpvegas_info info = {
+			.tcpv_enabled = 1,
+			.tcpv_rttcnt = ca->cnt_rtt,
+			.tcpv_minrtt = ca->base_rtt,
+		};
 
-		if (info->vegas.tcpv_rttcnt > 0) {
+		if (info.tcpv_rttcnt > 0) {
 			u64 t = ca->sum_rtt;
 
-			do_div(t, info->vegas.tcpv_rttcnt);
-			info->vegas.tcpv_rtt = t;
+			do_div(t, info.tcpv_rttcnt);
+			info.tcpv_rtt = t;
 		}
-		*attr = INET_DIAG_VEGASINFO;
-		return sizeof(struct tcpvegas_info);
+		nla_put(skb, INET_DIAG_VEGASINFO, sizeof(info), &info);
 	}
-	return 0;
 }
 
 static struct tcp_congestion_ops tcp_illinois __read_mostly = {
+	.flags		= TCP_CONG_RTT_STAMP,
 	.init		= tcp_illinois_init,
 	.ssthresh	= tcp_illinois_ssthresh,
+	.min_cwnd	= tcp_reno_min_cwnd,
 	.cong_avoid	= tcp_illinois_cong_avoid,
 	.set_state	= tcp_illinois_state,
 	.get_info	= tcp_illinois_info,

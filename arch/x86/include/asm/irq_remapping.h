@@ -1,93 +1,45 @@
-/*
- * Copyright (C) 2012 Advanced Micro Devices, Inc.
- * Author: Joerg Roedel <joerg.roedel@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
- * This header file contains the interface of the interrupt remapping code to
- * the x86 interrupt management code.
- */
+#ifndef _ASM_X86_IRQ_REMAPPING_H
+#define _ASM_X86_IRQ_REMAPPING_H
 
-#ifndef __X86_IRQ_REMAPPING_H
-#define __X86_IRQ_REMAPPING_H
-
-#include <asm/irqdomain.h>
-#include <asm/hw_irq.h>
-#include <asm/io_apic.h>
-
-struct msi_msg;
-struct irq_alloc_info;
-
-enum irq_remap_cap {
-	IRQ_POSTING_CAP = 0,
-};
-
-struct vcpu_data {
-	u64 pi_desc_addr;	/* Physical address of PI Descriptor */
-	u32 vector;		/* Guest vector of the interrupt */
-};
+#define IRTE_DEST(dest) ((x2apic_mode) ? dest : dest << 8)
 
 #ifdef CONFIG_IRQ_REMAP
-
-extern bool irq_remapping_cap(enum irq_remap_cap cap);
-extern void set_irq_remapping_broken(void);
-extern int irq_remapping_prepare(void);
-extern int irq_remapping_enable(void);
-extern void irq_remapping_disable(void);
-extern int irq_remapping_reenable(int);
-extern int irq_remap_enable_fault_handling(void);
-extern void panic_if_irq_remap(const char *msg);
-
-extern struct irq_domain *
-irq_remapping_get_ir_irq_domain(struct irq_alloc_info *info);
-extern struct irq_domain *
-irq_remapping_get_irq_domain(struct irq_alloc_info *info);
-
-/* Create PCI MSI/MSIx irqdomain, use @parent as the parent irqdomain. */
-extern struct irq_domain *arch_create_msi_irq_domain(struct irq_domain *parent);
-
-/* Get parent irqdomain for interrupt remapping irqdomain */
-static inline struct irq_domain *arch_get_ir_parent_domain(void)
+static void irq_remap_modify_chip_defaults(struct irq_chip *chip);
+static inline void prepare_irte(struct irte *irte, int vector,
+			        unsigned int dest)
 {
-	return x86_vector_domain;
+	memset(irte, 0, sizeof(*irte));
+
+	irte->present = 1;
+	irte->dst_mode = apic->irq_dest_mode;
+	/*
+	 * Trigger mode in the IRTE will always be edge, and for IO-APIC, the
+	 * actual level or edge trigger will be setup in the IO-APIC
+	 * RTE. This will help simplify level triggered irq migration.
+	 * For more details, see the comments (in io_apic.c) explainig IO-APIC
+	 * irq migration in the presence of interrupt-remapping.
+	*/
+	irte->trigger_mode = 0;
+	irte->dlvry_mode = apic->irq_delivery_mode;
+	irte->vector = vector;
+	irte->dest_id = IRTE_DEST(dest);
+	irte->redir_hint = 1;
 }
-
-#else  /* CONFIG_IRQ_REMAP */
-
-static inline bool irq_remapping_cap(enum irq_remap_cap cap) { return 0; }
-static inline void set_irq_remapping_broken(void) { }
-static inline int irq_remapping_prepare(void) { return -ENODEV; }
-static inline int irq_remapping_enable(void) { return -ENODEV; }
-static inline void irq_remapping_disable(void) { }
-static inline int irq_remapping_reenable(int eim) { return -ENODEV; }
-static inline int irq_remap_enable_fault_handling(void) { return -ENODEV; }
-
-static inline void panic_if_irq_remap(const char *msg)
+static inline bool irq_remapped(struct irq_cfg *cfg)
+{
+	return cfg->irq_2_iommu.iommu != NULL;
+}
+#else
+static void prepare_irte(struct irte *irte, int vector, unsigned int dest)
 {
 }
-
-static inline struct irq_domain *
-irq_remapping_get_ir_irq_domain(struct irq_alloc_info *info)
+static inline bool irq_remapped(struct irq_cfg *cfg)
 {
-	return NULL;
+	return false;
 }
-
-static inline struct irq_domain *
-irq_remapping_get_irq_domain(struct irq_alloc_info *info)
+static inline void irq_remap_modify_chip_defaults(struct irq_chip *chip)
 {
-	return NULL;
 }
+#endif
 
-#endif /* CONFIG_IRQ_REMAP */
-#endif /* __X86_IRQ_REMAPPING_H */
+#endif	/* _ASM_X86_IRQ_REMAPPING_H */

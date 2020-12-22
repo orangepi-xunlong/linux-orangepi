@@ -1,4 +1,4 @@
-/*
+/*******************************************************************************
  * Copyright © 2015-2016, Shuge
  *		Author: Sugar <shugeLinux@gmail.com>
  *
@@ -10,7 +10,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
  * GNU General Public License for more details.
  *
- */
+ ********************************************************************************/
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/errno.h>
@@ -33,7 +33,6 @@
 #include <asm/irq.h>
 
 #include <linux/mfd/acx00-mfd.h>
-#include <linux/sunxi-sid.h>
 
 #define EXTEPHY_CTRL0 0x0014
 #define EXTEPHY_CTRL1 0x0016
@@ -41,52 +40,15 @@
 #define EPHY_CTRL 0x6000
 #define EPHY_SID 0x8004
 
-#define WAIT_MAX_COUNT 200
-
-atomic_t ephy_en;
-
 struct ephy_res {
 	struct device_driver *plat_drv;
 	struct device_driver *phy_drv;
 	struct phy_device *phydev;
 	struct acx00 *acx;
+	struct work_struct   en_work;
 };
-
 static struct ephy_res ephy_priv;
 
-int ephy_is_enable(void)
-{
-	return atomic_read(&ephy_en);
-}
-EXPORT_SYMBOL_GPL(ephy_is_enable);
-
-/**
- * @name	ephy_read_sid
- * @brief		read ephy sid from efuse
- * @param[IN]	none
- * @param[OUT]	p_ephy_cali: ephy calibration value
- * @return	return 0 if success,-value if fail
- */
-static __attribute__((unused)) s32 ephy_read_sid(u16 *p_ephy_cali)
-{
-	s32 ret = 0;
-	u8 buf[6];
-
-	if (!p_ephy_cali) {
-		pr_info("%s's pointer type args are NULL!\n", __func__);
-		return -1;
-	}
-	ret = sunxi_efuse_readn(EFUSE_OEM_NAME, buf, 6);
-	if (ret != 0) {
-		pr_info("sunxi_efuse_readn failed:%d\n", ret);
-		return ret;
-	}
-	*p_ephy_cali = buf[0] + (buf[1] << 8);
-
-	return ret;
-}
-
-#if 0
 static int ephy_reset(struct phy_device *phydev)
 {
 	int bmcr;
@@ -109,40 +71,10 @@ static int ephy_reset(struct phy_device *phydev)
 
 	return 0;
 }
-#endif
-
-static void disable_intelligent_ieee(struct phy_device *phydev)
-{
-	unsigned int value;
-
-	phy_write(phydev, 0x1f, 0x0100);	/* switch to page 1 */
-	value = phy_read(phydev, 0x17);		/* read address 0 0x17 register */
-	value &= ~(1 << 3);			/* reg 0x17 bit 3, set 0 to disable IEEE */
-	phy_write(phydev, 0x17, value);
-	phy_write(phydev, 0x1f, 0x0000);	/* switch to page 0 */
-}
-
-static void disable_802_3az_ieee(struct phy_device *phydev)
-{
-	unsigned int value;
-
-	phy_write(phydev, 0xd, 0x7);
-	phy_write(phydev, 0xe, 0x3c);
-	phy_write(phydev, 0xd, 0x1 << 14 | 0x7);
-	value = phy_read(phydev, 0xe);
-	value &= ~(0x1 << 1);
-	phy_write(phydev, 0xd, 0x7);
-	phy_write(phydev, 0xe, 0x3c);
-	phy_write(phydev, 0xd, 0x1 << 14 | 0x7);
-	phy_write(phydev, 0xe, value);
-
-	phy_write(phydev, 0x1f, 0x0200);	/* switch to page 2 */
-	phy_write(phydev, 0x18, 0x0000);
-}
 
 static int ephy_config_init(struct phy_device *phydev)
 {
-	int value;
+	int c;
 
 	/* Iint ephy */
 	phy_write(phydev, 0x1f, 0x0100);	/* Switch to Page 1 */
@@ -152,39 +84,20 @@ static int ephy_config_init(struct phy_device *phydev)
 	phy_write(phydev, 0x18, 0x0000);	/* PHYAFE TRX optimization */
 
 	phy_write(phydev, 0x1f, 0x0600);	/* Switch to Page 6 */
-	phy_write(phydev, 0x14, 0x708b);	/* PHYAFE TX optimization */
+	phy_write(phydev, 0x14, 0x708f);	/* PHYAFE TX optimization */
 	phy_write(phydev, 0x13, 0xF000);	/* PHYAFE RX optimization */
 	phy_write(phydev, 0x15, 0x1530);
 
 	phy_write(phydev, 0x1f, 0x0800);	/* Switch to Page 6 */
 	phy_write(phydev, 0x18, 0x00bc);	/* PHYAFE TRX optimization */
-#if 0
+
 	/* Disable Auto Power Saving mode */
 	phy_write(phydev, 0x1f, 0x0100);	/* Switch to Page 1 */
-	value = phy_read(phydev, 0x17);
-	value &= ~BIT(13);
-	phy_write(phydev, 0x17, value);
-#endif
-	disable_intelligent_ieee(phydev);	/* Disable Intelligent IEEE */
-	disable_802_3az_ieee(phydev);		/* Disable 802.3az IEEE */
-	phy_write(phydev, 0x1f, 0x0000);	/* Switch to Page 0 */
+	c = phy_read(phydev, 0x17);
+	c &= ~BIT(13);
+	phy_write(phydev, 0x17, c);
+	return phy_write(phydev, 0x1f, 0x0000);	/* Switch to Page 0 */
 
-#ifdef CONFIG_MFD_ACX00
-	value = acx00_reg_read(ephy_priv.acx, EPHY_CTRL);
-	if (phydev->interface == PHY_INTERFACE_MODE_RMII)
-		value |= (1 << 11);
-	else
-		value &= (~(1 << 11));
-	acx00_reg_write(ephy_priv.acx, EPHY_CTRL, value | (1 << 11));
-#endif
-
-#if defined(CONFIG_ARCH_SUN50IW6)
-	value = phy_read(phydev, 0x13);
-	value |= 1 << 12;
-	phy_write(phydev, 0x13, value);
-#endif
-
-	return 0;
 }
 
 static int ephy_probe(struct phy_device *phydev)
@@ -195,7 +108,7 @@ static int ephy_probe(struct phy_device *phydev)
 		return -ENODEV;
 
 	drv = phydev->drv;
-	ephy_priv.phy_drv = &drv->mdiodrv.driver;
+	ephy_priv.phy_drv = &drv->driver;
 	ephy_priv.phydev = phydev;
 	return 0;
 }
@@ -204,7 +117,6 @@ static int ephy_probe(struct phy_device *phydev)
 static int ephy_ack_interrupt(struct phy_device *phydev)
 {
 	int err = phy_read(phydev, IP101A_G_IRQ_CONF_STATUS);
-
 	if (err < 0)
 		return err;
 
@@ -216,66 +128,32 @@ static void sunxi_ephy_enable(struct ephy_res *priv)
 {
 #ifdef CONFIG_MFD_ACX00
 	int value;
-	unsigned char i = 0;
-#if defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN50IW9)
-	u16 ephy_cali = 0;
-#endif
-
-	if (!acx00_enable()) {
-		for (i = 0; i < WAIT_MAX_COUNT; i++) {
-			msleep(10);
-			if (acx00_enable())
-				break;
-		}
-		if (i == WAIT_MAX_COUNT) {
-			pr_err("acx00 is no enable, and sunxi_ephy_enable is fail\n");
-			return;
-		}
-	}
+	if (!acx00_enable())
+		msleep(200);
 
 	value = acx00_reg_read(priv->acx, EXTEPHY_CTRL0);
 	value |= 0x03;
 	acx00_reg_write(priv->acx, EXTEPHY_CTRL0, value);
 	value = acx00_reg_read(priv->acx, EXTEPHY_CTRL1);
-#if defined(CONFIG_ARCH_SUN50IW9)
-	/* disable link led to avoid conflict with twi2 */
-	value |= 0x09;
-#else
 	value |= 0x0f;
-#endif
 	acx00_reg_write(priv->acx, EXTEPHY_CTRL1, value);
 	acx00_reg_write(priv->acx, EPHY_CTRL, 0x06);
 
 	/*for ephy */
-	value = acx00_reg_read(priv->acx, EPHY_CTRL);
-	value &= ~(0xf << 12);
-
-#if defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN50IW9)
-	ephy_read_sid(&ephy_cali);
-	value |= (0x0F & (0x03 + ephy_cali)) << 12;
-#else
-	value |= (0x0F & (0x03 + acx00_reg_read(priv->acx, EPHY_SID))) << 12;
-#endif
-
+	value= acx00_reg_read(priv->acx, EPHY_CTRL);
+	value &= ~(0xf<<12);
+	value |= (0x0F & (0x03 + acx00_reg_read(priv->acx, EPHY_SID)))<<12;
 	acx00_reg_write(priv->acx, EPHY_CTRL, value);
-
-	atomic_set(&ephy_en, 1);
 #endif
 }
 
-static void sunxi_ephy_disable(struct ephy_res *priv)
+static void ephy_work_fn(struct work_struct *work)
 {
-	int value;
+	struct ephy_res *priv = container_of(work, struct ephy_res, en_work);
 
-	/* reset ephy */
-	value = acx00_reg_read(priv->acx, EXTEPHY_CTRL0);
-	value &= ~0x01;
-	acx00_reg_write(priv->acx, EXTEPHY_CTRL0, value);
-
-	/* shutdown ephy */
-	value = acx00_reg_read(priv->acx, EPHY_CTRL);
-	value |= 0x01;
-	acx00_reg_write(priv->acx, EPHY_CTRL, value);
+	if (!acx00_enable())
+		msleep(200);
+	sunxi_ephy_enable(priv);
 }
 
 static struct phy_driver ephy_driver = {
@@ -293,6 +171,7 @@ static struct phy_driver ephy_driver = {
 	.read_status	= &genphy_read_status,
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
+	.driver		= { .owner = THIS_MODULE,},
 	.probe		= ephy_probe,
 };
 
@@ -302,7 +181,7 @@ static const struct platform_device_id sunxi_ephy_id[] = {
 };
 MODULE_DEVICE_TABLE(platform, sunxi_ephy_id);
 
-static int ephy_plat_probe(struct platform_device *pdev)
+static __devinit int ephy_plat_probe(struct platform_device *pdev)
 {
 	struct acx00 *ax = dev_get_drvdata(pdev->dev.parent);
 
@@ -313,30 +192,26 @@ static int ephy_plat_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, &ephy_priv);
 	ephy_priv.plat_drv = pdev->dev.driver;
 
-	atomic_set(&ephy_en, 0);
+	INIT_WORK(&ephy_priv.en_work, ephy_work_fn);
 
 	sunxi_ephy_enable(&ephy_priv);
 
 	return 0;
 }
 
-static int ephy_plat_remove(struct platform_device *pdev)
+static int __devexit ephy_plat_remove(struct platform_device *pdev)
 {
 	return 0;
 }
 
 static int sunxi_phy_suspend(struct device *dev)
 {
-	sunxi_ephy_disable(&ephy_priv);
-	atomic_set(&ephy_en, 0);
-
 	return 0;
 }
 
 static int sunxi_phy_resume(struct device *dev)
 {
-	sunxi_ephy_enable(&ephy_priv);
-
+	schedule_work(&ephy_priv.en_work);
 	return 0;
 }
 
@@ -353,11 +228,11 @@ static struct platform_driver ephy_plat_driver = {
 		.pm = &sunxi_phy_pm_ops,
 	},
 	.probe = ephy_plat_probe,
-	.remove = ephy_plat_remove,
+	.remove = __devexit_p(ephy_plat_remove),
 	.id_table = sunxi_ephy_id,
 };
 
-static int ephy_init(void)
+static int __init ephy_init(void)
 {
 	int ret = 0;
 
@@ -365,14 +240,14 @@ static int ephy_init(void)
 	if (ret)
 		return -EINVAL;
 
-	ret = phy_driver_register(&ephy_driver, THIS_MODULE);
+	ret = phy_driver_register(&ephy_driver);
 	if (ret)
 		platform_driver_unregister(&ephy_plat_driver);
 
 	return ret;
 }
 
-static void ephy_exit(void)
+static void __exit ephy_exit(void)
 {
 	if (ephy_priv.plat_drv)
 		platform_driver_unregister(&ephy_plat_driver);

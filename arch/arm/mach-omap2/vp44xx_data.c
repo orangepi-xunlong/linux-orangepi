@@ -28,8 +28,8 @@
 #include "vp.h"
 
 static const struct omap_vp_ops omap4_vp_ops = {
-	.check_txdone = omap_prm_vp_check_txdone,
-	.clear_txdone = omap_prm_vp_clear_txdone,
+	.check_txdone = omap4_prm_vp_check_txdone,
+	.clear_txdone = omap4_prm_vp_clear_txdone,
 };
 
 /*
@@ -86,19 +86,4 @@ struct omap_vp_instance omap4_vp_core = {
 	.vlimitto = OMAP4_PRM_VP_CORE_VLIMITTO_OFFSET,
 	.vstatus = OMAP4_PRM_VP_CORE_STATUS_OFFSET,
 	.voltage = OMAP4_PRM_VP_CORE_VOLTAGE_OFFSET,
-};
-
-struct omap_vp_param omap4_mpu_vp_data = {
-	.vddmin			= OMAP4_VP_MPU_VLIMITTO_VDDMIN,
-	.vddmax			= OMAP4_VP_MPU_VLIMITTO_VDDMAX,
-};
-
-struct omap_vp_param omap4_iva_vp_data = {
-	.vddmin			= OMAP4_VP_IVA_VLIMITTO_VDDMIN,
-	.vddmax			= OMAP4_VP_IVA_VLIMITTO_VDDMAX,
-};
-
-struct omap_vp_param omap4_core_vp_data = {
-	.vddmin			= OMAP4_VP_CORE_VLIMITTO_VDDMIN,
-	.vddmax			= OMAP4_VP_CORE_VLIMITTO_VDDMAX,
 };

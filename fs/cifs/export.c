@@ -49,7 +49,7 @@
 static struct dentry *cifs_get_parent(struct dentry *dentry)
 {
 	/* BB need to add code here eventually to enable export via NFSD */
-	cifs_dbg(FYI, "get parent for %p\n", dentry);
+	cFYI(1, "get parent for %p", dentry);
 	return ERR_PTR(-EACCES);
 }
 

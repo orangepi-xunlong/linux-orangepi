@@ -25,12 +25,11 @@
 #include <linux/gpio.h>
 #include <linux/dm9000.h>
 #include <linux/leds.h>
-#include <linux/platform_data/rtc-v3020.h>
-#include <linux/pwm.h>
+#include <linux/rtc-v3020.h>
 #include <linux/pwm_backlight.h>
 
 #include <linux/i2c.h>
-#include <linux/platform_data/pca953x.h>
+#include <linux/i2c/pca953x.h>
 #include <linux/i2c/pxa-i2c.h>
 
 #include <linux/mfd/da903x.h>
@@ -47,14 +46,14 @@
 #include <asm/setup.h>
 #include <asm/system_info.h>
 
-#include "pxa300.h"
-#include "pxa27x-udc.h"
-#include <linux/platform_data/video-pxafb.h>
-#include <linux/platform_data/mmc-pxamci.h>
-#include <linux/platform_data/usb-ohci-pxa27x.h>
-#include <linux/platform_data/mtd-nand-pxa3xx.h>
+#include <mach/pxa300.h>
+#include <mach/pxa27x-udc.h>
+#include <mach/pxafb.h>
+#include <mach/mmc.h>
+#include <mach/ohci.h>
+#include <plat/pxa3xx_nand.h>
 #include <mach/audio.h>
-#include <linux/platform_data/usb-pxa3xx-ulpi.h>
+#include <mach/pxa3xx-u2d.h>
 
 #include <asm/mach/map.h>
 
@@ -306,15 +305,11 @@ static inline void cm_x300_init_lcd(void) {}
 #endif
 
 #if defined(CONFIG_BACKLIGHT_PWM) || defined(CONFIG_BACKLIGHT_PWM_MODULE)
-static struct pwm_lookup cm_x300_pwm_lookup[] = {
-	PWM_LOOKUP("pxa27x-pwm.0", 1, "pwm-backlight.0", NULL, 10000,
-		   PWM_POLARITY_NORMAL),
-};
-
 static struct platform_pwm_backlight_data cm_x300_backlight_data = {
+	.pwm_id		= 2,
 	.max_brightness	= 100,
 	.dft_brightness	= 100,
-	.enable_gpio	= -1,
+	.pwm_period_ns	= 10000,
 };
 
 static struct platform_device cm_x300_backlight_device = {
@@ -327,7 +322,6 @@ static struct platform_device cm_x300_backlight_device = {
 
 static void cm_x300_init_bl(void)
 {
-	pwm_add_table(cm_x300_pwm_lookup, ARRAY_SIZE(cm_x300_pwm_lookup));
 	platform_device_register(&cm_x300_backlight_device);
 }
 #else
@@ -547,7 +541,7 @@ static struct pxa3xx_u2d_platform_data cm_x300_u2d_platform_data = {
 	.exit		= cm_x300_u2d_exit,
 };
 
-static void __init cm_x300_init_u2d(void)
+static void cm_x300_init_u2d(void)
 {
 	pxa3xx_set_u2d_info(&cm_x300_u2d_platform_data);
 }
@@ -719,7 +713,9 @@ struct da9030_battery_info cm_x300_battery_info = {
 };
 
 static struct regulator_consumer_supply buck2_consumers[] = {
-	REGULATOR_SUPPLY("vcc_core", NULL),
+	{
+		.supply = "vcc_core",
+	},
 };
 
 static struct regulator_init_data buck2_data = {
@@ -840,11 +836,10 @@ static void __init cm_x300_init(void)
 	cm_x300_init_ac97();
 	cm_x300_init_wi2wi();
 	cm_x300_init_bl();
-
-	regulator_has_full_constraints();
 }
 
-static void __init cm_x300_fixup(struct tag *tags, char **cmdline)
+static void __init cm_x300_fixup(struct tag *tags, char **cmdline,
+				 struct meminfo *mi)
 {
 	/* Make sure that mi->bank[0].start = PHYS_ADDR */
 	for (; tags->hdr.size; tags = tag_next(tags))
@@ -861,7 +856,7 @@ MACHINE_START(CM_X300, "CM-X300 module")
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa3xx_init_irq,
 	.handle_irq	= pxa3xx_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= cm_x300_init,
 	.fixup		= cm_x300_fixup,
 	.restart	= pxa_restart,

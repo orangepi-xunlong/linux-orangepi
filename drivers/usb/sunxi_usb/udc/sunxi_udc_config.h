@@ -13,8 +13,8 @@
  *
  */
 
-#ifndef __SUNXI_UDC_CONFIG_H__
-#define __SUNXI_UDC_CONFIG_H__
+#ifndef  __SUNXI_UDC_CONFIG_H__
+#define  __SUNXI_UDC_CONFIG_H__
 
 #include <linux/slab.h>
 #include <linux/list.h>
@@ -27,24 +27,25 @@
 #define  SW_UDC_DOUBLE_FIFO       /* double FIFO          */
 #define  SW_UDC_DMA
 
-/**
- * only SUN8IW5 and later ic support inner dma,
- * former ic(eg. SUN8IW1, SUN8IW3, SUN8IW2 etc) use outer dma.
- */
+/* only 1667 and later ic support inner dma,
+ * former ic(eg. 1633,1650,1651 etc) use outer dma */
 #ifdef SW_UDC_DMA
+#if defined (CONFIG_ARCH_SUN8IW5) || defined (CONFIG_ARCH_SUN8IW6) || defined (CONFIG_ARCH_SUN8IW9) || defined (CONFIG_ARCH_SUN8IW8) || defined (CONFIG_ARCH_SUN8IW7)
 #define  SW_UDC_DMA_INNER
+#endif
 #endif
 
 #define  SW_UDC_HS_TO_FS          /* support HS to FS */
-#define  SW_UDC_DEBUG
+//#define  SW_UDC_DEBUG
 
 /* sw udc debug print */
 #if	0
-#define DMSG_DBG_UDC	DMSG_MSG
+#define DMSG_DBG_UDC     			DMSG_MSG
 #else
 #define DMSG_DBG_UDC(...)
 #endif
 
 #include  "../include/sunxi_usb_config.h"
 
-#endif /* __SUNXI_UDC_CONFIG_H__ */
+#endif   //__SUNXI_UDC_CONFIG_H__
+

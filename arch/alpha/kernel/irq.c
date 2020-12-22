@@ -19,6 +19,7 @@
 #include <linux/ptrace.h>
 #include <linux/interrupt.h>
 #include <linux/random.h>
+#include <linux/init.h>
 #include <linux/irq.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
@@ -59,7 +60,7 @@ int irq_select_affinity(unsigned int irq)
 		cpu = (cpu < (NR_CPUS-1) ? cpu + 1 : 0);
 	last_cpu = cpu;
 
-	cpumask_copy(irq_data_get_affinity_mask(data), cpumask_of(cpu));
+	cpumask_copy(data->affinity, cpumask_of(cpu));
 	chip->irq_set_affinity(data, cpumask_of(cpu), false);
 	return 0;
 }
@@ -116,7 +117,14 @@ handle_irq(int irq)
 		return;
 	}
 
+	/*
+	 * From here we must proceed with IPL_MAX. Note that we do not
+	 * explicitly enable interrupts afterwards - some MILO PALcode
+	 * (namely LX164 one) seems to have severe problems with RTI
+	 * at IPL 0.
+	 */
+	local_irq_disable();
 	irq_enter();
-	generic_handle_irq_desc(desc);
+	generic_handle_irq_desc(irq, desc);
 	irq_exit();
 }

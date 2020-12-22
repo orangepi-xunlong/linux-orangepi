@@ -30,7 +30,6 @@
 #include <linux/spi/ads7846.h>
 #include <linux/spi/pxa2xx_spi.h>
 #include <linux/mtd/sharpsl.h>
-#include <linux/memblock.h>
 
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
@@ -41,12 +40,12 @@
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 
-#include "pxa25x.h"
-#include <linux/platform_data/mmc-pxamci.h>
-#include "udc.h"
-#include <linux/platform_data/irda-pxaficp.h>
+#include <mach/pxa25x.h>
+#include <mach/mmc.h>
+#include <mach/udc.h>
+#include <mach/irda.h>
 #include <mach/poodle.h>
-#include <linux/platform_data/video-pxafb.h>
+#include <mach/pxafb.h>
 
 #include <asm/hardware/scoop.h>
 #include <asm/hardware/locomo.h>
@@ -260,7 +259,7 @@ err_free_2:
 	return err;
 }
 
-static int poodle_mci_setpower(struct device *dev, unsigned int vdd)
+static void poodle_mci_setpower(struct device *dev, unsigned int vdd)
 {
 	struct pxamci_platform_data* p_d = dev->platform_data;
 
@@ -272,8 +271,6 @@ static int poodle_mci_setpower(struct device *dev, unsigned int vdd)
 		gpio_set_value(POODLE_GPIO_SD_PWR1, 0);
 		gpio_set_value(POODLE_GPIO_SD_PWR, 0);
 	}
-
-	return 0;
 }
 
 static void poodle_mci_exit(struct device *dev, void *data)
@@ -426,7 +423,7 @@ static struct i2c_board_info __initdata poodle_i2c_devices[] = {
 
 static void poodle_poweroff(void)
 {
-	pxa_restart(REBOOT_HARD, NULL);
+	pxa_restart('h', NULL);
 }
 
 static void __init poodle_init(void)
@@ -447,7 +444,7 @@ static void __init poodle_init(void)
 
 	ret = platform_add_devices(devices, ARRAY_SIZE(devices));
 	if (ret)
-		pr_warn("poodle: Unable to register LoCoMo device\n");
+		pr_warning("poodle: Unable to register LoCoMo device\n");
 
 	pxa_set_fb_info(&poodle_locomo_device.dev, &poodle_fb_info);
 	pxa_set_udc_info(&udc_info);
@@ -459,10 +456,13 @@ static void __init poodle_init(void)
 	regulator_has_full_constraints();
 }
 
-static void __init fixup_poodle(struct tag *tags, char **cmdline)
+static void __init fixup_poodle(struct tag *tags, char **cmdline,
+				struct meminfo *mi)
 {
 	sharpsl_save_param();
-	memblock_add(0xa0000000, SZ_32M);
+	mi->nr_banks=1;
+	mi->bank[0].start = 0xa0000000;
+	mi->bank[0].size = (32*1024*1024);
 }
 
 MACHINE_START(POODLE, "SHARP Poodle")
@@ -471,7 +471,7 @@ MACHINE_START(POODLE, "SHARP Poodle")
 	.nr_irqs	= POODLE_NR_IRQS,	/* 4 for LoCoMo */
 	.init_irq	= pxa25x_init_irq,
 	.handle_irq	= pxa25x_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= poodle_init,
 	.restart	= pxa_restart,
 MACHINE_END

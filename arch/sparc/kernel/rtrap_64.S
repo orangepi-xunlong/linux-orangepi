@@ -14,16 +14,14 @@
 #include <asm/visasm.h>
 #include <asm/processor.h>
 
-#ifdef CONFIG_CONTEXT_TRACKING
-# define SCHEDULE_USER schedule_user
-#else
-# define SCHEDULE_USER schedule
-#endif
+#define		RTRAP_PSTATE		(PSTATE_TSO|PSTATE_PEF|PSTATE_PRIV|PSTATE_IE)
+#define		RTRAP_PSTATE_IRQOFF	(PSTATE_TSO|PSTATE_PEF|PSTATE_PRIV)
+#define		RTRAP_PSTATE_AG_IRQOFF	(PSTATE_TSO|PSTATE_PEF|PSTATE_PRIV|PSTATE_AG)
 
 		.text
 		.align			32
 __handle_preemption:
-		call			SCHEDULE_USER
+		call			schedule
 		 wrpr			%g0, RTRAP_PSTATE, %pstate
 		ba,pt			%xcc, __handle_preemption_continue
 		 wrpr			%g0, RTRAP_PSTATE_IRQOFF, %pstate
@@ -69,20 +67,24 @@ rtrap_nmi:	ldx			[%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
 		andn			%l1, %l4, %l1
 		srl			%l4, 20, %l4
 		ba,pt			%xcc, rtrap_no_irq_enable
-		nop
-		/* Do not actually set the %pil here.  We will do that
-		 * below after we clear PSTATE_IE in the %pstate register.
-		 * If we re-enable interrupts here, we can recurse down
-		 * the hardirq stack potentially endlessly, causing a
-		 * stack overflow.
-		 */
+		 wrpr			%l4, %pil
 
 		.align			64
 		.globl			rtrap_irq, rtrap, irqsz_patchme, rtrap_xcall
 rtrap_irq:
 rtrap:
+#ifndef CONFIG_SMP
+		sethi			%hi(__cpu_data), %l0
+		lduw			[%l0 + %lo(__cpu_data)], %l1
+#else
+		sethi			%hi(__cpu_data), %l0
+		or			%l0, %lo(__cpu_data), %l0
+		lduw			[%l0 + %g5], %l1
+#endif
+		cmp			%l1, 0
+
 		/* mm/ultra.S:xcall_report_regs KNOWS about this load. */
-		ldx			[%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
+		 ldx			[%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
 rtrap_xcall:
 		sethi			%hi(0xf << 20), %l4
 		and			%l1, %l4, %l4
@@ -238,17 +240,52 @@ rt_continue:	ldx			[%sp + PTREGS_OFF + PT_V9_G1], %g1
 		 wrpr			%g1, %cwp
 		ba,a,pt			%xcc, user_rtt_fill_64bit
 
-user_rtt_fill_fixup_dax:
-		ba,pt	%xcc, user_rtt_fill_fixup_common
-		 mov	1, %g3
-
-user_rtt_fill_fixup_mna:
-		ba,pt	%xcc, user_rtt_fill_fixup_common
-		 mov	2, %g3
-
 user_rtt_fill_fixup:
-		ba,pt	%xcc, user_rtt_fill_fixup_common
-		 clr	%g3
+		rdpr	%cwp, %g1
+		add	%g1, 1, %g1
+		wrpr	%g1, 0x0, %cwp
+
+		rdpr	%wstate, %g2
+		sll	%g2, 3, %g2
+		wrpr	%g2, 0x0, %wstate
+
+		/* We know %canrestore and %otherwin are both zero.  */
+
+		sethi	%hi(sparc64_kern_pri_context), %g2
+		ldx	[%g2 + %lo(sparc64_kern_pri_context)], %g2
+		mov	PRIMARY_CONTEXT, %g1
+
+661:		stxa	%g2, [%g1] ASI_DMMU
+		.section .sun4v_1insn_patch, "ax"
+		.word	661b
+		stxa	%g2, [%g1] ASI_MMU
+		.previous
+
+		sethi	%hi(KERNBASE), %g1
+		flush	%g1
+
+		or	%g4, FAULT_CODE_WINFIXUP, %g4
+		stb	%g4, [%g6 + TI_FAULT_CODE]
+		stx	%g5, [%g6 + TI_FAULT_ADDR]
+
+		mov	%g6, %l1
+		wrpr	%g0, 0x0, %tl
+
+661:		nop
+		.section		.sun4v_1insn_patch, "ax"
+		.word			661b
+		SET_GL(0)
+		.previous
+
+		wrpr	%g0, RTRAP_PSTATE, %pstate
+
+		mov	%l1, %g6
+		ldx	[%g6 + TI_TASK], %g4
+		LOAD_PER_CPU_BASE(%g5, %g6, %g1, %g2, %g3)
+		call	do_sparc64_fault
+		 add	%sp, PTREGS_OFF, %o0
+		ba,pt	%xcc, rtrap
+		 nop
 
 user_rtt_pre_restore:
 		add			%g1, 1, %g1
@@ -279,10 +316,12 @@ to_kernel:
 		 nop
 		cmp			%l4, 0
 		bne,pn			%xcc, kern_fpucheck
-		 nop
-		call			preempt_schedule_irq
+		 sethi			%hi(PREEMPT_ACTIVE), %l6
+		stw			%l6, [%g6 + TI_PRE_COUNT]
+		call			schedule
 		 nop
 		ba,pt			%xcc, rtrap
+		 stw			%g0, [%g6 + TI_PRE_COUNT]
 #endif
 kern_fpucheck:	ldub			[%g6 + TI_FPDEPTH], %l5
 		brz,pt			%l5, rt_continue

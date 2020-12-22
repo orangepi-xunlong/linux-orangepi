@@ -214,7 +214,8 @@ irnet_get_discovery_log(irnet_socket *	ap)
  * After reading :    discoveries = NULL ; disco_index = Y ; disco_number = -1
  */
 static inline int
-irnet_read_discovery_log(irnet_socket *ap, char *event, int buf_size)
+irnet_read_discovery_log(irnet_socket *	ap,
+			 char *		event)
 {
   int		done_event = 0;
 
@@ -236,13 +237,12 @@ irnet_read_discovery_log(irnet_socket *ap, char *event, int buf_size)
   if(ap->disco_index < ap->disco_number)
     {
       /* Write an event */
-      snprintf(event, buf_size,
-	       "Found %08x (%s) behind %08x {hints %02X-%02X}\n",
-	       ap->discoveries[ap->disco_index].daddr,
-	       ap->discoveries[ap->disco_index].info,
-	       ap->discoveries[ap->disco_index].saddr,
-	       ap->discoveries[ap->disco_index].hints[0],
-	       ap->discoveries[ap->disco_index].hints[1]);
+      sprintf(event, "Found %08x (%s) behind %08x {hints %02X-%02X}\n",
+	      ap->discoveries[ap->disco_index].daddr,
+	      ap->discoveries[ap->disco_index].info,
+	      ap->discoveries[ap->disco_index].saddr,
+	      ap->discoveries[ap->disco_index].hints[0],
+	      ap->discoveries[ap->disco_index].hints[1]);
       DEBUG(CTRL_INFO, "Writing discovery %d : %s\n",
 	    ap->disco_index, ap->discoveries[ap->disco_index].info);
 
@@ -282,30 +282,33 @@ irnet_ctrl_read(irnet_socket *	ap,
 		size_t		count)
 {
   DECLARE_WAITQUEUE(wait, current);
-  char		event[75];
+  char		event[64];	/* Max event is 61 char */
   ssize_t	ret = 0;
 
   DENTER(CTRL_TRACE, "(ap=0x%p, count=%Zd)\n", ap, count);
 
+  /* Check if we can write an event out in one go */
+  DABORT(count < sizeof(event), -EOVERFLOW, CTRL_ERROR, "Buffer to small.\n");
+
 #ifdef INITIAL_DISCOVERY
   /* Check if we have read the log */
-  if (irnet_read_discovery_log(ap, event, sizeof(event)))
+  if(irnet_read_discovery_log(ap, event))
     {
-      count = min(strlen(event), count);
-      if (copy_to_user(buf, event, count))
+      /* We have an event !!! Copy it to the user */
+      if(copy_to_user(buf, event, strlen(event)))
 	{
 	  DERROR(CTRL_ERROR, "Invalid user space pointer.\n");
 	  return -EFAULT;
 	}
 
       DEXIT(CTRL_TRACE, "\n");
-      return count;
+      return strlen(event);
     }
 #endif /* INITIAL_DISCOVERY */
 
   /* Put ourselves on the wait queue to be woken up */
   add_wait_queue(&irnet_events.rwait, &wait);
-  set_current_state(TASK_INTERRUPTIBLE);
+  current->state = TASK_INTERRUPTIBLE;
   for(;;)
     {
       /* If there is unread events */
@@ -321,7 +324,7 @@ irnet_ctrl_read(irnet_socket *	ap,
       /* Yield and wait to be woken up */
       schedule();
     }
-  __set_current_state(TASK_RUNNING);
+  current->state = TASK_RUNNING;
   remove_wait_queue(&irnet_events.rwait, &wait);
 
   /* Did we got it ? */
@@ -336,81 +339,79 @@ irnet_ctrl_read(irnet_socket *	ap,
   switch(irnet_events.log[ap->event_index].event)
     {
     case IRNET_DISCOVER:
-      snprintf(event, sizeof(event),
-	       "Discovered %08x (%s) behind %08x {hints %02X-%02X}\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name,
-	       irnet_events.log[ap->event_index].saddr,
-	       irnet_events.log[ap->event_index].hints.byte[0],
-	       irnet_events.log[ap->event_index].hints.byte[1]);
+      sprintf(event, "Discovered %08x (%s) behind %08x {hints %02X-%02X}\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name,
+	      irnet_events.log[ap->event_index].saddr,
+	      irnet_events.log[ap->event_index].hints.byte[0],
+	      irnet_events.log[ap->event_index].hints.byte[1]);
       break;
     case IRNET_EXPIRE:
-      snprintf(event, sizeof(event),
-	       "Expired %08x (%s) behind %08x {hints %02X-%02X}\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name,
-	       irnet_events.log[ap->event_index].saddr,
-	       irnet_events.log[ap->event_index].hints.byte[0],
-	       irnet_events.log[ap->event_index].hints.byte[1]);
+      sprintf(event, "Expired %08x (%s) behind %08x {hints %02X-%02X}\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name,
+	      irnet_events.log[ap->event_index].saddr,
+	      irnet_events.log[ap->event_index].hints.byte[0],
+	      irnet_events.log[ap->event_index].hints.byte[1]);
       break;
     case IRNET_CONNECT_TO:
-      snprintf(event, sizeof(event), "Connected to %08x (%s) on ppp%d\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name,
-	       irnet_events.log[ap->event_index].unit);
+      sprintf(event, "Connected to %08x (%s) on ppp%d\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name,
+	      irnet_events.log[ap->event_index].unit);
       break;
     case IRNET_CONNECT_FROM:
-      snprintf(event, sizeof(event), "Connection from %08x (%s) on ppp%d\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name,
-	       irnet_events.log[ap->event_index].unit);
+      sprintf(event, "Connection from %08x (%s) on ppp%d\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name,
+	      irnet_events.log[ap->event_index].unit);
       break;
     case IRNET_REQUEST_FROM:
-      snprintf(event, sizeof(event), "Request from %08x (%s) behind %08x\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name,
-	       irnet_events.log[ap->event_index].saddr);
+      sprintf(event, "Request from %08x (%s) behind %08x\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name,
+	      irnet_events.log[ap->event_index].saddr);
       break;
     case IRNET_NOANSWER_FROM:
-      snprintf(event, sizeof(event), "No-answer from %08x (%s) on ppp%d\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name,
-	       irnet_events.log[ap->event_index].unit);
+      sprintf(event, "No-answer from %08x (%s) on ppp%d\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name,
+	      irnet_events.log[ap->event_index].unit);
       break;
     case IRNET_BLOCKED_LINK:
-      snprintf(event, sizeof(event), "Blocked link with %08x (%s) on ppp%d\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name,
-	       irnet_events.log[ap->event_index].unit);
+      sprintf(event, "Blocked link with %08x (%s) on ppp%d\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name,
+	      irnet_events.log[ap->event_index].unit);
       break;
     case IRNET_DISCONNECT_FROM:
-      snprintf(event, sizeof(event), "Disconnection from %08x (%s) on ppp%d\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name,
-	       irnet_events.log[ap->event_index].unit);
+      sprintf(event, "Disconnection from %08x (%s) on ppp%d\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name,
+	      irnet_events.log[ap->event_index].unit);
       break;
     case IRNET_DISCONNECT_TO:
-      snprintf(event, sizeof(event), "Disconnected to %08x (%s)\n",
-	       irnet_events.log[ap->event_index].daddr,
-	       irnet_events.log[ap->event_index].name);
+      sprintf(event, "Disconnected to %08x (%s)\n",
+	      irnet_events.log[ap->event_index].daddr,
+	      irnet_events.log[ap->event_index].name);
       break;
     default:
-      snprintf(event, sizeof(event), "Bug\n");
+      sprintf(event, "Bug\n");
     }
   /* Increment our event index */
   ap->event_index = (ap->event_index + 1) % IRNET_MAX_EVENTS;
 
   DEBUG(CTRL_INFO, "Event is :%s", event);
 
-  count = min(strlen(event), count);
-  if (copy_to_user(buf, event, count))
+  /* Copy it to the user */
+  if(copy_to_user(buf, event, strlen(event)))
     {
       DERROR(CTRL_ERROR, "Invalid user space pointer.\n");
       return -EFAULT;
     }
 
   DEXIT(CTRL_TRACE, "\n");
-  return count;
+  return strlen(event);
 }
 
 /*------------------------------------------------------------------*/

@@ -41,15 +41,20 @@
 
 
 static unsigned int ibm_scan_log_dump;			/* RTAS token */
-static unsigned int *scanlog_buffer;			/* The data buffer */
+static struct proc_dir_entry *proc_ppc64_scan_log_dump;	/* The proc file */
 
 static ssize_t scanlog_read(struct file *file, char __user *buf,
 			    size_t count, loff_t *ppos)
 {
-	unsigned int *data = scanlog_buffer;
+        struct inode * inode = file->f_path.dentry->d_inode;
+	struct proc_dir_entry *dp;
+	unsigned int *data;
 	int status;
 	unsigned long len, off;
 	unsigned int wait_time;
+
+        dp = PDE(inode);
+ 	data = (unsigned int *)dp->data;
 
 	if (count > RTAS_DATA_BUF_SIZE)
 		count = RTAS_DATA_BUF_SIZE;
@@ -134,7 +139,8 @@ static ssize_t scanlog_write(struct file * file, const char __user * buf,
 
 static int scanlog_open(struct inode * inode, struct file * file)
 {
-	unsigned int *data = scanlog_buffer;
+	struct proc_dir_entry *dp = PDE(inode);
+	unsigned int *data = (unsigned int *)dp->data;
 
 	if (data[0] != 0) {
 		/* This imperfect test stops a second copy of the
@@ -150,13 +156,15 @@ static int scanlog_open(struct inode * inode, struct file * file)
 
 static int scanlog_release(struct inode * inode, struct file * file)
 {
-	unsigned int *data = scanlog_buffer;
+	struct proc_dir_entry *dp = PDE(inode);
+	unsigned int *data = (unsigned int *)dp->data;
 
 	data[0] = 0;
+
 	return 0;
 }
 
-static const struct file_operations scanlog_fops = {
+const struct file_operations scanlog_fops = {
 	.owner		= THIS_MODULE,
 	.read		= scanlog_read,
 	.write		= scanlog_write,
@@ -168,6 +176,7 @@ static const struct file_operations scanlog_fops = {
 static int __init scanlog_init(void)
 {
 	struct proc_dir_entry *ent;
+	void *data;
 	int err = -ENOMEM;
 
 	ibm_scan_log_dump = rtas_token("ibm,scan-log-dump");
@@ -175,24 +184,29 @@ static int __init scanlog_init(void)
 		return -ENODEV;
 
 	/* Ideally we could allocate a buffer < 4G */
-	scanlog_buffer = kzalloc(RTAS_DATA_BUF_SIZE, GFP_KERNEL);
-	if (!scanlog_buffer)
+	data = kzalloc(RTAS_DATA_BUF_SIZE, GFP_KERNEL);
+	if (!data)
 		goto err;
 
-	ent = proc_create("powerpc/rtas/scan-log-dump", S_IRUSR, NULL,
-			  &scanlog_fops);
+	ent = proc_create_data("powerpc/rtas/scan-log-dump", S_IRUSR, NULL,
+			       &scanlog_fops, data);
 	if (!ent)
 		goto err;
+
+	proc_ppc64_scan_log_dump = ent;
+
 	return 0;
 err:
-	kfree(scanlog_buffer);
+	kfree(data);
 	return err;
 }
 
 static void __exit scanlog_cleanup(void)
 {
-	remove_proc_entry("powerpc/rtas/scan-log-dump", NULL);
-	kfree(scanlog_buffer);
+	if (proc_ppc64_scan_log_dump) {
+		kfree(proc_ppc64_scan_log_dump->data);
+		remove_proc_entry("scan-log-dump", proc_ppc64_scan_log_dump->parent);
+	}
 }
 
 module_init(scanlog_init);

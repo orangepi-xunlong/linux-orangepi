@@ -11,12 +11,6 @@
 
 #include "elfconfig.h"
 
-/* On BSD-alike OSes elf.h defines these according to host's word size */
-#undef ELF_ST_BIND
-#undef ELF_ST_TYPE
-#undef ELF_R_SYM
-#undef ELF_R_TYPE
-
 #if KERNEL_ELFCLASS == ELFCLASS32
 
 #define Elf_Ehdr    Elf32_Ehdr
@@ -133,7 +127,7 @@ struct elf_info {
 	Elf_Section  export_gpl_sec;
 	Elf_Section  export_unused_gpl_sec;
 	Elf_Section  export_gpl_future_sec;
-	char         *strtab;
+	const char   *strtab;
 	char	     *modinfo;
 	unsigned int modinfo_len;
 

@@ -17,9 +17,10 @@
 /*
  * Ugly hack to work around failing compilation on systems that don't
  * yet populate new version of hidraw.h to userspace.
+ *
+ * If you need this, please have your distro update the kernel headers.
  */
 #ifndef HIDIOCSFEATURE
-#warning Please have your distro update the userspace kernel headers
 #define HIDIOCSFEATURE(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len)
 #define HIDIOCGFEATURE(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x07, len)
 #endif
@@ -46,14 +47,10 @@ int main(int argc, char **argv)
 	char buf[256];
 	struct hidraw_report_descriptor rpt_desc;
 	struct hidraw_devinfo info;
-	char *device = "/dev/hidraw0";
-
-	if (argc > 1)
-		device = argv[1];
 
 	/* Open the Device with non-blocking reads. In real life,
 	   don't use a hard coded path; use libudev instead. */
-	fd = open(device, O_RDWR|O_NONBLOCK);
+	fd = open("/dev/hidraw0", O_RDWR|O_NONBLOCK);
 
 	if (fd < 0) {
 		perror("Unable to open device");

@@ -71,7 +71,7 @@
 
 #include "fpu_system.h"
 
-#include <uapi/asm/sigcontext.h>	/* for struct _fpstate */
+#include <asm/sigcontext.h>	/* for struct _fpstate */
 #include <asm/math_emu.h>
 #include <linux/linkage.h>
 

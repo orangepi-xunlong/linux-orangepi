@@ -10,7 +10,6 @@
  * published by the Free Software Foundation.
  *
  */
-#include <asm/assembler.h>
 
 #define ATAG_CORE 0x54410001
 #define ATAG_CORE_SIZE ((2*4 + 3*4) >> 2)
@@ -62,10 +61,10 @@ __vet_atags:
 	cmp	r5, r6
 	bne	1f
 
-2:	ret	lr				@ atag/dtb pointer is ok
+2:	mov	pc, lr				@ atag/dtb pointer is ok
 
 1:	mov	r2, #0
-	ret	lr
+	mov	pc, lr
 ENDPROC(__vet_atags)
 
 /*
@@ -99,8 +98,8 @@ __mmap_switched:
 	str	r9, [r4]			@ Save processor ID
 	str	r1, [r5]			@ Save machine type
 	str	r2, [r6]			@ Save atags pointer
-	cmp	r7, #0
-	strne	r0, [r7]			@ Save control register values
+	bic	r4, r0, #CR_A			@ Clear 'A' bit
+	stmia	r7, {r0, r4}			@ Save control register values
 	b	start_kernel
 ENDPROC(__mmap_switched)
 
@@ -114,16 +113,9 @@ __mmap_switched_data:
 	.long	processor_id			@ r4
 	.long	__machine_arch_type		@ r5
 	.long	__atags_pointer			@ r6
-#ifdef CONFIG_CPU_CP15
 	.long	cr_alignment			@ r7
-#else
-	.long	0				@ r7
-#endif
 	.long	init_thread_union + THREAD_START_SP @ sp
 	.size	__mmap_switched_data, . - __mmap_switched_data
-
-	__FINIT
-	.text
 
 /*
  * This provides a C-API version of __lookup_processor_type
@@ -149,6 +141,7 @@ ENDPROC(lookup_processor_type)
  *	r5 = proc_info pointer in physical address space
  *	r9 = cpuid (preserved)
  */
+	__CPUINIT
 __lookup_processor_type:
 	adr	r3, __lookup_processor_type_data
 	ldmia	r3, {r4 - r6}
@@ -163,7 +156,7 @@ __lookup_processor_type:
 	cmp	r5, r6
 	blo	1b
 	mov	r5, #0				@ unknown processor
-2:	ret	lr
+2:	mov	pc, lr
 ENDPROC(__lookup_processor_type)
 
 /*
@@ -176,18 +169,6 @@ __lookup_processor_type_data:
 	.long	__proc_info_begin
 	.long	__proc_info_end
 	.size	__lookup_processor_type_data, . - __lookup_processor_type_data
-
-__error_lpae:
-#ifdef CONFIG_DEBUG_LL
-	adr	r0, str_lpae
-	bl 	printascii
-	b	__error
-str_lpae: .asciz "\nError: Kernel with LPAE support, but CPU does not support LPAE.\n"
-#else
-	b	__error
-#endif
-	.align
-ENDPROC(__error_lpae)
 
 __error_p:
 #ifdef CONFIG_DEBUG_LL

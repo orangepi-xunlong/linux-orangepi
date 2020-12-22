@@ -10,7 +10,8 @@
  */
 #include <linux/linkage.h>
 #include <linux/init.h>
-#include <asm/assembler.h>
+
+	__INIT
 
 /*
  * Realview/Versatile Express specific entry point for secondary CPUs.
@@ -18,9 +19,8 @@
  * until we're ready for them to initialise.
  */
 ENTRY(versatile_secondary_startup)
- ARM_BE8(setend	be)
 	mrc	p15, 0, r0, c0, c0, 5
-	bic	r0, #0xff000000
+	and	r0, r0, #15
 	adr	r4, 1f
 	ldmia	r4, {r5, r6}
 	sub	r4, r4, r5

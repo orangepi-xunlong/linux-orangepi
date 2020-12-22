@@ -45,6 +45,7 @@ int in_source_file;
 
 static int flag_debug, flag_dump_defs, flag_reference, flag_dump_types,
 	   flag_preserve, flag_warnings;
+static const char *arch = "";
 static const char *mod_prefix = "";
 
 static int errors;
@@ -423,15 +424,13 @@ static struct string_list *read_node(FILE *f)
 	struct string_list node = {
 		.string = buffer,
 		.tag = SYM_NORMAL };
-	int c, in_string = 0;
+	int c;
 
 	while ((c = fgetc(f)) != EOF) {
-		if (!in_string && c == ' ') {
+		if (c == ' ') {
 			if (node.string == buffer)
 				continue;
 			break;
-		} else if (c == '"') {
-			in_string = !in_string;
 		} else if (c == '\n') {
 			if (node.string == buffer)
 				return NULL;
@@ -732,7 +731,7 @@ static void genksyms_usage(void)
 {
 	fputs("Usage:\n" "genksyms [-adDTwqhV] > /path/to/.tmp_obj.ver\n" "\n"
 #ifdef __GNU_LIBRARY__
-	      "  -s, --symbol-prefix   Select symbol prefix\n"
+	      "  -a, --arch            Select architecture\n"
 	      "  -d, --debug           Increment the debug level (repeatable)\n"
 	      "  -D, --dump            Dump expanded symbol defs (for debugging only)\n"
 	      "  -r, --reference file  Read reference symbols from a file\n"
@@ -743,7 +742,7 @@ static void genksyms_usage(void)
 	      "  -h, --help            Print this message\n"
 	      "  -V, --version         Print the release version\n"
 #else				/* __GNU_LIBRARY__ */
-	      "  -s                    Select symbol prefix\n"
+	      "  -a                    Select architecture\n"
 	      "  -d                    Increment the debug level (repeatable)\n"
 	      "  -D                    Dump expanded symbol defs (for debugging only)\n"
 	      "  -r file               Read reference symbols from a file\n"
@@ -764,7 +763,7 @@ int main(int argc, char **argv)
 
 #ifdef __GNU_LIBRARY__
 	struct option long_opts[] = {
-		{"symbol-prefix", 1, 0, 's'},
+		{"arch", 1, 0, 'a'},
 		{"debug", 0, 0, 'd'},
 		{"warnings", 0, 0, 'w'},
 		{"quiet", 0, 0, 'q'},
@@ -777,14 +776,14 @@ int main(int argc, char **argv)
 		{0, 0, 0, 0}
 	};
 
-	while ((o = getopt_long(argc, argv, "s:dwqVDr:T:ph",
+	while ((o = getopt_long(argc, argv, "a:dwqVDr:T:ph",
 				&long_opts[0], NULL)) != EOF)
 #else				/* __GNU_LIBRARY__ */
-	while ((o = getopt(argc, argv, "s:dwqVDr:T:ph")) != EOF)
+	while ((o = getopt(argc, argv, "a:dwqVDr:T:ph")) != EOF)
 #endif				/* __GNU_LIBRARY__ */
 		switch (o) {
-		case 's':
-			mod_prefix = optarg;
+		case 'a':
+			arch = optarg;
 			break;
 		case 'd':
 			flag_debug++;
@@ -827,6 +826,8 @@ int main(int argc, char **argv)
 			genksyms_usage();
 			return 1;
 		}
+	if ((strcmp(arch, "h8300") == 0) || (strcmp(arch, "blackfin") == 0))
+		mod_prefix = "_";
 	{
 		extern int yydebug;
 		extern int yy_flex_debug;
@@ -872,9 +873,6 @@ int main(int argc, char **argv)
 			nsyms, HASH_BUCKETS,
 			(double)nsyms / (double)HASH_BUCKETS);
 	}
-
-	if (dumpfile)
-		fclose(dumpfile);
 
 	return errors != 0;
 }

@@ -2170,8 +2170,8 @@ xpc_send_payload_sn2(struct xpc_channel *ch, u32 flags, void *payload,
 {
 	enum xp_retval ret = xpSuccess;
 	struct xpc_channel_sn2 *ch_sn2 = &ch->sn.sn2;
-	struct xpc_msg_sn2 *msg = msg;
-	struct xpc_notify_sn2 *notify = notify;
+	struct xpc_msg_sn2 *msg = NULL;
+	struct xpc_notify_sn2 *notify = NULL;
 	s64 msg_number;
 	s64 put;
 

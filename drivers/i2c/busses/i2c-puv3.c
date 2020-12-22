@@ -17,6 +17,7 @@
 #include <linux/types.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
+#include <linux/init.h>
 #include <linux/clk.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
@@ -183,7 +184,7 @@ static struct i2c_algorithm puv3_i2c_algorithm = {
 /*
  * Main initialization routine.
  */
-static int puv3_i2c_probe(struct platform_device *pdev)
+static int __devinit puv3_i2c_probe(struct platform_device *pdev)
 {
 	struct i2c_adapter *adapter;
 	struct resource *mem;
@@ -198,7 +199,7 @@ static int puv3_i2c_probe(struct platform_device *pdev)
 
 	adapter = kzalloc(sizeof(struct i2c_adapter), GFP_KERNEL);
 	if (adapter == NULL) {
-		dev_err(&pdev->dev, "can't allocate interface!\n");
+		dev_err(&pdev->dev, "can't allocate inteface!\n");
 		rc = -ENOMEM;
 		goto fail_nomem;
 	}
@@ -212,13 +213,17 @@ static int puv3_i2c_probe(struct platform_device *pdev)
 
 	adapter->nr = pdev->id;
 	rc = i2c_add_numbered_adapter(adapter);
-	if (rc)
+	if (rc) {
+		dev_err(&pdev->dev, "Adapter '%s' registration failed\n",
+				adapter->name);
 		goto fail_add_adapter;
+	}
 
 	dev_info(&pdev->dev, "PKUnity v3 i2c bus adapter.\n");
 	return 0;
 
 fail_add_adapter:
+	platform_set_drvdata(pdev, NULL);
 	kfree(adapter);
 fail_nomem:
 	release_mem_region(mem->start, resource_size(mem));
@@ -226,23 +231,30 @@ fail_nomem:
 	return rc;
 }
 
-static int puv3_i2c_remove(struct platform_device *pdev)
+static int __devexit puv3_i2c_remove(struct platform_device *pdev)
 {
 	struct i2c_adapter *adapter = platform_get_drvdata(pdev);
 	struct resource *mem;
+	int rc;
 
-	i2c_del_adapter(adapter);
+	rc = i2c_del_adapter(adapter);
+	if (rc) {
+		dev_err(&pdev->dev, "Adapter '%s' delete fail\n",
+				adapter->name);
+		return rc;
+	}
 
 	put_device(&pdev->dev);
+	platform_set_drvdata(pdev, NULL);
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	release_mem_region(mem->start, resource_size(mem));
 
-	return 0;
+	return rc;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int puv3_i2c_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int puv3_i2c_suspend(struct platform_device *dev, pm_message_t state)
 {
 	int poll_count;
 	/* Disable the IIC */
@@ -255,19 +267,23 @@ static int puv3_i2c_suspend(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(puv3_i2c_pm, puv3_i2c_suspend, NULL);
-#define PUV3_I2C_PM	(&puv3_i2c_pm)
-
+static int puv3_i2c_resume(struct platform_device *dev)
+{
+	return 0 ;
+}
 #else
-#define PUV3_I2C_PM	NULL
+#define puv3_i2c_suspend NULL
+#define puv3_i2c_resume NULL
 #endif
 
 static struct platform_driver puv3_i2c_driver = {
 	.probe		= puv3_i2c_probe,
-	.remove		= puv3_i2c_remove,
+	.remove		= __devexit_p(puv3_i2c_remove),
+	.suspend	= puv3_i2c_suspend,
+	.resume		= puv3_i2c_resume,
 	.driver		= {
 		.name	= "PKUnity-v3-I2C",
-		.pm	= PUV3_I2C_PM,
+		.owner	= THIS_MODULE,
 	}
 };
 

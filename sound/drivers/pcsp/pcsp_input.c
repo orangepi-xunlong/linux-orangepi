@@ -14,9 +14,8 @@
 
 #include <linux/init.h>
 #include <linux/input.h>
-#include <linux/io.h>
+#include <asm/io.h>
 #include "pcsp.h"
-#include "pcsp_input.h"
 
 static void pcspkr_do_sound(unsigned int count)
 {
@@ -78,7 +77,7 @@ static int pcspkr_input_event(struct input_dev *dev, unsigned int type,
 	return 0;
 }
 
-int pcspkr_input_init(struct input_dev **rdev, struct device *dev)
+int __devinit pcspkr_input_init(struct input_dev **rdev, struct device *dev)
 {
 	int err;
 

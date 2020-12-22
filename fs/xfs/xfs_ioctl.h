@@ -20,13 +20,12 @@
 
 extern int
 xfs_ioc_space(
+	struct xfs_inode	*ip,
+	struct inode		*inode,
 	struct file		*filp,
+	int			ioflags,
 	unsigned int		cmd,
 	xfs_flock64_t		*bf);
-
-int
-xfs_ioc_swapext(
-	xfs_swapext_t	*sxp);
 
 extern int
 xfs_find_handle(
@@ -82,11 +81,5 @@ xfs_file_compat_ioctl(
 	struct file		*file,
 	unsigned int		cmd,
 	unsigned long		arg);
-
-extern int
-xfs_set_dmattrs(
-	struct xfs_inode	*ip,
-	u_int			evmask,
-	u_int16_t		state);
 
 #endif

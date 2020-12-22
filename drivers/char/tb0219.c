@@ -21,7 +21,6 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/module.h>
-#include <linux/uaccess.h>
 
 #include <asm/io.h>
 #include <asm/reboot.h>
@@ -165,7 +164,7 @@ static ssize_t tanbac_tb0219_read(struct file *file, char __user *buf, size_t le
 	unsigned int minor;
 	char value;
 
-	minor = iminor(file_inode(file));
+	minor = iminor(file->f_path.dentry->d_inode);
 	switch (minor) {
 	case 0:
 		value = get_led();
@@ -201,7 +200,7 @@ static ssize_t tanbac_tb0219_write(struct file *file, const char __user *data,
 	int retval = 0;
 	char c;
 
-	minor = iminor(file_inode(file));
+	minor = iminor(file->f_path.dentry->d_inode);
 	switch (minor) {
 	case 0:
 		type = TYPE_LED;
@@ -285,7 +284,7 @@ static void tb0219_pci_irq_init(void)
 	vr41xx_set_irq_level(TB0219_PCI_SLOT3_PIN, IRQ_LEVEL_LOW);
 }
 
-static int tb0219_probe(struct platform_device *dev)
+static int __devinit tb0219_probe(struct platform_device *dev)
 {
 	int retval;
 
@@ -319,7 +318,7 @@ static int tb0219_probe(struct platform_device *dev)
 	return 0;
 }
 
-static int tb0219_remove(struct platform_device *dev)
+static int __devexit tb0219_remove(struct platform_device *dev)
 {
 	_machine_restart = old_machine_restart;
 
@@ -335,9 +334,10 @@ static struct platform_device *tb0219_platform_device;
 
 static struct platform_driver tb0219_device_driver = {
 	.probe		= tb0219_probe,
-	.remove		= tb0219_remove,
+	.remove		= __devexit_p(tb0219_remove),
 	.driver		= {
 		.name	= "TB0219",
+		.owner	= THIS_MODULE,
 	},
 };
 

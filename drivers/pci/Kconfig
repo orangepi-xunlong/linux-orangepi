@@ -1,17 +1,14 @@
 #
 # PCI configuration
 #
-
-source "drivers/pci/pcie/Kconfig"
-
-config PCI_BUS_ADDR_T_64BIT
-	def_bool y if (ARCH_DMA_ADDR_T_64BIT || 64BIT)
-	depends on PCI
+config ARCH_SUPPORTS_MSI
+	bool
+	default n
 
 config PCI_MSI
 	bool "Message Signaled Interrupts (MSI and MSI-X)"
 	depends on PCI
-	select GENERIC_MSI_IRQ
+	depends on ARCH_SUPPORTS_MSI
 	help
 	   This allows device drivers to enable MSI (Message Signaled
 	   Interrupts).  Message Signaled Interrupts enable a device to
@@ -23,11 +20,6 @@ config PCI_MSI
 	   entire system.
 
 	   If you don't know what to do here, say Y.
-
-config PCI_MSI_IRQ_DOMAIN
-	def_bool ARC || ARM || ARM64 || X86
-	depends on PCI_MSI
-	select GENERIC_MSI_IRQ_DOMAIN
 
 config PCI_DEBUG
 	bool "PCI Debugging"
@@ -64,6 +56,7 @@ config PCI_STUB
 config XEN_PCIDEV_FRONTEND
         tristate "Xen PCI Frontend"
         depends on PCI && X86 && XEN
+        select HOTPLUG
         select PCI_XEN
 	select XEN_XENBUS_FRONTEND
         default y
@@ -74,16 +67,13 @@ config XEN_PCIDEV_FRONTEND
 config HT_IRQ
 	bool "Interrupts on hypertransport devices"
 	default y
-	depends on PCI && X86_LOCAL_APIC
+	depends on PCI && X86_LOCAL_APIC && X86_IO_APIC
 	help
 	   This allows native hypertransport devices to use interrupts.
 
 	   If unsure say Y.
 
 config PCI_ATS
-	bool
-
-config PCI_ECAM
 	bool
 
 config PCI_IOV
@@ -120,16 +110,13 @@ config PCI_PASID
 
 	  If unsure, say N.
 
+config PCI_IOAPIC
+	tristate "PCI IO-APIC hotplug support" if X86
+	depends on PCI
+	depends on ACPI
+	depends on HOTPLUG
+	default !X86
+
 config PCI_LABEL
 	def_bool y if (DMI || ACPI)
 	select NLS
-
-config PCI_HYPERV
-        tristate "Hyper-V PCI Frontend"
-        depends on PCI && X86 && HYPERV && PCI_MSI && PCI_MSI_IRQ_DOMAIN && X86_64
-        help
-          The PCI device frontend driver allows the kernel to import arbitrary
-          PCI devices from a PCI backend to support PCI driver domains.
-
-source "drivers/pci/hotplug/Kconfig"
-source "drivers/pci/host/Kconfig"

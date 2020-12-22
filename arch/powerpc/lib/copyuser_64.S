@@ -8,18 +8,9 @@
  */
 #include <asm/processor.h>
 #include <asm/ppc_asm.h>
-#include <asm/export.h>
-
-#ifdef __BIG_ENDIAN__
-#define sLd sld		/* Shift towards low-numbered address. */
-#define sHd srd		/* Shift towards high-numbered address. */
-#else
-#define sLd srd		/* Shift towards low-numbered address. */
-#define sHd sld		/* Shift towards high-numbered address. */
-#endif
 
 	.align	7
-_GLOBAL_TOC(__copy_tofrom_user)
+_GLOBAL(__copy_tofrom_user)
 BEGIN_FTR_SECTION
 	nop
 FTR_SECTION_ELSE
@@ -39,7 +30,7 @@ _GLOBAL(__copy_tofrom_user_base)
 	dcbt	0,r4
 	beq	.Lcopy_page_4K
 	andi.	r6,r6,7
-	PPC_MTOCRF(0x01,r5)
+	PPC_MTOCRF	0x01,r5
 	blt	cr1,.Lshort_copy
 /* Below we want to nop out the bne if we're on a CPU that has the
  * CPU_FTR_UNALIGNED_LD_STD bit set and the CPU_FTR_CP_USE_DCBTZ bit
@@ -127,10 +118,10 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 
 24:	ld	r9,0(r4)	/* 3+2n loads, 2+2n stores */
 25:	ld	r0,8(r4)
-	sLd	r6,r9,r10
+	sld	r6,r9,r10
 26:	ldu	r9,16(r4)
-	sHd	r7,r0,r11
-	sLd	r8,r0,r10
+	srd	r7,r0,r11
+	sld	r8,r0,r10
 	or	r7,r7,r6
 	blt	cr6,79f
 27:	ld	r0,8(r4)
@@ -138,35 +129,35 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 
 28:	ld	r0,0(r4)	/* 4+2n loads, 3+2n stores */
 29:	ldu	r9,8(r4)
-	sLd	r8,r0,r10
+	sld	r8,r0,r10
 	addi	r3,r3,-8
 	blt	cr6,5f
 30:	ld	r0,8(r4)
-	sHd	r12,r9,r11
-	sLd	r6,r9,r10
+	srd	r12,r9,r11
+	sld	r6,r9,r10
 31:	ldu	r9,16(r4)
 	or	r12,r8,r12
-	sHd	r7,r0,r11
-	sLd	r8,r0,r10
+	srd	r7,r0,r11
+	sld	r8,r0,r10
 	addi	r3,r3,16
 	beq	cr6,78f
 
 1:	or	r7,r7,r6
 32:	ld	r0,8(r4)
 76:	std	r12,8(r3)
-2:	sHd	r12,r9,r11
-	sLd	r6,r9,r10
+2:	srd	r12,r9,r11
+	sld	r6,r9,r10
 33:	ldu	r9,16(r4)
 	or	r12,r8,r12
 77:	stdu	r7,16(r3)
-	sHd	r7,r0,r11
-	sLd	r8,r0,r10
+	srd	r7,r0,r11
+	sld	r8,r0,r10
 	bdnz	1b
 
 78:	std	r12,8(r3)
 	or	r7,r7,r6
 79:	std	r7,16(r3)
-5:	sHd	r12,r9,r11
+5:	srd	r12,r9,r11
 	or	r12,r8,r12
 80:	std	r12,24(r3)
 	bne	6f
@@ -174,43 +165,28 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 	blr
 6:	cmpwi	cr1,r5,8
 	addi	r3,r3,32
-	sLd	r9,r9,r10
+	sld	r9,r9,r10
 	ble	cr1,7f
 34:	ld	r0,8(r4)
-	sHd	r7,r0,r11
+	srd	r7,r0,r11
 	or	r9,r7,r9
 7:
 	bf	cr7*4+1,1f
-#ifdef __BIG_ENDIAN__
 	rotldi	r9,r9,32
-#endif
 94:	stw	r9,0(r3)
-#ifdef __LITTLE_ENDIAN__
-	rotrdi	r9,r9,32
-#endif
 	addi	r3,r3,4
 1:	bf	cr7*4+2,2f
-#ifdef __BIG_ENDIAN__
 	rotldi	r9,r9,16
-#endif
 95:	sth	r9,0(r3)
-#ifdef __LITTLE_ENDIAN__
-	rotrdi	r9,r9,16
-#endif
 	addi	r3,r3,2
 2:	bf	cr7*4+3,3f
-#ifdef __BIG_ENDIAN__
 	rotldi	r9,r9,8
-#endif
 96:	stb	r9,0(r3)
-#ifdef __LITTLE_ENDIAN__
-	rotrdi	r9,r9,8
-#endif
 3:	li	r3,0
 	blr
 
 .Ldst_unaligned:
-	PPC_MTOCRF(0x01,r6)		/* put #bytes to 8B bdry into cr7 */
+	PPC_MTOCRF	0x01,r6		/* put #bytes to 8B bdry into cr7 */
 	subf	r5,r6,r5
 	li	r7,0
 	cmpldi	cr1,r5,16
@@ -225,7 +201,7 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 2:	bf	cr7*4+1,3f
 37:	lwzx	r0,r7,r4
 83:	stwx	r0,r7,r3
-3:	PPC_MTOCRF(0x01,r5)
+3:	PPC_MTOCRF	0x01,r5
 	add	r4,r6,r4
 	add	r3,r6,r3
 	b	.Ldst_aligned
@@ -360,7 +336,6 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 	addi	r3,r3,8
 171:
 177:
-179:
 	addi	r3,r3,8
 370:
 372:
@@ -375,6 +350,7 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 173:
 174:
 175:
+179:
 181:
 184:
 186:
@@ -462,7 +438,8 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 /*
  * Routine to copy a whole page of data, optimized for POWER4.
  * On POWER4 it is more than 50% faster than the simple loop
- * above (following the .Ldst_aligned label).
+ * above (following the .Ldst_aligned label) but it runs slightly
+ * slower on POWER3.
  */
 .Lcopy_page_4K:
 	std	r31,-32(1)
@@ -672,4 +649,3 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 	.llong	89b,100b
 	.llong	90b,100b
 	.llong	91b,100b
-EXPORT_SYMBOL(__copy_tofrom_user)

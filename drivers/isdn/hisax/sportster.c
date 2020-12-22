@@ -183,7 +183,8 @@ Sportster_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 	return (0);
 }
 
-static int get_io_range(struct IsdnCardState *cs)
+static int __devinit
+get_io_range(struct IsdnCardState *cs)
 {
 	int i, j, adr;
 
@@ -207,7 +208,8 @@ static int get_io_range(struct IsdnCardState *cs)
 	}
 }
 
-int setup_sportster(struct IsdnCard *card)
+int __devinit
+setup_sportster(struct IsdnCard *card)
 {
 	struct IsdnCardState *cs = card->cs;
 	char tmp[64];

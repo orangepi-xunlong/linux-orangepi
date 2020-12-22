@@ -20,8 +20,6 @@
  *
  */
 
-#include <linux/linkage.h>
-
 .file "blowfish-x86_64-asm.S"
 .text
 
@@ -118,7 +116,11 @@
 	bswapq 			RX0; \
 	xorq RX0, 		(RIO);
 
-ENTRY(__blowfish_enc_blk)
+.align 8
+.global __blowfish_enc_blk
+.type   __blowfish_enc_blk,@function;
+
+__blowfish_enc_blk:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -146,16 +148,19 @@ ENTRY(__blowfish_enc_blk)
 
 	movq %r10, RIO;
 	test %cl, %cl;
-	jnz .L__enc_xor;
+	jnz __enc_xor;
 
 	write_block();
 	ret;
-.L__enc_xor:
+__enc_xor:
 	xor_block();
 	ret;
-ENDPROC(__blowfish_enc_blk)
 
-ENTRY(blowfish_dec_blk)
+.align 8
+.global blowfish_dec_blk
+.type   blowfish_dec_blk,@function;
+
+blowfish_dec_blk:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -184,7 +189,6 @@ ENTRY(blowfish_dec_blk)
 	movq %r11, %rbp;
 
 	ret;
-ENDPROC(blowfish_dec_blk)
 
 /**********************************************************************
   4-way blowfish, four blocks parallel
@@ -296,7 +300,11 @@ ENDPROC(blowfish_dec_blk)
 	bswapq 			RX3; \
 	xorq RX3,		24(RIO);
 
-ENTRY(__blowfish_enc_blk_4way)
+.align 8
+.global __blowfish_enc_blk_4way
+.type   __blowfish_enc_blk_4way,@function;
+
+__blowfish_enc_blk_4way:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -328,7 +336,7 @@ ENTRY(__blowfish_enc_blk_4way)
 	movq %r11, RIO;
 
 	test %bpl, %bpl;
-	jnz .L__enc_xor4;
+	jnz __enc_xor4;
 
 	write_block4();
 
@@ -336,15 +344,18 @@ ENTRY(__blowfish_enc_blk_4way)
 	popq %rbp;
 	ret;
 
-.L__enc_xor4:
+__enc_xor4:
 	xor_block4();
 
 	popq %rbx;
 	popq %rbp;
 	ret;
-ENDPROC(__blowfish_enc_blk_4way)
 
-ENTRY(blowfish_dec_blk_4way)
+.align 8
+.global blowfish_dec_blk_4way
+.type   blowfish_dec_blk_4way,@function;
+
+blowfish_dec_blk_4way:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -376,4 +387,4 @@ ENTRY(blowfish_dec_blk_4way)
 	popq %rbp;
 
 	ret;
-ENDPROC(blowfish_dec_blk_4way)
+

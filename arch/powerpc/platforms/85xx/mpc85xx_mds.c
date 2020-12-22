@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2010, 2012-2013 Freescale Semiconductor, Inc.
+ * Copyright (C) 2006-2010, 2012 Freescale Semicondutor, Inc.
  * All rights reserved.
  *
  * Author: Andy Fleming <afleming@freescale.com>
@@ -34,7 +34,6 @@
 #include <linux/of_device.h>
 #include <linux/phy.h>
 #include <linux/memblock.h>
-#include <linux/fsl/guts.h>
 
 #include <linux/atomic.h>
 #include <asm/time.h>
@@ -48,10 +47,11 @@
 #include <sysdev/fsl_soc.h>
 #include <sysdev/fsl_pci.h>
 #include <sysdev/simple_gpio.h>
-#include <soc/fsl/qe/qe.h>
-#include <soc/fsl/qe/qe_ic.h>
+#include <asm/qe.h>
+#include <asm/qe_ic.h>
 #include <asm/mpic.h>
 #include <asm/swiotlb.h>
+#include <asm/fsl_guts.h>
 #include "smp.h"
 
 #include "mpc85xx.h"
@@ -62,8 +62,6 @@
 #else
 #define DBG(fmt...)
 #endif
-
-#if IS_BUILTIN(CONFIG_PHYLIB)
 
 #define MV88E1111_SCR	0x10
 #define MV88E1111_SCR_125CLK	0x0010
@@ -154,8 +152,6 @@ static int mpc8568_mds_phy_fixups(struct phy_device *phydev)
 	return err;
 }
 
-#endif
-
 /* ************************************************************************
  *
  * Setup the architecture
@@ -210,7 +206,9 @@ static void __init mpc85xx_mds_reset_ucc_phys(void)
 		setbits8(&bcsr_regs[7], BCSR7_UCC12_GETHnRST);
 		clrbits8(&bcsr_regs[8], BCSR8_UEM_MARVELL_RST);
 
-		for_each_compatible_node(np, "network", "ucc_geth") {
+		for (np = NULL; (np = of_find_compatible_node(np,
+						"network",
+						"ucc_geth")) != NULL;) {
 			const unsigned int *prop;
 			int ucc_num;
 
@@ -242,8 +240,32 @@ static void __init mpc85xx_mds_qe_init(void)
 {
 	struct device_node *np;
 
-	mpc85xx_qe_init();
-	mpc85xx_qe_par_io_init();
+	np = of_find_compatible_node(NULL, NULL, "fsl,qe");
+	if (!np) {
+		np = of_find_node_by_name(NULL, "qe");
+		if (!np)
+			return;
+	}
+
+	if (!of_device_is_available(np)) {
+		of_node_put(np);
+		return;
+	}
+
+	qe_reset();
+	of_node_put(np);
+
+	np = of_find_node_by_name(NULL, "par_io");
+	if (np) {
+		struct device_node *ucc;
+
+		par_io_init(np);
+		of_node_put(np);
+
+		for_each_node_by_name(ucc, "ucc")
+			par_io_of_config(ucc);
+	}
+
 	mpc85xx_mds_reset_ucc_phys();
 
 	if (machine_is(p1021_mds)) {
@@ -305,19 +327,46 @@ static void __init mpc85xx_mds_qeic_init(void) { }
 
 static void __init mpc85xx_mds_setup_arch(void)
 {
+#ifdef CONFIG_PCI
+	struct pci_controller *hose;
+	struct device_node *np;
+#endif
+	dma_addr_t max = 0xffffffff;
+
 	if (ppc_md.progress)
 		ppc_md.progress("mpc85xx_mds_setup_arch()", 0);
+
+#ifdef CONFIG_PCI
+	for_each_node_by_type(np, "pci") {
+		if (of_device_is_compatible(np, "fsl,mpc8540-pci") ||
+		    of_device_is_compatible(np, "fsl,mpc8548-pcie")) {
+			struct resource rsrc;
+			of_address_to_resource(np, 0, &rsrc);
+			if ((rsrc.start & 0xfffff) == 0x8000)
+				fsl_add_bridge(np, 1);
+			else
+				fsl_add_bridge(np, 0);
+
+			hose = pci_find_hose_for_OF_device(np);
+			max = min(max, hose->dma_window_base_cur +
+					hose->dma_window_size);
+		}
+	}
+#endif
 
 	mpc85xx_smp_init();
 
 	mpc85xx_mds_qe_init();
 
-	fsl_pci_assign_primary();
-
-	swiotlb_detect_4g();
+#ifdef CONFIG_SWIOTLB
+	if (memblock_end_of_DRAM() > max) {
+		ppc_swiotlb_enable = 1;
+		set_pci_dma_ops(&swiotlb_dma_ops);
+		ppc_md.pci_dma_dev_setup = pci_dma_dev_setup_swiotlb;
+	}
+#endif
 }
 
-#if IS_BUILTIN(CONFIG_PHYLIB)
 
 static int __init board_fixups(void)
 {
@@ -347,11 +396,8 @@ static int __init board_fixups(void)
 
 	return 0;
 }
-
 machine_arch_initcall(mpc8568_mds, board_fixups);
 machine_arch_initcall(mpc8569_mds, board_fixups);
-
-#endif
 
 static int __init mpc85xx_publish_devices(void)
 {
@@ -363,9 +409,9 @@ static int __init mpc85xx_publish_devices(void)
 	return mpc85xx_common_publish_devices();
 }
 
-machine_arch_initcall(mpc8568_mds, mpc85xx_publish_devices);
-machine_arch_initcall(mpc8569_mds, mpc85xx_publish_devices);
-machine_arch_initcall(p1021_mds, mpc85xx_common_publish_devices);
+machine_device_initcall(mpc8568_mds, mpc85xx_publish_devices);
+machine_device_initcall(mpc8569_mds, mpc85xx_publish_devices);
+machine_device_initcall(p1021_mds, mpc85xx_common_publish_devices);
 
 machine_arch_initcall(mpc8568_mds, swiotlb_setup_bus_notifier);
 machine_arch_initcall(mpc8569_mds, swiotlb_setup_bus_notifier);
@@ -384,7 +430,9 @@ static void __init mpc85xx_mds_pic_init(void)
 
 static int __init mpc85xx_mds_probe(void)
 {
-	return of_machine_is_compatible("MPC85xxMDS");
+        unsigned long root = of_get_flat_dt_root();
+
+        return of_flat_dt_is_compatible(root, "MPC85xxMDS");
 }
 
 define_machine(mpc8568_mds) {
@@ -393,17 +441,19 @@ define_machine(mpc8568_mds) {
 	.setup_arch	= mpc85xx_mds_setup_arch,
 	.init_IRQ	= mpc85xx_mds_pic_init,
 	.get_irq	= mpic_get_irq,
+	.restart	= fsl_rstcr_restart,
 	.calibrate_decr	= generic_calibrate_decr,
 	.progress	= udbg_progress,
 #ifdef CONFIG_PCI
 	.pcibios_fixup_bus	= fsl_pcibios_fixup_bus,
-	.pcibios_fixup_phb      = fsl_pcibios_fixup_phb,
 #endif
 };
 
 static int __init mpc8569_mds_probe(void)
 {
-	return of_machine_is_compatible("fsl,MPC8569EMDS");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "fsl,MPC8569EMDS");
 }
 
 define_machine(mpc8569_mds) {
@@ -412,17 +462,19 @@ define_machine(mpc8569_mds) {
 	.setup_arch	= mpc85xx_mds_setup_arch,
 	.init_IRQ	= mpc85xx_mds_pic_init,
 	.get_irq	= mpic_get_irq,
+	.restart	= fsl_rstcr_restart,
 	.calibrate_decr	= generic_calibrate_decr,
 	.progress	= udbg_progress,
 #ifdef CONFIG_PCI
 	.pcibios_fixup_bus	= fsl_pcibios_fixup_bus,
-	.pcibios_fixup_phb      = fsl_pcibios_fixup_phb,
 #endif
 };
 
 static int __init p1021_mds_probe(void)
 {
-	return of_machine_is_compatible("fsl,P1021MDS");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "fsl,P1021MDS");
 
 }
 
@@ -432,10 +484,11 @@ define_machine(p1021_mds) {
 	.setup_arch	= mpc85xx_mds_setup_arch,
 	.init_IRQ	= mpc85xx_mds_pic_init,
 	.get_irq	= mpic_get_irq,
+	.restart	= fsl_rstcr_restart,
 	.calibrate_decr	= generic_calibrate_decr,
 	.progress	= udbg_progress,
 #ifdef CONFIG_PCI
 	.pcibios_fixup_bus	= fsl_pcibios_fixup_bus,
-	.pcibios_fixup_phb      = fsl_pcibios_fixup_phb,
 #endif
 };
+

@@ -3,7 +3,7 @@
 
 #include <linux/tracepoint.h>
 #include <linux/unistd.h>
-#include <linux/trace_events.h>
+#include <linux/ftrace_event.h>
 #include <linux/thread_info.h>
 
 #include <asm/ptrace.h>
@@ -17,7 +17,6 @@
  * @nb_args: number of parameters it takes
  * @types: list of types as strings
  * @args: list of args as strings (args[i] matches types[i])
- * @enter_fields: list of fields for syscall_enter trace event
  * @enter_event: associated syscall_enter trace event
  * @exit_event: associated syscall_exit trace event
  */
@@ -29,9 +28,32 @@ struct syscall_metadata {
 	const char	**args;
 	struct list_head enter_fields;
 
-	struct trace_event_call *enter_event;
-	struct trace_event_call *exit_event;
+	struct ftrace_event_call *enter_event;
+	struct ftrace_event_call *exit_event;
 };
+
+#ifdef CONFIG_FTRACE_SYSCALLS
+extern unsigned long arch_syscall_addr(int nr);
+extern int init_syscall_trace(struct ftrace_event_call *call);
+
+extern int reg_event_syscall_enter(struct ftrace_event_call *call);
+extern void unreg_event_syscall_enter(struct ftrace_event_call *call);
+extern int reg_event_syscall_exit(struct ftrace_event_call *call);
+extern void unreg_event_syscall_exit(struct ftrace_event_call *call);
+extern int
+ftrace_format_syscall(struct ftrace_event_call *call, struct trace_seq *s);
+enum print_line_t print_syscall_enter(struct trace_iterator *iter, int flags,
+				      struct trace_event *event);
+enum print_line_t print_syscall_exit(struct trace_iterator *iter, int flags,
+				     struct trace_event *event);
+#endif
+
+#ifdef CONFIG_PERF_EVENTS
+int perf_sysenter_enable(struct ftrace_event_call *call);
+void perf_sysenter_disable(struct ftrace_event_call *call);
+int perf_sysexit_enable(struct ftrace_event_call *call);
+void perf_sysexit_disable(struct ftrace_event_call *call);
+#endif
 
 #if defined(CONFIG_TRACEPOINTS) && defined(CONFIG_HAVE_SYSCALL_TRACEPOINTS)
 static inline void syscall_tracepoint_update(struct task_struct *p)

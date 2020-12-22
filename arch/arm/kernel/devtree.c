@@ -18,47 +18,50 @@
 #include <linux/of_fdt.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
-#include <linux/smp.h>
 
 #include <asm/cputype.h>
 #include <asm/setup.h>
 #include <asm/page.h>
-#include <asm/prom.h>
 #include <asm/smp_plat.h>
 #include <asm/mach/arch.h>
 #include <asm/mach-types.h>
 
-
-#ifdef CONFIG_SMP
-extern struct of_cpu_method __cpu_method_of_table[];
-
-static const struct of_cpu_method __cpu_method_of_table_sentinel
-	__used __section(__cpu_method_of_table_end);
-
-
-static int __init set_smp_ops_by_method(struct device_node *node)
+void __init early_init_dt_add_memory_arch(u64 base, u64 size)
 {
-	const char *method;
-	struct of_cpu_method *m = __cpu_method_of_table;
-
-	if (of_property_read_string(node, "enable-method", &method))
-		return 0;
-
-	for (; m->method; m++)
-		if (!strcmp(m->method, method)) {
-			smp_set_ops(m->ops);
-			return 1;
-		}
-
-	return 0;
+	arm_add_memory(base, size);
 }
-#else
-static inline int set_smp_ops_by_method(struct device_node *node)
+
+void * __init early_init_dt_alloc_memory_arch(u64 size, u64 align)
 {
-	return 1;
+	return alloc_bootmem_align(size, align);
 }
-#endif
 
+void __init arm_dt_memblock_reserve(void)
+{
+	u64 *reserve_map, base, size;
+
+	if (!initial_boot_params)
+		return;
+
+	/* Reserve the dtb region */
+	memblock_reserve(virt_to_phys(initial_boot_params),
+			 be32_to_cpu(initial_boot_params->totalsize));
+
+	/*
+	 * Process the reserve map.  This will probably overlap the initrd
+	 * and dtb locations which are already reserved, but overlaping
+	 * doesn't hurt anything
+	 */
+	reserve_map = ((void*)initial_boot_params) +
+			be32_to_cpu(initial_boot_params->off_mem_rsvmap);
+	while (1) {
+		base = be64_to_cpup(reserve_map++);
+		size = be64_to_cpup(reserve_map++);
+		if (!size)
+			break;
+		memblock_reserve(base, size);
+	}
+}
 
 /*
  * arm_dt_init_cpu_maps - Function retrieves cpu nodes from the device tree
@@ -76,7 +79,6 @@ void __init arm_dt_init_cpu_maps(void)
 	 * read as 0.
 	 */
 	struct device_node *cpu, *cpus;
-	int found_method = 0;
 	u32 i, j, cpuidx = 1;
 	u32 mpidr = is_smp() ? read_cpuid_mpidr() & MPIDR_HWID_BITMASK : 0;
 
@@ -88,8 +90,6 @@ void __init arm_dt_init_cpu_maps(void)
 		return;
 
 	for_each_child_of_node(cpus, cpu) {
-		const __be32 *cell;
-		int prop_bytes;
 		u32 hwid;
 
 		if (of_node_cmp(cpu->type, "cpu"))
@@ -101,27 +101,18 @@ void __init arm_dt_init_cpu_maps(void)
 		 * properties is considered invalid to build the
 		 * cpu_logical_map.
 		 */
-		cell = of_get_property(cpu, "reg", &prop_bytes);
-		if (!cell || prop_bytes < sizeof(*cell)) {
+		if (of_property_read_u32(cpu, "reg", &hwid)) {
 			pr_debug(" * %s missing reg property\n",
 				     cpu->full_name);
-			of_node_put(cpu);
 			return;
 		}
 
 		/*
-		 * Bits n:24 must be set to 0 in the DT since the reg property
+		 * 8 MSBs must be set to 0 in the DT since the reg property
 		 * defines the MPIDR[23:0].
 		 */
-		do {
-			hwid = be32_to_cpu(*cell++);
-			prop_bytes -= sizeof(*cell);
-		} while (!hwid && prop_bytes > 0);
-
-		if (prop_bytes || (hwid & ~MPIDR_HWID_BITMASK)) {
-			of_node_put(cpu);
+		if (hwid & ~MPIDR_HWID_BITMASK)
 			return;
-		}
 
 		/*
 		 * Duplicate MPIDRs are a recipe for disaster.
@@ -131,11 +122,9 @@ void __init arm_dt_init_cpu_maps(void)
 		 * to avoid matching valid MPIDR[23:0] values.
 		 */
 		for (j = 0; j < cpuidx; j++)
-			if (WARN(tmp_map[j] == hwid,
-				 "Duplicate /cpu reg properties in the DT\n")) {
-				of_node_put(cpu);
+			if (WARN(tmp_map[j] == hwid, "Duplicate /cpu reg "
+						     "properties in the DT\n"))
 				return;
-			}
 
 		/*
 		 * Build a stashed array of MPIDR values. Numbering scheme
@@ -157,22 +146,11 @@ void __init arm_dt_init_cpu_maps(void)
 					       "max cores %u, capping them\n",
 					       cpuidx, nr_cpu_ids)) {
 			cpuidx = nr_cpu_ids;
-			of_node_put(cpu);
 			break;
 		}
 
 		tmp_map[i] = hwid;
-
-		if (!found_method)
-			found_method = set_smp_ops_by_method(cpu);
 	}
-
-	/*
-	 * Fallback to an enable-method in the cpus node if nothing found in
-	 * a cpu node.
-	 */
-	if (!found_method)
-		set_smp_ops_by_method(cpus);
 
 	if (!bootcpu_valid) {
 		pr_warn("DT missing boot CPU MPIDR[23:0], fall back to default cpu_logical_map\n");
@@ -191,24 +169,6 @@ void __init arm_dt_init_cpu_maps(void)
 	}
 }
 
-bool arch_match_cpu_phys_id(int cpu, u64 phys_id)
-{
-	return phys_id == cpu_logical_map(cpu);
-}
-
-static const void * __init arch_get_next_mach(const char *const **match)
-{
-	static const struct machine_desc *mdesc = __arch_info_begin;
-	const struct machine_desc *m = mdesc;
-
-	if (m >= __arch_info_end)
-		return NULL;
-
-	mdesc++;
-	*match = m->dt_compat;
-	return m;
-}
-
 /**
  * setup_machine_fdt - Machine setup when an dtb was passed to the kernel
  * @dt_phys: physical address of dt blob
@@ -216,33 +176,47 @@ static const void * __init arch_get_next_mach(const char *const **match)
  * If a dtb was passed to the kernel in r2, then use it to choose the
  * correct machine_desc and to setup the system.
  */
-const struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
+struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
 {
-	const struct machine_desc *mdesc, *mdesc_best = NULL;
+	struct boot_param_header *devtree;
+	struct machine_desc *mdesc, *mdesc_best = NULL;
+	unsigned int score, mdesc_score = ~1;
+	unsigned long dt_root;
+	const char *model;
 
-#if defined(CONFIG_ARCH_MULTIPLATFORM) || defined(CONFIG_ARM_SINGLE_ARMV7M)
+#ifdef CONFIG_ARCH_MULTIPLATFORM
 	DT_MACHINE_START(GENERIC_DT, "Generic DT based system")
-		.l2c_aux_val = 0x0,
-		.l2c_aux_mask = ~0x0,
 	MACHINE_END
 
-	mdesc_best = &__mach_desc_GENERIC_DT;
+	mdesc_best = (struct machine_desc *)&__mach_desc_GENERIC_DT;
 #endif
 
-	if (!dt_phys || !early_init_dt_verify(phys_to_virt(dt_phys)))
+	if (!dt_phys)
 		return NULL;
 
-	mdesc = of_flat_dt_match_machine(mdesc_best, arch_get_next_mach);
+	devtree = phys_to_virt(dt_phys);
 
-	if (!mdesc) {
+	/* check device tree validity */
+	if (be32_to_cpu(devtree->magic) != OF_DT_HEADER)
+		return NULL;
+
+	/* Search the mdescs for the 'best' compatible value match */
+	initial_boot_params = devtree;
+	dt_root = of_get_flat_dt_root();
+	for_each_machine_desc(mdesc) {
+		score = of_flat_dt_match(dt_root, mdesc->dt_compat);
+		if (score > 0 && score < mdesc_score) {
+			mdesc_best = mdesc;
+			mdesc_score = score;
+		}
+	}
+	if (!mdesc_best) {
 		const char *prop;
-		int size;
-		unsigned long dt_root;
+		long size;
 
 		early_print("\nError: unrecognized/unsupported "
 			    "device tree compatible list:\n[ ");
 
-		dt_root = of_get_flat_dt_root();
 		prop = of_get_flat_dt_prop(dt_root, "compatible", &size);
 		while (size > 0) {
 			early_print("'%s' ", prop);
@@ -254,14 +228,22 @@ const struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
 		dump_machine_table(); /* does not return */
 	}
 
-	/* We really don't want to do this, but sometimes firmware provides buggy data */
-	if (mdesc->dt_fixup)
-		mdesc->dt_fixup();
+	model = of_get_flat_dt_prop(dt_root, "model", NULL);
+	if (!model)
+		model = of_get_flat_dt_prop(dt_root, "compatible", NULL);
+	if (!model)
+		model = "<unknown>";
+	pr_info("Machine: %s, model: %s\n", mdesc_best->name, model);
 
-	early_init_dt_scan_nodes();
+	/* Retrieve various information from the /chosen node */
+	of_scan_flat_dt(early_init_dt_scan_chosen, boot_command_line);
+	/* Initialize {size,address}-cells info */
+	of_scan_flat_dt(early_init_dt_scan_root, NULL);
+	/* Setup memory, calling early_init_dt_add_memory_arch */
+	of_scan_flat_dt(early_init_dt_scan_memory, NULL);
 
 	/* Change machine number to match the mdesc we're using */
-	__machine_arch_type = mdesc->nr;
+	__machine_arch_type = mdesc_best->nr;
 
-	return mdesc;
+	return mdesc_best;
 }

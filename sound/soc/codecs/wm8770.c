@@ -17,7 +17,6 @@
 #include <linux/of_device.h>
 #include <linux/pm.h>
 #include <linux/spi/spi.h>
-#include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <sound/core.h>
@@ -36,52 +35,19 @@ static const char *wm8770_supply_names[WM8770_NUM_SUPPLIES] = {
 	"DVDD"
 };
 
-static const struct reg_default wm8770_reg_defaults[] = {
-	{  0, 0x7f },
-	{  1, 0x7f },
-	{  2, 0x7f },
-	{  3, 0x7f },
-	{  4, 0x7f },
-	{  5, 0x7f },
-	{  6, 0x7f },
-	{  7, 0x7f },
-	{  8, 0x7f },
-	{  9, 0xff },
-	{ 10, 0xff },
-	{ 11, 0xff },
-	{ 12, 0xff },
-	{ 13, 0xff },
-	{ 14, 0xff },
-	{ 15, 0xff },
-	{ 16, 0xff },
-	{ 17, 0xff },
-	{ 18, 0    },
-	{ 19, 0x90 },
-	{ 20, 0    },
-	{ 21, 0    },
-	{ 22, 0x22 },
-	{ 23, 0x22 },
-	{ 24, 0x3e },
-	{ 25, 0xc  },
-	{ 26, 0xc  },
-	{ 27, 0x100 },
-	{ 28, 0x189 },
-	{ 29, 0x189 },
-	{ 30, 0x8770 },
+static const u16 wm8770_reg_defs[WM8770_CACHEREGNUM] = {
+	0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0, 0x90, 0,
+	0, 0x22, 0x22, 0x3e,
+	0xc, 0xc, 0x100, 0x189,
+	0x189, 0x8770
 };
 
-static bool wm8770_volatile_reg(struct device *dev, unsigned int reg)
-{
-	switch (reg) {
-	case WM8770_RESET:
-		return true;
-	default:
-		return false;
-	}
-}
-
 struct wm8770_priv {
-	struct regmap *regmap;
+	enum snd_soc_control_type control_type;
 	struct regulator_bulk_data supplies[WM8770_NUM_SUPPLIES];
 	struct notifier_block disable_nb[WM8770_NUM_SUPPLIES];
 	struct snd_soc_codec *codec;
@@ -105,7 +71,7 @@ static int wm8770_regulator_event_##n(struct notifier_block *nb, \
 	struct wm8770_priv *wm8770 = container_of(nb, struct wm8770_priv, \
 				     disable_nb[n]); \
 	if (event & REGULATOR_EVENT_DISABLE) { \
-		regcache_mark_dirty(wm8770->regmap);	\
+		wm8770->codec->cache_sync = 1; \
 	} \
 	return 0; \
 }
@@ -308,7 +274,9 @@ static const struct snd_soc_dapm_route wm8770_intercon[] = {
 static int vout12supply_event(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct snd_soc_codec *codec;
+
+	codec = w->codec;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -325,7 +293,9 @@ static int vout12supply_event(struct snd_soc_dapm_widget *w,
 static int vout34supply_event(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct snd_soc_codec *codec;
+
+	codec = w->codec;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -422,16 +392,16 @@ static int wm8770_hw_params(struct snd_pcm_substream *substream,
 	wm8770 = snd_soc_codec_get_drvdata(codec);
 
 	iface = 0;
-	switch (params_width(params)) {
-	case 16:
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
 		break;
-	case 20:
+	case SNDRV_PCM_FORMAT_S20_3LE:
 		iface |= 0x10;
 		break;
-	case 24:
+	case SNDRV_PCM_FORMAT_S24_LE:
 		iface |= 0x20;
 		break;
-	case 32:
+	case SNDRV_PCM_FORMAT_S32_LE:
 		iface |= 0x30;
 		break;
 	}
@@ -496,6 +466,24 @@ static int wm8770_set_sysclk(struct snd_soc_dai *dai,
 	return 0;
 }
 
+static void wm8770_sync_cache(struct snd_soc_codec *codec)
+{
+	int i;
+	u16 *cache;
+
+	if (!codec->cache_sync)
+		return;
+
+	codec->cache_only = 0;
+	cache = codec->reg_cache;
+	for (i = 0; i < codec->driver->reg_cache_size; i++) {
+		if (i == WM8770_RESET || cache[i] == wm8770_reg_defs[i])
+			continue;
+		snd_soc_write(codec, i, cache[i]);
+	}
+	codec->cache_sync = 0;
+}
+
 static int wm8770_set_bias_level(struct snd_soc_codec *codec,
 				 enum snd_soc_bias_level level)
 {
@@ -510,7 +498,7 @@ static int wm8770_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			ret = regulator_bulk_enable(ARRAY_SIZE(wm8770->supplies),
 						    wm8770->supplies);
 			if (ret) {
@@ -519,9 +507,7 @@ static int wm8770_set_bias_level(struct snd_soc_codec *codec,
 					ret);
 				return ret;
 			}
-
-			regcache_sync(wm8770->regmap);
-
+			wm8770_sync_cache(codec);
 			/* global powerup */
 			snd_soc_write(codec, WM8770_PWDNCTRL, 0);
 		}
@@ -534,6 +520,7 @@ static int wm8770_set_bias_level(struct snd_soc_codec *codec,
 		break;
 	}
 
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -567,19 +554,68 @@ static struct snd_soc_dai_driver wm8770_dai = {
 	.symmetric_rates = 1
 };
 
+#ifdef CONFIG_PM
+static int wm8770_suspend(struct snd_soc_codec *codec)
+{
+	wm8770_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	return 0;
+}
+
+static int wm8770_resume(struct snd_soc_codec *codec)
+{
+	wm8770_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	return 0;
+}
+#else
+#define wm8770_suspend NULL
+#define wm8770_resume NULL
+#endif
+
 static int wm8770_probe(struct snd_soc_codec *codec)
 {
 	struct wm8770_priv *wm8770;
 	int ret;
+	int i;
 
 	wm8770 = snd_soc_codec_get_drvdata(codec);
 	wm8770->codec = codec;
+
+	ret = snd_soc_codec_set_cache_io(codec, 7, 9, wm8770->control_type);
+	if (ret < 0) {
+		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
+		return ret;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(wm8770->supplies); i++)
+		wm8770->supplies[i].supply = wm8770_supply_names[i];
+
+	ret = regulator_bulk_get(codec->dev, ARRAY_SIZE(wm8770->supplies),
+				 wm8770->supplies);
+	if (ret) {
+		dev_err(codec->dev, "Failed to request supplies: %d\n", ret);
+		return ret;
+	}
+
+	wm8770->disable_nb[0].notifier_call = wm8770_regulator_event_0;
+	wm8770->disable_nb[1].notifier_call = wm8770_regulator_event_1;
+	wm8770->disable_nb[2].notifier_call = wm8770_regulator_event_2;
+
+	/* This should really be moved into the regulator core */
+	for (i = 0; i < ARRAY_SIZE(wm8770->supplies); i++) {
+		ret = regulator_register_notifier(wm8770->supplies[i].consumer,
+						  &wm8770->disable_nb[i]);
+		if (ret) {
+			dev_err(codec->dev,
+				"Failed to register regulator notifier: %d\n",
+				ret);
+		}
+	}
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(wm8770->supplies),
 				    wm8770->supplies);
 	if (ret) {
 		dev_err(codec->dev, "Failed to enable supplies: %d\n", ret);
-		return ret;
+		goto err_reg_get;
 	}
 
 	ret = wm8770_reset(codec);
@@ -587,6 +623,8 @@ static int wm8770_probe(struct snd_soc_codec *codec)
 		dev_err(codec->dev, "Failed to issue reset: %d\n", ret);
 		goto err_reg_enable;
 	}
+
+	wm8770_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
 	/* latch the volume update bits */
 	snd_soc_update_bits(codec, WM8770_MSDIGVOL, 0x100, 0x100);
@@ -603,24 +641,46 @@ static int wm8770_probe(struct snd_soc_codec *codec)
 	/* mute all DACs */
 	snd_soc_update_bits(codec, WM8770_DACMUTE, 0x10, 0x10);
 
+	snd_soc_add_codec_controls(codec, wm8770_snd_controls,
+			     ARRAY_SIZE(wm8770_snd_controls));
+	snd_soc_dapm_new_controls(&codec->dapm, wm8770_dapm_widgets,
+				  ARRAY_SIZE(wm8770_dapm_widgets));
+	snd_soc_dapm_add_routes(&codec->dapm, wm8770_intercon,
+				ARRAY_SIZE(wm8770_intercon));
+	return 0;
+
 err_reg_enable:
 	regulator_bulk_disable(ARRAY_SIZE(wm8770->supplies), wm8770->supplies);
+err_reg_get:
+	regulator_bulk_free(ARRAY_SIZE(wm8770->supplies), wm8770->supplies);
 	return ret;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8770 = {
+static int wm8770_remove(struct snd_soc_codec *codec)
+{
+	struct wm8770_priv *wm8770;
+	int i;
+
+	wm8770 = snd_soc_codec_get_drvdata(codec);
+	wm8770_set_bias_level(codec, SND_SOC_BIAS_OFF);
+
+	for (i = 0; i < ARRAY_SIZE(wm8770->supplies); ++i)
+		regulator_unregister_notifier(wm8770->supplies[i].consumer,
+					      &wm8770->disable_nb[i]);
+	regulator_bulk_free(ARRAY_SIZE(wm8770->supplies), wm8770->supplies);
+	return 0;
+}
+
+static struct snd_soc_codec_driver soc_codec_dev_wm8770 = {
 	.probe = wm8770_probe,
+	.remove = wm8770_remove,
+	.suspend = wm8770_suspend,
+	.resume = wm8770_resume,
 	.set_bias_level = wm8770_set_bias_level,
 	.idle_bias_off = true,
-
-	.component_driver = {
-		.controls		= wm8770_snd_controls,
-		.num_controls		= ARRAY_SIZE(wm8770_snd_controls),
-		.dapm_widgets		= wm8770_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(wm8770_dapm_widgets),
-		.dapm_routes		= wm8770_intercon,
-		.num_dapm_routes	= ARRAY_SIZE(wm8770_intercon),
-	},
+	.reg_cache_size = ARRAY_SIZE(wm8770_reg_defs),
+	.reg_word_size = sizeof (u16),
+	.reg_cache_default = wm8770_reg_defs
 };
 
 static const struct of_device_id wm8770_of_match[] = {
@@ -629,57 +689,17 @@ static const struct of_device_id wm8770_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, wm8770_of_match);
 
-static const struct regmap_config wm8770_regmap = {
-	.reg_bits = 7,
-	.val_bits = 9,
-	.max_register = WM8770_RESET,
-
-	.reg_defaults = wm8770_reg_defaults,
-	.num_reg_defaults = ARRAY_SIZE(wm8770_reg_defaults),
-	.cache_type = REGCACHE_RBTREE,
-
-	.volatile_reg = wm8770_volatile_reg,
-};
-
-static int wm8770_spi_probe(struct spi_device *spi)
+static int __devinit wm8770_spi_probe(struct spi_device *spi)
 {
 	struct wm8770_priv *wm8770;
-	int ret, i;
+	int ret;
 
 	wm8770 = devm_kzalloc(&spi->dev, sizeof(struct wm8770_priv),
 			      GFP_KERNEL);
 	if (!wm8770)
 		return -ENOMEM;
 
-	for (i = 0; i < ARRAY_SIZE(wm8770->supplies); i++)
-		wm8770->supplies[i].supply = wm8770_supply_names[i];
-
-	ret = devm_regulator_bulk_get(&spi->dev, ARRAY_SIZE(wm8770->supplies),
-				      wm8770->supplies);
-	if (ret) {
-		dev_err(&spi->dev, "Failed to request supplies: %d\n", ret);
-		return ret;
-	}
-
-	wm8770->disable_nb[0].notifier_call = wm8770_regulator_event_0;
-	wm8770->disable_nb[1].notifier_call = wm8770_regulator_event_1;
-	wm8770->disable_nb[2].notifier_call = wm8770_regulator_event_2;
-
-	/* This should really be moved into the regulator core */
-	for (i = 0; i < ARRAY_SIZE(wm8770->supplies); i++) {
-		ret = regulator_register_notifier(wm8770->supplies[i].consumer,
-						  &wm8770->disable_nb[i]);
-		if (ret) {
-			dev_err(&spi->dev,
-				"Failed to register regulator notifier: %d\n",
-				ret);
-		}
-	}
-
-	wm8770->regmap = devm_regmap_init_spi(spi, &wm8770_regmap);
-	if (IS_ERR(wm8770->regmap))
-		return PTR_ERR(wm8770->regmap);
-
+	wm8770->control_type = SND_SOC_SPI;
 	spi_set_drvdata(spi, wm8770);
 
 	ret = snd_soc_register_codec(&spi->dev,
@@ -688,30 +708,40 @@ static int wm8770_spi_probe(struct spi_device *spi)
 	return ret;
 }
 
-static int wm8770_spi_remove(struct spi_device *spi)
+static int __devexit wm8770_spi_remove(struct spi_device *spi)
 {
-	struct wm8770_priv *wm8770 = spi_get_drvdata(spi);
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(wm8770->supplies); ++i)
-		regulator_unregister_notifier(wm8770->supplies[i].consumer,
-					      &wm8770->disable_nb[i]);
-
 	snd_soc_unregister_codec(&spi->dev);
-
 	return 0;
 }
 
 static struct spi_driver wm8770_spi_driver = {
 	.driver = {
 		.name = "wm8770",
+		.owner = THIS_MODULE,
 		.of_match_table = wm8770_of_match,
 	},
 	.probe = wm8770_spi_probe,
-	.remove = wm8770_spi_remove
+	.remove = __devexit_p(wm8770_spi_remove)
 };
 
-module_spi_driver(wm8770_spi_driver);
+static int __init wm8770_modinit(void)
+{
+	int ret = 0;
+
+	ret = spi_register_driver(&wm8770_spi_driver);
+	if (ret) {
+		printk(KERN_ERR "Failed to register wm8770 SPI driver: %d\n",
+		       ret);
+	}
+	return ret;
+}
+module_init(wm8770_modinit);
+
+static void __exit wm8770_exit(void)
+{
+	spi_unregister_driver(&wm8770_spi_driver);
+}
+module_exit(wm8770_exit);
 
 MODULE_DESCRIPTION("ASoC WM8770 driver");
 MODULE_AUTHOR("Dimitris Papastamos <dp@opensource.wolfsonmicro.com>");

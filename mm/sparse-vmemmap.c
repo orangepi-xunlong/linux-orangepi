@@ -20,7 +20,6 @@
 #include <linux/mm.h>
 #include <linux/mmzone.h>
 #include <linux/bootmem.h>
-#include <linux/memremap.h>
 #include <linux/highmem.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -36,13 +35,12 @@
  * Uses the main allocators if they are available, else bootmem.
  */
 
-static void * __ref __earlyonly_bootmem_alloc(int node,
+static void * __init_refok __earlyonly_bootmem_alloc(int node,
 				unsigned long size,
 				unsigned long align,
 				unsigned long goal)
 {
-	return memblock_virt_alloc_try_nid(size, align, goal,
-					    BOOTMEM_ALLOC_ACCESSIBLE, node);
+	return __alloc_bootmem_node_high(NODE_DATA(node), size, align, goal);
 }
 
 static void *vmemmap_buf;
@@ -55,12 +53,10 @@ void * __meminit vmemmap_alloc_block(unsigned long size, int node)
 		struct page *page;
 
 		if (node_state(node, N_HIGH_MEMORY))
-			page = alloc_pages_node(
-				node, GFP_KERNEL | __GFP_ZERO | __GFP_REPEAT,
-				get_order(size));
+			page = alloc_pages_node(node,
+				GFP_KERNEL | __GFP_ZERO, get_order(size));
 		else
-			page = alloc_pages(
-				GFP_KERNEL | __GFP_ZERO | __GFP_REPEAT,
+			page = alloc_pages(GFP_KERNEL | __GFP_ZERO,
 				get_order(size));
 		if (page)
 			return page_address(page);
@@ -71,7 +67,7 @@ void * __meminit vmemmap_alloc_block(unsigned long size, int node)
 }
 
 /* need to make sure size is all the same during early stage */
-static void * __meminit alloc_block_buf(unsigned long size, int node)
+void * __meminit vmemmap_alloc_block_buf(unsigned long size, int node)
 {
 	void *ptr;
 
@@ -88,77 +84,6 @@ static void * __meminit alloc_block_buf(unsigned long size, int node)
 	return ptr;
 }
 
-static unsigned long __meminit vmem_altmap_next_pfn(struct vmem_altmap *altmap)
-{
-	return altmap->base_pfn + altmap->reserve + altmap->alloc
-		+ altmap->align;
-}
-
-static unsigned long __meminit vmem_altmap_nr_free(struct vmem_altmap *altmap)
-{
-	unsigned long allocated = altmap->alloc + altmap->align;
-
-	if (altmap->free > allocated)
-		return altmap->free - allocated;
-	return 0;
-}
-
-/**
- * vmem_altmap_alloc - allocate pages from the vmem_altmap reservation
- * @altmap - reserved page pool for the allocation
- * @nr_pfns - size (in pages) of the allocation
- *
- * Allocations are aligned to the size of the request
- */
-static unsigned long __meminit vmem_altmap_alloc(struct vmem_altmap *altmap,
-		unsigned long nr_pfns)
-{
-	unsigned long pfn = vmem_altmap_next_pfn(altmap);
-	unsigned long nr_align;
-
-	nr_align = 1UL << find_first_bit(&nr_pfns, BITS_PER_LONG);
-	nr_align = ALIGN(pfn, nr_align) - pfn;
-
-	if (nr_pfns + nr_align > vmem_altmap_nr_free(altmap))
-		return ULONG_MAX;
-	altmap->alloc += nr_pfns;
-	altmap->align += nr_align;
-	return pfn + nr_align;
-}
-
-static void * __meminit altmap_alloc_block_buf(unsigned long size,
-		struct vmem_altmap *altmap)
-{
-	unsigned long pfn, nr_pfns;
-	void *ptr;
-
-	if (size & ~PAGE_MASK) {
-		pr_warn_once("%s: allocations must be multiple of PAGE_SIZE (%ld)\n",
-				__func__, size);
-		return NULL;
-	}
-
-	nr_pfns = size >> PAGE_SHIFT;
-	pfn = vmem_altmap_alloc(altmap, nr_pfns);
-	if (pfn < ULONG_MAX)
-		ptr = __va(__pfn_to_phys(pfn));
-	else
-		ptr = NULL;
-	pr_debug("%s: pfn: %#lx alloc: %ld align: %ld nr: %#lx\n",
-			__func__, pfn, altmap->alloc, altmap->align, nr_pfns);
-
-	return ptr;
-}
-
-/* need to make sure size is all the same during early stage */
-void * __meminit __vmemmap_alloc_block_buf(unsigned long size, int node,
-		struct vmem_altmap *altmap)
-{
-	if (altmap)
-		return altmap_alloc_block_buf(size, altmap);
-	return alloc_block_buf(size, node);
-}
-
 void __meminit vmemmap_verify(pte_t *pte, int node,
 				unsigned long start, unsigned long end)
 {
@@ -166,8 +91,8 @@ void __meminit vmemmap_verify(pte_t *pte, int node,
 	int actual_node = early_pfn_to_nid(pfn);
 
 	if (node_distance(actual_node, node) > LOCAL_DISTANCE)
-		pr_warn("[%lx-%lx] potential offnode page_structs\n",
-			start, end - 1);
+		printk(KERN_WARNING "[%lx-%lx] potential offnode "
+			"page_structs\n", start, end - 1);
 }
 
 pte_t * __meminit vmemmap_pte_populate(pmd_t *pmd, unsigned long addr, int node)
@@ -175,7 +100,7 @@ pte_t * __meminit vmemmap_pte_populate(pmd_t *pmd, unsigned long addr, int node)
 	pte_t *pte = pte_offset_kernel(pmd, addr);
 	if (pte_none(*pte)) {
 		pte_t entry;
-		void *p = alloc_block_buf(PAGE_SIZE, node);
+		void *p = vmemmap_alloc_block_buf(PAGE_SIZE, node);
 		if (!p)
 			return NULL;
 		entry = pfn_pte(__pa(p) >> PAGE_SHIFT, PAGE_KERNEL);
@@ -220,10 +145,11 @@ pgd_t * __meminit vmemmap_pgd_populate(unsigned long addr, int node)
 	return pgd;
 }
 
-int __meminit vmemmap_populate_basepages(unsigned long start,
-					 unsigned long end, int node)
+int __meminit vmemmap_populate_basepages(struct page *start_page,
+						unsigned long size, int node)
 {
-	unsigned long addr = start;
+	unsigned long addr = (unsigned long)start_page;
+	unsigned long end = (unsigned long)(start_page + size);
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
@@ -250,15 +176,9 @@ int __meminit vmemmap_populate_basepages(unsigned long start,
 
 struct page * __meminit sparse_mem_map_populate(unsigned long pnum, int nid)
 {
-	unsigned long start;
-	unsigned long end;
-	struct page *map;
-
-	map = pfn_to_page(pnum * PAGES_PER_SECTION);
-	start = (unsigned long)map;
-	end = (unsigned long)(map + PAGES_PER_SECTION);
-
-	if (vmemmap_populate(start, end, nid))
+	struct page *map = pfn_to_page(pnum * PAGES_PER_SECTION);
+	int error = vmemmap_populate(map, PAGES_PER_SECTION, nid);
+	if (error)
 		return NULL;
 
 	return map;
@@ -292,15 +212,14 @@ void __init sparse_mem_maps_populate_node(struct page **map_map,
 		if (map_map[pnum])
 			continue;
 		ms = __nr_to_section(pnum);
-		pr_err("%s: sparsemem memory map backing failed some memory will not be available\n",
-		       __func__);
+		printk(KERN_ERR "%s: sparsemem memory map backing failed "
+			"some memory will not be available.\n", __func__);
 		ms->section_mem_map = 0;
 	}
 
 	if (vmemmap_buf_start) {
 		/* need to free left buf */
-		memblock_free_early(__pa(vmemmap_buf),
-				    vmemmap_buf_end - vmemmap_buf);
+		free_bootmem(__pa(vmemmap_buf), vmemmap_buf_end - vmemmap_buf);
 		vmemmap_buf = NULL;
 		vmemmap_buf_end = NULL;
 	}

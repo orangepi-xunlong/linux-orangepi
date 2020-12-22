@@ -20,7 +20,6 @@
 #include <asm/uaccess.h>
 #include <asm/auxio.h>
 #include <asm/apc.h>
-#include <asm/processor.h>
 
 /* Debugging
  * 
@@ -32,7 +31,7 @@
 #define APC_DEVNAME "apc"
 
 static u8 __iomem *regs;
-static int apc_no_idle = 0;
+static int apc_no_idle __devinitdata = 0;
 
 #define apc_readb(offs)		(sbus_readb(regs+offs))
 #define apc_writeb(val, offs) 	(sbus_writeb(val, regs+offs))
@@ -139,7 +138,7 @@ static const struct file_operations apc_fops = {
 
 static struct miscdevice apc_miscdev = { APC_MINOR, APC_DEVNAME, &apc_fops };
 
-static int apc_probe(struct platform_device *op)
+static int __devinit apc_probe(struct platform_device *op)
 {
 	int err;
 
@@ -159,7 +158,7 @@ static int apc_probe(struct platform_device *op)
 
 	/* Assign power management IDLE handler */
 	if (!apc_no_idle)
-		sparc_idle = apc_swift_idle;
+		pm_idle = apc_swift_idle;	
 
 	printk(KERN_INFO "%s: power management initialized%s\n", 
 	       APC_DEVNAME, apc_no_idle ? " (CPU idle disabled)" : "");
@@ -178,6 +177,7 @@ MODULE_DEVICE_TABLE(of, apc_match);
 static struct platform_driver apc_driver = {
 	.driver = {
 		.name = "apc",
+		.owner = THIS_MODULE,
 		.of_match_table = apc_match,
 	},
 	.probe		= apc_probe,

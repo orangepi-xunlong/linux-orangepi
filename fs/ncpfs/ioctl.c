@@ -41,11 +41,11 @@ ncp_get_fs_info(struct ncp_server * server, struct inode *inode,
 		return -EFAULT;
 
 	if (info.version != NCP_GET_FS_INFO_VERSION) {
-		ncp_dbg(1, "info.version invalid: %d\n", info.version);
+		DPRINTK("info.version invalid: %d\n", info.version);
 		return -EINVAL;
 	}
 	/* TODO: info.addr = server->m.serv_addr; */
-	SET_UID(info.mounted_uid, from_kuid_munged(current_user_ns(), server->m.mounted_uid));
+	SET_UID(info.mounted_uid, server->m.mounted_uid);
 	info.connection		= server->connection;
 	info.buffer_size	= server->buffer_size;
 	info.volume_number	= NCP_FINFO(inode)->volNumber;
@@ -66,10 +66,10 @@ ncp_get_fs_info_v2(struct ncp_server * server, struct inode *inode,
 		return -EFAULT;
 
 	if (info2.version != NCP_GET_FS_INFO_VERSION_V2) {
-		ncp_dbg(1, "info.version invalid: %d\n", info2.version);
+		DPRINTK("info.version invalid: %d\n", info2.version);
 		return -EINVAL;
 	}
-	info2.mounted_uid   = from_kuid_munged(current_user_ns(), server->m.mounted_uid);
+	info2.mounted_uid   = server->m.mounted_uid;
 	info2.connection    = server->connection;
 	info2.buffer_size   = server->buffer_size;
 	info2.volume_number = NCP_FINFO(inode)->volNumber;
@@ -132,10 +132,10 @@ ncp_get_compat_fs_info_v2(struct ncp_server * server, struct inode *inode,
 		return -EFAULT;
 
 	if (info2.version != NCP_GET_FS_INFO_VERSION_V2) {
-		ncp_dbg(1, "info.version invalid: %d\n", info2.version);
+		DPRINTK("info.version invalid: %d\n", info2.version);
 		return -EINVAL;
 	}
-	info2.mounted_uid   = from_kuid_munged(current_user_ns(), server->m.mounted_uid);
+	info2.mounted_uid   = server->m.mounted_uid;
 	info2.connection    = server->connection;
 	info2.buffer_size   = server->buffer_size;
 	info2.volume_number = NCP_FINFO(inode)->volNumber;
@@ -233,7 +233,7 @@ ncp_get_charsets(struct ncp_server* server, struct ncp_nls_ioctl __user *arg)
 		len = strlen(server->nls_vol->charset);
 		if (len > NCP_IOCSNAME_LEN)
 			len = NCP_IOCSNAME_LEN;
-		strscpy(user.codepage, server->nls_vol->charset, NCP_IOCSNAME_LEN);
+		strncpy(user.codepage, server->nls_vol->charset, len);
 		user.codepage[len] = 0;
 	}
 
@@ -243,7 +243,7 @@ ncp_get_charsets(struct ncp_server* server, struct ncp_nls_ioctl __user *arg)
 		len = strlen(server->nls_io->charset);
 		if (len > NCP_IOCSNAME_LEN)
 			len = NCP_IOCSNAME_LEN;
-		strscpy(user.iocharset,	server->nls_io->charset, NCP_IOCSNAME_LEN);
+		strncpy(user.iocharset,	server->nls_io->charset, len);
 		user.iocharset[len] = 0;
 	}
 	mutex_unlock(&server->root_setup_lock);
@@ -308,7 +308,8 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 		else
 			result = server->reply_size;
 		ncp_unlock_server(server);
-		ncp_dbg(1, "copy %d bytes\n", result);
+		DPRINTK("ncp_ioctl: copy %d bytes\n",
+			result);
 		if (result >= 0)
 			if (copy_to_user(request.data, bouncebuffer, result))
 				result = -EFAULT;
@@ -347,25 +348,22 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 		{
 			u16 uid;
 
-			SET_UID(uid, from_kuid_munged(current_user_ns(), server->m.mounted_uid));
+			SET_UID(uid, server->m.mounted_uid);
 			if (put_user(uid, (u16 __user *)argp))
 				return -EFAULT;
 			return 0;
 		}
 	case NCP_IOC_GETMOUNTUID32:
-	{
-		uid_t uid = from_kuid_munged(current_user_ns(), server->m.mounted_uid);
-		if (put_user(uid, (u32 __user *)argp))
+		if (put_user(server->m.mounted_uid,
+			     (u32 __user *)argp))
 			return -EFAULT;
 		return 0;
-	}
 	case NCP_IOC_GETMOUNTUID64:
-	{
-		uid_t uid = from_kuid_munged(current_user_ns(), server->m.mounted_uid);
-		if (put_user(uid, (u64 __user *)argp))
+		if (put_user(server->m.mounted_uid,
+			     (u64 __user *)argp))
 			return -EFAULT;
 		return 0;
-	}
+
 	case NCP_IOC_GETROOT:
 		{
 			struct ncp_setroot_ioctl sr;
@@ -376,7 +374,7 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 				struct dentry* dentry = inode->i_sb->s_root;
 
 				if (dentry) {
-					struct inode* s_inode = d_inode(dentry);
+					struct inode* s_inode = dentry->d_inode;
 
 					if (s_inode) {
 						sr.volNumber = NCP_FINFO(s_inode)->volNumber;
@@ -384,9 +382,9 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 						sr.namespace = server->name_space[sr.volNumber];
 						result = 0;
 					} else
-						ncp_dbg(1, "d_inode(s_root)==NULL\n");
+						DPRINTK("ncpfs: s_root->d_inode==NULL\n");
 				} else
-					ncp_dbg(1, "s_root==NULL\n");
+					DPRINTK("ncpfs: s_root==NULL\n");
 			} else {
 				sr.volNumber = -1;
 				sr.namespace = 0;
@@ -431,7 +429,7 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 				if (result == 0) {
 					dentry = inode->i_sb->s_root;
 					if (dentry) {
-						struct inode* s_inode = d_inode(dentry);
+						struct inode* s_inode = dentry->d_inode;
 
 						if (s_inode) {
 							NCP_FINFO(s_inode)->volNumber = vnum;
@@ -439,11 +437,11 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 							NCP_FINFO(s_inode)->DosDirNum = dosde;
 							server->root_setuped = 1;
 						} else {
-							ncp_dbg(1, "d_inode(s_root)==NULL\n");
+							DPRINTK("ncpfs: s_root->d_inode==NULL\n");
 							result = -EIO;
 						}
 					} else {
-						ncp_dbg(1, "s_root==NULL\n");
+						DPRINTK("ncpfs: s_root==NULL\n");
 						result = -EIO;
 					}
 				}
@@ -525,8 +523,6 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 			switch (rqdata.cmd) {
 				case NCP_LOCK_EX:
 				case NCP_LOCK_SH:
-						if (rqdata.timeout < 0)
-							return -EINVAL;
 						if (rqdata.timeout == 0)
 							rqdata.timeout = NCP_LOCK_DEFAULT_TIMEOUT;
 						else if (rqdata.timeout > NCP_LOCK_MAX_TIMEOUT)
@@ -811,9 +807,9 @@ outrel:
 
 long ncp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	struct inode *inode = file_inode(filp);
+	struct inode *inode = filp->f_dentry->d_inode;
 	struct ncp_server *server = NCP_SERVER(inode);
-	kuid_t uid = current_uid();
+	uid_t uid = current_uid();
 	int need_drop_write = 0;
 	long ret;
 
@@ -822,12 +818,12 @@ long ncp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case NCP_IOC_CONN_LOGGED_IN:
 	case NCP_IOC_SETROOT:
 		if (!capable(CAP_SYS_ADMIN)) {
-			ret = -EPERM;
+			ret = -EACCES;
 			goto out;
 		}
 		break;
 	}
-	if (!uid_eq(server->m.mounted_uid, uid)) {
+	if (server->m.mounted_uid != uid) {
 		switch (cmd) {
 		/*
 		 * Only mount owner can issue these ioctls.  Information

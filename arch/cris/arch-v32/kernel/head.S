@@ -4,8 +4,6 @@
  * Copyright (C) 2003, Axis Communications AB
  */
 
-#include <linux/init.h>
-
 #define ASSEMBLER_MACROS_ONLY
 
 /*
@@ -38,7 +36,14 @@
 	.global nand_boot
 	.global swapper_pg_dir
 
-	__HEAD
+	;; Dummy section to make it bootable with current VCS simulator
+#ifdef CONFIG_ETRAX_VCS_SIM
+	.section ".boot", "ax"
+	ba tstart
+	nop
+#endif
+
+	.text
 tstart:
 	;; This is the entry point of the kernel. The CPU is currently in
 	;; supervisor mode.
@@ -54,6 +59,11 @@ tstart:
 
 	GIO_INIT
 
+#ifdef CONFIG_SMP
+secondary_cpu_entry: /* Entry point for secondary CPUs */
+	di
+#endif
+
 	;; Setup and enable the MMU. Use same configuration for both the data
 	;; and the instruction MMU.
 	;;
@@ -65,10 +75,17 @@ tstart:
 		| REG_FIELD(mmu, rw_mm_kbase_hi, base_c, 4)	\
 		| REG_FIELD(mmu, rw_mm_kbase_hi, base_d, 5)     \
 		| REG_FIELD(mmu, rw_mm_kbase_hi, base_b, 0xb), $r0
-#else
+#elif !defined(CONFIG_ETRAX_VCS_SIM)
 	move.d	REG_FIELD(mmu, rw_mm_kbase_hi, base_e, 8)	\
 		| REG_FIELD(mmu, rw_mm_kbase_hi, base_c, 4)	\
 		| REG_FIELD(mmu, rw_mm_kbase_hi, base_b, 0xb), $r0
+#else
+	;; Map the virtual DRAM to the RW eprom area at address 0.
+	;; Also map 0xa for the hook calls,
+	move.d	REG_FIELD(mmu, rw_mm_kbase_hi, base_e, 8)	\
+		| REG_FIELD(mmu, rw_mm_kbase_hi, base_c, 4)	\
+		| REG_FIELD(mmu, rw_mm_kbase_hi, base_b, 0xb)   \
+		| REG_FIELD(mmu, rw_mm_kbase_hi, base_a, 0xa), $r0
 #endif
 
 	;; Temporary map of 0x40 -> 0x40 and 0x00 -> 0x00.
@@ -109,7 +126,7 @@ tstart:
 		| REG_STATE(mmu, rw_mm_cfg, seg_2, page)	\
 		| REG_STATE(mmu, rw_mm_cfg, seg_1, page)	\
 		| REG_STATE(mmu, rw_mm_cfg, seg_0, linear), $r2
-#else
+#elif !defined(CONFIG_ETRAX_VCS_SIM)
 	move.d	REG_STATE(mmu, rw_mm_cfg, we, on)		\
 		| REG_STATE(mmu, rw_mm_cfg, acc, on)		\
 		| REG_STATE(mmu, rw_mm_cfg, ex, on)		\
@@ -120,6 +137,27 @@ tstart:
 		| REG_STATE(mmu, rw_mm_cfg, seg_c, linear)	\
 		| REG_STATE(mmu, rw_mm_cfg, seg_b, linear)	\
 		| REG_STATE(mmu, rw_mm_cfg, seg_a, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_9, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_8, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_7, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_6, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_5, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_4, linear)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_3, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_2, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_1, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_0, linear), $r2
+#else
+	move.d	REG_STATE(mmu, rw_mm_cfg, we, on)		\
+		| REG_STATE(mmu, rw_mm_cfg, acc, on)		\
+		| REG_STATE(mmu, rw_mm_cfg, ex, on)		\
+		| REG_STATE(mmu, rw_mm_cfg, inv, on)		\
+		| REG_STATE(mmu, rw_mm_cfg, seg_f, linear)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_e, linear)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_d, page)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_c, linear)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_b, linear)	\
+		| REG_STATE(mmu, rw_mm_cfg, seg_a, linear)	\
 		| REG_STATE(mmu, rw_mm_cfg, seg_9, page)	\
 		| REG_STATE(mmu, rw_mm_cfg, seg_8, page)	\
 		| REG_STATE(mmu, rw_mm_cfg, seg_7, page)	\
@@ -161,6 +199,34 @@ tstart:
 	nop
 	nop
 
+#ifdef CONFIG_SMP
+	;; Read CPU ID
+	move    0, $srs
+	nop
+	nop
+	nop
+	move    $s12, $r0
+	cmpq    0, $r0
+	beq	master_cpu
+	nop
+slave_cpu:
+	; Time to boot-up. Get stack location provided by master CPU.
+	move.d  smp_init_current_idle_thread, $r1
+	move.d  [$r1], $sp
+	add.d	8192, $sp
+	move.d	ebp_start, $r0	; Defined in linker-script.
+	move	$r0, $ebp
+	jsr	smp_callin
+	nop
+master_cpu:
+	/* Set up entry point for secondary CPUs. The boot ROM has set up
+	 * EBP at start of internal memory. The CPU will get there
+	 * later when we issue an IPI to them... */
+	move.d MEM_INTMEM_START + IPI_INTR_VECT * 4, $r0
+	move.d secondary_cpu_entry, $r1
+	move.d $r1, [$r0]
+#endif
+#ifndef CONFIG_ETRAX_VCS_SIM
 	; Check if starting from DRAM (network->RAM boot or unpacked
 	; compressed kernel), or directly from flash.
 	lapcq	., $r0
@@ -168,6 +234,7 @@ tstart:
 	cmp.d	0x10000, $r0	; Arbitrary, something above this code.
 	blo	_inflash0
 	nop
+#endif
 
 	jump	_inram		; Jump to cached RAM.
 	nop
@@ -179,7 +246,7 @@ _inflash0:
 
 	;; Put the following in a section so that storage for it can be
 	;; reclaimed after init is finished.
-	__INIT
+	.section ".init.text", "ax"
 
 _inflash:
 
@@ -259,6 +326,7 @@ move_cramfs:
 	move.d	romfs_length, $r1
 	move.d	$r0, [$r1]
 
+#ifndef CONFIG_ETRAX_VCS_SIM
 	;; The kernel could have been unpacked to DRAM by the loader, but
 	;; the cramfs image could still be in the flash immediately
 	;; following the compressed kernel image. The loader passes the address
@@ -267,6 +335,10 @@ move_cramfs:
 	cmp.d	0x0ffffff8, $r9
 	bhs	_no_romfs_in_flash ; R9 points outside the flash area.
 	nop
+#else
+	ba _no_romfs_in_flash
+	nop
+#endif
 	;; cramfs rootfs might to be in flash. Check for it.
 	move.d	[$r9], $r0	; cramfs_super.magic
 	cmp.d	CRAMFS_MAGIC, $r0
@@ -294,7 +366,11 @@ _no_romfs_in_flash:
 	;; For cramfs, partition starts with magic and length.
 	;; For jffs2, a jhead is prepended which contains with magic and length.
 	;; The jhead is not part of the jffs2 partition however.
+#ifndef CONFIG_ETRAXFS_SIM
 	move.d	__bss_start, $r0
+#else
+	move.d	__end, $r0
+#endif
 	move.d	[$r0], $r1
 	cmp.d	CRAMFS_MAGIC, $r1 ; cramfs magic?
 	beq	2f		  ; yes, jump
@@ -320,6 +396,7 @@ _no_romfs_in_flash:
 	move.d	romfs_length, $r3
 	move.d	$r2, [$r3]	; store size at romfs_length
 
+#ifndef CONFIG_ETRAX_VCS_SIM
 	add.d	$r2, $r0	; copy from end and downwards
 	add.d	$r2, $r1
 
@@ -333,6 +410,7 @@ _no_romfs_in_flash:
 	subq	1, $r2
 	bne	1b
 	nop
+#endif
 
 4:
 	;; BSS move done.
@@ -377,6 +455,7 @@ no_command_line:
 	move.d	etrax_irv, $r1	; Set the exception base register and pointer.
 	move.d	$r0, [$r1]
 
+#ifndef CONFIG_ETRAX_VCS_SIM
 	;; Clear the BSS region from _bss_start to _end.
 	move.d	__bss_start, $r0
 	move.d	_end, $r1
@@ -384,6 +463,15 @@ no_command_line:
 	cmp.d	$r1, $r0
 	blo 1b
 	nop
+#endif
+
+#ifdef CONFIG_ETRAX_VCS_SIM
+	/* Set the watchdog timeout to something big. Will be removed when */
+	/* watchdog can be disabled with command line option */
+	move.d  0x7fffffff, $r10
+	jsr     CPU_WATCHDOG_TIMEOUT
+	nop
+#endif
 
 	; Initialize registers to increase determinism
 	move.d __bss_start, $r0

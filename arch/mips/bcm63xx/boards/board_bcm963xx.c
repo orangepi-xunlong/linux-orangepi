@@ -7,12 +7,13 @@
  * Copyright (C) 2008 Florian Fainelli <florian@openwrt.org>
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/platform_device.h>
+#include <linux/mtd/mtd.h>
+#include <linux/mtd/partitions.h>
+#include <linux/mtd/physmap.h>
 #include <linux/ssb/ssb.h>
 #include <asm/addrspace.h>
 #include <bcm63xx_board.h>
@@ -20,103 +21,17 @@
 #include <bcm63xx_dev_uart.h>
 #include <bcm63xx_regs.h>
 #include <bcm63xx_io.h>
-#include <bcm63xx_nvram.h>
 #include <bcm63xx_dev_pci.h>
 #include <bcm63xx_dev_enet.h>
 #include <bcm63xx_dev_dsp.h>
-#include <bcm63xx_dev_flash.h>
-#include <bcm63xx_dev_hsspi.h>
 #include <bcm63xx_dev_pcmcia.h>
-#include <bcm63xx_dev_spi.h>
-#include <bcm63xx_dev_usb_usbd.h>
 #include <board_bcm963xx.h>
 
-#include <uapi/linux/bcm933xx_hcs.h>
+#define PFX	"board_bcm963xx: "
 
-
-#define HCS_OFFSET_128K			0x20000
-
+static struct bcm963xx_nvram nvram;
+static unsigned int mac_addr_used;
 static struct board_info board;
-
-/*
- * known 3368 boards
- */
-#ifdef CONFIG_BCM63XX_CPU_3368
-static struct board_info __initdata board_cvg834g = {
-	.name				= "CVG834G_E15R3921",
-	.expected_cpu_id		= 0x3368,
-
-	.has_uart0			= 1,
-	.has_uart1			= 1,
-
-	.has_enet0			= 1,
-	.has_pci			= 1,
-
-	.enet0 = {
-		.has_phy		= 1,
-		.use_internal_phy	= 1,
-	},
-
-	.leds = {
-		{
-			.name		= "CVG834G:green:power",
-			.gpio		= 37,
-			.default_trigger= "default-on",
-		},
-	},
-
-	.ephy_reset_gpio		= 36,
-	.ephy_reset_gpio_flags		= GPIOF_INIT_HIGH,
-};
-#endif
-
-/*
- * known 6328 boards
- */
-#ifdef CONFIG_BCM63XX_CPU_6328
-static struct board_info __initdata board_96328avng = {
-	.name				= "96328avng",
-	.expected_cpu_id		= 0x6328,
-
-	.has_uart0			= 1,
-	.has_pci			= 1,
-	.has_usbd			= 0,
-
-	.usbd = {
-		.use_fullspeed		= 0,
-		.port_no		= 0,
-	},
-
-	.leds = {
-		{
-			.name		= "96328avng::ppp-fail",
-			.gpio		= 2,
-			.active_low	= 1,
-		},
-		{
-			.name		= "96328avng::power",
-			.gpio		= 4,
-			.active_low	= 1,
-			.default_trigger = "default-on",
-		},
-		{
-			.name		= "96328avng::power-fail",
-			.gpio		= 8,
-			.active_low	= 1,
-		},
-		{
-			.name		= "96328avng::wps",
-			.gpio		= 9,
-			.active_low	= 1,
-		},
-		{
-			.name		= "96328avng::ppp",
-			.gpio		= 11,
-			.active_low	= 1,
-		},
-	},
-};
-#endif
 
 /*
  * known 6338 boards
@@ -444,9 +359,9 @@ static struct board_info __initdata board_FAST2404 = {
 	.expected_cpu_id		= 0x6348,
 
 	.has_uart0			= 1,
-	.has_enet0			= 1,
-	.has_enet1			= 1,
-	.has_pci			= 1,
+        .has_enet0			= 1,
+        .has_enet1			= 1,
+        .has_pci			= 1,
 
 	.enet0 = {
 		.has_phy		= 1,
@@ -629,22 +544,22 @@ static struct board_info __initdata board_96358vw2 = {
 };
 
 static struct board_info __initdata board_AGPFS0 = {
-	.name				= "AGPF-S0",
-	.expected_cpu_id		= 0x6358,
+	.name                           = "AGPF-S0",
+	.expected_cpu_id                = 0x6358,
 
 	.has_uart0			= 1,
-	.has_enet0			= 1,
-	.has_enet1			= 1,
-	.has_pci			= 1,
+	.has_enet0                      = 1,
+	.has_enet1                      = 1,
+	.has_pci                        = 1,
 
 	.enet0 = {
-		.has_phy		= 1,
-		.use_internal_phy	= 1,
+		.has_phy                = 1,
+		.use_internal_phy       = 1,
 	},
 
 	.enet1 = {
-		.force_speed_100	= 1,
-		.force_duplex_full	= 1,
+		.force_speed_100        = 1,
+		.force_duplex_full      = 1,
 	},
 
 	.has_ohci0 = 1,
@@ -676,13 +591,7 @@ static struct board_info __initdata board_DWVS0 = {
 /*
  * all boards
  */
-static const struct board_info __initconst *bcm963xx_boards[] = {
-#ifdef CONFIG_BCM63XX_CPU_3368
-	&board_cvg834g,
-#endif
-#ifdef CONFIG_BCM63XX_CPU_6328
-	&board_96328avng,
-#endif
+static const struct board_info __initdata *bcm963xx_boards[] = {
 #ifdef CONFIG_BCM63XX_CPU_6338
 	&board_96338gw,
 	&board_96338w,
@@ -718,7 +627,7 @@ static struct ssb_sprom bcm63xx_sprom = {
 	.revision		= 0x02,
 	.board_rev		= 0x17,
 	.country_code		= 0x0,
-	.ant_available_bg	= 0x3,
+	.ant_available_bg 	= 0x3,
 	.pa0b0			= 0x15ae,
 	.pa0b1			= 0xfa85,
 	.pa0b2			= 0xfe8d,
@@ -741,7 +650,7 @@ int bcm63xx_get_fallback_sprom(struct ssb_bus *bus, struct ssb_sprom *out)
 		memcpy(out, &bcm63xx_sprom, sizeof(struct ssb_sprom));
 		return 0;
 	} else {
-		pr_err("unable to fill SPROM for given bustype\n");
+		printk(KERN_ERR PFX "unable to fill SPROM for given bustype.\n");
 		return -EINVAL;
 	}
 }
@@ -756,26 +665,53 @@ const char *board_get_name(void)
 }
 
 /*
+ * register & return a new board mac address
+ */
+static int board_get_mac_address(u8 *mac)
+{
+	u8 *p;
+	int count;
+
+	if (mac_addr_used >= nvram.mac_addr_count) {
+		printk(KERN_ERR PFX "not enough mac address\n");
+		return -ENODEV;
+	}
+
+	memcpy(mac, nvram.mac_addr_base, ETH_ALEN);
+	p = mac + ETH_ALEN - 1;
+	count = mac_addr_used;
+
+	while (count--) {
+		do {
+			(*p)++;
+			if (*p != 0)
+				break;
+			p--;
+		} while (p != mac);
+	}
+
+	if (p == mac) {
+		printk(KERN_ERR PFX "unable to fetch mac address\n");
+		return -ENODEV;
+	}
+
+	mac_addr_used++;
+	return 0;
+}
+
+/*
  * early init callback, read nvram data from flash and checksum it
  */
 void __init board_prom_init(void)
 {
-	unsigned int i;
-	u8 *boot_addr, *cfe;
+	unsigned int check_len, i;
+	u8 *boot_addr, *cfe, *p;
 	char cfe_version[32];
-	char *board_name = NULL;
 	u32 val;
-	struct bcm_hcs *hcs;
 
-	/* read base address of boot chip select (0)
-	 * 6328/6362 do not have MPI but boot from a fixed address
-	 */
-	if (BCMCPU_IS_6328() || BCMCPU_IS_6362()) {
-		val = 0x18000000;
-	} else {
-		val = bcm_mpi_readl(MPI_CSBASE_REG(0));
-		val &= MPI_CSBASE_BASE_MASK;
-	}
+	/* read base address of boot chip select (0) */
+	val = bcm_mpi_readl(MPI_CSBASE_REG(0));
+	val &= MPI_CSBASE_BASE_MASK;
 	boot_addr = (u8 *)KSEG1ADDR(val);
 
 	/* dump cfe version */
@@ -785,19 +721,29 @@ void __init board_prom_init(void)
 			 cfe[5], cfe[6], cfe[7], cfe[8], cfe[9]);
 	else
 		strcpy(cfe_version, "unknown");
-	pr_info("CFE version: %s\n", cfe_version);
+	printk(KERN_INFO PFX "CFE version: %s\n", cfe_version);
 
-	bcm63xx_nvram_init(boot_addr + BCM963XX_NVRAM_OFFSET);
+	/* extract nvram data */
+	memcpy(&nvram, boot_addr + BCM963XX_NVRAM_OFFSET, sizeof(nvram));
 
-	if (BCMCPU_IS_3368()) {
-		hcs = (struct bcm_hcs *)boot_addr;
-		board_name = hcs->filename;
-	} else {
-		board_name = bcm63xx_nvram_get_name();
+	/* check checksum before using data */
+	if (nvram.version <= 4)
+		check_len = offsetof(struct bcm963xx_nvram, checksum_old);
+	else
+		check_len = sizeof(nvram);
+	val = 0;
+	p = (u8 *)&nvram;
+	while (check_len--)
+		val += *p;
+	if (val) {
+		printk(KERN_ERR PFX "invalid nvram checksum\n");
+		return;
 	}
+
 	/* find board by name */
 	for (i = 0; i < ARRAY_SIZE(bcm963xx_boards); i++) {
-		if (strncmp(board_name, bcm963xx_boards[i]->name, 16))
+		if (strncmp(nvram.name, bcm963xx_boards[i]->name,
+			    sizeof(nvram.name)))
 			continue;
 		/* copy, board desc array is marked initdata */
 		memcpy(&board, bcm963xx_boards[i], sizeof(board));
@@ -807,9 +753,10 @@ void __init board_prom_init(void)
 	/* bail out if board is not found, will complain later */
 	if (!board.name[0]) {
 		char name[17];
-		memcpy(name, board_name, 16);
+		memcpy(name, nvram.name, 16);
 		name[16] = 0;
-		pr_err("unknown bcm963xx board: %s\n", name);
+		printk(KERN_ERR PFX "unknown bcm963xx board: %s\n",
+		       name);
 		return;
 	}
 
@@ -854,12 +801,46 @@ void __init board_setup(void)
 {
 	if (!board.name[0])
 		panic("unable to detect bcm963xx board");
-	pr_info("board name: %s\n", board.name);
+	printk(KERN_INFO PFX "board name: %s\n", board.name);
 
 	/* make sure we're running on expected cpu */
 	if (bcm63xx_get_cpu_id() != board.expected_cpu_id)
 		panic("unexpected CPU for bcm963xx board");
 }
+
+static struct mtd_partition mtd_partitions[] = {
+	{
+		.name		= "cfe",
+		.offset		= 0x0,
+		.size		= 0x40000,
+	}
+};
+
+static const char *bcm63xx_part_types[] = { "bcm63xxpart", NULL };
+
+static struct physmap_flash_data flash_data = {
+	.width			= 2,
+	.nr_parts		= ARRAY_SIZE(mtd_partitions),
+	.parts			= mtd_partitions,
+	.part_probe_types	= bcm63xx_part_types,
+};
+
+static struct resource mtd_resources[] = {
+	{
+		.start		= 0,	/* filled at runtime */
+		.end		= 0,	/* filled at runtime */
+		.flags		= IORESOURCE_MEM,
+	}
+};
+
+static struct platform_device mtd_dev = {
+	.name			= "physmap-flash",
+	.resource		= mtd_resources,
+	.num_resources		= ARRAY_SIZE(mtd_resources),
+	.dev			= {
+		.platform_data	= &flash_data,
+	},
+};
 
 static struct gpio_led_platform_data bcm63xx_led_data;
 
@@ -874,6 +855,8 @@ static struct platform_device bcm63xx_gpio_leds = {
  */
 int __init board_register_devices(void)
 {
+	u32 val;
+
 	if (board.has_uart0)
 		bcm63xx_uart_register(0);
 
@@ -884,19 +867,12 @@ int __init board_register_devices(void)
 		bcm63xx_pcmcia_register();
 
 	if (board.has_enet0 &&
-	    !bcm63xx_nvram_get_mac_address(board.enet0.mac_addr))
+	    !board_get_mac_address(board.enet0.mac_addr))
 		bcm63xx_enet_register(0, &board.enet0);
 
 	if (board.has_enet1 &&
-	    !bcm63xx_nvram_get_mac_address(board.enet1.mac_addr))
+	    !board_get_mac_address(board.enet1.mac_addr))
 		bcm63xx_enet_register(1, &board.enet1);
-
-	if (board.has_enetsw &&
-	    !bcm63xx_nvram_get_mac_address(board.enetsw.mac_addr))
-		bcm63xx_enetsw_register(&board.enetsw);
-
-	if (board.has_usbd)
-		bcm63xx_usbd_register(&board.usbd);
 
 	if (board.has_dsp)
 		bcm63xx_dsp_register(&board.dsp);
@@ -905,29 +881,28 @@ int __init board_register_devices(void)
 	 * do this after registering enet devices
 	 */
 #ifdef CONFIG_SSB_PCIHOST
-	if (!bcm63xx_nvram_get_mac_address(bcm63xx_sprom.il0mac)) {
+	if (!board_get_mac_address(bcm63xx_sprom.il0mac)) {
 		memcpy(bcm63xx_sprom.et0mac, bcm63xx_sprom.il0mac, ETH_ALEN);
 		memcpy(bcm63xx_sprom.et1mac, bcm63xx_sprom.il0mac, ETH_ALEN);
 		if (ssb_arch_register_fallback_sprom(
 				&bcm63xx_get_fallback_sprom) < 0)
-			pr_err("failed to register fallback SPROM\n");
+			pr_err(PFX "failed to register fallback SPROM\n");
 	}
 #endif
 
-	bcm63xx_spi_register();
+	/* read base address of boot chip select (0) */
+	val = bcm_mpi_readl(MPI_CSBASE_REG(0));
+	val &= MPI_CSBASE_BASE_MASK;
 
-	bcm63xx_hsspi_register();
+	mtd_resources[0].start = val;
+	mtd_resources[0].end = 0x1FFFFFFF;
 
-	bcm63xx_flash_register();
+	platform_device_register(&mtd_dev);
 
 	bcm63xx_led_data.num_leds = ARRAY_SIZE(board.leds);
 	bcm63xx_led_data.leds = board.leds;
 
 	platform_device_register(&bcm63xx_gpio_leds);
-
-	if (board.ephy_reset_gpio && board.ephy_reset_gpio_flags)
-		gpio_request_one(board.ephy_reset_gpio,
-				board.ephy_reset_gpio_flags, "ephy-reset");
 
 	return 0;
 }

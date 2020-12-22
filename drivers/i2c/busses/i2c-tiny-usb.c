@@ -54,15 +54,11 @@ static int usb_write(struct i2c_adapter *adapter, int cmd,
 
 static int usb_xfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num)
 {
-	unsigned char *pstatus;
+	unsigned char status;
 	struct i2c_msg *pmsg;
-	int i, ret;
+	int i;
 
 	dev_dbg(&adapter->dev, "master xfer %d messages:\n", num);
-
-	pstatus = kmalloc(sizeof(*pstatus), GFP_KERNEL);
-	if (!pstatus)
-		return -ENOMEM;
 
 	for (i = 0 ; i < num ; i++) {
 		int cmd = CMD_I2C_IO;
@@ -88,8 +84,7 @@ static int usb_xfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num)
 				     pmsg->buf, pmsg->len) != pmsg->len) {
 				dev_err(&adapter->dev,
 					"failure reading data\n");
-				ret = -EREMOTEIO;
-				goto out;
+				return -EREMOTEIO;
 			}
 		} else {
 			/* write data */
@@ -98,50 +93,36 @@ static int usb_xfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num)
 				      pmsg->buf, pmsg->len) != pmsg->len) {
 				dev_err(&adapter->dev,
 					"failure writing data\n");
-				ret = -EREMOTEIO;
-				goto out;
+				return -EREMOTEIO;
 			}
 		}
 
 		/* read status */
-		if (usb_read(adapter, CMD_GET_STATUS, 0, 0, pstatus, 1) != 1) {
+		if (usb_read(adapter, CMD_GET_STATUS, 0, 0, &status, 1) != 1) {
 			dev_err(&adapter->dev, "failure reading status\n");
-			ret = -EREMOTEIO;
-			goto out;
+			return -EREMOTEIO;
 		}
 
-		dev_dbg(&adapter->dev, "  status = %d\n", *pstatus);
-		if (*pstatus == STATUS_ADDRESS_NAK) {
-			ret = -EREMOTEIO;
-			goto out;
-		}
+		dev_dbg(&adapter->dev, "  status = %d\n", status);
+		if (status == STATUS_ADDRESS_NAK)
+			return -EREMOTEIO;
 	}
 
-	ret = i;
-out:
-	kfree(pstatus);
-	return ret;
+	return i;
 }
 
 static u32 usb_func(struct i2c_adapter *adapter)
 {
-	__le32 *pfunc;
-	u32 ret;
-
-	pfunc = kmalloc(sizeof(*pfunc), GFP_KERNEL);
+	__le32 func;
 
 	/* get functionality from adapter */
-	if (!pfunc || usb_read(adapter, CMD_GET_FUNC, 0, 0, pfunc,
-			       sizeof(*pfunc)) != sizeof(*pfunc)) {
+	if (usb_read(adapter, CMD_GET_FUNC, 0, 0, &func, sizeof(func)) !=
+	    sizeof(func)) {
 		dev_err(&adapter->dev, "failure reading functionality\n");
-		ret = 0;
-		goto out;
+		return 0;
 	}
 
-	ret = le32_to_cpup(pfunc);
-out:
-	kfree(pfunc);
-	return ret;
+	return le32_to_cpu(func);
 }
 
 /* This is the actual algorithm we define */
@@ -178,39 +159,22 @@ static int usb_read(struct i2c_adapter *adapter, int cmd,
 		    int value, int index, void *data, int len)
 {
 	struct i2c_tiny_usb *dev = (struct i2c_tiny_usb *)adapter->algo_data;
-	void *dmadata = kmalloc(len, GFP_KERNEL);
-	int ret;
-
-	if (!dmadata)
-		return -ENOMEM;
 
 	/* do control transfer */
-	ret = usb_control_msg(dev->usb_dev, usb_rcvctrlpipe(dev->usb_dev, 0),
+	return usb_control_msg(dev->usb_dev, usb_rcvctrlpipe(dev->usb_dev, 0),
 			       cmd, USB_TYPE_VENDOR | USB_RECIP_INTERFACE |
-			       USB_DIR_IN, value, index, dmadata, len, 2000);
-
-	memcpy(data, dmadata, len);
-	kfree(dmadata);
-	return ret;
+			       USB_DIR_IN, value, index, data, len, 2000);
 }
 
 static int usb_write(struct i2c_adapter *adapter, int cmd,
 		     int value, int index, void *data, int len)
 {
 	struct i2c_tiny_usb *dev = (struct i2c_tiny_usb *)adapter->algo_data;
-	void *dmadata = kmemdup(data, len, GFP_KERNEL);
-	int ret;
-
-	if (!dmadata)
-		return -ENOMEM;
 
 	/* do control transfer */
-	ret = usb_control_msg(dev->usb_dev, usb_sndctrlpipe(dev->usb_dev, 0),
+	return usb_control_msg(dev->usb_dev, usb_sndctrlpipe(dev->usb_dev, 0),
 			       cmd, USB_TYPE_VENDOR | USB_RECIP_INTERFACE,
-			       value, index, dmadata, len, 2000);
-
-	kfree(dmadata);
-	return ret;
+			       value, index, data, len, 2000);
 }
 
 static void i2c_tiny_usb_free(struct i2c_tiny_usb *dev)

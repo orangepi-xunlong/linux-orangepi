@@ -76,6 +76,13 @@
  */
 #define SCIC_SDS_SATA_LINK_TRAINING_TIMEOUT  250
 
+enum sci_phy_protocol {
+	SCIC_SDS_PHY_PROTOCOL_UNKNOWN,
+	SCIC_SDS_PHY_PROTOCOL_SAS,
+	SCIC_SDS_PHY_PROTOCOL_SATA,
+	SCIC_SDS_MAX_PHY_PROTOCOLS
+};
+
 /**
  * isci_phy - hba local phy infrastructure
  * @sm:
@@ -88,7 +95,7 @@ struct isci_phy {
 	struct sci_base_state_machine sm;
 	struct isci_port *owning_port;
 	enum sas_linkrate max_negotiated_speed;
-	enum sas_protocol protocol;
+	enum sci_phy_protocol protocol;
 	u8 phy_index;
 	bool bcn_received_while_port_unassigned;
 	bool is_in_link_training;

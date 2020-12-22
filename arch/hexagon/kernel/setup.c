@@ -1,7 +1,7 @@
 /*
  * Arch related setup for Hexagon
  *
- * Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,7 +19,6 @@
  */
 
 #include <linux/init.h>
-#include <linux/delay.h>
 #include <linux/bootmem.h>
 #include <linux/mmzone.h>
 #include <linux/mm.h>
@@ -33,13 +32,16 @@
 #include <asm/hexagon_vm.h>
 #include <asm/vm_mmu.h>
 #include <asm/time.h>
+#ifdef CONFIG_OF
+#include <asm/prom.h>
+#endif
 
 char cmd_line[COMMAND_LINE_SIZE];
 static char default_command_line[COMMAND_LINE_SIZE] __initdata = CONFIG_CMDLINE;
 
 int on_simulator;
 
-void calibrate_delay(void)
+void __cpuinit calibrate_delay(void)
 {
 	loops_per_jiffy = thread_freq_mhz * 1000000 / HZ;
 }
@@ -65,8 +67,6 @@ void __init setup_arch(char **cmdline_p)
 	 * Set up event bindings to handle exceptions and interrupts.
 	 */
 	__vmsetvec(_K_VM_event_vector);
-
-	printk(KERN_INFO "PHYS_OFFSET=0x%08x\n", PHYS_OFFSET);
 
 	/*
 	 * Simulator has a few differences from the hardware.
@@ -127,11 +127,6 @@ static void c_stop(struct seq_file *m, void *v)
 static int show_cpuinfo(struct seq_file *m, void *v)
 {
 	int cpu = (unsigned long) v - 1;
-
-#ifdef CONFIG_SMP
-	if (!cpu_online(cpu))
-		return 0;
-#endif
 
 	seq_printf(m, "processor\t: %d\n", cpu);
 	seq_printf(m, "model name\t: Hexagon Virtual Machine\n");

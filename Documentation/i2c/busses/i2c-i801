@@ -23,16 +23,6 @@ Supported adapters:
   * Intel Lynx Point (PCH)
   * Intel Lynx Point-LP (PCH)
   * Intel Avoton (SOC)
-  * Intel Wellsburg (PCH)
-  * Intel Coleto Creek (PCH)
-  * Intel Wildcat Point (PCH)
-  * Intel Wildcat Point-LP (PCH)
-  * Intel BayTrail (SOC)
-  * Intel Sunrise Point-H (PCH)
-  * Intel Sunrise Point-LP (PCH)
-  * Intel DNV (SOC)
-  * Intel Broxton (SOC)
-  * Intel Lewisburg (PCH)
    Datasheets: Publicly available at the Intel website
 
 On Intel Patsburg and later chipsets, both the normal host SMBus controller
@@ -40,7 +30,7 @@ and the additional 'Integrated Device Function' controllers are supported.
 
 Authors: 
 	Mark Studebaker <mdsxyz123@yahoo.com>
-	Jean Delvare <jdelvare@suse.de>
+	Jean Delvare <khali@linux-fr.org>
 
 
 Module Parameters
@@ -50,10 +40,9 @@ Module Parameters
 Disable selected features normally supported by the device. This makes it
 possible to work around possible driver or hardware bugs if the feature in
 question doesn't work as intended for whatever reason. Bit values:
- 0x01  disable SMBus PEC
- 0x02  disable the block buffer
- 0x08  disable the I2C block read functionality
- 0x10  don't use interrupts
+  1  disable SMBus PEC
+  2  disable the block buffer
+  8  disable the I2C block read functionality
 
 
 Description
@@ -97,12 +86,6 @@ SMBus 2.0 Support
 -----------------
 
 The 82801DB (ICH4) and later chips support several SMBus 2.0 features.
-
-
-Interrupt Support
------------------
-
-PCI interrupt support is supported on the 82801EB (ICH5) and later chips.
 
 
 Hidden ICH SMBus

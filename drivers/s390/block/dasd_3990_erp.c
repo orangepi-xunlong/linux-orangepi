@@ -1,8 +1,9 @@
 /*
+ * File...........: linux/drivers/s390/block/dasd_3990_erp.c
  * Author(s)......: Horst  Hummel    <Horst.Hummel@de.ibm.com>
  *		    Holger Smolinski <Holger.Smolinski@de.ibm.com>
  * Bugreports.to..: <Linux390@de.ibm.com>
- * Copyright IBM Corp. 2000, 2001
+ * (C) IBM Corporation, IBM Deutschland Entwicklung GmbH, 2000, 2001
  *
  */
 
@@ -229,7 +230,7 @@ dasd_3990_erp_DCTL(struct dasd_ccw_req * erp, char modifier)
 	dctl_cqr->expires = 5 * 60 * HZ;
 	dctl_cqr->retries = 2;
 
-	dctl_cqr->buildclk = get_tod_clock();
+	dctl_cqr->buildclk = get_clock();
 
 	dctl_cqr->status = DASD_CQR_FILLED;
 
@@ -1367,14 +1368,8 @@ dasd_3990_erp_no_rec(struct dasd_ccw_req * default_erp, char *sense)
 
 	struct dasd_device *device = default_erp->startdev;
 
-	/*
-	 * In some cases the 'No Record Found' error might be expected and
-	 * log messages shouldn't be written then.
-	 * Check if the according suppress bit is set.
-	 */
-	if (!test_bit(DASD_CQR_SUPPRESS_NRF, &default_erp->flags))
-		dev_err(&device->cdev->dev,
-			"The specified record was not found\n");
+	dev_err(&device->cdev->dev,
+		    "The specified record was not found\n");
 
 	return dasd_3990_erp_cleanup(default_erp, DASD_CQR_FAILED);
 
@@ -1399,14 +1394,8 @@ dasd_3990_erp_file_prot(struct dasd_ccw_req * erp)
 
 	struct dasd_device *device = erp->startdev;
 
-	/*
-	 * In some cases the 'File Protected' error might be expected and
-	 * log messages shouldn't be written then.
-	 * Check if the according suppress bit is set.
-	 */
-	if (!test_bit(DASD_CQR_SUPPRESS_FP, &erp->flags))
-		dev_err(&device->cdev->dev,
-			"Accessing the DASD failed because of a hardware error\n");
+	dev_err(&device->cdev->dev, "Accessing the DASD failed because of "
+		"a hardware error\n");
 
 	return dasd_3990_erp_cleanup(erp, DASD_CQR_FAILED);
 
@@ -1731,7 +1720,7 @@ dasd_3990_erp_action_1B_32(struct dasd_ccw_req * default_erp, char *sense)
 	erp->magic = default_erp->magic;
 	erp->expires = default_erp->expires;
 	erp->retries = 256;
-	erp->buildclk = get_tod_clock();
+	erp->buildclk = get_clock();
 	erp->status = DASD_CQR_FILLED;
 
 	/* remove the default erp */
@@ -2334,7 +2323,7 @@ static struct dasd_ccw_req *dasd_3990_erp_add_erp(struct dasd_ccw_req *cqr)
 			DBF_DEV_EVENT(DBF_ERR, device, "%s",
 				    "Unable to allocate ERP request");
 			cqr->status = DASD_CQR_FAILED;
-			cqr->stopclk = get_tod_clock();
+                        cqr->stopclk = get_clock ();
 		} else {
 			DBF_DEV_EVENT(DBF_ERR, device,
                                      "Unable to allocate ERP request "
@@ -2376,7 +2365,7 @@ static struct dasd_ccw_req *dasd_3990_erp_add_erp(struct dasd_ccw_req *cqr)
 	erp->magic    = cqr->magic;
 	erp->expires  = cqr->expires;
 	erp->retries  = 256;
-	erp->buildclk = get_tod_clock();
+	erp->buildclk = get_clock();
 	erp->status = DASD_CQR_FILLED;
 
 	return erp;
@@ -2753,16 +2742,6 @@ dasd_3990_erp_action(struct dasd_ccw_req * cqr)
 	} else {
 		/* matching erp found - set all leading erp's to DONE */
 		erp = dasd_3990_erp_handle_match_erp(cqr, erp);
-	}
-
-
-	/*
-	 * For path verification work we need to stick with the path that was
-	 * originally chosen so that the per path configuration data is
-	 * assigned correctly.
-	 */
-	if (test_bit(DASD_CQR_VERIFY_PATH, &erp->flags) && cqr->lpm) {
-		erp->lpm = cqr->lpm;
 	}
 
 	if (device->features & DASD_FEATURE_ERPLOG) {

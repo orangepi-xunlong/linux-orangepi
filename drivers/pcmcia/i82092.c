@@ -25,7 +25,7 @@
 MODULE_LICENSE("GPL");
 
 /* PCI core routines */
-static const struct pci_device_id i82092aa_pci_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(i82092aa_pci_ids) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82092AA_0) },
 	{ }
 };
@@ -35,7 +35,7 @@ static struct pci_driver i82092aa_pci_driver = {
 	.name           = "i82092aa",
 	.id_table       = i82092aa_pci_ids,
 	.probe          = i82092aa_pci_probe,
-	.remove         = i82092aa_pci_remove,
+	.remove         = __devexit_p(i82092aa_pci_remove),
 };
 
 
@@ -67,7 +67,7 @@ static struct socket_info sockets[MAX_SOCKETS];
 static int socket_count;  /* shortcut */                                  	                                	
 
 
-static int i82092aa_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
+static int __devinit i82092aa_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	unsigned char configbyte;
 	int i, ret;
@@ -133,6 +133,8 @@ static int i82092aa_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		goto err_out_free_res;
 	}
 
+	pci_set_drvdata(dev, &sockets[i].socket);
+
 	for (i = 0; i<socket_count; i++) {
 		sockets[i].socket.dev.parent = &dev->dev;
 		sockets[i].socket.ops = &i82092aa_operations;
@@ -160,16 +162,16 @@ err_out_disable:
 	return ret;			
 }
 
-static void i82092aa_pci_remove(struct pci_dev *dev)
+static void __devexit i82092aa_pci_remove(struct pci_dev *dev)
 {
-	int i;
+	struct pcmcia_socket *socket = pci_get_drvdata(dev);
 
 	enter("i82092aa_pci_remove");
 	
 	free_irq(dev->irq, i82092aa_interrupt);
 
-	for (i = 0; i < socket_count; i++)
-		pcmcia_unregister_socket(&sockets[i].socket);
+	if (socket)
+		pcmcia_unregister_socket(socket);
 
 	leave("i82092aa_pci_remove");
 }

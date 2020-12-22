@@ -18,9 +18,9 @@
 
 /*
  * Handle errors from the bridge.  This includes master and target aborts,
- * various command and address errors, and the interrupt test.	This gets
- * registered on the bridge error irq.	It's conceivable that some of these
- * conditions warrant a panic.	Anybody care to say which ones?
+ * various command and address errors, and the interrupt test.  This gets
+ * registered on the bridge error irq.  It's conceivable that some of these
+ * conditions warrant a panic.  Anybody care to say which ones?
  */
 static irqreturn_t macepci_error(int irq, void *dev)
 {
@@ -116,6 +116,7 @@ static struct pci_controller mace_pci_controller = {
 	.pci_ops	= &mace_pci_ops,
 	.mem_resource	= &mace_pci_mem_resource,
 	.io_resource	= &mace_pci_io_resource,
+	.iommu		= 0,
 	.mem_offset	= MACE_PCI_MEM_OFFSET,
 	.io_offset	= 0,
 	.io_map_base	= CKSEG1ADDR(MACEPCI_LOW_IO),

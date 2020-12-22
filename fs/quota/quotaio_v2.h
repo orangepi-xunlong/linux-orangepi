@@ -13,14 +13,12 @@
  */
 #define V2_INITQMAGICS {\
 	0xd9c01f11,	/* USRQUOTA */\
-	0xd9c01927,	/* GRPQUOTA */\
-	0xd9c03f14,	/* PRJQUOTA */\
+	0xd9c01927	/* GRPQUOTA */\
 }
 
 #define V2_INITQVERSIONS {\
 	1,		/* USRQUOTA */\
-	1,		/* GRPQUOTA */\
-	1,		/* PRJQUOTA */\
+	1		/* GRPQUOTA */\
 }
 
 /* First generic header */

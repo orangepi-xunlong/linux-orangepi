@@ -92,6 +92,13 @@ int wimax_reset(struct wimax_dev *wimax_dev)
 EXPORT_SYMBOL(wimax_reset);
 
 
+static const struct nla_policy wimax_gnl_reset_policy[WIMAX_GNL_ATTR_MAX + 1] = {
+	[WIMAX_GNL_RESET_IFIDX] = {
+		.type = NLA_U32,
+	},
+};
+
+
 /*
  * Exporting to user space over generic netlink
  *
@@ -99,6 +106,7 @@ EXPORT_SYMBOL(wimax_reset);
  *
  * No attributes.
  */
+static
 int wimax_gnl_doit_reset(struct sk_buff *skb, struct genl_info *info)
 {
 	int result, ifindex;
@@ -107,7 +115,8 @@ int wimax_gnl_doit_reset(struct sk_buff *skb, struct genl_info *info)
 	d_fnstart(3, NULL, "(skb %p info %p)\n", skb, info);
 	result = -ENODEV;
 	if (info->attrs[WIMAX_GNL_RESET_IFIDX] == NULL) {
-		pr_err("WIMAX_GNL_OP_RFKILL: can't find IFIDX attribute\n");
+		printk(KERN_ERR "WIMAX_GNL_OP_RFKILL: can't find IFIDX "
+			"attribute\n");
 		goto error_no_wimax_dev;
 	}
 	ifindex = nla_get_u32(info->attrs[WIMAX_GNL_RESET_IFIDX]);
@@ -121,3 +130,12 @@ error_no_wimax_dev:
 	d_fnend(3, NULL, "(skb %p info %p) = %d\n", skb, info, result);
 	return result;
 }
+
+
+struct genl_ops wimax_gnl_reset = {
+	.cmd = WIMAX_GNL_OP_RESET,
+	.flags = GENL_ADMIN_PERM,
+	.policy = wimax_gnl_reset_policy,
+	.doit = wimax_gnl_doit_reset,
+	.dumpit = NULL,
+};

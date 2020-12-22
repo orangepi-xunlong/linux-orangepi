@@ -1346,22 +1346,29 @@ EXPORT_SYMBOL(i2400m_unknown_barker);
 int i2400m_rx_setup(struct i2400m *i2400m)
 {
 	int result = 0;
+	struct device *dev = i2400m_dev(i2400m);
 
 	i2400m->rx_reorder = i2400m_rx_reorder_disabled? 0 : 1;
 	if (i2400m->rx_reorder) {
 		unsigned itr;
+		size_t size;
 		struct i2400m_roq_log *rd;
 
 		result = -ENOMEM;
 
-		i2400m->rx_roq = kcalloc(I2400M_RO_CIN + 1,
-					 sizeof(i2400m->rx_roq[0]), GFP_KERNEL);
-		if (i2400m->rx_roq == NULL)
+		size = sizeof(i2400m->rx_roq[0]) * (I2400M_RO_CIN + 1);
+		i2400m->rx_roq = kzalloc(size, GFP_KERNEL);
+		if (i2400m->rx_roq == NULL) {
+			dev_err(dev, "RX: cannot allocate %zu bytes for "
+				"reorder queues\n", size);
 			goto error_roq_alloc;
+		}
 
-		rd = kcalloc(I2400M_RO_CIN + 1, sizeof(*i2400m->rx_roq[0].log),
-			     GFP_KERNEL);
+		size = sizeof(*i2400m->rx_roq[0].log) * (I2400M_RO_CIN + 1);
+		rd = kzalloc(size, GFP_KERNEL);
 		if (rd == NULL) {
+			dev_err(dev, "RX: cannot allocate %zu bytes for "
+				"reorder queues log areas\n", size);
 			result = -ENOMEM;
 			goto error_roq_log_alloc;
 		}

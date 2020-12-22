@@ -45,6 +45,11 @@ extern void paging_init(void);
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
+static inline int pte_file(pte_t pte)
+{
+	return 0;
+}
+
 #define set_pte(pteptr, pteval) (*(pteptr) = pteval)
 #define set_pte_at(mm, addr, ptep, pteval) set_pte(ptep, pteval)
 
@@ -78,11 +83,14 @@ PTE_BIT_FUNC(mkyoung, |= _PAGE_ACCESSED);
 #define ZERO_PAGE(vaddr)	virt_to_page(empty_zero_page)
 extern char empty_zero_page[];
 
+extern unsigned int kobjsize(const void *objp);
+
 #define swapper_pg_dir ((pgd_t *) 0)
 /*
  * No page table caches to initialise.
  */
 #define pgtable_cache_init()	do { } while (0)
+#define io_remap_pfn_range      remap_pfn_range
 
 /*
  * All 32bit addresses are effectively valid for vmalloc...
@@ -96,8 +104,6 @@ extern unsigned long get_fb_unmapped_area(struct file *filp, unsigned long,
 					  unsigned long, unsigned long,
 					  unsigned long);
 #define HAVE_ARCH_FB_UNMAPPED_AREA
-
-#define pgprot_writecombine pgprot_noncached
 
 #include <asm-generic/pgtable.h>
 

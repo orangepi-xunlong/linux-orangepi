@@ -126,12 +126,6 @@ static int mmc_ios_show(struct seq_file *s, void *data)
 	case MMC_TIMING_SD_HS:
 		str = "sd high-speed";
 		break;
-	case MMC_TIMING_UHS_SDR12:
-		str = "sd uhs SDR12";
-		break;
-	case MMC_TIMING_UHS_SDR25:
-		str = "sd uhs SDR25";
-		break;
 	case MMC_TIMING_UHS_SDR50:
 		str = "sd uhs SDR50";
 		break;
@@ -141,56 +135,14 @@ static int mmc_ios_show(struct seq_file *s, void *data)
 	case MMC_TIMING_UHS_DDR50:
 		str = "sd uhs DDR50";
 		break;
-	case MMC_TIMING_MMC_DDR52:
-		str = "mmc DDR52";
-		break;
 	case MMC_TIMING_MMC_HS200:
-		str = "mmc HS200";
-		break;
-	case MMC_TIMING_MMC_HS400:
-		str = mmc_card_hs400es(host->card) ?
-			"mmc HS400 enhanced strobe" : "mmc HS400";
+		str = "mmc high-speed SDR200";
 		break;
 	default:
 		str = "invalid";
 		break;
 	}
 	seq_printf(s, "timing spec:\t%u (%s)\n", ios->timing, str);
-
-	switch (ios->signal_voltage) {
-	case MMC_SIGNAL_VOLTAGE_330:
-		str = "3.30 V";
-		break;
-	case MMC_SIGNAL_VOLTAGE_180:
-		str = "1.80 V";
-		break;
-	case MMC_SIGNAL_VOLTAGE_120:
-		str = "1.20 V";
-		break;
-	default:
-		str = "invalid";
-		break;
-	}
-	seq_printf(s, "signal voltage:\t%u (%s)\n", ios->signal_voltage, str);
-
-	switch (ios->drv_type) {
-	case MMC_SET_DRIVER_TYPE_A:
-		str = "driver type A";
-		break;
-	case MMC_SET_DRIVER_TYPE_B:
-		str = "driver type B";
-		break;
-	case MMC_SET_DRIVER_TYPE_C:
-		str = "driver type C";
-		break;
-	case MMC_SET_DRIVER_TYPE_D:
-		str = "driver type D";
-		break;
-	default:
-		str = "invalid";
-		break;
-	}
-	seq_printf(s, "driver type:\t%u (%s)\n", ios->drv_type, str);
 
 	return 0;
 }
@@ -221,7 +173,7 @@ static int mmc_clock_opt_set(void *data, u64 val)
 	struct mmc_host *host = data;
 
 	/* We need this check due to input value is u64 */
-	if (val != 0 && (val > host->f_max || val < host->f_min))
+	if (val > host->f_max)
 		return -EINVAL;
 
 	mmc_claim_host(host);
@@ -256,6 +208,11 @@ void mmc_add_host_debugfs(struct mmc_host *host)
 			&mmc_clock_fops))
 		goto err_node;
 
+#ifdef CONFIG_MMC_CLKGATE
+	if (!debugfs_create_u32("clk_delay", (S_IRUSR | S_IWUSR),
+				root, &host->clk_delay))
+		goto err_node;
+#endif
 #ifdef CONFIG_FAIL_MMC_REQUEST
 	if (fail_request)
 		setup_fault_attr(&fail_default_attr, fail_request);
@@ -285,13 +242,13 @@ static int mmc_dbg_card_status_get(void *data, u64 *val)
 	u32		status;
 	int		ret;
 
-	mmc_get_card(card);
+	mmc_claim_host(card->host);
 
 	ret = mmc_send_status(data, &status);
 	if (!ret)
 		*val = status;
 
-	mmc_put_card(card);
+	mmc_release_host(card->host);
 
 	return ret;
 }
@@ -312,13 +269,19 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 	if (!buf)
 		return -ENOMEM;
 
-	mmc_get_card(card);
-	err = mmc_get_ext_csd(card, &ext_csd);
-	mmc_put_card(card);
+	ext_csd = kmalloc(512, GFP_KERNEL);
+	if (!ext_csd) {
+		err = -ENOMEM;
+		goto out_free;
+	}
+
+	mmc_claim_host(card->host);
+	err = mmc_send_ext_csd(card, ext_csd);
+	mmc_release_host(card->host);
 	if (err)
 		goto out_free;
 
-	for (i = 0; i < 512; i++)
+	for (i = 511; i >= 0; i--)
 		n += sprintf(buf + n, "%02x", ext_csd[i]);
 	n += sprintf(buf + n, "\n");
 	BUG_ON(n != EXT_CSD_STR_LEN);
@@ -329,6 +292,7 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 
 out_free:
 	kfree(buf);
+	kfree(ext_csd);
 	return err;
 }
 

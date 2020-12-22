@@ -15,13 +15,10 @@
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/kprobes.h>
-#include <linux/kdebug.h>
 #include <linux/module.h>
 #include <linux/reboot.h>
 #include <linux/uaccess.h>
 #include <linux/ptrace.h>
-#include <linux/hardirq.h>
-#include <linux/nmi.h>
 #include <asm/stack.h>
 #include <asm/traps.h>
 #include <asm/setup.h>
@@ -32,7 +29,7 @@
 
 void __init trap_init(void)
 {
-	/* Nothing needed here since we link code at .intrpt */
+	/* Nothing needed here since we link code at .intrpt1 */
 }
 
 int unaligned_fixup = 1;
@@ -44,13 +41,14 @@ static int __init setup_unaligned_fixup(char *str)
 	 * will still parse the instruction, then fire a SIGBUS with
 	 * the correct address from inside the single_step code.
 	 */
-	if (kstrtoint(str, 0, &unaligned_fixup) != 0)
+	long val;
+	if (strict_strtol(str, 0, &val) != 0)
 		return 0;
-
+	unaligned_fixup = val;
 	pr_info("Fixups for unaligned data accesses are %s\n",
-		unaligned_fixup >= 0 ?
-		(unaligned_fixup ? "enabled" : "disabled") :
-		"completely disabled");
+	       unaligned_fixup >= 0 ?
+	       (unaligned_fixup ? "enabled" : "disabled") :
+	       "completely disabled");
 	return 1;
 }
 __setup("unaligned_fixup=", setup_unaligned_fixup);
@@ -102,7 +100,13 @@ static int retry_gpv(unsigned int gpv_reason)
 
 #endif /* CHIP_HAS_TILE_DMA() */
 
-extern tile_bundle_bits bpt_code;
+#ifdef __tilegx__
+#define bundle_bits tilegx_bundle_bits
+#else
+#define bundle_bits tile_bundle_bits
+#endif
+
+extern bundle_bits bpt_code;
 
 asm(".pushsection .rodata.bpt_code,\"a\";"
     ".align 8;"
@@ -110,7 +114,7 @@ asm(".pushsection .rodata.bpt_code,\"a\";"
     ".size bpt_code,.-bpt_code;"
     ".popsection");
 
-static int special_ill(tile_bundle_bits bundle, int *sigp, int *codep)
+static int special_ill(bundle_bits bundle, int *sigp, int *codep)
 {
 	int sig, code, maxcode;
 
@@ -191,111 +195,31 @@ static int special_ill(tile_bundle_bits bundle, int *sigp, int *codep)
 	return 1;
 }
 
-static const char *const int_name[] = {
-	[INT_MEM_ERROR] = "Memory error",
-	[INT_ILL] = "Illegal instruction",
-	[INT_GPV] = "General protection violation",
-	[INT_UDN_ACCESS] = "UDN access",
-	[INT_IDN_ACCESS] = "IDN access",
-#if CHIP_HAS_SN()
-	[INT_SN_ACCESS] = "SN access",
-#endif
-	[INT_SWINT_3] = "Software interrupt 3",
-	[INT_SWINT_2] = "Software interrupt 2",
-	[INT_SWINT_0] = "Software interrupt 0",
-	[INT_UNALIGN_DATA] = "Unaligned data",
-	[INT_DOUBLE_FAULT] = "Double fault",
-#ifdef __tilegx__
-	[INT_ILL_TRANS] = "Illegal virtual address",
-#endif
-};
-
-static int do_bpt(struct pt_regs *regs)
-{
-	unsigned long bundle, bcode, bpt;
-
-	bundle = *(unsigned long *)instruction_pointer(regs);
-
-	/*
-	 * bpt shoule be { bpt; nop }, which is 0x286a44ae51485000ULL.
-	 * we encode the unused least significant bits for other purpose.
-	 */
-	bpt = bundle & ~((1ULL << 12) - 1);
-	if (bpt != TILE_BPT_BUNDLE)
-		return 0;
-
-	bcode = bundle & ((1ULL << 12) - 1);
-	/*
-	 * notify the kprobe handlers, if instruction is likely to
-	 * pertain to them.
-	 */
-	switch (bcode) {
-	/* breakpoint_insn */
-	case 0:
-		notify_die(DIE_BREAK, "debug", regs, bundle,
-			INT_ILL, SIGTRAP);
-		break;
-	/* compiled_bpt */
-	case DIE_COMPILED_BPT:
-		notify_die(DIE_COMPILED_BPT, "debug", regs, bundle,
-			INT_ILL, SIGTRAP);
-		break;
-	/* breakpoint2_insn */
-	case DIE_SSTEPBP:
-		notify_die(DIE_SSTEPBP, "single_step", regs, bundle,
-			INT_ILL, SIGTRAP);
-		break;
-	default:
-		return 0;
-	}
-
-	return 1;
-}
-
 void __kprobes do_trap(struct pt_regs *regs, int fault_num,
 		       unsigned long reason)
 {
 	siginfo_t info = { 0 };
 	int signo, code;
 	unsigned long address = 0;
-	tile_bundle_bits instr;
-	int is_kernel = !user_mode(regs);
+	bundle_bits instr;
 
-	/* Handle breakpoints, etc. */
-	if (is_kernel && fault_num == INT_ILL && do_bpt(regs))
-		return;
-
-	/* Re-enable interrupts, if they were previously enabled. */
-	if (!(regs->flags & PT_FLAGS_DISABLE_IRQ))
-		local_irq_enable();
+	/* Re-enable interrupts. */
+	local_irq_enable();
 
 	/*
 	 * If it hits in kernel mode and we can't fix it up, just exit the
 	 * current process and hope for the best.
 	 */
-	if (is_kernel) {
-		const char *name;
-		char buf[100];
-		if (fixup_exception(regs))  /* ILL_TRANS or UNALIGN_DATA */
+	if (!user_mode(regs)) {
+		if (fixup_exception(regs))  /* only UNALIGN_DATA in practice */
 			return;
-		if (fault_num >= 0 &&
-		    fault_num < ARRAY_SIZE(int_name) &&
-		    int_name[fault_num] != NULL)
-			name = int_name[fault_num];
-		else
-			name = "Unknown interrupt";
+		pr_alert("Kernel took bad trap %d at PC %#lx\n",
+		       fault_num, regs->pc);
 		if (fault_num == INT_GPV)
-			snprintf(buf, sizeof(buf), "; GPV_REASON %#lx", reason);
-#ifdef __tilegx__
-		else if (fault_num == INT_ILL_TRANS)
-			snprintf(buf, sizeof(buf), "; address %#lx", reason);
-#endif
-		else
-			buf[0] = '\0';
-		pr_alert("Kernel took bad trap %d (%s) at PC %#lx%s\n",
-			 fault_num, name, regs->pc, buf);
+			pr_alert("GPV_REASON is %#lx\n", reason);
 		show_regs(regs);
 		do_exit(SIGKILL);  /* FIXME: implement i386 die() */
+		return;
 	}
 
 	switch (fault_num) {
@@ -306,9 +230,10 @@ void __kprobes do_trap(struct pt_regs *regs, int fault_num,
 	case INT_ILL:
 		if (copy_from_user(&instr, (void __user *)regs->pc,
 				   sizeof(instr))) {
-			pr_err("Unreadable instruction for INT_ILL: %#lx\n",
-			       regs->pc);
+			pr_err("Unreadable instruction for INT_ILL:"
+			       " %#lx\n", regs->pc);
 			do_exit(SIGKILL);
+			return;
 		}
 		if (!special_ill(instr, &signo, &code)) {
 			signo = SIGILL;
@@ -373,13 +298,17 @@ void __kprobes do_trap(struct pt_regs *regs, int fault_num,
 		fill_ra_stack();
 
 		signo = SIGSEGV;
-		address = reason;
 		code = SEGV_MAPERR;
+		if (reason & SPR_ILL_TRANS_REASON__I_STREAM_VA_RMASK)
+			address = regs->pc;
+		else
+			address = 0;  /* FIXME: GX: single-step for address */
 		break;
 	}
 #endif
 	default:
 		panic("Unexpected do_trap interrupt number %d", fault_num);
+		return;
 	}
 
 	info.si_signo = signo;
@@ -391,24 +320,6 @@ void __kprobes do_trap(struct pt_regs *regs, int fault_num,
 		trace_unhandled_signal("trap", regs, address, signo);
 	force_sig_info(signo, &info, current);
 }
-
-void do_nmi(struct pt_regs *regs, int fault_num, unsigned long reason)
-{
-	nmi_enter();
-	switch (reason) {
-#ifdef arch_trigger_cpumask_backtrace
-	case TILE_NMI_DUMP_STACK:
-		nmi_cpu_backtrace(regs);
-		break;
-#endif
-	default:
-		panic("Unexpected do_nmi type %ld", reason);
-	}
-	nmi_exit();
-}
-
-/* Deprecated function currently only used here. */
-extern void _dump_stack(int dummy, ulong pc, ulong lr, ulong sp, ulong r52);
 
 void kernel_double_fault(int dummy, ulong pc, ulong lr, ulong sp, ulong r52)
 {

@@ -20,7 +20,6 @@
 #include <linux/spi/spi.h>
 #include <linux/bcd.h>
 #include <linux/slab.h>
-#include <linux/of.h>
 
 #define DS1390_REG_100THS		0x00
 #define DS1390_REG_SECONDS		0x01
@@ -41,30 +40,10 @@
 #define DS1390_REG_STATUS		0x0E
 #define DS1390_REG_TRICKLE		0x0F
 
-#define DS1390_TRICKLE_CHARGER_ENABLE	0xA0
-#define DS1390_TRICKLE_CHARGER_250_OHM	0x01
-#define DS1390_TRICKLE_CHARGER_2K_OHM	0x02
-#define DS1390_TRICKLE_CHARGER_4K_OHM	0x03
-#define DS1390_TRICKLE_CHARGER_NO_DIODE	0x04
-#define DS1390_TRICKLE_CHARGER_DIODE	0x08
-
 struct ds1390 {
 	struct rtc_device *rtc;
 	u8 txrx_buf[9];	/* cmd + 8 registers */
 };
-
-static void ds1390_set_reg(struct device *dev, unsigned char address,
-			   unsigned char data)
-{
-	struct spi_device *spi = to_spi_device(dev);
-	unsigned char buf[2];
-
-	/* MSB must be '1' to write */
-	buf[0] = address | 0x80;
-	buf[1] = data;
-
-	spi_write(spi, buf, 2);
-}
 
 static int ds1390_get_reg(struct device *dev, unsigned char address,
 				unsigned char *data)
@@ -83,48 +62,9 @@ static int ds1390_get_reg(struct device *dev, unsigned char address,
 	if (status != 0)
 		return status;
 
-	*data = chip->txrx_buf[0];
+	*data = chip->txrx_buf[1];
 
 	return 0;
-}
-
-static void ds1390_trickle_of_init(struct spi_device *spi)
-{
-	u32 ohms = 0;
-	u8 value;
-
-	if (of_property_read_u32(spi->dev.of_node, "trickle-resistor-ohms",
-				 &ohms))
-		goto out;
-
-	/* Enable charger */
-	value = DS1390_TRICKLE_CHARGER_ENABLE;
-	if (of_property_read_bool(spi->dev.of_node, "trickle-diode-disable"))
-		value |= DS1390_TRICKLE_CHARGER_NO_DIODE;
-	else
-		value |= DS1390_TRICKLE_CHARGER_DIODE;
-
-	/* Resistor select */
-	switch (ohms) {
-	case 250:
-		value |= DS1390_TRICKLE_CHARGER_250_OHM;
-		break;
-	case 2000:
-		value |= DS1390_TRICKLE_CHARGER_2K_OHM;
-		break;
-	case 4000:
-		value |= DS1390_TRICKLE_CHARGER_4K_OHM;
-		break;
-	default:
-		dev_warn(&spi->dev,
-			 "Unsupported ohm value %02ux in dt\n", ohms);
-		return;
-	}
-
-	ds1390_set_reg(&spi->dev, DS1390_REG_TRICKLE, value);
-
-out:
-	return;
 }
 
 static int ds1390_read_time(struct device *dev, struct rtc_time *dt)
@@ -181,7 +121,7 @@ static const struct rtc_class_ops ds1390_rtc_ops = {
 	.set_time	= ds1390_set_time,
 };
 
-static int ds1390_probe(struct spi_device *spi)
+static int __devinit ds1390_probe(struct spi_device *spi)
 {
 	unsigned char tmp;
 	struct ds1390 *chip;
@@ -191,36 +131,48 @@ static int ds1390_probe(struct spi_device *spi)
 	spi->bits_per_word = 8;
 	spi_setup(spi);
 
-	chip = devm_kzalloc(&spi->dev, sizeof(*chip), GFP_KERNEL);
-	if (!chip)
+	chip = kzalloc(sizeof *chip, GFP_KERNEL);
+	if (!chip) {
+		dev_err(&spi->dev, "unable to allocate device memory\n");
 		return -ENOMEM;
-
-	spi_set_drvdata(spi, chip);
+	}
+	dev_set_drvdata(&spi->dev, chip);
 
 	res = ds1390_get_reg(&spi->dev, DS1390_REG_SECONDS, &tmp);
 	if (res != 0) {
 		dev_err(&spi->dev, "unable to read device\n");
+		kfree(chip);
 		return res;
 	}
 
-	if (spi->dev.of_node)
-		ds1390_trickle_of_init(spi);
-
-	chip->rtc = devm_rtc_device_register(&spi->dev, "ds1390",
-					&ds1390_rtc_ops, THIS_MODULE);
+	chip->rtc = rtc_device_register("ds1390",
+				&spi->dev, &ds1390_rtc_ops, THIS_MODULE);
 	if (IS_ERR(chip->rtc)) {
 		dev_err(&spi->dev, "unable to register device\n");
 		res = PTR_ERR(chip->rtc);
+		kfree(chip);
 	}
 
 	return res;
 }
 
+static int __devexit ds1390_remove(struct spi_device *spi)
+{
+	struct ds1390 *chip = spi_get_drvdata(spi);
+
+	rtc_device_unregister(chip->rtc);
+	kfree(chip);
+
+	return 0;
+}
+
 static struct spi_driver ds1390_driver = {
 	.driver = {
 		.name	= "rtc-ds1390",
+		.owner	= THIS_MODULE,
 	},
 	.probe	= ds1390_probe,
+	.remove = __devexit_p(ds1390_remove),
 };
 
 module_spi_driver(ds1390_driver);

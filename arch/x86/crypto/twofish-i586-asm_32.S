@@ -20,7 +20,6 @@
 .file "twofish-i586-asm.S"
 .text
 
-#include <linux/linkage.h>
 #include <asm/asm-offsets.h>
 
 /* return address at 0 */
@@ -220,7 +219,11 @@
 	xor	%esi,		d ## D;\
 	ror	$1,		d ## D;
 
-ENTRY(twofish_enc_blk)
+.align 4
+.global twofish_enc_blk
+.global twofish_dec_blk
+
+twofish_enc_blk:
 	push	%ebp			/* save registers according to calling convention*/
 	push    %ebx
 	push    %esi
@@ -274,9 +277,8 @@ ENTRY(twofish_enc_blk)
 	pop	%ebp
 	mov	$1,	%eax
 	ret
-ENDPROC(twofish_enc_blk)
 
-ENTRY(twofish_dec_blk)
+twofish_dec_blk:
 	push	%ebp			/* save registers according to calling convention*/
 	push    %ebx
 	push    %esi
@@ -331,4 +333,3 @@ ENTRY(twofish_dec_blk)
 	pop	%ebp
 	mov	$1,	%eax
 	ret
-ENDPROC(twofish_dec_blk)

@@ -14,9 +14,12 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/dmi.h>
-#include <linux/jiffies.h>
-#include <linux/err.h>
-#include <linux/acpi.h>
+
+#include <acpi/acpi.h>
+#include <acpi/acpixf.h>
+#include <acpi/acpi_drivers.h>
+#include <acpi/acpi_bus.h>
+
 
 #define ATK_HID "ATK0110"
 
@@ -114,7 +117,7 @@ struct atk_data {
 	acpi_handle rtmp_handle;
 	acpi_handle rvlt_handle;
 	acpi_handle rfan_handle;
-	/* new interface */
+	/* new inteface */
 	acpi_handle enumerate_handle;
 	acpi_handle read_handle;
 	acpi_handle write_handle;
@@ -185,7 +188,7 @@ struct atk_acpi_input_buf {
 };
 
 static int atk_add(struct acpi_device *device);
-static int atk_remove(struct acpi_device *device);
+static int atk_remove(struct acpi_device *device, int type);
 static void atk_print_sensor(struct atk_data *data, union acpi_object *obj);
 static int atk_read_value(struct atk_sensor_data *sensor, u64 *value);
 static void atk_free_sensors(struct atk_data *data);
@@ -688,7 +691,7 @@ static int atk_debugfs_gitm_get(void *p, u64 *val)
 DEFINE_SIMPLE_ATTRIBUTE(atk_debugfs_gitm,
 			atk_debugfs_gitm_get,
 			NULL,
-			"0x%08llx\n");
+			"0x%08llx\n")
 
 static int atk_acpi_print(char *buf, size_t sz, union acpi_object *obj)
 {
@@ -959,6 +962,7 @@ static int atk_add_sensor(struct atk_data *data, union acpi_object *obj)
 
 	return 1;
 out:
+	kfree(sensor->acpi_name);
 	kfree(sensor);
 	return err;
 }
@@ -1411,7 +1415,7 @@ out:
 	return err;
 }
 
-static int atk_remove(struct acpi_device *device)
+static int atk_remove(struct acpi_device *device, int type)
 {
 	struct atk_data *data = device->driver_data;
 	dev_dbg(&device->dev, "removing...\n");

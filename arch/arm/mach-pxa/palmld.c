@@ -32,15 +32,15 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#include "pxa27x.h"
+#include <mach/pxa27x.h>
 #include <mach/audio.h>
 #include <mach/palmld.h>
-#include <linux/platform_data/mmc-pxamci.h>
-#include <linux/platform_data/video-pxafb.h>
-#include <linux/platform_data/irda-pxaficp.h>
-#include <linux/platform_data/keypad-pxa27x.h>
-#include <linux/platform_data/asoc-palm27x.h>
-#include "palm27x.h"
+#include <mach/mmc.h>
+#include <mach/pxafb.h>
+#include <mach/irda.h>
+#include <plat/pxa27x_keypad.h>
+#include <mach/palmasoc.h>
+#include <mach/palm27x.h>
 
 #include "generic.h"
 #include "devices.h"
@@ -173,7 +173,7 @@ static inline void palmld_nor_init(void) {}
  * GPIO keyboard
  ******************************************************************************/
 #if defined(CONFIG_KEYBOARD_PXA27x) || defined(CONFIG_KEYBOARD_PXA27x_MODULE)
-static const unsigned int palmld_matrix_keys[] = {
+static unsigned int palmld_matrix_keys[] = {
 	KEY(0, 1, KEY_F2),
 	KEY(0, 2, KEY_UP),
 
@@ -190,15 +190,11 @@ static const unsigned int palmld_matrix_keys[] = {
 	KEY(3, 2, KEY_LEFT),
 };
 
-static struct matrix_keymap_data palmld_matrix_keymap_data = {
-	.keymap			= palmld_matrix_keys,
-	.keymap_size		= ARRAY_SIZE(palmld_matrix_keys),
-};
-
 static struct pxa27x_keypad_platform_data palmld_keypad_platform_data = {
 	.matrix_key_rows	= 4,
 	.matrix_key_cols	= 3,
-	.matrix_keymap_data	= &palmld_matrix_keymap_data,
+	.matrix_key_map		= palmld_matrix_keys,
+	.matrix_key_map_size	= ARRAY_SIZE(palmld_matrix_keys),
 
 	.debounce_interval	= 30,
 };
@@ -351,7 +347,7 @@ MACHINE_START(PALMLD, "Palm LifeDrive")
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa27x_init_irq,
 	.handle_irq	= pxa27x_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= palmld_init,
 	.restart	= pxa_restart,
 MACHINE_END

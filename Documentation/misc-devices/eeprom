@@ -38,7 +38,7 @@ Supported chips:
 Authors:
         Frodo Looijaard <frodol@dds.nl>,
         Philip Edelbrock <phil@netroedge.com>,
-        Jean Delvare <jdelvare@suse.de>,
+        Jean Delvare <khali@linux-fr.org>,
         Greg Kroah-Hartman <greg@kroah.com>,
         IBM Corp.
 

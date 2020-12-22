@@ -1,7 +1,7 @@
 /*
  *  pc87427.c - hardware monitoring driver for the
  *              National Semiconductor PC87427 Super-I/O chip
- *  Copyright (C) 2006, 2008, 2010  Jean Delvare <jdelvare@suse.de>
+ *  Copyright (C) 2006, 2008, 2010  Jean Delvare <khali@linux-fr.org>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -627,9 +627,8 @@ static ssize_t set_pwm(struct device *dev, struct device_attribute
 	pc87427_readall_pwm(data, nr);
 	mode = data->pwm_enable[nr] & PWM_ENABLE_MODE_MASK;
 	if (mode != PWM_MODE_MANUAL && mode != PWM_MODE_OFF) {
-		dev_notice(dev,
-			   "Can't set PWM%d duty cycle while not in manual mode\n",
-			   nr + 1);
+		dev_notice(dev, "Can't set PWM%d duty cycle while not in "
+			   "manual mode\n", nr + 1);
 		mutex_unlock(&data->lock);
 		return -EPERM;
 	}
@@ -957,33 +956,49 @@ static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
  * Device detection, attach and detach
  */
 
-static int pc87427_request_regions(struct platform_device *pdev,
-					     int count)
+static void pc87427_release_regions(struct platform_device *pdev, int count)
 {
 	struct resource *res;
 	int i;
 
 	for (i = 0; i < count; i++) {
 		res = platform_get_resource(pdev, IORESOURCE_IO, i);
+		release_region(res->start, resource_size(res));
+	}
+}
+
+static int __devinit pc87427_request_regions(struct platform_device *pdev,
+					     int count)
+{
+	struct resource *res;
+	int i, err = 0;
+
+	for (i = 0; i < count; i++) {
+		res = platform_get_resource(pdev, IORESOURCE_IO, i);
 		if (!res) {
+			err = -ENOENT;
 			dev_err(&pdev->dev, "Missing resource #%d\n", i);
-			return -ENOENT;
+			break;
 		}
-		if (!devm_request_region(&pdev->dev, res->start,
-					 resource_size(res), DRVNAME)) {
+		if (!request_region(res->start, resource_size(res), DRVNAME)) {
+			err = -EBUSY;
 			dev_err(&pdev->dev,
 				"Failed to request region 0x%lx-0x%lx\n",
 				(unsigned long)res->start,
 				(unsigned long)res->end);
-			return -EBUSY;
+			break;
 		}
 	}
-	return 0;
+
+	if (err && i)
+		pc87427_release_regions(pdev, i);
+
+	return err;
 }
 
-static void pc87427_init_device(struct device *dev)
+static void __devinit pc87427_init_device(struct device *dev)
 {
-	struct pc87427_sio_data *sio_data = dev_get_platdata(dev);
+	struct pc87427_sio_data *sio_data = dev->platform_data;
 	struct pc87427_data *data = dev_get_drvdata(dev);
 	int i;
 	u8 reg;
@@ -1073,16 +1088,18 @@ static void pc87427_remove_files(struct device *dev)
 	}
 }
 
-static int pc87427_probe(struct platform_device *pdev)
+static int __devinit pc87427_probe(struct platform_device *pdev)
 {
-	struct pc87427_sio_data *sio_data = dev_get_platdata(&pdev->dev);
+	struct pc87427_sio_data *sio_data = pdev->dev.platform_data;
 	struct pc87427_data *data;
 	int i, err, res_count;
 
-	data = devm_kzalloc(&pdev->dev, sizeof(struct pc87427_data),
-			    GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
+	data = kzalloc(sizeof(struct pc87427_data), GFP_KERNEL);
+	if (!data) {
+		err = -ENOMEM;
+		pr_err("Out of memory\n");
+		goto exit;
+	}
 
 	data->address[0] = sio_data->address[0];
 	data->address[1] = sio_data->address[1];
@@ -1090,7 +1107,7 @@ static int pc87427_probe(struct platform_device *pdev)
 
 	err = pc87427_request_regions(pdev, res_count);
 	if (err)
-		return err;
+		goto exit_kfree;
 
 	mutex_init(&data->lock);
 	data->name = "pc87427";
@@ -1100,7 +1117,7 @@ static int pc87427_probe(struct platform_device *pdev)
 	/* Register sysfs hooks */
 	err = device_create_file(&pdev->dev, &dev_attr_name);
 	if (err)
-		return err;
+		goto exit_release_region;
 	for (i = 0; i < 8; i++) {
 		if (!(data->fan_enabled & (1 << i)))
 			continue;
@@ -1137,15 +1154,28 @@ static int pc87427_probe(struct platform_device *pdev)
 
 exit_remove_files:
 	pc87427_remove_files(&pdev->dev);
+exit_release_region:
+	pc87427_release_regions(pdev, res_count);
+exit_kfree:
+	platform_set_drvdata(pdev, NULL);
+	kfree(data);
+exit:
 	return err;
 }
 
-static int pc87427_remove(struct platform_device *pdev)
+static int __devexit pc87427_remove(struct platform_device *pdev)
 {
 	struct pc87427_data *data = platform_get_drvdata(pdev);
+	int res_count;
+
+	res_count = (data->address[0] != 0) + (data->address[1] != 0);
 
 	hwmon_device_unregister(data->hwmon_dev);
 	pc87427_remove_files(&pdev->dev);
+	platform_set_drvdata(pdev, NULL);
+	kfree(data);
+
+	pc87427_release_regions(pdev, res_count);
 
 	return 0;
 }
@@ -1153,10 +1183,11 @@ static int pc87427_remove(struct platform_device *pdev)
 
 static struct platform_driver pc87427_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= DRVNAME,
 	},
 	.probe		= pc87427_probe,
-	.remove		= pc87427_remove,
+	.remove		= __devexit_p(pc87427_remove),
 };
 
 static int __init pc87427_device_add(const struct pc87427_sio_data *sio_data)
@@ -1243,16 +1274,16 @@ static int __init pc87427_find(int sioaddr, struct pc87427_sio_data *sio_data)
 
 		val = superio_inb(sioaddr, SIOREG_MAP);
 		if (val & 0x01) {
-			pr_warn("Logical device 0x%02x is memory-mapped, can't use\n",
-				logdev[i]);
+			pr_warn("Logical device 0x%02x is memory-mapped, "
+				"can't use\n", logdev[i]);
 			continue;
 		}
 
 		val = (superio_inb(sioaddr, SIOREG_IOBASE) << 8)
 		    | superio_inb(sioaddr, SIOREG_IOBASE + 1);
 		if (!val) {
-			pr_info("I/O base address not set for logical device 0x%02x\n",
-				logdev[i]);
+			pr_info("I/O base address not set for logical device "
+				"0x%02x\n", logdev[i]);
 			continue;
 		}
 		sio_data->address[i] = val;
@@ -1344,7 +1375,7 @@ static void __exit pc87427_exit(void)
 	platform_driver_unregister(&pc87427_driver);
 }
 
-MODULE_AUTHOR("Jean Delvare <jdelvare@suse.de>");
+MODULE_AUTHOR("Jean Delvare <khali@linux-fr.org>");
 MODULE_DESCRIPTION("PC87427 hardware monitoring driver");
 MODULE_LICENSE("GPL");
 

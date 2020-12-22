@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,8 +47,7 @@
 
 #define _COMPONENT          ACPI_UTILITIES
 ACPI_MODULE_NAME("utresrc")
-
-#if defined(ACPI_DEBUG_OUTPUT) || defined (ACPI_DISASSEMBLER) || defined (ACPI_DEBUGGER)
+#if defined(ACPI_DISASSEMBLER) || defined (ACPI_DEBUGGER)
 /*
  * Strings used to decode resource descriptors.
  * Used by both the disassembler and the debugger resource dump routines
@@ -87,9 +86,7 @@ const char *acpi_gbl_io_decode[] = {
 
 const char *acpi_gbl_ll_decode[] = {
 	"ActiveHigh",
-	"ActiveLow",
-	"ActiveBoth",
-	"Reserved"
+	"ActiveLow"
 };
 
 const char *acpi_gbl_max_decode[] = {
@@ -130,9 +127,7 @@ const char *acpi_gbl_rw_decode[] = {
 
 const char *acpi_gbl_shr_decode[] = {
 	"Exclusive",
-	"Shared",
-	"ExclusiveAndWake",	/* ACPI 5.0 */
-	"SharedAndWake"		/* ACPI 5.0 */
+	"Shared"
 };
 
 const char *acpi_gbl_siz_decode[] = {
@@ -263,7 +258,7 @@ const char *acpi_gbl_bpb_decode[] = {
 /* UART serial bus stop bits */
 
 const char *acpi_gbl_sb_decode[] = {
-	"StopBitsZero",
+	"StopBitsNone",
 	"StopBitsOne",
 	"StopBitsOnePlusHalf",
 	"StopBitsTwo"
@@ -361,13 +356,13 @@ static const u8 acpi_gbl_resource_types[] = {
 	ACPI_SMALL_VARIABLE_LENGTH,	/* 06 start_dependent_functions */
 	ACPI_FIXED_LENGTH,	/* 07 end_dependent_functions */
 	ACPI_FIXED_LENGTH,	/* 08 IO */
-	ACPI_FIXED_LENGTH,	/* 09 fixed_IO */
-	ACPI_FIXED_LENGTH,	/* 0A fixed_DMA */
+	ACPI_FIXED_LENGTH,	/* 09 fixed_iO */
+	ACPI_FIXED_LENGTH,	/* 0_a fixed_dMA */
 	0,
 	0,
 	0,
-	ACPI_VARIABLE_LENGTH,	/* 0E vendor_short */
-	ACPI_FIXED_LENGTH,	/* 0F end_tag */
+	ACPI_VARIABLE_LENGTH,	/* 0_e vendor_short */
+	ACPI_FIXED_LENGTH,	/* 0_f end_tag */
 
 	/* Large descriptors */
 
@@ -380,24 +375,34 @@ static const u8 acpi_gbl_resource_types[] = {
 	ACPI_FIXED_LENGTH,	/* 06 memory32_fixed */
 	ACPI_VARIABLE_LENGTH,	/* 07 Dword* address */
 	ACPI_VARIABLE_LENGTH,	/* 08 Word* address */
-	ACPI_VARIABLE_LENGTH,	/* 09 extended_IRQ */
-	ACPI_VARIABLE_LENGTH,	/* 0A Qword* address */
-	ACPI_FIXED_LENGTH,	/* 0B Extended* address */
-	ACPI_VARIABLE_LENGTH,	/* 0C Gpio* */
+	ACPI_VARIABLE_LENGTH,	/* 09 extended_iRQ */
+	ACPI_VARIABLE_LENGTH,	/* 0_a Qword* address */
+	ACPI_FIXED_LENGTH,	/* 0_b Extended* address */
+	ACPI_VARIABLE_LENGTH,	/* 0_c Gpio* */
 	0,
-	ACPI_VARIABLE_LENGTH	/* 0E *serial_bus */
+	ACPI_VARIABLE_LENGTH	/* 0_e *serial_bus */
 };
+
+/*
+ * For the i_aSL compiler/disassembler, we don't want any error messages
+ * because the disassembler uses the resource validation code to determine
+ * if Buffer objects are actually Resource Templates.
+ */
+#ifdef ACPI_ASL_COMPILER
+#define ACPI_RESOURCE_ERROR(plist)
+#else
+#define ACPI_RESOURCE_ERROR(plist)  ACPI_ERROR(plist)
+#endif
 
 /*******************************************************************************
  *
  * FUNCTION:    acpi_ut_walk_aml_resources
  *
- * PARAMETERS:  walk_state          - Current walk info
- * PARAMETERS:  aml                 - Pointer to the raw AML resource template
- *              aml_length          - Length of the entire template
- *              user_function       - Called once for each descriptor found. If
- *                                    NULL, a pointer to the end_tag is returned
- *              context             - Passed to user_function
+ * PARAMETERS:  Aml             - Pointer to the raw AML resource template
+ *              aml_length      - Length of the entire template
+ *              user_function   - Called once for each descriptor found. If
+ *                                NULL, a pointer to the end_tag is returned
+ *              Context         - Passed to user_function
  *
  * RETURN:      Status
  *
@@ -407,8 +412,7 @@ static const u8 acpi_gbl_resource_types[] = {
  ******************************************************************************/
 
 acpi_status
-acpi_ut_walk_aml_resources(struct acpi_walk_state *walk_state,
-			   u8 *aml,
+acpi_ut_walk_aml_resources(u8 * aml,
 			   acpi_size aml_length,
 			   acpi_walk_aml_callback user_function, void **context)
 {
@@ -437,12 +441,11 @@ acpi_ut_walk_aml_resources(struct acpi_walk_state *walk_state,
 
 		/* Validate the Resource Type and Resource Length */
 
-		status =
-		    acpi_ut_validate_resource(walk_state, aml, &resource_index);
+		status = acpi_ut_validate_resource(aml, &resource_index);
 		if (ACPI_FAILURE(status)) {
 			/*
-			 * Exit on failure. Cannot continue because the descriptor
-			 * length may be bogus also.
+			 * Exit on failure. Cannot continue because the descriptor length
+			 * may be bogus also.
 			 */
 			return_ACPI_STATUS(status);
 		}
@@ -495,8 +498,7 @@ acpi_ut_walk_aml_resources(struct acpi_walk_state *walk_state,
 
 		/* Insert an end_tag anyway. acpi_rs_get_list_length always leaves room */
 
-		(void)acpi_ut_validate_resource(walk_state, end_tag,
-						&resource_index);
+		(void)acpi_ut_validate_resource(end_tag, &resource_index);
 		status =
 		    user_function(end_tag, 2, offset, resource_index, context);
 		if (ACPI_FAILURE(status)) {
@@ -511,10 +513,9 @@ acpi_ut_walk_aml_resources(struct acpi_walk_state *walk_state,
  *
  * FUNCTION:    acpi_ut_validate_resource
  *
- * PARAMETERS:  walk_state          - Current walk info
- *              aml                 - Pointer to the raw AML resource descriptor
- *              return_index        - Where the resource index is returned. NULL
- *                                    if the index is not required.
+ * PARAMETERS:  Aml             - Pointer to the raw AML resource descriptor
+ *              return_index    - Where the resource index is returned. NULL
+ *                                if the index is not required.
  *
  * RETURN:      Status, and optionally the Index into the global resource tables
  *
@@ -524,9 +525,7 @@ acpi_ut_walk_aml_resources(struct acpi_walk_state *walk_state,
  *
  ******************************************************************************/
 
-acpi_status
-acpi_ut_validate_resource(struct acpi_walk_state *walk_state,
-			  void *aml, u8 *return_index)
+acpi_status acpi_ut_validate_resource(void *aml, u8 * return_index)
 {
 	union aml_resource *aml_resource;
 	u8 resource_type;
@@ -568,8 +567,8 @@ acpi_ut_validate_resource(struct acpi_walk_state *walk_state,
 	}
 
 	/*
-	 * Check validity of the resource type, via acpi_gbl_resource_types.
-	 * Zero indicates an invalid resource.
+	 * Check validity of the resource type, via acpi_gbl_resource_types. Zero
+	 * indicates an invalid resource.
 	 */
 	if (!acpi_gbl_resource_types[resource_index]) {
 		goto invalid_resource;
@@ -628,12 +627,10 @@ acpi_ut_validate_resource(struct acpi_walk_state *walk_state,
 		if ((aml_resource->common_serial_bus.type == 0) ||
 		    (aml_resource->common_serial_bus.type >
 		     AML_RESOURCE_MAX_SERIALBUSTYPE)) {
-			if (walk_state) {
-				ACPI_ERROR((AE_INFO,
-					    "Invalid/unsupported SerialBus resource descriptor: BusType 0x%2.2X",
-					    aml_resource->common_serial_bus.
-					    type));
-			}
+			ACPI_RESOURCE_ERROR((AE_INFO,
+					     "Invalid/unsupported SerialBus resource descriptor: BusType 0x%2.2X",
+					     aml_resource->common_serial_bus.
+					     type));
 			return (AE_AML_INVALID_RESOURCE_TYPE);
 		}
 	}
@@ -646,24 +643,20 @@ acpi_ut_validate_resource(struct acpi_walk_state *walk_state,
 
 	return (AE_OK);
 
-invalid_resource:
+      invalid_resource:
 
-	if (walk_state) {
-		ACPI_ERROR((AE_INFO,
-			    "Invalid/unsupported resource descriptor: Type 0x%2.2X",
-			    resource_type));
-	}
+	ACPI_RESOURCE_ERROR((AE_INFO,
+			     "Invalid/unsupported resource descriptor: Type 0x%2.2X",
+			     resource_type));
 	return (AE_AML_INVALID_RESOURCE_TYPE);
 
-bad_resource_length:
+      bad_resource_length:
 
-	if (walk_state) {
-		ACPI_ERROR((AE_INFO,
-			    "Invalid resource descriptor length: Type "
-			    "0x%2.2X, Length 0x%4.4X, MinLength 0x%4.4X",
-			    resource_type, resource_length,
-			    minimum_resource_length));
-	}
+	ACPI_RESOURCE_ERROR((AE_INFO,
+			     "Invalid resource descriptor length: Type "
+			     "0x%2.2X, Length 0x%4.4X, MinLength 0x%4.4X",
+			     resource_type, resource_length,
+			     minimum_resource_length));
 	return (AE_AML_BAD_RESOURCE_LENGTH);
 }
 
@@ -671,7 +664,7 @@ bad_resource_length:
  *
  * FUNCTION:    acpi_ut_get_resource_type
  *
- * PARAMETERS:  aml             - Pointer to the raw AML resource descriptor
+ * PARAMETERS:  Aml             - Pointer to the raw AML resource descriptor
  *
  * RETURN:      The Resource Type with no extraneous bits (except the
  *              Large/Small descriptor bit -- this is left alone)
@@ -705,7 +698,7 @@ u8 acpi_ut_get_resource_type(void *aml)
  *
  * FUNCTION:    acpi_ut_get_resource_length
  *
- * PARAMETERS:  aml             - Pointer to the raw AML resource descriptor
+ * PARAMETERS:  Aml             - Pointer to the raw AML resource descriptor
  *
  * RETURN:      Byte Length
  *
@@ -745,7 +738,7 @@ u16 acpi_ut_get_resource_length(void *aml)
  *
  * FUNCTION:    acpi_ut_get_resource_header_length
  *
- * PARAMETERS:  aml             - Pointer to the raw AML resource descriptor
+ * PARAMETERS:  Aml             - Pointer to the raw AML resource descriptor
  *
  * RETURN:      Length of the AML header (depends on large/small descriptor)
  *
@@ -770,7 +763,7 @@ u8 acpi_ut_get_resource_header_length(void *aml)
  *
  * FUNCTION:    acpi_ut_get_descriptor_length
  *
- * PARAMETERS:  aml             - Pointer to the raw AML resource descriptor
+ * PARAMETERS:  Aml             - Pointer to the raw AML resource descriptor
  *
  * RETURN:      Byte length
  *
@@ -807,7 +800,8 @@ u32 acpi_ut_get_descriptor_length(void *aml)
  ******************************************************************************/
 
 acpi_status
-acpi_ut_get_resource_end_tag(union acpi_operand_object *obj_desc, u8 **end_tag)
+acpi_ut_get_resource_end_tag(union acpi_operand_object * obj_desc,
+			     u8 ** end_tag)
 {
 	acpi_status status;
 
@@ -822,7 +816,7 @@ acpi_ut_get_resource_end_tag(union acpi_operand_object *obj_desc, u8 **end_tag)
 
 	/* Validate the template and get a pointer to the end_tag */
 
-	status = acpi_ut_walk_aml_resources(NULL, obj_desc->buffer.pointer,
+	status = acpi_ut_walk_aml_resources(obj_desc->buffer.pointer,
 					    obj_desc->buffer.length, NULL,
 					    (void **)end_tag);
 

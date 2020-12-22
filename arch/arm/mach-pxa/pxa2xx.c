@@ -17,9 +17,9 @@
 
 #include <mach/hardware.h>
 #include <mach/pxa2xx-regs.h>
-#include "mfp-pxa25x.h"
+#include <mach/mfp-pxa25x.h>
 #include <mach/reset.h>
-#include <linux/platform_data/irda-pxaficp.h>
+#include <mach/irda.h>
 
 void pxa2xx_clear_reset_status(unsigned int mask)
 {

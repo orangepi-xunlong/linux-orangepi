@@ -11,6 +11,10 @@
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 /* Note: we assume there can only be one SIS5595 with one SMBus interface */
@@ -138,7 +142,7 @@ static void sis5595_write(u8 reg, u8 data)
 	outb(data, sis5595_base + SMB_DAT);
 }
 
-static int sis5595_setup(struct pci_dev *SIS5595_dev)
+static int __devinit sis5595_setup(struct pci_dev *SIS5595_dev)
 {
 	u16 a;
 	u8 val;
@@ -365,14 +369,14 @@ static struct i2c_adapter sis5595_adapter = {
 	.algo		= &smbus_algorithm,
 };
 
-static const struct pci_device_id sis5595_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(sis5595_ids) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_SI, PCI_DEVICE_ID_SI_503) }, 
 	{ 0, }
 };
 
 MODULE_DEVICE_TABLE (pci, sis5595_ids);
 
-static int sis5595_probe(struct pci_dev *dev, const struct pci_device_id *id)
+static int __devinit sis5595_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	int err;
 

@@ -1,7 +1,7 @@
 /*
  * Checksum functions for Hexagon
  *
- * Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -60,16 +60,18 @@ static inline unsigned short from64to16(u64 x)
  * computes the checksum of the TCP/UDP pseudo-header
  * returns a 16-bit checksum, already complemented.
  */
-__sum16 csum_tcpudp_magic(__be32 saddr, __be32 daddr,
-			  __u32 len, __u8 proto, __wsum sum)
+__sum16 csum_tcpudp_magic(unsigned long saddr, unsigned long daddr,
+			  unsigned short len, unsigned short proto,
+			  __wsum sum)
 {
 	return (__force __sum16)~from64to16(
 		(__force u64)saddr + (__force u64)daddr +
 		(__force u64)sum + ((len + proto) << 8));
 }
 
-__wsum csum_tcpudp_nofold(__be32 saddr, __be32 daddr,
-			  __u32 len, __u8 proto, __wsum sum)
+__wsum csum_tcpudp_nofold(unsigned long saddr, unsigned long daddr,
+			  unsigned short len, unsigned short proto,
+			  __wsum sum)
 {
 	u64 result;
 

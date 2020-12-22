@@ -18,11 +18,11 @@
 #include <linux/fsl_devices.h>
 #include <linux/of_platform.h>
 
-#include <linux/io.h>
+#include <asm/io.h>
 #include <asm/cpm2.h>
 #include <asm/udbg.h>
 #include <asm/machdep.h>
-#include <linux/time.h>
+#include <asm/time.h>
 #include <asm/mpc8260.h>
 #include <asm/prom.h>
 
@@ -36,7 +36,7 @@ static void __init km82xx_pic_init(void)
 	struct device_node *np = of_find_compatible_node(NULL, NULL,
 							"fsl,pq2-pic");
 	if (!np) {
-		pr_err("PIC init: can not find cpm-pic node\n");
+		printk(KERN_ERR "PIC init: can not find cpm-pic node\n");
 		return;
 	}
 
@@ -128,11 +128,6 @@ static __initdata struct cpm_pin km82xx_pins[] = {
 	{3, 23, CPM_PIN_OUTPUT | CPM_PIN_PRIMARY}, /* TXP */
 	{3, 24, CPM_PIN_OUTPUT | CPM_PIN_PRIMARY}, /* TXN */
 	{3, 25, CPM_PIN_INPUT  | CPM_PIN_PRIMARY}, /* RXD */
-
-	/* SPI */
-	{3, 16, CPM_PIN_INPUT | CPM_PIN_SECONDARY},/* SPI_MISO PD16 */
-	{3, 17, CPM_PIN_INPUT | CPM_PIN_SECONDARY},/* SPI_MOSI PD17 */
-	{3, 18, CPM_PIN_INPUT | CPM_PIN_SECONDARY},/* SPI_CLK PD18 */
 };
 
 static void __init init_ioports(void)
@@ -180,7 +175,7 @@ static void __init km82xx_setup_arch(void)
 		ppc_md.progress("km82xx_setup_arch(), finish", 0);
 }
 
-static const struct of_device_id of_bus_ids[] __initconst = {
+static  __initdata struct of_device_id of_bus_ids[] = {
 	{ .compatible = "simple-bus", },
 	{},
 };
@@ -198,7 +193,8 @@ machine_device_initcall(km82xx, declare_of_platform_devices);
  */
 static int __init km82xx_probe(void)
 {
-	return of_machine_is_compatible("keymile,km82xx");
+	unsigned long root = of_get_flat_dt_root();
+	return of_flat_dt_is_compatible(root, "keymile,km82xx");
 }
 
 define_machine(km82xx)

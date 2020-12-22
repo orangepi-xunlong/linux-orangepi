@@ -305,7 +305,7 @@ static int aac_sa_ioremap(struct aac_dev * dev, u32 size)
 		iounmap(dev->regs.sa);
 		return 0;
 	}
-	dev->base = dev->regs.sa = ioremap(dev->base_start, size);
+	dev->base = dev->regs.sa = ioremap(dev->scsi_host_ptr->base, size);
 	return (dev->base == NULL) ? -1 : 0;
 }
 
@@ -372,7 +372,6 @@ int aac_sa_init(struct aac_dev *dev)
 	dev->a_ops.adapter_sync_cmd = sa_sync_cmd;
 	dev->a_ops.adapter_check_health = aac_sa_check_health;
 	dev->a_ops.adapter_restart = aac_sa_restart_adapter;
-	dev->a_ops.adapter_start = aac_sa_start_adapter;
 	dev->a_ops.adapter_intr = aac_sa_intr;
 	dev->a_ops.adapter_deliver = aac_rx_deliver_producer;
 	dev->a_ops.adapter_ioremap = aac_sa_ioremap;
@@ -388,12 +387,13 @@ int aac_sa_init(struct aac_dev *dev)
 		goto error_irq;
 	dev->sync_mode = 0;	/* sync. mode not supported */
 	if (request_irq(dev->pdev->irq, dev->a_ops.adapter_intr,
-			IRQF_SHARED, "aacraid", (void *)dev) < 0) {
+			IRQF_SHARED|IRQF_DISABLED,
+			"aacraid", (void *)dev ) < 0) {
 		printk(KERN_WARNING "%s%d: Interrupt unavailable.\n",
 			name, instance);
 		goto error_iounmap;
 	}
-	dev->dbg_base = dev->base_start;
+	dev->dbg_base = dev->scsi_host_ptr->base;
 	dev->dbg_base_mapped = dev->base;
 	dev->dbg_size = dev->base_size;
 

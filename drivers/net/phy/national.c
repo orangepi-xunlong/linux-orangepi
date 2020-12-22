@@ -15,16 +15,12 @@
  *
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mii.h>
 #include <linux/ethtool.h>
 #include <linux/phy.h>
 #include <linux/netdevice.h>
-
-#define DEBUG
 
 /* DP83865 phy identifier values */
 #define DP83865_PHY_ID	0x20005c7a
@@ -116,8 +112,8 @@ static void ns_10_base_t_hdx_loopack(struct phy_device *phydev, int disable)
 		ns_exp_write(phydev, 0x1c0,
 			     ns_exp_read(phydev, 0x1c0) & 0xfffe);
 
-	pr_debug("10BASE-T HDX loopback %s\n",
-		 (ns_exp_read(phydev, 0x1c0) & 0x0001) ? "off" : "on");
+	printk(KERN_DEBUG "DP83865 PHY: 10BASE-T HDX loopback %s\n",
+	       (ns_exp_read(phydev, 0x1c0) & 0x0001) ? "off" : "on");
 }
 
 static int ns_config_init(struct phy_device *phydev)
@@ -129,7 +125,7 @@ static int ns_config_init(struct phy_device *phydev)
 	return ns_ack_interrupt(phydev);
 }
 
-static struct phy_driver dp83865_driver[] = { {
+static struct phy_driver dp83865_driver = {
 	.phy_id = DP83865_PHY_ID,
 	.phy_id_mask = 0xfffffff0,
 	.name = "NatSemi DP83865",
@@ -140,13 +136,25 @@ static struct phy_driver dp83865_driver[] = { {
 	.read_status = genphy_read_status,
 	.ack_interrupt = ns_ack_interrupt,
 	.config_intr = ns_config_intr,
-} };
+	.driver = {.owner = THIS_MODULE,}
+};
 
-module_phy_driver(dp83865_driver);
+static int __init ns_init(void)
+{
+	return phy_driver_register(&dp83865_driver);
+}
+
+static void __exit ns_exit(void)
+{
+	phy_driver_unregister(&dp83865_driver);
+}
 
 MODULE_DESCRIPTION("NatSemi PHY driver");
 MODULE_AUTHOR("Stuart Menefy");
 MODULE_LICENSE("GPL");
+
+module_init(ns_init);
+module_exit(ns_exit);
 
 static struct mdio_device_id __maybe_unused ns_tbl[] = {
 	{ DP83865_PHY_ID, 0xfffffff0 },

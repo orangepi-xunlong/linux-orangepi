@@ -9,7 +9,6 @@ struct ppi_info;
 struct bcap_route {
 	u32 input;
 	u32 output;
-	u32 ppi_control;
 };
 
 struct bfin_capture_config {
@@ -31,8 +30,8 @@ struct bfin_capture_config {
 	unsigned long ppi_control;
 	/* ppi interrupt mask */
 	u32 int_mask;
-	/* horizontal blanking pixels */
-	int blank_pixels;
+	/* horizontal blanking clocks */
+	int blank_clocks;
 };
 
 #endif

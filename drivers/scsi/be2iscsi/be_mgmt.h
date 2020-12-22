@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2005 - 2016 Broadcom
+ * Copyright (C) 2005 - 2011 Emulex
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -7,10 +7,10 @@
  * as published by the Free Software Foundation.  The full GNU General
  * Public License is included in this distribution in the file called COPYING.
  *
- * Written by: Jayamohan Kallickal (jayamohan.kallickal@broadcom.com)
+ * Written by: Jayamohan Kallickal (jayamohan.kallickal@emulex.com)
  *
  * Contact Information:
- * linux-drivers@broadcom.com
+ * linux-drivers@emulex.com
  *
  * Emulex
  * 3333 Susan Street
@@ -20,21 +20,10 @@
 #ifndef _BEISCSI_MGMT_
 #define _BEISCSI_MGMT_
 
-#include <scsi/scsi_bsg_iscsi.h>
+#include <linux/types.h>
+#include <linux/list.h>
 #include "be_iscsi.h"
 #include "be_main.h"
-
-#define IP_ACTION_ADD	0x01
-#define IP_ACTION_DEL	0x02
-
-#define IP_V6_LEN	16
-#define IP_V4_LEN	4
-
-/* UE Status and Mask register */
-#define PCICFG_UE_STATUS_LOW            0xA0
-#define PCICFG_UE_STATUS_HIGH           0xA4
-#define PCICFG_UE_STATUS_MASK_LOW       0xA8
-#define PCICFG_UE_STATUS_MASK_HI        0xAC
 
 /**
  * Pseudo amap definition in which each bit of the actual structure is defined
@@ -96,6 +85,7 @@ struct mcc_wrb {
 	struct mcc_wrb_payload payload;
 };
 
+int mgmt_epfw_cleanup(struct beiscsi_hba *phba, unsigned short chute);
 int mgmt_open_connection(struct beiscsi_hba *phba,
 			 struct sockaddr *dst_addr,
 			 struct beiscsi_endpoint *beiscsi_ep,
@@ -108,12 +98,7 @@ unsigned int mgmt_invalidate_icds(struct beiscsi_hba *phba,
 				struct invalidate_command_table *inv_tbl,
 				unsigned int num_invalidate, unsigned int cid,
 				struct be_dma_mem *nonemb_cmd);
-unsigned int mgmt_vendor_specific_fw_cmd(struct be_ctrl_info *ctrl,
-					 struct beiscsi_hba *phba,
-					 struct bsg_job *job,
-					 struct be_dma_mem *nonemb_cmd);
 
-#define BEISCSI_NO_RST_ISSUE	0
 struct iscsi_invalidate_connection_params_in {
 	struct be_cmd_req_hdr hdr;
 	unsigned int session_handle;
@@ -155,25 +140,25 @@ union invalidate_commands_params {
 } __packed;
 
 struct mgmt_hba_attributes {
-	u8 flashrom_version_string[BEISCSI_VER_STRLEN];
-	u8 manufacturer_name[BEISCSI_VER_STRLEN];
+	u8 flashrom_version_string[32];
+	u8 manufacturer_name[32];
 	u32 supported_modes;
 	u8 seeprom_version_lo;
 	u8 seeprom_version_hi;
 	u8 rsvd0[2];
 	u32 fw_cmd_data_struct_version;
 	u32 ep_fw_data_struct_version;
-	u8 ncsi_version_string[12];
+	u32 future_reserved[12];
 	u32 default_extended_timeout;
-	u8 controller_model_number[BEISCSI_VER_STRLEN];
+	u8 controller_model_number[32];
 	u8 controller_description[64];
-	u8 controller_serial_number[BEISCSI_VER_STRLEN];
-	u8 ip_version_string[BEISCSI_VER_STRLEN];
-	u8 firmware_version_string[BEISCSI_VER_STRLEN];
-	u8 bios_version_string[BEISCSI_VER_STRLEN];
-	u8 redboot_version_string[BEISCSI_VER_STRLEN];
-	u8 driver_version_string[BEISCSI_VER_STRLEN];
-	u8 fw_on_flash_version_string[BEISCSI_VER_STRLEN];
+	u8 controller_serial_number[32];
+	u8 ip_version_string[32];
+	u8 firmware_version_string[32];
+	u8 bios_version_string[32];
+	u8 redboot_version_string[32];
+	u8 driver_version_string[32];
+	u8 fw_on_flash_version_string[32];
 	u32 functionalities_supported;
 	u16 max_cdblength;
 	u8 asic_revision;
@@ -189,8 +174,7 @@ struct mgmt_hba_attributes {
 	u32 firmware_post_status;
 	u32 hba_mtu[8];
 	u8 iscsi_features;
-	u8 asic_generation;
-	u8 future_u8[2];
+	u8 future_u8[3];
 	u32 future_u32[3];
 } __packed;
 
@@ -207,7 +191,7 @@ struct mgmt_controller_attributes {
 	u64 unique_identifier;
 	u8 netfilters;
 	u8 rsvd0[3];
-	u32 future_u32[4];
+	u8 future_u32[4];
 } __packed;
 
 struct be_mgmt_controller_attributes {
@@ -218,13 +202,6 @@ struct be_mgmt_controller_attributes {
 struct be_mgmt_controller_attributes_resp {
 	struct be_cmd_resp_hdr hdr;
 	struct mgmt_controller_attributes params;
-} __packed;
-
-struct be_bsg_vendor_cmd {
-	struct be_cmd_req_hdr hdr;
-	unsigned short region;
-	unsigned short offset;
-	unsigned short sector;
 } __packed;
 
 /* configuration management */
@@ -242,14 +219,11 @@ struct be_bsg_vendor_cmd {
 				/* the CMD_RESPONSE_HEADER  */
 
 #define ISCSI_GET_PDU_TEMPLATE_ADDRESS(pc, pa) {\
-	pa->lo = phba->init_mem[ISCSI_MEM_GLOBAL_HEADER].mem_array[0].\
+    pa->lo = phba->init_mem[ISCSI_MEM_GLOBAL_HEADER].mem_array[0].\
 					bus_address.u.a32.address_lo;  \
-	pa->hi = phba->init_mem[ISCSI_MEM_GLOBAL_HEADER].mem_array[0].\
+    pa->hi = phba->init_mem[ISCSI_MEM_GLOBAL_HEADER].mem_array[0].\
 					bus_address.u.a32.address_hi;  \
 }
-
-#define BEISCSI_WRITE_FLASH 0
-#define BEISCSI_READ_FLASH 1
 
 struct beiscsi_endpoint {
 	struct beiscsi_hba *phba;
@@ -265,74 +239,13 @@ struct beiscsi_endpoint {
 	u16 cid_vld;
 };
 
+int mgmt_get_fw_config(struct be_ctrl_info *ctrl,
+				 struct beiscsi_hba *phba);
+
 unsigned int mgmt_invalidate_connection(struct beiscsi_hba *phba,
 					 struct beiscsi_endpoint *beiscsi_ep,
 					 unsigned short cid,
 					 unsigned short issue_reset,
 					 unsigned short savecfg_flag);
-
-int beiscsi_if_en_dhcp(struct beiscsi_hba *phba, u32 ip_type);
-
-int beiscsi_if_en_static(struct beiscsi_hba *phba, u32 ip_type,
-			 u8 *ip, u8 *subnet);
-
-int beiscsi_if_set_gw(struct beiscsi_hba *phba, u32 ip_type, u8 *gw);
-
-int beiscsi_if_get_gw(struct beiscsi_hba *phba, u32 ip_type,
-		      struct be_cmd_get_def_gateway_resp *resp);
-
-int mgmt_get_nic_conf(struct beiscsi_hba *phba,
-		      struct be_cmd_get_nic_conf_resp *mac);
-
-int beiscsi_if_get_info(struct beiscsi_hba *phba, int ip_type,
-			struct be_cmd_get_if_info_resp **if_info);
-
-unsigned int beiscsi_if_get_handle(struct beiscsi_hba *phba);
-
-int beiscsi_if_set_vlan(struct beiscsi_hba *phba, uint16_t vlan_tag);
-
-unsigned int beiscsi_boot_logout_sess(struct beiscsi_hba *phba);
-
-unsigned int beiscsi_boot_reopen_sess(struct beiscsi_hba *phba);
-
-unsigned int beiscsi_boot_get_sinfo(struct beiscsi_hba *phba);
-
-unsigned int __beiscsi_boot_get_shandle(struct beiscsi_hba *phba, int async);
-
-int beiscsi_boot_get_shandle(struct beiscsi_hba *phba, unsigned int *s_handle);
-
-ssize_t beiscsi_drvr_ver_disp(struct device *dev,
-			       struct device_attribute *attr, char *buf);
-
-ssize_t beiscsi_fw_ver_disp(struct device *dev,
-			     struct device_attribute *attr, char *buf);
-
-ssize_t beiscsi_active_session_disp(struct device *dev,
-				     struct device_attribute *attr, char *buf);
-
-ssize_t beiscsi_adap_family_disp(struct device *dev,
-				  struct device_attribute *attr, char *buf);
-
-
-ssize_t beiscsi_free_session_disp(struct device *dev,
-				   struct device_attribute *attr, char *buf);
-
-ssize_t beiscsi_phys_port_disp(struct device *dev,
-				struct device_attribute *attr, char *buf);
-
-void beiscsi_offload_cxn_v0(struct beiscsi_offload_params *params,
-			     struct wrb_handle *pwrb_handle,
-			     struct be_mem_descriptor *mem_descr,
-			     struct hwi_wrb_context *pwrb_context);
-
-void beiscsi_offload_cxn_v2(struct beiscsi_offload_params *params,
-			     struct wrb_handle *pwrb_handle,
-			     struct hwi_wrb_context *pwrb_context);
-
-int be_cmd_modify_eq_delay(struct beiscsi_hba *phba,
-			 struct be_set_eqd *, int num);
-
-int beiscsi_logout_fw_sess(struct beiscsi_hba *phba,
-			    uint32_t fw_sess_handle);
 
 #endif

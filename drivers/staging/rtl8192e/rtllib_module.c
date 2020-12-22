@@ -17,6 +17,10 @@
   FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
   more details.
 
+  You should have received a copy of the GNU General Public License along with
+  this program; if not, write to the Free Software Foundation, Inc., 59
+  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+
   The full GNU General Public License is included in this distribution in the
   file called LICENSE.
 
@@ -45,20 +49,34 @@
 #include <linux/etherdevice.h>
 #include <linux/uaccess.h>
 #include <net/arp.h>
+
 #include "rtllib.h"
+
 
 u32 rt_global_debug_component = COMP_ERR;
 EXPORT_SYMBOL(rt_global_debug_component);
+
+
+void _setup_timer(struct timer_list *ptimer, void *fun, unsigned long data)
+{
+	ptimer->function = fun;
+	ptimer->data = data;
+	init_timer(ptimer);
+}
 
 static inline int rtllib_networks_allocate(struct rtllib_device *ieee)
 {
 	if (ieee->networks)
 		return 0;
 
-	ieee->networks = kcalloc(MAX_NETWORK_COUNT,
-				 sizeof(struct rtllib_network), GFP_KERNEL);
-	if (!ieee->networks)
+	ieee->networks = kzalloc(
+		MAX_NETWORK_COUNT * sizeof(struct rtllib_network),
+		GFP_KERNEL);
+	if (!ieee->networks) {
+		printk(KERN_WARNING "%s: Out of memory allocating beacons\n",
+		       ieee->dev->name);
 		return -ENOMEM;
+	}
 
 	return 0;
 }
@@ -88,12 +106,12 @@ struct net_device *alloc_rtllib(int sizeof_priv)
 	struct net_device *dev;
 	int i, err;
 
-	pr_debug("rtllib: Initializing...\n");
+	RTLLIB_DEBUG_INFO("Initializing...\n");
 
 	dev = alloc_etherdev(sizeof(struct rtllib_device) + sizeof_priv);
 	if (!dev) {
-		pr_err("Unable to allocate net_device.\n");
-		return NULL;
+		RTLLIB_ERROR("Unable to network device.\n");
+		goto failed;
 	}
 	ieee = (struct rtllib_device *)netdev_priv_rsl(dev);
 	memset(ieee, 0, sizeof(struct rtllib_device)+sizeof_priv);
@@ -101,10 +119,12 @@ struct net_device *alloc_rtllib(int sizeof_priv)
 
 	err = rtllib_networks_allocate(ieee);
 	if (err) {
-		pr_err("Unable to allocate beacon storage: %d\n", err);
+		RTLLIB_ERROR("Unable to allocate beacon storage: %d\n",
+				err);
 		goto failed;
 	}
 	rtllib_networks_initialize(ieee);
+
 
 	/* Default fragmentation threshold is maximum payload size */
 	ieee->fts = DEFAULT_FTS;
@@ -120,12 +140,15 @@ struct net_device *alloc_rtllib(int sizeof_priv)
 
 	spin_lock_init(&ieee->lock);
 	spin_lock_init(&ieee->wpax_suitlist_lock);
+	spin_lock_init(&ieee->bw_spinlock);
 	spin_lock_init(&ieee->reorder_spinlock);
+	atomic_set(&(ieee->atm_chnlop), 0);
 	atomic_set(&(ieee->atm_swbw), 0);
 
 	/* SAM FIXME */
 	lib80211_crypt_info_init(&ieee->crypt_info, "RTLLIB", &ieee->lock);
 
+	ieee->bHalfNMode = false;
 	ieee->wpa_enabled = 0;
 	ieee->tkip_countermeasures = 0;
 	ieee->drop_unencrypted = 0;
@@ -138,9 +161,10 @@ struct net_device *alloc_rtllib(int sizeof_priv)
 	rtllib_softmac_init(ieee);
 
 	ieee->pHTInfo = kzalloc(sizeof(struct rt_hi_throughput), GFP_KERNEL);
-	if (!ieee->pHTInfo)
+	if (ieee->pHTInfo == NULL) {
+		RTLLIB_DEBUG(RTLLIB_DL_ERR, "can't alloc memory for HTInfo\n");
 		return NULL;
-
+	}
 	HTUpdateDefaultSetting(ieee);
 	HTInitializeHTInfo(ieee);
 	TSInitialize(ieee);
@@ -156,7 +180,8 @@ struct net_device *alloc_rtllib(int sizeof_priv)
 	return dev;
 
  failed:
-	free_netdev(dev);
+	if (dev)
+		free_netdev(dev);
 	return NULL;
 }
 EXPORT_SYMBOL(alloc_rtllib);
@@ -177,13 +202,77 @@ void free_rtllib(struct net_device *dev)
 }
 EXPORT_SYMBOL(free_rtllib);
 
-static int __init rtllib_init(void)
+u32 rtllib_debug_level;
+static int debug = \
+			    RTLLIB_DL_ERR
+			    ;
+static struct proc_dir_entry *rtllib_proc;
+
+static int show_debug_level(char *page, char **start, off_t offset,
+			    int count, int *eof, void *data)
 {
+	return snprintf(page, count, "0x%08X\n", rtllib_debug_level);
+}
+
+static int store_debug_level(struct file *file, const char __user *buffer,
+			     unsigned long count, void *data)
+{
+	char buf[] = "0x00000000";
+	unsigned long len = min((unsigned long)sizeof(buf) - 1, count);
+	char *p = (char *)buf;
+	unsigned long val;
+
+	if (copy_from_user(buf, buffer, len))
+		return count;
+	buf[len] = 0;
+	if (p[1] == 'x' || p[1] == 'X' || p[0] == 'x' || p[0] == 'X') {
+		p++;
+		if (p[0] == 'x' || p[0] == 'X')
+			p++;
+		val = simple_strtoul(p, &p, 16);
+	} else
+		val = simple_strtoul(p, &p, 10);
+	if (p == buf)
+		printk(KERN_INFO DRV_NAME
+		       ": %s is not in hex or decimal form.\n", buf);
+	else
+		rtllib_debug_level = val;
+
+	return strnlen(buf, count);
+}
+
+int __init rtllib_init(void)
+{
+	struct proc_dir_entry *e;
+
+	rtllib_debug_level = debug;
+	rtllib_proc = create_proc_entry(DRV_NAME, S_IFDIR, init_net.proc_net);
+	if (rtllib_proc == NULL) {
+		RTLLIB_ERROR("Unable to create " DRV_NAME
+				" proc directory\n");
+		return -EIO;
+	}
+	e = create_proc_entry("debug_level", S_IFREG | S_IRUGO | S_IWUSR,
+			      rtllib_proc);
+	if (!e) {
+		remove_proc_entry(DRV_NAME, init_net.proc_net);
+		rtllib_proc = NULL;
+		return -EIO;
+	}
+	e->read_proc = show_debug_level;
+	e->write_proc = store_debug_level;
+	e->data = NULL;
+
 	return 0;
 }
 
-static void __exit rtllib_exit(void)
+void __exit rtllib_exit(void)
 {
+	if (rtllib_proc) {
+		remove_proc_entry("debug_level", rtllib_proc);
+		remove_proc_entry(DRV_NAME, init_net.proc_net);
+		rtllib_proc = NULL;
+	}
 }
 
 module_init(rtllib_init);

@@ -13,6 +13,7 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/init.h>
 #include <linux/types.h>
 #include <linux/bitops.h>
 #include <linux/platform_device.h>
@@ -74,7 +75,7 @@ static void mpu_port(struct net_device *dev, int c, dma_addr_t x)
 }
 
 
-static int sni_82596_probe(struct platform_device *dev)
+static int __devinit sni_82596_probe(struct platform_device *dev)
 {
 	struct	net_device *netdevice;
 	struct i596_private *lp;
@@ -146,7 +147,7 @@ probe_failed_free_mpu:
 	return retval;
 }
 
-static int sni_82596_driver_remove(struct platform_device *pdev)
+static int __devexit sni_82596_driver_remove(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
 	struct i596_private *lp = netdev_priv(dev);
@@ -162,13 +163,14 @@ static int sni_82596_driver_remove(struct platform_device *pdev)
 
 static struct platform_driver sni_82596_driver = {
 	.probe	= sni_82596_probe,
-	.remove	= sni_82596_driver_remove,
+	.remove	= __devexit_p(sni_82596_driver_remove),
 	.driver	= {
 		.name	= sni_82596_string,
+		.owner	= THIS_MODULE,
 	},
 };
 
-static int sni_82596_init(void)
+static int __devinit sni_82596_init(void)
 {
 	printk(KERN_INFO SNI_82596_DRIVER_VERSION "\n");
 	return platform_driver_register(&sni_82596_driver);

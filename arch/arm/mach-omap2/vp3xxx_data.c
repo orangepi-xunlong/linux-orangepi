@@ -28,8 +28,8 @@
 #include "prm2xxx_3xxx.h"
 
 static const struct omap_vp_ops omap3_vp_ops = {
-	.check_txdone = omap_prm_vp_check_txdone,
-	.clear_txdone = omap_prm_vp_clear_txdone,
+	.check_txdone = omap3_prm_vp_check_txdone,
+	.clear_txdone = omap3_prm_vp_clear_txdone,
 };
 
 /*
@@ -76,14 +76,4 @@ struct omap_vp_instance omap3_vp_core = {
 	.vlimitto = OMAP3_PRM_VP2_VLIMITTO_OFFSET,
 	.vstatus = OMAP3_PRM_VP2_STATUS_OFFSET,
 	.voltage = OMAP3_PRM_VP2_VOLTAGE_OFFSET,
-};
-
-struct omap_vp_param omap3_mpu_vp_data = {
-	.vddmin			= OMAP3430_VP1_VLIMITTO_VDDMIN,
-	.vddmax			= OMAP3430_VP1_VLIMITTO_VDDMAX,
-};
-
-struct omap_vp_param omap3_core_vp_data = {
-	.vddmin			= OMAP3430_VP2_VLIMITTO_VDDMIN,
-	.vddmax			= OMAP3430_VP2_VLIMITTO_VDDMAX,
 };

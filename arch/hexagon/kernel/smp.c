@@ -1,7 +1,7 @@
 /*
  * SMP support for Hexagon
  *
- * Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -62,6 +62,10 @@ static inline void __handle_ipi(unsigned long *ops, struct ipi_data *ipi,
 
 		case IPI_CALL_FUNC:
 			generic_smp_call_function_interrupt();
+			break;
+
+		case IPI_CALL_FUNC_SINGLE:
+			generic_smp_call_function_single_interrupt();
 			break;
 
 		case IPI_CPU_STOP:
@@ -142,7 +146,7 @@ void __init smp_prepare_boot_cpu(void)
  * to point to current thread info
  */
 
-void start_secondary(void)
+void __cpuinit start_secondary(void)
 {
 	unsigned int cpu;
 	unsigned long thread_ptr;
@@ -176,11 +180,13 @@ void start_secondary(void)
 
 	notify_cpu_starting(cpu);
 
+	ipi_call_lock();
 	set_cpu_online(cpu, true);
+	ipi_call_unlock();
 
 	local_irq_enable();
 
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_idle();
 }
 
 
@@ -190,11 +196,18 @@ void start_secondary(void)
  * maintains control until "cpu_online(cpu)" is set.
  */
 
-int __cpu_up(unsigned int cpu, struct task_struct *idle)
+int __cpuinit __cpu_up(unsigned int cpu)
 {
-	struct thread_info *thread = (struct thread_info *)idle->stack;
+	struct task_struct *idle;
+	struct thread_info *thread;
 	void *stack_start;
 
+	/*  Create new init task for the CPU  */
+	idle = fork_idle(cpu);
+	if (IS_ERR(idle))
+		panic(KERN_ERR "fork_idle failed\n");
+
+	thread = (struct thread_info *)idle->stack;
 	thread->cpu = cpu;
 
 	/*  Boot to the head.  */
@@ -244,7 +257,7 @@ void smp_send_stop(void)
 
 void arch_send_call_function_single_ipi(int cpu)
 {
-	send_ipi(cpumask_of(cpu), IPI_CALL_FUNC);
+	send_ipi(cpumask_of(cpu), IPI_CALL_FUNC_SINGLE);
 }
 
 void arch_send_call_function_ipi_mask(const struct cpumask *mask)

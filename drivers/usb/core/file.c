@@ -8,7 +8,7 @@
  * (C) Copyright Deti Fliegl 1999 (new USB architecture)
  * (C) Copyright Randy Dunlap 2000
  * (C) Copyright David Brownell 2000-2001 (kernel hotplug, usb_device_id,
- *	more docs, etc)
+ 	more docs, etc)
  * (C) Copyright Yggdrasil Computing, Inc. 2000
  *     (usb_device_id matching changes by Adam J. Richter)
  * (C) Copyright Greg Kroah-Hartman 2002-2003
@@ -19,7 +19,6 @@
 #include <linux/errno.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>
-#include <linux/string.h>
 #include <linux/usb.h>
 
 #include "usb.h"
@@ -27,23 +26,30 @@
 #define MAX_USB_MINORS	256
 static const struct file_operations *usb_minors[MAX_USB_MINORS];
 static DECLARE_RWSEM(minor_rwsem);
-static DEFINE_MUTEX(init_usb_class_mutex);
 
-static int usb_open(struct inode *inode, struct file *file)
+static int usb_open(struct inode * inode, struct file * file)
 {
+	int minor = iminor(inode);
+	const struct file_operations *c;
 	int err = -ENODEV;
-	const struct file_operations *new_fops;
+	const struct file_operations *old_fops, *new_fops = NULL;
 
 	down_read(&minor_rwsem);
-	new_fops = fops_get(usb_minors[iminor(inode)]);
+	c = usb_minors[minor];
 
-	if (!new_fops)
+	if (!c || !(new_fops = fops_get(c)))
 		goto done;
 
-	replace_fops(file, new_fops);
+	old_fops = file->f_op;
+	file->f_op = new_fops;
 	/* Curiouser and curiouser... NULL ->open() as "no device" ? */
 	if (file->f_op->open)
-		err = file->f_op->open(inode, file);
+		err = file->f_op->open(inode,file);
+	if (err) {
+		fops_put(file->f_op);
+		file->f_op = fops_get(old_fops);
+	}
+	fops_put(old_fops);
  done:
 	up_read(&minor_rwsem);
 	return err;
@@ -86,9 +92,9 @@ static int init_usb_class(void)
 	}
 
 	kref_init(&usb_class->kref);
-	usb_class->class = class_create(THIS_MODULE, "usbmisc");
+	usb_class->class = class_create(THIS_MODULE, "usb");
 	if (IS_ERR(usb_class->class)) {
-		result = PTR_ERR(usb_class->class);
+		result = IS_ERR(usb_class->class);
 		printk(KERN_ERR "class_create failed for usb devices\n");
 		kfree(usb_class);
 		usb_class = NULL;
@@ -110,9 +116,8 @@ static void release_usb_class(struct kref *kref)
 
 static void destroy_usb_class(void)
 {
-	mutex_lock(&init_usb_class_mutex);
-	kref_put(&usb_class->kref, release_usb_class);
-	mutex_unlock(&init_usb_class_mutex);
+	if (usb_class)
+		kref_put(&usb_class->kref, release_usb_class);
 }
 
 int usb_major_init(void)
@@ -148,7 +153,7 @@ void usb_major_cleanup(void)
  * usb_deregister_dev() must be called when the driver is done with
  * the minor numbers given out by this function.
  *
- * Return: -EINVAL if something bad happens with trying to register a
+ * Returns -EINVAL if something bad happens with trying to register a
  * device, and 0 on success.
  */
 int usb_register_dev(struct usb_interface *intf,
@@ -158,9 +163,10 @@ int usb_register_dev(struct usb_interface *intf,
 	int minor_base = class_driver->minor_base;
 	int minor;
 	char name[20];
+	char *temp;
 
 #ifdef CONFIG_USB_DYNAMIC_MINORS
-	/*
+	/* 
 	 * We don't care what the device tries to start at, we want to start
 	 * at zero to pack the devices into the smallest available space with
 	 * no holes in the minor range.
@@ -173,14 +179,11 @@ int usb_register_dev(struct usb_interface *intf,
 	if (intf->minor >= 0)
 		return -EADDRINUSE;
 
-	mutex_lock(&init_usb_class_mutex);
 	retval = init_usb_class();
-	mutex_unlock(&init_usb_class_mutex);
-
 	if (retval)
 		return retval;
 
-	dev_dbg(&intf->dev, "looking for a minor, starting at %d\n", minor_base);
+	dev_dbg(&intf->dev, "looking for a minor, starting at %d", minor_base);
 
 	down_write(&minor_rwsem);
 	for (minor = minor_base; minor < MAX_USB_MINORS; ++minor) {
@@ -197,9 +200,14 @@ int usb_register_dev(struct usb_interface *intf,
 
 	/* create a usb class device for this usb interface */
 	snprintf(name, sizeof(name), class_driver->name, minor - minor_base);
+	temp = strrchr(name, '/');
+	if (temp && (temp[1] != '\0'))
+		++temp;
+	else
+		temp = name;
 	intf->usb_dev = device_create(usb_class->class, &intf->dev,
 				      MKDEV(USB_MAJOR, minor), class_driver,
-				      "%s", kbasename(name));
+				      "%s", temp);
 	if (IS_ERR(intf->usb_dev)) {
 		down_write(&minor_rwsem);
 		usb_minors[minor] = NULL;
@@ -231,7 +239,7 @@ void usb_deregister_dev(struct usb_interface *intf,
 	if (intf->minor == -1)
 		return;
 
-	dev_dbg(&intf->dev, "removing %d minor\n", intf->minor);
+	dbg ("removing %d minor", intf->minor);
 
 	down_write(&minor_rwsem);
 	usb_minors[intf->minor] = NULL;

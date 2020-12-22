@@ -52,6 +52,7 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/serio.h>
+#include <linux/init.h>
 
 #define DRIVER_DESC	"Handykey Twiddler keyboard as a joystick driver"
 
@@ -256,4 +257,19 @@ static struct serio_driver twidjoy_drv = {
 	.disconnect	= twidjoy_disconnect,
 };
 
-module_serio_driver(twidjoy_drv);
+/*
+ * The functions for inserting/removing us as a module.
+ */
+
+static int __init twidjoy_init(void)
+{
+	return serio_register_driver(&twidjoy_drv);
+}
+
+static void __exit twidjoy_exit(void)
+{
+	serio_unregister_driver(&twidjoy_drv);
+}
+
+module_init(twidjoy_init);
+module_exit(twidjoy_exit);

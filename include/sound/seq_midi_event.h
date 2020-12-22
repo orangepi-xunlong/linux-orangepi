@@ -22,7 +22,7 @@
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
-#include <sound/asequencer.h>
+#include "asequencer.h"
 
 #define MAX_MIDI_EVENT_BUF	256
 

@@ -21,10 +21,8 @@
 #include <linux/device.h>
 #include <linux/types.h>
 
-#define CPUFREQ_DBG(format, args...)	\
-	pr_debug("[cpu_freq] DBG: "format, ##args)
-#define CPUFREQ_ERR(format, args...)	\
-	pr_err("[cpu_freq] ERR: "format, ##args)
+#define CPUFREQ_DBG(format,args...)   pr_debug("[cpu_freq] DBG: "format,##args)
+#define CPUFREQ_ERR(format,args...)   printk(KERN_ERR "[cpu_freq] ERR: "format,##args)
 
 /* sun9i platform support two clusters,
  * cluster0 : cortex-a7,
@@ -38,7 +36,7 @@
 #ifdef CONFIG_ARCH_SUN9IW1P1
 #define SUNXI_CPUFREQ_C0_CPUVDD        "axp22_dcdc3"
 #define SUNXI_CPUFREQ_C1_CPUVDD        "axp15_dcdc1"
-#elif defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1) || defined(CONFIG_ARCH_SUN8IW17P1)
+#elif defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW9P1)
 #define SUNXI_CPUFREQ_C0_CPUVDD        "vdd-cpua"
 #define SUNXI_CPUFREQ_C1_CPUVDD        "vdd-cpub"
 #endif
@@ -56,10 +54,10 @@
 #ifdef CONFIG_BL_SWITCHER
 extern bool bL_switching_enabled;
 #define is_bL_switching_enabled()		bL_switching_enabled
-#define set_switching_enabled(x)		(bL_switching_enabled = (x))
+#define set_switching_enabled(x) 		(bL_switching_enabled = (x))
 #else
 #define is_bL_switching_enabled()		false
-#define set_switching_enabled(x)		do { } while (0)
+#define set_switching_enabled(x) 		do { } while (0)
 #endif
 
 static inline int cpu_to_cluster(int cpu)

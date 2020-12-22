@@ -31,15 +31,13 @@ static inline void prom_putchar_wait(void __iomem *reg, u32 mask, u32 val)
 	} while (1);
 }
 
-#define BOTH_EMPTY (UART_LSR_TEMT | UART_LSR_THRE)
-
 static void prom_putchar_ar71xx(unsigned char ch)
 {
 	void __iomem *base = (void __iomem *)(KSEG1ADDR(AR71XX_UART_BASE));
 
-	prom_putchar_wait(base + UART_LSR * 4, BOTH_EMPTY, BOTH_EMPTY);
+	prom_putchar_wait(base + UART_LSR * 4, UART_LSR_THRE, UART_LSR_THRE);
 	__raw_writel(ch, base + UART_TX * 4);
-	prom_putchar_wait(base + UART_LSR * 4, BOTH_EMPTY, BOTH_EMPTY);
+	prom_putchar_wait(base + UART_LSR * 4, UART_LSR_THRE, UART_LSR_THRE);
 }
 
 static void prom_putchar_ar933x(unsigned char ch)
@@ -73,11 +71,6 @@ static void prom_putchar_init(void)
 	case REV_ID_MAJOR_AR7241:
 	case REV_ID_MAJOR_AR7242:
 	case REV_ID_MAJOR_AR913X:
-	case REV_ID_MAJOR_AR9341:
-	case REV_ID_MAJOR_AR9342:
-	case REV_ID_MAJOR_AR9344:
-	case REV_ID_MAJOR_QCA9556:
-	case REV_ID_MAJOR_QCA9558:
 		_prom_putchar = prom_putchar_ar71xx;
 		break;
 

@@ -20,7 +20,6 @@
 
 /* To configure the PRUSS INTC base offset for UIO driver */
 struct uio_pruss_pdata {
-	u32		pintc_base;
-	struct gen_pool *sram_pool;
+	u32	pintc_base;
 };
 #endif /* _UIO_PRUSS_H_ */

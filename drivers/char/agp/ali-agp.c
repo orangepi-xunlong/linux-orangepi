@@ -85,8 +85,8 @@ static int ali_configure(void)
 	pci_write_config_dword(agp_bridge->dev, ALI_TLBCTRL, ((temp & 0xffffff00) | 0x00000010));
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 #if 0
 	if (agp_bridge->type == ALI_M1541) {
@@ -249,7 +249,7 @@ static const struct agp_bridge_driver ali_m1541_bridge = {
 };
 
 
-static struct agp_device_ids ali_agp_device_ids[] =
+static struct agp_device_ids ali_agp_device_ids[] __devinitdata =
 {
 	{
 		.device_id	= PCI_DEVICE_ID_AL_M1541,
@@ -299,7 +299,8 @@ static struct agp_device_ids ali_agp_device_ids[] =
 	{ }, /* dummy final entry, always present */
 };
 
-static int agp_ali_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit agp_ali_probe(struct pci_dev *pdev,
+				const struct pci_device_id *ent)
 {
 	struct agp_device_ids *devs = ali_agp_device_ids;
 	struct agp_bridge_data *bridge;
@@ -373,7 +374,7 @@ found:
 	return agp_add_bridge(bridge);
 }
 
-static void agp_ali_remove(struct pci_dev *pdev)
+static void __devexit agp_ali_remove(struct pci_dev *pdev)
 {
 	struct agp_bridge_data *bridge = pci_get_drvdata(pdev);
 
@@ -417,6 +418,6 @@ static void __exit agp_ali_cleanup(void)
 module_init(agp_ali_init);
 module_exit(agp_ali_cleanup);
 
-MODULE_AUTHOR("Dave Jones");
+MODULE_AUTHOR("Dave Jones <davej@redhat.com>");
 MODULE_LICENSE("GPL and additional rights");
 

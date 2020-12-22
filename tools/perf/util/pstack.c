@@ -6,7 +6,6 @@
 
 #include "util.h"
 #include "pstack.h"
-#include "debug.h"
 #include <linux/kernel.h>
 #include <stdlib.h>
 
@@ -18,66 +17,59 @@ struct pstack {
 
 struct pstack *pstack__new(unsigned short max_nr_entries)
 {
-	struct pstack *pstack = zalloc((sizeof(*pstack) +
-				       max_nr_entries * sizeof(void *)));
-	if (pstack != NULL)
-		pstack->max_nr_entries = max_nr_entries;
-	return pstack;
+	struct pstack *self = zalloc((sizeof(*self) +
+				     max_nr_entries * sizeof(void *)));
+	if (self != NULL)
+		self->max_nr_entries = max_nr_entries;
+	return self;
 }
 
-void pstack__delete(struct pstack *pstack)
+void pstack__delete(struct pstack *self)
 {
-	free(pstack);
+	free(self);
 }
 
-bool pstack__empty(const struct pstack *pstack)
+bool pstack__empty(const struct pstack *self)
 {
-	return pstack->top == 0;
+	return self->top == 0;
 }
 
-void pstack__remove(struct pstack *pstack, void *key)
+void pstack__remove(struct pstack *self, void *key)
 {
-	unsigned short i = pstack->top, last_index = pstack->top - 1;
+	unsigned short i = self->top, last_index = self->top - 1;
 
 	while (i-- != 0) {
-		if (pstack->entries[i] == key) {
+		if (self->entries[i] == key) {
 			if (i < last_index)
-				memmove(pstack->entries + i,
-					pstack->entries + i + 1,
+				memmove(self->entries + i,
+					self->entries + i + 1,
 					(last_index - i) * sizeof(void *));
-			--pstack->top;
+			--self->top;
 			return;
 		}
 	}
 	pr_err("%s: %p not on the pstack!\n", __func__, key);
 }
 
-void pstack__push(struct pstack *pstack, void *key)
+void pstack__push(struct pstack *self, void *key)
 {
-	if (pstack->top == pstack->max_nr_entries) {
-		pr_err("%s: top=%d, overflow!\n", __func__, pstack->top);
+	if (self->top == self->max_nr_entries) {
+		pr_err("%s: top=%d, overflow!\n", __func__, self->top);
 		return;
 	}
-	pstack->entries[pstack->top++] = key;
+	self->entries[self->top++] = key;
 }
 
-void *pstack__pop(struct pstack *pstack)
+void *pstack__pop(struct pstack *self)
 {
 	void *ret;
 
-	if (pstack->top == 0) {
+	if (self->top == 0) {
 		pr_err("%s: underflow!\n", __func__);
 		return NULL;
 	}
 
-	ret = pstack->entries[--pstack->top];
-	pstack->entries[pstack->top] = NULL;
+	ret = self->entries[--self->top];
+	self->entries[self->top] = NULL;
 	return ret;
-}
-
-void *pstack__peek(struct pstack *pstack)
-{
-	if (pstack->top == 0)
-		return NULL;
-	return pstack->entries[pstack->top - 1];
 }

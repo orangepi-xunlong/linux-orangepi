@@ -1,3 +1,4 @@
+
 /******************************************************************************
  *
  * Module Name: exstoren - AML Interpreter object store support,
@@ -6,7 +7,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -60,7 +61,7 @@ ACPI_MODULE_NAME("exstoren")
  *
  * RETURN:      Status, resolved object in source_desc_ptr.
  *
- * DESCRIPTION: Resolve an object. If the object is a reference, dereference
+ * DESCRIPTION: Resolve an object.  If the object is a reference, dereference
  *              it and return the actual object in the source_desc_ptr.
  *
  ******************************************************************************/
@@ -85,12 +86,14 @@ acpi_ex_resolve_object(union acpi_operand_object **source_desc_ptr,
 		 * These cases all require only Integers or values that
 		 * can be converted to Integers (Strings or Buffers)
 		 */
+
 	case ACPI_TYPE_INTEGER:
 	case ACPI_TYPE_STRING:
 	case ACPI_TYPE_BUFFER:
+
 		/*
 		 * Stores into a Field/Region or into a Integer/Buffer/String
-		 * are all essentially the same. This case handles the
+		 * are all essentially the same.  This case handles the
 		 * "interchangeable" types Integer, String, and Buffer.
 		 */
 		if (source_desc->common.type == ACPI_TYPE_LOCAL_REFERENCE) {
@@ -122,16 +125,16 @@ acpi_ex_resolve_object(union acpi_operand_object **source_desc_ptr,
 			/* Conversion successful but still not a valid type */
 
 			ACPI_ERROR((AE_INFO,
-				    "Cannot assign type [%s] to [%s] (must be type Int/Str/Buf)",
+				    "Cannot assign type %s to %s (must be type Int/Str/Buf)",
 				    acpi_ut_get_object_type_name(source_desc),
 				    acpi_ut_get_type_name(target_type)));
-
 			status = AE_AML_OPERAND_TYPE;
 		}
 		break;
 
 	case ACPI_TYPE_LOCAL_ALIAS:
 	case ACPI_TYPE_LOCAL_METHOD_ALIAS:
+
 		/*
 		 * All aliases should have been resolved earlier, during the
 		 * operand resolution phase.
@@ -142,6 +145,7 @@ acpi_ex_resolve_object(union acpi_operand_object **source_desc_ptr,
 
 	case ACPI_TYPE_PACKAGE:
 	default:
+
 		/*
 		 * All other types than Alias and the various Fields come here,
 		 * including the untyped case - ACPI_TYPE_ANY.
@@ -163,7 +167,7 @@ acpi_ex_resolve_object(union acpi_operand_object **source_desc_ptr,
  *
  * RETURN:      Status
  *
- * DESCRIPTION: "Store" an object to another object. This may include
+ * DESCRIPTION: "Store" an object to another object.  This may include
  *              converting the source type to the target type (implicit
  *              conversion), and a copy of the value of the source to
  *              the target.
@@ -174,14 +178,14 @@ acpi_ex_resolve_object(union acpi_operand_object **source_desc_ptr,
  *              with the input value.
  *
  *              When storing into an object the data is converted to the
- *              target object type then stored in the object. This means
+ *              target object type then stored in the object.  This means
  *              that the target object type (for an initialized target) will
  *              not be changed by a store operation.
  *
  *              This module allows destination types of Number, String,
  *              Buffer, and Package.
  *
- *              Assumes parameters are already validated. NOTE: source_desc
+ *              Assumes parameters are already validated.  NOTE: source_desc
  *              resolution (from a reference object) must be performed by
  *              the caller if necessary.
  *
@@ -250,7 +254,7 @@ acpi_ex_store_object_to_object(union acpi_operand_object *source_desc,
 
 		/* Truncate value if we are executing from a 32-bit ACPI table */
 
-		(void)acpi_ex_truncate_for32bit_table(dest_desc);
+		acpi_ex_truncate_for32bit_table(dest_desc);
 		break;
 
 	case ACPI_TYPE_STRING:
@@ -276,7 +280,7 @@ acpi_ex_store_object_to_object(union acpi_operand_object *source_desc,
 		/*
 		 * All other types come here.
 		 */
-		ACPI_WARNING((AE_INFO, "Store into type [%s] not implemented",
+		ACPI_WARNING((AE_INFO, "Store into type %s not implemented",
 			      acpi_ut_get_object_type_name(dest_desc)));
 
 		status = AE_NOT_IMPLEMENTED;

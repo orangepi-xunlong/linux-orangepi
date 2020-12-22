@@ -1,5 +1,5 @@
 #
-# Makefile to build the iSCSI driver for Emulex OneConnect.
+# Makefile to build the iSCSI driver for ServerEngine's BladeEngine.
 #
 #
 

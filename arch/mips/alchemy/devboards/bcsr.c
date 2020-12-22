@@ -8,7 +8,6 @@
  */
 
 #include <linux/interrupt.h>
-#include <linux/irqchip/chained_irq.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/irq.h>
@@ -21,7 +20,7 @@ static struct bcsr_reg {
 	spinlock_t lock;
 } bcsr_regs[BCSR_CNT];
 
-static void __iomem *bcsr_virt; /* KSEG1 addr of BCSR base */
+static void __iomem *bcsr_virt;	/* KSEG1 addr of BCSR base */
 static int bcsr_csc_base;	/* linux-irq of first cascaded irq */
 
 void __init bcsr_init(unsigned long bcsr1_phys, unsigned long bcsr2_phys)
@@ -86,14 +85,16 @@ EXPORT_SYMBOL_GPL(bcsr_mod);
 /*
  * DB1200/PB1200 CPLD IRQ muxer
  */
-static void bcsr_csc_handler(struct irq_desc *d)
+static void bcsr_csc_handler(unsigned int irq, struct irq_desc *d)
 {
 	unsigned short bisr = __raw_readw(bcsr_virt + BCSR_REG_INTSTAT);
-	struct irq_chip *chip = irq_desc_get_chip(d);
 
-	chained_irq_enter(chip, d);
-	generic_handle_irq(bcsr_csc_base + __ffs(bisr));
-	chained_irq_exit(chip, d);
+	disable_irq_nosync(irq);
+
+	for ( ; bisr; bisr &= bisr - 1)
+		generic_handle_irq(bcsr_csc_base + __ffs(bisr));
+
+	enable_irq(irq);
 }
 
 static void bcsr_irq_mask(struct irq_data *d)

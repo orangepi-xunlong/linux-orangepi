@@ -102,7 +102,6 @@ out:
 }
 #endif
 
-#ifndef ip_fast_csum
 /*
  *	This is a version of ip_compute_csum() optimized for IP headers,
  *	which always checksum on 4 octet boundaries.
@@ -112,7 +111,6 @@ __sum16 ip_fast_csum(const void *iph, unsigned int ihl)
 	return (__force __sum16)~do_csum(iph, ihl*4);
 }
 EXPORT_SYMBOL(ip_fast_csum);
-#endif
 
 /*
  * computes the checksum of a memory block at buff, length len,
@@ -191,7 +189,9 @@ static inline u32 from64to32(u64 x)
 }
 
 __wsum csum_tcpudp_nofold(__be32 saddr, __be32 daddr,
-			  __u32 len, __u8 proto, __wsum sum)
+			unsigned short len,
+			unsigned short proto,
+			__wsum sum)
 {
 	unsigned long long s = (__force u32)sum;
 

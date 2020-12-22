@@ -23,7 +23,6 @@ enum {
 	PSM_CONFIG_REG3  = 0x164,
 	PSM_CONFIG_REG4  = 0x168,
 
-	PCI_LDO_CTRL    = 0xbc,
 };
 
 /* Yukon-2 */
@@ -587,10 +586,6 @@ enum yukon_supr_rev {
 	CHIP_REV_YU_SU_B1    = 3,
 };
 
-enum yukon_prm_rev {
-	CHIP_REV_YU_PRM_Z1   = 1,
-	CHIP_REV_YU_PRM_A0   = 2,
-};
 
 /*	B2_Y2_CLK_GATE	 8 bit	Clock Gating (Yukon-2 only) */
 enum {

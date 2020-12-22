@@ -23,7 +23,6 @@
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/serial_core.h>
-#include <linux/serial_s3c.h>
 #include <linux/serial.h>
 #include <linux/io.h>
 #include <linux/mtd/mtd.h>
@@ -32,27 +31,27 @@
 #include <linux/mtd/partitions.h>
 
 #include <asm/mach/arch.h>
-#include <asm/mach/irq.h>
 #include <asm/mach/map.h>
+#include <asm/mach/irq.h>
 
-#include <linux/platform_data/mtd-nand-s3c2410.h>
-
+#include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/mach-types.h>
 
-#include <mach/fb.h>
-#include <mach/hardware.h>
+#include <plat/regs-serial.h>
 #include <mach/regs-gpio.h>
 #include <mach/regs-lcd.h>
-#include <mach/gpio-samsung.h>
 
-#include <plat/cpu.h>
+#include <mach/h1940.h>
+#include <plat/nand.h>
+#include <mach/fb.h>
+
+#include <plat/clock.h>
 #include <plat/devs.h>
+#include <plat/cpu.h>
 #include <plat/pm.h>
-#include <plat/samsung-time.h>
 
 #include "common.h"
-#include "h1940.h"
 
 static struct map_desc rx3715_iodesc[] __initdata = {
 	/* dump ISA space somewhere unused */
@@ -178,14 +177,8 @@ static struct platform_device *rx3715_devices[] __initdata = {
 static void __init rx3715_map_io(void)
 {
 	s3c24xx_init_io(rx3715_iodesc, ARRAY_SIZE(rx3715_iodesc));
+	s3c24xx_init_clocks(16934000);
 	s3c24xx_init_uarts(rx3715_uartcfgs, ARRAY_SIZE(rx3715_uartcfgs));
-	samsung_set_timer_source(SAMSUNG_PWM3, SAMSUNG_PWM4);
-}
-
-static void __init rx3715_init_time(void)
-{
-	s3c2440_init_clocks(16934000);
-	samsung_timer_init();
 }
 
 /* H1940 and RX3715 need to reserve this for suspend */
@@ -193,6 +186,11 @@ static void __init rx3715_reserve(void)
 {
 	memblock_reserve(0x30003000, 0x1000);
 	memblock_reserve(0x30081000, 0x1000);
+}
+
+static void __init rx3715_init_irq(void)
+{
+	s3c24xx_init_irq();
 }
 
 static void __init rx3715_init_machine(void)
@@ -212,7 +210,8 @@ MACHINE_START(RX3715, "IPAQ-RX3715")
 	.atag_offset	= 0x100,
 	.map_io		= rx3715_map_io,
 	.reserve	= rx3715_reserve,
-	.init_irq	= s3c2440_init_irq,
+	.init_irq	= rx3715_init_irq,
 	.init_machine	= rx3715_init_machine,
-	.init_time	= rx3715_init_time,
+	.timer		= &s3c24xx_timer,
+	.restart	= s3c244x_restart,
 MACHINE_END

@@ -26,7 +26,6 @@
  *	 however I decided to publish this code under the plain GPL.
  */
 
-#include <linux/sched.h>
 #include <linux/string.h>
 #include "mpi-internal.h"
 #include "longlong.h"
@@ -65,13 +64,8 @@ int mpi_powm(MPI res, MPI base, MPI exp, MPI mod)
 	if (!esize) {
 		/* Exponent is zero, result is 1 mod MOD, i.e., 1 or 0
 		 * depending on if MOD equals 1.  */
+		rp[0] = 1;
 		res->nlimbs = (msize == 1 && mod->d[0] == 1) ? 0 : 1;
-		if (res->nlimbs) {
-			if (mpi_resize(res, 1) < 0)
-				goto enomem;
-			rp = res->d;
-			rp[0] = 1;
-		}
 		res->sign = 0;
 		goto leave;
 	}
@@ -83,7 +77,7 @@ int mpi_powm(MPI res, MPI base, MPI exp, MPI mod)
 	mp = mp_marker = mpi_alloc_limb_space(msize);
 	if (!mp)
 		goto enomem;
-	mod_shift_cnt = count_leading_zeros(mod->d[msize - 1]);
+	count_leading_zeros(mod_shift_cnt, mod->d[msize - 1]);
 	if (mod_shift_cnt)
 		mpihelp_lshift(mp, mod->d, msize, mod_shift_cnt);
 	else
@@ -175,7 +169,7 @@ int mpi_powm(MPI res, MPI base, MPI exp, MPI mod)
 
 		i = esize - 1;
 		e = ep[i];
-		c = count_leading_zeros(e);
+		count_leading_zeros(c, e);
 		e = (e << c) << 1;	/* shift the exp bits to the left, lose msb */
 		c = BITS_PER_MPI_LIMB - 1 - c;
 
@@ -257,7 +251,6 @@ int mpi_powm(MPI res, MPI base, MPI exp, MPI mod)
 				}
 				e <<= 1;
 				c--;
-				cond_resched();
 			}
 
 			i--;

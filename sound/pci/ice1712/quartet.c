@@ -22,6 +22,7 @@
  *
  */
 
+#include <asm/io.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
@@ -46,7 +47,7 @@ struct qtet_kcontrol_private {
 	unsigned int bit;
 	void (*set_register)(struct snd_ice1712 *ice, unsigned int val);
 	unsigned int (*get_register)(struct snd_ice1712 *ice);
-	const char * const texts[2];
+	unsigned char *texts[2];
 };
 
 enum {
@@ -62,7 +63,7 @@ enum {
 	OUT34_MON12,
 };
 
-static const char * const ext_clock_names[3] = {"IEC958 In", "Word Clock 1xFS",
+static char *ext_clock_names[3] = {"IEC958 In", "Word Clock 1xFS",
 	"Word Clock 256xFS"};
 
 /* chip address on I2C bus */
@@ -278,7 +279,7 @@ static void qtet_akm_write(struct snd_akm4xxx *ak, int chip,
 
 	if (snd_BUG_ON(chip < 0 || chip >= 4))
 		return;
-	/*dev_dbg(ice->card->dev, "Writing to AK4620: chip=%d, addr=0x%x,
+	/*printk(KERN_DEBUG "Writing to AK4620: chip=%d, addr=0x%x,
 	  data=0x%x\n", chip, addr, data);*/
 	orig_dir = ice->gpio.get_dir(ice);
 	ice->gpio.set_dir(ice, orig_dir | GPIO_SPI_ALL);
@@ -386,7 +387,7 @@ static const struct snd_akm4xxx_adc_channel qtet_adc[] = {
 	AK_CONTROL(PCM_34_CAPTURE_VOLUME, 2),
 };
 
-static struct snd_akm4xxx akm_qtet_dac = {
+static struct snd_akm4xxx akm_qtet_dac __devinitdata = {
 	.type = SND_AK4620,
 	.num_dacs = 4,	/* DAC1 - Output 12
 	*/
@@ -484,7 +485,7 @@ static void set_cpld(struct snd_ice1712 *ice, unsigned int val)
 	reg_write(ice, GPIO_CPLD_CSN, val);
 	spec->cpld = val;
 }
-
+#ifdef CONFIG_PROC_FS
 static void proc_regs_read(struct snd_info_entry *entry,
 		struct snd_info_buffer *buffer)
 {
@@ -505,6 +506,9 @@ static void proc_init(struct snd_ice1712 *ice)
 	if (!snd_card_proc_new(ice->card, "quartet", &entry))
 		snd_info_set_text_ops(entry, ice, proc_regs_read);
 }
+#else /* !CONFIG_PROC_FS */
+static void proc_init(struct snd_ice1712 *ice) {}
+#endif
 
 static int qtet_mute_get(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
@@ -547,9 +551,18 @@ static int qtet_mute_put(struct snd_kcontrol *kcontrol,
 static int qtet_ain12_enum_info(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_info *uinfo)
 {
-	static const char * const texts[3] =
-		{"Line In 1/2", "Mic", "Mic + Low-cut"};
-	return snd_ctl_enum_info(uinfo, 1, ARRAY_SIZE(texts), texts);
+	static char *texts[3] = {"Line In 1/2", "Mic", "Mic + Low-cut"};
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = ARRAY_SIZE(texts);
+
+	if (uinfo->value.enumerated.item >= uinfo->value.enumerated.items)
+		uinfo->value.enumerated.item =
+			uinfo->value.enumerated.items - 1;
+	strcpy(uinfo->value.enumerated.name,
+			texts[uinfo->value.enumerated.item]);
+
+	return 0;
 }
 
 static int qtet_ain12_sw_get(struct snd_kcontrol *kcontrol,
@@ -691,8 +704,17 @@ static int qtet_enum_info(struct snd_kcontrol *kcontrol,
 {
 	struct qtet_kcontrol_private private =
 		qtet_privates[kcontrol->private_value];
-	return snd_ctl_enum_info(uinfo, 1, ARRAY_SIZE(private.texts),
-				 private.texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = ARRAY_SIZE(private.texts);
+
+	if (uinfo->value.enumerated.item >= uinfo->value.enumerated.items)
+		uinfo->value.enumerated.item =
+			uinfo->value.enumerated.items - 1;
+	strcpy(uinfo->value.enumerated.name,
+			private.texts[uinfo->value.enumerated.item]);
+
+	return 0;
 }
 
 static int qtet_sw_get(struct snd_kcontrol *kcontrol,
@@ -736,7 +758,7 @@ static int qtet_sw_put(struct snd_kcontrol *kcontrol,
 	.put = qtet_sw_put,\
 	.private_value = xpriv }
 
-static struct snd_kcontrol_new qtet_controls[] = {
+static struct snd_kcontrol_new qtet_controls[] __devinitdata = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Master Playback Switch",
@@ -773,17 +795,17 @@ static struct snd_kcontrol_new qtet_controls[] = {
 	QTET_CONTROL("Output 3/4 to Monitor 1/2", sw, OUT34_MON12),
 };
 
-static char *slave_vols[] = {
+static char *slave_vols[] __devinitdata = {
 	PCM_12_PLAYBACK_VOLUME,
 	PCM_34_PLAYBACK_VOLUME,
 	NULL
 };
 
-static
+static __devinitdata
 DECLARE_TLV_DB_SCALE(qtet_master_db_scale, -6350, 50, 1);
 
-static struct snd_kcontrol *ctl_find(struct snd_card *card,
-				     const char *name)
+static struct snd_kcontrol __devinit *ctl_find(struct snd_card *card,
+		const char *name)
 {
 	struct snd_ctl_elem_id sid;
 	memset(&sid, 0, sizeof(sid));
@@ -793,8 +815,8 @@ static struct snd_kcontrol *ctl_find(struct snd_card *card,
 	return snd_ctl_find_id(card, &sid);
 }
 
-static void add_slaves(struct snd_card *card,
-		       struct snd_kcontrol *master, char * const *list)
+static void __devinit add_slaves(struct snd_card *card,
+		struct snd_kcontrol *master, char **list)
 {
 	for (; *list; list++) {
 		struct snd_kcontrol *slave = ctl_find(card, *list);
@@ -803,7 +825,7 @@ static void add_slaves(struct snd_card *card,
 	}
 }
 
-static int qtet_add_controls(struct snd_ice1712 *ice)
+static int __devinit qtet_add_controls(struct snd_ice1712 *ice)
 {
 	struct qtet_spec *spec = ice->spec;
 	int err, i;
@@ -828,8 +850,11 @@ static int qtet_add_controls(struct snd_ice1712 *ice)
 	if (err < 0)
 		return err;
 	/* only capture SPDIF over AK4113 */
-	return snd_ak4113_build(spec->ak4113,
+	err = snd_ak4113_build(spec->ak4113,
 			ice->pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream);
+	if (err < 0)
+		return err;
+	return 0;
 }
 
 static inline int qtet_is_spdif_master(struct snd_ice1712 *ice)
@@ -871,7 +896,7 @@ static void qtet_set_rate(struct snd_ice1712 *ice, unsigned int rate)
 	new =  (get_cpld(ice) & ~CPLD_CKS_MASK) | get_cks_val(rate);
 	/* switch to internal clock, drop CPLD_SYNC_SEL */
 	new &= ~CPLD_SYNC_SEL;
-	/* dev_dbg(ice->card->dev, "QT - set_rate: old %x, new %x\n",
+	/* printk(KERN_DEBUG "QT - set_rate: old %x, new %x\n",
 	   get_cpld(ice), new); */
 	set_cpld(ice, new);
 }
@@ -951,7 +976,7 @@ static void qtet_ak4113_change(struct ak4113 *ak4113, unsigned char c0,
 			c1) {
 		/* only for SPDIF master mode, rate was changed */
 		rate = snd_ak4113_external_rate(ak4113);
-		/* dev_dbg(ice->card->dev, "ak4113 - input rate changed to %d\n",
+		/* printk(KERN_DEBUG "ak4113 - input rate changed to %d\n",
 		   rate); */
 		qtet_akm_set_rate_val(ice->akm, rate);
 	}
@@ -982,7 +1007,7 @@ static void qtet_spdif_in_open(struct snd_ice1712 *ice,
 /*
  * initialize the chip
  */
-static int qtet_init(struct snd_ice1712 *ice)
+static int __devinit qtet_init(struct snd_ice1712 *ice)
 {
 	static const unsigned char ak4113_init_vals[] = {
 		/* AK4113_REG_PWRDN */	AK4113_RST | AK4113_PWN |
@@ -1070,7 +1095,7 @@ static int qtet_init(struct snd_ice1712 *ice)
 	return 0;
 }
 
-static unsigned char qtet_eeprom[] = {
+static unsigned char qtet_eeprom[] __devinitdata = {
 	[ICE_EEP2_SYSCONF]     = 0x28,	/* clock 256(24MHz), mpu401, 1xADC,
 					   1xDACs, SPDIF in */
 	[ICE_EEP2_ACLINK]      = 0x80,	/* I2S */
@@ -1091,7 +1116,7 @@ static unsigned char qtet_eeprom[] = {
 };
 
 /* entry point */
-struct snd_ice1712_card_info snd_vt1724_qtet_cards[] = {
+struct snd_ice1712_card_info snd_vt1724_qtet_cards[] __devinitdata = {
 	{
 		.subvendor = VT1724_SUBDEVICE_QTET,
 		.name = "Infrasonic Quartet",

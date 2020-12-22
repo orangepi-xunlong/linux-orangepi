@@ -1,6 +1,5 @@
 /* Internationalization implementation.  Includes definitions of English
- * string arrays, and the i18n pointer.
- */
+ * string arrays, and the i18n pointer. */
 
 #include <linux/slab.h>		/* For kmalloc. */
 #include <linux/ctype.h>
@@ -72,7 +71,7 @@ static char *speakup_default_msgs[MSG_LAST_INDEX] = {
 	[MSG_CTL_SHIFT] = "shift",
 	[MSG_CTL_ALTGR] = "altgr",
 	[MSG_CTL_CONTROL] = "control",
-	[MSG_CTL_ALT] = "alt",
+	[MSG_CTL_ALT] = "ault",
 	[MSG_CTL_LSHIFT] = "l shift",
 	[MSG_CTL_SPEAKUP] = "speakup",
 	[MSG_CTL_LCONTROL] = "l control",
@@ -389,11 +388,14 @@ static struct msg_group_t all_groups[] = {
 	},
 };
 
-static const  int num_groups = ARRAY_SIZE(all_groups);
+static const  int num_groups = sizeof(all_groups) / sizeof(struct msg_group_t);
 
 char *spk_msg_get(enum msg_index_t index)
 {
-	return speakup_msgs[index];
+	char *ch;
+
+	ch = speakup_msgs[index];
+	return ch;
 }
 
 /*
@@ -553,14 +555,13 @@ ssize_t spk_msg_set(enum msg_index_t index, char *text, size_t length)
 			&& index <= MSG_FORMATTED_END)
 				&& !fmt_validate(speakup_default_msgs[index],
 				newstr)) {
-				kfree(newstr);
 				return -EINVAL;
 			}
-			spin_lock_irqsave(&speakup_info.spinlock, flags);
+			spk_lock(flags);
 			if (speakup_msgs[index] != speakup_default_msgs[index])
 				kfree(speakup_msgs[index]);
 			speakup_msgs[index] = newstr;
-			spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+			spk_unlock(flags);
 		} else {
 			rc = -ENOMEM;
 		}
@@ -593,14 +594,14 @@ void spk_reset_msg_group(struct msg_group_t *group)
 	unsigned long flags;
 	enum msg_index_t i;
 
-	spin_lock_irqsave(&speakup_info.spinlock, flags);
+	spk_lock(flags);
 
 	for (i = group->start; i <= group->end; i++) {
 		if (speakup_msgs[i] != speakup_default_msgs[i])
 			kfree(speakup_msgs[i]);
 		speakup_msgs[i] = speakup_default_msgs[i];
 	}
-	spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+	spk_unlock(flags);
 }
 
 /* Called at initialization time, to establish default messages. */
@@ -616,12 +617,12 @@ void spk_free_user_msgs(void)
 	enum msg_index_t index;
 	unsigned long flags;
 
-	spin_lock_irqsave(&speakup_info.spinlock, flags);
+	spk_lock(flags);
 	for (index = MSG_FIRST_INDEX; index < MSG_LAST_INDEX; index++) {
 		if (speakup_msgs[index] != speakup_default_msgs[index]) {
 			kfree(speakup_msgs[index]);
 			speakup_msgs[index] = speakup_default_msgs[index];
 		}
 	}
-	spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+	spk_unlock(flags);
 }

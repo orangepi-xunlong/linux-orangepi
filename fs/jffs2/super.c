@@ -63,6 +63,21 @@ static void jffs2_i_init_once(void *foo)
 	inode_init_once(&f->vfs_inode);
 }
 
+static void jffs2_write_super(struct super_block *sb)
+{
+	struct jffs2_sb_info *c = JFFS2_SB_INFO(sb);
+
+	lock_super(sb);
+	sb->s_dirt = 0;
+
+	if (!(sb->s_flags & MS_RDONLY)) {
+		jffs2_dbg(1, "%s()\n", __func__);
+		jffs2_flush_wbuf_gc(c, 0);
+	}
+
+	unlock_super(sb);
+}
+
 static const char *jffs2_compr_name(unsigned int compr)
 {
 	switch (compr) {
@@ -90,8 +105,6 @@ static int jffs2_show_options(struct seq_file *s, struct dentry *root)
 
 	if (opts->override_compr)
 		seq_printf(s, ",compr=%s", jffs2_compr_name(opts->compr));
-	if (opts->rp_size)
-		seq_printf(s, ",rp_size=%u", opts->rp_size / 1024);
 
 	return 0;
 }
@@ -100,10 +113,7 @@ static int jffs2_sync_fs(struct super_block *sb, int wait)
 {
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(sb);
 
-#ifdef CONFIG_JFFS2_FS_WRITEBUFFER
-	if (jffs2_is_writebuffered(c))
-		cancel_delayed_work_sync(&c->wbuf_dwork);
-#endif
+	jffs2_write_super(sb);
 
 	mutex_lock(&c->alloc_sem);
 	jffs2_flush_wbuf_pad(c);
@@ -139,16 +149,16 @@ static struct dentry *jffs2_get_parent(struct dentry *child)
 	struct jffs2_inode_info *f;
 	uint32_t pino;
 
-	BUG_ON(!d_is_dir(child));
+	BUG_ON(!S_ISDIR(child->d_inode->i_mode));
 
-	f = JFFS2_INODE_INFO(d_inode(child));
+	f = JFFS2_INODE_INFO(child->d_inode);
 
 	pino = f->inocache->pino_nlink;
 
 	JFFS2_DEBUG("Parent of directory ino #%u is #%u\n",
 		    f->inocache->ino, pino);
 
-	return d_obtain_alias(jffs2_iget(child->d_sb, pino));
+	return d_obtain_alias(jffs2_iget(child->d_inode->i_sb, pino));
 }
 
 static const struct export_operations jffs2_export_ops = {
@@ -161,18 +171,15 @@ static const struct export_operations jffs2_export_ops = {
  * JFFS2 mount options.
  *
  * Opt_override_compr: override default compressor
- * Opt_rp_size: size of reserved pool in KiB
  * Opt_err: just end of array marker
  */
 enum {
 	Opt_override_compr,
-	Opt_rp_size,
 	Opt_err,
 };
 
 static const match_table_t tokens = {
 	{Opt_override_compr, "compr=%s"},
-	{Opt_rp_size, "rp_size=%u"},
 	{Opt_err, NULL},
 };
 
@@ -180,7 +187,6 @@ static int jffs2_parse_options(struct jffs2_sb_info *c, char *data)
 {
 	substring_t args[MAX_OPT_ARGS];
 	char *p, *name;
-	unsigned int opt;
 
 	if (!data)
 		return 0;
@@ -218,17 +224,6 @@ static int jffs2_parse_options(struct jffs2_sb_info *c, char *data)
 			kfree(name);
 			c->mount_opts.override_compr = true;
 			break;
-		case Opt_rp_size:
-			if (match_int(&args[0], &opt))
-				return -EINVAL;
-			opt *= 1024;
-			if (opt > c->mtd->size) {
-				pr_warn("Too large reserve pool specified, max "
-					"is %llu KB\n", c->mtd->size / 1024);
-				return -EINVAL;
-			}
-			c->mount_opts.rp_size = opt;
-			break;
 		default:
 			pr_err("Error: unrecognized mount option '%s' or missing value\n",
 			       p);
@@ -244,7 +239,6 @@ static int jffs2_remount_fs(struct super_block *sb, int *flags, char *data)
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(sb);
 	int err;
 
-	sync_filesystem(sb);
 	err = jffs2_parse_options(c, data);
 	if (err)
 		return -EINVAL;
@@ -257,6 +251,7 @@ static const struct super_operations jffs2_super_operations =
 	.alloc_inode =	jffs2_alloc_inode,
 	.destroy_inode =jffs2_destroy_inode,
 	.put_super =	jffs2_put_super,
+	.write_super =	jffs2_write_super,
 	.statfs =	jffs2_statfs,
 	.remount_fs =	jffs2_remount_fs,
 	.evict_inode =	jffs2_evict_inode,
@@ -286,8 +281,10 @@ static int jffs2_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_fs_info = c;
 
 	ret = jffs2_parse_options(c, data);
-	if (ret)
+	if (ret) {
+		kfree(c);
 		return -EINVAL;
+	}
 
 	/* Initialize JFFS2 superblock locks, the further initialization will
 	 * be done later */
@@ -322,6 +319,9 @@ static void jffs2_put_super (struct super_block *sb)
 
 	jffs2_dbg(2, "%s()\n", __func__);
 
+	if (sb->s_dirt)
+		jffs2_write_super(sb);
+
 	mutex_lock(&c->alloc_sem);
 	jffs2_flush_wbuf_pad(c);
 	mutex_unlock(&c->alloc_sem);
@@ -330,7 +330,10 @@ static void jffs2_put_super (struct super_block *sb)
 
 	jffs2_free_ino_caches(c);
 	jffs2_free_raw_node_refs(c);
-	kvfree(c->blocks);
+	if (jffs2_blocks_use_vmalloc(c))
+		vfree(c->blocks);
+	else
+		kfree(c->blocks);
 	jffs2_flash_cleanup(c);
 	kfree(c->inocache_list);
 	jffs2_clear_xattr_subsystem(c);
@@ -341,7 +344,7 @@ static void jffs2_put_super (struct super_block *sb)
 static void jffs2_kill_sb(struct super_block *sb)
 {
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(sb);
-	if (c && !(sb->s_flags & MS_RDONLY))
+	if (!(sb->s_flags & MS_RDONLY))
 		jffs2_stop_garbage_collect_thread(c);
 	kill_mtd_super(sb);
 	kfree(c);
@@ -353,7 +356,6 @@ static struct file_system_type jffs2_fs_type = {
 	.mount =	jffs2_mount,
 	.kill_sb =	jffs2_kill_sb,
 };
-MODULE_ALIAS_FS("jffs2");
 
 static int __init init_jffs2_fs(void)
 {
@@ -383,7 +385,7 @@ static int __init init_jffs2_fs(void)
 	jffs2_inode_cachep = kmem_cache_create("jffs2_i",
 					     sizeof(struct jffs2_inode_info),
 					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD|SLAB_ACCOUNT),
+						SLAB_MEM_SPREAD),
 					     jffs2_i_init_once);
 	if (!jffs2_inode_cachep) {
 		pr_err("error: Failed to initialise inode cache\n");
@@ -420,12 +422,6 @@ static void __exit exit_jffs2_fs(void)
 	unregister_filesystem(&jffs2_fs_type);
 	jffs2_destroy_slab_caches();
 	jffs2_compressors_exit();
-
-	/*
-	 * Make sure all delayed rcu free inodes are flushed before we
-	 * destroy cache.
-	 */
-	rcu_barrier();
 	kmem_cache_destroy(jffs2_inode_cachep);
 }
 

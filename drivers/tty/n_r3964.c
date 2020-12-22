@@ -276,7 +276,7 @@ static void remove_from_tx_queue(struct r3964_info *pInfo, int error_code)
 			add_msg(pHeader->owner, R3964_MSG_ACK, pHeader->length,
 				error_code, NULL);
 		}
-		wake_up_interruptible(&pInfo->tty->read_wait);
+		wake_up_interruptible(&pInfo->read_wait);
 	}
 
 	spin_lock_irqsave(&pInfo->lock, flags);
@@ -542,7 +542,7 @@ static void on_receive_block(struct r3964_info *pInfo)
 				pBlock);
 		}
 	}
-	wake_up_interruptible(&pInfo->tty->read_wait);
+	wake_up_interruptible(&pInfo->read_wait);
 
 	pInfo->state = R3964_IDLE;
 
@@ -978,8 +978,8 @@ static int r3964_open(struct tty_struct *tty)
 	}
 
 	spin_lock_init(&pInfo->lock);
-	mutex_init(&pInfo->read_lock);
 	pInfo->tty = tty;
+	init_waitqueue_head(&pInfo->read_wait);
 	pInfo->priority = R3964_MASTER;
 	pInfo->rx_first = pInfo->rx_last = NULL;
 	pInfo->tx_first = pInfo->tx_last = NULL;
@@ -1045,6 +1045,7 @@ static void r3964_close(struct tty_struct *tty)
 	}
 
 	/* Free buffers: */
+	wake_up_interruptible(&pInfo->read_wait);
 	kfree(pInfo->rx_buf);
 	TRACE_M("r3964_close - rx_buf kfree %p", pInfo->rx_buf);
 	kfree(pInfo->tx_buf);
@@ -1064,16 +1065,7 @@ static ssize_t r3964_read(struct tty_struct *tty, struct file *file,
 
 	TRACE_L("read()");
 
-	/*
-	 *	Internal serialization of reads.
-	 */
-	if (file->f_flags & O_NONBLOCK) {
-		if (!mutex_trylock(&pInfo->read_lock))
-			return -EAGAIN;
-	} else {
-		if (mutex_lock_interruptible(&pInfo->read_lock))
-			return -ERESTARTSYS;
-	}
+	tty_lock();
 
 	pClient = findClient(pInfo, task_pid(current));
 	if (pClient) {
@@ -1085,7 +1077,7 @@ static ssize_t r3964_read(struct tty_struct *tty, struct file *file,
 				goto unlock;
 			}
 			/* block until there is a message: */
-			wait_event_interruptible(tty->read_wait,
+			wait_event_interruptible_tty(pInfo->read_wait,
 					(pMsg = remove_msg(pInfo, pClient)));
 		}
 
@@ -1115,7 +1107,7 @@ static ssize_t r3964_read(struct tty_struct *tty, struct file *file,
 	}
 	ret = -EPERM;
 unlock:
-	mutex_unlock(&pInfo->read_lock);
+	tty_unlock();
 	return ret;
 }
 
@@ -1164,6 +1156,8 @@ static ssize_t r3964_write(struct tty_struct *tty, struct file *file,
 	pHeader->locks = 0;
 	pHeader->owner = NULL;
 
+	tty_lock();
+
 	pClient = findClient(pInfo, task_pid(current));
 	if (pClient) {
 		pHeader->owner = pClient;
@@ -1180,6 +1174,8 @@ static ssize_t r3964_write(struct tty_struct *tty, struct file *file,
  */
 	add_tx_queue(pInfo, pHeader);
 	trigger_transmit(pInfo);
+
+	tty_unlock();
 
 	return 0;
 }
@@ -1231,7 +1227,7 @@ static unsigned int r3964_poll(struct tty_struct *tty, struct file *file,
 
 	pClient = findClient(pInfo, task_pid(current));
 	if (pClient) {
-		poll_wait(file, &tty->read_wait, wait);
+		poll_wait(file, &pInfo->read_wait, wait);
 		spin_lock_irqsave(&pInfo->lock, flags);
 		pMsg = pClient->first_msg;
 		spin_unlock_irqrestore(&pInfo->lock, flags);
@@ -1248,7 +1244,7 @@ static void r3964_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 {
 	struct r3964_info *pInfo = tty->disc_data;
 	const unsigned char *p;
-	char *f, flags = TTY_NORMAL;
+	char *f, flags = 0;
 	int i;
 
 	for (i = count, p = cp, f = fp; i; i--, p++) {

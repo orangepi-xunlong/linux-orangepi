@@ -42,9 +42,11 @@ enum sony_state {
 static int ir_sony_decode(struct rc_dev *dev, struct ir_raw_event ev)
 {
 	struct sony_dec *data = &dev->raw->sony;
-	enum rc_type protocol;
 	u32 scancode;
 	u8 device, subdevice, function;
+
+	if (!(dev->raw->enabled_protocols & RC_TYPE_SONY))
+		return 0;
 
 	if (!is_timing_event(ev)) {
 		if (ev.reset)
@@ -121,31 +123,19 @@ static int ir_sony_decode(struct rc_dev *dev, struct ir_raw_event ev)
 
 		switch (data->count) {
 		case 12:
-			if (!(dev->enabled_protocols & RC_BIT_SONY12))
-				goto finish_state_machine;
-
 			device    = bitrev8((data->bits <<  3) & 0xF8);
 			subdevice = 0;
 			function  = bitrev8((data->bits >>  4) & 0xFE);
-			protocol = RC_TYPE_SONY12;
 			break;
 		case 15:
-			if (!(dev->enabled_protocols & RC_BIT_SONY15))
-				goto finish_state_machine;
-
 			device    = bitrev8((data->bits >>  0) & 0xFF);
 			subdevice = 0;
 			function  = bitrev8((data->bits >>  7) & 0xFE);
-			protocol = RC_TYPE_SONY15;
 			break;
 		case 20:
-			if (!(dev->enabled_protocols & RC_BIT_SONY20))
-				goto finish_state_machine;
-
 			device    = bitrev8((data->bits >>  5) & 0xF8);
 			subdevice = bitrev8((data->bits >>  0) & 0xFF);
 			function  = bitrev8((data->bits >> 12) & 0xFE);
-			protocol = RC_TYPE_SONY20;
 			break;
 		default:
 			IR_dprintk(1, "Sony invalid bitcount %u\n", data->count);
@@ -154,8 +144,9 @@ static int ir_sony_decode(struct rc_dev *dev, struct ir_raw_event ev)
 
 		scancode = device << 16 | subdevice << 8 | function;
 		IR_dprintk(1, "Sony(%u) scancode 0x%05x\n", data->count, scancode);
-		rc_keydown(dev, protocol, scancode, 0);
-		goto finish_state_machine;
+		rc_keydown(dev, scancode, 0);
+		data->state = STATE_INACTIVE;
+		return 0;
 	}
 
 out:
@@ -163,14 +154,10 @@ out:
 		   data->state, TO_US(ev.duration), TO_STR(ev.pulse));
 	data->state = STATE_INACTIVE;
 	return -EINVAL;
-
-finish_state_machine:
-	data->state = STATE_INACTIVE;
-	return 0;
 }
 
 static struct ir_raw_handler sony_handler = {
-	.protocols	= RC_BIT_SONY12 | RC_BIT_SONY15 | RC_BIT_SONY20,
+	.protocols	= RC_TYPE_SONY,
 	.decode		= ir_sony_decode,
 };
 
@@ -178,7 +165,7 @@ static int __init ir_sony_decode_init(void)
 {
 	ir_raw_handler_register(&sony_handler);
 
-	printk(KERN_INFO "IR Sony protocol handler initialized\n");
+	pr_debug("IR Sony protocol handler initialized\n");
 	return 0;
 }
 

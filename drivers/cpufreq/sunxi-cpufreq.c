@@ -1,7 +1,7 @@
 /*
  * drivers/cpufreq/sunxi-cpufreq.c
  *
- * Copyright (c) 2014 softwinner.
+ * Copyright (c) 2012 softwinner.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,664 +13,782 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/interrupt.h>
 #include <linux/cpufreq.h>
 #include <linux/cpu.h>
-#include <linux/cpu_cooling.h>
-#include <linux/io.h>
-#include <linux/of.h>
 #include <linux/clk.h>
-#include <linux/err.h>
-#include <linux/regulator/consumer.h>
-#include <linux/pm_opp.h>
-#include <linux/arisc/arisc.h>
-#include <linux/sunxi-sid.h>
-#include <asm/cacheflush.h>
-#include <linux/slab.h>
-#include <linux/sunxi-cpufreq.h>
+#include <linux/debugfs.h>
 #include <linux/delay.h>
-#ifdef CONFIG_SUNXI_ARISC
+#include <linux/err.h>
+#include <mach/sys_config.h>
+#include <linux/cpu.h>
+#include <asm/cpu.h>
+#include <linux/pm.h>
 #include <linux/arisc/arisc.h>
-#endif
+#include <linux/clk/sunxi_name.h>
+#include <linux/regulator/consumer.h>
+#include <linux/io.h>
+#include <mach/platform.h>
 
-#define CPUFREQ_DBG(format, args...)	\
-	pr_debug("[cpu_freq] DBG: "format, ##args)
-#define CPUFREQ_ERR(format, args...)	\
-	pr_err("[cpu_freq] ERR: "format, ##args)
+#include "sunxi-cpufreq.h"
 
 #ifdef CONFIG_DEBUG_FS
-/* sunxi CPUFreq driver data structure */
-static struct {
-	s64 cpufreq_set_us;
-	s64 cpufreq_get_us;
-} sunxi_cpufreq;
+static unsigned long long cpufreq_set_time_usecs = 0;
+static unsigned long long cpufreq_get_time_usecs = 0;
 #endif
 
-static struct thermal_cooling_device *cdev;
+static struct sunxi_cpu_freq_t  cpu_cur;    /* current cpu frequency configuration  */
+static unsigned int last_target = ~0;       /* backup last target frequency         */
 
-/* cpufreq_dvfs_table is global default dvfs table */
-static struct cpufreq_dvfs_table cpufreq_dvfs_table[DVFS_VF_TABLE_MAX] = {
-	/*
-	 * cluster0
-	 * cpu0 vdd is 1.20v if cpu freq is (600Mhz, 1008Mhz]
-	 * cpu0 vdd is 1.20v if cpu freq is (420Mhz, 600Mhz]
-	 * cpu0 vdd is 1.20v if cpu freq is (360Mhz, 420Mhz]
-	 * cpu0 vdd is 1.20v if cpu freq is (300Mhz, 360Mhz]
-	 * cpu0 vdd is 1.20v if cpu freq is (240Mhz, 300Mhz]
-	 * cpu0 vdd is 1.20v if cpu freq is (120Mhz, 240Mhz]
-	 * cpu0 vdd is 1.20v if cpu freq is (60Mhz,  120Mhz]
-	 * cpu0 vdd is 1.20v if cpu freq is (0Mhz,   60Mhz]
-	 */
-	/* freq         voltage     axi_div */
-	{900000000,     1200,       3},
-	{600000000,     1200,       3},
-	{420000000,     1200,       3},
-	{360000000,     1200,       3},
-	{300000000,     1200,       3},
-	{240000000,     1200,       3},
-	{120000000,     1200,       3},
-	{60000000,      1200,       3},
-	{0,             1200,       3},
-	{0,             1200,       3},
-	{0,             1200,       3},
-	{0,             1200,       3},
-	{0,             1200,       3},
-	{0,             1200,       3},
-	{0,             1200,       3},
-	{0,             1200,       3}
+#if !defined(CONFIG_ARCH_SUN8IW7P1) && !defined(CONFIG_ARCH_SUN8IW8P1)
+struct regulator *cpu_vdd;  /* cpu vdd handler   */
+#endif
+static struct clk *clk_pll; /* pll clock handler */
+static struct clk *clk_cpu; /* cpu clock handler */
+static struct clk *clk_axi; /* axi clock handler */
+static DEFINE_MUTEX(sunxi_cpu_lock);
+
+static unsigned int cpu_freq_max   = SUNXI_CPUFREQ_MAX / 1000;
+static unsigned int cpu_freq_min   = SUNXI_CPUFREQ_MIN / 1000;
+static unsigned int cpu_freq_ext   = SUNXI_CPUFREQ_MAX / 1000;  // extremity cpu freq
+static unsigned int cpu_freq_boot  = SUNXI_CPUFREQ_MAX / 1000;
+
+int sunxi_dvfs_debug = 0;
+int sunxi_boot_freq_lock = 0;
+
+#if defined(CONFIG_ARCH_SUN8IW3P1) && defined(CONFIG_DEVFREQ_DRAM_FREQ)
+extern int dramfreq_need_suspend;
+extern int __ahb_set_rate(unsigned long ahb_freq);
+#endif
+
+int table_length_syscfg = 0;
+struct cpufreq_dvfs dvfs_table_syscfg[16];
+
+struct cpufreq_frequency_table sunxi_freq_tbl[] = {
+    { .frequency = 60000  , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 120000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 240000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 312000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 408000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 480000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 504000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 528000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 576000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 600000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 624000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 648000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 672000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 720000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 768000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 816000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 864000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 912000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 960000 , .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1008000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1056000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1104000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1152000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1200000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1248000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1296000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1344000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1440000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+    { .frequency = 1536000, .index = SUNXI_CLK_DIV(0, 0, 0, 0), },
+
+	/* table end */
+	{ .frequency = CPUFREQ_TABLE_END,  .index = 0,              },
 };
 
-#ifdef CONFIG_ARM_SUNXI_PSENSOR_BIN
-struct psensor_range {
-	unsigned int min;
-	unsigned int max;
-};
+/*
+ *check if the cpu frequency policy is valid;
+ */
+static int sunxi_cpufreq_verify(struct cpufreq_policy *policy)
+{
+	return 0;
+}
 
-static struct psensor_range psensor_range[8];
-static int psensor_range_count;
-#define PSENSOR_REG             0x0300621c
+
+#if !defined(CONFIG_ARCH_SUN8IW7P1) && !defined(CONFIG_ARCH_SUN8IW8P1)
+/*
+ * get the current cpu vdd;
+ * return: cpu vdd, based on mv;
+ */
+int sunxi_cpufreq_getvolt(void)
+{
+	return regulator_get_voltage(cpu_vdd) / 1000;
+}
 #endif
 
-#ifdef CONFIG_SCHED_SMP_DCMP
-#ifdef CONFIG_ARCH_SUN8IW17P1
-#define CLUSTER_MAX_CORES	3
-struct clk *cluster1_clk;
-#endif
-#endif
-
-extern unsigned long dev_pm_opp_axi_bus_divide_ratio(struct dev_pm_opp *opp);
-extern int dev_pm_opp_of_get_sharing_cpus_by_soc_bin(struct device *cpu_dev,
-			cpumask_var_t cpumask, int soc_bin);
-extern int dev_pm_opp_of_cpumask_add_table_by_soc_bin(cpumask_var_t cpumask,
-			int soc_bin);
-
-
+/*
+ * get the frequency that cpu currently is running;
+ * cpu:    cpu number, all cpus use the same clock;
+ * return: cpu frequency, based on khz;
+ */
 static unsigned int sunxi_cpufreq_get(unsigned int cpu)
 {
 	unsigned int current_freq = 0;
 #ifdef CONFIG_DEBUG_FS
-	ktime_t calltime = ktime_get();
+	ktime_t calltime = ktime_set(0, 0), delta, rettime;
+
+	calltime = ktime_get();
 #endif
 
-	current_freq = cpufreq_generic_get(cpu);
+	clk_get_rate(clk_pll);
+	current_freq = clk_get_rate(clk_cpu) / 1000;
 
 #ifdef CONFIG_DEBUG_FS
-	sunxi_cpufreq.cpufreq_get_us =
-				ktime_to_us(ktime_sub(ktime_get(), calltime));
+	rettime = ktime_get();
+	delta = ktime_sub(rettime, calltime);
+	cpufreq_get_time_usecs = ktime_to_ns(delta) >> 10;
 #endif
 
 	return current_freq;
 }
 
-#ifdef CONFIG_SUNXI_ARISC
-static int sunxi_set_cpufreq_and_voltage(struct cpufreq_policy *policy,
-					unsigned long freq)
+
+/*
+ *show cpu frequency information;
+ */
+static void sunxi_cpufreq_show(const char *pfx, struct sunxi_cpu_freq_t *cfg)
+{
+	pr_debug("%s: pll=%u, cpudiv=%u, axidiv=%u\n", pfx, cfg->pll, cfg->div.cpu_div, cfg->div.axi_div);
+}
+
+
+/*
+ * adjust the frequency that cpu is currently running;
+ * policy:  cpu frequency policy;
+ * freq:    target frequency to be set, based on khz;
+ * relation:    method for selecting the target requency;
+ * return:  result, return 0 if set target frequency successed, else, return -EINVAL;
+ * notes:   this function is called by the cpufreq core;
+ */
+static int sunxi_cpufreq_target(struct cpufreq_policy *policy, __u32 freq, __u32 relation)
 {
 	int ret = 0;
-
-#ifdef CONFIG_SCHED_SMP_DCMP
-	int cpu;
-#endif
-
-#ifdef CONFIG_SUNXI_CPUFREQ_ASYN
-	unsigned long timeout;
-
-	arisc_dvfs_set_cpufreq(freq, ARISC_DVFS_PLL1, ARISC_DVFS_ASYN,
-					NULL, NULL);
-	/* CPUS max latency for cpu freq*/
-	timeout = 15;
-
-#ifdef CONFIG_SCHED_SMP_DCMP
-	for_each_online_cpu(cpu) {
-		if (cpu >= CLUSTER_MAX_CORES) {
-	//	CPUFREQ_DBG("Set other cluster freq: %d\n", freq);
-			arisc_dvfs_set_cpufreq(freq, ARISC_DVFS_PLL2,
-					ARISC_DVFS_ASYN, NULL, NULL);
-			break;
-		}
-	}
-	while (timeout-- && (clk_get_rate(policy->clk) != freq*1000) &&
-			(clk_get_rate(policy->clk) != freq*1000))
-		usleep_range(900, 1000);
-	if ((clk_get_rate(policy->clk) != freq*1000) || (clk_get_rate(policy->clk) != freq*1000))
-		ret = -1;
-#else
-	while (timeout-- && (clk_get_rate(policy->clk) != freq*1000))
-		msleep(1);
-	if (clk_get_rate(policy->clk) != freq*1000)
-		ret = -1;
-#endif
-
-#else
-
-	ret = arisc_dvfs_set_cpufreq(freq, ARISC_DVFS_PLL1, ARISC_DVFS_SYN,
-					NULL, NULL);
-#ifdef CONFIG_SCHED_SMP_DCMP
-	if (ret)
-		return ret;
-	for_each_online_cpu(cpu) {
-		if (cpu >= CLUSTER_MAX_CORES) {
-	//	CPUFREQ_DBG("Set other cluster freq: %d\n", freq);
-			ret = arisc_dvfs_set_cpufreq(freq, ARISC_DVFS_PLL2, ARISC_DVFS_SYN,
-					NULL, NULL);
-			break;
-		}
-	}
-#endif
-
-#endif
-	return ret;
-}
-#else
-static int sunxi_set_cpufreq_and_voltage(struct cpufreq_policy *policy,
-					unsigned long freq)
-{
-	struct device *cpu_dev;
-
-	cpu_dev = get_cpu_device(policy->cpu);
-
-
-	return dev_pm_opp_set_rate(cpu_dev, freq * 1000);
-}
-#endif
-
-static int sunxi_cpufreq_target_index(struct cpufreq_policy *policy,
-					unsigned int index)
-{
-	int ret = 0;
-	unsigned long freq;
+	unsigned int            index;
+	struct sunxi_cpu_freq_t freq_cfg;
+	struct cpufreq_freqs    freqs;
 #ifdef CONFIG_DEBUG_FS
-	ktime_t calltime;
+	ktime_t calltime = ktime_set(0, 0), delta, rettime;
+#endif
+#ifdef CONFIG_SMP
+	int i;
 #endif
 
-	freq = policy->freq_table[index].frequency;
+	mutex_lock(&sunxi_cpu_lock);
+
+	/* avoid repeated calls which cause a needless amout of duplicated
+	 * logging output (and CPU time as the calculation process is
+	 * done) */
+	if (freq == last_target)
+		goto out;
+
+	if (unlikely(sunxi_dvfs_debug))
+		printk("[cpufreq] request frequency is %u\n", freq);
+
+	if (unlikely(sunxi_boot_freq_lock))
+		freq = freq > cpu_freq_boot ? cpu_freq_boot : freq;
+
+	/* try to look for a valid frequency value from cpu frequency table */
+	if (cpufreq_frequency_table_target(policy, sunxi_freq_tbl, freq, relation, &index)) {
+		CPUFREQ_ERR("try to look for a valid frequency for %u failed!\n", freq);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	/* frequency is same as the value last set, need not adjust */
+	if (sunxi_freq_tbl[index].frequency == last_target)
+		goto out;
+
+	freq = sunxi_freq_tbl[index].frequency;
+
+	/* update the target frequency */
+	freq_cfg.pll = sunxi_freq_tbl[index].frequency * 1000;
+	freq_cfg.div = *(struct sunxi_clk_div_t *)&sunxi_freq_tbl[index].index;
+
+	if (unlikely(sunxi_dvfs_debug))
+		printk("[cpufreq] target frequency find is %u, entry %u\n", freq_cfg.pll, index);
+
+	/* notify that cpu clock will be adjust if needed */
+	if (policy) {
+		freqs.cpu = policy->cpu;
+		freqs.old = last_target;
+		freqs.new = freq;
+
+#ifdef CONFIG_SMP
+		/* notifiers */
+		for_each_cpu(i, policy->cpus) {
+			freqs.cpu = i;
+			cpufreq_notify_transition(policy, &freqs, CPUFREQ_PRECHANGE);
+		}
+#else
+		cpufreq_notify_transition(policy, &freqs, CPUFREQ_PRECHANGE);
+#endif
+	}
 
 #ifdef CONFIG_DEBUG_FS
 	calltime = ktime_get();
 #endif
+
+#if defined(CONFIG_ARCH_SUN8IW8P1)
+	if (clk_set_rate(clk_pll, freq_cfg.pll)) {
+#else
 	/* try to set cpu frequency */
-	ret = sunxi_set_cpufreq_and_voltage(policy, freq);
-	if (ret)
-		CPUFREQ_ERR("Set cpu frequency to %luKHz failed!\n", freq);
+	if (arisc_dvfs_set_cpufreq(freq, ARISC_DVFS_PLL1, ARISC_DVFS_SYN, NULL, NULL)) {
+#endif
+		CPUFREQ_ERR("set cpu frequency to %uMHz failed!\n", freq / 1000);
+		/* set cpu frequency failed */
+		if (policy) {
+			freqs.cpu = policy->cpu;
+			freqs.old = freqs.new;
+			freqs.new = last_target;
+
+#ifdef CONFIG_SMP
+			/* notifiers */
+			for_each_cpu(i, policy->cpus) {
+				freqs.cpu = i;
+				cpufreq_notify_transition(policy, &freqs, CPUFREQ_POSTCHANGE);
+			}
+#else
+			cpufreq_notify_transition(policy, &freqs, CPUFREQ_POSTCHANGE);
+#endif
+		}
+
+		ret = -EINVAL;
+		goto out;
+	}
 
 #ifdef CONFIG_DEBUG_FS
-	sunxi_cpufreq.cpufreq_set_us = ktime_to_us(ktime_sub(ktime_get(),
-				calltime));
+	rettime = ktime_get();
+	delta = ktime_sub(rettime, calltime);
+	cpufreq_set_time_usecs = ktime_to_ns(delta) >> 10;
 #endif
+
+	/* notify that cpu clock will be adjust if needed */
+	if (policy) {
+#ifdef CONFIG_SMP
+		/*
+		 * Note that loops_per_jiffy is not updated on SMP systems in
+		 * cpufreq driver. So, update the per-CPU loops_per_jiffy value
+		 * on frequency transition. We need to update all dependent cpus
+		 */
+		for_each_cpu(i, policy->cpus) {
+			per_cpu(cpu_data, i).loops_per_jiffy =
+				 cpufreq_scale(per_cpu(cpu_data, i).loops_per_jiffy, freqs.old, freqs.new);
+			freqs.cpu = i;
+			cpufreq_notify_transition(policy, &freqs, CPUFREQ_POSTCHANGE);
+		}
+#else
+		cpufreq_notify_transition(policy, &freqs, CPUFREQ_POSTCHANGE);
+#endif
+	}
+
+	last_target = freq;
+
+#if defined(CONFIG_ARCH_SUN8IW3P1) && defined(CONFIG_DEVFREQ_DRAM_FREQ)
+	if (!dramfreq_need_suspend) {
+		if (freq < 100000) {
+			if (__ahb_set_rate(100000000)) {
+				CPUFREQ_ERR("set ahb to 100MHz failed!\n");
+			}
+		} else {
+			if (__ahb_set_rate(200000000)) {
+				CPUFREQ_ERR("set ahb to 200MHz failed!\n");
+			}
+		}
+	}
+#endif
+
+	if (unlikely(sunxi_dvfs_debug)) {
+#if !defined(CONFIG_ARCH_SUN8IW7P1) && !defined(CONFIG_ARCH_SUN8IW8P1)
+		printk("[cpufreq] DVFS done! Freq[%uMHz] Volt[%umv] ok\n\n", \
+			sunxi_cpufreq_get(0) / 1000, sunxi_cpufreq_getvolt());
+#else
+		printk("[cpufreq] DFS done! Freq[%uMHz] ok\n\n", \
+			sunxi_cpufreq_get(0) / 1000);
+#endif
+	}
+
+
+out:
+	mutex_unlock(&sunxi_cpu_lock);
 
 	return ret;
 }
-static int sunxi_cpufreq_set_vf(struct cpufreq_frequency_table *table,
-				unsigned int cpu)
+
+
+/*
+ * get the frequency that cpu average is running;
+ * cpu:    cpu number, all cpus use the same clock;
+ * return: cpu frequency, based on khz;
+ */
+static unsigned int sunxi_cpufreq_getavg(struct cpufreq_policy *policy, unsigned int cpu)
 {
-	struct cpufreq_frequency_table *pos;
-	struct dev_pm_opp *opp;
-	struct device *dev;
-	unsigned long freq;
-	int ret, num = 0;
-	int max_opp_num = 0;
-	void *kvir = NULL;
-
-	dev = get_cpu_device(cpu);
-	max_opp_num = dev_pm_opp_get_opp_count(dev);
-
-#ifndef CONFIG_ARCH_SUN8IW12P1
-	for (pos = table; max_opp_num > 0; --max_opp_num) {
-		freq = pos[max_opp_num - 1].frequency * 1000;
-#else
-	cpufreq_for_each_valid_entry(pos, table) {
-		freq = pos->frequency * 1000;
-#endif
-		CPUFREQ_DBG("freq: %lu\n", freq);
-		rcu_read_lock();
-		opp = dev_pm_opp_find_freq_ceil(dev, &freq);
-		if (IS_ERR(opp)) {
-			ret = PTR_ERR(opp);
-			dev_err(dev,
-				"%s: failed to find OPP for freq %lu (%d)\n",
-				__func__, freq, ret);
-			rcu_read_unlock();
-			return ret;
-		}
-
-		cpufreq_dvfs_table[num].voltage =
-			dev_pm_opp_get_voltage(opp) / 1000;
-		cpufreq_dvfs_table[num].freq = dev_pm_opp_get_freq(opp);
-		cpufreq_dvfs_table[num].axi_div =
-				dev_pm_opp_axi_bus_divide_ratio(opp);
-		rcu_read_unlock();
-		CPUFREQ_DBG("num:%d, volatge:%d, freq:%d, axi_div:%d ,%s\n",
-				num, cpufreq_dvfs_table[num].voltage,
-				cpufreq_dvfs_table[num].freq,
-			cpufreq_dvfs_table[num].axi_div, __func__);
-		num++;
-	}
-
-	kvir =
-	kmalloc(num * sizeof(struct cpufreq_frequency_table), GFP_KERNEL);
-	if (kvir == NULL) {
-		CPUFREQ_ERR("kmalloc error for transmiting vf table\n");
-		return -1;
-	}
-	memcpy((void *)kvir, (void *)cpufreq_dvfs_table,
-			num * sizeof(struct cpufreq_frequency_table));
-	__dma_flush_area((void *)kvir, num * sizeof(struct cpufreq_frequency_table));
-
-#ifdef CONFIG_SUNXI_ARISC
-	arisc_dvfs_cfg_vf_table(0, num, virt_to_phys(kvir));
-#endif
-
-	kfree(kvir);
-	kvir = NULL;
-
-	return 0;
+	return clk_get_rate(clk_cpu) / 1000;
 }
 
-#ifdef CONFIG_ARM_SUNXI_PSENSOR_BIN
-static int get_psensor_range(void)
+
+/*
+ * get a valid frequency from cpu frequency table;
+ * target_freq: target frequency to be judge, based on KHz;
+ * return: cpu frequency, based on khz;
+ */
+static unsigned int __get_valid_freq(unsigned int target_freq)
 {
-	int i = 0;
-	char name[20];
-	int psensor_count = 0;
-	struct device_node *psensor_node = NULL;
+	struct cpufreq_frequency_table *tmp = &sunxi_freq_tbl[0];
 
-	psensor_node = of_find_node_by_path("/psensor_table");
-	if (psensor_node == NULL) {
-		pr_err("%s(%d) has no pensor node\n", __func__, __LINE__);
-		return -1;
-	}
-
-	if (of_property_read_u32(psensor_node, "psensor_count",
-	&psensor_count)) {
-		pr_err("%s(%d) get psensor count error\n", __func__, __LINE__);
-		return -1;
-	}
-	psensor_range_count = psensor_count;
-	for (i = 0; i < psensor_count; i++) {
-		sprintf(name, "prange_min_%d", i);
-		if (of_property_read_u32(psensor_node, name,
-					&psensor_range[i].min)) {
-			pr_err("get prange_min_%d failed\n", i);
-			return -1;
-		}
-
-		sprintf(name, "prange_max_%d", i);
-		if (of_property_read_u32(psensor_node, name,
-					&psensor_range[i].max)) {
-			pr_err("get prange_max_%d failed\n", i);
-			return -1;
-		}
-	}
-
-	for (i = 0; i < psensor_count; ++i) {
-		pr_debug("psensor_range_%d.min=%d; psensor_range_%d.max=%d\n",
-			i, psensor_range[i].min, i, psensor_range[i].max);
-	}
-	return 0;
-}
-
-static int get_psensor_bin(void)
-{
-	unsigned int soc_bin;
-	void __iomem *bin_reg = NULL;
-	int i;
-
-	bin_reg = ioremap(PSENSOR_REG, 16);
-
-	soc_bin = readl(bin_reg);
-
-	/*use the high 16 bit*/
-	soc_bin >>= 16;
-
-	iounmap(bin_reg);
-
-	for (i = 0; i < psensor_range_count; ++i) {
-		if (soc_bin >= psensor_range[i].min && soc_bin <=
-				psensor_range[i].max)
+	while(tmp->frequency != CPUFREQ_TABLE_END){
+		if((tmp+1)->frequency <= target_freq)
+			tmp++;
+		else
 			break;
 	}
 
-	if (i >= psensor_range_count)
-		return -1;
-
-	return i;
+	return tmp->frequency;
 }
-#endif
 
-static int sunxi_cpufreq_init(struct cpufreq_policy *policy)
+static int __init_vftable_syscfg(char *tbl_name, int value)
 {
-	struct device *cpu_dev;
-	struct cpufreq_frequency_table *freq_table;
-	struct dev_pm_opp *suspend_opp;
-	struct clk *cpu_clk;
-	const char *regulator_name;
-	struct opp_table *table;
-	unsigned int transition_latency;
-	int ret, soc_bin;
-	unsigned int table_count;
-	struct device_node *dvfs_main_np;
-#ifdef CONFIG_SCHED_SMP_DCMP
-	struct device *cluster1_cpu_dev;
-#endif
+	script_item_u val;
+	script_item_value_type_e type;
+	int i ,ret = -1;
+	char name[16] = {0};
 
-	dvfs_main_np = of_find_node_by_path("/opp_dvfs_table");
-	if (!dvfs_main_np) {
-		CPUFREQ_ERR("No opp dvfs table node found\n");
-		return -ENODEV;
+	type = script_get_item(tbl_name, "LV_count", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		CPUFREQ_ERR("fetch LV_count from sysconfig failed\n");
+		goto fail;
 	}
 
-#ifdef CONFIG_ARM_SUNXI_PSENSOR_BIN
-	ret = get_psensor_range();
-	if (ret < 0)
-		return -EINVAL;
-#endif
-	if (of_property_read_u32(dvfs_main_np, "opp_table_count",
-	&table_count)) {
-		CPUFREQ_ERR("get vf_table_count failed\n");
-		return -EINVAL;
+	table_length_syscfg = val.val;
+	if(table_length_syscfg >= 16){
+		CPUFREQ_ERR("LV_count from sysconfig is out of bounder\n");
+		goto fail;
 	}
 
-	if (table_count == 1) {
-		pr_info("%s: only one opp_table\n", __func__);
-		soc_bin = 0;
-	} else {
-#ifdef CONFIG_ARM_SUNXI_PSENSOR_BIN
-		soc_bin = get_psensor_bin();
-#else
-		soc_bin = sunxi_get_soc_bin();
-		if (soc_bin == 0)
-			soc_bin = 2;
-
-		if (soc_bin == 1 || soc_bin == 2 || soc_bin == 3)
-			soc_bin--;
-#endif
-		if (soc_bin < 0) {
-			pr_err("%s: get the wrong soc bin!\n", __func__);
-			return -EINVAL;
+	for (i = 1; i <= table_length_syscfg; i++){
+		sprintf(name, "LV%d_freq", i);
+		type = script_get_item(tbl_name, name, &val);
+		if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+			CPUFREQ_ERR("get LV%d_freq from sysconfig failed\n", i);
+			goto fail;
 		}
-		pr_info("%s: support more opp_table and soc bin is %d\n",
-							__func__, soc_bin);
-	}
+		dvfs_table_syscfg[i-1].freq = val.val / 1000;
 
-	cpu_dev = get_cpu_device(policy->cpu);
-	CPUFREQ_ERR("DEBUG: get cpu %d device\n", policy->cpu);
-	if (!cpu_dev) {
-		CPUFREQ_ERR("Failed to get cpu%d device\n", policy->cpu);
-		return -ENODEV;
-	}
+		sprintf(name, "LV%d_volt", i);
+		type = script_get_item(tbl_name, name, &val);
+		if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+			CPUFREQ_ERR("get LV%d_volt from sysconfig failed\n", i);
+			goto fail;
+		}
 
-	cpu_clk = clk_get(cpu_dev, NULL);
-	if (IS_ERR_OR_NULL(cpu_clk)) {
-		ret = PTR_ERR(cpu_clk);
-		CPUFREQ_ERR("Unable to get PLL CPU clock\n");
-		return ret;
-	}
-	policy->clk = cpu_clk;
-
-#ifdef CONFIG_SCHED_SMP_DCMP
-	cluster1_cpu_dev = get_cpu_device(CLUSTER_MAX_CORES);
-	if (!cluster1_cpu_dev) {
-		CPUFREQ_ERR("Failed to get other cluster cpu%d device\n", policy->cpu);
-		return -ENODEV;
-	}
-	cluster1_clk = clk_get(cluster1_cpu_dev, NULL);
-	if (IS_ERR_OR_NULL(cluster1_clk)) {
-		ret = PTR_ERR(cluster1_clk);
-		CPUFREQ_ERR("Unable to get OTHER cluster PLL CPU clock\n");
-		return ret;
-	}
+#ifdef CONFIG_ARCH_SUN8IW3P1
+		if (value) {
+			dvfs_table_syscfg[i-1].volt = val.val >= SUNXI_CPUFREQ_VOLT_LIMIT ? val.val : SUNXI_CPUFREQ_VOLT_LIMIT;
+		} else {
+			dvfs_table_syscfg[i-1].volt = val.val;
+		}
+#else
+		dvfs_table_syscfg[i-1].volt = val.val;
 #endif
-	regulator_name = of_get_property(cpu_dev->of_node, "regulators", NULL);
-	if (!regulator_name) {
-		CPUFREQ_ERR("Unable to get regulator\n");
-		goto lable_1;
-	}
-
-	table = dev_pm_opp_set_regulator(cpu_dev, regulator_name);
-	if (!table) {
-		CPUFREQ_ERR("Failed to set regulator for cpu\n");
-		goto out_err_clk_pll;
-	}
-
-lable_1:
-	/* set policy->cpus according to operating-points-v2 */
-	ret = dev_pm_opp_of_get_sharing_cpus_by_soc_bin(cpu_dev,
-						policy->cpus, soc_bin);
-	if (ret) {
-		CPUFREQ_ERR("OPP-v2 opp-shared Error\n");
-		goto out_err_clk_pll;
-	}
-
-	ret = dev_pm_opp_of_cpumask_add_table_by_soc_bin(policy->cpus,
-								soc_bin);
-	if (ret) {
-		CPUFREQ_ERR("Failed to add opp table\n");
-		goto out_err_clk_pll;
-	}
-
-	ret = dev_pm_opp_init_cpufreq_table(cpu_dev, &freq_table);
-	if (ret) {
-		CPUFREQ_ERR("Failed to init cpufreq table: %d\n", ret);
-		goto out_err_free_opp;
-	}
-
-	ret = cpufreq_table_validate_and_show(policy, freq_table);
-	if (ret) {
-		CPUFREQ_ERR("Invalid frequency table: %d\n", ret);
-		goto out_err_free_opp;
-	}
-
-	transition_latency = dev_pm_opp_get_max_transition_latency(cpu_dev);
-	if (!transition_latency)
-		transition_latency = CPUFREQ_ETERNAL;
-	policy->cpuinfo.transition_latency = transition_latency;
-
-	rcu_read_lock();
-	suspend_opp = dev_pm_opp_get_suspend_opp(cpu_dev);
-	if (suspend_opp)
-		policy->suspend_freq = dev_pm_opp_get_freq(suspend_opp) / 1000;
-	rcu_read_unlock();
-
-	ret = sunxi_cpufreq_set_vf(freq_table, policy->cpu);
-	if (ret) {
-		CPUFREQ_ERR("sunxi_cpufreq_set_vf failed: %d\n", ret);
-		goto out_err_free_opp;
 	}
 
 	return 0;
 
-out_err_free_opp:
-	dev_pm_opp_of_cpumask_remove_table(policy->cpus);
-out_err_clk_pll:
-	clk_put(cpu_clk);
+fail:
+	return ret;
+}
+
+static void __vftable_show(void)
+{
+	int i;
+
+	pr_debug("----------------CPU V-F Table-------------\n");
+	for(i = 0; i < table_length_syscfg; i++){
+		pr_debug("\tfrequency = %4dKHz \tvoltage = %4dmv\n", \
+				dvfs_table_syscfg[i].freq, dvfs_table_syscfg[i].volt);
+	}
+	pr_debug("------------------------------------------\n");
+}
+
+extern int sunxi_get_soc_chipid(uint8_t *chip_id);
+static int calibrate_max_cpufreq(void *maxfreq)
+{
+    int ret = 0;
+#ifdef CONFIG_ARCH_SUN8IW7P1
+    unsigned char chipid[16];
+    memset(chipid, 0, sizeof(chipid));
+
+    sunxi_get_soc_chipid((uint8_t *)chipid);
+    switch(chipid[0]&0xff) {
+    case 0x42:      /* H2+ */
+    case 0x83:
+        *((unsigned int *)maxfreq) = 1008000000;
+        ret = 1;
+        break;
+    case 0x00:      /* H3 */
+    case 0x81:
+        break;
+    default:        /* H3 */
+        break;
+    }
+#endif
+    printk("calibrat: max_cpufreq %uMhz Type %d!\n", *((unsigned int *)maxfreq)/1000000, ret);
+    return ret;
+}
+
+/*
+ * init cpu max/min frequency from sysconfig;
+ * return: 0 - init cpu max/min successed, !0 - init cpu max/min failed;
+ */
+static int __init_freq_syscfg(char *tbl_name)
+{
+	int ret = 0;
+	script_item_u max, min, boot;
+	script_item_value_type_e type;
+
+	type = script_get_item(tbl_name, "max_freq", &max);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		CPUFREQ_ERR("get cpu max frequency from sysconfig failed\n");
+		ret = -1;
+		goto fail;
+	}
+	cpu_freq_max = max.val;
+	calibrate_max_cpufreq((void *)&cpu_freq_max);
+
+	type = script_get_item(tbl_name, "min_freq", &min);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		CPUFREQ_ERR("get cpu min frequency from sysconfig failed\n");
+		ret = -1;
+		goto fail;
+	}
+	cpu_freq_min = min.val;
+
+	type = script_get_item(tbl_name, "extremity_freq", &max);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		CPUFREQ_ERR("get cpu extremity frequency from sysconfig failed, use max_freq\n");
+		max.val = cpu_freq_max;
+	}
+	cpu_freq_ext = max.val;
+
+	type = script_get_item(tbl_name, "boot_freq", &boot);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		boot.val = cpu_freq_max;
+	} else {
+		sunxi_boot_freq_lock = 1;
+	}
+	cpu_freq_boot = boot.val;
+
+	if(cpu_freq_max > SUNXI_CPUFREQ_MAX || cpu_freq_max < SUNXI_CPUFREQ_MIN
+		|| cpu_freq_min < SUNXI_CPUFREQ_MIN || cpu_freq_min > SUNXI_CPUFREQ_MAX){
+		CPUFREQ_ERR("cpu max or min frequency from sysconfig is more than range\n");
+		ret = -1;
+		goto fail;
+	}
+
+	if(cpu_freq_min > cpu_freq_max){
+		CPUFREQ_ERR("cpu min frequency can not be more than cpu max frequency\n");
+		ret = -1;
+		goto fail;
+	}
+
+	if (cpu_freq_ext < cpu_freq_max) {
+		CPUFREQ_ERR("cpu ext frequency can not be less than cpu max frequency\n");
+		ret = -1;
+		goto fail;
+	}
+
+	if(cpu_freq_boot > cpu_freq_max || cpu_freq_boot < cpu_freq_min){
+		CPUFREQ_ERR("cpu boot frequency can not be more than cpu max frequency\n");
+		ret = -1;
+		goto fail;
+	}
+
+	/* get valid max/min frequency from cpu frequency table */
+	cpu_freq_max = __get_valid_freq(cpu_freq_max / 1000);
+	cpu_freq_min = __get_valid_freq(cpu_freq_min / 1000);
+	cpu_freq_ext = __get_valid_freq(cpu_freq_ext / 1000);
+	cpu_freq_boot = __get_valid_freq(cpu_freq_boot / 1000);
+
+	return 0;
+
+fail:
+	/* use default cpu max/min frequency */
+	cpu_freq_max = SUNXI_CPUFREQ_MAX / 1000;
+	cpu_freq_min = SUNXI_CPUFREQ_MIN / 1000;
+	cpu_freq_ext = SUNXI_CPUFREQ_MAX / 1000;
+	cpu_freq_boot = cpu_freq_max;
 
 	return ret;
 }
 
-static int sunxi_cpufreq_exit(struct cpufreq_policy *policy)
+
+/*
+ * cpu frequency initialise a policy;
+ * policy:  cpu frequency policy;
+ * result:  return 0 if init ok, else, return -EINVAL;
+ */
+static int sunxi_cpufreq_init(struct cpufreq_policy *policy)
 {
-	struct device *cpu_dev;
+	policy->cur = sunxi_cpufreq_get(0);
+	policy->min = cpu_freq_min;
+	policy->max = cpu_freq_ext;
+	policy->cpuinfo.min_freq = cpu_freq_min;
+	policy->cpuinfo.max_freq = cpu_freq_ext;
+	policy->cpuinfo.boot_freq = cpu_freq_boot;
+	policy->governor = CPUFREQ_DEFAULT_GOVERNOR;
 
-	cpu_dev = get_cpu_device(policy->cpu);
+	/* feed the latency information from the cpu driver */
+	policy->cpuinfo.transition_latency = SUNXI_FREQTRANS_LATENCY;
+	cpufreq_frequency_table_get_attr(sunxi_freq_tbl, policy->cpu);
 
-	dev_pm_opp_free_cpufreq_table(cpu_dev, &policy->freq_table);
-
-	dev_pm_opp_of_cpumask_remove_table(policy->related_cpus);
-
-	//dev_pm_opp_put_regulator(cpu_dev);
-
-	clk_put(policy->clk);
+#ifdef CONFIG_SMP
+	/*
+	 * both processors share the same voltage and the same clock,
+	 * but have dedicated power domains. So both cores needs to be
+	 * scaled together and hence needs software co-ordination.
+	 * Use cpufreq affected_cpus interface to handle this scenario.
+	 */
+	policy->shared_type = CPUFREQ_SHARED_TYPE_ANY;
+	cpumask_copy(policy->cpus, topology_core_cpumask(policy->cpu));
+#endif
 
 	return 0;
 }
 
-int sunxi_get_static_power(cpumask_t *cpumask, int interval,
-					unsigned long voltage, u32 *power)
+
+/*
+ * get current cpu frequency configuration;
+ * cfg:     cpu frequency cofniguration;
+ * return:  result;
+ */
+static int sunxi_cpufreq_getcur(struct sunxi_cpu_freq_t *cfg)
 {
-	*power = 1;
-	return 0;
-}
+	unsigned int    freq, freq0;
 
-static void sunxi_cpufreq_ready(struct cpufreq_policy *policy)
-{
-	struct device *cpu_dev = get_cpu_device(policy->cpu);
-	struct device_node *np;
-
-	np = of_node_get(cpu_dev->of_node);
-	if (WARN_ON(!np))
-		return;
-
-	if (of_find_property(np, "#cooling-cells", NULL)) {
-		u32 power_coefficient = 0;
-
-		of_property_read_u32(np, "dynamic-power-coefficient",
-				     &power_coefficient);
-
-		cdev = of_cpufreq_power_cooling_register(np,
-				policy->related_cpus,
-				power_coefficient, &sunxi_get_static_power);
-		if (IS_ERR(cdev)) {
-			dev_err(cpu_dev,
-				"running cpufreq without cooling device: %ld\n",
-				PTR_ERR(cdev));
-			cdev = NULL;
-		}
+	if(!cfg) {
+		return -EINVAL;
 	}
-	of_node_put(np);
+
+	cfg->pll = clk_get_rate(clk_pll);
+	freq = clk_get_rate(clk_cpu);
+	cfg->div.cpu_div = cfg->pll / freq;
+	freq0 = clk_get_rate(clk_axi);
+	cfg->div.axi_div = freq / freq0;
+
+	return 0;
 }
 
+
+#if defined(CONFIG_ARCH_SUN8IW7P1) || defined(CONFIG_ARCH_SUN8IW8P1)
+static int __set_pll_cpu_lock_time(void)
+{
+	unsigned int value;
+
+	/* modify pll cpu lock time */
+	value = readl(SUNXI_CCM_VBASE + 0x204);
+	value &= ~(0xffff);
+	value |= 0x400;
+	writel(value, SUNXI_CCM_VBASE + 0x204);
+
+	return 0;
+}
+#endif
+
+
+#ifdef CONFIG_PM
+
+/*
+ * cpu frequency configuration suspend;
+ */
+static int sunxi_cpufreq_suspend(struct cpufreq_policy *policy)
+{
+	return 0;
+}
+
+/*
+ * cpu frequency configuration resume;
+ */
+static int sunxi_cpufreq_resume(struct cpufreq_policy *policy)
+{
+#if defined(CONFIG_ARCH_SUN8IW7P1) || defined(CONFIG_ARCH_SUN8IW8P1)
+	__set_pll_cpu_lock_time();
+#endif
+
+	/* invalidate last_target setting */
+	last_target = ~0;
+	return 0;
+}
+
+
+#else   /* #ifdef CONFIG_PM */
+
+#define sunxi_cpufreq_suspend   NULL
+#define sunxi_cpufreq_resume    NULL
+
+#endif  /* #ifdef CONFIG_PM */
+
+/* Export freq_table to sysfs */
 static struct freq_attr *sunxi_cpufreq_attr[] = {
-	 &cpufreq_freq_attr_scaling_available_freqs,
-	 NULL,
+	&cpufreq_freq_attr_scaling_available_freqs,
+	NULL,
 };
 
 static struct cpufreq_driver sunxi_cpufreq_driver = {
-	.name         = "cpufreq-sunxi",
-	.flags        = CPUFREQ_STICKY | CPUFREQ_NEED_INITIAL_FREQ_CHECK,
-	.attr         = sunxi_cpufreq_attr,
-	.init         = sunxi_cpufreq_init,
-	.get          = sunxi_cpufreq_get,
-	.target_index = sunxi_cpufreq_target_index,
-	.exit         = sunxi_cpufreq_exit,
-	.ready        = sunxi_cpufreq_ready,
-	.verify       = cpufreq_generic_frequency_table_verify,
-	.suspend      = cpufreq_generic_suspend,
+	.name       = "cpufreq-sunxi",
+	.flags      = CPUFREQ_STICKY,
+	.init       = sunxi_cpufreq_init,
+	.verify     = sunxi_cpufreq_verify,
+	.target     = sunxi_cpufreq_target,
+	.get        = sunxi_cpufreq_get,
+	.getavg     = sunxi_cpufreq_getavg,
+	.suspend    = sunxi_cpufreq_suspend,
+	.resume     = sunxi_cpufreq_resume,
+	.attr	    = sunxi_cpufreq_attr,
 };
 
-#ifdef CONFIG_ARCH_SUN8IW7P1
-static int set_pll_cpu_lock_time(void)
-{
-	unsigned int value;
-	void __iomem *lock_time_vbase = NULL;
-#define PLL_CPU_LOCK_TIME_REG	(0x01c20000 + 0x204)
 
-	lock_time_vbase = ioremap(PLL_CPU_LOCK_TIME_REG, 4);
-	if (lock_time_vbase == NULL) {
-		pr_err("ioremap pll cpu lock time error\n");
-		return -1;
-	}
-
-	value = readl(lock_time_vbase);
-	value &= ~(0xffff);
-	value |= 0x400;
-	writel(value, lock_time_vbase);
-
-	iounmap(lock_time_vbase);
-	return 0;
-}
-#endif
-
+/*
+ * cpu frequency driver init
+ */
 static int __init sunxi_cpufreq_initcall(void)
 {
-	int ret;
+	int ret = 0;
+	char vftbl_name[16] = {0};
+	int flag = 0;
 
-#ifdef CONFIG_DEBUG_FS
-	sunxi_cpufreq.cpufreq_set_us = 0;
-	sunxi_cpufreq.cpufreq_get_us = 0;
+#if defined(CONFIG_ARCH_SUN8IW7P1) || defined(CONFIG_ARCH_SUN8IW8P1)
+	__set_pll_cpu_lock_time();
 #endif
 
-#ifdef CONFIG_ARCH_SUN8IW7P1
-	if (set_pll_cpu_lock_time())
-		return -1;
+#if defined(CONFIG_ARCH_SUN8IW1P1) || defined(CONFIG_ARCH_SUN8IW3P1)
+	clk_pll = clk_get(NULL, PLL1_CLK);
+#elif defined(CONFIG_ARCH_SUN8IW5P1) || defined(CONFIG_ARCH_SUN8IW7P1) || defined(CONFIG_ARCH_SUN8IW8P1)
+	clk_pll = clk_get(NULL, PLL_CPU_CLK);
 #endif
+
+	clk_cpu = clk_get(NULL, CPU_CLK);
+	clk_axi = clk_get(NULL, AXI_CLK);
+
+	if (IS_ERR(clk_pll) || IS_ERR(clk_cpu) || IS_ERR(clk_axi)) {
+		CPUFREQ_ERR("%s: could not get clock(s)\n", __func__);
+		return -ENOENT;
+	}
+
+	pr_debug("%s: clocks pll=%lu,cpu=%lu,axi=%lu\n", __func__,
+		   clk_get_rate(clk_pll), clk_get_rate(clk_cpu), clk_get_rate(clk_axi));
+
+	/* initialise current frequency configuration */
+	sunxi_cpufreq_getcur(&cpu_cur);
+	sunxi_cpufreq_show("cur", &cpu_cur);
+
+#if !defined(CONFIG_ARCH_SUN8IW7P1) && !defined(CONFIG_ARCH_SUN8IW8P1)
+	cpu_vdd = regulator_get(NULL, SUNXI_CPUFREQ_CPUVDD);
+	if (IS_ERR(cpu_vdd)) {
+		CPUFREQ_ERR("%s: could not get cpu vdd\n", __func__);
+		return -ENOENT;
+	}
+#endif
+
+#ifdef CONFIG_ARCH_SUN8IW3P1
+	writel(BIT(15), IO_ADDRESS(0x01c00024));
+	if ((readl(IO_ADDRESS(0x01c00024)) >> 16) == MAGIC0) {
+		sprintf(vftbl_name, "dvfs_table");
+	} else {
+		if (script_is_main_key_exist("dvfs_table_bak")) {
+			sprintf(vftbl_name, "dvfs_table_bak");
+		} else {
+			sprintf(vftbl_name, "dvfs_table");
+			flag = 1;
+		}
+	}
+#else
+	sprintf(vftbl_name, "dvfs_table");
+#endif
+
+	/* init cpu frequency from sysconfig */
+	if(__init_freq_syscfg(vftbl_name)) {
+		CPUFREQ_ERR("%s, use default cpu max/min frequency, max freq: %uMHz, min freq: %uMHz\n",
+					__func__, cpu_freq_max/1000, cpu_freq_min/1000);
+	}else{
+		pr_debug("%s, get cpu frequency from sysconfig, max freq: %uMHz, min freq: %uMHz\n",
+					__func__, cpu_freq_max/1000, cpu_freq_min/1000);
+	}
+
+	ret = __init_vftable_syscfg(vftbl_name, flag);
+	if (ret) {
+		CPUFREQ_ERR("%s get V-F table failed\n", __func__);
+		return ret;
+	} else {
+		__vftable_show();
+	}
+
+	/* register cpu frequency driver */
 	ret = cpufreq_register_driver(&sunxi_cpufreq_driver);
-	if (ret)
-		CPUFREQ_ERR("Failed register driver\n");
 
 	return ret;
 }
+module_init(sunxi_cpufreq_initcall);
 
+/*
+ * cpu frequency driver exit
+ */
 static void __exit sunxi_cpufreq_exitcall(void)
 {
+#if !defined(CONFIG_ARCH_SUN8IW7P1) && !defined(CONFIG_ARCH_SUN8IW8P1)
+	regulator_put(cpu_vdd);
+#endif
+	clk_put(clk_pll);
+	clk_put(clk_cpu);
+	clk_put(clk_axi);
 	cpufreq_unregister_driver(&sunxi_cpufreq_driver);
 }
-
-module_init(sunxi_cpufreq_initcall);
 module_exit(sunxi_cpufreq_exitcall);
 
 #ifdef CONFIG_DEBUG_FS
-#include <linux/debugfs.h>
-
 static struct dentry *debugfs_cpufreq_root;
 
-static int cpufreq_debugfs_gettime_show(struct seq_file *s, void *data)
+static int cpufreq_get_time_show(struct seq_file *s, void *data)
 {
-	seq_printf(s, "%lld\n", sunxi_cpufreq.cpufreq_get_us);
+	seq_printf(s, "%Ld\n", cpufreq_get_time_usecs);
 	return 0;
 }
 
-static int cpufreq_debugfs_gettime_open(struct inode *inode, struct file *file)
+static int cpufreq_get_time_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, cpufreq_debugfs_gettime_show,
-			inode->i_private);
+	return single_open(file, cpufreq_get_time_show, inode->i_private);
 }
 
-static const struct file_operations cpufreq_debugfs_gettime_fops = {
-	.open = cpufreq_debugfs_gettime_open,
+static const struct file_operations cpufreq_get_time_fops = {
+	.open = cpufreq_get_time_open,
 	.read = seq_read,
 };
 
-static int cpufreq_debugfs_settime_show(struct seq_file *s, void *data)
+static int cpufreq_set_time_show(struct seq_file *s, void *data)
 {
-	seq_printf(s, "%lld\n", sunxi_cpufreq.cpufreq_set_us);
+	seq_printf(s, "%Ld\n", cpufreq_set_time_usecs);
 	return 0;
 }
 
-static int cpufreq_debugfs_settime_open(struct inode *inode, struct file *file)
+static int cpufreq_set_time_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, cpufreq_debugfs_settime_show,
-			inode->i_private);
+	return single_open(file, cpufreq_set_time_show, inode->i_private);
 }
 
-static const struct file_operations cpufreq_debugfs_settime_fops = {
-	.open = cpufreq_debugfs_settime_open,
+static const struct file_operations cpufreq_set_time_fops = {
+	.open = cpufreq_set_time_open,
 	.read = seq_read,
 };
 
-static int __init cpufreq_debugfs_init(void)
+static int __init cpufreq_debug_init(void)
 {
 	int err = 0;
 
@@ -678,14 +796,12 @@ static int __init cpufreq_debugfs_init(void)
 	if (!debugfs_cpufreq_root)
 		return -ENOMEM;
 
-	if (!debugfs_create_file("get_time", 0444, debugfs_cpufreq_root, NULL,
-				&cpufreq_debugfs_gettime_fops)) {
+	if (!debugfs_create_file("get_time", 0444, debugfs_cpufreq_root, NULL, &cpufreq_get_time_fops)) {
 		err = -ENOMEM;
 		goto out;
 	}
 
-	if (!debugfs_create_file("set_time", 0444, debugfs_cpufreq_root, NULL,
-				&cpufreq_debugfs_settime_fops)) {
+	if (!debugfs_create_file("set_time", 0444, debugfs_cpufreq_root, NULL, &cpufreq_set_time_fops)) {
 		err = -ENOMEM;
 		goto out;
 	}
@@ -697,14 +813,13 @@ out:
 	return err;
 }
 
-static void __exit cpufreq_debugfs_exit(void)
+static void __exit cpufreq_debug_exit(void)
 {
 	debugfs_remove_recursive(debugfs_cpufreq_root);
 }
 
-late_initcall(cpufreq_debugfs_init);
-module_exit(cpufreq_debugfs_exit);
-
+late_initcall(cpufreq_debug_init);
+module_exit(cpufreq_debug_exit);
 #endif /* CONFIG_DEBUG_FS */
 
 MODULE_DESCRIPTION("cpufreq driver for sunxi SOCs");

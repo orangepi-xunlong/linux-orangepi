@@ -74,8 +74,8 @@ config MTD_REDBOOT_PARTS_READONLY
 endif # MTD_REDBOOT_PARTS
 
 config MTD_CMDLINE_PARTS
-	tristate "Command line partition table parsing"
-	depends on MTD
+	bool "Command line partition table parsing"
+	depends on MTD = "y"
 	---help---
 	  Allow generic configuration of the MTD partition tables via the kernel
 	  command line. Multiple flash resources are supported for hardware where
@@ -112,7 +112,7 @@ config MTD_CMDLINE_PARTS
 
 config MTD_AFS_PARTS
 	tristate "ARM Firmware Suite partition parsing"
-	depends on (ARM || ARM64)
+	depends on ARM
 	---help---
 	  The ARM Firmware Suite allows the user to divide flash devices into
 	  multiple 'images'. Each such image has a header containing its name
@@ -133,7 +133,7 @@ config MTD_OF_PARTS
 	help
 	  This provides a partition parsing function which derives
 	  the partition map from the children of the flash node,
-	  as described in Documentation/devicetree/bindings/mtd/partition.txt.
+	  as described in Documentation/devicetree/booting-without-of.txt.
 
 config MTD_AR7_PARTS
 	tristate "TI AR7 partitioning support"
@@ -142,33 +142,31 @@ config MTD_AR7_PARTS
 
 config MTD_BCM63XX_PARTS
 	tristate "BCM63XX CFE partitioning support"
-	depends on BCM63XX || BMIPS_GENERIC || COMPILE_TEST
+	depends on BCM63XX
 	select CRC32
 	help
 	  This provides partions parsing for BCM63xx devices with CFE
 	  bootloaders.
 
-config MTD_BCM47XX_PARTS
-	tristate "BCM47XX partitioning support"
-	depends on BCM47XX || ARCH_BCM_5301X
-	help
-	  This provides partitions parser for devices based on BCM47xx
-	  boards.
-
-config MTD_SUNXI_PARTS
-	tristate "SUNXI partitioning support"
-	depends on ARCH_SUNXI
-	help
-	  This provides partitions parser for devices based on SUNXI
-	  boards.
-
 comment "User Modules And Translation Layers"
 
-#
-# MTD block device support is select'ed if needed
-#
+config MTD_CHAR
+	tristate "Direct char device access to MTD devices"
+	help
+	  This provides a character device for each MTD device present in
+	  the system, allowing the user to read and write directly to the
+	  memory chips, and also use ioctl() to obtain information about
+	  the device, or to erase parts of it.
+
+config HAVE_MTD_OTP
+	bool
+	help
+	  Enable access to OTP regions using MTD_CHAR.
+
 config MTD_BLKDEVS
-	tristate
+	tristate "Common interface to block layer for MTD 'translation layers'"
+	depends on BLOCK
+	default n
 
 config MTD_BLOCK
 	tristate "Caching block device access to MTD devices"
@@ -286,7 +284,7 @@ config SSFDC
 
 config SM_FTL
 	tristate "SmartMedia/xD new translation layer"
-	depends on BLOCK
+	depends on EXPERIMENTAL && BLOCK
 	select MTD_BLKDEVS
 	select MTD_NAND_ECC
 	help
@@ -316,19 +314,6 @@ config MTD_SWAP
 	  The driver provides wear leveling by storing erase counter into the
 	  OOB.
 
-config MTD_PARTITIONED_MASTER
-	bool "Retain master device when partitioned"
-	default n
-	depends on MTD
-	help
-	  For historical reasons, by default, either a master is present or
-	  several partitions are present, but not both. The concern was that
-	  data listed in multiple partitions was dangerous; however, SCSI does
-	  this and it is frequently useful for applications. This config option
-	  leaves the master in even if the device is partitioned. It also makes
-	  the parent of the partition device be the master device, rather than
-	  what lies behind the master.
-
 source "drivers/mtd/chips/Kconfig"
 
 source "drivers/mtd/maps/Kconfig"
@@ -340,8 +325,6 @@ source "drivers/mtd/nand/Kconfig"
 source "drivers/mtd/onenand/Kconfig"
 
 source "drivers/mtd/lpddr/Kconfig"
-
-source "drivers/mtd/spi-nor/Kconfig"
 
 source "drivers/mtd/ubi/Kconfig"
 

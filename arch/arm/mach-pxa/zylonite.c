@@ -19,20 +19,19 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
-#include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 #include <linux/smc91x.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include "pxa3xx.h"
+#include <mach/pxa3xx.h>
 #include <mach/audio.h>
-#include <linux/platform_data/video-pxafb.h>
-#include "zylonite.h"
-#include <linux/platform_data/mmc-pxamci.h>
-#include <linux/platform_data/usb-ohci-pxa27x.h>
-#include <linux/platform_data/keypad-pxa27x.h>
-#include <linux/platform_data/mtd-nand-pxa3xx.h>
+#include <mach/pxafb.h>
+#include <mach/zylonite.h>
+#include <mach/mmc.h>
+#include <mach/ohci.h>
+#include <plat/pxa27x_keypad.h>
+#include <plat/pxa3xx_nand.h>
 
 #include "devices.h"
 #include "generic.h"
@@ -121,15 +120,11 @@ static inline void zylonite_init_leds(void) {}
 #endif
 
 #if defined(CONFIG_FB_PXA) || defined(CONFIG_FB_PXA_MODULE)
-static struct pwm_lookup zylonite_pwm_lookup[] = {
-	PWM_LOOKUP("pxa27x-pwm.1", 1, "pwm-backlight.0", NULL, 10000,
-		   PWM_POLARITY_NORMAL),
-};
-
 static struct platform_pwm_backlight_data zylonite_backlight_data = {
+	.pwm_id		= 3,
 	.max_brightness	= 100,
 	.dft_brightness	= 100,
-	.enable_gpio	= -1,
+	.pwm_period_ns	= 10000,
 };
 
 static struct platform_device zylonite_backlight_device = {
@@ -210,7 +205,6 @@ static struct pxafb_mach_info zylonite_sharp_lcd_info = {
 
 static void __init zylonite_init_lcd(void)
 {
-	pwm_add_table(zylonite_pwm_lookup, ARRAY_SIZE(zylonite_pwm_lookup));
 	platform_device_register(&zylonite_backlight_device);
 
 	if (lcd_id & 0x20) {
@@ -269,7 +263,7 @@ static inline void zylonite_init_mmc(void) {}
 #endif
 
 #if defined(CONFIG_KEYBOARD_PXA27x) || defined(CONFIG_KEYBOARD_PXA27x_MODULE)
-static const unsigned int zylonite_matrix_key_map[] = {
+static unsigned int zylonite_matrix_key_map[] = {
 	/* KEY(row, col, key_code) */
 	KEY(0, 0, KEY_A), KEY(0, 1, KEY_B), KEY(0, 2, KEY_C), KEY(0, 5, KEY_D),
 	KEY(1, 0, KEY_E), KEY(1, 1, KEY_F), KEY(1, 2, KEY_G), KEY(1, 5, KEY_H),
@@ -312,15 +306,11 @@ static const unsigned int zylonite_matrix_key_map[] = {
 	KEY(0, 3, KEY_AUX),	/* contact */
 };
 
-static struct matrix_keymap_data zylonite_matrix_keymap_data = {
-	.keymap			= zylonite_matrix_key_map,
-	.keymap_size		= ARRAY_SIZE(zylonite_matrix_key_map),
-};
-
 static struct pxa27x_keypad_platform_data zylonite_keypad_info = {
 	.matrix_key_rows	= 8,
 	.matrix_key_cols	= 8,
-	.matrix_keymap_data	= &zylonite_matrix_keymap_data,
+	.matrix_key_map		= zylonite_matrix_key_map,
+	.matrix_key_map_size	= ARRAY_SIZE(zylonite_matrix_key_map),
 
 	.enable_rotary0		= 1,
 	.rotary0_up_key		= KEY_UP,
@@ -438,7 +428,7 @@ MACHINE_START(ZYLONITE, "PXA3xx Platform Development Kit (aka Zylonite)")
 	.nr_irqs	= ZYLONITE_NR_IRQS,
 	.init_irq	= pxa3xx_init_irq,
 	.handle_irq	= pxa3xx_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= zylonite_init,
 	.restart	= pxa_restart,
 MACHINE_END

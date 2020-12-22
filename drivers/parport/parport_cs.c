@@ -193,4 +193,16 @@ static struct pcmcia_driver parport_cs_driver = {
 	.remove		= parport_detach,
 	.id_table	= parport_ids,
 };
-module_pcmcia_driver(parport_cs_driver);
+
+static int __init init_parport_cs(void)
+{
+	return pcmcia_register_driver(&parport_cs_driver);
+}
+
+static void __exit exit_parport_cs(void)
+{
+	pcmcia_unregister_driver(&parport_cs_driver);
+}
+
+module_init(init_parport_cs);
+module_exit(exit_parport_cs);

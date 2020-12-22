@@ -22,10 +22,10 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/irq.h>
 
-#include "pxa300.h"
-#include "colibri.h"
-#include <linux/platform_data/usb-ohci-pxa27x.h>
-#include <linux/platform_data/video-pxafb.h>
+#include <mach/pxa300.h>
+#include <mach/colibri.h>
+#include <mach/ohci.h>
+#include <mach/pxafb.h>
 #include <mach/audio.h>
 
 #include "generic.h"
@@ -189,7 +189,7 @@ MACHINE_START(COLIBRI300, "Toradex Colibri PXA300")
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa3xx_init_irq,
 	.handle_irq	= pxa3xx_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.restart	= pxa_restart,
 MACHINE_END
 

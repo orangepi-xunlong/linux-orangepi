@@ -17,7 +17,7 @@
 #include <linux/delay.h>
 #include <linux/types.h>
 #include <linux/io.h>
-#include <loongson1.h>
+#include <asm/mach-loongson1/loongson1.h>
 
 #define LS1X_RTC_REG_OFFSET	(LS1X_RTC_BASE + 0x20)
 #define LS1X_RTC_REGS(x) \
@@ -143,7 +143,7 @@ static struct rtc_class_ops  ls1x_rtc_ops = {
 	.set_time	= ls1x_rtc_set_time,
 };
 
-static int ls1x_rtc_probe(struct platform_device *pdev)
+static int __devinit ls1x_rtc_probe(struct platform_device *pdev)
 {
 	struct rtc_device *rtcdev;
 	unsigned long v;
@@ -172,7 +172,7 @@ static int ls1x_rtc_probe(struct platform_device *pdev)
 	while (readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_TTS)
 		usleep_range(1000, 3000);
 
-	rtcdev = devm_rtc_device_register(&pdev->dev, "ls1x-rtc",
+	rtcdev = rtc_device_register("ls1x-rtc", &pdev->dev,
 					&ls1x_rtc_ops , THIS_MODULE);
 	if (IS_ERR(rtcdev)) {
 		ret = PTR_ERR(rtcdev);
@@ -185,10 +185,22 @@ err:
 	return ret;
 }
 
+static int __devexit ls1x_rtc_remove(struct platform_device *pdev)
+{
+	struct rtc_device *rtcdev = platform_get_drvdata(pdev);
+
+	rtc_device_unregister(rtcdev);
+	platform_set_drvdata(pdev, NULL);
+
+	return 0;
+}
+
 static struct platform_driver  ls1x_rtc_driver = {
 	.driver		= {
 		.name	= "ls1x-rtc",
+		.owner	= THIS_MODULE,
 	},
+	.remove		= __devexit_p(ls1x_rtc_remove),
 	.probe		= ls1x_rtc_probe,
 };
 

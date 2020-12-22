@@ -18,6 +18,12 @@ config LIRC_BT829
 	help
 	  Driver for the IR interface on BT829-based hardware
 
+config LIRC_IGORPLUGUSB
+	tristate "Igor Cesko's USB IR Receiver"
+	depends on LIRC && USB
+	help
+	  Driver for Igor Cesko's USB IR Receiver
+
 config LIRC_IMON
 	tristate "Legacy SoundGraph iMON Receiver and Display"
 	depends on LIRC && USB
@@ -56,6 +62,12 @@ config LIRC_SIR
 	depends on LIRC
 	help
 	  Driver for the SIR IrDA port
+
+config LIRC_TTUSBIR
+	tristate "Technotrend USB IR Receiver"
+	depends on LIRC && USB
+	help
+	  Driver for the Technotrend USB IR Receiver
 
 config LIRC_ZILOG
 	tristate "Zilog/Hauppauge IR Transmitter"

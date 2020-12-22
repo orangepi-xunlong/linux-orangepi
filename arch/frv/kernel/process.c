@@ -38,7 +38,6 @@
 #include "local.h"
 
 asmlinkage void ret_from_fork(void);
-asmlinkage void ret_from_kernel_thread(void);
 
 #include <asm/pgalloc.h>
 
@@ -59,12 +58,29 @@ static void core_sleep_idle(void)
 	mb();
 }
 
-void arch_cpu_idle(void)
+void (*idle)(void) = core_sleep_idle;
+
+/*
+ * The idle thread. There's no useful work to be
+ * done, so just try to conserve power and have a
+ * low exit latency (ie sit in a loop waiting for
+ * somebody to say that they'd like to reschedule)
+ */
+void cpu_idle(void)
 {
-	if (!frv_dma_inprogress)
-		core_sleep_idle();
-	else
-		local_irq_enable();
+	/* endless idle loop with no priority at all */
+	while (1) {
+		rcu_idle_enter();
+		while (!need_resched()) {
+			check_pgt_cache();
+
+			if (!frv_dma_inprogress && idle)
+				idle();
+		}
+		rcu_idle_exit();
+
+		schedule_preempt_disabled();
+	}
 }
 
 void machine_restart(char * __unused)
@@ -122,40 +138,87 @@ inline unsigned long user_stack(const struct pt_regs *regs)
 	return user_mode(regs) ? regs->sp : 0;
 }
 
+asmlinkage int sys_fork(void)
+{
+#ifndef CONFIG_MMU
+	/* fork almost works, enough to trick you into looking elsewhere:-( */
+	return -EINVAL;
+#else
+	return do_fork(SIGCHLD, user_stack(__frame), __frame, 0, NULL, NULL);
+#endif
+}
+
+asmlinkage int sys_vfork(void)
+{
+	return do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, user_stack(__frame), __frame, 0,
+		       NULL, NULL);
+}
+
+/*****************************************************************************/
+/*
+ * clone a process
+ * - tlsptr is retrieved by copy_thread()
+ */
+asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp,
+			 int __user *parent_tidptr, int __user *child_tidptr,
+			 int __user *tlsptr)
+{
+	if (!newsp)
+		newsp = user_stack(__frame);
+	return do_fork(clone_flags, newsp, __frame, 0, parent_tidptr, child_tidptr);
+} /* end sys_clone() */
+
+/*****************************************************************************/
+/*
+ * This gets called before we allocate a new thread and copy
+ * the current task into it.
+ */
+void prepare_to_copy(struct task_struct *tsk)
+{
+	//unlazy_fpu(tsk);
+} /* end prepare_to_copy() */
+
+/*****************************************************************************/
 /*
  * set up the kernel stack and exception frames for a new process
  */
 int copy_thread(unsigned long clone_flags,
-		unsigned long usp, unsigned long arg,
-		struct task_struct *p)
+		unsigned long usp, unsigned long topstk,
+		struct task_struct *p, struct pt_regs *regs)
 {
-	struct pt_regs *childregs;
+	struct pt_regs *childregs0, *childregs, *regs0;
 
-	childregs = (struct pt_regs *)
+	regs0 = __kernel_frame0_ptr;
+	childregs0 = (struct pt_regs *)
 		(task_stack_page(p) + THREAD_SIZE - FRV_FRAME0_SIZE);
+	childregs = childregs0;
 
 	/* set up the userspace frame (the only place that the USP is stored) */
-	*childregs = *current_pt_regs();
+	*childregs0 = *regs0;
+
+	childregs0->gr8		= 0;
+	childregs0->sp		= usp;
+	childregs0->next_frame	= NULL;
+
+	/* set up the return kernel frame if called from kernel_thread() */
+	if (regs != regs0) {
+		childregs--;
+		*childregs = *regs;
+		childregs->sp = (unsigned long) childregs0;
+		childregs->next_frame = childregs0;
+		childregs->gr15 = (unsigned long) task_thread_info(p);
+		childregs->gr29 = (unsigned long) p;
+	}
+
+	p->set_child_tid = p->clear_child_tid = NULL;
 
 	p->thread.frame	 = childregs;
 	p->thread.curr	 = p;
 	p->thread.sp	 = (unsigned long) childregs;
 	p->thread.fp	 = 0;
 	p->thread.lr	 = 0;
-	p->thread.frame0 = childregs;
-
-	if (unlikely(p->flags & PF_KTHREAD)) {
-		childregs->gr9 = usp; /* function */
-		childregs->gr8 = arg;
-		p->thread.pc = (unsigned long) ret_from_kernel_thread;
-		save_user_regs(p->thread.user);
-		return 0;
-	}
-	if (usp)
-		childregs->sp = usp;
-	childregs->next_frame	= NULL;
-
-	p->thread.pc = (unsigned long) ret_from_fork;
+	p->thread.pc	 = (unsigned long) ret_from_fork;
+	p->thread.frame0 = childregs0;
 
 	/* the new TLS pointer is passed in as arg #5 to sys_clone() */
 	if (clone_flags & CLONE_SETTLS)
@@ -165,6 +228,25 @@ int copy_thread(unsigned long clone_flags,
 
 	return 0;
 } /* end copy_thread() */
+
+/*
+ * sys_execve() executes a new program.
+ */
+asmlinkage int sys_execve(const char __user *name,
+			  const char __user *const __user *argv,
+			  const char __user *const __user *envp)
+{
+	int error;
+	char * filename;
+
+	filename = getname(name);
+	error = PTR_ERR(filename);
+	if (IS_ERR(filename))
+		return error;
+	error = do_execve(filename, argv, envp, __frame);
+	putname(filename);
+	return error;
+}
 
 unsigned long get_wchan(struct task_struct *p)
 {

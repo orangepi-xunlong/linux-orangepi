@@ -23,8 +23,10 @@
 
 #include <linux/input.h>
 #include <linux/slab.h>
+#include <linux/usb.h>
 #include <linux/hid.h>
 
+#include "usbhid/usbhid.h"
 #include "hid-lg.h"
 
 struct lg2ff_device {
@@ -54,7 +56,7 @@ static int play_effect(struct input_dev *dev, void *data,
 		lg2ff->report->field[0]->value[4] = 0x00;
 	}
 
-	hid_hw_request(hid, lg2ff->report, HID_REQ_SET_REPORT);
+	usbhid_submit_report(hid, lg2ff->report, USB_DIR_OUT);
 	return 0;
 }
 
@@ -93,9 +95,9 @@ int lg2ff_init(struct hid_device *hid)
 	report->field[0]->value[5] = 0x00;
 	report->field[0]->value[6] = 0x00;
 
-	hid_hw_request(hid, report, HID_REQ_SET_REPORT);
+	usbhid_submit_report(hid, report, USB_DIR_OUT);
 
-	hid_info(hid, "Force feedback for Logitech variant 2 rumble devices by Anssi Hannula <anssi.hannula@gmail.com>\n");
+	hid_info(hid, "Force feedback for Logitech RumblePad/Rumblepad 2 by Anssi Hannula <anssi.hannula@gmail.com>\n");
 
 	return 0;
 }

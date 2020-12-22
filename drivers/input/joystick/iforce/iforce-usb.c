@@ -64,7 +64,7 @@ void iforce_usb_xmit(struct iforce *iforce)
 
 	if ( (n=usb_submit_urb(iforce->out, GFP_ATOMIC)) ) {
 		clear_bit(IFORCE_XMIT_RUNNING, iforce->xmit_flags);
-		dev_warn(&iforce->intf->dev, "usb_submit_urb failed %d\n", n);
+		dev_warn(&iforce->dev->dev, "usb_submit_urb failed %d\n", n);
 	}
 
 	/* The IFORCE_XMIT_RUNNING bit is not cleared here. That's intended.
@@ -76,7 +76,6 @@ void iforce_usb_xmit(struct iforce *iforce)
 static void iforce_usb_irq(struct urb *urb)
 {
 	struct iforce *iforce = urb->context;
-	struct device *dev = &iforce->intf->dev;
 	int status;
 
 	switch (urb->status) {
@@ -87,12 +86,11 @@ static void iforce_usb_irq(struct urb *urb)
 	case -ENOENT:
 	case -ESHUTDOWN:
 		/* this urb is terminated, clean up */
-		dev_dbg(dev, "%s - urb shutting down with status: %d\n",
-			__func__, urb->status);
+		dbg("%s - urb shutting down with status: %d",
+		    __func__, urb->status);
 		return;
 	default:
-		dev_dbg(dev, "%s - urb has status of: %d\n",
-			__func__, urb->status);
+		dbg("%s - urb has status of: %d", __func__, urb->status);
 		goto exit;
 	}
 
@@ -102,8 +100,8 @@ static void iforce_usb_irq(struct urb *urb)
 exit:
 	status = usb_submit_urb (urb, GFP_ATOMIC);
 	if (status)
-		dev_err(dev, "%s - usb_submit_urb failed with result %d\n",
-			__func__, status);
+		err ("%s - usb_submit_urb failed with result %d",
+		     __func__, status);
 }
 
 static void iforce_usb_out(struct urb *urb)
@@ -112,8 +110,7 @@ static void iforce_usb_out(struct urb *urb)
 
 	if (urb->status) {
 		clear_bit(IFORCE_XMIT_RUNNING, iforce->xmit_flags);
-		dev_dbg(&iforce->intf->dev, "urb->status %d, exiting\n",
-			urb->status);
+		dbg("urb->status %d, exiting", urb->status);
 		return;
 	}
 
@@ -141,9 +138,6 @@ static int iforce_usb_probe(struct usb_interface *intf,
 
 	interface = intf->cur_altsetting;
 
-	if (interface->desc.bNumEndpoints < 2)
-		return -ENODEV;
-
 	epirq = &interface->endpoint[0].desc;
 	epout = &interface->endpoint[1].desc;
 
@@ -161,7 +155,6 @@ static int iforce_usb_probe(struct usb_interface *intf,
 
 	iforce->bus = IFORCE_USB;
 	iforce->usbdev = dev;
-	iforce->intf = intf;
 
 	iforce->cr.bRequestType = USB_TYPE_VENDOR | USB_DIR_IN | USB_RECIP_INTERFACE;
 	iforce->cr.wIndex = 0;

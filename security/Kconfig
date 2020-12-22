@@ -4,7 +4,73 @@
 
 menu "Security options"
 
-source security/keys/Kconfig
+config KEYS
+	bool "Enable access key retention support"
+	help
+	  This option provides support for retaining authentication tokens and
+	  access keys in the kernel.
+
+	  It also includes provision of methods by which such keys might be
+	  associated with a process so that network filesystems, encryption
+	  support and the like can find them.
+
+	  Furthermore, a special type of key is available that acts as keyring:
+	  a searchable sequence of keys. Each process is equipped with access
+	  to five standard keyrings: UID-specific, GID-specific, session,
+	  process and thread.
+
+	  If you are unsure as to whether this is required, answer N.
+
+config TRUSTED_KEYS
+	tristate "TRUSTED KEYS"
+	depends on KEYS && TCG_TPM
+	select CRYPTO
+	select CRYPTO_HMAC
+	select CRYPTO_SHA1
+	help
+	  This option provides support for creating, sealing, and unsealing
+	  keys in the kernel. Trusted keys are random number symmetric keys,
+	  generated and RSA-sealed by the TPM. The TPM only unseals the keys,
+	  if the boot PCRs and other criteria match.  Userspace will only ever
+	  see encrypted blobs.
+
+	  If you are unsure as to whether this is required, answer N.
+
+config ENCRYPTED_KEYS
+	tristate "ENCRYPTED KEYS"
+	depends on KEYS
+	select CRYPTO
+	select CRYPTO_HMAC
+	select CRYPTO_AES
+	select CRYPTO_CBC
+	select CRYPTO_SHA256
+	select CRYPTO_RNG
+	help
+	  This option provides support for create/encrypting/decrypting keys
+	  in the kernel.  Encrypted keys are kernel generated random numbers,
+	  which are encrypted/decrypted with a 'master' symmetric key. The
+	  'master' key can be either a trusted-key or user-key type.
+	  Userspace only ever sees/stores encrypted blobs.
+
+	  If you are unsure as to whether this is required, answer N.
+
+config KEYS_DEBUG_PROC_KEYS
+	bool "Enable the /proc/keys file by which keys may be viewed"
+	depends on KEYS
+	help
+	  This option turns on support for the /proc/keys file - through which
+	  can be listed all the keys on the system that are viewable by the
+	  reading process.
+
+	  The only keys included in the list are those that grant View
+	  permission to the reading process whether or not it possesses them.
+	  Note that LSM security checks are still performed, and may further
+	  filter out keys that the current process is not authorised to view.
+
+	  Only key attributes are listed here; key payloads are not included in
+	  the resulting table.
+
+	  If you are unsure as to whether this is required, answer N.
 
 config SECURITY_DMESG_RESTRICT
 	bool "Restrict unprivileged access to the kernel syslog"
@@ -18,19 +84,9 @@ config SECURITY_DMESG_RESTRICT
 
 	  If you are unsure how to answer this question, answer N.
 
-config SECURITY_PERF_EVENTS_RESTRICT
-	bool "Restrict unprivileged use of performance events"
-	depends on PERF_EVENTS
-	help
-	  If you say Y here, the kernel.perf_event_paranoid sysctl
-	  will be set to 3 by default, and no unprivileged use of the
-	  perf_event_open syscall will be permitted unless it is
-	  changed.
-
 config SECURITY
 	bool "Enable different security models"
 	depends on SYSFS
-	depends on MULTIUSER
 	help
 	  This allows you to choose different security modules to be
 	  configured into your kernel.
@@ -39,16 +95,6 @@ config SECURITY
 	  model will be used.
 
 	  If you are unsure how to answer this question, answer N.
-
-config PAGE_TABLE_ISOLATION
-	bool "Remove the kernel mapping in user mode"
-	default y
-	depends on X86_64 && SMP
-	help
-	  This enforces a strict kernel and user space isolation, in order
-	  to close hardware side channels on kernel address information.
-
-	  If you are unsure how to answer this question, answer Y.
 
 config SECURITYFS
 	bool "Enable the securityfs filesystem"
@@ -123,7 +169,7 @@ config INTEL_TXT
 config LSM_MMAP_MIN_ADDR
 	int "Low address space for LSM to protect from user allocation"
 	depends on SECURITY && SECURITY_SELINUX
-	default 32768 if ARM || (ARM64 && COMPAT)
+	default 32768 if ARM
 	default 65536
 	help
 	  This is the portion of low virtual memory which should be protected
@@ -136,48 +182,8 @@ config LSM_MMAP_MIN_ADDR
 	  Programs which use vm86 functionality or have some need to map
 	  this low address space will need the permission specific to the
 	  systems running LSM.
-
-config HAVE_HARDENED_USERCOPY_ALLOCATOR
-	bool
-	help
-	  The heap allocator implements __check_heap_object() for
-	  validating memory ranges against heap object sizes in
-	  support of CONFIG_HARDENED_USERCOPY.
-
-config HAVE_ARCH_HARDENED_USERCOPY
-	bool
-	help
-	  The architecture supports CONFIG_HARDENED_USERCOPY by
-	  calling check_object_size() just before performing the
-	  userspace copies in the low level implementation of
-	  copy_to_user() and copy_from_user().
-
-config HARDENED_USERCOPY
-	bool "Harden memory copies between kernel and userspace"
-	depends on HAVE_ARCH_HARDENED_USERCOPY
-	depends on HAVE_HARDENED_USERCOPY_ALLOCATOR
-	select BUG
-	help
-	  This option checks for obviously wrong memory regions when
-	  copying memory to/from the kernel (via copy_to_user() and
-	  copy_from_user() functions) by rejecting memory ranges that
-	  are larger than the specified heap object, span multiple
-	  separately allocates pages, are not on the process stack,
-	  or are part of the kernel text. This kills entire classes
-	  of heap overflow exploits and similar kernel memory exposures.
-
-config HARDENED_USERCOPY_PAGESPAN
-	bool "Refuse to copy allocations that span multiple pages"
-	depends on HARDENED_USERCOPY
-	depends on EXPERT
-	help
-	  When a multi-page allocation is done without __GFP_COMP,
-	  hardened usercopy will reject attempts to copy it. There are,
-	  however, several cases of this in the kernel that have not all
-	  been removed. This config is intended to be used only while
-	  trying to find such users.
-
-config FILE_INTEGRITY
+	  
+config FILE_INTEGRITY 
 	depends on SECURITYFS
 	tristate "Enable System File Verify Module"
 	default n
@@ -188,17 +194,18 @@ source security/selinux/Kconfig
 source security/smack/Kconfig
 source security/tomoyo/Kconfig
 source security/apparmor/Kconfig
-source security/loadpin/Kconfig
 source security/yama/Kconfig
-
 source security/integrity/Kconfig
-
+source security/te_driver/Kconfig
+source security/te_test/Kconfig
+source security/te_sec_storage/Kconfig
 choice
 	prompt "Default security module"
 	default DEFAULT_SECURITY_SELINUX if SECURITY_SELINUX
 	default DEFAULT_SECURITY_SMACK if SECURITY_SMACK
 	default DEFAULT_SECURITY_TOMOYO if SECURITY_TOMOYO
 	default DEFAULT_SECURITY_APPARMOR if SECURITY_APPARMOR
+	default DEFAULT_SECURITY_YAMA if SECURITY_YAMA
 	default DEFAULT_SECURITY_DAC
 
 	help
@@ -217,6 +224,9 @@ choice
 	config DEFAULT_SECURITY_APPARMOR
 		bool "AppArmor" if SECURITY_APPARMOR=y
 
+	config DEFAULT_SECURITY_YAMA
+		bool "Yama" if SECURITY_YAMA=y
+
 	config DEFAULT_SECURITY_DAC
 		bool "Unix Discretionary Access Controls"
 
@@ -228,6 +238,7 @@ config DEFAULT_SECURITY
 	default "smack" if DEFAULT_SECURITY_SMACK
 	default "tomoyo" if DEFAULT_SECURITY_TOMOYO
 	default "apparmor" if DEFAULT_SECURITY_APPARMOR
+	default "yama" if DEFAULT_SECURITY_YAMA
 	default "" if DEFAULT_SECURITY_DAC
 
 endmenu

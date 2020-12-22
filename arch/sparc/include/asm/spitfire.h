@@ -45,10 +45,6 @@
 #define SUN4V_CHIP_NIAGARA3	0x03
 #define SUN4V_CHIP_NIAGARA4	0x04
 #define SUN4V_CHIP_NIAGARA5	0x05
-#define SUN4V_CHIP_SPARC_M6	0x06
-#define SUN4V_CHIP_SPARC_M7	0x07
-#define SUN4V_CHIP_SPARC64X	0x8a
-#define SUN4V_CHIP_SPARC_SN	0x8b
 #define SUN4V_CHIP_UNKNOWN	0xff
 
 #ifndef __ASSEMBLY__
@@ -65,7 +61,7 @@ extern enum ultra_tlb_layout tlb_type;
 extern int sun4v_chip_type;
 
 extern int cheetah_pcache_forced_on;
-void cheetah_enable_pcache(void);
+extern void cheetah_enable_pcache(void);
 
 #define sparc64_highest_locked_tlbent()	\
 	(tlb_type == spitfire ? \

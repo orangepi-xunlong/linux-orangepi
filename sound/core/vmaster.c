@@ -68,13 +68,10 @@ static int slave_update(struct link_slave *slave)
 		return -ENOMEM;
 	uctl->id = slave->slave.id;
 	err = slave->slave.get(&slave->slave, uctl);
-	if (err < 0)
-		goto error;
 	for (ch = 0; ch < slave->info.count; ch++)
 		slave->vals[ch] = uctl->value.integer.value[ch];
- error:
 	kfree(uctl);
-	return err < 0 ? err : 0;
+	return 0;
 }
 
 /* get the slave ctl info and save the initial values */
@@ -104,7 +101,7 @@ static int slave_init(struct link_slave *slave)
 	if (slave->info.count > 2  ||
 	    (slave->info.type != SNDRV_CTL_ELEM_TYPE_INTEGER &&
 	     slave->info.type != SNDRV_CTL_ELEM_TYPE_BOOLEAN)) {
-		pr_err("ALSA: vmaster: invalid slave element\n");
+		snd_printk(KERN_ERR "invalid slave element\n");
 		kfree(uinfo);
 		return -EINVAL;
 	}
@@ -313,10 +310,20 @@ static int master_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int sync_slaves(struct link_master *master, int old_val, int new_val)
+static int master_put(struct snd_kcontrol *kcontrol,
+		      struct snd_ctl_elem_value *ucontrol)
 {
+	struct link_master *master = snd_kcontrol_chip(kcontrol);
 	struct link_slave *slave;
 	struct snd_ctl_elem_value *uval;
+	int err, old_val;
+
+	err = master_init(master);
+	if (err < 0)
+		return err;
+	old_val = master->val;
+	if (ucontrol->value.integer.value[0] == old_val)
+		return 0;
 
 	uval = kmalloc(sizeof(*uval), GFP_KERNEL);
 	if (!uval)
@@ -325,33 +332,11 @@ static int sync_slaves(struct link_master *master, int old_val, int new_val)
 		master->val = old_val;
 		uval->id = slave->slave.id;
 		slave_get_val(slave, uval);
-		master->val = new_val;
+		master->val = ucontrol->value.integer.value[0];
 		slave_put_val(slave, uval);
 	}
 	kfree(uval);
-	return 0;
-}
-
-static int master_put(struct snd_kcontrol *kcontrol,
-		      struct snd_ctl_elem_value *ucontrol)
-{
-	struct link_master *master = snd_kcontrol_chip(kcontrol);
-	int err, new_val, old_val;
-	bool first_init;
-
-	err = master_init(master);
-	if (err < 0)
-		return err;
-	first_init = err;
-	old_val = master->val;
-	new_val = ucontrol->value.integer.value[0];
-	if (new_val == old_val)
-		return 0;
-
-	err = sync_slaves(master, old_val, new_val);
-	if (err < 0)
-		return err;
-	if (master->hook && !first_init)
+	if (master->hook && !err)
 		master->hook(master->hook_private_data, master->val);
 	return 1;
 }
@@ -380,7 +365,8 @@ static void master_free(struct snd_kcontrol *kcontrol)
  * @name: name string of the control element to create
  * @tlv: optional TLV int array for dB information
  *
- * Creates a virtual master control with the given name string.
+ * Creates a virtual matster control with the given name string.
+ * Returns the created control element, or NULL for errors (ENOMEM).
  *
  * After creating a vmaster element, you can add the slave controls
  * via snd_ctl_add_slave() or snd_ctl_add_slave_uncached().
@@ -389,8 +375,6 @@ static void master_free(struct snd_kcontrol *kcontrol)
  * for dB scale of the master control.  It should be a single element
  * with #SNDRV_CTL_TLVT_DB_SCALE, #SNDRV_CTL_TLV_DB_MINMAX or
  * #SNDRV_CTL_TLVT_DB_MINMAX_MUTE type, and should be the max 0dB.
- *
- * Return: The created control element, or %NULL for errors (ENOMEM).
  */
 struct snd_kcontrol *snd_ctl_make_virtual_master(char *name,
 						 const unsigned int *tlv)
@@ -442,8 +426,6 @@ EXPORT_SYMBOL(snd_ctl_make_virtual_master);
  *
  * Adds the given hook to the vmaster control element so that it's called
  * at each time when the value is changed.
- *
- * Return: Zero.
  */
 int snd_ctl_add_vmaster_hook(struct snd_kcontrol *kcontrol,
 			     void (*hook)(void *private_data, int),
@@ -457,33 +439,20 @@ int snd_ctl_add_vmaster_hook(struct snd_kcontrol *kcontrol,
 EXPORT_SYMBOL_GPL(snd_ctl_add_vmaster_hook);
 
 /**
- * snd_ctl_sync_vmaster - Sync the vmaster slaves and hook
+ * snd_ctl_sync_vmaster_hook - Sync the vmaster hook
  * @kcontrol: vmaster kctl element
- * @hook_only: sync only the hook
  *
- * Forcibly call the put callback of each slave and call the hook function
- * to synchronize with the current value of the given vmaster element.
- * NOP when NULL is passed to @kcontrol.
+ * Call the hook function to synchronize with the current value of the given
+ * vmaster element.  NOP when NULL is passed to @kcontrol or the hook doesn't
+ * exist.
  */
-void snd_ctl_sync_vmaster(struct snd_kcontrol *kcontrol, bool hook_only)
+void snd_ctl_sync_vmaster_hook(struct snd_kcontrol *kcontrol)
 {
 	struct link_master *master;
-	bool first_init = false;
-
 	if (!kcontrol)
 		return;
 	master = snd_kcontrol_chip(kcontrol);
-	if (!hook_only) {
-		int err = master_init(master);
-		if (err < 0)
-			return;
-		first_init = err;
-		err = sync_slaves(master, master->val, master->val);
-		if (err < 0)
-			return;
-	}
-
-	if (master->hook && !first_init)
+	if (master->hook)
 		master->hook(master->hook_private_data, master->val);
 }
-EXPORT_SYMBOL_GPL(snd_ctl_sync_vmaster);
+EXPORT_SYMBOL_GPL(snd_ctl_sync_vmaster_hook);

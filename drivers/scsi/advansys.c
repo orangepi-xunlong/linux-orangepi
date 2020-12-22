@@ -1,10 +1,12 @@
+#define DRV_NAME "advansys"
+#define ASC_VERSION "3.4"	/* AdvanSys Driver Version */
+
 /*
  * advansys.c - Linux Host Driver for AdvanSys SCSI Adapters
  *
  * Copyright (c) 1995-2000 Advanced System Products, Inc.
  * Copyright (c) 2000-2001 ConnectCom Solutions, Inc.
  * Copyright (c) 2007 Matthew Wilcox <matthew@wil.cx>
- * Copyright (c) 2014 Hannes Reinecke <hare@suse.de>
  * All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -37,7 +39,6 @@
 #include <linux/spinlock.h>
 #include <linux/dma-mapping.h>
 #include <linux/firmware.h>
-#include <linux/dmapool.h>
 
 #include <asm/io.h>
 #include <asm/dma.h>
@@ -48,15 +49,26 @@
 #include <scsi/scsi.h>
 #include <scsi/scsi_host.h>
 
-#define DRV_NAME "advansys"
-#define ASC_VERSION "3.5"	/* AdvanSys Driver Version */
-
 /* FIXME:
  *
- *  1. Use scsi_transport_spi
- *  2. advansys_info is not safe against multiple simultaneous callers
- *  3. Add module_param to override ISA/VLB ioport array
+ *  1. Although all of the necessary command mapping places have the
+ *     appropriate dma_map.. APIs, the driver still processes its internal
+ *     queue using bus_to_virt() and virt_to_bus() which are illegal under
+ *     the API.  The entire queue processing structure will need to be
+ *     altered to fix this.
+ *  2. Need to add memory mapping workaround. Test the memory mapping.
+ *     If it doesn't work revert to I/O port access. Can a test be done
+ *     safely?
+ *  3. Handle an interrupt not working. Keep an interrupt counter in
+ *     the interrupt handler. In the timeout function if the interrupt
+ *     has not occurred then print a message and run in polled mode.
+ *  4. Need to add support for target mode commands, cf. CAM XPT.
+ *  5. check DMA mapping functions for failure
+ *  6. Use scsi_transport_spi
+ *  7. advansys_info is not safe against multiple simultaneous callers
+ *  8. Add module_param to override ISA/VLB ioport array
  */
+#warning this driver is still not properly converted to the DMA API
 
 /* Enable driver /proc statistics. */
 #define ADVANSYS_STATS
@@ -64,8 +76,31 @@
 /* Enable driver tracing. */
 #undef ADVANSYS_DEBUG
 
+/*
+ * Portable Data Types
+ *
+ * Any instance where a 32-bit long or pointer type is assumed
+ * for precision or HW defined structures, the following define
+ * types must be used. In Linux the char, short, and int types
+ * are all consistent at 8, 16, and 32 bits respectively. Pointers
+ * and long types are 64 bits on Alpha and UltraSPARC.
+ */
+#define ASC_PADDR __u32		/* Physical/Bus address data type. */
+#define ASC_VADDR __u32		/* Virtual address data type. */
+#define ASC_DCNT  __u32		/* Unsigned Data count type. */
+#define ASC_SDCNT __s32		/* Signed Data count type. */
+
 typedef unsigned char uchar;
 
+#ifndef TRUE
+#define TRUE     (1)
+#endif
+#ifndef FALSE
+#define FALSE    (0)
+#endif
+
+#define ERR      (-1)
+#define UW_ERR   (uint)(0xFFFF)
 #define isodd_word(val)   ((((uint)val) & (uint)0x0001) != 0)
 
 #define PCI_VENDOR_ID_ASP		0x10cd
@@ -75,6 +110,15 @@ typedef unsigned char uchar;
 #define PCI_DEVICE_ID_ASP_ABP940UW	0x2300
 #define PCI_DEVICE_ID_38C0800_REV1	0x2500
 #define PCI_DEVICE_ID_38C1600_REV1	0x2700
+
+/*
+ * Enable CC_VERY_LONG_SG_LIST to support up to 64K element SG lists.
+ * The SRB structure will have to be changed and the ASC_SRB2SCSIQ()
+ * macro re-defined to be able to obtain a ASC_SCSI_Q pointer from the
+ * SRB structure.
+ */
+#define CC_VERY_LONG_SG_LIST 0
+#define ASC_SRB2SCSIQ(srb_ptr)  (srb_ptr)
 
 #define PortAddr                 unsigned int	/* port address size  */
 #define inp(port)                inb(port)
@@ -263,15 +307,15 @@ typedef struct asc_scsiq_1 {
 	uchar sg_queue_cnt;
 	uchar target_id;
 	uchar target_lun;
-	__le32 data_addr;
-	__le32 data_cnt;
-	__le32 sense_addr;
+	ASC_PADDR data_addr;
+	ASC_DCNT data_cnt;
+	ASC_PADDR sense_addr;
 	uchar sense_len;
 	uchar extra_bytes;
 } ASC_SCSIQ_1;
 
 typedef struct asc_scsiq_2 {
-	u32 srb_tag;
+	ASC_VADDR srb_ptr;
 	uchar target_ix;
 	uchar flag;
 	uchar cdb_len;
@@ -294,8 +338,8 @@ typedef struct asc_scsiq_4 {
 	uchar y_res;
 	ushort x_req_count;
 	ushort x_reconnect_rtn;
-	__le32 x_saved_data_addr;
-	__le32 x_saved_data_cnt;
+	ASC_PADDR x_saved_data_addr;
+	ASC_DCNT x_saved_data_cnt;
 } ASC_SCSIQ_4;
 
 typedef struct asc_q_done_info {
@@ -307,12 +351,12 @@ typedef struct asc_q_done_info {
 	uchar sense_len;
 	uchar extra_bytes;
 	uchar res;
-	u32 remain_bytes;
+	ASC_DCNT remain_bytes;
 } ASC_QDONE_INFO;
 
 typedef struct asc_sg_list {
-	__le32 addr;
-	__le32 bytes;
+	ASC_PADDR addr;
+	ASC_DCNT bytes;
 } ASC_SG_LIST;
 
 typedef struct asc_sg_head {
@@ -331,6 +375,17 @@ typedef struct asc_scsi_q {
 	ushort remain_sg_entry_cnt;
 	ushort next_sg_index;
 } ASC_SCSI_Q;
+
+typedef struct asc_scsi_req_q {
+	ASC_SCSIQ_1 r1;
+	ASC_SCSIQ_2 r2;
+	uchar *cdbptr;
+	ASC_SG_HEAD *sg_head;
+	uchar *sense_ptr;
+	ASC_SCSIQ_3 r3;
+	uchar cdb[ASC_MAX_CDB_LEN];
+	uchar sense[ASC_MIN_SENSE_LEN];
+} ASC_SCSI_REQ_Q;
 
 typedef struct asc_scsi_bios_req_q {
 	ASC_SCSIQ_1 r1;
@@ -515,7 +570,7 @@ typedef struct asc_dvc_var {
 	dma_addr_t overrun_dma;
 	uchar scsi_reset_wait;
 	uchar chip_no;
-	bool is_in_int;
+	char is_in_int;
 	uchar max_total_qng;
 	uchar cur_total_qng;
 	uchar in_critical_cnt;
@@ -531,13 +586,15 @@ typedef struct asc_dvc_var {
 	char redo_scam;
 	ushort res2;
 	uchar dos_int13_table[ASC_MAX_TID + 1];
-	unsigned int max_dma_count;
+	ASC_DCNT max_dma_count;
 	ASC_SCSI_BIT_ID_TYPE no_scam;
 	ASC_SCSI_BIT_ID_TYPE pci_fix_asyn_xfer;
 	uchar min_sdtr_index;
 	uchar max_sdtr_index;
 	struct asc_board *drv_ptr;
-	unsigned int uc_break;
+	int ptr_map_count;
+	void **ptr_map;
+	ASC_DCNT uc_break;
 } ASC_DVC_VAR;
 
 typedef struct asc_dvc_inq_info {
@@ -545,8 +602,8 @@ typedef struct asc_dvc_inq_info {
 } ASC_DVC_INQ_INFO;
 
 typedef struct asc_cap_info {
-	u32 lba;
-	u32 blk_size;
+	ASC_DCNT lba;
+	ASC_DCNT blk_size;
 } ASC_CAP_INFO;
 
 typedef struct asc_cap_info_array {
@@ -872,6 +929,31 @@ typedef struct asc_mc_saved {
 #define AscReadChipDvcID(port)            (uchar)inp((port)+IOP_REG_ID)
 #define AscWriteChipDvcID(port, data)     outp((port)+IOP_REG_ID, data)
 
+/*
+ * Portable Data Types
+ *
+ * Any instance where a 32-bit long or pointer type is assumed
+ * for precision or HW defined structures, the following define
+ * types must be used. In Linux the char, short, and int types
+ * are all consistent at 8, 16, and 32 bits respectively. Pointers
+ * and long types are 64 bits on Alpha and UltraSPARC.
+ */
+#define ADV_PADDR __u32		/* Physical address data type. */
+#define ADV_VADDR __u32		/* Virtual address data type. */
+#define ADV_DCNT  __u32		/* Unsigned Data count type. */
+#define ADV_SDCNT __s32		/* Signed Data count type. */
+
+/*
+ * These macros are used to convert a virtual address to a
+ * 32-bit value. This currently can be used on Linux Alpha
+ * which uses 64-bit virtual address but a 32-bit bus address.
+ * This is likely to break in the future, but doing this now
+ * will give us time to change the HW and FW to handle 64-bit
+ * addresses.
+ */
+#define ADV_VADDR_TO_U32   virt_to_bus
+#define ADV_U32_TO_VADDR   bus_to_virt
+
 #define AdvPortAddr  void __iomem *	/* Virtual memory address size */
 
 /*
@@ -882,6 +964,8 @@ typedef struct asc_mc_saved {
 #define ADV_MEM_WRITEB(addr, byte) writeb(byte, addr)
 #define ADV_MEM_WRITEW(addr, word) writew(word, addr)
 #define ADV_MEM_WRITEDW(addr, dword) writel(dword, addr)
+
+#define ADV_CARRIER_COUNT (ASC_DEF_MAX_HOST_QNG + 15)
 
 /*
  * Define total number of simultaneous maximum element scatter-gather
@@ -1663,37 +1747,44 @@ typedef struct adveep_38C1600_config {
  * little-endian.
  */
 typedef struct adv_carr_t {
-	__le32 carr_va;	/* Carrier Virtual Address */
-	__le32 carr_pa;	/* Carrier Physical Address */
-	__le32 areq_vpa;	/* ADV_SCSI_REQ_Q Virtual or Physical Address */
+	ADV_VADDR carr_va;	/* Carrier Virtual Address */
+	ADV_PADDR carr_pa;	/* Carrier Physical Address */
+	ADV_VADDR areq_vpa;	/* ASC_SCSI_REQ_Q Virtual or Physical Address */
 	/*
 	 * next_vpa [31:4]            Carrier Virtual or Physical Next Pointer
 	 *
 	 * next_vpa [3:1]             Reserved Bits
 	 * next_vpa [0]               Done Flag set in Response Queue.
 	 */
-	__le32 next_vpa;
+	ADV_VADDR next_vpa;
 } ADV_CARR_T;
 
 /*
  * Mask used to eliminate low 4 bits of carrier 'next_vpa' field.
  */
-#define ADV_NEXT_VPA_MASK       0xFFFFFFF0
+#define ASC_NEXT_VPA_MASK       0xFFFFFFF0
 
-#define ADV_RQ_DONE             0x00000001
-#define ADV_RQ_GOOD             0x00000002
-#define ADV_CQ_STOPPER          0x00000000
+#define ASC_RQ_DONE             0x00000001
+#define ASC_RQ_GOOD             0x00000002
+#define ASC_CQ_STOPPER          0x00000000
 
-#define ADV_GET_CARRP(carrp) ((carrp) & ADV_NEXT_VPA_MASK)
+#define ASC_GET_CARRP(carrp) ((carrp) & ASC_NEXT_VPA_MASK)
 
-/*
- * Each carrier is 64 bytes, and we need three additional
- * carrier for icq, irq, and the termination carrier.
- */
-#define ADV_CARRIER_COUNT (ASC_DEF_MAX_HOST_QNG + 3)
+#define ADV_CARRIER_NUM_PAGE_CROSSING \
+    (((ADV_CARRIER_COUNT * sizeof(ADV_CARR_T)) + (PAGE_SIZE - 1))/PAGE_SIZE)
 
 #define ADV_CARRIER_BUFSIZE \
-	(ADV_CARRIER_COUNT * sizeof(ADV_CARR_T))
+    ((ADV_CARRIER_COUNT + ADV_CARRIER_NUM_PAGE_CROSSING) * sizeof(ADV_CARR_T))
+
+/*
+ * ASC_SCSI_REQ_Q 'a_flag' definitions
+ *
+ * The Adv Library should limit use to the lower nibble (4 bits) of
+ * a_flag. Drivers are free to use the upper nibble (4 bits) of a_flag.
+ */
+#define ADV_POLL_REQUEST                0x01	/* poll for request completion */
+#define ADV_SCSIQ_DONE                  0x02	/* request done */
+#define ADV_DONT_RETRY                  0x08	/* don't do retry */
 
 #define ADV_CHIP_ASC3550          0x01	/* Ultra-Wide IC */
 #define ADV_CHIP_ASC38C0800       0x02	/* Ultra2-Wide/LVD IC */
@@ -1725,15 +1816,15 @@ typedef struct adv_dvc_cfg {
 struct adv_dvc_var;
 struct adv_scsi_req_q;
 
-typedef struct adv_sg_block {
+typedef struct asc_sg_block {
 	uchar reserved1;
 	uchar reserved2;
 	uchar reserved3;
 	uchar sg_cnt;		/* Valid entries in block. */
-	__le32 sg_ptr;	/* Pointer to next sg block. */
+	ADV_PADDR sg_ptr;	/* Pointer to next sg block. */
 	struct {
-		__le32 sg_addr;	/* SG element address. */
-		__le32 sg_count;	/* SG element count. */
+		ADV_PADDR sg_addr;	/* SG element address. */
+		ADV_DCNT sg_count;	/* SG element count. */
 	} sg_list[NO_OF_SG_PER_BLOCK];
 } ADV_SG_BLOCK;
 
@@ -1753,10 +1844,10 @@ typedef struct adv_scsi_req_q {
 	uchar target_cmd;
 	uchar target_id;	/* Device target identifier. */
 	uchar target_lun;	/* Device target logical unit number. */
-	__le32 data_addr;	/* Data buffer physical address. */
-	__le32 data_cnt;	/* Data count. Ucode sets to residual. */
-	__le32 sense_addr;
-	__le32 carr_pa;
+	ADV_PADDR data_addr;	/* Data buffer physical address. */
+	ADV_DCNT data_cnt;	/* Data count. Ucode sets to residual. */
+	ADV_PADDR sense_addr;
+	ADV_PADDR carr_pa;
 	uchar mflag;
 	uchar sense_len;
 	uchar cdb_len;		/* SCSI CDB length. Must <= 16 bytes. */
@@ -1766,26 +1857,29 @@ typedef struct adv_scsi_req_q {
 	uchar host_status;	/* Ucode host status. */
 	uchar sg_working_ix;
 	uchar cdb[12];		/* SCSI CDB bytes 0-11. */
-	__le32 sg_real_addr;	/* SG list physical address. */
-	__le32 scsiq_rptr;
+	ADV_PADDR sg_real_addr;	/* SG list physical address. */
+	ADV_PADDR scsiq_rptr;
 	uchar cdb16[4];		/* SCSI CDB bytes 12-15. */
-	__le32 scsiq_ptr;
-	__le32 carr_va;
+	ADV_VADDR scsiq_ptr;
+	ADV_VADDR carr_va;
 	/*
 	 * End of microcode structure - 60 bytes. The rest of the structure
 	 * is used by the Adv Library and ignored by the microcode.
 	 */
-	u32 srb_tag;
+	ADV_VADDR srb_ptr;
 	ADV_SG_BLOCK *sg_list_ptr;	/* SG list virtual address. */
+	char *vdata_addr;	/* Data buffer virtual address. */
+	uchar a_flag;
+	uchar pad[2];		/* Pad out to a word boundary. */
 } ADV_SCSI_REQ_Q;
 
 /*
  * The following two structures are used to process Wide Board requests.
  *
  * The ADV_SCSI_REQ_Q structure in adv_req_t is passed to the Adv Library
- * and microcode with the ADV_SCSI_REQ_Q field 'srb_tag' set to the
- * SCSI request tag. The adv_req_t structure 'cmndp' field in turn points
- * to the Mid-Level SCSI request structure.
+ * and microcode with the ADV_SCSI_REQ_Q field 'srb_ptr' pointing to the
+ * adv_req_t. The adv_req_t structure 'cmndp' field in turn points to the
+ * Mid-Level SCSI request structure.
  *
  * Zero or more ADV_SG_BLOCK are used with each ADV_SCSI_REQ_Q. Each
  * ADV_SG_BLOCK structure holds 15 scatter-gather elements. Under Linux
@@ -1796,17 +1890,17 @@ typedef struct adv_scsi_req_q {
  */
 typedef struct adv_sgblk {
 	ADV_SG_BLOCK sg_block;	/* Sgblock structure. */
-	dma_addr_t sg_addr;	/* Physical address */
+	uchar align[32];	/* Sgblock structure padding. */
 	struct adv_sgblk *next_sgblkp;	/* Next scatter-gather structure. */
 } adv_sgblk_t;
 
 typedef struct adv_req {
 	ADV_SCSI_REQ_Q scsi_req_q;	/* Adv Library request structure. */
-	uchar align[24];	/* Request structure padding. */
+	uchar align[32];	/* Request structure padding. */
 	struct scsi_cmnd *cmndp;	/* Mid-Level SCSI command pointer. */
-	dma_addr_t req_addr;
 	adv_sgblk_t *sgblkp;	/* Adv Library scatter-gather pointer. */
-} adv_req_t __aligned(32);
+	struct adv_req *next_reqp;	/* Next Request Structure. */
+} adv_req_t;
 
 /*
  * Adapter operation variable structure.
@@ -1843,12 +1937,12 @@ typedef struct adv_dvc_var {
 	uchar chip_scsi_id;	/* chip SCSI target ID */
 	uchar chip_type;
 	uchar bist_err_code;
-	ADV_CARR_T *carrier;
+	ADV_CARR_T *carrier_buf;
 	ADV_CARR_T *carr_freelist;	/* Carrier free list. */
-	dma_addr_t carrier_addr;
 	ADV_CARR_T *icq_sp;	/* Initiator command queue stopper pointer. */
 	ADV_CARR_T *irq_sp;	/* Initiator response queue stopper pointer. */
 	ushort carr_pending_cnt;	/* Count of pending carriers. */
+	struct adv_req *orig_reqp;	/* adv_req_t memory block. */
 	/*
 	 * Note: The following fields will not be used after initialization. The
 	 * driver may discard the buffer after initialization is done.
@@ -1974,8 +2068,8 @@ do { \
     AdvReadByteRegister((iop_base), IOPB_CHIP_TYPE_REV)
 
 /*
- * Abort an SRB in the chip's RISC Memory. The 'srb_tag' argument must
- * match the ADV_SCSI_REQ_Q 'srb_tag' field.
+ * Abort an SRB in the chip's RISC Memory. The 'srb_ptr' argument must
+ * match the ASC_SCSI_REQ_Q 'srb_ptr' field.
  *
  * If the request has not yet been sent to the device it will simply be
  * aborted from RISC memory. If the request is disconnected it will be
@@ -1985,9 +2079,9 @@ do { \
  *      ADV_TRUE(1) - Queue was successfully aborted.
  *      ADV_FALSE(0) - Queue was not found on the active queue list.
  */
-#define AdvAbortQueue(asc_dvc, srb_tag) \
-     AdvSendIdleCmd((asc_dvc), (ushort) IDLE_CMD_ABORT, \
-		    (ADV_DCNT) (srb_tag))
+#define AdvAbortQueue(asc_dvc, scsiq) \
+        AdvSendIdleCmd((asc_dvc), (ushort) IDLE_CMD_ABORT, \
+                       (ADV_DCNT) (scsiq))
 
 /*
  * Send a Bus Device Reset Message to the specified target ID.
@@ -2001,8 +2095,8 @@ do { \
  *                     are not purged.
  */
 #define AdvResetDevice(asc_dvc, target_id) \
-     AdvSendIdleCmd((asc_dvc), (ushort) IDLE_CMD_DEVICE_RESET,	\
-		    (ADV_DCNT) (target_id))
+        AdvSendIdleCmd((asc_dvc), (ushort) IDLE_CMD_DEVICE_RESET, \
+                    (ADV_DCNT) (target_id))
 
 /*
  * SCSI Wide Type definition.
@@ -2021,7 +2115,7 @@ do { \
 #define ADV_TID_TO_TIDMASK(tid)   (0x01 << ((tid) & ADV_MAX_TID))
 
 /*
- * ADV_SCSI_REQ_Q 'done_status' and 'host_status' return values.
+ * ASC_SCSI_REQ_Q 'done_status' and 'host_status' return values.
  */
 
 #define QD_NO_STATUS         0x00	/* Request not completed yet. */
@@ -2059,6 +2153,8 @@ do { \
 #define QHSTA_M_SGBACKUP_ERROR      0x47	/* Scatter-Gather backup error */
 
 /* Return the address that is aligned at the next doubleword >= to 'addr'. */
+#define ADV_8BALIGN(addr)      (((ulong) (addr) + 0x7) & ~0x7)
+#define ADV_16BALIGN(addr)     (((ulong) (addr) + 0xF) & ~0xF)
 #define ADV_32BALIGN(addr)     (((ulong) (addr) + 0x1F) & ~0x1F)
 
 /*
@@ -2081,6 +2177,22 @@ do { \
 #define NO_ISA_DMA              0xff	/* No ISA DMA Channel Used */
 
 #define ASC_INFO_SIZE           128	/* advansys_info() line size */
+
+#ifdef CONFIG_PROC_FS
+/* /proc/scsi/advansys/[0...] related definitions */
+#define ASC_PRTBUF_SIZE         2048
+#define ASC_PRTLINE_SIZE        160
+
+#define ASC_PRT_NEXT() \
+    if (cp) { \
+        totlen += len; \
+        leftlen -= len; \
+        if (leftlen == 0) { \
+            return totlen; \
+        } \
+        cp += len; \
+    }
+#endif /* CONFIG_PROC_FS */
 
 /* Asc Library return codes */
 #define ASC_TRUE        1
@@ -2219,24 +2331,24 @@ do { \
 /* Per board statistics structure */
 struct asc_stats {
 	/* Driver Entrypoint Statistics */
-	unsigned int queuecommand;	/* # calls to advansys_queuecommand() */
-	unsigned int reset;		/* # calls to advansys_eh_bus_reset() */
-	unsigned int biosparam;	/* # calls to advansys_biosparam() */
-	unsigned int interrupt;	/* # advansys_interrupt() calls */
-	unsigned int callback;	/* # calls to asc/adv_isr_callback() */
-	unsigned int done;		/* # calls to request's scsi_done function */
-	unsigned int build_error;	/* # asc/adv_build_req() ASC_ERROR returns. */
-	unsigned int adv_build_noreq;	/* # adv_build_req() adv_req_t alloc. fail. */
-	unsigned int adv_build_nosg;	/* # adv_build_req() adv_sgblk_t alloc. fail. */
+	ADV_DCNT queuecommand;	/* # calls to advansys_queuecommand() */
+	ADV_DCNT reset;		/* # calls to advansys_eh_bus_reset() */
+	ADV_DCNT biosparam;	/* # calls to advansys_biosparam() */
+	ADV_DCNT interrupt;	/* # advansys_interrupt() calls */
+	ADV_DCNT callback;	/* # calls to asc/adv_isr_callback() */
+	ADV_DCNT done;		/* # calls to request's scsi_done function */
+	ADV_DCNT build_error;	/* # asc/adv_build_req() ASC_ERROR returns. */
+	ADV_DCNT adv_build_noreq;	/* # adv_build_req() adv_req_t alloc. fail. */
+	ADV_DCNT adv_build_nosg;	/* # adv_build_req() adv_sgblk_t alloc. fail. */
 	/* AscExeScsiQueue()/AdvExeScsiQueue() Statistics */
-	unsigned int exe_noerror;	/* # ASC_NOERROR returns. */
-	unsigned int exe_busy;	/* # ASC_BUSY returns. */
-	unsigned int exe_error;	/* # ASC_ERROR returns. */
-	unsigned int exe_unknown;	/* # unknown returns. */
+	ADV_DCNT exe_noerror;	/* # ASC_NOERROR returns. */
+	ADV_DCNT exe_busy;	/* # ASC_BUSY returns. */
+	ADV_DCNT exe_error;	/* # ASC_ERROR returns. */
+	ADV_DCNT exe_unknown;	/* # unknown returns. */
 	/* Data Transfer Statistics */
-	unsigned int xfer_cnt;	/* # I/O requests received */
-	unsigned int xfer_elem;	/* # scatter-gather elements */
-	unsigned int xfer_sect;	/* # 512-byte blocks */
+	ADV_DCNT xfer_cnt;	/* # I/O requests received */
+	ADV_DCNT xfer_elem;	/* # scatter-gather elements */
+	ADV_DCNT xfer_sect;	/* # 512-byte blocks */
 };
 #endif /* ADVANSYS_STATS */
 
@@ -2249,7 +2361,6 @@ struct asc_stats {
  */
 struct asc_board {
 	struct device *dev;
-	struct Scsi_Host *shost;
 	uint flags;		/* Board flags */
 	unsigned int irq;
 	union {
@@ -2271,7 +2382,9 @@ struct asc_board {
 		ADVEEP_38C0800_CONFIG adv_38C0800_eep;	/* 38C0800 EEPROM config. */
 		ADVEEP_38C1600_CONFIG adv_38C1600_eep;	/* 38C1600 EEPROM config. */
 	} eep_config;
+	ulong last_reset;	/* Saved last reset time */
 	/* /proc/scsi/advansys/[0...] */
+	char *prtbuf;		/* /proc print buffer */
 #ifdef ADVANSYS_STATS
 	struct asc_stats asc_stats;	/* Board statistics */
 #endif				/* ADVANSYS_STATS */
@@ -2285,9 +2398,7 @@ struct asc_board {
 	void __iomem *ioremap_addr;	/* I/O Memory remap address. */
 	ushort ioport;		/* I/O Port address. */
 	adv_req_t *adv_reqp;	/* Request structures. */
-	dma_addr_t adv_reqp_addr;
-	size_t adv_reqp_size;
-	struct dma_pool *adv_sgblk_pool;	/* Scatter-gather structures. */
+	adv_sgblk_t *adv_sgblkp;	/* Scatter-gather structures. */
 	ushort bios_signature;	/* BIOS Signature. */
 	ushort bios_version;	/* BIOS Version. */
 	ushort bios_codeseg;	/* BIOS Code Segment. */
@@ -2376,11 +2487,12 @@ static void asc_prt_adv_dvc_var(ADV_DVC_VAR *h)
 	printk("  start_motor 0x%x, scsi_reset_wait 0x%x\n",
 	       (unsigned)h->start_motor, (unsigned)h->scsi_reset_wait);
 
-	printk("  max_host_qng %u, max_dvc_qng %u, carr_freelist 0x%p\n",
+	printk("  max_host_qng %u, max_dvc_qng %u, carr_freelist 0x%lxn\n",
 	       (unsigned)h->max_host_qng, (unsigned)h->max_dvc_qng,
-	       h->carr_freelist);
+	       (ulong)h->carr_freelist);
 
-	printk("  icq_sp 0x%p, irq_sp 0x%p\n", h->icq_sp, h->irq_sp);
+	printk("  icq_sp 0x%lx, irq_sp 0x%lx\n",
+	       (ulong)h->icq_sp, (ulong)h->irq_sp);
 
 	printk("  no_scam 0x%x, tagqng_able 0x%x\n",
 	       (unsigned)h->no_scam, (unsigned)h->tagqng_able);
@@ -2416,8 +2528,8 @@ static void asc_prt_scsi_host(struct Scsi_Host *s)
 	struct asc_board *boardp = shost_priv(s);
 
 	printk("Scsi_Host at addr 0x%p, device %s\n", s, dev_name(boardp->dev));
-	printk(" host_busy %u, host_no %d,\n",
-	       atomic_read(&s->host_busy), s->host_no);
+	printk(" host_busy %u, host_no %d, last_reset %d,\n",
+	       s->host_busy, s->host_no, (unsigned)s->last_reset);
 
 	printk(" base 0x%lx, io_port 0x%lx, irq %d,\n",
 	       (ulong)s->base, (ulong)s->io_port, boardp->irq);
@@ -2505,8 +2617,8 @@ static void asc_prt_asc_scsi_q(ASC_SCSI_Q *q)
 	printk("ASC_SCSI_Q at addr 0x%lx\n", (ulong)q);
 
 	printk
-	    (" target_ix 0x%x, target_lun %u, srb_tag 0x%x, tag_code 0x%x,\n",
-	     q->q2.target_ix, q->q1.target_lun, q->q2.srb_tag,
+	    (" target_ix 0x%x, target_lun %u, srb_ptr 0x%lx, tag_code 0x%x,\n",
+	     q->q2.target_ix, q->q1.target_lun, (ulong)q->q2.srb_ptr,
 	     q->q2.tag_code);
 
 	printk
@@ -2539,8 +2651,8 @@ static void asc_prt_asc_scsi_q(ASC_SCSI_Q *q)
 static void asc_prt_asc_qdone_info(ASC_QDONE_INFO *q)
 {
 	printk("ASC_QDONE_INFO at addr 0x%lx\n", (ulong)q);
-	printk(" srb_tag 0x%x, target_ix %u, cdb_len %u, tag_code %u,\n",
-	       q->d2.srb_tag, q->d2.target_ix, q->d2.cdb_len,
+	printk(" srb_ptr 0x%lx, target_ix %u, cdb_len %u, tag_code %u,\n",
+	       (ulong)q->d2.srb_ptr, q->d2.target_ix, q->d2.cdb_len,
 	       q->d2.tag_code);
 	printk
 	    (" done_stat 0x%x, host_stat 0x%x, scsi_stat 0x%x, scsi_msg 0x%x\n",
@@ -2556,17 +2668,17 @@ static void asc_prt_adv_sgblock(int sgblockno, ADV_SG_BLOCK *b)
 {
 	int i;
 
-	printk(" ADV_SG_BLOCK at addr 0x%lx (sgblockno %d)\n",
+	printk(" ASC_SG_BLOCK at addr 0x%lx (sgblockno %d)\n",
 	       (ulong)b, sgblockno);
-	printk("  sg_cnt %u, sg_ptr 0x%x\n",
-	       b->sg_cnt, (u32)le32_to_cpu(b->sg_ptr));
+	printk("  sg_cnt %u, sg_ptr 0x%lx\n",
+	       b->sg_cnt, (ulong)le32_to_cpu(b->sg_ptr));
 	BUG_ON(b->sg_cnt > NO_OF_SG_PER_BLOCK);
 	if (b->sg_ptr != 0)
 		BUG_ON(b->sg_cnt != NO_OF_SG_PER_BLOCK);
 	for (i = 0; i < b->sg_cnt; i++) {
-		printk("  [%u]: sg_addr 0x%x, sg_count 0x%x\n",
-		       i, (u32)le32_to_cpu(b->sg_list[i].sg_addr),
-		       (u32)le32_to_cpu(b->sg_list[i].sg_count));
+		printk("  [%u]: sg_addr 0x%lx, sg_count 0x%lx\n",
+		       i, (ulong)b->sg_list[i].sg_addr,
+		       (ulong)b->sg_list[i].sg_count);
 	}
 }
 
@@ -2578,16 +2690,15 @@ static void asc_prt_adv_sgblock(int sgblockno, ADV_SG_BLOCK *b)
 static void asc_prt_adv_scsi_req_q(ADV_SCSI_REQ_Q *q)
 {
 	int sg_blk_cnt;
-	struct adv_sg_block *sg_ptr;
-	adv_sgblk_t *sgblkp;
+	struct asc_sg_block *sg_ptr;
 
 	printk("ADV_SCSI_REQ_Q at addr 0x%lx\n", (ulong)q);
 
-	printk("  target_id %u, target_lun %u, srb_tag 0x%x\n",
-	       q->target_id, q->target_lun, q->srb_tag);
+	printk("  target_id %u, target_lun %u, srb_ptr 0x%lx, a_flag 0x%x\n",
+	       q->target_id, q->target_lun, (ulong)q->srb_ptr, q->a_flag);
 
-	printk("  cntl 0x%x, data_addr 0x%lx\n",
-	       q->cntl, (ulong)le32_to_cpu(q->data_addr));
+	printk("  cntl 0x%x, data_addr 0x%lx, vdata_addr 0x%lx\n",
+	       q->cntl, (ulong)le32_to_cpu(q->data_addr), (ulong)q->vdata_addr);
 
 	printk("  data_cnt %lu, sense_addr 0x%lx, sense_len %u,\n",
 	       (ulong)le32_to_cpu(q->data_cnt),
@@ -2606,20 +2717,79 @@ static void asc_prt_adv_scsi_req_q(ADV_SCSI_REQ_Q *q)
 
 	/* Display the request's ADV_SG_BLOCK structures. */
 	if (q->sg_list_ptr != NULL) {
-		sgblkp = container_of(q->sg_list_ptr, adv_sgblk_t, sg_block);
 		sg_blk_cnt = 0;
-		while (sgblkp) {
-			sg_ptr = &sgblkp->sg_block;
+		while (1) {
+			/*
+			 * 'sg_ptr' is a physical address. Convert it to a virtual
+			 * address by indexing 'sg_blk_cnt' into the virtual address
+			 * array 'sg_list_ptr'.
+			 *
+			 * XXX - Assumes all SG physical blocks are virtually contiguous.
+			 */
+			sg_ptr =
+			    &(((ADV_SG_BLOCK *)(q->sg_list_ptr))[sg_blk_cnt]);
 			asc_prt_adv_sgblock(sg_blk_cnt, sg_ptr);
 			if (sg_ptr->sg_ptr == 0) {
 				break;
 			}
-			sgblkp = sgblkp->next_sgblkp;
 			sg_blk_cnt++;
 		}
 	}
 }
 #endif /* ADVANSYS_DEBUG */
+
+/*
+ * The advansys chip/microcode contains a 32-bit identifier for each command
+ * known as the 'srb'.  I don't know what it stands for.  The driver used
+ * to encode the scsi_cmnd pointer by calling virt_to_bus and retrieve it
+ * with bus_to_virt.  Now the driver keeps a per-host map of integers to
+ * pointers.  It auto-expands when full, unless it can't allocate memory.
+ * Note that an srb of 0 is treated specially by the chip/firmware, hence
+ * the return of i+1 in this routine, and the corresponding subtraction in
+ * the inverse routine.
+ */
+#define BAD_SRB 0
+static u32 advansys_ptr_to_srb(struct asc_dvc_var *asc_dvc, void *ptr)
+{
+	int i;
+	void **new_ptr;
+
+	for (i = 0; i < asc_dvc->ptr_map_count; i++) {
+		if (!asc_dvc->ptr_map[i])
+			goto out;
+	}
+
+	if (asc_dvc->ptr_map_count == 0)
+		asc_dvc->ptr_map_count = 1;
+	else
+		asc_dvc->ptr_map_count *= 2;
+
+	new_ptr = krealloc(asc_dvc->ptr_map,
+			asc_dvc->ptr_map_count * sizeof(void *), GFP_ATOMIC);
+	if (!new_ptr)
+		return BAD_SRB;
+	asc_dvc->ptr_map = new_ptr;
+ out:
+	ASC_DBG(3, "Putting ptr %p into array offset %d\n", ptr, i);
+	asc_dvc->ptr_map[i] = ptr;
+	return i + 1;
+}
+
+static void * advansys_srb_to_ptr(struct asc_dvc_var *asc_dvc, u32 srb)
+{
+	void *ptr;
+
+	srb--;
+	if (srb >= asc_dvc->ptr_map_count) {
+		printk("advansys: bad SRB %u, max %u\n", srb,
+							asc_dvc->ptr_map_count);
+		return NULL;
+	}
+	ptr = asc_dvc->ptr_map[srb];
+	asc_dvc->ptr_map[srb] = NULL;
+	ASC_DBG(3, "Returning ptr %p from array offset %d\n", ptr, srb);
+	return ptr;
+}
 
 /*
  * advansys_info()
@@ -2705,21 +2875,64 @@ static const char *advansys_info(struct Scsi_Host *shost)
 }
 
 #ifdef CONFIG_PROC_FS
+/*
+ * asc_prt_line()
+ *
+ * If 'cp' is NULL print to the console, otherwise print to a buffer.
+ *
+ * Return 0 if printing to the console, otherwise return the number of
+ * bytes written to the buffer.
+ *
+ * Note: If any single line is greater than ASC_PRTLINE_SIZE bytes the stack
+ * will be corrupted. 's[]' is defined to be ASC_PRTLINE_SIZE bytes.
+ */
+static int asc_prt_line(char *buf, int buflen, char *fmt, ...)
+{
+	va_list args;
+	int ret;
+	char s[ASC_PRTLINE_SIZE];
+
+	va_start(args, fmt);
+	ret = vsprintf(s, fmt, args);
+	BUG_ON(ret >= ASC_PRTLINE_SIZE);
+	if (buf == NULL) {
+		(void)printk(s);
+		ret = 0;
+	} else {
+		ret = min(buflen, ret);
+		memcpy(buf, s, ret);
+	}
+	va_end(args);
+	return ret;
+}
 
 /*
  * asc_prt_board_devices()
  *
  * Print driver information for devices attached to the board.
+ *
+ * Note: no single line should be greater than ASC_PRTLINE_SIZE,
+ * cf. asc_prt_line().
+ *
+ * Return the number of characters copied into 'cp'. No more than
+ * 'cplen' characters will be copied to 'cp'.
  */
-static void asc_prt_board_devices(struct seq_file *m, struct Scsi_Host *shost)
+static int asc_prt_board_devices(struct Scsi_Host *shost, char *cp, int cplen)
 {
 	struct asc_board *boardp = shost_priv(shost);
+	int leftlen;
+	int totlen;
+	int len;
 	int chip_scsi_id;
 	int i;
 
-	seq_printf(m,
-		   "\nDevice Information for AdvanSys SCSI Host %d:\n",
-		   shost->host_no);
+	leftlen = cplen;
+	totlen = len = 0;
+
+	len = asc_prt_line(cp, leftlen,
+			   "\nDevice Information for AdvanSys SCSI Host %d:\n",
+			   shost->host_no);
+	ASC_PRT_NEXT();
 
 	if (ASC_NARROW_BOARD(boardp)) {
 		chip_scsi_id = boardp->dvc_cfg.asc_dvc_cfg.chip_scsi_id;
@@ -2727,40 +2940,60 @@ static void asc_prt_board_devices(struct seq_file *m, struct Scsi_Host *shost)
 		chip_scsi_id = boardp->dvc_var.adv_dvc_var.chip_scsi_id;
 	}
 
-	seq_puts(m, "Target IDs Detected:");
+	len = asc_prt_line(cp, leftlen, "Target IDs Detected:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ADV_MAX_TID; i++) {
-		if (boardp->init_tidmask & ADV_TID_TO_TIDMASK(i))
-			seq_printf(m, " %X,", i);
+		if (boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) {
+			len = asc_prt_line(cp, leftlen, " %X,", i);
+			ASC_PRT_NEXT();
+		}
 	}
-	seq_printf(m, " (%X=Host Adapter)\n", chip_scsi_id);
+	len = asc_prt_line(cp, leftlen, " (%X=Host Adapter)\n", chip_scsi_id);
+	ASC_PRT_NEXT();
+
+	return totlen;
 }
 
 /*
  * Display Wide Board BIOS Information.
  */
-static void asc_prt_adv_bios(struct seq_file *m, struct Scsi_Host *shost)
+static int asc_prt_adv_bios(struct Scsi_Host *shost, char *cp, int cplen)
 {
 	struct asc_board *boardp = shost_priv(shost);
+	int leftlen;
+	int totlen;
+	int len;
 	ushort major, minor, letter;
 
-	seq_puts(m, "\nROM BIOS Version: ");
+	leftlen = cplen;
+	totlen = len = 0;
+
+	len = asc_prt_line(cp, leftlen, "\nROM BIOS Version: ");
+	ASC_PRT_NEXT();
 
 	/*
 	 * If the BIOS saved a valid signature, then fill in
 	 * the BIOS code segment base address.
 	 */
 	if (boardp->bios_signature != 0x55AA) {
-		seq_puts(m, "Disabled or Pre-3.1\n"
-			"BIOS either disabled or Pre-3.1. If it is pre-3.1, then a newer version\n"
-			"can be found at the ConnectCom FTP site: ftp://ftp.connectcom.net/pub\n");
+		len = asc_prt_line(cp, leftlen, "Disabled or Pre-3.1\n");
+		ASC_PRT_NEXT();
+		len = asc_prt_line(cp, leftlen,
+				   "BIOS either disabled or Pre-3.1. If it is pre-3.1, then a newer version\n");
+		ASC_PRT_NEXT();
+		len = asc_prt_line(cp, leftlen,
+				   "can be found at the ConnectCom FTP site: ftp://ftp.connectcom.net/pub\n");
+		ASC_PRT_NEXT();
 	} else {
 		major = (boardp->bios_version >> 12) & 0xF;
 		minor = (boardp->bios_version >> 8) & 0xF;
 		letter = (boardp->bios_version & 0xFF);
 
-		seq_printf(m, "%d.%d%c\n",
+		len = asc_prt_line(cp, leftlen, "%d.%d%c\n",
 				   major, minor,
 				   letter >= 26 ? '?' : letter + 'A');
+		ASC_PRT_NEXT();
+
 		/*
 		 * Current available ROM BIOS release is 3.1I for UW
 		 * and 3.2I for U2W. This code doesn't differentiate
@@ -2768,10 +3001,16 @@ static void asc_prt_adv_bios(struct seq_file *m, struct Scsi_Host *shost)
 		 */
 		if (major < 3 || (major <= 3 && minor < 1) ||
 		    (major <= 3 && minor <= 1 && letter < ('I' - 'A'))) {
-			seq_puts(m, "Newer version of ROM BIOS is available at the ConnectCom FTP site:\n"
-				"ftp://ftp.connectcom.net/pub\n");
+			len = asc_prt_line(cp, leftlen,
+					   "Newer version of ROM BIOS is available at the ConnectCom FTP site:\n");
+			ASC_PRT_NEXT();
+			len = asc_prt_line(cp, leftlen,
+					   "ftp://ftp.connectcom.net/pub\n");
+			ASC_PRT_NEXT();
 		}
 	}
+
+	return totlen;
 }
 
 /*
@@ -2876,11 +3115,20 @@ static int asc_get_eeprom_string(ushort *serialnum, uchar *cp)
  * asc_prt_asc_board_eeprom()
  *
  * Print board EEPROM configuration.
+ *
+ * Note: no single line should be greater than ASC_PRTLINE_SIZE,
+ * cf. asc_prt_line().
+ *
+ * Return the number of characters copied into 'cp'. No more than
+ * 'cplen' characters will be copied to 'cp'.
  */
-static void asc_prt_asc_board_eeprom(struct seq_file *m, struct Scsi_Host *shost)
+static int asc_prt_asc_board_eeprom(struct Scsi_Host *shost, char *cp, int cplen)
 {
 	struct asc_board *boardp = shost_priv(shost);
 	ASC_DVC_VAR *asc_dvc_varp;
+	int leftlen;
+	int totlen;
+	int len;
 	ASCEEP_CONFIG *ep;
 	int i;
 #ifdef CONFIG_ISA
@@ -2891,70 +3139,129 @@ static void asc_prt_asc_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 	asc_dvc_varp = &boardp->dvc_var.asc_dvc_var;
 	ep = &boardp->eep_config.asc_eep;
 
-	seq_printf(m,
-		   "\nEEPROM Settings for AdvanSys SCSI Host %d:\n",
-		   shost->host_no);
+	leftlen = cplen;
+	totlen = len = 0;
+
+	len = asc_prt_line(cp, leftlen,
+			   "\nEEPROM Settings for AdvanSys SCSI Host %d:\n",
+			   shost->host_no);
+	ASC_PRT_NEXT();
 
 	if (asc_get_eeprom_string((ushort *)&ep->adapter_info[0], serialstr)
-	    == ASC_TRUE)
-		seq_printf(m, " Serial Number: %s\n", serialstr);
-	else if (ep->adapter_info[5] == 0xBB)
-		seq_puts(m,
-			 " Default Settings Used for EEPROM-less Adapter.\n");
-	else
-		seq_puts(m, " Serial Number Signature Not Present.\n");
+	    == ASC_TRUE) {
+		len =
+		    asc_prt_line(cp, leftlen, " Serial Number: %s\n",
+				 serialstr);
+		ASC_PRT_NEXT();
+	} else {
+		if (ep->adapter_info[5] == 0xBB) {
+			len = asc_prt_line(cp, leftlen,
+					   " Default Settings Used for EEPROM-less Adapter.\n");
+			ASC_PRT_NEXT();
+		} else {
+			len = asc_prt_line(cp, leftlen,
+					   " Serial Number Signature Not Present.\n");
+			ASC_PRT_NEXT();
+		}
+	}
 
-	seq_printf(m,
-		   " Host SCSI ID: %u, Host Queue Size: %u, Device Queue Size: %u\n",
-		   ASC_EEP_GET_CHIP_ID(ep), ep->max_total_qng,
-		   ep->max_tag_qng);
+	len = asc_prt_line(cp, leftlen,
+			   " Host SCSI ID: %u, Host Queue Size: %u, Device Queue Size: %u\n",
+			   ASC_EEP_GET_CHIP_ID(ep), ep->max_total_qng,
+			   ep->max_tag_qng);
+	ASC_PRT_NEXT();
 
-	seq_printf(m,
-		   " cntl 0x%x, no_scam 0x%x\n", ep->cntl, ep->no_scam);
+	len = asc_prt_line(cp, leftlen,
+			   " cntl 0x%x, no_scam 0x%x\n", ep->cntl, ep->no_scam);
+	ASC_PRT_NEXT();
 
-	seq_puts(m, " Target ID:           ");
-	for (i = 0; i <= ASC_MAX_TID; i++)
-		seq_printf(m, " %d", i);
+	len = asc_prt_line(cp, leftlen, " Target ID:           ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ASC_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %d", i);
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
-	seq_puts(m, "\n Disconnects:         ");
-	for (i = 0; i <= ASC_MAX_TID; i++)
-		seq_printf(m, " %c",
-			   (ep->disc_enable & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+	len = asc_prt_line(cp, leftlen, " Disconnects:         ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ASC_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %c",
+				   (ep->
+				    disc_enable & ADV_TID_TO_TIDMASK(i)) ? 'Y' :
+				   'N');
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
-	seq_puts(m, "\n Command Queuing:     ");
-	for (i = 0; i <= ASC_MAX_TID; i++)
-		seq_printf(m, " %c",
-			   (ep->use_cmd_qng & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+	len = asc_prt_line(cp, leftlen, " Command Queuing:     ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ASC_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %c",
+				   (ep->
+				    use_cmd_qng & ADV_TID_TO_TIDMASK(i)) ? 'Y' :
+				   'N');
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
-	seq_puts(m, "\n Start Motor:         ");
-	for (i = 0; i <= ASC_MAX_TID; i++)
-		seq_printf(m, " %c",
-			   (ep->start_motor & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+	len = asc_prt_line(cp, leftlen, " Start Motor:         ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ASC_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %c",
+				   (ep->
+				    start_motor & ADV_TID_TO_TIDMASK(i)) ? 'Y' :
+				   'N');
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
-	seq_puts(m, "\n Synchronous Transfer:");
-	for (i = 0; i <= ASC_MAX_TID; i++)
-		seq_printf(m, " %c",
-			   (ep->init_sdtr & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, " Synchronous Transfer:");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ASC_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %c",
+				   (ep->
+				    init_sdtr & ADV_TID_TO_TIDMASK(i)) ? 'Y' :
+				   'N');
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 #ifdef CONFIG_ISA
 	if (asc_dvc_varp->bus_type & ASC_IS_ISA) {
-		seq_printf(m,
-			   " Host ISA DMA speed:   %d MB/S\n",
-			   isa_dma_speed[ASC_EEP_GET_DMA_SPD(ep)]);
+		len = asc_prt_line(cp, leftlen,
+				   " Host ISA DMA speed:   %d MB/S\n",
+				   isa_dma_speed[ASC_EEP_GET_DMA_SPD(ep)]);
+		ASC_PRT_NEXT();
 	}
 #endif /* CONFIG_ISA */
+
+	return totlen;
 }
 
 /*
  * asc_prt_adv_board_eeprom()
  *
  * Print board EEPROM configuration.
+ *
+ * Note: no single line should be greater than ASC_PRTLINE_SIZE,
+ * cf. asc_prt_line().
+ *
+ * Return the number of characters copied into 'cp'. No more than
+ * 'cplen' characters will be copied to 'cp'.
  */
-static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost)
+static int asc_prt_adv_board_eeprom(struct Scsi_Host *shost, char *cp, int cplen)
 {
 	struct asc_board *boardp = shost_priv(shost);
 	ADV_DVC_VAR *adv_dvc_varp;
+	int leftlen;
+	int totlen;
+	int len;
 	int i;
 	char *termstr;
 	uchar serialstr[13];
@@ -2974,9 +3281,13 @@ static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 		ep_38C1600 = &boardp->eep_config.adv_38C1600_eep;
 	}
 
-	seq_printf(m,
-		   "\nEEPROM Settings for AdvanSys SCSI Host %d:\n",
-		   shost->host_no);
+	leftlen = cplen;
+	totlen = len = 0;
+
+	len = asc_prt_line(cp, leftlen,
+			   "\nEEPROM Settings for AdvanSys SCSI Host %d:\n",
+			   shost->host_no);
+	ASC_PRT_NEXT();
 
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
 		wordp = &ep_3550->serial_number_word1;
@@ -2986,28 +3297,38 @@ static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 		wordp = &ep_38C1600->serial_number_word1;
 	}
 
-	if (asc_get_eeprom_string(wordp, serialstr) == ASC_TRUE)
-		seq_printf(m, " Serial Number: %s\n", serialstr);
-	else
-		seq_puts(m, " Serial Number Signature Not Present.\n");
+	if (asc_get_eeprom_string(wordp, serialstr) == ASC_TRUE) {
+		len =
+		    asc_prt_line(cp, leftlen, " Serial Number: %s\n",
+				 serialstr);
+		ASC_PRT_NEXT();
+	} else {
+		len = asc_prt_line(cp, leftlen,
+				   " Serial Number Signature Not Present.\n");
+		ASC_PRT_NEXT();
+	}
 
-	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550)
-		seq_printf(m,
-			   " Host SCSI ID: %u, Host Queue Size: %u, Device Queue Size: %u\n",
-			   ep_3550->adapter_scsi_id,
-			   ep_3550->max_host_qng, ep_3550->max_dvc_qng);
-	else if (adv_dvc_varp->chip_type == ADV_CHIP_ASC38C0800)
-		seq_printf(m,
-			   " Host SCSI ID: %u, Host Queue Size: %u, Device Queue Size: %u\n",
-			   ep_38C0800->adapter_scsi_id,
-			   ep_38C0800->max_host_qng,
-			   ep_38C0800->max_dvc_qng);
-	else
-		seq_printf(m,
-			   " Host SCSI ID: %u, Host Queue Size: %u, Device Queue Size: %u\n",
-			   ep_38C1600->adapter_scsi_id,
-			   ep_38C1600->max_host_qng,
-			   ep_38C1600->max_dvc_qng);
+	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
+		len = asc_prt_line(cp, leftlen,
+				   " Host SCSI ID: %u, Host Queue Size: %u, Device Queue Size: %u\n",
+				   ep_3550->adapter_scsi_id,
+				   ep_3550->max_host_qng, ep_3550->max_dvc_qng);
+		ASC_PRT_NEXT();
+	} else if (adv_dvc_varp->chip_type == ADV_CHIP_ASC38C0800) {
+		len = asc_prt_line(cp, leftlen,
+				   " Host SCSI ID: %u, Host Queue Size: %u, Device Queue Size: %u\n",
+				   ep_38C0800->adapter_scsi_id,
+				   ep_38C0800->max_host_qng,
+				   ep_38C0800->max_dvc_qng);
+		ASC_PRT_NEXT();
+	} else {
+		len = asc_prt_line(cp, leftlen,
+				   " Host SCSI ID: %u, Host Queue Size: %u, Device Queue Size: %u\n",
+				   ep_38C1600->adapter_scsi_id,
+				   ep_38C1600->max_host_qng,
+				   ep_38C1600->max_dvc_qng);
+		ASC_PRT_NEXT();
+	}
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
 		word = ep_3550->termination;
 	} else if (adv_dvc_varp->chip_type == ADV_CHIP_ASC38C0800) {
@@ -3031,26 +3352,34 @@ static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 		break;
 	}
 
-	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550)
-		seq_printf(m,
-			   " termination: %u (%s), bios_ctrl: 0x%x\n",
-			   ep_3550->termination, termstr,
-			   ep_3550->bios_ctrl);
-	else if (adv_dvc_varp->chip_type == ADV_CHIP_ASC38C0800)
-		seq_printf(m,
-			   " termination: %u (%s), bios_ctrl: 0x%x\n",
-			   ep_38C0800->termination_lvd, termstr,
-			   ep_38C0800->bios_ctrl);
-	else
-		seq_printf(m,
-			   " termination: %u (%s), bios_ctrl: 0x%x\n",
-			   ep_38C1600->termination_lvd, termstr,
-			   ep_38C1600->bios_ctrl);
+	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
+		len = asc_prt_line(cp, leftlen,
+				   " termination: %u (%s), bios_ctrl: 0x%x\n",
+				   ep_3550->termination, termstr,
+				   ep_3550->bios_ctrl);
+		ASC_PRT_NEXT();
+	} else if (adv_dvc_varp->chip_type == ADV_CHIP_ASC38C0800) {
+		len = asc_prt_line(cp, leftlen,
+				   " termination: %u (%s), bios_ctrl: 0x%x\n",
+				   ep_38C0800->termination_lvd, termstr,
+				   ep_38C0800->bios_ctrl);
+		ASC_PRT_NEXT();
+	} else {
+		len = asc_prt_line(cp, leftlen,
+				   " termination: %u (%s), bios_ctrl: 0x%x\n",
+				   ep_38C1600->termination_lvd, termstr,
+				   ep_38C1600->bios_ctrl);
+		ASC_PRT_NEXT();
+	}
 
-	seq_puts(m, " Target ID:           ");
-	for (i = 0; i <= ADV_MAX_TID; i++)
-		seq_printf(m, " %X", i);
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, " Target ID:           ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ADV_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %X", i);
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
 		word = ep_3550->disc_enable;
@@ -3059,11 +3388,15 @@ static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 	} else {
 		word = ep_38C1600->disc_enable;
 	}
-	seq_puts(m, " Disconnects:         ");
-	for (i = 0; i <= ADV_MAX_TID; i++)
-		seq_printf(m, " %c",
-			   (word & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, " Disconnects:         ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ADV_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %c",
+				   (word & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
 		word = ep_3550->tagqng_able;
@@ -3072,11 +3405,15 @@ static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 	} else {
 		word = ep_38C1600->tagqng_able;
 	}
-	seq_puts(m, " Command Queuing:     ");
-	for (i = 0; i <= ADV_MAX_TID; i++)
-		seq_printf(m, " %c",
-			   (word & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, " Command Queuing:     ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ADV_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %c",
+				   (word & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
 		word = ep_3550->start_motor;
@@ -3085,28 +3422,42 @@ static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 	} else {
 		word = ep_38C1600->start_motor;
 	}
-	seq_puts(m, " Start Motor:         ");
-	for (i = 0; i <= ADV_MAX_TID; i++)
-		seq_printf(m, " %c",
-			   (word & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, " Start Motor:         ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ADV_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %c",
+				   (word & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
-		seq_puts(m, " Synchronous Transfer:");
-		for (i = 0; i <= ADV_MAX_TID; i++)
-			seq_printf(m, " %c",
-				   (ep_3550->sdtr_able & ADV_TID_TO_TIDMASK(i)) ?
-				   'Y' : 'N');
-		seq_putc(m, '\n');
+		len = asc_prt_line(cp, leftlen, " Synchronous Transfer:");
+		ASC_PRT_NEXT();
+		for (i = 0; i <= ADV_MAX_TID; i++) {
+			len = asc_prt_line(cp, leftlen, " %c",
+					   (ep_3550->
+					    sdtr_able & ADV_TID_TO_TIDMASK(i)) ?
+					   'Y' : 'N');
+			ASC_PRT_NEXT();
+		}
+		len = asc_prt_line(cp, leftlen, "\n");
+		ASC_PRT_NEXT();
 	}
 
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
-		seq_puts(m, " Ultra Transfer:      ");
-		for (i = 0; i <= ADV_MAX_TID; i++)
-			seq_printf(m, " %c",
-				   (ep_3550->ultra_able & ADV_TID_TO_TIDMASK(i))
-				   ? 'Y' : 'N');
-		seq_putc(m, '\n');
+		len = asc_prt_line(cp, leftlen, " Ultra Transfer:      ");
+		ASC_PRT_NEXT();
+		for (i = 0; i <= ADV_MAX_TID; i++) {
+			len = asc_prt_line(cp, leftlen, " %c",
+					   (ep_3550->
+					    ultra_able & ADV_TID_TO_TIDMASK(i))
+					   ? 'Y' : 'N');
+			ASC_PRT_NEXT();
+		}
+		len = asc_prt_line(cp, leftlen, "\n");
+		ASC_PRT_NEXT();
 	}
 
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC3550) {
@@ -3116,15 +3467,21 @@ static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 	} else {
 		word = ep_38C1600->wdtr_able;
 	}
-	seq_puts(m, " Wide Transfer:       ");
-	for (i = 0; i <= ADV_MAX_TID; i++)
-		seq_printf(m, " %c",
-			   (word & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, " Wide Transfer:       ");
+	ASC_PRT_NEXT();
+	for (i = 0; i <= ADV_MAX_TID; i++) {
+		len = asc_prt_line(cp, leftlen, " %c",
+				   (word & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		ASC_PRT_NEXT();
+	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	if (adv_dvc_varp->chip_type == ADV_CHIP_ASC38C0800 ||
 	    adv_dvc_varp->chip_type == ADV_CHIP_ASC38C1600) {
-		seq_puts(m, " Synchronous Transfer Speed (Mhz):\n  ");
+		len = asc_prt_line(cp, leftlen,
+				   " Synchronous Transfer Speed (Mhz):\n  ");
+		ASC_PRT_NEXT();
 		for (i = 0; i <= ADV_MAX_TID; i++) {
 			char *speed_str;
 
@@ -3160,64 +3517,99 @@ static void asc_prt_adv_board_eeprom(struct seq_file *m, struct Scsi_Host *shost
 				speed_str = "Unk";
 				break;
 			}
-			seq_printf(m, "%X:%s ", i, speed_str);
-			if (i == 7)
-				seq_puts(m, "\n  ");
+			len = asc_prt_line(cp, leftlen, "%X:%s ", i, speed_str);
+			ASC_PRT_NEXT();
+			if (i == 7) {
+				len = asc_prt_line(cp, leftlen, "\n  ");
+				ASC_PRT_NEXT();
+			}
 			sdtr_speed >>= 4;
 		}
-		seq_putc(m, '\n');
+		len = asc_prt_line(cp, leftlen, "\n");
+		ASC_PRT_NEXT();
 	}
+
+	return totlen;
 }
 
 /*
  * asc_prt_driver_conf()
+ *
+ * Note: no single line should be greater than ASC_PRTLINE_SIZE,
+ * cf. asc_prt_line().
+ *
+ * Return the number of characters copied into 'cp'. No more than
+ * 'cplen' characters will be copied to 'cp'.
  */
-static void asc_prt_driver_conf(struct seq_file *m, struct Scsi_Host *shost)
+static int asc_prt_driver_conf(struct Scsi_Host *shost, char *cp, int cplen)
 {
 	struct asc_board *boardp = shost_priv(shost);
+	int leftlen;
+	int totlen;
+	int len;
 	int chip_scsi_id;
 
-	seq_printf(m,
-		"\nLinux Driver Configuration and Information for AdvanSys SCSI Host %d:\n",
-		shost->host_no);
+	leftlen = cplen;
+	totlen = len = 0;
 
-	seq_printf(m,
-		   " host_busy %u, max_id %u, max_lun %llu, max_channel %u\n",
-		   atomic_read(&shost->host_busy), shost->max_id,
-		   shost->max_lun, shost->max_channel);
+	len = asc_prt_line(cp, leftlen,
+			   "\nLinux Driver Configuration and Information for AdvanSys SCSI Host %d:\n",
+			   shost->host_no);
+	ASC_PRT_NEXT();
 
-	seq_printf(m,
-		   " unique_id %d, can_queue %d, this_id %d, sg_tablesize %u, cmd_per_lun %u\n",
-		   shost->unique_id, shost->can_queue, shost->this_id,
-		   shost->sg_tablesize, shost->cmd_per_lun);
+	len = asc_prt_line(cp, leftlen,
+			   " host_busy %u, last_reset %u, max_id %u, max_lun %u, max_channel %u\n",
+			   shost->host_busy, shost->last_reset, shost->max_id,
+			   shost->max_lun, shost->max_channel);
+	ASC_PRT_NEXT();
 
-	seq_printf(m,
-		   " unchecked_isa_dma %d, use_clustering %d\n",
-		   shost->unchecked_isa_dma, shost->use_clustering);
+	len = asc_prt_line(cp, leftlen,
+			   " unique_id %d, can_queue %d, this_id %d, sg_tablesize %u, cmd_per_lun %u\n",
+			   shost->unique_id, shost->can_queue, shost->this_id,
+			   shost->sg_tablesize, shost->cmd_per_lun);
+	ASC_PRT_NEXT();
 
-	seq_printf(m,
-		   " flags 0x%x, last_reset 0x%lx, jiffies 0x%lx, asc_n_io_port 0x%x\n",
-		   boardp->flags, shost->last_reset, jiffies,
-		   boardp->asc_n_io_port);
+	len = asc_prt_line(cp, leftlen,
+			   " unchecked_isa_dma %d, use_clustering %d\n",
+			   shost->unchecked_isa_dma, shost->use_clustering);
+	ASC_PRT_NEXT();
 
-	seq_printf(m, " io_port 0x%lx\n", shost->io_port);
+	len = asc_prt_line(cp, leftlen,
+			   " flags 0x%x, last_reset 0x%x, jiffies 0x%x, asc_n_io_port 0x%x\n",
+			   boardp->flags, boardp->last_reset, jiffies,
+			   boardp->asc_n_io_port);
+	ASC_PRT_NEXT();
+
+	len = asc_prt_line(cp, leftlen, " io_port 0x%x\n", shost->io_port);
+	ASC_PRT_NEXT();
 
 	if (ASC_NARROW_BOARD(boardp)) {
 		chip_scsi_id = boardp->dvc_cfg.asc_dvc_cfg.chip_scsi_id;
 	} else {
 		chip_scsi_id = boardp->dvc_var.adv_dvc_var.chip_scsi_id;
 	}
+
+	return totlen;
 }
 
 /*
  * asc_prt_asc_board_info()
  *
  * Print dynamic board configuration information.
+ *
+ * Note: no single line should be greater than ASC_PRTLINE_SIZE,
+ * cf. asc_prt_line().
+ *
+ * Return the number of characters copied into 'cp'. No more than
+ * 'cplen' characters will be copied to 'cp'.
  */
-static void asc_prt_asc_board_info(struct seq_file *m, struct Scsi_Host *shost)
+static int asc_prt_asc_board_info(struct Scsi_Host *shost, char *cp, int cplen)
 {
 	struct asc_board *boardp = shost_priv(shost);
 	int chip_scsi_id;
+	int leftlen;
+	int totlen;
+	int len;
 	ASC_DVC_VAR *v;
 	ASC_DVC_CFG *c;
 	int i;
@@ -3227,75 +3619,105 @@ static void asc_prt_asc_board_info(struct seq_file *m, struct Scsi_Host *shost)
 	c = &boardp->dvc_cfg.asc_dvc_cfg;
 	chip_scsi_id = c->chip_scsi_id;
 
-	seq_printf(m,
-		   "\nAsc Library Configuration and Statistics for AdvanSys SCSI Host %d:\n",
-		   shost->host_no);
+	leftlen = cplen;
+	totlen = len = 0;
 
-	seq_printf(m, " chip_version %u, mcode_date 0x%x, "
-		   "mcode_version 0x%x, err_code %u\n",
-		   c->chip_version, c->mcode_date, c->mcode_version,
-		   v->err_code);
+	len = asc_prt_line(cp, leftlen,
+			   "\nAsc Library Configuration and Statistics for AdvanSys SCSI Host %d:\n",
+			   shost->host_no);
+	ASC_PRT_NEXT();
+
+	len = asc_prt_line(cp, leftlen, " chip_version %u, mcode_date 0x%x, "
+			   "mcode_version 0x%x, err_code %u\n",
+			   c->chip_version, c->mcode_date, c->mcode_version,
+			   v->err_code);
+	ASC_PRT_NEXT();
 
 	/* Current number of commands waiting for the host. */
-	seq_printf(m,
-		   " Total Command Pending: %d\n", v->cur_total_qng);
+	len = asc_prt_line(cp, leftlen,
+			   " Total Command Pending: %d\n", v->cur_total_qng);
+	ASC_PRT_NEXT();
 
-	seq_puts(m, " Command Queuing:");
+	len = asc_prt_line(cp, leftlen, " Command Queuing:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ASC_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
 			continue;
 		}
-		seq_printf(m, " %X:%c",
-			   i,
-			   (v->use_tagged_qng & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		len = asc_prt_line(cp, leftlen, " %X:%c",
+				   i,
+				   (v->
+				    use_tagged_qng & ADV_TID_TO_TIDMASK(i)) ?
+				   'Y' : 'N');
+		ASC_PRT_NEXT();
 	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	/* Current number of commands waiting for a device. */
-	seq_puts(m, "\n Command Queue Pending:");
+	len = asc_prt_line(cp, leftlen, " Command Queue Pending:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ASC_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
 			continue;
 		}
-		seq_printf(m, " %X:%u", i, v->cur_dvc_qng[i]);
+		len = asc_prt_line(cp, leftlen, " %X:%u", i, v->cur_dvc_qng[i]);
+		ASC_PRT_NEXT();
 	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	/* Current limit on number of commands that can be sent to a device. */
-	seq_puts(m, "\n Command Queue Limit:");
+	len = asc_prt_line(cp, leftlen, " Command Queue Limit:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ASC_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
 			continue;
 		}
-		seq_printf(m, " %X:%u", i, v->max_dvc_qng[i]);
+		len = asc_prt_line(cp, leftlen, " %X:%u", i, v->max_dvc_qng[i]);
+		ASC_PRT_NEXT();
 	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	/* Indicate whether the device has returned queue full status. */
-	seq_puts(m, "\n Command Queue Full:");
+	len = asc_prt_line(cp, leftlen, " Command Queue Full:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ASC_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
 			continue;
 		}
-		if (boardp->queue_full & ADV_TID_TO_TIDMASK(i))
-			seq_printf(m, " %X:Y-%d",
-				   i, boardp->queue_full_cnt[i]);
-		else
-			seq_printf(m, " %X:N", i);
+		if (boardp->queue_full & ADV_TID_TO_TIDMASK(i)) {
+			len = asc_prt_line(cp, leftlen, " %X:Y-%d",
+					   i, boardp->queue_full_cnt[i]);
+		} else {
+			len = asc_prt_line(cp, leftlen, " %X:N", i);
+		}
+		ASC_PRT_NEXT();
 	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
-	seq_puts(m, "\n Synchronous Transfer:");
+	len = asc_prt_line(cp, leftlen, " Synchronous Transfer:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ASC_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
 			continue;
 		}
-		seq_printf(m, " %X:%c",
-			   i,
-			   (v->sdtr_done & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		len = asc_prt_line(cp, leftlen, " %X:%c",
+				   i,
+				   (v->
+				    sdtr_done & ADV_TID_TO_TIDMASK(i)) ? 'Y' :
+				   'N');
+		ASC_PRT_NEXT();
 	}
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	for (i = 0; i <= ASC_MAX_TID; i++) {
 		uchar syn_period_ix;
@@ -3306,47 +3728,69 @@ static void asc_prt_asc_board_info(struct seq_file *m, struct Scsi_Host *shost)
 			continue;
 		}
 
-		seq_printf(m, "  %X:", i);
+		len = asc_prt_line(cp, leftlen, "  %X:", i);
+		ASC_PRT_NEXT();
 
 		if ((boardp->sdtr_data[i] & ASC_SYN_MAX_OFFSET) == 0) {
-			seq_puts(m, " Asynchronous");
+			len = asc_prt_line(cp, leftlen, " Asynchronous");
+			ASC_PRT_NEXT();
 		} else {
 			syn_period_ix =
 			    (boardp->sdtr_data[i] >> 4) & (v->max_sdtr_index -
 							   1);
 
-			seq_printf(m,
-				   " Transfer Period Factor: %d (%d.%d Mhz),",
-				   v->sdtr_period_tbl[syn_period_ix],
-				   250 / v->sdtr_period_tbl[syn_period_ix],
-				   ASC_TENTHS(250,
-					      v->sdtr_period_tbl[syn_period_ix]));
+			len = asc_prt_line(cp, leftlen,
+					   " Transfer Period Factor: %d (%d.%d Mhz),",
+					   v->sdtr_period_tbl[syn_period_ix],
+					   250 /
+					   v->sdtr_period_tbl[syn_period_ix],
+					   ASC_TENTHS(250,
+						      v->
+						      sdtr_period_tbl
+						      [syn_period_ix]));
+			ASC_PRT_NEXT();
 
-			seq_printf(m, " REQ/ACK Offset: %d",
-				   boardp->sdtr_data[i] & ASC_SYN_MAX_OFFSET);
+			len = asc_prt_line(cp, leftlen, " REQ/ACK Offset: %d",
+					   boardp->
+					   sdtr_data[i] & ASC_SYN_MAX_OFFSET);
+			ASC_PRT_NEXT();
 		}
 
 		if ((v->sdtr_done & ADV_TID_TO_TIDMASK(i)) == 0) {
-			seq_puts(m, "*\n");
+			len = asc_prt_line(cp, leftlen, "*\n");
 			renegotiate = 1;
 		} else {
-			seq_putc(m, '\n');
+			len = asc_prt_line(cp, leftlen, "\n");
 		}
+		ASC_PRT_NEXT();
 	}
 
 	if (renegotiate) {
-		seq_puts(m, " * = Re-negotiation pending before next command.\n");
+		len = asc_prt_line(cp, leftlen,
+				   " * = Re-negotiation pending before next command.\n");
+		ASC_PRT_NEXT();
 	}
+
+	return totlen;
 }
 
 /*
  * asc_prt_adv_board_info()
  *
  * Print dynamic board configuration information.
+ *
+ * Note: no single line should be greater than ASC_PRTLINE_SIZE,
+ * cf. asc_prt_line().
+ *
+ * Return the number of characters copied into 'cp'. No more than
+ * 'cplen' characters will be copied to 'cp'.
  */
-static void asc_prt_adv_board_info(struct seq_file *m, struct Scsi_Host *shost)
+static int asc_prt_adv_board_info(struct Scsi_Host *shost, char *cp, int cplen)
 {
 	struct asc_board *boardp = shost_priv(shost);
+	int leftlen;
+	int totlen;
+	int len;
 	int i;
 	ADV_DVC_VAR *v;
 	ADV_DVC_CFG *c;
@@ -3365,34 +3809,47 @@ static void asc_prt_adv_board_info(struct seq_file *m, struct Scsi_Host *shost)
 	iop_base = v->iop_base;
 	chip_scsi_id = v->chip_scsi_id;
 
-	seq_printf(m,
-		   "\nAdv Library Configuration and Statistics for AdvanSys SCSI Host %d:\n",
-		   shost->host_no);
+	leftlen = cplen;
+	totlen = len = 0;
 
-	seq_printf(m,
-		   " iop_base 0x%lx, cable_detect: %X, err_code %u\n",
-		   (unsigned long)v->iop_base,
-		   AdvReadWordRegister(iop_base,IOPW_SCSI_CFG1) & CABLE_DETECT,
-		   v->err_code);
+	len = asc_prt_line(cp, leftlen,
+			   "\nAdv Library Configuration and Statistics for AdvanSys SCSI Host %d:\n",
+			   shost->host_no);
+	ASC_PRT_NEXT();
 
-	seq_printf(m, " chip_version %u, mcode_date 0x%x, "
-		   "mcode_version 0x%x\n", c->chip_version,
-		   c->mcode_date, c->mcode_version);
+	len = asc_prt_line(cp, leftlen,
+			   " iop_base 0x%lx, cable_detect: %X, err_code %u\n",
+			   v->iop_base,
+			   AdvReadWordRegister(iop_base,
+					       IOPW_SCSI_CFG1) & CABLE_DETECT,
+			   v->err_code);
+	ASC_PRT_NEXT();
+
+	len = asc_prt_line(cp, leftlen, " chip_version %u, mcode_date 0x%x, "
+			   "mcode_version 0x%x\n", c->chip_version,
+			   c->mcode_date, c->mcode_version);
+	ASC_PRT_NEXT();
 
 	AdvReadWordLram(iop_base, ASC_MC_TAGQNG_ABLE, tagqng_able);
-	seq_puts(m, " Queuing Enabled:");
+	len = asc_prt_line(cp, leftlen, " Queuing Enabled:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ADV_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
 			continue;
 		}
 
-		seq_printf(m, " %X:%c",
-			   i,
-			   (tagqng_able & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		len = asc_prt_line(cp, leftlen, " %X:%c",
+				   i,
+				   (tagqng_able & ADV_TID_TO_TIDMASK(i)) ? 'Y' :
+				   'N');
+		ASC_PRT_NEXT();
 	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
-	seq_puts(m, "\n Queue Limit:");
+	len = asc_prt_line(cp, leftlen, " Queue Limit:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ADV_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
@@ -3402,10 +3859,14 @@ static void asc_prt_adv_board_info(struct seq_file *m, struct Scsi_Host *shost)
 		AdvReadByteLram(iop_base, ASC_MC_NUMBER_OF_MAX_CMD + i,
 				lrambyte);
 
-		seq_printf(m, " %X:%d", i, lrambyte);
+		len = asc_prt_line(cp, leftlen, " %X:%d", i, lrambyte);
+		ASC_PRT_NEXT();
 	}
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
-	seq_puts(m, "\n Command Pending:");
+	len = asc_prt_line(cp, leftlen, " Command Pending:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ADV_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
@@ -3415,26 +3876,33 @@ static void asc_prt_adv_board_info(struct seq_file *m, struct Scsi_Host *shost)
 		AdvReadByteLram(iop_base, ASC_MC_NUMBER_OF_QUEUED_CMD + i,
 				lrambyte);
 
-		seq_printf(m, " %X:%d", i, lrambyte);
+		len = asc_prt_line(cp, leftlen, " %X:%d", i, lrambyte);
+		ASC_PRT_NEXT();
 	}
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	AdvReadWordLram(iop_base, ASC_MC_WDTR_ABLE, wdtr_able);
-	seq_puts(m, " Wide Enabled:");
+	len = asc_prt_line(cp, leftlen, " Wide Enabled:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ADV_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
 			continue;
 		}
 
-		seq_printf(m, " %X:%c",
-			   i,
-			   (wdtr_able & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		len = asc_prt_line(cp, leftlen, " %X:%c",
+				   i,
+				   (wdtr_able & ADV_TID_TO_TIDMASK(i)) ? 'Y' :
+				   'N');
+		ASC_PRT_NEXT();
 	}
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	AdvReadWordLram(iop_base, ASC_MC_WDTR_DONE, wdtr_done);
-	seq_puts(m, " Transfer Bit Width:");
+	len = asc_prt_line(cp, leftlen, " Transfer Bit Width:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ADV_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
@@ -3445,30 +3913,37 @@ static void asc_prt_adv_board_info(struct seq_file *m, struct Scsi_Host *shost)
 				ASC_MC_DEVICE_HSHK_CFG_TABLE + (2 * i),
 				lramword);
 
-		seq_printf(m, " %X:%d",
-			   i, (lramword & 0x8000) ? 16 : 8);
+		len = asc_prt_line(cp, leftlen, " %X:%d",
+				   i, (lramword & 0x8000) ? 16 : 8);
+		ASC_PRT_NEXT();
 
 		if ((wdtr_able & ADV_TID_TO_TIDMASK(i)) &&
 		    (wdtr_done & ADV_TID_TO_TIDMASK(i)) == 0) {
-			seq_putc(m, '*');
+			len = asc_prt_line(cp, leftlen, "*");
+			ASC_PRT_NEXT();
 			renegotiate = 1;
 		}
 	}
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	AdvReadWordLram(iop_base, ASC_MC_SDTR_ABLE, sdtr_able);
-	seq_puts(m, " Synchronous Enabled:");
+	len = asc_prt_line(cp, leftlen, " Synchronous Enabled:");
+	ASC_PRT_NEXT();
 	for (i = 0; i <= ADV_MAX_TID; i++) {
 		if ((chip_scsi_id == i) ||
 		    ((boardp->init_tidmask & ADV_TID_TO_TIDMASK(i)) == 0)) {
 			continue;
 		}
 
-		seq_printf(m, " %X:%c",
-			   i,
-			   (sdtr_able & ADV_TID_TO_TIDMASK(i)) ? 'Y' : 'N');
+		len = asc_prt_line(cp, leftlen, " %X:%c",
+				   i,
+				   (sdtr_able & ADV_TID_TO_TIDMASK(i)) ? 'Y' :
+				   'N');
+		ASC_PRT_NEXT();
 	}
-	seq_putc(m, '\n');
+	len = asc_prt_line(cp, leftlen, "\n");
+	ASC_PRT_NEXT();
 
 	AdvReadWordLram(iop_base, ASC_MC_SDTR_DONE, sdtr_done);
 	for (i = 0; i <= ADV_MAX_TID; i++) {
@@ -3484,169 +3959,358 @@ static void asc_prt_adv_board_info(struct seq_file *m, struct Scsi_Host *shost)
 			continue;
 		}
 
-		seq_printf(m, "  %X:", i);
+		len = asc_prt_line(cp, leftlen, "  %X:", i);
+		ASC_PRT_NEXT();
 
 		if ((lramword & 0x1F) == 0) {	/* Check for REQ/ACK Offset 0. */
-			seq_puts(m, " Asynchronous");
+			len = asc_prt_line(cp, leftlen, " Asynchronous");
+			ASC_PRT_NEXT();
 		} else {
-			seq_puts(m, " Transfer Period Factor: ");
+			len =
+			    asc_prt_line(cp, leftlen,
+					 " Transfer Period Factor: ");
+			ASC_PRT_NEXT();
 
 			if ((lramword & 0x1F00) == 0x1100) {	/* 80 Mhz */
-				seq_puts(m, "9 (80.0 Mhz),");
+				len =
+				    asc_prt_line(cp, leftlen, "9 (80.0 Mhz),");
+				ASC_PRT_NEXT();
 			} else if ((lramword & 0x1F00) == 0x1000) {	/* 40 Mhz */
-				seq_puts(m, "10 (40.0 Mhz),");
+				len =
+				    asc_prt_line(cp, leftlen, "10 (40.0 Mhz),");
+				ASC_PRT_NEXT();
 			} else {	/* 20 Mhz or below. */
 
 				period = (((lramword >> 8) * 25) + 50) / 4;
 
 				if (period == 0) {	/* Should never happen. */
-					seq_printf(m, "%d (? Mhz), ", period);
+					len =
+					    asc_prt_line(cp, leftlen,
+							 "%d (? Mhz), ");
+					ASC_PRT_NEXT();
 				} else {
-					seq_printf(m,
-						   "%d (%d.%d Mhz),",
-						   period, 250 / period,
-						   ASC_TENTHS(250, period));
+					len = asc_prt_line(cp, leftlen,
+							   "%d (%d.%d Mhz),",
+							   period, 250 / period,
+							   ASC_TENTHS(250,
+								      period));
+					ASC_PRT_NEXT();
 				}
 			}
 
-			seq_printf(m, " REQ/ACK Offset: %d",
-				   lramword & 0x1F);
+			len = asc_prt_line(cp, leftlen, " REQ/ACK Offset: %d",
+					   lramword & 0x1F);
+			ASC_PRT_NEXT();
 		}
 
 		if ((sdtr_done & ADV_TID_TO_TIDMASK(i)) == 0) {
-			seq_puts(m, "*\n");
+			len = asc_prt_line(cp, leftlen, "*\n");
 			renegotiate = 1;
 		} else {
-			seq_putc(m, '\n');
+			len = asc_prt_line(cp, leftlen, "\n");
 		}
+		ASC_PRT_NEXT();
 	}
 
 	if (renegotiate) {
-		seq_puts(m, " * = Re-negotiation pending before next command.\n");
+		len = asc_prt_line(cp, leftlen,
+				   " * = Re-negotiation pending before next command.\n");
+		ASC_PRT_NEXT();
 	}
+
+	return totlen;
+}
+
+/*
+ * asc_proc_copy()
+ *
+ * Copy proc information to a read buffer taking into account the current
+ * read offset in the file and the remaining space in the read buffer.
+ */
+static int
+asc_proc_copy(off_t advoffset, off_t offset, char *curbuf, int leftlen,
+	      char *cp, int cplen)
+{
+	int cnt = 0;
+
+	ASC_DBG(2, "offset %d, advoffset %d, cplen %d\n",
+		 (unsigned)offset, (unsigned)advoffset, cplen);
+	if (offset <= advoffset) {
+		/* Read offset below current offset, copy everything. */
+		cnt = min(cplen, leftlen);
+		ASC_DBG(2, "curbuf 0x%lx, cp 0x%lx, cnt %d\n",
+			 (ulong)curbuf, (ulong)cp, cnt);
+		memcpy(curbuf, cp, cnt);
+	} else if (offset < advoffset + cplen) {
+		/* Read offset within current range, partial copy. */
+		cnt = (advoffset + cplen) - offset;
+		cp = (cp + cplen) - cnt;
+		cnt = min(cnt, leftlen);
+		ASC_DBG(2, "curbuf 0x%lx, cp 0x%lx, cnt %d\n",
+			 (ulong)curbuf, (ulong)cp, cnt);
+		memcpy(curbuf, cp, cnt);
+	}
+	return cnt;
 }
 
 #ifdef ADVANSYS_STATS
 /*
  * asc_prt_board_stats()
+ *
+ * Note: no single line should be greater than ASC_PRTLINE_SIZE,
+ * cf. asc_prt_line().
+ *
+ * Return the number of characters copied into 'cp'. No more than
+ * 'cplen' characters will be copied to 'cp'.
  */
-static void asc_prt_board_stats(struct seq_file *m, struct Scsi_Host *shost)
+static int asc_prt_board_stats(struct Scsi_Host *shost, char *cp, int cplen)
 {
 	struct asc_board *boardp = shost_priv(shost);
 	struct asc_stats *s = &boardp->asc_stats;
 
-	seq_printf(m,
-		   "\nLinux Driver Statistics for AdvanSys SCSI Host %d:\n",
-		   shost->host_no);
+	int leftlen = cplen;
+	int len, totlen = 0;
 
-	seq_printf(m,
-		   " queuecommand %u, reset %u, biosparam %u, interrupt %u\n",
-		   s->queuecommand, s->reset, s->biosparam,
-		   s->interrupt);
+	len = asc_prt_line(cp, leftlen,
+			   "\nLinux Driver Statistics for AdvanSys SCSI Host %d:\n",
+			   shost->host_no);
+	ASC_PRT_NEXT();
 
-	seq_printf(m,
-		   " callback %u, done %u, build_error %u, build_noreq %u, build_nosg %u\n",
-		   s->callback, s->done, s->build_error,
-		   s->adv_build_noreq, s->adv_build_nosg);
+	len = asc_prt_line(cp, leftlen,
+			   " queuecommand %lu, reset %lu, biosparam %lu, interrupt %lu\n",
+			   s->queuecommand, s->reset, s->biosparam,
+			   s->interrupt);
+	ASC_PRT_NEXT();
 
-	seq_printf(m,
-		   " exe_noerror %u, exe_busy %u, exe_error %u, exe_unknown %u\n",
-		   s->exe_noerror, s->exe_busy, s->exe_error,
-		   s->exe_unknown);
+	len = asc_prt_line(cp, leftlen,
+			   " callback %lu, done %lu, build_error %lu, build_noreq %lu, build_nosg %lu\n",
+			   s->callback, s->done, s->build_error,
+			   s->adv_build_noreq, s->adv_build_nosg);
+	ASC_PRT_NEXT();
+
+	len = asc_prt_line(cp, leftlen,
+			   " exe_noerror %lu, exe_busy %lu, exe_error %lu, exe_unknown %lu\n",
+			   s->exe_noerror, s->exe_busy, s->exe_error,
+			   s->exe_unknown);
+	ASC_PRT_NEXT();
 
 	/*
 	 * Display data transfer statistics.
 	 */
 	if (s->xfer_cnt > 0) {
-		seq_printf(m, " xfer_cnt %u, xfer_elem %u, ",
-			   s->xfer_cnt, s->xfer_elem);
+		len = asc_prt_line(cp, leftlen, " xfer_cnt %lu, xfer_elem %lu, ",
+				   s->xfer_cnt, s->xfer_elem);
+		ASC_PRT_NEXT();
 
-		seq_printf(m, "xfer_bytes %u.%01u kb\n",
-			   s->xfer_sect / 2, ASC_TENTHS(s->xfer_sect, 2));
+		len = asc_prt_line(cp, leftlen, "xfer_bytes %lu.%01lu kb\n",
+				   s->xfer_sect / 2, ASC_TENTHS(s->xfer_sect, 2));
+		ASC_PRT_NEXT();
 
 		/* Scatter gather transfer statistics */
-		seq_printf(m, " avg_num_elem %u.%01u, ",
-			   s->xfer_elem / s->xfer_cnt,
-			   ASC_TENTHS(s->xfer_elem, s->xfer_cnt));
+		len = asc_prt_line(cp, leftlen, " avg_num_elem %lu.%01lu, ",
+				   s->xfer_elem / s->xfer_cnt,
+				   ASC_TENTHS(s->xfer_elem, s->xfer_cnt));
+		ASC_PRT_NEXT();
 
-		seq_printf(m, "avg_elem_size %u.%01u kb, ",
-			   (s->xfer_sect / 2) / s->xfer_elem,
-			   ASC_TENTHS((s->xfer_sect / 2), s->xfer_elem));
+		len = asc_prt_line(cp, leftlen, "avg_elem_size %lu.%01lu kb, ",
+				   (s->xfer_sect / 2) / s->xfer_elem,
+				   ASC_TENTHS((s->xfer_sect / 2), s->xfer_elem));
+		ASC_PRT_NEXT();
 
-		seq_printf(m, "avg_xfer_size %u.%01u kb\n",
-			   (s->xfer_sect / 2) / s->xfer_cnt,
-			   ASC_TENTHS((s->xfer_sect / 2), s->xfer_cnt));
+		len = asc_prt_line(cp, leftlen, "avg_xfer_size %lu.%01lu kb\n",
+				   (s->xfer_sect / 2) / s->xfer_cnt,
+				   ASC_TENTHS((s->xfer_sect / 2), s->xfer_cnt));
+		ASC_PRT_NEXT();
 	}
+
+	return totlen;
 }
 #endif /* ADVANSYS_STATS */
 
 /*
- * advansys_show_info() - /proc/scsi/advansys/{0,1,2,3,...}
+ * advansys_proc_info() - /proc/scsi/advansys/{0,1,2,3,...}
  *
- * m: seq_file to print into
- * shost: Scsi_Host
+ * *buffer: I/O buffer
+ * **start: if inout == FALSE pointer into buffer where user read should start
+ * offset: current offset into a /proc/scsi/advansys/[0...] file
+ * length: length of buffer
+ * hostno: Scsi_Host host_no
+ * inout: TRUE - user is writing; FALSE - user is reading
  *
  * Return the number of bytes read from or written to a
  * /proc/scsi/advansys/[0...] file.
+ *
+ * Note: This function uses the per board buffer 'prtbuf' which is
+ * allocated when the board is initialized in advansys_detect(). The
+ * buffer is ASC_PRTBUF_SIZE bytes. The function asc_proc_copy() is
+ * used to write to the buffer. The way asc_proc_copy() is written
+ * if 'prtbuf' is too small it will not be overwritten. Instead the
+ * user just won't get all the available statistics.
  */
 static int
-advansys_show_info(struct seq_file *m, struct Scsi_Host *shost)
+advansys_proc_info(struct Scsi_Host *shost, char *buffer, char **start,
+		   off_t offset, int length, int inout)
 {
 	struct asc_board *boardp = shost_priv(shost);
+	char *cp;
+	int cplen;
+	int cnt;
+	int totcnt;
+	int leftlen;
+	char *curbuf;
+	off_t advoffset;
 
 	ASC_DBG(1, "begin\n");
 
 	/*
+	 * User write not supported.
+	 */
+	if (inout == TRUE)
+		return -ENOSYS;
+
+	/*
 	 * User read of /proc/scsi/advansys/[0...] file.
 	 */
+
+	/* Copy read data starting at the beginning of the buffer. */
+	*start = buffer;
+	curbuf = buffer;
+	advoffset = 0;
+	totcnt = 0;
+	leftlen = length;
 
 	/*
 	 * Get board configuration information.
 	 *
 	 * advansys_info() returns the board string from its own static buffer.
 	 */
+	cp = (char *)advansys_info(shost);
+	strcat(cp, "\n");
+	cplen = strlen(cp);
 	/* Copy board information. */
-	seq_printf(m, "%s\n", (char *)advansys_info(shost));
+	cnt = asc_proc_copy(advoffset, offset, curbuf, leftlen, cp, cplen);
+	totcnt += cnt;
+	leftlen -= cnt;
+	if (leftlen == 0) {
+		ASC_DBG(1, "totcnt %d\n", totcnt);
+		return totcnt;
+	}
+	advoffset += cplen;
+	curbuf += cnt;
+
 	/*
 	 * Display Wide Board BIOS Information.
 	 */
-	if (!ASC_NARROW_BOARD(boardp))
-		asc_prt_adv_bios(m, shost);
+	if (!ASC_NARROW_BOARD(boardp)) {
+		cp = boardp->prtbuf;
+		cplen = asc_prt_adv_bios(shost, cp, ASC_PRTBUF_SIZE);
+		BUG_ON(cplen >= ASC_PRTBUF_SIZE);
+		cnt = asc_proc_copy(advoffset, offset, curbuf, leftlen, cp,
+				  cplen);
+		totcnt += cnt;
+		leftlen -= cnt;
+		if (leftlen == 0) {
+			ASC_DBG(1, "totcnt %d\n", totcnt);
+			return totcnt;
+		}
+		advoffset += cplen;
+		curbuf += cnt;
+	}
 
 	/*
 	 * Display driver information for each device attached to the board.
 	 */
-	asc_prt_board_devices(m, shost);
+	cp = boardp->prtbuf;
+	cplen = asc_prt_board_devices(shost, cp, ASC_PRTBUF_SIZE);
+	BUG_ON(cplen >= ASC_PRTBUF_SIZE);
+	cnt = asc_proc_copy(advoffset, offset, curbuf, leftlen, cp, cplen);
+	totcnt += cnt;
+	leftlen -= cnt;
+	if (leftlen == 0) {
+		ASC_DBG(1, "totcnt %d\n", totcnt);
+		return totcnt;
+	}
+	advoffset += cplen;
+	curbuf += cnt;
 
 	/*
 	 * Display EEPROM configuration for the board.
 	 */
-	if (ASC_NARROW_BOARD(boardp))
-		asc_prt_asc_board_eeprom(m, shost);
-	else
-		asc_prt_adv_board_eeprom(m, shost);
+	cp = boardp->prtbuf;
+	if (ASC_NARROW_BOARD(boardp)) {
+		cplen = asc_prt_asc_board_eeprom(shost, cp, ASC_PRTBUF_SIZE);
+	} else {
+		cplen = asc_prt_adv_board_eeprom(shost, cp, ASC_PRTBUF_SIZE);
+	}
+	BUG_ON(cplen >= ASC_PRTBUF_SIZE);
+	cnt = asc_proc_copy(advoffset, offset, curbuf, leftlen, cp, cplen);
+	totcnt += cnt;
+	leftlen -= cnt;
+	if (leftlen == 0) {
+		ASC_DBG(1, "totcnt %d\n", totcnt);
+		return totcnt;
+	}
+	advoffset += cplen;
+	curbuf += cnt;
 
 	/*
 	 * Display driver configuration and information for the board.
 	 */
-	asc_prt_driver_conf(m, shost);
+	cp = boardp->prtbuf;
+	cplen = asc_prt_driver_conf(shost, cp, ASC_PRTBUF_SIZE);
+	BUG_ON(cplen >= ASC_PRTBUF_SIZE);
+	cnt = asc_proc_copy(advoffset, offset, curbuf, leftlen, cp, cplen);
+	totcnt += cnt;
+	leftlen -= cnt;
+	if (leftlen == 0) {
+		ASC_DBG(1, "totcnt %d\n", totcnt);
+		return totcnt;
+	}
+	advoffset += cplen;
+	curbuf += cnt;
 
 #ifdef ADVANSYS_STATS
 	/*
 	 * Display driver statistics for the board.
 	 */
-	asc_prt_board_stats(m, shost);
+	cp = boardp->prtbuf;
+	cplen = asc_prt_board_stats(shost, cp, ASC_PRTBUF_SIZE);
+	BUG_ON(cplen >= ASC_PRTBUF_SIZE);
+	cnt = asc_proc_copy(advoffset, offset, curbuf, leftlen, cp, cplen);
+	totcnt += cnt;
+	leftlen -= cnt;
+	if (leftlen == 0) {
+		ASC_DBG(1, "totcnt %d\n", totcnt);
+		return totcnt;
+	}
+	advoffset += cplen;
+	curbuf += cnt;
 #endif /* ADVANSYS_STATS */
 
 	/*
 	 * Display Asc Library dynamic configuration information
 	 * for the board.
 	 */
-	if (ASC_NARROW_BOARD(boardp))
-		asc_prt_asc_board_info(m, shost);
-	else
-		asc_prt_adv_board_info(m, shost);
-	return 0;
+	cp = boardp->prtbuf;
+	if (ASC_NARROW_BOARD(boardp)) {
+		cplen = asc_prt_asc_board_info(shost, cp, ASC_PRTBUF_SIZE);
+	} else {
+		cplen = asc_prt_adv_board_info(shost, cp, ASC_PRTBUF_SIZE);
+	}
+	BUG_ON(cplen >= ASC_PRTBUF_SIZE);
+	cnt = asc_proc_copy(advoffset, offset, curbuf, leftlen, cp, cplen);
+	totcnt += cnt;
+	leftlen -= cnt;
+	if (leftlen == 0) {
+		ASC_DBG(1, "totcnt %d\n", totcnt);
+		return totcnt;
+	}
+	advoffset += cplen;
+	curbuf += cnt;
+
+	ASC_DBG(1, "totcnt %d\n", totcnt);
+
+	return totcnt;
 }
 #endif /* CONFIG_PROC_FS */
 
@@ -3691,7 +4355,7 @@ static int AscStartChip(PortAddr iop_base)
 	return (1);
 }
 
-static bool AscStopChip(PortAddr iop_base)
+static int AscStopChip(PortAddr iop_base)
 {
 	uchar cc_val;
 
@@ -3702,22 +4366,22 @@ static bool AscStopChip(PortAddr iop_base)
 	AscSetChipIH(iop_base, INS_HALT);
 	AscSetChipIH(iop_base, INS_RFLAG_WTM);
 	if ((AscGetChipStatus(iop_base) & CSW_HALTED) == 0) {
-		return false;
+		return (0);
 	}
-	return true;
+	return (1);
 }
 
-static bool AscIsChipHalted(PortAddr iop_base)
+static int AscIsChipHalted(PortAddr iop_base)
 {
 	if ((AscGetChipStatus(iop_base) & CSW_HALTED) != 0) {
 		if ((AscGetChipControl(iop_base) & CC_HALT) != 0) {
-			return true;
+			return (1);
 		}
 	}
-	return false;
+	return (0);
 }
 
-static bool AscResetChipAndScsiBus(ASC_DVC_VAR *asc_dvc)
+static int AscResetChipAndScsiBus(ASC_DVC_VAR *asc_dvc)
 {
 	PortAddr iop_base;
 	int i = 10;
@@ -3799,6 +4463,20 @@ static ushort AscReadLramWord(PortAddr iop_base, ushort addr)
 	word_data = AscGetChipLramData(iop_base);
 	return (word_data);
 }
+
+#if CC_VERY_LONG_SG_LIST
+static ASC_DCNT AscReadLramDWord(PortAddr iop_base, ushort addr)
+{
+	ushort val_low, val_high;
+	ASC_DCNT dword_data;
+
+	AscSetChipLramAddr(iop_base, addr);
+	val_low = AscGetChipLramData(iop_base);
+	val_high = AscGetChipLramData(iop_base);
+	dword_data = ((ASC_DCNT) val_high << 16) | (ASC_DCNT) val_low;
+	return (dword_data);
+}
+#endif /* CC_VERY_LONG_SG_LIST */
 
 static void
 AscMemWordSetLram(PortAddr iop_base, ushort s_addr, ushort set_wval, int words)
@@ -3901,24 +4579,27 @@ AscMemWordCopyPtrFromLram(PortAddr iop_base,
 	}
 }
 
-static u32 AscMemSumLramWord(PortAddr iop_base, ushort s_addr, int words)
+static ASC_DCNT AscMemSumLramWord(PortAddr iop_base, ushort s_addr, int words)
 {
-	u32 sum = 0;
+	ASC_DCNT sum;
 	int i;
 
+	sum = 0L;
 	for (i = 0; i < words; i++, s_addr += 2) {
 		sum += AscReadLramWord(iop_base, s_addr);
 	}
 	return (sum);
 }
 
-static void AscInitLram(ASC_DVC_VAR *asc_dvc)
+static ushort AscInitLram(ASC_DVC_VAR *asc_dvc)
 {
 	uchar i;
 	ushort s_addr;
 	PortAddr iop_base;
+	ushort warn_code;
 
 	iop_base = asc_dvc->iop_base;
+	warn_code = 0;
 	AscMemWordSetLram(iop_base, ASC_QADR_BEG, 0,
 			  (ushort)(((int)(asc_dvc->max_total_qng + 2 + 1) *
 				    64) >> 1));
@@ -3957,13 +4638,14 @@ static void AscInitLram(ASC_DVC_VAR *asc_dvc)
 		AscWriteLramByte(iop_base,
 				 (ushort)(s_addr + (ushort)ASC_SCSIQ_B_QNO), i);
 	}
+	return warn_code;
 }
 
-static u32
+static ASC_DCNT
 AscLoadMicroCode(PortAddr iop_base, ushort s_addr,
 		 const uchar *mcode_buf, ushort mcode_size)
 {
-	u32 chksum;
+	ASC_DCNT chksum;
 	ushort mcode_word_size;
 	ushort mcode_chksum;
 
@@ -4015,13 +4697,13 @@ static void AscInitQLinkVar(ASC_DVC_VAR *asc_dvc)
 	}
 }
 
-static int AscInitMicroCodeVar(ASC_DVC_VAR *asc_dvc)
+static ushort AscInitMicroCodeVar(ASC_DVC_VAR *asc_dvc)
 {
 	int i;
-	int warn_code;
+	ushort warn_code;
 	PortAddr iop_base;
-	__le32 phy_addr;
-	__le32 phy_size;
+	ASC_PADDR phy_addr;
+	ASC_DCNT phy_size;
 	struct asc_board *board = asc_dvc_to_board(asc_dvc);
 
 	iop_base = asc_dvc->iop_base;
@@ -4060,12 +4742,12 @@ static int AscInitMicroCodeVar(ASC_DVC_VAR *asc_dvc)
 	AscSetPCAddr(iop_base, ASC_MCODE_START_ADDR);
 	if (AscGetPCAddr(iop_base) != ASC_MCODE_START_ADDR) {
 		asc_dvc->err_code |= ASC_IERR_SET_PC_ADDR;
-		warn_code = -EINVAL;
+		warn_code = UW_ERR;
 		goto err_mcode_start;
 	}
 	if (AscStartChip(iop_base) != 1) {
 		asc_dvc->err_code |= ASC_IERR_START_STOP_CHIP;
-		warn_code = -EIO;
+		warn_code = UW_ERR;
 		goto err_mcode_start;
 	}
 
@@ -4079,13 +4761,13 @@ err_dma_map:
 	return warn_code;
 }
 
-static int AscInitAsc1000Driver(ASC_DVC_VAR *asc_dvc)
+static ushort AscInitAsc1000Driver(ASC_DVC_VAR *asc_dvc)
 {
 	const struct firmware *fw;
 	const char fwname[] = "advansys/mcode.bin";
 	int err;
 	unsigned long chksum;
-	int warn_code;
+	ushort warn_code;
 	PortAddr iop_base;
 
 	iop_base = asc_dvc->iop_base;
@@ -4097,13 +4779,15 @@ static int AscInitAsc1000Driver(ASC_DVC_VAR *asc_dvc)
 	}
 	asc_dvc->init_state |= ASC_INIT_STATE_BEG_LOAD_MC;
 	if (asc_dvc->err_code != 0)
-		return ASC_ERROR;
+		return UW_ERR;
 	if (!AscFindSignature(asc_dvc->iop_base)) {
 		asc_dvc->err_code = ASC_IERR_BAD_SIGNATURE;
 		return warn_code;
 	}
 	AscDisableInterrupt(iop_base);
-	AscInitLram(asc_dvc);
+	warn_code |= AscInitLram(asc_dvc);
+	if (asc_dvc->err_code != 0)
+		return UW_ERR;
 
 	err = request_firmware(&fw, fwname, asc_dvc->drv_ptr->dev);
 	if (err) {
@@ -4163,7 +4847,7 @@ static int AdvLoadMicrocode(AdvPortAddr iop_base, const unsigned char *buf,
 			    int size, int memsize, int chksum)
 {
 	int i, j, end, len = 0;
-	u32 sum;
+	ADV_DCNT sum;
 
 	AdvWriteWordRegister(iop_base, IOPW_RAM_ADDR, 0);
 
@@ -4209,72 +4893,38 @@ static int AdvLoadMicrocode(AdvPortAddr iop_base, const unsigned char *buf,
 	return 0;
 }
 
-static void AdvBuildCarrierFreelist(struct adv_dvc_var *adv_dvc)
+static void AdvBuildCarrierFreelist(struct adv_dvc_var *asc_dvc)
 {
-	off_t carr_offset = 0, next_offset;
-	dma_addr_t carr_paddr;
-	int carr_num = ADV_CARRIER_BUFSIZE / sizeof(ADV_CARR_T), i;
+	ADV_CARR_T *carrp;
+	ADV_SDCNT buf_size;
+	ADV_PADDR carr_paddr;
 
-	for (i = 0; i < carr_num; i++) {
-		carr_offset = i * sizeof(ADV_CARR_T);
+	carrp = (ADV_CARR_T *) ADV_16BALIGN(asc_dvc->carrier_buf);
+	asc_dvc->carr_freelist = NULL;
+	if (carrp == asc_dvc->carrier_buf) {
+		buf_size = ADV_CARRIER_BUFSIZE;
+	} else {
+		buf_size = ADV_CARRIER_BUFSIZE - sizeof(ADV_CARR_T);
+	}
+
+	do {
 		/* Get physical address of the carrier 'carrp'. */
-		carr_paddr = adv_dvc->carrier_addr + carr_offset;
+		carr_paddr = cpu_to_le32(virt_to_bus(carrp));
 
-		adv_dvc->carrier[i].carr_pa = cpu_to_le32(carr_paddr);
-		adv_dvc->carrier[i].carr_va = cpu_to_le32(carr_offset);
-		adv_dvc->carrier[i].areq_vpa = 0;
-		next_offset = carr_offset + sizeof(ADV_CARR_T);
-		if (i == carr_num)
-			next_offset = ~0;
-		adv_dvc->carrier[i].next_vpa = cpu_to_le32(next_offset);
-	}
-	/*
-	 * We cannot have a carrier with 'carr_va' of '0', as
-	 * a reference to this carrier would be interpreted as
-	 * list termination.
-	 * So start at carrier 1 with the freelist.
-	 */
-	adv_dvc->carr_freelist = &adv_dvc->carrier[1];
-}
+		buf_size -= sizeof(ADV_CARR_T);
 
-static ADV_CARR_T *adv_get_carrier(struct adv_dvc_var *adv_dvc, u32 offset)
-{
-	int index;
+		carrp->carr_pa = carr_paddr;
+		carrp->carr_va = cpu_to_le32(ADV_VADDR_TO_U32(carrp));
 
-	BUG_ON(offset > ADV_CARRIER_BUFSIZE);
+		/*
+		 * Insert the carrier at the beginning of the freelist.
+		 */
+		carrp->next_vpa =
+			cpu_to_le32(ADV_VADDR_TO_U32(asc_dvc->carr_freelist));
+		asc_dvc->carr_freelist = carrp;
 
-	index = offset / sizeof(ADV_CARR_T);
-	return &adv_dvc->carrier[index];
-}
-
-static ADV_CARR_T *adv_get_next_carrier(struct adv_dvc_var *adv_dvc)
-{
-	ADV_CARR_T *carrp = adv_dvc->carr_freelist;
-	u32 next_vpa = le32_to_cpu(carrp->next_vpa);
-
-	if (next_vpa == 0 || next_vpa == ~0) {
-		ASC_DBG(1, "invalid vpa offset 0x%x\n", next_vpa);
-		return NULL;
-	}
-
-	adv_dvc->carr_freelist = adv_get_carrier(adv_dvc, next_vpa);
-	/*
-	 * insert stopper carrier to terminate list
-	 */
-	carrp->next_vpa = cpu_to_le32(ADV_CQ_STOPPER);
-
-	return carrp;
-}
-
-/*
- * 'offset' is the index in the request pointer array
- */
-static adv_req_t * adv_get_reqp(struct adv_dvc_var *adv_dvc, u32 offset)
-{
-	struct asc_board *boardp = adv_dvc->drv_ptr;
-
-	BUG_ON(offset > adv_dvc->max_host_qng);
-	return &boardp->adv_reqp[offset];
+		carrp++;
+	} while (buf_size > 0);
 }
 
 /*
@@ -4293,9 +4943,10 @@ static adv_req_t * adv_get_reqp(struct adv_dvc_var *adv_dvc, u32 offset)
  */
 static int
 AdvSendIdleCmd(ADV_DVC_VAR *asc_dvc,
-	       ushort idle_cmd, u32 idle_cmd_parameter)
+	       ushort idle_cmd, ADV_DCNT idle_cmd_parameter)
 {
-	int result, i, j;
+	int result;
+	ADV_DCNT i, j;
 	AdvPortAddr iop_base;
 
 	iop_base = asc_dvc->iop_base;
@@ -4762,11 +5413,17 @@ static int AdvInitAsc3550Driver(ADV_DVC_VAR *asc_dvc)
 	 * Set-up the Host->RISC Initiator Command Queue (ICQ).
 	 */
 
-	asc_dvc->icq_sp = adv_get_next_carrier(asc_dvc);
-	if (!asc_dvc->icq_sp) {
+	if ((asc_dvc->icq_sp = asc_dvc->carr_freelist) == NULL) {
 		asc_dvc->err_code |= ASC_IERR_NO_CARRIER;
 		return ADV_ERROR;
 	}
+	asc_dvc->carr_freelist = (ADV_CARR_T *)
+	    ADV_U32_TO_VADDR(le32_to_cpu(asc_dvc->icq_sp->next_vpa));
+
+	/*
+	 * The first command issued will be placed in the stopper carrier.
+	 */
+	asc_dvc->icq_sp->next_vpa = cpu_to_le32(ASC_CQ_STOPPER);
 
 	/*
 	 * Set RISC ICQ physical address start value.
@@ -4776,11 +5433,21 @@ static int AdvInitAsc3550Driver(ADV_DVC_VAR *asc_dvc)
 	/*
 	 * Set-up the RISC->Host Initiator Response Queue (IRQ).
 	 */
-	asc_dvc->irq_sp = adv_get_next_carrier(asc_dvc);
-	if (!asc_dvc->irq_sp) {
+	if ((asc_dvc->irq_sp = asc_dvc->carr_freelist) == NULL) {
 		asc_dvc->err_code |= ASC_IERR_NO_CARRIER;
 		return ADV_ERROR;
 	}
+	asc_dvc->carr_freelist = (ADV_CARR_T *)
+	    ADV_U32_TO_VADDR(le32_to_cpu(asc_dvc->irq_sp->next_vpa));
+
+	/*
+	 * The first command completed by the RISC will be placed in
+	 * the stopper.
+	 *
+	 * Note: Set 'next_vpa' to ASC_CQ_STOPPER. When the request is
+	 * completed the RISC will set the ASC_RQ_STOPPER bit.
+	 */
+	asc_dvc->irq_sp->next_vpa = cpu_to_le32(ASC_CQ_STOPPER);
 
 	/*
 	 * Set RISC IRQ physical address start value.
@@ -5243,12 +5910,17 @@ static int AdvInitAsc38C0800Driver(ADV_DVC_VAR *asc_dvc)
 	 * Set-up the Host->RISC Initiator Command Queue (ICQ).
 	 */
 
-	asc_dvc->icq_sp = adv_get_next_carrier(asc_dvc);
-	if (!asc_dvc->icq_sp) {
-		ASC_DBG(0, "Failed to get ICQ carrier\n");
+	if ((asc_dvc->icq_sp = asc_dvc->carr_freelist) == NULL) {
 		asc_dvc->err_code |= ASC_IERR_NO_CARRIER;
 		return ADV_ERROR;
 	}
+	asc_dvc->carr_freelist = (ADV_CARR_T *)
+	    ADV_U32_TO_VADDR(le32_to_cpu(asc_dvc->icq_sp->next_vpa));
+
+	/*
+	 * The first command issued will be placed in the stopper carrier.
+	 */
+	asc_dvc->icq_sp->next_vpa = cpu_to_le32(ASC_CQ_STOPPER);
 
 	/*
 	 * Set RISC ICQ physical address start value.
@@ -5259,12 +5931,21 @@ static int AdvInitAsc38C0800Driver(ADV_DVC_VAR *asc_dvc)
 	/*
 	 * Set-up the RISC->Host Initiator Response Queue (IRQ).
 	 */
-	asc_dvc->irq_sp = adv_get_next_carrier(asc_dvc);
-	if (!asc_dvc->irq_sp) {
-		ASC_DBG(0, "Failed to get IRQ carrier\n");
+	if ((asc_dvc->irq_sp = asc_dvc->carr_freelist) == NULL) {
 		asc_dvc->err_code |= ASC_IERR_NO_CARRIER;
 		return ADV_ERROR;
 	}
+	asc_dvc->carr_freelist = (ADV_CARR_T *)
+	    ADV_U32_TO_VADDR(le32_to_cpu(asc_dvc->irq_sp->next_vpa));
+
+	/*
+	 * The first command completed by the RISC will be placed in
+	 * the stopper.
+	 *
+	 * Note: Set 'next_vpa' to ASC_CQ_STOPPER. When the request is
+	 * completed the RISC will set the ASC_RQ_STOPPER bit.
+	 */
+	asc_dvc->irq_sp->next_vpa = cpu_to_le32(ASC_CQ_STOPPER);
 
 	/*
 	 * Set RISC IRQ physical address start value.
@@ -5739,11 +6420,17 @@ static int AdvInitAsc38C1600Driver(ADV_DVC_VAR *asc_dvc)
 	/*
 	 * Set-up the Host->RISC Initiator Command Queue (ICQ).
 	 */
-	asc_dvc->icq_sp = adv_get_next_carrier(asc_dvc);
-	if (!asc_dvc->icq_sp) {
+	if ((asc_dvc->icq_sp = asc_dvc->carr_freelist) == NULL) {
 		asc_dvc->err_code |= ASC_IERR_NO_CARRIER;
 		return ADV_ERROR;
 	}
+	asc_dvc->carr_freelist = (ADV_CARR_T *)
+	    ADV_U32_TO_VADDR(le32_to_cpu(asc_dvc->icq_sp->next_vpa));
+
+	/*
+	 * The first command issued will be placed in the stopper carrier.
+	 */
+	asc_dvc->icq_sp->next_vpa = cpu_to_le32(ASC_CQ_STOPPER);
 
 	/*
 	 * Set RISC ICQ physical address start value. Initialize the
@@ -5757,11 +6444,21 @@ static int AdvInitAsc38C1600Driver(ADV_DVC_VAR *asc_dvc)
 	/*
 	 * Set-up the RISC->Host Initiator Response Queue (IRQ).
 	 */
-	asc_dvc->irq_sp = adv_get_next_carrier(asc_dvc);
-	if (!asc_dvc->irq_sp) {
+	if ((asc_dvc->irq_sp = asc_dvc->carr_freelist) == NULL) {
 		asc_dvc->err_code |= ASC_IERR_NO_CARRIER;
 		return ADV_ERROR;
 	}
+	asc_dvc->carr_freelist = (ADV_CARR_T *)
+	    ADV_U32_TO_VADDR(le32_to_cpu(asc_dvc->irq_sp->next_vpa));
+
+	/*
+	 * The first command completed by the RISC will be placed in
+	 * the stopper.
+	 *
+	 * Note: Set 'next_vpa' to ASC_CQ_STOPPER. When the request is
+	 * completed the RISC will set the ASC_RQ_STOPPER bit.
+	 */
+	asc_dvc->irq_sp->next_vpa = cpu_to_le32(ASC_CQ_STOPPER);
 
 	/*
 	 * Set RISC IRQ physical address start value.
@@ -5948,16 +6645,15 @@ static void adv_async_callback(ADV_DVC_VAR *adv_dvc_varp, uchar code)
  */
 static void adv_isr_callback(ADV_DVC_VAR *adv_dvc_varp, ADV_SCSI_REQ_Q *scsiqp)
 {
-	struct asc_board *boardp = adv_dvc_varp->drv_ptr;
-	u32 srb_tag;
+	struct asc_board *boardp;
 	adv_req_t *reqp;
 	adv_sgblk_t *sgblkp;
 	struct scsi_cmnd *scp;
-	u32 resid_cnt;
-	dma_addr_t sense_addr;
+	struct Scsi_Host *shost;
+	ADV_DCNT resid_cnt;
 
-	ASC_DBG(1, "adv_dvc_varp 0x%p, scsiqp 0x%p\n",
-		adv_dvc_varp, scsiqp);
+	ASC_DBG(1, "adv_dvc_varp 0x%lx, scsiqp 0x%lx\n",
+		 (ulong)adv_dvc_varp, (ulong)scsiqp);
 	ASC_DBG_PRT_ADV_SCSI_REQ_Q(2, scsiqp);
 
 	/*
@@ -5965,9 +6661,22 @@ static void adv_isr_callback(ADV_DVC_VAR *adv_dvc_varp, ADV_SCSI_REQ_Q *scsiqp)
 	 * completed. The adv_req_t structure actually contains the
 	 * completed ADV_SCSI_REQ_Q structure.
 	 */
-	srb_tag = le32_to_cpu(scsiqp->srb_tag);
-	scp = scsi_host_find_tag(boardp->shost, scsiqp->srb_tag);
+	reqp = (adv_req_t *)ADV_U32_TO_VADDR(scsiqp->srb_ptr);
+	ASC_DBG(1, "reqp 0x%lx\n", (ulong)reqp);
+	if (reqp == NULL) {
+		ASC_PRINT("adv_isr_callback: reqp is NULL\n");
+		return;
+	}
 
+	/*
+	 * Get the struct scsi_cmnd structure and Scsi_Host structure for the
+	 * command that has been completed.
+	 *
+	 * Note: The adv_req_t request structure and adv_sgblk_t structure,
+	 * if any, are dropped, because a board structure pointer can not be
+	 * determined.
+	 */
+	scp = reqp->cmndp;
 	ASC_DBG(1, "scp 0x%p\n", scp);
 	if (scp == NULL) {
 		ASC_PRINT
@@ -5976,25 +6685,12 @@ static void adv_isr_callback(ADV_DVC_VAR *adv_dvc_varp, ADV_SCSI_REQ_Q *scsiqp)
 	}
 	ASC_DBG_PRT_CDB(2, scp->cmnd, scp->cmd_len);
 
-	reqp = (adv_req_t *)scp->host_scribble;
-	ASC_DBG(1, "reqp 0x%lx\n", (ulong)reqp);
-	if (reqp == NULL) {
-		ASC_PRINT("adv_isr_callback: reqp is NULL\n");
-		return;
-	}
-	/*
-	 * Remove backreferences to avoid duplicate
-	 * command completions.
-	 */
-	scp->host_scribble = NULL;
-	reqp->cmndp = NULL;
+	shost = scp->device->host;
+	ASC_STATS(shost, callback);
+	ASC_DBG(1, "shost 0x%p\n", shost);
 
-	ASC_STATS(boardp->shost, callback);
-	ASC_DBG(1, "shost 0x%p\n", boardp->shost);
-
-	sense_addr = le32_to_cpu(scsiqp->sense_addr);
-	dma_unmap_single(boardp->dev, sense_addr,
-			 SCSI_SENSE_BUFFERSIZE, DMA_FROM_DEVICE);
+	boardp = shost_priv(shost);
+	BUG_ON(adv_dvc_varp != &boardp->dvc_var.adv_dvc_var);
 
 	/*
 	 * 'done_status' contains the command's ending status.
@@ -6087,9 +6783,17 @@ static void adv_isr_callback(ADV_DVC_VAR *adv_dvc_varp, ADV_SCSI_REQ_Q *scsiqp)
 		/* Remove 'sgblkp' from the request list. */
 		reqp->sgblkp = sgblkp->next_sgblkp;
 
-		dma_pool_free(boardp->adv_sgblk_pool, sgblkp,
-			      sgblkp->sg_addr);
+		/* Add 'sgblkp' to the board free list. */
+		sgblkp->next_sgblkp = boardp->adv_sgblkp;
+		boardp->adv_sgblkp = sgblkp;
 	}
+
+	/*
+	 * Free the adv_req_t structure used with the command by adding
+	 * it back to the board free list.
+	 */
+	reqp->next_reqp = boardp->adv_reqp;
+	boardp->adv_reqp = reqp;
 
 	ASC_DBG(1, "done\n");
 }
@@ -6119,9 +6823,8 @@ static int AdvISR(ADV_DVC_VAR *asc_dvc)
 	uchar int_stat;
 	ushort target_bit;
 	ADV_CARR_T *free_carrp;
-	__le32 irq_next_vpa;
+	ADV_VADDR irq_next_vpa;
 	ADV_SCSI_REQ_Q *scsiq;
-	adv_req_t *reqp;
 
 	iop_base = asc_dvc->iop_base;
 
@@ -6164,28 +6867,25 @@ static int AdvISR(ADV_DVC_VAR *asc_dvc)
 	 * Check if the IRQ stopper carrier contains a completed request.
 	 */
 	while (((irq_next_vpa =
-		 le32_to_cpu(asc_dvc->irq_sp->next_vpa)) & ADV_RQ_DONE) != 0) {
+		 le32_to_cpu(asc_dvc->irq_sp->next_vpa)) & ASC_RQ_DONE) != 0) {
 		/*
 		 * Get a pointer to the newly completed ADV_SCSI_REQ_Q structure.
 		 * The RISC will have set 'areq_vpa' to a virtual address.
 		 *
-		 * The firmware will have copied the ADV_SCSI_REQ_Q.scsiq_ptr
+		 * The firmware will have copied the ASC_SCSI_REQ_Q.scsiq_ptr
 		 * field to the carrier ADV_CARR_T.areq_vpa field. The conversion
-		 * below complements the conversion of ADV_SCSI_REQ_Q.scsiq_ptr'
+		 * below complements the conversion of ASC_SCSI_REQ_Q.scsiq_ptr'
 		 * in AdvExeScsiQueue().
 		 */
-		u32 pa_offset = le32_to_cpu(asc_dvc->irq_sp->areq_vpa);
-		ASC_DBG(1, "irq_sp %p areq_vpa %u\n",
-			asc_dvc->irq_sp, pa_offset);
-		reqp = adv_get_reqp(asc_dvc, pa_offset);
-		scsiq = &reqp->scsi_req_q;
+		scsiq = (ADV_SCSI_REQ_Q *)
+		    ADV_U32_TO_VADDR(le32_to_cpu(asc_dvc->irq_sp->areq_vpa));
 
 		/*
 		 * Request finished with good status and the queue was not
 		 * DMAed to host memory by the firmware. Set all status fields
 		 * to indicate good status.
 		 */
-		if ((irq_next_vpa & ADV_RQ_GOOD) != 0) {
+		if ((irq_next_vpa & ASC_RQ_GOOD) != 0) {
 			scsiq->done_status = QD_NO_ERROR;
 			scsiq->host_status = scsiq->scsi_status = 0;
 			scsiq->data_cnt = 0L;
@@ -6197,10 +6897,11 @@ static int AdvISR(ADV_DVC_VAR *asc_dvc)
 		 * stopper carrier.
 		 */
 		free_carrp = asc_dvc->irq_sp;
-		asc_dvc->irq_sp = adv_get_carrier(asc_dvc,
-						  ADV_GET_CARRP(irq_next_vpa));
+		asc_dvc->irq_sp = (ADV_CARR_T *)
+		    ADV_U32_TO_VADDR(ASC_GET_CARRP(irq_next_vpa));
 
-		free_carrp->next_vpa = asc_dvc->carr_freelist->carr_va;
+		free_carrp->next_vpa =
+		    cpu_to_le32(ADV_VADDR_TO_U32(asc_dvc->carr_freelist));
 		asc_dvc->carr_freelist = free_carrp;
 		asc_dvc->carr_pending_cnt--;
 
@@ -6215,6 +6916,7 @@ static int AdvISR(ADV_DVC_VAR *asc_dvc)
 		 * Notify the driver of the completed request by passing
 		 * the ADV_SCSI_REQ_Q pointer to its callback function.
 		 */
+		scsiq->a_flag |= ADV_SCSIQ_DONE;
 		adv_isr_callback(asc_dvc, scsiq);
 		/*
 		 * Note: After the driver callback function is called, 'scsiq'
@@ -6291,17 +6993,18 @@ static uchar AscGetSynPeriodIndex(ASC_DVC_VAR *asc_dvc, uchar syn_time)
 static uchar
 AscMsgOutSDTR(ASC_DVC_VAR *asc_dvc, uchar sdtr_period, uchar sdtr_offset)
 {
-	PortAddr iop_base = asc_dvc->iop_base;
-	uchar sdtr_period_index = AscGetSynPeriodIndex(asc_dvc, sdtr_period);
-	EXT_MSG sdtr_buf = {
-		.msg_type = EXTENDED_MESSAGE,
-		.msg_len = MS_SDTR_LEN,
-		.msg_req = EXTENDED_SDTR,
-		.xfer_period = sdtr_period,
-		.req_ack_offset = sdtr_offset,
-	};
-	sdtr_offset &= ASC_SYN_MAX_OFFSET;
+	EXT_MSG sdtr_buf;
+	uchar sdtr_period_index;
+	PortAddr iop_base;
 
+	iop_base = asc_dvc->iop_base;
+	sdtr_buf.msg_type = EXTENDED_MESSAGE;
+	sdtr_buf.msg_len = MS_SDTR_LEN;
+	sdtr_buf.msg_req = EXTENDED_SDTR;
+	sdtr_buf.xfer_period = sdtr_period;
+	sdtr_offset &= ASC_SYN_MAX_OFFSET;
+	sdtr_buf.req_ack_offset = sdtr_offset;
+	sdtr_period_index = AscGetSynPeriodIndex(asc_dvc, sdtr_period);
 	if (sdtr_period_index <= asc_dvc->max_sdtr_index) {
 		AscMemWordCopyPtrToLram(iop_base, ASCV_MSGOUT_BEG,
 					(uchar *)&sdtr_buf,
@@ -6329,11 +7032,11 @@ AscCalSDTRData(ASC_DVC_VAR *asc_dvc, uchar sdtr_period, uchar syn_offset)
 	return byte;
 }
 
-static bool AscSetChipSynRegAtID(PortAddr iop_base, uchar id, uchar sdtr_data)
+static int AscSetChipSynRegAtID(PortAddr iop_base, uchar id, uchar sdtr_data)
 {
 	ASC_SCSI_BIT_ID_TYPE org_id;
 	int i;
-	bool sta = true;
+	int sta = TRUE;
 
 	AscSetBank(iop_base, 1);
 	org_id = AscReadChipDvcID(iop_base);
@@ -6347,10 +7050,10 @@ static bool AscSetChipSynRegAtID(PortAddr iop_base, uchar id, uchar sdtr_data)
 		AscSetBank(iop_base, 0);
 		AscSetChipSyn(iop_base, sdtr_data);
 		if (AscGetChipSyn(iop_base) != sdtr_data) {
-			sta = false;
+			sta = FALSE;
 		}
 	} else {
-		sta = false;
+		sta = FALSE;
 	}
 	AscSetBank(iop_base, 1);
 	AscWriteChipDvcID(iop_base, org_id);
@@ -6364,12 +7067,12 @@ static void AscSetChipSDTR(PortAddr iop_base, uchar sdtr_data, uchar tid_no)
 	AscPutMCodeSDTRDoneAtID(iop_base, tid_no, sdtr_data);
 }
 
-static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
+static int AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 {
 	EXT_MSG ext_msg;
 	EXT_MSG out_msg;
 	ushort halt_q_addr;
-	bool sdtr_accept;
+	int sdtr_accept;
 	ushort int_halt_code;
 	ASC_SCSI_BIT_ID_TYPE scsi_busy;
 	ASC_SCSI_BIT_ID_TYPE target_id;
@@ -6411,14 +7114,14 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 			boardp->sdtr_data[tid_no] = 0;
 		}
 		AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
-		return;
+		return (0);
 	} else if (int_halt_code == ASC_HALT_ENABLE_ASYN_USE_SYN_FIX) {
 		if (asc_dvc->pci_fix_asyn_xfer & target_id) {
 			AscSetChipSDTR(iop_base, asyn_sdtr, tid_no);
 			boardp->sdtr_data[tid_no] = asyn_sdtr;
 		}
 		AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
-		return;
+		return (0);
 	} else if (int_halt_code == ASC_HALT_EXTMSG_IN) {
 		AscMemWordCopyPtrFromLram(iop_base,
 					  ASCV_MSGIN_BEG,
@@ -6428,10 +7131,10 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 		if (ext_msg.msg_type == EXTENDED_MESSAGE &&
 		    ext_msg.msg_req == EXTENDED_SDTR &&
 		    ext_msg.msg_len == MS_SDTR_LEN) {
-			sdtr_accept = true;
+			sdtr_accept = TRUE;
 			if ((ext_msg.req_ack_offset > ASC_SYN_MAX_OFFSET)) {
 
-				sdtr_accept = false;
+				sdtr_accept = FALSE;
 				ext_msg.req_ack_offset = ASC_SYN_MAX_OFFSET;
 			}
 			if ((ext_msg.xfer_period <
@@ -6439,7 +7142,7 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 			    || (ext_msg.xfer_period >
 				asc_dvc->sdtr_period_tbl[asc_dvc->
 							 max_sdtr_index])) {
-				sdtr_accept = false;
+				sdtr_accept = FALSE;
 				ext_msg.xfer_period =
 				    asc_dvc->sdtr_period_tbl[asc_dvc->
 							     min_sdtr_index];
@@ -6504,7 +7207,7 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 						  (ushort)ASC_SCSIQ_B_CNTL),
 					 q_cntl);
 			AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
-			return;
+			return (0);
 		} else if (ext_msg.msg_type == EXTENDED_MESSAGE &&
 			   ext_msg.msg_req == EXTENDED_WDTR &&
 			   ext_msg.msg_len == MS_WDTR_LEN) {
@@ -6520,7 +7223,7 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 						  (ushort)ASC_SCSIQ_B_CNTL),
 					 q_cntl);
 			AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
-			return;
+			return (0);
 		} else {
 
 			ext_msg.msg_type = MESSAGE_REJECT;
@@ -6534,7 +7237,7 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 						  (ushort)ASC_SCSIQ_B_CNTL),
 					 q_cntl);
 			AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
-			return;
+			return (0);
 		}
 	} else if (int_halt_code == ASC_HALT_CHK_CONDITION) {
 
@@ -6591,7 +7294,7 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 		AscWriteLramByte(iop_base, (ushort)ASCV_SCSIBUSY_B, scsi_busy);
 
 		AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
-		return;
+		return (0);
 	} else if (int_halt_code == ASC_HALT_SDTR_REJECTED) {
 
 		AscMemWordCopyPtrFromLram(iop_base,
@@ -6613,7 +7316,7 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 				 (ushort)(halt_q_addr +
 					  (ushort)ASC_SCSIQ_B_CNTL), q_cntl);
 		AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
-		return;
+		return (0);
 	} else if (int_halt_code == ASC_HALT_SS_QUEUE_FULL) {
 
 		scsi_status = AscReadLramByte(iop_base,
@@ -6658,9 +7361,166 @@ static void AscIsrChipHalted(ASC_DVC_VAR *asc_dvc)
 			}
 		}
 		AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
-		return;
+		return (0);
 	}
-	return;
+#if CC_VERY_LONG_SG_LIST
+	else if (int_halt_code == ASC_HALT_HOST_COPY_SG_LIST_TO_RISC) {
+		uchar q_no;
+		ushort q_addr;
+		uchar sg_wk_q_no;
+		uchar first_sg_wk_q_no;
+		ASC_SCSI_Q *scsiq;	/* Ptr to driver request. */
+		ASC_SG_HEAD *sg_head;	/* Ptr to driver SG request. */
+		ASC_SG_LIST_Q scsi_sg_q;	/* Structure written to queue. */
+		ushort sg_list_dwords;
+		ushort sg_entry_cnt;
+		uchar next_qp;
+		int i;
+
+		q_no = AscReadLramByte(iop_base, (ushort)ASCV_REQ_SG_LIST_QP);
+		if (q_no == ASC_QLINK_END)
+			return 0;
+
+		q_addr = ASC_QNO_TO_QADDR(q_no);
+
+		/*
+		 * Convert the request's SRB pointer to a host ASC_SCSI_REQ
+		 * structure pointer using a macro provided by the driver.
+		 * The ASC_SCSI_REQ pointer provides a pointer to the
+		 * host ASC_SG_HEAD structure.
+		 */
+		/* Read request's SRB pointer. */
+		scsiq = (ASC_SCSI_Q *)
+		    ASC_SRB2SCSIQ(ASC_U32_TO_VADDR(AscReadLramDWord(iop_base,
+								    (ushort)
+								    (q_addr +
+								     ASC_SCSIQ_D_SRBPTR))));
+
+		/*
+		 * Get request's first and working SG queue.
+		 */
+		sg_wk_q_no = AscReadLramByte(iop_base,
+					     (ushort)(q_addr +
+						      ASC_SCSIQ_B_SG_WK_QP));
+
+		first_sg_wk_q_no = AscReadLramByte(iop_base,
+						   (ushort)(q_addr +
+							    ASC_SCSIQ_B_FIRST_SG_WK_QP));
+
+		/*
+		 * Reset request's working SG queue back to the
+		 * first SG queue.
+		 */
+		AscWriteLramByte(iop_base,
+				 (ushort)(q_addr +
+					  (ushort)ASC_SCSIQ_B_SG_WK_QP),
+				 first_sg_wk_q_no);
+
+		sg_head = scsiq->sg_head;
+
+		/*
+		 * Set sg_entry_cnt to the number of SG elements
+		 * that will be completed on this interrupt.
+		 *
+		 * Note: The allocated SG queues contain ASC_MAX_SG_LIST - 1
+		 * SG elements. The data_cnt and data_addr fields which
+		 * add 1 to the SG element capacity are not used when
+		 * restarting SG handling after a halt.
+		 */
+		if (scsiq->remain_sg_entry_cnt > (ASC_MAX_SG_LIST - 1)) {
+			sg_entry_cnt = ASC_MAX_SG_LIST - 1;
+
+			/*
+			 * Keep track of remaining number of SG elements that
+			 * will need to be handled on the next interrupt.
+			 */
+			scsiq->remain_sg_entry_cnt -= (ASC_MAX_SG_LIST - 1);
+		} else {
+			sg_entry_cnt = scsiq->remain_sg_entry_cnt;
+			scsiq->remain_sg_entry_cnt = 0;
+		}
+
+		/*
+		 * Copy SG elements into the list of allocated SG queues.
+		 *
+		 * Last index completed is saved in scsiq->next_sg_index.
+		 */
+		next_qp = first_sg_wk_q_no;
+		q_addr = ASC_QNO_TO_QADDR(next_qp);
+		scsi_sg_q.sg_head_qp = q_no;
+		scsi_sg_q.cntl = QCSG_SG_XFER_LIST;
+		for (i = 0; i < sg_head->queue_cnt; i++) {
+			scsi_sg_q.seq_no = i + 1;
+			if (sg_entry_cnt > ASC_SG_LIST_PER_Q) {
+				sg_list_dwords = (uchar)(ASC_SG_LIST_PER_Q * 2);
+				sg_entry_cnt -= ASC_SG_LIST_PER_Q;
+				/*
+				 * After very first SG queue RISC FW uses next
+				 * SG queue first element then checks sg_list_cnt
+				 * against zero and then decrements, so set
+				 * sg_list_cnt 1 less than number of SG elements
+				 * in each SG queue.
+				 */
+				scsi_sg_q.sg_list_cnt = ASC_SG_LIST_PER_Q - 1;
+				scsi_sg_q.sg_cur_list_cnt =
+				    ASC_SG_LIST_PER_Q - 1;
+			} else {
+				/*
+				 * This is the last SG queue in the list of
+				 * allocated SG queues. If there are more
+				 * SG elements than will fit in the allocated
+				 * queues, then set the QCSG_SG_XFER_MORE flag.
+				 */
+				if (scsiq->remain_sg_entry_cnt != 0) {
+					scsi_sg_q.cntl |= QCSG_SG_XFER_MORE;
+				} else {
+					scsi_sg_q.cntl |= QCSG_SG_XFER_END;
+				}
+				/* equals sg_entry_cnt * 2 */
+				sg_list_dwords = sg_entry_cnt << 1;
+				scsi_sg_q.sg_list_cnt = sg_entry_cnt - 1;
+				scsi_sg_q.sg_cur_list_cnt = sg_entry_cnt - 1;
+				sg_entry_cnt = 0;
+			}
+
+			scsi_sg_q.q_no = next_qp;
+			AscMemWordCopyPtrToLram(iop_base,
+						q_addr + ASC_SCSIQ_SGHD_CPY_BEG,
+						(uchar *)&scsi_sg_q,
+						sizeof(ASC_SG_LIST_Q) >> 1);
+
+			AscMemDWordCopyPtrToLram(iop_base,
+						 q_addr + ASC_SGQ_LIST_BEG,
+						 (uchar *)&sg_head->
+						 sg_list[scsiq->next_sg_index],
+						 sg_list_dwords);
+
+			scsiq->next_sg_index += ASC_SG_LIST_PER_Q;
+
+			/*
+			 * If the just completed SG queue contained the
+			 * last SG element, then no more SG queues need
+			 * to be written.
+			 */
+			if (scsi_sg_q.cntl & QCSG_SG_XFER_END) {
+				break;
+			}
+
+			next_qp = AscReadLramByte(iop_base,
+						  (ushort)(q_addr +
+							   ASC_SCSIQ_B_FWD));
+			q_addr = ASC_QNO_TO_QADDR(next_qp);
+		}
+
+		/*
+		 * Clear the halt condition so the RISC will be restarted
+		 * after the return.
+		 */
+		AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0);
+		return (0);
+	}
+#endif /* CC_VERY_LONG_SG_LIST */
+	return (0);
 }
 
 /*
@@ -6694,7 +7554,7 @@ DvcGetQinfo(PortAddr iop_base, ushort s_addr, uchar *inbuf, int words)
 static uchar
 _AscCopyLramScsiDoneQ(PortAddr iop_base,
 		      ushort q_addr,
-		      ASC_QDONE_INFO *scsiq, unsigned int max_dma_count)
+		      ASC_QDONE_INFO *scsiq, ASC_DCNT max_dma_count)
 {
 	ushort _val;
 	uchar sg_queue_cnt;
@@ -6721,10 +7581,10 @@ _AscCopyLramScsiDoneQ(PortAddr iop_base,
 	/*
 	 * Read high word of remain bytes from alternate location.
 	 */
-	scsiq->remain_bytes = (((u32)AscReadLramWord(iop_base,
-						     (ushort)(q_addr +
-							      (ushort)
-							      ASC_SCSIQ_W_ALT_DC1)))
+	scsiq->remain_bytes = (((ADV_DCNT)AscReadLramWord(iop_base,
+							  (ushort)(q_addr +
+								   (ushort)
+								   ASC_SCSIQ_W_ALT_DC1)))
 			       << 16);
 	/*
 	 * Read low word of remain bytes from original location.
@@ -6744,24 +7604,25 @@ _AscCopyLramScsiDoneQ(PortAddr iop_base,
  */
 static void asc_isr_callback(ASC_DVC_VAR *asc_dvc_varp, ASC_QDONE_INFO *qdonep)
 {
-	struct asc_board *boardp = asc_dvc_varp->drv_ptr;
-	u32 srb_tag;
+	struct asc_board *boardp;
 	struct scsi_cmnd *scp;
+	struct Scsi_Host *shost;
 
 	ASC_DBG(1, "asc_dvc_varp 0x%p, qdonep 0x%p\n", asc_dvc_varp, qdonep);
 	ASC_DBG_PRT_ASC_QDONE_INFO(2, qdonep);
 
-	/*
-	 * Decrease the srb_tag by 1 to find the SCSI command
-	 */
-	srb_tag = qdonep->d2.srb_tag - 1;
-	scp = scsi_host_find_tag(boardp->shost, srb_tag);
+	scp = advansys_srb_to_ptr(asc_dvc_varp, qdonep->d2.srb_ptr);
 	if (!scp)
 		return;
 
 	ASC_DBG_PRT_CDB(2, scp->cmnd, scp->cmd_len);
 
-	ASC_STATS(boardp->shost, callback);
+	shost = scp->device->host;
+	ASC_STATS(shost, callback);
+	ASC_DBG(1, "shost 0x%p\n", shost);
+
+	boardp = shost_priv(shost);
+	BUG_ON(asc_dvc_varp != &boardp->dvc_var.asc_dvc_var);
 
 	dma_unmap_single(boardp->dev, scp->SCp.dma_handle,
 			 SCSI_SENSE_BUFFERSIZE, DMA_FROM_DEVICE);
@@ -6870,7 +7731,7 @@ static int AscIsrQDone(ASC_DVC_VAR *asc_dvc)
 	uchar cur_target_qng;
 	ASC_QDONE_INFO scsiq_buf;
 	ASC_QDONE_INFO *scsiq;
-	bool false_overrun;
+	int false_overrun;
 
 	iop_base = asc_dvc->iop_base;
 	n_q_used = 1;
@@ -6944,17 +7805,14 @@ static int AscIsrQDone(ASC_DVC_VAR *asc_dvc)
 			scsiq->d3.done_stat = QD_WITH_ERROR;
 			goto FATAL_ERR_QDONE;
 		}
-		if ((scsiq->d2.srb_tag == 0UL) ||
+		if ((scsiq->d2.srb_ptr == 0UL) ||
 		    ((scsiq->q_status & QS_ABORTED) != 0)) {
 			return (0x11);
 		} else if (scsiq->q_status == QS_DONE) {
-			/*
-			 * This is also curious.
-			 * false_overrun will _always_ be set to 'false'
-			 */
-			false_overrun = false;
+			false_overrun = FALSE;
 			if (scsiq->extra_bytes != 0) {
-				scsiq->remain_bytes += scsiq->extra_bytes;
+				scsiq->remain_bytes +=
+				    (ADV_DCNT)scsiq->extra_bytes;
 			}
 			if (scsiq->d3.done_stat == QD_WITH_ERROR) {
 				if (scsiq->d3.host_stat ==
@@ -7025,23 +7883,23 @@ static int AscISR(ASC_DVC_VAR *asc_dvc)
 	uchar host_flag;
 
 	iop_base = asc_dvc->iop_base;
-	int_pending = ASC_FALSE;
+	int_pending = FALSE;
 
 	if (AscIsIntPending(iop_base) == 0)
 		return int_pending;
 
 	if ((asc_dvc->init_state & ASC_INIT_STATE_END_LOAD_MC) == 0) {
-		return ASC_ERROR;
+		return ERR;
 	}
 	if (asc_dvc->in_critical_cnt != 0) {
 		AscSetLibErrorCode(asc_dvc, ASCQ_ERR_ISR_ON_CRITICAL);
-		return ASC_ERROR;
+		return ERR;
 	}
 	if (asc_dvc->is_in_int) {
 		AscSetLibErrorCode(asc_dvc, ASCQ_ERR_ISR_RE_ENTRY);
-		return ASC_ERROR;
+		return ERR;
 	}
-	asc_dvc->is_in_int = true;
+	asc_dvc->is_in_int = TRUE;
 	ctrl_reg = AscGetChipControl(iop_base);
 	saved_ctrl_reg = ctrl_reg & (~(CC_SCSI_RESET | CC_CHIP_RESET |
 				       CC_SINGLE_STEP | CC_DIAG | CC_TEST));
@@ -7049,7 +7907,7 @@ static int AscISR(ASC_DVC_VAR *asc_dvc)
 	if (chipstat & CSW_SCSI_RESET_LATCH) {
 		if (!(asc_dvc->bus_type & (ASC_IS_VL | ASC_IS_EISA))) {
 			int i = 10;
-			int_pending = ASC_TRUE;
+			int_pending = TRUE;
 			asc_dvc->sdtr_done = 0;
 			saved_ctrl_reg &= (uchar)(~CC_HALT);
 			while ((AscGetChipStatus(iop_base) &
@@ -7071,11 +7929,15 @@ static int AscISR(ASC_DVC_VAR *asc_dvc)
 			 (uchar)(host_flag | (uchar)ASC_HOST_FLAG_IN_ISR));
 	if ((chipstat & CSW_INT_PENDING) || (int_pending)) {
 		AscAckInterrupt(iop_base);
-		int_pending = ASC_TRUE;
+		int_pending = TRUE;
 		if ((chipstat & CSW_HALTED) && (ctrl_reg & CC_SINGLE_STEP)) {
-			AscIsrChipHalted(asc_dvc);
-			saved_ctrl_reg &= (uchar)(~CC_HALT);
+			if (AscIsrChipHalted(asc_dvc) == ERR) {
+				goto ISR_REPORT_QDONE_FATAL_ERROR;
+			} else {
+				saved_ctrl_reg &= (uchar)(~CC_HALT);
+			}
 		} else {
+ ISR_REPORT_QDONE_FATAL_ERROR:
 			if ((asc_dvc->dvc_cntl & ASC_CNTL_INT_MULTI_Q) != 0) {
 				while (((status =
 					 AscIsrQDone(asc_dvc)) & 0x01) != 0) {
@@ -7089,20 +7951,20 @@ static int AscISR(ASC_DVC_VAR *asc_dvc)
 				} while (status == 0x11);
 			}
 			if ((status & 0x80) != 0)
-				int_pending = ASC_ERROR;
+				int_pending = ERR;
 		}
 	}
 	AscWriteLramByte(iop_base, ASCV_HOST_FLAG_B, host_flag);
 	AscSetChipLramAddr(iop_base, saved_ram_addr);
 	AscSetChipControl(iop_base, saved_ctrl_reg);
-	asc_dvc->is_in_int = false;
+	asc_dvc->is_in_int = FALSE;
 	return int_pending;
 }
 
 /*
  * advansys_reset()
  *
- * Reset the host associated with the command 'scp'.
+ * Reset the bus associated with the command 'scp'.
  *
  * This function runs its own thread. Interrupts must be blocked but
  * sleeping is allowed and no locking other than for host structures is
@@ -7120,7 +7982,7 @@ static int advansys_reset(struct scsi_cmnd *scp)
 
 	ASC_STATS(shost, reset);
 
-	scmd_printk(KERN_INFO, scp, "SCSI host reset started...\n");
+	scmd_printk(KERN_INFO, scp, "SCSI bus reset started...\n");
 
 	if (ASC_NARROW_BOARD(boardp)) {
 		ASC_DVC_VAR *asc_dvc = &boardp->dvc_var.asc_dvc_var;
@@ -7131,19 +7993,20 @@ static int advansys_reset(struct scsi_cmnd *scp)
 
 		/* Refer to ASC_IERR_* definitions for meaning of 'err_code'. */
 		if (asc_dvc->err_code || !asc_dvc->overrun_dma) {
-			scmd_printk(KERN_INFO, scp, "SCSI host reset error: "
+			scmd_printk(KERN_INFO, scp, "SCSI bus reset error: "
 				    "0x%x, status: 0x%x\n", asc_dvc->err_code,
 				    status);
 			ret = FAILED;
 		} else if (status) {
-			scmd_printk(KERN_INFO, scp, "SCSI host reset warning: "
+			scmd_printk(KERN_INFO, scp, "SCSI bus reset warning: "
 				    "0x%x\n", status);
 		} else {
-			scmd_printk(KERN_INFO, scp, "SCSI host reset "
+			scmd_printk(KERN_INFO, scp, "SCSI bus reset "
 				    "successful\n");
 		}
 
 		ASC_DBG(1, "after AscInitAsc1000Driver()\n");
+		spin_lock_irqsave(shost->host_lock, flags);
 	} else {
 		/*
 		 * If the suggest reset bus flags are set, then reset the bus.
@@ -7152,24 +8015,27 @@ static int advansys_reset(struct scsi_cmnd *scp)
 		ADV_DVC_VAR *adv_dvc = &boardp->dvc_var.adv_dvc_var;
 
 		/*
-		 * Reset the chip and SCSI bus.
+		 * Reset the target's SCSI bus.
 		 */
 		ASC_DBG(1, "before AdvResetChipAndSB()\n");
 		switch (AdvResetChipAndSB(adv_dvc)) {
 		case ASC_TRUE:
-			scmd_printk(KERN_INFO, scp, "SCSI host reset "
+			scmd_printk(KERN_INFO, scp, "SCSI bus reset "
 				    "successful\n");
 			break;
 		case ASC_FALSE:
 		default:
-			scmd_printk(KERN_INFO, scp, "SCSI host reset error\n");
+			scmd_printk(KERN_INFO, scp, "SCSI bus reset error\n");
 			ret = FAILED;
 			break;
 		}
 		spin_lock_irqsave(shost->host_lock, flags);
 		AdvISR(adv_dvc);
-		spin_unlock_irqrestore(shost->host_lock, flags);
 	}
+
+	/* Save the time of the most recently completed reset. */
+	boardp->last_reset = jiffies;
+	spin_unlock_irqrestore(shost->host_lock, flags);
 
 	ASC_DBG(1, "ret %d\n", ret);
 
@@ -7229,10 +8095,9 @@ static irqreturn_t advansys_interrupt(int irq, void *dev_id)
 	struct Scsi_Host *shost = dev_id;
 	struct asc_board *boardp = shost_priv(shost);
 	irqreturn_t result = IRQ_NONE;
-	unsigned long flags;
 
 	ASC_DBG(2, "boardp 0x%p\n", boardp);
-	spin_lock_irqsave(shost->host_lock, flags);
+	spin_lock(shost->host_lock);
 	if (ASC_NARROW_BOARD(boardp)) {
 		if (AscIsIntPending(shost->io_port)) {
 			result = IRQ_HANDLED;
@@ -7247,38 +8112,38 @@ static irqreturn_t advansys_interrupt(int irq, void *dev_id)
 			ASC_STATS(shost, interrupt);
 		}
 	}
-	spin_unlock_irqrestore(shost->host_lock, flags);
+	spin_unlock(shost->host_lock);
 
 	ASC_DBG(1, "end\n");
 	return result;
 }
 
-static bool AscHostReqRiscHalt(PortAddr iop_base)
+static int AscHostReqRiscHalt(PortAddr iop_base)
 {
 	int count = 0;
-	bool sta = false;
+	int sta = 0;
 	uchar saved_stop_code;
 
 	if (AscIsChipHalted(iop_base))
-		return true;
+		return (1);
 	saved_stop_code = AscReadLramByte(iop_base, ASCV_STOP_CODE_B);
 	AscWriteLramByte(iop_base, ASCV_STOP_CODE_B,
 			 ASC_STOP_HOST_REQ_RISC_HALT | ASC_STOP_REQ_RISC_STOP);
 	do {
 		if (AscIsChipHalted(iop_base)) {
-			sta = true;
+			sta = 1;
 			break;
 		}
 		mdelay(100);
 	} while (count++ < 20);
 	AscWriteLramByte(iop_base, ASCV_STOP_CODE_B, saved_stop_code);
-	return sta;
+	return (sta);
 }
 
-static bool
+static int
 AscSetRunChipSynRegAtID(PortAddr iop_base, uchar tid_no, uchar sdtr_data)
 {
-	bool sta = false;
+	int sta = FALSE;
 
 	if (AscHostReqRiscHalt(iop_base)) {
 		sta = AscSetChipSynRegAtID(iop_base, tid_no, sdtr_data);
@@ -7334,7 +8199,7 @@ advansys_narrow_slave_configure(struct scsi_device *sdev, ASC_DVC_VAR *asc_dvc)
 				asc_dvc->cfg->can_tagged_qng |= tid_bit;
 				asc_dvc->use_tagged_qng |= tid_bit;
 			}
-			scsi_change_queue_depth(sdev, 
+			scsi_adjust_queue_depth(sdev, MSG_ORDERED_TAG,
 						asc_dvc->max_dvc_qng[sdev->id]);
 		}
 	} else {
@@ -7342,6 +8207,7 @@ advansys_narrow_slave_configure(struct scsi_device *sdev, ASC_DVC_VAR *asc_dvc)
 			asc_dvc->cfg->can_tagged_qng &= ~tid_bit;
 			asc_dvc->use_tagged_qng &= ~tid_bit;
 		}
+		scsi_adjust_queue_depth(sdev, 0, sdev->host->cmd_per_lun);
 	}
 
 	if ((sdev->lun == 0) &&
@@ -7475,8 +8341,12 @@ advansys_wide_slave_configure(struct scsi_device *sdev, ADV_DVC_VAR *adv_dvc)
 		}
 	}
 
-	if ((adv_dvc->tagqng_able & tidmask) && sdev->tagged_supported)
-		scsi_change_queue_depth(sdev, adv_dvc->max_dvc_qng);
+	if ((adv_dvc->tagqng_able & tidmask) && sdev->tagged_supported) {
+		scsi_adjust_queue_depth(sdev, MSG_ORDERED_TAG,
+					adv_dvc->max_dvc_qng);
+	} else {
+		scsi_adjust_queue_depth(sdev, 0, sdev->host->cmd_per_lun);
+	}
 }
 
 /*
@@ -7497,17 +8367,13 @@ static int advansys_slave_configure(struct scsi_device *sdev)
 	return 0;
 }
 
-static __le32 asc_get_sense_buffer_dma(struct scsi_cmnd *scp)
+static __le32 advansys_get_sense_buffer_dma(struct scsi_cmnd *scp)
 {
 	struct asc_board *board = shost_priv(scp->device->host);
-
 	scp->SCp.dma_handle = dma_map_single(board->dev, scp->sense_buffer,
-					     SCSI_SENSE_BUFFERSIZE,
-					     DMA_FROM_DEVICE);
-	if (dma_mapping_error(board->dev, scp->SCp.dma_handle)) {
-		ASC_DBG(1, "failed to map sense buffer\n");
-		return 0;
-	}
+					     SCSI_SENSE_BUFFERSIZE, DMA_FROM_DEVICE);
+	dma_cache_sync(board->dev, scp->sense_buffer,
+		       SCSI_SENSE_BUFFERSIZE, DMA_FROM_DEVICE);
 	return cpu_to_le32(scp->SCp.dma_handle);
 }
 
@@ -7516,16 +8382,17 @@ static int asc_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
 {
 	struct asc_dvc_var *asc_dvc = &boardp->dvc_var.asc_dvc_var;
 	int use_sg;
-	u32 srb_tag;
 
 	memset(asc_scsi_q, 0, sizeof(*asc_scsi_q));
 
 	/*
-	 * Set the srb_tag to the command tag + 1, as
-	 * srb_tag '0' is used internally by the chip.
+	 * Point the ASC_SCSI_Q to the 'struct scsi_cmnd'.
 	 */
-	srb_tag = scp->request->tag + 1;
-	asc_scsi_q->q2.srb_tag = srb_tag;
+	asc_scsi_q->q2.srb_ptr = advansys_ptr_to_srb(asc_dvc, scp);
+	if (asc_scsi_q->q2.srb_ptr == BAD_SRB) {
+		scp->result = HOST_BYTE(DID_SOFT_ERROR);
+		return ASC_ERROR;
+	}
 
 	/*
 	 * Build the ASC_SCSI_Q request.
@@ -7536,10 +8403,8 @@ static int asc_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
 	asc_scsi_q->q1.target_lun = scp->device->lun;
 	asc_scsi_q->q2.target_ix =
 	    ASC_TIDLUN_TO_IX(scp->device->id, scp->device->lun);
-	asc_scsi_q->q1.sense_addr = asc_get_sense_buffer_dma(scp);
+	asc_scsi_q->q1.sense_addr = advansys_get_sense_buffer_dma(scp);
 	asc_scsi_q->q1.sense_len = SCSI_SENSE_BUFFERSIZE;
-	if (!asc_scsi_q->q1.sense_addr)
-		return ASC_BUSY;
 
 	/*
 	 * If there are any outstanding requests for the current target,
@@ -7554,17 +8419,14 @@ static int asc_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
 	 */
 	if ((asc_dvc->cur_dvc_qng[scp->device->id] > 0) &&
 	    (boardp->reqcnt[scp->device->id] % 255) == 0) {
-		asc_scsi_q->q2.tag_code = ORDERED_QUEUE_TAG;
+		asc_scsi_q->q2.tag_code = MSG_ORDERED_TAG;
 	} else {
-		asc_scsi_q->q2.tag_code = SIMPLE_QUEUE_TAG;
+		asc_scsi_q->q2.tag_code = MSG_SIMPLE_TAG;
 	}
 
 	/* Build ASC_SCSI_Q */
 	use_sg = scsi_dma_map(scp);
-	if (use_sg < 0) {
-		ASC_DBG(1, "failed to map sglist\n");
-		return ASC_BUSY;
-	} else if (use_sg > 0) {
+	if (use_sg != 0) {
 		int sgcnt;
 		struct scatterlist *slp;
 		struct asc_sg_head *asc_sg_head;
@@ -7629,19 +8491,20 @@ static int asc_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
  *      ADV_ERROR(-1) - SG List creation failed
  */
 static int
-adv_get_sglist(struct asc_board *boardp, adv_req_t *reqp,
-	       ADV_SCSI_REQ_Q *scsiqp, struct scsi_cmnd *scp, int use_sg)
+adv_get_sglist(struct asc_board *boardp, adv_req_t *reqp, struct scsi_cmnd *scp,
+	       int use_sg)
 {
-	adv_sgblk_t *sgblkp, *prev_sgblkp;
+	adv_sgblk_t *sgblkp;
+	ADV_SCSI_REQ_Q *scsiqp;
 	struct scatterlist *slp;
 	int sg_elem_cnt;
 	ADV_SG_BLOCK *sg_block, *prev_sg_block;
-	dma_addr_t sgblk_paddr;
+	ADV_PADDR sg_block_paddr;
 	int i;
 
+	scsiqp = (ADV_SCSI_REQ_Q *)ADV_32BALIGN(&reqp->scsi_req_q);
 	slp = scsi_sglist(scp);
 	sg_elem_cnt = use_sg;
-	prev_sgblkp = NULL;
 	prev_sg_block = NULL;
 	reqp->sgblkp = NULL;
 
@@ -7651,9 +8514,7 @@ adv_get_sglist(struct asc_board *boardp, adv_req_t *reqp,
 		 * list. One 'adv_sgblk_t' structure holds NO_OF_SG_PER_BLOCK
 		 * (15) scatter-gather elements.
 		 */
-		sgblkp = dma_pool_alloc(boardp->adv_sgblk_pool, GFP_ATOMIC,
-					&sgblk_paddr);
-		if (!sgblkp) {
+		if ((sgblkp = boardp->adv_sgblkp) == NULL) {
 			ASC_DBG(1, "no free adv_sgblk_t\n");
 			ASC_STATS(scp->device->host, adv_build_nosg);
 
@@ -7664,16 +8525,24 @@ adv_get_sglist(struct asc_board *boardp, adv_req_t *reqp,
 			while ((sgblkp = reqp->sgblkp) != NULL) {
 				/* Remove 'sgblkp' from the request list. */
 				reqp->sgblkp = sgblkp->next_sgblkp;
-				sgblkp->next_sgblkp = NULL;
-				dma_pool_free(boardp->adv_sgblk_pool, sgblkp,
-					      sgblkp->sg_addr);
+
+				/* Add 'sgblkp' to the board free list. */
+				sgblkp->next_sgblkp = boardp->adv_sgblkp;
+				boardp->adv_sgblkp = sgblkp;
 			}
 			return ASC_BUSY;
 		}
+
 		/* Complete 'adv_sgblk_t' board allocation. */
-		sgblkp->sg_addr = sgblk_paddr;
+		boardp->adv_sgblkp = sgblkp->next_sgblkp;
 		sgblkp->next_sgblkp = NULL;
-		sg_block = &sgblkp->sg_block;
+
+		/*
+		 * Get 8 byte aligned virtual and physical addresses
+		 * for the allocated ADV_SG_BLOCK structure.
+		 */
+		sg_block = (ADV_SG_BLOCK *)ADV_8BALIGN(&sgblkp->sg_block);
+		sg_block_paddr = virt_to_bus(sg_block);
 
 		/*
 		 * Check if this is the first 'adv_sgblk_t' for the
@@ -7688,16 +8557,17 @@ adv_get_sglist(struct asc_board *boardp, adv_req_t *reqp,
 			 * address pointers.
 			 */
 			scsiqp->sg_list_ptr = sg_block;
-			scsiqp->sg_real_addr = cpu_to_le32(sgblk_paddr);
+			scsiqp->sg_real_addr = cpu_to_le32(sg_block_paddr);
 		} else {
 			/* Request's second or later scatter-gather block. */
-			prev_sgblkp->next_sgblkp = sgblkp;
+			sgblkp->next_sgblkp = reqp->sgblkp;
+			reqp->sgblkp = sgblkp;
 
 			/*
 			 * Point the previous ADV_SG_BLOCK structure to
 			 * the newly allocated ADV_SG_BLOCK structure.
 			 */
-			prev_sg_block->sg_ptr = cpu_to_le32(sgblk_paddr);
+			prev_sg_block->sg_ptr = cpu_to_le32(sg_block_paddr);
 		}
 
 		for (i = 0; i < NO_OF_SG_PER_BLOCK; i++) {
@@ -7708,19 +8578,15 @@ adv_get_sglist(struct asc_board *boardp, adv_req_t *reqp,
 			ASC_STATS_ADD(scp->device->host, xfer_sect,
 				      DIV_ROUND_UP(sg_dma_len(slp), 512));
 
-			if (--sg_elem_cnt == 0) {
-				/*
-				 * Last ADV_SG_BLOCK and scatter-gather entry.
-				 */
+			if (--sg_elem_cnt == 0) {	/* Last ADV_SG_BLOCK and scatter-gather entry. */
 				sg_block->sg_cnt = i + 1;
-				sg_block->sg_ptr = 0L; /* Last ADV_SG_BLOCK in list. */
+				sg_block->sg_ptr = 0L;	/* Last ADV_SG_BLOCK in list. */
 				return ADV_SUCCESS;
 			}
 			slp++;
 		}
 		sg_block->sg_cnt = NO_OF_SG_PER_BLOCK;
 		prev_sg_block = sg_block;
-		prev_sgblkp = sgblkp;
 	}
 }
 
@@ -7730,35 +8596,38 @@ adv_get_sglist(struct asc_board *boardp, adv_req_t *reqp,
  * If an adv_req_t can not be allocated to issue the request,
  * then return ASC_BUSY. If an error occurs, then return ASC_ERROR.
  *
- * Multi-byte fields in the ADV_SCSI_REQ_Q that are used by the
+ * Multi-byte fields in the ASC_SCSI_REQ_Q that are used by the
  * microcode for DMA addresses or math operations are byte swapped
  * to little-endian order.
  */
 static int
 adv_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
-	      adv_req_t **adv_reqpp)
+	      ADV_SCSI_REQ_Q **adv_scsiqpp)
 {
-	u32 srb_tag = scp->request->tag;
 	adv_req_t *reqp;
 	ADV_SCSI_REQ_Q *scsiqp;
+	int i;
 	int ret;
 	int use_sg;
-	dma_addr_t sense_addr;
 
 	/*
 	 * Allocate an adv_req_t structure from the board to execute
 	 * the command.
 	 */
-	reqp = &boardp->adv_reqp[srb_tag];
-	if (reqp->cmndp && reqp->cmndp != scp ) {
+	if (boardp->adv_reqp == NULL) {
 		ASC_DBG(1, "no free adv_req_t\n");
 		ASC_STATS(scp->device->host, adv_build_noreq);
 		return ASC_BUSY;
+	} else {
+		reqp = boardp->adv_reqp;
+		boardp->adv_reqp = reqp->next_reqp;
+		reqp->next_reqp = NULL;
 	}
 
-	reqp->req_addr = boardp->adv_reqp_addr + (srb_tag * sizeof(adv_req_t));
-
-	scsiqp = &reqp->scsi_req_q;
+	/*
+	 * Get 32-byte aligned ADV_SCSI_REQ_Q and ADV_SG_BLOCK pointers.
+	 */
+	scsiqp = (ADV_SCSI_REQ_Q *)ADV_32BALIGN(&reqp->scsi_req_q);
 
 	/*
 	 * Initialize the structure.
@@ -7766,15 +8635,14 @@ adv_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
 	scsiqp->cntl = scsiqp->scsi_cntl = scsiqp->done_status = 0;
 
 	/*
-	 * Set the srb_tag to the command tag.
+	 * Set the ADV_SCSI_REQ_Q 'srb_ptr' to point to the adv_req_t structure.
 	 */
-	scsiqp->srb_tag = srb_tag;
+	scsiqp->srb_ptr = ADV_VADDR_TO_U32(reqp);
 
 	/*
-	 * Set 'host_scribble' to point to the adv_req_t structure.
+	 * Set the adv_req_t 'cmndp' to point to the struct scsi_cmnd structure.
 	 */
 	reqp->cmndp = scp;
-	scp->host_scribble = (void *)reqp;
 
 	/*
 	 * Build the ADV_SCSI_REQ_Q request.
@@ -7783,38 +8651,28 @@ adv_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
 	/* Set CDB length and copy it to the request structure.  */
 	scsiqp->cdb_len = scp->cmd_len;
 	/* Copy first 12 CDB bytes to cdb[]. */
-	memcpy(scsiqp->cdb, scp->cmnd, scp->cmd_len < 12 ? scp->cmd_len : 12);
+	for (i = 0; i < scp->cmd_len && i < 12; i++) {
+		scsiqp->cdb[i] = scp->cmnd[i];
+	}
 	/* Copy last 4 CDB bytes, if present, to cdb16[]. */
-	if (scp->cmd_len > 12) {
-		int cdb16_len = scp->cmd_len - 12;
-
-		memcpy(scsiqp->cdb16, &scp->cmnd[12], cdb16_len);
+	for (; i < scp->cmd_len; i++) {
+		scsiqp->cdb16[i - 12] = scp->cmnd[i];
 	}
 
 	scsiqp->target_id = scp->device->id;
 	scsiqp->target_lun = scp->device->lun;
 
-	sense_addr = dma_map_single(boardp->dev, scp->sense_buffer,
-				    SCSI_SENSE_BUFFERSIZE, DMA_FROM_DEVICE);
-	if (dma_mapping_error(boardp->dev, sense_addr)) {
-		ASC_DBG(1, "failed to map sense buffer\n");
-		ASC_STATS(scp->device->host, adv_build_noreq);
-		return ASC_BUSY;
-	}
-	scsiqp->sense_addr = cpu_to_le32(sense_addr);
+	scsiqp->sense_addr = cpu_to_le32(virt_to_bus(&scp->sense_buffer[0]));
 	scsiqp->sense_len = SCSI_SENSE_BUFFERSIZE;
 
 	/* Build ADV_SCSI_REQ_Q */
 
 	use_sg = scsi_dma_map(scp);
-	if (use_sg < 0) {
-		ASC_DBG(1, "failed to map SG list\n");
-		ASC_STATS(scp->device->host, adv_build_noreq);
-		return ASC_BUSY;
-	} else if (use_sg == 0) {
+	if (use_sg == 0) {
 		/* Zero-length transfer */
 		reqp->sgblkp = NULL;
 		scsiqp->data_cnt = 0;
+		scsiqp->vdata_addr = NULL;
 
 		scsiqp->data_addr = 0;
 		scsiqp->sg_list_ptr = NULL;
@@ -7826,20 +8684,27 @@ adv_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
 				   scp->device->host->sg_tablesize);
 			scsi_dma_unmap(scp);
 			scp->result = HOST_BYTE(DID_ERROR);
-			reqp->cmndp = NULL;
-			scp->host_scribble = NULL;
+
+			/*
+			 * Free the 'adv_req_t' structure by adding it back
+			 * to the board free list.
+			 */
+			reqp->next_reqp = boardp->adv_reqp;
+			boardp->adv_reqp = reqp;
 
 			return ASC_ERROR;
 		}
 
 		scsiqp->data_cnt = cpu_to_le32(scsi_bufflen(scp));
 
-		ret = adv_get_sglist(boardp, reqp, scsiqp, scp, use_sg);
+		ret = adv_get_sglist(boardp, reqp, scp, use_sg);
 		if (ret != ADV_SUCCESS) {
-			scsi_dma_unmap(scp);
-			scp->result = HOST_BYTE(DID_ERROR);
-			reqp->cmndp = NULL;
-			scp->host_scribble = NULL;
+			/*
+			 * Free the adv_req_t structure by adding it back to
+			 * the board free list.
+			 */
+			reqp->next_reqp = boardp->adv_reqp;
+			boardp->adv_reqp = reqp;
 
 			return ret;
 		}
@@ -7852,7 +8717,7 @@ adv_build_req(struct asc_board *boardp, struct scsi_cmnd *scp,
 	ASC_DBG_PRT_ADV_SCSI_REQ_Q(2, scsiqp);
 	ASC_DBG_PRT_CDB(1, scp->cmnd, scp->cmd_len);
 
-	*adv_reqpp = reqp;
+	*adv_scsiqpp = scsiqp;
 
 	return ASC_NOERROR;
 }
@@ -7984,7 +8849,7 @@ static int AscPutReadyQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq, uchar q_no)
 	}
 	q_addr = ASC_QNO_TO_QADDR(q_no);
 	if ((scsiq->q1.target_id & asc_dvc->use_tagged_qng) == 0) {
-		scsiq->q2.tag_code &= ~SIMPLE_QUEUE_TAG;
+		scsiq->q2.tag_code &= ~MSG_SIMPLE_TAG;
 	}
 	scsiq->q1.status = QS_FREE;
 	AscMemWordCopyPtrToLram(iop_base,
@@ -8009,8 +8874,8 @@ AscPutReadySgListQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq, uchar q_no)
 	int i;
 	ASC_SG_HEAD *sg_head;
 	ASC_SG_LIST_Q scsi_sg_q;
-	__le32 saved_data_addr;
-	__le32 saved_data_cnt;
+	ASC_DCNT saved_data_addr;
+	ASC_DCNT saved_data_cnt;
 	PortAddr iop_base;
 	ushort sg_list_dwords;
 	ushort sg_index;
@@ -8022,15 +8887,42 @@ AscPutReadySgListQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq, uchar q_no)
 	sg_head = scsiq->sg_head;
 	saved_data_addr = scsiq->q1.data_addr;
 	saved_data_cnt = scsiq->q1.data_cnt;
-	scsiq->q1.data_addr = cpu_to_le32(sg_head->sg_list[0].addr);
-	scsiq->q1.data_cnt = cpu_to_le32(sg_head->sg_list[0].bytes);
+	scsiq->q1.data_addr = (ASC_PADDR) sg_head->sg_list[0].addr;
+	scsiq->q1.data_cnt = (ASC_DCNT) sg_head->sg_list[0].bytes;
+#if CC_VERY_LONG_SG_LIST
 	/*
-	 * Set sg_entry_cnt to be the number of SG elements that
-	 * will fit in the allocated SG queues. It is minus 1, because
-	 * the first SG element is handled above.
+	 * If sg_head->entry_cnt is greater than ASC_MAX_SG_LIST
+	 * then not all SG elements will fit in the allocated queues.
+	 * The rest of the SG elements will be copied when the RISC
+	 * completes the SG elements that fit and halts.
 	 */
-	sg_entry_cnt = sg_head->entry_cnt - 1;
+	if (sg_head->entry_cnt > ASC_MAX_SG_LIST) {
+		/*
+		 * Set sg_entry_cnt to be the number of SG elements that
+		 * will fit in the allocated SG queues. It is minus 1, because
+		 * the first SG element is handled above. ASC_MAX_SG_LIST is
+		 * already inflated by 1 to account for this. For example it
+		 * may be 50 which is 1 + 7 queues * 7 SG elements.
+		 */
+		sg_entry_cnt = ASC_MAX_SG_LIST - 1;
 
+		/*
+		 * Keep track of remaining number of SG elements that will
+		 * need to be handled from a_isr.c.
+		 */
+		scsiq->remain_sg_entry_cnt =
+		    sg_head->entry_cnt - ASC_MAX_SG_LIST;
+	} else {
+#endif /* CC_VERY_LONG_SG_LIST */
+		/*
+		 * Set sg_entry_cnt to be the number of SG elements that
+		 * will fit in the allocated SG queues. It is minus 1, because
+		 * the first SG element is handled above.
+		 */
+		sg_entry_cnt = sg_head->entry_cnt - 1;
+#if CC_VERY_LONG_SG_LIST
+	}
+#endif /* CC_VERY_LONG_SG_LIST */
 	if (sg_entry_cnt != 0) {
 		scsiq->q1.cntl |= QC_SG_HEAD;
 		q_addr = ASC_QNO_TO_QADDR(q_no);
@@ -8055,7 +8947,21 @@ AscPutReadySgListQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq, uchar q_no)
 					    ASC_SG_LIST_PER_Q - 1;
 				}
 			} else {
-				scsi_sg_q.cntl |= QCSG_SG_XFER_END;
+#if CC_VERY_LONG_SG_LIST
+				/*
+				 * This is the last SG queue in the list of
+				 * allocated SG queues. If there are more
+				 * SG elements than will fit in the allocated
+				 * queues, then set the QCSG_SG_XFER_MORE flag.
+				 */
+				if (sg_head->entry_cnt > ASC_MAX_SG_LIST) {
+					scsi_sg_q.cntl |= QCSG_SG_XFER_MORE;
+				} else {
+#endif /* CC_VERY_LONG_SG_LIST */
+					scsi_sg_q.cntl |= QCSG_SG_XFER_END;
+#if CC_VERY_LONG_SG_LIST
+				}
+#endif /* CC_VERY_LONG_SG_LIST */
 				sg_list_dwords = sg_entry_cnt << 1;
 				if (i == 0) {
 					scsi_sg_q.sg_list_cnt = sg_entry_cnt;
@@ -8160,9 +9066,9 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 	PortAddr iop_base;
 	int sta;
 	int n_q_required;
-	bool disable_syn_offset_one_fix;
+	int disable_syn_offset_one_fix;
 	int i;
-	u32 addr;
+	ASC_PADDR addr;
 	ushort sg_entry_cnt = 0;
 	ushort sg_entry_cnt_minus_one = 0;
 	uchar target_ix;
@@ -8172,12 +9078,12 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 	uchar scsi_cmd;
 	uchar disable_cmd;
 	ASC_SG_HEAD *sg_head;
-	unsigned long data_cnt;
+	ASC_DCNT data_cnt;
 
 	iop_base = asc_dvc->iop_base;
 	sg_head = scsiq->sg_head;
 	if (asc_dvc->err_code != 0)
-		return ASC_ERROR;
+		return (ERR);
 	scsiq->q1.q_no = 0;
 	if ((scsiq->q2.tag_code & ASC_TAG_FLAG_EXTRA_BYTES) == 0) {
 		scsiq->q1.extra_bytes = 0;
@@ -8203,41 +9109,46 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 	}
 	if (asc_dvc->in_critical_cnt != 0) {
 		AscSetLibErrorCode(asc_dvc, ASCQ_ERR_CRITICAL_RE_ENTRY);
-		return ASC_ERROR;
+		return (ERR);
 	}
 	asc_dvc->in_critical_cnt++;
 	if ((scsiq->q1.cntl & QC_SG_HEAD) != 0) {
 		if ((sg_entry_cnt = sg_head->entry_cnt) == 0) {
 			asc_dvc->in_critical_cnt--;
-			return ASC_ERROR;
+			return (ERR);
 		}
+#if !CC_VERY_LONG_SG_LIST
 		if (sg_entry_cnt > ASC_MAX_SG_LIST) {
 			asc_dvc->in_critical_cnt--;
-			return ASC_ERROR;
+			return (ERR);
 		}
+#endif /* !CC_VERY_LONG_SG_LIST */
 		if (sg_entry_cnt == 1) {
-			scsiq->q1.data_addr = cpu_to_le32(sg_head->sg_list[0].addr);
-			scsiq->q1.data_cnt = cpu_to_le32(sg_head->sg_list[0].bytes);
+			scsiq->q1.data_addr =
+			    (ADV_PADDR)sg_head->sg_list[0].addr;
+			scsiq->q1.data_cnt =
+			    (ADV_DCNT)sg_head->sg_list[0].bytes;
 			scsiq->q1.cntl &= ~(QC_SG_HEAD | QC_SG_SWAP_QUEUE);
 		}
 		sg_entry_cnt_minus_one = sg_entry_cnt - 1;
 	}
 	scsi_cmd = scsiq->cdbptr[0];
-	disable_syn_offset_one_fix = false;
+	disable_syn_offset_one_fix = FALSE;
 	if ((asc_dvc->pci_fix_asyn_xfer & scsiq->q1.target_id) &&
 	    !(asc_dvc->pci_fix_asyn_xfer_always & scsiq->q1.target_id)) {
 		if (scsiq->q1.cntl & QC_SG_HEAD) {
 			data_cnt = 0;
 			for (i = 0; i < sg_entry_cnt; i++) {
-				data_cnt += le32_to_cpu(sg_head->sg_list[i].
-							bytes);
+				data_cnt +=
+				    (ADV_DCNT)le32_to_cpu(sg_head->sg_list[i].
+							  bytes);
 			}
 		} else {
 			data_cnt = le32_to_cpu(scsiq->q1.data_cnt);
 		}
 		if (data_cnt != 0UL) {
 			if (data_cnt < 512UL) {
-				disable_syn_offset_one_fix = true;
+				disable_syn_offset_one_fix = TRUE;
 			} else {
 				for (i = 0; i < ASC_SYN_OFFSET_ONE_DISABLE_LIST;
 				     i++) {
@@ -8248,7 +9159,7 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 					}
 					if (scsi_cmd == disable_cmd) {
 						disable_syn_offset_one_fix =
-						    true;
+						    TRUE;
 						break;
 					}
 				}
@@ -8256,7 +9167,7 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 		}
 	}
 	if (disable_syn_offset_one_fix) {
-		scsiq->q2.tag_code &= ~SIMPLE_QUEUE_TAG;
+		scsiq->q2.tag_code &= ~MSG_SIMPLE_TAG;
 		scsiq->q2.tag_code |= (ASC_TAG_FLAG_DISABLE_ASYN_USE_SYN_FIX |
 				       ASC_TAG_FLAG_DISABLE_DISCONNECT);
 	} else {
@@ -8267,11 +9178,12 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 			if (asc_dvc->bug_fix_cntl & ASC_BUG_FIX_IF_NOT_DWB) {
 				if ((scsi_cmd == READ_6) ||
 				    (scsi_cmd == READ_10)) {
-					addr = le32_to_cpu(sg_head->
+					addr =
+					    (ADV_PADDR)le32_to_cpu(sg_head->
 								   sg_list
 								   [sg_entry_cnt_minus_one].
 								   addr) +
-						le32_to_cpu(sg_head->
+					    (ADV_DCNT)le32_to_cpu(sg_head->
 								  sg_list
 								  [sg_entry_cnt_minus_one].
 								  bytes);
@@ -8292,7 +9204,8 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 								sg_list
 								[sg_entry_cnt_minus_one].
 								bytes);
-						data_cnt -= extra_bytes;
+						data_cnt -=
+						    (ASC_DCNT) extra_bytes;
 						sg_head->
 						    sg_list
 						    [sg_entry_cnt_minus_one].
@@ -8303,6 +9216,16 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 			}
 		}
 		sg_head->entry_to_copy = sg_head->entry_cnt;
+#if CC_VERY_LONG_SG_LIST
+		/*
+		 * Set the sg_entry_cnt to the maximum possible. The rest of
+		 * the SG elements will be copied when the RISC completes the
+		 * SG elements that fit and halts.
+		 */
+		if (sg_entry_cnt > ASC_MAX_SG_LIST) {
+			sg_entry_cnt = ASC_MAX_SG_LIST;
+		}
+#endif /* CC_VERY_LONG_SG_LIST */
 		n_q_required = AscSgListToQueue(sg_entry_cnt);
 		if ((AscGetNumOfFreeQueue(asc_dvc, target_ix, n_q_required) >=
 		     (uint) n_q_required)
@@ -8337,7 +9260,8 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
 						    == 0) {
 							scsiq->q2.tag_code |=
 							    ASC_TAG_FLAG_EXTRA_BYTES;
-							data_cnt -= extra_bytes;
+							data_cnt -= (ASC_DCNT)
+							    extra_bytes;
 							scsiq->q1.data_cnt =
 							    cpu_to_le32
 							    (data_cnt);
@@ -8372,7 +9296,7 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
  * If 'done_status' is not set to QD_DO_RETRY, then 'error_retry' will be
  * set to SCSI_MAX_RETRY.
  *
- * Multi-byte fields in the ADV_SCSI_REQ_Q that are used by the microcode
+ * Multi-byte fields in the ASC_SCSI_REQ_Q that are used by the microcode
  * for DMA addresses or math operations are byte swapped to little-endian
  * order.
  *
@@ -8383,11 +9307,11 @@ static int AscExeScsiQueue(ASC_DVC_VAR *asc_dvc, ASC_SCSI_Q *scsiq)
  *      ADV_ERROR(-1) -  Invalid ADV_SCSI_REQ_Q request structure
  *                       host IC error.
  */
-static int AdvExeScsiQueue(ADV_DVC_VAR *asc_dvc, adv_req_t *reqp)
+static int AdvExeScsiQueue(ADV_DVC_VAR *asc_dvc, ADV_SCSI_REQ_Q *scsiq)
 {
 	AdvPortAddr iop_base;
+	ADV_PADDR req_paddr;
 	ADV_CARR_T *new_carrp;
-	ADV_SCSI_REQ_Q *scsiq = &reqp->scsi_req_q;
 
 	/*
 	 * The ADV_SCSI_REQ_Q 'target_id' field should never exceed ADV_MAX_TID.
@@ -8404,19 +9328,39 @@ static int AdvExeScsiQueue(ADV_DVC_VAR *asc_dvc, adv_req_t *reqp)
 	 * Allocate a carrier ensuring at least one carrier always
 	 * remains on the freelist and initialize fields.
 	 */
-	new_carrp = adv_get_next_carrier(asc_dvc);
-	if (!new_carrp) {
-		ASC_DBG(1, "No free carriers\n");
+	if ((new_carrp = asc_dvc->carr_freelist) == NULL) {
 		return ADV_BUSY;
 	}
-
+	asc_dvc->carr_freelist = (ADV_CARR_T *)
+	    ADV_U32_TO_VADDR(le32_to_cpu(new_carrp->next_vpa));
 	asc_dvc->carr_pending_cnt++;
 
-	/* Save virtual and physical address of ADV_SCSI_REQ_Q and carrier. */
-	scsiq->scsiq_ptr = cpu_to_le32(scsiq->srb_tag);
-	scsiq->scsiq_rptr = cpu_to_le32(reqp->req_addr);
+	/*
+	 * Set the carrier to be a stopper by setting 'next_vpa'
+	 * to the stopper value. The current stopper will be changed
+	 * below to point to the new stopper.
+	 */
+	new_carrp->next_vpa = cpu_to_le32(ASC_CQ_STOPPER);
 
-	scsiq->carr_va = asc_dvc->icq_sp->carr_va;
+	/*
+	 * Clear the ADV_SCSI_REQ_Q done flag.
+	 */
+	scsiq->a_flag &= ~ADV_SCSIQ_DONE;
+
+	req_paddr = virt_to_bus(scsiq);
+	BUG_ON(req_paddr & 31);
+	/* Wait for assertion before making little-endian */
+	req_paddr = cpu_to_le32(req_paddr);
+
+	/* Save virtual and physical address of ADV_SCSI_REQ_Q and carrier. */
+	scsiq->scsiq_ptr = cpu_to_le32(ADV_VADDR_TO_U32(scsiq));
+	scsiq->scsiq_rptr = req_paddr;
+
+	scsiq->carr_va = cpu_to_le32(ADV_VADDR_TO_U32(asc_dvc->icq_sp));
+	/*
+	 * Every ADV_CARR_T.carr_pa is byte swapped to little-endian
+	 * order during initialization.
+	 */
 	scsiq->carr_pa = asc_dvc->icq_sp->carr_pa;
 
 	/*
@@ -8424,7 +9368,7 @@ static int AdvExeScsiQueue(ADV_DVC_VAR *asc_dvc, adv_req_t *reqp)
 	 * the microcode. The newly allocated stopper will become the new
 	 * stopper.
 	 */
-	asc_dvc->icq_sp->areq_vpa = scsiq->scsiq_rptr;
+	asc_dvc->icq_sp->areq_vpa = req_paddr;
 
 	/*
 	 * Set the 'next_vpa' pointer for the old stopper to be the
@@ -8479,10 +9423,11 @@ static int asc_execute_scsi_cmnd(struct scsi_cmnd *scp)
 		ASC_DVC_VAR *asc_dvc = &boardp->dvc_var.asc_dvc_var;
 		struct asc_scsi_q asc_scsi_q;
 
+		/* asc_build_req() can not return ASC_BUSY. */
 		ret = asc_build_req(boardp, scp, &asc_scsi_q);
-		if (ret != ASC_NOERROR) {
+		if (ret == ASC_ERROR) {
 			ASC_STATS(scp->device->host, build_error);
-			return ret;
+			return ASC_ERROR;
 		}
 
 		ret = AscExeScsiQueue(asc_dvc, &asc_scsi_q);
@@ -8490,9 +9435,9 @@ static int asc_execute_scsi_cmnd(struct scsi_cmnd *scp)
 		err_code = asc_dvc->err_code;
 	} else {
 		ADV_DVC_VAR *adv_dvc = &boardp->dvc_var.adv_dvc_var;
-		adv_req_t *adv_reqp;
+		ADV_SCSI_REQ_Q *adv_scsiqp;
 
-		switch (adv_build_req(boardp, scp, &adv_reqp)) {
+		switch (adv_build_req(boardp, scp, &adv_scsiqp)) {
 		case ASC_NOERROR:
 			ASC_DBG(3, "adv_build_req ASC_NOERROR\n");
 			break;
@@ -8512,7 +9457,7 @@ static int asc_execute_scsi_cmnd(struct scsi_cmnd *scp)
 			return ASC_ERROR;
 		}
 
-		ret = AdvExeScsiQueue(adv_dvc, adv_reqp);
+		ret = AdvExeScsiQueue(adv_dvc, adv_scsiqp);
 		err_code = adv_dvc->err_code;
 	}
 
@@ -8527,7 +9472,6 @@ static int asc_execute_scsi_cmnd(struct scsi_cmnd *scp)
 		ASC_DBG(1, "ExeScsiQueue() ASC_NOERROR\n");
 		break;
 	case ASC_BUSY:
-		ASC_DBG(1, "ExeScsiQueue() ASC_BUSY\n");
 		ASC_STATS(scp->device->host, exe_busy);
 		break;
 	case ASC_ERROR:
@@ -8582,7 +9526,7 @@ advansys_queuecommand_lck(struct scsi_cmnd *scp, void (*done)(struct scsi_cmnd *
 
 static DEF_SCSI_QCMD(advansys_queuecommand)
 
-static ushort AscGetEisaChipCfg(PortAddr iop_base)
+static ushort __devinit AscGetEisaChipCfg(PortAddr iop_base)
 {
 	PortAddr eisa_cfg_iop = (PortAddr) ASC_GET_EISA_SLOT(iop_base) |
 	    (PortAddr) (ASC_EISA_CFG_IOP_MASK);
@@ -8593,8 +9537,8 @@ static ushort AscGetEisaChipCfg(PortAddr iop_base)
  * Return the BIOS address of the adapter at the specified
  * I/O port and with the specified bus type.
  */
-static unsigned short AscGetChipBiosAddress(PortAddr iop_base,
-					    unsigned short bus_type)
+static unsigned short __devinit
+AscGetChipBiosAddress(PortAddr iop_base, unsigned short bus_type)
 {
 	unsigned short cfg_lsw;
 	unsigned short bios_addr;
@@ -8625,7 +9569,7 @@ static unsigned short AscGetChipBiosAddress(PortAddr iop_base,
 	return bios_addr;
 }
 
-static uchar AscSetChipScsiID(PortAddr iop_base, uchar new_host_id)
+static uchar __devinit AscSetChipScsiID(PortAddr iop_base, uchar new_host_id)
 {
 	ushort cfg_lsw;
 
@@ -8639,7 +9583,7 @@ static uchar AscSetChipScsiID(PortAddr iop_base, uchar new_host_id)
 	return (AscGetChipScsiID(iop_base));
 }
 
-static unsigned char AscGetChipScsiCtrl(PortAddr iop_base)
+static unsigned char __devinit AscGetChipScsiCtrl(PortAddr iop_base)
 {
 	unsigned char sc;
 
@@ -8649,8 +9593,8 @@ static unsigned char AscGetChipScsiCtrl(PortAddr iop_base)
 	return sc;
 }
 
-static unsigned char AscGetChipVersion(PortAddr iop_base,
-				       unsigned short bus_type)
+static unsigned char __devinit
+AscGetChipVersion(PortAddr iop_base, unsigned short bus_type)
 {
 	if (bus_type & ASC_IS_EISA) {
 		PortAddr eisa_iop;
@@ -8664,7 +9608,7 @@ static unsigned char AscGetChipVersion(PortAddr iop_base,
 }
 
 #ifdef CONFIG_ISA
-static void AscEnableIsaDma(uchar dma_channel)
+static void __devinit AscEnableIsaDma(uchar dma_channel)
 {
 	if (dma_channel < 4) {
 		outp(0x000B, (ushort)(0xC0 | dma_channel));
@@ -8694,7 +9638,7 @@ static int AscStopQueueExe(PortAddr iop_base)
 	return (0);
 }
 
-static unsigned int AscGetMaxDmaCount(ushort bus_type)
+static ASC_DCNT __devinit AscGetMaxDmaCount(ushort bus_type)
 {
 	if (bus_type & ASC_IS_ISA)
 		return ASC_MAX_ISA_DMA_COUNT;
@@ -8704,7 +9648,7 @@ static unsigned int AscGetMaxDmaCount(ushort bus_type)
 }
 
 #ifdef CONFIG_ISA
-static ushort AscGetIsaDmaChannel(PortAddr iop_base)
+static ushort __devinit AscGetIsaDmaChannel(PortAddr iop_base)
 {
 	ushort channel;
 
@@ -8716,7 +9660,7 @@ static ushort AscGetIsaDmaChannel(PortAddr iop_base)
 	return (channel + 4);
 }
 
-static ushort AscSetIsaDmaChannel(PortAddr iop_base, ushort dma_channel)
+static ushort __devinit AscSetIsaDmaChannel(PortAddr iop_base, ushort dma_channel)
 {
 	ushort cfg_lsw;
 	uchar value;
@@ -8734,7 +9678,7 @@ static ushort AscSetIsaDmaChannel(PortAddr iop_base, ushort dma_channel)
 	return 0;
 }
 
-static uchar AscGetIsaDmaSpeed(PortAddr iop_base)
+static uchar __devinit AscGetIsaDmaSpeed(PortAddr iop_base)
 {
 	uchar speed_value;
 
@@ -8745,7 +9689,7 @@ static uchar AscGetIsaDmaSpeed(PortAddr iop_base)
 	return speed_value;
 }
 
-static uchar AscSetIsaDmaSpeed(PortAddr iop_base, uchar speed_value)
+static uchar __devinit AscSetIsaDmaSpeed(PortAddr iop_base, uchar speed_value)
 {
 	speed_value &= 0x07;
 	AscSetBank(iop_base, 1);
@@ -8755,13 +9699,15 @@ static uchar AscSetIsaDmaSpeed(PortAddr iop_base, uchar speed_value)
 }
 #endif /* CONFIG_ISA */
 
-static void AscInitAscDvcVar(ASC_DVC_VAR *asc_dvc)
+static ushort __devinit AscInitAscDvcVar(ASC_DVC_VAR *asc_dvc)
 {
 	int i;
 	PortAddr iop_base;
+	ushort warn_code;
 	uchar chip_version;
 
 	iop_base = asc_dvc->iop_base;
+	warn_code = 0;
 	asc_dvc->err_code = 0;
 	if ((asc_dvc->bus_type &
 	     (ASC_IS_ISA | ASC_IS_PCI | ASC_IS_EISA | ASC_IS_VL)) == 0) {
@@ -8775,7 +9721,7 @@ static void AscInitAscDvcVar(ASC_DVC_VAR *asc_dvc)
 	/* asc_dvc->init_state initialized in AscInitGetConfig(). */
 	asc_dvc->sdtr_done = 0;
 	asc_dvc->cur_total_qng = 0;
-	asc_dvc->is_in_int = false;
+	asc_dvc->is_in_int = 0;
 	asc_dvc->in_critical_cnt = 0;
 	asc_dvc->last_q_shortage = 0;
 	asc_dvc->use_tagged_qng = 0;
@@ -8837,9 +9783,10 @@ static void AscInitAscDvcVar(ASC_DVC_VAR *asc_dvc)
 		asc_dvc->scsiq_busy_tail[i] = (ASC_SCSI_Q *)0L;
 		asc_dvc->cfg->max_tag_qng[i] = ASC_MAX_INRAM_TAG_QNG;
 	}
+	return warn_code;
 }
 
-static int AscWriteEEPCmdReg(PortAddr iop_base, uchar cmd_reg)
+static int __devinit AscWriteEEPCmdReg(PortAddr iop_base, uchar cmd_reg)
 {
 	int retry;
 
@@ -8854,12 +9801,12 @@ static int AscWriteEEPCmdReg(PortAddr iop_base, uchar cmd_reg)
 	return 0;
 }
 
-static void AscWaitEEPRead(void)
+static void __devinit AscWaitEEPRead(void)
 {
 	mdelay(1);
 }
 
-static ushort AscReadEEPWord(PortAddr iop_base, uchar addr)
+static ushort __devinit AscReadEEPWord(PortAddr iop_base, uchar addr)
 {
 	ushort read_wval;
 	uchar cmd_reg;
@@ -8874,8 +9821,8 @@ static ushort AscReadEEPWord(PortAddr iop_base, uchar addr)
 	return read_wval;
 }
 
-static ushort AscGetEEPConfig(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf,
-			      ushort bus_type)
+static ushort __devinit
+AscGetEEPConfig(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf, ushort bus_type)
 {
 	ushort wval;
 	ushort sum;
@@ -8921,7 +9868,7 @@ static ushort AscGetEEPConfig(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf,
 	return sum;
 }
 
-static int AscTestExternalLram(ASC_DVC_VAR *asc_dvc)
+static int __devinit AscTestExternalLram(ASC_DVC_VAR *asc_dvc)
 {
 	PortAddr iop_base;
 	ushort q_addr;
@@ -8943,18 +9890,18 @@ static int AscTestExternalLram(ASC_DVC_VAR *asc_dvc)
 	return (sta);
 }
 
-static void AscWaitEEPWrite(void)
+static void __devinit AscWaitEEPWrite(void)
 {
 	mdelay(20);
 }
 
-static int AscWriteEEPDataReg(PortAddr iop_base, ushort data_reg)
+static int __devinit AscWriteEEPDataReg(PortAddr iop_base, ushort data_reg)
 {
 	ushort read_back;
 	int retry;
 
 	retry = 0;
-	while (true) {
+	while (TRUE) {
 		AscSetChipEEPData(iop_base, data_reg);
 		mdelay(1);
 		read_back = AscGetChipEEPData(iop_base);
@@ -8967,7 +9914,8 @@ static int AscWriteEEPDataReg(PortAddr iop_base, ushort data_reg)
 	}
 }
 
-static ushort AscWriteEEPWord(PortAddr iop_base, uchar addr, ushort word_val)
+static ushort __devinit
+AscWriteEEPWord(PortAddr iop_base, uchar addr, ushort word_val)
 {
 	ushort read_wval;
 
@@ -8987,8 +9935,8 @@ static ushort AscWriteEEPWord(PortAddr iop_base, uchar addr, ushort word_val)
 	return (read_wval);
 }
 
-static int AscSetEEPConfigOnce(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf,
-			       ushort bus_type)
+static int __devinit
+AscSetEEPConfigOnce(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf, ushort bus_type)
 {
 	int n_error;
 	ushort *wbuf;
@@ -9083,14 +10031,14 @@ static int AscSetEEPConfigOnce(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf,
 	return n_error;
 }
 
-static int AscSetEEPConfig(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf,
-			   ushort bus_type)
+static int __devinit
+AscSetEEPConfig(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf, ushort bus_type)
 {
 	int retry;
 	int n_error;
 
 	retry = 0;
-	while (true) {
+	while (TRUE) {
 		if ((n_error = AscSetEEPConfigOnce(iop_base, cfg_buf,
 						   bus_type)) == 0) {
 			break;
@@ -9102,7 +10050,7 @@ static int AscSetEEPConfig(PortAddr iop_base, ASCEEP_CONFIG *cfg_buf,
 	return n_error;
 }
 
-static int AscInitFromEEP(ASC_DVC_VAR *asc_dvc)
+static ushort __devinit AscInitFromEEP(ASC_DVC_VAR *asc_dvc)
 {
 	ASCEEP_CONFIG eep_config_buf;
 	ASCEEP_CONFIG *eep_config;
@@ -9117,13 +10065,13 @@ static int AscInitFromEEP(ASC_DVC_VAR *asc_dvc)
 	warn_code = 0;
 	AscWriteLramWord(iop_base, ASCV_HALTCODE_W, 0x00FE);
 	AscStopQueueExe(iop_base);
-	if ((AscStopChip(iop_base)) ||
+	if ((AscStopChip(iop_base) == FALSE) ||
 	    (AscGetChipScsiCtrl(iop_base) != 0)) {
 		asc_dvc->init_state |= ASC_INIT_RESET_SCSI_DONE;
 		AscResetChipAndScsiBus(asc_dvc);
 		mdelay(asc_dvc->scsi_reset_wait * 1000); /* XXX: msleep? */
 	}
-	if (!AscIsChipHalted(iop_base)) {
+	if (AscIsChipHalted(iop_base) == FALSE) {
 		asc_dvc->err_code |= ASC_IERR_START_STOP_CHIP;
 		return (warn_code);
 	}
@@ -9267,7 +10215,7 @@ static int AscInitFromEEP(ASC_DVC_VAR *asc_dvc)
 	return (warn_code);
 }
 
-static int AscInitGetConfig(struct Scsi_Host *shost)
+static int __devinit AscInitGetConfig(struct Scsi_Host *shost)
 {
 	struct asc_board *board = shost_priv(shost);
 	ASC_DVC_VAR *asc_dvc = &board->dvc_var.asc_dvc_var;
@@ -9278,8 +10226,8 @@ static int AscInitGetConfig(struct Scsi_Host *shost)
 		return asc_dvc->err_code;
 
 	if (AscFindSignature(asc_dvc->iop_base)) {
-		AscInitAscDvcVar(asc_dvc);
-		warn_code = AscInitFromEEP(asc_dvc);
+		warn_code |= AscInitAscDvcVar(asc_dvc);
+		warn_code |= AscInitFromEEP(asc_dvc);
 		asc_dvc->init_state |= ASC_INIT_STATE_END_GET_CFG;
 		if (asc_dvc->scsi_reset_wait > ASC_MAX_SCSI_RESET_WAIT)
 			asc_dvc->scsi_reset_wait = ASC_MAX_SCSI_RESET_WAIT;
@@ -9321,7 +10269,7 @@ static int AscInitGetConfig(struct Scsi_Host *shost)
 	return asc_dvc->err_code;
 }
 
-static int AscInitSetConfig(struct pci_dev *pdev, struct Scsi_Host *shost)
+static int __devinit AscInitSetConfig(struct pci_dev *pdev, struct Scsi_Host *shost)
 {
 	struct asc_board *board = shost_priv(shost);
 	ASC_DVC_VAR *asc_dvc = &board->dvc_var.asc_dvc_var;
@@ -9435,8 +10383,7 @@ static int AscInitSetConfig(struct pci_dev *pdev, struct Scsi_Host *shost)
  * on big-endian platforms so char fields read as words are actually being
  * unswapped on big-endian platforms.
  */
-#ifdef CONFIG_PCI
-static ADVEEP_3550_CONFIG Default_3550_EEPROM_Config = {
+static ADVEEP_3550_CONFIG Default_3550_EEPROM_Config __devinitdata = {
 	ADV_EEPROM_BIOS_ENABLE,	/* cfg_lsw */
 	0x0000,			/* cfg_msw */
 	0xFFFF,			/* disc_enable */
@@ -9474,7 +10421,7 @@ static ADVEEP_3550_CONFIG Default_3550_EEPROM_Config = {
 	0			/* num_of_err */
 };
 
-static ADVEEP_3550_CONFIG ADVEEP_3550_Config_Field_IsChar = {
+static ADVEEP_3550_CONFIG ADVEEP_3550_Config_Field_IsChar __devinitdata = {
 	0,			/* cfg_lsw */
 	0,			/* cfg_msw */
 	0,			/* -disc_enable */
@@ -9512,7 +10459,7 @@ static ADVEEP_3550_CONFIG ADVEEP_3550_Config_Field_IsChar = {
 	0			/* num_of_err */
 };
 
-static ADVEEP_38C0800_CONFIG Default_38C0800_EEPROM_Config = {
+static ADVEEP_38C0800_CONFIG Default_38C0800_EEPROM_Config __devinitdata = {
 	ADV_EEPROM_BIOS_ENABLE,	/* 00 cfg_lsw */
 	0x0000,			/* 01 cfg_msw */
 	0xFFFF,			/* 02 disc_enable */
@@ -9577,7 +10524,7 @@ static ADVEEP_38C0800_CONFIG Default_38C0800_EEPROM_Config = {
 	0			/* 63 reserved */
 };
 
-static ADVEEP_38C0800_CONFIG ADVEEP_38C0800_Config_Field_IsChar = {
+static ADVEEP_38C0800_CONFIG ADVEEP_38C0800_Config_Field_IsChar __devinitdata = {
 	0,			/* 00 cfg_lsw */
 	0,			/* 01 cfg_msw */
 	0,			/* 02 disc_enable */
@@ -9642,7 +10589,7 @@ static ADVEEP_38C0800_CONFIG ADVEEP_38C0800_Config_Field_IsChar = {
 	0			/* 63 reserved */
 };
 
-static ADVEEP_38C1600_CONFIG Default_38C1600_EEPROM_Config = {
+static ADVEEP_38C1600_CONFIG Default_38C1600_EEPROM_Config __devinitdata = {
 	ADV_EEPROM_BIOS_ENABLE,	/* 00 cfg_lsw */
 	0x0000,			/* 01 cfg_msw */
 	0xFFFF,			/* 02 disc_enable */
@@ -9707,7 +10654,7 @@ static ADVEEP_38C1600_CONFIG Default_38C1600_EEPROM_Config = {
 	0			/* 63 reserved */
 };
 
-static ADVEEP_38C1600_CONFIG ADVEEP_38C1600_Config_Field_IsChar = {
+static ADVEEP_38C1600_CONFIG ADVEEP_38C1600_Config_Field_IsChar __devinitdata = {
 	0,			/* 00 cfg_lsw */
 	0,			/* 01 cfg_msw */
 	0,			/* 02 disc_enable */
@@ -9772,10 +10719,11 @@ static ADVEEP_38C1600_CONFIG ADVEEP_38C1600_Config_Field_IsChar = {
 	0			/* 63 reserved */
 };
 
+#ifdef CONFIG_PCI
 /*
  * Wait for EEPROM command to complete
  */
-static void AdvWaitEEPCmd(AdvPortAddr iop_base)
+static void __devinit AdvWaitEEPCmd(AdvPortAddr iop_base)
 {
 	int eep_delay_ms;
 
@@ -9794,7 +10742,7 @@ static void AdvWaitEEPCmd(AdvPortAddr iop_base)
 /*
  * Read the EEPROM from specified location
  */
-static ushort AdvReadEEPWord(AdvPortAddr iop_base, int eep_word_addr)
+static ushort __devinit AdvReadEEPWord(AdvPortAddr iop_base, int eep_word_addr)
 {
 	AdvWriteWordRegister(iop_base, IOPW_EE_CMD,
 			     ASC_EEP_CMD_READ | eep_word_addr);
@@ -9805,8 +10753,8 @@ static ushort AdvReadEEPWord(AdvPortAddr iop_base, int eep_word_addr)
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-static void AdvSet3550EEPConfig(AdvPortAddr iop_base,
-				ADVEEP_3550_CONFIG *cfg_buf)
+static void __devinit
+AdvSet3550EEPConfig(AdvPortAddr iop_base, ADVEEP_3550_CONFIG *cfg_buf)
 {
 	ushort *wbuf;
 	ushort addr, chksum;
@@ -9872,8 +10820,8 @@ static void AdvSet3550EEPConfig(AdvPortAddr iop_base,
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-static void AdvSet38C0800EEPConfig(AdvPortAddr iop_base,
-				   ADVEEP_38C0800_CONFIG *cfg_buf)
+static void __devinit
+AdvSet38C0800EEPConfig(AdvPortAddr iop_base, ADVEEP_38C0800_CONFIG *cfg_buf)
 {
 	ushort *wbuf;
 	ushort *charfields;
@@ -9939,8 +10887,8 @@ static void AdvSet38C0800EEPConfig(AdvPortAddr iop_base,
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-static void AdvSet38C1600EEPConfig(AdvPortAddr iop_base,
-				   ADVEEP_38C1600_CONFIG *cfg_buf)
+static void __devinit
+AdvSet38C1600EEPConfig(AdvPortAddr iop_base, ADVEEP_38C1600_CONFIG *cfg_buf)
 {
 	ushort *wbuf;
 	ushort *charfields;
@@ -10008,8 +10956,8 @@ static void AdvSet38C1600EEPConfig(AdvPortAddr iop_base,
  *
  * Return a checksum based on the EEPROM configuration read.
  */
-static ushort AdvGet3550EEPConfig(AdvPortAddr iop_base,
-				  ADVEEP_3550_CONFIG *cfg_buf)
+static ushort __devinit
+AdvGet3550EEPConfig(AdvPortAddr iop_base, ADVEEP_3550_CONFIG *cfg_buf)
 {
 	ushort wval, chksum;
 	ushort *wbuf;
@@ -10051,8 +10999,8 @@ static ushort AdvGet3550EEPConfig(AdvPortAddr iop_base,
  *
  * Return a checksum based on the EEPROM configuration read.
  */
-static ushort AdvGet38C0800EEPConfig(AdvPortAddr iop_base,
-				     ADVEEP_38C0800_CONFIG *cfg_buf)
+static ushort __devinit
+AdvGet38C0800EEPConfig(AdvPortAddr iop_base, ADVEEP_38C0800_CONFIG *cfg_buf)
 {
 	ushort wval, chksum;
 	ushort *wbuf;
@@ -10094,8 +11042,8 @@ static ushort AdvGet38C0800EEPConfig(AdvPortAddr iop_base,
  *
  * Return a checksum based on the EEPROM configuration read.
  */
-static ushort AdvGet38C1600EEPConfig(AdvPortAddr iop_base,
-				     ADVEEP_38C1600_CONFIG *cfg_buf)
+static ushort __devinit
+AdvGet38C1600EEPConfig(AdvPortAddr iop_base, ADVEEP_38C1600_CONFIG *cfg_buf)
 {
 	ushort wval, chksum;
 	ushort *wbuf;
@@ -10144,7 +11092,7 @@ static ushort AdvGet38C1600EEPConfig(AdvPortAddr iop_base,
  *
  * Note: Chip is stopped on entry.
  */
-static int AdvInitFrom3550EEP(ADV_DVC_VAR *asc_dvc)
+static int __devinit AdvInitFrom3550EEP(ADV_DVC_VAR *asc_dvc)
 {
 	AdvPortAddr iop_base;
 	ushort warn_code;
@@ -10294,7 +11242,7 @@ static int AdvInitFrom3550EEP(ADV_DVC_VAR *asc_dvc)
  *
  * Note: Chip is stopped on entry.
  */
-static int AdvInitFrom38C0800EEP(ADV_DVC_VAR *asc_dvc)
+static int __devinit AdvInitFrom38C0800EEP(ADV_DVC_VAR *asc_dvc)
 {
 	AdvPortAddr iop_base;
 	ushort warn_code;
@@ -10493,7 +11441,7 @@ static int AdvInitFrom38C0800EEP(ADV_DVC_VAR *asc_dvc)
  *
  * Note: Chip is stopped on entry.
  */
-static int AdvInitFrom38C1600EEP(ADV_DVC_VAR *asc_dvc)
+static int __devinit AdvInitFrom38C1600EEP(ADV_DVC_VAR *asc_dvc)
 {
 	AdvPortAddr iop_base;
 	ushort warn_code;
@@ -10713,7 +11661,8 @@ static int AdvInitFrom38C1600EEP(ADV_DVC_VAR *asc_dvc)
  * For a non-fatal error return a warning code. If there are no warnings
  * then 0 is returned.
  */
-static int AdvInitGetConfig(struct pci_dev *pdev, struct Scsi_Host *shost)
+static int __devinit
+AdvInitGetConfig(struct pci_dev *pdev, struct Scsi_Host *shost)
 {
 	struct asc_board *board = shost_priv(shost);
 	ADV_DVC_VAR *asc_dvc = &board->dvc_var.adv_dvc_var;
@@ -10796,12 +11745,12 @@ static int AdvInitGetConfig(struct pci_dev *pdev, struct Scsi_Host *shost)
 static struct scsi_host_template advansys_template = {
 	.proc_name = DRV_NAME,
 #ifdef CONFIG_PROC_FS
-	.show_info = advansys_show_info,
+	.proc_info = advansys_proc_info,
 #endif
 	.name = DRV_NAME,
 	.info = advansys_info,
 	.queuecommand = advansys_queuecommand,
-	.eh_host_reset_handler = advansys_reset,
+	.eh_bus_reset_handler = advansys_reset,
 	.bios_param = advansys_biosparam,
 	.slave_configure = advansys_slave_configure,
 	/*
@@ -10809,7 +11758,7 @@ static struct scsi_host_template advansys_template = {
 	 * must be set. The flag will be cleared in advansys_board_found
 	 * for non-ISA adapters.
 	 */
-	.unchecked_isa_dma = true,
+	.unchecked_isa_dma = 1,
 	/*
 	 * All adapters controlled by this driver are capable of large
 	 * scatter-gather lists. According to the mid-level SCSI documentation
@@ -10820,22 +11769,24 @@ static struct scsi_host_template advansys_template = {
 	.use_clustering = ENABLE_CLUSTERING,
 };
 
-static int advansys_wide_init_chip(struct Scsi_Host *shost)
+static int __devinit advansys_wide_init_chip(struct Scsi_Host *shost)
 {
 	struct asc_board *board = shost_priv(shost);
 	struct adv_dvc_var *adv_dvc = &board->dvc_var.adv_dvc_var;
-	size_t sgblk_pool_size;
+	int req_cnt = 0;
+	adv_req_t *reqp = NULL;
+	int sg_cnt = 0;
+	adv_sgblk_t *sgp;
 	int warn_code, err_code;
 
 	/*
 	 * Allocate buffer carrier structures. The total size
-	 * is about 8 KB, so allocate all at once.
+	 * is about 4 KB, so allocate all at once.
 	 */
-	adv_dvc->carrier = dma_alloc_coherent(board->dev,
-		ADV_CARRIER_BUFSIZE, &adv_dvc->carrier_addr, GFP_KERNEL);
-	ASC_DBG(1, "carrier 0x%p\n", adv_dvc->carrier);
+	adv_dvc->carrier_buf = kmalloc(ADV_CARRIER_BUFSIZE, GFP_KERNEL);
+	ASC_DBG(1, "carrier_buf 0x%p\n", adv_dvc->carrier_buf);
 
-	if (!adv_dvc->carrier)
+	if (!adv_dvc->carrier_buf)
 		goto kmalloc_failed;
 
 	/*
@@ -10843,33 +11794,53 @@ static int advansys_wide_init_chip(struct Scsi_Host *shost)
 	 * board. The total size is about 16 KB, so allocate all at once.
 	 * If the allocation fails decrement and try again.
 	 */
-	board->adv_reqp_size = adv_dvc->max_host_qng * sizeof(adv_req_t);
-	if (board->adv_reqp_size & 0x1f) {
-		ASC_DBG(1, "unaligned reqp %lu bytes\n", sizeof(adv_req_t));
-		board->adv_reqp_size = ADV_32BALIGN(board->adv_reqp_size);
-	}
-	board->adv_reqp = dma_alloc_coherent(board->dev, board->adv_reqp_size,
-		&board->adv_reqp_addr, GFP_KERNEL);
+	for (req_cnt = adv_dvc->max_host_qng; req_cnt > 0; req_cnt--) {
+		reqp = kmalloc(sizeof(adv_req_t) * req_cnt, GFP_KERNEL);
 
-	if (!board->adv_reqp)
+		ASC_DBG(1, "reqp 0x%p, req_cnt %d, bytes %lu\n", reqp, req_cnt,
+			 (ulong)sizeof(adv_req_t) * req_cnt);
+
+		if (reqp)
+			break;
+	}
+
+	if (!reqp)
 		goto kmalloc_failed;
 
-	ASC_DBG(1, "reqp 0x%p, req_cnt %d, bytes %lu\n", board->adv_reqp,
-		adv_dvc->max_host_qng, board->adv_reqp_size);
+	adv_dvc->orig_reqp = reqp;
 
 	/*
 	 * Allocate up to ADV_TOT_SG_BLOCK request structures for
 	 * the Wide board. Each structure is about 136 bytes.
 	 */
-	sgblk_pool_size = sizeof(adv_sgblk_t) * ADV_TOT_SG_BLOCK;
-	board->adv_sgblk_pool = dma_pool_create("adv_sgblk", board->dev,
-						sgblk_pool_size, 32, 0);
+	board->adv_sgblkp = NULL;
+	for (sg_cnt = 0; sg_cnt < ADV_TOT_SG_BLOCK; sg_cnt++) {
+		sgp = kmalloc(sizeof(adv_sgblk_t), GFP_KERNEL);
 
-	ASC_DBG(1, "sg_cnt %d * %lu = %lu bytes\n", ADV_TOT_SG_BLOCK,
-		sizeof(adv_sgblk_t), sgblk_pool_size);
+		if (!sgp)
+			break;
 
-	if (!board->adv_sgblk_pool)
+		sgp->next_sgblkp = board->adv_sgblkp;
+		board->adv_sgblkp = sgp;
+
+	}
+
+	ASC_DBG(1, "sg_cnt %d * %lu = %lu bytes\n", sg_cnt, sizeof(adv_sgblk_t),
+		 sizeof(adv_sgblk_t) * sg_cnt);
+
+	if (!board->adv_sgblkp)
 		goto kmalloc_failed;
+
+	/*
+	 * Point 'adv_reqp' to the request structures and
+	 * link them together.
+	 */
+	req_cnt--;
+	reqp[req_cnt].next_reqp = NULL;
+	for (; req_cnt > 0; req_cnt--) {
+		reqp[req_cnt - 1].next_reqp = &reqp[req_cnt];
+	}
+	board->adv_reqp = &reqp[0];
 
 	if (adv_dvc->chip_type == ADV_CHIP_ASC3550) {
 		ASC_DBG(2, "AdvInitAsc3550Driver()\n");
@@ -10900,25 +11871,19 @@ static int advansys_wide_init_chip(struct Scsi_Host *shost)
 static void advansys_wide_free_mem(struct asc_board *board)
 {
 	struct adv_dvc_var *adv_dvc = &board->dvc_var.adv_dvc_var;
-
-	if (adv_dvc->carrier) {
-		dma_free_coherent(board->dev, ADV_CARRIER_BUFSIZE,
-				  adv_dvc->carrier, adv_dvc->carrier_addr);
-		adv_dvc->carrier = NULL;
-	}
-	if (board->adv_reqp) {
-		dma_free_coherent(board->dev, board->adv_reqp_size,
-				  board->adv_reqp, board->adv_reqp_addr);
-		board->adv_reqp = NULL;
-	}
-	if (board->adv_sgblk_pool) {
-		dma_pool_destroy(board->adv_sgblk_pool);
-		board->adv_sgblk_pool = NULL;
+	kfree(adv_dvc->carrier_buf);
+	adv_dvc->carrier_buf = NULL;
+	kfree(adv_dvc->orig_reqp);
+	adv_dvc->orig_reqp = board->adv_reqp = NULL;
+	while (board->adv_sgblkp) {
+		adv_sgblk_t *sgp = board->adv_sgblkp;
+		board->adv_sgblkp = sgp->next_sgblkp;
+		kfree(sgp);
 	}
 }
 
-static int advansys_board_found(struct Scsi_Host *shost, unsigned int iop,
-				int bus_type)
+static int __devinit advansys_board_found(struct Scsi_Host *shost,
+					  unsigned int iop, int bus_type)
 {
 	struct pci_dev *pdev;
 	struct asc_board *boardp = shost_priv(shost);
@@ -10976,6 +11941,20 @@ static int advansys_board_found(struct Scsi_Host *shost, unsigned int iop,
 #endif /* CONFIG_PCI */
 	}
 
+#ifdef CONFIG_PROC_FS
+	/*
+	 * Allocate buffer for printing information from
+	 * /proc/scsi/advansys/[0...].
+	 */
+	boardp->prtbuf = kmalloc(ASC_PRTBUF_SIZE, GFP_KERNEL);
+	if (!boardp->prtbuf) {
+		shost_printk(KERN_ERR, shost, "kmalloc(%d) returned NULL\n",
+				ASC_PRTBUF_SIZE);
+		ret = -ENOMEM;
+		goto err_unmap;
+	}
+#endif /* CONFIG_PROC_FS */
+
 	if (ASC_NARROW_BOARD(boardp)) {
 		/*
 		 * Set the board bus type and PCI IRQ before
@@ -10984,28 +11963,28 @@ static int advansys_board_found(struct Scsi_Host *shost, unsigned int iop,
 		switch (asc_dvc_varp->bus_type) {
 #ifdef CONFIG_ISA
 		case ASC_IS_ISA:
-			shost->unchecked_isa_dma = true;
+			shost->unchecked_isa_dma = TRUE;
 			share_irq = 0;
 			break;
 		case ASC_IS_VL:
-			shost->unchecked_isa_dma = false;
+			shost->unchecked_isa_dma = FALSE;
 			share_irq = 0;
 			break;
 		case ASC_IS_EISA:
-			shost->unchecked_isa_dma = false;
+			shost->unchecked_isa_dma = FALSE;
 			share_irq = IRQF_SHARED;
 			break;
 #endif /* CONFIG_ISA */
 #ifdef CONFIG_PCI
 		case ASC_IS_PCI:
-			shost->unchecked_isa_dma = false;
+			shost->unchecked_isa_dma = FALSE;
 			share_irq = IRQF_SHARED;
 			break;
 #endif /* CONFIG_PCI */
 		default:
 			shost_printk(KERN_ERR, shost, "unknown adapter type: "
 					"%d\n", asc_dvc_varp->bus_type);
-			shost->unchecked_isa_dma = false;
+			shost->unchecked_isa_dma = TRUE;
 			share_irq = 0;
 			break;
 		}
@@ -11024,19 +12003,16 @@ static int advansys_board_found(struct Scsi_Host *shost, unsigned int iop,
 		 * For Wide boards set PCI information before calling
 		 * AdvInitGetConfig().
 		 */
-		shost->unchecked_isa_dma = false;
+		shost->unchecked_isa_dma = FALSE;
 		share_irq = IRQF_SHARED;
 		ASC_DBG(2, "AdvInitGetConfig()\n");
 
 		ret = AdvInitGetConfig(pdev, shost) ? -ENODEV : 0;
-#else
-		share_irq = 0;
-		ret = -ENODEV;
 #endif /* CONFIG_PCI */
 	}
 
 	if (ret)
-		goto err_unmap;
+		goto err_free_proc;
 
 	/*
 	 * Save the EEPROM configuration so that it can be displayed
@@ -11081,7 +12057,7 @@ static int advansys_board_found(struct Scsi_Host *shost, unsigned int iop,
 		ASC_DBG(2, "AscInitSetConfig()\n");
 		ret = AscInitSetConfig(pdev, shost) ? -ENODEV : 0;
 		if (ret)
-			goto err_unmap;
+			goto err_free_proc;
 	} else {
 		ADVEEP_3550_CONFIG *ep_3550;
 		ADVEEP_38C0800_CONFIG *ep_38C0800;
@@ -11214,6 +12190,24 @@ static int advansys_board_found(struct Scsi_Host *shost, unsigned int iop,
 	}
 
 	/*
+	 * Following v1.3.89, 'cmd_per_lun' is no longer needed
+	 * and should be set to zero.
+	 *
+	 * But because of a bug introduced in v1.3.89 if the driver is
+	 * compiled as a module and 'cmd_per_lun' is zero, the Mid-Level
+	 * SCSI function 'allocate_device' will panic. To allow the driver
+	 * to work as a module in these kernels set 'cmd_per_lun' to 1.
+	 *
+	 * Note: This is wrong.  cmd_per_lun should be set to the depth
+	 * you want on untagged devices always.
+	 #ifdef MODULE
+	 */
+	shost->cmd_per_lun = 1;
+/* #else
+            shost->cmd_per_lun = 0;
+#endif */
+
+	/*
 	 * Set the maximum number of scatter-gather elements the
 	 * adapter can handle.
 	 */
@@ -11298,7 +12292,7 @@ static int advansys_board_found(struct Scsi_Host *shost, unsigned int iop,
 				shost_printk(KERN_ERR, shost, "request_dma() "
 						"%d failed %d\n",
 						shost->dma_channel, ret);
-				goto err_unmap;
+				goto err_free_proc;
 			}
 			AscEnableIsaDma(shost->dma_channel);
 		}
@@ -11379,12 +12373,12 @@ static int advansys_board_found(struct Scsi_Host *shost, unsigned int iop,
 	if (shost->dma_channel != NO_ISA_DMA)
 		free_dma(shost->dma_channel);
 #endif
+ err_free_proc:
+	kfree(boardp->prtbuf);
  err_unmap:
 	if (boardp->ioremap_addr)
 		iounmap(boardp->ioremap_addr);
-#ifdef CONFIG_PCI
  err_shost:
-#endif
 	return ret;
 }
 
@@ -11414,6 +12408,7 @@ static int advansys_release(struct Scsi_Host *shost)
 		iounmap(board->ioremap_addr);
 		advansys_wide_free_mem(board);
 	}
+	kfree(board->prtbuf);
 	scsi_host_put(shost);
 	ASC_DBG(1, "end\n");
 	return 0;
@@ -11433,7 +12428,7 @@ static PortAddr _asc_def_iop_base[ASC_IOADR_TABLE_MAX_IX] = {
  * 10: 12
  * 11: 15
  */
-static unsigned int advansys_isa_irq_no(PortAddr iop_base)
+static unsigned int __devinit advansys_isa_irq_no(PortAddr iop_base)
 {
 	unsigned short cfg_lsw = AscGetChipCfgLsw(iop_base);
 	unsigned int chip_irq = ((cfg_lsw >> 2) & 0x03) + 10;
@@ -11442,7 +12437,7 @@ static unsigned int advansys_isa_irq_no(PortAddr iop_base)
 	return chip_irq;
 }
 
-static int advansys_isa_probe(struct device *dev, unsigned int id)
+static int __devinit advansys_isa_probe(struct device *dev, unsigned int id)
 {
 	int err = -ENODEV;
 	PortAddr iop_base = _asc_def_iop_base[id];
@@ -11467,7 +12462,6 @@ static int advansys_isa_probe(struct device *dev, unsigned int id)
 	board = shost_priv(shost);
 	board->irq = advansys_isa_irq_no(iop_base);
 	board->dev = dev;
-	board->shost = shost;
 
 	err = advansys_board_found(shost, iop_base, ASC_IS_ISA);
 	if (err)
@@ -11483,7 +12477,7 @@ static int advansys_isa_probe(struct device *dev, unsigned int id)
 	return err;
 }
 
-static int advansys_isa_remove(struct device *dev, unsigned int id)
+static int __devexit advansys_isa_remove(struct device *dev, unsigned int id)
 {
 	int ioport = _asc_def_iop_base[id];
 	advansys_release(dev_get_drvdata(dev));
@@ -11493,7 +12487,7 @@ static int advansys_isa_remove(struct device *dev, unsigned int id)
 
 static struct isa_driver advansys_isa_driver = {
 	.probe		= advansys_isa_probe,
-	.remove		= advansys_isa_remove,
+	.remove		= __devexit_p(advansys_isa_remove),
 	.driver = {
 		.owner	= THIS_MODULE,
 		.name	= DRV_NAME,
@@ -11511,7 +12505,7 @@ static struct isa_driver advansys_isa_driver = {
  * 110: 15
  * 111: invalid
  */
-static unsigned int advansys_vlb_irq_no(PortAddr iop_base)
+static unsigned int __devinit advansys_vlb_irq_no(PortAddr iop_base)
 {
 	unsigned short cfg_lsw = AscGetChipCfgLsw(iop_base);
 	unsigned int chip_irq = ((cfg_lsw >> 2) & 0x07) + 9;
@@ -11520,7 +12514,7 @@ static unsigned int advansys_vlb_irq_no(PortAddr iop_base)
 	return chip_irq;
 }
 
-static int advansys_vlb_probe(struct device *dev, unsigned int id)
+static int __devinit advansys_vlb_probe(struct device *dev, unsigned int id)
 {
 	int err = -ENODEV;
 	PortAddr iop_base = _asc_def_iop_base[id];
@@ -11550,7 +12544,6 @@ static int advansys_vlb_probe(struct device *dev, unsigned int id)
 	board = shost_priv(shost);
 	board->irq = advansys_vlb_irq_no(iop_base);
 	board->dev = dev;
-	board->shost = shost;
 
 	err = advansys_board_found(shost, iop_base, ASC_IS_VL);
 	if (err)
@@ -11568,14 +12561,14 @@ static int advansys_vlb_probe(struct device *dev, unsigned int id)
 
 static struct isa_driver advansys_vlb_driver = {
 	.probe		= advansys_vlb_probe,
-	.remove		= advansys_isa_remove,
+	.remove		= __devexit_p(advansys_isa_remove),
 	.driver = {
 		.owner	= THIS_MODULE,
 		.name	= "advansys_vlb",
 	},
 };
 
-static struct eisa_device_id advansys_eisa_table[] = {
+static struct eisa_device_id advansys_eisa_table[] __devinitdata = {
 	{ "ABP7401" },
 	{ "ABP7501" },
 	{ "" }
@@ -11602,7 +12595,7 @@ struct eisa_scsi_data {
  * 110: invalid
  * 111: invalid
  */
-static unsigned int advansys_eisa_irq_no(struct eisa_device *edev)
+static unsigned int __devinit advansys_eisa_irq_no(struct eisa_device *edev)
 {
 	unsigned short cfg_lsw = inw(edev->base_addr + 0xc86);
 	unsigned int chip_irq = ((cfg_lsw >> 8) & 0x07) + 10;
@@ -11611,7 +12604,7 @@ static unsigned int advansys_eisa_irq_no(struct eisa_device *edev)
 	return chip_irq;
 }
 
-static int advansys_eisa_probe(struct device *dev)
+static int __devinit advansys_eisa_probe(struct device *dev)
 {
 	int i, ioport, irq = 0;
 	int err;
@@ -11658,7 +12651,6 @@ static int advansys_eisa_probe(struct device *dev)
 		board = shost_priv(shost);
 		board->irq = irq;
 		board->dev = dev;
-		board->shost = shost;
 
 		err = advansys_board_found(shost, ioport, ASC_IS_EISA);
 		if (!err) {
@@ -11685,7 +12677,7 @@ static int advansys_eisa_probe(struct device *dev)
 	return err;
 }
 
-static int advansys_eisa_remove(struct device *dev)
+static __devexit int advansys_eisa_remove(struct device *dev)
 {
 	int i;
 	struct eisa_scsi_data *data = dev_get_drvdata(dev);
@@ -11709,12 +12701,12 @@ static struct eisa_driver advansys_eisa_driver = {
 	.driver = {
 		.name =		DRV_NAME,
 		.probe =	advansys_eisa_probe,
-		.remove =	advansys_eisa_remove,
+		.remove =	__devexit_p(advansys_eisa_remove),
 	}
 };
 
 /* PCI Devices supported by this driver */
-static struct pci_device_id advansys_pci_tbl[] = {
+static struct pci_device_id advansys_pci_tbl[] __devinitdata = {
 	{PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_ASP_1200A,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_ASP_ABP940,
@@ -11732,7 +12724,7 @@ static struct pci_device_id advansys_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, advansys_pci_tbl);
 
-static void advansys_set_latency(struct pci_dev *pdev)
+static void __devinit advansys_set_latency(struct pci_dev *pdev)
 {
 	if ((pdev->device == PCI_DEVICE_ID_ASP_1200A) ||
 	    (pdev->device == PCI_DEVICE_ID_ASP_ABP940)) {
@@ -11745,8 +12737,8 @@ static void advansys_set_latency(struct pci_dev *pdev)
 	}
 }
 
-static int advansys_pci_probe(struct pci_dev *pdev,
-			      const struct pci_device_id *ent)
+static int __devinit
+advansys_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	int err, ioport;
 	struct Scsi_Host *shost;
@@ -11775,7 +12767,6 @@ static int advansys_pci_probe(struct pci_dev *pdev,
 	board = shost_priv(shost);
 	board->irq = pdev->irq;
 	board->dev = &pdev->dev;
-	board->shost = shost;
 
 	if (pdev->device == PCI_DEVICE_ID_ASP_ABP940UW ||
 	    pdev->device == PCI_DEVICE_ID_38C0800_REV1 ||
@@ -11800,7 +12791,7 @@ static int advansys_pci_probe(struct pci_dev *pdev,
 	return err;
 }
 
-static void advansys_pci_remove(struct pci_dev *pdev)
+static void __devexit advansys_pci_remove(struct pci_dev *pdev)
 {
 	advansys_release(pci_get_drvdata(pdev));
 	pci_release_regions(pdev);
@@ -11811,7 +12802,7 @@ static struct pci_driver advansys_pci_driver = {
 	.name =		DRV_NAME,
 	.id_table =	advansys_pci_tbl,
 	.probe =	advansys_pci_probe,
-	.remove =	advansys_pci_remove,
+	.remove =	__devexit_p(advansys_pci_remove),
 };
 
 static int __init advansys_init(void)

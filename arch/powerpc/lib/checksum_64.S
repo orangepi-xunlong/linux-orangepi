@@ -16,15 +16,65 @@
 #include <asm/processor.h>
 #include <asm/errno.h>
 #include <asm/ppc_asm.h>
-#include <asm/export.h>
+
+/*
+ * ip_fast_csum(r3=buf, r4=len) -- Optimized for IP header
+ * len is in words and is always >= 5.
+ *
+ * In practice len == 5, but this is not guaranteed.  So this code does not
+ * attempt to use doubleword instructions.
+ */
+_GLOBAL(ip_fast_csum)
+	lwz	r0,0(r3)
+	lwzu	r5,4(r3)
+	addic.	r4,r4,-2
+	addc	r0,r0,r5
+	mtctr	r4
+	blelr-
+1:	lwzu	r4,4(r3)
+	adde	r0,r0,r4
+	bdnz	1b
+	addze	r0,r0		/* add in final carry */
+        rldicl  r4,r0,32,0      /* fold two 32-bit halves together */
+        add     r0,r0,r4
+        srdi    r0,r0,32
+	rlwinm	r3,r0,16,0,31	/* fold two halves together */
+	add	r3,r0,r3
+	not	r3,r3
+	srwi	r3,r3,16
+	blr
+
+/*
+ * Compute checksum of TCP or UDP pseudo-header:
+ *   csum_tcpudp_magic(r3=saddr, r4=daddr, r5=len, r6=proto, r7=sum)
+ * No real gain trying to do this specially for 64 bit, but
+ * the 32 bit addition may spill into the upper bits of
+ * the doubleword so we still must fold it down from 64.
+ */	
+_GLOBAL(csum_tcpudp_magic)
+	rlwimi	r5,r6,16,0,15	/* put proto in upper half of len */
+	addc	r0,r3,r4	/* add 4 32-bit words together */
+	adde	r0,r0,r5
+	adde	r0,r0,r7
+        rldicl  r4,r0,32,0      /* fold 64 bit value */
+        add     r0,r4,r0
+        srdi    r0,r0,32
+	rlwinm	r3,r0,16,0,31	/* fold two halves together */
+	add	r3,r0,r3
+	not	r3,r3
+	srwi	r3,r3,16
+	blr
+
+#define STACKFRAMESIZE 256
+#define STK_REG(i)	(112 + ((i)-14)*8)
 
 /*
  * Computes the checksum of a memory block at buff, length len,
  * and adds in "sum" (32-bit).
  *
- * __csum_partial(r3=buff, r4=len, r5=sum)
+ * csum_partial(r3=buff, r4=len, r5=sum)
  */
-_GLOBAL(__csum_partial)
+_GLOBAL(csum_partial)
 	addic	r0,r5,0			/* clear carry */
 
 	srdi.	r6,r4,3			/* less than 8 bytes? */
@@ -64,9 +114,9 @@ _GLOBAL(__csum_partial)
 	mtctr	r6
 
 	stdu	r1,-STACKFRAMESIZE(r1)
-	std	r14,STK_REG(R14)(r1)
-	std	r15,STK_REG(R15)(r1)
-	std	r16,STK_REG(R16)(r1)
+	std	r14,STK_REG(r14)(r1)
+	std	r15,STK_REG(r15)(r1)
+	std	r16,STK_REG(r16)(r1)
 
 	ld	r6,0(r3)
 	ld	r9,8(r3)
@@ -75,9 +125,9 @@ _GLOBAL(__csum_partial)
 	ld	r11,24(r3)
 
 	/*
-	 * On POWER6 and POWER7 back to back adde instructions take 2 cycles
-	 * because of the XER dependency. This means the fastest this loop can
-	 * go is 16 cycles per iteration. The scheduling of the loop below has
+	 * On POWER6 and POWER7 back to back addes take 2 cycles because of
+	 * the XER dependency. This means the fastest this loop can go is
+	 * 16 cycles per iteration. The scheduling of the loop below has
 	 * been shown to hit this on both POWER6 and POWER7.
 	 */
 	.align 5
@@ -125,9 +175,9 @@ _GLOBAL(__csum_partial)
 	adde	r0,r0,r15
 	adde	r0,r0,r16
 
-	ld	r14,STK_REG(R14)(r1)
-	ld	r15,STK_REG(R15)(r1)
-	ld	r16,STK_REG(R16)(r1)
+	ld	r14,STK_REG(r14)(r1)
+	ld	r15,STK_REG(r15)(r1)
+	ld	r16,STK_REG(r16)(r1)
 	addi	r1,r1,STACKFRAMESIZE
 
 	andi.	r4,r4,63
@@ -177,7 +227,6 @@ _GLOBAL(__csum_partial)
 	add	r3,r4,r0
 	srdi	r3,r3,32
 	blr
-EXPORT_SYMBOL(__csum_partial)
 
 
 	.macro srcnr
@@ -266,9 +315,9 @@ dstnr;	sth	r6,0(r4)
 	mtctr	r6
 
 	stdu	r1,-STACKFRAMESIZE(r1)
-	std	r14,STK_REG(R14)(r1)
-	std	r15,STK_REG(R15)(r1)
-	std	r16,STK_REG(R16)(r1)
+	std	r14,STK_REG(r14)(r1)
+	std	r15,STK_REG(r15)(r1)
+	std	r16,STK_REG(r16)(r1)
 
 source;	ld	r6,0(r3)
 source;	ld	r9,8(r3)
@@ -277,9 +326,9 @@ source;	ld	r10,16(r3)
 source;	ld	r11,24(r3)
 
 	/*
-	 * On POWER6 and POWER7 back to back adde instructions take 2 cycles
-	 * because of the XER dependency. This means the fastest this loop can
-	 * go is 16 cycles per iteration. The scheduling of the loop below has
+	 * On POWER6 and POWER7 back to back addes take 2 cycles because of
+	 * the XER dependency. This means the fastest this loop can go is
+	 * 16 cycles per iteration. The scheduling of the loop below has
 	 * been shown to hit this on both POWER6 and POWER7.
 	 */
 	.align 5
@@ -349,9 +398,9 @@ dest;	std	r16,56(r4)
 	adde	r0,r0,r15
 	adde	r0,r0,r16
 
-	ld	r14,STK_REG(R14)(r1)
-	ld	r15,STK_REG(R15)(r1)
-	ld	r16,STK_REG(R16)(r1)
+	ld	r14,STK_REG(r14)(r1)
+	ld	r15,STK_REG(r15)(r1)
+	ld	r16,STK_REG(r16)(r1)
 	addi	r1,r1,STACKFRAMESIZE
 
 	andi.	r5,r5,63
@@ -410,9 +459,9 @@ dstnr;	stb	r6,0(r4)
 	blr
 
 .Lsrc_error:
-	ld	r14,STK_REG(R14)(r1)
-	ld	r15,STK_REG(R15)(r1)
-	ld	r16,STK_REG(R16)(r1)
+	ld	r14,STK_REG(r14)(r1)
+	ld	r15,STK_REG(r15)(r1)
+	ld	r16,STK_REG(r16)(r1)
 	addi	r1,r1,STACKFRAMESIZE
 .Lsrc_error_nr:
 	cmpdi	0,r7,0
@@ -422,9 +471,9 @@ dstnr;	stb	r6,0(r4)
 	blr
 
 .Ldest_error:
-	ld	r14,STK_REG(R14)(r1)
-	ld	r15,STK_REG(R15)(r1)
-	ld	r16,STK_REG(R16)(r1)
+	ld	r14,STK_REG(r14)(r1)
+	ld	r15,STK_REG(r15)(r1)
+	ld	r16,STK_REG(r16)(r1)
 	addi	r1,r1,STACKFRAMESIZE
 .Ldest_error_nr:
 	cmpdi	0,r8,0
@@ -432,4 +481,3 @@ dstnr;	stb	r6,0(r4)
 	li	r6,-EFAULT
 	stw	r6,0(r8)
 	blr
-EXPORT_SYMBOL(csum_partial_copy_generic)

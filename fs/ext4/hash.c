@@ -10,6 +10,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/jbd2.h>
 #include <linux/cryptohash.h>
 #include "ext4.h"
 
@@ -154,11 +155,11 @@ int ext4fs_dirhash(const char *name, int len, struct dx_hash_info *hinfo)
 	/* Check to see if the seed is all zero's */
 	if (hinfo->seed) {
 		for (i = 0; i < 4; i++) {
-			if (hinfo->seed[i]) {
-				memcpy(buf, hinfo->seed, sizeof(buf));
+			if (hinfo->seed[i])
 				break;
-			}
 		}
+		if (i < 4)
+			memcpy(buf, hinfo->seed, sizeof(buf));
 	}
 
 	switch (hinfo->hash_version) {

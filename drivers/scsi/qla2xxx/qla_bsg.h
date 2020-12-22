@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2014 QLogic Corporation
+ * Copyright (c)  2003-2011 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -19,50 +19,21 @@
 #define QL_VND_SET_FRU_VERSION	0x0B
 #define QL_VND_READ_FRU_STATUS	0x0C
 #define QL_VND_WRITE_FRU_STATUS	0x0D
-#define QL_VND_DIAG_IO_CMD	0x0A
-#define QL_VND_WRITE_I2C	0x10
-#define QL_VND_READ_I2C		0x11
-#define QL_VND_FX00_MGMT_CMD	0x12
-#define QL_VND_SERDES_OP	0x13
-#define	QL_VND_SERDES_OP_EX	0x14
-#define QL_VND_GET_FLASH_UPDATE_CAPS    0x15
-#define QL_VND_SET_FLASH_UPDATE_CAPS    0x16
-#define QL_VND_GET_BBCR_DATA    0x17
-#define QL_VND_GET_PRIV_STATS	0x18
-#define QL_VND_DPORT_DIAGNOSTICS	0x19
-#define QL_VND_GET_PRIV_STATS_EX	0x1A
 
 /* BSG Vendor specific subcode returns */
 #define EXT_STATUS_OK			0
 #define EXT_STATUS_ERR			1
-#define EXT_STATUS_BUSY			2
 #define EXT_STATUS_INVALID_PARAM	6
-#define EXT_STATUS_DATA_OVERRUN		7
-#define EXT_STATUS_DATA_UNDERRUN	8
 #define EXT_STATUS_MAILBOX		11
 #define EXT_STATUS_NO_MEMORY		17
-#define EXT_STATUS_DEVICE_OFFLINE	22
-
-/*
- * To support bidirectional iocb
- * BSG Vendor specific returns
- */
-#define EXT_STATUS_NOT_SUPPORTED	27
-#define EXT_STATUS_INVALID_CFG		28
-#define EXT_STATUS_DMA_ERR		29
-#define EXT_STATUS_TIMEOUT		30
-#define EXT_STATUS_THREAD_FAILED	31
-#define EXT_STATUS_DATA_CMP_FAILED	32
 
 /* BSG definations for interpreting CommandSent field */
 #define INT_DEF_LB_LOOPBACK_CMD         0
 #define INT_DEF_LB_ECHO_CMD             1
 
 /* Loopback related definations */
-#define INTERNAL_LOOPBACK		0xF1
 #define EXTERNAL_LOOPBACK		0xF2
 #define ENABLE_INTERNAL_LOOPBACK	0x02
-#define ENABLE_EXTERNAL_LOOPBACK	0x04
 #define INTERNAL_LOOPBACK_MASK		0x000E
 #define MAX_ELS_FRAME_PAYLOAD		252
 #define ELS_OPCODE_BYTE			0x10
@@ -211,72 +182,5 @@ struct qla_status_reg {
 	uint8_t status_reg;
 	uint8_t reserved[7];
 } __packed;
-
-struct qla_i2c_access {
-	uint16_t device;
-	uint16_t offset;
-	uint16_t option;
-	uint16_t length;
-	uint8_t  buffer[0x40];
-} __packed;
-
-/* 26xx serdes register interface */
-
-/* serdes reg commands */
-#define INT_SC_SERDES_READ_REG		1
-#define INT_SC_SERDES_WRITE_REG		2
-
-struct qla_serdes_reg {
-	uint16_t cmd;
-	uint16_t addr;
-	uint16_t val;
-} __packed;
-
-struct qla_serdes_reg_ex {
-	uint16_t cmd;
-	uint32_t addr;
-	uint32_t val;
-} __packed;
-
-struct qla_flash_update_caps {
-	uint64_t  capabilities;
-	uint32_t  outage_duration;
-	uint8_t   reserved[20];
-} __packed;
-
-/* BB_CR Status */
-#define QLA_BBCR_STATUS_DISABLED       0
-#define QLA_BBCR_STATUS_ENABLED        1
-#define QLA_BBCR_STATUS_UNKNOWN        2
-
-/* BB_CR State */
-#define QLA_BBCR_STATE_OFFLINE         0
-#define QLA_BBCR_STATE_ONLINE          1
-
-/* BB_CR Offline Reason Code */
-#define QLA_BBCR_REASON_PORT_SPEED     1
-#define QLA_BBCR_REASON_PEER_PORT      2
-#define QLA_BBCR_REASON_SWITCH         3
-#define QLA_BBCR_REASON_LOGIN_REJECT   4
-
-struct  qla_bbcr_data {
-	uint8_t   status;         /* 1 - enabled, 0 - Disabled */
-	uint8_t   state;          /* 1 - online, 0 - offline */
-	uint8_t   configured_bbscn;       /* 0-15 */
-	uint8_t   negotiated_bbscn;       /* 0-15 */
-	uint8_t   offline_reason_code;
-	uint16_t  mbx1;			/* Port state */
-	uint8_t   reserved[9];
-} __packed;
-
-struct qla_dport_diag {
-	uint16_t options;
-	uint32_t buf[16];
-	uint8_t  unused[62];
-} __packed;
-
-/* D_Port options */
-#define QLA_DPORT_RESULT	0x0
-#define QLA_DPORT_START		0x2
 
 #endif

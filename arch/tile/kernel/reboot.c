@@ -16,7 +16,6 @@
 #include <linux/reboot.h>
 #include <linux/smp.h>
 #include <linux/pm.h>
-#include <linux/export.h>
 #include <asm/page.h>
 #include <asm/setup.h>
 #include <hv/hypervisor.h>
@@ -27,6 +26,7 @@
 
 void machine_halt(void)
 {
+	warn_early_printk();
 	arch_local_irq_disable_all();
 	smp_send_stop();
 	hv_halt();
@@ -34,6 +34,7 @@ void machine_halt(void)
 
 void machine_power_off(void)
 {
+	warn_early_printk();
 	arch_local_irq_disable_all();
 	smp_send_stop();
 	hv_power_off();
@@ -48,4 +49,3 @@ void machine_restart(char *cmd)
 
 /* No interesting distinction to be made here. */
 void (*pm_power_off)(void) = NULL;
-EXPORT_SYMBOL(pm_power_off);

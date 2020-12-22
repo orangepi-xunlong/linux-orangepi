@@ -1,7 +1,7 @@
 /*
  * P3041 Silicon/SoC Device Tree Source (post include)
  *
- * Copyright 2011 - 2015 Freescale Semiconductor Inc.
+ * Copyright 2011 Freescale Semiconductor Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,21 +32,6 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-&bman_fbpr {
-	compatible = "fsl,bman-fbpr";
-	alloc-ranges = <0 0 0x10 0>;
-};
-
-&qman_fqd {
-	compatible = "fsl,qman-fqd";
-	alloc-ranges = <0 0 0x10 0>;
-};
-
-&qman_pfdr {
-	compatible = "fsl,qman-pfdr";
-	alloc-ranges = <0 0 0x10 0>;
-};
-
 &lbc {
 	compatible = "fsl,p3041-elbc", "fsl,elbc", "simple-bus";
 	interrupts = <25 2 0 0>;
@@ -63,8 +48,6 @@
 	bus-range = <0x0 0xff>;
 	clock-frequency = <33333333>;
 	interrupts = <16 2 1 15>;
-	fsl,iommu-parent = <&pamu0>;
-	fsl,liodn-reg = <&guts 0x500>; /* PEX1LIODNR */
 	pcie@0 {
 		reg = <0 0 0 0 0>;
 		#interrupt-cells = <1>;
@@ -92,8 +75,6 @@
 	bus-range = <0 0xff>;
 	clock-frequency = <33333333>;
 	interrupts = <16 2 1 14>;
-	fsl,iommu-parent = <&pamu0>;
-	fsl,liodn-reg = <&guts 0x504>; /* PEX2LIODNR */
 	pcie@0 {
 		reg = <0 0 0 0 0>;
 		#interrupt-cells = <1>;
@@ -121,8 +102,6 @@
 	bus-range = <0x0 0xff>;
 	clock-frequency = <33333333>;
 	interrupts = <16 2 1 13>;
-	fsl,iommu-parent = <&pamu0>;
-	fsl,liodn-reg = <&guts 0x508>; /* PEX3LIODNR */
 	pcie@0 {
 		reg = <0 0 0 0 0>;
 		#interrupt-cells = <1>;
@@ -173,21 +152,18 @@
 	interrupts = <16 2 1 11>;
 	#address-cells = <2>;
 	#size-cells = <2>;
-	fsl,iommu-parent = <&pamu0>;
 	ranges;
 
 	port1 {
 		#address-cells = <2>;
 		#size-cells = <2>;
 		cell-index = <1>;
-		fsl,liodn-reg = <&guts 0x510>; /* RIO1LIODNR */
 	};
 
 	port2 {
 		#address-cells = <2>;
 		#size-cells = <2>;
 		cell-index = <2>;
-		fsl,liodn-reg = <&guts 0x514>; /* RIO2LIODNR */
 	};
 };
 
@@ -197,7 +173,7 @@
 	compatible = "fsl,dcsr", "simple-bus";
 
 	dcsr-epu@0 {
-		compatible = "fsl,p3041-dcsr-epu", "fsl,dcsr-epu";
+		compatible = "fsl,dcsr-epu";
 		interrupts = <52 2 0 0
 			      84 2 0 0
 			      85 2 0 0>;
@@ -258,10 +234,6 @@
 	};
 };
 
-/include/ "qoriq-bman1-portals.dtsi"
-
-/include/ "qoriq-qman1-portals.dtsi"
-
 &soc {
 	#address-cells = <1>;
 	#size-cells = <1>;
@@ -292,7 +264,7 @@
 	};
 
 	corenet-cf@18000 {
-		compatible = "fsl,corenet1-cf", "fsl,corenet-cf";
+		compatible = "fsl,corenet-cf";
 		reg = <0x18000 0x1000>;
 		interrupts = <16 2 1 31>;
 		fsl,ccf-num-csdids = <32>;
@@ -301,38 +273,10 @@
 
 	iommu@20000 {
 		compatible = "fsl,pamu-v1.0", "fsl,pamu";
-		reg = <0x20000 0x4000>; /* for compatibility with older PAMU drivers */
-		ranges = <0 0x20000 0x4000>;
-		#address-cells = <1>;
-		#size-cells = <1>;
+		reg = <0x20000 0x4000>;
 		interrupts = <
 			24 2 0 0
 			16 2 1 30>;
-		fsl,portid-mapping = <0x0f000000>;
-
-		pamu0: pamu@0 {
-			reg = <0 0x1000>;
-			fsl,primary-cache-geometry = <32 1>;
-			fsl,secondary-cache-geometry = <128 2>;
-		};
-
-		pamu1: pamu@1000 {
-			reg = <0x1000 0x1000>;
-			fsl,primary-cache-geometry = <32 1>;
-			fsl,secondary-cache-geometry = <128 2>;
-		};
-
-		pamu2: pamu@2000 {
-			reg = <0x2000 0x1000>;
-			fsl,primary-cache-geometry = <32 1>;
-			fsl,secondary-cache-geometry = <128 2>;
-		};
-
-		pamu3: pamu@3000 {
-			reg = <0x3000 0x1000>;
-			fsl,primary-cache-geometry = <32 1>;
-			fsl,secondary-cache-geometry = <128 2>;
-		};
 	};
 
 /include/ "qoriq-mpic.dtsi"
@@ -351,27 +295,10 @@
 		#sleep-cells = <2>;
 	};
 
-/include/ "qoriq-clockgen1.dtsi"
-	global-utilities@e1000 {
+	clockgen: global-utilities@e1000 {
 		compatible = "fsl,p3041-clockgen", "fsl,qoriq-clockgen-1.0";
-
-		mux2: mux2@40 {
-			#clock-cells = <0>;
-			reg = <0x40 0x4>;
-			compatible = "fsl,qoriq-core-mux-1.0";
-			clocks = <&pll0 0>, <&pll0 1>, <&pll1 0>, <&pll1 1>;
-			clock-names = "pll0", "pll0-div2", "pll1", "pll1-div2";
-			clock-output-names = "cmux2";
-		};
-
-		mux3: mux3@60 {
-			#clock-cells = <0>;
-			reg = <0x60 0x4>;
-			compatible = "fsl,qoriq-core-mux-1.0";
-			clocks = <&pll0 0>, <&pll0 1>, <&pll1 0>, <&pll1 1>;
-			clock-names = "pll0", "pll0-div2", "pll1", "pll1-div2";
-			clock-output-names = "cmux3";
-		};
+		reg = <0xe1000 0x1000>;
+		clock-frequency = <0>;
 	};
 
 	rcpm: global-utilities@e2000 {
@@ -391,17 +318,7 @@
 	};
 
 /include/ "qoriq-dma-0.dtsi"
-	dma@100300 {
-		fsl,iommu-parent = <&pamu0>;
-		fsl,liodn-reg = <&guts 0x580>; /* DMA1LIODNR */
-	};
-
 /include/ "qoriq-dma-1.dtsi"
-	dma@101300 {
-		fsl,iommu-parent = <&pamu0>;
-		fsl,liodn-reg = <&guts 0x584>; /* DMA2LIODNR */
-	};
-
 /include/ "qoriq-espi-0.dtsi"
 	spi@110000 {
 		fsl,espi-num-chipselects = <4>;
@@ -409,9 +326,6 @@
 
 /include/ "qoriq-esdhc-0.dtsi"
 	sdhc@114000 {
-		compatible = "fsl,p3041-esdhc", "fsl,esdhc";
-		fsl,iommu-parent = <&pamu1>;
-		fsl,liodn-reg = <&guts 0x530>; /* eSDHCLIODNR */
 		sdhci,auto-cmd12;
 	};
 
@@ -421,67 +335,20 @@
 /include/ "qoriq-duart-1.dtsi"
 /include/ "qoriq-gpio-0.dtsi"
 /include/ "qoriq-usb2-mph-0.dtsi"
-	usb0: usb@210000 {
-		compatible = "fsl-usb2-mph-v1.6", "fsl-usb2-mph";
-		phy_type = "utmi";
-		fsl,iommu-parent = <&pamu1>;
-		fsl,liodn-reg = <&guts 0x520>; /* USB1LIODNR */
-		port0;
-	};
+		usb0: usb@210000 {
+			compatible = "fsl-usb2-mph-v1.6", "fsl-usb2-mph";
+			phy_type = "utmi";
+			port0;
+		};
 
 /include/ "qoriq-usb2-dr-0.dtsi"
-	usb1: usb@211000 {
-		compatible = "fsl-usb2-dr-v1.6", "fsl,mpc85xx-usb2-dr", "fsl-usb2-dr";
-		fsl,iommu-parent = <&pamu1>;
-		fsl,liodn-reg = <&guts 0x524>; /* USB2LIODNR */
-		dr_mode = "host";
-		phy_type = "utmi";
-	};
+		usb1: usb@211000 {
+			compatible = "fsl-usb2-dr-v1.6", "fsl,mpc85xx-usb2-dr", "fsl-usb2-dr";
+			dr_mode = "host";
+			phy_type = "utmi";
+		};
 
 /include/ "qoriq-sata2-0.dtsi"
-	sata@220000 {
-		fsl,iommu-parent = <&pamu1>;
-		fsl,liodn-reg = <&guts 0x550>; /* SATA1LIODNR */
-	};
-
 /include/ "qoriq-sata2-1.dtsi"
-	sata@221000 {
-		fsl,iommu-parent = <&pamu1>;
-		fsl,liodn-reg = <&guts 0x554>; /* SATA2LIODNR */
-	};
-
 /include/ "qoriq-sec4.2-0.dtsi"
-crypto: crypto@300000 {
-		fsl,iommu-parent = <&pamu1>;
-	};
-
-/include/ "qoriq-qman1.dtsi"
-/include/ "qoriq-bman1.dtsi"
-
-/include/ "qoriq-fman-0.dtsi"
-/include/ "qoriq-fman-0-1g-0.dtsi"
-/include/ "qoriq-fman-0-1g-1.dtsi"
-/include/ "qoriq-fman-0-1g-2.dtsi"
-/include/ "qoriq-fman-0-1g-3.dtsi"
-/include/ "qoriq-fman-0-1g-4.dtsi"
-/include/ "qoriq-fman-0-10g-0.dtsi"
-	fman@400000 {
-		enet0: ethernet@e0000 {
-		};
-
-		enet1: ethernet@e2000 {
-		};
-
-		enet2: ethernet@e4000 {
-		};
-
-		enet3: ethernet@e6000 {
-		};
-
-		enet4: ethernet@e8000 {
-		};
-
-		enet5: ethernet@f0000 {
-		};
-	};
 };

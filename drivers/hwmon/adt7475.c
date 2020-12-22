@@ -3,7 +3,7 @@
  * Copyright (C) 2007-2008, Advanced Micro Devices, Inc.
  * Copyright (C) 2008 Jordan Crouse <jordan@cosmicpenguin.net>
  * Copyright (C) 2008 Hans de Goede <hdegoede@redhat.com>
- * Copyright (C) 2009 Jean Delvare <jdelvare@suse.de>
+ * Copyright (C) 2009 Jean Delvare <khali@linux-fr.org>
  *
  * Derived from the lm83 driver by Jean Delvare
  *
@@ -20,7 +20,6 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
-#include <linux/jiffies.h>
 
 /* Indexes for the sysfs hooks */
 
@@ -201,10 +200,10 @@ static inline u16 temp2reg(struct adt7475_data *data, long val)
 	u16 ret;
 
 	if (!(data->config5 & CONFIG5_TWOSCOMP)) {
-		val = clamp_val(val, -64000, 191000);
+		val = SENSORS_LIMIT(val, -64000, 191000);
 		ret = (val + 64500) / 1000;
 	} else {
-		val = clamp_val(val, -128000, 127000);
+		val = SENSORS_LIMIT(val, -128000, 127000);
 		if (val < -500)
 			ret = (256500 + val) / 1000;
 		else
@@ -240,7 +239,7 @@ static inline u16 rpm2tach(unsigned long rpm)
 	if (rpm == 0)
 		return 0;
 
-	return clamp_val((90000 * 60) / rpm, 1, 0xFFFF);
+	return SENSORS_LIMIT((90000 * 60) / rpm, 1, 0xFFFF);
 }
 
 /* Scaling factors for voltage inputs, taken from the ADT7490 datasheet */
@@ -271,21 +270,17 @@ static inline u16 volt2reg(int channel, long volt, u8 bypass_attn)
 		reg = (volt * 1024) / 2250;
 	else
 		reg = (volt * r[1] * 1024) / ((r[0] + r[1]) * 2250);
-	return clamp_val(reg, 0, 1023) & (0xff << 2);
+	return SENSORS_LIMIT(reg, 0, 1023) & (0xff << 2);
 }
 
-static int adt7475_read_word(struct i2c_client *client, int reg)
+static u16 adt7475_read_word(struct i2c_client *client, int reg)
 {
-	int val1, val2;
+	u16 val;
 
-	val1 = i2c_smbus_read_byte_data(client, reg);
-	if (val1 < 0)
-		return val1;
-	val2 = i2c_smbus_read_byte_data(client, reg + 1);
-	if (val2 < 0)
-		return val2;
+	val = i2c_smbus_read_byte_data(client, reg);
+	val |= (i2c_smbus_read_byte_data(client, reg + 1) << 8);
 
-	return val1 | (val2 << 8);
+	return val;
 }
 
 static void adt7475_write_word(struct i2c_client *client, int reg, u16 val)
@@ -455,10 +450,10 @@ static ssize_t set_temp(struct device *dev, struct device_attribute *attr,
 	switch (sattr->nr) {
 	case OFFSET:
 		if (data->config5 & CONFIG5_TEMPOFFSET) {
-			val = clamp_val(val, -63000, 127000);
+			val = SENSORS_LIMIT(val, -63000, 127000);
 			out = data->temp[OFFSET][sattr->index] = val / 1000;
 		} else {
-			val = clamp_val(val, -63000, 64000);
+			val = SENSORS_LIMIT(val, -63000, 64000);
 			out = data->temp[OFFSET][sattr->index] = val / 500;
 		}
 		break;
@@ -475,7 +470,7 @@ static ssize_t set_temp(struct device *dev, struct device_attribute *attr,
 		adt7475_read_hystersis(client);
 
 		temp = reg2temp(data, data->temp[THERM][sattr->index]);
-		val = clamp_val(val, temp - 15000, temp);
+		val = SENSORS_LIMIT(val, temp - 15000, temp);
 		val = (temp - val) / 1000;
 
 		if (sattr->index != 1) {
@@ -581,7 +576,7 @@ static ssize_t set_point2(struct device *dev, struct device_attribute *attr,
 	 * to figure the range
 	 */
 	temp = reg2temp(data, data->temp[AUTOMIN][sattr->index]);
-	val = clamp_val(val, temp + autorange_table[0],
+	val = SENSORS_LIMIT(val, temp + autorange_table[0],
 		temp + autorange_table[ARRAY_SIZE(autorange_table) - 1]);
 	val -= temp;
 
@@ -705,7 +700,7 @@ static ssize_t set_pwm(struct device *dev, struct device_attribute *attr,
 		break;
 	}
 
-	data->pwm[sattr->nr][sattr->index] = clamp_val(val, 0, 0xFF);
+	data->pwm[sattr->nr][sattr->index] = SENSORS_LIMIT(val, 0, 0xFF);
 	i2c_smbus_write_byte_data(client, reg,
 				  data->pwm[sattr->nr][sattr->index]);
 
@@ -1265,7 +1260,7 @@ static int adt7475_probe(struct i2c_client *client,
 	int i, ret = 0, revision;
 	u8 config2, config3;
 
-	data = devm_kzalloc(&client->dev, sizeof(*data), GFP_KERNEL);
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (data == NULL)
 		return -ENOMEM;
 
@@ -1349,7 +1344,7 @@ static int adt7475_probe(struct i2c_client *client,
 
 	ret = sysfs_create_group(&client->dev.kobj, &adt7475_attr_group);
 	if (ret)
-		return ret;
+		goto efree;
 
 	/* Features that can be disabled individually */
 	if (data->has_fan4) {
@@ -1415,6 +1410,8 @@ static int adt7475_probe(struct i2c_client *client,
 
 eremove:
 	adt7475_remove_files(client, data);
+efree:
+	kfree(data);
 	return ret;
 }
 
@@ -1424,6 +1421,7 @@ static int adt7475_remove(struct i2c_client *client)
 
 	hwmon_device_unregister(data->hwmon_dev);
 	adt7475_remove_files(client, data);
+	kfree(data);
 
 	return 0;
 }

@@ -15,32 +15,23 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/mmc/host.h>
+#include <linux/mmc/sh_mobile_sdhi.h>
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/sh_flctl.h>
-#include <linux/mfd/tmio.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
-#include <linux/regulator/fixed.h>
-#include <linux/regulator/machine.h>
 #include <linux/smsc911x.h>
 #include <linux/gpio.h>
 #include <linux/videodev2.h>
-#include <linux/sh_intc.h>
-#include <media/i2c/ov772x.h>
+#include <media/ov772x.h>
 #include <media/soc_camera.h>
-#include <linux/platform_data/media/soc_camera_platform.h>
-#include <media/drv-intf/sh_mobile_ceu.h>
+#include <media/soc_camera_platform.h>
+#include <media/sh_mobile_ceu.h>
 #include <video/sh_mobile_lcdc.h>
 #include <asm/io.h>
 #include <asm/clock.h>
 #include <asm/suspend.h>
 #include <cpu/sh7723.h>
-
-/* Dummy supplies, where voltage doesn't matter */
-static struct regulator_consumer_supply dummy_supplies[] = {
-	REGULATOR_SUPPLY("vddvario", "smsc911x"),
-	REGULATOR_SUPPLY("vdd33a", "smsc911x"),
-};
 
 static struct smsc911x_platform_config smsc911x_config = {
 	.phy_interface	= PHY_INTERFACE_MODE_MII,
@@ -56,8 +47,8 @@ static struct resource smsc9118_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= evt2irq(0x660),
-		.end	= evt2irq(0x660),
+		.start	= 35,
+		.end	= 35,
 		.flags	= IORESOURCE_IRQ,
 	}
 };
@@ -175,8 +166,13 @@ static int ap320_wvga_set_brightness(int brightness)
 		__raw_writew(0, FPGA_BKLREG);
 		gpio_set_value(GPIO_PTS3, 1);
 	}
-
+	
 	return 0;
+}
+
+static int ap320_wvga_get_brightness(void)
+{
+	return gpio_get_value(GPIO_PTS3);
 }
 
 static void ap320_wvga_power_on(void)
@@ -227,6 +223,7 @@ static struct sh_mobile_lcdc_info lcdc_info = {
 			.name = "sh_mobile_lcdc_bl",
 			.max_brightness = 1,
 			.set_brightness = ap320_wvga_set_brightness,
+			.get_brightness = ap320_wvga_get_brightness,
 		},
 	}
 };
@@ -239,7 +236,7 @@ static struct resource lcdc_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= evt2irq(0x580),
+		.start	= 28,
 		.flags	= IORESOURCE_IRQ,
 	},
 };
@@ -338,7 +335,7 @@ static struct soc_camera_platform_info camera_info = {
 	.format_name = "UYVY",
 	.format_depth = 16,
 	.format = {
-		.code = MEDIA_BUS_FMT_UYVY8_2X8,
+		.code = V4L2_MBUS_FMT_UYVY8_2X8,
 		.colorspace = V4L2_COLORSPACE_SMPTE170M,
 		.field = V4L2_FIELD_NONE,
 		.width = 640,
@@ -407,7 +404,7 @@ static struct resource ceu_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = evt2irq(0x880),
+		.start  = 52,
 		.flags  = IORESOURCE_IRQ,
 	},
 	[2] = {
@@ -425,15 +422,6 @@ static struct platform_device ceu_device = {
 	},
 };
 
-/* Fixed 3.3V regulators to be used by SDHI0, SDHI1 */
-static struct regulator_consumer_supply fixed3v3_power_consumers[] =
-{
-	REGULATOR_SUPPLY("vmmc", "sh_mobile_sdhi.0"),
-	REGULATOR_SUPPLY("vqmmc", "sh_mobile_sdhi.0"),
-	REGULATOR_SUPPLY("vmmc", "sh_mobile_sdhi.1"),
-	REGULATOR_SUPPLY("vqmmc", "sh_mobile_sdhi.1"),
-};
-
 static struct resource sdhi0_cn3_resources[] = {
 	[0] = {
 		.name	= "SDHI0",
@@ -442,13 +430,13 @@ static struct resource sdhi0_cn3_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= evt2irq(0xe80),
+		.start	= 100,
 		.flags  = IORESOURCE_IRQ,
 	},
 };
 
-static struct tmio_mmc_data sdhi0_cn3_data = {
-	.capabilities	= MMC_CAP_SDIO_IRQ,
+static struct sh_mobile_sdhi_info sdhi0_cn3_data = {
+	.tmio_caps      = MMC_CAP_SDIO_IRQ,
 };
 
 static struct platform_device sdhi0_cn3_device = {
@@ -469,13 +457,13 @@ static struct resource sdhi1_cn7_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= evt2irq(0x4e0),
+		.start	= 23,
 		.flags  = IORESOURCE_IRQ,
 	},
 };
 
-static struct tmio_mmc_data sdhi1_cn7_data = {
-	.capabilities	= MMC_CAP_SDIO_IRQ,
+static struct sh_mobile_sdhi_info sdhi1_cn7_data = {
+	.tmio_caps      = MMC_CAP_SDIO_IRQ,
 };
 
 static struct platform_device sdhi1_cn7_device = {
@@ -554,10 +542,6 @@ static int __init ap325rxa_devices_setup(void)
 					&ap325rxa_sdram_enter_end,
 					&ap325rxa_sdram_leave_start,
 					&ap325rxa_sdram_leave_end);
-
-	regulator_register_always_on(0, "fixed-3.3V", fixed3v3_power_consumers,
-				     ARRAY_SIZE(fixed3v3_power_consumers), 3300000);
-	regulator_register_fixed(1, dummy_supplies, ARRAY_SIZE(dummy_supplies));
 
 	/* LD3 and LD4 LEDs */
 	gpio_request(GPIO_PTX5, NULL); /* RUN */

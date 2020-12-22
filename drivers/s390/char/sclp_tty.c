@@ -1,8 +1,9 @@
 /*
+ *  drivers/s390/char/sclp_tty.c
  *    SCLP line mode terminal driver.
  *
  *  S390 version
- *    Copyright IBM Corp. 1999
+ *    Copyright (C) 1999 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Martin Peschke <mpeschke@de.ibm.com>
  *		 Martin Schwidefsky <schwidefsky@de.ibm.com>
  */
@@ -47,7 +48,7 @@ static struct sclp_buffer *sclp_ttybuf;
 /* Timer for delayed output of console messages. */
 static struct timer_list sclp_tty_timer;
 
-static struct tty_port sclp_port;
+static struct tty_struct *sclp_tty;
 static unsigned char sclp_tty_chars[SCLP_TTY_BUF_SIZE];
 static unsigned short int sclp_tty_chars_count;
 
@@ -63,9 +64,9 @@ static int sclp_tty_columns = 80;
 static int
 sclp_tty_open(struct tty_struct *tty, struct file *filp)
 {
-	tty_port_tty_set(&sclp_port, tty);
+	sclp_tty = tty;
 	tty->driver_data = NULL;
-	sclp_port.low_latency = 0;
+	tty->low_latency = 0;
 	return 0;
 }
 
@@ -75,7 +76,7 @@ sclp_tty_close(struct tty_struct *tty, struct file *filp)
 {
 	if (tty->count > 1)
 		return;
-	tty_port_tty_set(&sclp_port, NULL);
+	sclp_tty = NULL;
 }
 
 /*
@@ -84,8 +85,8 @@ sclp_tty_close(struct tty_struct *tty, struct file *filp)
  * to change as output buffers get emptied, or if the output flow
  * control is acted. This is not an exact number because not every
  * character needs the same space in the sccb. The worst case is
- * a string of newlines. Every newline creates a new message which
- * needs 82 bytes.
+ * a string of newlines. Every newlines creates a new mto which
+ * needs 8 bytes.
  */
 static int
 sclp_tty_write_room (struct tty_struct *tty)
@@ -97,9 +98,9 @@ sclp_tty_write_room (struct tty_struct *tty)
 	spin_lock_irqsave(&sclp_tty_lock, flags);
 	count = 0;
 	if (sclp_ttybuf != NULL)
-		count = sclp_buffer_space(sclp_ttybuf) / sizeof(struct msg_buf);
+		count = sclp_buffer_space(sclp_ttybuf) / sizeof(struct mto);
 	list_for_each(l, &sclp_tty_pages)
-		count += NR_EMPTY_MSG_PER_SCCB;
+		count += NR_EMPTY_MTO_PER_SCCB;
 	spin_unlock_irqrestore(&sclp_tty_lock, flags);
 	return count;
 }
@@ -124,8 +125,10 @@ sclp_ttybuf_callback(struct sclp_buffer *buffer, int rc)
 					    struct sclp_buffer, list);
 		spin_unlock_irqrestore(&sclp_tty_lock, flags);
 	} while (buffer && sclp_emit_buffer(buffer, sclp_ttybuf_callback));
-
-	tty_port_tty_wakeup(&sclp_port);
+	/* check if the tty needs a wake up call */
+	if (sclp_tty != NULL) {
+		tty_wakeup(sclp_tty);
+	}
 }
 
 static inline void
@@ -323,22 +326,21 @@ sclp_tty_flush_buffer(struct tty_struct *tty)
 static void
 sclp_tty_input(unsigned char* buf, unsigned int count)
 {
-	struct tty_struct *tty = tty_port_tty_get(&sclp_port);
 	unsigned int cchar;
 
 	/*
 	 * If this tty driver is currently closed
 	 * then throw the received input away.
 	 */
-	if (tty == NULL)
+	if (sclp_tty == NULL)
 		return;
-	cchar = ctrlchar_handle(buf, count, tty);
+	cchar = ctrlchar_handle(buf, count, sclp_tty);
 	switch (cchar & CTRLCHAR_MASK) {
 	case CTRLCHAR_SYSRQ:
 		break;
 	case CTRLCHAR_CTRL:
-		tty_insert_flip_char(&sclp_port, cchar, TTY_NORMAL);
-		tty_flip_buffer_push(&sclp_port);
+		tty_insert_flip_char(sclp_tty, cchar, TTY_NORMAL);
+		tty_flip_buffer_push(sclp_tty);
 		break;
 	case CTRLCHAR_NONE:
 		/* send (normal) input to line discipline */
@@ -346,14 +348,13 @@ sclp_tty_input(unsigned char* buf, unsigned int count)
 		    (strncmp((const char *) buf + count - 2, "^n", 2) &&
 		     strncmp((const char *) buf + count - 2, "\252n", 2))) {
 			/* add the auto \n */
-			tty_insert_flip_string(&sclp_port, buf, count);
-			tty_insert_flip_char(&sclp_port, '\n', TTY_NORMAL);
+			tty_insert_flip_string(sclp_tty, buf, count);
+			tty_insert_flip_char(sclp_tty, '\n', TTY_NORMAL);
 		} else
-			tty_insert_flip_string(&sclp_port, buf, count - 2);
-		tty_flip_buffer_push(&sclp_port);
+			tty_insert_flip_string(sclp_tty, buf, count - 2);
+		tty_flip_buffer_push(sclp_tty);
 		break;
 	}
-	tty_kref_put(tty);
 }
 
 /*
@@ -542,14 +543,13 @@ sclp_tty_init(void)
 		sclp_tty_tolower = 1;
 	}
 	sclp_tty_chars_count = 0;
+	sclp_tty = NULL;
 
 	rc = sclp_register(&sclp_input_event);
 	if (rc) {
 		put_tty_driver(driver);
 		return rc;
 	}
-
-	tty_port_init(&sclp_port);
 
 	driver->driver_name = "sclp_line";
 	driver->name = "sclp_line";
@@ -559,15 +559,13 @@ sclp_tty_init(void)
 	driver->subtype = SYSTEM_TYPE_TTY;
 	driver->init_termios = tty_std_termios;
 	driver->init_termios.c_iflag = IGNBRK | IGNPAR;
-	driver->init_termios.c_oflag = ONLCR;
+	driver->init_termios.c_oflag = ONLCR | XTABS;
 	driver->init_termios.c_lflag = ISIG | ECHO;
 	driver->flags = TTY_DRIVER_REAL_RAW;
 	tty_set_operations(driver, &sclp_ops);
-	tty_port_link_device(&sclp_port, driver, 0);
 	rc = tty_register_driver(driver);
 	if (rc) {
 		put_tty_driver(driver);
-		tty_port_destroy(&sclp_port);
 		return rc;
 	}
 	sclp_tty_driver = driver;

@@ -1,0 +1,10 @@
+#
+# sunxi cma test driver.
+#
+
+config SUNXI_CMATESET
+	bool "sunxi cma test driver"
+	depends on CMA
+	default y
+	help
+	Nothing help.

@@ -323,6 +323,8 @@ about the status of the key service:
 	U	Under construction by callback to userspace
 	N	Negative key
 
+     This file must be enabled at kernel configuration time as it allows anyone
+     to list the keys database.
 
  (*) /proc/key-users
 
@@ -807,56 +809,6 @@ The keyctl syscall functions are:
      kernel and resumes executing userspace.
 
 
- (*) Invalidate a key.
-
-	long keyctl(KEYCTL_INVALIDATE, key_serial_t key);
-
-     This function marks a key as being invalidated and then wakes up the
-     garbage collector.  The garbage collector immediately removes invalidated
-     keys from all keyrings and deletes the key when its reference count
-     reaches zero.
-
-     Keys that are marked invalidated become invisible to normal key operations
-     immediately, though they are still visible in /proc/keys until deleted
-     (they're marked with an 'i' flag).
-
-     A process must have search permission on the key for this function to be
-     successful.
-
- (*) Compute a Diffie-Hellman shared secret or public key
-
-       long keyctl(KEYCTL_DH_COMPUTE, struct keyctl_dh_params *params,
-		   char *buffer, size_t buflen,
-		   void *reserved);
-
-     The params struct contains serial numbers for three keys:
-
-	 - The prime, p, known to both parties
-	 - The local private key
-	 - The base integer, which is either a shared generator or the
-	   remote public key
-
-     The value computed is:
-
-	result = base ^ private (mod prime)
-
-     If the base is the shared generator, the result is the local
-     public key.  If the base is the remote public key, the result is
-     the shared secret.
-
-     The reserved argument must be set to NULL.
-
-     The buffer length must be at least the length of the prime, or zero.
-
-     If the buffer length is nonzero, the length of the result is
-     returned when it is successfully calculated and copied in to the
-     buffer. When the buffer length is zero, the minimum required
-     buffer length is returned.
-
-     This function will return error EOPNOTSUPP if the key type is not
-     supported, error ENOKEY if the key could not be found, or error
-     EACCES if the key is not readable by the caller.
-
 ===============
 KERNEL SERVICES
 ===============
@@ -896,14 +848,15 @@ encountered:
      calling processes has a searchable link to the key from one of its
      keyrings. There are three functions for dealing with these:
 
-	key_ref_t make_key_ref(const struct key *key, bool possession);
+	key_ref_t make_key_ref(const struct key *key,
+			       unsigned long possession);
 
 	struct key *key_ref_to_ptr(const key_ref_t key_ref);
 
-	bool is_key_possessed(const key_ref_t key_ref);
+	unsigned long is_key_possessed(const key_ref_t key_ref);
 
      The first function constructs a key reference from a key pointer and
-     possession information (which must be true or false).
+     possession information (which must be 0 or 1 and not any other value).
 
      The second function retrieves the key pointer from a reference and the
      third retrieves the possession flag.
@@ -919,11 +872,11 @@ payload contents" for more information.
 				const char *callout_info);
 
     This is used to request a key or keyring with a description that matches
-    the description specified according to the key type's match_preparse()
-    method. This permits approximate matching to occur. If callout_string is
-    not NULL, then /sbin/request-key will be invoked in an attempt to obtain
-    the key from userspace. In that case, callout_string will be passed as an
-    argument to the program.
+    the description specified according to the key type's match function. This
+    permits approximate matching to occur. If callout_string is not NULL, then
+    /sbin/request-key will be invoked in an attempt to obtain the key from
+    userspace. In that case, callout_string will be passed as an argument to
+    the program.
 
     Should the function fail error ENOKEY, EKEYEXPIRED or EKEYREVOKED will be
     returned.
@@ -991,17 +944,14 @@ payload contents" for more information.
     the argument will not be parsed.
 
 
-(*) Extra references can be made to a key by calling one of the following
-    functions:
+(*) Extra references can be made to a key by calling the following function:
 
-	struct key *__key_get(struct key *key);
 	struct key *key_get(struct key *key);
 
-    Keys so references will need to be disposed of by calling key_put() when
-    they've been finished with.  The key pointer passed in will be returned.
-
-    In the case of key_get(), if the pointer is NULL or CONFIG_KEYS is not set
-    then the key will not be dereferenced and no increment will take place.
+    These need to be disposed of by calling key_put() when they've been
+    finished with. The key pointer passed in will be returned. If the pointer
+    is NULL or CONFIG_KEYS is not set then the key will not be dereferenced and
+    no increment will take place.
 
 
 (*) A key's serial number can be obtained by calling:
@@ -1025,45 +975,6 @@ payload contents" for more information.
     The possession attribute from the keyring reference is used to control
     access through the permissions mask and is propagated to the returned key
     reference pointer if successful.
-
-
-(*) A keyring can be created by:
-
-	struct key *keyring_alloc(const char *description, uid_t uid, gid_t gid,
-				  const struct cred *cred,
-				  key_perm_t perm,
-				  int (*restrict_link)(struct key *,
-						       const struct key_type *,
-						       unsigned long,
-						       const union key_payload *),
-				  unsigned long flags,
-				  struct key *dest);
-
-    This creates a keyring with the given attributes and returns it.  If dest
-    is not NULL, the new keyring will be linked into the keyring to which it
-    points.  No permission checks are made upon the destination keyring.
-
-    Error EDQUOT can be returned if the keyring would overload the quota (pass
-    KEY_ALLOC_NOT_IN_QUOTA in flags if the keyring shouldn't be accounted
-    towards the user's quota).  Error ENOMEM can also be returned.
-
-    If restrict_link not NULL, it should point to a function that will be
-    called each time an attempt is made to link a key into the new keyring.
-    This function is called to check whether a key may be added into the keying
-    or not.  Callers of key_create_or_update() within the kernel can pass
-    KEY_ALLOC_BYPASS_RESTRICTION to suppress the check.  An example of using
-    this is to manage rings of cryptographic keys that are set up when the
-    kernel boots where userspace is also permitted to add keys - provided they
-    can be verified by a key the kernel already has.
-
-    When called, the restriction function will be passed the keyring being
-    added to, the key flags value and the type and payload of the key being
-    added.  Note that when a new key is being created, this is called between
-    payload preparsing and actual key creation.  The function should return 0
-    to allow the link or an error to reject it.
-
-    A convenience function, restrict_link_reject, exists to always return
-    -EPERM to in this case.
 
 
 (*) To check the validity of a key, this function can be called:
@@ -1104,12 +1015,12 @@ search a specific keyring, so using keyrings in this way is of limited utility.
 NOTES ON ACCESSING PAYLOAD CONTENTS
 ===================================
 
-The simplest payload is just data stored in key->payload directly.  In this
-case, there's no need to indulge in RCU or locking when accessing the payload.
+The simplest payload is just a number in key->payload.value. In this case,
+there's no need to indulge in RCU or locking when accessing the payload.
 
-More complex payload contents must be allocated and pointers to them set in the
-key->payload.data[] array.  One of the following ways must be selected to
-access the data:
+More complex payload contents must be allocated and a pointer to them set in
+key->payload.data. One of the following ways must be selected to access the
+data:
 
  (1) Unmodifiable key type.
 
@@ -1146,26 +1057,6 @@ access the data:
      use of call_rcu() and, if the payload is of variable size, the length of
      the payload. key->datalen cannot be relied upon to be consistent with the
      payload just dereferenced if the key's semaphore is not held.
-
-     Note that key->payload.data[0] has a shadow that is marked for __rcu
-     usage.  This is called key->payload.rcu_data0.  The following accessors
-     wrap the RCU calls to this element:
-
-     (a) Set or change the first payload pointer:
-
-		rcu_assign_keypointer(struct key *key, void *data);
-
-     (b) Read the first payload pointer with the key semaphore held:
-
-		[const] void *dereference_key_locked([const] struct key *key);
-
-	 Note that the return value will inherit its constness from the key
-	 parameter.  Static analysis will give an error if it things the lock
-	 isn't held.
-
-     (c) Read the first payload pointer with the RCU read lock held:
-
-		const void *dereference_key_rcu(const struct key *key);
 
 
 ===================
@@ -1218,37 +1109,34 @@ The structure has a number of fields, some of which are mandatory:
 
 	struct key_preparsed_payload {
 		char		*description;
-		union key_payload payload;
+		void		*type_data[2];
+		void		*payload;
 		const void	*data;
 		size_t		datalen;
 		size_t		quotalen;
-		time_t		expiry;
 	};
 
      Before calling the method, the caller will fill in data and datalen with
      the payload blob parameters; quotalen will be filled in with the default
-     quota size from the key type; expiry will be set to TIME_T_MAX and the
-     rest will be cleared.
+     quota size from the key type and the rest will be cleared.
 
      If a description can be proposed from the payload contents, that should be
      attached as a string to the description field.  This will be used for the
      key description if the caller of add_key() passes NULL or "".
 
-     The method can attach anything it likes to payload.  This is merely passed
-     along to the instantiate() or update() operations.  If set, the expiry
-     time will be applied to the key if it is instantiated from this data.
+     The method can attach anything it likes to type_data[] and payload.  These
+     are merely passed along to the instantiate() or update() operations.
 
-     The method should return 0 if successful or a negative error code
+     The method should return 0 if success ful or a negative error code
      otherwise.
 
-
+     
  (*) void (*free_preparse)(struct key_preparsed_payload *prep);
 
      This method is only required if the preparse() method is provided,
-     otherwise it is unused.  It cleans up anything attached to the description
-     and payload fields of the key_preparsed_payload struct as filled in by the
-     preparse() method.  It will always be called after preparse() returns
-     successfully, even if instantiate() or update() succeed.
+     otherwise it is unused.  It cleans up anything attached to the
+     description, type_data and payload fields of the key_preparsed_payload
+     struct as filled in by the preparse() method.
 
 
  (*) int (*instantiate)(struct key *key, struct key_preparsed_payload *prep);
@@ -1268,11 +1156,6 @@ The structure has a number of fields, some of which are mandatory:
      anything else from gaining access to the key.
 
      It is safe to sleep in this method.
-
-     generic_key_instantiate() is provided to simply copy the data from
-     prep->payload.data[] to key->payload.data[], with RCU-safe assignment on
-     the first element.  It will then clear prep->payload.data[] so that the
-     free_preparse method doesn't release the data.
 
 
  (*) int (*update)(struct key *key, const void *data, size_t datalen);
@@ -1300,55 +1183,16 @@ The structure has a number of fields, some of which are mandatory:
      It is safe to sleep in this method.
 
 
- (*) int (*match_preparse)(struct key_match_data *match_data);
+ (*) int (*match)(const struct key *key, const void *desc);
 
-     This method is optional.  It is called when a key search is about to be
-     performed.  It is given the following structure:
+     This method is called to match a key against a description. It should
+     return non-zero if the two match, zero if they don't.
 
-	struct key_match_data {
-		bool (*cmp)(const struct key *key,
-			    const struct key_match_data *match_data);
-		const void	*raw_data;
-		void		*preparsed;
-		unsigned	lookup_type;
-	};
+     This method should not need to lock the key in any way. The type and
+     description can be considered invariant, and the payload should not be
+     accessed (the key may not yet be instantiated).
 
-     On entry, raw_data will be pointing to the criteria to be used in matching
-     a key by the caller and should not be modified.  (*cmp)() will be pointing
-     to the default matcher function (which does an exact description match
-     against raw_data) and lookup_type will be set to indicate a direct lookup.
-
-     The following lookup_type values are available:
-
-      [*] KEYRING_SEARCH_LOOKUP_DIRECT - A direct lookup hashes the type and
-      	  description to narrow down the search to a small number of keys.
-
-      [*] KEYRING_SEARCH_LOOKUP_ITERATE - An iterative lookup walks all the
-      	  keys in the keyring until one is matched.  This must be used for any
-      	  search that's not doing a simple direct match on the key description.
-
-     The method may set cmp to point to a function of its choice that does some
-     other form of match, may set lookup_type to KEYRING_SEARCH_LOOKUP_ITERATE
-     and may attach something to the preparsed pointer for use by (*cmp)().
-     (*cmp)() should return true if a key matches and false otherwise.
-
-     If preparsed is set, it may be necessary to use the match_free() method to
-     clean it up.
-
-     The method should return 0 if successful or a negative error code
-     otherwise.
-
-     It is permitted to sleep in this method, but (*cmp)() may not sleep as
-     locks will be held over it.
-
-     If match_preparse() is not provided, keys of this type will be matched
-     exactly by their description.
-
-
- (*) void (*match_free)(struct key_match_data *match_data);
-
-     This method is optional.  If given, it called to clean up
-     match_data->preparsed after a successful call to match_preparse().
+     It is not safe to sleep in this method; the caller may hold spinlocks.
 
 
  (*) void (*revoke)(struct key *key);

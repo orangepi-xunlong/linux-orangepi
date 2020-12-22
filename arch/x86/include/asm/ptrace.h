@@ -1,12 +1,44 @@
 #ifndef _ASM_X86_PTRACE_H
 #define _ASM_X86_PTRACE_H
 
+#include <linux/compiler.h>	/* For __user */
+#include <asm/ptrace-abi.h>
+#include <asm/processor-flags.h>
+
+#ifdef __KERNEL__
 #include <asm/segment.h>
 #include <asm/page_types.h>
-#include <uapi/asm/ptrace.h>
+#endif
 
 #ifndef __ASSEMBLY__
+
 #ifdef __i386__
+/* this struct defines the way the registers are stored on the
+   stack during a system call. */
+
+#ifndef __KERNEL__
+
+struct pt_regs {
+	long ebx;
+	long ecx;
+	long edx;
+	long esi;
+	long edi;
+	long ebp;
+	long eax;
+	int  xds;
+	int  xes;
+	int  xfs;
+	int  xgs;
+	long orig_eax;
+	long eip;
+	int  xcs;
+	long eflags;
+	long esp;
+	int  xss;
+};
+
+#else /* __KERNEL__ */
 
 struct pt_regs {
 	unsigned long bx;
@@ -28,20 +60,50 @@ struct pt_regs {
 	unsigned long ss;
 };
 
+#endif /* __KERNEL__ */
+
 #else /* __i386__ */
 
+#ifndef __KERNEL__
+
 struct pt_regs {
-/*
- * C ABI says these regs are callee-preserved. They aren't saved on kernel entry
- * unless syscall needs a complete, fully filled "struct pt_regs".
- */
+	unsigned long r15;
+	unsigned long r14;
+	unsigned long r13;
+	unsigned long r12;
+	unsigned long rbp;
+	unsigned long rbx;
+/* arguments: non interrupts/non tracing syscalls only save up to here*/
+	unsigned long r11;
+	unsigned long r10;
+	unsigned long r9;
+	unsigned long r8;
+	unsigned long rax;
+	unsigned long rcx;
+	unsigned long rdx;
+	unsigned long rsi;
+	unsigned long rdi;
+	unsigned long orig_rax;
+/* end of arguments */
+/* cpu exception frame or undefined */
+	unsigned long rip;
+	unsigned long cs;
+	unsigned long eflags;
+	unsigned long rsp;
+	unsigned long ss;
+/* top of stack page */
+};
+
+#else /* __KERNEL__ */
+
+struct pt_regs {
 	unsigned long r15;
 	unsigned long r14;
 	unsigned long r13;
 	unsigned long r12;
 	unsigned long bp;
 	unsigned long bx;
-/* These regs are callee-clobbered. Always saved on kernel entry. */
+/* arguments: non interrupts/non tracing syscalls only save up to here*/
 	unsigned long r11;
 	unsigned long r10;
 	unsigned long r9;
@@ -51,12 +113,9 @@ struct pt_regs {
 	unsigned long dx;
 	unsigned long si;
 	unsigned long di;
-/*
- * On syscall entry, this is syscall#. On CPU exception, this is error code.
- * On hw interrupt, it's IRQ number:
- */
 	unsigned long orig_ax;
-/* Return frame for iretq */
+/* end of arguments */
+/* cpu exception frame or undefined */
 	unsigned long ip;
 	unsigned long cs;
 	unsigned long flags;
@@ -65,8 +124,13 @@ struct pt_regs {
 /* top of stack page */
 };
 
+#endif /* __KERNEL__ */
 #endif /* !__i386__ */
 
+
+#ifdef __KERNEL__
+
+#include <linux/init.h>
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt_types.h>
 #endif
@@ -82,6 +146,8 @@ convert_ip_to_linear(struct task_struct *child, struct pt_regs *regs);
 extern void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs,
 			 int error_code, int si_code);
 
+extern long syscall_trace_enter(struct pt_regs *);
+extern void syscall_trace_leave(struct pt_regs *);
 
 static inline unsigned long regs_return_value(struct pt_regs *regs)
 {
@@ -89,20 +155,28 @@ static inline unsigned long regs_return_value(struct pt_regs *regs)
 }
 
 /*
- * user_mode(regs) determines whether a register set came from user
- * mode.  On x86_32, this is true if V8086 mode was enabled OR if the
- * register set was from protected mode with RPL-3 CS value.  This
- * tricky test checks that with one comparison.
- *
- * On x86_64, vm86 mode is mercifully nonexistent, and we don't need
- * the extra check.
+ * user_mode_vm(regs) determines whether a register set came from user mode.
+ * This is true if V8086 mode was enabled OR if the register set was from
+ * protected mode with RPL-3 CS value.  This tricky test checks that with
+ * one comparison.  Many places in the kernel can bypass this full check
+ * if they have already ruled out V8086 mode, so user_mode(regs) can be used.
  */
 static inline int user_mode(struct pt_regs *regs)
 {
 #ifdef CONFIG_X86_32
-	return ((regs->cs & SEGMENT_RPL_MASK) | (regs->flags & X86_VM_MASK)) >= USER_RPL;
+	return (regs->cs & SEGMENT_RPL_MASK) == USER_RPL;
 #else
 	return !!(regs->cs & 3);
+#endif
+}
+
+static inline int user_mode_vm(struct pt_regs *regs)
+{
+#ifdef CONFIG_X86_32
+	return ((regs->cs & SEGMENT_RPL_MASK) | (regs->flags & X86_VM_MASK)) >=
+		USER_RPL;
+#else
+	return user_mode(regs);
 #endif
 }
 
@@ -129,9 +203,6 @@ static inline bool user_64bit_mode(struct pt_regs *regs)
 	return regs->cs == __USER_CS || regs->cs == pv_info.extra_user_64bit_cs;
 #endif
 }
-
-#define current_user_stack_pointer()	current_pt_regs()->sp
-#define compat_user_stack_pointer()	current_pt_regs()->sp
 #endif
 
 #ifdef CONFIG_X86_32
@@ -168,15 +239,6 @@ static inline unsigned long regs_get_register(struct pt_regs *regs,
 {
 	if (unlikely(offset > MAX_REG_OFFSET))
 		return 0;
-#ifdef CONFIG_X86_32
-	/*
-	 * Traps from the kernel do not save sp and ss.
-	 * Use the helper function to retrieve sp.
-	 */
-	if (offset == offsetof(struct pt_regs, sp) &&
-	    regs->cs == __KERNEL_CS)
-		return kernel_stack_pointer(regs);
-#endif
 	return *(unsigned long *)((unsigned long)regs + offset);
 }
 
@@ -236,7 +298,7 @@ static inline unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs,
  */
 #define arch_ptrace_stop_needed(code, info)				\
 ({									\
-	force_iret();							\
+	set_thread_flag(TIF_NOTIFY_RESUME);				\
 	false;								\
 })
 
@@ -246,5 +308,8 @@ extern int do_get_thread_area(struct task_struct *p, int idx,
 extern int do_set_thread_area(struct task_struct *p, int idx,
 			      struct user_desc __user *info, int can_allocate);
 
+#endif /* __KERNEL__ */
+
 #endif /* !__ASSEMBLY__ */
+
 #endif /* _ASM_X86_PTRACE_H */

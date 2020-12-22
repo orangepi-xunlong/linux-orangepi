@@ -23,12 +23,15 @@
 #include <linux/clk.h>
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
+
 #include <linux/usb/musb.h>
 
-#include "omap_device.h"
-#include "soc.h"
+#include <mach/hardware.h>
+#include <mach/irqs.h>
+#include <mach/am35xx.h>
+#include <plat/usb.h>
+#include <plat/omap_device.h>
 #include "mux.h"
-#include "usb.h"
 
 static struct musb_hdrc_config musb_config = {
 	.multipoint	= 1,
@@ -38,8 +41,13 @@ static struct musb_hdrc_config musb_config = {
 };
 
 static struct musb_hdrc_platform_data musb_plat = {
+#ifdef CONFIG_USB_MUSB_OTG
 	.mode		= MUSB_OTG,
-
+#elif defined(CONFIG_USB_MUSB_HDRC_HCD)
+	.mode		= MUSB_HOST,
+#elif defined(CONFIG_USB_GADGET_MUSB_HDRC)
+	.mode		= MUSB_PERIPHERAL,
+#endif
 	/* .clock is set dynamically */
 	.config		= &musb_config,
 
@@ -82,8 +90,16 @@ void __init usb_musb_init(struct omap_musb_board_data *musb_board_data)
 	musb_plat.mode = board_data->mode;
 	musb_plat.extvbus = board_data->extvbus;
 
-	oh_name = "usb_otg_hs";
-	name = "musb-omap2430";
+	if (cpu_is_omap3517() || cpu_is_omap3505()) {
+		oh_name = "am35x_otg_hs";
+		name = "musb-am35x";
+	} else if (cpu_is_ti81xx()) {
+		oh_name = "usb_otg_hs";
+		name = "musb-ti81xx";
+	} else {
+		oh_name = "usb_otg_hs";
+		name = "musb-omap2430";
+	}
 
         oh = omap_hwmod_lookup(oh_name);
         if (WARN(!oh, "%s: could not find omap_hwmod for %s\n",
@@ -91,7 +107,7 @@ void __init usb_musb_init(struct omap_musb_board_data *musb_board_data)
                 return;
 
 	pdev = omap_device_build(name, bus_id, oh, &musb_plat,
-				 sizeof(musb_plat));
+			       sizeof(musb_plat), NULL, 0, false);
 	if (IS_ERR(pdev)) {
 		pr_err("Could not build omap_device for %s %s\n",
 						name, oh_name);
@@ -103,4 +119,7 @@ void __init usb_musb_init(struct omap_musb_board_data *musb_board_data)
 	dev->dma_mask = &musb_dmamask;
 	dev->coherent_dma_mask = musb_dmamask;
 	put_device(dev);
+
+	if (cpu_is_omap44xx())
+		omap4430_phy_init(dev);
 }

@@ -29,6 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/gameport.h>
 #include <linux/input.h>
 #include <linux/jiffies.h>
@@ -412,4 +413,15 @@ static struct gameport_driver a3d_drv = {
 	.disconnect	= a3d_disconnect,
 };
 
-module_gameport_driver(a3d_drv);
+static int __init a3d_init(void)
+{
+	return gameport_register_driver(&a3d_drv);
+}
+
+static void __exit a3d_exit(void)
+{
+	gameport_unregister_driver(&a3d_drv);
+}
+
+module_init(a3d_init);
+module_exit(a3d_exit);

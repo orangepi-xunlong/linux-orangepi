@@ -4,7 +4,7 @@
  * Fibre Channel related definitions and inline functions for the zfcp
  * device driver
  *
- * Copyright IBM Corp. 2009, 2017
+ * Copyright IBM Corporation 2009
  */
 
 #ifndef ZFCP_FC_H
@@ -212,6 +212,8 @@ static inline
 void zfcp_fc_scsi_to_fcp(struct fcp_cmnd *fcp, struct scsi_cmnd *scsi,
 			 u8 tm_flags)
 {
+	char tag[2];
+
 	int_to_scsilun(scsi->device->lun, (struct scsi_lun *) &fcp->fc_lun);
 
 	if (unlikely(tm_flags)) {
@@ -219,7 +221,17 @@ void zfcp_fc_scsi_to_fcp(struct fcp_cmnd *fcp, struct scsi_cmnd *scsi,
 		return;
 	}
 
-	fcp->fc_pri_ta = FCP_PTA_SIMPLE;
+	if (scsi_populate_tag_msg(scsi, tag)) {
+		switch (tag[0]) {
+		case MSG_ORDERED_TAG:
+			fcp->fc_pri_ta |= FCP_PTA_ORDERED;
+			break;
+		case MSG_SIMPLE_TAG:
+			fcp->fc_pri_ta |= FCP_PTA_SIMPLE;
+			break;
+		};
+	} else
+		fcp->fc_pri_ta = FCP_PTA_SIMPLE;
 
 	if (scsi->sc_data_direction == DMA_FROM_DEVICE)
 		fcp->fc_flags |= FCP_CFL_RDDATA;
@@ -278,10 +290,6 @@ void zfcp_fc_eval_fcp_rsp(struct fcp_resp_with_ext *fcp_rsp,
 		if (scsi_bufflen(scsi) - resid < scsi->underflow &&
 		     !(rsp_flags & FCP_SNS_LEN_VAL) &&
 		     fcp_rsp->resp.fr_status == SAM_STAT_GOOD)
-			set_host_byte(scsi, DID_ERROR);
-	} else if (unlikely(rsp_flags & FCP_RESID_OVER)) {
-		/* FCP_DL was not sufficient for SCSI data length */
-		if (fcp_rsp->resp.fr_status == SAM_STAT_GOOD)
 			set_host_byte(scsi, DID_ERROR);
 	}
 }

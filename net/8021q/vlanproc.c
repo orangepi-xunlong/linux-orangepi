@@ -93,7 +93,7 @@ static const struct file_operations vlan_fops = {
 
 static int vlandev_seq_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, vlandev_seq_show, PDE_DATA(inode));
+	return single_open(file, vlandev_seq_show, PDE(inode)->data);
 }
 
 static const struct file_operations vlandev_fops = {
@@ -105,7 +105,7 @@ static const struct file_operations vlandev_fops = {
 };
 
 /*
- * Proc filesystem directory entries.
+ * Proc filesystem derectory entries.
  */
 
 /* Strings */
@@ -131,7 +131,7 @@ void vlan_proc_cleanup(struct net *net)
 		remove_proc_entry(name_conf, vn->proc_vlan_dir);
 
 	if (vn->proc_vlan_dir)
-		remove_proc_entry(name_root, net->proc_net);
+		proc_net_remove(net, name_root);
 
 	/* Dynamically added entries should be cleaned up as their vlan_device
 	 * is removed, so we should not have to take care of it here...
@@ -171,8 +171,6 @@ int vlan_proc_add_dev(struct net_device *vlandev)
 	struct vlan_dev_priv *vlan = vlan_dev_priv(vlandev);
 	struct vlan_net *vn = net_generic(dev_net(vlandev), vlan_net_id);
 
-	if (!strcmp(vlandev->name, name_conf))
-		return -EINVAL;
 	vlan->dent =
 		proc_create_data(vlandev->name, S_IFREG|S_IRUSR|S_IWUSR,
 				 vn->proc_vlan_dir, &vlandev_fops, vlandev);
@@ -184,11 +182,17 @@ int vlan_proc_add_dev(struct net_device *vlandev)
 /*
  *	Delete directory entry for VLAN device.
  */
-void vlan_proc_rem_dev(struct net_device *vlandev)
+int vlan_proc_rem_dev(struct net_device *vlandev)
 {
+	struct vlan_net *vn = net_generic(dev_net(vlandev), vlan_net_id);
+
 	/** NOTE:  This will consume the memory pointed to by dent, it seems. */
-	proc_remove(vlan_dev_priv(vlandev)->dent);
-	vlan_dev_priv(vlandev)->dent = NULL;
+	if (vlan_dev_priv(vlandev)->dent) {
+		remove_proc_entry(vlan_dev_priv(vlandev)->dent->name,
+				  vn->proc_vlan_dir);
+		vlan_dev_priv(vlandev)->dent = NULL;
+	}
+	return 0;
 }
 
 /****** Proc filesystem entry points ****************************************/

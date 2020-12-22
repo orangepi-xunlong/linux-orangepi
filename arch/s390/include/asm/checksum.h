@@ -1,15 +1,17 @@
+#ifndef _S390_CHECKSUM_H
+#define _S390_CHECKSUM_H
+
 /*
+ *  include/asm-s390/checksum.h
  *    S390 fast network checksum routines
+ *    see also arch/S390/lib/checksum.c
  *
  *  S390 version
- *    Copyright IBM Corp. 1999
+ *    Copyright (C) 1999 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Ulrich Hild        (first version)
  *               Martin Schwidefsky (heavily optimized CKSM version)
  *               D.J. Barrow        (third attempt) 
  */
-
-#ifndef _S390_CHECKSUM_H
-#define _S390_CHECKSUM_H
 
 #include <asm/uaccess.h>
 
@@ -44,15 +46,22 @@ csum_partial(const void *buff, int len, __wsum sum)
  * here even more important to align src and dst on a 32-bit (or even
  * better 64-bit) boundary
  *
- * Copy from userspace and compute checksum.
+ * Copy from userspace and compute checksum.  If we catch an exception
+ * then zero the rest of the buffer.
  */
 static inline __wsum
 csum_partial_copy_from_user(const void __user *src, void *dst,
                                           int len, __wsum sum,
                                           int *err_ptr)
 {
-	if (unlikely(copy_from_user(dst, src, len)))
+	int missing;
+
+	missing = copy_from_user(dst, src, len);
+	if (missing) {
+		memset(dst + len - missing, 0, missing);
 		*err_ptr = -EFAULT;
+	}
+		
 	return csum_partial(dst, len, sum);
 }
 
@@ -91,7 +100,8 @@ static inline __sum16 ip_fast_csum(const void *iph, unsigned int ihl)
  * returns a 32-bit checksum
  */
 static inline __wsum
-csum_tcpudp_nofold(__be32 saddr, __be32 daddr, __u32 len, __u8 proto,
+csum_tcpudp_nofold(__be32 saddr, __be32 daddr,
+                   unsigned short len, unsigned short proto,
                    __wsum sum)
 {
 	__u32 csum = (__force __u32)sum;
@@ -117,7 +127,8 @@ csum_tcpudp_nofold(__be32 saddr, __be32 daddr, __u32 len, __u8 proto,
  */
 
 static inline __sum16
-csum_tcpudp_magic(__be32 saddr, __be32 daddr, __u32 len, __u8 proto,
+csum_tcpudp_magic(__be32 saddr, __be32 daddr,
+                  unsigned short len, unsigned short proto,
                   __wsum sum)
 {
 	return csum_fold(csum_tcpudp_nofold(saddr,daddr,len,proto,sum));

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
  *
  * This program is free software; you can redistribute it and/or modify
@@ -39,7 +39,7 @@
  *   DJH 10/14/09 Version 1.3 added special loop for aligned case, was
  *                            overreading bloated codesize back up to 892
  *   DJH  4/20/10 Version 1.4 fixed Ldword_loop_epilog loop to prevent loads
- *                            occurring if only 1 left outstanding, fixes bug
+ *                            occuring if only 1 left outstanding, fixes bug
  *                            # 3888, corrected for all alignments. Peeled off
  *                            1 32byte chunk from kernel loop and extended 8byte
  *                            loop at end to solve all combinations and prevent

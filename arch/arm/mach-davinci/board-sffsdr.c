@@ -26,7 +26,7 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
-#include <linux/platform_data/at24.h>
+#include <linux/i2c/at24.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
@@ -36,10 +36,10 @@
 #include <asm/mach/flash.h>
 
 #include <mach/common.h>
-#include <linux/platform_data/i2c-davinci.h>
+#include <mach/i2c.h>
 #include <mach/serial.h>
 #include <mach/mux.h>
-#include <linux/platform_data/usb-davinci.h>
+#include <mach/usb.h>
 
 #include "davinci.h"
 
@@ -125,6 +125,10 @@ static struct platform_device *davinci_sffsdr_devices[] __initdata = {
 	&davinci_sffsdr_nandflash_device,
 };
 
+static struct davinci_uart_config uart_config __initdata = {
+	.enabled_uarts = (1 << 0),
+};
+
 static void __init davinci_sffsdr_map_io(void)
 {
 	dm644x_init();
@@ -137,7 +141,7 @@ static __init void davinci_sffsdr_init(void)
 	platform_add_devices(davinci_sffsdr_devices,
 			     ARRAY_SIZE(davinci_sffsdr_devices));
 	sffsdr_init_i2c();
-	davinci_serial_init(dm644x_serial_device);
+	davinci_serial_init(&uart_config);
 	soc_info->emac_pdata->phy_id = SFFSDR_PHY_ID;
 	davinci_setup_usb(0, 0); /* We support only peripheral mode. */
 
@@ -147,12 +151,12 @@ static __init void davinci_sffsdr_init(void)
 }
 
 MACHINE_START(SFFSDR, "Lyrtech SFFSDR")
+	/* Maintainer: Hugo Villeneuve hugo.villeneuve@lyrtech.com */
 	.atag_offset  = 0x100,
 	.map_io	      = davinci_sffsdr_map_io,
 	.init_irq     = davinci_irq_init,
-	.init_time	= davinci_timer_init,
+	.timer	      = &davinci_timer,
 	.init_machine = davinci_sffsdr_init,
-	.init_late	= davinci_init_late,
 	.dma_zone_size	= SZ_128M,
 	.restart	= davinci_restart,
 MACHINE_END

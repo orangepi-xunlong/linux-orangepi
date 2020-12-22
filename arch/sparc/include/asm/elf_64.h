@@ -7,7 +7,7 @@
 
 #include <asm/ptrace.h>
 #include <asm/processor.h>
-#include <asm/extable_64.h>
+#include <asm/uaccess.h>
 #include <asm/spitfire.h>
 
 /*
@@ -86,16 +86,6 @@
 #define AV_SPARC_IMA		0x00400000 /* integer multiply-add */
 #define AV_SPARC_ASI_CACHE_SPARING \
 				0x00800000 /* cache sparing ASIs available */
-#define AV_SPARC_PAUSE		0x01000000 /* PAUSE available */
-#define AV_SPARC_CBCOND		0x02000000 /* CBCOND insns available */
-
-/* Solaris decided to enumerate every single crypto instruction type
- * in the AT_HWCAP bits.  This is wasteful, since if crypto is present,
- * you still need to look in the CFR register to see if the opcode is
- * really available.  So we simply advertise only "crypto" support.
- */
-#define HWCAP_SPARC_CRYPTO	0x04000000 /* CRYPTO insns available */
-#define HWCAP_SPARC_ADI		0x08000000 /* ADI available */
 
 #define CORE_DUMP_USE_REGSET
 

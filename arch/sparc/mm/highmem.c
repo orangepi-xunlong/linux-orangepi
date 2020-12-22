@@ -22,38 +22,20 @@
  * shared by CPUs, and so precious, and establishing them requires IPI.
  * Atomic kmaps are lightweight and we may have NCPUS more of them.
  */
+#include <linux/mm.h>
 #include <linux/highmem.h>
 #include <linux/export.h>
-#include <linux/mm.h>
-
+#include <asm/pgalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
-#include <asm/pgalloc.h>
-#include <asm/vaddrs.h>
-
-pgprot_t kmap_prot;
-
-static pte_t *kmap_pte;
-
-void __init kmap_init(void)
-{
-	unsigned long address;
-	pmd_t *dir;
-
-	address = __fix_to_virt(FIX_KMAP_BEGIN);
-	dir = pmd_offset(pgd_offset_k(address), address);
-
-        /* cache the first kmap pte */
-        kmap_pte = pte_offset_kernel(dir, address);
-        kmap_prot = __pgprot(SRMMU_ET_PTE | SRMMU_PRIV | SRMMU_CACHE);
-}
+#include <asm/fixmap.h>
 
 void *kmap_atomic(struct page *page)
 {
 	unsigned long vaddr;
 	long idx, type;
 
-	preempt_disable();
+	/* even !CONFIG_PREEMPT needs this, for in_atomic in do_page_fault */
 	pagefault_disable();
 	if (!PageHighMem(page))
 		return page_address(page);
@@ -91,7 +73,6 @@ void __kunmap_atomic(void *kvaddr)
 
 	if (vaddr < FIXADDR_START) { // FIXME
 		pagefault_enable();
-		preempt_enable();
 		return;
 	}
 
@@ -127,6 +108,23 @@ void __kunmap_atomic(void *kvaddr)
 
 	kmap_atomic_idx_pop();
 	pagefault_enable();
-	preempt_enable();
 }
 EXPORT_SYMBOL(__kunmap_atomic);
+
+/* We may be fed a pagetable here by ptep_to_xxx and others. */
+struct page *kmap_atomic_to_page(void *ptr)
+{
+	unsigned long idx, vaddr = (unsigned long)ptr;
+	pte_t *pte;
+
+	if (vaddr < SRMMU_NOCACHE_VADDR)
+		return virt_to_page(ptr);
+	if (vaddr < PKMAP_BASE)
+		return pfn_to_page(__nocache_pa(vaddr) >> PAGE_SHIFT);
+	BUG_ON(vaddr < FIXADDR_START);
+	BUG_ON(vaddr > FIXADDR_TOP);
+
+	idx = virt_to_fix(vaddr);
+	pte = kmap_pte - (idx - FIX_KMAP_BEGIN);
+	return pte_page(*pte);
+}

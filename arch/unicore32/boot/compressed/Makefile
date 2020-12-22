@@ -17,7 +17,7 @@ OBJS		:= misc.o
 
 # font.c and font.o
 CFLAGS_font.o	:= -Dstatic=
-$(obj)/font.c: $(srctree)/lib/fonts/font_8x8.c
+$(obj)/font.c: $(srctree)/drivers/video/console/font_8x8.c
 	$(call cmd,shipped)
 
 # piggy.S and piggy.o
@@ -54,6 +54,7 @@ LDFLAGS_vmlinux += -T
 $(obj)/vmlinux: $(obj)/vmlinux.lds $(obj)/head.o $(obj)/piggy.o \
 		$(obj)/misc.o FORCE
 	$(call if_changed,ld)
+	@:
 
 # We now have a PIC decompressor implementation.  Decompressors running
 # from RAM should not define ZTEXTADDR.  Decompressors running directly

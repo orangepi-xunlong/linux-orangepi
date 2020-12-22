@@ -9,8 +9,8 @@
 
 #include <crypto/internal/hash.h>
 #include <linux/module.h>
-#include <linux/cpufeature.h>
-#include <asm/cpacf.h>
+
+#include "crypt_s390.h"
 
 #define GHASH_BLOCK_SIZE	16
 #define GHASH_DIGEST_SIZE	16
@@ -58,6 +58,7 @@ static int ghash_update(struct shash_desc *desc,
 	struct ghash_desc_ctx *dctx = shash_desc_ctx(desc);
 	unsigned int n;
 	u8 *buf = dctx->buffer;
+	int ret;
 
 	if (dctx->bytes) {
 		u8 *pos = buf + (GHASH_BLOCK_SIZE - dctx->bytes);
@@ -70,14 +71,16 @@ static int ghash_update(struct shash_desc *desc,
 		src += n;
 
 		if (!dctx->bytes) {
-			cpacf_kimd(CPACF_KIMD_GHASH, dctx, buf,
-				   GHASH_BLOCK_SIZE);
+			ret = crypt_s390_kimd(KIMD_GHASH, dctx, buf,
+					      GHASH_BLOCK_SIZE);
+			BUG_ON(ret != GHASH_BLOCK_SIZE);
 		}
 	}
 
 	n = srclen & ~(GHASH_BLOCK_SIZE - 1);
 	if (n) {
-		cpacf_kimd(CPACF_KIMD_GHASH, dctx, src, n);
+		ret = crypt_s390_kimd(KIMD_GHASH, dctx, src, n);
+		BUG_ON(ret != n);
 		src += n;
 		srclen -= n;
 	}
@@ -93,27 +96,28 @@ static int ghash_update(struct shash_desc *desc,
 static int ghash_flush(struct ghash_desc_ctx *dctx)
 {
 	u8 *buf = dctx->buffer;
+	int ret;
 
 	if (dctx->bytes) {
 		u8 *pos = buf + (GHASH_BLOCK_SIZE - dctx->bytes);
 
 		memset(pos, 0, dctx->bytes);
-		cpacf_kimd(CPACF_KIMD_GHASH, dctx, buf, GHASH_BLOCK_SIZE);
+
+		ret = crypt_s390_kimd(KIMD_GHASH, dctx, buf, GHASH_BLOCK_SIZE);
+		BUG_ON(ret != GHASH_BLOCK_SIZE);
+
 		dctx->bytes = 0;
 	}
-
-	return 0;
 }
 
 static int ghash_final(struct shash_desc *desc, u8 *dst)
 {
 	struct ghash_desc_ctx *dctx = shash_desc_ctx(desc);
-	int ret;
 
-	ret = ghash_flush(dctx);
-	if (!ret)
-		memcpy(dst, dctx->icv, GHASH_BLOCK_SIZE);
-	return ret;
+	ghash_flush(dctx);
+	memcpy(dst, dctx->icv, GHASH_BLOCK_SIZE);
+
+	return 0;
 }
 
 static struct shash_alg ghash_alg = {
@@ -126,17 +130,19 @@ static struct shash_alg ghash_alg = {
 	.base		= {
 		.cra_name		= "ghash",
 		.cra_driver_name	= "ghash-s390",
-		.cra_priority		= 300,
+		.cra_priority		= CRYPT_S390_PRIORITY,
 		.cra_flags		= CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize		= GHASH_BLOCK_SIZE,
 		.cra_ctxsize		= sizeof(struct ghash_ctx),
 		.cra_module		= THIS_MODULE,
+		.cra_list		= LIST_HEAD_INIT(ghash_alg.base.cra_list),
 	},
 };
 
 static int __init ghash_mod_init(void)
 {
-	if (!cpacf_query_func(CPACF_KIMD, CPACF_KIMD_GHASH))
+	if (!crypt_s390_func_available(KIMD_GHASH,
+				       CRYPT_S390_MSA | CRYPT_S390_MSA4))
 		return -EOPNOTSUPP;
 
 	return crypto_register_shash(&ghash_alg);
@@ -147,10 +153,10 @@ static void __exit ghash_mod_exit(void)
 	crypto_unregister_shash(&ghash_alg);
 }
 
-module_cpu_feature_match(MSA, ghash_mod_init);
+module_init(ghash_mod_init);
 module_exit(ghash_mod_exit);
 
-MODULE_ALIAS_CRYPTO("ghash");
+MODULE_ALIAS("ghash");
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("GHASH Message Digest Algorithm, s390 implementation");

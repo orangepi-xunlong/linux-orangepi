@@ -26,8 +26,11 @@
 #include <sound/core.h>
 #include <sound/minors.h>
 #include <sound/info.h>
+#include <sound/version.h>
 #include <linux/utsname.h>
 #include <linux/mutex.h>
+
+#if defined(CONFIG_SND_OSSEMUL) && defined(CONFIG_PROC_FS)
 
 /*
  *  OSS compatible part
@@ -35,6 +38,7 @@
 
 static DEFINE_MUTEX(strings);
 static char *snd_sndstat_strings[SNDRV_CARDS][SNDRV_OSS_INFO_DEV_COUNT];
+static struct snd_info_entry *snd_sndstat_proc_entry;
 
 int snd_oss_info_register(int dev, int num, char *string)
 {
@@ -90,7 +94,7 @@ static int snd_sndstat_show_strings(struct snd_info_buffer *buf, char *id, int d
 static void snd_sndstat_proc_read(struct snd_info_entry *entry,
 				  struct snd_info_buffer *buffer)
 {
-	snd_iprintf(buffer, "Sound Driver:3.8.1a-980706 (ALSA emulation code)\n");
+	snd_iprintf(buffer, "Sound Driver:3.8.1a-980706 (ALSA v" CONFIG_SND_VERSION " emulation code)\n");
 	snd_iprintf(buffer, "Kernel: %s %s %s %s %s\n",
 		    init_utsname()->sysname,
 		    init_utsname()->nodename,
@@ -109,15 +113,27 @@ static void snd_sndstat_proc_read(struct snd_info_entry *entry,
 	snd_sndstat_show_strings(buffer, "Mixers", SNDRV_OSS_INFO_DEV_MIXERS);
 }
 
-int __init snd_info_minor_register(void)
+int snd_info_minor_register(void)
 {
 	struct snd_info_entry *entry;
 
 	memset(snd_sndstat_strings, 0, sizeof(snd_sndstat_strings));
-	entry = snd_info_create_module_entry(THIS_MODULE, "sndstat",
-					     snd_oss_root);
-	if (!entry)
-		return -ENOMEM;
-	entry->c.text.read = snd_sndstat_proc_read;
-	return snd_info_register(entry); /* freed in error path */
+	if ((entry = snd_info_create_module_entry(THIS_MODULE, "sndstat", snd_oss_root)) != NULL) {
+		entry->c.text.read = snd_sndstat_proc_read;
+		if (snd_info_register(entry) < 0) {
+			snd_info_free_entry(entry);
+			entry = NULL;
+		}
+	}
+	snd_sndstat_proc_entry = entry;
+	return 0;
 }
+
+int snd_info_minor_unregister(void)
+{
+	snd_info_free_entry(snd_sndstat_proc_entry);
+	snd_sndstat_proc_entry = NULL;
+	return 0;
+}
+
+#endif /* CONFIG_SND_OSSEMUL */

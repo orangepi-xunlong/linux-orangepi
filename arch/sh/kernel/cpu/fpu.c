@@ -44,7 +44,7 @@ void __fpu_state_restore(void)
 	restore_fpu(tsk);
 
 	task_thread_info(tsk)->status |= TS_USEDFPU;
-	tsk->thread.fpu_counter++;
+	tsk->fpu_counter++;
 }
 
 void fpu_state_restore(struct pt_regs *regs)

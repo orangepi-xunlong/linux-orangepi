@@ -27,7 +27,6 @@
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
 #include <linux/mod_devicetable.h>
-#include <linux/syscore_ops.h>
 #include <asm/prom.h>
 #include <asm/fsl_lbc.h>
 
@@ -75,8 +74,8 @@ int fsl_lbc_find(phys_addr_t addr_base)
 
 	lbc = fsl_lbc_ctrl_dev->regs;
 	for (i = 0; i < ARRAY_SIZE(lbc->bank); i++) {
-		u32 br = in_be32(&lbc->bank[i].br);
-		u32 or = in_be32(&lbc->bank[i].or);
+		__be32 br = in_be32(&lbc->bank[i].br);
+		__be32 or = in_be32(&lbc->bank[i].or);
 
 		if (br & BR_V && (br & or & BR_BA) == fsl_lbc_addr(addr_base))
 			return i;
@@ -98,7 +97,7 @@ EXPORT_SYMBOL(fsl_lbc_find);
 int fsl_upm_find(phys_addr_t addr_base, struct fsl_upm *upm)
 {
 	int bank;
-	u32 br;
+	__be32 br;
 	struct fsl_lbc_regs __iomem *lbc;
 
 	bank = fsl_lbc_find(addr_base);
@@ -186,8 +185,8 @@ int fsl_upm_run_pattern(struct fsl_upm *upm, void __iomem *io_base, u32 mar)
 }
 EXPORT_SYMBOL(fsl_upm_run_pattern);
 
-static int fsl_lbc_ctrl_init(struct fsl_lbc_ctrl *ctrl,
-			     struct device_node *node)
+static int __devinit fsl_lbc_ctrl_init(struct fsl_lbc_ctrl *ctrl,
+				       struct device_node *node)
 {
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 
@@ -215,14 +214,10 @@ static irqreturn_t fsl_lbc_ctrl_irq(int irqno, void *data)
 	struct fsl_lbc_ctrl *ctrl = data;
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 	u32 status;
-	unsigned long flags;
 
-	spin_lock_irqsave(&fsl_lbc_lock, flags);
 	status = in_be32(&lbc->ltesr);
-	if (!status) {
-		spin_unlock_irqrestore(&fsl_lbc_lock, flags);
+	if (!status)
 		return IRQ_NONE;
-	}
 
 	out_be32(&lbc->ltesr, LTESR_CLEAR);
 	out_be32(&lbc->lteatr, 0);
@@ -244,6 +239,8 @@ static irqreturn_t fsl_lbc_ctrl_irq(int irqno, void *data)
 	if (status & LTESR_CS)
 		dev_err(ctrl->dev, "Chip select error: "
 			"LTESR 0x%08X\n", status);
+	if (status & LTESR_UPM)
+		;
 	if (status & LTESR_FCT) {
 		dev_err(ctrl->dev, "FCM command time-out: "
 			"LTESR 0x%08X\n", status);
@@ -263,7 +260,6 @@ static irqreturn_t fsl_lbc_ctrl_irq(int irqno, void *data)
 	if (status & ~LTESR_MASK)
 		dev_err(ctrl->dev, "Unknown error: "
 			"LTESR 0x%08X\n", status);
-	spin_unlock_irqrestore(&fsl_lbc_lock, flags);
 	return IRQ_HANDLED;
 }
 
@@ -277,7 +273,7 @@ static irqreturn_t fsl_lbc_ctrl_irq(int irqno, void *data)
  * in the chip probe function.
 */
 
-static int fsl_lbc_ctrl_probe(struct platform_device *dev)
+static int __devinit fsl_lbc_ctrl_probe(struct platform_device *dev)
 {
 	int ret;
 
@@ -302,8 +298,8 @@ static int fsl_lbc_ctrl_probe(struct platform_device *dev)
 		goto err;
 	}
 
-	fsl_lbc_ctrl_dev->irq[0] = irq_of_parse_and_map(dev->dev.of_node, 0);
-	if (!fsl_lbc_ctrl_dev->irq[0]) {
+	fsl_lbc_ctrl_dev->irq = irq_of_parse_and_map(dev->dev.of_node, 0);
+	if (fsl_lbc_ctrl_dev->irq == NO_IRQ) {
 		dev_err(&dev->dev, "failed to get irq resource\n");
 		ret = -ENODEV;
 		goto err;
@@ -315,25 +311,13 @@ static int fsl_lbc_ctrl_probe(struct platform_device *dev)
 	if (ret < 0)
 		goto err;
 
-	ret = request_irq(fsl_lbc_ctrl_dev->irq[0], fsl_lbc_ctrl_irq, 0,
+	ret = request_irq(fsl_lbc_ctrl_dev->irq, fsl_lbc_ctrl_irq, 0,
 				"fsl-lbc", fsl_lbc_ctrl_dev);
 	if (ret != 0) {
 		dev_err(&dev->dev, "failed to install irq (%d)\n",
-			fsl_lbc_ctrl_dev->irq[0]);
-		ret = fsl_lbc_ctrl_dev->irq[0];
+			fsl_lbc_ctrl_dev->irq);
+		ret = fsl_lbc_ctrl_dev->irq;
 		goto err;
-	}
-
-	fsl_lbc_ctrl_dev->irq[1] = irq_of_parse_and_map(dev->dev.of_node, 1);
-	if (fsl_lbc_ctrl_dev->irq[1]) {
-		ret = request_irq(fsl_lbc_ctrl_dev->irq[1], fsl_lbc_ctrl_irq,
-				IRQF_SHARED, "fsl-lbc-err", fsl_lbc_ctrl_dev);
-		if (ret) {
-			dev_err(&dev->dev, "failed to install irq (%d)\n",
-					fsl_lbc_ctrl_dev->irq[1]);
-			ret = fsl_lbc_ctrl_dev->irq[1];
-			goto err1;
-		}
 	}
 
 	/* Enable interrupts for any detected events */
@@ -341,8 +325,6 @@ static int fsl_lbc_ctrl_probe(struct platform_device *dev)
 
 	return 0;
 
-err1:
-	free_irq(fsl_lbc_ctrl_dev->irq[0], fsl_lbc_ctrl_dev);
 err:
 	iounmap(fsl_lbc_ctrl_dev->regs);
 	kfree(fsl_lbc_ctrl_dev);
@@ -353,42 +335,24 @@ err:
 #ifdef CONFIG_SUSPEND
 
 /* save lbc registers */
-static int fsl_lbc_syscore_suspend(void)
+static int fsl_lbc_suspend(struct platform_device *pdev, pm_message_t state)
 {
-	struct fsl_lbc_ctrl *ctrl;
-	struct fsl_lbc_regs __iomem *lbc;
-
-	ctrl = fsl_lbc_ctrl_dev;
-	if (!ctrl)
-		goto out;
-
-	lbc = ctrl->regs;
-	if (!lbc)
-		goto out;
+	struct fsl_lbc_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
+	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 
 	ctrl->saved_regs = kmalloc(sizeof(struct fsl_lbc_regs), GFP_KERNEL);
 	if (!ctrl->saved_regs)
 		return -ENOMEM;
 
 	_memcpy_fromio(ctrl->saved_regs, lbc, sizeof(struct fsl_lbc_regs));
-
-out:
 	return 0;
 }
 
 /* restore lbc registers */
-static void fsl_lbc_syscore_resume(void)
+static int fsl_lbc_resume(struct platform_device *pdev)
 {
-	struct fsl_lbc_ctrl *ctrl;
-	struct fsl_lbc_regs __iomem *lbc;
-
-	ctrl = fsl_lbc_ctrl_dev;
-	if (!ctrl)
-		goto out;
-
-	lbc = ctrl->regs;
-	if (!lbc)
-		goto out;
+	struct fsl_lbc_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
+	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 
 	if (ctrl->saved_regs) {
 		_memcpy_toio(lbc, ctrl->saved_regs,
@@ -396,9 +360,7 @@ static void fsl_lbc_syscore_resume(void)
 		kfree(ctrl->saved_regs);
 		ctrl->saved_regs = NULL;
 	}
-
-out:
-	return;
+	return 0;
 }
 #endif /* CONFIG_SUSPEND */
 
@@ -410,26 +372,20 @@ static const struct of_device_id fsl_lbc_match[] = {
 	{},
 };
 
-#ifdef CONFIG_SUSPEND
-static struct syscore_ops lbc_syscore_pm_ops = {
-	.suspend = fsl_lbc_syscore_suspend,
-	.resume = fsl_lbc_syscore_resume,
-};
-#endif
-
 static struct platform_driver fsl_lbc_ctrl_driver = {
 	.driver = {
 		.name = "fsl-lbc",
 		.of_match_table = fsl_lbc_match,
 	},
 	.probe = fsl_lbc_ctrl_probe,
+#ifdef CONFIG_SUSPEND
+	.suspend     = fsl_lbc_suspend,
+	.resume      = fsl_lbc_resume,
+#endif
 };
 
 static int __init fsl_lbc_init(void)
 {
-#ifdef CONFIG_SUSPEND
-	register_syscore_ops(&lbc_syscore_pm_ops);
-#endif
 	return platform_driver_register(&fsl_lbc_ctrl_driver);
 }
-subsys_initcall(fsl_lbc_init);
+module_init(fsl_lbc_init);

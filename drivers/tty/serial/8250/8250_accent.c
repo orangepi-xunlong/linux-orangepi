@@ -10,11 +10,18 @@
 #include <linux/init.h>
 #include <linux/serial_8250.h>
 
-#include "8250.h"
+#define PORT(_base,_irq)				\
+	{						\
+		.iobase		= _base,		\
+		.irq		= _irq,			\
+		.uartclk	= 1843200,		\
+		.iotype		= UPIO_PORT,		\
+		.flags		= UPF_BOOT_AUTOCONF,	\
+	}
 
 static struct plat_serial8250_port accent_data[] = {
-	SERIAL8250_PORT(0x330, 4),
-	SERIAL8250_PORT(0x338, 4),
+	PORT(0x330, 4),
+	PORT(0x338, 4),
 	{ },
 };
 

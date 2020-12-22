@@ -12,6 +12,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
  *
  * File: firmware.h
  *
@@ -26,10 +30,30 @@
 #ifndef __FIRMWARE_H__
 #define __FIRMWARE_H__
 
+#include "ttype.h"
 #include "device.h"
 
-int vnt_download_firmware(struct vnt_private *);
-int vnt_firmware_branch_to_sram(struct vnt_private *);
-int vnt_check_firmware_version(struct vnt_private *);
+/*---------------------  Export Definitions -------------------------*/
+
+/*---------------------  Export Classes  ----------------------------*/
+
+/*---------------------  Export Variables  --------------------------*/
+
+/*---------------------  Export Functions  --------------------------*/
+
+BOOL
+FIRMWAREbDownload(
+     PSDevice pDevice
+    );
+
+BOOL
+FIRMWAREbBrach2Sram(
+     PSDevice pDevice
+    );
+
+BOOL
+FIRMWAREbCheckVersion(
+     PSDevice pDevice
+    );
 
 #endif /* __FIRMWARE_H__ */

@@ -1,0 +1,39 @@
+config SUNXI_GETH
+	tristate "Sunxi platform Gigabit Ethernet driver"
+	depends on HAS_IOMEM && NET_VENDOR_SUNXI
+	select NET_CORE
+	select PHYLIB
+	select CRC32
+	---help---
+	  This is the driver for the Sunxi Gigabit Ethernet.
+
+if SUNXI_GETH
+
+config GETH_SCRIPT_SYS
+	bool "Use sunxi platform script"
+	depends on SUNXI_GETH
+	default y
+	---help---
+	 The gabit ethernet gpio request and control by the script
+	 of sunxi platform. Select it, by script. If not, ioremap
+	 by drivers itself.
+
+config GETH_CLK_SYS
+	bool "Clock use system interface"
+	depends on SUNXI_GETH
+	default y
+	---help---
+	 It select the clock controler is system or the driver itself.
+	 If you want to use the system interface, select it. If not, the
+	 driver will control the clock by ioremap.
+
+config GETH_PHY_POWER
+	bool "External PHY power control"
+	depends on SUNXI_GETH && REGULATOR
+	default y
+	---help---
+	 If external PHY power is exist, and it want to be controled,
+	 select it.  If not, it mean the power of PHY already on.
+
+endif
+

@@ -22,8 +22,8 @@
 #include <linux/raid/pq.h>
 
 /* Recover two failed data blocks. */
-static void raid6_2data_recov_intx1(int disks, size_t bytes, int faila,
-		int failb, void **ptrs)
+void raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
+		       void **ptrs)
 {
 	u8 *p, *q, *dp, *dq;
 	u8 px, qx, db;
@@ -64,10 +64,10 @@ static void raid6_2data_recov_intx1(int disks, size_t bytes, int faila,
 		p++; q++;
 	}
 }
+EXPORT_SYMBOL_GPL(raid6_2data_recov);
 
 /* Recover failure of one data block plus the P block */
-static void raid6_datap_recov_intx1(int disks, size_t bytes, int faila,
-		void **ptrs)
+void raid6_datap_recov(int disks, size_t bytes, int faila, void **ptrs)
 {
 	u8 *p, *q, *dq;
 	const u8 *qmul;		/* Q multiplier table */
@@ -96,15 +96,7 @@ static void raid6_datap_recov_intx1(int disks, size_t bytes, int faila,
 		q++; dq++;
 	}
 }
-
-
-const struct raid6_recov_calls raid6_recov_intx1 = {
-	.data2 = raid6_2data_recov_intx1,
-	.datap = raid6_datap_recov_intx1,
-	.valid = NULL,
-	.name = "intx1",
-	.priority = 0,
-};
+EXPORT_SYMBOL_GPL(raid6_datap_recov);
 
 #ifndef __KERNEL__
 /* Testing only */

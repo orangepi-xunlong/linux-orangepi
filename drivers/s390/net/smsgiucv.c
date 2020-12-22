@@ -49,7 +49,7 @@ static DEFINE_SPINLOCK(smsg_list_lock);
 static LIST_HEAD(smsg_list);
 static int iucv_path_connected;
 
-static int smsg_path_pending(struct iucv_path *, u8 *, u8 *);
+static int smsg_path_pending(struct iucv_path *, u8 ipvmid[8], u8 ipuser[16]);
 static void smsg_message_pending(struct iucv_path *, struct iucv_message *);
 
 static struct iucv_handler smsg_handler = {
@@ -57,7 +57,8 @@ static struct iucv_handler smsg_handler = {
 	.message_pending = smsg_message_pending,
 };
 
-static int smsg_path_pending(struct iucv_path *path, u8 *ipvmid, u8 *ipuser)
+static int smsg_path_pending(struct iucv_path *path, u8 ipvmid[8],
+			     u8 ipuser[16])
 {
 	if (strncmp(ipvmid, "*MSG    ", 8) != 0)
 		return -EINVAL;
@@ -156,7 +157,7 @@ static int smsg_pm_restore_thaw(struct device *dev)
 #ifdef CONFIG_PM_DEBUG
 	printk(KERN_WARNING "smsg_pm_restore_thaw\n");
 #endif
-	if (smsg_path && !iucv_path_connected) {
+	if (smsg_path && iucv_path_connected) {
 		memset(smsg_path, 0, sizeof(*smsg_path));
 		smsg_path->msglim = 255;
 		smsg_path->flags = 0;

@@ -9,12 +9,154 @@
  *  Kendrick Smith <kmsmith@umich.edu>
  *  Andy Adamson   <andros@umich.edu>
  */
+
 #ifndef _LINUX_NFS4_H
 #define _LINUX_NFS4_H
 
-#include <linux/list.h>
-#include <linux/uidgid.h>
-#include <uapi/linux/nfs4.h>
+#include <linux/types.h>
+
+#define NFS4_BITMAP_SIZE	2
+#define NFS4_VERIFIER_SIZE	8
+#define NFS4_STATEID_SEQID_SIZE 4
+#define NFS4_STATEID_OTHER_SIZE 12
+#define NFS4_STATEID_SIZE	(NFS4_STATEID_SEQID_SIZE + NFS4_STATEID_OTHER_SIZE)
+#define NFS4_FHSIZE		128
+#define NFS4_MAXPATHLEN		PATH_MAX
+#define NFS4_MAXNAMLEN		NAME_MAX
+#define NFS4_OPAQUE_LIMIT	1024
+#define NFS4_MAX_SESSIONID_LEN	16
+
+#define NFS4_ACCESS_READ        0x0001
+#define NFS4_ACCESS_LOOKUP      0x0002
+#define NFS4_ACCESS_MODIFY      0x0004
+#define NFS4_ACCESS_EXTEND      0x0008
+#define NFS4_ACCESS_DELETE      0x0010
+#define NFS4_ACCESS_EXECUTE     0x0020
+
+#define NFS4_FH_PERSISTENT		0x0000
+#define NFS4_FH_NOEXPIRE_WITH_OPEN	0x0001
+#define NFS4_FH_VOLATILE_ANY		0x0002
+#define NFS4_FH_VOL_MIGRATION		0x0004
+#define NFS4_FH_VOL_RENAME		0x0008
+
+#define NFS4_OPEN_RESULT_CONFIRM 0x0002
+#define NFS4_OPEN_RESULT_LOCKTYPE_POSIX 0x0004
+
+#define NFS4_SHARE_ACCESS_MASK	0x000F
+#define NFS4_SHARE_ACCESS_READ	0x0001
+#define NFS4_SHARE_ACCESS_WRITE	0x0002
+#define NFS4_SHARE_ACCESS_BOTH	0x0003
+#define NFS4_SHARE_DENY_READ	0x0001
+#define NFS4_SHARE_DENY_WRITE	0x0002
+#define NFS4_SHARE_DENY_BOTH	0x0003
+
+/* nfs41 */
+#define NFS4_SHARE_WANT_MASK		0xFF00
+#define NFS4_SHARE_WANT_NO_PREFERENCE	0x0000
+#define NFS4_SHARE_WANT_READ_DELEG	0x0100
+#define NFS4_SHARE_WANT_WRITE_DELEG	0x0200
+#define NFS4_SHARE_WANT_ANY_DELEG	0x0300
+#define NFS4_SHARE_WANT_NO_DELEG	0x0400
+#define NFS4_SHARE_WANT_CANCEL		0x0500
+
+#define NFS4_SHARE_WHEN_MASK		0xF0000
+#define NFS4_SHARE_SIGNAL_DELEG_WHEN_RESRC_AVAIL	0x10000
+#define NFS4_SHARE_PUSH_DELEG_WHEN_UNCONTENDED		0x20000
+
+#define NFS4_CDFC4_FORE	0x1
+#define NFS4_CDFC4_BACK 0x2
+#define NFS4_CDFC4_BOTH 0x3
+#define NFS4_CDFC4_FORE_OR_BOTH 0x3
+#define NFS4_CDFC4_BACK_OR_BOTH 0x7
+
+#define NFS4_SET_TO_SERVER_TIME	0
+#define NFS4_SET_TO_CLIENT_TIME	1
+
+#define NFS4_ACE_ACCESS_ALLOWED_ACE_TYPE 0
+#define NFS4_ACE_ACCESS_DENIED_ACE_TYPE  1
+#define NFS4_ACE_SYSTEM_AUDIT_ACE_TYPE   2
+#define NFS4_ACE_SYSTEM_ALARM_ACE_TYPE   3
+
+#define ACL4_SUPPORT_ALLOW_ACL 0x01
+#define ACL4_SUPPORT_DENY_ACL  0x02
+#define ACL4_SUPPORT_AUDIT_ACL 0x04
+#define ACL4_SUPPORT_ALARM_ACL 0x08
+
+#define NFS4_ACE_FILE_INHERIT_ACE             0x00000001
+#define NFS4_ACE_DIRECTORY_INHERIT_ACE        0x00000002
+#define NFS4_ACE_NO_PROPAGATE_INHERIT_ACE     0x00000004
+#define NFS4_ACE_INHERIT_ONLY_ACE             0x00000008
+#define NFS4_ACE_SUCCESSFUL_ACCESS_ACE_FLAG   0x00000010
+#define NFS4_ACE_FAILED_ACCESS_ACE_FLAG       0x00000020
+#define NFS4_ACE_IDENTIFIER_GROUP             0x00000040
+
+#define NFS4_ACE_READ_DATA                    0x00000001
+#define NFS4_ACE_LIST_DIRECTORY               0x00000001
+#define NFS4_ACE_WRITE_DATA                   0x00000002
+#define NFS4_ACE_ADD_FILE                     0x00000002
+#define NFS4_ACE_APPEND_DATA                  0x00000004
+#define NFS4_ACE_ADD_SUBDIRECTORY             0x00000004
+#define NFS4_ACE_READ_NAMED_ATTRS             0x00000008
+#define NFS4_ACE_WRITE_NAMED_ATTRS            0x00000010
+#define NFS4_ACE_EXECUTE                      0x00000020
+#define NFS4_ACE_DELETE_CHILD                 0x00000040
+#define NFS4_ACE_READ_ATTRIBUTES              0x00000080
+#define NFS4_ACE_WRITE_ATTRIBUTES             0x00000100
+#define NFS4_ACE_DELETE                       0x00010000
+#define NFS4_ACE_READ_ACL                     0x00020000
+#define NFS4_ACE_WRITE_ACL                    0x00040000
+#define NFS4_ACE_WRITE_OWNER                  0x00080000
+#define NFS4_ACE_SYNCHRONIZE                  0x00100000
+#define NFS4_ACE_GENERIC_READ                 0x00120081
+#define NFS4_ACE_GENERIC_WRITE                0x00160106
+#define NFS4_ACE_GENERIC_EXECUTE              0x001200A0
+#define NFS4_ACE_MASK_ALL                     0x001F01FF
+
+#define EXCHGID4_FLAG_SUPP_MOVED_REFER		0x00000001
+#define EXCHGID4_FLAG_SUPP_MOVED_MIGR		0x00000002
+#define EXCHGID4_FLAG_BIND_PRINC_STATEID	0x00000100
+
+#define EXCHGID4_FLAG_USE_NON_PNFS		0x00010000
+#define EXCHGID4_FLAG_USE_PNFS_MDS		0x00020000
+#define EXCHGID4_FLAG_USE_PNFS_DS		0x00040000
+#define EXCHGID4_FLAG_MASK_PNFS			0x00070000
+
+#define EXCHGID4_FLAG_UPD_CONFIRMED_REC_A	0x40000000
+#define EXCHGID4_FLAG_CONFIRMED_R		0x80000000
+/*
+ * Since the validity of these bits depends on whether
+ * they're set in the argument or response, have separate
+ * invalid flag masks for arg (_A) and resp (_R).
+ */
+#define EXCHGID4_FLAG_MASK_A			0x40070103
+#define EXCHGID4_FLAG_MASK_R			0x80070103
+
+#define SEQ4_STATUS_CB_PATH_DOWN		0x00000001
+#define SEQ4_STATUS_CB_GSS_CONTEXTS_EXPIRING	0x00000002
+#define SEQ4_STATUS_CB_GSS_CONTEXTS_EXPIRED	0x00000004
+#define SEQ4_STATUS_EXPIRED_ALL_STATE_REVOKED	0x00000008
+#define SEQ4_STATUS_EXPIRED_SOME_STATE_REVOKED	0x00000010
+#define SEQ4_STATUS_ADMIN_STATE_REVOKED		0x00000020
+#define SEQ4_STATUS_RECALLABLE_STATE_REVOKED	0x00000040
+#define SEQ4_STATUS_LEASE_MOVED			0x00000080
+#define SEQ4_STATUS_RESTART_RECLAIM_NEEDED	0x00000100
+#define SEQ4_STATUS_CB_PATH_DOWN_SESSION	0x00000200
+#define SEQ4_STATUS_BACKCHANNEL_FAULT		0x00000400
+
+#define NFS4_SECINFO_STYLE4_CURRENT_FH	0
+#define NFS4_SECINFO_STYLE4_PARENT	1
+
+#define NFS4_MAX_UINT64	(~(u64)0)
+
+/* An NFS4 sessions server must support at least NFS4_MAX_OPS operations.
+ * If a compound requires more operations, adjust NFS4_MAX_OPS accordingly.
+ */
+#define NFS4_MAX_OPS   8
+
+/* Our NFS4 client back channel server only wants the cb_sequene and the
+ * actual operation per compound
+ */
+#define NFS4_MAX_BACK_CHANNEL_OPS 2
 
 enum nfs4_acl_whotype {
 	NFS4_ACL_WHO_NAMED = 0,
@@ -23,15 +165,15 @@ enum nfs4_acl_whotype {
 	NFS4_ACL_WHO_EVERYONE,
 };
 
+#ifdef __KERNEL__
+#include <linux/list.h>
+
 struct nfs4_ace {
 	uint32_t	type;
 	uint32_t	flag;
 	uint32_t	access_mask;
 	int		whotype;
-	union {
-		kuid_t	who_uid;
-		kgid_t	who_gid;
-	};
+	uid_t		who;
 };
 
 struct nfs4_acl {
@@ -39,39 +181,14 @@ struct nfs4_acl {
 	struct nfs4_ace	aces[0];
 };
 
-#define NFS4_MAXLABELLEN	2048
-
-struct nfs4_label {
-	uint32_t	lfs;
-	uint32_t	pi;
-	u32		len;
-	char	*label;
-};
-
 typedef struct { char data[NFS4_VERIFIER_SIZE]; } nfs4_verifier;
 
-struct nfs4_stateid_struct {
-	union {
-		char data[NFS4_STATEID_SIZE];
-		struct {
-			__be32 seqid;
-			char other[NFS4_STATEID_OTHER_SIZE];
-		} __attribute__ ((packed));
-	};
+struct nfs_stateid4 {
+	__be32 seqid;
+	char other[NFS4_STATEID_OTHER_SIZE];
+} __attribute__ ((packed));
 
-	enum {
-		NFS4_INVALID_STATEID_TYPE = 0,
-		NFS4_SPECIAL_STATEID_TYPE,
-		NFS4_OPEN_STATEID_TYPE,
-		NFS4_LOCK_STATEID_TYPE,
-		NFS4_DELEGATION_STATEID_TYPE,
-		NFS4_LAYOUT_STATEID_TYPE,
-		NFS4_PNFS_DS_STATEID_TYPE,
-		NFS4_REVOKED_STATEID_TYPE,
-	} type;
-};
-
-typedef struct nfs4_stateid_struct nfs4_stateid;
+typedef struct nfs_stateid4 nfs4_stateid;
 
 enum nfs_opnum4 {
 	OP_ACCESS = 3,
@@ -133,21 +250,6 @@ enum nfs_opnum4 {
 	OP_DESTROY_CLIENTID = 57,
 	OP_RECLAIM_COMPLETE = 58,
 
-	/* nfs42 */
-	OP_ALLOCATE = 59,
-	OP_COPY = 60,
-	OP_COPY_NOTIFY = 61,
-	OP_DEALLOCATE = 62,
-	OP_IO_ADVISE = 63,
-	OP_LAYOUTERROR = 64,
-	OP_LAYOUTSTATS = 65,
-	OP_OFFLOAD_CANCEL = 66,
-	OP_OFFLOAD_STATUS = 67,
-	OP_READ_PLUS = 68,
-	OP_SEEK = 69,
-	OP_WRITE_SAME = 70,
-	OP_CLONE = 71,
-
 	OP_ILLEGAL = 10044,
 };
 
@@ -155,10 +257,7 @@ enum nfs_opnum4 {
 Needs to be updated if more operations are defined in future.*/
 
 #define FIRST_NFS4_OP	OP_ACCESS
-#define LAST_NFS40_OP	OP_RELEASE_LOCKOWNER
-#define LAST_NFS41_OP	OP_RECLAIM_COMPLETE
-#define LAST_NFS42_OP	OP_CLONE
-#define LAST_NFS4_OP	LAST_NFS42_OP
+#define LAST_NFS4_OP 	OP_RECLAIM_COMPLETE
 
 enum nfsstat4 {
 	NFS4_OK = 0,
@@ -269,20 +368,11 @@ enum nfsstat4 {
 	NFS4ERR_REJECT_DELEG	= 10085,	/* on callback */
 	NFS4ERR_RETURNCONFLICT	= 10086,	/* outstanding layoutreturn */
 	NFS4ERR_DELEG_REVOKED	= 10087,	/* deleg./layout revoked */
-
-	/* nfs42 */
-	NFS4ERR_PARTNER_NOTSUPP	= 10088,
-	NFS4ERR_PARTNER_NO_AUTH	= 10089,
-	NFS4ERR_UNION_NOTSUPP = 10090,
-	NFS4ERR_OFFLOAD_DENIED = 10091,
-	NFS4ERR_WRONG_LFS = 10092,
-	NFS4ERR_BADLABEL = 10093,
-	NFS4ERR_OFFLOAD_NO_REQS = 10094,
 };
 
 static inline bool seqid_mutating_err(u32 err)
 {
-	/* See RFC 7530, section 9.1.7 */
+	/* rfc 3530 section 8.1.5: */
 	switch (err) {
 	case NFS4ERR_STALE_CLIENTID:
 	case NFS4ERR_STALE_STATEID:
@@ -291,7 +381,6 @@ static inline bool seqid_mutating_err(u32 err)
 	case NFS4ERR_BADXDR:
 	case NFS4ERR_RESOURCE:
 	case NFS4ERR_NOFILEHANDLE:
-	case NFS4ERR_MOVED:
 		return false;
 	};
 	return true;
@@ -436,22 +525,18 @@ enum lock_type4 {
 #define FATTR4_WORD1_TIME_MODIFY_SET    (1UL << 22)
 #define FATTR4_WORD1_MOUNTED_ON_FILEID  (1UL << 23)
 #define FATTR4_WORD1_FS_LAYOUT_TYPES    (1UL << 30)
-#define FATTR4_WORD2_LAYOUT_TYPES       (1UL << 0)
 #define FATTR4_WORD2_LAYOUT_BLKSIZE     (1UL << 1)
-#define FATTR4_WORD2_MDSTHRESHOLD       (1UL << 4)
-#define FATTR4_WORD2_CLONE_BLKSIZE	(1UL << 13)
-#define FATTR4_WORD2_SECURITY_LABEL     (1UL << 16)
-
-/* MDS threshold bitmap bits */
-#define THRESHOLD_RD                    (1UL << 0)
-#define THRESHOLD_WR                    (1UL << 1)
-#define THRESHOLD_RD_IO                 (1UL << 2)
-#define THRESHOLD_WR_IO                 (1UL << 3)
 
 #define NFSPROC4_NULL 0
 #define NFSPROC4_COMPOUND 1
 #define NFS4_VERSION 4
 #define NFS4_MINOR_VERSION 0
+
+#if defined(CONFIG_NFS_V4_1)
+#define NFS4_MAX_MINOR_VERSION 1
+#else
+#define NFS4_MAX_MINOR_VERSION 0
+#endif /* CONFIG_NFS_V4_1 */
 
 #define NFS4_DEBUG 1
 
@@ -495,7 +580,6 @@ enum {
 	NFSPROC4_CLNT_FS_LOCATIONS,
 	NFSPROC4_CLNT_RELEASE_LOCKOWNER,
 	NFSPROC4_CLNT_SECINFO,
-	NFSPROC4_CLNT_FSID_PRESENT,
 
 	/* nfs41 */
 	NFSPROC4_CLNT_EXCHANGE_ID,
@@ -512,16 +596,6 @@ enum {
 	NFSPROC4_CLNT_TEST_STATEID,
 	NFSPROC4_CLNT_FREE_STATEID,
 	NFSPROC4_CLNT_GETDEVICELIST,
-	NFSPROC4_CLNT_BIND_CONN_TO_SESSION,
-	NFSPROC4_CLNT_DESTROY_CLIENTID,
-
-	/* nfs42 */
-	NFSPROC4_CLNT_SEEK,
-	NFSPROC4_CLNT_ALLOCATE,
-	NFSPROC4_CLNT_DEALLOCATE,
-	NFSPROC4_CLNT_LAYOUTSTATS,
-	NFSPROC4_CLNT_CLONE,
-	NFSPROC4_CLNT_COPY,
 };
 
 /* nfs41 types */
@@ -546,9 +620,6 @@ enum pnfs_layouttype {
 	LAYOUT_NFSV4_1_FILES  = 1,
 	LAYOUT_OSD2_OBJECTS = 2,
 	LAYOUT_BLOCK_VOLUME = 3,
-	LAYOUT_FLEX_FILES = 4,
-	LAYOUT_SCSI = 5,
-	LAYOUT_TYPE_MAX
 };
 
 /* used for both layout return and recall */
@@ -567,42 +638,6 @@ enum pnfs_iomode {
 enum pnfs_notify_deviceid_type4 {
 	NOTIFY_DEVICEID4_CHANGE = 1 << 1,
 	NOTIFY_DEVICEID4_DELETE = 1 << 2,
-};
-
-enum pnfs_block_volume_type {
-	PNFS_BLOCK_VOLUME_SIMPLE	= 0,
-	PNFS_BLOCK_VOLUME_SLICE		= 1,
-	PNFS_BLOCK_VOLUME_CONCAT	= 2,
-	PNFS_BLOCK_VOLUME_STRIPE	= 3,
-	PNFS_BLOCK_VOLUME_SCSI		= 4,
-};
-
-enum pnfs_block_extent_state {
-	PNFS_BLOCK_READWRITE_DATA	= 0,
-	PNFS_BLOCK_READ_DATA		= 1,
-	PNFS_BLOCK_INVALID_DATA		= 2,
-	PNFS_BLOCK_NONE_DATA		= 3,
-};
-
-/* on the wire size of a block layout extent */
-#define PNFS_BLOCK_EXTENT_SIZE \
-	(7 * sizeof(__be32) + NFS4_DEVICEID4_SIZE)
-
-/* on the wire size of a scsi commit range */
-#define PNFS_SCSI_RANGE_SIZE \
-	(4 * sizeof(__be32))
-
-enum scsi_code_set {
-	PS_CODE_SET_BINARY	= 1,
-	PS_CODE_SET_ASCII	= 2,
-	PS_CODE_SET_UTF8	= 3
-};
-
-enum scsi_designator_type {
-	PS_DESIGNATOR_T10	= 1,
-	PS_DESIGNATOR_EUI64	= 2,
-	PS_DESIGNATOR_NAA	= 3,
-	PS_DESIGNATOR_NAME	= 8
 };
 
 #define NFL4_UFLG_MASK			0x0000003F
@@ -624,36 +659,11 @@ struct nfs4_deviceid {
 	char data[NFS4_DEVICEID4_SIZE];
 };
 
-enum data_content4 {
-	NFS4_CONTENT_DATA		= 0,
-	NFS4_CONTENT_HOLE		= 1,
-};
-
-enum pnfs_update_layout_reason {
-	PNFS_UPDATE_LAYOUT_UNKNOWN = 0,
-	PNFS_UPDATE_LAYOUT_NO_PNFS,
-	PNFS_UPDATE_LAYOUT_RD_ZEROLEN,
-	PNFS_UPDATE_LAYOUT_MDSTHRESH,
-	PNFS_UPDATE_LAYOUT_NOMEM,
-	PNFS_UPDATE_LAYOUT_BULK_RECALL,
-	PNFS_UPDATE_LAYOUT_IO_TEST_FAIL,
-	PNFS_UPDATE_LAYOUT_FOUND_CACHED,
-	PNFS_UPDATE_LAYOUT_RETURN,
-	PNFS_UPDATE_LAYOUT_RETRY,
-	PNFS_UPDATE_LAYOUT_BLOCKED,
-	PNFS_UPDATE_LAYOUT_INVALID_OPEN,
-	PNFS_UPDATE_LAYOUT_SEND_LAYOUTGET,
-};
-
-#define NFS4_OP_MAP_NUM_LONGS					\
-	DIV_ROUND_UP(LAST_NFS4_OP, 8 * sizeof(unsigned long))
-#define NFS4_OP_MAP_NUM_WORDS \
-	(NFS4_OP_MAP_NUM_LONGS * sizeof(unsigned long) / sizeof(u32))
-struct nfs4_op_map {
-	union {
-		unsigned long longs[NFS4_OP_MAP_NUM_LONGS];
-		u32 words[NFS4_OP_MAP_NUM_WORDS];
-	} u;
-};
-
 #endif
+#endif
+
+/*
+ * Local variables:
+ *  c-basic-offset: 8
+ * End:
+ */

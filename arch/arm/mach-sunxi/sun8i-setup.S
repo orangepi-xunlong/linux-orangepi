@@ -29,57 +29,78 @@
 #define CCI_SLAVE_OFFSET(n)	(0x1000 + 0x1000 * (n))
 
 #define SUN8I_CCI_PHYS_BASE	0x01790000
-#define SUN8I_CCI_SLAVE_A15	3
-#define SUN8I_CCI_SLAVE_A7	4
+#define SUN8I_CCI_SLAVE_C0	3
+#define SUN8I_CCI_SLAVE_C1	4
 
-#define SUN8I_CCI_A15_OFFSET	CCI_SLAVE_OFFSET(SUN8I_CCI_SLAVE_A15)
-#define SUN8I_CCI_A7_OFFSET	CCI_SLAVE_OFFSET(SUN8I_CCI_SLAVE_A7)
+#define SUN8I_CCI_C0_OFFSET     CCI_SLAVE_OFFSET(SUN8I_CCI_SLAVE_C0)
+#define SUN8I_CCI_C1_OFFSET     CCI_SLAVE_OFFSET(SUN8I_CCI_SLAVE_C1)
 
+#define SUN8I_CCU_PHYS_BASE      (0x01c20000)
+#define SUN8I_CCU_AXI_CFG_OFFSET (0x50)
 
 ENTRY(sun8i_power_up_setup)
 
-	cmp	r0, #0			@ check affinity level
-	beq	2f
-
-/*
- * Enable cluster-level coherency, in preparation for turning on the MMU.
- * The ACTLR SMP bit does not need to be set here, because cpu_resume()
- * already restores that.
- */
-
+	mov     r2,  r0             @ backup r0 register first
 	mrc	p15, 0, r0, c0, c0, 5	@ MPIDR
 	ubfx	r0, r0, #8, #4		@ cluster
+	cmp	r2, #0			        @ if the cluster first-man
+	beq	2f
 
-	@ A15/A7 may not require explicit L2 invalidation on reset, dependent
+	@Config cluster0/cluster1 axi div to 3 and 4
+	@If you don't kown why, please don't change the code.
+	@by zhuzhenhua at 2014-7-10.
+	ldr	r3, =SUN8I_CCU_PHYS_BASE + SUN8I_CCU_AXI_CFG_OFFSET
+	cmp	r0, #0		    @ Cluster 0?
+    bne     cluster1_axi_setup
+
+cluster0_axi_setup:
+	ldr	r1, [r3]
+	bic     r1, r1, #(0x3<<0)   @ cluster0 axi div
+	orr     r1, r1, #(0x3<<0)   @ div = value + 1
+	str	r1, [r3]	            @ set axi div to 4
+	dsb                         @ Synchronise side-effects of axi config
+                                @ make axi change from 4 to 3 force hardware update
+	ldr	r1, [r3]
+	bic     r1, r1, #(0x3<<0)   @ cluster0 axi div
+	orr     r1, r1, #(0x2<<0)   @ div = value + 1
+	str	r1, [r3]	            @ set axi div to 3
+	dsb                         @ Synchronise side-effects of axi config
+	b       axi_setup_finish
+
+cluster1_axi_setup:
+	ldr	r1, [r3]
+	bic     r1, r1, #(0x3<<16)   @ cluster1 axi div
+	orr     r1, r1, #(0x3<<16)   @ div = value + 1
+	str	r1, [r3]	            @ set axi div to 4
+	dsb                         @ Synchronise side-effects of axi config
+                                @ make axi change from 4 to 3 force hardware update
+	ldr	r1, [r3]
+	bic     r1, r1, #(0x3<<16)  @ cluster1 axi div
+	orr     r1, r1, #(0x2<<16)   @ div = value + 1
+	str	r1, [r3]	            @ set axi div to 3
+	dsb                         @ Synchronise side-effects of axi config
+
+axi_setup_finish:
+	@ cluster1/cluster0 may not require explicit L2 invalidation on reset, dependent
 	@ on hardware integration desicions.
-	@ For now, this code assumes that L2 is either already invalidated, or
-	@ invalidation is not required.
-
-	ldr	r3, =SUN8I_CCI_PHYS_BASE + SUN8I_CCI_A15_OFFSET
-	cmp	r0, #0		@ A15 cluster?
-	addne	r3, r3, #SUN8I_CCI_A7_OFFSET - SUN8I_CCI_A15_OFFSET
+	@ For now, this code assumes that L2 is already invalidated by hardware.
+	ldr	r3, =SUN8I_CCI_PHYS_BASE + SUN8I_CCI_C0_OFFSET
+	cmp	r0, #0		            @ cluster0?
+	addne	r3, r3, #SUN8I_CCI_C1_OFFSET - SUN8I_CCI_C0_OFFSET
 
 	@ r3 now points to the correct CCI slave register block
-
-	ldr	r0, [r3, #SLAVE_SNOOPCTL_OFFSET]
-	orr	r0, r0, #SNOOPCTL_SNOOP_ENABLE | SNOOPCTL_DVM_ENABLE
-	str	r0, [r3, #SLAVE_SNOOPCTL_OFFSET]	@ enable CCI snoops
+	ldr	r1, [r3, #SLAVE_SNOOPCTL_OFFSET]
+	orr	r1, r1, #SNOOPCTL_SNOOP_ENABLE
+	orr	r1, r1, #SNOOPCTL_DVM_ENABLE
+	str	r1, [r3, #SLAVE_SNOOPCTL_OFFSET]	@ enable CCI snoops
 
 	@ Wait for snoop control change to complete:
-
 	ldr	r3, =SUN8I_CCI_PHYS_BASE
-
-1:	ldr	r0, [r3, #CCI_STATUS_OFFSET]
-	tst	r0, #STATUS_CHANGE_PENDING
+1:
+    ldr	r1, [r3, #CCI_STATUS_OFFSET]
+	tst	r1, #STATUS_CHANGE_PENDING
 	bne	1b
-
-	dsb		@ Synchronise side-effects of enabling CCI
-
+	dsb                          @ Synchronise side-effects of enabling CCI
+2:
 	bx	lr
-
-2:	@ Implementation-specific local CPU setup operations should go here,
-	@ if any.  In this case, there is nothing to do.
-
-	bx	lr
-
 ENDPROC(sun8i_power_up_setup)

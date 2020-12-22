@@ -29,8 +29,7 @@
 #define PCI_DEVICE_ID_INTEL_82975_0	0x277c
 #endif				/* PCI_DEVICE_ID_INTEL_82975_0 */
 
-#define I82975X_NR_DIMMS		8
-#define I82975X_NR_CSROWS(nr_chans)	(I82975X_NR_DIMMS / (nr_chans))
+#define I82975X_NR_CSROWS(nr_chans)		(8/(nr_chans))
 
 /* Intel 82975X register addresses - device 0 function 0 - DRAM Controller */
 #define I82975X_EAP		0x58	/* Dram Error Address Pointer (32b)
@@ -241,7 +240,7 @@ static void i82975x_get_error_info(struct mem_ctl_info *mci,
 {
 	struct pci_dev *pdev;
 
-	pdev = to_pci_dev(mci->pdev);
+	pdev = to_pci_dev(mci->dev);
 
 	/*
 	 * This is a mess because there is no atomic way to read all the
@@ -288,8 +287,7 @@ static int i82975x_process_error_info(struct mem_ctl_info *mci,
 		return 1;
 
 	if ((info->errsts ^ info->errsts2) & 0x0003) {
-		edac_mc_handle_error(HW_EVENT_ERR_UNCORRECTED, mci, 1, 0, 0, 0,
-				     -1, -1, -1, "UE overwrote CE", "");
+		edac_mc_handle_ce_no_info(mci, "UE overwrote CE");
 		info->errsts = info->errsts2;
 	}
 
@@ -308,21 +306,16 @@ static int i82975x_process_error_info(struct mem_ctl_info *mci,
 			(info->xeap & 1) ? 1 : 0, info->eap, (unsigned int) page);
 		return 0;
 	}
-	chan = (mci->csrows[row]->nr_channels == 1) ? 0 : info->eap & 1;
+	chan = (mci->csrows[row].nr_channels == 1) ? 0 : info->eap & 1;
 	offst = info->eap
 			& ((1 << PAGE_SHIFT) -
-			   (1 << mci->csrows[row]->channels[chan]->dimm->grain));
+				(1 << mci->csrows[row].grain));
 
 	if (info->errsts & 0x0002)
-		edac_mc_handle_error(HW_EVENT_ERR_UNCORRECTED, mci, 1,
-				     page, offst, 0,
-				     row, -1, -1,
-				     "i82975x UE", "");
+		edac_mc_handle_ue(mci, page, offst , row, "i82975x UE");
 	else
-		edac_mc_handle_error(HW_EVENT_ERR_CORRECTED, mci, 1,
-				     page, offst, info->derrsyn,
-				     row, chan ? chan : 0, -1,
-				     "i82975x CE", "");
+		edac_mc_handle_ce(mci, page, offst, info->derrsyn, row,
+				chan, "i82975x CE");
 
 	return 1;
 }
@@ -331,7 +324,7 @@ static void i82975x_check(struct mem_ctl_info *mci)
 {
 	struct i82975x_error_info info;
 
-	edac_dbg(1, "MC%d\n", mci->mc_idx);
+	debugf1("MC%d: %s()\n", mci->mc_idx, __func__);
 	i82975x_get_error_info(mci, &info);
 	i82975x_process_error_info(mci, &info, 1);
 }
@@ -373,10 +366,8 @@ static void i82975x_init_csrows(struct mem_ctl_info *mci,
 	struct csrow_info *csrow;
 	unsigned long last_cumul_size;
 	u8 value;
-	u32 cumul_size, nr_pages;
+	u32 cumul_size;
 	int index, chan;
-	struct dimm_info *dimm;
-	enum dev_type dtype;
 
 	last_cumul_size = 0;
 
@@ -390,7 +381,7 @@ static void i82975x_init_csrows(struct mem_ctl_info *mci,
 	 */
 
 	for (index = 0; index < mci->nr_csrows; index++) {
-		csrow = mci->csrows[index];
+		csrow = &mci->csrows[index];
 
 		value = readb(mch_window + I82975X_DRB + index +
 					((index >= 4) ? 0x80 : 0));
@@ -402,11 +393,8 @@ static void i82975x_init_csrows(struct mem_ctl_info *mci,
 		 */
 		if (csrow->nr_channels > 1)
 			cumul_size <<= 1;
-		edac_dbg(3, "(%d) cumul_size 0x%x\n", index, cumul_size);
-
-		nr_pages = cumul_size - last_cumul_size;
-		if (!nr_pages)
-			continue;
+		debugf3("%s(): (%d) cumul_size 0x%x\n", __func__, index,
+			cumul_size);
 
 		/*
 		 * Initialise dram labels
@@ -414,24 +402,23 @@ static void i82975x_init_csrows(struct mem_ctl_info *mci,
 		 *   [0-7] for single-channel; i.e. csrow->nr_channels = 1
 		 *   [0-3] for dual-channel; i.e. csrow->nr_channels = 2
 		 */
-		dtype = i82975x_dram_type(mch_window, index);
-		for (chan = 0; chan < csrow->nr_channels; chan++) {
-			dimm = mci->csrows[index]->channels[chan]->dimm;
+		for (chan = 0; chan < csrow->nr_channels; chan++)
 
-			dimm->nr_pages = nr_pages / csrow->nr_channels;
-
-			snprintf(csrow->channels[chan]->dimm->label, EDAC_MC_LABEL_LEN, "DIMM %c%d",
+			snprintf(csrow->channels[chan].label, EDAC_MC_LABEL_LEN, "DIMM %c%d",
 				 (chan == 0) ? 'A' : 'B',
 				 index);
-			dimm->grain = 1 << 7;	/* 128Byte cache-line resolution */
-			dimm->dtype = i82975x_dram_type(mch_window, index);
-			dimm->mtype = MEM_DDR2; /* I82975x supports only DDR2 */
-			dimm->edac_mode = EDAC_SECDED; /* only supported */
-		}
+
+		if (cumul_size == last_cumul_size)
+			continue;	/* not populated */
 
 		csrow->first_page = last_cumul_size;
 		csrow->last_page = cumul_size - 1;
+		csrow->nr_pages = cumul_size - last_cumul_size;
 		last_cumul_size = cumul_size;
+		csrow->grain = 1 << 7;	/* 128Byte cache-line resolution */
+		csrow->mtype = MEM_DDR2; /* I82975x supports only DDR2 */
+		csrow->dtype = i82975x_dram_type(mch_window, index);
+		csrow->edac_mode = EDAC_SECDED; /* only supported */
 	}
 }
 
@@ -473,7 +460,6 @@ static int i82975x_probe1(struct pci_dev *pdev, int dev_idx)
 {
 	int rc = -ENODEV;
 	struct mem_ctl_info *mci;
-	struct edac_mc_layer layers[2];
 	struct i82975x_pvt *pvt;
 	void __iomem *mch_window;
 	u32 mchbar;
@@ -485,11 +471,11 @@ static int i82975x_probe1(struct pci_dev *pdev, int dev_idx)
 	u8 c1drb[4];
 #endif
 
-	edac_dbg(0, "\n");
+	debugf0("%s()\n", __func__);
 
 	pci_read_config_dword(pdev, I82975X_MCHBAR, &mchbar);
 	if (!(mchbar & 1)) {
-		edac_dbg(3, "failed, MCHBAR disabled!\n");
+		debugf3("%s(): failed, MCHBAR disabled!\n", __func__);
 		goto fail0;
 	}
 	mchbar &= 0xffffc000;	/* bits 31:14 used for 16K window */
@@ -542,20 +528,15 @@ static int i82975x_probe1(struct pci_dev *pdev, int dev_idx)
 	chans = dual_channel_active(mch_window) + 1;
 
 	/* assuming only one controller, index thus is 0 */
-	layers[0].type = EDAC_MC_LAYER_CHIP_SELECT;
-	layers[0].size = I82975X_NR_DIMMS;
-	layers[0].is_virt_csrow = true;
-	layers[1].type = EDAC_MC_LAYER_CHANNEL;
-	layers[1].size = I82975X_NR_CSROWS(chans);
-	layers[1].is_virt_csrow = false;
-	mci = edac_mc_alloc(0, ARRAY_SIZE(layers), layers, sizeof(*pvt));
+	mci = edac_mc_alloc(sizeof(*pvt), I82975X_NR_CSROWS(chans),
+					chans, 0);
 	if (!mci) {
 		rc = -ENOMEM;
 		goto fail1;
 	}
 
-	edac_dbg(3, "init mci\n");
-	mci->pdev = &pdev->dev;
+	debugf3("%s(): init mci\n", __func__);
+	mci->dev = &pdev->dev;
 	mci->mtype_cap = MEM_FLAG_DDR2;
 	mci->edac_ctl_cap = EDAC_FLAG_NONE | EDAC_FLAG_SECDED;
 	mci->edac_cap = EDAC_FLAG_NONE | EDAC_FLAG_SECDED;
@@ -565,7 +546,7 @@ static int i82975x_probe1(struct pci_dev *pdev, int dev_idx)
 	mci->dev_name = pci_name(pdev);
 	mci->edac_check = i82975x_check;
 	mci->ctl_page_to_phys = NULL;
-	edac_dbg(3, "init pvt\n");
+	debugf3("%s(): init pvt\n", __func__);
 	pvt = (struct i82975x_pvt *) mci->pvt_info;
 	pvt->mch_window = mch_window;
 	i82975x_init_csrows(mci, pdev, mch_window);
@@ -574,12 +555,12 @@ static int i82975x_probe1(struct pci_dev *pdev, int dev_idx)
 
 	/* finalize this instance of memory controller with edac core */
 	if (edac_mc_add_mc(mci)) {
-		edac_dbg(3, "failed edac_mc_add_mc()\n");
+		debugf3("%s(): failed edac_mc_add_mc()\n", __func__);
 		goto fail2;
 	}
 
 	/* get this far and it's successful */
-	edac_dbg(3, "success\n");
+	debugf3("%s(): success\n", __func__);
 	return 0;
 
 fail2:
@@ -592,12 +573,12 @@ fail0:
 }
 
 /* returns count (>= 0), or negative on error */
-static int i82975x_init_one(struct pci_dev *pdev,
-			    const struct pci_device_id *ent)
+static int __devinit i82975x_init_one(struct pci_dev *pdev,
+		const struct pci_device_id *ent)
 {
 	int rc;
 
-	edac_dbg(0, "\n");
+	debugf0("%s()\n", __func__);
 
 	if (pci_enable_device(pdev) < 0)
 		return -EIO;
@@ -610,12 +591,12 @@ static int i82975x_init_one(struct pci_dev *pdev,
 	return rc;
 }
 
-static void i82975x_remove_one(struct pci_dev *pdev)
+static void __devexit i82975x_remove_one(struct pci_dev *pdev)
 {
 	struct mem_ctl_info *mci;
 	struct i82975x_pvt *pvt;
 
-	edac_dbg(0, "\n");
+	debugf0("%s()\n", __func__);
 
 	mci = edac_mc_del_mc(&pdev->dev);
 	if (mci  == NULL)
@@ -628,7 +609,7 @@ static void i82975x_remove_one(struct pci_dev *pdev)
 	edac_mc_free(mci);
 }
 
-static const struct pci_device_id i82975x_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(i82975x_pci_tbl) = {
 	{
 		PCI_VEND_DEV(INTEL, 82975_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 		I82975X
@@ -643,7 +624,7 @@ MODULE_DEVICE_TABLE(pci, i82975x_pci_tbl);
 static struct pci_driver i82975x_driver = {
 	.name = EDAC_MOD_STR,
 	.probe = i82975x_init_one,
-	.remove = i82975x_remove_one,
+	.remove = __devexit_p(i82975x_remove_one),
 	.id_table = i82975x_pci_tbl,
 };
 
@@ -651,7 +632,7 @@ static int __init i82975x_init(void)
 {
 	int pci_rc;
 
-	edac_dbg(3, "\n");
+	debugf3("%s()\n", __func__);
 
        /* Ensure that the OPSTATE is set correctly for POLL or NMI */
        opstate_init();
@@ -665,7 +646,7 @@ static int __init i82975x_init(void)
 				PCI_DEVICE_ID_INTEL_82975_0, NULL);
 
 		if (!mci_pdev) {
-			edac_dbg(0, "i82975x pci_get_device fail\n");
+			debugf0("i82975x pci_get_device fail\n");
 			pci_rc = -ENODEV;
 			goto fail1;
 		}
@@ -673,7 +654,7 @@ static int __init i82975x_init(void)
 		pci_rc = i82975x_init_one(mci_pdev, i82975x_pci_tbl);
 
 		if (pci_rc < 0) {
-			edac_dbg(0, "i82975x init fail\n");
+			debugf0("i82975x init fail\n");
 			pci_rc = -ENODEV;
 			goto fail1;
 		}
@@ -685,13 +666,15 @@ fail1:
 	pci_unregister_driver(&i82975x_driver);
 
 fail0:
-	pci_dev_put(mci_pdev);
+	if (mci_pdev != NULL)
+		pci_dev_put(mci_pdev);
+
 	return pci_rc;
 }
 
 static void __exit i82975x_exit(void)
 {
-	edac_dbg(3, "\n");
+	debugf3("%s()\n", __func__);
 
 	pci_unregister_driver(&i82975x_driver);
 

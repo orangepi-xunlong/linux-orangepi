@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2014 QLogic Corporation
+ * Copyright (c)  2003-2011 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -91,7 +91,7 @@ struct nvram_24xx {
 	/* Firmware Initialization Control Block. */
 	uint16_t version;
 	uint16_t reserved_1;
-	__le16 frame_payload_size;
+	uint16_t frame_payload_size;
 	uint16_t execution_throttle;
 	uint16_t exchange_count;
 	uint16_t hard_address;
@@ -300,8 +300,7 @@ struct init_cb_24xx {
 	uint32_t prio_request_q_address[2];
 
 	uint16_t msix;
-	uint16_t msix_atio;
-	uint8_t reserved_2[4];
+	uint8_t reserved_2[6];
 
 	uint16_t atio_q_inpointer;
 	uint16_t atio_q_length;
@@ -317,8 +316,8 @@ struct init_cb_24xx {
 	 * BIT 3  = Reserved
 	 * BIT 4  = Enable Target Mode
 	 * BIT 5  = Disable Initiator Mode
-	 * BIT 6  = Acquire FA-WWN
-	 * BIT 7  = Enable D-port Diagnostics
+	 * BIT 6  = Reserved
+	 * BIT 7  = Reserved
 	 *
 	 * BIT 8  = Reserved
 	 * BIT 9  = Non Participating LIP
@@ -371,10 +370,7 @@ struct init_cb_24xx {
 	 * BIT 14 = Data Rate bit 1
 	 * BIT 15 = Data Rate bit 2
 	 * BIT 16 = Enable 75 ohm Termination Select
-	 * BIT 17-28 = Reserved
-	 * BIT 29 = Enable response queue 0 in index shadowing
-	 * BIT 30 = Enable request queue 0 out index shadowing
-	 * BIT 31 = Reserved
+	 * BIT 17-31 = Reserved
 	 */
 	uint32_t firmware_options_3;
 	uint16_t qos;
@@ -385,44 +381,6 @@ struct init_cb_24xx {
 /*
  * ISP queue - command entry structure definition.
  */
-#define COMMAND_BIDIRECTIONAL 0x75
-struct cmd_bidir {
-	uint8_t entry_type;		/* Entry type. */
-	uint8_t entry_count;		/* Entry count. */
-	uint8_t sys_define;		/* System defined */
-	uint8_t entry_status;		/* Entry status. */
-
-	uint32_t handle;		/* System handle. */
-
-	uint16_t nport_handle;		/* N_PORT hanlde. */
-
-	uint16_t timeout;		/* Commnad timeout. */
-
-	uint16_t wr_dseg_count;		/* Write Data segment count. */
-	uint16_t rd_dseg_count;		/* Read Data segment count. */
-
-	struct scsi_lun lun;		/* FCP LUN (BE). */
-
-	uint16_t control_flags;		/* Control flags. */
-#define BD_WRAP_BACK			BIT_3
-#define BD_READ_DATA			BIT_1
-#define BD_WRITE_DATA			BIT_0
-
-	uint16_t fcp_cmnd_dseg_len;		/* Data segment length. */
-	uint32_t fcp_cmnd_dseg_address[2];	/* Data segment address. */
-
-	uint16_t reserved[2];			/* Reserved */
-
-	uint32_t rd_byte_count;			/* Total Byte count Read. */
-	uint32_t wr_byte_count;			/* Total Byte count write. */
-
-	uint8_t port_id[3];			/* PortID of destination port.*/
-	uint8_t vp_index;
-
-	uint32_t fcp_data_dseg_address[2];	/* Data segment address. */
-	uint16_t fcp_data_dseg_len;		/* Data segment length. */
-};
-
 #define COMMAND_TYPE_6	0x48		/* Command Type 6 entry */
 struct cmd_type_6 {
 	uint8_t entry_type;		/* Entry type. */
@@ -567,7 +525,7 @@ struct sts_entry_24xx {
 #define SF_TRANSFERRED_DATA	BIT_11
 #define SF_FCP_RSP_DMA		BIT_0
 
-	uint16_t retry_delay;
+	uint16_t reserved_2;
 	uint16_t scsi_status;		/* SCSI status. */
 #define SS_CONFIRMATION_REQ		BIT_12
 
@@ -1096,27 +1054,6 @@ struct device_reg_24xx {
 	uint32_t unused_6[2];		/* Gap. */
 	uint32_t iobase_sdata;
 };
-/* RISC-RISC semaphore register PCI offet */
-#define RISC_REGISTER_BASE_OFFSET	0x7010
-#define RISC_REGISTER_WINDOW_OFFET	0x6
-
-/* RISC-RISC semaphore/flag register (risc address 0x7016) */
-
-#define RISC_SEMAPHORE		0x1UL
-#define RISC_SEMAPHORE_WE	(RISC_SEMAPHORE << 16)
-#define RISC_SEMAPHORE_CLR	(RISC_SEMAPHORE_WE | 0x0UL)
-#define RISC_SEMAPHORE_SET	(RISC_SEMAPHORE_WE | RISC_SEMAPHORE)
-
-#define RISC_SEMAPHORE_FORCE		0x8000UL
-#define RISC_SEMAPHORE_FORCE_WE		(RISC_SEMAPHORE_FORCE << 16)
-#define RISC_SEMAPHORE_FORCE_CLR	(RISC_SEMAPHORE_FORCE_WE | 0x0UL)
-#define RISC_SEMAPHORE_FORCE_SET	\
-		(RISC_SEMAPHORE_FORCE_WE | RISC_SEMAPHORE_FORCE)
-
-/* RISC semaphore timeouts (ms) */
-#define TIMEOUT_SEMAPHORE		2500
-#define TIMEOUT_SEMAPHORE_FORCE		2000
-#define TIMEOUT_TOTAL_ELAPSED		4500
 
 /* Trace Control *************************************************************/
 
@@ -1136,6 +1073,13 @@ struct device_reg_24xx {
 
 #define MIN_MULTI_ID_FABRIC	64	/* Must be power-of-2. */
 #define MAX_MULTI_ID_FABRIC	256	/* ... */
+
+#define for_each_mapped_vp_idx(_ha, _idx)		\
+	for (_idx = find_next_bit((_ha)->vp_idx_map,	\
+		(_ha)->max_npiv_vports + 1, 1);		\
+	    _idx <= (_ha)->max_npiv_vports;		\
+	    _idx = find_next_bit((_ha)->vp_idx_map,	\
+		(_ha)->max_npiv_vports + 1, _idx + 1))	\
 
 struct mid_conf_entry_24xx {
 	uint16_t reserved_1;
@@ -1186,7 +1130,7 @@ struct mid_db_entry_24xx {
 /*
  * Virtual Port Control IOCB
  */
-#define VP_CTRL_IOCB_TYPE	0x30	/* Virtual Port Control entry. */
+#define VP_CTRL_IOCB_TYPE	0x30	/* Vitual Port Control entry. */
 struct vp_ctrl_entry_24xx {
 	uint8_t entry_type;		/* Entry type. */
 	uint8_t entry_count;		/* Entry count. */
@@ -1222,7 +1166,7 @@ struct vp_ctrl_entry_24xx {
 /*
  * Modify Virtual Port Configuration IOCB
  */
-#define VP_CONFIG_IOCB_TYPE	0x31	/* Virtual Port Config entry. */
+#define VP_CONFIG_IOCB_TYPE	0x31	/* Vitual Port Config entry. */
 struct vp_config_entry_24xx {
 	uint8_t entry_type;		/* Entry type. */
 	uint8_t entry_count;		/* Entry count. */
@@ -1288,9 +1232,7 @@ struct vp_rpt_id_entry_24xx {
 
 	uint8_t vp_idx_map[16];
 
-	uint8_t reserved_4[24];
-	uint16_t bbcr;
-	uint8_t reserved_5[6];
+	uint8_t reserved_4[32];
 };
 
 #define VF_EVFP_IOCB_TYPE       0x26    /* Exchange Virtual Fabric Parameters entry. */
@@ -1376,10 +1318,6 @@ struct qla_flt_header {
 #define FLT_REG_NVRAM_0		0x15
 #define FLT_REG_VPD_1		0x16
 #define FLT_REG_NVRAM_1		0x17
-#define FLT_REG_VPD_2		0xD4
-#define FLT_REG_NVRAM_2		0xD5
-#define FLT_REG_VPD_3		0xD6
-#define FLT_REG_NVRAM_3		0xD7
 #define FLT_REG_FDT		0x1a
 #define FLT_REG_FLT		0x1c
 #define FLT_REG_HW_EVENT_0	0x1d
@@ -1389,21 +1327,11 @@ struct qla_flt_header {
 #define FLT_REG_GOLD_FW		0x2f
 #define FLT_REG_FCP_PRIO_0	0x87
 #define FLT_REG_FCP_PRIO_1	0x88
-#define FLT_REG_CNA_FW		0x97
-#define FLT_REG_BOOT_CODE_8044	0xA2
 #define FLT_REG_FCOE_FW		0xA4
+#define FLT_REG_FCOE_VPD_0	0xA9
 #define FLT_REG_FCOE_NVRAM_0	0xAA
+#define FLT_REG_FCOE_VPD_1	0xAB
 #define FLT_REG_FCOE_NVRAM_1	0xAC
-
-/* 27xx */
-#define FLT_REG_IMG_PRI_27XX	0x95
-#define FLT_REG_IMG_SEC_27XX	0x96
-#define FLT_REG_FW_SEC_27XX	0x02
-#define FLT_REG_BOOTLOAD_SEC_27XX	0x9
-#define FLT_REG_VPD_SEC_27XX_0	0x50
-#define FLT_REG_VPD_SEC_27XX_1	0x52
-#define FLT_REG_VPD_SEC_27XX_2	0xD8
-#define FLT_REG_VPD_SEC_27XX_3	0xDA
 
 struct qla_flt_region {
 	uint32_t code;
@@ -1574,10 +1502,7 @@ struct access_chip_rsp_84xx {
 /*
  * ISP83xx mailbox commands
  */
-#define MBC_WRITE_REMOTE_REG		0x0001 /* Write remote register */
-#define MBC_READ_REMOTE_REG		0x0009 /* Read remote register */
-#define MBC_RESTART_NIC_FIRMWARE	0x003d /* Restart NIC firmware */
-#define MBC_SET_ACCESS_CONTROL		0x003e /* Access control command */
+#define MBC_WRITE_REMOTE_REG 0x0001 /* Write remote register */
 
 /* Flash access control option field bit definitions */
 #define FAC_OPT_FORCE_SEMAPHORE		BIT_15

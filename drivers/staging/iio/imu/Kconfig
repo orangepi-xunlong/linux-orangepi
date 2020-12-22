@@ -1,0 +1,34 @@
+#
+# IIO imu drivers configuration
+#
+#menu "Inertial measurement units"
+
+menuconfig INV_SENSOR
+       bool "Invensense MPU devices"
+       default y
+
+if INV_SENSOR
+#config ADIS16400
+#	tristate "Analog Devices ADIS16400 and similar IMU SPI driver"
+#	depends on SPI
+#	select IIO_SW_RING if IIO_BUFFER
+#	select IIO_TRIGGER if IIO_BUFFER
+#	help
+#	  Say yes here to build support for Analog Devices adis16300, adis16344,
+#	  adis16350, adis16354, adis16355, adis16360, adis16362, adis16364,
+#	  adis16365, adis16400 and adis16405 triaxial inertial sensors
+#	  (adis16400 series also have magnetometers).
+	  
+#config INV_SENSORS_MPU6500
+#	tristate "Invensense MPU 6500 devices"
+#	depends on I2C && SYSFS && IIO && IIO_KFIFO_BUF && IIO_TRIGGER
+#	default y
+#	help
+#	  This driver supports the Invensense MPU devices.
+#	  This includes MPU6500.
+#	  This driver can be built as a module. The module will be called
+#	  inv-mpu-iio.
+
+source "drivers/staging/iio/imu/inv_mpu/Kconfig"
+endif
+#endmenu

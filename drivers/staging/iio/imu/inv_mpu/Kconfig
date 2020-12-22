@@ -1,0 +1,14 @@
+#
+# inv-mpu-iio driver for Invensense MPU devices and combos
+#
+
+config INV_MPU6500_IIO
+	tristate "Invensense MPU6500 devices"
+	depends on I2C && SYSFS && IIO && IIO_KFIFO_BUF && IIO_TRIGGER
+	default m
+	help
+	  This driver supports the Invensense MPU devices.
+	  This includes MPU6050/MPU3050/MPU9150/ITG3500/MPU6500/MPU9250.
+	  This driver can be built as a module. The module will be called
+	  inv-mpu-iio.
+

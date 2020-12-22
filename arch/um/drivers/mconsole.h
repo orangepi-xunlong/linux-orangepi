@@ -7,12 +7,12 @@
 #ifndef __MCONSOLE_H__
 #define __MCONSOLE_H__
 
-#ifdef __UM_HOST__
+#ifndef __KERNEL__
 #include <stdint.h>
 #define u32 uint32_t
 #endif
 
-#include <sysdep/ptrace.h>
+#include "sysdep/ptrace.h"
 
 #define MCONSOLE_MAGIC (0xcafebabe)
 #define MCONSOLE_MAX_DATA (512)

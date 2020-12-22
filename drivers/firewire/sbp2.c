@@ -174,7 +174,6 @@ struct sbp2_target {
 	unsigned int mgt_orb_timeout;
 	unsigned int max_payload;
 
-	spinlock_t lock;
 	int dont_block;	/* counter for each logical unit */
 	int blocked;	/* ditto */
 };
@@ -209,8 +208,9 @@ static const struct device *lu_dev(const struct sbp2_logical_unit *lu)
 #define SBP2_MAX_CDB_SIZE		16
 
 /*
- * The maximum SBP-2 data buffer size is 0xffff.  We quadlet-align this
- * for compatibility with earlier versions of this driver.
+ * The default maximum s/g segment size of a FireWire controller is
+ * usually 0x10000, but SBP-2 only allows 0xffff. Since buffers have to
+ * be quadlet-aligned, we set the length limit to 0xffff & ~3.
  */
 #define SBP2_MAX_SEG_SIZE		0xfffc
 
@@ -271,7 +271,6 @@ struct sbp2_orb {
 	dma_addr_t request_bus;
 	int rcode;
 	void (*callback)(struct sbp2_orb * orb, struct sbp2_status * status);
-	struct sbp2_logical_unit *lu;
 	struct list_head link;
 };
 
@@ -323,6 +322,7 @@ struct sbp2_command_orb {
 		u8 command_block[SBP2_MAX_CDB_SIZE];
 	} request;
 	struct scsi_cmnd *cmd;
+	struct sbp2_logical_unit *lu;
 
 	struct sbp2_pointer page_table[SG_ALL] __attribute__((aligned(8)));
 	dma_addr_t page_table_bus;
@@ -445,7 +445,7 @@ static void sbp2_status_write(struct fw_card *card, struct fw_request *request,
 	}
 
 	/* Lookup the orb corresponding to this status write. */
-	spin_lock_irqsave(&lu->tgt->lock, flags);
+	spin_lock_irqsave(&card->lock, flags);
 	list_for_each_entry(orb, &lu->orb_list, link) {
 		if (STATUS_GET_ORB_HIGH(status) == 0 &&
 		    STATUS_GET_ORB_LOW(status) == orb->request_bus) {
@@ -454,7 +454,7 @@ static void sbp2_status_write(struct fw_card *card, struct fw_request *request,
 			break;
 		}
 	}
-	spin_unlock_irqrestore(&lu->tgt->lock, flags);
+	spin_unlock_irqrestore(&card->lock, flags);
 
 	if (&orb->link != &lu->orb_list) {
 		orb->callback(orb, &status);
@@ -481,18 +481,18 @@ static void complete_transaction(struct fw_card *card, int rcode,
 	 * been set and only does the cleanup if the transaction
 	 * failed and we didn't already get a status write.
 	 */
-	spin_lock_irqsave(&orb->lu->tgt->lock, flags);
+	spin_lock_irqsave(&card->lock, flags);
 
 	if (orb->rcode == -1)
 		orb->rcode = rcode;
 	if (orb->rcode != RCODE_COMPLETE) {
 		list_del(&orb->link);
-		spin_unlock_irqrestore(&orb->lu->tgt->lock, flags);
+		spin_unlock_irqrestore(&card->lock, flags);
 
 		orb->callback(orb, NULL);
 		kref_put(&orb->kref, free_orb); /* orb callback reference */
 	} else {
-		spin_unlock_irqrestore(&orb->lu->tgt->lock, flags);
+		spin_unlock_irqrestore(&card->lock, flags);
 	}
 
 	kref_put(&orb->kref, free_orb); /* transaction callback reference */
@@ -508,10 +508,9 @@ static void sbp2_send_orb(struct sbp2_orb *orb, struct sbp2_logical_unit *lu,
 	orb_pointer.high = 0;
 	orb_pointer.low = cpu_to_be32(orb->request_bus);
 
-	orb->lu = lu;
-	spin_lock_irqsave(&lu->tgt->lock, flags);
+	spin_lock_irqsave(&device->card->lock, flags);
 	list_add_tail(&orb->link, &lu->orb_list);
-	spin_unlock_irqrestore(&lu->tgt->lock, flags);
+	spin_unlock_irqrestore(&device->card->lock, flags);
 
 	kref_get(&orb->kref); /* transaction callback reference */
 	kref_get(&orb->kref); /* orb callback reference */
@@ -526,12 +525,13 @@ static int sbp2_cancel_orbs(struct sbp2_logical_unit *lu)
 	struct fw_device *device = target_parent_device(lu->tgt);
 	struct sbp2_orb *orb, *next;
 	struct list_head list;
+	unsigned long flags;
 	int retval = -ENOENT;
 
 	INIT_LIST_HEAD(&list);
-	spin_lock_irq(&lu->tgt->lock);
+	spin_lock_irqsave(&device->card->lock, flags);
 	list_splice_init(&lu->orb_list, &list);
-	spin_unlock_irq(&lu->tgt->lock);
+	spin_unlock_irqrestore(&device->card->lock, flags);
 
 	list_for_each_entry_safe(orb, next, &list, link) {
 		retval = 0;
@@ -688,11 +688,16 @@ static void sbp2_agent_reset_no_wait(struct sbp2_logical_unit *lu)
 			&d, 4, complete_agent_reset_write_no_wait, t);
 }
 
-static inline void sbp2_allow_block(struct sbp2_target *tgt)
+static inline void sbp2_allow_block(struct sbp2_logical_unit *lu)
 {
-	spin_lock_irq(&tgt->lock);
-	--tgt->dont_block;
-	spin_unlock_irq(&tgt->lock);
+	/*
+	 * We may access dont_block without taking card->lock here:
+	 * All callers of sbp2_allow_block() and all callers of sbp2_unblock()
+	 * are currently serialized against each other.
+	 * And a wrong result in sbp2_conditionally_block()'s access of
+	 * dont_block is rather harmless, it simply misses its first chance.
+	 */
+	--lu->tgt->dont_block;
 }
 
 /*
@@ -701,7 +706,7 @@ static inline void sbp2_allow_block(struct sbp2_target *tgt)
  *     logical units have been finished (indicated by dont_block == 0).
  *   - lu->generation is stale.
  *
- * Note, scsi_block_requests() must be called while holding tgt->lock,
+ * Note, scsi_block_requests() must be called while holding card->lock,
  * otherwise it might foil sbp2_[conditionally_]unblock()'s attempt to
  * unblock the target.
  */
@@ -713,20 +718,20 @@ static void sbp2_conditionally_block(struct sbp2_logical_unit *lu)
 		container_of((void *)tgt, struct Scsi_Host, hostdata[0]);
 	unsigned long flags;
 
-	spin_lock_irqsave(&tgt->lock, flags);
+	spin_lock_irqsave(&card->lock, flags);
 	if (!tgt->dont_block && !lu->blocked &&
 	    lu->generation != card->generation) {
 		lu->blocked = true;
 		if (++tgt->blocked == 1)
 			scsi_block_requests(shost);
 	}
-	spin_unlock_irqrestore(&tgt->lock, flags);
+	spin_unlock_irqrestore(&card->lock, flags);
 }
 
 /*
  * Unblocks lu->tgt as soon as all its logical units can be unblocked.
  * Note, it is harmless to run scsi_unblock_requests() outside the
- * tgt->lock protected section.  On the other hand, running it inside
+ * card->lock protected section.  On the other hand, running it inside
  * the section might clash with shost->host_lock.
  */
 static void sbp2_conditionally_unblock(struct sbp2_logical_unit *lu)
@@ -735,14 +740,15 @@ static void sbp2_conditionally_unblock(struct sbp2_logical_unit *lu)
 	struct fw_card *card = target_parent_device(tgt)->card;
 	struct Scsi_Host *shost =
 		container_of((void *)tgt, struct Scsi_Host, hostdata[0]);
+	unsigned long flags;
 	bool unblock = false;
 
-	spin_lock_irq(&tgt->lock);
+	spin_lock_irqsave(&card->lock, flags);
 	if (lu->blocked && lu->generation == card->generation) {
 		lu->blocked = false;
 		unblock = --tgt->blocked == 0;
 	}
-	spin_unlock_irq(&tgt->lock);
+	spin_unlock_irqrestore(&card->lock, flags);
 
 	if (unblock)
 		scsi_unblock_requests(shost);
@@ -751,17 +757,19 @@ static void sbp2_conditionally_unblock(struct sbp2_logical_unit *lu)
 /*
  * Prevents future blocking of tgt and unblocks it.
  * Note, it is harmless to run scsi_unblock_requests() outside the
- * tgt->lock protected section.  On the other hand, running it inside
+ * card->lock protected section.  On the other hand, running it inside
  * the section might clash with shost->host_lock.
  */
 static void sbp2_unblock(struct sbp2_target *tgt)
 {
+	struct fw_card *card = target_parent_device(tgt)->card;
 	struct Scsi_Host *shost =
 		container_of((void *)tgt, struct Scsi_Host, hostdata[0]);
+	unsigned long flags;
 
-	spin_lock_irq(&tgt->lock);
+	spin_lock_irqsave(&card->lock, flags);
 	++tgt->dont_block;
-	spin_unlock_irq(&tgt->lock);
+	spin_unlock_irqrestore(&card->lock, flags);
 
 	scsi_unblock_requests(shost);
 }
@@ -897,7 +905,7 @@ static void sbp2_login(struct work_struct *work)
 	/* No error during __scsi_add_device() */
 	lu->has_sdev = true;
 	scsi_device_put(sdev);
-	sbp2_allow_block(tgt);
+	sbp2_allow_block(lu);
 
 	return;
 
@@ -1130,10 +1138,11 @@ static void sbp2_init_workarounds(struct sbp2_target *tgt, u32 model,
 }
 
 static struct scsi_host_template scsi_driver_template;
-static void sbp2_remove(struct fw_unit *unit);
+static int sbp2_remove(struct device *dev);
 
-static int sbp2_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
+static int sbp2_probe(struct device *dev)
 {
+	struct fw_unit *unit = fw_unit(dev);
 	struct fw_device *device = fw_parent_device(unit);
 	struct sbp2_target *tgt;
 	struct sbp2_logical_unit *lu;
@@ -1145,8 +1154,8 @@ static int sbp2_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
 		return -ENODEV;
 
 	if (dma_get_max_seg_size(device->card->device) > SBP2_MAX_SEG_SIZE)
-		WARN_ON(dma_set_max_seg_size(device->card->device,
-					     SBP2_MAX_SEG_SIZE));
+		BUG_ON(dma_set_max_seg_size(device->card->device,
+					    SBP2_MAX_SEG_SIZE));
 
 	shost = scsi_host_alloc(&scsi_driver_template, sizeof(*tgt));
 	if (shost == NULL)
@@ -1156,7 +1165,6 @@ static int sbp2_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
 	dev_set_drvdata(&unit->device, tgt);
 	tgt->unit = unit;
 	INIT_LIST_HEAD(&tgt->lu_list);
-	spin_lock_init(&tgt->lock);
 	tgt->guid = (u64)device->config_rom[3] << 32 | device->config_rom[4];
 
 	if (fw_device_enable_phys_dma(device) < 0)
@@ -1164,8 +1172,7 @@ static int sbp2_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
 
 	shost->max_cmd_len = SBP2_MAX_CDB_SIZE;
 
-	if (scsi_add_host_with_dma(shost, &unit->device,
-				   device->card->device) < 0)
+	if (scsi_add_host(shost, &unit->device) < 0)
 		goto fail_shost_put;
 
 	/* implicit directory ID */
@@ -1198,7 +1205,7 @@ static int sbp2_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
 	return 0;
 
  fail_remove:
-	sbp2_remove(unit);
+	sbp2_remove(dev);
 	return -ENOMEM;
 
  fail_shost_put:
@@ -1224,8 +1231,9 @@ static void sbp2_update(struct fw_unit *unit)
 	}
 }
 
-static void sbp2_remove(struct fw_unit *unit)
+static int sbp2_remove(struct device *dev)
 {
+	struct fw_unit *unit = fw_unit(dev);
 	struct fw_device *device = fw_parent_device(unit);
 	struct sbp2_target *tgt = dev_get_drvdata(&unit->device);
 	struct sbp2_logical_unit *lu, *next;
@@ -1262,9 +1270,10 @@ static void sbp2_remove(struct fw_unit *unit)
 		kfree(lu);
 	}
 	scsi_remove_host(shost);
-	dev_notice(&unit->device, "released target %d:0:0\n", shost->host_no);
+	dev_notice(dev, "released target %d:0:0\n", shost->host_no);
 
 	scsi_host_put(shost);
+	return 0;
 }
 
 #define SBP2_UNIT_SPEC_ID_ENTRY	0x0000609e
@@ -1285,17 +1294,20 @@ static struct fw_driver sbp2_driver = {
 		.owner  = THIS_MODULE,
 		.name   = KBUILD_MODNAME,
 		.bus    = &fw_bus_type,
+		.probe  = sbp2_probe,
+		.remove = sbp2_remove,
 	},
-	.probe    = sbp2_probe,
 	.update   = sbp2_update,
-	.remove   = sbp2_remove,
 	.id_table = sbp2_id_table,
 };
 
 static void sbp2_unmap_scatterlist(struct device *card_device,
 				   struct sbp2_command_orb *orb)
 {
-	scsi_dma_unmap(orb->cmd);
+	if (scsi_sg_count(orb->cmd))
+		dma_unmap_sg(card_device, scsi_sglist(orb->cmd),
+			     scsi_sg_count(orb->cmd),
+			     orb->cmd->sc_data_direction);
 
 	if (orb->request.misc & cpu_to_be32(COMMAND_ORB_PAGE_TABLE_PRESENT))
 		dma_unmap_single(card_device, orb->page_table_bus,
@@ -1353,12 +1365,12 @@ static void complete_command_orb(struct sbp2_orb *base_orb,
 {
 	struct sbp2_command_orb *orb =
 		container_of(base_orb, struct sbp2_command_orb, base);
-	struct fw_device *device = target_parent_device(base_orb->lu->tgt);
+	struct fw_device *device = target_parent_device(orb->lu->tgt);
 	int result;
 
 	if (status != NULL) {
 		if (STATUS_GET_DEAD(*status))
-			sbp2_agent_reset_no_wait(base_orb->lu);
+			sbp2_agent_reset_no_wait(orb->lu);
 
 		switch (STATUS_GET_RESPONSE(*status)) {
 		case SBP2_STATUS_REQUEST_COMPLETE:
@@ -1384,7 +1396,7 @@ static void complete_command_orb(struct sbp2_orb *base_orb,
 		 * or when sending the write (less likely).
 		 */
 		result = DID_BUS_BUSY << 16;
-		sbp2_conditionally_block(base_orb->lu);
+		sbp2_conditionally_block(orb->lu);
 	}
 
 	dma_unmap_single(device->card->device, orb->base.request_bus,
@@ -1401,8 +1413,9 @@ static int sbp2_map_scatterlist(struct sbp2_command_orb *orb,
 	struct scatterlist *sg = scsi_sglist(orb->cmd);
 	int i, n;
 
-	n = scsi_dma_map(orb->cmd);
-	if (n <= 0)
+	n = dma_map_sg(device->card->device, sg, scsi_sg_count(orb->cmd),
+		       orb->cmd->sc_data_direction);
+	if (n == 0)
 		goto fail;
 
 	/*
@@ -1448,7 +1461,8 @@ static int sbp2_map_scatterlist(struct sbp2_command_orb *orb,
 	return 0;
 
  fail_page_table:
-	scsi_dma_unmap(orb->cmd);
+	dma_unmap_sg(device->card->device, scsi_sglist(orb->cmd),
+		     scsi_sg_count(orb->cmd), orb->cmd->sc_data_direction);
  fail:
 	return -ENOMEM;
 }
@@ -1463,13 +1477,27 @@ static int sbp2_scsi_queuecommand(struct Scsi_Host *shost,
 	struct sbp2_command_orb *orb;
 	int generation, retval = SCSI_MLQUEUE_HOST_BUSY;
 
+	/*
+	 * Bidirectional commands are not yet implemented, and unknown
+	 * transfer direction not handled.
+	 */
+	if (cmd->sc_data_direction == DMA_BIDIRECTIONAL) {
+		dev_err(lu_dev(lu), "cannot handle bidirectional command\n");
+		cmd->result = DID_ERROR << 16;
+		cmd->scsi_done(cmd);
+		return 0;
+	}
+
 	orb = kzalloc(sizeof(*orb), GFP_ATOMIC);
-	if (orb == NULL)
+	if (orb == NULL) {
+		dev_notice(lu_dev(lu), "failed to alloc ORB\n");
 		return SCSI_MLQUEUE_HOST_BUSY;
+	}
 
 	/* Initialize rcode to something not RCODE_COMPLETE. */
 	orb->base.rcode = -1;
 	kref_init(&orb->base.kref);
+	orb->lu = lu;
 	orb->cmd = cmd;
 	orb->request.next.high = cpu_to_be32(SBP2_ORB_NULL);
 	orb->request.misc = cpu_to_be32(
@@ -1515,10 +1543,7 @@ static int sbp2_scsi_slave_alloc(struct scsi_device *sdev)
 
 	sdev->allow_restart = 1;
 
-	/*
-	 * SBP-2 does not require any alignment, but we set it anyway
-	 * for compatibility with earlier versions of this driver.
-	 */
+	/* SBP-2 requires quadlet alignment of the data buffers. */
 	blk_queue_update_dma_alignment(sdev->request_queue, 4 - 1);
 
 	if (lu->tgt->workarounds & SBP2_WORKAROUND_INQUIRY_36)
@@ -1551,6 +1576,8 @@ static int sbp2_scsi_slave_configure(struct scsi_device *sdev)
 
 	if (lu->tgt->workarounds & SBP2_WORKAROUND_128K_MAX_TRANS)
 		blk_queue_max_hw_sectors(sdev->request_queue, 128 * 1024 / 512);
+
+	blk_queue_max_segment_size(sdev->request_queue, SBP2_MAX_SEG_SIZE);
 
 	return 0;
 }
@@ -1611,6 +1638,7 @@ static struct scsi_host_template scsi_driver_template = {
 	.this_id		= -1,
 	.sg_tablesize		= SG_ALL,
 	.use_clustering		= ENABLE_CLUSTERING,
+	.cmd_per_lun		= 1,
 	.can_queue		= 1,
 	.sdev_attrs		= sbp2_scsi_sysfs_attrs,
 };
@@ -1621,7 +1649,9 @@ MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(ieee1394, sbp2_id_table);
 
 /* Provide a module alias so root-on-sbp2 initrds don't break. */
+#ifndef CONFIG_IEEE1394_SBP2_MODULE
 MODULE_ALIAS("sbp2");
+#endif
 
 static int __init sbp2_init(void)
 {

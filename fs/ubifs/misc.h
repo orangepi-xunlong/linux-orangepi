@@ -155,8 +155,13 @@ static inline int ubifs_wbuf_sync(struct ubifs_wbuf *wbuf)
  */
 static inline int ubifs_encode_dev(union ubifs_dev_desc *dev, dev_t rdev)
 {
-	dev->new = cpu_to_le32(new_encode_dev(rdev));
-	return sizeof(dev->new);
+	if (new_valid_dev(rdev)) {
+		dev->new = cpu_to_le32(new_encode_dev(rdev));
+		return sizeof(dev->new);
+	} else {
+		dev->huge = cpu_to_le64(huge_encode_dev(rdev));
+		return sizeof(dev->huge);
+	}
 }
 
 /**

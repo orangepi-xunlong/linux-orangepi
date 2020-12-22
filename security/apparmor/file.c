@@ -65,7 +65,7 @@ static void audit_file_mask(struct audit_buffer *ab, u32 mask)
 static void file_audit_cb(struct audit_buffer *ab, void *va)
 {
 	struct common_audit_data *sa = va;
-	kuid_t fsuid = current_fsuid();
+	uid_t fsuid = current_fsuid();
 
 	if (sa->aad->fs.request & AA_AUDIT_FILE_MASK) {
 		audit_log_format(ab, " requested_mask=");
@@ -76,10 +76,8 @@ static void file_audit_cb(struct audit_buffer *ab, void *va)
 		audit_file_mask(ab, sa->aad->fs.denied);
 	}
 	if (sa->aad->fs.request & AA_AUDIT_FILE_MASK) {
-		audit_log_format(ab, " fsuid=%d",
-				 from_kuid(&init_user_ns, fsuid));
-		audit_log_format(ab, " ouid=%d",
-				 from_kuid(&init_user_ns, sa->aad->fs.ouid));
+		audit_log_format(ab, " fsuid=%d", fsuid);
+		audit_log_format(ab, " ouid=%d", sa->aad->fs.ouid);
 	}
 
 	if (sa->aad->fs.target) {
@@ -105,13 +103,12 @@ static void file_audit_cb(struct audit_buffer *ab, void *va)
  */
 int aa_audit_file(struct aa_profile *profile, struct file_perms *perms,
 		  gfp_t gfp, int op, u32 request, const char *name,
-		  const char *target, kuid_t ouid, const char *info, int error)
+		  const char *target, uid_t ouid, const char *info, int error)
 {
 	int type = AUDIT_APPARMOR_AUTO;
 	struct common_audit_data sa;
 	struct apparmor_audit_data aad = {0,};
-	sa.type = LSM_AUDIT_DATA_TASK;
-	sa.u.tsk = NULL;
+	COMMON_AUDIT_DATA_INIT(&sa, NONE);
 	sa.aad = &aad;
 	aad.op = op,
 	aad.fs.request = request;
@@ -204,7 +201,7 @@ static struct file_perms compute_perms(struct aa_dfa *dfa, unsigned int state,
 	 */
 	perms.kill = 0;
 
-	if (uid_eq(current_fsuid(), cond->uid)) {
+	if (current_fsuid() == cond->uid) {
 		perms.allow = map_old_perms(dfa_user_allow(dfa, state));
 		perms.audit = map_old_perms(dfa_user_audit(dfa, state));
 		perms.quiet = map_old_perms(dfa_user_quiet(dfa, state));
@@ -260,7 +257,7 @@ unsigned int aa_str_perms(struct aa_dfa *dfa, unsigned int start,
  */
 static inline bool is_deleted(struct dentry *dentry)
 {
-	if (d_unlinked(dentry) && d_backing_inode(dentry)->i_nlink == 0)
+	if (d_unlinked(dentry) && dentry->d_inode->i_nlink == 0)
 		return 1;
 	return 0;
 }
@@ -276,7 +273,7 @@ static inline bool is_deleted(struct dentry *dentry)
  *
  * Returns: %0 else error if access denied or other error
  */
-int aa_path_perm(int op, struct aa_profile *profile, const struct path *path,
+int aa_path_perm(int op, struct aa_profile *profile, struct path *path,
 		 int flags, u32 request, struct path_cond *cond)
 {
 	char *buffer = NULL;
@@ -347,13 +344,13 @@ static inline bool xindex_is_subset(u32 link, u32 target)
  * Returns: %0 if allowed else error
  */
 int aa_path_link(struct aa_profile *profile, struct dentry *old_dentry,
-		 const struct path *new_dir, struct dentry *new_dentry)
+		 struct path *new_dir, struct dentry *new_dentry)
 {
 	struct path link = { new_dir->mnt, new_dentry };
 	struct path target = { new_dir->mnt, old_dentry };
 	struct path_cond cond = {
-		d_backing_inode(old_dentry)->i_uid,
-		d_backing_inode(old_dentry)->i_mode
+		old_dentry->d_inode->i_uid,
+		old_dentry->d_inode->i_mode
 	};
 	char *buffer = NULL, *buffer2 = NULL;
 	const char *lname, *tname = NULL, *info = NULL;
@@ -450,8 +447,8 @@ int aa_file_perm(int op, struct aa_profile *profile, struct file *file,
 		 u32 request)
 {
 	struct path_cond cond = {
-		.uid = file_inode(file)->i_uid,
-		.mode = file_inode(file)->i_mode
+		.uid = file->f_path.dentry->d_inode->i_uid,
+		.mode = file->f_path.dentry->d_inode->i_mode
 	};
 
 	return aa_path_perm(op, profile, &file->f_path, PATH_DELEGATE_DELETED,

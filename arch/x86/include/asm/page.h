@@ -17,10 +17,6 @@
 
 struct page;
 
-#include <linux/range.h>
-extern struct range pfn_mapped[];
-extern int nr_pfn_mapped;
-
 static inline void clear_user_page(void *page, unsigned long vaddr,
 				   struct page *pg)
 {
@@ -37,10 +33,7 @@ static inline void copy_user_page(void *to, void *from, unsigned long vaddr,
 	alloc_page_vma(GFP_HIGHUSER | __GFP_ZERO | movableflags, vma, vaddr)
 #define __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE
 
-#ifndef __pa
 #define __pa(x)		__phys_addr((unsigned long)(x))
-#endif
-
 #define __pa_nodebug(x)	__phys_addr_nodebug((unsigned long)(x))
 /* __pa_symbol should be used for C visible symbols.
    This seems to be the official gcc blessed way to do such arithmetic. */
@@ -51,12 +44,9 @@ static inline void copy_user_page(void *to, void *from, unsigned long vaddr,
  * case properly. Once all supported versions of gcc understand it, we can
  * remove this Voodoo magic stuff. (i.e. once gcc3.x is deprecated)
  */
-#define __pa_symbol(x) \
-	__phys_addr_symbol(__phys_reloc_hide((unsigned long)(x)))
+#define __pa_symbol(x)	__pa(__phys_reloc_hide((unsigned long)(x)))
 
-#ifndef __va
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
-#endif
 
 #define __boot_va(x)		__va(x)
 #define __boot_pa(x)		__pa(x)
@@ -75,7 +65,7 @@ extern bool __virt_addr_valid(unsigned long kaddr);
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
 
-#define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
+#define __HAVE_ARCH_GATE_AREA 1
 
 #endif	/* __KERNEL__ */
 #endif /* _ASM_X86_PAGE_H */

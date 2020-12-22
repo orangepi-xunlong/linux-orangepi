@@ -4,7 +4,7 @@
 #include <linux/spinlock.h>
 #include <asm/prom.h>
 
-void of_console_init(void);
+extern void of_console_init(void);
 
 extern unsigned int prom_early_allocated;
 

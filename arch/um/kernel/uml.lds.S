@@ -20,15 +20,15 @@ SECTIONS
   . = START + SIZEOF_HEADERS;
 
   _text = .;
+  _stext = .;
+  __init_begin = .;
   INIT_TEXT_SECTION(0)
   . = ALIGN(PAGE_SIZE);
 
   .text      :
   {
-    _stext = .;
     TEXT_TEXT
     SCHED_TEXT
-    CPUIDLE_TEXT
     LOCK_TEXT
     *(.fixup)
     /* .gnu.warning sections are handled specially by elf32.em.  */
@@ -60,12 +60,9 @@ SECTIONS
 	PROVIDE_HIDDEN(__rela_iplt_end = .);
   }
 
-  #include <asm/common.lds.S>
+  #include "asm/common.lds.S"
 
-  __init_begin = .;
   init.data : { INIT_DATA }
-  __init_end = .;
-
   .data    :
   {
     INIT_TASK_DATA(KERNEL_STACK_SIZE)
@@ -100,7 +97,6 @@ SECTIONS
   PROVIDE(_bss_start = .);
   SBSS(0)
   BSS(0)
-   __bss_stop = .;
   _end = .;
   PROVIDE (end = .);
 

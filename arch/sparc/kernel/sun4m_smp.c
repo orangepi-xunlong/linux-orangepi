@@ -4,18 +4,14 @@
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
  */
 
-#include <linux/clockchips.h>
 #include <linux/interrupt.h>
 #include <linux/profile.h>
 #include <linux/delay.h>
-#include <linux/sched.h>
 #include <linux/cpu.h>
 
 #include <asm/cacheflush.h>
 #include <asm/switch_to.h>
 #include <asm/tlbflush.h>
-#include <asm/timer.h>
-#include <asm/oplib.h>
 
 #include "irq.h"
 #include "kernel.h"
@@ -34,24 +30,39 @@ swap_ulong(volatile unsigned long *ptr, unsigned long val)
 	return val;
 }
 
-void sun4m_cpu_pre_starting(void *arg)
-{
-}
+static void smp4m_ipi_init(void);
+static void smp_setup_percpu_timer(void);
 
-void sun4m_cpu_pre_online(void *arg)
+void __cpuinit smp4m_callin(void)
 {
 	int cpuid = hard_smp_processor_id();
 
-	/* Allow master to continue. The master will then give us the
-	 * go-ahead by setting the smp_commenced_mask and will wait without
-	 * timeouts until our setup is completed fully (signified by
-	 * our bit being set in the cpu_online_mask).
+	local_flush_cache_all();
+	local_flush_tlb_all();
+
+	notify_cpu_starting(cpuid);
+
+	/* Get our local ticker going. */
+	smp_setup_percpu_timer();
+
+	calibrate_delay();
+	smp_store_cpu_info(cpuid);
+
+	local_flush_cache_all();
+	local_flush_tlb_all();
+
+	/*
+	 * Unblock the master CPU _only_ when the scheduler state
+	 * of all secondary CPUs will be up-to-date, so after
+	 * the SMP initialization the master will be just allowed
+	 * to call the scheduler code.
 	 */
+	/* Allow master to continue. */
 	swap_ulong(&cpu_callin_map[cpuid], 1);
 
 	/* XXX: What's up with all the flushes? */
-	local_ops->cache_all();
-	local_ops->tlb_all();
+	local_flush_cache_all();
+	local_flush_tlb_all();
 
 	/* Fix idle thread fields. */
 	__asm__ __volatile__("ld [%0], %%g6\n\t"
@@ -64,6 +75,10 @@ void sun4m_cpu_pre_online(void *arg)
 
 	while (!cpumask_test_cpu(cpuid, &smp_commenced_mask))
 		mb();
+
+	local_irq_enable();
+
+	set_cpu_online(cpuid, true);
 }
 
 /*
@@ -71,19 +86,23 @@ void sun4m_cpu_pre_online(void *arg)
  */
 void __init smp4m_boot_cpus(void)
 {
-	sun4m_unmask_profile_irq();
-	local_ops->cache_all();
+	smp4m_ipi_init();
+	smp_setup_percpu_timer();
+	local_flush_cache_all();
 }
 
-int smp4m_boot_one_cpu(int i, struct task_struct *idle)
+int __cpuinit smp4m_boot_one_cpu(int i)
 {
 	unsigned long *entry = &sun4m_cpu_startup;
+	struct task_struct *p;
 	int timeout;
 	int cpu_node;
 
 	cpu_find_by_mid(i, &cpu_node);
-	current_set[i] = task_thread_info(idle);
 
+	/* Cook up an idler for this guy. */
+	p = fork_idle(i);
+	current_set[i] = task_thread_info(p);
 	/* See trampoline.S for details... */
 	entry += ((i - 1) * 3);
 
@@ -98,7 +117,7 @@ int smp4m_boot_one_cpu(int i, struct task_struct *idle)
 
 	/* whirrr, whirrr, whirrrrrrrrr... */
 	printk(KERN_INFO "Starting CPU %d at %p\n", i, entry);
-	local_ops->cache_all();
+	local_flush_cache_all();
 	prom_startcpu(cpu_node, &smp_penguin_ctable, 0, (char *)entry);
 
 	/* wheee... it's going... */
@@ -113,7 +132,7 @@ int smp4m_boot_one_cpu(int i, struct task_struct *idle)
 		return -ENODEV;
 	}
 
-	local_ops->cache_all();
+	local_flush_cache_all();
 	return 0;
 }
 
@@ -130,29 +149,30 @@ void __init smp4m_smp_done(void)
 		prev = &cpu_data(i).next;
 	}
 	*prev = first;
-	local_ops->cache_all();
+	local_flush_cache_all();
 
 	/* Ok, they are spinning and ready to go. */
 }
 
-static void sun4m_send_ipi(int cpu, int level)
+
+/* Initialize IPIs on the SUN4M SMP machine */
+static void __init smp4m_ipi_init(void)
 {
-	sbus_writel(SUN4M_SOFT_INT(level), &sun4m_irq_percpu[cpu]->set);
 }
 
-static void sun4m_ipi_resched(int cpu)
+static void smp4m_ipi_resched(int cpu)
 {
-	sun4m_send_ipi(cpu, IRQ_IPI_RESCHED);
+	set_cpu_int(cpu, IRQ_IPI_RESCHED);
 }
 
-static void sun4m_ipi_single(int cpu)
+static void smp4m_ipi_single(int cpu)
 {
-	sun4m_send_ipi(cpu, IRQ_IPI_SINGLE);
+	set_cpu_int(cpu, IRQ_IPI_SINGLE);
 }
 
-static void sun4m_ipi_mask_one(int cpu)
+static void smp4m_ipi_mask_one(int cpu)
 {
-	sun4m_send_ipi(cpu, IRQ_IPI_MASK);
+	set_cpu_int(cpu, IRQ_IPI_MASK);
 }
 
 static struct smp_funcall {
@@ -169,7 +189,7 @@ static struct smp_funcall {
 static DEFINE_SPINLOCK(cross_call_lock);
 
 /* Cross calls must be serialized, at least currently. */
-static void sun4m_cross_call(smpfunc_t func, cpumask_t mask, unsigned long arg1,
+static void smp4m_cross_call(smpfunc_t func, cpumask_t mask, unsigned long arg1,
 			     unsigned long arg2, unsigned long arg3,
 			     unsigned long arg4)
 {
@@ -196,7 +216,7 @@ static void sun4m_cross_call(smpfunc_t func, cpumask_t mask, unsigned long arg1,
 				if (cpumask_test_cpu(i, &mask)) {
 					ccall_info.processors_in[i] = 0;
 					ccall_info.processors_out[i] = 0;
-					sun4m_send_ipi(i, IRQ_CROSS_CALL);
+					set_cpu_int(i, IRQ_CROSS_CALL);
 				} else {
 					ccall_info.processors_in[i] = 1;
 					ccall_info.processors_out[i] = 1;
@@ -240,33 +260,64 @@ void smp4m_cross_call_irq(void)
 void smp4m_percpu_timer_interrupt(struct pt_regs *regs)
 {
 	struct pt_regs *old_regs;
-	struct clock_event_device *ce;
 	int cpu = smp_processor_id();
 
 	old_regs = set_irq_regs(regs);
 
-	ce = &per_cpu(sparc32_clockevent, cpu);
+	sun4m_clear_profile_irq(cpu);
 
-	if (clockevent_state_periodic(ce))
-		sun4m_clear_profile_irq(cpu);
-	else
-		sparc_config.load_profile_irq(cpu, 0); /* Is this needless? */
+	profile_tick(CPU_PROFILING);
 
-	irq_enter();
-	ce->event_handler(ce);
-	irq_exit();
+	if (!--prof_counter(cpu)) {
+		int user = user_mode(regs);
 
+		irq_enter();
+		update_process_times(user);
+		irq_exit();
+
+		prof_counter(cpu) = prof_multiplier(cpu);
+	}
 	set_irq_regs(old_regs);
 }
 
-static const struct sparc32_ipi_ops sun4m_ipi_ops = {
-	.cross_call = sun4m_cross_call,
-	.resched    = sun4m_ipi_resched,
-	.single     = sun4m_ipi_single,
-	.mask_one   = sun4m_ipi_mask_one,
-};
+static void __cpuinit smp_setup_percpu_timer(void)
+{
+	int cpu = smp_processor_id();
+
+	prof_counter(cpu) = prof_multiplier(cpu) = 1;
+	load_profile_irq(cpu, lvl14_resolution);
+
+	if (cpu == boot_cpu_id)
+		sun4m_unmask_profile_irq();
+}
+
+static void __init smp4m_blackbox_id(unsigned *addr)
+{
+	int rd = *addr & 0x3e000000;
+	int rs1 = rd >> 11;
+
+	addr[0] = 0x81580000 | rd;		/* rd %tbr, reg */
+	addr[1] = 0x8130200c | rd | rs1;	/* srl reg, 0xc, reg */
+	addr[2] = 0x80082003 | rd | rs1;	/* and reg, 3, reg */
+}
+
+static void __init smp4m_blackbox_current(unsigned *addr)
+{
+	int rd = *addr & 0x3e000000;
+	int rs1 = rd >> 11;
+
+	addr[0] = 0x81580000 | rd;		/* rd %tbr, reg */
+	addr[2] = 0x8130200a | rd | rs1;	/* srl reg, 0xa, reg */
+	addr[4] = 0x8008200c | rd | rs1;	/* and reg, 0xc, reg */
+}
 
 void __init sun4m_init_smp(void)
 {
-	sparc32_ipi_ops = &sun4m_ipi_ops;
+	BTFIXUPSET_BLACKBOX(hard_smp_processor_id, smp4m_blackbox_id);
+	BTFIXUPSET_BLACKBOX(load_current, smp4m_blackbox_current);
+	BTFIXUPSET_CALL(smp_cross_call, smp4m_cross_call, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(__hard_smp_processor_id, __smp4m_processor_id, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(smp_ipi_resched, smp4m_ipi_resched, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(smp_ipi_single, smp4m_ipi_single, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(smp_ipi_mask_one, smp4m_ipi_mask_one, BTFIXUPCALL_NORM);
 }

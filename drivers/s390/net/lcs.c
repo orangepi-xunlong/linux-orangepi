@@ -30,6 +30,7 @@
 #include <linux/if.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/trdevice.h>
 #include <linux/fddidevice.h>
 #include <linux/inetdevice.h>
 #include <linux/in.h>
@@ -49,7 +50,8 @@
 #include "lcs.h"
 
 
-#if !defined(CONFIG_ETHERNET) && !defined(CONFIG_FDDI)
+#if !defined(CONFIG_ETHERNET) && \
+    !defined(CONFIG_TR) && !defined(CONFIG_FDDI)
 #error Cannot compile lcs.c without some net devices switched on.
 #endif
 
@@ -88,8 +90,10 @@ static debug_info_t *lcs_dbf_trace;
 static void
 lcs_unregister_debug_facility(void)
 {
-	debug_unregister(lcs_dbf_setup);
-	debug_unregister(lcs_dbf_trace);
+	if (lcs_dbf_setup)
+		debug_unregister(lcs_dbf_setup);
+	if (lcs_dbf_trace)
+		debug_unregister(lcs_dbf_trace);
 }
 
 static int
@@ -280,7 +284,7 @@ lcs_setup_write_ccws(struct lcs_card *card)
 
 	LCS_DBF_TEXT(3, setup, "iwritccw");
 	/* Setup write ccws. */
-	memset(card->write.ccws, 0, sizeof(struct ccw1) * (LCS_NUM_BUFFS + 1));
+	memset(card->write.ccws, 0, sizeof(struct ccw1) * LCS_NUM_BUFFS + 1);
 	for (cnt = 0; cnt < LCS_NUM_BUFFS; cnt++) {
 		card->write.ccws[cnt].cmd_code = LCS_CCW_WRITE;
 		card->write.ccws[cnt].count = 0;
@@ -897,7 +901,6 @@ lcs_send_lancmd(struct lcs_card *card, struct lcs_buffer *buffer,
 	add_timer(&timer);
 	wait_event(reply->wait_q, reply->received);
 	del_timer_sync(&timer);
-	destroy_timer_on_stack(&timer);
 	LCS_DBF_TEXT_(4, trace, "rc:%d",reply->rc);
 	rc = reply->rc;
 	lcs_put_reply(reply);
@@ -1163,7 +1166,10 @@ static void
 lcs_get_mac_for_ipm(__be32 ipm, char *mac, struct net_device *dev)
 {
 	LCS_DBF_TEXT(4,trace, "getmac");
-	ip_eth_mc_map(ipm, mac);
+	if (dev->type == ARPHRD_IEEE802_TR)
+		ip_tr_mc_map(ipm, mac);
+	else
+		ip_eth_mc_map(ipm, mac);
 }
 
 /**
@@ -1635,6 +1641,12 @@ lcs_startlan_auto(struct lcs_card *card)
 		return 0;
 
 #endif
+#ifdef CONFIG_TR
+	card->lan_type = LCS_FRAME_TYPE_TR;
+	rc = lcs_send_startlan(card, LCS_INITIATOR_TCPIP);
+	if (rc == 0)
+		return 0;
+#endif
 #ifdef CONFIG_FDDI
 	card->lan_type = LCS_FRAME_TYPE_FDDI;
 	rc = lcs_send_startlan(card, LCS_INITIATOR_TCPIP);
@@ -1761,8 +1773,8 @@ lcs_get_control(struct lcs_card *card, struct lcs_cmd *cmd)
 			lcs_schedule_recovery(card);
 			break;
 		case LCS_CMD_STOPLAN:
-			pr_warn("Stoplan for %s initiated by LGW\n",
-				card->dev->name);
+			pr_warning("Stoplan for %s initiated by LGW.\n",
+				   card->dev->name);
 			if (card->dev)
 				netif_carrier_off(card->dev);
 			break;
@@ -1941,17 +1953,14 @@ static ssize_t
 lcs_portno_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
         struct lcs_card *card;
-	int rc;
-	s16 value;
+        int value;
 
 	card = dev_get_drvdata(dev);
 
         if (!card)
                 return 0;
 
-	rc = kstrtos16(buf, 0, &value);
-	if (rc)
-		return -EINVAL;
+        sscanf(buf, "%u", &value);
         /* TODO: sanity checks */
         card->portno = value;
 
@@ -1998,17 +2007,14 @@ static ssize_t
 lcs_timeout_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
         struct lcs_card *card;
-	unsigned int value;
-	int rc;
+        int value;
 
 	card = dev_get_drvdata(dev);
 
         if (!card)
                 return 0;
 
-	rc = kstrtouint(buf, 0, &value);
-	if (rc)
-		return -EINVAL;
+        sscanf(buf, "%u", &value);
         /* TODO: sanity checks */
         card->lancmd_timeout = value;
 
@@ -2045,16 +2051,9 @@ static struct attribute * lcs_attrs[] = {
 	&dev_attr_recover.attr,
 	NULL,
 };
+
 static struct attribute_group lcs_attr_group = {
 	.attrs = lcs_attrs,
-};
-static const struct attribute_group *lcs_attr_groups[] = {
-	&lcs_attr_group,
-	NULL,
-};
-static const struct device_type lcs_devtype = {
-	.name = "lcs",
-	.groups = lcs_attr_groups,
 };
 
 /**
@@ -2064,6 +2063,7 @@ static int
 lcs_probe_device(struct ccwgroup_device *ccwgdev)
 {
 	struct lcs_card *card;
+	int ret;
 
 	if (!get_device(&ccwgdev->dev))
 		return -ENODEV;
@@ -2075,6 +2075,12 @@ lcs_probe_device(struct ccwgroup_device *ccwgdev)
 		put_device(&ccwgdev->dev);
                 return -ENOMEM;
         }
+	ret = sysfs_create_group(&ccwgdev->dev.kobj, &lcs_attr_group);
+	if (ret) {
+		lcs_free_card(card);
+		put_device(&ccwgdev->dev);
+		return ret;
+        }
 	dev_set_drvdata(&ccwgdev->dev, card);
 	ccwgdev->cdev[0]->handler = lcs_irq;
 	ccwgdev->cdev[1]->handler = lcs_irq;
@@ -2083,9 +2089,7 @@ lcs_probe_device(struct ccwgroup_device *ccwgdev)
 	card->thread_start_mask = 0;
 	card->thread_allowed_mask = 0;
 	card->thread_running_mask = 0;
-	ccwgdev->dev.type = &lcs_devtype;
-
-	return 0;
+        return 0;
 }
 
 static int
@@ -2150,7 +2154,7 @@ lcs_new_device(struct ccwgroup_device *ccwgdev)
 	rc = lcs_detect(card);
 	if (rc) {
 		LCS_DBF_TEXT(2, setup, "dtctfail");
-		dev_err(&ccwgdev->dev,
+		dev_err(&card->dev->dev,
 			"Detecting a network adapter for LCS devices"
 			" failed with rc=%d (0x%x)\n", rc, rc);
 		lcs_stopcard(card);
@@ -2166,6 +2170,12 @@ lcs_new_device(struct ccwgroup_device *ccwgdev)
 	case LCS_FRAME_TYPE_ENET:
 		card->lan_type_trans = eth_type_trans;
 		dev = alloc_etherdev(0);
+		break;
+#endif
+#ifdef CONFIG_TR
+	case LCS_FRAME_TYPE_TR:
+		card->lan_type_trans = tr_type_trans;
+		dev = alloc_trdev(0);
 		break;
 #endif
 #ifdef CONFIG_FDDI
@@ -2313,9 +2323,9 @@ lcs_remove_device(struct ccwgroup_device *ccwgdev)
 	}
 	if (card->dev)
 		unregister_netdev(card->dev);
+	sysfs_remove_group(&ccwgdev->dev.kobj, &lcs_attr_group);
 	lcs_cleanup_card(card);
 	lcs_free_card(card);
-	dev_set_drvdata(&ccwgdev->dev, NULL);
 	put_device(&ccwgdev->dev);
 }
 
@@ -2389,7 +2399,7 @@ static struct ccw_driver lcs_ccw_driver = {
 	.ids	= lcs_ids,
 	.probe	= ccwgroup_probe_ccwdev,
 	.remove	= ccwgroup_remove_ccwdev,
-	.int_class = IRQIO_LCS,
+	.int_class = IOINT_LCS,
 };
 
 /**
@@ -2400,7 +2410,9 @@ static struct ccwgroup_driver lcs_group_driver = {
 		.owner	= THIS_MODULE,
 		.name	= "lcs",
 	},
-	.setup	     = lcs_probe_device,
+	.max_slaves  = 2,
+	.driver_id   = 0xD3C3E2,
+	.probe       = lcs_probe_device,
 	.remove      = lcs_remove_device,
 	.set_online  = lcs_new_device,
 	.set_offline = lcs_shutdown_device,
@@ -2411,24 +2423,30 @@ static struct ccwgroup_driver lcs_group_driver = {
 	.restore     = lcs_restore,
 };
 
-static ssize_t lcs_driver_group_store(struct device_driver *ddrv,
-				      const char *buf, size_t count)
+static ssize_t
+lcs_driver_group_store(struct device_driver *ddrv, const char *buf,
+		       size_t count)
 {
 	int err;
-	err = ccwgroup_create_dev(lcs_root_dev, &lcs_group_driver, 2, buf);
+	err = ccwgroup_create_from_string(lcs_root_dev,
+					  lcs_group_driver.driver_id,
+					  &lcs_ccw_driver, 2, buf);
 	return err ? err : count;
 }
+
 static DRIVER_ATTR(group, 0200, NULL, lcs_driver_group_store);
 
-static struct attribute *lcs_drv_attrs[] = {
+static struct attribute *lcs_group_attrs[] = {
 	&driver_attr_group.attr,
 	NULL,
 };
-static struct attribute_group lcs_drv_attr_group = {
-	.attrs = lcs_drv_attrs,
+
+static struct attribute_group lcs_group_attr_group = {
+	.attrs = lcs_group_attrs,
 };
-static const struct attribute_group *lcs_drv_attr_groups[] = {
-	&lcs_drv_attr_group,
+
+static const struct attribute_group *lcs_group_attr_groups[] = {
+	&lcs_group_attr_group,
 	NULL,
 };
 
@@ -2446,13 +2464,13 @@ __init lcs_init_module(void)
 	if (rc)
 		goto out_err;
 	lcs_root_dev = root_device_register("lcs");
-	rc = PTR_ERR_OR_ZERO(lcs_root_dev);
+	rc = IS_ERR(lcs_root_dev) ? PTR_ERR(lcs_root_dev) : 0;
 	if (rc)
 		goto register_err;
 	rc = ccw_driver_register(&lcs_ccw_driver);
 	if (rc)
 		goto ccw_err;
-	lcs_group_driver.driver.groups = lcs_drv_attr_groups;
+	lcs_group_driver.driver.groups = lcs_group_attr_groups;
 	rc = ccwgroup_driver_register(&lcs_group_driver);
 	if (rc)
 		goto ccwgroup_err;
@@ -2478,6 +2496,8 @@ __exit lcs_cleanup_module(void)
 {
 	pr_info("Terminating lcs module.\n");
 	LCS_DBF_TEXT(0, trace, "cleanup");
+	driver_remove_file(&lcs_group_driver.driver,
+			   &driver_attr_group);
 	ccwgroup_driver_unregister(&lcs_group_driver);
 	ccw_driver_unregister(&lcs_ccw_driver);
 	root_device_unregister(lcs_root_dev);

@@ -19,10 +19,10 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
-#include <linux/omap-dma.h>
-#include <mach/mux.h>
-#include "soc.h"
-#include <linux/platform_data/asoc-ti-mcbsp.h>
+#include <plat/dma.h>
+#include <plat/mux.h>
+#include <plat/cpu.h>
+#include <plat/mcbsp.h>
 
 #include <mach/irqs.h>
 
@@ -113,12 +113,12 @@ struct resource omap7xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = 9,
+			.start = OMAP_DMA_MCBSP1_RX,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = 8,
+			.start = OMAP_DMA_MCBSP1_TX,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -140,12 +140,12 @@ struct resource omap7xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = 11,
+			.start = OMAP_DMA_MCBSP3_RX,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = 10,
+			.start = OMAP_DMA_MCBSP3_TX,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -190,12 +190,12 @@ struct resource omap15xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = 9,
+			.start = OMAP_DMA_MCBSP1_RX,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = 8,
+			.start = OMAP_DMA_MCBSP1_TX,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -217,12 +217,12 @@ struct resource omap15xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = 17,
+			.start = OMAP_DMA_MCBSP2_RX,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = 16,
+			.start = OMAP_DMA_MCBSP2_TX,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -244,12 +244,12 @@ struct resource omap15xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = 11,
+			.start = OMAP_DMA_MCBSP3_RX,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = 10,
+			.start = OMAP_DMA_MCBSP3_TX,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -297,12 +297,12 @@ struct resource omap16xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = 9,
+			.start = OMAP_DMA_MCBSP1_RX,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = 8,
+			.start = OMAP_DMA_MCBSP1_TX,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -324,12 +324,12 @@ struct resource omap16xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = 17,
+			.start = OMAP_DMA_MCBSP2_RX,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = 16,
+			.start = OMAP_DMA_MCBSP2_TX,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -351,12 +351,12 @@ struct resource omap16xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = 11,
+			.start = OMAP_DMA_MCBSP3_RX,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = 10,
+			.start = OMAP_DMA_MCBSP3_TX,
 			.flags = IORESOURCE_DMA,
 		},
 	},

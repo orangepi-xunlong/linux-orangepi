@@ -36,3 +36,4 @@ static __inline__ void __arch_decomp_setup(unsigned long arch_id)
  * nothing to do
  */
 #define arch_decomp_setup()	__arch_decomp_setup(arch_id)
+#define arch_decomp_wdog()

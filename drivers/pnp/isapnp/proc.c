@@ -21,7 +21,7 @@
 #include <linux/isapnp.h>
 #include <linux/proc_fs.h>
 #include <linux/init.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 extern struct pnp_protocol isapnp_protocol;
 
@@ -29,13 +29,35 @@ static struct proc_dir_entry *isapnp_proc_bus_dir = NULL;
 
 static loff_t isapnp_proc_bus_lseek(struct file *file, loff_t off, int whence)
 {
-	return fixed_size_llseek(file, off, whence, 256);
+	loff_t new = -1;
+	struct inode *inode = file->f_path.dentry->d_inode;
+
+	mutex_lock(&inode->i_mutex);
+	switch (whence) {
+	case 0:
+		new = off;
+		break;
+	case 1:
+		new = file->f_pos + off;
+		break;
+	case 2:
+		new = 256 + off;
+		break;
+	}
+	if (new < 0 || new > 256)
+		new = -EINVAL;
+	else
+		file->f_pos = new;
+	mutex_unlock(&inode->i_mutex);
+	return new;
 }
 
 static ssize_t isapnp_proc_bus_read(struct file *file, char __user * buf,
 				    size_t nbytes, loff_t * ppos)
 {
-	struct pnp_dev *dev = PDE_DATA(file_inode(file));
+	struct inode *ino = file->f_path.dentry->d_inode;
+	struct proc_dir_entry *dp = PDE(ino);
+	struct pnp_dev *dev = dp->data;
 	int pos = *ppos;
 	int cnt, size = 256;
 
@@ -85,7 +107,7 @@ static int isapnp_proc_attach_device(struct pnp_dev *dev)
 			&isapnp_proc_bus_file_operations, dev);
 	if (!e)
 		return -ENOMEM;
-	proc_set_size(e, 256);
+	e->size = 256;
 	return 0;
 }
 

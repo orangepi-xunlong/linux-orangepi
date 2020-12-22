@@ -11,15 +11,12 @@
 
 #include <linux/mm.h>
 #include <linux/proc_fs.h>
-#include <linux/kcore.h>
 #include <linux/user.h>
 #include <linux/capability.h>
 #include <linux/elf.h>
 #include <linux/elfcore.h>
-#include <linux/notifier.h>
 #include <linux/vmalloc.h>
 #include <linux/highmem.h>
-#include <linux/printk.h>
 #include <linux/bootmem.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -29,7 +26,6 @@
 #include <linux/ioport.h>
 #include <linux/memory.h>
 #include <asm/sections.h>
-#include "internal.h"
 
 #define CORE_STR "CORE"
 
@@ -92,7 +88,7 @@ static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
 			     roundup(sizeof(CORE_STR), 4)) +
 			roundup(sizeof(struct elf_prstatus), 4) +
 			roundup(sizeof(struct elf_prpsinfo), 4) +
-			roundup(arch_task_struct_size, 4);
+			roundup(sizeof(struct task_struct), 4);
 	*elf_buflen = PAGE_ALIGN(*elf_buflen);
 	return size + *elf_buflen;
 }
@@ -172,7 +168,7 @@ get_sparsemem_vmemmap_info(struct kcore_list *ent, struct list_head *head)
 
 	start = ((unsigned long)pfn_to_page(pfn)) & PAGE_MASK;
 	end = ((unsigned long)pfn_to_page(pfn + nr_pages)) - 1;
-	end = PAGE_ALIGN(end);
+	end = ALIGN(end, PAGE_SIZE);
 	/* overlap check (because we have to align page */
 	list_for_each_entry(tmp, head, list) {
 		if (tmp->type != KCORE_VMEMMAP)
@@ -253,9 +249,10 @@ static int kcore_update_ram(void)
 	/* Not inialized....update now */
 	/* find out "max pfn" */
 	end_pfn = 0;
-	for_each_node_state(nid, N_MEMORY) {
+	for_each_node_state(nid, N_HIGH_MEMORY) {
 		unsigned long node_end;
-		node_end = node_end_pfn(nid);
+		node_end  = NODE_DATA(nid)->node_start_pfn +
+			NODE_DATA(nid)->node_spanned_pages;
 		if (end_pfn < node_end)
 			end_pfn = node_end;
 	}
@@ -407,7 +404,7 @@ static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
 	prpsinfo.pr_zomb	= 0;
 
 	strcpy(prpsinfo.pr_fname, "vmlinux");
-	strlcpy(prpsinfo.pr_psargs, saved_command_line, sizeof(prpsinfo.pr_psargs));
+	strncpy(prpsinfo.pr_psargs, saved_command_line, ELF_PRARGSZ);
 
 	nhdr->p_filesz	+= notesize(&notes[1]);
 	bufp = storenote(&notes[1], bufp);
@@ -415,7 +412,7 @@ static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
 	/* set up the task structure */
 	notes[2].name	= CORE_STR;
 	notes[2].type	= NT_TASKSTRUCT;
-	notes[2].datasz	= arch_task_struct_size;
+	notes[2].datasz	= sizeof(struct task_struct);
 	notes[2].data	= current;
 
 	nhdr->p_filesz	+= notesize(&notes[2]);
@@ -430,7 +427,6 @@ static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
 static ssize_t
 read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 {
-	char *buf = file->private_data;
 	ssize_t acc = 0;
 	size_t size, tsz;
 	size_t elf_buflen;
@@ -501,25 +497,32 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 			if (clear_user(buffer, tsz))
 				return -EFAULT;
 		} else if (is_vmalloc_or_module_addr((void *)start)) {
-			vread(buf, (char *)start, tsz);
+			char * elf_buf;
+
+			elf_buf = kzalloc(tsz, GFP_KERNEL);
+			if (!elf_buf)
+				return -ENOMEM;
+			vread(elf_buf, (char *)start, tsz);
 			/* we have to zero-fill user buffer even if no read */
-			if (copy_to_user(buffer, buf, tsz))
+			if (copy_to_user(buffer, elf_buf, tsz)) {
+				kfree(elf_buf);
 				return -EFAULT;
-		} else if (m->type == KCORE_USER) {
-			/* User page is handled prior to normal kernel page: */
-			if (copy_to_user(buffer, (char *)start, tsz))
-				return -EFAULT;
+			}
+			kfree(elf_buf);
 		} else {
 			if (kern_addr_valid(start)) {
+				unsigned long n;
+
+				n = copy_to_user(buffer, (char *)start, tsz);
 				/*
-				 * Using bounce buffer to bypass the
-				 * hardened user copy kernel text checks.
+				 * We cannot distinguish between fault on source
+				 * and fault on destination. When this happens
+				 * we clear too and hope it will trigger the
+				 * EFAULT again.
 				 */
-				if (probe_kernel_read(buf, (void *) start, tsz)) {
-					if (clear_user(buffer, tsz))
-						return -EFAULT;
-				} else {
-					if (copy_to_user(buffer, buf, tsz))
+				if (n) { 
+					if (clear_user(buffer + tsz - n,
+								n))
 						return -EFAULT;
 				}
 			} else {
@@ -543,34 +546,24 @@ static int open_kcore(struct inode *inode, struct file *filp)
 {
 	if (!capable(CAP_SYS_RAWIO))
 		return -EPERM;
-
-	filp->private_data = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!filp->private_data)
-		return -ENOMEM;
-
 	if (kcore_need_update)
 		kcore_update_ram();
 	if (i_size_read(inode) != proc_root_kcore->size) {
-		inode_lock(inode);
+		mutex_lock(&inode->i_mutex);
 		i_size_write(inode, proc_root_kcore->size);
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 	}
 	return 0;
 }
 
-static int release_kcore(struct inode *inode, struct file *file)
-{
-	kfree(file->private_data);
-	return 0;
-}
 
 static const struct file_operations proc_kcore_operations = {
 	.read		= read_kcore,
 	.open		= open_kcore,
-	.release	= release_kcore,
 	.llseek		= default_llseek,
 };
 
+#ifdef CONFIG_MEMORY_HOTPLUG
 /* just remember that we have to update kcore */
 static int __meminit kcore_callback(struct notifier_block *self,
 				    unsigned long action, void *arg)
@@ -584,11 +577,8 @@ static int __meminit kcore_callback(struct notifier_block *self,
 	}
 	return NOTIFY_OK;
 }
+#endif
 
-static struct notifier_block kcore_callback_nb __meminitdata = {
-	.notifier_call = kcore_callback,
-	.priority = 0,
-};
 
 static struct kcore_list kcore_vmalloc;
 
@@ -615,10 +605,8 @@ static void __init proc_kcore_text_init(void)
 struct kcore_list kcore_modules;
 static void __init add_modules_range(void)
 {
-	if (MODULES_VADDR != VMALLOC_START && MODULES_END != VMALLOC_END) {
-		kclist_add(&kcore_modules, (void *)MODULES_VADDR,
+	kclist_add(&kcore_modules, (void *)MODULES_VADDR,
 			MODULES_END - MODULES_VADDR, KCORE_VMALLOC);
-	}
 }
 #else
 static void __init add_modules_range(void)
@@ -631,7 +619,7 @@ static int __init proc_kcore_init(void)
 	proc_root_kcore = proc_create("kcore", S_IRUSR, NULL,
 				      &proc_kcore_operations);
 	if (!proc_root_kcore) {
-		pr_err("couldn't create /proc/kcore\n");
+		printk(KERN_ERR "couldn't create /proc/kcore\n");
 		return 0; /* Always returns 0. */
 	}
 	/* Store text area if it's special */
@@ -642,8 +630,8 @@ static int __init proc_kcore_init(void)
 	add_modules_range();
 	/* Store direct-map area from physical memory map */
 	kcore_update_ram();
-	register_hotmemory_notifier(&kcore_callback_nb);
+	hotplug_memory_notifier(kcore_callback, 0);
 
 	return 0;
 }
-fs_initcall(proc_kcore_init);
+module_init(proc_kcore_init);

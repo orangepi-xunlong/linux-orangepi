@@ -16,13 +16,17 @@
 #include <linux/rtc.h>
 #include <linux/platform_device.h>
 #include <linux/bcd.h>
-#include <linux/rtc/ds1286.h>
+#include <linux/ds1286.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+
+#define DRV_VERSION		"1.0"
 
 struct ds1286_priv {
 	struct rtc_device *rtc;
 	u32 __iomem *rtcregs;
+	size_t size;
+	unsigned long baseaddr;
 	spinlock_t lock;
 };
 
@@ -266,6 +270,7 @@ static int ds1286_set_time(struct device *dev, struct rtc_time *tm)
 static int ds1286_read_alarm(struct device *dev, struct rtc_wkalrm *alm)
 {
 	struct ds1286_priv *priv = dev_get_drvdata(dev);
+	unsigned char cmd;
 	unsigned long flags;
 
 	/*
@@ -276,7 +281,7 @@ static int ds1286_read_alarm(struct device *dev, struct rtc_wkalrm *alm)
 	alm->time.tm_min = ds1286_rtc_read(priv, RTC_MINUTES_ALARM) & 0x7f;
 	alm->time.tm_hour = ds1286_rtc_read(priv, RTC_HOURS_ALARM)  & 0x1f;
 	alm->time.tm_wday = ds1286_rtc_read(priv, RTC_DAY_ALARM)    & 0x07;
-	ds1286_rtc_read(priv, RTC_CMD);
+	cmd = ds1286_rtc_read(priv, RTC_CMD);
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	alm->time.tm_min = bcd2bin(alm->time.tm_min);
@@ -324,36 +329,71 @@ static const struct rtc_class_ops ds1286_ops = {
 	.alarm_irq_enable = ds1286_alarm_irq_enable,
 };
 
-static int ds1286_probe(struct platform_device *pdev)
+static int __devinit ds1286_probe(struct platform_device *pdev)
 {
 	struct rtc_device *rtc;
 	struct resource *res;
 	struct ds1286_priv *priv;
+	int ret = 0;
 
-	priv = devm_kzalloc(&pdev->dev, sizeof(struct ds1286_priv), GFP_KERNEL);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -ENODEV;
+	priv = kzalloc(sizeof(struct ds1286_priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->rtcregs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(priv->rtcregs))
-		return PTR_ERR(priv->rtcregs);
-
+	priv->size = resource_size(res);
+	if (!request_mem_region(res->start, priv->size, pdev->name)) {
+		ret = -EBUSY;
+		goto out;
+	}
+	priv->baseaddr = res->start;
+	priv->rtcregs = ioremap(priv->baseaddr, priv->size);
+	if (!priv->rtcregs) {
+		ret = -ENOMEM;
+		goto out;
+	}
 	spin_lock_init(&priv->lock);
 	platform_set_drvdata(pdev, priv);
-	rtc = devm_rtc_device_register(&pdev->dev, "ds1286", &ds1286_ops,
-					THIS_MODULE);
-	if (IS_ERR(rtc))
-		return PTR_ERR(rtc);
+	rtc = rtc_device_register("ds1286", &pdev->dev,
+				  &ds1286_ops, THIS_MODULE);
+	if (IS_ERR(rtc)) {
+		ret = PTR_ERR(rtc);
+		goto out;
+	}
 	priv->rtc = rtc;
+	return 0;
+
+out:
+	if (priv->rtc)
+		rtc_device_unregister(priv->rtc);
+	if (priv->rtcregs)
+		iounmap(priv->rtcregs);
+	if (priv->baseaddr)
+		release_mem_region(priv->baseaddr, priv->size);
+	kfree(priv);
+	return ret;
+}
+
+static int __devexit ds1286_remove(struct platform_device *pdev)
+{
+	struct ds1286_priv *priv = platform_get_drvdata(pdev);
+
+	rtc_device_unregister(priv->rtc);
+	iounmap(priv->rtcregs);
+	release_mem_region(priv->baseaddr, priv->size);
+	kfree(priv);
 	return 0;
 }
 
 static struct platform_driver ds1286_platform_driver = {
 	.driver		= {
 		.name	= "rtc-ds1286",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= ds1286_probe,
+	.remove		= __devexit_p(ds1286_remove),
 };
 
 module_platform_driver(ds1286_platform_driver);
@@ -361,4 +401,5 @@ module_platform_driver(ds1286_platform_driver);
 MODULE_AUTHOR("Thomas Bogendoerfer <tsbogend@alpha.franken.de>");
 MODULE_DESCRIPTION("DS1286 RTC driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_VERSION);
 MODULE_ALIAS("platform:rtc-ds1286");

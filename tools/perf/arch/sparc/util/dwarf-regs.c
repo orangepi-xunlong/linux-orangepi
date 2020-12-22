@@ -9,7 +9,7 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <stddef.h>
+#include <libio.h>
 #include <dwarf-regs.h>
 
 #define SPARC_MAX_REGS	96
@@ -39,5 +39,5 @@ const char *sparc_regs_table[SPARC_MAX_REGS] = {
  */
 const char *get_arch_regstr(unsigned int n)
 {
-	return (n < SPARC_MAX_REGS) ? sparc_regs_table[n] : NULL;
+	return (n <= SPARC_MAX_REGS) ? sparc_regs_table[n] : NULL;
 }

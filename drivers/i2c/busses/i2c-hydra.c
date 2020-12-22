@@ -15,6 +15,10 @@
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #include <linux/kernel.h>
@@ -23,6 +27,7 @@
 #include <linux/types.h>
 #include <linux/i2c.h>
 #include <linux/i2c-algo-bit.h>
+#include <linux/init.h>
 #include <linux/io.h>
 #include <asm/hydra.h>
 
@@ -100,14 +105,14 @@ static struct i2c_adapter hydra_adap = {
 	.algo_data	= &hydra_bit_data,
 };
 
-static const struct pci_device_id hydra_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(hydra_ids) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_APPLE, PCI_DEVICE_ID_APPLE_HYDRA) },
 	{ 0, }
 };
 
 MODULE_DEVICE_TABLE (pci, hydra_ids);
 
-static int hydra_probe(struct pci_dev *dev,
+static int __devinit hydra_probe(struct pci_dev *dev,
 				 const struct pci_device_id *id)
 {
 	unsigned long base = pci_resource_start(dev, 0);
@@ -134,7 +139,7 @@ static int hydra_probe(struct pci_dev *dev,
 	return 0;
 }
 
-static void hydra_remove(struct pci_dev *dev)
+static void __devexit hydra_remove(struct pci_dev *dev)
 {
 	pdregw(hydra_bit_data.data, 0);		/* clear SCLK_OE and SDAT_OE */
 	i2c_del_adapter(&hydra_adap);
@@ -148,11 +153,26 @@ static struct pci_driver hydra_driver = {
 	.name		= "hydra_smbus",
 	.id_table	= hydra_ids,
 	.probe		= hydra_probe,
-	.remove		= hydra_remove,
+	.remove		= __devexit_p(hydra_remove),
 };
 
-module_pci_driver(hydra_driver);
+static int __init i2c_hydra_init(void)
+{
+	return pci_register_driver(&hydra_driver);
+}
+
+
+static void __exit i2c_hydra_exit(void)
+{
+	pci_unregister_driver(&hydra_driver);
+}
+
+
 
 MODULE_AUTHOR("Geert Uytterhoeven <geert@linux-m68k.org>");
 MODULE_DESCRIPTION("i2c for Apple Hydra Mac I/O");
 MODULE_LICENSE("GPL");
+
+module_init(i2c_hydra_init);
+module_exit(i2c_hydra_exit);
+

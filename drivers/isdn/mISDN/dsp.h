@@ -76,9 +76,7 @@ extern u8 dsp_silence;
 #define MAX_SECONDS_JITTER_CHECK 5
 
 extern struct timer_list dsp_spl_tl;
-
-/* the datatype need to match jiffies datatype */
-extern unsigned long dsp_spl_jiffies;
+extern u32 dsp_spl_jiffies;
 
 /* the structure of conferences:
  *

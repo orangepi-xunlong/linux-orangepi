@@ -10,7 +10,6 @@
 #include <asm/pgtable.h>
 #include <asm/spitfire.h>
 #include <asm/head.h>
-#include <asm/export.h>
 
 	/* What we used to do was lock a TLB entry into a specific
 	 * TLB slot, clear the page with interrupts disabled, then
@@ -35,23 +34,22 @@
 #endif
 
 #define TOUCH(reg0, reg1, reg2, reg3, reg4, reg5, reg6, reg7)	\
-	fsrc2	%reg0, %f48; 	fsrc2	%reg1, %f50;		\
-	fsrc2	%reg2, %f52; 	fsrc2	%reg3, %f54;		\
-	fsrc2	%reg4, %f56; 	fsrc2	%reg5, %f58;		\
-	fsrc2	%reg6, %f60; 	fsrc2	%reg7, %f62;
+	fmovd	%reg0, %f48; 	fmovd	%reg1, %f50;		\
+	fmovd	%reg2, %f52; 	fmovd	%reg3, %f54;		\
+	fmovd	%reg4, %f56; 	fmovd	%reg5, %f58;		\
+	fmovd	%reg6, %f60; 	fmovd	%reg7, %f62;
 
 	.text
 
 	.align		32
 	.globl		copy_user_page
 	.type		copy_user_page,#function
-	EXPORT_SYMBOL(copy_user_page)
 copy_user_page:		/* %o0=dest, %o1=src, %o2=vaddr */
 	lduw		[%g6 + TI_PRE_COUNT], %o4
-	sethi		%hi(PAGE_OFFSET), %g2
+	sethi		%uhi(PAGE_OFFSET), %g2
 	sethi		%hi(PAGE_SIZE), %o3
 
-	ldx		[%g2 + %lo(PAGE_OFFSET)], %g2
+	sllx		%g2, 32, %g2
 	sethi		%hi(PAGE_KERNEL_LOCKED), %g3
 
 	ldx		[%g3 + %lo(PAGE_KERNEL_LOCKED)], %g3
@@ -106,60 +104,60 @@ cheetah_copy_page_insn:
 	prefetch	[%o1 + 0x140], #one_read
 	ldd		[%o1 + 0x010], %f4
 	prefetch	[%o1 + 0x180], #one_read
-	fsrc2		%f0, %f16
+	fmovd		%f0, %f16
 	ldd		[%o1 + 0x018], %f6
-	fsrc2		%f2, %f18
+	fmovd		%f2, %f18
 	ldd		[%o1 + 0x020], %f8
-	fsrc2		%f4, %f20
+	fmovd		%f4, %f20
 	ldd		[%o1 + 0x028], %f10
-	fsrc2		%f6, %f22
+	fmovd		%f6, %f22
 	ldd		[%o1 + 0x030], %f12
-	fsrc2		%f8, %f24
+	fmovd		%f8, %f24
 	ldd		[%o1 + 0x038], %f14
-	fsrc2		%f10, %f26
+	fmovd		%f10, %f26
 	ldd		[%o1 + 0x040], %f0
 1:	ldd		[%o1 + 0x048], %f2
-	fsrc2		%f12, %f28
+	fmovd		%f12, %f28
 	ldd		[%o1 + 0x050], %f4
-	fsrc2		%f14, %f30
+	fmovd		%f14, %f30
 	stda		%f16, [%o0] ASI_BLK_P
 	ldd		[%o1 + 0x058], %f6
-	fsrc2		%f0, %f16
+	fmovd		%f0, %f16
 	ldd		[%o1 + 0x060], %f8
-	fsrc2		%f2, %f18
+	fmovd		%f2, %f18
 	ldd		[%o1 + 0x068], %f10
-	fsrc2		%f4, %f20
+	fmovd		%f4, %f20
 	ldd		[%o1 + 0x070], %f12
-	fsrc2		%f6, %f22
+	fmovd		%f6, %f22
 	ldd		[%o1 + 0x078], %f14
-	fsrc2		%f8, %f24
+	fmovd		%f8, %f24
 	ldd		[%o1 + 0x080], %f0
 	prefetch	[%o1 + 0x180], #one_read
-	fsrc2		%f10, %f26
+	fmovd		%f10, %f26
 	subcc		%o2, 1, %o2
 	add		%o0, 0x40, %o0
 	bne,pt		%xcc, 1b
 	 add		%o1, 0x40, %o1
 
 	ldd		[%o1 + 0x048], %f2
-	fsrc2		%f12, %f28
+	fmovd		%f12, %f28
 	ldd		[%o1 + 0x050], %f4
-	fsrc2		%f14, %f30
+	fmovd		%f14, %f30
 	stda		%f16, [%o0] ASI_BLK_P
 	ldd		[%o1 + 0x058], %f6
-	fsrc2		%f0, %f16
+	fmovd		%f0, %f16
 	ldd		[%o1 + 0x060], %f8
-	fsrc2		%f2, %f18
+	fmovd		%f2, %f18
 	ldd		[%o1 + 0x068], %f10
-	fsrc2		%f4, %f20
+	fmovd		%f4, %f20
 	ldd		[%o1 + 0x070], %f12
-	fsrc2		%f6, %f22
+	fmovd		%f6, %f22
 	add		%o0, 0x40, %o0
 	ldd		[%o1 + 0x078], %f14
-	fsrc2		%f8, %f24
-	fsrc2		%f10, %f26
-	fsrc2		%f12, %f28
-	fsrc2		%f14, %f30
+	fmovd		%f8, %f24
+	fmovd		%f10, %f26
+	fmovd		%f12, %f28
+	fmovd		%f14, %f30
 	stda		%f16, [%o0] ASI_BLK_P
 	membar		#Sync
 	VISExitHalf

@@ -13,9 +13,9 @@
  *
  */
 
-#include <linux/err.h>
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/slab.h>
@@ -148,12 +148,14 @@ struct ixp4xx_flash_info {
 	struct resource *res;
 };
 
-static const char * const probes[] = { "RedBoot", "cmdlinepart", NULL };
+static const char *probes[] = { "RedBoot", "cmdlinepart", NULL };
 
 static int ixp4xx_flash_remove(struct platform_device *dev)
 {
-	struct flash_platform_data *plat = dev_get_platdata(&dev->dev);
+	struct flash_platform_data *plat = dev->dev.platform_data;
 	struct ixp4xx_flash_info *info = platform_get_drvdata(dev);
+
+	platform_set_drvdata(dev, NULL);
 
 	if(!info)
 		return 0;
@@ -161,6 +163,13 @@ static int ixp4xx_flash_remove(struct platform_device *dev)
 	if (info->mtd) {
 		mtd_device_unregister(info->mtd);
 		map_destroy(info->mtd);
+	}
+	if (info->map.virt)
+		iounmap(info->map.virt);
+
+	if (info->res) {
+		release_resource(info->res);
+		kfree(info->res);
 	}
 
 	if (plat->exit)
@@ -171,7 +180,7 @@ static int ixp4xx_flash_remove(struct platform_device *dev)
 
 static int ixp4xx_flash_probe(struct platform_device *dev)
 {
-	struct flash_platform_data *plat = dev_get_platdata(&dev->dev);
+	struct flash_platform_data *plat = dev->dev.platform_data;
 	struct ixp4xx_flash_info *info;
 	struct mtd_part_parser_data ppdata = {
 		.origin = dev->resource->start,
@@ -187,8 +196,7 @@ static int ixp4xx_flash_probe(struct platform_device *dev)
 			return err;
 	}
 
-	info = devm_kzalloc(&dev->dev, sizeof(struct ixp4xx_flash_info),
-			    GFP_KERNEL);
+	info = kzalloc(sizeof(struct ixp4xx_flash_info), GFP_KERNEL);
 	if(!info) {
 		err = -ENOMEM;
 		goto Error;
@@ -214,9 +222,20 @@ static int ixp4xx_flash_probe(struct platform_device *dev)
 	info->map.write = ixp4xx_probe_write16;
 	info->map.copy_from = ixp4xx_copy_from;
 
-	info->map.virt = devm_ioremap_resource(&dev->dev, dev->resource);
-	if (IS_ERR(info->map.virt)) {
-		err = PTR_ERR(info->map.virt);
+	info->res = request_mem_region(dev->resource->start,
+			resource_size(dev->resource),
+			"IXP4XXFlash");
+	if (!info->res) {
+		printk(KERN_ERR "IXP4XXFlash: Could not reserve memory region\n");
+		err = -ENOMEM;
+		goto Error;
+	}
+
+	info->map.virt = ioremap(dev->resource->start,
+				 resource_size(dev->resource));
+	if (!info->map.virt) {
+		printk(KERN_ERR "IXP4XXFlash: Failed to ioremap region\n");
+		err = -EIO;
 		goto Error;
 	}
 
@@ -226,7 +245,7 @@ static int ixp4xx_flash_probe(struct platform_device *dev)
 		err = -ENXIO;
 		goto Error;
 	}
-	info->mtd->dev.parent = &dev->dev;
+	info->mtd->owner = THIS_MODULE;
 
 	/* Use the fast version */
 	info->map.write = ixp4xx_write16;
@@ -250,6 +269,7 @@ static struct platform_driver ixp4xx_flash_driver = {
 	.remove		= ixp4xx_flash_remove,
 	.driver		= {
 		.name	= "IXP4XX-Flash",
+		.owner	= THIS_MODULE,
 	},
 };
 

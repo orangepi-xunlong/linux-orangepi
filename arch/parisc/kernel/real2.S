@@ -61,7 +61,7 @@ save_cr_end:
 	 *	iodc_fn is the IODC function to call
 	 */
 
-ENTRY_CFI(real32_call_asm)
+ENTRY(real32_call_asm)
 	STREG	%rp, -RP_OFFSET(%sp)	/* save RP */
 #ifdef CONFIG_64BIT
 	callee_save
@@ -119,14 +119,14 @@ ric_ret:
 	LDREG	-RP_OFFSET(%sp), %rp	/* restore RP */
 	bv	0(%rp)
 	nop
-ENDPROC_CFI(real32_call_asm)
+ENDPROC(real32_call_asm)
 
 
 #  define PUSH_CR(r, where) mfctl r, %r1 ! STREG,ma %r1, REG_SZ(where)
 #  define POP_CR(r, where) LDREG,mb -REG_SZ(where), %r1 ! mtctl %r1, r
 
 	.text
-ENTRY_CFI(save_control_regs)
+save_control_regs:
 	load32	PA(save_cr_space), %r28
 	PUSH_CR(%cr24, %r28)
 	PUSH_CR(%cr25, %r28)
@@ -139,9 +139,8 @@ ENTRY_CFI(save_control_regs)
 	PUSH_CR(%cr15, %r28)
 	bv 0(%r2)
 	nop
-ENDPROC_CFI(save_control_regs)
 
-ENTRY_CFI(restore_control_regs)
+restore_control_regs:
 	load32	PA(save_cr_end), %r26
 	POP_CR(%cr15, %r26)
 	POP_CR(%cr31, %r26)
@@ -154,14 +153,13 @@ ENTRY_CFI(restore_control_regs)
 	POP_CR(%cr24, %r26)
 	bv 0(%r2)
 	nop
-ENDPROC_CFI(restore_control_regs)
 
 /* rfi_virt2real() and rfi_real2virt() could perhaps be adapted for
  * more general-purpose use by the several places which need RFIs
  */
 	.text
 	.align 128
-ENTRY_CFI(rfi_virt2real)
+rfi_virt2real:
 	/* switch to real mode... */
 	rsm		PSW_SM_I,%r0
 	load32		PA(rfi_v2r_1), %r1
@@ -193,11 +191,10 @@ rfi_v2r_1:
 	tophys_r1 %r2
 	bv	0(%r2)
 	nop
-ENDPROC_CFI(rfi_virt2real)
 
 	.text
 	.align 128
-ENTRY_CFI(rfi_real2virt)
+rfi_real2virt:
 	rsm		PSW_SM_I,%r0
 	load32		(rfi_r2v_1), %r1
 	nop
@@ -228,7 +225,6 @@ rfi_r2v_1:
 	tovirt_r1 %r2
 	bv	0(%r2)
 	nop
-ENDPROC_CFI(rfi_real2virt)
 
 #ifdef CONFIG_64BIT
 
@@ -242,7 +238,7 @@ ENDPROC_CFI(rfi_real2virt)
 	 *	arg0p points to where saved arg values may be found
 	 *	iodc_fn is the IODC function to call
 	 */
-ENTRY_CFI(real64_call_asm)
+ENTRY(real64_call_asm)
 	std	%rp, -0x10(%sp)		/* save RP */
 	std	%sp, -8(%arg0)		/* save SP on real-mode stack */
 	copy	%arg0, %sp		/* adopt the real-mode SP */
@@ -288,7 +284,7 @@ r64_ret:
 	ldd	-0x10(%sp), %rp		/* restore RP */
 	bv	0(%rp)
 	nop
-ENDPROC_CFI(real64_call_asm)
+ENDPROC(real64_call_asm)
 
 #endif
 
@@ -297,12 +293,12 @@ ENDPROC_CFI(real64_call_asm)
 	**	GCC 3.3 and later has a new function in libgcc.a for
 	**	comparing function pointers.
 	*/
-ENTRY_CFI(__canonicalize_funcptr_for_compare)
+ENTRY(__canonicalize_funcptr_for_compare)
 #ifdef CONFIG_64BIT
 	bve (%r2)
 #else
 	bv %r0(%r2)
 #endif
 	copy %r26,%r28
-ENDPROC_CFI(__canonicalize_funcptr_for_compare)
+ENDPROC(__canonicalize_funcptr_for_compare)
 

@@ -1,0 +1,62 @@
+
+config SND_SUNXI_SOC_AUDIOCODEC
+	tristate "Audiocodec for the SUNXI chips"
+	depends on  ARCH_SUN8IW1 || ARCH_SUN8IW3 || ARCH_SUN8IW5 || ARCH_SUN8IW7 || ARCH_SUN8IW8 || ARCH_SUN8IW9
+	select SND_SOC_DMAENGINE_PCM
+	default n
+	help
+	  Say Y or M if you want to add support for audiocodec
+
+config SND_SUNXI_SOC_SUN8IW9_MACHINE
+	tristate "Audiocodec Machine for sun8iw9 chips"
+	depends on ARCH_SUN8IW9
+	default n
+	help
+	  Say Y or M if you want to add sun8iw9 audiocodec support
+config SND_SUNXI_SOC_PUBLUC_MACHINE
+	tristate "Audiocodec Machine for codec chips"
+	depends on  ARCH_SUN8IW1 || ARCH_SUN8IW3 || ARCH_SUN8IW5 || ARCH_SUN8IW7 || ARCH_SUN8IW8
+	default n
+	help
+	  Say Y or M if you want to add audiocodec machine support
+config SND_SUN8IW1_SNDCODEC
+	tristate "Audiocodec for the SUN8IW1 chips"
+	depends on ARCH_SUN8IW1
+	default n
+	help
+	  Say Y or M if you want to add sun8iw1 audiocodec support
+config SND_SUN8IW3_SNDCODEC
+	tristate "Audiocodec for the SUN8IW3 chips"
+	depends on ARCH_SUN8IW3
+	default n
+config SND_SUN8IW5_SNDCODEC
+       tristate "Audiocodec for the SUN8IW5 chips"
+       depends on ARCH_SUN8IW5
+       default n
+       help
+         Say Y or M if you want to add sun8iwX audiocodec support
+config SND_SUN8IW7_SNDCODEC
+       tristate "Audiocodec for the SUN8IW7 chips"
+       depends on ARCH_SUN8IW7
+       default n
+       help
+         Say Y or M if you want to add sun8iw7 audiocodec support
+config SND_SUN8IW8_SNDCODEC
+       tristate "Audiocodec for the SUN8IW8 chips"
+       depends on ARCH_SUN8IW8
+       default n
+       help
+         Say Y or M if you want to add sun8iw8 audiocodec support
+config SND_SUN8IW9_SNDCODEC
+       tristate "Audiocodec for the SUN8IW9 chips"
+       depends on ARCH_SUN8IW9
+       default n
+       help
+         Say Y or M if you want to add sun8iw9 audiocodec support
+
+config SND_SUNXI_SWITCH
+       tristate "headset for the SUN8IWx chips"
+       depends on ARCH_SUN8IW5 || ARCH_SUN8IW8
+       default n
+	help
+         Say Y or M if you want to add sun8iwX headset support

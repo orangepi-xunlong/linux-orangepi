@@ -1,6 +1,6 @@
 /*
  * Copyright (C) ST-Ericsson AB 2010
- * Author:	Sjur Brendeland
+ * Author:	Sjur Brendeland/sjur.brandeland@stericsson.com
  * License terms: GNU General Public License (GPL) version 2
  */
 
@@ -43,7 +43,7 @@ static void cfrfml_release(struct cflayer *layer)
 }
 
 struct cflayer *cfrfml_create(u8 channel_id, struct dev_info *dev_info,
-			      int mtu_size)
+					int mtu_size)
 {
 	int tmp;
 	struct cfrfml *this = kzalloc(sizeof(struct cfrfml), GFP_ATOMIC);
@@ -69,7 +69,7 @@ struct cflayer *cfrfml_create(u8 channel_id, struct dev_info *dev_info,
 }
 
 static struct cfpkt *rfm_append(struct cfrfml *rfml, char *seghead,
-				struct cfpkt *pkt, int *err)
+			struct cfpkt *pkt, int *err)
 {
 	struct cfpkt *tmppkt;
 	*err = -EPROTO;
@@ -159,7 +159,7 @@ static int cfrfml_receive(struct cflayer *layr, struct cfpkt *pkt)
 		tmppkt = NULL;
 
 		/* Verify that length is correct */
-		err = -EPROTO;
+		err = EPROTO;
 		if (rfml->pdu_size != cfpkt_getlen(pkt) - RFM_HEAD_SIZE + 1)
 			goto out;
 	}

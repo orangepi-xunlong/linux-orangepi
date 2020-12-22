@@ -22,13 +22,13 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #include "generic.h"
 
 static void isp116x_pfm_delay(struct device *dev, int delay)
 {
 
-	/* 400MHz PXA2 = 2.5ns / instruction */
+	/* 400Mhz PXA2 = 2.5ns / instruction */
 
 	int cyc = delay / 10;
 
@@ -93,7 +93,7 @@ static void __init mp900c_init(void)
 /* Maintainer - Michael Petchkovsky <mkpetch@internode.on.net> */
 MACHINE_START(NEC_MP900, "MobilePro900/C")
 	.atag_offset	= 0x220100,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.map_io		= pxa25x_map_io,
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa25x_init_irq,

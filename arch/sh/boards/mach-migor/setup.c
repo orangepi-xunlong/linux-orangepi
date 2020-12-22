@@ -13,23 +13,20 @@
 #include <linux/input.h>
 #include <linux/input/sh_keysc.h>
 #include <linux/mmc/host.h>
+#include <linux/mmc/sh_mobile_sdhi.h>
 #include <linux/mtd/physmap.h>
-#include <linux/mfd/tmio.h>
 #include <linux/mtd/nand.h>
 #include <linux/i2c.h>
-#include <linux/regulator/fixed.h>
-#include <linux/regulator/machine.h>
 #include <linux/smc91x.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/gpio.h>
 #include <linux/videodev2.h>
-#include <linux/sh_intc.h>
 #include <video/sh_mobile_lcdc.h>
-#include <media/drv-intf/sh_mobile_ceu.h>
-#include <media/i2c/ov772x.h>
+#include <media/sh_mobile_ceu.h>
+#include <media/ov772x.h>
 #include <media/soc_camera.h>
-#include <media/i2c/tw9910.h>
+#include <media/tw9910.h>
 #include <asm/clock.h>
 #include <asm/machvec.h>
 #include <asm/io.h>
@@ -57,7 +54,7 @@ static struct resource smc91x_eth_resources[] = {
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = evt2irq(0x600), /* IRQ0 */
+		.start  = 32, /* IRQ0 */
 		.flags  = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL,
 	},
 };
@@ -91,7 +88,7 @@ static struct resource sh_keysc_resources[] = {
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = evt2irq(0xbe0),
+		.start  = 79,
 		.flags  = IORESOURCE_IRQ,
 	},
 };
@@ -166,7 +163,7 @@ static struct mtd_partition migor_nand_flash_partitions[] = {
 static void migor_nand_flash_cmd_ctl(struct mtd_info *mtd, int cmd,
 				     unsigned int ctrl)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
+	struct nand_chip *chip = mtd->priv;
 
 	if (cmd == NAND_CMD_NONE)
 		return;
@@ -190,6 +187,7 @@ static struct platform_nand_data migor_nand_flash_data = {
 		.partitions = migor_nand_flash_partitions,
 		.nr_partitions = ARRAY_SIZE(migor_nand_flash_partitions),
 		.chip_delay = 20,
+		.part_probe_types = (const char *[]) { "cmdlinepart", NULL },
 	},
 	.ctrl = {
 		.dev_ready = migor_nand_flash_ready,
@@ -287,7 +285,7 @@ static struct resource migor_lcdc_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= evt2irq(0x580),
+		.start	= 28,
 		.flags	= IORESOURCE_IRQ,
 	},
 };
@@ -370,7 +368,7 @@ static struct resource migor_ceu_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = evt2irq(0x880),
+		.start  = 52,
 		.flags  = IORESOURCE_IRQ,
 	},
 	[2] = {
@@ -388,13 +386,6 @@ static struct platform_device migor_ceu_device = {
 	},
 };
 
-/* Fixed 3.3V regulator to be used by SDHI0 */
-static struct regulator_consumer_supply fixed3v3_power_consumers[] =
-{
-	REGULATOR_SUPPLY("vmmc", "sh_mobile_sdhi.0"),
-	REGULATOR_SUPPLY("vqmmc", "sh_mobile_sdhi.0"),
-};
-
 static struct resource sdhi_cn9_resources[] = {
 	[0] = {
 		.name	= "SDHI",
@@ -403,15 +394,15 @@ static struct resource sdhi_cn9_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= evt2irq(0xe80),
+		.start	= 100,
 		.flags  = IORESOURCE_IRQ,
 	},
 };
 
-static struct tmio_mmc_data sh7724_sdhi_data = {
-	.chan_priv_tx	= (void *)SHDMA_SLAVE_SDHI0_TX,
-	.chan_priv_rx	= (void *)SHDMA_SLAVE_SDHI0_RX,
-	.capabilities	= MMC_CAP_SDIO_IRQ,
+static struct sh_mobile_sdhi_info sh7724_sdhi_data = {
+	.dma_slave_tx	= SHDMA_SLAVE_SDHI0_TX,
+	.dma_slave_rx	= SHDMA_SLAVE_SDHI0_RX,
+	.tmio_caps      = MMC_CAP_SDIO_IRQ,
 };
 
 static struct platform_device sdhi_cn9_device = {
@@ -429,7 +420,7 @@ static struct i2c_board_info migor_i2c_devices[] = {
 	},
 	{
 		I2C_BOARD_INFO("migor_ts", 0x51),
-		.irq = evt2irq(0x6c0), /* IRQ6 */
+		.irq = 38, /* IRQ6 */
 	},
 	{
 		I2C_BOARD_INFO("wm8978", 0x1a),
@@ -507,10 +498,6 @@ static int __init migor_devices_setup(void)
 					&migor_sdram_enter_end,
 					&migor_sdram_leave_start,
 					&migor_sdram_leave_end);
-
-	regulator_register_always_on(0, "fixed-3.3V", fixed3v3_power_consumers,
-				     ARRAY_SIZE(fixed3v3_power_consumers), 3300000);
-
 	/* Let D11 LED show STATUS0 */
 	gpio_request(GPIO_FN_STATUS0, NULL);
 

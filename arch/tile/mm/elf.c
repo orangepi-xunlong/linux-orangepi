@@ -17,13 +17,11 @@
 #include <linux/binfmts.h>
 #include <linux/compat.h>
 #include <linux/mman.h>
-#include <linux/file.h>
 #include <linux/elf.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/sections.h>
-#include <asm/vdso.h>
-#include <arch/sim.h>
+#include <arch/sim_def.h>
 
 /* Notify a running simulator, if any, that an exec just occurred. */
 static void sim_notify_exec(const char *binary_name)
@@ -38,67 +36,28 @@ static void sim_notify_exec(const char *binary_name)
 	} while (c);
 }
 
-static int notify_exec(struct mm_struct *mm)
+static int notify_exec(void)
 {
-	int ret = 0;
-	char *buf, *path;
-	struct vm_area_struct *vma;
-	struct file *exe_file;
-
-	if (!sim_is_simulator())
-		return 1;
-
-	buf = (char *) __get_free_page(GFP_KERNEL);
-	if (buf == NULL)
-		return 0;
-
-	exe_file = get_mm_exe_file(mm);
-	if (exe_file == NULL)
-		goto done_free;
-
-	path = file_path(exe_file, buf, PAGE_SIZE);
-	if (IS_ERR(path))
-		goto done_put;
-
-	down_read(&mm->mmap_sem);
-	for (vma = current->mm->mmap; ; vma = vma->vm_next) {
-		if (vma == NULL) {
-			up_read(&mm->mmap_sem);
-			goto done_put;
-		}
-		if (vma->vm_file == exe_file)
+	int retval = 0;  /* failure */
+	struct vm_area_struct *vma = current->mm->mmap;
+	while (vma) {
+		if ((vma->vm_flags & VM_EXECUTABLE) && vma->vm_file)
 			break;
+		vma = vma->vm_next;
 	}
-
-	/*
-	 * Notify simulator of an ET_DYN object so we know the load address.
-	 * The somewhat cryptic overuse of SIM_CONTROL_DLOPEN allows us
-	 * to be backward-compatible with older simulator releases.
-	 */
-	if (vma->vm_start == (ELF_ET_DYN_BASE & PAGE_MASK)) {
-		char buf[64];
-		int i;
-
-		snprintf(buf, sizeof(buf), "0x%lx:@", vma->vm_start);
-		for (i = 0; ; ++i) {
-			char c = buf[i];
-			__insn_mtspr(SPR_SIM_CONTROL,
-				     (SIM_CONTROL_DLOPEN
-				      | (c << _SIM_CONTROL_OPERATOR_BITS)));
-			if (c == '\0') {
-				ret = 1; /* success */
-				break;
+	if (vma) {
+		char *buf = (char *) __get_free_page(GFP_KERNEL);
+		if (buf) {
+			char *path = d_path(&vma->vm_file->f_path,
+					    buf, PAGE_SIZE);
+			if (!IS_ERR(path)) {
+				sim_notify_exec(path);
+				retval = 1;
 			}
+			free_page((unsigned long)buf);
 		}
 	}
-	up_read(&mm->mmap_sem);
-
-	sim_notify_exec(path);
-done_put:
-	fput(exe_file);
-done_free:
-	free_page((unsigned long)buf);
-	return ret;
+	return retval;
 }
 
 /* Notify a running simulator, if any, that we loaded an interpreter. */
@@ -114,10 +73,37 @@ static void sim_notify_interp(unsigned long load_addr)
 }
 
 
+/* Kernel address of page used to map read-only kernel data into userspace. */
+static void *vdso_page;
+
+/* One-entry array used for install_special_mapping. */
+static struct page *vdso_pages[1];
+
+static int __init vdso_setup(void)
+{
+	vdso_page = (void *)get_zeroed_page(GFP_ATOMIC);
+	memcpy(vdso_page, __rt_sigreturn, __rt_sigreturn_end - __rt_sigreturn);
+	vdso_pages[0] = virt_to_page(vdso_page);
+	return 0;
+}
+device_initcall(vdso_setup);
+
+const char *arch_vma_name(struct vm_area_struct *vma)
+{
+	if (vma->vm_private_data == vdso_pages)
+		return "[vdso]";
+#ifndef __tilegx__
+	if (vma->vm_start == MEM_USER_INTRPT)
+		return "[intrpt]";
+#endif
+	return NULL;
+}
+
 int arch_setup_additional_pages(struct linux_binprm *bprm,
 				int executable_stack)
 {
 	struct mm_struct *mm = current->mm;
+	unsigned long vdso_base;
 	int retval = 0;
 
 	/*
@@ -125,12 +111,19 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 	 * If we can't find the filename of the mapping, just use
 	 * whatever was passed as the linux_binprm filename.
 	 */
-	if (!notify_exec(mm))
+	if (!notify_exec())
 		sim_notify_exec(bprm->filename);
 
 	down_write(&mm->mmap_sem);
 
-	retval = setup_vdso_pages();
+	/*
+	 * MAYWRITE to allow gdb to COW and set breakpoints
+	 */
+	vdso_base = VDSO_BASE;
+	retval = install_special_mapping(mm, vdso_base, PAGE_SIZE,
+					 VM_READ|VM_EXEC|
+					 VM_MAYREAD|VM_MAYWRITE|VM_MAYEXEC,
+					 vdso_pages);
 
 #ifndef __tilegx__
 	/*
@@ -142,6 +135,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 	if (!retval) {
 		unsigned long addr = MEM_USER_INTRPT;
 		addr = mmap_region(NULL, addr, INTRPT_SIZE,
+				   MAP_FIXED|MAP_ANONYMOUS|MAP_PRIVATE,
 				   VM_READ|VM_EXEC|
 				   VM_MAYREAD|VM_MAYWRITE|VM_MAYEXEC, 0);
 		if (addr > (unsigned long) -PAGE_SIZE)

@@ -479,7 +479,7 @@
 
 #include "de4x5.h"
 
-static const char version[] =
+static const char version[] __devinitconst =
 	KERN_INFO "de4x5.c:V0.546 2001/02/22 davies@maniac.ultranet.com\n";
 
 #define c_char const char
@@ -995,6 +995,7 @@ static void    de4x5_dbg_mii(struct net_device *dev, int k);
 static void    de4x5_dbg_media(struct net_device *dev);
 static void    de4x5_dbg_srom(struct de4x5_srom *p);
 static void    de4x5_dbg_rx(struct sk_buff *skb, int len);
+static int     de4x5_strncmp(char *a, char *b, int n);
 static int     dc21041_infoleaf(struct net_device *dev);
 static int     dc21140_infoleaf(struct net_device *dev);
 static int     dc21142_infoleaf(struct net_device *dev);
@@ -1091,7 +1092,7 @@ static const struct net_device_ops de4x5_netdev_ops = {
 };
 
 
-static int
+static int __devinit
 de4x5_hw_init(struct net_device *dev, u_long iobase, struct device *gendev)
 {
     char name[DE4X5_NAME_LENGTH + 1];
@@ -1319,8 +1320,8 @@ de4x5_open(struct net_device *dev)
 
     if (request_irq(dev->irq, de4x5_interrupt, IRQF_SHARED,
 		                                     lp->adapter_name, dev)) {
-	printk("de4x5_open(): Requested IRQ%d is busy - attempting FAST/SHARE...", dev->irq);
-	if (request_irq(dev->irq, de4x5_interrupt, IRQF_SHARED,
+	printk("de4x5_open(): Requested IRQ%d is busy - attemping FAST/SHARE...", dev->irq);
+	if (request_irq(dev->irq, de4x5_interrupt, IRQF_DISABLED | IRQF_SHARED,
 			                             lp->adapter_name, dev)) {
 	    printk("\n              Cannot get IRQ- reconfigure your hardware.\n");
 	    disable_ast(dev);
@@ -1336,7 +1337,7 @@ de4x5_open(struct net_device *dev)
     }
 
     lp->interrupt = UNMASK_INTERRUPTS;
-    netif_trans_update(dev); /* prevent tx timeout */
+    dev->trans_start = jiffies; /* prevent tx timeout */
 
     START_DE4X5;
 
@@ -1465,7 +1466,7 @@ de4x5_queue_pkt(struct sk_buff *skb, struct net_device *dev)
 
     netif_stop_queue(dev);
     if (!lp->tx_enable)                   /* Cannot send for now */
-		goto tx_err;
+	return NETDEV_TX_LOCKED;
 
     /*
     ** Clean out the TX ring asynchronously to interrupts - sometimes the
@@ -1478,7 +1479,7 @@ de4x5_queue_pkt(struct sk_buff *skb, struct net_device *dev)
 
     /* Test if cache is already locked - requeue skb if so */
     if (test_and_set_bit(0, (void *)&lp->cache.lock) && !lp->interrupt)
-		goto tx_err;
+	return NETDEV_TX_LOCKED;
 
     /* Transmit descriptor ring full or stale skb */
     if (netif_queue_stopped(dev) || (u_long) lp->tx_skb[lp->tx_new] > 1) {
@@ -1519,9 +1520,6 @@ de4x5_queue_pkt(struct sk_buff *skb, struct net_device *dev)
     lp->cache.lock = 0;
 
     return NETDEV_TX_OK;
-tx_err:
-	dev_kfree_skb_any(skb);
-	return NETDEV_TX_OK;
 }
 
 /*
@@ -1876,7 +1874,7 @@ de4x5_local_stats(struct net_device *dev, char *buf, int pkt_len)
 	} else {
 	    lp->pktStats.multicast++;
 	}
-    } else if (ether_addr_equal(buf, dev->dev_addr)) {
+    } else if (compare_ether_addr(buf, dev->dev_addr) == 0) {
         lp->pktStats.unicast++;
     }
 
@@ -1935,7 +1933,7 @@ set_multicast_list(struct net_device *dev)
 
 	    lp->tx_new = (lp->tx_new + 1) % lp->txRingSize;
 	    outl(POLL_DEMAND, DE4X5_TPD);       /* Start the TX */
-	    netif_trans_update(dev); /* prevent tx timeout */
+	    dev->trans_start = jiffies; /* prevent tx timeout */
 	}
     }
 }
@@ -1966,7 +1964,7 @@ SetMulticastFilter(struct net_device *dev)
     } else if (lp->setup_f == HASH_PERF) {   /* Hash Filtering */
 	netdev_for_each_mc_addr(ha, dev) {
 		crc = ether_crc_le(ETH_ALEN, ha->addr);
-		hashcode = crc & DE4X5_HASH_BITS;  /* hashcode is 9 LSb of CRC */
+		hashcode = crc & HASH_BITS;  /* hashcode is 9 LSb of CRC */
 
 		byte = hashcode >> 3;        /* bit[3-8] -> byte in filter */
 		bit = 1 << (hashcode & 0x07);/* bit[0-2] -> bit in byte */
@@ -1993,7 +1991,7 @@ SetMulticastFilter(struct net_device *dev)
 
 static u_char de4x5_irq[] = EISA_ALLOWED_IRQ_LIST;
 
-static int de4x5_eisa_probe(struct device *gendev)
+static int __init de4x5_eisa_probe (struct device *gendev)
 {
 	struct eisa_device *edev;
 	u_long iobase;
@@ -2079,7 +2077,7 @@ static int de4x5_eisa_probe(struct device *gendev)
 	return status;
 }
 
-static int de4x5_eisa_remove(struct device *device)
+static int __devexit de4x5_eisa_remove (struct device *device)
 {
 	struct net_device *dev;
 	u_long iobase;
@@ -2106,7 +2104,7 @@ static struct eisa_driver de4x5_eisa_driver = {
         .driver   = {
                 .name    = "de4x5",
                 .probe   = de4x5_eisa_probe,
-		.remove  = de4x5_eisa_remove,
+                .remove  = __devexit_p (de4x5_eisa_remove),
         }
 };
 MODULE_DEVICE_TABLE(eisa, de4x5_eisa_ids);
@@ -2120,7 +2118,7 @@ MODULE_DEVICE_TABLE(eisa, de4x5_eisa_ids);
 ** DECchips, we can find the base SROM irrespective of the BIOS scan direction.
 ** For single port cards this is a time waster...
 */
-static void
+static void __devinit
 srom_search(struct net_device *dev, struct pci_dev *pdev)
 {
     u_char pb;
@@ -2194,8 +2192,8 @@ srom_search(struct net_device *dev, struct pci_dev *pdev)
 ** kernels use the V0.535[n] drivers.
 */
 
-static int de4x5_pci_probe(struct pci_dev *pdev,
-			   const struct pci_device_id *ent)
+static int __devinit de4x5_pci_probe (struct pci_dev *pdev,
+				   const struct pci_device_id *ent)
 {
 	u_char pb, pbus = 0, dev_num, dnum = 0, timer;
 	u_short vendor, status;
@@ -2316,12 +2314,12 @@ static int de4x5_pci_probe(struct pci_dev *pdev,
 	return error;
 }
 
-static void de4x5_pci_remove(struct pci_dev *pdev)
+static void __devexit de4x5_pci_remove (struct pci_dev *pdev)
 {
 	struct net_device *dev;
 	u_long iobase;
 
-	dev = pci_get_drvdata(pdev);
+	dev = dev_get_drvdata(&pdev->dev);
 	iobase = dev->base_addr;
 
 	unregister_netdev (dev);
@@ -2330,7 +2328,7 @@ static void de4x5_pci_remove(struct pci_dev *pdev)
 	pci_disable_device (pdev);
 }
 
-static const struct pci_device_id de4x5_pci_tbl[] = {
+static struct pci_device_id de4x5_pci_tbl[] = {
         { PCI_VENDOR_ID_DEC, PCI_DEVICE_ID_DEC_TULIP,
           PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
         { PCI_VENDOR_ID_DEC, PCI_DEVICE_ID_DEC_TULIP_PLUS,
@@ -2346,7 +2344,7 @@ static struct pci_driver de4x5_pci_driver = {
         .name           = "de4x5",
         .id_table       = de4x5_pci_tbl,
         .probe          = de4x5_pci_probe,
-	.remove         = de4x5_pci_remove,
+	.remove         = __devexit_p (de4x5_pci_remove),
 };
 
 #endif
@@ -3252,6 +3250,7 @@ srom_map_media(struct net_device *dev)
 	printk("%s: Bad media code [%d] detected in SROM!\n", dev->name,
 	                                                  lp->infoblock_media);
 	return -1;
+	break;
     }
 
     return 0;
@@ -3974,7 +3973,7 @@ DevicePresent(struct net_device *dev, u_long aprom_addr)
 	    tmp = srom_rd(aprom_addr, i);
 	    *p++ = cpu_to_le16(tmp);
 	}
-	de4x5_dbg_srom(&lp->srom);
+	de4x5_dbg_srom((struct de4x5_srom *)&lp->srom);
     }
 }
 
@@ -4104,7 +4103,8 @@ get_hw_addr(struct net_device *dev)
 }
 
 /*
-** Test for enet addresses in the first 32 bytes.
+** Test for enet addresses in the first 32 bytes. The built-in strncmp
+** didn't seem to work here...?
 */
 static int
 de4x5_bad_srom(struct de4x5_private *lp)
@@ -4112,8 +4112,8 @@ de4x5_bad_srom(struct de4x5_private *lp)
     int i, status = 0;
 
     for (i = 0; i < ARRAY_SIZE(enet_det); i++) {
-	if (!memcmp(&lp->srom, &enet_det[i], 3) &&
-	    !memcmp((char *)&lp->srom+0x10, &enet_det[i], 3)) {
+	if (!de4x5_strncmp((char *)&lp->srom, (char *)&enet_det[i], 3) &&
+	    !de4x5_strncmp((char *)&lp->srom+0x10, (char *)&enet_det[i], 3)) {
 	    if (i == 0) {
 		status = SMC;
 	    } else if (i == 1) {
@@ -4124,6 +4124,18 @@ de4x5_bad_srom(struct de4x5_private *lp)
     }
 
     return status;
+}
+
+static int
+de4x5_strncmp(char *a, char *b, int n)
+{
+    int ret=0;
+
+    for (;n && !ret; n--) {
+	ret = *a++ - *b++;
+    }
+
+    return ret;
 }
 
 static void
@@ -5043,7 +5055,7 @@ build_setup_frame(struct net_device *dev, int mode)
 	    *(pa + i) = dev->dev_addr[i];                 /* Host address */
 	    if (i & 0x01) pa += 2;
 	}
-	*(lp->setup_frame + (DE4X5_HASH_TABLE_LEN >> 3) - 3) = 0x80;
+	*(lp->setup_frame + (HASH_TABLE_LEN >> 3) - 3) = 0x80;
     } else {
 	for (i=0; i<ETH_ALEN; i++) { /* Host address */
 	    *(pa + (i&1)) = dev->dev_addr[i];
@@ -5192,16 +5204,16 @@ de4x5_parse_params(struct net_device *dev)
 	if (strstr(p, "fdx") || strstr(p, "FDX")) lp->params.fdx = true;
 
 	if (strstr(p, "autosense") || strstr(p, "AUTOSENSE")) {
-	    if (strstr(p, "TP_NW")) {
-		lp->params.autosense = TP_NW;
-	    } else if (strstr(p, "TP")) {
+	    if (strstr(p, "TP")) {
 		lp->params.autosense = TP;
-	    } else if (strstr(p, "BNC_AUI")) {
-		lp->params.autosense = BNC;
+	    } else if (strstr(p, "TP_NW")) {
+		lp->params.autosense = TP_NW;
 	    } else if (strstr(p, "BNC")) {
 		lp->params.autosense = BNC;
 	    } else if (strstr(p, "AUI")) {
 		lp->params.autosense = AUI;
+	    } else if (strstr(p, "BNC_AUI")) {
+		lp->params.autosense = BNC;
 	    } else if (strstr(p, "10Mb")) {
 		lp->params.autosense = _10Mb;
 	    } else if (strstr(p, "100Mb")) {

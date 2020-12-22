@@ -10,6 +10,7 @@
 #include <linux/types.h>
 #include <linux/fs.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/watchdog.h>
 #include <linux/of.h>
@@ -173,7 +174,7 @@ static struct miscdevice riowd_miscdev = {
 	.fops	= &riowd_fops
 };
 
-static int riowd_probe(struct platform_device *op)
+static int __devinit riowd_probe(struct platform_device *op)
 {
 	struct riowd *p;
 	int err = -EINVAL;
@@ -182,7 +183,7 @@ static int riowd_probe(struct platform_device *op)
 		goto out;
 
 	err = -ENOMEM;
-	p = devm_kzalloc(&op->dev, sizeof(*p), GFP_KERNEL);
+	p = kzalloc(sizeof(*p), GFP_KERNEL);
 	if (!p)
 		goto out;
 
@@ -191,7 +192,7 @@ static int riowd_probe(struct platform_device *op)
 	p->regs = of_ioremap(&op->resource[0], 0, 2, DRIVER_NAME);
 	if (!p->regs) {
 		pr_err("Cannot map registers\n");
-		goto out;
+		goto out_free;
 	}
 	/* Make miscdev useable right away */
 	riowd_device = p;
@@ -205,23 +206,27 @@ static int riowd_probe(struct platform_device *op)
 	pr_info("Hardware watchdog [%i minutes], regs at %p\n",
 		riowd_timeout, p->regs);
 
-	platform_set_drvdata(op, p);
+	dev_set_drvdata(&op->dev, p);
 	return 0;
 
 out_iounmap:
 	riowd_device = NULL;
 	of_iounmap(&op->resource[0], p->regs, 2);
 
+out_free:
+	kfree(p);
+
 out:
 	return err;
 }
 
-static int riowd_remove(struct platform_device *op)
+static int __devexit riowd_remove(struct platform_device *op)
 {
-	struct riowd *p = platform_get_drvdata(op);
+	struct riowd *p = dev_get_drvdata(&op->dev);
 
 	misc_deregister(&riowd_miscdev);
 	of_iounmap(&op->resource[0], p->regs, 2);
+	kfree(p);
 
 	return 0;
 }
@@ -237,10 +242,11 @@ MODULE_DEVICE_TABLE(of, riowd_match);
 static struct platform_driver riowd_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = riowd_match,
 	},
 	.probe		= riowd_probe,
-	.remove		= riowd_remove,
+	.remove		= __devexit_p(riowd_remove),
 };
 
 module_platform_driver(riowd_driver);

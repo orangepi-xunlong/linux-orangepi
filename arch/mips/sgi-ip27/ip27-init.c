@@ -54,13 +54,13 @@ extern void pcibr_setup(cnodeid_t);
 
 extern void xtalk_probe_node(cnodeid_t nid);
 
-static void per_hub_init(cnodeid_t cnode)
+static void __cpuinit per_hub_init(cnodeid_t cnode)
 {
 	struct hub_data *hub = hub_data(cnode);
 	nasid_t nasid = COMPACT_TO_NASID_NODEID(cnode);
 	int i;
 
-	cpumask_set_cpu(smp_processor_id(), &hub->h_cpus);
+	cpu_set(smp_processor_id(), hub->h_cpus);
 
 	if (test_and_set_bit(cnode, hub_init_mask))
 		return;
@@ -110,7 +110,7 @@ static void per_hub_init(cnodeid_t cnode)
 	}
 }
 
-void per_cpu_init(void)
+void __cpuinit per_cpu_init(void)
 {
 	int cpu = smp_processor_id();
 	int slice = LOCAL_HUB_L(PI_CPU_NUM);
@@ -151,7 +151,7 @@ nasid_t
 get_nasid(void)
 {
 	return (nasid_t)((LOCAL_HUB_L(NI_STATUS_REV_ID) & NSRI_NODEID_MASK)
-			 >> NSRI_NODEID_SHFT);
+	                 >> NSRI_NODEID_SHFT);
 }
 
 /*

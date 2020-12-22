@@ -44,77 +44,17 @@ SECTIONS
  * Text, read only data and other permanent read-only sections
  */
 
-	_text = .;
-	_stext = .;
-
-	/*
-	 * Head text.
-	 * This needs to be in its own output section to avoid ld placing
-	 * branch trampoline stubs randomly throughout the fixed sections,
-	 * which it will do (even if the branch comes from another section)
-	 * in order to optimize stub generation.
-	 */
-	.head.text : AT(ADDR(.head.text) - LOAD_OFFSET) {
-#ifdef CONFIG_PPC64
-		KEEP(*(.head.text.first_256B));
-#ifdef CONFIG_PPC_BOOK3E
-# define END_FIXED	0x100
-#else
-		KEEP(*(.head.text.real_vectors));
-		*(.head.text.real_trampolines);
-		KEEP(*(.head.text.virt_vectors));
-		*(.head.text.virt_trampolines);
-# if defined(CONFIG_PPC_PSERIES) || defined(CONFIG_PPC_POWERNV)
-		KEEP(*(.head.data.fwnmi_page));
-#  define END_FIXED	0x8000
-# else
-#  define END_FIXED	0x7000
-# endif
-#endif
-		ASSERT((. == END_FIXED), "vmlinux.lds.S: fixed section overflow error");
-#else /* !CONFIG_PPC64 */
-		HEAD_TEXT
-#endif
-	} :kernel
-
-	/*
-	 * If the build dies here, it's likely code in head_64.S is referencing
-	 * labels it can't reach, and the linker inserting stubs without the
-	 * assembler's knowledge. To debug, remove the above assert and
-	 * rebuild. Look for branch stubs in the fixed section region.
-	 *
-	 * Linker stub generation could be allowed in "trampoline"
-	 * sections if absolutely necessary, but this would require
-	 * some rework of the fixed sections. Before resorting to this,
-	 * consider references that have sufficient addressing range,
-	 * (e.g., hand coded trampolines) so the linker does not have
-	 * to add stubs.
-	 *
-	 * Linker stubs at the top of the main text section are currently not
-	 * detected, and will result in a crash at boot due to offsets being
-	 * wrong.
-	 */
-#ifdef CONFIG_PPC64
-	/*
-	 * BLOCK(0) overrides the default output section alignment because
-	 * this needs to start right after .head.text in order for fixed
-	 * section placement to work.
-	 */
-	.text BLOCK(0) : AT(ADDR(.text) - LOAD_OFFSET) {
-#else
+	/* Text and gots */
 	.text : AT(ADDR(.text) - LOAD_OFFSET) {
 		ALIGN_FUNCTION();
-#endif
+		HEAD_TEXT
+		_text = .;
 		/* careful! __ftr_alt_* sections need to be close to .text */
 		*(.text .fixup __ftr_alt_* .ref.text)
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		IRQENTRY_TEXT
-		SOFTIRQENTRY_TEXT
-		MEM_KEEP(init.text)
-		MEM_KEEP(exit.text)
 
 #ifdef CONFIG_PPC32
 		*(.got1)
@@ -132,46 +72,6 @@ SECTIONS
 	/* Read-only data */
 	RODATA
 
-#ifdef CONFIG_PPC64
-	. = ALIGN(8);
-	__stf_entry_barrier_fixup : AT(ADDR(__stf_entry_barrier_fixup) - LOAD_OFFSET) {
-		__start___stf_entry_barrier_fixup = .;
-		*(__stf_entry_barrier_fixup)
-		__stop___stf_entry_barrier_fixup = .;
-	}
-
-	. = ALIGN(8);
-	__stf_exit_barrier_fixup : AT(ADDR(__stf_exit_barrier_fixup) - LOAD_OFFSET) {
-		__start___stf_exit_barrier_fixup = .;
-		*(__stf_exit_barrier_fixup)
-		__stop___stf_exit_barrier_fixup = .;
-	}
-
-	. = ALIGN(8);
-	__rfi_flush_fixup : AT(ADDR(__rfi_flush_fixup) - LOAD_OFFSET) {
-		__start___rfi_flush_fixup = .;
-		*(__rfi_flush_fixup)
-		__stop___rfi_flush_fixup = .;
-	}
-#endif /* CONFIG_PPC64 */
-
-#ifdef CONFIG_PPC_BARRIER_NOSPEC
-	. = ALIGN(8);
-	__spec_barrier_fixup : AT(ADDR(__spec_barrier_fixup) - LOAD_OFFSET) {
-		__start___barrier_nospec_fixup = .;
-		*(__barrier_nospec_fixup)
-		__stop___barrier_nospec_fixup = .;
-	}
-#endif /* CONFIG_PPC_BARRIER_NOSPEC */
-
-#ifdef CONFIG_PPC_FSL_BOOK3E
-	. = ALIGN(8);
-	__spec_btb_flush_fixup : AT(ADDR(__spec_btb_flush_fixup) - LOAD_OFFSET) {
-		__start__btb_flush_fixup = .;
-		*(__btb_flush_fixup)
-		__stop__btb_flush_fixup = .;
-	}
-#endif
 	EXCEPTION_TABLE(0)
 
 	NOTES :kernel :notes
@@ -264,7 +164,7 @@ SECTIONS
 	. = ALIGN(8);
 	.dynsym : AT(ADDR(.dynsym) - LOAD_OFFSET)
 	{
-#ifdef CONFIG_PPC32
+#ifdef CONFIG_RELOCATABLE_PPC32
 		__dynamic_symtab = .;
 #endif
 		*(.dynsym)
@@ -283,12 +183,6 @@ SECTIONS
 		*(.rela*)
 	}
 #endif
-	/* .exit.data is discarded at runtime, not link time,
-	 * to deal with references from .exit.text
-	 */
-	.exit.data : AT(ADDR(.exit.data) - LOAD_OFFSET) {
-		EXIT_DATA
-	}
 
 	/* freed after init ends here */
 	. = ALIGN(PAGE_SIZE);
@@ -322,11 +216,6 @@ SECTIONS
 	. = ALIGN(256);
 	.got : AT(ADDR(.got) - LOAD_OFFSET) {
 		__toc_start = .;
-#ifndef CONFIG_RELOCATABLE
-		__prom_init_toc_start = .;
-		arch/powerpc/kernel/prom_init.o*(.toc .got)
-		__prom_init_toc_end = .;
-#endif
 		*(.got)
 		*(.toc)
 	}

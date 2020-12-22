@@ -9,10 +9,6 @@
  * published by the Free Software Foundation.
 */
 
-/*
- * NOTE: Code in this file is not used when booting with Device Tree support.
- */
-
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
@@ -23,9 +19,7 @@
 #include <linux/io.h>
 #include <linux/device.h>
 #include <linux/serial_core.h>
-#include <linux/serial_s3c.h>
 #include <linux/platform_device.h>
-#include <linux/of.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
@@ -35,15 +29,17 @@
 #include <asm/irq.h>
 
 #include <plat/cpu-freq.h>
+#include <plat/regs-serial.h>
 #include <mach/regs-clock.h>
 
 #include <plat/cpu.h>
 #include <plat/devs.h>
+#include <plat/clock.h>
 #include <plat/sdhci.h>
 #include <plat/iic-core.h>
+#include <plat/onenand-core.h>
 
 #include "common.h"
-#include "onenand-core.h"
 
 void __init s3c6400_map_io(void)
 {
@@ -60,6 +56,12 @@ void __init s3c6400_map_io(void)
 
 	s3c_onenand_setname("s3c6400-onenand");
 	s3c64xx_onenand1_setname("s3c6400-onenand");
+}
+
+void __init s3c6400_init_clocks(int xtal)
+{
+	s3c64xx_register_clocks(xtal, S3C6400_CLKDIV0_ARM_MASK);
+	s3c64xx_setup_clocks();
 }
 
 void __init s3c6400_init_irq(void)
@@ -80,10 +82,6 @@ static struct device s3c6400_dev = {
 
 static int __init s3c6400_core_init(void)
 {
-	/* Not applicable when using DT. */
-	if (of_have_populated_dt() || soc_is_s3c64xx())
-		return 0;
-
 	return subsys_system_register(&s3c6400_subsys, NULL);
 }
 

@@ -17,8 +17,8 @@
  * The hypervisor's public API.
  */
 
-#ifndef _HV_HV_H
-#define _HV_HV_H
+#ifndef _TILE_HV_H
+#define _TILE_HV_H
 
 #include <arch/chip.h>
 
@@ -42,45 +42,25 @@
  */
 #define HV_L1_SPAN (__HV_SIZE_ONE << HV_LOG2_L1_SPAN)
 
-/** The log2 of the initial size of small pages, in bytes.
- * See HV_DEFAULT_PAGE_SIZE_SMALL.
+/** The log2 of the size of small pages, in bytes. This value should
+ * be verified at runtime by calling hv_sysconf(HV_SYSCONF_PAGE_SIZE_SMALL).
  */
-#define HV_LOG2_DEFAULT_PAGE_SIZE_SMALL 16
+#define HV_LOG2_PAGE_SIZE_SMALL 16
 
-/** The initial size of small pages, in bytes. This value should be verified
+/** The size of small pages, in bytes. This value should be verified
  * at runtime by calling hv_sysconf(HV_SYSCONF_PAGE_SIZE_SMALL).
- * It may also be modified when installing a new context.
  */
-#define HV_DEFAULT_PAGE_SIZE_SMALL \
-  (__HV_SIZE_ONE << HV_LOG2_DEFAULT_PAGE_SIZE_SMALL)
+#define HV_PAGE_SIZE_SMALL (__HV_SIZE_ONE << HV_LOG2_PAGE_SIZE_SMALL)
 
-/** The log2 of the initial size of large pages, in bytes.
- * See HV_DEFAULT_PAGE_SIZE_LARGE.
+/** The log2 of the size of large pages, in bytes. This value should be
+ * verified at runtime by calling hv_sysconf(HV_SYSCONF_PAGE_SIZE_LARGE).
  */
-#define HV_LOG2_DEFAULT_PAGE_SIZE_LARGE 24
+#define HV_LOG2_PAGE_SIZE_LARGE 24
 
-/** The initial size of large pages, in bytes. This value should be verified
+/** The size of large pages, in bytes. This value should be verified
  * at runtime by calling hv_sysconf(HV_SYSCONF_PAGE_SIZE_LARGE).
- * It may also be modified when installing a new context.
  */
-#define HV_DEFAULT_PAGE_SIZE_LARGE \
-  (__HV_SIZE_ONE << HV_LOG2_DEFAULT_PAGE_SIZE_LARGE)
-
-#if CHIP_VA_WIDTH() > 32
-
-/** The log2 of the initial size of jumbo pages, in bytes.
- * See HV_DEFAULT_PAGE_SIZE_JUMBO.
- */
-#define HV_LOG2_DEFAULT_PAGE_SIZE_JUMBO 32
-
-/** The initial size of jumbo pages, in bytes. This value should
- * be verified at runtime by calling hv_sysconf(HV_SYSCONF_PAGE_SIZE_JUMBO).
- * It may also be modified when installing a new context.
- */
-#define HV_DEFAULT_PAGE_SIZE_JUMBO \
-  (__HV_SIZE_ONE << HV_LOG2_DEFAULT_PAGE_SIZE_JUMBO)
-
-#endif
+#define HV_PAGE_SIZE_LARGE (__HV_SIZE_ONE << HV_LOG2_PAGE_SIZE_LARGE)
 
 /** The log2 of the granularity at which page tables must be aligned;
  *  in other words, the CPA for a page table must have this many zero
@@ -107,22 +87,7 @@
 #define HV_DISPATCH_ENTRY_SIZE 32
 
 /** Version of the hypervisor interface defined by this file */
-#define _HV_VERSION 13
-
-/** Last version of the hypervisor interface with old hv_init() ABI.
- *
- * The change from version 12 to version 13 corresponds to launching
- * the client by default at PL2 instead of PL1 (corresponding to the
- * hv itself running at PL3 instead of PL2).  To make this explicit,
- * the hv_init() API was also extended so the client can report its
- * desired PL, resulting in a more helpful failure diagnostic.  If you
- * call hv_init() with _HV_VERSION_OLD_HV_INIT and omit the client_pl
- * argument, the hypervisor will assume client_pl = 1.
- *
- * Note that this is a deprecated solution and we do not expect to
- * support clients of the Tilera hypervisor running at PL1 indefinitely.
- */
-#define _HV_VERSION_OLD_HV_INIT 12
+#define _HV_VERSION 11
 
 /* Index into hypervisor interface dispatch code blocks.
  *
@@ -315,17 +280,8 @@
 #define HV_DISPATCH_GET_IPI_PTE                   56
 #endif
 
-/** hv_set_pte_super_shift */
-#define HV_DISPATCH_SET_PTE_SUPER_SHIFT           57
-
-/** hv_console_set_ipi */
-#define HV_DISPATCH_CONSOLE_SET_IPI               63
-
-/** hv_send_nmi */
-#define HV_DISPATCH_SEND_NMI                      65
-
 /** One more than the largest dispatch value */
-#define _HV_DISPATCH_END                          66
+#define _HV_DISPATCH_END                          57
 
 
 #ifndef __ASSEMBLER__
@@ -398,11 +354,7 @@ typedef int HV_Errno;
 #ifndef __ASSEMBLER__
 
 /** Pass HV_VERSION to hv_init to request this version of the interface. */
-typedef enum {
-  HV_VERSION = _HV_VERSION,
-  HV_VERSION_OLD_HV_INIT = _HV_VERSION_OLD_HV_INIT,
-
-} HV_VersionNumber;
+typedef enum { HV_VERSION = _HV_VERSION } HV_VersionNumber;
 
 /** Initializes the hypervisor.
  *
@@ -410,11 +362,9 @@ typedef enum {
  * that this program expects, typically HV_VERSION.
  * @param chip_num Architecture number of the chip the client was built for.
  * @param chip_rev_num Revision number of the chip the client was built for.
- * @param client_pl Privilege level the client is built for
- *   (not required if interface_version_number == HV_VERSION_OLD_HV_INIT).
  */
 void hv_init(HV_VersionNumber interface_version_number,
-             int chip_num, int chip_rev_num, int client_pl);
+             int chip_num, int chip_rev_num);
 
 
 /** Queries we can make for hv_sysconf().
@@ -451,18 +401,7 @@ typedef enum {
    *  that the temperature has hit an upper limit and is no longer being
    *  accurately tracked.
    */
-  HV_SYSCONF_BOARD_TEMP      = 6,
-
-  /** Legal page size bitmask for hv_install_context().
-   * For example, if 16KB and 64KB small pages are supported,
-   * it would return "HV_CTX_PG_SM_16K | HV_CTX_PG_SM_64K".
-   */
-  HV_SYSCONF_VALID_PAGE_SIZES = 7,
-
-  /** The size of jumbo pages, in bytes.
-   * If no jumbo pages are available, zero will be returned.
-   */
-  HV_SYSCONF_PAGE_SIZE_JUMBO = 8,
+  HV_SYSCONF_BOARD_TEMP      = 6
 
 } HV_SysconfQuery;
 
@@ -535,36 +474,14 @@ typedef enum {
   HV_CONFSTR_SWITCH_CONTROL  = 14,
 
   /** Chip revision level. */
-  HV_CONFSTR_CHIP_REV        = 15,
-
-  /** CPU module part number. */
-  HV_CONFSTR_CPUMOD_PART_NUM = 16,
-
-  /** CPU module serial number. */
-  HV_CONFSTR_CPUMOD_SERIAL_NUM = 17,
-
-  /** CPU module revision level. */
-  HV_CONFSTR_CPUMOD_REV      = 18,
-
-  /** Human-readable CPU module description. */
-  HV_CONFSTR_CPUMOD_DESC     = 19,
-
-  /** Per-tile hypervisor statistics.  When this identifier is specified,
-   *  the hv_confstr call takes two extra arguments.  The first is the
-   *  HV_XY_TO_LOTAR of the target tile's coordinates.  The second is
-   *  a flag word.  The only current flag is the lowest bit, which means
-   *  "zero out the stats instead of retrieving them"; in this case the
-   *  buffer and buffer length are ignored. */
-  HV_CONFSTR_HV_STATS        = 20
+  HV_CONFSTR_CHIP_REV        = 15
 
 } HV_ConfstrQuery;
 
 /** Query a configuration string from the hypervisor.
  *
  * @param query Identifier for the specific string to be retrieved
- *        (HV_CONFSTR_xxx).  Some strings may require or permit extra
- *        arguments to be appended which select specific objects to be
- *        described; see the string descriptions above.
+ *        (HV_CONFSTR_xxx).
  * @param buf Buffer in which to place the string.
  * @param len Length of the buffer.
  * @return If query is valid, then the length of the corresponding string,
@@ -572,7 +489,7 @@ typedef enum {
  *        was truncated.  If query is invalid, HV_EINVAL.  If the specified
  *        buffer is not writable by the client, HV_EFAULT.
  */
-int hv_confstr(HV_ConfstrQuery query, HV_VirtAddr buf, int len, ...);
+int hv_confstr(HV_ConfstrQuery query, HV_VirtAddr buf, int len);
 
 /** Tile coordinate */
 typedef struct
@@ -595,30 +512,6 @@ typedef struct
  * @result Zero if no error, non-zero for invalid parameters.
  */
 int hv_get_ipi_pte(HV_Coord tile, int pl, HV_PTE* pte);
-
-/** Configure the console interrupt.
- *
- * When the console client interrupt is enabled, the hypervisor will
- * deliver the specified IPI to the client in the following situations:
- *
- * - The console has at least one character available for input.
- *
- * - The console can accept new characters for output, and the last call
- *   to hv_console_write() did not write all of the characters requested
- *   by the client.
- *
- * Note that in some system configurations, console interrupt will not
- * be available; clients should be prepared for this routine to fail and
- * to fall back to periodic console polling in that case.
- *
- * @param ipi Index of the IPI register which will receive the interrupt.
- * @param event IPI event number for console interrupt. If less than 0,
- *        disable the console IPI interrupt.
- * @param coord Tile to be targeted for console interrupt.
- * @return 0 on success, otherwise, HV_EINVAL if illegal parameter,
- *         HV_ENOTSUP if console interrupt are not available.
- */
-int hv_console_set_ipi(int ipi, int event, HV_Coord coord);
 
 #else /* !CHIP_HAS_IPI() */
 
@@ -756,12 +649,6 @@ void hv_set_rtc(HV_RTCTime time);
  *  new page table does not need to contain any mapping for the
  *  hv_install_context address itself.
  *
- *  At most one HV_CTX_PG_SM_* flag may be specified in "flags";
- *  if multiple flags are specified, HV_EINVAL is returned.
- *  Specifying none of the flags results in using the default page size.
- *  All cores participating in a given client must request the same
- *  page size, or the results are undefined.
- *
  * @param page_table Root of the page table.
  * @param access PTE providing info on how to read the page table.  This
  *   value must be consistent between multiple tiles sharing a page table,
@@ -780,35 +667,7 @@ int hv_install_context(HV_PhysAddr page_table, HV_PTE access, HV_ASID asid,
 #define HV_CTX_DIRECTIO     0x1   /**< Direct I/O requests are accepted from
                                        PL0. */
 
-#define HV_CTX_PG_SM_4K     0x10  /**< Use 4K small pages, if available. */
-#define HV_CTX_PG_SM_16K    0x20  /**< Use 16K small pages, if available. */
-#define HV_CTX_PG_SM_64K    0x40  /**< Use 64K small pages, if available. */
-#define HV_CTX_PG_SM_MASK   0xf0  /**< Mask of all possible small pages. */
-
 #ifndef __ASSEMBLER__
-
-
-/** Set the number of pages ganged together by HV_PTE_SUPER at a
- * particular level of the page table.
- *
- * The current TILE-Gx hardware only supports powers of four
- * (i.e. log2_count must be a multiple of two), and the requested
- * "super" page size must be less than the span of the next level in
- * the page table.  The largest size that can be requested is 64GB.
- *
- * The shift value is initially "0" for all page table levels,
- * indicating that the HV_PTE_SUPER bit is effectively ignored.
- *
- * If you change the count from one non-zero value to another, the
- * hypervisor will flush the entire TLB and TSB to avoid confusion.
- *
- * @param level Page table level (0, 1, or 2)
- * @param log2_count Base-2 log of the number of pages to gang together,
- * i.e. how much to shift left the base page size for the super page size.
- * @return Zero on success, or a hypervisor error code on failure.
- */
-int hv_set_pte_super_shift(int level, int log2_count);
-
 
 /** Value returned from hv_inquire_context(). */
 typedef struct
@@ -964,11 +823,7 @@ typedef enum {
   HV_INQ_TILES_HFH_CACHE       = 2,
 
   /** The set of tiles that can be legally used as a LOTAR for a PTE. */
-  HV_INQ_TILES_LOTAR           = 3,
-
-  /** The set of "shared" driver tiles that the hypervisor may
-   *  periodically interrupt. */
-  HV_INQ_TILES_SHARED          = 4
+  HV_INQ_TILES_LOTAR           = 3
 } HV_InqTileSet;
 
 /** Returns specific information about various sets of tiles within the
@@ -1256,11 +1111,6 @@ void hv_downcall_dispatch(void);
 #define INT_DMATLB_ACCESS_DWNCL  INT_DMA_CPL
 /** Device interrupt downcall interrupt vector */
 #define INT_DEV_INTR_DWNCL       INT_WORLD_ACCESS
-/** NMI downcall interrupt vector */
-#define INT_NMI_DWNCL            64
-
-#define HV_NMI_FLAG_FORCE    0x1  /**< Force an NMI downcall regardless of
-               the ICS bit of the client. */
 
 #ifndef __ASSEMBLER__
 
@@ -1388,14 +1238,11 @@ HV_Errno hv_set_command_line(HV_VirtAddr buf, int length);
  * with the existing priority pages) or "red/black" (if they don't).
  * The bitmask provides information on which parts of the cache
  * have been used for pinned pages so far on this tile; if (1 << N)
- * appears in the bitmask, that indicates that a 4KB region of the
- * cache starting at (N * 4KB) is in use by a "priority" page.
- * The portion of cache used by a particular page can be computed
- * by taking the page's PA, modulo CHIP_L2_CACHE_SIZE(), and setting
- * all the "4KB" bits corresponding to the actual page size.
+ * appears in the bitmask, that indicates that a page has been marked
+ * "priority" whose PFN equals N, mod 8.
  * @param bitmask A bitmap of priority page set values
  */
-void hv_set_caching(unsigned long bitmask);
+void hv_set_caching(unsigned int bitmask);
 
 
 /** Zero out a specified number of pages.
@@ -1788,56 +1635,6 @@ int hv_dev_poll(int devhdl, __hv32 events, HV_IntArg intarg);
 int hv_dev_poll_cancel(int devhdl);
 
 
-/** NMI information */
-typedef struct
-{
-  /** Result: negative error, or HV_NMI_RESULT_xxx. */
-  int result;
-
-  /** PC from interrupted remote core (if result != HV_NMI_RESULT_FAIL_HV). */
-  HV_VirtAddr pc;
-
-} HV_NMI_Info;
-
-/** NMI issued successfully. */
-#define HV_NMI_RESULT_OK        0
-
-/** NMI not issued: remote tile running at client PL with ICS set. */
-#define HV_NMI_RESULT_FAIL_ICS  1
-
-/** NMI not issued: remote tile waiting in hypervisor. */
-#define HV_NMI_RESULT_FAIL_HV   2
-
-/** Force an NMI downcall regardless of the ICS bit of the client. */
-#define HV_NMI_FLAG_FORCE    0x1
-
-/** Send an NMI interrupt request to a particular tile.
- *
- *  This will cause the NMI to be issued on the remote tile regardless
- *  of the state of the client interrupt mask.  However, if the remote
- *  tile is in the hypervisor, it will not execute the NMI, and
- *  HV_NMI_RESULT_FAIL_HV will be returned.  Similarly, if the remote
- *  tile is in a client interrupt critical section at the time of the
- *  NMI, it will not execute the NMI, and HV_NMI_RESULT_FAIL_ICS will
- *  be returned.  In this second case, however, if HV_NMI_FLAG_FORCE
- *  is set in flags, then the remote tile will enter its NMI interrupt
- *  vector regardless.  Forcing the NMI vector during an interrupt
- *  critical section will mean that the client can not safely continue
- *  execution after handling the interrupt.
- *
- *  @param tile Tile to which the NMI request is sent.
- *  @param info NMI information which is defined by and interpreted by the
- *         supervisor, is passed to the specified tile, and is
- *         stored in the SPR register SYSTEM_SAVE_{CLIENT_PL}_2 on the
- *         specified tile when entering the NMI handler routine.
- *         Typically, this parameter stores the NMI type, or an aligned
- *         VA plus some special bits, etc.
- *  @param flags Flags (HV_NMI_FLAG_xxx).
- *  @return Information about the requested NMI.
- */
-HV_NMI_Info hv_send_nmi(HV_Coord tile, unsigned long info, __hv64 flags);
-
-
 /** Scatter-gather list for preada/pwritea calls. */
 typedef struct
 #if CHIP_VA_WIDTH() <= 32
@@ -2054,12 +1851,12 @@ int hv_flush_remote(HV_PhysAddr cache_pa, unsigned long cache_control,
 #define HV_PTE_INDEX_USER            10  /**< Page is user-accessible */
 #define HV_PTE_INDEX_ACCESSED        11  /**< Page has been accessed */
 #define HV_PTE_INDEX_DIRTY           12  /**< Page has been written */
-                                         /*   Bits 13-14 are reserved for
+                                         /*   Bits 13-15 are reserved for
                                               future use. */
-#define HV_PTE_INDEX_SUPER           15  /**< Pages ganged together for TLB */
 #define HV_PTE_INDEX_MODE            16  /**< Page mode; see HV_PTE_MODE_xxx */
 #define HV_PTE_MODE_BITS              3  /**< Number of bits in mode */
-#define HV_PTE_INDEX_CLIENT2         19  /**< Page client state 2 */
+                                         /*   Bit 19 is reserved for
+                                              future use. */
 #define HV_PTE_INDEX_LOTAR           20  /**< Page's LOTAR; must be high bits
                                               of word */
 #define HV_PTE_LOTAR_BITS            12  /**< Number of bits in a LOTAR */
@@ -2071,6 +1868,15 @@ int hv_flush_remote(HV_PhysAddr cache_pa, unsigned long cache_control,
 #define HV_PTE_INDEX_PTFN            35  /**< Page's PTFN; must be high bits
                                               of word */
 #define HV_PTE_PTFN_BITS             29  /**< Number of bits in a PTFN */
+
+/** Position of the PFN field within the PTE (subset of the PTFN). */
+#define HV_PTE_INDEX_PFN (HV_PTE_INDEX_PTFN + (HV_LOG2_PAGE_SIZE_SMALL - \
+                                               HV_LOG2_PAGE_TABLE_ALIGN))
+
+/** Length of the PFN field within the PTE (subset of the PTFN). */
+#define HV_PTE_INDEX_PFN_BITS (HV_PTE_INDEX_PTFN_BITS - \
+                               (HV_LOG2_PAGE_SIZE_SMALL - \
+                                HV_LOG2_PAGE_TABLE_ALIGN))
 
 /*
  * Legal values for the PTE's mode field
@@ -2151,10 +1957,7 @@ int hv_flush_remote(HV_PhysAddr cache_pa, unsigned long cache_control,
 
 /** Does this PTE map a page?
  *
- * If this bit is set in a level-0 page table, the entry should be
- * interpreted as a level-2 page table entry mapping a jumbo page.
- *
- * If this bit is set in a level-1 page table, the entry should be
+ * If this bit is set in the level-1 page table, the entry should be
  * interpreted as a level-2 page table entry mapping a large page.
  *
  * This bit should not be modified by the client while PRESENT is set, as
@@ -2163,18 +1966,6 @@ int hv_flush_remote(HV_PhysAddr cache_pa, unsigned long cache_control,
  * In a level-2 page table, this bit is ignored and must be zero.
  */
 #define HV_PTE_PAGE                  (__HV_PTE_ONE << HV_PTE_INDEX_PAGE)
-
-/** Does this PTE implicitly reference multiple pages?
- *
- * If this bit is set in the page table (either in the level-2 page table,
- * or in a higher level page table in conjunction with the PAGE bit)
- * then the PTE specifies a range of contiguous pages, not a single page.
- * The hv_set_pte_super_shift() allows you to specify the count for
- * each level of the page table.
- *
- * Note: this bit is not supported on TILEPro systems.
- */
-#define HV_PTE_SUPER                 (__HV_PTE_ONE << HV_PTE_INDEX_SUPER)
 
 /** Is this a global (non-ASID) mapping?
  *
@@ -2254,13 +2045,6 @@ int hv_flush_remote(HV_PhysAddr cache_pa, unsigned long cache_control,
  * hypervisor.
  */
 #define HV_PTE_CLIENT1               (__HV_PTE_ONE << HV_PTE_INDEX_CLIENT1)
-
-/** Client-private bit in PTE.
- *
- * This bit is guaranteed not to be inspected or modified by the
- * hypervisor.
- */
-#define HV_PTE_CLIENT2               (__HV_PTE_ONE << HV_PTE_INDEX_CLIENT2)
 
 /** Non-coherent (NC) bit in PTE.
  *
@@ -2394,10 +2178,8 @@ hv_pte_clear_##name(HV_PTE pte)                                 \
  */
 _HV_BIT(present,         PRESENT)
 _HV_BIT(page,            PAGE)
-_HV_BIT(super,           SUPER)
 _HV_BIT(client0,         CLIENT0)
 _HV_BIT(client1,         CLIENT1)
-_HV_BIT(client2,         CLIENT2)
 _HV_BIT(migrating,       MIGRATING)
 _HV_BIT(nc,              NC)
 _HV_BIT(readable,        READABLE)
@@ -2440,17 +2222,47 @@ hv_pte_set_mode(HV_PTE pte, unsigned int val)
  *
  * This field contains the upper bits of the CPA (client physical
  * address) of the target page; the complete CPA is this field with
- * HV_LOG2_PAGE_TABLE_ALIGN zero bits appended to it.
+ * HV_LOG2_PAGE_SIZE_SMALL zero bits appended to it.
  *
- * For all PTEs in the lowest-level page table, and for all PTEs with
- * the Page bit set in all page tables, the CPA must be aligned modulo
- * the relevant page size.
+ * For PTEs in a level-1 page table where the Page bit is set, the
+ * CPA must be aligned modulo the large page size.
+ */
+static __inline unsigned int
+hv_pte_get_pfn(const HV_PTE pte)
+{
+  return pte.val >> HV_PTE_INDEX_PFN;
+}
+
+
+/** Set the page frame number into a PTE.  See hv_pte_get_pfn. */
+static __inline HV_PTE
+hv_pte_set_pfn(HV_PTE pte, unsigned int val)
+{
+  /*
+   * Note that the use of "PTFN" in the next line is intentional; we
+   * don't want any garbage lower bits left in that field.
+   */
+  pte.val &= ~(((1ULL << HV_PTE_PTFN_BITS) - 1) << HV_PTE_INDEX_PTFN);
+  pte.val |= (__hv64) val << HV_PTE_INDEX_PFN;
+  return pte;
+}
+
+/** Get the page table frame number from the PTE.
+ *
+ * This field contains the upper bits of the CPA (client physical
+ * address) of the target page table; the complete CPA is this field with
+ * with HV_PAGE_TABLE_ALIGN zero bits appended to it.
+ *
+ * For PTEs in a level-1 page table when the Page bit is not set, the
+ * CPA must be aligned modulo the sticter of HV_PAGE_TABLE_ALIGN and
+ * the level-2 page table size.
  */
 static __inline unsigned long
 hv_pte_get_ptfn(const HV_PTE pte)
 {
   return pte.val >> HV_PTE_INDEX_PTFN;
 }
+
 
 /** Set the page table frame number into a PTE.  See hv_pte_get_ptfn. */
 static __inline HV_PTE
@@ -2459,20 +2271,6 @@ hv_pte_set_ptfn(HV_PTE pte, unsigned long val)
   pte.val &= ~(((1ULL << HV_PTE_PTFN_BITS)-1) << HV_PTE_INDEX_PTFN);
   pte.val |= (__hv64) val << HV_PTE_INDEX_PTFN;
   return pte;
-}
-
-/** Get the client physical address from the PTE.  See hv_pte_set_ptfn. */
-static __inline HV_PhysAddr
-hv_pte_get_pa(const HV_PTE pte)
-{
-  return (__hv64) hv_pte_get_ptfn(pte) << HV_LOG2_PAGE_TABLE_ALIGN;
-}
-
-/** Set the client physical address into a PTE.  See hv_pte_get_ptfn. */
-static __inline HV_PTE
-hv_pte_set_pa(HV_PTE pte, HV_PhysAddr pa)
-{
-  return hv_pte_set_ptfn(pte, pa >> HV_LOG2_PAGE_TABLE_ALIGN);
 }
 
 
@@ -2510,19 +2308,27 @@ hv_pte_set_lotar(HV_PTE pte, unsigned int val)
 
 #endif  /* !__ASSEMBLER__ */
 
+/** Converts a client physical address to a pfn. */
+#define HV_CPA_TO_PFN(p) ((p) >> HV_LOG2_PAGE_SIZE_SMALL)
+
+/** Converts a pfn to a client physical address. */
+#define HV_PFN_TO_CPA(p) (((HV_PhysAddr)(p)) << HV_LOG2_PAGE_SIZE_SMALL)
+
 /** Converts a client physical address to a ptfn. */
 #define HV_CPA_TO_PTFN(p) ((p) >> HV_LOG2_PAGE_TABLE_ALIGN)
 
 /** Converts a ptfn to a client physical address. */
 #define HV_PTFN_TO_CPA(p) (((HV_PhysAddr)(p)) << HV_LOG2_PAGE_TABLE_ALIGN)
 
-#if CHIP_VA_WIDTH() > 32
+/** Converts a ptfn to a pfn. */
+#define HV_PTFN_TO_PFN(p) \
+  ((p) >> (HV_LOG2_PAGE_SIZE_SMALL - HV_LOG2_PAGE_TABLE_ALIGN))
 
-/*
- * Note that we currently do not allow customizing the page size
- * of the L0 pages, but fix them at 4GB, so we do not use the
- * "_HV_xxx" nomenclature for the L0 macros.
- */
+/** Converts a pfn to a ptfn. */
+#define HV_PFN_TO_PTFN(p) \
+  ((p) << (HV_LOG2_PAGE_SIZE_SMALL - HV_LOG2_PAGE_TABLE_ALIGN))
+
+#if CHIP_VA_WIDTH() > 32
 
 /** Log number of HV_PTE entries in L0 page table */
 #define HV_LOG2_L0_ENTRIES (CHIP_VA_WIDTH() - HV_LOG2_L1_SPAN)
@@ -2553,104 +2359,69 @@ hv_pte_set_lotar(HV_PTE pte, unsigned int val)
 #endif /* CHIP_VA_WIDTH() > 32 */
 
 /** Log number of HV_PTE entries in L1 page table */
-#define _HV_LOG2_L1_ENTRIES(log2_page_size_large) \
-  (HV_LOG2_L1_SPAN - log2_page_size_large)
+#define HV_LOG2_L1_ENTRIES (HV_LOG2_L1_SPAN - HV_LOG2_PAGE_SIZE_LARGE)
 
 /** Number of HV_PTE entries in L1 page table */
-#define _HV_L1_ENTRIES(log2_page_size_large) \
-  (1 << _HV_LOG2_L1_ENTRIES(log2_page_size_large))
+#define HV_L1_ENTRIES (1 << HV_LOG2_L1_ENTRIES)
 
 /** Log size of L1 page table in bytes */
-#define _HV_LOG2_L1_SIZE(log2_page_size_large) \
-  (HV_LOG2_PTE_SIZE + _HV_LOG2_L1_ENTRIES(log2_page_size_large))
+#define HV_LOG2_L1_SIZE (HV_LOG2_PTE_SIZE + HV_LOG2_L1_ENTRIES)
 
 /** Size of L1 page table in bytes */
-#define _HV_L1_SIZE(log2_page_size_large) \
-  (1 << _HV_LOG2_L1_SIZE(log2_page_size_large))
+#define HV_L1_SIZE (1 << HV_LOG2_L1_SIZE)
 
 /** Log number of HV_PTE entries in level-2 page table */
-#define _HV_LOG2_L2_ENTRIES(log2_page_size_large, log2_page_size_small) \
-  (log2_page_size_large - log2_page_size_small)
+#define HV_LOG2_L2_ENTRIES (HV_LOG2_PAGE_SIZE_LARGE - HV_LOG2_PAGE_SIZE_SMALL)
 
 /** Number of HV_PTE entries in level-2 page table */
-#define _HV_L2_ENTRIES(log2_page_size_large, log2_page_size_small) \
-  (1 << _HV_LOG2_L2_ENTRIES(log2_page_size_large, log2_page_size_small))
+#define HV_L2_ENTRIES (1 << HV_LOG2_L2_ENTRIES)
 
 /** Log size of level-2 page table in bytes */
-#define _HV_LOG2_L2_SIZE(log2_page_size_large, log2_page_size_small) \
-  (HV_LOG2_PTE_SIZE + \
-   _HV_LOG2_L2_ENTRIES(log2_page_size_large, log2_page_size_small))
+#define HV_LOG2_L2_SIZE (HV_LOG2_PTE_SIZE + HV_LOG2_L2_ENTRIES)
 
 /** Size of level-2 page table in bytes */
-#define _HV_L2_SIZE(log2_page_size_large, log2_page_size_small) \
-  (1 << _HV_LOG2_L2_SIZE(log2_page_size_large, log2_page_size_small))
+#define HV_L2_SIZE (1 << HV_LOG2_L2_SIZE)
 
 #ifdef __ASSEMBLER__
 
 #if CHIP_VA_WIDTH() > 32
 
 /** Index in L1 for a specific VA */
-#define _HV_L1_INDEX(va, log2_page_size_large) \
-  (((va) >> log2_page_size_large) & (_HV_L1_ENTRIES(log2_page_size_large) - 1))
+#define HV_L1_INDEX(va) \
+  (((va) >> HV_LOG2_PAGE_SIZE_LARGE) & (HV_L1_ENTRIES - 1))
 
 #else /* CHIP_VA_WIDTH() > 32 */
 
 /** Index in L1 for a specific VA */
-#define _HV_L1_INDEX(va, log2_page_size_large) \
-  (((va) >> log2_page_size_large))
+#define HV_L1_INDEX(va) \
+  (((va) >> HV_LOG2_PAGE_SIZE_LARGE))
 
 #endif /* CHIP_VA_WIDTH() > 32 */
 
 /** Index in level-2 page table for a specific VA */
-#define _HV_L2_INDEX(va, log2_page_size_large, log2_page_size_small) \
-  (((va) >> log2_page_size_small) & \
-   (_HV_L2_ENTRIES(log2_page_size_large, log2_page_size_small) - 1))
+#define HV_L2_INDEX(va) \
+  (((va) >> HV_LOG2_PAGE_SIZE_SMALL) & (HV_L2_ENTRIES - 1))
 
 #else /* __ASSEMBLER __ */
 
 #if CHIP_VA_WIDTH() > 32
 
 /** Index in L1 for a specific VA */
-#define _HV_L1_INDEX(va, log2_page_size_large) \
-  (((HV_VirtAddr)(va) >> log2_page_size_large) & \
-   (_HV_L1_ENTRIES(log2_page_size_large) - 1))
+#define HV_L1_INDEX(va) \
+  (((HV_VirtAddr)(va) >> HV_LOG2_PAGE_SIZE_LARGE) & (HV_L1_ENTRIES - 1))
 
 #else /* CHIP_VA_WIDTH() > 32 */
 
 /** Index in L1 for a specific VA */
-#define _HV_L1_INDEX(va, log2_page_size_large) \
-  (((HV_VirtAddr)(va) >> log2_page_size_large))
+#define HV_L1_INDEX(va) \
+  (((HV_VirtAddr)(va) >> HV_LOG2_PAGE_SIZE_LARGE))
 
 #endif /* CHIP_VA_WIDTH() > 32 */
 
 /** Index in level-2 page table for a specific VA */
-#define _HV_L2_INDEX(va, log2_page_size_large, log2_page_size_small) \
-  (((HV_VirtAddr)(va) >> log2_page_size_small) & \
-   (_HV_L2_ENTRIES(log2_page_size_large, log2_page_size_small) - 1))
+#define HV_L2_INDEX(va) \
+  (((HV_VirtAddr)(va) >> HV_LOG2_PAGE_SIZE_SMALL) & (HV_L2_ENTRIES - 1))
 
 #endif /* __ASSEMBLER __ */
 
-/** Position of the PFN field within the PTE (subset of the PTFN). */
-#define _HV_PTE_INDEX_PFN(log2_page_size) \
-  (HV_PTE_INDEX_PTFN + (log2_page_size - HV_LOG2_PAGE_TABLE_ALIGN))
-
-/** Length of the PFN field within the PTE (subset of the PTFN). */
-#define _HV_PTE_INDEX_PFN_BITS(log2_page_size) \
-  (HV_PTE_INDEX_PTFN_BITS - (log2_page_size - HV_LOG2_PAGE_TABLE_ALIGN))
-
-/** Converts a client physical address to a pfn. */
-#define _HV_CPA_TO_PFN(p, log2_page_size) ((p) >> log2_page_size)
-
-/** Converts a pfn to a client physical address. */
-#define _HV_PFN_TO_CPA(p, log2_page_size) \
-  (((HV_PhysAddr)(p)) << log2_page_size)
-
-/** Converts a ptfn to a pfn. */
-#define _HV_PTFN_TO_PFN(p, log2_page_size) \
-  ((p) >> (log2_page_size - HV_LOG2_PAGE_TABLE_ALIGN))
-
-/** Converts a pfn to a ptfn. */
-#define _HV_PFN_TO_PTFN(p, log2_page_size) \
-  ((p) << (log2_page_size - HV_LOG2_PAGE_TABLE_ALIGN))
-
-#endif /* _HV_HV_H */
+#endif /* _TILE_HV_H */

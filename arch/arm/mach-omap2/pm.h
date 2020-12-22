@@ -15,25 +15,14 @@
 
 #include "powerdomain.h"
 
-#ifdef CONFIG_CPU_IDLE
-extern int __init omap3_idle_init(void);
-extern int __init omap4_idle_init(void);
-#else
-static inline int omap3_idle_init(void)
-{
-	return 0;
-}
-
-static inline int omap4_idle_init(void)
-{
-	return 0;
-}
-#endif
-
 extern void *omap3_secure_ram_storage;
 extern void omap3_pm_off_mode_enable(int);
 extern void omap_sram_idle(void);
+extern int omap_set_pwrdm_state(struct powerdomain *pwrdm, u32 state);
+extern int omap3_idle_init(void);
+extern int omap4_idle_init(void);
 extern int omap_pm_clkdms_setup(struct clockdomain *clkdm, void *unused);
+extern int (*omap_pm_suspend)(void);
 
 #if defined(CONFIG_PM_OPP)
 extern int omap3_opp_init(void);
@@ -46,6 +35,27 @@ static inline int omap3_opp_init(void)
 static inline int omap4_opp_init(void)
 {
 	return -EINVAL;
+}
+#endif
+
+/*
+ * cpuidle mach specific parameters
+ *
+ * The board code can override the default C-states definition using
+ * omap3_pm_init_cpuidle
+ */
+struct cpuidle_params {
+	u32 exit_latency;	/* exit_latency = sleep + wake-up latencies */
+	u32 target_residency;
+	u8 valid;		/* validates the C-state */
+};
+
+#if defined(CONFIG_PM) && defined(CONFIG_CPU_IDLE)
+extern void omap3_pm_init_cpuidle(struct cpuidle_params *cpuidle_board_params);
+#else
+static
+inline void omap3_pm_init_cpuidle(struct cpuidle_params *cpuidle_board_params)
+{
 }
 #endif
 
@@ -81,11 +91,14 @@ extern unsigned int omap3_do_wfi_sz;
 /* ... and its pointer from SRAM after copy */
 extern void (*omap3_do_wfi_sram)(void);
 
+/* save_secure_ram_context function pointer and size, for copy to SRAM */
+extern int save_secure_ram_context(u32 *addr);
+extern unsigned int save_secure_ram_context_sz;
+
 extern void omap3_save_scratchpad_contents(void);
 
 #define PM_RTA_ERRATUM_i608		(1 << 0)
 #define PM_SDRC_WAKEUP_ERRATUM_i583	(1 << 1)
-#define PM_PER_MEMORIES_ERRATUM_i582	(1 << 2)
 
 #if defined(CONFIG_PM) && defined(CONFIG_ARCH_OMAP3)
 extern u16 pm34xx_errata;
@@ -96,18 +109,7 @@ extern void enable_omap3630_toggle_l2_on_restore(void);
 static inline void enable_omap3630_toggle_l2_on_restore(void) { }
 #endif		/* defined(CONFIG_PM) && defined(CONFIG_ARCH_OMAP3) */
 
-#define PM_OMAP4_ROM_SMP_BOOT_ERRATUM_GICD	(1 << 0)
-#define PM_OMAP4_CPU_OSWR_DISABLE		(1 << 1)
-
-#if defined(CONFIG_PM) && (defined(CONFIG_ARCH_OMAP4) ||\
-	   defined(CONFIG_SOC_OMAP5) || defined(CONFIG_SOC_DRA7XX))
-extern u16 pm44xx_errata;
-#define IS_PM44XX_ERRATUM(id)		(pm44xx_errata & (id))
-#else
-#define IS_PM44XX_ERRATUM(id)		0
-#endif
-
-#ifdef CONFIG_POWER_AVS_OMAP
+#ifdef CONFIG_OMAP_SMARTREFLEX
 extern int omap_devinit_smartreflex(void);
 extern void omap_enable_smartreflex_on_init(void);
 #else
@@ -134,21 +136,4 @@ static inline int omap4_twl_init(void)
 }
 #endif
 
-#ifdef CONFIG_PM
-extern void omap_pm_setup_oscillator(u32 tstart, u32 tshut);
-extern void omap_pm_get_oscillator(u32 *tstart, u32 *tshut);
-extern void omap_pm_setup_sr_i2c_pcb_length(u32 mm);
-#else
-static inline void omap_pm_setup_oscillator(u32 tstart, u32 tshut) { }
-static inline void omap_pm_get_oscillator(u32 *tstart, u32 *tshut) { *tstart = *tshut = 0; }
-static inline void omap_pm_setup_sr_i2c_pcb_length(u32 mm) { }
-#endif
-
-#ifdef CONFIG_SUSPEND
-void omap_common_suspend_init(void *pm_suspend);
-#else
-static inline void omap_common_suspend_init(void *pm_suspend)
-{
-}
-#endif /* CONFIG_SUSPEND */
 #endif

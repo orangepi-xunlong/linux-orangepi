@@ -45,9 +45,9 @@
 #include <linux/miscdevice.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include <linux/spinlock.h>
 #include <linux/stat.h>
 #include <linux/module.h>
-#include <linux/uio.h>
 
 #include "fuse_i.h"
 
@@ -63,7 +63,7 @@ struct cuse_conn {
 	bool			unrestricted_ioctl;
 };
 
-static DEFINE_MUTEX(cuse_lock);		/* protects registration */
+static DEFINE_SPINLOCK(cuse_lock);		/* protects cuse_conntbl */
 static struct list_head cuse_conntbl[CUSE_CONNTBL_LEN];
 static struct class *cuse_class;
 
@@ -88,24 +88,23 @@ static struct list_head *cuse_conntbl_head(dev_t devt)
  * FUSE file.
  */
 
-static ssize_t cuse_read_iter(struct kiocb *kiocb, struct iov_iter *to)
+static ssize_t cuse_read(struct file *file, char __user *buf, size_t count,
+			 loff_t *ppos)
 {
-	struct fuse_io_priv io = FUSE_IO_PRIV_SYNC(kiocb->ki_filp);
 	loff_t pos = 0;
 
-	return fuse_direct_io(&io, to, &pos, FUSE_DIO_CUSE);
+	return fuse_direct_io(file, buf, count, &pos, 0);
 }
 
-static ssize_t cuse_write_iter(struct kiocb *kiocb, struct iov_iter *from)
+static ssize_t cuse_write(struct file *file, const char __user *buf,
+			  size_t count, loff_t *ppos)
 {
-	struct fuse_io_priv io = FUSE_IO_PRIV_SYNC(kiocb->ki_filp);
 	loff_t pos = 0;
 	/*
 	 * No locking or generic_write_checks(), the server is
 	 * responsible for locking and sanity checks.
 	 */
-	return fuse_direct_io(&io, from, &pos,
-			      FUSE_DIO_WRITE | FUSE_DIO_CUSE);
+	return fuse_direct_io(file, buf, count, &pos, 1);
 }
 
 static int cuse_open(struct inode *inode, struct file *file)
@@ -115,14 +114,14 @@ static int cuse_open(struct inode *inode, struct file *file)
 	int rc;
 
 	/* look up and get the connection */
-	mutex_lock(&cuse_lock);
+	spin_lock(&cuse_lock);
 	list_for_each_entry(pos, cuse_conntbl_head(devt), list)
 		if (pos->dev->devt == devt) {
 			fuse_conn_get(&pos->fc);
 			cc = pos;
 			break;
 		}
-	mutex_unlock(&cuse_lock);
+	spin_unlock(&cuse_lock);
 
 	/* dead? */
 	if (!cc)
@@ -177,8 +176,8 @@ static long cuse_file_compat_ioctl(struct file *file, unsigned int cmd,
 
 static const struct file_operations cuse_frontend_fops = {
 	.owner			= THIS_MODULE,
-	.read_iter		= cuse_read_iter,
-	.write_iter		= cuse_write_iter,
+	.read			= cuse_read,
+	.write			= cuse_write,
 	.open			= cuse_open,
 	.release		= cuse_release,
 	.unlocked_ioctl		= cuse_file_ioctl,
@@ -268,7 +267,7 @@ static int cuse_parse_one(char **pp, char *end, char **keyp, char **valp)
 static int cuse_parse_devinfo(char *p, size_t len, struct cuse_devinfo *devinfo)
 {
 	char *end = p + len;
-	char *uninitialized_var(key), *uninitialized_var(val);
+	char *key, *val;
 	int rc;
 
 	while (true) {
@@ -306,14 +305,14 @@ static void cuse_gendev_release(struct device *dev)
  */
 static void cuse_process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 {
-	struct cuse_conn *cc = fc_to_cc(fc), *pos;
+	struct cuse_conn *cc = fc_to_cc(fc);
 	struct cuse_init_out *arg = req->out.args[0].value;
 	struct page *page = req->pages[0];
 	struct cuse_devinfo devinfo = { };
 	struct device *dev;
 	struct cdev *cdev;
 	dev_t devt;
-	int rc, i;
+	int rc;
 
 	if (req->out.h.error ||
 	    arg->major != FUSE_KERNEL_VERSION || arg->minor < 11) {
@@ -357,24 +356,15 @@ static void cuse_process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 	dev_set_drvdata(dev, cc);
 	dev_set_name(dev, "%s", devinfo.name);
 
-	mutex_lock(&cuse_lock);
-
-	/* make sure the device-name is unique */
-	for (i = 0; i < CUSE_CONNTBL_LEN; ++i) {
-		list_for_each_entry(pos, &cuse_conntbl[i], list)
-			if (!strcmp(dev_name(pos->dev), dev_name(dev)))
-				goto err_unlock;
-	}
-
 	rc = device_add(dev);
 	if (rc)
-		goto err_unlock;
+		goto err_device;
 
 	/* register cdev */
 	rc = -ENOMEM;
 	cdev = cdev_alloc();
 	if (!cdev)
-		goto err_unlock;
+		goto err_device;
 
 	cdev->owner = THIS_MODULE;
 	cdev->ops = &cuse_frontend_fops;
@@ -387,8 +377,9 @@ static void cuse_process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 	cc->cdev = cdev;
 
 	/* make the device available */
+	spin_lock(&cuse_lock);
 	list_add(&cc->list, cuse_conntbl_head(devt));
-	mutex_unlock(&cuse_lock);
+	spin_unlock(&cuse_lock);
 
 	/* announce device availability */
 	dev_set_uevent_suppress(dev, 0);
@@ -400,13 +391,12 @@ out:
 
 err_cdev:
 	cdev_del(cdev);
-err_unlock:
-	mutex_unlock(&cuse_lock);
+err_device:
 	put_device(dev);
 err_region:
 	unregister_chrdev_region(devt, 1);
 err:
-	fuse_abort_conn(fc);
+	fc->conn_error = 1;
 	goto out;
 }
 
@@ -421,7 +411,7 @@ static int cuse_send_init(struct cuse_conn *cc)
 
 	BUILD_BUG_ON(CUSE_INIT_INFO_MAX > PAGE_SIZE);
 
-	req = fuse_get_req_for_background(fc, 1);
+	req = fuse_get_req(fc);
 	if (IS_ERR(req)) {
 		rc = PTR_ERR(req);
 		goto err;
@@ -451,7 +441,6 @@ static int cuse_send_init(struct cuse_conn *cc)
 	req->out.argvar = 1;
 	req->out.argpages = 1;
 	req->pages[0] = page;
-	req->page_descs[0].length = req->out.args[1].size;
 	req->num_pages = 1;
 	req->end = cuse_process_init_reply;
 	fuse_request_send_background(fc, req);
@@ -469,7 +458,7 @@ err:
 static void cuse_fc_release(struct fuse_conn *fc)
 {
 	struct cuse_conn *cc = fc_to_cc(fc);
-	kfree_rcu(cc, fc.rcu);
+	kfree(cc);
 }
 
 /**
@@ -489,7 +478,6 @@ static void cuse_fc_release(struct fuse_conn *fc)
  */
 static int cuse_channel_open(struct inode *inode, struct file *file)
 {
-	struct fuse_dev *fud;
 	struct cuse_conn *cc;
 	int rc;
 
@@ -500,22 +488,17 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
 
 	fuse_conn_init(&cc->fc);
 
-	fud = fuse_dev_alloc(&cc->fc);
-	if (!fud) {
-		kfree(cc);
-		return -ENOMEM;
-	}
-
 	INIT_LIST_HEAD(&cc->list);
 	cc->fc.release = cuse_fc_release;
 
-	cc->fc.initialized = 1;
+	cc->fc.connected = 1;
+	cc->fc.blocked = 0;
 	rc = cuse_send_init(cc);
 	if (rc) {
-		fuse_dev_free(fud);
+		fuse_conn_put(&cc->fc);
 		return rc;
 	}
-	file->private_data = fud;
+	file->private_data = &cc->fc;	/* channel owns base reference to cc */
 
 	return 0;
 }
@@ -533,14 +516,13 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
  */
 static int cuse_channel_release(struct inode *inode, struct file *file)
 {
-	struct fuse_dev *fud = file->private_data;
-	struct cuse_conn *cc = fc_to_cc(fud->fc);
+	struct cuse_conn *cc = fc_to_cc(file->private_data);
 	int rc;
 
 	/* remove from the conntbl, no more access from this point on */
-	mutex_lock(&cuse_lock);
+	spin_lock(&cuse_lock);
 	list_del_init(&cc->list);
-	mutex_unlock(&cuse_lock);
+	spin_unlock(&cuse_lock);
 
 	/* remove device */
 	if (cc->dev)
@@ -549,9 +531,9 @@ static int cuse_channel_release(struct inode *inode, struct file *file)
 		unregister_chrdev_region(cc->cdev->dev, 1);
 		cdev_del(cc->cdev);
 	}
-	/* Base reference is now owned by "fud" */
-	fuse_conn_put(&cc->fc);
 
+	/* kill connection and shutdown channel */
+	fuse_conn_kill(&cc->fc);
 	rc = fuse_dev_release(inode, file);	/* puts the base reference */
 
 	return rc;
@@ -573,7 +555,6 @@ static ssize_t cuse_class_waiting_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", atomic_read(&cc->fc.num_waiting));
 }
-static DEVICE_ATTR(waiting, 0400, cuse_class_waiting_show, NULL);
 
 static ssize_t cuse_class_abort_store(struct device *dev,
 				      struct device_attribute *attr,
@@ -584,23 +565,18 @@ static ssize_t cuse_class_abort_store(struct device *dev,
 	fuse_abort_conn(&cc->fc);
 	return count;
 }
-static DEVICE_ATTR(abort, 0200, NULL, cuse_class_abort_store);
 
-static struct attribute *cuse_class_dev_attrs[] = {
-	&dev_attr_waiting.attr,
-	&dev_attr_abort.attr,
-	NULL,
+static struct device_attribute cuse_class_dev_attrs[] = {
+	__ATTR(waiting, S_IFREG | 0400, cuse_class_waiting_show, NULL),
+	__ATTR(abort, S_IFREG | 0200, NULL, cuse_class_abort_store),
+	{ }
 };
-ATTRIBUTE_GROUPS(cuse_class_dev);
 
 static struct miscdevice cuse_miscdev = {
-	.minor		= CUSE_MINOR,
+	.minor		= MISC_DYNAMIC_MINOR,
 	.name		= "cuse",
 	.fops		= &cuse_channel_fops,
 };
-
-MODULE_ALIAS_MISCDEV(CUSE_MINOR);
-MODULE_ALIAS("devname:cuse");
 
 static int __init cuse_init(void)
 {
@@ -620,7 +596,7 @@ static int __init cuse_init(void)
 	if (IS_ERR(cuse_class))
 		return PTR_ERR(cuse_class);
 
-	cuse_class->dev_groups = cuse_class_dev_groups;
+	cuse_class->dev_attrs = cuse_class_dev_attrs;
 
 	rc = misc_register(&cuse_miscdev);
 	if (rc) {

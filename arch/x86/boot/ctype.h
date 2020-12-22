@@ -1,5 +1,6 @@
-#ifndef BOOT_CTYPE_H
-#define BOOT_CTYPE_H
+#ifndef BOOT_ISDIGIT_H
+
+#define BOOT_ISDIGIT_H
 
 static inline int isdigit(int ch)
 {

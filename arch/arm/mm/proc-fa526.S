@@ -32,7 +32,7 @@
  * cpu_fa526_proc_init()
  */
 ENTRY(cpu_fa526_proc_init)
-	ret	lr
+	mov	pc, lr
 
 /*
  * cpu_fa526_proc_fin()
@@ -44,7 +44,7 @@ ENTRY(cpu_fa526_proc_fin)
 	mcr	p15, 0, r0, c1, c0, 0		@ disable caches
 	nop
 	nop
-	ret	lr
+	mov	pc, lr
 
 /*
  * cpu_fa526_reset(loc)
@@ -72,7 +72,7 @@ ENTRY(cpu_fa526_reset)
 	mcr	p15, 0, ip, c1, c0, 0		@ ctrl register
 	nop
 	nop
-	ret	r0
+	mov	pc, r0
 ENDPROC(cpu_fa526_reset)
 	.popsection
 
@@ -81,7 +81,8 @@ ENDPROC(cpu_fa526_reset)
  */
 	.align	4
 ENTRY(cpu_fa526_do_idle)
-	ret	lr
+	mcr	p15, 0, r0, c7, c0, 4		@ Wait for interrupt
+	mov	pc, lr
 
 
 ENTRY(cpu_fa526_dcache_clean_area)
@@ -90,7 +91,7 @@ ENTRY(cpu_fa526_dcache_clean_area)
 	subs	r1, r1, #CACHE_DLINESIZE
 	bhi	1b
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /* =============================== PageTable ============================== */
 
@@ -117,7 +118,7 @@ ENTRY(cpu_fa526_switch_mm)
 	mcr	p15, 0, r0, c2, c0, 0		@ load page table pointer
 	mcr	p15, 0, ip, c8, c7, 0		@ invalidate UTLB
 #endif
-	ret	lr
+	mov	pc, lr
 
 /*
  * cpu_fa526_set_pte_ext(ptep, pte, ext)
@@ -133,7 +134,9 @@ ENTRY(cpu_fa526_set_pte_ext)
 	mov	r0, #0
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
 #endif
-	ret	lr
+	mov	pc, lr
+
+	__CPUINIT
 
 	.type	__fa526_setup, #function
 __fa526_setup:
@@ -162,7 +165,7 @@ __fa526_setup:
 	bic	r0, r0, r5
 	ldr	r5, fa526_cr1_set
 	orr	r0, r0, r5
-	ret	lr
+	mov	pc, lr
 	.size	__fa526_setup, . - __fa526_setup
 
 	/*
@@ -190,7 +193,7 @@ fa526_cr1_set:
 
 	.align
 
-	.section ".proc.info.init", #alloc
+	.section ".proc.info.init", #alloc, #execinstr
 
 	.type	__fa526_proc_info,#object
 __fa526_proc_info:
@@ -206,7 +209,7 @@ __fa526_proc_info:
 		PMD_BIT4 | \
 		PMD_SECT_AP_WRITE | \
 		PMD_SECT_AP_READ
-	initfn	__fa526_setup, __fa526_proc_info
+	b	__fa526_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
 	.long	HWCAP_SWP | HWCAP_HALF

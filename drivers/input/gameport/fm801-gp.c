@@ -27,6 +27,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/gameport.h>
 
@@ -77,7 +78,7 @@ static int fm801_gp_open(struct gameport *gameport, int mode)
 	return 0;
 }
 
-static int fm801_gp_probe(struct pci_dev *pci, const struct pci_device_id *id)
+static int __devinit fm801_gp_probe(struct pci_dev *pci, const struct pci_device_id *id)
 {
 	struct fm801_gp *gp;
 	struct gameport *port;
@@ -128,7 +129,7 @@ static int fm801_gp_probe(struct pci_dev *pci, const struct pci_device_id *id)
 	return error;
 }
 
-static void fm801_gp_remove(struct pci_dev *pci)
+static void __devexit fm801_gp_remove(struct pci_dev *pci)
 {
 	struct fm801_gp *gp = pci_get_drvdata(pci);
 
@@ -143,16 +144,28 @@ static const struct pci_device_id fm801_gp_id_table[] = {
 	{ PCI_VENDOR_ID_FORTEMEDIA, PCI_DEVICE_ID_FM801_GP, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0  },
 	{ 0 }
 };
-MODULE_DEVICE_TABLE(pci, fm801_gp_id_table);
 
 static struct pci_driver fm801_gp_driver = {
 	.name =		"FM801_gameport",
 	.id_table =	fm801_gp_id_table,
 	.probe =	fm801_gp_probe,
-	.remove =	fm801_gp_remove,
+	.remove =	__devexit_p(fm801_gp_remove),
 };
 
-module_pci_driver(fm801_gp_driver);
+static int __init fm801_gp_init(void)
+{
+	return pci_register_driver(&fm801_gp_driver);
+}
+
+static void __exit fm801_gp_exit(void)
+{
+	pci_unregister_driver(&fm801_gp_driver);
+}
+
+module_init(fm801_gp_init);
+module_exit(fm801_gp_exit);
+
+MODULE_DEVICE_TABLE(pci, fm801_gp_id_table);
 
 MODULE_DESCRIPTION("FM801 gameport driver");
 MODULE_AUTHOR("Takashi Iwai <tiwai@suse.de>");

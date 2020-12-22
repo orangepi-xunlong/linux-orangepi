@@ -210,7 +210,8 @@ S0Box_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 	return (0);
 }
 
-int setup_s0box(struct IsdnCard *card)
+int __devinit
+setup_s0box(struct IsdnCard *card)
 {
 	struct IsdnCardState *cs = card->cs;
 	char tmp[64];

@@ -18,7 +18,7 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <linux/coda.h>
 #include <linux/coda_psdev.h>
@@ -27,36 +27,67 @@
 #include "coda_int.h"
 
 static ssize_t
-coda_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
+coda_file_read(struct file *coda_file, char __user *buf, size_t count, loff_t *ppos)
 {
-	struct file *coda_file = iocb->ki_filp;
-	struct coda_file_info *cfi = CODA_FTOC(coda_file);
+	struct coda_file_info *cfi;
+	struct file *host_file;
 
+	cfi = CODA_FTOC(coda_file);
 	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
+	host_file = cfi->cfi_container;
 
-	return vfs_iter_read(cfi->cfi_container, to, &iocb->ki_pos);
+	if (!host_file->f_op || !host_file->f_op->read)
+		return -EINVAL;
+
+	return host_file->f_op->read(host_file, buf, count, ppos);
 }
 
 static ssize_t
-coda_file_write_iter(struct kiocb *iocb, struct iov_iter *to)
+coda_file_splice_read(struct file *coda_file, loff_t *ppos,
+		      struct pipe_inode_info *pipe, size_t count,
+		      unsigned int flags)
 {
-	struct file *coda_file = iocb->ki_filp;
-	struct inode *coda_inode = file_inode(coda_file);
-	struct coda_file_info *cfi = CODA_FTOC(coda_file);
+	ssize_t (*splice_read)(struct file *, loff_t *,
+			       struct pipe_inode_info *, size_t, unsigned int);
+	struct coda_file_info *cfi;
+	struct file *host_file;
+
+	cfi = CODA_FTOC(coda_file);
+	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
+	host_file = cfi->cfi_container;
+
+	splice_read = host_file->f_op->splice_read;
+	if (!splice_read)
+		splice_read = default_file_splice_read;
+
+	return splice_read(host_file, ppos, pipe, count, flags);
+}
+
+static ssize_t
+coda_file_write(struct file *coda_file, const char __user *buf, size_t count, loff_t *ppos)
+{
+	struct inode *host_inode, *coda_inode = coda_file->f_path.dentry->d_inode;
+	struct coda_file_info *cfi;
 	struct file *host_file;
 	ssize_t ret;
 
+	cfi = CODA_FTOC(coda_file);
 	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
-
 	host_file = cfi->cfi_container;
-	file_start_write(host_file);
-	inode_lock(coda_inode);
-	ret = vfs_iter_write(cfi->cfi_container, to, &iocb->ki_pos);
-	coda_inode->i_size = file_inode(host_file)->i_size;
+
+	if (!host_file->f_op || !host_file->f_op->write)
+		return -EINVAL;
+
+	host_inode = host_file->f_path.dentry->d_inode;
+	mutex_lock(&coda_inode->i_mutex);
+
+	ret = host_file->f_op->write(host_file, buf, count, ppos);
+
+	coda_inode->i_size = host_inode->i_size;
 	coda_inode->i_blocks = (coda_inode->i_size + 511) >> 9;
-	coda_inode->i_mtime = coda_inode->i_ctime = current_time(coda_inode);
-	inode_unlock(coda_inode);
-	file_end_write(host_file);
+	coda_inode->i_mtime = coda_inode->i_ctime = CURRENT_TIME_SEC;
+	mutex_unlock(&coda_inode->i_mutex);
+
 	return ret;
 }
 
@@ -72,11 +103,11 @@ coda_file_mmap(struct file *coda_file, struct vm_area_struct *vma)
 	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
 	host_file = cfi->cfi_container;
 
-	if (!host_file->f_op->mmap)
+	if (!host_file->f_op || !host_file->f_op->mmap)
 		return -ENODEV;
 
-	coda_inode = file_inode(coda_file);
-	host_inode = file_inode(host_file);
+	coda_inode = coda_file->f_path.dentry->d_inode;
+	host_inode = host_file->f_path.dentry->d_inode;
 
 	cii = ITOC(coda_inode);
 	spin_lock(&cii->c_lock);
@@ -147,7 +178,7 @@ int coda_release(struct inode *coda_inode, struct file *coda_file)
 	err = venus_close(coda_inode->i_sb, coda_i2f(coda_inode),
 			  coda_flags, coda_file->f_cred->fsuid);
 
-	host_inode = file_inode(cfi->cfi_container);
+	host_inode = cfi->cfi_container->f_path.dentry->d_inode;
 	cii = ITOC(coda_inode);
 
 	/* did we mmap this file? */
@@ -171,7 +202,7 @@ int coda_release(struct inode *coda_inode, struct file *coda_file)
 int coda_fsync(struct file *coda_file, loff_t start, loff_t end, int datasync)
 {
 	struct file *host_file;
-	struct inode *coda_inode = file_inode(coda_file);
+	struct inode *coda_inode = coda_file->f_path.dentry->d_inode;
 	struct coda_file_info *cfi;
 	int err;
 
@@ -182,7 +213,7 @@ int coda_fsync(struct file *coda_file, loff_t start, loff_t end, int datasync)
 	err = filemap_write_and_wait_range(coda_inode->i_mapping, start, end);
 	if (err)
 		return err;
-	inode_lock(coda_inode);
+	mutex_lock(&coda_inode->i_mutex);
 
 	cfi = CODA_FTOC(coda_file);
 	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
@@ -191,19 +222,19 @@ int coda_fsync(struct file *coda_file, loff_t start, loff_t end, int datasync)
 	err = vfs_fsync(host_file, datasync);
 	if (!err && !datasync)
 		err = venus_fsync(coda_inode->i_sb, coda_i2f(coda_inode));
-	inode_unlock(coda_inode);
+	mutex_unlock(&coda_inode->i_mutex);
 
 	return err;
 }
 
 const struct file_operations coda_file_operations = {
 	.llseek		= generic_file_llseek,
-	.read_iter	= coda_file_read_iter,
-	.write_iter	= coda_file_write_iter,
+	.read		= coda_file_read,
+	.write		= coda_file_write,
 	.mmap		= coda_file_mmap,
 	.open		= coda_open,
 	.release	= coda_release,
 	.fsync		= coda_fsync,
-	.splice_read	= generic_file_splice_read,
+	.splice_read	= coda_file_splice_read,
 };
 

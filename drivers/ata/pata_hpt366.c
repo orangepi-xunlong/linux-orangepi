@@ -19,6 +19,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <scsi/scsi_host.h>
@@ -176,14 +177,17 @@ static int hpt_dma_blacklisted(const struct ata_device *dev, char *modestr,
 			       const char * const list[])
 {
 	unsigned char model_num[ATA_ID_PROD_LEN + 1];
-	int i;
+	int i = 0;
 
 	ata_id_c_string(dev->id, model_num, ATA_ID_PROD, sizeof(model_num));
 
-	i = match_string(list, -1, model_num);
-	if (i >= 0) {
-		pr_warn("%s is not supported for %s\n", modestr, list[i]);
-		return 1;
+	while (list[i] != NULL) {
+		if (!strcmp(list[i], model_num)) {
+			pr_warn("%s is not supported for %s\n",
+				modestr, list[i]);
+			return 1;
+		}
+		i++;
 	}
 	return 0;
 }
@@ -349,7 +353,7 @@ static int hpt36x_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 	};
 	const struct ata_port_info *ppi[] = { &info_hpt366, NULL };
 
-	const void *hpriv = NULL;
+	void *hpriv = NULL;
 	u32 reg1;
 	int rc;
 
@@ -368,7 +372,7 @@ static int hpt36x_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 
 	/* PCI clocking determines the ATA timing values to use */
 	/* info_hpt366 is safe against re-entry so we can scribble on it */
-	switch ((reg1 & 0xf00) >> 8) {
+	switch ((reg1 & 0x700) >> 8) {
 	case 9:
 		hpriv = &hpt366_40;
 		break;
@@ -380,13 +384,13 @@ static int hpt36x_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 		break;
 	}
 	/* Now kick off ATA set up */
-	return ata_pci_bmdma_init_one(dev, ppi, &hpt36x_sht, (void *)hpriv, 0);
+	return ata_pci_bmdma_init_one(dev, ppi, &hpt36x_sht, hpriv, 0);
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int hpt36x_reinit_one(struct pci_dev *dev)
 {
-	struct ata_host *host = pci_get_drvdata(dev);
+	struct ata_host *host = dev_get_drvdata(&dev->dev);
 	int rc;
 
 	rc = ata_pci_device_do_resume(dev);
@@ -408,16 +412,27 @@ static struct pci_driver hpt36x_pci_driver = {
 	.id_table	= hpt36x,
 	.probe		= hpt36x_init_one,
 	.remove		= ata_pci_remove_one,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend	= ata_pci_device_suspend,
 	.resume		= hpt36x_reinit_one,
 #endif
 };
 
-module_pci_driver(hpt36x_pci_driver);
+static int __init hpt36x_init(void)
+{
+	return pci_register_driver(&hpt36x_pci_driver);
+}
+
+static void __exit hpt36x_exit(void)
+{
+	pci_unregister_driver(&hpt36x_pci_driver);
+}
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("low-level driver for the Highpoint HPT366/368");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, hpt36x);
 MODULE_VERSION(DRV_VERSION);
+
+module_init(hpt36x_init);
+module_exit(hpt36x_exit);

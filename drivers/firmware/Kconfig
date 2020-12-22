@@ -5,37 +5,6 @@
 
 menu "Firmware Drivers"
 
-config ARM_PSCI_FW
-	bool
-
-config ARM_SCPI_PROTOCOL
-	tristate "ARM System Control and Power Interface (SCPI) Message Protocol"
-	depends on MAILBOX
-	help
-	  System Control and Power Interface (SCPI) Message Protocol is
-	  defined for the purpose of communication between the Application
-	  Cores(AP) and the System Control Processor(SCP). The MHU peripheral
-	  provides a mechanism for inter-processor communication between SCP
-	  and AP.
-
-	  SCP controls most of the power managament on the Application
-	  Processors. It offers control and management of: the core/cluster
-	  power states, various power domain DVFS including the core/cluster,
-	  certain system clocks configuration, thermal sensors and many
-	  others.
-
-	  This protocol library provides interface for all the client drivers
-	  making use of the features offered by the SCP.
-
-config ARM_SCPI_POWER_DOMAIN
-	tristate "SCPI power domain driver"
-	depends on ARM_SCPI_PROTOCOL || (COMPILE_TEST && OF)
-	default y
-	select PM_GENERIC_DOMAINS if PM
-	help
-	  This enables support for the SCPI power domains which can be
-	  enabled or disabled via the SCP firmware
-
 config EDD
 	tristate "BIOS Enhanced Disk Drive calls determine boot disk"
 	depends on X86
@@ -67,6 +36,41 @@ config FIRMWARE_MEMMAP
 
       See also Documentation/ABI/testing/sysfs-firmware-memmap.
 
+config EFI_VARS
+	tristate "EFI Variable Support via sysfs"
+	depends on EFI
+	default n
+	help
+	  If you say Y here, you are able to get EFI (Extensible Firmware
+	  Interface) variable information via sysfs.  You may read,
+	  write, create, and destroy EFI variables through this interface.
+
+	  Note that using this driver in concert with efibootmgr requires
+	  at least test release version 0.5.0-test3 or later, which is
+	  available from Matt Domsch's website located at:
+	  <http://linux.dell.com/efibootmgr/testing/efibootmgr-0.5.0-test3.tar.gz>
+
+	  Subsequent efibootmgr releases may be found at:
+	  <http://linux.dell.com/efibootmgr>
+
+config EFI_VARS_PSTORE
+	bool "Register efivars backend for pstore"
+	depends on EFI_VARS && PSTORE
+	default y
+	help
+	  Say Y here to enable use efivars as a backend to pstore. This
+	  will allow writing console messages, crash dumps, or anything
+	  else supported by pstore to EFI variables.
+
+config EFI_VARS_PSTORE_DEFAULT_DISABLE
+	bool "Disable using efivars as a pstore backend by default"
+	depends on EFI_VARS_PSTORE
+	default n
+	help
+	  Saying Y here will disable the use of efivars as a storage
+	  backend for pstore by default. This setting can be overridden
+	  using the efivars module's pstore_disable parameter.
+
 config EFI_PCDP
 	bool "Console device selection via EFI PCDP or HCDP table"
 	depends on ACPI && EFI && IA64
@@ -95,7 +99,6 @@ config DELL_RBU
 	tristate "BIOS update support for DELL systems via sysfs"
 	depends on X86
 	select FW_LOADER
-	select FW_LOADER_USER_HELPER
 	help
 	 Say m if you want to have the option of updating the BIOS for your
 	 DELL system. Note you need a Dell OpenManage or Dell Update package (DUP)
@@ -139,12 +142,9 @@ config DMI_SYSFS
 	  under /sys/firmware/dmi when this option is enabled and
 	  loaded.
 
-config DMI_SCAN_MACHINE_NON_EFI_FALLBACK
-	bool
-
 config ISCSI_IBFT_FIND
 	bool "iSCSI Boot Firmware Table Attributes"
-	depends on X86 && ACPI
+	depends on X86
 	default n
 	help
 	  This option enables the kernel to find the region of memory
@@ -163,52 +163,6 @@ config ISCSI_IBFT
 	  detect iSCSI boot parameters dynamically during system boot, say Y.
 	  Otherwise, say N.
 
-config RASPBERRYPI_FIRMWARE
-	tristate "Raspberry Pi Firmware Driver"
-	depends on BCM2835_MBOX
-	help
-	  This option enables support for communicating with the firmware on the
-	  Raspberry Pi.
-
-config FW_CFG_SYSFS
-	tristate "QEMU fw_cfg device support in sysfs"
-	depends on SYSFS && (ARM || ARM64 || PPC_PMAC || SPARC || X86)
-	depends on HAS_IOPORT_MAP
-	default n
-	help
-	  Say Y or M here to enable the exporting of the QEMU firmware
-	  configuration (fw_cfg) file entries via sysfs. Entries are
-	  found under /sys/firmware/fw_cfg when this option is enabled
-	  and loaded.
-
-config FW_CFG_SYSFS_CMDLINE
-	bool "QEMU fw_cfg device parameter parsing"
-	depends on FW_CFG_SYSFS
-	help
-	  Allow the qemu_fw_cfg device to be initialized via the kernel
-	  command line or using a module parameter.
-	  WARNING: Using incorrect parameters (base address in particular)
-	  may crash your system.
-
-config QCOM_SCM
-	bool
-	depends on ARM || ARM64
-	select RESET_CONTROLLER
-
-config QCOM_SCM_32
-	def_bool y
-	depends on QCOM_SCM && ARM
-
-config QCOM_SCM_64
-	def_bool y
-	depends on QCOM_SCM && ARM64
-
-config HAVE_ARM_SMCCC
-	bool
-
-source "drivers/firmware/broadcom/Kconfig"
 source "drivers/firmware/google/Kconfig"
-source "drivers/firmware/efi/Kconfig"
-source "drivers/firmware/meson/Kconfig"
 
 endmenu

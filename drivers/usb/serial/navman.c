@@ -14,11 +14,14 @@
 
 #include <linux/gfp.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 #include <linux/module.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
+
+static bool debug;
 
 static const struct usb_device_id id_table[] = {
 	{ USB_DEVICE(0x0a99, 0x0001) },	/* Talon Technology device */
@@ -27,10 +30,18 @@ static const struct usb_device_id id_table[] = {
 };
 MODULE_DEVICE_TABLE(usb, id_table);
 
+static struct usb_driver navman_driver = {
+	.name =		"navman",
+	.probe =	usb_serial_probe,
+	.disconnect =	usb_serial_disconnect,
+	.id_table =	id_table,
+};
+
 static void navman_read_int_callback(struct urb *urb)
 {
 	struct usb_serial_port *port = urb->context;
 	unsigned char *data = urb->transfer_buffer;
+	struct tty_struct *tty;
 	int status = urb->status;
 	int result;
 
@@ -42,21 +53,24 @@ static void navman_read_int_callback(struct urb *urb)
 	case -ENOENT:
 	case -ESHUTDOWN:
 		/* this urb is terminated, clean up */
-		dev_dbg(&port->dev, "%s - urb shutting down with status: %d\n",
-			__func__, status);
+		dbg("%s - urb shutting down with status: %d",
+		    __func__, status);
 		return;
 	default:
-		dev_dbg(&port->dev, "%s - nonzero urb status received: %d\n",
-			__func__, status);
+		dbg("%s - nonzero urb status received: %d",
+		    __func__, status);
 		goto exit;
 	}
 
-	usb_serial_debug_data(&port->dev, __func__, urb->actual_length, data);
+	usb_serial_debug_data(debug, &port->dev, __func__,
+			      urb->actual_length, data);
 
-	if (urb->actual_length) {
-		tty_insert_flip_string(&port->port, data, urb->actual_length);
-		tty_flip_buffer_push(&port->port);
+	tty = tty_port_tty_get(&port->port);
+	if (tty && urb->actual_length) {
+		tty_insert_flip_string(tty, data, urb->actual_length);
+		tty_flip_buffer_push(tty);
 	}
+	tty_kref_put(tty);
 
 exit:
 	result = usb_submit_urb(urb, GFP_ATOMIC);
@@ -70,9 +84,10 @@ static int navman_open(struct tty_struct *tty, struct usb_serial_port *port)
 {
 	int result = 0;
 
+	dbg("%s - port %d", __func__, port->number);
+
 	if (port->interrupt_in_urb) {
-		dev_dbg(&port->dev, "%s - adding interrupt input for treo\n",
-			__func__);
+		dbg("%s - adding interrupt input for treo", __func__);
 		result = usb_submit_urb(port->interrupt_in_urb, GFP_KERNEL);
 		if (result)
 			dev_err(&port->dev,
@@ -84,12 +99,16 @@ static int navman_open(struct tty_struct *tty, struct usb_serial_port *port)
 
 static void navman_close(struct usb_serial_port *port)
 {
+	dbg("%s - port %d", __func__, port->number);
+
 	usb_kill_urb(port->interrupt_in_urb);
 }
 
 static int navman_write(struct tty_struct *tty, struct usb_serial_port *port,
 			const unsigned char *buf, int count)
 {
+	dbg("%s - port %d", __func__, port->number);
+
 	/*
 	 * This device can't write any data, only read from the device
 	 */
@@ -113,6 +132,9 @@ static struct usb_serial_driver * const serial_drivers[] = {
 	&navman_device, NULL
 };
 
-module_usb_serial_driver(serial_drivers, id_table);
+module_usb_serial_driver(navman_driver, serial_drivers);
 
 MODULE_LICENSE("GPL");
+
+module_param(debug, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(debug, "Debug enabled or not");

@@ -54,7 +54,7 @@ static const struct ad7879_bus_ops ad7879_i2c_bus_ops = {
 	.write		= ad7879_i2c_write,
 };
 
-static int ad7879_i2c_probe(struct i2c_client *client,
+static int __devinit ad7879_i2c_probe(struct i2c_client *client,
 				      const struct i2c_device_id *id)
 {
 	struct ad7879 *ts;
@@ -75,7 +75,7 @@ static int ad7879_i2c_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int ad7879_i2c_remove(struct i2c_client *client)
+static int __devexit ad7879_i2c_remove(struct i2c_client *client)
 {
 	struct ad7879 *ts = i2c_get_clientdata(client);
 
@@ -94,10 +94,11 @@ MODULE_DEVICE_TABLE(i2c, ad7879_id);
 static struct i2c_driver ad7879_i2c_driver = {
 	.driver = {
 		.name	= "ad7879",
+		.owner	= THIS_MODULE,
 		.pm	= &ad7879_pm_ops,
 	},
 	.probe		= ad7879_i2c_probe,
-	.remove		= ad7879_i2c_remove,
+	.remove		= __devexit_p(ad7879_i2c_remove),
 	.id_table	= ad7879_id,
 };
 

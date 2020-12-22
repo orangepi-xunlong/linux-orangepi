@@ -23,75 +23,75 @@
 #include <linux/uaccess.h>
 #include <linux/signal.h>
 #include <asm/syscalls.h>
-#include <asm/byteorder.h>
 
 /*
  * Syscalls that take 64-bit numbers traditionally take them in 32-bit
  * "high" and "low" value parts on 32-bit architectures.
  * In principle, one could imagine passing some register arguments as
  * fully 64-bit on TILE-Gx in 32-bit mode, but it seems easier to
- * adopt the usual convention.
+ * adapt the usual convention.
  */
 
-#ifdef __BIG_ENDIAN
-#define SYSCALL_PAIR(name) u32, name ## _hi, u32, name ## _lo
-#else
-#define SYSCALL_PAIR(name) u32, name ## _lo, u32, name ## _hi
-#endif
-
-COMPAT_SYSCALL_DEFINE4(truncate64, char __user *, filename, u32, dummy,
-		       SYSCALL_PAIR(length))
+long compat_sys_truncate64(char __user *filename, u32 dummy, u32 low, u32 high)
 {
-	return sys_truncate(filename, ((loff_t)length_hi << 32) | length_lo);
+	return sys_truncate(filename, ((loff_t)high << 32) | low);
 }
 
-COMPAT_SYSCALL_DEFINE4(ftruncate64, unsigned int, fd, u32, dummy,
-		       SYSCALL_PAIR(length))
+long compat_sys_ftruncate64(unsigned int fd, u32 dummy, u32 low, u32 high)
 {
-	return sys_ftruncate(fd, ((loff_t)length_hi << 32) | length_lo);
+	return sys_ftruncate(fd, ((loff_t)high << 32) | low);
 }
 
-COMPAT_SYSCALL_DEFINE6(pread64, unsigned int, fd, char __user *, ubuf,
-		       size_t, count, u32, dummy, SYSCALL_PAIR(offset))
+long compat_sys_pread64(unsigned int fd, char __user *ubuf, size_t count,
+			u32 dummy, u32 low, u32 high)
 {
-	return sys_pread64(fd, ubuf, count,
-			   ((loff_t)offset_hi << 32) | offset_lo);
+	return sys_pread64(fd, ubuf, count, ((loff_t)high << 32) | low);
 }
 
-COMPAT_SYSCALL_DEFINE6(pwrite64, unsigned int, fd, char __user *, ubuf,
-		       size_t, count, u32, dummy, SYSCALL_PAIR(offset))
+long compat_sys_pwrite64(unsigned int fd, char __user *ubuf, size_t count,
+			 u32 dummy, u32 low, u32 high)
 {
-	return sys_pwrite64(fd, ubuf, count,
-			    ((loff_t)offset_hi << 32) | offset_lo);
+	return sys_pwrite64(fd, ubuf, count, ((loff_t)high << 32) | low);
 }
 
-COMPAT_SYSCALL_DEFINE6(sync_file_range2, int, fd, unsigned int, flags,
-		       SYSCALL_PAIR(offset), SYSCALL_PAIR(nbytes))
+long compat_sys_lookup_dcookie(u32 low, u32 high, char __user *buf, size_t len)
+{
+	return sys_lookup_dcookie(((loff_t)high << 32) | low, buf, len);
+}
+
+long compat_sys_sync_file_range2(int fd, unsigned int flags,
+				 u32 offset_lo, u32 offset_hi,
+				 u32 nbytes_lo, u32 nbytes_hi)
 {
 	return sys_sync_file_range(fd, ((loff_t)offset_hi << 32) | offset_lo,
 				   ((loff_t)nbytes_hi << 32) | nbytes_lo,
 				   flags);
 }
 
-COMPAT_SYSCALL_DEFINE6(fallocate, int, fd, int, mode,
-		       SYSCALL_PAIR(offset), SYSCALL_PAIR(len))
+long compat_sys_fallocate(int fd, int mode,
+			  u32 offset_lo, u32 offset_hi,
+			  u32 len_lo, u32 len_hi)
 {
 	return sys_fallocate(fd, mode, ((loff_t)offset_hi << 32) | offset_lo,
 			     ((loff_t)len_hi << 32) | len_lo);
 }
 
-/*
- * Avoid bug in generic sys_llseek() that specifies offset_high and
- * offset_low as "unsigned long", thus making it possible to pass
- * a sign-extended high 32 bits in offset_low.
- * Note that we do not use SYSCALL_PAIR here since glibc passes the
- * high and low parts explicitly in that order.
- */
-COMPAT_SYSCALL_DEFINE5(llseek, unsigned int, fd, unsigned int, offset_high,
-		       unsigned int, offset_low, loff_t __user *, result,
-		       unsigned int, origin)
+
+
+long compat_sys_sched_rr_get_interval(compat_pid_t pid,
+				      struct compat_timespec __user *interval)
 {
-	return sys_llseek(fd, offset_high, offset_low, result, origin);
+	struct timespec t;
+	int ret;
+	mm_segment_t old_fs = get_fs();
+
+	set_fs(KERNEL_DS);
+	ret = sys_sched_rr_get_interval(pid,
+					(struct timespec __force __user *)&t);
+	set_fs(old_fs);
+	if (put_compat_timespec(&t, interval))
+		return -EFAULT;
+	return ret;
 }
 
 /* Provide the compat syscall number to call mapping. */
@@ -101,9 +101,10 @@ COMPAT_SYSCALL_DEFINE5(llseek, unsigned int, fd, unsigned int, offset_high,
 /* See comments in sys.c */
 #define compat_sys_fadvise64_64 sys32_fadvise64_64
 #define compat_sys_readahead sys32_readahead
-#define sys_llseek compat_sys_llseek
 
-/* Call the assembly trampolines where necessary. */
+/* Call the trampolines to manage pt_regs where necessary. */
+#define compat_sys_execve _compat_sys_execve
+#define compat_sys_sigaltstack _compat_sys_sigaltstack
 #define compat_sys_rt_sigreturn _compat_sys_rt_sigreturn
 #define sys_clone _sys_clone
 

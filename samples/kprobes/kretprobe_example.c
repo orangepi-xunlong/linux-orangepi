@@ -7,7 +7,7 @@
  *
  * usage: insmod kretprobe_example.ko func=<func_name>
  *
- * If no func_name is specified, _do_fork is instrumented
+ * If no func_name is specified, do_fork is instrumented
  *
  * For more information on theory of operation of kretprobes, see
  * Documentation/kprobes.txt
@@ -25,7 +25,7 @@
 #include <linux/limits.h>
 #include <linux/sched.h>
 
-static char func_name[NAME_MAX] = "_do_fork";
+static char func_name[NAME_MAX] = "do_fork";
 module_param_string(func, func_name, NAME_MAX, S_IRUGO);
 MODULE_PARM_DESC(func, "Function to kretprobe; this module will report the"
 			" function's execution time");
@@ -55,14 +55,14 @@ static int entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
  */
 static int ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
-	unsigned long retval = regs_return_value(regs);
+	int retval = regs_return_value(regs);
 	struct my_data *data = (struct my_data *)ri->data;
 	s64 delta;
 	ktime_t now;
 
 	now = ktime_get();
 	delta = ktime_to_ns(ktime_sub(now, data->entry_stamp));
-	pr_info("%s returned %lu and took %lld ns to execute\n",
+	printk(KERN_INFO "%s returned %d and took %lld ns to execute\n",
 			func_name, retval, (long long)delta);
 	return 0;
 }
@@ -82,10 +82,11 @@ static int __init kretprobe_init(void)
 	my_kretprobe.kp.symbol_name = func_name;
 	ret = register_kretprobe(&my_kretprobe);
 	if (ret < 0) {
-		pr_err("register_kretprobe failed, returned %d\n", ret);
+		printk(KERN_INFO "register_kretprobe failed, returned %d\n",
+				ret);
 		return -1;
 	}
-	pr_info("Planted return probe at %s: %p\n",
+	printk(KERN_INFO "Planted return probe at %s: %p\n",
 			my_kretprobe.kp.symbol_name, my_kretprobe.kp.addr);
 	return 0;
 }
@@ -93,10 +94,11 @@ static int __init kretprobe_init(void)
 static void __exit kretprobe_exit(void)
 {
 	unregister_kretprobe(&my_kretprobe);
-	pr_info("kretprobe at %p unregistered\n", my_kretprobe.kp.addr);
+	printk(KERN_INFO "kretprobe at %p unregistered\n",
+			my_kretprobe.kp.addr);
 
 	/* nmissed > 0 suggests that maxactive was set too low. */
-	pr_info("Missed probing %d instances of %s\n",
+	printk(KERN_INFO "Missed probing %d instances of %s\n",
 		my_kretprobe.nmissed, my_kretprobe.kp.symbol_name);
 }
 

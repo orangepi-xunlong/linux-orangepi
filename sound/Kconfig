@@ -52,6 +52,9 @@ config SOUND_OSS_CORE_PRECLAIM
 
 	  Disabling this allows alternative OSS implementations.
 
+	  Please read Documentation/feature-removal-schedule.txt for
+	  details.
+
 	  If unsure, say Y.
 
 source "sound/oss/dmasound/Kconfig"
@@ -75,8 +78,6 @@ source "sound/drivers/Kconfig"
 source "sound/isa/Kconfig"
 
 source "sound/pci/Kconfig"
-
-source "sound/hda/Kconfig"
 
 source "sound/ppc/Kconfig"
 

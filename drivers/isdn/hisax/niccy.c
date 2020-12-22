@@ -223,10 +223,10 @@ static int niccy_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 }
 
 #ifdef __ISAPNP__
-static struct pnp_card *pnp_c = NULL;
+static struct pnp_card *pnp_c __devinitdata = NULL;
 #endif
 
-int setup_niccy(struct IsdnCard *card)
+int __devinit setup_niccy(struct IsdnCard *card)
 {
 	struct IsdnCardState *cs = card->cs;
 	char tmp[64];
@@ -298,7 +298,7 @@ int setup_niccy(struct IsdnCard *card)
 		}
 	} else {
 #ifdef CONFIG_PCI
-		static struct pci_dev *niccy_dev;
+		static struct pci_dev *niccy_dev __devinitdata;
 
 		u_int pci_ioaddr;
 		cs->subtyp = 0;

@@ -22,7 +22,7 @@ void _intc_enable(struct irq_data *data, unsigned long handle)
 
 	for (cpu = 0; cpu < SMP_NR(d, _INTC_ADDR_E(handle)); cpu++) {
 #ifdef CONFIG_SMP
-		if (!cpumask_test_cpu(cpu, irq_data_get_affinity_mask(data)))
+		if (!cpumask_test_cpu(cpu, data->affinity))
 			continue;
 #endif
 		addr = INTC_REG(d, _INTC_ADDR_E(handle), cpu);
@@ -50,7 +50,7 @@ static void intc_disable(struct irq_data *data)
 
 	for (cpu = 0; cpu < SMP_NR(d, _INTC_ADDR_D(handle)); cpu++) {
 #ifdef CONFIG_SMP
-		if (!cpumask_test_cpu(cpu, irq_data_get_affinity_mask(data)))
+		if (!cpumask_test_cpu(cpu, data->affinity))
 			continue;
 #endif
 		addr = INTC_REG(d, _INTC_ADDR_D(handle), cpu);
@@ -72,7 +72,7 @@ static int intc_set_affinity(struct irq_data *data,
 	if (!cpumask_intersects(cpumask, cpu_online_mask))
 		return -1;
 
-	cpumask_copy(irq_data_get_affinity_mask(data), cpumask);
+	cpumask_copy(data->affinity, cpumask);
 
 	return IRQ_SET_MASK_OK_NOCOPY;
 }
@@ -83,7 +83,7 @@ static void intc_mask_ack(struct irq_data *data)
 	unsigned int irq = data->irq;
 	struct intc_desc_int *d = get_intc_desc(irq);
 	unsigned long handle = intc_get_ack_handle(irq);
-	void __iomem *addr;
+	unsigned long addr;
 
 	intc_disable(data);
 
@@ -91,7 +91,7 @@ static void intc_mask_ack(struct irq_data *data)
 	if (handle) {
 		unsigned int value;
 
-		addr = (void __iomem *)INTC_REG(d, _INTC_ADDR_D(handle), 0);
+		addr = INTC_REG(d, _INTC_ADDR_D(handle), 0);
 		value = intc_set_field_from_handle(0, 1, handle);
 
 		switch (_INTC_FN(handle)) {

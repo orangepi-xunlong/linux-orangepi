@@ -84,27 +84,26 @@ typedef enum {
  * Octeon-I HW never interprets this X (<39:36> reserved
  * for future expansion), software should set to 0.
  *
- *  - 0x0 XXX0 0000 0000 to	 DRAM	      Cached
+ *  - 0x0 XXX0 0000 0000 to      DRAM         Cached
  *  - 0x0 XXX0 0FFF FFFF
  *
- *  - 0x0 XXX0 1000 0000 to	 Boot Bus     Uncached	(Converted to 0x1 00X0 1000 0000
- *  - 0x0 XXX0 1FFF FFFF	 + EJTAG			   to 0x1 00X0 1FFF FFFF)
+ *  - 0x0 XXX0 1000 0000 to      Boot Bus     Uncached  (Converted to 0x1 00X0 1000 0000
+ *  - 0x0 XXX0 1FFF FFFF         + EJTAG                           to 0x1 00X0 1FFF FFFF)
  *
- *  - 0x0 XXX0 2000 0000 to	 DRAM	      Cached
+ *  - 0x0 XXX0 2000 0000 to      DRAM         Cached
  *  - 0x0 XXXF FFFF FFFF
  *
- *  - 0x1 00X0 0000 0000 to	 Boot Bus     Uncached
+ *  - 0x1 00X0 0000 0000 to      Boot Bus     Uncached
  *  - 0x1 00XF FFFF FFFF
  *
- *  - 0x1 01X0 0000 0000 to	 Other NCB    Uncached
- *  - 0x1 FFXF FFFF FFFF	 devices
+ *  - 0x1 01X0 0000 0000 to      Other NCB    Uncached
+ *  - 0x1 FFXF FFFF FFFF         devices
  *
  * Decode of all Octeon addresses
  */
 typedef union {
 
 	uint64_t u64;
-#ifdef __BIG_ENDIAN_BITFIELD
 	/* mapped or unmapped virtual address */
 	struct {
 		uint64_t R:2;
@@ -130,9 +129,9 @@ typedef union {
 	 */
 	struct {
 		uint64_t R:2;	/* CVMX_MIPS_SPACE_XKPHYS in this case */
-		uint64_t cca:3; /* ignored by octeon */
+		uint64_t cca:3;	/* ignored by octeon */
 		uint64_t mbz:10;
-		uint64_t pa:49; /* physical address */
+		uint64_t pa:49;	/* physical address */
 	} sxkphys;
 
 	/* physical address */
@@ -203,72 +202,6 @@ typedef union {
 		uint64_t didspace:24;
 		uint64_t unused:40;
 	} sfilldidspace;
-#else
-	struct {
-		uint64_t offset:62;
-		uint64_t R:2;
-	} sva;
-
-	struct {
-		uint64_t offset:31;
-		uint64_t zeroes:33;
-	} suseg;
-
-	struct {
-		uint64_t offset:29;
-		uint64_t sp:2;
-		uint64_t ones:33;
-	} sxkseg;
-
-	struct {
-		uint64_t pa:49;
-		uint64_t mbz:10;
-		uint64_t cca:3;
-		uint64_t R:2;
-	} sxkphys;
-
-	struct {
-		uint64_t offset:36;
-		uint64_t unaddr:4;
-		uint64_t did:8;
-		uint64_t is_io:1;
-		uint64_t mbz:15;
-	} sphys;
-
-	struct {
-		uint64_t offset:36;
-		uint64_t unaddr:4;
-		uint64_t zeroes:24;
-	} smem;
-
-	struct {
-		uint64_t offset:36;
-		uint64_t unaddr:4;
-		uint64_t did:8;
-		uint64_t is_io:1;
-		uint64_t mbz:13;
-		uint64_t mem_region:2;
-	} sio;
-
-	struct {
-		uint64_t addr:13;
-		cvmx_add_win_dec_t csrdec:2;
-		uint64_t ones:49;
-	} sscr;
-
-	struct {
-		uint64_t addr:7;
-		uint64_t type:3;
-		uint64_t unused2:3;
-		uint64_t csrdec:2;
-		uint64_t ones:49;
-	} sdma;
-
-	struct {
-		uint64_t unused:40;
-		uint64_t didspace:24;
-	} sfilldidspace;
-#endif
 
 } cvmx_addr_t;
 
@@ -320,22 +253,22 @@ typedef union {
 #define CVMX_OCT_DID_ASX1 23ULL
 #define CVMX_OCT_DID_IOB 30ULL
 
-#define CVMX_OCT_DID_PKT_SEND	    CVMX_FULL_DID(CVMX_OCT_DID_PKT, 2ULL)
-#define CVMX_OCT_DID_TAG_SWTAG	    CVMX_FULL_DID(CVMX_OCT_DID_TAG, 0ULL)
-#define CVMX_OCT_DID_TAG_TAG1	    CVMX_FULL_DID(CVMX_OCT_DID_TAG, 1ULL)
-#define CVMX_OCT_DID_TAG_TAG2	    CVMX_FULL_DID(CVMX_OCT_DID_TAG, 2ULL)
-#define CVMX_OCT_DID_TAG_TAG3	    CVMX_FULL_DID(CVMX_OCT_DID_TAG, 3ULL)
+#define CVMX_OCT_DID_PKT_SEND       CVMX_FULL_DID(CVMX_OCT_DID_PKT, 2ULL)
+#define CVMX_OCT_DID_TAG_SWTAG      CVMX_FULL_DID(CVMX_OCT_DID_TAG, 0ULL)
+#define CVMX_OCT_DID_TAG_TAG1       CVMX_FULL_DID(CVMX_OCT_DID_TAG, 1ULL)
+#define CVMX_OCT_DID_TAG_TAG2       CVMX_FULL_DID(CVMX_OCT_DID_TAG, 2ULL)
+#define CVMX_OCT_DID_TAG_TAG3       CVMX_FULL_DID(CVMX_OCT_DID_TAG, 3ULL)
 #define CVMX_OCT_DID_TAG_NULL_RD    CVMX_FULL_DID(CVMX_OCT_DID_TAG, 4ULL)
-#define CVMX_OCT_DID_TAG_CSR	    CVMX_FULL_DID(CVMX_OCT_DID_TAG, 7ULL)
-#define CVMX_OCT_DID_FAU_FAI	    CVMX_FULL_DID(CVMX_OCT_DID_IOB, 0ULL)
-#define CVMX_OCT_DID_TIM_CSR	    CVMX_FULL_DID(CVMX_OCT_DID_TIM, 0ULL)
-#define CVMX_OCT_DID_KEY_RW	    CVMX_FULL_DID(CVMX_OCT_DID_KEY, 0ULL)
-#define CVMX_OCT_DID_PCI_6	    CVMX_FULL_DID(CVMX_OCT_DID_PCI, 6ULL)
-#define CVMX_OCT_DID_MIS_BOO	    CVMX_FULL_DID(CVMX_OCT_DID_MIS, 0ULL)
-#define CVMX_OCT_DID_PCI_RML	    CVMX_FULL_DID(CVMX_OCT_DID_PCI, 0ULL)
-#define CVMX_OCT_DID_IPD_CSR	    CVMX_FULL_DID(CVMX_OCT_DID_IPD, 7ULL)
-#define CVMX_OCT_DID_DFA_CSR	    CVMX_FULL_DID(CVMX_OCT_DID_DFA, 7ULL)
-#define CVMX_OCT_DID_MIS_CSR	    CVMX_FULL_DID(CVMX_OCT_DID_MIS, 7ULL)
-#define CVMX_OCT_DID_ZIP_CSR	    CVMX_FULL_DID(CVMX_OCT_DID_ZIP, 0ULL)
+#define CVMX_OCT_DID_TAG_CSR        CVMX_FULL_DID(CVMX_OCT_DID_TAG, 7ULL)
+#define CVMX_OCT_DID_FAU_FAI        CVMX_FULL_DID(CVMX_OCT_DID_IOB, 0ULL)
+#define CVMX_OCT_DID_TIM_CSR        CVMX_FULL_DID(CVMX_OCT_DID_TIM, 0ULL)
+#define CVMX_OCT_DID_KEY_RW         CVMX_FULL_DID(CVMX_OCT_DID_KEY, 0ULL)
+#define CVMX_OCT_DID_PCI_6          CVMX_FULL_DID(CVMX_OCT_DID_PCI, 6ULL)
+#define CVMX_OCT_DID_MIS_BOO        CVMX_FULL_DID(CVMX_OCT_DID_MIS, 0ULL)
+#define CVMX_OCT_DID_PCI_RML        CVMX_FULL_DID(CVMX_OCT_DID_PCI, 0ULL)
+#define CVMX_OCT_DID_IPD_CSR        CVMX_FULL_DID(CVMX_OCT_DID_IPD, 7ULL)
+#define CVMX_OCT_DID_DFA_CSR        CVMX_FULL_DID(CVMX_OCT_DID_DFA, 7ULL)
+#define CVMX_OCT_DID_MIS_CSR        CVMX_FULL_DID(CVMX_OCT_DID_MIS, 7ULL)
+#define CVMX_OCT_DID_ZIP_CSR        CVMX_FULL_DID(CVMX_OCT_DID_ZIP, 0ULL)
 
 #endif /* __CVMX_ADDRESS_H__ */

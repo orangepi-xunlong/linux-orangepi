@@ -43,9 +43,13 @@ static ssize_t tomoyo_write_self(struct file *file, const char __user *buf,
 	int error;
 	if (!count || count >= TOMOYO_EXEC_TMPSIZE - 10)
 		return -ENOMEM;
-	data = memdup_user_nul(buf, count);
-	if (IS_ERR(data))
-		return PTR_ERR(data);
+	data = kzalloc(count + 1, GFP_NOFS);
+	if (!data)
+		return -ENOMEM;
+	if (copy_from_user(data, buf, count)) {
+		error = -EFAULT;
+		goto out;
+	}
 	tomoyo_normalize_line(data);
 	if (tomoyo_correct_domain(data)) {
 		const int idx = tomoyo_read_lock();
@@ -83,6 +87,7 @@ static ssize_t tomoyo_write_self(struct file *file, const char __user *buf,
 		tomoyo_read_unlock(idx);
 	} else
 		error = -EINVAL;
+out:
 	kfree(data);
 	return error ? error : count;
 }
@@ -130,7 +135,7 @@ static const struct file_operations tomoyo_self_operations = {
  */
 static int tomoyo_open(struct inode *inode, struct file *file)
 {
-	const int key = ((u8 *) file_inode(file)->i_private)
+	const int key = ((u8 *) file->f_path.dentry->d_inode->i_private)
 		- ((u8 *) NULL);
 	return tomoyo_open_control(key, file);
 }
@@ -138,13 +143,14 @@ static int tomoyo_open(struct inode *inode, struct file *file)
 /**
  * tomoyo_release - close() for /sys/kernel/security/tomoyo/ interface.
  *
+ * @inode: Pointer to "struct inode".
  * @file:  Pointer to "struct file".
  *
+ * Returns 0 on success, negative value otherwise.
  */
 static int tomoyo_release(struct inode *inode, struct file *file)
 {
-	tomoyo_close_control(file->private_data);
-	return 0;
+	return tomoyo_close_control(file->private_data);
 }
 
 /**

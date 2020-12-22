@@ -82,6 +82,7 @@ static struct dentry *ocfs2_get_dentry(struct super_block *sb,
 	}
 
 	status = ocfs2_test_inode_bit(osb, blkno, &set);
+	trace_ocfs2_get_dentry_test_bit(status, set);
 	if (status < 0) {
 		if (status == -EINVAL) {
 			/*
@@ -95,7 +96,6 @@ static struct dentry *ocfs2_get_dentry(struct super_block *sb,
 		goto unlock_nfs_sync;
 	}
 
-	trace_ocfs2_get_dentry_test_bit(status, set);
 	/* If the inode allocator bit is clear, this inode must be stale */
 	if (!set) {
 		status = -ESTALE;
@@ -125,10 +125,10 @@ check_err:
 
 check_gen:
 	if (handle->ih_generation != inode->i_generation) {
+		iput(inode);
 		trace_ocfs2_get_dentry_generation((unsigned long long)blkno,
 						  handle->ih_generation,
 						  inode->i_generation);
-		iput(inode);
 		result = ERR_PTR(-ESTALE);
 		goto bail;
 	}
@@ -147,7 +147,7 @@ static struct dentry *ocfs2_get_parent(struct dentry *child)
 	int status;
 	u64 blkno;
 	struct dentry *parent;
-	struct inode *dir = d_inode(child);
+	struct inode *dir = child->d_inode;
 
 	trace_ocfs2_get_parent(child, child->d_name.len, child->d_name.name,
 			       (unsigned long long)OCFS2_I(dir)->ip_blkno);
@@ -177,29 +177,27 @@ bail:
 	return parent;
 }
 
-static int ocfs2_encode_fh(struct inode *inode, u32 *fh_in, int *max_len,
-			   struct inode *parent)
+static int ocfs2_encode_fh(struct dentry *dentry, u32 *fh_in, int *max_len,
+			   int connectable)
 {
+	struct inode *inode = dentry->d_inode;
 	int len = *max_len;
 	int type = 1;
 	u64 blkno;
 	u32 generation;
 	__le32 *fh = (__force __le32 *) fh_in;
 
-#ifdef TRACE_HOOKS_ARE_NOT_BRAINDEAD_IN_YOUR_OPINION
-#error "You go ahead and fix that mess, then.  Somehow"
 	trace_ocfs2_encode_fh_begin(dentry, dentry->d_name.len,
 				    dentry->d_name.name,
 				    fh, len, connectable);
-#endif
 
-	if (parent && (len < 6)) {
+	if (connectable && (len < 6)) {
 		*max_len = 6;
-		type = FILEID_INVALID;
+		type = 255;
 		goto bail;
 	} else if (len < 3) {
 		*max_len = 3;
-		type = FILEID_INVALID;
+		type = 255;
 		goto bail;
 	}
 
@@ -213,13 +211,20 @@ static int ocfs2_encode_fh(struct inode *inode, u32 *fh_in, int *max_len,
 	fh[1] = cpu_to_le32((u32)(blkno & 0xffffffff));
 	fh[2] = cpu_to_le32(generation);
 
-	if (parent) {
+	if (connectable && !S_ISDIR(inode->i_mode)) {
+		struct inode *parent;
+
+		spin_lock(&dentry->d_lock);
+
+		parent = dentry->d_parent->d_inode;
 		blkno = OCFS2_I(parent)->ip_blkno;
 		generation = parent->i_generation;
 
 		fh[3] = cpu_to_le32((u32)(blkno >> 32));
 		fh[4] = cpu_to_le32((u32)(blkno & 0xffffffff));
 		fh[5] = cpu_to_le32(generation);
+
+		spin_unlock(&dentry->d_lock);
 
 		len = 6;
 		type = 2;

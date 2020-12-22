@@ -15,7 +15,7 @@
 #include <linux/platform_device.h>
 #include <linux/leds.h>
 #include <linux/err.h>
-#include <linux/io.h>
+#include <asm/io.h>
 #include <linux/scx200_gpio.h>
 #include <linux/module.h>
 
@@ -76,21 +76,42 @@ static int wrap_led_probe(struct platform_device *pdev)
 {
 	int ret;
 
-	ret = devm_led_classdev_register(&pdev->dev, &wrap_power_led);
+	ret = led_classdev_register(&pdev->dev, &wrap_power_led);
 	if (ret < 0)
 		return ret;
 
-	ret = devm_led_classdev_register(&pdev->dev, &wrap_error_led);
+	ret = led_classdev_register(&pdev->dev, &wrap_error_led);
 	if (ret < 0)
-		return ret;
+		goto err1;
 
-	return  devm_led_classdev_register(&pdev->dev, &wrap_extra_led);
+	ret = led_classdev_register(&pdev->dev, &wrap_extra_led);
+	if (ret < 0)
+		goto err2;
+
+	return ret;
+
+err2:
+	led_classdev_unregister(&wrap_error_led);
+err1:
+	led_classdev_unregister(&wrap_power_led);
+
+	return ret;
+}
+
+static int wrap_led_remove(struct platform_device *pdev)
+{
+	led_classdev_unregister(&wrap_power_led);
+	led_classdev_unregister(&wrap_error_led);
+	led_classdev_unregister(&wrap_extra_led);
+	return 0;
 }
 
 static struct platform_driver wrap_led_driver = {
 	.probe		= wrap_led_probe,
+	.remove		= wrap_led_remove,
 	.driver		= {
 		.name		= DRVNAME,
+		.owner		= THIS_MODULE,
 	},
 };
 

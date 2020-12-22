@@ -13,7 +13,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Written by Koji Sato.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * Written by Koji Sato <koji@osrg.net>.
  */
 
 #include <linux/errno.h>
@@ -58,7 +62,7 @@ static int nilfs_direct_lookup(const struct nilfs_bmap *direct,
 
 static int nilfs_direct_lookup_contig(const struct nilfs_bmap *direct,
 				      __u64 key, __u64 *ptrp,
-				      unsigned int maxblocks)
+				      unsigned maxblocks)
 {
 	struct inode *dat = NULL;
 	__u64 ptr, ptr2;
@@ -79,8 +83,7 @@ static int nilfs_direct_lookup_contig(const struct nilfs_bmap *direct,
 		ptr = blocknr;
 	}
 
-	maxblocks = min_t(unsigned int, maxblocks,
-			  NILFS_DIRECT_KEY_MAX - key + 1);
+	maxblocks = min_t(unsigned, maxblocks, NILFS_DIRECT_KEY_MAX - key + 1);
 	for (cnt = 1; cnt < maxblocks &&
 		     (ptr2 = nilfs_direct_get_ptr(direct, key + cnt)) !=
 		     NILFS_BMAP_INVALID_PTR;
@@ -107,9 +110,9 @@ nilfs_direct_find_target_v(const struct nilfs_bmap *direct, __u64 key)
 	if (ptr != NILFS_BMAP_INVALID_PTR)
 		/* sequential access */
 		return ptr;
-
-	/* block group */
-	return nilfs_bmap_find_target_in_group(direct);
+	else
+		/* block group */
+		return nilfs_bmap_find_target_in_group(direct);
 }
 
 static int nilfs_direct_insert(struct nilfs_bmap *bmap, __u64 key, __u64 ptr)
@@ -168,21 +171,6 @@ static int nilfs_direct_delete(struct nilfs_bmap *bmap, __u64 key)
 		nilfs_inode_sub_blocks(bmap->b_inode, 1);
 	}
 	return ret;
-}
-
-static int nilfs_direct_seek_key(const struct nilfs_bmap *direct, __u64 start,
-				 __u64 *keyp)
-{
-	__u64 key;
-
-	for (key = start; key <= NILFS_DIRECT_KEY_MAX; key++) {
-		if (nilfs_direct_get_ptr(direct, key) !=
-		    NILFS_BMAP_INVALID_PTR) {
-			*keyp = key;
-			return 0;
-		}
-	}
-	return -ENOENT;
 }
 
 static int nilfs_direct_last_key(const struct nilfs_bmap *direct, __u64 *keyp)
@@ -337,16 +325,14 @@ static int nilfs_direct_assign(struct nilfs_bmap *bmap,
 
 	key = nilfs_bmap_data_get_key(bmap, *bh);
 	if (unlikely(key > NILFS_DIRECT_KEY_MAX)) {
-		nilfs_msg(bmap->b_inode->i_sb, KERN_CRIT,
-			  "%s (ino=%lu): invalid key: %llu", __func__,
-			  bmap->b_inode->i_ino, (unsigned long long)key);
+		printk(KERN_CRIT "%s: invalid key: %llu\n", __func__,
+		       (unsigned long long)key);
 		return -EINVAL;
 	}
 	ptr = nilfs_direct_get_ptr(bmap, key);
 	if (unlikely(ptr == NILFS_BMAP_INVALID_PTR)) {
-		nilfs_msg(bmap->b_inode->i_sb, KERN_CRIT,
-			  "%s (ino=%lu): invalid pointer: %llu", __func__,
-			  bmap->b_inode->i_ino, (unsigned long long)ptr);
+		printk(KERN_CRIT "%s: invalid pointer: %llu\n", __func__,
+		       (unsigned long long)ptr);
 		return -EINVAL;
 	}
 
@@ -369,9 +355,7 @@ static const struct nilfs_bmap_operations nilfs_direct_ops = {
 	.bop_assign		=	nilfs_direct_assign,
 	.bop_mark		=	NULL,
 
-	.bop_seek_key		=	nilfs_direct_seek_key,
 	.bop_last_key		=	nilfs_direct_last_key,
-
 	.bop_check_insert	=	nilfs_direct_check_insert,
 	.bop_check_delete	=	NULL,
 	.bop_gather_data	=	nilfs_direct_gather_data,

@@ -398,10 +398,10 @@ static struct mmc_host_ops sdricoh_ops = {
 static int sdricoh_init_mmc(struct pci_dev *pci_dev,
 			    struct pcmcia_device *pcmcia_dev)
 {
-	int result;
-	void __iomem *iobase;
-	struct mmc_host *mmc;
-	struct sdricoh_host *host;
+	int result = 0;
+	void __iomem *iobase = NULL;
+	struct mmc_host *mmc = NULL;
+	struct sdricoh_host *host = NULL;
 	struct device *dev = &pcmcia_dev->dev;
 	/* map iomem */
 	if (pci_resource_len(pci_dev, SDRICOH_PCI_REGION) !=
@@ -419,7 +419,7 @@ static int sdricoh_init_mmc(struct pci_dev *pci_dev,
 	if (readl(iobase + R104_VERSION) != 0x4000) {
 		dev_dbg(dev, "no supported mmc controller found\n");
 		result = -ENODEV;
-		goto unmap_io;
+		goto err;
 	}
 	/* allocate privdata */
 	mmc = pcmcia_dev->priv =
@@ -427,7 +427,7 @@ static int sdricoh_init_mmc(struct pci_dev *pci_dev,
 	if (!mmc) {
 		dev_err(dev, "mmc_alloc_host failed\n");
 		result = -ENOMEM;
-		goto unmap_io;
+		goto err;
 	}
 	host = mmc_priv(mmc);
 
@@ -451,7 +451,8 @@ static int sdricoh_init_mmc(struct pci_dev *pci_dev,
 	if (sdricoh_reset(host)) {
 		dev_dbg(dev, "could not reset\n");
 		result = -EIO;
-		goto free_host;
+		goto err;
+
 	}
 
 	result = mmc_add_host(mmc);
@@ -460,10 +461,13 @@ static int sdricoh_init_mmc(struct pci_dev *pci_dev,
 		dev_dbg(dev, "mmc host registered\n");
 		return 0;
 	}
-free_host:
-	mmc_free_host(mmc);
-unmap_io:
-	pci_iounmap(pci_dev, iobase);
+
+err:
+	if (iobase)
+		pci_iounmap(pci_dev, iobase);
+	if (mmc)
+		mmc_free_host(mmc);
+
 	return result;
 }
 
@@ -512,7 +516,9 @@ static void sdricoh_pcmcia_detach(struct pcmcia_device *link)
 #ifdef CONFIG_PM
 static int sdricoh_pcmcia_suspend(struct pcmcia_device *link)
 {
+	struct mmc_host *mmc = link->priv;
 	dev_dbg(&link->dev, "suspend\n");
+	mmc_suspend_host(mmc);
 	return 0;
 }
 
@@ -521,6 +527,7 @@ static int sdricoh_pcmcia_resume(struct pcmcia_device *link)
 	struct mmc_host *mmc = link->priv;
 	dev_dbg(&link->dev, "resume\n");
 	sdricoh_reset(mmc_priv(mmc));
+	mmc_resume_host(mmc);
 	return 0;
 }
 #else
@@ -536,7 +543,25 @@ static struct pcmcia_driver sdricoh_driver = {
 	.suspend = sdricoh_pcmcia_suspend,
 	.resume = sdricoh_pcmcia_resume,
 };
-module_pcmcia_driver(sdricoh_driver);
+
+/*****************************************************************************\
+ *                                                                           *
+ * Driver init/exit                                                          *
+ *                                                                           *
+\*****************************************************************************/
+
+static int __init sdricoh_drv_init(void)
+{
+	return pcmcia_register_driver(&sdricoh_driver);
+}
+
+static void __exit sdricoh_drv_exit(void)
+{
+	pcmcia_unregister_driver(&sdricoh_driver);
+}
+
+module_init(sdricoh_drv_init);
+module_exit(sdricoh_drv_exit);
 
 module_param(switchlocked, uint, 0444);
 

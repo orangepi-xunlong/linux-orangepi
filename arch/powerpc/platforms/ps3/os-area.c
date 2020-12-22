@@ -194,6 +194,11 @@ static const struct os_area_db_id os_area_db_id_rtc_diff = {
 	.key = OS_AREA_DB_KEY_RTC_DIFF
 };
 
+static const struct os_area_db_id os_area_db_id_video_mode = {
+	.owner = OS_AREA_DB_OWNER_LINUX,
+	.key = OS_AREA_DB_KEY_VIDEO_MODE
+};
+
 #define SECONDS_FROM_1970_TO_2000 946684800LL
 
 /**
@@ -275,13 +280,13 @@ static void os_area_set_property(struct device_node *node,
 
 	if (tmp) {
 		pr_debug("%s:%d found %s\n", __func__, __LINE__, prop->name);
-		of_remove_property(node, tmp);
+		prom_remove_property(node, tmp);
 	}
 
-	result = of_add_property(node, prop);
+	result = prom_add_property(node, prop);
 
 	if (result)
-		pr_debug("%s:%d of_set_property failed\n", __func__,
+		pr_debug("%s:%d prom_set_property failed\n", __func__,
 			__LINE__);
 }
 

@@ -13,6 +13,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/errno.h>
 #include <linux/module.h>
@@ -102,6 +103,16 @@ static void altera_spi_chipsel(struct spi_device *spi, int value)
 	}
 }
 
+static int altera_spi_setupxfer(struct spi_device *spi, struct spi_transfer *t)
+{
+	return 0;
+}
+
+static int altera_spi_setup(struct spi_device *spi)
+{
+	return 0;
+}
+
 static inline unsigned int hw_txbyte(struct altera_spi *hw, int count)
 {
 	if (hw->tx) {
@@ -123,7 +134,7 @@ static int altera_spi_txrx(struct spi_device *spi, struct spi_transfer *t)
 	hw->tx = t->tx_buf;
 	hw->rx = t->rx_buf;
 	hw->count = 0;
-	hw->bytes_per_word = DIV_ROUND_UP(t->bits_per_word, 8);
+	hw->bytes_per_word = (t->bits_per_word ? : spi->bits_per_word) / 8;
 	hw->len = t->len / hw->bytes_per_word;
 
 	if (hw->irq >= 0) {
@@ -139,11 +150,11 @@ static int altera_spi_txrx(struct spi_device *spi, struct spi_transfer *t)
 		hw->imr &= ~ALTERA_SPI_CONTROL_IRRDY_MSK;
 		writel(hw->imr, hw->base + ALTERA_SPI_CONTROL);
 	} else {
-		while (hw->count < hw->len) {
-			unsigned int rxd;
+		/* send the first byte */
+		writel(hw_txbyte(hw, 0), hw->base + ALTERA_SPI_TXDATA);
 
-			writel(hw_txbyte(hw, hw->count),
-			       hw->base + ALTERA_SPI_TXDATA);
+		while (1) {
+			unsigned int rxd;
 
 			while (!(readl(hw->base + ALTERA_SPI_STATUS) &
 				 ALTERA_SPI_STATUS_RRDY_MSK))
@@ -163,7 +174,14 @@ static int altera_spi_txrx(struct spi_device *spi, struct spi_transfer *t)
 			}
 
 			hw->count++;
+
+			if (hw->count < hw->len)
+				writel(hw_txbyte(hw, hw->count),
+				       hw->base + ALTERA_SPI_TXDATA);
+			else
+				break;
 		}
+
 	}
 
 	return hw->count * hw->bytes_per_word;
@@ -197,8 +215,9 @@ static irqreturn_t altera_spi_irq(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static int altera_spi_probe(struct platform_device *pdev)
+static int __devinit altera_spi_probe(struct platform_device *pdev)
 {
+	struct altera_spi_platform_data *platp = pdev->dev.platform_data;
 	struct altera_spi *hw;
 	struct spi_master *master;
 	struct resource *res;
@@ -212,24 +231,30 @@ static int altera_spi_probe(struct platform_device *pdev)
 	master->bus_num = pdev->id;
 	master->num_chipselect = 16;
 	master->mode_bits = SPI_CS_HIGH;
-	master->bits_per_word_mask = SPI_BPW_RANGE_MASK(1, 16);
-	master->dev.of_node = pdev->dev.of_node;
+	master->setup = altera_spi_setup;
 
 	hw = spi_master_get_devdata(master);
 	platform_set_drvdata(pdev, hw);
 
 	/* setup the state for the bitbang driver */
-	hw->bitbang.master = master;
+	hw->bitbang.master = spi_master_get(master);
+	if (!hw->bitbang.master)
+		return err;
+	hw->bitbang.setup_transfer = altera_spi_setupxfer;
 	hw->bitbang.chipselect = altera_spi_chipsel;
 	hw->bitbang.txrx_bufs = altera_spi_txrx;
 
 	/* find and map our resources */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hw->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(hw->base)) {
-		err = PTR_ERR(hw->base);
-		goto exit;
-	}
+	if (!res)
+		goto exit_busy;
+	if (!devm_request_mem_region(&pdev->dev, res->start, resource_size(res),
+				     pdev->name))
+		goto exit_busy;
+	hw->base = devm_ioremap_nocache(&pdev->dev, res->start,
+					resource_size(res));
+	if (!hw->base)
+		goto exit_busy;
 	/* program defaults into the registers */
 	hw->imr = 0;		/* disable spi interrupts */
 	writel(hw->imr, hw->base + ALTERA_SPI_CONTROL);
@@ -245,6 +270,9 @@ static int altera_spi_probe(struct platform_device *pdev)
 		if (err)
 			goto exit;
 	}
+	/* find platform data */
+	if (!platp)
+		hw->bitbang.master->dev.of_node = pdev->dev.of_node;
 
 	/* register our spi controller */
 	err = spi_bitbang_start(&hw->bitbang);
@@ -253,17 +281,22 @@ static int altera_spi_probe(struct platform_device *pdev)
 	dev_info(&pdev->dev, "base %p, irq %d\n", hw->base, hw->irq);
 
 	return 0;
+
+exit_busy:
+	err = -EBUSY;
 exit:
+	platform_set_drvdata(pdev, NULL);
 	spi_master_put(master);
 	return err;
 }
 
-static int altera_spi_remove(struct platform_device *dev)
+static int __devexit altera_spi_remove(struct platform_device *dev)
 {
 	struct altera_spi *hw = platform_get_drvdata(dev);
 	struct spi_master *master = hw->bitbang.master;
 
 	spi_bitbang_stop(&hw->bitbang);
+	platform_set_drvdata(dev, NULL);
 	spi_master_put(master);
 	return 0;
 }
@@ -271,19 +304,21 @@ static int altera_spi_remove(struct platform_device *dev)
 #ifdef CONFIG_OF
 static const struct of_device_id altera_spi_match[] = {
 	{ .compatible = "ALTR,spi-1.0", },
-	{ .compatible = "altr,spi-1.0", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, altera_spi_match);
+#else /* CONFIG_OF */
+#define altera_spi_match NULL
 #endif /* CONFIG_OF */
 
 static struct platform_driver altera_spi_driver = {
 	.probe = altera_spi_probe,
-	.remove = altera_spi_remove,
+	.remove = __devexit_p(altera_spi_remove),
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 		.pm = NULL,
-		.of_match_table = of_match_ptr(altera_spi_match),
+		.of_match_table = altera_spi_match,
 	},
 };
 module_platform_driver(altera_spi_driver);

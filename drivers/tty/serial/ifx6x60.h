@@ -41,7 +41,6 @@
 #define IFX_SPI_STATE_IO_IN_PROGRESS	1
 #define IFX_SPI_STATE_IO_READY		2
 #define IFX_SPI_STATE_TIMER_PENDING	3
-#define IFX_SPI_STATE_IO_AVAILABLE	4
 
 /* flow control bitfields */
 #define IFX_SPI_DCD			0
@@ -125,7 +124,6 @@ struct ifx_spi_device {
 #define MR_INPROGRESS	1
 #define MR_COMPLETE	2
 	wait_queue_head_t mdm_reset_wait;
-	void (*swap_buf)(unsigned char *buf, int len, void *end);
 };
 
 #endif /* _IFX6X60_H */

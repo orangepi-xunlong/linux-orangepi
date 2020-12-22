@@ -29,7 +29,7 @@
     activation method (full-duplex audio!).
 */
 
-#include <linux/io.h>
+#include <asm/io.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/time.h>
@@ -99,9 +99,9 @@ MODULE_DEVICE_TABLE(pnp_card, snd_azt2320_pnpids);
 
 #define	DRIVER_NAME	"snd-card-azt2320"
 
-static int snd_card_azt2320_pnp(int dev, struct snd_card_azt2320 *acard,
-				struct pnp_card_link *card,
-				const struct pnp_card_device_id *id)
+static int __devinit snd_card_azt2320_pnp(int dev, struct snd_card_azt2320 *acard,
+					  struct pnp_card_link *card,
+					  const struct pnp_card_device_id *id)
 {
 	struct pnp_dev *pdev;
 	int err;
@@ -147,7 +147,7 @@ static int snd_card_azt2320_pnp(int dev, struct snd_card_azt2320 *acard,
 }
 
 /* same of snd_sbdsp_command by Jaroslav Kysela */
-static int snd_card_azt2320_command(unsigned long port, unsigned char val)
+static int __devinit snd_card_azt2320_command(unsigned long port, unsigned char val)
 {
 	int i;
 	unsigned long limit;
@@ -161,7 +161,7 @@ static int snd_card_azt2320_command(unsigned long port, unsigned char val)
 	return -EBUSY;
 }
 
-static int snd_card_azt2320_enable_wss(unsigned long port)
+static int __devinit snd_card_azt2320_enable_wss(unsigned long port)
 {
 	int error;
 
@@ -174,9 +174,9 @@ static int snd_card_azt2320_enable_wss(unsigned long port)
 	return 0;
 }
 
-static int snd_card_azt2320_probe(int dev,
-				  struct pnp_card_link *pcard,
-				  const struct pnp_card_device_id *pid)
+static int __devinit snd_card_azt2320_probe(int dev,
+					    struct pnp_card_link *pcard,
+					    const struct pnp_card_device_id *pid)
 {
 	int error;
 	struct snd_card *card;
@@ -184,9 +184,8 @@ static int snd_card_azt2320_probe(int dev,
 	struct snd_wss *chip;
 	struct snd_opl3 *opl3;
 
-	error = snd_card_new(&pcard->card->dev,
-			     index[dev], id[dev], THIS_MODULE,
-			     sizeof(struct snd_card_azt2320), &card);
+	error = snd_card_create(index[dev], id[dev], THIS_MODULE,
+				sizeof(struct snd_card_azt2320), &card);
 	if (error < 0)
 		return error;
 	acard = card->private_data;
@@ -195,6 +194,7 @@ static int snd_card_azt2320_probe(int dev,
 		snd_card_free(card);
 		return error;
 	}
+	snd_card_set_dev(card, &pcard->card->dev);
 
 	if ((error = snd_card_azt2320_enable_wss(port[dev]))) {
 		snd_card_free(card);
@@ -215,7 +215,7 @@ static int snd_card_azt2320_probe(int dev,
 	sprintf(card->longname, "%s, WSS at 0x%lx, irq %i, dma %i&%i",
 		card->shortname, chip->port, irq[dev], dma1[dev], dma2[dev]);
 
-	error = snd_wss_pcm(chip, 0);
+	error = snd_wss_pcm(chip, 0, NULL);
 	if (error < 0) {
 		snd_card_free(card);
 		return error;
@@ -225,7 +225,7 @@ static int snd_card_azt2320_probe(int dev,
 		snd_card_free(card);
 		return error;
 	}
-	error = snd_wss_timer(chip, 0);
+	error = snd_wss_timer(chip, 0, NULL);
 	if (error < 0) {
 		snd_card_free(card);
 		return error;
@@ -264,10 +264,10 @@ static int snd_card_azt2320_probe(int dev,
 	return 0;
 }
 
-static unsigned int azt2320_devices;
+static unsigned int __devinitdata azt2320_devices;
 
-static int snd_azt2320_pnp_detect(struct pnp_card_link *card,
-				  const struct pnp_card_device_id *id)
+static int __devinit snd_azt2320_pnp_detect(struct pnp_card_link *card,
+					    const struct pnp_card_device_id *id)
 {
 	static int dev;
 	int res;
@@ -285,7 +285,7 @@ static int snd_azt2320_pnp_detect(struct pnp_card_link *card,
         return -ENODEV;
 }
 
-static void snd_azt2320_pnp_remove(struct pnp_card_link *pcard)
+static void __devexit snd_azt2320_pnp_remove(struct pnp_card_link * pcard)
 {
 	snd_card_free(pnp_get_card_drvdata(pcard));
 	pnp_set_card_drvdata(pcard, NULL);
@@ -320,7 +320,7 @@ static struct pnp_card_driver azt2320_pnpc_driver = {
 	.name           = "azt2320",
 	.id_table       = snd_azt2320_pnpids,
 	.probe          = snd_azt2320_pnp_detect,
-	.remove         = snd_azt2320_pnp_remove,
+	.remove         = __devexit_p(snd_azt2320_pnp_remove),
 #ifdef CONFIG_PM
 	.suspend	= snd_azt2320_pnp_suspend,
 	.resume		= snd_azt2320_pnp_resume,

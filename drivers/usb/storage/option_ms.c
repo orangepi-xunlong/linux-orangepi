@@ -50,7 +50,7 @@ static int option_rezero(struct us_data *us)
 	char *buffer;
 	int result;
 
-	usb_stor_dbg(us, "Option MS: %s\n", "DEVICE MODE SWITCH");
+	US_DEBUGP("Option MS: %s", "DEVICE MODE SWITCH\n");
 
 	buffer = kzalloc(RESPONSE_LEN, GFP_KERNEL);
 	if (buffer == NULL)
@@ -65,8 +65,7 @@ static int option_rezero(struct us_data *us)
 		goto out;
 	}
 
-	/*
-	 * Some of the devices need to be asked for a response, but we don't
+	/* Some of the devices need to be asked for a response, but we don't
 	 * care what that response is.
 	 */
 	usb_stor_bulk_transfer_buf(us,
@@ -96,7 +95,7 @@ static int option_inquiry(struct us_data *us)
 	char *buffer;
 	int result;
 
-	usb_stor_dbg(us, "Option MS: %s\n", "device inquiry for vendor name");
+	US_DEBUGP("Option MS: %s", "device inquiry for vendor name\n");
 
 	buffer = kzalloc(0x24, GFP_KERNEL);
 	if (buffer == NULL)
@@ -139,33 +138,31 @@ int option_ms_init(struct us_data *us)
 {
 	int result;
 
-	usb_stor_dbg(us, "Option MS: %s\n", "option_ms_init called");
+	US_DEBUGP("Option MS: option_ms_init called\n");
 
-	/*
-	 * Additional test for vendor information via INQUIRY,
+	/* Additional test for vendor information via INQUIRY,
 	 * because some vendor/product IDs are ambiguous
 	 */
 	result = option_inquiry(us);
 	if (result != 0) {
-		usb_stor_dbg(us, "Option MS: %s\n",
-			     "vendor is not Option or not determinable, no action taken");
+		US_DEBUGP("Option MS: vendor is not Option or not determinable,"
+			  " no action taken\n");
 		return 0;
 	} else
-		usb_stor_dbg(us, "Option MS: %s\n",
-			     "this is a genuine Option device, proceeding");
+		US_DEBUGP("Option MS: this is a genuine Option device,"
+			  " proceeding\n");
 
 	/* Force Modem mode */
 	if (option_zero_cd == ZCD_FORCE_MODEM) {
-		usb_stor_dbg(us, "Option MS: %s\n", "Forcing Modem Mode");
+		US_DEBUGP("Option MS: %s", "Forcing Modem Mode\n");
 		result = option_rezero(us);
 		if (result != USB_STOR_XFER_GOOD)
-			usb_stor_dbg(us, "Option MS: %s\n",
-				     "Failed to switch to modem mode");
+			US_DEBUGP("Option MS: Failed to switch to modem mode.\n");
 		return -EIO;
 	} else if (option_zero_cd == ZCD_ALLOW_MS) {
 		/* Allow Mass Storage mode (keep CD-Rom) */
-		usb_stor_dbg(us, "Option MS: %s\n",
-			     "Allowing Mass Storage Mode if device requests it");
+		US_DEBUGP("Option MS: %s", "Allowing Mass Storage Mode if device"
+		          " requests it\n");
 	}
 
 	return 0;

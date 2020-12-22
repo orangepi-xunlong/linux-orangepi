@@ -29,8 +29,6 @@
 #include <linux/anon_inodes.h>
 #include <linux/signalfd.h>
 #include <linux/syscalls.h>
-#include <linux/proc_fs.h>
-#include <linux/compat.h>
 
 void signalfd_cleanup(struct sighand_struct *sighand)
 {
@@ -121,9 +119,8 @@ static int signalfd_copyinfo(struct signalfd_siginfo __user *uinfo,
 		 * Other callers might not initialize the si_lsb field,
 		 * so check explicitly for the right codes here.
 		 */
-		if (kinfo->si_signo == SIGBUS &&
-		    (kinfo->si_code == BUS_MCEERR_AR ||
-		     kinfo->si_code == BUS_MCEERR_AO))
+		if (kinfo->si_code == BUS_MCEERR_AR ||
+		    kinfo->si_code == BUS_MCEERR_AO)
 			err |= __put_user((short) kinfo->si_addr_lsb,
 					  &uinfo->ssi_addr_lsb);
 #endif
@@ -230,22 +227,7 @@ static ssize_t signalfd_read(struct file *file, char __user *buf, size_t count,
 	return total ? total: ret;
 }
 
-#ifdef CONFIG_PROC_FS
-static void signalfd_show_fdinfo(struct seq_file *m, struct file *f)
-{
-	struct signalfd_ctx *ctx = f->private_data;
-	sigset_t sigmask;
-
-	sigmask = ctx->sigmask;
-	signotset(&sigmask);
-	render_sigset_t(m, "sigmask:\t", &sigmask);
-}
-#endif
-
 static const struct file_operations signalfd_fops = {
-#ifdef CONFIG_PROC_FS
-	.show_fdinfo	= signalfd_show_fdinfo,
-#endif
 	.release	= signalfd_release,
 	.poll		= signalfd_poll,
 	.read		= signalfd_read,
@@ -287,12 +269,12 @@ SYSCALL_DEFINE4(signalfd4, int, ufd, sigset_t __user *, user_mask,
 		if (ufd < 0)
 			kfree(ctx);
 	} else {
-		struct fd f = fdget(ufd);
-		if (!f.file)
+		struct file *file = fget(ufd);
+		if (!file)
 			return -EBADF;
-		ctx = f.file->private_data;
-		if (f.file->f_op != &signalfd_fops) {
-			fdput(f);
+		ctx = file->private_data;
+		if (file->f_op != &signalfd_fops) {
+			fput(file);
 			return -EINVAL;
 		}
 		spin_lock_irq(&current->sighand->siglock);
@@ -300,7 +282,7 @@ SYSCALL_DEFINE4(signalfd4, int, ufd, sigset_t __user *, user_mask,
 		spin_unlock_irq(&current->sighand->siglock);
 
 		wake_up(&current->sighand->signalfd_wqh);
-		fdput(f);
+		fput(file);
 	}
 
 	return ufd;
@@ -311,33 +293,3 @@ SYSCALL_DEFINE3(signalfd, int, ufd, sigset_t __user *, user_mask,
 {
 	return sys_signalfd4(ufd, user_mask, sizemask, 0);
 }
-
-#ifdef CONFIG_COMPAT
-COMPAT_SYSCALL_DEFINE4(signalfd4, int, ufd,
-		     const compat_sigset_t __user *,sigmask,
-		     compat_size_t, sigsetsize,
-		     int, flags)
-{
-	compat_sigset_t ss32;
-	sigset_t tmp;
-	sigset_t __user *ksigmask;
-
-	if (sigsetsize != sizeof(compat_sigset_t))
-		return -EINVAL;
-	if (copy_from_user(&ss32, sigmask, sizeof(ss32)))
-		return -EFAULT;
-	sigset_from_compat(&tmp, &ss32);
-	ksigmask = compat_alloc_user_space(sizeof(sigset_t));
-	if (copy_to_user(ksigmask, &tmp, sizeof(sigset_t)))
-		return -EFAULT;
-
-	return sys_signalfd4(ufd, ksigmask, sizeof(sigset_t), flags);
-}
-
-COMPAT_SYSCALL_DEFINE3(signalfd, int, ufd,
-		     const compat_sigset_t __user *,sigmask,
-		     compat_size_t, sigsetsize)
-{
-	return compat_sys_signalfd4(ufd, sigmask, sigsetsize, 0);
-}
-#endif

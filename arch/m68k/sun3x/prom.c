@@ -10,6 +10,7 @@
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
+#include <asm/bootinfo.h>
 #include <asm/setup.h>
 #include <asm/traps.h>
 #include <asm/sun3xprom.h>

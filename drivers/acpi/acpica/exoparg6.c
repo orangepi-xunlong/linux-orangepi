@@ -1,3 +1,4 @@
+
 /******************************************************************************
  *
  * Module Name: exoparg6 - AML execution - opcodes with 6 arguments
@@ -5,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -119,6 +120,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MEQ:
+
 		/*
 		 * True if equal: (P[i] == M)
 		 * Change to:     (M == P[i])
@@ -132,6 +134,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MLE:
+
 		/*
 		 * True if less than or equal: (P[i] <= M) (P[i] not_greater than M)
 		 * Change to:                  (M >= P[i]) (M not_less than P[i])
@@ -146,6 +149,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MLT:
+
 		/*
 		 * True if less than: (P[i] < M)
 		 * Change to:         (M > P[i])
@@ -159,6 +163,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MGE:
+
 		/*
 		 * True if greater than or equal: (P[i] >= M) (P[i] not_less than M)
 		 * Change to:                     (M <= P[i]) (M not_greater than P[i])
@@ -173,6 +178,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MGT:
+
 		/*
 		 * True if greater than: (P[i] > M)
 		 * Change to:            (M < P[i])
@@ -192,7 +198,7 @@ acpi_ex_do_match(u32 match_op,
 		return (FALSE);
 	}
 
-	return (logical_result);
+	return logical_result;
 }
 
 /*******************************************************************************
@@ -207,7 +213,7 @@ acpi_ex_do_match(u32 match_op,
  *
  ******************************************************************************/
 
-acpi_status acpi_ex_opcode_6A_0T_1R(struct acpi_walk_state *walk_state)
+acpi_status acpi_ex_opcode_6A_0T_1R(struct acpi_walk_state * walk_state)
 {
 	union acpi_operand_object **operand = &walk_state->operands[0];
 	union acpi_operand_object *return_desc = NULL;
@@ -263,7 +269,7 @@ acpi_status acpi_ex_opcode_6A_0T_1R(struct acpi_walk_state *walk_state)
 		 * and the next should be examined.
 		 *
 		 * Upon finding a match, the loop will terminate via "break" at
-		 * the bottom. If it terminates "normally", match_value will be
+		 * the bottom.  If it terminates "normally", match_value will be
 		 * ACPI_UINT64_MAX (Ones) (its initial value) indicating that no
 		 * match was found.
 		 */
@@ -310,12 +316,11 @@ acpi_status acpi_ex_opcode_6A_0T_1R(struct acpi_walk_state *walk_state)
 
 		ACPI_ERROR((AE_INFO, "Unknown AML opcode 0x%X",
 			    walk_state->opcode));
-
 		status = AE_AML_BAD_OPCODE;
 		goto cleanup;
 	}
 
-cleanup:
+      cleanup:
 
 	/* Delete return object on error */
 

@@ -18,17 +18,14 @@
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/clocksource.h>
-#include <linux/sched_clock.h>
 
-#include <asm/mach/time.h>
+#include <asm/sched_clock.h>
 
-#include <plat/counter-32k.h>
+#include <plat/hardware.h>
+#include <plat/common.h>
+#include <plat/board.h>
 
-/* OMAP2_32KSYNCNT_CR_OFF: offset of 32ksync counter register */
-#define OMAP2_32KSYNCNT_REV_OFF		0x0
-#define OMAP2_32KSYNCNT_REV_SCHEME	(0x3 << 30)
-#define OMAP2_32KSYNCNT_CR_OFF_LOW	0x10
-#define OMAP2_32KSYNCNT_CR_OFF_HIGH	0x30
+#include <plat/clock.h>
 
 /*
  * 32KHz clocksource ... always available, on pretty most chips except
@@ -36,82 +33,96 @@
  * higher resolution in free-running counter modes (e.g. 12 MHz xtal),
  * but systems won't necessarily want to spend resources that way.
  */
-static void __iomem *sync32k_cnt_reg;
+static void __iomem *timer_32k_base;
 
-static u64 notrace omap_32k_read_sched_clock(void)
+#define OMAP16XX_TIMER_32K_SYNCHRONIZED		0xfffbc410
+
+static u32 notrace omap_32k_read_sched_clock(void)
 {
-	return sync32k_cnt_reg ? readl_relaxed(sync32k_cnt_reg) : 0;
+	return timer_32k_base ? __raw_readl(timer_32k_base) : 0;
 }
 
 /**
- * omap_read_persistent_clock64 -  Return time from a persistent clock.
+ * read_persistent_clock -  Return time from a persistent clock.
  *
  * Reads the time from a source which isn't disabled during PM, the
  * 32k sync timer.  Convert the cycles elapsed since last read into
- * nsecs and adds to a monotonically increasing timespec64.
+ * nsecs and adds to a monotonically increasing timespec.
  */
-static struct timespec64 persistent_ts;
+static struct timespec persistent_ts;
 static cycles_t cycles;
 static unsigned int persistent_mult, persistent_shift;
+static DEFINE_SPINLOCK(read_persistent_clock_lock);
 
-static void omap_read_persistent_clock64(struct timespec64 *ts)
+void read_persistent_clock(struct timespec *ts)
 {
 	unsigned long long nsecs;
 	cycles_t last_cycles;
+	unsigned long flags;
+
+	spin_lock_irqsave(&read_persistent_clock_lock, flags);
 
 	last_cycles = cycles;
-	cycles = sync32k_cnt_reg ? readl_relaxed(sync32k_cnt_reg) : 0;
+	cycles = timer_32k_base ? __raw_readl(timer_32k_base) : 0;
 
 	nsecs = clocksource_cyc2ns(cycles - last_cycles,
 					persistent_mult, persistent_shift);
 
-	timespec64_add_ns(&persistent_ts, nsecs);
+	timespec_add_ns(&persistent_ts, nsecs);
 
 	*ts = persistent_ts;
+
+	spin_unlock_irqrestore(&read_persistent_clock_lock, flags);
 }
 
-/**
- * omap_init_clocksource_32k - setup and register counter 32k as a
- * kernel clocksource
- * @pbase: base addr of counter_32k module
- * @size: size of counter_32k to map
- *
- * Returns 0 upon success or negative error code upon failure.
- *
- */
-int __init omap_init_clocksource_32k(void __iomem *vbase)
+int __init omap_init_clocksource_32k(void)
 {
-	int ret;
+	static char err[] __initdata = KERN_ERR
+			"%s: can't register clocksource!\n";
 
-	/*
-	 * 32k sync Counter IP register offsets vary between the
-	 * highlander version and the legacy ones.
-	 * The 'SCHEME' bits(30-31) of the revision register is used
-	 * to identify the version.
-	 */
-	if (readl_relaxed(vbase + OMAP2_32KSYNCNT_REV_OFF) &
-						OMAP2_32KSYNCNT_REV_SCHEME)
-		sync32k_cnt_reg = vbase + OMAP2_32KSYNCNT_CR_OFF_HIGH;
-	else
-		sync32k_cnt_reg = vbase + OMAP2_32KSYNCNT_CR_OFF_LOW;
+	if (cpu_is_omap16xx() || cpu_class_is_omap2()) {
+		u32 pbase;
+		unsigned long size = SZ_4K;
+		void __iomem *base;
+		struct clk *sync_32k_ick;
 
-	/*
-	 * 120000 rough estimate from the calculations in
-	 * __clocksource_update_freq_scale.
-	 */
-	clocks_calc_mult_shift(&persistent_mult, &persistent_shift,
-			32768, NSEC_PER_SEC, 120000);
+		if (cpu_is_omap16xx()) {
+			pbase = OMAP16XX_TIMER_32K_SYNCHRONIZED;
+			size = SZ_1K;
+		} else if (cpu_is_omap2420())
+			pbase = OMAP2420_32KSYNCT_BASE + 0x10;
+		else if (cpu_is_omap2430())
+			pbase = OMAP2430_32KSYNCT_BASE + 0x10;
+		else if (cpu_is_omap34xx())
+			pbase = OMAP3430_32KSYNCT_BASE + 0x10;
+		else if (cpu_is_omap44xx())
+			pbase = OMAP4430_32KSYNCT_BASE + 0x10;
+		else
+			return -ENODEV;
 
-	ret = clocksource_mmio_init(sync32k_cnt_reg, "32k_counter", 32768,
-				250, 32, clocksource_mmio_readl_up);
-	if (ret) {
-		pr_err("32k_counter: can't register clocksource\n");
-		return ret;
+		/* For this to work we must have a static mapping in io.c for this area */
+		base = ioremap(pbase, size);
+		if (!base)
+			return -ENODEV;
+
+		sync_32k_ick = clk_get(NULL, "omap_32ksync_ick");
+		if (!IS_ERR(sync_32k_ick))
+			clk_enable(sync_32k_ick);
+
+		timer_32k_base = base;
+
+		/*
+		 * 120000 rough estimate from the calculations in
+		 * __clocksource_updatefreq_scale.
+		 */
+		clocks_calc_mult_shift(&persistent_mult, &persistent_shift,
+				32768, NSEC_PER_SEC, 120000);
+
+		if (clocksource_mmio_init(base, "32k_counter", 32768, 250, 32,
+					  clocksource_mmio_readl_up))
+			printk(err, "32k_counter");
+
+		setup_sched_clock(omap_32k_read_sched_clock, 32, 32768);
 	}
-
-	sched_clock_register(omap_32k_read_sched_clock, 32, 32768);
-	register_persistent_clock(NULL, omap_read_persistent_clock64);
-	pr_info("OMAP clocksource: 32k_counter at 32768 Hz\n");
-
 	return 0;
 }

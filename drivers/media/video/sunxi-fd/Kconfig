@@ -1,0 +1,6 @@
+config SUNXI_FD
+tristate "FD driver" 
+depends on ARCH_SUN9I
+default m
+help
+	  This is the driver for allwinner platform facedetector module

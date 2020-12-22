@@ -33,9 +33,10 @@
 
 #include <linux/compat.h>
 
-#include <drm/drmP.h>
+#include "drmP.h"
+#include "drm.h"
 
-#include "nouveau_ioctl.h"
+#include "nouveau_drv.h"
 
 /**
  * Called whenever a 32-bit process running under a 64-bit kernel
@@ -57,13 +58,13 @@ long nouveau_compat_ioctl(struct file *filp, unsigned int cmd,
 		return drm_compat_ioctl(filp, cmd, arg);
 
 #if 0
-	if (nr < DRM_COMMAND_BASE + ARRAY_SIZE(mga_compat_ioctls))
+	if (nr < DRM_COMMAND_BASE + DRM_ARRAY_SIZE(mga_compat_ioctls))
 		fn = nouveau_compat_ioctls[nr - DRM_COMMAND_BASE];
 #endif
 	if (fn != NULL)
 		ret = (*fn)(filp, cmd, arg);
 	else
-		ret = nouveau_drm_ioctl(filp, cmd, arg);
+		ret = drm_ioctl(filp, cmd, arg);
 
 	return ret;
 }

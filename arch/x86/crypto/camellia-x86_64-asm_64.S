@@ -20,8 +20,6 @@
  *
  */
 
-#include <linux/linkage.h>
-
 .file "camellia-x86_64-asm_64.S"
 .text
 
@@ -190,7 +188,10 @@
 	bswapq				RAB0; \
 	movq RAB0,			4*2(RIO);
 
-ENTRY(__camellia_enc_blk)
+.global __camellia_enc_blk;
+.type   __camellia_enc_blk,@function;
+
+__camellia_enc_blk:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -213,31 +214,33 @@ ENTRY(__camellia_enc_blk)
 	movl $24, RT1d; /* max */
 
 	cmpb $16, key_length(CTX);
-	je .L__enc_done;
+	je __enc_done;
 
 	enc_fls(24);
 	enc_rounds(24);
 	movl $32, RT1d; /* max */
 
-.L__enc_done:
+__enc_done:
 	testb RXORbl, RXORbl;
 	movq RDST, RIO;
 
-	jnz .L__enc_xor;
+	jnz __enc_xor;
 
 	enc_outunpack(mov, RT1);
 
 	movq RRBP, %rbp;
 	ret;
 
-.L__enc_xor:
+__enc_xor:
 	enc_outunpack(xor, RT1);
 
 	movq RRBP, %rbp;
 	ret;
-ENDPROC(__camellia_enc_blk)
 
-ENTRY(camellia_dec_blk)
+.global camellia_dec_blk;
+.type   camellia_dec_blk,@function;
+
+camellia_dec_blk:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -255,12 +258,12 @@ ENTRY(camellia_dec_blk)
 	dec_inpack(RT2);
 
 	cmpb $24, RT2bl;
-	je .L__dec_rounds16;
+	je __dec_rounds16;
 
 	dec_rounds(24);
 	dec_fls(24);
 
-.L__dec_rounds16:
+__dec_rounds16:
 	dec_rounds(16);
 	dec_fls(16);
 	dec_rounds(8);
@@ -273,7 +276,6 @@ ENTRY(camellia_dec_blk)
 
 	movq RRBP, %rbp;
 	ret;
-ENDPROC(camellia_dec_blk)
 
 /**********************************************************************
   2-way camellia
@@ -424,7 +426,10 @@ ENDPROC(camellia_dec_blk)
 		bswapq				RAB1; \
 		movq RAB1,			12*2(RIO);
 
-ENTRY(__camellia_enc_blk_2way)
+.global __camellia_enc_blk_2way;
+.type   __camellia_enc_blk_2way,@function;
+
+__camellia_enc_blk_2way:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -448,16 +453,16 @@ ENTRY(__camellia_enc_blk_2way)
 	movl $24, RT2d; /* max */
 
 	cmpb $16, key_length(CTX);
-	je .L__enc2_done;
+	je __enc2_done;
 
 	enc_fls2(24);
 	enc_rounds2(24);
 	movl $32, RT2d; /* max */
 
-.L__enc2_done:
+__enc2_done:
 	test RXORbl, RXORbl;
 	movq RDST, RIO;
-	jnz .L__enc2_xor;
+	jnz __enc2_xor;
 
 	enc_outunpack2(mov, RT2);
 
@@ -465,15 +470,17 @@ ENTRY(__camellia_enc_blk_2way)
 	popq %rbx;
 	ret;
 
-.L__enc2_xor:
+__enc2_xor:
 	enc_outunpack2(xor, RT2);
 
 	movq RRBP, %rbp;
 	popq %rbx;
 	ret;
-ENDPROC(__camellia_enc_blk_2way)
 
-ENTRY(camellia_dec_blk_2way)
+.global camellia_dec_blk_2way;
+.type   camellia_dec_blk_2way,@function;
+
+camellia_dec_blk_2way:
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -492,12 +499,12 @@ ENTRY(camellia_dec_blk_2way)
 	dec_inpack2(RT2);
 
 	cmpb $24, RT2bl;
-	je .L__dec2_rounds16;
+	je __dec2_rounds16;
 
 	dec_rounds2(24);
 	dec_fls2(24);
 
-.L__dec2_rounds16:
+__dec2_rounds16:
 	dec_rounds2(16);
 	dec_fls2(16);
 	dec_rounds2(8);
@@ -511,4 +518,3 @@ ENTRY(camellia_dec_blk_2way)
 	movq RRBP, %rbp;
 	movq RXOR, %rbx;
 	ret;
-ENDPROC(camellia_dec_blk_2way)

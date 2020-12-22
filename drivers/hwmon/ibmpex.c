@@ -2,7 +2,7 @@
  * A hwmon driver for the IBM PowerExecutive temperature/power sensors
  * Copyright (C) 2007 IBM
  *
- * Author: Darrick J. Wong <darrick.wong@oracle.com>
+ * Author: Darrick J. Wong <djwong@us.ibm.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,6 @@
 #include <linux/jiffies.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
-#include <linux/err.h>
 
 #define REFRESH_INTERVAL	(2 * HZ)
 #define DRVNAME			"ibmpex"
@@ -56,10 +55,15 @@ static u8 const temp_sensor_sig[]  = {0x74, 0x65, 0x6D};
 static u8 const watt_sensor_sig[]  = {0x41, 0x43};
 
 #define PEX_NUM_SENSOR_FUNCS	3
-static const char * const sensor_name_suffixes[] = {
-	"",
-	"_lowest",
-	"_highest"
+static char const * const power_sensor_name_templates[] = {
+	"%s%d_average",
+	"%s%d_average_lowest",
+	"%s%d_average_highest"
+};
+static char const * const temp_sensor_name_templates[] = {
+	"%s%d_input",
+	"%s%d_input_lowest",
+	"%s%d_input_highest"
 };
 
 static void ibmpex_msg_handler(struct ipmi_recv_msg *msg, void *user_msg_data);
@@ -158,8 +162,8 @@ static int ibmpex_ver_check(struct ibmpex_bmc_data *data)
 	data->sensor_major = data->rx_msg_data[0];
 	data->sensor_minor = data->rx_msg_data[1];
 
-	dev_info(data->bmc_device,
-		 "Found BMC with sensor interface v%d.%d %d-%02d-%02d on interface %d\n",
+	dev_info(data->bmc_device, "Found BMC with sensor interface "
+		 "v%d.%d %d-%02d-%02d on interface %d\n",
 		 data->sensor_major,
 		 data->sensor_minor,
 		 extract_value(data->rx_msg_data, 2),
@@ -350,11 +354,9 @@ static int create_sensor(struct ibmpex_bmc_data *data, int type,
 		return -ENOMEM;
 
 	if (type == TEMP_SENSOR)
-		sprintf(n, "temp%d_input%s",
-			counter, sensor_name_suffixes[func]);
+		sprintf(n, temp_sensor_name_templates[func], "temp", counter);
 	else if (type == POWER_SENSOR)
-		sprintf(n, "power%d_average%s",
-			counter, sensor_name_suffixes[func]);
+		sprintf(n, power_sensor_name_templates[func], "power", counter);
 
 	sysfs_attr_init(&data->sensors[sensor].attr[func].dev_attr.attr);
 	data->sensors[sensor].attr[func].dev_attr.attr.name = n;
@@ -460,8 +462,10 @@ static void ibmpex_register_bmc(int iface, struct device *dev)
 	int err;
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
-	if (!data)
+	if (!data) {
+		dev_err(dev, "Insufficient memory for BMC interface.\n");
 		return;
+	}
 
 	data->address.addr_type = IPMI_SYSTEM_INTERFACE_ADDR_TYPE;
 	data->address.channel = IPMI_BMC_CHANNEL;
@@ -473,9 +477,8 @@ static void ibmpex_register_bmc(int iface, struct device *dev)
 	err = ipmi_create_user(data->interface, &driver_data.ipmi_hndlrs,
 			       data, &data->user);
 	if (err < 0) {
-		dev_err(dev,
-			"Unable to register user with IPMI interface %d\n",
-			data->interface);
+		dev_err(dev, "Unable to register user with IPMI "
+			"interface %d\n", data->interface);
 		goto out;
 	}
 
@@ -497,8 +500,8 @@ static void ibmpex_register_bmc(int iface, struct device *dev)
 	data->hwmon_dev = hwmon_device_register(data->bmc_device);
 
 	if (IS_ERR(data->hwmon_dev)) {
-		dev_err(data->bmc_device,
-			"Unable to register hwmon device for IPMI interface %d\n",
+		dev_err(data->bmc_device, "Unable to register hwmon "
+			"device for IPMI interface %d\n",
 			data->interface);
 		goto out_user;
 	}
@@ -563,8 +566,8 @@ static void ibmpex_msg_handler(struct ipmi_recv_msg *msg, void *user_msg_data)
 	struct ibmpex_bmc_data *data = (struct ibmpex_bmc_data *)user_msg_data;
 
 	if (msg->msgid != data->tx_msgid) {
-		dev_err(data->bmc_device,
-			"Mismatch between received msgid (%02x) and transmitted msgid (%02x)!\n",
+		dev_err(data->bmc_device, "Mismatch between received msgid "
+			"(%02x) and transmitted msgid (%02x)!\n",
 			(int)msg->msgid,
 			(int)data->tx_msgid);
 		ipmi_free_recv_msg(msg);
@@ -601,7 +604,7 @@ static void __exit ibmpex_exit(void)
 		ibmpex_bmc_delete(p);
 }
 
-MODULE_AUTHOR("Darrick J. Wong <darrick.wong@oracle.com>");
+MODULE_AUTHOR("Darrick J. Wong <djwong@us.ibm.com>");
 MODULE_DESCRIPTION("IBM PowerExecutive power/temperature sensor driver");
 MODULE_LICENSE("GPL");
 

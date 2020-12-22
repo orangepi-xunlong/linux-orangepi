@@ -236,7 +236,7 @@ static const struct ide_port_ops icside_v6_no_dma_port_ops = {
  */
 static void icside_set_dma_mode(ide_hwif_t *hwif, ide_drive_t *drive)
 {
-	unsigned long cycle_time = 0;
+	unsigned long cycle_time;
 	int use_dma_info = 0;
 	const u8 xfer_mode = drive->dma_mode;
 
@@ -271,9 +271,9 @@ static void icside_set_dma_mode(ide_hwif_t *hwif, ide_drive_t *drive)
 
 	ide_set_drivedata(drive, (void *)cycle_time);
 
-	printk(KERN_INFO "%s: %s selected (peak %luMB/s)\n",
-	       drive->name, ide_xfer_verbose(xfer_mode),
-	       2000 / (cycle_time ? cycle_time : (unsigned long) -1));
+	printk("%s: %s selected (peak %dMB/s)\n", drive->name,
+		ide_xfer_verbose(xfer_mode),
+		2000 / (unsigned long)ide_get_drivedata(drive));
 }
 
 static const struct ide_port_ops icside_v6_port_ops = {
@@ -375,6 +375,8 @@ static const struct ide_dma_ops icside_v6_dma_ops = {
 	.dma_test_irq		= icside_dma_test_irq,
 	.dma_lost_irq		= ide_dma_lost_irq,
 };
+#else
+#define icside_v6_dma_ops NULL
 #endif
 
 static int icside_dma_off_init(ide_hwif_t *hwif, const struct ide_port_info *d)
@@ -406,8 +408,8 @@ static const struct ide_port_info icside_v5_port_info = {
 	.chipset		= ide_acorn,
 };
 
-static int icside_register_v5(struct icside_state *state,
-			      struct expansion_card *ec)
+static int __devinit
+icside_register_v5(struct icside_state *state, struct expansion_card *ec)
 {
 	void __iomem *base;
 	struct ide_host *host;
@@ -451,17 +453,18 @@ err_free:
 	return ret;
 }
 
-static const struct ide_port_info icside_v6_port_info = {
+static const struct ide_port_info icside_v6_port_info __initdata = {
 	.init_dma		= icside_dma_off_init,
 	.port_ops		= &icside_v6_no_dma_port_ops,
+	.dma_ops		= &icside_v6_dma_ops,
 	.host_flags		= IDE_HFLAG_SERIALIZE | IDE_HFLAG_MMIO,
 	.mwdma_mask		= ATA_MWDMA2,
 	.swdma_mask		= ATA_SWDMA2,
 	.chipset		= ide_acorn,
 };
 
-static int icside_register_v6(struct icside_state *state,
-			      struct expansion_card *ec)
+static int __devinit
+icside_register_v6(struct icside_state *state, struct expansion_card *ec)
 {
 	void __iomem *ioc_base, *easi_base;
 	struct ide_host *host;
@@ -515,13 +518,11 @@ static int icside_register_v6(struct icside_state *state,
 
 	ecard_set_drvdata(ec, state);
 
-#ifdef CONFIG_BLK_DEV_IDEDMA_ICS
 	if (ec->dma != NO_DMA && !request_dma(ec->dma, DRV_NAME)) {
 		d.init_dma = icside_dma_init;
 		d.port_ops = &icside_v6_port_ops;
-		d.dma_ops  = &icside_v6_dma_ops;
-	}
-#endif
+	} else
+		d.dma_ops = NULL;
 
 	ret = ide_host_register(host, &d, hws);
 	if (ret)
@@ -537,7 +538,8 @@ out:
 	return ret;
 }
 
-static int icside_probe(struct expansion_card *ec, const struct ecard_id *id)
+static int __devinit
+icside_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	struct icside_state *state;
 	void __iomem *idmem;
@@ -603,7 +605,7 @@ static int icside_probe(struct expansion_card *ec, const struct ecard_id *id)
 	return ret;
 }
 
-static void icside_remove(struct expansion_card *ec)
+static void __devexit icside_remove(struct expansion_card *ec)
 {
 	struct icside_state *state = ecard_get_drvdata(ec);
 
@@ -665,7 +667,7 @@ static const struct ecard_id icside_ids[] = {
 
 static struct ecard_driver icside_driver = {
 	.probe		= icside_probe,
-	.remove		= icside_remove,
+	.remove		= __devexit_p(icside_remove),
 	.shutdown	= icside_shutdown,
 	.id_table	= icside_ids,
 	.drv = {

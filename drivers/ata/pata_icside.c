@@ -294,7 +294,7 @@ static int icside_dma_init(struct pata_icside_info *info)
 
 static struct scsi_host_template pata_icside_sht = {
 	ATA_BASE_SHT(DRV_NAME),
-	.sg_tablesize		= SG_MAX_SEGMENTS,
+	.sg_tablesize		= SCSI_MAX_SG_CHAIN_SEGMENTS,
 	.dma_boundary		= IOMD_DMA_BOUNDARY,
 };
 
@@ -337,9 +337,10 @@ static struct ata_port_operations pata_icside_port_ops = {
 	.port_start		= ATA_OP_NULL,	/* don't need PRD table */
 };
 
-static void pata_icside_setup_ioaddr(struct ata_port *ap, void __iomem *base,
-				     struct pata_icside_info *info,
-				     const struct portinfo *port)
+static void __devinit
+pata_icside_setup_ioaddr(struct ata_port *ap, void __iomem *base,
+			 struct pata_icside_info *info,
+			 const struct portinfo *port)
 {
 	struct ata_ioports *ioaddr = &ap->ioaddr;
 	void __iomem *cmd = base + port->dataoffset;
@@ -367,7 +368,7 @@ static void pata_icside_setup_ioaddr(struct ata_port *ap, void __iomem *base,
 		ata_port_desc(ap, "iocbase 0x%lx", info->raw_ioc_base);
 }
 
-static int pata_icside_register_v5(struct pata_icside_info *info)
+static int __devinit pata_icside_register_v5(struct pata_icside_info *info)
 {
 	struct pata_icside_state *state = info->state;
 	void __iomem *base;
@@ -390,7 +391,7 @@ static int pata_icside_register_v5(struct pata_icside_info *info)
 	return 0;
 }
 
-static int pata_icside_register_v6(struct pata_icside_info *info)
+static int __devinit pata_icside_register_v6(struct pata_icside_info *info)
 {
 	struct pata_icside_state *state = info->state;
 	struct expansion_card *ec = info->ec;
@@ -433,7 +434,7 @@ static int pata_icside_register_v6(struct pata_icside_info *info)
 	return icside_dma_init(info);
 }
 
-static int pata_icside_add_ports(struct pata_icside_info *info)
+static int __devinit pata_icside_add_ports(struct pata_icside_info *info)
 {
 	struct expansion_card *ec = info->ec;
 	struct ata_host *host;
@@ -473,8 +474,8 @@ static int pata_icside_add_ports(struct pata_icside_info *info)
 				 &pata_icside_sht);
 }
 
-static int pata_icside_probe(struct expansion_card *ec,
-			     const struct ecard_id *id)
+static int __devinit
+pata_icside_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	struct pata_icside_state *state;
 	struct pata_icside_info info;
@@ -574,7 +575,7 @@ static void pata_icside_shutdown(struct expansion_card *ec)
 	}
 }
 
-static void pata_icside_remove(struct expansion_card *ec)
+static void __devexit pata_icside_remove(struct expansion_card *ec)
 {
 	struct ata_host *host = ecard_get_drvdata(ec);
 	struct pata_icside_state *state = host->private_data;
@@ -601,7 +602,7 @@ static const struct ecard_id pata_icside_ids[] = {
 
 static struct ecard_driver pata_icside_driver = {
 	.probe		= pata_icside_probe,
-	.remove 	= pata_icside_remove,
+	.remove 	= __devexit_p(pata_icside_remove),
 	.shutdown	= pata_icside_shutdown,
 	.id_table	= pata_icside_ids,
 	.drv = {

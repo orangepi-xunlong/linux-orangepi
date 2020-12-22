@@ -1,8 +1,6 @@
-/* bnx2x_reg.h: Qlogic Everest network driver.
+/* bnx2x_reg.h: Broadcom Everest network driver.
  *
- * Copyright (c) 2007-2013 Broadcom Corporation
- * Copyright (c) 2014 QLogic Corporation
- * All rights reserved
+ * Copyright (c) 2007-2012 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,14 +29,12 @@
 #define ATC_ATC_INT_STS_REG_ATC_TCPL_TO_NOT_PEND		 (0x1<<1)
 /* [RW 1] Initiate the ATC array - reset all the valid bits */
 #define ATC_REG_ATC_INIT_ARRAY					 0x1100b8
-/* [R 1] ATC initialization done */
+/* [R 1] ATC initalization done */
 #define ATC_REG_ATC_INIT_DONE					 0x1100bc
 /* [RC 6] Interrupt register #0 read clear */
 #define ATC_REG_ATC_INT_STS_CLR					 0x1101c0
 /* [RW 5] Parity mask register #0 read/write */
 #define ATC_REG_ATC_PRTY_MASK					 0x1101d8
-/* [R 5] Parity register #0 read */
-#define ATC_REG_ATC_PRTY_STS					 0x1101cc
 /* [RC 5] Parity register #0 read clear */
 #define ATC_REG_ATC_PRTY_STS_CLR				 0x1101d0
 /* [RW 19] Interrupt mask register #0 read/write */
@@ -829,7 +825,6 @@
 /* [RW 28] The value sent to CM header in the case of CFC load error. */
 #define DORQ_REG_ERR_CMHEAD					 0x170058
 #define DORQ_REG_IF_EN						 0x170004
-#define DORQ_REG_MAX_RVFID_SIZE				 0x1701ec
 #define DORQ_REG_MODE_ACT					 0x170008
 /* [RW 5] The normal mode CID extraction offset. */
 #define DORQ_REG_NORM_CID_OFST					 0x17002c
@@ -852,22 +847,6 @@
    writes the same initial credit to the rspa_crd_cnt and rspb_crd_cnt. The
    read reads this written value. */
 #define DORQ_REG_RSP_INIT_CRD					 0x170048
-#define DORQ_REG_RSPB_CRD_CNT					 0x1700b0
-#define DORQ_REG_VF_NORM_CID_BASE				 0x1701a0
-#define DORQ_REG_VF_NORM_CID_OFST				 0x1701f4
-#define DORQ_REG_VF_NORM_CID_WND_SIZE				 0x1701a4
-#define DORQ_REG_VF_NORM_MAX_CID_COUNT				 0x1701e4
-#define DORQ_REG_VF_NORM_VF_BASE				 0x1701a8
-/* [RW 10] VF type validation mask value */
-#define DORQ_REG_VF_TYPE_MASK_0					 0x170218
-/* [RW 17] VF type validation Min MCID value */
-#define DORQ_REG_VF_TYPE_MAX_MCID_0				 0x1702d8
-/* [RW 17] VF type validation Max MCID value */
-#define DORQ_REG_VF_TYPE_MIN_MCID_0				 0x170298
-/* [RW 10] VF type validation comp value */
-#define DORQ_REG_VF_TYPE_VALUE_0				 0x170258
-#define DORQ_REG_VF_USAGE_CT_LIMIT				 0x170340
-
 /* [RW 4] Initial activity counter value on the load request; when the
    shortcut is done. */
 #define DORQ_REG_SHRT_ACT_CNT					 0x170070
@@ -880,7 +859,6 @@
 #define HC_CONFIG_0_REG_MSI_MSIX_INT_EN_0			 (0x1<<2)
 #define HC_CONFIG_0_REG_SINGLE_ISR_EN_0				 (0x1<<1)
 #define HC_CONFIG_1_REG_BLOCK_DISABLE_1				 (0x1<<0)
-#define DORQ_REG_VF_USAGE_CNT					 0x170320
 #define HC_REG_AGG_INT_0					 0x108050
 #define HC_REG_AGG_INT_1					 0x108054
 #define HC_REG_ATTN_BIT 					 0x108120
@@ -1495,136 +1473,16 @@
 /* [R 4] This field indicates the type of the device. '0' - 2 Ports; '1' - 1
    Port. */
 #define MISC_REG_BOND_ID					 0xa400
+/* [R 8] These bits indicate the metal revision of the chip. This value
+   starts at 0x00 for each all-layer tape-out and increments by one for each
+   tape-out. */
+#define MISC_REG_CHIP_METAL					 0xa404
 /* [R 16] These bits indicate the part number for the chip. */
 #define MISC_REG_CHIP_NUM					 0xa408
 /* [R 4] These bits indicate the base revision of the chip. This value
    starts at 0x0 for the A0 tape-out and increments by one for each
    all-layer tape-out. */
 #define MISC_REG_CHIP_REV					 0xa40c
-/* [R 14] otp_misc_do[100:0] spare bits collection: 13:11-
- * otp_misc_do[100:98]; 10:7 - otp_misc_do[87:84]; 6:3 - otp_misc_do[75:72];
- * 2:1 - otp_misc_do[51:50]; 0 - otp_misc_do[1]. */
-#define MISC_REG_CHIP_TYPE					 0xac60
-#define MISC_REG_CHIP_TYPE_57811_MASK				 (1<<1)
-#define MISC_REG_CPMU_LP_DR_ENABLE				 0xa858
-/* [RW 1] FW EEE LPI Enable. When 1 indicates that EEE LPI mode is enabled
- * by FW. When 0 indicates that the EEE LPI mode is disabled by FW. Clk
- * 25MHz. Reset on hard reset. */
-#define MISC_REG_CPMU_LP_FW_ENABLE_P0				 0xa84c
-/* [RW 32] EEE LPI Idle Threshold. The threshold value for the idle EEE LPI
- * counter. Timer tick is 1 us. Clock 25MHz. Reset on hard reset. */
-#define MISC_REG_CPMU_LP_IDLE_THR_P0				 0xa8a0
-/* [RW 18] LPI entry events mask. [0] - Vmain SM Mask. When 1 indicates that
- * the Vmain SM end state is disabled. When 0 indicates that the Vmain SM
- * end state is enabled. [1] - FW Queues Empty Mask. When 1 indicates that
- * the FW command that all Queues are empty is disabled. When 0 indicates
- * that the FW command that all Queues are empty is enabled. [2] - FW Early
- * Exit Mask / Reserved (Entry mask). When 1 indicates that the FW Early
- * Exit command is disabled. When 0 indicates that the FW Early Exit command
- * is enabled. This bit applicable only in the EXIT Events Mask registers.
- * [3] - PBF Request Mask. When 1 indicates that the PBF Request indication
- * is disabled. When 0 indicates that the PBF Request indication is enabled.
- * [4] - Tx Request Mask. When =1 indicates that the Tx other Than PBF
- * Request indication is disabled. When 0 indicates that the Tx Other Than
- * PBF Request indication is enabled. [5] - Rx EEE LPI Status Mask. When 1
- * indicates that the RX EEE LPI Status indication is disabled. When 0
- * indicates that the RX EEE LPI Status indication is enabled. In the EXIT
- * Events Masks registers; this bit masks the falling edge detect of the LPI
- * Status (Rx LPI is on - off). [6] - Tx Pause Mask. When 1 indicates that
- * the Tx Pause indication is disabled. When 0 indicates that the Tx Pause
- * indication is enabled. [7] - BRB1 Empty Mask. When 1 indicates that the
- * BRB1 EMPTY indication is disabled. When 0 indicates that the BRB1 EMPTY
- * indication is enabled. [8] - QM Idle Mask. When 1 indicates that the QM
- * IDLE indication is disabled. When 0 indicates that the QM IDLE indication
- * is enabled. (One bit for both VOQ0 and VOQ1). [9] - QM LB Idle Mask. When
- * 1 indicates that the QM IDLE indication for LOOPBACK is disabled. When 0
- * indicates that the QM IDLE indication for LOOPBACK is enabled. [10] - L1
- * Status Mask. When 1 indicates that the L1 Status indication from the PCIE
- * CORE is disabled. When 0 indicates that the RX EEE LPI Status indication
- * from the PCIE CORE is enabled. In the EXIT Events Masks registers; this
- * bit masks the falling edge detect of the L1 status (L1 is on - off). [11]
- * - P0 E0 EEE EEE LPI REQ Mask. When =1 indicates that the P0 E0 EEE EEE
- * LPI REQ indication is disabled. When =0 indicates that the P0 E0 EEE LPI
- * REQ indication is enabled. [12] - P1 E0 EEE LPI REQ Mask. When =1
- * indicates that the P0 EEE LPI REQ indication is disabled. When =0
- * indicates that the P0 EEE LPI REQ indication is enabled. [13] - P0 E1 EEE
- * LPI REQ Mask. When =1 indicates that the P0 EEE LPI REQ indication is
- * disabled. When =0 indicates that the P0 EEE LPI REQ indication is
- * enabled. [14] - P1 E1 EEE LPI REQ Mask. When =1 indicates that the P0 EEE
- * LPI REQ indication is disabled. When =0 indicates that the P0 EEE LPI REQ
- * indication is enabled. [15] - L1 REQ Mask. When =1 indicates that the L1
- * REQ indication is disabled. When =0 indicates that the L1 indication is
- * enabled. [16] - Rx EEE LPI Status Edge Detect Mask. When =1 indicates
- * that the RX EEE LPI Status Falling Edge Detect indication is disabled (Rx
- * EEE LPI is on - off). When =0 indicates that the RX EEE LPI Status
- * Falling Edge Detec indication is enabled (Rx EEE LPI is on - off). This
- * bit is applicable only in the EXIT Events Masks registers. [17] - L1
- * Status Edge Detect Mask. When =1 indicates that the L1 Status Falling
- * Edge Detect indication from the PCIE CORE is disabled (L1 is on - off).
- * When =0 indicates that the L1 Status Falling Edge Detect indication from
- * the PCIE CORE is enabled (L1 is on - off). This bit is applicable only in
- * the EXIT Events Masks registers. Clock 25MHz. Reset on hard reset. */
-#define MISC_REG_CPMU_LP_MASK_ENT_P0				 0xa880
-/* [RW 18] EEE LPI exit events mask. [0] - Vmain SM Mask. When 1 indicates
- * that the Vmain SM end state is disabled. When 0 indicates that the Vmain
- * SM end state is enabled. [1] - FW Queues Empty Mask. When 1 indicates
- * that the FW command that all Queues are empty is disabled. When 0
- * indicates that the FW command that all Queues are empty is enabled. [2] -
- * FW Early Exit Mask / Reserved (Entry mask). When 1 indicates that the FW
- * Early Exit command is disabled. When 0 indicates that the FW Early Exit
- * command is enabled. This bit applicable only in the EXIT Events Mask
- * registers. [3] - PBF Request Mask. When 1 indicates that the PBF Request
- * indication is disabled. When 0 indicates that the PBF Request indication
- * is enabled. [4] - Tx Request Mask. When =1 indicates that the Tx other
- * Than PBF Request indication is disabled. When 0 indicates that the Tx
- * Other Than PBF Request indication is enabled. [5] - Rx EEE LPI Status
- * Mask. When 1 indicates that the RX EEE LPI Status indication is disabled.
- * When 0 indicates that the RX LPI Status indication is enabled. In the
- * EXIT Events Masks registers; this bit masks the falling edge detect of
- * the EEE LPI Status (Rx EEE LPI is on - off). [6] - Tx Pause Mask. When 1
- * indicates that the Tx Pause indication is disabled. When 0 indicates that
- * the Tx Pause indication is enabled. [7] - BRB1 Empty Mask. When 1
- * indicates that the BRB1 EMPTY indication is disabled. When 0 indicates
- * that the BRB1 EMPTY indication is enabled. [8] - QM Idle Mask. When 1
- * indicates that the QM IDLE indication is disabled. When 0 indicates that
- * the QM IDLE indication is enabled. (One bit for both VOQ0 and VOQ1). [9]
- * - QM LB Idle Mask. When 1 indicates that the QM IDLE indication for
- * LOOPBACK is disabled. When 0 indicates that the QM IDLE indication for
- * LOOPBACK is enabled. [10] - L1 Status Mask. When 1 indicates that the L1
- * Status indication from the PCIE CORE is disabled. When 0 indicates that
- * the RX EEE LPI Status indication from the PCIE CORE is enabled. In the
- * EXIT Events Masks registers; this bit masks the falling edge detect of
- * the L1 status (L1 is on - off). [11] - P0 E0 EEE EEE LPI REQ Mask. When
- * =1 indicates that the P0 E0 EEE EEE LPI REQ indication is disabled. When
- * =0 indicates that the P0 E0 EEE LPI REQ indication is enabled. [12] - P1
- * E0 EEE LPI REQ Mask. When =1 indicates that the P0 EEE LPI REQ indication
- * is disabled. When =0 indicates that the P0 EEE LPI REQ indication is
- * enabled. [13] - P0 E1 EEE LPI REQ Mask. When =1 indicates that the P0 EEE
- * LPI REQ indication is disabled. When =0 indicates that the P0 EEE LPI REQ
- * indication is enabled. [14] - P1 E1 EEE LPI REQ Mask. When =1 indicates
- * that the P0 EEE LPI REQ indication is disabled. When =0 indicates that
- * the P0 EEE LPI REQ indication is enabled. [15] - L1 REQ Mask. When =1
- * indicates that the L1 REQ indication is disabled. When =0 indicates that
- * the L1 indication is enabled. [16] - Rx EEE LPI Status Edge Detect Mask.
- * When =1 indicates that the RX EEE LPI Status Falling Edge Detect
- * indication is disabled (Rx EEE LPI is on - off). When =0 indicates that
- * the RX EEE LPI Status Falling Edge Detec indication is enabled (Rx EEE
- * LPI is on - off). This bit is applicable only in the EXIT Events Masks
- * registers. [17] - L1 Status Edge Detect Mask. When =1 indicates that the
- * L1 Status Falling Edge Detect indication from the PCIE CORE is disabled
- * (L1 is on - off). When =0 indicates that the L1 Status Falling Edge
- * Detect indication from the PCIE CORE is enabled (L1 is on - off). This
- * bit is applicable only in the EXIT Events Masks registers.Clock 25MHz.
- * Reset on hard reset. */
-#define MISC_REG_CPMU_LP_MASK_EXT_P0				 0xa888
-/* [RW 16] EEE LPI Entry Events Counter. A statistic counter with the number
- * of counts that the SM entered the EEE LPI state. Clock 25MHz. Read only
- * register. Reset on hard reset. */
-#define MISC_REG_CPMU_LP_SM_ENT_CNT_P0				 0xa8b8
-/* [RW 16] EEE LPI Entry Events Counter. A statistic counter with the number
- * of counts that the SM entered the EEE LPI state. Clock 25MHz. Read only
- * register. Reset on hard reset. */
-#define MISC_REG_CPMU_LP_SM_ENT_CNT_P1				 0xa8bc
 /* [RW 32] The following driver registers(1...16) represent 16 drivers and
    32 clients. Each client can be controlled by one driver only. One in each
    bit represent that this driver control the appropriate client (Ex: bit 5
@@ -2125,7 +1983,6 @@
 #define NIG_REG_LLH1_ERROR_MASK 				 0x10090
 /* [RW 8] event id for llh1 */
 #define NIG_REG_LLH1_EVENT_ID					 0x10088
-#define NIG_REG_LLH1_FUNC_EN					 0x16104
 #define NIG_REG_LLH1_FUNC_MEM					 0x161c0
 #define NIG_REG_LLH1_FUNC_MEM_ENABLE				 0x16160
 #define NIG_REG_LLH1_FUNC_MEM_SIZE				 16
@@ -2139,10 +1996,6 @@
 /* [RW 1] When this bit is set; the LLH will expect all packets to be with
    e1hov */
 #define NIG_REG_LLH_E1HOV_MODE					 0x160d8
-/* [RW 16] Outer VLAN type identifier for multi-function mode. In non
- * multi-function mode; it will hold the inner VLAN type. Typically 0x8100.
- */
-#define NIG_REG_LLH_E1HOV_TYPE_1				 0x16028
 /* [RW 1] When this bit is set; the LLH will classify the packet before
    sending it to the BRB or calculating WoL on it. */
 #define NIG_REG_LLH_MF_MODE					 0x16024
@@ -2158,8 +2011,6 @@
 /* [R 32] Interrupt register #0 read */
 #define NIG_REG_NIG_INT_STS_0					 0x103b0
 #define NIG_REG_NIG_INT_STS_1					 0x103c0
-/* [RC 32] Interrupt register #0 read clear */
-#define NIG_REG_NIG_INT_STS_CLR_0				 0x103b4
 /* [R 32] Legacy E1 and E1H location for parity error mask register. */
 #define NIG_REG_NIG_PRTY_MASK					 0x103dc
 /* [RW 32] Parity mask register #0 read/write */
@@ -2188,45 +2039,6 @@
 #define NIG_REG_P0_HWPFC_ENABLE				 0x18078
 #define NIG_REG_P0_LLH_FUNC_MEM2				 0x18480
 #define NIG_REG_P0_LLH_FUNC_MEM2_ENABLE			 0x18440
-/* [RW 17] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * the host. Bits [15:0] return the sequence ID of the packet. Bit 16
- * indicates the validity of the data in the buffer. Writing a 1 to bit 16
- * will clear the buffer.
- */
-#define NIG_REG_P0_LLH_PTP_HOST_BUF_SEQID			 0x1875c
-/* [R 32] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * the host. This location returns the lower 32 bits of timestamp value.
- */
-#define NIG_REG_P0_LLH_PTP_HOST_BUF_TS_LSB			 0x18754
-/* [R 32] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * the host. This location returns the upper 32 bits of timestamp value.
- */
-#define NIG_REG_P0_LLH_PTP_HOST_BUF_TS_MSB			 0x18758
-/* [RW 11] Mask register for the various parameters used in determining PTP
- * packet presence. Set each bit to 1 to mask out the particular parameter.
- * 0-IPv4 DA 0 of 224.0.1.129. 1-IPv4 DA 1 of 224.0.0.107. 2-IPv6 DA 0 of
- * 0xFF0*:0:0:0:0:0:0:181. 3-IPv6 DA 1 of 0xFF02:0:0:0:0:0:0:6B. 4-UDP
- * destination port 0 of 319. 5-UDP destination port 1 of 320. 6-MAC
- * Ethertype 0 of 0x88F7. 7-configurable MAC Ethertype 1. 8-MAC DA 0 of
- * 0x01-1B-19-00-00-00. 9-MAC DA 1 of 0x01-80-C2-00-00-0E. 10-configurable
- * MAC DA 2. The reset default is set to mask out all parameters.
- */
-#define NIG_REG_P0_LLH_PTP_PARAM_MASK				 0x187a0
-/* [RW 14] Mask regiser for the rules used in detecting PTP packets. Set
- * each bit to 1 to mask out that particular rule. 0-{IPv4 DA 0; UDP DP 0} .
- * 1-{IPv4 DA 0; UDP DP 1} . 2-{IPv4 DA 1; UDP DP 0} . 3-{IPv4 DA 1; UDP DP
- * 1} . 4-{IPv6 DA 0; UDP DP 0} . 5-{IPv6 DA 0; UDP DP 1} . 6-{IPv6 DA 1;
- * UDP DP 0} . 7-{IPv6 DA 1; UDP DP 1} . 8-{MAC DA 0; Ethertype 0} . 9-{MAC
- * DA 1; Ethertype 0} . 10-{MAC DA 0; Ethertype 1} . 11-{MAC DA 1; Ethertype
- * 1} . 12-{MAC DA 2; Ethertype 0} . 13-{MAC DA 2; Ethertype 1} . The reset
- * default is to mask out all of the rules. Note that rules 0-3 are for IPv4
- * packets only and require that the packet is IPv4 for the rules to match.
- * Note that rules 4-7 are for IPv6 packets only and require that the packet
- * is IPv6 for the rules to match.
- */
-#define NIG_REG_P0_LLH_PTP_RULE_MASK				 0x187a4
-/* [RW 1] Set to 1 to enable PTP packets to be forwarded to the host. */
-#define NIG_REG_P0_LLH_PTP_TO_HOST				 0x187ac
 /* [RW 1] Input enable for RX MAC interface. */
 #define NIG_REG_P0_MAC_IN_EN					 0x185ac
 /* [RW 1] Output enable for TX MAC interface */
@@ -2239,17 +2051,6 @@
  * priority field is extracted from the outer-most VLAN in receive packet.
  * Only COS 0 and COS 1 are supported in E2. */
 #define NIG_REG_P0_PKT_PRIORITY_TO_COS				 0x18054
-/* [RW 6] Enable for TimeSync feature. Bits [2:0] are for RX side. Bits
- * [5:3] are for TX side. Bit 0 enables TimeSync on RX side. Bit 1 enables
- * V1 frame format in timesync event detection on RX side. Bit 2 enables V2
- * frame format in timesync event detection on RX side. Bit 3 enables
- * TimeSync on TX side. Bit 4 enables V1 frame format in timesync event
- * detection on TX side. Bit 5 enables V2 frame format in timesync event
- * detection on TX side. Note that for HW to detect PTP packet and extract
- * data from the packet, at least one of the version bits of that traffic
- * direction has to be enabled.
- */
-#define NIG_REG_P0_PTP_EN					 0x18788
 /* [RW 16] Bit-map indicating which SAFC/PFC priorities to map to COS 0. A
  * priority is mapped to COS 0 when the corresponding mask bit is 1. More
  * than one bit may be set; allowing multiple priorities to be mapped to one
@@ -2356,46 +2157,7 @@
  * Ethernet header. */
 #define NIG_REG_P1_HDRS_AFTER_BASIC				 0x1818c
 #define NIG_REG_P1_LLH_FUNC_MEM2				 0x184c0
-#define NIG_REG_P1_LLH_FUNC_MEM2_ENABLE			 0x18460a
-/* [RW 17] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * the host. Bits [15:0] return the sequence ID of the packet. Bit 16
- * indicates the validity of the data in the buffer. Writing a 1 to bit 16
- * will clear the buffer.
- */
-#define NIG_REG_P1_LLH_PTP_HOST_BUF_SEQID			 0x18774
-/* [R 32] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * the host. This location returns the lower 32 bits of timestamp value.
- */
-#define NIG_REG_P1_LLH_PTP_HOST_BUF_TS_LSB			 0x1876c
-/* [R 32] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * the host. This location returns the upper 32 bits of timestamp value.
- */
-#define NIG_REG_P1_LLH_PTP_HOST_BUF_TS_MSB			 0x18770
-/* [RW 11] Mask register for the various parameters used in determining PTP
- * packet presence. Set each bit to 1 to mask out the particular parameter.
- * 0-IPv4 DA 0 of 224.0.1.129. 1-IPv4 DA 1 of 224.0.0.107. 2-IPv6 DA 0 of
- * 0xFF0*:0:0:0:0:0:0:181. 3-IPv6 DA 1 of 0xFF02:0:0:0:0:0:0:6B. 4-UDP
- * destination port 0 of 319. 5-UDP destination port 1 of 320. 6-MAC
- * Ethertype 0 of 0x88F7. 7-configurable MAC Ethertype 1. 8-MAC DA 0 of
- * 0x01-1B-19-00-00-00. 9-MAC DA 1 of 0x01-80-C2-00-00-0E. 10-configurable
- * MAC DA 2. The reset default is set to mask out all parameters.
- */
-#define NIG_REG_P1_LLH_PTP_PARAM_MASK				 0x187c8
-/* [RW 14] Mask regiser for the rules used in detecting PTP packets. Set
- * each bit to 1 to mask out that particular rule. 0-{IPv4 DA 0; UDP DP 0} .
- * 1-{IPv4 DA 0; UDP DP 1} . 2-{IPv4 DA 1; UDP DP 0} . 3-{IPv4 DA 1; UDP DP
- * 1} . 4-{IPv6 DA 0; UDP DP 0} . 5-{IPv6 DA 0; UDP DP 1} . 6-{IPv6 DA 1;
- * UDP DP 0} . 7-{IPv6 DA 1; UDP DP 1} . 8-{MAC DA 0; Ethertype 0} . 9-{MAC
- * DA 1; Ethertype 0} . 10-{MAC DA 0; Ethertype 1} . 11-{MAC DA 1; Ethertype
- * 1} . 12-{MAC DA 2; Ethertype 0} . 13-{MAC DA 2; Ethertype 1} . The reset
- * default is to mask out all of the rules. Note that rules 0-3 are for IPv4
- * packets only and require that the packet is IPv4 for the rules to match.
- * Note that rules 4-7 are for IPv6 packets only and require that the packet
- * is IPv6 for the rules to match.
- */
-#define NIG_REG_P1_LLH_PTP_RULE_MASK				 0x187cc
-/* [RW 1] Set to 1 to enable PTP packets to be forwarded to the host. */
-#define NIG_REG_P1_LLH_PTP_TO_HOST				 0x187d4
+#define NIG_REG_P1_LLH_FUNC_MEM2_ENABLE			 0x18460
 /* [RW 32] Specify the client number to be assigned to each priority of the
  * strict priority arbiter. This register specifies bits 31:0 of the 36-bit
  * value. Priority 0 is the highest priority. Bits [3:0] are for priority 0
@@ -2416,15 +2178,6 @@
  * set to 0x345678021. This is a new register (with 2_) added in E3 B0 to
  * accommodate the 9 input clients to ETS arbiter. */
 #define NIG_REG_P0_TX_ARB_PRIORITY_CLIENT2_MSB			 0x18684
-/* [RW 1] MCP-to-host path enable. Set this bit to enable the routing of MCP
- * packets to BRB LB interface to forward the packet to the host. All
- * packets from MCP are forwarded to the network when this bit is cleared -
- * regardless of the configured destination in tx_mng_destination register.
- * When MCP-to-host paths for both ports 0 and 1 are disabled - the arbiter
- * for BRB LB interface is bypassed and PBF LB traffic is always selected to
- * send to BRB LB.
- */
-#define NIG_REG_P0_TX_MNG_HOST_ENABLE				 0x182f4
 #define NIG_REG_P1_HWPFC_ENABLE					 0x181d0
 #define NIG_REG_P1_MAC_IN_EN					 0x185c0
 /* [RW 1] Output enable for TX MAC interface */
@@ -2437,17 +2190,6 @@
  * priority field is extracted from the outer-most VLAN in receive packet.
  * Only COS 0 and COS 1 are supported in E2. */
 #define NIG_REG_P1_PKT_PRIORITY_TO_COS				 0x181a8
-/* [RW 6] Enable for TimeSync feature. Bits [2:0] are for RX side. Bits
- * [5:3] are for TX side. Bit 0 enables TimeSync on RX side. Bit 1 enables
- * V1 frame format in timesync event detection on RX side. Bit 2 enables V2
- * frame format in timesync event detection on RX side. Bit 3 enables
- * TimeSync on TX side. Bit 4 enables V1 frame format in timesync event
- * detection on TX side. Bit 5 enables V2 frame format in timesync event
- * detection on TX side. Note that for HW to detect PTP packet and extract
- * data from the packet, at least one of the version bits of that traffic
- * direction has to be enabled.
- */
-#define NIG_REG_P1_PTP_EN					 0x187b0
 /* [RW 16] Bit-map indicating which SAFC/PFC priorities to map to COS 0. A
  * priority is mapped to COS 0 when the corresponding mask bit is 1. More
  * than one bit may be set; allowing multiple priorities to be mapped to one
@@ -2467,78 +2209,6 @@
 #define NIG_REG_P1_RX_MACFIFO_EMPTY				 0x1858c
 /* [R 1] TLLH FIFO is empty. */
 #define NIG_REG_P1_TLLH_FIFO_EMPTY				 0x18338
-/* [RW 19] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * TX side. Bits [15:0] reflect the sequence ID of the packet. Bit 16
- * indicates the validity of the data in the buffer. Bit 17 indicates that
- * the sequence ID is valid and it is waiting for the TX timestamp value.
- * Bit 18 indicates whether the timestamp is from a SW request (value of 1)
- * or HW request (value of 0). Writing a 1 to bit 16 will clear the buffer.
- */
-#define NIG_REG_P0_TLLH_PTP_BUF_SEQID				 0x187e0
-/* [R 32] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * MCP. This location returns the lower 32 bits of timestamp value.
- */
-#define NIG_REG_P0_TLLH_PTP_BUF_TS_LSB				 0x187d8
-/* [R 32] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * MCP. This location returns the upper 32 bits of timestamp value.
- */
-#define NIG_REG_P0_TLLH_PTP_BUF_TS_MSB				 0x187dc
-/* [RW 11] Mask register for the various parameters used in determining PTP
- * packet presence. Set each bit to 1 to mask out the particular parameter.
- * 0-IPv4 DA 0 of 224.0.1.129. 1-IPv4 DA 1 of 224.0.0.107. 2-IPv6 DA 0 of
- * 0xFF0*:0:0:0:0:0:0:181. 3-IPv6 DA 1 of 0xFF02:0:0:0:0:0:0:6B. 4-UDP
- * destination port 0 of 319. 5-UDP destination port 1 of 320. 6-MAC
- * Ethertype 0 of 0x88F7. 7-configurable MAC Ethertype 1. 8-MAC DA 0 of
- * 0x01-1B-19-00-00-00. 9-MAC DA 1 of 0x01-80-C2-00-00-0E. 10-configurable
- * MAC DA 2. The reset default is set to mask out all parameters.
- */
-#define NIG_REG_P0_TLLH_PTP_PARAM_MASK				 0x187f0
-/* [RW 14] Mask regiser for the rules used in detecting PTP packets. Set
- * each bit to 1 to mask out that particular rule. 0-{IPv4 DA 0; UDP DP 0} .
- * 1-{IPv4 DA 0; UDP DP 1} . 2-{IPv4 DA 1; UDP DP 0} . 3-{IPv4 DA 1; UDP DP
- * 1} . 4-{IPv6 DA 0; UDP DP 0} . 5-{IPv6 DA 0; UDP DP 1} . 6-{IPv6 DA 1;
- * UDP DP 0} . 7-{IPv6 DA 1; UDP DP 1} . 8-{MAC DA 0; Ethertype 0} . 9-{MAC
- * DA 1; Ethertype 0} . 10-{MAC DA 0; Ethertype 1} . 11-{MAC DA 1; Ethertype
- * 1} . 12-{MAC DA 2; Ethertype 0} . 13-{MAC DA 2; Ethertype 1} . The reset
- * default is to mask out all of the rules.
- */
-#define NIG_REG_P0_TLLH_PTP_RULE_MASK				 0x187f4
-/* [RW 19] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * TX side. Bits [15:0] reflect the sequence ID of the packet. Bit 16
- * indicates the validity of the data in the buffer. Bit 17 indicates that
- * the sequence ID is valid and it is waiting for the TX timestamp value.
- * Bit 18 indicates whether the timestamp is from a SW request (value of 1)
- * or HW request (value of 0). Writing a 1 to bit 16 will clear the buffer.
- */
-#define NIG_REG_P1_TLLH_PTP_BUF_SEQID				 0x187ec
-/* [R 32] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * MCP. This location returns the lower 32 bits of timestamp value.
- */
-#define NIG_REG_P1_TLLH_PTP_BUF_TS_LSB				 0x187e4
-/* [R 32] Packet TimeSync information that is buffered in 1-deep FIFOs for
- * MCP. This location returns the upper 32 bits of timestamp value.
- */
-#define NIG_REG_P1_TLLH_PTP_BUF_TS_MSB				 0x187e8
-/* [RW 11] Mask register for the various parameters used in determining PTP
- * packet presence. Set each bit to 1 to mask out the particular parameter.
- * 0-IPv4 DA 0 of 224.0.1.129. 1-IPv4 DA 1 of 224.0.0.107. 2-IPv6 DA 0 of
- * 0xFF0*:0:0:0:0:0:0:181. 3-IPv6 DA 1 of 0xFF02:0:0:0:0:0:0:6B. 4-UDP
- * destination port 0 of 319. 5-UDP destination port 1 of 320. 6-MAC
- * Ethertype 0 of 0x88F7. 7-configurable MAC Ethertype 1. 8-MAC DA 0 of
- * 0x01-1B-19-00-00-00. 9-MAC DA 1 of 0x01-80-C2-00-00-0E. 10-configurable
- * MAC DA 2. The reset default is set to mask out all parameters.
- */
-#define NIG_REG_P1_TLLH_PTP_PARAM_MASK				 0x187f8
-/* [RW 14] Mask regiser for the rules used in detecting PTP packets. Set
- * each bit to 1 to mask out that particular rule. 0-{IPv4 DA 0; UDP DP 0} .
- * 1-{IPv4 DA 0; UDP DP 1} . 2-{IPv4 DA 1; UDP DP 0} . 3-{IPv4 DA 1; UDP DP
- * 1} . 4-{IPv6 DA 0; UDP DP 0} . 5-{IPv6 DA 0; UDP DP 1} . 6-{IPv6 DA 1;
- * UDP DP 0} . 7-{IPv6 DA 1; UDP DP 1} . 8-{MAC DA 0; Ethertype 0} . 9-{MAC
- * DA 1; Ethertype 0} . 10-{MAC DA 0; Ethertype 1} . 11-{MAC DA 1; Ethertype
- * 1} . 12-{MAC DA 2; Ethertype 0} . 13-{MAC DA 2; Ethertype 1} . The reset
- * default is to mask out all of the rules.
- */
-#define NIG_REG_P1_TLLH_PTP_RULE_MASK				 0x187fc
 /* [RW 32] Specify which of the credit registers the client is to be mapped
  * to. This register specifies bits 31:0 of the 36-bit value. Bits[3:0] are
  * for client 0; bits [35:32] are for client 8. For clients that are not
@@ -2624,12 +2294,6 @@
 #define NIG_REG_P1_TX_ARB_PRIORITY_CLIENT2_MSB			 0x186e4
 /* [R 1] TX FIFO for transmitting data to MAC is empty. */
 #define NIG_REG_P1_TX_MACFIFO_EMPTY				 0x18594
-/* [RW 1] MCP-to-host path enable. Set this bit to enable the routing of MCP
- * packets to BRB LB interface to forward the packet to the host. All
- * packets from MCP are forwarded to the network when this bit is cleared -
- * regardless of the configured destination in tx_mng_destination register.
- */
-#define NIG_REG_P1_TX_MNG_HOST_ENABLE				 0x182f8
 /* [R 1] FIFO empty status of the MCP TX FIFO used for storing MCP packets
    forwarded to the host. */
 #define NIG_REG_P1_TX_MNG_HOST_FIFO_EMPTY			 0x182b8
@@ -2691,10 +2355,6 @@
    swap is equal to SPIO pin that inputs from ifmux_serdes_swap. If 1 then
    ort swap is equal to ~nig_registers_port_swap.port_swap */
 #define NIG_REG_STRAP_OVERRIDE					 0x10398
-/* [WB 64] Addresses for TimeSync related registers in the timesync
- * generator sub-module.
- */
-#define NIG_REG_TIMESYNC_GEN_REG				 0x18800
 /* [RW 1] output enable for RX_XCM0 IF */
 #define NIG_REG_XCM0_OUT_EN					 0x100f0
 /* [RW 1] output enable for RX_XCM1 IF */
@@ -2771,7 +2431,6 @@
    current task in process). */
 #define PBF_REG_DISABLE_NEW_TASK_PROC_P4			 0x14006c
 #define PBF_REG_DISABLE_PF					 0x1402e8
-#define PBF_REG_DISABLE_VF					 0x1402ec
 /* [RW 18] For port 0: For each client that is subject to WFQ (the
  * corresponding bit is 1); indicates to which of the credit registers this
  * client is mapped. For clients which are not credit blocked; their mapping
@@ -2934,8 +2593,6 @@
 #define PBF_REG_PBF_INT_STS					 0x1401c8
 /* [RW 20] Parity mask register #0 read/write */
 #define PBF_REG_PBF_PRTY_MASK					 0x1401e4
-/* [R 28] Parity register #0 read */
-#define PBF_REG_PBF_PRTY_STS					 0x1401d8
 /* [RC 20] Parity register #0 read clear */
 #define PBF_REG_PBF_PRTY_STS_CLR				 0x1401dc
 /* [RW 16] The Ethernet type value for L2 tag 0 */
@@ -2959,12 +2616,7 @@
 #define PBF_REG_TQ_OCCUPANCY_Q0					 0x1403ac
 /* [R 13] Number of 8 bytes lines occupied in the task queue of queue 1. */
 #define PBF_REG_TQ_OCCUPANCY_Q1					 0x1403b0
-/* [RW 16] One of 8 values that should be compared to type in Ethernet
- * parsing. If there is a match; the field after Ethernet is the first VLAN.
- * Reset value is 0x8100 which is the standard VLAN type. Note that when
- * checking second VLAN; type is compared only to 0x8100.
- */
-#define PBF_REG_VLAN_TYPE_0					 0x15c06c
+#define PB_REG_CONTROL						 0
 /* [RW 2] Interrupt mask register #0 read/write */
 #define PB_REG_PB_INT_MASK					 0x28
 /* [R 2] Interrupt register #0 read */
@@ -3051,17 +2703,6 @@
 #define PGLUE_B_REG_INTERNAL_PFID_ENABLE_TARGET_READ		 0x9430
 #define PGLUE_B_REG_INTERNAL_PFID_ENABLE_TARGET_WRITE		 0x9434
 #define PGLUE_B_REG_INTERNAL_VFID_ENABLE			 0x9438
-/* [W 7] Writing 1 to each bit in this register clears a corresponding error
- * details register and enables logging new error details. Bit 0 - clears
- * INCORRECT_RCV_DETAILS; Bit 1 - clears RX_ERR_DETAILS; Bit 2 - clears
- * TX_ERR_WR_ADD_31_0 TX_ERR_WR_ADD_63_32 TX_ERR_WR_DETAILS
- * TX_ERR_WR_DETAILS2 TX_ERR_RD_ADD_31_0 TX_ERR_RD_ADD_63_32
- * TX_ERR_RD_DETAILS TX_ERR_RD_DETAILS2 TX_ERR_WR_DETAILS_ICPL; Bit 3 -
- * clears VF_LENGTH_VIOLATION_DETAILS. Bit 4 - clears
- * VF_GRC_SPACE_VIOLATION_DETAILS. Bit 5 - clears RX_TCPL_ERR_DETAILS. Bit 6
- * - clears TCPL_IN_TWO_RCBS_DETAILS. */
-#define PGLUE_B_REG_LATCHED_ERRORS_CLR				 0x943c
-
 /* [R 9] Interrupt register #0 read */
 #define PGLUE_B_REG_PGLUE_B_INT_STS				 0x9298
 /* [RC 9] Interrupt register #0 read clear */
@@ -3383,12 +3024,6 @@
 #define PRS_REG_TCM_CURRENT_CREDIT				 0x40160
 /* [R 8] debug only: TSDM current credit. Transaction based. */
 #define PRS_REG_TSDM_CURRENT_CREDIT				 0x4015c
-/* [RW 16] One of 8 values that should be compared to type in Ethernet
- * parsing. If there is a match; the field after Ethernet is the first VLAN.
- * Reset value is 0x8100 which is the standard VLAN type. Note that when
- * checking second VLAN; type is compared only to 0x8100.
- */
-#define PRS_REG_VLAN_TYPE_0					 0x401a8
 #define PXP2_PXP2_INT_MASK_0_REG_PGL_CPL_AFT			 (0x1<<19)
 #define PXP2_PXP2_INT_MASK_0_REG_PGL_CPL_OF			 (0x1<<20)
 #define PXP2_PXP2_INT_MASK_0_REG_PGL_PCIE_ATTN			 (0x1<<22)
@@ -3933,10 +3568,6 @@
 #define PXP_REG_HST_DISCARD_INTERNAL_WRITES_STATUS		 0x10309c
 /* [WB 160] Used for initialization of the inbound interrupts memory */
 #define PXP_REG_HST_INBOUND_INT 				 0x103800
-/* [RW 7] Indirect access to the permission table. The fields are : {Valid;
- * VFID[5:0]}
- */
-#define PXP_REG_HST_ZONE_PERMISSION_TABLE			 0x103400
 /* [RW 32] Interrupt mask register #0 read/write */
 #define PXP_REG_PXP_INT_MASK_0					 0x103074
 #define PXP_REG_PXP_INT_MASK_1					 0x103084
@@ -4725,8 +4356,6 @@
 #define TM_REG_TM_INT_STS					 0x1640f0
 /* [RW 7] Parity mask register #0 read/write */
 #define TM_REG_TM_PRTY_MASK					 0x16410c
-/* [R 7] Parity register #0 read */
-#define TM_REG_TM_PRTY_STS					 0x164100
 /* [RC 7] Parity register #0 read clear */
 #define TM_REG_TM_PRTY_STS_CLR					 0x164104
 /* [RW 8] The event id for aggregated interrupt 0 */
@@ -5196,10 +4825,6 @@
 #define UMAC_COMMAND_CONFIG_REG_SW_RESET			 (0x1<<13)
 #define UMAC_COMMAND_CONFIG_REG_TX_ENA				 (0x1<<0)
 #define UMAC_REG_COMMAND_CONFIG					 0x8
-/* [RW 16] This is the duration for which MAC must wait to go back to ACTIVE
- * state from LPI state when it receives packet for transmission. The
- * decrement unit is 1 micro-second. */
-#define UMAC_REG_EEE_WAKE_TIMER					 0x6c
 /* [RW 32] Register Bit 0 refers to Bit 16 of the MAC address; Bit 1 refers
  * to bit 17 of the MAC address etc. */
 #define UMAC_REG_MAC_ADDR0					 0xc
@@ -5209,8 +4834,6 @@
 /* [RW 14] Defines a 14-Bit maximum frame length used by the MAC receive
  * logic to check frames. */
 #define UMAC_REG_MAXFR						 0x14
-#define UMAC_REG_UMAC_EEE_CTRL					 0x64
-#define UMAC_UMAC_EEE_CTRL_REG_EEE_EN				 (0x1<<3)
 /* [RW 8] The event id for aggregated interrupt 0 */
 #define USDM_REG_AGG_INT_EVENT_0				 0xc4038
 #define USDM_REG_AGG_INT_EVENT_1				 0xc403c
@@ -5729,7 +5352,6 @@
 #define XMAC_CTRL_REG_RX_EN					 (0x1<<1)
 #define XMAC_CTRL_REG_SOFT_RESET				 (0x1<<6)
 #define XMAC_CTRL_REG_TX_EN					 (0x1<<0)
-#define XMAC_CTRL_REG_XLGMII_ALIGN_ENB				 (0x1<<7)
 #define XMAC_PAUSE_CTRL_REG_RX_PAUSE_EN				 (0x1<<18)
 #define XMAC_PAUSE_CTRL_REG_TX_PAUSE_EN				 (0x1<<17)
 #define XMAC_PFC_CTRL_HI_REG_FORCE_PFC_XON			 (0x1<<1)
@@ -5745,19 +5367,14 @@
 /* [RW 32] Lower 48 bits of ctrl_sa register. Used as the SA in PAUSE/PFC
  * packets transmitted by the MAC */
 #define XMAC_REG_CTRL_SA_LO					 0x28
-#define XMAC_REG_EEE_CTRL					 0xd8
-#define XMAC_REG_EEE_TIMERS_HI					 0xe4
 #define XMAC_REG_PAUSE_CTRL					 0x68
 #define XMAC_REG_PFC_CTRL					 0x70
 #define XMAC_REG_PFC_CTRL_HI					 0x74
-#define XMAC_REG_RX_LSS_CTRL					 0x50
 #define XMAC_REG_RX_LSS_STATUS					 0x58
 /* [RW 14] Maximum packet size in receive direction; exclusive of preamble &
  * CRC in strip mode */
 #define XMAC_REG_RX_MAX_SIZE					 0x40
 #define XMAC_REG_TX_CTRL					 0x20
-#define XMAC_RX_LSS_CTRL_REG_LOCAL_FAULT_DISABLE		 (0x1<<0)
-#define XMAC_RX_LSS_CTRL_REG_REMOTE_FAULT_DISABLE		 (0x1<<1)
 /* [RW 16] Indirect access to the XX table of the XX protection mechanism.
    The fields are:[4:0] - tail pointer; 9:5] - Link List size; 14:10] -
    header pointer. */
@@ -6125,7 +5742,6 @@
 #define MISC_REGISTERS_RESET_REG_1_RST_NIG			 (0x1<<7)
 #define MISC_REGISTERS_RESET_REG_1_RST_PXP			 (0x1<<26)
 #define MISC_REGISTERS_RESET_REG_1_RST_PXPV			 (0x1<<27)
-#define MISC_REGISTERS_RESET_REG_1_RST_XSEM			 (0x1<<22)
 #define MISC_REGISTERS_RESET_REG_1_SET				 0x584
 #define MISC_REGISTERS_RESET_REG_2_CLEAR			 0x598
 #define MISC_REGISTERS_RESET_REG_2_MSTAT0			 (0x1<<24)
@@ -6174,18 +5790,7 @@
 #define MISC_REGISTERS_SPIO_OUTPUT_HIGH 			 1
 #define MISC_REGISTERS_SPIO_OUTPUT_LOW				 0
 #define MISC_REGISTERS_SPIO_SET_POS				 8
-#define MISC_SPIO_CLR_POS					 16
-#define MISC_SPIO_FLOAT					 (0xffL<<24)
-#define MISC_SPIO_FLOAT_POS					 24
-#define MISC_SPIO_INPUT_HI_Z					 2
-#define MISC_SPIO_INT_OLD_SET_POS				 16
-#define MISC_SPIO_OUTPUT_HIGH					 1
-#define MISC_SPIO_OUTPUT_LOW					 0
-#define MISC_SPIO_SET_POS					 8
-#define MISC_SPIO_SPIO4					 0x10
-#define MISC_SPIO_SPIO5					 0x20
 #define HW_LOCK_MAX_RESOURCE_VALUE				 31
-#define HW_LOCK_RESOURCE_DCBX_ADMIN_MIB				 13
 #define HW_LOCK_RESOURCE_DRV_FLAGS				 10
 #define HW_LOCK_RESOURCE_GPIO					 1
 #define HW_LOCK_RESOURCE_MDIO					 0
@@ -6198,7 +5803,6 @@
 #define HW_LOCK_RESOURCE_SPIO					 2
 #define AEU_INPUTS_ATTN_BITS_ATC_HW_INTERRUPT			 (0x1<<4)
 #define AEU_INPUTS_ATTN_BITS_ATC_PARITY_ERROR			 (0x1<<5)
-#define AEU_INPUTS_ATTN_BITS_BRB_HW_INTERRUPT			 (0x1<<19)
 #define AEU_INPUTS_ATTN_BITS_BRB_PARITY_ERROR			 (0x1<<18)
 #define AEU_INPUTS_ATTN_BITS_CCM_HW_INTERRUPT			 (0x1<<31)
 #define AEU_INPUTS_ATTN_BITS_CCM_PARITY_ERROR			 (0x1<<30)
@@ -6393,9 +5997,7 @@
 #define PCICFG_COMMAND_INT_DISABLE		(1<<10)
 #define PCICFG_COMMAND_RESERVED 		(0x1f<<11)
 #define PCICFG_STATUS_OFFSET				0x06
-#define PCICFG_REVISION_ID_OFFSET			0x08
-#define PCICFG_REVESION_ID_MASK			0xff
-#define PCICFG_REVESION_ID_ERROR_VAL		0xff
+#define PCICFG_REVESION_ID_OFFSET			0x08
 #define PCICFG_CACHE_LINE_SIZE				0x0c
 #define PCICFG_LATENCY_TIMER				0x0d
 #define PCICFG_BAR_1_LOW				0x10
@@ -6538,18 +6140,6 @@
 #define PCI_PM_DATA_B					0x414
 #define PCI_ID_VAL1					0x434
 #define PCI_ID_VAL2					0x438
-#define PCI_ID_VAL3					0x43c
-
-#define GRC_CONFIG_REG_VF_MSIX_CONTROL		    0x61C
-#define GRC_CONFIG_REG_PF_INIT_VF		0x624
-#define GRC_CR_PF_INIT_VF_PF_FIRST_VF_NUM_MASK	0xf
-/* First VF_NUM for PF is encoded in this register.
- * The number of VFs assigned to a PF is assumed to be a multiple of 8.
- * Software should program these bits based on Total Number of VFs \
- * programmed for each PF.
- * Since registers from 0x000-0x7ff are split across functions, each PF will
- * have the same location for the same 4 bits
- */
 
 #define PXPCS_TL_CONTROL_5		    0x814
 #define PXPCS_TL_CONTROL_5_UNKNOWNTYPE_ERR_ATTN    (1 << 29) /*WC*/
@@ -6799,27 +6389,6 @@
 	(7L<<ME_REG_ABS_PF_NUM_SHIFT) /* Absolute PF Num */
 
 
-#define PXP_VF_ADDR_IGU_START				0
-#define PXP_VF_ADDR_IGU_SIZE				0x3000
-#define PXP_VF_ADDR_IGU_END\
-	((PXP_VF_ADDR_IGU_START) + (PXP_VF_ADDR_IGU_SIZE) - 1)
-
-#define PXP_VF_ADDR_USDM_QUEUES_START			0x3000
-#define PXP_VF_ADDR_USDM_QUEUES_SIZE\
-	(PXP_VF_ADRR_NUM_QUEUES * PXP_ADDR_QUEUE_SIZE)
-#define PXP_VF_ADDR_USDM_QUEUES_END\
-	((PXP_VF_ADDR_USDM_QUEUES_START) + (PXP_VF_ADDR_USDM_QUEUES_SIZE) - 1)
-
-#define PXP_VF_ADDR_CSDM_GLOBAL_START			0x7600
-#define PXP_VF_ADDR_CSDM_GLOBAL_SIZE			(PXP_ADDR_REG_SIZE)
-#define PXP_VF_ADDR_CSDM_GLOBAL_END\
-	((PXP_VF_ADDR_CSDM_GLOBAL_START) + (PXP_VF_ADDR_CSDM_GLOBAL_SIZE) - 1)
-
-#define PXP_VF_ADDR_DB_START				0x7c00
-#define PXP_VF_ADDR_DB_SIZE				0x200
-#define PXP_VF_ADDR_DB_END\
-	((PXP_VF_ADDR_DB_START) + (PXP_VF_ADDR_DB_SIZE) - 1)
-
 #define MDIO_REG_BANK_CL73_IEEEB0	0x0
 #define MDIO_CL73_IEEEB0_CL73_AN_CONTROL	0x0
 #define MDIO_CL73_IEEEB0_CL73_AN_CONTROL_RESTART_AN	0x0200
@@ -6970,7 +6539,6 @@
 #define MDIO_GP_STATUS_TOP_AN_STATUS1_ACTUAL_SPEED_10G_XFI	0x1B00
 #define MDIO_GP_STATUS_TOP_AN_STATUS1_ACTUAL_SPEED_20G_DXGXS	0x1E00
 #define MDIO_GP_STATUS_TOP_AN_STATUS1_ACTUAL_SPEED_10G_SFI	0x1F00
-#define MDIO_GP_STATUS_TOP_AN_STATUS1_ACTUAL_SPEED_20G_KR2	0x3900
 
 
 #define MDIO_REG_BANK_10G_PARALLEL_DETECT		0x8130
@@ -7240,8 +6808,6 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_AN_REG_LP_AUTO_NEG		0x0013
 #define MDIO_AN_REG_LP_AUTO_NEG2	0x0014
 #define MDIO_AN_REG_MASTER_STATUS	0x0021
-#define MDIO_AN_REG_EEE_ADV		0x003c
-#define MDIO_AN_REG_LP_EEE_ADV		0x003d
 /*bcm*/
 #define MDIO_AN_REG_LINK_STATUS 	0x8304
 #define MDIO_AN_REG_CL37_CL73		0x8370
@@ -7257,9 +6823,6 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_AN_REG_8481_LEGACY_MII_CTRL	0xffe0
 #define MDIO_AN_REG_8481_MII_CTRL_FORCE_1G	0x40
 #define MDIO_AN_REG_8481_LEGACY_MII_STATUS	0xffe1
-#define MDIO_AN_REG_848xx_ID_MSB		0xffe2
-#define BCM84858_PHY_ID					0x600d
-#define MDIO_AN_REG_848xx_ID_LSB		0xffe3
 #define MDIO_AN_REG_8481_LEGACY_AN_ADV		0xffe4
 #define MDIO_AN_REG_8481_LEGACY_AN_EXPANSION	0xffe6
 #define MDIO_AN_REG_8481_1000T_CTRL		0xffe9
@@ -7296,40 +6859,35 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_PMA_REG_84823_CTL_LED_CTL_1			0xa8e3
 #define MDIO_PMA_REG_84833_CTL_LED_CTL_1			0xa8ec
 #define MDIO_PMA_REG_84823_LED3_STRETCH_EN			0x0080
-/* BCM84858 only */
-#define MDIO_PMA_REG_84858_ALLOW_GPHY_ACT			0x8000
 
 /* BCM84833 only */
-#define MDIO_84833_TOP_CFG_FW_REV			0x400f
-#define MDIO_84833_TOP_CFG_FW_EEE		0x10b1
-#define MDIO_84833_TOP_CFG_FW_NO_EEE		0x1f81
 #define MDIO_84833_TOP_CFG_XGPHY_STRAP1			0x401a
 #define MDIO_84833_SUPER_ISOLATE		0x8000
-/* These are mailbox register set used by 84833/84858. */
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG0			0x4005
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG1			0x4006
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG2			0x4007
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG3			0x4008
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG4			0x4009
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG26		0x4037
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG27		0x4038
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG28		0x4039
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG29		0x403a
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG30		0x403b
-#define MDIO_848xx_TOP_CFG_SCRATCH_REG31		0x403c
-#define MDIO_848xx_CMD_HDLR_COMMAND	(MDIO_848xx_TOP_CFG_SCRATCH_REG0)
-#define MDIO_848xx_CMD_HDLR_STATUS	(MDIO_848xx_TOP_CFG_SCRATCH_REG26)
-#define MDIO_848xx_CMD_HDLR_DATA1	(MDIO_848xx_TOP_CFG_SCRATCH_REG27)
-#define MDIO_848xx_CMD_HDLR_DATA2	(MDIO_848xx_TOP_CFG_SCRATCH_REG28)
-#define MDIO_848xx_CMD_HDLR_DATA3	(MDIO_848xx_TOP_CFG_SCRATCH_REG29)
-#define MDIO_848xx_CMD_HDLR_DATA4	(MDIO_848xx_TOP_CFG_SCRATCH_REG30)
-#define MDIO_848xx_CMD_HDLR_DATA5	(MDIO_848xx_TOP_CFG_SCRATCH_REG31)
+/* These are mailbox register set used by 84833. */
+#define MDIO_84833_TOP_CFG_SCRATCH_REG0			0x4005
+#define MDIO_84833_TOP_CFG_SCRATCH_REG1			0x4006
+#define MDIO_84833_TOP_CFG_SCRATCH_REG2			0x4007
+#define MDIO_84833_TOP_CFG_SCRATCH_REG3			0x4008
+#define MDIO_84833_TOP_CFG_SCRATCH_REG4			0x4009
+#define MDIO_84833_TOP_CFG_SCRATCH_REG26		0x4037
+#define MDIO_84833_TOP_CFG_SCRATCH_REG27		0x4038
+#define MDIO_84833_TOP_CFG_SCRATCH_REG28		0x4039
+#define MDIO_84833_TOP_CFG_SCRATCH_REG29		0x403a
+#define MDIO_84833_TOP_CFG_SCRATCH_REG30		0x403b
+#define MDIO_84833_TOP_CFG_SCRATCH_REG31		0x403c
+#define MDIO_84833_CMD_HDLR_COMMAND	MDIO_84833_TOP_CFG_SCRATCH_REG0
+#define MDIO_84833_CMD_HDLR_STATUS	MDIO_84833_TOP_CFG_SCRATCH_REG26
+#define MDIO_84833_CMD_HDLR_DATA1	MDIO_84833_TOP_CFG_SCRATCH_REG27
+#define MDIO_84833_CMD_HDLR_DATA2	MDIO_84833_TOP_CFG_SCRATCH_REG28
+#define MDIO_84833_CMD_HDLR_DATA3	MDIO_84833_TOP_CFG_SCRATCH_REG29
+#define MDIO_84833_CMD_HDLR_DATA4	MDIO_84833_TOP_CFG_SCRATCH_REG30
+#define MDIO_84833_CMD_HDLR_DATA5	MDIO_84833_TOP_CFG_SCRATCH_REG31
 
-/* Mailbox command set used by 84833/84858 */
-#define PHY848xx_CMD_SET_PAIR_SWAP			0x8001
-#define PHY848xx_CMD_GET_EEE_MODE			0x8008
-#define PHY848xx_CMD_SET_EEE_MODE			0x8009
-/* Mailbox status set used by 84833 only */
+/* Mailbox command set used by 84833. */
+#define PHY84833_CMD_SET_PAIR_SWAP			0x8001
+#define PHY84833_CMD_GET_EEE_MODE			0x8008
+#define PHY84833_CMD_SET_EEE_MODE			0x8009
+/* Mailbox status set used by 84833. */
 #define PHY84833_STATUS_CMD_RECEIVED			0x0001
 #define PHY84833_STATUS_CMD_IN_PROGRESS			0x0002
 #define PHY84833_STATUS_CMD_COMPLETE_PASS		0x0004
@@ -7339,17 +6897,6 @@ Theotherbitsarereservedandshouldbezero*/
 #define PHY84833_STATUS_CMD_NOT_OPEN_FOR_CMDS		0x0040
 #define PHY84833_STATUS_CMD_CLEAR_COMPLETE		0x0080
 #define PHY84833_STATUS_CMD_OPEN_OVERRIDE		0xa5a5
-/* Mailbox Process */
-#define PHY84833_MB_PROCESS1				1
-#define PHY84833_MB_PROCESS2				2
-#define PHY84833_MB_PROCESS3				3
-
-/* Mailbox status set used by 84858 only */
-#define PHY84858_STATUS_CMD_RECEIVED			0x0001
-#define PHY84858_STATUS_CMD_IN_PROGRESS			0x0002
-#define PHY84858_STATUS_CMD_COMPLETE_PASS		0x0004
-#define PHY84858_STATUS_CMD_COMPLETE_ERROR		0x0008
-#define PHY84858_STATUS_CMD_SYSTEM_BUSY			0xbbbb
 
 
 /* Warpcore clause 45 addressing */
@@ -7361,8 +6908,7 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_WC_REG_AN_IEEE1BLK_AN_ADVERTISEMENT2	0x12
 #define MDIO_WC_REG_AN_IEEE1BLK_AN_ADV2_FEC_ABILITY	0x4000
 #define MDIO_WC_REG_AN_IEEE1BLK_AN_ADV2_FEC_REQ		0x8000
-#define MDIO_WC_REG_PCS_STATUS2				0x0021
-#define MDIO_WC_REG_PMD_KR_CONTROL			0x0096
+#define MDIO_WC_REG_PMD_IEEE9BLK_TENGBASE_KR_PMD_CONTROL_REGISTER_150  0x96
 #define MDIO_WC_REG_XGXSBLK0_XGXSCONTROL		0x8000
 #define MDIO_WC_REG_XGXSBLK0_MISCCONTROL1		0x800e
 #define MDIO_WC_REG_XGXSBLK1_DESKEW			0x8010
@@ -7374,8 +6920,6 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_WC_REG_TX2_ANA_CTRL0			0x8081
 #define MDIO_WC_REG_TX3_ANA_CTRL0			0x8091
 #define MDIO_WC_REG_TX0_TX_DRIVER			0x8067
-#define MDIO_WC_REG_TX0_TX_DRIVER_IFIR_OFFSET			0x01
-#define MDIO_WC_REG_TX0_TX_DRIVER_IFIR_MASK				0x000e
 #define MDIO_WC_REG_TX0_TX_DRIVER_IPRE_DRIVER_OFFSET		0x04
 #define MDIO_WC_REG_TX0_TX_DRIVER_IPRE_DRIVER_MASK			0x00f0
 #define MDIO_WC_REG_TX0_TX_DRIVER_IDRIVER_OFFSET		0x08
@@ -7391,13 +6935,11 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_WC_REG_RX1_PCI_CTRL			0x80ca
 #define MDIO_WC_REG_RX2_PCI_CTRL			0x80da
 #define MDIO_WC_REG_RX3_PCI_CTRL			0x80ea
-#define MDIO_WC_REG_RXB_ANA_RX_CONTROL_PCI		0x80fa
 #define MDIO_WC_REG_XGXSBLK2_UNICORE_MODE_10G		0x8104
 #define MDIO_WC_REG_XGXS_STATUS3			0x8129
 #define MDIO_WC_REG_PAR_DET_10G_STATUS			0x8130
 #define MDIO_WC_REG_PAR_DET_10G_CTRL			0x8131
 #define MDIO_WC_REG_XGXS_X2_CONTROL2			0x8141
-#define MDIO_WC_REG_XGXS_X2_CONTROL3			0x8142
 #define MDIO_WC_REG_XGXS_RX_LN_SWAP1			0x816B
 #define MDIO_WC_REG_XGXS_TX_LN_SWAP1			0x8169
 #define MDIO_WC_REG_GP2_STATUS_GP_2_0			0x81d0
@@ -7432,7 +6974,6 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_WC_REG_TX_FIR_TAP_POST_TAP_OFFSET		0x0a
 #define MDIO_WC_REG_TX_FIR_TAP_POST_TAP_MASK		0x7c00
 #define MDIO_WC_REG_TX_FIR_TAP_ENABLE		0x8000
-#define MDIO_WC_REG_CL72_USERB0_CL72_TX_FIR_TAP		0x82e2
 #define MDIO_WC_REG_CL72_USERB0_CL72_MISC1_CONTROL	0x82e3
 #define MDIO_WC_REG_CL72_USERB0_CL72_OS_DEF_CTRL	0x82e6
 #define MDIO_WC_REG_CL72_USERB0_CL72_BR_DEF_CTRL	0x82e7
@@ -7447,20 +6988,11 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_WC_REG_DIGITAL3_UP1			0x8329
 #define MDIO_WC_REG_DIGITAL3_LP_UP1			 0x832c
 #define MDIO_WC_REG_DIGITAL4_MISC3			0x833c
-#define MDIO_WC_REG_DIGITAL4_MISC5			0x833e
 #define MDIO_WC_REG_DIGITAL5_MISC6			0x8345
 #define MDIO_WC_REG_DIGITAL5_MISC7			0x8349
-#define MDIO_WC_REG_DIGITAL5_LINK_STATUS		0x834d
 #define MDIO_WC_REG_DIGITAL5_ACTUAL_SPEED		0x834e
 #define MDIO_WC_REG_DIGITAL6_MP5_NEXTPAGECTRL		0x8350
 #define MDIO_WC_REG_CL49_USERB0_CTRL			0x8368
-#define MDIO_WC_REG_CL73_USERB0_CTRL			0x8370
-#define MDIO_WC_REG_CL73_USERB0_USTAT			0x8371
-#define MDIO_WC_REG_CL73_BAM_CTRL1			0x8372
-#define MDIO_WC_REG_CL73_BAM_CTRL2			0x8373
-#define MDIO_WC_REG_CL73_BAM_CTRL3			0x8374
-#define MDIO_WC_REG_CL73_BAM_CODE_FIELD			0x837b
-#define MDIO_WC_REG_EEE_COMBO_CONTROL0			0x8390
 #define MDIO_WC_REG_TX66_CONTROL			0x83b0
 #define MDIO_WC_REG_RX66_CONTROL			0x83c0
 #define MDIO_WC_REG_RX66_SCW0				0x83c2
@@ -7473,17 +7005,7 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_WC_REG_RX66_SCW3_MASK			0x83c9
 #define MDIO_WC_REG_FX100_CTRL1				0x8400
 #define MDIO_WC_REG_FX100_CTRL3				0x8402
-#define MDIO_WC_REG_CL82_USERB1_TX_CTRL5		0x8436
-#define MDIO_WC_REG_CL82_USERB1_TX_CTRL6		0x8437
-#define MDIO_WC_REG_CL82_USERB1_TX_CTRL7		0x8438
-#define MDIO_WC_REG_CL82_USERB1_TX_CTRL9		0x8439
-#define MDIO_WC_REG_CL82_USERB1_RX_CTRL10		0x843a
-#define MDIO_WC_REG_CL82_USERB1_RX_CTRL11		0x843b
-#define MDIO_WC_REG_ETA_CL73_OUI1			0x8453
-#define MDIO_WC_REG_ETA_CL73_OUI2			0x8454
-#define MDIO_WC_REG_ETA_CL73_OUI3			0x8455
-#define MDIO_WC_REG_ETA_CL73_LD_BAM_CODE		0x8456
-#define MDIO_WC_REG_ETA_CL73_LD_UD_CODE			0x8457
+
 #define MDIO_WC_REG_MICROBLK_CMD			0xffc2
 #define MDIO_WC_REG_MICROBLK_DL_STATUS			0xffc5
 #define MDIO_WC_REG_MICROBLK_CMD3			0xffcc
@@ -7505,12 +7027,10 @@ Theotherbitsarereservedandshouldbezero*/
 #define MDIO_REG_GPHY_ID_54618SE		0x5cd5
 #define MDIO_REG_GPHY_CL45_ADDR_REG			0xd
 #define MDIO_REG_GPHY_CL45_DATA_REG			0xe
+#define MDIO_REG_GPHY_EEE_ADV			0x3c
+#define MDIO_REG_GPHY_EEE_1G		(0x1 << 2)
+#define MDIO_REG_GPHY_EEE_100		(0x1 << 1)
 #define MDIO_REG_GPHY_EEE_RESOLVED		0x803e
-#define MDIO_REG_GPHY_EXP_ACCESS_GATE			0x15
-#define MDIO_REG_GPHY_EXP_ACCESS			0x17
-#define MDIO_REG_GPHY_EXP_ACCESS_TOP		0xd00
-#define MDIO_REG_GPHY_EXP_TOP_2K_BUF		0x40
-#define MDIO_REG_GPHY_AUX_STATUS			0x19
 #define MDIO_REG_INTR_STATUS				0x1a
 #define MDIO_REG_INTR_MASK				0x1b
 #define MDIO_REG_INTR_MASK_LINK_STATUS			(0x1 << 1)
@@ -7584,7 +7104,7 @@ Theotherbitsarereservedandshouldbezero*/
 #define IGU_REG_SISR_MDPC_WOMASK_UPPER		0x05a6
 
 #define IGU_REG_RESERVED_UPPER				0x05ff
-/* Fields of IGU PF CONFIGURATION REGISTER */
+/* Fields of IGU PF CONFIGRATION REGISTER */
 #define IGU_PF_CONF_FUNC_EN	  (0x1<<0)  /* function enable	      */
 #define IGU_PF_CONF_MSI_MSIX_EN   (0x1<<1)  /* MSI/MSIX enable	      */
 #define IGU_PF_CONF_INT_LINE_EN   (0x1<<2)  /* INT enable	      */
@@ -7592,7 +7112,7 @@ Theotherbitsarereservedandshouldbezero*/
 #define IGU_PF_CONF_SINGLE_ISR_EN (0x1<<4)  /* single ISR mode enable */
 #define IGU_PF_CONF_SIMD_MODE	  (0x1<<5)  /* simd all ones mode     */
 
-/* Fields of IGU VF CONFIGURATION REGISTER */
+/* Fields of IGU VF CONFIGRATION REGISTER */
 #define IGU_VF_CONF_FUNC_EN	   (0x1<<0)  /* function enable        */
 #define IGU_VF_CONF_MSI_MSIX_EN    (0x1<<1)  /* MSI/MSIX enable        */
 #define IGU_VF_CONF_PARENT_MASK    (0x3<<2)  /* Parent PF	       */
@@ -7625,7 +7145,8 @@ Theotherbitsarereservedandshouldbezero*/
 #define CDU_REGION_NUMBER_UCM_AG 4
 
 
-/* String-to-compress [31:8] = CID (all 24 bits)
+/**
+ * String-to-compress [31:8] = CID (all 24 bits)
  * String-to-compress [7:4] = Region
  * String-to-compress [3:0] = Type
  */

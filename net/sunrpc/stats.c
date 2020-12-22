@@ -64,7 +64,7 @@ static int rpc_proc_show(struct seq_file *seq, void *v) {
 
 static int rpc_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, rpc_proc_show, PDE_DATA(inode));
+	return single_open(file, rpc_proc_show, PDE(inode)->data);
 }
 
 static const struct file_operations rpc_proc_fops = {
@@ -116,15 +116,7 @@ EXPORT_SYMBOL_GPL(svc_seq_show);
  */
 struct rpc_iostats *rpc_alloc_iostats(struct rpc_clnt *clnt)
 {
-	struct rpc_iostats *stats;
-	int i;
-
-	stats = kcalloc(clnt->cl_maxproc, sizeof(*stats), GFP_KERNEL);
-	if (stats) {
-		for (i = 0; i < clnt->cl_maxproc; i++)
-			spin_lock_init(&stats[i].om_lock);
-	}
-	return stats;
+	return kcalloc(clnt->cl_maxproc, sizeof(struct rpc_iostats), GFP_KERNEL);
 }
 EXPORT_SYMBOL_GPL(rpc_alloc_iostats);
 
@@ -140,21 +132,22 @@ void rpc_free_iostats(struct rpc_iostats *stats)
 EXPORT_SYMBOL_GPL(rpc_free_iostats);
 
 /**
- * rpc_count_iostats_metrics - tally up per-task stats
+ * rpc_count_iostats - tally up per-task stats
  * @task: completed rpc_task
- * @op_metrics: stat structure for OP that will accumulate stats from @task
+ * @stats: array of stat structures
+ *
+ * Relies on the caller for serialization.
  */
-void rpc_count_iostats_metrics(const struct rpc_task *task,
-			       struct rpc_iostats *op_metrics)
+void rpc_count_iostats(const struct rpc_task *task, struct rpc_iostats *stats)
 {
 	struct rpc_rqst *req = task->tk_rqstp;
-	ktime_t delta, now;
+	struct rpc_iostats *op_metrics;
+	ktime_t delta;
 
-	if (!op_metrics || !req)
+	if (!stats || !req)
 		return;
 
-	now = ktime_get();
-	spin_lock(&op_metrics->om_lock);
+	op_metrics = &stats[task->tk_msg.rpc_proc->p_statidx];
 
 	op_metrics->om_ops++;
 	op_metrics->om_ntrans += req->rq_ntrans;
@@ -168,24 +161,8 @@ void rpc_count_iostats_metrics(const struct rpc_task *task,
 
 	op_metrics->om_rtt = ktime_add(op_metrics->om_rtt, req->rq_rtt);
 
-	delta = ktime_sub(now, task->tk_start);
+	delta = ktime_sub(ktime_get(), task->tk_start);
 	op_metrics->om_execute = ktime_add(op_metrics->om_execute, delta);
-
-	spin_unlock(&op_metrics->om_lock);
-}
-EXPORT_SYMBOL_GPL(rpc_count_iostats_metrics);
-
-/**
- * rpc_count_iostats - tally up per-task stats
- * @task: completed rpc_task
- * @stats: array of stat structures
- *
- * Uses the statidx from @task
- */
-void rpc_count_iostats(const struct rpc_task *task, struct rpc_iostats *stats)
-{
-	rpc_count_iostats_metrics(task,
-				  &stats[task->tk_msg.rpc_proc->p_statidx]);
 }
 EXPORT_SYMBOL_GPL(rpc_count_iostats);
 
@@ -211,7 +188,7 @@ void rpc_print_iostats(struct seq_file *seq, struct rpc_clnt *clnt)
 
 	seq_printf(seq, "\tRPC iostats version: %s  ", RPC_IOSTATS_VERS);
 	seq_printf(seq, "p/v: %u/%u (%s)\n",
-			clnt->cl_prog, clnt->cl_vers, clnt->cl_program->name);
+			clnt->cl_prog, clnt->cl_vers, clnt->cl_protname);
 
 	rcu_read_lock();
 	xprt = rcu_dereference(clnt->cl_xprt);

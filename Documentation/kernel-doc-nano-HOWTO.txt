@@ -1,6 +1,3 @@
-NOTE: this document is outdated and will eventually be removed.  See
-Documentation/kernel-documentation.rst for current information.
-
 kernel-doc nano-HOWTO
 =====================
 
@@ -67,8 +64,6 @@ Example kernel-doc function comment:
  * comment lines.
  *
  * The longer description can have multiple paragraphs.
- *
- * Return: Describe the return value of foobar.
  */
 
 The short description following the subject can span multiple lines
@@ -83,8 +78,6 @@ If a function parameter is "..." (varargs), it should be listed in
 kernel-doc notation as:
  * @...: description
 
-The return value, if any, should be described in a dedicated section
-named "Return".
 
 Example kernel-doc data structure comment.
 
@@ -131,7 +124,7 @@ are:
   special place-holders for where the extracted documentation should
   go.
 
-- scripts/docproc.c
+- scripts/basic/docproc.c
 
   This is a program for converting SGML template files into SGML
   files. When a file is referenced it is searched for symbols
@@ -145,10 +138,9 @@ are:
 
 - Makefile
 
-  The targets 'xmldocs', 'psdocs', 'pdfdocs', and 'htmldocs' are used
-  to build XML DocBook files, PostScript files, PDF files, and html files
-  in Documentation/DocBook. The older target 'sgmldocs' is equivalent
-  to 'xmldocs'.
+  The targets 'sgmldocs', 'psdocs', 'pdfdocs', and 'htmldocs' are used
+  to build DocBook files, PostScript files, PDF files, and html files
+  in Documentation/DocBook.
 
 - Documentation/DocBook/Makefile
 
@@ -162,8 +154,8 @@ If you just want to read the ready-made books on the various
 subsystems (see Documentation/DocBook/*.tmpl), just type 'make
 psdocs', or 'make pdfdocs', or 'make htmldocs', depending on your
 preference.  If you would rather read a different format, you can type
-'make xmldocs' and then use DocBook tools to convert
-Documentation/DocBook/*.xml to a format of your choice (for example,
+'make sgmldocs' and then use DocBook tools to convert
+Documentation/DocBook/*.sgml to a format of your choice (for example,
 'db2html ...' if 'make htmldocs' was not defined).
 
 If you want to see man pages instead, you can do this:
@@ -230,9 +222,6 @@ only a "*").
 "section header:" names must be unique per function (or struct,
 union, typedef, enum).
 
-Use the section header "Return" for sections describing the return value
-of a function.
-
 Avoid putting a spurious blank line after the function name, or else the
 description will be repeated!
 
@@ -248,21 +237,21 @@ patterns, which are highlighted appropriately.
 NOTE 1:  The multi-line descriptive text you provide does *not* recognize
 line breaks, so if you try to format some text nicely, as in:
 
-  Return:
+  Return codes
     0 - cool
     1 - invalid arg
     2 - out of memory
 
 this will all run together and produce:
 
-  Return: 0 - cool 1 - invalid arg 2 - out of memory
+  Return codes 0 - cool 1 - invalid arg 2 - out of memory
 
 NOTE 2:  If the descriptive text you provide has lines that begin with
 some phrase followed by a colon, each of those phrases will be taken as
 a new section heading, which means you should similarly try to avoid text
 like:
 
-  Return:
+  Return codes:
     0: cool
     1: invalid arg
     2: out of memory

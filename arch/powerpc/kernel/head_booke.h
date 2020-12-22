@@ -2,9 +2,6 @@
 #define __HEAD_BOOKE_H__
 
 #include <asm/ptrace.h>	/* for STACK_FRAME_REGS_MARKER */
-#include <asm/kvm_asm.h>
-#include <asm/kvm_booke_hv_asm.h>
-
 /*
  * Macros used for common Book-e exception handling
  */
@@ -31,28 +28,16 @@
  */
 #define THREAD_NORMSAVE(offset)	(THREAD_NORMSAVES + (offset * 4))
 
-#ifdef CONFIG_PPC_FSL_BOOK3E
-#define BOOKE_CLEAR_BTB(reg)									\
-START_BTB_FLUSH_SECTION								\
-	BTB_FLUSH(reg)									\
-END_BTB_FLUSH_SECTION
-#else
-#define BOOKE_CLEAR_BTB(reg)
-#endif
-
-
-#define NORMAL_EXCEPTION_PROLOG(intno)						     \
+#define NORMAL_EXCEPTION_PROLOG						     \
 	mtspr	SPRN_SPRG_WSCRATCH0, r10;	/* save one register */	     \
 	mfspr	r10, SPRN_SPRG_THREAD;					     \
 	stw	r11, THREAD_NORMSAVE(0)(r10);				     \
 	stw	r13, THREAD_NORMSAVE(2)(r10);				     \
 	mfcr	r13;			/* save CR in r13 for now	   */\
-	mfspr	r11, SPRN_SRR1;		                                     \
-	DO_KVM	BOOKE_INTERRUPT_##intno SPRN_SRR1;			     \
-	andi.	r11, r11, MSR_PR;	/* check whether user or kernel    */\
+	mfspr	r11,SPRN_SRR1;		/* check whether user or kernel    */\
+	andi.	r11,r11,MSR_PR;						     \
 	mr	r11, r1;						     \
 	beq	1f;							     \
-	BOOKE_CLEAR_BTB(r11)						\
 	/* if from user, start at top of this thread's kernel stack */       \
 	lwz	r11, THREAD_INFO-THREAD(r10);				     \
 	ALLOC_STACK_FRAME(r11, THREAD_SIZE);				     \
@@ -128,7 +113,7 @@ END_BTB_FLUSH_SECTION
  * registers as the normal prolog above. Instead we use a portion of the
  * critical/machine check exception stack at low physical addresses.
  */
-#define EXC_LEVEL_EXCEPTION_PROLOG(exc_level, intno, exc_level_srr0, exc_level_srr1) \
+#define EXC_LEVEL_EXCEPTION_PROLOG(exc_level, exc_level_srr0, exc_level_srr1) \
 	mtspr	SPRN_SPRG_WSCRATCH_##exc_level,r8;			     \
 	BOOKE_LOAD_EXC_LEVEL_STACK(exc_level);/* r8 points to the exc_level stack*/ \
 	stw	r9,GPR9(r8);		/* save various registers	   */\
@@ -136,10 +121,8 @@ END_BTB_FLUSH_SECTION
 	stw	r10,GPR10(r8);						     \
 	stw	r11,GPR11(r8);						     \
 	stw	r9,_CCR(r8);		/* save CR on stack		   */\
-	mfspr	r11,exc_level_srr1;	/* check whether user or kernel    */\
-	DO_KVM	BOOKE_INTERRUPT_##intno exc_level_srr1;		             \
-	BOOKE_CLEAR_BTB(r10)						\
-	andi.	r11,r11,MSR_PR;						     \
+	mfspr	r10,exc_level_srr1;	/* check whether user or kernel    */\
+	andi.	r10,r10,MSR_PR;						     \
 	mfspr	r11,SPRN_SPRG_THREAD;	/* if from user, start at top of   */\
 	lwz	r11,THREAD_INFO-THREAD(r11); /* this thread's kernel stack */\
 	addi	r11,r11,EXC_LVL_FRAME_OVERHEAD;	/* allocate stack frame    */\
@@ -179,30 +162,12 @@ END_BTB_FLUSH_SECTION
 	SAVE_4GPRS(3, r11);						     \
 	SAVE_2GPRS(7, r11)
 
-#define CRITICAL_EXCEPTION_PROLOG(intno) \
-		EXC_LEVEL_EXCEPTION_PROLOG(CRIT, intno, SPRN_CSRR0, SPRN_CSRR1)
+#define CRITICAL_EXCEPTION_PROLOG \
+		EXC_LEVEL_EXCEPTION_PROLOG(CRIT, SPRN_CSRR0, SPRN_CSRR1)
 #define DEBUG_EXCEPTION_PROLOG \
-		EXC_LEVEL_EXCEPTION_PROLOG(DBG, DEBUG, SPRN_DSRR0, SPRN_DSRR1)
+		EXC_LEVEL_EXCEPTION_PROLOG(DBG, SPRN_DSRR0, SPRN_DSRR1)
 #define MCHECK_EXCEPTION_PROLOG \
-		EXC_LEVEL_EXCEPTION_PROLOG(MC, MACHINE_CHECK, \
-			SPRN_MCSRR0, SPRN_MCSRR1)
-
-/*
- * Guest Doorbell -- this is a bit odd in that uses GSRR0/1 despite
- * being delivered to the host.  This exception can only happen
- * inside a KVM guest -- so we just handle up to the DO_KVM rather
- * than try to fit this into one of the existing prolog macros.
- */
-#define GUEST_DOORBELL_EXCEPTION \
-	START_EXCEPTION(GuestDoorbell);					     \
-	mtspr	SPRN_SPRG_WSCRATCH0, r10;	/* save one register */	     \
-	mfspr	r10, SPRN_SPRG_THREAD;					     \
-	stw	r11, THREAD_NORMSAVE(0)(r10);				     \
-	mfspr	r11, SPRN_SRR1;		                                     \
-	stw	r13, THREAD_NORMSAVE(2)(r10);				     \
-	mfcr	r13;			/* save CR in r13 for now	   */\
-	DO_KVM	BOOKE_INTERRUPT_GUEST_DBELL SPRN_GSRR1;			     \
-	trap
+		EXC_LEVEL_EXCEPTION_PROLOG(MC, SPRN_MCSRR0, SPRN_MCSRR1)
 
 /*
  * Exception vectors.
@@ -211,16 +176,21 @@ END_BTB_FLUSH_SECTION
         .align 5;              						     \
 label:
 
-#define EXCEPTION(n, intno, label, hdlr, xfer)			\
+#define FINISH_EXCEPTION(func)					\
+	bl	transfer_to_handler_full;			\
+	.long	func;						\
+	.long	ret_from_except_full
+
+#define EXCEPTION(n, label, hdlr, xfer)				\
 	START_EXCEPTION(label);					\
-	NORMAL_EXCEPTION_PROLOG(intno);				\
+	NORMAL_EXCEPTION_PROLOG;				\
 	addi	r3,r1,STACK_FRAME_OVERHEAD;			\
 	xfer(n, hdlr)
 
-#define CRITICAL_EXCEPTION(n, intno, label, hdlr)			\
-	START_EXCEPTION(label);						\
-	CRITICAL_EXCEPTION_PROLOG(intno);				\
-	addi	r3,r1,STACK_FRAME_OVERHEAD;				\
+#define CRITICAL_EXCEPTION(n, label, hdlr)			\
+	START_EXCEPTION(label);					\
+	CRITICAL_EXCEPTION_PROLOG;				\
+	addi	r3,r1,STACK_FRAME_OVERHEAD;			\
 	EXC_XFER_TEMPLATE(hdlr, n+2, (MSR_KERNEL & ~(MSR_ME|MSR_DE|MSR_CE)), \
 			  NOCOPY, crit_transfer_to_handler, \
 			  ret_from_crit_exc)
@@ -293,13 +263,13 @@ label:
 	andis.	r10,r10,(DBSR_IC|DBSR_BT)@h;				      \
 	beq+	2f;							      \
 									      \
-	lis	r10,interrupt_base@h;	/* check if exception in vectors */   \
-	ori	r10,r10,interrupt_base@l;				      \
+	lis	r10,KERNELBASE@h;	/* check if exception in vectors */   \
+	ori	r10,r10,KERNELBASE@l;					      \
 	cmplw	r12,r10;						      \
 	blt+	2f;			/* addr below exception vectors */    \
 									      \
-	lis	r10,interrupt_end@h;					      \
-	ori	r10,r10,interrupt_end@l;				      \
+	lis	r10,DebugDebug@h;					      \
+	ori	r10,r10,DebugDebug@l;					      \
 	cmplw	r12,r10;						      \
 	bgt+	2f;			/* addr above exception vectors */    \
 									      \
@@ -332,7 +302,7 @@ label:
 
 #define DEBUG_CRIT_EXCEPTION						      \
 	START_EXCEPTION(DebugCrit);					      \
-	CRITICAL_EXCEPTION_PROLOG(DEBUG);				      \
+	CRITICAL_EXCEPTION_PROLOG;					      \
 									      \
 	/*								      \
 	 * If there is a single step or branch-taken exception in an	      \
@@ -346,13 +316,13 @@ label:
 	andis.	r10,r10,(DBSR_IC|DBSR_BT)@h;				      \
 	beq+	2f;							      \
 									      \
-	lis	r10,interrupt_base@h;	/* check if exception in vectors */   \
-	ori	r10,r10,interrupt_base@l;				      \
+	lis	r10,KERNELBASE@h;	/* check if exception in vectors */   \
+	ori	r10,r10,KERNELBASE@l;					      \
 	cmplw	r12,r10;						      \
 	blt+	2f;			/* addr below exception vectors */    \
 									      \
-	lis	r10,interrupt_end@h;					      \
-	ori	r10,r10,interrupt_end@l;				      \
+	lis	r10,DebugCrit@h;					      \
+	ori	r10,r10,DebugCrit@l;					      \
 	cmplw	r12,r10;						      \
 	bgt+	2f;			/* addr above exception vectors */    \
 									      \
@@ -385,7 +355,7 @@ label:
 
 #define DATA_STORAGE_EXCEPTION						      \
 	START_EXCEPTION(DataStorage)					      \
-	NORMAL_EXCEPTION_PROLOG(DATA_STORAGE);		      \
+	NORMAL_EXCEPTION_PROLOG;					      \
 	mfspr	r5,SPRN_ESR;		/* Grab the ESR and save it */	      \
 	stw	r5,_ESR(r11);						      \
 	mfspr	r4,SPRN_DEAR;		/* Grab the DEAR */		      \
@@ -393,7 +363,7 @@ label:
 
 #define INSTRUCTION_STORAGE_EXCEPTION					      \
 	START_EXCEPTION(InstructionStorage)				      \
-	NORMAL_EXCEPTION_PROLOG(INST_STORAGE);		      \
+	NORMAL_EXCEPTION_PROLOG;					      \
 	mfspr	r5,SPRN_ESR;		/* Grab the ESR and save it */	      \
 	stw	r5,_ESR(r11);						      \
 	mr      r4,r12;                 /* Pass SRR0 as arg2 */		      \
@@ -402,7 +372,7 @@ label:
 
 #define ALIGNMENT_EXCEPTION						      \
 	START_EXCEPTION(Alignment)					      \
-	NORMAL_EXCEPTION_PROLOG(ALIGNMENT);		      \
+	NORMAL_EXCEPTION_PROLOG;					      \
 	mfspr   r4,SPRN_DEAR;           /* Grab the DEAR and save it */	      \
 	stw     r4,_DEAR(r11);						      \
 	addi    r3,r1,STACK_FRAME_OVERHEAD;				      \
@@ -410,7 +380,7 @@ label:
 
 #define PROGRAM_EXCEPTION						      \
 	START_EXCEPTION(Program)					      \
-	NORMAL_EXCEPTION_PROLOG(PROGRAM);		      \
+	NORMAL_EXCEPTION_PROLOG;					      \
 	mfspr	r4,SPRN_ESR;		/* Grab the ESR and save it */	      \
 	stw	r4,_ESR(r11);						      \
 	addi	r3,r1,STACK_FRAME_OVERHEAD;				      \
@@ -418,7 +388,7 @@ label:
 
 #define DECREMENTER_EXCEPTION						      \
 	START_EXCEPTION(Decrementer)					      \
-	NORMAL_EXCEPTION_PROLOG(DECREMENTER);		      \
+	NORMAL_EXCEPTION_PROLOG;					      \
 	lis     r0,TSR_DIS@h;           /* Setup the DEC interrupt mask */    \
 	mtspr   SPRN_TSR,r0;		/* Clear the DEC interrupt */	      \
 	addi    r3,r1,STACK_FRAME_OVERHEAD;				      \
@@ -426,7 +396,7 @@ label:
 
 #define FP_UNAVAILABLE_EXCEPTION					      \
 	START_EXCEPTION(FloatingPointUnavailable)			      \
-	NORMAL_EXCEPTION_PROLOG(FP_UNAVAIL);		      \
+	NORMAL_EXCEPTION_PROLOG;					      \
 	beq	1f;							      \
 	bl	load_up_fpu;		/* if from user, just load it up */   \
 	b	fast_exception_return;					      \

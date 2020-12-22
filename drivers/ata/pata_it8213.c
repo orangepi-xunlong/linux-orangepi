@@ -10,6 +10,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -283,13 +284,24 @@ static struct pci_driver it8213_pci_driver = {
 	.id_table		= it8213_pci_tbl,
 	.probe			= it8213_init_one,
 	.remove			= ata_pci_remove_one,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend		= ata_pci_device_suspend,
 	.resume			= ata_pci_device_resume,
 #endif
 };
 
-module_pci_driver(it8213_pci_driver);
+static int __init it8213_init(void)
+{
+	return pci_register_driver(&it8213_pci_driver);
+}
+
+static void __exit it8213_exit(void)
+{
+	pci_unregister_driver(&it8213_pci_driver);
+}
+
+module_init(it8213_init);
+module_exit(it8213_exit);
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("SCSI low-level driver for the ITE 8213");

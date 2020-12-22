@@ -14,7 +14,7 @@
  * Memory copy routines
  */
 
-	.code16
+	.code16gcc
 	.text
 
 GLOBAL(memcpy)
@@ -30,7 +30,7 @@ GLOBAL(memcpy)
 	rep; movsb
 	popw	%di
 	popw	%si
-	retl
+	ret
 ENDPROC(memcpy)
 
 GLOBAL(memset)
@@ -45,25 +45,25 @@ GLOBAL(memset)
 	andw	$3, %cx
 	rep; stosb
 	popw	%di
-	retl
+	ret
 ENDPROC(memset)
 
 GLOBAL(copy_from_fs)
 	pushw	%ds
 	pushw	%fs
 	popw	%ds
-	calll	memcpy
+	call	memcpy
 	popw	%ds
-	retl
+	ret
 ENDPROC(copy_from_fs)
 
 GLOBAL(copy_to_fs)
 	pushw	%es
 	pushw	%fs
 	popw	%es
-	calll	memcpy
+	call	memcpy
 	popw	%es
-	retl
+	ret
 ENDPROC(copy_to_fs)
 
 #if 0 /* Not currently used, but can be enabled as needed */
@@ -71,17 +71,17 @@ GLOBAL(copy_from_gs)
 	pushw	%ds
 	pushw	%gs
 	popw	%ds
-	calll	memcpy
+	call	memcpy
 	popw	%ds
-	retl
+	ret
 ENDPROC(copy_from_gs)
 
 GLOBAL(copy_to_gs)
 	pushw	%es
 	pushw	%gs
 	popw	%es
-	calll	memcpy
+	call	memcpy
 	popw	%es
-	retl
+	ret
 ENDPROC(copy_to_gs)
 #endif

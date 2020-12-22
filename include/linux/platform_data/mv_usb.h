@@ -34,6 +34,8 @@ struct mv_usb_addon_irq {
 };
 
 struct mv_usb_platform_data {
+	unsigned int		clknum;
+	char			**clkname;
 	struct mv_usb_addon_irq	*id;	/* Only valid for OTG. ID pin change*/
 	struct mv_usb_addon_irq	*vbus;	/* valid for OTG/UDC. VBUS change*/
 
@@ -50,4 +52,13 @@ struct mv_usb_platform_data {
 	int	(*set_vbus)(unsigned int vbus);
 	int     (*private_init)(void __iomem *opregs, void __iomem *phyregs);
 };
+
+#ifndef CONFIG_HAVE_CLK
+/* Dummy stub for clk framework */
+#define clk_get(dev, id)       NULL
+#define clk_put(clock)         do {} while (0)
+#define clk_enable(clock)      do {} while (0)
+#define clk_disable(clock)     do {} while (0)
+#endif
+
 #endif

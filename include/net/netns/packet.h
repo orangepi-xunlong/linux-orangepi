@@ -5,10 +5,10 @@
 #define __NETNS_PACKET_H__
 
 #include <linux/rculist.h>
-#include <linux/mutex.h>
+#include <linux/spinlock.h>
 
 struct netns_packet {
-	struct mutex		sklist_lock;
+	spinlock_t		sklist_lock;
 	struct hlist_head	sklist;
 };
 

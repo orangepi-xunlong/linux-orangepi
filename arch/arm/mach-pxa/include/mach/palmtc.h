@@ -16,8 +16,6 @@
 #ifndef _INCLUDE_PALMTC_H_
 #define _INCLUDE_PALMTC_H_
 
-#include "irqs.h" /* PXA_GPIO_TO_IRQ */
-
 /** HERE ARE GPIOs **/
 
 /* GPIOs */

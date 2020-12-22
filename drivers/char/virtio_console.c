@@ -24,8 +24,6 @@
 #include <linux/err.h>
 #include <linux/freezer.h>
 #include <linux/fs.h>
-#include <linux/splice.h>
-#include <linux/pagemap.h>
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/poll.h>
@@ -37,10 +35,7 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/module.h>
-#include <linux/dma-mapping.h>
 #include "../tty/hvc/hvc_console.h"
-
-#define is_rproc_enabled IS_ENABLED(CONFIG_REMOTEPROC)
 
 /*
  * This is a global struct for storing common data for all the devices
@@ -60,6 +55,9 @@ struct ports_driver_data {
 	/* List of all the devices we're handling */
 	struct list_head portdevs;
 
+	/* Number of devices this driver is handling */
+	unsigned int index;
+
 	/*
 	 * This is used to keep track of the number of hvc consoles
 	 * spawned by this driver.  This number is given as the first
@@ -77,8 +75,8 @@ struct ports_driver_data {
 };
 static struct ports_driver_data pdrvdata;
 
-static DEFINE_SPINLOCK(pdrvdata_lock);
-static DECLARE_COMPLETION(early_console_added);
+DEFINE_SPINLOCK(pdrvdata_lock);
+DECLARE_COMPLETION(early_console_added);
 
 /* This struct holds information that's relevant only for console ports */
 struct console {
@@ -111,21 +109,6 @@ struct port_buffer {
 	size_t len;
 	/* offset in the buf from which to consume data */
 	size_t offset;
-
-	/* DMA address of buffer */
-	dma_addr_t dma;
-
-	/* Device we got DMA memory from */
-	struct device *dev;
-
-	/* List of pending dma buffers to free */
-	struct list_head list;
-
-	/* If sgpages == 0 then buf is used */
-	unsigned int sgpages;
-
-	/* sg is used if spages > 0. sg must be the last in is struct */
-	struct scatterlist sg[0];
 };
 
 /*
@@ -164,14 +147,11 @@ struct ports_device {
 	 */
 	struct virtqueue *c_ivq, *c_ovq;
 
-	/*
-	 * A control packet buffer for guest->host requests, protected
-	 * by c_ovq_lock.
-	 */
-	struct virtio_console_control cpkt;
-
 	/* Array of per-port IO virtqueues */
 	struct virtqueue **in_vqs, **out_vqs;
+
+	/* Used for numbering devices for sysfs and debugfs */
+	unsigned int drv_index;
 
 	/* Major number for this device.  Ports will be created as minors. */
 	int chr_major;
@@ -348,11 +328,6 @@ static bool is_console_port(struct port *port)
 	return false;
 }
 
-static bool is_rproc_serial(const struct virtio_device *vdev)
-{
-	return is_rproc_enabled && vdev->id.device == VIRTIO_ID_RPROC_SERIAL;
-}
-
 static inline bool use_multiport(struct ports_device *portdev)
 {
 	/*
@@ -360,114 +335,24 @@ static inline bool use_multiport(struct ports_device *portdev)
 	 * early_init
 	 */
 	if (!portdev->vdev)
-		return false;
-	return __virtio_test_bit(portdev->vdev, VIRTIO_CONSOLE_F_MULTIPORT);
+		return 0;
+	return portdev->vdev->features[0] & (1 << VIRTIO_CONSOLE_F_MULTIPORT);
 }
 
-static DEFINE_SPINLOCK(dma_bufs_lock);
-static LIST_HEAD(pending_free_dma_bufs);
-
-static void free_buf(struct port_buffer *buf, bool can_sleep)
+static void free_buf(struct port_buffer *buf)
 {
-	unsigned int i;
-
-	for (i = 0; i < buf->sgpages; i++) {
-		struct page *page = sg_page(&buf->sg[i]);
-		if (!page)
-			break;
-		put_page(page);
-	}
-
-	if (!buf->dev) {
-		kfree(buf->buf);
-	} else if (is_rproc_enabled) {
-		unsigned long flags;
-
-		/* dma_free_coherent requires interrupts to be enabled. */
-		if (!can_sleep) {
-			/* queue up dma-buffers to be freed later */
-			spin_lock_irqsave(&dma_bufs_lock, flags);
-			list_add_tail(&buf->list, &pending_free_dma_bufs);
-			spin_unlock_irqrestore(&dma_bufs_lock, flags);
-			return;
-		}
-		dma_free_coherent(buf->dev, buf->size, buf->buf, buf->dma);
-
-		/* Release device refcnt and allow it to be freed */
-		put_device(buf->dev);
-	}
-
+	kfree(buf->buf);
 	kfree(buf);
 }
 
-static void reclaim_dma_bufs(void)
-{
-	unsigned long flags;
-	struct port_buffer *buf, *tmp;
-	LIST_HEAD(tmp_list);
-
-	if (list_empty(&pending_free_dma_bufs))
-		return;
-
-	/* Create a copy of the pending_free_dma_bufs while holding the lock */
-	spin_lock_irqsave(&dma_bufs_lock, flags);
-	list_cut_position(&tmp_list, &pending_free_dma_bufs,
-			  pending_free_dma_bufs.prev);
-	spin_unlock_irqrestore(&dma_bufs_lock, flags);
-
-	/* Release the dma buffers, without irqs enabled */
-	list_for_each_entry_safe(buf, tmp, &tmp_list, list) {
-		list_del(&buf->list);
-		free_buf(buf, true);
-	}
-}
-
-static struct port_buffer *alloc_buf(struct virtqueue *vq, size_t buf_size,
-				     int pages)
+static struct port_buffer *alloc_buf(size_t buf_size)
 {
 	struct port_buffer *buf;
 
-	reclaim_dma_bufs();
-
-	/*
-	 * Allocate buffer and the sg list. The sg list array is allocated
-	 * directly after the port_buffer struct.
-	 */
-	buf = kmalloc(sizeof(*buf) + sizeof(struct scatterlist) * pages,
-		      GFP_KERNEL);
+	buf = kmalloc(sizeof(*buf), GFP_KERNEL);
 	if (!buf)
 		goto fail;
-
-	buf->sgpages = pages;
-	if (pages > 0) {
-		buf->dev = NULL;
-		buf->buf = NULL;
-		return buf;
-	}
-
-	if (is_rproc_serial(vq->vdev)) {
-		/*
-		 * Allocate DMA memory from ancestor. When a virtio
-		 * device is created by remoteproc, the DMA memory is
-		 * associated with the grandparent device:
-		 * vdev => rproc => platform-dev.
-		 * The code here would have been less quirky if
-		 * DMA_MEMORY_INCLUDES_CHILDREN had been supported
-		 * in dma-coherent.c
-		 */
-		if (!vq->vdev->dev.parent || !vq->vdev->dev.parent->parent)
-			goto free_buf;
-		buf->dev = vq->vdev->dev.parent->parent;
-
-		/* Increase device refcnt to avoid freeing it */
-		get_device(buf->dev);
-		buf->buf = dma_alloc_coherent(buf->dev, buf_size, &buf->dma,
-					      GFP_KERNEL);
-	} else {
-		buf->dev = NULL;
-		buf->buf = kmalloc(buf_size, GFP_KERNEL);
-	}
-
+	buf->buf = kzalloc(buf_size, GFP_KERNEL);
 	if (!buf->buf)
 		goto free_buf;
 	buf->len = 0;
@@ -512,10 +397,8 @@ static int add_inbuf(struct virtqueue *vq, struct port_buffer *buf)
 
 	sg_init_one(sg, buf->buf, buf->size);
 
-	ret = virtqueue_add_inbuf(vq, sg, 1, buf, GFP_ATOMIC);
+	ret = virtqueue_add_buf(vq, sg, 0, 1, buf, GFP_ATOMIC);
 	virtqueue_kick(vq);
-	if (!ret)
-		ret = vq->num_free;
 	return ret;
 }
 
@@ -536,7 +419,7 @@ static void discard_port_data(struct port *port)
 		port->stats.bytes_discarded += buf->len - buf->offset;
 		if (add_inbuf(port->in_vq, buf) < 0) {
 			err++;
-			free_buf(buf, false);
+			free_buf(buf);
 		}
 		port->inbuf = NULL;
 		buf = get_inbuf(port);
@@ -565,29 +448,27 @@ static ssize_t __send_control_msg(struct ports_device *portdev, u32 port_id,
 				  unsigned int event, unsigned int value)
 {
 	struct scatterlist sg[1];
+	struct virtio_console_control cpkt;
 	struct virtqueue *vq;
 	unsigned int len;
 
 	if (!use_multiport(portdev))
 		return 0;
 
+	cpkt.id = port_id;
+	cpkt.event = event;
+	cpkt.value = value;
+
 	vq = portdev->c_ovq;
 
+	sg_init_one(sg, &cpkt, sizeof(cpkt));
+
 	spin_lock(&portdev->c_ovq_lock);
-
-	portdev->cpkt.id = cpu_to_virtio32(portdev->vdev, port_id);
-	portdev->cpkt.event = cpu_to_virtio16(portdev->vdev, event);
-	portdev->cpkt.value = cpu_to_virtio16(portdev->vdev, value);
-
-	sg_init_one(sg, &portdev->cpkt, sizeof(struct virtio_console_control));
-
-	if (virtqueue_add_outbuf(vq, sg, 1, &portdev->cpkt, GFP_ATOMIC) == 0) {
+	if (virtqueue_add_buf(vq, sg, 1, 0, &cpkt, GFP_ATOMIC) >= 0) {
 		virtqueue_kick(vq);
-		while (!virtqueue_get_buf(vq, &len)
-			&& !virtqueue_is_broken(vq))
+		while (!virtqueue_get_buf(vq, &len))
 			cpu_relax();
 	}
-
 	spin_unlock(&portdev->c_ovq_lock);
 	return 0;
 }
@@ -601,11 +482,10 @@ static ssize_t send_control_msg(struct port *port, unsigned int event,
 	return 0;
 }
 
-
 /* Callers must take the port->outvq_lock */
 static void reclaim_consumed_buffers(struct port *port)
 {
-	struct port_buffer *buf;
+	void *buf;
 	unsigned int len;
 
 	if (!port->portdev) {
@@ -613,17 +493,17 @@ static void reclaim_consumed_buffers(struct port *port)
 		return;
 	}
 	while ((buf = virtqueue_get_buf(port->out_vq, &len))) {
-		free_buf(buf, false);
+		kfree(buf);
 		port->outvq_full = false;
 	}
 }
 
-static ssize_t __send_to_port(struct port *port, struct scatterlist *sg,
-			      int nents, size_t in_count,
-			      void *data, bool nonblock)
+static ssize_t send_buf(struct port *port, void *in_buf, size_t in_count,
+			bool nonblock)
 {
+	struct scatterlist sg[1];
 	struct virtqueue *out_vq;
-	int err;
+	ssize_t ret;
 	unsigned long flags;
 	unsigned int len;
 
@@ -633,17 +513,18 @@ static ssize_t __send_to_port(struct port *port, struct scatterlist *sg,
 
 	reclaim_consumed_buffers(port);
 
-	err = virtqueue_add_outbuf(out_vq, sg, nents, data, GFP_ATOMIC);
+	sg_init_one(sg, in_buf, in_count);
+	ret = virtqueue_add_buf(out_vq, sg, 1, 0, in_buf, GFP_ATOMIC);
 
 	/* Tell Host to go! */
 	virtqueue_kick(out_vq);
 
-	if (err) {
+	if (ret < 0) {
 		in_count = 0;
 		goto done;
 	}
 
-	if (out_vq->num_free == 0)
+	if (ret == 0)
 		port->outvq_full = true;
 
 	if (nonblock)
@@ -658,8 +539,7 @@ static ssize_t __send_to_port(struct port *port, struct scatterlist *sg,
 	 * we need to kmalloc a GFP_ATOMIC buffer each time the
 	 * console driver writes something out.
 	 */
-	while (!virtqueue_get_buf(out_vq, &len)
-		&& !virtqueue_is_broken(out_vq))
+	while (!virtqueue_get_buf(out_vq, &len))
 		cpu_relax();
 done:
 	spin_unlock_irqrestore(&port->outvq_lock, flags);
@@ -676,8 +556,8 @@ done:
  * Give out the data that's requested from the buffer that we have
  * queued up.
  */
-static ssize_t fill_readbuf(struct port *port, char __user *out_buf,
-			    size_t out_count, bool to_user)
+static ssize_t fill_readbuf(struct port *port, char *out_buf, size_t out_count,
+			    bool to_user)
 {
 	struct port_buffer *buf;
 	unsigned long flags;
@@ -695,8 +575,7 @@ static ssize_t fill_readbuf(struct port *port, char __user *out_buf,
 		if (ret)
 			return -EFAULT;
 	} else {
-		memcpy((__force char *)out_buf, buf->buf + buf->offset,
-		       out_count);
+		memcpy(out_buf, buf->buf + buf->offset, out_count);
 	}
 
 	buf->offset += out_count;
@@ -798,9 +677,21 @@ static ssize_t port_fops_read(struct file *filp, char __user *ubuf,
 	return fill_readbuf(port, ubuf, count, true);
 }
 
-static int wait_port_writable(struct port *port, bool nonblock)
+static ssize_t port_fops_write(struct file *filp, const char __user *ubuf,
+			       size_t count, loff_t *offp)
 {
-	int ret;
+	struct port *port;
+	char *buf;
+	ssize_t ret;
+	bool nonblock;
+
+	/* Userspace could be out to fool us */
+	if (!count)
+		return 0;
+
+	port = filp->private_data;
+
+	nonblock = filp->f_flags & O_NONBLOCK;
 
 	if (will_write_block(port)) {
 		if (nonblock)
@@ -815,37 +706,13 @@ static int wait_port_writable(struct port *port, bool nonblock)
 	if (!port->guest_connected)
 		return -ENODEV;
 
-	return 0;
-}
-
-static ssize_t port_fops_write(struct file *filp, const char __user *ubuf,
-			       size_t count, loff_t *offp)
-{
-	struct port *port;
-	struct port_buffer *buf;
-	ssize_t ret;
-	bool nonblock;
-	struct scatterlist sg[1];
-
-	/* Userspace could be out to fool us */
-	if (!count)
-		return 0;
-
-	port = filp->private_data;
-
-	nonblock = filp->f_flags & O_NONBLOCK;
-
-	ret = wait_port_writable(port, nonblock);
-	if (ret < 0)
-		return ret;
-
 	count = min((size_t)(32 * 1024), count);
 
-	buf = alloc_buf(port->out_vq, count, 0);
+	buf = kmalloc(count, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
-	ret = copy_from_user(buf->buf, ubuf, count);
+	ret = copy_from_user(buf, ubuf, count);
 	if (ret) {
 		ret = -EFAULT;
 		goto free_buf;
@@ -859,129 +726,14 @@ static ssize_t port_fops_write(struct file *filp, const char __user *ubuf,
 	 * through to the host.
 	 */
 	nonblock = true;
-	sg_init_one(sg, buf->buf, count);
-	ret = __send_to_port(port, sg, 1, count, buf, nonblock);
+	ret = send_buf(port, buf, count, nonblock);
 
 	if (nonblock && ret > 0)
 		goto out;
 
 free_buf:
-	free_buf(buf, true);
+	kfree(buf);
 out:
-	return ret;
-}
-
-struct sg_list {
-	unsigned int n;
-	unsigned int size;
-	size_t len;
-	struct scatterlist *sg;
-};
-
-static int pipe_to_sg(struct pipe_inode_info *pipe, struct pipe_buffer *buf,
-			struct splice_desc *sd)
-{
-	struct sg_list *sgl = sd->u.data;
-	unsigned int offset, len;
-
-	if (sgl->n == sgl->size)
-		return 0;
-
-	/* Try lock this page */
-	if (pipe_buf_steal(pipe, buf) == 0) {
-		/* Get reference and unlock page for moving */
-		get_page(buf->page);
-		unlock_page(buf->page);
-
-		len = min(buf->len, sd->len);
-		sg_set_page(&(sgl->sg[sgl->n]), buf->page, len, buf->offset);
-	} else {
-		/* Failback to copying a page */
-		struct page *page = alloc_page(GFP_KERNEL);
-		char *src;
-
-		if (!page)
-			return -ENOMEM;
-
-		offset = sd->pos & ~PAGE_MASK;
-
-		len = sd->len;
-		if (len + offset > PAGE_SIZE)
-			len = PAGE_SIZE - offset;
-
-		src = kmap_atomic(buf->page);
-		memcpy(page_address(page) + offset, src + buf->offset, len);
-		kunmap_atomic(src);
-
-		sg_set_page(&(sgl->sg[sgl->n]), page, len, offset);
-	}
-	sgl->n++;
-	sgl->len += len;
-
-	return len;
-}
-
-/* Faster zero-copy write by splicing */
-static ssize_t port_fops_splice_write(struct pipe_inode_info *pipe,
-				      struct file *filp, loff_t *ppos,
-				      size_t len, unsigned int flags)
-{
-	struct port *port = filp->private_data;
-	struct sg_list sgl;
-	ssize_t ret;
-	struct port_buffer *buf;
-	struct splice_desc sd = {
-		.total_len = len,
-		.flags = flags,
-		.pos = *ppos,
-		.u.data = &sgl,
-	};
-
-	/*
-	 * Rproc_serial does not yet support splice. To support splice
-	 * pipe_to_sg() must allocate dma-buffers and copy content from
-	 * regular pages to dma pages. And alloc_buf and free_buf must
-	 * support allocating and freeing such a list of dma-buffers.
-	 */
-	if (is_rproc_serial(port->out_vq->vdev))
-		return -EINVAL;
-
-	/*
-	 * pipe->nrbufs == 0 means there are no data to transfer,
-	 * so this returns just 0 for no data.
-	 */
-	pipe_lock(pipe);
-	if (!pipe->nrbufs) {
-		ret = 0;
-		goto error_out;
-	}
-
-	ret = wait_port_writable(port, filp->f_flags & O_NONBLOCK);
-	if (ret < 0)
-		goto error_out;
-
-	buf = alloc_buf(port->out_vq, 0, pipe->nrbufs);
-	if (!buf) {
-		ret = -ENOMEM;
-		goto error_out;
-	}
-
-	sgl.n = 0;
-	sgl.len = 0;
-	sgl.size = pipe->nrbufs;
-	sgl.sg = buf->sg;
-	sg_init_table(sgl.sg, sgl.size);
-	ret = __splice_from_pipe(pipe, &sd, pipe_to_sg);
-	pipe_unlock(pipe);
-	if (likely(ret > 0))
-		ret = __send_to_port(port, buf->sg, sgl.n, sgl.len, buf, true);
-
-	if (unlikely(ret <= 0))
-		free_buf(buf, true);
-	return ret;
-
-error_out:
-	pipe_unlock(pipe);
 	return ret;
 }
 
@@ -1030,7 +782,6 @@ static int port_fops_release(struct inode *inode, struct file *filp)
 	reclaim_consumed_buffers(port);
 	spin_unlock_irq(&port->outvq_lock);
 
-	reclaim_dma_bufs();
 	/*
 	 * Locks aren't necessary here as a port can't be opened after
 	 * unplug, and if a port isn't unplugged, a kref would already
@@ -1071,7 +822,7 @@ static int port_fops_open(struct inode *inode, struct file *filp)
 	spin_lock_irq(&port->inbuf_lock);
 	if (port->guest_connected) {
 		spin_unlock_irq(&port->inbuf_lock);
-		ret = -EBUSY;
+		ret = -EMFILE;
 		goto out;
 	}
 
@@ -1117,7 +868,6 @@ static const struct file_operations port_fops = {
 	.open  = port_fops_open,
 	.read  = port_fops_read,
 	.write = port_fops_write,
-	.splice_write = port_fops_splice_write,
 	.poll  = port_fops_poll,
 	.release = port_fops_release,
 	.fasync = port_fops_fasync,
@@ -1135,9 +885,6 @@ static const struct file_operations port_fops = {
 static int put_chars(u32 vtermno, const char *buf, int count)
 {
 	struct port *port;
-	struct scatterlist sg[1];
-	void *data;
-	int ret;
 
 	if (unlikely(early_put_chars))
 		return early_put_chars(vtermno, buf, count);
@@ -1146,14 +893,7 @@ static int put_chars(u32 vtermno, const char *buf, int count)
 	if (!port)
 		return -EPIPE;
 
-	data = kmemdup(buf, count, GFP_ATOMIC);
-	if (!data)
-		return -ENOMEM;
-
-	sg_init_one(sg, data, count);
-	ret = __send_to_port(port, sg, 1, count, data, false);
-	kfree(data);
-	return ret;
+	return send_buf(port, (void *)buf, count, false);
 }
 
 /*
@@ -1178,7 +918,7 @@ static int get_chars(u32 vtermno, char *buf, int count)
 	/* If we don't have an input queue yet, we can't get input. */
 	BUG_ON(!port->in_vq);
 
-	return fill_readbuf(port, (__force char __user *)buf, count, false);
+	return fill_readbuf(port, buf, count, false);
 }
 
 static void resize_console(struct port *port)
@@ -1190,10 +930,7 @@ static void resize_console(struct port *port)
 		return;
 
 	vdev = port->portdev->vdev;
-
-	/* Don't test F_SIZE at all if we're rproc: not a valid feature! */
-	if (!is_rproc_serial(vdev) &&
-	    virtio_has_feature(vdev, VIRTIO_CONSOLE_F_SIZE))
+	if (virtio_has_feature(vdev, VIRTIO_CONSOLE_F_SIZE))
 		hvc_resize(port->cons.hvc, port->cons.ws);
 }
 
@@ -1241,7 +978,7 @@ int __init virtio_cons_early_init(int (*put_chars)(u32, const char *, int))
 	return hvc_instantiate(0, 0, &hv_ops);
 }
 
-static int init_port_console(struct port *port)
+int init_port_console(struct port *port)
 {
 	int ret;
 
@@ -1377,7 +1114,7 @@ static unsigned int fill_queue(struct virtqueue *vq, spinlock_t *lock)
 
 	nr_added_bufs = 0;
 	do {
-		buf = alloc_buf(vq, PAGE_SIZE, 0);
+		buf = alloc_buf(PAGE_SIZE);
 		if (!buf)
 			break;
 
@@ -1385,7 +1122,7 @@ static unsigned int fill_queue(struct virtqueue *vq, spinlock_t *lock)
 		ret = add_inbuf(vq, buf);
 		if (ret < 0) {
 			spin_unlock_irq(lock);
-			free_buf(buf, true);
+			free_buf(buf);
 			break;
 		}
 		nr_added_bufs++;
@@ -1405,6 +1142,7 @@ static int add_port(struct ports_device *portdev, u32 id)
 {
 	char debugfs_name[16];
 	struct port *port;
+	struct port_buffer *buf;
 	dev_t devt;
 	unsigned int nr_added_bufs;
 	int err;
@@ -1451,7 +1189,7 @@ static int add_port(struct ports_device *portdev, u32 id)
 	}
 	port->dev = device_create(pdrvdata.class, &port->portdev->vdev->dev,
 				  devt, port, "vport%up%u",
-				  port->portdev->vdev->index, id);
+				  port->portdev->drv_index, id);
 	if (IS_ERR(port->dev)) {
 		err = PTR_ERR(port->dev);
 		dev_err(&port->portdev->vdev->dev,
@@ -1472,18 +1210,10 @@ static int add_port(struct ports_device *portdev, u32 id)
 		goto free_device;
 	}
 
-	if (is_rproc_serial(port->portdev->vdev))
-		/*
-		 * For rproc_serial assume remote processor is connected.
-		 * rproc_serial does not want the console port, only
-		 * the generic port implementation.
-		 */
-		port->host_connected = true;
-	else if (!use_multiport(port->portdev)) {
-		/*
-		 * If we're not using multiport support,
-		 * this has to be a console port.
-		 */
+	/*
+	 * If we're not using multiport support, this has to be a console port
+	 */
+	if (!use_multiport(port->portdev)) {
 		err = init_port_console(port);
 		if (err)
 			goto free_inbufs;
@@ -1505,8 +1235,8 @@ static int add_port(struct ports_device *portdev, u32 id)
 		 * Finally, create the debugfs file that we can use to
 		 * inspect a port's state at any time
 		 */
-		snprintf(debugfs_name, sizeof(debugfs_name), "vport%up%u",
-			 port->portdev->vdev->index, id);
+		sprintf(debugfs_name, "vport%up%u",
+			port->portdev->drv_index, id);
 		port->debugfs_file = debugfs_create_file(debugfs_name, 0444,
 							 pdrvdata.debugfs_dir,
 							 port,
@@ -1515,6 +1245,8 @@ static int add_port(struct ports_device *portdev, u32 id)
 	return 0;
 
 free_inbufs:
+	while ((buf = virtqueue_detach_unused_buf(port->in_vq)))
+		free_buf(buf);
 free_device:
 	device_destroy(pdrvdata.class, port->dev->devt);
 free_cdev:
@@ -1539,14 +1271,16 @@ static void remove_port(struct kref *kref)
 
 static void remove_port_data(struct port *port)
 {
-	spin_lock_irq(&port->inbuf_lock);
+	struct port_buffer *buf;
+
 	/* Remove unused data this port might have received. */
 	discard_port_data(port);
-	spin_unlock_irq(&port->inbuf_lock);
 
-	spin_lock_irq(&port->outvq_lock);
 	reclaim_consumed_buffers(port);
-	spin_unlock_irq(&port->outvq_lock);
+
+	/* Remove buffers we queued up for the Host to send us data in. */
+	while ((buf = virtqueue_detach_unused_buf(port->in_vq)))
+		free_buf(buf);
 }
 
 /*
@@ -1560,7 +1294,6 @@ static void unplug_port(struct port *port)
 	list_del(&port->list);
 	spin_unlock_irq(&port->portdev->ports_lock);
 
-	spin_lock_irq(&port->inbuf_lock);
 	if (port->guest_connected) {
 		/* Let the app know the port is going down. */
 		send_sigio_to_port(port);
@@ -1571,7 +1304,6 @@ static void unplug_port(struct port *port)
 
 		wake_up_interruptible(&port->waitqueue);
 	}
-	spin_unlock_irq(&port->inbuf_lock);
 
 	if (is_console_port(port)) {
 		spin_lock_irq(&pdrvdata_lock);
@@ -1593,8 +1325,9 @@ static void unplug_port(struct port *port)
 	device_destroy(pdrvdata.class, port->dev->devt);
 	cdev_del(port->cdev);
 
-	debugfs_remove(port->debugfs_file);
 	kfree(port->name);
+
+	debugfs_remove(port->debugfs_file);
 
 	/*
 	 * Locks around here are not necessary - a port can't be
@@ -1605,8 +1338,7 @@ static void unplug_port(struct port *port)
 }
 
 /* Any private messages that the Host and Guest want to share */
-static void handle_control_message(struct virtio_device *vdev,
-				   struct ports_device *portdev,
+static void handle_control_message(struct ports_device *portdev,
 				   struct port_buffer *buf)
 {
 	struct virtio_console_control *cpkt;
@@ -1616,16 +1348,15 @@ static void handle_control_message(struct virtio_device *vdev,
 
 	cpkt = (struct virtio_console_control *)(buf->buf + buf->offset);
 
-	port = find_port_by_id(portdev, virtio32_to_cpu(vdev, cpkt->id));
-	if (!port &&
-	    cpkt->event != cpu_to_virtio16(vdev, VIRTIO_CONSOLE_PORT_ADD)) {
+	port = find_port_by_id(portdev, cpkt->id);
+	if (!port && cpkt->event != VIRTIO_CONSOLE_PORT_ADD) {
 		/* No valid header at start of buffer.  Drop it. */
 		dev_dbg(&portdev->vdev->dev,
 			"Invalid index %u in control packet\n", cpkt->id);
 		return;
 	}
 
-	switch (virtio16_to_cpu(vdev, cpkt->event)) {
+	switch (cpkt->event) {
 	case VIRTIO_CONSOLE_PORT_ADD:
 		if (port) {
 			dev_dbg(&portdev->vdev->dev,
@@ -1633,15 +1364,13 @@ static void handle_control_message(struct virtio_device *vdev,
 			send_control_msg(port, VIRTIO_CONSOLE_PORT_READY, 1);
 			break;
 		}
-		if (virtio32_to_cpu(vdev, cpkt->id) >=
-		    portdev->config.max_nr_ports) {
+		if (cpkt->id >= portdev->config.max_nr_ports) {
 			dev_warn(&portdev->vdev->dev,
-				"Request for adding port with "
-				"out-of-bound id %u, max. supported id: %u\n",
+				"Request for adding port with out-of-bound id %u, max. supported id: %u\n",
 				cpkt->id, portdev->config.max_nr_ports - 1);
 			break;
 		}
-		add_port(portdev, virtio32_to_cpu(vdev, cpkt->id));
+		add_port(portdev, cpkt->id);
 		break;
 	case VIRTIO_CONSOLE_PORT_REMOVE:
 		unplug_port(port);
@@ -1677,7 +1406,7 @@ static void handle_control_message(struct virtio_device *vdev,
 		break;
 	}
 	case VIRTIO_CONSOLE_PORT_OPEN:
-		port->host_connected = virtio16_to_cpu(vdev, cpkt->value);
+		port->host_connected = cpkt->value;
 		wake_up_interruptible(&port->waitqueue);
 		/*
 		 * If the host port got closed and the host had any
@@ -1692,9 +1421,7 @@ static void handle_control_message(struct virtio_device *vdev,
 		 * If the guest is connected, it'll be interested in
 		 * knowing the host connection state changed.
 		 */
-		spin_lock_irq(&port->inbuf_lock);
 		send_sigio_to_port(port);
-		spin_unlock_irq(&port->inbuf_lock);
 		break;
 	case VIRTIO_CONSOLE_PORT_NAME:
 		/*
@@ -1759,25 +1486,16 @@ static void control_work_handler(struct work_struct *work)
 		buf->len = len;
 		buf->offset = 0;
 
-		handle_control_message(vq->vdev, portdev, buf);
+		handle_control_message(portdev, buf);
 
 		spin_lock(&portdev->c_ivq_lock);
 		if (add_inbuf(portdev->c_ivq, buf) < 0) {
 			dev_warn(&portdev->vdev->dev,
 				 "Error adding buffer to queue\n");
-			free_buf(buf, false);
+			free_buf(buf);
 		}
 	}
 	spin_unlock(&portdev->c_ivq_lock);
-}
-
-static void flush_bufs(struct virtqueue *vq, bool can_sleep)
-{
-	struct port_buffer *buf;
-	unsigned int len;
-
-	while ((buf = virtqueue_get_buf(vq, &len)))
-		free_buf(buf, can_sleep);
 }
 
 static void out_intr(struct virtqueue *vq)
@@ -1785,10 +1503,8 @@ static void out_intr(struct virtqueue *vq)
 	struct port *port;
 
 	port = find_port_by_vq(vq->vdev->priv, vq);
-	if (!port) {
-		flush_bufs(vq, false);
+	if (!port)
 		return;
-	}
 
 	wake_up_interruptible(&port->waitqueue);
 }
@@ -1799,40 +1515,28 @@ static void in_intr(struct virtqueue *vq)
 	unsigned long flags;
 
 	port = find_port_by_vq(vq->vdev->priv, vq);
-	if (!port) {
-		flush_bufs(vq, false);
+	if (!port)
 		return;
-	}
 
 	spin_lock_irqsave(&port->inbuf_lock, flags);
 	port->inbuf = get_inbuf(port);
 
 	/*
-	 * Normally the port should not accept data when the port is
-	 * closed. For generic serial ports, the host won't (shouldn't)
-	 * send data till the guest is connected. But this condition
+	 * Don't queue up data when port is closed.  This condition
 	 * can be reached when a console port is not yet connected (no
-	 * tty is spawned) and the other side sends out data over the
-	 * vring, or when a remote devices start sending data before
-	 * the ports are opened.
-	 *
-	 * A generic serial port will discard data if not connected,
-	 * while console ports and rproc-serial ports accepts data at
-	 * any time. rproc-serial is initiated with guest_connected to
-	 * false because port_fops_open expects this. Console ports are
-	 * hooked up with an HVC console and is initialized with
-	 * guest_connected to true.
+	 * tty is spawned) and the host sends out data to console
+	 * ports.  For generic serial ports, the host won't
+	 * (shouldn't) send data till the guest is connected.
 	 */
-
-	if (!port->guest_connected && !is_rproc_serial(port->portdev->vdev))
+	if (!port->guest_connected)
 		discard_port_data(port);
-
-	/* Send a SIGIO indicating new data in case the process asked for it */
-	send_sigio_to_port(port);
 
 	spin_unlock_irqrestore(&port->inbuf_lock, flags);
 
 	wake_up_interruptible(&port->waitqueue);
+
+	/* Send a SIGIO indicating new data in case the process asked for it */
+	send_sigio_to_port(port);
 
 	if (is_console_port(port) && hvc_poll(port->cons.hvc))
 		hvc_kick();
@@ -1860,15 +1564,19 @@ static void config_work_handler(struct work_struct *work)
 {
 	struct ports_device *portdev;
 
-	portdev = container_of(work, struct ports_device, config_work);
+	portdev = container_of(work, struct ports_device, control_work);
 	if (!use_multiport(portdev)) {
 		struct virtio_device *vdev;
 		struct port *port;
 		u16 rows, cols;
 
 		vdev = portdev->vdev;
-		virtio_cread(vdev, struct virtio_console_config, cols, &cols);
-		virtio_cread(vdev, struct virtio_console_config, rows, &rows);
+		vdev->config->get(vdev,
+				  offsetof(struct virtio_console_config, cols),
+				  &cols, sizeof(u16));
+		vdev->config->get(vdev,
+				  offsetof(struct virtio_console_config, rows),
+				  &rows, sizeof(u16));
 
 		port = find_port_by_id(portdev, 0);
 		set_console_size(port, rows, cols);
@@ -1977,15 +1685,6 @@ static const struct file_operations portdev_fops = {
 
 static void remove_vqs(struct ports_device *portdev)
 {
-	struct virtqueue *vq;
-
-	virtio_device_for_each_vq(portdev->vdev, vq) {
-		struct port_buffer *buf;
-
-		flush_bufs(vq, true);
-		while ((buf = virtqueue_detach_unused_buf(vq)))
-			free_buf(buf, true);
-	}
 	portdev->vdev->config->del_vqs(portdev->vdev);
 	kfree(portdev->in_vqs);
 	kfree(portdev->out_vqs);
@@ -2000,10 +1699,10 @@ static void remove_controlq_data(struct ports_device *portdev)
 		return;
 
 	while ((buf = virtqueue_get_buf(portdev->c_ivq, &len)))
-		free_buf(buf, true);
+		free_buf(buf);
 
 	while ((buf = virtqueue_detach_unused_buf(portdev->c_ivq)))
-		free_buf(buf, true);
+		free_buf(buf);
 }
 
 /*
@@ -2014,21 +1713,12 @@ static void remove_controlq_data(struct ports_device *portdev)
  * config space to see how many ports the host has spawned.  We
  * initialize each port found.
  */
-static int virtcons_probe(struct virtio_device *vdev)
+static int __devinit virtcons_probe(struct virtio_device *vdev)
 {
 	struct ports_device *portdev;
 	int err;
 	bool multiport;
 	bool early = early_put_chars != NULL;
-
-	/* We only need a config space if features are offered */
-	if (!vdev->config->get &&
-	    (virtio_has_feature(vdev, VIRTIO_CONSOLE_F_SIZE)
-	     || virtio_has_feature(vdev, VIRTIO_CONSOLE_F_MULTIPORT))) {
-		dev_err(&vdev->dev, "%s failure: config access disabled\n",
-			__func__);
-		return -EINVAL;
-	}
 
 	/* Ensure to read early_put_chars now */
 	barrier();
@@ -2043,26 +1733,27 @@ static int virtcons_probe(struct virtio_device *vdev)
 	portdev->vdev = vdev;
 	vdev->priv = portdev;
 
+	spin_lock_irq(&pdrvdata_lock);
+	portdev->drv_index = pdrvdata.index++;
+	spin_unlock_irq(&pdrvdata_lock);
+
 	portdev->chr_major = register_chrdev(0, "virtio-portsdev",
 					     &portdev_fops);
 	if (portdev->chr_major < 0) {
 		dev_err(&vdev->dev,
 			"Error %d registering chrdev for device %u\n",
-			portdev->chr_major, vdev->index);
+			portdev->chr_major, portdev->drv_index);
 		err = portdev->chr_major;
 		goto free;
 	}
 
 	multiport = false;
 	portdev->config.max_nr_ports = 1;
-
-	/* Don't test MULTIPORT at all if we're rproc: not a valid feature! */
-	if (!is_rproc_serial(vdev) &&
-	    virtio_cread_feature(vdev, VIRTIO_CONSOLE_F_MULTIPORT,
-				 struct virtio_console_config, max_nr_ports,
-				 &portdev->config.max_nr_ports) == 0) {
+	if (virtio_config_val(vdev, VIRTIO_CONSOLE_F_MULTIPORT,
+			      offsetof(struct virtio_console_config,
+				       max_nr_ports),
+			      &portdev->config.max_nr_ports) == 0)
 		multiport = true;
-	}
 
 	err = init_vqs(portdev);
 	if (err < 0) {
@@ -2072,8 +1763,6 @@ static int virtcons_probe(struct virtio_device *vdev)
 
 	spin_lock_init(&portdev->ports_lock);
 	INIT_LIST_HEAD(&portdev->ports);
-
-	virtio_device_ready(portdev->vdev);
 
 	INIT_WORK(&portdev->config_work, &config_work_handler);
 	INIT_WORK(&portdev->control_work, &control_work_handler);
@@ -2181,17 +1870,7 @@ static unsigned int features[] = {
 	VIRTIO_CONSOLE_F_MULTIPORT,
 };
 
-static struct virtio_device_id rproc_serial_id_table[] = {
-#if IS_ENABLED(CONFIG_REMOTEPROC)
-	{ VIRTIO_ID_RPROC_SERIAL, VIRTIO_DEV_ANY_ID },
-#endif
-	{ 0 },
-};
-
-static unsigned int rproc_serial_features[] = {
-};
-
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int virtcons_freeze(struct virtio_device *vdev)
 {
 	struct ports_device *portdev;
@@ -2238,8 +1917,6 @@ static int virtcons_restore(struct virtio_device *vdev)
 	if (ret)
 		return ret;
 
-	virtio_device_ready(portdev->vdev);
-
 	if (use_multiport(portdev))
 		fill_queue(portdev->c_ivq, &portdev->c_ivq_lock);
 
@@ -2272,20 +1949,10 @@ static struct virtio_driver virtio_console = {
 	.probe =	virtcons_probe,
 	.remove =	virtcons_remove,
 	.config_changed = config_intr,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.freeze =	virtcons_freeze,
 	.restore =	virtcons_restore,
 #endif
-};
-
-static struct virtio_driver virtio_rproc_serial = {
-	.feature_table = rproc_serial_features,
-	.feature_table_size = ARRAY_SIZE(rproc_serial_features),
-	.driver.name =	"virtio_rproc_serial",
-	.driver.owner =	THIS_MODULE,
-	.id_table =	rproc_serial_id_table,
-	.probe =	virtcons_probe,
-	.remove =	virtcons_remove,
 };
 
 static int __init init(void)
@@ -2300,40 +1967,23 @@ static int __init init(void)
 	}
 
 	pdrvdata.debugfs_dir = debugfs_create_dir("virtio-ports", NULL);
-	if (!pdrvdata.debugfs_dir)
-		pr_warning("Error creating debugfs dir for virtio-ports\n");
+	if (!pdrvdata.debugfs_dir) {
+		pr_warning("Error %ld creating debugfs dir for virtio-ports\n",
+			   PTR_ERR(pdrvdata.debugfs_dir));
+	}
 	INIT_LIST_HEAD(&pdrvdata.consoles);
 	INIT_LIST_HEAD(&pdrvdata.portdevs);
 
-	err = register_virtio_driver(&virtio_console);
-	if (err < 0) {
-		pr_err("Error %d registering virtio driver\n", err);
-		goto free;
-	}
-	err = register_virtio_driver(&virtio_rproc_serial);
-	if (err < 0) {
-		pr_err("Error %d registering virtio rproc serial driver\n",
-		       err);
-		goto unregister;
-	}
-	return 0;
-unregister:
-	unregister_virtio_driver(&virtio_console);
-free:
-	debugfs_remove_recursive(pdrvdata.debugfs_dir);
-	class_destroy(pdrvdata.class);
-	return err;
+	return register_virtio_driver(&virtio_console);
 }
 
 static void __exit fini(void)
 {
-	reclaim_dma_bufs();
-
 	unregister_virtio_driver(&virtio_console);
-	unregister_virtio_driver(&virtio_rproc_serial);
 
 	class_destroy(pdrvdata.class);
-	debugfs_remove_recursive(pdrvdata.debugfs_dir);
+	if (pdrvdata.debugfs_dir)
+		debugfs_remove_recursive(pdrvdata.debugfs_dir);
 }
 module_init(init);
 module_exit(fini);

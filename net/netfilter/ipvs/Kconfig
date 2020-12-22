@@ -28,11 +28,12 @@ if IP_VS
 config	IP_VS_IPV6
 	bool "IPv6 support for IPVS"
 	depends on IPV6 = y || IP_VS = IPV6
-	select IP6_NF_IPTABLES
 	---help---
-	  Add IPv6 support to IPVS.
+	  Add IPv6 support to IPVS. This is incomplete and might be dangerous.
 
-	  Say Y if unsure.
+	  See http://www.mindbasket.com/ipvs for more information.
+
+	  Say N if unsure.
 
 config	IP_VS_DEBUG
 	bool "IP virtual server debugging"
@@ -152,27 +153,6 @@ config	IP_VS_WLC
 	  If you want to compile it in kernel, say Y. To compile it as a
 	  module, choose M here. If unsure, say N.
 
-config  IP_VS_FO
-		tristate "weighted failover scheduling"
-	---help---
-	  The weighted failover scheduling algorithm directs network
-	  connections to the server with the highest weight that is
-	  currently available.
-
-	  If you want to compile it in kernel, say Y. To compile it as a
-	  module, choose M here. If unsure, say N.
-
-config  IP_VS_OVF
-	tristate "weighted overflow scheduling"
-	---help---
-	  The weighted overflow scheduling algorithm directs network
-	  connections to the server with the highest weight that is
-	  currently available and overflows to the next when active
-	  connections exceed the node's weight.
-
-	  If you want to compile it in kernel, say Y. To compile it as a
-	  module, choose M here. If unsure, say N.
-
 config	IP_VS_LBLC
 	tristate "locality-based least-connection scheduling"
 	---help---
@@ -270,8 +250,7 @@ comment 'IPVS application helper'
 
 config	IP_VS_FTP
   	tristate "FTP protocol helper"
-	depends on IP_VS_PROTO_TCP && NF_CONNTRACK && NF_NAT && \
-		NF_CONNTRACK_FTP
+        depends on IP_VS_PROTO_TCP && NF_CONNTRACK && NF_NAT
 	select IP_VS_NFCT
 	---help---
 	  FTP is a protocol that transfers IP address and/or port number in

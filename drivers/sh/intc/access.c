@@ -75,61 +75,54 @@ unsigned long intc_get_field_from_handle(unsigned int value, unsigned int handle
 static unsigned long test_8(unsigned long addr, unsigned long h,
 			    unsigned long ignore)
 {
-	void __iomem *ptr = (void __iomem *)addr;
-	return intc_get_field_from_handle(__raw_readb(ptr), h);
+	return intc_get_field_from_handle(__raw_readb(addr), h);
 }
 
 static unsigned long test_16(unsigned long addr, unsigned long h,
 			     unsigned long ignore)
 {
-	void __iomem *ptr = (void __iomem *)addr;
-	return intc_get_field_from_handle(__raw_readw(ptr), h);
+	return intc_get_field_from_handle(__raw_readw(addr), h);
 }
 
 static unsigned long test_32(unsigned long addr, unsigned long h,
 			     unsigned long ignore)
 {
-	void __iomem *ptr = (void __iomem *)addr;
-	return intc_get_field_from_handle(__raw_readl(ptr), h);
+	return intc_get_field_from_handle(__raw_readl(addr), h);
 }
 
 static unsigned long write_8(unsigned long addr, unsigned long h,
 			     unsigned long data)
 {
-	void __iomem *ptr = (void __iomem *)addr;
-	__raw_writeb(intc_set_field_from_handle(0, data, h), ptr);
-	(void)__raw_readb(ptr);	/* Defeat write posting */
+	__raw_writeb(intc_set_field_from_handle(0, data, h), addr);
+	(void)__raw_readb(addr);	/* Defeat write posting */
 	return 0;
 }
 
 static unsigned long write_16(unsigned long addr, unsigned long h,
 			      unsigned long data)
 {
-	void __iomem *ptr = (void __iomem *)addr;
-	__raw_writew(intc_set_field_from_handle(0, data, h), ptr);
-	(void)__raw_readw(ptr);	/* Defeat write posting */
+	__raw_writew(intc_set_field_from_handle(0, data, h), addr);
+	(void)__raw_readw(addr);	/* Defeat write posting */
 	return 0;
 }
 
 static unsigned long write_32(unsigned long addr, unsigned long h,
 			      unsigned long data)
 {
-	void __iomem *ptr = (void __iomem *)addr;
-	__raw_writel(intc_set_field_from_handle(0, data, h), ptr);
-	(void)__raw_readl(ptr);	/* Defeat write posting */
+	__raw_writel(intc_set_field_from_handle(0, data, h), addr);
+	(void)__raw_readl(addr);	/* Defeat write posting */
 	return 0;
 }
 
 static unsigned long modify_8(unsigned long addr, unsigned long h,
 			      unsigned long data)
 {
-	void __iomem *ptr = (void __iomem *)addr;
 	unsigned long flags;
 	unsigned int value;
 	local_irq_save(flags);
-	value = intc_set_field_from_handle(__raw_readb(ptr), data, h);
-	__raw_writeb(value, ptr);
-	(void)__raw_readb(ptr);	/* Defeat write posting */
+	value = intc_set_field_from_handle(__raw_readb(addr), data, h);
+	__raw_writeb(value, addr);
+	(void)__raw_readb(addr);	/* Defeat write posting */
 	local_irq_restore(flags);
 	return 0;
 }
@@ -137,13 +130,12 @@ static unsigned long modify_8(unsigned long addr, unsigned long h,
 static unsigned long modify_16(unsigned long addr, unsigned long h,
 			       unsigned long data)
 {
-	void __iomem *ptr = (void __iomem *)addr;
 	unsigned long flags;
 	unsigned int value;
 	local_irq_save(flags);
-	value = intc_set_field_from_handle(__raw_readw(ptr), data, h);
-	__raw_writew(value, ptr);
-	(void)__raw_readw(ptr);	/* Defeat write posting */
+	value = intc_set_field_from_handle(__raw_readw(addr), data, h);
+	__raw_writew(value, addr);
+	(void)__raw_readw(addr);	/* Defeat write posting */
 	local_irq_restore(flags);
 	return 0;
 }
@@ -151,13 +143,12 @@ static unsigned long modify_16(unsigned long addr, unsigned long h,
 static unsigned long modify_32(unsigned long addr, unsigned long h,
 			       unsigned long data)
 {
-	void __iomem *ptr = (void __iomem *)addr;
 	unsigned long flags;
 	unsigned int value;
 	local_irq_save(flags);
-	value = intc_set_field_from_handle(__raw_readl(ptr), data, h);
-	__raw_writel(value, ptr);
-	(void)__raw_readl(ptr);	/* Defeat write posting */
+	value = intc_set_field_from_handle(__raw_readl(addr), data, h);
+	__raw_writel(value, addr);
+	(void)__raw_readl(addr);	/* Defeat write posting */
 	local_irq_restore(flags);
 	return 0;
 }

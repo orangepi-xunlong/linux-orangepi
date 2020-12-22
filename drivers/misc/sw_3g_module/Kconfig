@@ -1,0 +1,78 @@
+#
+# softwinner 3G module driver.
+#
+
+menuconfig SW_3G_MODULE
+    tristate "softwinner 3G module driver"
+    help
+        softwinner 3G module driver
+
+choice
+
+    prompt "3G modem support"
+    depends on SW_3G_MODULE
+    help
+        3G modem slecet.
+
+config HUAWEI_MU509
+    boolean "huawei mu509"
+    help
+        huawei mu509 modem support.
+
+config YUGA_CWM600
+    boolean "yuga cwm600"
+    help
+        yuga cwm600 modem support.
+
+config OVIPHONE_EM55
+    boolean "Oviphone em55"
+    help
+        Oviphone em55 modem support.
+        
+config OVIPHONE_EM56_EM66
+    boolean "Oviphone em56/em66"
+    help
+        Oviphone em56/em66 modem support.
+
+config SPREADWIN_G3
+    boolean "Spreadwin G3"
+    select SW_USB_3G_MODULE
+    help
+        Spreadwin g3 modem support.
+
+config LONGCHEER_WM5608
+    boolean "longcheer wm5608"
+    help
+        longcheer wm5608 modem support.
+
+config USI_MT6276MA
+    boolean "Usi MT6276MA"
+    select SW_USB_3G_MODULE
+    help
+        Usi MT6276MA modem support.
+endchoice
+
+choice
+
+    prompt "3G suspend/resume mode support"
+    depends on SW_3G_MODULE
+    help
+        3G suspend/resume mode slecet.
+
+config SW_3G_SLEEP_BY_GPIO_WAKEUP_BY_GPIO
+    boolean "bp sleep by gpio, ap wakeup by gpio"
+    help
+        bp sleep by gpio, ap wakeup by gpio.
+
+config SW_3G_SLEEP_BY_USB_WAKEUP_BY_USB
+    boolean "bp sleep by usb, ap wakeup by usb"
+    help
+        bp sleep by usb, ap wakeup by usb.
+
+config SW_3G_SLEEP_BY_USB_WAKEUP_BY_GPIO
+    boolean "bp sleep by usb, ap wakeup by gpio"
+    help
+        bp sleep by usb, ap wakeup by gpio.
+
+endchoice
+

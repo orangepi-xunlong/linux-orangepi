@@ -8,7 +8,8 @@
  * the Free Software Foundation version 2.
  */
 
-#include <linux/acpi.h>
+#include <acpi/acpi_bus.h>
+#include <acpi/acpi_drivers.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -29,11 +30,10 @@ struct acpi_smb_hc {
 	u8 query_bit;
 	smbus_alarm_callback callback;
 	void *context;
-	bool done;
 };
 
 static int acpi_smbus_hc_add(struct acpi_device *device);
-static int acpi_smbus_hc_remove(struct acpi_device *device);
+static int acpi_smbus_hc_remove(struct acpi_device *device, int type);
 
 static const struct acpi_device_id sbs_device_ids[] = {
 	{"ACPI0001", 0},
@@ -98,11 +98,27 @@ static inline int smb_hc_write(struct acpi_smb_hc *hc, u8 address, u8 data)
 	return ec_write(hc->offset + address, data);
 }
 
+static inline int smb_check_done(struct acpi_smb_hc *hc)
+{
+	union acpi_smb_status status = {.raw = 0};
+	smb_hc_read(hc, ACPI_SMB_STATUS, &status.raw);
+	return status.fields.done && (status.fields.status == SMBUS_OK);
+}
+
 static int wait_transaction_complete(struct acpi_smb_hc *hc, int timeout)
 {
-	if (wait_event_timeout(hc->wait, hc->done, msecs_to_jiffies(timeout)))
+	if (wait_event_timeout(hc->wait, smb_check_done(hc),
+			       msecs_to_jiffies(timeout)))
 		return 0;
-	return -ETIME;
+	/*
+	 * After the timeout happens, OS will try to check the status of SMbus.
+	 * If the status is what OS expected, it will be regarded as the bogus
+	 * timeout.
+	 */
+	if (smb_check_done(hc))
+		return 0;
+	else
+		return -ETIME;
 }
 
 static int acpi_smbus_transaction(struct acpi_smb_hc *hc, u8 protocol,
@@ -117,7 +133,6 @@ static int acpi_smbus_transaction(struct acpi_smb_hc *hc, u8 protocol,
 	}
 
 	mutex_lock(&hc->lock);
-	hc->done = false;
 	if (smb_hc_read(hc, ACPI_SMB_PROTOCOL, &temp))
 		goto end;
 	if (temp) {
@@ -216,10 +231,8 @@ static int smbus_alarm(void *context)
 	if (smb_hc_read(hc, ACPI_SMB_STATUS, &status.raw))
 		return 0;
 	/* Check if it is only a completion notify */
-	if (status.fields.done && status.fields.status == SMBUS_OK) {
-		hc->done = true;
+	if (status.fields.done)
 		wake_up(&hc->wait);
-	}
 	if (!status.fields.alarm)
 		return 0;
 	mutex_lock(&hc->lock);
@@ -275,15 +288,15 @@ static int acpi_smbus_hc_add(struct acpi_device *device)
 	device->driver_data = hc;
 
 	acpi_ec_add_query_handler(hc->ec, hc->query_bit, NULL, smbus_alarm, hc);
-	dev_info(&device->dev, "SBS HC: offset = 0x%0x, query_bit = 0x%0x\n",
-		 hc->offset, hc->query_bit);
+	printk(KERN_INFO PREFIX "SBS HC: EC = 0x%p, offset = 0x%0x, query_bit = 0x%0x\n",
+		hc->ec, hc->offset, hc->query_bit);
 
 	return 0;
 }
 
 extern void acpi_ec_remove_query_handler(struct acpi_ec *ec, u8 query_bit);
 
-static int acpi_smbus_hc_remove(struct acpi_device *device)
+static int acpi_smbus_hc_remove(struct acpi_device *device, int type)
 {
 	struct acpi_smb_hc *hc;
 
@@ -297,7 +310,23 @@ static int acpi_smbus_hc_remove(struct acpi_device *device)
 	return 0;
 }
 
-module_acpi_driver(acpi_smb_hc_driver);
+static int __init acpi_smb_hc_init(void)
+{
+	int result;
+
+	result = acpi_bus_register_driver(&acpi_smb_hc_driver);
+	if (result < 0)
+		return -ENODEV;
+	return 0;
+}
+
+static void __exit acpi_smb_hc_exit(void)
+{
+	acpi_bus_unregister_driver(&acpi_smb_hc_driver);
+}
+
+module_init(acpi_smb_hc_init);
+module_exit(acpi_smb_hc_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Alexey Starikovskiy");

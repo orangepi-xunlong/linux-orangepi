@@ -39,7 +39,6 @@ int mpi_cmp_ui(MPI u, unsigned long v)
 	else
 		return -1;
 }
-EXPORT_SYMBOL_GPL(mpi_cmp_ui);
 
 int mpi_cmp(MPI u, MPI v)
 {
@@ -57,12 +56,13 @@ int mpi_cmp(MPI u, MPI v)
 	if (usize != vsize && !u->sign && !v->sign)
 		return usize - vsize;
 	if (usize != vsize && u->sign && v->sign)
-		return vsize - usize;
+		return vsize + usize;
 	if (!usize)
 		return 0;
 	cmp = mpihelp_cmp(u->d, v->d, usize);
-	if (u->sign)
-		return -cmp;
-	return cmp;
+	if (!cmp)
+		return 0;
+	if ((cmp < 0 ? 1 : 0) == (u->sign ? 1 : 0))
+		return 1;
+	return -1;
 }
-EXPORT_SYMBOL_GPL(mpi_cmp);

@@ -130,8 +130,7 @@ struct red_parms {
 	u32		qth_max;	/* Max avg length threshold: Wlog scaled */
 	u32		Scell_max;
 	u32		max_P;		/* probability, [0 .. 1.0] 32 scaled */
-	/* reciprocal_value(max_P / qth_delta) */
-	struct reciprocal_value	max_P_reciprocal;
+	u32		max_P_reciprocal; /* reciprocal_value(max_P / qth_delta) */
 	u32		qth_delta;	/* max_th - min_th */
 	u32		target_min;	/* min_th + 0.4*(max_th - min_th) */
 	u32		target_max;	/* min_th + 0.6*(max_th - min_th) */
@@ -167,17 +166,6 @@ static inline void red_set_vars(struct red_vars *v)
 	v->qcount	= -1;
 }
 
-static inline bool red_check_params(u32 qth_min, u32 qth_max, u8 Wlog)
-{
-	if (fls(qth_min) + Wlog > 32)
-		return false;
-	if (fls(qth_max) + Wlog > 32)
-		return false;
-	if (qth_max < qth_min)
-		return false;
-	return true;
-}
-
 static inline void red_set_parms(struct red_parms *p,
 				 u32 qth_min, u32 qth_max, u8 Wlog, u8 Plog,
 				 u8 Scell_log, u8 *stab, u32 max_P)
@@ -189,7 +177,7 @@ static inline void red_set_parms(struct red_parms *p,
 	p->qth_max	= qth_max << Wlog;
 	p->Wlog		= Wlog;
 	p->Plog		= Plog;
-	if (delta <= 0)
+	if (delta < 0)
 		delta = 1;
 	p->qth_delta	= delta;
 	if (!max_P) {
@@ -315,7 +303,7 @@ static inline unsigned long red_calc_qavg(const struct red_parms *p,
 
 static inline u32 red_random(const struct red_parms *p)
 {
-	return reciprocal_divide(prandom_u32(), p->max_P_reciprocal);
+	return reciprocal_divide(net_random(), p->max_P_reciprocal);
 }
 
 static inline int red_mark_probability(const struct red_parms *p,

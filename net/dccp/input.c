@@ -28,7 +28,7 @@ static void dccp_enqueue_skb(struct sock *sk, struct sk_buff *skb)
 	__skb_pull(skb, dccp_hdr(skb)->dccph_doff * 4);
 	__skb_queue_tail(&sk->sk_receive_queue, skb);
 	skb_set_owner_r(skb, sk);
-	sk->sk_data_ready(sk);
+	sk->sk_data_ready(sk, 0);
 }
 
 static void dccp_fin(struct sock *sk, struct sk_buff *skb)
@@ -285,7 +285,7 @@ static int dccp_check_seqno(struct sock *sk, struct sk_buff *skb)
 }
 
 static int __dccp_rcv_established(struct sock *sk, struct sk_buff *skb,
-				  const struct dccp_hdr *dh, const unsigned int len)
+				  const struct dccp_hdr *dh, const unsigned len)
 {
 	struct dccp_sock *dp = dccp_sk(sk);
 
@@ -359,14 +359,14 @@ send_sync:
 		goto discard;
 	}
 
-	DCCP_INC_STATS(DCCP_MIB_INERRS);
+	DCCP_INC_STATS_BH(DCCP_MIB_INERRS);
 discard:
 	__kfree_skb(skb);
 	return 0;
 }
 
 int dccp_rcv_established(struct sock *sk, struct sk_buff *skb,
-			 const struct dccp_hdr *dh, const unsigned int len)
+			 const struct dccp_hdr *dh, const unsigned len)
 {
 	if (dccp_check_seqno(sk, skb))
 		goto discard;
@@ -388,7 +388,7 @@ EXPORT_SYMBOL_GPL(dccp_rcv_established);
 static int dccp_rcv_request_sent_state_process(struct sock *sk,
 					       struct sk_buff *skb,
 					       const struct dccp_hdr *dh,
-					       const unsigned int len)
+					       const unsigned len)
 {
 	/*
 	 *  Step 4: Prepare sequence numbers in REQUEST
@@ -521,7 +521,7 @@ unable_to_proceed:
 static int dccp_rcv_respond_partopen_state_process(struct sock *sk,
 						   struct sk_buff *skb,
 						   const struct dccp_hdr *dh,
-						   const unsigned int len)
+						   const unsigned len)
 {
 	struct dccp_sock *dp = dccp_sk(sk);
 	u32 sample = dp->dccps_options_received.dccpor_timestamp_echo;
@@ -537,7 +537,7 @@ static int dccp_rcv_respond_partopen_state_process(struct sock *sk,
 	case DCCP_PKT_DATAACK:
 	case DCCP_PKT_ACK:
 		/*
-		 * FIXME: we should be resetting the PARTOPEN (DELACK) timer
+		 * FIXME: we should be reseting the PARTOPEN (DELACK) timer
 		 * here but only if we haven't used the DELACK timer for
 		 * something else, like sending a delayed ack for a TIMESTAMP
 		 * echo, etc, for now were not clearing it, sending an extra
@@ -572,12 +572,11 @@ static int dccp_rcv_respond_partopen_state_process(struct sock *sk,
 }
 
 int dccp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
-			   struct dccp_hdr *dh, unsigned int len)
+			   struct dccp_hdr *dh, unsigned len)
 {
 	struct dccp_sock *dp = dccp_sk(sk);
 	struct dccp_skb_cb *dcb = DCCP_SKB_CB(skb);
 	const int old_state = sk->sk_state;
-	bool acceptable;
 	int queued = 0;
 
 	/*
@@ -604,18 +603,10 @@ int dccp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 	 */
 	if (sk->sk_state == DCCP_LISTEN) {
 		if (dh->dccph_type == DCCP_PKT_REQUEST) {
-			/* It is possible that we process SYN packets from backlog,
-			 * so we need to make sure to disable BH and RCU right there.
-			 */
-			rcu_read_lock();
-			local_bh_disable();
-			acceptable = inet_csk(sk)->icsk_af_ops->conn_request(sk, skb) >= 0;
-			local_bh_enable();
-			rcu_read_unlock();
-			if (!acceptable)
+			if (inet_csk(sk)->icsk_af_ops->conn_request(sk,
+								    skb) < 0)
 				return 1;
-			consume_skb(skb);
-			return 0;
+			goto discard;
 		}
 		if (dh->dccph_type == DCCP_PKT_RESET)
 			goto discard;
@@ -719,7 +710,6 @@ EXPORT_SYMBOL_GPL(dccp_rcv_state_process);
 /**
  *  dccp_sample_rtt  -  Validate and finalise computation of RTT sample
  *  @delta:	number of microseconds between packet and acknowledgment
- *
  *  The routine is kept generic to work in different contexts. It should be
  *  called immediately when the ACK used for the RTT sample arrives.
  */

@@ -14,12 +14,12 @@
 #define TI_FLAG_FAULT_CODE_SHIFT	56
 #define TI_FLAG_BYTE_WSTATE		1
 #define TI_FLAG_WSTATE_SHIFT		48
-#define TI_FLAG_BYTE_NOERROR		2
-#define TI_FLAG_BYTE_NOERROR_SHIFT	40
-#define TI_FLAG_BYTE_FPDEPTH		3
-#define TI_FLAG_FPDEPTH_SHIFT		32
-#define TI_FLAG_BYTE_CWP		4
-#define TI_FLAG_CWP_SHIFT		24
+#define TI_FLAG_BYTE_CWP		2
+#define TI_FLAG_CWP_SHIFT		40
+#define TI_FLAG_BYTE_CURRENT_DS		3
+#define TI_FLAG_CURRENT_DS_SHIFT	32
+#define TI_FLAG_BYTE_FPDEPTH		4
+#define TI_FLAG_FPDEPTH_SHIFT		24
 #define TI_FLAG_BYTE_WSAVED		5
 #define TI_FLAG_WSAVED_SHIFT		16
 
@@ -31,6 +31,7 @@
 #include <asm/types.h>
 
 struct task_struct;
+struct exec_domain;
 
 struct thread_info {
 	/* D$ line 1 */
@@ -43,9 +44,10 @@ struct thread_info {
 	/* D$ line 2 */
 	unsigned long		fault_address;
 	struct pt_regs		*kregs;
+	struct exec_domain	*exec_domain;
 	int			preempt_count;	/* 0 => preemptable, <0 => BUG */
 	__u8			new_child;
-	__u8			current_ds;
+	__u8			syscall_noerror;
 	__u16			cpu;
 
 	unsigned long		*utraps;
@@ -56,11 +58,12 @@ struct thread_info {
 	unsigned long		gsr[7];
 	unsigned long		xfsr[7];
 
+	struct restart_block	restart_block;
+
 	struct pt_regs		*kern_una_regs;
 	unsigned int		kern_una_insn;
 
-	unsigned long		fpregs[(7 * 256) / sizeof(unsigned long)]
-		__attribute__ ((aligned(64)));
+	unsigned long		fpregs[0] __attribute__ ((aligned(64)));
 };
 
 #endif /* !(__ASSEMBLY__) */
@@ -71,25 +74,27 @@ struct thread_info {
 #define TI_FAULT_CODE	(TI_FLAGS + TI_FLAG_BYTE_FAULT_CODE)
 #define TI_WSTATE	(TI_FLAGS + TI_FLAG_BYTE_WSTATE)
 #define TI_CWP		(TI_FLAGS + TI_FLAG_BYTE_CWP)
+#define TI_CURRENT_DS	(TI_FLAGS + TI_FLAG_BYTE_CURRENT_DS)
 #define TI_FPDEPTH	(TI_FLAGS + TI_FLAG_BYTE_FPDEPTH)
 #define TI_WSAVED	(TI_FLAGS + TI_FLAG_BYTE_WSAVED)
-#define TI_SYS_NOERROR	(TI_FLAGS + TI_FLAG_BYTE_NOERROR)
 #define TI_FPSAVED	0x00000010
 #define TI_KSP		0x00000018
 #define TI_FAULT_ADDR	0x00000020
 #define TI_KREGS	0x00000028
-#define TI_PRE_COUNT	0x00000030
-#define TI_NEW_CHILD	0x00000034
-#define TI_CURRENT_DS	0x00000035
-#define TI_CPU		0x00000036
-#define TI_UTRAPS	0x00000038
-#define TI_REG_WINDOW	0x00000040
-#define TI_RWIN_SPTRS	0x000003c0
-#define TI_GSR		0x000003f8
-#define TI_XFSR		0x00000430
-#define TI_KUNA_REGS	0x00000468
-#define TI_KUNA_INSN	0x00000470
-#define TI_FPREGS	0x00000480
+#define TI_EXEC_DOMAIN	0x00000030
+#define TI_PRE_COUNT	0x00000038
+#define TI_NEW_CHILD	0x0000003c
+#define TI_SYS_NOERROR	0x0000003d
+#define TI_CPU		0x0000003e
+#define TI_UTRAPS	0x00000040
+#define TI_REG_WINDOW	0x00000048
+#define TI_RWIN_SPTRS	0x000003c8
+#define TI_GSR		0x00000400
+#define TI_XFSR		0x00000438
+#define TI_RESTART_BLOCK 0x00000470
+#define TI_KUNA_REGS	0x000004a0
+#define TI_KUNA_INSN	0x000004a8
+#define TI_FPREGS	0x000004c0
 
 /* We embed this in the uppermost byte of thread_info->flags */
 #define FAULT_CODE_WRITE	0x01	/* Write access, implies D-TLB	   */
@@ -97,7 +102,6 @@ struct thread_info {
 #define FAULT_CODE_ITLB		0x04	/* Miss happened in I-TLB	   */
 #define FAULT_CODE_WINFIXUP	0x08	/* Miss happened during spill/fill */
 #define FAULT_CODE_BLKCOMMIT	0x10	/* Use blk-commit ASI in copy_page */
-#define	FAULT_CODE_BAD_RA	0x20	/* Bad RA for sun4v		   */
 
 #if PAGE_SHIFT == 13
 #define THREAD_SIZE (2*PAGE_SIZE)
@@ -107,6 +111,8 @@ struct thread_info {
 #define THREAD_SHIFT PAGE_SHIFT
 #endif /* PAGE_SHIFT == 13 */
 
+#define PREEMPT_ACTIVE		0x10000000
+
 /*
  * macros/functions for gaining access to the thread information structure
  */
@@ -115,8 +121,12 @@ struct thread_info {
 #define INIT_THREAD_INFO(tsk)				\
 {							\
 	.task		=	&tsk,			\
-	.current_ds	=	ASI_P,			\
+	.flags		= ((unsigned long)ASI_P) << TI_FLAG_CURRENT_DS_SHIFT,	\
+	.exec_domain	=	&default_exec_domain,	\
 	.preempt_count	=	INIT_PREEMPT_COUNT,	\
+	.restart_block	= {				\
+		.fn	=	do_no_restart_syscall,	\
+	},						\
 }
 
 #define init_thread_info	(init_thread_union.thread_info)
@@ -128,10 +138,31 @@ register struct thread_info *current_thread_info_reg asm("g6");
 
 /* thread information allocation */
 #if PAGE_SHIFT == 13
-#define THREAD_SIZE_ORDER	1
+#define __THREAD_INFO_ORDER	1
 #else /* PAGE_SHIFT == 13 */
-#define THREAD_SIZE_ORDER	0
+#define __THREAD_INFO_ORDER	0
 #endif /* PAGE_SHIFT == 13 */
+
+#define __HAVE_ARCH_THREAD_INFO_ALLOCATOR
+
+#ifdef CONFIG_DEBUG_STACK_USAGE
+#define THREAD_FLAGS (GFP_KERNEL | __GFP_ZERO)
+#else
+#define THREAD_FLAGS (GFP_KERNEL)
+#endif
+
+#define alloc_thread_info_node(tsk, node)				\
+({									\
+	struct page *page = alloc_pages_node(node, THREAD_FLAGS,	\
+					     __THREAD_INFO_ORDER);	\
+	struct thread_info *ret;					\
+									\
+	ret = page ? page_address(page) : NULL;				\
+	ret;								\
+})
+
+#define free_thread_info(ti) \
+	free_pages((unsigned long)(ti),__THREAD_INFO_ORDER)
 
 #define __thread_flag_byte_ptr(ti)	\
 	((unsigned char *)(&((ti)->flags)))
@@ -143,12 +174,13 @@ register struct thread_info *current_thread_info_reg asm("g6");
 #define set_thread_wstate(val)		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_WSTATE] = (val))
 #define get_thread_cwp()		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_CWP])
 #define set_thread_cwp(val)		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_CWP] = (val))
-#define get_thread_noerror()		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_NOERROR])
-#define set_thread_noerror(val)		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_NOERROR] = (val))
+#define get_thread_current_ds()		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_CURRENT_DS])
+#define set_thread_current_ds(val)	(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_CURRENT_DS] = (val))
 #define get_thread_fpdepth()		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_FPDEPTH])
 #define set_thread_fpdepth(val)		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_FPDEPTH] = (val))
 #define get_thread_wsaved()		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_WSAVED])
 #define set_thread_wsaved(val)		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_WSAVED] = (val))
+
 #endif /* !(__ASSEMBLY__) */
 
 /*
@@ -182,7 +214,7 @@ register struct thread_info *current_thread_info_reg asm("g6");
 #define TIF_UNALIGNED		5	/* allowed to do unaligned accesses */
 /* flag bit 6 is available */
 #define TIF_32BIT		7	/* 32-bit binary */
-#define TIF_NOHZ		8	/* in adaptive nohz mode */
+/* flag bit 8 is available */
 #define TIF_SECCOMP		9	/* secure computing */
 #define TIF_SYSCALL_AUDIT	10	/* syscall auditing active */
 #define TIF_SYSCALL_TRACEPOINT	11	/* syscall tracepoint instrumentation */
@@ -200,7 +232,6 @@ register struct thread_info *current_thread_info_reg asm("g6");
 #define _TIF_NEED_RESCHED	(1<<TIF_NEED_RESCHED)
 #define _TIF_UNALIGNED		(1<<TIF_UNALIGNED)
 #define _TIF_32BIT		(1<<TIF_32BIT)
-#define _TIF_NOHZ		(1<<TIF_NOHZ)
 #define _TIF_SECCOMP		(1<<TIF_SECCOMP)
 #define _TIF_SYSCALL_AUDIT	(1<<TIF_SYSCALL_AUDIT)
 #define _TIF_SYSCALL_TRACEPOINT	(1<<TIF_SYSCALL_TRACEPOINT)
@@ -211,8 +242,6 @@ register struct thread_info *current_thread_info_reg asm("g6");
 				 _TIF_NEED_RESCHED)
 #define _TIF_DO_NOTIFY_RESUME_MASK	(_TIF_NOTIFY_RESUME | _TIF_SIGPENDING)
 
-#define is_32bit_task()	(test_thread_flag(TIF_32BIT))
-
 /*
  * Thread-synchronous status.
  *
@@ -222,14 +251,16 @@ register struct thread_info *current_thread_info_reg asm("g6");
  *
  * Note that there are only 8 bits available.
  */
+#define TS_RESTORE_SIGMASK	0x0001	/* restore signal mask in do_signal() */
 
 #ifndef __ASSEMBLY__
-
-#define thread32_stack_is_64bit(__SP) (((__SP) & 0x1) != 0)
-#define test_thread_64bit_stack(__SP) \
-	((test_thread_flag(TIF_32BIT) && !thread32_stack_is_64bit(__SP)) ? \
-	 false : true)
-
+#define HAVE_SET_RESTORE_SIGMASK	1
+static inline void set_restore_sigmask(void)
+{
+	struct thread_info *ti = current_thread_info();
+	ti->status |= TS_RESTORE_SIGMASK;
+	set_bit(TIF_SIGPENDING, &ti->flags);
+}
 #endif	/* !__ASSEMBLY__ */
 
 #endif /* __KERNEL__ */

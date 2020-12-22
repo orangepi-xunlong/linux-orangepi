@@ -1,13 +1,3 @@
-/*
- * Many of the syscalls used in this file expect some of the arguments
- * to be __user pointers not __kernel pointers.  To limit the sparse
- * noise, turn off sparse checking for this file.
- */
-#ifdef __CHECKER__
-#undef __CHECKER__
-#warning "Sparse checking disabled for this file"
-#endif
-
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/ctype.h>
@@ -26,8 +16,6 @@
 #include <linux/async.h>
 #include <linux/fs_struct.h>
 #include <linux/slab.h>
-#include <linux/ramfs.h>
-#include <linux/shmem_fs.h>
 
 #include <linux/nfs_fs.h>
 #include <linux/nfs_fs_sb.h>
@@ -71,28 +59,23 @@ __setup("ro", readonly);
 __setup("rw", readwrite);
 
 #ifdef CONFIG_BLOCK
-struct uuidcmp {
-	const char *uuid;
-	int len;
-};
-
 /**
  * match_dev_by_uuid - callback for finding a partition using its uuid
  * @dev:	device passed in by the caller
- * @data:	opaque pointer to the desired struct uuidcmp to match
+ * @data:	opaque pointer to a 36 byte char array with a UUID
  *
  * Returns 1 if the device matches, and 0 otherwise.
  */
-static int match_dev_by_uuid(struct device *dev, const void *data)
+static int match_dev_by_uuid(struct device *dev, void *data)
 {
-	const struct uuidcmp *cmp = data;
+	u8 *uuid = data;
 	struct hd_struct *part = dev_to_part(dev);
 
 	if (!part->info)
 		goto no_match;
 
-	if (strncasecmp(cmp->uuid, part->info->uuid, cmp->len))
-		goto no_match;
+	if (memcmp(uuid, part->info->uuid, sizeof(part->info->uuid)))
+			goto no_match;
 
 	return 1;
 no_match:
@@ -102,52 +85,49 @@ no_match:
 
 /**
  * devt_from_partuuid - looks up the dev_t of a partition by its UUID
- * @uuid_str:	char array containing ascii UUID
+ * @uuid:	min 36 byte char array containing a hex ascii UUID
  *
  * The function will return the first partition which contains a matching
  * UUID value in its partition_meta_info struct.  This does not search
  * by filesystem UUIDs.
  *
- * If @uuid_str is followed by a "/PARTNROFF=%d", then the number will be
+ * If @uuid is followed by a "/PARTNROFF=%d", then the number will be
  * extracted and used as an offset from the partition identified by the UUID.
  *
  * Returns the matching dev_t on success or 0 on failure.
  */
-static dev_t devt_from_partuuid(const char *uuid_str)
+static dev_t devt_from_partuuid(char *uuid_str)
 {
 	dev_t res = 0;
-	struct uuidcmp cmp;
 	struct device *dev = NULL;
+	u8 uuid[16];
 	struct gendisk *disk;
 	struct hd_struct *part;
 	int offset = 0;
-	bool clear_root_wait = false;
-	char *slash;
 
-	cmp.uuid = uuid_str;
+	if (strlen(uuid_str) < 36)
+		goto done;
 
-	slash = strchr(uuid_str, '/');
 	/* Check for optional partition number offset attributes. */
-	if (slash) {
+	if (uuid_str[36]) {
 		char c = 0;
 		/* Explicitly fail on poor PARTUUID syntax. */
-		if (sscanf(slash + 1,
-			   "PARTNROFF=%d%c", &offset, &c) != 1) {
-			clear_root_wait = true;
+		if (sscanf(&uuid_str[36],
+			   "/PARTNROFF=%d%c", &offset, &c) != 1) {
+			printk(KERN_ERR "VFS: PARTUUID= is invalid.\n"
+			 "Expected PARTUUID=<valid-uuid-id>[/PARTNROFF=%%d]\n");
+			if (root_wait)
+				printk(KERN_ERR
+				     "Disabling rootwait; root= is invalid.\n");
+			root_wait = 0;
 			goto done;
 		}
-		cmp.len = slash - uuid_str;
-	} else {
-		cmp.len = strlen(uuid_str);
 	}
 
-	if (!cmp.len) {
-		clear_root_wait = true;
-		goto done;
-	}
+	/* Pack the requested UUID in the expected format. */
+	part_pack_uuid(uuid_str, uuid);
 
-	dev = class_find_device(&block_class, NULL, &cmp,
-				&match_dev_by_uuid);
+	dev = class_find_device(&block_class, NULL, uuid, &match_dev_by_uuid);
 	if (!dev)
 		goto done;
 
@@ -168,13 +148,6 @@ static dev_t devt_from_partuuid(const char *uuid_str)
 no_offset:
 	put_device(dev);
 done:
-	if (clear_root_wait) {
-		pr_err("VFS: PARTUUID= is invalid.\n"
-		       "Expected PARTUUID=<valid-uuid-id>[/PARTNROFF=%%d]\n");
-		if (root_wait)
-			pr_err("Disabling rootwait; root= is invalid.\n");
-		root_wait = 0;
-	}
 	return res;
 }
 #endif
@@ -182,8 +155,7 @@ done:
 /*
  *	Convert a name into device number.  We accept the following variants:
  *
- *	1) <hex_major><hex_minor> device number in hexadecimal represents itself
- *         no leading 0x, for example b302.
+ *	1) device number in hexadecimal	represents itself
  *	2) /dev/nfs represents Root_NFS (0xff)
  *	3) /dev/<disk_name> represents the device number of disk
  *	4) /dev/<disk_name><decimal> represents the device number
@@ -192,14 +164,8 @@ done:
  *	   used when disk name of partitioned disk ends on a digit.
  *	6) PARTUUID=00112233-4455-6677-8899-AABBCCDDEEFF representing the
  *	   unique id of a partition if the partition table provides it.
- *	   The UUID may be either an EFI/GPT UUID, or refer to an MSDOS
- *	   partition using the format SSSSSSSS-PP, where SSSSSSSS is a zero-
- *	   filled hex representation of the 32-bit "NT disk signature", and PP
- *	   is a zero-filled hex representation of the 1-based partition number.
  *	7) PARTUUID=<UUID>/PARTNROFF=<int> to select a partition in relation to
  *	   a partition with a known unique id.
- *	8) <major>:<minor> major and minor number of the device separated by
- *	   a colon.
  *
  *	If name doesn't have fall into the categories above, we return (0,0).
  *	block_class is used to check if something is a disk name. If the disk
@@ -207,7 +173,7 @@ done:
  *	bangs.
  */
 
-dev_t name_to_dev_t(const char *name)
+dev_t name_to_dev_t(char *name)
 {
 	char s[32];
 	char *p;
@@ -225,11 +191,9 @@ dev_t name_to_dev_t(const char *name)
 #endif
 
 	if (strncmp(name, "/dev/", 5) != 0) {
-		unsigned maj, min, offset;
-		char dummy;
+		unsigned maj, min;
 
-		if ((sscanf(name, "%u:%u%c", &maj, &min, &dummy) == 2) ||
-		    (sscanf(name, "%u:%u:%u:%c", &maj, &min, &offset, &dummy) == 3)) {
+		if (sscanf(name, "%u:%u", &maj, &min) == 2) {
 			res = MKDEV(maj, min);
 			if (maj != MAJOR(res) || min != MINOR(res))
 				goto fail;
@@ -288,7 +252,6 @@ fail:
 done:
 	return res;
 }
-EXPORT_SYMBOL_GPL(name_to_dev_t);
 
 static int __init root_dev_setup(char *line)
 {
@@ -367,7 +330,7 @@ static int __init do_mount_root(char *name, char *fs, int flags, void *data)
 	if (err)
 		return err;
 
-	sys_chdir("/root");
+	sys_chdir((const char __user __force *)"/root");
 	s = current->fs->pwd.dentry->d_sb;
 	ROOT_DEV = s->s_dev;
 	printk(KERN_INFO
@@ -380,9 +343,8 @@ static int __init do_mount_root(char *name, char *fs, int flags, void *data)
 
 void __init mount_block_root(char *name, int flags)
 {
-	struct page *page = alloc_page(GFP_KERNEL |
-					__GFP_NOTRACK_FALSE_POSITIVE);
-	char *fs_names = page_address(page);
+	char *fs_names = __getname_gfp(GFP_KERNEL
+		| __GFP_NOTRACK_FALSE_POSITIVE);
 	char *p;
 #ifdef CONFIG_BLOCK
 	char b[BDEVNAME_SIZE];
@@ -398,6 +360,8 @@ retry:
 			case 0:
 				goto out;
 			case -EACCES:
+				flags |= MS_RDONLY;
+				goto retry;
 			case -EINVAL:
 				continue;
 		}
@@ -420,10 +384,6 @@ retry:
 #endif
 		panic("VFS: Unable to mount root fs on %s", b);
 	}
-	if (!(flags & MS_RDONLY)) {
-		flags |= MS_RDONLY;
-		goto retry;
-	}
 
 	printk("List of all partitions:\n");
 	printk_all_partitions();
@@ -436,7 +396,7 @@ retry:
 #endif
 	panic("VFS: Unable to mount root fs on %s", b);
 out:
-	put_page(page);
+	putname(fs_names);
 }
  
 #ifdef CONFIG_ROOT_NFS
@@ -533,13 +493,8 @@ void __init mount_root(void)
 	}
 #endif
 #ifdef CONFIG_BLOCK
-	{
-		int err = create_dev("/dev/root", ROOT_DEV);
-
-		if (err < 0)
-			pr_emerg("Failed to create /dev/root: %d\n", err);
-		mount_block_root("/dev/root", root_mountflags);
-	}
+	create_dev("/dev/root", ROOT_DEV);
+	mount_block_root("/dev/root", root_mountflags);
 #endif
 }
 
@@ -551,7 +506,7 @@ void __init prepare_namespace(void)
 	int is_floppy;
 
 	if (root_delay) {
-		printk(KERN_INFO "Waiting %d sec before mounting root device...\n",
+		printk(KERN_INFO "Waiting %dsec before mounting root device...\n",
 		       root_delay);
 		ssleep(root_delay);
 	}
@@ -566,7 +521,6 @@ void __init prepare_namespace(void)
 	wait_for_device_probe();
 
 	md_run_setup();
-	dm_run_setup();
 
 	if (saved_root_name[0]) {
 		root_device_name = saved_root_name;
@@ -602,48 +556,5 @@ void __init prepare_namespace(void)
 out:
 	devtmpfs_mount("dev");
 	sys_mount(".", "/", NULL, MS_MOVE, NULL);
-	sys_chroot(".");
-}
-
-static bool is_tmpfs;
-static struct dentry *rootfs_mount(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
-{
-	static unsigned long once;
-	void *fill = ramfs_fill_super;
-
-	if (test_and_set_bit(0, &once))
-		return ERR_PTR(-ENODEV);
-
-	if (IS_ENABLED(CONFIG_TMPFS) && is_tmpfs)
-		fill = shmem_fill_super;
-
-	return mount_nodev(fs_type, flags, data, fill);
-}
-
-static struct file_system_type rootfs_fs_type = {
-	.name		= "rootfs",
-	.mount		= rootfs_mount,
-	.kill_sb	= kill_litter_super,
-};
-
-int __init init_rootfs(void)
-{
-	int err = register_filesystem(&rootfs_fs_type);
-
-	if (err)
-		return err;
-
-	if (IS_ENABLED(CONFIG_TMPFS) && !saved_root_name[0] &&
-		(!root_fs_names || strstr(root_fs_names, "tmpfs"))) {
-		err = shmem_init();
-		is_tmpfs = true;
-	} else {
-		err = init_ramfs_fs();
-	}
-
-	if (err)
-		unregister_filesystem(&rootfs_fs_type);
-
-	return err;
+	sys_chroot((const char __user __force *)".");
 }

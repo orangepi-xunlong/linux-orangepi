@@ -28,8 +28,9 @@
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
+#include <asm/hardware/vic.h>
 #include <mach/netx-regs.h>
-#include <linux/platform_data/eth-netx.h>
+#include <mach/eth.h>
 
 #include "generic.h"
 #include "fb.h"
@@ -180,7 +181,8 @@ MACHINE_START(NXEB500HMI, "Hilscher nxeb500hmi")
 	.atag_offset	= 0x100,
 	.map_io		= netx_map_io,
 	.init_irq	= netx_init_irq,
-	.init_time	= netx_timer_init,
+	.handle_irq	= vic_handle_irq,
+	.timer		= &netx_timer,
 	.init_machine	= nxeb500hmi_init,
 	.restart	= netx_restart,
 MACHINE_END

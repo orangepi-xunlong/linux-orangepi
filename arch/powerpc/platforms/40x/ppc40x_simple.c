@@ -24,7 +24,7 @@
 #include <linux/init.h>
 #include <linux/of_platform.h>
 
-static const struct of_device_id ppc40x_of_bus[] __initconst = {
+static __initdata struct of_device_id ppc40x_of_bus[] = {
 	{ .compatible = "ibm,plb3", },
 	{ .compatible = "ibm,plb4", },
 	{ .compatible = "ibm,opb", },
@@ -50,7 +50,7 @@ machine_device_initcall(ppc40x_simple, ppc40x_device_probe);
  * Again, if your board needs to do things differently then create a
  * board.c file for it rather than adding it to this list.
  */
-static const char * const board[] __initconst = {
+static const char *board[] __initdata = {
 	"amcc,acadia",
 	"amcc,haleakala",
 	"amcc,kilauea",
@@ -63,7 +63,7 @@ static const char * const board[] __initconst = {
 
 static int __init ppc40x_probe(void)
 {
-	if (of_device_compatible_match(of_root, board)) {
+	if (of_flat_dt_match(of_get_flat_dt_root(), board)) {
 		pci_set_flags(PCI_REASSIGN_ALL_RSRC);
 		return 1;
 	}

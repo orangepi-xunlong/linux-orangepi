@@ -253,7 +253,7 @@ out_nonsensical_length:
 	return 0;
 
 out_invalid_option:
-	DCCP_INC_STATS(DCCP_MIB_INVALIDOPT);
+	DCCP_INC_STATS_BH(DCCP_MIB_INVALIDOPT);
 	rc = DCCP_RESET_CODE_OPTION_ERROR;
 out_featneg_failed:
 	DCCP_WARN("DCCP(%p): Option %d (len=%d) error=%u\n", sk, opt, len, rc);
@@ -342,6 +342,38 @@ static inline int dccp_elapsed_time_len(const u32 elapsed_time)
 {
 	return elapsed_time == 0 ? 0 : elapsed_time <= 0xFFFF ? 2 : 4;
 }
+
+/* FIXME: This function is currently not used anywhere */
+int dccp_insert_option_elapsed_time(struct sk_buff *skb, u32 elapsed_time)
+{
+	const int elapsed_time_len = dccp_elapsed_time_len(elapsed_time);
+	const int len = 2 + elapsed_time_len;
+	unsigned char *to;
+
+	if (elapsed_time_len == 0)
+		return 0;
+
+	if (DCCP_SKB_CB(skb)->dccpd_opt_len + len > DCCP_MAX_OPT_LEN)
+		return -1;
+
+	DCCP_SKB_CB(skb)->dccpd_opt_len += len;
+
+	to    = skb_push(skb, len);
+	*to++ = DCCPO_ELAPSED_TIME;
+	*to++ = len;
+
+	if (elapsed_time_len == 2) {
+		const __be16 var16 = htons((u16)elapsed_time);
+		memcpy(to, &var16, 2);
+	} else {
+		const __be32 var32 = htonl(elapsed_time);
+		memcpy(to, &var32, 4);
+	}
+
+	return 0;
+}
+
+EXPORT_SYMBOL_GPL(dccp_insert_option_elapsed_time);
 
 static int dccp_insert_option_timestamp(struct sk_buff *skb)
 {
@@ -495,7 +527,6 @@ int dccp_insert_option_mandatory(struct sk_buff *skb)
  * @val: NN value or SP array (preferred element first) to copy
  * @len: true length of @val in bytes (excluding first element repetition)
  * @repeat_first: whether to copy the first element of @val twice
- *
  * The last argument is used to construct Confirm options, where the preferred
  * value and the preference list appear separately (RFC 4340, 6.3.1). Preference
  * lists are kept such that the preferred entry is always first, so we only need

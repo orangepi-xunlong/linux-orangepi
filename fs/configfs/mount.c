@@ -71,8 +71,8 @@ static int configfs_fill_super(struct super_block *sb, void *data, int silent)
 	struct inode *inode;
 	struct dentry *root;
 
-	sb->s_blocksize = PAGE_SIZE;
-	sb->s_blocksize_bits = PAGE_SHIFT;
+	sb->s_blocksize = PAGE_CACHE_SIZE;
+	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	sb->s_magic = CONFIGFS_MAGIC;
 	sb->s_op = &configfs_ops;
 	sb->s_time_gran = 1;
@@ -85,7 +85,7 @@ static int configfs_fill_super(struct super_block *sb, void *data, int silent)
 		/* directory inodes start off with i_nlink == 2 (for "." entry) */
 		inc_nlink(inode);
 	} else {
-		pr_debug("could not get root inode\n");
+		pr_debug("configfs: could not get root inode\n");
 		return -ENOMEM;
 	}
 
@@ -114,7 +114,6 @@ static struct file_system_type configfs_fs_type = {
 	.mount		= configfs_do_mount,
 	.kill_sb	= kill_litter_super,
 };
-MODULE_ALIAS_FS("configfs");
 
 struct dentry *configfs_pin_fs(void)
 {
@@ -129,6 +128,8 @@ void configfs_release_fs(void)
 }
 
 
+static struct kobject *config_kobj;
+
 static int __init configfs_init(void)
 {
 	int err = -ENOMEM;
@@ -139,18 +140,24 @@ static int __init configfs_init(void)
 	if (!configfs_dir_cachep)
 		goto out;
 
-	err = sysfs_create_mount_point(kernel_kobj, "config");
-	if (err)
+	config_kobj = kobject_create_and_add("config", kernel_kobj);
+	if (!config_kobj)
 		goto out2;
 
-	err = register_filesystem(&configfs_fs_type);
+	err = configfs_inode_init();
 	if (err)
 		goto out3;
 
+	err = register_filesystem(&configfs_fs_type);
+	if (err)
+		goto out4;
+
 	return 0;
+out4:
+	printk(KERN_ERR "configfs: Unable to register filesystem!\n");
+	configfs_inode_exit();
 out3:
-	pr_err("Unable to register filesystem!\n");
-	sysfs_remove_mount_point(kernel_kobj, "config");
+	kobject_put(config_kobj);
 out2:
 	kmem_cache_destroy(configfs_dir_cachep);
 	configfs_dir_cachep = NULL;
@@ -161,9 +168,10 @@ out:
 static void __exit configfs_exit(void)
 {
 	unregister_filesystem(&configfs_fs_type);
-	sysfs_remove_mount_point(kernel_kobj, "config");
+	kobject_put(config_kobj);
 	kmem_cache_destroy(configfs_dir_cachep);
 	configfs_dir_cachep = NULL;
+	configfs_inode_exit();
 }
 
 MODULE_AUTHOR("Oracle");
@@ -171,5 +179,5 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION("0.0.2");
 MODULE_DESCRIPTION("Simple RAM filesystem for user driven kernel subsystem configuration.");
 
-core_initcall(configfs_init);
+module_init(configfs_init);
 module_exit(configfs_exit);

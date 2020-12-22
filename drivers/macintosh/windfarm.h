@@ -17,7 +17,7 @@
 #include <linux/device.h>
 
 /* Display a 16.16 fixed point value */
-#define FIX32TOPRINT(f)	(((s32)(f)) >> 16),(((((s32)(f)) & 0xffff) * 1000) >> 16)
+#define FIX32TOPRINT(f)	((f) >> 16),((((f) & 0xffff) * 1000) >> 16)
 
 /*
  * Control objects
@@ -35,13 +35,12 @@ struct wf_control_ops {
 };
 
 struct wf_control {
-	struct list_head		link;
-	const struct wf_control_ops	*ops;
-	const char			*name;
-	int				type;
-	struct kref			ref;
-	struct device_attribute		attr;
-	void				*priv;
+	struct list_head	link;
+	struct wf_control_ops	*ops;
+	char			*name;
+	int			type;
+	struct kref		ref;
+	struct device_attribute	attr;
 };
 
 #define WF_CONTROL_TYPE_GENERIC		0
@@ -53,9 +52,11 @@ struct wf_control {
  * the kref and wf_unregister_control will decrement it, thus the
  * object creating/disposing a given control shouldn't assume it
  * still exists after wf_unregister_control has been called.
+ * wf_find_control will inc the refcount for you
  */
 extern int wf_register_control(struct wf_control *ct);
 extern void wf_unregister_control(struct wf_control *ct);
+extern struct wf_control * wf_find_control(const char *name);
 extern int wf_get_control(struct wf_control *ct);
 extern void wf_put_control(struct wf_control *ct);
 
@@ -71,26 +72,6 @@ static inline int wf_control_set_min(struct wf_control *ct)
 	return ct->ops->set_value(ct, vmin);
 }
 
-static inline int wf_control_set(struct wf_control *ct, s32 val)
-{
-	return ct->ops->set_value(ct, val);
-}
-
-static inline int wf_control_get(struct wf_control *ct, s32 *val)
-{
-	return ct->ops->get_value(ct, val);
-}
-
-static inline s32 wf_control_get_min(struct wf_control *ct)
-{
-	return ct->ops->get_min(ct);
-}
-
-static inline s32 wf_control_get_max(struct wf_control *ct)
-{
-	return ct->ops->get_max(ct);
-}
-
 /*
  * Sensor objects
  */
@@ -104,24 +85,19 @@ struct wf_sensor_ops {
 };
 
 struct wf_sensor {
-	struct list_head		link;
-	const struct wf_sensor_ops	*ops;
-	const char			*name;
-	struct kref			ref;
-	struct device_attribute		attr;
-	void				*priv;
+	struct list_head	link;
+	struct wf_sensor_ops	*ops;
+	char			*name;
+	struct kref		ref;
+	struct device_attribute	attr;
 };
 
 /* Same lifetime rules as controls */
 extern int wf_register_sensor(struct wf_sensor *sr);
 extern void wf_unregister_sensor(struct wf_sensor *sr);
+extern struct wf_sensor * wf_find_sensor(const char *name);
 extern int wf_get_sensor(struct wf_sensor *sr);
 extern void wf_put_sensor(struct wf_sensor *sr);
-
-static inline int wf_sensor_get(struct wf_sensor *sr, s32 *val)
-{
-	return sr->ops->get_value(sr, val);
-}
 
 /* For use by clients. Note that we are a bit racy here since
  * notifier_block doesn't have a module owner field. I may fix
@@ -141,6 +117,7 @@ extern int wf_unregister_client(struct notifier_block *nb);
 /* Overtemp conditions. Those are refcounted */
 extern void wf_set_overtemp(void);
 extern void wf_clear_overtemp(void);
+extern int wf_is_overtemp(void);
 
 #define WF_EVENT_NEW_CONTROL	0 /* param is wf_control * */
 #define WF_EVENT_NEW_SENSOR	1 /* param is wf_sensor * */

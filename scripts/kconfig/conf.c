@@ -5,7 +5,6 @@
 
 #include <locale.h>
 #include <ctype.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +13,6 @@
 #include <getopt.h>
 #include <sys/stat.h>
 #include <sys/time.h>
-#include <errno.h>
 
 #include "lkc.h"
 
@@ -34,15 +32,14 @@ enum input_mode {
 	defconfig,
 	savedefconfig,
 	listnewconfig,
-	olddefconfig,
+	oldnoconfig,
 } input_mode = oldaskconfig;
 
 static int indent = 1;
-static int tty_stdio;
 static int valid_stdin = 1;
 static int sync_kconfig;
 static int conf_cnt;
-static char line[PATH_MAX];
+static char line[128];
 static struct menu *rootEntry;
 
 static void print_help(struct menu *menu)
@@ -110,9 +107,7 @@ static int conf_askvalue(struct symbol *sym, const char *def)
 		/* fall through */
 	case oldaskconfig:
 		fflush(stdout);
-		xfgets(line, sizeof(line), stdin);
-		if (!tty_stdio)
-			printf("\n");
+		xfgets(line, 128, stdin);
 		return 1;
 	default:
 		break;
@@ -312,7 +307,7 @@ static int conf_choice(struct menu *menu)
 			/* fall through */
 		case oldaskconfig:
 			fflush(stdout);
-			xfgets(line, sizeof(line), stdin);
+			xfgets(line, 128, stdin);
 			strip(line);
 			if (line[0] == '?') {
 				print_help(menu);
@@ -370,7 +365,7 @@ static void conf(struct menu *menu)
 		case P_MENU:
 			if ((input_mode == silentoldconfig ||
 			     input_mode == listnewconfig ||
-			     input_mode == olddefconfig) &&
+			     input_mode == oldnoconfig) &&
 			    rootEntry != menu) {
 				check_conf(menu);
 				return;
@@ -434,7 +429,7 @@ static void check_conf(struct menu *menu)
 				if (sym->name && !sym_is_choice_value(sym)) {
 					printf("%s%s\n", CONFIG_, sym->name);
 				}
-			} else if (input_mode != olddefconfig) {
+			} else if (input_mode != oldnoconfig) {
 				if (!conf_cnt++)
 					printf(_("*\n* Restart config...\n*\n"));
 				rootEntry = menu_get_parent_menu(menu);
@@ -459,27 +454,20 @@ static struct option long_opts[] = {
 	{"alldefconfig",    no_argument,       NULL, alldefconfig},
 	{"randconfig",      no_argument,       NULL, randconfig},
 	{"listnewconfig",   no_argument,       NULL, listnewconfig},
-	{"olddefconfig",    no_argument,       NULL, olddefconfig},
-	/*
-	 * oldnoconfig is an alias of olddefconfig, because people already
-	 * are dependent on its behavior(sets new symbols to their default
-	 * value but not 'n') with the counter-intuitive name.
-	 */
-	{"oldnoconfig",     no_argument,       NULL, olddefconfig},
+	{"oldnoconfig",     no_argument,       NULL, oldnoconfig},
 	{NULL, 0, NULL, 0}
 };
 
 static void conf_usage(const char *progname)
 {
 
-	printf("Usage: %s [-s] [option] <kconfig-file>\n", progname);
+	printf("Usage: %s [option] <kconfig-file>\n", progname);
 	printf("[option] is _one_ of the following:\n");
 	printf("  --listnewconfig         List new options\n");
 	printf("  --oldaskconfig          Start a new configuration using a line-oriented program\n");
 	printf("  --oldconfig             Update a configuration using a provided .config as base\n");
 	printf("  --silentoldconfig       Same as oldconfig, but quietly, additionally update deps\n");
-	printf("  --olddefconfig          Same as silentoldconfig but sets new symbols to their default value\n");
-	printf("  --oldnoconfig           An alias of olddefconfig\n");
+	printf("  --oldnoconfig           Same as silentoldconfig but set new symbols to no\n");
 	printf("  --defconfig <file>      New config with default defined in <file>\n");
 	printf("  --savedefconfig <file>  Save the minimal current configuration to <file>\n");
 	printf("  --allnoconfig           New config where all options are answered with no\n");
@@ -500,13 +488,7 @@ int main(int ac, char **av)
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
 
-	tty_stdio = isatty(0) && isatty(1) && isatty(2);
-
-	while ((opt = getopt_long(ac, av, "s", long_opts, NULL)) != -1) {
-		if (opt == 's') {
-			conf_set_message_callback(NULL);
-			continue;
-		}
+	while ((opt = getopt_long(ac, av, "", long_opts, NULL)) != -1) {
 		input_mode = (enum input_mode)opt;
 		switch (opt) {
 		case silentoldconfig:
@@ -520,24 +502,14 @@ int main(int ac, char **av)
 		{
 			struct timeval now;
 			unsigned int seed;
-			char *seed_env;
 
 			/*
 			 * Use microseconds derived seed,
 			 * compensate for systems where it may be zero
 			 */
 			gettimeofday(&now, NULL);
-			seed = (unsigned int)((now.tv_sec + 1) * (now.tv_usec + 1));
 
-			seed_env = getenv("KCONFIG_SEED");
-			if( seed_env && *seed_env ) {
-				char *endp;
-				int tmp = (int)strtol(seed_env, &endp, 0);
-				if (*endp == '\0') {
-					seed = tmp;
-				}
-			}
-			fprintf( stderr, "KCONFIG_SEED=0x%X\n", seed );
+			seed = (unsigned int)((now.tv_sec + 1) * (now.tv_usec + 1));
 			srand(seed);
 			break;
 		}
@@ -548,7 +520,7 @@ int main(int ac, char **av)
 		case allmodconfig:
 		case alldefconfig:
 		case listnewconfig:
-		case olddefconfig:
+		case oldnoconfig:
 			break;
 		case '?':
 			conf_usage(progname);
@@ -593,7 +565,7 @@ int main(int ac, char **av)
 	case oldaskconfig:
 	case oldconfig:
 	case listnewconfig:
-	case olddefconfig:
+	case oldnoconfig:
 		conf_read(NULL);
 		break;
 	case allnoconfig:
@@ -602,15 +574,8 @@ int main(int ac, char **av)
 	case alldefconfig:
 	case randconfig:
 		name = getenv("KCONFIG_ALLCONFIG");
-		if (!name)
-			break;
-		if ((strcmp(name, "") != 0) && (strcmp(name, "1") != 0)) {
-			if (conf_read_simple(name, S_DEF_USER)) {
-				fprintf(stderr,
-					_("*** Can't read seed configuration \"%s\"!\n"),
-					name);
-				exit(1);
-			}
+		if (name && !stat(name, &tmpstat)) {
+			conf_read_simple(name, S_DEF_USER);
 			break;
 		}
 		switch (input_mode) {
@@ -621,13 +586,10 @@ int main(int ac, char **av)
 		case randconfig:	name = "allrandom.config"; break;
 		default: break;
 		}
-		if (conf_read_simple(name, S_DEF_USER) &&
-		    conf_read_simple("all.config", S_DEF_USER)) {
-			fprintf(stderr,
-				_("*** KCONFIG_ALLCONFIG set, but no \"%s\" or \"all.config\" file found\n"),
-				name);
-			exit(1);
-		}
+		if (!stat(name, &tmpstat))
+			conf_read_simple(name, S_DEF_USER);
+		else if (!stat("all.config", &tmpstat))
+			conf_read_simple("all.config", S_DEF_USER);
 		break;
 	default:
 		break;
@@ -642,7 +604,7 @@ int main(int ac, char **av)
 				return 1;
 			}
 		}
-		valid_stdin = tty_stdio;
+		valid_stdin = isatty(0) && isatty(1) && isatty(2);
 	}
 
 	switch (input_mode) {
@@ -659,8 +621,7 @@ int main(int ac, char **av)
 		conf_set_all_new_symbols(def_default);
 		break;
 	case randconfig:
-		/* Really nothing to do in this loop */
-		while (conf_set_all_new_symbols(def_random)) ;
+		conf_set_all_new_symbols(def_random);
 		break;
 	case defconfig:
 		conf_set_all_new_symbols(def_default);
@@ -674,7 +635,7 @@ int main(int ac, char **av)
 		/* fall through */
 	case oldconfig:
 	case listnewconfig:
-	case olddefconfig:
+	case oldnoconfig:
 	case silentoldconfig:
 		/* Update until a loop caused no more changes */
 		do {
@@ -682,7 +643,7 @@ int main(int ac, char **av)
 			check_conf(&rootmenu);
 		} while (conf_cnt &&
 			 (input_mode != listnewconfig &&
-			  input_mode != olddefconfig));
+			  input_mode != oldnoconfig));
 		break;
 	}
 
@@ -701,7 +662,7 @@ int main(int ac, char **av)
 	} else if (input_mode == savedefconfig) {
 		if (conf_write_defconfig(defconfig_file)) {
 			fprintf(stderr, _("n*** Error while saving defconfig to: %s\n\n"),
-				defconfig_file);
+			        defconfig_file);
 			return 1;
 		}
 	} else if (input_mode != listnewconfig) {

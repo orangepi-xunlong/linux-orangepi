@@ -20,7 +20,6 @@
 #include <linux/i2c/tps65010.h>
 
 #include <plat/cpu-freq.h>
-#include <mach/gpio-samsung.h>
 
 #define OSIRIS_GPIO_DVS	S3C2410_GPB(5)
 
@@ -70,16 +69,16 @@ static int osiris_dvs_notify(struct notifier_block *nb,
 
 	switch (val) {
 	case CPUFREQ_PRECHANGE:
-		if ((old_dvs && !new_dvs) ||
-		    (cur_dvs && !new_dvs)) {
+		if (old_dvs & !new_dvs ||
+		    cur_dvs & !new_dvs) {
 			pr_debug("%s: exiting dvs\n", __func__);
 			cur_dvs = false;
 			gpio_set_value(OSIRIS_GPIO_DVS, 1);
 		}
 		break;
 	case CPUFREQ_POSTCHANGE:
-		if ((!old_dvs && new_dvs) ||
-		    (!cur_dvs && new_dvs)) {
+		if (!old_dvs & new_dvs ||
+		    !cur_dvs & new_dvs) {
 			pr_debug("entering dvs\n");
 			cur_dvs = true;
 			gpio_set_value(OSIRIS_GPIO_DVS, 0);
@@ -94,7 +93,7 @@ static struct notifier_block osiris_dvs_nb = {
 	.notifier_call	= osiris_dvs_notify,
 };
 
-static int osiris_dvs_probe(struct platform_device *pdev)
+static int __devinit osiris_dvs_probe(struct platform_device *pdev)
 {
 	int ret;
 
@@ -127,7 +126,7 @@ err_nogpio:
 	return ret;
 }
 
-static int osiris_dvs_remove(struct platform_device *pdev)
+static int __devexit osiris_dvs_remove(struct platform_device *pdev)
 {
 	dev_info(&pdev->dev, "exiting\n");
 
@@ -143,7 +142,7 @@ static int osiris_dvs_remove(struct platform_device *pdev)
 	return 0;
 }
 
-/* the CONFIG_PM block is so small, it isn't worth actually compiling it
+/* the CONFIG_PM block is so small, it isn't worth actaully compiling it
  * out if the configuration isn't set. */
 
 static int osiris_dvs_suspend(struct device *dev)
@@ -168,14 +167,26 @@ static const struct dev_pm_ops osiris_dvs_pm = {
 
 static struct platform_driver osiris_dvs_driver = {
 	.probe		= osiris_dvs_probe,
-	.remove		= osiris_dvs_remove,
+	.remove		= __devexit_p(osiris_dvs_remove),
 	.driver		= {
 		.name	= "osiris-dvs",
+		.owner	= THIS_MODULE,
 		.pm	= &osiris_dvs_pm,
 	},
 };
 
-module_platform_driver(osiris_dvs_driver);
+static int __init osiris_dvs_init(void)
+{
+	return platform_driver_register(&osiris_dvs_driver);
+}
+
+static void __exit osiris_dvs_exit(void)
+{
+	platform_driver_unregister(&osiris_dvs_driver);
+}
+
+module_init(osiris_dvs_init);
+module_exit(osiris_dvs_exit);
 
 MODULE_DESCRIPTION("Simtec OSIRIS DVS support");
 MODULE_AUTHOR("Ben Dooks <ben@simtec.co.uk>");

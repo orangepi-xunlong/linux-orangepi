@@ -59,31 +59,6 @@ static irqreturn_t stdma_int (int irq, void *dummy);
 /************************* End of Prototypes **************************/
 
 
-/**
- * stdma_try_lock - attempt to acquire ST DMA interrupt "lock"
- * @handler: interrupt handler to use after acquisition
- *
- * Returns !0 if lock was acquired; otherwise 0.
- */
-
-int stdma_try_lock(irq_handler_t handler, void *data)
-{
-	unsigned long flags;
-
-	local_irq_save(flags);
-	if (stdma_locked) {
-		local_irq_restore(flags);
-		return 0;
-	}
-
-	stdma_locked   = 1;
-	stdma_isr      = handler;
-	stdma_isr_data = data;
-	local_irq_restore(flags);
-	return 1;
-}
-EXPORT_SYMBOL(stdma_try_lock);
-
 
 /*
  * Function: void stdma_lock( isrfunc isr, void *data )
@@ -103,10 +78,19 @@ EXPORT_SYMBOL(stdma_try_lock);
 
 void stdma_lock(irq_handler_t handler, void *data)
 {
+	unsigned long flags;
+
+	local_irq_save(flags);		/* protect lock */
+
 	/* Since the DMA is used for file system purposes, we
 	 have to sleep uninterruptible (there may be locked
 	 buffers) */
-	wait_event(stdma_wait, stdma_try_lock(handler, data));
+	wait_event(stdma_wait, !stdma_locked);
+
+	stdma_locked   = 1;
+	stdma_isr      = handler;
+	stdma_isr_data = data;
+	local_irq_restore(flags);
 }
 EXPORT_SYMBOL(stdma_lock);
 
@@ -138,25 +122,22 @@ void stdma_release(void)
 EXPORT_SYMBOL(stdma_release);
 
 
-/**
- * stdma_is_locked_by - allow lock holder to check whether it needs to release.
- * @handler: interrupt handler previously used to acquire lock.
+/*
+ * Function: int stdma_others_waiting( void )
  *
- * Returns !0 if locked for the given handler; 0 otherwise.
+ * Purpose: Check if someone waits for the ST-DMA lock.
+ *
+ * Inputs: none
+ *
+ * Returns: 0 if no one is waiting, != 0 otherwise
+ *
  */
 
-int stdma_is_locked_by(irq_handler_t handler)
+int stdma_others_waiting(void)
 {
-	unsigned long flags;
-	int result;
-
-	local_irq_save(flags);
-	result = stdma_locked && (stdma_isr == handler);
-	local_irq_restore(flags);
-
-	return result;
+	return waitqueue_active(&stdma_wait);
 }
-EXPORT_SYMBOL(stdma_is_locked_by);
+EXPORT_SYMBOL(stdma_others_waiting);
 
 
 /*
@@ -198,7 +179,7 @@ EXPORT_SYMBOL(stdma_islocked);
 void __init stdma_init(void)
 {
 	stdma_isr = NULL;
-	if (request_irq(IRQ_MFP_FDC, stdma_int, IRQF_SHARED,
+	if (request_irq(IRQ_MFP_FDC, stdma_int, IRQ_TYPE_SLOW | IRQF_SHARED,
 			"ST-DMA floppy,ACSI,IDE,Falcon-SCSI", stdma_int))
 		pr_err("Couldn't register ST-DMA interrupt\n");
 }

@@ -1075,8 +1075,9 @@ static inline void SPECIAL_REG_WRITE(u64 val, void __iomem *addr, int order)
 /*
  * Prototype declaration.
  */
-static int s2io_init_nic(struct pci_dev *pdev, const struct pci_device_id *pre);
-static void s2io_rem_nic(struct pci_dev *pdev);
+static int __devinit s2io_init_nic(struct pci_dev *pdev,
+				   const struct pci_device_id *pre);
+static void __devexit s2io_rem_nic(struct pci_dev *pdev);
 static int init_shared_mem(struct s2io_nic *sp);
 static void free_shared_mem(struct s2io_nic *sp);
 static int init_nic(struct s2io_nic *nic);
@@ -1085,6 +1086,8 @@ static void s2io_txpic_intr_handle(struct s2io_nic *sp);
 static void tx_intr_handler(struct fifo_info *fifo_data);
 static void s2io_handle_errors(void * dev_id);
 
+static int s2io_starter(void);
+static void s2io_closer(void);
 static void s2io_tx_watchdog(struct net_device *dev);
 static void s2io_set_multicast(struct net_device *dev);
 static int rx_osm_handler(struct ring_info *ring_data, struct RxD_t * rxdp);

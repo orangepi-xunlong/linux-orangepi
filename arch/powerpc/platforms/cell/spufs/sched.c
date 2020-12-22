@@ -24,8 +24,6 @@
 
 #include <linux/errno.h>
 #include <linux/sched.h>
-#include <linux/sched/loadavg.h>
-#include <linux/sched/rt.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -84,6 +82,7 @@ static struct timer_list spuloadavg_timer;
 #define MIN_SPU_TIMESLICE	max(5 * HZ / (1000 * SPUSCHED_TICK), 1)
 #define DEF_SPU_TIMESLICE	(100 * HZ / (1000 * SPUSCHED_TICK))
 
+#define MAX_USER_PRIO		(MAX_PRIO - MAX_RT_PRIO)
 #define SCALE_PRIO(x, prio) \
 	max(x * (MAX_PRIO - prio) / (MAX_USER_PRIO / 2), MIN_SPU_TIMESLICE)
 
@@ -623,7 +622,7 @@ static struct spu *spu_get_idle(struct spu_context *ctx)
 
 /**
  * find_victim - find a lower priority context to preempt
- * @ctx:	candidate context for running
+ * @ctx:	canidate context for running
  *
  * Returns the freed physical spu to run the new context on.
  */
@@ -987,9 +986,9 @@ static void spu_calc_load(void)
 	unsigned long active_tasks; /* fixed-point */
 
 	active_tasks = count_active_contexts() * FIXED_1;
-	spu_avenrun[0] = calc_load(spu_avenrun[0], EXP_1, active_tasks);
-	spu_avenrun[1] = calc_load(spu_avenrun[1], EXP_5, active_tasks);
-	spu_avenrun[2] = calc_load(spu_avenrun[2], EXP_15, active_tasks);
+	CALC_LOAD(spu_avenrun[0], EXP_1, active_tasks);
+	CALC_LOAD(spu_avenrun[1], EXP_5, active_tasks);
+	CALC_LOAD(spu_avenrun[2], EXP_15, active_tasks);
 }
 
 static void spusched_wake(unsigned long data)
@@ -1040,11 +1039,13 @@ void spuctx_switch_state(struct spu_context *ctx,
 {
 	unsigned long long curtime;
 	signed long long delta;
+	struct timespec ts;
 	struct spu *spu;
 	enum spu_utilization_state old_state;
 	int node;
 
-	curtime = ktime_get_ns();
+	ktime_get_ts(&ts);
+	curtime = timespec_to_ns(&ts);
 	delta = curtime - ctx->stats.tstamp;
 
 	WARN_ON(!mutex_is_locked(&ctx->state_mutex));
@@ -1071,6 +1072,9 @@ void spuctx_switch_state(struct spu_context *ctx,
 	}
 }
 
+#define LOAD_INT(x) ((x) >> FSHIFT)
+#define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
+
 static int show_spu_loadavg(struct seq_file *s, void *private)
 {
 	int a, b, c;
@@ -1090,7 +1094,7 @@ static int show_spu_loadavg(struct seq_file *s, void *private)
 		LOAD_INT(c), LOAD_FRAC(c),
 		count_active_contexts(),
 		atomic_read(&nr_spu_contexts),
-		task_active_pid_ns(current)->last_pid);
+		current->nsproxy->pid_ns->last_pid);
 	return 0;
 }
 

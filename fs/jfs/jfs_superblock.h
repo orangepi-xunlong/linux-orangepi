@@ -108,7 +108,6 @@ struct jfs_superblock {
 
 extern int readSuper(struct super_block *, struct buffer_head **);
 extern int updateSuper(struct super_block *, uint);
-__printf(2, 3)
 extern void jfs_error(struct super_block *, const char *, ...);
 extern int jfs_mount(struct super_block *);
 extern int jfs_mount_rw(struct super_block *, int);

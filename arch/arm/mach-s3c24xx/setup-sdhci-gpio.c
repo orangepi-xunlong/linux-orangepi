@@ -20,7 +20,6 @@
 #include <linux/gpio.h>
 
 #include <mach/regs-gpio.h>
-#include <mach/gpio-samsung.h>
 #include <plat/gpio-cfg.h>
 
 void s3c2416_setup_sdhci0_cfg_gpio(struct platform_device *dev, int width)

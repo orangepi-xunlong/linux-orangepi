@@ -3,11 +3,11 @@
  *            generic strncmp routine.
  */
 
-#include <linux/linkage.h>
-#include <asm/export.h>
-
 	.text
-ENTRY(strncmp)
+	.align 4
+	.global __strncmp, strncmp
+__strncmp:
+strncmp:
 	mov	%o0, %g3
 	mov	0, %o3
 
@@ -116,5 +116,3 @@ ENTRY(strncmp)
 	and	%g2, 0xff, %o0
 	retl
 	 sub	%o3, %o0, %o0
-ENDPROC(strncmp)
-EXPORT_SYMBOL(strncmp)

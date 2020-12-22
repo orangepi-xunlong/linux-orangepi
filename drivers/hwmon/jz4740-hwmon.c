@@ -20,7 +20,6 @@
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/io.h>
 
 #include <linux/completion.h>
 #include <linux/mfd/core.h>
@@ -28,13 +27,24 @@
 #include <linux/hwmon.h>
 
 struct jz4740_hwmon {
+	struct resource *mem;
 	void __iomem *base;
+
 	int irq;
+
 	const struct mfd_cell *cell;
-	struct platform_device *pdev;
+	struct device *hwmon;
+
 	struct completion read_completion;
+
 	struct mutex lock;
 };
+
+static ssize_t jz4740_hwmon_show_name(struct device *dev,
+	struct device_attribute *dev_attr, char *buf)
+{
+	return sprintf(buf, "jz4740\n");
+}
 
 static irqreturn_t jz4740_hwmon_irq(int irq, void *data)
 {
@@ -48,7 +58,6 @@ static ssize_t jz4740_hwmon_read_adcin(struct device *dev,
 	struct device_attribute *dev_attr, char *buf)
 {
 	struct jz4740_hwmon *hwmon = dev_get_drvdata(dev);
-	struct platform_device *pdev = hwmon->pdev;
 	struct completion *completion = &hwmon->read_completion;
 	long t;
 	unsigned long val;
@@ -56,10 +65,10 @@ static ssize_t jz4740_hwmon_read_adcin(struct device *dev,
 
 	mutex_lock(&hwmon->lock);
 
-	reinit_completion(completion);
+	INIT_COMPLETION(*completion);
 
 	enable_irq(hwmon->irq);
-	hwmon->cell->enable(pdev);
+	hwmon->cell->enable(to_platform_device(dev));
 
 	t = wait_for_completion_interruptible_timeout(completion, HZ);
 
@@ -71,7 +80,7 @@ static ssize_t jz4740_hwmon_read_adcin(struct device *dev,
 		ret = t ? t : -ETIMEDOUT;
 	}
 
-	hwmon->cell->disable(pdev);
+	hwmon->cell->disable(to_platform_device(dev));
 	disable_irq(hwmon->irq);
 
 	mutex_unlock(&hwmon->lock);
@@ -79,62 +88,127 @@ static ssize_t jz4740_hwmon_read_adcin(struct device *dev,
 	return ret;
 }
 
+static DEVICE_ATTR(name, S_IRUGO, jz4740_hwmon_show_name, NULL);
 static DEVICE_ATTR(in0_input, S_IRUGO, jz4740_hwmon_read_adcin, NULL);
 
-static struct attribute *jz4740_attrs[] = {
+static struct attribute *jz4740_hwmon_attributes[] = {
+	&dev_attr_name.attr,
 	&dev_attr_in0_input.attr,
 	NULL
 };
 
-ATTRIBUTE_GROUPS(jz4740);
+static const struct attribute_group jz4740_hwmon_attr_group = {
+	.attrs = jz4740_hwmon_attributes,
+};
 
-static int jz4740_hwmon_probe(struct platform_device *pdev)
+static int __devinit jz4740_hwmon_probe(struct platform_device *pdev)
 {
 	int ret;
-	struct device *dev = &pdev->dev;
 	struct jz4740_hwmon *hwmon;
-	struct device *hwmon_dev;
-	struct resource *mem;
 
-	hwmon = devm_kzalloc(dev, sizeof(*hwmon), GFP_KERNEL);
-	if (!hwmon)
+	hwmon = kmalloc(sizeof(*hwmon), GFP_KERNEL);
+	if (!hwmon) {
+		dev_err(&pdev->dev, "Failed to allocate driver structure\n");
 		return -ENOMEM;
+	}
 
 	hwmon->cell = mfd_get_cell(pdev);
 
 	hwmon->irq = platform_get_irq(pdev, 0);
 	if (hwmon->irq < 0) {
-		dev_err(&pdev->dev, "Failed to get platform irq: %d\n",
-			hwmon->irq);
-		return hwmon->irq;
+		ret = hwmon->irq;
+		dev_err(&pdev->dev, "Failed to get platform irq: %d\n", ret);
+		goto err_free;
 	}
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hwmon->base = devm_ioremap_resource(&pdev->dev, mem);
-	if (IS_ERR(hwmon->base))
-		return PTR_ERR(hwmon->base);
+	hwmon->mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!hwmon->mem) {
+		ret = -ENOENT;
+		dev_err(&pdev->dev, "Failed to get platform mmio resource\n");
+		goto err_free;
+	}
 
-	hwmon->pdev = pdev;
+	hwmon->mem = request_mem_region(hwmon->mem->start,
+			resource_size(hwmon->mem), pdev->name);
+	if (!hwmon->mem) {
+		ret = -EBUSY;
+		dev_err(&pdev->dev, "Failed to request mmio memory region\n");
+		goto err_free;
+	}
+
+	hwmon->base = ioremap_nocache(hwmon->mem->start,
+			resource_size(hwmon->mem));
+	if (!hwmon->base) {
+		ret = -EBUSY;
+		dev_err(&pdev->dev, "Failed to ioremap mmio memory\n");
+		goto err_release_mem_region;
+	}
+
 	init_completion(&hwmon->read_completion);
 	mutex_init(&hwmon->lock);
 
-	ret = devm_request_irq(dev, hwmon->irq, jz4740_hwmon_irq, 0,
-			       pdev->name, hwmon);
+	platform_set_drvdata(pdev, hwmon);
+
+	ret = request_irq(hwmon->irq, jz4740_hwmon_irq, 0, pdev->name, hwmon);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to request irq: %d\n", ret);
-		return ret;
+		goto err_iounmap;
 	}
 	disable_irq(hwmon->irq);
 
-	hwmon_dev = devm_hwmon_device_register_with_groups(dev, "jz4740", hwmon,
-							   jz4740_groups);
-	return PTR_ERR_OR_ZERO(hwmon_dev);
+	ret = sysfs_create_group(&pdev->dev.kobj, &jz4740_hwmon_attr_group);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to create sysfs group: %d\n", ret);
+		goto err_free_irq;
+	}
+
+	hwmon->hwmon = hwmon_device_register(&pdev->dev);
+	if (IS_ERR(hwmon->hwmon)) {
+		ret = PTR_ERR(hwmon->hwmon);
+		goto err_remove_file;
+	}
+
+	return 0;
+
+err_remove_file:
+	sysfs_remove_group(&pdev->dev.kobj, &jz4740_hwmon_attr_group);
+err_free_irq:
+	free_irq(hwmon->irq, hwmon);
+err_iounmap:
+	platform_set_drvdata(pdev, NULL);
+	iounmap(hwmon->base);
+err_release_mem_region:
+	release_mem_region(hwmon->mem->start, resource_size(hwmon->mem));
+err_free:
+	kfree(hwmon);
+
+	return ret;
+}
+
+static int __devexit jz4740_hwmon_remove(struct platform_device *pdev)
+{
+	struct jz4740_hwmon *hwmon = platform_get_drvdata(pdev);
+
+	hwmon_device_unregister(hwmon->hwmon);
+	sysfs_remove_group(&pdev->dev.kobj, &jz4740_hwmon_attr_group);
+
+	free_irq(hwmon->irq, hwmon);
+
+	iounmap(hwmon->base);
+	release_mem_region(hwmon->mem->start, resource_size(hwmon->mem));
+
+	platform_set_drvdata(pdev, NULL);
+	kfree(hwmon);
+
+	return 0;
 }
 
 static struct platform_driver jz4740_hwmon_driver = {
 	.probe	= jz4740_hwmon_probe,
+	.remove = __devexit_p(jz4740_hwmon_remove),
 	.driver = {
 		.name = "jz4740-hwmon",
+		.owner = THIS_MODULE,
 	},
 };
 

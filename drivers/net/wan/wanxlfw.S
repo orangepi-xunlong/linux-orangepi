@@ -35,7 +35,6 @@
 */
 
 #include <linux/hdlc.h>
-#include <linux/hdlc/ioctl.h>
 #include "wanxl.h"
 
 /* memory addresses and offsets */

@@ -1,35 +1,10 @@
 /*
- * Copyright (C) 1999-2017, Broadcom Corporation
- *
- *      Unless you and Broadcom execute a separate written software license
- * agreement governing use of this software, this software is licensed to you
- * under the terms of the GNU General Public License version 2 (the "GPL"),
- * available at http://www.broadcom.com/licenses/GPLv2.php, with the
- * following added to such license:
- *
- *      As a special exception, the copyright holders of this software give you
- * permission to link this software with independent modules, and to copy and
- * distribute the resulting executable under terms of your choice, provided that
- * you also meet, for each linked independent module, the terms and conditions of
- * the license of that module.  An independent module is a module which is not
- * derived from this software.  The special exception does not apply to any
- * modifications of the software.
- *
- *      Notwithstanding the above, under no circumstances may you combine this
- * software in any way with any other Broadcom software provided under a license
- * other than the GPL, without Broadcom's express prior written consent.
- *
- *
- * <<Broadcom-WL-IPTag/Open:>>
- *
- * $Id: typedefs.h 639587 2016-05-24 06:44:44Z $
+ * $Copyright Open Broadcom Corporation$
+ * $Id: typedefs.h 484281 2014-06-12 22:42:26Z $
  */
 
 #ifndef _TYPEDEFS_H_
 #define _TYPEDEFS_H_
-
-#if (!defined(EDK_RELEASE_VERSION) || (EDK_RELEASE_VERSION < 0x00020000)) || \
-	!defined(BWL_NO_INTERNAL_STDLIB_SUPPORT)
 
 #ifdef SITE_TYPEDEFS
 
@@ -80,9 +55,6 @@ typedef unsigned long long int uintptr;
 
 
 
-/* float_t types conflict with the same typedefs from the standard ANSI-C
-** math.h header file. Don't re-typedef them here.
-*/
 
 #if defined(_NEED_SIZE_T_)
 typedef long unsigned int size_t;
@@ -103,6 +75,7 @@ typedef long unsigned int size_t;
  * a duplicate typedef error; there is no way to "undefine" a typedef.
  * We know when it's per-port code because each file defines LINUX_PORT at the top.
  */
+#if !defined(LINUX_HYBRID) || defined(LINUX_PORT)
 #define TYPEDEF_UINT
 #ifndef TARGETENV_android
 #define TYPEDEF_USHORT
@@ -121,6 +94,7 @@ typedef long unsigned int size_t;
 #endif
 #endif	/* == 2.6.18 */
 #endif	/* __KERNEL__ */
+#endif  /* !defined(LINUX_HYBRID) || defined(LINUX_PORT) */
 
 
 /* Do not support the (u)int64 types with strict ansi for GNU C */
@@ -148,7 +122,9 @@ typedef long unsigned int size_t;
 #if defined(__KERNEL__)
 
 /* See note above */
+#if !defined(LINUX_HYBRID) || defined(LINUX_PORT)
 #include <linux/types.h>	/* sys/types.h and linux/types.h are oil and water */
+#endif /* !defined(LINUX_HYBRID) || defined(LINUX_PORT) */
 
 #else
 
@@ -156,7 +132,7 @@ typedef long unsigned int size_t;
 
 #endif /* linux && __KERNEL__ */
 
-#endif
+#endif 
 
 
 /* use the default typedefs in the next section of this file */
@@ -296,7 +272,7 @@ typedef float64 float_t;
 	#define BWL_COMPILER_ARMCC
 #else
 	#error "Unknown compiler!"
-#endif
+#endif 
 
 
 #ifndef INLINE
@@ -308,7 +284,7 @@ typedef float64 float_t;
 		#define INLINE	__inline
 	#else
 		#define INLINE
-	#endif
+	#endif 
 #endif /* INLINE */
 
 #undef TYPEDEF_BOOL
@@ -336,47 +312,6 @@ typedef float64 float_t;
 
 /* Avoid warning for discarded const or volatile qualifier in special cases (-Wcast-qual) */
 #define DISCARD_QUAL(ptr, type) ((type *)(uintptr)(ptr))
-
-#else
-
-#include <sys/types.h>
-#include <strings.h>
-#include <stdlib.h>
-
-#ifdef stderr
-#undef stderr
-#define stderr stdout
-#endif
-
-typedef UINT32  uint;
-typedef UINT64  ulong;
-typedef UINT16  ushort;
-typedef UINT8   uint8;
-typedef UINT16  uint16;
-typedef UINT32  uint32;
-typedef UINT64  uint64;
-typedef INT8    int8;
-typedef INT16   int16;
-typedef INT32   int32;
-typedef INT64   int64;
-
-typedef BOOLEAN       bool;
-typedef unsigned char uchar;
-typedef UINTN         uintptr;
-
-typedef UINT8   u_char;
-typedef UINT16  u_short;
-typedef UINTN   u_int;
-typedef ULONGN  u_long;
-
-#define UNUSED_PARAMETER(x) (void)(x)
-#define DISCARD_QUAL(ptr, type) ((type *)(uintptr)(ptr))
-#define INLINE
-#define	AUTO	(-1) /* Auto = -1 */
-#define	ON	1  /* ON = 1 */
-#define	OFF	0
-
-#endif /* !EDK_RELEASE_VERSION || (EDK_RELEASE_VERSION < 0x00020000) */
 
 /*
  * Including the bcmdefs.h here, to make sure everyone including typedefs.h

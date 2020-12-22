@@ -112,9 +112,7 @@ MODULE_ALIAS("sound-layout-100");
 
 MODULE_ALIAS("aoa-device-id-14");
 MODULE_ALIAS("aoa-device-id-22");
-MODULE_ALIAS("aoa-device-id-31");
 MODULE_ALIAS("aoa-device-id-35");
-MODULE_ALIAS("aoa-device-id-44");
 
 /* onyx with all but microphone connected */
 static struct codec_connection onyx_connections_nomic[] = {
@@ -361,20 +359,6 @@ static struct layout layouts[] = {
 	  .codecs[0] = {
 		.name = "tas",
 		.connections = tas_connections_nolineout,
-	  },
-	},
-	/* PowerBook6,1 */
-	{ .device_id = 31,
-	  .codecs[0] = {
-		.name = "tas",
-		.connections = tas_connections_nolineout,
-	  },
-	},
-	/* PowerBook6,5 */
-	{ .device_id = 44,
-	  .codecs[0] = {
-		.name = "tas",
-		.connections = tas_connections_all,
 	  },
 	},
 	/* PowerBook6,7 */
@@ -652,7 +636,7 @@ static int n##_control_put(struct snd_kcontrol *kcontrol,		\
 			   struct snd_ctl_elem_value *ucontrol)		\
 {									\
 	struct gpio_runtime *gpio = snd_kcontrol_chip(kcontrol);	\
-	if (gpio->methods && gpio->methods->set_##n)			\
+	if (gpio->methods && gpio->methods->get_##n)			\
 		gpio->methods->set_##n(gpio,				\
 			!!ucontrol->value.integer.value[0]);		\
 	return 1;							\
@@ -1128,10 +1112,10 @@ static int aoa_fabric_layout_remove(struct soundbus_dev *sdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int aoa_fabric_layout_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int aoa_fabric_layout_suspend(struct soundbus_dev *sdev, pm_message_t state)
 {
-	struct layout_dev *ldev = dev_get_drvdata(dev);
+	struct layout_dev *ldev = dev_get_drvdata(&sdev->ofdev.dev);
 
 	if (ldev->gpio.methods && ldev->gpio.methods->all_amps_off)
 		ldev->gpio.methods->all_amps_off(&ldev->gpio);
@@ -1139,19 +1123,15 @@ static int aoa_fabric_layout_suspend(struct device *dev)
 	return 0;
 }
 
-static int aoa_fabric_layout_resume(struct device *dev)
+static int aoa_fabric_layout_resume(struct soundbus_dev *sdev)
 {
-	struct layout_dev *ldev = dev_get_drvdata(dev);
+	struct layout_dev *ldev = dev_get_drvdata(&sdev->ofdev.dev);
 
-	if (ldev->gpio.methods && ldev->gpio.methods->all_amps_restore)
+	if (ldev->gpio.methods && ldev->gpio.methods->all_amps_off)
 		ldev->gpio.methods->all_amps_restore(&ldev->gpio);
 
 	return 0;
 }
-
-static SIMPLE_DEV_PM_OPS(aoa_fabric_layout_pm_ops,
-	aoa_fabric_layout_suspend, aoa_fabric_layout_resume);
-
 #endif
 
 static struct soundbus_driver aoa_soundbus_driver = {
@@ -1159,17 +1139,23 @@ static struct soundbus_driver aoa_soundbus_driver = {
 	.owner = THIS_MODULE,
 	.probe = aoa_fabric_layout_probe,
 	.remove = aoa_fabric_layout_remove,
+#ifdef CONFIG_PM
+	.suspend = aoa_fabric_layout_suspend,
+	.resume = aoa_fabric_layout_resume,
+#endif
 	.driver = {
 		.owner = THIS_MODULE,
-#ifdef CONFIG_PM_SLEEP
-		.pm = &aoa_fabric_layout_pm_ops,
-#endif
 	}
 };
 
 static int __init aoa_fabric_layout_init(void)
 {
-	return soundbus_register_driver(&aoa_soundbus_driver);
+	int err;
+
+	err = soundbus_register_driver(&aoa_soundbus_driver);
+	if (err)
+		return err;
+	return 0;
 }
 
 static void __exit aoa_fabric_layout_exit(void)

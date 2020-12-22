@@ -23,8 +23,6 @@
   Reset function and helpers
 \****************************/
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <asm/unaligned.h>
 
 #include <linux/pci.h>		/* To determine if a card is pci-e */
@@ -634,7 +632,7 @@ ath5k_hw_on_hold(struct ath5k_hw *ah)
 		ret = ath5k_hw_nic_reset(ah, AR5K_RESET_CTL_PCU |
 			AR5K_RESET_CTL_MAC | AR5K_RESET_CTL_DMA |
 			AR5K_RESET_CTL_PHY | AR5K_RESET_CTL_PCI);
-		usleep_range(2000, 2500);
+			usleep_range(2000, 2500);
 	} else {
 		ret = ath5k_hw_nic_reset(ah, AR5K_RESET_CTL_PCU |
 			AR5K_RESET_CTL_BASEBAND | bus_flags);
@@ -699,7 +697,7 @@ ath5k_hw_nic_wakeup(struct ath5k_hw *ah, struct ieee80211_channel *channel)
 		ret = ath5k_hw_nic_reset(ah, AR5K_RESET_CTL_PCU |
 			AR5K_RESET_CTL_MAC | AR5K_RESET_CTL_DMA |
 			AR5K_RESET_CTL_PHY | AR5K_RESET_CTL_PCI);
-		usleep_range(2000, 2500);
+			usleep_range(2000, 2500);
 	} else {
 		if (ath5k_get_bus_type(ah) == ATH_AHB)
 			ret = ath5k_hw_wisoc_reset(ah, AR5K_RESET_CTL_PCU |
@@ -752,7 +750,7 @@ ath5k_hw_nic_wakeup(struct ath5k_hw *ah, struct ieee80211_channel *channel)
 			clock = AR5K_PHY_PLL_RF5111;		/*Zero*/
 		}
 
-		if (channel->band == NL80211_BAND_2GHZ) {
+		if (channel->band == IEEE80211_BAND_2GHZ) {
 			mode |= AR5K_PHY_MODE_FREQ_2GHZ;
 			clock |= AR5K_PHY_PLL_44MHZ;
 
@@ -771,7 +769,7 @@ ath5k_hw_nic_wakeup(struct ath5k_hw *ah, struct ieee80211_channel *channel)
 				else
 					mode |= AR5K_PHY_MODE_MOD_DYN;
 			}
-		} else if (channel->band == NL80211_BAND_5GHZ) {
+		} else if (channel->band == IEEE80211_BAND_5GHZ) {
 			mode |= (AR5K_PHY_MODE_FREQ_5GHZ |
 				 AR5K_PHY_MODE_MOD_OFDM);
 
@@ -789,9 +787,9 @@ ath5k_hw_nic_wakeup(struct ath5k_hw *ah, struct ieee80211_channel *channel)
 		 * (I don't think it supports 44MHz) */
 		/* On 2425 initvals TURBO_SHORT is not present */
 		if (ah->ah_bwmode == AR5K_BWMODE_40MHZ) {
-			turbo = AR5K_PHY_TURBO_MODE;
-			if (ah->ah_radio != AR5K_RF2425)
-				turbo |= AR5K_PHY_TURBO_SHORT;
+			turbo = AR5K_PHY_TURBO_MODE |
+				(ah->ah_radio == AR5K_RF2425) ? 0 :
+				AR5K_PHY_TURBO_SHORT;
 		} else if (ah->ah_bwmode != AR5K_BWMODE_DEFAULT) {
 			if (ah->ah_radio == AR5K_RF5413) {
 				mode |= (ah->ah_bwmode == AR5K_BWMODE_10MHZ) ?
@@ -906,7 +904,7 @@ ath5k_hw_tweak_initval_settings(struct ath5k_hw *ah,
 		u32 data;
 		ath5k_hw_reg_write(ah, AR5K_PHY_CCKTXCTL_WORLD,
 				AR5K_PHY_CCKTXCTL);
-		if (channel->band == NL80211_BAND_5GHZ)
+		if (channel->band == IEEE80211_BAND_5GHZ)
 			data = 0xffb81020;
 		else
 			data = 0xffb80d20;
@@ -984,7 +982,7 @@ ath5k_hw_commit_eeprom_settings(struct ath5k_hw *ah,
 	if (ah->ah_version == AR5K_AR5210)
 		return;
 
-	ee_mode = ath5k_eeprom_mode_from_channel(ah, channel);
+	ee_mode = ath5k_eeprom_mode_from_channel(channel);
 
 	/* Adjust power delta for channel 14 */
 	if (channel->center_freq == 2484)
@@ -1168,6 +1166,30 @@ ath5k_hw_reset(struct ath5k_hw *ah, enum nl80211_iftype op_mode,
 	 * PHY registers */
 	if (ah->ah_version == AR5K_AR5212)
 		ath5k_hw_set_sleep_clock(ah, false);
+
+	/*
+	 * Stop PCU
+	 */
+	ath5k_hw_stop_rx_pcu(ah);
+
+	/*
+	 * Stop DMA
+	 *
+	 * Note: If DMA didn't stop continue
+	 * since only a reset will fix it.
+	 */
+	ret = ath5k_hw_dma_stop(ah);
+
+	/* RF Bus grant won't work if we have pending
+	 * frames */
+	if (ret && fast) {
+		ATH5K_DBG(ah, ATH5K_DEBUG_RESET,
+			"DMA didn't stop, falling back to normal reset\n");
+		fast = false;
+		/* Non fatal, just continue with
+		 * normal reset */
+		ret = 0;
+	}
 
 	mode = channel->hw_value;
 	switch (mode) {

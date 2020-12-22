@@ -19,12 +19,16 @@
  * See the GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with GNU CC; see the file COPYING.  If not, see
- * <http://www.gnu.org/licenses/>.
+ * along with GNU CC; see the file COPYING.  If not, write to
+ * the Free Software Foundation, 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  * Please send any bug reports or fixes you make to the
  * email address(es):
- *    lksctp developers <linux-sctp@vger.kernel.org>
+ *    lksctp developers <lksctp-developers@lists.sourceforge.net>
+ *
+ * Or submit a bug report through the following website:
+ *    http://www.sf.net/projects/lksctp
  *
  * Written or modified by:
  *    Dinakaran Joseph
@@ -33,46 +37,47 @@
  *
  * Rewritten to use libcrc32c by:
  *    Vlad Yasevich <vladislav.yasevich@hp.com>
+ *
+ * Any bugs reported given to us we will try to fix... any fixes shared will
+ * be incorporated into the next SCTP release.
  */
-
-#ifndef __sctp_checksum_h__
-#define __sctp_checksum_h__
 
 #include <linux/types.h>
 #include <net/sctp/sctp.h>
 #include <linux/crc32c.h>
-#include <linux/crc32.h>
 
-static inline __wsum sctp_csum_update(const void *buff, int len, __wsum sum)
+static inline __u32 sctp_crc32c(__u32 crc, u8 *buffer, u16 length)
 {
-	/* This uses the crypto implementation of crc32c, which is either
-	 * implemented w/ hardware support or resolves to __crc32c_le().
+	return crc32c(crc, buffer, length);
+}
+
+static inline __u32 sctp_start_cksum(__u8 *buffer, __u16 length)
+{
+	__u32 crc = ~(__u32)0;
+	__u8  zero[sizeof(__u32)] = {0};
+
+	/* Optimize this routine to be SCTP specific, knowing how
+	 * to skip the checksum field of the SCTP header.
 	 */
-	return crc32c(sum, buff, len);
+
+	/* Calculate CRC up to the checksum. */
+	crc = sctp_crc32c(crc, buffer, sizeof(struct sctphdr) - sizeof(__u32));
+
+	/* Skip checksum field of the header. */
+	crc = sctp_crc32c(crc, zero, sizeof(__u32));
+
+	/* Calculate the rest of the CRC. */
+	crc = sctp_crc32c(crc, &buffer[sizeof(struct sctphdr)],
+			    length - sizeof(struct sctphdr));
+	return crc;
 }
 
-static inline __wsum sctp_csum_combine(__wsum csum, __wsum csum2,
-				       int offset, int len)
+static inline __u32 sctp_update_cksum(__u8 *buffer, __u16 length, __u32 crc32)
 {
-	return __crc32c_le_combine(csum, csum2, len);
+	return sctp_crc32c(crc32, buffer, length);
 }
 
-static inline __le32 sctp_compute_cksum(const struct sk_buff *skb,
-					unsigned int offset)
+static inline __le32 sctp_end_cksum(__be32 crc32)
 {
-	struct sctphdr *sh = (struct sctphdr *)(skb->data + offset);
-        __le32 ret, old = sh->checksum;
-	const struct skb_checksum_ops ops = {
-		.update  = sctp_csum_update,
-		.combine = sctp_csum_combine,
-	};
-
-	sh->checksum = 0;
-	ret = cpu_to_le32(~__skb_checksum(skb, offset, skb->len - offset,
-					  ~(__u32)0, &ops));
-	sh->checksum = old;
-
-	return ret;
+	return cpu_to_le32(~crc32);
 }
-
-#endif /* __sctp_checksum_h__ */

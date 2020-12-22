@@ -19,7 +19,7 @@ struct hvtramp_descr {
 	struct hvtramp_mapping	maps[1];
 };
 
-void hv_cpu_startup(unsigned long hvdescr_pa);
+extern void hv_cpu_startup(unsigned long hvdescr_pa);
 
 #endif
 

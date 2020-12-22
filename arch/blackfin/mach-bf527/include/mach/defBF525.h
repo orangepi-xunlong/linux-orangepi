@@ -1,7 +1,7 @@
 /*
  * Copyright 2007-2010 Analog Devices Inc.
  *
- * Licensed under the Clear BSD license or the GPL-2 (or later)
+ * Licensed under the ADI BSD license or the GPL-2 (or later)
  */
 
 #ifndef _DEF_BF525_H
@@ -76,6 +76,10 @@
 #define                   USB_APHY_CALIB  0xffc039e4   /* Register used to set some calibration values */
 
 #define                  USB_APHY_CNTRL2  0xffc039e8   /* Register used to prevent re-enumeration once Moab goes into hibernate mode */
+
+/* (PHY_TEST is for ADI usage only) */
+
+#define                     USB_PHY_TEST  0xffc039ec   /* Used for reducing simulation time and simplifies FIFO testability */
 
 #define                  USB_PLLOSC_CTRL  0xffc039f0   /* Used to program different parameters for USB PLL and Oscillator */
 #define                   USB_SRP_CLKDIV  0xffc039f4   /* Used to program clock divide value for the clock fed to the SRP detection logic */

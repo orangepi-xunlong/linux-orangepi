@@ -1,9 +1,8 @@
 /*
  *  arch/arm/mach-sun6i/include/mach/io.h
  *
- * Copyright(c) 2012-2016 Allwinnertech Co., Ltd.
- * Author: Benn Huang <benn@allwinnertech.com>
- *	   Sugar <shuge@allwinnertech.com>
+ *  Copyright (C) 2012-2016 Allwinner Limited
+ *  Benn Huang (benn@allwinnertech.com)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,7 +15,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #ifndef __ASM_ARM_ARCH_IO_H
 #define __ASM_ARM_ARCH_IO_H
@@ -29,30 +29,4 @@
  */
 #define __io(a)		__typesafe_io(a)
 
-#if !defined(SUNXI_IO_PBASE)
-#define SUNXI_IO_PBASE		UL(0x01000000)
-
-#if defined(CONFIG_ARCH_SUN8IW11)
-#define SUNXI_IO_SIZE		SZ_16M
-#elif defined (CONFIG_ARCH_SUN8IW7) || defined (CONFIG_ARCH_SUN8IW6)
-#define SUNXI_IO_SIZE		UL(0x01000000)
-#else
-#define SUNXI_IO_SIZE		UL(0x0a000000 - 0x01000000)
 #endif
-
-#endif
-
-#if !defined(SUNXI_UART_PBASE)
-#if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW7)
-#define SUNXI_UART_PBASE		UL(0x01c28000)
-#else
-#define SUNXI_UART_PBASE		UL(0x05000000)
-#endif
-#define SUNXI_UART_SIZE			UL(0x2000)
-#endif
-
-#if !defined(UARTIO_ADDRESS)
-#define UARTIO_ADDRESS(x)  IOMEM((x) + 0xf0000000)
-#endif
-
-#endif /* __ASM_ARM_ARCH_IO_H */

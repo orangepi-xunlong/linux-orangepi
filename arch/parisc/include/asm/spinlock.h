@@ -13,19 +13,15 @@ static inline int arch_spin_is_locked(arch_spinlock_t *x)
 }
 
 #define arch_spin_lock(lock) arch_spin_lock_flags(lock, 0)
-
-static inline void arch_spin_unlock_wait(arch_spinlock_t *x)
-{
-	volatile unsigned int *a = __ldcw_align(x);
-
-	smp_cond_load_acquire(a, VAL);
-}
+#define arch_spin_unlock_wait(x) \
+		do { cpu_relax(); } while (arch_spin_is_locked(x))
 
 static inline void arch_spin_lock_flags(arch_spinlock_t *x,
 					 unsigned long flags)
 {
 	volatile unsigned int *a;
 
+	mb();
 	a = __ldcw_align(x);
 	while (__ldcw(a) == 0)
 		while (*a == 0)
@@ -35,15 +31,16 @@ static inline void arch_spin_lock_flags(arch_spinlock_t *x,
 				local_irq_disable();
 			} else
 				cpu_relax();
+	mb();
 }
 
 static inline void arch_spin_unlock(arch_spinlock_t *x)
 {
 	volatile unsigned int *a;
-
-	a = __ldcw_align(x);
 	mb();
+	a = __ldcw_align(x);
 	*a = 1;
+	mb();
 }
 
 static inline int arch_spin_trylock(arch_spinlock_t *x)
@@ -51,8 +48,10 @@ static inline int arch_spin_trylock(arch_spinlock_t *x)
 	volatile unsigned int *a;
 	int ret;
 
+	mb();
 	a = __ldcw_align(x);
         ret = __ldcw(a) != 0;
+	mb();
 
 	return ret;
 }
@@ -191,5 +190,9 @@ static __inline__ int arch_write_can_lock(arch_rwlock_t *rw)
 
 #define arch_read_lock_flags(lock, flags) arch_read_lock(lock)
 #define arch_write_lock_flags(lock, flags) arch_write_lock(lock)
+
+#define arch_spin_relax(lock)	cpu_relax()
+#define arch_read_relax(lock)	cpu_relax()
+#define arch_write_relax(lock)	cpu_relax()
 
 #endif /* __ASM_SPINLOCK_H */

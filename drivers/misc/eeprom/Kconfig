@@ -1,18 +1,16 @@
 menu "EEPROM support"
 
 config EEPROM_AT24
-	tristate "I2C EEPROMs / RAMs / ROMs from most vendors"
+	tristate "I2C EEPROMs from most vendors"
 	depends on I2C && SYSFS
-	select NVMEM
 	help
-	  Enable this driver to get read/write support to most I2C EEPROMs
-	  and compatible devices like FRAMs, SRAMs, ROMs etc. After you
-	  configure the driver to know about each chip on your target
-	  board.  Use these generic chip names, instead of vendor-specific
-	  ones like at24c64, 24lc02 or fm24c04:
+	  Enable this driver to get read/write support to most I2C EEPROMs,
+	  after you configure the driver to know about each EEPROM on
+	  your target board.  Use these generic chip names, instead of
+	  vendor-specific ones like at24c64 or 24lc02:
 
 	     24c00, 24c01, 24c02, spd (readonly 24c02), 24c04, 24c08,
-	     24c16, 24c32, 24c64, 24c128, 24c256, 24c512, 24c1024, 24c2048
+	     24c16, 24c32, 24c64, 24c128, 24c256, 24c512, 24c1024
 
 	  Unless you like data loss puzzles, always be sure that any chip
 	  you configure as a 24c32 (32 kbit) or larger is NOT really a
@@ -31,7 +29,6 @@ config EEPROM_AT24
 config EEPROM_AT25
 	tristate "SPI EEPROMs from most vendors"
 	depends on SPI && SYSFS
-	select NVMEM
 	help
 	  Enable this driver to get read/write support to most SPI EEPROMs,
 	  after you configure the board init code to know about each eeprom
@@ -53,7 +50,7 @@ config EEPROM_LEGACY
 
 config EEPROM_MAX6875
 	tristate "Maxim MAX6874/5 power supply supervisor"
-	depends on I2C
+	depends on I2C && EXPERIMENTAL
 	help
 	  If you say yes here you get read-only support for the user EEPROM of
 	  the Maxim MAX6874/5 EEPROM-programmable, quad power-supply
@@ -76,8 +73,6 @@ config EEPROM_93CX6
 config EEPROM_93XX46
 	tristate "Microwire EEPROM 93XX46 support"
 	depends on SPI && SYSFS
-	select REGMAP
-	select NVMEM
 	help
 	  Driver for the microwire EEPROM chipsets 93xx46x. The driver
 	  supports both read and write commands and also the command to

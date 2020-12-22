@@ -13,7 +13,6 @@
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/delay.h>
-#include <linux/time.h>
 
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -128,16 +127,17 @@ static void psc_ac97_cold_reset(struct snd_ac97 *ac97)
 
 	mutex_unlock(&psc_dma->mutex);
 
-	usleep_range(1000, 2000);
+	msleep(1);
 	psc_ac97_warm_reset(ac97);
 }
 
-static struct snd_ac97_bus_ops psc_ac97_ops = {
+struct snd_ac97_bus_ops soc_ac97_ops = {
 	.read		= psc_ac97_read,
 	.write		= psc_ac97_write,
 	.reset		= psc_ac97_cold_reset,
 	.warm_reset	= psc_ac97_warm_reset,
 };
+EXPORT_SYMBOL_GPL(soc_ac97_ops);
 
 static int psc_ac97_hw_analog_params(struct snd_pcm_substream *substream,
 				 struct snd_pcm_hw_params *params,
@@ -237,18 +237,15 @@ static const struct snd_soc_dai_ops psc_ac97_digital_ops = {
 
 static struct snd_soc_dai_driver psc_ac97_dai[] = {
 {
-	.name = "mpc5200-psc-ac97.0",
-	.bus_control = true,
+	.ac97_control = 1,
 	.probe	= psc_ac97_probe,
 	.playback = {
-		.stream_name	= "AC97 Playback",
 		.channels_min   = 1,
 		.channels_max   = 6,
 		.rates          = SNDRV_PCM_RATE_8000_48000,
 		.formats = SNDRV_PCM_FMTBIT_S32_BE,
 	},
 	.capture = {
-		.stream_name	= "AC97 Capture",
 		.channels_min   = 1,
 		.channels_max   = 2,
 		.rates          = SNDRV_PCM_RATE_8000_48000,
@@ -257,10 +254,8 @@ static struct snd_soc_dai_driver psc_ac97_dai[] = {
 	.ops = &psc_ac97_analog_ops,
 },
 {
-	.name = "mpc5200-psc-ac97.1",
-	.bus_control = true,
+	.ac97_control = 1,
 	.playback = {
-		.stream_name	= "AC97 SPDIF",
 		.channels_min   = 1,
 		.channels_max   = 2,
 		.rates          = SNDRV_PCM_RATE_32000 | \
@@ -270,9 +265,6 @@ static struct snd_soc_dai_driver psc_ac97_dai[] = {
 	.ops = &psc_ac97_digital_ops,
 } };
 
-static const struct snd_soc_component_driver psc_ac97_component = {
-	.name		= DRV_NAME,
-};
 
 
 /* ---------------------------------------------------------------------
@@ -280,23 +272,13 @@ static const struct snd_soc_component_driver psc_ac97_component = {
  * - Probe/remove operations
  * - OF device match table
  */
-static int psc_ac97_of_probe(struct platform_device *op)
+static int __devinit psc_ac97_of_probe(struct platform_device *op)
 {
 	int rc;
+	struct snd_ac97 ac97;
 	struct mpc52xx_psc __iomem *regs;
 
-	rc = mpc5200_audio_dma_create(op);
-	if (rc != 0)
-		return rc;
-
-	rc = snd_soc_set_ac97_ops(&psc_ac97_ops);
-	if (rc != 0) {
-		dev_err(&op->dev, "Failed to set AC'97 ops: %d\n", rc);
-		return rc;
-	}
-
-	rc = snd_soc_register_component(&op->dev, &psc_ac97_component,
-					psc_ac97_dai, ARRAY_SIZE(psc_ac97_dai));
+	rc = snd_soc_register_dais(&op->dev, psc_ac97_dai, ARRAY_SIZE(psc_ac97_dai));
 	if (rc != 0) {
 		dev_err(&op->dev, "Failed to register DAI\n");
 		return rc;
@@ -304,6 +286,7 @@ static int psc_ac97_of_probe(struct platform_device *op)
 
 	psc_dma = dev_get_drvdata(&op->dev);
 	regs = psc_dma->psc_regs;
+	ac97.private_data = psc_dma;
 
 	psc_dma->imr = 0;
 	out_be16(&psc_dma->psc_regs->isr_imr.imr, psc_dma->imr);
@@ -318,16 +301,14 @@ static int psc_ac97_of_probe(struct platform_device *op)
 	return 0;
 }
 
-static int psc_ac97_of_remove(struct platform_device *op)
+static int __devexit psc_ac97_of_remove(struct platform_device *op)
 {
-	mpc5200_audio_dma_destroy(op);
-	snd_soc_unregister_component(&op->dev);
-	snd_soc_set_ac97_ops(NULL);
+	snd_soc_unregister_dais(&op->dev, ARRAY_SIZE(psc_ac97_dai));
 	return 0;
 }
 
 /* Match table for of_platform binding */
-static const struct of_device_id psc_ac97_match[] = {
+static struct of_device_id psc_ac97_match[] __devinitdata = {
 	{ .compatible = "fsl,mpc5200-psc-ac97", },
 	{ .compatible = "fsl,mpc5200b-psc-ac97", },
 	{}
@@ -336,9 +317,10 @@ MODULE_DEVICE_TABLE(of, psc_ac97_match);
 
 static struct platform_driver psc_ac97_driver = {
 	.probe = psc_ac97_of_probe,
-	.remove = psc_ac97_of_remove,
+	.remove = __devexit_p(psc_ac97_of_remove),
 	.driver = {
 		.name = "mpc5200-psc-ac97",
+		.owner = THIS_MODULE,
 		.of_match_table = psc_ac97_match,
 	},
 };

@@ -10,9 +10,10 @@
 
 #include <linux/kernel.h>
 #include <linux/suspend.h>
-
+#include <linux/module.h>
 #include <asm/firmware.h>
 
 static const struct firmware_ops default_firmware_ops;
 
 const struct firmware_ops *firmware_ops = &default_firmware_ops;
+EXPORT_SYMBOL(firmware_ops);

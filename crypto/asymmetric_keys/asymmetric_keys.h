@@ -9,10 +9,7 @@
  * 2 of the Licence, or (at your option) any later version.
  */
 
-#include <keys/asymmetric-type.h>
-
-extern struct asymmetric_key_id *asymmetric_key_hex_to_key_id(const char *id);
-
-extern int __asymmetric_key_hex_to_key_id(const char *id,
-					  struct asymmetric_key_id *match_id,
-					  size_t hexlen);
+static inline const char *asymmetric_key_id(const struct key *key)
+{
+	return key->type_data.p[1];
+}

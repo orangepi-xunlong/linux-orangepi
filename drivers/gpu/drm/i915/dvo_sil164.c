@@ -93,7 +93,7 @@ static bool sil164_readb(struct intel_dvo_device *dvo, int addr, uint8_t *ch)
 	if (i2c_transfer(adapter, msgs, 2) == 2) {
 		*ch = in_buf[0];
 		return true;
-	}
+	};
 
 	if (!sil->quiet) {
 		DRM_DEBUG_KMS("Unable to read register 0x%02x from %s:%02x.\n",
@@ -190,8 +190,8 @@ static enum drm_mode_status sil164_mode_valid(struct intel_dvo_device *dvo,
 }
 
 static void sil164_mode_set(struct intel_dvo_device *dvo,
-			    const struct drm_display_mode *mode,
-			    const struct drm_display_mode *adjusted_mode)
+			    struct drm_display_mode *mode,
+			    struct drm_display_mode *adjusted_mode)
 {
 	/* As long as the basics are set up, since we don't have clock
 	 * dependencies in the mode setup, we can just leave the
@@ -208,7 +208,7 @@ static void sil164_mode_set(struct intel_dvo_device *dvo,
 }
 
 /* set the SIL164 power state */
-static void sil164_dpms(struct intel_dvo_device *dvo, bool enable)
+static void sil164_dpms(struct intel_dvo_device *dvo, int mode)
 {
 	int ret;
 	unsigned char ch;
@@ -217,7 +217,7 @@ static void sil164_dpms(struct intel_dvo_device *dvo, bool enable)
 	if (ret == false)
 		return;
 
-	if (enable)
+	if (mode == DRM_MODE_DPMS_ON)
 		ch |= SIL164_8_PD;
 	else
 		ch &= ~SIL164_8_PD;
@@ -226,35 +226,20 @@ static void sil164_dpms(struct intel_dvo_device *dvo, bool enable)
 	return;
 }
 
-static bool sil164_get_hw_state(struct intel_dvo_device *dvo)
-{
-	int ret;
-	unsigned char ch;
-
-	ret = sil164_readb(dvo, SIL164_REG8, &ch);
-	if (ret == false)
-		return false;
-
-	if (ch & SIL164_8_PD)
-		return true;
-	else
-		return false;
-}
-
 static void sil164_dump_regs(struct intel_dvo_device *dvo)
 {
 	uint8_t val;
 
 	sil164_readb(dvo, SIL164_FREQ_LO, &val);
-	DRM_DEBUG_KMS("SIL164_FREQ_LO: 0x%02x\n", val);
+	DRM_LOG_KMS("SIL164_FREQ_LO: 0x%02x\n", val);
 	sil164_readb(dvo, SIL164_FREQ_HI, &val);
-	DRM_DEBUG_KMS("SIL164_FREQ_HI: 0x%02x\n", val);
+	DRM_LOG_KMS("SIL164_FREQ_HI: 0x%02x\n", val);
 	sil164_readb(dvo, SIL164_REG8, &val);
-	DRM_DEBUG_KMS("SIL164_REG8: 0x%02x\n", val);
+	DRM_LOG_KMS("SIL164_REG8: 0x%02x\n", val);
 	sil164_readb(dvo, SIL164_REG9, &val);
-	DRM_DEBUG_KMS("SIL164_REG9: 0x%02x\n", val);
+	DRM_LOG_KMS("SIL164_REG9: 0x%02x\n", val);
 	sil164_readb(dvo, SIL164_REGC, &val);
-	DRM_DEBUG_KMS("SIL164_REGC: 0x%02x\n", val);
+	DRM_LOG_KMS("SIL164_REGC: 0x%02x\n", val);
 }
 
 static void sil164_destroy(struct intel_dvo_device *dvo)
@@ -267,13 +252,12 @@ static void sil164_destroy(struct intel_dvo_device *dvo)
 	}
 }
 
-const struct intel_dvo_dev_ops sil164_ops = {
+struct intel_dvo_dev_ops sil164_ops = {
 	.init = sil164_init,
 	.detect = sil164_detect,
 	.mode_valid = sil164_mode_valid,
 	.mode_set = sil164_mode_set,
 	.dpms = sil164_dpms,
-	.get_hw_state = sil164_get_hw_state,
 	.dump_regs = sil164_dump_regs,
 	.destroy = sil164_destroy,
 };

@@ -13,6 +13,7 @@
 
 #include <linux/bug.h>
 
+
 /*
  * struct firmware_ops
  *
@@ -21,38 +22,16 @@
  * A filled up structure can be registered with register_firmware_ops().
  */
 struct firmware_ops {
-	/*
-	 * Inform the firmware we intend to enter CPU idle mode
-	 */
-	int (*prepare_idle)(void);
-	/*
-	 * Enters CPU idle mode
-	 */
-	int (*do_idle)(unsigned long mode);
-	/*
-	 * Sets boot address of specified physical CPU
-	 */
-	int (*set_cpu_boot_addr)(int cpu, unsigned long boot_addr);
-	/*
-	 * Gets boot address of specified physical CPU
-	 */
-	int (*get_cpu_boot_addr)(int cpu, unsigned long *boot_addr);
-	/*
-	 * Boots specified physical CPU
-	 */
-	int (*cpu_boot)(int cpu);
-	/*
-	 * Initializes L2 cache
-	 */
-	int (*l2x0_init)(void);
-	/*
-	 * Enter system-wide suspend.
-	 */
-	int (*suspend)(void);
-	/*
-	 * Restore state of privileged hardware after system-wide suspend.
-	 */
-	int (*resume)(void);
+	unsigned int (*read_reg)(void __iomem *reg);
+	unsigned int (*write_reg)(u32 value, void __iomem *reg);
+	unsigned int (*send_command)(u32 arg0, u32 arg1, u32 arg2, u32 arg3);
+	unsigned int (*load_arisc)(void *image, u32 image_size, void *para, u32 para_size, u32 para_offset);
+	unsigned int (*set_secondary_entry)(void *entry);
+	unsigned int (*suspend)(void);
+	unsigned int (*suspend_prepare)(void);
+	unsigned int (*set_standby_status)(u32 arg0, u32 arg1, u32 arg2, u32 arg3);
+	unsigned int (*get_cp15_status)(void *addr);
+	unsigned int (*resume_hdcp_key)(void);
 };
 
 /* Global pointer for current firmware_ops structure, can't be NULL. */
@@ -79,4 +58,8 @@ static inline void register_firmware_ops(const struct firmware_ops *ops)
 	firmware_ops = ops;
 }
 
+struct sunxi_sst_hdcp{
+	u8			key[SZ_4K];
+	size_t		act_len ;
+};
 #endif

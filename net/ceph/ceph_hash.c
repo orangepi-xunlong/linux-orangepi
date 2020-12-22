@@ -20,7 +20,7 @@
 		c = c - a;  c = c - b;  c = c ^ (b >> 15);	\
 	} while (0)
 
-unsigned int ceph_str_hash_rjenkins(const char *str, unsigned int length)
+unsigned ceph_str_hash_rjenkins(const char *str, unsigned length)
 {
 	const unsigned char *k = (const unsigned char *)str;
 	__u32 a, b, c;  /* the internal state */
@@ -81,7 +81,7 @@ unsigned int ceph_str_hash_rjenkins(const char *str, unsigned int length)
 /*
  * linux dcache hash
  */
-unsigned int ceph_str_hash_linux(const char *str, unsigned int length)
+unsigned ceph_str_hash_linux(const char *str, unsigned length)
 {
 	unsigned long hash = 0;
 	unsigned char c;
@@ -94,7 +94,7 @@ unsigned int ceph_str_hash_linux(const char *str, unsigned int length)
 }
 
 
-unsigned int ceph_str_hash(int type, const char *s, unsigned int len)
+unsigned ceph_str_hash(int type, const char *s, unsigned len)
 {
 	switch (type) {
 	case CEPH_STR_HASH_LINUX:

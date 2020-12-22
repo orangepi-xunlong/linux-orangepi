@@ -13,25 +13,27 @@
 #define R4600_V2_HIT_CACHEOP_WAR	0
 #define R5432_CP0_INTERRUPT_WAR		0
 
-#if defined(CONFIG_SB1_PASS_2_WORKAROUNDS)
+#if defined(CONFIG_SB1_PASS_1_WORKAROUNDS) || \
+    defined(CONFIG_SB1_PASS_2_WORKAROUNDS)
 
 #ifndef __ASSEMBLY__
 extern int sb1250_m3_workaround_needed(void);
 #endif
 
 #define BCM1250_M3_WAR	sb1250_m3_workaround_needed()
-#define SIBYTE_1956_WAR 1
+#define SIBYTE_1956_WAR	1
 
 #else
 
 #define BCM1250_M3_WAR	0
-#define SIBYTE_1956_WAR 0
+#define SIBYTE_1956_WAR	0
 
 #endif
 
 #define MIPS4K_ICACHE_REFILL_WAR	0
 #define MIPS_CACHE_SYNC_WAR		0
 #define TX49XX_ICACHE_INDEX_INV_WAR	0
+#define RM9000_CDEX_SMP_WAR		0
 #define ICACHE_REFILLS_WORKAROUND_WAR	0
 #define R10000_LLSC_WAR			0
 #define MIPS34K_MISSED_ITLB_WAR		0

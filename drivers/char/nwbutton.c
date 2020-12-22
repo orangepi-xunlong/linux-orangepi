@@ -93,9 +93,9 @@ int button_del_callback (void (*callback) (void))
 			button_callback_list [lp].count = 0;
 			callback_count--;
 			return 0;
-		}
+		};
 		lp--;
-	}
+	};
 	return -EINVAL;
 }
 
@@ -129,9 +129,10 @@ static void button_consume_callbacks (int bpcount)
 
 static void button_sequence_finished (unsigned long parameters)
 {
-	if (IS_ENABLED(CONFIG_NWBUTTON_REBOOT) &&
-	    button_press_count == reboot_count)
+#ifdef CONFIG_NWBUTTON_REBOOT		/* Reboot using button is enabled */
+	if (button_press_count == reboot_count)
 		kill_cad_pid(SIGINT, 1);	/* Ask init to reboot us */
+#endif /* CONFIG_NWBUTTON_REBOOT */
 	button_consume_callbacks (button_press_count);
 	bcount = sprintf (button_output_buffer, "%d\n", button_press_count);
 	button_press_count = 0;		/* Reset the button press counter */
@@ -167,10 +168,7 @@ static irqreturn_t button_handler (int irq, void *dev_id)
 static int button_read (struct file *filp, char __user *buffer,
 			size_t count, loff_t *ppos)
 {
-	DEFINE_WAIT(wait);
-	prepare_to_wait(&button_wait_queue, &wait, TASK_INTERRUPTIBLE);
-	schedule();
-	finish_wait(&button_wait_queue, &wait);
+	interruptible_sleep_on (&button_wait_queue);
 	return (copy_to_user (buffer, &button_output_buffer, bcount))
 		 ? -EFAULT : bcount;
 }
@@ -222,7 +220,7 @@ static int __init nwbutton_init(void)
 		return -EBUSY;
 	}
 
-	if (request_irq (IRQ_NETWINDER_BUTTON, button_handler, 0,
+	if (request_irq (IRQ_NETWINDER_BUTTON, button_handler, IRQF_DISABLED,
 			"nwbutton", NULL)) {
 		printk (KERN_WARNING "nwbutton: IRQ %d is not free.\n",
 				IRQ_NETWINDER_BUTTON);

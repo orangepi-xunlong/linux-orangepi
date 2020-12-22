@@ -295,8 +295,7 @@ static inline u16 *decompose_unichar(wchar_t uc, int *size)
 	return hfsplus_decompose_table + (off / 4);
 }
 
-int hfsplus_asc2uni(struct super_block *sb,
-		    struct hfsplus_unistr *ustr, int max_unistr_len,
+int hfsplus_asc2uni(struct super_block *sb, struct hfsplus_unistr *ustr,
 		    const char *astr, int len)
 {
 	int size, dsize, decompose;
@@ -304,7 +303,7 @@ int hfsplus_asc2uni(struct super_block *sb,
 	wchar_t c;
 
 	decompose = !test_bit(HFSPLUS_SB_NODECOMPOSE, &HFSPLUS_SB(sb)->flags);
-	while (outlen < max_unistr_len && len > 0) {
+	while (outlen < HFSPLUS_MAX_STRLEN && len > 0) {
 		size = asc2unichar(sb, astr, len, &c);
 
 		if (decompose)
@@ -312,7 +311,7 @@ int hfsplus_asc2uni(struct super_block *sb,
 		else
 			dstr = NULL;
 		if (dstr) {
-			if (outlen + dsize > max_unistr_len)
+			if (outlen + dsize > HFSPLUS_MAX_STRLEN)
 				break;
 			do {
 				ustr->unicode[outlen++] = cpu_to_be16(*dstr++);
@@ -334,7 +333,8 @@ int hfsplus_asc2uni(struct super_block *sb,
  * Composed unicode characters are decomposed and case-folding is performed
  * if the appropriate bits are (un)set on the superblock.
  */
-int hfsplus_hash_dentry(const struct dentry *dentry, struct qstr *str)
+int hfsplus_hash_dentry(const struct dentry *dentry, const struct inode *inode,
+		struct qstr *str)
 {
 	struct super_block *sb = dentry->d_sb;
 	const char *astr;
@@ -346,7 +346,7 @@ int hfsplus_hash_dentry(const struct dentry *dentry, struct qstr *str)
 
 	casefold = test_bit(HFSPLUS_SB_CASEFOLD, &HFSPLUS_SB(sb)->flags);
 	decompose = !test_bit(HFSPLUS_SB_NODECOMPOSE, &HFSPLUS_SB(sb)->flags);
-	hash = init_name_hash(dentry);
+	hash = init_name_hash();
 	astr = str->name;
 	len = str->len;
 	while (len > 0) {
@@ -385,10 +385,12 @@ int hfsplus_hash_dentry(const struct dentry *dentry, struct qstr *str)
  * Composed unicode characters are decomposed and case-folding is performed
  * if the appropriate bits are (un)set on the superblock.
  */
-int hfsplus_compare_dentry(const struct dentry *dentry,
+int hfsplus_compare_dentry(const struct dentry *parent,
+		const struct inode *pinode,
+		const struct dentry *dentry, const struct inode *inode,
 		unsigned int len, const char *str, const struct qstr *name)
 {
-	struct super_block *sb = dentry->d_sb;
+	struct super_block *sb = parent->d_sb;
 	int casefold, decompose, size;
 	int dsize1, dsize2, len1, len2;
 	const u16 *dstr1, *dstr2;

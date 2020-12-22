@@ -1,7 +1,7 @@
 /*
  * Hexagon VM instruction support
  *
- * Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,7 +26,7 @@
  * could be, and perhaps some day will be, handled as in-line
  * macros, but for tracing/debugging it's handy to have
  * a single point of invocation for each of them.
- * Conveniently, they take parameters and return values
+ * Conveniently, they take paramters and return values
  * consistent with the ABI calling convention.
  */
 

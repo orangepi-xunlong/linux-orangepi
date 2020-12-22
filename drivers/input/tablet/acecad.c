@@ -28,6 +28,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/usb/input.h>
 
 /*
@@ -49,7 +50,7 @@ MODULE_LICENSE(DRIVER_LICENSE);
 struct usb_acecad {
 	char name[128];
 	char phys[64];
-	struct usb_interface *intf;
+	struct usb_device *usbdev;
 	struct input_dev *input;
 	struct urb *irq;
 
@@ -62,8 +63,6 @@ static void usb_acecad_irq(struct urb *urb)
 	struct usb_acecad *acecad = urb->context;
 	unsigned char *data = acecad->data;
 	struct input_dev *dev = acecad->input;
-	struct usb_interface *intf = acecad->intf;
-	struct usb_device *udev = interface_to_usbdev(intf);
 	int prox, status;
 
 	switch (urb->status) {
@@ -74,12 +73,10 @@ static void usb_acecad_irq(struct urb *urb)
 	case -ENOENT:
 	case -ESHUTDOWN:
 		/* this urb is terminated, clean up */
-		dev_dbg(&intf->dev, "%s - urb shutting down with status: %d\n",
-			__func__, urb->status);
+		dbg("%s - urb shutting down with status: %d", __func__, urb->status);
 		return;
 	default:
-		dev_dbg(&intf->dev, "%s - nonzero urb status received: %d\n",
-			__func__, urb->status);
+		dbg("%s - nonzero urb status received: %d", __func__, urb->status);
 		goto resubmit;
 	}
 
@@ -108,17 +105,15 @@ static void usb_acecad_irq(struct urb *urb)
 resubmit:
 	status = usb_submit_urb(urb, GFP_ATOMIC);
 	if (status)
-		dev_err(&intf->dev,
-			"can't resubmit intr, %s-%s/input0, status %d\n",
-			udev->bus->bus_name,
-			udev->devpath, status);
+		err("can't resubmit intr, %s-%s/input0, status %d",
+			acecad->usbdev->bus->bus_name, acecad->usbdev->devpath, status);
 }
 
 static int usb_acecad_open(struct input_dev *dev)
 {
 	struct usb_acecad *acecad = input_get_drvdata(dev);
 
-	acecad->irq->dev = interface_to_usbdev(acecad->intf);
+	acecad->irq->dev = acecad->usbdev;
 	if (usb_submit_urb(acecad->irq, GFP_KERNEL))
 		return -EIO;
 
@@ -172,7 +167,7 @@ static int usb_acecad_probe(struct usb_interface *intf, const struct usb_device_
 		goto fail2;
 	}
 
-	acecad->intf = intf;
+	acecad->usbdev = dev;
 	acecad->input = input_dev;
 
 	if (dev->manufacturer)
@@ -250,13 +245,12 @@ static int usb_acecad_probe(struct usb_interface *intf, const struct usb_device_
 static void usb_acecad_disconnect(struct usb_interface *intf)
 {
 	struct usb_acecad *acecad = usb_get_intfdata(intf);
-	struct usb_device *udev = interface_to_usbdev(intf);
 
 	usb_set_intfdata(intf, NULL);
 
 	input_unregister_device(acecad->input);
 	usb_free_urb(acecad->irq);
-	usb_free_coherent(udev, 8, acecad->data, acecad->data_dma);
+	usb_free_coherent(acecad->usbdev, 8, acecad->data, acecad->data_dma);
 	kfree(acecad);
 }
 

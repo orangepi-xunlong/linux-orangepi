@@ -65,7 +65,7 @@ static int ams_i2c_probe(struct i2c_client *client,
 static int ams_i2c_remove(struct i2c_client *client);
 
 static const struct i2c_device_id ams_id[] = {
-	{ "MAC,accelerometer_1", 0 },
+	{ "ams", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ams_id);
@@ -73,6 +73,7 @@ MODULE_DEVICE_TABLE(i2c, ams_id);
 static struct i2c_driver ams_i2c_driver = {
 	.driver = {
 		.name   = "ams",
+		.owner  = THIS_MODULE,
 	},
 	.probe          = ams_i2c_probe,
 	.remove         = ams_i2c_remove,

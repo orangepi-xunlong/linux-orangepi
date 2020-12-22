@@ -9,7 +9,6 @@
 #ifndef _ASM_PGTABLE_64_H
 #define _ASM_PGTABLE_64_H
 
-#include <linux/compiler.h>
 #include <linux/linkage.h>
 
 #include <asm/addrspace.h>
@@ -17,7 +16,7 @@
 #include <asm/cachectl.h>
 #include <asm/fixmap.h>
 
-#if defined(CONFIG_PAGE_SIZE_64KB) && !defined(CONFIG_MIPS_VA_BITS_48)
+#ifdef CONFIG_PAGE_SIZE_64KB
 #include <asm-generic/pgtable-nopmd.h>
 #else
 #include <asm-generic/pgtable-nopud.h>
@@ -90,11 +89,7 @@
 #define PTE_ORDER		0
 #endif
 #ifdef CONFIG_PAGE_SIZE_16KB
-#ifdef CONFIG_MIPS_VA_BITS_48
-#define PGD_ORDER               1
-#else
-#define PGD_ORDER               0
-#endif
+#define PGD_ORDER		0
 #define PUD_ORDER		aieeee_attempt_to_allocate_pud
 #define PMD_ORDER		0
 #define PTE_ORDER		0
@@ -108,11 +103,7 @@
 #ifdef CONFIG_PAGE_SIZE_64KB
 #define PGD_ORDER		0
 #define PUD_ORDER		aieeee_attempt_to_allocate_pud
-#ifdef CONFIG_MIPS_VA_BITS_48
-#define PMD_ORDER		0
-#else
 #define PMD_ORDER		aieeee_attempt_to_allocate_pmd
-#endif
 #define PTE_ORDER		0
 #endif
 
@@ -122,7 +113,11 @@
 #endif
 #define PTRS_PER_PTE	((PAGE_SIZE << PTE_ORDER) / sizeof(pte_t))
 
-#define USER_PTRS_PER_PGD       ((TASK_SIZE64 / PGDIR_SIZE)?(TASK_SIZE64 / PGDIR_SIZE):1)
+#if PGDIR_SIZE >= TASK_SIZE64
+#define USER_PTRS_PER_PGD       (1)
+#else
+#define USER_PTRS_PER_PGD	(TASK_SIZE64 / PGDIR_SIZE)
+#endif
 #define FIRST_USER_ADDRESS	0UL
 
 /*
@@ -167,6 +162,7 @@ typedef struct { unsigned long pmd; } pmd_t;
 
 
 extern pmd_t invalid_pmd_table[PTRS_PER_PMD];
+extern pmd_t empty_bad_pmd_table[PTRS_PER_PMD];
 #endif
 
 /*
@@ -177,27 +173,10 @@ static inline int pmd_none(pmd_t pmd)
 	return pmd_val(pmd) == (unsigned long) invalid_pte_table;
 }
 
-static inline int pmd_bad(pmd_t pmd)
-{
-#ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
-	/* pmd_huge(pmd) but inline */
-	if (unlikely(pmd_val(pmd) & _PAGE_HUGE))
-		return 0;
-#endif
-
-	if (unlikely(pmd_val(pmd) & ~PAGE_MASK))
-		return 1;
-
-	return 0;
-}
+#define pmd_bad(pmd)		(pmd_val(pmd) & ~PAGE_MASK)
 
 static inline int pmd_present(pmd_t pmd)
 {
-#ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
-	if (unlikely(pmd_val(pmd) & _PAGE_HUGE))
-		return pmd_val(pmd) & _PAGE_PRESENT;
-#endif
-
 	return pmd_val(pmd) != (unsigned long) invalid_pte_table;
 }
 
@@ -239,7 +218,6 @@ static inline void pud_clear(pud_t *pudp)
 #else
 #define pte_pfn(x)		((unsigned long)((x).pte >> _PFN_SHIFT))
 #define pfn_pte(pfn, prot)	__pte(((pfn) << _PFN_SHIFT) | pgprot_val(prot))
-#define pfn_pmd(pfn, prot)	__pmd(((pfn) << _PFN_SHIFT) | pgprot_val(prot))
 #endif
 
 #define __pgd_offset(address)	pgd_index(address)
@@ -288,16 +266,25 @@ extern void pgd_init(unsigned long page);
 extern void pmd_init(unsigned long page, unsigned long pagetable);
 
 /*
- * Non-present pages:  high 40 bits are offset, next 8 bits type,
- * low 16 bits zero.
+ * Non-present pages:  high 24 bits are offset, next 8 bits type,
+ * low 32 bits zero.
  */
 static inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
-{ pte_t pte; pte_val(pte) = (type << 16) | (offset << 24); return pte; }
+{ pte_t pte; pte_val(pte) = (type << 32) | (offset << 40); return pte; }
 
-#define __swp_type(x)		(((x).val >> 16) & 0xff)
-#define __swp_offset(x)		((x).val >> 24)
+#define __swp_type(x)		(((x).val >> 32) & 0xff)
+#define __swp_offset(x)		((x).val >> 40)
 #define __swp_entry(type, offset) ((swp_entry_t) { pte_val(mk_swap_pte((type), (offset))) })
-#define __pte_to_swp_entry(pte) ((swp_entry_t) { pte_val(pte) })
+#define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
+
+/*
+ * Bits 0, 4, 6, and 7 are taken. Let's leave bits 1, 2, 3, and 5 alone to
+ * make things easier, and only use the upper 56 bits for the page offset...
+ */
+#define PTE_FILE_MAX_BITS	56
+
+#define pte_to_pgoff(_pte)	((_pte).pte >> 8)
+#define pgoff_to_pte(off)	((pte_t) { ((off) << 8) | _PAGE_FILE })
 
 #endif /* _ASM_PGTABLE_64_H */

@@ -120,18 +120,12 @@ static ssize_t foo_show(struct foo_obj *foo_obj, struct foo_attribute *attr,
 static ssize_t foo_store(struct foo_obj *foo_obj, struct foo_attribute *attr,
 			 const char *buf, size_t count)
 {
-	int ret;
-
-	ret = kstrtoint(buf, 10, &foo_obj->foo);
-	if (ret < 0)
-		return ret;
-
+	sscanf(buf, "%du", &foo_obj->foo);
 	return count;
 }
 
-/* Sysfs attributes cannot be world-writable. */
 static struct foo_attribute foo_attribute =
-	__ATTR(foo, 0664, foo_show, foo_store);
+	__ATTR(foo, 0666, foo_show, foo_store);
 
 /*
  * More complex function where we determine which variable is being accessed by
@@ -152,12 +146,9 @@ static ssize_t b_show(struct foo_obj *foo_obj, struct foo_attribute *attr,
 static ssize_t b_store(struct foo_obj *foo_obj, struct foo_attribute *attr,
 		       const char *buf, size_t count)
 {
-	int var, ret;
+	int var;
 
-	ret = kstrtoint(buf, 10, &var);
-	if (ret < 0)
-		return ret;
-
+	sscanf(buf, "%du", &var);
 	if (strcmp(attr->attr.name, "baz") == 0)
 		foo_obj->baz = var;
 	else
@@ -166,9 +157,9 @@ static ssize_t b_store(struct foo_obj *foo_obj, struct foo_attribute *attr,
 }
 
 static struct foo_attribute baz_attribute =
-	__ATTR(baz, 0664, b_show, b_store);
+	__ATTR(baz, 0666, b_show, b_store);
 static struct foo_attribute bar_attribute =
-	__ATTR(bar, 0664, b_show, b_store);
+	__ATTR(bar, 0666, b_show, b_store);
 
 /*
  * Create a group of attributes so that we can create and destroy them all
@@ -271,7 +262,6 @@ baz_error:
 bar_error:
 	destroy_foo_obj(foo_obj);
 foo_error:
-	kset_unregister(example_kset);
 	return -EINVAL;
 }
 
@@ -285,5 +275,5 @@ static void __exit example_exit(void)
 
 module_init(example_init);
 module_exit(example_exit);
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Greg Kroah-Hartman <greg@kroah.com>");

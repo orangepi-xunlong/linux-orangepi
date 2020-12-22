@@ -1,5 +1,5 @@
 /*
- * Copyright IBM Corp. 2004, 2010
+ * Copyright IBM Corp. 2004,2010
  * Interface implementation for communication with the z/VM control program
  *
  * Author(s): Christian Borntraeger <borntraeger@de.ibm.com>
@@ -88,9 +88,14 @@ vmcp_write(struct file *file, const char __user *buff, size_t count,
 
 	if (count > 240)
 		return -EINVAL;
-	cmd = memdup_user_nul(buff, count);
-	if (IS_ERR(cmd))
-		return PTR_ERR(cmd);
+	cmd = kmalloc(count + 1, GFP_KERNEL);
+	if (!cmd)
+		return -ENOMEM;
+	if (copy_from_user(cmd, buff, count)) {
+		kfree(cmd);
+		return -EFAULT;
+	}
+	cmd[count] = '\0';
 	session = file->private_data;
 	if (mutex_lock_interruptible(&session->mutex)) {
 		kfree(cmd);

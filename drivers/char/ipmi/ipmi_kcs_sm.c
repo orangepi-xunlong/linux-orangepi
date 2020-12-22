@@ -118,8 +118,8 @@ enum kcs_states {
 #define MAX_KCS_WRITE_SIZE IPMI_MAX_MSG_LENGTH
 
 /* Timeouts in microseconds. */
-#define IBF_RETRY_TIMEOUT (5*USEC_PER_SEC)
-#define OBF_RETRY_TIMEOUT (5*USEC_PER_SEC)
+#define IBF_RETRY_TIMEOUT 5000000
+#define OBF_RETRY_TIMEOUT 5000000
 #define MAX_ERROR_RETRIES 10
 #define ERROR0_OBF_WAIT_JIFFIES (2*HZ)
 
@@ -540,7 +540,7 @@ static void kcs_cleanup(struct si_sm_data *kcs)
 {
 }
 
-const struct si_sm_handlers kcs_smi_handlers = {
+struct si_sm_handlers kcs_smi_handlers = {
 	.init_data         = init_kcs_data,
 	.start_transaction = start_kcs_transaction,
 	.get_result        = get_kcs_result,

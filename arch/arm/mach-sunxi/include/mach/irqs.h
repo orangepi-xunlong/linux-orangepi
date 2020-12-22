@@ -17,18 +17,6 @@
 #ifndef __SUNXI_MACH_IRQS_H
 #define __SUNXI_MACH_IRQS_H
 
-
-#if defined CONFIG_ARCH_SUN8IW5P1
-/* irq total number = gic irq max + gpio irq max(reserve 256) */
-
-#undef  NR_IRQS
-#define NR_IRQS                 (256)
-
-#ifndef NR_IRQS
-#error "NR_IRQS not defined by the board-specific files"
-#endif
-#endif
-
 #define SUNXI_GIC_START          32
 
 #if defined CONFIG_ARCH_SUN8IW1P1
@@ -49,6 +37,15 @@
 #include "sun9i/irqs-sun9iw1p1.h"
 #else
 #error "please select a platform\n"
+#endif
+
+#define MAX_GIC_NR              1
+
+/* irq total number = gic irq max + gpio irq max(reserve 256) */
+#define NR_IRQS                 (SUNXI_IRQ_MAX + 256)
+
+#ifndef NR_IRQS
+#error "NR_IRQS not defined by the board-specific files"
 #endif
 
 #endif

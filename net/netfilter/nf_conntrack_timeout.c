@@ -25,7 +25,7 @@
 #include <net/netfilter/nf_conntrack_timeout.h>
 
 struct ctnl_timeout *
-(*nf_ct_timeout_find_get_hook)(struct net *net, const char *name) __read_mostly;
+(*nf_ct_timeout_find_get_hook)(const char *name) __read_mostly;
 EXPORT_SYMBOL_GPL(nf_ct_timeout_find_get_hook);
 
 void (*nf_ct_timeout_put_hook)(struct ctnl_timeout *timeout) __read_mostly;
@@ -37,15 +37,24 @@ static struct nf_ct_ext_type timeout_extend __read_mostly = {
 	.id	= NF_CT_EXT_TIMEOUT,
 };
 
-int nf_conntrack_timeout_init(void)
+int nf_conntrack_timeout_init(struct net *net)
 {
-	int ret = nf_ct_extend_register(&timeout_extend);
-	if (ret < 0)
-		pr_err("nf_ct_timeout: Unable to register timeout extension.\n");
-	return ret;
+	int ret = 0;
+
+	if (net_eq(net, &init_net)) {
+		ret = nf_ct_extend_register(&timeout_extend);
+		if (ret < 0) {
+			printk(KERN_ERR "nf_ct_timeout: Unable to register "
+					"timeout extension.\n");
+			return ret;
+		}
+	}
+
+	return 0;
 }
 
-void nf_conntrack_timeout_fini(void)
+void nf_conntrack_timeout_fini(struct net *net)
 {
-	nf_ct_extend_unregister(&timeout_extend);
+	if (net_eq(net, &init_net))
+		nf_ct_extend_unregister(&timeout_extend);
 }

@@ -32,55 +32,34 @@
 #include <net/ip_vs.h>
 
 static int
-tcp_conn_schedule(struct netns_ipvs *ipvs, int af, struct sk_buff *skb,
-		  struct ip_vs_proto_data *pd,
-		  int *verdict, struct ip_vs_conn **cpp,
-		  struct ip_vs_iphdr *iph)
+tcp_conn_schedule(int af, struct sk_buff *skb, struct ip_vs_proto_data *pd,
+		  int *verdict, struct ip_vs_conn **cpp)
 {
+	struct net *net;
 	struct ip_vs_service *svc;
 	struct tcphdr _tcph, *th;
-	__be16 _ports[2], *ports = NULL;
+	struct ip_vs_iphdr iph;
 
-	/* In the event of icmp, we're only guaranteed to have the first 8
-	 * bytes of the transport header, so we only check the rest of the
-	 * TCP packet for non-ICMP packets
-	 */
-	if (likely(!ip_vs_iph_icmp(iph))) {
-		th = skb_header_pointer(skb, iph->len, sizeof(_tcph), &_tcph);
-		if (th) {
-			if (th->rst || !(sysctl_sloppy_tcp(ipvs) || th->syn))
-				return 1;
-			ports = &th->source;
-		}
-	} else {
-		ports = skb_header_pointer(
-			skb, iph->len, sizeof(_ports), &_ports);
-	}
+	ip_vs_fill_iphdr(af, skb_network_header(skb), &iph);
 
-	if (!ports) {
+	th = skb_header_pointer(skb, iph.len, sizeof(_tcph), &_tcph);
+	if (th == NULL) {
 		*verdict = NF_DROP;
 		return 0;
 	}
-
+	net = skb_net(skb);
 	/* No !th->ack check to allow scheduling on SYN+ACK for Active FTP */
-	rcu_read_lock();
-
-	if (likely(!ip_vs_iph_inverse(iph)))
-		svc = ip_vs_service_find(ipvs, af, skb->mark, iph->protocol,
-					 &iph->daddr, ports[1]);
-	else
-		svc = ip_vs_service_find(ipvs, af, skb->mark, iph->protocol,
-					 &iph->saddr, ports[0]);
-
-	if (svc) {
+	if (th->syn &&
+	    (svc = ip_vs_service_get(net, af, skb->mark, iph.protocol,
+				     &iph.daddr, th->dest))) {
 		int ignored;
 
-		if (ip_vs_todrop(ipvs)) {
+		if (ip_vs_todrop(net_ipvs(net))) {
 			/*
 			 * It seems that we are very loaded.
 			 * We have to drop this packet :(
 			 */
-			rcu_read_unlock();
+			ip_vs_service_put(svc);
 			*verdict = NF_DROP;
 			return 0;
 		}
@@ -89,17 +68,18 @@ tcp_conn_schedule(struct netns_ipvs *ipvs, int af, struct sk_buff *skb,
 		 * Let the virtual server select a real server for the
 		 * incoming connection, and create a connection entry.
 		 */
-		*cpp = ip_vs_schedule(svc, skb, pd, &ignored, iph);
+		*cpp = ip_vs_schedule(svc, skb, pd, &ignored);
 		if (!*cpp && ignored <= 0) {
 			if (!ignored)
-				*verdict = ip_vs_leave(svc, skb, pd, iph);
-			else
+				*verdict = ip_vs_leave(svc, skb, pd);
+			else {
+				ip_vs_service_put(svc);
 				*verdict = NF_DROP;
-			rcu_read_unlock();
+			}
 			return 0;
 		}
+		ip_vs_service_put(svc);
 	}
-	rcu_read_unlock();
 	/* NF_ACCEPT */
 	return 1;
 }
@@ -148,18 +128,20 @@ tcp_partial_csum_update(int af, struct tcphdr *tcph,
 
 
 static int
-tcp_snat_handler(struct sk_buff *skb, struct ip_vs_protocol *pp,
-		 struct ip_vs_conn *cp, struct ip_vs_iphdr *iph)
+tcp_snat_handler(struct sk_buff *skb,
+		 struct ip_vs_protocol *pp, struct ip_vs_conn *cp)
 {
 	struct tcphdr *tcph;
-	unsigned int tcphoff = iph->len;
+	unsigned int tcphoff;
 	int oldlen;
 	int payload_csum = 0;
 
 #ifdef CONFIG_IP_VS_IPV6
-	if (cp->af == AF_INET6 && iph->fragoffs)
-		return 1;
+	if (cp->af == AF_INET6)
+		tcphoff = sizeof(struct ipv6hdr);
+	else
 #endif
+		tcphoff = ip_hdrlen(skb);
 	oldlen = skb->len - tcphoff;
 
 	/* csum_check requires unshared skb */
@@ -226,18 +208,20 @@ tcp_snat_handler(struct sk_buff *skb, struct ip_vs_protocol *pp,
 
 
 static int
-tcp_dnat_handler(struct sk_buff *skb, struct ip_vs_protocol *pp,
-		 struct ip_vs_conn *cp, struct ip_vs_iphdr *iph)
+tcp_dnat_handler(struct sk_buff *skb,
+		 struct ip_vs_protocol *pp, struct ip_vs_conn *cp)
 {
 	struct tcphdr *tcph;
-	unsigned int tcphoff = iph->len;
+	unsigned int tcphoff;
 	int oldlen;
 	int payload_csum = 0;
 
 #ifdef CONFIG_IP_VS_IPV6
-	if (cp->af == AF_INET6 && iph->fragoffs)
-		return 1;
+	if (cp->af == AF_INET6)
+		tcphoff = sizeof(struct ipv6hdr);
+	else
 #endif
+		tcphoff = ip_hdrlen(skb);
 	oldlen = skb->len - tcphoff;
 
 	/* csum_check requires unshared skb */
@@ -395,20 +379,6 @@ static const char *const tcp_state_name_table[IP_VS_TCP_S_LAST+1] = {
 	[IP_VS_TCP_S_LAST]		=	"BUG!",
 };
 
-static const bool tcp_state_active_table[IP_VS_TCP_S_LAST] = {
-	[IP_VS_TCP_S_NONE]		=	false,
-	[IP_VS_TCP_S_ESTABLISHED]	=	true,
-	[IP_VS_TCP_S_SYN_SENT]		=	true,
-	[IP_VS_TCP_S_SYN_RECV]		=	true,
-	[IP_VS_TCP_S_FIN_WAIT]		=	false,
-	[IP_VS_TCP_S_TIME_WAIT]		=	false,
-	[IP_VS_TCP_S_CLOSE]		=	false,
-	[IP_VS_TCP_S_CLOSE_WAIT]	=	false,
-	[IP_VS_TCP_S_LAST_ACK]		=	false,
-	[IP_VS_TCP_S_LISTEN]		=	false,
-	[IP_VS_TCP_S_SYNACK]		=	true,
-};
-
 #define sNO IP_VS_TCP_S_NONE
 #define sES IP_VS_TCP_S_ESTABLISHED
 #define sSS IP_VS_TCP_S_SYN_SENT
@@ -432,19 +402,12 @@ static const char * tcp_state_name(int state)
 	return tcp_state_name_table[state] ? tcp_state_name_table[state] : "?";
 }
 
-static bool tcp_state_active(int state)
-{
-	if (state >= IP_VS_TCP_S_LAST)
-		return false;
-	return tcp_state_active_table[state];
-}
-
 static struct tcp_states_t tcp_states [] = {
 /*	INPUT */
 /*        sNO, sES, sSS, sSR, sFW, sTW, sCL, sCW, sLA, sLI, sSA	*/
 /*syn*/ {{sSR, sES, sES, sSR, sSR, sSR, sSR, sSR, sSR, sSR, sSR }},
 /*fin*/ {{sCL, sCW, sSS, sTW, sTW, sTW, sCL, sCW, sLA, sLI, sTW }},
-/*ack*/ {{sES, sES, sSS, sES, sFW, sTW, sCL, sCW, sCL, sLI, sES }},
+/*ack*/ {{sCL, sES, sSS, sES, sFW, sTW, sCL, sCW, sCL, sLI, sES }},
 /*rst*/ {{sCL, sCL, sCL, sSR, sCL, sCL, sCL, sCL, sLA, sLI, sSR }},
 
 /*	OUTPUT */
@@ -458,7 +421,7 @@ static struct tcp_states_t tcp_states [] = {
 /*        sNO, sES, sSS, sSR, sFW, sTW, sCL, sCW, sLA, sLI, sSA	*/
 /*syn*/ {{sSR, sES, sES, sSR, sSR, sSR, sSR, sSR, sSR, sSR, sSR }},
 /*fin*/ {{sCL, sFW, sSS, sTW, sFW, sTW, sCL, sCW, sLA, sLI, sTW }},
-/*ack*/ {{sES, sES, sSS, sES, sFW, sTW, sCL, sCW, sCL, sLI, sES }},
+/*ack*/ {{sCL, sES, sSS, sES, sFW, sTW, sCL, sCW, sCL, sLI, sES }},
 /*rst*/ {{sCL, sCL, sCL, sSR, sCL, sCL, sCL, sCL, sLA, sLI, sCL }},
 };
 
@@ -467,7 +430,7 @@ static struct tcp_states_t tcp_states_dos [] = {
 /*        sNO, sES, sSS, sSR, sFW, sTW, sCL, sCW, sLA, sLI, sSA	*/
 /*syn*/ {{sSR, sES, sES, sSR, sSR, sSR, sSR, sSR, sSR, sSR, sSA }},
 /*fin*/ {{sCL, sCW, sSS, sTW, sTW, sTW, sCL, sCW, sLA, sLI, sSA }},
-/*ack*/ {{sES, sES, sSS, sSR, sFW, sTW, sCL, sCW, sCL, sLI, sSA }},
+/*ack*/ {{sCL, sES, sSS, sSR, sFW, sTW, sCL, sCW, sCL, sLI, sSA }},
 /*rst*/ {{sCL, sCL, sCL, sSR, sCL, sCL, sCL, sCL, sLA, sLI, sCL }},
 
 /*	OUTPUT */
@@ -481,7 +444,7 @@ static struct tcp_states_t tcp_states_dos [] = {
 /*        sNO, sES, sSS, sSR, sFW, sTW, sCL, sCW, sLA, sLI, sSA	*/
 /*syn*/ {{sSA, sES, sES, sSR, sSA, sSA, sSA, sSA, sSA, sSA, sSA }},
 /*fin*/ {{sCL, sFW, sSS, sTW, sFW, sTW, sCL, sCW, sLA, sLI, sTW }},
-/*ack*/ {{sES, sES, sSS, sES, sFW, sTW, sCL, sCW, sCL, sLI, sES }},
+/*ack*/ {{sCL, sES, sSS, sES, sFW, sTW, sCL, sCW, sCL, sLI, sES }},
 /*rst*/ {{sCL, sCL, sCL, sSR, sCL, sCL, sCL, sCL, sLA, sLI, sCL }},
 };
 
@@ -551,7 +514,7 @@ set_tcp_state(struct ip_vs_proto_data *pd, struct ip_vs_conn *cp,
 			      th->fin ? 'F' : '.',
 			      th->ack ? 'A' : '.',
 			      th->rst ? 'R' : '.',
-			      IP_VS_DBG_ADDR(cp->daf, &cp->daddr),
+			      IP_VS_DBG_ADDR(cp->af, &cp->daddr),
 			      ntohs(cp->dport),
 			      IP_VS_DBG_ADDR(cp->af, &cp->caddr),
 			      ntohs(cp->cport),
@@ -561,12 +524,12 @@ set_tcp_state(struct ip_vs_proto_data *pd, struct ip_vs_conn *cp,
 
 		if (dest) {
 			if (!(cp->flags & IP_VS_CONN_F_INACTIVE) &&
-			    !tcp_state_active(new_state)) {
+			    (new_state != IP_VS_TCP_S_ESTABLISHED)) {
 				atomic_dec(&dest->activeconns);
 				atomic_inc(&dest->inactconns);
 				cp->flags |= IP_VS_CONN_F_INACTIVE;
 			} else if ((cp->flags & IP_VS_CONN_F_INACTIVE) &&
-				   tcp_state_active(new_state)) {
+				   (new_state == IP_VS_TCP_S_ESTABLISHED)) {
 				atomic_inc(&dest->activeconns);
 				atomic_dec(&dest->inactconns);
 				cp->flags &= ~IP_VS_CONN_F_INACTIVE;
@@ -600,9 +563,9 @@ tcp_state_transition(struct ip_vs_conn *cp, int direction,
 	if (th == NULL)
 		return;
 
-	spin_lock_bh(&cp->lock);
+	spin_lock(&cp->lock);
 	set_tcp_state(pd, cp, direction, th);
-	spin_unlock_bh(&cp->lock);
+	spin_unlock(&cp->lock);
 }
 
 static inline __u16 tcp_app_hashkey(__be16 port)
@@ -612,44 +575,50 @@ static inline __u16 tcp_app_hashkey(__be16 port)
 }
 
 
-static int tcp_register_app(struct netns_ipvs *ipvs, struct ip_vs_app *inc)
+static int tcp_register_app(struct net *net, struct ip_vs_app *inc)
 {
 	struct ip_vs_app *i;
 	__u16 hash;
 	__be16 port = inc->port;
 	int ret = 0;
-	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(ipvs, IPPROTO_TCP);
+	struct netns_ipvs *ipvs = net_ipvs(net);
+	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(net, IPPROTO_TCP);
 
 	hash = tcp_app_hashkey(port);
 
+	spin_lock_bh(&ipvs->tcp_app_lock);
 	list_for_each_entry(i, &ipvs->tcp_apps[hash], p_list) {
 		if (i->port == port) {
 			ret = -EEXIST;
 			goto out;
 		}
 	}
-	list_add_rcu(&inc->p_list, &ipvs->tcp_apps[hash]);
+	list_add(&inc->p_list, &ipvs->tcp_apps[hash]);
 	atomic_inc(&pd->appcnt);
 
   out:
+	spin_unlock_bh(&ipvs->tcp_app_lock);
 	return ret;
 }
 
 
 static void
-tcp_unregister_app(struct netns_ipvs *ipvs, struct ip_vs_app *inc)
+tcp_unregister_app(struct net *net, struct ip_vs_app *inc)
 {
-	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(ipvs, IPPROTO_TCP);
+	struct netns_ipvs *ipvs = net_ipvs(net);
+	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(net, IPPROTO_TCP);
 
+	spin_lock_bh(&ipvs->tcp_app_lock);
 	atomic_dec(&pd->appcnt);
-	list_del_rcu(&inc->p_list);
+	list_del(&inc->p_list);
+	spin_unlock_bh(&ipvs->tcp_app_lock);
 }
 
 
 static int
 tcp_app_conn_bind(struct ip_vs_conn *cp)
 {
-	struct netns_ipvs *ipvs = cp->ipvs;
+	struct netns_ipvs *ipvs = net_ipvs(ip_vs_conn_net(cp));
 	int hash;
 	struct ip_vs_app *inc;
 	int result = 0;
@@ -661,12 +630,12 @@ tcp_app_conn_bind(struct ip_vs_conn *cp)
 	/* Lookup application incarnations and bind the right one */
 	hash = tcp_app_hashkey(cp->vport);
 
-	rcu_read_lock();
-	list_for_each_entry_rcu(inc, &ipvs->tcp_apps[hash], p_list) {
+	spin_lock(&ipvs->tcp_app_lock);
+	list_for_each_entry(inc, &ipvs->tcp_apps[hash], p_list) {
 		if (inc->port == cp->vport) {
 			if (unlikely(!ip_vs_app_inc_get(inc)))
 				break;
-			rcu_read_unlock();
+			spin_unlock(&ipvs->tcp_app_lock);
 
 			IP_VS_DBG_BUF(9, "%s(): Binding conn %s:%u->"
 				      "%s:%u to app %s on port %u\n",
@@ -683,7 +652,7 @@ tcp_app_conn_bind(struct ip_vs_conn *cp)
 			goto out;
 		}
 	}
-	rcu_read_unlock();
+	spin_unlock(&ipvs->tcp_app_lock);
 
   out:
 	return result;
@@ -693,24 +662,27 @@ tcp_app_conn_bind(struct ip_vs_conn *cp)
 /*
  *	Set LISTEN timeout. (ip_vs_conn_put will setup timer)
  */
-void ip_vs_tcp_conn_listen(struct ip_vs_conn *cp)
+void ip_vs_tcp_conn_listen(struct net *net, struct ip_vs_conn *cp)
 {
-	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(cp->ipvs, IPPROTO_TCP);
+	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(net, IPPROTO_TCP);
 
-	spin_lock_bh(&cp->lock);
+	spin_lock(&cp->lock);
 	cp->state = IP_VS_TCP_S_LISTEN;
 	cp->timeout = (pd ? pd->timeout_table[IP_VS_TCP_S_LISTEN]
 			   : tcp_timeouts[IP_VS_TCP_S_LISTEN]);
-	spin_unlock_bh(&cp->lock);
+	spin_unlock(&cp->lock);
 }
 
 /* ---------------------------------------------
  *   timeouts is netns related now.
  * ---------------------------------------------
  */
-static int __ip_vs_tcp_init(struct netns_ipvs *ipvs, struct ip_vs_proto_data *pd)
+static int __ip_vs_tcp_init(struct net *net, struct ip_vs_proto_data *pd)
 {
+	struct netns_ipvs *ipvs = net_ipvs(net);
+
 	ip_vs_init_hash_table(ipvs->tcp_apps, TCP_APP_TAB_SIZE);
+	spin_lock_init(&ipvs->tcp_app_lock);
 	pd->timeout_table = ip_vs_create_timeout_table((int *)tcp_timeouts,
 							sizeof(tcp_timeouts));
 	if (!pd->timeout_table)
@@ -719,7 +691,7 @@ static int __ip_vs_tcp_init(struct netns_ipvs *ipvs, struct ip_vs_proto_data *pd
 	return 0;
 }
 
-static void __ip_vs_tcp_exit(struct netns_ipvs *ipvs, struct ip_vs_proto_data *pd)
+static void __ip_vs_tcp_exit(struct net *net, struct ip_vs_proto_data *pd)
 {
 	kfree(pd->timeout_table);
 }

@@ -16,16 +16,13 @@
 #ifndef CONFIG_MMU
 
 #include <asm-generic/4level-fixup.h>
-#include <asm/pgtable-nommu.h>
+#include "pgtable-nommu.h"
 
 #else
 
 #include <asm-generic/pgtable-nopud.h>
 #include <asm/memory.h>
 #include <asm/pgtable-hwdef.h>
-
-
-#include <asm/tlbflush.h>
 
 #ifdef CONFIG_ARM_LPAE
 #include <asm/pgtable-3level.h>
@@ -43,7 +40,7 @@
  */
 #define VMALLOC_OFFSET		(8*1024*1024)
 #define VMALLOC_START		(((unsigned long)high_memory + VMALLOC_OFFSET) & ~(VMALLOC_OFFSET-1))
-#define VMALLOC_END		0xff800000UL
+#define VMALLOC_END		0xff000000UL
 
 #define LIBRARY_TEXT_START	0x0c000000
 
@@ -61,7 +58,7 @@ extern void __pgd_error(const char *file, int line, pgd_t);
  * mapping to be mapped at.  This is particularly important for
  * non-high vector CPUs.
  */
-#define FIRST_USER_ADDRESS	(PAGE_SIZE * 2)
+#define FIRST_USER_ADDRESS	PAGE_SIZE
 
 /*
  * Use TASK_SIZE as the ceiling argument for free_pgtables() and
@@ -82,13 +79,10 @@ extern void __pgd_error(const char *file, int line, pgd_t);
 
 extern pgprot_t		pgprot_user;
 extern pgprot_t		pgprot_kernel;
-extern pgprot_t		pgprot_hyp_device;
-extern pgprot_t		pgprot_s2;
-extern pgprot_t		pgprot_s2_device;
 
 #define _MOD_PROT(p, b)	__pgprot(pgprot_val(p) | (b))
 
-#define PAGE_NONE		_MOD_PROT(pgprot_user, L_PTE_XN | L_PTE_RDONLY | L_PTE_NONE)
+#define PAGE_NONE		_MOD_PROT(pgprot_user, L_PTE_XN | L_PTE_RDONLY)
 #define PAGE_SHARED		_MOD_PROT(pgprot_user, L_PTE_USER | L_PTE_XN)
 #define PAGE_SHARED_EXEC	_MOD_PROT(pgprot_user, L_PTE_USER)
 #define PAGE_COPY		_MOD_PROT(pgprot_user, L_PTE_USER | L_PTE_RDONLY | L_PTE_XN)
@@ -97,14 +91,8 @@ extern pgprot_t		pgprot_s2_device;
 #define PAGE_READONLY_EXEC	_MOD_PROT(pgprot_user, L_PTE_USER | L_PTE_RDONLY)
 #define PAGE_KERNEL		_MOD_PROT(pgprot_kernel, L_PTE_XN)
 #define PAGE_KERNEL_EXEC	pgprot_kernel
-#define PAGE_HYP		_MOD_PROT(pgprot_kernel, L_PTE_HYP | L_PTE_XN)
-#define PAGE_HYP_EXEC		_MOD_PROT(pgprot_kernel, L_PTE_HYP | L_PTE_RDONLY)
-#define PAGE_HYP_RO		_MOD_PROT(pgprot_kernel, L_PTE_HYP | L_PTE_RDONLY | L_PTE_XN)
-#define PAGE_HYP_DEVICE		_MOD_PROT(pgprot_hyp_device, L_PTE_HYP)
-#define PAGE_S2			_MOD_PROT(pgprot_s2, L_PTE_S2_RDONLY)
-#define PAGE_S2_DEVICE		_MOD_PROT(pgprot_s2_device, L_PTE_S2_RDONLY)
 
-#define __PAGE_NONE		__pgprot(_L_PTE_DEFAULT | L_PTE_RDONLY | L_PTE_XN | L_PTE_NONE)
+#define __PAGE_NONE		__pgprot(_L_PTE_DEFAULT | L_PTE_RDONLY | L_PTE_XN)
 #define __PAGE_SHARED		__pgprot(_L_PTE_DEFAULT | L_PTE_USER | L_PTE_XN)
 #define __PAGE_SHARED_EXEC	__pgprot(_L_PTE_DEFAULT | L_PTE_USER)
 #define __PAGE_COPY		__pgprot(_L_PTE_DEFAULT | L_PTE_USER | L_PTE_RDONLY | L_PTE_XN)
@@ -184,6 +172,7 @@ extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
 #define pgd_offset_k(addr)	pgd_offset(&init_mm, addr)
 
 #define pmd_none(pmd)		(!pmd_val(pmd))
+#define pmd_present(pmd)	(pmd_val(pmd))
 
 static inline pte_t *pmd_page_vaddr(pmd_t pmd)
 {
@@ -215,21 +204,17 @@ static inline pte_t *pmd_page_vaddr(pmd_t pmd)
 
 #define pte_clear(mm,addr,ptep)	set_pte_ext(ptep, __pte(0), 0)
 
-#define pte_isset(pte, val)	((u32)(val) == (val) ? pte_val(pte) & (val) \
-						: !!(pte_val(pte) & (val)))
-#define pte_isclear(pte, val)	(!(pte_val(pte) & (val)))
-
 #define pte_none(pte)		(!pte_val(pte))
-#define pte_present(pte)	(pte_isset((pte), L_PTE_PRESENT))
-#define pte_valid(pte)		(pte_isset((pte), L_PTE_VALID))
-#define pte_accessible(mm, pte)	(mm_tlb_flush_pending(mm) ? pte_present(pte) : pte_valid(pte))
-#define pte_write(pte)		(pte_isclear((pte), L_PTE_RDONLY))
-#define pte_dirty(pte)		(pte_isset((pte), L_PTE_DIRTY))
-#define pte_young(pte)		(pte_isset((pte), L_PTE_YOUNG))
-#define pte_exec(pte)		(pte_isclear((pte), L_PTE_XN))
+#define pte_present(pte)	(pte_val(pte) & L_PTE_PRESENT)
+#define pte_write(pte)		(!(pte_val(pte) & L_PTE_RDONLY))
+#define pte_dirty(pte)		(pte_val(pte) & L_PTE_DIRTY)
+#define pte_young(pte)		(pte_val(pte) & L_PTE_YOUNG)
+#define pte_exec(pte)		(!(pte_val(pte) & L_PTE_XN))
+#define pte_special(pte)	(0)
 
-#define pte_valid_user(pte)	\
-	(pte_valid(pte) && pte_isset((pte), L_PTE_USER) && pte_young(pte))
+#define pte_present_user(pte) \
+	((pte_val(pte) & (L_PTE_PRESENT | L_PTE_USER)) == \
+	 (L_PTE_PRESENT | L_PTE_USER))
 
 #if __LINUX_ARM_ARCH__ < 6
 static inline void __sync_icache_dcache(pte_t pteval)
@@ -244,71 +229,29 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 {
 	unsigned long ext = 0;
 
-	if (addr < TASK_SIZE && pte_valid_user(pteval)) {
-		if (!pte_special(pteval))
-			__sync_icache_dcache(pteval);
+	if (addr < TASK_SIZE && pte_present_user(pteval)) {
+		__sync_icache_dcache(pteval);
 		ext |= PTE_EXT_NG;
 	}
 
 	set_pte_ext(ptep, pteval, ext);
 }
 
-static inline pte_t clear_pte_bit(pte_t pte, pgprot_t prot)
-{
-	pte_val(pte) &= ~pgprot_val(prot);
-	return pte;
-}
+#define PTE_BIT_FUNC(fn,op) \
+static inline pte_t pte_##fn(pte_t pte) { pte_val(pte) op; return pte; }
 
-static inline pte_t set_pte_bit(pte_t pte, pgprot_t prot)
-{
-	pte_val(pte) |= pgprot_val(prot);
-	return pte;
-}
+PTE_BIT_FUNC(wrprotect, |= L_PTE_RDONLY);
+PTE_BIT_FUNC(mkwrite,   &= ~L_PTE_RDONLY);
+PTE_BIT_FUNC(mkclean,   &= ~L_PTE_DIRTY);
+PTE_BIT_FUNC(mkdirty,   |= L_PTE_DIRTY);
+PTE_BIT_FUNC(mkold,     &= ~L_PTE_YOUNG);
+PTE_BIT_FUNC(mkyoung,   |= L_PTE_YOUNG);
 
-static inline pte_t pte_wrprotect(pte_t pte)
-{
-	return set_pte_bit(pte, __pgprot(L_PTE_RDONLY));
-}
-
-static inline pte_t pte_mkwrite(pte_t pte)
-{
-	return clear_pte_bit(pte, __pgprot(L_PTE_RDONLY));
-}
-
-static inline pte_t pte_mkclean(pte_t pte)
-{
-	return clear_pte_bit(pte, __pgprot(L_PTE_DIRTY));
-}
-
-static inline pte_t pte_mkdirty(pte_t pte)
-{
-	return set_pte_bit(pte, __pgprot(L_PTE_DIRTY));
-}
-
-static inline pte_t pte_mkold(pte_t pte)
-{
-	return clear_pte_bit(pte, __pgprot(L_PTE_YOUNG));
-}
-
-static inline pte_t pte_mkyoung(pte_t pte)
-{
-	return set_pte_bit(pte, __pgprot(L_PTE_YOUNG));
-}
-
-static inline pte_t pte_mkexec(pte_t pte)
-{
-	return clear_pte_bit(pte, __pgprot(L_PTE_XN));
-}
-
-static inline pte_t pte_mknexec(pte_t pte)
-{
-	return set_pte_bit(pte, __pgprot(L_PTE_XN));
-}
+static inline pte_t pte_mkspecial(pte_t pte) { return pte; }
 
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
-	const pteval_t mask = L_PTE_XN | L_PTE_RDONLY | L_PTE_USER |
-		L_PTE_NONE | L_PTE_VALID;
+	const pteval_t mask = L_PTE_XN | L_PTE_RDONLY | L_PTE_USER;
 	pte_val(pte) = (pte_val(pte) & ~mask) | (pgprot_val(newprot) & mask);
 	return pte;
 }
@@ -319,12 +262,12 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
  *
  *   3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
  *   1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
- *   <--------------- offset ------------------------> < type -> 0 0
+ *   <--------------- offset ----------------------> < type -> 0 0 0
  *
- * This gives us up to 31 swap files and 128GB per swap file.  Note that
+ * This gives us up to 31 swap files and 64GB per swap file.  Note that
  * the offset field is always non-zero.
  */
-#define __SWP_TYPE_SHIFT	2
+#define __SWP_TYPE_SHIFT	3
 #define __SWP_TYPE_BITS		5
 #define __SWP_TYPE_MASK		((1 << __SWP_TYPE_BITS) - 1)
 #define __SWP_OFFSET_SHIFT	(__SWP_TYPE_BITS + __SWP_TYPE_SHIFT)
@@ -343,6 +286,20 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
  */
 #define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > __SWP_TYPE_BITS)
 
+/*
+ * Encode and decode a file entry.  File entries are stored in the Linux
+ * page tables as follows:
+ *
+ *   3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+ *   1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+ *   <----------------------- offset ------------------------> 1 0 0
+ */
+#define pte_file(pte)		(pte_val(pte) & L_PTE_FILE)
+#define pte_to_pgoff(x)		(pte_val(x) >> 3)
+#define pgoff_to_pte(x)		__pte(((x) << 3) | L_PTE_FILE)
+
+#define PTE_FILE_MAX_BITS	29
+
 /* Needs to be defined here and not in linux/mm.h, as it is arch dependent */
 /* FIXME: this is not correct */
 #define kern_addr_valid(addr)	(1)
@@ -354,6 +311,13 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
  */
 #define HAVE_ARCH_UNMAPPED_AREA
 #define HAVE_ARCH_UNMAPPED_AREA_TOPDOWN
+
+/*
+ * remap a physical page `pfn' of size `size' with page protection `prot'
+ * into virtual address `from'
+ */
+#define io_remap_pfn_range(vma,from,pfn,size,prot) \
+		remap_pfn_range(vma, from, pfn, size, prot)
 
 #define pgtable_cache_init() do { } while (0)
 

@@ -5,6 +5,7 @@
 #
 
 targets		:= vmlinux vmlinux.bin vmlinux.bin.gz head.o misc.o piggy.o
+asflags-y	:= -traditional
 
 OBJECTS = $(obj)/head.o $(obj)/misc.o
 
@@ -14,29 +15,23 @@ OBJECTS = $(obj)/head.o $(obj)/misc.o
 # in order to suppress error message.
 #
 CONFIG_MEMORY_START     ?= 0x00400000
-CONFIG_BOOT_LINK_OFFSET ?= 0x00280000
-IMAGE_OFFSET := $(shell printf "0x%08x" $$(($(CONFIG_MEMORY_START)+$(CONFIG_BOOT_LINK_OFFSET))))
+CONFIG_BOOT_LINK_OFFSET ?= 0x00140000
+IMAGE_OFFSET := $(shell printf "0x%08x" $$[$(CONFIG_MEMORY_START)+$(CONFIG_BOOT_LINK_OFFSET)])
 
-LIBGCC := $(shell $(CROSS-COMPILE)$(CC) $(KBUILD_CFLAGS) -print-libgcc-file-name)
-LDFLAGS_vmlinux := -Ttext $(IMAGE_OFFSET) -estartup -T $(obj)/vmlinux.lds \
-	--defsym output=$(CONFIG_MEMORY_START)
+LDFLAGS_vmlinux := -Ttext $(IMAGE_OFFSET) -estartup $(obj)/vmlinux.lds
 
-$(obj)/vmlinux: $(OBJECTS) $(obj)/piggy.o $(LIBGCC) FORCE
+$(obj)/vmlinux: $(OBJECTS) $(obj)/piggy.o FORCE
 	$(call if_changed,ld)
+	@:
 
 $(obj)/vmlinux.bin: vmlinux FORCE
 	$(call if_changed,objcopy)
 
-suffix-$(CONFIG_KERNEL_GZIP)    := gzip
-suffix-$(CONFIG_KERNEL_LZO)     := lzo
+$(obj)/vmlinux.bin.gz: $(obj)/vmlinux.bin FORCE
+	$(call if_changed,gzip)
 
-$(obj)/vmlinux.bin.$(suffix-y): $(obj)/vmlinux.bin FORCE
-	$(call if_changed,$(suffix-y))
-
-LDFLAGS_piggy.o := -r --format binary --oformat elf32-h8300-linux -T
+LDFLAGS_piggy.o := -r --format binary --oformat elf32-h8300 -T
 OBJCOPYFLAGS := -O binary
 
-$(obj)/piggy.o: $(obj)/vmlinux.scr $(obj)/vmlinux.bin.$(suffix-y) FORCE
+$(obj)/piggy.o: $(obj)/vmlinux.scr $(obj)/vmlinux.bin.gz FORCE
 	$(call if_changed,ld)
-
-CFLAGS_misc.o = -O0

@@ -29,7 +29,6 @@
 #include <linux/random.h>
 #include <scsi/fc/fc_fcoe.h>
 #include <scsi/libfc.h>
-#include <scsi/fcoe_sysfs.h>
 
 #define FCOE_MAX_CMD_LEN	16	/* Supported CDB length */
 
@@ -78,12 +77,10 @@ enum fip_state {
  * The mode is the state that is to be entered after link up.
  * It must not change after fcoe_ctlr_init() sets it.
  */
-enum fip_mode {
-	FIP_MODE_AUTO = FIP_ST_AUTO,
-	FIP_MODE_NON_FIP,
-	FIP_MODE_FABRIC,
-	FIP_MODE_VN2VN,
-};
+#define FIP_MODE_AUTO		FIP_ST_AUTO
+#define FIP_MODE_NON_FIP	FIP_ST_NON_FIP
+#define FIP_MODE_FABRIC		FIP_ST_ENABLED
+#define FIP_MODE_VN2VN		FIP_ST_VNMP_START
 
 /**
  * struct fcoe_ctlr - FCoE Controller and FIP state
@@ -92,7 +89,6 @@ enum fip_mode {
  * @lp:		   &fc_lport: libfc local port.
  * @sel_fcf:	   currently selected FCF, or NULL.
  * @fcfs:	   list of discovered FCFs.
- * @cdev:          (Optional) pointer to sysfs fcoe_ctlr_device.
  * @fcf_count:	   number of discovered FCF entries.
  * @sol_time:	   time when a multicast solicitation was last sent.
  * @sel_time:	   time after which to select an FCF.
@@ -110,10 +106,8 @@ enum fip_mode {
  * @flogi_req_send: send of FLOGI requested
  * @flogi_count:   number of FLOGI attempts in AUTO mode.
  * @map_dest:	   use the FC_MAP mode for destination MAC addresses.
- * @fip_resp:	   start FIP VLAN discovery responder
  * @spma:	   supports SPMA server-provided MACs mode
  * @probe_tries:   number of FC_IDs probed
- * @priority:      DCBx FCoE APP priority
  * @dest_addr:	   MAC address of the selected FC forwarder.
  * @ctl_src_addr:  the native MAC address of our local port.
  * @send:	   LLD-supplied function to handle sending FIP Ethernet frames
@@ -128,11 +122,10 @@ enum fip_mode {
  */
 struct fcoe_ctlr {
 	enum fip_state state;
-	enum fip_mode mode;
+	enum fip_state mode;
 	struct fc_lport *lp;
 	struct fcoe_fcf *sel_fcf;
 	struct list_head fcfs;
-	struct fcoe_ctlr_device *cdev;
 	u16 fcf_count;
 	unsigned long sol_time;
 	unsigned long sel_time;
@@ -151,8 +144,7 @@ struct fcoe_ctlr {
 	u16 flogi_oxid;
 	u8 flogi_req_send;
 	u8 flogi_count;
-	bool map_dest;
-	bool fip_resp;
+	u8 map_dest;
 	u8 spma;
 	u8 probe_tries;
 	u8 priority;
@@ -167,27 +159,8 @@ struct fcoe_ctlr {
 };
 
 /**
- * fcoe_ctlr_priv() - Return the private data from a fcoe_ctlr
- * @cltr: The fcoe_ctlr whose private data will be returned
- */
-static inline void *fcoe_ctlr_priv(const struct fcoe_ctlr *ctlr)
-{
-	return (void *)(ctlr + 1);
-}
-
-/*
- * This assumes that the fcoe_ctlr (x) is allocated with the fcoe_ctlr_device.
- */
-#define fcoe_ctlr_to_ctlr_dev(x)					\
-	(x)->cdev
-
-/**
  * struct fcoe_fcf - Fibre-Channel Forwarder
  * @list:	 list linkage
- * @event_work:  Work for FC Transport actions queue
- * @event:       The event to be processed
- * @fip:         The controller that the FCF was discovered on
- * @fcf_dev:     The associated fcoe_fcf_device instance
  * @time:	 system time (jiffies) when an advertisement was last received
  * @switch_name: WWN of switch from advertisement
  * @fabric_name: WWN of fabric from advertisement
@@ -209,9 +182,6 @@ static inline void *fcoe_ctlr_priv(const struct fcoe_ctlr *ctlr)
  */
 struct fcoe_fcf {
 	struct list_head list;
-	struct work_struct event_work;
-	struct fcoe_ctlr *fip;
-	struct fcoe_fcf_device *fcf_dev;
 	unsigned long time;
 
 	u64 switch_name;
@@ -227,9 +197,6 @@ struct fcoe_fcf {
 	u32 fka_period;
 	u8 fd_flags:1;
 };
-
-#define fcoe_fcf_to_fcf_dev(x)			\
-	((x)->fcf_dev)
 
 /**
  * struct fcoe_rport - VN2VN remote port
@@ -270,9 +237,6 @@ void __fcoe_get_lesb(struct fc_lport *lport, struct fc_els_lesb *fc_lesb,
 		     struct net_device *netdev);
 void fcoe_wwn_to_str(u64 wwn, char *buf, int len);
 int fcoe_validate_vport_create(struct fc_vport *vport);
-int fcoe_link_speed_update(struct fc_lport *);
-void fcoe_get_lesb(struct fc_lport *, struct fc_els_lesb *);
-void fcoe_ctlr_get_lesb(struct fcoe_ctlr_device *ctlr_dev);
 
 /**
  * is_fip_mode() - returns true if FIP mode selected.
@@ -302,11 +266,8 @@ static inline bool is_fip_mode(struct fcoe_ctlr *fip)
  * @attached:	whether this transport is already attached
  * @list:	list linkage to all attached transports
  * @match:	handler to allow the transport driver to match up a given netdev
- * @alloc:      handler to allocate per-instance FCoE structures
- *		(no discovery or login)
  * @create:	handler to sysfs entry of create for FCoE instances
- * @destroy:    handler to delete per-instance FCoE structures
- *		(frees all memory)
+ * @destroy:	handler to sysfs entry of destroy for FCoE instances
  * @enable:	handler to sysfs entry of enable for FCoE instances
  * @disable:	handler to sysfs entry of disable for FCoE instances
  */
@@ -315,8 +276,7 @@ struct fcoe_transport {
 	bool attached;
 	struct list_head list;
 	bool (*match) (struct net_device *device);
-	int (*alloc) (struct net_device *device);
-	int (*create) (struct net_device *device, enum fip_mode fip_mode);
+	int (*create) (struct net_device *device, enum fip_state fip_mode);
 	int (*destroy) (struct net_device *device);
 	int (*enable) (struct net_device *device);
 	int (*disable) (struct net_device *device);
@@ -324,16 +284,14 @@ struct fcoe_transport {
 
 /**
  * struct fcoe_percpu_s - The context for FCoE receive thread(s)
- * @kthread:	    The thread context (used by bnx2fc)
- * @work:	    The work item (used by fcoe)
+ * @thread:	    The thread context
  * @fcoe_rx_list:   The queue of pending packets to process
  * @page:	    The memory page for calculating frame trailer CRCs
  * @crc_eof_offset: The offset into the CRC page pointing to available
  *		    memory for a new trailer
  */
 struct fcoe_percpu_s {
-	struct task_struct *kthread;
-	struct work_struct work;
+	struct task_struct *thread;
 	struct sk_buff_head fcoe_rx_list;
 	struct page *crc_eof_page;
 	int crc_eof_offset;
@@ -346,6 +304,7 @@ struct fcoe_percpu_s {
  * @lport:		       The associated local port
  * @fcoe_pending_queue:	       The pending Rx queue of skbs
  * @fcoe_pending_queue_active: Indicates if the pending queue is active
+ * @priority:		       Packet priority (DCB)
  * @max_queue_depth:	       Max queue depth of pending queue
  * @min_queue_depth:	       Min queue depth of pending queue
  * @timer:		       The queue timer
@@ -361,34 +320,18 @@ struct fcoe_port {
 	struct fc_lport	      *lport;
 	struct sk_buff_head   fcoe_pending_queue;
 	u8		      fcoe_pending_queue_active;
+	u8		      priority;
 	u32		      max_queue_depth;
 	u32		      min_queue_depth;
 	struct timer_list     timer;
 	struct work_struct    destroy_work;
 	u8		      data_src_addr[ETH_ALEN];
-	struct net_device * (*get_netdev)(const struct fc_lport *lport);
 };
-
-/**
- * fcoe_get_netdev() - Return the net device associated with a local port
- * @lport: The local port to get the net device from
- */
-static inline struct net_device *fcoe_get_netdev(const struct fc_lport *lport)
-{
-	struct fcoe_port *port = ((struct fcoe_port *)lport_priv(lport));
-
-	return (port->get_netdev) ? port->get_netdev(lport) : NULL;
-}
-
 void fcoe_clean_pending_queue(struct fc_lport *);
 void fcoe_check_wait_queue(struct fc_lport *lport, struct sk_buff *skb);
 void fcoe_queue_timer(ulong lport);
 int fcoe_get_paged_crc_eof(struct sk_buff *skb, int tlen,
 			   struct fcoe_percpu_s *fps);
-
-/* FCoE Sysfs helpers */
-void fcoe_fcf_get_selected(struct fcoe_fcf_device *);
-void fcoe_ctlr_set_fip_mode(struct fcoe_ctlr_device *);
 
 /**
  * struct netdev_list
@@ -404,12 +347,4 @@ struct fcoe_netdev_mapping {
 int fcoe_transport_attach(struct fcoe_transport *ft);
 int fcoe_transport_detach(struct fcoe_transport *ft);
 
-/* sysfs store handler for ctrl_control interface */
-ssize_t fcoe_ctlr_create_store(struct bus_type *bus,
-			       const char *buf, size_t count);
-ssize_t fcoe_ctlr_destroy_store(struct bus_type *bus,
-				const char *buf, size_t count);
-
 #endif /* _LIBFCOE_H */
-
-

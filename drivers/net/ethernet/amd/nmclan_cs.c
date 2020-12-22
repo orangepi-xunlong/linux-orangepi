@@ -132,6 +132,7 @@ Include Files
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/ptrace.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -457,7 +458,7 @@ static int nmclan_probe(struct pcmcia_device *link)
     lp->tx_free_frames=AM2150_MAX_TX_FRAMES;
 
     dev->netdev_ops = &mace_netdev_ops;
-    dev->ethtool_ops = &netdev_ethtool_ops;
+    SET_ETHTOOL_OPS(dev, &netdev_ethtool_ops);
     dev->watchdog_timeo = TX_TIMEOUT;
 
     return nmclan_config(link);
@@ -621,7 +622,7 @@ static int nmclan_config(struct pcmcia_device *link)
   ret = pcmcia_request_io(link);
   if (ret)
 	  goto failed;
-  ret = pcmcia_request_irq(link, mace_interrupt);
+  ret = pcmcia_request_exclusive_irq(link, mace_interrupt);
   if (ret)
 	  goto failed;
   ret = pcmcia_enable_device(link);
@@ -851,7 +852,7 @@ static void mace_tx_timeout(struct net_device *dev)
 #else /* #if RESET_ON_TIMEOUT */
   pr_cont("NOT resetting card\n");
 #endif /* #if RESET_ON_TIMEOUT */
-  netif_trans_update(dev); /* prevent tx timeout */
+  dev->trans_start = jiffies; /* prevent tx timeout */
   netif_wake_queue(dev);
 }
 
@@ -952,8 +953,6 @@ static irqreturn_t mace_interrupt(int irq, void *dev_id)
   do {
     /* WARNING: MACE_IR is a READ/CLEAR port! */
     status = inb(ioaddr + AM2150_MACE_BASE + MACE_IR);
-    if (!(status & ~MACE_IMR_DEFAULT) && IntrCnt == MACE_MAX_IR_ITERATIONS)
-      return IRQ_NONE;
 
     pr_debug("mace_interrupt: irq 0x%X status 0x%X.\n", irq, status);
 
@@ -1509,4 +1508,16 @@ static struct pcmcia_driver nmclan_cs_driver = {
 	.suspend	= nmclan_suspend,
 	.resume		= nmclan_resume,
 };
-module_pcmcia_driver(nmclan_cs_driver);
+
+static int __init init_nmclan_cs(void)
+{
+	return pcmcia_register_driver(&nmclan_cs_driver);
+}
+
+static void __exit exit_nmclan_cs(void)
+{
+	pcmcia_unregister_driver(&nmclan_cs_driver);
+}
+
+module_init(init_nmclan_cs);
+module_exit(exit_nmclan_cs);

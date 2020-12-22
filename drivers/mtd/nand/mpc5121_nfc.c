@@ -30,14 +30,13 @@
 #include <linux/gfp.h>
 #include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
-#include <linux/of_address.h>
 #include <linux/of_device.h>
-#include <linux/of_irq.h>
 #include <linux/of_platform.h>
 
 #include <asm/mpc5121.h>
@@ -118,6 +117,7 @@
 #define NFC_TIMEOUT		(HZ / 10)	/* 1/10 s */
 
 struct mpc5121_nfc_prv {
+	struct mtd_info		mtd;
 	struct nand_chip	chip;
 	int			irq;
 	void __iomem		*regs;
@@ -134,8 +134,8 @@ static void mpc5121_nfc_done(struct mtd_info *mtd);
 /* Read NFC register */
 static inline u16 nfc_read(struct mtd_info *mtd, uint reg)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 
 	return in_be16(prv->regs + reg);
 }
@@ -143,8 +143,8 @@ static inline u16 nfc_read(struct mtd_info *mtd, uint reg)
 /* Write NFC register */
 static inline void nfc_write(struct mtd_info *mtd, uint reg, u16 val)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 
 	out_be16(prv->regs + reg, val);
 }
@@ -213,8 +213,8 @@ static inline void mpc5121_nfc_send_read_status(struct mtd_info *mtd)
 static irqreturn_t mpc5121_nfc_irq(int irq, void *data)
 {
 	struct mtd_info *mtd = data;
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 
 	nfc_set(mtd, NFC_CONFIG1, NFC_INT_MASK);
 	wake_up(&prv->irq_waitq);
@@ -225,8 +225,8 @@ static irqreturn_t mpc5121_nfc_irq(int irq, void *data)
 /* Wait for operation complete */
 static void mpc5121_nfc_done(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 	int rv;
 
 	if ((nfc_read(mtd, NFC_CONFIG2) & NFC_INT) == 0) {
@@ -245,7 +245,7 @@ static void mpc5121_nfc_done(struct mtd_info *mtd)
 /* Do address cycle(s) */
 static void mpc5121_nfc_addr_cycle(struct mtd_info *mtd, int column, int page)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
+	struct nand_chip *chip = mtd->priv;
 	u32 pagemask = chip->pagemask;
 
 	if (column != -1) {
@@ -280,8 +280,8 @@ static void mpc5121_nfc_select_chip(struct mtd_info *mtd, int chip)
 /* Init external chip select logic on ADS5121 board */
 static int ads5121_chipselect_init(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 	struct device_node *dn;
 
 	dn = of_find_compatible_node(NULL, NULL, "fsl,mpc5121ads-cpld");
@@ -302,8 +302,8 @@ static int ads5121_chipselect_init(struct mtd_info *mtd)
 /* Control chips select signal on ADS5121 board */
 static void ads5121_select_chip(struct mtd_info *mtd, int chip)
 {
-	struct nand_chip *nand = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(nand);
+	struct nand_chip *nand = mtd->priv;
+	struct mpc5121_nfc_prv *prv = nand->priv;
 	u8 v;
 
 	v = in_8(prv->csreg);
@@ -332,8 +332,8 @@ static int mpc5121_nfc_dev_ready(struct mtd_info *mtd)
 static void mpc5121_nfc_command(struct mtd_info *mtd, unsigned command,
 							int column, int page)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 
 	prv->column = (column >= 0) ? column : 0;
 	prv->spareonly = 0;
@@ -405,8 +405,8 @@ static void mpc5121_nfc_command(struct mtd_info *mtd, unsigned command,
 static void mpc5121_nfc_copy_spare(struct mtd_info *mtd, uint offset,
 						u8 *buffer, uint size, int wr)
 {
-	struct nand_chip *nand = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(nand);
+	struct nand_chip *nand = mtd->priv;
+	struct mpc5121_nfc_prv *prv = nand->priv;
 	uint o, s, sbsize, blksize;
 
 	/*
@@ -457,8 +457,8 @@ static void mpc5121_nfc_copy_spare(struct mtd_info *mtd, uint offset,
 static void mpc5121_nfc_buf_copy(struct mtd_info *mtd, u_char *buf, int len,
 									int wr)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 	uint c = prv->column;
 	uint l;
 
@@ -506,6 +506,27 @@ static void mpc5121_nfc_write_buf(struct mtd_info *mtd,
 	mpc5121_nfc_buf_copy(mtd, (u_char *)buf, len, 1);
 }
 
+/* Compare buffer with NAND flash */
+static int mpc5121_nfc_verify_buf(struct mtd_info *mtd,
+						const u_char *buf, int len)
+{
+	u_char tmp[256];
+	uint bsize;
+
+	while (len) {
+		bsize = min(len, 256);
+		mpc5121_nfc_read_buf(mtd, tmp, bsize);
+
+		if (memcmp(buf, tmp, bsize))
+			return 1;
+
+		buf += bsize;
+		len -= bsize;
+	}
+
+	return 0;
+}
+
 /* Read byte from NFC buffers */
 static u8 mpc5121_nfc_read_byte(struct mtd_info *mtd)
 {
@@ -535,8 +556,8 @@ static u16 mpc5121_nfc_read_word(struct mtd_info *mtd)
  */
 static int mpc5121_nfc_read_hw_config(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 	struct mpc512x_reset_module *rm;
 	struct device_node *rmnode;
 	uint rcw_pagesize = 0;
@@ -614,20 +635,21 @@ out:
 /* Free driver resources */
 static void mpc5121_nfc_free(struct device *dev, struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mpc5121_nfc_prv *prv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 
-	if (prv->clk)
-		clk_disable_unprepare(prv->clk);
+	if (prv->clk) {
+		clk_disable(prv->clk);
+		clk_put(prv->clk);
+	}
 
 	if (prv->csreg)
 		iounmap(prv->csreg);
 }
 
-static int mpc5121_nfc_probe(struct platform_device *op)
+static int __devinit mpc5121_nfc_probe(struct platform_device *op)
 {
-	struct device_node *dn = op->dev.of_node;
-	struct clk *clk;
+	struct device_node *rootnode, *dn = op->dev.of_node;
 	struct device *dev = &op->dev;
 	struct mpc5121_nfc_prv *prv;
 	struct resource res;
@@ -638,6 +660,7 @@ static int mpc5121_nfc_probe(struct platform_device *op)
 	int resettime = 0;
 	int retval = 0;
 	int rev, len;
+	struct mtd_part_parser_data ppdata;
 
 	/*
 	 * Check SoC revision. This driver supports only NFC
@@ -650,15 +673,16 @@ static int mpc5121_nfc_probe(struct platform_device *op)
 	}
 
 	prv = devm_kzalloc(dev, sizeof(*prv), GFP_KERNEL);
-	if (!prv)
+	if (!prv) {
+		dev_err(dev, "Memory exhausted!\n");
 		return -ENOMEM;
+	}
 
+	mtd = &prv->mtd;
 	chip = &prv->chip;
-	mtd = nand_to_mtd(chip);
 
-	mtd->dev.parent = dev;
-	nand_set_controller_data(chip, prv);
-	nand_set_flash_node(chip, dn);
+	mtd->priv = chip;
+	chip->priv = prv;
 	prv->dev = dev;
 
 	/* Read NFC configuration from Reset Config Word */
@@ -701,41 +725,42 @@ static int mpc5121_nfc_probe(struct platform_device *op)
 	}
 
 	mtd->name = "MPC5121 NAND";
+	ppdata.of_node = dn;
 	chip->dev_ready = mpc5121_nfc_dev_ready;
 	chip->cmdfunc = mpc5121_nfc_command;
 	chip->read_byte = mpc5121_nfc_read_byte;
 	chip->read_word = mpc5121_nfc_read_word;
 	chip->read_buf = mpc5121_nfc_read_buf;
 	chip->write_buf = mpc5121_nfc_write_buf;
+	chip->verify_buf = mpc5121_nfc_verify_buf;
 	chip->select_chip = mpc5121_nfc_select_chip;
+	chip->options = NAND_NO_AUTOINCR;
 	chip->bbt_options = NAND_BBT_USE_FLASH;
 	chip->ecc.mode = NAND_ECC_SOFT;
-	chip->ecc.algo = NAND_ECC_HAMMING;
 
 	/* Support external chip-select logic on ADS5121 board */
-	if (of_machine_is_compatible("fsl,mpc5121ads")) {
+	rootnode = of_find_node_by_path("/");
+	if (of_device_is_compatible(rootnode, "fsl,mpc5121ads")) {
 		retval = ads5121_chipselect_init(mtd);
 		if (retval) {
 			dev_err(dev, "Chipselect init error!\n");
+			of_node_put(rootnode);
 			return retval;
 		}
 
 		chip->select_chip = ads5121_select_chip;
 	}
+	of_node_put(rootnode);
 
 	/* Enable NFC clock */
-	clk = devm_clk_get(dev, "ipg");
-	if (IS_ERR(clk)) {
+	prv->clk = clk_get(dev, "nfc_clk");
+	if (IS_ERR(prv->clk)) {
 		dev_err(dev, "Unable to acquire NFC clock!\n");
-		retval = PTR_ERR(clk);
+		retval = PTR_ERR(prv->clk);
 		goto error;
 	}
-	retval = clk_prepare_enable(clk);
-	if (retval) {
-		dev_err(dev, "Unable to enable NFC clock!\n");
-		goto error;
-	}
-	prv->clk = clk;
+
+	clk_enable(prv->clk);
 
 	/* Reset NAND Flash controller */
 	nfc_set(mtd, NFC_CONFIG1, NFC_RESET);
@@ -779,6 +804,7 @@ static int mpc5121_nfc_probe(struct platform_device *op)
 	/* Detect NAND chips */
 	if (nand_scan(mtd, be32_to_cpup(chips_no))) {
 		dev_err(dev, "NAND Flash not found !\n");
+		devm_free_irq(dev, prv->irq, mtd);
 		retval = -ENXIO;
 		goto error;
 	}
@@ -803,6 +829,7 @@ static int mpc5121_nfc_probe(struct platform_device *op)
 
 	default:
 		dev_err(dev, "Unsupported NAND flash!\n");
+		devm_free_irq(dev, prv->irq, mtd);
 		retval = -ENXIO;
 		goto error;
 	}
@@ -810,9 +837,10 @@ static int mpc5121_nfc_probe(struct platform_device *op)
 	dev_set_drvdata(dev, mtd);
 
 	/* Register device in MTD */
-	retval = mtd_device_register(mtd, NULL, 0);
+	retval = mtd_device_parse_register(mtd, NULL, &ppdata, NULL, 0);
 	if (retval) {
 		dev_err(dev, "Error adding MTD device!\n");
+		devm_free_irq(dev, prv->irq, mtd);
 		goto error;
 	}
 
@@ -822,28 +850,31 @@ error:
 	return retval;
 }
 
-static int mpc5121_nfc_remove(struct platform_device *op)
+static int __devexit mpc5121_nfc_remove(struct platform_device *op)
 {
 	struct device *dev = &op->dev;
 	struct mtd_info *mtd = dev_get_drvdata(dev);
+	struct nand_chip *chip = mtd->priv;
+	struct mpc5121_nfc_prv *prv = chip->priv;
 
 	nand_release(mtd);
+	devm_free_irq(dev, prv->irq, mtd);
 	mpc5121_nfc_free(dev, mtd);
 
 	return 0;
 }
 
-static const struct of_device_id mpc5121_nfc_match[] = {
+static struct of_device_id mpc5121_nfc_match[] __devinitdata = {
 	{ .compatible = "fsl,mpc5121-nfc", },
 	{},
 };
-MODULE_DEVICE_TABLE(of, mpc5121_nfc_match);
 
 static struct platform_driver mpc5121_nfc_driver = {
 	.probe		= mpc5121_nfc_probe,
-	.remove		= mpc5121_nfc_remove,
+	.remove		= __devexit_p(mpc5121_nfc_remove),
 	.driver		= {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = mpc5121_nfc_match,
 	},
 };

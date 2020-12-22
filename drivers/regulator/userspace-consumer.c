@@ -111,13 +111,11 @@ static int regulator_userspace_consumer_probe(struct platform_device *pdev)
 	struct userspace_consumer_data *drvdata;
 	int ret;
 
-	pdata = dev_get_platdata(&pdev->dev);
+	pdata = pdev->dev.platform_data;
 	if (!pdata)
 		return -EINVAL;
 
-	drvdata = devm_kzalloc(&pdev->dev,
-			       sizeof(struct userspace_consumer_data),
-			       GFP_KERNEL);
+	drvdata = kzalloc(sizeof(struct userspace_consumer_data), GFP_KERNEL);
 	if (drvdata == NULL)
 		return -ENOMEM;
 
@@ -127,16 +125,16 @@ static int regulator_userspace_consumer_probe(struct platform_device *pdev)
 
 	mutex_init(&drvdata->lock);
 
-	ret = devm_regulator_bulk_get(&pdev->dev, drvdata->num_supplies,
-				      drvdata->supplies);
+	ret = regulator_bulk_get(&pdev->dev, drvdata->num_supplies,
+				 drvdata->supplies);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to get supplies: %d\n", ret);
-		return ret;
+		goto err_alloc_supplies;
 	}
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &attr_group);
 	if (ret != 0)
-		return ret;
+		goto err_create_attrs;
 
 	if (pdata->init_on) {
 		ret = regulator_bulk_enable(drvdata->num_supplies,
@@ -156,6 +154,11 @@ static int regulator_userspace_consumer_probe(struct platform_device *pdev)
 err_enable:
 	sysfs_remove_group(&pdev->dev.kobj, &attr_group);
 
+err_create_attrs:
+	regulator_bulk_free(drvdata->num_supplies, drvdata->supplies);
+
+err_alloc_supplies:
+	kfree(drvdata);
 	return ret;
 }
 
@@ -167,6 +170,9 @@ static int regulator_userspace_consumer_remove(struct platform_device *pdev)
 
 	if (data->enabled)
 		regulator_bulk_disable(data->num_supplies, data->supplies);
+
+	regulator_bulk_free(data->num_supplies, data->supplies);
+	kfree(data);
 
 	return 0;
 }

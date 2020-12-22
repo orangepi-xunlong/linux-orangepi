@@ -38,7 +38,7 @@
 #include <net/irda/irda_device.h>
 
 #include <mach/hardware.h>
-#include <linux/platform_data/irda-sa11x0.h>
+#include <asm/mach/irda.h>
 
 static int power_level = 3;
 static int tx_lpm;
@@ -940,10 +940,8 @@ static int sa1100_irda_probe(struct platform_device *pdev)
 		goto err_mem_3;
 
 	dev = alloc_irdadev(sizeof(struct sa1100_irda));
-	if (!dev) {
-		err = -ENOMEM;
+	if (!dev)
 		goto err_mem_4;
-	}
 
 	SET_NETDEV_DEV(dev, &pdev->dev);
 
@@ -1114,6 +1112,7 @@ static struct platform_driver sa1100ir_driver = {
 	.resume		= sa1100_irda_resume,
 	.driver		= {
 		.name	= "sa11x0-ir",
+		.owner	= THIS_MODULE,
 	},
 };
 

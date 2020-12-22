@@ -283,12 +283,17 @@ TelesPCI_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 	return (0);
 }
 
-static struct pci_dev *dev_tel = NULL;
+static struct pci_dev *dev_tel __devinitdata = NULL;
 
-int setup_telespci(struct IsdnCard *card)
+int __devinit
+setup_telespci(struct IsdnCard *card)
 {
 	struct IsdnCardState *cs = card->cs;
 	char tmp[64];
+
+#ifdef __BIG_ENDIAN
+#error "not running on big endian machines now"
+#endif
 
 	strcpy(tmp, telespci_revision);
 	printk(KERN_INFO "HiSax: Teles/PCI driver Rev. %s\n", HiSax_getrev(tmp));

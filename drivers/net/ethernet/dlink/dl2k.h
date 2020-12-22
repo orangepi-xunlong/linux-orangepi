@@ -25,6 +25,7 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/init.h>
 #include <linux/crc32.h>
 #include <linux/ethtool.h>
 #include <linux/mii.h>
@@ -40,6 +41,23 @@
 #define RX_RING_SIZE 	256
 #define TX_TOTAL_SIZE	TX_RING_SIZE*sizeof(struct netdev_desc)
 #define RX_TOTAL_SIZE	RX_RING_SIZE*sizeof(struct netdev_desc)
+
+/* This driver was written to use PCI memory space, however x86-oriented
+   hardware often uses I/O space accesses. */
+#ifndef MEM_MAPPING
+#undef readb
+#undef readw
+#undef readl
+#undef writeb
+#undef writew
+#undef writel
+#define readb inb
+#define readw inw
+#define readl inl
+#define writeb outb
+#define writew outw
+#define writel outl
+#endif
 
 /* Offsets to the device registers.
    Unlike software-only systems, device drivers interact with complex hardware.
@@ -211,10 +229,6 @@ enum ASICCtrl_HiWord_bits {
 	ResetBusy = 0x0400,
 };
 
-#define IPG_AC_LED_MODE		BIT(14)
-#define IPG_AC_LED_SPEED	BIT(27)
-#define IPG_AC_LED_MODE_BIT_1	BIT(29)
-
 /* Transmit Frame Control bits */
 enum TFC_bits {
 	DwordAlign = 0x00000000,
@@ -336,10 +350,7 @@ typedef struct t_SROM {
 	u16 asic_ctrl;		/* 0x02 */
 	u16 sub_vendor_id;	/* 0x04 */
 	u16 sub_system_id;	/* 0x06 */
-	u16 pci_base_1;		/* 0x08 (IP1000A only) */
-	u16 pci_base_2;		/* 0x0a (IP1000A only) */
-	u16 led_mode;		/* 0x0c (IP1000A only) */
-	u16 reserved1[9];	/* 0x0e-0x1f */
+	u16 reserved1[12];	/* 0x08-0x1f */
 	u8 mac_addr[6];		/* 0x20-0x25 */
 	u8 reserved2[10];	/* 0x26-0x2f */
 	u8 sib[204];		/* 0x30-0xfb */
@@ -373,8 +384,6 @@ struct netdev_private {
 	dma_addr_t tx_ring_dma;
 	dma_addr_t rx_ring_dma;
 	struct pci_dev *pdev;
-	void __iomem *ioaddr;
-	void __iomem *eeprom_addr;
 	spinlock_t tx_lock;
 	spinlock_t rx_lock;
 	struct net_device_stats stats;
@@ -404,7 +413,6 @@ struct netdev_private {
 	u16 advertising;	/* NWay media advertisement */
 	u16 negotiate;		/* Negotiated media */
 	int phy_addr;		/* PHY addresses. */
-	u16 led_mode;		/* LED mode read from EEPROM (IP1000A only) */
 };
 
 /* The station address location in the EEPROM. */
@@ -415,15 +423,10 @@ struct netdev_private {
         class_mask              of the class are honored during the comparison.
         driver_data             Data private to the driver.
 */
-#define CHIP_IP1000A	1
 
-static const struct pci_device_id rio_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(rio_pci_tbl) = {
 	{0x1186, 0x4000, PCI_ANY_ID, PCI_ANY_ID, },
 	{0x13f0, 0x1021, PCI_ANY_ID, PCI_ANY_ID, },
-	{ PCI_VDEVICE(SUNDANCE,	0x1023), CHIP_IP1000A },
-	{ PCI_VDEVICE(SUNDANCE,	0x2021), CHIP_IP1000A },
-	{ PCI_VDEVICE(DLINK,	0x9021), CHIP_IP1000A },
-	{ PCI_VDEVICE(DLINK,	0x4020), CHIP_IP1000A },
 	{ }
 };
 MODULE_DEVICE_TABLE (pci, rio_pci_tbl);

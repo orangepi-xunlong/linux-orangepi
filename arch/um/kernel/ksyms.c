@@ -4,7 +4,7 @@
  */
 
 #include <linux/module.h>
-#include <os.h>
+#include "os.h"
 
 EXPORT_SYMBOL(set_signals);
 EXPORT_SYMBOL(get_signals);
@@ -42,5 +42,3 @@ EXPORT_SYMBOL(os_makedev);
 EXPORT_SYMBOL(add_sigio_fd);
 EXPORT_SYMBOL(ignore_sigio_fd);
 EXPORT_SYMBOL(sigio_broken);
-
-EXPORT_SYMBOL(syscall);

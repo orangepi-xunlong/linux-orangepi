@@ -57,6 +57,8 @@ void (*ia64_mark_idle)(int);
 
 unsigned long boot_option_idle_override = IDLE_NO_OVERRIDE;
 EXPORT_SYMBOL(boot_option_idle_override);
+void (*pm_idle) (void);
+EXPORT_SYMBOL(pm_idle);
 void (*pm_power_off) (void);
 EXPORT_SYMBOL(pm_power_off);
 
@@ -96,13 +98,21 @@ show_stack (struct task_struct *task, unsigned long *sp)
 }
 
 void
+dump_stack (void)
+{
+	show_stack(NULL, NULL);
+}
+
+EXPORT_SYMBOL(dump_stack);
+
+void
 show_regs (struct pt_regs *regs)
 {
 	unsigned long ip = regs->cr_iip + ia64_psr(regs)->ri;
 
 	print_modules();
-	printk("\n");
-	show_regs_print_info(KERN_DEFAULT);
+	printk("\nPid: %d, CPU %d, comm: %20s\n", task_pid_nr(current),
+			smp_processor_id(), current->comm);
 	printk("psr : %016lx ifs : %016lx ip  : [<%016lx>]    %s (%s)\n",
 	       regs->cr_ipsr, regs->cr_ifs, ip, print_tainted(),
 	       init_utsname()->release);
@@ -187,9 +197,11 @@ do_notify_resume_user(sigset_t *unused, struct sigscratch *scr, long in_syscall)
 		ia64_do_signal(scr, in_syscall);
 	}
 
-	if (test_and_clear_thread_flag(TIF_NOTIFY_RESUME)) {
-		local_irq_enable();	/* force interrupt enable */
+	if (test_thread_flag(TIF_NOTIFY_RESUME)) {
+		clear_thread_flag(TIF_NOTIFY_RESUME);
 		tracehook_notify_resume(&scr->pt);
+		if (current->replacement_session_keyring)
+			key_replace_session_keyring();
 	}
 
 	/* copy user rbs to kernel rbs */
@@ -201,12 +213,40 @@ do_notify_resume_user(sigset_t *unused, struct sigscratch *scr, long in_syscall)
 	local_irq_disable();	/* force interrupt disable */
 }
 
+static int pal_halt        = 1;
+static int can_do_pal_halt = 1;
+
 static int __init nohalt_setup(char * str)
 {
-	cpu_idle_poll_ctrl(true);
+	pal_halt = can_do_pal_halt = 0;
 	return 1;
 }
 __setup("nohalt", nohalt_setup);
+
+void
+update_pal_halt_status(int status)
+{
+	can_do_pal_halt = pal_halt && status;
+}
+
+/*
+ * We use this if we don't have any better idle routine..
+ */
+void
+default_idle (void)
+{
+	local_irq_enable();
+	while (!need_resched()) {
+		if (can_do_pal_halt) {
+			local_irq_disable();
+			if (!need_resched()) {
+				safe_halt();
+			}
+			local_irq_enable();
+		} else
+			cpu_relax();
+	}
+}
 
 #ifdef CONFIG_HOTPLUG_CPU
 /* We don't actually take CPU down, just spin without interrupts. */
@@ -215,7 +255,7 @@ static inline void play_dead(void)
 	unsigned int this_cpu = smp_processor_id();
 
 	/* Ack it */
-	__this_cpu_write(cpu_state, CPU_DEAD);
+	__get_cpu_var(cpu_state) = CPU_DEAD;
 
 	max_xtp();
 	local_irq_disable();
@@ -234,29 +274,71 @@ static inline void play_dead(void)
 }
 #endif /* CONFIG_HOTPLUG_CPU */
 
-void arch_cpu_idle_dead(void)
+static void do_nothing(void *unused)
 {
-	play_dead();
 }
 
-void arch_cpu_idle(void)
+/*
+ * cpu_idle_wait - Used to ensure that all the CPUs discard old value of
+ * pm_idle and update to new pm_idle value. Required while changing pm_idle
+ * handler on SMP systems.
+ *
+ * Caller must have changed pm_idle to the new value before the call. Old
+ * pm_idle value will not be used by any CPU after the return of this function.
+ */
+void cpu_idle_wait(void)
+{
+	smp_mb();
+	/* kick all the CPUs so that they exit out of pm_idle */
+	smp_call_function(do_nothing, NULL, 1);
+}
+EXPORT_SYMBOL_GPL(cpu_idle_wait);
+
+void __attribute__((noreturn))
+cpu_idle (void)
 {
 	void (*mark_idle)(int) = ia64_mark_idle;
+  	int cpu = smp_processor_id();
 
+	/* endless idle loop with no priority at all */
+	while (1) {
+		rcu_idle_enter();
+		if (can_do_pal_halt) {
+			current_thread_info()->status &= ~TS_POLLING;
+			/*
+			 * TS_POLLING-cleared state must be visible before we
+			 * test NEED_RESCHED:
+			 */
+			smp_mb();
+		} else {
+			current_thread_info()->status |= TS_POLLING;
+		}
+
+		if (!need_resched()) {
+			void (*idle)(void);
 #ifdef CONFIG_SMP
-	min_xtp();
+			min_xtp();
 #endif
-	rmb();
-	if (mark_idle)
-		(*mark_idle)(1);
+			rmb();
+			if (mark_idle)
+				(*mark_idle)(1);
 
-	safe_halt();
-
-	if (mark_idle)
-		(*mark_idle)(0);
+			idle = pm_idle;
+			if (!idle)
+				idle = default_idle;
+			(*idle)();
+			if (mark_idle)
+				(*mark_idle)(0);
 #ifdef CONFIG_SMP
-	normal_xtp();
+			normal_xtp();
 #endif
+		}
+		rcu_idle_exit();
+		schedule_preempt_disabled();
+		check_pgt_cache();
+		if (cpu_is_offline(cpu))
+			play_dead();
+	}
 }
 
 void
@@ -273,7 +355,7 @@ ia64_save_extra (struct task_struct *task)
 	if ((task->thread.flags & IA64_THREAD_PM_VALID) != 0)
 		pfm_save_regs(task);
 
-	info = __this_cpu_read(pfm_syst_info);
+	info = __get_cpu_var(pfm_syst_info);
 	if (info & PFM_CPUINFO_SYST_WIDE)
 		pfm_syst_wide_update_task(task, info, 0);
 #endif
@@ -293,7 +375,7 @@ ia64_load_extra (struct task_struct *task)
 	if ((task->thread.flags & IA64_THREAD_PM_VALID) != 0)
 		pfm_load_regs(task);
 
-	info = __this_cpu_read(pfm_syst_info);
+	info = __get_cpu_var(pfm_syst_info);
 	if (info & PFM_CPUINFO_SYST_WIDE) 
 		pfm_syst_wide_update_task(task, info, 1);
 #endif
@@ -333,23 +415,71 @@ ia64_load_extra (struct task_struct *task)
 int
 copy_thread(unsigned long clone_flags,
 	     unsigned long user_stack_base, unsigned long user_stack_size,
-	     struct task_struct *p)
+	     struct task_struct *p, struct pt_regs *regs)
 {
 	extern char ia64_ret_from_clone;
 	struct switch_stack *child_stack, *stack;
 	unsigned long rbs, child_rbs, rbs_size;
 	struct pt_regs *child_ptregs;
-	struct pt_regs *regs = current_pt_regs();
 	int retval = 0;
+
+#ifdef CONFIG_SMP
+	/*
+	 * For SMP idle threads, fork_by_hand() calls do_fork with
+	 * NULL regs.
+	 */
+	if (!regs)
+		return 0;
+#endif
+
+	stack = ((struct switch_stack *) regs) - 1;
 
 	child_ptregs = (struct pt_regs *) ((unsigned long) p + IA64_STK_OFFSET) - 1;
 	child_stack = (struct switch_stack *) child_ptregs - 1;
 
+	/* copy parent's switch_stack & pt_regs to child: */
+	memcpy(child_stack, stack, sizeof(*child_ptregs) + sizeof(*child_stack));
+
 	rbs = (unsigned long) current + IA64_RBS_OFFSET;
 	child_rbs = (unsigned long) p + IA64_RBS_OFFSET;
+	rbs_size = stack->ar_bspstore - rbs;
+
+	/* copy the parent's register backing store to the child: */
+	memcpy((void *) child_rbs, (void *) rbs, rbs_size);
+
+	if (likely(user_mode(child_ptregs))) {
+		if (clone_flags & CLONE_SETTLS)
+			child_ptregs->r13 = regs->r16;	/* see sys_clone2() in entry.S */
+		if (user_stack_base) {
+			child_ptregs->r12 = user_stack_base + user_stack_size - 16;
+			child_ptregs->ar_bspstore = user_stack_base;
+			child_ptregs->ar_rnat = 0;
+			child_ptregs->loadrs = 0;
+		}
+	} else {
+		/*
+		 * Note: we simply preserve the relative position of
+		 * the stack pointer here.  There is no need to
+		 * allocate a scratch area here, since that will have
+		 * been taken care of by the caller of sys_clone()
+		 * already.
+		 */
+		child_ptregs->r12 = (unsigned long) child_ptregs - 16; /* kernel sp */
+		child_ptregs->r13 = (unsigned long) p;		/* set `current' pointer */
+	}
+	child_stack->ar_bspstore = child_rbs + rbs_size;
+	child_stack->b0 = (unsigned long) &ia64_ret_from_clone;
 
 	/* copy parts of thread_struct: */
 	p->thread.ksp = (unsigned long) child_stack - 16;
+
+	/* stop some PSR bits from being inherited.
+	 * the psr.up/psr.pp bits must be cleared on fork but inherited on execve()
+	 * therefore we must specify them explicitly here and not include them in
+	 * IA64_PSR_BITS_TO_CLEAR.
+	 */
+	child_ptregs->cr_ipsr = ((child_ptregs->cr_ipsr | IA64_PSR_BITS_TO_SET)
+				 & ~(IA64_PSR_BITS_TO_CLEAR | IA64_PSR_PP | IA64_PSR_UP));
 
 	/*
 	 * NOTE: The calling convention considers all floating point
@@ -372,65 +502,7 @@ copy_thread(unsigned long clone_flags,
 #	define THREAD_FLAGS_TO_SET	0
 	p->thread.flags = ((current->thread.flags & ~THREAD_FLAGS_TO_CLEAR)
 			   | THREAD_FLAGS_TO_SET);
-
 	ia64_drop_fpu(p);	/* don't pick up stale state from a CPU's fph */
-
-	if (unlikely(p->flags & PF_KTHREAD)) {
-		if (unlikely(!user_stack_base)) {
-			/* fork_idle() called us */
-			return 0;
-		}
-		memset(child_stack, 0, sizeof(*child_ptregs) + sizeof(*child_stack));
-		child_stack->r4 = user_stack_base;	/* payload */
-		child_stack->r5 = user_stack_size;	/* argument */
-		/*
-		 * Preserve PSR bits, except for bits 32-34 and 37-45,
-		 * which we can't read.
-		 */
-		child_ptregs->cr_ipsr = ia64_getreg(_IA64_REG_PSR) | IA64_PSR_BN;
-		/* mark as valid, empty frame */
-		child_ptregs->cr_ifs = 1UL << 63;
-		child_stack->ar_fpsr = child_ptregs->ar_fpsr
-			= ia64_getreg(_IA64_REG_AR_FPSR);
-		child_stack->pr = (1 << PRED_KERNEL_STACK);
-		child_stack->ar_bspstore = child_rbs;
-		child_stack->b0 = (unsigned long) &ia64_ret_from_clone;
-
-		/* stop some PSR bits from being inherited.
-		 * the psr.up/psr.pp bits must be cleared on fork but inherited on execve()
-		 * therefore we must specify them explicitly here and not include them in
-		 * IA64_PSR_BITS_TO_CLEAR.
-		 */
-		child_ptregs->cr_ipsr = ((child_ptregs->cr_ipsr | IA64_PSR_BITS_TO_SET)
-				 & ~(IA64_PSR_BITS_TO_CLEAR | IA64_PSR_PP | IA64_PSR_UP));
-
-		return 0;
-	}
-	stack = ((struct switch_stack *) regs) - 1;
-	/* copy parent's switch_stack & pt_regs to child: */
-	memcpy(child_stack, stack, sizeof(*child_ptregs) + sizeof(*child_stack));
-
-	/* copy the parent's register backing store to the child: */
-	rbs_size = stack->ar_bspstore - rbs;
-	memcpy((void *) child_rbs, (void *) rbs, rbs_size);
-	if (clone_flags & CLONE_SETTLS)
-		child_ptregs->r13 = regs->r16;	/* see sys_clone2() in entry.S */
-	if (user_stack_base) {
-		child_ptregs->r12 = user_stack_base + user_stack_size - 16;
-		child_ptregs->ar_bspstore = user_stack_base;
-		child_ptregs->ar_rnat = 0;
-		child_ptregs->loadrs = 0;
-	}
-	child_stack->ar_bspstore = child_rbs + rbs_size;
-	child_stack->b0 = (unsigned long) &ia64_ret_from_clone;
-
-	/* stop some PSR bits from being inherited.
-	 * the psr.up/psr.pp bits must be cleared on fork but inherited on execve()
-	 * therefore we must specify them explicitly here and not include them in
-	 * IA64_PSR_BITS_TO_CLEAR.
-	 */
-	child_ptregs->cr_ipsr = ((child_ptregs->cr_ipsr | IA64_PSR_BITS_TO_SET)
-				 & ~(IA64_PSR_BITS_TO_CLEAR | IA64_PSR_PP | IA64_PSR_UP));
 
 #ifdef CONFIG_PERFMON
 	if (current->thread.pfm_context)
@@ -558,6 +630,57 @@ dump_fpu (struct pt_regs *pt, elf_fpregset_t dst)
 	return 1;	/* f0-f31 are always valid so we always return 1 */
 }
 
+long
+sys_execve (const char __user *filename,
+	    const char __user *const __user *argv,
+	    const char __user *const __user *envp,
+	    struct pt_regs *regs)
+{
+	char *fname;
+	int error;
+
+	fname = getname(filename);
+	error = PTR_ERR(fname);
+	if (IS_ERR(fname))
+		goto out;
+	error = do_execve(fname, argv, envp, regs);
+	putname(fname);
+out:
+	return error;
+}
+
+pid_t
+kernel_thread (int (*fn)(void *), void *arg, unsigned long flags)
+{
+	extern void start_kernel_thread (void);
+	unsigned long *helper_fptr = (unsigned long *) &start_kernel_thread;
+	struct {
+		struct switch_stack sw;
+		struct pt_regs pt;
+	} regs;
+
+	memset(&regs, 0, sizeof(regs));
+	regs.pt.cr_iip = helper_fptr[0];	/* set entry point (IP) */
+	regs.pt.r1 = helper_fptr[1];		/* set GP */
+	regs.pt.r9 = (unsigned long) fn;	/* 1st argument */
+	regs.pt.r11 = (unsigned long) arg;	/* 2nd argument */
+	/* Preserve PSR bits, except for bits 32-34 and 37-45, which we can't read.  */
+	regs.pt.cr_ipsr = ia64_getreg(_IA64_REG_PSR) | IA64_PSR_BN;
+	regs.pt.cr_ifs = 1UL << 63;		/* mark as valid, empty frame */
+	regs.sw.ar_fpsr = regs.pt.ar_fpsr = ia64_getreg(_IA64_REG_AR_FPSR);
+	regs.sw.ar_bspstore = (unsigned long) current + IA64_RBS_OFFSET;
+	regs.sw.pr = (1 << PRED_KERNEL_STACK);
+	return do_fork(flags | CLONE_VM | CLONE_UNTRACED, 0, &regs.pt, 0, NULL, NULL);
+}
+EXPORT_SYMBOL(kernel_thread);
+
+/* This gets called from kernel_thread() via ia64_invoke_thread_helper().  */
+int
+kernel_thread_helper (int (*fn)(void *), void *arg)
+{
+	return (*fn)(arg);
+}
+
 /*
  * Flush thread state.  This is called when a thread does an execve().
  */
@@ -570,22 +693,22 @@ flush_thread (void)
 }
 
 /*
- * Clean up state associated with a thread.  This is called when
+ * Clean up state associated with current thread.  This is called when
  * the thread calls exit().
  */
 void
-exit_thread (struct task_struct *tsk)
+exit_thread (void)
 {
 
-	ia64_drop_fpu(tsk);
+	ia64_drop_fpu(current);
 #ifdef CONFIG_PERFMON
        /* if needed, stop monitoring and flush state to perfmon context */
-	if (tsk->thread.pfm_context)
-		pfm_exit_thread(tsk);
+	if (current->thread.pfm_context)
+		pfm_exit_thread(current);
 
 	/* free debug register resources */
-	if (tsk->thread.flags & IA64_THREAD_DBG_VALID)
-		pfm_release_debug_registers(tsk);
+	if (current->thread.flags & IA64_THREAD_DBG_VALID)
+		pfm_release_debug_registers(current);
 #endif
 }
 
@@ -662,7 +785,7 @@ void
 machine_restart (char *restart_cmd)
 {
 	(void) notify_die(DIE_MACHINE_RESTART, restart_cmd, NULL, 0, 0, 0);
-	efi_reboot(REBOOT_WARM, NULL);
+	(*efi.reset_system)(EFI_RESET_WARM, 0, 0, NULL);
 }
 
 void

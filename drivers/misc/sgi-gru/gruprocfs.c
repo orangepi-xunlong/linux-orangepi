@@ -160,11 +160,15 @@ static int options_show(struct seq_file *s, void *p)
 static ssize_t options_write(struct file *file, const char __user *userbuf,
 			     size_t count, loff_t *data)
 {
-	int ret;
+	char buf[20];
 
-	ret = kstrtoul_from_user(userbuf, count, 0, &gru_options);
-	if (ret)
-		return ret;
+	if (count >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, userbuf, count))
+		return -EFAULT;
+	buf[count] = '\0';
+	if (strict_strtoul(buf, 0, &gru_options))
+		return -EINVAL;
 
 	return count;
 }
@@ -351,7 +355,7 @@ static void delete_proc_files(void)
 		for (p = proc_files; p->name; p++)
 			if (p->entry)
 				remove_proc_entry(p->name, proc_gru);
-		proc_remove(proc_gru);
+		remove_proc_entry("gru", proc_gru->parent);
 	}
 }
 

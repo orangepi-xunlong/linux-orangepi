@@ -1,30 +1,9 @@
 /*
  * Common function shared by Linux WEXT, cfg80211 and p2p drivers
  *
- * Copyright (C) 1999-2017, Broadcom Corporation
+ * $Copyright Open Broadcom Corporation$
  *
- *      Unless you and Broadcom execute a separate written software license
- * agreement governing use of this software, this software is licensed to you
- * under the terms of the GNU General Public License version 2 (the "GPL"),
- * available at http://www.broadcom.com/licenses/GPLv2.php, with the
- * following added to such license:
- *
- *      As a special exception, the copyright holders of this software give you
- * permission to link this software with independent modules, and to copy and
- * distribute the resulting executable under terms of your choice, provided that
- * you also meet, for each linked independent module, the terms and conditions of
- * the license of that module.  An independent module is a module which is not
- * derived from this software.  The special exception does not apply to any
- * modifications of the software.
- *
- *      Notwithstanding the above, under no circumstances may you combine this
- * software in any way with any other Broadcom software provided under a license
- * other than the GPL, without Broadcom's express prior written consent.
- *
- *
- * <<Broadcom-WL-IPTag/Open:>>
- *
- * $Id: wldev_common.c 699163 2017-05-12 05:18:23Z $
+ * $Id: wldev_common.c 504503 2014-09-24 11:28:56Z $
  */
 
 #include <osl.h>
@@ -34,9 +13,6 @@
 
 #include <wldev_common.h>
 #include <bcmutils.h>
-#ifdef WL_CFG80211
-#include <wl_cfg80211.h>
-#endif
 #include <dhd_config.h>
 
 #define htod32(i) (i)
@@ -48,13 +24,7 @@
 
 #define	WLDEV_ERROR(args)						\
 	do {										\
-		printk(KERN_ERR "WLDEV-ERROR) ");	\
-		printk args;							\
-	} while (0)
-
-#define	WLDEV_INFO(args)						\
-	do {										\
-		printk(KERN_INFO "WLDEV-INFO) ");	\
+		printk(KERN_ERR "WLDEV-ERROR) %s : ", __func__);	\
 		printk args;							\
 	} while (0)
 
@@ -78,40 +48,12 @@ s32 wldev_ioctl(
 	return ret;
 }
 
-
-/*
-SET commands :
-cast buffer to non-const  and call the GET function
-*/
-
-s32 wldev_ioctl_set(
-	struct net_device *dev, u32 cmd, const void *arg, u32 len)
-{
-
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif
-	return wldev_ioctl(dev, cmd, (void *)arg, len, 1);
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
-}
-
-
-s32 wldev_ioctl_get(
-	struct net_device *dev, u32 cmd, void *arg, u32 len)
-{
-	return wldev_ioctl(dev, cmd, (void *)arg, len, 0);
-}
-
 /* Format a iovar buffer, not bsscfg indexed. The bsscfg index will be
  * taken care of in dhd_ioctl_entry. Internal use only, not exposed to
  * wl_iw, wl_cfg80211 and wl_cfgp2p
  */
 static s32 wldev_mkiovar(
-	const s8 *iovar_name, s8 *param, s32 paramlen,
+	s8 *iovar_name, s8 *param, s32 paramlen,
 	s8 *iovar_buf, u32 buflen)
 {
 	s32 iolen = 0;
@@ -128,23 +70,8 @@ s32 wldev_iovar_getbuf(
 	if (buf_sync) {
 		mutex_lock(buf_sync);
 	}
-
-	if (buf && (buflen > 0)) {
-		/* initialize the response buffer */
-		memset(buf, 0, buflen);
-	} else {
-		ret = BCME_BADARG;
-		goto exit;
-	}
-
-	ret = wldev_mkiovar(iovar_name, param, paramlen, buf, buflen);
-
-	if (!ret) {
-		ret = BCME_BUFTOOSHORT;
-		goto exit;
-	}
-	ret = wldev_ioctl_get(dev, WLC_GET_VAR, buf, buflen);
-exit:
+	wldev_mkiovar(iovar_name, param, paramlen, buf, buflen);
+	ret = wldev_ioctl(dev, WLC_GET_VAR, buf, buflen, FALSE);
 	if (buf_sync)
 		mutex_unlock(buf_sync);
 	return ret;
@@ -162,7 +89,7 @@ s32 wldev_iovar_setbuf(
 	}
 	iovar_len = wldev_mkiovar(iovar_name, param, paramlen, buf, buflen);
 	if (iovar_len > 0)
-		ret = wldev_ioctl_set(dev, WLC_SET_VAR, buf, iovar_len);
+		ret = wldev_ioctl(dev, WLC_SET_VAR, buf, iovar_len, TRUE);
 	else
 		ret = BCME_BUFTOOSHORT;
 
@@ -214,14 +141,9 @@ s32 wldev_mkiovar_bsscfg(
 	u32 namelen;
 	u32 iolen;
 
-	/* initialize buffer */
-	if (!iovar_buf || buflen == 0)
-		return BCME_BADARG;
-	memset(iovar_buf, 0, buflen);
-
 	if (bssidx == 0) {
-		return wldev_mkiovar(iovar_name, param, paramlen,
-			iovar_buf, buflen);
+		return wldev_mkiovar((s8*)iovar_name, (s8 *)param, paramlen,
+			(s8 *) iovar_buf, buflen);
 	}
 
 	prefixlen = (u32) strlen(prefix); /* lengh of bsscfg prefix */
@@ -267,7 +189,7 @@ s32 wldev_iovar_getbuf_bsscfg(
 	}
 
 	wldev_mkiovar_bsscfg(iovar_name, param, paramlen, buf, buflen, bsscfg_idx);
-	ret = wldev_ioctl_get(dev, WLC_GET_VAR, buf, buflen);
+	ret = wldev_ioctl(dev, WLC_GET_VAR, buf, buflen, FALSE);
 	if (buf_sync) {
 		mutex_unlock(buf_sync);
 	}
@@ -286,7 +208,7 @@ s32 wldev_iovar_setbuf_bsscfg(
 	}
 	iovar_len = wldev_mkiovar_bsscfg(iovar_name, param, paramlen, buf, buflen, bsscfg_idx);
 	if (iovar_len > 0)
-		ret = wldev_ioctl_set(dev, WLC_SET_VAR, buf, iovar_len);
+		ret = wldev_ioctl(dev, WLC_SET_VAR, buf, iovar_len, TRUE);
 	else {
 		ret = BCME_BUFTOOSHORT;
 	}
@@ -333,8 +255,7 @@ int wldev_get_link_speed(
 
 	if (!plink_speed)
 		return -ENOMEM;
-	*plink_speed = 0;
-	error = wldev_ioctl_get(dev, WLC_GET_RATE, plink_speed, sizeof(int));
+	error = wldev_ioctl(dev, WLC_GET_RATE, plink_speed, sizeof(int), 0);
 	if (unlikely(error))
 		return error;
 
@@ -344,17 +265,20 @@ int wldev_get_link_speed(
 }
 
 int wldev_get_rssi(
-	struct net_device *dev, scb_val_t *scb_val)
+	struct net_device *dev, int *prssi)
 {
+	scb_val_t scb_val;
 	int error;
 
-	if (!scb_val)
+	if (!prssi)
 		return -ENOMEM;
-	memset(scb_val, 0, sizeof(scb_val_t));
-	error = wldev_ioctl_get(dev, WLC_GET_RSSI, scb_val, sizeof(scb_val_t));
+	bzero(&scb_val, sizeof(scb_val_t));
+
+	error = wldev_ioctl(dev, WLC_GET_RSSI, &scb_val, sizeof(scb_val_t), 0);
 	if (unlikely(error))
 		return error;
 
+	*prssi = dtoh32(scb_val.val);
 	return error;
 }
 
@@ -365,8 +289,7 @@ int wldev_get_ssid(
 
 	if (!pssid)
 		return -ENOMEM;
-	memset(pssid, 0, sizeof(wlc_ssid_t));
-	error = wldev_ioctl_get(dev, WLC_GET_SSID, pssid, sizeof(wlc_ssid_t));
+	error = wldev_ioctl(dev, WLC_GET_SSID, pssid, sizeof(wlc_ssid_t), 0);
 	if (unlikely(error))
 		return error;
 	pssid->SSID_len = dtoh32(pssid->SSID_len);
@@ -378,8 +301,7 @@ int wldev_get_band(
 {
 	int error;
 
-	*pband = 0;
-	error = wldev_ioctl_get(dev, WLC_GET_BAND, pband, sizeof(uint));
+	error = wldev_ioctl(dev, WLC_GET_BAND, pband, sizeof(uint), 0);
 	return error;
 }
 
@@ -389,134 +311,37 @@ int wldev_set_band(
 	int error = -1;
 
 	if ((band == WLC_BAND_AUTO) || (band == WLC_BAND_5G) || (band == WLC_BAND_2G)) {
-		error = wldev_ioctl_set(dev, WLC_SET_BAND, &band, sizeof(band));
+		error = wldev_ioctl(dev, WLC_SET_BAND, &band, sizeof(band), true);
 		if (!error)
 			dhd_bus_band_set(dev, band);
 	}
 	return error;
 }
-int wldev_get_datarate(struct net_device *dev, int *datarate)
-{
-	int error = 0;
-
-	error = wldev_ioctl_get(dev, WLC_GET_RATE, datarate, sizeof(int));
-	if (error) {
-		return -1;
-	} else {
-		*datarate = dtoh32(*datarate);
-	}
-
-	return error;
-}
-
-#ifdef WL_CFG80211
-extern chanspec_t
-wl_chspec_driver_to_host(chanspec_t chanspec);
-#define WL_EXTRA_BUF_MAX 2048
-int wldev_get_mode(
-	struct net_device *dev, uint8 *cap, uint8 caplen)
-{
-	int error = 0;
-	int chanspec = 0;
-	uint16 band = 0;
-	uint16 bandwidth = 0;
-	wl_bss_info_t *bss = NULL;
-	char* buf = NULL;
-
-	buf = kzalloc(WL_EXTRA_BUF_MAX, GFP_KERNEL);
-	if (!buf) {
-		WLDEV_ERROR(("%s:ENOMEM\n", __FUNCTION__));
-		return -ENOMEM;
-	}
-
-	*(u32*) buf = htod32(WL_EXTRA_BUF_MAX);
-	error = wldev_ioctl_get(dev, WLC_GET_BSS_INFO, (void*)buf, WL_EXTRA_BUF_MAX);
-	if (error) {
-		WLDEV_ERROR(("%s:failed:%d\n", __FUNCTION__, error));
-		kfree(buf);
-		buf = NULL;
-		return error;
-	}
-	bss = (struct  wl_bss_info *)(buf + 4);
-	chanspec = wl_chspec_driver_to_host(bss->chanspec);
-
-	band = chanspec & WL_CHANSPEC_BAND_MASK;
-	bandwidth = chanspec & WL_CHANSPEC_BW_MASK;
-
-	if (band == WL_CHANSPEC_BAND_2G) {
-		if (bss->n_cap)
-			strncpy(cap, "n", caplen);
-		else
-			strncpy(cap, "bg", caplen);
-	} else if (band == WL_CHANSPEC_BAND_5G) {
-		if (bandwidth == WL_CHANSPEC_BW_80)
-			strncpy(cap, "ac", caplen);
-		else if ((bandwidth == WL_CHANSPEC_BW_40) || (bandwidth == WL_CHANSPEC_BW_20)) {
-			if ((bss->nbss_cap & 0xf00) && (bss->n_cap))
-				strncpy(cap, "n|ac", caplen);
-			else if (bss->n_cap)
-				strncpy(cap, "n", caplen);
-			else if (bss->vht_cap)
-				strncpy(cap, "ac", caplen);
-			else
-				strncpy(cap, "a", caplen);
-		} else {
-			WLDEV_ERROR(("%s:Mode get failed\n", __FUNCTION__));
-			error = BCME_ERROR;
-		}
-
-	}
-	kfree(buf);
-	buf = NULL;
-	return error;
-}
-#endif
 
 int wldev_set_country(
-	struct net_device *dev, char *country_code, bool notify, bool user_enforced, int revinfo)
+	struct net_device *dev, char *country_code, bool notify, bool user_enforced)
 {
 	int error = -1;
 	wl_country_t cspec = {{0}, 0, {0}};
-	wl_country_t cur_cspec = {{0}, 0, {0}};	/* current ccode */
 	scb_val_t scbval;
-#ifdef WL_CFG80211
-	struct wireless_dev *wdev = ndev_to_wdev(dev);
-	struct wiphy *wiphy = wdev->wiphy;
-	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-#endif
+	char smbuf[WLC_IOCTL_SMLEN];
 
 	if (!country_code)
 		return error;
 
 	bzero(&scbval, sizeof(scb_val_t));
-	error = wldev_iovar_getbuf(dev, "country", NULL, 0, &cur_cspec, sizeof(wl_country_t), NULL);
+	error = wldev_iovar_getbuf(dev, "country", NULL, 0, &cspec, sizeof(cspec), NULL);
 	if (error < 0) {
 		WLDEV_ERROR(("%s: get country failed = %d\n", __FUNCTION__, error));
 		return error;
 	}
 
-	cspec.rev = revinfo;
-	memcpy(cspec.country_abbrev, country_code, WLC_CNTRY_BUF_SZ);
-	memcpy(cspec.ccode, country_code, WLC_CNTRY_BUF_SZ);
-	error = dhd_conf_map_country_list(dhd_get_pub(dev), &cspec);
-	if (error)
-		dhd_get_customized_country_code(dev, (char *)&cspec.country_abbrev, &cspec);
-
-	WLDEV_INFO(("%s: Current country %s rev %d\n",
-		__FUNCTION__, cur_cspec.ccode, cur_cspec.rev));
-
 	if ((error < 0) ||
-		dhd_force_country_change(dev) ||
-	    (strncmp(cspec.ccode, cur_cspec.ccode, WLC_CNTRY_BUF_SZ) != 0)) {
+	    (strncmp(country_code, cspec.country_abbrev, WLC_CNTRY_BUF_SZ) != 0)) {
 
-		if ((user_enforced)
-#ifdef WL_CFG80211
-			&& (wl_get_drv_status(cfg, CONNECTED, dev))
-#endif
-		) {
+		if (user_enforced) {
 			bzero(&scbval, sizeof(scb_val_t));
-			error = wldev_ioctl_set(dev, WLC_DISASSOC,
-			                        &scbval, sizeof(scb_val_t));
+			error = wldev_ioctl(dev, WLC_DISASSOC, &scbval, sizeof(scb_val_t), true);
 			if (error < 0) {
 				WLDEV_ERROR(("%s: set country failed due to Disassoc error %d\n",
 					__FUNCTION__, error));
@@ -524,7 +349,14 @@ int wldev_set_country(
 			}
 		}
 
-		error = dhd_conf_set_country(dhd_get_pub(dev), &cspec);
+		cspec.rev = -1;
+		memcpy(cspec.country_abbrev, country_code, WLC_CNTRY_BUF_SZ);
+		memcpy(cspec.ccode, country_code, WLC_CNTRY_BUF_SZ);
+		error = dhd_conf_map_country_list(dhd_get_pub(dev), &cspec, 0);
+		if (error)
+			dhd_get_customized_country_code(dev, (char *)&cspec.country_abbrev, &cspec);
+		error = wldev_iovar_setbuf(dev, "country", &cspec, sizeof(cspec),
+			smbuf, sizeof(smbuf), NULL);
 		if (error < 0) {
 			WLDEV_ERROR(("%s: set country for %s as %s rev %d failed\n",
 				__FUNCTION__, country_code, cspec.ccode, cspec.rev));

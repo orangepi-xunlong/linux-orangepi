@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -53,85 +53,16 @@
 ACPI_MODULE_NAME("dsfield")
 
 /* Local prototypes */
-#ifdef ACPI_ASL_COMPILER
-#include "acdisasm.h"
-static acpi_status
-acpi_ds_create_external_region(acpi_status lookup_status,
-			       union acpi_parse_object *op,
-			       char *path,
-			       struct acpi_walk_state *walk_state,
-			       struct acpi_namespace_node **node);
-#endif
-
 static acpi_status
 acpi_ds_get_field_names(struct acpi_create_field_info *info,
 			struct acpi_walk_state *walk_state,
 			union acpi_parse_object *arg);
 
-#ifdef ACPI_ASL_COMPILER
-/*******************************************************************************
- *
- * FUNCTION:    acpi_ds_create_external_region (iASL Disassembler only)
- *
- * PARAMETERS:  lookup_status   - Status from ns_lookup operation
- *              op              - Op containing the Field definition and args
- *              path            - Pathname of the region
- *  `           walk_state      - Current method state
- *              node            - Where the new region node is returned
- *
- * RETURN:      Status
- *
- * DESCRIPTION: Add region to the external list if NOT_FOUND. Create a new
- *              region node/object.
- *
- ******************************************************************************/
-
-static acpi_status
-acpi_ds_create_external_region(acpi_status lookup_status,
-			       union acpi_parse_object *op,
-			       char *path,
-			       struct acpi_walk_state *walk_state,
-			       struct acpi_namespace_node **node)
-{
-	acpi_status status;
-	union acpi_operand_object *obj_desc;
-
-	if (lookup_status != AE_NOT_FOUND) {
-		return (lookup_status);
-	}
-
-	/*
-	 * Table disassembly:
-	 * operation_region not found. Generate an External for it, and
-	 * insert the name into the namespace.
-	 */
-	acpi_dm_add_op_to_external_list(op, path, ACPI_TYPE_REGION, 0, 0);
-
-	status = acpi_ns_lookup(walk_state->scope_info, path, ACPI_TYPE_REGION,
-				ACPI_IMODE_LOAD_PASS1, ACPI_NS_SEARCH_PARENT,
-				walk_state, node);
-	if (ACPI_FAILURE(status)) {
-		return (status);
-	}
-
-	/* Must create and install a region object for the new node */
-
-	obj_desc = acpi_ut_create_internal_object(ACPI_TYPE_REGION);
-	if (!obj_desc) {
-		return (AE_NO_MEMORY);
-	}
-
-	obj_desc->region.node = *node;
-	status = acpi_ns_attach_object(*node, obj_desc, ACPI_TYPE_REGION);
-	return (status);
-}
-#endif
-
 /*******************************************************************************
  *
  * FUNCTION:    acpi_ds_create_buffer_field
  *
- * PARAMETERS:  op                  - Current parse op (create_XXField)
+ * PARAMETERS:  Op                  - Current parse op (create_xXField)
  *              walk_state          - Current state
  *
  * RETURN:      Status
@@ -168,7 +99,7 @@ acpi_ds_create_buffer_field(union acpi_parse_object *op,
 
 		arg = acpi_ps_get_arg(op, 3);
 	} else {
-		/* For all other create_XXXField operators, name is the 3rd argument */
+		/* For all other create_xXXField operators, name is the 3rd argument */
 
 		arg = acpi_ps_get_arg(op, 2);
 	}
@@ -203,10 +134,11 @@ acpi_ds_create_buffer_field(union acpi_parse_object *op,
 
 		/* Enter the name_string into the namespace */
 
-		status = acpi_ns_lookup(walk_state->scope_info,
-					arg->common.value.string, ACPI_TYPE_ANY,
-					ACPI_IMODE_LOAD_PASS1, flags,
-					walk_state, &node);
+		status =
+		    acpi_ns_lookup(walk_state->scope_info,
+				   arg->common.value.string, ACPI_TYPE_ANY,
+				   ACPI_IMODE_LOAD_PASS1, flags, walk_state,
+				   &node);
 		if (ACPI_FAILURE(status)) {
 			ACPI_ERROR_NAMESPACE(arg->common.value.string, status);
 			return_ACPI_STATUS(status);
@@ -244,8 +176,8 @@ acpi_ds_create_buffer_field(union acpi_parse_object *op,
 	}
 
 	/*
-	 * Remember location in AML stream of the field unit opcode and operands
-	 * -- since the buffer and index operands must be evaluated.
+	 * Remember location in AML stream of the field unit opcode and operands --
+	 * since the buffer and index operands must be evaluated.
 	 */
 	second_desc = obj_desc->common.next_object;
 	second_desc->extra.aml_start = op->named.data;
@@ -259,7 +191,7 @@ acpi_ds_create_buffer_field(union acpi_parse_object *op,
 		goto cleanup;
 	}
 
-cleanup:
+      cleanup:
 
 	/* Remove local reference to the object */
 
@@ -271,13 +203,13 @@ cleanup:
  *
  * FUNCTION:    acpi_ds_get_field_names
  *
- * PARAMETERS:  info            - create_field info structure
+ * PARAMETERS:  Info            - create_field info structure
  *  `           walk_state      - Current method state
- *              arg             - First parser arg for the field name list
+ *              Arg             - First parser arg for the field name list
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Process all named fields in a field declaration. Names are
+ * DESCRIPTION: Process all named fields in a field declaration.  Names are
  *              entered into the namespace.
  *
  ******************************************************************************/
@@ -302,16 +234,16 @@ acpi_ds_get_field_names(struct acpi_create_field_info *info,
 	while (arg) {
 		/*
 		 * Four types of field elements are handled:
-		 * 1) name - Enters a new named field into the namespace
-		 * 2) offset - specifies a bit offset
+		 * 1) Name - Enters a new named field into the namespace
+		 * 2) Offset - specifies a bit offset
 		 * 3) access_as - changes the access mode/attributes
-		 * 4) connection - Associate a resource template with the field
+		 * 4) Connection - Associate a resource template with the field
 		 */
 		switch (arg->common.aml_opcode) {
 		case AML_INT_RESERVEDFIELD_OP:
 
-			position = (u64)info->field_bit_position +
-			    (u64)arg->common.value.size;
+			position = (u64) info->field_bit_position
+			    + (u64) arg->common.value.size;
 
 			if (position > ACPI_UINT32_MAX) {
 				ACPI_ERROR((AE_INFO,
@@ -344,13 +276,13 @@ acpi_ds_get_field_names(struct acpi_create_field_info *info,
 
 			/* access_attribute (attrib_quick, attrib_byte, etc.) */
 
-			info->attribute = (u8)
-			    ((arg->common.value.integer >> 8) & 0xFF);
+			info->attribute =
+			    (u8)((arg->common.value.integer >> 8) & 0xFF);
 
 			/* access_length (for serial/buffer protocols) */
 
-			info->access_length = (u8)
-			    ((arg->common.value.integer >> 16) & 0xFF);
+			info->access_length =
+			    (u8)((arg->common.value.integer >> 16) & 0xFF);
 			break;
 
 		case AML_INT_CONNECTION_OP:
@@ -360,7 +292,6 @@ acpi_ds_get_field_names(struct acpi_create_field_info *info,
 			 */
 			info->resource_buffer = NULL;
 			info->connection_node = NULL;
-			info->pin_number_index = 0;
 
 			/*
 			 * A Connection() is either an actual resource descriptor (buffer)
@@ -425,8 +356,8 @@ acpi_ds_get_field_names(struct acpi_create_field_info *info,
 
 			/* Keep track of bit position for the next field */
 
-			position = (u64)info->field_bit_position +
-			    (u64)arg->common.value.size;
+			position = (u64) info->field_bit_position
+			    + (u64) arg->common.value.size;
 
 			if (position > ACPI_UINT32_MAX) {
 				ACPI_ERROR((AE_INFO,
@@ -438,7 +369,6 @@ acpi_ds_get_field_names(struct acpi_create_field_info *info,
 			}
 
 			info->field_bit_position += info->field_bit_length;
-			info->pin_number_index++;	/* Index relative to previous Connection() */
 			break;
 
 		default:
@@ -459,7 +389,7 @@ acpi_ds_get_field_names(struct acpi_create_field_info *info,
  *
  * FUNCTION:    acpi_ds_create_field
  *
- * PARAMETERS:  op              - Op containing the Field definition and args
+ * PARAMETERS:  Op              - Op containing the Field definition and args
  *              region_node     - Object for the containing Operation Region
  *  `           walk_state      - Current method state
  *
@@ -483,26 +413,19 @@ acpi_ds_create_field(union acpi_parse_object *op,
 	/* First arg is the name of the parent op_region (must already exist) */
 
 	arg = op->common.value.arg;
-
 	if (!region_node) {
 		status =
 		    acpi_ns_lookup(walk_state->scope_info,
 				   arg->common.value.name, ACPI_TYPE_REGION,
 				   ACPI_IMODE_EXECUTE, ACPI_NS_SEARCH_PARENT,
 				   walk_state, &region_node);
-#ifdef ACPI_ASL_COMPILER
-		status = acpi_ds_create_external_region(status, arg,
-							arg->common.value.name,
-							walk_state,
-							&region_node);
-#endif
 		if (ACPI_FAILURE(status)) {
 			ACPI_ERROR_NAMESPACE(arg->common.value.name, status);
 			return_ACPI_STATUS(status);
 		}
 	}
 
-	memset(&info, 0, sizeof(struct acpi_create_field_info));
+	ACPI_MEMSET(&info, 0, sizeof(struct acpi_create_field_info));
 
 	/* Second arg is the field flags */
 
@@ -523,7 +446,7 @@ acpi_ds_create_field(union acpi_parse_object *op,
  *
  * FUNCTION:    acpi_ds_init_field_objects
  *
- * PARAMETERS:  op              - Op containing the Field definition and args
+ * PARAMETERS:  Op              - Op containing the Field definition and args
  *  `           walk_state      - Current method state
  *
  * RETURN:      Status
@@ -565,25 +488,21 @@ acpi_ds_init_field_objects(union acpi_parse_object *op,
 	 */
 	switch (walk_state->opcode) {
 	case AML_FIELD_OP:
-
 		arg = acpi_ps_get_arg(op, 2);
 		type = ACPI_TYPE_LOCAL_REGION_FIELD;
 		break;
 
 	case AML_BANK_FIELD_OP:
-
 		arg = acpi_ps_get_arg(op, 4);
 		type = ACPI_TYPE_LOCAL_BANK_FIELD;
 		break;
 
 	case AML_INDEX_FIELD_OP:
-
 		arg = acpi_ps_get_arg(op, 3);
 		type = ACPI_TYPE_LOCAL_INDEX_FIELD;
 		break;
 
 	default:
-
 		return_ACPI_STATUS(AE_BAD_PARAMETER);
 	}
 
@@ -642,7 +561,7 @@ acpi_ds_init_field_objects(union acpi_parse_object *op,
  *
  * FUNCTION:    acpi_ds_create_bank_field
  *
- * PARAMETERS:  op              - Op containing the Field definition and args
+ * PARAMETERS:  Op              - Op containing the Field definition and args
  *              region_node     - Object for the containing Operation Region
  *              walk_state      - Current method state
  *
@@ -672,12 +591,6 @@ acpi_ds_create_bank_field(union acpi_parse_object *op,
 				   arg->common.value.name, ACPI_TYPE_REGION,
 				   ACPI_IMODE_EXECUTE, ACPI_NS_SEARCH_PARENT,
 				   walk_state, &region_node);
-#ifdef ACPI_ASL_COMPILER
-		status = acpi_ds_create_external_region(status, arg,
-							arg->common.value.name,
-							walk_state,
-							&region_node);
-#endif
 		if (ACPI_FAILURE(status)) {
 			ACPI_ERROR_NAMESPACE(arg->common.value.name, status);
 			return_ACPI_STATUS(status);
@@ -716,12 +629,11 @@ acpi_ds_create_bank_field(union acpi_parse_object *op,
 
 	/*
 	 * Use Info.data_register_node to store bank_field Op
-	 * It's safe because data_register_node will never be used when create
-	 * bank field \we store aml_start and aml_length in the bank_field Op for
-	 * late evaluation. Used in acpi_ex_prep_field_value(Info)
+	 * It's safe because data_register_node will never be used when create bank field
+	 * We store aml_start and aml_length in the bank_field Op for late evaluation
+	 * Used in acpi_ex_prep_field_value(Info)
 	 *
-	 * TBD: Or, should we add a field in struct acpi_create_field_info, like
-	 * "void *ParentOp"?
+	 * TBD: Or, should we add a field in struct acpi_create_field_info, like "void *ParentOp"?
 	 */
 	info.data_register_node = (struct acpi_namespace_node *)op;
 
@@ -733,7 +645,7 @@ acpi_ds_create_bank_field(union acpi_parse_object *op,
  *
  * FUNCTION:    acpi_ds_create_index_field
  *
- * PARAMETERS:  op              - Op containing the Field definition and args
+ * PARAMETERS:  Op              - Op containing the Field definition and args
  *              region_node     - Object for the containing Operation Region
  *  `           walk_state      - Current method state
  *

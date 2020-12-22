@@ -3,13 +3,11 @@
  * Copyright (C) 1996,1997 Jakub Jelinek (jj@sunsite.mff.cuni.cz)
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
  *
- * Calls to memset returns initial %o0. Calls to bzero returns 0, if ok, and
- * number of bytes not yet set if exception occurs and we were called as
- * clear_user.
+ * Returns 0, if ok, and number of bytes not yet set if exception
+ * occurs and we were called as clear_user.
  */
 
 #include <asm/ptrace.h>
-#include <asm/export.h>
 
 /* Work around cpp -rob */
 #define ALLOC #alloc
@@ -64,13 +62,9 @@ __bzero_begin:
 
 	.globl	__bzero
 	.globl	memset
-	EXPORT_SYMBOL(__bzero)
-	EXPORT_SYMBOL(memset)
 	.globl	__memset_start, __memset_end
 __memset_start:
 memset:
-	mov	%o0, %g1
-	mov	1, %g4
 	and	%o1, 0xff, %g3
 	sll	%g3, 8, %g2
 	or	%g3, %g2, %g3
@@ -95,7 +89,6 @@ memset:
 	 sub	%o0, %o2, %o0
 
 __bzero:
-	clr	%g4
 	mov	%g0, %g3
 1:
 	cmp	%o1, 7
@@ -158,8 +151,8 @@ __bzero:
 	bne,a	8f
 	 EX(stb	%g3, [%o0], and %o1, 1)
 8:
-	b	0f
-	 nop
+	retl
+	 clr	%o0
 7:
 	be	13b
 	 orcc	%o1, 0, %g0
@@ -171,12 +164,6 @@ __bzero:
 	bne	8b
 	 EX(stb	%g3, [%o0 - 1], add %o1, 1)
 0:
-	andcc	%g4, 1, %g0
-	be	5f
-	 nop
-	retl
-	 mov	%g1, %o0
-5:
 	retl
 	 clr	%o0
 __memset_end:

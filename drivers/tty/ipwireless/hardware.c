@@ -378,9 +378,9 @@ static void swap_packet_bitfield_to_le(unsigned char *data)
 	/*
 	 * transform bits from aa.bbb.ccc to ccc.bbb.aa
 	 */
-	ret |= (tmp & 0xc0) >> 6;
-	ret |= (tmp & 0x38) >> 1;
-	ret |= (tmp & 0x07) << 5;
+	ret |= tmp & 0xc0 >> 6;
+	ret |= tmp & 0x38 >> 1;
+	ret |= tmp & 0x07 << 5;
 	*data = ret & 0xff;
 #endif
 }
@@ -393,9 +393,9 @@ static void swap_packet_bitfield_from_le(unsigned char *data)
 	/*
 	 * transform bits from ccc.bbb.aa to aa.bbb.ccc
 	 */
-	ret |= (tmp & 0xe0) >> 5;
-	ret |= (tmp & 0x1c) << 1;
-	ret |= (tmp & 0x03) << 6;
+	ret |= tmp & 0xe0 >> 5;
+	ret |= tmp & 0x1c << 1;
+	ret |= tmp & 0x03 << 6;
 	*data = ret & 0xff;
 #endif
 }
@@ -646,7 +646,7 @@ static void queue_received_packet(struct ipw_hardware *hw,
 		(*assem) = pool_allocate(hw, *assem, length);
 		if (!(*assem)) {
 			printk(KERN_ERR IPWIRELESS_PCCARD_NAME
-				": no memory for incoming data packet, dropped!\n");
+				": no memory for incomming data packet, dropped!\n");
 			return;
 		}
 		(*assem)->protocol = protocol;
@@ -670,7 +670,7 @@ static void queue_received_packet(struct ipw_hardware *hw,
 		packet = pool_allocate(hw, NULL, length);
 		if (!packet) {
 			printk(KERN_ERR IPWIRELESS_PCCARD_NAME
-				": no memory for incoming ctrl packet, dropped!\n");
+				": no memory for incomming ctrl packet, dropped!\n");
 			return;
 		}
 		packet->protocol = protocol;
@@ -1455,7 +1455,7 @@ static void __handle_setup_get_version_rsp(struct ipw_hardware *hw)
 			return;
 		}
 
-		ret = set_RTS(hw, PRIO_SETUP, channel_idx,
+		set_RTS(hw, PRIO_SETUP, channel_idx,
 			(hw->control_lines [channel_idx] &
 			 IPW_CONTROL_LINE_RTS) != 0);
 		if (ret) {
@@ -1572,11 +1572,6 @@ static void handle_received_SETUP_packet(struct ipw_hardware *hw,
 					sizeof(struct ipw_setup_reboot_msg_ack),
 					ADDR_SETUP_PROT, TL_PROTOCOLID_SETUP,
 					TL_SETUP_SIGNO_REBOOT_MSG_ACK);
-			if (!packet) {
-				pr_err(IPWIRELESS_PCCARD_NAME
-				       ": Not enough memory to send reboot packet");
-				break;
-			}
 			packet->header.length =
 				sizeof(struct TlSetupRebootMsgAck);
 			send_packet(hw, PRIO_SETUP, &packet->header);
@@ -1734,10 +1729,11 @@ void ipwireless_hardware_free(struct ipw_hardware *hw)
 
 	ipwireless_stop_interrupts(hw);
 
-	flush_work(&hw->work_rx);
+	flush_work_sync(&hw->work_rx);
 
 	for (i = 0; i < NL_NUM_OF_ADDRESSES; i++)
-		kfree(hw->packet_assembler[i]);
+		if (hw->packet_assembler[i] != NULL)
+			kfree(hw->packet_assembler[i]);
 
 	for (i = 0; i < NL_NUM_OF_PRIORITIES; i++)
 		list_for_each_entry_safe(tp, tq, &hw->tx_queue[i], queue) {

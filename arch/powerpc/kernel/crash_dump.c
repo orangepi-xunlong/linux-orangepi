@@ -12,7 +12,7 @@
 #undef DEBUG
 
 #include <linux/crash_dump.h>
-#include <linux/io.h>
+#include <linux/bootmem.h>
 #include <linux/memblock.h>
 #include <asm/code-patching.h>
 #include <asm/kdump.h>
@@ -68,6 +68,16 @@ void __init setup_kdump_trampoline(void)
 	DBG(" <- setup_kdump_trampoline()\n");
 }
 #endif /* CONFIG_NONSTATIC_KERNEL */
+
+static int __init parse_savemaxmem(char *p)
+{
+	if (p)
+		saved_max_pfn = (memparse(p, &p) >> PAGE_SHIFT) - 1;
+
+	return 1;
+}
+__setup("savemaxmem=", parse_savemaxmem);
+
 
 static size_t copy_oldmem_vaddr(void *vaddr, char *buf, size_t csize,
                                unsigned long offset, int userbuf)
@@ -126,15 +136,15 @@ ssize_t copy_oldmem_page(unsigned long pfn, char *buf,
 void crash_free_reserved_phys_range(unsigned long begin, unsigned long end)
 {
 	unsigned long addr;
-	const __be32 *basep, *sizep;
+	const u32 *basep, *sizep;
 	unsigned int rtas_start = 0, rtas_end = 0;
 
 	basep = of_get_property(rtas.dev, "linux,rtas-base", NULL);
 	sizep = of_get_property(rtas.dev, "rtas-size", NULL);
 
 	if (basep && sizep) {
-		rtas_start = be32_to_cpup(basep);
-		rtas_end = rtas_start + be32_to_cpup(sizep);
+		rtas_start = *basep;
+		rtas_end = *basep + *sizep;
 	}
 
 	for (addr = begin; addr < end; addr += PAGE_SIZE) {
@@ -142,7 +152,10 @@ void crash_free_reserved_phys_range(unsigned long begin, unsigned long end)
 		if (addr <= rtas_end && ((addr + PAGE_SIZE) > rtas_start))
 			continue;
 
-		free_reserved_page(pfn_to_page(addr >> PAGE_SHIFT));
+		ClearPageReserved(pfn_to_page(addr >> PAGE_SHIFT));
+		init_page_count(pfn_to_page(addr >> PAGE_SHIFT));
+		free_page((unsigned long)__va(addr));
+		totalram_pages++;
 	}
 }
 #endif

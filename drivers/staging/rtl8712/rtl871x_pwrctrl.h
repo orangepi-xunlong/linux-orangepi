@@ -30,22 +30,42 @@
 #include "drv_types.h"
 
 
+#define FW_PWR0	0
+#define FW_PWR1		1
+#define FW_PWR2		2
+#define FW_PWR3		3
+
+
+#define HW_PWR0	7
+#define HW_PWR1		6
+#define HW_PWR2		2
+#define HW_PWR3	0
+#define HW_PWR4	8
+
+#define FW_PWRMSK	0x7
+
+
+#define XMIT_ALIVE	BIT(0)
+#define RECV_ALIVE	BIT(1)
 #define CMD_ALIVE	BIT(2)
+#define EVT_ALIVE	BIT(3)
+
 
 enum Power_Mgnt {
-	PS_MODE_ACTIVE	= 0,
-	PS_MODE_MIN,
-	PS_MODE_MAX,
-	PS_MODE_DTIM,
-	PS_MODE_VOIP,
-	PS_MODE_UAPSD_WMM,
-	PS_MODE_UAPSD,
-	PS_MODE_IBSS,
-	PS_MODE_WWLAN,
-	PM_Radio_Off,
-	PM_Card_Disable,
+	PS_MODE_ACTIVE	= 0	,
+	PS_MODE_MIN			,
+	PS_MODE_MAX			,
+	PS_MODE_DTIM			,
+	PS_MODE_VOIP			,
+	PS_MODE_UAPSD_WMM	,
+	PS_MODE_UAPSD			,
+	PS_MODE_IBSS			,
+	PS_MODE_WWLAN		,
+	PM_Radio_Off			,
+	PM_Card_Disable		,
 	PS_MODE_NUM
 };
+
 
 /*
 	BIT[2:0] = HW state
@@ -87,12 +107,16 @@ struct reportpwrstate_parm {
 	unsigned short rsvd;
 };
 
+static inline void _enter_pwrlock(struct semaphore *plock)
+{
+	_down_sema(plock);
+}
+
 struct	pwrctrl_priv {
-	struct mutex mutex_lock;
+	struct semaphore lock;
 	/*volatile*/ u8 rpwm; /* requested power state for fw */
 	/* fw current power state. updated when 1. read from HCPWM or
-	 * 2. driver lowers power level
-	 */
+	 * 2. driver lowers power level */
 	/*volatile*/ u8 cpwm;
 	/*volatile*/ u8 tog; /* toggling */
 	/*volatile*/ u8 cpwm_tog; /* toggling */
@@ -103,8 +127,8 @@ struct	pwrctrl_priv {
 	uint ImrContent;	/* used to store original imr. */
 	uint bSleep; /* sleep -> active is different from active -> sleep. */
 
-	struct work_struct SetPSModeWorkItem;
-	struct work_struct rpwm_workitem;
+	_workitem SetPSModeWorkItem;
+	_workitem rpwm_workitem;
 	struct timer_list rpwm_check_timer;
 	u8	rpwm_retry;
 	uint	bSetPSModeWorkItemInProgress;

@@ -52,7 +52,7 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 	u8 address, not_address, command, not_command;
 	bool send_32bits = false;
 
-	if (!(dev->enabled_protocols & RC_BIT_NEC))
+	if (!(dev->raw->enabled_protocols & RC_TYPE_NEC))
 		return 0;
 
 	if (!is_timing_event(ev)) {
@@ -70,7 +70,7 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 		if (!ev.pulse)
 			break;
 
-		if (eq_margin(ev.duration, NEC_HEADER_PULSE, NEC_UNIT * 2)) {
+		if (eq_margin(ev.duration, NEC_HEADER_PULSE, NEC_UNIT / 2)) {
 			data->is_nec_x = false;
 			data->necx_repeat = false;
 		} else if (eq_margin(ev.duration, NECX_HEADER_PULSE, NEC_UNIT / 2))
@@ -86,7 +86,7 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 		if (ev.pulse)
 			break;
 
-		if (eq_margin(ev.duration, NEC_HEADER_SPACE, NEC_UNIT)) {
+		if (eq_margin(ev.duration, NEC_HEADER_SPACE, NEC_UNIT / 2)) {
 			data->state = STATE_BIT_PULSE;
 			return 0;
 		} else if (eq_margin(ev.duration, NEC_REPEAT_SPACE, NEC_UNIT / 2)) {
@@ -174,18 +174,22 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 			 * least Apple and TiVo remotes */
 			scancode = data->bits;
 			IR_dprintk(1, "NEC (modified) scancode 0x%08x\n", scancode);
-		} else {
+		} else if ((address ^ not_address) != 0xff) {
 			/* Extended NEC */
-			scancode = address << 8  |
-				   not_address << 16 |
+			scancode = address     << 16 |
+				   not_address <<  8 |
 				   command;
-			IR_dprintk(1, "NEC scancode 0x%06x\n", scancode);
+			IR_dprintk(1, "NEC (Ext) scancode 0x%06x\n", scancode);
+		} else {
+			/* Normal NEC */
+			scancode = address << 8 | command;
+			IR_dprintk(1, "NEC scancode 0x%04x\n", scancode);
 		}
 
 		if (data->is_nec_x)
 			data->necx_repeat = true;
 
-		rc_keydown(dev, RC_TYPE_NEC, scancode, 0);
+		rc_keydown(dev, scancode, 0);
 		data->state = STATE_INACTIVE;
 		return 0;
 	}
@@ -197,7 +201,7 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 }
 
 static struct ir_raw_handler nec_handler = {
-	.protocols	= RC_BIT_NEC,
+	.protocols	= RC_TYPE_NEC,
 	.decode		= ir_nec_decode,
 };
 
@@ -205,7 +209,7 @@ static int __init ir_nec_decode_init(void)
 {
 	ir_raw_handler_register(&nec_handler);
 
-	printk(KERN_INFO "IR NEC protocol handler initialized\n");
+	pr_debug("IR NEC protocol handler initialized\n");
 	return 0;
 }
 

@@ -1,197 +1,347 @@
 if ARCH_SUNXI
 
+config SUNXI_CONSISTENT_DMA_SIZE
+	int "Consistent DMA memory size (MB)"
+	range 1 14
+	default 12
+	help
+	  We need to use dma alloc function in many case, while the default
+	  virtual address range total is 2M(DEFAULT_CONSISTENT_DMA_SIZE), which
+	  may not satisfy out needs.
+	  So we should increase the DMA consistent memory size.
+	  The size must be 2MB aligned.
+
+# ==========================================
+# Select the arch of chip
+# ==========================================
 choice
-	prompt "Select the architecture of SoC"
+	prompt "Select the arch of chip"
 	default ARCH_SUN8I
 	help
-	  Select the architecture for SoC
-	  sunxi
-	  `-- sun8i ----- Cortex-A7 based Family SoCs
+	 Select the platform arch for chip
+          sunxi
+          |-- sun4i  ----------------- ------------arch sun4i: cortex-a8 serial chips
+          |   |-- sun4iw1   --------------- wafer1
+          |   |   `-- sun4iw1p1  ----- A10
+          |   `-- sun4iw2   --------------- wafer2
+          |       |-- sun4iw2p1  ----- A13
+          |       |-- sun4iw2p2  ----- A12
+          |       `-- sun4iw2p3  ----- A10s
+          |-- sun8i  ----------------------------- arch sun8i: cortex-a7 smp serial chips
+          |   |-- sun8iw1  --------------- wafer1
+          |   |   |-- sun8iw1p1  ----- A31
+          |   |   `-- sun8iw1p2  ----- A31s
+          |   |-- sun8iw2  --------------- wafer2
+          |   |   |-- sun8iw2p1  ----- A20
+          |   |   `-- sun8iw2p2
+          |   |-- sun8iw3  --------------- wafer3
+          |   |   |-- sun8iw3p1  ----- A23
+          |   |   `-- sun8iw3p2
+          |   |-- sun8iw5
+          |   |   `-- sun8iw5p1  ----- A33
+          |   |-- sun8iw6
+          |   |   `-- sun8iw6p1  ----- A83
+          |   |-- sun8iw7
+          |   |   `-- sun8iw6p7  ----- I20
+          |   |-- sun8iw8
+          |   |   |-- sun8iw8p1  ----- V30
+          |   |   `-- sun8iw8p2  ----- V33
+          |   `-- sun8iw9
+          |       `-- sun8iw9p1  ----- 
+          |
+          `-- sun9i  ----------------------------- arch sun9i: cortex-a15 smp serial chips
+              `-- sun9iw1
+                  |-- sun9iw1p1  ----- A80
+                  `-- sun9iw1p2
 
 config ARCH_SUN8I
-	bool "Allwinner A7 smp SoCs"
+	bool "Allwinner A7 smp socs(sun8i)"
 	select ARM_GIC
 	select CPU_V7
-	select HAVE_SMP
-	select HAVE_ARM_ARCH_TIMER
-	select SUN4I_TIMER
+	select HAVE_SMP if !ARCH_SUN8IW8
+	select SUNXI_TIMER
+	select COMMON_CLK
+	select CLKDEV_LOOKUP
+	select NEED_MACH_IO_H
 	select MIGHT_HAVE_CACHE_L2X0
 	select PINCTRL
 	select PINCTRL_SUNXI
 	select ARCH_REQUIRE_GPIOLIB
-	select COMMON_CLK
-	select CLKDEV_LOOKUP
-	select CLKSRC_MMIO
-	select CLKSRC_OF
-	select GENERIC_CLOCKEVENTS
-	select GENERIC_IRQ_CHIP
-	select SPARSE_IRQ
+	select HAVE_UNSTABLE_SCHED_CLOCK
 	select GENERIC_ALLOCATOR
 	help
-	  Allwinner A7 smp SoCs(sun8i)
+	  Allwinner A7 smp socs
+
+config ARCH_SUN9I
+	bool "Allwinner A15 smp socs(sun9i)"
+	select ARM_GIC
+	select CPU_V7
+	select HAVE_SMP
+	select SUNXI_TIMER
+	select COMMON_CLK
+	select CLKDEV_LOOKUP
+	select NEED_MACH_IO_H
+	select MIGHT_HAVE_CACHE_L2X0
+	select PINCTRL
+	select PINCTRL_SUNXI
+	select ARCH_REQUIRE_GPIOLIB
+
+	help
+	  Allwinner A15 smp socs
 endchoice
 
-# Select the wafer with sun8i
+# ==========================================
+# Select the wafer with specific arch
+# ==========================================
 
+#
+# Select the wafer with sun8i
+#
 if ARCH_SUN8I
 choice
 	prompt "Select the wafer with arch sun8i"
-	default ARCH_SUN8IW11
+	default ARCH_SUN8IW1
 	help
-	  Select the wafer with arch sun8i
+	 Select the wafer with arch sun8i
 
-config ARCH_SUN8IW11
-        bool "Allwinner sun8iw11 SoCs"
-	select HAVE_UNSTABLE_SCHED_CLOCK
-        help
-          Allwinner sun8iw11 SoCs
+config ARCH_SUN8IW1
+	bool "Allwinner A3x SOCs(sun8iw1)"
+	help
+	  Allwinner A3x SOCs
 
-config ARCH_SUN8IW12
-        bool "Allwinner sun8iw12 SoCs"
-        help
-          Allwinner sun8iw12 SoCs
-config ARCH_SUN8IW15
-        bool "Allwinner sun8iw15 SoCs"
-        help
-          Allwinner sun8iw15 SoCs
-config ARCH_SUN8IW17
-        bool "Allwinner sun8iw17 SoCs"
-        help
-          Allwinner sun8iw17 SoCs
-config ARCH_SUN8IW7
-        bool "Allwinner sun8iw7 SoCs"
-        help
-          Allwinner sun8iw7 SoCs
+config ARCH_SUN8IW3
+	bool "Allwinner A2x SOCs(sun8iw3)"
+	help
+	  Allwinner A2x SOCs
+
+config ARCH_SUN8IW5
+	bool "Allwinner A33 SOCs(sun8iw5)"
+	help
+	  Allwinner A33 SOCs
+
 config ARCH_SUN8IW6
-        bool "Allwinner sun8iw6 SoCs"
+        bool "Allwinner A83 SOCs(sun8iw6)"
         help
-          Allwinner sun8iw6 SoCs
-config ARCH_SUN8IW18
-        bool "Allwinner sun8iw18 SoCs"
+          Allwinner A83 SOCs
+
+config ARCH_SUN8IW7
+        bool "Allwinner Axx SOCs(sun8w7)"
         help
-          Allwinner sun8iw18 SoCs
+          Allwinner Axx SOCs
+
+config ARCH_SUN8IW8
+        bool "Allwinner V3x SOCs(sun8iw8)"
+        help
+          Allwinner V3x SOCs
+
+config ARCH_SUN8IW9
+        bool "Allwinner Axx SOCs(sun8iw9)"
+        help
+          Allwinner Axx SOCs
+
 endchoice
+config SUN8I_CCI
+	bool "Cache Coherent Interconnect support"
+	depends on ARCH_SUN8IW6 || ARCH_SUN8IW9
+	default n
+	help
+	  Enable Cache Coherent Interconnect support
 endif
 
-# Select the SoC with specific arch and wafer
-
-if ARCH_SUN8IW11
+#
+# Select the wafer with sun9i
+#
+if ARCH_SUN9I
 choice
-	prompt "Select the SoC with wafer sun8iw11"
-	default ARCH_SUN8IW11P1
+	prompt "Select the wafer with arch sun9i"
+	default ARCH_SUN9IW1
 	help
-	 Select the SoC with wafer sun8iw11
+	 Select the wafer with arch sun9i
 
-config ARCH_SUN8IW11P1
-	bool "Allwinner sun8iw11p1 SoC"
+config ARCH_SUN9IW1
+	bool "Allwinner xxx SOCs(sun9w1)"
 	help
-	  Allwinner sun8iw11p1 SoC
+	  Allwinner xxx SOCs
 endchoice
+config SUN9I_CCI
+	bool "Cache Coherent Interconnect support"
+	depends on ARCH_SUN9I
+	default n
+	help
+	  Enable Cache Coherent Interconnect support
+config DRAM_TRAINING_RESERVE_MEM
+	bool "Reserve dram training memory at first & middle 4K"
+	depends on ARCH_SUN9I
+	default n
+	help
+	  Enable dramfreq reserve mem support
 endif
 
-if ARCH_SUN8IW12
+# ==========================================
+# Select the chip with specific arch and wafer
+# ==========================================
+
+#
+# Select the chip with wafer sun8iw1
+#
+if ARCH_SUN8IW1
 choice
-	prompt "Select the SoC with wafer sun8iw12"
-	default ARCH_SUN8IW12P1
+	prompt "Select the chip with wafer sun8iw1"
+	default ARCH_SUN8IW1P1
 	help
-	 Select the SoC with wafer sun8iw12
+	 Select the soc for system
 
-config ARCH_SUN8IW12P1
-	bool "Allwinner sun8iw12p1 SoC"
+config ARCH_SUN8IW1P1
+	bool "Allwinner A31 chip(sun8iw1p1-A31)"
 	help
-	  Allwinner sun8iw12p1 SoC
+	  Allwinner A31 chip
+
+config ARCH_SUN8IW1P2
+	bool "Allwinner A31s chip(sun8iw1p2-A31s)"
+	help
+	  Allwinner A31s chip
 endchoice
 endif
 
-if ARCH_SUN8IW15
+#
+# Select the chip with wafer sun8iw3
+#
+if ARCH_SUN8IW3
 choice
-	prompt "Select the SoC with wafer sun8iw15"
-	default ARCH_SUN8IW15P1
+	prompt "Select the chip with wafer sun8iw3"
+	default ARCH_SUN8IW3P1
 	help
-	 Select the SoC with wafer sun8iw15
+	 Select the chip with wafer sun8iw3
 
-config ARCH_SUN8IW15P1
-	bool "Allwinner sun8iw15p1 SoC"
+config ARCH_SUN8IW3P1
+	bool "Allwinner A23 chip(sun8iw3p1)"
 	help
-	  Allwinner sun8iw15p1 SoC
+	  Allwinner A23 chip
 endchoice
 endif
 
-if ARCH_SUN8IW17
+#
+# Select the chip with wafer sun8iw5
+#
+if ARCH_SUN8IW5
 choice
-	prompt "Select the SoC with wafer sun8iw17"
-	default ARCH_SUN8IW17P1
+	prompt "Select the chip with wafer sun8iw5"
+	default ARCH_SUN8IW5P1
 	help
-	 Select the SoC with wafer sun8iw17
+	 Select the chip with wafer sun8iw5
 
-config ARCH_SUN8IW17P1
-	bool "Allwinner sun8iw17p1 SoC"
+config ARCH_SUN8IW5P1
+	bool "Allwinner A33 chip(sun8iw5p1)"
 	help
-	  Allwinner sun8iw17p1 SoC
+	  Allwinner Axx chip
 endchoice
 endif
 
-if ARCH_SUN8IW7
-choice
-	prompt "Select the SoC with wafer sun8iw7"
-	default ARCH_SUN8IW7P1
-	help
-	 Select the SoC with wafer sun8iw7
+config SW_POWERNOW
+    bool "Enable sw_powernow feature"
+    depends on ARCH_SUN8IW3 || ARCH_SUN8IW5
+    default y
+    help
+        Support for sw_powernow function
 
-config ARCH_SUN8IW7P1
-	bool "Allwinner sun8iw7p1 SoC"
-	help
-	  Allwinner sun8iw7p1 SoC
-endchoice
-endif
-
+#
+# Select the chip with wafer sun8iw6
+#
 if ARCH_SUN8IW6
 choice
-	prompt "Select the SoC with wafer sun8iw6"
-	default ARCH_SUN8IW6P1
-	help
-	 Select the SoC with wafer sun8iw7
+        prompt "Select the chip with wafer sun8iw6"
+        default ARCH_SUN8IW6P1
+        help
+         Select the chip with wafer sun8iw6
 
 config ARCH_SUN8IW6P1
-	bool "Allwinner sun8iw6p1 SoC"
-	help
-	  Allwinner sun8iw6p1 SoC
+        bool "Allwinner Axx chip(sun8iw6p1)"
+        help
+          Allwinner Axx chip
 endchoice
 endif
-
-if ARCH_SUN8IW18
-choice
-	prompt "Select the SoC with wafer sun8iw18"
-	default ARCH_SUN8IW18P1
-	help
-	 Select the SoC with wafer sun8iw18
-
-config ARCH_SUN8IW18P1
-	bool "Allwinner sun8iw18p1 SoC"
-	help
-	  Allwinner sun8iw18p1 SoC
-endchoice
-endif
-
 
 config SUNXI_GIC_ACCESS_SS
     bool "Enable Sunxi GIC Access SS Protect"
     depends on ARCH_SUN8IW6
-    default n
+    default y
     help
         Support for Sunxi GIC Access SS Protect
-
-config SUN8I_CCI
-	bool "Cache Coherent Interconnect support"
-	depends on ARCH_SUN8IW6 || ARCH_SUN8IW17
-	default n
-	help
-	  Enable Cache Coherent Interconnect support
-
-# Select the board between FPGA and EVB
-
+#
+#
+# Select the chip with wafer sun8iw6
+#
+if ARCH_SUN8IW8
 choice
-	prompt "Allwinner development Board"
+        prompt "Select the chip with wafer sun8iw8"
+        default ARCH_SUN8IW8P1
+        help
+         Select the chip with wafer sun8iw8
+
+config ARCH_SUN8IW8P1
+        bool "Allwinner V30 chip(sun8iw8p1)"
+        help
+          Allwinner V30 chip
+endchoice
+endif
+
+
+#
+# Select the chip with wafer sun8iw7
+#
+if ARCH_SUN8IW7
+choice
+        prompt "Select the chip with wafer sun8iw7"
+        default ARCH_SUN8IW7P1
+        help
+         Select the chip with wafer sun8iw7
+
+config ARCH_SUN8IW7P1
+        bool "Allwinner Axx chip(sun8w7p1)"
+        help
+          Allwinner Axx chip
+endchoice
+endif
+
+#
+# Select the chip with wafer sun8iw9
+#
+if ARCH_SUN8IW9
+choice
+	prompt "Select the chip with wafer sun8iw9"
+	default ARCH_SUN8IW9P1
+	help
+	 Select the chip with wafer sun8iw9
+
+config ARCH_SUN8IW9P1
+	bool "Allwinner Axx chip(sun8iw9p1)"
+	help
+	  Allwinner Axx chip
+endchoice
+endif
+
+#
+# Select the chip with wafer sun9iw1
+#
+if ARCH_SUN9IW1
+choice
+	prompt "Select the chip with wafer sun9iw1"
+	default ARCH_SUN9IW1P1
+	help
+	 Select the chip with wafer sun9iw1
+
+config ARCH_SUN9IW1P1
+	bool "Allwinner xxx chip(sun9w1p1)"
+	help
+	  Allwinner xxx chip
+endchoice
+endif
+
+# ==========================================
+# Select the board between FPGA and real IC
+# ==========================================
+choice
+	prompt "Allwinner A7 smp socs"
 	depends on ARCH_SUNXI
 	default FPGA_V4_PLATFORM
 
@@ -210,11 +360,49 @@ config EVB_PLATFORM
        help
          Support for Allwinner's EVB board
 endchoice
+config SUN9IW1_PERF5_BOARD
+       bool "SUN9IW1 PERF5 BOARD"
+       depends on ARCH_SUN9IW1
+       default n
+    help
+        Support for SUN9IW1 PERF5 BOARD
+source "arch/arm/mach-sunxi/Kconfig.conf"
 
-config SUNXI_SOC_NAME
-	string "The name of Sunxi SoC"
-	default ""
+config SUNXI_TRUSTZONE
+       bool "SUNXI trustzone security"
+       default n
+    help
+        Support for SUNXI trustzone security
+
+config HOMLET_PLATFORM
+       bool "Homlet platform Features"
+       default y
+       help
+         Enable special features for box then select Yes,
+         For example, fsync & sync immediatetly to nand disk.
+
+config SUNXI_BOOTUP_EXTEND
+        bool "Homlet platform bootup extend"
+        depends on HOMLET_PLATFORM
+        default n
+    help
+        Support system bootup triggered by ir, when system is poweroff.
+
+config SUNXI_OOPS_HOOK
+		bool "Homlet platform oops hook"
+		depends on HOMLET_PLATFORM
+		default n
 	help
-	  Used for /proc/cpuinfo and /sys/.../sysinfo.
+		Hooks for oops:
+		1. enable sdcard jtag
+		2. print cpu/dram/gpu frequency and temperature
+
+config MEM_512M_DEBUG
+		bool "Force dram size to 512M(only for debug)"
+		depends on HOMLET_PLATFORM && ARCH_SUN8I
+		default n
+	help
+		Force the dram size to 512M, this config is only for debug,
+		Do not enable this in release version!
 
 endif

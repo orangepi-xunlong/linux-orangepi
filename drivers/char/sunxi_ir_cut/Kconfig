@@ -1,0 +1,9 @@
+#
+# sunxi continous physic memory allocator.
+#
+
+config IR_CUT
+	bool "sunxi IR CUT "
+	default n
+	help
+	Nothing help.

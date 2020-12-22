@@ -11,7 +11,6 @@
 #include <asm/processor.h>
 #include <asm/errno.h>
 #include <asm/ppc_asm.h>
-#include <asm/export.h>
 
 _GLOBAL(memset)
 	neg	r0,r3
@@ -20,7 +19,7 @@ _GLOBAL(memset)
 	rlwimi	r4,r4,16,0,15
 	cmplw	cr1,r5,r0		/* do we get that far? */
 	rldimi	r4,r4,32,0
-	PPC_MTOCRF(1,r0)
+	PPC_MTOCRF	1,r0
 	mr	r6,r3
 	blt	cr1,8f
 	beq+	3f			/* if already 8-byte aligned */
@@ -38,7 +37,6 @@ _GLOBAL(memset)
 	clrldi	r5,r5,58
 	mtctr	r0
 	beq	5f
-	.balign 16
 4:	std	r4,0(r6)
 	std	r4,8(r6)
 	std	r4,16(r6)
@@ -51,7 +49,7 @@ _GLOBAL(memset)
 	bdnz	4b
 5:	srwi.	r0,r5,3
 	clrlwi	r5,r5,29
-	PPC_MTOCRF(1,r0)
+	PPC_MTOCRF	1,r0
 	beq	8f
 	bf	29,6f
 	std	r4,0(r6)
@@ -67,7 +65,7 @@ _GLOBAL(memset)
 	std	r4,0(r6)
 	addi	r6,r6,8
 8:	cmpwi	r5,0
-	PPC_MTOCRF(1,r5)
+	PPC_MTOCRF	1,r5
 	beqlr+
 	bf	29,9f
 	stw	r4,0(r6)
@@ -78,12 +76,11 @@ _GLOBAL(memset)
 10:	bflr	31
 	stb	r4,0(r6)
 	blr
-EXPORT_SYMBOL(memset)
 
-_GLOBAL_TOC(memmove)
+_GLOBAL(memmove)
 	cmplw	0,r3,r4
-	bgt	backwards_memcpy
-	b	memcpy
+	bgt	.backwards_memcpy
+	b	.memcpy
 
 _GLOBAL(backwards_memcpy)
 	rlwinm.	r7,r5,32-3,3,31		/* r0 = r5 >> 3 */
@@ -93,7 +90,6 @@ _GLOBAL(backwards_memcpy)
 	andi.	r0,r6,3
 	mtctr	r7
 	bne	5f
-	.balign 16
 1:	lwz	r7,-4(r4)
 	lwzu	r8,-8(r4)
 	stw	r7,-4(r6)
@@ -121,4 +117,3 @@ _GLOBAL(backwards_memcpy)
 	beq	2b
 	mtctr	r7
 	b	1b
-EXPORT_SYMBOL(memmove)

@@ -6,12 +6,12 @@
 #ifndef __LINE_H__
 #define __LINE_H__
 
-#include <linux/list.h>
-#include <linux/workqueue.h>
-#include <linux/tty.h>
-#include <linux/interrupt.h>
-#include <linux/spinlock.h>
-#include <linux/mutex.h>
+#include "linux/list.h"
+#include "linux/workqueue.h"
+#include "linux/tty.h"
+#include "linux/interrupt.h"
+#include "linux/spinlock.h"
+#include "linux/mutex.h"
 #include "chan_user.h"
 #include "mconsole_kern.h"
 
@@ -32,7 +32,9 @@ struct line_driver {
 };
 
 struct line {
-	struct tty_port port;
+	struct tty_struct *tty;
+	struct mutex count_lock;
+	unsigned long count;
 	int valid;
 
 	char *init_str;
@@ -57,11 +59,7 @@ struct line {
 };
 
 extern void line_close(struct tty_struct *tty, struct file * filp);
-extern int line_open(struct tty_struct *tty, struct file *filp);
-extern int line_install(struct tty_driver *driver, struct tty_struct *tty,
-	struct line *line);
-extern void line_cleanup(struct tty_struct *tty);
-extern void line_hangup(struct tty_struct *tty);
+extern int line_open(struct line *lines, struct tty_struct *tty);
 extern int line_setup(char **conf, unsigned nlines, char **def,
 		      char *init, char *name);
 extern int line_write(struct tty_struct *tty, const unsigned char *buf,
@@ -72,6 +70,8 @@ extern int line_chars_in_buffer(struct tty_struct *tty);
 extern void line_flush_buffer(struct tty_struct *tty);
 extern void line_flush_chars(struct tty_struct *tty);
 extern int line_write_room(struct tty_struct *tty);
+extern int line_ioctl(struct tty_struct *tty, unsigned int cmd,
+				unsigned long arg);
 extern void line_throttle(struct tty_struct *tty);
 extern void line_unthrottle(struct tty_struct *tty);
 

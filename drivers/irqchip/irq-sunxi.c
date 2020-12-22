@@ -1,143 +1,151 @@
 /*
- * SUNXI WakeupGen Source file
+ * Allwinner A1X SoCs IRQ chip driver.
  *
- * SUNXI WakeupGen is the interrupt controller extension used along
- * with ARM GIC to wake the CPU out from low power states on
- * external interrupts. It is responsible for generating wakeup
- * event from the incoming interrupts and enable bits. It is
- * implemented in PMU always ON power domain. During normal operation,
- * WakeupGen delivers external interrupts directly to the GIC.
+ * Copyright (C) 2012 Maxime Ripard
  *
- * Copyright (C) 2017 Allwinner Technology, Inc.
- *	fanqinghua <fanqinghua@allwinnertech.com>
+ * Maxime Ripard <maxime.ripard@free-electrons.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Based on code from
+ * Allwinner Technology Co., Ltd. <www.allwinnertech.com>
+ * Benn Huang <benn@allwinnertech.com>
+ *
+ * This file is licensed under the terms of the GNU General Public
+ * License version 2.  This program is licensed "as is" without any
+ * warranty of any kind, whether express or implied.
  */
 
-#include <linux/kernel.h>
-#include <linux/init.h>
 #include <linux/io.h>
 #include <linux/irq.h>
-#include <linux/irqchip.h>
-#include <linux/irqdomain.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/platform_device.h>
-#include <linux/cpu.h>
-#include <linux/notifier.h>
-#include <linux/cpu_pm.h>
-#include <linux/arisc/arisc.h>
+#include <linux/of_irq.h>
 
-#define GIC_SUPPORT_IRQS 1024
+#include <linux/irqchip/sunxi.h>
 
-static int sunxi_irq_set_wake(struct irq_data *d, unsigned int on)
+#define SUNXI_IRQ_VECTOR_REG		0x00
+#define SUNXI_IRQ_PROTECTION_REG	0x08
+#define SUNXI_IRQ_NMI_CTRL_REG		0x0c
+#define SUNXI_IRQ_PENDING_REG(x)	(0x10 + 0x4 * x)
+#define SUNXI_IRQ_FIQ_PENDING_REG(x)	(0x20 + 0x4 * x)
+#define SUNXI_IRQ_ENABLE_REG(x)		(0x40 + 0x4 * x)
+#define SUNXI_IRQ_MASK_REG(x)		(0x50 + 0x4 * x)
+
+static void __iomem *sunxi_irq_base;
+static struct irq_domain *sunxi_irq_domain;
+
+void sunxi_irq_ack(struct irq_data *irqd)
 {
-	if (on)
-		arisc_set_wakeup_source(SET_ROOT_WAKEUP_SOURCE(d->hwirq));
-	else
-		arisc_clear_wakeup_source(SET_ROOT_WAKEUP_SOURCE(d->hwirq));
-	/*
-	 * Do *not* call into the parent, as the GIC doesn't have any
-	 * wake-up facility...
-	 */
+	unsigned int irq = irqd_to_hwirq(irqd);
+	unsigned int irq_off = irq % 32;
+	int reg = irq / 32;
+	u32 val;
+
+	val = readl(sunxi_irq_base + SUNXI_IRQ_PENDING_REG(reg));
+	writel(val | (1 << irq_off),
+	       sunxi_irq_base + SUNXI_IRQ_PENDING_REG(reg));
+}
+
+static void sunxi_irq_mask(struct irq_data *irqd)
+{
+	unsigned int irq = irqd_to_hwirq(irqd);
+	unsigned int irq_off = irq % 32;
+	int reg = irq / 32;
+	u32 val;
+
+	val = readl(sunxi_irq_base + SUNXI_IRQ_ENABLE_REG(reg));
+	writel(val & ~(1 << irq_off),
+	       sunxi_irq_base + SUNXI_IRQ_ENABLE_REG(reg));
+}
+
+static void sunxi_irq_unmask(struct irq_data *irqd)
+{
+	unsigned int irq = irqd_to_hwirq(irqd);
+	unsigned int irq_off = irq % 32;
+	int reg = irq / 32;
+	u32 val;
+
+	val = readl(sunxi_irq_base + SUNXI_IRQ_ENABLE_REG(reg));
+	writel(val | (1 << irq_off),
+	       sunxi_irq_base + SUNXI_IRQ_ENABLE_REG(reg));
+}
+
+static struct irq_chip sunxi_irq_chip = {
+	.name		= "sunxi_irq",
+	.irq_ack	= sunxi_irq_ack,
+	.irq_mask	= sunxi_irq_mask,
+	.irq_unmask	= sunxi_irq_unmask,
+};
+
+static int sunxi_irq_map(struct irq_domain *d, unsigned int virq,
+			 irq_hw_number_t hw)
+{
+	irq_set_chip_and_handler(virq, &sunxi_irq_chip,
+				 handle_level_irq);
+	set_irq_flags(virq, IRQF_VALID | IRQF_PROBE);
+
 	return 0;
 }
 
-static struct irq_chip wakeupgen_chip = {
-	.name			= "wakeupgen",
-	.irq_enable		= irq_chip_enable_parent,
-	.irq_disable		= irq_chip_disable_parent,
-	.irq_eoi		= irq_chip_eoi_parent,
-	.irq_mask		= irq_chip_mask_parent,
-	.irq_unmask		= irq_chip_unmask_parent,
-	.irq_retrigger		= irq_chip_retrigger_hierarchy,
-	.irq_set_wake		= sunxi_irq_set_wake,
-	.irq_set_type           = irq_chip_set_type_parent,
-#ifdef CONFIG_SMP
-	.irq_set_affinity	= irq_chip_set_affinity_parent,
-#endif
+static struct irq_domain_ops sunxi_irq_ops = {
+	.map = sunxi_irq_map,
+	.xlate = irq_domain_xlate_onecell,
 };
 
-static int sunxi_domain_translate(struct irq_domain *d,
-				    struct irq_fwspec *fwspec,
-				    unsigned long *hwirq,
-				    unsigned int *type)
+static int __init sunxi_of_init(struct device_node *node,
+				struct device_node *parent)
 {
-	if (is_of_node(fwspec->fwnode)) {
-		if (fwspec->param_count != 3)
-			return -EINVAL;
+	sunxi_irq_base = of_iomap(node, 0);
+	if (!sunxi_irq_base)
+		panic("%s: unable to map IC registers\n",
+			node->full_name);
 
-		/* No PPI should point to this domain */
-		if (fwspec->param[0] != 0)
-			return -EINVAL;
+	/* Disable all interrupts */
+	writel(0, sunxi_irq_base + SUNXI_IRQ_ENABLE_REG(0));
+	writel(0, sunxi_irq_base + SUNXI_IRQ_ENABLE_REG(1));
+	writel(0, sunxi_irq_base + SUNXI_IRQ_ENABLE_REG(2));
 
-		*hwirq = fwspec->param[1];
-		*type = fwspec->param[2];
-		return 0;
-	}
+	/* Mask all the interrupts */
+	writel(0, sunxi_irq_base + SUNXI_IRQ_MASK_REG(0));
+	writel(0, sunxi_irq_base + SUNXI_IRQ_MASK_REG(1));
+	writel(0, sunxi_irq_base + SUNXI_IRQ_MASK_REG(2));
 
-	return -EINVAL;
-}
+	/* Clear all the pending interrupts */
+	writel(0xffffffff, sunxi_irq_base + SUNXI_IRQ_PENDING_REG(0));
+	writel(0xffffffff, sunxi_irq_base + SUNXI_IRQ_PENDING_REG(1));
+	writel(0xffffffff, sunxi_irq_base + SUNXI_IRQ_PENDING_REG(2));
 
-static int sunxi_domain_alloc(struct irq_domain *domain,
-				  unsigned int irq,
-				  unsigned int nr_irqs, void *data)
-{
-	struct irq_fwspec *fwspec = data;
-	struct irq_fwspec parent_fwspec;
-	irq_hw_number_t hwirq;
-	int i;
+	/* Enable protection mode */
+	writel(0x01, sunxi_irq_base + SUNXI_IRQ_PROTECTION_REG);
 
-	if (fwspec->param_count != 3)
-		return -EINVAL;	/* Not GIC compliant */
-	if (fwspec->param[0] != 0)
-		return -EINVAL;	/* No PPI should point to this domain */
+	/* Configure the external interrupt source type */
+	writel(0x00, sunxi_irq_base + SUNXI_IRQ_NMI_CTRL_REG);
 
-	hwirq = fwspec->param[1];
-	if (hwirq >= GIC_SUPPORT_IRQS)
-		return -EINVAL;	/* Can't deal with this */
-
-	for (i = 0; i < nr_irqs; i++)
-		irq_domain_set_hwirq_and_chip(domain, irq + i, hwirq + i,
-					      &wakeupgen_chip, NULL);
-
-	parent_fwspec = *fwspec;
-	parent_fwspec.fwnode = domain->parent->fwnode;
-	return irq_domain_alloc_irqs_parent(domain, irq, nr_irqs,
-					    &parent_fwspec);
-}
-
-static const struct irq_domain_ops sunxi_domain_ops = {
-	.translate	= sunxi_domain_translate,
-	.alloc		= sunxi_domain_alloc,
-	.free		= irq_domain_free_irqs_common,
-};
-
-static int __init wakeupgen_init(struct device_node *node,
-			       struct device_node *parent)
-{
-	struct irq_domain *parent_domain, *domain;
-
-	if (!parent) {
-		pr_err("%s: no parent, giving up\n", node->full_name);
-		return -ENODEV;
-	}
-
-	parent_domain = irq_find_host(parent);
-	if (!parent_domain) {
-		pr_err("%s: unable to obtain parent domain\n", node->full_name);
-		return -ENXIO;
-	}
-
-	domain = irq_domain_add_hierarchy(parent_domain, 0, GIC_SUPPORT_IRQS,
-					  node, &sunxi_domain_ops,
-					  NULL);
-	if (!domain) {
-		pr_err("%s: failed to allocated domain\n", node->full_name);
-		return -ENOMEM;
-	}
+	sunxi_irq_domain = irq_domain_add_linear(node, 3 * 32,
+						 &sunxi_irq_ops, NULL);
+	if (!sunxi_irq_domain)
+		panic("%s: unable to create IRQ domain\n", node->full_name);
 
 	return 0;
 }
-IRQCHIP_DECLARE(sunxi_wakeupgen, "allwinner,sunxi-wakeupgen", wakeupgen_init);
+
+static struct of_device_id sunxi_irq_dt_ids[] __initconst = {
+	{ .compatible = "allwinner,sunxi-ic", .data = sunxi_of_init },
+	{ }
+};
+
+void __init sunxi_init_irq(void)
+{
+	of_irq_init(sunxi_irq_dt_ids);
+}
+
+asmlinkage void __exception_irq_entry sunxi_handle_irq(struct pt_regs *regs)
+{
+	u32 irq, hwirq;
+
+	hwirq = readl(sunxi_irq_base + SUNXI_IRQ_VECTOR_REG) >> 2;
+	while (hwirq != 0) {
+		irq = irq_find_mapping(sunxi_irq_domain, hwirq);
+		handle_IRQ(irq, regs);
+		hwirq = readl(sunxi_irq_base + SUNXI_IRQ_VECTOR_REG) >> 2;
+	}
+}

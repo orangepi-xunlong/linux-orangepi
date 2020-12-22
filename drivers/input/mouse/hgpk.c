@@ -334,8 +334,11 @@ static bool hgpk_is_byte_valid(struct psmouse *psmouse, unsigned char *packet)
 
 	if (!valid)
 		psmouse_dbg(psmouse,
-			    "bad data, mode %d (%d) %*ph\n",
-			    priv->mode, pktcnt, 6, psmouse->packet);
+			    "bad data, mode %d (%d) %02x %02x %02x %02x %02x %02x\n",
+			    priv->mode, pktcnt,
+			    psmouse->packet[0], psmouse->packet[1],
+			    psmouse->packet[2], psmouse->packet[3],
+			    psmouse->packet[4], psmouse->packet[5]);
 
 	return valid;
 }
@@ -1027,7 +1030,7 @@ static enum hgpk_model_t hgpk_get_model(struct psmouse *psmouse)
 		return -EIO;
 	}
 
-	psmouse_dbg(psmouse, "ID: %*ph\n", 3, param);
+	psmouse_dbg(psmouse, "ID: %02x %02x %02x\n", param[0], param[1], param[2]);
 
 	/* HGPK signature: 0x67, 0x00, 0x<model> */
 	if (param[0] != 0x67 || param[1] != 0x00)

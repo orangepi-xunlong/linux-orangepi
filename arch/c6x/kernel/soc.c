@@ -80,7 +80,7 @@ int soc_mac_addr(unsigned int index, u8 *addr)
 		if (have_fuse_mac)
 			memcpy(addr, c6x_fuse_mac, 6);
 		else
-			eth_random_addr(addr);
+			random_ether_addr(addr);
 	}
 
 	/* adjust for specific EMAC device */

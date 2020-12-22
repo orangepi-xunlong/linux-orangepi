@@ -11,7 +11,7 @@ config TN3270
 config TN3270_TTY
 	def_tristate y
 	prompt "Support for tty input/output on 3270 terminals"
-	depends on TN3270 && TTY
+	depends on TN3270
 	help
 	  Include support for using an IBM 3270 terminal as a Linux tty.
 
@@ -33,7 +33,7 @@ config TN3270_CONSOLE
 config TN3215
 	def_bool y
 	prompt "Support for 3215 line mode terminal"
-	depends on CCW && TTY
+	depends on CCW
 	help
 	  Include support for IBM 3215 line-mode terminals.
 
@@ -51,7 +51,7 @@ config CCW_CONSOLE
 config SCLP_TTY
 	def_bool y
 	prompt "Support for SCLP line mode terminal"
-	depends on S390 && TTY
+	depends on S390
 	help
 	  Include support for IBM SCLP line-mode terminals.
 
@@ -66,7 +66,7 @@ config SCLP_CONSOLE
 config SCLP_VT220_TTY
 	def_bool y
 	prompt "Support for SCLP VT220-compatible terminal"
-	depends on S390 && TTY
+	depends on S390
 	help
 	  Include support for an IBM SCLP VT220-compatible terminal.
 
@@ -78,6 +78,19 @@ config SCLP_VT220_CONSOLE
 	  Include support for using an IBM SCLP VT220-compatible terminal as a
 	  Linux system console.
 
+config SCLP_CPI
+	def_tristate m
+	prompt "Control-Program Identification"
+	depends on S390
+	help
+	  This option enables the hardware console interface for system
+	  identification. This is commonly used for workload management and
+	  gives you a nice name for the system on the service element.
+	  Please select this option as a module since built-in operation is
+	  completely untested.
+	  You should only select this option if you know what you are doing,
+	  need this feature and intend to run your kernel in LPAR.
+
 config SCLP_ASYNC
 	def_tristate m
 	prompt "Support for Call Home via Asynchronous SCLP Records"
@@ -88,37 +101,6 @@ config SCLP_ASYNC
 	  You should only select this option if you know what you are doing,
 	  want for inform other people about your kernel panics,
 	  need this feature and intend to run your kernel in LPAR.
-
-config SCLP_ASYNC_ID
-       string "Component ID for Call Home"
-       depends on SCLP_ASYNC
-       default "000000000"
-       help
-	 The Component ID for Call Home is used to identify the correct
-	 problem reporting queue the call home records should be sent to.
-
-	 If your are unsure, please use the default value "000000000".
-
-config HMC_DRV
-	def_tristate m
-	prompt "Support for file transfers from HMC drive CD/DVD-ROM"
-	depends on S390
-	select CRC16
-	help
-	  This option enables support for file transfers from a Hardware
-	  Management Console (HMC) drive CD/DVD-ROM. It is available as a
-	  module, called 'hmcdrv', and also as kernel built-in. There is one
-	  optional parameter for this module: cachesize=N, which modifies the
-	  transfer cache size from it's default value 0.5MB to N bytes. If N
-	  is zero, then no caching is performed.
-
-config SCLP_OFB
-	def_bool n
-	prompt "Support for Open-for-Business SCLP Event"
-	depends on S390
-	help
-	  This option enables the Open-for-Business interface to the s390
-	  Service Element.
 
 config S390_TAPE
 	def_tristate m

@@ -116,7 +116,7 @@ static bool wm8988_writeable(struct device *dev, unsigned int reg)
 struct wm8988_priv {
 	struct regmap *regmap;
 	unsigned int sysclk;
-	const struct snd_pcm_hw_constraint_list *sysclk_constraints;
+	struct snd_pcm_hw_constraint_list *sysclk_constraints;
 };
 
 #define wm8988_reset(c)	snd_soc_write(c, WM8988_RESET, 0)
@@ -126,46 +126,46 @@ struct wm8988_priv {
  */
 
 static const char *bass_boost_txt[] = {"Linear Control", "Adaptive Boost"};
-static SOC_ENUM_SINGLE_DECL(bass_boost,
-			    WM8988_BASS, 7, bass_boost_txt);
+static const struct soc_enum bass_boost =
+	SOC_ENUM_SINGLE(WM8988_BASS, 7, 2, bass_boost_txt);
 
 static const char *bass_filter_txt[] = { "130Hz @ 48kHz", "200Hz @ 48kHz" };
-static SOC_ENUM_SINGLE_DECL(bass_filter,
-			    WM8988_BASS, 6, bass_filter_txt);
+static const struct soc_enum bass_filter =
+	SOC_ENUM_SINGLE(WM8988_BASS, 6, 2, bass_filter_txt);
 
 static const char *treble_txt[] = {"8kHz", "4kHz"};
-static SOC_ENUM_SINGLE_DECL(treble,
-			    WM8988_TREBLE, 6, treble_txt);
+static const struct soc_enum treble =
+	SOC_ENUM_SINGLE(WM8988_TREBLE, 6, 2, treble_txt);
 
 static const char *stereo_3d_lc_txt[] = {"200Hz", "500Hz"};
-static SOC_ENUM_SINGLE_DECL(stereo_3d_lc,
-			    WM8988_3D, 5, stereo_3d_lc_txt);
+static const struct soc_enum stereo_3d_lc =
+	SOC_ENUM_SINGLE(WM8988_3D, 5, 2, stereo_3d_lc_txt);
 
 static const char *stereo_3d_uc_txt[] = {"2.2kHz", "1.5kHz"};
-static SOC_ENUM_SINGLE_DECL(stereo_3d_uc,
-			    WM8988_3D, 6, stereo_3d_uc_txt);
+static const struct soc_enum stereo_3d_uc =
+	SOC_ENUM_SINGLE(WM8988_3D, 6, 2, stereo_3d_uc_txt);
 
 static const char *stereo_3d_func_txt[] = {"Capture", "Playback"};
-static SOC_ENUM_SINGLE_DECL(stereo_3d_func,
-			    WM8988_3D, 7, stereo_3d_func_txt);
+static const struct soc_enum stereo_3d_func =
+	SOC_ENUM_SINGLE(WM8988_3D, 7, 2, stereo_3d_func_txt);
 
 static const char *alc_func_txt[] = {"Off", "Right", "Left", "Stereo"};
-static SOC_ENUM_SINGLE_DECL(alc_func,
-			    WM8988_ALC1, 7, alc_func_txt);
+static const struct soc_enum alc_func =
+	SOC_ENUM_SINGLE(WM8988_ALC1, 7, 4, alc_func_txt);
 
 static const char *ng_type_txt[] = {"Constant PGA Gain",
 				    "Mute ADC Output"};
-static SOC_ENUM_SINGLE_DECL(ng_type,
-			    WM8988_NGATE, 1, ng_type_txt);
+static const struct soc_enum ng_type =
+	SOC_ENUM_SINGLE(WM8988_NGATE, 1, 2, ng_type_txt);
 
 static const char *deemph_txt[] = {"None", "32Khz", "44.1Khz", "48Khz"};
-static SOC_ENUM_SINGLE_DECL(deemph,
-			    WM8988_ADCDAC, 1, deemph_txt);
+static const struct soc_enum deemph =
+	SOC_ENUM_SINGLE(WM8988_ADCDAC, 1, 4, deemph_txt);
 
 static const char *adcpol_txt[] = {"Normal", "L Invert", "R Invert",
 				   "L + R Invert"};
-static SOC_ENUM_SINGLE_DECL(adcpol,
-			    WM8988_ADCDAC, 5, adcpol_txt);
+static const struct soc_enum adcpol =
+	SOC_ENUM_SINGLE(WM8988_ADCDAC, 5, 4, adcpol_txt);
 
 static const DECLARE_TLV_DB_SCALE(pga_tlv, -1725, 75, 0);
 static const DECLARE_TLV_DB_SCALE(adc_tlv, -9750, 50, 1);
@@ -244,7 +244,7 @@ SOC_DOUBLE_R_TLV("Output 2 Playback Volume", WM8988_LOUT2V, WM8988_ROUT2V,
 static int wm8988_lrc_control(struct snd_soc_dapm_widget *w,
 			      struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct snd_soc_codec *codec = w->codec;
 	u16 adctl2 = snd_soc_read(codec, WM8988_ADCTL2);
 
 	/* Use the DAC to gate LRC if active, otherwise use ADC */
@@ -268,7 +268,7 @@ static const struct soc_enum wm8988_lline_enum =
 			      wm8988_line_texts,
 			      wm8988_line_values);
 static const struct snd_kcontrol_new wm8988_left_line_controls =
-	SOC_DAPM_ENUM("Route", wm8988_lline_enum);
+	SOC_DAPM_VALUE_ENUM("Route", wm8988_lline_enum);
 
 static const struct soc_enum wm8988_rline_enum =
 	SOC_VALUE_ENUM_SINGLE(WM8988_ROUTM1, 0, 7,
@@ -276,7 +276,7 @@ static const struct soc_enum wm8988_rline_enum =
 			      wm8988_line_texts,
 			      wm8988_line_values);
 static const struct snd_kcontrol_new wm8988_right_line_controls =
-	SOC_DAPM_ENUM("Route", wm8988_lline_enum);
+	SOC_DAPM_VALUE_ENUM("Route", wm8988_lline_enum);
 
 /* Left Mixer */
 static const struct snd_kcontrol_new wm8988_left_mixer_controls[] = {
@@ -304,7 +304,7 @@ static const struct soc_enum wm8988_lpga_enum =
 			      wm8988_pga_sel,
 			      wm8988_pga_val);
 static const struct snd_kcontrol_new wm8988_left_pga_controls =
-	SOC_DAPM_ENUM("Route", wm8988_lpga_enum);
+	SOC_DAPM_VALUE_ENUM("Route", wm8988_lpga_enum);
 
 /* Right PGA Mux */
 static const struct soc_enum wm8988_rpga_enum =
@@ -313,20 +313,20 @@ static const struct soc_enum wm8988_rpga_enum =
 			      wm8988_pga_sel,
 			      wm8988_pga_val);
 static const struct snd_kcontrol_new wm8988_right_pga_controls =
-	SOC_DAPM_ENUM("Route", wm8988_rpga_enum);
+	SOC_DAPM_VALUE_ENUM("Route", wm8988_rpga_enum);
 
 /* Differential Mux */
 static const char *wm8988_diff_sel[] = {"Line 1", "Line 2"};
-static SOC_ENUM_SINGLE_DECL(diffmux,
-			    WM8988_ADCIN, 8, wm8988_diff_sel);
+static const struct soc_enum diffmux =
+	SOC_ENUM_SINGLE(WM8988_ADCIN, 8, 2, wm8988_diff_sel);
 static const struct snd_kcontrol_new wm8988_diffmux_controls =
 	SOC_DAPM_ENUM("Route", diffmux);
 
 /* Mono ADC Mux */
 static const char *wm8988_mono_mux[] = {"Stereo", "Mono (Left)",
 	"Mono (Right)", "Digital Mono"};
-static SOC_ENUM_SINGLE_DECL(monomux,
-			    WM8988_ADCIN, 6, wm8988_mono_mux);
+static const struct soc_enum monomux =
+	SOC_ENUM_SINGLE(WM8988_ADCIN, 6, 4, wm8988_mono_mux);
 static const struct snd_kcontrol_new wm8988_monomux_controls =
 	SOC_DAPM_ENUM("Route", monomux);
 
@@ -521,30 +521,30 @@ static inline int get_coeff(int mclk, int rate)
 
 /* The set of rates we can generate from the above for each SYSCLK */
 
-static const unsigned int rates_12288[] = {
+static unsigned int rates_12288[] = {
 	8000, 12000, 16000, 24000, 24000, 32000, 48000, 96000,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_12288 = {
+static struct snd_pcm_hw_constraint_list constraints_12288 = {
 	.count	= ARRAY_SIZE(rates_12288),
 	.list	= rates_12288,
 };
 
-static const unsigned int rates_112896[] = {
+static unsigned int rates_112896[] = {
 	8000, 11025, 22050, 44100,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_112896 = {
+static struct snd_pcm_hw_constraint_list constraints_112896 = {
 	.count	= ARRAY_SIZE(rates_112896),
 	.list	= rates_112896,
 };
 
-static const unsigned int rates_12[] = {
+static unsigned int rates_12[] = {
 	8000, 11025, 12000, 16000, 22050, 2400, 32000, 41100, 48000,
 	48000, 88235, 96000,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_12 = {
+static struct snd_pcm_hw_constraint_list constraints_12 = {
 	.count	= ARRAY_SIZE(rates_12),
 	.list	= rates_12,
 };
@@ -668,7 +668,8 @@ static int wm8988_pcm_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params,
 				struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
 	struct wm8988_priv *wm8988 = snd_soc_codec_get_drvdata(codec);
 	u16 iface = snd_soc_read(codec, WM8988_IFACE) & 0x1f3;
 	u16 srate = snd_soc_read(codec, WM8988_SRATE) & 0x180;
@@ -687,16 +688,16 @@ static int wm8988_pcm_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* bit size */
-	switch (params_width(params)) {
-	case 16:
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
 		break;
-	case 20:
+	case SNDRV_PCM_FORMAT_S20_3LE:
 		iface |= 0x0004;
 		break;
-	case 24:
+	case SNDRV_PCM_FORMAT_S24_LE:
 		iface |= 0x0008;
 		break;
-	case 32:
+	case SNDRV_PCM_FORMAT_S32_LE:
 		iface |= 0x000c;
 		break;
 	}
@@ -738,7 +739,7 @@ static int wm8988_set_bias_level(struct snd_soc_codec *codec,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			regcache_sync(wm8988->regmap);
 
 			/* VREF, VMID=2x5k */
@@ -756,6 +757,7 @@ static int wm8988_set_bias_level(struct snd_soc_codec *codec,
 		snd_soc_write(codec, WM8988_PWR1, 0x0000);
 		break;
 	}
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -792,9 +794,32 @@ static struct snd_soc_dai_driver wm8988_dai = {
 	.symmetric_rates = 1,
 };
 
+static int wm8988_suspend(struct snd_soc_codec *codec)
+{
+	struct wm8988_priv *wm8988 = snd_soc_codec_get_drvdata(codec);
+
+	wm8988_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	regcache_mark_dirty(wm8988->regmap);
+	return 0;
+}
+
+static int wm8988_resume(struct snd_soc_codec *codec)
+{
+	wm8988_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	return 0;
+}
+
 static int wm8988_probe(struct snd_soc_codec *codec)
 {
+	struct wm8988_priv *wm8988 = snd_soc_codec_get_drvdata(codec);
 	int ret = 0;
+
+	codec->control_data = wm8988->regmap;
+	ret = snd_soc_codec_set_cache_io(codec, 7, 9, SND_SOC_REGMAP);
+	if (ret < 0) {
+		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
+		return ret;
+	}
 
 	ret = wm8988_reset(codec);
 	if (ret < 0) {
@@ -809,25 +834,33 @@ static int wm8988_probe(struct snd_soc_codec *codec)
 	snd_soc_update_bits(codec, WM8988_ROUT2V, 0x0100, 0x0100);
 	snd_soc_update_bits(codec, WM8988_RINVOL, 0x0100, 0x0100);
 
+	wm8988_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+
 	return 0;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8988 = {
-	.probe =	wm8988_probe,
-	.set_bias_level = wm8988_set_bias_level,
-	.suspend_bias_off = true,
+static int wm8988_remove(struct snd_soc_codec *codec)
+{
+	wm8988_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	return 0;
+}
 
-	.component_driver = {
-		.controls		= wm8988_snd_controls,
-		.num_controls		= ARRAY_SIZE(wm8988_snd_controls),
-		.dapm_widgets		= wm8988_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(wm8988_dapm_widgets),
-		.dapm_routes		= wm8988_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(wm8988_dapm_routes),
-	},
+static struct snd_soc_codec_driver soc_codec_dev_wm8988 = {
+	.probe =	wm8988_probe,
+	.remove =	wm8988_remove,
+	.suspend =	wm8988_suspend,
+	.resume =	wm8988_resume,
+	.set_bias_level = wm8988_set_bias_level,
+
+	.controls = wm8988_snd_controls,
+	.num_controls = ARRAY_SIZE(wm8988_snd_controls),
+	.dapm_widgets = wm8988_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(wm8988_dapm_widgets),
+	.dapm_routes = wm8988_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(wm8988_dapm_routes),
 };
 
-static const struct regmap_config wm8988_regmap = {
+static struct regmap_config wm8988_regmap = {
 	.reg_bits = 7,
 	.val_bits = 9,
 
@@ -840,7 +873,7 @@ static const struct regmap_config wm8988_regmap = {
 };
 
 #if defined(CONFIG_SPI_MASTER)
-static int wm8988_spi_probe(struct spi_device *spi)
+static int __devinit wm8988_spi_probe(struct spi_device *spi)
 {
 	struct wm8988_priv *wm8988;
 	int ret;
@@ -850,7 +883,7 @@ static int wm8988_spi_probe(struct spi_device *spi)
 	if (wm8988 == NULL)
 		return -ENOMEM;
 
-	wm8988->regmap = devm_regmap_init_spi(spi, &wm8988_regmap);
+	wm8988->regmap = regmap_init_spi(spi, &wm8988_regmap);
 	if (IS_ERR(wm8988->regmap)) {
 		ret = PTR_ERR(wm8988->regmap);
 		dev_err(&spi->dev, "Failed to init regmap: %d\n", ret);
@@ -861,27 +894,33 @@ static int wm8988_spi_probe(struct spi_device *spi)
 
 	ret = snd_soc_register_codec(&spi->dev,
 			&soc_codec_dev_wm8988, &wm8988_dai, 1);
+	if (ret != 0)
+		regmap_exit(wm8988->regmap);
+
 	return ret;
 }
 
-static int wm8988_spi_remove(struct spi_device *spi)
+static int __devexit wm8988_spi_remove(struct spi_device *spi)
 {
+	struct wm8988_priv *wm8988 = spi_get_drvdata(spi);
 	snd_soc_unregister_codec(&spi->dev);
+	regmap_exit(wm8988->regmap);
 	return 0;
 }
 
 static struct spi_driver wm8988_spi_driver = {
 	.driver = {
 		.name	= "wm8988",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= wm8988_spi_probe,
-	.remove		= wm8988_spi_remove,
+	.remove		= __devexit_p(wm8988_spi_remove),
 };
 #endif /* CONFIG_SPI_MASTER */
 
-#if IS_ENABLED(CONFIG_I2C)
-static int wm8988_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
+static __devinit int wm8988_i2c_probe(struct i2c_client *i2c,
+				      const struct i2c_device_id *id)
 {
 	struct wm8988_priv *wm8988;
 	int ret;
@@ -893,7 +932,7 @@ static int wm8988_i2c_probe(struct i2c_client *i2c,
 
 	i2c_set_clientdata(i2c, wm8988);
 
-	wm8988->regmap = devm_regmap_init_i2c(i2c, &wm8988_regmap);
+	wm8988->regmap = regmap_init_i2c(i2c, &wm8988_regmap);
 	if (IS_ERR(wm8988->regmap)) {
 		ret = PTR_ERR(wm8988->regmap);
 		dev_err(&i2c->dev, "Failed to init regmap: %d\n", ret);
@@ -902,12 +941,17 @@ static int wm8988_i2c_probe(struct i2c_client *i2c,
 
 	ret =  snd_soc_register_codec(&i2c->dev,
 			&soc_codec_dev_wm8988, &wm8988_dai, 1);
+	if (ret != 0)
+		regmap_exit(wm8988->regmap);
+
 	return ret;
 }
 
-static int wm8988_i2c_remove(struct i2c_client *client)
+static __devexit int wm8988_i2c_remove(struct i2c_client *client)
 {
+	struct wm8988_priv *wm8988 = i2c_get_clientdata(client);
 	snd_soc_unregister_codec(&client->dev);
+	regmap_exit(wm8988->regmap);
 	return 0;
 }
 
@@ -920,9 +964,10 @@ MODULE_DEVICE_TABLE(i2c, wm8988_i2c_id);
 static struct i2c_driver wm8988_i2c_driver = {
 	.driver = {
 		.name = "wm8988",
+		.owner = THIS_MODULE,
 	},
 	.probe =    wm8988_i2c_probe,
-	.remove =   wm8988_i2c_remove,
+	.remove =   __devexit_p(wm8988_i2c_remove),
 	.id_table = wm8988_i2c_id,
 };
 #endif
@@ -930,7 +975,7 @@ static struct i2c_driver wm8988_i2c_driver = {
 static int __init wm8988_modinit(void)
 {
 	int ret = 0;
-#if IS_ENABLED(CONFIG_I2C)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
 	ret = i2c_add_driver(&wm8988_i2c_driver);
 	if (ret != 0) {
 		printk(KERN_ERR "Failed to register WM8988 I2C driver: %d\n",
@@ -950,7 +995,7 @@ module_init(wm8988_modinit);
 
 static void __exit wm8988_exit(void)
 {
-#if IS_ENABLED(CONFIG_I2C)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
 	i2c_del_driver(&wm8988_i2c_driver);
 #endif
 #if defined(CONFIG_SPI_MASTER)

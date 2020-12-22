@@ -299,7 +299,7 @@ static inline void reuse_entry(struct l2t_entry *e, struct neighbour *neigh)
 }
 
 struct l2t_entry *t3_l2t_get(struct t3cdev *cdev, struct dst_entry *dst,
-			     struct net_device *dev, const void *daddr)
+			     struct net_device *dev)
 {
 	struct l2t_entry *e = NULL;
 	struct neighbour *neigh;
@@ -311,7 +311,7 @@ struct l2t_entry *t3_l2t_get(struct t3cdev *cdev, struct dst_entry *dst,
 	int smt_idx;
 
 	rcu_read_lock();
-	neigh = dst_neigh_lookup(dst, daddr);
+	neigh = dst_get_neighbour_noref(dst);
 	if (!neigh)
 		goto done_rcu;
 
@@ -360,8 +360,6 @@ struct l2t_entry *t3_l2t_get(struct t3cdev *cdev, struct dst_entry *dst,
 done_unlock:
 	write_unlock_bh(&d->lock);
 done_rcu:
-	if (neigh)
-		neigh_release(neigh);
 	rcu_read_unlock();
 	return e;
 }
@@ -429,7 +427,7 @@ found:
 		} else {
 			e->state = neigh->nud_state & NUD_CONNECTED ?
 			    L2T_STATE_VALID : L2T_STATE_STALE;
-			if (!ether_addr_equal(e->dmac, neigh->ha))
+			if (memcmp(e->dmac, neigh->ha, 6))
 				setup_l2e_send_pending(dev, NULL, e);
 		}
 	}

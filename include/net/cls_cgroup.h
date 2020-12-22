@@ -16,73 +16,55 @@
 #include <linux/cgroup.h>
 #include <linux/hardirq.h>
 #include <linux/rcupdate.h>
-#include <net/sock.h>
-#include <net/inet_sock.h>
 
-#ifdef CONFIG_CGROUP_NET_CLASSID
-struct cgroup_cls_state {
+#ifdef CONFIG_CGROUPS
+struct cgroup_cls_state
+{
 	struct cgroup_subsys_state css;
 	u32 classid;
 };
 
-struct cgroup_cls_state *task_cls_state(struct task_struct *p);
-
+#ifdef CONFIG_NET_CLS_CGROUP
 static inline u32 task_cls_classid(struct task_struct *p)
 {
-	u32 classid;
+	int classid;
 
 	if (in_interrupt())
 		return 0;
 
 	rcu_read_lock();
-	classid = container_of(task_css(p, net_cls_cgrp_id),
+	classid = container_of(task_subsys_state(p, net_cls_subsys_id),
 			       struct cgroup_cls_state, css)->classid;
 	rcu_read_unlock();
 
 	return classid;
 }
+#else
+extern int net_cls_subsys_id;
 
-static inline void sock_update_classid(struct sock_cgroup_data *skcd)
+static inline u32 task_cls_classid(struct task_struct *p)
 {
-	u32 classid;
+	int id;
+	u32 classid = 0;
 
-	classid = task_cls_classid(current);
-	sock_cgroup_set_classid(skcd, classid);
-}
+	if (in_interrupt())
+		return 0;
 
-static inline u32 task_get_classid(const struct sk_buff *skb)
-{
-	u32 classid = task_cls_state(current)->classid;
-
-	/* Due to the nature of the classifier it is required to ignore all
-	 * packets originating from softirq context as accessing `current'
-	 * would lead to false results.
-	 *
-	 * This test assumes that all callers of dev_queue_xmit() explicitly
-	 * disable bh. Knowing this, it is possible to detect softirq based
-	 * calls by looking at the number of nested bh disable calls because
-	 * softirqs always disables bh.
-	 */
-	if (in_serving_softirq()) {
-		struct sock *sk = skb_to_full_sk(skb);
-
-		/* If there is an sock_cgroup_classid we'll use that. */
-		if (!sk || !sk_fullsock(sk))
-			return 0;
-
-		classid = sock_cgroup_classid(&sk->sk_cgrp_data);
-	}
+	rcu_read_lock();
+	id = rcu_dereference_index_check(net_cls_subsys_id,
+					 rcu_read_lock_held());
+	if (id >= 0)
+		classid = container_of(task_subsys_state(p, id),
+				       struct cgroup_cls_state, css)->classid;
+	rcu_read_unlock();
 
 	return classid;
 }
-#else /* !CONFIG_CGROUP_NET_CLASSID */
-static inline void sock_update_classid(struct sock_cgroup_data *skcd)
-{
-}
-
-static inline u32 task_get_classid(const struct sk_buff *skb)
+#endif
+#else
+static inline u32 task_cls_classid(struct task_struct *p)
 {
 	return 0;
 }
-#endif /* CONFIG_CGROUP_NET_CLASSID */
+#endif
 #endif  /* _NET_CLS_CGROUP_H */

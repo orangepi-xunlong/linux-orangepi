@@ -72,7 +72,6 @@ struct cpu_hw_events {
 	atomic_t		ctr_set[CPUMF_CTR_SET_MAX];
 	u64			state, tx_state;
 	unsigned int		flags;
-	unsigned int		txn_flags;
 };
 static DEFINE_PER_CPU(struct cpu_hw_events, cpu_hw_events) = {
 	.ctr_set = {
@@ -83,7 +82,6 @@ static DEFINE_PER_CPU(struct cpu_hw_events, cpu_hw_events) = {
 	},
 	.state = 0,
 	.flags = 0,
-	.txn_flags = 0,
 };
 
 static int get_counter_set(u64 event)
@@ -96,7 +94,7 @@ static int get_counter_set(u64 event)
 		set = CPUMF_CTR_SET_USER;
 	else if (event < 128)
 		set = CPUMF_CTR_SET_CRYPTO;
-	else if (event < 256)
+	else if (event < 160)
 		set = CPUMF_CTR_SET_EXT;
 
 	return set;
@@ -140,10 +138,6 @@ static int validate_ctr_version(const struct hw_perf_event *hwc)
 	case CPUMF_CTR_SET_EXT:
 		if (cpuhw->info.csvn < 1)
 			err = -EOPNOTSUPP;
-		if ((cpuhw->info.csvn == 1 && hwc->config > 159) ||
-		    (cpuhw->info.csvn == 2 && hwc->config > 175) ||
-		    (cpuhw->info.csvn  > 2 && hwc->config > 255))
-			err = -EOPNOTSUPP;
 		break;
 	}
 
@@ -159,14 +153,10 @@ static int validate_ctr_auth(const struct hw_perf_event *hwc)
 
 	cpuhw = &get_cpu_var(cpu_hw_events);
 
-	/* Check authorization for cpu counter sets.
-	 * If the particular CPU counter set is not authorized,
-	 * return with -ENOENT in order to fall back to other
-	 * PMUs that might suffice the event request.
-	 */
+	/* check authorization for cpu counter sets */
 	ctrs_state = cpumf_state_ctl[hwc->config_base];
 	if (!(ctrs_state & cpuhw->info.auth_ctl))
-		err = -ENOENT;
+		err = -EPERM;
 
 	put_cpu_var(cpu_hw_events);
 	return err;
@@ -179,7 +169,7 @@ static int validate_ctr_auth(const struct hw_perf_event *hwc)
  */
 static void cpumf_pmu_enable(struct pmu *pmu)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 	int err;
 
 	if (cpuhw->flags & PMU_F_ENABLED)
@@ -202,7 +192,7 @@ static void cpumf_pmu_enable(struct pmu *pmu)
  */
 static void cpumf_pmu_disable(struct pmu *pmu)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 	int err;
 	u64 inactive;
 
@@ -235,8 +225,8 @@ static void cpumf_measurement_alert(struct ext_code ext_code,
 	if (!(alert & CPU_MF_INT_CF_MASK))
 		return;
 
-	inc_irq_stat(IRQEXT_CMC);
-	cpuhw = this_cpu_ptr(&cpu_hw_events);
+	kstat_cpu(smp_processor_id()).irqs[EXTINT_CPM]++;
+	cpuhw = &__get_cpu_var(cpu_hw_events);
 
 	/* Measurement alerts are shared and might happen when the PMU
 	 * is not reserved.  Ignore these alerts in this case. */
@@ -256,7 +246,7 @@ static void cpumf_measurement_alert(struct ext_code ext_code,
 #define PMC_RELEASE   1
 static void setup_pmc_cpu(void *flags)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 
 	switch (*((int *) flags)) {
 	case PMC_INIT:
@@ -280,7 +270,7 @@ static int reserve_pmc_hardware(void)
 	int flags = PMC_INIT;
 
 	on_each_cpu(setup_pmc_cpu, &flags, 1);
-	irq_subclass_register(IRQ_SUBCLASS_MEASUREMENT_ALERT);
+	measurement_alert_subclass_register();
 
 	return 0;
 }
@@ -291,7 +281,7 @@ static void release_pmc_hardware(void)
 	int flags = PMC_RELEASE;
 
 	on_each_cpu(setup_pmc_cpu, &flags, 1);
-	irq_subclass_unregister(IRQ_SUBCLASS_MEASUREMENT_ALERT);
+	measurement_alert_subclass_unregister();
 }
 
 /* Release the PMU if event is the last perf event */
@@ -344,8 +334,6 @@ static int __hw_perf_event_init(struct perf_event *event)
 		break;
 
 	case PERF_TYPE_HARDWARE:
-		if (is_sampling_event(event))	/* No sampling support */
-			return -ENOENT;
 		ev = attr->config;
 		/* Count user space (problem-state) only */
 		if (!attr->exclude_user && attr->exclude_kernel) {
@@ -375,6 +363,13 @@ static int __hw_perf_event_init(struct perf_event *event)
 	if (ev >= PERF_CPUM_CF_MAX_CTR)
 		return -EINVAL;
 
+	/* The CPU measurement counter facility does not have any interrupts
+	 * to do sampling.  Sampling must be provided by external means,
+	 * for example, by timers.
+	 */
+	if (hwc->sample_period)
+		return -EINVAL;
+
 	/* Use the hardware perf event structure to store the counter number
 	 * in 'config' member and the counter set to which the counter belongs
 	 * in the 'config_base'.  The counter set (config_base) is then used
@@ -385,7 +380,7 @@ static int __hw_perf_event_init(struct perf_event *event)
 
 	/* Validate the counter that is assigned to this event.
 	 * Because the counter facility can use numerous counters at the
-	 * same time without constraints, it is not necessary to explicitly
+	 * same time without constraints, it is not necessary to explicity
 	 * validate event groups (event->group_leader != event).
 	 */
 	err = validate_event(hwc);
@@ -483,7 +478,7 @@ static void cpumf_pmu_read(struct perf_event *event)
 
 static void cpumf_pmu_start(struct perf_event *event, int flags)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 	struct hw_perf_event *hwc = &event->hw;
 
 	if (WARN_ON_ONCE(!(hwc->state & PERF_HES_STOPPED)))
@@ -514,7 +509,7 @@ static void cpumf_pmu_start(struct perf_event *event, int flags)
 
 static void cpumf_pmu_stop(struct perf_event *event, int flags)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 	struct hw_perf_event *hwc = &event->hw;
 
 	if (!(hwc->state & PERF_HES_STOPPED)) {
@@ -535,16 +530,16 @@ static void cpumf_pmu_stop(struct perf_event *event, int flags)
 
 static int cpumf_pmu_add(struct perf_event *event, int flags)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 
 	/* Check authorization for the counter set to which this
 	 * counter belongs.
 	 * For group events transaction, the authorization check is
 	 * done in cpumf_pmu_commit_txn().
 	 */
-	if (!(cpuhw->txn_flags & PERF_PMU_TXN_ADD))
+	if (!(cpuhw->flags & PERF_EVENT_TXN))
 		if (validate_ctr_auth(&event->hw))
-			return -ENOENT;
+			return -EPERM;
 
 	ctr_set_enable(&cpuhw->state, event->hw.config_base);
 	event->hw.state = PERF_HES_UPTODATE | PERF_HES_STOPPED;
@@ -559,7 +554,7 @@ static int cpumf_pmu_add(struct perf_event *event, int flags)
 
 static void cpumf_pmu_del(struct perf_event *event, int flags)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 
 	cpumf_pmu_stop(event, PERF_EF_UPDATE);
 
@@ -580,22 +575,13 @@ static void cpumf_pmu_del(struct perf_event *event, int flags)
 /*
  * Start group events scheduling transaction.
  * Set flags to perform a single test at commit time.
- *
- * We only support PERF_PMU_TXN_ADD transactions. Save the
- * transaction flags but otherwise ignore non-PERF_PMU_TXN_ADD
- * transactions.
  */
-static void cpumf_pmu_start_txn(struct pmu *pmu, unsigned int txn_flags)
+static void cpumf_pmu_start_txn(struct pmu *pmu)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
-
-	WARN_ON_ONCE(cpuhw->txn_flags);		/* txn already in flight */
-
-	cpuhw->txn_flags = txn_flags;
-	if (txn_flags & ~PERF_PMU_TXN_ADD)
-		return;
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 
 	perf_pmu_disable(pmu);
+	cpuhw->flags |= PERF_EVENT_TXN;
 	cpuhw->tx_state = cpuhw->state;
 }
 
@@ -606,18 +592,11 @@ static void cpumf_pmu_start_txn(struct pmu *pmu, unsigned int txn_flags)
  */
 static void cpumf_pmu_cancel_txn(struct pmu *pmu)
 {
-	unsigned int txn_flags;
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
-
-	WARN_ON_ONCE(!cpuhw->txn_flags);	/* no txn in flight */
-
-	txn_flags = cpuhw->txn_flags;
-	cpuhw->txn_flags = 0;
-	if (txn_flags & ~PERF_PMU_TXN_ADD)
-		return;
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 
 	WARN_ON(cpuhw->tx_state != cpuhw->state);
 
+	cpuhw->flags &= ~PERF_EVENT_TXN;
 	perf_pmu_enable(pmu);
 }
 
@@ -628,31 +607,22 @@ static void cpumf_pmu_cancel_txn(struct pmu *pmu)
  */
 static int cpumf_pmu_commit_txn(struct pmu *pmu)
 {
-	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
+	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
 	u64 state;
-
-	WARN_ON_ONCE(!cpuhw->txn_flags);	/* no txn in flight */
-
-	if (cpuhw->txn_flags & ~PERF_PMU_TXN_ADD) {
-		cpuhw->txn_flags = 0;
-		return 0;
-	}
 
 	/* check if the updated state can be scheduled */
 	state = cpuhw->state & ~((1 << CPUMF_LCCTL_ENABLE_SHIFT) - 1);
 	state >>= CPUMF_LCCTL_ENABLE_SHIFT;
 	if ((state & cpuhw->info.auth_ctl) != state)
-		return -ENOENT;
+		return -EPERM;
 
-	cpuhw->txn_flags = 0;
+	cpuhw->flags &= ~PERF_EVENT_TXN;
 	perf_pmu_enable(pmu);
 	return 0;
 }
 
 /* Performance monitoring unit for s390x */
 static struct pmu cpumf_pmu = {
-	.task_ctx_nr  = perf_sw_context,
-	.capabilities = PERF_PMU_CAP_NO_INTERRUPT,
 	.pmu_enable   = cpumf_pmu_enable,
 	.pmu_disable  = cpumf_pmu_disable,
 	.event_init   = cpumf_pmu_event_init,
@@ -666,22 +636,26 @@ static struct pmu cpumf_pmu = {
 	.cancel_txn   = cpumf_pmu_cancel_txn,
 };
 
-static int cpumf_pmf_setup(unsigned int cpu, int flags)
+static int __cpuinit cpumf_pmu_notifier(struct notifier_block *self,
+					unsigned long action, void *hcpu)
 {
-	local_irq_disable();
-	setup_pmc_cpu(&flags);
-	local_irq_enable();
-	return 0;
-}
+	unsigned int cpu = (long) hcpu;
+	int flags;
 
-static int s390_pmu_online_cpu(unsigned int cpu)
-{
-	return cpumf_pmf_setup(cpu, PMC_INIT);
-}
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_ONLINE:
+		flags = PMC_INIT;
+		smp_call_function_single(cpu, setup_pmc_cpu, &flags, 1);
+		break;
+	case CPU_DOWN_PREPARE:
+		flags = PMC_RELEASE;
+		smp_call_function_single(cpu, setup_pmc_cpu, &flags, 1);
+		break;
+	default:
+		break;
+	}
 
-static int s390_pmu_offline_cpu(unsigned int cpu)
-{
-	return cpumf_pmf_setup(cpu, PMC_RELEASE);
+	return NOTIFY_OK;
 }
 
 static int __init cpumf_pmu_init(void)
@@ -696,24 +670,21 @@ static int __init cpumf_pmu_init(void)
 	ctl_clear_bit(0, 48);
 
 	/* register handler for measurement-alert interruptions */
-	rc = register_external_irq(EXT_IRQ_MEASURE_ALERT,
-				   cpumf_measurement_alert);
+	rc = register_external_interrupt(0x1407, cpumf_measurement_alert);
 	if (rc) {
 		pr_err("Registering for CPU-measurement alerts "
 		       "failed with rc=%i\n", rc);
-		return rc;
+		goto out;
 	}
 
-	cpumf_pmu.attr_groups = cpumf_cf_event_group();
 	rc = perf_pmu_register(&cpumf_pmu, "cpum_cf", PERF_TYPE_RAW);
 	if (rc) {
 		pr_err("Registering the cpum_cf PMU failed with rc=%i\n", rc);
-		unregister_external_irq(EXT_IRQ_MEASURE_ALERT,
-					cpumf_measurement_alert);
-		return rc;
+		unregister_external_interrupt(0x1407, cpumf_measurement_alert);
+		goto out;
 	}
-	return cpuhp_setup_state(CPUHP_AP_PERF_S390_CF_ONLINE,
-				 "AP_PERF_S390_CF_ONLINE",
-				 s390_pmu_online_cpu, s390_pmu_offline_cpu);
+	perf_cpu_notifier(cpumf_pmu_notifier);
+out:
+	return rc;
 }
 early_initcall(cpumf_pmu_init);

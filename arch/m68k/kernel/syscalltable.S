@@ -22,7 +22,7 @@ ALIGN
 ENTRY(sys_call_table)
 	.long sys_restart_syscall	/* 0 - old "setup()" system call, used for restarting */
 	.long sys_exit
-	.long __sys_fork
+	.long sys_fork
 	.long sys_read
 	.long sys_write
 	.long sys_open			/* 5 */
@@ -140,7 +140,7 @@ ENTRY(sys_call_table)
 	.long sys_ipc
 	.long sys_fsync
 	.long sys_sigreturn
-	.long __sys_clone		/* 120 */
+	.long sys_clone			/* 120 */
 	.long sys_setdomainname
 	.long sys_newuname
 	.long sys_cacheflush		/* modify_ldt for i386 */
@@ -210,7 +210,7 @@ ENTRY(sys_call_table)
 	.long sys_sendfile
 	.long sys_ni_syscall		/* streams1 */
 	.long sys_ni_syscall		/* streams2 */
-	.long __sys_vfork		/* 190 */
+	.long sys_vfork			/* 190 */
 	.long sys_getrlimit
 	.long sys_mmap2
 	.long sys_truncate64
@@ -367,35 +367,4 @@ ENTRY(sys_call_table)
 	.long sys_setns
 	.long sys_process_vm_readv	/* 345 */
 	.long sys_process_vm_writev
-	.long sys_kcmp
-	.long sys_finit_module
-	.long sys_sched_setattr
-	.long sys_sched_getattr		/* 350 */
-	.long sys_renameat2
-	.long sys_getrandom
-	.long sys_memfd_create
-	.long sys_bpf
-	.long sys_execveat		/* 355 */
-	.long sys_socket
-	.long sys_socketpair
-	.long sys_bind
-	.long sys_connect
-	.long sys_listen		/* 360 */
-	.long sys_accept4
-	.long sys_getsockopt
-	.long sys_setsockopt
-	.long sys_getsockname
-	.long sys_getpeername		/* 365 */
-	.long sys_sendto
-	.long sys_sendmsg
-	.long sys_recvfrom
-	.long sys_recvmsg
-	.long sys_shutdown		/* 370 */
-	.long sys_recvmmsg
-	.long sys_sendmmsg
-	.long sys_userfaultfd
-	.long sys_membarrier
-	.long sys_mlock2		/* 375 */
-	.long sys_copy_file_range
-	.long sys_preadv2
-	.long sys_pwritev2
+

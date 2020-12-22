@@ -13,8 +13,8 @@
 #include <linux/miscdevice.h>
 #include <linux/delay.h>
 #include <asm/uaccess.h>
-#include <irq_kern.h>
-#include <os.h>
+#include "irq_kern.h"
+#include "os.h"
 
 /*
  * core module and version information
@@ -79,6 +79,7 @@ static ssize_t rng_dev_read (struct file *filp, char __user *buf, size_t size,
 			set_task_state(current, TASK_INTERRUPTIBLE);
 
 			schedule();
+			set_task_state(current, TASK_RUNNING);
 			remove_wait_queue(&host_read_wait, &wait);
 
 			if (atomic_dec_and_test(&host_sleep_count)) {
@@ -130,7 +131,8 @@ static int __init rng_init (void)
 	random_fd = err;
 
 	err = um_request_irq(RANDOM_IRQ, random_fd, IRQ_READ, random_interrupt,
-			     0, "random", NULL);
+			     IRQF_SAMPLE_RANDOM, "random",
+			     NULL);
 	if (err)
 		goto err_out_cleanup_hw;
 

@@ -65,13 +65,6 @@ static inline int is_arch_mappable_range(unsigned long addr,
 #endif
 
 /*
- * Note that using this definition ignores is_arch_mappable_range(),
- * so on tilepro code that uses user_addr_max() is constrained not
- * to reference the tilepro user-interrupt region.
- */
-#define user_addr_max() (current_thread_info()->addr_limit.seg)
-
-/*
  * Test whether a block of memory is a valid user space address.
  * Returns 0 if the range is valid, nonzero otherwise.
  */
@@ -85,8 +78,7 @@ int __range_ok(unsigned long addr, unsigned long size);
  * @addr: User space pointer to start of block to check
  * @size: Size of block to check
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * Checks if a pointer to a block of memory in user space is valid.
  *
@@ -122,86 +114,51 @@ struct exception_table_entry {
 extern int fixup_exception(struct pt_regs *regs);
 
 /*
- * This is a type: either unsigned long, if the argument fits into
- * that type, or otherwise unsigned long long.
+ * We return the __get_user_N function results in a structure,
+ * thus in r0 and r1.  If "err" is zero, "val" is the result
+ * of the read; otherwise, "err" is -EFAULT.
+ *
+ * We rarely need 8-byte values on a 32-bit architecture, but
+ * we size the structure to accommodate.  In practice, for the
+ * the smaller reads, we can zero the high word for free, and
+ * the caller will ignore it by virtue of casting anyway.
  */
-#define __inttype(x) \
-	__typeof__(__builtin_choose_expr(sizeof(x) > sizeof(0UL), 0ULL, 0UL))
+struct __get_user {
+	unsigned long long val;
+	int err;
+};
 
 /*
- * Support macros for __get_user().
- * Note that __get_user() and __put_user() assume proper alignment.
+ * FIXME: we should express these as inline extended assembler, since
+ * they're fundamentally just a variable dereference and some
+ * supporting exception_table gunk.  Note that (a la i386) we can
+ * extend the copy_to_user and copy_from_user routines to call into
+ * such extended assembler routines, though we will have to use a
+ * different return code in that case (1, 2, or 4, rather than -EFAULT).
  */
+extern struct __get_user __get_user_1(const void __user *);
+extern struct __get_user __get_user_2(const void __user *);
+extern struct __get_user __get_user_4(const void __user *);
+extern struct __get_user __get_user_8(const void __user *);
+extern int __put_user_1(long, void __user *);
+extern int __put_user_2(long, void __user *);
+extern int __put_user_4(long, void __user *);
+extern int __put_user_8(long long, void __user *);
 
-#ifdef __LP64__
-#define _ASM_PTR	".quad"
-#define _ASM_ALIGN	".align 8"
-#else
-#define _ASM_PTR	".long"
-#define _ASM_ALIGN	".align 4"
-#endif
+/* Unimplemented routines to cause linker failures */
+extern struct __get_user __get_user_bad(void);
+extern int __put_user_bad(void);
 
-#define __get_user_asm(OP, x, ptr, ret)					\
-	asm volatile("1: {" #OP " %1, %2; movei %0, 0 }\n"		\
-		     ".pushsection .fixup,\"ax\"\n"			\
-		     "0: { movei %1, 0; movei %0, %3 }\n"		\
-		     "j 9f\n"						\
-		     ".section __ex_table,\"a\"\n"			\
-		     _ASM_ALIGN "\n"					\
-		     _ASM_PTR " 1b, 0b\n"				\
-		     ".popsection\n"					\
-		     "9:"						\
-		     : "=r" (ret), "=r" (x)				\
-		     : "r" (ptr), "i" (-EFAULT))
-
-#ifdef __tilegx__
-#define __get_user_1(x, ptr, ret) __get_user_asm(ld1u, x, ptr, ret)
-#define __get_user_2(x, ptr, ret) __get_user_asm(ld2u, x, ptr, ret)
-#define __get_user_4(x, ptr, ret) __get_user_asm(ld4s, x, ptr, ret)
-#define __get_user_8(x, ptr, ret) __get_user_asm(ld, x, ptr, ret)
-#else
-#define __get_user_1(x, ptr, ret) __get_user_asm(lb_u, x, ptr, ret)
-#define __get_user_2(x, ptr, ret) __get_user_asm(lh_u, x, ptr, ret)
-#define __get_user_4(x, ptr, ret) __get_user_asm(lw, x, ptr, ret)
-#ifdef __LITTLE_ENDIAN
-#define __lo32(a, b) a
-#define __hi32(a, b) b
-#else
-#define __lo32(a, b) b
-#define __hi32(a, b) a
-#endif
-#define __get_user_8(x, ptr, ret)					\
-	({								\
-		unsigned int __a, __b;					\
-		asm volatile("1: { lw %1, %3; addi %2, %3, 4 }\n"	\
-			     "2: { lw %2, %2; movei %0, 0 }\n"		\
-			     ".pushsection .fixup,\"ax\"\n"		\
-			     "0: { movei %1, 0; movei %2, 0 }\n"	\
-			     "{ movei %0, %4; j 9f }\n"			\
-			     ".section __ex_table,\"a\"\n"		\
-			     ".align 4\n"				\
-			     ".word 1b, 0b\n"				\
-			     ".word 2b, 0b\n"				\
-			     ".popsection\n"				\
-			     "9:"					\
-			     : "=r" (ret), "=r" (__a), "=&r" (__b)	\
-			     : "r" (ptr), "i" (-EFAULT));		\
-		(x) = (__force __typeof(x))(__inttype(x))		\
-			(((u64)__hi32(__a, __b) << 32) |		\
-			 __lo32(__a, __b));				\
-	})
-#endif
-
-extern int __get_user_bad(void)
-  __attribute__((warning("sizeof __get_user argument not 1, 2, 4 or 8")));
-
+/*
+ * Careful: we have to cast the result to the type of the pointer
+ * for sign reasons.
+ */
 /**
  * __get_user: - Get a simple variable from user space, with less checking.
  * @x:   Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -217,74 +174,37 @@ extern int __get_user_bad(void)
  * function.
  */
 #define __get_user(x, ptr)						\
-	({								\
-		int __ret;						\
-		typeof(x) _x;						\
-		__chk_user_ptr(ptr);					\
-		switch (sizeof(*(ptr))) {				\
-		case 1: __get_user_1(_x, ptr, __ret); break;		\
-		case 2: __get_user_2(_x, ptr, __ret); break;		\
-		case 4: __get_user_4(_x, ptr, __ret); break;		\
-		case 8: __get_user_8(_x, ptr, __ret); break;		\
-		default: __ret = __get_user_bad(); break;		\
-		}							\
-		(x) = (typeof(*(ptr))) _x;				\
-		__ret;							\
-	})
-
-/* Support macros for __put_user(). */
-
-#define __put_user_asm(OP, x, ptr, ret)			\
-	asm volatile("1: {" #OP " %1, %2; movei %0, 0 }\n"		\
-		     ".pushsection .fixup,\"ax\"\n"			\
-		     "0: { movei %0, %3; j 9f }\n"			\
-		     ".section __ex_table,\"a\"\n"			\
-		     _ASM_ALIGN "\n"					\
-		     _ASM_PTR " 1b, 0b\n"				\
-		     ".popsection\n"					\
-		     "9:"						\
-		     : "=r" (ret)					\
-		     : "r" (ptr), "r" (x), "i" (-EFAULT))
-
-#ifdef __tilegx__
-#define __put_user_1(x, ptr, ret) __put_user_asm(st1, x, ptr, ret)
-#define __put_user_2(x, ptr, ret) __put_user_asm(st2, x, ptr, ret)
-#define __put_user_4(x, ptr, ret) __put_user_asm(st4, x, ptr, ret)
-#define __put_user_8(x, ptr, ret) __put_user_asm(st, x, ptr, ret)
-#else
-#define __put_user_1(x, ptr, ret) __put_user_asm(sb, x, ptr, ret)
-#define __put_user_2(x, ptr, ret) __put_user_asm(sh, x, ptr, ret)
-#define __put_user_4(x, ptr, ret) __put_user_asm(sw, x, ptr, ret)
-#define __put_user_8(x, ptr, ret)					\
-	({								\
-		u64 __x = (__force __inttype(x))(x);			\
-		int __lo = (int) __x, __hi = (int) (__x >> 32);		\
-		asm volatile("1: { sw %1, %2; addi %0, %1, 4 }\n"	\
-			     "2: { sw %0, %3; movei %0, 0 }\n"		\
-			     ".pushsection .fixup,\"ax\"\n"		\
-			     "0: { movei %0, %4; j 9f }\n"		\
-			     ".section __ex_table,\"a\"\n"		\
-			     ".align 4\n"				\
-			     ".word 1b, 0b\n"				\
-			     ".word 2b, 0b\n"				\
-			     ".popsection\n"				\
-			     "9:"					\
-			     : "=&r" (ret)				\
-			     : "r" (ptr), "r" (__lo32(__lo, __hi)),	\
-			     "r" (__hi32(__lo, __hi)), "i" (-EFAULT));	\
-	})
-#endif
-
-extern int __put_user_bad(void)
-  __attribute__((warning("sizeof __put_user argument not 1, 2, 4 or 8")));
+({	struct __get_user __ret;					\
+	__typeof__(*(ptr)) const __user *__gu_addr = (ptr);		\
+	__chk_user_ptr(__gu_addr);					\
+	switch (sizeof(*(__gu_addr))) {					\
+	case 1:								\
+		__ret = __get_user_1(__gu_addr);			\
+		break;							\
+	case 2:								\
+		__ret = __get_user_2(__gu_addr);			\
+		break;							\
+	case 4:								\
+		__ret = __get_user_4(__gu_addr);			\
+		break;							\
+	case 8:								\
+		__ret = __get_user_8(__gu_addr);			\
+		break;							\
+	default:							\
+		__ret = __get_user_bad();				\
+		break;							\
+	}								\
+	(x) = (__typeof__(*__gu_addr)) (__typeof__(*__gu_addr - *__gu_addr)) \
+	  __ret.val;			                                \
+	__ret.err;							\
+})
 
 /**
  * __put_user: - Write a simple value into user space, with less checking.
  * @x:   Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -297,20 +217,39 @@ extern int __put_user_bad(void)
  * function.
  *
  * Returns zero on success, or -EFAULT on error.
+ *
+ * Implementation note: The "case 8" logic of casting to the type of
+ * the result of subtracting the value from itself is basically a way
+ * of keeping all integer types the same, but casting any pointers to
+ * ptrdiff_t, i.e. also an integer type.  This way there are no
+ * questionable casts seen by the compiler on an ILP32 platform.
  */
 #define __put_user(x, ptr)						\
 ({									\
-	int __ret;							\
-	typeof(*(ptr)) _x = (x);					\
-	__chk_user_ptr(ptr);						\
-	switch (sizeof(*(ptr))) {					\
-	case 1: __put_user_1(_x, ptr, __ret); break;			\
-	case 2: __put_user_2(_x, ptr, __ret); break;			\
-	case 4: __put_user_4(_x, ptr, __ret); break;			\
-	case 8: __put_user_8(_x, ptr, __ret); break;			\
-	default: __ret = __put_user_bad(); break;			\
+	int __pu_err = 0;						\
+	__typeof__(*(ptr)) __user *__pu_addr = (ptr);			\
+	typeof(*__pu_addr) __pu_val = (x);				\
+	__chk_user_ptr(__pu_addr);					\
+	switch (sizeof(__pu_val)) {					\
+	case 1:								\
+		__pu_err = __put_user_1((long)__pu_val, __pu_addr);	\
+		break;							\
+	case 2:								\
+		__pu_err = __put_user_2((long)__pu_val, __pu_addr);	\
+		break;							\
+	case 4:								\
+		__pu_err = __put_user_4((long)__pu_val, __pu_addr);	\
+		break;							\
+	case 8:								\
+		__pu_err =						\
+		  __put_user_8((__typeof__(__pu_val - __pu_val))__pu_val,\
+			__pu_addr);					\
+		break;							\
+	default:							\
+		__pu_err = __put_user_bad();				\
+		break;							\
 	}								\
-	__ret;								\
+	__pu_err;							\
 })
 
 /*
@@ -340,8 +279,7 @@ extern int __put_user_bad(void)
  * @from: Source address, in kernel space.
  * @n:    Number of bytes to copy.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * Copy data from kernel space to user space.  Caller must check
  * the specified block with access_ok() before calling this function.
@@ -377,8 +315,7 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
  * @from: Source address, in user space.
  * @n:    Number of bytes to copy.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * Copy data from user space to kernel space.  Caller must check
  * the specified block with access_ok() before calling this function.
@@ -416,13 +353,9 @@ _copy_from_user(void *to, const void __user *from, unsigned long n)
 	return n;
 }
 
-extern void __compiletime_error("usercopy buffer size is too small")
-__bad_copy_user(void);
-
-static inline void copy_user_overflow(int size, unsigned long count)
-{
-	WARN(1, "Buffer overflow detected (%d < %lu)!\n", size, count);
-}
+#ifdef CONFIG_DEBUG_COPY_FROM_USER
+extern void copy_from_user_overflow(void)
+	__compiletime_warning("copy_from_user() size is not provably correct");
 
 static inline unsigned long __must_check copy_from_user(void *to,
 					  const void __user *from,
@@ -432,23 +365,23 @@ static inline unsigned long __must_check copy_from_user(void *to,
 
 	if (likely(sz == -1 || sz >= n))
 		n = _copy_from_user(to, from, n);
-	else if (!__builtin_constant_p(n))
-		copy_user_overflow(sz, n);
 	else
-		__bad_copy_user();
+		copy_from_user_overflow();
 
 	return n;
 }
+#else
+#define copy_from_user _copy_from_user
+#endif
 
 #ifdef __tilegx__
 /**
  * __copy_in_user() - copy data within user space, with less checking.
  * @to:   Destination address, in user space.
- * @from: Source address, in user space.
+ * @from: Source address, in kernel space.
  * @n:    Number of bytes to copy.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * Copy data from user space to user space.  Caller must check
  * the specified blocks with access_ok() before calling this function.
@@ -462,7 +395,7 @@ extern unsigned long __copy_in_user_inatomic(
 static inline unsigned long __must_check
 __copy_in_user(void __user *to, const void __user *from, unsigned long n)
 {
-	might_fault();
+	might_sleep();
 	return __copy_in_user_inatomic(to, from, n);
 }
 
@@ -476,9 +409,62 @@ copy_in_user(void __user *to, const void __user *from, unsigned long n)
 #endif
 
 
-extern long strnlen_user(const char __user *str, long n);
-extern long strlen_user(const char __user *str);
-extern long strncpy_from_user(char *dst, const char __user *src, long);
+/**
+ * strlen_user: - Get the size of a string in user space.
+ * @str: The string to measure.
+ *
+ * Context: User context only.  This function may sleep.
+ *
+ * Get the size of a NUL-terminated string in user space.
+ *
+ * Returns the size of the string INCLUDING the terminating NUL.
+ * On exception, returns 0.
+ *
+ * If there is a limit on the length of a valid string, you may wish to
+ * consider using strnlen_user() instead.
+ */
+extern long strnlen_user_asm(const char __user *str, long n);
+static inline long __must_check strnlen_user(const char __user *str, long n)
+{
+	might_fault();
+	return strnlen_user_asm(str, n);
+}
+#define strlen_user(str) strnlen_user(str, LONG_MAX)
+
+/**
+ * strncpy_from_user: - Copy a NUL terminated string from userspace, with less checking.
+ * @dst:   Destination address, in kernel space.  This buffer must be at
+ *         least @count bytes long.
+ * @src:   Source address, in user space.
+ * @count: Maximum number of bytes to copy, including the trailing NUL.
+ *
+ * Copies a NUL-terminated string from userspace to kernel space.
+ * Caller must check the specified block with access_ok() before calling
+ * this function.
+ *
+ * On success, returns the length of the string (not including the trailing
+ * NUL).
+ *
+ * If access to userspace fails, returns -EFAULT (some data may have been
+ * copied).
+ *
+ * If @count is smaller than the length of the string, copies @count bytes
+ * and returns @count.
+ */
+extern long strncpy_from_user_asm(char *dst, const char __user *src, long);
+static inline long __must_check __strncpy_from_user(
+	char *dst, const char __user *src, long count)
+{
+	might_fault();
+	return strncpy_from_user_asm(dst, src, count);
+}
+static inline long __must_check strncpy_from_user(
+	char *dst, const char __user *src, long count)
+{
+	if (access_ok(VERIFY_READ, src, 1))
+		return __strncpy_from_user(dst, src, count);
+	return -EFAULT;
+}
 
 /**
  * clear_user: - Zero a block of memory in user space.
@@ -530,6 +516,37 @@ static inline unsigned long __must_check flush_user(
 {
 	if (access_ok(VERIFY_WRITE, mem, len))
 		return __flush_user(mem, len);
+	return len;
+}
+
+/**
+ * inv_user: - Invalidate a block of memory in user space from cache.
+ * @mem:   Destination address, in user space.
+ * @len:   Number of bytes to invalidate.
+ *
+ * Returns number of bytes that could not be invalidated.
+ * On success, this will be zero.
+ *
+ * Note that on Tile64, the "inv" operation is in fact a
+ * "flush and invalidate", so cache write-backs will occur prior
+ * to the cache being marked invalid.
+ */
+extern unsigned long inv_user_asm(void __user *mem, unsigned long len);
+static inline unsigned long __must_check __inv_user(
+	void __user *mem, unsigned long len)
+{
+	int retval;
+
+	might_fault();
+	retval = inv_user_asm(mem, len);
+	mb_incoherent();
+	return retval;
+}
+static inline unsigned long __must_check inv_user(
+	void __user *mem, unsigned long len)
+{
+	if (access_ok(VERIFY_WRITE, mem, len))
+		return __inv_user(mem, len);
 	return len;
 }
 

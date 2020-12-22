@@ -240,7 +240,7 @@ static const struct agp_bridge_driver amd_8151_driver = {
 };
 
 /* Some basic sanity checks for the aperture. */
-static int agp_aperture_valid(u64 aper, u32 size)
+static int __devinit agp_aperture_valid(u64 aper, u32 size)
 {
 	if (!aperture_valid(aper, size, 32*1024*1024))
 		return 0;
@@ -267,8 +267,10 @@ static int agp_aperture_valid(u64 aper, u32 size)
  * to allocate that much memory. But at least error out cleanly instead of
  * crashing.
  */
-static int fix_northbridge(struct pci_dev *nb, struct pci_dev *agp, u16 cap)
+static __devinit int fix_northbridge(struct pci_dev *nb, struct pci_dev *agp,
+								 u16 cap)
 {
+	u32 aper_low, aper_hi;
 	u64 aper, nb_aper;
 	int order = 0;
 	u32 nb_order, nb_base;
@@ -294,7 +296,9 @@ static int fix_northbridge(struct pci_dev *nb, struct pci_dev *agp, u16 cap)
 		apsize |= 0xf00;
 	order = 7 - hweight16(apsize);
 
-	aper = pci_bus_address(agp, AGP_APERTURE_BAR);
+	pci_read_config_dword(agp, 0x10, &aper_low);
+	pci_read_config_dword(agp, 0x14, &aper_hi);
+	aper = (aper_low & ~((1<<22)-1)) | ((u64)aper_hi << 32);
 
 	/*
 	 * On some sick chips APSIZE is 0. This means it wants 4G
@@ -322,7 +326,7 @@ static int fix_northbridge(struct pci_dev *nb, struct pci_dev *agp, u16 cap)
 	return 0;
 }
 
-static int cache_nbs(struct pci_dev *pdev, u32 cap_ptr)
+static __devinit int cache_nbs(struct pci_dev *pdev, u32 cap_ptr)
 {
 	int i;
 
@@ -348,7 +352,7 @@ static int cache_nbs(struct pci_dev *pdev, u32 cap_ptr)
 }
 
 /* Handle AMD 8151 quirks */
-static void amd8151_init(struct pci_dev *pdev, struct agp_bridge_data *bridge)
+static void __devinit amd8151_init(struct pci_dev *pdev, struct agp_bridge_data *bridge)
 {
 	char *revstring;
 
@@ -386,7 +390,7 @@ static const struct aper_size_info_32 uli_sizes[7] =
 	{8, 2048, 1, 4},
 	{4, 1024, 0, 3}
 };
-static int uli_agp_init(struct pci_dev *pdev)
+static int __devinit uli_agp_init(struct pci_dev *pdev)
 {
 	u32 httfea,baseaddr,enuscr;
 	struct pci_dev *dev1;
@@ -509,8 +513,8 @@ put:
 	return ret;
 }
 
-static int agp_amd64_probe(struct pci_dev *pdev,
-			   const struct pci_device_id *ent)
+static int __devinit agp_amd64_probe(struct pci_dev *pdev,
+				     const struct pci_device_id *ent)
 {
 	struct agp_bridge_data *bridge;
 	u8 cap_ptr;
@@ -575,7 +579,7 @@ static int agp_amd64_probe(struct pci_dev *pdev,
 	return 0;
 }
 
-static void agp_amd64_remove(struct pci_dev *pdev)
+static void __devexit agp_amd64_remove(struct pci_dev *pdev)
 {
 	struct agp_bridge_data *bridge = pci_get_drvdata(pdev);
 
@@ -732,7 +736,7 @@ static struct pci_device_id agp_amd64_pci_table[] = {
 
 MODULE_DEVICE_TABLE(pci, agp_amd64_pci_table);
 
-static const struct pci_device_id agp_amd64_pci_promisc_table[] = {
+static DEFINE_PCI_DEVICE_TABLE(agp_amd64_pci_promisc_table) = {
 	{ PCI_DEVICE_CLASS(0, 0) },
 	{ }
 };
@@ -813,6 +817,6 @@ static void __exit agp_amd64_cleanup(void)
 module_init(agp_amd64_mod_init);
 module_exit(agp_amd64_cleanup);
 
-MODULE_AUTHOR("Dave Jones, Andi Kleen");
+MODULE_AUTHOR("Dave Jones <davej@redhat.com>, Andi Kleen");
 module_param(agp_try_unsupported, bool, 0);
 MODULE_LICENSE("GPL");

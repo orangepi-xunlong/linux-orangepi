@@ -1,0 +1,1 @@
+obj-$(CONFIG_TV_GM7121_DISP1) += gm7121.o

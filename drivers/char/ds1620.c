@@ -6,7 +6,6 @@
 #include <linux/miscdevice.h>
 #include <linux/delay.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <linux/capability.h>
 #include <linux/init.h>
 #include <linux/mutex.h>
@@ -75,21 +74,21 @@ static inline void netwinder_ds1620_reset(void)
 
 static inline void netwinder_lock(unsigned long *flags)
 {
-	raw_spin_lock_irqsave(&nw_gpio_lock, *flags);
+	spin_lock_irqsave(&nw_gpio_lock, *flags);
 }
 
 static inline void netwinder_unlock(unsigned long *flags)
 {
-	raw_spin_unlock_irqrestore(&nw_gpio_lock, *flags);
+	spin_unlock_irqrestore(&nw_gpio_lock, *flags);
 }
 
 static inline void netwinder_set_fan(int i)
 {
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&nw_gpio_lock, flags);
+	spin_lock_irqsave(&nw_gpio_lock, flags);
 	nw_gpio_modify_op(GPIO_FAN, i ? GPIO_FAN : 0);
-	raw_spin_unlock_irqrestore(&nw_gpio_lock, flags);
+	spin_unlock_irqrestore(&nw_gpio_lock, flags);
 }
 
 static inline int netwinder_get_fan(void)
@@ -330,7 +329,9 @@ ds1620_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 }
 
 #ifdef THERM_USE_PROC
-static int ds1620_proc_therm_show(struct seq_file *m, void *v)
+static int
+proc_therm_ds1620_read(char *buf, char **start, off_t offset,
+		       int len, int *eof, void *unused)
 {
 	struct therm th;
 	int temp;
@@ -338,25 +339,17 @@ static int ds1620_proc_therm_show(struct seq_file *m, void *v)
 	ds1620_read_state(&th);
 	temp =  cvt_9_to_int(ds1620_in(THERM_READ_TEMP, 9));
 
-	seq_printf(m, "Thermostat: HI %i.%i, LOW %i.%i; temperature: %i.%i C, fan %s\n",
-		   th.hi >> 1, th.hi & 1 ? 5 : 0,
-		   th.lo >> 1, th.lo & 1 ? 5 : 0,
-		   temp  >> 1, temp  & 1 ? 5 : 0,
-		   fan_state[netwinder_get_fan()]);
-	return 0;
+	len = sprintf(buf, "Thermostat: HI %i.%i, LOW %i.%i; "
+		      "temperature: %i.%i C, fan %s\n",
+		      th.hi >> 1, th.hi & 1 ? 5 : 0,
+		      th.lo >> 1, th.lo & 1 ? 5 : 0,
+		      temp  >> 1, temp  & 1 ? 5 : 0,
+		      fan_state[netwinder_get_fan()]);
+
+	return len;
 }
 
-static int ds1620_proc_therm_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ds1620_proc_therm_show, NULL);
-}
-
-static const struct file_operations ds1620_proc_therm_fops = {
-	.open		= ds1620_proc_therm_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+static struct proc_dir_entry *proc_therm_ds1620;
 #endif
 
 static const struct file_operations ds1620_fops = {
@@ -404,7 +397,10 @@ static int __init ds1620_init(void)
 		return ret;
 
 #ifdef THERM_USE_PROC
-	if (!proc_create("therm", 0, NULL, &ds1620_proc_therm_fops))
+	proc_therm_ds1620 = create_proc_entry("therm", 0, NULL);
+	if (proc_therm_ds1620)
+		proc_therm_ds1620->read_proc = proc_therm_ds1620_read;
+	else
 		printk(KERN_ERR "therm: unable to register /proc/therm\n");
 #endif
 

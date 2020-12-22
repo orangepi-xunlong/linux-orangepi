@@ -100,8 +100,8 @@ static void amd76xrom_cleanup(struct amd76xrom_window *window)
 }
 
 
-static int amd76xrom_init_one(struct pci_dev *pdev,
-			      const struct pci_device_id *ent)
+static int __devinit amd76xrom_init_one (struct pci_dev *pdev,
+	const struct pci_device_id *ent)
 {
 	static char *rom_probe_types[] = { "cfi_probe", "jedec_probe", NULL };
 	u8 byte;
@@ -138,7 +138,7 @@ static int amd76xrom_init_one(struct pci_dev *pdev,
 	/*
 	 * Try to reserve the window mem region.  If this fails then
 	 * it is likely due to a fragment of the window being
-	 * "reserved" by the BIOS.  In the case that the
+	 * "reseved" by the BIOS.  In the case that the
 	 * request_mem_region() fails then once the rom size is
 	 * discovered we will try to reserve the unreserved fragment.
 	 */
@@ -289,7 +289,7 @@ static int amd76xrom_init_one(struct pci_dev *pdev,
 }
 
 
-static void amd76xrom_remove_one(struct pci_dev *pdev)
+static void __devexit amd76xrom_remove_one (struct pci_dev *pdev)
 {
 	struct amd76xrom_window *window = &amd76xrom_window;
 
@@ -347,3 +347,4 @@ module_exit(cleanup_amd76xrom);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Eric Biederman <ebiederman@lnxi.com>");
 MODULE_DESCRIPTION("MTD map driver for BIOS chips on the AMD76X southbridge");
+

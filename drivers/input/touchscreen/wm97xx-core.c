@@ -70,11 +70,11 @@
  * Documentation/input/input-programming.txt for more details.
  */
 
-static int abs_x[3] = {150, 4000, 5};
+static int abs_x[3] = {350, 3900, 5};
 module_param_array(abs_x, int, NULL, 0);
 MODULE_PARM_DESC(abs_x, "Touchscreen absolute X min, max, fuzz");
 
-static int abs_y[3] = {200, 4000, 40};
+static int abs_y[3] = {320, 3750, 40};
 module_param_array(abs_y, int, NULL, 0);
 MODULE_PARM_DESC(abs_y, "Touchscreen absolute Y min, max, fuzz");
 
@@ -442,16 +442,6 @@ static int wm97xx_read_samples(struct wm97xx *wm)
 			"pen down: x=%x:%d, y=%x:%d, pressure=%x:%d\n",
 			data.x >> 12, data.x & 0xfff, data.y >> 12,
 			data.y & 0xfff, data.p >> 12, data.p & 0xfff);
-
-		if (abs_x[0] > (data.x & 0xfff) ||
-		    abs_x[1] < (data.x & 0xfff) ||
-		    abs_y[0] > (data.y & 0xfff) ||
-		    abs_y[1] < (data.y & 0xfff)) {
-			dev_dbg(wm->dev, "Measurement out of range, dropping it\n");
-			rc = RC_AGAIN;
-			goto out;
-		}
-
 		input_report_abs(wm->input_dev, ABS_X, data.x & 0xfff);
 		input_report_abs(wm->input_dev, ABS_Y, data.y & 0xfff);
 		input_report_abs(wm->input_dev, ABS_PRESSURE, data.p & 0xfff);
@@ -465,7 +455,6 @@ static int wm97xx_read_samples(struct wm97xx *wm)
 		wm->ts_reader_interval = wm->ts_reader_min_interval;
 	}
 
-out:
 	mutex_unlock(&wm->codec_mutex);
 	return rc;
 }
@@ -584,7 +573,7 @@ static void wm97xx_ts_input_close(struct input_dev *idev)
 static int wm97xx_probe(struct device *dev)
 {
 	struct wm97xx *wm;
-	struct wm97xx_pdata *pdata = dev_get_platdata(dev);
+	struct wm97xx_pdata *pdata = dev->platform_data;
 	int ret = 0, id = 0;
 
 	wm = kzalloc(sizeof(struct wm97xx), GFP_KERNEL);
@@ -732,7 +721,8 @@ static int wm97xx_remove(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused wm97xx_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int wm97xx_suspend(struct device *dev, pm_message_t state)
 {
 	struct wm97xx *wm = dev_get_drvdata(dev);
 	u16 reg;
@@ -764,7 +754,7 @@ static int __maybe_unused wm97xx_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused wm97xx_resume(struct device *dev)
+static int wm97xx_resume(struct device *dev)
 {
 	struct wm97xx *wm = dev_get_drvdata(dev);
 
@@ -798,7 +788,10 @@ static int __maybe_unused wm97xx_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(wm97xx_pm_ops, wm97xx_suspend, wm97xx_resume);
+#else
+#define wm97xx_suspend		NULL
+#define wm97xx_resume		NULL
+#endif
 
 /*
  * Machine specific operations
@@ -832,7 +825,8 @@ static struct device_driver wm97xx_driver = {
 	.owner =	THIS_MODULE,
 	.probe =	wm97xx_probe,
 	.remove =	wm97xx_remove,
-	.pm =		&wm97xx_pm_ops,
+	.suspend =	wm97xx_suspend,
+	.resume =	wm97xx_resume,
 };
 
 static int __init wm97xx_init(void)

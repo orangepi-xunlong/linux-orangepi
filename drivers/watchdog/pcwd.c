@@ -61,7 +61,7 @@
 #include <linux/delay.h>	/* For mdelay function */
 #include <linux/timer.h>	/* For timer related operations */
 #include <linux/jiffies.h>	/* For jiffies stuff */
-#include <linux/miscdevice.h>	/* For struct miscdevice */
+#include <linux/miscdevice.h>	/* For MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR) */
 #include <linux/watchdog.h>	/* For the watchdog specific items */
 #include <linux/reboot.h>	/* For kernel_power_off() */
 #include <linux/init.h>		/* For __init/__exit/... */
@@ -801,7 +801,7 @@ static inline int get_revision(void)
  *  The initial rate is once per second at board start up, then twice
  *  per second for normal operation.
  */
-static int pcwd_isa_match(struct device *dev, unsigned int id)
+static int __devinit pcwd_isa_match(struct device *dev, unsigned int id)
 {
 	int base_addr = pcwd_ioports[id];
 	int port0, last_port0;	/* Reg 0, in case it's REV A */
@@ -846,7 +846,7 @@ static int pcwd_isa_match(struct device *dev, unsigned int id)
 	return retval;
 }
 
-static int pcwd_isa_probe(struct device *dev, unsigned int id)
+static int __devinit pcwd_isa_probe(struct device *dev, unsigned int id)
 {
 	int ret;
 
@@ -949,7 +949,7 @@ error_request_region:
 	return ret;
 }
 
-static int pcwd_isa_remove(struct device *dev, unsigned int id)
+static int __devexit pcwd_isa_remove(struct device *dev, unsigned int id)
 {
 	if (debug >= DEBUG)
 		pr_debug("pcwd_isa_remove id=%d\n", id);
@@ -984,7 +984,7 @@ static void pcwd_isa_shutdown(struct device *dev, unsigned int id)
 static struct isa_driver pcwd_isa_driver = {
 	.match		= pcwd_isa_match,
 	.probe		= pcwd_isa_probe,
-	.remove		= pcwd_isa_remove,
+	.remove		= __devexit_p(pcwd_isa_remove),
 	.shutdown	= pcwd_isa_shutdown,
 	.driver		= {
 		.owner	= THIS_MODULE,
@@ -992,10 +992,24 @@ static struct isa_driver pcwd_isa_driver = {
 	},
 };
 
-module_isa_driver(pcwd_isa_driver, PCWD_ISA_NR_CARDS);
+static int __init pcwd_init_module(void)
+{
+	return isa_register_driver(&pcwd_isa_driver, PCWD_ISA_NR_CARDS);
+}
+
+static void __exit pcwd_cleanup_module(void)
+{
+	isa_unregister_driver(&pcwd_isa_driver);
+	pr_info("Watchdog Module Unloaded\n");
+}
+
+module_init(pcwd_init_module);
+module_exit(pcwd_cleanup_module);
 
 MODULE_AUTHOR("Ken Hollis <kenji@bitgate.com>, "
 		"Wim Van Sebroeck <wim@iguana.be>");
 MODULE_DESCRIPTION("Berkshire ISA-PC Watchdog driver");
 MODULE_VERSION(WATCHDOG_VERSION);
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
+MODULE_ALIAS_MISCDEV(TEMP_MINOR);

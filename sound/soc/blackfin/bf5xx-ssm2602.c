@@ -40,11 +40,20 @@
 #include <linux/gpio.h>
 #include "../codecs/ssm2602.h"
 #include "bf5xx-sport.h"
+#include "bf5xx-i2s-pcm.h"
 
 static struct snd_soc_card bf5xx_ssm2602;
 
-static int bf5xx_ssm2602_dai_init(struct snd_soc_pcm_runtime *rtd)
+static int bf5xx_ssm2602_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	unsigned int clk = 0;
+	int ret = 0;
+
+	pr_debug("%s rate %d format %x\n", __func__, params_rate(params),
+		params_format(params));
 	/*
 	 * If you are using a crystal source which frequency is not 12MHz
 	 * then modify the below case statement with frequency of the crystal.
@@ -52,9 +61,30 @@ static int bf5xx_ssm2602_dai_init(struct snd_soc_pcm_runtime *rtd)
 	 * If you are using the SPORT to generate clocking then this is
 	 * where to do it.
 	 */
-	return snd_soc_dai_set_sysclk(rtd->codec_dai, SSM2602_SYSCLK, 12000000,
+
+	switch (params_rate(params)) {
+	case 8000:
+	case 16000:
+	case 48000:
+	case 96000:
+	case 11025:
+	case 22050:
+	case 44100:
+		clk = 12000000;
+		break;
+	}
+
+	ret = snd_soc_dai_set_sysclk(codec_dai, SSM2602_SYSCLK, clk,
 		SND_SOC_CLOCK_IN);
+	if (ret < 0)
+		return ret;
+
+	return 0;
 }
+
+static struct snd_soc_ops bf5xx_ssm2602_ops = {
+	.hw_params = bf5xx_ssm2602_hw_params,
+};
 
 /* CODEC is master for BCLK and LRC in this configuration. */
 #define BF5XX_SSM2602_DAIFMT (SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | \
@@ -68,7 +98,7 @@ static struct snd_soc_dai_link bf5xx_ssm2602_dai[] = {
 		.codec_dai_name = "ssm2602-hifi",
 		.platform_name = "bfin-i2s-pcm-audio",
 		.codec_name = "ssm2602.0-001b",
-		.init = bf5xx_ssm2602_dai_init,
+		.ops = &bf5xx_ssm2602_ops,
 		.dai_fmt = BF5XX_SSM2602_DAIFMT,
 	},
 	{
@@ -78,7 +108,7 @@ static struct snd_soc_dai_link bf5xx_ssm2602_dai[] = {
 		.codec_dai_name = "ssm2602-hifi",
 		.platform_name = "bfin-i2s-pcm-audio",
 		.codec_name = "ssm2602.0-001b",
-		.init = bf5xx_ssm2602_dai_init,
+		.ops = &bf5xx_ssm2602_ops,
 		.dai_fmt = BF5XX_SSM2602_DAIFMT,
 	},
 };

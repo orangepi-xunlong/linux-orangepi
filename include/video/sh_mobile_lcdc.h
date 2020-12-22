@@ -163,12 +163,7 @@ struct sh_mobile_lcdc_bl_info {
 	const char *name;
 	int max_brightness;
 	int (*set_brightness)(int brightness);
-};
-
-struct sh_mobile_lcdc_overlay_cfg {
-	int fourcc;
-	unsigned int max_xres;
-	unsigned int max_yres;
+	int (*get_brightness)(void);
 };
 
 struct sh_mobile_lcdc_chan_cfg {
@@ -191,7 +186,6 @@ struct sh_mobile_lcdc_chan_cfg {
 struct sh_mobile_lcdc_info {
 	int clock_source;
 	struct sh_mobile_lcdc_chan_cfg ch[2];
-	struct sh_mobile_lcdc_overlay_cfg overlays[4];
 	struct sh_mobile_meram_info *meram_dev;
 };
 

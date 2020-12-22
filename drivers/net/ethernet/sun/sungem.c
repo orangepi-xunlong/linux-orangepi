@@ -24,6 +24,7 @@
 #include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/delay.h>
+#include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/pci.h>
 #include <linux/dma-mapping.h>
@@ -51,6 +52,7 @@
 #endif
 
 #ifdef CONFIG_PPC_PMAC
+#include <asm/pci-bridge.h>
 #include <asm/prom.h>
 #include <asm/machdep.h>
 #include <asm/pmac_feature.h>
@@ -59,7 +61,8 @@
 #include <linux/sungem_phy.h>
 #include "sungem.h"
 
-#define STRIP_FCS
+/* Stripping FCS is causing problems, disabled for now */
+#undef STRIP_FCS
 
 #define DEFAULT_MSG	(NETIF_MSG_DRV		| \
 			 NETIF_MSG_PROBE	| \
@@ -74,7 +77,7 @@
 #define DRV_VERSION	"1.0"
 #define DRV_AUTHOR	"David S. Miller <davem@redhat.com>"
 
-static char version[] =
+static char version[] __devinitdata =
         DRV_NAME ".c:v" DRV_VERSION " " DRV_AUTHOR "\n";
 
 MODULE_AUTHOR(DRV_AUTHOR);
@@ -83,7 +86,7 @@ MODULE_LICENSE("GPL");
 
 #define GEM_MODULE_NAME	"gem"
 
-static const struct pci_device_id gem_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(gem_pci_tbl) = {
 	{ PCI_VENDOR_ID_SUN, PCI_DEVICE_ID_SUN_GEM,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0UL },
 
@@ -113,7 +116,7 @@ static const struct pci_device_id gem_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, gem_pci_tbl);
 
-static u16 __sungem_phy_read(struct gem *gp, int phy_addr, int reg)
+static u16 __phy_read(struct gem *gp, int phy_addr, int reg)
 {
 	u32 cmd;
 	int limit = 10000;
@@ -139,18 +142,18 @@ static u16 __sungem_phy_read(struct gem *gp, int phy_addr, int reg)
 	return cmd & MIF_FRAME_DATA;
 }
 
-static inline int _sungem_phy_read(struct net_device *dev, int mii_id, int reg)
+static inline int _phy_read(struct net_device *dev, int mii_id, int reg)
 {
 	struct gem *gp = netdev_priv(dev);
-	return __sungem_phy_read(gp, mii_id, reg);
+	return __phy_read(gp, mii_id, reg);
 }
 
-static inline u16 sungem_phy_read(struct gem *gp, int reg)
+static inline u16 phy_read(struct gem *gp, int reg)
 {
-	return __sungem_phy_read(gp, gp->mii_phy_addr, reg);
+	return __phy_read(gp, gp->mii_phy_addr, reg);
 }
 
-static void __sungem_phy_write(struct gem *gp, int phy_addr, int reg, u16 val)
+static void __phy_write(struct gem *gp, int phy_addr, int reg, u16 val)
 {
 	u32 cmd;
 	int limit = 10000;
@@ -172,15 +175,15 @@ static void __sungem_phy_write(struct gem *gp, int phy_addr, int reg, u16 val)
 	}
 }
 
-static inline void _sungem_phy_write(struct net_device *dev, int mii_id, int reg, int val)
+static inline void _phy_write(struct net_device *dev, int mii_id, int reg, int val)
 {
 	struct gem *gp = netdev_priv(dev);
-	__sungem_phy_write(gp, mii_id, reg, val & 0xffff);
+	__phy_write(gp, mii_id, reg, val & 0xffff);
 }
 
-static inline void sungem_phy_write(struct gem *gp, int reg, u16 val)
+static inline void phy_write(struct gem *gp, int reg, u16 val)
 {
-	__sungem_phy_write(gp, gp->mii_phy_addr, reg, val);
+	__phy_write(gp, gp->mii_phy_addr, reg, val);
 }
 
 static inline void gem_enable_ints(struct gem *gp)
@@ -225,7 +228,7 @@ static void gem_put_cell(struct gem *gp)
 
 static inline void gem_netif_stop(struct gem *gp)
 {
-	netif_trans_update(gp->dev);	/* prevent tx timeout */
+	gp->dev->trans_start = jiffies;	/* prevent tx timeout */
 	napi_disable(&gp->napi);
 	netif_tx_disable(gp->dev);
 }
@@ -398,7 +401,7 @@ static int gem_rxmac_reset(struct gem *gp)
 		return 1;
 	}
 
-	mdelay(5);
+	udelay(5000);
 
 	/* Execute RX reset command. */
 	writel(gp->swrst_base | GREG_SWRST_RXRST,
@@ -433,7 +436,7 @@ static int gem_rxmac_reset(struct gem *gp)
 	writel(desc_dma & 0xffffffff, gp->regs + RXDMA_DBLOW);
 	writel(RX_RING_SIZE - 4, gp->regs + RXDMA_KICK);
 	val = (RXDMA_CFG_BASE | (RX_OFFSET << 10) |
-	       (ETH_HLEN << 13) | RXDMA_CFG_FTHRESH_128);
+	       ((14 / 2) << 13) | RXDMA_CFG_FTHRESH_128);
 	writel(val, gp->regs + RXDMA_CFG);
 	if (readl(gp->regs + GREG_BIFCFG) & GREG_BIFCFG_M66EN)
 		writel(((5 & RXDMA_BLANK_IPKTS) |
@@ -686,7 +689,7 @@ static __inline__ void gem_tx(struct net_device *dev, struct gem *gp, u32 gem_st
 		}
 
 		dev->stats.tx_packets++;
-		dev_consume_skb_any(skb);
+		dev_kfree_skb(skb);
 	}
 	gp->tx_old = entry;
 
@@ -716,7 +719,7 @@ static __inline__ void gem_post_rxds(struct gem *gp, int limit)
 	cluster_start = curr = (gp->rx_new & ~(4 - 1));
 	count = 0;
 	kick = -1;
-	dma_wmb();
+	wmb();
 	while (curr != limit) {
 		curr = NEXT_RX(curr);
 		if (++count == 4) {
@@ -749,6 +752,7 @@ static __inline__ struct sk_buff *gem_alloc_skb(struct net_device *dev, int size
 	if (likely(skb)) {
 		unsigned long offset = ALIGNED_RX_SKB_ADDR(skb->data);
 		skb_reserve(skb, offset);
+		skb->dev = dev;
 	}
 	return skb;
 }
@@ -758,6 +762,7 @@ static int gem_rx(struct gem *gp, int work_to_do)
 	struct net_device *dev = gp->dev;
 	int entry, drops, work_done = 0;
 	u32 done;
+	__sum16 csum;
 
 	if (netif_msg_rx_status(gp))
 		printk(KERN_DEBUG "%s: rx interrupt, done: %d, rx_new: %d\n",
@@ -852,13 +857,9 @@ static int gem_rx(struct gem *gp, int work_to_do)
 			skb = copy_skb;
 		}
 
-		if (likely(dev->features & NETIF_F_RXCSUM)) {
-			__sum16 csum;
-
-			csum = (__force __sum16)htons((status & RXDCTRL_TCPCSUM) ^ 0xffff);
-			skb->csum = csum_unfold(csum);
-			skb->ip_summed = CHECKSUM_COMPLETE;
-		}
+		csum = (__force __sum16)htons((status & RXDCTRL_TCPCSUM) ^ 0xffff);
+		skb->csum = csum_unfold(csum);
+		skb->ip_summed = CHECKSUM_COMPLETE;
 		skb->protocol = eth_type_trans(skb, gp->dev);
 
 		napi_gro_receive(&gp->napi, skb);
@@ -1039,7 +1040,7 @@ static netdev_tx_t gem_start_xmit(struct sk_buff *skb,
 		if (gem_intme(entry))
 			ctrl |= TXDCTRL_INTME;
 		txd->buffer = cpu_to_le64(mapping);
-		dma_wmb();
+		wmb();
 		txd->control_word = cpu_to_le64(ctrl);
 		entry = NEXT_TX(entry);
 	} else {
@@ -1077,7 +1078,7 @@ static netdev_tx_t gem_start_xmit(struct sk_buff *skb,
 
 			txd = &gp->init_block->txd[entry];
 			txd->buffer = cpu_to_le64(mapping);
-			dma_wmb();
+			wmb();
 			txd->control_word = cpu_to_le64(this_ctrl | len);
 
 			if (gem_intme(entry))
@@ -1087,7 +1088,7 @@ static netdev_tx_t gem_start_xmit(struct sk_buff *skb,
 		}
 		txd = &gp->init_block->txd[first_entry];
 		txd->buffer = cpu_to_le64(first_mapping);
-		dma_wmb();
+		wmb();
 		txd->control_word =
 			cpu_to_le64(ctrl | TXDCTRL_SOF | intme | first_len);
 	}
@@ -1586,7 +1587,7 @@ static void gem_clean_rings(struct gem *gp)
 			gp->rx_skbs[i] = NULL;
 		}
 		rxd->status_word = 0;
-		dma_wmb();
+		wmb();
 		rxd->buffer = 0;
 	}
 
@@ -1648,7 +1649,7 @@ static void gem_init_rings(struct gem *gp)
 					RX_BUF_ALLOC_SIZE(gp),
 					PCI_DMA_FROMDEVICE);
 		rxd->buffer = cpu_to_le64(dma_addr);
-		dma_wmb();
+		wmb();
 		rxd->status_word = cpu_to_le64(RXDCTRL_FRESH(gp));
 		skb_reserve(skb, RX_OFFSET);
 	}
@@ -1657,7 +1658,7 @@ static void gem_init_rings(struct gem *gp)
 		struct gem_txd *txd = &gb->txd[i];
 
 		txd->control_word = 0;
-		dma_wmb();
+		wmb();
 		txd->buffer = 0;
 	}
 	wmb();
@@ -1688,9 +1689,9 @@ static void gem_init_phy(struct gem *gp)
 			/* Some PHYs used by apple have problem getting back to us,
 			 * we do an additional reset here
 			 */
-			sungem_phy_write(gp, MII_BMCR, BMCR_RESET);
+			phy_write(gp, MII_BMCR, BMCR_RESET);
 			msleep(20);
-			if (sungem_phy_read(gp, MII_BMCR) != 0xffff)
+			if (phy_read(gp, MII_BMCR) != 0xffff)
 				break;
 			if (i == 2)
 				netdev_warn(gp->dev, "GMAC PHY not responding !\n");
@@ -1756,7 +1757,7 @@ static void gem_init_dma(struct gem *gp)
 	writel(0, gp->regs + TXDMA_KICK);
 
 	val = (RXDMA_CFG_BASE | (RX_OFFSET << 10) |
-	       (ETH_HLEN << 13) | RXDMA_CFG_FTHRESH_128);
+	       ((14 / 2) << 13) | RXDMA_CFG_FTHRESH_128);
 	writel(val, gp->regs + RXDMA_CFG);
 
 	writel(desc_dma >> 32, gp->regs + RXDMA_DBHI);
@@ -2013,7 +2014,7 @@ static int gem_check_invariants(struct gem *gp)
 
 		for (i = 0; i < 32; i++) {
 			gp->mii_phy_addr = i;
-			if (sungem_phy_read(gp, MII_BMCR) != 0xffff)
+			if (phy_read(gp, MII_BMCR) != 0xffff)
 				break;
 		}
 		if (i == 32) {
@@ -2176,7 +2177,7 @@ static int gem_do_start(struct net_device *dev)
 	}
 
 	/* Mark us as attached again if we come from resume(), this has
-	 * no effect if we weren't detached and needs to be done now.
+	 * no effect if we weren't detatched and needs to be done now.
 	 */
 	netif_device_attach(dev);
 
@@ -2697,13 +2698,13 @@ static int gem_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		/* Fallthrough... */
 
 	case SIOCGMIIREG:		/* Read MII PHY register. */
-		data->val_out = __sungem_phy_read(gp, data->phy_id & 0x1f,
+		data->val_out = __phy_read(gp, data->phy_id & 0x1f,
 					   data->reg_num & 0x1f);
 		rc = 0;
 		break;
 
 	case SIOCSMIIREG:		/* Write MII PHY register. */
-		__sungem_phy_write(gp, data->phy_id & 0x1f, data->reg_num & 0x1f,
+		__phy_write(gp, data->phy_id & 0x1f, data->reg_num & 0x1f,
 			    data->val_in);
 		rc = 0;
 		break;
@@ -2763,7 +2764,7 @@ static void get_gem_mac_nonobp(struct pci_dev *pdev, unsigned char *dev_addr)
 }
 #endif /* not Sparc and not PPC */
 
-static int gem_get_device_address(struct gem *gp)
+static int __devinit gem_get_device_address(struct gem *gp)
 {
 #if defined(CONFIG_SPARC) || defined(CONFIG_PPC_PMAC)
 	struct net_device *dev = gp->dev;
@@ -2779,7 +2780,7 @@ static int gem_get_device_address(struct gem *gp)
 		return -1;
 #endif
 	}
-	memcpy(dev->dev_addr, addr, ETH_ALEN);
+	memcpy(dev->dev_addr, addr, 6);
 #else
 	get_gem_mac_nonobp(gp->pdev, gp->dev->dev_addr);
 #endif
@@ -2795,7 +2796,7 @@ static void gem_remove_one(struct pci_dev *pdev)
 
 		unregister_netdev(dev);
 
-		/* Ensure reset task is truly gone */
+		/* Ensure reset task is truely gone */
 		cancel_work_sync(&gp->reset_task);
 
 		/* Free resources */
@@ -2806,6 +2807,8 @@ static void gem_remove_one(struct pci_dev *pdev)
 		iounmap(gp->regs);
 		pci_release_regions(pdev);
 		free_netdev(dev);
+
+		pci_set_drvdata(pdev, NULL);
 	}
 }
 
@@ -2825,7 +2828,8 @@ static const struct net_device_ops gem_netdev_ops = {
 #endif
 };
 
-static int gem_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int __devinit gem_init_one(struct pci_dev *pdev,
+				  const struct pci_device_id *ent)
 {
 	unsigned long gemreg_base, gemreg_len;
 	struct net_device *dev;
@@ -2894,6 +2898,7 @@ static int gem_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	gp->pdev = pdev;
+	dev->base_addr = (long) pdev;
 	gp->dev = dev;
 
 	gp->msg_enable = DEFAULT_MSG;
@@ -2934,8 +2939,8 @@ static int gem_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	/* Fill up the mii_phy structure (even if we won't use it) */
 	gp->phy_mii.dev = dev;
-	gp->phy_mii.mdio_read = _sungem_phy_read;
-	gp->phy_mii.mdio_write = _sungem_phy_write;
+	gp->phy_mii.mdio_read = _phy_read;
+	gp->phy_mii.mdio_write = _phy_write;
 #ifdef CONFIG_PPC_PMAC
 	gp->phy_mii.platform_data = gp->of_node;
 #endif
@@ -2960,22 +2965,22 @@ static int gem_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_out_iounmap;
 	}
 
-	err = gem_get_device_address(gp);
-	if (err)
+	if (gem_get_device_address(gp))
 		goto err_out_free_consistent;
 
 	dev->netdev_ops = &gem_netdev_ops;
 	netif_napi_add(dev, &gp->napi, gem_poll, 64);
 	dev->ethtool_ops = &gem_ethtool_ops;
 	dev->watchdog_timeo = 5 * HZ;
+	dev->irq = pdev->irq;
 	dev->dma = 0;
 
 	/* Set that now, in case PM kicks in now */
 	pci_set_drvdata(pdev, dev);
 
 	/* We can do scatter/gather and HW checksum */
-	dev->hw_features = NETIF_F_SG | NETIF_F_HW_CSUM | NETIF_F_RXCSUM;
-	dev->features = dev->hw_features;
+	dev->hw_features = NETIF_F_SG | NETIF_F_HW_CSUM;
+	dev->features |= dev->hw_features | NETIF_F_RXCSUM;
 	if (pci_using_dac)
 		dev->features |= NETIF_F_HIGHDMA;
 
@@ -3026,4 +3031,15 @@ static struct pci_driver gem_driver = {
 #endif /* CONFIG_PM */
 };
 
-module_pci_driver(gem_driver);
+static int __init gem_init(void)
+{
+	return pci_register_driver(&gem_driver);
+}
+
+static void __exit gem_cleanup(void)
+{
+	pci_unregister_driver(&gem_driver);
+}
+
+module_init(gem_init);
+module_exit(gem_cleanup);

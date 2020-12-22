@@ -369,92 +369,93 @@ def trace_end():
 
 def sched__sched_stat_runtime(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, runtime, vruntime):
+	comm, pid, runtime, vruntime):
 	pass
 
 def sched__sched_stat_iowait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, delay):
+	comm, pid, delay):
 	pass
 
 def sched__sched_stat_sleep(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, delay):
+	comm, pid, delay):
 	pass
 
 def sched__sched_stat_wait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, delay):
+	comm, pid, delay):
 	pass
 
 def sched__sched_process_fork(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, parent_comm, parent_pid, child_comm, child_pid):
+	parent_comm, parent_pid, child_comm, child_pid):
 	pass
 
 def sched__sched_process_wait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio):
+	comm, pid, prio):
 	pass
 
 def sched__sched_process_exit(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio):
+	comm, pid, prio):
 	pass
 
 def sched__sched_process_free(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio):
+	comm, pid, prio):
 	pass
 
 def sched__sched_migrate_task(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio, orig_cpu,
+	comm, pid, prio, orig_cpu,
 	dest_cpu):
 	headers = EventHeaders(common_cpu, common_secs, common_nsecs,
-				common_pid, common_comm, common_callchain)
+				common_pid, common_comm)
 	parser.migrate(headers, pid, prio, orig_cpu, dest_cpu)
 
 def sched__sched_switch(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm, common_callchain,
+	common_secs, common_nsecs, common_pid, common_comm,
 	prev_comm, prev_pid, prev_prio, prev_state,
 	next_comm, next_pid, next_prio):
 
 	headers = EventHeaders(common_cpu, common_secs, common_nsecs,
-				common_pid, common_comm, common_callchain)
+				common_pid, common_comm)
 	parser.sched_switch(headers, prev_comm, prev_pid, prev_prio, prev_state,
 			 next_comm, next_pid, next_prio)
 
 def sched__sched_wakeup_new(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio, success,
+	comm, pid, prio, success,
 	target_cpu):
 	headers = EventHeaders(common_cpu, common_secs, common_nsecs,
-				common_pid, common_comm, common_callchain)
+				common_pid, common_comm)
 	parser.wake_up(headers, comm, pid, success, target_cpu, 1)
 
 def sched__sched_wakeup(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio, success,
+	comm, pid, prio, success,
 	target_cpu):
 	headers = EventHeaders(common_cpu, common_secs, common_nsecs,
-				common_pid, common_comm, common_callchain)
+				common_pid, common_comm)
 	parser.wake_up(headers, comm, pid, success, target_cpu, 0)
 
 def sched__sched_wait_task(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio):
+	comm, pid, prio):
 	pass
 
 def sched__sched_kthread_stop_ret(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, ret):
+	ret):
 	pass
 
 def sched__sched_kthread_stop(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid):
+	comm, pid):
 	pass
 
-def trace_unhandled(event_name, context, event_fields_dict):
+def trace_unhandled(event_name, context, common_cpu, common_secs, common_nsecs,
+		common_pid, common_comm):
 	pass

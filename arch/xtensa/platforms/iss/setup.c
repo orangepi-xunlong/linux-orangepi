@@ -32,8 +32,6 @@
 #include <asm/platform.h>
 #include <asm/bootparam.h>
 
-#include <platform/simcall.h>
-
 
 void __init platform_init(bp_tag_t* bootparam)
 {
@@ -42,20 +40,34 @@ void __init platform_init(bp_tag_t* bootparam)
 
 void platform_halt(void)
 {
-	pr_info(" ** Called platform_halt() **\n");
-	simc_exit(0);
+	printk (" ** Called platform_halt(), looping forever! **\n");
+	while (1);
 }
 
 void platform_power_off(void)
 {
-	pr_info(" ** Called platform_power_off() **\n");
-	simc_exit(0);
+	printk (" ** Called platform_power_off(), looping forever! **\n");
+	while (1);
 }
 void platform_restart(void)
 {
 	/* Flush and reset the mmu, simulate a processor reset, and
 	 * jump to the reset vector. */
-	cpu_reset();
+
+	__asm__ __volatile__("movi	a2, 15\n\t"
+			     "wsr	a2, " __stringify(ICOUNTLEVEL) "\n\t"
+			     "movi	a2, 0\n\t"
+			     "wsr	a2, " __stringify(ICOUNT) "\n\t"
+			     "wsr	a2, " __stringify(IBREAKENABLE) "\n\t"
+			     "wsr	a2, " __stringify(LCOUNT) "\n\t"
+			     "movi	a2, 0x1f\n\t"
+			     "wsr	a2, " __stringify(PS) "\n\t"
+			     "isync\n\t"
+			     "jx	%0\n\t"
+			     :
+			     : "a" (XCHAL_RESET_VECTOR_VADDR)
+			     : "a2");
+
 	/* control never gets here */
 }
 
@@ -82,7 +94,7 @@ void platform_heartbeat(void)
 static int
 iss_panic_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
-	simc_exit(1);
+	__asm__ __volatile__("movi a2, -1; simcall\n");
 	return NOTIFY_DONE;
 }
 

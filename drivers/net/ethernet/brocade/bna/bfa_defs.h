@@ -1,5 +1,5 @@
 /*
- * Linux network driver for QLogic BR-series Converged Network Adapter.
+ * Linux network driver for Brocade Converged Network Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -11,10 +11,9 @@
  * General Public License for more details.
  */
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014-2015 QLogic Corporation
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  */
 
 #ifndef __BFA_DEFS_H__
@@ -24,11 +23,16 @@
 #include "bfa_defs_status.h"
 #include "bfa_defs_mfg_comm.h"
 
+#define BFA_STRING_32	32
 #define BFA_VERSION_LEN 64
 
-/* ---------------------- adapter definitions ------------ */
+/**
+ * ---------------------- adapter definitions ------------
+ */
 
-/* BFA adapter level attributes. */
+/**
+ * BFA adapter level attributes.
+ */
 enum {
 	BFA_ADAPTER_SERIAL_NUM_LEN = STRSZ(BFA_MFG_SERIALNUM_SIZE),
 					/*
@@ -54,7 +58,7 @@ struct bfa_adapter_attr {
 	char		optrom_ver[BFA_VERSION_LEN];
 	char		os_type[BFA_ADAPTER_OS_TYPE_LEN];
 	struct bfa_mfg_vpd vpd;
-	u8		mac[ETH_ALEN];
+	struct mac mac;
 
 	u8		nports;
 	u8		max_speed;
@@ -70,14 +74,18 @@ struct bfa_adapter_attr {
 	u8		trunk_capable;
 };
 
-/* ---------------------- IOC definitions ------------ */
+/**
+ * ---------------------- IOC definitions ------------
+ */
 
 enum {
 	BFA_IOC_DRIVER_LEN	= 16,
 	BFA_IOC_CHIP_REV_LEN	= 8,
 };
 
-/* Driver and firmware versions. */
+/**
+ * Driver and firmware versions.
+ */
 struct bfa_ioc_driver_attr {
 	char		driver[BFA_IOC_DRIVER_LEN];	/*!< driver name */
 	char		driver_ver[BFA_VERSION_LEN];	/*!< driver version */
@@ -87,7 +95,9 @@ struct bfa_ioc_driver_attr {
 	char		ob_ver[BFA_VERSION_LEN];	/*!< openboot version */
 };
 
-/* IOC PCI device attributes */
+/**
+ * IOC PCI device attributes
+ */
 struct bfa_ioc_pci_attr {
 	u16	vendor_id;	/*!< PCI vendor ID */
 	u16	device_id;	/*!< PCI device ID */
@@ -98,7 +108,9 @@ struct bfa_ioc_pci_attr {
 	char		chip_rev[BFA_IOC_CHIP_REV_LEN];	 /*!< chip revision */
 };
 
-/* IOC states */
+/**
+ * IOC states
+ */
 enum bfa_ioc_state {
 	BFA_IOC_UNINIT		= 1,	/*!< IOC is in uninit state */
 	BFA_IOC_RESET		= 2,	/*!< IOC is in reset state */
@@ -115,7 +127,9 @@ enum bfa_ioc_state {
 	BFA_IOC_HWFAIL		= 13,	/*!< PCI mapping doesn't exist */
 };
 
-/* IOC firmware stats */
+/**
+ * IOC firmware stats
+ */
 struct bfa_fw_ioc_stats {
 	u32	enable_reqs;
 	u32	disable_reqs;
@@ -125,7 +139,9 @@ struct bfa_fw_ioc_stats {
 	u32	unknown_reqs;
 };
 
-/* IOC driver stats */
+/**
+ * IOC driver stats
+ */
 struct bfa_ioc_drv_stats {
 	u32	ioc_isrs;
 	u32	ioc_enables;
@@ -141,7 +157,9 @@ struct bfa_ioc_drv_stats {
 	u32	rsvd;
 };
 
-/* IOC statistics */
+/**
+ * IOC statistics
+ */
 struct bfa_ioc_stats {
 	struct bfa_ioc_drv_stats drv_stats; /*!< driver IOC stats */
 	struct bfa_fw_ioc_stats fw_stats;  /*!< firmware IOC stats */
@@ -153,7 +171,9 @@ enum bfa_ioc_type {
 	BFA_IOC_TYPE_LL		= 3,
 };
 
-/* IOC attributes returned in queries */
+/**
+ * IOC attributes returned in queries
+ */
 struct bfa_ioc_attr {
 	enum bfa_ioc_type ioc_type;
 	enum bfa_ioc_state		state;		/*!< IOC state      */
@@ -164,20 +184,25 @@ struct bfa_ioc_attr {
 	u8				port_mode;	/*!< enum bfa_mode */
 	u8				cap_bm;		/*!< capability */
 	u8				port_mode_cfg;	/*!< enum bfa_mode */
-	u8				def_fn;		/*!< 1 if default fn */
-	u8				rsvd[3];	/*!< 64bit align */
+	u8				rsvd[4];	/*!< 64bit align */
 };
 
-/* Adapter capability mask definition */
+/**
+ * Adapter capability mask definition
+ */
 enum {
 	BFA_CM_HBA	=	0x01,
 	BFA_CM_CNA	=	0x02,
 	BFA_CM_NIC	=	0x04,
 };
 
-/* ---------------------- mfg definitions ------------ */
+/**
+ * ---------------------- mfg definitions ------------
+ */
 
-/* Checksum size */
+/**
+ * Checksum size
+ */
 #define BFA_MFG_CHKSUM_SIZE			16
 
 #define BFA_MFG_PARTNUM_SIZE			14
@@ -186,7 +211,10 @@ enum {
 #define BFA_MFG_SUPPLIER_SERIALNUM_SIZE		20
 #define BFA_MFG_SUPPLIER_REVISION_SIZE		4
 
-/* BFA adapter manufacturing block definition.
+#pragma pack(1)
+
+/**
+ * @brief BFA adapter manufacturing block definition.
  *
  * All numerical fields are in big-endian format.
  */
@@ -208,7 +236,7 @@ struct bfa_mfg_block {
 	char	supplier_partnum[STRSZ(BFA_MFG_SUPPLIER_PARTNUM_SIZE)];
 	char	supplier_serialnum[STRSZ(BFA_MFG_SUPPLIER_SERIALNUM_SIZE)];
 	char	supplier_revision[STRSZ(BFA_MFG_SUPPLIER_REVISION_SIZE)];
-	u8	mfg_mac[ETH_ALEN]; /* base mac address */
+	mac_t	mfg_mac;	/* base mac address */
 	u8	num_mac;	/* number of mac addresses */
 	u8	rsv2;
 	u32	card_type;	/* card type          */
@@ -224,9 +252,13 @@ struct bfa_mfg_block {
 	char	initial_mode[8]; /* initial mode: hba/cna/nic */
 	u8	rsv4[84];
 	u8	md5_chksum[BFA_MFG_CHKSUM_SIZE]; /* md5 checksum */
-} __packed;
+};
 
-/* ---------------------- pci definitions ------------ */
+#pragma pack()
+
+/**
+ * ---------------------- pci definitions ------------
+ */
 
 /*
  * PCI device ID information
@@ -243,7 +275,9 @@ enum {
 #define bfa_asic_id_ctc(device)			\
 	(bfa_asic_id_ct(device) || bfa_asic_id_ct2(device))
 
-/* PCI sub-system device and vendor ID information */
+/**
+ * PCI sub-system device and vendor ID information
+ */
 enum {
 	BFA_PCI_FCOE_SSDEVICE_ID	= 0x14,
 	BFA_PCI_CT2_SSID_FCoE		= 0x22,

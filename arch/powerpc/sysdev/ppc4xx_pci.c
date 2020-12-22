@@ -22,6 +22,7 @@
 #include <linux/pci.h>
 #include <linux/init.h>
 #include <linux/of.h>
+#include <linux/bootmem.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
 
@@ -175,12 +176,8 @@ static int __init ppc4xx_parse_dma_ranges(struct pci_controller *hose,
 		return -ENXIO;
 	}
 
-	/* Check that we are fully contained within 32 bits space if we are not
-	 * running on a 460sx or 476fpe which have 64 bit bus addresses.
-	 */
-	if (res->end > 0xffffffff &&
-	    !(of_device_is_compatible(hose->dn, "ibm,plb-pciex-460sx")
-	      || of_device_is_compatible(hose->dn, "ibm,plb-pciex-476fpe"))) {
+	/* Check that we are fully contained within 32 bits space */
+	if (res->end > 0xffffffff) {
 		printk(KERN_ERR "%s: dma-ranges outside of 32 bits space\n",
 		       hose->dn->full_name);
 		return -ENXIO;
@@ -260,7 +257,6 @@ static void __init ppc4xx_configure_pci_PMMs(struct pci_controller *hose,
 	/* Setup outbound memory windows */
 	for (i = j = 0; i < 3; i++) {
 		struct resource *res = &hose->mem_resources[i];
-		resource_size_t offset = hose->mem_offset[i];
 
 		/* we only care about memory windows */
 		if (!(res->flags & IORESOURCE_MEM))
@@ -274,7 +270,7 @@ static void __init ppc4xx_configure_pci_PMMs(struct pci_controller *hose,
 		/* Configure the resource */
 		if (ppc4xx_setup_one_pci_PMM(hose, reg,
 					     res->start,
-					     res->start - offset,
+					     res->start - hose->pci_mem_offset,
 					     resource_size(res),
 					     res->flags,
 					     j) == 0) {
@@ -283,7 +279,7 @@ static void __init ppc4xx_configure_pci_PMMs(struct pci_controller *hose,
 			/* If the resource PCI address is 0 then we have our
 			 * ISA memory hole
 			 */
-			if (res->start == offset)
+			if (res->start == hose->pci_mem_offset)
 				found_isa_hole = 1;
 		}
 	}
@@ -461,7 +457,6 @@ static void __init ppc4xx_configure_pcix_POMs(struct pci_controller *hose,
 	/* Setup outbound memory windows */
 	for (i = j = 0; i < 3; i++) {
 		struct resource *res = &hose->mem_resources[i];
-		resource_size_t offset = hose->mem_offset[i];
 
 		/* we only care about memory windows */
 		if (!(res->flags & IORESOURCE_MEM))
@@ -475,7 +470,7 @@ static void __init ppc4xx_configure_pcix_POMs(struct pci_controller *hose,
 		/* Configure the resource */
 		if (ppc4xx_setup_one_pcix_POM(hose, reg,
 					      res->start,
-					      res->start - offset,
+					      res->start - hose->pci_mem_offset,
 					      resource_size(res),
 					      res->flags,
 					      j) == 0) {
@@ -484,7 +479,7 @@ static void __init ppc4xx_configure_pcix_POMs(struct pci_controller *hose,
 			/* If the resource PCI address is 0 then we have our
 			 * ISA memory hole
 			 */
-			if (res->start == offset)
+			if (res->start == hose->pci_mem_offset)
 				found_isa_hole = 1;
 		}
 	}
@@ -1061,7 +1056,7 @@ static int __init apm821xx_pciex_core_init(struct device_node *np)
 	return 1;
 }
 
-static int __init apm821xx_pciex_init_port_hw(struct ppc4xx_pciex_port *port)
+static int apm821xx_pciex_init_port_hw(struct ppc4xx_pciex_port *port)
 {
 	u32 val;
 
@@ -1443,8 +1438,7 @@ static int __init ppc4xx_pciex_check_core_init(struct device_node *np)
 		ppc4xx_pciex_hwops = &ppc405ex_pcie_hwops;
 #endif
 #ifdef CONFIG_476FPE
-	if (of_device_is_compatible(np, "ibm,plb-pciex-476fpe")
-		|| of_device_is_compatible(np, "ibm,plb-pciex-476gtr"))
+	if (of_device_is_compatible(np, "ibm,plb-pciex-476fpe"))
 		ppc4xx_pciex_hwops = &ppc_476fpe_pcie_hwops;
 #endif
 	if (ppc4xx_pciex_hwops == NULL) {
@@ -1755,10 +1749,7 @@ static int __init ppc4xx_setup_one_pciex_POM(struct ppc4xx_pciex_port	*port,
 			dcr_write(port->dcrs, DCRO_PEGPL_OMR1MSKL,
 				sa | DCRO_PEGPL_460SX_OMR1MSKL_UOT
 					| DCRO_PEGPL_OMRxMSKL_VAL);
-		else if (of_device_is_compatible(
-				port->node, "ibm,plb-pciex-476fpe") ||
-			of_device_is_compatible(
-				port->node, "ibm,plb-pciex-476gtr"))
+		else if (of_device_is_compatible(port->node, "ibm,plb-pciex-476fpe"))
 			dcr_write(port->dcrs, DCRO_PEGPL_OMR1MSKL,
 				sa | DCRO_PEGPL_476FPE_OMR1MSKL_UOT
 					| DCRO_PEGPL_OMRxMSKL_VAL);
@@ -1801,7 +1792,6 @@ static void __init ppc4xx_configure_pciex_POMs(struct ppc4xx_pciex_port *port,
 	/* Setup outbound memory windows */
 	for (i = j = 0; i < 3; i++) {
 		struct resource *res = &hose->mem_resources[i];
-		resource_size_t offset = hose->mem_offset[i];
 
 		/* we only care about memory windows */
 		if (!(res->flags & IORESOURCE_MEM))
@@ -1815,7 +1805,7 @@ static void __init ppc4xx_configure_pciex_POMs(struct ppc4xx_pciex_port *port,
 		/* Configure the resource */
 		if (ppc4xx_setup_one_pciex_POM(port, hose, mbase,
 					       res->start,
-					       res->start - offset,
+					       res->start - hose->pci_mem_offset,
 					       resource_size(res),
 					       res->flags,
 					       j) == 0) {
@@ -1824,7 +1814,7 @@ static void __init ppc4xx_configure_pciex_POMs(struct ppc4xx_pciex_port *port,
 			/* If the resource PCI address is 0 then we have our
 			 * ISA memory hole
 			 */
-			if (res->start == offset)
+			if (res->start == hose->pci_mem_offset)
 				found_isa_hole = 1;
 		}
 	}
@@ -1888,10 +1878,7 @@ static void __init ppc4xx_configure_pciex_PIMs(struct ppc4xx_pciex_port *port,
 			sa |= PCI_BASE_ADDRESS_MEM_PREFETCH;
 
 		if (of_device_is_compatible(port->node, "ibm,plb-pciex-460sx") ||
-		    of_device_is_compatible(
-			    port->node, "ibm,plb-pciex-476fpe") ||
-		    of_device_is_compatible(
-			    port->node, "ibm,plb-pciex-476gtr"))
+		    of_device_is_compatible(port->node, "ibm,plb-pciex-476fpe"))
 			sa |= PCI_BASE_ADDRESS_MEM_TYPE_64;
 
 		out_le32(mbase + PECFG_BAR0HMPA, RES_TO_U32_HIGH(sa));

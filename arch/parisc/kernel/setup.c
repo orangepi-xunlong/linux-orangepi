@@ -38,7 +38,6 @@
 #include <linux/export.h>
 
 #include <asm/processor.h>
-#include <asm/sections.h>
 #include <asm/pdc.h>
 #include <asm/led.h>
 #include <asm/machdep.h>	/* for pa7300lc_init() proto */
@@ -70,8 +69,7 @@ void __init setup_cmdline(char **cmdline_p)
 		/* called from hpux boot loader */
 		boot_command_line[0] = '\0';
 	} else {
-		strlcpy(boot_command_line, (char *)__va(boot_args[1]),
-			COMMAND_LINE_SIZE);
+		strcpy(boot_command_line, (char *)__va(boot_args[1]));
 
 #ifdef CONFIG_BLK_DEV_INITRD
 		if (boot_args[2] != 0) /* did palo pass us a ramdisk? */
@@ -131,24 +129,6 @@ void __init setup_arch(char **cmdline_p)
 	printk(KERN_INFO "The 32-bit Kernel has started...\n");
 #endif
 
-	printk(KERN_INFO "Kernel default page size is %d KB. Huge pages ",
-		(int)(PAGE_SIZE / 1024));
-#ifdef CONFIG_HUGETLB_PAGE
-	printk(KERN_CONT "enabled with %d MB physical and %d MB virtual size",
-		 1 << (REAL_HPAGE_SHIFT - 20), 1 << (HPAGE_SHIFT - 20));
-#else
-	printk(KERN_CONT "disabled");
-#endif
-	printk(KERN_CONT ".\n");
-
-	/*
-	 * Check if initial kernel page mappings are sufficient.
-	 * panic early if not, else we may access kernel functions
-	 * and variables which can't be reached.
-	 */
-	if (__pa((unsigned long) &_end) >= KERNEL_INITIAL_SIZE)
-		panic("KERNEL_INITIAL_ORDER too small!");
-
 	pdc_console_init();
 
 #ifdef CONFIG_64BIT
@@ -173,7 +153,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 #if defined(CONFIG_VT) && defined(CONFIG_DUMMY_CONSOLE)
-	conswitchp = &dummy_con;	/* we use do_take_over_console() later ! */
+	conswitchp = &dummy_con;	/* we use take_over_console() later ! */
 #endif
 
 }
@@ -334,17 +314,9 @@ static int __init parisc_init(void)
 	/* tell PDC we're Linux. Nevermind failure. */
 	pdc_stable_write(0x40, &osid, sizeof(osid));
 	
-	/* start with known state */
-	flush_cache_all_local();
-	flush_tlb_all_local(NULL);
-
 	processor_init();
-#ifdef CONFIG_SMP
-	pr_info("CPU(s): %d out of %d %s at %d.%06d MHz online\n",
-		num_online_cpus(), num_present_cpus(),
-#else
-	pr_info("CPU(s): 1 x %s at %d.%06d MHz\n",
-#endif
+	printk(KERN_INFO "CPU(s): %d x %s at %d.%06d MHz\n",
+			num_present_cpus(),
 			boot_cpu_data.cpu_name,
 			boot_cpu_data.cpu_hz / 1000000,
 			boot_cpu_data.cpu_hz % 1000000	);
@@ -398,13 +370,9 @@ arch_initcall(parisc_init);
 void start_parisc(void)
 {
 	extern void start_kernel(void);
-	extern void early_trap_init(void);
 
 	int ret, cpunum;
 	struct pdc_coproc_cfg coproc_cfg;
-
-	/* check QEMU/SeaBIOS marker in PAGE0 */
-	running_on_qemu = (memcmp(&PAGE0->pad0, "SeaBIOS", 8) == 0);
 
 	cpunum = smp_processor_id();
 
@@ -421,8 +389,6 @@ void start_parisc(void)
 	} else {
 		panic("must have an fpu to boot linux");
 	}
-
-	early_trap_init(); /* initialize checksum of fault_vector */
 
 	start_kernel();
 	// not reached

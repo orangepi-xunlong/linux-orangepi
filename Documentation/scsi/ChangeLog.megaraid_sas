@@ -1,102 +1,3 @@
-Release Date    : Thu. Jun 19, 2014 17:00:00 PST 2014 -
-			(emaild-id:megaraidlinux@lsi.com)
-			Adam Radford
-			Kashyap Desai
-			Sumit Saxena
-			Uday Lingala
-Current Version : 06.803.02.00-rc1
-Old Version     : 06.803.01.00-rc1
-    1. Fix reset_mutex leak in megasas_reset_fusion().
-    2. Remove unused variables in megasas_instance.
-    3. Fix LD/VF affiliation parsing.
-    4. Add missing initial call to megasas_get_ld_vf_affiliation().
-    5. Version and Changelog update.
--------------------------------------------------------------------------------
-Release Date    : Mon. Mar 10, 2014 17:00:00 PST 2014 -
-			(emaild-id:megaraidlinux@lsi.com)
-			Adam Radford
-			Kashyap Desai
-			Sumit Saxena
-Current Version : 06.803.01.00-rc1
-Old Version     : 06.700.06.00-rc1
-    1. Load correct raid context timeout value for multipathing & clustering.
-    2. Fix megasas_ioc_init_fusion to use local stack variable.
-    3. Return leaked MPT frames to MPT command pool.
-    4. Add Dell PowerEdge VRTX SR-IOV VF device support.
-    5. Version and Changelog update.
--------------------------------------------------------------------------------
-Release Date    : Sat. Aug 31, 2013 17:00:00 PST 2013 -
-			(emaild-id:megaraidlinux@lsi.com)
-			Adam Radford
-			Kashyap Desai
-			Sumit Saxena
-Current Version : 06.700.06.00-rc1
-Old Version     : 06.600.18.00-rc1
-    1. Add High Availability clustering support using shared Logical Disks.
-    2. Version and Changelog update.
--------------------------------------------------------------------------------
-Release Date    : Wed. May 15, 2013 17:00:00 PST 2013 -
-			(emaild-id:megaraidlinux@lsi.com)
-			Adam Radford
-			Kashyap Desai
-			Sumit Saxena
-Current Version : 06.600.18.00-rc1
-Old Version     : 06.506.00.00-rc1
-    1. Return DID_ERROR for scsi io, when controller is in critical h/w error.
-    2. Fix the interrupt mask for Gen2 controller.
-    3. Update balance count in driver to be in sync of firmware.
-    4. Free event detail memory without device ID check.
-    5. Set IO request timeout value provided by OS timeout for Tape devices.
-    6. Add support for MegaRAID Fury (device ID-0x005f) 12Gb/s controllers.
-    7. Add support to display Customer branding details in syslog.
-    8. Set IoFlags to enable Fast Path for JBODs for Invader/Fury(12 Gb/s)
-    controllers.
-    9. Add support for Extended MSI-x vectors for Invader and Fury(12Gb/s
-    HBA).
-    10.Add support for Uneven Span PRL11.
-    11.Add support to differentiate between iMR and MR Firmware.
-    12.Version and Changelog update.
--------------------------------------------------------------------------------
-Release Date    : Sat. Feb 9, 2013 17:00:00 PST 2013 -
-			(emaild-id:megaraidlinux@lsi.com)
-			Adam Radford
-Current Version : 06.506.00.00-rc1
-Old Version     : 06.504.01.00-rc1
-    1. Add 4k FastPath DIF support.
-    2. Don't load DevHandle unless FastPath enabled.
-    3. Version and Changelog update.
--------------------------------------------------------------------------------
-Release Date    : Mon. Oct 1, 2012 17:00:00 PST 2012 -
-			(emaild-id:megaraidlinux@lsi.com)
-			Adam Radford
-Current Version : 06.504.01.00-rc1
-Old Version     : 00.00.06.18-rc1
-    1. Removed un-needed completion_lock spinlock calls.
-    2. Add module param for configurable MSI-X vector count.
-    3. Load io_request DataLength in bytes.
-    4. Add array boundary check for SystemPD.
-    5. Add SystemPD FastPath support.
-    6. Remove duplicate code.
-    7. Version, Changelog, Copyright update.
--------------------------------------------------------------------------------
-Release Date    : Tue. Jun 17, 2012 17:00:00 PST 2012 -
-			(emaild-id:megaraidlinux@lsi.com)
-			Adam Radford/Kashyap Desai
-Current Version : 00.00.06.18-rc1
-Old Version     : 00.00.06.15-rc1
-    1. Fix Copyright dates.
-    2. Add throttlequeuedepth module parameter.
-    3. Add resetwaittime module parameter.
-    4. Move poll_aen_lock initializer.
--------------------------------------------------------------------------------
-Release Date    : Mon. Mar 19, 2012 17:00:00 PST 2012 -
-			(emaild-id:megaraidlinux@lsi.com)
-			Adam Radford
-Current Version : 00.00.06.15-rc1
-Old Version     : 00.00.06.14-rc1
-    1. Optimize HostMSIxVectors setting.
-    2. Add fpRead/WriteCapable, fpRead/WriteAcrossStripe checks.
--------------------------------------------------------------------------------
 Release Date    : Fri. Jan 6, 2012 17:00:00 PST 2010 -
 			(emaild-id:megaraidlinux@lsi.com)
 			Adam Radford
@@ -105,7 +6,7 @@ Old Version     : 00.00.06.12-rc1
     1. Fix reglockFlags for degraded raid5/6 for MR 9360/9380.
     2. Mask off flags in ioctl path to prevent memory scribble with older
        MegaCLI versions.
-    3. Remove poll_mode_io module parameter, sysfs node, and associated code.
+    3. Remove poll_mode_io module paramater, sysfs node, and associated code.
 -------------------------------------------------------------------------------
 Release Date    : Wed. Oct 5, 2011 17:00:00 PST 2010 -
 			(emaild-id:megaraidlinux@lsi.com)
@@ -199,7 +100,7 @@ Old Version     : 00.00.04.31-rc1
 1.	Add the Online Controller Reset (OCR) to the Driver.
 	OCR is the new feature for megaraid_sas driver which
 	will allow the fw to do the chip reset which will not
-	affect the OS behavior.
+	affact the OS behavious.
 
 	To add the OCR support, driver need to do:
 		a). reset the controller chips -- Xscale and Gen2 which
@@ -233,7 +134,7 @@ Old Version     : 00.00.04.31-rc1
 	failed state.  Driver will kill adapter if can't bring back FW after the
 	this three times reset.
 4.	Add the input parameter max_sectors to 1MB support to our GEN2 controller.
-	customer can use the input parameter max_sectors to add 1MB support to GEN2
+	customer can use the input paramenter max_sectors to add 1MB support to GEN2
 	controller.
 
 1 Release Date    : Thur.  Oct 29, 2009 09:12:45 PST 2009 -
@@ -582,11 +483,11 @@ ii.	Bug fix : Disable controller interrupt before firing INIT cmd to FW.
 
 1 Release Date    : Wed Feb 03 14:31:44 PST 2006 - Sumant Patro <Sumant.Patro@lsil.com>
 2 Current Version : 00.00.02.04
-3 Older Version   : 00.00.02.04
+3 Older Version   : 00.00.02.04 
 
-i.	Remove superfluous instance_lock
+i.	Remove superflous instance_lock
 
-	gets rid of the otherwise superfluous instance_lock and avoids an unsafe
+	gets rid of the otherwise superflous instance_lock and avoids an unsave 
 	unsynchronized access in the error handler.
 
 		- Christoph Hellwig <hch@lst.de>
@@ -594,43 +495,43 @@ i.	Remove superfluous instance_lock
 
 1 Release Date    : Wed Feb 03 14:31:44 PST 2006 - Sumant Patro <Sumant.Patro@lsil.com>
 2 Current Version : 00.00.02.04
-3 Older Version   : 00.00.02.04
+3 Older Version   : 00.00.02.04 
 
 i.	Support for 1078 type (ppc IOP) controller, device id : 0x60 added.
-	During initialization, depending on the device id, the template members
-	are initialized with function pointers specific to the ppc or
-	xscale controllers.
+	During initialization, depending on the device id, the template members 
+	are initialized with function pointers specific to the ppc or 
+	xscale controllers.  
 
 		-Sumant Patro <Sumant.Patro@lsil.com>
 		
-1 Release Date    : Fri Feb 03 14:16:25 PST 2006 - Sumant Patro
+1 Release Date    : Fri Feb 03 14:16:25 PST 2006 - Sumant Patro 
 							<Sumant.Patro@lsil.com>
 2 Current Version : 00.00.02.04
-3 Older Version   : 00.00.02.02
-i.	Register 16 byte CDB capability with scsi midlayer
+3 Older Version   : 00.00.02.02 
+i.	Register 16 byte CDB capability with scsi midlayer 
 
-	"This patch properly registers the 16 byte command length capability of the
-	megaraid_sas controlled hardware with the scsi midlayer. All megaraid_sas
+	"This patch properly registers the 16 byte command length capability of the 
+	megaraid_sas controlled hardware with the scsi midlayer. All megaraid_sas 
 	hardware supports 16 byte CDB's."
 
-		-Joshua Giles <joshua_giles@dell.com>
+		-Joshua Giles <joshua_giles@dell.com> 
 
 1 Release Date    : Mon Jan 23 14:09:01 PST 2006 - Sumant Patro <Sumant.Patro@lsil.com>
 2 Current Version : 00.00.02.02
-3 Older Version   : 00.00.02.01
+3 Older Version   : 00.00.02.01 
 
-i.	New template defined to represent each family of controllers (identified by processor used).
-	The template will have definitions that will be initialised to appropriate values for a specific family of controllers. The template definition has four function pointers. During driver initialisation the function pointers will be set based on the controller family type. This change is done to support new controllers that has different processors and thus different register set.
+i.	New template defined to represent each family of controllers (identified by processor used). 
+	The template will have defintions that will be initialised to appropritae values for a specific family of controllers. The template definition has four function pointers. During driver initialisation the function pointers will be set based on the controller family type. This change is done to support new controllers that has different processors and thus different register set.
 
 		-Sumant Patro <Sumant.Patro@lsil.com>
 
 1 Release Date    : Mon Dec 19 14:36:26 PST 2005 - Sumant Patro <Sumant.Patro@lsil.com>
-2 Current Version : 00.00.02.00-rc4
-3 Older Version   : 00.00.02.01
+2 Current Version : 00.00.02.00-rc4 
+3 Older Version   : 00.00.02.01 
 
-i.	Code reorganized to remove code duplication in megasas_build_cmd.
+i.	Code reorganized to remove code duplication in megasas_build_cmd. 
 
-	"There's a lot of duplicate code megasas_build_cmd.  Move that out of the different codepaths and merge the reminder of megasas_build_cmd into megasas_queue_command"
+	"There's a lot of duplicate code megasas_build_cmd.  Move that out of the different codepathes and merge the reminder of megasas_build_cmd into megasas_queue_command"
 
 		- Christoph Hellwig <hch@lst.de>
 

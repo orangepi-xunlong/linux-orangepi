@@ -21,6 +21,7 @@
 #include <linux/fs.h>
 #include <linux/errno.h>
 #include <linux/major.h>
+#include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
@@ -410,7 +411,7 @@ static long cpwd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		.identity		= DRIVER_NAME,
 	};
 	void __user *argp = (void __user *)arg;
-	struct inode *inode = file_inode(file);
+	struct inode *inode = file->f_path.dentry->d_inode;
 	int index = iminor(inode) - WD0_MINOR;
 	struct cpwd *p = cpwd_device;
 	int setopt = 0;
@@ -498,7 +499,7 @@ static long cpwd_compat_ioctl(struct file *file, unsigned int cmd,
 static ssize_t cpwd_write(struct file *file, const char __user *buf,
 			  size_t count, loff_t *ppos)
 {
-	struct inode *inode = file_inode(file);
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct cpwd *p = cpwd_device;
 	int index = iminor(inode);
 
@@ -527,7 +528,7 @@ static const struct file_operations cpwd_fops = {
 	.llseek =		no_llseek,
 };
 
-static int cpwd_probe(struct platform_device *op)
+static int __devinit cpwd_probe(struct platform_device *op)
 {
 	struct device_node *options;
 	const char *str_prop;
@@ -611,14 +612,16 @@ static int cpwd_probe(struct platform_device *op)
 	}
 
 	if (p->broken) {
-		setup_timer(&cpwd_timer, cpwd_brokentimer, (unsigned long)p);
+		init_timer(&cpwd_timer);
+		cpwd_timer.function	= cpwd_brokentimer;
+		cpwd_timer.data		= (unsigned long) p;
 		cpwd_timer.expires	= WD_BTIMEOUT;
 
 		pr_info("PLD defect workaround enabled for model %s\n",
 			WD_BADMODEL);
 	}
 
-	platform_set_drvdata(op, p);
+	dev_set_drvdata(&op->dev, p);
 	cpwd_device = p;
 	err = 0;
 
@@ -637,9 +640,9 @@ out_free:
 	goto out;
 }
 
-static int cpwd_remove(struct platform_device *op)
+static int __devexit cpwd_remove(struct platform_device *op)
 {
-	struct cpwd *p = platform_get_drvdata(op);
+	struct cpwd *p = dev_get_drvdata(&op->dev);
 	int i;
 
 	for (i = 0; i < WD_NUMDEVS; i++) {
@@ -677,10 +680,11 @@ MODULE_DEVICE_TABLE(of, cpwd_match);
 static struct platform_driver cpwd_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = cpwd_match,
 	},
 	.probe		= cpwd_probe,
-	.remove		= cpwd_remove,
+	.remove		= __devexit_p(cpwd_remove),
 };
 
 module_platform_driver(cpwd_driver);

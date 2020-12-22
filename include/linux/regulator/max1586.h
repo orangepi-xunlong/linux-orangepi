@@ -40,7 +40,7 @@
  */
 struct max1586_subdev_data {
 	int				id;
-	const char			*name;
+	char				*name;
 	struct regulator_init_data	*platform_data;
 };
 

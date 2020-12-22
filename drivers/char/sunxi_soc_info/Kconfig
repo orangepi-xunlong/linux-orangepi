@@ -1,0 +1,9 @@
+#
+# sunxi cpus test configuration.
+#
+
+config SUNXI_SOC_INFO
+	tristate "sunxi SOC info driver"
+	default y
+
+	

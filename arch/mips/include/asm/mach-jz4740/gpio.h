@@ -27,7 +27,7 @@ enum jz_gpio_function {
 
 /*
  Usually a driver for a SoC component has to request several gpio pins and
- configure them as function pins.
+ configure them as funcion pins.
  jz_gpio_bulk_request can be used to ease this process.
  Usually one would do something like:
 
@@ -72,6 +72,8 @@ int jz_gpio_port_direction_input(int port, uint32_t mask);
 int jz_gpio_port_direction_output(int port, uint32_t mask);
 void jz_gpio_port_set_value(int port, uint32_t value, uint32_t mask);
 uint32_t jz_gpio_port_get_value(int port, uint32_t mask);
+
+#include <asm/mach-generic/gpio.h>
 
 #define JZ_GPIO_PORTA(x) ((x) + 32 * 0)
 #define JZ_GPIO_PORTB(x) ((x) + 32 * 1)
@@ -196,7 +198,7 @@ uint32_t jz_gpio_port_get_value(int port, uint32_t mask);
 #define JZ_GPIO_FUNC_MEM_ADDR14		JZ_GPIO_FUNC1
 #define JZ_GPIO_FUNC_MEM_ADDR15		JZ_GPIO_FUNC1
 #define JZ_GPIO_FUNC_MEM_ADDR16		JZ_GPIO_FUNC1
-#define JZ_GPIO_FUNC_LCD_CLS		JZ_GPIO_FUNC1
+#define JZ_GPIO_FUNC_LCD_CLS	        JZ_GPIO_FUNC1
 #define JZ_GPIO_FUNC_LCD_SPL		JZ_GPIO_FUNC1
 #define JZ_GPIO_FUNC_MEM_DCS		JZ_GPIO_FUNC1
 #define JZ_GPIO_FUNC_MEM_RAS		JZ_GPIO_FUNC1

@@ -3,8 +3,6 @@
  * Copyright (C) 2005 David S. Miller <davem@davemloft.net>
  */
 
-#include <asm/export.h>
-
 #ifdef __KERNEL__
 #define GLOBAL_SPARE	%g7
 #else
@@ -65,7 +63,6 @@
 	 add		%o5, %o4, %o4
 
 	.globl		FUNC_NAME
-	EXPORT_SYMBOL(FUNC_NAME)
 FUNC_NAME:		/* %o0=src, %o1=dst, %o2=len, %o3=sum */
 	LOAD(prefetch, %o0 + 0x000, #n_reads)
 	xor		%o0, %o1, %g1

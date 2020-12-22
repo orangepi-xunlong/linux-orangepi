@@ -15,7 +15,7 @@
 #include <linux/platform_device.h>
 #include <linux/leds.h>
 #include <linux/err.h>
-#include <linux/io.h>
+#include <asm/io.h>
 #include <linux/nsc_gpio.h>
 #include <linux/scx200_gpio.h>
 #include <linux/module.h>
@@ -39,13 +39,21 @@ static struct led_classdev net48xx_error_led = {
 
 static int net48xx_led_probe(struct platform_device *pdev)
 {
-	return devm_led_classdev_register(&pdev->dev, &net48xx_error_led);
+	return led_classdev_register(&pdev->dev, &net48xx_error_led);
+}
+
+static int net48xx_led_remove(struct platform_device *pdev)
+{
+	led_classdev_unregister(&net48xx_error_led);
+	return 0;
 }
 
 static struct platform_driver net48xx_led_driver = {
 	.probe		= net48xx_led_probe,
+	.remove		= net48xx_led_remove,
 	.driver		= {
 		.name		= DRVNAME,
+		.owner		= THIS_MODULE,
 	},
 };
 

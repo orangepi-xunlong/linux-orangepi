@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Allwinner Ltd.
+ * Copyright (C) 2014 Allwinner Ltd. 
  *
  * Author:
  *	Ryan Chen <ryanchen@allwinnertech.com>
@@ -21,7 +21,8 @@
 #include <linux/fs.h>
 #include "fivm.h"
 
-static char *fivm_hash = "sha256";
+
+static char *fivm_hash="sha256";
 static int init_desc(struct hash_desc *desc)
 {
 	int rc;
@@ -39,7 +40,9 @@ static int init_desc(struct hash_desc *desc)
 		crypto_free_hash(desc->tfm);
 	return rc;
 }
-
+/*
+ * Calculate the file hash(SHA256/SHA512) digest
+ */
 int fivm_calc_hash(struct file *file, char *digest)
 {
 	struct hash_desc desc;
@@ -57,9 +60,10 @@ int fivm_calc_hash(struct file *file, char *digest)
 		rc = -ENOMEM;
 		goto out;
 	}
-	i_size = i_size_read(file->f_path.dentry->d_inode);
+	i_size = i_size_read(file->f_dentry->d_inode);
 	while (offset < i_size) {
 		int rbuf_len;
+
 		rbuf_len = kernel_read(file, offset, rbuf, PAGE_SIZE);
 		if (rbuf_len < 0) {
 			rc = rbuf_len;
@@ -81,3 +85,5 @@ out:
 	crypto_free_hash(desc.tfm);
 	return rc;
 }
+
+

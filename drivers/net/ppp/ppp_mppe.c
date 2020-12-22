@@ -27,7 +27,8 @@
  *   GNU General Public License for more details.
  *
  *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, see <http://www.gnu.org/licenses/>.
+ *   along with this program; if not, write to the Free Software
+ *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  *
  * Changelog:
@@ -42,8 +43,6 @@
  *                    deprecated in 2.6
  */
 
-#include <crypto/hash.h>
-#include <crypto/skcipher.h>
 #include <linux/err.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -51,6 +50,7 @@
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/crypto.h>
 #include <linux/mm.h>
 #include <linux/ppp_defs.h>
 #include <linux/ppp-comp.h>
@@ -95,8 +95,8 @@ static inline void sha_pad_init(struct sha_pad *shapad)
  * State for an MPPE (de)compressor.
  */
 struct ppp_mppe_state {
-	struct crypto_skcipher *arc4;
-	struct crypto_ahash *sha1;
+	struct crypto_blkcipher *arc4;
+	struct crypto_hash *sha1;
 	unsigned char *sha1_digest;
 	unsigned char master_key[MPPE_MAX_KEY_LEN];
 	unsigned char session_key[MPPE_MAX_KEY_LEN];
@@ -136,7 +136,7 @@ struct ppp_mppe_state {
  */
 static void get_new_key_from_sha(struct ppp_mppe_state * state)
 {
-	AHASH_REQUEST_ON_STACK(req, state->sha1);
+	struct hash_desc desc;
 	struct scatterlist sg[4];
 	unsigned int nbytes;
 
@@ -149,12 +149,10 @@ static void get_new_key_from_sha(struct ppp_mppe_state * state)
 	nbytes += setup_sg(&sg[3], sha_pad->sha_pad2,
 			   sizeof(sha_pad->sha_pad2));
 
-	ahash_request_set_tfm(req, state->sha1);
-	ahash_request_set_callback(req, 0, NULL, NULL);
-	ahash_request_set_crypt(req, sg, state->sha1_digest, nbytes);
+	desc.tfm = state->sha1;
+	desc.flags = 0;
 
-	crypto_ahash_digest(req);
-	ahash_request_zero(req);
+	crypto_hash_digest(&desc, sg, nbytes, state->sha1_digest);
 }
 
 /*
@@ -164,23 +162,20 @@ static void get_new_key_from_sha(struct ppp_mppe_state * state)
 static void mppe_rekey(struct ppp_mppe_state * state, int initial_key)
 {
 	struct scatterlist sg_in[1], sg_out[1];
-	SKCIPHER_REQUEST_ON_STACK(req, state->arc4);
-
-	skcipher_request_set_tfm(req, state->arc4);
-	skcipher_request_set_callback(req, 0, NULL, NULL);
+	struct blkcipher_desc desc = { .tfm = state->arc4 };
 
 	get_new_key_from_sha(state);
 	if (!initial_key) {
-		crypto_skcipher_setkey(state->arc4, state->sha1_digest,
-				       state->keylen);
+		crypto_blkcipher_setkey(state->arc4, state->sha1_digest,
+					state->keylen);
 		sg_init_table(sg_in, 1);
 		sg_init_table(sg_out, 1);
 		setup_sg(sg_in, state->sha1_digest, state->keylen);
 		setup_sg(sg_out, state->session_key, state->keylen);
-		skcipher_request_set_crypt(req, sg_in, sg_out, state->keylen,
-					   NULL);
-		if (crypto_skcipher_encrypt(req))
+		if (crypto_blkcipher_encrypt(&desc, sg_out, sg_in,
+					     state->keylen) != 0) {
     		    printk(KERN_WARNING "mppe_rekey: cipher_encrypt failed\n");
+		}
 	} else {
 		memcpy(state->session_key, state->sha1_digest, state->keylen);
 	}
@@ -190,8 +185,7 @@ static void mppe_rekey(struct ppp_mppe_state * state, int initial_key)
 		state->session_key[1] = 0x26;
 		state->session_key[2] = 0x9e;
 	}
-	crypto_skcipher_setkey(state->arc4, state->session_key, state->keylen);
-	skcipher_request_zero(req);
+	crypto_blkcipher_setkey(state->arc4, state->session_key, state->keylen);
 }
 
 /*
@@ -211,19 +205,19 @@ static void *mppe_alloc(unsigned char *options, int optlen)
 		goto out;
 
 
-	state->arc4 = crypto_alloc_skcipher("ecb(arc4)", 0, CRYPTO_ALG_ASYNC);
+	state->arc4 = crypto_alloc_blkcipher("ecb(arc4)", 0, CRYPTO_ALG_ASYNC);
 	if (IS_ERR(state->arc4)) {
 		state->arc4 = NULL;
 		goto out_free;
 	}
 
-	state->sha1 = crypto_alloc_ahash("sha1", 0, CRYPTO_ALG_ASYNC);
+	state->sha1 = crypto_alloc_hash("sha1", 0, CRYPTO_ALG_ASYNC);
 	if (IS_ERR(state->sha1)) {
 		state->sha1 = NULL;
 		goto out_free;
 	}
 
-	digestsize = crypto_ahash_digestsize(state->sha1);
+	digestsize = crypto_hash_digestsize(state->sha1);
 	if (digestsize < MPPE_MAX_KEY_LEN)
 		goto out_free;
 
@@ -244,12 +238,15 @@ static void *mppe_alloc(unsigned char *options, int optlen)
 
 	return (void *)state;
 
-out_free:
-	kfree(state->sha1_digest);
-	crypto_free_ahash(state->sha1);
-	crypto_free_skcipher(state->arc4);
-	kfree(state);
-out:
+	out_free:
+	    if (state->sha1_digest)
+		kfree(state->sha1_digest);
+	    if (state->sha1)
+		crypto_free_hash(state->sha1);
+	    if (state->arc4)
+		crypto_free_blkcipher(state->arc4);
+	    kfree(state);
+	out:
 	return NULL;
 }
 
@@ -260,10 +257,13 @@ static void mppe_free(void *arg)
 {
 	struct ppp_mppe_state *state = (struct ppp_mppe_state *) arg;
 	if (state) {
+	    if (state->sha1_digest)
 		kfree(state->sha1_digest);
-		crypto_free_ahash(state->sha1);
-		crypto_free_skcipher(state->arc4);
-		kfree(state);
+	    if (state->sha1)
+		crypto_free_hash(state->sha1);
+	    if (state->arc4)
+		crypto_free_blkcipher(state->arc4);
+	    kfree(state);
 	}
 }
 
@@ -369,9 +369,8 @@ mppe_compress(void *arg, unsigned char *ibuf, unsigned char *obuf,
 	      int isize, int osize)
 {
 	struct ppp_mppe_state *state = (struct ppp_mppe_state *) arg;
-	SKCIPHER_REQUEST_ON_STACK(req, state->arc4);
+	struct blkcipher_desc desc = { .tfm = state->arc4 };
 	int proto;
-	int err;
 	struct scatterlist sg_in[1], sg_out[1];
 
 	/*
@@ -428,13 +427,7 @@ mppe_compress(void *arg, unsigned char *ibuf, unsigned char *obuf,
 	sg_init_table(sg_out, 1);
 	setup_sg(sg_in, ibuf, isize);
 	setup_sg(sg_out, obuf, osize);
-
-	skcipher_request_set_tfm(req, state->arc4);
-	skcipher_request_set_callback(req, 0, NULL, NULL);
-	skcipher_request_set_crypt(req, sg_in, sg_out, isize, NULL);
-	err = crypto_skcipher_encrypt(req);
-	skcipher_request_zero(req);
-	if (err) {
+	if (crypto_blkcipher_encrypt(&desc, sg_out, sg_in, isize) != 0) {
 		printk(KERN_DEBUG "crypto_cypher_encrypt failed\n");
 		return -1;
 	}
@@ -483,9 +476,10 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 		int osize)
 {
 	struct ppp_mppe_state *state = (struct ppp_mppe_state *) arg;
-	SKCIPHER_REQUEST_ON_STACK(req, state->arc4);
+	struct blkcipher_desc desc = { .tfm = state->arc4 };
 	unsigned ccount;
 	int flushed = MPPE_BITS(ibuf) & MPPE_BIT_FLUSHED;
+	int sanity = 0;
 	struct scatterlist sg_in[1], sg_out[1];
 
 	if (isize <= PPP_HDRLEN + MPPE_OVHD) {
@@ -521,19 +515,31 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 		       "mppe_decompress[%d]: ENCRYPTED bit not set!\n",
 		       state->unit);
 		state->sanity_errors += 100;
-		goto sanity_error;
+		sanity = 1;
 	}
 	if (!state->stateful && !flushed) {
 		printk(KERN_DEBUG "mppe_decompress[%d]: FLUSHED bit not set in "
 		       "stateless mode!\n", state->unit);
 		state->sanity_errors += 100;
-		goto sanity_error;
+		sanity = 1;
 	}
 	if (state->stateful && ((ccount & 0xff) == 0xff) && !flushed) {
 		printk(KERN_DEBUG "mppe_decompress[%d]: FLUSHED bit not set on "
 		       "flag packet!\n", state->unit);
 		state->sanity_errors += 100;
-		goto sanity_error;
+		sanity = 1;
+	}
+
+	if (sanity) {
+		if (state->sanity_errors < SANITY_MAX)
+			return DECOMP_ERROR;
+		else
+			/*
+			 * Take LCP down if the peer is sending too many bogons.
+			 * We don't want to do this for a single or just a few
+			 * instances since it could just be due to packet corruption.
+			 */
+			return DECOMP_FATALERROR;
 	}
 
 	/*
@@ -541,13 +547,6 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 	 */
 
 	if (!state->stateful) {
-		/* Discard late packet */
-		if ((ccount - state->ccount) % MPPE_CCOUNT_SPACE
-						> MPPE_CCOUNT_SPACE / 2) {
-			state->sanity_errors++;
-			goto sanity_error;
-		}
-
 		/* RFC 3078, sec 8.1.  Rekey for every packet. */
 		while (state->ccount != ccount) {
 			mppe_rekey(state, 0);
@@ -617,14 +616,9 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 	sg_init_table(sg_out, 1);
 	setup_sg(sg_in, ibuf, 1);
 	setup_sg(sg_out, obuf, 1);
-
-	skcipher_request_set_tfm(req, state->arc4);
-	skcipher_request_set_callback(req, 0, NULL, NULL);
-	skcipher_request_set_crypt(req, sg_in, sg_out, 1, NULL);
-	if (crypto_skcipher_decrypt(req)) {
+	if (crypto_blkcipher_decrypt(&desc, sg_out, sg_in, 1) != 0) {
 		printk(KERN_DEBUG "crypto_cypher_decrypt failed\n");
-		osize = DECOMP_ERROR;
-		goto out_zap_req;
+		return DECOMP_ERROR;
 	}
 
 	/*
@@ -642,11 +636,9 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 	/* And finally, decrypt the rest of the packet. */
 	setup_sg(sg_in, ibuf + 1, isize - 1);
 	setup_sg(sg_out, obuf + 1, osize - 1);
-	skcipher_request_set_crypt(req, sg_in, sg_out, isize - 1, NULL);
-	if (crypto_skcipher_decrypt(req)) {
+	if (crypto_blkcipher_decrypt(&desc, sg_out, sg_in, isize - 1)) {
 		printk(KERN_DEBUG "crypto_cypher_decrypt failed\n");
-		osize = DECOMP_ERROR;
-		goto out_zap_req;
+		return DECOMP_ERROR;
 	}
 
 	state->stats.unc_bytes += osize;
@@ -657,19 +649,7 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 	/* good packet credit */
 	state->sanity_errors >>= 1;
 
-out_zap_req:
-	skcipher_request_zero(req);
 	return osize;
-
-sanity_error:
-	if (state->sanity_errors < SANITY_MAX)
-		return DECOMP_ERROR;
-	else
-		/* Take LCP down if the peer is sending too many bogons.
-		 * We don't want to do this for a single or just a few
-		 * instances since it could just be due to packet corruption.
-		 */
-		return DECOMP_FATALERROR;
 }
 
 /*
@@ -731,8 +711,8 @@ static struct compressor ppp_mppe = {
 static int __init ppp_mppe_init(void)
 {
 	int answer;
-	if (!(crypto_has_skcipher("ecb(arc4)", 0, CRYPTO_ALG_ASYNC) &&
-	      crypto_has_ahash("sha1", 0, CRYPTO_ALG_ASYNC)))
+	if (!(crypto_has_blkcipher("ecb(arc4)", 0, CRYPTO_ALG_ASYNC) &&
+	      crypto_has_hash("sha1", 0, CRYPTO_ALG_ASYNC)))
 		return -ENODEV;
 
 	sha_pad = kmalloc(sizeof(struct sha_pad), GFP_KERNEL);

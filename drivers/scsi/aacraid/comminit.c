@@ -37,7 +37,6 @@
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/blkdev.h>
-#include <linux/delay.h>
 #include <linux/completion.h>
 #include <linux/mm.h>
 #include <scsi/scsi_host.h>
@@ -48,37 +47,18 @@ struct aac_common aac_config = {
 	.irq_mod = 1
 };
 
-static inline int aac_is_msix_mode(struct aac_dev *dev)
-{
-	u32 status = 0;
-
-	if (dev->pdev->device == PMC_DEVICE_S6 ||
-		dev->pdev->device == PMC_DEVICE_S7 ||
-		dev->pdev->device == PMC_DEVICE_S8) {
-		status = src_readl(dev, MUnit.OMR);
-	}
-	return (status & AAC_INT_MODE_MSIX);
-}
-
-static inline void aac_change_to_intx(struct aac_dev *dev)
-{
-	aac_src_access_devreg(dev, AAC_DISABLE_MSIX);
-	aac_src_access_devreg(dev, AAC_ENABLE_INTX);
-}
-
 static int aac_alloc_comm(struct aac_dev *dev, void **commaddr, unsigned long commsize, unsigned long commalign)
 {
 	unsigned char *base;
 	unsigned long size, align;
-	const unsigned long fibsize = dev->max_fib_size;
+	const unsigned long fibsize = 4096;
 	const unsigned long printfbufsiz = 256;
 	unsigned long host_rrq_size = 0;
 	struct aac_init *init;
 	dma_addr_t phys;
 	unsigned long aac_max_hostphysmempages;
 
-	if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE1 ||
-	    dev->comm_interface == AAC_COMM_MESSAGE_TYPE2)
+	if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE1)
 		host_rrq_size = (dev->scsi_host_ptr->can_queue
 			+ AAC_NUM_MGT_FIB) * sizeof(u32);
 	size = fibsize + sizeof(struct aac_init) + commsize +
@@ -95,8 +75,7 @@ static int aac_alloc_comm(struct aac_dev *dev, void **commaddr, unsigned long co
 	dev->comm_phys = phys;
 	dev->comm_size = size;
 	
-	if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE1 ||
-	    dev->comm_interface == AAC_COMM_MESSAGE_TYPE2) {
+	if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE1) {
 		dev->host_rrq = (u32 *)(base + fibsize);
 		dev->host_rrq_pa = phys + fibsize;
 		memset(dev->host_rrq, 0, host_rrq_size);
@@ -110,7 +89,7 @@ static int aac_alloc_comm(struct aac_dev *dev, void **commaddr, unsigned long co
 	init->InitStructRevision = cpu_to_le32(ADAPTER_INIT_STRUCT_REVISION);
 	if (dev->max_fib_size != sizeof(struct hw_fib))
 		init->InitStructRevision = cpu_to_le32(ADAPTER_INIT_STRUCT_REVISION_4);
-	init->Sa_MSIXVectors = cpu_to_le32(SA_INIT_NUM_MSIXVECTORS);
+	init->MiniPortRevision = cpu_to_le32(Sa_MINIPORT_REVISION);
 	init->fsrev = cpu_to_le32(dev->fsrev);
 
 	/*
@@ -136,33 +115,26 @@ static int aac_alloc_comm(struct aac_dev *dev, void **commaddr, unsigned long co
 	else
 		init->HostPhysMemPages = cpu_to_le32(AAC_MAX_HOSTPHYSMEMPAGES);
 
-	init->InitFlags = cpu_to_le32(INITFLAGS_DRIVER_USES_UTC_TIME |
-		INITFLAGS_DRIVER_SUPPORTS_PM);
-	init->MaxIoCommands = cpu_to_le32(dev->scsi_host_ptr->can_queue + AAC_NUM_MGT_FIB);
-	init->MaxIoSize = cpu_to_le32(dev->scsi_host_ptr->max_sectors << 9);
-	init->MaxFibSize = cpu_to_le32(dev->max_fib_size);
-	init->MaxNumAif = cpu_to_le32(dev->max_num_aif);
-
+	init->InitFlags = 0;
 	if (dev->comm_interface == AAC_COMM_MESSAGE) {
 		init->InitFlags |= cpu_to_le32(INITFLAGS_NEW_COMM_SUPPORTED);
 		dprintk((KERN_WARNING"aacraid: New Comm Interface enabled\n"));
 	} else if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE1) {
 		init->InitStructRevision = cpu_to_le32(ADAPTER_INIT_STRUCT_REVISION_6);
-		init->InitFlags |= cpu_to_le32(INITFLAGS_NEW_COMM_SUPPORTED |
-			INITFLAGS_NEW_COMM_TYPE1_SUPPORTED | INITFLAGS_FAST_JBOD_SUPPORTED);
-		init->HostRRQ_AddrHigh = cpu_to_le32((u32)((u64)dev->host_rrq_pa >> 32));
-		init->HostRRQ_AddrLow = cpu_to_le32((u32)(dev->host_rrq_pa & 0xffffffff));
-		dprintk((KERN_WARNING"aacraid: New Comm Interface type1 enabled\n"));
-	} else if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE2) {
-		init->InitStructRevision = cpu_to_le32(ADAPTER_INIT_STRUCT_REVISION_7);
-		init->InitFlags |= cpu_to_le32(INITFLAGS_NEW_COMM_SUPPORTED |
-			INITFLAGS_NEW_COMM_TYPE2_SUPPORTED | INITFLAGS_FAST_JBOD_SUPPORTED);
-		init->HostRRQ_AddrHigh = cpu_to_le32((u32)((u64)dev->host_rrq_pa >> 32));
-		init->HostRRQ_AddrLow = cpu_to_le32((u32)(dev->host_rrq_pa & 0xffffffff));
-		/* number of MSI-X */
-		init->Sa_MSIXVectors = cpu_to_le32(dev->max_msix);
-		dprintk((KERN_WARNING"aacraid: New Comm Interface type2 enabled\n"));
+		init->InitFlags |= cpu_to_le32(INITFLAGS_NEW_COMM_TYPE1_SUPPORTED);
+		dprintk((KERN_WARNING
+			"aacraid: New Comm Interface type1 enabled\n"));
 	}
+	init->InitFlags |= cpu_to_le32(INITFLAGS_DRIVER_USES_UTC_TIME |
+				       INITFLAGS_DRIVER_SUPPORTS_PM);
+	init->MaxIoCommands = cpu_to_le32(dev->scsi_host_ptr->can_queue + AAC_NUM_MGT_FIB);
+	init->MaxIoSize = cpu_to_le32(dev->scsi_host_ptr->max_sectors << 9);
+	init->MaxFibSize = cpu_to_le32(dev->max_fib_size);
+
+	init->MaxNumAif = cpu_to_le32(dev->max_num_aif);
+	init->HostRRQ_AddrHigh = (u32)((u64)dev->host_rrq_pa >> 32);
+	init->HostRRQ_AddrLow = (u32)(dev->host_rrq_pa & 0xffffffff);
+
 
 	/*
 	 * Increment the base address by the amount already used
@@ -199,7 +171,7 @@ static int aac_alloc_comm(struct aac_dev *dev, void **commaddr, unsigned long co
     
 static void aac_queue_init(struct aac_dev * dev, struct aac_queue * q, u32 *mem, int qsize)
 {
-	atomic_set(&q->numpending, 0);
+	q->numpending = 0;
 	q->dev = dev;
 	init_waitqueue_head(&q->cmdready);
 	INIT_LIST_HEAD(&q->cmdq);
@@ -231,13 +203,10 @@ int aac_send_shutdown(struct aac_dev * dev)
 		return -ENOMEM;
 	aac_fib_init(fibctx);
 
-	mutex_lock(&dev->ioctl_mutex);
-	dev->adapter_shutdown = 1;
-	mutex_unlock(&dev->ioctl_mutex);
-
 	cmd = (struct aac_close *) fib_data(fibctx);
+
 	cmd->command = cpu_to_le32(VM_CloseAll);
-	cmd->cid = cpu_to_le32(0xfffffffe);
+	cmd->cid = cpu_to_le32(0xffffffff);
 
 	status = aac_fib_send(ContainerCommand,
 			  fibctx,
@@ -251,11 +220,6 @@ int aac_send_shutdown(struct aac_dev * dev)
 	/* FIB should be freed only after getting the response from the F/W */
 	if (status != -ERESTARTSYS)
 		aac_fib_free(fibctx);
-	if ((dev->pdev->device == PMC_DEVICE_S7 ||
-	     dev->pdev->device == PMC_DEVICE_S8 ||
-	     dev->pdev->device == PMC_DEVICE_S9) &&
-	     dev->msi_enabled)
-		aac_src_access_devreg(dev, AAC_ENABLE_INTX);
 	return status;
 }
 
@@ -357,61 +321,6 @@ static int aac_comm_init(struct aac_dev * dev)
 	return 0;
 }
 
-void aac_define_int_mode(struct aac_dev *dev)
-{
-	int i, msi_count, min_msix;
-
-	msi_count = i = 0;
-	/* max. vectors from GET_COMM_PREFERRED_SETTINGS */
-	if (dev->max_msix == 0 ||
-	    dev->pdev->device == PMC_DEVICE_S6 ||
-	    dev->sync_mode) {
-		dev->max_msix = 1;
-		dev->vector_cap =
-			dev->scsi_host_ptr->can_queue +
-			AAC_NUM_MGT_FIB;
-		return;
-	}
-
-	/* Don't bother allocating more MSI-X vectors than cpus */
-	msi_count = min(dev->max_msix,
-		(unsigned int)num_online_cpus());
-
-	dev->max_msix = msi_count;
-
-	if (msi_count > AAC_MAX_MSIX)
-		msi_count = AAC_MAX_MSIX;
-
-	for (i = 0; i < msi_count; i++)
-		dev->msixentry[i].entry = i;
-
-	if (msi_count > 1 &&
-	    pci_find_capability(dev->pdev, PCI_CAP_ID_MSIX)) {
-		min_msix = 2;
-		i = pci_enable_msix_range(dev->pdev,
-				    dev->msixentry,
-				    min_msix,
-				    msi_count);
-		if (i > 0) {
-			dev->msi_enabled = 1;
-			msi_count = i;
-		} else {
-			dev->msi_enabled = 0;
-			dev_err(&dev->pdev->dev,
-			"MSIX not supported!! Will try INTX 0x%x.\n", i);
-		}
-	}
-
-	if (!dev->msi_enabled)
-		dev->max_msix = msi_count = 1;
-	else {
-		if (dev->max_msix > msi_count)
-			dev->max_msix = msi_count;
-	}
-	dev->vector_cap =
-		(dev->scsi_host_ptr->can_queue + AAC_NUM_MGT_FIB) /
-		msi_count;
-}
 struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 {
 	u32 status[5];
@@ -424,7 +333,6 @@ struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 	dev->management_fib_count = 0;
 	spin_lock_init(&dev->manage_lock);
 	spin_lock_init(&dev->sync_lock);
-	spin_lock_init(&dev->iq_lock);
 	dev->max_fib_size = sizeof(struct hw_fib);
 	dev->sg_tablesize = host->sg_tablesize = (dev->max_fib_size
 		- sizeof(struct aac_fibhdr)
@@ -433,20 +341,9 @@ struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 	dev->comm_interface = AAC_COMM_PRODUCER;
 	dev->raw_io_interface = dev->raw_io_64 = 0;
 
-
-	/*
-	 * Enable INTX mode, if not done already Enabled
-	 */
-	if (aac_is_msix_mode(dev)) {
-		aac_change_to_intx(dev);
-		dev_info(&dev->pdev->dev, "Changed firmware to INTX mode");
-	}
-
 	if ((!aac_adapter_sync_cmd(dev, GET_ADAPTER_PROPERTIES,
-		0, 0, 0, 0, 0, 0,
-		status+0, status+1, status+2, status+3, NULL)) &&
+		0, 0, 0, 0, 0, 0, status+0, status+1, status+2, NULL, NULL)) &&
 	 		(status[0] == 0x00000001)) {
-		dev->doorbell_mask = status[3];
 		if (status[1] & le32_to_cpu(AAC_OPT_NEW_COMM_64))
 			dev->raw_io_64 = 1;
 		dev->sync_mode = aac_sync_mode;
@@ -457,15 +354,13 @@ struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 			if ((status[1] & le32_to_cpu(AAC_OPT_NEW_COMM_TYPE1))) {
 				/* driver supports TYPE1 (Tupelo) */
 				dev->comm_interface = AAC_COMM_MESSAGE_TYPE1;
-			} else if ((status[1] & le32_to_cpu(AAC_OPT_NEW_COMM_TYPE2))) {
-				/* driver supports TYPE2 (Denali) */
-				dev->comm_interface = AAC_COMM_MESSAGE_TYPE2;
 			} else if ((status[1] & le32_to_cpu(AAC_OPT_NEW_COMM_TYPE4)) ||
-				  (status[1] & le32_to_cpu(AAC_OPT_NEW_COMM_TYPE3))) {
-				/* driver doesn't TYPE3 and TYPE4 */
-				/* switch to sync. mode */
-				dev->comm_interface = AAC_COMM_MESSAGE_TYPE2;
-				dev->sync_mode = 1;
+				  (status[1] & le32_to_cpu(AAC_OPT_NEW_COMM_TYPE3)) ||
+				  (status[1] & le32_to_cpu(AAC_OPT_NEW_COMM_TYPE2))) {
+					/* driver doesn't support TYPE2 (Series7), TYPE3 and TYPE4 */
+					/* switch to sync. mode */
+					dev->comm_interface = AAC_COMM_MESSAGE_TYPE1;
+					dev->sync_mode = 1;
 			}
 		}
 		if ((dev->comm_interface == AAC_COMM_MESSAGE) &&
@@ -483,9 +378,6 @@ struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 			}
 		}
 	}
-	dev->max_msix = 0;
-	dev->msi_enabled = 0;
-	dev->adapter_shutdown = 0;
 	if ((!aac_adapter_sync_cmd(dev, GET_COMM_PREFERRED_SETTINGS,
 	  0, 0, 0, 0, 0, 0,
 	  status+0, status+1, status+2, status+3, status+4))
@@ -502,13 +394,7 @@ struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 		dev->max_fib_size = status[1] & 0xFFE0;
 		host->sg_tablesize = status[2] >> 16;
 		dev->sg_tablesize = status[2] & 0xFFFF;
-		if (dev->pdev->device == PMC_DEVICE_S7 ||
-		    dev->pdev->device == PMC_DEVICE_S8 ||
-		    dev->pdev->device == PMC_DEVICE_S9)
-			host->can_queue = ((status[3] >> 16) ? (status[3] >> 16) :
-				(status[3] & 0xFFFF)) - AAC_NUM_MGT_FIB;
-		else
-			host->can_queue = (status[3] & 0xFFFF) - AAC_NUM_MGT_FIB;
+		host->can_queue = (status[3] & 0xFFFF) - AAC_NUM_MGT_FIB;
 		dev->max_num_aif = status[4] & 0xFFFF;
 		/*
 		 *	NOTE:
@@ -556,14 +442,6 @@ struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 		}
 	}
 
-	if (host->can_queue > AAC_NUM_IO_FIB)
-		host->can_queue = AAC_NUM_IO_FIB;
-
-	if (dev->pdev->device == PMC_DEVICE_S6 ||
-	    dev->pdev->device == PMC_DEVICE_S7 ||
-	    dev->pdev->device == PMC_DEVICE_S8 ||
-	    dev->pdev->device == PMC_DEVICE_S9)
-		aac_define_int_mode(dev);
 	/*
 	 *	Ok now init the communication subsystem
 	 */
@@ -592,3 +470,4 @@ struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 	return dev;
 }
 
+    

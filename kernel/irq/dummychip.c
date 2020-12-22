@@ -6,7 +6,6 @@
  */
 #include <linux/interrupt.h>
 #include <linux/irq.h>
-#include <linux/export.h>
 
 #include "internals.h"
 
@@ -42,7 +41,6 @@ struct irq_chip no_irq_chip = {
 	.irq_enable	= noop,
 	.irq_disable	= noop,
 	.irq_ack	= ack_bad,
-	.flags		= IRQCHIP_SKIP_SET_WAKE,
 };
 
 /*
@@ -58,6 +56,4 @@ struct irq_chip dummy_irq_chip = {
 	.irq_ack	= noop,
 	.irq_mask	= noop,
 	.irq_unmask	= noop,
-	.flags		= IRQCHIP_SKIP_SET_WAKE,
 };
-EXPORT_SYMBOL_GPL(dummy_irq_chip);

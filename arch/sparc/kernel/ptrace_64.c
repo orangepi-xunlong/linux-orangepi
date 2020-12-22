@@ -14,7 +14,6 @@
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/errno.h>
-#include <linux/export.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
 #include <linux/smp.h>
@@ -27,7 +26,6 @@
 #include <trace/syscall.h>
 #include <linux/compat.h>
 #include <linux/elf.h>
-#include <linux/context_tracking.h>
 
 #include <asm/asi.h>
 #include <asm/pgtable.h>
@@ -118,7 +116,6 @@ void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
 
 	preempt_enable();
 }
-EXPORT_SYMBOL_GPL(flush_ptrace_access);
 
 static int get_from_target(struct task_struct *target, unsigned long uaddr,
 			   void *kbuf, int len)
@@ -127,8 +124,7 @@ static int get_from_target(struct task_struct *target, unsigned long uaddr,
 		if (copy_from_user(kbuf, (void __user *) uaddr, len))
 			return -EFAULT;
 	} else {
-		int len2 = access_process_vm(target, uaddr, kbuf, len,
-				FOLL_FORCE);
+		int len2 = access_process_vm(target, uaddr, kbuf, len, 0);
 		if (len2 != len)
 			return -EFAULT;
 	}
@@ -142,8 +138,7 @@ static int set_to_target(struct task_struct *target, unsigned long uaddr,
 		if (copy_to_user((void __user *) uaddr, kbuf, len))
 			return -EFAULT;
 	} else {
-		int len2 = access_process_vm(target, uaddr, kbuf, len,
-				FOLL_FORCE | FOLL_WRITE);
+		int len2 = access_process_vm(target, uaddr, kbuf, len, 1);
 		if (len2 != len)
 			return -EFAULT;
 	}
@@ -156,7 +151,7 @@ static int regwindow64_get(struct task_struct *target,
 {
 	unsigned long rw_addr = regs->u_regs[UREG_I6];
 
-	if (!test_thread_64bit_stack(rw_addr)) {
+	if (test_tsk_thread_flag(current, TIF_32BIT)) {
 		struct reg_window32 win32;
 		int i;
 
@@ -181,7 +176,7 @@ static int regwindow64_set(struct task_struct *target,
 {
 	unsigned long rw_addr = regs->u_regs[UREG_I6];
 
-	if (!test_thread_64bit_stack(rw_addr)) {
+	if (test_tsk_thread_flag(current, TIF_32BIT)) {
 		struct reg_window32 win32;
 		int i;
 
@@ -313,7 +308,7 @@ static int genregs64_set(struct task_struct *target,
 	}
 
 	if (!ret) {
-		unsigned long y = regs->y;
+		unsigned long y;
 
 		ret = user_regset_copyin(&pos, &count, &kbuf, &ubuf,
 					 &y,
@@ -507,8 +502,7 @@ static int genregs32_get(struct task_struct *target,
 				if (access_process_vm(target,
 						      (unsigned long)
 						      &reg_window[pos],
-						      k, sizeof(*k),
-						      FOLL_FORCE)
+						      k, sizeof(*k), 0)
 				    != sizeof(*k))
 					return -EFAULT;
 				k++;
@@ -534,14 +528,12 @@ static int genregs32_get(struct task_struct *target,
 				if (access_process_vm(target,
 						      (unsigned long)
 						      &reg_window[pos],
-						      &reg, sizeof(reg),
-						      FOLL_FORCE)
+						      &reg, sizeof(reg), 0)
 				    != sizeof(reg))
 					return -EFAULT;
 				if (access_process_vm(target,
 						      (unsigned long) u,
-						      &reg, sizeof(reg),
-						      FOLL_FORCE | FOLL_WRITE)
+						      &reg, sizeof(reg), 1)
 				    != sizeof(reg))
 					return -EFAULT;
 				pos++;
@@ -620,8 +612,7 @@ static int genregs32_set(struct task_struct *target,
 						      (unsigned long)
 						      &reg_window[pos],
 						      (void *) k,
-						      sizeof(*k),
-						      FOLL_FORCE | FOLL_WRITE)
+						      sizeof(*k), 1)
 				    != sizeof(*k))
 					return -EFAULT;
 				k++;
@@ -648,15 +639,13 @@ static int genregs32_set(struct task_struct *target,
 				if (access_process_vm(target,
 						      (unsigned long)
 						      u,
-						      &reg, sizeof(reg),
-						      FOLL_FORCE)
+						      &reg, sizeof(reg), 0)
 				    != sizeof(reg))
 					return -EFAULT;
 				if (access_process_vm(target,
 						      (unsigned long)
 						      &reg_window[pos],
-						      &reg, sizeof(reg),
-						      FOLL_FORCE | FOLL_WRITE)
+						      &reg, sizeof(reg), 1)
 				    != sizeof(reg))
 					return -EFAULT;
 				pos++;
@@ -1073,10 +1062,7 @@ asmlinkage int syscall_trace_enter(struct pt_regs *regs)
 	int ret = 0;
 
 	/* do the secure computing check first */
-	secure_computing_strict(regs->u_regs[UREG_G1]);
-
-	if (test_thread_flag(TIF_NOHZ))
-		user_exit();
+	secure_computing(regs->u_regs[UREG_G1]);
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
 		ret = tracehook_report_syscall_entry(regs);
@@ -1084,8 +1070,13 @@ asmlinkage int syscall_trace_enter(struct pt_regs *regs)
 	if (unlikely(test_thread_flag(TIF_SYSCALL_TRACEPOINT)))
 		trace_sys_enter(regs, regs->u_regs[UREG_G1]);
 
-	audit_syscall_entry(regs->u_regs[UREG_G1], regs->u_regs[UREG_I0],
-			    regs->u_regs[UREG_I1], regs->u_regs[UREG_I2],
+	audit_syscall_entry((test_thread_flag(TIF_32BIT) ?
+			     AUDIT_ARCH_SPARC :
+			     AUDIT_ARCH_SPARC64),
+			    regs->u_regs[UREG_G1],
+			    regs->u_regs[UREG_I0],
+			    regs->u_regs[UREG_I1],
+			    regs->u_regs[UREG_I2],
 			    regs->u_regs[UREG_I3]);
 
 	return ret;
@@ -1093,17 +1084,11 @@ asmlinkage int syscall_trace_enter(struct pt_regs *regs)
 
 asmlinkage void syscall_trace_leave(struct pt_regs *regs)
 {
-	if (test_thread_flag(TIF_NOHZ))
-		user_exit();
-
 	audit_syscall_exit(regs);
 
 	if (unlikely(test_thread_flag(TIF_SYSCALL_TRACEPOINT)))
-		trace_sys_exit(regs, regs->u_regs[UREG_I0]);
+		trace_sys_exit(regs, regs->u_regs[UREG_G1]);
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
 		tracehook_report_syscall_exit(regs, 0);
-
-	if (test_thread_flag(TIF_NOHZ))
-		user_enter();
 }

@@ -24,7 +24,7 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 
 #include "generic.h"
 
@@ -164,6 +164,6 @@ MACHINE_START(HIMALAYA, "HTC Himalaya")
 	.init_irq = pxa25x_init_irq,
 	.handle_irq = pxa25x_handle_irq,
 	.init_machine = himalaya_init,
-	.init_time	= pxa_timer_init,
+	.timer = &pxa_timer,
 	.restart	= pxa_restart,
 MACHINE_END

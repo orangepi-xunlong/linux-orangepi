@@ -1,484 +1,528 @@
 /*
- * comedi/drivers/cb_pcimdas.c
- * Comedi driver for Computer Boards PCIM-DAS1602/16 and PCIe-DAS1602/16
- *
- * COMEDI - Linux Control and Measurement Device Interface
- * Copyright (C) 2000 David A. Schleef <ds@schleef.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+    comedi/drivers/cb_pcimdas.c
+    Comedi driver for Computer Boards PCIM-DAS1602/16
 
+    COMEDI - Linux Control and Measurement Device Interface
+    Copyright (C) 2000 David A. Schleef <ds@schleef.org>
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+*/
 /*
- * Driver: cb_pcimdas
- * Description: Measurement Computing PCI Migration series boards
- * Devices: [ComputerBoards] PCIM-DAS1602/16 (cb_pcimdas), PCIe-DAS1602/16
- * Author: Richard Bytheway
- * Updated: Mon, 13 Oct 2014 11:57:39 +0000
- * Status: experimental
- *
- * Written to support the PCIM-DAS1602/16 and PCIe-DAS1602/16.
- *
- * Configuration Options:
- *   none
- *
- * Manual configuration of PCI(e) cards is not supported; they are configured
- * automatically.
- *
- * Developed from cb_pcidas and skel by Richard Bytheway (mocelet@sucs.org).
- * Only supports DIO, AO and simple AI in it's present form.
- * No interrupts, multi channel or FIFO AI,
- * although the card looks like it could support this.
- *
- * http://www.mccdaq.com/PDFs/Manuals/pcim-das1602-16.pdf
- * http://www.mccdaq.com/PDFs/Manuals/pcie-das1602-16.pdf
- */
+Driver: cb_pcimdas
+Description: Measurement Computing PCI Migration series boards
+Devices: [ComputerBoards] PCIM-DAS1602/16 (cb_pcimdas)
+Author: Richard Bytheway
+Updated: Wed, 13 Nov 2002 12:34:56 +0000
+Status: experimental
 
-#include <linux/module.h>
+Written to support the PCIM-DAS1602/16 on a 2.4 series kernel.
+
+Configuration Options:
+    [0] - PCI bus number
+    [1] - PCI slot number
+
+Developed from cb_pcidas and skel by Richard Bytheway (mocelet@sucs.org).
+Only supports DIO, AO and simple AI in it's present form.
+No interrupts, multi channel or FIFO AI, although the card looks like it could support this.
+See http://www.mccdaq.com/PDFs/Manuals/pcim-das1602-16.pdf for more details.
+*/
+
+#include "../comedidev.h"
+
+#include <linux/delay.h>
 #include <linux/interrupt.h>
 
-#include "../comedi_pci.h"
-
-#include "comedi_8254.h"
+#include "comedi_pci.h"
 #include "plx9052.h"
 #include "8255.h"
 
-/*
- * PCI Bar 1 Register map
- * see plx9052.h for register and bit defines
- */
+/* #define CBPCIMDAS_DEBUG */
+#undef CBPCIMDAS_DEBUG
 
-/*
- * PCI Bar 2 Register map (devpriv->daqio)
- */
-#define PCIMDAS_AI_REG			0x00
-#define PCIMDAS_AI_SOFTTRIG_REG		0x00
-#define PCIMDAS_AO_REG(x)		(0x02 + ((x) * 2))
+#define PCI_VENDOR_ID_COMPUTERBOARDS	0x1307
 
-/*
- * PCI Bar 3 Register map (devpriv->BADR3)
- */
-#define PCIMDAS_MUX_REG			0x00
-#define PCIMDAS_MUX(_lo, _hi)		((_lo) | ((_hi) << 4))
-#define PCIMDAS_DI_DO_REG		0x01
-#define PCIMDAS_STATUS_REG		0x02
-#define PCIMDAS_STATUS_EOC		BIT(7)
-#define PCIMDAS_STATUS_UB		BIT(6)
-#define PCIMDAS_STATUS_MUX		BIT(5)
-#define PCIMDAS_STATUS_CLK		BIT(4)
-#define PCIMDAS_STATUS_TO_CURR_MUX(x)	((x) & 0xf)
-#define PCIMDAS_CONV_STATUS_REG		0x03
-#define PCIMDAS_CONV_STATUS_EOC		BIT(7)
-#define PCIMDAS_CONV_STATUS_EOB		BIT(6)
-#define PCIMDAS_CONV_STATUS_EOA		BIT(5)
-#define PCIMDAS_CONV_STATUS_FNE		BIT(4)
-#define PCIMDAS_CONV_STATUS_FHF		BIT(3)
-#define PCIMDAS_CONV_STATUS_OVERRUN	BIT(2)
-#define PCIMDAS_IRQ_REG			0x04
-#define PCIMDAS_IRQ_INTE		BIT(7)
-#define PCIMDAS_IRQ_INT			BIT(6)
-#define PCIMDAS_IRQ_OVERRUN		BIT(4)
-#define PCIMDAS_IRQ_EOA			BIT(3)
-#define PCIMDAS_IRQ_EOA_INT_SEL		BIT(2)
-#define PCIMDAS_IRQ_INTSEL(x)		((x) << 0)
-#define PCIMDAS_IRQ_INTSEL_EOC		PCIMDAS_IRQ_INTSEL(0)
-#define PCIMDAS_IRQ_INTSEL_FNE		PCIMDAS_IRQ_INTSEL(1)
-#define PCIMDAS_IRQ_INTSEL_EOB		PCIMDAS_IRQ_INTSEL(2)
-#define PCIMDAS_IRQ_INTSEL_FHF_EOA	PCIMDAS_IRQ_INTSEL(3)
-#define PCIMDAS_PACER_REG		0x05
-#define PCIMDAS_PACER_GATE_STATUS	BIT(6)
-#define PCIMDAS_PACER_GATE_POL		BIT(5)
-#define PCIMDAS_PACER_GATE_LATCH	BIT(4)
-#define PCIMDAS_PACER_GATE_EN		BIT(3)
-#define PCIMDAS_PACER_EXT_PACER_POL	BIT(2)
-#define PCIMDAS_PACER_SRC(x)		((x) << 0)
-#define PCIMDAS_PACER_SRC_POLLED	PCIMDAS_PACER_SRC(0)
-#define PCIMDAS_PACER_SRC_EXT		PCIMDAS_PACER_SRC(2)
-#define PCIMDAS_PACER_SRC_INT		PCIMDAS_PACER_SRC(3)
-#define PCIMDAS_PACER_SRC_MASK		(3 << 0)
-#define PCIMDAS_BURST_REG		0x06
-#define PCIMDAS_BURST_BME		BIT(1)
-#define PCIMDAS_BURST_CONV_EN		BIT(0)
-#define PCIMDAS_GAIN_REG		0x07
-#define PCIMDAS_8254_BASE		0x08
-#define PCIMDAS_USER_CNTR_REG		0x0c
-#define PCIMDAS_USER_CNTR_CTR1_CLK_SEL	BIT(0)
-#define PCIMDAS_RESIDUE_MSB_REG		0x0d
-#define PCIMDAS_RESIDUE_LSB_REG		0x0e
+/* Registers for the PCIM-DAS1602/16 */
 
-/*
- * PCI Bar 4 Register map (dev->iobase)
- */
-#define PCIMDAS_8255_BASE		0x00
+/* sizes of io regions (bytes) */
+#define BADR0_SIZE 2		/* ?? */
+#define BADR1_SIZE 4
+#define BADR2_SIZE 6
+#define BADR3_SIZE 16
+#define BADR4_SIZE 4
 
-static const struct comedi_lrange cb_pcimdas_ai_bip_range = {
-	4, {
-		BIP_RANGE(10),
-		BIP_RANGE(5),
-		BIP_RANGE(2.5),
-		BIP_RANGE(1.25)
-	}
+/* DAC Offsets */
+#define ADC_TRIG 0
+#define DAC0_OFFSET 2
+#define DAC1_OFFSET 4
+
+/* AI and Counter Constants */
+#define MUX_LIMITS 0
+#define MAIN_CONN_DIO 1
+#define ADC_STAT 2
+#define ADC_CONV_STAT 3
+#define ADC_INT 4
+#define ADC_PACER 5
+#define BURST_MODE 6
+#define PROG_GAIN 7
+#define CLK8254_1_DATA 8
+#define CLK8254_2_DATA 9
+#define CLK8254_3_DATA 10
+#define CLK8254_CONTROL 11
+#define USER_COUNTER 12
+#define RESID_COUNT_H 13
+#define RESID_COUNT_L 14
+
+/* Board description */
+struct cb_pcimdas_board {
+	const char *name;
+	unsigned short device_id;
+	int ai_se_chans;	/*  Inputs in single-ended mode */
+	int ai_diff_chans;	/*  Inputs in differential mode */
+	int ai_bits;		/*  analog input resolution */
+	int ai_speed;		/*  fastest conversion period in ns */
+	int ao_nchan;		/*  number of analog out channels */
+	int ao_bits;		/*  analogue output resolution */
+	int has_ao_fifo;	/*  analog output has fifo */
+	int ao_scan_speed;	/*  analog output speed for 1602 series (for a scan, not conversion) */
+	int fifo_size;		/*  number of samples fifo can hold */
+	int dio_bits;		/*  number of dio bits */
+	int has_dio;		/*  has DIO */
+	const struct comedi_lrange *ranges;
 };
 
-static const struct comedi_lrange cb_pcimdas_ai_uni_range = {
-	4, {
-		UNI_RANGE(10),
-		UNI_RANGE(5),
-		UNI_RANGE(2.5),
-		UNI_RANGE(1.25)
-	}
+static const struct cb_pcimdas_board cb_pcimdas_boards[] = {
+	{
+	 .name = "PCIM-DAS1602/16",
+	 .device_id = 0x56,
+	 .ai_se_chans = 16,
+	 .ai_diff_chans = 8,
+	 .ai_bits = 16,
+	 .ai_speed = 10000,	/* ?? */
+	 .ao_nchan = 2,
+	 .ao_bits = 12,
+	 .has_ao_fifo = 0,	/* ?? */
+	 .ao_scan_speed = 10000,
+	 /* ?? */
+	 .fifo_size = 1024,
+	 .dio_bits = 24,
+	 .has_dio = 1,
+/*	.ranges = &cb_pcimdas_ranges, */
+	 },
 };
 
-/*
- * The Analog Output range is not programmable. The DAC ranges are
- * jumper-settable on the board. The settings are not software-readable.
- */
-static const struct comedi_lrange cb_pcimdas_ao_range = {
-	6, {
-		BIP_RANGE(10),
-		BIP_RANGE(5),
-		UNI_RANGE(10),
-		UNI_RANGE(5),
-		RANGE_ext(-1, 1),
-		RANGE_ext(0, 1)
-	}
+/* This is used by modprobe to translate PCI IDs to drivers.  Should
+ * only be used for PCI and ISA-PnP devices */
+static DEFINE_PCI_DEVICE_TABLE(cb_pcimdas_pci_table) = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_COMPUTERBOARDS, 0x0056) },
+	{ 0 }
 };
 
+MODULE_DEVICE_TABLE(pci, cb_pcimdas_pci_table);
+
+#define N_BOARDS 1		/*  Max number of boards supported */
+
 /*
- * this structure is for data unique to this hardware driver.  If
- * several hardware drivers keep similar information in this structure,
- * feel free to suggest moving the variable to the struct comedi_device
- * struct.
+ * Useful for shorthand access to the particular board structure
  */
+#define thisboard ((const struct cb_pcimdas_board *)dev->board_ptr)
+
+/* this structure is for data unique to this hardware driver.  If
+   several hardware drivers keep similar information in this structure,
+   feel free to suggest moving the variable to the struct comedi_device struct.  */
 struct cb_pcimdas_private {
+	int data;
+
+	/*  would be useful for a PCI device */
+	struct pci_dev *pci_dev;
+
 	/* base addresses */
-	unsigned long daqio;
+	unsigned long BADR0;
+	unsigned long BADR1;
+	unsigned long BADR2;
 	unsigned long BADR3;
+	unsigned long BADR4;
+
+	/* Used for AO readback */
+	unsigned int ao_readback[2];
+
+	/*  Used for DIO */
+	unsigned short int port_a;	/*  copy of BADR4+0 */
+	unsigned short int port_b;	/*  copy of BADR4+1 */
+	unsigned short int port_c;	/*  copy of BADR4+2 */
+	unsigned short int dio_mode;	/*  copy of BADR4+3 */
+
 };
 
-static int cb_pcimdas_ai_eoc(struct comedi_device *dev,
-			     struct comedi_subdevice *s,
-			     struct comedi_insn *insn,
-			     unsigned long context)
-{
-	struct cb_pcimdas_private *devpriv = dev->private;
-	unsigned int status;
+/*
+ * most drivers define the following macro to make it easy to
+ * access the private structure.
+ */
+#define devpriv ((struct cb_pcimdas_private *)dev->private)
 
-	status = inb(devpriv->BADR3 + PCIMDAS_STATUS_REG);
-	if ((status & PCIMDAS_STATUS_EOC) == 0)
-		return 0;
-	return -EBUSY;
+/*
+ * The struct comedi_driver structure tells the Comedi core module
+ * which functions to call to configure/deconfigure (attach/detach)
+ * the board, and also about the kernel module that contains
+ * the device code.
+ */
+static int cb_pcimdas_attach(struct comedi_device *dev,
+			     struct comedi_devconfig *it);
+static int cb_pcimdas_detach(struct comedi_device *dev);
+static struct comedi_driver driver_cb_pcimdas = {
+	.driver_name = "cb_pcimdas",
+	.module = THIS_MODULE,
+	.attach = cb_pcimdas_attach,
+	.detach = cb_pcimdas_detach,
+};
+
+static int cb_pcimdas_ai_rinsn(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data);
+static int cb_pcimdas_ao_winsn(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data);
+static int cb_pcimdas_ao_rinsn(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data);
+
+/*
+ * Attach is called by the Comedi core to configure the driver
+ * for a particular board.  If you specified a board_name array
+ * in the driver structure, dev->board_ptr contains that
+ * address.
+ */
+static int cb_pcimdas_attach(struct comedi_device *dev,
+			     struct comedi_devconfig *it)
+{
+	struct comedi_subdevice *s;
+	struct pci_dev *pcidev = NULL;
+	int index;
+	/* int i; */
+
+/*
+ * Allocate the private structure area.
+ */
+	if (alloc_private(dev, sizeof(struct cb_pcimdas_private)) < 0)
+		return -ENOMEM;
+
+/*
+ * Probe the device to determine what device in the series it is.
+ */
+
+	for_each_pci_dev(pcidev) {
+		/*  is it not a computer boards card? */
+		if (pcidev->vendor != PCI_VENDOR_ID_COMPUTERBOARDS)
+			continue;
+		/*  loop through cards supported by this driver */
+		for (index = 0; index < N_BOARDS; index++) {
+			if (cb_pcimdas_boards[index].device_id !=
+			    pcidev->device)
+				continue;
+			/*  was a particular bus/slot requested? */
+			if (it->options[0] || it->options[1]) {
+				/*  are we on the wrong bus/slot? */
+				if (pcidev->bus->number != it->options[0] ||
+				    PCI_SLOT(pcidev->devfn) != it->options[1]) {
+					continue;
+				}
+			}
+			devpriv->pci_dev = pcidev;
+			dev->board_ptr = cb_pcimdas_boards + index;
+			goto found;
+		}
+	}
+
+	dev_err(dev->hw_dev, "No supported ComputerBoards/MeasurementComputing card found on requested position\n");
+	return -EIO;
+
+found:
+
+	dev_dbg(dev->hw_dev, "Found %s on bus %i, slot %i\n",
+		cb_pcimdas_boards[index].name, pcidev->bus->number,
+		PCI_SLOT(pcidev->devfn));
+
+	/*  Warn about non-tested features */
+	switch (thisboard->device_id) {
+	case 0x56:
+		break;
+	default:
+		dev_dbg(dev->hw_dev, "THIS CARD IS UNSUPPORTED.\n"
+			"PLEASE REPORT USAGE TO <mocelet@sucs.org>\n");
+	}
+
+	if (comedi_pci_enable(pcidev, "cb_pcimdas")) {
+		dev_err(dev->hw_dev, "Failed to enable PCI device and request regions\n");
+		return -EIO;
+	}
+
+	devpriv->BADR0 = pci_resource_start(devpriv->pci_dev, 0);
+	devpriv->BADR1 = pci_resource_start(devpriv->pci_dev, 1);
+	devpriv->BADR2 = pci_resource_start(devpriv->pci_dev, 2);
+	devpriv->BADR3 = pci_resource_start(devpriv->pci_dev, 3);
+	devpriv->BADR4 = pci_resource_start(devpriv->pci_dev, 4);
+
+	dev_dbg(dev->hw_dev, "devpriv->BADR0 = 0x%lx\n", devpriv->BADR0);
+	dev_dbg(dev->hw_dev, "devpriv->BADR1 = 0x%lx\n", devpriv->BADR1);
+	dev_dbg(dev->hw_dev, "devpriv->BADR2 = 0x%lx\n", devpriv->BADR2);
+	dev_dbg(dev->hw_dev, "devpriv->BADR3 = 0x%lx\n", devpriv->BADR3);
+	dev_dbg(dev->hw_dev, "devpriv->BADR4 = 0x%lx\n", devpriv->BADR4);
+
+/* Dont support IRQ yet */
+/*  get irq */
+/* if(request_irq(devpriv->pci_dev->irq, cb_pcimdas_interrupt, IRQF_SHARED, "cb_pcimdas", dev )) */
+/* { */
+/* printk(" unable to allocate irq %u\n", devpriv->pci_dev->irq); */
+/* return -EINVAL; */
+/* } */
+/* dev->irq = devpriv->pci_dev->irq; */
+
+	/* Initialize dev->board_name */
+	dev->board_name = thisboard->name;
+
+/*
+ * Allocate the subdevice structures.  alloc_subdevice() is a
+ * convenient macro defined in comedidev.h.
+ */
+	if (alloc_subdevices(dev, 3) < 0)
+		return -ENOMEM;
+
+	s = dev->subdevices + 0;
+	/* dev->read_subdev=s; */
+	/*  analog input subdevice */
+	s->type = COMEDI_SUBD_AI;
+	s->subdev_flags = SDF_READABLE | SDF_GROUND;
+	s->n_chan = thisboard->ai_se_chans;
+	s->maxdata = (1 << thisboard->ai_bits) - 1;
+	s->range_table = &range_unknown;
+	s->len_chanlist = 1;	/*  This is the maximum chanlist length that */
+	/*  the board can handle */
+	s->insn_read = cb_pcimdas_ai_rinsn;
+
+	s = dev->subdevices + 1;
+	/*  analog output subdevice */
+	s->type = COMEDI_SUBD_AO;
+	s->subdev_flags = SDF_WRITABLE;
+	s->n_chan = thisboard->ao_nchan;
+	s->maxdata = 1 << thisboard->ao_bits;
+	s->range_table = &range_unknown;	/* ranges are hardware settable, but not software readable. */
+	s->insn_write = &cb_pcimdas_ao_winsn;
+	s->insn_read = &cb_pcimdas_ao_rinsn;
+
+	s = dev->subdevices + 2;
+	/* digital i/o subdevice */
+	if (thisboard->has_dio)
+		subdev_8255_init(dev, s, NULL, devpriv->BADR4);
+	else
+		s->type = COMEDI_SUBD_UNUSED;
+
+	return 1;
 }
 
-static int cb_pcimdas_ai_insn_read(struct comedi_device *dev,
-				   struct comedi_subdevice *s,
-				   struct comedi_insn *insn,
-				   unsigned int *data)
+/*
+ * _detach is called to deconfigure a device.  It should deallocate
+ * resources.
+ * This function is also called when _attach() fails, so it should be
+ * careful not to release resources that were not necessarily
+ * allocated by _attach().  dev->private and dev->subdevices are
+ * deallocated automatically by the core.
+ */
+static int cb_pcimdas_detach(struct comedi_device *dev)
 {
-	struct cb_pcimdas_private *devpriv = dev->private;
-	unsigned int chan = CR_CHAN(insn->chanspec);
-	unsigned int range = CR_RANGE(insn->chanspec);
-	int n;
+	if (devpriv) {
+		dev_dbg(dev->hw_dev, "devpriv->BADR0 = 0x%lx\n",
+			devpriv->BADR0);
+		dev_dbg(dev->hw_dev, "devpriv->BADR1 = 0x%lx\n",
+			devpriv->BADR1);
+		dev_dbg(dev->hw_dev, "devpriv->BADR2 = 0x%lx\n",
+			devpriv->BADR2);
+		dev_dbg(dev->hw_dev, "devpriv->BADR3 = 0x%lx\n",
+			devpriv->BADR3);
+		dev_dbg(dev->hw_dev, "devpriv->BADR4 = 0x%lx\n",
+			devpriv->BADR4);
+	}
+
+	if (dev->irq)
+		free_irq(dev->irq, dev);
+	if (devpriv) {
+		if (devpriv->pci_dev) {
+			if (devpriv->BADR0)
+				comedi_pci_disable(devpriv->pci_dev);
+			pci_dev_put(devpriv->pci_dev);
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * "instructions" read/write data in "one-shot" or "software-triggered"
+ * mode.
+ */
+static int cb_pcimdas_ai_rinsn(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data)
+{
+	int n, i;
 	unsigned int d;
-	int ret;
+	unsigned int busy;
+	int chan = CR_CHAN(insn->chanspec);
+	unsigned short chanlims;
+	int maxchans;
 
 	/*  only support sw initiated reads from a single channel */
 
+	/* check channel number */
+	if ((inb(devpriv->BADR3 + 2) & 0x20) == 0)	/* differential mode */
+		maxchans = thisboard->ai_diff_chans;
+	else
+		maxchans = thisboard->ai_se_chans;
+
+	if (chan > (maxchans - 1))
+		return -ETIMEDOUT;	/* *** Wrong error code. Fixme. */
+
 	/* configure for sw initiated read */
-	d = inb(devpriv->BADR3 + PCIMDAS_PACER_REG);
-	if ((d & PCIMDAS_PACER_SRC_MASK) != PCIMDAS_PACER_SRC_POLLED) {
-		d &= ~PCIMDAS_PACER_SRC_MASK;
-		d |= PCIMDAS_PACER_SRC_POLLED;
-		outb(d, devpriv->BADR3 + PCIMDAS_PACER_REG);
+	d = inb(devpriv->BADR3 + 5);
+	if ((d & 0x03) > 0) {	/* only reset if needed. */
+		d = d & 0xfd;
+		outb(d, devpriv->BADR3 + 5);
 	}
+	outb(0x01, devpriv->BADR3 + 6);	/* set bursting off, conversions on */
+	outb(0x00, devpriv->BADR3 + 7);	/* set range to 10V. UP/BP is controlled by a switch on the board */
 
-	/* set bursting off, conversions on */
-	outb(PCIMDAS_BURST_CONV_EN, devpriv->BADR3 + PCIMDAS_BURST_REG);
-
-	/* set range */
-	outb(range, devpriv->BADR3 + PCIMDAS_GAIN_REG);
-
-	/* set mux for single channel scan */
-	outb(PCIMDAS_MUX(chan, chan), devpriv->BADR3 + PCIMDAS_MUX_REG);
+	/*  write channel limits to multiplexer, set Low (bits 0-3) and High (bits 4-7) channels to chan. */
+	chanlims = chan | (chan << 4);
+	outb(chanlims, devpriv->BADR3 + 0);
 
 	/* convert n samples */
 	for (n = 0; n < insn->n; n++) {
 		/* trigger conversion */
-		outw(0, devpriv->daqio + PCIMDAS_AI_SOFTTRIG_REG);
+		outw(0, devpriv->BADR2 + 0);
+
+#define TIMEOUT 1000		/* typically takes 5 loops on a lightly loaded Pentium 100MHz, */
+		/* this is likely to be 100 loops on a 2GHz machine, so set 1000 as the limit. */
 
 		/* wait for conversion to end */
-		ret = comedi_timeout(dev, s, insn, cb_pcimdas_ai_eoc, 0);
-		if (ret)
-			return ret;
-
+		for (i = 0; i < TIMEOUT; i++) {
+			busy = inb(devpriv->BADR3 + 2) & 0x80;
+			if (!busy)
+				break;
+		}
+		if (i == TIMEOUT) {
+			printk("timeout\n");
+			return -ETIMEDOUT;
+		}
 		/* read data */
-		data[n] = inw(devpriv->daqio + PCIMDAS_AI_REG);
+		d = inw(devpriv->BADR2 + 0);
+
+		/* mangle the data as necessary */
+		/* d ^= 1<<(thisboard->ai_bits-1); // 16 bit data from ADC, so no mangle needed. */
+
+		data[n] = d;
 	}
 
 	/* return the number of samples read/written */
 	return n;
 }
 
-static int cb_pcimdas_ao_insn_write(struct comedi_device *dev,
-				    struct comedi_subdevice *s,
-				    struct comedi_insn *insn,
-				    unsigned int *data)
+static int cb_pcimdas_ao_winsn(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data)
 {
-	struct cb_pcimdas_private *devpriv = dev->private;
-	unsigned int chan = CR_CHAN(insn->chanspec);
-	unsigned int val = s->readback[chan];
 	int i;
+	int chan = CR_CHAN(insn->chanspec);
 
+	/* Writing a list of values to an AO channel is probably not
+	 * very useful, but that's how the interface is defined. */
 	for (i = 0; i < insn->n; i++) {
-		val = data[i];
-		outw(val, devpriv->daqio + PCIMDAS_AO_REG(chan));
-	}
-	s->readback[chan] = val;
-
-	return insn->n;
-}
-
-static int cb_pcimdas_di_insn_bits(struct comedi_device *dev,
-				   struct comedi_subdevice *s,
-				   struct comedi_insn *insn,
-				   unsigned int *data)
-{
-	struct cb_pcimdas_private *devpriv = dev->private;
-	unsigned int val;
-
-	val = inb(devpriv->BADR3 + PCIMDAS_DI_DO_REG);
-
-	data[1] = val & 0x0f;
-
-	return insn->n;
-}
-
-static int cb_pcimdas_do_insn_bits(struct comedi_device *dev,
-				    struct comedi_subdevice *s,
-				    struct comedi_insn *insn,
-				    unsigned int *data)
-{
-	struct cb_pcimdas_private *devpriv = dev->private;
-
-	if (comedi_dio_update_state(s, data))
-		outb(s->state, devpriv->BADR3 + PCIMDAS_DI_DO_REG);
-
-	data[1] = s->state;
-
-	return insn->n;
-}
-
-static int cb_pcimdas_counter_insn_config(struct comedi_device *dev,
-					  struct comedi_subdevice *s,
-					  struct comedi_insn *insn,
-					  unsigned int *data)
-{
-	struct cb_pcimdas_private *devpriv = dev->private;
-	unsigned int ctrl;
-
-	switch (data[0]) {
-	case INSN_CONFIG_SET_CLOCK_SRC:
-		switch (data[1]) {
-		case 0:	/* internal 100 kHz clock */
-			ctrl = PCIMDAS_USER_CNTR_CTR1_CLK_SEL;
+		switch (chan) {
+		case 0:
+			outw(data[i] & 0x0FFF, devpriv->BADR2 + DAC0_OFFSET);
 			break;
-		case 1:	/* external clk on pin 21 */
-			ctrl = 0;
+		case 1:
+			outw(data[i] & 0x0FFF, devpriv->BADR2 + DAC1_OFFSET);
 			break;
 		default:
-			return -EINVAL;
+			return -1;
 		}
-		outb(ctrl, devpriv->BADR3 + PCIMDAS_USER_CNTR_REG);
-		break;
-	case INSN_CONFIG_GET_CLOCK_SRC:
-		ctrl = inb(devpriv->BADR3 + PCIMDAS_USER_CNTR_REG);
-		if (ctrl & PCIMDAS_USER_CNTR_CTR1_CLK_SEL) {
-			data[1] = 0;
-			data[2] = I8254_OSC_BASE_100KHZ;
-		} else {
-			data[1] = 1;
-			data[2] = 0;
-		}
-		break;
-	default:
-		return -EINVAL;
+		devpriv->ao_readback[chan] = data[i];
 	}
 
-	return insn->n;
+	/* return the number of samples read/written */
+	return i;
 }
 
-static unsigned int cb_pcimdas_pacer_clk(struct comedi_device *dev)
+/* AO subdevices should have a read insn as well as a write insn.
+ * Usually this means copying a value stored in devpriv. */
+static int cb_pcimdas_ao_rinsn(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data)
 {
-	struct cb_pcimdas_private *devpriv = dev->private;
-	unsigned int status;
+	int i;
+	int chan = CR_CHAN(insn->chanspec);
 
-	/* The Pacer Clock jumper selects a 10 MHz or 1 MHz clock */
-	status = inb(devpriv->BADR3 + PCIMDAS_STATUS_REG);
-	if (status & PCIMDAS_STATUS_CLK)
-		return I8254_OSC_BASE_10MHZ;
-	return I8254_OSC_BASE_1MHZ;
+	for (i = 0; i < insn->n; i++)
+		data[i] = devpriv->ao_readback[chan];
+
+	return i;
 }
 
-static bool cb_pcimdas_is_ai_se(struct comedi_device *dev)
+/*
+ * A convenient macro that defines init_module() and cleanup_module(),
+ * as necessary.
+ */
+static int __devinit driver_cb_pcimdas_pci_probe(struct pci_dev *dev,
+						 const struct pci_device_id
+						 *ent)
 {
-	struct cb_pcimdas_private *devpriv = dev->private;
-	unsigned int status;
-
-	/*
-	 * The number of Analog Input channels is set with the
-	 * Analog Input Mode Switch on the board. The board can
-	 * have 16 single-ended or 8 differential channels.
-	 */
-	status = inb(devpriv->BADR3 + PCIMDAS_STATUS_REG);
-	return status & PCIMDAS_STATUS_MUX;
+	return comedi_pci_auto_config(dev, driver_cb_pcimdas.driver_name);
 }
 
-static bool cb_pcimdas_is_ai_uni(struct comedi_device *dev)
+static void __devexit driver_cb_pcimdas_pci_remove(struct pci_dev *dev)
 {
-	struct cb_pcimdas_private *devpriv = dev->private;
-	unsigned int status;
-
-	/*
-	 * The Analog Input range polarity is set with the
-	 * Analog Input Polarity Switch on the board. The
-	 * inputs can be set to Unipolar or Bipolar ranges.
-	 */
-	status = inb(devpriv->BADR3 + PCIMDAS_STATUS_REG);
-	return status & PCIMDAS_STATUS_UB;
+	comedi_pci_auto_unconfig(dev);
 }
 
-static int cb_pcimdas_auto_attach(struct comedi_device *dev,
-				  unsigned long context_unused)
-{
-	struct pci_dev *pcidev = comedi_to_pci_dev(dev);
-	struct cb_pcimdas_private *devpriv;
-	struct comedi_subdevice *s;
-	int ret;
-
-	devpriv = comedi_alloc_devpriv(dev, sizeof(*devpriv));
-	if (!devpriv)
-		return -ENOMEM;
-
-	ret = comedi_pci_enable(dev);
-	if (ret)
-		return ret;
-
-	devpriv->daqio = pci_resource_start(pcidev, 2);
-	devpriv->BADR3 = pci_resource_start(pcidev, 3);
-	dev->iobase = pci_resource_start(pcidev, 4);
-
-	dev->pacer = comedi_8254_init(devpriv->BADR3 + PCIMDAS_8254_BASE,
-				      cb_pcimdas_pacer_clk(dev),
-				      I8254_IO8, 0);
-	if (!dev->pacer)
-		return -ENOMEM;
-
-	ret = comedi_alloc_subdevices(dev, 6);
-	if (ret)
-		return ret;
-
-	/* Analog Input subdevice */
-	s = &dev->subdevices[0];
-	s->type		= COMEDI_SUBD_AI;
-	s->subdev_flags	= SDF_READABLE;
-	if (cb_pcimdas_is_ai_se(dev)) {
-		s->subdev_flags	|= SDF_GROUND;
-		s->n_chan	= 16;
-	} else {
-		s->subdev_flags	|= SDF_DIFF;
-		s->n_chan	= 8;
-	}
-	s->maxdata	= 0xffff;
-	s->range_table	= cb_pcimdas_is_ai_uni(dev) ? &cb_pcimdas_ai_uni_range
-						    : &cb_pcimdas_ai_bip_range;
-	s->insn_read	= cb_pcimdas_ai_insn_read;
-
-	/* Analog Output subdevice */
-	s = &dev->subdevices[1];
-	s->type		= COMEDI_SUBD_AO;
-	s->subdev_flags	= SDF_WRITABLE;
-	s->n_chan	= 2;
-	s->maxdata	= 0xfff;
-	s->range_table	= &cb_pcimdas_ao_range;
-	s->insn_write	= cb_pcimdas_ao_insn_write;
-
-	ret = comedi_alloc_subdev_readback(s);
-	if (ret)
-		return ret;
-
-	/* Digital I/O subdevice */
-	s = &dev->subdevices[2];
-	ret = subdev_8255_init(dev, s, NULL, PCIMDAS_8255_BASE);
-	if (ret)
-		return ret;
-
-	/* Digital Input subdevice (main connector) */
-	s = &dev->subdevices[3];
-	s->type		= COMEDI_SUBD_DI;
-	s->subdev_flags	= SDF_READABLE;
-	s->n_chan	= 4;
-	s->maxdata	= 1;
-	s->range_table	= &range_digital;
-	s->insn_bits	= cb_pcimdas_di_insn_bits;
-
-	/* Digital Output subdevice (main connector) */
-	s = &dev->subdevices[4];
-	s->type		= COMEDI_SUBD_DO;
-	s->subdev_flags	= SDF_WRITABLE;
-	s->n_chan	= 4;
-	s->maxdata	= 1;
-	s->range_table	= &range_digital;
-	s->insn_bits	= cb_pcimdas_do_insn_bits;
-
-	/* Counter subdevice (8254) */
-	s = &dev->subdevices[5];
-	comedi_8254_subdevice_init(s, dev->pacer);
-
-	dev->pacer->insn_config = cb_pcimdas_counter_insn_config;
-
-	/* counters 1 and 2 are used internally for the pacer */
-	comedi_8254_set_busy(dev->pacer, 1, true);
-	comedi_8254_set_busy(dev->pacer, 2, true);
-
-	return 0;
-}
-
-static struct comedi_driver cb_pcimdas_driver = {
-	.driver_name	= "cb_pcimdas",
-	.module		= THIS_MODULE,
-	.auto_attach	= cb_pcimdas_auto_attach,
-	.detach		= comedi_pci_detach,
+static struct pci_driver driver_cb_pcimdas_pci_driver = {
+	.id_table = cb_pcimdas_pci_table,
+	.probe = &driver_cb_pcimdas_pci_probe,
+	.remove = __devexit_p(&driver_cb_pcimdas_pci_remove)
 };
 
-static int cb_pcimdas_pci_probe(struct pci_dev *dev,
-				const struct pci_device_id *id)
+static int __init driver_cb_pcimdas_init_module(void)
 {
-	return comedi_pci_auto_config(dev, &cb_pcimdas_driver,
-				      id->driver_data);
+	int retval;
+
+	retval = comedi_driver_register(&driver_cb_pcimdas);
+	if (retval < 0)
+		return retval;
+
+	driver_cb_pcimdas_pci_driver.name =
+	    (char *)driver_cb_pcimdas.driver_name;
+	return pci_register_driver(&driver_cb_pcimdas_pci_driver);
 }
 
-static const struct pci_device_id cb_pcimdas_pci_table[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_CB, 0x0056) },	/* PCIM-DAS1602/16 */
-	{ PCI_DEVICE(PCI_VENDOR_ID_CB, 0x0115) },	/* PCIe-DAS1602/16 */
-	{ 0 }
-};
-MODULE_DEVICE_TABLE(pci, cb_pcimdas_pci_table);
+static void __exit driver_cb_pcimdas_cleanup_module(void)
+{
+	pci_unregister_driver(&driver_cb_pcimdas_pci_driver);
+	comedi_driver_unregister(&driver_cb_pcimdas);
+}
 
-static struct pci_driver cb_pcimdas_pci_driver = {
-	.name		= "cb_pcimdas",
-	.id_table	= cb_pcimdas_pci_table,
-	.probe		= cb_pcimdas_pci_probe,
-	.remove		= comedi_pci_auto_unconfig,
-};
-module_comedi_pci_driver(cb_pcimdas_driver, cb_pcimdas_pci_driver);
+module_init(driver_cb_pcimdas_init_module);
+module_exit(driver_cb_pcimdas_cleanup_module);
 
 MODULE_AUTHOR("Comedi http://www.comedi.org");
-MODULE_DESCRIPTION("Comedi driver for PCIM-DAS1602/16 and PCIe-DAS1602/16");
+MODULE_DESCRIPTION("Comedi low-level driver");
 MODULE_LICENSE("GPL");

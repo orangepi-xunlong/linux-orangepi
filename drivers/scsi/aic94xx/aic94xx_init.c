@@ -49,6 +49,14 @@ MODULE_PARM_DESC(use_msi, "\n"
 	"\tEnable(1) or disable(0) using PCI MSI.\n"
 	"\tDefault: 0");
 
+static int lldd_max_execute_num = 0;
+module_param_named(collector, lldd_max_execute_num, int, S_IRUGO);
+MODULE_PARM_DESC(collector, "\n"
+	"\tIf greater than one, tells the SAS Layer to run in Task Collector\n"
+	"\tMode.  If 1 or 0, tells the SAS Layer to run in Direct Mode.\n"
+	"\tThe aic94xx SAS LLDD supports both modes.\n"
+	"\tDefault: 0 (Direct Mode).\n");
+
 static struct scsi_transport_template *aic94xx_transport_template;
 static int asd_scan_finished(struct Scsi_Host *, unsigned long);
 static void asd_scan_start(struct Scsi_Host *);
@@ -63,8 +71,10 @@ static struct scsi_host_template aic94xx_sht = {
 	.scan_finished		= asd_scan_finished,
 	.scan_start		= asd_scan_start,
 	.change_queue_depth	= sas_change_queue_depth,
+	.change_queue_type	= sas_change_queue_type,
 	.bios_param		= sas_bios_param,
 	.can_queue		= 1,
+	.cmd_per_lun		= 1,
 	.this_id		= -1,
 	.sg_tablesize		= SG_ALL,
 	.max_sectors		= SCSI_DEFAULT_MAX_SECTORS,
@@ -73,10 +83,9 @@ static struct scsi_host_template aic94xx_sht = {
 	.eh_bus_reset_handler	= sas_eh_bus_reset_handler,
 	.target_destroy		= sas_target_destroy,
 	.ioctl			= sas_ioctl,
-	.track_queue_depth	= 1,
 };
 
-static int asd_map_memio(struct asd_ha_struct *asd_ha)
+static int __devinit asd_map_memio(struct asd_ha_struct *asd_ha)
 {
 	int err, i;
 	struct asd_ha_addrspace *io_handle;
@@ -99,11 +108,15 @@ static int asd_map_memio(struct asd_ha_struct *asd_ha)
 				   pci_name(asd_ha->pcidev));
 			goto Err;
 		}
-		io_handle->addr = ioremap(io_handle->start, io_handle->len);
+		if (io_handle->flags & IORESOURCE_CACHEABLE)
+			io_handle->addr = ioremap(io_handle->start,
+						  io_handle->len);
+		else
+			io_handle->addr = ioremap_nocache(io_handle->start,
+							  io_handle->len);
 		if (!io_handle->addr) {
 			asd_printk("couldn't map MBAR%d of %s\n", i==0?0:1,
 				   pci_name(asd_ha->pcidev));
-			err = -ENOMEM;
 			goto Err_unreq;
 		}
 	}
@@ -133,7 +146,7 @@ static void asd_unmap_memio(struct asd_ha_struct *asd_ha)
 	pci_release_region(asd_ha->pcidev, 0);
 }
 
-static int asd_map_ioport(struct asd_ha_struct *asd_ha)
+static int __devinit asd_map_ioport(struct asd_ha_struct *asd_ha)
 {
 	int i = PCI_IOBAR_OFFSET, err;
 	struct asd_ha_addrspace *io_handle = &asd_ha->io_handle[0];
@@ -162,7 +175,7 @@ static void asd_unmap_ioport(struct asd_ha_struct *asd_ha)
 	pci_release_region(asd_ha->pcidev, PCI_IOBAR_OFFSET);
 }
 
-static int asd_map_ha(struct asd_ha_struct *asd_ha)
+static int __devinit asd_map_ha(struct asd_ha_struct *asd_ha)
 {
 	int err;
 	u16 cmd_reg;
@@ -208,7 +221,7 @@ static const char *asd_dev_rev[30] = {
 	[8] = "B0",
 };
 
-static int asd_common_setup(struct asd_ha_struct *asd_ha)
+static int __devinit asd_common_setup(struct asd_ha_struct *asd_ha)
 {
 	int err, i;
 
@@ -244,7 +257,7 @@ Err:
 	return err;
 }
 
-static int asd_aic9410_setup(struct asd_ha_struct *asd_ha)
+static int __devinit asd_aic9410_setup(struct asd_ha_struct *asd_ha)
 {
 	int err = asd_common_setup(asd_ha);
 
@@ -259,7 +272,7 @@ static int asd_aic9410_setup(struct asd_ha_struct *asd_ha)
 	return 0;
 }
 
-static int asd_aic9405_setup(struct asd_ha_struct *asd_ha)
+static int __devinit asd_aic9405_setup(struct asd_ha_struct *asd_ha)
 {
 	int err = asd_common_setup(asd_ha);
 
@@ -518,7 +531,7 @@ static void asd_remove_dev_attrs(struct asd_ha_struct *asd_ha)
 static const struct asd_pcidev_struct {
 	const char * name;
 	int (*setup)(struct asd_ha_struct *asd_ha);
-} asd_pcidev_data[] = {
+} asd_pcidev_data[] __devinitconst = {
 	/* Id 0 is used for dynamic ids. */
 	{ .name  = "Adaptec AIC-94xx SAS/SATA Host Adapter",
 	  .setup = asd_aic9410_setup
@@ -696,6 +709,9 @@ static int asd_register_sas_ha(struct asd_ha_struct *asd_ha)
 	asd_ha->sas_ha.sas_port= sas_ports;
 	asd_ha->sas_ha.num_phys= ASD_MAX_PHYS;
 
+	asd_ha->sas_ha.lldd_queue_size = asd_ha->seq.can_queue;
+	asd_ha->sas_ha.lldd_max_execute_num = lldd_max_execute_num;
+
 	return sas_register_ha(&asd_ha->sas_ha);
 }
 
@@ -703,10 +719,10 @@ static int asd_unregister_sas_ha(struct asd_ha_struct *asd_ha)
 {
 	int err;
 
-	scsi_remove_host(asd_ha->sas_ha.core.shost);
 	err = sas_unregister_ha(&asd_ha->sas_ha);
 
 	sas_remove_host(asd_ha->sas_ha.core.shost);
+	scsi_remove_host(asd_ha->sas_ha.core.shost);
 	scsi_host_put(asd_ha->sas_ha.core.shost);
 
 	kfree(asd_ha->sas_ha.sas_phy);
@@ -715,7 +731,8 @@ static int asd_unregister_sas_ha(struct asd_ha_struct *asd_ha)
 	return err;
 }
 
-static int asd_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
+static int __devinit asd_pci_probe(struct pci_dev *dev,
+				   const struct pci_device_id *id)
 {
 	const struct asd_pcidev_struct *asd_dev;
 	unsigned asd_id = (unsigned) id->driver_data;
@@ -907,7 +924,7 @@ static void asd_turn_off_leds(struct asd_ha_struct *asd_ha)
 	}
 }
 
-static void asd_pci_remove(struct pci_dev *dev)
+static void __devexit asd_pci_remove(struct pci_dev *dev)
 {
 	struct asd_ha_struct *asd_ha = pci_get_drvdata(dev);
 
@@ -995,7 +1012,7 @@ static struct sas_domain_function_template aic94xx_transport_functions = {
 	.lldd_ata_set_dmamode	= asd_set_dmamode,
 };
 
-static const struct pci_device_id aic94xx_pci_table[] = {
+static const struct pci_device_id aic94xx_pci_table[] __devinitdata = {
 	{PCI_DEVICE(PCI_VENDOR_ID_ADAPTEC2, 0x410),0, 0, 1},
 	{PCI_DEVICE(PCI_VENDOR_ID_ADAPTEC2, 0x412),0, 0, 1},
 	{PCI_DEVICE(PCI_VENDOR_ID_ADAPTEC2, 0x416),0, 0, 1},
@@ -1014,7 +1031,7 @@ static struct pci_driver aic94xx_pci_driver = {
 	.name		= ASD_DRIVER_NAME,
 	.id_table	= aic94xx_pci_table,
 	.probe		= asd_pci_probe,
-	.remove		= asd_pci_remove,
+	.remove		= __devexit_p(asd_pci_remove),
 };
 
 static int __init aic94xx_init(void)
@@ -1031,10 +1048,8 @@ static int __init aic94xx_init(void)
 
 	aic94xx_transport_template =
 		sas_domain_attach_transport(&aic94xx_transport_functions);
-	if (!aic94xx_transport_template) {
-		err = -ENOMEM;
+	if (!aic94xx_transport_template)
 		goto out_destroy_caches;
-	}
 
 	err = pci_register_driver(&aic94xx_pci_driver);
 	if (err)

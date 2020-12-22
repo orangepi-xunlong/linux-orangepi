@@ -403,7 +403,8 @@ static void apb_init(struct pci_bus *sabre_bus)
 	}
 }
 
-static void sabre_scan_bus(struct pci_pbm_info *pbm, struct device *parent)
+static void __devinit sabre_scan_bus(struct pci_pbm_info *pbm,
+				     struct device *parent)
 {
 	static int once;
 
@@ -442,8 +443,8 @@ static void sabre_scan_bus(struct pci_pbm_info *pbm, struct device *parent)
 	sabre_register_error_handlers(pbm);
 }
 
-static void sabre_pbm_init(struct pci_pbm_info *pbm,
-			   struct platform_device *op)
+static void __devinit sabre_pbm_init(struct pci_pbm_info *pbm,
+				     struct platform_device *op)
 {
 	psycho_pbm_init_common(pbm, op, "SABRE", PBM_CHIP_TYPE_SABRE);
 	pbm->pci_afsr = pbm->controller_regs + SABRE_PIOAFSR;
@@ -453,7 +454,7 @@ static void sabre_pbm_init(struct pci_pbm_info *pbm,
 }
 
 static const struct of_device_id sabre_match[];
-static int sabre_probe(struct platform_device *op)
+static int __devinit sabre_probe(struct platform_device *op)
 {
 	const struct of_device_id *match;
 	const struct linux_prom64_registers *pr_regs;
@@ -600,6 +601,7 @@ static const struct of_device_id sabre_match[] = {
 static struct platform_driver sabre_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = sabre_match,
 	},
 	.probe		= sabre_probe,

@@ -25,9 +25,6 @@
 #include <asm/firmware.h>
 #include <asm/bug.h>
 
-/* See definition in io.h */
-bool isa_io_special;
-
 void _insb(const volatile u8 __iomem *port, void *buf, long count)
 {
 	u8 *tbuf = buf;

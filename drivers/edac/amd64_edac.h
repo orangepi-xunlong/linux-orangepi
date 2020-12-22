@@ -2,10 +2,64 @@
  * AMD64 class Memory Controller kernel module
  *
  * Copyright (c) 2009 SoftwareBitMaker.
- * Copyright (c) 2009-15 Advanced Micro Devices, Inc.
+ * Copyright (c) 2009 Advanced Micro Devices, Inc.
  *
  * This file may be distributed under the terms of the
  * GNU General Public License.
+ *
+ *	Originally Written by Thayne Harbaugh
+ *
+ *      Changes by Douglas "norsk" Thompson  <dougthompson@xmission.com>:
+ *		- K8 CPU Revision D and greater support
+ *
+ *      Changes by Dave Peterson <dsp@llnl.gov> <dave_peterson@pobox.com>:
+ *		- Module largely rewritten, with new (and hopefully correct)
+ *		code for dealing with node and chip select interleaving,
+ *		various code cleanup, and bug fixes
+ *		- Added support for memory hoisting using DRAM hole address
+ *		register
+ *
+ *	Changes by Douglas "norsk" Thompson <dougthompson@xmission.com>:
+ *		-K8 Rev (1207) revision support added, required Revision
+ *		specific mini-driver code to support Rev F as well as
+ *		prior revisions
+ *
+ *	Changes by Douglas "norsk" Thompson <dougthompson@xmission.com>:
+ *		-Family 10h revision support added. New PCI Device IDs,
+ *		indicating new changes. Actual registers modified
+ *		were slight, less than the Rev E to Rev F transition
+ *		but changing the PCI Device ID was the proper thing to
+ *		do, as it provides for almost automactic family
+ *		detection. The mods to Rev F required more family
+ *		information detection.
+ *
+ *	Changes/Fixes by Borislav Petkov <borislav.petkov@amd.com>:
+ *		- misc fixes and code cleanups
+ *
+ * This module is based on the following documents
+ * (available from http://www.amd.com/):
+ *
+ *	Title:	BIOS and Kernel Developer's Guide for AMD Athlon 64 and AMD
+ *		Opteron Processors
+ *	AMD publication #: 26094
+ *`	Revision: 3.26
+ *
+ *	Title:	BIOS and Kernel Developer's Guide for AMD NPT Family 0Fh
+ *		Processors
+ *	AMD publication #: 32559
+ *	Revision: 3.00
+ *	Issue Date: May 2006
+ *
+ *	Title:	BIOS and Kernel Developer's Guide (BKDG) For AMD Family 10h
+ *		Processors
+ *	AMD publication #: 31116
+ *	Revision: 3.00
+ *	Issue Date: September 07, 2007
+ *
+ * Sections in the first 2 documents are no longer in sync with each other.
+ * The Family 10h BKDG was totally re-written from scratch with a new
+ * presentation model.
+ * Therefore, comments that refer to a Document section might be off.
  */
 
 #include <linux/module.h>
@@ -16,7 +70,6 @@
 #include <linux/slab.h>
 #include <linux/mmzone.h>
 #include <linux/edac.h>
-#include <asm/cpu_device_id.h>
 #include <asm/msr.h>
 #include "edac_core.h"
 #include "mce_amd.h"
@@ -107,18 +160,19 @@
 #define OFF false
 
 /*
+ * Create a contiguous bitmask starting at bit position @lo and ending at
+ * position @hi. For example
+ *
+ * GENMASK(21, 39) gives us the 64bit vector 0x000000ffffe00000.
+ */
+#define GENMASK(lo, hi)			(((1ULL << ((hi) - (lo) + 1)) - 1) << (lo))
+
+/*
  * PCI-defined configuration space registers
  */
 #define PCI_DEVICE_ID_AMD_15H_NB_F1	0x1601
 #define PCI_DEVICE_ID_AMD_15H_NB_F2	0x1602
-#define PCI_DEVICE_ID_AMD_15H_M30H_NB_F1 0x141b
-#define PCI_DEVICE_ID_AMD_15H_M30H_NB_F2 0x141c
-#define PCI_DEVICE_ID_AMD_15H_M60H_NB_F1 0x1571
-#define PCI_DEVICE_ID_AMD_15H_M60H_NB_F2 0x1572
-#define PCI_DEVICE_ID_AMD_16H_NB_F1	0x1531
-#define PCI_DEVICE_ID_AMD_16H_NB_F2	0x1532
-#define PCI_DEVICE_ID_AMD_16H_M30H_NB_F1 0x1581
-#define PCI_DEVICE_ID_AMD_16H_M30H_NB_F2 0x1582
+
 
 /*
  * Function 1 - Address Map
@@ -126,22 +180,13 @@
 #define DRAM_BASE_LO			0x40
 #define DRAM_LIMIT_LO			0x44
 
-/*
- * F15 M30h D18F1x2[1C:00]
- */
-#define DRAM_CONT_BASE			0x200
-#define DRAM_CONT_LIMIT			0x204
-
-/*
- * F15 M30h D18F1x2[4C:40]
- */
-#define DRAM_CONT_HIGH_OFF		0x240
-
+#define dram_intlv_en(pvt, i)		((u8)((pvt->ranges[i].base.lo >> 8) & 0x7))
 #define dram_rw(pvt, i)			((u8)(pvt->ranges[i].base.lo & 0x3))
 #define dram_intlv_sel(pvt, i)		((u8)((pvt->ranges[i].lim.lo >> 8) & 0x7))
 #define dram_dst_node(pvt, i)		((u8)(pvt->ranges[i].lim.lo & 0x7))
 
 #define DHAR				0xf0
+#define dhar_valid(pvt)			((pvt)->dhar & BIT(0))
 #define dhar_mem_hoist_valid(pvt)	((pvt)->dhar & BIT(1))
 #define dhar_base(pvt)			((pvt)->dhar & 0xff000000)
 #define k8_dhar_offset(pvt)		(((pvt)->dhar & 0x0000ff00) << 16)
@@ -170,13 +215,11 @@
 
 #define csrow_enabled(i, dct, pvt)	((pvt)->csels[(dct)].csbases[(i)] & DCSB_CS_ENABLE)
 
-#define DRAM_CONTROL			0x78
-
 #define DBAM0				0x80
 #define DBAM1				0x180
 
 /* Extract the DIMM 'type' on the i'th DIMM from the DBAM reg value passed */
-#define DBAM_DIMM(i, reg)		((((reg) >> (4*(i)))) & 0xF)
+#define DBAM_DIMM(i, reg)		((((reg) >> (4*i))) & 0xF)
 
 #define DBAM_MAX_VALUE			11
 
@@ -190,6 +233,8 @@
 #define DDR3_MODE			BIT(8)
 
 #define DCT_SEL_LO			0x110
+#define dct_sel_baseaddr(pvt)		((pvt)->dct_sel_lo & 0xFFFFF800)
+#define dct_sel_interleave_addr(pvt)	(((pvt)->dct_sel_lo >> 6) & 0x3)
 #define dct_high_range_enabled(pvt)	((pvt)->dct_sel_lo & BIT(0))
 #define dct_interleave_enabled(pvt)	((pvt)->dct_sel_lo & BIT(2))
 
@@ -201,8 +246,6 @@
 #define SWAP_INTLV_REG			0x10c
 
 #define DCT_SEL_HI			0x114
-
-#define F15H_M60H_SCRCTRL		0x1C8
 
 /*
  * Function 3 - Misc Control
@@ -224,20 +267,18 @@
 #define online_spare_bad_dramcs(pvt, c)	(((pvt)->online_spare >> (4 + 4 * (c))) & 0x7)
 
 #define F10_NB_ARRAY_ADDR		0xB8
-#define F10_NB_ARRAY_DRAM		BIT(31)
+#define F10_NB_ARRAY_DRAM_ECC		BIT(31)
 
 /* Bits [2:1] are used to select 16-byte section within a 64-byte cacheline  */
-#define SET_NB_ARRAY_ADDR(section)	(((section) & 0x3) << 1)
+#define SET_NB_ARRAY_ADDRESS(section)	(((section) & 0x3) << 1)
 
 #define F10_NB_ARRAY_DATA		0xBC
-#define F10_NB_ARR_ECC_WR_REQ		BIT(17)
-#define SET_NB_DRAM_INJECTION_WRITE(inj)  \
-					(BIT(((inj.word) & 0xF) + 20) | \
-					F10_NB_ARR_ECC_WR_REQ | inj.bit_map)
-#define SET_NB_DRAM_INJECTION_READ(inj)  \
-					(BIT(((inj.word) & 0xF) + 20) | \
-					BIT(16) |  inj.bit_map)
-
+#define SET_NB_DRAM_INJECTION_WRITE(word, bits)  \
+					(BIT(((word) & 0xF) + 20) | \
+					BIT(17) | bits)
+#define SET_NB_DRAM_INJECTION_READ(word, bits)  \
+					(BIT(((word) & 0xF) + 20) | \
+					BIT(16) |  bits)
 
 #define NBCAP				0xE8
 #define NBCAP_CHIPKILL			BIT(4)
@@ -249,22 +290,24 @@
 /* MSRs */
 #define MSR_MCGCTL_NBE			BIT(4)
 
+/* AMD sets the first MC device at device ID 0x18. */
+static inline u8 get_node_id(struct pci_dev *pdev)
+{
+	return PCI_SLOT(pdev->devfn) - 0x18;
+}
+
 enum amd_families {
 	K8_CPUS = 0,
 	F10_CPUS,
 	F15_CPUS,
-	F15_M30H_CPUS,
-	F15_M60H_CPUS,
-	F16_CPUS,
-	F16_M30H_CPUS,
 	NUM_FAMILIES,
 };
 
 /* Error injection control structure */
 struct error_injection {
-	u32	 section;
-	u32	 word;
-	u32	 bit_map;
+	u32	section;
+	u32	word;
+	u32	bit_map;
 };
 
 /* low and high part of PCI config space regs */
@@ -295,11 +338,7 @@ struct amd64_pvt {
 	/* pci_device handles which we utilize */
 	struct pci_dev *F1, *F2, *F3;
 
-	u16 mc_node_id;		/* MC index of this MC node */
-	u8 fam;			/* CPU family */
-	u8 model;		/* ... model */
-	u8 stepping;		/* ... stepping */
-
+	unsigned mc_node_id;	/* MC index of this MC node */
 	int ext_model;		/* extended model value of this node */
 	int channel_count;
 
@@ -333,29 +372,9 @@ struct amd64_pvt {
 
 	/* place to store error injection parameters prior to issue */
 	struct error_injection injection;
-
-	/* cache the dram_type */
-	enum mem_type dram_type;
 };
 
-enum err_codes {
-	DECODE_OK	=  0,
-	ERR_NODE	= -1,
-	ERR_CSROW	= -2,
-	ERR_CHANNEL	= -3,
-};
-
-struct err_info {
-	int err_code;
-	struct mem_ctl_info *src_mci;
-	int csrow;
-	int channel;
-	u16 syndrome;
-	u32 page;
-	u32 offset;
-};
-
-static inline u64 get_dram_base(struct amd64_pvt *pvt, u8 i)
+static inline u64 get_dram_base(struct amd64_pvt *pvt, unsigned i)
 {
 	u64 addr = ((u64)pvt->ranges[i].base.lo & 0xffff0000) << 8;
 
@@ -365,7 +384,7 @@ static inline u64 get_dram_base(struct amd64_pvt *pvt, u8 i)
 	return (((u64)pvt->ranges[i].base.hi & 0x000000ff) << 40) | addr;
 }
 
-static inline u64 get_dram_limit(struct amd64_pvt *pvt, u8 i)
+static inline u64 get_dram_limit(struct amd64_pvt *pvt, unsigned i)
 {
 	u64 lim = (((u64)pvt->ranges[i].lim.lo & 0xffff0000) << 8) | 0x00ffffff;
 
@@ -380,14 +399,6 @@ static inline u16 extract_syndrome(u64 status)
 	return ((status >> 47) & 0xff) | ((status >> 16) & 0xff00);
 }
 
-static inline u8 dct_sel_interleave_addr(struct amd64_pvt *pvt)
-{
-	if (pvt->fam == 0x15 && pvt->model >= 0x30)
-		return (((pvt->dct_sel_hi >> 9) & 0x1) << 2) |
-			((pvt->dct_sel_lo >> 6) & 0x3);
-
-	return	((pvt)->dct_sel_lo >> 6) & 0x3;
-}
 /*
  * per-node ECC settings descriptor
  */
@@ -402,12 +413,19 @@ struct ecc_settings {
 };
 
 #ifdef CONFIG_EDAC_DEBUG
-extern const struct attribute_group amd64_edac_dbg_group;
+#define NUM_DBG_ATTRS 5
+#else
+#define NUM_DBG_ATTRS 0
 #endif
 
 #ifdef CONFIG_EDAC_AMD64_ERROR_INJECTION
-extern const struct attribute_group amd64_edac_inj_group;
+#define NUM_INJ_ATTRS 5
+#else
+#define NUM_INJ_ATTRS 0
 #endif
+
+extern struct mcidev_sysfs_attribute amd64_dbg_attrs[NUM_DBG_ATTRS],
+				     amd64_inj_attrs[NUM_INJ_ATTRS];
 
 /*
  * Each of the PCI Device IDs types have their own set of hardware accessor
@@ -416,19 +434,18 @@ extern const struct attribute_group amd64_edac_inj_group;
 struct low_ops {
 	int (*early_channel_count)	(struct amd64_pvt *pvt);
 	void (*map_sysaddr_to_csrow)	(struct mem_ctl_info *mci, u64 sys_addr,
-					 struct err_info *);
-	int (*dbam_to_cs)		(struct amd64_pvt *pvt, u8 dct,
-					 unsigned cs_mode, int cs_mask_nr);
+					 u16 syndrome);
+	int (*dbam_to_cs)		(struct amd64_pvt *pvt, u8 dct, unsigned cs_mode);
+	int (*read_dct_pci_cfg)		(struct amd64_pvt *pvt, int offset,
+					 u32 *val, const char *func);
 };
 
 struct amd64_family_type {
 	const char *ctl_name;
-	u16 f1_id, f2_id;
+	u16 f1_id, f3_id;
 	struct low_ops ops;
 };
 
-int __amd64_read_pci_cfg_dword(struct pci_dev *pdev, int offset,
-			       u32 *val, const char *func);
 int __amd64_write_pci_cfg_dword(struct pci_dev *pdev, int offset,
 				u32 val, const char *func);
 
@@ -438,49 +455,8 @@ int __amd64_write_pci_cfg_dword(struct pci_dev *pdev, int offset,
 #define amd64_write_pci_cfg(pdev, offset, val)	\
 	__amd64_write_pci_cfg_dword(pdev, offset, val, __func__)
 
+#define amd64_read_dct_pci_cfg(pvt, offset, val) \
+	pvt->ops->read_dct_pci_cfg(pvt, offset, val, __func__)
+
 int amd64_get_dram_hole_info(struct mem_ctl_info *mci, u64 *hole_base,
 			     u64 *hole_offset, u64 *hole_size);
-
-#define to_mci(k) container_of(k, struct mem_ctl_info, dev)
-
-/* Injection helpers */
-static inline void disable_caches(void *dummy)
-{
-	write_cr0(read_cr0() | X86_CR0_CD);
-	wbinvd();
-}
-
-static inline void enable_caches(void *dummy)
-{
-	write_cr0(read_cr0() & ~X86_CR0_CD);
-}
-
-static inline u8 dram_intlv_en(struct amd64_pvt *pvt, unsigned int i)
-{
-	if (pvt->fam == 0x15 && pvt->model >= 0x30) {
-		u32 tmp;
-		amd64_read_pci_cfg(pvt->F1, DRAM_CONT_LIMIT, &tmp);
-		return (u8) tmp & 0xF;
-	}
-	return (u8) (pvt->ranges[i].base.lo >> 8) & 0x7;
-}
-
-static inline u8 dhar_valid(struct amd64_pvt *pvt)
-{
-	if (pvt->fam == 0x15 && pvt->model >= 0x30) {
-		u32 tmp;
-		amd64_read_pci_cfg(pvt->F1, DRAM_CONT_BASE, &tmp);
-		return (tmp >> 1) & BIT(0);
-	}
-	return (pvt)->dhar & BIT(0);
-}
-
-static inline u32 dct_sel_baseaddr(struct amd64_pvt *pvt)
-{
-	if (pvt->fam == 0x15 && pvt->model >= 0x30) {
-		u32 tmp;
-		amd64_read_pci_cfg(pvt->F1, DRAM_CONT_BASE, &tmp);
-		return (tmp >> 11) & 0x1FFF;
-	}
-	return (pvt)->dct_sel_lo & 0xFFFFF800;
-}

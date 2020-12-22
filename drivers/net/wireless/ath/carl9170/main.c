@@ -37,6 +37,7 @@
  *    OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/etherdevice.h>
@@ -357,13 +358,8 @@ static int carl9170_op_start(struct ieee80211_hw *hw)
 	ar->ps.last_action = jiffies;
 	ar->ps.last_slept = jiffies;
 	ar->erp_mode = CARL9170_ERP_AUTO;
-
-	/* Set "disable hw crypto offload" whenever the module parameter
-	 * nohwcrypt is true or if the firmware does not support it.
-	 */
-	ar->disable_offload = modparam_nohwcrypt |
-		ar->fw.disable_offload_fw;
-	ar->rx_software_decryption = ar->disable_offload;
+	ar->rx_software_decryption = false;
+	ar->disable_offload = false;
 
 	for (i = 0; i < ar->hw->queues; i++) {
 		ar->queue_stop_timeout[i] = jiffies;
@@ -469,26 +465,27 @@ static void carl9170_restart_work(struct work_struct *work)
 {
 	struct ar9170 *ar = container_of(work, struct ar9170,
 					 restart_work);
-	int err = -EIO;
+	int err;
 
 	ar->usedkeys = 0;
 	ar->filter_state = 0;
 	carl9170_cancel_worker(ar);
 
 	mutex_lock(&ar->mutex);
-	if (!ar->force_usb_reset) {
-		err = carl9170_usb_restart(ar);
-		if (net_ratelimit()) {
-			if (err)
-				dev_err(&ar->udev->dev, "Failed to restart device (%d).\n", err);
-			else
-				dev_info(&ar->udev->dev, "device restarted successfully.\n");
+	err = carl9170_usb_restart(ar);
+	if (net_ratelimit()) {
+		if (err) {
+			dev_err(&ar->udev->dev, "Failed to restart device "
+				" (%d).\n", err);
+		 } else {
+			dev_info(&ar->udev->dev, "device restarted "
+				 "successfully.\n");
 		}
 	}
+
 	carl9170_zap_queues(ar);
 	mutex_unlock(&ar->mutex);
-
-	if (!err && !ar->force_usb_reset) {
+	if (!err) {
 		ar->restart_counter++;
 		atomic_set(&ar->pending_restarts, 0);
 
@@ -529,10 +526,10 @@ void carl9170_restart(struct ar9170 *ar, const enum carl9170_restart_reasons r)
 	if (!ar->registered)
 		return;
 
-	if (!IS_ACCEPTING_CMD(ar) || ar->needs_full_reset)
-		ar->force_usb_reset = true;
-
-	ieee80211_queue_work(ar->hw, &ar->restart_work);
+	if (IS_ACCEPTING_CMD(ar) && !ar->needs_full_reset)
+		ieee80211_queue_work(ar->hw, &ar->restart_work);
+	else
+		carl9170_usb_reset(ar);
 
 	/*
 	 * At this point, the device instance might have vanished/disabled.
@@ -569,28 +566,12 @@ static int carl9170_init_interface(struct ar9170 *ar,
 
 	memcpy(common->macaddr, vif->addr, ETH_ALEN);
 
-	/* We have to fall back to software crypto, whenever
-	 * the user choose to participates in an IBSS. HW
-	 * offload for IBSS RSN is not supported by this driver.
-	 *
-	 * NOTE: If the previous main interface has already
-	 * disabled hw crypto offload, we have to keep this
-	 * previous disable_offload setting as it was.
-	 * Altough ideally, we should notify mac80211 and tell
-	 * it to forget about any HW crypto offload for now.
-	 */
-	ar->disable_offload |= ((vif->type != NL80211_IFTYPE_STATION) &&
-	    (vif->type != NL80211_IFTYPE_AP));
-
-	/* While the driver supports HW offload in a single
-	 * P2P client configuration, it doesn't support HW
-	 * offload in the favourit, concurrent P2P GO+CLIENT
-	 * configuration. Hence, HW offload will always be
-	 * disabled for P2P.
-	 */
-	ar->disable_offload |= vif->p2p;
-
-	ar->rx_software_decryption = ar->disable_offload;
+	if (modparam_nohwcrypt ||
+	    ((vif->type != NL80211_IFTYPE_STATION) &&
+	     (vif->type != NL80211_IFTYPE_AP))) {
+		ar->rx_software_decryption = true;
+		ar->disable_offload = true;
+	}
 
 	err = carl9170_set_operating_mode(ar);
 	return err;
@@ -600,7 +581,7 @@ static int carl9170_op_add_interface(struct ieee80211_hw *hw,
 				     struct ieee80211_vif *vif)
 {
 	struct carl9170_vif_info *vif_priv = (void *) vif->drv_priv;
-	struct ieee80211_vif *main_vif, *old_main = NULL;
+	struct ieee80211_vif *main_vif;
 	struct ar9170 *ar = hw->priv;
 	int vif_id = -1, err = 0;
 
@@ -622,15 +603,6 @@ static int carl9170_op_add_interface(struct ieee80211_hw *hw,
 		goto init;
 	}
 
-	/* Because the AR9170 HW's MAC doesn't provide full support for
-	 * multiple, independent interfaces [of different operation modes].
-	 * We have to select ONE main interface [main mode of HW], but we
-	 * can have multiple slaves [AKA: entry in the ACK-table].
-	 *
-	 * The first (from HEAD/TOP) interface in the ar->vif_list is
-	 * always the main intf. All following intfs in this list
-	 * are considered to be slave intfs.
-	 */
 	main_vif = carl9170_get_main_vif(ar);
 
 	if (main_vif) {
@@ -639,29 +611,15 @@ static int carl9170_op_add_interface(struct ieee80211_hw *hw,
 			if (vif->type == NL80211_IFTYPE_STATION)
 				break;
 
-			/* P2P GO [master] use-case
-			 * Because the P2P GO station is selected dynamically
-			 * by all participating peers of a WIFI Direct network,
-			 * the driver has be able to change the main interface
-			 * operating mode on the fly.
-			 */
-			if (main_vif->p2p && vif->p2p &&
-			    vif->type == NL80211_IFTYPE_AP) {
-				old_main = main_vif;
-				break;
-			}
-
 			err = -EBUSY;
 			rcu_read_unlock();
 
 			goto unlock;
 
-		case NL80211_IFTYPE_MESH_POINT:
 		case NL80211_IFTYPE_AP:
 			if ((vif->type == NL80211_IFTYPE_STATION) ||
 			    (vif->type == NL80211_IFTYPE_WDS) ||
-			    (vif->type == NL80211_IFTYPE_AP) ||
-			    (vif->type == NL80211_IFTYPE_MESH_POINT))
+			    (vif->type == NL80211_IFTYPE_AP))
 				break;
 
 			err = -EBUSY;
@@ -689,40 +647,13 @@ static int carl9170_op_add_interface(struct ieee80211_hw *hw,
 	vif_priv->id = vif_id;
 	vif_priv->enable_beacon = false;
 	ar->vifs++;
-	if (old_main) {
-		/* We end up in here, if the main interface is being replaced.
-		 * Put the new main interface at the HEAD of the list and the
-		 * previous inteface will automatically become second in line.
-		 */
-		list_add_rcu(&vif_priv->list, &ar->vif_list);
-	} else {
-		/* Add new inteface. If the list is empty, it will become the
-		 * main inteface, otherwise it will be slave.
-		 */
-		list_add_tail_rcu(&vif_priv->list, &ar->vif_list);
-	}
+	list_add_tail_rcu(&vif_priv->list, &ar->vif_list);
 	rcu_assign_pointer(ar->vif_priv[vif_id].vif, vif);
 
 init:
-	main_vif = carl9170_get_main_vif(ar);
-
-	if (main_vif == vif) {
+	if (carl9170_get_main_vif(ar) == vif) {
 		rcu_assign_pointer(ar->beacon_iter, vif_priv);
 		rcu_read_unlock();
-
-		if (old_main) {
-			struct carl9170_vif_info *old_main_priv =
-				(void *) old_main->drv_priv;
-			/* downgrade old main intf to slave intf.
-			 * NOTE: We are no longer under rcu_read_lock.
-			 * But we are still holding ar->mutex, so the
-			 * vif data [id, addr] is safe.
-			 */
-			err = carl9170_mod_virtual_mac(ar, old_main_priv->id,
-						       old_main->addr);
-			if (err)
-				goto unlock;
-		}
 
 		err = carl9170_init_interface(ar, vif);
 		if (err)
@@ -928,9 +859,6 @@ static int carl9170_op_config(struct ieee80211_hw *hw, u32 changed)
 	}
 
 	if (changed & IEEE80211_CONF_CHANGE_CHANNEL) {
-		enum nl80211_channel_type channel_type =
-			cfg80211_get_chandef_type(&hw->conf.chandef);
-
 		/* adjust slot time for 5 GHz */
 		err = carl9170_set_slot_time(ar);
 		if (err)
@@ -940,8 +868,8 @@ static int carl9170_op_config(struct ieee80211_hw *hw, u32 changed)
 		if (err)
 			goto out;
 
-		err = carl9170_set_channel(ar, hw->conf.chandef.chan,
-					   channel_type);
+		err = carl9170_set_channel(ar, hw->conf.channel,
+			hw->conf.channel_type, CARL9170_RFI_NONE);
 		if (err)
 			goto out;
 
@@ -959,7 +887,7 @@ static int carl9170_op_config(struct ieee80211_hw *hw, u32 changed)
 	}
 
 	if (changed & IEEE80211_CONF_CHANGE_POWER) {
-		err = carl9170_set_mac_tpc(ar, ar->hw->conf.chandef.chan);
+		err = carl9170_set_mac_tpc(ar, ar->hw->conf.channel);
 		if (err)
 			goto out;
 	}
@@ -1011,17 +939,15 @@ static void carl9170_op_configure_filter(struct ieee80211_hw *hw,
 	if (multicast != ar->cur_mc_hash)
 		WARN_ON(carl9170_update_multicast(ar, multicast));
 
-	if (changed_flags & FIF_OTHER_BSS) {
-		ar->sniffer_enabled = !!(*new_flags & FIF_OTHER_BSS);
+	if (changed_flags & (FIF_OTHER_BSS | FIF_PROMISC_IN_BSS)) {
+		ar->sniffer_enabled = !!(*new_flags &
+			(FIF_OTHER_BSS | FIF_PROMISC_IN_BSS));
 
 		WARN_ON(carl9170_set_operating_mode(ar));
 	}
 
 	if (ar->fw.rx_filter && changed_flags & ar->rx_filter_caps) {
 		u32 rx_filter = 0;
-
-		if (!ar->fw.ba_filter)
-			rx_filter |= CARL9170_RX_FILTER_CTL_OTHER;
 
 		if (!(*new_flags & (FIF_FCSFAIL | FIF_PLCPFAIL)))
 			rx_filter |= CARL9170_RX_FILTER_BAD;
@@ -1032,7 +958,7 @@ static void carl9170_op_configure_filter(struct ieee80211_hw *hw,
 		if (!(*new_flags & FIF_PSPOLL))
 			rx_filter |= CARL9170_RX_FILTER_CTL_PSPOLL;
 
-		if (!(*new_flags & FIF_OTHER_BSS)) {
+		if (!(*new_flags & (FIF_OTHER_BSS | FIF_PROMISC_IN_BSS))) {
 			rx_filter |= CARL9170_RX_FILTER_OTHER_RA;
 			rx_filter |= CARL9170_RX_FILTER_DECRY_FAIL;
 		}
@@ -1182,7 +1108,9 @@ static int carl9170_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 	if (ar->disable_offload || !vif)
 		return -EOPNOTSUPP;
 
-	/* Fall back to software encryption whenever the driver is connected
+	/*
+	 * We have to fall back to software encryption, whenever
+	 * the user choose to participates in an IBSS or is connected
 	 * to more than one network.
 	 *
 	 * This is very unfortunate, because some machines cannot handle
@@ -1216,7 +1144,6 @@ static int carl9170_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 		break;
 	case WLAN_CIPHER_SUITE_CCMP:
 		ktype = AR9170_ENC_ALG_AESCCMP;
-		key->flags |= IEEE80211_KEY_FLAG_SW_MGMT_TX;
 		break;
 	default:
 		return -EOPNOTSUPP;
@@ -1331,7 +1258,7 @@ static int carl9170_op_sta_add(struct ieee80211_hw *hw,
 			return 0;
 		}
 
-		for (i = 0; i < ARRAY_SIZE(sta_info->agg); i++)
+		for (i = 0; i < CARL9170_NUM_TID; i++)
 			RCU_INIT_POINTER(sta_info->agg[i], NULL);
 
 		sta_info->ampdu_max_len = 1 << (3 + sta->ht_cap.ampdu_factor);
@@ -1355,7 +1282,7 @@ static int carl9170_op_sta_remove(struct ieee80211_hw *hw,
 		sta_info->ht_sta = false;
 
 		rcu_read_lock();
-		for (i = 0; i < ARRAY_SIZE(sta_info->agg); i++) {
+		for (i = 0; i < CARL9170_NUM_TID; i++) {
 			struct carl9170_sta_tid *tid_info;
 
 			tid_info = rcu_dereference(sta_info->agg[i]);
@@ -1413,12 +1340,10 @@ static void carl9170_ampdu_work(struct work_struct *work)
 
 static int carl9170_op_ampdu_action(struct ieee80211_hw *hw,
 				    struct ieee80211_vif *vif,
-				    struct ieee80211_ampdu_params *params)
+				    enum ieee80211_ampdu_mlme_action action,
+				    struct ieee80211_sta *sta,
+				    u16 tid, u16 *ssn, u8 buf_size)
 {
-	struct ieee80211_sta *sta = params->sta;
-	enum ieee80211_ampdu_mlme_action action = params->action;
-	u16 tid = params->tid;
-	u16 *ssn = &params->ssn;
 	struct ar9170 *ar = hw->priv;
 	struct carl9170_sta_info *sta_info = (void *) sta->drv_priv;
 	struct carl9170_sta_tid *tid_info;
@@ -1431,17 +1356,23 @@ static int carl9170_op_ampdu_action(struct ieee80211_hw *hw,
 		if (!sta_info->ht_sta)
 			return -EOPNOTSUPP;
 
+		rcu_read_lock();
+		if (rcu_dereference(sta_info->agg[tid])) {
+			rcu_read_unlock();
+			return -EBUSY;
+		}
+
 		tid_info = kzalloc(sizeof(struct carl9170_sta_tid),
 				   GFP_ATOMIC);
-		if (!tid_info)
+		if (!tid_info) {
+			rcu_read_unlock();
 			return -ENOMEM;
+		}
 
 		tid_info->hsn = tid_info->bsn = tid_info->snx = (*ssn);
 		tid_info->state = CARL9170_TID_STATE_PROGRESS;
 		tid_info->tid = tid;
 		tid_info->max = sta_info->ampdu_max_len;
-		tid_info->sta = sta;
-		tid_info->vif = vif;
 
 		INIT_LIST_HEAD(&tid_info->list);
 		INIT_LIST_HEAD(&tid_info->tmp_list);
@@ -1453,13 +1384,12 @@ static int carl9170_op_ampdu_action(struct ieee80211_hw *hw,
 		list_add_tail_rcu(&tid_info->list, &ar->tx_ampdu_list);
 		rcu_assign_pointer(sta_info->agg[tid], tid_info);
 		spin_unlock_bh(&ar->tx_ampdu_list_lock);
+		rcu_read_unlock();
 
 		ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
 		break;
 
-	case IEEE80211_AMPDU_TX_STOP_CONT:
-	case IEEE80211_AMPDU_TX_STOP_FLUSH:
-	case IEEE80211_AMPDU_TX_STOP_FLUSH_CONT:
+	case IEEE80211_AMPDU_TX_STOP:
 		rcu_read_lock();
 		tid_info = rcu_dereference(sta_info->agg[tid]);
 		if (tid_info) {
@@ -1666,7 +1596,7 @@ static int carl9170_op_get_survey(struct ieee80211_hw *hw, int idx,
 			return err;
 	}
 
-	for (b = 0; b < NUM_NL80211_BANDS; b++) {
+	for (b = 0; b < IEEE80211_NUM_BANDS; b++) {
 		band = ar->hw->wiphy->bands[b];
 
 		if (!band)
@@ -1691,17 +1621,15 @@ found:
 		survey->filled |= SURVEY_INFO_IN_USE;
 
 	if (ar->fw.hw_counters) {
-		survey->filled |= SURVEY_INFO_TIME |
-				  SURVEY_INFO_TIME_BUSY |
-				  SURVEY_INFO_TIME_TX;
+		survey->filled |= SURVEY_INFO_CHANNEL_TIME |
+				  SURVEY_INFO_CHANNEL_TIME_BUSY |
+				  SURVEY_INFO_CHANNEL_TIME_TX;
 	}
 
 	return 0;
 }
 
-static void carl9170_op_flush(struct ieee80211_hw *hw,
-			      struct ieee80211_vif *vif,
-			      u32 queues, bool drop)
+static void carl9170_op_flush(struct ieee80211_hw *hw, bool drop)
 {
 	struct ar9170 *ar = hw->priv;
 	unsigned int vid;
@@ -1825,9 +1753,6 @@ void *carl9170_alloc(size_t priv_size)
 	for (i = 0; i < ar->hw->queues; i++) {
 		skb_queue_head_init(&ar->tx_status[i]);
 		skb_queue_head_init(&ar->tx_pending[i]);
-
-		INIT_LIST_HEAD(&ar->bar_list[i]);
-		spin_lock_init(&ar->bar_list_lock[i]);
 	}
 	INIT_WORK(&ar->ps_work, carl9170_ps_work);
 	INIT_WORK(&ar->ping_work, carl9170_ping_work);
@@ -1846,22 +1771,19 @@ void *carl9170_alloc(size_t priv_size)
 	/* firmware decides which modes we support */
 	hw->wiphy->interface_modes = 0;
 
-	ieee80211_hw_set(hw, RX_INCLUDES_FCS);
-	ieee80211_hw_set(hw, MFP_CAPABLE);
-	ieee80211_hw_set(hw, REPORTS_TX_ACK_STATUS);
-	ieee80211_hw_set(hw, SUPPORTS_PS);
-	ieee80211_hw_set(hw, PS_NULLFUNC_STACK);
-	ieee80211_hw_set(hw, NEED_DTIM_BEFORE_ASSOC);
-	ieee80211_hw_set(hw, SUPPORTS_RC_TABLE);
-	ieee80211_hw_set(hw, SIGNAL_DBM);
-	ieee80211_hw_set(hw, SUPPORTS_HT_CCK_RATES);
+	hw->flags |= IEEE80211_HW_RX_INCLUDES_FCS |
+		     IEEE80211_HW_REPORTS_TX_ACK_STATUS |
+		     IEEE80211_HW_SUPPORTS_PS |
+		     IEEE80211_HW_PS_NULLFUNC_STACK |
+		     IEEE80211_HW_NEED_DTIM_PERIOD |
+		     IEEE80211_HW_SIGNAL_DBM;
 
 	if (!modparam_noht) {
 		/*
 		 * see the comment above, why we allow the user
 		 * to disable HT by a module parameter.
 		 */
-		ieee80211_hw_set(hw, AMPDU_AGGREGATION);
+		hw->flags |= IEEE80211_HW_AMPDU_AGGREGATION;
 	}
 
 	hw->extra_tx_headroom = sizeof(struct _carl9170_tx_superframe);
@@ -1874,6 +1796,10 @@ void *carl9170_alloc(size_t priv_size)
 	for (i = 0; i < ARRAY_SIZE(ar->noise); i++)
 		ar->noise[i] = -95; /* ATH_DEFAULT_NOISE_FLOOR */
 
+	hw->wiphy->flags &= ~WIPHY_FLAG_PS_ON_BY_DEFAULT;
+
+	/* As IBSS Encryption is software-based, IBSS RSN is supported. */
+	hw->wiphy->flags |= WIPHY_FLAG_IBSS_RSN;
 	return ar;
 
 err_nomem:
@@ -1941,13 +1867,13 @@ static int carl9170_parse_eeprom(struct ar9170 *ar)
 	}
 
 	if (ar->eeprom.operating_flags & AR9170_OPFLAG_2GHZ) {
-		ar->hw->wiphy->bands[NL80211_BAND_2GHZ] =
+		ar->hw->wiphy->bands[IEEE80211_BAND_2GHZ] =
 			&carl9170_band_2GHz;
 		chans += carl9170_band_2GHz.n_channels;
 		bands++;
 	}
 	if (ar->eeprom.operating_flags & AR9170_OPFLAG_5GHZ) {
-		ar->hw->wiphy->bands[NL80211_BAND_5GHZ] =
+		ar->hw->wiphy->bands[IEEE80211_BAND_5GHZ] =
 			&carl9170_band_5GHz;
 		chans += carl9170_band_5GHz.n_channels;
 		bands++;
@@ -1961,6 +1887,18 @@ static int carl9170_parse_eeprom(struct ar9170 *ar)
 		return -ENOMEM;
 	ar->num_channels = chans;
 
+	/*
+	 * I measured this, a bandswitch takes roughly
+	 * 135 ms and a frequency switch about 80.
+	 *
+	 * FIXME: measure these values again once EEPROM settings
+	 *	  are used, that will influence them!
+	 */
+	if (bands == 2)
+		ar->hw->channel_change_time = 135 * 1000;
+	else
+		ar->hw->channel_change_time = 80 * 1000;
+
 	regulatory->current_rd = le16_to_cpu(ar->eeprom.reg_domain[0]);
 
 	/* second part of wiphy init */
@@ -1969,13 +1907,13 @@ static int carl9170_parse_eeprom(struct ar9170 *ar)
 	return 0;
 }
 
-static void carl9170_reg_notifier(struct wiphy *wiphy,
-				  struct regulatory_request *request)
+static int carl9170_reg_notifier(struct wiphy *wiphy,
+				 struct regulatory_request *request)
 {
 	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
 	struct ar9170 *ar = hw->priv;
 
-	ath_reg_notifier_apply(wiphy, request, &ar->common.regulatory);
+	return ath_reg_notifier_apply(wiphy, request, &ar->common.regulatory);
 }
 
 int carl9170_register(struct ar9170 *ar)

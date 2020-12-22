@@ -1,0 +1,45 @@
+
+config SND_SUNXI_SOC_DAUDIO0_INTERFACE
+	tristate "SoC daudio0 tdm interface for SUNXI chips"
+	depends on ARCH_SUN9IW1 || ARCH_SUN8IW6|| ARCH_SUN8IW7 || ARCH_SUN8IW8
+	select SND_SOC_DMAENGINE_PCM
+	default n
+	help
+	  Say Y or M if you want to add support for codecs attached to
+	  the SUNXI DAUDIO TDM interface. You will also need
+	  to select the audio interfaces to support below.
+
+config SND_SUNXI_SOC_DAUDIO0_PUBLIC_MACHINE
+	tristate "Daudio0 Public Machine for SUNXI chips"
+	depends on ARCH_SUN9IW1 || ARCH_SUN8IW8 || (ARCH_SUN8IW7  && SND_SOC_RT3261 = n && MFD_ACX00 = n)
+	default n
+	help
+	  Say Y or M if you want to add audiocodec support
+
+config SND_SUNXI_SOC_DAUDIO0_KARAOKE_MACHINE
+	tristate "Daudio0 KARAOKE Machine for SUN8IW7 chips"
+	depends on (ARCH_SUN8IW7) && SND_SOC_RT3261 = n && MFD_ACX00 = y
+	default n
+	help
+	  Say Y or M if you want to add audiocodec support
+	 
+config SND_SUNXI_SOC_SUN8IW6_ACX00
+	tristate "Machine for A83 ACX00"
+	depends on ARCH_SUN8IW6 && MFD_ACX00 && SND_SOC_ACX00DAPM_CODEC
+	default n
+	help
+	  Say Y or M if you want to add sun8iw6 codec support
+
+config SND_SUNXI_SOC_SUN8IW7_RT3261
+	tristate "Machine for h3 rt3261"
+	depends on ARCH_SUN8IW7 && SND_SOC_RT3261
+	default n
+	help
+	  Say Y or M if you want to add rt3261 codec support
+
+config SND_VIRBB_DAI
+	tristate "virtual bb interface"
+	depends on (ARCH_SUN8IW6||ARCH_SUN8IW7)&& MFD_ACX00=y
+	default n
+	help
+	  Say Y or M if you want to add sun8iw1 audiocodec support

@@ -30,9 +30,9 @@
 #include <asm/mach/map.h>
 #include <asm/irq.h>
 
-#include "pxa25x.h"
-#include "h5000.h"
-#include "udc.h"
+#include <mach/pxa25x.h>
+#include <mach/h5000.h>
+#include <mach/udc.h>
 #include <mach/smemc.h>
 
 #include "generic.h"
@@ -208,7 +208,7 @@ MACHINE_START(H5400, "HP iPAQ H5000")
 	.nr_irqs = PXA_NR_IRQS,
 	.init_irq = pxa25x_init_irq,
 	.handle_irq = pxa25x_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer = &pxa_timer,
 	.init_machine = h5000_init,
 	.restart	= pxa_restart,
 MACHINE_END

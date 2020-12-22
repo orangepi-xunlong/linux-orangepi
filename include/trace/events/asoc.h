@@ -7,14 +7,102 @@
 #include <linux/ktime.h>
 #include <linux/tracepoint.h>
 
-#define DAPM_DIRECT "(direct)"
-#define DAPM_ARROW(dir) (((dir) == SND_SOC_DAPM_DIR_OUT) ? "->" : "<-")
-
 struct snd_soc_jack;
 struct snd_soc_codec;
+struct snd_soc_platform;
 struct snd_soc_card;
 struct snd_soc_dapm_widget;
-struct snd_soc_dapm_path;
+
+/*
+ * Log register events
+ */
+DECLARE_EVENT_CLASS(snd_soc_reg,
+
+	TP_PROTO(struct snd_soc_codec *codec, unsigned int reg,
+		 unsigned int val),
+
+	TP_ARGS(codec, reg, val),
+
+	TP_STRUCT__entry(
+		__string(	name,		codec->name	)
+		__field(	int,		id		)
+		__field(	unsigned int,	reg		)
+		__field(	unsigned int,	val		)
+	),
+
+	TP_fast_assign(
+		__assign_str(name, codec->name);
+		__entry->id = codec->id;
+		__entry->reg = reg;
+		__entry->val = val;
+	),
+
+	TP_printk("codec=%s.%d reg=%x val=%x", __get_str(name),
+		  (int)__entry->id, (unsigned int)__entry->reg,
+		  (unsigned int)__entry->val)
+);
+
+DEFINE_EVENT(snd_soc_reg, snd_soc_reg_write,
+
+	TP_PROTO(struct snd_soc_codec *codec, unsigned int reg,
+		 unsigned int val),
+
+	TP_ARGS(codec, reg, val)
+
+);
+
+DEFINE_EVENT(snd_soc_reg, snd_soc_reg_read,
+
+	TP_PROTO(struct snd_soc_codec *codec, unsigned int reg,
+		 unsigned int val),
+
+	TP_ARGS(codec, reg, val)
+
+);
+
+DECLARE_EVENT_CLASS(snd_soc_preg,
+
+	TP_PROTO(struct snd_soc_platform *platform, unsigned int reg,
+		 unsigned int val),
+
+	TP_ARGS(platform, reg, val),
+
+	TP_STRUCT__entry(
+		__string(	name,		platform->name	)
+		__field(	int,		id		)
+		__field(	unsigned int,	reg		)
+		__field(	unsigned int,	val		)
+	),
+
+	TP_fast_assign(
+		__assign_str(name, platform->name);
+		__entry->id = platform->id;
+		__entry->reg = reg;
+		__entry->val = val;
+	),
+
+	TP_printk("platform=%s.%d reg=%x val=%x", __get_str(name),
+		  (int)__entry->id, (unsigned int)__entry->reg,
+		  (unsigned int)__entry->val)
+);
+
+DEFINE_EVENT(snd_soc_preg, snd_soc_preg_write,
+
+	TP_PROTO(struct snd_soc_platform *platform, unsigned int reg,
+		 unsigned int val),
+
+	TP_ARGS(platform, reg, val)
+
+);
+
+DEFINE_EVENT(snd_soc_preg, snd_soc_preg_read,
+
+	TP_PROTO(struct snd_soc_platform *platform, unsigned int reg,
+		 unsigned int val),
+
+	TP_ARGS(platform, reg, val)
+
+);
 
 DECLARE_EVENT_CLASS(snd_soc_card,
 
@@ -153,60 +241,6 @@ TRACE_EVENT(snd_soc_dapm_walk_done,
 		  (int)__entry->path_checks, (int)__entry->neighbour_checks)
 );
 
-TRACE_EVENT(snd_soc_dapm_path,
-
-	TP_PROTO(struct snd_soc_dapm_widget *widget,
-		enum snd_soc_dapm_direction dir,
-		struct snd_soc_dapm_path *path),
-
-	TP_ARGS(widget, dir, path),
-
-	TP_STRUCT__entry(
-		__string(	wname,	widget->name		)
-		__string(	pname,	path->name ? path->name : DAPM_DIRECT)
-		__string(	pnname,	path->node[dir]->name	)
-		__field(	int,	path_node		)
-		__field(	int,	path_connect		)
-		__field(	int,	path_dir		)
-	),
-
-	TP_fast_assign(
-		__assign_str(wname, widget->name);
-		__assign_str(pname, path->name ? path->name : DAPM_DIRECT);
-		__assign_str(pnname, path->node[dir]->name);
-		__entry->path_connect = path->connect;
-		__entry->path_node = (long)path->node[dir];
-		__entry->path_dir = dir;
-	),
-
-	TP_printk("%c%s %s %s %s %s",
-		(int) __entry->path_node &&
-		(int) __entry->path_connect ? '*' : ' ',
-		__get_str(wname), DAPM_ARROW(__entry->path_dir),
-		__get_str(pname), DAPM_ARROW(__entry->path_dir),
-		__get_str(pnname))
-);
-
-TRACE_EVENT(snd_soc_dapm_connected,
-
-	TP_PROTO(int paths, int stream),
-
-	TP_ARGS(paths, stream),
-
-	TP_STRUCT__entry(
-		__field(	int,	paths		)
-		__field(	int,	stream		)
-	),
-
-	TP_fast_assign(
-		__entry->paths = paths;
-		__entry->stream = stream;
-	),
-
-	TP_printk("%s: found %d paths",
-		__entry->stream ? "capture" : "playback", __entry->paths)
-);
-
 TRACE_EVENT(snd_soc_jack_irq,
 
 	TP_PROTO(const char *name),
@@ -231,13 +265,13 @@ TRACE_EVENT(snd_soc_jack_report,
 	TP_ARGS(jack, mask, val),
 
 	TP_STRUCT__entry(
-		__string(	name,		jack->jack->id		)
+		__string(	name,		jack->jack->name	)
 		__field(	int,		mask			)
 		__field(	int,		val			)
 	),
 
 	TP_fast_assign(
-		__assign_str(name, jack->jack->id);
+		__assign_str(name, jack->jack->name);
 		__entry->mask = mask;
 		__entry->val = val;
 	),
@@ -253,16 +287,41 @@ TRACE_EVENT(snd_soc_jack_notify,
 	TP_ARGS(jack, val),
 
 	TP_STRUCT__entry(
-		__string(	name,		jack->jack->id		)
+		__string(	name,		jack->jack->name	)
 		__field(	int,		val			)
 	),
 
 	TP_fast_assign(
-		__assign_str(name, jack->jack->id);
+		__assign_str(name, jack->jack->name);
 		__entry->val = val;
 	),
 
 	TP_printk("jack=%s %x", __get_str(name), (int)__entry->val)
+);
+
+TRACE_EVENT(snd_soc_cache_sync,
+
+	TP_PROTO(struct snd_soc_codec *codec, const char *type,
+		 const char *status),
+
+	TP_ARGS(codec, type, status),
+
+	TP_STRUCT__entry(
+		__string(	name,		codec->name	)
+		__string(	status,		status		)
+		__string(	type,		type		)
+		__field(	int,		id		)
+	),
+
+	TP_fast_assign(
+		__assign_str(name, codec->name);
+		__assign_str(status, status);
+		__assign_str(type, type);
+		__entry->id = codec->id;
+	),
+
+	TP_printk("codec=%s.%d type=%s status=%s", __get_str(name),
+		  (int)__entry->id, __get_str(type), __get_str(status))
 );
 
 #endif /* _TRACE_ASOC_H */

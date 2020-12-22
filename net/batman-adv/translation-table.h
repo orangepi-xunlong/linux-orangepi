@@ -1,6 +1,7 @@
-/* Copyright (C) 2007-2016  B.A.T.M.A.N. contributors:
+/*
+ * Copyright (C) 2007-2012 B.A.T.M.A.N. contributors:
  *
- * Marek Lindner, Simon Wunderlich, Antonio Quartulli
+ * Marek Lindner, Simon Wunderlich
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of version 2 of the GNU General Public
@@ -12,58 +13,53 @@
  * General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA
+ *
  */
 
 #ifndef _NET_BATMAN_ADV_TRANSLATION_TABLE_H_
 #define _NET_BATMAN_ADV_TRANSLATION_TABLE_H_
 
-#include "main.h"
-
-#include <linux/types.h>
-
-struct netlink_callback;
-struct net_device;
-struct seq_file;
-struct sk_buff;
-
-int batadv_tt_init(struct batadv_priv *bat_priv);
-bool batadv_tt_local_add(struct net_device *soft_iface, const u8 *addr,
-			 unsigned short vid, int ifindex, u32 mark);
-u16 batadv_tt_local_remove(struct batadv_priv *bat_priv,
-			   const u8 *addr, unsigned short vid,
-			   const char *message, bool roaming);
-int batadv_tt_local_seq_print_text(struct seq_file *seq, void *offset);
-int batadv_tt_global_seq_print_text(struct seq_file *seq, void *offset);
-int batadv_tt_local_dump(struct sk_buff *msg, struct netlink_callback *cb);
-int batadv_tt_global_dump(struct sk_buff *msg, struct netlink_callback *cb);
-void batadv_tt_global_del_orig(struct batadv_priv *bat_priv,
-			       struct batadv_orig_node *orig_node,
-			       s32 match_vid, const char *message);
-int batadv_tt_global_hash_count(struct batadv_priv *bat_priv,
-				const u8 *addr, unsigned short vid);
-struct batadv_orig_node *batadv_transtable_search(struct batadv_priv *bat_priv,
-						  const u8 *src, const u8 *addr,
-						  unsigned short vid);
-void batadv_tt_free(struct batadv_priv *bat_priv);
-bool batadv_is_my_client(struct batadv_priv *bat_priv, const u8 *addr,
-			 unsigned short vid);
-bool batadv_is_ap_isolated(struct batadv_priv *bat_priv, u8 *src, u8 *dst,
-			   unsigned short vid);
-void batadv_tt_local_commit_changes(struct batadv_priv *bat_priv);
-bool batadv_tt_global_client_is_roaming(struct batadv_priv *bat_priv,
-					u8 *addr, unsigned short vid);
-bool batadv_tt_local_client_is_roaming(struct batadv_priv *bat_priv,
-				       u8 *addr, unsigned short vid);
-void batadv_tt_local_resize_to_mtu(struct net_device *soft_iface);
-bool batadv_tt_add_temporary_global_entry(struct batadv_priv *bat_priv,
-					  struct batadv_orig_node *orig_node,
-					  const unsigned char *addr,
-					  unsigned short vid);
-bool batadv_tt_global_is_isolated(struct batadv_priv *bat_priv,
-				  const u8 *addr, unsigned short vid);
-
-int batadv_tt_cache_init(void);
-void batadv_tt_cache_destroy(void);
+int tt_len(int changes_num);
+int tt_changes_fill_buffer(struct bat_priv *bat_priv,
+			   unsigned char *buff, int buff_len);
+int tt_init(struct bat_priv *bat_priv);
+void tt_local_add(struct net_device *soft_iface, const uint8_t *addr,
+		  int ifindex);
+void tt_local_remove(struct bat_priv *bat_priv,
+		     const uint8_t *addr, const char *message, bool roaming);
+int tt_local_seq_print_text(struct seq_file *seq, void *offset);
+void tt_global_add_orig(struct bat_priv *bat_priv, struct orig_node *orig_node,
+			const unsigned char *tt_buff, int tt_buff_len);
+int tt_global_add(struct bat_priv *bat_priv, struct orig_node *orig_node,
+		  const unsigned char *addr, uint8_t ttvn, bool roaming,
+		  bool wifi);
+int tt_global_seq_print_text(struct seq_file *seq, void *offset);
+void tt_global_del_orig(struct bat_priv *bat_priv,
+			struct orig_node *orig_node, const char *message);
+void tt_global_del(struct bat_priv *bat_priv,
+		   struct orig_node *orig_node, const unsigned char *addr,
+		   const char *message, bool roaming);
+struct orig_node *transtable_search(struct bat_priv *bat_priv,
+				    const uint8_t *src, const uint8_t *addr);
+void tt_save_orig_buffer(struct bat_priv *bat_priv, struct orig_node *orig_node,
+			 const unsigned char *tt_buff, uint8_t tt_num_changes);
+uint16_t tt_local_crc(struct bat_priv *bat_priv);
+uint16_t tt_global_crc(struct bat_priv *bat_priv, struct orig_node *orig_node);
+void tt_free(struct bat_priv *bat_priv);
+bool send_tt_response(struct bat_priv *bat_priv,
+		      struct tt_query_packet *tt_request);
+bool is_my_client(struct bat_priv *bat_priv, const uint8_t *addr);
+void handle_tt_response(struct bat_priv *bat_priv,
+			struct tt_query_packet *tt_response);
+void send_roam_adv(struct bat_priv *bat_priv, uint8_t *client,
+		   struct orig_node *orig_node);
+void tt_commit_changes(struct bat_priv *bat_priv);
+bool is_ap_isolated(struct bat_priv *bat_priv, uint8_t *src, uint8_t *dst);
+void tt_update_orig(struct bat_priv *bat_priv, struct orig_node *orig_node,
+		    const unsigned char *tt_buff, uint8_t tt_num_changes,
+		    uint8_t ttvn, uint16_t tt_crc);
 
 #endif /* _NET_BATMAN_ADV_TRANSLATION_TABLE_H_ */

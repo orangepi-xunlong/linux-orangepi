@@ -28,6 +28,7 @@
 #include <linux/module.h>
 #include <linux/gfp.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -242,4 +243,16 @@ static int uli_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 				 IRQF_SHARED, &uli_sht);
 }
 
-module_pci_driver(uli_pci_driver);
+static int __init uli_init(void)
+{
+	return pci_register_driver(&uli_pci_driver);
+}
+
+static void __exit uli_exit(void)
+{
+	pci_unregister_driver(&uli_pci_driver);
+}
+
+
+module_init(uli_init);
+module_exit(uli_exit);

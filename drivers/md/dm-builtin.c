@@ -1,4 +1,6 @@
-#include "dm-core.h"
+#include "dm.h"
+
+#include <linux/export.h>
 
 /*
  * The kobject release method must not be placed in the module itself,

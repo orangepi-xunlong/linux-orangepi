@@ -580,7 +580,7 @@ static unsigned int __init build_one_device_irq(struct platform_device *op,
 				printk("%s: Apply [%s:%x] imap --> [%s:%x]\n",
 				       op->dev.of_node->full_name,
 				       pp->full_name, this_orig_irq,
-				       of_node_full_name(iret), irq);
+				       (iret ? iret->full_name : "NULL"), irq);
 
 			if (!iret)
 				break;

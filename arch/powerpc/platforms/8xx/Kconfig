@@ -1,3 +1,6 @@
+config FADS
+	bool
+
 config CPM1
 	bool
 	select CPM
@@ -10,6 +13,7 @@ choice
 
 config MPC8XXFADS
 	bool "FADS"
+	select FADS
 
 config MPC86XADS
 	bool "MPC86XADS"
@@ -41,6 +45,7 @@ config PPC_EP88XC
 config PPC_ADDER875
 	bool "Analogue & Micro Adder 875"
 	select CPM1
+	select REDBOOT
 	help
 	  This enables support for the Analogue & Micro Adder 875
 	  board.
@@ -109,7 +114,8 @@ config 8xx_COPYBACK
 
 config 8xx_GPIO
 	bool "GPIO API Support"
-	select GPIOLIB
+	select GENERIC_GPIO
+	select ARCH_REQUIRE_GPIOLIB
 	help
 	  Saying Y here will cause the ports on an MPC8xx processor to be used
 	  with the GPIO API.  If you say N here, the kernel needs less memory.

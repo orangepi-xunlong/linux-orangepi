@@ -18,8 +18,6 @@
  *                        SPEEDSTEP - DEFINITIONS                    *
  *********************************************************************/
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -51,9 +49,9 @@ static u32 pmbase;
  * are in kHz for the time being.
  */
 static struct cpufreq_frequency_table speedstep_freqs[] = {
-	{0, SPEEDSTEP_HIGH,	0},
-	{0, SPEEDSTEP_LOW,	0},
-	{0, 0,			CPUFREQ_TABLE_END},
+	{SPEEDSTEP_HIGH,	0},
+	{SPEEDSTEP_LOW,		0},
+	{0,			CPUFREQ_TABLE_END},
 };
 
 
@@ -70,13 +68,13 @@ static int speedstep_find_register(void)
 	/* get PMBASE */
 	pci_read_config_dword(speedstep_chipset_dev, 0x40, &pmbase);
 	if (!(pmbase & 0x01)) {
-		pr_err("could not find speedstep register\n");
+		printk(KERN_ERR "speedstep-ich: could not find speedstep register\n");
 		return -ENODEV;
 	}
 
 	pmbase &= 0xFFFFFFFE;
 	if (!pmbase) {
-		pr_err("could not find speedstep register\n");
+		printk(KERN_ERR "speedstep-ich: could not find speedstep register\n");
 		return -ENODEV;
 	}
 
@@ -138,7 +136,7 @@ static void speedstep_set_state(unsigned int state)
 		pr_debug("change to %u MHz succeeded\n",
 			speedstep_get_frequency(speedstep_processor) / 1000);
 	else
-		pr_err("change failed - I/O error\n");
+		printk(KERN_ERR "cpufreq: change failed - I/O error\n");
 
 	return;
 }
@@ -205,7 +203,7 @@ static unsigned int speedstep_detect_chipset(void)
 	if (speedstep_chipset_dev) {
 		/* speedstep.c causes lockups on Dell Inspirons 8000 and
 		 * 8100 which use a pretty old revision of the 82815
-		 * host bridge. Abort on these systems.
+		 * host brige. Abort on these systems.
 		 */
 		static struct pci_dev *hostbridge;
 
@@ -253,22 +251,63 @@ static unsigned int speedstep_get(unsigned int cpu)
 /**
  * speedstep_target - set a new CPUFreq policy
  * @policy: new policy
- * @index: index of target frequency
+ * @target_freq: the target frequency
+ * @relation: how that frequency relates to achieved frequency
+ *	(CPUFREQ_RELATION_L or CPUFREQ_RELATION_H)
  *
  * Sets a new CPUFreq policy.
  */
-static int speedstep_target(struct cpufreq_policy *policy, unsigned int index)
+static int speedstep_target(struct cpufreq_policy *policy,
+			     unsigned int target_freq,
+			     unsigned int relation)
 {
-	unsigned int policy_cpu;
+	unsigned int newstate = 0, policy_cpu;
+	struct cpufreq_freqs freqs;
+	int i;
+
+	if (cpufreq_frequency_table_target(policy, &speedstep_freqs[0],
+				target_freq, relation, &newstate))
+		return -EINVAL;
 
 	policy_cpu = cpumask_any_and(policy->cpus, cpu_online_mask);
+	freqs.old = speedstep_get(policy_cpu);
+	freqs.new = speedstep_freqs[newstate].frequency;
+	freqs.cpu = policy->cpu;
 
-	smp_call_function_single(policy_cpu, _speedstep_set_state, &index,
+	pr_debug("transiting from %u to %u kHz\n", freqs.old, freqs.new);
+
+	/* no transition necessary */
+	if (freqs.old == freqs.new)
+		return 0;
+
+	for_each_cpu(i, policy->cpus) {
+		freqs.cpu = i;
+		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+	}
+
+	smp_call_function_single(policy_cpu, _speedstep_set_state, &newstate,
 				 true);
+
+	for_each_cpu(i, policy->cpus) {
+		freqs.cpu = i;
+		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+	}
 
 	return 0;
 }
 
+
+/**
+ * speedstep_verify - verifies a new CPUFreq policy
+ * @policy: new policy
+ *
+ * Limit must be within speedstep_low_freq and speedstep_high_freq, with
+ * at least one border included.
+ */
+static int speedstep_verify(struct cpufreq_policy *policy)
+{
+	return cpufreq_frequency_table_verify(policy, &speedstep_freqs[0]);
+}
 
 struct get_freqs {
 	struct cpufreq_policy *policy;
@@ -289,12 +328,13 @@ static void get_freqs_on_cpu(void *_get_freqs)
 
 static int speedstep_cpu_init(struct cpufreq_policy *policy)
 {
-	unsigned int policy_cpu;
+	int result;
+	unsigned int policy_cpu, speed;
 	struct get_freqs gf;
 
 	/* only run on CPU to be set, or on its sibling */
 #ifdef CONFIG_SMP
-	cpumask_copy(policy->cpus, topology_sibling_cpumask(policy->cpu));
+	cpumask_copy(policy->cpus, cpu_sibling_mask(policy->cpu));
 #endif
 	policy_cpu = cpumask_any_and(policy->cpus, cpu_online_mask);
 
@@ -304,17 +344,50 @@ static int speedstep_cpu_init(struct cpufreq_policy *policy)
 	if (gf.ret)
 		return gf.ret;
 
-	return cpufreq_table_validate_and_show(policy, speedstep_freqs);
+	/* get current speed setting */
+	speed = speedstep_get(policy_cpu);
+	if (!speed)
+		return -EIO;
+
+	pr_debug("currently at %s speed setting - %i MHz\n",
+		(speed == speedstep_freqs[SPEEDSTEP_LOW].frequency)
+		? "low" : "high",
+		(speed / 1000));
+
+	/* cpuinfo and default policy values */
+	policy->cur = speed;
+
+	result = cpufreq_frequency_table_cpuinfo(policy, speedstep_freqs);
+	if (result)
+		return result;
+
+	cpufreq_frequency_table_get_attr(speedstep_freqs, policy->cpu);
+
+	return 0;
 }
+
+
+static int speedstep_cpu_exit(struct cpufreq_policy *policy)
+{
+	cpufreq_frequency_table_put_attr(policy->cpu);
+	return 0;
+}
+
+static struct freq_attr *speedstep_attr[] = {
+	&cpufreq_freq_attr_scaling_available_freqs,
+	NULL,
+};
 
 
 static struct cpufreq_driver speedstep_driver = {
 	.name	= "speedstep-ich",
-	.verify	= cpufreq_generic_frequency_table_verify,
-	.target_index = speedstep_target,
+	.verify	= speedstep_verify,
+	.target	= speedstep_target,
 	.init	= speedstep_cpu_init,
+	.exit	= speedstep_cpu_exit,
 	.get	= speedstep_get,
-	.attr	= cpufreq_generic_attr,
+	.owner	= THIS_MODULE,
+	.attr	= speedstep_attr,
 };
 
 static const struct x86_cpu_id ss_smi_ids[] = {
@@ -380,7 +453,8 @@ static void __exit speedstep_exit(void)
 }
 
 
-MODULE_AUTHOR("Dave Jones, Dominik Brodowski <linux@brodo.de>");
+MODULE_AUTHOR("Dave Jones <davej@redhat.com>, "
+		"Dominik Brodowski <linux@brodo.de>");
 MODULE_DESCRIPTION("Speedstep driver for Intel mobile processors on chipsets "
 		"with ICH-M southbridges.");
 MODULE_LICENSE("GPL");

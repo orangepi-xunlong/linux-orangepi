@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2012 Intel Corporation. All rights reserved.
- * Copyright (c) 2006 - 2012 QLogic Corporation. All rights reserved.
+ * Copyright (c) 2006, 2007, 2008, 2009 QLogic Corporation. All rights reserved.
  * Copyright (c) 2003, 2004, 2005, 2006 PathScale, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
@@ -105,7 +104,6 @@ static void scl_out(struct qib_devdata *dd, u8 bit)
 		udelay(2);
 	else {
 		int rise_usec;
-
 		for (rise_usec = SCL_WAIT_USEC; rise_usec > 0; rise_usec -= 2) {
 			if (mask & dd->f_gpio_mod(dd, 0, 0, 0))
 				break;
@@ -327,7 +325,6 @@ int qib_twsi_reset(struct qib_devdata *dd)
 static int qib_twsi_wr(struct qib_devdata *dd, int data, int flags)
 {
 	int ret = 1;
-
 	if (flags & QIB_TWSI_START)
 		start_seq(dd);
 
@@ -437,7 +434,8 @@ int qib_twsi_blk_wr(struct qib_devdata *dd, int dev, int addr,
 	int sub_len;
 	const u8 *bp = buffer;
 	int max_wait_time, i;
-	int ret = 1;
+	int ret;
+	ret = 1;
 
 	while (len > 0) {
 		if (dev == QIB_TWSI_NO_DEV) {
@@ -451,9 +449,8 @@ int qib_twsi_blk_wr(struct qib_devdata *dd, int dev, int addr,
 				goto failed_write;
 			ret = qib_twsi_wr(dd, addr, 0);
 			if (ret) {
-				qib_dev_err(dd,
-					"Failed to write interface write addr %02X\n",
-					addr);
+				qib_dev_err(dd, "Failed to write interface"
+					    " write addr %02X\n", addr);
 				goto failed_write;
 			}
 		}

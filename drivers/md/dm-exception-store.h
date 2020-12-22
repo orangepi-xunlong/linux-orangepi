@@ -42,7 +42,8 @@ struct dm_exception_store_type {
 	const char *name;
 	struct module *module;
 
-	int (*ctr) (struct dm_exception_store *store, char *options);
+	int (*ctr) (struct dm_exception_store *store,
+		    unsigned argc, char **argv);
 
 	/*
 	 * Destroys this object when you've finished with it.
@@ -69,7 +70,7 @@ struct dm_exception_store_type {
 	 * Update the metadata with this exception.
 	 */
 	void (*commit_exception) (struct dm_exception_store *store,
-				  struct dm_exception *e, int valid,
+				  struct dm_exception *e,
 				  void (*callback) (void *, int success),
 				  void *callback_context);
 
@@ -122,8 +123,6 @@ struct dm_exception_store {
 	unsigned chunk_shift;
 
 	void *context;
-
-	bool userspace_supports_overflow;
 };
 
 /*

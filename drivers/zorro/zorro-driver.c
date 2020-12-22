@@ -142,6 +142,7 @@ static int zorro_bus_match(struct device *dev, struct device_driver *drv)
 
 static int zorro_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
+#ifdef CONFIG_HOTPLUG
 	struct zorro_dev *z;
 
 	if (!dev)
@@ -158,15 +159,17 @@ static int zorro_uevent(struct device *dev, struct kobj_uevent_env *env)
 		return -ENOMEM;
 
 	return 0;
+#else /* !CONFIG_HOTPLUG */
+	return -ENODEV;
+#endif /* !CONFIG_HOTPLUG */
 }
 
 struct bus_type zorro_bus_type = {
-	.name     = "zorro",
-	.dev_name = "zorro",
-	.match    = zorro_bus_match,
-	.uevent   = zorro_uevent,
-	.probe    = zorro_device_probe,
-	.remove   = zorro_device_remove,
+	.name	= "zorro",
+	.match	= zorro_bus_match,
+	.uevent	= zorro_uevent,
+	.probe	= zorro_device_probe,
+	.remove	= zorro_device_remove,
 };
 EXPORT_SYMBOL(zorro_bus_type);
 

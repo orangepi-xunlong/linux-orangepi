@@ -4,7 +4,7 @@
 
 config SUNXI_TRANSFORM
   tristate "Transform Driver Support(sunxi)"
-  depends on ARCH_SUNXI
+  depends on (ARCH_SUN8IW6)
   default n
   ---help---
 

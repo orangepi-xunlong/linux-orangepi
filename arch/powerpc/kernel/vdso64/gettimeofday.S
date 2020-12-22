@@ -145,7 +145,7 @@ V_FUNCTION_BEGIN(__kernel_clock_getres)
 	bne	cr0,99f
 
 	li	r3,0
-	cmpldi	cr0,r4,0
+	cmpli	cr0,r4,0
 	crclr	cr0*4+so
 	beqlr
 	lis	r5,CLOCK_REALTIME_RES@h
@@ -163,32 +163,6 @@ V_FUNCTION_BEGIN(__kernel_clock_getres)
 	blr
   .cfi_endproc
 V_FUNCTION_END(__kernel_clock_getres)
-
-/*
- * Exact prototype of time()
- *
- * time_t time(time *t);
- *
- */
-V_FUNCTION_BEGIN(__kernel_time)
-  .cfi_startproc
-	mflr	r12
-  .cfi_register lr,r12
-
-	mr	r11,r3			/* r11 holds t */
-	bl	V_LOCAL_FUNC(__get_datapage)
-
-	ld	r4,STAMP_XTIME+TSPC64_TV_SEC(r3)
-
-	cmpldi	r11,0			/* check if t is NULL */
-	beq	2f
-	std	r4,0(r11)		/* store result at *t */
-2:	mtlr	r12
-	crclr	cr0*4+so
-	mr	r3,r4
-	blr
-  .cfi_endproc
-V_FUNCTION_END(__kernel_time)
 
 
 /*

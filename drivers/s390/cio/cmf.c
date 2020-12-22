@@ -1,7 +1,9 @@
 /*
+ * linux/drivers/s390/cio/cmf.c
+ *
  * Linux on zSeries Channel Measurement Facility support
  *
- * Copyright IBM Corp. 2000, 2006
+ * Copyright 2000,2006 IBM Corporation
  *
  * Authors: Arnd Bergmann <arndb@de.ibm.com>
  *	    Cornelia Huck <cornelia.huck@de.ibm.com>
@@ -33,7 +35,7 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
-#include <linux/timex.h>	/* get_tod_clock() */
+#include <linux/timex.h>	/* get_clock() */
 
 #include <asm/ccwdev.h>
 #include <asm/cio.h>
@@ -113,6 +115,7 @@ module_param(format, bint, 0444);
  * @readall:	read a measurement block in a common format
  * @reset:	clear the data in the associated measurement block and
  *		reset its time stamp
+ * @align:	align an allocated block so that the hardware can use it
  */
 struct cmb_operations {
 	int  (*alloc)  (struct ccw_device *);
@@ -121,6 +124,7 @@ struct cmb_operations {
 	u64  (*read)   (struct ccw_device *, int);
 	int  (*readall)(struct ccw_device *, struct cmbdata *);
 	void (*reset)  (struct ccw_device *);
+	void *(*align) (void *);
 /* private: */
 	struct attribute_group *attr_group;
 };
@@ -164,9 +168,6 @@ static inline u64 time_to_avg_nsec(u32 value, u32 count)
 	return ret;
 }
 
-#define CMF_OFF 0
-#define CMF_ON	2
-
 /*
  * Activate or deactivate the channel monitor. When area is NULL,
  * the monitor is deactivated. The channel monitor needs to
@@ -179,7 +180,7 @@ static inline void cmf_activate(void *area, unsigned int onoff)
 	register long __gpr1 asm("1");
 
 	__gpr2 = area;
-	__gpr1 = onoff;
+	__gpr1 = onoff ? 2 : 0;
 	/* activate channel measurement */
 	asm("schm" : : "d" (__gpr2), "d" (__gpr1) );
 }
@@ -187,8 +188,9 @@ static inline void cmf_activate(void *area, unsigned int onoff)
 static int set_schib(struct ccw_device *cdev, u32 mme, int mbfc,
 		     unsigned long address)
 {
-	struct subchannel *sch = to_subchannel(cdev->dev.parent);
-	int ret;
+	struct subchannel *sch;
+
+	sch = to_subchannel(cdev->dev.parent);
 
 	sch->config.mme = mme;
 	sch->config.mbfc = mbfc;
@@ -198,15 +200,7 @@ static int set_schib(struct ccw_device *cdev, u32 mme, int mbfc,
 	else
 		sch->config.mbi = address;
 
-	ret = cio_commit_config(sch);
-	if (!mme && ret == -ENODEV) {
-		/*
-		 * The task was to disable measurement block updates but
-		 * the subchannel is already gone. Report success.
-		 */
-		ret = 0;
-	}
-	return ret;
+	return cio_commit_config(sch);
 }
 
 struct set_schib_struct {
@@ -322,7 +316,7 @@ static int cmf_copy_block(struct ccw_device *cdev)
 			return -EBUSY;
 	}
 	cmb_data = cdev->private->cmb;
-	hw_block = cmb_data->hw_block;
+	hw_block = cmbops->align(cmb_data->hw_block);
 	if (!memcmp(cmb_data->last_block, hw_block, cmb_data->size))
 		/* No need to copy. */
 		return 0;
@@ -334,7 +328,7 @@ static int cmf_copy_block(struct ccw_device *cdev)
 		memcpy(cmb_data->last_block, hw_block, cmb_data->size);
 		memcpy(reference_buf, hw_block, cmb_data->size);
 	} while (memcmp(cmb_data->last_block, reference_buf, cmb_data->size));
-	cmb_data->last_update = get_tod_clock();
+	cmb_data->last_update = get_clock();
 	kfree(reference_buf);
 	return 0;
 }
@@ -433,10 +427,10 @@ static void cmf_generic_reset(struct ccw_device *cdev)
 		 * Need to reset hw block as well to make the hardware start
 		 * from 0 again.
 		 */
-		memset(cmb_data->hw_block, 0, cmb_data->size);
+		memset(cmbops->align(cmb_data->hw_block), 0, cmb_data->size);
 		cmb_data->last_update = 0;
 	}
-	cdev->private->cmb_start_time = get_tod_clock();
+	cdev->private->cmb_start_time = get_clock();
 	spin_unlock_irq(cdev->ccwlock);
 }
 
@@ -590,7 +584,7 @@ static int alloc_cmb(struct ccw_device *cdev)
 			/* everything ok */
 			memset(mem, 0, size);
 			cmb_area.mem = mem;
-			cmf_activate(cmb_area.mem, CMF_ON);
+			cmf_activate(cmb_area.mem, 1);
 		}
 	}
 
@@ -614,6 +608,12 @@ static void free_cmb(struct ccw_device *cdev)
 	spin_lock_irq(cdev->ccwlock);
 
 	priv = cdev->private;
+
+	if (list_empty(&priv->cmb_list)) {
+		/* already freed */
+		goto out;
+	}
+
 	cmb_data = priv->cmb;
 	priv->cmb = NULL;
 	if (cmb_data)
@@ -624,10 +624,11 @@ static void free_cmb(struct ccw_device *cdev)
 	if (list_empty(&cmb_area.list)) {
 		ssize_t size;
 		size = sizeof(struct cmb) * cmb_area.num_channels;
-		cmf_activate(NULL, CMF_OFF);
+		cmf_activate(NULL, 0);
 		free_pages((unsigned long)cmb_area.mem, get_order(size));
 		cmb_area.mem = NULL;
 	}
+out:
 	spin_unlock_irq(cdev->ccwlock);
 	spin_unlock(&cmb_area.lock);
 }
@@ -756,15 +757,9 @@ static void reset_cmb(struct ccw_device *cdev)
 	cmf_generic_reset(cdev);
 }
 
-static int cmf_enabled(struct ccw_device *cdev)
+static void * align_cmb(void *area)
 {
-	int enabled;
-
-	spin_lock_irq(cdev->ccwlock);
-	enabled = !!cdev->private->cmb;
-	spin_unlock_irq(cdev->ccwlock);
-
-	return enabled;
+	return area;
 }
 
 static struct attribute_group cmf_attr_group;
@@ -776,6 +771,7 @@ static struct cmb_operations cmbops_basic = {
 	.read	= read_cmb,
 	.readall    = readall_cmb,
 	.reset	    = reset_cmb,
+	.align	    = align_cmb,
 	.attr_group = &cmf_attr_group,
 };
 
@@ -810,57 +806,64 @@ struct cmbe {
 	u32 device_busy_time;
 	u32 initial_command_response_time;
 	u32 reserved[7];
-} __packed __aligned(64);
+};
 
-static struct kmem_cache *cmbe_cache;
+/*
+ * kmalloc only guarantees 8 byte alignment, but we need cmbe
+ * pointers to be naturally aligned. Make sure to allocate
+ * enough space for two cmbes.
+ */
+static inline struct cmbe *cmbe_align(struct cmbe *c)
+{
+	unsigned long addr;
+	addr = ((unsigned long)c + sizeof (struct cmbe) - sizeof(long)) &
+				 ~(sizeof (struct cmbe) - sizeof(long));
+	return (struct cmbe*)addr;
+}
 
 static int alloc_cmbe(struct ccw_device *cdev)
 {
-	struct cmb_data *cmb_data;
 	struct cmbe *cmbe;
-	int ret = -ENOMEM;
+	struct cmb_data *cmb_data;
+	int ret;
 
-	cmbe = kmem_cache_zalloc(cmbe_cache, GFP_KERNEL);
+	cmbe = kzalloc (sizeof (*cmbe) * 2, GFP_KERNEL);
 	if (!cmbe)
-		return ret;
-
-	cmb_data = kzalloc(sizeof(*cmb_data), GFP_KERNEL);
-	if (!cmb_data)
+		return -ENOMEM;
+	cmb_data = kzalloc(sizeof(struct cmb_data), GFP_KERNEL);
+	if (!cmb_data) {
+		ret = -ENOMEM;
 		goto out_free;
-
+	}
 	cmb_data->last_block = kzalloc(sizeof(struct cmbe), GFP_KERNEL);
-	if (!cmb_data->last_block)
+	if (!cmb_data->last_block) {
+		ret = -ENOMEM;
 		goto out_free;
-
-	cmb_data->size = sizeof(*cmbe);
-	cmb_data->hw_block = cmbe;
-
-	spin_lock(&cmb_area.lock);
+	}
+	cmb_data->size = sizeof(struct cmbe);
 	spin_lock_irq(cdev->ccwlock);
-	if (cdev->private->cmb)
-		goto out_unlock;
-
+	if (cdev->private->cmb) {
+		spin_unlock_irq(cdev->ccwlock);
+		ret = -EBUSY;
+		goto out_free;
+	}
+	cmb_data->hw_block = cmbe;
 	cdev->private->cmb = cmb_data;
+	spin_unlock_irq(cdev->ccwlock);
 
 	/* activate global measurement if this is the first channel */
+	spin_lock(&cmb_area.lock);
 	if (list_empty(&cmb_area.list))
-		cmf_activate(NULL, CMF_ON);
+		cmf_activate(NULL, 1);
 	list_add_tail(&cdev->private->cmb_list, &cmb_area.list);
-
-	spin_unlock_irq(cdev->ccwlock);
 	spin_unlock(&cmb_area.lock);
+
 	return 0;
-
-out_unlock:
-	spin_unlock_irq(cdev->ccwlock);
-	spin_unlock(&cmb_area.lock);
-	ret = -EBUSY;
 out_free:
 	if (cmb_data)
 		kfree(cmb_data->last_block);
 	kfree(cmb_data);
-	kmem_cache_free(cmbe_cache, cmbe);
-
+	kfree(cmbe);
 	return ret;
 }
 
@@ -868,21 +871,19 @@ static void free_cmbe(struct ccw_device *cdev)
 {
 	struct cmb_data *cmb_data;
 
-	spin_lock(&cmb_area.lock);
 	spin_lock_irq(cdev->ccwlock);
 	cmb_data = cdev->private->cmb;
 	cdev->private->cmb = NULL;
-	if (cmb_data) {
+	if (cmb_data)
 		kfree(cmb_data->last_block);
-		kmem_cache_free(cmbe_cache, cmb_data->hw_block);
-	}
 	kfree(cmb_data);
+	spin_unlock_irq(cdev->ccwlock);
 
 	/* deactivate global measurement if this is the last channel */
+	spin_lock(&cmb_area.lock);
 	list_del_init(&cdev->private->cmb_list);
 	if (list_empty(&cmb_area.list))
-		cmf_activate(NULL, CMF_OFF);
-	spin_unlock_irq(cdev->ccwlock);
+		cmf_activate(NULL, 0);
 	spin_unlock(&cmb_area.lock);
 }
 
@@ -898,7 +899,7 @@ static int set_cmbe(struct ccw_device *cdev, u32 mme)
 		return -EINVAL;
 	}
 	cmb_data = cdev->private->cmb;
-	mba = mme ? (unsigned long) cmb_data->hw_block : 0;
+	mba = mme ? (unsigned long) cmbe_align(cmb_data->hw_block) : 0;
 	spin_unlock_irqrestore(cdev->ccwlock, flags);
 
 	return set_schib_wait(cdev, mme, 1, mba);
@@ -1023,6 +1024,11 @@ static void reset_cmbe(struct ccw_device *cdev)
 	cmf_generic_reset(cdev);
 }
 
+static void * align_cmbe(void *area)
+{
+	return cmbe_align(area);
+}
+
 static struct attribute_group cmf_attr_group_ext;
 
 static struct cmb_operations cmbops_extended = {
@@ -1032,6 +1038,7 @@ static struct cmb_operations cmbops_extended = {
 	.read	    = read_cmbe,
 	.readall    = readall_cmbe,
 	.reset	    = reset_cmbe,
+	.align	    = align_cmbe,
 	.attr_group = &cmf_attr_group_ext,
 };
 
@@ -1166,22 +1173,22 @@ static ssize_t cmb_enable_show(struct device *dev,
 			       struct device_attribute *attr,
 			       char *buf)
 {
-	struct ccw_device *cdev = to_ccwdev(dev);
-
-	return sprintf(buf, "%d\n", cmf_enabled(cdev));
+	return sprintf(buf, "%d\n", to_ccwdev(dev)->private->cmb ? 1 : 0);
 }
 
 static ssize_t cmb_enable_store(struct device *dev,
 				struct device_attribute *attr, const char *buf,
 				size_t c)
 {
-	struct ccw_device *cdev = to_ccwdev(dev);
-	unsigned long val;
+	struct ccw_device *cdev;
 	int ret;
+	unsigned long val;
 
-	ret = kstrtoul(buf, 16, &val);
+	ret = strict_strtoul(buf, 16, &val);
 	if (ret)
 		return ret;
+
+	cdev = to_ccwdev(dev);
 
 	switch (val) {
 	case 0:
@@ -1190,13 +1197,12 @@ static ssize_t cmb_enable_store(struct device *dev,
 	case 1:
 		ret = enable_cmf(cdev);
 		break;
-	default:
-		ret = -EINVAL;
 	}
 
-	return ret ? ret : c;
+	return c;
 }
-DEVICE_ATTR_RW(cmb_enable);
+
+DEVICE_ATTR(cmb_enable, 0644, cmb_enable_show, cmb_enable_store);
 
 int ccw_set_cmf(struct ccw_device *cdev, int enable)
 {
@@ -1208,64 +1214,28 @@ int ccw_set_cmf(struct ccw_device *cdev, int enable)
  *  @cdev:	The ccw device to be enabled
  *
  *  Returns %0 for success or a negative error value.
- *  Note: If this is called on a device for which channel measurement is already
- *	  enabled a reset of the measurement data is triggered.
+ *
  *  Context:
  *    non-atomic
  */
 int enable_cmf(struct ccw_device *cdev)
 {
-	int ret = 0;
-
-	device_lock(&cdev->dev);
-	if (cmf_enabled(cdev)) {
-		cmbops->reset(cdev);
-		goto out_unlock;
-	}
-	get_device(&cdev->dev);
-	ret = cmbops->alloc(cdev);
-	if (ret)
-		goto out;
-	cmbops->reset(cdev);
-	ret = sysfs_create_group(&cdev->dev.kobj, cmbops->attr_group);
-	if (ret) {
-		cmbops->free(cdev);
-		goto out;
-	}
-	ret = cmbops->set(cdev, 2);
-	if (ret) {
-		sysfs_remove_group(&cdev->dev.kobj, cmbops->attr_group);
-		cmbops->free(cdev);
-	}
-out:
-	if (ret)
-		put_device(&cdev->dev);
-out_unlock:
-	device_unlock(&cdev->dev);
-	return ret;
-}
-
-/**
- * __disable_cmf() - switch off the channel measurement for a specific device
- *  @cdev:	The ccw device to be disabled
- *
- *  Returns %0 for success or a negative error value.
- *
- *  Context:
- *    non-atomic, device_lock() held.
- */
-int __disable_cmf(struct ccw_device *cdev)
-{
 	int ret;
 
-	ret = cmbops->set(cdev, 0);
+	ret = cmbops->alloc(cdev);
+	cmbops->reset(cdev);
 	if (ret)
 		return ret;
-
-	sysfs_remove_group(&cdev->dev.kobj, cmbops->attr_group);
+	ret = cmbops->set(cdev, 2);
+	if (ret) {
+		cmbops->free(cdev);
+		return ret;
+	}
+	ret = sysfs_create_group(&cdev->dev.kobj, cmbops->attr_group);
+	if (!ret)
+		return 0;
+	cmbops->set(cdev, 0);  //FIXME: this can fail
 	cmbops->free(cdev);
-	put_device(&cdev->dev);
-
 	return ret;
 }
 
@@ -1282,10 +1252,11 @@ int disable_cmf(struct ccw_device *cdev)
 {
 	int ret;
 
-	device_lock(&cdev->dev);
-	ret = __disable_cmf(cdev);
-	device_unlock(&cdev->dev);
-
+	ret = cmbops->set(cdev, 0);
+	if (ret)
+		return ret;
+	cmbops->free(cdev);
+	sysfs_remove_group(&cdev->dev.kobj, cmbops->attr_group);
 	return ret;
 }
 
@@ -1326,32 +1297,10 @@ int cmf_reenable(struct ccw_device *cdev)
 	return cmbops->set(cdev, 2);
 }
 
-/**
- * cmf_reactivate() - reactivate measurement block updates
- *
- * Use this during resume from hibernate.
- */
-void cmf_reactivate(void)
-{
-	spin_lock(&cmb_area.lock);
-	if (!list_empty(&cmb_area.list))
-		cmf_activate(cmb_area.mem, CMF_ON);
-	spin_unlock(&cmb_area.lock);
-}
-
-static int __init init_cmbe(void)
-{
-	cmbe_cache = kmem_cache_create("cmbe_cache", sizeof(struct cmbe),
-				       __alignof__(struct cmbe), 0, NULL);
-
-	return cmbe_cache ? 0 : -ENOMEM;
-}
-
 static int __init init_cmf(void)
 {
 	char *format_string;
-	char *detect_string;
-	int ret;
+	char *detect_string = "parameter";
 
 	/*
 	 * If the user did not give a parameter, see if we are running on a
@@ -1377,25 +1326,22 @@ static int __init init_cmf(void)
 	case CMF_EXTENDED:
 		format_string = "extended";
 		cmbops = &cmbops_extended;
-
-		ret = init_cmbe();
-		if (ret)
-			return ret;
 		break;
 	default:
-		return -EINVAL;
+		return 1;
 	}
 	pr_info("Channel measurement facility initialized using format "
 		"%s (mode %s)\n", format_string, detect_string);
 	return 0;
 }
+
 module_init(init_cmf);
 
 
 MODULE_AUTHOR("Arnd Bergmann <arndb@de.ibm.com>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("channel measurement facility base driver\n"
-		   "Copyright IBM Corp. 2003\n");
+		   "Copyright 2003 IBM Corporation\n");
 
 EXPORT_SYMBOL_GPL(enable_cmf);
 EXPORT_SYMBOL_GPL(disable_cmf);

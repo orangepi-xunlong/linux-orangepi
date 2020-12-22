@@ -65,7 +65,7 @@ FILE *prepare_output(const char *dirname)
 {
 	FILE *output = NULL;
 	int len;
-	char *filename, *filename_tmp;
+	char *filename;
 	struct utsname sysdata;
 	DIR *dir;
 
@@ -81,22 +81,16 @@ FILE *prepare_output(const char *dirname)
 
 	len = strlen(dirname) + 30;
 	filename = malloc(sizeof(char) * len);
-	if (!filename) {
-		perror("malloc");
-		goto out_dir;
-	}
 
 	if (uname(&sysdata) == 0) {
 		len += strlen(sysdata.nodename) + strlen(sysdata.release);
-		filename_tmp = realloc(filename, sizeof(*filename) * len);
+		filename = realloc(filename, sizeof(char) * len);
 
-		if (filename_tmp == NULL) {
-			free(filename);
+		if (filename == NULL) {
 			perror("realloc");
-			goto out_dir;
+			return NULL;
 		}
 
-		filename = filename_tmp;
 		snprintf(filename, len - 1, "%s/benchmark_%s_%s_%li.log",
 			dirname, sysdata.nodename, sysdata.release, time(NULL));
 	} else {
@@ -110,16 +104,12 @@ FILE *prepare_output(const char *dirname)
 	if (output == NULL) {
 		perror("fopen");
 		fprintf(stderr, "error: unable to open logfile\n");
-		goto out;
 	}
 
 	fprintf(stdout, "Logfile: %s\n", filename);
 
-	fprintf(output, "#round load sleep performance powersave percentage\n");
-out:
 	free(filename);
-out_dir:
-	closedir(dir);
+	fprintf(output, "#round load sleep performance powersave percentage\n");
 	return output;
 }
 
@@ -168,15 +158,14 @@ struct config *prepare_default_config()
 int prepare_config(const char *path, struct config *config)
 {
 	size_t len = 0;
-	char opt[16], val[32], *line = NULL;
-	FILE *configfile;
+	char *opt, *val, *line = NULL;
+	FILE *configfile = fopen(path, "r");
 
 	if (config == NULL) {
 		fprintf(stderr, "error: config is NULL\n");
 		return 1;
 	}
 
-	configfile = fopen(path, "r");
 	if (configfile == NULL) {
 		perror("fopen");
 		fprintf(stderr, "error: unable to read configfile\n");
@@ -185,54 +174,52 @@ int prepare_config(const char *path, struct config *config)
 	}
 
 	while (getline(&line, &len, configfile) != -1) {
-		if (line[0] == '#' || line[0] == ' ' || line[0] == '\n')
+		if (line[0] == '#' || line[0] == ' ')
 			continue;
 
-		if (sscanf(line, "%14s = %30s", opt, val) < 2)
-			continue;
+		sscanf(line, "%as = %as", &opt, &val);
 
 		dprintf("parsing: %s -> %s\n", opt, val);
 
-		if (strcmp("sleep", opt) == 0)
+		if (strncmp("sleep", opt, strlen(opt)) == 0)
 			sscanf(val, "%li", &config->sleep);
 
-		else if (strcmp("load", opt) == 0)
+		else if (strncmp("load", opt, strlen(opt)) == 0)
 			sscanf(val, "%li", &config->load);
 
-		else if (strcmp("load_step", opt) == 0)
+		else if (strncmp("load_step", opt, strlen(opt)) == 0)
 			sscanf(val, "%li", &config->load_step);
 
-		else if (strcmp("sleep_step", opt) == 0)
+		else if (strncmp("sleep_step", opt, strlen(opt)) == 0)
 			sscanf(val, "%li", &config->sleep_step);
 
-		else if (strcmp("cycles", opt) == 0)
+		else if (strncmp("cycles", opt, strlen(opt)) == 0)
 			sscanf(val, "%u", &config->cycles);
 
-		else if (strcmp("rounds", opt) == 0)
+		else if (strncmp("rounds", opt, strlen(opt)) == 0)
 			sscanf(val, "%u", &config->rounds);
 
-		else if (strcmp("verbose", opt) == 0)
+		else if (strncmp("verbose", opt, strlen(opt)) == 0)
 			sscanf(val, "%u", &config->verbose);
 
-		else if (strcmp("output", opt) == 0)
+		else if (strncmp("output", opt, strlen(opt)) == 0)
 			config->output = prepare_output(val); 
 
-		else if (strcmp("cpu", opt) == 0)
+		else if (strncmp("cpu", opt, strlen(opt)) == 0)
 			sscanf(val, "%u", &config->cpu);
 
-		else if (strcmp("governor", opt) == 0) {
-			strncpy(config->governor, val,
-					sizeof(config->governor));
-			config->governor[sizeof(config->governor) - 1] = '\0';
-		}
+		else if (strncmp("governor", opt, 14) == 0)
+			strncpy(config->governor, val, 14);
 
-		else if (strcmp("priority", opt) == 0) {
+		else if (strncmp("priority", opt, strlen(opt)) == 0) {
 			if (string_to_prio(val) != SCHED_ERR)
 				config->prio = string_to_prio(val);
 		}
 	}
 
 	free(line);
+	free(opt);
+	free(val);
 
 	return 0;
 }

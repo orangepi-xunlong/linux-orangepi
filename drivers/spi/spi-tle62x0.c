@@ -52,7 +52,8 @@ static inline int tle62x0_write(struct tle62x0_state *st)
 		buff[1] = gpio_state;
 	}
 
-	dev_dbg(&st->us->dev, "buff %3ph\n", buff);
+	dev_dbg(&st->us->dev, "buff %02x,%02x,%02x\n",
+		buff[0], buff[1], buff[2]);
 
 	return spi_write(st->us, buff, (st->nr_gpio == 16) ? 3 : 2);
 }
@@ -239,22 +240,24 @@ static int to_gpio_num(struct device_attribute *attr)
 	return -1;
 }
 
-static int tle62x0_probe(struct spi_device *spi)
+static int __devinit tle62x0_probe(struct spi_device *spi)
 {
 	struct tle62x0_state *st;
 	struct tle62x0_pdata *pdata;
 	int ptr;
 	int ret;
 
-	pdata = dev_get_platdata(&spi->dev);
+	pdata = spi->dev.platform_data;
 	if (pdata == NULL) {
 		dev_err(&spi->dev, "no device data specified\n");
 		return -EINVAL;
 	}
 
 	st = kzalloc(sizeof(struct tle62x0_state), GFP_KERNEL);
-	if (st == NULL)
+	if (st == NULL) {
+		dev_err(&spi->dev, "no memory for device state\n");
 		return -ENOMEM;
+	}
 
 	st->us = spi;
 	st->nr_gpio = pdata->gpio_count;
@@ -291,7 +294,7 @@ static int tle62x0_probe(struct spi_device *spi)
 	return ret;
 }
 
-static int tle62x0_remove(struct spi_device *spi)
+static int __devexit tle62x0_remove(struct spi_device *spi)
 {
 	struct tle62x0_state *st = spi_get_drvdata(spi);
 	int ptr;
@@ -307,12 +310,24 @@ static int tle62x0_remove(struct spi_device *spi)
 static struct spi_driver tle62x0_driver = {
 	.driver = {
 		.name	= "tle62x0",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= tle62x0_probe,
-	.remove		= tle62x0_remove,
+	.remove		= __devexit_p(tle62x0_remove),
 };
 
-module_spi_driver(tle62x0_driver);
+static __init int tle62x0_init(void)
+{
+	return spi_register_driver(&tle62x0_driver);
+}
+
+static __exit void tle62x0_exit(void)
+{
+	spi_unregister_driver(&tle62x0_driver);
+}
+
+module_init(tle62x0_init);
+module_exit(tle62x0_exit);
 
 MODULE_AUTHOR("Ben Dooks <ben@simtec.co.uk>");
 MODULE_DESCRIPTION("TLE62x0 SPI driver");

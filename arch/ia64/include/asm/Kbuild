@@ -1,11 +1,15 @@
+include include/asm-generic/Kbuild.asm
 
-generic-y += clkdev.h
-generic-y += exec.h
-generic-y += irq_work.h
-generic-y += kvm_para.h
-generic-y += mcs_spinlock.h
-generic-y += mm-arch-hooks.h
-generic-y += preempt.h
-generic-y += trace_clock.h
-generic-y += vtime.h
-generic-y += word-at-a-time.h
+header-y += break.h
+header-y += cmpxchg.h
+header-y += fpu.h
+header-y += gcc_intrin.h
+header-y += ia64regs.h
+header-y += intel_intrin.h
+header-y += intrinsics.h
+header-y += perfmon.h
+header-y += perfmon_default_smpl.h
+header-y += ptrace_offsets.h
+header-y += rse.h
+header-y += ucontext.h
+header-y += ustack.h

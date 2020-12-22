@@ -12,7 +12,7 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
  *
- *   Copyright (C) 2011 John Crispin <john@phrozen.org>
+ *   Copyright (C) 2011 John Crispin <blogic@openwrt.org>
  */
 
 #ifndef LTQ_DMA_H__
@@ -21,7 +21,7 @@
 #define LTQ_DESC_SIZE		0x08	/* each descriptor is 64bit */
 #define LTQ_DESC_NUM		0x40	/* 64 descriptors / channel */
 
-#define LTQ_DMA_OWN		BIT(31) /* owner bit */
+#define LTQ_DMA_OWN		BIT(31)	/* owner bit */
 #define LTQ_DMA_C		BIT(30) /* complete bit */
 #define LTQ_DMA_SOP		BIT(29) /* start of packet */
 #define LTQ_DMA_EOP		BIT(28) /* end of packet */
@@ -38,7 +38,7 @@ struct ltq_dma_channel {
 	int nr;				/* the channel number */
 	int irq;			/* the mapped irq */
 	int desc;			/* the current descriptor */
-	struct ltq_dma_desc *desc_base; /* the descriptor base */
+	struct ltq_dma_desc *desc_base;	/* the descriptor base */
 	int phys;			/* physical addr */
 };
 

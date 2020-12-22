@@ -123,9 +123,9 @@ static void mma8450_poll(struct input_polled_dev *dev)
 	if (ret < 0)
 		return;
 
-	x = ((int)(s8)buf[1] << 4) | (buf[0] & 0xf);
-	y = ((int)(s8)buf[3] << 4) | (buf[2] & 0xf);
-	z = ((int)(s8)buf[5] << 4) | (buf[4] & 0xf);
+	x = ((buf[1] << 4) & 0xff0) | (buf[0] & 0xf);
+	y = ((buf[3] << 4) & 0xff0) | (buf[2] & 0xf);
+	z = ((buf[5] << 4) & 0xff0) | (buf[4] & 0xf);
 
 	input_report_abs(dev->input, ABS_X, x);
 	input_report_abs(dev->input, ABS_Y, y);
@@ -167,20 +167,19 @@ static void mma8450_close(struct input_polled_dev *dev)
 /*
  * I2C init/probing/exit functions
  */
-static int mma8450_probe(struct i2c_client *c,
-			 const struct i2c_device_id *id)
+static int __devinit mma8450_probe(struct i2c_client *c,
+				   const struct i2c_device_id *id)
 {
 	struct input_polled_dev *idev;
 	struct mma8450 *m;
 	int err;
 
-	m = devm_kzalloc(&c->dev, sizeof(*m), GFP_KERNEL);
-	if (!m)
-		return -ENOMEM;
-
-	idev = devm_input_allocate_polled_device(&c->dev);
-	if (!idev)
-		return -ENOMEM;
+	m = kzalloc(sizeof(struct mma8450), GFP_KERNEL);
+	idev = input_allocate_polled_device();
+	if (!m || !idev) {
+		err = -ENOMEM;
+		goto err_free_mem;
+	}
 
 	m->client = c;
 	m->idev = idev;
@@ -202,10 +201,25 @@ static int mma8450_probe(struct i2c_client *c,
 	err = input_register_polled_device(idev);
 	if (err) {
 		dev_err(&c->dev, "failed to register polled input device\n");
-		return err;
+		goto err_free_mem;
 	}
 
-	i2c_set_clientdata(c, m);
+	return 0;
+
+err_free_mem:
+	input_free_polled_device(idev);
+	kfree(m);
+	return err;
+}
+
+static int __devexit mma8450_remove(struct i2c_client *c)
+{
+	struct mma8450 *m = i2c_get_clientdata(c);
+	struct input_polled_dev *idev = m->idev;
+
+	input_unregister_polled_device(idev);
+	input_free_polled_device(idev);
+	kfree(m);
 
 	return 0;
 }
@@ -225,9 +239,11 @@ MODULE_DEVICE_TABLE(of, mma8450_dt_ids);
 static struct i2c_driver mma8450_driver = {
 	.driver = {
 		.name	= MMA8450_DRV_NAME,
+		.owner	= THIS_MODULE,
 		.of_match_table = mma8450_dt_ids,
 	},
 	.probe		= mma8450_probe,
+	.remove		= __devexit_p(mma8450_remove),
 	.id_table	= mma8450_id,
 };
 

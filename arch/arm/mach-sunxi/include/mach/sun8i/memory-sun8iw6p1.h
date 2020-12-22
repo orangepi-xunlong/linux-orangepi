@@ -17,22 +17,27 @@
 #ifndef __MEMORY_SUN8I_W6P1_H
 #define __MEMORY_SUN8I_W6P1_H
 
+#define PLAT_PHYS_OFFSET         UL(0x40000000)
 #ifdef CONFIG_EVB_PLATFORM
-#define PLAT_MEM_SIZE            SZ_2G
+#define PLAT_MEM_SIZE            SZ_1G
 #else
 #define PLAT_MEM_SIZE            SZ_256M
 #endif
 
-#define SYS_CONFIG_MEMBASE       (0x40000000 + SZ_32M + SZ_16M) /* 0x43000000 */
-#define SYS_CONFIG_MEMSIZE       (SZ_64K)               /* 0x00010000 */
-/* 0x43010000 */
-#define SUPER_STANDBY_MEM_BASE   (SYS_CONFIG_MEMBASE + SYS_CONFIG_MEMSIZE)
-/* 0x00000800 */
-#define SUPER_STANDBY_MEM_SIZE   (SZ_2K)
+#define SYS_CONFIG_MEMBASE       (PLAT_PHYS_OFFSET + SZ_32M + SZ_16M)           /* 0x43000000 */
+#define SYS_CONFIG_MEMSIZE       (SZ_128K)                                      /* 0x00020000 */
 
-#if defined(CONFIG_ION) || defined(CONFIG_ION_MODULE)
-#define ION_CARVEOUT_MEM_BASE    (0x43100000)           /* 0x43100000 */
-#define ION_CARVEOUT_MEM_SIZE    (CONFIG_ION_SUNXI_CARVEOUT_SIZE * SZ_1M)
+#define SUPER_STANDBY_MEM_BASE   (PLAT_PHYS_OFFSET + SZ_32M + SZ_16M + SZ_512K) /* 0x43080000 */
+#define SUPER_STANDBY_MEM_SIZE   (SZ_2K)                                        /* 0x00000800 */
+
+#define ARISC_RESERVE_MEMBASE    (SUPER_STANDBY_MEM_BASE + SUPER_STANDBY_MEM_SIZE)      /* 0x43080800 */
+#define ARISC_RESERVE_MEMSIZE    (SZ_16K)                                               /* 0x00004000 */
+
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+#define RC_MEM_BASE              (ARISC_RESERVE_MEMBASE + ARISC_RESERVE_MEMSIZE)
+#define RC_MEM_SIZE              (SZ_64K)
 #endif
+
+#define SRAM_DDRFREQ_OFFSET	0xf0000000
 
 #endif /* __MEMORY_SUN8I_W6P1_H */

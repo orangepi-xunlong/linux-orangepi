@@ -3,7 +3,7 @@
  * temperature/power/energy sensors and capping functionality.
  * Copyright (C) 2008 IBM
  *
- * Author: Darrick J. Wong <darrick.wong@oracle.com>
+ * Author: Darrick J. Wong <djwong@us.ibm.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,7 +36,6 @@
 #include <linux/platform_device.h>
 #include <linux/math64.h>
 #include <linux/time.h>
-#include <linux/err.h>
 
 #define REFRESH_INTERVAL	(HZ)
 #define IPMI_TIMEOUT		(30 * HZ)
@@ -289,10 +288,9 @@ static int aem_init_ipmi_data(struct aem_ipmi_data *data, int iface,
 	err = ipmi_create_user(data->interface, &driver_data.ipmi_hndlrs,
 			       data, &data->user);
 	if (err < 0) {
-		dev_err(bmc,
-			"Unable to register user with IPMI interface %d\n",
-			data->interface);
-		return err;
+		dev_err(bmc, "Unable to register user with IPMI "
+			"interface %d\n", data->interface);
+		return -EACCES;
 	}
 
 	return 0;
@@ -329,8 +327,8 @@ static void aem_msg_handler(struct ipmi_recv_msg *msg, void *user_msg_data)
 	struct aem_ipmi_data *data = user_msg_data;
 
 	if (msg->msgid != data->tx_msgid) {
-		dev_err(data->bmc_device,
-			"Mismatch between received msgid (%02x) and transmitted msgid (%02x)!\n",
+		dev_err(data->bmc_device, "Mismatch between received msgid "
+			"(%02x) and transmitted msgid (%02x)!\n",
 			(int)msg->msgid,
 			(int)data->tx_msgid);
 		ipmi_free_recv_msg(msg);
@@ -576,8 +574,8 @@ static int aem_init_aem1_inst(struct aem_ipmi_data *probe, u8 module_handle)
 	/* Register with hwmon */
 	data->hwmon_dev = hwmon_device_register(&data->pdev->dev);
 	if (IS_ERR(data->hwmon_dev)) {
-		dev_err(&data->pdev->dev,
-			"Unable to register hwmon device for IPMI interface %d\n",
+		dev_err(&data->pdev->dev, "Unable to register hwmon "
+			"device for IPMI interface %d\n",
 			probe->interface);
 		res = PTR_ERR(data->hwmon_dev);
 		goto hwmon_reg_err;
@@ -716,8 +714,8 @@ static int aem_init_aem2_inst(struct aem_ipmi_data *probe,
 	/* Register with hwmon */
 	data->hwmon_dev = hwmon_device_register(&data->pdev->dev);
 	if (IS_ERR(data->hwmon_dev)) {
-		dev_err(&data->pdev->dev,
-			"Unable to register hwmon device for IPMI interface %d\n",
+		dev_err(&data->pdev->dev, "Unable to register hwmon "
+			"device for IPMI interface %d\n",
 			probe->interface);
 		res = PTR_ERR(data->hwmon_dev);
 		goto hwmon_reg_err;
@@ -769,8 +767,8 @@ static void aem_init_aem2(struct aem_ipmi_data *probe)
 
 	while (!aem_find_aem2(probe, &fi_resp, i)) {
 		if (fi_resp.major != 2) {
-			dev_err(probe->bmc_device,
-				"Unknown AEM v%d; please report this to the maintainer.\n",
+			dev_err(probe->bmc_device, "Unknown AEM v%d; please "
+				"report this to the maintainer.\n",
 				fi_resp.major);
 			i++;
 			continue;
@@ -842,10 +840,11 @@ static ssize_t aem_show_power(struct device *dev,
 	struct aem_data *data = dev_get_drvdata(dev);
 	u64 before, after, delta, time;
 	signed long leftover;
+	struct timespec b, a;
 
 	mutex_lock(&data->lock);
 	update_aem_energy_one(data, attr->index);
-	time = ktime_get_ns();
+	getnstimeofday(&b);
 	before = data->energy[attr->index];
 
 	leftover = schedule_timeout_interruptible(
@@ -857,10 +856,11 @@ static ssize_t aem_show_power(struct device *dev,
 	}
 
 	update_aem_energy_one(data, attr->index);
-	time = ktime_get_ns() - time;
+	getnstimeofday(&a);
 	after = data->energy[attr->index];
 	mutex_unlock(&data->lock);
 
+	time = timespec_to_ns(&a) - timespec_to_ns(&b);
 	delta = (after - before) * UJ_PER_MJ;
 
 	return sprintf(buf, "%llu\n",
@@ -920,8 +920,8 @@ static ssize_t aem_set_power_period(struct device *dev,
 
 /* Discover sensors on an AEM device */
 static int aem_register_sensors(struct aem_data *data,
-				const struct aem_ro_sensor_template *ro,
-				const struct aem_rw_sensor_template *rw)
+				struct aem_ro_sensor_template *ro,
+				struct aem_rw_sensor_template *rw)
 {
 	struct device *dev = &data->pdev->dev;
 	struct sensor_device_attribute *sensors = data->sensors;
@@ -1020,19 +1020,19 @@ static void aem_remove_sensors(struct aem_data *data)
 /* Sensor probe functions */
 
 /* Description of AEM1 sensors */
-static const struct aem_ro_sensor_template aem1_ro_sensors[] = {
+static struct aem_ro_sensor_template aem1_ro_sensors[] = {
 {"energy1_input",  aem_show_energy, 0},
 {"power1_average", aem_show_power,  0},
 {NULL,		   NULL,	    0},
 };
 
-static const struct aem_rw_sensor_template aem1_rw_sensors[] = {
+static struct aem_rw_sensor_template aem1_rw_sensors[] = {
 {"power1_average_interval", aem_show_power_period, aem_set_power_period, 0},
 {NULL,			    NULL,                  NULL,                 0},
 };
 
 /* Description of AEM2 sensors */
-static const struct aem_ro_sensor_template aem2_ro_sensors[] = {
+static struct aem_ro_sensor_template aem2_ro_sensors[] = {
 {"energy1_input",	  aem_show_energy,	0},
 {"energy2_input",	  aem_show_energy,	1},
 {"power1_average",	  aem_show_power,	0},
@@ -1050,7 +1050,7 @@ static const struct aem_ro_sensor_template aem2_ro_sensors[] = {
 {NULL,                    NULL,                 0},
 };
 
-static const struct aem_rw_sensor_template aem2_rw_sensors[] = {
+static struct aem_rw_sensor_template aem2_rw_sensors[] = {
 {"power1_average_interval", aem_show_power_period, aem_set_power_period, 0},
 {"power2_average_interval", aem_show_power_period, aem_set_power_period, 1},
 {NULL,			    NULL,                  NULL,                 0},
@@ -1101,7 +1101,7 @@ static void __exit aem_exit(void)
 		aem_delete(p1);
 }
 
-MODULE_AUTHOR("Darrick J. Wong <darrick.wong@oracle.com>");
+MODULE_AUTHOR("Darrick J. Wong <djwong@us.ibm.com>");
 MODULE_DESCRIPTION("IBM AEM power/temp/energy sensor driver");
 MODULE_LICENSE("GPL");
 

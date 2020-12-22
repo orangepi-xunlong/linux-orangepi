@@ -48,24 +48,6 @@
 #define OMAP3430_NEON_MOD				0xb00
 #define OMAP3430ES2_USBHOST_MOD				0xc00
 
-/*
- * TI81XX PRM module offsets
- */
-#define TI814X_PRM_DSP_MOD				0x0a00
-#define TI814X_PRM_HDVICP_MOD				0x0c00
-#define TI814X_PRM_ISP_MOD				0x0d00
-#define TI814X_PRM_HDVPSS_MOD				0x0e00
-#define TI814X_PRM_GFX_MOD				0x0f00
-
-#define TI81XX_PRM_DEVICE_MOD			0x0000
-#define TI816X_PRM_ACTIVE_MOD			0x0a00
-#define TI81XX_PRM_DEFAULT_MOD			0x0b00
-#define TI816X_PRM_IVAHD0_MOD			0x0c00
-#define TI816X_PRM_IVAHD1_MOD			0x0d00
-#define TI816X_PRM_IVAHD2_MOD			0x0e00
-#define TI816X_PRM_SGX_MOD				0x0f00
-#define TI81XX_PRM_ALWON_MOD			0x1800
-
 /* 24XX register bits shared between CM & PRM registers */
 
 /* CM_FCLKEN1_CORE, CM_ICLKEN1_CORE, PM_WKEN1_CORE shared bits */
@@ -127,8 +109,6 @@
 #define OMAP2430_EN_MDM_INTC_MASK			(1 << 11)
 #define OMAP2430_EN_USBHS_SHIFT				6
 #define OMAP2430_EN_USBHS_MASK				(1 << 6)
-#define OMAP24XX_EN_GPMC_SHIFT				1
-#define OMAP24XX_EN_GPMC_MASK				(1 << 1)
 
 /* CM_IDLEST1_CORE, PM_WKST1_CORE shared bits */
 #define OMAP2420_ST_MMC_SHIFT				26
@@ -197,8 +177,6 @@
 /* PM_WKST_WKUP, CM_IDLEST_WKUP shared bits */
 #define OMAP24XX_ST_GPIOS_SHIFT				2
 #define OMAP24XX_ST_GPIOS_MASK				(1 << 2)
-#define OMAP24XX_ST_32KSYNC_SHIFT			1
-#define OMAP24XX_ST_32KSYNC_MASK			(1 << 1)
 #define OMAP24XX_ST_GPT1_SHIFT				0
 #define OMAP24XX_ST_GPT1_MASK				(1 << 0)
 
@@ -223,8 +201,8 @@
 #define OMAP3430_EN_MMC2_SHIFT				25
 #define OMAP3430_EN_MMC1_MASK				(1 << 24)
 #define OMAP3430_EN_MMC1_SHIFT				24
-#define AM35XX_EN_UART4_MASK				(1 << 23)
-#define AM35XX_EN_UART4_SHIFT				23
+#define OMAP3430_EN_UART4_MASK				(1 << 23)
+#define OMAP3430_EN_UART4_SHIFT				23
 #define OMAP3430_EN_MCSPI4_MASK				(1 << 21)
 #define OMAP3430_EN_MCSPI4_SHIFT			21
 #define OMAP3430_EN_MCSPI3_MASK				(1 << 20)
@@ -329,8 +307,6 @@
 #define OMAP3430_ST_SR1_MASK				(1 << 6)
 #define OMAP3430_ST_GPIO1_SHIFT				3
 #define OMAP3430_ST_GPIO1_MASK				(1 << 3)
-#define OMAP3430_ST_32KSYNC_SHIFT			2
-#define OMAP3430_ST_32KSYNC_MASK			(1 << 2)
 #define OMAP3430_ST_GPT12_SHIFT				1
 #define OMAP3430_ST_GPT12_MASK				(1 << 1)
 #define OMAP3430_ST_GPT1_SHIFT				0
@@ -424,37 +400,16 @@
 #define OMAP3430_EN_CORE_MASK				(1 << 0)
 
 
-
 /*
- * Maximum time(us) it takes to output the signal WUCLKOUT of the last
- * pad of the I/O ring after asserting WUCLKIN high.  Tero measured
- * the actual time at 7 to 8 microseconds on OMAP3 and 2 to 4
- * microseconds on OMAP4, so this timeout may be too high.
+ * MAX_MODULE_HARDRESET_WAIT: Maximum microseconds to wait for an OMAP
+ * submodule to exit hardreset
  */
-#define MAX_IOPAD_LATCH_TIME			100
+#define MAX_MODULE_HARDRESET_WAIT		10000
+
 # ifndef __ASSEMBLER__
-
-#include <linux/delay.h>
-
-/**
- * omap_test_timeout - busy-loop, testing a condition
- * @cond: condition to test until it evaluates to true
- * @timeout: maximum number of microseconds in the timeout
- * @index: loop index (integer)
- *
- * Loop waiting for @cond to become true or until at least @timeout
- * microseconds have passed.  To use, define some integer @index in the
- * calling code.  After running, if @index == @timeout, then the loop has
- * timed out.
- */
-#define omap_test_timeout(cond, timeout, index)			\
-({								\
-	for (index = 0; index < timeout; index++) {		\
-		if (cond)					\
-			break;					\
-		udelay(1);					\
-	}							\
-})
+extern void __iomem *prm_base;
+extern void __iomem *cm_base;
+extern void __iomem *cm2_base;
 
 /**
  * struct omap_prcm_irq - describes a PRCM interrupt bit
@@ -478,7 +433,6 @@ struct omap_prcm_irq {
  * struct omap_prcm_irq_setup - PRCM interrupt controller details
  * @ack: PRM register offset for the first PRM_IRQSTATUS_MPU register
  * @mask: PRM register offset for the first PRM_IRQENABLE_MPU register
- * @pm_ctrl: PRM register offset for the PRM_IO_PMCTRL register
  * @nr_regs: number of PRM_IRQ{STATUS,ENABLE}_MPU* registers
  * @nr_irqs: number of entries in the @irqs array
  * @irqs: ptr to an array of PRCM interrupt bits (see @nr_irqs)
@@ -487,7 +441,6 @@ struct omap_prcm_irq {
  * @ocp_barrier: fn ptr to force buffered PRM writes to complete
  * @save_and_clear_irqen: fn ptr to save and clear IRQENABLE regs
  * @restore_irqen: fn ptr to save and clear IRQENABLE regs
- * @reconfigure_io_chain: fn ptr to reconfigure IO chain
  * @saved_mask: IRQENABLE regs are saved here during suspend
  * @priority_mask: 1 bit per IRQ, set to 1 if omap_prcm_irq.priority = true
  * @base_irq: base dynamic IRQ number, returned from irq_alloc_descs() in init
@@ -501,17 +454,14 @@ struct omap_prcm_irq {
 struct omap_prcm_irq_setup {
 	u16 ack;
 	u16 mask;
-	u16 pm_ctrl;
 	u8 nr_regs;
 	u8 nr_irqs;
 	const struct omap_prcm_irq *irqs;
 	int irq;
-	unsigned int (*xlate_irq)(unsigned int);
 	void (*read_pending_irqs)(unsigned long *events);
 	void (*ocp_barrier)(void);
 	void (*save_and_clear_irqen)(u32 *saved_mask);
 	void (*restore_irqen)(u32 *saved_mask);
-	void (*reconfigure_io_chain)(void);
 	u32 *saved_mask;
 	u32 *priority_mask;
 	int base_irq;
@@ -525,26 +475,6 @@ struct omap_prcm_irq_setup {
 	.offset = _offset,				\
 	.priority = _priority				\
 	}
-
-/**
- * struct omap_prcm_init_data - PRCM driver init data
- * @index: clock memory mapping index to be used
- * @mem: IO mem pointer for this module
- * @offset: module base address offset from the IO base
- * @flags: PRCM module init flags
- * @device_inst_offset: device instance offset within the module address space
- * @init: low level PRCM init function for this module
- * @np: device node for this PRCM module
- */
-struct omap_prcm_init_data {
-	int index;
-	void __iomem *mem;
-	s16 offset;
-	u16 flags;
-	s32 device_inst_offset;
-	int (*init)(const struct omap_prcm_init_data *data);
-	struct device_node *np;
-};
 
 extern void omap_prcm_irq_cleanup(void);
 extern int omap_prcm_register_chain_handler(

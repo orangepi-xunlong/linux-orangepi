@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -77,7 +77,6 @@ void acpi_ds_scope_stack_clear(struct acpi_walk_state *walk_state)
 				  "Popped object type (%s)\n",
 				  acpi_ut_get_type_name(scope_info->common.
 							value)));
-
 		acpi_ut_delete_generic_state(scope_info);
 	}
 }
@@ -86,8 +85,8 @@ void acpi_ds_scope_stack_clear(struct acpi_walk_state *walk_state)
  *
  * FUNCTION:    acpi_ds_scope_stack_push
  *
- * PARAMETERS:  node            - Name to be made current
- *              type            - Type of frame being pushed
+ * PARAMETERS:  Node            - Name to be made current
+ *              Type            - Type of frame being pushed
  *              walk_state      - Current state
  *
  * RETURN:      Status

@@ -19,7 +19,8 @@
 #include <sound/soc.h>
 #include <sound/pcm_params.h>
 
-#include <linux/platform_data/asoc-s3c.h>
+#include <plat/audio.h>
+#include <plat/dma.h>
 
 #include "dma.h"
 #include "pcm.h"
@@ -127,25 +128,37 @@ struct s3c_pcm_info {
 	struct clk	*pclk;
 	struct clk	*cclk;
 
-	struct snd_dmaengine_dai_dma_data *dma_playback;
-	struct snd_dmaengine_dai_dma_data *dma_capture;
+	struct s3c_dma_params	*dma_playback;
+	struct s3c_dma_params	*dma_capture;
 };
 
-static struct snd_dmaengine_dai_dma_data s3c_pcm_stereo_out[] = {
+static struct s3c2410_dma_client s3c_pcm_dma_client_out = {
+	.name		= "PCM Stereo out"
+};
+
+static struct s3c2410_dma_client s3c_pcm_dma_client_in = {
+	.name		= "PCM Stereo in"
+};
+
+static struct s3c_dma_params s3c_pcm_stereo_out[] = {
 	[0] = {
-		.addr_width	= 4,
+		.client		= &s3c_pcm_dma_client_out,
+		.dma_size	= 4,
 	},
 	[1] = {
-		.addr_width	= 4,
+		.client		= &s3c_pcm_dma_client_out,
+		.dma_size	= 4,
 	},
 };
 
-static struct snd_dmaengine_dai_dma_data s3c_pcm_stereo_in[] = {
+static struct s3c_dma_params s3c_pcm_stereo_in[] = {
 	[0] = {
-		.addr_width	= 4,
+		.client		= &s3c_pcm_dma_client_in,
+		.dma_size	= 4,
 	},
 	[1] = {
-		.addr_width	= 4,
+		.client		= &s3c_pcm_dma_client_in,
+		.dma_size	= 4,
 	},
 };
 
@@ -262,6 +275,7 @@ static int s3c_pcm_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct s3c_pcm_info *pcm = snd_soc_dai_get_drvdata(rtd->cpu_dai);
+	struct s3c_dma_params *dma_data;
 	void __iomem *regs = pcm->regs;
 	struct clk *clk;
 	int sclk_div, sync_div;
@@ -270,9 +284,16 @@ static int s3c_pcm_hw_params(struct snd_pcm_substream *substream,
 
 	dev_dbg(pcm->dev, "Entered %s\n", __func__);
 
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		dma_data = pcm->dma_playback;
+	else
+		dma_data = pcm->dma_capture;
+
+	snd_soc_dai_set_dma_data(rtd->cpu_dai, substream, dma_data);
+
 	/* Strictly check for sample size */
-	switch (params_width(params)) {
-	case 16:
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
 		break;
 	default:
 		return -EINVAL;
@@ -440,20 +461,10 @@ static const struct snd_soc_dai_ops s3c_pcm_dai_ops = {
 	.set_fmt	= s3c_pcm_set_fmt,
 };
 
-static int s3c_pcm_dai_probe(struct snd_soc_dai *dai)
-{
-	struct s3c_pcm_info *pcm = snd_soc_dai_get_drvdata(dai);
-
-	snd_soc_dai_init_dma_data(dai, pcm->dma_playback, pcm->dma_capture);
-
-	return 0;
-}
-
 #define S3C_PCM_RATES  SNDRV_PCM_RATE_8000_96000
 
 #define S3C_PCM_DAI_DECLARE			\
 	.symmetric_rates = 1,					\
-	.probe = s3c_pcm_dai_probe,				\
 	.ops = &s3c_pcm_dai_ops,				\
 	.playback = {						\
 		.channels_min	= 2,				\
@@ -479,16 +490,11 @@ static struct snd_soc_dai_driver s3c_pcm_dai[] = {
 	},
 };
 
-static const struct snd_soc_component_driver s3c_pcm_component = {
-	.name		= "s3c-pcm",
-};
-
-static int s3c_pcm_dev_probe(struct platform_device *pdev)
+static __devinit int s3c_pcm_dev_probe(struct platform_device *pdev)
 {
 	struct s3c_pcm_info *pcm;
-	struct resource *mem_res;
+	struct resource *mem_res, *dmatx_res, *dmarx_res;
 	struct s3c_audio_pdata *pcm_pdata;
-	dma_filter_fn filter;
 	int ret;
 
 	/* Check for valid device index */
@@ -500,6 +506,18 @@ static int s3c_pcm_dev_probe(struct platform_device *pdev)
 	pcm_pdata = pdev->dev.platform_data;
 
 	/* Check for availability of necessary resource */
+	dmatx_res = platform_get_resource(pdev, IORESOURCE_DMA, 0);
+	if (!dmatx_res) {
+		dev_err(&pdev->dev, "Unable to get PCM-TX dma resource\n");
+		return -ENXIO;
+	}
+
+	dmarx_res = platform_get_resource(pdev, IORESOURCE_DMA, 1);
+	if (!dmarx_res) {
+		dev_err(&pdev->dev, "Unable to get PCM-RX dma resource\n");
+		return -ENXIO;
+	}
+
 	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!mem_res) {
 		dev_err(&pdev->dev, "Unable to get register resource\n");
@@ -519,13 +537,13 @@ static int s3c_pcm_dev_probe(struct platform_device *pdev)
 	/* Default is 128fs */
 	pcm->sclk_per_fs = 128;
 
-	pcm->cclk = devm_clk_get(&pdev->dev, "audio-bus");
+	pcm->cclk = clk_get(&pdev->dev, "audio-bus");
 	if (IS_ERR(pcm->cclk)) {
 		dev_err(&pdev->dev, "failed to get audio-bus\n");
 		ret = PTR_ERR(pcm->cclk);
 		goto err1;
 	}
-	clk_prepare_enable(pcm->cclk);
+	clk_enable(pcm->cclk);
 
 	/* record our pcm structure for later use in the callbacks */
 	dev_set_drvdata(&pdev->dev, pcm);
@@ -544,62 +562,55 @@ static int s3c_pcm_dev_probe(struct platform_device *pdev)
 		goto err3;
 	}
 
-	pcm->pclk = devm_clk_get(&pdev->dev, "pcm");
+	pcm->pclk = clk_get(&pdev->dev, "pcm");
 	if (IS_ERR(pcm->pclk)) {
 		dev_err(&pdev->dev, "failed to get pcm_clock\n");
 		ret = -ENOENT;
 		goto err4;
 	}
-	clk_prepare_enable(pcm->pclk);
+	clk_enable(pcm->pclk);
 
-	s3c_pcm_stereo_in[pdev->id].addr = mem_res->start + S3C_PCM_RXFIFO;
-	s3c_pcm_stereo_out[pdev->id].addr = mem_res->start + S3C_PCM_TXFIFO;
+	s3c_pcm_stereo_in[pdev->id].dma_addr = mem_res->start
+							+ S3C_PCM_RXFIFO;
+	s3c_pcm_stereo_out[pdev->id].dma_addr = mem_res->start
+							+ S3C_PCM_TXFIFO;
 
-	filter = NULL;
-	if (pcm_pdata) {
-		s3c_pcm_stereo_in[pdev->id].filter_data = pcm_pdata->dma_capture;
-		s3c_pcm_stereo_out[pdev->id].filter_data = pcm_pdata->dma_playback;
-		filter = pcm_pdata->dma_filter;
-	}
+	s3c_pcm_stereo_in[pdev->id].channel = dmarx_res->start;
+	s3c_pcm_stereo_out[pdev->id].channel = dmatx_res->start;
 
 	pcm->dma_capture = &s3c_pcm_stereo_in[pdev->id];
 	pcm->dma_playback = &s3c_pcm_stereo_out[pdev->id];
 
-	ret = samsung_asoc_dma_platform_register(&pdev->dev, filter,
-						 NULL, NULL);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to get register DMA: %d\n", ret);
+	pm_runtime_enable(&pdev->dev);
+
+	ret = snd_soc_register_dai(&pdev->dev, &s3c_pcm_dai[pdev->id]);
+	if (ret != 0) {
+		dev_err(&pdev->dev, "failed to get register DAI: %d\n", ret);
 		goto err5;
 	}
 
-	pm_runtime_enable(&pdev->dev);
-
-	ret = devm_snd_soc_register_component(&pdev->dev, &s3c_pcm_component,
-					 &s3c_pcm_dai[pdev->id], 1);
-	if (ret != 0) {
-		dev_err(&pdev->dev, "failed to get register DAI: %d\n", ret);
-		goto err6;
-	}
-
 	return 0;
-err6:
-	pm_runtime_disable(&pdev->dev);
+
 err5:
-	clk_disable_unprepare(pcm->pclk);
+	clk_disable(pcm->pclk);
+	clk_put(pcm->pclk);
 err4:
 	iounmap(pcm->regs);
 err3:
 	release_mem_region(mem_res->start, resource_size(mem_res));
 err2:
-	clk_disable_unprepare(pcm->cclk);
+	clk_disable(pcm->cclk);
+	clk_put(pcm->cclk);
 err1:
 	return ret;
 }
 
-static int s3c_pcm_dev_remove(struct platform_device *pdev)
+static __devexit int s3c_pcm_dev_remove(struct platform_device *pdev)
 {
 	struct s3c_pcm_info *pcm = &s3c_pcm[pdev->id];
 	struct resource *mem_res;
+
+	snd_soc_unregister_dai(&pdev->dev);
 
 	pm_runtime_disable(&pdev->dev);
 
@@ -608,17 +619,20 @@ static int s3c_pcm_dev_remove(struct platform_device *pdev)
 	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	release_mem_region(mem_res->start, resource_size(mem_res));
 
-	clk_disable_unprepare(pcm->cclk);
-	clk_disable_unprepare(pcm->pclk);
+	clk_disable(pcm->cclk);
+	clk_disable(pcm->pclk);
+	clk_put(pcm->pclk);
+	clk_put(pcm->cclk);
 
 	return 0;
 }
 
 static struct platform_driver s3c_pcm_driver = {
 	.probe  = s3c_pcm_dev_probe,
-	.remove = s3c_pcm_dev_remove,
+	.remove = __devexit_p(s3c_pcm_dev_remove),
 	.driver = {
 		.name = "samsung-pcm",
+		.owner = THIS_MODULE,
 	},
 };
 

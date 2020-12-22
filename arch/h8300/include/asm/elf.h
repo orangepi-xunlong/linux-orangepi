@@ -1,5 +1,5 @@
-#ifndef __ASM_H8300_ELF_H
-#define __ASM_H8300_ELF_H
+#ifndef __ASMH8300_ELF_H
+#define __ASMH8300_ELF_H
 
 /*
  * ELF register definitions..
@@ -25,14 +25,14 @@ typedef unsigned long elf_fpregset_t;
 #define ELF_CLASS	ELFCLASS32
 #define ELF_DATA	ELFDATA2MSB
 #define ELF_ARCH	EM_H8_300
-#if defined(CONFIG_CPU_H8300H)
+#if defined(__H8300H__)
 #define ELF_CORE_EFLAGS 0x810000
 #endif
-#if defined(CONFIG_CPU_H8S)
+#if defined(__H8300S__)
 #define ELF_CORE_EFLAGS 0x820000
 #endif
 
-#define ELF_PLAT_INIT(_r) do { (_r)->er1 = 0; } while (0)
+#define ELF_PLAT_INIT(_r)	_r->er1 = 0
 
 #define ELF_EXEC_PAGESIZE	4096
 
@@ -53,6 +53,8 @@ typedef unsigned long elf_fpregset_t;
    intent than poking at uname or /proc/cpuinfo.  */
 
 #define ELF_PLATFORM  (NULL)
+
+#define SET_PERSONALITY(ex) set_personality(PER_LINUX)
 
 #define R_H8_NONE       0
 #define R_H8_DIR32      1

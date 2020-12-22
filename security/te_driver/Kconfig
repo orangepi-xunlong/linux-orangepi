@@ -1,0 +1,13 @@
+config TRUSTED_LITTLE_KERNEL
+	tristate "Enable Open Trusted Execution driver"
+	default n
+	help
+	  This option adds kernel support for communication with the
+	  Trusted secure OS monitor/runtime support.
+	  If you are unsure how to answer this question, answer N.
+
+
+config TRUSTED_LITTLE_KERNEL_DEBUG
+	tristate "Support TRUSTED LITTLE KERNEL DEBUG"
+	depends on TRUSTED_LITTLE_KERNEL
+	default n

@@ -22,6 +22,7 @@
 #include "udfdecl.h"
 #include <linux/fs.h>
 #include <linux/mm.h>
+#include <linux/buffer_head.h>
 
 #include "udf_i.h"
 #include "udf_sb.h"
@@ -247,7 +248,7 @@ void udf_truncate_extents(struct inode *inode)
 				/* We managed to free all extents in the
 				 * indirect extent - free it too */
 				BUG_ON(!epos.bh);
-				udf_free_blocks(sb, NULL, &epos.block,
+				udf_free_blocks(sb, inode, &epos.block,
 						0, indirect_ext_len);
 			} else if (!epos.bh) {
 				iinfo->i_lenAlloc = lenalloc;
@@ -260,9 +261,6 @@ void udf_truncate_extents(struct inode *inode)
 			epos.block = eloc;
 			epos.bh = udf_tread(sb,
 					udf_get_lb_pblock(sb, &eloc, 0));
-			/* Error reading indirect block? */
-			if (!epos.bh)
-				return;
 			if (elen)
 				indirect_ext_len =
 					(elen + sb->s_blocksize - 1) >>
@@ -277,7 +275,7 @@ void udf_truncate_extents(struct inode *inode)
 
 	if (indirect_ext_len) {
 		BUG_ON(!epos.bh);
-		udf_free_blocks(sb, NULL, &epos.block, 0, indirect_ext_len);
+		udf_free_blocks(sb, inode, &epos.block, 0, indirect_ext_len);
 	} else if (!epos.bh) {
 		iinfo->i_lenAlloc = lenalloc;
 		mark_inode_dirty(inode);

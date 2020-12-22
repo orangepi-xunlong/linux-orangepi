@@ -39,12 +39,10 @@ static ssize_t store_pc0event(struct device *dev,
 			      size_t count)
 {
 	unsigned long val;
-	int ret;
+	char *endp;
 
-	ret = kstrtoul(buf, 0, &val);
-	if (ret)
-		return ret;
-	if (val > 0x3f)
+	val = simple_strtoul(buf, &endp, 0);
+	if (endp == buf || val > 0x3f)
 		return -EINVAL;
 	val = (val << 12) | (sysreg_read(PCCR) & 0xfffc0fff);
 	sysreg_write(PCCR, val);
@@ -63,11 +61,11 @@ static ssize_t store_pc0count(struct device *dev,
 				const char *buf, size_t count)
 {
 	unsigned long val;
-	int ret;
+	char *endp;
 
-	ret = kstrtoul(buf, 0, &val);
-	if (ret)
-		return ret;
+	val = simple_strtoul(buf, &endp, 0);
+	if (endp == buf)
+		return -EINVAL;
 	sysreg_write(PCNT0, val);
 
 	return count;
@@ -86,12 +84,10 @@ static ssize_t store_pc1event(struct device *dev,
 			      size_t count)
 {
 	unsigned long val;
-	int ret;
+	char *endp;
 
-	ret = kstrtoul(buf, 0, &val);
-	if (ret)
-		return ret;
-	if (val > 0x3f)
+	val = simple_strtoul(buf, &endp, 0);
+	if (endp == buf || val > 0x3f)
 		return -EINVAL;
 	val = (val << 18) | (sysreg_read(PCCR) & 0xff03ffff);
 	sysreg_write(PCCR, val);
@@ -110,11 +106,11 @@ static ssize_t store_pc1count(struct device *dev,
 			      size_t count)
 {
 	unsigned long val;
-	int ret;
+	char *endp;
 
-	ret = kstrtoul(buf, 0, &val);
-	if (ret)
-		return ret;
+	val = simple_strtoul(buf, &endp, 0);
+	if (endp == buf)
+		return -EINVAL;
 	sysreg_write(PCNT1, val);
 
 	return count;
@@ -133,11 +129,11 @@ static ssize_t store_pccycles(struct device *dev,
 			      size_t count)
 {
 	unsigned long val;
-	int ret;
+	char *endp;
 
-	ret = kstrtoul(buf, 0, &val);
-	if (ret)
-		return ret;
+	val = simple_strtoul(buf, &endp, 0);
+	if (endp == buf)
+		return -EINVAL;
 	sysreg_write(PCCNT, val);
 
 	return count;
@@ -156,11 +152,11 @@ static ssize_t store_pcenable(struct device *dev,
 			      size_t count)
 {
 	unsigned long pccr, val;
-	int ret;
+	char *endp;
 
-	ret = kstrtoul(buf, 0, &val);
-	if (ret)
-		return ret;
+	val = simple_strtoul(buf, &endp, 0);
+	if (endp == buf)
+		return -EINVAL;
 	if (val)
 		val = 1;
 

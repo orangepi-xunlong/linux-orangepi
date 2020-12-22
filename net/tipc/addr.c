@@ -34,51 +34,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <linux/kernel.h>
-#include "addr.h"
 #include "core.h"
-
-/**
- * in_own_cluster - test for cluster inclusion; <0.0.0> always matches
- */
-int in_own_cluster(struct net *net, u32 addr)
-{
-	return in_own_cluster_exact(net, addr) || !addr;
-}
-
-int in_own_cluster_exact(struct net *net, u32 addr)
-{
-	struct tipc_net *tn = net_generic(net, tipc_net_id);
-
-	return !((addr ^ tn->own_addr) >> 12);
-}
-
-/**
- * in_own_node - test for node inclusion; <0.0.0> always matches
- */
-int in_own_node(struct net *net, u32 addr)
-{
-	struct tipc_net *tn = net_generic(net, tipc_net_id);
-
-	return (addr == tn->own_addr) || !addr;
-}
-
-/**
- * addr_domain - convert 2-bit scope value to equivalent message lookup domain
- *
- * Needed when address of a named message must be looked up a second time
- * after a network hop.
- */
-u32 addr_domain(struct net *net, u32 sc)
-{
-	struct tipc_net *tn = net_generic(net, tipc_net_id);
-
-	if (likely(sc == TIPC_NODE_SCOPE))
-		return tn->own_addr;
-	if (sc == TIPC_CLUSTER_SCOPE)
-		return tipc_cluster_mask(tn->own_addr);
-	return tipc_zone_mask(tn->own_addr);
-}
+#include "addr.h"
 
 /**
  * tipc_addr_domain_valid - validates a network domain address
@@ -88,6 +45,7 @@ u32 addr_domain(struct net *net, u32 sc)
  *
  * Returns 1 if domain address is valid, otherwise 0
  */
+
 int tipc_addr_domain_valid(u32 addr)
 {
 	u32 n = tipc_node(addr);
@@ -108,6 +66,7 @@ int tipc_addr_domain_valid(u32 addr)
  *
  * Returns 1 if address can be used, otherwise 0
  */
+
 int tipc_addr_node_valid(u32 addr)
 {
 	return tipc_addr_domain_valid(addr) && tipc_node(addr);
@@ -127,6 +86,7 @@ int tipc_in_scope(u32 domain, u32 addr)
 /**
  * tipc_addr_scope - convert message lookup domain to a 2-bit scope value
  */
+
 int tipc_addr_scope(u32 domain)
 {
 	if (likely(!domain))

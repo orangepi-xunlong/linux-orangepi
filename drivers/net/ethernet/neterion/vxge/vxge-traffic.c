@@ -533,7 +533,8 @@ __vxge_hw_device_handle_error(struct __vxge_hw_device *hldev, u32 vp_id,
 
 	/* notify driver */
 	if (hldev->uld_callbacks->crit_err)
-		hldev->uld_callbacks->crit_err(hldev,
+		hldev->uld_callbacks->crit_err(
+			(struct __vxge_hw_device *)hldev,
 			type, vp_id);
 out:
 
@@ -1004,6 +1005,8 @@ void vxge_hw_device_clear_tx_rx(struct __vxge_hw_device *hldev)
 static enum vxge_hw_status
 vxge_hw_channel_dtr_alloc(struct __vxge_hw_channel *channel, void **dtrh)
 {
+	void **tmp_arr;
+
 	if (channel->reserve_ptr - channel->reserve_top > 0) {
 _alloc_after_swap:
 		*dtrh =	channel->reserve_arr[--channel->reserve_ptr];
@@ -1018,7 +1021,10 @@ _alloc_after_swap:
 	 * i.e.	no additional lock need	to be done when	we free	a resource */
 
 	if (channel->length - channel->free_ptr > 0) {
-		swap(channel->reserve_arr, channel->free_arr);
+
+		tmp_arr	= channel->reserve_arr;
+		channel->reserve_arr = channel->free_arr;
+		channel->free_arr = tmp_arr;
 		channel->reserve_ptr = channel->length;
 		channel->reserve_top = channel->free_ptr;
 		channel->free_ptr = channel->length;
@@ -1316,7 +1322,7 @@ enum vxge_hw_status vxge_hw_ring_rxd_next_completed(
 	/* check whether it is not the end */
 	if (!own || *t_code == VXGE_HW_RING_T_CODE_FRM_DROP) {
 
-		vxge_assert((rxdp)->host_control !=
+		vxge_assert(((struct vxge_hw_ring_rxd_1 *)rxdp)->host_control !=
 				0);
 
 		++ring->cmpl_cnt;
@@ -1951,7 +1957,8 @@ exit:
  * @vid: vlan id to be added for this vpath into the list
  *
  * Adds the given vlan id into the list for this  vpath.
- * see also: vxge_hw_vpath_vid_delete
+ * see also: vxge_hw_vpath_vid_delete, vxge_hw_vpath_vid_get and
+ * vxge_hw_vpath_vid_get_next
  *
  */
 enum vxge_hw_status
@@ -1973,13 +1980,45 @@ exit:
 }
 
 /**
+ * vxge_hw_vpath_vid_get - Get the first vid entry for this vpath
+ *               from vlan id table.
+ * @vp: Vpath handle.
+ * @vid: Buffer to return vlan id
+ *
+ * Returns the first vlan id in the list for this vpath.
+ * see also: vxge_hw_vpath_vid_get_next
+ *
+ */
+enum vxge_hw_status
+vxge_hw_vpath_vid_get(struct __vxge_hw_vpath_handle *vp, u64 *vid)
+{
+	u64 data;
+	enum vxge_hw_status status = VXGE_HW_OK;
+
+	if (vp == NULL) {
+		status = VXGE_HW_ERR_INVALID_HANDLE;
+		goto exit;
+	}
+
+	status = __vxge_hw_vpath_rts_table_get(vp,
+			VXGE_HW_RTS_ACCESS_STEER_CTRL_ACTION_LIST_FIRST_ENTRY,
+			VXGE_HW_RTS_ACCESS_STEER_CTRL_DATA_STRUCT_SEL_VID,
+			0, vid, &data);
+
+	*vid = VXGE_HW_RTS_ACCESS_STEER_DATA0_GET_VLAN_ID(*vid);
+exit:
+	return status;
+}
+
+/**
  * vxge_hw_vpath_vid_delete - Delete the vlan id entry for this vpath
  *               to vlan id table.
  * @vp: Vpath handle.
  * @vid: vlan id to be added for this vpath into the list
  *
  * Adds the given vlan id into the list for this  vpath.
- * see also: vxge_hw_vpath_vid_add
+ * see also: vxge_hw_vpath_vid_add, vxge_hw_vpath_vid_get and
+ * vxge_hw_vpath_vid_get_next
  *
  */
 enum vxge_hw_status

@@ -12,7 +12,6 @@
 #include <linux/acpi.h>
 #include <linux/debugfs.h>
 #include <linux/module.h>
-#include <linux/uaccess.h>
 #include "internal.h"
 
 MODULE_AUTHOR("Thomas Renninger <trenn@suse.de>");
@@ -35,6 +34,7 @@ static ssize_t acpi_ec_read_io(struct file *f, char __user *buf,
 	 * struct acpi_ec *ec = ((struct seq_file *)f->private_data)->private;
 	 */
 	unsigned int size = EC_SPACE_SIZE;
+	u8 *data = (u8 *) buf;
 	loff_t init_off = *off;
 	int err = 0;
 
@@ -47,15 +47,9 @@ static ssize_t acpi_ec_read_io(struct file *f, char __user *buf,
 		size = count;
 
 	while (size) {
-		u8 byte_read;
-		err = ec_read(*off, &byte_read);
+		err = ec_read(*off, &data[*off - init_off]);
 		if (err)
 			return err;
-		if (put_user(byte_read, buf + *off - init_off)) {
-			if (*off - init_off)
-				return *off - init_off; /* partial read */
-			return -EFAULT;
-		}
 		*off += 1;
 		size--;
 	}
@@ -71,10 +65,8 @@ static ssize_t acpi_ec_write_io(struct file *f, const char __user *buf,
 
 	unsigned int size = count;
 	loff_t init_off = *off;
+	u8 *data = (u8 *) buf;
 	int err = 0;
-
-	if (!write_support)
-		return -EINVAL;
 
 	if (*off >= EC_SPACE_SIZE)
 		return 0;
@@ -84,12 +76,7 @@ static ssize_t acpi_ec_write_io(struct file *f, const char __user *buf,
 	}
 
 	while (size) {
-		u8 byte_write;
-		if (get_user(byte_write, buf + *off - init_off)) {
-			if (*off - init_off)
-				return *off - init_off; /* partial write */
-			return -EFAULT;
-		}
+		u8 byte_write = data[*off - init_off];
 		err = ec_write(*off, byte_write);
 		if (err)
 			return err;
@@ -108,7 +95,7 @@ static const struct file_operations acpi_ec_io_ops = {
 	.llseek = default_llseek,
 };
 
-static int acpi_ec_add_debugfs(struct acpi_ec *ec, unsigned int ec_device_count)
+int acpi_ec_add_debugfs(struct acpi_ec *ec, unsigned int ec_device_count)
 {
 	struct dentry *dev_dir;
 	char name[64];
@@ -128,10 +115,10 @@ static int acpi_ec_add_debugfs(struct acpi_ec *ec, unsigned int ec_device_count)
 		return -ENOMEM;
 	}
 
-	if (!debugfs_create_x32("gpe", 0444, dev_dir, &first_ec->gpe))
+	if (!debugfs_create_x32("gpe", 0444, dev_dir, (u32 *)&first_ec->gpe))
 		goto error;
 	if (!debugfs_create_bool("use_global_lock", 0444, dev_dir,
-				 &first_ec->global_lock))
+				 (u32 *)&first_ec->global_lock))
 		goto error;
 
 	if (write_support)

@@ -2,5 +2,3 @@ mktables
 altivec*.c
 int*.c
 tables.c
-neon?.c
-s390vx?.c

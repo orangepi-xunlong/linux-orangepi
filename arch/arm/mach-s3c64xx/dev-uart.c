@@ -23,7 +23,6 @@
 #include <asm/mach/irq.h>
 #include <mach/hardware.h>
 #include <mach/map.h>
-#include <mach/irqs.h>
 
 #include <plat/devs.h>
 
@@ -32,23 +31,55 @@
 /* 64xx uarts are closer together */
 
 static struct resource s3c64xx_uart0_resource[] = {
-	[0] = DEFINE_RES_MEM(S3C_PA_UART0, SZ_256),
-	[1] = DEFINE_RES_IRQ(IRQ_UART0),
+	[0] = {
+		.start	= S3C_PA_UART0,
+		.end	= S3C_PA_UART0 + 0x100,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= IRQ_UART0,
+		.end	= IRQ_UART0,
+		.flags	= IORESOURCE_IRQ,
+	},
 };
 
 static struct resource s3c64xx_uart1_resource[] = {
-	[0] = DEFINE_RES_MEM(S3C_PA_UART1, SZ_256),
-	[1] = DEFINE_RES_IRQ(IRQ_UART1),
+	[0] = {
+		.start = S3C_PA_UART1,
+		.end   = S3C_PA_UART1 + 0x100,
+		.flags = IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= IRQ_UART1,
+		.end	= IRQ_UART1,
+		.flags	= IORESOURCE_IRQ,
+	},
 };
 
 static struct resource s3c6xx_uart2_resource[] = {
-	[0] = DEFINE_RES_MEM(S3C_PA_UART2, SZ_256),
-	[1] = DEFINE_RES_IRQ(IRQ_UART2),
+	[0] = {
+		.start = S3C_PA_UART2,
+		.end   = S3C_PA_UART2 + 0x100,
+		.flags = IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= IRQ_UART2,
+		.end	= IRQ_UART2,
+		.flags	= IORESOURCE_IRQ,
+	},
 };
 
 static struct resource s3c64xx_uart3_resource[] = {
-	[0] = DEFINE_RES_MEM(S3C_PA_UART3, SZ_256),
-	[1] = DEFINE_RES_IRQ(IRQ_UART3),
+	[0] = {
+		.start = S3C_PA_UART3,
+		.end   = S3C_PA_UART3 + 0x100,
+		.flags = IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= IRQ_UART3,
+		.end	= IRQ_UART3,
+		.flags	= IORESOURCE_IRQ,
+	},
 };
 
 

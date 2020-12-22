@@ -78,17 +78,8 @@ wd0_timeout: Default watchdog0 timeout in 1/10secs
 wd1_timeout: Default watchdog1 timeout in 1/10secs
 wd2_timeout: Default watchdog2 timeout in 1/10secs
 -------------------------------------------------
-da9052wdt:
-timeout: Watchdog timeout in seconds. 2<= timeout <=131, default=2.048s
-nowayout: Watchdog cannot be stopped once started
-	(default=kernel config parameter)
--------------------------------------------------
 davinci_wdt:
 heartbeat: Watchdog heartbeat period in seconds from 1 to 600, default 60
--------------------------------------------------
-ebc-c384_wdt:
-timeout: Watchdog timeout in seconds. (1<=timeout<=15300, default=60)
-nowayout: Watchdog cannot be stopped once started
 -------------------------------------------------
 ep93xx_wdt:
 nowayout: Watchdog cannot be stopped once started
@@ -154,8 +145,6 @@ nowayout: Disable watchdog shutdown on close
 -------------------------------------------------
 it87_wdt:
 nogameport: Forbid the activation of game port, default=0
-nocir: Forbid the use of CIR (workaround for some buggy setups); set to 1 if
-system resets despite watchdog daemon running, default=0
 exclusive: Watchdog exclusive device open, default=1
 timeout: Watchdog timeout in seconds, default=60
 testmode: Watchdog test mode (1 = no reboot), default=0
@@ -200,12 +189,15 @@ reset: Watchdog Interrupt/Reset Mode. 0 = interrupt, 1 = reset
 nowayout: Watchdog cannot be stopped once started
 	(default=kernel config parameter)
 -------------------------------------------------
-mv64x60_wdt:
+mpcore_wdt:
+mpcore_margin: MPcore timer margin in seconds.
+	(0 < mpcore_margin < 65536, default=60)
 nowayout: Watchdog cannot be stopped once started
 	(default=kernel config parameter)
+mpcore_noboot: MPcore watchdog action, set to 1 to ignore reboots,
+	0 to reboot (default=0
 -------------------------------------------------
-ni903x_wdt:
-timeout: Initial watchdog timeout in seconds (0<timeout<516, default=60)
+mv64x60_wdt:
 nowayout: Watchdog cannot be stopped once started
 	(default=kernel config parameter)
 -------------------------------------------------
@@ -217,9 +209,6 @@ nowayout: Watchdog cannot be stopped once started
 -------------------------------------------------
 omap_wdt:
 timer_margin: initial watchdog timeout (in seconds)
-early_enable: Watchdog is started on module insertion (default=0
-nowayout: Watchdog cannot be stopped once started
-	(default=kernel config parameter)
 -------------------------------------------------
 orion_wdt:
 heartbeat: Initial watchdog heartbeat in seconds
@@ -293,13 +282,6 @@ sbc_fitpc2_wdt:
 margin: Watchdog margin in seconds (default 60s)
 nowayout: Watchdog cannot be stopped once started
 -------------------------------------------------
-sbsa_gwdt:
-timeout: Watchdog timeout in seconds. (default 10s)
-action: Watchdog action at the first stage timeout,
-	set to 0 to ignore, 1 to panic. (default=0)
-nowayout: Watchdog cannot be stopped once started
-	(default=kernel config parameter)
--------------------------------------------------
 sc1200wdt:
 isapnp: When set to 0 driver ISA PnP support will be disabled (default=1)
 io: io port
@@ -345,11 +327,6 @@ soft_noboot: Softdog action, set to 1 to ignore reboots, 0 to reboot
 -------------------------------------------------
 stmp3xxx_wdt:
 heartbeat: Watchdog heartbeat period in seconds from 1 to 4194304, default 19
--------------------------------------------------
-tegra_wdt:
-heartbeat: Watchdog heartbeats in seconds. (default = 120)
-nowayout: Watchdog cannot be stopped once started
-	(default=kernel config parameter)
 -------------------------------------------------
 ts72xx_wdt:
 timeout: Watchdog timeout in seconds. (1 <= timeout <= 8, default=8)
@@ -415,8 +392,4 @@ nowayout: Watchdog cannot be stopped once started
 wm8350_wdt:
 nowayout: Watchdog cannot be stopped once started
 	(default=kernel config parameter)
--------------------------------------------------
-sun4v_wdt:
-timeout_ms: Watchdog timeout in milliseconds 1..180000, default=60000)
-nowayout: Watchdog cannot be stopped once started
 -------------------------------------------------

@@ -10,15 +10,15 @@
  */
 
 #include <linux/mm.h>
-#include <linux/extable.h>
+#include <linux/module.h>
 #include <linux/pagemap.h>
 #include <linux/kdebug.h>
 #include <linux/kprobes.h>
-#include <linux/uaccess.h>
 
 #include <asm/mmu_context.h>
 #include <asm/sysreg.h>
 #include <asm/tlb.h>
+#include <asm/uaccess.h>
 
 #ifdef CONFIG_KPROBES
 static inline int notify_page_fault(struct pt_regs *regs, int trap)
@@ -61,10 +61,10 @@ asmlinkage void do_page_fault(unsigned long ecr, struct pt_regs *regs)
 	const struct exception_table_entry *fixup;
 	unsigned long address;
 	unsigned long page;
+	int writeaccess;
 	long signr;
 	int code;
 	int fault;
-	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
 	if (notify_page_fault(regs, ecr))
 		return;
@@ -81,14 +81,11 @@ asmlinkage void do_page_fault(unsigned long ecr, struct pt_regs *regs)
 	 * If we're in an interrupt or have no user context, we must
 	 * not take the fault...
 	 */
-	if (faulthandler_disabled() || !mm || regs->sr & SYSREG_BIT(GM))
+	if (in_atomic() || !mm || regs->sr & SYSREG_BIT(GM))
 		goto no_context;
 
 	local_irq_enable();
 
-	if (user_mode(regs))
-		flags |= FAULT_FLAG_USER;
-retry:
 	down_read(&mm->mmap_sem);
 
 	vma = find_vma(mm, address);
@@ -107,6 +104,7 @@ retry:
 	 */
 good_area:
 	code = SEGV_ACCERR;
+	writeaccess = 0;
 
 	switch (ecr) {
 	case ECR_PROTECTION_X:
@@ -123,7 +121,7 @@ good_area:
 	case ECR_TLB_MISS_W:
 		if (!(vma->vm_flags & VM_WRITE))
 			goto bad_area;
-		flags |= FAULT_FLAG_WRITE;
+		writeaccess = 1;
 		break;
 	default:
 		panic("Unhandled case %lu in do_page_fault!", ecr);
@@ -134,11 +132,7 @@ good_area:
 	 * sure we exit gracefully rather than endlessly redo the
 	 * fault.
 	 */
-	fault = handle_mm_fault(vma, address, flags);
-
-	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
-		return;
-
+	fault = handle_mm_fault(mm, vma, address, writeaccess ? FAULT_FLAG_WRITE : 0);
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
 			goto out_of_memory;
@@ -148,24 +142,10 @@ good_area:
 			goto do_sigbus;
 		BUG();
 	}
-
-	if (flags & FAULT_FLAG_ALLOW_RETRY) {
-		if (fault & VM_FAULT_MAJOR)
-			tsk->maj_flt++;
-		else
-			tsk->min_flt++;
-		if (fault & VM_FAULT_RETRY) {
-			flags &= ~FAULT_FLAG_ALLOW_RETRY;
-			flags |= FAULT_FLAG_TRIED;
-
-			/*
-			 * No need to up_read(&mm->mmap_sem) as we would have
-			 * already released it in __lock_page_or_retry() in
-			 * mm/filemap.c.
-			 */
-			goto retry;
-		}
-	}
+	if (fault & VM_FAULT_MAJOR)
+		tsk->maj_flt++;
+	else
+		tsk->min_flt++;
 
 	up_read(&mm->mmap_sem);
 	return;
@@ -232,9 +212,9 @@ no_context:
 	 */
 out_of_memory:
 	up_read(&mm->mmap_sem);
+	pagefault_out_of_memory();
 	if (!user_mode(regs))
 		goto no_context;
-	pagefault_out_of_memory();
 	return;
 
 do_sigbus:

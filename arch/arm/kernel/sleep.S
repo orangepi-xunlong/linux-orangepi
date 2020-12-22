@@ -4,6 +4,8 @@
 #include <asm/assembler.h>
 #include <asm/glue-cache.h>
 #include <asm/glue-proc.h>
+#include <asm/cache.h>
+
 	.text
 
 /*
@@ -55,7 +57,7 @@
  * specific registers and some other data for resume.
  *  r0 = suspend function arg0
  *  r1 = suspend function
- *  r2 = MPIDR value the resuming CPU will use
+ *  r2 = MPIDR value used to index into sleep_save_sp
  */
 ENTRY(__cpu_suspend)
 	stmfd	sp!, {r4 - r11, lr}
@@ -72,16 +74,19 @@ ENTRY(__cpu_suspend)
 	stmfd	sp!, {r0, r1}		@ save suspend func arg and pointer
 	ldr	r3, [r3, #SLEEP_SAVE_SP_VIRT]
 	ALT_SMP(ldr r0, =mpidr_hash)
-	ALT_UP_B(1f)
+       ALT_UP_B(1f)
 	/* This ldmia relies on the memory layout of the mpidr_hash struct */
 	ldmia	r0, {r1, r6-r8}	@ r1 = mpidr mask (r6,r7,r8) = l[0,1,2] shifts
 	compute_mpidr_hash	r0, r6, r7, r8, r2, r1
-	add	r3, r3, r0, lsl #2
-1:	mov	r2, r5			@ virtual SP
+//	add	r3, r3, r0, lsl #2
+	add	r3, r3, r0, lsl #L1_CACHE_SHIFT
+
+1:
+	mov	r2, r5			@ virtual SP
 	mov	r1, r4			@ size of save block
 	add	r0, sp, #8		@ pointer to save block
 	bl	__cpu_suspend_save
-	badr	lr, cpu_suspend_abort
+	adr	lr, BSYM(cpu_suspend_abort)
 	ldmfd	sp!, {r0, pc}		@ call suspend fn
 ENDPROC(__cpu_suspend)
 	.ltorg
@@ -107,7 +112,7 @@ ENTRY(cpu_resume_mmu)
 	instr_sync
 	mov	r0, r0
 	mov	r0, r0
-	ret	r3			@ jump to virtual address
+	mov	pc, r3			@ jump to virtual address
 ENDPROC(cpu_resume_mmu)
 	.popsection
 cpu_resume_after_mmu:
@@ -116,24 +121,16 @@ cpu_resume_after_mmu:
 	ldmfd	sp!, {r4 - r11, pc}
 ENDPROC(cpu_resume_after_mmu)
 
-	.text
+/*
+ * Note: Yes, part of the following code is located into the .data section.
+ *       This is to allow sleep_save_sp to be accessed with a relative load
+ *       while we can't rely on any MMU translation.  We could have put
+ *       sleep_save_sp in the .text section as well, but some setups might
+ *       insist on it to be truly read-only.
+ */
+	.data
 	.align
-
-#ifdef CONFIG_MMU
-	.arm
-ENTRY(cpu_resume_arm)
- THUMB(	badr	r9, 1f		)	@ Kernel is entered in ARM.
- THUMB(	bx	r9		)	@ If this is a Thumb-2 kernel,
- THUMB(	.thumb			)	@ switch to Thumb now.
- THUMB(1:			)
-#endif
-
 ENTRY(cpu_resume)
-ARM_BE8(setend be)			@ ensure we are in BE mode
-#ifdef CONFIG_ARM_VIRT_EXT
-	bl	__hyp_stub_install_secondary
-#endif
-	safe_svcmode_maskall r1
 	mov	r1, #0
 	ALT_SMP(mrc p15, 0, r0, c0, c0, 5)
 	ALT_UP_B(1f)
@@ -148,11 +145,11 @@ ARM_BE8(setend be)			@ ensure we are in BE mode
 	compute_mpidr_hash	r1, r4, r5, r6, r0, r3
 1:
 	adr	r0, _sleep_save_sp
-	ldr	r2, [r0]
-	add	r0, r0, r2
 	ldr	r0, [r0, #SLEEP_SAVE_SP_PHYS]
-	ldr	r0, [r0, r1, lsl #2]
+//	ldr	r0, [r0, r1, lsl #2]
+	ldr	r0, [r0, r1, lsl #L1_CACHE_SHIFT]
 
+	setmode	PSR_I_BIT | PSR_F_BIT | SVC_MODE, r1  @ set SVC, irqs off
 	@ load phys pgd, stack, resume fn
   ARM(	ldmia	r0!, {r1, sp, pc}	)
 THUMB(	ldmia	r0!, {r1, r2, r3}	)
@@ -160,17 +157,11 @@ THUMB(	mov	sp, r2			)
 THUMB(	bx	r3			)
 ENDPROC(cpu_resume)
 
-#ifdef CONFIG_MMU
-ENDPROC(cpu_resume_arm)
-#endif
-
 	.align 2
-_sleep_save_sp:
-	.long	sleep_save_sp - .
 mpidr_hash_ptr:
 	.long	mpidr_hash - .			@ mpidr_hash struct offset
 
-	.data
 	.type	sleep_save_sp, #object
 ENTRY(sleep_save_sp)
+_sleep_save_sp:
 	.space	SLEEP_SAVE_SP_SZ		@ struct sleep_save_sp

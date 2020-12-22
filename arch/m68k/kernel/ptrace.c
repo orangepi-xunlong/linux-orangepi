@@ -286,7 +286,7 @@ asmlinkage void syscall_trace(void)
 	}
 }
 
-#if defined(CONFIG_COLDFIRE) || !defined(CONFIG_MMU)
+#ifdef CONFIG_COLDFIRE
 asmlinkage int syscall_trace_enter(void)
 {
 	int ret = 0;

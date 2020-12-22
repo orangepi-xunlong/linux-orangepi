@@ -29,6 +29,7 @@
 #include <linux/tty.h>
 #include <linux/gfp.h>
 #include <linux/ioport.h>
+#include <linux/init.h>
 #include <linux/serial.h>
 #include <linux/console.h>
 #include <linux/sysrq.h>
@@ -44,7 +45,6 @@
 #include <linux/kernel.h>
 
 #include <linux/of.h>
-#include <linux/of_address.h>
 
 #include "cpm_uart.h"
 

@@ -20,66 +20,30 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/export.h>
-#include <linux/vmalloc.h>
 
 #include "debug.h"
 #include "hif-ops.h"
-#include "htc-ops.h"
 #include "cfg80211.h"
 
 unsigned int debug_mask;
 static unsigned int suspend_mode;
 static unsigned int wow_mode;
 static unsigned int uart_debug;
-static unsigned int uart_rate = 115200;
 static unsigned int ath6kl_p2p;
 static unsigned int testmode;
-static unsigned int recovery_enable;
-static unsigned int heart_beat_poll;
 
 module_param(debug_mask, uint, 0644);
 module_param(suspend_mode, uint, 0644);
 module_param(wow_mode, uint, 0644);
 module_param(uart_debug, uint, 0644);
-module_param(uart_rate, uint, 0644);
 module_param(ath6kl_p2p, uint, 0644);
 module_param(testmode, uint, 0644);
-module_param(recovery_enable, uint, 0644);
-module_param(heart_beat_poll, uint, 0644);
-MODULE_PARM_DESC(recovery_enable, "Enable recovery from firmware error");
-MODULE_PARM_DESC(heart_beat_poll,
-		 "Enable fw error detection periodic polling in msecs - Also set recovery_enable for this to be effective");
 
-
-void ath6kl_core_tx_complete(struct ath6kl *ar, struct sk_buff *skb)
-{
-	ath6kl_htc_tx_complete(ar, skb);
-}
-EXPORT_SYMBOL(ath6kl_core_tx_complete);
-
-void ath6kl_core_rx_complete(struct ath6kl *ar, struct sk_buff *skb, u8 pipe)
-{
-	ath6kl_htc_rx_complete(ar, skb, pipe);
-}
-EXPORT_SYMBOL(ath6kl_core_rx_complete);
-
-int ath6kl_core_init(struct ath6kl *ar, enum ath6kl_htc_type htc_type)
+int ath6kl_core_init(struct ath6kl *ar)
 {
 	struct ath6kl_bmi_target_info targ_info;
-	struct wireless_dev *wdev;
+	struct net_device *ndev;
 	int ret = 0, i;
-
-	switch (htc_type) {
-	case ATH6KL_HTC_TYPE_MBOX:
-		ath6kl_htc_mbox_attach(ar);
-		break;
-	case ATH6KL_HTC_TYPE_PIPE:
-		ath6kl_htc_pipe_attach(ar);
-		break;
-	default:
-		WARN_ON(1);
-		return -ENOMEM;
-	}
 
 	ar->ath6kl_wq = create_singlethread_workqueue("ath6kl");
 	if (!ar->ath6kl_wq)
@@ -125,22 +89,6 @@ int ath6kl_core_init(struct ath6kl *ar, enum ath6kl_htc_type htc_type)
 
 	/* FIXME: we should free all firmwares in the error cases below */
 
-	/*
-	 * Backwards compatibility support for older ar6004 firmware images
-	 * which do not set these feature flags.
-	 */
-	if (ar->target_type == TARGET_TYPE_AR6004 &&
-	    ar->fw_api <= 4) {
-		__set_bit(ATH6KL_FW_CAPABILITY_64BIT_RATES,
-			  ar->fw_capabilities);
-		__set_bit(ATH6KL_FW_CAPABILITY_AP_INACTIVITY_MINS,
-			  ar->fw_capabilities);
-
-		if (ar->hw.id == AR6004_HW_1_3_VERSION)
-			__set_bit(ATH6KL_FW_CAPABILITY_MAP_LP_ENDPOINT,
-				  ar->fw_capabilities);
-	}
-
 	/* Indicate that WMI is enabled (although not ready yet) */
 	set_bit(WMI_ENABLED, &ar->flag);
 	ar->wmi = ath6kl_wmi_init(ar);
@@ -182,7 +130,6 @@ int ath6kl_core_init(struct ath6kl *ar, enum ath6kl_htc_type htc_type)
 
 	if (uart_debug)
 		ar->conf_flags |= ATH6KL_CONF_UART_DEBUG;
-	ar->hw.uarttx_rate = uart_rate;
 
 	set_bit(FIRST_BOOT, &ar->flag);
 
@@ -214,12 +161,12 @@ int ath6kl_core_init(struct ath6kl *ar, enum ath6kl_htc_type htc_type)
 	rtnl_lock();
 
 	/* Add an initial station interface */
-	wdev = ath6kl_interface_add(ar, "wlan%d", NET_NAME_ENUM,
-				    NL80211_IFTYPE_STATION, 0, INFRA_NETWORK);
+	ndev = ath6kl_interface_add(ar, "wlan%d", NL80211_IFTYPE_STATION, 0,
+				    INFRA_NETWORK);
 
 	rtnl_unlock();
 
-	if (!wdev) {
+	if (!ndev) {
 		ath6kl_err("Failed to instantiate a network device\n");
 		ret = -ENOMEM;
 		wiphy_unregister(ar->wiphy);
@@ -227,18 +174,7 @@ int ath6kl_core_init(struct ath6kl *ar, enum ath6kl_htc_type htc_type)
 	}
 
 	ath6kl_dbg(ATH6KL_DBG_TRC, "%s: name=%s dev=0x%p, ar=0x%p\n",
-		   __func__, wdev->netdev->name, wdev->netdev, ar);
-
-	ar->fw_recovery.enable = !!recovery_enable;
-	if (!ar->fw_recovery.enable)
-		return ret;
-
-	if (heart_beat_poll &&
-	    test_bit(ATH6KL_FW_CAPABILITY_HEART_BEAT_POLL,
-		     ar->fw_capabilities))
-		ar->fw_recovery.hb_poll = heart_beat_poll;
-
-	ath6kl_recovery_init(ar);
+		   __func__, ndev->name, ndev, ar);
 
 	return ret;
 
@@ -329,8 +265,6 @@ void ath6kl_core_cleanup(struct ath6kl *ar)
 {
 	ath6kl_hif_power_off(ar);
 
-	ath6kl_recovery_cleanup(ar);
-
 	destroy_workqueue(ar->ath6kl_wq);
 
 	if (ar->htc_target)
@@ -346,7 +280,7 @@ void ath6kl_core_cleanup(struct ath6kl *ar)
 
 	kfree(ar->fw_board);
 	kfree(ar->fw_otp);
-	vfree(ar->fw);
+	kfree(ar->fw);
 	kfree(ar->fw_patch);
 	kfree(ar->fw_testscript);
 

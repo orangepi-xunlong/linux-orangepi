@@ -15,14 +15,6 @@
 #include <linux/mmc/sdio_func.h>
 #endif /* defined(BUS_POWER_RESTORE) && defined(BCMSDIO) */
 
-#ifdef CUSTOMER_HW_ALLWINNER
-extern void sunxi_mmc_rescan_card(unsigned ids);
-extern void sunxi_wlan_set_power(int on);
-extern int sunxi_wlan_get_bus_index(void);
-extern int sunxi_wlan_get_oob_irq(void);
-extern int sunxi_wlan_get_oob_irq_flags(void);
-#endif
-
 #ifdef CONFIG_DHD_USE_STATIC_BUF
 extern void *dhd_wlan_mem_prealloc(int section, unsigned long size);
 #endif /* CONFIG_DHD_USE_STATIC_BUF */
@@ -32,8 +24,16 @@ static int gpio_wl_reg_on = -1; // WL_REG_ON is input pin of WLAN module
 static int gpio_wl_host_wake = -1; // WL_HOST_WAKE is output pin of WLAN module
 #endif
 
+#ifdef CUSTOMER_HW_ALLWINNER
+#include <linux/gpio.h>
+#include <mach/sys_config.h>
+static int sdc_id = 1;
+extern void sunxi_mci_rescan_card(unsigned id, unsigned insert);
+extern void wifi_pm_power(int on);
+#endif
+
 static int
-dhd_wlan_set_power(int on
+dhd_wlan_set_power(bool on
 #ifdef BUS_POWER_RESTORE
 , wifi_adapter_info_t *adapter
 #endif /* BUS_POWER_RESTORE */
@@ -51,18 +51,17 @@ dhd_wlan_set_power(int on
 			}
 		}
 #ifdef CUSTOMER_HW_ALLWINNER
-		sunxi_wlan_set_power(1);
+		wifi_pm_power(1);
 #endif
 #if defined(BUS_POWER_RESTORE)
-#if defined(BCMSDIO) && (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
+#if defined(BCMSDIO)
 		if (adapter->sdio_func && adapter->sdio_func->card && adapter->sdio_func->card->host) {
-			mdelay(100);
 			printf("======== mmc_power_restore_host! ========\n");
 			mmc_power_restore_host(adapter->sdio_func->card->host);
 		}
 #elif defined(BCMPCIE)
+		OSL_SLEEP(50); /* delay needed to be able to restore PCIe configuration registers */
 		if (adapter->pci_dev) {
-			mdelay(100);
 			printf("======== pci_set_power_state PCI_D0! ========\n");
 			pci_set_power_state(adapter->pci_dev, PCI_D0);
 			if (adapter->pci_saved_state)
@@ -79,7 +78,7 @@ dhd_wlan_set_power(int on
 		mdelay(100);
 	} else {
 #if defined(BUS_POWER_RESTORE)
-#if defined(BCMSDIO) && (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
+#if defined(BCMSDIO)
 		if (adapter->sdio_func && adapter->sdio_func->card && adapter->sdio_func->card->host) {
 			printf("======== mmc_power_save_host! ========\n");
 			mmc_power_save_host(adapter->sdio_func->card->host);
@@ -104,7 +103,7 @@ dhd_wlan_set_power(int on
 			}
 		}
 #ifdef CUSTOMER_HW_ALLWINNER
-		sunxi_wlan_set_power(0);
+		wifi_pm_power(0);
 #endif
 	}
 
@@ -116,14 +115,9 @@ static int dhd_wlan_set_reset(int onoff)
 	return 0;
 }
 
-static int dhd_wlan_set_carddetect(int present)
+static int dhd_wlan_set_carddetect(bool present)
 {
 	int err = 0;
-#ifdef CUSTOMER_HW_ALLWINNER
-        int wlan_bus_index = sunxi_wlan_get_bus_index();
-        if(wlan_bus_index < 0)
-                return wlan_bus_index;
-#endif
 
 #if !defined(BUS_POWER_RESTORE)
 	if (present) {
@@ -133,7 +127,7 @@ static int dhd_wlan_set_carddetect(int present)
 		err = sdhci_force_presence_change(&sdmmc_channel, 1);
 #endif /* CUSTOMER_HW_PLATFORM */
 #ifdef CUSTOMER_HW_ALLWINNER
-		sunxi_mmc_rescan_card(wlan_bus_index);
+		sunxi_mci_rescan_card(sdc_id, 1);
 #endif
 #elif defined(BCMPCIE)
 		printf("======== Card detection to detect PCIE card! ========\n");
@@ -145,7 +139,7 @@ static int dhd_wlan_set_carddetect(int present)
 		err = sdhci_force_presence_change(&sdmmc_channel, 0);
 #endif /* CUSTOMER_HW_PLATFORM */
 #ifdef CUSTOMER_HW_ALLWINNER
-		sunxi_mmc_rescan_card(wlan_bus_index);
+		sunxi_mci_rescan_card(sdc_id, 0);
 #endif
 #elif defined(BCMPCIE)
 		printf("======== Card detection to remove PCIE card! ========\n");
@@ -156,10 +150,61 @@ static int dhd_wlan_set_carddetect(int present)
 	return err;
 }
 
+#ifdef CUSTOMER_HW_ALLWINNER
+extern char *saved_command_line;
+#define MAC_KEY_VALUE "wifi_mac"
+s32 get_para_from_cmdline(const char *cmdline, const char *name, char *value)
+{
+	char *value_p = value;
+
+	if (!cmdline || !name || !value) {
+		return -1;
+	}
+
+	for (; *cmdline != 0;) {
+		if (*cmdline++ == ' ') {
+			if (0 == strncmp(cmdline, name, strlen(name))) {
+				cmdline += strlen(name);
+				if (*cmdline++ != '=') {
+					continue;
+				}
+				while (*cmdline != 0 && *cmdline != ' ') {
+					*value_p++ = *cmdline++;
+				}
+				return value_p - value;
+			}
+		}
+	}
+
+	return 0;
+}
+static u8 key_char2num(u8 ch)
+{
+	if ((ch>='0') && (ch<='9'))
+		return ch - '0';
+	else if ((ch>='a') && (ch<='f'))
+		return ch - 'a' + 10;
+	else if ((ch>='A') && (ch<='F'))
+		return ch - 'A' + 10;
+	else
+		return 0xff;
+}
+u8 key_2char2num(u8 hch, u8 lch)
+{
+	return ((key_char2num(hch) << 4) | key_char2num(lch));
+}
+#endif
+
 static int dhd_wlan_get_mac_addr(unsigned char *buf)
 {
-#define EXAMPLE_GET_MAC
 	int err = 0;
+#ifdef CUSTOMER_HW_ALLWINNER
+	int ret = 0;
+	char mac_str[18] = {0};
+	u8 mac[ETH_ALEN];
+	struct ether_addr mac_addr;
+	int jj,kk;
+#endif
 
 	printf("======== %s ========\n", __FUNCTION__);
 #ifdef EXAMPLE_GET_MAC
@@ -169,6 +214,41 @@ static int dhd_wlan_get_mac_addr(unsigned char *buf)
 		bcopy((char *)&ea_example, buf, sizeof(struct ether_addr));
 	}
 #endif /* EXAMPLE_GET_MAC */
+
+#ifdef CUSTOMER_HW_ALLWINNER
+	get_para_from_cmdline(saved_command_line, MAC_KEY_VALUE, mac_str);
+	printk("%s wifi_mac=%s\n", __FUNCTION__, mac_str);
+/*
+	if (mac_str != NULL) {
+		//printk(KERN_ERR "mac_str=%s\n",mac_str);
+		for ( jj = 0, kk = 0; jj < ETH_ALEN; jj++, kk += 3 ) {
+			mac[jj] = key_2char2num(mac_str[kk], mac_str[kk+ 1]);
+			printk("%d:", mac[jj]);
+		}
+		printk("\n");
+		if (is_valid_ether_addr(mac)) {
+			memcpy(mac_addr.octet, mac, ETHER_ADDR_LEN);
+			bcopy((char *)&mac_addr, buf, sizeof(struct ether_addr));
+			ret = 0;
+		} else 
+			ret = -1;
+	} else {
+		printk("get mac from cmdline failed.\n");
+		ret = -1;
+	}
+*/
+	if(mac_str != NULL && is_valid_ether_addr(mac_str)) {
+		printk(KERN_ERR "mac_str=%s\n",mac_str);
+		for( jj = 0, kk = 0; jj < ETH_ALEN; jj++, kk += 3 ) {
+			mac[jj] = key_2char2num(mac_str[kk], mac_str[kk+ 1]);
+		}
+		memcpy(mac_addr.octet, mac, ETHER_ADDR_LEN);
+		bcopy((char *)&mac_addr, buf, sizeof(struct ether_addr));
+		ret = 0;
+	} else {
+		ret = -1;
+	}
+#endif
 #ifdef EXAMPLE_GET_MAC_VER2
 	/* EXAMPLE code */
 	{
@@ -187,28 +267,21 @@ static int dhd_wlan_get_mac_addr(unsigned char *buf)
 	return err;
 }
 
+#if !defined(WL_WIRELESS_EXT)
+struct cntry_locales_custom {
+	char iso_abbrev[WLC_CNTRY_BUF_SZ];	/* ISO 3166-1 country abbreviation */
+	char custom_locale[WLC_CNTRY_BUF_SZ];	/* Custom firmware locale */
+	int32 custom_locale_rev;		/* Custom local revisin default -1 */
+};
+#endif
+
 static struct cntry_locales_custom brcm_wlan_translate_custom_table[] = {
 	/* Table should be filled out based on custom platform regulatory requirement */
-#ifdef EXAMPLE_TABLE
 	{"",   "XT", 49},  /* Universal if Country code is unknown or empty */
 	{"US", "US", 0},
-#endif /* EXMAPLE_TABLE */
 };
 
-#ifdef CUSTOM_FORCE_NODFS_FLAG
-struct cntry_locales_custom brcm_wlan_translate_nodfs_table[] = {
-#ifdef EXAMPLE_TABLE
-	{"",   "XT", 50},  /* Universal if Country code is unknown or empty */
-	{"US", "US", 0},
-#endif /* EXMAPLE_TABLE */
-};
-#endif
-
-static void *dhd_wlan_get_country_code(char *ccode
-#ifdef CUSTOM_FORCE_NODFS_FLAG
-	, u32 flags
-#endif
-)
+static void *dhd_wlan_get_country_code(char *ccode)
 {
 	struct cntry_locales_custom *locales;
 	int size;
@@ -217,17 +290,8 @@ static void *dhd_wlan_get_country_code(char *ccode
 	if (!ccode)
 		return NULL;
 
-#ifdef CUSTOM_FORCE_NODFS_FLAG
-	if (flags & WLAN_PLAT_NODFS_FLAG) {
-		locales = brcm_wlan_translate_nodfs_table;
-		size = ARRAY_SIZE(brcm_wlan_translate_nodfs_table);
-	} else {
-#endif
-		locales = brcm_wlan_translate_custom_table;
-		size = ARRAY_SIZE(brcm_wlan_translate_custom_table);
-#ifdef CUSTOM_FORCE_NODFS_FLAG
-	}
-#endif
+	locales = brcm_wlan_translate_custom_table;
+	size = ARRAY_SIZE(brcm_wlan_translate_custom_table);
 
 	for (i = 0; i < size; i++)
 		if (strcmp(ccode, locales[i].iso_abbrev) == 0)
@@ -263,6 +327,18 @@ int dhd_wlan_init_gpio(void)
 	int host_oob_irq = -1;
 	uint host_oob_irq_flags = 0;
 #endif
+#ifdef CUSTOMER_HW_ALLWINNER
+	script_item_value_type_e type;
+	script_item_u val;
+	int host_wake_invert = 0;
+
+	type = script_get_item("wifi_para", "wifi_sdc_id", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type) {
+		printf("failed to fetch sdio card's sdcid\n");
+		return -1;
+	}
+	sdc_id = val.val;
+#endif
 
 	/* Please check your schematic and fill right GPIO number which connected to
 	* WL_REG_ON and WL_HOST_WAKE.
@@ -270,6 +346,20 @@ int dhd_wlan_init_gpio(void)
 	gpio_wl_reg_on = -1;
 #ifdef CUSTOMER_OOB
 	gpio_wl_host_wake = -1;
+#ifdef CUSTOMER_HW_ALLWINNER
+	type = script_get_item("wifi_para", "wl_host_wake", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_PIO != type) {
+		printf("get bcmdhd wl_host_wake gpio failed\n");
+		return 0;
+	} else {
+		gpio_wl_host_wake = val.gpio.gpio;
+	}
+	type = script_get_item("wifi_para", "wl_host_wake_invert", &val);
+	if (SCIRPT_ITEM_VALUE_TYPE_INT != type)
+		printf("has no wl_host_wake_invert\n");
+	else
+		host_wake_invert = val.val;
+#endif
 #endif
 
 	if (gpio_wl_reg_on >= 0) {
@@ -304,30 +394,23 @@ int dhd_wlan_init_gpio(void)
 			return -1;
 		}
 	}
-#ifdef CUSTOMER_HW_ALLWINNER
-	host_oob_irq = sunxi_wlan_get_oob_irq();
-#endif
 
+#ifdef CUSTOMER_HW_ALLWINNER
 #ifdef HW_OOB
-#ifdef HW_OOB_LOW_LEVEL
-	host_oob_irq_flags = IORESOURCE_IRQ | IORESOURCE_IRQ_LOWLEVEL | IORESOURCE_IRQ_SHAREABLE;
-#else
-	host_oob_irq_flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL | IORESOURCE_IRQ_SHAREABLE;
-#endif
+	if(host_wake_invert)
+		host_oob_irq_flags = IORESOURCE_IRQ | IORESOURCE_IRQ_LOWLEVEL | IORESOURCE_IRQ_SHAREABLE;
+	else
+		host_oob_irq_flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL | IORESOURCE_IRQ_SHAREABLE;
 #else
 	host_oob_irq_flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE | IORESOURCE_IRQ_SHAREABLE;
 #endif
-
-#ifdef CUSTOMER_HW_ALLWINNER
-	host_oob_irq_flags = sunxi_wlan_get_oob_irq_flags();
 #endif
 
 	dhd_wlan_resources[0].start = dhd_wlan_resources[0].end = host_oob_irq;
 	dhd_wlan_resources[0].flags = host_oob_irq_flags;
-	printf("%s: WL_HOST_WAKE=%d, oob_irq=%d, oob_irq_flags=0x%x\n", __FUNCTION__,
-		gpio_wl_host_wake, host_oob_irq, host_oob_irq_flags);
+	printf("%s: WL_REG_ON=%d, WL_HOST_WAKE=%d\n", __FUNCTION__, gpio_wl_reg_on, gpio_wl_host_wake);
+	printf("%s: oob_irq=%d, oob_irq_flags=0x%x\n", __FUNCTION__, host_oob_irq, host_oob_irq_flags);
 #endif /* CUSTOMER_OOB */
-	printf("%s: WL_REG_ON=%d\n", __FUNCTION__, gpio_wl_reg_on);
 
 	return 0;
 }

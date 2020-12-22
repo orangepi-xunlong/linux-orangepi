@@ -14,7 +14,6 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/pci.h>
-#include <linux/sh_intc.h>
 #include "pci-sh4.h"
 
 #define PCIMCR_MRSET_OFF	0xBFFFFFFF
@@ -28,7 +27,7 @@ int pcibios_map_platform_irq(const struct pci_dev *pdev, u8 slot, u8 pin)
 	 * slot2: pin1-4 = irq7,8,5,6
 	 * slot3: pin1-4 = irq8,5,6,7
 	 */
-	int irq = ((slot + pin - 1) & 0x3) + evt2irq(0x2a0);
+	int irq = ((slot + pin - 1) & 0x3) + 5;
 
 	if ((slot | (pin - 1)) > 0x3) {
 		printk(KERN_WARNING "PCI: Bad IRQ mapping request for slot %d pin %c\n",

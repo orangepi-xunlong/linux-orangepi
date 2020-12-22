@@ -39,6 +39,7 @@
 
 #include <asm/dma.h>
 
+#include "bf5xx-ac97-pcm.h"
 #include "bf5xx-ac97.h"
 #include "bf5xx-sport.h"
 
@@ -107,6 +108,7 @@ static const struct snd_pcm_hardware bf5xx_pcm_hardware = {
 #endif
 				   SNDRV_PCM_INFO_BLOCK_TRANSFER,
 
+	.formats		= SNDRV_PCM_FMTBIT_S16_LE,
 	.period_bytes_min	= 32,
 	.period_bytes_max	= 0x10000,
 	.periods_min		= 1,
@@ -414,16 +416,19 @@ static void bf5xx_pcm_free_dma_buffers(struct snd_pcm *pcm)
 	}
 }
 
+static u64 bf5xx_pcm_dmamask = DMA_BIT_MASK(32);
+
 static int bf5xx_pcm_ac97_new(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_card *card = rtd->card->snd_card;
 	struct snd_pcm *pcm = rtd->pcm;
-	int ret;
+	int ret = 0;
 
 	pr_debug("%s enter\n", __func__);
-	ret = dma_coerce_mask_and_coherent(card->dev, DMA_BIT_MASK(32));
-	if (ret)
-		return ret;
+	if (!card->dev->dma_mask)
+		card->dev->dma_mask = &bf5xx_pcm_dmamask;
+	if (!card->dev->coherent_dma_mask)
+		card->dev->coherent_dma_mask = DMA_BIT_MASK(32);
 
 	if (pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream) {
 		ret = bf5xx_pcm_preallocate_dma_buffer(pcm,
@@ -448,18 +453,25 @@ static struct snd_soc_platform_driver bf5xx_ac97_soc_platform = {
 	.pcm_free	= bf5xx_pcm_free_dma_buffers,
 };
 
-static int bf5xx_soc_platform_probe(struct platform_device *pdev)
+static int __devinit bf5xx_soc_platform_probe(struct platform_device *pdev)
 {
-	return devm_snd_soc_register_platform(&pdev->dev,
-					      &bf5xx_ac97_soc_platform);
+	return snd_soc_register_platform(&pdev->dev, &bf5xx_ac97_soc_platform);
+}
+
+static int __devexit bf5xx_soc_platform_remove(struct platform_device *pdev)
+{
+	snd_soc_unregister_platform(&pdev->dev);
+	return 0;
 }
 
 static struct platform_driver bf5xx_pcm_driver = {
 	.driver = {
 			.name = "bfin-ac97-pcm-audio",
+			.owner = THIS_MODULE,
 	},
 
 	.probe = bf5xx_soc_platform_probe,
+	.remove = __devexit_p(bf5xx_soc_platform_remove),
 };
 
 module_platform_driver(bf5xx_pcm_driver);

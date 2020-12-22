@@ -11,8 +11,8 @@
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/atomic.h>
-#include "cns3xxx.h"
-#include "pm.h"
+#include <mach/cns3xxx.h>
+#include <mach/pm.h>
 #include "core.h"
 
 void cns3xxx_pwr_clk_en(unsigned int block)
@@ -73,6 +73,7 @@ static void cns3xxx_pwr_soft_rst_force(unsigned int block)
 
 	__raw_writel(reg, PM_SOFT_RST_REG);
 }
+EXPORT_SYMBOL(cns3xxx_pwr_soft_rst_force);
 
 void cns3xxx_pwr_soft_rst(unsigned int block)
 {
@@ -88,7 +89,7 @@ void cns3xxx_pwr_soft_rst(unsigned int block)
 }
 EXPORT_SYMBOL(cns3xxx_pwr_soft_rst);
 
-void cns3xxx_restart(enum reboot_mode mode, const char *cmd)
+void cns3xxx_restart(char mode, const char *cmd)
 {
 	/*
 	 * To reset, we hit the on-board reset register

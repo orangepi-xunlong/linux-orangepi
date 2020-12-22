@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-sunxi/include/mach/sunxi-smc.h
  *
- * Copyright(c) 2013-2015 Allwinnertech Co., Ltd.
+ * Copyright(c) 2013-2015 Allwinnertech Co., Ltd. 
  *         http://www.allwinnertech.com
  *
  * Author: sunny <sunny@allwinnertech.com>
@@ -50,8 +50,8 @@ struct smc_param {
 	u32 a3;
 };
 /*raw smc all in asm*/
-u32 __sunxi_smc_call(struct smc_param *param);
-u32 __sunxi_fast_smc_call(struct smc_param *param);
+u32 __sunxi_smc_call(struct smc_param *param); 
+u32 __sunxi_fast_smc_call(struct smc_param *param); 
 
 /*generic smc api cpu 0*/
 u32 sunxi_smc_call(struct smc_param *param);
@@ -60,23 +60,25 @@ u32 sunxi_smc_call(struct smc_param *param);
 #if  defined(CONFIG_SUNXI_TRUSTZONE)
 static inline u32 sunxi_smc_readl(void __iomem *addr)
 {
-	if (sunxi_soc_is_secure())
+	if (sunxi_soc_is_secure()) {
 		return call_firmware_op(read_reg, addr);
-	else
+	} else {
 		return readl(addr);
-
+	}
+	
 }
 static inline void sunxi_smc_writel(u32 val, void __iomem *addr)
 {
-	if (sunxi_soc_is_secure())
+	if (sunxi_soc_is_secure()) {
 		call_firmware_op(write_reg, val, addr);
-	else
+	} else {
 		writel(val, addr);
+	}
 }
 #else
 static inline u32 sunxi_smc_readl(void __iomem *addr)
 {
-	return readl(addr);
+	return readl(addr);	
 }
 static inline void sunxi_smc_writel(u32 val, void __iomem *addr)
 {

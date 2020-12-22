@@ -1,5 +1,5 @@
 #
-# Makefile for the QLogic BR-series device drivers.
+# Makefile for the Brocade device drivers.
 #
 
 obj-$(CONFIG_BNA) += bna/

@@ -1,0 +1,50 @@
+menuconfig XR_WLAN
+	tristate "XRadio WLAN support"
+	default n
+	select CFG80211
+	select AVERAGE
+	select MMC_UNSAFE_RESUME
+	select CRYPTO
+	select CRYPTO_ARC4
+	---help---
+	  To compile this code as a module, choose M here.
+
+if XR_WLAN
+
+config XRADIO_NON_POWER_OF_TWO_BLOCKSIZES
+	bool "Platform supports non-power-of-two SDIO transfer"
+	depends on XR_WLAN
+	default y
+	---help---
+	  Say N here only if you are running the driver on a platform
+	  which does not have support for non-power-of-two SDIO transfer.
+	  If unsure, say Y.
+
+config XRADIO_USE_GPIO_IRQ
+	bool "Use GPIO interrupt"
+	depends on XR_WLAN
+	default y
+	---help---
+	  Say Y here if you want to include GPIO IRQ support instead of SDIO IRQ.
+	  If unsure, say Y.
+
+config XRADIO_SUSPEND_POWER_OFF
+	bool "Wlan power off in suspend(disable WoW)"
+	depends on XR_WLAN && PM
+	default n
+	---help---
+	  Say Y if you want to wlan power off in suspend,
+	  and then WoW will be disable.
+	  If unsure, say N.
+
+config XRADIO_EXTEND_SUSPEND
+	bool "Support extend suspend(use in special platform)"
+	depends on XR_WLAN && PM
+	select XRADIO_SUSPEND_POWER_OFF
+	default n
+	---help---
+	  Say Y if you want to support extend supend, but
+	  extend suspend need to be support on your platform.
+	  If unsure, say N.
+
+endif # XR_WLAN

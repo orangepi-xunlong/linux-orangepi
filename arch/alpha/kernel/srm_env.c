@@ -51,11 +51,13 @@ MODULE_LICENSE("GPL");
 typedef struct _srm_env {
 	char			*name;
 	unsigned long		id;
+	struct proc_dir_entry	*proc_entry;
 } srm_env_t;
 
 static struct proc_dir_entry	*base_dir;
 static struct proc_dir_entry	*named_dir;
 static struct proc_dir_entry	*numbered_dir;
+static char			number[256][4];
 
 static srm_env_t	srm_named_entries[] = {
 	{ "auto_action",	ENV_AUTO_ACTION		},
@@ -75,18 +77,21 @@ static srm_env_t	srm_named_entries[] = {
 	{ "tty_dev",		ENV_TTY_DEV		},
 	{ NULL,			0			},
 };
+static srm_env_t	srm_numbered_entries[256];
+
 
 static int srm_env_proc_show(struct seq_file *m, void *v)
 {
 	unsigned long	ret;
-	unsigned long	id = (unsigned long)m->private;
+	srm_env_t	*entry;
 	char		*page;
 
+	entry = m->private;
 	page = (char *)__get_free_page(GFP_USER);
 	if (!page)
 		return -ENOMEM;
 
-	ret = callback_getenv(id, page, PAGE_SIZE);
+	ret = callback_getenv(entry->id, page, PAGE_SIZE);
 
 	if ((ret >> 61) == 0) {
 		seq_write(m, page, ret);
@@ -99,14 +104,14 @@ static int srm_env_proc_show(struct seq_file *m, void *v)
 
 static int srm_env_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, srm_env_proc_show, PDE_DATA(inode));
+	return single_open(file, srm_env_proc_show, PDE(inode)->data);
 }
 
 static ssize_t srm_env_proc_write(struct file *file, const char __user *buffer,
 				  size_t count, loff_t *pos)
 {
 	int res;
-	unsigned long	id = (unsigned long)PDE_DATA(file_inode(file));
+	srm_env_t	*entry = PDE(file->f_path.dentry->d_inode)->data;
 	char		*buf = (char *) __get_free_page(GFP_USER);
 	unsigned long	ret1, ret2;
 
@@ -122,7 +127,7 @@ static ssize_t srm_env_proc_write(struct file *file, const char __user *buffer,
 		goto out;
 	buf[count] = '\0';
 
-	ret1 = callback_setenv(id, buf, count);
+	ret1 = callback_setenv(entry->id, buf, count);
 	if ((ret1 >> 61) == 0) {
 		do
 			ret2 = callback_save_env();
@@ -144,6 +149,52 @@ static const struct file_operations srm_env_proc_fops = {
 	.write		= srm_env_proc_write,
 };
 
+static void
+srm_env_cleanup(void)
+{
+	srm_env_t	*entry;
+	unsigned long	var_num;
+
+	if (base_dir) {
+		/*
+		 * Remove named entries
+		 */
+		if (named_dir) {
+			entry = srm_named_entries;
+			while (entry->name != NULL && entry->id != 0) {
+				if (entry->proc_entry) {
+					remove_proc_entry(entry->name,
+							named_dir);
+					entry->proc_entry = NULL;
+				}
+				entry++;
+			}
+			remove_proc_entry(NAMED_DIR, base_dir);
+		}
+
+		/*
+		 * Remove numbered entries
+		 */
+		if (numbered_dir) {
+			for (var_num = 0; var_num <= 255; var_num++) {
+				entry =	&srm_numbered_entries[var_num];
+
+				if (entry->proc_entry) {
+					remove_proc_entry(entry->name,
+							numbered_dir);
+					entry->proc_entry	= NULL;
+					entry->name		= NULL;
+				}
+			}
+			remove_proc_entry(NUMBERED_DIR, base_dir);
+		}
+
+		remove_proc_entry(BASE_DIR, NULL);
+	}
+
+	return;
+}
+
 static int __init
 srm_env_init(void)
 {
@@ -162,13 +213,19 @@ srm_env_init(void)
 	}
 
 	/*
+	 * Init numbers
+	 */
+	for (var_num = 0; var_num <= 255; var_num++)
+		sprintf(number[var_num], "%ld", var_num);
+
+	/*
 	 * Create base directory
 	 */
 	base_dir = proc_mkdir(BASE_DIR, NULL);
 	if (!base_dir) {
 		printk(KERN_ERR "Couldn't create base dir /proc/%s\n",
 				BASE_DIR);
-		return -ENOMEM;
+		goto cleanup;
 	}
 
 	/*
@@ -197,8 +254,9 @@ srm_env_init(void)
 	 */
 	entry = srm_named_entries;
 	while (entry->name && entry->id) {
-		if (!proc_create_data(entry->name, 0644, named_dir,
-			     &srm_env_proc_fops, (void *)entry->id))
+		entry->proc_entry = proc_create_data(entry->name, 0644, named_dir,
+						     &srm_env_proc_fops, entry);
+		if (!entry->proc_entry)
 			goto cleanup;
 		entry++;
 	}
@@ -207,11 +265,15 @@ srm_env_init(void)
 	 * Create all numbered nodes
 	 */
 	for (var_num = 0; var_num <= 255; var_num++) {
-		char name[4];
-		sprintf(name, "%ld", var_num);
-		if (!proc_create_data(name, 0644, numbered_dir,
-			     &srm_env_proc_fops, (void *)var_num))
+		entry = &srm_numbered_entries[var_num];
+		entry->name = number[var_num];
+
+		entry->proc_entry = proc_create_data(entry->name, 0644, numbered_dir,
+						     &srm_env_proc_fops, entry);
+		if (!entry->proc_entry)
 			goto cleanup;
+
+		entry->id			= var_num;
 	}
 
 	printk(KERN_INFO "%s: version %s loaded successfully\n", NAME,
@@ -220,15 +282,18 @@ srm_env_init(void)
 	return 0;
 
 cleanup:
-	remove_proc_subtree(BASE_DIR, NULL);
+	srm_env_cleanup();
+
 	return -ENOMEM;
 }
 
 static void __exit
 srm_env_exit(void)
 {
-	remove_proc_subtree(BASE_DIR, NULL);
+	srm_env_cleanup();
 	printk(KERN_INFO "%s: unloaded successfully\n", NAME);
+
+	return;
 }
 
 module_init(srm_env_init);

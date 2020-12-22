@@ -14,7 +14,6 @@
  */
 
 #include "boot.h"
-#include "string.h"
 
 struct boot_params boot_params __attribute__((aligned(16)));
 
@@ -58,20 +57,14 @@ static void copy_boot_params(void)
 }
 
 /*
- * Query the keyboard lock status as given by the BIOS, and
- * set the keyboard repeat rate to maximum.  Unclear why the latter
+ * Set the keyboard repeat rate to maximum.  Unclear why this
  * is done here; this might be possible to kill off as stale code.
  */
-static void keyboard_init(void)
+static void keyboard_set_repeat(void)
 {
-	struct biosregs ireg, oreg;
+	struct biosregs ireg;
 	initregs(&ireg);
-
-	ireg.ah = 0x02;		/* Get keyboard status */
-	intcall(0x16, &ireg, &oreg);
-	boot_params.kbd_status = oreg.al;
-
-	ireg.ax = 0x0305;	/* Set keyboard repeat rate */
+	ireg.ax = 0x0305;
 	intcall(0x16, &ireg, NULL);
 }
 
@@ -158,8 +151,11 @@ void main(void)
 	/* Detect memory layout */
 	detect_memory();
 
-	/* Set keyboard repeat rate (why?) and query the lock flags */
-	keyboard_init();
+	/* Set keyboard repeat rate (why?) */
+	keyboard_set_repeat();
+
+	/* Query MCA information */
+	query_mca();
 
 	/* Query Intel SpeedStep (IST) information */
 	query_ist();

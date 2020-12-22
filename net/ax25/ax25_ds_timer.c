@@ -70,6 +70,7 @@ static void ax25_ds_timeout(unsigned long arg)
 {
 	ax25_dev *ax25_dev = (struct ax25_dev *) arg;
 	ax25_cb *ax25;
+	struct hlist_node *node;
 
 	if (ax25_dev == NULL || !ax25_dev->dama.slave)
 		return;			/* Yikes! */
@@ -80,7 +81,7 @@ static void ax25_ds_timeout(unsigned long arg)
 	}
 
 	spin_lock(&ax25_list_lock);
-	ax25_for_each(ax25, &ax25_list) {
+	ax25_for_each(ax25, node, &ax25_list) {
 		if (ax25->ax25_dev != ax25_dev || !(ax25->condition & AX25_COND_DAMA_MODE))
 			continue;
 
@@ -102,7 +103,6 @@ void ax25_ds_heartbeat_expiry(ax25_cb *ax25)
 	switch (ax25->state) {
 
 	case AX25_STATE_0:
-	case AX25_STATE_2:
 		/* Magic here: If we listen() and a new link dies before it
 		   is accepted() it isn't 'dead' so doesn't get removed. */
 		if (!sk || sock_flag(sk, SOCK_DESTROY) ||
@@ -112,7 +112,6 @@ void ax25_ds_heartbeat_expiry(ax25_cb *ax25)
 				sock_hold(sk);
 				ax25_destroy_socket(ax25);
 				bh_unlock_sock(sk);
-				/* Ungrab socket and destroy it */
 				sock_put(sk);
 			} else
 				ax25_destroy_socket(ax25);
@@ -215,8 +214,7 @@ void ax25_ds_t1_timeout(ax25_cb *ax25)
 	case AX25_STATE_2:
 		if (ax25->n2count == ax25->n2) {
 			ax25_send_control(ax25, AX25_DISC, AX25_POLLON, AX25_COMMAND);
-			if (!sock_flag(ax25->sk, SOCK_DESTROY))
-				ax25_disconnect(ax25, ETIMEDOUT);
+			ax25_disconnect(ax25, ETIMEDOUT);
 			return;
 		} else {
 			ax25->n2count++;

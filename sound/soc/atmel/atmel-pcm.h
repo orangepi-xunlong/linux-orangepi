@@ -36,8 +36,6 @@
 
 #include <linux/atmel-ssc.h>
 
-#define ATMEL_SSC_DMABUF_SIZE	(64 * 1024)
-
 /*
  * Registers and status bits that are required by the PCM driver.
  */
@@ -52,7 +50,6 @@ struct atmel_pdc_regs {
 struct atmel_ssc_mask {
 	u32	ssc_enable;		/* SSC recv/trans enable */
 	u32	ssc_disable;		/* SSC recv/trans disable */
-	u32	ssc_error;		/* SSC error conditions */
 	u32	ssc_endx;		/* SSC ENDTX or ENDRX */
 	u32	ssc_endbuf;		/* SSC TXBUFE or RXBUFF */
 	u32	pdc_enable;		/* PDC recv/trans enable */
@@ -82,33 +79,5 @@ struct atmel_pcm_dma_params {
  */
 #define ssc_readx(base, reg)            (__raw_readl((base) + (reg)))
 #define ssc_writex(base, reg, value)    __raw_writel((value), (base) + (reg))
-
-#if defined(CONFIG_SND_ATMEL_SOC_PDC) || \
-	defined(CONFIG_SND_ATMEL_SOC_PDC_MODULE)
-int atmel_pcm_pdc_platform_register(struct device *dev);
-void atmel_pcm_pdc_platform_unregister(struct device *dev);
-#else
-static inline int atmel_pcm_pdc_platform_register(struct device *dev)
-{
-	return 0;
-}
-static inline void atmel_pcm_pdc_platform_unregister(struct device *dev)
-{
-}
-#endif
-
-#if defined(CONFIG_SND_ATMEL_SOC_DMA) || \
-	defined(CONFIG_SND_ATMEL_SOC_DMA_MODULE)
-int atmel_pcm_dma_platform_register(struct device *dev);
-void atmel_pcm_dma_platform_unregister(struct device *dev);
-#else
-static inline int atmel_pcm_dma_platform_register(struct device *dev)
-{
-	return 0;
-}
-static inline void atmel_pcm_dma_platform_unregister(struct device *dev)
-{
-}
-#endif
 
 #endif /* _ATMEL_PCM_H */

@@ -830,14 +830,14 @@
  *              	(read/write).
  */
 
-#define OSMR0  		io_p2v(0x90000000)  /* OS timer Match Reg. 0 */
-#define OSMR1  		io_p2v(0x90000004)  /* OS timer Match Reg. 1 */
-#define OSMR2  		io_p2v(0x90000008)  /* OS timer Match Reg. 2 */
-#define OSMR3  		io_p2v(0x9000000c)  /* OS timer Match Reg. 3 */
-#define OSCR   		io_p2v(0x90000010)  /* OS timer Counter Reg. */
-#define OSSR   		io_p2v(0x90000014)  /* OS timer Status Reg. */
-#define OWER   		io_p2v(0x90000018)  /* OS timer Watch-dog Enable Reg. */
-#define OIER  	 	io_p2v(0x9000001C)  /* OS timer Interrupt Enable Reg. */
+#define OSMR0  		__REG(0x90000000)  /* OS timer Match Reg. 0 */
+#define OSMR1  		__REG(0x90000004)  /* OS timer Match Reg. 1 */
+#define OSMR2  		__REG(0x90000008)  /* OS timer Match Reg. 2 */
+#define OSMR3  		__REG(0x9000000c)  /* OS timer Match Reg. 3 */
+#define OSCR   	__REG(0x90000010)  /* OS timer Counter Reg. */
+#define OSSR   	__REG(0x90000014	)  /* OS timer Status Reg. */
+#define OWER   	__REG(0x90000018	)  /* OS timer Watch-dog Enable Reg. */
+#define OIER   	__REG(0x9000001C	)  /* OS timer Interrupt Enable Reg. */
 
 #define OSSR_M(Nb)	        	/* Match detected [0..3]           */ \
                 	(0x00000001 << (Nb))
@@ -855,6 +855,40 @@
 #define OIER_E1 	OIER_E (1)	/* match interrupt Enable 1        */
 #define OIER_E2 	OIER_E (2)	/* match interrupt Enable 2        */
 #define OIER_E3 	OIER_E (3)	/* match interrupt Enable 3        */
+
+
+/*
+ * Real-Time Clock (RTC) control registers
+ *
+ * Registers
+ *    RTAR      	Real-Time Clock (RTC) Alarm Register (read/write).
+ *    RCNR      	Real-Time Clock (RTC) CouNt Register (read/write).
+ *    RTTR      	Real-Time Clock (RTC) Trim Register (read/write).
+ *    RTSR      	Real-Time Clock (RTC) Status Register (read/write).
+ *
+ * Clocks
+ *    frtx, Trtx	Frequency, period of the real-time clock crystal
+ *              	(32.768 kHz nominal).
+ *    frtc, Trtc	Frequency, period of the real-time clock counter
+ *              	(1 Hz nominal).
+ */
+
+#define RTAR		__REG(0x90010000)  /* RTC Alarm Reg. */
+#define RCNR		__REG(0x90010004)  /* RTC CouNt Reg. */
+#define RTTR		__REG(0x90010008)  /* RTC Trim Reg. */
+#define RTSR		__REG(0x90010010)  /* RTC Status Reg. */
+
+#define RTTR_C  	Fld (16, 0)	/* clock divider Count - 1         */
+#define RTTR_D  	Fld (10, 16)	/* trim Delete count               */
+                	        	/* frtc = (1023*(C + 1) - D)*frtx/ */
+                	        	/*        (1023*(C + 1)^2)         */
+                	        	/* Trtc = (1023*(C + 1)^2)*Trtx/   */
+                	        	/*        (1023*(C + 1) - D)       */
+
+#define RTSR_AL 	0x00000001	/* ALarm detected                  */
+#define RTSR_HZ 	0x00000002	/* 1 Hz clock detected             */
+#define RTSR_ALE	0x00000004	/* ALarm interrupt Enable          */
+#define RTSR_HZE	0x00000008	/* 1 Hz clock interrupt Enable     */
 
 
 /*

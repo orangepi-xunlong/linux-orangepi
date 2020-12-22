@@ -547,9 +547,9 @@ static __be16 plip_type_trans(struct sk_buff *skb, struct net_device *dev)
 	skb_pull(skb,dev->hard_header_len);
 	eth = eth_hdr(skb);
 
-	if(is_multicast_ether_addr(eth->h_dest))
+	if(*eth->h_dest&1)
 	{
-		if(ether_addr_equal_64bits(eth->h_dest, dev->broadcast))
+		if(memcmp(eth->h_dest,dev->broadcast, ETH_ALEN)==0)
 			skb->pkt_type=PACKET_BROADCAST;
 		else
 			skb->pkt_type=PACKET_MULTICAST;
@@ -560,7 +560,7 @@ static __be16 plip_type_trans(struct sk_buff *skb, struct net_device *dev)
 	 *	so don't forget to remove it.
 	 */
 
-	if (ntohs(eth->h_proto) >= ETH_P_802_3_MIN)
+	if (ntohs(eth->h_proto) >= 1536)
 		return eth->h_proto;
 
 	rawp = skb->data;
@@ -1002,7 +1002,7 @@ plip_rewrite_address(const struct net_device *dev, struct ethhdr *eth)
 		/* Any address will do - we take the first */
 		const struct in_ifaddr *ifa = in_dev->ifa_list;
 		if (ifa) {
-			memcpy(eth->h_source, dev->dev_addr, ETH_ALEN);
+			memcpy(eth->h_source, dev->dev_addr, 6);
 			memset(eth->h_dest, 0xfc, 2);
 			memcpy(eth->h_dest+2, &ifa->ifa_address, 4);
 		}
@@ -1249,7 +1249,6 @@ static void plip_attach (struct parport *port)
 	struct net_device *dev;
 	struct net_local *nl;
 	char name[IFNAMSIZ];
-	struct pardev_cb plip_cb;
 
 	if ((parport[0] == -1 && (!timid || !port->devices)) ||
 	    plip_searchfor(parport, port->number)) {
@@ -1274,15 +1273,9 @@ static void plip_attach (struct parport *port)
 
 		nl = netdev_priv(dev);
 		nl->dev = dev;
-
-		memset(&plip_cb, 0, sizeof(plip_cb));
-		plip_cb.private = dev;
-		plip_cb.preempt = plip_preempt;
-		plip_cb.wakeup = plip_wakeup;
-		plip_cb.irq_func = plip_interrupt;
-
-		nl->pardev = parport_register_dev_model(port, dev->name,
-							&plip_cb, unit);
+		nl->pardev = parport_register_device(port, dev->name, plip_preempt,
+						 plip_wakeup, plip_interrupt,
+						 0, dev);
 
 		if (!nl->pardev) {
 			printk(KERN_ERR "%s: parport_register failed\n", name);
@@ -1322,29 +1315,18 @@ static void plip_detach (struct parport *port)
 	/* Nothing to do */
 }
 
-static int plip_probe(struct pardevice *par_dev)
-{
-	struct device_driver *drv = par_dev->dev.driver;
-	int len = strlen(drv->name);
-
-	if (strncmp(par_dev->name, drv->name, len))
-		return -ENODEV;
-
-	return 0;
-}
-
 static struct parport_driver plip_driver = {
-	.name		= "plip",
-	.probe		= plip_probe,
-	.match_port	= plip_attach,
-	.detach		= plip_detach,
-	.devmodel	= true,
+	.name	= "plip",
+	.attach = plip_attach,
+	.detach = plip_detach
 };
 
 static void __exit plip_cleanup_module (void)
 {
 	struct net_device *dev;
 	int i;
+
+	parport_unregister_driver (&plip_driver);
 
 	for (i=0; i < PLIP_MAX; i++) {
 		if ((dev = dev_plip[i])) {
@@ -1357,8 +1339,6 @@ static void __exit plip_cleanup_module (void)
 			dev_plip[i] = NULL;
 		}
 	}
-
-	parport_unregister_driver(&plip_driver);
 }
 
 #ifndef MODULE

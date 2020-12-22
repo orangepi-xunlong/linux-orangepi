@@ -287,16 +287,23 @@ static int w90p910_init_desc(struct net_device *dev)
 	ether = netdev_priv(dev);
 	pdev = ether->pdev;
 
-	ether->tdesc = dma_alloc_coherent(&pdev->dev, sizeof(struct tran_pdesc),
-					  &ether->tdesc_phys, GFP_KERNEL);
-	if (!ether->tdesc)
-		return -ENOMEM;
+	ether->tdesc = (struct tran_pdesc *)
+		dma_alloc_coherent(&pdev->dev, sizeof(struct tran_pdesc),
+					&ether->tdesc_phys, GFP_KERNEL);
 
-	ether->rdesc = dma_alloc_coherent(&pdev->dev, sizeof(struct recv_pdesc),
-					  &ether->rdesc_phys, GFP_KERNEL);
+	if (!ether->tdesc) {
+		dev_err(&pdev->dev, "Failed to allocate memory for tx desc\n");
+		return -ENOMEM;
+	}
+
+	ether->rdesc = (struct recv_pdesc *)
+		dma_alloc_coherent(&pdev->dev, sizeof(struct recv_pdesc),
+					&ether->rdesc_phys, GFP_KERNEL);
+
 	if (!ether->rdesc) {
+		dev_err(&pdev->dev, "Failed to allocate memory for rx desc\n");
 		dma_free_coherent(&pdev->dev, sizeof(struct tran_pdesc),
-				  ether->tdesc, ether->tdesc_phys);
+					ether->tdesc, ether->tdesc_phys);
 		return -ENOMEM;
 	}
 
@@ -476,7 +483,7 @@ static void w90p910_reset_mac(struct net_device *dev)
 
 	w90p910_init_desc(dev);
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	ether->cur_tx = 0x0;
 	ether->finish_tx = 0x0;
 	ether->cur_rx = 0x0;
@@ -490,7 +497,7 @@ static void w90p910_reset_mac(struct net_device *dev)
 	w90p910_trigger_tx(dev);
 	w90p910_trigger_rx(dev);
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 
 	if (netif_queue_stopped(dev))
 		netif_wake_queue(dev);
@@ -730,6 +737,7 @@ static void netdev_rx(struct net_device *dev)
 			data = ether->rdesc->recv_buf[ether->cur_rx];
 			skb = netdev_alloc_skb(dev, length + 2);
 			if (!skb) {
+				dev_err(&pdev->dev, "get skb buffer error\n");
 				ether->stats.rx_dropped++;
 				return;
 			}
@@ -751,7 +759,7 @@ static void netdev_rx(struct net_device *dev)
 				dev_err(&pdev->dev, "rx crc err\n");
 				ether->stats.rx_crc_errors++;
 			} else if (status & RXDS_ALIE) {
-				dev_err(&pdev->dev, "rx alignment err\n");
+				dev_err(&pdev->dev, "rx aligment err\n");
 				ether->stats.rx_frame_errors++;
 			} else if (status & RXDS_PTLE) {
 				dev_err(&pdev->dev, "rx longer err\n");
@@ -870,8 +878,8 @@ static int w90p910_ether_ioctl(struct net_device *dev,
 static void w90p910_get_drvinfo(struct net_device *dev,
 					struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
+	strcpy(info->driver, DRV_MODULE_NAME);
+	strcpy(info->version, DRV_MODULE_VERSION);
 }
 
 static int w90p910_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
@@ -918,11 +926,11 @@ static const struct net_device_ops w90p910_ether_netdev_ops = {
 	.ndo_change_mtu		= eth_change_mtu,
 };
 
-static void get_mac_address(struct net_device *dev)
+static void __init get_mac_address(struct net_device *dev)
 {
 	struct w90p910_ether *ether = netdev_priv(dev);
 	struct platform_device *pdev;
-	char addr[ETH_ALEN];
+	char addr[6];
 
 	pdev = ether->pdev;
 
@@ -934,7 +942,7 @@ static void get_mac_address(struct net_device *dev)
 	addr[5] = 0xa8;
 
 	if (is_valid_ether_addr(addr))
-		memcpy(dev->dev_addr, &addr, ETH_ALEN);
+		memcpy(dev->dev_addr, &addr, 0x06);
 	else
 		dev_err(&pdev->dev, "invalid mac address\n");
 }
@@ -943,6 +951,7 @@ static int w90p910_ether_setup(struct net_device *dev)
 {
 	struct w90p910_ether *ether = netdev_priv(dev);
 
+	ether_setup(dev);
 	dev->netdev_ops = &w90p910_ether_netdev_ops;
 	dev->ethtool_ops = &w90p910_ether_ethtool_ops;
 
@@ -969,7 +978,7 @@ static int w90p910_ether_setup(struct net_device *dev)
 	return 0;
 }
 
-static int w90p910_ether_probe(struct platform_device *pdev)
+static int __devinit w90p910_ether_probe(struct platform_device *pdev)
 {
 	struct w90p910_ether *ether;
 	struct net_device *dev;
@@ -1013,7 +1022,7 @@ static int w90p910_ether_probe(struct platform_device *pdev)
 	if (ether->rxirq < 0) {
 		dev_err(&pdev->dev, "failed to get ether rx irq\n");
 		error = -ENXIO;
-		goto failed_free_io;
+		goto failed_free_txirq;
 	}
 
 	platform_set_drvdata(pdev, dev);
@@ -1022,7 +1031,7 @@ static int w90p910_ether_probe(struct platform_device *pdev)
 	if (IS_ERR(ether->clk)) {
 		dev_err(&pdev->dev, "failed to get ether clock\n");
 		error = PTR_ERR(ether->clk);
-		goto failed_free_io;
+		goto failed_free_rxirq;
 	}
 
 	ether->rmiiclk = clk_get(&pdev->dev, "RMII");
@@ -1038,7 +1047,7 @@ static int w90p910_ether_probe(struct platform_device *pdev)
 
 	error = register_netdev(dev);
 	if (error != 0) {
-		dev_err(&pdev->dev, "Register EMC w90p910 FAILED\n");
+		dev_err(&pdev->dev, "Regiter EMC w90p910 FAILED\n");
 		error = -ENODEV;
 		goto failed_put_rmiiclk;
 	}
@@ -1048,6 +1057,11 @@ failed_put_rmiiclk:
 	clk_put(ether->rmiiclk);
 failed_put_clk:
 	clk_put(ether->clk);
+failed_free_rxirq:
+	free_irq(ether->rxirq, pdev);
+	platform_set_drvdata(pdev, NULL);
+failed_free_txirq:
+	free_irq(ether->txirq, pdev);
 failed_free_io:
 	iounmap(ether->reg);
 failed_free_mem:
@@ -1057,7 +1071,7 @@ failed_free:
 	return error;
 }
 
-static int w90p910_ether_remove(struct platform_device *pdev)
+static int __devexit w90p910_ether_remove(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
 	struct w90p910_ether *ether = netdev_priv(dev);
@@ -1070,7 +1084,11 @@ static int w90p910_ether_remove(struct platform_device *pdev)
 	iounmap(ether->reg);
 	release_mem_region(ether->res->start, resource_size(ether->res));
 
+	free_irq(ether->txirq, dev);
+	free_irq(ether->rxirq, dev);
+
 	del_timer_sync(&ether->check_timer);
+	platform_set_drvdata(pdev, NULL);
 
 	free_netdev(dev);
 	return 0;
@@ -1078,9 +1096,10 @@ static int w90p910_ether_remove(struct platform_device *pdev)
 
 static struct platform_driver w90p910_ether_driver = {
 	.probe		= w90p910_ether_probe,
-	.remove		= w90p910_ether_remove,
+	.remove		= __devexit_p(w90p910_ether_remove),
 	.driver		= {
 		.name	= "nuc900-emc",
+		.owner	= THIS_MODULE,
 	},
 };
 

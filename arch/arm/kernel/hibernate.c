@@ -21,24 +21,34 @@
 #include <asm/idmap.h>
 #include <asm/suspend.h>
 #include <asm/memory.h>
-#include <asm/sections.h>
-#include "reboot.h"
+#include <asm/page.h>
+#include <linux/pfn.h>
+
+extern const void __nosave_begin, __nosave_end;
+extern const void _text, __end_rodata;
 
 int pfn_is_nosave(unsigned long pfn)
 {
-	unsigned long nosave_begin_pfn = virt_to_pfn(&__nosave_begin);
-	unsigned long nosave_end_pfn = virt_to_pfn(&__nosave_end - 1);
+	int result;
+	unsigned long nosave_begin_pfn = PFN_DOWN(__pa(&__nosave_begin));
+	unsigned long nosave_end_pfn = PFN_UP(__pa(&__nosave_end));
+	unsigned long textsave_begin_pfn = PFN_DOWN(__pa(&_text));
+	unsigned long textsave_end_pfn = PFN_UP(__pa(&__end_rodata));
 
-	return (pfn >= nosave_begin_pfn) && (pfn <= nosave_end_pfn);
+	result = ((pfn >= nosave_begin_pfn) && (pfn < nosave_end_pfn)) ||
+		((pfn >= textsave_begin_pfn) && (pfn < textsave_end_pfn));
+
+	return result;
 }
 
-void notrace save_processor_state(void)
+
+void notrace hibernate_save_processor_state(void)
 {
 	WARN_ON(num_online_cpus() != 1);
 	local_fiq_disable();
 }
 
-void notrace restore_processor_state(void)
+void notrace hibernate_restore_processor_state(void)
 {
 	local_fiq_enable();
 }
@@ -62,7 +72,7 @@ static int notrace arch_save_image(unsigned long unused)
 
 	ret = swsusp_save();
 	if (ret == 0)
-		_soft_restart(virt_to_idmap(cpu_resume), false);
+		soft_restart(virt_to_phys(cpu_resume));
 	return ret;
 }
 
@@ -87,7 +97,7 @@ static void notrace arch_restore_image(void *unused)
 	for (pbe = restore_pblist; pbe; pbe = pbe->next)
 		copy_page(pbe->orig_address, pbe->address);
 
-	_soft_restart(virt_to_idmap(cpu_resume), false);
+	soft_restart(virt_to_phys(cpu_resume));
 }
 
 static u64 resume_stack[PAGE_SIZE/2/sizeof(u64)] __nosavedata;
@@ -100,7 +110,9 @@ static u64 resume_stack[PAGE_SIZE/2/sizeof(u64)] __nosavedata;
  */
 int swsusp_arch_resume(void)
 {
+	extern void call_with_stack(void (*fn)(void *), void *arg, void *sp);
 	call_with_stack(arch_restore_image, 0,
 		resume_stack + ARRAY_SIZE(resume_stack));
 	return 0;
 }
+

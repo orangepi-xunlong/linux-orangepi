@@ -22,7 +22,6 @@
 #include <net/ip6_fib.h>
 #endif
 
-#include <linux/netfilter_ipv6.h>
 #include <linux/netfilter/xt_addrtype.h>
 #include <linux/netfilter/x_tables.h>
 
@@ -34,12 +33,12 @@ MODULE_ALIAS("ip6t_addrtype");
 
 #if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
 static u32 match_lookup_rt6(struct net *net, const struct net_device *dev,
-			    const struct in6_addr *addr, u16 mask)
+			    const struct in6_addr *addr)
 {
 	const struct nf_afinfo *afinfo;
 	struct flowi6 flow;
 	struct rt6_info *rt;
-	u32 ret = 0;
+	u32 ret;
 	int route_err;
 
 	memset(&flow, 0, sizeof(flow));
@@ -50,19 +49,12 @@ static u32 match_lookup_rt6(struct net *net, const struct net_device *dev,
 	rcu_read_lock();
 
 	afinfo = nf_get_afinfo(NFPROTO_IPV6);
-	if (afinfo != NULL) {
-		const struct nf_ipv6_ops *v6ops;
-
-		if (dev && (mask & XT_ADDRTYPE_LOCAL)) {
-			v6ops = nf_get_ipv6_ops();
-			if (v6ops && v6ops->chk_addr(net, addr, dev, true))
-				ret = XT_ADDRTYPE_LOCAL;
-		}
+	if (afinfo != NULL)
 		route_err = afinfo->route(net, (struct dst_entry **)&rt,
-					  flowi6_to_flowi(&flow), false);
-	} else {
+					flowi6_to_flowi(&flow), !!dev);
+	else
 		route_err = 1;
-	}
+
 	rcu_read_unlock();
 
 	if (route_err)
@@ -70,11 +62,14 @@ static u32 match_lookup_rt6(struct net *net, const struct net_device *dev,
 
 	if (rt->rt6i_flags & RTF_REJECT)
 		ret = XT_ADDRTYPE_UNREACHABLE;
+	else
+		ret = 0;
 
-	if (dev == NULL && rt->rt6i_flags & RTF_LOCAL)
+	if (rt->rt6i_flags & RTF_LOCAL)
 		ret |= XT_ADDRTYPE_LOCAL;
-	if (ipv6_anycast_destination((struct dst_entry *)rt, addr))
+	if (rt->rt6i_flags & RTF_ANYCAST)
 		ret |= XT_ADDRTYPE_ANYCAST;
+
 
 	dst_release(&rt->dst);
 	return ret;
@@ -95,7 +90,7 @@ static bool match_type6(struct net *net, const struct net_device *dev,
 
 	if ((XT_ADDRTYPE_LOCAL | XT_ADDRTYPE_ANYCAST |
 	     XT_ADDRTYPE_UNREACHABLE) & mask)
-		return !!(mask & match_lookup_rt6(net, dev, addr, mask));
+		return !!(mask & match_lookup_rt6(net, dev, addr));
 	return true;
 }
 
@@ -125,7 +120,7 @@ static inline bool match_type(struct net *net, const struct net_device *dev,
 static bool
 addrtype_mt_v0(const struct sk_buff *skb, struct xt_action_param *par)
 {
-	struct net *net = par->net;
+	struct net *net = dev_net(par->in ? par->in : par->out);
 	const struct xt_addrtype_info *info = par->matchinfo;
 	const struct iphdr *iph = ip_hdr(skb);
 	bool ret = true;
@@ -143,7 +138,7 @@ addrtype_mt_v0(const struct sk_buff *skb, struct xt_action_param *par)
 static bool
 addrtype_mt_v1(const struct sk_buff *skb, struct xt_action_param *par)
 {
-	struct net *net = par->net;
+	struct net *net = dev_net(par->in ? par->in : par->out);
 	const struct xt_addrtype_info_v1 *info = par->matchinfo;
 	const struct iphdr *iph;
 	const struct net_device *dev = NULL;
@@ -202,7 +197,7 @@ static int addrtype_mt_checkentry_v1(const struct xt_mtchk_param *par)
 			return -EINVAL;
 		}
 		if ((info->source | info->dest) >= XT_ADDRTYPE_PROHIBIT) {
-			pr_err("ipv6 PROHIBIT (THROW, NAT ..) matching not supported\n");
+			pr_err("ipv6 PROHIBT (THROW, NAT ..) matching not supported\n");
 			return -EINVAL;
 		}
 		if ((info->source | info->dest) & XT_ADDRTYPE_BROADCAST) {

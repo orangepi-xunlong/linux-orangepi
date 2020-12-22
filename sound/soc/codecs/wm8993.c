@@ -1,7 +1,7 @@
 /*
  * wm8993.c -- WM8993 ALSA SoC audio driver
  *
- * Copyright 2009-12 Wolfson Microelectronics plc
+ * Copyright 2009, 2010 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
  *
@@ -41,7 +41,7 @@ static const char *wm8993_supply_names[WM8993_NUM_SUPPLIES] = {
 	"SPKVDD",
 };
 
-static const struct reg_default wm8993_reg_defaults[] = {
+static struct reg_default wm8993_reg_defaults[] = {
 	{ 1,   0x0000 },     /* R1   - Power Management (1) */
 	{ 2,   0x6000 },     /* R2   - Power Management (2) */
 	{ 3,   0x0000 },     /* R3   - Power Management (3) */
@@ -218,6 +218,7 @@ struct wm8993_priv {
 	unsigned int sysclk_rate;
 	unsigned int fs;
 	unsigned int bclk;
+	int class_w_users;
 	unsigned int fll_fref;
 	unsigned int fll_fout;
 	int fll_src;
@@ -628,10 +629,11 @@ static const DECLARE_TLV_DB_SCALE(sidetone_tlv, -3600, 300, 0);
 static const DECLARE_TLV_DB_SCALE(drc_comp_threash, -4500, 75, 0);
 static const DECLARE_TLV_DB_SCALE(drc_comp_amp, -2250, 75, 0);
 static const DECLARE_TLV_DB_SCALE(drc_min_tlv, -1800, 600, 0);
-static const DECLARE_TLV_DB_RANGE(drc_max_tlv,
+static const unsigned int drc_max_tlv[] = {
+	TLV_DB_RANGE_HEAD(2),
 	0, 2, TLV_DB_SCALE_ITEM(1200, 600, 0),
-	3, 3, TLV_DB_SCALE_ITEM(3600, 0, 0)
-);
+	3, 3, TLV_DB_SCALE_ITEM(3600, 0, 0),
+};
 static const DECLARE_TLV_DB_SCALE(drc_qr_tlv, 1200, 600, 0);
 static const DECLARE_TLV_DB_SCALE(drc_startup_tlv, -1800, 300, 0);
 static const DECLARE_TLV_DB_SCALE(eq_tlv, -1200, 100, 0);
@@ -645,8 +647,8 @@ static const char *dac_deemph_text[] = {
 	"48kHz",
 };
 
-static SOC_ENUM_SINGLE_DECL(dac_deemph,
-			    WM8993_DAC_CTRL, 4, dac_deemph_text);
+static const struct soc_enum dac_deemph =
+	SOC_ENUM_SINGLE(WM8993_DAC_CTRL, 4, 4, dac_deemph_text);
 
 static const char *adc_hpf_text[] = {
 	"Hi-Fi",
@@ -655,16 +657,16 @@ static const char *adc_hpf_text[] = {
 	"Voice 3",
 };
 
-static SOC_ENUM_SINGLE_DECL(adc_hpf,
-			    WM8993_ADC_CTRL, 5, adc_hpf_text);
+static const struct soc_enum adc_hpf =
+	SOC_ENUM_SINGLE(WM8993_ADC_CTRL, 5, 4, adc_hpf_text);
 
 static const char *drc_path_text[] = {
 	"ADC",
 	"DAC"
 };
 
-static SOC_ENUM_SINGLE_DECL(drc_path,
-			    WM8993_DRC_CONTROL_1, 14, drc_path_text);
+static const struct soc_enum drc_path =
+	SOC_ENUM_SINGLE(WM8993_DRC_CONTROL_1, 14, 2, drc_path_text);
 
 static const char *drc_r0_text[] = {
 	"1",
@@ -675,8 +677,8 @@ static const char *drc_r0_text[] = {
 	"0",
 };
 
-static SOC_ENUM_SINGLE_DECL(drc_r0,
-			    WM8993_DRC_CONTROL_3, 8, drc_r0_text);
+static const struct soc_enum drc_r0 =
+	SOC_ENUM_SINGLE(WM8993_DRC_CONTROL_3, 8, 6, drc_r0_text);
 
 static const char *drc_r1_text[] = {
 	"1",
@@ -686,8 +688,8 @@ static const char *drc_r1_text[] = {
 	"0",
 };
 
-static SOC_ENUM_SINGLE_DECL(drc_r1,
-			    WM8993_DRC_CONTROL_4, 13, drc_r1_text);
+static const struct soc_enum drc_r1 =
+	SOC_ENUM_SINGLE(WM8993_DRC_CONTROL_4, 13, 5, drc_r1_text);
 
 static const char *drc_attack_text[] = {
 	"Reserved",
@@ -704,8 +706,8 @@ static const char *drc_attack_text[] = {
 	"185.6ms",
 };
 
-static SOC_ENUM_SINGLE_DECL(drc_attack,
-			    WM8993_DRC_CONTROL_2, 12, drc_attack_text);
+static const struct soc_enum drc_attack =
+	SOC_ENUM_SINGLE(WM8993_DRC_CONTROL_2, 12, 12, drc_attack_text);
 
 static const char *drc_decay_text[] = {
 	"186ms",
@@ -719,16 +721,16 @@ static const char *drc_decay_text[] = {
 	"47.56ms",
 };
 
-static SOC_ENUM_SINGLE_DECL(drc_decay,
-			    WM8993_DRC_CONTROL_2, 8, drc_decay_text);
+static const struct soc_enum drc_decay =
+	SOC_ENUM_SINGLE(WM8993_DRC_CONTROL_2, 8, 9, drc_decay_text);
 
 static const char *drc_ff_text[] = {
 	"5 samples",
 	"9 samples",
 };
 
-static SOC_ENUM_SINGLE_DECL(drc_ff,
-			    WM8993_DRC_CONTROL_3, 7, drc_ff_text);
+static const struct soc_enum drc_ff =
+	SOC_ENUM_SINGLE(WM8993_DRC_CONTROL_3, 7, 2, drc_ff_text);
 
 static const char *drc_qr_rate_text[] = {
 	"0.725ms",
@@ -736,8 +738,8 @@ static const char *drc_qr_rate_text[] = {
 	"5.8ms",
 };
 
-static SOC_ENUM_SINGLE_DECL(drc_qr_rate,
-			    WM8993_DRC_CONTROL_3, 0, drc_qr_rate_text);
+static const struct soc_enum drc_qr_rate =
+	SOC_ENUM_SINGLE(WM8993_DRC_CONTROL_3, 0, 3, drc_qr_rate_text);
 
 static const char *drc_smooth_text[] = {
 	"Low",
@@ -745,8 +747,8 @@ static const char *drc_smooth_text[] = {
 	"High",
 };
 
-static SOC_ENUM_SINGLE_DECL(drc_smooth,
-			    WM8993_DRC_CONTROL_1, 4, drc_smooth_text);
+static const struct soc_enum drc_smooth =
+	SOC_ENUM_SINGLE(WM8993_DRC_CONTROL_1, 4, 3, drc_smooth_text);
 
 static const struct snd_kcontrol_new wm8993_snd_controls[] = {
 SOC_DOUBLE_TLV("Digital Sidetone Volume", WM8993_DIGITAL_SIDE_TONE,
@@ -809,7 +811,7 @@ SOC_SINGLE_TLV("EQ5 Volume", WM8993_EQ6, 0, 24, 0, eq_tlv),
 static int clk_sys_event(struct snd_soc_dapm_widget *w,
 			 struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct snd_soc_codec *codec = w->codec;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -821,6 +823,84 @@ static int clk_sys_event(struct snd_soc_dapm_widget *w,
 
 	return 0;
 }
+
+/*
+ * When used with DAC outputs only the WM8993 charge pump supports
+ * operation in class W mode, providing very low power consumption
+ * when used with digital sources.  Enable and disable this mode
+ * automatically depending on the mixer configuration.
+ *
+ * Currently the only supported paths are the direct DAC->headphone
+ * paths (which provide minimum power consumption anyway).
+ */
+static int class_w_put(struct snd_kcontrol *kcontrol,
+		       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dapm_widget_list *wlist = snd_kcontrol_chip(kcontrol);
+	struct snd_soc_dapm_widget *widget = wlist->widgets[0];
+	struct snd_soc_codec *codec = widget->codec;
+	struct wm8993_priv *wm8993 = snd_soc_codec_get_drvdata(codec);
+	int ret;
+
+	/* Turn it off if we're using the main output mixer */
+	if (ucontrol->value.integer.value[0] == 0) {
+		if (wm8993->class_w_users == 0) {
+			dev_dbg(codec->dev, "Disabling Class W\n");
+			snd_soc_update_bits(codec, WM8993_CLASS_W_0,
+					    WM8993_CP_DYN_FREQ |
+					    WM8993_CP_DYN_V,
+					    0);
+		}
+		wm8993->class_w_users++;
+		wm8993->hubs_data.class_w = true;
+	}
+
+	/* Implement the change */
+	ret = snd_soc_dapm_put_enum_double(kcontrol, ucontrol);
+
+	/* Enable it if we're using the direct DAC path */
+	if (ucontrol->value.integer.value[0] == 1) {
+		if (wm8993->class_w_users == 1) {
+			dev_dbg(codec->dev, "Enabling Class W\n");
+			snd_soc_update_bits(codec, WM8993_CLASS_W_0,
+					    WM8993_CP_DYN_FREQ |
+					    WM8993_CP_DYN_V,
+					    WM8993_CP_DYN_FREQ |
+					    WM8993_CP_DYN_V);
+		}
+		wm8993->class_w_users--;
+		wm8993->hubs_data.class_w = false;
+	}
+
+	dev_dbg(codec->dev, "Indirect DAC use count now %d\n",
+		wm8993->class_w_users);
+
+	return ret;
+}
+
+#define SOC_DAPM_ENUM_W(xname, xenum) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
+	.info = snd_soc_info_enum_double, \
+	.get = snd_soc_dapm_get_enum_double, \
+	.put = class_w_put, \
+	.private_value = (unsigned long)&xenum }
+
+static const char *hp_mux_text[] = {
+	"Mixer",
+	"DAC",
+};
+
+static const struct soc_enum hpl_enum =
+	SOC_ENUM_SINGLE(WM8993_OUTPUT_MIXER1, 8, 2, hp_mux_text);
+
+static const struct snd_kcontrol_new hpl_mux =
+	SOC_DAPM_ENUM_W("Left Headphone Mux", hpl_enum);
+
+static const struct soc_enum hpr_enum =
+	SOC_ENUM_SINGLE(WM8993_OUTPUT_MIXER2, 8, 2, hp_mux_text);
+
+static const struct snd_kcontrol_new hpr_mux =
+	SOC_DAPM_ENUM_W("Right Headphone Mux", hpr_enum);
 
 static const struct snd_kcontrol_new left_speaker_mixer[] = {
 SOC_DAPM_SINGLE("Input Switch", WM8993_SPEAKER_MIXER, 7, 1, 0),
@@ -840,26 +920,26 @@ static const char *aif_text[] = {
 	"Left", "Right"
 };
 
-static SOC_ENUM_SINGLE_DECL(aifoutl_enum,
-			    WM8993_AUDIO_INTERFACE_1, 15, aif_text);
+static const struct soc_enum aifoutl_enum =
+	SOC_ENUM_SINGLE(WM8993_AUDIO_INTERFACE_1, 15, 2, aif_text);
 
 static const struct snd_kcontrol_new aifoutl_mux =
 	SOC_DAPM_ENUM("AIFOUTL Mux", aifoutl_enum);
 
-static SOC_ENUM_SINGLE_DECL(aifoutr_enum,
-			    WM8993_AUDIO_INTERFACE_1, 14, aif_text);
+static const struct soc_enum aifoutr_enum =
+	SOC_ENUM_SINGLE(WM8993_AUDIO_INTERFACE_1, 14, 2, aif_text);
 
 static const struct snd_kcontrol_new aifoutr_mux =
 	SOC_DAPM_ENUM("AIFOUTR Mux", aifoutr_enum);
 
-static SOC_ENUM_SINGLE_DECL(aifinl_enum,
-			    WM8993_AUDIO_INTERFACE_2, 15, aif_text);
+static const struct soc_enum aifinl_enum =
+	SOC_ENUM_SINGLE(WM8993_AUDIO_INTERFACE_2, 15, 2, aif_text);
 
 static const struct snd_kcontrol_new aifinl_mux =
 	SOC_DAPM_ENUM("AIFINL Mux", aifinl_enum);
 
-static SOC_ENUM_SINGLE_DECL(aifinr_enum,
-			    WM8993_AUDIO_INTERFACE_2, 14, aif_text);
+static const struct soc_enum aifinr_enum =
+	SOC_ENUM_SINGLE(WM8993_AUDIO_INTERFACE_2, 14, 2, aif_text);
 
 static const struct snd_kcontrol_new aifinr_mux =
 	SOC_DAPM_ENUM("AIFINR Mux", aifinr_enum);
@@ -868,14 +948,14 @@ static const char *sidetone_text[] = {
 	"None", "Left", "Right"
 };
 
-static SOC_ENUM_SINGLE_DECL(sidetonel_enum,
-			    WM8993_DIGITAL_SIDE_TONE, 2, sidetone_text);
+static const struct soc_enum sidetonel_enum =
+	SOC_ENUM_SINGLE(WM8993_DIGITAL_SIDE_TONE, 2, 3, sidetone_text);
 
 static const struct snd_kcontrol_new sidetonel_mux =
 	SOC_DAPM_ENUM("Left Sidetone", sidetonel_enum);
 
-static SOC_ENUM_SINGLE_DECL(sidetoner_enum,
-			    WM8993_DIGITAL_SIDE_TONE, 0, sidetone_text);
+static const struct soc_enum sidetoner_enum =
+	SOC_ENUM_SINGLE(WM8993_DIGITAL_SIDE_TONE, 0, 3, sidetone_text);
 
 static const struct snd_kcontrol_new sidetoner_mux =
 	SOC_DAPM_ENUM("Right Sidetone", sidetoner_enum);
@@ -908,8 +988,8 @@ SND_SOC_DAPM_MUX("DACR Sidetone", SND_SOC_NOPM, 0, 0, &sidetoner_mux),
 SND_SOC_DAPM_DAC("DACL", NULL, WM8993_POWER_MANAGEMENT_3, 1, 0),
 SND_SOC_DAPM_DAC("DACR", NULL, WM8993_POWER_MANAGEMENT_3, 0, 0),
 
-SND_SOC_DAPM_MUX("Left Headphone Mux", SND_SOC_NOPM, 0, 0, &wm_hubs_hpl_mux),
-SND_SOC_DAPM_MUX("Right Headphone Mux", SND_SOC_NOPM, 0, 0, &wm_hubs_hpr_mux),
+SND_SOC_DAPM_MUX("Left Headphone Mux", SND_SOC_NOPM, 0, 0, &hpl_mux),
+SND_SOC_DAPM_MUX("Right Headphone Mux", SND_SOC_NOPM, 0, 0, &hpr_mux),
 
 SND_SOC_DAPM_MIXER("SPKL", WM8993_POWER_MANAGEMENT_3, 8, 0,
 		   left_speaker_mixer, ARRAY_SIZE(left_speaker_mixer)),
@@ -991,7 +1071,7 @@ static int wm8993_set_bias_level(struct snd_soc_codec *codec,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			ret = regulator_bulk_enable(ARRAY_SIZE(wm8993->supplies),
 						    wm8993->supplies);
 			if (ret != 0)
@@ -1063,6 +1143,8 @@ static int wm8993_set_bias_level(struct snd_soc_codec *codec,
 				       wm8993->supplies);
 		break;
 	}
+
+	codec->dapm.bias_level = level;
 
 	return 0;
 }
@@ -1211,19 +1293,19 @@ static int wm8993_hw_params(struct snd_pcm_substream *substream,
 			wm8993->tdm_slots, wm8993->tdm_width);
 		wm8993->bclk *= wm8993->tdm_width * wm8993->tdm_slots;
 	} else {
-		switch (params_width(params)) {
-		case 16:
+		switch (params_format(params)) {
+		case SNDRV_PCM_FORMAT_S16_LE:
 			wm8993->bclk *= 16;
 			break;
-		case 20:
+		case SNDRV_PCM_FORMAT_S20_3LE:
 			wm8993->bclk *= 20;
 			aif1 |= 0x8;
 			break;
-		case 24:
+		case SNDRV_PCM_FORMAT_S24_LE:
 			wm8993->bclk *= 24;
 			aif1 |= 0x10;
 			break;
-		case 32:
+		case SNDRV_PCM_FORMAT_S32_LE:
 			wm8993->bclk *= 32;
 			aif1 |= 0x18;
 			break;
@@ -1482,12 +1564,23 @@ static struct snd_soc_dai_driver wm8993_dai = {
 static int wm8993_probe(struct snd_soc_codec *codec)
 {
 	struct wm8993_priv *wm8993 = snd_soc_codec_get_drvdata(codec);
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
+	int ret;
 
 	wm8993->hubs_data.hp_startup_mode = 1;
 	wm8993->hubs_data.dcs_codes_l = -2;
 	wm8993->hubs_data.dcs_codes_r = -2;
 	wm8993->hubs_data.series_startup = 1;
+
+	codec->control_data = wm8993->regmap;
+	ret = snd_soc_codec_set_cache_io(codec, 8, 16, SND_SOC_REGMAP);
+	if (ret != 0) {
+		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
+		return ret;
+	}
+
+	/* By default we're using the output mixers */
+	wm8993->class_w_users = 2;
 
 	/* Latch volume update bits and default ZC on */
 	snd_soc_update_bits(codec, WM8993_RIGHT_DAC_DIGITAL_VOLUME,
@@ -1509,10 +1602,12 @@ static int wm8993_probe(struct snd_soc_codec *codec)
 				      wm8993->pdata.lineout2fb,
 				      wm8993->pdata.jd_scthr,
 				      wm8993->pdata.jd_thr,
-				      wm8993->pdata.micbias1_delay,
-				      wm8993->pdata.micbias2_delay,
 				      wm8993->pdata.micbias1_lvl,
 				      wm8993->pdata.micbias2_lvl);
+
+	ret = wm8993_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	if (ret != 0)
+		return ret;
 
 	snd_soc_add_codec_controls(codec, wm8993_snd_controls,
 			     ARRAY_SIZE(wm8993_snd_controls));
@@ -1536,10 +1631,19 @@ static int wm8993_probe(struct snd_soc_codec *codec)
 	 * VMID as an output and can disable it.
 	 */
 	if (wm8993->pdata.lineout1_diff && wm8993->pdata.lineout2_diff)
-		dapm->idle_bias_off = 1;
+		codec->dapm.idle_bias_off = 1;
 
 	return 0;
 
+}
+
+static int wm8993_remove(struct snd_soc_codec *codec)
+{
+	struct wm8993_priv *wm8993 = snd_soc_codec_get_drvdata(codec);
+
+	wm8993_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	regulator_bulk_free(ARRAY_SIZE(wm8993->supplies), wm8993->supplies);
+	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -1560,7 +1664,7 @@ static int wm8993_suspend(struct snd_soc_codec *codec)
 	wm8993->fll_fout = fll_fout;
 	wm8993->fll_fref = fll_fref;
 
-	snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_OFF);
+	wm8993_set_bias_level(codec, SND_SOC_BIAS_OFF);
 
 	return 0;
 }
@@ -1570,7 +1674,7 @@ static int wm8993_resume(struct snd_soc_codec *codec)
 	struct wm8993_priv *wm8993 = snd_soc_codec_get_drvdata(codec);
 	int ret;
 
-	snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	wm8993_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
 	/* Restart the FLL? */
 	if (wm8993->fll_fout) {
@@ -1594,7 +1698,7 @@ static int wm8993_resume(struct snd_soc_codec *codec)
 #endif
 
 /* Tune DC servo configuration */
-static const struct reg_sequence wm8993_regmap_patch[] = {
+static struct reg_default wm8993_regmap_patch[] = {
 	{ 0x44, 3 },
 	{ 0x56, 3 },
 	{ 0x44, 0 },
@@ -1613,15 +1717,16 @@ static const struct regmap_config wm8993_regmap = {
 	.num_reg_defaults = ARRAY_SIZE(wm8993_reg_defaults),
 };
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8993 = {
+static struct snd_soc_codec_driver soc_codec_dev_wm8993 = {
 	.probe = 	wm8993_probe,
+	.remove = 	wm8993_remove,
 	.suspend =	wm8993_suspend,
 	.resume =	wm8993_resume,
 	.set_bias_level = wm8993_set_bias_level,
 };
 
-static int wm8993_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static __devinit int wm8993_i2c_probe(struct i2c_client *i2c,
+				      const struct i2c_device_id *id)
 {
 	struct wm8993_priv *wm8993;
 	unsigned int reg;
@@ -1635,7 +1740,7 @@ static int wm8993_i2c_probe(struct i2c_client *i2c,
 	wm8993->dev = &i2c->dev;
 	init_completion(&wm8993->fll_lock);
 
-	wm8993->regmap = devm_regmap_init_i2c(i2c, &wm8993_regmap);
+	wm8993->regmap = regmap_init_i2c(i2c, &wm8993_regmap);
 	if (IS_ERR(wm8993->regmap)) {
 		ret = PTR_ERR(wm8993->regmap);
 		dev_err(&i2c->dev, "Failed to allocate regmap: %d\n", ret);
@@ -1647,18 +1752,18 @@ static int wm8993_i2c_probe(struct i2c_client *i2c,
 	for (i = 0; i < ARRAY_SIZE(wm8993->supplies); i++)
 		wm8993->supplies[i].supply = wm8993_supply_names[i];
 
-	ret = devm_regulator_bulk_get(&i2c->dev, ARRAY_SIZE(wm8993->supplies),
+	ret = regulator_bulk_get(&i2c->dev, ARRAY_SIZE(wm8993->supplies),
 				 wm8993->supplies);
 	if (ret != 0) {
 		dev_err(&i2c->dev, "Failed to request supplies: %d\n", ret);
-		return ret;
+		goto err;
 	}
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(wm8993->supplies),
 				    wm8993->supplies);
 	if (ret != 0) {
 		dev_err(&i2c->dev, "Failed to enable supplies: %d\n", ret);
-		return ret;
+		goto err_get;
 	}
 
 	ret = regmap_read(wm8993->regmap, WM8993_SOFTWARE_RESET, &reg);
@@ -1717,17 +1822,23 @@ err_irq:
 		free_irq(i2c->irq, wm8993);
 err_enable:
 	regulator_bulk_disable(ARRAY_SIZE(wm8993->supplies), wm8993->supplies);
+err_get:
+	regulator_bulk_free(ARRAY_SIZE(wm8993->supplies), wm8993->supplies);
+err:
+	regmap_exit(wm8993->regmap);
 	return ret;
 }
 
-static int wm8993_i2c_remove(struct i2c_client *i2c)
+static __devexit int wm8993_i2c_remove(struct i2c_client *i2c)
 {
 	struct wm8993_priv *wm8993 = i2c_get_clientdata(i2c);
 
 	snd_soc_unregister_codec(&i2c->dev);
 	if (i2c->irq)
 		free_irq(i2c->irq, wm8993);
+	regmap_exit(wm8993->regmap);
 	regulator_bulk_disable(ARRAY_SIZE(wm8993->supplies), wm8993->supplies);
+	regulator_bulk_free(ARRAY_SIZE(wm8993->supplies), wm8993->supplies);
 
 	return 0;
 }
@@ -1741,9 +1852,10 @@ MODULE_DEVICE_TABLE(i2c, wm8993_i2c_id);
 static struct i2c_driver wm8993_i2c_driver = {
 	.driver = {
 		.name = "wm8993",
+		.owner = THIS_MODULE,
 	},
 	.probe =    wm8993_i2c_probe,
-	.remove =   wm8993_i2c_remove,
+	.remove =   __devexit_p(wm8993_i2c_remove),
 	.id_table = wm8993_i2c_id,
 };
 

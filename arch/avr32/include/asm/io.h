@@ -165,10 +165,6 @@ BUILDIO_IOPORT(l, u32)
 #define readw_be			__raw_readw
 #define readl_be			__raw_readl
 
-#define writeb_relaxed			writeb
-#define writew_relaxed			writew
-#define writel_relaxed			writel
-
 #define writeb_be			__raw_writeb
 #define writew_be			__raw_writew
 #define writel_be			__raw_writel
@@ -294,10 +290,6 @@ extern void __iounmap(void __iomem *addr);
 
 #define iounmap(addr)				\
 	__iounmap(addr)
-
-#define ioremap_wc ioremap_nocache
-#define ioremap_wt ioremap_nocache
-#define ioremap_uc ioremap_nocache
 
 #define cached(addr) P1SEGADDR(addr)
 #define uncached(addr) P2SEGADDR(addr)

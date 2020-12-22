@@ -27,12 +27,11 @@
 #include <linux/io.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
-#include <linux/gpio.h>
 
 #include <linux/libata.h>
 #include <scsi/scsi_host.h>
 
-#include <asm/mach-rc32434/rb.h>
+#include <asm/gpio.h>
 
 #define DRV_NAME	"pata-rb532-cf"
 #define DRV_VERSION	"0.1.0"
@@ -103,13 +102,12 @@ static void rb532_pata_setup_ports(struct ata_host *ah)
 	ap->ioaddr.error_addr	= info->iobase + RB500_CF_REG_ERR;
 }
 
-static int rb532_pata_driver_probe(struct platform_device *pdev)
+static __devinit int rb532_pata_driver_probe(struct platform_device *pdev)
 {
 	int irq;
 	int gpio;
 	struct resource *res;
 	struct ata_host *ah;
-	struct cf_device *pdata;
 	struct rb532_cf_info *info;
 	int ret;
 
@@ -125,13 +123,7 @@ static int rb532_pata_driver_probe(struct platform_device *pdev)
 		return -ENOENT;
 	}
 
-	pdata = dev_get_platdata(&pdev->dev);
-	if (!pdata) {
-		dev_err(&pdev->dev, "no platform data specified\n");
-		return -EINVAL;
-	}
-
-	gpio = pdata->gpio_pin;
+	gpio = irq_to_gpio(irq);
 	if (gpio < 0) {
 		dev_err(&pdev->dev, "no GPIO found for irq%d\n", irq);
 		return -ENOENT;
@@ -185,7 +177,7 @@ err_free_gpio:
 	return ret;
 }
 
-static int rb532_pata_driver_remove(struct platform_device *pdev)
+static __devexit int rb532_pata_driver_remove(struct platform_device *pdev)
 {
 	struct ata_host *ah = platform_get_drvdata(pdev);
 	struct rb532_cf_info *info = ah->private_data;
@@ -198,9 +190,10 @@ static int rb532_pata_driver_remove(struct platform_device *pdev)
 
 static struct platform_driver rb532_pata_platform_driver = {
 	.probe		= rb532_pata_driver_probe,
-	.remove		= rb532_pata_driver_remove,
+	.remove		= __devexit_p(rb532_pata_driver_remove),
 	.driver	 = {
 		.name   = DRV_NAME,
+		.owner  = THIS_MODULE,
 	},
 };
 

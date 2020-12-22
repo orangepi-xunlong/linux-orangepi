@@ -34,14 +34,23 @@
 #include <linux/kernel.h>
 #include <linux/ctype.h>
 #include <asm/unaligned.h>
+#include <scsi/scsi.h>
+#include <scsi/scsi_host.h>
+#include <scsi/scsi_device.h>
+#include <scsi/scsi_cmnd.h>
 #include <scsi/libfc.h>
 
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
+#include <target/target_core_fabric_configfs.h>
+#include <target/target_core_configfs.h>
+#include <target/configfs_macros.h>
 
 #include "tcm_fc.h"
 
-static LIST_HEAD(ft_wwn_list);
+struct target_fabric_configfs *ft_configfs;
+
+LIST_HEAD(ft_lport_list);
 DEFINE_MUTEX(ft_lport_lock);
 
 unsigned int ft_debug_logging;
@@ -129,73 +138,55 @@ static ssize_t ft_wwn_store(void *arg, const char *buf, size_t len)
  * ACL auth ops.
  */
 
-static ssize_t ft_nacl_port_name_show(struct config_item *item, char *page)
+static ssize_t ft_nacl_show_port_name(
+	struct se_node_acl *se_nacl,
+	char *page)
 {
-	struct se_node_acl *se_nacl = acl_to_nacl(item);
 	struct ft_node_acl *acl = container_of(se_nacl,
 			struct ft_node_acl, se_node_acl);
 
 	return ft_wwn_show(&acl->node_auth.port_name, page);
 }
 
-static ssize_t ft_nacl_port_name_store(struct config_item *item,
-		const char *page, size_t count)
+static ssize_t ft_nacl_store_port_name(
+	struct se_node_acl *se_nacl,
+	const char *page,
+	size_t count)
 {
-	struct se_node_acl *se_nacl = acl_to_nacl(item);
 	struct ft_node_acl *acl = container_of(se_nacl,
 			struct ft_node_acl, se_node_acl);
 
 	return ft_wwn_store(&acl->node_auth.port_name, page, count);
 }
 
-static ssize_t ft_nacl_node_name_show(struct config_item *item,
-		char *page)
+TF_NACL_BASE_ATTR(ft, port_name, S_IRUGO | S_IWUSR);
+
+static ssize_t ft_nacl_show_node_name(
+	struct se_node_acl *se_nacl,
+	char *page)
 {
-	struct se_node_acl *se_nacl = acl_to_nacl(item);
 	struct ft_node_acl *acl = container_of(se_nacl,
 			struct ft_node_acl, se_node_acl);
 
 	return ft_wwn_show(&acl->node_auth.node_name, page);
 }
 
-static ssize_t ft_nacl_node_name_store(struct config_item *item,
-		const char *page, size_t count)
+static ssize_t ft_nacl_store_node_name(
+	struct se_node_acl *se_nacl,
+	const char *page,
+	size_t count)
 {
-	struct se_node_acl *se_nacl = acl_to_nacl(item);
 	struct ft_node_acl *acl = container_of(se_nacl,
 			struct ft_node_acl, se_node_acl);
 
 	return ft_wwn_store(&acl->node_auth.node_name, page, count);
 }
 
-CONFIGFS_ATTR(ft_nacl_, node_name);
-CONFIGFS_ATTR(ft_nacl_, port_name);
-
-static ssize_t ft_nacl_tag_show(struct config_item *item,
-		char *page)
-{
-	return snprintf(page, PAGE_SIZE, "%s", acl_to_nacl(item)->acl_tag);
-}
-
-static ssize_t ft_nacl_tag_store(struct config_item *item,
-		const char *page, size_t count)
-{
-	struct se_node_acl *se_nacl = acl_to_nacl(item);
-	int ret;
-
-	ret = core_tpg_set_initiator_node_tag(se_nacl->se_tpg, se_nacl, page);
-
-	if (ret < 0)
-		return ret;
-	return count;
-}
-
-CONFIGFS_ATTR(ft_nacl_, tag);
+TF_NACL_BASE_ATTR(ft, node_name, S_IRUGO | S_IWUSR);
 
 static struct configfs_attribute *ft_nacl_base_attrs[] = {
-	&ft_nacl_attr_port_name,
-	&ft_nacl_attr_node_name,
-	&ft_nacl_attr_tag,
+	&ft_nacl_port_name.attr,
+	&ft_nacl_node_name.attr,
 	NULL,
 };
 
@@ -207,17 +198,96 @@ static struct configfs_attribute *ft_nacl_base_attrs[] = {
  * Add ACL for an initiator.  The ACL is named arbitrarily.
  * The port_name and/or node_name are attributes.
  */
-static int ft_init_nodeacl(struct se_node_acl *nacl, const char *name)
+static struct se_node_acl *ft_add_acl(
+	struct se_portal_group *se_tpg,
+	struct config_group *group,
+	const char *name)
 {
-	struct ft_node_acl *acl =
-		container_of(nacl, struct ft_node_acl, se_node_acl);
+	struct ft_node_acl *acl;
+	struct ft_tpg *tpg;
 	u64 wwpn;
+	u32 q_depth;
+
+	pr_debug("add acl %s\n", name);
+	tpg = container_of(se_tpg, struct ft_tpg, se_tpg);
 
 	if (ft_parse_wwn(name, &wwpn, 1) < 0)
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
 
+	acl = kzalloc(sizeof(struct ft_node_acl), GFP_KERNEL);
+	if (!acl)
+		return ERR_PTR(-ENOMEM);
 	acl->node_auth.port_name = wwpn;
-	return 0;
+
+	q_depth = 32;		/* XXX bogus default - get from tpg? */
+	return core_tpg_add_initiator_node_acl(&tpg->se_tpg,
+				&acl->se_node_acl, name, q_depth);
+}
+
+static void ft_del_acl(struct se_node_acl *se_acl)
+{
+	struct se_portal_group *se_tpg = se_acl->se_tpg;
+	struct ft_tpg *tpg;
+	struct ft_node_acl *acl = container_of(se_acl,
+				struct ft_node_acl, se_node_acl);
+
+	pr_debug("del acl %s\n",
+		config_item_name(&se_acl->acl_group.cg_item));
+
+	tpg = container_of(se_tpg, struct ft_tpg, se_tpg);
+	pr_debug("del acl %p se_acl %p tpg %p se_tpg %p\n",
+		    acl, se_acl, tpg, &tpg->se_tpg);
+
+	core_tpg_del_initiator_node_acl(&tpg->se_tpg, se_acl, 1);
+	kfree(acl);
+}
+
+struct ft_node_acl *ft_acl_get(struct ft_tpg *tpg, struct fc_rport_priv *rdata)
+{
+	struct ft_node_acl *found = NULL;
+	struct ft_node_acl *acl;
+	struct se_portal_group *se_tpg = &tpg->se_tpg;
+	struct se_node_acl *se_acl;
+
+	spin_lock_irq(&se_tpg->acl_node_lock);
+	list_for_each_entry(se_acl, &se_tpg->acl_node_list, acl_list) {
+		acl = container_of(se_acl, struct ft_node_acl, se_node_acl);
+		pr_debug("acl %p port_name %llx\n",
+			acl, (unsigned long long)acl->node_auth.port_name);
+		if (acl->node_auth.port_name == rdata->ids.port_name ||
+		    acl->node_auth.node_name == rdata->ids.node_name) {
+			pr_debug("acl %p port_name %llx matched\n", acl,
+				    (unsigned long long)rdata->ids.port_name);
+			found = acl;
+			/* XXX need to hold onto ACL */
+			break;
+		}
+	}
+	spin_unlock_irq(&se_tpg->acl_node_lock);
+	return found;
+}
+
+struct se_node_acl *ft_tpg_alloc_fabric_acl(struct se_portal_group *se_tpg)
+{
+	struct ft_node_acl *acl;
+
+	acl = kzalloc(sizeof(*acl), GFP_KERNEL);
+	if (!acl) {
+		pr_err("Unable to allocate struct ft_node_acl\n");
+		return NULL;
+	}
+	pr_debug("acl %p\n", acl);
+	return &acl->se_node_acl;
+}
+
+static void ft_tpg_release_fabric_acl(struct se_portal_group *se_tpg,
+				      struct se_node_acl *se_acl)
+{
+	struct ft_node_acl *acl = container_of(se_acl,
+				struct ft_node_acl, se_node_acl);
+
+	pr_debug("acl %p\n", acl);
+	kfree(acl);
 }
 
 /*
@@ -228,7 +298,7 @@ static struct se_portal_group *ft_add_tpg(
 	struct config_group *group,
 	const char *name)
 {
-	struct ft_lport_wwn *ft_wwn;
+	struct ft_lport_acl *lacl;
 	struct ft_tpg *tpg;
 	struct workqueue_struct *wq;
 	unsigned long index;
@@ -241,24 +311,15 @@ static struct se_portal_group *ft_add_tpg(
 	 */
 	if (strstr(name, "tpgt_") != name)
 		return NULL;
-
-	ret = kstrtoul(name + 5, 10, &index);
-	if (ret)
-		return NULL;
-	if (index > UINT_MAX)
+	if (strict_strtoul(name + 5, 10, &index) || index > UINT_MAX)
 		return NULL;
 
-	if ((index != 1)) {
-		pr_err("Error, a single TPG=1 is used for HW port mappings\n");
-		return ERR_PTR(-ENOSYS);
-	}
-
-	ft_wwn = container_of(wwn, struct ft_lport_wwn, se_wwn);
+	lacl = container_of(wwn, struct ft_lport_acl, fc_lport_wwn);
 	tpg = kzalloc(sizeof(*tpg), GFP_KERNEL);
 	if (!tpg)
 		return NULL;
 	tpg->index = index;
-	tpg->lport_wwn = ft_wwn;
+	tpg->lport_acl = lacl;
 	INIT_LIST_HEAD(&tpg->lun_list);
 
 	wq = alloc_workqueue("tcm_fc", 0, 1);
@@ -267,7 +328,8 @@ static struct se_portal_group *ft_add_tpg(
 		return NULL;
 	}
 
-	ret = core_tpg_register(wwn, &tpg->se_tpg, SCSI_PROTOCOL_FCP);
+	ret = core_tpg_register(&ft_configfs->tf_ops, wwn, &tpg->se_tpg,
+				tpg, TRANSPORT_TPG_TYPE_NORMAL);
 	if (ret < 0) {
 		destroy_workqueue(wq);
 		kfree(tpg);
@@ -276,7 +338,7 @@ static struct se_portal_group *ft_add_tpg(
 	tpg->workqueue = wq;
 
 	mutex_lock(&ft_lport_lock);
-	ft_wwn->tpg = tpg;
+	list_add_tail(&tpg->list, &lacl->tpg_list);
 	mutex_unlock(&ft_lport_lock);
 
 	return &tpg->se_tpg;
@@ -285,7 +347,6 @@ static struct se_portal_group *ft_add_tpg(
 static void ft_del_tpg(struct se_portal_group *se_tpg)
 {
 	struct ft_tpg *tpg = container_of(se_tpg, struct ft_tpg, se_tpg);
-	struct ft_lport_wwn *ft_wwn = tpg->lport_wwn;
 
 	pr_debug("del tpg %s\n",
 		    config_item_name(&tpg->se_tpg.tpg_group.cg_item));
@@ -296,7 +357,7 @@ static void ft_del_tpg(struct se_portal_group *se_tpg)
 	synchronize_rcu();
 
 	mutex_lock(&ft_lport_lock);
-	ft_wwn->tpg = NULL;
+	list_del(&tpg->list);
 	if (tpg->tport) {
 		tpg->tport->tpg = NULL;
 		tpg->tport = NULL;
@@ -315,11 +376,15 @@ static void ft_del_tpg(struct se_portal_group *se_tpg)
  */
 struct ft_tpg *ft_lport_find_tpg(struct fc_lport *lport)
 {
-	struct ft_lport_wwn *ft_wwn;
+	struct ft_lport_acl *lacl;
+	struct ft_tpg *tpg;
 
-	list_for_each_entry(ft_wwn, &ft_wwn_list, ft_wwn_node) {
-		if (ft_wwn->wwpn == lport->wwpn)
-			return ft_wwn->tpg;
+	list_for_each_entry(lacl, &ft_lport_list, list) {
+		if (lacl->wwpn == lport->wwpn) {
+			list_for_each_entry(tpg, &lacl->tpg_list, list)
+				return tpg; /* XXX for now return first entry */
+			return NULL;
+		}
 	}
 	return NULL;
 }
@@ -332,68 +397,66 @@ struct ft_tpg *ft_lport_find_tpg(struct fc_lport *lport)
  * Add lport to allowed config.
  * The name is the WWPN in lower-case ASCII, colon-separated bytes.
  */
-static struct se_wwn *ft_add_wwn(
+static struct se_wwn *ft_add_lport(
 	struct target_fabric_configfs *tf,
 	struct config_group *group,
 	const char *name)
 {
-	struct ft_lport_wwn *ft_wwn;
-	struct ft_lport_wwn *old_ft_wwn;
+	struct ft_lport_acl *lacl;
+	struct ft_lport_acl *old_lacl;
 	u64 wwpn;
 
-	pr_debug("add wwn %s\n", name);
+	pr_debug("add lport %s\n", name);
 	if (ft_parse_wwn(name, &wwpn, 1) < 0)
 		return NULL;
-	ft_wwn = kzalloc(sizeof(*ft_wwn), GFP_KERNEL);
-	if (!ft_wwn)
+	lacl = kzalloc(sizeof(*lacl), GFP_KERNEL);
+	if (!lacl)
 		return NULL;
-	ft_wwn->wwpn = wwpn;
+	lacl->wwpn = wwpn;
+	INIT_LIST_HEAD(&lacl->tpg_list);
 
 	mutex_lock(&ft_lport_lock);
-	list_for_each_entry(old_ft_wwn, &ft_wwn_list, ft_wwn_node) {
-		if (old_ft_wwn->wwpn == wwpn) {
+	list_for_each_entry(old_lacl, &ft_lport_list, list) {
+		if (old_lacl->wwpn == wwpn) {
 			mutex_unlock(&ft_lport_lock);
-			kfree(ft_wwn);
+			kfree(lacl);
 			return NULL;
 		}
 	}
-	list_add_tail(&ft_wwn->ft_wwn_node, &ft_wwn_list);
-	ft_format_wwn(ft_wwn->name, sizeof(ft_wwn->name), wwpn);
+	list_add_tail(&lacl->list, &ft_lport_list);
+	ft_format_wwn(lacl->name, sizeof(lacl->name), wwpn);
 	mutex_unlock(&ft_lport_lock);
 
-	return &ft_wwn->se_wwn;
+	return &lacl->fc_lport_wwn;
 }
 
-static void ft_del_wwn(struct se_wwn *wwn)
+static void ft_del_lport(struct se_wwn *wwn)
 {
-	struct ft_lport_wwn *ft_wwn = container_of(wwn,
-				struct ft_lport_wwn, se_wwn);
+	struct ft_lport_acl *lacl = container_of(wwn,
+				struct ft_lport_acl, fc_lport_wwn);
 
-	pr_debug("del wwn %s\n", ft_wwn->name);
+	pr_debug("del lport %s\n", lacl->name);
 	mutex_lock(&ft_lport_lock);
-	list_del(&ft_wwn->ft_wwn_node);
+	list_del(&lacl->list);
 	mutex_unlock(&ft_lport_lock);
 
-	kfree(ft_wwn);
+	kfree(lacl);
 }
 
-static ssize_t ft_wwn_version_show(struct config_item *item, char *page)
+static ssize_t ft_wwn_show_attr_version(
+	struct target_fabric_configfs *tf,
+	char *page)
 {
 	return sprintf(page, "TCM FC " FT_VERSION " on %s/%s on "
 		""UTS_RELEASE"\n",  utsname()->sysname, utsname()->machine);
 }
 
-CONFIGFS_ATTR_RO(ft_wwn_, version);
+TF_WWN_ATTR_RO(ft, version);
 
 static struct configfs_attribute *ft_wwn_attrs[] = {
-	&ft_wwn_attr_version,
+	&ft_wwn_version.attr,
 	NULL,
 };
-
-static inline struct ft_tpg *ft_tpg(struct se_portal_group *se_tpg)
-{
-	return container_of(se_tpg, struct ft_tpg, se_tpg);
-}
 
 static char *ft_get_fabric_name(void)
 {
@@ -402,16 +465,25 @@ static char *ft_get_fabric_name(void)
 
 static char *ft_get_fabric_wwn(struct se_portal_group *se_tpg)
 {
-	return ft_tpg(se_tpg)->lport_wwn->name;
+	struct ft_tpg *tpg = se_tpg->se_tpg_fabric_ptr;
+
+	return tpg->lport_acl->name;
 }
 
 static u16 ft_get_tag(struct se_portal_group *se_tpg)
 {
+	struct ft_tpg *tpg = se_tpg->se_tpg_fabric_ptr;
+
 	/*
 	 * This tag is used when forming SCSI Name identifier in EVPD=1 0x83
 	 * to represent the SCSI Target Port.
 	 */
-	return ft_tpg(se_tpg)->index;
+	return tpg->index;
+}
+
+static u32 ft_get_default_depth(struct se_portal_group *se_tpg)
+{
+	return 1;
 }
 
 static int ft_check_false(struct se_portal_group *se_tpg)
@@ -423,49 +495,128 @@ static void ft_set_default_node_attr(struct se_node_acl *se_nacl)
 {
 }
 
-static u32 ft_tpg_get_inst_index(struct se_portal_group *se_tpg)
+static u16 ft_get_fabric_sense_len(void)
 {
-	return ft_tpg(se_tpg)->index;
+	return 0;
 }
 
-static const struct target_core_fabric_ops ft_fabric_ops = {
-	.module =			THIS_MODULE,
-	.name =				"fc",
-	.node_acl_size =		sizeof(struct ft_node_acl),
+static u16 ft_set_fabric_sense_len(struct se_cmd *se_cmd, u32 sense_len)
+{
+	return 0;
+}
+
+static u32 ft_tpg_get_inst_index(struct se_portal_group *se_tpg)
+{
+	struct ft_tpg *tpg = se_tpg->se_tpg_fabric_ptr;
+
+	return tpg->index;
+}
+
+static struct target_core_fabric_ops ft_fabric_ops = {
 	.get_fabric_name =		ft_get_fabric_name,
+	.get_fabric_proto_ident =	fc_get_fabric_proto_ident,
 	.tpg_get_wwn =			ft_get_fabric_wwn,
 	.tpg_get_tag =			ft_get_tag,
+	.tpg_get_default_depth =	ft_get_default_depth,
+	.tpg_get_pr_transport_id =	fc_get_pr_transport_id,
+	.tpg_get_pr_transport_id_len =	fc_get_pr_transport_id_len,
+	.tpg_parse_pr_out_transport_id = fc_parse_pr_out_transport_id,
 	.tpg_check_demo_mode =		ft_check_false,
 	.tpg_check_demo_mode_cache =	ft_check_false,
 	.tpg_check_demo_mode_write_protect = ft_check_false,
 	.tpg_check_prod_mode_write_protect = ft_check_false,
+	.tpg_alloc_fabric_acl =		ft_tpg_alloc_fabric_acl,
+	.tpg_release_fabric_acl =	ft_tpg_release_fabric_acl,
 	.tpg_get_inst_index =		ft_tpg_get_inst_index,
 	.check_stop_free =		ft_check_stop_free,
 	.release_cmd =			ft_release_cmd,
+	.shutdown_session =		ft_sess_shutdown,
 	.close_session =		ft_sess_close,
 	.sess_get_index =		ft_sess_get_index,
 	.sess_get_initiator_sid =	NULL,
 	.write_pending =		ft_write_pending,
 	.write_pending_status =		ft_write_pending_status,
 	.set_default_node_attributes =	ft_set_default_node_attr,
+	.get_task_tag =			ft_get_task_tag,
 	.get_cmd_state =		ft_get_cmd_state,
 	.queue_data_in =		ft_queue_data_in,
 	.queue_status =			ft_queue_status,
 	.queue_tm_rsp =			ft_queue_tm_resp,
-	.aborted_task =			ft_aborted_task,
+	.get_fabric_sense_len =		ft_get_fabric_sense_len,
+	.set_fabric_sense_len =		ft_set_fabric_sense_len,
 	/*
 	 * Setup function pointers for generic logic in
 	 * target_core_fabric_configfs.c
 	 */
-	.fabric_make_wwn =		&ft_add_wwn,
-	.fabric_drop_wwn =		&ft_del_wwn,
+	.fabric_make_wwn =		&ft_add_lport,
+	.fabric_drop_wwn =		&ft_del_lport,
 	.fabric_make_tpg =		&ft_add_tpg,
 	.fabric_drop_tpg =		&ft_del_tpg,
-	.fabric_init_nodeacl =		&ft_init_nodeacl,
-
-	.tfc_wwn_attrs			= ft_wwn_attrs,
-	.tfc_tpg_nacl_base_attrs	= ft_nacl_base_attrs,
+	.fabric_post_link =		NULL,
+	.fabric_pre_unlink =		NULL,
+	.fabric_make_np =		NULL,
+	.fabric_drop_np =		NULL,
+	.fabric_make_nodeacl =		&ft_add_acl,
+	.fabric_drop_nodeacl =		&ft_del_acl,
 };
+
+int ft_register_configfs(void)
+{
+	struct target_fabric_configfs *fabric;
+	int ret;
+
+	/*
+	 * Register the top level struct config_item_type with TCM core
+	 */
+	fabric = target_fabric_configfs_init(THIS_MODULE, "fc");
+	if (IS_ERR(fabric)) {
+		pr_err("%s: target_fabric_configfs_init() failed!\n",
+		       __func__);
+		return PTR_ERR(fabric);
+	}
+	fabric->tf_ops = ft_fabric_ops;
+
+	/* Allowing support for task_sg_chaining */
+	fabric->tf_ops.task_sg_chaining = 1;
+
+	/*
+	 * Setup default attribute lists for various fabric->tf_cit_tmpl
+	 */
+	TF_CIT_TMPL(fabric)->tfc_wwn_cit.ct_attrs = ft_wwn_attrs;
+	TF_CIT_TMPL(fabric)->tfc_tpg_base_cit.ct_attrs = NULL;
+	TF_CIT_TMPL(fabric)->tfc_tpg_attrib_cit.ct_attrs = NULL;
+	TF_CIT_TMPL(fabric)->tfc_tpg_param_cit.ct_attrs = NULL;
+	TF_CIT_TMPL(fabric)->tfc_tpg_np_base_cit.ct_attrs = NULL;
+	TF_CIT_TMPL(fabric)->tfc_tpg_nacl_base_cit.ct_attrs =
+						    ft_nacl_base_attrs;
+	TF_CIT_TMPL(fabric)->tfc_tpg_nacl_attrib_cit.ct_attrs = NULL;
+	TF_CIT_TMPL(fabric)->tfc_tpg_nacl_auth_cit.ct_attrs = NULL;
+	TF_CIT_TMPL(fabric)->tfc_tpg_nacl_param_cit.ct_attrs = NULL;
+	/*
+	 * register the fabric for use within TCM
+	 */
+	ret = target_fabric_configfs_register(fabric);
+	if (ret < 0) {
+		pr_debug("target_fabric_configfs_register() for"
+			    " FC Target failed!\n");
+		target_fabric_configfs_free(fabric);
+		return -1;
+	}
+
+	/*
+	 * Setup our local pointer to *fabric.
+	 */
+	ft_configfs = fabric;
+	return 0;
+}
+
+void ft_deregister_configfs(void)
+{
+	if (!ft_configfs)
+		return;
+	target_fabric_configfs_deregister(ft_configfs);
+	ft_configfs = NULL;
+}
 
 static struct notifier_block ft_notifier = {
 	.notifier_call = ft_lport_notify
@@ -473,24 +624,15 @@ static struct notifier_block ft_notifier = {
 
 static int __init ft_init(void)
 {
-	int ret;
-
-	ret = target_register_template(&ft_fabric_ops);
-	if (ret)
-		goto out;
-
-	ret = fc_fc4_register_provider(FC_TYPE_FCP, &ft_prov);
-	if (ret)
-		goto out_unregister_template;
-
+	if (ft_register_configfs())
+		return -1;
+	if (fc_fc4_register_provider(FC_TYPE_FCP, &ft_prov)) {
+		ft_deregister_configfs();
+		return -1;
+	}
 	blocking_notifier_chain_register(&fc_lport_notifier_head, &ft_notifier);
 	fc_lport_iterate(ft_lport_add, NULL);
 	return 0;
-
-out_unregister_template:
-	target_unregister_template(&ft_fabric_ops);
-out:
-	return ret;
 }
 
 static void __exit ft_exit(void)
@@ -499,7 +641,7 @@ static void __exit ft_exit(void)
 					   &ft_notifier);
 	fc_fc4_deregister_provider(FC_TYPE_FCP, &ft_prov);
 	fc_lport_iterate(ft_lport_del, NULL);
-	target_unregister_template(&ft_fabric_ops);
+	ft_deregister_configfs();
 	synchronize_rcu();
 }
 

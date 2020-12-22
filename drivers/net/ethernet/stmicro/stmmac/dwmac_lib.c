@@ -24,28 +24,12 @@
 #include "common.h"
 #include "dwmac_dma.h"
 
-#define GMAC_HI_REG_AE		0x80000000
-
-int dwmac_dma_reset(void __iomem *ioaddr)
-{
-	u32 value = readl(ioaddr + DMA_BUS_MODE);
-	int limit;
-
-	/* DMA SW reset */
-	value |= DMA_BUS_MODE_SFT_RESET;
-	writel(value, ioaddr + DMA_BUS_MODE);
-	limit = 10;
-	while (limit--) {
-		if (!(readl(ioaddr + DMA_BUS_MODE) & DMA_BUS_MODE_SFT_RESET))
-			break;
-		mdelay(10);
-	}
-
-	if (limit < 0)
-		return -EBUSY;
-
-	return 0;
-}
+#undef DWMAC_DMA_DEBUG
+#ifdef DWMAC_DMA_DEBUG
+#define DWMAC_LIB_DBG(fmt, args...)  printk(fmt, ## args)
+#else
+#define DWMAC_LIB_DBG(fmt, args...)  do { } while (0)
+#endif
 
 /* CSR1 enables the transmit DMA to check for new descriptor */
 void dwmac_enable_dma_transmission(void __iomem *ioaddr)
@@ -99,24 +83,24 @@ static void show_tx_process_state(unsigned int status)
 
 	switch (state) {
 	case 0:
-		pr_debug("- TX (Stopped): Reset or Stop command\n");
+		pr_info("- TX (Stopped): Reset or Stop command\n");
 		break;
 	case 1:
-		pr_debug("- TX (Running):Fetching the Tx desc\n");
+		pr_info("- TX (Running):Fetching the Tx desc\n");
 		break;
 	case 2:
-		pr_debug("- TX (Running): Waiting for end of tx\n");
+		pr_info("- TX (Running): Waiting for end of tx\n");
 		break;
 	case 3:
-		pr_debug("- TX (Running): Reading the data "
+		pr_info("- TX (Running): Reading the data "
 		       "and queuing the data into the Tx buf\n");
 		break;
 	case 6:
-		pr_debug("- TX (Suspended): Tx Buff Underflow "
+		pr_info("- TX (Suspended): Tx Buff Underflow "
 		       "or an unavailable Transmit descriptor\n");
 		break;
 	case 7:
-		pr_debug("- TX (Running): Closing Tx descriptor\n");
+		pr_info("- TX (Running): Closing Tx descriptor\n");
 		break;
 	default:
 		break;
@@ -130,29 +114,29 @@ static void show_rx_process_state(unsigned int status)
 
 	switch (state) {
 	case 0:
-		pr_debug("- RX (Stopped): Reset or Stop command\n");
+		pr_info("- RX (Stopped): Reset or Stop command\n");
 		break;
 	case 1:
-		pr_debug("- RX (Running): Fetching the Rx desc\n");
+		pr_info("- RX (Running): Fetching the Rx desc\n");
 		break;
 	case 2:
-		pr_debug("- RX (Running):Checking for end of pkt\n");
+		pr_info("- RX (Running):Checking for end of pkt\n");
 		break;
 	case 3:
-		pr_debug("- RX (Running): Waiting for Rx pkt\n");
+		pr_info("- RX (Running): Waiting for Rx pkt\n");
 		break;
 	case 4:
-		pr_debug("- RX (Suspended): Unavailable Rx buf\n");
+		pr_info("- RX (Suspended): Unavailable Rx buf\n");
 		break;
 	case 5:
-		pr_debug("- RX (Running): Closing Rx descriptor\n");
+		pr_info("- RX (Running): Closing Rx descriptor\n");
 		break;
 	case 6:
-		pr_debug("- RX(Running): Flushing the current frame"
+		pr_info("- RX(Running): Flushing the current frame"
 		       " from the Rx buf\n");
 		break;
 	case 7:
-		pr_debug("- RX (Running): Queuing the Rx frame"
+		pr_info("- RX (Running): Queuing the Rx frame"
 		       " from the Rx buf into memory\n");
 		break;
 	default:
@@ -168,67 +152,70 @@ int dwmac_dma_interrupt(void __iomem *ioaddr,
 	/* read the status register (CSR5) */
 	u32 intr_status = readl(ioaddr + DMA_STATUS);
 
+	DWMAC_LIB_DBG(KERN_INFO "%s: [CSR5: 0x%08x]\n", __func__, intr_status);
 #ifdef DWMAC_DMA_DEBUG
-	/* Enable it to monitor DMA rx/tx status in case of critical problems */
-	pr_debug("%s: [CSR5: 0x%08x]\n", __func__, intr_status);
+	/* It displays the DMA process states (CSR5 register) */
 	show_tx_process_state(intr_status);
 	show_rx_process_state(intr_status);
 #endif
 	/* ABNORMAL interrupts */
 	if (unlikely(intr_status & DMA_STATUS_AIS)) {
+		DWMAC_LIB_DBG(KERN_INFO "CSR5[15] DMA ABNORMAL IRQ: ");
 		if (unlikely(intr_status & DMA_STATUS_UNF)) {
+			DWMAC_LIB_DBG(KERN_INFO "transmit underflow\n");
 			ret = tx_hard_error_bump_tc;
 			x->tx_undeflow_irq++;
 		}
-		if (unlikely(intr_status & DMA_STATUS_TJT))
+		if (unlikely(intr_status & DMA_STATUS_TJT)) {
+			DWMAC_LIB_DBG(KERN_INFO "transmit jabber\n");
 			x->tx_jabber_irq++;
-
-		if (unlikely(intr_status & DMA_STATUS_OVF))
+		}
+		if (unlikely(intr_status & DMA_STATUS_OVF)) {
+			DWMAC_LIB_DBG(KERN_INFO "recv overflow\n");
 			x->rx_overflow_irq++;
-
-		if (unlikely(intr_status & DMA_STATUS_RU))
+		}
+		if (unlikely(intr_status & DMA_STATUS_RU)) {
+			DWMAC_LIB_DBG(KERN_INFO "receive buffer unavailable\n");
 			x->rx_buf_unav_irq++;
-		if (unlikely(intr_status & DMA_STATUS_RPS))
+		}
+		if (unlikely(intr_status & DMA_STATUS_RPS)) {
+			DWMAC_LIB_DBG(KERN_INFO "receive process stopped\n");
 			x->rx_process_stopped_irq++;
-		if (unlikely(intr_status & DMA_STATUS_RWT))
+		}
+		if (unlikely(intr_status & DMA_STATUS_RWT)) {
+			DWMAC_LIB_DBG(KERN_INFO "receive watchdog\n");
 			x->rx_watchdog_irq++;
-		if (unlikely(intr_status & DMA_STATUS_ETI))
+		}
+		if (unlikely(intr_status & DMA_STATUS_ETI)) {
+			DWMAC_LIB_DBG(KERN_INFO "transmit early interrupt\n");
 			x->tx_early_irq++;
+		}
 		if (unlikely(intr_status & DMA_STATUS_TPS)) {
+			DWMAC_LIB_DBG(KERN_INFO "transmit process stopped\n");
 			x->tx_process_stopped_irq++;
 			ret = tx_hard_error;
 		}
 		if (unlikely(intr_status & DMA_STATUS_FBI)) {
+			DWMAC_LIB_DBG(KERN_INFO "fatal bus error\n");
 			x->fatal_bus_error_irq++;
 			ret = tx_hard_error;
 		}
 	}
 	/* TX/RX NORMAL interrupts */
-	if (likely(intr_status & DMA_STATUS_NIS)) {
+	if (intr_status & DMA_STATUS_NIS) {
 		x->normal_irq_n++;
-		if (likely(intr_status & DMA_STATUS_RI)) {
-			u32 value = readl(ioaddr + DMA_INTR_ENA);
-			/* to schedule NAPI on real RIE event. */
-			if (likely(value & DMA_INTR_ENA_RIE)) {
-				x->rx_normal_irq_n++;
-				ret |= handle_rx;
-			}
-		}
-		if (likely(intr_status & DMA_STATUS_TI)) {
-			x->tx_normal_irq_n++;
-			ret |= handle_tx;
-		}
-		if (unlikely(intr_status & DMA_STATUS_ERI))
-			x->rx_early_irq++;
+		if (likely((intr_status & DMA_STATUS_RI) ||
+			 (intr_status & (DMA_STATUS_TI))))
+				ret = handle_tx_rx;
 	}
 	/* Optional hardware blocks, interrupts should be disabled */
 	if (unlikely(intr_status &
 		     (DMA_STATUS_GPI | DMA_STATUS_GMI | DMA_STATUS_GLI)))
-		pr_warn("%s: unexpected status %08x\n", __func__, intr_status);
-
+		pr_info("%s: unexpected status %08x\n", __func__, intr_status);
 	/* Clear the interrupt by writing a logic 1 to the CSR5[15-0] */
 	writel((intr_status & 0x1ffff), ioaddr + DMA_STATUS);
 
+	DWMAC_LIB_DBG(KERN_INFO "\n\n");
 	return ret;
 }
 
@@ -246,11 +233,7 @@ void stmmac_set_mac_addr(void __iomem *ioaddr, u8 addr[6],
 	unsigned long data;
 
 	data = (addr[5] << 8) | addr[4];
-	/* For MAC Addr registers se have to set the Address Enable (AE)
-	 * bit that has no effect on the High Reg 0 where the bit 31 (MO)
-	 * is RO.
-	 */
-	writel(data | GMAC_HI_REG_AE, ioaddr + high);
+	writel(data, ioaddr + high);
 	data = (addr[3] << 24) | (addr[2] << 16) | (addr[1] << 8) | addr[0];
 	writel(data, ioaddr + low);
 }

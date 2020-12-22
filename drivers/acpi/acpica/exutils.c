@@ -1,3 +1,4 @@
+
 /******************************************************************************
  *
  * Module Name: exutils - interpreter/scanner utilities
@@ -5,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -44,12 +45,12 @@
 /*
  * DEFINE_AML_GLOBALS is tested in amlcode.h
  * to determine whether certain global names should be "defined" or only
- * "declared" in the current compilation. This enhances maintainability
+ * "declared" in the current compilation.  This enhances maintainability
  * by enabling a single header file to embody all knowledge of the names
  * in question.
  *
  * Exactly one module of any executable should #define DEFINE_GLOBALS
- * before #including the header files which use this convention. The
+ * before #including the header files which use this convention.  The
  * names in question will be defined and initialized in that module,
  * and declared as extern in all other modules which #include those
  * header files.
@@ -94,9 +95,36 @@ void acpi_ex_enter_interpreter(void)
 		ACPI_ERROR((AE_INFO,
 			    "Could not acquire AML Interpreter mutex"));
 	}
-	status = acpi_ut_acquire_mutex(ACPI_MTX_NAMESPACE);
-	if (ACPI_FAILURE(status)) {
-		ACPI_ERROR((AE_INFO, "Could not acquire AML Namespace mutex"));
+
+	return_VOID;
+}
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_ex_reacquire_interpreter
+ *
+ * PARAMETERS:  None
+ *
+ * RETURN:      None
+ *
+ * DESCRIPTION: Reacquire the interpreter execution region from within the
+ *              interpreter code. Failure to enter the interpreter region is a
+ *              fatal system error. Used in  conjunction with
+ *              relinquish_interpreter
+ *
+ ******************************************************************************/
+
+void acpi_ex_reacquire_interpreter(void)
+{
+	ACPI_FUNCTION_TRACE(ex_reacquire_interpreter);
+
+	/*
+	 * If the global serialized flag is set, do not release the interpreter,
+	 * since it was not actually released by acpi_ex_relinquish_interpreter.
+	 * This forces the interpreter to be single threaded.
+	 */
+	if (!acpi_gbl_all_methods_serialized) {
+		acpi_ex_enter_interpreter();
 	}
 
 	return_VOID;
@@ -112,16 +140,7 @@ void acpi_ex_enter_interpreter(void)
  *
  * DESCRIPTION: Exit the interpreter execution region. This is the top level
  *              routine used to exit the interpreter when all processing has
- *              been completed, or when the method blocks.
- *
- * Cases where the interpreter is unlocked internally:
- *      1) Method will be blocked on a Sleep() AML opcode
- *      2) Method will be blocked on an Acquire() AML opcode
- *      3) Method will be blocked on a Wait() AML opcode
- *      4) Method will be blocked to acquire the global lock
- *      5) Method will be blocked waiting to execute a serialized control
- *          method that is currently executing
- *      6) About to invoke a user-installed opregion handler
+ *              been completed.
  *
  ******************************************************************************/
 
@@ -131,10 +150,6 @@ void acpi_ex_exit_interpreter(void)
 
 	ACPI_FUNCTION_TRACE(ex_exit_interpreter);
 
-	status = acpi_ut_release_mutex(ACPI_MTX_NAMESPACE);
-	if (ACPI_FAILURE(status)) {
-		ACPI_ERROR((AE_INFO, "Could not release AML Namespace mutex"));
-	}
 	status = acpi_ut_release_mutex(ACPI_MTX_INTERPRETER);
 	if (ACPI_FAILURE(status)) {
 		ACPI_ERROR((AE_INFO,
@@ -146,43 +161,77 @@ void acpi_ex_exit_interpreter(void)
 
 /*******************************************************************************
  *
+ * FUNCTION:    acpi_ex_relinquish_interpreter
+ *
+ * PARAMETERS:  None
+ *
+ * RETURN:      None
+ *
+ * DESCRIPTION: Exit the interpreter execution region, from within the
+ *              interpreter - before attempting an operation that will possibly
+ *              block the running thread.
+ *
+ * Cases where the interpreter is unlocked internally
+ *      1) Method to be blocked on a Sleep() AML opcode
+ *      2) Method to be blocked on an Acquire() AML opcode
+ *      3) Method to be blocked on a Wait() AML opcode
+ *      4) Method to be blocked to acquire the global lock
+ *      5) Method to be blocked waiting to execute a serialized control method
+ *          that is currently executing
+ *      6) About to invoke a user-installed opregion handler
+ *
+ ******************************************************************************/
+
+void acpi_ex_relinquish_interpreter(void)
+{
+	ACPI_FUNCTION_TRACE(ex_relinquish_interpreter);
+
+	/*
+	 * If the global serialized flag is set, do not release the interpreter.
+	 * This forces the interpreter to be single threaded.
+	 */
+	if (!acpi_gbl_all_methods_serialized) {
+		acpi_ex_exit_interpreter();
+	}
+
+	return_VOID;
+}
+
+/*******************************************************************************
+ *
  * FUNCTION:    acpi_ex_truncate_for32bit_table
  *
  * PARAMETERS:  obj_desc        - Object to be truncated
  *
- * RETURN:      TRUE if a truncation was performed, FALSE otherwise.
+ * RETURN:      none
  *
  * DESCRIPTION: Truncate an ACPI Integer to 32 bits if the execution mode is
  *              32-bit, as determined by the revision of the DSDT.
  *
  ******************************************************************************/
 
-u8 acpi_ex_truncate_for32bit_table(union acpi_operand_object *obj_desc)
+void acpi_ex_truncate_for32bit_table(union acpi_operand_object *obj_desc)
 {
 
 	ACPI_FUNCTION_ENTRY();
 
 	/*
 	 * Object must be a valid number and we must be executing
-	 * a control method. Object could be NS node for AML_INT_NAMEPATH_OP.
+	 * a control method. NS node could be there for AML_INT_NAMEPATH_OP.
 	 */
 	if ((!obj_desc) ||
 	    (ACPI_GET_DESCRIPTOR_TYPE(obj_desc) != ACPI_DESC_TYPE_OPERAND) ||
 	    (obj_desc->common.type != ACPI_TYPE_INTEGER)) {
-		return (FALSE);
+		return;
 	}
 
-	if ((acpi_gbl_integer_byte_width == 4) &&
-	    (obj_desc->integer.value > (u64)ACPI_UINT32_MAX)) {
+	if (acpi_gbl_integer_byte_width == 4) {
 		/*
-		 * We are executing in a 32-bit ACPI table. Truncate
-		 * the value to 32 bits by zeroing out the upper 32-bit field
+		 * We are running a method that exists in a 32-bit ACPI table.
+		 * Truncate the value to 32 bits by zeroing out the upper 32-bit field
 		 */
-		obj_desc->integer.value &= (u64)ACPI_UINT32_MAX;
-		return (TRUE);
+		obj_desc->integer.value &= (u64) ACPI_UINT32_MAX;
 	}
-
-	return (FALSE);
 }
 
 /*******************************************************************************
@@ -268,8 +317,8 @@ void acpi_ex_release_global_lock(u32 field_flags)
  *
  * FUNCTION:    acpi_ex_digits_needed
  *
- * PARAMETERS:  value           - Value to be represented
- *              base            - Base of representation
+ * PARAMETERS:  Value           - Value to be represented
+ *              Base            - Base of representation
  *
  * RETURN:      The number of digits.
  *
@@ -309,8 +358,8 @@ static u32 acpi_ex_digits_needed(u64 value, u32 base)
  *
  * FUNCTION:    acpi_ex_eisa_id_to_string
  *
- * PARAMETERS:  out_string      - Where to put the converted string (8 bytes)
- *              compressed_id   - EISAID to be converted
+ * PARAMETERS:  compressed_id   - EISAID to be converted
+ *              out_string      - Where to put the converted string (8 bytes)
  *
  * RETURN:      None
  *
@@ -331,8 +380,7 @@ void acpi_ex_eisa_id_to_string(char *out_string, u64 compressed_id)
 
 	if (compressed_id > ACPI_UINT32_MAX) {
 		ACPI_WARNING((AE_INFO,
-			      "Expected EISAID is larger than 32 bits: "
-			      "0x%8.8X%8.8X, truncating",
+			      "Expected EISAID is larger than 32 bits: 0x%8.8X%8.8X, truncating",
 			      ACPI_FORMAT_UINT64(compressed_id)));
 	}
 
@@ -360,9 +408,9 @@ void acpi_ex_eisa_id_to_string(char *out_string, u64 compressed_id)
  * PARAMETERS:  out_string      - Where to put the converted string. At least
  *                                21 bytes are needed to hold the largest
  *                                possible 64-bit integer.
- *              value           - Value to be converted
+ *              Value           - Value to be converted
  *
- * RETURN:      Converted string in out_string
+ * RETURN:      None, string
  *
  * DESCRIPTION: Convert a 64-bit integer to decimal string representation.
  *              Assumes string buffer is large enough to hold the string. The
@@ -389,45 +437,13 @@ void acpi_ex_integer_to_string(char *out_string, u64 value)
 
 /*******************************************************************************
  *
- * FUNCTION:    acpi_ex_pci_cls_to_string
- *
- * PARAMETERS:  out_string      - Where to put the converted string (7 bytes)
- *              class_code      - PCI class code to be converted (3 bytes)
- *
- * RETURN:      Converted string in out_string
- *
- * DESCRIPTION: Convert 3-bytes PCI class code to string representation.
- *              Return buffer must be large enough to hold the string. The
- *              string returned is always exactly of length
- *              ACPI_PCICLS_STRING_SIZE (includes null terminator).
- *
- ******************************************************************************/
-
-void acpi_ex_pci_cls_to_string(char *out_string, u8 class_code[3])
-{
-
-	ACPI_FUNCTION_ENTRY();
-
-	/* All 3 bytes are hexadecimal */
-
-	out_string[0] = acpi_ut_hex_to_ascii_char((u64)class_code[0], 4);
-	out_string[1] = acpi_ut_hex_to_ascii_char((u64)class_code[0], 0);
-	out_string[2] = acpi_ut_hex_to_ascii_char((u64)class_code[1], 4);
-	out_string[3] = acpi_ut_hex_to_ascii_char((u64)class_code[1], 0);
-	out_string[4] = acpi_ut_hex_to_ascii_char((u64)class_code[2], 4);
-	out_string[5] = acpi_ut_hex_to_ascii_char((u64)class_code[2], 0);
-	out_string[6] = 0;
-}
-
-/*******************************************************************************
- *
  * FUNCTION:    acpi_is_valid_space_id
  *
  * PARAMETERS:  space_id            - ID to be validated
  *
- * RETURN:      TRUE if space_id is a valid/supported ID.
+ * RETURN:      TRUE if valid/supported ID.
  *
- * DESCRIPTION: Validate an operation region space_ID.
+ * DESCRIPTION: Validate an operation region space_iD.
  *
  ******************************************************************************/
 

@@ -27,7 +27,7 @@
 
 #include <linux/i2c/pxa-i2c.h>
 #include <linux/i2c/pcf857x.h>
-#include <linux/platform_data/at24.h>
+#include <linux/i2c/at24.h>
 #include <linux/smc91x.h>
 #include <linux/gpio.h>
 #include <linux/leds.h>
@@ -43,16 +43,16 @@
 #include <asm/mach/irq.h>
 #include <asm/mach/flash.h>
 
-#include "pxa27x.h"
-#include <linux/platform_data/mmc-pxamci.h>
-#include "udc.h"
-#include "pxa27x-udc.h"
+#include <mach/pxa27x.h>
+#include <mach/mmc.h>
+#include <mach/udc.h>
+#include <mach/pxa27x-udc.h>
 #include <mach/smemc.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/pxa2xx_spi.h>
 #include <linux/mfd/da903x.h>
-#include <linux/platform_data/sht15.h>
+#include <linux/sht15.h>
 
 #include "devices.h"
 #include "generic.h"
@@ -151,7 +151,10 @@ static struct platform_device sht15 = {
 };
 
 static struct regulator_consumer_supply stargate2_sensor_3_con[] = {
-	REGULATOR_SUPPLY("vcc", "sht15"),
+	{
+		.dev_name = "sht15",
+		.supply = "vcc",
+	},
 };
 
 enum stargate2_ldos{
@@ -734,10 +737,9 @@ static int stargate2_mci_init(struct device *dev,
  *
  * Very simple control. Either it is on or off and is controlled by
  * a gpio pin */
-static int stargate2_mci_setpower(struct device *dev, unsigned int vdd)
+static void stargate2_mci_setpower(struct device *dev, unsigned int vdd)
 {
 	gpio_set_value(SG2_SD_POWER_ENABLE, !!vdd);
-	return 0;
 }
 
 static void stargate2_mci_exit(struct device *dev, void *data)
@@ -1007,7 +1009,7 @@ MACHINE_START(INTELMOTE2, "IMOTE 2")
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa27x_init_irq,
 	.handle_irq	= pxa27x_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer		= &pxa_timer,
 	.init_machine	= imote2_init,
 	.atag_offset	= 0x100,
 	.restart	= pxa_restart,
@@ -1020,7 +1022,7 @@ MACHINE_START(STARGATE2, "Stargate 2")
 	.nr_irqs = STARGATE_NR_IRQS,
 	.init_irq = pxa27x_init_irq,
 	.handle_irq = pxa27x_handle_irq,
-	.init_time	= pxa_timer_init,
+	.timer = &pxa_timer,
 	.init_machine = stargate2_init,
 	.atag_offset = 0x100,
 	.restart	= pxa_restart,

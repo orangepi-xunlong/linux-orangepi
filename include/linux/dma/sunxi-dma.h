@@ -1,9 +1,9 @@
 /*
  * include/linux/dma/sunxi-dma.h
  *
- * Copyright (C) 2015-2020 Allwinnertech Co., Ltd
+ * Copyright (C) 2013-2015 Allwinnertech Co., Ltd
  *
- * Author: Wim Hwang <huangwei@allwinnertech.com>
+ * Author: Sugar <shuge@allwinnertech.com>
  *
  * Sunxi DMA controller driver
  *
@@ -21,38 +21,6 @@
 #define __SUNXI_DMA_H__
 
 #include <linux/dmaengine.h>
-
-#if defined(CONFIG_ARCH_SUN8IW10)
-#include "sunxi/dma-sun8iw10.h"
-#elif defined(CONFIG_ARCH_SUN8IW11)
-#include "sunxi/dma-sun8iw11.h"
-#elif defined(CONFIG_ARCH_SUN8IW17)
-#include "sunxi/dma-sun8iw17.h"
-#elif defined(CONFIG_ARCH_SUN50IW2P1)
-#include "sunxi/dma-sun50iw2.h"
-#elif defined(CONFIG_ARCH_SUN50IW3P1)
-#include "sunxi/dma-sun50iw3.h"
-#elif defined(CONFIG_ARCH_SUN50IW6P1)
-#include "sunxi/dma-sun50iw6.h"
-#elif defined(CONFIG_ARCH_SUN3IW1P1)
-#include "sunxi/dma-sun3iw1.h"
-#elif defined(CONFIG_ARCH_SUN8IW7)
-#include "sunxi/dma-sun8iw7.h"
-#elif defined(CONFIG_ARCH_SUN8IW12)
-#include "sunxi/dma-sun8iw12.h"
-#elif defined(CONFIG_ARCH_SUN8IW15)
-#include "sunxi/dma-sun8iw15.h"
-#elif defined(CONFIG_ARCH_SUN50IW8)
-#include "sunxi/dma-sun50iw8.h"
-#elif defined(CONFIG_ARCH_SUN8IW18)
-#include "sunxi/dma-sun8iw18.h"
-#elif defined(CONFIG_ARCH_SUN50IW5T)
-#include "sunxi/dma-sun50iw5t.h"
-#elif defined(CONFIG_ARCH_SUN50IW9)
-#include "sunxi/dma-sun50iw9.h"
-#elif defined(CONFIG_ARCH_SUN50IW10)
-#include "sunxi/dma-sun50iw10.h"
-#else
 
 #define DRQSRC_SRAM		0
 #define DRQSRC_SDRAM		0
@@ -74,13 +42,13 @@
 #define DRQSRC_NAND0		5
 #endif
 
-#define DRQSRC_UART0_RX		6
-#define DRQSRC_UART1_RX 	7
-#define DRQSRC_UART2_RX		8
+#define DRQSRC_UART0RX		6
+#define DRQSRC_UART1RX 		7
+#define DRQSRC_UART2RX		8
 
 #ifndef CONFIG_ARCH_SUN8IW8
-#define DRQSRC_UART3_RX		9
-#define DRQSRC_UART4_RX		10
+#define DRQSRC_UART3RX		9
+#define DRQSRC_UART4RX		10
 #endif
 /* #define DRQSRC_RESEVER		11 */
 /* #define DRQSRC_RESEVER		12 */
@@ -94,17 +62,11 @@
 
 #if !defined(CONFIG_ARCH_SUN8IW6)
 #define DRQSRC_AUDIO_CODEC	15
-#if defined(CONFIG_ARCH_SUN50I)
-#define DRQSRC_CODEC		DRQSRC_AUDIO_CODEC
-#endif
 #endif
 
 #if !defined(CONFIG_ARCH_SUN8IW3) \
 	&& !defined(CONFIG_ARCH_SUN8IW6)
 #define DRQSRC_SS		16
-#if defined(CONFIG_ARCH_SUN50I)
-#define DRQSRC_CE_RX		DRQSRC_SS
-#endif
 #endif
 
 #define DRQSRC_OTG_EP1		17
@@ -122,19 +84,19 @@
 
 #if defined(CONFIG_ARCH_SUN8IW1) \
 	|| defined(CONFIG_ARCH_SUN9I)
-#define DRQSRC_UART5_RX		22
+#define DRQSRC_UART5RX		22
 #endif
 
-#define DRQSRC_SPI0_RX		23
+#define DRQSRC_SPI0RX		23
 
 #if !defined(CONFIG_ARCH_SUN8IW8)
-#define DRQSRC_SPI1_RX		24
+#define DRQSRC_SPI1RX		24
 #endif
 
 #if defined(CONFIG_ARCH_SUN8IW1) \
 	|| defined(CONFIG_ARCH_SUN9I)
-#define DRQSRC_SPI2_RX		25
-#define DRQSRC_SPI3_RX		26
+#define DRQSRC_SPI2RX		25
+#define DRQSRC_SPI3RX		26
 #endif
 
 #if defined(CONFIG_ARCH_SUN8IW1)
@@ -145,13 +107,14 @@
 
 #elif defined(CONFIG_ARCH_SUN8IW6) \
 	|| defined(CONFIG_ARCH_SUN8IW7)
-
+#define DRQSRC_DAUDIO_2_RX	27
 #define DRQDST_TDMRX		28
 #endif
 
 
 /*
- * The source and destination DRQ type and port corresponding relation
+ * The destination DRQ type and port corresponding relation
+ *
  */
 #define DRQDST_SRAM		0
 #define DRQDST_SDRAM		0
@@ -159,7 +122,7 @@
 #if !defined(CONFIG_ARCH_SUN8IW5) \
 	&& !defined(CONFIG_ARCH_SUN8IW5) \
 	&& !defined(CONFIG_ARCH_SUN8IW8)
-#define DRQDST_SPDIFTX		2
+#define DRQDST_SPDIFRX		2
 #endif
 
 #if !defined(CONFIG_ARCH_SUN8IW9)
@@ -176,13 +139,13 @@
 #define DRQDST_NAND0		5
 #endif
 
-#define DRQDST_UART0_TX		6
-#define DRQDST_UART1_TX 	7
-#define DRQDST_UART2_TX		8
+#define DRQDST_UART0TX		6
+#define DRQDST_UART1TX 		7
+#define DRQDST_UART2TX		8
 
 #if !defined(CONFIG_ARCH_SUN8IW8)
-#define DRQDST_UART3_TX		9
-#define DRQDST_UART4_TX		10
+#define DRQDST_UART3TX		9
+#define DRQDST_UART4TX		10
 #endif
 
 #if defined(CONFIG_ARCH_SUN8IW3) \
@@ -201,17 +164,11 @@
 
 #if !defined(CONFIG_ARCH_SUN8IW6)
 #define DRQDST_AUDIO_CODEC	15
-#if defined(CONFIG_ARCH_SUN50I)
-#define DRQDST_CODEC		DRQDST_AUDIO_CODEC
-#endif
 #endif
 
 #if !defined(CONFIG_ARCH_SUN8IW3) \
 	&& !defined(CONFIG_ARCH_SUN8IW6)
 #define DRQDST_SS		16
-#if defined(CONFIG_ARCH_SUN50I)
-#define DRQDST_CE_TX		DRQDST_SS
-#endif
 #endif
 
 #define DRQDST_OTG_EP1		17
@@ -229,11 +186,11 @@
 
 #if defined(CONFIG_ARCH_SUN8IW1) \
 	|| defined(CONFIG_ARCH_SUN9I)
-#define DRQDST_UART5_TX		22
+#define DRQDST_UART5TX		22
 #endif
 
-#define DRQDST_SPI0_TX		23
-#define DRQDST_SPI1_TX		24
+#define DRQDST_SPI0TX		23
+#define DRQDST_SPI1TX		24
 
 #if defined(CONFIG_ARCH_SUN8IW1) \
 	&& defined(CONFIG_ARCH_SUN9I)
@@ -252,11 +209,7 @@
 #define DRQDST_DAUDIO_2_TX	27
 #define DRQDST_TDM_TX		28
 #define	DRQDST_CIR_TX		29
-#elif defined(CONFIG_ARCH_SUN50I)
-#define DRQDST_DAUDIO_2_TX	27
 #endif
-
-#endif /* CONFIG_ARCH_SUN8IW10 */
 
 #define sunxi_slave_id(d, s) (((d)<<16) | (s))
 #define GET_SRC_DRQ(x)	((x) & 0x000000ff)
@@ -294,3 +247,4 @@ struct sunxi_dma_info {
 };
 
 #endif /* __SUNXI_DMA_H__ */
+

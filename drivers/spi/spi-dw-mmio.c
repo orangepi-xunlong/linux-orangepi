@@ -16,10 +16,6 @@
 #include <linux/spi/spi.h>
 #include <linux/scatterlist.h>
 #include <linux/module.h>
-#include <linux/of.h>
-#include <linux/of_gpio.h>
-#include <linux/of_platform.h>
-#include <linux/property.h>
 
 #include "spi-dw.h"
 
@@ -30,109 +26,113 @@ struct dw_spi_mmio {
 	struct clk     *clk;
 };
 
-static int dw_spi_mmio_probe(struct platform_device *pdev)
+static int __devinit dw_spi_mmio_probe(struct platform_device *pdev)
 {
 	struct dw_spi_mmio *dwsmmio;
 	struct dw_spi *dws;
-	struct resource *mem;
+	struct resource *mem, *ioarea;
 	int ret;
-	int num_cs;
 
-	dwsmmio = devm_kzalloc(&pdev->dev, sizeof(struct dw_spi_mmio),
-			GFP_KERNEL);
-	if (!dwsmmio)
-		return -ENOMEM;
+	dwsmmio = kzalloc(sizeof(struct dw_spi_mmio), GFP_KERNEL);
+	if (!dwsmmio) {
+		ret = -ENOMEM;
+		goto err_end;
+	}
 
 	dws = &dwsmmio->dws;
 
 	/* Get basic io resource and map it */
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	dws->regs = devm_ioremap_resource(&pdev->dev, mem);
-	if (IS_ERR(dws->regs)) {
-		dev_err(&pdev->dev, "SPI region map failed\n");
-		return PTR_ERR(dws->regs);
+	if (!mem) {
+		dev_err(&pdev->dev, "no mem resource?\n");
+		ret = -EINVAL;
+		goto err_kfree;
+	}
+
+	ioarea = request_mem_region(mem->start, resource_size(mem),
+			pdev->name);
+	if (!ioarea) {
+		dev_err(&pdev->dev, "SPI region already claimed\n");
+		ret = -EBUSY;
+		goto err_kfree;
+	}
+
+	dws->regs = ioremap_nocache(mem->start, resource_size(mem));
+	if (!dws->regs) {
+		dev_err(&pdev->dev, "SPI region already mapped\n");
+		ret = -ENOMEM;
+		goto err_release_reg;
 	}
 
 	dws->irq = platform_get_irq(pdev, 0);
 	if (dws->irq < 0) {
 		dev_err(&pdev->dev, "no irq resource?\n");
-		return dws->irq; /* -ENXIO */
+		ret = dws->irq; /* -ENXIO */
+		goto err_unmap;
 	}
 
-	dwsmmio->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(dwsmmio->clk))
-		return PTR_ERR(dwsmmio->clk);
-	ret = clk_prepare_enable(dwsmmio->clk);
-	if (ret)
-		return ret;
+	dwsmmio->clk = clk_get(&pdev->dev, NULL);
+	if (IS_ERR(dwsmmio->clk)) {
+		ret = PTR_ERR(dwsmmio->clk);
+		goto err_irq;
+	}
+	clk_enable(dwsmmio->clk);
 
-	dws->bus_num = pdev->id;
-
+	dws->parent_dev = &pdev->dev;
+	dws->bus_num = 0;
+	dws->num_cs = 4;
 	dws->max_freq = clk_get_rate(dwsmmio->clk);
 
-	device_property_read_u32(&pdev->dev, "reg-io-width", &dws->reg_io_width);
-
-	num_cs = 4;
-
-	device_property_read_u32(&pdev->dev, "num-cs", &num_cs);
-
-	dws->num_cs = num_cs;
-
-	if (pdev->dev.of_node) {
-		int i;
-
-		for (i = 0; i < dws->num_cs; i++) {
-			int cs_gpio = of_get_named_gpio(pdev->dev.of_node,
-					"cs-gpios", i);
-
-			if (cs_gpio == -EPROBE_DEFER) {
-				ret = cs_gpio;
-				goto out;
-			}
-
-			if (gpio_is_valid(cs_gpio)) {
-				ret = devm_gpio_request(&pdev->dev, cs_gpio,
-						dev_name(&pdev->dev));
-				if (ret)
-					goto out;
-			}
-		}
-	}
-
-	ret = dw_spi_add_host(&pdev->dev, dws);
+	ret = dw_spi_add_host(dws);
 	if (ret)
-		goto out;
+		goto err_clk;
 
 	platform_set_drvdata(pdev, dwsmmio);
 	return 0;
 
-out:
-	clk_disable_unprepare(dwsmmio->clk);
+err_clk:
+	clk_disable(dwsmmio->clk);
+	clk_put(dwsmmio->clk);
+	dwsmmio->clk = NULL;
+err_irq:
+	free_irq(dws->irq, dws);
+err_unmap:
+	iounmap(dws->regs);
+err_release_reg:
+	release_mem_region(mem->start, resource_size(mem));
+err_kfree:
+	kfree(dwsmmio);
+err_end:
 	return ret;
 }
 
-static int dw_spi_mmio_remove(struct platform_device *pdev)
+static int __devexit dw_spi_mmio_remove(struct platform_device *pdev)
 {
 	struct dw_spi_mmio *dwsmmio = platform_get_drvdata(pdev);
+	struct resource *mem;
 
+	platform_set_drvdata(pdev, NULL);
+
+	clk_disable(dwsmmio->clk);
+	clk_put(dwsmmio->clk);
+	dwsmmio->clk = NULL;
+
+	free_irq(dwsmmio->dws.irq, &dwsmmio->dws);
 	dw_spi_remove_host(&dwsmmio->dws);
-	clk_disable_unprepare(dwsmmio->clk);
+	iounmap(dwsmmio->dws.regs);
+	kfree(dwsmmio);
 
+	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	release_mem_region(mem->start, resource_size(mem));
 	return 0;
 }
 
-static const struct of_device_id dw_spi_mmio_of_match[] = {
-	{ .compatible = "snps,dw-apb-ssi", },
-	{ /* end of table */}
-};
-MODULE_DEVICE_TABLE(of, dw_spi_mmio_of_match);
-
 static struct platform_driver dw_spi_mmio_driver = {
 	.probe		= dw_spi_mmio_probe,
-	.remove		= dw_spi_mmio_remove,
+	.remove		= __devexit_p(dw_spi_mmio_remove),
 	.driver		= {
 		.name	= DRIVER_NAME,
-		.of_match_table = dw_spi_mmio_of_match,
+		.owner	= THIS_MODULE,
 	},
 };
 module_platform_driver(dw_spi_mmio_driver);

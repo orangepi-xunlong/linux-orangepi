@@ -139,7 +139,7 @@ static int siu_pcm_wr_set(struct siu_port *port_info,
 
 	desc->callback = siu_dma_tx_complete;
 	desc->callback_param = siu_stream;
-	cookie = dmaengine_submit(desc);
+	cookie = desc->tx_submit(desc);
 	if (cookie < 0) {
 		dev_err(dev, "Failed to submit a dma transfer\n");
 		return cookie;
@@ -189,7 +189,7 @@ static int siu_pcm_rd_set(struct siu_port *port_info,
 
 	desc->callback = siu_dma_tx_complete;
 	desc->callback_param = siu_stream;
-	cookie = dmaengine_submit(desc);
+	cookie = desc->tx_submit(desc);
 	if (cookie < 0) {
 		dev_err(dev, "Failed to submit dma descriptor\n");
 		return cookie;
@@ -330,9 +330,12 @@ static bool filter(struct dma_chan *chan, void *slave)
 {
 	struct sh_dmae_slave *param = slave;
 
-	pr_debug("%s: slave ID %d\n", __func__, param->shdma_slave.slave_id);
+	pr_debug("%s: slave ID %d\n", __func__, param->slave_id);
 
-	chan->private = &param->shdma_slave;
+	if (unlikely(param->dma_dev != chan->device->dev))
+		return false;
+
+	chan->private = param;
 	return true;
 }
 
@@ -357,15 +360,16 @@ static int siu_pcm_open(struct snd_pcm_substream *ss)
 	if (ss->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		siu_stream = &port_info->playback;
 		param = &siu_stream->param;
-		param->shdma_slave.slave_id = port ? pdata->dma_slave_tx_b :
+		param->slave_id = port ? pdata->dma_slave_tx_b :
 			pdata->dma_slave_tx_a;
 	} else {
 		siu_stream = &port_info->capture;
 		param = &siu_stream->param;
-		param->shdma_slave.slave_id = port ? pdata->dma_slave_rx_b :
+		param->slave_id = port ? pdata->dma_slave_rx_b :
 			pdata->dma_slave_rx_a;
 	}
 
+	param->dma_dev = pdata->dma_dev;
 	/* Get DMA channel */
 	siu_stream->chan = dma_request_channel(mask, filter, param);
 	if (!siu_stream->chan) {
@@ -589,6 +593,7 @@ static void siu_pcm_free(struct snd_pcm *pcm)
 	tasklet_kill(&port_info->playback.tasklet);
 
 	siu_free_port(port_info);
+	snd_pcm_lib_preallocate_free_for_all(pcm);
 
 	dev_dbg(pcm->card->dev, "%s\n", __func__);
 }

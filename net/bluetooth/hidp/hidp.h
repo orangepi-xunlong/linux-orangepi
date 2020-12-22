@@ -24,10 +24,7 @@
 #define __HIDP_H
 
 #include <linux/types.h>
-#include <linux/hid.h>
-#include <linux/kref.h>
 #include <net/bluetooth/bluetooth.h>
-#include <net/bluetooth/l2cap.h>
 
 /* HIDP header masks */
 #define HIDP_HEADER_TRANS_MASK			0xf0
@@ -122,54 +119,43 @@ struct hidp_connlist_req {
 	struct hidp_conninfo __user *ci;
 };
 
-int hidp_connection_add(struct hidp_connadd_req *req, struct socket *ctrl_sock, struct socket *intr_sock);
-int hidp_connection_del(struct hidp_conndel_req *req);
+int hidp_add_connection(struct hidp_connadd_req *req, struct socket *ctrl_sock, struct socket *intr_sock);
+int hidp_del_connection(struct hidp_conndel_req *req);
 int hidp_get_connlist(struct hidp_connlist_req *req);
 int hidp_get_conninfo(struct hidp_conninfo *ci);
-
-enum hidp_session_state {
-	HIDP_SESSION_IDLING,
-	HIDP_SESSION_PREPARING,
-	HIDP_SESSION_RUNNING,
-};
 
 /* HIDP session defines */
 struct hidp_session {
 	struct list_head list;
-	struct kref ref;
 
-	/* runtime management */
-	atomic_t state;
-	wait_queue_head_t state_queue;
-	atomic_t terminate;
-	struct task_struct *task;
-	unsigned long flags;
+	struct hci_conn *conn;
 
-	/* connection management */
-	bdaddr_t bdaddr;
-	struct l2cap_conn *conn;
-	struct l2cap_user user;
 	struct socket *ctrl_sock;
 	struct socket *intr_sock;
-	struct sk_buff_head ctrl_transmit;
-	struct sk_buff_head intr_transmit;
-	uint ctrl_mtu;
-	uint intr_mtu;
+
+	bdaddr_t bdaddr;
+
+	unsigned long state;
+	unsigned long flags;
 	unsigned long idle_to;
 
-	/* device management */
-	struct work_struct dev_init;
-	struct input_dev *input;
-	struct hid_device *hid;
-	struct timer_list timer;
+	uint ctrl_mtu;
+	uint intr_mtu;
 
-	/* Report descriptor */
-	__u8 *rd_data;
-	uint rd_size;
+	atomic_t terminate;
+	struct task_struct *task;
 
-	/* session data */
 	unsigned char keys[8];
 	unsigned char leds;
+
+	struct input_dev *input;
+
+	struct hid_device *hid;
+
+	struct timer_list timer;
+
+	struct sk_buff_head ctrl_transmit;
+	struct sk_buff_head intr_transmit;
 
 	/* Used in hidp_get_raw_report() */
 	int waiting_report_type; /* HIDP_DATA_RTYPE_* */
@@ -181,12 +167,25 @@ struct hidp_session {
 	/* Used in hidp_output_raw_report() */
 	int output_report_success; /* boolean */
 
-	/* temporary input buffer */
-	u8 input_buf[HID_MAX_BUFFER_SIZE];
+	/* Report descriptor */
+	__u8 *rd_data;
+	uint rd_size;
+
+	wait_queue_head_t startup_queue;
+	int waiting_for_startup;
 };
 
+static inline void hidp_schedule(struct hidp_session *session)
+{
+	struct sock *ctrl_sk = session->ctrl_sock->sk;
+	struct sock *intr_sk = session->intr_sock->sk;
+
+	wake_up_interruptible(sk_sleep(ctrl_sk));
+	wake_up_interruptible(sk_sleep(intr_sk));
+}
+
 /* HIDP init defines */
-int __init hidp_init_sockets(void);
-void __exit hidp_cleanup_sockets(void);
+extern int __init hidp_init_sockets(void);
+extern void __exit hidp_cleanup_sockets(void);
 
 #endif /* __HIDP_H */

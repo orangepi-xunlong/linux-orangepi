@@ -7,8 +7,6 @@
  *  BIG FAT DISCLAIMER: Work in progress code. Possibly *dangerous*
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -57,6 +55,8 @@ module_param(min_fsb, int, 0444);
 MODULE_PARM_DESC(fid, "CPU multiplier to use (11.5 = 115)");
 MODULE_PARM_DESC(min_fsb,
 		"Minimum FSB to use, if not defined: current FSB - 50");
+
+#define PFX "cpufreq-nforce2: "
 
 /**
  * nforce2_calc_fsb - calculate FSB
@@ -174,13 +174,13 @@ static int nforce2_set_fsb(unsigned int fsb)
 	int pll = 0;
 
 	if ((fsb > max_fsb) || (fsb < NFORCE2_MIN_FSB)) {
-		pr_err("FSB %d is out of range!\n", fsb);
+		printk(KERN_ERR PFX "FSB %d is out of range!\n", fsb);
 		return -EINVAL;
 	}
 
 	tfsb = nforce2_fsb_read(0);
 	if (!tfsb) {
-		pr_err("Error while reading the FSB\n");
+		printk(KERN_ERR PFX "Error while reading the FSB\n");
 		return -EINVAL;
 	}
 
@@ -263,6 +263,7 @@ static int nforce2_target(struct cpufreq_policy *policy,
 
 	freqs.old = nforce2_get(policy->cpu);
 	freqs.new = target_fsb * fid * 100;
+	freqs.cpu = 0;		/* Only one CPU on nForce2 platforms */
 
 	if (freqs.old == freqs.new)
 		return 0;
@@ -270,13 +271,14 @@ static int nforce2_target(struct cpufreq_policy *policy,
 	pr_debug("Old CPU frequency %d kHz, new %d kHz\n",
 	       freqs.old, freqs.new);
 
-	cpufreq_freq_transition_begin(policy, &freqs);
+	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 
 	/* Disable IRQs */
 	/* local_irq_save(flags); */
 
 	if (nforce2_set_fsb(target_fsb) < 0)
-		pr_err("Changing FSB to %d failed\n", target_fsb);
+		printk(KERN_ERR PFX "Changing FSB to %d failed\n",
+			target_fsb);
 	else
 		pr_debug("Changed FSB successfully to %d\n",
 			target_fsb);
@@ -284,7 +286,7 @@ static int nforce2_target(struct cpufreq_policy *policy,
 	/* Enable IRQs */
 	/* local_irq_restore(flags); */
 
-	cpufreq_freq_transition_end(policy, &freqs, 0);
+	cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 
 	return 0;
 }
@@ -302,7 +304,9 @@ static int nforce2_verify(struct cpufreq_policy *policy)
 	if (policy->min < (fsb_pol_max * fid * 100))
 		policy->max = (fsb_pol_max + 1) * fid * 100;
 
-	cpufreq_verify_within_cpu_limits(policy);
+	cpufreq_verify_within_limits(policy,
+				     policy->cpuinfo.min_freq,
+				     policy->cpuinfo.max_freq);
 	return 0;
 }
 
@@ -324,7 +328,8 @@ static int nforce2_cpu_init(struct cpufreq_policy *policy)
 	/* FIX: Get FID from CPU */
 	if (!fid) {
 		if (!cpu_khz) {
-			pr_warn("cpu_khz not set, can't calculate multiplier!\n");
+			printk(KERN_WARNING PFX
+			"cpu_khz not set, can't calculate multiplier!\n");
 			return -ENODEV;
 		}
 
@@ -339,8 +344,8 @@ static int nforce2_cpu_init(struct cpufreq_policy *policy)
 		}
 	}
 
-	pr_info("FSB currently at %i MHz, FID %d.%d\n",
-		fsb, fid / 10, fid % 10);
+	printk(KERN_INFO PFX "FSB currently at %i MHz, FID %d.%d\n", fsb,
+	       fid / 10, fid % 10);
 
 	/* Set maximum FSB to FSB at boot time */
 	max_fsb = nforce2_fsb_read(1);
@@ -355,9 +360,12 @@ static int nforce2_cpu_init(struct cpufreq_policy *policy)
 		min_fsb = NFORCE2_MIN_FSB;
 
 	/* cpuinfo and default policy values */
-	policy->min = policy->cpuinfo.min_freq = min_fsb * fid * 100;
-	policy->max = policy->cpuinfo.max_freq = max_fsb * fid * 100;
+	policy->cpuinfo.min_freq = min_fsb * fid * 100;
+	policy->cpuinfo.max_freq = max_fsb * fid * 100;
 	policy->cpuinfo.transition_latency = CPUFREQ_ETERNAL;
+	policy->cur = nforce2_get(policy->cpu);
+	policy->min = policy->cpuinfo.min_freq;
+	policy->max = policy->cpuinfo.max_freq;
 
 	return 0;
 }
@@ -374,10 +382,11 @@ static struct cpufreq_driver nforce2_driver = {
 	.get = nforce2_get,
 	.init = nforce2_cpu_init,
 	.exit = nforce2_cpu_exit,
+	.owner = THIS_MODULE,
 };
 
 #ifdef MODULE
-static const struct pci_device_id nforce2_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(nforce2_ids) = {
 	{ PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_NFORCE2 },
 	{}
 };
@@ -399,9 +408,11 @@ static int nforce2_detect_chipset(void)
 	if (nforce2_dev == NULL)
 		return -ENODEV;
 
-	pr_info("Detected nForce2 chipset revision %X\n",
-		nforce2_dev->revision);
-	pr_info("FSB changing is maybe unstable and can lead to crashes and data loss\n");
+	printk(KERN_INFO PFX "Detected nForce2 chipset revision %X\n",
+	       nforce2_dev->revision);
+	printk(KERN_INFO PFX
+	       "FSB changing is maybe unstable and can lead to "
+	       "crashes and data loss.\n");
 
 	return 0;
 }
@@ -410,7 +421,7 @@ static int nforce2_detect_chipset(void)
  * nforce2_init - initializes the nForce2 CPUFreq driver
  *
  * Initializes the nForce2 FSB support. Returns -ENODEV on unsupported
- * devices, -EINVAL on problems during initialization, and zero on
+ * devices, -EINVAL on problems during initiatization, and zero on
  * success.
  */
 static int __init nforce2_init(void)
@@ -419,7 +430,7 @@ static int __init nforce2_init(void)
 
 	/* detect chipset */
 	if (nforce2_detect_chipset()) {
-		pr_info("No nForce2 chipset\n");
+		printk(KERN_INFO PFX "No nForce2 chipset.\n");
 		return -ENODEV;
 	}
 

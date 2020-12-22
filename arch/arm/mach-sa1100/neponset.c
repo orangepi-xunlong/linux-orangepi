@@ -7,15 +7,14 @@
 #include <linux/irq.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/platform_data/sa11x0-serial.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/serial_core.h>
 #include <linux/slab.h>
-#include <linux/smc91x.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/map.h>
+#include <asm/mach/serial_sa1100.h>
 #include <asm/hardware/sa1111.h>
 #include <asm/sizes.h>
 
@@ -90,7 +89,6 @@ void neponset_ncr_frob(unsigned int mask, unsigned int val)
 		WARN(1, "nep_base unset\n");
 	}
 }
-EXPORT_SYMBOL(neponset_ncr_frob);
 
 static void neponset_set_mctrl(struct uart_port *port, u_int mctrl)
 {
@@ -155,7 +153,7 @@ static u_int neponset_get_mctrl(struct uart_port *port)
 	return ret;
 }
 
-static struct sa1100_port_fns neponset_port_fns = {
+static struct sa1100_port_fns neponset_port_fns __devinitdata = {
 	.set_mctrl	= neponset_set_mctrl,
 	.get_mctrl	= neponset_get_mctrl,
 };
@@ -166,7 +164,7 @@ static struct sa1100_port_fns neponset_port_fns = {
  * ensure that the IRQ signal is deasserted before returning.  This
  * is rather unfortunate.
  */
-static void neponset_irq_handler(struct irq_desc *desc)
+static void neponset_irq_handler(unsigned int irq, struct irq_desc *desc)
 {
 	struct neponset_drvdata *d = irq_desc_get_handler_data(desc);
 	unsigned int irr;
@@ -234,7 +232,7 @@ static struct sa1111_platform_data sa1111_info = {
 	.disable_devs	= SA1111_DEVID_PS2_MSE,
 };
 
-static int neponset_probe(struct platform_device *dev)
+static int __devinit neponset_probe(struct platform_device *dev)
 {
 	struct neponset_drvdata *d;
 	struct resource *nep_res, *sa1111_res, *smc91x_res;
@@ -259,17 +257,12 @@ static int neponset_probe(struct platform_device *dev)
 			0x02000000, "smc91x-attrib"),
 		{ .flags = IORESOURCE_IRQ },
 	};
-	struct smc91x_platdata smc91x_platdata = {
-		.flags = SMC91X_USE_8BIT | SMC91X_IO_SHIFT_2 | SMC91X_NOWAIT,
-	};
 	struct platform_device_info smc91x_devinfo = {
 		.parent = &dev->dev,
 		.name = "smc91x",
 		.id = 0,
 		.res = smc91x_resources,
 		.num_res = ARRAY_SIZE(smc91x_resources),
-		.data = &smc91x_platdata,
-		.size_data = sizeof(smc91x_platdata),
 	};
 	int ret, irq;
 
@@ -320,14 +313,15 @@ static int neponset_probe(struct platform_device *dev)
 
 	irq_set_chip_and_handler(d->irq_base + NEP_IRQ_SMC91X, &nochip,
 		handle_simple_irq);
-	irq_clear_status_flags(d->irq_base + NEP_IRQ_SMC91X, IRQ_NOREQUEST | IRQ_NOPROBE);
+	set_irq_flags(d->irq_base + NEP_IRQ_SMC91X, IRQF_VALID | IRQF_PROBE);
 	irq_set_chip_and_handler(d->irq_base + NEP_IRQ_USAR, &nochip,
 		handle_simple_irq);
-	irq_clear_status_flags(d->irq_base + NEP_IRQ_USAR, IRQ_NOREQUEST | IRQ_NOPROBE);
+	set_irq_flags(d->irq_base + NEP_IRQ_USAR, IRQF_VALID | IRQF_PROBE);
 	irq_set_chip(d->irq_base + NEP_IRQ_SA1111, &nochip);
 
 	irq_set_irq_type(irq, IRQ_TYPE_EDGE_RISING);
-	irq_set_chained_handler_and_data(irq, neponset_irq_handler, d);
+	irq_set_handler_data(irq, d);
+	irq_set_chained_handler(irq, neponset_irq_handler);
 
 	/*
 	 * We would set IRQ_GPIO25 to be a wake-up IRQ, but unfortunately
@@ -373,7 +367,7 @@ static int neponset_probe(struct platform_device *dev)
 	return ret;
 }
 
-static int neponset_remove(struct platform_device *dev)
+static int __devexit neponset_remove(struct platform_device *dev)
 {
 	struct neponset_drvdata *d = platform_get_drvdata(dev);
 	int irq = platform_get_irq(dev, 0);
@@ -425,9 +419,10 @@ static const struct dev_pm_ops neponset_pm_ops = {
 
 static struct platform_driver neponset_device_driver = {
 	.probe		= neponset_probe,
-	.remove		= neponset_remove,
+	.remove		= __devexit_p(neponset_remove),
 	.driver		= {
 		.name	= "neponset",
+		.owner	= THIS_MODULE,
 		.pm	= PM_OPS,
 	},
 };

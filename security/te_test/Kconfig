@@ -1,0 +1,7 @@
+config TE_TEST
+	tristate "sunxi tee test driver"
+	depends on TRUSTED_LITTLE_KERNEL
+	default n
+	help
+	  This option adds kernel support for test TEE.
+	  If you are unsure how to answer this question, answer N.

@@ -58,11 +58,10 @@ st_cmd_head cmd_head;
 
 static struct i2c_client *gt_client = NULL;
 
-/*static struct proc_dir_entry *goodix_proc_entry;
+static struct proc_dir_entry *goodix_proc_entry;
 
 static s32 goodix_tool_write(struct file *filp, const char __user *buff, unsigned long len, void *data);
 static s32 goodix_tool_read( char *page, char **start, off_t off, int count, int *eof, void *data );
-*/
 static s32 (*tool_i2c_read)(u8 *, u16);
 static s32 (*tool_i2c_write)(u8 *, u16);
 
@@ -198,7 +197,7 @@ s32 init_wr_node(struct i2c_client *client)
         cmd_head.retry = 5;
         
         register_i2c_func();
-   /*    
+        
         goodix_proc_entry = create_proc_entry(GOODIX_ENTRY_NAME, 0666, NULL);
         if (goodix_proc_entry == NULL) {
                 GTP_ERROR("Couldn't create proc entry!");
@@ -208,11 +207,10 @@ s32 init_wr_node(struct i2c_client *client)
                 goodix_proc_entry->write_proc = goodix_tool_write;
                 goodix_proc_entry->read_proc = goodix_tool_read;
         }
-      */ 
+        
         return SUCCESS;
 }
 
-#ifdef GTP_CREATE_WR_NODE
 void uninit_wr_node(void)
 {
         kfree(cmd_head.data);
@@ -220,8 +218,7 @@ void uninit_wr_node(void)
         unregister_i2c_func();
         remove_proc_entry(GOODIX_ENTRY_NAME, NULL);
 }
-#endif
-/*
+
 static u8 relation(u8 src, u8 dst, u8 rlt)
 {
         u8 ret = 0;
@@ -260,7 +257,7 @@ static u8 relation(u8 src, u8 dst, u8 rlt)
         
         return ret;
 }
-*/
+
 /*******************************************************    
 Function:
     Comfirm function.
@@ -269,7 +266,6 @@ Input:
 Output:
     Return write length.
 ********************************************************/
-/*
 static u8 comfirm(void)
 {
         s32 i = 0;
@@ -301,7 +297,6 @@ static u8 comfirm(void)
 
         return SUCCESS;
 }
-*/
 
 /*******************************************************    
 Function:
@@ -311,7 +306,6 @@ Input:
 Output:
     Return write length.
 ********************************************************/
-/*
 static s32 goodix_tool_write(struct file *filp, const char __user *buff, unsigned long len, void *data)
 {
         s32 ret = 0;
@@ -434,7 +428,7 @@ static s32 goodix_tool_write(struct file *filp, const char __user *buff, unsigne
 
         return CMD_HEAD_LENGTH;
 }
-*/
+
 /*******************************************************    
 Function:
     Goodix tool read function.
@@ -443,7 +437,6 @@ Input:
 Output:
     Return read length.
 ********************************************************/
-/*
 static s32 goodix_tool_read( char *page, char **start, off_t off, int count, int *eof, void *data )
 {
         GTP_DEBUG_FUNC();
@@ -520,4 +513,3 @@ static s32 goodix_tool_read( char *page, char **start, off_t off, int count, int
 
         return cmd_head.data_len;
 }
-*/

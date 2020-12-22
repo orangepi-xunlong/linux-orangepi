@@ -62,10 +62,10 @@ MODULE_LICENSE("Dual MPL/GPL");
 static int protocol = 2;        /* EURO-ISDN Default */
 module_param(protocol, int, 0);
 
-static int sedlbauer_config(struct pcmcia_device *link);
+static int sedlbauer_config(struct pcmcia_device *link) __devinit;
 static void sedlbauer_release(struct pcmcia_device *link);
 
-static void sedlbauer_detach(struct pcmcia_device *p_dev);
+static void sedlbauer_detach(struct pcmcia_device *p_dev) __devexit;
 
 typedef struct local_info_t {
 	struct pcmcia_device	*p_dev;
@@ -73,7 +73,7 @@ typedef struct local_info_t {
 	int			cardnr;
 } local_info_t;
 
-static int sedlbauer_probe(struct pcmcia_device *link)
+static int __devinit sedlbauer_probe(struct pcmcia_device *link)
 {
 	local_info_t *local;
 
@@ -90,7 +90,7 @@ static int sedlbauer_probe(struct pcmcia_device *link)
 	return sedlbauer_config(link);
 } /* sedlbauer_attach */
 
-static void sedlbauer_detach(struct pcmcia_device *link)
+static void __devexit sedlbauer_detach(struct pcmcia_device *link)
 {
 	dev_dbg(&link->dev, "sedlbauer_detach(0x%p)\n", link);
 
@@ -110,7 +110,7 @@ static int sedlbauer_config_check(struct pcmcia_device *p_dev, void *priv_data)
 	return pcmcia_request_io(p_dev);
 }
 
-static int sedlbauer_config(struct pcmcia_device *link)
+static int __devinit sedlbauer_config(struct pcmcia_device *link)
 {
 	int ret;
 	IsdnCard_t  icard;
@@ -201,9 +201,21 @@ static struct pcmcia_driver sedlbauer_driver = {
 	.owner		= THIS_MODULE,
 	.name		= "sedlbauer_cs",
 	.probe		= sedlbauer_probe,
-	.remove		= sedlbauer_detach,
+	.remove		= __devexit_p(sedlbauer_detach),
 	.id_table	= sedlbauer_ids,
 	.suspend	= sedlbauer_suspend,
 	.resume		= sedlbauer_resume,
 };
-module_pcmcia_driver(sedlbauer_driver);
+
+static int __init init_sedlbauer_cs(void)
+{
+	return pcmcia_register_driver(&sedlbauer_driver);
+}
+
+static void __exit exit_sedlbauer_cs(void)
+{
+	pcmcia_unregister_driver(&sedlbauer_driver);
+}
+
+module_init(init_sedlbauer_cs);
+module_exit(exit_sedlbauer_cs);

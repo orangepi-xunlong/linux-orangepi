@@ -10,13 +10,11 @@
  * License v2. See the file COPYING in the main directory of this archive for
  * more details.
  */
-#include <drm/drmP.h>
+#include "drmP.h"
 #include "udl_drv.h"
 
 /* -BULK_SIZE as per usb-skeleton. Can we get full page and avoid overhead? */
 #define BULK_SIZE 512
-
-#define NR_USB_REQUEST_CHANNEL 0x12
 
 #define MAX_TRANSFER (PAGE_SIZE*16 - BULK_SIZE)
 #define WRITES_IN_FLIGHT (4)
@@ -43,8 +41,11 @@ static int udl_parse_vendor_descriptor(struct drm_device *dev,
 	total_len = usb_get_descriptor(usbdev, 0x5f, /* vendor specific */
 				    0, desc, MAX_VENDOR_DESCRIPTOR_SIZE);
 	if (total_len > 5) {
-		DRM_INFO("vendor descriptor length:%x data:%11ph\n",
-			total_len, desc);
+		DRM_INFO("vendor descriptor length:%x data:%02x %02x %02x %02x" \
+			"%02x %02x %02x %02x %02x %02x %02x\n",
+			total_len, desc[0],
+			desc[1], desc[2], desc[3], desc[4], desc[5], desc[6],
+			desc[7], desc[8], desc[9], desc[10]);
 
 		if ((desc[0] != total_len) || /* descriptor length */
 		    (desc[1] != 0x5f) ||   /* vendor descriptor type */
@@ -60,7 +61,7 @@ static int udl_parse_vendor_descriptor(struct drm_device *dev,
 			u8 length;
 			u16 key;
 
-			key = le16_to_cpu(*((u16 *) desc));
+			key = *((u16 *) desc);
 			desc += sizeof(u16);
 			length = *desc;
 			desc++;
@@ -90,32 +91,6 @@ unrecognized:
 success:
 	kfree(buf);
 	return true;
-}
-
-/*
- * Need to ensure a channel is selected before submitting URBs
- */
-static int udl_select_std_channel(struct udl_device *udl)
-{
-	int ret;
-	static const u8 set_def_chn[] = {0x57, 0xCD, 0xDC, 0xA7,
-					 0x1C, 0x88, 0x5E, 0x15,
-					 0x60, 0xFE, 0xC6, 0x97,
-					 0x16, 0x3D, 0x47, 0xF2};
-	void *sendbuf;
-
-	sendbuf = kmemdup(set_def_chn, sizeof(set_def_chn), GFP_KERNEL);
-	if (!sendbuf)
-		return -ENOMEM;
-
-	ret = usb_control_msg(udl->udev,
-			      usb_sndctrlpipe(udl->udev, 0),
-			      NR_USB_REQUEST_CHANNEL,
-			      (USB_DIR_OUT | USB_TYPE_VENDOR), 0, 0,
-			      sendbuf, sizeof(set_def_chn),
-			      USB_CTRL_SET_TIMEOUT);
-	kfree(sendbuf);
-	return ret < 0 ? ret : 0;
 }
 
 static void udl_release_urb_work(struct work_struct *work)
@@ -169,13 +144,18 @@ static void udl_free_urb_list(struct drm_device *dev)
 	struct list_head *node;
 	struct urb_node *unode;
 	struct urb *urb;
+	int ret;
 	unsigned long flags;
 
 	DRM_DEBUG("Waiting for completes and freeing all render urbs\n");
 
 	/* keep waiting and freeing, until we've got 'em all */
 	while (count--) {
-		down(&udl->urbs.limit_sem);
+
+		/* Getting interrupted means a leak, but ok at shutdown*/
+		ret = down_interruptible(&udl->urbs.limit_sem);
+		if (ret)
+			break;
 
 		spin_lock_irqsave(&udl->urbs.lock, flags);
 
@@ -199,22 +179,17 @@ static void udl_free_urb_list(struct drm_device *dev)
 static int udl_alloc_urb_list(struct drm_device *dev, int count, size_t size)
 {
 	struct udl_device *udl = dev->dev_private;
+	int i = 0;
 	struct urb *urb;
 	struct urb_node *unode;
 	char *buf;
-	size_t wanted_size = count * size;
 
 	spin_lock_init(&udl->urbs.lock);
 
-retry:
 	udl->urbs.size = size;
 	INIT_LIST_HEAD(&udl->urbs.list);
 
-	sema_init(&udl->urbs.limit_sem, 0);
-	udl->urbs.count = 0;
-	udl->urbs.available = 0;
-
-	while (udl->urbs.count * size < wanted_size) {
+	while (i < count) {
 		unode = kzalloc(sizeof(struct urb_node), GFP_KERNEL);
 		if (!unode)
 			break;
@@ -230,34 +205,31 @@ retry:
 		}
 		unode->urb = urb;
 
-		buf = usb_alloc_coherent(udl->udev, size, GFP_KERNEL,
+		buf = usb_alloc_coherent(udl->ddev->usbdev, MAX_TRANSFER, GFP_KERNEL,
 					 &urb->transfer_dma);
 		if (!buf) {
 			kfree(unode);
 			usb_free_urb(urb);
-			if (size > PAGE_SIZE) {
-				size /= 2;
-				udl_free_urb_list(dev);
-				goto retry;
-			}
 			break;
 		}
 
 		/* urb->transfer_buffer_length set to actual before submit */
-		usb_fill_bulk_urb(urb, udl->udev, usb_sndbulkpipe(udl->udev, 1),
+		usb_fill_bulk_urb(urb, udl->ddev->usbdev, usb_sndbulkpipe(udl->ddev->usbdev, 1),
 			buf, size, udl_urb_completion, unode);
 		urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 
 		list_add_tail(&unode->entry, &udl->urbs.list);
 
-		up(&udl->urbs.limit_sem);
-		udl->urbs.count++;
-		udl->urbs.available++;
+		i++;
 	}
 
-	DRM_DEBUG("allocated %d %d byte urbs\n", udl->urbs.count, (int) size);
+	sema_init(&udl->urbs.limit_sem, i);
+	udl->urbs.count = i;
+	udl->urbs.available = i;
 
-	return udl->urbs.count;
+	DRM_DEBUG("allocated %d %d byte urbs\n", i, (int) size);
+
+	return i;
 }
 
 struct urb *udl_get_urb(struct drm_device *dev)
@@ -313,52 +285,34 @@ int udl_submit_urb(struct drm_device *dev, struct urb *urb, size_t len)
 
 int udl_driver_load(struct drm_device *dev, unsigned long flags)
 {
-	struct usb_device *udev = (void*)flags;
 	struct udl_device *udl;
-	int ret = -ENOMEM;
+	int ret;
 
 	DRM_DEBUG("\n");
 	udl = kzalloc(sizeof(struct udl_device), GFP_KERNEL);
 	if (!udl)
 		return -ENOMEM;
 
-	udl->udev = udev;
 	udl->ddev = dev;
 	dev->dev_private = udl;
 
-	if (!udl_parse_vendor_descriptor(dev, udl->udev)) {
-		ret = -ENODEV;
+	if (!udl_parse_vendor_descriptor(dev, dev->usbdev)) {
 		DRM_ERROR("firmware not recognized. Assume incompatible device\n");
 		goto err;
 	}
 
-	if (udl_select_std_channel(udl))
-		DRM_ERROR("Selecting channel failed\n");
-
 	if (!udl_alloc_urb_list(dev, WRITES_IN_FLIGHT, MAX_TRANSFER)) {
+		ret = -ENOMEM;
 		DRM_ERROR("udl_alloc_urb_list failed\n");
 		goto err;
 	}
 
 	DRM_DEBUG("\n");
 	ret = udl_modeset_init(dev);
-	if (ret)
-		goto err;
 
 	ret = udl_fbdev_init(dev);
-	if (ret)
-		goto err;
-
-	ret = drm_vblank_init(dev, 1);
-	if (ret)
-		goto err_fb;
-
 	return 0;
-err_fb:
-	udl_fbdev_cleanup(dev);
 err:
-	if (udl->urbs.count)
-		udl_free_urb_list(dev);
 	kfree(udl);
 	DRM_ERROR("%d\n", ret);
 	return ret;
@@ -373,8 +327,6 @@ int udl_drop_usb(struct drm_device *dev)
 int udl_driver_unload(struct drm_device *dev)
 {
 	struct udl_device *udl = dev->dev_private;
-
-	drm_vblank_cleanup(dev);
 
 	if (udl->urbs.count)
 		udl_free_urb_list(dev);

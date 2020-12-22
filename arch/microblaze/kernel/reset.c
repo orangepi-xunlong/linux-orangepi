@@ -9,6 +9,7 @@
 
 #include <linux/init.h>
 #include <linux/of_platform.h>
+#include <asm/prom.h>
 
 /* Trigger specific functions */
 #ifdef CONFIG_GPIOLIB
@@ -25,14 +26,13 @@ void of_platform_reset_gpio_probe(void)
 				   "hard-reset-gpios", 0);
 
 	if (!gpio_is_valid(handle)) {
-		pr_info("Skipping unavailable RESET gpio %d (%s)\n",
+		printk(KERN_INFO "Skipping unavailable RESET gpio %d (%s)\n",
 				handle, "reset");
-		return;
 	}
 
 	ret = gpio_request(handle, "reset");
 	if (ret < 0) {
-		pr_info("GPIO pin is already allocated\n");
+		printk(KERN_INFO "GPIO pin is already allocated\n");
 		return;
 	}
 
@@ -49,7 +49,7 @@ void of_platform_reset_gpio_probe(void)
 	/* Setup output direction */
 	gpio_set_value(handle, 0);
 
-	pr_info("RESET: Registered gpio device: %d, current val: %d\n",
+	printk(KERN_INFO "RESET: Registered gpio device: %d, current val: %d\n",
 							handle, reset_val);
 	return;
 err:
@@ -60,17 +60,10 @@ err:
 
 static void gpio_system_reset(void)
 {
-	if (gpio_is_valid(handle))
-		gpio_set_value(handle, 1 - reset_val);
-	else
-		pr_notice("Reset GPIO unavailable - halting!\n");
+	gpio_set_value(handle, 1 - reset_val);
 }
 #else
-static void gpio_system_reset(void)
-{
-	pr_notice("No reset GPIO present - halting!\n");
-}
-
+#define gpio_system_reset() do {} while (0)
 void of_platform_reset_gpio_probe(void)
 {
 	return;
@@ -79,29 +72,30 @@ void of_platform_reset_gpio_probe(void)
 
 void machine_restart(char *cmd)
 {
-	pr_notice("Machine restart...\n");
+	printk(KERN_NOTICE "Machine restart...\n");
 	gpio_system_reset();
+	dump_stack();
 	while (1)
 		;
 }
 
 void machine_shutdown(void)
 {
-	pr_notice("Machine shutdown...\n");
+	printk(KERN_NOTICE "Machine shutdown...\n");
 	while (1)
 		;
 }
 
 void machine_halt(void)
 {
-	pr_notice("Machine halt...\n");
+	printk(KERN_NOTICE "Machine halt...\n");
 	while (1)
 		;
 }
 
 void machine_power_off(void)
 {
-	pr_notice("Machine power off...\n");
+	printk(KERN_NOTICE "Machine power off...\n");
 	while (1)
 		;
 }

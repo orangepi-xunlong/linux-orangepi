@@ -20,7 +20,6 @@
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
-#include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 #include <linux/i2c/pxa-i2c.h>
 
@@ -28,11 +27,11 @@
 #include <asm/mach-types.h>
 
 #include <mach/hardware.h>
-#include <linux/platform_data/mmc-pxamci.h>
-#include <linux/platform_data/usb-ohci-pxa27x.h>
-#include "pxa27x.h"
-#include "pxa27x-udc.h"
-#include <linux/platform_data/video-pxafb.h>
+#include <mach/mmc.h>
+#include <mach/ohci.h>
+#include <mach/pxa27x.h>
+#include <mach/pxa27x-udc.h>
+#include <mach/pxafb.h>
 
 #include "devices.h"
 #include "generic.h"
@@ -185,15 +184,11 @@ static inline void income_lcd_init(void) {}
  * Backlight
  ******************************************************************************/
 #if defined(CONFIG_BACKLIGHT_PWM) || defined(CONFIG_BACKLIGHT_PWM_MODULE)
-static struct pwm_lookup income_pwm_lookup[] = {
-	PWM_LOOKUP("pxa27x-pwm.0", 0, "pwm-backlight.0", NULL, 1000000,
-		   PWM_POLARITY_NORMAL),
-};
-
 static struct platform_pwm_backlight_data income_backlight_data = {
+	.pwm_id		= 0,
 	.max_brightness	= 0x3ff,
 	.dft_brightness	= 0x1ff,
-	.enable_gpio	= -1,
+	.pwm_period_ns	= 1000000,
 };
 
 static struct platform_device income_backlight = {
@@ -206,7 +201,6 @@ static struct platform_device income_backlight = {
 
 static void __init income_pwm_init(void)
 {
-	pwm_add_table(income_pwm_lookup, ARRAY_SIZE(income_pwm_lookup));
 	platform_device_register(&income_backlight);
 }
 #else

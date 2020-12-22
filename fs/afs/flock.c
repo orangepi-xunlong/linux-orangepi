@@ -36,8 +36,8 @@ static int afs_init_lock_manager(void)
 	if (!afs_lock_manager) {
 		mutex_lock(&afs_lock_manager_mutex);
 		if (!afs_lock_manager) {
-			afs_lock_manager = alloc_workqueue("kafs_lockd",
-							   WQ_MEM_RECLAIM, 0);
+			afs_lock_manager =
+				create_singlethread_workqueue("kafs_lockd");
 			if (!afs_lock_manager)
 				ret = -ENOMEM;
 		}
@@ -252,8 +252,7 @@ static void afs_defer_unlock(struct afs_vnode *vnode, struct key *key)
  */
 static int afs_do_setlk(struct file *file, struct file_lock *fl)
 {
-	struct inode *inode = file_inode(file);
-	struct afs_vnode *vnode = AFS_FS_I(inode);
+	struct afs_vnode *vnode = AFS_FS_I(file->f_mapping->host);
 	afs_lock_type_t type;
 	struct key *key = file->private_data;
 	int ret;
@@ -274,7 +273,7 @@ static int afs_do_setlk(struct file *file, struct file_lock *fl)
 
 	type = (fl->fl_type == F_RDLCK) ? AFS_LOCK_READ : AFS_LOCK_WRITE;
 
-	spin_lock(&inode->i_lock);
+	lock_flocks();
 
 	/* make sure we've got a callback on this file and that our view of the
 	 * data version is up to date */
@@ -421,7 +420,7 @@ given_lock:
 	afs_vnode_fetch_status(vnode, NULL, key);
 
 error:
-	spin_unlock(&inode->i_lock);
+	unlock_flocks();
 	_leave(" = %d", ret);
 	return ret;
 
@@ -483,7 +482,7 @@ static int afs_do_getlk(struct file *file, struct file_lock *fl)
 
 	fl->fl_type = F_UNLCK;
 
-	inode_lock(&vnode->vfs_inode);
+	mutex_lock(&vnode->vfs_inode.i_mutex);
 
 	/* check local lock records first */
 	ret = 0;
@@ -505,7 +504,7 @@ static int afs_do_getlk(struct file *file, struct file_lock *fl)
 	}
 
 error:
-	inode_unlock(&vnode->vfs_inode);
+	mutex_unlock(&vnode->vfs_inode.i_mutex);
 	_leave(" = %d [%hd]", ret, fl->fl_type);
 	return ret;
 }
@@ -515,7 +514,7 @@ error:
  */
 int afs_lock(struct file *file, int cmd, struct file_lock *fl)
 {
-	struct afs_vnode *vnode = AFS_FS_I(file_inode(file));
+	struct afs_vnode *vnode = AFS_FS_I(file->f_dentry->d_inode);
 
 	_enter("{%x:%u},%d,{t=%x,fl=%x,r=%Ld:%Ld}",
 	       vnode->fid.vid, vnode->fid.vnode, cmd,
@@ -538,7 +537,7 @@ int afs_lock(struct file *file, int cmd, struct file_lock *fl)
  */
 int afs_flock(struct file *file, int cmd, struct file_lock *fl)
 {
-	struct afs_vnode *vnode = AFS_FS_I(file_inode(file));
+	struct afs_vnode *vnode = AFS_FS_I(file->f_dentry->d_inode);
 
 	_enter("{%x:%u},%d,{t=%x,fl=%x}",
 	       vnode->fid.vid, vnode->fid.vnode, cmd,
@@ -555,6 +554,10 @@ int afs_flock(struct file *file, int cmd, struct file_lock *fl)
 		return -ENOLCK;
 
 	/* we're simulating flock() locks using posix locks on the server */
+	fl->fl_owner = (fl_owner_t) file;
+	fl->fl_start = 0;
+	fl->fl_end = OFFSET_MAX;
+
 	if (fl->fl_type == F_UNLCK)
 		return afs_do_unlk(file, fl);
 	return afs_do_setlk(file, fl);
