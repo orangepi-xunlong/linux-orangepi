@@ -178,6 +178,12 @@ config ROCKCHIP_RAMDISK
 	  Saying Y here will allow you to use reserved RAM memory as a block
 	  device.
 
+config ROCKCHIP_LITE_ULTRA_SUSPEND
+	bool "Enable lite/ultra suspend"
+	depends on SUSPEND && NO_GKI
+	help
+	  Add mem_sleep_states options lite/ultra for RK ebook project
+
 config ROCKCHIP_SUSPEND_MODE
 	tristate "Rockchip suspend mode config"
 	depends on ROCKCHIP_SIP
