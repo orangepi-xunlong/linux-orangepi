@@ -14485,6 +14485,14 @@ S:	Maintained
 T:	git git://linuxtv.org/media_tree.git
 F:	drivers/media/i2c/ov08d10.c
 
+OMNIVISION OV13850 SENSOR DRIVER
+M: Sebastian Fricke <sebastian.fricke@posteo.net>
+L: linux-media@vger.kernel.org
+S: Maintained
+T: git git://linuxtv.org/media_tree.git
+F: Documentation/devicetree/bindings/media/i2c/ovti,ov13850.yaml
+F: drivers/media/i2c/ov13850.c
+
 OMNIVISION OV13858 SENSOR DRIVER
 M:	Sakari Ailus <sakari.ailus@linux.intel.com>
 L:	linux-media@vger.kernel.org
