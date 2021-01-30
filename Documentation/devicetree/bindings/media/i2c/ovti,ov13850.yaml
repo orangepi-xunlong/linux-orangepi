@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+# Copyright (c) 2021 Sebastian Fricke
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/i2c/ovti,ov13850.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Omnivision OV13850 CMOS Sensor Device Tree Bindings
+
+maintainers:
+  - Sebastian Fricke <sebastian.fricke@posteo.net>
+
+description: |-
+  The Omnivision OV13850 is a 1/3.06-inch, up to 13.2 megapixel image sensor.
+  It supports currently two image sizes from full-resolution at 4224x3136 (13.2 MP)
+  to 2x2 binned mode 2112x1568.
+  The sensor output is available via CSI-2 serial data output.
+
+allOf:
+  - $ref: /schemas/media/video-interface-devices.yaml#
+
+properties:
+  compatible:
+    const: ovti,ov13850
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    description:
+      External clock for the sensor.
+    items:
+      - const: xvclk
+
+  dovdd-supply:
+    description:
+      Definition of the regulator used as Digital I/O voltage supply.
+
+  avdd-supply:
+    description:
+      Definition of the regulator used as Analog voltage supply.
+
+  dvdd-supply:
+    description:
+      Definition of the regulator used as Digital core voltage supply.
+
+  pwdn-gpios:
+    description:
+      Reference to the GPIO connected to the PWDN pin which is active high.
+    maxItems: 1
+
+  reset-gpios:
+    description:
+      Reference to the GPIO connected to the RSTB pin which is active high.
+    maxItems: 1
+
+  port:
+    $ref: /schemas/graph.yaml#/$defs/port-base
+    additionalProperties: false
+    description:
+      Video output port.
+
+    properties:
+      endpoint:
+        $ref: /schemas/media/video-interfaces.yaml#
+        unevaluatedProperties: false
+
+        properties:
+          remote-endpoint: true
+
+          data-lanes:
+            minItems: 1
+            maxItems: 2
+
+        required:
+          - remote-endpoint
+          - data-lanes
+
+    required:
+      - endpoint
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - dovdd-supply
+  - avdd-supply
+  - dvdd-supply
+  - pwdn-gpios
+  - reset-gpios
+  - port
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    i2c {
+        ov13850p0: ov13850@10 {
+            compatible = "ovti,ov13850";
+            status = "okay";
+            reg = <0x10>;
+            clocks = <&cru SCLK_CIF_OUT>;
+            clock-names = "xvclk";
+            dovdd-supply = <&ov13850_dovdd_1p8v>;
+            avdd-supply = <&ov13850_avdd_2p8v>;
+            dvdd-supply = <&ov13850_dvdd_1p2v>;
+
+            reset-gpios = <&gpio2 27 GPIO_ACTIVE_HIGH>;
+            pwdn-gpios = <&gpio2 28 GPIO_ACTIVE_HIGH>;
+
+            port {
+                ucam_out: endpoint {
+                    remote-endpoint = <&mipi_in_ucam>;
+                    data-lanes = <1 2>;
+                };
+            };
+        };
+    };
+...
