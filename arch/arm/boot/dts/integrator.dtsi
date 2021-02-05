@@ -52,13 +52,12 @@
 	};
 
 	flash@24000000 {
-		compatible = "arm,versatile-flash", "cfi-flash";
+		compatible = "cfi-flash";
 		reg = <0x24000000 0x02000000>;
-		bank-width = <4>;
 	};
 
 	fpga {
-		compatible = "simple-bus";
+		compatible = "arm,amba-bus", "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;

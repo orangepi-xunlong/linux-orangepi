@@ -1,14 +1,10 @@
-config WLAN_VENDOR_MEDIATEK
-	bool "MediaTek devices"
-	default y
+menuconfig WL_MEDIATEK
+	bool "Mediatek Wireless LAN support"
 	---help---
-	  If you have a wireless card belonging to this class, say Y.
+	  Enable community drivers for MediaTek WiFi devices.
+	  Those drivers make use of the Linux mac80211 stack.
 
-	  Note that the answer to this question doesn't directly affect the
-	  kernel: saying N will just cause the configurator to skip all
-	  the questions about  cards. If you say Y, you will be asked for
-	  your specific card in the following questions.
 
-if WLAN_VENDOR_MEDIATEK
+if WL_MEDIATEK
 source "drivers/net/wireless/mediatek/mt7601u/Kconfig"
-endif # WLAN_VENDOR_MEDIATEK
+endif # WL_MEDIATEK

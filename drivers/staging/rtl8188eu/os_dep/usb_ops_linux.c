@@ -11,6 +11,10 @@
  * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
  ******************************************************************************/
 #define _USB_OPS_LINUX_C_
 
@@ -20,7 +24,7 @@
 
 static void interrupt_handler_8188eu(struct adapter *adapt, u16 pkt_len, u8 *pbuf)
 {
-	struct hal_data_8188e *haldata = adapt->HalData;
+	struct hal_data_8188e	*haldata = GET_HAL_DATA(adapt);
 
 	if (pkt_len != INTERRUPT_MSG_FORMAT_LEN) {
 		DBG_88E("%s Invalid interrupt content length (%d)!\n", __func__, pkt_len);
@@ -48,7 +52,7 @@ static int recvbuf2recvframe(struct adapter *adapt, struct sk_buff *pskb)
 	struct sk_buff *pkt_copy = NULL;
 	struct recv_frame	*precvframe = NULL;
 	struct rx_pkt_attrib	*pattrib = NULL;
-	struct hal_data_8188e *haldata = adapt->HalData;
+	struct hal_data_8188e	*haldata = GET_HAL_DATA(adapt);
 	struct recv_priv	*precvpriv = &adapt->recvpriv;
 	struct __queue *pfree_recv_queue = &precvpriv->free_recv_queue;
 
@@ -251,7 +255,7 @@ static int usbctrl_vendorreq(struct adapter *adapt, u8 request, u16 value, u16 i
 	}
 
 	/*  Acquire IO memory for vendorreq */
-	pIo_buf = kmalloc(MAX_USB_IO_CTL_SIZE, GFP_ATOMIC);
+	pIo_buf = dvobjpriv->usb_vendor_req_buf;
 
 	if (pIo_buf == NULL) {
 		DBG_88E("[%s] pIo_buf == NULL\n", __func__);
@@ -285,7 +289,8 @@ static int usbctrl_vendorreq(struct adapter *adapt, u8 request, u16 value, u16 i
 				if (status == (-ESHUTDOWN) || status == -ENODEV) {
 					adapt->bSurpriseRemoved = true;
 				} else {
-					adapt->HalData->srestpriv.Wifi_Error_Status = USB_VEN_REQ_CMD_FAIL;
+					struct hal_data_8188e	*haldata = GET_HAL_DATA(adapt);
+					haldata->srestpriv.Wifi_Error_Status = USB_VEN_REQ_CMD_FAIL;
 				}
 			} else { /*  status != len && status >= 0 */
 				if (status > 0) {
@@ -302,8 +307,6 @@ static int usbctrl_vendorreq(struct adapter *adapt, u8 request, u16 value, u16 i
 		if ((value >= FW_8188E_START_ADDRESS && value <= FW_8188E_END_ADDRESS) || status == len)
 			break;
 	}
-	kfree(pIo_buf);
-
 release_mutex:
 	mutex_unlock(&dvobjpriv->usb_vendor_req_mutex);
 exit:
@@ -435,7 +438,10 @@ static void usb_read_port_complete(struct urb *purb, struct pt_regs *regs)
 			break;
 		case -EPROTO:
 		case -EOVERFLOW:
-			adapt->HalData->srestpriv.Wifi_Error_Status = USB_READ_PORT_FAIL;
+			{
+				struct hal_data_8188e	*haldata = GET_HAL_DATA(adapt);
+				haldata->srestpriv.Wifi_Error_Status = USB_READ_PORT_FAIL;
+			}
 			precvbuf->reuse = true;
 			usb_read_port(adapt, precvpriv->ff_hwaddr, 0, (unsigned char *)precvbuf);
 			break;
@@ -523,7 +529,7 @@ u32 usb_read_port(struct adapter *adapter, u32 addr, u32 cnt, u8 *rmem)
 	return ret;
 }
 
-void rtw_hal_inirp_deinit(struct adapter *padapter)
+void usb_read_port_cancel(struct adapter *padapter)
 {
 	int i;
 	struct recv_buf *precvbuf;
@@ -689,7 +695,7 @@ check_completion:
 	tasklet_hi_schedule(&pxmitpriv->xmit_tasklet);
 }
 
-u32 usb_write_port(struct adapter *padapter, u32 addr, u32 cnt, struct xmit_buf *xmitbuf)
+u32 usb_write_port(struct adapter *padapter, u32 addr, u32 cnt, u8 *wmem)
 {
 	unsigned long irqL;
 	unsigned int pipe;
@@ -698,7 +704,8 @@ u32 usb_write_port(struct adapter *padapter, u32 addr, u32 cnt, struct xmit_buf 
 	struct urb *purb = NULL;
 	struct dvobj_priv	*pdvobj = adapter_to_dvobj(padapter);
 	struct xmit_priv	*pxmitpriv = &padapter->xmitpriv;
-	struct xmit_frame *pxmitframe = (struct xmit_frame *)xmitbuf->priv_data;
+	struct xmit_buf *pxmitbuf = (struct xmit_buf *)wmem;
+	struct xmit_frame *pxmitframe = (struct xmit_frame *)pxmitbuf->priv_data;
 	struct usb_device *pusbd = pdvobj->pusbdev;
 
 
@@ -708,7 +715,7 @@ u32 usb_write_port(struct adapter *padapter, u32 addr, u32 cnt, struct xmit_buf 
 	    (padapter->pwrctrlpriv.pnp_bstop_trx)) {
 		RT_TRACE(_module_hci_ops_os_c_, _drv_err_,
 			 ("usb_write_port:( padapter->bDriverStopped ||padapter->bSurpriseRemoved ||adapter->pwrctrlpriv.pnp_bstop_trx)!!!\n"));
-		rtw_sctx_done_err(&xmitbuf->sctx, RTW_SCTX_DONE_TX_DENY);
+		rtw_sctx_done_err(&pxmitbuf->sctx, RTW_SCTX_DONE_TX_DENY);
 		goto exit;
 	}
 
@@ -717,44 +724,44 @@ u32 usb_write_port(struct adapter *padapter, u32 addr, u32 cnt, struct xmit_buf 
 	switch (addr) {
 	case VO_QUEUE_INX:
 		pxmitpriv->voq_cnt++;
-		xmitbuf->flags = VO_QUEUE_INX;
+		pxmitbuf->flags = VO_QUEUE_INX;
 		break;
 	case VI_QUEUE_INX:
 		pxmitpriv->viq_cnt++;
-		xmitbuf->flags = VI_QUEUE_INX;
+		pxmitbuf->flags = VI_QUEUE_INX;
 		break;
 	case BE_QUEUE_INX:
 		pxmitpriv->beq_cnt++;
-		xmitbuf->flags = BE_QUEUE_INX;
+		pxmitbuf->flags = BE_QUEUE_INX;
 		break;
 	case BK_QUEUE_INX:
 		pxmitpriv->bkq_cnt++;
-		xmitbuf->flags = BK_QUEUE_INX;
+		pxmitbuf->flags = BK_QUEUE_INX;
 		break;
 	case HIGH_QUEUE_INX:
-		xmitbuf->flags = HIGH_QUEUE_INX;
+		pxmitbuf->flags = HIGH_QUEUE_INX;
 		break;
 	default:
-		xmitbuf->flags = MGT_QUEUE_INX;
+		pxmitbuf->flags = MGT_QUEUE_INX;
 		break;
 	}
 
 	spin_unlock_irqrestore(&pxmitpriv->lock, irqL);
 
-	purb	= xmitbuf->pxmit_urb[0];
+	purb	= pxmitbuf->pxmit_urb[0];
 
 	/* translate DMA FIFO addr to pipehandle */
 	pipe = ffaddr2pipehdl(pdvobj, addr);
 
 	usb_fill_bulk_urb(purb, pusbd, pipe,
-			  pxmitframe->buf_addr, /*  xmitbuf->pbuf */
+			  pxmitframe->buf_addr, /*  pxmitbuf->pbuf */
 			  cnt,
 			  usb_write_port_complete,
-			  xmitbuf);/* context is xmitbuf */
+			  pxmitbuf);/* context is pxmitbuf */
 
 	status = usb_submit_urb(purb, GFP_ATOMIC);
 	if (status) {
-		rtw_sctx_done_err(&xmitbuf->sctx, RTW_SCTX_DONE_WRITE_PORT_ERR);
+		rtw_sctx_done_err(&pxmitbuf->sctx, RTW_SCTX_DONE_WRITE_PORT_ERR);
 		DBG_88E("usb_write_port, status =%d\n", status);
 		RT_TRACE(_module_hci_ops_os_c_, _drv_err_, ("usb_write_port(): usb_submit_urb, status =%x\n", status));
 
@@ -776,7 +783,7 @@ u32 usb_write_port(struct adapter *padapter, u32 addr, u32 cnt, struct xmit_buf 
 
 exit:
 	if (ret != _SUCCESS)
-		rtw_free_xmitbuf(pxmitpriv, xmitbuf);
+		rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
 	return ret;
 }
 
@@ -843,7 +850,7 @@ void rtl8188eu_xmit_tasklet(void *priv)
 			break;
 		}
 
-		ret = rtl8188eu_xmitframe_complete(adapt, pxmitpriv);
+		ret = rtl8188eu_xmitframe_complete(adapt, pxmitpriv, NULL);
 
 		if (!ret)
 			break;

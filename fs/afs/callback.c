@@ -462,8 +462,8 @@ static void afs_callback_updater(struct work_struct *work)
  */
 int __init afs_callback_update_init(void)
 {
-	afs_callback_update_worker = alloc_ordered_workqueue("kafs_callbackd",
-							     WQ_MEM_RECLAIM);
+	afs_callback_update_worker =
+		create_singlethread_workqueue("kafs_callbackd");
 	return afs_callback_update_worker ? 0 : -ENOMEM;
 }
 

@@ -259,6 +259,14 @@ struct etm_drvdata {
 	struct etm_config		config;
 };
 
+enum etm_addr_type {
+	ETM_ADDR_TYPE_NONE,
+	ETM_ADDR_TYPE_SINGLE,
+	ETM_ADDR_TYPE_RANGE,
+	ETM_ADDR_TYPE_START,
+	ETM_ADDR_TYPE_STOP,
+};
+
 static inline void etm_writel(struct etm_drvdata *drvdata,
 			      u32 val, u32 off)
 {

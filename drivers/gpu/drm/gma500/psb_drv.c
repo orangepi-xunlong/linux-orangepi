@@ -210,8 +210,10 @@ static int psb_driver_unload(struct drm_device *dev)
 			iounmap(dev_priv->aux_reg);
 			dev_priv->aux_reg = NULL;
 		}
-		pci_dev_put(dev_priv->aux_pdev);
-		pci_dev_put(dev_priv->lpc_pdev);
+		if (dev_priv->aux_pdev)
+			pci_dev_put(dev_priv->aux_pdev);
+		if (dev_priv->lpc_pdev)
+			pci_dev_put(dev_priv->lpc_pdev);
 
 		/* Destroy VBT data */
 		psb_intel_destroy_bios(dev);
@@ -372,6 +374,7 @@ static int psb_driver_load(struct drm_device *dev, unsigned long flags)
 
 	drm_irq_install(dev, dev->pdev->irq);
 
+	dev->vblank_disable_allowed = true;
 	dev->max_vblank_count = 0xffffff; /* only 24 bits of frame count */
 	dev->driver->get_vblank_counter = psb_get_vblank_counter;
 
@@ -439,6 +442,14 @@ static long psb_unlocked_ioctl(struct file *filp, unsigned int cmd,
 	/* FIXME: do we need to wrap the other side of this */
 }
 
+/*
+ * When a client dies:
+ *    - Check for and clean up flipped page state
+ */
+static void psb_driver_preclose(struct drm_device *dev, struct drm_file *priv)
+{
+}
+
 static int psb_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	return drm_get_pci_dev(pdev, ent, &driver);
@@ -487,6 +498,7 @@ static struct drm_driver driver = {
 	.load = psb_driver_load,
 	.unload = psb_driver_unload,
 	.lastclose = psb_driver_lastclose,
+	.preclose = psb_driver_preclose,
 	.set_busid = drm_pci_set_busid,
 
 	.num_ioctls = ARRAY_SIZE(psb_ioctls),

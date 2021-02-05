@@ -177,7 +177,7 @@ static void vmk80xx_do_bulk_msg(struct comedi_device *dev)
 	 * The max packet size attributes of the K8061
 	 * input/output endpoints are identical
 	 */
-	size = usb_endpoint_maxp(devpriv->ep_tx);
+	size = le16_to_cpu(devpriv->ep_tx->wMaxPacketSize);
 
 	usb_bulk_msg(usb, tx_pipe, devpriv->usb_tx_buf,
 		     size, NULL, devpriv->ep_tx->bInterval);
@@ -199,7 +199,7 @@ static int vmk80xx_read_packet(struct comedi_device *dev)
 	ep = devpriv->ep_rx;
 	pipe = usb_rcvintpipe(usb, ep->bEndpointAddress);
 	return usb_interrupt_msg(usb, pipe, devpriv->usb_rx_buf,
-				 usb_endpoint_maxp(ep), NULL,
+				 le16_to_cpu(ep->wMaxPacketSize), NULL,
 				 HZ * 10);
 }
 
@@ -220,7 +220,7 @@ static int vmk80xx_write_packet(struct comedi_device *dev, int cmd)
 	ep = devpriv->ep_tx;
 	pipe = usb_sndintpipe(usb, ep->bEndpointAddress);
 	return usb_interrupt_msg(usb, pipe, devpriv->usb_tx_buf,
-				 usb_endpoint_maxp(ep), NULL,
+				 le16_to_cpu(ep->wMaxPacketSize), NULL,
 				 HZ * 10);
 }
 
@@ -230,7 +230,7 @@ static int vmk80xx_reset_device(struct comedi_device *dev)
 	size_t size;
 	int retval;
 
-	size = usb_endpoint_maxp(devpriv->ep_tx);
+	size = le16_to_cpu(devpriv->ep_tx->wMaxPacketSize);
 	memset(devpriv->usb_tx_buf, 0, size);
 	retval = vmk80xx_write_packet(dev, VMK8055_CMD_RST);
 	if (retval)
@@ -684,17 +684,15 @@ static int vmk80xx_alloc_usb_buffers(struct comedi_device *dev)
 	struct vmk80xx_private *devpriv = dev->private;
 	size_t size;
 
-	size = usb_endpoint_maxp(devpriv->ep_rx);
+	size = le16_to_cpu(devpriv->ep_rx->wMaxPacketSize);
 	devpriv->usb_rx_buf = kzalloc(size, GFP_KERNEL);
 	if (!devpriv->usb_rx_buf)
 		return -ENOMEM;
 
-	size = usb_endpoint_maxp(devpriv->ep_tx);
+	size = le16_to_cpu(devpriv->ep_tx->wMaxPacketSize);
 	devpriv->usb_tx_buf = kzalloc(size, GFP_KERNEL);
-	if (!devpriv->usb_tx_buf) {
-		kfree(devpriv->usb_rx_buf);
+	if (!devpriv->usb_tx_buf)
 		return -ENOMEM;
-	}
 
 	return 0;
 }
@@ -809,6 +807,8 @@ static int vmk80xx_auto_attach(struct comedi_device *dev,
 
 	devpriv->model = board->model;
 
+	sema_init(&devpriv->limit_sem, 8);
+
 	ret = vmk80xx_find_usb_endpoints(dev);
 	if (ret)
 		return ret;
@@ -816,8 +816,6 @@ static int vmk80xx_auto_attach(struct comedi_device *dev,
 	ret = vmk80xx_alloc_usb_buffers(dev);
 	if (ret)
 		return ret;
-
-	sema_init(&devpriv->limit_sem, 8);
 
 	usb_set_intfdata(intf, devpriv);
 

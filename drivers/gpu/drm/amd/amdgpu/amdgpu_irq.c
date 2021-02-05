@@ -219,7 +219,6 @@ int amdgpu_irq_init(struct amdgpu_device *adev)
 	if (r) {
 		return r;
 	}
-
 	/* enable msi */
 	adev->irq.msi_enabled = false;
 
@@ -239,7 +238,6 @@ int amdgpu_irq_init(struct amdgpu_device *adev)
 	if (r) {
 		adev->irq.installed = false;
 		flush_work(&adev->hotplug_work);
-		cancel_work_sync(&adev->reset_work);
 		return r;
 	}
 
@@ -265,7 +263,6 @@ void amdgpu_irq_fini(struct amdgpu_device *adev)
 		if (adev->irq.msi_enabled)
 			pci_disable_msi(adev->pdev);
 		flush_work(&adev->hotplug_work);
-		cancel_work_sync(&adev->reset_work);
 	}
 
 	for (i = 0; i < AMDGPU_MAX_IRQ_SRC_ID; ++i) {
@@ -316,7 +313,6 @@ int amdgpu_irq_add_id(struct amdgpu_device *adev, unsigned src_id,
 	}
 
 	adev->irq.sources[src_id] = source;
-
 	return 0;
 }
 
@@ -340,19 +336,15 @@ void amdgpu_irq_dispatch(struct amdgpu_device *adev,
 		return;
 	}
 
-	if (adev->irq.virq[src_id]) {
-		generic_handle_irq(irq_find_mapping(adev->irq.domain, src_id));
-	} else {
-		src = adev->irq.sources[src_id];
-		if (!src) {
-			DRM_DEBUG("Unhandled interrupt src_id: %d\n", src_id);
-			return;
-		}
-
-		r = src->funcs->process(adev, src, entry);
-		if (r)
-			DRM_ERROR("error processing interrupt (%d)\n", r);
+	src = adev->irq.sources[src_id];
+	if (!src) {
+		DRM_DEBUG("Unhandled interrupt src_id: %d\n", src_id);
+		return;
 	}
+
+	r = src->funcs->process(adev, src, entry);
+	if (r)
+		DRM_ERROR("error processing interrupt (%d)\n", r);
 }
 
 /**
@@ -383,18 +375,6 @@ int amdgpu_irq_update(struct amdgpu_device *adev,
 	r = src->funcs->set(adev, src, type, state);
 	spin_unlock_irqrestore(&adev->irq.lock, irqflags);
 	return r;
-}
-
-void amdgpu_irq_gpu_reset_resume_helper(struct amdgpu_device *adev)
-{
-	int i, j;
-	for (i = 0; i < AMDGPU_MAX_IRQ_SRC_ID; i++) {
-		struct amdgpu_irq_src *src = adev->irq.sources[i];
-		if (!src)
-			continue;
-		for (j = 0; j < src->num_types; j++)
-			amdgpu_irq_update(adev, src, j);
-	}
 }
 
 /**
@@ -481,91 +461,4 @@ bool amdgpu_irq_enabled(struct amdgpu_device *adev, struct amdgpu_irq_src *src,
 		return false;
 
 	return !!atomic_read(&src->enabled_types[type]);
-}
-
-/* gen irq */
-static void amdgpu_irq_mask(struct irq_data *irqd)
-{
-	/* XXX */
-}
-
-static void amdgpu_irq_unmask(struct irq_data *irqd)
-{
-	/* XXX */
-}
-
-static struct irq_chip amdgpu_irq_chip = {
-	.name = "amdgpu-ih",
-	.irq_mask = amdgpu_irq_mask,
-	.irq_unmask = amdgpu_irq_unmask,
-};
-
-static int amdgpu_irqdomain_map(struct irq_domain *d,
-				unsigned int irq, irq_hw_number_t hwirq)
-{
-	if (hwirq >= AMDGPU_MAX_IRQ_SRC_ID)
-		return -EPERM;
-
-	irq_set_chip_and_handler(irq,
-				 &amdgpu_irq_chip, handle_simple_irq);
-	return 0;
-}
-
-static const struct irq_domain_ops amdgpu_hw_irqdomain_ops = {
-	.map = amdgpu_irqdomain_map,
-};
-
-/**
- * amdgpu_irq_add_domain - create a linear irq domain
- *
- * @adev: amdgpu device pointer
- *
- * Create an irq domain for GPU interrupt sources
- * that may be driven by another driver (e.g., ACP).
- */
-int amdgpu_irq_add_domain(struct amdgpu_device *adev)
-{
-	adev->irq.domain = irq_domain_add_linear(NULL, AMDGPU_MAX_IRQ_SRC_ID,
-						 &amdgpu_hw_irqdomain_ops, adev);
-	if (!adev->irq.domain) {
-		DRM_ERROR("GPU irq add domain failed\n");
-		return -ENODEV;
-	}
-
-	return 0;
-}
-
-/**
- * amdgpu_irq_remove_domain - remove the irq domain
- *
- * @adev: amdgpu device pointer
- *
- * Remove the irq domain for GPU interrupt sources
- * that may be driven by another driver (e.g., ACP).
- */
-void amdgpu_irq_remove_domain(struct amdgpu_device *adev)
-{
-	if (adev->irq.domain) {
-		irq_domain_remove(adev->irq.domain);
-		adev->irq.domain = NULL;
-	}
-}
-
-/**
- * amdgpu_irq_create_mapping - create a mapping between a domain irq and a
- *                             Linux irq
- *
- * @adev: amdgpu device pointer
- * @src_id: IH source id
- *
- * Create a mapping between a domain irq (GPU IH src id) and a Linux irq
- * Use this for components that generate a GPU interrupt, but are driven
- * by a different driver (e.g., ACP).
- * Returns the Linux irq.
- */
-unsigned amdgpu_irq_create_mapping(struct amdgpu_device *adev, unsigned src_id)
-{
-	adev->irq.virq[src_id] = irq_create_mapping(adev->irq.domain, src_id);
-
-	return adev->irq.virq[src_id];
 }

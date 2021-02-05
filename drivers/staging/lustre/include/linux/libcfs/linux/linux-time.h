@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -66,12 +70,12 @@ static inline unsigned long cfs_time_current(void)
 
 static inline long cfs_time_seconds(int seconds)
 {
-	return ((long)seconds) * msecs_to_jiffies(MSEC_PER_SEC);
+	return ((long)seconds) * HZ;
 }
 
 static inline long cfs_duration_sec(long d)
 {
-	return d / msecs_to_jiffies(MSEC_PER_SEC);
+	return d / HZ;
 }
 
 #define cfs_time_current_64 get_jiffies_64

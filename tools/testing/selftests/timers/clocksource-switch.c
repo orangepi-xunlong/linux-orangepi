@@ -97,7 +97,7 @@ int get_cur_clocksource(char *buf, size_t size)
 int change_clocksource(char *clocksource)
 {
 	int fd;
-	ssize_t size;
+	size_t size;
 
 	fd = open("/sys/devices/system/clocksource/clocksource0/current_clocksource", O_WRONLY);
 

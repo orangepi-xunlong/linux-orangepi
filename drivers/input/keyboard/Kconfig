@@ -540,6 +540,16 @@ config KEYBOARD_GOLDFISH_EVENTS
 	  To compile this driver as a module, choose M here: the
 	  module will be called goldfish-events.
 
+config KEYBOARD_GOLDFISH_ROTARY
+	depends on GOLDFISH
+	tristate "Rotary encoder device for Goldfish"
+	help
+	  Say Y here to get an input event device for the Goldfish virtual
+	  device emulator that acts as a rotary encoder.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called goldfish-rotary.
+
 config KEYBOARD_STOWAWAY
 	tristate "Stowaway keyboard"
 	select SERIO
@@ -575,7 +585,7 @@ config KEYBOARD_SUNKBD
 
 config KEYBOARD_SH_KEYSC
 	tristate "SuperH KEYSC keypad support"
-	depends on ARCH_SHMOBILE || COMPILE_TEST
+	depends on SUPERH || ARCH_SHMOBILE || COMPILE_TEST
 	help
 	  Say Y here if you want to use a keypad attached to the KEYSC block
 	  on SuperH processors such as sh7722 and sh7343.
@@ -644,6 +654,12 @@ config KEYBOARD_OMAP4
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called omap4-keypad.
+
+config KEYBOARD_ROCKCHIP
+	tristate "Rockchip keyboard support"
+	depends on IIO && ARCH_ROCKCHIP
+	help
+	  rk keyboard drivers(gpio and adc)
 
 config KEYBOARD_SPEAR
 	tristate "ST SPEAR keyboard support"
@@ -733,17 +749,5 @@ config KEYBOARD_BCM
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called bcm-keypad.
-
-config KEYBOARD_SUNXI
-	tristate "softwinnner KEY BOARD support"
-	help
-	  Say Y here to enable the keyboard, support 7 keys.
-	  based on verify board.
-
-config IR_TX_SUNXI
-       tristate "sunxi IR TX support"
-         help
-          Say Y here to enable the IR TX, support NEC code.
-
 
 endif

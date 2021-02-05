@@ -98,7 +98,7 @@ static int mvebu_hwcc_notifier(struct notifier_block *nb,
 
 	if (event != BUS_NOTIFY_ADD_DEVICE)
 		return NOTIFY_DONE;
-	set_dma_ops(dev, &arm_coherent_dma_ops);
+	arch_set_dma_ops(dev, &arm_coherent_dma_ops);
 
 	return NOTIFY_OK;
 }
@@ -107,15 +107,23 @@ static struct notifier_block mvebu_hwcc_nb = {
 	.notifier_call = mvebu_hwcc_notifier,
 };
 
-static struct notifier_block mvebu_hwcc_pci_nb __maybe_unused = {
+static struct notifier_block mvebu_hwcc_pci_nb = {
 	.notifier_call = mvebu_hwcc_notifier,
 };
 
-static int armada_xp_clear_l2_starting(unsigned int cpu)
+static int armada_xp_clear_shared_l2_notifier_func(struct notifier_block *nfb,
+					unsigned long action, void *hcpu)
 {
-	armada_xp_clear_shared_l2();
-	return 0;
+	if (action == CPU_STARTING || action == CPU_STARTING_FROZEN)
+		armada_xp_clear_shared_l2();
+
+	return NOTIFY_OK;
 }
+
+static struct notifier_block armada_xp_clear_shared_l2_notifier = {
+	.notifier_call = armada_xp_clear_shared_l2_notifier_func,
+	.priority = 100,
+};
 
 static void __init armada_370_coherency_init(struct device_node *np)
 {
@@ -147,9 +155,8 @@ static void __init armada_370_coherency_init(struct device_node *np)
 
 	of_node_put(cpu_config_np);
 
-	cpuhp_setup_state_nocalls(CPUHP_AP_ARM_MVEBU_COHERENCY,
-				  "AP_ARM_MVEBU_COHERENCY",
-				  armada_xp_clear_l2_starting, NULL);
+	register_cpu_notifier(&armada_xp_clear_shared_l2_notifier);
+
 exit:
 	set_cpu_coherent();
 }
@@ -174,7 +181,6 @@ static void __init armada_375_380_coherency_init(struct device_node *np)
 
 	coherency_cpu_base = of_iomap(np, 0);
 	arch_ioremap_caller = armada_wa_ioremap_caller;
-	pci_ioremap_set_mem_type(MT_UNCACHED);
 
 	/*
 	 * We should switch the PL310 to I/O coherency mode only if

@@ -42,7 +42,7 @@ static void __init alpine_smp_prepare_cpus(unsigned int max_cpus)
 	alpine_cpu_pm_init();
 }
 
-static const struct smp_operations alpine_smp_ops __initconst = {
+static struct smp_operations alpine_smp_ops __initdata = {
 	.smp_prepare_cpus	= alpine_smp_prepare_cpus,
 	.smp_boot_secondary	= alpine_boot_secondary,
 };

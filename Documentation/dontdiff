@@ -3,7 +3,6 @@
 *.bc
 *.bin
 *.bz2
-*.c.[012]*.*
 *.cis
 *.cpio
 *.csp

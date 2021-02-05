@@ -141,8 +141,8 @@ static u8 halbtc_get_wifi_central_chnl(struct btc_coexist *btcoexist)
 
 	if (rtlphy->current_channel != 0)
 		chnl = rtlphy->current_channel;
-	btc_alg_dbg(ALGO_TRACE,
-		    "static halbtc_get_wifi_central_chnl:%d\n", chnl);
+	BTC_PRINT(BTC_MSG_ALGORITHM, ALGO_TRACE,
+		  "static halbtc_get_wifi_central_chnl:%d\n", chnl);
 	return chnl;
 }
 
@@ -901,7 +901,7 @@ void exhalbtc_stack_update_profile_info(void)
 {
 }
 
-void exhalbtc_update_min_bt_rssi(s8 bt_rssi)
+void exhalbtc_update_min_bt_rssi(char bt_rssi)
 {
 	struct btc_coexist *btcoexist = &gl_bt_coexist;
 

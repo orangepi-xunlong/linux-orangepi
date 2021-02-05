@@ -655,10 +655,12 @@ static int dummy_disable(struct usb_ep *_ep)
 static struct usb_request *dummy_alloc_request(struct usb_ep *_ep,
 		gfp_t mem_flags)
 {
+	struct dummy_ep		*ep;
 	struct dummy_request	*req;
 
 	if (!_ep)
 		return NULL;
+	ep = usb_ep_to_dummy_ep(_ep);
 
 	req = kzalloc(sizeof(*req), mem_flags);
 	if (!req)
@@ -2479,6 +2481,9 @@ static int dummy_start(struct usb_hcd *hcd)
 
 static void dummy_stop(struct usb_hcd *hcd)
 {
+	struct dummy		*dum;
+
+	dum = hcd_to_dummy_hcd(hcd)->dum;
 	device_remove_file(dummy_dev(hcd_to_dummy_hcd(hcd)), &dev_attr_urbs);
 	dev_info(dummy_dev(hcd_to_dummy_hcd(hcd)), "stopped\n");
 }

@@ -22,7 +22,6 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/delay.h>
-#include <video/mipi_display.h>
 
 #include "fbtft.h"
 #include "fb_hx8357d.h"
@@ -36,7 +35,7 @@ static int init_display(struct fbtft_par *par)
 	par->fbtftops.reset(par);
 
 	/* Reset things like Gamma */
-	write_reg(par, MIPI_DCS_SOFT_RESET);
+	write_reg(par, HX8357B_SWRESET);
 	usleep_range(5000, 7000);
 
 	/* setextc */
@@ -56,83 +55,83 @@ static int init_display(struct fbtft_par *par)
 	write_reg(par, HX8357_SETPANEL, 0x05);
 
 	write_reg(par, HX8357_SETPWR1,
-		  0x00,  /* Not deep standby */
-		  0x15,  /* BT */
-		  0x1C,  /* VSPR */
-		  0x1C,  /* VSNR */
-		  0x83,  /* AP */
-		  0xAA);  /* FS */
+		0x00,  /* Not deep standby */
+		0x15,  /* BT */
+		0x1C,  /* VSPR */
+		0x1C,  /* VSNR */
+		0x83,  /* AP */
+		0xAA);  /* FS */
 
 	write_reg(par, HX8357D_SETSTBA,
-		  0x50,  /* OPON normal */
-		  0x50,  /* OPON idle */
-		  0x01,  /* STBA */
-		  0x3C,  /* STBA */
-		  0x1E,  /* STBA */
-		  0x08);  /* GEN */
+		0x50,  /* OPON normal */
+		0x50,  /* OPON idle */
+		0x01,  /* STBA */
+		0x3C,  /* STBA */
+		0x1E,  /* STBA */
+		0x08);  /* GEN */
 
 	write_reg(par, HX8357D_SETCYC,
-		  0x02,  /* NW 0x02 */
-		  0x40,  /* RTN */
-		  0x00,  /* DIV */
-		  0x2A,  /* DUM */
-		  0x2A,  /* DUM */
-		  0x0D,  /* GDON */
-		  0x78);  /* GDOFF */
+		0x02,  /* NW 0x02 */
+		0x40,  /* RTN */
+		0x00,  /* DIV */
+		0x2A,  /* DUM */
+		0x2A,  /* DUM */
+		0x0D,  /* GDON */
+		0x78);  /* GDOFF */
 
 	write_reg(par, HX8357D_SETGAMMA,
-		  0x02,
-		  0x0A,
-		  0x11,
-		  0x1d,
-		  0x23,
-		  0x35,
-		  0x41,
-		  0x4b,
-		  0x4b,
-		  0x42,
-		  0x3A,
-		  0x27,
-		  0x1B,
-		  0x08,
-		  0x09,
-		  0x03,
-		  0x02,
-		  0x0A,
-		  0x11,
-		  0x1d,
-		  0x23,
-		  0x35,
-		  0x41,
-		  0x4b,
-		  0x4b,
-		  0x42,
-		  0x3A,
-		  0x27,
-		  0x1B,
-		  0x08,
-		  0x09,
-		  0x03,
-		  0x00,
-		  0x01);
+		0x02,
+		0x0A,
+		0x11,
+		0x1d,
+		0x23,
+		0x35,
+		0x41,
+		0x4b,
+		0x4b,
+		0x42,
+		0x3A,
+		0x27,
+		0x1B,
+		0x08,
+		0x09,
+		0x03,
+		0x02,
+		0x0A,
+		0x11,
+		0x1d,
+		0x23,
+		0x35,
+		0x41,
+		0x4b,
+		0x4b,
+		0x42,
+		0x3A,
+		0x27,
+		0x1B,
+		0x08,
+		0x09,
+		0x03,
+		0x00,
+		0x01);
 
 	/* 16 bit */
-	write_reg(par, MIPI_DCS_SET_PIXEL_FORMAT, 0x55);
+	write_reg(par, HX8357_COLMOD, 0x55);
 
-	write_reg(par, MIPI_DCS_SET_ADDRESS_MODE, 0xC0);
+	write_reg(par, HX8357_MADCTL, 0xC0);
 
 	/* TE off */
-	write_reg(par, MIPI_DCS_SET_TEAR_ON, 0x00);
+	write_reg(par, HX8357_TEON, 0x00);
 
 	/* tear line */
-	write_reg(par, MIPI_DCS_SET_TEAR_SCANLINE, 0x00, 0x02);
+	write_reg(par, HX8357_TEARLINE, 0x00, 0x02);
 
 	/* Exit Sleep */
-	write_reg(par, MIPI_DCS_EXIT_SLEEP_MODE);
+	write_reg(par, HX8357_SLPOUT);
 	msleep(150);
 
 	/* display on */
-	write_reg(par, MIPI_DCS_SET_DISPLAY_ON);
+	write_reg(par, HX8357_DISPON);
 	usleep_range(5000, 7000);
 
 	return 0;
@@ -140,15 +139,18 @@ static int init_display(struct fbtft_par *par)
 
 static void set_addr_win(struct fbtft_par *par, int xs, int ys, int xe, int ye)
 {
-	write_reg(par, MIPI_DCS_SET_COLUMN_ADDRESS,
-		  xs >> 8, xs & 0xff,  /* XSTART */
-		  xe >> 8, xe & 0xff); /* XEND */
+	/* Column addr set */
+	write_reg(par, HX8357_CASET,
+		xs >> 8, xs & 0xff,  /* XSTART */
+		xe >> 8, xe & 0xff); /* XEND */
 
-	write_reg(par, MIPI_DCS_SET_PAGE_ADDRESS,
-		  ys >> 8, ys & 0xff,  /* YSTART */
-		  ye >> 8, ye & 0xff); /* YEND */
+	/* Row addr set */
+	write_reg(par, HX8357_PASET,
+		ys >> 8, ys & 0xff,  /* YSTART */
+		ye >> 8, ye & 0xff); /* YEND */
 
-	write_reg(par, MIPI_DCS_WRITE_MEMORY_START);
+	/* write to RAM */
+	write_reg(par, HX8357_RAMWR);
 }
 
 #define HX8357D_MADCTL_MY  0x80
@@ -180,7 +182,7 @@ static int set_var(struct fbtft_par *par)
 	val |= (par->bgr ? HX8357D_MADCTL_RGB : HX8357D_MADCTL_BGR);
 
 	/* Memory Access Control */
-	write_reg(par, MIPI_DCS_SET_ADDRESS_MODE, val);
+	write_reg(par, HX8357_MADCTL, val);
 
 	return 0;
 }

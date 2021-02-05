@@ -13,10 +13,10 @@
 #define MIX_NAME "mix"
 
 struct rsnd_mix {
+	struct rsnd_mix_platform_info *info; /* rcar_snd.h */
 	struct rsnd_mod mod;
 };
 
-#define rsnd_mix_get(priv, id) ((struct rsnd_mix *)(priv->mix) + id)
 #define rsnd_mix_nr(priv) ((priv)->mix_nr)
 #define for_each_rsnd_mix(pos, priv, i)					\
 	for ((i) = 0;							\
@@ -24,63 +24,34 @@ struct rsnd_mix {
 		     ((pos) = (struct rsnd_mix *)(priv)->mix + i);	\
 	     i++)
 
-static void rsnd_mix_activation(struct rsnd_mod *mod)
+
+static void rsnd_mix_soft_reset(struct rsnd_mod *mod)
 {
 	rsnd_mod_write(mod, MIX_SWRSR, 0);
 	rsnd_mod_write(mod, MIX_SWRSR, 1);
 }
 
-static void rsnd_mix_halt(struct rsnd_mod *mod)
+#define rsnd_mix_initialize_lock(mod)	__rsnd_mix_initialize_lock(mod, 1)
+#define rsnd_mix_initialize_unlock(mod)	__rsnd_mix_initialize_lock(mod, 0)
+static void __rsnd_mix_initialize_lock(struct rsnd_mod *mod, u32 enable)
 {
-	rsnd_mod_write(mod, MIX_MIXIR, 1);
-	rsnd_mod_write(mod, MIX_SWRSR, 0);
-}
-
-static void rsnd_mix_volume_parameter(struct rsnd_dai_stream *io,
-				      struct rsnd_mod *mod)
-{
-	rsnd_mod_write(mod, MIX_MDBAR, 0);
-	rsnd_mod_write(mod, MIX_MDBBR, 0);
-	rsnd_mod_write(mod, MIX_MDBCR, 0);
-	rsnd_mod_write(mod, MIX_MDBDR, 0);
-}
-
-static void rsnd_mix_volume_init(struct rsnd_dai_stream *io,
-				 struct rsnd_mod *mod)
-{
-	rsnd_mod_write(mod, MIX_MIXIR, 1);
-
-	/* General Information */
-	rsnd_mod_write(mod, MIX_ADINR, rsnd_runtime_channel_after_ctu(io));
-
-	/* volume step */
-	rsnd_mod_write(mod, MIX_MIXMR, 0);
-	rsnd_mod_write(mod, MIX_MVPDR, 0);
-
-	/* common volume parameter */
-	rsnd_mix_volume_parameter(io, mod);
-
-	rsnd_mod_write(mod, MIX_MIXIR, 0);
+	rsnd_mod_write(mod, MIX_MIXIR, enable);
 }
 
 static void rsnd_mix_volume_update(struct rsnd_dai_stream *io,
 				  struct rsnd_mod *mod)
 {
+
 	/* Disable MIX dB setting */
 	rsnd_mod_write(mod, MIX_MDBER, 0);
 
-	/* common volume parameter */
-	rsnd_mix_volume_parameter(io, mod);
+	rsnd_mod_write(mod, MIX_MDBAR, 0);
+	rsnd_mod_write(mod, MIX_MDBBR, 0);
+	rsnd_mod_write(mod, MIX_MDBCR, 0);
+	rsnd_mod_write(mod, MIX_MDBDR, 0);
 
 	/* Enable MIX dB setting */
 	rsnd_mod_write(mod, MIX_MDBER, 1);
-}
-
-static int rsnd_mix_probe_(struct rsnd_mod *mod,
-			   struct rsnd_dai_stream *io,
-			   struct rsnd_priv *priv)
-{
-	return rsnd_cmd_attach(io, rsnd_mod_id(mod));
 }
 
 static int rsnd_mix_init(struct rsnd_mod *mod,
@@ -89,11 +60,21 @@ static int rsnd_mix_init(struct rsnd_mod *mod,
 {
 	rsnd_mod_power_on(mod);
 
-	rsnd_mix_activation(mod);
+	rsnd_mix_soft_reset(mod);
 
-	rsnd_mix_volume_init(io, mod);
+	rsnd_mix_initialize_lock(mod);
+
+	rsnd_mod_write(mod, MIX_ADINR, rsnd_get_adinr_chan(mod, io));
+
+	rsnd_path_parse(priv, io);
+
+	/* volume step */
+	rsnd_mod_write(mod, MIX_MIXMR, 0);
+	rsnd_mod_write(mod, MIX_MVPDR, 0);
 
 	rsnd_mix_volume_update(io, mod);
+
+	rsnd_mix_initialize_unlock(mod);
 
 	return 0;
 }
@@ -102,8 +83,6 @@ static int rsnd_mix_quit(struct rsnd_mod *mod,
 			 struct rsnd_dai_stream *io,
 			 struct rsnd_priv *priv)
 {
-	rsnd_mix_halt(mod);
-
 	rsnd_mod_power_off(mod);
 
 	return 0;
@@ -111,7 +90,6 @@ static int rsnd_mix_quit(struct rsnd_mod *mod,
 
 static struct rsnd_mod_ops rsnd_mix_ops = {
 	.name		= MIX_NAME,
-	.probe		= rsnd_mix_probe_,
 	.init		= rsnd_mix_init,
 	.quit		= rsnd_mix_quit,
 };
@@ -121,13 +99,51 @@ struct rsnd_mod *rsnd_mix_mod_get(struct rsnd_priv *priv, int id)
 	if (WARN_ON(id < 0 || id >= rsnd_mix_nr(priv)))
 		id = 0;
 
-	return rsnd_mod_get(rsnd_mix_get(priv, id));
+	return rsnd_mod_get((struct rsnd_mix *)(priv->mix) + id);
 }
 
-int rsnd_mix_probe(struct rsnd_priv *priv)
+static void rsnd_of_parse_mix(struct platform_device *pdev,
+			      const struct rsnd_of_data *of_data,
+			      struct rsnd_priv *priv)
 {
 	struct device_node *node;
-	struct device_node *np;
+	struct rsnd_mix_platform_info *mix_info;
+	struct rcar_snd_info *info = rsnd_priv_to_info(priv);
+	struct device *dev = &pdev->dev;
+	int nr;
+
+	if (!of_data)
+		return;
+
+	node = of_get_child_by_name(dev->of_node, "rcar_sound,mix");
+	if (!node)
+		return;
+
+	nr = of_get_child_count(node);
+	if (!nr)
+		goto rsnd_of_parse_mix_end;
+
+	mix_info = devm_kzalloc(dev,
+				sizeof(struct rsnd_mix_platform_info) * nr,
+				GFP_KERNEL);
+	if (!mix_info) {
+		dev_err(dev, "mix info allocation error\n");
+		goto rsnd_of_parse_mix_end;
+	}
+
+	info->mix_info		= mix_info;
+	info->mix_info_nr	= nr;
+
+rsnd_of_parse_mix_end:
+	of_node_put(node);
+
+}
+
+int rsnd_mix_probe(struct platform_device *pdev,
+		   const struct rsnd_of_data *of_data,
+		   struct rsnd_priv *priv)
+{
+	struct rcar_snd_info *info = rsnd_priv_to_info(priv);
 	struct device *dev = rsnd_priv_to_dev(priv);
 	struct rsnd_mix *mix;
 	struct clk *clk;
@@ -138,54 +154,40 @@ int rsnd_mix_probe(struct rsnd_priv *priv)
 	if (rsnd_is_gen1(priv))
 		return 0;
 
-	node = rsnd_mix_of_node(priv);
-	if (!node)
-		return 0; /* not used is not error */
+	rsnd_of_parse_mix(pdev, of_data, priv);
 
-	nr = of_get_child_count(node);
-	if (!nr) {
-		ret = -EINVAL;
-		goto rsnd_mix_probe_done;
-	}
+	nr = info->mix_info_nr;
+	if (!nr)
+		return 0;
 
 	mix	= devm_kzalloc(dev, sizeof(*mix) * nr, GFP_KERNEL);
-	if (!mix) {
-		ret = -ENOMEM;
-		goto rsnd_mix_probe_done;
-	}
+	if (!mix)
+		return -ENOMEM;
 
 	priv->mix_nr	= nr;
 	priv->mix	= mix;
 
-	i = 0;
-	ret = 0;
-	for_each_child_of_node(node, np) {
-		mix = rsnd_mix_get(priv, i);
-
+	for_each_rsnd_mix(mix, priv, i) {
 		snprintf(name, MIX_NAME_SIZE, "%s.%d",
 			 MIX_NAME, i);
 
 		clk = devm_clk_get(dev, name);
-		if (IS_ERR(clk)) {
-			ret = PTR_ERR(clk);
-			goto rsnd_mix_probe_done;
-		}
+		if (IS_ERR(clk))
+			return PTR_ERR(clk);
+
+		mix->info = &info->mix_info[i];
 
 		ret = rsnd_mod_init(priv, rsnd_mod_get(mix), &rsnd_mix_ops,
-				    clk, rsnd_mod_get_status, RSND_MOD_MIX, i);
+				    clk, RSND_MOD_MIX, i);
 		if (ret)
-			goto rsnd_mix_probe_done;
-
-		i++;
+			return ret;
 	}
 
-rsnd_mix_probe_done:
-	of_node_put(node);
-
-	return ret;
+	return 0;
 }
 
-void rsnd_mix_remove(struct rsnd_priv *priv)
+void rsnd_mix_remove(struct platform_device *pdev,
+		     struct rsnd_priv *priv)
 {
 	struct rsnd_mix *mix;
 	int i;

@@ -50,40 +50,21 @@ struct hsr_frame_info {
  */
 static bool is_supervision_frame(struct hsr_priv *hsr, struct sk_buff *skb)
 {
-	struct ethhdr *ethHdr;
-	struct hsr_sup_tag *hsrSupTag;
-	struct hsrv1_ethhdr_sp *hsrV1Hdr;
+	struct hsr_ethhdr_sp *hdr;
 
 	WARN_ON_ONCE(!skb_mac_header_was_set(skb));
-	ethHdr = (struct ethhdr *) skb_mac_header(skb);
+	hdr = (struct hsr_ethhdr_sp *) skb_mac_header(skb);
 
-	/* Correct addr? */
-	if (!ether_addr_equal(ethHdr->h_dest,
+	if (!ether_addr_equal(hdr->ethhdr.h_dest,
 			      hsr->sup_multicast_addr))
 		return false;
 
-	/* Correct ether type?. */
-	if (!(ethHdr->h_proto == htons(ETH_P_PRP)
-			|| ethHdr->h_proto == htons(ETH_P_HSR)))
+	if (get_hsr_stag_path(&hdr->hsr_sup) != 0x0f)
 		return false;
-
-	/* Get the supervision header from correct location. */
-	if (ethHdr->h_proto == htons(ETH_P_HSR)) { /* Okay HSRv1. */
-		hsrV1Hdr = (struct hsrv1_ethhdr_sp *) skb_mac_header(skb);
-		if (hsrV1Hdr->hsr.encap_proto != htons(ETH_P_PRP))
-			return false;
-
-		hsrSupTag = &hsrV1Hdr->hsr_sup;
-	} else {
-		hsrSupTag = &((struct hsrv0_ethhdr_sp *) skb_mac_header(skb))->hsr_sup;
-	}
-
-	if ((hsrSupTag->HSR_TLV_Type != HSR_TLV_ANNOUNCE) &&
-	    (hsrSupTag->HSR_TLV_Type != HSR_TLV_LIFE_CHECK))
+	if ((hdr->hsr_sup.HSR_TLV_Type != HSR_TLV_ANNOUNCE) &&
+	    (hdr->hsr_sup.HSR_TLV_Type != HSR_TLV_LIFE_CHECK))
 		return false;
-	if ((hsrSupTag->HSR_TLV_Length != 12) &&
-			(hsrSupTag->HSR_TLV_Length !=
-					sizeof(struct hsr_sup_payload)))
+	if (hdr->hsr_sup.HSR_TLV_Length != 12)
 		return false;
 
 	return true;
@@ -129,7 +110,7 @@ static struct sk_buff *frame_get_stripped_skb(struct hsr_frame_info *frame,
 
 
 static void hsr_fill_tag(struct sk_buff *skb, struct hsr_frame_info *frame,
-			 struct hsr_port *port, u8 protoVersion)
+			 struct hsr_port *port)
 {
 	struct hsr_ethhdr *hsr_ethhdr;
 	int lane_id;
@@ -150,8 +131,7 @@ static void hsr_fill_tag(struct sk_buff *skb, struct hsr_frame_info *frame,
 	set_hsr_tag_LSDU_size(&hsr_ethhdr->hsr_tag, lsdu_size);
 	hsr_ethhdr->hsr_tag.sequence_nr = htons(frame->sequence_nr);
 	hsr_ethhdr->hsr_tag.encap_proto = hsr_ethhdr->ethhdr.h_proto;
-	hsr_ethhdr->ethhdr.h_proto = htons(protoVersion ?
-			ETH_P_HSR : ETH_P_PRP);
+	hsr_ethhdr->ethhdr.h_proto = htons(ETH_P_PRP);
 }
 
 static struct sk_buff *create_tagged_skb(struct sk_buff *skb_o,
@@ -180,7 +160,7 @@ static struct sk_buff *create_tagged_skb(struct sk_buff *skb_o,
 	memmove(dst, src, movelen);
 	skb_reset_mac_header(skb);
 
-	hsr_fill_tag(skb, frame, port, port->hsr->protVersion);
+	hsr_fill_tag(skb, frame, port);
 
 	return skb;
 }
@@ -300,6 +280,10 @@ static void hsr_forward_do(struct hsr_frame_info *frame)
 static void check_local_dest(struct hsr_priv *hsr, struct sk_buff *skb,
 			     struct hsr_frame_info *frame)
 {
+	struct net_device *master_dev;
+
+	master_dev = hsr_port_get_hsr(hsr, HSR_PT_MASTER)->dev;
+
 	if (hsr_addr_is_self(hsr, eth_hdr(skb)->h_dest)) {
 		frame->is_local_exclusive = true;
 		skb->pkt_type = PACKET_HOST;
@@ -324,7 +308,8 @@ static int hsr_fill_frame_info(struct hsr_frame_info *frame,
 	unsigned long irqflags;
 
 	frame->is_supervision = is_supervision_frame(port->hsr, skb);
-	frame->node_src = hsr_get_node(port, skb, frame->is_supervision);
+	frame->node_src = hsr_get_node(&port->hsr->node_db, skb,
+				       frame->is_supervision);
 	if (frame->node_src == NULL)
 		return -1; /* Unknown node and !is_supervision, or no mem */
 
@@ -335,8 +320,7 @@ static int hsr_fill_frame_info(struct hsr_frame_info *frame,
 		/* FIXME: */
 		WARN_ONCE(1, "HSR: VLAN not yet supported");
 	}
-	if (ethhdr->h_proto == htons(ETH_P_PRP)
-			|| ethhdr->h_proto == htons(ETH_P_HSR)) {
+	if (ethhdr->h_proto == htons(ETH_P_PRP)) {
 		frame->skb_std = NULL;
 		frame->skb_hsr = skb;
 		frame->sequence_nr = hsr_get_skb_sequence_nr(skb);

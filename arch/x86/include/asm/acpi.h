@@ -92,7 +92,7 @@ static inline unsigned int acpi_processor_cstate_check(unsigned int max_cstate)
 	if (boot_cpu_data.x86 == 0x0F &&
 	    boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
 	    boot_cpu_data.x86_model <= 0x05 &&
-	    boot_cpu_data.x86_stepping < 0x0A)
+	    boot_cpu_data.x86_mask < 0x0A)
 		return 1;
 	else if (amd_e400_c1e_detected)
 		return 1;
@@ -145,6 +145,7 @@ static inline void disable_acpi(void) { }
 #define ARCH_HAS_POWER_INIT	1
 
 #ifdef CONFIG_ACPI_NUMA
+extern int acpi_numa;
 extern int x86_acpi_numa_init(void);
 #endif /* CONFIG_ACPI_NUMA */
 
@@ -168,7 +169,5 @@ static inline pgprot_t arch_apei_get_mem_attribute(phys_addr_t addr)
 	 return PAGE_KERNEL;
 }
 #endif
-
-#define ACPI_TABLE_UPGRADE_MAX_PHYS (max_low_pfn_mapped << PAGE_SHIFT)
 
 #endif /* _ASM_X86_ACPI_H */

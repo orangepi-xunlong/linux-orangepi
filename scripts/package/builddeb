@@ -26,8 +26,6 @@ create_package() {
 	# Fix ownership and permissions
 	chown -R root:root "$pdir"
 	chmod -R go-w "$pdir"
-	# in case we are in a restrictive umask environment like 0077
-	chmod -R a+rX "$pdir"
 
 	# Create preinstall and post install script to remove dtb
 	if [[ "$1" == *dtb* ]]; then
@@ -43,14 +41,14 @@ create_package() {
 		echo "exit 0" >> $pdir/DEBIAN/postinst
 		chmod 775 $pdir/DEBIAN/postinst
 	fi
-	
+
 	# Create postinstall script for headers
 	if [[ "$1" == *headers* ]]; then
-		echo "cd /usr/src/linux-headers-$version; echo \"Compiling headers - please wait ...\"; make -s scripts >/dev/null 2>&1" >> $pdir/DEBIAN/postinst
+		echo "cd /usr/src/linux-headers-$version; echo \"Compiling headers - please wait ...\"; find -type f -exec touch {} +;yes "" | make oldconfig >/dev/null;make -j\$(grep -c 'processor' /proc/cpuinfo) -s scripts >/dev/null; make -s M=scripts/mod/ >/dev/null" >> $pdir/DEBIAN/postinst
 		echo "exit 0" >> $pdir/DEBIAN/postinst
 		chmod 775 $pdir/DEBIAN/postinst
 	fi
-	
+
 	# Create the package
 	dpkg-gencontrol $forcearch -Vkernel:debarch="${debarch}" -p$pname -P"$pdir"
 	dpkg --build "$pdir" ..
@@ -73,7 +71,7 @@ set_debarch() {
 		debarch=hppa ;;
 	mips*)
 		debarch=mips$(grep -q CPU_LITTLE_ENDIAN=y $KCONFIG_CONFIG && echo el || true) ;;
-	aarch64|arm64)
+	arm64)
 		debarch=arm64 ;;
 	arm*)
 		if grep -q CONFIG_AEABI=y $KCONFIG_CONFIG; then
@@ -119,11 +117,11 @@ kernel_headers_dir="$objtree/debian/hdrtmp"
 libc_headers_dir="$objtree/debian/headertmp"
 dtb_dir="$objtree/debian/dtbtmp"
 dbg_dir="$objtree/debian/dbgtmp"
-packagename=linux-image-${BRANCH}"$LOCALVERSION"
-fwpackagename=linux-firmware-image-${BRANCH}"$LOCALVERSION"
-kernel_headers_packagename=linux-headers-${BRANCH}"$LOCALVERSION"
-dtb_packagename=linux-dtb-${BRANCH}"$LOCALVERSION"
-libc_headers_packagename=linux-libc-dev-next"$LOCALVERSION"
+packagename=linux-image-"$BRANCH$LOCALVERSION"
+fwpackagename=linux-firmware-image-"$BRANCH$LOCALVERSION"
+kernel_headers_packagename=linux-headers-"$BRANCH$LOCALVERSION"
+dtb_packagename=linux-dtb-"$BRANCH$LOCALVERSION"
+libc_headers_packagename=linux-libc-dev-"$BRANCH$LOCALVERSION"
 dbg_packagename=$packagename-dbg
 debarch=
 forcearch=
@@ -137,18 +135,10 @@ fi
 # XXX: have each arch Makefile export a variable of the canonical image install
 # path instead
 case $ARCH in
-aarch64|arm64)
-	image_name=uImage
-	installed_image_path="boot/vmlinuz-$version"
-	;;
-arm*)
-	image_name=zImage
-	installed_image_path="boot/vmlinuz-$version"
-	;;
 um)
 	installed_image_path="usr/bin/linux-$version"
 	;;
-parisc|mips|powerpc)
+parisc|mips|powerpc|arm64)
 	installed_image_path="boot/vmlinux-$version"
 	;;
 *)
@@ -177,11 +167,13 @@ else
 	cp System.map "$tmpdir/boot/System.map-$version"
 	cp $KCONFIG_CONFIG "$tmpdir/boot/config-$version"
 fi
-
-mkimage -A arm -n "${BOARD}" -O linux -T kernel -C none -a 0x41000000 -e 0x41000000 \
-           -d arch/"${ARCH}"/boot/Image "arch/"${ARCH}"/boot/$image_name"
-
-cp arch/$ARCH/boot/$image_name "$tmpdir/$installed_image_path"
+# Not all arches include the boot path in KBUILD_IMAGE
+if [ -e $KBUILD_IMAGE ]; then
+#Forcing KBUILD_MAGE reference to Image instead of zImage.. Armbian LINUX_KERNEL_TYPE=Image not being honored
+	cp Image "$tmpdir/$installed_image_path"
+else
+	cp arch/$ARCH/boot/Image "$tmpdir/$installed_image_path"
+fi
 
 if grep -q "^CONFIG_OF=y" $KCONFIG_CONFIG ; then
 	# Only some architectures with OF support have this target
@@ -263,51 +255,40 @@ done
 ##
 ## Create sym link to kernel image
 ##
-sed -e "s/set -e//g" -i $tmpdir/DEBIAN/postinst
 sed -e "s/exit 0//g" -i $tmpdir/DEBIAN/postinst
 cat >> $tmpdir/DEBIAN/postinst <<EOT 
-if [ "\$(grep nand /proc/partitions)" != "" ] && [ "\$(grep mmc /proc/partitions)" = "" ]; then
-mkimage -A arm -O linux -T kernel -C none -a "0x40008000" -e "0x40008000" -n "Linux kernel" -d /$installed_image_path /boot/uImage  > /dev/null 2>&1
-cp /boot/uImage /tmp/uImage
-sync
-mountpoint -q /boot || mount /boot
-cp /tmp/uImage /boot/uImage
-rm -f /$installed_image_path
-else
-ln -sf $(basename $installed_image_path) /boot/$image_name || mv /$installed_image_path /boot/$image_name
-fi
+ln -sf $(basename $installed_image_path) /boot/Image > /dev/null 2>&1 || mv /$installed_image_path /boot/Image
 touch /boot/.next
 exit 0
 EOT
 ##
 ## FAT install workaround
 ##
-sed -e "s/set -e//g" -i $tmpdir/DEBIAN/preinst
 sed -e "s/exit 0//g" -i $tmpdir/DEBIAN/preinst
 cat >> $tmpdir/DEBIAN/preinst <<EOT 
 # exit if we are running chroot
 if [ "\$(stat -c %d:%i /)" != "\$(stat -c %d:%i /proc/1/root/.)" ]; then exit 0; fi
 
 check_and_unmount (){
-	boot_device=\$(mountpoint -d /boot)
+boot_device=\$(mountpoint -d /boot)
 
-	for file in /dev/* ; do
-		CURRENT_DEVICE=\$(printf "%d:%d" \$(stat --printf="0x%t 0x%T" \$file))
-		if [[ "\$CURRENT_DEVICE" = "\$boot_device" ]]; then
-			boot_partition=\$file
-			break
-		fi
-	done
-
-	bootfstype=\$(blkid -s TYPE -o value \$boot_partition)
-	if [ "\$bootfstype" = "vfat" ]; then
-		# we have to keep it mounted! umount /boot
-		rm -f /boot/System.map* /boot/config* /boot/vmlinuz* /boot/$image_name /boot/uImage
+for file in /dev/* ; do
+	CURRENT_DEVICE=\$(printf "%d:%d" \$(stat --printf="0x%t 0x%T" \$file))
+	if [ "\$CURRENT_DEVICE" = "\$boot_device" ]; then
+		boot_partition=\$file
+		break;
 	fi
+done
+
+bootfstype=\$(blkid -s TYPE -o value \$boot_partition)
+if [ "\$bootfstype" = "vfat" ]; then 
+# we have to keep it mounted! umount /boot
+rm -f /boot/System.map* /boot/config* /boot/vmlinuz* /boot/zImage /boot/uImage /boot/Image
+fi
 }
 mountpoint -q /boot && check_and_unmount
 EOT
-echo "exit 0" >> $tmpdir/DEBIAN/preinst
+echo "exit 0" >> $tmpdir/DEBIAN/preinst 
 
 # Try to determine maintainer and email values
 if [ -n "$DEBEMAIL" ]; then
@@ -329,8 +310,7 @@ maintainer="$name <$email>"
 # Try to determine distribution
 if [ -n "$KDEB_CHANGELOG_DIST" ]; then
         distribution=$KDEB_CHANGELOG_DIST
-# In some cases lsb_release returns the codename as n/a, which breaks dpkg-parsechangelog
-elif distribution=$(lsb_release -cs 2>/dev/null) && [ -n "$distribution" ] && [ "$distribution" != "n/a" ]; then
+elif distribution=$(lsb_release -cs 2>/dev/null) && [ -n "$distribution" ]; then
         : # nothing to do in this case
 else
         distribution="unstable"
@@ -415,17 +395,14 @@ fi
 # Build kernel header package
 (cd $srctree; find . -name Makefile\* -o -name Kconfig\* -o -name \*.pl) > "$objtree/debian/hdrsrcfiles"
 (cd $srctree; find arch/*/include include scripts -type f -o -type l) >> "$objtree/debian/hdrsrcfiles"
+(cd $srctree; find security/*/include -type f) >> "$objtree/debian/hdrsrcfiles"
 (cd $srctree; find arch/$SRCARCH -name module.lds -o -name Kbuild.platforms -o -name Platform) >> "$objtree/debian/hdrsrcfiles"
 (cd $srctree; find $(find arch/$SRCARCH -name include -o -name scripts -type d) -type f) >> "$objtree/debian/hdrsrcfiles"
-if grep -q '^CONFIG_STACK_VALIDATION=y' $KCONFIG_CONFIG ; then
-	(cd $objtree; find tools/objtool -type f -executable) >> "$objtree/debian/hdrobjfiles"
-fi
 (cd $objtree; find arch/$SRCARCH/include Module.symvers include scripts -type f) >> "$objtree/debian/hdrobjfiles"
-if grep -q '^CONFIG_GCC_PLUGINS=y' $KCONFIG_CONFIG ; then
-	(cd $objtree; find scripts/gcc-plugins -name \*.so -o -name gcc-common.h) >> "$objtree/debian/hdrobjfiles"
-fi
 destdir=$kernel_headers_dir/usr/src/linux-headers-$version
 mkdir -p "$destdir"
+mkdir -p "$destdir"/net/wireguard; 
+		touch "$destdir"/net/wireguard/{Kconfig,Makefile} # workaround for Wireguard
 ######################## headers patch
 ZACNI=$(pwd)
 cd $destdir
@@ -443,8 +420,9 @@ rm -f "$objtree/debian/hdrsrcfiles" "$objtree/debian/hdrobjfiles"
 cat <<EOF >> debian/control
 
 Package: $kernel_headers_packagename
-Provides: linux-headers
+Provides: $kernel_headers_packagename
 Architecture: any
+Depends: make, gcc, libc6-dev, libssl-dev
 Description: Linux kernel headers for $KERNELRELEASE on \${kernel:debarch}
  This package provides kernel header files for $KERNELRELEASE on \${kernel:debarch}
  .
@@ -518,7 +496,7 @@ Description: Linux kernel debugging symbols for $version
  all the necessary debug symbols for the kernel and its modules.
 EOF
 
-	create_package "$dbg_packagename" "$dbg_dir"
+	#create_package "$dbg_packagename" "$dbg_dir"
 fi
 
 if [ "x$1" = "xdeb-pkg" ]

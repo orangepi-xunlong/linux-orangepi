@@ -4,7 +4,7 @@
 #include <linux/spinlock.h>
 #include <linux/smp.h>
 #include <linux/interrupt.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/cpu.h>
 #include <linux/debugfs.h>
 
@@ -129,20 +129,6 @@ void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
 		    get_dumpable(tsk->mm) != SUID_DUMP_USER)
 			indirect_branch_prediction_barrier();
 
-		if (IS_ENABLED(CONFIG_VMAP_STACK)) {
-			/*
-			 * If our current stack is in vmalloc space and isn't
-			 * mapped in the new pgd, we'll double-fault.  Forcibly
-			 * map it.
-			 */
-			unsigned int stack_pgd_index = pgd_index(current_stack_pointer);
-
-			pgd_t *pgd = next->pgd + stack_pgd_index;
-
-			if (unlikely(pgd_none(*pgd)))
-				set_pgd(pgd, init_mm.pgd[stack_pgd_index]);
-		}
-
 		/*
 		 * Record last user mm's context id, so we can avoid
 		 * flushing branch buffer with IBPB if we switch back
@@ -153,7 +139,6 @@ void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
 
 		this_cpu_write(cpu_tlbstate.state, TLBSTATE_OK);
 		this_cpu_write(cpu_tlbstate.active_mm, next);
-
 		cpumask_set_cpu(cpu, mm_cpumask(next));
 
 		/*

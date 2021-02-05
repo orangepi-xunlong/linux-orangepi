@@ -1,5 +1,5 @@
 #include <linux/smp.h>
-#include <linux/export.h>
+#include <linux/module.h>
 
 static void __wbinvd(void *dummy)
 {

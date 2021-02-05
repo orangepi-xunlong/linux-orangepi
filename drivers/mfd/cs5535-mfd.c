@@ -60,7 +60,6 @@ static int cs5535_mfd_res_enable(struct platform_device *pdev)
 static int cs5535_mfd_res_disable(struct platform_device *pdev)
 {
 	struct resource *res;
-
 	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "can't fetch device resource info\n");
@@ -115,10 +114,7 @@ static struct mfd_cell cs5535_mfd_cells[] = {
 #ifdef CONFIG_OLPC
 static void cs5535_clone_olpc_cells(void)
 {
-	static const char *acpi_clones[] = {
-		"olpc-xo1-pm-acpi",
-		"olpc-xo1-sci-acpi"
-	};
+	const char *acpi_clones[] = { "olpc-xo1-pm-acpi", "olpc-xo1-sci-acpi" };
 
 	if (!machine_is_olpc())
 		return;

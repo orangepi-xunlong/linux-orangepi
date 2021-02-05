@@ -53,7 +53,7 @@
 #define IMR_MASK		(IMR_ALIGN - 1)
 
 int imr_add_range(phys_addr_t base, size_t size,
-		  unsigned int rmask, unsigned int wmask);
+		  unsigned int rmask, unsigned int wmask, bool lock);
 
 int imr_remove_range(phys_addr_t base, size_t size);
 

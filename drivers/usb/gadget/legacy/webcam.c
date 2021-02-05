@@ -77,7 +77,7 @@ static struct usb_function *f_uvc;
 static struct usb_device_descriptor webcam_device_descriptor = {
 	.bLength		= USB_DT_DEVICE_SIZE,
 	.bDescriptorType	= USB_DT_DEVICE,
-	/* .bcdUSB = DYNAMIC */
+	.bcdUSB			= cpu_to_le16(0x0200),
 	.bDeviceClass		= USB_CLASS_MISC,
 	.bDeviceSubClass	= 0x02,
 	.bDeviceProtocol	= 0x01,
@@ -223,11 +223,7 @@ static const struct uvc_format_mjpeg uvc_format_mjpg = {
 	.bDescriptorType	= USB_DT_CS_INTERFACE,
 	.bDescriptorSubType	= UVC_VS_FORMAT_MJPEG,
 	.bFormatIndex		= 2,
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-	.bNumFrameDescriptors	= 1,
-#else
 	.bNumFrameDescriptors	= 2,
-#endif
 	.bmFlags		= 0,
 	.bDefaultFrameIndex	= 1,
 	.bAspectRatioX		= 0,
@@ -265,25 +261,12 @@ static const struct UVC_FRAME_MJPEG(1) uvc_frame_mjpg_720p = {
 	.bmCapabilities		= 0,
 	.wWidth			= cpu_to_le16(1280),
 	.wHeight		= cpu_to_le16(720),
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-	.dwMinBitRate		= cpu_to_le32(442368000),
-	.dwMaxBitRate		= cpu_to_le32(442368000),
-#else
 	.dwMinBitRate		= cpu_to_le32(29491200),
 	.dwMaxBitRate		= cpu_to_le32(29491200),
-#endif
 	.dwMaxVideoFrameBufferSize	= cpu_to_le32(1843200),
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-	.dwDefaultFrameInterval	= cpu_to_le32(333333),
-#else
 	.dwDefaultFrameInterval	= cpu_to_le32(5000000),
-#endif
 	.bFrameIntervalType	= 1,
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-	.dwFrameInterval[0]	= cpu_to_le32(333333),
-#else
 	.dwFrameInterval[0]	= cpu_to_le32(5000000),
-#endif
 };
 
 static const struct uvc_color_matching_descriptor uvc_color_matching = {
@@ -313,15 +296,11 @@ static const struct uvc_descriptor_header * const uvc_ss_control_cls[] = {
 
 static const struct uvc_descriptor_header * const uvc_fs_streaming_cls[] = {
 	(const struct uvc_descriptor_header *) &uvc_input_header,
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	(const struct uvc_descriptor_header *) &uvc_format_yuv,
 	(const struct uvc_descriptor_header *) &uvc_frame_yuv_360p,
 	(const struct uvc_descriptor_header *) &uvc_frame_yuv_720p,
-#endif
 	(const struct uvc_descriptor_header *) &uvc_format_mjpg,
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	(const struct uvc_descriptor_header *) &uvc_frame_mjpg_360p,
-#endif
 	(const struct uvc_descriptor_header *) &uvc_frame_mjpg_720p,
 	(const struct uvc_descriptor_header *) &uvc_color_matching,
 	NULL,
@@ -329,15 +308,11 @@ static const struct uvc_descriptor_header * const uvc_fs_streaming_cls[] = {
 
 static const struct uvc_descriptor_header * const uvc_hs_streaming_cls[] = {
 	(const struct uvc_descriptor_header *) &uvc_input_header,
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	(const struct uvc_descriptor_header *) &uvc_format_yuv,
 	(const struct uvc_descriptor_header *) &uvc_frame_yuv_360p,
 	(const struct uvc_descriptor_header *) &uvc_frame_yuv_720p,
-#endif
 	(const struct uvc_descriptor_header *) &uvc_format_mjpg,
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	(const struct uvc_descriptor_header *) &uvc_frame_mjpg_360p,
-#endif
 	(const struct uvc_descriptor_header *) &uvc_frame_mjpg_720p,
 	(const struct uvc_descriptor_header *) &uvc_color_matching,
 	NULL,
@@ -345,15 +320,11 @@ static const struct uvc_descriptor_header * const uvc_hs_streaming_cls[] = {
 
 static const struct uvc_descriptor_header * const uvc_ss_streaming_cls[] = {
 	(const struct uvc_descriptor_header *) &uvc_input_header,
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	(const struct uvc_descriptor_header *) &uvc_format_yuv,
 	(const struct uvc_descriptor_header *) &uvc_frame_yuv_360p,
 	(const struct uvc_descriptor_header *) &uvc_frame_yuv_720p,
-#endif
 	(const struct uvc_descriptor_header *) &uvc_format_mjpg,
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	(const struct uvc_descriptor_header *) &uvc_frame_mjpg_360p,
-#endif
 	(const struct uvc_descriptor_header *) &uvc_frame_mjpg_720p,
 	(const struct uvc_descriptor_header *) &uvc_color_matching,
 	NULL,

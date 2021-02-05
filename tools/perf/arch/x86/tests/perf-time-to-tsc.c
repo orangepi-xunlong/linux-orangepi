@@ -35,12 +35,13 @@
  * %0 is returned, otherwise %-1 is returned.  If TSC conversion is not
  * supported then then the test passes but " (not supported)" is printed.
  */
-int test__perf_time_to_tsc(int subtest __maybe_unused)
+int test__perf_time_to_tsc(void)
 {
 	struct record_opts opts = {
 		.mmap_pages	     = UINT_MAX,
 		.user_freq	     = UINT_MAX,
 		.user_interval	     = ULLONG_MAX,
+		.freq		     = 4000,
 		.target		     = {
 			.uses_mmap   = true,
 		},
@@ -71,7 +72,7 @@ int test__perf_time_to_tsc(int subtest __maybe_unused)
 
 	CHECK__(parse_events(evlist, "cycles:u", NULL));
 
-	perf_evlist__config(evlist, &opts, NULL);
+	perf_evlist__config(evlist, &opts);
 
 	evsel = perf_evlist__first(evlist);
 
@@ -154,6 +155,10 @@ next_event:
 	err = 0;
 
 out_err:
-	perf_evlist__delete(evlist);
+	if (evlist) {
+		perf_evlist__disable(evlist);
+		perf_evlist__delete(evlist);
+	}
+
 	return err;
 }

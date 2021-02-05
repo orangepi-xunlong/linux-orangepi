@@ -9,11 +9,12 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 
+#include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/io.h>
-#include <linux/irqchip.h>
 #include <linux/irqdomain.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -55,19 +56,19 @@ static struct irq_domain *domain;
 #define TZIC_NUM_IRQS 128
 
 #ifdef CONFIG_FIQ
-static int tzic_set_irq_fiq(unsigned int hwirq, unsigned int type)
+static int tzic_set_irq_fiq(unsigned int irq, unsigned int type)
 {
 	unsigned int index, mask, value;
 
-	index = hwirq >> 5;
+	index = irq >> 5;
 	if (unlikely(index >= 4))
 		return -EINVAL;
-	mask = 1U << (hwirq & 0x1F);
+	mask = 1U << (irq & 0x1F);
 
-	value = imx_readl(tzic_base + TZIC_INTSEC0(index)) | mask;
+	value = __raw_readl(tzic_base + TZIC_INTSEC0(index)) | mask;
 	if (type)
 		value &= ~mask;
-	imx_writel(value, tzic_base + TZIC_INTSEC0(index));
+	__raw_writel(value, tzic_base + TZIC_INTSEC0(index));
 
 	return 0;
 }
@@ -81,15 +82,15 @@ static void tzic_irq_suspend(struct irq_data *d)
 	struct irq_chip_generic *gc = irq_data_get_irq_chip_data(d);
 	int idx = d->hwirq >> 5;
 
-	imx_writel(gc->wake_active, tzic_base + TZIC_WAKEUP0(idx));
+	__raw_writel(gc->wake_active, tzic_base + TZIC_WAKEUP0(idx));
 }
 
 static void tzic_irq_resume(struct irq_data *d)
 {
 	int idx = d->hwirq >> 5;
 
-	imx_writel(imx_readl(tzic_base + TZIC_ENSET0(idx)),
-		   tzic_base + TZIC_WAKEUP0(idx));
+	__raw_writel(__raw_readl(tzic_base + TZIC_ENSET0(idx)),
+		     tzic_base + TZIC_WAKEUP0(idx));
 }
 
 #else
@@ -134,8 +135,8 @@ static void __exception_irq_entry tzic_handle_irq(struct pt_regs *regs)
 		handled = 0;
 
 		for (i = 0; i < 4; i++) {
-			stat = imx_readl(tzic_base + TZIC_HIPND(i)) &
-				imx_readl(tzic_base + TZIC_INTSEC0(i));
+			stat = __raw_readl(tzic_base + TZIC_HIPND(i)) &
+				__raw_readl(tzic_base + TZIC_INTSEC0(i));
 
 			while (stat) {
 				handled = 1;
@@ -152,29 +153,31 @@ static void __exception_irq_entry tzic_handle_irq(struct pt_regs *regs)
  * interrupts. It registers the interrupt enable and disable functions
  * to the kernel for each interrupt source.
  */
-static int __init tzic_init_dt(struct device_node *np, struct device_node *p)
+void __init tzic_init_irq(void)
 {
+	struct device_node *np;
 	int irq_base;
 	int i;
 
+	np = of_find_compatible_node(NULL, NULL, "fsl,tzic");
 	tzic_base = of_iomap(np, 0);
 	WARN_ON(!tzic_base);
 
 	/* put the TZIC into the reset value with
 	 * all interrupts disabled
 	 */
-	i = imx_readl(tzic_base + TZIC_INTCNTL);
+	i = __raw_readl(tzic_base + TZIC_INTCNTL);
 
-	imx_writel(0x80010001, tzic_base + TZIC_INTCNTL);
-	imx_writel(0x1f, tzic_base + TZIC_PRIOMASK);
-	imx_writel(0x02, tzic_base + TZIC_SYNCCTRL);
+	__raw_writel(0x80010001, tzic_base + TZIC_INTCNTL);
+	__raw_writel(0x1f, tzic_base + TZIC_PRIOMASK);
+	__raw_writel(0x02, tzic_base + TZIC_SYNCCTRL);
 
 	for (i = 0; i < 4; i++)
-		imx_writel(0xFFFFFFFF, tzic_base + TZIC_INTSEC0(i));
+		__raw_writel(0xFFFFFFFF, tzic_base + TZIC_INTSEC0(i));
 
 	/* disable all interrupts */
 	for (i = 0; i < 4; i++)
-		imx_writel(0xFFFFFFFF, tzic_base + TZIC_ENCLEAR0(i));
+		__raw_writel(0xFFFFFFFF, tzic_base + TZIC_ENCLEAR0(i));
 
 	/* all IRQ no FIQ Warning :: No selection */
 
@@ -196,10 +199,7 @@ static int __init tzic_init_dt(struct device_node *np, struct device_node *p)
 #endif
 
 	pr_info("TrustZone Interrupt Controller (TZIC) initialized\n");
-
-	return 0;
 }
-IRQCHIP_DECLARE(tzic, "fsl,tzic", tzic_init_dt);
 
 /**
  * tzic_enable_wake() - enable wakeup interrupt
@@ -214,13 +214,13 @@ int tzic_enable_wake(void)
 {
 	unsigned int i;
 
-	imx_writel(1, tzic_base + TZIC_DSMINT);
-	if (unlikely(imx_readl(tzic_base + TZIC_DSMINT) == 0))
+	__raw_writel(1, tzic_base + TZIC_DSMINT);
+	if (unlikely(__raw_readl(tzic_base + TZIC_DSMINT) == 0))
 		return -EAGAIN;
 
 	for (i = 0; i < 4; i++)
-		imx_writel(imx_readl(tzic_base + TZIC_ENSET0(i)),
-			   tzic_base + TZIC_WAKEUP0(i));
+		__raw_writel(__raw_readl(tzic_base + TZIC_ENSET0(i)),
+			     tzic_base + TZIC_WAKEUP0(i));
 
 	return 0;
 }

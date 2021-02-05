@@ -22,15 +22,9 @@
 struct mn88473_config {
 	/*
 	 * Max num of bytes given I2C adapter could write at once.
-	 * Default: unlimited
+	 * Default: none
 	 */
 	u16 i2c_wr_max;
-
-	/*
-	 * Xtal frequency Hz.
-	 * Default: 25000000
-	 */
-	u32 xtal;
 
 
 	/* Everything after that is returned by the driver. */
@@ -39,6 +33,12 @@ struct mn88473_config {
 	 * DVB frontend.
 	 */
 	struct dvb_frontend **fe;
+
+	/*
+	 * Xtal frequency.
+	 * Hz
+	 */
+	u32 xtal;
 };
 
 #endif

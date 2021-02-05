@@ -45,14 +45,14 @@
 #define WRITERDP(lp, x)	out_be16(lp->base + LANCE_RDP, (x))
 #define READRDP(lp)	in_be16(lp->base + LANCE_RDP)
 
-#if IS_ENABLED(CONFIG_HPLANCE)
+#if defined(CONFIG_HPLANCE) || defined(CONFIG_HPLANCE_MODULE)
 #include "hplance.h"
 
 #undef WRITERAP
 #undef WRITERDP
 #undef READRDP
 
-#if IS_ENABLED(CONFIG_MVME147_NET)
+#if defined(CONFIG_MVME147_NET) || defined(CONFIG_MVME147_NET_MODULE)
 
 /* Lossage Factor Nine, Mr Sulu. */
 #define WRITERAP(lp, x)	(lp->writerap(lp, x))
@@ -86,7 +86,7 @@ static inline __u16 READRDP(struct lance_private *lp)
 }
 
 #endif
-#endif /* IS_ENABLED(CONFIG_HPLANCE) */
+#endif /* CONFIG_HPLANCE || CONFIG_HPLANCE_MODULE */
 
 /* debugging output macros, various flavours */
 /* #define TEST_HITS */
@@ -260,7 +260,7 @@ static int lance_reset(struct net_device *dev)
 
 	load_csrs(lp);
 	lance_init_ring(dev);
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	status = init_restart_lance(lp);
 #ifdef DEBUG_DRIVER
 	printk("Lance restart=%d\n", status);
@@ -530,7 +530,7 @@ void lance_tx_timeout(struct net_device *dev)
 {
 	printk("lance_tx_timeout\n");
 	lance_reset(dev);
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue(dev);
 }
 EXPORT_SYMBOL_GPL(lance_tx_timeout);
@@ -543,12 +543,10 @@ int lance_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	static int outs;
 	unsigned long flags;
 
-	netif_stop_queue(dev);
+	if (!TX_BUFFS_AVAIL)
+		return NETDEV_TX_LOCKED;
 
-	if (!TX_BUFFS_AVAIL) {
-		dev_consume_skb_any(skb);
-		return NETDEV_TX_OK;
-	}
+	netif_stop_queue(dev);
 
 	skblen = skb->len;
 

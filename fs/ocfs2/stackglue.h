@@ -301,6 +301,4 @@ void ocfs2_stack_glue_unregister(struct ocfs2_stack_plugin *plugin);
 /* In ocfs2_downconvert_lock(), we need to know which stack we are using */
 int ocfs2_is_o2cb_active(void);
 
-extern struct kset *ocfs2_kset;
-
 #endif  /* STACKGLUE_H */

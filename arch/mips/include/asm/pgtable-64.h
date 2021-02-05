@@ -17,7 +17,7 @@
 #include <asm/cachectl.h>
 #include <asm/fixmap.h>
 
-#if defined(CONFIG_PAGE_SIZE_64KB) && !defined(CONFIG_MIPS_VA_BITS_48)
+#ifdef CONFIG_PAGE_SIZE_64KB
 #include <asm-generic/pgtable-nopmd.h>
 #else
 #include <asm-generic/pgtable-nopud.h>
@@ -90,11 +90,7 @@
 #define PTE_ORDER		0
 #endif
 #ifdef CONFIG_PAGE_SIZE_16KB
-#ifdef CONFIG_MIPS_VA_BITS_48
-#define PGD_ORDER               1
-#else
-#define PGD_ORDER               0
-#endif
+#define PGD_ORDER		0
 #define PUD_ORDER		aieeee_attempt_to_allocate_pud
 #define PMD_ORDER		0
 #define PTE_ORDER		0
@@ -108,11 +104,7 @@
 #ifdef CONFIG_PAGE_SIZE_64KB
 #define PGD_ORDER		0
 #define PUD_ORDER		aieeee_attempt_to_allocate_pud
-#ifdef CONFIG_MIPS_VA_BITS_48
-#define PMD_ORDER		0
-#else
 #define PMD_ORDER		aieeee_attempt_to_allocate_pmd
-#endif
 #define PTE_ORDER		0
 #endif
 
@@ -122,7 +114,11 @@
 #endif
 #define PTRS_PER_PTE	((PAGE_SIZE << PTE_ORDER) / sizeof(pte_t))
 
-#define USER_PTRS_PER_PGD       ((TASK_SIZE64 / PGDIR_SIZE)?(TASK_SIZE64 / PGDIR_SIZE):1)
+#if PGDIR_SIZE >= TASK_SIZE64
+#define USER_PTRS_PER_PGD	(1)
+#else
+#define USER_PTRS_PER_PGD	(TASK_SIZE64 / PGDIR_SIZE)
+#endif
 #define FIRST_USER_ADDRESS	0UL
 
 /*

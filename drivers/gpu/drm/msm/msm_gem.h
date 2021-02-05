@@ -29,16 +29,6 @@ struct msm_gem_object {
 
 	uint32_t flags;
 
-	/**
-	 * Advice: are the backing pages purgeable?
-	 */
-	uint8_t madv;
-
-	/**
-	 * count of active vmap'ing
-	 */
-	uint8_t vmap_count;
-
 	/* And object is either:
 	 *  inactive - on priv->inactive_list
 	 *  active   - on one one of the gpu's active_list..  well, at
@@ -49,6 +39,7 @@ struct msm_gem_object {
 	 */
 	struct list_head mm_list;
 	struct msm_gpu *gpu;     /* non-null if active */
+	uint32_t read_fence, write_fence;
 
 	/* Transiently in the process of submit ioctl, objects associated
 	 * with the submit are on submit->bo_list.. this only lasts for
@@ -82,16 +73,20 @@ static inline bool is_active(struct msm_gem_object *msm_obj)
 	return msm_obj->gpu != NULL;
 }
 
-static inline bool is_purgeable(struct msm_gem_object *msm_obj)
+static inline uint32_t msm_gem_fence(struct msm_gem_object *msm_obj,
+		uint32_t op)
 {
-	return (msm_obj->madv == MSM_MADV_DONTNEED) && msm_obj->sgt &&
-			!msm_obj->base.dma_buf && !msm_obj->base.import_attach;
+	uint32_t fence = 0;
+
+	if (op & MSM_PREP_READ)
+		fence = msm_obj->write_fence;
+	if (op & MSM_PREP_WRITE)
+		fence = max(fence, msm_obj->read_fence);
+
+	return fence;
 }
 
-static inline bool is_vunmapable(struct msm_gem_object *msm_obj)
-{
-	return (msm_obj->vmap_count == 0) && msm_obj->vaddr;
-}
+#define MAX_CMDS 4
 
 /* Created per submit-ioctl, to track bo's and cmdstream bufs, etc,
  * associated with the cmdstream submission for synchronization (and
@@ -104,9 +99,8 @@ struct msm_gem_submit {
 	struct list_head node;   /* node in gpu submit_list */
 	struct list_head bo_list;
 	struct ww_acquire_ctx ticket;
-	struct fence *fence;
-	struct pid *pid;    /* submitting process */
-	bool valid;         /* true if no cmdstream patching needed */
+	uint32_t fence;
+	bool valid;
 	unsigned int nr_cmds;
 	unsigned int nr_bos;
 	struct {
@@ -114,7 +108,7 @@ struct msm_gem_submit {
 		uint32_t size;  /* in dwords */
 		uint32_t iova;
 		uint32_t idx;   /* cmdstream buffer idx in bos[] */
-	} *cmd;  /* array of size nr_cmds */
+	} cmd[MAX_CMDS];
 	struct {
 		uint32_t flags;
 		struct msm_gem_object *obj;

@@ -24,6 +24,7 @@
 #include <linux/media.h>
 #include <linux/module.h>
 #include <linux/of_gpio.h>
+#include <linux/of_graph.h>
 #include <linux/regulator/consumer.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
@@ -34,8 +35,8 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-mediabus.h>
-#include <media/i2c/s5c73m3.h>
-#include <media/v4l2-of.h>
+#include <media/s5c73m3.h>
+#include <media/v4l2-fwnode.h>
 
 #include "s5c73m3.h"
 
@@ -1482,11 +1483,11 @@ static int s5c73m3_oif_registered(struct v4l2_subdev *sd)
 		return ret;
 	}
 
-	ret = media_create_pad_link(&state->sensor_sd.entity,
+	ret = media_entity_create_link(&state->sensor_sd.entity,
 			S5C73M3_ISP_PAD, &state->oif_sd.entity, OIF_ISP_PAD,
 			MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
 
-	ret = media_create_pad_link(&state->sensor_sd.entity,
+	ret = media_entity_create_link(&state->sensor_sd.entity,
 			S5C73M3_JPEG_PAD, &state->oif_sd.entity, OIF_JPEG_PAD,
 			MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
 
@@ -1602,7 +1603,7 @@ static int s5c73m3_get_platform_data(struct s5c73m3 *state)
 	const struct s5c73m3_platform_data *pdata = dev->platform_data;
 	struct device_node *node = dev->of_node;
 	struct device_node *node_ep;
-	struct v4l2_of_endpoint ep;
+	struct v4l2_fwnode_endpoint ep;
 	int ret;
 
 	if (!node) {
@@ -1639,7 +1640,7 @@ static int s5c73m3_get_platform_data(struct s5c73m3 *state)
 		return 0;
 	}
 
-	ret = v4l2_of_parse_endpoint(node_ep, &ep);
+	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(node_ep), &ep);
 	of_node_put(node_ep);
 	if (ret)
 		return ret;
@@ -1690,10 +1691,10 @@ static int s5c73m3_probe(struct i2c_client *client,
 
 	state->sensor_pads[S5C73M3_JPEG_PAD].flags = MEDIA_PAD_FL_SOURCE;
 	state->sensor_pads[S5C73M3_ISP_PAD].flags = MEDIA_PAD_FL_SOURCE;
-	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
 
-	ret = media_entity_pads_init(&sd->entity, S5C73M3_NUM_PADS,
-							state->sensor_pads);
+	ret = media_entity_init(&sd->entity, S5C73M3_NUM_PADS,
+							state->sensor_pads, 0);
 	if (ret < 0)
 		return ret;
 
@@ -1706,10 +1707,10 @@ static int s5c73m3_probe(struct i2c_client *client,
 	state->oif_pads[OIF_ISP_PAD].flags = MEDIA_PAD_FL_SINK;
 	state->oif_pads[OIF_JPEG_PAD].flags = MEDIA_PAD_FL_SINK;
 	state->oif_pads[OIF_SOURCE_PAD].flags = MEDIA_PAD_FL_SOURCE;
-	oif_sd->entity.function = MEDIA_ENT_F_PROC_VIDEO_SCALER;
+	oif_sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
 
-	ret = media_entity_pads_init(&oif_sd->entity, OIF_NUM_PADS,
-							state->oif_pads);
+	ret = media_entity_init(&oif_sd->entity, OIF_NUM_PADS,
+							state->oif_pads, 0);
 	if (ret < 0)
 		return ret;
 

@@ -1,5 +1,4 @@
-/*
- * Driver for USB Mass Storage compliant devices
+/* Driver for USB Mass Storage compliant devices
  * SCSI Connecting Glue Header File
  *
  * Current development and maintenance by:

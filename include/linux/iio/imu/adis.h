@@ -41,7 +41,6 @@ struct adis_data {
 	unsigned int diag_stat_reg;
 
 	unsigned int self_test_mask;
-	bool self_test_no_autoclear;
 	unsigned int startup_delay;
 
 	const char * const *status_error_msgs;

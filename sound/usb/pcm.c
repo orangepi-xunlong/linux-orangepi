@@ -272,15 +272,16 @@ static int start_endpoints(struct snd_usb_substream *subs)
 
 static void stop_endpoints(struct snd_usb_substream *subs, bool wait)
 {
-	if (test_and_clear_bit(SUBSTREAM_FLAG_SYNC_EP_STARTED, &subs->flags))
+	if (test_and_clear_bit(SUBSTREAM_FLAG_SYNC_EP_STARTED, &subs->flags)) {
 		snd_usb_endpoint_stop(subs->sync_endpoint);
+		if (wait)
+			snd_usb_endpoint_sync_pending_stop(subs->sync_endpoint);
+	}
 
-	if (test_and_clear_bit(SUBSTREAM_FLAG_DATA_EP_STARTED, &subs->flags))
+	if (test_and_clear_bit(SUBSTREAM_FLAG_DATA_EP_STARTED, &subs->flags)) {
 		snd_usb_endpoint_stop(subs->data_endpoint);
-
-	if (wait) {
-		snd_usb_endpoint_sync_pending_stop(subs->sync_endpoint);
-		snd_usb_endpoint_sync_pending_stop(subs->data_endpoint);
+		if (wait)
+			snd_usb_endpoint_sync_pending_stop(subs->data_endpoint);
 	}
 }
 
@@ -351,15 +352,6 @@ static int set_sync_ep_implicit_fb_quirk(struct snd_usb_substream *subs,
 
 		alts = &iface->altsetting[1];
 		goto add_sync_ep;
-	case USB_ID(0x2466, 0x8003):
-		ep = 0x86;
-		iface = usb_ifnum_to_if(dev, 2);
-
-		if (!iface || iface->num_altsetting == 0)
-			return -EINVAL;
-
-		alts = &iface->altsetting[1];
-		goto add_sync_ep;
 	case USB_ID(0x1397, 0x0002):
 		ep = 0x81;
 		iface = usb_ifnum_to_if(dev, 1);
@@ -369,7 +361,6 @@ static int set_sync_ep_implicit_fb_quirk(struct snd_usb_substream *subs,
 
 		alts = &iface->altsetting[1];
 		goto add_sync_ep;
-
 	}
 	if (attr == USB_ENDPOINT_SYNC_ASYNC &&
 	    altsd->bInterfaceClass == USB_CLASS_VENDOR_SPEC &&
@@ -1652,11 +1643,16 @@ static int snd_usb_substream_playback_trigger(struct snd_pcm_substream *substrea
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
 		subs->trigger_tstamp_pending_update = true;
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		subs->data_endpoint->prepare_data_urb = prepare_playback_urb;
 		subs->data_endpoint->retire_data_urb = retire_playback_urb;
 		subs->running = 1;
+		return 0;
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+		stop_endpoints(subs, true);
+		subs->running = 0;
 		return 0;
 	case SNDRV_PCM_TRIGGER_STOP:
 		stop_endpoints(subs, false);
@@ -1681,12 +1677,17 @@ static int snd_usb_substream_capture_trigger(struct snd_pcm_substream *substream
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
 		err = start_endpoints(subs);
 		if (err < 0)
 			return err;
 
 		subs->data_endpoint->retire_data_urb = retire_capture_urb;
 		subs->running = 1;
+		return 0;
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+		stop_endpoints(subs, true);
+		subs->running = 0;
 		return 0;
 	case SNDRV_PCM_TRIGGER_STOP:
 		stop_endpoints(subs, false);

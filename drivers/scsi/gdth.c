@@ -2838,6 +2838,7 @@ static gdth_evt_str *gdth_store_event(gdth_ha_str *ha, u16 source,
                                       u16 idx, gdth_evt_data *evt)
 {
     gdth_evt_str *e;
+    struct timeval tv;
 
     /* no GDTH_LOCK_HA() ! */
     TRACE2(("gdth_store_event() source %d idx %d\n", source, idx));
@@ -2853,7 +2854,8 @@ static gdth_evt_str *gdth_store_event(gdth_ha_str *ha, u16 source,
             !strcmp((char *)&ebuffer[elastidx].event_data.event_string,
             (char *)&evt->event_string)))) { 
         e = &ebuffer[elastidx];
-	e->last_stamp = (u32)ktime_get_real_seconds();
+        do_gettimeofday(&tv);
+        e->last_stamp = tv.tv_sec;
         ++e->same_count;
     } else {
         if (ebuffer[elastidx].event_source != 0) {  /* entry not free ? */
@@ -2869,7 +2871,8 @@ static gdth_evt_str *gdth_store_event(gdth_ha_str *ha, u16 source,
         e = &ebuffer[elastidx];
         e->event_source = source;
         e->event_idx = idx;
-	e->first_stamp = e->last_stamp = (u32)ktime_get_real_seconds();
+        do_gettimeofday(&tv);
+        e->first_stamp = e->last_stamp = tv.tv_sec;
         e->same_count = 1;
         e->event_data = *evt;
         e->application = 0;

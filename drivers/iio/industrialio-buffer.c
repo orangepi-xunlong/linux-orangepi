@@ -204,8 +204,7 @@ void iio_buffer_init(struct iio_buffer *buffer)
 	INIT_LIST_HEAD(&buffer->buffer_list);
 	init_waitqueue_head(&buffer->pollq);
 	kref_init(&buffer->ref);
-	if (!buffer->watermark)
-		buffer->watermark = 1;
+	buffer->watermark = 1;
 }
 EXPORT_SYMBOL(iio_buffer_init);
 
@@ -523,41 +522,33 @@ static ssize_t iio_buffer_show_enable(struct device *dev,
 	return sprintf(buf, "%d\n", iio_buffer_is_active(indio_dev->buffer));
 }
 
-static unsigned int iio_storage_bytes_for_si(struct iio_dev *indio_dev,
-					     unsigned int scan_index)
-{
-	const struct iio_chan_spec *ch;
-	unsigned int bytes;
-
-	ch = iio_find_channel_from_si(indio_dev, scan_index);
-	bytes = ch->scan_type.storagebits / 8;
-	if (ch->scan_type.repeat > 1)
-		bytes *= ch->scan_type.repeat;
-	return bytes;
-}
-
-static unsigned int iio_storage_bytes_for_timestamp(struct iio_dev *indio_dev)
-{
-	return iio_storage_bytes_for_si(indio_dev,
-					indio_dev->scan_index_timestamp);
-}
-
 static int iio_compute_scan_bytes(struct iio_dev *indio_dev,
 				const unsigned long *mask, bool timestamp)
 {
+	const struct iio_chan_spec *ch;
 	unsigned bytes = 0;
 	int length, i;
 
 	/* How much space will the demuxed element take? */
 	for_each_set_bit(i, mask,
 			 indio_dev->masklength) {
-		length = iio_storage_bytes_for_si(indio_dev, i);
+		ch = iio_find_channel_from_si(indio_dev, i);
+		if (ch->scan_type.repeat > 1)
+			length = ch->scan_type.storagebits / 8 *
+				ch->scan_type.repeat;
+		else
+			length = ch->scan_type.storagebits / 8;
 		bytes = ALIGN(bytes, length);
 		bytes += length;
 	}
-
 	if (timestamp) {
-		length = iio_storage_bytes_for_timestamp(indio_dev);
+		ch = iio_find_channel_from_si(indio_dev,
+					      indio_dev->scan_index_timestamp);
+		if (ch->scan_type.repeat > 1)
+			length = ch->scan_type.storagebits / 8 *
+				ch->scan_type.repeat;
+		else
+			length = ch->scan_type.storagebits / 8;
 		bytes = ALIGN(bytes, length);
 		bytes += length;
 	}
@@ -585,22 +576,6 @@ static void iio_buffer_deactivate_all(struct iio_dev *indio_dev)
 	list_for_each_entry_safe(buffer, _buffer,
 			&indio_dev->buffer_list, buffer_list)
 		iio_buffer_deactivate(buffer);
-}
-
-static int iio_buffer_enable(struct iio_buffer *buffer,
-	struct iio_dev *indio_dev)
-{
-	if (!buffer->access->enable)
-		return 0;
-	return buffer->access->enable(buffer, indio_dev);
-}
-
-static int iio_buffer_disable(struct iio_buffer *buffer,
-	struct iio_dev *indio_dev)
-{
-	if (!buffer->access->disable)
-		return 0;
-	return buffer->access->disable(buffer, indio_dev);
 }
 
 static void iio_buffer_update_bytes_per_datum(struct iio_dev *indio_dev,
@@ -646,7 +621,6 @@ static void iio_free_scan_mask(struct iio_dev *indio_dev,
 
 struct iio_device_config {
 	unsigned int mode;
-	unsigned int watermark;
 	const unsigned long *scan_mask;
 	unsigned int scan_bytes;
 	bool scan_timestamp;
@@ -664,7 +638,6 @@ static int iio_verify_update(struct iio_dev *indio_dev,
 	unsigned int modes;
 
 	memset(config, 0, sizeof(*config));
-	config->watermark = ~0;
 
 	/*
 	 * If there is just one buffer and we are removing it there is nothing
@@ -680,14 +653,10 @@ static int iio_verify_update(struct iio_dev *indio_dev,
 		if (buffer == remove_buffer)
 			continue;
 		modes &= buffer->access->modes;
-		config->watermark = min(config->watermark, buffer->watermark);
 	}
 
-	if (insert_buffer) {
+	if (insert_buffer)
 		modes &= insert_buffer->access->modes;
-		config->watermark = min(config->watermark,
-			insert_buffer->watermark);
-	}
 
 	/* Definitely possible for devices to support both of these. */
 	if ((modes & INDIO_BUFFER_TRIGGERED) && indio_dev->trig) {
@@ -755,7 +724,6 @@ static int iio_verify_update(struct iio_dev *indio_dev,
 static int iio_enable_buffers(struct iio_dev *indio_dev,
 	struct iio_device_config *config)
 {
-	struct iio_buffer *buffer;
 	int ret;
 
 	indio_dev->active_scan_mask = config->scan_mask;
@@ -786,16 +754,6 @@ static int iio_enable_buffers(struct iio_dev *indio_dev,
 		}
 	}
 
-	if (indio_dev->info->hwfifo_set_watermark)
-		indio_dev->info->hwfifo_set_watermark(indio_dev,
-			config->watermark);
-
-	list_for_each_entry(buffer, &indio_dev->buffer_list, buffer_list) {
-		ret = iio_buffer_enable(buffer, indio_dev);
-		if (ret)
-			goto err_disable_buffers;
-	}
-
 	indio_dev->currentmode = config->mode;
 
 	if (indio_dev->setup_ops->postenable) {
@@ -803,16 +761,12 @@ static int iio_enable_buffers(struct iio_dev *indio_dev,
 		if (ret) {
 			dev_dbg(&indio_dev->dev,
 			       "Buffer not started: postenable failed (%d)\n", ret);
-			goto err_disable_buffers;
+			goto err_run_postdisable;
 		}
 	}
 
 	return 0;
 
-err_disable_buffers:
-	list_for_each_entry_continue_reverse(buffer, &indio_dev->buffer_list,
-					     buffer_list)
-		iio_buffer_disable(buffer, indio_dev);
 err_run_postdisable:
 	indio_dev->currentmode = INDIO_DIRECT_MODE;
 	if (indio_dev->setup_ops->postdisable)
@@ -825,7 +779,6 @@ err_undo_config:
 
 static int iio_disable_buffers(struct iio_dev *indio_dev)
 {
-	struct iio_buffer *buffer;
 	int ret = 0;
 	int ret2;
 
@@ -842,12 +795,6 @@ static int iio_disable_buffers(struct iio_dev *indio_dev)
 
 	if (indio_dev->setup_ops->predisable) {
 		ret2 = indio_dev->setup_ops->predisable(indio_dev);
-		if (ret2 && !ret)
-			ret = ret2;
-	}
-
-	list_for_each_entry(buffer, &indio_dev->buffer_list, buffer_list) {
-		ret2 = iio_buffer_disable(buffer, indio_dev);
 		if (ret2 && !ret)
 			ret = ret2;
 	}
@@ -1038,6 +985,9 @@ static ssize_t iio_buffer_store_watermark(struct device *dev,
 	}
 
 	buffer->watermark = val;
+
+	if (indio_dev->info->hwfifo_set_watermark)
+		indio_dev->info->hwfifo_set_watermark(indio_dev, val);
 out:
 	mutex_unlock(&indio_dev->mlock);
 
@@ -1052,8 +1002,6 @@ static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR,
 		   iio_buffer_show_enable, iio_buffer_store_enable);
 static DEVICE_ATTR(watermark, S_IRUGO | S_IWUSR,
 		   iio_buffer_show_watermark, iio_buffer_store_watermark);
-static struct device_attribute dev_attr_watermark_ro = __ATTR(watermark,
-	S_IRUGO, iio_buffer_show_watermark, NULL);
 
 static struct attribute *iio_buffer_attrs[] = {
 	&dev_attr_length.attr,
@@ -1095,9 +1043,6 @@ int iio_buffer_alloc_sysfs_and_mask(struct iio_dev *indio_dev)
 	memcpy(attr, iio_buffer_attrs, sizeof(iio_buffer_attrs));
 	if (!buffer->access->set_length)
 		attr[0] = &dev_attr_length_ro.attr;
-
-	if (buffer->access->flags & INDIO_BUFFER_FLAG_FIXED_WATERMARK)
-		attr[2] = &dev_attr_watermark_ro.attr;
 
 	if (buffer->attrs)
 		memcpy(&attr[ARRAY_SIZE(iio_buffer_attrs)], buffer->attrs,
@@ -1308,6 +1253,7 @@ static int iio_buffer_add_demux(struct iio_buffer *buffer,
 static int iio_buffer_update_demux(struct iio_dev *indio_dev,
 				   struct iio_buffer *buffer)
 {
+	const struct iio_chan_spec *ch;
 	int ret, in_ind = -1, out_ind, length;
 	unsigned in_loc = 0, out_loc = 0;
 	struct iio_demux_table *p = NULL;
@@ -1334,11 +1280,21 @@ static int iio_buffer_update_demux(struct iio_dev *indio_dev,
 			in_ind = find_next_bit(indio_dev->active_scan_mask,
 					       indio_dev->masklength,
 					       in_ind + 1);
-			length = iio_storage_bytes_for_si(indio_dev, in_ind);
+			ch = iio_find_channel_from_si(indio_dev, in_ind);
+			if (ch->scan_type.repeat > 1)
+				length = ch->scan_type.storagebits / 8 *
+					ch->scan_type.repeat;
+			else
+				length = ch->scan_type.storagebits / 8;
 			/* Make sure we are aligned */
 			in_loc = roundup(in_loc, length) + length;
 		}
-		length = iio_storage_bytes_for_si(indio_dev, in_ind);
+		ch = iio_find_channel_from_si(indio_dev, in_ind);
+		if (ch->scan_type.repeat > 1)
+			length = ch->scan_type.storagebits / 8 *
+				ch->scan_type.repeat;
+		else
+			length = ch->scan_type.storagebits / 8;
 		out_loc = roundup(out_loc, length);
 		in_loc = roundup(in_loc, length);
 		ret = iio_buffer_add_demux(buffer, &p, in_loc, out_loc, length);
@@ -1349,7 +1305,13 @@ static int iio_buffer_update_demux(struct iio_dev *indio_dev,
 	}
 	/* Relies on scan_timestamp being last */
 	if (buffer->scan_timestamp) {
-		length = iio_storage_bytes_for_timestamp(indio_dev);
+		ch = iio_find_channel_from_si(indio_dev,
+			indio_dev->scan_index_timestamp);
+		if (ch->scan_type.repeat > 1)
+			length = ch->scan_type.storagebits / 8 *
+				ch->scan_type.repeat;
+		else
+			length = ch->scan_type.storagebits / 8;
 		out_loc = roundup(out_loc, length);
 		in_loc = roundup(in_loc, length);
 		ret = iio_buffer_add_demux(buffer, &p, in_loc, out_loc, length);

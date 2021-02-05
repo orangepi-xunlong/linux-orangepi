@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -97,11 +97,14 @@ acpi_status acpi_ev_initialize_op_regions(void)
 		if (acpi_ev_has_default_handler(acpi_gbl_root_node,
 						acpi_gbl_default_address_spaces
 						[i])) {
-			acpi_ev_execute_reg_methods(acpi_gbl_root_node,
-						    acpi_gbl_default_address_spaces
-						    [i], ACPI_REG_CONNECT);
+			status =
+			    acpi_ev_execute_reg_methods(acpi_gbl_root_node,
+							acpi_gbl_default_address_spaces
+							[i]);
 		}
 	}
+
+	acpi_gbl_reg_methods_executed = TRUE;
 
 	(void)acpi_ut_release_mutex(ACPI_MTX_NAMESPACE);
 	return_ACPI_STATUS(status);
@@ -123,12 +126,6 @@ acpi_status acpi_ev_initialize_op_regions(void)
  *
  * DESCRIPTION: Dispatch an address space or operation region access to
  *              a previously installed handler.
- *
- * NOTE: During early initialization, we always install the default region
- * handlers for Memory, I/O and PCI_Config. This ensures that these operation
- * region address spaces are always available as per the ACPI specification.
- * This is especially needed in order to support the execution of
- * module-level AML code during loading of the ACPI tables.
  *
  ******************************************************************************/
 
@@ -501,12 +498,6 @@ acpi_ev_attach_region(union acpi_operand_object *handler_obj,
 
 	ACPI_FUNCTION_TRACE(ev_attach_region);
 
-	/* Install the region's handler */
-
-	if (region_obj->region.handler) {
-		return_ACPI_STATUS(AE_ALREADY_EXISTS);
-	}
-
 	ACPI_DEBUG_PRINT((ACPI_DB_OPREGION,
 			  "Adding Region [%4.4s] %p to address handler %p [%s]\n",
 			  acpi_ut_get_node_name(region_obj->region.node),
@@ -518,6 +509,13 @@ acpi_ev_attach_region(union acpi_operand_object *handler_obj,
 
 	region_obj->region.next = handler_obj->address_space.region_list;
 	handler_obj->address_space.region_list = region_obj;
+
+	/* Install the region's handler */
+
+	if (region_obj->region.handler) {
+		return_ACPI_STATUS(AE_ALREADY_EXISTS);
+	}
+
 	region_obj->region.handler = handler_obj;
 	acpi_ut_add_reference(handler_obj);
 
@@ -543,51 +541,16 @@ acpi_ev_execute_reg_method(union acpi_operand_object *region_obj, u32 function)
 	struct acpi_evaluate_info *info;
 	union acpi_operand_object *args[3];
 	union acpi_operand_object *region_obj2;
-	const acpi_name *reg_name_ptr =
-	    ACPI_CAST_PTR(acpi_name, METHOD_NAME__REG);
-	struct acpi_namespace_node *method_node;
-	struct acpi_namespace_node *node;
 	acpi_status status;
 
 	ACPI_FUNCTION_TRACE(ev_execute_reg_method);
-
-	if (!acpi_gbl_namespace_initialized ||
-	    region_obj->region.handler == NULL) {
-		return_ACPI_STATUS(AE_OK);
-	}
 
 	region_obj2 = acpi_ns_get_secondary_object(region_obj);
 	if (!region_obj2) {
 		return_ACPI_STATUS(AE_NOT_EXIST);
 	}
 
-	/*
-	 * Find any "_REG" method associated with this region definition.
-	 * The method should always be updated as this function may be
-	 * invoked after a namespace change.
-	 */
-	node = region_obj->region.node->parent;
-	status =
-	    acpi_ns_search_one_scope(*reg_name_ptr, node, ACPI_TYPE_METHOD,
-				     &method_node);
-	if (ACPI_SUCCESS(status)) {
-		/*
-		 * The _REG method is optional and there can be only one per
-		 * region definition. This will be executed when the handler is
-		 * attached or removed.
-		 */
-		region_obj2->extra.method_REG = method_node;
-	}
 	if (region_obj2->extra.method_REG == NULL) {
-		return_ACPI_STATUS(AE_OK);
-	}
-
-	/* _REG(DISCONNECT) should be paired with _REG(CONNECT) */
-
-	if ((function == ACPI_REG_CONNECT &&
-	     region_obj->common.flags & AOPOBJ_REG_CONNECTED) ||
-	    (function == ACPI_REG_DISCONNECT &&
-	     !(region_obj->common.flags & AOPOBJ_REG_CONNECTED))) {
 		return_ACPI_STATUS(AE_OK);
 	}
 
@@ -636,16 +599,6 @@ acpi_ev_execute_reg_method(union acpi_operand_object *region_obj, u32 function)
 	status = acpi_ns_evaluate(info);
 	acpi_ut_remove_reference(args[1]);
 
-	if (ACPI_FAILURE(status)) {
-		goto cleanup2;
-	}
-
-	if (function == ACPI_REG_CONNECT) {
-		region_obj->common.flags |= AOPOBJ_REG_CONNECTED;
-	} else {
-		region_obj->common.flags &= ~AOPOBJ_REG_CONNECTED;
-	}
-
 cleanup2:
 	acpi_ut_remove_reference(args[0]);
 
@@ -660,25 +613,24 @@ cleanup1:
  *
  * PARAMETERS:  node            - Namespace node for the device
  *              space_id        - The address space ID
- *              function        - Passed to _REG: On (1) or Off (0)
  *
- * RETURN:      None
+ * RETURN:      Status
  *
  * DESCRIPTION: Run all _REG methods for the input Space ID;
  *              Note: assumes namespace is locked, or system init time.
  *
  ******************************************************************************/
 
-void
+acpi_status
 acpi_ev_execute_reg_methods(struct acpi_namespace_node *node,
-			    acpi_adr_space_type space_id, u32 function)
+			    acpi_adr_space_type space_id)
 {
+	acpi_status status;
 	struct acpi_reg_walk_info info;
 
 	ACPI_FUNCTION_TRACE(ev_execute_reg_methods);
 
 	info.space_id = space_id;
-	info.function = function;
 	info.reg_run_count = 0;
 
 	ACPI_DEBUG_PRINT_RAW((ACPI_DB_NAMES,
@@ -691,9 +643,9 @@ acpi_ev_execute_reg_methods(struct acpi_namespace_node *node,
 	 * regions and _REG methods. (i.e. handlers must be installed for all
 	 * regions of this Space ID before we can run any _REG methods)
 	 */
-	(void)acpi_ns_walk_namespace(ACPI_TYPE_ANY, node, ACPI_UINT32_MAX,
-				     ACPI_NS_WALK_UNLOCK, acpi_ev_reg_run, NULL,
-				     &info, NULL);
+	status = acpi_ns_walk_namespace(ACPI_TYPE_ANY, node, ACPI_UINT32_MAX,
+					ACPI_NS_WALK_UNLOCK, acpi_ev_reg_run,
+					NULL, &info, NULL);
 
 	/* Special case for EC: handle "orphan" _REG methods with no region */
 
@@ -706,7 +658,7 @@ acpi_ev_execute_reg_methods(struct acpi_namespace_node *node,
 			      info.reg_run_count,
 			      acpi_ut_get_region_name(info.space_id)));
 
-	return_VOID;
+	return_ACPI_STATUS(status);
 }
 
 /*******************************************************************************
@@ -765,7 +717,7 @@ acpi_ev_reg_run(acpi_handle obj_handle,
 	}
 
 	info->reg_run_count++;
-	status = acpi_ev_execute_reg_method(obj_desc, info->function);
+	status = acpi_ev_execute_reg_method(obj_desc, ACPI_REG_CONNECT);
 	return (status);
 }
 

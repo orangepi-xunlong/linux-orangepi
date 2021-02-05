@@ -132,11 +132,9 @@ static void process_ir_data(struct iguanair *ir, unsigned len)
 			break;
 		}
 	} else if (len >= 7) {
-		DEFINE_IR_RAW_EVENT(rawir);
+		struct ir_raw_event rawir = {};
 		unsigned i;
 		bool event = false;
-
-		init_ir_raw_event(&rawir);
 
 		for (i = 0; i < 7; i++) {
 			if (ir->buf_in[i] == 0x80) {
@@ -330,7 +328,7 @@ static int iguanair_set_tx_carrier(struct rc_dev *dev, uint32_t carrier)
 
 	mutex_unlock(&ir->lock);
 
-	return 0;
+	return carrier;
 }
 
 static int iguanair_set_tx_mask(struct rc_dev *dev, uint32_t mask)
@@ -431,7 +429,7 @@ static int iguanair_probe(struct usb_interface *intf,
 	struct usb_host_interface *idesc;
 
 	ir = kzalloc(sizeof(*ir), GFP_KERNEL);
-	rc = rc_allocate_device();
+	rc = rc_allocate_device(RC_DRIVER_IR_RAW);
 	if (!ir || !rc) {
 		ret = -ENOMEM;
 		goto out;
@@ -490,12 +488,11 @@ static int iguanair_probe(struct usb_interface *intf,
 
 	usb_make_path(ir->udev, ir->phys, sizeof(ir->phys));
 
-	rc->input_name = ir->name;
+	rc->device_name = ir->name;
 	rc->input_phys = ir->phys;
 	usb_to_input_id(ir->udev, &rc->input_id);
 	rc->dev.parent = &intf->dev;
-	rc->driver_type = RC_DRIVER_IR_RAW;
-	rc->allowed_protocols = RC_BIT_ALL;
+	rc->allowed_protocols = RC_PROTO_BIT_ALL_IR_DECODER;
 	rc->priv = ir;
 	rc->open = iguanair_open;
 	rc->close = iguanair_close;

@@ -566,13 +566,11 @@ static ssize_t adp8860_bl_ambient_light_level_show(struct device *dev,
 
 	mutex_lock(&data->lock);
 	error = adp8860_read(data->client, ADP8860_PH1LEVL, &reg_val);
-	if (!error) {
-		ret_val = reg_val;
-		error = adp8860_read(data->client, ADP8860_PH1LEVH, &reg_val);
-	}
+	ret_val = reg_val;
+	error |= adp8860_read(data->client, ADP8860_PH1LEVH, &reg_val);
 	mutex_unlock(&data->lock);
 
-	if (error)
+	if (error < 0)
 		return error;
 
 	/* Return 13-bit conversion value for the first light sensor */
@@ -623,12 +621,10 @@ static ssize_t adp8860_bl_ambient_light_zone_store(struct device *dev,
 
 		/* Set user supplied ambient light zone */
 		mutex_lock(&data->lock);
-		ret = adp8860_read(data->client, ADP8860_CFGR, &reg_val);
-		if (!ret) {
-			reg_val &= ~(CFGR_BLV_MASK << CFGR_BLV_SHIFT);
-			reg_val |= (val - 1) << CFGR_BLV_SHIFT;
-			adp8860_write(data->client, ADP8860_CFGR, reg_val);
-		}
+		adp8860_read(data->client, ADP8860_CFGR, &reg_val);
+		reg_val &= ~(CFGR_BLV_MASK << CFGR_BLV_SHIFT);
+		reg_val |= (val - 1) << CFGR_BLV_SHIFT;
+		adp8860_write(data->client, ADP8860_CFGR, reg_val);
 		mutex_unlock(&data->lock);
 	}
 

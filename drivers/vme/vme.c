@@ -13,8 +13,8 @@
  * option) any later version.
  */
 
-#include <linux/init.h>
-#include <linux/export.h>
+#include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/mm.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -39,6 +39,7 @@ static unsigned int vme_bus_numbers;
 static LIST_HEAD(vme_bus_list);
 static DEFINE_MUTEX(vme_buses_lock);
 
+static void __exit vme_exit(void);
 static int __init vme_init(void);
 
 static struct vme_dev *dev_to_vme_dev(struct device *dev)
@@ -156,16 +157,12 @@ size_t vme_get_size(struct vme_resource *resource)
 	case VME_MASTER:
 		retval = vme_master_get(resource, &enabled, &base, &size,
 			&aspace, &cycle, &dwidth);
-		if (retval)
-			return 0;
 
 		return size;
 		break;
 	case VME_SLAVE:
 		retval = vme_slave_get(resource, &enabled, &base, &size,
 			&buf_base, &aspace, &cycle);
-		if (retval)
-			return 0;
 
 		return size;
 		break;
@@ -785,7 +782,7 @@ struct vme_dma_list *vme_new_dma_list(struct vme_resource *resource)
 
 	dma_list = kmalloc(sizeof(struct vme_dma_list), GFP_KERNEL);
 	if (dma_list == NULL) {
-		printk(KERN_ERR "Unable to allocate memory for new DMA list\n");
+		printk(KERN_ERR "Unable to allocate memory for new dma list\n");
 		return NULL;
 	}
 	INIT_LIST_HEAD(&dma_list->entries);
@@ -849,7 +846,7 @@ struct vme_dma_attr *vme_dma_pci_attribute(dma_addr_t address)
 
 	pci_attr = kmalloc(sizeof(struct vme_dma_pci), GFP_KERNEL);
 	if (pci_attr == NULL) {
-		printk(KERN_ERR "Unable to allocate memory for PCI attributes\n");
+		printk(KERN_ERR "Unable to allocate memory for pci attributes\n");
 		goto err_pci;
 	}
 
@@ -887,7 +884,7 @@ struct vme_dma_attr *vme_dma_vme_attribute(unsigned long long address,
 
 	vme_attr = kmalloc(sizeof(struct vme_dma_vme), GFP_KERNEL);
 	if (vme_attr == NULL) {
-		printk(KERN_ERR "Unable to allocate memory for VME attributes\n");
+		printk(KERN_ERR "Unable to allocate memory for vme attributes\n");
 		goto err_vme;
 	}
 
@@ -978,8 +975,8 @@ int vme_dma_list_free(struct vme_dma_list *list)
 	}
 
 	/*
-	 * Empty out all of the entries from the DMA list. We need to go to the
-	 * low level driver as DMA entries are driver specific.
+	 * Empty out all of the entries from the dma list. We need to go to the
+	 * low level driver as dma entries are driver specific.
 	 */
 	retval = bridge->dma_list_empty(list);
 	if (retval) {
@@ -1094,7 +1091,7 @@ void vme_irq_handler(struct vme_bridge *bridge, int level, int statid)
 	if (call != NULL)
 		call(level, statid, priv_data);
 	else
-		printk(KERN_WARNING "Spurious VME interrupt, level:%x, vector:%x\n",
+		printk(KERN_WARNING "Spurilous VME interrupt, level:%x, vector:%x\n",
 		       level, statid);
 }
 EXPORT_SYMBOL(vme_irq_handler);
@@ -1324,7 +1321,7 @@ int vme_lm_get(struct vme_resource *resource, unsigned long long *lm_base,
 EXPORT_SYMBOL(vme_lm_get);
 
 int vme_lm_attach(struct vme_resource *resource, int monitor,
-	void (*callback)(void *), void *data)
+	void (*callback)(int))
 {
 	struct vme_bridge *bridge = find_bridge(resource);
 	struct vme_lm_resource *lm;
@@ -1341,7 +1338,7 @@ int vme_lm_attach(struct vme_resource *resource, int monitor,
 		return -EINVAL;
 	}
 
-	return bridge->lm_attach(lm, monitor, callback, data);
+	return bridge->lm_attach(lm, monitor, callback);
 }
 EXPORT_SYMBOL(vme_lm_attach);
 
@@ -1431,20 +1428,6 @@ static void vme_dev_release(struct device *dev)
 {
 	kfree(dev_to_vme_dev(dev));
 }
-
-/* Common bridge initialization */
-struct vme_bridge *vme_init_bridge(struct vme_bridge *bridge)
-{
-	INIT_LIST_HEAD(&bridge->vme_error_handlers);
-	INIT_LIST_HEAD(&bridge->master_resources);
-	INIT_LIST_HEAD(&bridge->slave_resources);
-	INIT_LIST_HEAD(&bridge->dma_resources);
-	INIT_LIST_HEAD(&bridge->lm_resources);
-	mutex_init(&bridge->irq_mtx);
-
-	return bridge;
-}
-EXPORT_SYMBOL(vme_init_bridge);
 
 int vme_register_bridge(struct vme_bridge *bridge)
 {
@@ -1651,4 +1634,11 @@ static int __init vme_init(void)
 {
 	return bus_register(&vme_bus_type);
 }
+
+static void __exit vme_exit(void)
+{
+	bus_unregister(&vme_bus_type);
+}
+
 subsys_initcall(vme_init);
+module_exit(vme_exit);

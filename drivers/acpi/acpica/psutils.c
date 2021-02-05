@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -128,7 +128,7 @@ union acpi_parse_object *acpi_ps_alloc_op(u16 opcode, u8 *aml)
 	if (op_info->flags & AML_DEFER) {
 		flags = ACPI_PARSEOP_DEFERRED;
 	} else if (op_info->flags & AML_NAMED) {
-		flags = ACPI_PARSEOP_NAMED_OBJECT;
+		flags = ACPI_PARSEOP_NAMED;
 	} else if (opcode == AML_INT_BYTELIST_OP) {
 		flags = ACPI_PARSEOP_BYTELIST;
 	}
@@ -175,8 +175,8 @@ void acpi_ps_free_op(union acpi_parse_object *op)
 	ACPI_FUNCTION_NAME(ps_free_op);
 
 	if (op->common.aml_opcode == AML_INT_RETURN_VALUE_OP) {
-		ACPI_DEBUG_PRINT((ACPI_DB_ALLOCATIONS,
-				  "Free retval op: %p\n", op));
+		ACPI_DEBUG_PRINT((ACPI_DB_ALLOCATIONS, "Free retval op: %p\n",
+				  op));
 	}
 
 	if (op->common.flags & ACPI_PARSEOP_GENERIC) {

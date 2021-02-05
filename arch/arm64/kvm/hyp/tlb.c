@@ -15,64 +15,16 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <asm/kvm_hyp.h>
+#include "hyp.h"
 
-static void __hyp_text __tlb_switch_to_guest_vhe(struct kvm *kvm)
-{
-	u64 val;
-
-	/*
-	 * With VHE enabled, we have HCR_EL2.{E2H,TGE} = {1,1}, and
-	 * most TLB operations target EL2/EL0. In order to affect the
-	 * guest TLBs (EL1/EL0), we need to change one of these two
-	 * bits. Changing E2H is impossible (goodbye TTBR1_EL2), so
-	 * let's flip TGE before executing the TLB operation.
-	 */
-	write_sysreg(kvm->arch.vttbr, vttbr_el2);
-	val = read_sysreg(hcr_el2);
-	val &= ~HCR_TGE;
-	write_sysreg(val, hcr_el2);
-	isb();
-}
-
-static void __hyp_text __tlb_switch_to_guest_nvhe(struct kvm *kvm)
-{
-	write_sysreg(kvm->arch.vttbr, vttbr_el2);
-	isb();
-}
-
-static hyp_alternate_select(__tlb_switch_to_guest,
-			    __tlb_switch_to_guest_nvhe,
-			    __tlb_switch_to_guest_vhe,
-			    ARM64_HAS_VIRT_HOST_EXTN);
-
-static void __hyp_text __tlb_switch_to_host_vhe(struct kvm *kvm)
-{
-	/*
-	 * We're done with the TLB operation, let's restore the host's
-	 * view of HCR_EL2.
-	 */
-	write_sysreg(0, vttbr_el2);
-	write_sysreg(HCR_HOST_VHE_FLAGS, hcr_el2);
-}
-
-static void __hyp_text __tlb_switch_to_host_nvhe(struct kvm *kvm)
-{
-	write_sysreg(0, vttbr_el2);
-}
-
-static hyp_alternate_select(__tlb_switch_to_host,
-			    __tlb_switch_to_host_nvhe,
-			    __tlb_switch_to_host_vhe,
-			    ARM64_HAS_VIRT_HOST_EXTN);
-
-void __hyp_text __kvm_tlb_flush_vmid_ipa(struct kvm *kvm, phys_addr_t ipa)
+static void __hyp_text __tlb_flush_vmid_ipa(struct kvm *kvm, phys_addr_t ipa)
 {
 	dsb(ishst);
 
 	/* Switch to requested VMID */
 	kvm = kern_hyp_va(kvm);
-	__tlb_switch_to_guest()(kvm);
+	write_sysreg(kvm->arch.vttbr, vttbr_el2);
+	isb();
 
 	/*
 	 * We could do so much better if we had the VA as well.
@@ -93,42 +45,36 @@ void __hyp_text __kvm_tlb_flush_vmid_ipa(struct kvm *kvm, phys_addr_t ipa)
 	dsb(ish);
 	isb();
 
-	__tlb_switch_to_host()(kvm);
+	write_sysreg(0, vttbr_el2);
 }
 
-void __hyp_text __kvm_tlb_flush_vmid(struct kvm *kvm)
+__alias(__tlb_flush_vmid_ipa) void __kvm_tlb_flush_vmid_ipa(struct kvm *kvm,
+							    phys_addr_t ipa);
+
+static void __hyp_text __tlb_flush_vmid(struct kvm *kvm)
 {
 	dsb(ishst);
 
 	/* Switch to requested VMID */
 	kvm = kern_hyp_va(kvm);
-	__tlb_switch_to_guest()(kvm);
+	write_sysreg(kvm->arch.vttbr, vttbr_el2);
+	isb();
 
 	asm volatile("tlbi vmalls12e1is" : : );
 	dsb(ish);
 	isb();
 
-	__tlb_switch_to_host()(kvm);
+	write_sysreg(0, vttbr_el2);
 }
 
-void __hyp_text __kvm_tlb_flush_local_vmid(struct kvm_vcpu *vcpu)
-{
-	struct kvm *kvm = kern_hyp_va(kern_hyp_va(vcpu)->kvm);
+__alias(__tlb_flush_vmid) void __kvm_tlb_flush_vmid(struct kvm *kvm);
 
-	/* Switch to requested VMID */
-	__tlb_switch_to_guest()(kvm);
-
-	asm volatile("tlbi vmalle1" : : );
-	dsb(nsh);
-	isb();
-
-	__tlb_switch_to_host()(kvm);
-}
-
-void __hyp_text __kvm_flush_vm_context(void)
+static void __hyp_text __tlb_flush_vm_context(void)
 {
 	dsb(ishst);
 	asm volatile("tlbi alle1is	\n"
 		     "ic ialluis	  ": : );
 	dsb(ish);
 }
+
+__alias(__tlb_flush_vm_context) void __kvm_flush_vm_context(void);

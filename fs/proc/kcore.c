@@ -505,21 +505,25 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 			/* we have to zero-fill user buffer even if no read */
 			if (copy_to_user(buffer, buf, tsz))
 				return -EFAULT;
-		} else if (m->type == KCORE_USER) {
-			/* User page is handled prior to normal kernel page: */
-			if (copy_to_user(buffer, (char *)start, tsz))
-				return -EFAULT;
 		} else {
 			if (kern_addr_valid(start)) {
+				unsigned long n;
+
 				/*
 				 * Using bounce buffer to bypass the
 				 * hardened user copy kernel text checks.
 				 */
-				if (probe_kernel_read(buf, (void *) start, tsz)) {
-					if (clear_user(buffer, tsz))
-						return -EFAULT;
-				} else {
-					if (copy_to_user(buffer, buf, tsz))
+				memcpy(buf, (char *) start, tsz);
+				n = copy_to_user(buffer, buf, tsz);
+				/*
+				 * We cannot distinguish between fault on source
+				 * and fault on destination. When this happens
+				 * we clear too and hope it will trigger the
+				 * EFAULT again.
+				 */
+				if (n) { 
+					if (clear_user(buffer + tsz - n,
+								n))
 						return -EFAULT;
 				}
 			} else {
@@ -551,9 +555,9 @@ static int open_kcore(struct inode *inode, struct file *filp)
 	if (kcore_need_update)
 		kcore_update_ram();
 	if (i_size_read(inode) != proc_root_kcore->size) {
-		inode_lock(inode);
+		mutex_lock(&inode->i_mutex);
 		i_size_write(inode, proc_root_kcore->size);
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 	}
 	return 0;
 }

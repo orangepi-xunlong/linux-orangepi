@@ -144,37 +144,30 @@ int stk_camera_write_reg(struct stk_camera *dev, u16 index, u8 value)
 		return 0;
 }
 
-int stk_camera_read_reg(struct stk_camera *dev, u16 index, u8 *value)
+int stk_camera_read_reg(struct stk_camera *dev, u16 index, int *value)
 {
 	struct usb_device *udev = dev->udev;
-	unsigned char *buf;
 	int ret;
-
-	buf = kmalloc(sizeof(u8), GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
 
 	ret = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
 			0x00,
 			USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			0x00,
 			index,
-			buf,
+			(u8 *) value,
 			sizeof(u8),
 			500);
-	if (ret >= 0)
-		*value = *buf;
-
-	kfree(buf);
-	return ret;
+	if (ret < 0)
+		return ret;
+	else
+		return 0;
 }
 
 static int stk_start_stream(struct stk_camera *dev)
 {
-	u8 value;
+	int value;
 	int i, ret;
-	u8 value_116, value_117;
-
+	int value_116, value_117;
 
 	if (!is_present(dev))
 		return -ENODEV;
@@ -214,7 +207,7 @@ static int stk_start_stream(struct stk_camera *dev)
 
 static int stk_stop_stream(struct stk_camera *dev)
 {
-	u8 value;
+	int value;
 	int i;
 	if (is_present(dev)) {
 		stk_camera_read_reg(dev, 0x0100, &value);
@@ -459,8 +452,10 @@ static int stk_prepare_iso(struct stk_camera *dev)
 			STK_ERROR("isobuf data already allocated\n");
 		if (dev->isobufs[i].urb == NULL) {
 			urb = usb_alloc_urb(ISO_FRAMES_PER_DESC, GFP_KERNEL);
-			if (urb == NULL)
+			if (urb == NULL) {
+				STK_ERROR("Failed to allocate URB %d\n", i);
 				goto isobufs_out;
+			}
 			dev->isobufs[i].urb = urb;
 		} else {
 			STK_ERROR("Killing URB\n");

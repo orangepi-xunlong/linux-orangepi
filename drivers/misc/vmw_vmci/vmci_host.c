@@ -381,12 +381,18 @@ static int vmci_host_do_send_datagram(struct vmci_host_dev *vmci_host_dev,
 		return -EINVAL;
 	}
 
-	dg = memdup_user((void __user *)(uintptr_t)send_info.addr,
-			 send_info.len);
-	if (IS_ERR(dg)) {
+	dg = kmalloc(send_info.len, GFP_KERNEL);
+	if (!dg) {
 		vmci_ioctl_err(
 			"cannot allocate memory to dispatch datagram\n");
-		return PTR_ERR(dg);
+		return -ENOMEM;
+	}
+
+	if (copy_from_user(dg, (void __user *)(uintptr_t)send_info.addr,
+			   send_info.len)) {
+		vmci_ioctl_err("error getting datagram\n");
+		kfree(dg);
+		return -EFAULT;
 	}
 
 	if (VMCI_DG_SIZE(dg) != send_info.len) {

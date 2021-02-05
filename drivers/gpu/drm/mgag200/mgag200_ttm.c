@@ -150,8 +150,7 @@ static int mgag200_bo_verify_access(struct ttm_buffer_object *bo, struct file *f
 {
 	struct mgag200_bo *mgabo = mgag200_bo(bo);
 
-	return drm_vma_node_verify_access(&mgabo->gem.vma_node,
-					  filp->private_data);
+	return drm_vma_node_verify_access(&mgabo->gem.vma_node, filp);
 }
 
 static int mgag200_ttm_io_mem_reserve(struct ttm_bo_device *bdev,
@@ -186,6 +185,17 @@ static int mgag200_ttm_io_mem_reserve(struct ttm_bo_device *bdev,
 static void mgag200_ttm_io_mem_free(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem)
 {
 }
+
+static int mgag200_bo_move(struct ttm_buffer_object *bo,
+		       bool evict, bool interruptible,
+		       bool no_wait_gpu,
+		       struct ttm_mem_reg *new_mem)
+{
+	int r;
+	r = ttm_bo_move_memcpy(bo, evict, no_wait_gpu, new_mem);
+	return r;
+}
+
 
 static void mgag200_ttm_backend_destroy(struct ttm_tt *tt)
 {
@@ -231,12 +241,10 @@ struct ttm_bo_driver mgag200_bo_driver = {
 	.ttm_tt_unpopulate = mgag200_ttm_tt_unpopulate,
 	.init_mem_type = mgag200_bo_init_mem_type,
 	.evict_flags = mgag200_bo_evict_flags,
-	.move = NULL,
+	.move = mgag200_bo_move,
 	.verify_access = mgag200_bo_verify_access,
 	.io_mem_reserve = &mgag200_ttm_io_mem_reserve,
 	.io_mem_free = &mgag200_ttm_io_mem_free,
-	.lru_tail = &ttm_bo_default_lru_tail,
-	.swap_lru_tail = &ttm_bo_default_swap_lru_tail,
 };
 
 int mgag200_mm_init(struct mga_device *mdev)

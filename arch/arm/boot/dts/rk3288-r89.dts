@@ -41,7 +41,6 @@
  */
 
 /dts-v1/;
-#include <dt-bindings/input/input.h>
 #include <dt-bindings/pwm/pwm.h>
 #include "rk3288.dtsi"
 
@@ -50,7 +49,7 @@
 
 	memory {
 		device_type = "memory";
-		reg = <0x0 0x80000000>;
+		reg = <0x0 0x0 0x0 0x80000000>;
 	};
 
 	ext_gmac: external-gmac-clock {
@@ -62,26 +61,21 @@
 
 	gpio-keys {
 		compatible = "gpio-keys";
+		#address-cells = <1>;
+		#size-cells = <0>;
 		autorepeat;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&pwrbtn>;
 
-		power {
+		button@0 {
 			gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
-			linux,code = <KEY_POWER>;
+			linux,code = <116>;
 			label = "GPIO Key Power";
 			linux,input-type = <1>;
-			wakeup-source;
+			gpio-key,wakeup = <1>;
 			debounce-interval = <100>;
 		};
-	};
-
-	ir: ir-receiver {
-		compatible = "gpio-ir-receiver";
-		gpios = <&gpio7 0 GPIO_ACTIVE_LOW>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&ir_int>;
 	};
 
 	vcc_host: vcc-host-regulator {
@@ -316,12 +310,6 @@
 		};
 	};
 
-	ir {
-		ir_int: ir-int {
-			rockchip,pins = <7 0 RK_FUNC_GPIO &pcfg_pull_up>;
-		};
-	};
-
 	pmic {
 		pmic_int: pmic-int {
 			rockchip,pins = <RK_GPIO0 4 RK_FUNC_GPIO &pcfg_pull_up>;
@@ -363,7 +351,6 @@
 };
 
 &tsadc {
-	rockchip,hw-tshut-mode = <0>;
 	rockchip,hw-tshut-polarity = <0>;
 	status = "okay";
 };

@@ -27,7 +27,6 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <linux/bitmap.h>
-#include <linux/time64.h>
 
 #include "../../perf.h"
 #include "../debug.h"
@@ -42,10 +41,6 @@
 #include "../thread-stack.h"
 #include "../trace-event.h"
 #include "../machine.h"
-#include "../call-path.h"
-#include "thread_map.h"
-#include "cpumap.h"
-#include "stat.h"
 
 PyMODINIT_FUNC initperf_trace_context(void);
 
@@ -207,9 +202,6 @@ static void define_event_symbols(struct event_format *event,
 				 const char *ev_name,
 				 struct print_arg *args)
 {
-	if (args == NULL)
-		return;
-
 	switch (args->type) {
 	case PRINT_NULL:
 		break;
@@ -274,7 +266,7 @@ static PyObject *get_field_numeric_entry(struct event_format *event,
 		struct format_field *field, void *data)
 {
 	bool is_array = field->flags & FIELD_IS_ARRAY;
-	PyObject *obj = NULL, *list = NULL;
+	PyObject *obj, *list = NULL;
 	unsigned long long val;
 	unsigned int item_size, n_items, i;
 
@@ -325,7 +317,7 @@ static PyObject *python_process_callchain(struct perf_sample *sample,
 	if (!symbol_conf.use_callchain || !sample->callchain)
 		goto exit;
 
-	if (thread__resolve_callchain(al->thread, &callchain_cursor, evsel,
+	if (thread__resolve_callchain(al->thread, evsel,
 				      sample, NULL, NULL,
 				      scripting_max_stack) != 0) {
 		pr_err("Failed to resolve callchain. Skipping\n");
@@ -387,12 +379,13 @@ exit:
 	return pylist;
 }
 
+
 static void python_process_tracepoint(struct perf_sample *sample,
 				      struct perf_evsel *evsel,
 				      struct addr_location *al)
 {
 	struct event_format *event = evsel->tp_format;
-	PyObject *handler, *context, *t, *obj = NULL, *callchain;
+	PyObject *handler, *context, *t, *obj, *callchain;
 	PyObject *dict = NULL;
 	static char handler_name[256];
 	struct format_field *field;
@@ -408,11 +401,8 @@ static void python_process_tracepoint(struct perf_sample *sample,
 	if (!t)
 		Py_FatalError("couldn't create Python tuple");
 
-	if (!event) {
-		snprintf(handler_name, sizeof(handler_name),
-			 "ug! no event found for type %" PRIu64, (u64)evsel->attr.config);
-		Py_FatalError(handler_name);
-	}
+	if (!event)
+		die("ug! no event found for type %d", (int)evsel->attr.config);
 
 	pid = raw_field_value(event, "common_pid", data);
 
@@ -427,8 +417,8 @@ static void python_process_tracepoint(struct perf_sample *sample,
 		if (!dict)
 			Py_FatalError("couldn't create Python dict");
 	}
-	s = nsecs / NSEC_PER_SEC;
-	ns = nsecs - s * NSEC_PER_SEC;
+	s = nsecs / NSECS_PER_SEC;
+	ns = nsecs - s * NSECS_PER_SEC;
 
 	scripting_context->event_data = data;
 	scripting_context->pevent = evsel->tp_format->pevent;
@@ -457,26 +447,14 @@ static void python_process_tracepoint(struct perf_sample *sample,
 		pydict_set_item_string_decref(dict, "common_callchain", callchain);
 	}
 	for (field = event->format.fields; field; field = field->next) {
-		unsigned int offset, len;
-		unsigned long long val;
-
-		if (field->flags & FIELD_IS_ARRAY) {
-			offset = field->offset;
-			len    = field->size;
+		if (field->flags & FIELD_IS_STRING) {
+			int offset;
 			if (field->flags & FIELD_IS_DYNAMIC) {
-				val     = pevent_read_number(scripting_context->pevent,
-							     data + offset, len);
-				offset  = val;
-				len     = offset >> 16;
+				offset = *(int *)(data + field->offset);
 				offset &= 0xffff;
-			}
-			if (field->flags & FIELD_IS_STRING &&
-			    is_printable_array(data + offset, len)) {
-				obj = PyString_FromString((char *) data + offset);
-			} else {
-				obj = PyByteArray_FromStringAndSize((const char *) data + offset, len);
-				field->flags &= ~FIELD_IS_STRING;
-			}
+			} else
+				offset = field->offset;
+			obj = PyString_FromString((char *)data + offset);
 		} else { /* FIELD_IS_NUMERIC */
 			obj = get_field_numeric_entry(event, field, data);
 		}
@@ -630,7 +608,7 @@ static int python_export_dso(struct db_export *dbe, struct dso *dso,
 			     struct machine *machine)
 {
 	struct tables *tables = container_of(dbe, struct tables, dbe);
-	char sbuild_id[SBUILD_ID_SIZE];
+	char sbuild_id[BUILD_ID_SIZE * 2 + 1];
 	PyObject *t;
 
 	build_id__sprintf(dso->build_id, sizeof(dso->build_id), sbuild_id);
@@ -697,7 +675,7 @@ static int python_export_sample(struct db_export *dbe,
 	struct tables *tables = container_of(dbe, struct tables, dbe);
 	PyObject *t;
 
-	t = tuple_new(22);
+	t = tuple_new(21);
 
 	tuple_set_u64(t, 0, es->db_id);
 	tuple_set_u64(t, 1, es->evsel->db_id);
@@ -720,7 +698,6 @@ static int python_export_sample(struct db_export *dbe,
 	tuple_set_u64(t, 18, es->sample->data_src);
 	tuple_set_s32(t, 19, es->sample->flags & PERF_BRANCH_MASK);
 	tuple_set_s32(t, 20, !!(es->sample->flags & PERF_IP_FLAG_IN_TX));
-	tuple_set_u64(t, 21, es->call_path_id);
 
 	call_object(tables->sample_handler, t, "sample_table");
 
@@ -829,6 +806,8 @@ static void python_process_general_event(struct perf_sample *sample,
 			PyInt_FromLong(sample->cpu));
 	pydict_set_item_string_decref(dict_sample, "ip",
 			PyLong_FromUnsignedLongLong(sample->ip));
+        pydict_set_item_string_decref(dict_sample, "addr",
+			PyLong_FromUnsignedLongLong(sample->addr));
 	pydict_set_item_string_decref(dict_sample, "time",
 			PyLong_FromUnsignedLongLong(sample->time));
 	pydict_set_item_string_decref(dict_sample, "period",
@@ -882,104 +861,6 @@ static void python_process_event(union perf_event *event,
 	}
 }
 
-static void get_handler_name(char *str, size_t size,
-			     struct perf_evsel *evsel)
-{
-	char *p = str;
-
-	scnprintf(str, size, "stat__%s", perf_evsel__name(evsel));
-
-	while ((p = strchr(p, ':'))) {
-		*p = '_';
-		p++;
-	}
-}
-
-static void
-process_stat(struct perf_evsel *counter, int cpu, int thread, u64 tstamp,
-	     struct perf_counts_values *count)
-{
-	PyObject *handler, *t;
-	static char handler_name[256];
-	int n = 0;
-
-	t = PyTuple_New(MAX_FIELDS);
-	if (!t)
-		Py_FatalError("couldn't create Python tuple");
-
-	get_handler_name(handler_name, sizeof(handler_name),
-			 counter);
-
-	handler = get_handler(handler_name);
-	if (!handler) {
-		pr_debug("can't find python handler %s\n", handler_name);
-		return;
-	}
-
-	PyTuple_SetItem(t, n++, PyInt_FromLong(cpu));
-	PyTuple_SetItem(t, n++, PyInt_FromLong(thread));
-
-	tuple_set_u64(t, n++, tstamp);
-	tuple_set_u64(t, n++, count->val);
-	tuple_set_u64(t, n++, count->ena);
-	tuple_set_u64(t, n++, count->run);
-
-	if (_PyTuple_Resize(&t, n) == -1)
-		Py_FatalError("error resizing Python tuple");
-
-	call_object(handler, t, handler_name);
-
-	Py_DECREF(t);
-}
-
-static void python_process_stat(struct perf_stat_config *config,
-				struct perf_evsel *counter, u64 tstamp)
-{
-	struct thread_map *threads = counter->threads;
-	struct cpu_map *cpus = counter->cpus;
-	int cpu, thread;
-
-	if (config->aggr_mode == AGGR_GLOBAL) {
-		process_stat(counter, -1, -1, tstamp,
-			     &counter->counts->aggr);
-		return;
-	}
-
-	for (thread = 0; thread < threads->nr; thread++) {
-		for (cpu = 0; cpu < cpus->nr; cpu++) {
-			process_stat(counter, cpus->map[cpu],
-				     thread_map__pid(threads, thread), tstamp,
-				     perf_counts(counter->counts, cpu, thread));
-		}
-	}
-}
-
-static void python_process_stat_interval(u64 tstamp)
-{
-	PyObject *handler, *t;
-	static const char handler_name[] = "stat__interval";
-	int n = 0;
-
-	t = PyTuple_New(MAX_FIELDS);
-	if (!t)
-		Py_FatalError("couldn't create Python tuple");
-
-	handler = get_handler(handler_name);
-	if (!handler) {
-		pr_debug("can't find python handler %s\n", handler_name);
-		return;
-	}
-
-	tuple_set_u64(t, n++, tstamp);
-
-	if (_PyTuple_Resize(&t, n) == -1)
-		Py_FatalError("error resizing Python tuple");
-
-	call_object(handler, t, handler_name);
-
-	Py_DECREF(t);
-}
-
 static int run_start_sub(void)
 {
 	main_module = PyImport_AddModule("__main__");
@@ -1015,10 +896,8 @@ static void set_table_handlers(struct tables *tables)
 {
 	const char *perf_db_export_mode = "perf_db_export_mode";
 	const char *perf_db_export_calls = "perf_db_export_calls";
-	const char *perf_db_export_callchains = "perf_db_export_callchains";
-	PyObject *db_export_mode, *db_export_calls, *db_export_callchains;
+	PyObject *db_export_mode, *db_export_calls;
 	bool export_calls = false;
-	bool export_callchains = false;
 	int ret;
 
 	memset(tables, 0, sizeof(struct tables));
@@ -1035,7 +914,6 @@ static void set_table_handlers(struct tables *tables)
 	if (!ret)
 		return;
 
-	/* handle export calls */
 	tables->dbe.crp = NULL;
 	db_export_calls = PyDict_GetItemString(main_dict, perf_db_export_calls);
 	if (db_export_calls) {
@@ -1051,33 +929,6 @@ static void set_table_handlers(struct tables *tables)
 						   &tables->dbe);
 		if (!tables->dbe.crp)
 			Py_FatalError("failed to create calls processor");
-	}
-
-	/* handle export callchains */
-	tables->dbe.cpr = NULL;
-	db_export_callchains = PyDict_GetItemString(main_dict,
-						    perf_db_export_callchains);
-	if (db_export_callchains) {
-		ret = PyObject_IsTrue(db_export_callchains);
-		if (ret == -1)
-			handler_call_die(perf_db_export_callchains);
-		export_callchains = !!ret;
-	}
-
-	if (export_callchains) {
-		/*
-		 * Attempt to use the call path root from the call return
-		 * processor, if the call return processor is in use. Otherwise,
-		 * we allocate a new call path root. This prevents exporting
-		 * duplicate call path ids when both are in use simultaniously.
-		 */
-		if (tables->dbe.crp)
-			tables->dbe.cpr = tables->dbe.crp->cpr;
-		else
-			tables->dbe.cpr = call_path_root__new();
-
-		if (!tables->dbe.cpr)
-			Py_FatalError("failed to create call path root");
 	}
 
 	tables->db_export_mode = true;
@@ -1141,6 +992,8 @@ static int python_start_script(const char *script, int argc, const char **argv)
 		goto error;
 	}
 
+	free(command_line);
+
 	set_table_handlers(tables);
 
 	if (tables->db_export_mode) {
@@ -1148,8 +1001,6 @@ static int python_start_script(const char *script, int argc, const char **argv)
 		if (err)
 			goto error;
 	}
-
-	free(command_line);
 
 	return err;
 error:
@@ -1352,12 +1203,10 @@ static int python_generate_script(struct pevent *pevent, const char *outfile)
 }
 
 struct scripting_ops python_scripting_ops = {
-	.name			= "Python",
-	.start_script		= python_start_script,
-	.flush_script		= python_flush_script,
-	.stop_script		= python_stop_script,
-	.process_event		= python_process_event,
-	.process_stat		= python_process_stat,
-	.process_stat_interval	= python_process_stat_interval,
-	.generate_script	= python_generate_script,
+	.name = "Python",
+	.start_script = python_start_script,
+	.flush_script = python_flush_script,
+	.stop_script = python_stop_script,
+	.process_event = python_process_event,
+	.generate_script = python_generate_script,
 };

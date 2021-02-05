@@ -20,7 +20,6 @@
 #include <linux/delay.h>
 #include <linux/kthread.h>
 #include <linux/irqreturn.h>
-#include <linux/pm_runtime.h>
 
 #include <linux/mei.h>
 
@@ -28,9 +27,6 @@
 #include "hw-txe.h"
 #include "client.h"
 #include "hbm.h"
-
-#include "mei-trace.h"
-
 
 /**
  * mei_txe_reg_read - Reads 32bit data from the txe device
@@ -644,11 +640,8 @@ static int mei_txe_fw_status(struct mei_device *dev,
 
 	fw_status->count = fw_src->count;
 	for (i = 0; i < fw_src->count && i < MEI_FW_STATUS_MAX; i++) {
-		ret = pci_read_config_dword(pdev, fw_src->status[i],
-					    &fw_status->status[i]);
-		trace_mei_pci_cfg_read(dev->dev, "PCI_CFG_HSF_X",
-				       fw_src->status[i],
-				       fw_status->status[i]);
+		ret = pci_read_config_dword(pdev,
+			fw_src->status[i], &fw_status->status[i]);
 		if (ret)
 			return ret;
 	}
@@ -935,8 +928,6 @@ static int mei_txe_hw_start(struct mei_device *dev)
 		dev_err(dev->dev, "wait for aliveness failed ... bailing out\n");
 		return ret;
 	}
-
-	pm_runtime_set_active(dev->dev);
 
 	/* enable input ready interrupts:
 	 * SEC_IPC_HOST_INT_MASK.IPC_INPUT_READY_INT_MASK

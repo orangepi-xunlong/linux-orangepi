@@ -79,6 +79,13 @@ static int bcm2835_wdt_stop(struct watchdog_device *wdog)
 	struct bcm2835_wdt *wdt = watchdog_get_drvdata(wdog);
 
 	writel_relaxed(PM_PASSWORD | PM_RSTC_RESET, wdt->base + PM_RSTC);
+	dev_info(wdog->dev, "Watchdog timer stopped");
+	return 0;
+}
+
+static int bcm2835_wdt_set_timeout(struct watchdog_device *wdog, unsigned int t)
+{
+	wdog->timeout = t;
 	return 0;
 }
 
@@ -90,14 +97,15 @@ static unsigned int bcm2835_wdt_get_timeleft(struct watchdog_device *wdog)
 	return WDOG_TICKS_TO_SECS(ret & PM_WDOG_TIME_SET);
 }
 
-static const struct watchdog_ops bcm2835_wdt_ops = {
+static struct watchdog_ops bcm2835_wdt_ops = {
 	.owner =	THIS_MODULE,
 	.start =	bcm2835_wdt_start,
 	.stop =		bcm2835_wdt_stop,
+	.set_timeout =	bcm2835_wdt_set_timeout,
 	.get_timeleft =	bcm2835_wdt_get_timeleft,
 };
 
-static const struct watchdog_info bcm2835_wdt_info = {
+static struct watchdog_info bcm2835_wdt_info = {
 	.options =	WDIOF_SETTIMEOUT | WDIOF_MAGICCLOSE |
 			WDIOF_KEEPALIVEPING,
 	.identity =	"Broadcom BCM2835 Watchdog timer",

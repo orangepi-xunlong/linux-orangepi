@@ -35,7 +35,6 @@
 #include <ttm/ttm_placement.h>
 #include <drm/drm_vma_manager.h>
 #include <linux/mm.h>
-#include <linux/pfn_t.h>
 #include <linux/rbtree.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
@@ -48,14 +47,15 @@ static int ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 {
 	int ret = 0;
 
-	if (likely(!bo->moving))
+	if (likely(!test_bit(TTM_BO_PRIV_FLAG_MOVING, &bo->priv_flags)))
 		goto out_unlock;
 
 	/*
 	 * Quick non-stalling check for idle.
 	 */
-	if (fence_is_signaled(bo->moving))
-		goto out_clear;
+	ret = ttm_bo_wait(bo, false, false, true);
+	if (likely(ret == 0))
+		goto out_unlock;
 
 	/*
 	 * If possible, avoid waiting for GPU with mmap_sem
@@ -68,7 +68,7 @@ static int ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 
 		ttm_bo_reference(bo);
 		up_read(&vma->vm_mm->mmap_sem);
-		(void) fence_wait(bo->moving, true);
+		(void) ttm_bo_wait(bo, false, true, false);
 		ttm_bo_unreserve(bo);
 		ttm_bo_unref(&bo);
 		goto out_unlock;
@@ -77,16 +77,10 @@ static int ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 	/*
 	 * Ordinary wait.
 	 */
-	ret = fence_wait(bo->moving, true);
-	if (unlikely(ret != 0)) {
+	ret = ttm_bo_wait(bo, false, true, false);
+	if (unlikely(ret != 0))
 		ret = (ret != -ERESTARTSYS) ? VM_FAULT_SIGBUS :
 			VM_FAULT_NOPAGE;
-		goto out_unlock;
-	}
-
-out_clear:
-	fence_put(bo->moving);
-	bo->moving = NULL;
 
 out_unlock:
 	return ret;
@@ -116,7 +110,7 @@ static int ttm_bo_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	 * for reserve, and if it fails, retry the fault after waiting
 	 * for the buffer to become unreserved.
 	 */
-	ret = ttm_bo_reserve(bo, true, true, NULL);
+	ret = ttm_bo_reserve(bo, true, true, false, NULL);
 	if (unlikely(ret != 0)) {
 		if (ret != -EBUSY)
 			return VM_FAULT_NOPAGE;
@@ -247,8 +241,7 @@ static int ttm_bo_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		}
 
 		if (vma->vm_flags & VM_MIXEDMAP)
-			ret = vm_insert_mixed(&cvma, address,
-					__pfn_to_pfn_t(pfn, PFN_DEV));
+			ret = vm_insert_mixed(&cvma, address, pfn);
 		else
 			ret = vm_insert_pfn(&cvma, address, pfn);
 

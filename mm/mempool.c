@@ -308,7 +308,7 @@ EXPORT_SYMBOL(mempool_resize);
  * fail if called from an IRQ context.)
  * Note: using __GFP_ZERO is not supported.
  */
-void *mempool_alloc(mempool_t *pool, gfp_t gfp_mask)
+void * mempool_alloc(mempool_t *pool, gfp_t gfp_mask)
 {
 	void *element;
 	unsigned long flags;

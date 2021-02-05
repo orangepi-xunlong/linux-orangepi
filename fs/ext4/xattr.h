@@ -24,7 +24,6 @@
 #define EXT4_XATTR_INDEX_SYSTEM			7
 #define EXT4_XATTR_INDEX_RICHACL		8
 #define EXT4_XATTR_INDEX_ENCRYPTION		9
-#define EXT4_XATTR_INDEX_HURD			10 /* Reserved for Hurd */
 
 struct ext4_xattr_header {
 	__le32	h_magic;	/* magic number for identification */
@@ -156,8 +155,8 @@ extern int ext4_xattr_ibody_inline_set(handle_t *handle, struct inode *inode,
 				       struct ext4_xattr_info *i,
 				       struct ext4_xattr_ibody_find *is);
 
-extern struct mb_cache *ext4_xattr_create_cache(void);
-extern void ext4_xattr_destroy_cache(struct mb_cache *);
+extern struct mb2_cache *ext4_xattr_create_cache(void);
+extern void ext4_xattr_destroy_cache(struct mb2_cache *);
 
 #ifdef CONFIG_EXT4_FS_SECURITY
 extern int ext4_init_security(handle_t *handle, struct inode *inode,

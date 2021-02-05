@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -134,7 +138,7 @@ static int lmv_desc_uuid_seq_show(struct seq_file *m, void *v)
 	struct obd_device *dev = (struct obd_device *)m->private;
 	struct lmv_obd	  *lmv;
 
-	LASSERT(dev);
+	LASSERT(dev != NULL);
 	lmv = &dev->u.lmv;
 	seq_printf(m, "%s\n", lmv->desc.ld_uuid.uuid);
 	return 0;
@@ -167,9 +171,9 @@ static int lmv_tgt_seq_show(struct seq_file *p, void *v)
 {
 	struct lmv_tgt_desc     *tgt = v;
 
-	if (!tgt)
+	if (tgt == NULL)
 		return 0;
-	seq_printf(p, "%u: %s %sACTIVE\n",
+	seq_printf(p, "%d: %s %sACTIVE\n",
 		   tgt->ltd_idx, tgt->ltd_uuid.uuid,
 		   tgt->ltd_active ? "" : "IN");
 	return 0;
@@ -202,7 +206,7 @@ static struct lprocfs_vars lprocfs_lmv_obd_vars[] = {
 	{ NULL }
 };
 
-const struct file_operations lmv_proc_target_fops = {
+struct file_operations lmv_proc_target_fops = {
 	.owner		= THIS_MODULE,
 	.open		 = lmv_target_seq_open,
 	.read		 = seq_read,

@@ -17,6 +17,7 @@
 #include <linux/uaccess.h>
 #include <linux/mount.h>
 #include <linux/pagevec.h>
+#include <linux/random.h>
 #include <linux/uio.h>
 #include <linux/uuid.h>
 #include <linux/file.h>
@@ -197,6 +198,25 @@ static void try_to_fix_pino(struct inode *inode)
 	up_write(&fi->i_sem);
 }
 
+static bool f2fs_update_fsync_count(struct f2fs_sb_info *sbi,
+					unsigned int npages)
+{
+	struct sysinfo val;
+	unsigned long avail_ram;
+
+	si_meminfo(&val);
+
+	/* only uses low memory */
+	avail_ram = val.totalram - val.totalhigh;
+	avail_ram = (avail_ram * DEF_RAM_THRESHOLD) / 100;
+
+	if ((atomic_read(&sbi->no_cp_fsync_pages) + npages) > avail_ram)
+		return false;
+
+	atomic_add(npages, &sbi->no_cp_fsync_pages);
+	return true;
+}
+
 static int f2fs_do_sync_file(struct file *file, loff_t start, loff_t end,
 						int datasync, bool atomic)
 {
@@ -204,6 +224,7 @@ static int f2fs_do_sync_file(struct file *file, loff_t start, loff_t end,
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	nid_t ino = inode->i_ino;
 	int ret = 0;
+	unsigned int npages = 0;
 	enum cp_reason_type cp_reason = 0;
 	struct writeback_control wbc = {
 		.sync_mode = WB_SYNC_ALL,
@@ -222,6 +243,7 @@ static int f2fs_do_sync_file(struct file *file, loff_t start, loff_t end,
 		goto go_write;
 
 	/* if fdatasync is triggered, let's do in-place-update */
+	npages = get_dirty_pages(inode);
 	if (datasync || get_dirty_pages(inode) <= SM_I(sbi)->min_fsync_blocks)
 		set_inode_flag(inode, FI_NEED_IPU);
 	ret = filemap_write_and_wait_range(inode->i_mapping, start, end);
@@ -262,7 +284,7 @@ go_write:
 	cp_reason = need_do_checkpoint(inode);
 	up_read(&F2FS_I(inode)->i_sem);
 
-	if (cp_reason) {
+	if (cp_reason || !f2fs_update_fsync_count(sbi, npages)) {
 		/* all the dirty node pages should be flushed for POR */
 		ret = f2fs_sync_fs(inode->i_sb, 1);
 
@@ -691,7 +713,7 @@ int f2fs_truncate(struct inode *inode)
 }
 
 int f2fs_getattr(struct vfsmount *mnt,
-			struct dentry *dentry, struct kstat *stat)
+			 struct dentry *dentry, struct kstat *stat)
 {
 	struct inode *inode = d_inode(dentry);
 #if 0
@@ -773,7 +795,7 @@ int f2fs_setattr(struct dentry *dentry, struct iattr *attr)
 	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode))))
 		return -EIO;
 
-	err = setattr_prepare(dentry, attr);
+	err = inode_change_ok(inode, attr);
 	if (err)
 		return err;
 
@@ -870,7 +892,10 @@ const struct inode_operations f2fs_file_inode_operations = {
 	.get_acl	= f2fs_get_acl,
 	.set_acl	= f2fs_set_acl,
 #ifdef CONFIG_F2FS_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= f2fs_listxattr,
+	.removexattr	= generic_removexattr,
 #endif
 	.fiemap		= f2fs_fiemap,
 };
@@ -2864,8 +2889,13 @@ static ssize_t f2fs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	}
 	inode_unlock(inode);
 
-	if (ret > 0)
-		ret = generic_write_sync(iocb, ret);
+	if (ret > 0) {
+		ssize_t err;
+
+		err = generic_write_sync(file, iocb->ki_pos - ret, ret);
+		if (err < 0)
+			ret = err;
+	}
 	return ret;
 }
 

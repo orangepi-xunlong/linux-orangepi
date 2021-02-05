@@ -16,15 +16,41 @@
 #include <asm/processor.h>
 #include <asm/errno.h>
 #include <asm/ppc_asm.h>
-#include <asm/export.h>
+
+/*
+ * ip_fast_csum(r3=buf, r4=len) -- Optimized for IP header
+ * len is in words and is always >= 5.
+ *
+ * In practice len == 5, but this is not guaranteed.  So this code does not
+ * attempt to use doubleword instructions.
+ */
+_GLOBAL(ip_fast_csum)
+	lwz	r0,0(r3)
+	lwzu	r5,4(r3)
+	addic.	r4,r4,-2
+	addc	r0,r0,r5
+	mtctr	r4
+	blelr-
+1:	lwzu	r4,4(r3)
+	adde	r0,r0,r4
+	bdnz	1b
+	addze	r0,r0		/* add in final carry */
+        rldicl  r4,r0,32,0      /* fold two 32-bit halves together */
+        add     r0,r0,r4
+        srdi    r0,r0,32
+	rlwinm	r3,r0,16,0,31	/* fold two halves together */
+	add	r3,r0,r3
+	not	r3,r3
+	srwi	r3,r3,16
+	blr
 
 /*
  * Computes the checksum of a memory block at buff, length len,
  * and adds in "sum" (32-bit).
  *
- * __csum_partial(r3=buff, r4=len, r5=sum)
+ * csum_partial(r3=buff, r4=len, r5=sum)
  */
-_GLOBAL(__csum_partial)
+_GLOBAL(csum_partial)
 	addic	r0,r5,0			/* clear carry */
 
 	srdi.	r6,r4,3			/* less than 8 bytes? */
@@ -75,9 +101,9 @@ _GLOBAL(__csum_partial)
 	ld	r11,24(r3)
 
 	/*
-	 * On POWER6 and POWER7 back to back adde instructions take 2 cycles
-	 * because of the XER dependency. This means the fastest this loop can
-	 * go is 16 cycles per iteration. The scheduling of the loop below has
+	 * On POWER6 and POWER7 back to back addes take 2 cycles because of
+	 * the XER dependency. This means the fastest this loop can go is
+	 * 16 cycles per iteration. The scheduling of the loop below has
 	 * been shown to hit this on both POWER6 and POWER7.
 	 */
 	.align 5
@@ -177,7 +203,6 @@ _GLOBAL(__csum_partial)
 	add	r3,r4,r0
 	srdi	r3,r3,32
 	blr
-EXPORT_SYMBOL(__csum_partial)
 
 
 	.macro srcnr
@@ -277,9 +302,9 @@ source;	ld	r10,16(r3)
 source;	ld	r11,24(r3)
 
 	/*
-	 * On POWER6 and POWER7 back to back adde instructions take 2 cycles
-	 * because of the XER dependency. This means the fastest this loop can
-	 * go is 16 cycles per iteration. The scheduling of the loop below has
+	 * On POWER6 and POWER7 back to back addes take 2 cycles because of
+	 * the XER dependency. This means the fastest this loop can go is
+	 * 16 cycles per iteration. The scheduling of the loop below has
 	 * been shown to hit this on both POWER6 and POWER7.
 	 */
 	.align 5
@@ -432,4 +457,3 @@ dstnr;	stb	r6,0(r4)
 	li	r6,-EFAULT
 	stw	r6,0(r8)
 	blr
-EXPORT_SYMBOL(csum_partial_copy_generic)

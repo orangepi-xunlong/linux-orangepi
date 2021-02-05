@@ -46,8 +46,6 @@ cflags-$(CONFIG_MARCH_Z196_TUNE)	+= -mtune=z196
 cflags-$(CONFIG_MARCH_ZEC12_TUNE)	+= -mtune=zEC12
 cflags-$(CONFIG_MARCH_Z13_TUNE)	+= -mtune=z13
 
-cflags-y += -Wa,-I$(srctree)/arch/$(ARCH)/include
-
 #KBUILD_IMAGE is necessary for make rpm
 KBUILD_IMAGE	:=arch/s390/boot/image
 
@@ -118,7 +116,6 @@ drivers-y	+= drivers/s390/
 drivers-$(CONFIG_OPROFILE)	+= arch/s390/oprofile/
 
 boot		:= arch/s390/boot
-tools		:= arch/s390/tools
 
 all: image bzImage
 
@@ -137,17 +134,9 @@ vdso_install:
 
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
-	$(Q)$(MAKE) $(clean)=$(tools)
-
-archprepare:
-	$(Q)$(MAKE) $(build)=$(tools) include/generated/facilities.h
 
 # Don't use tabs in echo arguments
 define archhelp
   echo  '* image           - Kernel image for IPL ($(boot)/image)'
   echo	'* bzImage         - Compressed kernel image for IPL ($(boot)/bzImage)'
-  echo	'  install         - Install kernel using'
-  echo	'                    (your) ~/bin/$(INSTALLKERNEL) or'
-  echo	'                    (distribution) /sbin/$(INSTALLKERNEL) or'
-  echo	'                    install to $$(INSTALL_PATH)'
 endef

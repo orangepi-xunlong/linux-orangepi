@@ -31,7 +31,6 @@ static unsigned int nf_route_table_hook(void *priv,
 	__be32 saddr, daddr;
 	u_int8_t tos;
 	const struct iphdr *iph;
-	int err;
 
 	/* root is playing with raw sockets. */
 	if (skb->len < sizeof(struct iphdr) ||
@@ -47,17 +46,15 @@ static unsigned int nf_route_table_hook(void *priv,
 	tos = iph->tos;
 
 	ret = nft_do_chain(&pkt, priv);
-	if (ret != NF_DROP && ret != NF_STOLEN) {
+	if (ret != NF_DROP && ret != NF_QUEUE) {
 		iph = ip_hdr(skb);
 
 		if (iph->saddr != saddr ||
 		    iph->daddr != daddr ||
 		    skb->mark != mark ||
-		    iph->tos != tos) {
-			err = ip_route_me_harder(state->net, skb, RTN_UNSPEC);
-			if (err < 0)
-				ret = NF_DROP_ERR(err);
-		}
+		    iph->tos != tos)
+			if (ip_route_me_harder(state->net, skb, RTN_UNSPEC))
+				ret = NF_DROP;
 	}
 	return ret;
 }

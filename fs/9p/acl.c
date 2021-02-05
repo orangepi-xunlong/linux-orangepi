@@ -67,8 +67,8 @@ int v9fs_get_acl(struct inode *inode, struct p9_fid *fid)
 		return 0;
 	}
 	/* get the default/access acl values and cache them */
-	dacl = __v9fs_get_acl(fid, XATTR_NAME_POSIX_ACL_DEFAULT);
-	pacl = __v9fs_get_acl(fid, XATTR_NAME_POSIX_ACL_ACCESS);
+	dacl = __v9fs_get_acl(fid, POSIX_ACL_XATTR_DEFAULT);
+	pacl = __v9fs_get_acl(fid, POSIX_ACL_XATTR_ACCESS);
 
 	if (!IS_ERR(dacl) && !IS_ERR(pacl)) {
 		set_cached_acl(inode, ACL_TYPE_DEFAULT, dacl);
@@ -93,7 +93,7 @@ static struct posix_acl *v9fs_get_cached_acl(struct inode *inode, int type)
 	 * instantiating the inode (v9fs_inode_from_fid)
 	 */
 	acl = get_cached_acl(inode, type);
-	BUG_ON(is_uncached_acl(acl));
+	BUG_ON(acl == ACL_NOT_CACHED);
 	return acl;
 }
 
@@ -133,10 +133,10 @@ static int v9fs_set_acl(struct p9_fid *fid, int type, struct posix_acl *acl)
 		goto err_free_out;
 	switch (type) {
 	case ACL_TYPE_ACCESS:
-		name = XATTR_NAME_POSIX_ACL_ACCESS;
+		name = POSIX_ACL_XATTR_ACCESS;
 		break;
 	case ACL_TYPE_DEFAULT:
-		name = XATTR_NAME_POSIX_ACL_DEFAULT;
+		name = POSIX_ACL_XATTR_DEFAULT;
 		break;
 	default:
 		BUG();
@@ -213,21 +213,24 @@ int v9fs_acl_mode(struct inode *dir, umode_t *modep,
 }
 
 static int v9fs_xattr_get_acl(const struct xattr_handler *handler,
-			      struct dentry *dentry, struct inode *inode,
-			      const char *name, void *buffer, size_t size)
+			      struct dentry *dentry, const char *name,
+			      void *buffer, size_t size)
 {
 	struct v9fs_session_info *v9ses;
 	struct posix_acl *acl;
 	int error;
+
+	if (strcmp(name, "") != 0)
+		return -EINVAL;
 
 	v9ses = v9fs_dentry2v9ses(dentry);
 	/*
 	 * We allow set/get/list of acl when access=client is not specified
 	 */
 	if ((v9ses->flags & V9FS_ACCESS_MASK) != V9FS_ACCESS_CLIENT)
-		return v9fs_xattr_get(dentry, handler->name, buffer, size);
+		return v9fs_xattr_get(dentry, handler->prefix, buffer, size);
 
-	acl = v9fs_get_cached_acl(inode, handler->flags);
+	acl = v9fs_get_cached_acl(d_inode(dentry), handler->flags);
 	if (IS_ERR(acl))
 		return PTR_ERR(acl);
 	if (acl == NULL)
@@ -239,13 +242,16 @@ static int v9fs_xattr_get_acl(const struct xattr_handler *handler,
 }
 
 static int v9fs_xattr_set_acl(const struct xattr_handler *handler,
-			      struct dentry *dentry, struct inode *inode,
-			      const char *name, const void *value,
-			      size_t size, int flags)
+			      struct dentry *dentry, const char *name,
+			      const void *value, size_t size, int flags)
 {
 	int retval;
 	struct posix_acl *acl;
 	struct v9fs_session_info *v9ses;
+	struct inode *inode = d_inode(dentry);
+
+	if (strcmp(name, "") != 0)
+		return -EINVAL;
 
 	v9ses = v9fs_dentry2v9ses(dentry);
 	/*
@@ -253,7 +259,7 @@ static int v9fs_xattr_set_acl(const struct xattr_handler *handler,
 	 * xattr value. We leave it to the server to validate
 	 */
 	if ((v9ses->flags & V9FS_ACCESS_MASK) != V9FS_ACCESS_CLIENT)
-		return v9fs_xattr_set(dentry, handler->name, value, size,
+		return v9fs_xattr_set(dentry, handler->prefix, value, size,
 				      flags);
 
 	if (S_ISLNK(inode->i_mode))
@@ -266,7 +272,7 @@ static int v9fs_xattr_set_acl(const struct xattr_handler *handler,
 		if (IS_ERR(acl))
 			return PTR_ERR(acl);
 		else if (acl) {
-			retval = posix_acl_valid(inode->i_sb->s_user_ns, acl);
+			retval = posix_acl_valid(acl);
 			if (retval)
 				goto err_out;
 		}
@@ -309,7 +315,7 @@ static int v9fs_xattr_set_acl(const struct xattr_handler *handler,
 	default:
 		BUG();
 	}
-	retval = v9fs_xattr_set(dentry, handler->name, value, size, flags);
+	retval = v9fs_xattr_set(dentry, handler->prefix, value, size, flags);
 	if (!retval)
 		set_cached_acl(inode, handler->flags, acl);
 err_out:
@@ -318,14 +324,14 @@ err_out:
 }
 
 const struct xattr_handler v9fs_xattr_acl_access_handler = {
-	.name	= XATTR_NAME_POSIX_ACL_ACCESS,
+	.prefix	= POSIX_ACL_XATTR_ACCESS,
 	.flags	= ACL_TYPE_ACCESS,
 	.get	= v9fs_xattr_get_acl,
 	.set	= v9fs_xattr_set_acl,
 };
 
 const struct xattr_handler v9fs_xattr_acl_default_handler = {
-	.name	= XATTR_NAME_POSIX_ACL_DEFAULT,
+	.prefix	= POSIX_ACL_XATTR_DEFAULT,
 	.flags	= ACL_TYPE_DEFAULT,
 	.get	= v9fs_xattr_get_acl,
 	.set	= v9fs_xattr_set_acl,

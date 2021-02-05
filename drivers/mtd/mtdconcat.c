@@ -777,7 +777,7 @@ struct mtd_info *mtd_concat_create(struct mtd_info *subdev[],	/* subdevices to c
 
 	}
 
-	mtd_set_ooblayout(&concat->mtd, subdev[0]->ooblayout);
+	concat->mtd.ecclayout = subdev[0]->ecclayout;
 
 	concat->num_subdev = num_devs;
 	concat->mtd.name = name;

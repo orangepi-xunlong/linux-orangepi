@@ -3,12 +3,8 @@
 #include <linux/scatterlist.h>
 #include <linux/kernel.h>
 
-struct device {
-	void *parent;
-};
-
 struct virtio_device {
-	struct device dev;
+	void *dev;
 	u64 features;
 };
 

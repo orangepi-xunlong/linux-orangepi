@@ -319,6 +319,16 @@ static struct isa_driver i2c_elektor_driver = {
 	},
 };
 
+static int __init i2c_pcfisa_init(void)
+{
+	return isa_register_driver(&i2c_elektor_driver, 1);
+}
+
+static void __exit i2c_pcfisa_exit(void)
+{
+	isa_unregister_driver(&i2c_elektor_driver);
+}
+
 MODULE_AUTHOR("Hans Berglund <hb@spacetec.no>");
 MODULE_DESCRIPTION("I2C-Bus adapter routines for PCF8584 ISA bus adapter");
 MODULE_LICENSE("GPL");
@@ -328,4 +338,6 @@ module_param(irq, int, 0);
 module_param(clock, int, 0);
 module_param(own, int, 0);
 module_param(mmapped, int, 0);
-module_isa_driver(i2c_elektor_driver, 1);
+
+module_init(i2c_pcfisa_init);
+module_exit(i2c_pcfisa_exit);

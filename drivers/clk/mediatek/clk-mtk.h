@@ -83,11 +83,7 @@ struct mtk_composite {
 	signed char num_parents;
 };
 
-/*
- * In case the rate change propagation to parent clocks is undesirable,
- * this macro allows to specify the clock flags manually.
- */
-#define MUX_GATE_FLAGS(_id, _name, _parents, _reg, _shift, _width, _gate, _flags) {	\
+#define MUX_GATE(_id, _name, _parents, _reg, _shift, _width, _gate) {	\
 		.id = _id,						\
 		.name = _name,						\
 		.mux_reg = _reg,					\
@@ -98,15 +94,8 @@ struct mtk_composite {
 		.divider_shift = -1,					\
 		.parent_names = _parents,				\
 		.num_parents = ARRAY_SIZE(_parents),			\
-		.flags = _flags,					\
+		.flags = CLK_SET_RATE_PARENT,				\
 	}
-
-/*
- * Unless necessary, all MUX_GATE clocks propagate rate changes to their
- * parent clock by default.
- */
-#define MUX_GATE(_id, _name, _parents, _reg, _shift, _width, _gate)	\
-	MUX_GATE_FLAGS(_id, _name, _parents, _reg, _shift, _width, _gate, CLK_SET_RATE_PARENT)
 
 #define MUX(_id, _name, _parents, _reg, _shift, _width) {		\
 		.id = _id,						\

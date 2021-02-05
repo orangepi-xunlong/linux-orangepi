@@ -139,6 +139,7 @@ extern unsigned int ft_debug_logging;
  * Session ops.
  */
 void ft_sess_put(struct ft_sess *);
+int ft_sess_shutdown(struct se_session *);
 void ft_sess_close(struct se_session *);
 u32 ft_sess_get_index(struct se_session *);
 u32 ft_sess_get_port_name(struct se_session *, unsigned char *, u32);
@@ -165,6 +166,7 @@ void ft_aborted_task(struct se_cmd *);
  */
 void ft_recv_req(struct ft_sess *, struct fc_frame *);
 struct ft_tpg *ft_lport_find_tpg(struct fc_lport *);
+struct ft_node_acl *ft_acl_get(struct ft_tpg *, struct fc_rport_priv *);
 
 void ft_recv_write_data(struct ft_cmd *, struct fc_frame *);
 void ft_dump_cmd(struct ft_cmd *, const char *caller);

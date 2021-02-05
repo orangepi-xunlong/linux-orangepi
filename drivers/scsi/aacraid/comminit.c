@@ -110,7 +110,7 @@ static int aac_alloc_comm(struct aac_dev *dev, void **commaddr, unsigned long co
 	init->InitStructRevision = cpu_to_le32(ADAPTER_INIT_STRUCT_REVISION);
 	if (dev->max_fib_size != sizeof(struct hw_fib))
 		init->InitStructRevision = cpu_to_le32(ADAPTER_INIT_STRUCT_REVISION_4);
-	init->Sa_MSIXVectors = cpu_to_le32(SA_INIT_NUM_MSIXVECTORS);
+	init->Sa_MSIXVectors = cpu_to_le32(Sa_MINIPORT_REVISION);
 	init->fsrev = cpu_to_le32(dev->fsrev);
 
 	/*
@@ -231,11 +231,8 @@ int aac_send_shutdown(struct aac_dev * dev)
 		return -ENOMEM;
 	aac_fib_init(fibctx);
 
-	mutex_lock(&dev->ioctl_mutex);
-	dev->adapter_shutdown = 1;
-	mutex_unlock(&dev->ioctl_mutex);
-
 	cmd = (struct aac_close *) fib_data(fibctx);
+
 	cmd->command = cpu_to_le32(VM_CloseAll);
 	cmd->cid = cpu_to_le32(0xfffffffe);
 
@@ -251,6 +248,7 @@ int aac_send_shutdown(struct aac_dev * dev)
 	/* FIB should be freed only after getting the response from the F/W */
 	if (status != -ERESTARTSYS)
 		aac_fib_free(fibctx);
+	dev->adapter_shutdown = 1;
 	if ((dev->pdev->device == PMC_DEVICE_S7 ||
 	     dev->pdev->device == PMC_DEVICE_S8 ||
 	     dev->pdev->device == PMC_DEVICE_S9) &&
@@ -397,8 +395,21 @@ void aac_define_int_mode(struct aac_dev *dev)
 			msi_count = i;
 		} else {
 			dev->msi_enabled = 0;
-			dev_err(&dev->pdev->dev,
-			"MSIX not supported!! Will try INTX 0x%x.\n", i);
+			printk(KERN_ERR "%s%d: MSIX not supported!! Will try MSI 0x%x.\n",
+					dev->name, dev->id, i);
+		}
+	}
+
+	if (!dev->msi_enabled) {
+		msi_count = 1;
+		i = pci_enable_msi(dev->pdev);
+
+		if (!i) {
+			dev->msi_enabled = 1;
+			dev->msi = 1;
+		} else {
+			printk(KERN_ERR "%s%d: MSI not supported!! Will try INTx 0x%x.\n",
+					dev->name, dev->id, i);
 		}
 	}
 

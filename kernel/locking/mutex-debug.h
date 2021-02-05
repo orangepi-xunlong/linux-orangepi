@@ -29,12 +29,12 @@ extern void debug_mutex_init(struct mutex *lock, const char *name,
 
 static inline void mutex_set_owner(struct mutex *lock)
 {
-	WRITE_ONCE(lock->owner, current);
+	lock->owner = current;
 }
 
 static inline void mutex_clear_owner(struct mutex *lock)
 {
-	WRITE_ONCE(lock->owner, NULL);
+	lock->owner = NULL;
 }
 
 #define spin_lock_mutex(lock, flags)			\

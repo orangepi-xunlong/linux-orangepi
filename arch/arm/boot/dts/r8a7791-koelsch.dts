@@ -54,7 +54,7 @@
 
 	chosen {
 		bootargs = "ignore_loglevel rw root=/dev/nfs ip=dhcp";
-		stdout-path = "serial0:115200n8";
+		stdout-path = &scif0;
 	};
 
 	memory@40000000 {
@@ -79,77 +79,77 @@
 			gpios = <&gpio5 0 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_1>;
 			label = "SW2-1";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-2 {
 			gpios = <&gpio5 1 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_2>;
 			label = "SW2-2";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-3 {
 			gpios = <&gpio5 2 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_3>;
 			label = "SW2-3";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-4 {
 			gpios = <&gpio5 3 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_4>;
 			label = "SW2-4";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-a {
 			gpios = <&gpio7 0 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_A>;
 			label = "SW30";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-b {
 			gpios = <&gpio7 1 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_B>;
 			label = "SW31";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-c {
 			gpios = <&gpio7 2 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_C>;
 			label = "SW32";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-d {
 			gpios = <&gpio7 3 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_D>;
 			label = "SW33";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-e {
 			gpios = <&gpio7 4 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_E>;
 			label = "SW34";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-f {
 			gpios = <&gpio7 5 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_F>;
 			label = "SW35";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 		key-g {
 			gpios = <&gpio7 6 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_G>;
 			label = "SW36";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 		};
 	};
@@ -170,7 +170,7 @@
 		};
 	};
 
-	vcc_sdhi0: regulator-vcc-sdhi0 {
+	vcc_sdhi0: regulator@0 {
 		compatible = "regulator-fixed";
 
 		regulator-name = "SDHI0 Vcc";
@@ -181,7 +181,7 @@
 		enable-active-high;
 	};
 
-	vccq_sdhi0: regulator-vccq-sdhi0 {
+	vccq_sdhi0: regulator@1 {
 		compatible = "regulator-gpio";
 
 		regulator-name = "SDHI0 VccQ";
@@ -194,7 +194,7 @@
 			  1800000 0>;
 	};
 
-	vcc_sdhi1: regulator-vcc-sdhi1 {
+	vcc_sdhi1: regulator@2 {
 		compatible = "regulator-fixed";
 
 		regulator-name = "SDHI1 Vcc";
@@ -205,7 +205,7 @@
 		enable-active-high;
 	};
 
-	vccq_sdhi1: regulator-vccq-sdhi1 {
+	vccq_sdhi1: regulator@3 {
 		compatible = "regulator-gpio";
 
 		regulator-name = "SDHI1 VccQ";
@@ -218,7 +218,7 @@
 			  1800000 0>;
 	};
 
-	vcc_sdhi2: regulator-vcc-sdhi2 {
+	vcc_sdhi2: regulator@4 {
 		compatible = "regulator-fixed";
 
 		regulator-name = "SDHI2 Vcc";
@@ -229,7 +229,7 @@
 		enable-active-high;
 	};
 
-	vccq_sdhi2: regulator-vccq-sdhi2 {
+	vccq_sdhi2: regulator@5 {
 		compatible = "regulator-gpio";
 
 		regulator-name = "SDHI2 VccQ";
@@ -242,10 +242,11 @@
 			  1800000 0>;
 	};
 
-	audio_clock: audio_clock {
+	audio_clock: clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <11289600>;
+		clock-output-names = "audio_clock";
 	};
 
 	rsnd_ak4643: sound {
@@ -319,93 +320,85 @@
 };
 
 &pfc {
-	pinctrl-0 = <&scif_clk_pins>;
-	pinctrl-names = "default";
-
 	i2c2_pins: i2c2 {
-		groups = "i2c2";
-		function = "i2c2";
+		renesas,groups = "i2c2";
+		renesas,function = "i2c2";
 	};
 
 	du_pins: du {
-		groups = "du_rgb888", "du_sync", "du_disp", "du_clk_out_0";
-		function = "du";
+		renesas,groups = "du_rgb666", "du_sync", "du_disp", "du_clk_out_0";
+		renesas,function = "du";
 	};
 
-	scif0_pins: scif0 {
-		groups = "scif0_data_d";
-		function = "scif0";
+	scif0_pins: serial0 {
+		renesas,groups = "scif0_data_d";
+		renesas,function = "scif0";
 	};
 
-	scif1_pins: scif1 {
-		groups = "scif1_data_d";
-		function = "scif1";
-	};
-
-	scif_clk_pins: scif_clk {
-		groups = "scif_clk";
-		function = "scif_clk";
+	scif1_pins: serial1 {
+		renesas,groups = "scif1_data_d";
+		renesas,function = "scif1";
 	};
 
 	ether_pins: ether {
-		groups = "eth_link", "eth_mdio", "eth_rmii";
-		function = "eth";
+		renesas,groups = "eth_link", "eth_mdio", "eth_rmii";
+		renesas,function = "eth";
 	};
 
 	phy1_pins: phy1 {
-		groups = "intc_irq0";
-		function = "intc";
+		renesas,groups = "intc_irq0";
+		renesas,function = "intc";
 	};
 
 	sdhi0_pins: sd0 {
-		groups = "sdhi0_data4", "sdhi0_ctrl";
-		function = "sdhi0";
+		renesas,groups = "sdhi0_data4", "sdhi0_ctrl";
+		renesas,function = "sdhi0";
 	};
 
 	sdhi1_pins: sd1 {
-		groups = "sdhi1_data4", "sdhi1_ctrl";
-		function = "sdhi1";
+		renesas,groups = "sdhi1_data4", "sdhi1_ctrl";
+		renesas,function = "sdhi1";
 	};
 
 	sdhi2_pins: sd2 {
-		groups = "sdhi2_data4", "sdhi2_ctrl";
-		function = "sdhi2";
+		renesas,groups = "sdhi2_data4", "sdhi2_ctrl";
+		renesas,function = "sdhi2";
 	};
 
-	qspi_pins: qspi {
-		groups = "qspi_ctrl", "qspi_data4";
-		function = "qspi";
+	qspi_pins: spi0 {
+		renesas,groups = "qspi_ctrl", "qspi_data4";
+		renesas,function = "qspi";
 	};
 
-	msiof0_pins: msiof0 {
-		groups = "msiof0_clk", "msiof0_sync", "msiof0_rx",
+	msiof0_pins: spi1 {
+		renesas,groups = "msiof0_clk", "msiof0_sync", "msiof0_rx",
 				 "msiof0_tx";
-		function = "msiof0";
+		renesas,function = "msiof0";
 	};
 
 	usb0_pins: usb0 {
-		groups = "usb0";
-		function = "usb0";
+		renesas,groups = "usb0";
+		renesas,function = "usb0";
 	};
 
 	usb1_pins: usb1 {
-		groups = "usb1";
-		function = "usb1";
+		renesas,groups = "usb1";
+		renesas,function = "usb1";
 	};
 
 	vin1_pins: vin1 {
-		groups = "vin1_data8", "vin1_clk";
-		function = "vin1";
+		renesas,groups = "vin1_data8", "vin1_clk";
+		renesas,function = "vin1";
 	};
 
 	sound_pins: sound {
-		groups = "ssi0129_ctrl", "ssi0_data", "ssi1_data";
-		function = "ssi";
+		renesas,groups = "ssi0129_ctrl", "ssi0_data", "ssi1_data";
+		renesas,function = "ssi";
 	};
 
 	sound_clk_pins: sound_clk {
-		groups = "audio_clk_a";
-		function = "audio_clk";
+		renesas,groups = "audio_clk_a";
+		renesas,function = "audio_clk";
 	};
 };
 
@@ -444,11 +437,6 @@
 	pinctrl-0 = <&scif1_pins>;
 	pinctrl-names = "default";
 
-	status = "okay";
-};
-
-&scif_clk {
-	clock-frequency = <14745600>;
 	status = "okay";
 };
 
@@ -491,6 +479,8 @@
 	status = "okay";
 
 	flash: flash@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
 		compatible = "spansion,s25fl512s", "jedec,spi-nor";
 		reg = <0>;
 		spi-max-frequency = <30000000>;
@@ -500,25 +490,19 @@
 		spi-cpol;
 		m25p,fast-read;
 
-		partitions {
-			compatible = "fixed-partitions";
-			#address-cells = <1>;
-			#size-cells = <1>;
-
-			partition@0 {
-				label = "loader";
-				reg = <0x00000000 0x00080000>;
-				read-only;
-			};
-			partition@80000 {
-				label = "user";
-				reg = <0x00080000 0x00580000>;
-				read-only;
-			};
-			partition@600000 {
-				label = "flash";
-				reg = <0x00600000 0x03a00000>;
-			};
+		partition@0 {
+			label = "loader";
+			reg = <0x00000000 0x00080000>;
+			read-only;
+		};
+		partition@80000 {
+			label = "user";
+			reg = <0x00080000 0x00580000>;
+			read-only;
+		};
+		partition@600000 {
+			label = "flash";
+			reg = <0x00600000 0x03a00000>;
 		};
 	};
 };
@@ -660,7 +644,6 @@
 };
 
 &pcie_bus_clk {
-	clock-frequency = <100000000>;
 	status = "okay";
 };
 

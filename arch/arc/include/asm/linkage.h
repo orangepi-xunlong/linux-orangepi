@@ -9,8 +9,6 @@
 #ifndef __ASM_LINKAGE_H
 #define __ASM_LINKAGE_H
 
-#include <asm/dwarf.h>
-
 #ifdef __ASSEMBLY__
 
 #define ASM_NL		 `	/* use '`' to mark new line in macro */
@@ -33,16 +31,6 @@
 	.section .text, "ax",@progbits
 #endif
 .endm
-
-#define ENTRY_CFI(name)		\
-	.globl name ASM_NL	\
-	ALIGN ASM_NL 		\
-	name: ASM_NL		\
-	CFI_STARTPROC ASM_NL
-
-#define END_CFI(name) 		\
-	CFI_ENDPROC ASM_NL	\
-	.size name, .-name
 
 #else	/* !__ASSEMBLY__ */
 

@@ -31,8 +31,6 @@
 #define dmb(opt)	asm volatile("dmb " #opt : : : "memory")
 #define dsb(opt)	asm volatile("dsb " #opt : : : "memory")
 
-#define csdb()		asm volatile("hint #20" : : : "memory")
-
 #define mb()		dsb(sy)
 #define rmb()		dsb(ld)
 #define wmb()		dsb(st)
@@ -40,32 +38,11 @@
 #define dma_rmb()	dmb(oshld)
 #define dma_wmb()	dmb(oshst)
 
-/*
- * Generate a mask for array_index__nospec() that is ~0UL when 0 <= idx < sz
- * and 0 otherwise.
- */
-#define array_index_mask_nospec array_index_mask_nospec
-static inline unsigned long array_index_mask_nospec(unsigned long idx,
-						    unsigned long sz)
-{
-	unsigned long mask;
+#define smp_mb()	dmb(ish)
+#define smp_rmb()	dmb(ishld)
+#define smp_wmb()	dmb(ishst)
 
-	asm volatile(
-	"	cmp	%1, %2\n"
-	"	sbc	%0, xzr, xzr\n"
-	: "=r" (mask)
-	: "r" (idx), "Ir" (sz)
-	: "cc");
-
-	csdb();
-	return mask;
-}
-
-#define __smp_mb()	dmb(ish)
-#define __smp_rmb()	dmb(ishld)
-#define __smp_wmb()	dmb(ishst)
-
-#define __smp_store_release(p, v)					\
+#define smp_store_release(p, v)						\
 do {									\
 	union { typeof(*p) __val; char __c[1]; } __u =			\
 		{ .__val = (__force typeof(*p)) (v) }; 			\
@@ -98,7 +75,7 @@ do {									\
 	}								\
 } while (0)
 
-#define __smp_load_acquire(p)						\
+#define smp_load_acquire(p)						\
 ({									\
 	union { typeof(*p) __val; char __c[1]; } __u;			\
 	compiletime_assert_atomic_type(*p);				\
@@ -127,20 +104,14 @@ do {									\
 	__u.__val;							\
 })
 
-#define smp_cond_load_acquire(ptr, cond_expr)				\
-({									\
-	typeof(ptr) __PTR = (ptr);					\
-	typeof(*ptr) VAL;						\
-	for (;;) {							\
-		VAL = smp_load_acquire(__PTR);				\
-		if (cond_expr)						\
-			break;						\
-		__cmpwait_relaxed(__PTR, VAL);				\
-	}								\
-	VAL;								\
-})
+#define read_barrier_depends()		do { } while(0)
+#define smp_read_barrier_depends()	do { } while(0)
 
-#include <asm-generic/barrier.h>
+#define smp_store_mb(var, value)	do { WRITE_ONCE(var, value); smp_mb(); } while (0)
+#define nop()		asm volatile("nop");
+
+#define smp_mb__before_atomic()	smp_mb()
+#define smp_mb__after_atomic()	smp_mb()
 
 #endif	/* __ASSEMBLY__ */
 

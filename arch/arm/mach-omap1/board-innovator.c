@@ -32,7 +32,7 @@
 #include <asm/mach/map.h>
 
 #include <mach/mux.h>
-#include "flash.h"
+#include <mach/flash.h>
 #include <mach/tc.h>
 #include <linux/platform_data/keypad-omap.h>
 
@@ -315,7 +315,7 @@ static struct omap_usb_config h2_usb_config __initdata = {
 #if IS_ENABLED(CONFIG_USB_OMAP)
 	.hmc_mode	= 19,	/* 0:host(off) 1:dev|otg 2:disabled */
 	/* .hmc_mode	= 21,*/	/* 0:host(off) 1:dev(loopback) 2:host(loopback) */
-#elif	IS_ENABLED(CONFIG_USB_OHCI_HCD)
+#elif	defined(CONFIG_USB_OHCI_HCD) || defined(CONFIG_USB_OHCI_HCD_MODULE)
 	/* NONSTANDARD CABLE NEEDED (B-to-Mini-B) */
 	.hmc_mode	= 20,	/* 1:dev|otg(off) 1:host 2:disabled */
 #endif
@@ -328,7 +328,7 @@ static struct omap_lcd_config innovator1610_lcd_config __initdata = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_MMC_OMAP)
+#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
 
 static int mmc_set_power(struct device *dev, int slot, int power_on,
 				int vdd)

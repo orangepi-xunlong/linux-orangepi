@@ -21,7 +21,7 @@
  */
 #ifndef __NOUVEAU_PLATFORM_H__
 #define __NOUVEAU_PLATFORM_H__
-#include "nouveau_drv.h"
+#include "nouveau_drm.h"
 
 extern struct platform_driver nouveau_platform_driver;
 #endif

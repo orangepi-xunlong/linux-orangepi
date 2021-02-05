@@ -2,7 +2,6 @@
 #define _LINUX_NETFILTER_XT_RECENT_H 1
 
 #include <linux/types.h>
-#include <linux/netfilter.h>
 
 enum {
 	XT_RECENT_CHECK    = 1 << 0,

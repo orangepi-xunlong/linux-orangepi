@@ -153,7 +153,7 @@
 
 struct ti_tscadc_dev {
 	struct device *dev;
-	struct regmap *regmap;
+	struct regmap *regmap_tscadc;
 	void __iomem *tscadc_base;
 	int irq;
 	int used_cells;	/* 1-2 */

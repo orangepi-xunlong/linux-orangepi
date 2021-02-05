@@ -570,15 +570,11 @@ static void retry_timeout(unsigned long data)
 }
 
 
-static void ssif_alert(struct i2c_client *client, enum i2c_alert_protocol type,
-		       unsigned int data)
+static void ssif_alert(struct i2c_client *client, unsigned int data)
 {
 	struct ssif_info *ssif_info = i2c_get_clientdata(client);
 	unsigned long oflags, *flags;
 	bool do_get = false;
-
-	if (type != I2C_PROTOCOL_SMBUS_ALERT)
-		return;
 
 	ssif_inc_stat(ssif_info, alerts);
 
@@ -943,18 +939,23 @@ static void msg_written_handler(struct ssif_info *ssif_info, int result,
 			msg_done_handler(ssif_info, -EIO, NULL, 0);
 		}
 	} else {
-		/* Ready to request the result. */
 		unsigned long oflags, *flags;
+		bool got_alert;
 
 		ssif_inc_stat(ssif_info, sent_messages);
 		ssif_inc_stat(ssif_info, sent_messages_parts);
 
 		flags = ipmi_ssif_lock_cond(ssif_info, &oflags);
-		if (ssif_info->got_alert) {
-			/* The result is already ready, just start it. */
+		got_alert = ssif_info->got_alert;
+		if (got_alert) {
 			ssif_info->got_alert = false;
+			ssif_info->waiting_alert = false;
+		}
+
+		if (got_alert) {
 			ipmi_ssif_unlock_cond(ssif_info, flags);
-			start_get(ssif_info);
+			/* The alert already happened, try now. */
+			retry_timeout((unsigned long) ssif_info);
 		} else {
 			/* Wait a jiffie then request the next message */
 			ssif_info->waiting_alert = true;
@@ -1894,7 +1895,7 @@ static int try_init_spmi(struct SPMITable *spmi)
 		return -EIO;
 	}
 
-	myaddr = spmi->addr.address & 0x7f;
+	myaddr = spmi->addr.address >> 1;
 
 	return new_ssif_client(myaddr, NULL, 0, 0, SI_SPMI);
 }
@@ -1978,6 +1979,7 @@ MODULE_DEVICE_TABLE(i2c, ssif_id);
 static struct i2c_driver ssif_i2c_driver = {
 	.class		= I2C_CLASS_HWMON,
 	.driver		= {
+		.owner			= THIS_MODULE,
 		.name			= DEVICE_NAME
 	},
 	.probe		= ssif_probe,

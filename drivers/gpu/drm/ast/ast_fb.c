@@ -33,6 +33,7 @@
 #include <linux/tty.h>
 #include <linux/sysrq.h>
 #include <linux/delay.h>
+#include <linux/fb.h>
 #include <linux/init.h>
 
 
@@ -162,13 +163,16 @@ static struct fb_ops astfb_ops = {
 };
 
 static int astfb_create_object(struct ast_fbdev *afbdev,
-			       const struct drm_mode_fb_cmd2 *mode_cmd,
+			       struct drm_mode_fb_cmd2 *mode_cmd,
 			       struct drm_gem_object **gobj_p)
 {
 	struct drm_device *dev = afbdev->helper.dev;
+	u32 bpp, depth;
 	u32 size;
 	struct drm_gem_object *gobj;
+
 	int ret = 0;
+	drm_fb_get_bpp_depth(mode_cmd->pixel_format, &depth, &bpp);
 
 	size = mode_cmd->pitches[0] * mode_cmd->height;
 	ret = ast_gem_create(dev, size, true, &gobj);
@@ -286,7 +290,6 @@ static void ast_fbdev_destroy(struct drm_device *dev,
 {
 	struct ast_framebuffer *afb = &afbdev->afb;
 
-	drm_crtc_force_disable_all(dev);
 	drm_fb_helper_unregister_fbi(&afbdev->helper);
 	drm_fb_helper_release_fbi(&afbdev->helper);
 

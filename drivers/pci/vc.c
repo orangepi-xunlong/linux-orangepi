@@ -221,9 +221,9 @@ static int pci_vc_do_save_buffer(struct pci_dev *dev, int pos,
 		else
 			pci_write_config_word(dev, pos + PCI_VC_PORT_CTRL,
 					      *(u16 *)buf);
-		buf += 4;
+		buf += 2;
 	}
-	len += 4;
+	len += 2;
 
 	/*
 	 * If we have any Low Priority VCs and a VC Arbitration Table Offset

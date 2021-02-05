@@ -40,18 +40,15 @@ struct pwm_fan_ctx {
 
 static int  __set_pwm(struct pwm_fan_ctx *ctx, unsigned long pwm)
 {
-	struct pwm_args pargs;
 	unsigned long duty;
 	int ret = 0;
-
-	pwm_get_args(ctx->pwm, &pargs);
 
 	mutex_lock(&ctx->lock);
 	if (ctx->pwm_value == pwm)
 		goto exit_set_pwm_err;
 
-	duty = DIV_ROUND_UP(pwm * (pargs.period - 1), MAX_PWM);
-	ret = pwm_config(ctx->pwm, duty, pargs.period);
+	duty = DIV_ROUND_UP(pwm * (ctx->pwm->period - 1), MAX_PWM);
+	ret = pwm_config(ctx->pwm, duty, ctx->pwm->period);
 	if (ret)
 		goto exit_set_pwm_err;
 
@@ -218,7 +215,6 @@ static int pwm_fan_probe(struct platform_device *pdev)
 {
 	struct thermal_cooling_device *cdev;
 	struct pwm_fan_ctx *ctx;
-	struct pwm_args pargs;
 	struct device *hwmon;
 	int duty_cycle;
 	int ret;
@@ -237,19 +233,11 @@ static int pwm_fan_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, ctx);
 
-	/*
-	 * FIXME: pwm_apply_args() should be removed when switching to the
-	 * atomic PWM API.
-	 */
-	pwm_apply_args(ctx->pwm);
-
 	/* Set duty cycle to maximum allowed */
-	pwm_get_args(ctx->pwm, &pargs);
-
-	duty_cycle = pargs.period - 1;
+	duty_cycle = ctx->pwm->period - 1;
 	ctx->pwm_value = MAX_PWM;
 
-	ret = pwm_config(ctx->pwm, duty_cycle, pargs.period);
+	ret = pwm_config(ctx->pwm, duty_cycle, ctx->pwm->period);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to configure PWM\n");
 		return ret;
@@ -306,35 +294,23 @@ static int pwm_fan_remove(struct platform_device *pdev)
 static int pwm_fan_suspend(struct device *dev)
 {
 	struct pwm_fan_ctx *ctx = dev_get_drvdata(dev);
-	struct pwm_args args;
-	int ret;
 
-	pwm_get_args(ctx->pwm, &args);
-
-	if (ctx->pwm_value) {
-		ret = pwm_config(ctx->pwm, 0, args.period);
-		if (ret < 0)
-			return ret;
-
+	if (ctx->pwm_value)
 		pwm_disable(ctx->pwm);
-	}
-
 	return 0;
 }
 
 static int pwm_fan_resume(struct device *dev)
 {
 	struct pwm_fan_ctx *ctx = dev_get_drvdata(dev);
-	struct pwm_args pargs;
 	unsigned long duty;
 	int ret;
 
 	if (ctx->pwm_value == 0)
 		return 0;
 
-	pwm_get_args(ctx->pwm, &pargs);
-	duty = DIV_ROUND_UP(ctx->pwm_value * (pargs.period - 1), MAX_PWM);
-	ret = pwm_config(ctx->pwm, duty, pargs.period);
+	duty = DIV_ROUND_UP(ctx->pwm_value * (ctx->pwm->period - 1), MAX_PWM);
+	ret = pwm_config(ctx->pwm, duty, ctx->pwm->period);
 	if (ret)
 		return ret;
 	return pwm_enable(ctx->pwm);

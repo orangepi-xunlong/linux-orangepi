@@ -375,11 +375,11 @@ int acpi_processor_tstate_has_changed(struct acpi_processor *pr)
  *	3. TSD domain
  */
 void acpi_processor_reevaluate_tstate(struct acpi_processor *pr,
-					bool is_dead)
+					unsigned long action)
 {
 	int result = 0;
 
-	if (is_dead) {
+	if (action == CPU_DEAD) {
 		/* When one CPU is offline, the T-state throttling
 		 * will be invalidated.
 		 */

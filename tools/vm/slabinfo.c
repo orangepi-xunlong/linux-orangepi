@@ -135,7 +135,7 @@ static void usage(void)
 		"\nValid debug options (FZPUT may be combined)\n"
 		"a / A          Switch on all debug options (=FZUP)\n"
 		"-              Switch off all debug options\n"
-		"f / F          Sanity Checks (SLAB_CONSISTENCY_CHECKS)\n"
+		"f / F          Sanity Checks (SLAB_DEBUG_FREE)\n"
 		"z / Z          Redzoning\n"
 		"p / P          Poisoning\n"
 		"u / U          Tracking\n"
@@ -492,7 +492,7 @@ static void slab_stats(struct slabinfo *s)
 			s->deactivate_to_head + s->deactivate_to_tail + s->deactivate_bypass;
 
 	if (total) {
-		printf("\nSlab Deactivation             Occurrences %%\n");
+		printf("\nSlab Deactivation             Ocurrences  %%\n");
 		printf("-------------------------------------------------\n");
 		printf("Slab full                     %7lu  %3lu%%\n",
 			s->deactivate_full, (s->deactivate_full * 100) / total);

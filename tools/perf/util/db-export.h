@@ -27,7 +27,6 @@ struct dso;
 struct perf_sample;
 struct addr_location;
 struct call_return_processor;
-struct call_path_root;
 struct call_path;
 struct call_return;
 
@@ -44,7 +43,6 @@ struct export_sample {
 	u64			addr_dso_db_id;
 	u64			addr_sym_db_id;
 	u64			addr_offset; /* addr offset from symbol start */
-	u64			call_path_id;
 };
 
 struct db_export {
@@ -66,7 +64,6 @@ struct db_export {
 	int (*export_call_return)(struct db_export *dbe,
 				  struct call_return *cr);
 	struct call_return_processor *crp;
-	struct call_path_root *cpr;
 	u64 evsel_last_db_id;
 	u64 machine_last_db_id;
 	u64 thread_last_db_id;

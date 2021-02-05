@@ -16,7 +16,6 @@
 #include <linux/uaccess.h>
 #include <linux/elf.h>
 
-#include <asm/compat.h>
 #include <asm/ia32.h>
 #include <asm/syscalls.h>
 
@@ -101,7 +100,8 @@ out:
 static void find_start_end(unsigned long flags, unsigned long *begin,
 			   unsigned long *end)
 {
-	if (!in_compat_syscall() && (flags & MAP_32BIT)) {
+	if (!test_thread_flag(TIF_ADDR32) && (flags & MAP_32BIT)) {
+		unsigned long new_begin;
 		/* This is usually used needed to map code in small
 		   model, so it needs to be in the first 31bit. Limit
 		   it to that.  This means we need to move the
@@ -112,7 +112,9 @@ static void find_start_end(unsigned long flags, unsigned long *begin,
 		*begin = 0x40000000;
 		*end = 0x80000000;
 		if (current->flags & PF_RANDOMIZE) {
-			*begin = randomize_page(*begin, 0x02000000);
+			new_begin = randomize_range(*begin, *begin + 0x02000000, 0);
+			if (new_begin)
+				*begin = new_begin;
 		}
 	} else {
 		*begin = current->mm->mmap_legacy_base;
@@ -176,7 +178,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 		return addr;
 
 	/* for MAP_32BIT mappings we force the legacy mmap base */
-	if (!in_compat_syscall() && (flags & MAP_32BIT))
+	if (!test_thread_flag(TIF_ADDR32) && (flags & MAP_32BIT))
 		goto bottomup;
 
 	/* requesting a specific address */

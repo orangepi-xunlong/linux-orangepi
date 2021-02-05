@@ -88,6 +88,7 @@
 #define   _POSIX_VDISABLE '\0'
 #endif
 
+
 /*
  * All the possible states the driver can be while being loaded.
  */
@@ -104,6 +105,7 @@ enum {
 	BOARD_FOUND,
 	BOARD_READY
 };
+
 
 /*************************************************************************
  *
@@ -142,6 +144,7 @@ struct board_ops {
  * Device flag definitions for bd_flags.
  ************************************************************************/
 #define BD_IS_PCI_EXPRESS     0x0001	  /* Is a PCI Express board */
+
 
 /*
  *	Per-board information
@@ -183,6 +186,10 @@ struct dgnc_board {
 	uint		nasync;		/* Number of ports on card */
 
 	uint		irq;		/* Interrupt request number */
+	ulong		intr_count;	/* Count of interrupts */
+	ulong		intr_modem;	/* Count of interrupts */
+	ulong		intr_tx;	/* Count of interrupts */
+	ulong		intr_rx;	/* Count of interrupts */
 
 	ulong		membase;	/* Start of base memory of the card */
 	ulong		membase_end;	/* End of base memory of the card */
@@ -198,10 +205,18 @@ struct dgnc_board {
 						 * to our channels.
 						 */
 
-	struct tty_driver *serial_driver;
-	char		serial_name[200];
-	struct tty_driver *print_driver;
-	char		print_name[200];
+	struct tty_driver	SerialDriver;
+	char		SerialName[200];
+	struct tty_driver	PrintDriver;
+	char		PrintName[200];
+
+	bool		dgnc_Major_Serial_Registered;
+	bool		dgnc_Major_TransparentPrint_Registered;
+
+	uint		dgnc_Serial_Major;
+	uint		dgnc_TransparentPrint_Major;
+
+	uint		TtyRefCnt;
 
 	u16		dpatype;	/* The board "type",
 					 * as defined by DPA
@@ -209,6 +224,12 @@ struct dgnc_board {
 	u16		dpastatus;	/* The board "status",
 					 * as defined by DPA
 					 */
+
+	/*
+	 *	Mgmt data.
+	 */
+	char		*msgbuf_head;
+	char		*msgbuf;
 
 	uint		bd_dividend;	/* Board/UARTs specific dividend */
 
@@ -219,6 +240,7 @@ struct dgnc_board {
 	struct dgnc_proc_entry *dgnc_board_table;
 
 };
+
 
 /************************************************************************
  * Unit flag definitions for un_flags.
@@ -255,6 +277,7 @@ struct un_t {
 	struct device *un_sysfs;
 };
 
+
 /************************************************************************
  * Device flag definitions for ch_flags.
  ************************************************************************/
@@ -277,6 +300,7 @@ struct un_t {
 #define CH_FORCED_STOP  0x20000		/* Output is forcibly stopped	*/
 #define CH_FORCED_STOPI 0x40000		/* Input is forcibly stopped	*/
 
+
 /* Our Read/Error/Write queue sizes */
 #define RQUEUEMASK	0x1FFF		/* 8 K - 1 */
 #define EQUEUEMASK	0x1FFF		/* 8 K - 1 */
@@ -284,6 +308,7 @@ struct un_t {
 #define RQUEUESIZE	(RQUEUEMASK + 1)
 #define EQUEUESIZE	RQUEUESIZE
 #define WQUEUESIZE	(WQUEUEMASK + 1)
+
 
 /************************************************************************
  * Channel information structure.
@@ -368,6 +393,11 @@ struct channel_t {
 	ulong		ch_xon_sends;	/* Count of xons transmitted */
 	ulong		ch_xoff_sends;	/* Count of xoffs transmitted */
 
+	ulong		ch_intr_modem;	/* Count of interrupts */
+	ulong		ch_intr_tx;	/* Count of interrupts */
+	ulong		ch_intr_rx;	/* Count of interrupts */
+
+
 	/* /proc/<board>/<channel> entries */
 	struct proc_dir_entry *proc_entry_pointer;
 	struct dgnc_proc_entry *dgnc_channel_table;
@@ -377,12 +407,12 @@ struct channel_t {
 /*
  * Our Global Variables.
  */
-extern uint		dgnc_major;		/* Our driver/mgmt major */
+extern uint		dgnc_Major;		/* Our driver/mgmt major */
 extern int		dgnc_poll_tick;		/* Poll interval - 20 ms */
 extern spinlock_t	dgnc_global_lock;	/* Driver global spinlock */
 extern spinlock_t	dgnc_poll_lock;		/* Poll scheduling lock */
-extern uint		dgnc_num_boards;	/* Total number of boards */
-extern struct dgnc_board	*dgnc_board[MAXBOARDS];	/* Array of board
+extern uint		dgnc_NumBoards;		/* Total number of boards */
+extern struct dgnc_board	*dgnc_Board[MAXBOARDS];	/* Array of board
 							 * structs
 							 */
 

@@ -28,6 +28,16 @@
 		stdout-path = &uart0;
 	};
 
+	mbus {
+		pcie-controller {
+			status = "okay";
+
+			pcie@1,0 {
+				status = "okay";
+			};
+		};
+	};
+
 	ocp@f1000000 {
 		rtc@10300 {
 			/* The on-chip RTC is not powered (no supercap). */
@@ -130,12 +140,4 @@
 		label = "unused";
 		reg = <0x9100000 0x6f00000>;
 	};
-};
-
-&pciec {
-        status = "okay";
-};
-
-&pcie0 {
-	status = "okay";
 };

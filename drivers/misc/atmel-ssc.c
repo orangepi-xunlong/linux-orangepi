@@ -34,7 +34,6 @@ struct ssc_device *ssc_request(unsigned int ssc_num)
 		if (ssc->pdev->dev.of_node) {
 			if (of_alias_get_id(ssc->pdev->dev.of_node, "ssc")
 				== ssc_num) {
-				ssc->pdev->id = ssc_num;
 				ssc_valid = 1;
 				break;
 			}

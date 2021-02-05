@@ -606,10 +606,12 @@ static void xgene_dma_run_tx_complete_actions(struct xgene_dma_chan *chan,
 		return;
 
 	dma_cookie_complete(tx);
-	dma_descriptor_unmap(tx);
 
 	/* Run the link descriptor callback function */
-	dmaengine_desc_get_callback_invoke(tx, NULL);
+	if (tx->callback)
+		tx->callback(tx->callback_param);
+
+	dma_descriptor_unmap(tx);
 
 	/* Run any dependencies */
 	dma_run_dependencies(tx);

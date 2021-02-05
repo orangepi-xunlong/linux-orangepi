@@ -226,8 +226,7 @@ static void context_check_map(void)
 static void context_check_map(void) { }
 #endif
 
-void switch_mmu_context(struct mm_struct *prev, struct mm_struct *next,
-			struct task_struct *tsk)
+void switch_mmu_context(struct mm_struct *prev, struct mm_struct *next)
 {
 	unsigned int i, id, cpu = smp_processor_id();
 	unsigned long *map;
@@ -335,7 +334,8 @@ int init_new_context(struct task_struct *t, struct mm_struct *mm)
 	mm->context.active = 0;
 
 #ifdef CONFIG_PPC_MM_SLICES
-	slice_set_user_psize(mm, mmu_virtual_psize);
+	if (slice_mm_new_context(mm))
+		slice_set_user_psize(mm, mmu_virtual_psize);
 #endif
 
 	return 0;
@@ -369,34 +369,44 @@ void destroy_context(struct mm_struct *mm)
 }
 
 #ifdef CONFIG_SMP
-static int mmu_ctx_cpu_prepare(unsigned int cpu)
+
+static int mmu_context_cpu_notify(struct notifier_block *self,
+				  unsigned long action, void *hcpu)
 {
+	unsigned int cpu = (unsigned int)(long)hcpu;
+
 	/* We don't touch CPU 0 map, it's allocated at aboot and kept
 	 * around forever
 	 */
 	if (cpu == boot_cpuid)
-		return 0;
+		return NOTIFY_OK;
 
-	pr_devel("MMU: Allocating stale context map for CPU %d\n", cpu);
-	stale_map[cpu] = kzalloc(CTX_MAP_SIZE, GFP_KERNEL);
-	return 0;
-}
-
-static int mmu_ctx_cpu_dead(unsigned int cpu)
-{
+	switch (action) {
+	case CPU_UP_PREPARE:
+	case CPU_UP_PREPARE_FROZEN:
+		pr_devel("MMU: Allocating stale context map for CPU %d\n", cpu);
+		stale_map[cpu] = kzalloc(CTX_MAP_SIZE, GFP_KERNEL);
+		break;
 #ifdef CONFIG_HOTPLUG_CPU
-	if (cpu == boot_cpuid)
-		return 0;
+	case CPU_UP_CANCELED:
+	case CPU_UP_CANCELED_FROZEN:
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
+		pr_devel("MMU: Freeing stale context map for CPU %d\n", cpu);
+		kfree(stale_map[cpu]);
+		stale_map[cpu] = NULL;
 
-	pr_devel("MMU: Freeing stale context map for CPU %d\n", cpu);
-	kfree(stale_map[cpu]);
-	stale_map[cpu] = NULL;
-
-	/* We also clear the cpu_vm_mask bits of CPUs going away */
-	clear_tasks_mm_cpumask(cpu);
-#endif
-	return 0;
+		/* We also clear the cpu_vm_mask bits of CPUs going away */
+		clear_tasks_mm_cpumask(cpu);
+	break;
+#endif /* CONFIG_HOTPLUG_CPU */
+	}
+	return NOTIFY_OK;
 }
+
+static struct notifier_block mmu_context_cpu_nb = {
+	.notifier_call	= mmu_context_cpu_notify,
+};
 
 #endif /* CONFIG_SMP */
 
@@ -459,9 +469,7 @@ void __init mmu_context_init(void)
 #else
 	stale_map[boot_cpuid] = memblock_virt_alloc(CTX_MAP_SIZE, 0);
 
-	cpuhp_setup_state_nocalls(CPUHP_POWERPC_MMU_CTX_PREPARE,
-				  "powerpc/mmu/ctx:prepare",
-				  mmu_ctx_cpu_prepare, mmu_ctx_cpu_dead);
+	register_cpu_notifier(&mmu_context_cpu_nb);
 #endif
 
 	printk(KERN_INFO

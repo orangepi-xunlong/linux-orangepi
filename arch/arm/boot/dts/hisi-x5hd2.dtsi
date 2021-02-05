@@ -34,7 +34,7 @@
 		amba {
 			#address-cells = <1>;
 			#size-cells = <1>;
-			compatible = "simple-bus";
+			compatible = "arm,amba-bus";
 			ranges;
 
 			timer0: timer@00002000 {

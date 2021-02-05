@@ -215,7 +215,7 @@ static int __init rbtx4939_led_probe(struct platform_device *pdev)
 	int i;
 	static char *default_triggers[] __initdata = {
 		"heartbeat",
-		"disk-activity",
+		"ide-disk",
 		"nand-disk",
 	};
 

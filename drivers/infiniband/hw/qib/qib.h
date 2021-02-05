@@ -52,8 +52,6 @@
 #include <linux/kref.h>
 #include <linux/sched.h>
 #include <linux/kthread.h>
-#include <rdma/ib_hdrs.h>
-#include <rdma/rdma_vt.h>
 
 #include "qib_common.h"
 #include "qib_verbs.h"
@@ -231,6 +229,9 @@ struct qib_ctxtdata {
 	u8 redirect_seq_cnt;
 	/* ctxt rcvhdrq head offset */
 	u32 head;
+	/* lookaside fields */
+	struct qib_qp *lookaside_qp;
+	u32 lookaside_qpn;
 	/* QPs waiting for context processing */
 	struct list_head qp_wait_list;
 #ifdef CONFIG_DEBUG_FS
@@ -239,7 +240,7 @@ struct qib_ctxtdata {
 #endif
 };
 
-struct rvt_sge_state;
+struct qib_sge_state;
 
 struct qib_sdma_txreq {
 	int                 flags;
@@ -257,14 +258,14 @@ struct qib_sdma_desc {
 
 struct qib_verbs_txreq {
 	struct qib_sdma_txreq   txreq;
-	struct rvt_qp           *qp;
-	struct rvt_swqe         *wqe;
+	struct qib_qp           *qp;
+	struct qib_swqe         *wqe;
 	u32                     dwords;
 	u16                     hdr_dwords;
 	u16                     hdr_inx;
 	struct qib_pio_header	*align_buf;
-	struct rvt_mregion	*mr;
-	struct rvt_sge_state    *ss;
+	struct qib_mregion	*mr;
+	struct qib_sge_state    *ss;
 };
 
 #define QIB_SDMA_TXREQ_F_USELARGEBUF  0x1
@@ -1095,6 +1096,8 @@ struct qib_devdata {
 	u16 psxmitwait_check_rate;
 	/* high volume overflow errors defered to tasklet */
 	struct tasklet_struct error_tasklet;
+	/* per device cq worker */
+	struct kthread_worker *worker;
 
 	int assigned_node_id; /* NUMA node closest to HCA */
 };
@@ -1132,8 +1135,8 @@ extern spinlock_t qib_devs_lock;
 extern struct qib_devdata *qib_lookup(int unit);
 extern u32 qib_cpulist_count;
 extern unsigned long *qib_cpulist;
-extern unsigned qib_cc_table_size;
 
+extern unsigned qib_cc_table_size;
 int qib_init(struct qib_devdata *, int);
 int init_chip_wc_pat(struct qib_devdata *dd, u32);
 int qib_enable_wc(struct qib_devdata *dd);
@@ -1250,7 +1253,6 @@ static inline struct qib_ibport *to_iport(struct ib_device *ibdev, u8 port)
 #define QIB_BADINTR           0x8000 /* severe interrupt problems */
 #define QIB_DCA_ENABLED       0x10000 /* Direct Cache Access enabled */
 #define QIB_HAS_QSFP          0x20000 /* device (card instance) has QSFP */
-#define QIB_SHUTDOWN          0x40000 /* device is shutting down */
 
 /*
  * values for ppd->lflags (_ib_port_ related flags)
@@ -1321,7 +1323,7 @@ void __qib_sdma_intr(struct qib_pportdata *);
 void qib_sdma_intr(struct qib_pportdata *);
 void qib_user_sdma_send_desc(struct qib_pportdata *dd,
 			struct list_head *pktlist);
-int qib_sdma_verbs_send(struct qib_pportdata *, struct rvt_sge_state *,
+int qib_sdma_verbs_send(struct qib_pportdata *, struct qib_sge_state *,
 			u32, struct qib_verbs_txreq *);
 /* ppd->sdma_lock should be locked before calling this. */
 int qib_sdma_make_progress(struct qib_pportdata *dd);
@@ -1451,8 +1453,6 @@ u64 qib_sps_ints(void);
  */
 int qib_map_page(struct pci_dev *d, struct page *p, dma_addr_t *daddr);
 const char *qib_get_unit_name(int unit);
-const char *qib_get_card_name(struct rvt_dev_info *rdi);
-struct pci_dev *qib_get_pci_dev(struct rvt_dev_info *rdi);
 
 /*
  * Flush write combining store buffers (if present) and perform a write
@@ -1539,14 +1539,4 @@ struct qib_hwerror_msgs {
 void qib_format_hwerrors(u64 hwerrs,
 			 const struct qib_hwerror_msgs *hwerrmsgs,
 			 size_t nhwerrmsgs, char *msg, size_t lmsg);
-
-void qib_stop_send_queue(struct rvt_qp *qp);
-void qib_quiesce_qp(struct rvt_qp *qp);
-void qib_flush_qp_waiters(struct rvt_qp *qp);
-int qib_mtu_to_path_mtu(u32 mtu);
-u32 qib_mtu_from_qp(struct rvt_dev_info *rdi, struct rvt_qp *qp, u32 pmtu);
-void qib_notify_error_qp(struct rvt_qp *qp);
-int qib_get_pmtu_from_attr(struct rvt_dev_info *rdi, struct rvt_qp *qp,
-			   struct ib_qp_attr *attr);
-
 #endif                          /* _QIB_KERNEL_H */

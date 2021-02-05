@@ -322,11 +322,10 @@ int btrfs_check_delayed_seq(struct btrfs_fs_info *fs_info,
 		elem = list_first_entry(&fs_info->tree_mod_seq_list,
 					struct seq_list, list);
 		if (seq >= elem->seq) {
-			btrfs_debug(fs_info,
-				"holding back delayed_ref %#x.%x, lowest is %#x.%x (%p)",
-				(u32)(seq >> 32), (u32)seq,
-				(u32)(elem->seq >> 32), (u32)elem->seq,
-				delayed_refs);
+			pr_debug("holding back delayed_ref %#x.%x, lowest is %#x.%x (%p)\n",
+				 (u32)(seq >> 32), (u32)seq,
+				 (u32)(elem->seq >> 32), (u32)elem->seq,
+				 delayed_refs);
 			ret = 1;
 		}
 	}
@@ -494,12 +493,12 @@ update_existing_head_ref(struct btrfs_delayed_ref_root *delayed_refs,
 				memcpy(&existing_ref->extent_op->key,
 				       &ref->extent_op->key,
 				       sizeof(ref->extent_op->key));
-				existing_ref->extent_op->update_key = true;
+				existing_ref->extent_op->update_key = 1;
 			}
 			if (ref->extent_op->update_flags) {
 				existing_ref->extent_op->flags_to_set |=
 					ref->extent_op->flags_to_set;
-				existing_ref->extent_op->update_flags = true;
+				existing_ref->extent_op->update_flags = 1;
 			}
 			btrfs_free_delayed_extent_op(ref->extent_op);
 		}
@@ -542,6 +541,7 @@ add_delayed_ref_head(struct btrfs_fs_info *fs_info,
 	struct btrfs_delayed_ref_head *existing;
 	struct btrfs_delayed_ref_head *head_ref = NULL;
 	struct btrfs_delayed_ref_root *delayed_refs;
+	struct btrfs_qgroup_extent_record *qexisting;
 	int count_mod = 1;
 	int must_insert_reserved = 0;
 
@@ -606,15 +606,16 @@ add_delayed_ref_head(struct btrfs_fs_info *fs_info,
 		qrecord->num_bytes = num_bytes;
 		qrecord->old_roots = NULL;
 
-		if(btrfs_qgroup_insert_dirty_extent_nolock(fs_info,
-					delayed_refs, qrecord))
+		qexisting = btrfs_qgroup_insert_dirty_extent(delayed_refs,
+							     qrecord);
+		if (qexisting)
 			kfree(qrecord);
 	}
 
 	spin_lock_init(&head_ref->lock);
 	mutex_init(&head_ref->mutex);
 
-	trace_add_delayed_ref_head(fs_info, ref, head_ref, action);
+	trace_add_delayed_ref_head(ref, head_ref, action);
 
 	existing = htree_insert(&delayed_refs->href_root,
 				&head_ref->href_node);
@@ -681,7 +682,7 @@ add_delayed_tree_ref(struct btrfs_fs_info *fs_info,
 		ref->type = BTRFS_TREE_BLOCK_REF_KEY;
 	full_ref->level = level;
 
-	trace_add_delayed_tree_ref(fs_info, ref, full_ref, action);
+	trace_add_delayed_tree_ref(ref, full_ref, action);
 
 	ret = add_delayed_ref_tail_merge(trans, delayed_refs, head_ref, ref);
 
@@ -738,7 +739,7 @@ add_delayed_data_ref(struct btrfs_fs_info *fs_info,
 	full_ref->objectid = owner;
 	full_ref->offset = offset;
 
-	trace_add_delayed_data_ref(fs_info, ref, full_ref, action);
+	trace_add_delayed_data_ref(ref, full_ref, action);
 
 	ret = add_delayed_ref_tail_merge(trans, delayed_refs, head_ref, ref);
 
@@ -771,8 +772,7 @@ int btrfs_add_delayed_tree_ref(struct btrfs_fs_info *fs_info,
 	if (!head_ref)
 		goto free_ref;
 
-	if (test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags) &&
-	    is_fstree(ref_root)) {
+	if (fs_info->quota_enabled && is_fstree(ref_root)) {
 		record = kmalloc(sizeof(*record), GFP_NOFS);
 		if (!record)
 			goto free_head_ref;
@@ -830,8 +830,7 @@ int btrfs_add_delayed_data_ref(struct btrfs_fs_info *fs_info,
 		return -ENOMEM;
 	}
 
-	if (test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags) &&
-	    is_fstree(ref_root)) {
+	if (fs_info->quota_enabled && is_fstree(ref_root)) {
 		record = kmalloc(sizeof(*record), GFP_NOFS);
 		if (!record) {
 			kmem_cache_free(btrfs_delayed_data_ref_cachep, ref);
@@ -860,6 +859,33 @@ int btrfs_add_delayed_data_ref(struct btrfs_fs_info *fs_info,
 	spin_unlock(&delayed_refs->lock);
 
 	return 0;
+}
+
+int btrfs_add_delayed_qgroup_reserve(struct btrfs_fs_info *fs_info,
+				     struct btrfs_trans_handle *trans,
+				     u64 ref_root, u64 bytenr, u64 num_bytes)
+{
+	struct btrfs_delayed_ref_root *delayed_refs;
+	struct btrfs_delayed_ref_head *ref_head;
+	int ret = 0;
+
+	if (!fs_info->quota_enabled || !is_fstree(ref_root))
+		return 0;
+
+	delayed_refs = &trans->transaction->delayed_refs;
+
+	spin_lock(&delayed_refs->lock);
+	ref_head = find_ref_head(&delayed_refs->href_root, bytenr, 0);
+	if (!ref_head) {
+		ret = -ENOENT;
+		goto out;
+	}
+	WARN_ON(ref_head->qgroup_reserved || ref_head->qgroup_ref_root);
+	ref_head->qgroup_ref_root = ref_root;
+	ref_head->qgroup_reserved = num_bytes;
+out:
+	spin_unlock(&delayed_refs->lock);
+	return ret;
 }
 
 int btrfs_add_delayed_extent_op(struct btrfs_fs_info *fs_info,
@@ -903,10 +929,14 @@ btrfs_find_delayed_ref_head(struct btrfs_trans_handle *trans, u64 bytenr)
 
 void btrfs_delayed_ref_exit(void)
 {
-	kmem_cache_destroy(btrfs_delayed_ref_head_cachep);
-	kmem_cache_destroy(btrfs_delayed_tree_ref_cachep);
-	kmem_cache_destroy(btrfs_delayed_data_ref_cachep);
-	kmem_cache_destroy(btrfs_delayed_extent_op_cachep);
+	if (btrfs_delayed_ref_head_cachep)
+		kmem_cache_destroy(btrfs_delayed_ref_head_cachep);
+	if (btrfs_delayed_tree_ref_cachep)
+		kmem_cache_destroy(btrfs_delayed_tree_ref_cachep);
+	if (btrfs_delayed_data_ref_cachep)
+		kmem_cache_destroy(btrfs_delayed_data_ref_cachep);
+	if (btrfs_delayed_extent_op_cachep)
+		kmem_cache_destroy(btrfs_delayed_extent_op_cachep);
 }
 
 int btrfs_delayed_ref_init(void)
@@ -914,28 +944,28 @@ int btrfs_delayed_ref_init(void)
 	btrfs_delayed_ref_head_cachep = kmem_cache_create(
 				"btrfs_delayed_ref_head",
 				sizeof(struct btrfs_delayed_ref_head), 0,
-				SLAB_MEM_SPREAD, NULL);
+				SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, NULL);
 	if (!btrfs_delayed_ref_head_cachep)
 		goto fail;
 
 	btrfs_delayed_tree_ref_cachep = kmem_cache_create(
 				"btrfs_delayed_tree_ref",
 				sizeof(struct btrfs_delayed_tree_ref), 0,
-				SLAB_MEM_SPREAD, NULL);
+				SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, NULL);
 	if (!btrfs_delayed_tree_ref_cachep)
 		goto fail;
 
 	btrfs_delayed_data_ref_cachep = kmem_cache_create(
 				"btrfs_delayed_data_ref",
 				sizeof(struct btrfs_delayed_data_ref), 0,
-				SLAB_MEM_SPREAD, NULL);
+				SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, NULL);
 	if (!btrfs_delayed_data_ref_cachep)
 		goto fail;
 
 	btrfs_delayed_extent_op_cachep = kmem_cache_create(
 				"btrfs_delayed_extent_op",
 				sizeof(struct btrfs_delayed_extent_op), 0,
-				SLAB_MEM_SPREAD, NULL);
+				SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, NULL);
 	if (!btrfs_delayed_extent_op_cachep)
 		goto fail;
 

@@ -205,8 +205,8 @@ static int recover_quota_data(struct inode *inode, struct page *page)
 
 	memset(&attr, 0, sizeof(attr));
 
-	attr.ia_uid = make_kuid(inode->i_sb->s_user_ns, i_uid);
-	attr.ia_gid = make_kgid(inode->i_sb->s_user_ns, i_gid);
+	attr.ia_uid = make_kuid(&init_user_ns, i_uid);
+	attr.ia_gid = make_kgid(&init_user_ns, i_gid);
 
 	if (!uid_eq(attr.ia_uid, inode->i_uid))
 		attr.ia_valid |= ATTR_UID;

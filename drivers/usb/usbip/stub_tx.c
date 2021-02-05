@@ -101,10 +101,7 @@ void stub_complete(struct urb *urb)
 
 	/* link a urb to the queue of tx. */
 	spin_lock_irqsave(&sdev->priv_lock, flags);
-	if (sdev->ud.tcp_socket == NULL) {
-		usbip_dbg_stub_tx("ignore urb for closed connection\n");
-		/* It will be freed in stub_device_cleanup_urbs(). */
-	} else if (priv->unlinking) {
+	if (priv->unlinking) {
 		stub_enqueue_ret_unlink(sdev, priv->seqnum, urb->status);
 		stub_free_priv_and_urb(priv);
 	} else {
@@ -243,7 +240,7 @@ static int stub_send_ret_submit(struct stub_device *sdev)
 			}
 
 			if (txsize != sizeof(pdu_header) + urb->actual_length) {
-				dev_err(&sdev->udev->dev,
+				dev_err(&sdev->interface->dev,
 					"actual length of urb %d does not match iso packet sizes %zu\n",
 					urb->actual_length,
 					txsize-sizeof(pdu_header));
@@ -275,7 +272,7 @@ static int stub_send_ret_submit(struct stub_device *sdev)
 		ret = kernel_sendmsg(sdev->ud.tcp_socket, &msg,
 						iov,  iovnum, txsize);
 		if (ret != txsize) {
-			dev_err(&sdev->udev->dev,
+			dev_err(&sdev->interface->dev,
 				"sendmsg failed!, retval %d for %zd\n",
 				ret, txsize);
 			kfree(iov);
@@ -350,7 +347,7 @@ static int stub_send_ret_unlink(struct stub_device *sdev)
 		ret = kernel_sendmsg(sdev->ud.tcp_socket, &msg, iov,
 				     1, txsize);
 		if (ret != txsize) {
-			dev_err(&sdev->udev->dev,
+			dev_err(&sdev->interface->dev,
 				"sendmsg failed!, retval %d for %zd\n",
 				ret, txsize);
 			usbip_event_add(&sdev->ud, SDEV_EVENT_ERROR_TCP);

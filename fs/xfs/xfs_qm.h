@@ -53,15 +53,6 @@ extern struct kmem_zone	*xfs_qm_dqtrxzone;
  */
 #define XFS_DQUOT_CLUSTER_SIZE_FSB	(xfs_filblks_t)1
 
-struct xfs_def_quota {
-	xfs_qcnt_t       bhardlimit;     /* default data blk hard limit */
-	xfs_qcnt_t       bsoftlimit;	 /* default data blk soft limit */
-	xfs_qcnt_t       ihardlimit;	 /* default inode count hard limit */
-	xfs_qcnt_t       isoftlimit;	 /* default inode count soft limit */
-	xfs_qcnt_t	 rtbhardlimit;   /* default realtime blk hard limit */
-	xfs_qcnt_t	 rtbsoftlimit;   /* default realtime blk soft limit */
-};
-
 /*
  * Various quota information for individual filesystems.
  * The mount structure keeps a pointer to this.
@@ -85,9 +76,12 @@ typedef struct xfs_quotainfo {
 	struct mutex	 qi_quotaofflock;/* to serialize quotaoff */
 	xfs_filblks_t	 qi_dqchunklen;	 /* # BBs in a chunk of dqs */
 	uint		 qi_dqperchunk;	 /* # ondisk dqs in above chunk */
-	struct xfs_def_quota	qi_usr_default;
-	struct xfs_def_quota	qi_grp_default;
-	struct xfs_def_quota	qi_prj_default;
+	xfs_qcnt_t	 qi_bhardlimit;	 /* default data blk hard limit */
+	xfs_qcnt_t	 qi_bsoftlimit;	 /* default data blk soft limit */
+	xfs_qcnt_t	 qi_ihardlimit;	 /* default inode count hard limit */
+	xfs_qcnt_t	 qi_isoftlimit;	 /* default inode count soft limit */
+	xfs_qcnt_t	 qi_rtbhardlimit;/* default realtime blk hard limit */
+	xfs_qcnt_t	 qi_rtbsoftlimit;/* default realtime blk soft limit */
 	struct shrinker  qi_shrinker;
 } xfs_quotainfo_t;
 
@@ -110,15 +104,15 @@ xfs_dquot_tree(
 }
 
 static inline struct xfs_inode *
-xfs_quota_inode(xfs_mount_t *mp, uint dq_flags)
+xfs_dq_to_quota_inode(struct xfs_dquot *dqp)
 {
-	switch (dq_flags & XFS_DQ_ALLTYPES) {
+	switch (dqp->dq_flags & XFS_DQ_ALLTYPES) {
 	case XFS_DQ_USER:
-		return mp->m_quotainfo->qi_uquotaip;
+		return dqp->q_mount->m_quotainfo->qi_uquotaip;
 	case XFS_DQ_GROUP:
-		return mp->m_quotainfo->qi_gquotaip;
+		return dqp->q_mount->m_quotainfo->qi_gquotaip;
 	case XFS_DQ_PROJ:
-		return mp->m_quotainfo->qi_pquotaip;
+		return dqp->q_mount->m_quotainfo->qi_pquotaip;
 	default:
 		ASSERT(0);
 	}
@@ -170,27 +164,11 @@ extern void		xfs_qm_dqrele_all_inodes(struct xfs_mount *, uint);
 
 /* quota ops */
 extern int		xfs_qm_scall_trunc_qfiles(struct xfs_mount *, uint);
-extern int		xfs_qm_scall_getquota(struct xfs_mount *, xfs_dqid_t *,
-					uint, struct qc_dqblk *, uint);
+extern int		xfs_qm_scall_getquota(struct xfs_mount *, xfs_dqid_t,
+					uint, struct qc_dqblk *);
 extern int		xfs_qm_scall_setqlim(struct xfs_mount *, xfs_dqid_t, uint,
 					struct qc_dqblk *);
 extern int		xfs_qm_scall_quotaon(struct xfs_mount *, uint);
 extern int		xfs_qm_scall_quotaoff(struct xfs_mount *, uint);
-
-static inline struct xfs_def_quota *
-xfs_get_defquota(struct xfs_dquot *dqp, struct xfs_quotainfo *qi)
-{
-	struct xfs_def_quota *defq;
-
-	if (XFS_QM_ISUDQ(dqp))
-		defq = &qi->qi_usr_default;
-	else if (XFS_QM_ISGDQ(dqp))
-		defq = &qi->qi_grp_default;
-	else {
-		ASSERT(XFS_QM_ISPDQ(dqp));
-		defq = &qi->qi_prj_default;
-	}
-	return defq;
-}
 
 #endif /* __XFS_QM_H__ */

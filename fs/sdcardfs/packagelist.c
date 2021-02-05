@@ -45,9 +45,9 @@ static DEFINE_HASHTABLE(ext_to_groupid, 8);
 
 static struct kmem_cache *hashtable_entry_cachep;
 
-static unsigned int full_name_case_hash(const void *salt, const unsigned char *name, unsigned int len)
+static unsigned int full_name_case_hash(const unsigned char *name, unsigned int len)
 {
-	unsigned long hash = init_name_hash(salt);
+	unsigned long hash = init_name_hash();
 
 	while (len--)
 		hash = partial_name_hash(tolower(*name++), hash);
@@ -58,7 +58,7 @@ static inline void qstr_init(struct qstr *q, const char *name)
 {
 	q->name = name;
 	q->len = strlen(q->name);
-	q->hash = full_name_case_hash(0, q->name, q->len);
+	q->hash = full_name_case_hash(q->name, q->len);
 }
 
 static inline int qstr_copy(const struct qstr *src, struct qstr *dest)
@@ -832,6 +832,7 @@ static struct configfs_subsystem sdcardfs_packages = {
 			.ci_namebuf = "sdcardfs",
 			.ci_type = &packages_type,
 		},
+		.default_groups = sd_default_groups,
 	},
 };
 
@@ -840,11 +841,9 @@ static int configfs_sdcardfs_init(void)
 	int ret, i;
 	struct configfs_subsystem *subsys = &sdcardfs_packages;
 
-	config_group_init(&subsys->su_group);
-	for (i = 0; sd_default_groups[i]; i++) {
+	for (i = 0; sd_default_groups[i]; i++)
 		config_group_init(sd_default_groups[i]);
-		configfs_add_default_group(sd_default_groups[i], &subsys->su_group);
-	}
+	config_group_init(&subsys->su_group);
 	mutex_init(&subsys->su_mutex);
 	ret = configfs_register_subsystem(subsys);
 	if (ret) {

@@ -13,7 +13,6 @@
 #define DM_VERITY_FEC_H
 
 #include "dm.h"
-#include "dm-core.h"
 #include "dm-verity.h"
 #include <linux/rslib.h>
 

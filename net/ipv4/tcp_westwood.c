@@ -99,13 +99,12 @@ static void westwood_filter(struct westwood *w, u32 delta)
  * Called after processing group of packets.
  * but all westwood needs is the last sample of srtt.
  */
-static void tcp_westwood_pkts_acked(struct sock *sk,
-				    const struct ack_sample *sample)
+static void tcp_westwood_pkts_acked(struct sock *sk, u32 cnt, s32 rtt)
 {
 	struct westwood *w = inet_csk_ca(sk);
 
-	if (sample->rtt_us > 0)
-		w->rtt = usecs_to_jiffies(sample->rtt_us);
+	if (rtt > 0)
+		w->rtt = usecs_to_jiffies(rtt);
 }
 
 /*

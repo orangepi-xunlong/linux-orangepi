@@ -220,11 +220,10 @@ static int ircomm_tty_startup(struct ircomm_tty_cb *self)
 	IRDA_ASSERT(self->magic == IRCOMM_TTY_MAGIC, return -1;);
 
 	/* Check if already open */
-	if (tty_port_initialized(&self->port)) {
+	if (test_and_set_bit(ASYNCB_INITIALIZED, &self->port.flags)) {
 		pr_debug("%s(), already open so break out!\n", __func__);
 		return 0;
 	}
-	tty_port_set_initialized(&self->port, 1);
 
 	/* Register with IrCOMM */
 	irda_notify_init(&notify);
@@ -258,7 +257,7 @@ static int ircomm_tty_startup(struct ircomm_tty_cb *self)
 
 	return 0;
 err:
-	tty_port_set_initialized(&self->port, 0);
+	clear_bit(ASYNCB_INITIALIZED, &self->port.flags);
 	return ret;
 }
 
@@ -281,21 +280,21 @@ static int ircomm_tty_block_til_ready(struct ircomm_tty_cb *self,
 	 * If non-blocking mode is set, or the port is not enabled,
 	 * then make the check up front and then exit.
 	 */
-	if (tty_io_error(tty)) {
-		tty_port_set_active(port, 1);
+	if (test_bit(TTY_IO_ERROR, &tty->flags)) {
+		port->flags |= ASYNC_NORMAL_ACTIVE;
 		return 0;
 	}
 
 	if (filp->f_flags & O_NONBLOCK) {
 		/* nonblock mode is set */
-		if (C_BAUD(tty))
+		if (tty->termios.c_cflag & CBAUD)
 			tty_port_raise_dtr_rts(port);
-		tty_port_set_active(port, 1);
+		port->flags |= ASYNC_NORMAL_ACTIVE;
 		pr_debug("%s(), O_NONBLOCK requested!\n", __func__);
 		return 0;
 	}
 
-	if (C_CLOCAL(tty)) {
+	if (tty->termios.c_cflag & CLOCAL) {
 		pr_debug("%s(), doing CLOCAL!\n", __func__);
 		do_clocal = 1;
 	}
@@ -319,12 +318,13 @@ static int ircomm_tty_block_til_ready(struct ircomm_tty_cb *self,
 	spin_unlock_irqrestore(&port->lock, flags);
 
 	while (1) {
-		if (C_BAUD(tty) && tty_port_initialized(port))
+		if (C_BAUD(tty) && test_bit(ASYNCB_INITIALIZED, &port->flags))
 			tty_port_raise_dtr_rts(port);
 
 		set_current_state(TASK_INTERRUPTIBLE);
 
-		if (tty_hung_up_p(filp) || !tty_port_initialized(port)) {
+		if (tty_hung_up_p(filp) ||
+		    !test_bit(ASYNCB_INITIALIZED, &port->flags)) {
 			retval = (port->flags & ASYNC_HUP_NOTIFY) ?
 					-EAGAIN : -ERESTARTSYS;
 			break;
@@ -365,7 +365,7 @@ static int ircomm_tty_block_til_ready(struct ircomm_tty_cb *self,
 		 __FILE__, __LINE__, tty->driver->name, port->count);
 
 	if (!retval)
-		tty_port_set_active(port, 1);
+		port->flags |= ASYNC_NORMAL_ACTIVE;
 
 	return retval;
 }
@@ -806,7 +806,7 @@ static void ircomm_tty_throttle(struct tty_struct *tty)
 		ircomm_tty_send_xchar(tty, STOP_CHAR(tty));
 
 	/* Hardware flow control? */
-	if (C_CRTSCTS(tty)) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		self->settings.dte &= ~IRCOMM_RTS;
 		self->settings.dte |= IRCOMM_DELTA_RTS;
 
@@ -831,11 +831,12 @@ static void ircomm_tty_unthrottle(struct tty_struct *tty)
 	IRDA_ASSERT(self->magic == IRCOMM_TTY_MAGIC, return;);
 
 	/* Using software flow control? */
-	if (I_IXOFF(tty))
+	if (I_IXOFF(tty)) {
 		ircomm_tty_send_xchar(tty, START_CHAR(tty));
+	}
 
 	/* Using hardware flow control? */
-	if (C_CRTSCTS(tty)) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		self->settings.dte |= (IRCOMM_RTS|IRCOMM_DELTA_RTS);
 
 		ircomm_param_request(self, IRCOMM_DTE, TRUE);
@@ -876,9 +877,8 @@ static void ircomm_tty_shutdown(struct ircomm_tty_cb *self)
 	IRDA_ASSERT(self != NULL, return;);
 	IRDA_ASSERT(self->magic == IRCOMM_TTY_MAGIC, return;);
 
-	if (!tty_port_initialized(&self->port))
+	if (!test_and_clear_bit(ASYNCB_INITIALIZED, &self->port.flags))
 		return;
-	tty_port_set_initialized(&self->port, 0);
 
 	ircomm_tty_detach_cable(self);
 
@@ -926,6 +926,7 @@ static void ircomm_tty_hangup(struct tty_struct *tty)
 	ircomm_tty_shutdown(self);
 
 	spin_lock_irqsave(&port->lock, flags);
+	port->flags &= ~ASYNC_NORMAL_ACTIVE;
 	if (port->tty) {
 		set_bit(TTY_IO_ERROR, &port->tty->flags);
 		tty_kref_put(port->tty);
@@ -933,7 +934,6 @@ static void ircomm_tty_hangup(struct tty_struct *tty)
 	port->tty = NULL;
 	port->count = 0;
 	spin_unlock_irqrestore(&port->lock, flags);
-	tty_port_set_active(port, 0);
 
 	wake_up_interruptible(&port->open_wait);
 }
@@ -1000,7 +1000,7 @@ void ircomm_tty_check_modem_status(struct ircomm_tty_cb *self)
 	if (status & IRCOMM_DCE_DELTA_ANY) {
 		/*wake_up_interruptible(&self->delta_msr_wait);*/
 	}
-	if (tty_port_check_carrier(&self->port) && (status & IRCOMM_DELTA_CD)) {
+	if ((self->port.flags & ASYNC_CHECK_CD) && (status & IRCOMM_DELTA_CD)) {
 		pr_debug("%s(), ircomm%d CD now %s...\n", __func__ , self->line,
 			 (status & IRCOMM_CD) ? "on" : "off");
 
@@ -1256,11 +1256,11 @@ static void ircomm_tty_line_info(struct ircomm_tty_cb *self, struct seq_file *m)
 		seq_printf(m, "%cASYNC_CTS_FLOW", sep);
 		sep = '|';
 	}
-	if (tty_port_check_carrier(&self->port)) {
+	if (self->port.flags & ASYNC_CHECK_CD) {
 		seq_printf(m, "%cASYNC_CHECK_CD", sep);
 		sep = '|';
 	}
-	if (tty_port_initialized(&self->port)) {
+	if (self->port.flags & ASYNC_INITIALIZED) {
 		seq_printf(m, "%cASYNC_INITIALIZED", sep);
 		sep = '|';
 	}
@@ -1268,7 +1268,11 @@ static void ircomm_tty_line_info(struct ircomm_tty_cb *self, struct seq_file *m)
 		seq_printf(m, "%cASYNC_LOW_LATENCY", sep);
 		sep = '|';
 	}
-	if (tty_port_active(&self->port)) {
+	if (self->port.flags & ASYNC_CLOSING) {
+		seq_printf(m, "%cASYNC_CLOSING", sep);
+		sep = '|';
+	}
+	if (self->port.flags & ASYNC_NORMAL_ACTIVE) {
 		seq_printf(m, "%cASYNC_NORMAL_ACTIVE", sep);
 		sep = '|';
 	}

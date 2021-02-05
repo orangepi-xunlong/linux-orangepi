@@ -33,7 +33,7 @@
 /* misc.c */
 extern memptr free_mem_ptr;
 extern memptr free_mem_end_ptr;
-extern struct boot_params *boot_params;
+extern struct boot_params *real_mode;		/* Pointer to real-mode data */
 void __putstr(const char *s);
 void __puthex(unsigned long value);
 #define error_putstr(__x)  __putstr(__x)
@@ -67,36 +67,24 @@ int cmdline_find_option_bool(const char *option);
 
 
 #if CONFIG_RANDOMIZE_BASE
-/* kaslr.c */
-void choose_random_location(unsigned long input,
-			    unsigned long input_size,
-			    unsigned long *output,
-			    unsigned long output_size,
-			    unsigned long *virt_addr);
+/* aslr.c */
+unsigned char *choose_kernel_location(struct boot_params *boot_params,
+				      unsigned char *input,
+				      unsigned long input_size,
+				      unsigned char *output,
+				      unsigned long output_size);
 /* cpuflags.c */
 bool has_cpuflag(int flag);
 #else
-static inline void choose_random_location(unsigned long input,
-					  unsigned long input_size,
-					  unsigned long *output,
-					  unsigned long output_size,
-					  unsigned long *virt_addr)
+static inline
+unsigned char *choose_kernel_location(struct boot_params *boot_params,
+				      unsigned char *input,
+				      unsigned long input_size,
+				      unsigned char *output,
+				      unsigned long output_size)
 {
+	return output;
 }
-#endif
-
-#ifdef CONFIG_X86_64
-void initialize_identity_maps(void);
-void add_identity_map(unsigned long start, unsigned long size);
-void finalize_identity_maps(void);
-extern unsigned char _pgtable[];
-#else
-static inline void initialize_identity_maps(void)
-{ }
-static inline void add_identity_map(unsigned long start, unsigned long size)
-{ }
-static inline void finalize_identity_maps(void)
-{ }
 #endif
 
 #ifdef CONFIG_EARLY_PRINTK

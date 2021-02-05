@@ -84,7 +84,6 @@ EXPORT_SYMBOL(insl_16);
 
 #ifdef CONFIG_SMP
 EXPORT_SYMBOL(__raw_atomic_add_asm);
-EXPORT_SYMBOL(__raw_atomic_xadd_asm);
 EXPORT_SYMBOL(__raw_atomic_and_asm);
 EXPORT_SYMBOL(__raw_atomic_or_asm);
 EXPORT_SYMBOL(__raw_atomic_xor_asm);

@@ -513,9 +513,7 @@ int qib_sdma_running(struct qib_pportdata *ppd)
 static void complete_sdma_err_req(struct qib_pportdata *ppd,
 				  struct qib_verbs_txreq *tx)
 {
-	struct qib_qp_priv *priv = tx->qp->priv;
-
-	atomic_inc(&priv->s_dma_busy);
+	atomic_inc(&tx->qp->s_dma_busy);
 	/* no sdma descriptors, so no unmap_desc */
 	tx->txreq.start_idx = 0;
 	tx->txreq.next_descq_idx = 0;
@@ -533,19 +531,18 @@ static void complete_sdma_err_req(struct qib_pportdata *ppd,
  * 3) The SGE addresses are suitable for passing to dma_map_single().
  */
 int qib_sdma_verbs_send(struct qib_pportdata *ppd,
-			struct rvt_sge_state *ss, u32 dwords,
+			struct qib_sge_state *ss, u32 dwords,
 			struct qib_verbs_txreq *tx)
 {
 	unsigned long flags;
-	struct rvt_sge *sge;
-	struct rvt_qp *qp;
+	struct qib_sge *sge;
+	struct qib_qp *qp;
 	int ret = 0;
 	u16 tail;
 	__le64 *descqp;
 	u64 sdmadesc[2];
 	u32 dwoffset;
 	dma_addr_t addr;
-	struct qib_qp_priv *priv;
 
 	spin_lock_irqsave(&ppd->sdma_lock, flags);
 
@@ -624,7 +621,7 @@ retry:
 			if (--ss->num_sge)
 				*sge = *ss->sg_list++;
 		} else if (sge->length == 0 && sge->mr->lkey) {
-			if (++sge->n >= RVT_SEGSZ) {
+			if (++sge->n >= QIB_SEGSZ) {
 				if (++sge->m >= sge->mr->mapsz)
 					break;
 				sge->n = 0;
@@ -647,8 +644,8 @@ retry:
 		descqp[0] |= cpu_to_le64(SDMA_DESC_DMA_HEAD);
 	if (tx->txreq.flags & QIB_SDMA_TXREQ_F_INTREQ)
 		descqp[0] |= cpu_to_le64(SDMA_DESC_INTR);
-	priv = tx->qp->priv;
-	atomic_inc(&priv->s_dma_busy);
+
+	atomic_inc(&tx->qp->s_dma_busy);
 	tx->txreq.next_descq_idx = tail;
 	ppd->dd->f_sdma_update_tail(ppd, tail);
 	ppd->sdma_descq_added += tx->txreq.sg_count;
@@ -666,14 +663,13 @@ unmap:
 		unmap_desc(ppd, tail);
 	}
 	qp = tx->qp;
-	priv = qp->priv;
 	qib_put_txreq(tx);
 	spin_lock(&qp->r_lock);
 	spin_lock(&qp->s_lock);
 	if (qp->ibqp.qp_type == IB_QPT_RC) {
 		/* XXX what about error sending RDMA read responses? */
-		if (ib_rvt_state_ops[qp->state] & RVT_PROCESS_RECV_OK)
-			rvt_error_qp(qp, IB_WC_GENERAL_ERR);
+		if (ib_qib_state_ops[qp->state] & QIB_PROCESS_RECV_OK)
+			qib_error_qp(qp, IB_WC_GENERAL_ERR);
 	} else if (qp->s_wqe)
 		qib_send_complete(qp, qp->s_wqe, IB_WC_GENERAL_ERR);
 	spin_unlock(&qp->s_lock);
@@ -683,9 +679,8 @@ unmap:
 
 busy:
 	qp = tx->qp;
-	priv = qp->priv;
 	spin_lock(&qp->s_lock);
-	if (ib_rvt_state_ops[qp->state] & RVT_PROCESS_RECV_OK) {
+	if (ib_qib_state_ops[qp->state] & QIB_PROCESS_RECV_OK) {
 		struct qib_ibdev *dev;
 
 		/*
@@ -695,19 +690,19 @@ busy:
 		 */
 		tx->ss = ss;
 		tx->dwords = dwords;
-		priv->s_tx = tx;
+		qp->s_tx = tx;
 		dev = &ppd->dd->verbs_dev;
-		spin_lock(&dev->rdi.pending_lock);
-		if (list_empty(&priv->iowait)) {
+		spin_lock(&dev->pending_lock);
+		if (list_empty(&qp->iowait)) {
 			struct qib_ibport *ibp;
 
 			ibp = &ppd->ibport_data;
-			ibp->rvp.n_dmawait++;
-			qp->s_flags |= RVT_S_WAIT_DMA_DESC;
-			list_add_tail(&priv->iowait, &dev->dmawait);
+			ibp->n_dmawait++;
+			qp->s_flags |= QIB_S_WAIT_DMA_DESC;
+			list_add_tail(&qp->iowait, &dev->dmawait);
 		}
-		spin_unlock(&dev->rdi.pending_lock);
-		qp->s_flags &= ~RVT_S_BUSY;
+		spin_unlock(&dev->pending_lock);
+		qp->s_flags &= ~QIB_S_BUSY;
 		spin_unlock(&qp->s_lock);
 		ret = -EBUSY;
 	} else {

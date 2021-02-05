@@ -8,7 +8,7 @@
 
 #include <linux/linkage.h>
 
-ENTRY_CFI(strlen)
+ENTRY(strlen)
 	or	r3,r0,7
 	ld	r2,[r3,-7]
 	ld.a	r6,[r3,-3]
@@ -80,4 +80,4 @@ ENTRY_CFI(strlen)
 .Learly_end:
 	b.d	.Lend
 	sub_s.ne r1,r1,r1
-END_CFI(strlen)
+END(strlen)

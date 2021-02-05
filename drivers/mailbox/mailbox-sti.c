@@ -384,7 +384,7 @@ static struct mbox_chan *sti_mbox_xlate(struct mbox_controller *mbox,
 	return chan;
 }
 
-static const struct mbox_chan_ops sti_mbox_ops = {
+static struct mbox_chan_ops sti_mbox_ops = {
 	.startup	= sti_mbox_startup_chan,
 	.shutdown	= sti_mbox_shutdown_chan,
 	.send_data	= sti_mbox_send_data,
@@ -430,8 +430,8 @@ static int sti_mbox_probe(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	mdev->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(mdev->base))
-		return PTR_ERR(mdev->base);
+	if (!mdev->base)
+		return -ENOMEM;
 
 	ret = of_property_read_string(np, "mbox-name", &mdev->name);
 	if (ret)

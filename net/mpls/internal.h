@@ -1,6 +1,9 @@
 #ifndef MPLS_INTERNAL_H
 #define MPLS_INTERNAL_H
-#include <net/mpls.h>
+
+struct mpls_shim_hdr {
+	__be32 label_stack_entry;
+};
 
 struct mpls_entry_decoded {
 	u32 label;
@@ -38,7 +41,6 @@ enum mpls_payload_type {
 
 struct mpls_nh { /* next hop label forwarding entry */
 	struct net_device __rcu *nh_dev;
-	unsigned int		nh_flags;
 	u32			nh_label[MAX_NEW_LABELS];
 	u8			nh_labels;
 	u8			nh_via_alen;
@@ -72,7 +74,6 @@ struct mpls_route { /* next hop label forwarding entry */
 	u8			rt_payload_type;
 	u8			rt_max_alen;
 	unsigned int		rt_nhn;
-	unsigned int		rt_nhn_alive;
 	struct mpls_nh		rt_nh[0];
 };
 
@@ -89,6 +90,11 @@ struct mpls_route { /* next hop label forwarding entry */
 	     nh++, nhsel++)
 
 #define endfor_nexthops(rt) }
+
+static inline struct mpls_shim_hdr *mpls_hdr(const struct sk_buff *skb)
+{
+	return (struct mpls_shim_hdr *)skb_network_header(skb);
+}
 
 static inline struct mpls_shim_hdr mpls_entry_encode(u32 label, unsigned ttl, unsigned tc, bool bos)
 {

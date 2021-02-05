@@ -211,16 +211,14 @@
 # define DP_DS_PORT_TYPE_DVI		    2
 # define DP_DS_PORT_TYPE_HDMI		    3
 # define DP_DS_PORT_TYPE_NON_EDID	    4
-# define DP_DS_PORT_TYPE_DP_DUALMODE        5
-# define DP_DS_PORT_TYPE_WIRELESS           6
 # define DP_DS_PORT_HPD			    (1 << 3)
 /* offset 1 for VGA is maximum megapixels per second / 8 */
 /* offset 2 */
-# define DP_DS_MAX_BPC_MASK	            (3 << 0)
-# define DP_DS_8BPC		            0
-# define DP_DS_10BPC		            1
-# define DP_DS_12BPC		            2
-# define DP_DS_16BPC		            3
+# define DP_DS_VGA_MAX_BPC_MASK		    (3 << 0)
+# define DP_DS_VGA_8BPC			    0
+# define DP_DS_VGA_10BPC		    1
+# define DP_DS_VGA_12BPC		    2
+# define DP_DS_VGA_16BPC		    3
 
 /* link configuration */
 #define	DP_LINK_BW_SET		            0x100
@@ -446,9 +444,6 @@
 #define DP_SOURCE_OUI			    0x300
 #define DP_SINK_OUI			    0x400
 #define DP_BRANCH_OUI			    0x500
-#define DP_BRANCH_ID                        0x503
-#define DP_BRANCH_HW_REV                    0x509
-#define DP_BRANCH_SW_REV                    0x50A
 
 #define DP_SET_POWER                        0x600
 # define DP_SET_POWER_D0                    0x1
@@ -462,52 +457,16 @@
 # define DP_EDP_14			    0x03
 
 #define DP_EDP_GENERAL_CAP_1		    0x701
-# define DP_EDP_TCON_BACKLIGHT_ADJUSTMENT_CAP		(1 << 0)
-# define DP_EDP_BACKLIGHT_PIN_ENABLE_CAP		(1 << 1)
-# define DP_EDP_BACKLIGHT_AUX_ENABLE_CAP		(1 << 2)
-# define DP_EDP_PANEL_SELF_TEST_PIN_ENABLE_CAP		(1 << 3)
-# define DP_EDP_PANEL_SELF_TEST_AUX_ENABLE_CAP		(1 << 4)
-# define DP_EDP_FRC_ENABLE_CAP				(1 << 5)
-# define DP_EDP_COLOR_ENGINE_CAP			(1 << 6)
-# define DP_EDP_SET_POWER_CAP				(1 << 7)
 
 #define DP_EDP_BACKLIGHT_ADJUSTMENT_CAP     0x702
-# define DP_EDP_BACKLIGHT_BRIGHTNESS_PWM_PIN_CAP	(1 << 0)
-# define DP_EDP_BACKLIGHT_BRIGHTNESS_AUX_SET_CAP	(1 << 1)
-# define DP_EDP_BACKLIGHT_BRIGHTNESS_BYTE_COUNT		(1 << 2)
-# define DP_EDP_BACKLIGHT_AUX_PWM_PRODUCT_CAP		(1 << 3)
-# define DP_EDP_BACKLIGHT_FREQ_PWM_PIN_PASSTHRU_CAP	(1 << 4)
-# define DP_EDP_BACKLIGHT_FREQ_AUX_SET_CAP		(1 << 5)
-# define DP_EDP_DYNAMIC_BACKLIGHT_CAP			(1 << 6)
-# define DP_EDP_VBLANK_BACKLIGHT_UPDATE_CAP		(1 << 7)
 
 #define DP_EDP_GENERAL_CAP_2		    0x703
-# define DP_EDP_OVERDRIVE_ENGINE_ENABLED		(1 << 0)
 
 #define DP_EDP_GENERAL_CAP_3		    0x704    /* eDP 1.4 */
-# define DP_EDP_X_REGION_CAP_MASK			(0xf << 0)
-# define DP_EDP_X_REGION_CAP_SHIFT			0
-# define DP_EDP_Y_REGION_CAP_MASK			(0xf << 4)
-# define DP_EDP_Y_REGION_CAP_SHIFT			4
 
 #define DP_EDP_DISPLAY_CONTROL_REGISTER     0x720
-# define DP_EDP_BACKLIGHT_ENABLE			(1 << 0)
-# define DP_EDP_BLACK_VIDEO_ENABLE			(1 << 1)
-# define DP_EDP_FRC_ENABLE				(1 << 2)
-# define DP_EDP_COLOR_ENGINE_ENABLE			(1 << 3)
-# define DP_EDP_VBLANK_BACKLIGHT_UPDATE_ENABLE		(1 << 7)
 
 #define DP_EDP_BACKLIGHT_MODE_SET_REGISTER  0x721
-# define DP_EDP_BACKLIGHT_CONTROL_MODE_MASK		(3 << 0)
-# define DP_EDP_BACKLIGHT_CONTROL_MODE_PWM		(0 << 0)
-# define DP_EDP_BACKLIGHT_CONTROL_MODE_PRESET		(1 << 0)
-# define DP_EDP_BACKLIGHT_CONTROL_MODE_DPCD		(2 << 0)
-# define DP_EDP_BACKLIGHT_CONTROL_MODE_PRODUCT		(3 << 0)
-# define DP_EDP_BACKLIGHT_FREQ_PWM_PIN_PASSTHRU_ENABLE	(1 << 2)
-# define DP_EDP_BACKLIGHT_FREQ_AUX_SET_ENABLE		(1 << 3)
-# define DP_EDP_DYNAMIC_BACKLIGHT_ENABLE		(1 << 4)
-# define DP_EDP_REGIONAL_BACKLIGHT_ENABLE		(1 << 5)
-# define DP_EDP_UPDATE_REGION_BRIGHTNESS		(1 << 6) /* eDP 1.4 */
 
 #define DP_EDP_BACKLIGHT_BRIGHTNESS_MSB     0x722
 #define DP_EDP_BACKLIGHT_BRIGHTNESS_LSB     0x723
@@ -546,6 +505,9 @@
 #define DP_DEVICE_SERVICE_IRQ_VECTOR_ESI0   0x2003   /* 1.2 */
 
 #define DP_DEVICE_SERVICE_IRQ_VECTOR_ESI1   0x2004   /* 1.2 */
+# define DP_RX_GTC_MSTR_REQ_STATUS_CHANGE    (1 << 0)
+# define DP_LOCK_ACQUISITION_REQUEST         (1 << 1)
+# define DP_CEC_IRQ                          (1 << 2)
 
 #define DP_LINK_SERVICE_IRQ_VECTOR_ESI0     0x2005   /* 1.2 */
 
@@ -568,6 +530,79 @@
 
 #define DP_RECEIVER_ALPM_STATUS		    0x200b  /* eDP 1.4 */
 # define DP_ALPM_LOCK_TIMEOUT_ERROR	    (1 << 0)
+
+#define DP_AUX_HDCP_BKSV		0x68000
+#define DP_AUX_HDCP_RI_PRIME		0x68005
+#define DP_AUX_HDCP_AKSV		0x68007
+#define DP_AUX_HDCP_AN			0x6800C
+#define DP_AUX_HDCP_V_PRIME(h)		(0x68014 + h * 4)
+#define DP_AUX_HDCP_BCAPS		0x68028
+# define DP_BCAPS_REPEATER_PRESENT	BIT(1)
+# define DP_BCAPS_HDCP_CAPABLE		BIT(0)
+#define DP_AUX_HDCP_BSTATUS		0x68029
+# define DP_BSTATUS_REAUTH_REQ		BIT(3)
+# define DP_BSTATUS_LINK_FAILURE	BIT(2)
+# define DP_BSTATUS_R0_PRIME_READY	BIT(1)
+# define DP_BSTATUS_READY		BIT(0)
+#define DP_AUX_HDCP_BINFO		0x6802A
+#define DP_AUX_HDCP_KSV_FIFO		0x6802C
+#define DP_AUX_HDCP_AINFO		0x6803B
+
+/* HDMI CEC tunneling over AUX DP 1.3 section 5.3.3.3.1 DPCD 1.4+ */
+#define DP_CEC_TUNNELING_CAPABILITY            0x3000
+# define DP_CEC_TUNNELING_CAPABLE               (1 << 0)
+# define DP_CEC_SNOOPING_CAPABLE                (1 << 1)
+# define DP_CEC_MULTIPLE_LA_CAPABLE             (1 << 2)
+
+#define DP_CEC_TUNNELING_CONTROL               0x3001
+# define DP_CEC_TUNNELING_ENABLE                (1 << 0)
+# define DP_CEC_SNOOPING_ENABLE                 (1 << 1)
+
+#define DP_CEC_RX_MESSAGE_INFO                 0x3002
+# define DP_CEC_RX_MESSAGE_LEN_MASK             (0xf << 0)
+# define DP_CEC_RX_MESSAGE_LEN_SHIFT            0
+# define DP_CEC_RX_MESSAGE_HPD_STATE            (1 << 4)
+# define DP_CEC_RX_MESSAGE_HPD_LOST             (1 << 5)
+# define DP_CEC_RX_MESSAGE_ACKED                (1 << 6)
+# define DP_CEC_RX_MESSAGE_ENDED                (1 << 7)
+
+#define DP_CEC_TX_MESSAGE_INFO                 0x3003
+# define DP_CEC_TX_MESSAGE_LEN_MASK             (0xf << 0)
+# define DP_CEC_TX_MESSAGE_LEN_SHIFT            0
+# define DP_CEC_TX_RETRY_COUNT_MASK             (0x7 << 4)
+# define DP_CEC_TX_RETRY_COUNT_SHIFT            4
+# define DP_CEC_TX_MESSAGE_SEND                 (1 << 7)
+
+#define DP_CEC_TUNNELING_IRQ_FLAGS             0x3004
+# define DP_CEC_RX_MESSAGE_INFO_VALID           (1 << 0)
+# define DP_CEC_RX_MESSAGE_OVERFLOW             (1 << 1)
+# define DP_CEC_TX_MESSAGE_SENT                 (1 << 4)
+# define DP_CEC_TX_LINE_ERROR                   (1 << 5)
+# define DP_CEC_TX_ADDRESS_NACK_ERROR           (1 << 6)
+# define DP_CEC_TX_DATA_NACK_ERROR              (1 << 7)
+
+#define DP_CEC_LOGICAL_ADDRESS_MASK            0x300E /* 0x300F word */
+# define DP_CEC_LOGICAL_ADDRESS_0               (1 << 0)
+# define DP_CEC_LOGICAL_ADDRESS_1               (1 << 1)
+# define DP_CEC_LOGICAL_ADDRESS_2               (1 << 2)
+# define DP_CEC_LOGICAL_ADDRESS_3               (1 << 3)
+# define DP_CEC_LOGICAL_ADDRESS_4               (1 << 4)
+# define DP_CEC_LOGICAL_ADDRESS_5               (1 << 5)
+# define DP_CEC_LOGICAL_ADDRESS_6               (1 << 6)
+# define DP_CEC_LOGICAL_ADDRESS_7               (1 << 7)
+#define DP_CEC_LOGICAL_ADDRESS_MASK_2          0x300F /* 0x300E word */
+# define DP_CEC_LOGICAL_ADDRESS_8               (1 << 0)
+# define DP_CEC_LOGICAL_ADDRESS_9               (1 << 1)
+# define DP_CEC_LOGICAL_ADDRESS_10              (1 << 2)
+# define DP_CEC_LOGICAL_ADDRESS_11              (1 << 3)
+# define DP_CEC_LOGICAL_ADDRESS_12              (1 << 4)
+# define DP_CEC_LOGICAL_ADDRESS_13              (1 << 5)
+# define DP_CEC_LOGICAL_ADDRESS_14              (1 << 6)
+# define DP_CEC_LOGICAL_ADDRESS_15              (1 << 7)
+
+#define DP_CEC_RX_MESSAGE_BUFFER               0x3010
+#define DP_CEC_TX_MESSAGE_BUFFER               0x3020
+#define DP_CEC_MESSAGE_BUFFER_LENGTH             0x10
 
 /* DP 1.2 Sideband message defines */
 /* peer device type - DP 1.2a Table 2-92 */
@@ -628,7 +663,6 @@ u8 drm_dp_get_adjust_request_pre_emphasis(const u8 link_status[DP_LINK_STATUS_SI
 #define DP_BRANCH_OUI_HEADER_SIZE	0xc
 #define DP_RECEIVER_CAP_SIZE		0xf
 #define EDP_PSR_RECEIVER_CAP_SIZE	2
-#define EDP_DISPLAY_CTL_CAP_SIZE	3
 
 void drm_dp_link_train_clock_recovery_delay(const u8 dpcd[DP_RECEIVER_CAP_SIZE]);
 void drm_dp_link_train_channel_eq_delay(const u8 dpcd[DP_RECEIVER_CAP_SIZE]);
@@ -662,8 +696,6 @@ struct edp_vsc_psr {
 #define EDP_VSC_PSR_STATE_ACTIVE	(1<<0)
 #define EDP_VSC_PSR_UPDATE_RFB		(1<<1)
 #define EDP_VSC_PSR_CRC_VALUES_VALID	(1<<2)
-
-int drm_dp_psr_setup_time(const u8 psr_cap[EDP_PSR_RECEIVER_CAP_SIZE]);
 
 static inline int
 drm_dp_max_link_rate(const u8 dpcd[DP_RECEIVER_CAP_SIZE])
@@ -711,11 +743,31 @@ struct drm_dp_aux_msg {
 	size_t size;
 };
 
+struct cec_adapter;
+struct edid;
+
+/**
+ * struct drm_dp_aux_cec - DisplayPort CEC-Tunneling-over-AUX
+ * @lock: mutex protecting this struct
+ * @adap: the CEC adapter for CEC-Tunneling-over-AUX support.
+ * @name: name of the CEC adapter
+ * @parent: parent device of the CEC adapter
+ * @unregister_work: unregister the CEC adapter
+ */
+struct drm_dp_aux_cec {
+	struct mutex lock;
+	struct cec_adapter *adap;
+	const char *name;
+	struct device *parent;
+	struct delayed_work unregister_work;
+};
+
 /**
  * struct drm_dp_aux - DisplayPort AUX channel
  * @name: user-visible name of this AUX channel and the I2C-over-AUX adapter
  * @ddc: I2C adapter that can be used for I2C-over-AUX communication
  * @dev: pointer to struct device that is the parent for this AUX channel
+ * @crtc: backpointer to the crtc that is currently using this AUX channel
  * @hw_mutex: internal mutex used for locking transfers
  * @transfer: transfers a message representing a single AUX transaction
  *
@@ -752,6 +804,7 @@ struct drm_dp_aux {
 	const char *name;
 	struct i2c_adapter ddc;
 	struct device *dev;
+	struct drm_crtc *crtc;
 	struct mutex hw_mutex;
 	ssize_t (*transfer)(struct drm_dp_aux *aux,
 			    struct drm_dp_aux_msg *msg);
@@ -763,6 +816,10 @@ struct drm_dp_aux {
 	 * @i2c_defer_count: Counts I2C DEFERs, used for DP validation.
 	 */
 	unsigned i2c_defer_count;
+	/**
+	 * @cec: struct containing fields used for CEC-Tunneling-over-AUX.
+	 */
+	struct drm_dp_aux_cec cec;
 };
 
 ssize_t drm_dp_dpcd_read(struct drm_dp_aux *aux, unsigned int offset,
@@ -819,16 +876,92 @@ int drm_dp_link_probe(struct drm_dp_aux *aux, struct drm_dp_link *link);
 int drm_dp_link_power_up(struct drm_dp_aux *aux, struct drm_dp_link *link);
 int drm_dp_link_power_down(struct drm_dp_aux *aux, struct drm_dp_link *link);
 int drm_dp_link_configure(struct drm_dp_aux *aux, struct drm_dp_link *link);
-int drm_dp_downstream_max_clock(const u8 dpcd[DP_RECEIVER_CAP_SIZE],
-				const u8 port_cap[4]);
-int drm_dp_downstream_max_bpc(const u8 dpcd[DP_RECEIVER_CAP_SIZE],
-			      const u8 port_cap[4]);
-int drm_dp_downstream_id(struct drm_dp_aux *aux, char id[6]);
-void drm_dp_downstream_debug(struct seq_file *m, const u8 dpcd[DP_RECEIVER_CAP_SIZE],
-			     const u8 port_cap[4], struct drm_dp_aux *aux);
 
-void drm_dp_aux_init(struct drm_dp_aux *aux);
 int drm_dp_aux_register(struct drm_dp_aux *aux);
 void drm_dp_aux_unregister(struct drm_dp_aux *aux);
+
+struct drm_dp_dpcd_ident {
+	u8 oui[3];
+	u8 device_id[6];
+	u8 hw_rev;
+	u8 sw_major_rev;
+	u8 sw_minor_rev;
+} __packed;
+
+/**
+ * struct drm_dp_desc - DP branch/sink device descriptor
+ * @ident: DP device identification from DPCD 0x400 (sink) or 0x500 (branch).
+ * @quirks: Quirks; use drm_dp_has_quirk() to query for the quirks.
+ */
+struct drm_dp_desc {
+	struct drm_dp_dpcd_ident ident;
+	u32 quirks;
+};
+
+int drm_dp_read_desc(struct drm_dp_aux *aux, struct drm_dp_desc *desc,
+		     bool is_branch);
+
+/**
+ * enum drm_dp_quirk - Display Port sink/branch device specific quirks
+ *
+ * Display Port sink and branch devices in the wild have a variety of bugs, try
+ * to collect them here. The quirks are shared, but it's up to the drivers to
+ * implement workarounds for them.
+ */
+enum drm_dp_quirk {
+	/**
+	 * @DP_DPCD_QUIRK_LIMITED_M_N:
+	 *
+	 * The device requires main link attributes Mvid and Nvid to be limited
+	 * to 16 bits.
+	 */
+	DP_DPCD_QUIRK_LIMITED_M_N,
+};
+
+/**
+ * drm_dp_has_quirk() - does the DP device have a specific quirk
+ * @desc: Device decriptor filled by drm_dp_read_desc()
+ * @quirk: Quirk to query for
+ *
+ * Return true if DP device identified by @desc has @quirk.
+ */
+static inline bool
+drm_dp_has_quirk(const struct drm_dp_desc *desc, enum drm_dp_quirk quirk)
+{
+	return desc->quirks & BIT(quirk);
+}
+
+#ifdef CONFIG_DRM_DP_CEC
+void drm_dp_cec_irq(struct drm_dp_aux *aux);
+void drm_dp_cec_register_connector(struct drm_dp_aux *aux, const char *name,
+				   struct device *parent);
+void drm_dp_cec_unregister_connector(struct drm_dp_aux *aux);
+void drm_dp_cec_set_edid(struct drm_dp_aux *aux, const struct edid *edid);
+void drm_dp_cec_unset_edid(struct drm_dp_aux *aux);
+#else
+static inline void drm_dp_cec_irq(struct drm_dp_aux *aux)
+{
+}
+
+static inline void drm_dp_cec_register_connector(struct drm_dp_aux *aux,
+						 const char *name,
+						 struct device *parent)
+{
+}
+
+static inline void drm_dp_cec_unregister_connector(struct drm_dp_aux *aux)
+{
+}
+
+static inline void drm_dp_cec_set_edid(struct drm_dp_aux *aux,
+				       const struct edid *edid)
+{
+}
+
+static inline void drm_dp_cec_unset_edid(struct drm_dp_aux *aux)
+{
+}
+
+#endif
 
 #endif /* _DRM_DP_HELPER_H_ */

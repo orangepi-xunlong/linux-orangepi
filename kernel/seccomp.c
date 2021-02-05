@@ -356,7 +356,7 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 {
 	struct seccomp_filter *sfilter;
 	int ret;
-	const bool save_orig = IS_ENABLED(CONFIG_CHECKPOINT_RESTORE);
+	const bool save_orig = config_enabled(CONFIG_CHECKPOINT_RESTORE);
 
 	if (fprog->len == 0 || fprog->len > BPF_MAXINSNS)
 		return ERR_PTR(-EINVAL);
@@ -404,7 +404,7 @@ seccomp_prepare_user_filter(const char __user *user_filter)
 	struct seccomp_filter *filter = ERR_PTR(-EFAULT);
 
 #ifdef CONFIG_COMPAT
-	if (in_compat_syscall()) {
+	if (is_compat_task()) {
 		struct compat_sock_fprog fprog32;
 		if (copy_from_user(&fprog32, user_filter, sizeof(fprog32)))
 			goto out;
@@ -531,17 +531,24 @@ static void seccomp_send_sigsys(int syscall, int reason)
  * To be fully secure this must be combined with rlimit
  * to limit the stack allocations too.
  */
-static const int mode1_syscalls[] = {
+static int mode1_syscalls[] = {
 	__NR_seccomp_read, __NR_seccomp_write, __NR_seccomp_exit, __NR_seccomp_sigreturn,
 	0, /* null terminated */
 };
 
+#ifdef CONFIG_COMPAT
+static int mode1_syscalls_32[] = {
+	__NR_seccomp_read_32, __NR_seccomp_write_32, __NR_seccomp_exit_32, __NR_seccomp_sigreturn_32,
+	0, /* null terminated */
+};
+#endif
+
 static void __secure_computing_strict(int this_syscall)
 {
-	const int *syscall_whitelist = mode1_syscalls;
+	int *syscall_whitelist = mode1_syscalls;
 #ifdef CONFIG_COMPAT
-	if (in_compat_syscall())
-		syscall_whitelist = get_compat_mode1_syscalls();
+	if (is_compat_task())
+		syscall_whitelist = mode1_syscalls_32;
 #endif
 	do {
 		if (*syscall_whitelist == this_syscall)
@@ -560,7 +567,7 @@ void secure_computing_strict(int this_syscall)
 {
 	int mode = current->seccomp.mode;
 
-	if (IS_ENABLED(CONFIG_CHECKPOINT_RESTORE) &&
+	if (config_enabled(CONFIG_CHECKPOINT_RESTORE) &&
 	    unlikely(current->ptrace & PT_SUSPEND_SECCOMP))
 		return;
 
@@ -677,7 +684,7 @@ int __secure_computing(const struct seccomp_data *sd)
 	int mode = current->seccomp.mode;
 	int this_syscall;
 
-	if (IS_ENABLED(CONFIG_CHECKPOINT_RESTORE) &&
+	if (config_enabled(CONFIG_CHECKPOINT_RESTORE) &&
 	    unlikely(current->ptrace & PT_SUSPEND_SECCOMP))
 		return 0;
 
@@ -898,7 +905,7 @@ long seccomp_get_filter(struct task_struct *task, unsigned long filter_off,
 
 	fprog = filter->prog->orig_prog;
 	if (!fprog) {
-		/* This must be a new non-cBPF filter, since we save
+		/* This must be a new non-cBPF filter, since we save every
 		 * every cBPF filter's orig_prog above when
 		 * CONFIG_CHECKPOINT_RESTORE is enabled.
 		 */

@@ -437,7 +437,7 @@ static struct watchdog_info kempld_wdt_info = {
 			WDIOF_PRETIMEOUT
 };
 
-static const struct watchdog_ops kempld_wdt_ops = {
+static struct watchdog_ops kempld_wdt_ops = {
 	.owner		= THIS_MODULE,
 	.start		= kempld_wdt_start,
 	.stop		= kempld_wdt_stop,

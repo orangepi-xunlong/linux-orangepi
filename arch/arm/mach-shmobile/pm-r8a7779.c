@@ -9,10 +9,9 @@
  * for more details.
  */
 
-#include <linux/soc/renesas/rcar-sysc.h>
-
 #include <asm/io.h>
 
+#include "pm-rcar.h"
 #include "r8a7779.h"
 
 /* SYSC */
@@ -23,7 +22,11 @@
 
 static void __init r8a7779_sysc_init(void)
 {
-	rcar_sysc_init(0xffd85000, 0x0131000e);
+	void __iomem *base = rcar_sysc_init(0xffd85000);
+
+	/* enable all interrupt sources, but do not use interrupt handler */
+	iowrite32(0x0131000e, base + SYSCIER);
+	iowrite32(0, base + SYSCIMR);
 }
 
 #else /* CONFIG_PM || CONFIG_SMP */

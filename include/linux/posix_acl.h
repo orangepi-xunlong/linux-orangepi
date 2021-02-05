@@ -11,7 +11,27 @@
 #include <linux/bug.h>
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
-#include <uapi/linux/posix_acl.h>
+
+#define ACL_UNDEFINED_ID	(-1)
+
+/* a_type field in acl_user_posix_entry_t */
+#define ACL_TYPE_ACCESS		(0x8000)
+#define ACL_TYPE_DEFAULT	(0x4000)
+
+/* e_tag entry in struct posix_acl_entry */
+#define ACL_USER_OBJ		(0x01)
+#define ACL_USER		(0x02)
+#define ACL_GROUP_OBJ		(0x04)
+#define ACL_GROUP		(0x08)
+#define ACL_MASK		(0x10)
+#define ACL_OTHER		(0x20)
+
+/* permissions in the e_perm field */
+#define ACL_READ		(0x04)
+#define ACL_WRITE		(0x02)
+#define ACL_EXECUTE		(0x01)
+//#define ACL_ADD		(0x08)
+//#define ACL_DELETE		(0x10)
 
 struct posix_acl_entry {
 	short			e_tag;
@@ -23,8 +43,10 @@ struct posix_acl_entry {
 };
 
 struct posix_acl {
-	atomic_t		a_refcount;
-	struct rcu_head		a_rcu;
+	union {
+		atomic_t		a_refcount;
+		struct rcu_head		a_rcu;
+	};
 	unsigned int		a_count;
 	struct posix_acl_entry	a_entries[0];
 };
@@ -59,7 +81,7 @@ posix_acl_release(struct posix_acl *acl)
 
 extern void posix_acl_init(struct posix_acl *, int);
 extern struct posix_acl *posix_acl_alloc(int, gfp_t);
-extern int posix_acl_valid(struct user_namespace *, const struct posix_acl *);
+extern int posix_acl_valid(const struct posix_acl *);
 extern int posix_acl_permission(struct inode *, const struct posix_acl *, int);
 extern struct posix_acl *posix_acl_from_mode(umode_t, gfp_t);
 extern int posix_acl_equiv_mode(const struct posix_acl *, umode_t *);
@@ -78,6 +100,7 @@ extern int posix_acl_update_mode(struct inode *, umode_t *, struct posix_acl **)
 extern int simple_set_acl(struct inode *, struct posix_acl *, int);
 extern int simple_acl_create(struct inode *, struct inode *);
 
+struct posix_acl **acl_by_type(struct inode *inode, int type);
 struct posix_acl *get_cached_acl(struct inode *inode, int type);
 struct posix_acl *get_cached_acl_rcu(struct inode *inode, int type);
 void set_cached_acl(struct inode *inode, int type, struct posix_acl *acl);

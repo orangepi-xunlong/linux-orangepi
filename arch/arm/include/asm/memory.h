@@ -134,21 +134,6 @@
  */
 #define PLAT_PHYS_OFFSET	UL(CONFIG_PHYS_OFFSET)
 
-#ifdef CONFIG_XIP_KERNEL
-/*
- * When referencing data in RAM from the XIP region in a relative manner
- * with the MMU off, we need the relative offset between the two physical
- * addresses.  The macro below achieves this, which is:
- *    __pa(v_data) - __xip_pa(v_text)
- */
-#define PHYS_RELATIVE(v_data, v_text) \
-	(((v_data) - PAGE_OFFSET + PLAT_PHYS_OFFSET) - \
-	 ((v_text) - XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR) + \
-          CONFIG_XIP_PHYS_ADDR))
-#else
-#define PHYS_RELATIVE(v_data, v_text) ((v_data) - (v_text))
-#endif
-
 #ifndef __ASSEMBLY__
 
 /*
@@ -159,8 +144,13 @@
  * PFNs are used to describe any physical page; this means
  * PFN 0 == physical address 0.
  */
+#if defined(__virt_to_phys)
+#define PHYS_OFFSET	PLAT_PHYS_OFFSET
+#define PHYS_PFN_OFFSET	((unsigned long)(PHYS_OFFSET >> PAGE_SHIFT))
 
-#if defined(CONFIG_ARM_PATCH_PHYS_VIRT)
+#define virt_to_pfn(kaddr) (__pa(kaddr) >> PAGE_SHIFT)
+
+#elif defined(CONFIG_ARM_PATCH_PHYS_VIRT)
 
 /*
  * Constants used to force the right instruction encodings and shifts
@@ -176,6 +166,10 @@ extern const void *__pv_table_begin, *__pv_table_end;
 
 #define PHYS_OFFSET	((phys_addr_t)__pv_phys_pfn_offset << PAGE_SHIFT)
 #define PHYS_PFN_OFFSET	(__pv_phys_pfn_offset)
+
+#define virt_to_pfn(kaddr) \
+	((((unsigned long)(kaddr) - PAGE_OFFSET) >> PAGE_SHIFT) + \
+	 PHYS_PFN_OFFSET)
 
 #define __pv_stub(from,to,instr,type)			\
 	__asm__("@ __pv_stub\n"				\
@@ -248,11 +242,11 @@ static inline unsigned long __phys_to_virt(phys_addr_t x)
 	return x - PHYS_OFFSET + PAGE_OFFSET;
 }
 
-#endif
-
 #define virt_to_pfn(kaddr) \
 	((((unsigned long)(kaddr) - PAGE_OFFSET) >> PAGE_SHIFT) + \
 	 PHYS_PFN_OFFSET)
+
+#endif
 
 /*
  * These are *only* valid on the kernel direct mapped RAM memory.
@@ -279,43 +273,19 @@ static inline void *phys_to_virt(phys_addr_t x)
 #define __va(x)			((void *)__phys_to_virt((phys_addr_t)(x)))
 #define pfn_to_kaddr(pfn)	__va((phys_addr_t)(pfn) << PAGE_SHIFT)
 
-extern long long arch_phys_to_idmap_offset;
+extern phys_addr_t (*arch_virt_to_idmap)(unsigned long x);
 
 /*
- * These are for systems that have a hardware interconnect supported alias
- * of physical memory for idmap purposes.  Most cases should leave these
- * untouched.  Note: this can only return addresses less than 4GiB.
+ * These are for systems that have a hardware interconnect supported alias of
+ * physical memory for idmap purposes.  Most cases should leave these
+ * untouched.
  */
-static inline bool arm_has_idmap_alias(void)
+static inline phys_addr_t __virt_to_idmap(unsigned long x)
 {
-	return IS_ENABLED(CONFIG_MMU) && arch_phys_to_idmap_offset != 0;
-}
-
-#define IDMAP_INVALID_ADDR ((u32)~0)
-
-static inline unsigned long phys_to_idmap(phys_addr_t addr)
-{
-	if (IS_ENABLED(CONFIG_MMU) && arch_phys_to_idmap_offset) {
-		addr += arch_phys_to_idmap_offset;
-		if (addr > (u32)~0)
-			addr = IDMAP_INVALID_ADDR;
-	}
-	return addr;
-}
-
-static inline phys_addr_t idmap_to_phys(unsigned long idmap)
-{
-	phys_addr_t addr = idmap;
-
-	if (IS_ENABLED(CONFIG_MMU) && arch_phys_to_idmap_offset)
-		addr -= arch_phys_to_idmap_offset;
-
-	return addr;
-}
-
-static inline unsigned long __virt_to_idmap(unsigned long x)
-{
-	return phys_to_idmap(__virt_to_phys(x));
+	if (IS_ENABLED(CONFIG_MMU) && arch_virt_to_idmap)
+		return arch_virt_to_idmap(x);
+	else
+		return __virt_to_phys(x);
 }
 
 #define virt_to_idmap(x)	__virt_to_idmap((unsigned long)(x))
@@ -331,6 +301,20 @@ static inline unsigned long __virt_to_idmap(unsigned long x)
 #define __bus_to_virt	__phys_to_virt
 #define __pfn_to_bus(x)	__pfn_to_phys(x)
 #define __bus_to_pfn(x)	__phys_to_pfn(x)
+#endif
+
+#ifdef CONFIG_VIRT_TO_BUS
+#define virt_to_bus virt_to_bus
+static inline __deprecated unsigned long virt_to_bus(void *x)
+{
+	return __virt_to_bus((unsigned long)x);
+}
+
+#define bus_to_virt bus_to_virt
+static inline __deprecated void *bus_to_virt(unsigned long x)
+{
+	return (void *)__bus_to_virt(x);
+}
 #endif
 
 /*

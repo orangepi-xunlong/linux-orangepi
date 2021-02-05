@@ -21,6 +21,8 @@
 #include <linux/slab.h>
 
 struct regmux {
+	struct i2c_adapter *parent;
+	struct i2c_adapter **adap; /* child busses */
 	struct i2c_mux_reg_platform_data data;
 };
 
@@ -62,16 +64,18 @@ static int i2c_mux_reg_set(const struct regmux *mux, unsigned int chan_id)
 	return 0;
 }
 
-static int i2c_mux_reg_select(struct i2c_mux_core *muxc, u32 chan)
+static int i2c_mux_reg_select(struct i2c_adapter *adap, void *data,
+			      unsigned int chan)
 {
-	struct regmux *mux = i2c_mux_priv(muxc);
+	struct regmux *mux = data;
 
 	return i2c_mux_reg_set(mux, chan);
 }
 
-static int i2c_mux_reg_deselect(struct i2c_mux_core *muxc, u32 chan)
+static int i2c_mux_reg_deselect(struct i2c_adapter *adap, void *data,
+				unsigned int chan)
 {
-	struct regmux *mux = i2c_mux_priv(muxc);
+	struct regmux *mux = data;
 
 	if (mux->data.idle_in_use)
 		return i2c_mux_reg_set(mux, mux->data.idle);
@@ -81,7 +85,7 @@ static int i2c_mux_reg_deselect(struct i2c_mux_core *muxc, u32 chan)
 
 #ifdef CONFIG_OF
 static int i2c_mux_reg_probe_dt(struct regmux *mux,
-				struct platform_device *pdev)
+					struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct device_node *adapter_np, *child;
@@ -103,6 +107,7 @@ static int i2c_mux_reg_probe_dt(struct regmux *mux,
 	if (!adapter)
 		return -EPROBE_DEFER;
 
+	mux->parent = adapter;
 	mux->data.parent = i2c_adapter_id(adapter);
 	put_device(&adapter->dev);
 
@@ -156,7 +161,7 @@ static int i2c_mux_reg_probe_dt(struct regmux *mux,
 }
 #else
 static int i2c_mux_reg_probe_dt(struct regmux *mux,
-				struct platform_device *pdev)
+					struct platform_device *pdev)
 {
 	return 0;
 }
@@ -164,10 +169,10 @@ static int i2c_mux_reg_probe_dt(struct regmux *mux,
 
 static int i2c_mux_reg_probe(struct platform_device *pdev)
 {
-	struct i2c_mux_core *muxc;
 	struct regmux *mux;
 	struct i2c_adapter *parent;
 	struct resource *res;
+	int (*deselect)(struct i2c_adapter *, void *, u32);
 	unsigned int class;
 	int i, ret, nr;
 
@@ -175,9 +180,17 @@ static int i2c_mux_reg_probe(struct platform_device *pdev)
 	if (!mux)
 		return -ENOMEM;
 
+	platform_set_drvdata(pdev, mux);
+
 	if (dev_get_platdata(&pdev->dev)) {
 		memcpy(&mux->data, dev_get_platdata(&pdev->dev),
 			sizeof(mux->data));
+
+		parent = i2c_get_adapter(mux->data.parent);
+		if (!parent)
+			return -EPROBE_DEFER;
+
+		mux->parent = parent;
 	} else {
 		ret = i2c_mux_reg_probe_dt(mux, pdev);
 		if (ret < 0) {
@@ -186,72 +199,71 @@ static int i2c_mux_reg_probe(struct platform_device *pdev)
 		}
 	}
 
-	parent = i2c_get_adapter(mux->data.parent);
-	if (!parent)
-		return -EPROBE_DEFER;
-
 	if (!mux->data.reg) {
 		dev_info(&pdev->dev,
 			"Register not set, using platform resource\n");
 		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 		mux->data.reg_size = resource_size(res);
 		mux->data.reg = devm_ioremap_resource(&pdev->dev, res);
-		if (IS_ERR(mux->data.reg)) {
-			ret = PTR_ERR(mux->data.reg);
-			goto err_put_parent;
-		}
+		if (IS_ERR(mux->data.reg))
+			return PTR_ERR(mux->data.reg);
 	}
 
 	if (mux->data.reg_size != 4 && mux->data.reg_size != 2 &&
 	    mux->data.reg_size != 1) {
 		dev_err(&pdev->dev, "Invalid register size\n");
-		ret = -EINVAL;
-		goto err_put_parent;
+		return -EINVAL;
 	}
 
-	muxc = i2c_mux_alloc(parent, &pdev->dev, mux->data.n_values, 0, 0,
-			     i2c_mux_reg_select, NULL);
-	if (!muxc) {
-		ret = -ENOMEM;
-		goto err_put_parent;
+	mux->adap = devm_kzalloc(&pdev->dev,
+				 sizeof(*mux->adap) * mux->data.n_values,
+				 GFP_KERNEL);
+	if (!mux->adap) {
+		dev_err(&pdev->dev, "Cannot allocate i2c_adapter structure");
+		return -ENOMEM;
 	}
-	muxc->priv = mux;
-
-	platform_set_drvdata(pdev, muxc);
 
 	if (mux->data.idle_in_use)
-		muxc->deselect = i2c_mux_reg_deselect;
+		deselect = i2c_mux_reg_deselect;
+	else
+		deselect = NULL;
 
 	for (i = 0; i < mux->data.n_values; i++) {
 		nr = mux->data.base_nr ? (mux->data.base_nr + i) : 0;
 		class = mux->data.classes ? mux->data.classes[i] : 0;
 
-		ret = i2c_mux_add_adapter(muxc, nr, mux->data.values[i], class);
-		if (ret) {
+		mux->adap[i] = i2c_add_mux_adapter(mux->parent, &pdev->dev, mux,
+						   nr, mux->data.values[i],
+						   class, i2c_mux_reg_select,
+						   deselect);
+		if (!mux->adap[i]) {
+			ret = -ENODEV;
 			dev_err(&pdev->dev, "Failed to add adapter %d\n", i);
 			goto add_adapter_failed;
 		}
 	}
 
 	dev_dbg(&pdev->dev, "%d port mux on %s adapter\n",
-		 mux->data.n_values, muxc->parent->name);
+		 mux->data.n_values, mux->parent->name);
 
 	return 0;
 
 add_adapter_failed:
-	i2c_mux_del_adapters(muxc);
-err_put_parent:
-	i2c_put_adapter(parent);
+	for (; i > 0; i--)
+		i2c_del_mux_adapter(mux->adap[i - 1]);
 
 	return ret;
 }
 
 static int i2c_mux_reg_remove(struct platform_device *pdev)
 {
-	struct i2c_mux_core *muxc = platform_get_drvdata(pdev);
+	struct regmux *mux = platform_get_drvdata(pdev);
+	int i;
 
-	i2c_mux_del_adapters(muxc);
-	i2c_put_adapter(muxc->parent);
+	for (i = 0; i < mux->data.n_values; i++)
+		i2c_del_mux_adapter(mux->adap[i]);
+
+	i2c_put_adapter(mux->parent);
 
 	return 0;
 }
@@ -267,7 +279,6 @@ static struct platform_driver i2c_mux_reg_driver = {
 	.remove	= i2c_mux_reg_remove,
 	.driver	= {
 		.name	= "i2c-mux-reg",
-		.of_match_table = of_match_ptr(i2c_mux_reg_of_match),
 	},
 };
 

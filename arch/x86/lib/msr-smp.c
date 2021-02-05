@@ -1,4 +1,4 @@
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/preempt.h>
 #include <linux/smp.h>
 #include <asm/msr.h>

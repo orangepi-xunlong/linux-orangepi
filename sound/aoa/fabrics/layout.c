@@ -112,7 +112,6 @@ MODULE_ALIAS("sound-layout-100");
 
 MODULE_ALIAS("aoa-device-id-14");
 MODULE_ALIAS("aoa-device-id-22");
-MODULE_ALIAS("aoa-device-id-31");
 MODULE_ALIAS("aoa-device-id-35");
 MODULE_ALIAS("aoa-device-id-44");
 
@@ -358,13 +357,6 @@ static struct layout layouts[] = {
 	},
 	/* PowerBook 5,4 */
 	{ .layout_id = 51,
-	  .codecs[0] = {
-		.name = "tas",
-		.connections = tas_connections_nolineout,
-	  },
-	},
-	/* PowerBook6,1 */
-	{ .device_id = 31,
 	  .codecs[0] = {
 		.name = "tas",
 		.connections = tas_connections_nolineout,
@@ -1169,7 +1161,12 @@ static struct soundbus_driver aoa_soundbus_driver = {
 
 static int __init aoa_fabric_layout_init(void)
 {
-	return soundbus_register_driver(&aoa_soundbus_driver);
+	int err;
+
+	err = soundbus_register_driver(&aoa_soundbus_driver);
+	if (err)
+		return err;
+	return 0;
 }
 
 static void __exit aoa_fabric_layout_exit(void)

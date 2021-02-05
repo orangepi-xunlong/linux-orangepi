@@ -22,6 +22,8 @@
 #ifndef CX24113_H
 #define CX24113_H
 
+#include <linux/kconfig.h>
+
 struct dvb_frontend;
 
 struct cx24113_config {

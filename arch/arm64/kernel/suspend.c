@@ -26,8 +26,8 @@ unsigned long *sleep_save_stash;
  * time the notifier runs debug exceptions might have been enabled already,
  * with HW breakpoints registers content still in an unknown state.
  */
-static int (*hw_breakpoint_restore)(unsigned int);
-void __init cpu_suspend_set_dbg_restorer(int (*hw_bp_restore)(unsigned int))
+static void (*hw_breakpoint_restore)(void *);
+void __init cpu_suspend_set_dbg_restorer(void (*hw_bp_restore)(void *))
 {
 	/* Prevent multiple restore hook initializations */
 	if (WARN_ON(hw_breakpoint_restore))
@@ -37,8 +37,6 @@ void __init cpu_suspend_set_dbg_restorer(int (*hw_bp_restore)(unsigned int))
 
 void notrace __cpu_suspend_exit(void)
 {
-	unsigned int cpu = smp_processor_id();
-
 	/*
 	 * We are resuming from reset with the idmap active in TTBR0_EL1.
 	 * We must uninstall the idmap and restore the expected MMU
@@ -47,28 +45,12 @@ void notrace __cpu_suspend_exit(void)
 	cpu_uninstall_idmap();
 
 	/*
-	 * PSTATE was not saved over suspend/resume, re-enable any detected
-	 * features that might not have been set correctly.
-	 */
-	asm(ALTERNATIVE("nop", SET_PSTATE_PAN(1), ARM64_HAS_PAN,
-			CONFIG_ARM64_PAN));
-	uao_thread_switch(current);
-
-	/*
 	 * Restore HW breakpoint registers to sane values
 	 * before debug exceptions are possibly reenabled
 	 * through local_dbg_restore.
 	 */
 	if (hw_breakpoint_restore)
-		hw_breakpoint_restore(cpu);
-
-	/*
-	 * On resume, firmware implementing dynamic mitigation will
-	 * have turned the mitigation on. If the user has forcefully
-	 * disabled it, make sure their wishes are obeyed.
-	 */
-	if (arm64_get_ssbd_state() == ARM64_SSBD_FORCE_DISABLE)
-		arm64_set_ssbd_mitigation(false);
+		hw_breakpoint_restore(NULL);
 }
 
 /*
@@ -103,11 +85,17 @@ int cpu_suspend(unsigned long arg, int (*fn)(unsigned long))
 		ret = fn(arg);
 
 		/*
-		 * Never gets here, unless the suspend finisher fails.
-		 * Successful cpu_suspend() should return from cpu_resume(),
-		 * returning through this code path is considered an error
-		 * If the return value is set to 0 force ret = -EOPNOTSUPP
-		 * to make sure a proper error condition is propagated
+		 * PSTATE was not saved over suspend/resume, re-enable any
+		 * detected features that might not have been set correctly.
+		 */
+		asm(ALTERNATIVE("nop", SET_PSTATE_PAN(1), ARM64_HAS_PAN,
+				CONFIG_ARM64_PAN));
+		uao_thread_switch(current);
+
+		/*
+		 * Restore HW breakpoint registers to sane values
+		 * before debug exceptions are possibly reenabled
+		 * through local_dbg_restore.
 		 */
 		if (!ret)
 			ret = -EOPNOTSUPP;

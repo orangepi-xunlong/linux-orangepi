@@ -11,6 +11,11 @@
 * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
 * more details.
 *
+* You should have received a copy of the GNU General Public License along with
+* this program; if not, write to the Free Software Foundation, Inc.,
+* 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+*
+*
 ******************************************************************************/
 
 #include "odm_precomp.h"
@@ -19,7 +24,7 @@
 
 static bool check_condition(struct adapter *adapt, const u32  condition)
 {
-	struct odm_dm_struct *odm = &adapt->HalData->odmpriv;
+	struct odm_dm_struct *odm = &GET_HAL_DATA(adapt)->odmpriv;
 	u32 _board = odm->BoardType;
 	u32 _platform = odm->SupportPlatform;
 	u32 _interface = odm->SupportInterface;
@@ -228,7 +233,7 @@ static bool rtl88e_phy_config_rf_with_headerfile(struct adapter *adapt)
 
 static bool rf6052_conf_para(struct adapter *adapt)
 {
-	struct hal_data_8188e *hal_data = adapt->HalData;
+	struct hal_data_8188e *hal_data = GET_HAL_DATA(adapt);
 	u32 u4val = 0;
 	u8 rfpath;
 	bool rtstatus = true;
@@ -299,9 +304,12 @@ static bool rf6052_conf_para(struct adapter *adapt)
 
 static bool rtl88e_phy_rf6052_config(struct adapter *adapt)
 {
-	struct hal_data_8188e *hal_data = adapt->HalData;
+	struct hal_data_8188e *hal_data = GET_HAL_DATA(adapt);
 
-	hal_data->NumTotalRFPath = 1;
+	if (hal_data->rf_type == RF_1T1R)
+		hal_data->NumTotalRFPath = 1;
+	else
+		hal_data->NumTotalRFPath = 2;
 
 	return rf6052_conf_para(adapt);
 }

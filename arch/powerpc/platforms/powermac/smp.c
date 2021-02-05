@@ -852,33 +852,38 @@ static void smp_core99_setup_cpu(int cpu_nr)
 
 #ifdef CONFIG_PPC64
 #ifdef CONFIG_HOTPLUG_CPU
-static unsigned int smp_core99_host_open;
-
-static int smp_core99_cpu_prepare(unsigned int cpu)
+static int smp_core99_cpu_notify(struct notifier_block *self,
+				 unsigned long action, void *hcpu)
 {
 	int rc;
 
-	/* Open i2c bus if it was used for tb sync */
-	if (pmac_tb_clock_chip_host && !smp_core99_host_open) {
-		rc = pmac_i2c_open(pmac_tb_clock_chip_host, 1);
-		if (rc) {
-			pr_err("Failed to open i2c bus for time sync\n");
-			return notifier_from_errno(rc);
+	switch(action) {
+	case CPU_UP_PREPARE:
+	case CPU_UP_PREPARE_FROZEN:
+		/* Open i2c bus if it was used for tb sync */
+		if (pmac_tb_clock_chip_host) {
+			rc = pmac_i2c_open(pmac_tb_clock_chip_host, 1);
+			if (rc) {
+				pr_err("Failed to open i2c bus for time sync\n");
+				return notifier_from_errno(rc);
+			}
 		}
-		smp_core99_host_open = 1;
+		break;
+	case CPU_ONLINE:
+	case CPU_UP_CANCELED:
+		/* Close i2c bus if it was used for tb sync */
+		if (pmac_tb_clock_chip_host)
+			pmac_i2c_close(pmac_tb_clock_chip_host);
+		break;
+	default:
+		break;
 	}
-	return 0;
+	return NOTIFY_OK;
 }
 
-static int smp_core99_cpu_online(unsigned int cpu)
-{
-	/* Close i2c bus if it was used for tb sync */
-	if (pmac_tb_clock_chip_host && smp_core99_host_open) {
-		pmac_i2c_close(pmac_tb_clock_chip_host);
-		smp_core99_host_open = 0;
-	}
-	return 0;
-}
+static struct notifier_block smp_core99_cpu_nb = {
+	.notifier_call	= smp_core99_cpu_notify,
+};
 #endif /* CONFIG_HOTPLUG_CPU */
 
 static void __init smp_core99_bringup_done(void)
@@ -898,11 +903,7 @@ static void __init smp_core99_bringup_done(void)
 		g5_phy_disable_cpu1();
 	}
 #ifdef CONFIG_HOTPLUG_CPU
-	cpuhp_setup_state_nocalls(CPUHP_POWERPC_PMAC_PREPARE,
-				  "powerpc/pmac:prepare", smp_core99_cpu_prepare,
-				  NULL);
-	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "powerpc/pmac:online",
-				  smp_core99_cpu_online, NULL);
+	register_cpu_notifier(&smp_core99_cpu_nb);
 #endif
 
 	if (ppc_md.progress)
@@ -979,7 +980,7 @@ static void pmac_cpu_die(void)
 #endif /* CONFIG_HOTPLUG_CPU */
 
 /* Core99 Macs (dual G4s and G5s) */
-static struct smp_ops_t core99_smp_ops = {
+struct smp_ops_t core99_smp_ops = {
 	.message_pass	= smp_mpic_message_pass,
 	.probe		= smp_core99_probe,
 #ifdef CONFIG_PPC64

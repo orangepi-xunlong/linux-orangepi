@@ -15,10 +15,11 @@
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/oid_registry.h>
-#include <crypto/public_key.h>
+#include "public_key.h"
 #include "x509_parser.h"
 #include "x509-asn1.h"
 #include "x509_akid-asn1.h"
+#include "x509_rsakey-asn1.h"
 
 struct x509_parse_context {
 	struct x509_certificate	*cert;		/* Certificate being constructed */
@@ -47,12 +48,15 @@ struct x509_parse_context {
 void x509_free_certificate(struct x509_certificate *cert)
 {
 	if (cert) {
-		public_key_free(cert->pub);
-		public_key_signature_free(cert->sig);
+		public_key_destroy(cert->pub);
 		kfree(cert->issuer);
 		kfree(cert->subject);
 		kfree(cert->id);
 		kfree(cert->skid);
+		kfree(cert->akid_id);
+		kfree(cert->akid_skid);
+		kfree(cert->sig.digest);
+		mpi_free(cert->sig.rsa.s);
 		kfree(cert);
 	}
 }
@@ -74,9 +78,6 @@ struct x509_certificate *x509_cert_parse(const void *data, size_t datalen)
 		goto error_no_cert;
 	cert->pub = kzalloc(sizeof(struct public_key), GFP_KERNEL);
 	if (!cert->pub)
-		goto error_no_ctx;
-	cert->sig = kzalloc(sizeof(struct public_key_signature), GFP_KERNEL);
-	if (!cert->sig)
 		goto error_no_ctx;
 	ctx = kzalloc(sizeof(struct x509_parse_context), GFP_KERNEL);
 	if (!ctx)
@@ -102,15 +103,9 @@ struct x509_certificate *x509_cert_parse(const void *data, size_t datalen)
 		}
 	}
 
-	ret = -ENOMEM;
-	cert->pub->key = kmemdup(ctx->key, ctx->key_size, GFP_KERNEL);
-	if (!cert->pub->key)
-		goto error_decode;
-
-	cert->pub->keylen = ctx->key_size;
-
-	/* Grab the signature bits */
-	ret = x509_get_sig_params(cert);
+	/* Decode the public key */
+	ret = asn1_ber_decoder(&x509_rsakey_decoder, ctx,
+			       ctx->key, ctx->key_size);
 	if (ret < 0)
 		goto error_decode;
 
@@ -124,11 +119,6 @@ struct x509_certificate *x509_cert_parse(const void *data, size_t datalen)
 		goto error_decode;
 	}
 	cert->id = kid;
-
-	/* Detect self-signed certificates */
-	ret = x509_check_for_self_signed(cert);
-	if (ret < 0)
-		goto error_decode;
 
 	kfree(ctx);
 	return cert;
@@ -198,33 +188,33 @@ int x509_note_pkey_algo(void *context, size_t hdrlen,
 		return -ENOPKG; /* Unsupported combination */
 
 	case OID_md4WithRSAEncryption:
-		ctx->cert->sig->hash_algo = "md4";
-		ctx->cert->sig->pkey_algo = "rsa";
+		ctx->cert->sig.pkey_hash_algo = HASH_ALGO_MD5;
+		ctx->cert->sig.pkey_algo = PKEY_ALGO_RSA;
 		break;
 
 	case OID_sha1WithRSAEncryption:
-		ctx->cert->sig->hash_algo = "sha1";
-		ctx->cert->sig->pkey_algo = "rsa";
+		ctx->cert->sig.pkey_hash_algo = HASH_ALGO_SHA1;
+		ctx->cert->sig.pkey_algo = PKEY_ALGO_RSA;
 		break;
 
 	case OID_sha256WithRSAEncryption:
-		ctx->cert->sig->hash_algo = "sha256";
-		ctx->cert->sig->pkey_algo = "rsa";
+		ctx->cert->sig.pkey_hash_algo = HASH_ALGO_SHA256;
+		ctx->cert->sig.pkey_algo = PKEY_ALGO_RSA;
 		break;
 
 	case OID_sha384WithRSAEncryption:
-		ctx->cert->sig->hash_algo = "sha384";
-		ctx->cert->sig->pkey_algo = "rsa";
+		ctx->cert->sig.pkey_hash_algo = HASH_ALGO_SHA384;
+		ctx->cert->sig.pkey_algo = PKEY_ALGO_RSA;
 		break;
 
 	case OID_sha512WithRSAEncryption:
-		ctx->cert->sig->hash_algo = "sha512";
-		ctx->cert->sig->pkey_algo = "rsa";
+		ctx->cert->sig.pkey_hash_algo = HASH_ALGO_SHA512;
+		ctx->cert->sig.pkey_algo = PKEY_ALGO_RSA;
 		break;
 
 	case OID_sha224WithRSAEncryption:
-		ctx->cert->sig->hash_algo = "sha224";
-		ctx->cert->sig->pkey_algo = "rsa";
+		ctx->cert->sig.pkey_hash_algo = HASH_ALGO_SHA224;
+		ctx->cert->sig.pkey_algo = PKEY_ALGO_RSA;
 		break;
 	}
 
@@ -247,15 +237,6 @@ int x509_note_signature(void *context, size_t hdrlen,
 		pr_warn("Got cert with pkey (%u) and sig (%u) algorithm OIDs\n",
 			ctx->algo_oid, ctx->last_oid);
 		return -EINVAL;
-	}
-
-	if (strcmp(ctx->cert->sig->pkey_algo, "rsa") == 0) {
-		/* Discard the BIT STRING metadata */
-		if (vlen < 1 || *(const u8 *)value != 0)
-			return -EBADMSG;
-
-		value++;
-		vlen--;
 	}
 
 	ctx->cert->raw_sig = value;
@@ -415,13 +396,36 @@ int x509_extract_key_data(void *context, size_t hdrlen,
 	if (ctx->last_oid != OID_rsaEncryption)
 		return -ENOPKG;
 
-	ctx->cert->pub->pkey_algo = "rsa";
+	ctx->cert->pub->pkey_algo = PKEY_ALGO_RSA;
 
 	/* Discard the BIT STRING metadata */
 	if (vlen < 1 || *(const u8 *)value != 0)
 		return -EBADMSG;
 	ctx->key = value + 1;
 	ctx->key_size = vlen - 1;
+	return 0;
+}
+
+/*
+ * Extract a RSA public key value
+ */
+int rsa_extract_mpi(void *context, size_t hdrlen,
+		    unsigned char tag,
+		    const void *value, size_t vlen)
+{
+	struct x509_parse_context *ctx = context;
+	MPI mpi;
+
+	if (ctx->nr_mpi >= ARRAY_SIZE(ctx->cert->pub->mpi)) {
+		pr_err("Too many public key MPIs in certificate\n");
+		return -EBADMSG;
+	}
+
+	mpi = mpi_read_raw_data(value, vlen);
+	if (!mpi)
+		return -ENOMEM;
+
+	ctx->cert->pub->mpi[ctx->nr_mpi++] = mpi;
 	return 0;
 }
 
@@ -546,9 +550,9 @@ int x509_decode_time(time64_t *_t,  size_t hdrlen,
 	}
 
 	if (day < 1 || day > mon_len ||
-	    hour > 24 || /* ISO 8601 permits 24:00:00 as midnight tomorrow */
+	    hour > 23 ||
 	    min > 59 ||
-	    sec > 60) /* ISO 8601 permits leap seconds [X.680 46.3] */
+	    sec > 59)
 		goto invalid_time;
 
 	*_t = mktime64(year, mon, day, hour, min, sec);
@@ -593,14 +597,14 @@ int x509_akid_note_kid(void *context, size_t hdrlen,
 
 	pr_debug("AKID: keyid: %*phN\n", (int)vlen, value);
 
-	if (ctx->cert->sig->auth_ids[1])
+	if (ctx->cert->akid_skid)
 		return 0;
 
 	kid = asymmetric_key_generate_id(value, vlen, "", 0);
 	if (IS_ERR(kid))
 		return PTR_ERR(kid);
 	pr_debug("authkeyid %*phN\n", kid->len, kid->data);
-	ctx->cert->sig->auth_ids[1] = kid;
+	ctx->cert->akid_skid = kid;
 	return 0;
 }
 
@@ -632,7 +636,7 @@ int x509_akid_note_serial(void *context, size_t hdrlen,
 
 	pr_debug("AKID: serial: %*phN\n", (int)vlen, value);
 
-	if (!ctx->akid_raw_issuer || ctx->cert->sig->auth_ids[0])
+	if (!ctx->akid_raw_issuer || ctx->cert->akid_id)
 		return 0;
 
 	kid = asymmetric_key_generate_id(value,
@@ -643,6 +647,6 @@ int x509_akid_note_serial(void *context, size_t hdrlen,
 		return PTR_ERR(kid);
 
 	pr_debug("authkeyid %*phN\n", kid->len, kid->data);
-	ctx->cert->sig->auth_ids[0] = kid;
+	ctx->cert->akid_id = kid;
 	return 0;
 }

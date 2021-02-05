@@ -289,7 +289,7 @@ static void __rate_control_send_low(struct ieee80211_hw *hw,
 	u32 rate_flags =
 		ieee80211_chandef_rate_flags(&hw->conf.chandef);
 
-	if ((sband->band == NL80211_BAND_2GHZ) &&
+	if ((sband->band == IEEE80211_BAND_2GHZ) &&
 	    (info->flags & IEEE80211_TX_CTL_NO_CCK_RATE))
 		rate_flags |= IEEE80211_RATE_ERP_G;
 
@@ -877,9 +877,7 @@ int rate_control_set_rates(struct ieee80211_hw *hw,
 	struct ieee80211_sta_rates *old;
 	struct ieee80211_supported_band *sband;
 
-	sband = ieee80211_get_sband(sta->sdata);
-	if (!sband)
-		return -EINVAL;
+	sband = hw->wiphy->bands[ieee80211_get_sdata_band(sta->sdata)];
 	rate_control_apply_mask_ratetbl(sta, sband, rates);
 	/*
 	 * mac80211 guarantees that this function will not be called

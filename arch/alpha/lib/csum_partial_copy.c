@@ -374,7 +374,6 @@ csum_partial_copy_from_user(const void __user *src, void *dst, int len,
 	}
 	return (__force __wsum)checksum;
 }
-EXPORT_SYMBOL(csum_partial_copy_from_user);
 
 __wsum
 csum_partial_copy_nocheck(const void *src, void *dst, int len, __wsum sum)
@@ -387,4 +386,3 @@ csum_partial_copy_nocheck(const void *src, void *dst, int len, __wsum sum)
 	set_fs(oldfs);
 	return checksum;
 }
-EXPORT_SYMBOL(csum_partial_copy_nocheck);

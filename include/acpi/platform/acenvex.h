@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -56,24 +56,17 @@
 #if defined(_LINUX) || defined(__linux__)
 #include <acpi/platform/aclinuxex.h>
 
-#elif defined(__DragonFly__)
-#include "acdragonflyex.h"
+#elif defined(WIN32)
+#include "acwinex.h"
 
-/*
- * EFI applications can be built with -nostdlib, in this case, it must be
- * included after including all other host environmental definitions, in
- * order to override the definitions.
- */
-#elif defined(_AED_EFI) || defined(_GNU_EFI) || defined(_EDK2_EFI)
+#elif defined(_AED_EFI)
 #include "acefiex.h"
 
-#endif
+#elif defined(_GNU_EFI)
+#include "acefiex.h"
 
-#if defined(__GNUC__) && !defined(__INTEL_COMPILER)
-#include "acgccex.h"
-
-#elif defined(_MSC_VER)
-#include "acmsvcex.h"
+#elif defined(__DragonFly__)
+#include "acdragonflyex.h"
 
 #endif
 

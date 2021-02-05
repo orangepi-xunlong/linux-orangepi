@@ -51,7 +51,7 @@
 	#size-cells = <2>;
 
 	cpus {
-		#address-cells = <1>;
+		#address-cells = <2>;
 		#size-cells = <0>;
 
 		/*
@@ -65,81 +65,57 @@
 		cpu@0 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a57";
-			reg = <0x0>;
+			reg = <0x0 0x0>;
 			clocks = <&clockgen 1 0>;
-			next-level-cache = <&cluster0_l2>;
 		};
 
 		cpu@1 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a57";
-			reg = <0x1>;
+			reg = <0x0 0x1>;
 			clocks = <&clockgen 1 0>;
-			next-level-cache = <&cluster0_l2>;
 		};
 
 		cpu@100 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a57";
-			reg = <0x100>;
+			reg = <0x0 0x100>;
 			clocks = <&clockgen 1 1>;
-			next-level-cache = <&cluster1_l2>;
 		};
 
 		cpu@101 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a57";
-			reg = <0x101>;
+			reg = <0x0 0x101>;
 			clocks = <&clockgen 1 1>;
-			next-level-cache = <&cluster1_l2>;
 		};
 
 		cpu@200 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a57";
-			reg = <0x200>;
+			reg = <0x0 0x200>;
 			clocks = <&clockgen 1 2>;
-			next-level-cache = <&cluster2_l2>;
 		};
 
 		cpu@201 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a57";
-			reg = <0x201>;
+			reg = <0x0 0x201>;
 			clocks = <&clockgen 1 2>;
-			next-level-cache = <&cluster2_l2>;
 		};
 
 		cpu@300 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a57";
-			reg = <0x300>;
+			reg = <0x0 0x300>;
 			clocks = <&clockgen 1 3>;
-			next-level-cache = <&cluster3_l2>;
 		};
 
 		cpu@301 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a57";
-			reg = <0x301>;
+			reg = <0x0 0x301>;
 			clocks = <&clockgen 1 3>;
-			next-level-cache = <&cluster3_l2>;
-		};
-
-		cluster0_l2: l2-cache0 {
-			compatible = "cache";
-		};
-
-		cluster1_l2: l2-cache1 {
-			compatible = "cache";
-		};
-
-		cluster2_l2: l2-cache2 {
-			compatible = "cache";
-		};
-
-		cluster3_l2: l2-cache3 {
-			compatible = "cache";
 		};
 	};
 
@@ -177,25 +153,12 @@
 		};
 	};
 
-	rstcr: syscon@1e60000 {
-		compatible = "fsl,ls2080a-rstcr", "syscon";
-		reg = <0x0 0x1e60000 0x0 0x4>;
-	};
-
-	reboot {
-		compatible ="syscon-reboot";
-		regmap = <&rstcr>;
-		offset = <0x0>;
-		mask = <0x2>;
-	};
-
 	timer {
 		compatible = "arm,armv8-timer";
-		interrupts = <1 13 4>, /* Physical Secure PPI, active-low */
-			     <1 14 4>, /* Physical Non-Secure PPI, active-low */
-			     <1 11 4>, /* Virtual PPI, active-low */
-			     <1 10 4>; /* Hypervisor PPI, active-low */
-		fsl,erratum-a008585;
+		interrupts = <1 13 0x8>, /* Physical Secure PPI, active-low */
+			     <1 14 0x8>, /* Physical Non-Secure PPI, active-low */
+			     <1 11 0x8>, /* Virtual PPI, active-low */
+			     <1 10 0x8>; /* Hypervisor PPI, active-low */
 	};
 
 	pmu {
@@ -230,164 +193,10 @@
 			interrupts = <0 32 0x4>; /* Level high type */
 		};
 
-		cluster1_core0_watchdog: wdt@c000000 {
-			compatible = "arm,sp805-wdt", "arm,primecell";
-			reg = <0x0 0xc000000 0x0 0x1000>;
-			clocks = <&clockgen 4 3>, <&clockgen 4 3>;
-			clock-names = "apb_pclk", "wdog_clk";
-		};
-
-		cluster1_core1_watchdog: wdt@c010000 {
-			compatible = "arm,sp805-wdt", "arm,primecell";
-			reg = <0x0 0xc010000 0x0 0x1000>;
-			clocks = <&clockgen 4 3>, <&clockgen 4 3>;
-			clock-names = "apb_pclk", "wdog_clk";
-		};
-
-		cluster2_core0_watchdog: wdt@c100000 {
-			compatible = "arm,sp805-wdt", "arm,primecell";
-			reg = <0x0 0xc100000 0x0 0x1000>;
-			clocks = <&clockgen 4 3>, <&clockgen 4 3>;
-			clock-names = "apb_pclk", "wdog_clk";
-		};
-
-		cluster2_core1_watchdog: wdt@c110000 {
-			compatible = "arm,sp805-wdt", "arm,primecell";
-			reg = <0x0 0xc110000 0x0 0x1000>;
-			clocks = <&clockgen 4 3>, <&clockgen 4 3>;
-			clock-names = "apb_pclk", "wdog_clk";
-		};
-
-		cluster3_core0_watchdog: wdt@c200000 {
-			compatible = "arm,sp805-wdt", "arm,primecell";
-			reg = <0x0 0xc200000 0x0 0x1000>;
-			clocks = <&clockgen 4 3>, <&clockgen 4 3>;
-			clock-names = "apb_pclk", "wdog_clk";
-		};
-
-		cluster3_core1_watchdog: wdt@c210000 {
-			compatible = "arm,sp805-wdt", "arm,primecell";
-			reg = <0x0 0xc210000 0x0 0x1000>;
-			clocks = <&clockgen 4 3>, <&clockgen 4 3>;
-			clock-names = "apb_pclk", "wdog_clk";
-		};
-
-		cluster4_core0_watchdog: wdt@c300000 {
-			compatible = "arm,sp805-wdt", "arm,primecell";
-			reg = <0x0 0xc300000 0x0 0x1000>;
-			clocks = <&clockgen 4 3>, <&clockgen 4 3>;
-			clock-names = "apb_pclk", "wdog_clk";
-		};
-
-		cluster4_core1_watchdog: wdt@c310000 {
-			compatible = "arm,sp805-wdt", "arm,primecell";
-			reg = <0x0 0xc310000 0x0 0x1000>;
-			clocks = <&clockgen 4 3>, <&clockgen 4 3>;
-			clock-names = "apb_pclk", "wdog_clk";
-		};
-
 		fsl_mc: fsl-mc@80c000000 {
 			compatible = "fsl,qoriq-mc";
 			reg = <0x00000008 0x0c000000 0 0x40>,	 /* MC portal base */
 			      <0x00000000 0x08340000 0 0x40000>; /* MC control reg */
-			msi-parent = <&its>;
-			#address-cells = <3>;
-			#size-cells = <1>;
-
-			/*
-			 * Region type 0x0 - MC portals
-			 * Region type 0x1 - QBMAN portals
-			 */
-			ranges = <0x0 0x0 0x0 0x8 0x0c000000 0x4000000
-				  0x1 0x0 0x0 0x8 0x18000000 0x8000000>;
-
-			/*
-			 * Define the maximum number of MACs present on the SoC.
-			 */
-			dpmacs {
-				#address-cells = <1>;
-				#size-cells = <0>;
-
-				dpmac1: dpmac@1 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x1>;
-				};
-
-				dpmac2: dpmac@2 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x2>;
-				};
-
-				dpmac3: dpmac@3 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x3>;
-				};
-
-				dpmac4: dpmac@4 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x4>;
-				};
-
-				dpmac5: dpmac@5 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x5>;
-				};
-
-				dpmac6: dpmac@6 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x6>;
-				};
-
-				dpmac7: dpmac@7 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x7>;
-				};
-
-				dpmac8: dpmac@8 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x8>;
-				};
-
-				dpmac9: dpmac@9 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x9>;
-				};
-
-				dpmac10: dpmac@a {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0xa>;
-				};
-
-				dpmac11: dpmac@b {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0xb>;
-				};
-
-				dpmac12: dpmac@c {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0xc>;
-				};
-
-				dpmac13: dpmac@d {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0xd>;
-				};
-
-				dpmac14: dpmac@e {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0xe>;
-				};
-
-				dpmac15: dpmac@f {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0xf>;
-				};
-
-				dpmac16: dpmac@10 {
-					compatible = "fsl,qoriq-mc-dpmac";
-					reg = <0x10>;
-				};
-			};
 		};
 
 		smmu: iommu@5000000 {
@@ -441,7 +250,7 @@
 
 		dspi: dspi@2100000 {
 			status = "disabled";
-			compatible = "fsl,ls2080a-dspi", "fsl,ls2085a-dspi";
+			compatible = "fsl,vf610-dspi";
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <0x0 0x2100000 0x0 0x10000>;
@@ -465,7 +274,7 @@
 		};
 
 		gpio0: gpio@2300000 {
-			compatible = "fsl,ls2080a-gpio", "fsl,qoriq-gpio";
+			compatible = "fsl,qoriq-gpio";
 			reg = <0x0 0x2300000 0x0 0x10000>;
 			interrupts = <0 36 0x4>; /* Level high type */
 			gpio-controller;
@@ -476,7 +285,7 @@
 		};
 
 		gpio1: gpio@2310000 {
-			compatible = "fsl,ls2080a-gpio", "fsl,qoriq-gpio";
+			compatible = "fsl,qoriq-gpio";
 			reg = <0x0 0x2310000 0x0 0x10000>;
 			interrupts = <0 36 0x4>; /* Level high type */
 			gpio-controller;
@@ -487,7 +296,7 @@
 		};
 
 		gpio2: gpio@2320000 {
-			compatible = "fsl,ls2080a-gpio", "fsl,qoriq-gpio";
+			compatible = "fsl,qoriq-gpio";
 			reg = <0x0 0x2320000 0x0 0x10000>;
 			interrupts = <0 37 0x4>; /* Level high type */
 			gpio-controller;
@@ -498,7 +307,7 @@
 		};
 
 		gpio3: gpio@2330000 {
-			compatible = "fsl,ls2080a-gpio", "fsl,qoriq-gpio";
+			compatible = "fsl,qoriq-gpio";
 			reg = <0x0 0x2330000 0x0 0x10000>;
 			interrupts = <0 37 0x4>; /* Level high type */
 			gpio-controller;
@@ -567,7 +376,7 @@
 
 		qspi: quadspi@20c0000 {
 			status = "disabled";
-			compatible = "fsl,ls2080a-qspi", "fsl,ls1021a-qspi";
+			compatible = "fsl,vf610-qspi";
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <0x0 0x20c0000 0x0 0x10000>,
@@ -579,8 +388,7 @@
 		};
 
 		pcie@3400000 {
-			compatible = "fsl,ls2080a-pcie", "fsl,ls2085a-pcie",
-				     "snps,dw-pcie";
+			compatible = "fsl,ls2080a-pcie", "snps,dw-pcie";
 			reg = <0x00 0x03400000 0x0 0x00100000   /* controller registers */
 			       0x10 0x00000000 0x0 0x00002000>; /* configuration space */
 			reg-names = "regs", "config";
@@ -589,7 +397,6 @@
 			#address-cells = <3>;
 			#size-cells = <2>;
 			device_type = "pci";
-			dma-coherent;
 			num-lanes = <4>;
 			bus-range = <0x0 0xff>;
 			ranges = <0x81000000 0x0 0x00000000 0x10 0x00010000 0x0 0x00010000   /* downstream I/O */
@@ -604,8 +411,7 @@
 		};
 
 		pcie@3500000 {
-			compatible = "fsl,ls2080a-pcie", "fsl,ls2085a-pcie",
-				     "snps,dw-pcie";
+			compatible = "fsl,ls2080a-pcie", "snps,dw-pcie";
 			reg = <0x00 0x03500000 0x0 0x00100000   /* controller registers */
 			       0x12 0x00000000 0x0 0x00002000>; /* configuration space */
 			reg-names = "regs", "config";
@@ -614,7 +420,6 @@
 			#address-cells = <3>;
 			#size-cells = <2>;
 			device_type = "pci";
-			dma-coherent;
 			num-lanes = <4>;
 			bus-range = <0x0 0xff>;
 			ranges = <0x81000000 0x0 0x00000000 0x12 0x00010000 0x0 0x00010000   /* downstream I/O */
@@ -629,8 +434,7 @@
 		};
 
 		pcie@3600000 {
-			compatible = "fsl,ls2080a-pcie", "fsl,ls2085a-pcie",
-				     "snps,dw-pcie";
+			compatible = "fsl,ls2080a-pcie", "snps,dw-pcie";
 			reg = <0x00 0x03600000 0x0 0x00100000   /* controller registers */
 			       0x14 0x00000000 0x0 0x00002000>; /* configuration space */
 			reg-names = "regs", "config";
@@ -639,7 +443,6 @@
 			#address-cells = <3>;
 			#size-cells = <2>;
 			device_type = "pci";
-			dma-coherent;
 			num-lanes = <8>;
 			bus-range = <0x0 0xff>;
 			ranges = <0x81000000 0x0 0x00000000 0x14 0x00010000 0x0 0x00010000   /* downstream I/O */
@@ -654,8 +457,7 @@
 		};
 
 		pcie@3700000 {
-			compatible = "fsl,ls2080a-pcie", "fsl,ls2085a-pcie",
-				     "snps,dw-pcie";
+			compatible = "fsl,ls2080a-pcie", "snps,dw-pcie";
 			reg = <0x00 0x03700000 0x0 0x00100000   /* controller registers */
 			       0x16 0x00000000 0x0 0x00002000>; /* configuration space */
 			reg-names = "regs", "config";
@@ -664,7 +466,6 @@
 			#address-cells = <3>;
 			#size-cells = <2>;
 			device_type = "pci";
-			dma-coherent;
 			num-lanes = <4>;
 			bus-range = <0x0 0xff>;
 			ranges = <0x81000000 0x0 0x00000000 0x16 0x00010000 0x0 0x00010000   /* downstream I/O */
@@ -684,7 +485,6 @@
 			reg = <0x0 0x3200000 0x0 0x10000>;
 			interrupts = <0 133 0x4>; /* Level high type */
 			clocks = <&clockgen 4 3>;
-			dma-coherent;
 		};
 
 		sata1: sata@3210000 {
@@ -693,7 +493,6 @@
 			reg = <0x0 0x3210000 0x0 0x10000>;
 			interrupts = <0 136 0x4>; /* Level high type */
 			clocks = <&clockgen 4 3>;
-			dma-coherent;
 		};
 
 		usb0: usb3@3100000 {
@@ -702,8 +501,6 @@
 			reg = <0x0 0x3100000 0x0 0x10000>;
 			interrupts = <0 80 0x4>; /* Level high type */
 			dr_mode = "host";
-			snps,quirk-frame-length-adjustment = <0x20>;
-			snps,dis_rxdet_inp3_quirk;
 		};
 
 		usb1: usb3@3110000 {
@@ -712,8 +509,6 @@
 			reg = <0x0 0x3110000 0x0 0x10000>;
 			interrupts = <0 81 0x4>; /* Level high type */
 			dr_mode = "host";
-			snps,quirk-frame-length-adjustment = <0x20>;
-			snps,dis_rxdet_inp3_quirk;
 		};
 
 		ccn@4000000 {
@@ -721,19 +516,5 @@
 			reg = <0x0 0x04000000 0x0 0x01000000>;
 			interrupts = <0 12 4>;
 		};
-	};
-
-	ddr1: memory-controller@1080000 {
-		compatible = "fsl,qoriq-memory-controller";
-		reg = <0x0 0x1080000 0x0 0x1000>;
-		interrupts = <0 17 0x4>;
-		little-endian;
-	};
-
-	ddr2: memory-controller@1090000 {
-		compatible = "fsl,qoriq-memory-controller";
-		reg = <0x0 0x1090000 0x0 0x1000>;
-		interrupts = <0 18 0x4>;
-		little-endian;
 	};
 };

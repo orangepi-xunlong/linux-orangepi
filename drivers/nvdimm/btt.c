@@ -31,6 +31,8 @@ enum log_ent_request {
 	LOG_OLD_ENT
 };
 
+static int btt_major;
+
 static int arena_read_bytes(struct arena_info *arena, resource_size_t offset,
 		void *buf, size_t n)
 {
@@ -183,13 +185,13 @@ static int btt_map_read(struct arena_info *arena, u32 lba, u32 *mapping,
 	return ret;
 }
 
-static int btt_log_group_read(struct arena_info *arena, u32 lane,
-			struct log_group *log)
+static int btt_log_read_pair(struct arena_info *arena, u32 lane,
+			struct log_entry *ent)
 {
-	WARN_ON(!log);
+	WARN_ON(!ent);
 	return arena_read_bytes(arena,
-			arena->logoff + (lane * LOG_GRP_SIZE), log,
-			LOG_GRP_SIZE);
+			arena->logoff + (2 * lane * LOG_ENT_SIZE), ent,
+			2 * LOG_ENT_SIZE);
 }
 
 static struct dentry *debugfs_root;
@@ -229,8 +231,6 @@ static void arena_debugfs_init(struct arena_info *a, struct dentry *parent,
 	debugfs_create_x64("logoff", S_IRUGO, d, &a->logoff);
 	debugfs_create_x64("info2off", S_IRUGO, d, &a->info2off);
 	debugfs_create_x32("flags", S_IRUGO, d, &a->flags);
-	debugfs_create_u32("log_index_0", S_IRUGO, d, &a->log_index[0]);
-	debugfs_create_u32("log_index_1", S_IRUGO, d, &a->log_index[1]);
 }
 
 static void btt_debugfs_init(struct btt *btt)
@@ -249,11 +249,6 @@ static void btt_debugfs_init(struct btt *btt)
 	}
 }
 
-static u32 log_seq(struct log_group *log, int log_idx)
-{
-	return le32_to_cpu(log->ent[log_idx].seq);
-}
-
 /*
  * This function accepts two log entries, and uses the
  * sequence number to find the 'older' entry.
@@ -263,10 +258,8 @@ static u32 log_seq(struct log_group *log, int log_idx)
  *
  * TODO The logic feels a bit kludge-y. make it better..
  */
-static int btt_log_get_old(struct arena_info *a, struct log_group *log)
+static int btt_log_get_old(struct log_entry *ent)
 {
-	int idx0 = a->log_index[0];
-	int idx1 = a->log_index[1];
 	int old;
 
 	/*
@@ -274,23 +267,23 @@ static int btt_log_get_old(struct arena_info *a, struct log_group *log)
 	 * the next time, the following logic works out to put this
 	 * (next) entry into [1]
 	 */
-	if (log_seq(log, idx0) == 0) {
-		log->ent[idx0].seq = cpu_to_le32(1);
+	if (ent[0].seq == 0) {
+		ent[0].seq = cpu_to_le32(1);
 		return 0;
 	}
 
-	if (log_seq(log, idx0) == log_seq(log, idx1))
+	if (ent[0].seq == ent[1].seq)
 		return -EINVAL;
-	if (log_seq(log, idx0) + log_seq(log, idx1) > 5)
+	if (le32_to_cpu(ent[0].seq) + le32_to_cpu(ent[1].seq) > 5)
 		return -EINVAL;
 
-	if (log_seq(log, idx0) < log_seq(log, idx1)) {
-		if ((log_seq(log, idx1) - log_seq(log, idx0)) == 1)
+	if (le32_to_cpu(ent[0].seq) < le32_to_cpu(ent[1].seq)) {
+		if (le32_to_cpu(ent[1].seq) - le32_to_cpu(ent[0].seq) == 1)
 			old = 0;
 		else
 			old = 1;
 	} else {
-		if ((log_seq(log, idx0) - log_seq(log, idx1)) == 1)
+		if (le32_to_cpu(ent[0].seq) - le32_to_cpu(ent[1].seq) == 1)
 			old = 1;
 		else
 			old = 0;
@@ -315,18 +308,17 @@ static int btt_log_read(struct arena_info *arena, u32 lane,
 {
 	int ret;
 	int old_ent, ret_ent;
-	struct log_group log;
+	struct log_entry log[2];
 
-	ret = btt_log_group_read(arena, lane, &log);
+	ret = btt_log_read_pair(arena, lane, log);
 	if (ret)
 		return -EIO;
 
-	old_ent = btt_log_get_old(arena, &log);
+	old_ent = btt_log_get_old(log);
 	if (old_ent < 0 || old_ent > 1) {
 		dev_info(to_dev(arena),
 				"log corruption (%d): lane %d seq [%d, %d]\n",
-				old_ent, lane, log.ent[arena->log_index[0]].seq,
-				log.ent[arena->log_index[1]].seq);
+			old_ent, lane, log[0].seq, log[1].seq);
 		/* TODO set error state? */
 		return -EIO;
 	}
@@ -334,7 +326,7 @@ static int btt_log_read(struct arena_info *arena, u32 lane,
 	ret_ent = (old_flag ? old_ent : (1 - old_ent));
 
 	if (ent != NULL)
-		memcpy(ent, &log.ent[arena->log_index[ret_ent]], LOG_ENT_SIZE);
+		memcpy(ent, &log[ret_ent], LOG_ENT_SIZE);
 
 	return ret_ent;
 }
@@ -348,13 +340,17 @@ static int __btt_log_write(struct arena_info *arena, u32 lane,
 			u32 sub, struct log_entry *ent)
 {
 	int ret;
-	u32 group_slot = arena->log_index[sub];
-	unsigned int log_half = LOG_ENT_SIZE / 2;
+	/*
+	 * Ignore the padding in log_entry for calculating log_half.
+	 * The entry is 'committed' when we write the sequence number,
+	 * and we want to ensure that that is the last thing written.
+	 * We don't bother writing the padding as that would be extra
+	 * media wear and write amplification
+	 */
+	unsigned int log_half = (LOG_ENT_SIZE - 2 * sizeof(u64)) / 2;
+	u64 ns_off = arena->logoff + (((2 * lane) + sub) * LOG_ENT_SIZE);
 	void *src = ent;
-	u64 ns_off;
 
-	ns_off = arena->logoff + (lane * LOG_GRP_SIZE) +
-		(group_slot * LOG_ENT_SIZE);
 	/* split the 16B write into atomic, durable halves */
 	ret = arena_write_bytes(arena, ns_off, src, log_half);
 	if (ret)
@@ -425,16 +421,16 @@ static int btt_log_init(struct arena_info *arena)
 {
 	int ret;
 	u32 i;
-	struct log_entry ent, zerolog;
+	struct log_entry log, zerolog;
 
 	memset(&zerolog, 0, sizeof(zerolog));
 
 	for (i = 0; i < arena->nfree; i++) {
-		ent.lba = cpu_to_le32(i);
-		ent.old_map = cpu_to_le32(arena->external_nlba + i);
-		ent.new_map = cpu_to_le32(arena->external_nlba + i);
-		ent.seq = cpu_to_le32(LOG_SEQ_INIT);
-		ret = __btt_log_write(arena, i, 0, &ent);
+		log.lba = cpu_to_le32(i);
+		log.old_map = cpu_to_le32(arena->external_nlba + i);
+		log.new_map = cpu_to_le32(arena->external_nlba + i);
+		log.seq = cpu_to_le32(LOG_SEQ_INIT);
+		ret = __btt_log_write(arena, i, 0, &log);
 		if (ret)
 			return ret;
 		ret = __btt_log_write(arena, i, 1, &zerolog);
@@ -496,123 +492,6 @@ static int btt_freelist_init(struct arena_info *arena)
 	return 0;
 }
 
-static bool ent_is_padding(struct log_entry *ent)
-{
-	return (ent->lba == 0) && (ent->old_map == 0) && (ent->new_map == 0)
-		&& (ent->seq == 0);
-}
-
-/*
- * Detecting valid log indices: We read a log group (see the comments in btt.h
- * for a description of a 'log_group' and its 'slots'), and iterate over its
- * four slots. We expect that a padding slot will be all-zeroes, and use this
- * to detect a padding slot vs. an actual entry.
- *
- * If a log_group is in the initial state, i.e. hasn't been used since the
- * creation of this BTT layout, it will have three of the four slots with
- * zeroes. We skip over these log_groups for the detection of log_index. If
- * all log_groups are in the initial state (i.e. the BTT has never been
- * written to), it is safe to assume the 'new format' of log entries in slots
- * (0, 1).
- */
-static int log_set_indices(struct arena_info *arena)
-{
-	bool idx_set = false, initial_state = true;
-	int ret, log_index[2] = {-1, -1};
-	u32 i, j, next_idx = 0;
-	struct log_group log;
-	u32 pad_count = 0;
-
-	for (i = 0; i < arena->nfree; i++) {
-		ret = btt_log_group_read(arena, i, &log);
-		if (ret < 0)
-			return ret;
-
-		for (j = 0; j < 4; j++) {
-			if (!idx_set) {
-				if (ent_is_padding(&log.ent[j])) {
-					pad_count++;
-					continue;
-				} else {
-					/* Skip if index has been recorded */
-					if ((next_idx == 1) &&
-						(j == log_index[0]))
-						continue;
-					/* valid entry, record index */
-					log_index[next_idx] = j;
-					next_idx++;
-				}
-				if (next_idx == 2) {
-					/* two valid entries found */
-					idx_set = true;
-				} else if (next_idx > 2) {
-					/* too many valid indices */
-					return -ENXIO;
-				}
-			} else {
-				/*
-				 * once the indices have been set, just verify
-				 * that all subsequent log groups are either in
-				 * their initial state or follow the same
-				 * indices.
-				 */
-				if (j == log_index[0]) {
-					/* entry must be 'valid' */
-					if (ent_is_padding(&log.ent[j]))
-						return -ENXIO;
-				} else if (j == log_index[1]) {
-					;
-					/*
-					 * log_index[1] can be padding if the
-					 * lane never got used and it is still
-					 * in the initial state (three 'padding'
-					 * entries)
-					 */
-				} else {
-					/* entry must be invalid (padding) */
-					if (!ent_is_padding(&log.ent[j]))
-						return -ENXIO;
-				}
-			}
-		}
-		/*
-		 * If any of the log_groups have more than one valid,
-		 * non-padding entry, then the we are no longer in the
-		 * initial_state
-		 */
-		if (pad_count < 3)
-			initial_state = false;
-		pad_count = 0;
-	}
-
-	if (!initial_state && !idx_set)
-		return -ENXIO;
-
-	/*
-	 * If all the entries in the log were in the initial state,
-	 * assume new padding scheme
-	 */
-	if (initial_state)
-		log_index[1] = 1;
-
-	/*
-	 * Only allow the known permutations of log/padding indices,
-	 * i.e. (0, 1), and (0, 2)
-	 */
-	if ((log_index[0] == 0) && ((log_index[1] == 1) || (log_index[1] == 2)))
-		; /* known index possibilities */
-	else {
-		dev_err(to_dev(arena), "Found an unknown padding scheme\n");
-		return -ENXIO;
-	}
-
-	arena->log_index[0] = log_index[0];
-	arena->log_index[1] = log_index[1];
-	dev_dbg(to_dev(arena), "log_index_0 = %d\n", log_index[0]);
-	dev_dbg(to_dev(arena), "log_index_1 = %d\n", log_index[1]);
-	return 0;
-}
-
 static int btt_rtt_init(struct arena_info *arena)
 {
 	arena->rtt = kcalloc(arena->nfree, sizeof(u32), GFP_KERNEL);
@@ -668,7 +547,8 @@ static struct arena_info *alloc_arena(struct btt *btt, size_t size,
 	available -= 2 * BTT_PG_SIZE;
 
 	/* The log takes a fixed amount of space based on nfree */
-	logsize = roundup(arena->nfree * LOG_GRP_SIZE, BTT_PG_SIZE);
+	logsize = roundup(2 * arena->nfree * sizeof(struct log_entry),
+				BTT_PG_SIZE);
 	available -= logsize;
 
 	/* Calculate optimal split between map and data area */
@@ -685,10 +565,6 @@ static struct arena_info *alloc_arena(struct btt *btt, size_t size,
 	arena->mapoff = arena->dataoff + datasize;
 	arena->logoff = arena->mapoff + mapsize;
 	arena->info2off = arena->logoff + logsize;
-
-	/* Default log indices are (0,1) */
-	arena->log_index[0] = 0;
-	arena->log_index[1] = 1;
 	return arena;
 }
 
@@ -778,13 +654,6 @@ static int discover_arenas(struct btt *btt)
 
 		arena->external_lba_start = cur_nlba;
 		parse_arena_meta(arena, super, cur_off);
-
-		ret = log_set_indices(arena);
-		if (ret) {
-			dev_err(to_dev(arena),
-				"Unable to deduce log/padding indices\n");
-			goto out;
-		}
 
 		ret = btt_freelist_init(arena);
 		if (ret)
@@ -1266,11 +1135,11 @@ static int btt_write_pg(struct btt *btt, struct bio_integrity_payload *bip,
 
 static int btt_do_bvec(struct btt *btt, struct bio_integrity_payload *bip,
 			struct page *page, unsigned int len, unsigned int off,
-			bool is_write, sector_t sector)
+			int rw, sector_t sector)
 {
 	int ret;
 
-	if (!is_write) {
+	if (rw == READ) {
 		ret = btt_read_pg(btt, bip, page, off, sector, len);
 		flush_dcache_page(page);
 	} else {
@@ -1288,7 +1157,7 @@ static blk_qc_t btt_make_request(struct request_queue *q, struct bio *bio)
 	struct bvec_iter iter;
 	unsigned long start;
 	struct bio_vec bvec;
-	int err = 0;
+	int err = 0, rw;
 	bool do_acct;
 
 	/*
@@ -1303,6 +1172,7 @@ static blk_qc_t btt_make_request(struct request_queue *q, struct bio *bio)
 	}
 
 	do_acct = nd_iostat_start(bio, &start);
+	rw = bio_data_dir(bio);
 	bio_for_each_segment(bvec, bio, iter) {
 		unsigned int len = bvec.bv_len;
 
@@ -1313,12 +1183,11 @@ static blk_qc_t btt_make_request(struct request_queue *q, struct bio *bio)
 		BUG_ON(len % btt->sector_size);
 
 		err = btt_do_bvec(btt, bip, bvec.bv_page, len, bvec.bv_offset,
-				  op_is_write(bio_op(bio)), iter.bi_sector);
+				rw, iter.bi_sector);
 		if (err) {
 			dev_info(&btt->nd_btt->dev,
 					"io error in %s sector %lld, len %d,\n",
-					(op_is_write(bio_op(bio))) ? "WRITE" :
-					"READ",
+					(rw == READ) ? "READ" : "WRITE",
 					(unsigned long long) iter.bi_sector, len);
 			bio->bi_error = err;
 			break;
@@ -1333,14 +1202,14 @@ out:
 }
 
 static int btt_rw_page(struct block_device *bdev, sector_t sector,
-		struct page *page, bool is_write)
+		struct page *page, int rw)
 {
 	struct btt *btt = bdev->bd_disk->private_data;
 	int rc;
 
-	rc = btt_do_bvec(btt, NULL, page, PAGE_SIZE, 0, is_write, sector);
+	rc = btt_do_bvec(btt, NULL, page, PAGE_CACHE_SIZE, 0, rw, sector);
 	if (rc == 0)
-		page_endio(page, is_write, 0);
+		page_endio(page, rw & WRITE, 0);
 
 	return rc;
 }
@@ -1379,6 +1248,8 @@ static int btt_blk_init(struct btt *btt)
 	}
 
 	nvdimm_namespace_disk_name(ndns, btt->btt_disk->disk_name);
+	btt->btt_disk->driverfs_dev = &btt->nd_btt->dev;
+	btt->btt_disk->major = btt_major;
 	btt->btt_disk->first_minor = 0;
 	btt->btt_disk->fops = &btt_fops;
 	btt->btt_disk->private_data = btt;
@@ -1392,6 +1263,8 @@ static int btt_blk_init(struct btt *btt)
 	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, btt->btt_queue);
 	btt->btt_queue->queuedata = btt;
 
+	set_capacity(btt->btt_disk, 0);
+	add_disk(btt->btt_disk);
 	if (btt_meta_size(btt)) {
 		int rc = nd_integrity_init(btt->btt_disk, btt_meta_size(btt));
 
@@ -1403,8 +1276,6 @@ static int btt_blk_init(struct btt *btt)
 		}
 	}
 	set_capacity(btt->btt_disk, btt->nlba * btt->sector_size >> 9);
-	device_add_disk(&btt->nd_btt->dev, btt->btt_disk);
-	btt->nd_btt->size = btt->nlba * (u64)btt->sector_size;
 	revalidate_disk(btt->btt_disk);
 
 	return 0;
@@ -1441,7 +1312,7 @@ static struct btt *btt_init(struct nd_btt *nd_btt, unsigned long long rawsize,
 	struct btt *btt;
 	struct device *dev = &nd_btt->dev;
 
-	btt = devm_kzalloc(dev, sizeof(struct btt), GFP_KERNEL);
+	btt = kzalloc(sizeof(struct btt), GFP_KERNEL);
 	if (!btt)
 		return NULL;
 
@@ -1456,13 +1327,13 @@ static struct btt *btt_init(struct nd_btt *nd_btt, unsigned long long rawsize,
 	ret = discover_arenas(btt);
 	if (ret) {
 		dev_err(dev, "init: error in arena_discover: %d\n", ret);
-		return NULL;
+		goto out_free;
 	}
 
 	if (btt->init_state != INIT_READY && nd_region->ro) {
 		dev_info(dev, "%s is read-only, unable to init btt metadata\n",
 				dev_name(&nd_region->dev));
-		return NULL;
+		goto out_free;
 	} else if (btt->init_state != INIT_READY) {
 		btt->num_arenas = (rawsize / ARENA_MAX_SIZE) +
 			((rawsize % ARENA_MAX_SIZE) ? 1 : 0);
@@ -1472,25 +1343,29 @@ static struct btt *btt_init(struct nd_btt *nd_btt, unsigned long long rawsize,
 		ret = create_arenas(btt);
 		if (ret) {
 			dev_info(dev, "init: create_arenas: %d\n", ret);
-			return NULL;
+			goto out_free;
 		}
 
 		ret = btt_meta_init(btt);
 		if (ret) {
 			dev_err(dev, "init: error in meta_init: %d\n", ret);
-			return NULL;
+			goto out_free;
 		}
 	}
 
 	ret = btt_blk_init(btt);
 	if (ret) {
 		dev_err(dev, "init: error in blk_init: %d\n", ret);
-		return NULL;
+		goto out_free;
 	}
 
 	btt_debugfs_init(btt);
 
 	return btt;
+
+ out_free:
+	kfree(btt);
+	return NULL;
 }
 
 /**
@@ -1508,6 +1383,7 @@ static void btt_fini(struct btt *btt)
 		btt_blk_cleanup(btt);
 		free_arenas(btt);
 		debugfs_remove_recursive(btt->debugfs_dir);
+		kfree(btt);
 	}
 }
 
@@ -1518,15 +1394,11 @@ int nvdimm_namespace_attach_btt(struct nd_namespace_common *ndns)
 	struct btt *btt;
 	size_t rawsize;
 
-	if (!nd_btt->uuid || !nd_btt->ndns || !nd_btt->lbasize) {
-		dev_dbg(&nd_btt->dev, "incomplete btt configuration\n");
+	if (!nd_btt->uuid || !nd_btt->ndns || !nd_btt->lbasize)
 		return -ENODEV;
-	}
 
 	rawsize = nvdimm_namespace_capacity(ndns) - SZ_4K;
 	if (rawsize < ARENA_MIN_SIZE) {
-		dev_dbg(&nd_btt->dev, "%s must be at least %ld bytes\n",
-				dev_name(&ndns->dev), ARENA_MIN_SIZE + SZ_4K);
 		return -ENXIO;
 	}
 	nd_region = to_nd_region(nd_btt->dev.parent);
@@ -1540,8 +1412,9 @@ int nvdimm_namespace_attach_btt(struct nd_namespace_common *ndns)
 }
 EXPORT_SYMBOL(nvdimm_namespace_attach_btt);
 
-int nvdimm_namespace_detach_btt(struct nd_btt *nd_btt)
+int nvdimm_namespace_detach_btt(struct nd_namespace_common *ndns)
 {
+	struct nd_btt *nd_btt = to_nd_btt(ndns->claim);
 	struct btt *btt = nd_btt->btt;
 
 	btt_fini(btt);
@@ -1553,11 +1426,22 @@ EXPORT_SYMBOL(nvdimm_namespace_detach_btt);
 
 static int __init nd_btt_init(void)
 {
-	int rc = 0;
+	int rc;
+
+	btt_major = register_blkdev(0, "btt");
+	if (btt_major < 0)
+		return btt_major;
 
 	debugfs_root = debugfs_create_dir("btt", NULL);
-	if (IS_ERR_OR_NULL(debugfs_root))
+	if (IS_ERR_OR_NULL(debugfs_root)) {
 		rc = -ENXIO;
+		goto err_debugfs;
+	}
+
+	return 0;
+
+ err_debugfs:
+	unregister_blkdev(btt_major, "btt");
 
 	return rc;
 }
@@ -1565,6 +1449,7 @@ static int __init nd_btt_init(void)
 static void __exit nd_btt_exit(void)
 {
 	debugfs_remove_recursive(debugfs_root);
+	unregister_blkdev(btt_major, "btt");
 }
 
 MODULE_ALIAS_ND_DEVICE(ND_DEVICE_BTT);

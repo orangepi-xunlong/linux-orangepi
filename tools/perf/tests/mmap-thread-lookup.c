@@ -149,6 +149,7 @@ static int synth_process(struct machine *machine)
 
 static int mmap_events(synth_cb synth)
 {
+	struct machines machines;
 	struct machine *machine;
 	int err, i;
 
@@ -161,7 +162,8 @@ static int mmap_events(synth_cb synth)
 	 */
 	TEST_ASSERT_VAL("failed to create threads", !threads_create());
 
-	machine = machine__new_host();
+	machines__init(&machines);
+	machine = &machines.host;
 
 	dump_trace = verbose > 1 ? 1 : 0;
 
@@ -201,7 +203,7 @@ static int mmap_events(synth_cb synth)
 	}
 
 	machine__delete_threads(machine);
-	machine__delete(machine);
+	machines__exit(&machines);
 	return err;
 }
 
@@ -219,7 +221,7 @@ static int mmap_events(synth_cb synth)
  *
  * by using all thread objects.
  */
-int test__mmap_thread_lookup(int subtest __maybe_unused)
+int test__mmap_thread_lookup(void)
 {
 	/* perf_event__synthesize_threads synthesize */
 	TEST_ASSERT_VAL("failed with sythesizing all",

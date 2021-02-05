@@ -29,6 +29,18 @@ struct lowpan_frag_queue {
 	struct inet_frag_queue	q;
 };
 
+/* private device info */
+struct lowpan_dev_info {
+	struct net_device	*wdev; /* wpan device ptr */
+	u16			fragment_tag;
+};
+
+static inline struct
+lowpan_dev_info *lowpan_dev_info(const struct net_device *dev)
+{
+	return (struct lowpan_dev_info *)lowpan_priv(dev)->priv;
+}
+
 int lowpan_frag_rcv(struct sk_buff *skb, const u8 frag_type);
 void lowpan_net_frag_exit(void);
 int lowpan_net_frag_init(void);

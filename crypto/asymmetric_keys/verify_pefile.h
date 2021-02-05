@@ -9,6 +9,7 @@
  * 2 of the Licence, or (at your option) any later version.
  */
 
+#include <linux/verify_pefile.h>
 #include <crypto/pkcs7.h>
 #include <crypto/hash_info.h>
 
@@ -22,11 +23,12 @@ struct pefile_context {
 	unsigned	sig_offset;
 	unsigned	sig_len;
 	const struct section_header *secs;
+	struct pkcs7_message *pkcs7;
 
 	/* PKCS#7 MS Individual Code Signing content */
 	const void	*digest;		/* Digest */
 	unsigned	digest_len;		/* Digest length */
-	const char	*digest_algo;		/* Digest algorithm */
+	enum hash_algo	digest_algo;		/* Digest algorithm */
 };
 
 #define kenter(FMT, ...)					\
@@ -37,5 +39,4 @@ struct pefile_context {
 /*
  * mscode_parser.c
  */
-extern int mscode_parse(void *_ctx, const void *content_data, size_t data_len,
-			size_t asn1hdrlen);
+extern int mscode_parse(struct pefile_context *ctx);

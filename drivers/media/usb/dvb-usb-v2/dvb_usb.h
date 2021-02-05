@@ -1,7 +1,7 @@
 /*
  * DVB USB framework
  *
- * Copyright (C) 2004-6 Patrick Boettcher <patrick.boettcher@posteo.de>
+ * Copyright (C) 2004-6 Patrick Boettcher <patrick.boettcher@desy.de>
  * Copyright (C) 2012 Antti Palosaari <crope@iki.fi>
  *
  *    This program is free software; you can redistribute it and/or modify
@@ -138,7 +138,7 @@ struct dvb_usb_driver_info {
 struct dvb_usb_rc {
 	const char *map_name;
 	u64 allowed_protos;
-	int (*change_protocol)(struct rc_dev *dev, u64 *rc_type);
+	int (*change_protocol)(struct rc_dev *dev, u64 *rc_proto);
 	int (*query) (struct dvb_usb_device *d);
 	unsigned int interval;
 	enum rc_driver_type driver_type;

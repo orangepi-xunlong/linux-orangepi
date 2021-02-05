@@ -10,7 +10,7 @@
 
 #define SMALL	7 /* Must be at least 6 to deal with alignment/loop issues.  */
 
-ENTRY_CFI(memset)
+ENTRY(memset)
 	mov_s	r4,r0
 	or	r12,r0,r2
 	bmsk.f	r12,r12,1
@@ -46,14 +46,14 @@ ENTRY_CFI(memset)
 	stb.ab	r1,[r4,1]
 .Ltiny_end:
 	j_s	[blink]
-END_CFI(memset)
+END(memset)
 
 ; memzero: @r0 = mem, @r1 = size_t
 ; memset:  @r0 = mem, @r1 = char, @r2 = size_t
 
-ENTRY_CFI(memzero)
+ENTRY(memzero)
     ; adjust bzero args to memset args
     mov r2, r1
     mov r1, 0
     b  memset    ;tail call so need to tinker with blink
-END_CFI(memzero)
+END(memzero)

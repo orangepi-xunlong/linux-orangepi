@@ -22,6 +22,7 @@
 #define LNBH25_H
 
 #include <linux/i2c.h>
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 
 /* 22 kHz tone enabled. Tone output controlled by DSQIN pin */

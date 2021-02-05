@@ -8,7 +8,6 @@
  */
 #include <asm/processor.h>
 #include <asm/ppc_asm.h>
-#include <asm/export.h>
 
 	.align	7
 _GLOBAL_TOC(memcpy)
@@ -220,4 +219,3 @@ END_FTR_SECTION_IFCLR(CPU_FTR_UNALIGNED_LD_STD)
 4:	ld	r3,-STACKFRAMESIZE+STK_REG(R31)(r1)	/* return dest pointer */
 	blr
 #endif
-EXPORT_SYMBOL(memcpy)

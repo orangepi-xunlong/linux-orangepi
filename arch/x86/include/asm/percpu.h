@@ -184,22 +184,22 @@ do {									\
 	typeof(var) pfo_ret__;				\
 	switch (sizeof(var)) {				\
 	case 1:						\
-		asm(op "b "__percpu_arg(1)",%0"		\
+		asm volatile(op "b "__percpu_arg(1)",%0"\
 		    : "=q" (pfo_ret__)			\
 		    : "m" (var));			\
 		break;					\
 	case 2:						\
-		asm(op "w "__percpu_arg(1)",%0"		\
+		asm volatile(op "w "__percpu_arg(1)",%0"\
 		    : "=r" (pfo_ret__)			\
 		    : "m" (var));			\
 		break;					\
 	case 4:						\
-		asm(op "l "__percpu_arg(1)",%0"		\
+		asm volatile(op "l "__percpu_arg(1)",%0"\
 		    : "=r" (pfo_ret__)			\
 		    : "m" (var));			\
 		break;					\
 	case 8:						\
-		asm(op "q "__percpu_arg(1)",%0"		\
+		asm volatile(op "q "__percpu_arg(1)",%0"\
 		    : "=r" (pfo_ret__)			\
 		    : "m" (var));			\
 		break;					\
@@ -510,19 +510,17 @@ do {									\
 /* This is not atomic against other CPUs -- CPU preemption needs to be off */
 #define x86_test_and_clear_bit_percpu(bit, var)				\
 ({									\
-	bool old__;							\
-	asm volatile("btr %2,"__percpu_arg(1)"\n\t"			\
-		     CC_SET(c)						\
-		     : CC_OUT(c) (old__), "+m" (var)			\
+	int old__;							\
+	asm volatile("btr %2,"__percpu_arg(1)"\n\tsbbl %0,%0"		\
+		     : "=r" (old__), "+m" (var)				\
 		     : "dIr" (bit));					\
 	old__;								\
 })
 
-static __always_inline bool x86_this_cpu_constant_test_bit(unsigned int nr,
+static __always_inline int x86_this_cpu_constant_test_bit(unsigned int nr,
                         const unsigned long __percpu *addr)
 {
-	unsigned long __percpu *a =
-		(unsigned long __percpu *)addr + nr / BITS_PER_LONG;
+	unsigned long __percpu *a = (unsigned long *)addr + nr / BITS_PER_LONG;
 
 #ifdef CONFIG_X86_64
 	return ((1UL << (nr % BITS_PER_LONG)) & raw_cpu_read_8(*a)) != 0;
@@ -531,15 +529,15 @@ static __always_inline bool x86_this_cpu_constant_test_bit(unsigned int nr,
 #endif
 }
 
-static inline bool x86_this_cpu_variable_test_bit(int nr,
+static inline int x86_this_cpu_variable_test_bit(int nr,
                         const unsigned long __percpu *addr)
 {
-	bool oldbit;
+	int oldbit;
 
 	asm volatile("bt "__percpu_arg(2)",%1\n\t"
-			CC_SET(c)
-			: CC_OUT(c) (oldbit)
-			: "m" (*(unsigned long __percpu *)addr), "Ir" (nr));
+			"sbb %0,%0"
+			: "=r" (oldbit)
+			: "m" (*(unsigned long *)addr), "Ir" (nr));
 
 	return oldbit;
 }

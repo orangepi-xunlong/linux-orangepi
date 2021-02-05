@@ -92,6 +92,7 @@ static int bcm63xx_pmb_get_resources(struct device_node *dn,
 				     unsigned int *cpu,
 				     unsigned int *addr)
 {
+	struct device_node *pmb_dn;
 	struct of_phandle_args args;
 	int ret;
 
@@ -108,6 +109,7 @@ static int bcm63xx_pmb_get_resources(struct device_node *dn,
 		return ret;
 	}
 
+	pmb_dn = args.np;
 	if (args.args_count != 2) {
 		pr_err("reset-controller does not conform to reset-cells\n");
 		return -EINVAL;

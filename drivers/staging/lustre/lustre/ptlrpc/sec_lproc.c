@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -78,7 +82,7 @@ static int sptlrpc_info_lprocfs_seq_show(struct seq_file *seq, void *v)
 
 	if (cli->cl_import)
 		sec = sptlrpc_import_sec_ref(cli->cl_import);
-	if (!sec)
+	if (sec == NULL)
 		goto out;
 
 	sec_flags2str(sec->ps_flvr.sf_flags, str, sizeof(str));
@@ -117,7 +121,7 @@ static int sptlrpc_ctxs_lprocfs_seq_show(struct seq_file *seq, void *v)
 
 	if (cli->cl_import)
 		sec = sptlrpc_import_sec_ref(cli->cl_import);
-	if (!sec)
+	if (sec == NULL)
 		goto out;
 
 	if (sec->ps_policy->sp_cops->display)
@@ -174,7 +178,7 @@ int sptlrpc_lproc_init(void)
 {
 	int rc;
 
-	LASSERT(!sptlrpc_debugfs_dir);
+	LASSERT(sptlrpc_debugfs_dir == NULL);
 
 	sptlrpc_debugfs_dir = ldebugfs_register("sptlrpc", debugfs_lustre_root,
 						sptlrpc_lprocfs_vars, NULL);

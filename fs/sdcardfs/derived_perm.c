@@ -250,11 +250,11 @@ retry_deleg:
 		if (!S_ISDIR(inode->i_mode))
 			newattrs.ia_valid |=
 				ATTR_KILL_SUID | ATTR_KILL_SGID | ATTR_KILL_PRIV;
-		inode_lock(inode);
+		mutex_lock(&inode->i_mutex);
 		error = security_path_chown(&path, newattrs.ia_uid, newattrs.ia_gid);
 		if (!error)
 			error = notify_change2(path.mnt, path.dentry, &newattrs, &delegated_inode);
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 		if (delegated_inode) {
 			error = break_deleg_wait(&delegated_inode);
 			if (!error)

@@ -174,7 +174,6 @@ cond_syscall(sys_setfsuid);
 cond_syscall(sys_setfsgid);
 cond_syscall(sys_capget);
 cond_syscall(sys_capset);
-cond_syscall(sys_copy_file_range);
 
 /* arch-specific weak syscall entries */
 cond_syscall(sys_pciconfig_read);
@@ -250,8 +249,3 @@ cond_syscall(sys_execveat);
 
 /* membarrier */
 cond_syscall(sys_membarrier);
-
-/* memory protection keys */
-cond_syscall(sys_pkey_mprotect);
-cond_syscall(sys_pkey_alloc);
-cond_syscall(sys_pkey_free);

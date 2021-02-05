@@ -20,6 +20,7 @@
 #ifndef CX24120_H
 #define CX24120_H
 
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 #include <linux/firmware.h>
 

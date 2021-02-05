@@ -64,7 +64,7 @@ static void gdm_port_destruct(struct tty_port *port)
 	kfree(gdm);
 }
 
-static const struct tty_port_operations gdm_port_ops = {
+static struct tty_port_operations gdm_port_ops = {
 	.destruct = gdm_port_destruct,
 };
 
@@ -225,6 +225,7 @@ int register_lte_tty_device(struct tty_dev *tty_dev, struct device *device)
 	int j;
 
 	for (i = 0; i < TTY_MAX_COUNT; i++) {
+
 		gdm = kmalloc(sizeof(*gdm), GFP_KERNEL);
 		if (!gdm)
 			return -ENOMEM;

@@ -130,13 +130,7 @@ static int taos_smbus_xfer(struct i2c_adapter *adapter, u16 addr,
 			return 0;
 	} else {
 		if (p[0] == 'x') {
-			/*
-			 * Voluntarily dropping error code of kstrtou8 since all
-			 * error code that it could return are invalid according
-			 * to Documentation/i2c/fault-codes.
-			 */
-			if (kstrtou8(p + 1, 16, &data->byte))
-				return -EPROTO;
+			data->byte = simple_strtol(p + 1, NULL, 16);
 			return 0;
 		}
 	}

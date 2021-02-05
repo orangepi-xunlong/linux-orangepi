@@ -80,7 +80,6 @@ struct sock_xprt {
 #define TCP_RPC_REPLY		(1UL << 6)
 
 #define XPRT_SOCK_CONNECTING	1U
-#define XPRT_SOCK_DATA_READY	(2)
 
 #endif /* __KERNEL__ */
 

@@ -48,7 +48,6 @@
 #include <asm/smp_scu.h>
 #include <asm/pgalloc.h>
 #include <asm/suspend.h>
-#include <asm/virt.h>
 #include <asm/hardware/cache-l2x0.h>
 
 #include "soc.h"
@@ -63,9 +62,7 @@
 #include "prm44xx.h"
 #include "prm-regbits-44xx.h"
 
-static void __iomem *sar_base;
-
-#if defined(CONFIG_PM) && defined(CONFIG_SMP)
+#ifdef CONFIG_SMP
 
 struct omap4_cpu_pm_info {
 	struct powerdomain *pwrdm;
@@ -93,6 +90,7 @@ struct cpu_pm_ops {
 
 static DEFINE_PER_CPU(struct omap4_cpu_pm_info, omap4_pm_info);
 static struct powerdomain *mpuss_pd;
+static void __iomem *sar_base;
 static u32 cpu_context_offset;
 
 static int default_finish_suspend(unsigned long cpu_state)
@@ -367,16 +365,15 @@ int __init omap4_mpuss_init(void)
 		return -ENODEV;
 	}
 
+	if (cpu_is_omap44xx())
+		sar_base = omap4_get_sar_ram_base();
+
 	/* Initilaise per CPU PM information */
 	pm_info = &per_cpu(omap4_pm_info, 0x0);
 	if (sar_base) {
 		pm_info->scu_sar_addr = sar_base + SCU_OFFSET0;
-		if (cpu_is_omap44xx())
-			pm_info->wkup_sar_addr = sar_base +
-				CPU0_WAKEUP_NS_PA_ADDR_OFFSET;
-		else
-			pm_info->wkup_sar_addr = sar_base +
-				OMAP5_CPU0_WAKEUP_NS_PA_ADDR_OFFSET;
+		pm_info->wkup_sar_addr = sar_base +
+					CPU0_WAKEUP_NS_PA_ADDR_OFFSET;
 		pm_info->l2x0_sar_addr = sar_base + L2X0_SAVE_OFFSET0;
 	}
 	pm_info->pwrdm = pwrdm_lookup("cpu0_pwrdm");
@@ -395,12 +392,8 @@ int __init omap4_mpuss_init(void)
 	pm_info = &per_cpu(omap4_pm_info, 0x1);
 	if (sar_base) {
 		pm_info->scu_sar_addr = sar_base + SCU_OFFSET1;
-		if (cpu_is_omap44xx())
-			pm_info->wkup_sar_addr = sar_base +
-				CPU1_WAKEUP_NS_PA_ADDR_OFFSET;
-		else
-			pm_info->wkup_sar_addr = sar_base +
-				OMAP5_CPU1_WAKEUP_NS_PA_ADDR_OFFSET;
+		pm_info->wkup_sar_addr = sar_base +
+					CPU1_WAKEUP_NS_PA_ADDR_OFFSET;
 		pm_info->l2x0_sar_addr = sar_base + L2X0_SAVE_OFFSET1;
 	}
 
@@ -450,35 +443,3 @@ int __init omap4_mpuss_init(void)
 }
 
 #endif
-
-/*
- * For kexec, we must set CPU1_WAKEUP_NS_PA_ADDR to point to
- * current kernel's secondary_startup() early before
- * clockdomains_init(). Otherwise clockdomain_init() can
- * wake CPU1 and cause a hang.
- */
-void __init omap4_mpuss_early_init(void)
-{
-	unsigned long startup_pa;
-
-	if (!(cpu_is_omap44xx() || soc_is_omap54xx()))
-		return;
-
-	sar_base = omap4_get_sar_ram_base();
-
-	if (cpu_is_omap443x())
-		startup_pa = virt_to_phys(omap4_secondary_startup);
-	else if (cpu_is_omap446x())
-		startup_pa = virt_to_phys(omap4460_secondary_startup);
-	else if ((__boot_cpu_mode & MODE_MASK) == HYP_MODE)
-		startup_pa = virt_to_phys(omap5_secondary_hyp_startup);
-	else
-		startup_pa = virt_to_phys(omap5_secondary_startup);
-
-	if (cpu_is_omap44xx())
-		writel_relaxed(startup_pa, sar_base +
-			       CPU1_WAKEUP_NS_PA_ADDR_OFFSET);
-	else
-		writel_relaxed(startup_pa, sar_base +
-			       OMAP5_CPU1_WAKEUP_NS_PA_ADDR_OFFSET);
-}

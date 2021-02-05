@@ -1,7 +1,5 @@
-#include <stdlib.h>
-#include "strbuf.h"
+#include "cache.h"
 #include "quote.h"
-#include "util.h"
 
 /* Help to copy the thing properly quoted for the shell safety.
  * any single quote is replaced with '\'', any exclamation point
@@ -19,42 +17,38 @@ static inline int need_bs_quote(char c)
 	return (c == '\'' || c == '!');
 }
 
-static int sq_quote_buf(struct strbuf *dst, const char *src)
+static void sq_quote_buf(struct strbuf *dst, const char *src)
 {
 	char *to_free = NULL;
-	int ret;
 
 	if (dst->buf == src)
 		to_free = strbuf_detach(dst, NULL);
 
-	ret = strbuf_addch(dst, '\'');
-	while (!ret && *src) {
+	strbuf_addch(dst, '\'');
+	while (*src) {
 		size_t len = strcspn(src, "'!");
-		ret = strbuf_add(dst, src, len);
+		strbuf_add(dst, src, len);
 		src += len;
-		while (!ret && need_bs_quote(*src))
-			ret = strbuf_addf(dst, "'\\%c\'", *src++);
+		while (need_bs_quote(*src)) {
+			strbuf_addstr(dst, "'\\");
+			strbuf_addch(dst, *src++);
+			strbuf_addch(dst, '\'');
+		}
 	}
-	if (!ret)
-		ret = strbuf_addch(dst, '\'');
+	strbuf_addch(dst, '\'');
 	free(to_free);
-
-	return ret;
 }
 
-int sq_quote_argv(struct strbuf *dst, const char** argv, size_t maxlen)
+void sq_quote_argv(struct strbuf *dst, const char** argv, size_t maxlen)
 {
-	int i, ret;
+	int i;
 
 	/* Copy into destination buffer. */
-	ret = strbuf_grow(dst, 255);
-	for (i = 0; !ret && argv[i]; ++i) {
-		ret = strbuf_addch(dst, ' ');
-		if (ret)
-			break;
-		ret = sq_quote_buf(dst, argv[i]);
+	strbuf_grow(dst, 255);
+	for (i = 0; argv[i]; ++i) {
+		strbuf_addch(dst, ' ');
+		sq_quote_buf(dst, argv[i]);
 		if (maxlen && dst->len > maxlen)
 			die("Too many or long arguments");
 	}
-	return ret;
 }

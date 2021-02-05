@@ -1241,7 +1241,7 @@ static int find_overflow_devnum(void)
 		ret = alloc_chrdev_region(&overflow_maj, 0, IB_UCM_MAX_DEVICES,
 					  "infiniband_cm");
 		if (ret) {
-			pr_err("ucm: couldn't register dynamic device number\n");
+			printk(KERN_ERR "ucm: couldn't register dynamic device number\n");
 			return ret;
 		}
 	}
@@ -1336,19 +1336,19 @@ static int __init ib_ucm_init(void)
 	ret = register_chrdev_region(IB_UCM_BASE_DEV, IB_UCM_MAX_DEVICES,
 				     "infiniband_cm");
 	if (ret) {
-		pr_err("ucm: couldn't register device number\n");
+		printk(KERN_ERR "ucm: couldn't register device number\n");
 		goto error1;
 	}
 
 	ret = class_create_file(&cm_class, &class_attr_abi_version.attr);
 	if (ret) {
-		pr_err("ucm: couldn't create abi_version attribute\n");
+		printk(KERN_ERR "ucm: couldn't create abi_version attribute\n");
 		goto error2;
 	}
 
 	ret = ib_register_client(&ucm_client);
 	if (ret) {
-		pr_err("ucm: couldn't register client\n");
+		printk(KERN_ERR "ucm: couldn't register client\n");
 		goto error3;
 	}
 	return 0;

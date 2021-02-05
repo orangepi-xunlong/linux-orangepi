@@ -308,8 +308,8 @@ static int vme_user_ioctl(struct inode *inode, struct file *file,
 		switch (cmd) {
 		case VME_IRQ_GEN:
 			copied = copy_from_user(&irq_req, argp,
-						sizeof(irq_req));
-			if (copied) {
+						sizeof(struct vme_irq_id));
+			if (copied != 0) {
 				pr_warn("Partial copy from userspace\n");
 				return -EFAULT;
 			}
@@ -322,7 +322,7 @@ static int vme_user_ioctl(struct inode *inode, struct file *file,
 	case MASTER_MINOR:
 		switch (cmd) {
 		case VME_GET_MASTER:
-			memset(&master, 0, sizeof(master));
+			memset(&master, 0, sizeof(struct vme_master));
 
 			/* XXX	We do not want to push aspace, cycle and width
 			 *	to userspace as they are
@@ -334,8 +334,8 @@ static int vme_user_ioctl(struct inode *inode, struct file *file,
 						&master.cycle, &master.dwidth);
 
 			copied = copy_to_user(argp, &master,
-					      sizeof(master));
-			if (copied) {
+					      sizeof(struct vme_master));
+			if (copied != 0) {
 				pr_warn("Partial copy to userspace\n");
 				return -EFAULT;
 			}
@@ -350,7 +350,7 @@ static int vme_user_ioctl(struct inode *inode, struct file *file,
 			}
 
 			copied = copy_from_user(&master, argp, sizeof(master));
-			if (copied) {
+			if (copied != 0) {
 				pr_warn("Partial copy from userspace\n");
 				return -EFAULT;
 			}
@@ -368,7 +368,7 @@ static int vme_user_ioctl(struct inode *inode, struct file *file,
 	case SLAVE_MINOR:
 		switch (cmd) {
 		case VME_GET_SLAVE:
-			memset(&slave, 0, sizeof(slave));
+			memset(&slave, 0, sizeof(struct vme_slave));
 
 			/* XXX	We do not want to push aspace, cycle and width
 			 *	to userspace as they are
@@ -379,8 +379,8 @@ static int vme_user_ioctl(struct inode *inode, struct file *file,
 					       &slave.aspace, &slave.cycle);
 
 			copied = copy_to_user(argp, &slave,
-					      sizeof(slave));
-			if (copied) {
+					      sizeof(struct vme_slave));
+			if (copied != 0) {
 				pr_warn("Partial copy to userspace\n");
 				return -EFAULT;
 			}
@@ -390,7 +390,7 @@ static int vme_user_ioctl(struct inode *inode, struct file *file,
 		case VME_SET_SLAVE:
 
 			copied = copy_from_user(&slave, argp, sizeof(slave));
-			if (copied) {
+			if (copied != 0) {
 				pr_warn("Partial copy from userspace\n");
 				return -EFAULT;
 			}
@@ -757,7 +757,7 @@ static int __init vme_user_init(void)
 	 * we just change the code in vme_user_match().
 	 */
 	retval = vme_register_driver(&vme_user_driver, VME_MAX_SLOTS);
-	if (retval)
+	if (retval != 0)
 		goto err_reg;
 
 	return retval;
@@ -773,7 +773,7 @@ static void __exit vme_user_exit(void)
 }
 
 MODULE_PARM_DESC(bus, "Enumeration of VMEbus to which the driver is connected");
-module_param_array(bus, int, &bus_num, 0000);
+module_param_array(bus, int, &bus_num, 0);
 
 MODULE_DESCRIPTION("VME User Space Access Driver");
 MODULE_AUTHOR("Martyn Welch <martyn.welch@ge.com");

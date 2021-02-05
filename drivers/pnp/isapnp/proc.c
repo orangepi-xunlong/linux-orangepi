@@ -21,7 +21,7 @@
 #include <linux/isapnp.h>
 #include <linux/proc_fs.h>
 #include <linux/init.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 extern struct pnp_protocol isapnp_protocol;
 

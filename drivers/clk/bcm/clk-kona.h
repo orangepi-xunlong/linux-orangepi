@@ -481,7 +481,7 @@ struct ccu_data {
 	bool write_enabled;	/* write access is currently enabled */
 	struct ccu_policy policy;
 	struct device_node *node;
-	size_t clk_num;
+	struct clk_onecell_data clk_data;
 	const char *name;
 	u32 range;		/* byte range of address space */
 	struct kona_clk kona_clks[];	/* must be last */
@@ -491,7 +491,9 @@ struct ccu_data {
 #define KONA_CCU_COMMON(_prefix, _name, _ccuname)			    \
 	.name		= #_name "_ccu",				    \
 	.lock		= __SPIN_LOCK_UNLOCKED(_name ## _ccu_data.lock),    \
-	.clk_num	= _prefix ## _ ## _ccuname ## _CCU_CLOCK_COUNT
+	.clk_data	= {						    \
+		.clk_num = _prefix ## _ ## _ccuname ## _CCU_CLOCK_COUNT,    \
+	}
 
 /* Exported globals */
 
@@ -503,6 +505,7 @@ extern u64 scaled_div_max(struct bcm_clk_div *div);
 extern u64 scaled_div_build(struct bcm_clk_div *div, u32 div_value,
 				u32 billionths);
 
+extern struct clk *kona_clk_setup(struct kona_clk *bcm_clk);
 extern void __init kona_dt_ccu_setup(struct ccu_data *ccu,
 				struct device_node *node);
 extern bool __init kona_ccu_init(struct ccu_data *ccu);

@@ -850,8 +850,10 @@ static int davinci_i2c_probe(struct platform_device *pdev)
 
 	adap->nr = pdev->id;
 	r = i2c_add_numbered_adapter(adap);
-	if (r)
+	if (r) {
+		dev_err(&pdev->dev, "failure adding adapter\n");
 		goto err_unuse_clocks;
+	}
 
 	return 0;
 

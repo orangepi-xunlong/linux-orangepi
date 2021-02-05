@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2013-2014 Renesas Solutions Corp.
  * Copyright (C) 2014 Cogent Embedded, Inc.
- * Copyright (C) 2015-2016 Renesas Electronics Corporation
  *
  * This file is licensed under the terms of the GNU General Public License
  * version 2.  This program is licensed "as is" without any warranty of any
@@ -48,14 +47,13 @@
 	compatible = "renesas,lager", "renesas,r8a7790";
 
 	aliases {
-		serial0 = &scif0;
+		serial0 = &scifa0;
 		serial1 = &scifa1;
-		i2c8 = "i2cexio";
 	};
 
 	chosen {
 		bootargs = "ignore_loglevel rw root=/dev/nfs ip=dhcp";
-		stdout-path = "serial0:115200n8";
+		stdout-path = &scifa0;
 	};
 
 	memory@40000000 {
@@ -76,31 +74,31 @@
 	keyboard {
 		compatible = "gpio-keys";
 
-		one {
+		button@1 {
 			linux,code = <KEY_1>;
 			label = "SW2-1";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 			gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;
 		};
-		two {
+		button@2 {
 			linux,code = <KEY_2>;
 			label = "SW2-2";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 			gpios = <&gpio1 24 GPIO_ACTIVE_LOW>;
 		};
-		three {
+		button@3 {
 			linux,code = <KEY_3>;
 			label = "SW2-3";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 			gpios = <&gpio1 26 GPIO_ACTIVE_LOW>;
 		};
-		four {
+		button@4 {
 			linux,code = <KEY_4>;
 			label = "SW2-4";
-			wakeup-source;
+			gpio-key,wakeup;
 			debounce-interval = <20>;
 			gpios = <&gpio1 28 GPIO_ACTIVE_LOW>;
 		};
@@ -119,7 +117,7 @@
 		};
 	};
 
-	fixedregulator3v3: regulator-3v3 {
+	fixedregulator3v3: fixedregulator@0 {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-3.3V";
 		regulator-min-microvolt = <3300000>;
@@ -128,7 +126,7 @@
 		regulator-always-on;
 	};
 
-	vcc_sdhi0: regulator-vcc-sdhi0 {
+	vcc_sdhi0: regulator@1 {
 		compatible = "regulator-fixed";
 
 		regulator-name = "SDHI0 Vcc";
@@ -139,7 +137,7 @@
 		enable-active-high;
 	};
 
-	vccq_sdhi0: regulator-vccq-sdhi0 {
+	vccq_sdhi0: regulator@2 {
 		compatible = "regulator-gpio";
 
 		regulator-name = "SDHI0 VccQ";
@@ -152,7 +150,7 @@
 			  1800000 0>;
 	};
 
-	vcc_sdhi2: regulator-vcc-sdhi2 {
+	vcc_sdhi2: regulator@3 {
 		compatible = "regulator-fixed";
 
 		regulator-name = "SDHI2 Vcc";
@@ -163,7 +161,7 @@
 		enable-active-high;
 	};
 
-	vccq_sdhi2: regulator-vccq-sdhi2 {
+	vccq_sdhi2: regulator@4 {
 		compatible = "regulator-gpio";
 
 		regulator-name = "SDHI2 VccQ";
@@ -176,10 +174,11 @@
 			  1800000 0>;
 	};
 
-	audio_clock: audio_clock {
+	audio_clock: clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <11289600>;
+		clock-output-names = "audio_clock";
 	};
 
 	rsnd_ak4643: sound {
@@ -253,23 +252,6 @@
 		#clock-cells = <0>;
 		clock-frequency = <148500000>;
 	};
-
-	/*
-	 * IIC0/I2C0 is routed to EXIO connector A, pins 114 (SCL) + 116 (SDA) only.
-	 * We use the I2C demuxer, so the desired IP core can be selected at runtime
-	 * depending on the use case (e.g. DMA with IIC0 or slave support with I2C0).
-	 * Note: For testing the I2C slave feature, it is convenient to connect this
-	 * bus with IIC3 on pins 110 (SCL) + 112 (SDA), select I2C0 at runtime, and
-	 * instantiate the slave device at runtime according to the documentation.
-	 * You can then communicate with the slave via IIC3.
-	 */
-	i2cexio: i2c-8 {
-		compatible = "i2c-demux-pinctrl";
-		i2c-parent = <&iic0>, <&i2c0>;
-		i2c-bus-name = "i2c-exio";
-		#address-cells = <1>;
-		#size-cells = <0>;
-	};
 };
 
 &du {
@@ -309,137 +291,110 @@
 };
 
 &pfc {
-	pinctrl-0 = <&scif_clk_pins>;
-	pinctrl-names = "default";
-
 	du_pins: du {
-		groups = "du_rgb666", "du_sync_1", "du_clk_out_0";
-		function = "du";
+		renesas,groups = "du_rgb666", "du_sync_1", "du_clk_out_0";
+		renesas,function = "du";
 	};
 
-	scif0_pins: scif0 {
-		groups = "scif0_data";
-		function = "scif0";
-	};
-
-	scif_clk_pins: scif_clk {
-		groups = "scif_clk";
-		function = "scif_clk";
+	scifa0_pins: serial0 {
+		renesas,groups = "scifa0_data";
+		renesas,function = "scifa0";
 	};
 
 	ether_pins: ether {
-		groups = "eth_link", "eth_mdio", "eth_rmii";
-		function = "eth";
+		renesas,groups = "eth_link", "eth_mdio", "eth_rmii";
+		renesas,function = "eth";
 	};
 
 	phy1_pins: phy1 {
-		groups = "intc_irq0";
-		function = "intc";
+		renesas,groups = "intc_irq0";
+		renesas,function = "intc";
 	};
 
-	scifa1_pins: scifa1 {
-		groups = "scifa1_data";
-		function = "scifa1";
+	scifa1_pins: serial1 {
+		renesas,groups = "scifa1_data";
+		renesas,function = "scifa1";
 	};
 
 	sdhi0_pins: sd0 {
-		groups = "sdhi0_data4", "sdhi0_ctrl";
-		function = "sdhi0";
-		power-source = <3300>;
-	};
-
-	sdhi0_pins_uhs: sd0_uhs {
-		groups = "sdhi0_data4", "sdhi0_ctrl";
-		function = "sdhi0";
-		power-source = <1800>;
+		renesas,groups = "sdhi0_data4", "sdhi0_ctrl";
+		renesas,function = "sdhi0";
 	};
 
 	sdhi2_pins: sd2 {
-		groups = "sdhi2_data4", "sdhi2_ctrl";
-		function = "sdhi2";
-		power-source = <3300>;
-	};
-
-	sdhi2_pins_uhs: sd2_uhs {
-		groups = "sdhi2_data4", "sdhi2_ctrl";
-		function = "sdhi2";
-		power-source = <1800>;
+		renesas,groups = "sdhi2_data4", "sdhi2_ctrl";
+		renesas,function = "sdhi2";
 	};
 
 	mmc1_pins: mmc1 {
-		groups = "mmc1_data8", "mmc1_ctrl";
-		function = "mmc1";
+		renesas,groups = "mmc1_data8", "mmc1_ctrl";
+		renesas,function = "mmc1";
 	};
 
-	qspi_pins: qspi {
-		groups = "qspi_ctrl", "qspi_data4";
-		function = "qspi";
+	qspi_pins: spi0 {
+		renesas,groups = "qspi_ctrl", "qspi_data4";
+		renesas,function = "qspi";
 	};
 
-	msiof1_pins: msiof1 {
-		groups = "msiof1_clk", "msiof1_sync", "msiof1_rx",
+	msiof1_pins: spi2 {
+		renesas,groups = "msiof1_clk", "msiof1_sync", "msiof1_rx",
 				 "msiof1_tx";
-		function = "msiof1";
-	};
-
-	i2c0_pins: i2c0 {
-		groups = "i2c0";
-		function = "i2c0";
+		renesas,function = "msiof1";
 	};
 
 	iic0_pins: iic0 {
-		groups = "iic0";
-		function = "iic0";
+		renesas,groups = "iic0";
+		renesas,function = "iic0";
 	};
 
 	iic1_pins: iic1 {
-		groups = "iic1";
-		function = "iic1";
+		renesas,groups = "iic1";
+		renesas,function = "iic1";
 	};
 
 	iic2_pins: iic2 {
-		groups = "iic2";
-		function = "iic2";
+		renesas,groups = "iic2";
+		renesas,function = "iic2";
 	};
 
 	iic3_pins: iic3 {
-		groups = "iic3";
-		function = "iic3";
+		renesas,groups = "iic3";
+		renesas,function = "iic3";
 	};
 
 	hsusb_pins: hsusb {
-		groups = "usb0_ovc_vbus";
-		function = "usb0";
+		renesas,groups = "usb0_ovc_vbus";
+		renesas,function = "usb0";
 	};
 
 	usb0_pins: usb0 {
-		groups = "usb0";
-		function = "usb0";
+		renesas,groups = "usb0";
+		renesas,function = "usb0";
 	};
 
 	usb1_pins: usb1 {
-		groups = "usb1";
-		function = "usb1";
+		renesas,groups = "usb1";
+		renesas,function = "usb1";
 	};
 
 	usb2_pins: usb2 {
-		groups = "usb2";
-		function = "usb2";
+		renesas,groups = "usb2";
+		renesas,function = "usb2";
 	};
 
-	vin1_pins: vin1 {
-		groups = "vin1_data8", "vin1_clk";
-		function = "vin1";
+	vin1_pins: vin {
+		renesas,groups = "vin1_data8", "vin1_clk";
+		renesas,function = "vin1";
 	};
 
 	sound_pins: sound {
-		groups = "ssi0129_ctrl", "ssi0_data", "ssi1_data";
-		function = "ssi";
+		renesas,groups = "ssi0129_ctrl", "ssi0_data", "ssi1_data";
+		renesas,function = "ssi";
 	};
 
 	sound_clk_pins: sound_clk {
-		groups = "audio_clk_a";
-		function = "audio_clk";
+		renesas,groups = "audio_clk_a";
+		renesas,function = "audio_clk";
 	};
 };
 
@@ -484,6 +439,8 @@
 	status = "okay";
 
 	flash: flash@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
 		compatible = "spansion,s25fl512s", "jedec,spi-nor";
 		reg = <0>;
 		spi-max-frequency = <30000000>;
@@ -493,31 +450,25 @@
 		spi-cpol;
 		m25p,fast-read;
 
-		partitions {
-			compatible = "fixed-partitions";
-			#address-cells = <1>;
-			#size-cells = <1>;
-
-			partition@0 {
-				label = "loader";
-				reg = <0x00000000 0x00040000>;
-				read-only;
-			};
-			partition@40000 {
-				label = "user";
-				reg = <0x00040000 0x00400000>;
-				read-only;
-			};
-			partition@440000 {
-				label = "flash";
-				reg = <0x00440000 0x03bc0000>;
-			};
+		partition@0 {
+			label = "loader";
+			reg = <0x00000000 0x00040000>;
+			read-only;
+		};
+		partition@40000 {
+			label = "user";
+			reg = <0x00040000 0x00400000>;
+			read-only;
+		};
+		partition@440000 {
+			label = "flash";
+			reg = <0x00440000 0x03bc0000>;
 		};
 	};
 };
 
-&scif0 {
-	pinctrl-0 = <&scif0_pins>;
+&scifa0 {
+	pinctrl-0 = <&scifa0_pins>;
 	pinctrl-names = "default";
 
 	status = "okay";
@@ -527,11 +478,6 @@
 	pinctrl-0 = <&scifa1_pins>;
 	pinctrl-names = "default";
 
-	status = "okay";
-};
-
-&scif_clk {
-	clock-frequency = <14745600>;
 	status = "okay";
 };
 
@@ -552,25 +498,21 @@
 
 &sdhi0 {
 	pinctrl-0 = <&sdhi0_pins>;
-	pinctrl-1 = <&sdhi0_pins_uhs>;
-	pinctrl-names = "default", "state_uhs";
+	pinctrl-names = "default";
 
 	vmmc-supply = <&vcc_sdhi0>;
 	vqmmc-supply = <&vccq_sdhi0>;
 	cd-gpios = <&gpio3 6 GPIO_ACTIVE_LOW>;
-	sd-uhs-sdr50;
 	status = "okay";
 };
 
 &sdhi2 {
 	pinctrl-0 = <&sdhi2_pins>;
-	pinctrl-1 = <&sdhi2_pins_uhs>;
-	pinctrl-names = "default", "state_uhs";
+	pinctrl-names = "default";
 
 	vmmc-supply = <&vcc_sdhi2>;
 	vqmmc-supply = <&vccq_sdhi2>;
 	cd-gpios = <&gpio3 22 GPIO_ACTIVE_LOW>;
-	sd-uhs-sdr50;
 	status = "okay";
 };
 
@@ -578,14 +520,10 @@
 	cpu0-supply = <&vdd_dvfs>;
 };
 
-&i2c0	{
-	pinctrl-0 = <&i2c0_pins>;
-	pinctrl-names = "i2c-exio";
-};
-
 &iic0	{
+	status = "okay";
 	pinctrl-0 = <&iic0_pins>;
-	pinctrl-names = "i2c-exio";
+	pinctrl-names = "default";
 };
 
 &iic1	{

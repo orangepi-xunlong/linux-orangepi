@@ -13,6 +13,8 @@
 #include <linux/rtc.h>
 #include <linux/module.h>
 
+#define DRV_VERSION "0.4"
+
 /* Registers */
 
 #define DS1672_REG_CNT_BASE	0
@@ -163,6 +165,8 @@ static int ds1672_probe(struct i2c_client *client,
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
 		return -ENODEV;
 
+	dev_info(&client->dev, "chip found, driver version " DRV_VERSION "\n");
+
 	rtc = devm_rtc_device_register(&client->dev, ds1672_driver.driver.name,
 				  &ds1672_rtc_ops, THIS_MODULE);
 
@@ -209,3 +213,4 @@ module_i2c_driver(ds1672_driver);
 MODULE_AUTHOR("Alessandro Zummo <a.zummo@towertech.it>");
 MODULE_DESCRIPTION("Dallas/Maxim DS1672 timekeeper driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_VERSION);

@@ -376,7 +376,7 @@ static int catc_tx_run(struct catc *catc)
 	catc->tx_idx = !catc->tx_idx;
 	catc->tx_ptr = 0;
 
-	netif_trans_update(catc->netdev);
+	catc->netdev->trans_start = jiffies;
 	return status;
 }
 
@@ -389,7 +389,7 @@ static void catc_tx_done(struct urb *urb)
 	if (status == -ECONNRESET) {
 		dev_dbg(&urb->dev->dev, "Tx Reset.\n");
 		urb->status = 0;
-		netif_trans_update(catc->netdev);
+		catc->netdev->trans_start = jiffies;
 		catc->netdev->stats.tx_errors++;
 		clear_bit(TX_RUNNING, &catc->flags);
 		netif_wake_queue(catc->netdev);

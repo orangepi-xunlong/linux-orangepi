@@ -1,5 +1,4 @@
 #include "../util.h"
-#include "../../util/util.h"
 #include "../../util/debug.h"
 #include "gtk.h"
 

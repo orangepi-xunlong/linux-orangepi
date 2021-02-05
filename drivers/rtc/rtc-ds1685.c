@@ -32,6 +32,8 @@
 #include <linux/proc_fs.h>
 #endif
 
+#define DRV_VERSION	"0.42.0"
+
 
 /* ----------------------------------------------------------------------- */
 /* Standard read/write functions if platform does not provide overrides */
@@ -100,26 +102,6 @@ ds1685_rtc_bin2bcd(struct ds1685_priv *rtc, u8 val, u8 bin_mask, u8 bcd_mask)
 		return (bin2bcd(val) & bcd_mask);
 
 	return (val & bin_mask);
-}
-
-/**
- * s1685_rtc_check_mday - check validity of the day of month.
- * @rtc: pointer to the ds1685 rtc structure.
- * @mday: day of month.
- *
- * Returns -EDOM if the day of month is not within 1..31 range.
- */
-static inline int
-ds1685_rtc_check_mday(struct ds1685_priv *rtc, u8 mday)
-{
-	if (rtc->bcd_mode) {
-		if (mday < 0x01 || mday > 0x31 || (mday & 0x0f) > 0x09)
-			return -EDOM;
-	} else {
-		if (mday < 1 || mday > 31)
-			return -EDOM;
-	}
-	return 0;
 }
 
 /**
@@ -397,7 +379,6 @@ ds1685_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 seconds, minutes, hours, mday, ctrlb, ctrlc;
-	int ret;
 
 	/* Fetch the alarm info from the RTC alarm registers. */
 	ds1685_rtc_begin_data_access(rtc);
@@ -409,29 +390,34 @@ ds1685_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	ctrlc	= rtc->read(rtc, RTC_CTRL_C);
 	ds1685_rtc_end_data_access(rtc);
 
-	/* Check the month date for validity. */
-	ret = ds1685_rtc_check_mday(rtc, mday);
-	if (ret)
-		return ret;
+	/* Check month date. */
+	if (!(mday >= 1) && (mday <= 31))
+		return -EDOM;
 
 	/*
 	 * Check the three alarm bytes.
 	 *
 	 * The Linux RTC system doesn't support the "don't care" capability
 	 * of this RTC chip.  We check for it anyways in case support is
-	 * added in the future and only assign when we care.
+	 * added in the future.
 	 */
-	if (likely(seconds < 0xc0))
+	if (unlikely(seconds >= 0xc0))
+		alrm->time.tm_sec = -1;
+	else
 		alrm->time.tm_sec = ds1685_rtc_bcd2bin(rtc, seconds,
 						       RTC_SECS_BCD_MASK,
 						       RTC_SECS_BIN_MASK);
 
-	if (likely(minutes < 0xc0))
+	if (unlikely(minutes >= 0xc0))
+		alrm->time.tm_min = -1;
+	else
 		alrm->time.tm_min = ds1685_rtc_bcd2bin(rtc, minutes,
 						       RTC_MINS_BCD_MASK,
 						       RTC_MINS_BIN_MASK);
 
-	if (likely(hours < 0xc0))
+	if (unlikely(hours >= 0xc0))
+		alrm->time.tm_hour = -1;
+	else
 		alrm->time.tm_hour = ds1685_rtc_bcd2bin(rtc, hours,
 							RTC_HRS_24_BCD_MASK,
 							RTC_HRS_24_BIN_MASK);
@@ -439,6 +425,11 @@ ds1685_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	/* Write the data to rtc_wkalrm. */
 	alrm->time.tm_mday = ds1685_rtc_bcd2bin(rtc, mday, RTC_MDAY_BCD_MASK,
 						RTC_MDAY_BIN_MASK);
+	alrm->time.tm_mon = -1;
+	alrm->time.tm_year = -1;
+	alrm->time.tm_wday = -1;
+	alrm->time.tm_yday = -1;
+	alrm->time.tm_isdst = -1;
 	alrm->enabled = !!(ctrlb & RTC_CTRL_B_AIE);
 	alrm->pending = !!(ctrlc & RTC_CTRL_C_AF);
 
@@ -456,7 +447,6 @@ ds1685_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 ctrlb, seconds, minutes, hours, mday;
-	int ret;
 
 	/* Fetch the alarm info and convert to BCD. */
 	seconds	= ds1685_rtc_bin2bcd(rtc, alrm->time.tm_sec,
@@ -473,9 +463,8 @@ ds1685_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 				     RTC_MDAY_BCD_MASK);
 
 	/* Check the month date for validity. */
-	ret = ds1685_rtc_check_mday(rtc, mday);
-	if (ret)
-		return ret;
+	if (!(mday >= 1) && (mday <= 31))
+		return -EDOM;
 
 	/*
 	 * Check the three alarm bytes.
@@ -864,7 +853,7 @@ ds1685_rtc_proc(struct device *dev, struct seq_file *seq)
 	   "Periodic Rate\t: %s\n"
 	   "SQW Freq\t: %s\n"
 #ifdef CONFIG_RTC_DS1685_PROC_REGS
-	   "Serial #\t: %8phC\n"
+	   "Serial #\t: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n"
 	   "Register Status\t:\n"
 	   "   Ctrl A\t: UIP  DV2  DV1  DV0  RS3  RS2  RS1  RS0\n"
 	   "\t\t:  %s\n"
@@ -883,7 +872,7 @@ ds1685_rtc_proc(struct device *dev, struct seq_file *seq)
 	   "   Ctrl 4B\t: ABE  E32k  CS  RCE  PRS  RIE  WIE  KSE\n"
 	   "\t\t:  %s\n",
 #else
-	   "Serial #\t: %8phC\n",
+	   "Serial #\t: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
 #endif
 	   model,
 	   ((ctrla & RTC_CTRL_A_DV1) ? "enabled" : "disabled"),
@@ -899,7 +888,7 @@ ds1685_rtc_proc(struct device *dev, struct seq_file *seq)
 	   (!((ctrl4b & RTC_CTRL_4B_E32K)) ?
 	    ds1685_rtc_sqw_freq[(ctrla & RTC_CTRL_A_RS_MASK)] : "32768Hz"),
 #ifdef CONFIG_RTC_DS1685_PROC_REGS
-	   ssn,
+	   ssn[0], ssn[1], ssn[2], ssn[3], ssn[4], ssn[5], ssn[6], ssn[7],
 	   ds1685_rtc_print_regs(ctrla, bits[0]),
 	   ds1685_rtc_print_regs(ctrlb, bits[1]),
 	   ds1685_rtc_print_regs(ctrlc, bits[2]),
@@ -907,7 +896,7 @@ ds1685_rtc_proc(struct device *dev, struct seq_file *seq)
 	   ds1685_rtc_print_regs(ctrl4a, bits[4]),
 	   ds1685_rtc_print_regs(ctrl4b, bits[5]));
 #else
-	   ssn);
+	   ssn[0], ssn[1], ssn[2], ssn[3], ssn[4], ssn[5], ssn[6], ssn[7]);
 #endif
 	return 0;
 }
@@ -1125,7 +1114,7 @@ ds1685_rtc_sysfs_battery_show(struct device *dev,
 
 	ctrld = rtc->read(rtc, RTC_CTRL_D);
 
-	return sprintf(buf, "%s\n",
+	return snprintf(buf, 13, "%s\n",
 			(ctrld & RTC_CTRL_D_VRT) ? "ok" : "not ok or N/A");
 }
 static DEVICE_ATTR(battery, S_IRUGO, ds1685_rtc_sysfs_battery_show, NULL);
@@ -1148,7 +1137,7 @@ ds1685_rtc_sysfs_auxbatt_show(struct device *dev,
 	ctrl4a = rtc->read(rtc, RTC_EXT_CTRL_4A);
 	ds1685_rtc_switch_to_bank0(rtc);
 
-	return sprintf(buf, "%s\n",
+	return snprintf(buf, 13, "%s\n",
 			(ctrl4a & RTC_CTRL_4A_VRT2) ? "ok" : "not ok or N/A");
 }
 static DEVICE_ATTR(auxbatt, S_IRUGO, ds1685_rtc_sysfs_auxbatt_show, NULL);
@@ -1171,7 +1160,11 @@ ds1685_rtc_sysfs_serial_show(struct device *dev,
 	ds1685_rtc_get_ssn(rtc, ssn);
 	ds1685_rtc_switch_to_bank0(rtc);
 
-	return sprintf(buf, "%8phC\n", ssn);
+	return snprintf(buf, 24, "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+			ssn[0], ssn[1], ssn[2], ssn[3], ssn[4], ssn[5],
+			ssn[6], ssn[7]);
+
+	return 0;
 }
 static DEVICE_ATTR(serial, S_IRUGO, ds1685_rtc_sysfs_serial_show, NULL);
 
@@ -1294,7 +1287,7 @@ ds1685_rtc_sysfs_ctrl_regs_show(struct device *dev,
 	tmp = rtc->read(rtc, reg_info->reg) & reg_info->bit;
 	ds1685_rtc_switch_to_bank0(rtc);
 
-	return sprintf(buf, "%d\n", (tmp ? 1 : 0));
+	return snprintf(buf, 2, "%d\n", (tmp ? 1 : 0));
 }
 
 /**
@@ -1630,7 +1623,7 @@ ds1685_rtc_sysfs_time_regs_show(struct device *dev,
 	tmp = ds1685_rtc_bcd2bin(rtc, tmp, bcd_reg_info->mask,
 				 bin_reg_info->mask);
 
-	return sprintf(buf, "%d\n", tmp);
+	return snprintf(buf, 4, "%d\n", tmp);
 }
 
 /**
@@ -2172,7 +2165,6 @@ ds1685_rtc_poweroff(struct platform_device *pdev)
 	/* Check for valid RTC data, else, spin forever. */
 	if (unlikely(!pdev)) {
 		pr_emerg("platform device data not available, spinning forever ...\n");
-		while(1);
 		unreachable();
 	} else {
 		/* Get the rtc data. */
@@ -2224,7 +2216,6 @@ ds1685_rtc_poweroff(struct platform_device *pdev)
 			   (ctrl4a | RTC_CTRL_4A_PAB));
 
 		/* Spin ... we do not switch back to bank0. */
-		while(1);
 		unreachable();
 	}
 }
@@ -2236,4 +2227,5 @@ MODULE_AUTHOR("Joshua Kinard <kumba@gentoo.org>");
 MODULE_AUTHOR("Matthias Fuchs <matthias.fuchs@esd-electronics.com>");
 MODULE_DESCRIPTION("Dallas/Maxim DS1685/DS1687-series RTC driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_VERSION);
 MODULE_ALIAS("platform:rtc-ds1685");

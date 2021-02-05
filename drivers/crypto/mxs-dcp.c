@@ -11,6 +11,7 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 
+#include <linux/crypto.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -24,7 +25,6 @@
 #include <crypto/aes.h>
 #include <crypto/sha.h>
 #include <crypto/internal/hash.h>
-#include <crypto/internal/skcipher.h>
 
 #define DCP_MAX_CHANS	4
 #define DCP_BUF_SZ	PAGE_SIZE
@@ -84,7 +84,7 @@ struct dcp_async_ctx {
 	unsigned int			hot:1;
 
 	/* Crypto-specific context */
-	struct crypto_skcipher		*fallback;
+	struct crypto_ablkcipher	*fallback;
 	unsigned int			key_len;
 	uint8_t				key[AES_KEYSIZE_128];
 };
@@ -378,22 +378,20 @@ static int dcp_chan_thread_aes(void *data)
 
 static int mxs_dcp_block_fallback(struct ablkcipher_request *req, int enc)
 {
-	struct crypto_ablkcipher *tfm = crypto_ablkcipher_reqtfm(req);
-	struct dcp_async_ctx *ctx = crypto_ablkcipher_ctx(tfm);
-	SKCIPHER_REQUEST_ON_STACK(subreq, ctx->fallback);
+	struct crypto_tfm *tfm =
+		crypto_ablkcipher_tfm(crypto_ablkcipher_reqtfm(req));
+	struct dcp_async_ctx *ctx = crypto_ablkcipher_ctx(
+		crypto_ablkcipher_reqtfm(req));
 	int ret;
 
-	skcipher_request_set_tfm(subreq, ctx->fallback);
-	skcipher_request_set_callback(subreq, req->base.flags, NULL, NULL);
-	skcipher_request_set_crypt(subreq, req->src, req->dst,
-				   req->nbytes, req->info);
+	ablkcipher_request_set_tfm(req, ctx->fallback);
 
 	if (enc)
-		ret = crypto_skcipher_encrypt(subreq);
+		ret = crypto_ablkcipher_encrypt(req);
 	else
-		ret = crypto_skcipher_decrypt(subreq);
+		ret = crypto_ablkcipher_decrypt(req);
 
-	skcipher_request_zero(subreq);
+	ablkcipher_request_set_tfm(req, __crypto_ablkcipher_cast(tfm));
 
 	return ret;
 }
@@ -459,22 +457,28 @@ static int mxs_dcp_aes_setkey(struct crypto_ablkcipher *tfm, const u8 *key,
 		return 0;
 	}
 
+	/* Check if the key size is supported by kernel at all. */
+	if (len != AES_KEYSIZE_192 && len != AES_KEYSIZE_256) {
+		tfm->base.crt_flags |= CRYPTO_TFM_RES_BAD_KEY_LEN;
+		return -EINVAL;
+	}
+
 	/*
 	 * If the requested AES key size is not supported by the hardware,
 	 * but is supported by in-kernel software implementation, we use
 	 * software fallback.
 	 */
-	crypto_skcipher_clear_flags(actx->fallback, CRYPTO_TFM_REQ_MASK);
-	crypto_skcipher_set_flags(actx->fallback,
-				  tfm->base.crt_flags & CRYPTO_TFM_REQ_MASK);
+	actx->fallback->base.crt_flags &= ~CRYPTO_TFM_REQ_MASK;
+	actx->fallback->base.crt_flags |=
+		tfm->base.crt_flags & CRYPTO_TFM_REQ_MASK;
 
-	ret = crypto_skcipher_setkey(actx->fallback, key, len);
+	ret = crypto_ablkcipher_setkey(actx->fallback, key, len);
 	if (!ret)
 		return 0;
 
 	tfm->base.crt_flags &= ~CRYPTO_TFM_RES_MASK;
-	tfm->base.crt_flags |= crypto_skcipher_get_flags(actx->fallback) &
-			       CRYPTO_TFM_RES_MASK;
+	tfm->base.crt_flags |=
+		actx->fallback->base.crt_flags & CRYPTO_TFM_RES_MASK;
 
 	return ret;
 }
@@ -484,9 +488,9 @@ static int mxs_dcp_aes_fallback_init(struct crypto_tfm *tfm)
 	const char *name = crypto_tfm_alg_name(tfm);
 	const uint32_t flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK;
 	struct dcp_async_ctx *actx = crypto_tfm_ctx(tfm);
-	struct crypto_skcipher *blk;
+	struct crypto_ablkcipher *blk;
 
-	blk = crypto_alloc_skcipher(name, 0, flags);
+	blk = crypto_alloc_ablkcipher(name, 0, flags);
 	if (IS_ERR(blk))
 		return PTR_ERR(blk);
 
@@ -499,7 +503,8 @@ static void mxs_dcp_aes_fallback_exit(struct crypto_tfm *tfm)
 {
 	struct dcp_async_ctx *actx = crypto_tfm_ctx(tfm);
 
-	crypto_free_skcipher(actx->fallback);
+	crypto_free_ablkcipher(actx->fallback);
+	actx->fallback = NULL;
 }
 
 /*

@@ -25,6 +25,8 @@ extern void machvec_dma_sync_sg(struct device *, struct scatterlist *, int,
 
 #define get_dma_ops(dev) platform_dma_get_ops(dev)
 
+#include <asm-generic/dma-mapping-common.h>
+
 static inline bool dma_capable(struct device *dev, dma_addr_t addr, size_t size)
 {
 	if (!dev->dma_mask)

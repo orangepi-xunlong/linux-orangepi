@@ -105,26 +105,6 @@
 			bitclock-master;
 		};
 	};
-
-	panel: panel {
-		compatible = "nec,nl4827hc19-05b";
-
-		port {
-			panel_in: endpoint {
-				remote-endpoint = <&dcu_out>;
-			};
-		};
-	};
-};
-
-&dcu {
-	status = "okay";
-
-	port {
-		dcu_out: endpoint {
-			remote-endpoint = <&panel_in>;
-		};
-	};
 };
 
 &dspi1 {
@@ -229,10 +209,6 @@
 };
 
 &sai1 {
-	status = "okay";
-};
-
-&sata {
 	status = "okay";
 };
 

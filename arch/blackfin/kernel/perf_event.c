@@ -453,13 +453,29 @@ static struct pmu pmu = {
 	.read        = bfin_pmu_read,
 };
 
-static int bfin_pmu_prepare_cpu(unsigned int cpu)
+static void bfin_pmu_setup(int cpu)
 {
 	struct cpu_hw_events *cpuhw = &per_cpu(cpu_hw_events, cpu);
 
-	bfin_write_PFCTL(0);
 	memset(cpuhw, 0, sizeof(struct cpu_hw_events));
-	return 0;
+}
+
+static int
+bfin_pmu_notifier(struct notifier_block *self, unsigned long action, void *hcpu)
+{
+	unsigned int cpu = (long)hcpu;
+
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_UP_PREPARE:
+		bfin_write_PFCTL(0);
+		bfin_pmu_setup(cpu);
+		break;
+
+	default:
+		break;
+	}
+
+	return NOTIFY_OK;
 }
 
 static int __init bfin_pmu_init(void)
@@ -475,8 +491,8 @@ static int __init bfin_pmu_init(void)
 
 	ret = perf_pmu_register(&pmu, "cpu", PERF_TYPE_RAW);
 	if (!ret)
-		cpuhp_setup_state(CPUHP_PERF_BFIN, "PERF_BFIN",
-				  bfin_pmu_prepare_cpu, NULL);
+		perf_cpu_notifier(bfin_pmu_notifier);
+
 	return ret;
 }
 early_initcall(bfin_pmu_init);

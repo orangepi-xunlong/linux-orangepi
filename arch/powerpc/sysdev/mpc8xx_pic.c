@@ -79,7 +79,7 @@ unsigned int mpc8xx_get_irq(void)
 	irq = in_be32(&siu_reg->sc_sivec) >> 26;
 
 	if (irq == PIC_VEC_SPURRIOUS)
-		return 0;
+		irq = NO_IRQ;
 
         return irq_linear_revmap(mpc8xx_pic_host, irq);
 

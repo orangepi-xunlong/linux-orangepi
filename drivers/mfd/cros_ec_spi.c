@@ -113,7 +113,7 @@ static int terminate_request(struct cros_ec_device *ec_dev)
 	trans.delay_usecs = ec_spi->end_of_msg_delay;
 	spi_message_add_tail(&trans, &msg);
 
-	ret = spi_sync_locked(ec_spi->spi, &msg);
+	ret = spi_sync(ec_spi->spi, &msg);
 
 	/* Reset end-of-response timer */
 	ec_spi->last_transfer_ns = ktime_get_ns();
@@ -147,7 +147,7 @@ static int receive_n_bytes(struct cros_ec_device *ec_dev, u8 *buf, int n)
 
 	spi_message_init(&msg);
 	spi_message_add_tail(&trans, &msg);
-	ret = spi_sync_locked(ec_spi->spi, &msg);
+	ret = spi_sync(ec_spi->spi, &msg);
 	if (ret < 0)
 		dev_err(ec_dev->dev, "spi transfer failed: %d\n", ret);
 
@@ -175,7 +175,7 @@ static int cros_ec_spi_receive_packet(struct cros_ec_device *ec_dev,
 	unsigned long deadline;
 	int todo;
 
-	BUG_ON(ec_dev->din_size < EC_MSG_PREAMBLE_COUNT);
+	BUG_ON(EC_MSG_PREAMBLE_COUNT > ec_dev->din_size);
 
 	/* Receive data until we see the header byte */
 	deadline = jiffies + msecs_to_jiffies(EC_MSG_DEADLINE_MS);
@@ -283,7 +283,7 @@ static int cros_ec_spi_receive_response(struct cros_ec_device *ec_dev,
 	unsigned long deadline;
 	int todo;
 
-	BUG_ON(ec_dev->din_size < EC_MSG_PREAMBLE_COUNT);
+	BUG_ON(EC_MSG_PREAMBLE_COUNT > ec_dev->din_size);
 
 	/* Receive data until we see the header byte */
 	deadline = jiffies + msecs_to_jiffies(EC_MSG_DEADLINE_MS);
@@ -366,6 +366,7 @@ static int cros_ec_spi_receive_response(struct cros_ec_device *ec_dev,
 static int cros_ec_pkt_xfer_spi(struct cros_ec_device *ec_dev,
 				struct cros_ec_command *ec_msg)
 {
+	struct ec_host_request *request;
 	struct ec_host_response *response;
 	struct cros_ec_spi *ec_spi = ec_dev->priv;
 	struct spi_transfer trans, trans_delay;
@@ -377,6 +378,7 @@ static int cros_ec_pkt_xfer_spi(struct cros_ec_device *ec_dev,
 	int ret = 0, final_ret;
 
 	len = cros_ec_prepare_tx(ec_dev, ec_msg);
+	request = (struct ec_host_request *)ec_dev->dout;
 	dev_dbg(ec_dev->dev, "prepared, len=%d\n", len);
 
 	/* If it's too soon to do another transaction, wait */
@@ -389,10 +391,10 @@ static int cros_ec_pkt_xfer_spi(struct cros_ec_device *ec_dev,
 	}
 
 	rx_buf = kzalloc(len, GFP_KERNEL);
-	if (!rx_buf)
-		return -ENOMEM;
-
-	spi_bus_lock(ec_spi->spi->master);
+	if (!rx_buf) {
+		ret = -ENOMEM;
+		goto exit;
+	}
 
 	/*
 	 * Leave a gap between CS assertion and clocking of data to allow the
@@ -412,7 +414,7 @@ static int cros_ec_pkt_xfer_spi(struct cros_ec_device *ec_dev,
 	trans.len = len;
 	trans.cs_change = 1;
 	spi_message_add_tail(&trans, &msg);
-	ret = spi_sync_locked(ec_spi->spi, &msg);
+	ret = spi_sync(ec_spi->spi, &msg);
 
 	/* Get the response */
 	if (!ret) {
@@ -438,9 +440,6 @@ static int cros_ec_pkt_xfer_spi(struct cros_ec_device *ec_dev,
 	}
 
 	final_ret = terminate_request(ec_dev);
-
-	spi_bus_unlock(ec_spi->spi->master);
-
 	if (!ret)
 		ret = final_ret;
 	if (ret < 0)
@@ -521,10 +520,10 @@ static int cros_ec_cmd_xfer_spi(struct cros_ec_device *ec_dev,
 	}
 
 	rx_buf = kzalloc(len, GFP_KERNEL);
-	if (!rx_buf)
-		return -ENOMEM;
-
-	spi_bus_lock(ec_spi->spi->master);
+	if (!rx_buf) {
+		ret = -ENOMEM;
+		goto exit;
+	}
 
 	/* Transmit phase - send our message */
 	debug_packet(ec_dev->dev, "out", ec_dev->dout, len);
@@ -535,7 +534,7 @@ static int cros_ec_cmd_xfer_spi(struct cros_ec_device *ec_dev,
 	trans.cs_change = 1;
 	spi_message_init(&msg);
 	spi_message_add_tail(&trans, &msg);
-	ret = spi_sync_locked(ec_spi->spi, &msg);
+	ret = spi_sync(ec_spi->spi, &msg);
 
 	/* Get the response */
 	if (!ret) {
@@ -561,9 +560,6 @@ static int cros_ec_cmd_xfer_spi(struct cros_ec_device *ec_dev,
 	}
 
 	final_ret = terminate_request(ec_dev);
-
-	spi_bus_unlock(ec_spi->spi->master);
-
 	if (!ret)
 		ret = final_ret;
 	if (ret < 0)

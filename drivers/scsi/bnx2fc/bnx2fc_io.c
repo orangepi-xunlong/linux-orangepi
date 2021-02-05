@@ -179,24 +179,12 @@ static void bnx2fc_scsi_done(struct bnx2fc_cmd *io_req, int err_code)
 
 	bnx2fc_unmap_sg_list(io_req);
 	io_req->sc_cmd = NULL;
-
-	/* Sanity checks before returning command to mid-layer */
 	if (!sc_cmd) {
 		printk(KERN_ERR PFX "scsi_done - sc_cmd NULL. "
 				    "IO(0x%x) already cleaned up\n",
 		       io_req->xid);
 		return;
 	}
-	if (!sc_cmd->device) {
-		pr_err(PFX "0x%x: sc_cmd->device is NULL.\n", io_req->xid);
-		return;
-	}
-	if (!sc_cmd->device->host) {
-		pr_err(PFX "0x%x: sc_cmd->device->host is NULL.\n",
-		    io_req->xid);
-		return;
-	}
-
 	sc_cmd->result = err_code << 16;
 
 	BNX2FC_IO_DBG(io_req, "sc=%p, result=0x%x, retries=%d, allowed=%d\n",
@@ -782,7 +770,7 @@ retry_tmf:
 	spin_unlock_bh(&tgt->tgt_lock);
 
 	rc = wait_for_completion_timeout(&io_req->tm_done,
-					 interface->tm_timeout * HZ);
+					 BNX2FC_TM_TIMEOUT * HZ);
 	spin_lock_bh(&tgt->tgt_lock);
 
 	io_req->wait_for_comp = 0;
@@ -1079,7 +1067,7 @@ int bnx2fc_eh_device_reset(struct scsi_cmnd *sc_cmd)
 	return bnx2fc_initiate_tmf(sc_cmd, FCP_TMF_LUN_RESET);
 }
 
-static int bnx2fc_abts_cleanup(struct bnx2fc_cmd *io_req)
+int bnx2fc_abts_cleanup(struct bnx2fc_cmd *io_req)
 {
 	struct bnx2fc_rport *tgt = io_req->tgt;
 	int rc = SUCCESS;
@@ -1116,7 +1104,8 @@ int bnx2fc_eh_abort(struct scsi_cmnd *sc_cmd)
 	struct bnx2fc_cmd *io_req;
 	struct fc_lport *lport;
 	struct bnx2fc_rport *tgt;
-	int rc;
+	int rc = FAILED;
+
 
 	rc = fc_block_scsi_eh(sc_cmd);
 	if (rc)
@@ -1125,7 +1114,7 @@ int bnx2fc_eh_abort(struct scsi_cmnd *sc_cmd)
 	lport = shost_priv(sc_cmd->device->host);
 	if ((lport->state != LPORT_ST_READY) || !(lport->link_up)) {
 		printk(KERN_ERR PFX "eh_abort: link not ready\n");
-		return FAILED;
+		return rc;
 	}
 
 	tgt = (struct bnx2fc_rport *)&rp[1];
@@ -1758,7 +1747,7 @@ static void bnx2fc_parse_fcp_rsp(struct bnx2fc_cmd *io_req,
 		if ((fcp_rsp_len == 4) || (fcp_rsp_len == 8)) {
 			/* Only for task management function */
 			io_req->fcp_rsp_code = rq_data[3];
-			BNX2FC_IO_DBG(io_req, "fcp_rsp_code = %d\n",
+			printk(KERN_ERR PFX "fcp_rsp_code = %d\n",
 				io_req->fcp_rsp_code);
 		}
 

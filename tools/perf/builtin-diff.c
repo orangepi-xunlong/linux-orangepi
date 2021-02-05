@@ -310,6 +310,16 @@ static int formula_fprintf(struct hist_entry *he, struct hist_entry *pair,
 	return -1;
 }
 
+static int hists__add_entry(struct hists *hists,
+			    struct addr_location *al, u64 period,
+			    u64 weight, u64 transaction)
+{
+	if (__hists__add_entry(hists, al, NULL, NULL, NULL, period, weight,
+			       transaction, true) != NULL)
+		return 0;
+	return -ENOMEM;
+}
+
 static int diff__process_sample_event(struct perf_tool *tool __maybe_unused,
 				      union perf_event *event,
 				      struct perf_sample *sample,
@@ -320,13 +330,14 @@ static int diff__process_sample_event(struct perf_tool *tool __maybe_unused,
 	struct hists *hists = evsel__hists(evsel);
 	int ret = -1;
 
-	if (machine__resolve(machine, &al, sample) < 0) {
+	if (perf_event__preprocess_sample(event, machine, &al, sample) < 0) {
 		pr_warning("problem processing %d event, skipping it.\n",
 			   event->header.type);
 		return -1;
 	}
 
-	if (!hists__add_entry(hists, &al, NULL, NULL, NULL, sample, true)) {
+	if (hists__add_entry(hists, &al, sample->period,
+			     sample->weight, sample->transaction)) {
 		pr_warning("problem incrementing symbol period, skipping event\n");
 		goto out_put;
 	}
@@ -363,7 +374,7 @@ static struct perf_evsel *evsel_match(struct perf_evsel *evsel,
 {
 	struct perf_evsel *e;
 
-	evlist__for_each_entry(evlist, e) {
+	evlist__for_each(evlist, e) {
 		if (perf_evsel__match2(evsel, e))
 			return e;
 	}
@@ -375,7 +386,7 @@ static void perf_evlist__collapse_resort(struct perf_evlist *evlist)
 {
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		struct hists *hists = evsel__hists(evsel);
 
 		hists__collapse_resort(hists, NULL);
@@ -418,7 +429,7 @@ static void hists__baseline_only(struct hists *hists)
 	struct rb_root *root;
 	struct rb_node *next;
 
-	if (hists__has(hists, need_collapse))
+	if (sort__need_collapse)
 		root = &hists->entries_collapsed;
 	else
 		root = hists->entries_in;
@@ -440,7 +451,7 @@ static void hists__precompute(struct hists *hists)
 	struct rb_root *root;
 	struct rb_node *next;
 
-	if (hists__has(hists, need_collapse))
+	if (sort__need_collapse)
 		root = &hists->entries_collapsed;
 	else
 		root = hists->entries_in;
@@ -656,8 +667,7 @@ static void hists__process(struct hists *hists)
 	hists__precompute(hists);
 	hists__output_resort(hists, NULL);
 
-	hists__fprintf(hists, true, 0, 0, 0, stdout,
-		       symbol_conf.use_callchain);
+	hists__fprintf(hists, true, 0, 0, 0, stdout);
 }
 
 static void data__fprintf(void)
@@ -681,7 +691,7 @@ static void data_process(void)
 	struct perf_evsel *evsel_base;
 	bool first = true;
 
-	evlist__for_each_entry(evlist_base, evsel_base) {
+	evlist__for_each(evlist_base, evsel_base) {
 		struct hists *hists_base = evsel__hists(evsel_base);
 		struct data__file *d;
 		int i;
@@ -756,7 +766,9 @@ static int __cmd_diff(void)
 
  out_delete:
 	data__for_each_file(i, d) {
-		perf_session__delete(d->session);
+		if (d->session)
+			perf_session__delete(d->session);
+
 		data__free(d);
 	}
 
@@ -801,9 +813,8 @@ static const struct option options[] = {
 	OPT_STRING_NOEMPTY('t', "field-separator", &symbol_conf.field_sep, "separator",
 		   "separator for columns, no spaces will be added between "
 		   "columns '.' is reserved."),
-	OPT_CALLBACK(0, "symfs", NULL, "directory",
-		     "Look for files with symbols relative to this directory",
-		     symbol__config_symfs),
+	OPT_STRING(0, "symfs", &symbol_conf.symfs, "directory",
+		    "Look for files with symbols relative to this directory"),
 	OPT_UINTEGER('o', "order", &sort_compute, "Specify compute sorting."),
 	OPT_CALLBACK(0, "percentage", NULL, "relative|absolute",
 		     "How to display percentage of filtered entries", parse_filter_percentage),
@@ -1033,9 +1044,7 @@ static int hpp__entry_global(struct perf_hpp_fmt *_fmt, struct perf_hpp *hpp,
 }
 
 static int hpp__header(struct perf_hpp_fmt *fmt, struct perf_hpp *hpp,
-		       struct hists *hists __maybe_unused,
-		       int line __maybe_unused,
-		       int *span __maybe_unused)
+		       struct perf_evsel *evsel __maybe_unused)
 {
 	struct diff_hpp_fmt *dfmt =
 		container_of(fmt, struct diff_hpp_fmt, fmt);
@@ -1046,7 +1055,7 @@ static int hpp__header(struct perf_hpp_fmt *fmt, struct perf_hpp *hpp,
 
 static int hpp__width(struct perf_hpp_fmt *fmt,
 		      struct perf_hpp *hpp __maybe_unused,
-		      struct hists *hists __maybe_unused)
+		      struct perf_evsel *evsel __maybe_unused)
 {
 	struct diff_hpp_fmt *dfmt =
 		container_of(fmt, struct diff_hpp_fmt, fmt);
@@ -1199,7 +1208,7 @@ static int ui_init(void)
 		BUG_ON(1);
 	}
 
-	perf_hpp__prepend_sort_field(fmt);
+	list_add(&fmt->sort_list, &perf_hpp__sort_list);
 	return 0;
 }
 
@@ -1256,6 +1265,8 @@ int cmd_diff(int argc, const char **argv, const char *prefix __maybe_unused)
 	if (ret < 0)
 		return ret;
 
+	perf_config(perf_default_config, NULL);
+
 	argc = parse_options(argc, argv, options, diff_usage, 0);
 
 	if (symbol__init(NULL) < 0)
@@ -1269,7 +1280,7 @@ int cmd_diff(int argc, const char **argv, const char *prefix __maybe_unused)
 
 	sort__mode = SORT_MODE__DIFF;
 
-	if (setup_sorting(NULL) < 0)
+	if (setup_sorting() < 0)
 		usage_with_options(diff_usage, options);
 
 	setup_pager();

@@ -82,6 +82,7 @@ struct spi_sh_data {
 	int irq;
 	struct spi_master *master;
 	struct list_head queue;
+	struct workqueue_struct *workqueue;
 	struct work_struct ws;
 	unsigned long cr1;
 	wait_queue_head_t wait;
@@ -379,7 +380,7 @@ static int spi_sh_transfer(struct spi_device *spi, struct spi_message *mesg)
 	spi_sh_clear_bit(ss, SPI_SH_SSA, SPI_SH_CR1);
 
 	list_add_tail(&mesg->queue, &ss->queue);
-	schedule_work(&ss->ws);
+	queue_work(ss->workqueue, &ss->ws);
 
 	spin_unlock_irqrestore(&ss->lock, flags);
 
@@ -424,7 +425,7 @@ static int spi_sh_remove(struct platform_device *pdev)
 	struct spi_sh_data *ss = platform_get_drvdata(pdev);
 
 	spi_unregister_master(ss->master);
-	flush_work(&ss->ws);
+	destroy_workqueue(ss->workqueue);
 	free_irq(ss->irq, ss);
 
 	return 0;
@@ -483,11 +484,18 @@ static int spi_sh_probe(struct platform_device *pdev)
 	spin_lock_init(&ss->lock);
 	INIT_WORK(&ss->ws, spi_sh_work);
 	init_waitqueue_head(&ss->wait);
+	ss->workqueue = create_singlethread_workqueue(
+					dev_name(master->dev.parent));
+	if (ss->workqueue == NULL) {
+		dev_err(&pdev->dev, "create workqueue error\n");
+		ret = -EBUSY;
+		goto error1;
+	}
 
 	ret = request_irq(irq, spi_sh_irq, 0, "spi_sh", ss);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "request_irq error\n");
-		goto error1;
+		goto error2;
 	}
 
 	master->num_chipselect = 2;
@@ -506,6 +514,8 @@ static int spi_sh_probe(struct platform_device *pdev)
 
  error3:
 	free_irq(irq, ss);
+ error2:
+	destroy_workqueue(ss->workqueue);
  error1:
 	spi_master_put(master);
 

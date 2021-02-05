@@ -281,8 +281,10 @@ static int ec_i2c_probe(struct platform_device *pdev)
 	bus->adap.retries = I2C_MAX_RETRIES;
 
 	err = i2c_add_adapter(&bus->adap);
-	if (err)
+	if (err) {
+		dev_err(dev, "cannot register i2c adapter\n");
 		return err;
+	}
 	platform_set_drvdata(pdev, bus);
 
 	return err;

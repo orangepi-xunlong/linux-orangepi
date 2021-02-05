@@ -41,12 +41,11 @@ mt7601u_rf_wr(struct mt7601u_dev *dev, u8 bank, u8 offset, u8 value)
 		goto out;
 	}
 
-	mt7601u_wr(dev, MT_RF_CSR_CFG,
-		   FIELD_PREP(MT_RF_CSR_CFG_DATA, value) |
-		   FIELD_PREP(MT_RF_CSR_CFG_REG_BANK, bank) |
-		   FIELD_PREP(MT_RF_CSR_CFG_REG_ID, offset) |
-		   MT_RF_CSR_CFG_WR |
-		   MT_RF_CSR_CFG_KICK);
+	mt7601u_wr(dev, MT_RF_CSR_CFG, MT76_SET(MT_RF_CSR_CFG_DATA, value) |
+				       MT76_SET(MT_RF_CSR_CFG_REG_BANK, bank) |
+				       MT76_SET(MT_RF_CSR_CFG_REG_ID, offset) |
+				       MT_RF_CSR_CFG_WR |
+				       MT_RF_CSR_CFG_KICK);
 	trace_rf_write(dev, bank, offset, value);
 out:
 	mutex_unlock(&dev->reg_atomic_mutex);
@@ -75,18 +74,17 @@ mt7601u_rf_rr(struct mt7601u_dev *dev, u8 bank, u8 offset)
 	if (!mt76_poll(dev, MT_RF_CSR_CFG, MT_RF_CSR_CFG_KICK, 0, 100))
 		goto out;
 
-	mt7601u_wr(dev, MT_RF_CSR_CFG,
-		   FIELD_PREP(MT_RF_CSR_CFG_REG_BANK, bank) |
-		   FIELD_PREP(MT_RF_CSR_CFG_REG_ID, offset) |
-		   MT_RF_CSR_CFG_KICK);
+	mt7601u_wr(dev, MT_RF_CSR_CFG, MT76_SET(MT_RF_CSR_CFG_REG_BANK, bank) |
+				       MT76_SET(MT_RF_CSR_CFG_REG_ID, offset) |
+				       MT_RF_CSR_CFG_KICK);
 
 	if (!mt76_poll(dev, MT_RF_CSR_CFG, MT_RF_CSR_CFG_KICK, 0, 100))
 		goto out;
 
 	val = mt7601u_rr(dev, MT_RF_CSR_CFG);
-	if (FIELD_GET(MT_RF_CSR_CFG_REG_ID, val) == offset &&
-	    FIELD_GET(MT_RF_CSR_CFG_REG_BANK, val) == bank) {
-		ret = FIELD_GET(MT_RF_CSR_CFG_DATA, val);
+	if (MT76_GET(MT_RF_CSR_CFG_REG_ID, val) == offset &&
+	    MT76_GET(MT_RF_CSR_CFG_REG_BANK, val) == bank) {
+		ret = MT76_GET(MT_RF_CSR_CFG_DATA, val);
 		trace_rf_read(dev, bank, offset, ret);
 	}
 out:
@@ -141,8 +139,8 @@ static void mt7601u_bbp_wr(struct mt7601u_dev *dev, u8 offset, u8 val)
 	}
 
 	mt7601u_wr(dev, MT_BBP_CSR_CFG,
-		   FIELD_PREP(MT_BBP_CSR_CFG_VAL, val) |
-		   FIELD_PREP(MT_BBP_CSR_CFG_REG_NUM, offset) |
+		   MT76_SET(MT_BBP_CSR_CFG_VAL, val) |
+		   MT76_SET(MT_BBP_CSR_CFG_REG_NUM, offset) |
 		   MT_BBP_CSR_CFG_RW_MODE | MT_BBP_CSR_CFG_BUSY);
 	trace_bbp_write(dev, offset, val);
 out:
@@ -165,7 +163,7 @@ static int mt7601u_bbp_rr(struct mt7601u_dev *dev, u8 offset)
 		goto out;
 
 	mt7601u_wr(dev, MT_BBP_CSR_CFG,
-		   FIELD_PREP(MT_BBP_CSR_CFG_REG_NUM, offset) |
+		   MT76_SET(MT_BBP_CSR_CFG_REG_NUM, offset) |
 		   MT_BBP_CSR_CFG_RW_MODE | MT_BBP_CSR_CFG_BUSY |
 		   MT_BBP_CSR_CFG_READ);
 
@@ -173,8 +171,8 @@ static int mt7601u_bbp_rr(struct mt7601u_dev *dev, u8 offset)
 		goto out;
 
 	val = mt7601u_rr(dev, MT_BBP_CSR_CFG);
-	if (FIELD_GET(MT_BBP_CSR_CFG_REG_NUM, val) == offset) {
-		ret = FIELD_GET(MT_BBP_CSR_CFG_VAL, val);
+	if (MT76_GET(MT_BBP_CSR_CFG_REG_NUM, val) == offset) {
+		ret = MT76_GET(MT_BBP_CSR_CFG_VAL, val);
 		trace_bbp_read(dev, offset, ret);
 	}
 out:
@@ -251,9 +249,9 @@ int mt7601u_phy_get_rssi(struct mt7601u_dev *dev,
 			/* bw40 */ { -2, 16, 34 }
 		}
 	};
-	int bw = FIELD_GET(MT_RXWI_RATE_BW, rate);
-	int aux_lna = FIELD_GET(MT_RXWI_ANT_AUX_LNA, rxwi->ant);
-	int lna_id = FIELD_GET(MT_RXWI_GAIN_RSSI_LNA_ID, rxwi->gain);
+	int bw = MT76_GET(MT_RXWI_RATE_BW, rate);
+	int aux_lna = MT76_GET(MT_RXWI_ANT_AUX_LNA, rxwi->ant);
+	int lna_id = MT76_GET(MT_RXWI_GAIN_RSSI_LNA_ID, rxwi->gain);
 	int val;
 
 	if (lna_id) /* LNA id can be 0, 2, 3. */
@@ -261,7 +259,7 @@ int mt7601u_phy_get_rssi(struct mt7601u_dev *dev,
 
 	val = 8;
 	val -= lna[aux_lna][bw][lna_id];
-	val -= FIELD_GET(MT_RXWI_GAIN_RSSI_VAL, rxwi->gain);
+	val -= MT76_GET(MT_RXWI_GAIN_RSSI_VAL, rxwi->gain);
 	val -= dev->ee->lna_gain;
 	val -= dev->ee->rssi_offset[0];
 
@@ -941,7 +939,7 @@ static int mt7601u_tssi_cal(struct mt7601u_dev *dev)
 	dev_dbg(dev->dev, "final diff: %08x\n", diff_pwr);
 
 	val = mt7601u_rr(dev, MT_TX_ALC_CFG_1);
-	curr_pwr = s6_to_int(FIELD_GET(MT_TX_ALC_CFG_1_TEMP_COMP, val));
+	curr_pwr = s6_to_int(MT76_GET(MT_TX_ALC_CFG_1_TEMP_COMP, val));
 	diff_pwr += curr_pwr;
 	val = (val & ~MT_TX_ALC_CFG_1_TEMP_COMP) | int_to_s6(diff_pwr);
 	mt7601u_wr(dev, MT_TX_ALC_CFG_1, val);

@@ -6,8 +6,6 @@ struct perf_env perf_env;
 
 void perf_env__exit(struct perf_env *env)
 {
-	int i;
-
 	zfree(&env->hostname);
 	zfree(&env->os_release);
 	zfree(&env->version);
@@ -18,21 +16,23 @@ void perf_env__exit(struct perf_env *env)
 	zfree(&env->cmdline_argv);
 	zfree(&env->sibling_cores);
 	zfree(&env->sibling_threads);
+	zfree(&env->numa_nodes);
 	zfree(&env->pmu_mappings);
 	zfree(&env->cpu);
-
-	for (i = 0; i < env->nr_numa_nodes; i++)
-		cpu_map__put(env->numa_nodes[i].map);
-	zfree(&env->numa_nodes);
-
-	for (i = 0; i < env->caches_cnt; i++)
-		cpu_cache_level__free(&env->caches[i]);
-	zfree(&env->caches);
 }
 
 int perf_env__set_cmdline(struct perf_env *env, int argc, const char *argv[])
 {
 	int i;
+
+	/*
+	 * If env->cmdline_argv has already been set, do not override it.  This allows
+	 * a command to set the cmdline, parse args and then call another
+	 * builtin function that implements a command -- e.g, cmd_kvm calling
+	 * cmd_record.
+	 */
+	if (env->cmdline_argv != NULL)
+		return 0;
 
 	/* do not include NULL termination */
 	env->cmdline_argv = calloc(argc, sizeof(char *));
@@ -83,11 +83,4 @@ int perf_env__read_cpu_topology_map(struct perf_env *env)
 
 	env->nr_cpus_avail = nr_cpus;
 	return 0;
-}
-
-void cpu_cache_level__free(struct cpu_cache_level *cache)
-{
-	free(cache->type);
-	free(cache->map);
-	free(cache->size);
 }

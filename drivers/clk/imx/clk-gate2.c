@@ -31,7 +31,6 @@ struct clk_gate2 {
 	struct clk_hw hw;
 	void __iomem	*reg;
 	u8		bit_idx;
-	u8		cgr_val;
 	u8		flags;
 	spinlock_t	*lock;
 	unsigned int	*share_count;
@@ -51,8 +50,7 @@ static int clk_gate2_enable(struct clk_hw *hw)
 		goto out;
 
 	reg = readl(gate->reg);
-	reg &= ~(3 << gate->bit_idx);
-	reg |= gate->cgr_val << gate->bit_idx;
+	reg |= 3 << gate->bit_idx;
 	writel(reg, gate->reg);
 
 out:
@@ -127,7 +125,7 @@ static struct clk_ops clk_gate2_ops = {
 
 struct clk *clk_register_gate2(struct device *dev, const char *name,
 		const char *parent_name, unsigned long flags,
-		void __iomem *reg, u8 bit_idx, u8 cgr_val,
+		void __iomem *reg, u8 bit_idx,
 		u8 clk_gate2_flags, spinlock_t *lock,
 		unsigned int *share_count)
 {
@@ -142,7 +140,6 @@ struct clk *clk_register_gate2(struct device *dev, const char *name,
 	/* struct clk_gate2 assignments */
 	gate->reg = reg;
 	gate->bit_idx = bit_idx;
-	gate->cgr_val = cgr_val;
 	gate->flags = clk_gate2_flags;
 	gate->lock = lock;
 	gate->share_count = share_count;

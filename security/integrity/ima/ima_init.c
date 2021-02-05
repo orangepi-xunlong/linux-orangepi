@@ -21,7 +21,7 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/err.h>
-
+#include <crypto/hash_info.h>
 #include "ima.h"
 
 /* name for boot aggregate entry */
@@ -79,8 +79,7 @@ static int __init ima_add_boot_aggregate(void)
 	}
 
 	result = ima_store_template(entry, violation, NULL,
-				    boot_aggregate_name,
-				    CONFIG_IMA_MEASURE_PCR_IDX);
+				    boot_aggregate_name);
 	if (result < 0) {
 		ima_free_template_entry(entry);
 		audit_cause = "store_entry";
@@ -117,7 +116,7 @@ int __init ima_init(void)
 	if (!ima_used_chip)
 		pr_info("No TPM chip found, activating TPM-bypass!\n");
 
-	rc = integrity_init_keyring(INTEGRITY_KEYRING_IMA);
+	rc = ima_init_keyring(INTEGRITY_KEYRING_IMA);
 	if (rc)
 		return rc;
 

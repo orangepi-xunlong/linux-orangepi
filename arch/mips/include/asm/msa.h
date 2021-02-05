@@ -168,7 +168,6 @@ static inline unsigned int read_msa_##name(void)		\
 	unsigned int reg;					\
 	__asm__ __volatile__(					\
 	"	.set	push\n"					\
-	"	.set	fp=64\n"				\
 	"	.set	msa\n"					\
 	"	cfcmsa	%0, $" #cs "\n"				\
 	"	.set	pop\n"					\
@@ -180,7 +179,6 @@ static inline void write_msa_##name(unsigned int val)		\
 {								\
 	__asm__ __volatile__(					\
 	"	.set	push\n"					\
-	"	.set	fp=64\n"				\
 	"	.set	msa\n"					\
 	"	ctcmsa	$" #cs ", %0\n"				\
 	"	.set	pop\n"					\
@@ -194,6 +192,13 @@ static inline void write_msa_##name(unsigned int val)		\
  * allow compilation with toolchains that do not support MSA. Once all
  * toolchains in use support MSA these can be removed.
  */
+#ifdef CONFIG_CPU_MICROMIPS
+#define CFC_MSA_INSN	0x587e0056
+#define CTC_MSA_INSN	0x583e0816
+#else
+#define CFC_MSA_INSN	0x787e0059
+#define CTC_MSA_INSN	0x783e0819
+#endif
 
 #define __BUILD_MSA_CTL_REG(name, cs)				\
 static inline unsigned int read_msa_##name(void)		\
@@ -202,12 +207,11 @@ static inline unsigned int read_msa_##name(void)		\
 	__asm__ __volatile__(					\
 	"	.set	push\n"					\
 	"	.set	noat\n"					\
-	"	# cfcmsa $1, $%1\n"				\
-	_ASM_INSN_IF_MIPS(0x787e0059 | %1 << 11)		\
-	_ASM_INSN32_IF_MM(0x587e0056 | %1 << 11)		\
+	"	.insn\n"					\
+	"	.word	%1 | (" #cs " << 11)\n"			\
 	"	move	%0, $1\n"				\
 	"	.set	pop\n"					\
-	: "=r"(reg) : "i"(cs));					\
+	: "=r"(reg) : "i"(CFC_MSA_INSN));			\
 	return reg;						\
 }								\
 								\
@@ -217,11 +221,10 @@ static inline void write_msa_##name(unsigned int val)		\
 	"	.set	push\n"					\
 	"	.set	noat\n"					\
 	"	move	$1, %0\n"				\
-	"	# ctcmsa $%1, $1\n"				\
-	_ASM_INSN_IF_MIPS(0x783e0819 | %1 << 6)			\
-	_ASM_INSN32_IF_MM(0x583e0816 | %1 << 6)			\
+	"	.insn\n"					\
+	"	.word	%1 | (" #cs " << 6)\n"			\
 	"	.set	pop\n"					\
-	: : "r"(val), "i"(cs));					\
+	: : "r"(val), "i"(CTC_MSA_INSN));			\
 }
 
 #endif /* !TOOLCHAIN_SUPPORTS_MSA */

@@ -1,5 +1,5 @@
 #include <linux/string.h>
-#include <linux/export.h>
+#include <linux/module.h>
 
 #undef memcpy
 #undef memset

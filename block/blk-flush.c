@@ -10,8 +10,8 @@
  * optional steps - PREFLUSH, DATA and POSTFLUSH - according to the request
  * properties and hardware capability.
  *
- * If a request doesn't have data, only REQ_PREFLUSH makes sense, which
- * indicates a simple flush request.  If there is data, REQ_PREFLUSH indicates
+ * If a request doesn't have data, only REQ_FLUSH makes sense, which
+ * indicates a simple flush request.  If there is data, REQ_FLUSH indicates
  * that the device cache should be flushed before the data is executed, and
  * REQ_FUA means that the data must be on non-volatile media on request
  * completion.
@@ -20,16 +20,16 @@
  * difference.  The requests are either completed immediately if there's no
  * data or executed as normal requests otherwise.
  *
- * If the device has writeback cache and supports FUA, REQ_PREFLUSH is
+ * If the device has writeback cache and supports FUA, REQ_FLUSH is
  * translated to PREFLUSH but REQ_FUA is passed down directly with DATA.
  *
- * If the device has writeback cache and doesn't support FUA, REQ_PREFLUSH
- * is translated to PREFLUSH and REQ_FUA to POSTFLUSH.
+ * If the device has writeback cache and doesn't support FUA, REQ_FLUSH is
+ * translated to PREFLUSH and REQ_FUA to POSTFLUSH.
  *
  * The actual execution of flush is double buffered.  Whenever a request
  * needs to execute PRE or POSTFLUSH, it queues at
  * fq->flush_queue[fq->flush_pending_idx].  Once certain criteria are met, a
- * REQ_OP_FLUSH is issued and the pending_idx is toggled.  When the flush
+ * flush is issued and the pending_idx is toggled.  When the flush
  * completes, all the requests which were pending are proceeded to the next
  * step.  This allows arbitrary merging of different types of FLUSH/FUA
  * requests.
@@ -95,18 +95,17 @@ enum {
 static bool blk_kick_flush(struct request_queue *q,
 			   struct blk_flush_queue *fq);
 
-static unsigned int blk_flush_policy(unsigned long fflags, struct request *rq)
+static unsigned int blk_flush_policy(unsigned int fflags, struct request *rq)
 {
 	unsigned int policy = 0;
 
 	if (blk_rq_sectors(rq))
 		policy |= REQ_FSEQ_DATA;
 
-	if (fflags & (1UL << QUEUE_FLAG_WC)) {
-		if (rq->cmd_flags & REQ_PREFLUSH)
+	if (fflags & REQ_FLUSH) {
+		if (rq->cmd_flags & REQ_FLUSH)
 			policy |= REQ_FSEQ_PREFLUSH;
-		if (!(fflags & (1UL << QUEUE_FLAG_FUA)) &&
-		    (rq->cmd_flags & REQ_FUA))
+		if (!(fflags & REQ_FUA) && (rq->cmd_flags & REQ_FUA))
 			policy |= REQ_FSEQ_POSTFLUSH;
 	}
 	return policy;
@@ -232,7 +231,7 @@ static void flush_end_io(struct request *flush_rq, int error)
 
 		/* release the tag's ownership to the req cloned from */
 		spin_lock_irqsave(&fq->mq_flush_lock, flags);
-		hctx = blk_mq_map_queue(q, flush_rq->mq_ctx->cpu);
+		hctx = q->mq_ops->map_queue(q, flush_rq->mq_ctx->cpu);
 		blk_mq_tag_set_rq(hctx, flush_rq->tag, fq->orig_rq);
 		flush_rq->tag = -1;
 	}
@@ -325,12 +324,12 @@ static bool blk_kick_flush(struct request_queue *q, struct blk_flush_queue *fq)
 		flush_rq->tag = first_rq->tag;
 		fq->orig_rq = first_rq;
 
-		hctx = blk_mq_map_queue(q, first_rq->mq_ctx->cpu);
+		hctx = q->mq_ops->map_queue(q, first_rq->mq_ctx->cpu);
 		blk_mq_tag_set_rq(hctx, first_rq->tag, flush_rq);
 	}
 
 	flush_rq->cmd_type = REQ_TYPE_FS;
-	req_set_op_attrs(flush_rq, REQ_OP_FLUSH, WRITE_FLUSH | REQ_FLUSH_SEQ);
+	flush_rq->cmd_flags = WRITE_FLUSH | REQ_FLUSH_SEQ;
 	flush_rq->rq_disk = first_rq->rq_disk;
 	flush_rq->end_io = flush_end_io;
 
@@ -341,34 +340,6 @@ static void flush_data_end_io(struct request *rq, int error)
 {
 	struct request_queue *q = rq->q;
 	struct blk_flush_queue *fq = blk_get_flush_queue(q, NULL);
-
-	/*
-	 * Updating q->in_flight[] here for making this tag usable
-	 * early. Because in blk_queue_start_tag(),
-	 * q->in_flight[BLK_RW_ASYNC] is used to limit async I/O and
-	 * reserve tags for sync I/O.
-	 *
-	 * More importantly this way can avoid the following I/O
-	 * deadlock:
-	 *
-	 * - suppose there are 40 fua requests comming to flush queue
-	 *   and queue depth is 31
-	 * - 30 rqs are scheduled then blk_queue_start_tag() can't alloc
-	 *   tag for async I/O any more
-	 * - all the 30 rqs are completed before FLUSH_PENDING_TIMEOUT
-	 *   and flush_data_end_io() is called
-	 * - the other rqs still can't go ahead if not updating
-	 *   q->in_flight[BLK_RW_ASYNC] here, meantime these rqs
-	 *   are held in flush data queue and make no progress of
-	 *   handling post flush rq
-	 * - only after the post flush rq is handled, all these rqs
-	 *   can be completed
-	 */
-
-	elv_completed_request(q, rq);
-
-	/* for avoiding double accounting */
-	rq->cmd_flags &= ~REQ_STARTED;
 
 	/*
 	 * After populating an empty queue, kick it to avoid stall.  Read
@@ -386,7 +357,7 @@ static void mq_flush_data_end_io(struct request *rq, int error)
 	unsigned long flags;
 	struct blk_flush_queue *fq = blk_get_flush_queue(q, ctx);
 
-	hctx = blk_mq_map_queue(q, ctx->cpu);
+	hctx = q->mq_ops->map_queue(q, ctx->cpu);
 
 	/*
 	 * After populating an empty queue, kick it to avoid stall.  Read
@@ -413,16 +384,16 @@ static void mq_flush_data_end_io(struct request *rq, int error)
 void blk_insert_flush(struct request *rq)
 {
 	struct request_queue *q = rq->q;
-	unsigned long fflags = q->queue_flags;	/* may change, cache */
+	unsigned int fflags = q->flush_flags;	/* may change, cache */
 	unsigned int policy = blk_flush_policy(fflags, rq);
 	struct blk_flush_queue *fq = blk_get_flush_queue(q, rq->mq_ctx);
 
 	/*
 	 * @policy now records what operations need to be done.  Adjust
-	 * REQ_PREFLUSH and FUA for the driver.
+	 * REQ_FLUSH and FUA for the driver.
 	 */
-	rq->cmd_flags &= ~REQ_PREFLUSH;
-	if (!(fflags & (1UL << QUEUE_FLAG_FUA)))
+	rq->cmd_flags &= ~REQ_FLUSH;
+	if (!(fflags & REQ_FUA))
 		rq->cmd_flags &= ~REQ_FUA;
 
 	/*
@@ -513,9 +484,8 @@ int blkdev_issue_flush(struct block_device *bdev, gfp_t gfp_mask,
 
 	bio = bio_alloc(gfp_mask, 0);
 	bio->bi_bdev = bdev;
-	bio_set_op_attrs(bio, REQ_OP_WRITE, WRITE_FLUSH);
 
-	ret = submit_bio_wait(bio);
+	ret = submit_bio_wait(WRITE_FLUSH, bio);
 
 	/*
 	 * The driver must store the error location in ->bi_sector, if

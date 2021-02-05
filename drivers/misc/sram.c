@@ -360,12 +360,9 @@ static int sram_probe(struct platform_device *pdev)
 		return -EBUSY;
 	}
 
-	if (of_property_read_bool(pdev->dev.of_node, "no-memory-wc"))
-		sram->virt_base = devm_ioremap(sram->dev, res->start, size);
-	else
-		sram->virt_base = devm_ioremap_wc(sram->dev, res->start, size);
-	if (!sram->virt_base)
-		return -ENOMEM;
+	sram->virt_base = devm_ioremap_wc(sram->dev, res->start, size);
+	if (IS_ERR(sram->virt_base))
+		return PTR_ERR(sram->virt_base);
 
 	sram->pool = devm_gen_pool_create(sram->dev, ilog2(SRAM_GRANULARITY),
 					  NUMA_NO_NODE, NULL);

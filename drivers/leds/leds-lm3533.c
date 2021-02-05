@@ -17,6 +17,7 @@
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
 
 #include <linux/mfd/lm3533.h>
 
@@ -52,6 +53,9 @@ struct lm3533_led {
 
 	struct mutex mutex;
 	unsigned long flags;
+
+	struct work_struct work;
+	u8 new_brightness;
 };
 
 
@@ -119,17 +123,27 @@ out:
 	return ret;
 }
 
-static int lm3533_led_set(struct led_classdev *cdev,
+static void lm3533_led_work(struct work_struct *work)
+{
+	struct lm3533_led *led = container_of(work, struct lm3533_led, work);
+
+	dev_dbg(led->cdev.dev, "%s - %u\n", __func__, led->new_brightness);
+
+	if (led->new_brightness == 0)
+		lm3533_led_pattern_enable(led, 0);	/* disable blink */
+
+	lm3533_ctrlbank_set_brightness(&led->cb, led->new_brightness);
+}
+
+static void lm3533_led_set(struct led_classdev *cdev,
 						enum led_brightness value)
 {
 	struct lm3533_led *led = to_lm3533_led(cdev);
 
 	dev_dbg(led->cdev.dev, "%s - %d\n", __func__, value);
 
-	if (value == 0)
-		lm3533_led_pattern_enable(led, 0);	/* disable blink */
-
-	return lm3533_ctrlbank_set_brightness(&led->cb, value);
+	led->new_brightness = value;
+	schedule_work(&led->work);
 }
 
 static enum led_brightness lm3533_led_get(struct led_classdev *cdev)
@@ -679,7 +693,7 @@ static int lm3533_led_probe(struct platform_device *pdev)
 	led->lm3533 = lm3533;
 	led->cdev.name = pdata->name;
 	led->cdev.default_trigger = pdata->default_trigger;
-	led->cdev.brightness_set_blocking = lm3533_led_set;
+	led->cdev.brightness_set = lm3533_led_set;
 	led->cdev.brightness_get = lm3533_led_get;
 	led->cdev.blink_set = lm3533_led_blink_set;
 	led->cdev.brightness = LED_OFF;
@@ -687,6 +701,7 @@ static int lm3533_led_probe(struct platform_device *pdev)
 	led->id = pdev->id;
 
 	mutex_init(&led->mutex);
+	INIT_WORK(&led->work, lm3533_led_work);
 
 	/* The class framework makes a callback to get brightness during
 	 * registration so use parent device (for error reporting) until
@@ -698,7 +713,7 @@ static int lm3533_led_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, led);
 
-	ret = devm_led_classdev_register(pdev->dev.parent, &led->cdev);
+	ret = led_classdev_register(pdev->dev.parent, &led->cdev);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register LED %d\n", pdev->id);
 		return ret;
@@ -708,13 +723,19 @@ static int lm3533_led_probe(struct platform_device *pdev)
 
 	ret = lm3533_led_setup(led, pdata);
 	if (ret)
-		return ret;
+		goto err_unregister;
 
 	ret = lm3533_ctrlbank_enable(&led->cb);
 	if (ret)
-		return ret;
+		goto err_unregister;
 
 	return 0;
+
+err_unregister:
+	led_classdev_unregister(&led->cdev);
+	flush_work(&led->work);
+
+	return ret;
 }
 
 static int lm3533_led_remove(struct platform_device *pdev)
@@ -724,6 +745,8 @@ static int lm3533_led_remove(struct platform_device *pdev)
 	dev_dbg(&pdev->dev, "%s\n", __func__);
 
 	lm3533_ctrlbank_disable(&led->cb);
+	led_classdev_unregister(&led->cdev);
+	flush_work(&led->work);
 
 	return 0;
 }
@@ -737,6 +760,7 @@ static void lm3533_led_shutdown(struct platform_device *pdev)
 
 	lm3533_ctrlbank_disable(&led->cb);
 	lm3533_led_set(&led->cdev, LED_OFF);		/* disable blink */
+	flush_work(&led->work);
 }
 
 static struct platform_driver lm3533_led_driver = {

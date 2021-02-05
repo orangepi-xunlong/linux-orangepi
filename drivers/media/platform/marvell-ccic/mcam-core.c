@@ -25,7 +25,7 @@
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-event.h>
-#include <media/i2c/ov7670.h>
+#include <media/ov7670.h>
 #include <media/videobuf2-vmalloc.h>
 #include <media/videobuf2-dma-contig.h>
 #include <media/videobuf2-dma-sg.h>
@@ -226,7 +226,7 @@ static void mcam_buffer_done(struct mcam_camera *cam, int frame,
 	vbuf->vb2_buf.planes[0].bytesused = cam->pix_format.sizeimage;
 	vbuf->sequence = cam->buf_seq[frame];
 	vbuf->field = V4L2_FIELD_NONE;
-	vbuf->vb2_buf.timestamp = ktime_get_ns();
+	v4l2_get_timestamp(&vbuf->timestamp);
 	vb2_set_plane_payload(&vbuf->vb2_buf, 0, cam->pix_format.sizeimage);
 	vb2_buffer_done(&vbuf->vb2_buf, VB2_BUF_STATE_DONE);
 }
@@ -973,7 +973,7 @@ static int mcam_cam_set_flip(struct mcam_camera *cam)
 	memset(&ctrl, 0, sizeof(ctrl));
 	ctrl.id = V4L2_CID_VFLIP;
 	ctrl.value = flip;
-	return v4l2_s_ctrl(NULL, cam->sensor->ctrl_handler, &ctrl);
+	return sensor_call(cam, core, s_ctrl, &ctrl);
 }
 
 
@@ -1049,21 +1049,24 @@ static int mcam_read_setup(struct mcam_camera *cam)
  */
 
 static int mcam_vb_queue_setup(struct vb2_queue *vq,
-		unsigned int *nbufs,
+		const void *parg, unsigned int *nbufs,
 		unsigned int *num_planes, unsigned int sizes[],
-		struct device *alloc_devs[])
+		void *alloc_ctxs[])
 {
+	const struct v4l2_format *fmt = parg;
 	struct mcam_camera *cam = vb2_get_drv_priv(vq);
 	int minbufs = (cam->buffer_mode == B_DMA_contig) ? 3 : 2;
-	unsigned size = cam->pix_format.sizeimage;
 
+	if (fmt && fmt->fmt.pix.sizeimage < cam->pix_format.sizeimage)
+		return -EINVAL;
+	sizes[0] = fmt ? fmt->fmt.pix.sizeimage : cam->pix_format.sizeimage;
+	*num_planes = 1; /* Someday we have to support planar formats... */
 	if (*nbufs < minbufs)
 		*nbufs = minbufs;
-
-	if (*num_planes)
-		return sizes[0] < size ? -EINVAL : 0;
-	sizes[0] = size;
-	*num_planes = 1; /* Someday we have to support planar formats... */
+	if (cam->buffer_mode == B_DMA_contig)
+		alloc_ctxs[0] = cam->vb_alloc_ctx;
+	else if (cam->buffer_mode == B_DMA_sg)
+		alloc_ctxs[0] = cam->vb_alloc_ctx_sg;
 	return 0;
 }
 
@@ -1267,7 +1270,6 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 	vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	vq->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF | VB2_READ;
 	vq->buf_struct_size = sizeof(struct mcam_vb_buffer);
-	vq->dev = cam->dev;
 	INIT_LIST_HEAD(&cam->buffers);
 	switch (cam->buffer_mode) {
 	case B_DMA_contig:
@@ -1276,6 +1278,9 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 		vq->mem_ops = &vb2_dma_contig_memops;
 		cam->dma_setup = mcam_ctlr_dma_contig;
 		cam->frame_complete = mcam_dma_contig_done;
+		cam->vb_alloc_ctx = vb2_dma_contig_init_ctx(cam->dev);
+		if (IS_ERR(cam->vb_alloc_ctx))
+			return PTR_ERR(cam->vb_alloc_ctx);
 #endif
 		break;
 	case B_DMA_sg:
@@ -1284,6 +1289,9 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 		vq->mem_ops = &vb2_dma_sg_memops;
 		cam->dma_setup = mcam_ctlr_dma_sg;
 		cam->frame_complete = mcam_dma_sg_done;
+		cam->vb_alloc_ctx_sg = vb2_dma_sg_init_ctx(cam->dev);
+		if (IS_ERR(cam->vb_alloc_ctx_sg))
+			return PTR_ERR(cam->vb_alloc_ctx_sg);
 #endif
 		break;
 	case B_vmalloc:
@@ -1298,6 +1306,18 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 		break;
 	}
 	return vb2_queue_init(vq);
+}
+
+static void mcam_cleanup_vb2(struct mcam_camera *cam)
+{
+#ifdef MCAM_MODE_DMA_CONTIG
+	if (cam->buffer_mode == B_DMA_contig)
+		vb2_dma_contig_cleanup_ctx(cam->vb_alloc_ctx);
+#endif
+#ifdef MCAM_MODE_DMA_SG
+	if (cam->buffer_mode == B_DMA_sg)
+		vb2_dma_sg_cleanup_ctx(cam->vb_alloc_ctx_sg);
+#endif
 }
 
 
@@ -1854,6 +1874,7 @@ void mccic_shutdown(struct mcam_camera *cam)
 		cam_warn(cam, "Removing a device with users!\n");
 		mcam_ctlr_power_down(cam);
 	}
+	mcam_cleanup_vb2(cam);
 	if (cam->buffer_mode == B_vmalloc)
 		mcam_free_dma_bufs(cam);
 	video_unregister_device(&cam->vdev);

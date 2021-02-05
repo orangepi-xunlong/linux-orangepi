@@ -57,16 +57,10 @@ void dccp_time_wait(struct sock *sk, int state, int timeo)
 		if (state == DCCP_TIME_WAIT)
 			timeo = DCCP_TIMEWAIT_LEN;
 
-		/* tw_timer is pinned, so we need to make sure BH are disabled
-		 * in following section, otherwise timer handler could run before
-		 * we complete the initialization.
-		 */
-		local_bh_disable();
 		inet_twsk_schedule(tw, timeo);
 		/* Linkage updates. */
 		__inet_twsk_hashdance(tw, sk, &dccp_hashinfo);
 		inet_twsk_put(tw);
-		local_bh_enable();
 	} else {
 		/* Sorry, if we're out of memory, just CLOSE this
 		 * socket up.  We've got bigger problems than
@@ -134,7 +128,7 @@ struct sock *dccp_create_openreq_child(const struct sock *sk,
 		}
 		dccp_init_xmit_timers(newsk);
 
-		__DCCP_INC_STATS(DCCP_MIB_PASSIVEOPENS);
+		DCCP_INC_STATS_BH(DCCP_MIB_PASSIVEOPENS);
 	}
 	return newsk;
 }

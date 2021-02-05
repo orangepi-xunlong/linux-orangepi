@@ -148,10 +148,10 @@ static int xtensa_gpio_probe(struct platform_device *pdev)
 {
 	int ret;
 
-	ret = gpiochip_add_data(&impwire_chip, NULL);
+	ret = gpiochip_add(&impwire_chip);
 	if (ret)
 		return ret;
-	return gpiochip_add_data(&expstate_chip, NULL);
+	return gpiochip_add(&expstate_chip);
 }
 
 static struct platform_driver xtensa_gpio_driver = {

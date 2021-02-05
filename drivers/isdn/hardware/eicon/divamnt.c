@@ -45,6 +45,7 @@ char *DRIVERRELEASE_MNT = "2.0";
 
 static wait_queue_head_t msgwaitq;
 static unsigned long opened;
+static struct timeval start_time;
 
 extern int mntfunc_init(int *, void **, unsigned long);
 extern void mntfunc_finit(void);
@@ -87,12 +88,28 @@ int diva_os_copy_from_user(void *os_handle, void *dst, const void __user *src,
  */
 void diva_os_get_time(dword *sec, dword *usec)
 {
-	struct timespec64 time;
+	struct timeval tv;
 
-	ktime_get_ts64(&time);
+	do_gettimeofday(&tv);
 
-	*sec = (dword) time.tv_sec;
-	*usec = (dword) (time.tv_nsec / NSEC_PER_USEC);
+	if (tv.tv_sec > start_time.tv_sec) {
+		if (start_time.tv_usec > tv.tv_usec) {
+			tv.tv_sec--;
+			tv.tv_usec += 1000000;
+		}
+		*sec = (dword) (tv.tv_sec - start_time.tv_sec);
+		*usec = (dword) (tv.tv_usec - start_time.tv_usec);
+	} else if (tv.tv_sec == start_time.tv_sec) {
+		*sec = 0;
+		if (start_time.tv_usec < tv.tv_usec) {
+			*usec = (dword) (tv.tv_usec - start_time.tv_usec);
+		} else {
+			*usec = 0;
+		}
+	} else {
+		*sec = (dword) tv.tv_sec;
+		*usec = (dword) tv.tv_usec;
+	}
 }
 
 /*
@@ -196,6 +213,7 @@ static int __init maint_init(void)
 	int ret = 0;
 	void *buffer = NULL;
 
+	do_gettimeofday(&start_time);
 	init_waitqueue_head(&msgwaitq);
 
 	printk(KERN_INFO "%s\n", DRIVERNAME);

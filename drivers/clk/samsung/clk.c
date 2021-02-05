@@ -346,9 +346,9 @@ static struct syscore_ops samsung_clk_syscore_ops = {
 	.resume = samsung_clk_resume,
 };
 
-void samsung_clk_sleep_init(void __iomem *reg_base,
-			const unsigned long *rdump,
-			unsigned long nr_rdump)
+static void samsung_clk_sleep_init(void __iomem *reg_base,
+		const unsigned long *rdump,
+		unsigned long nr_rdump)
 {
 	struct samsung_clock_reg_cache *reg_cache;
 
@@ -370,9 +370,9 @@ void samsung_clk_sleep_init(void __iomem *reg_base,
 }
 
 #else
-void samsung_clk_sleep_init(void __iomem *reg_base,
-			const unsigned long *rdump,
-			unsigned long nr_rdump) {}
+static void samsung_clk_sleep_init(void __iomem *reg_base,
+		const unsigned long *rdump,
+		unsigned long nr_rdump) {}
 #endif
 
 /*
@@ -381,7 +381,7 @@ void samsung_clk_sleep_init(void __iomem *reg_base,
  */
 struct samsung_clk_provider * __init samsung_cmu_register_one(
 			struct device_node *np,
-			const struct samsung_cmu_info *cmu)
+			struct samsung_cmu_info *cmu)
 {
 	void __iomem *reg_base;
 	struct samsung_clk_provider *ctx;

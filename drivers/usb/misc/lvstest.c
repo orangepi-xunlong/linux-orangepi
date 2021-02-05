@@ -34,6 +34,8 @@ struct lvs_rh {
 	struct usb_hub_descriptor descriptor;
 	/* urb for polling interrupt pipe */
 	struct urb *urb;
+	/* LVS RH work queue */
+	struct workqueue_struct *rh_queue;
 	/* LVH RH work */
 	struct work_struct	rh_work;
 	/* RH port status */
@@ -245,8 +247,10 @@ static ssize_t get_dev_desc_store(struct device *dev,
 	int ret;
 
 	descriptor = kmalloc(sizeof(*descriptor), GFP_KERNEL);
-	if (!descriptor)
+	if (!descriptor) {
+		dev_err(dev, "failed to allocate descriptor memory\n");
 		return -ENOMEM;
+	}
 
 	udev = create_lvs_device(intf);
 	if (!udev) {
@@ -351,7 +355,7 @@ static void lvs_rh_irq(struct urb *urb)
 {
 	struct lvs_rh *lvs = urb->context;
 
-	schedule_work(&lvs->rh_work);
+	queue_work(lvs->rh_queue, &lvs->rh_work);
 }
 
 static int lvs_rh_probe(struct usb_interface *intf,
@@ -397,15 +401,24 @@ static int lvs_rh_probe(struct usb_interface *intf,
 
 	/* submit urb to poll interrupt endpoint */
 	lvs->urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!lvs->urb)
+	if (!lvs->urb) {
+		dev_err(&intf->dev, "couldn't allocate lvs urb\n");
 		return -ENOMEM;
+	}
+
+	lvs->rh_queue = create_singlethread_workqueue("lvs_rh_queue");
+	if (!lvs->rh_queue) {
+		dev_err(&intf->dev, "couldn't create workqueue\n");
+		ret = -ENOMEM;
+		goto free_urb;
+	}
 
 	INIT_WORK(&lvs->rh_work, lvs_rh_work);
 
 	ret = sysfs_create_group(&intf->dev.kobj, &lvs_attr_group);
 	if (ret < 0) {
 		dev_err(&intf->dev, "Failed to create sysfs node %d\n", ret);
-		goto free_urb;
+		goto destroy_queue;
 	}
 
 	pipe = usb_rcvintpipe(hdev, endpoint->bEndpointAddress);
@@ -423,6 +436,8 @@ static int lvs_rh_probe(struct usb_interface *intf,
 
 sysfs_remove:
 	sysfs_remove_group(&intf->dev.kobj, &lvs_attr_group);
+destroy_queue:
+	destroy_workqueue(lvs->rh_queue);
 free_urb:
 	usb_free_urb(lvs->urb);
 	return ret;
@@ -433,8 +448,7 @@ static void lvs_rh_disconnect(struct usb_interface *intf)
 	struct lvs_rh *lvs = usb_get_intfdata(intf);
 
 	sysfs_remove_group(&intf->dev.kobj, &lvs_attr_group);
-	usb_poison_urb(lvs->urb); /* used in scheduled work */
-	flush_work(&lvs->rh_work);
+	destroy_workqueue(lvs->rh_queue);
 	usb_free_urb(lvs->urb);
 }
 

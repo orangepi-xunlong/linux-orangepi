@@ -343,26 +343,16 @@ static const struct regmap_config at86rf230_regmap_spi_config = {
 };
 
 static void
-at86rf230_async_error_recover_complete(void *context)
-{
-	struct at86rf230_state_change *ctx = context;
-	struct at86rf230_local *lp = ctx->lp;
-
-	if (ctx->free)
-		kfree(ctx);
-
-	ieee802154_wake_queue(lp->hw);
-}
-
-static void
 at86rf230_async_error_recover(void *context)
 {
 	struct at86rf230_state_change *ctx = context;
 	struct at86rf230_local *lp = ctx->lp;
 
 	lp->is_tx = 0;
-	at86rf230_async_state_change(lp, ctx, STATE_RX_AACK_ON,
-				     at86rf230_async_error_recover_complete);
+	at86rf230_async_state_change(lp, ctx, STATE_RX_AACK_ON, NULL);
+	ieee802154_wake_queue(lp->hw);
+	if (ctx->free)
+		kfree(ctx);
 }
 
 static inline void
@@ -902,12 +892,14 @@ at86rf230_xmit_start(void *context)
 	struct at86rf230_local *lp = ctx->lp;
 
 	/* check if we change from off state */
-	if (lp->is_tx_from_off)
+	if (lp->is_tx_from_off) {
+		lp->is_tx_from_off = false;
 		at86rf230_async_state_change(lp, ctx, STATE_TX_ARET_ON,
 					     at86rf230_write_frame);
-	else
+	} else {
 		at86rf230_async_state_change(lp, ctx, STATE_TX_ON,
 					     at86rf230_xmit_tx_on);
+	}
 }
 
 static int
@@ -931,7 +923,6 @@ at86rf230_xmit(struct ieee802154_hw *hw, struct sk_buff *skb)
 		at86rf230_async_state_change(lp, ctx, STATE_TRX_OFF,
 					     at86rf230_xmit_start);
 	} else {
-		lp->is_tx_from_off = false;
 		at86rf230_xmit_start(ctx);
 	}
 
@@ -1335,7 +1326,7 @@ static struct at86rf2xx_chip_data at86rf233_data = {
 	.t_off_to_aack = 80,
 	.t_off_to_tx_on = 80,
 	.t_off_to_sleep = 35,
-	.t_sleep_to_off = 1000,
+	.t_sleep_to_off = 210,
 	.t_frame = 4096,
 	.t_p_ack = 545,
 	.rssi_base_val = -91,
@@ -1350,7 +1341,7 @@ static struct at86rf2xx_chip_data at86rf231_data = {
 	.t_off_to_aack = 110,
 	.t_off_to_tx_on = 110,
 	.t_off_to_sleep = 35,
-	.t_sleep_to_off = 1000,
+	.t_sleep_to_off = 380,
 	.t_frame = 4096,
 	.t_p_ack = 545,
 	.rssi_base_val = -91,
@@ -1365,7 +1356,7 @@ static struct at86rf2xx_chip_data at86rf212_data = {
 	.t_off_to_aack = 200,
 	.t_off_to_tx_on = 200,
 	.t_off_to_sleep = 35,
-	.t_sleep_to_off = 1000,
+	.t_sleep_to_off = 380,
 	.t_frame = 4096,
 	.t_p_ack = 545,
 	.rssi_base_val = -100,

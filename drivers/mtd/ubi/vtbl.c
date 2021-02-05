@@ -299,17 +299,14 @@ static int create_vtbl(struct ubi_device *ubi, struct ubi_attach_info *ai,
 		       int copy, void *vtbl)
 {
 	int err, tries = 0;
-	struct ubi_vid_io_buf *vidb;
 	struct ubi_vid_hdr *vid_hdr;
 	struct ubi_ainf_peb *new_aeb;
 
 	dbg_gen("create volume table (copy #%d)", copy + 1);
 
-	vidb = ubi_alloc_vid_buf(ubi, GFP_KERNEL);
-	if (!vidb)
+	vid_hdr = ubi_zalloc_vid_hdr(ubi, GFP_KERNEL);
+	if (!vid_hdr)
 		return -ENOMEM;
-
-	vid_hdr = ubi_get_vid_hdr(vidb);
 
 retry:
 	new_aeb = ubi_early_get_peb(ubi, ai);
@@ -327,7 +324,7 @@ retry:
 	vid_hdr->sqnum = cpu_to_be64(++ai->max_sqnum);
 
 	/* The EC header is already there, write the VID header */
-	err = ubi_io_write_vid_hdr(ubi, new_aeb->pnum, vidb);
+	err = ubi_io_write_vid_hdr(ubi, new_aeb->pnum, vid_hdr);
 	if (err)
 		goto write_error;
 
@@ -341,8 +338,8 @@ retry:
 	 * of this LEB as it will be deleted and freed in 'ubi_add_to_av()'.
 	 */
 	err = ubi_add_to_av(ubi, ai, new_aeb->pnum, new_aeb->ec, vid_hdr, 0);
-	ubi_free_aeb(ai, new_aeb);
-	ubi_free_vid_buf(vidb);
+	kmem_cache_free(ai->aeb_slab_cache, new_aeb);
+	ubi_free_vid_hdr(ubi, vid_hdr);
 	return err;
 
 write_error:
@@ -354,9 +351,9 @@ write_error:
 		list_add(&new_aeb->u.list, &ai->erase);
 		goto retry;
 	}
-	ubi_free_aeb(ai, new_aeb);
+	kmem_cache_free(ai->aeb_slab_cache, new_aeb);
 out_free:
-	ubi_free_vid_buf(vidb);
+	ubi_free_vid_hdr(ubi, vid_hdr);
 	return err;
 
 }

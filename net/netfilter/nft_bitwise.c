@@ -52,7 +52,6 @@ static int nft_bitwise_init(const struct nft_ctx *ctx,
 {
 	struct nft_bitwise *priv = nft_expr_priv(expr);
 	struct nft_data_desc d1, d2;
-	u32 len;
 	int err;
 
 	if (tb[NFTA_BITWISE_SREG] == NULL ||
@@ -62,12 +61,7 @@ static int nft_bitwise_init(const struct nft_ctx *ctx,
 	    tb[NFTA_BITWISE_XOR] == NULL)
 		return -EINVAL;
 
-	err = nft_parse_u32_check(tb[NFTA_BITWISE_LEN], U8_MAX, &len);
-	if (err < 0)
-		return err;
-
-	priv->len = len;
-
+	priv->len  = ntohl(nla_get_be32(tb[NFTA_BITWISE_LEN]));
 	priv->sreg = nft_parse_register(tb[NFTA_BITWISE_SREG]);
 	err = nft_validate_register_load(priv->sreg, priv->len);
 	if (err < 0)

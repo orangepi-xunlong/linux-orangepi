@@ -44,13 +44,14 @@
 /**
  * eeh_dev_init - Create EEH device according to OF node
  * @pdn: PCI device node
+ * @data: PHB
  *
  * It will create EEH device according to the given OF node. The function
  * might be called by PCI emunation, DR, PHB hotplug.
  */
-struct eeh_dev *eeh_dev_init(struct pci_dn *pdn)
+void *eeh_dev_init(struct pci_dn *pdn, void *data)
 {
-	struct pci_controller *phb = pdn->phb;
+	struct pci_controller *phb = data;
 	struct eeh_dev *edev;
 
 	/* Allocate EEH device */
@@ -66,9 +67,8 @@ struct eeh_dev *eeh_dev_init(struct pci_dn *pdn)
 	edev->pdn = pdn;
 	edev->phb = phb;
 	INIT_LIST_HEAD(&edev->list);
-	INIT_LIST_HEAD(&edev->rmv_list);
 
-	return edev;
+	return NULL;
 }
 
 /**
@@ -80,8 +80,16 @@ struct eeh_dev *eeh_dev_init(struct pci_dn *pdn)
  */
 void eeh_dev_phb_init_dynamic(struct pci_controller *phb)
 {
+	struct pci_dn *root = phb->pci_data;
+
 	/* EEH PE for PHB */
 	eeh_phb_pe_create(phb);
+
+	/* EEH device for PHB */
+	eeh_dev_init(root, phb);
+
+	/* EEH devices for children OF nodes */
+	traverse_pci_dn(root, eeh_dev_init, phb);
 }
 
 /**
@@ -96,6 +104,8 @@ static int __init eeh_dev_phb_init(void)
 
 	list_for_each_entry_safe(phb, tmp, &hose_list, list_node)
 		eeh_dev_phb_init_dynamic(phb);
+
+	pr_info("EEH: devices created\n");
 
 	return 0;
 }

@@ -6,11 +6,9 @@ ifeq ($(ARCH),x86)
 TEST_PROGS := breakpoint_test
 endif
 
-TEST_PROGS += step_after_suspend_test
-
 all: $(TEST_PROGS)
 
 include ../lib.mk
 
 clean:
-	rm -fr breakpoint_test step_after_suspend_test
+	rm -fr breakpoint_test

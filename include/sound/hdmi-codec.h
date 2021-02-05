@@ -36,10 +36,10 @@ struct hdmi_codec_daifmt {
 		HDMI_AC97,
 		HDMI_SPDIF,
 	} fmt;
-	unsigned int bit_clk_inv:1;
-	unsigned int frame_clk_inv:1;
-	unsigned int bit_clk_master:1;
-	unsigned int frame_clk_master:1;
+	int bit_clk_inv:1;
+	int frame_clk_inv:1;
+	int bit_clk_master:1;
+	int frame_clk_master:1;
 };
 
 /*
@@ -51,6 +51,13 @@ struct hdmi_codec_params {
 	int sample_rate;
 	int sample_width;
 	int channels;
+	int mode;
+};
+
+enum {
+	LPCM = 0,
+	NLPCM,
+	HBR,
 };
 
 struct hdmi_codec_pdata;
@@ -97,6 +104,12 @@ struct hdmi_codec_pdata {
 	int max_i2s_channels;
 	void *data;
 };
+
+struct snd_soc_codec;
+struct snd_soc_jack;
+
+int hdmi_codec_set_jack_detect(struct snd_soc_codec *codec,
+			       struct snd_soc_jack *jack);
 
 #define HDMI_CODEC_DRV_NAME "hdmi-audio-codec"
 

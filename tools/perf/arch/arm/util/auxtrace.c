@@ -33,7 +33,7 @@ struct auxtrace_record
 	cs_etm_pmu = perf_pmu__find(CORESIGHT_ETM_PMU_NAME);
 
 	if (evlist) {
-		evlist__for_each_entry(evlist, evsel) {
+		evlist__for_each(evlist, evsel) {
 			if (cs_etm_pmu &&
 			    evsel->attr.type == cs_etm_pmu->type)
 				found_etm = true;

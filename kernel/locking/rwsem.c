@@ -22,7 +22,6 @@ void __sched down_read(struct rw_semaphore *sem)
 	rwsem_acquire_read(&sem->dep_map, 0, 0, _RET_IP_);
 
 	LOCK_CONTENDED(sem, __down_read_trylock, __down_read);
-	rwsem_set_reader_owned(sem);
 }
 
 EXPORT_SYMBOL(down_read);
@@ -34,10 +33,8 @@ int down_read_trylock(struct rw_semaphore *sem)
 {
 	int ret = __down_read_trylock(sem);
 
-	if (ret == 1) {
+	if (ret == 1)
 		rwsem_acquire_read(&sem->dep_map, 0, 1, _RET_IP_);
-		rwsem_set_reader_owned(sem);
-	}
 	return ret;
 }
 
@@ -56,25 +53,6 @@ void __sched down_write(struct rw_semaphore *sem)
 }
 
 EXPORT_SYMBOL(down_write);
-
-/*
- * lock for writing
- */
-int __sched down_write_killable(struct rw_semaphore *sem)
-{
-	might_sleep();
-	rwsem_acquire(&sem->dep_map, 0, 0, _RET_IP_);
-
-	if (LOCK_CONTENDED_RETURN(sem, __down_write_trylock, __down_write_killable)) {
-		rwsem_release(&sem->dep_map, 1, _RET_IP_);
-		return -EINTR;
-	}
-
-	rwsem_set_owner(sem);
-	return 0;
-}
-
-EXPORT_SYMBOL(down_write_killable);
 
 /*
  * trylock for writing -- returns 1 if successful, 0 if contention
@@ -127,7 +105,7 @@ void downgrade_write(struct rw_semaphore *sem)
 	 * lockdep: a downgraded write will live on as a write
 	 * dependency.
 	 */
-	rwsem_set_reader_owned(sem);
+	rwsem_clear_owner(sem);
 	__downgrade_write(sem);
 }
 
@@ -141,7 +119,6 @@ void down_read_nested(struct rw_semaphore *sem, int subclass)
 	rwsem_acquire_read(&sem->dep_map, subclass, 0, _RET_IP_);
 
 	LOCK_CONTENDED(sem, __down_read_trylock, __down_read);
-	rwsem_set_reader_owned(sem);
 }
 
 EXPORT_SYMBOL(down_read_nested);
@@ -176,22 +153,6 @@ void down_write_nested(struct rw_semaphore *sem, int subclass)
 }
 
 EXPORT_SYMBOL(down_write_nested);
-
-int __sched down_write_killable_nested(struct rw_semaphore *sem, int subclass)
-{
-	might_sleep();
-	rwsem_acquire(&sem->dep_map, subclass, 0, _RET_IP_);
-
-	if (LOCK_CONTENDED_RETURN(sem, __down_write_trylock, __down_write_killable)) {
-		rwsem_release(&sem->dep_map, 1, _RET_IP_);
-		return -EINTR;
-	}
-
-	rwsem_set_owner(sem);
-	return 0;
-}
-
-EXPORT_SYMBOL(down_write_killable_nested);
 
 void up_read_non_owner(struct rw_semaphore *sem)
 {

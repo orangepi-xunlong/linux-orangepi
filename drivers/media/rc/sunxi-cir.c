@@ -103,7 +103,7 @@ static irqreturn_t sunxi_ir_irq(int irqno, void *dev_id)
 	unsigned char dt;
 	unsigned int cnt, rc;
 	struct sunxi_ir *ir = dev_id;
-	DEFINE_IR_RAW_EVENT(rawir);
+	struct ir_raw_event rawir = {};
 
 	spin_lock(&ir->ir_lock);
 
@@ -212,7 +212,7 @@ static int sunxi_ir_probe(struct platform_device *pdev)
 		goto exit_clkdisable_clk;
 	}
 
-	ir->rc = rc_allocate_device();
+	ir->rc = rc_allocate_device(RC_DRIVER_IR_RAW);
 	if (!ir->rc) {
 		dev_err(dev, "failed to allocate device\n");
 		ret = -ENOMEM;
@@ -220,7 +220,7 @@ static int sunxi_ir_probe(struct platform_device *pdev)
 	}
 
 	ir->rc->priv = ir;
-	ir->rc->input_name = SUNXI_IR_DEV;
+	ir->rc->device_name = SUNXI_IR_DEV;
 	ir->rc->input_phys = "sunxi-ir/input0";
 	ir->rc->input_id.bustype = BUS_HOST;
 	ir->rc->input_id.vendor = 0x0001;
@@ -229,8 +229,7 @@ static int sunxi_ir_probe(struct platform_device *pdev)
 	ir->map_name = of_get_property(dn, "linux,rc-map-name", NULL);
 	ir->rc->map_name = ir->map_name ?: RC_MAP_EMPTY;
 	ir->rc->dev.parent = dev;
-	ir->rc->driver_type = RC_DRIVER_IR_RAW;
-	ir->rc->allowed_protocols = RC_BIT_ALL;
+	ir->rc->allowed_protocols = RC_PROTO_BIT_ALL_IR_DECODER;
 	ir->rc->rx_resolution = SUNXI_IR_SAMPLE;
 	ir->rc->timeout = MS_TO_NS(SUNXI_IR_TIMEOUT);
 	ir->rc->driver_name = SUNXI_IR_DEV;
@@ -326,7 +325,6 @@ static const struct of_device_id sunxi_ir_match[] = {
 	{ .compatible = "allwinner,sun5i-a13-ir", },
 	{},
 };
-MODULE_DEVICE_TABLE(of, sunxi_ir_match);
 
 static struct platform_driver sunxi_ir_driver = {
 	.probe          = sunxi_ir_probe,

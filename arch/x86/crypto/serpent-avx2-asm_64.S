@@ -15,7 +15,6 @@
  */
 
 #include <linux/linkage.h>
-#include <asm/frame.h>
 #include "glue_helper-asm-avx2.S"
 
 .file "serpent-avx2-asm_64.S"
@@ -674,7 +673,6 @@ ENTRY(serpent_ecb_enc_16way)
 	 *	%rsi: dst
 	 *	%rdx: src
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -686,7 +684,6 @@ ENTRY(serpent_ecb_enc_16way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(serpent_ecb_enc_16way)
 
@@ -696,7 +693,6 @@ ENTRY(serpent_ecb_dec_16way)
 	 *	%rsi: dst
 	 *	%rdx: src
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -708,7 +704,6 @@ ENTRY(serpent_ecb_dec_16way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(serpent_ecb_dec_16way)
 
@@ -718,7 +713,6 @@ ENTRY(serpent_cbc_dec_16way)
 	 *	%rsi: dst
 	 *	%rdx: src
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -731,7 +725,6 @@ ENTRY(serpent_cbc_dec_16way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(serpent_cbc_dec_16way)
 
@@ -742,7 +735,6 @@ ENTRY(serpent_ctr_16way)
 	 *	%rdx: src (16 blocks)
 	 *	%rcx: iv (little endian, 128bit)
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -756,7 +748,6 @@ ENTRY(serpent_ctr_16way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(serpent_ctr_16way)
 
@@ -767,7 +758,6 @@ ENTRY(serpent_xts_enc_16way)
 	 *	%rdx: src (16 blocks)
 	 *	%rcx: iv (t ⊕ αⁿ ∈ GF(2¹²⁸))
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -782,7 +772,6 @@ ENTRY(serpent_xts_enc_16way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(serpent_xts_enc_16way)
 
@@ -793,7 +782,6 @@ ENTRY(serpent_xts_dec_16way)
 	 *	%rdx: src (16 blocks)
 	 *	%rcx: iv (t ⊕ αⁿ ∈ GF(2¹²⁸))
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -808,6 +796,5 @@ ENTRY(serpent_xts_dec_16way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(serpent_xts_dec_16way)

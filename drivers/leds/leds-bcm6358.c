@@ -49,20 +49,12 @@ struct bcm6358_led {
 
 static void bcm6358_led_write(void __iomem *reg, unsigned long data)
 {
-#ifdef CONFIG_CPU_BIG_ENDIAN
 	iowrite32be(data, reg);
-#else
-	writel(data, reg);
-#endif
 }
 
 static unsigned long bcm6358_led_read(void __iomem *reg)
 {
-#ifdef CONFIG_CPU_BIG_ENDIAN
 	return ioread32be(reg);
-#else
-	return readl(reg);
-#endif
 }
 
 static unsigned long bcm6358_led_busy(void __iomem *mem)
@@ -76,15 +68,12 @@ static unsigned long bcm6358_led_busy(void __iomem *mem)
 	return val;
 }
 
-static void bcm6358_led_set(struct led_classdev *led_cdev,
-			    enum led_brightness value)
+static void bcm6358_led_mode(struct bcm6358_led *led, unsigned long value)
 {
-	struct bcm6358_led *led =
-		container_of(led_cdev, struct bcm6358_led, cdev);
-	unsigned long flags, val;
+	unsigned long val;
 
-	spin_lock_irqsave(led->lock, flags);
 	bcm6358_led_busy(led->mem);
+
 	val = bcm6358_led_read(led->mem + BCM6358_REG_MODE);
 	if ((led->active_low && value == LED_OFF) ||
 	    (!led->active_low && value != LED_OFF))
@@ -92,6 +81,17 @@ static void bcm6358_led_set(struct led_classdev *led_cdev,
 	else
 		val &= ~(BIT(led->pin));
 	bcm6358_led_write(led->mem + BCM6358_REG_MODE, val);
+}
+
+static void bcm6358_led_set(struct led_classdev *led_cdev,
+			    enum led_brightness value)
+{
+	struct bcm6358_led *led =
+		container_of(led_cdev, struct bcm6358_led, cdev);
+	unsigned long flags;
+
+	spin_lock_irqsave(led->lock, flags);
+	bcm6358_led_mode(led, value);
 	spin_unlock_irqrestore(led->lock, flags);
 }
 
@@ -99,6 +99,7 @@ static int bcm6358_led(struct device *dev, struct device_node *nc, u32 reg,
 		       void __iomem *mem, spinlock_t *lock)
 {
 	struct bcm6358_led *led;
+	unsigned long flags;
 	const char *state;
 	int rc;
 
@@ -118,11 +119,15 @@ static int bcm6358_led(struct device *dev, struct device_node *nc, u32 reg,
 						    "linux,default-trigger",
 						    NULL);
 
+	spin_lock_irqsave(lock, flags);
 	if (!of_property_read_string(nc, "default-state", &state)) {
 		if (!strcmp(state, "on")) {
 			led->cdev.brightness = LED_FULL;
 		} else if (!strcmp(state, "keep")) {
 			unsigned long val;
+
+			bcm6358_led_busy(led->mem);
+
 			val = bcm6358_led_read(led->mem + BCM6358_REG_MODE);
 			val &= BIT(led->pin);
 			if ((led->active_low && !val) ||
@@ -136,8 +141,8 @@ static int bcm6358_led(struct device *dev, struct device_node *nc, u32 reg,
 	} else {
 		led->cdev.brightness = LED_OFF;
 	}
-
-	bcm6358_led_set(&led->cdev, led->cdev.brightness);
+	bcm6358_led_mode(led, led->cdev.brightness);
+	spin_unlock_irqrestore(lock, flags);
 
 	led->cdev.brightness_set = bcm6358_led_set;
 

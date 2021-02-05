@@ -25,17 +25,17 @@
 #include <media/v4l2-common.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-dv-timings.h>
-#include <media/v4l2-rect.h>
 
 #include "vivid-core.h"
 #include "vivid-vid-common.h"
 #include "vivid-kthread-out.h"
 #include "vivid-vid-out.h"
 
-static int vid_out_queue_setup(struct vb2_queue *vq,
+static int vid_out_queue_setup(struct vb2_queue *vq, const void *parg,
 		       unsigned *nbuffers, unsigned *nplanes,
-		       unsigned sizes[], struct device *alloc_devs[])
+		       unsigned sizes[], void *alloc_ctxs[])
 {
+	const struct v4l2_format *fmt = parg;
 	struct vivid_dev *dev = vb2_get_drv_priv(vq);
 	const struct vivid_fmt *vfmt = dev->fmt_out;
 	unsigned planes = vfmt->buffers;
@@ -64,16 +64,26 @@ static int vid_out_queue_setup(struct vb2_queue *vq,
 		return -EINVAL;
 	}
 
-	if (*nplanes) {
+	if (fmt) {
+		const struct v4l2_pix_format_mplane *mp;
+		struct v4l2_format mp_fmt;
+
+		if (!V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
+			fmt_sp2mp(fmt, &mp_fmt);
+			fmt = &mp_fmt;
+		}
+		mp = &fmt->fmt.pix_mp;
 		/*
-		 * Check if the number of requested planes match
+		 * Check if the number of planes in the specified format match
 		 * the number of planes in the current format. You can't mix that.
 		 */
-		if (*nplanes != planes)
+		if (mp->num_planes != planes)
 			return -EINVAL;
+		sizes[0] = mp->plane_fmt[0].sizeimage;
 		if (sizes[0] < size)
 			return -EINVAL;
 		for (p = 1; p < planes; p++) {
+			sizes[p] = mp->plane_fmt[p].sizeimage;
 			if (sizes[p] < dev->bytesperline_out[p] * h)
 				return -EINVAL;
 		}
@@ -86,6 +96,11 @@ static int vid_out_queue_setup(struct vb2_queue *vq,
 		*nbuffers = 2 - vq->num_buffers;
 
 	*nplanes = planes;
+
+	/*
+	 * videobuf2-vmalloc allocator is context-less so no need to set
+	 * alloc_ctxs array.
+	 */
 
 	dprintk(dev, 1, "%s: count=%d\n", __func__, *nbuffers);
 	for (p = 0; p < planes; p++)
@@ -209,7 +224,6 @@ void vivid_update_format_out(struct vivid_dev *dev)
 {
 	struct v4l2_bt_timings *bt = &dev->dv_timings_out.bt;
 	unsigned size, p;
-	u64 pixelclock;
 
 	switch (dev->output_type[dev->output]) {
 	case SVID:
@@ -231,14 +245,8 @@ void vivid_update_format_out(struct vivid_dev *dev)
 		dev->sink_rect.width = bt->width;
 		dev->sink_rect.height = bt->height;
 		size = V4L2_DV_BT_FRAME_WIDTH(bt) * V4L2_DV_BT_FRAME_HEIGHT(bt);
-
-		if (can_reduce_fps(bt) && (bt->flags & V4L2_DV_FL_REDUCED_FPS))
-			pixelclock = div_u64(bt->pixelclock * 1000, 1001);
-		else
-			pixelclock = bt->pixelclock;
-
 		dev->timeperframe_vid_out = (struct v4l2_fract) {
-			size / 100, (u32)pixelclock / 100
+			size / 100, (u32)bt->pixelclock / 100
 		};
 		if (bt->interlaced)
 			dev->field_out = V4L2_FIELD_ALTERNATE;
@@ -372,16 +380,16 @@ int vivid_try_fmt_vid_out(struct file *file, void *priv,
 	} else {
 		struct v4l2_rect r = { 0, 0, mp->width, mp->height * factor };
 
-		v4l2_rect_set_min_size(&r, &vivid_min_rect);
-		v4l2_rect_set_max_size(&r, &vivid_max_rect);
+		rect_set_min_size(&r, &vivid_min_rect);
+		rect_set_max_size(&r, &vivid_max_rect);
 		if (dev->has_scaler_out && !dev->has_crop_out) {
 			struct v4l2_rect max_r = { 0, 0, MAX_ZOOM * w, MAX_ZOOM * h };
 
-			v4l2_rect_set_max_size(&r, &max_r);
+			rect_set_max_size(&r, &max_r);
 		} else if (!dev->has_scaler_out && dev->has_compose_out && !dev->has_crop_out) {
-			v4l2_rect_set_max_size(&r, &dev->sink_rect);
+			rect_set_max_size(&r, &dev->sink_rect);
 		} else if (!dev->has_scaler_out && !dev->has_compose_out) {
-			v4l2_rect_set_min_size(&r, &dev->sink_rect);
+			rect_set_min_size(&r, &dev->sink_rect);
 		}
 		mp->width = r.width;
 		mp->height = r.height / factor;
@@ -469,7 +477,7 @@ int vivid_s_fmt_vid_out(struct file *file, void *priv,
 
 		if (dev->has_scaler_out) {
 			if (dev->has_crop_out)
-				v4l2_rect_map_inside(crop, &r);
+				rect_map_inside(crop, &r);
 			else
 				*crop = r;
 			if (dev->has_compose_out && !dev->has_crop_out) {
@@ -484,9 +492,9 @@ int vivid_s_fmt_vid_out(struct file *file, void *priv,
 					factor * r.height * MAX_ZOOM
 				};
 
-				v4l2_rect_set_min_size(compose, &min_r);
-				v4l2_rect_set_max_size(compose, &max_r);
-				v4l2_rect_map_inside(compose, &dev->compose_bounds_out);
+				rect_set_min_size(compose, &min_r);
+				rect_set_max_size(compose, &max_r);
+				rect_map_inside(compose, &dev->compose_bounds_out);
 			} else if (dev->has_compose_out) {
 				struct v4l2_rect min_r = {
 					0, 0,
@@ -499,36 +507,36 @@ int vivid_s_fmt_vid_out(struct file *file, void *priv,
 					factor * crop->height * MAX_ZOOM
 				};
 
-				v4l2_rect_set_min_size(compose, &min_r);
-				v4l2_rect_set_max_size(compose, &max_r);
-				v4l2_rect_map_inside(compose, &dev->compose_bounds_out);
+				rect_set_min_size(compose, &min_r);
+				rect_set_max_size(compose, &max_r);
+				rect_map_inside(compose, &dev->compose_bounds_out);
 			}
 		} else if (dev->has_compose_out && !dev->has_crop_out) {
-			v4l2_rect_set_size_to(crop, &r);
+			rect_set_size_to(crop, &r);
 			r.height *= factor;
-			v4l2_rect_set_size_to(compose, &r);
-			v4l2_rect_map_inside(compose, &dev->compose_bounds_out);
+			rect_set_size_to(compose, &r);
+			rect_map_inside(compose, &dev->compose_bounds_out);
 		} else if (!dev->has_compose_out) {
-			v4l2_rect_map_inside(crop, &r);
+			rect_map_inside(crop, &r);
 			r.height /= factor;
-			v4l2_rect_set_size_to(compose, &r);
+			rect_set_size_to(compose, &r);
 		} else {
 			r.height *= factor;
-			v4l2_rect_set_max_size(compose, &r);
-			v4l2_rect_map_inside(compose, &dev->compose_bounds_out);
+			rect_set_max_size(compose, &r);
+			rect_map_inside(compose, &dev->compose_bounds_out);
 			crop->top *= factor;
 			crop->height *= factor;
-			v4l2_rect_set_size_to(crop, compose);
-			v4l2_rect_map_inside(crop, &r);
+			rect_set_size_to(crop, compose);
+			rect_map_inside(crop, &r);
 			crop->top /= factor;
 			crop->height /= factor;
 		}
 	} else {
 		struct v4l2_rect r = { 0, 0, mp->width, mp->height };
 
-		v4l2_rect_set_size_to(crop, &r);
+		rect_set_size_to(crop, &r);
 		r.height /= factor;
-		v4l2_rect_set_size_to(compose, &r);
+		rect_set_size_to(compose, &r);
 	}
 
 	dev->fmt_out_rect.width = mp->width;
@@ -679,8 +687,8 @@ int vivid_vid_out_s_selection(struct file *file, void *fh, struct v4l2_selection
 		ret = vivid_vid_adjust_sel(s->flags, &s->r);
 		if (ret)
 			return ret;
-		v4l2_rect_set_min_size(&s->r, &vivid_min_rect);
-		v4l2_rect_set_max_size(&s->r, &dev->fmt_out_rect);
+		rect_set_min_size(&s->r, &vivid_min_rect);
+		rect_set_max_size(&s->r, &dev->fmt_out_rect);
 		if (dev->has_scaler_out) {
 			struct v4l2_rect max_rect = {
 				0, 0,
@@ -688,7 +696,7 @@ int vivid_vid_out_s_selection(struct file *file, void *fh, struct v4l2_selection
 				(dev->sink_rect.height / factor) * MAX_ZOOM
 			};
 
-			v4l2_rect_set_max_size(&s->r, &max_rect);
+			rect_set_max_size(&s->r, &max_rect);
 			if (dev->has_compose_out) {
 				struct v4l2_rect min_rect = {
 					0, 0,
@@ -701,23 +709,23 @@ int vivid_vid_out_s_selection(struct file *file, void *fh, struct v4l2_selection
 					(s->r.height * factor) * MAX_ZOOM
 				};
 
-				v4l2_rect_set_min_size(compose, &min_rect);
-				v4l2_rect_set_max_size(compose, &max_rect);
-				v4l2_rect_map_inside(compose, &dev->compose_bounds_out);
+				rect_set_min_size(compose, &min_rect);
+				rect_set_max_size(compose, &max_rect);
+				rect_map_inside(compose, &dev->compose_bounds_out);
 			}
 		} else if (dev->has_compose_out) {
 			s->r.top *= factor;
 			s->r.height *= factor;
-			v4l2_rect_set_max_size(&s->r, &dev->sink_rect);
-			v4l2_rect_set_size_to(compose, &s->r);
-			v4l2_rect_map_inside(compose, &dev->compose_bounds_out);
+			rect_set_max_size(&s->r, &dev->sink_rect);
+			rect_set_size_to(compose, &s->r);
+			rect_map_inside(compose, &dev->compose_bounds_out);
 			s->r.top /= factor;
 			s->r.height /= factor;
 		} else {
-			v4l2_rect_set_size_to(&s->r, &dev->sink_rect);
+			rect_set_size_to(&s->r, &dev->sink_rect);
 			s->r.height /= factor;
 		}
-		v4l2_rect_map_inside(&s->r, &dev->fmt_out_rect);
+		rect_map_inside(&s->r, &dev->fmt_out_rect);
 		*crop = s->r;
 		break;
 	case V4L2_SEL_TGT_COMPOSE:
@@ -726,9 +734,9 @@ int vivid_vid_out_s_selection(struct file *file, void *fh, struct v4l2_selection
 		ret = vivid_vid_adjust_sel(s->flags, &s->r);
 		if (ret)
 			return ret;
-		v4l2_rect_set_min_size(&s->r, &vivid_min_rect);
-		v4l2_rect_set_max_size(&s->r, &dev->sink_rect);
-		v4l2_rect_map_inside(&s->r, &dev->compose_bounds_out);
+		rect_set_min_size(&s->r, &vivid_min_rect);
+		rect_set_max_size(&s->r, &dev->sink_rect);
+		rect_map_inside(&s->r, &dev->compose_bounds_out);
 		s->r.top /= factor;
 		s->r.height /= factor;
 		if (dev->has_scaler_out) {
@@ -744,35 +752,35 @@ int vivid_vid_out_s_selection(struct file *file, void *fh, struct v4l2_selection
 				s->r.height / MAX_ZOOM
 			};
 
-			v4l2_rect_set_min_size(&fmt, &min_rect);
+			rect_set_min_size(&fmt, &min_rect);
 			if (!dev->has_crop_out)
-				v4l2_rect_set_max_size(&fmt, &max_rect);
-			if (!v4l2_rect_same_size(&dev->fmt_out_rect, &fmt) &&
+				rect_set_max_size(&fmt, &max_rect);
+			if (!rect_same_size(&dev->fmt_out_rect, &fmt) &&
 			    vb2_is_busy(&dev->vb_vid_out_q))
 				return -EBUSY;
 			if (dev->has_crop_out) {
-				v4l2_rect_set_min_size(crop, &min_rect);
-				v4l2_rect_set_max_size(crop, &max_rect);
+				rect_set_min_size(crop, &min_rect);
+				rect_set_max_size(crop, &max_rect);
 			}
 			dev->fmt_out_rect = fmt;
 		} else if (dev->has_crop_out) {
 			struct v4l2_rect fmt = dev->fmt_out_rect;
 
-			v4l2_rect_set_min_size(&fmt, &s->r);
-			if (!v4l2_rect_same_size(&dev->fmt_out_rect, &fmt) &&
+			rect_set_min_size(&fmt, &s->r);
+			if (!rect_same_size(&dev->fmt_out_rect, &fmt) &&
 			    vb2_is_busy(&dev->vb_vid_out_q))
 				return -EBUSY;
 			dev->fmt_out_rect = fmt;
-			v4l2_rect_set_size_to(crop, &s->r);
-			v4l2_rect_map_inside(crop, &dev->fmt_out_rect);
+			rect_set_size_to(crop, &s->r);
+			rect_map_inside(crop, &dev->fmt_out_rect);
 		} else {
-			if (!v4l2_rect_same_size(&s->r, &dev->fmt_out_rect) &&
+			if (!rect_same_size(&s->r, &dev->fmt_out_rect) &&
 			    vb2_is_busy(&dev->vb_vid_out_q))
 				return -EBUSY;
-			v4l2_rect_set_size_to(&dev->fmt_out_rect, &s->r);
-			v4l2_rect_set_size_to(crop, &s->r);
+			rect_set_size_to(&dev->fmt_out_rect, &s->r);
+			rect_set_size_to(crop, &s->r);
 			crop->height /= factor;
-			v4l2_rect_map_inside(crop, &dev->fmt_out_rect);
+			rect_map_inside(crop, &dev->fmt_out_rect);
 		}
 		s->r.top *= factor;
 		s->r.height *= factor;
@@ -897,7 +905,7 @@ int vidioc_try_fmt_vid_out_overlay(struct file *file, void *priv,
 			for (j = i + 1; j < win->clipcount; j++) {
 				struct v4l2_rect *r2 = &dev->try_clips_out[j].c;
 
-				if (v4l2_rect_overlap(r1, r2))
+				if (rect_overlap(r1, r2))
 					return -EINVAL;
 			}
 		}
@@ -1141,7 +1149,7 @@ int vivid_vid_out_s_dv_timings(struct file *file, void *_fh,
 				0, NULL, NULL) &&
 	    !valid_cvt_gtf_timings(timings))
 		return -EINVAL;
-	if (v4l2_match_dv_timings(timings, &dev->dv_timings_out, 0, true))
+	if (v4l2_match_dv_timings(timings, &dev->dv_timings_out, 0))
 		return 0;
 	if (vb2_is_busy(&dev->vb_vid_out_q))
 		return -EBUSY;

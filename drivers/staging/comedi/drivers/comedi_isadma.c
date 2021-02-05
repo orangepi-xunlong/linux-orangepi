@@ -132,7 +132,8 @@ unsigned int comedi_isadma_poll(struct comedi_isadma *dma)
 		result = result1;
 	if (result >= desc->size || result == 0)
 		return 0;
-	return desc->size - result;
+	else
+		return desc->size - result;
 }
 EXPORT_SYMBOL_GPL(comedi_isadma_poll);
 

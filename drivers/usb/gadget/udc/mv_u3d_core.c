@@ -119,14 +119,18 @@ static int mv_u3d_process_ep_req(struct mv_u3d *u3d, int index,
 	struct mv_u3d_req *curr_req)
 {
 	struct mv_u3d_trb	*curr_trb;
-	int actual, remaining_length = 0;
+	dma_addr_t cur_deq_lo;
+	struct mv_u3d_ep_context	*curr_ep_context;
+	int trb_complete, actual, remaining_length = 0;
 	int direction, ep_num;
 	int retval = 0;
 	u32 tmp, status, length;
 
+	curr_ep_context = &u3d->ep_context[index];
 	direction = index % 2;
 	ep_num = index / 2;
 
+	trb_complete = 0;
 	actual = curr_req->req.length;
 
 	while (!list_empty(&curr_req->trb_list)) {
@@ -139,10 +143,15 @@ static int mv_u3d_process_ep_req(struct mv_u3d *u3d, int index,
 		}
 
 		curr_trb->trb_hw->ctrl.own = 0;
-		if (direction == MV_U3D_EP_DIR_OUT)
+		if (direction == MV_U3D_EP_DIR_OUT) {
 			tmp = ioread32(&u3d->vuc_regs->rxst[ep_num].statuslo);
-		else
+			cur_deq_lo =
+				ioread32(&u3d->vuc_regs->rxst[ep_num].curdeqlo);
+		} else {
 			tmp = ioread32(&u3d->vuc_regs->txst[ep_num].statuslo);
+			cur_deq_lo =
+				ioread32(&u3d->vuc_regs->txst[ep_num].curdeqlo);
+		}
 
 		status = tmp >> MV_U3D_XFERSTATUS_COMPLETE_SHIFT;
 		length = tmp & MV_U3D_XFERSTATUS_TRB_LENGTH_MASK;
@@ -518,6 +527,7 @@ static int mv_u3d_ep_enable(struct usb_ep *_ep,
 {
 	struct mv_u3d *u3d;
 	struct mv_u3d_ep *ep;
+	struct mv_u3d_ep_context *ep_context;
 	u16 max = 0;
 	unsigned maxburst = 0;
 	u32 epxcr, direction;
@@ -537,6 +547,9 @@ static int mv_u3d_ep_enable(struct usb_ep *_ep,
 	if (!_ep->maxburst)
 		_ep->maxburst = 1;
 	maxburst = _ep->maxburst;
+
+	/* Get the endpoint context address */
+	ep_context = (struct mv_u3d_ep_context *)ep->ep_context;
 
 	/* Set the max burst size */
 	switch (desc->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) {
@@ -620,6 +633,7 @@ static int  mv_u3d_ep_disable(struct usb_ep *_ep)
 {
 	struct mv_u3d *u3d;
 	struct mv_u3d_ep *ep;
+	struct mv_u3d_ep_context *ep_context;
 	u32 epxcr, direction;
 	unsigned long flags;
 
@@ -631,6 +645,9 @@ static int  mv_u3d_ep_disable(struct usb_ep *_ep)
 		return -EINVAL;
 
 	u3d = ep->u3d;
+
+	/* Get the endpoint context address */
+	ep_context = ep->ep_context;
 
 	direction = mv_u3d_ep_dir(ep);
 

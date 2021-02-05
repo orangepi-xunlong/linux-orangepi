@@ -1,4 +1,3 @@
-#include <linux/crypto.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -125,50 +124,6 @@ static bool tcp_fastopen_cookie_gen(struct request_sock *req,
 	return false;
 }
 
-
-/* If an incoming SYN or SYNACK frame contains a payload and/or FIN,
- * queue this additional data / FIN.
- */
-void tcp_fastopen_add_skb(struct sock *sk, struct sk_buff *skb)
-{
-	struct tcp_sock *tp = tcp_sk(sk);
-
-	if (TCP_SKB_CB(skb)->end_seq == tp->rcv_nxt)
-		return;
-
-	skb = skb_clone(skb, GFP_ATOMIC);
-	if (!skb)
-		return;
-
-	skb_dst_drop(skb);
-	/* segs_in has been initialized to 1 in tcp_create_openreq_child().
-	 * Hence, reset segs_in to 0 before calling tcp_segs_in()
-	 * to avoid double counting.  Also, tcp_segs_in() expects
-	 * skb->len to include the tcp_hdrlen.  Hence, it should
-	 * be called before __skb_pull().
-	 */
-	tp->segs_in = 0;
-	tcp_segs_in(tp, skb);
-	__skb_pull(skb, tcp_hdrlen(skb));
-	sk_forced_mem_schedule(sk, skb->truesize);
-	skb_set_owner_r(skb, sk);
-
-	TCP_SKB_CB(skb)->seq++;
-	TCP_SKB_CB(skb)->tcp_flags &= ~TCPHDR_SYN;
-
-	tp->rcv_nxt = TCP_SKB_CB(skb)->end_seq;
-	__skb_queue_tail(&sk->sk_receive_queue, skb);
-	tp->syn_data_acked = 1;
-
-	/* u64_stats_update_begin(&tp->syncp) not needed here,
-	 * as we certainly are not changing upper 32bit value (0)
-	 */
-	tp->bytes_received = skb->len;
-
-	if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN)
-		tcp_fin(sk);
-}
-
 static struct sock *tcp_fastopen_create_child(struct sock *sk,
 					      struct sk_buff *skb,
 					      struct dst_entry *dst,
@@ -177,6 +132,7 @@ static struct sock *tcp_fastopen_create_child(struct sock *sk,
 	struct tcp_sock *tp;
 	struct request_sock_queue *queue = &inet_csk(sk)->icsk_accept_queue;
 	struct sock *child;
+	u32 end_seq;
 	bool own_req;
 
 	req->num_retrans = 0;
@@ -223,12 +179,35 @@ static struct sock *tcp_fastopen_create_child(struct sock *sk,
 	tcp_init_metrics(child);
 	tcp_init_buffer_space(child);
 
-	tp->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
+	/* Queue the data carried in the SYN packet.
+	 * We used to play tricky games with skb_get().
+	 * With lockless listener, it is a dead end.
+	 * Do not think about it.
+	 *
+	 * XXX (TFO) - we honor a zero-payload TFO request for now,
+	 * (any reason not to?) but no need to queue the skb since
+	 * there is no data. How about SYN+FIN?
+	 */
+	end_seq = TCP_SKB_CB(skb)->end_seq;
+	if (end_seq != TCP_SKB_CB(skb)->seq + 1) {
+		struct sk_buff *skb2 = skb_clone(skb, GFP_ATOMIC);
 
-	tcp_fastopen_add_skb(child, skb);
+		if (likely(skb2)) {
+			skb_dst_drop(skb2);
+			__skb_pull(skb2, tcp_hdrlen(skb));
+			skb_set_owner_r(skb2, child);
+			__skb_queue_tail(&child->sk_receive_queue, skb2);
+			tp->syn_data_acked = 1;
 
-	tcp_rsk(req)->rcv_nxt = tp->rcv_nxt;
-	tp->rcv_wup = tp->rcv_nxt;
+			/* u64_stats_update_begin(&tp->syncp) not needed here,
+			 * as we certainly are not changing upper 32bit value (0)
+			 */
+			tp->bytes_received = end_seq - TCP_SKB_CB(skb)->seq - 1;
+		} else {
+			end_seq = TCP_SKB_CB(skb)->seq + 1;
+		}
+	}
+	tcp_rsk(req)->rcv_nxt = tp->rcv_nxt = end_seq;
 	/* tcp_conn_request() is sending the SYNACK,
 	 * and queues the child into listener accept queue.
 	 */
@@ -258,9 +237,9 @@ static bool tcp_fastopen_queue_check(struct sock *sk)
 		spin_lock(&fastopenq->lock);
 		req1 = fastopenq->rskq_rst_head;
 		if (!req1 || time_after(req1->rsk_timer.expires, jiffies)) {
-			__NET_INC_STATS(sock_net(sk),
-					LINUX_MIB_TCPFASTOPENLISTENOVERFLOW);
 			spin_unlock(&fastopenq->lock);
+			NET_INC_STATS_BH(sock_net(sk),
+					 LINUX_MIB_TCPFASTOPENLISTENOVERFLOW);
 			return false;
 		}
 		fastopenq->rskq_rst_head = req1->dl_next;
@@ -285,7 +264,7 @@ struct sock *tcp_try_fastopen(struct sock *sk, struct sk_buff *skb,
 	struct sock *child;
 
 	if (foc->len == 0) /* Client requests a cookie */
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPFASTOPENCOOKIEREQD);
+		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPFASTOPENCOOKIEREQD);
 
 	if (!((sysctl_tcp_fastopen & TFO_SERVER_ENABLE) &&
 	      (syn_data || foc->len >= 0) &&
@@ -314,69 +293,15 @@ fastopen:
 		child = tcp_fastopen_create_child(sk, skb, dst, req);
 		if (child) {
 			foc->len = -1;
-			NET_INC_STATS(sock_net(sk),
-				      LINUX_MIB_TCPFASTOPENPASSIVE);
+			NET_INC_STATS_BH(sock_net(sk),
+					 LINUX_MIB_TCPFASTOPENPASSIVE);
 			return child;
 		}
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
+		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
 	} else if (foc->len > 0) /* Client presents an invalid cookie */
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
+		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
 
 	valid_foc.exp = foc->exp;
 	*foc = valid_foc;
 	return NULL;
 }
-
-bool tcp_fastopen_cookie_check(struct sock *sk, u16 *mss,
-			       struct tcp_fastopen_cookie *cookie)
-{
-	unsigned long last_syn_loss = 0;
-	int syn_loss = 0;
-
-	tcp_fastopen_cache_get(sk, mss, cookie, &syn_loss, &last_syn_loss);
-
-	/* Recurring FO SYN losses: no cookie or data in SYN */
-	if (syn_loss > 1 &&
-	    time_before(jiffies, last_syn_loss + (60*HZ << syn_loss))) {
-		cookie->len = -1;
-		return false;
-	}
-	if (sysctl_tcp_fastopen & TFO_CLIENT_NO_COOKIE) {
-		cookie->len = -1;
-		return true;
-	}
-	return cookie->len > 0;
-}
-
-/* This function checks if we want to defer sending SYN until the first
- * write().  We defer under the following conditions:
- * 1. fastopen_connect sockopt is set
- * 2. we have a valid cookie
- * Return value: return true if we want to defer until application writes data
- *               return false if we want to send out SYN immediately
- */
-bool tcp_fastopen_defer_connect(struct sock *sk, int *err)
-{
-	struct tcp_fastopen_cookie cookie = { .len = 0 };
-	struct tcp_sock *tp = tcp_sk(sk);
-	u16 mss;
-
-	if (tp->fastopen_connect && !tp->fastopen_req) {
-		if (tcp_fastopen_cookie_check(sk, &mss, &cookie)) {
-			inet_sk(sk)->defer_connect = 1;
-			return true;
-		}
-
-		/* Alloc fastopen_req in order for FO option to be included
-		 * in SYN
-		 */
-		tp->fastopen_req = kzalloc(sizeof(*tp->fastopen_req),
-					   sk->sk_allocation);
-		if (tp->fastopen_req)
-			tp->fastopen_req->cookie = cookie;
-		else
-			*err = -ENOBUFS;
-	}
-	return false;
-}
-EXPORT_SYMBOL(tcp_fastopen_defer_connect);

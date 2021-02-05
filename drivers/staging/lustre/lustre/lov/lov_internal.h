@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -23,7 +27,7 @@
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -39,8 +43,7 @@
 /* lov_do_div64(a, b) returns a % b, and a = a / b.
  * The 32-bit code is LOV-specific due to knowing about stripe limits in
  * order to reduce the divisor to a 32-bit number.  If the divisor is
- * already a 32-bit value the compiler handles this directly.
- */
+ * already a 32-bit value the compiler handles this directly. */
 #if BITS_PER_LONG == 64
 # define lov_do_div64(n, base) ({					\
 	uint64_t __base = (base);					\
@@ -68,21 +71,6 @@
 })
 #endif
 
-#define pool_tgt_size(p)	((p)->pool_obds.op_size)
-#define pool_tgt_count(p)	((p)->pool_obds.op_count)
-#define pool_tgt_array(p)	((p)->pool_obds.op_array)
-#define pool_tgt_rw_sem(p)	((p)->pool_obds.op_rw_sem)
-
-struct pool_desc {
-	char			 pool_name[LOV_MAXPOOLNAME + 1];
-	struct ost_pool		 pool_obds;
-	atomic_t		 pool_refcount;
-	struct hlist_node	 pool_hash;		/* access by poolname */
-	struct list_head	 pool_list;		/* serial access */
-	struct dentry		*pool_debugfs_entry;	/* file in debugfs */
-	struct obd_device	*pool_lobd;		/* owner */
-};
-
 struct lov_request {
 	struct obd_info	  rq_oi;
 	struct lov_request_set  *rq_rqset;
@@ -99,12 +87,12 @@ struct lov_request {
 };
 
 struct lov_request_set {
+	struct ldlm_enqueue_info	*set_ei;
 	struct obd_info			*set_oi;
 	atomic_t			set_refcount;
 	struct obd_export		*set_exp;
 	/* XXX: There is @set_exp already, however obd_statfs gets obd_device
-	 * only.
-	 */
+	   only. */
 	struct obd_device		*set_obd;
 	int				set_count;
 	atomic_t			set_completes;
@@ -112,8 +100,10 @@ struct lov_request_set {
 	atomic_t			set_finish_checked;
 	struct llog_cookie		*set_cookies;
 	int				set_cookie_sent;
+	struct obd_trans_info		*set_oti;
 	struct list_head			set_list;
 	wait_queue_head_t			set_waitq;
+	spinlock_t			set_lock;
 };
 
 extern struct kmem_cache *lov_oinfo_slab;
@@ -121,6 +111,13 @@ extern struct kmem_cache *lov_oinfo_slab;
 extern struct lu_kmem_descr lov_caches[];
 
 void lov_finish_set(struct lov_request_set *set);
+
+static inline void lov_get_reqset(struct lov_request_set *set)
+{
+	LASSERT(set != NULL);
+	LASSERT(atomic_read(&set->set_refcount) > 0);
+	atomic_inc(&set->set_refcount);
+}
 
 static inline void lov_put_reqset(struct lov_request_set *set)
 {
@@ -134,27 +131,51 @@ static inline void lov_put_reqset(struct lov_request_set *set)
 /* lov_merge.c */
 void lov_merge_attrs(struct obdo *tgt, struct obdo *src, u64 valid,
 		     struct lov_stripe_md *lsm, int stripeno, int *set);
+int lov_adjust_kms(struct obd_export *exp, struct lov_stripe_md *lsm,
+		   u64 size, int shrink);
 int lov_merge_lvb_kms(struct lov_stripe_md *lsm,
 		      struct ost_lvb *lvb, __u64 *kms_place);
 
 /* lov_offset.c */
-u64 lov_stripe_size(struct lov_stripe_md *lsm, u64 ost_size, int stripeno);
+u64 lov_stripe_size(struct lov_stripe_md *lsm, u64 ost_size,
+			 int stripeno);
 int lov_stripe_offset(struct lov_stripe_md *lsm, u64 lov_off,
 		      int stripeno, u64 *u64);
-u64 lov_size_to_stripe(struct lov_stripe_md *lsm, u64 file_size, int stripeno);
+u64 lov_size_to_stripe(struct lov_stripe_md *lsm, u64 file_size,
+			   int stripeno);
 int lov_stripe_intersects(struct lov_stripe_md *lsm, int stripeno,
 			  u64 start, u64 end,
 			  u64 *obd_start, u64 *obd_end);
 int lov_stripe_number(struct lov_stripe_md *lsm, u64 lov_off);
-pgoff_t lov_stripe_pgoff(struct lov_stripe_md *lsm, pgoff_t stripe_index,
-			 int stripe);
+
+/* lov_qos.c */
+#define LOV_USES_ASSIGNED_STRIPE	0
+#define LOV_USES_DEFAULT_STRIPE	 1
+int qos_add_tgt(struct obd_device *obd, __u32 index);
+int qos_del_tgt(struct obd_device *obd, struct lov_tgt_desc *tgt);
+void qos_shrink_lsm(struct lov_request_set *set);
+int qos_prep_create(struct obd_export *exp, struct lov_request_set *set);
+void qos_update(struct lov_obd *lov);
+void qos_statfs_done(struct lov_obd *lov);
+void qos_statfs_update(struct obd_device *obd, __u64 max_age, int wait);
+int qos_remedy_create(struct lov_request_set *set, struct lov_request *req);
 
 /* lov_request.c */
+void lov_set_add_req(struct lov_request *req, struct lov_request_set *set);
+int lov_set_finished(struct lov_request_set *set, int idempotent);
+void lov_update_set(struct lov_request_set *set,
+		    struct lov_request *req, int rc);
 int lov_update_common_set(struct lov_request_set *set,
 			  struct lov_request *req, int rc);
+int lov_check_and_wait_active(struct lov_obd *lov, int ost_idx);
 int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 			 struct lov_request_set **reqset);
 int lov_fini_getattr_set(struct lov_request_set *set);
+int lov_prep_destroy_set(struct obd_export *exp, struct obd_info *oinfo,
+			 struct obdo *src_oa, struct lov_stripe_md *lsm,
+			 struct obd_trans_info *oti,
+			 struct lov_request_set **reqset);
+int lov_fini_destroy_set(struct lov_request_set *set);
 int lov_prep_setattr_set(struct obd_export *exp, struct obd_info *oinfo,
 			 struct obd_trans_info *oti,
 			 struct lov_request_set **reqset);
@@ -163,14 +184,14 @@ int lov_update_setattr_set(struct lov_request_set *set,
 int lov_fini_setattr_set(struct lov_request_set *set);
 int lov_prep_statfs_set(struct obd_device *obd, struct obd_info *oinfo,
 			struct lov_request_set **reqset);
+void lov_update_statfs(struct obd_statfs *osfs, struct obd_statfs *lov_sfs,
+		       int success);
 int lov_fini_statfs(struct obd_device *obd, struct obd_statfs *osfs,
 		    int success);
 int lov_fini_statfs_set(struct lov_request_set *set);
 int lov_statfs_interpret(struct ptlrpc_request_set *rqset, void *data, int rc);
 
 /* lov_obd.c */
-void lov_stripe_lock(struct lov_stripe_md *md);
-void lov_stripe_unlock(struct lov_stripe_md *md);
 void lov_fix_desc(struct lov_desc *desc);
 void lov_fix_desc_stripe_size(__u64 *val);
 void lov_fix_desc_stripe_count(__u32 *val);
@@ -190,6 +211,8 @@ int lov_packmd(struct obd_export *exp, struct lov_mds_md **lmm,
 	       struct lov_stripe_md *lsm);
 int lov_unpackmd(struct obd_export *exp, struct lov_stripe_md **lsmp,
 		 struct lov_mds_md *lmm, int lmm_bytes);
+int lov_getstripe(struct obd_export *exp,
+		  struct lov_stripe_md *lsm, struct lov_user_md *lump);
 int lov_alloc_memmd(struct lov_stripe_md **lsmp, __u16 stripe_count,
 		    int pattern, int magic);
 int lov_free_memmd(struct lov_stripe_md **lsmp);
@@ -224,6 +247,8 @@ int lov_pool_new(struct obd_device *obd, char *poolname);
 int lov_pool_del(struct obd_device *obd, char *poolname);
 int lov_pool_add(struct obd_device *obd, char *poolname, char *ostname);
 int lov_pool_remove(struct obd_device *obd, char *poolname, char *ostname);
+struct pool_desc *lov_find_pool(struct lov_obd *lov, char *poolname);
+int lov_check_index_in_pool(__u32 idx, struct pool_desc *pool);
 void lov_pool_putref(struct pool_desc *pool);
 
 static inline struct lov_stripe_md *lsm_addref(struct lov_stripe_md *lsm)

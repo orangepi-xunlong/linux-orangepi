@@ -7,22 +7,18 @@
  * it can be used to measure futex_wake() changes.
  */
 
-/* For the CLR_() macros */
-#include <pthread.h>
-
-#include <signal.h>
+#include "../perf.h"
+#include "../util/util.h"
 #include "../util/stat.h"
-#include <subcmd/parse-options.h>
-#include <linux/compiler.h>
-#include <linux/kernel.h>
-#include <linux/time64.h>
-#include <errno.h>
+#include "../util/parse-options.h"
+#include "../util/header.h"
 #include "bench.h"
 #include "futex.h"
 
 #include <err.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <pthread.h>
 
 struct thread_data {
 	pthread_t worker;
@@ -157,7 +153,7 @@ static void print_run(struct thread_data *waking_worker, unsigned int run_num)
 
 	printf("[Run %d]: Avg per-thread latency (waking %d/%d threads) "
 	       "in %.4f ms (+-%.2f%%)\n", run_num + 1, wakeup_avg,
-	       nblocked_threads, waketime_avg / USEC_PER_MSEC,
+	       nblocked_threads, waketime_avg/1e3,
 	       rel_stddev_stats(waketime_stddev, waketime_avg));
 }
 
@@ -173,7 +169,7 @@ static void print_summary(void)
 	printf("Avg per-thread latency (waking %d/%d threads) in %.4f ms (+-%.2f%%)\n",
 	       wakeup_avg,
 	       nblocked_threads,
-	       waketime_avg / USEC_PER_MSEC,
+	       waketime_avg/1e3,
 	       rel_stddev_stats(waketime_stddev, waketime_avg));
 }
 

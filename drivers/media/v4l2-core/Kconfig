@@ -27,7 +27,7 @@ config VIDEO_FIXED_MINOR_RANGES
 
 config VIDEO_PCI_SKELETON
 	tristate "Skeleton PCI V4L2 driver"
-	depends on PCI
+	depends on PCI && BUILD_DOCSRC
 	depends on VIDEO_V4L2 && VIDEOBUF2_CORE
 	depends on VIDEOBUF2_MEMOPS && VIDEOBUF2_DMA_CONTIG
 	---help---
@@ -53,6 +53,9 @@ config V4L2_FLASH_LED_CLASS
 	  class drivers.
 
 	  When in doubt, say N.
+
+config V4L2_FWNODE
+	tristate
 
 # Used by drivers that need Videobuf modules
 config VIDEOBUF_GEN

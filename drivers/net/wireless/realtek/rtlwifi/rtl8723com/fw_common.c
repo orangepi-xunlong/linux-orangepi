@@ -318,7 +318,9 @@ bool rtl8723_cmd_send_packet(struct ieee80211_hw *hw,
 	ring = &rtlpci->tx_ring[BEACON_QUEUE];
 
 	pskb = __skb_dequeue(&ring->queue);
-	kfree_skb(pskb);
+	if (pskb)
+		kfree_skb(pskb);
+
 	spin_lock_irqsave(&rtlpriv->locks.irq_th_lock, flags);
 
 	pdesc = &ring->desc[0];

@@ -345,19 +345,23 @@ static struct platform_driver grover_beep_driver = {
 	.shutdown	= sparcspkr_shutdown,
 };
 
-static struct platform_driver * const drivers[] = {
-	&bbc_beep_driver,
-	&grover_beep_driver,
-};
-
 static int __init sparcspkr_init(void)
 {
-	return platform_register_drivers(drivers, ARRAY_SIZE(drivers));
+	int err = platform_driver_register(&bbc_beep_driver);
+
+	if (!err) {
+		err = platform_driver_register(&grover_beep_driver);
+		if (err)
+			platform_driver_unregister(&bbc_beep_driver);
+	}
+
+	return err;
 }
 
 static void __exit sparcspkr_exit(void)
 {
-	platform_unregister_drivers(drivers, ARRAY_SIZE(drivers));
+	platform_driver_unregister(&bbc_beep_driver);
+	platform_driver_unregister(&grover_beep_driver);
 }
 
 module_init(sparcspkr_init);

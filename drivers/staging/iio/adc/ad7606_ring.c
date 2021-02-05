@@ -77,8 +77,7 @@ static void ad7606_poll_bh_to_ring(struct work_struct *work_s)
 			goto done;
 	}
 
-	iio_push_to_buffers_with_timestamp(indio_dev, buf,
-					   iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns());
 done:
 	gpio_set_value(st->pdata->gpio_convst, 0);
 	iio_trigger_notify_done(indio_dev->trig);

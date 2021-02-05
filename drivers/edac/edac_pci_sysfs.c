@@ -331,7 +331,10 @@ static struct kobj_type ktype_edac_pci_main_kobj = {
 };
 
 /**
- * edac_pci_main_kobj_setup: Setup the sysfs for EDAC PCI attributes.
+ * edac_pci_main_kobj_setup()
+ *
+ *	setup the sysfs for EDAC PCI attributes
+ *	assumes edac_subsys has already been initialized
  */
 static int edac_pci_main_kobj_setup(void)
 {
@@ -348,6 +351,11 @@ static int edac_pci_main_kobj_setup(void)
 	 * controls and attributes
 	 */
 	edac_subsys = edac_get_sysfs_subsys();
+	if (edac_subsys == NULL) {
+		edac_dbg(1, "no edac_subsys\n");
+		err = -ENODEV;
+		goto decrement_count_fail;
+	}
 
 	/* Bump the reference count on this module to ensure the
 	 * modules isn't unloaded until we deconstruct the top
@@ -356,7 +364,7 @@ static int edac_pci_main_kobj_setup(void)
 	if (!try_module_get(THIS_MODULE)) {
 		edac_dbg(1, "try_module_get() failed\n");
 		err = -ENODEV;
-		goto decrement_count_fail;
+		goto mod_get_fail;
 	}
 
 	edac_pci_top_main_kobj = kzalloc(sizeof(struct kobject), GFP_KERNEL);
@@ -391,6 +399,9 @@ kobject_init_and_add_fail:
 kzalloc_fail:
 	module_put(THIS_MODULE);
 
+mod_get_fail:
+	edac_put_sysfs_subsys();
+
 decrement_count_fail:
 	/* if are on this error exit, nothing to tear down */
 	atomic_dec(&edac_pci_sysfs_refcount);
@@ -415,6 +426,7 @@ static void edac_pci_main_kobj_teardown(void)
 	if (atomic_dec_return(&edac_pci_sysfs_refcount) == 0) {
 		edac_dbg(0, "called kobject_put on main kobj\n");
 		kobject_put(edac_pci_top_main_kobj);
+		edac_put_sysfs_subsys();
 	}
 }
 

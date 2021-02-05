@@ -93,19 +93,15 @@ static int __memcpy_real(void *dest, void *src, size_t count)
  */
 int memcpy_real(void *dest, void *src, size_t count)
 {
-	int irqs_disabled, rc;
 	unsigned long flags;
+	int rc;
 
 	if (!count)
 		return 0;
-	flags = __arch_local_irq_stnsm(0xf8UL);
-	irqs_disabled = arch_irqs_disabled_flags(flags);
-	if (!irqs_disabled)
-		trace_hardirqs_off();
+	local_irq_save(flags);
+	__arch_local_irq_stnsm(0xfbUL);
 	rc = __memcpy_real(dest, src, count);
-	if (!irqs_disabled)
-		trace_hardirqs_on();
-	__arch_local_irq_ssm(flags);
+	local_irq_restore(flags);
 	return rc;
 }
 
@@ -167,11 +163,11 @@ static int is_swapped(unsigned long addr)
 	unsigned long lc;
 	int cpu;
 
-	if (addr < sizeof(struct lowcore))
+	if (addr < sizeof(struct _lowcore))
 		return 1;
 	for_each_online_cpu(cpu) {
 		lc = (unsigned long) lowcore_ptr[cpu];
-		if (addr > lc + sizeof(struct lowcore) - 1 || addr < lc)
+		if (addr > lc + sizeof(struct _lowcore) - 1 || addr < lc)
 			continue;
 		return 1;
 	}

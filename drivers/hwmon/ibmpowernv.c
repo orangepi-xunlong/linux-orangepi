@@ -142,11 +142,13 @@ static void make_sensor_label(struct device_node *np,
 		if (cpuid >= 0)
 			/*
 			 * The digital thermal sensors are associated
-			 * with a core.
+			 * with a core. Let's print out the range of
+			 * cpu ids corresponding to the hardware
+			 * threads of the core.
 			 */
 			n += snprintf(sdata->label + n,
-				      sizeof(sdata->label) - n, " %d",
-				      cpuid);
+				      sizeof(sdata->label) - n, " %d-%d",
+				      cpuid, cpuid + threads_per_core - 1);
 		else
 			n += snprintf(sdata->label + n,
 				      sizeof(sdata->label) - n, " phy%d", id);

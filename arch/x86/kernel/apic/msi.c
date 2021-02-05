@@ -96,8 +96,8 @@ static irq_hw_number_t pci_msi_get_hwirq(struct msi_domain_info *info,
 	return arg->msi_hwirq;
 }
 
-int pci_msi_prepare(struct irq_domain *domain, struct device *dev, int nvec,
-		    msi_alloc_info_t *arg)
+static int pci_msi_prepare(struct irq_domain *domain, struct device *dev,
+			   int nvec, msi_alloc_info_t *arg)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct msi_desc *desc = first_pci_msi_entry(pdev);
@@ -113,13 +113,11 @@ int pci_msi_prepare(struct irq_domain *domain, struct device *dev, int nvec,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(pci_msi_prepare);
 
-void pci_msi_set_desc(msi_alloc_info_t *arg, struct msi_desc *desc)
+static void pci_msi_set_desc(msi_alloc_info_t *arg, struct msi_desc *desc)
 {
 	arg->msi_hwirq = pci_msi_domain_calc_hwirq(arg->msi_dev, desc);
 }
-EXPORT_SYMBOL_GPL(pci_msi_set_desc);
 
 static struct msi_domain_ops pci_msi_domain_ops = {
 	.get_hwirq	= pci_msi_get_hwirq,
@@ -269,7 +267,7 @@ static void hpet_msi_write_msg(struct irq_data *data, struct msi_msg *msg)
 	hpet_msi_write(irq_data_get_irq_handler_data(data), msg);
 }
 
-static struct irq_chip hpet_msi_controller __ro_after_init = {
+static struct irq_chip hpet_msi_controller = {
 	.name = "HPET-MSI",
 	.irq_unmask = hpet_msi_unmask,
 	.irq_mask = hpet_msi_mask,

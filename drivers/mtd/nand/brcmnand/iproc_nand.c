@@ -74,8 +74,7 @@ static void iproc_nand_intc_set(struct brcmnand_soc *soc, bool en)
 	spin_unlock_irqrestore(&priv->idm_lock, flags);
 }
 
-static void iproc_nand_apb_access(struct brcmnand_soc *soc, bool prepare,
-				  bool is_param)
+static void iproc_nand_apb_access(struct brcmnand_soc *soc, bool prepare)
 {
 	struct iproc_nand_soc *priv =
 			container_of(soc, struct iproc_nand_soc, soc);
@@ -87,19 +86,10 @@ static void iproc_nand_apb_access(struct brcmnand_soc *soc, bool prepare,
 
 	val = brcmnand_readl(mmio);
 
-	/*
-	 * In the case of BE or when dealing with NAND data, alway configure
-	 * the APB bus to LE mode before accessing the FIFO and back to BE mode
-	 * after the access is done
-	 */
-	if (IS_ENABLED(CONFIG_CPU_BIG_ENDIAN) || !is_param) {
-		if (prepare)
-			val |= IPROC_NAND_APB_LE_MODE;
-		else
-			val &= ~IPROC_NAND_APB_LE_MODE;
-	} else { /* when in LE accessing the parameter page, keep APB in BE */
+	if (prepare)
+		val |= IPROC_NAND_APB_LE_MODE;
+	else
 		val &= ~IPROC_NAND_APB_LE_MODE;
-	}
 
 	brcmnand_writel(val, mmio);
 

@@ -10,8 +10,6 @@
  * TODO: Code Cleanup
  */
 
-#define DRIVER_NAME "bfin-adv7393"
-
 #define pr_fmt(fmt) DRIVER_NAME ": " fmt
 
 #include <linux/module.h>
@@ -375,6 +373,7 @@ static int bfin_adv7393_fb_probe(struct i2c_client *client,
 {
 	int ret = 0;
 	struct proc_dir_entry *entry;
+	int num_modes = ARRAY_SIZE(known_modes);
 
 	struct adv7393fb_device *fbdev = NULL;
 
@@ -383,7 +382,7 @@ static int bfin_adv7393_fb_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
-	if (mode >= ARRAY_SIZE(known_modes)) {
+	if (mode > num_modes) {
 		dev_err(&client->dev, "mode %d: not supported", mode);
 		return -EFAULT;
 	}
@@ -796,7 +795,7 @@ static struct i2c_driver bfin_adv7393_fb_driver = {
 
 static int __init bfin_adv7393_fb_driver_init(void)
 {
-#if IS_ENABLED(CONFIG_I2C_BLACKFIN_TWI)
+#if  defined(CONFIG_I2C_BLACKFIN_TWI) || defined(CONFIG_I2C_BLACKFIN_TWI_MODULE)
 	request_module("i2c-bfin-twi");
 #else
 	request_module("i2c-gpio");

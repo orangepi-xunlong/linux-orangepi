@@ -208,7 +208,7 @@ static struct rpc_clnt *nfs_find_best_sec(struct rpc_clnt *clnt,
  */
 struct rpc_clnt *
 nfs4_negotiate_security(struct rpc_clnt *clnt, struct inode *inode,
-					const struct qstr *name)
+					struct qstr *name)
 {
 	struct page *page;
 	struct nfs4_secinfo_flavors *flavors;
@@ -279,7 +279,7 @@ static struct vfsmount *try_location(struct nfs_clone_mount *mountdata,
 				mountdata->hostname,
 				mountdata->mnt_path);
 
-		mnt = vfs_submount(mountdata->dentry, &nfs4_referral_fs_type, page, mountdata);
+		mnt = vfs_kern_mount(&nfs4_referral_fs_type, 0, page, mountdata);
 		if (!IS_ERR(mnt))
 			break;
 	}
@@ -397,7 +397,7 @@ struct vfsmount *nfs4_submount(struct nfs_server *server, struct dentry *dentry,
 	rpc_authflavor_t flavor = server->client->cl_auth->au_flavor;
 	struct dentry *parent = dget_parent(dentry);
 	struct inode *dir = d_inode(parent);
-	const struct qstr *name = &dentry->d_name;
+	struct qstr *name = &dentry->d_name;
 	struct rpc_clnt *client;
 	struct vfsmount *mnt;
 

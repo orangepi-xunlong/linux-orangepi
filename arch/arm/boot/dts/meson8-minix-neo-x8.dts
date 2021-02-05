@@ -80,7 +80,6 @@
 	pmic@32 {
 		compatible = "ricoh,rn5t618";
 		reg = <0x32>;
-		system-power-controller;
 
 		regulators {
 		};

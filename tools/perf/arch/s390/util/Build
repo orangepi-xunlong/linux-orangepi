@@ -2,5 +2,3 @@ libperf-y += header.o
 libperf-y += kvm-stat.o
 
 libperf-$(CONFIG_DWARF) += dwarf-regs.o
-
-libperf-y += machine.o

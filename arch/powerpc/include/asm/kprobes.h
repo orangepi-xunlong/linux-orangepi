@@ -40,7 +40,8 @@ struct kprobe;
 typedef ppc_opcode_t kprobe_opcode_t;
 #define MAX_INSN_SIZE 1
 
-#ifdef PPC64_ELF_ABI_v2
+#ifdef CONFIG_PPC64
+#if defined(_CALL_ELF) && _CALL_ELF == 2
 /* PPC64 ABIv2 needs local entry point */
 #define kprobe_lookup_name(name, addr)					\
 {									\
@@ -48,7 +49,7 @@ typedef ppc_opcode_t kprobe_opcode_t;
 	if (addr)							\
 		addr = (kprobe_opcode_t *)ppc_function_entry(addr);	\
 }
-#elif defined(PPC64_ELF_ABI_v1)
+#else
 /*
  * 64bit powerpc ABIv1 uses function descriptors:
  * - Check for the dot variant of the symbol first.
@@ -91,7 +92,8 @@ typedef ppc_opcode_t kprobe_opcode_t;
 		addr = (kprobe_opcode_t *)kallsyms_lookup_name(name);	\
 	}								\
 }
-#endif
+#endif /* defined(_CALL_ELF) && _CALL_ELF == 2 */
+#endif /* CONFIG_PPC64 */
 
 #define flush_insn_slot(p)	do { } while (0)
 #define kretprobe_blacklist_size 0

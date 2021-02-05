@@ -72,7 +72,7 @@ void __init check_iommu_entries(struct iommu_table_entry *start,
 	}
 }
 #else
-void __init check_iommu_entries(struct iommu_table_entry *start,
+inline void check_iommu_entries(struct iommu_table_entry *start,
 				       struct iommu_table_entry *finish)
 {
 }

@@ -1,9 +1,0 @@
-menu "GPU support for sunxi"
-
-config SUNXI_GPU_TYPE
-	string "The GPU type"
-	default "None"
-	help
-	  The GPU type used on the platform.
-
-endmenu

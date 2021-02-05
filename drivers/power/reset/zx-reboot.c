@@ -58,12 +58,9 @@ static int zx_reboot_probe(struct platform_device *pdev)
 	}
 
 	err = register_restart_handler(&zx_restart_nb);
-	if (err) {
-		iounmap(base);
-		iounmap(pcu_base);
+	if (err)
 		dev_err(&pdev->dev, "Register restart handler failed(err=%d)\n",
 			err);
-	}
 
 	return err;
 }

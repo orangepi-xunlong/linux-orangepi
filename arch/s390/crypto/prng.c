@@ -23,7 +23,8 @@
 #include <asm/debug.h>
 #include <asm/uaccess.h>
 #include <asm/timex.h>
-#include <asm/cpacf.h>
+
+#include "crypt_s390.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("IBM Corporation");
@@ -110,30 +111,22 @@ static const u8 initial_parm_block[32] __initconst = {
 
 /*** helper functions ***/
 
-/*
- * generate_entropy:
- * This algorithm produces 64 bytes of entropy data based on 1024
- * individual stckf() invocations assuming that each stckf() value
- * contributes 0.25 bits of entropy. So the caller gets 256 bit
- * entropy per 64 byte or 4 bits entropy per byte.
- */
 static int generate_entropy(u8 *ebuf, size_t nbytes)
 {
 	int n, ret = 0;
-	u8 *pg, *h, hash[64];
+	u8 *pg, *h, hash[32];
 
-	/* allocate 2 pages */
-	pg = (u8 *) __get_free_pages(GFP_KERNEL, 1);
+	pg = (u8 *) __get_free_page(GFP_KERNEL);
 	if (!pg) {
 		prng_errorflag = PRNG_GEN_ENTROPY_FAILED;
 		return -ENOMEM;
 	}
 
 	while (nbytes) {
-		/* fill pages with urandom bytes */
-		get_random_bytes(pg, 2*PAGE_SIZE);
-		/* exor pages with 1024 stckf values */
-		for (n = 0; n < 2 * PAGE_SIZE / sizeof(u64); n++) {
+		/* fill page with urandom bytes */
+		get_random_bytes(pg, PAGE_SIZE);
+		/* exor page with stckf values */
+		for (n = 0; n < PAGE_SIZE / sizeof(u64); n++) {
 			u64 *p = ((u64 *)pg) + n;
 			*p ^= get_tod_clock_fast();
 		}
@@ -142,8 +135,13 @@ static int generate_entropy(u8 *ebuf, size_t nbytes)
 			h = hash;
 		else
 			h = ebuf;
-		/* hash over the filled pages */
-		cpacf_kimd(CPACF_KIMD_SHA_512, h, pg, 2*PAGE_SIZE);
+		/* generate sha256 from this page */
+		if (crypt_s390_kimd(KIMD_SHA_256, h,
+				    pg, PAGE_SIZE) != PAGE_SIZE) {
+			prng_errorflag = PRNG_GEN_ENTROPY_FAILED;
+			ret = -EIO;
+			goto out;
+		}
 		if (n < sizeof(hash))
 			memcpy(ebuf, hash, n);
 		ret += n;
@@ -151,7 +149,8 @@ static int generate_entropy(u8 *ebuf, size_t nbytes)
 		nbytes -= n;
 	}
 
-	free_pages((unsigned long)pg, 1);
+out:
+	free_page((unsigned long)pg);
 	return ret;
 }
 
@@ -162,11 +161,13 @@ static void prng_tdes_add_entropy(void)
 {
 	__u64 entropy[4];
 	unsigned int i;
+	int ret;
 
 	for (i = 0; i < 16; i++) {
-		cpacf_kmc(CPACF_KMC_PRNG, prng_data->prngws.parm_block,
-			  (char *) entropy, (char *) entropy,
-			  sizeof(entropy));
+		ret = crypt_s390_kmc(KMC_PRNG, prng_data->prngws.parm_block,
+				     (char *)entropy, (char *)entropy,
+				     sizeof(entropy));
+		BUG_ON(ret < 0 || ret != sizeof(entropy));
 		memcpy(prng_data->prngws.parm_block, entropy, sizeof(entropy));
 	}
 }
@@ -303,14 +304,22 @@ static int __init prng_sha512_selftest(void)
 		0x21, 0xe4, 0xb0, 0x86, 0x44, 0xf6, 0x72, 0x7c,
 		0x36, 0x8c, 0x5a, 0x9f, 0x7a, 0x4b, 0x3e, 0xe2 };
 
+	int ret = 0;
 	u8 buf[sizeof(random)];
 	struct ppno_ws_s ws;
 
 	memset(&ws, 0, sizeof(ws));
 
 	/* initial seed */
-	cpacf_ppno(CPACF_PPNO_SHA512_DRNG_SEED,
-		   &ws, NULL, 0, seed, sizeof(seed));
+	ret = crypt_s390_ppno(PPNO_SHA512_DRNG_SEED,
+			      &ws, NULL, 0,
+			      seed, sizeof(seed));
+	if (ret < 0) {
+		pr_err("The prng self test seed operation for the "
+		       "SHA-512 mode failed with rc=%d\n", ret);
+		prng_errorflag = PRNG_SELFTEST_FAILED;
+		return -EIO;
+	}
 
 	/* check working states V and C */
 	if (memcmp(ws.V, V0, sizeof(V0)) != 0
@@ -322,10 +331,24 @@ static int __init prng_sha512_selftest(void)
 	}
 
 	/* generate random bytes */
-	cpacf_ppno(CPACF_PPNO_SHA512_DRNG_GEN,
-		   &ws, buf, sizeof(buf), NULL, 0);
-	cpacf_ppno(CPACF_PPNO_SHA512_DRNG_GEN,
-		   &ws, buf, sizeof(buf), NULL, 0);
+	ret = crypt_s390_ppno(PPNO_SHA512_DRNG_GEN,
+			      &ws, buf, sizeof(buf),
+			      NULL, 0);
+	if (ret < 0) {
+		pr_err("The prng self test generate operation for "
+		       "the SHA-512 mode failed with rc=%d\n", ret);
+		prng_errorflag = PRNG_SELFTEST_FAILED;
+		return -EIO;
+	}
+	ret = crypt_s390_ppno(PPNO_SHA512_DRNG_GEN,
+			      &ws, buf, sizeof(buf),
+			      NULL, 0);
+	if (ret < 0) {
+		pr_err("The prng self test generate operation for "
+		       "the SHA-512 mode failed with rc=%d\n", ret);
+		prng_errorflag = PRNG_SELFTEST_FAILED;
+		return -EIO;
+	}
 
 	/* check against expected data */
 	if (memcmp(buf, random, sizeof(random)) != 0) {
@@ -342,7 +365,7 @@ static int __init prng_sha512_selftest(void)
 static int __init prng_sha512_instantiate(void)
 {
 	int ret, datalen;
-	u8 seed[64 + 32 + 16];
+	u8 seed[64];
 
 	pr_debug("prng runs in SHA-512 mode "
 		 "with chunksize=%d and reseed_limit=%u\n",
@@ -365,24 +388,37 @@ static int __init prng_sha512_instantiate(void)
 	if (ret)
 		goto outfree;
 
-	/* generate initial seed bytestring, with 256 + 128 bits entropy */
-	ret = generate_entropy(seed, 64 + 32);
-	if (ret != 64 + 32)
+	/* generate initial seed bytestring, first 48 bytes of entropy */
+	ret = generate_entropy(seed, 48);
+	if (ret != 48)
 		goto outfree;
 	/* followed by 16 bytes of unique nonce */
-	get_tod_clock_ext(seed + 64 + 32);
+	get_tod_clock_ext(seed + 48);
 
 	/* initial seed of the ppno drng */
-	cpacf_ppno(CPACF_PPNO_SHA512_DRNG_SEED,
-		   &prng_data->ppnows, NULL, 0, seed, sizeof(seed));
+	ret = crypt_s390_ppno(PPNO_SHA512_DRNG_SEED,
+			      &prng_data->ppnows, NULL, 0,
+			      seed, sizeof(seed));
+	if (ret < 0) {
+		prng_errorflag = PRNG_SEED_FAILED;
+		ret = -EIO;
+		goto outfree;
+	}
 
 	/* if fips mode is enabled, generate a first block of random
 	   bytes for the FIPS 140-2 Conditional Self Test */
 	if (fips_enabled) {
 		prng_data->prev = prng_data->buf + prng_chunk_size;
-		cpacf_ppno(CPACF_PPNO_SHA512_DRNG_GEN,
-			   &prng_data->ppnows,
-			   prng_data->prev, prng_chunk_size, NULL, 0);
+		ret = crypt_s390_ppno(PPNO_SHA512_DRNG_GEN,
+				      &prng_data->ppnows,
+				      prng_data->prev,
+				      prng_chunk_size,
+				      NULL, 0);
+		if (ret < 0 || ret != prng_chunk_size) {
+			prng_errorflag = PRNG_GEN_FAILED;
+			ret = -EIO;
+			goto outfree;
+		}
 	}
 
 	return 0;
@@ -403,16 +439,21 @@ static void prng_sha512_deinstantiate(void)
 static int prng_sha512_reseed(void)
 {
 	int ret;
-	u8 seed[64];
+	u8 seed[32];
 
-	/* fetch 256 bits of fresh entropy */
+	/* generate 32 bytes of fresh entropy */
 	ret = generate_entropy(seed, sizeof(seed));
 	if (ret != sizeof(seed))
 		return ret;
 
 	/* do a reseed of the ppno drng with this bytestring */
-	cpacf_ppno(CPACF_PPNO_SHA512_DRNG_SEED,
-		   &prng_data->ppnows, NULL, 0, seed, sizeof(seed));
+	ret = crypt_s390_ppno(PPNO_SHA512_DRNG_SEED,
+			      &prng_data->ppnows, NULL, 0,
+			      seed, sizeof(seed));
+	if (ret) {
+		prng_errorflag = PRNG_RESEED_FAILED;
+		return -EIO;
+	}
 
 	return 0;
 }
@@ -430,8 +471,13 @@ static int prng_sha512_generate(u8 *buf, size_t nbytes)
 	}
 
 	/* PPNO generate */
-	cpacf_ppno(CPACF_PPNO_SHA512_DRNG_GEN,
-		   &prng_data->ppnows, buf, nbytes, NULL, 0);
+	ret = crypt_s390_ppno(PPNO_SHA512_DRNG_GEN,
+			      &prng_data->ppnows, buf, nbytes,
+			      NULL, 0);
+	if (ret < 0 || ret != nbytes) {
+		prng_errorflag = PRNG_GEN_FAILED;
+		return -EIO;
+	}
 
 	/* FIPS 140-2 Conditional Self Test */
 	if (fips_enabled) {
@@ -442,7 +488,7 @@ static int prng_sha512_generate(u8 *buf, size_t nbytes)
 		memcpy(prng_data->prev, buf, nbytes);
 	}
 
-	return nbytes;
+	return ret;
 }
 
 
@@ -457,7 +503,7 @@ static int prng_open(struct inode *inode, struct file *file)
 static ssize_t prng_tdes_read(struct file *file, char __user *ubuf,
 			      size_t nbytes, loff_t *ppos)
 {
-	int chunk, n, ret = 0;
+	int chunk, n, tmp, ret = 0;
 
 	/* lock prng_data struct */
 	if (mutex_lock_interruptible(&prng_data->mutex))
@@ -508,9 +554,13 @@ static ssize_t prng_tdes_read(struct file *file, char __user *ubuf,
 		 *
 		 * Note: you can still get strict X9.17 conformity by setting
 		 * prng_chunk_size to 8 bytes.
-		 */
-		cpacf_kmc(CPACF_KMC_PRNG, prng_data->prngws.parm_block,
-			  prng_data->buf, prng_data->buf, n);
+		*/
+		tmp = crypt_s390_kmc(KMC_PRNG, prng_data->prngws.parm_block,
+				     prng_data->buf, prng_data->buf, n);
+		if (tmp < 0 || tmp != n) {
+			ret = -EIO;
+			break;
+		}
 
 		prng_data->prngws.byte_counter += n;
 		prng_data->prngws.reseed_counter += n;
@@ -767,13 +817,14 @@ static int __init prng_init(void)
 	int ret;
 
 	/* check if the CPU has a PRNG */
-	if (!cpacf_query_func(CPACF_KMC, CPACF_KMC_PRNG))
+	if (!crypt_s390_func_available(KMC_PRNG, CRYPT_S390_MSA))
 		return -EOPNOTSUPP;
 
 	/* choose prng mode */
 	if (prng_mode != PRNG_MODE_TDES) {
 		/* check for MSA5 support for PPNO operations */
-		if (!cpacf_query_func(CPACF_PPNO, CPACF_PPNO_SHA512_DRNG_GEN)) {
+		if (!crypt_s390_func_available(PPNO_SHA512_DRNG_GEN,
+					       CRYPT_S390_MSA5)) {
 			if (prng_mode == PRNG_MODE_SHA512) {
 				pr_err("The prng module cannot "
 				       "start in SHA-512 mode\n");

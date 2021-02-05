@@ -32,9 +32,6 @@
 #include "amdgpu.h"
 #include "amdgpu_trace.h"
 
-#define AMDGPU_BO_LIST_MAX_PRIORITY	32u
-#define AMDGPU_BO_LIST_NUM_BUCKETS	(AMDGPU_BO_LIST_MAX_PRIORITY + 1)
-
 static int amdgpu_bo_list_create(struct amdgpu_fpriv *fpriv,
 				 struct amdgpu_bo_list **result,
 				 int *id)
@@ -91,10 +88,8 @@ static int amdgpu_bo_list_set(struct amdgpu_device *adev,
 	struct amdgpu_bo *gws_obj = adev->gds.gws_gfx_bo;
 	struct amdgpu_bo *oa_obj = adev->gds.oa_gfx_bo;
 
-	unsigned last_entry = 0, first_userptr = num_entries;
+	bool has_userptr = false;
 	unsigned i;
-	int r;
-	unsigned long total_size = 0;
 
 	array = drm_malloc_ab(num_entries, sizeof(struct amdgpu_bo_list_entry));
 	if (!array)
@@ -102,46 +97,35 @@ static int amdgpu_bo_list_set(struct amdgpu_device *adev,
 	memset(array, 0, num_entries * sizeof(struct amdgpu_bo_list_entry));
 
 	for (i = 0; i < num_entries; ++i) {
-		struct amdgpu_bo_list_entry *entry;
+		struct amdgpu_bo_list_entry *entry = &array[i];
 		struct drm_gem_object *gobj;
-		struct amdgpu_bo *bo;
-		struct mm_struct *usermm;
 
-		gobj = drm_gem_object_lookup(filp, info[i].bo_handle);
-		if (!gobj) {
-			r = -ENOENT;
+		gobj = drm_gem_object_lookup(adev->ddev, filp, info[i].bo_handle);
+		if (!gobj)
 			goto error_free;
-		}
 
-		bo = amdgpu_bo_ref(gem_to_amdgpu_bo(gobj));
+		entry->robj = amdgpu_bo_ref(gem_to_amdgpu_bo(gobj));
 		drm_gem_object_unreference_unlocked(gobj);
-
-		usermm = amdgpu_ttm_tt_get_usermm(bo->tbo.ttm);
-		if (usermm) {
-			if (usermm != current->mm) {
-				amdgpu_bo_unref(&bo);
-				r = -EPERM;
-				goto error_free;
-			}
-			entry = &array[--first_userptr];
-		} else {
-			entry = &array[last_entry++];
+		entry->priority = info[i].bo_priority;
+		entry->prefered_domains = entry->robj->initial_domain;
+		entry->allowed_domains = entry->prefered_domains;
+		if (entry->allowed_domains == AMDGPU_GEM_DOMAIN_VRAM)
+			entry->allowed_domains |= AMDGPU_GEM_DOMAIN_GTT;
+		if (amdgpu_ttm_tt_has_userptr(entry->robj->tbo.ttm)) {
+			has_userptr = true;
+			entry->prefered_domains = AMDGPU_GEM_DOMAIN_GTT;
+			entry->allowed_domains = AMDGPU_GEM_DOMAIN_GTT;
 		}
-
-		entry->robj = bo;
-		entry->priority = min(info[i].bo_priority,
-				      AMDGPU_BO_LIST_MAX_PRIORITY);
 		entry->tv.bo = &entry->robj->tbo;
 		entry->tv.shared = !entry->robj->prime_shared_count;
 
-		if (entry->robj->prefered_domains == AMDGPU_GEM_DOMAIN_GDS)
+		if (entry->prefered_domains == AMDGPU_GEM_DOMAIN_GDS)
 			gds_obj = entry->robj;
-		if (entry->robj->prefered_domains == AMDGPU_GEM_DOMAIN_GWS)
+		if (entry->prefered_domains == AMDGPU_GEM_DOMAIN_GWS)
 			gws_obj = entry->robj;
-		if (entry->robj->prefered_domains == AMDGPU_GEM_DOMAIN_OA)
+		if (entry->prefered_domains == AMDGPU_GEM_DOMAIN_OA)
 			oa_obj = entry->robj;
 
-		total_size += amdgpu_bo_size(entry->robj);
 		trace_amdgpu_bo_list_set(list, entry->robj);
 	}
 
@@ -153,18 +137,15 @@ static int amdgpu_bo_list_set(struct amdgpu_device *adev,
 	list->gds_obj = gds_obj;
 	list->gws_obj = gws_obj;
 	list->oa_obj = oa_obj;
-	list->first_userptr = first_userptr;
+	list->has_userptr = has_userptr;
 	list->array = array;
 	list->num_entries = num_entries;
 
-	trace_amdgpu_cs_bo_status(list->num_entries, total_size);
 	return 0;
 
 error_free:
-	while (i--)
-		amdgpu_bo_unref(&array[i].robj);
 	drm_free_large(array);
-	return r;
+	return -ENOENT;
 }
 
 struct amdgpu_bo_list *
@@ -178,39 +159,6 @@ amdgpu_bo_list_get(struct amdgpu_fpriv *fpriv, int id)
 		mutex_lock(&result->lock);
 	mutex_unlock(&fpriv->bo_list_lock);
 	return result;
-}
-
-void amdgpu_bo_list_get_list(struct amdgpu_bo_list *list,
-			     struct list_head *validated)
-{
-	/* This is based on the bucket sort with O(n) time complexity.
-	 * An item with priority "i" is added to bucket[i]. The lists are then
-	 * concatenated in descending order.
-	 */
-	struct list_head bucket[AMDGPU_BO_LIST_NUM_BUCKETS];
-	unsigned i;
-
-	for (i = 0; i < AMDGPU_BO_LIST_NUM_BUCKETS; i++)
-		INIT_LIST_HEAD(&bucket[i]);
-
-	/* Since buffers which appear sooner in the relocation list are
-	 * likely to be used more often than buffers which appear later
-	 * in the list, the sort mustn't change the ordering of buffers
-	 * with the same priority, i.e. it must be stable.
-	 */
-	for (i = 0; i < list->num_entries; i++) {
-		unsigned priority = list->array[i].priority;
-
-		if (!list->array[i].robj->parent)
-			list_add_tail(&list->array[i].tv.head,
-				      &bucket[priority]);
-
-		list->array[i].user_pages = NULL;
-	}
-
-	/* Connect the sorted buckets in the output list. */
-	for (i = 0; i < AMDGPU_BO_LIST_NUM_BUCKETS; i++)
-		list_splice(&bucket[i], validated);
 }
 
 void amdgpu_bo_list_put(struct amdgpu_bo_list *list)
@@ -268,7 +216,7 @@ int amdgpu_bo_list_ioctl(struct drm_device *dev, void *data,
 		for (i = 0; i < args->in.bo_number; ++i) {
 			if (copy_from_user(&info[i], uptr, bytes))
 				goto error_free;
-
+			
 			uptr += args->in.bo_info_size;
 		}
 	}
@@ -276,7 +224,7 @@ int amdgpu_bo_list_ioctl(struct drm_device *dev, void *data,
 	switch (args->in.operation) {
 	case AMDGPU_BO_LIST_OP_CREATE:
 		r = amdgpu_bo_list_create(fpriv, &list, &handle);
-		if (r)
+		if (r) 
 			goto error_free;
 
 		r = amdgpu_bo_list_set(adev, filp, list, info,
@@ -286,7 +234,7 @@ int amdgpu_bo_list_ioctl(struct drm_device *dev, void *data,
 			goto error_free;
 
 		break;
-
+		
 	case AMDGPU_BO_LIST_OP_DESTROY:
 		amdgpu_bo_list_destroy(fpriv, handle);
 		handle = 0;

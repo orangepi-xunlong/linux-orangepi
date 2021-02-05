@@ -132,7 +132,7 @@ static ssize_t perf_read(struct file *file, char __user *buf,
 		size_t sz, loff_t *ppos)
 {
 	struct msm_perf_state *perf = file->private_data;
-	int n = 0, ret = 0;
+	int n = 0, ret;
 
 	mutex_lock(&perf->read_lock);
 
@@ -143,10 +143,9 @@ static ssize_t perf_read(struct file *file, char __user *buf,
 	}
 
 	n = min((int)sz, perf->buftot - perf->bufpos);
-	if (copy_to_user(buf, &perf->buf[perf->bufpos], n)) {
-		ret = -EFAULT;
+	ret = copy_to_user(buf, &perf->buf[perf->bufpos], n);
+	if (ret)
 		goto out;
-	}
 
 	perf->bufpos += n;
 	*ppos += n;
@@ -229,8 +228,8 @@ int msm_perf_debugfs_init(struct drm_minor *minor)
 	perf->ent = debugfs_create_file("perf", S_IFREG | S_IRUGO,
 			minor->debugfs_root, perf, &perf_debugfs_fops);
 	if (!perf->ent) {
-		DRM_ERROR("Cannot create /sys/kernel/debug/dri/%pd/perf\n",
-				minor->debugfs_root);
+		DRM_ERROR("Cannot create /sys/kernel/debug/dri/%s/perf\n",
+				minor->debugfs_root->d_name.name);
 		goto fail;
 	}
 

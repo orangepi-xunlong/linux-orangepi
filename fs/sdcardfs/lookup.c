@@ -405,7 +405,7 @@ out:
  * On fail (== error)
  * returns error ptr
  *
- * @dir : Parent inode.
+ * @dir : Parent inode. It is locked (dir->i_mutex)
  * @dentry : Target dentry to lookup. we should set each of fields.
  *	     (dentry->d_name is initialized already)
  * @nd : nameidata of parent inode

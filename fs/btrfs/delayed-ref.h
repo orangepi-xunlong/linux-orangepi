@@ -75,11 +75,11 @@ struct btrfs_delayed_ref_node {
 
 struct btrfs_delayed_extent_op {
 	struct btrfs_disk_key key;
-	u8 level;
-	bool update_key;
-	bool update_flags;
-	bool is_data;
 	u64 flags_to_set;
+	int level;
+	unsigned int update_key:1;
+	unsigned int update_flags:1;
+	unsigned int is_data:1;
 };
 
 /*
@@ -188,7 +188,7 @@ struct btrfs_delayed_ref_root {
 
 	/*
 	 * To make qgroup to skip given root.
-	 * This is for snapshot, as btrfs_qgroup_inherit() will manually
+	 * This is for snapshot, as btrfs_qgroup_inherit() will manully
 	 * modify counters for snapshot and its source, so we should skip
 	 * the snapshot in new_root/old_roots or it will get calculated twice
 	 */
@@ -250,6 +250,9 @@ int btrfs_add_delayed_data_ref(struct btrfs_fs_info *fs_info,
 			       u64 parent, u64 ref_root,
 			       u64 owner, u64 offset, u64 reserved, int action,
 			       struct btrfs_delayed_extent_op *extent_op);
+int btrfs_add_delayed_qgroup_reserve(struct btrfs_fs_info *fs_info,
+				     struct btrfs_trans_handle *trans,
+				     u64 ref_root, u64 bytenr, u64 num_bytes);
 int btrfs_add_delayed_extent_op(struct btrfs_fs_info *fs_info,
 				struct btrfs_trans_handle *trans,
 				u64 bytenr, u64 num_bytes,

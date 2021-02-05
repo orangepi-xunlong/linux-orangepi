@@ -3,10 +3,8 @@
  *
  * Supported devices:
  *  - Vengeance K90 Keyboard
- *  - Scimitar PRO RGB Gaming Mouse
  *
  * Copyright (c) 2015 Clement Vuchener
- * Copyright (c) 2017 Oscar Campos
  */
 
 /*
@@ -627,9 +625,6 @@ static int corsair_input_mapping(struct hid_device *dev,
 {
 	int gkey;
 
-	if ((usage->hid & HID_USAGE_PAGE) != HID_UP_KEYBOARD)
-		return 0;
-
 	gkey = corsair_usage_to_gkey(usage->hid & HID_USAGE);
 	if (gkey != 0) {
 		hid_map_usage_clear(input, usage, bit, max, EV_KEY,
@@ -672,51 +667,10 @@ static int corsair_input_mapping(struct hid_device *dev,
 	return 0;
 }
 
-/*
- * The report descriptor of Corsair Scimitar RGB Pro gaming mouse is
- * non parseable as they define two consecutive Logical Minimum for
- * the Usage Page (Consumer) in rdescs bytes 75 and 77 being 77 0x16
- * that should be obviousy 0x26 for Logical Magimum of 16 bits. This
- * prevents poper parsing of the report descriptor due Logical
- * Minimum being larger than Logical Maximum.
- *
- * This driver fixes the report descriptor for:
- * - USB ID b1c:1b3e, sold as Scimitar RGB Pro Gaming mouse
- */
-
-static __u8 *corsair_mouse_report_fixup(struct hid_device *hdev, __u8 *rdesc,
-        unsigned int *rsize)
-{
-	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
-
-	if (intf->cur_altsetting->desc.bInterfaceNumber == 1) {
-		/*
-		 * Corsair Scimitar RGB Pro report descriptor is broken and
-		 * defines two different Logical Minimum for the Consumer
-		 * Application. The byte 77 should be a 0x26 defining a 16
-		 * bits integer for the Logical Maximum but it is a 0x16
-		 * instead (Logical Minimum)
-		 */
-		switch (hdev->product) {
-		case USB_DEVICE_ID_CORSAIR_SCIMITAR_PRO_RGB:
-			if (*rsize >= 172 && rdesc[75] == 0x15 && rdesc[77] == 0x16
-			&& rdesc[78] == 0xff && rdesc[79] == 0x0f) {
-				hid_info(hdev, "Fixing up report descriptor\n");
-				rdesc[77] = 0x26;
-			}
-			break;
-		}
-
-	}
-	return rdesc;
-}
-
 static const struct hid_device_id corsair_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR, USB_DEVICE_ID_CORSAIR_K90),
 		.driver_data = CORSAIR_USE_K90_MACRO |
 			       CORSAIR_USE_K90_BACKLIGHT },
-	{ HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR,
-            USB_DEVICE_ID_CORSAIR_SCIMITAR_PRO_RGB) },
 	{}
 };
 
@@ -729,14 +683,21 @@ static struct hid_driver corsair_driver = {
 	.event = corsair_event,
 	.remove = corsair_remove,
 	.input_mapping = corsair_input_mapping,
-	.report_fixup = corsair_mouse_report_fixup,
 };
 
-module_hid_driver(corsair_driver);
+static int __init corsair_init(void)
+{
+	return hid_register_driver(&corsair_driver);
+}
+
+static void corsair_exit(void)
+{
+	hid_unregister_driver(&corsair_driver);
+}
+
+module_init(corsair_init);
+module_exit(corsair_exit);
 
 MODULE_LICENSE("GPL");
-/* Original K90 driver author */
 MODULE_AUTHOR("Clement Vuchener");
-/* Scimitar PRO RGB driver author */
-MODULE_AUTHOR("Oscar Campos");
 MODULE_DESCRIPTION("HID driver for Corsair devices");

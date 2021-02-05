@@ -22,7 +22,6 @@
 
 #include "dtc.h"
 #include "srcpos.h"
-#include "updatetree.h"
 
 /*
  * Command line options
@@ -32,7 +31,7 @@ int reservenum;		/* Number of memory reservation slots */
 int minsize;		/* Minimum blob size */
 int padsize;		/* Additional padding to blob */
 int alignsize;		/* Additional padding to blob accroding to the alignsize */
-int phandle_format = PHANDLE_BOTH;	/* Use linux,phandle or phandle properties */
+int phandle_format = PHANDLE_EPAPR;	/* Use linux,phandle or phandle properties */
 int generate_symbols;	/* enable symbols & fixup support */
 int generate_fixups;		/* suppress generation of fixups on symbol support */
 int auto_label_aliases;		/* auto generate labels -> aliases */
@@ -41,7 +40,6 @@ static int is_power_of_2(int x)
 {
 	return (x > 0) && ((x & (x - 1)) == 0);
 }
-
 
 static void fill_fullpaths(struct node *tree, const char *prefix)
 {
@@ -64,7 +62,7 @@ static void fill_fullpaths(struct node *tree, const char *prefix)
 #define FDT_VERSION(version)	_FDT_VERSION(version)
 #define _FDT_VERSION(version)	#version
 static const char usage_synopsis[] = "dtc [options] <input file>";
-static const char usage_short_opts[] = "qI:O:o:V:d:R:S:p:a:fb:i:H:sW:E:F:@hv";
+static const char usage_short_opts[] = "qI:O:o:V:d:R:S:p:a:fb:i:H:sW:E:@Ahv";
 static struct option const usage_long_opts[] = {
 	{"quiet",            no_argument, NULL, 'q'},
 	{"in-format",         a_argument, NULL, 'I'},
@@ -83,9 +81,8 @@ static struct option const usage_long_opts[] = {
 	{"phandle",           a_argument, NULL, 'H'},
 	{"warning",           a_argument, NULL, 'W'},
 	{"error",             a_argument, NULL, 'E'},
-	{"symbols",          no_argument, NULL, '@'},
+	{"symbols",	     no_argument, NULL, '@'},
 	{"auto-alias",       no_argument, NULL, 'A'},
-	{"fexname",           a_argument, NULL, 'F'},
 	{"help",             no_argument, NULL, 'h'},
 	{"version",          no_argument, NULL, 'v'},
 	{NULL,               no_argument, NULL, 0x0},
@@ -141,7 +138,7 @@ static const char *guess_type_by_name(const char *fname, const char *fallback)
 static const char *guess_input_format(const char *fname, const char *fallback)
 {
 	struct stat statbuf;
-	uint32_t magic;
+	fdt32_t magic;
 	FILE *f;
 
 	if (stat(fname, &statbuf) != 0)
@@ -162,8 +159,7 @@ static const char *guess_input_format(const char *fname, const char *fallback)
 	}
 	fclose(f);
 
-	magic = fdt32_to_cpu(magic);
-	if (magic == FDT_MAGIC)
+	if (fdt32_to_cpu(magic) == FDT_MAGIC)
 		return "dtb";
 
 	return guess_type_by_name(fname, fallback);
@@ -176,7 +172,6 @@ int main(int argc, char *argv[])
 	const char *outform = NULL;
 	const char *outname = "-";
 	const char *depname = NULL;
-	const char *fexname = NULL;
 	bool force = false, sort = false;
 	const char *arg;
 	int opt;
@@ -220,7 +215,7 @@ int main(int argc, char *argv[])
 			alignsize = strtol(optarg, NULL, 0);
 			if (!is_power_of_2(alignsize))
 				die("Invalid argument \"%d\" to -a option\n",
-				    optarg);
+				    alignsize);
 			break;
 		case 'f':
 			force = true;
@@ -259,16 +254,12 @@ int main(int argc, char *argv[])
 		case 'E':
 			parse_checks_option(false, true, optarg);
 			break;
+
 		case '@':
 			generate_symbols = 1;
 			break;
-
 		case 'A':
 			auto_label_aliases = 1;
-			break;
-
-		case 'F':
-			fexname = optarg;
 			break;
 
 		case 'h':
@@ -317,6 +308,8 @@ int main(int argc, char *argv[])
 	else
 		die("Unknown input format \"%s\"\n", inform);
 
+	dti->outname = outname;
+
 	if (depfile) {
 		fputc('\n', depfile);
 		fclose(depfile);
@@ -329,8 +322,9 @@ int main(int argc, char *argv[])
 	process_checks(force, dti);
 
 	/* on a plugin, generate by default */
-	if (dti->dtsflags & DTSF_PLUGIN)
+	if (dti->dtsflags & DTSF_PLUGIN) {
 		generate_fixups = 1;
+	}
 
 	if (auto_label_aliases)
 		generate_label_tree(dti, "aliases", false);
@@ -353,18 +347,6 @@ int main(int argc, char *argv[])
 		if (! outf)
 			die("Couldn't open output file %s: %s\n",
 			    outname, strerror(errno));
-	}
-
-	/* add by huangshr.
-	 * here we parser script file and
-	 * insert mainkey info into bi struct.
-	 */
-	if (fexname) {
-		dt_update_source(fexname, outf, dti);
-		/* recheck bi struct */
-		fill_fullpaths(dti->dt, "");
-		dirty_checks();
-		process_checks(force, dti);
 	}
 
 	if (streq(outform, "dts")) {

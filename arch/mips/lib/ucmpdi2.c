@@ -1,4 +1,4 @@
-#include <linux/export.h>
+#include <linux/module.h>
 
 #include "libgcc.h"
 

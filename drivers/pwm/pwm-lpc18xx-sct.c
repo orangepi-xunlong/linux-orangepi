@@ -360,11 +360,6 @@ static int lpc18xx_pwm_probe(struct platform_device *pdev)
 	}
 
 	lpc18xx_pwm->clk_rate = clk_get_rate(lpc18xx_pwm->pwm_clk);
-	if (!lpc18xx_pwm->clk_rate) {
-		dev_err(&pdev->dev, "pwm clock has no frequency\n");
-		ret = -EINVAL;
-		goto disable_pwmclk;
-	}
 
 	mutex_init(&lpc18xx_pwm->res_lock);
 	mutex_init(&lpc18xx_pwm->period_lock);
@@ -413,18 +408,14 @@ static int lpc18xx_pwm_probe(struct platform_device *pdev)
 	}
 
 	for (i = 0; i < lpc18xx_pwm->chip.npwm; i++) {
-		struct lpc18xx_pwm_data *data;
-
 		pwm = &lpc18xx_pwm->chip.pwms[i];
-
-		data = devm_kzalloc(lpc18xx_pwm->dev, sizeof(*data),
-				    GFP_KERNEL);
-		if (!data) {
+		pwm->chip_data = devm_kzalloc(lpc18xx_pwm->dev,
+					      sizeof(struct lpc18xx_pwm_data),
+					      GFP_KERNEL);
+		if (!pwm->chip_data) {
 			ret = -ENOMEM;
 			goto remove_pwmchip;
 		}
-
-		pwm_set_chip_data(pwm, data);
 	}
 
 	platform_set_drvdata(pdev, lpc18xx_pwm);

@@ -177,12 +177,12 @@ static inline gid_t from_kgid_munged(struct user_namespace *to, kgid_t kgid)
 
 static inline bool kuid_has_mapping(struct user_namespace *ns, kuid_t uid)
 {
-	return uid_valid(uid);
+	return true;
 }
 
 static inline bool kgid_has_mapping(struct user_namespace *ns, kgid_t gid)
 {
-	return gid_valid(gid);
+	return true;
 }
 
 #endif /* CONFIG_USER_NS */

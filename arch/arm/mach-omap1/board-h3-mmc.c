@@ -20,7 +20,7 @@
 #include "board-h3.h"
 #include "mmc.h"
 
-#if IS_ENABLED(CONFIG_MMC_OMAP)
+#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
 
 static int mmc_set_power(struct device *dev, int slot, int power_on,
 				int vdd)

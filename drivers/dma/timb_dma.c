@@ -226,7 +226,8 @@ static void __td_start_dma(struct timb_dma_chan *td_chan)
 
 static void __td_finish(struct timb_dma_chan *td_chan)
 {
-	struct dmaengine_desc_callback	cb;
+	dma_async_tx_callback		callback;
+	void				*param;
 	struct dma_async_tx_descriptor	*txd;
 	struct timb_dma_desc		*td_desc;
 
@@ -251,7 +252,8 @@ static void __td_finish(struct timb_dma_chan *td_chan)
 	dma_cookie_complete(txd);
 	td_chan->ongoing = false;
 
-	dmaengine_desc_get_callback(txd, &cb);
+	callback = txd->callback;
+	param = txd->callback_param;
 
 	list_move(&td_desc->desc_node, &td_chan->free_list);
 
@@ -260,7 +262,8 @@ static void __td_finish(struct timb_dma_chan *td_chan)
 	 * The API requires that no submissions are done from a
 	 * callback, so we don't need to drop the lock here
 	 */
-	dmaengine_desc_callback_invoke(&cb, NULL);
+	if (callback)
+		callback(param);
 }
 
 static u32 __td_ier_mask(struct timb_dma *td)
@@ -334,14 +337,18 @@ static struct timb_dma_desc *td_alloc_init_desc(struct timb_dma_chan *td_chan)
 	int err;
 
 	td_desc = kzalloc(sizeof(struct timb_dma_desc), GFP_KERNEL);
-	if (!td_desc)
+	if (!td_desc) {
+		dev_err(chan2dev(chan), "Failed to alloc descriptor\n");
 		goto out;
+	}
 
 	td_desc->desc_list_len = td_chan->desc_elems * TIMB_DMA_DESC_SIZE;
 
 	td_desc->desc_list = kzalloc(td_desc->desc_list_len, GFP_KERNEL);
-	if (!td_desc->desc_list)
+	if (!td_desc->desc_list) {
+		dev_err(chan2dev(chan), "Failed to alloc descriptor\n");
 		goto err;
+	}
 
 	dma_async_tx_descriptor_init(&td_desc->txd, chan);
 	td_desc->txd.tx_submit = td_tx_submit;

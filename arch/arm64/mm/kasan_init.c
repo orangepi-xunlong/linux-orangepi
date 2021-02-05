@@ -41,7 +41,8 @@ static void __init kasan_early_pte_populate(pmd_t *pmd, unsigned long addr,
 	unsigned long next;
 
 	if (pmd_none(*pmd))
-		__pmd_populate(pmd, __pa_symbol(kasan_zero_pte), PMD_TYPE_TABLE);
+		__pmd_populate(pmd, __pa_symbol(kasan_zero_pte),
+			       PMD_TYPE_TABLE);
 
 	pte = pte_offset_kimg(pmd, addr);
 	do {
@@ -59,7 +60,8 @@ static void __init kasan_early_pmd_populate(pud_t *pud,
 	unsigned long next;
 
 	if (pud_none(*pud))
-		__pud_populate(pud, __pa_symbol(kasan_zero_pmd), PMD_TYPE_TABLE);
+		__pud_populate(pud, __pa_symbol(kasan_zero_pmd),
+			       PMD_TYPE_TABLE);
 
 	pmd = pmd_offset_kimg(pud, addr);
 	do {
@@ -76,7 +78,8 @@ static void __init kasan_early_pud_populate(pgd_t *pgd,
 	unsigned long next;
 
 	if (pgd_none(*pgd))
-		__pgd_populate(pgd, __pa_symbol(kasan_zero_pud), PUD_TYPE_TABLE);
+		__pgd_populate(pgd, __pa_symbol(kasan_zero_pud),
+			       PUD_TYPE_TABLE);
 
 	pud = pud_offset_kimg(pgd, addr);
 	do {

@@ -17,7 +17,7 @@
 /*
  * Extends the address range given by *start and *stop to include the address
  * range starting with estart and the length len. Takes care of overflowing
- * intervals and tries to minimize the overall interval size.
+ * intervals and tries to minimize the overall intervall size.
  */
 static void extend_address_range(u64 *start, u64 *stop, u64 estart, int len)
 {
@@ -72,7 +72,7 @@ static void enable_all_hw_bp(struct kvm_vcpu *vcpu)
 		return;
 
 	/*
-	 * If the guest is not interested in branching events, we can safely
+	 * If the guest is not interrested in branching events, we can savely
 	 * limit them to the PER address range.
 	 */
 	if (!(*cr9 & PER_EVENT_BRANCH))
@@ -116,7 +116,7 @@ static void enable_all_hw_wp(struct kvm_vcpu *vcpu)
 	if (*cr9 & PER_EVENT_STORE && *cr9 & PER_CONTROL_ALTERATION) {
 		*cr9 &= ~PER_CONTROL_ALTERATION;
 		*cr10 = 0;
-		*cr11 = -1UL;
+		*cr11 = PSW_ADDR_INSN;
 	} else {
 		*cr9 &= ~PER_CONTROL_ALTERATION;
 		*cr9 |= PER_EVENT_STORE;
@@ -159,7 +159,7 @@ void kvm_s390_patch_guest_per_regs(struct kvm_vcpu *vcpu)
 		vcpu->arch.sie_block->gcr[0] &= ~0x800ul;
 		vcpu->arch.sie_block->gcr[9] |= PER_EVENT_IFETCH;
 		vcpu->arch.sie_block->gcr[10] = 0;
-		vcpu->arch.sie_block->gcr[11] = -1UL;
+		vcpu->arch.sie_block->gcr[11] = PSW_ADDR_INSN;
 	}
 
 	if (guestdbg_hw_bp_enabled(vcpu)) {
@@ -206,7 +206,7 @@ static int __import_wp_info(struct kvm_vcpu *vcpu,
 int kvm_s390_import_bp_data(struct kvm_vcpu *vcpu,
 			    struct kvm_guest_debug *dbg)
 {
-	int ret = 0, nr_wp = 0, nr_bp = 0, i;
+	int ret = 0, nr_wp = 0, nr_bp = 0, i, size;
 	struct kvm_hw_breakpoint *bp_data = NULL;
 	struct kvm_hw_wp_info_arch *wp_info = NULL;
 	struct kvm_hw_bp_info_arch *bp_info = NULL;
@@ -216,10 +216,17 @@ int kvm_s390_import_bp_data(struct kvm_vcpu *vcpu,
 	else if (dbg->arch.nr_hw_bp > MAX_BP_COUNT)
 		return -EINVAL;
 
-	bp_data = memdup_user(dbg->arch.hw_bp,
-			      sizeof(*bp_data) * dbg->arch.nr_hw_bp);
-	if (IS_ERR(bp_data))
-		return PTR_ERR(bp_data);
+	size = dbg->arch.nr_hw_bp * sizeof(struct kvm_hw_breakpoint);
+	bp_data = kmalloc(size, GFP_KERNEL);
+	if (!bp_data) {
+		ret = -ENOMEM;
+		goto error;
+	}
+
+	if (copy_from_user(bp_data, dbg->arch.hw_bp, size)) {
+		ret = -EFAULT;
+		goto error;
+	}
 
 	for (i = 0; i < dbg->arch.nr_hw_bp; i++) {
 		switch (bp_data[i].type) {
@@ -234,19 +241,17 @@ int kvm_s390_import_bp_data(struct kvm_vcpu *vcpu,
 		}
 	}
 
-	if (nr_wp > 0) {
-		wp_info = kmalloc_array(nr_wp,
-					sizeof(*wp_info),
-					GFP_KERNEL);
+	size = nr_wp * sizeof(struct kvm_hw_wp_info_arch);
+	if (size > 0) {
+		wp_info = kmalloc(size, GFP_KERNEL);
 		if (!wp_info) {
 			ret = -ENOMEM;
 			goto error;
 		}
 	}
-	if (nr_bp > 0) {
-		bp_info = kmalloc_array(nr_bp,
-					sizeof(*bp_info),
-					GFP_KERNEL);
+	size = nr_bp * sizeof(struct kvm_hw_bp_info_arch);
+	if (size > 0) {
+		bp_info = kmalloc(size, GFP_KERNEL);
 		if (!bp_info) {
 			ret = -ENOMEM;
 			goto error;
@@ -377,20 +382,14 @@ void kvm_s390_prepare_debug_exit(struct kvm_vcpu *vcpu)
 	vcpu->guest_debug &= ~KVM_GUESTDBG_EXIT_PENDING;
 }
 
-#define PER_CODE_MASK		(PER_EVENT_MASK >> 24)
-#define PER_CODE_BRANCH		(PER_EVENT_BRANCH >> 24)
-#define PER_CODE_IFETCH		(PER_EVENT_IFETCH >> 24)
-#define PER_CODE_STORE		(PER_EVENT_STORE >> 24)
-#define PER_CODE_STORE_REAL	(PER_EVENT_STORE_REAL >> 24)
-
 #define per_bp_event(code) \
-			(code & (PER_CODE_IFETCH | PER_CODE_BRANCH))
+			(code & (PER_EVENT_IFETCH | PER_EVENT_BRANCH))
 #define per_write_wp_event(code) \
-			(code & (PER_CODE_STORE | PER_CODE_STORE_REAL))
+			(code & (PER_EVENT_STORE | PER_EVENT_STORE_REAL))
 
 static int debug_exit_required(struct kvm_vcpu *vcpu)
 {
-	u8 perc = vcpu->arch.sie_block->perc;
+	u32 perc = (vcpu->arch.sie_block->perc << 24);
 	struct kvm_debug_exit_arch *debug_exit = &vcpu->run->debug.arch;
 	struct kvm_hw_wp_info_arch *wp_info = NULL;
 	struct kvm_hw_bp_info_arch *bp_info = NULL;
@@ -440,52 +439,35 @@ exit_required:
 #define guest_per_enabled(vcpu) \
 			     (vcpu->arch.sie_block->gpsw.mask & PSW_MASK_PER)
 
-int kvm_s390_handle_per_ifetch_icpt(struct kvm_vcpu *vcpu)
-{
-	const u8 ilen = kvm_s390_get_ilen(vcpu);
-	struct kvm_s390_pgm_info pgm_info = {
-		.code = PGM_PER,
-		.per_code = PER_CODE_IFETCH,
-		.per_address = __rewind_psw(vcpu->arch.sie_block->gpsw, ilen),
-	};
-
-	/*
-	 * The PSW points to the next instruction, therefore the intercepted
-	 * instruction generated a PER i-fetch event. PER address therefore
-	 * points at the previous PSW address (could be an EXECUTE function).
-	 */
-	return kvm_s390_inject_prog_irq(vcpu, &pgm_info);
-}
-
 static void filter_guest_per_event(struct kvm_vcpu *vcpu)
 {
-	const u8 perc = vcpu->arch.sie_block->perc;
+	u32 perc = vcpu->arch.sie_block->perc << 24;
 	u64 peraddr = vcpu->arch.sie_block->peraddr;
 	u64 addr = vcpu->arch.sie_block->gpsw.addr;
 	u64 cr9 = vcpu->arch.sie_block->gcr[9];
 	u64 cr10 = vcpu->arch.sie_block->gcr[10];
 	u64 cr11 = vcpu->arch.sie_block->gcr[11];
 	/* filter all events, demanded by the guest */
-	u8 guest_perc = perc & (cr9 >> 24) & PER_CODE_MASK;
+	u32 guest_perc = perc & cr9 & PER_EVENT_MASK;
 
 	if (!guest_per_enabled(vcpu))
 		guest_perc = 0;
 
 	/* filter "successful-branching" events */
-	if (guest_perc & PER_CODE_BRANCH &&
+	if (guest_perc & PER_EVENT_BRANCH &&
 	    cr9 & PER_CONTROL_BRANCH_ADDRESS &&
 	    !in_addr_range(addr, cr10, cr11))
-		guest_perc &= ~PER_CODE_BRANCH;
+		guest_perc &= ~PER_EVENT_BRANCH;
 
 	/* filter "instruction-fetching" events */
-	if (guest_perc & PER_CODE_IFETCH &&
+	if (guest_perc & PER_EVENT_IFETCH &&
 	    !in_addr_range(peraddr, cr10, cr11))
-		guest_perc &= ~PER_CODE_IFETCH;
+		guest_perc &= ~PER_EVENT_IFETCH;
 
 	/* All other PER events will be given to the guest */
-	/* TODO: Check altered address/address space */
+	/* TODO: Check alterated address/address space */
 
-	vcpu->arch.sie_block->perc = guest_perc;
+	vcpu->arch.sie_block->perc = guest_perc >> 24;
 
 	if (!guest_perc)
 		vcpu->arch.sie_block->iprcc &= ~PGM_PER;

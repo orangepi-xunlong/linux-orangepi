@@ -34,9 +34,7 @@ root_check_run_with_sudo "$@"
 source ${basedir}/parameters.sh
 # Using invalid DST_MAC will cause the packets to get dropped in
 # ip_rcv() which is part of the test
-if [ -z "$DEST_IP" ]; then
-    [ -z "$IP6" ] && DEST_IP="198.18.0.42" || DEST_IP="FD00::1"
-fi
+[ -z "$DEST_IP" ] && DEST_IP="198.18.0.42"
 [ -z "$DST_MAC" ] && DST_MAC="90:e2:ba:ff:ff:ff"
 [ -z "$BURST" ] && BURST=1024
 
@@ -66,7 +64,7 @@ for ((thread = 0; thread < $THREADS; thread++)); do
 
     # Destination
     pg_set $dev "dst_mac $DST_MAC"
-    pg_set $dev "dst$IP6 $DEST_IP"
+    pg_set $dev "dst $DEST_IP"
 
     # Inject packet into RX path of stack
     pg_set $dev "xmit_mode netif_receive"

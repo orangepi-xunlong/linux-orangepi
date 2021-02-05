@@ -14,7 +14,7 @@
 
 #define PAGE_OFS(ofs) ((ofs) & (PAGE_SIZE-1))
 
-static int sync_request(struct page *page, struct block_device *bdev, int op)
+static int sync_request(struct page *page, struct block_device *bdev, int rw)
 {
 	struct bio bio;
 	struct bio_vec bio_vec;
@@ -29,14 +29,13 @@ static int sync_request(struct page *page, struct block_device *bdev, int op)
 	bio.bi_bdev = bdev;
 	bio.bi_iter.bi_sector = page->index * (PAGE_SIZE >> 9);
 	bio.bi_iter.bi_size = PAGE_SIZE;
-	bio_set_op_attrs(&bio, op, 0);
 
-	return submit_bio_wait(&bio);
+	return submit_bio_wait(rw, &bio);
 }
 
-static int bdev_readpage(struct file *_sb, struct page *page)
+static int bdev_readpage(void *_sb, struct page *page)
 {
-	struct super_block *sb = (struct super_block *)_sb;
+	struct super_block *sb = _sb;
 	struct block_device *bdev = logfs_super(sb)->s_bdev;
 	int err;
 
@@ -65,7 +64,7 @@ static void writeseg_end_io(struct bio *bio)
 
 	bio_for_each_segment_all(bvec, bio, i) {
 		end_page_writeback(bvec->bv_page);
-		put_page(bvec->bv_page);
+		page_cache_release(bvec->bv_page);
 	}
 	bio_put(bio);
 	if (atomic_dec_and_test(&super->s_pending_writes))
@@ -96,9 +95,8 @@ static int __bdev_writeseg(struct super_block *sb, u64 ofs, pgoff_t index,
 			bio->bi_iter.bi_sector = ofs >> 9;
 			bio->bi_private = sb;
 			bio->bi_end_io = writeseg_end_io;
-			bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 			atomic_inc(&super->s_pending_writes);
-			submit_bio(bio);
+			submit_bio(WRITE, bio);
 
 			ofs += i * PAGE_SIZE;
 			index += i;
@@ -124,9 +122,8 @@ static int __bdev_writeseg(struct super_block *sb, u64 ofs, pgoff_t index,
 	bio->bi_iter.bi_sector = ofs >> 9;
 	bio->bi_private = sb;
 	bio->bi_end_io = writeseg_end_io;
-	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	atomic_inc(&super->s_pending_writes);
-	submit_bio(bio);
+	submit_bio(WRITE, bio);
 	return 0;
 }
 
@@ -188,9 +185,8 @@ static int do_erase(struct super_block *sb, u64 ofs, pgoff_t index,
 			bio->bi_iter.bi_sector = ofs >> 9;
 			bio->bi_private = sb;
 			bio->bi_end_io = erase_end_io;
-			bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 			atomic_inc(&super->s_pending_writes);
-			submit_bio(bio);
+			submit_bio(WRITE, bio);
 
 			ofs += i * PAGE_SIZE;
 			index += i;
@@ -210,9 +206,8 @@ static int do_erase(struct super_block *sb, u64 ofs, pgoff_t index,
 	bio->bi_iter.bi_sector = ofs >> 9;
 	bio->bi_private = sb;
 	bio->bi_end_io = erase_end_io;
-	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	atomic_inc(&super->s_pending_writes);
-	submit_bio(bio);
+	submit_bio(WRITE, bio);
 	return 0;
 }
 

@@ -3341,7 +3341,7 @@ static int niu_rbr_add_page(struct niu *np, struct rx_ring_info *rp,
 
 	niu_hash_page(rp, page, addr);
 	if (rp->rbr_blocks_per_page > 1)
-		page_ref_add(page, rp->rbr_blocks_per_page - 1);
+		atomic_add(rp->rbr_blocks_per_page - 1, &page->_count);
 
 	for (i = 0; i < rp->rbr_blocks_per_page; i++) {
 		__le32 *rbr = &rp->rbr[start_index + i];
@@ -6430,7 +6430,7 @@ static int niu_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 
 static void niu_netif_stop(struct niu *np)
 {
-	netif_trans_update(np->dev);	/* prevent tx timeout */
+	np->dev->trans_start = jiffies;	/* prevent tx timeout */
 
 	niu_disable_napi(np);
 

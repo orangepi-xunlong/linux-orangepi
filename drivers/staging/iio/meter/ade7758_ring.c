@@ -33,19 +33,23 @@ static int ade7758_spi_read_burst(struct iio_dev *indio_dev)
 	return ret;
 }
 
-static int ade7758_write_waveform_type(struct device *dev, unsigned int type)
+static int ade7758_write_waveform_type(struct device *dev, unsigned type)
 {
 	int ret;
 	u8 reg;
 
-	ret = ade7758_spi_read_reg_8(dev, ADE7758_WAVMODE, &reg);
+	ret = ade7758_spi_read_reg_8(dev,
+			ADE7758_WAVMODE,
+			&reg);
 	if (ret)
 		goto out;
 
 	reg &= ~0x1F;
 	reg |= type & 0x1F;
 
-	ret = ade7758_spi_write_reg_8(dev, ADE7758_WAVMODE, reg);
+	ret = ade7758_spi_write_reg_8(dev,
+			ADE7758_WAVMODE,
+			reg);
 out:
 	return ret;
 }
@@ -81,7 +85,7 @@ static irqreturn_t ade7758_trigger_handler(int irq, void *p)
  **/
 static int ade7758_ring_preenable(struct iio_dev *indio_dev)
 {
-	unsigned int channel;
+	unsigned channel;
 
 	if (bitmap_empty(indio_dev->active_scan_mask, indio_dev->masklength))
 		return -EINVAL;
@@ -90,7 +94,7 @@ static int ade7758_ring_preenable(struct iio_dev *indio_dev)
 				 indio_dev->masklength);
 
 	ade7758_write_waveform_type(&indio_dev->dev,
-				    indio_dev->channels[channel].address);
+		indio_dev->channels[channel].address);
 
 	return 0;
 }

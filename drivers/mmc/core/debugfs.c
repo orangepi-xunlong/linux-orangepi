@@ -149,7 +149,7 @@ static int mmc_ios_show(struct seq_file *s, void *data)
 		break;
 	case MMC_TIMING_MMC_HS400:
 		str = mmc_card_hs400es(host->card) ?
-			"mmc HS400 enhanced strobe" : "mmc HS400";
+		"mmc HS400 enhanced strobe" : "mmc HS400";
 		break;
 	default:
 		str = "invalid";
@@ -171,7 +171,7 @@ static int mmc_ios_show(struct seq_file *s, void *data)
 		str = "invalid";
 		break;
 	}
-	seq_printf(s, "signal voltage:\t%u (%s)\n", ios->signal_voltage, str);
+	seq_printf(s, "signal voltage:\t%u (%s)\n", ios->chip_select, str);
 
 	switch (ios->drv_type) {
 	case MMC_SET_DRIVER_TYPE_A:

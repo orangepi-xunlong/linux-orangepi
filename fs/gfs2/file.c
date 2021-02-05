@@ -160,7 +160,7 @@ static int gfs2_get_flags(struct file *filp, u32 __user *ptr)
 	gfs2_holder_init(ip->i_gl, LM_ST_SHARED, 0, &gh);
 	error = gfs2_glock_nq(&gh);
 	if (error)
-		goto out_uninit;
+		return error;
 
 	fsflags = fsflags_cvt(gfs2_to_fsflags, ip->i_diskflags);
 	if (!S_ISDIR(inode->i_mode) && ip->i_diskflags & GFS2_DIF_JDATA)
@@ -169,7 +169,6 @@ static int gfs2_get_flags(struct file *filp, u32 __user *ptr)
 		error = -EFAULT;
 
 	gfs2_glock_dq(&gh);
-out_uninit:
 	gfs2_holder_uninit(&gh);
 	return error;
 }
@@ -301,9 +300,9 @@ static int gfs2_set_flags(struct file *filp, u32 __user *ptr)
 		gfsflags &= ~GFS2_DIF_TOPDIR;
 		if (gfsflags & GFS2_DIF_INHERIT_JDATA)
 			gfsflags ^= (GFS2_DIF_JDATA | GFS2_DIF_INHERIT_JDATA);
-		return do_gfs2_set_flags(filp, gfsflags, ~GFS2_DIF_SYSTEM);
+		return do_gfs2_set_flags(filp, gfsflags, ~0);
 	}
-	return do_gfs2_set_flags(filp, gfsflags, ~(GFS2_DIF_SYSTEM | GFS2_DIF_JDATA));
+	return do_gfs2_set_flags(filp, gfsflags, ~GFS2_DIF_JDATA);
 }
 
 static long gfs2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -339,8 +338,8 @@ static void gfs2_size_hint(struct file *filep, loff_t offset, size_t size)
 	size_t blks = (size + sdp->sd_sb.sb_bsize - 1) >> sdp->sd_sb.sb_bsize_shift;
 	int hint = min_t(size_t, INT_MAX, blks);
 
-	if (hint > atomic_read(&ip->i_res.rs_sizehint))
-		atomic_set(&ip->i_res.rs_sizehint, hint);
+	if (hint > atomic_read(&ip->i_res->rs_sizehint))
+		atomic_set(&ip->i_res->rs_sizehint, hint);
 }
 
 /**
@@ -357,8 +356,8 @@ static int gfs2_allocate_page_backing(struct page *page)
 {
 	struct inode *inode = page->mapping->host;
 	struct buffer_head bh;
-	unsigned long size = PAGE_SIZE;
-	u64 lblock = page->index << (PAGE_SHIFT - inode->i_blkbits);
+	unsigned long size = PAGE_CACHE_SIZE;
+	u64 lblock = page->index << (PAGE_CACHE_SHIFT - inode->i_blkbits);
 
 	do {
 		bh.b_state = 0;
@@ -389,7 +388,7 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	struct gfs2_alloc_parms ap = { .aflags = 0, };
 	unsigned long last_index;
-	u64 pos = page->index << PAGE_SHIFT;
+	u64 pos = page->index << PAGE_CACHE_SHIFT;
 	unsigned int data_blocks, ind_blocks, rblocks;
 	struct gfs2_holder gh;
 	loff_t size;
@@ -397,24 +396,28 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 
 	sb_start_pagefault(inode->i_sb);
 
-	ret = gfs2_rsqa_alloc(ip);
+	/* Update file times before taking page lock */
+	file_update_time(vma->vm_file);
+
+	ret = get_write_access(inode);
 	if (ret)
 		goto out;
 
-	gfs2_size_hint(vma->vm_file, pos, PAGE_SIZE);
+	ret = gfs2_rs_alloc(ip);
+	if (ret)
+		goto out_write_access;
+
+	gfs2_size_hint(vma->vm_file, pos, PAGE_CACHE_SIZE);
 
 	gfs2_holder_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
 	ret = gfs2_glock_nq(&gh);
 	if (ret)
 		goto out_uninit;
 
-	/* Update file times before taking page lock */
-	file_update_time(vma->vm_file);
-
 	set_bit(GLF_DIRTY, &ip->i_gl->gl_flags);
 	set_bit(GIF_SW_PAGED, &ip->i_flags);
 
-	if (!gfs2_write_alloc_required(ip, pos, PAGE_SIZE)) {
+	if (!gfs2_write_alloc_required(ip, pos, PAGE_CACHE_SIZE)) {
 		lock_page(page);
 		if (!PageUptodate(page) || page->mapping != inode->i_mapping) {
 			ret = -EAGAIN;
@@ -427,7 +430,7 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (ret)
 		goto out_unlock;
 
-	gfs2_write_calc_reserv(ip, PAGE_SIZE, &data_blocks, &ind_blocks);
+	gfs2_write_calc_reserv(ip, PAGE_CACHE_SIZE, &data_blocks, &ind_blocks);
 	ap.target = data_blocks + ind_blocks;
 	ret = gfs2_quota_lock_check(ip, &ap);
 	if (ret)
@@ -450,7 +453,7 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	lock_page(page);
 	ret = -EINVAL;
 	size = i_size_read(inode);
-	last_index = (size - 1) >> PAGE_SHIFT;
+	last_index = (size - 1) >> PAGE_CACHE_SHIFT;
 	/* Check page index against inode size */
 	if (size == 0 || (page->index > last_index))
 		goto out_trans_end;
@@ -485,6 +488,8 @@ out_uninit:
 		set_page_dirty(page);
 		wait_for_stable_page(page);
 	}
+out_write_access:
+	put_write_access(inode);
 out:
 	sb_end_pagefault(inode->i_sb);
 	return block_page_mkwrite_return(ret);
@@ -620,7 +625,7 @@ static int gfs2_release(struct inode *inode, struct file *file)
 	if (!(file->f_mode & FMODE_WRITE))
 		return 0;
 
-	gfs2_rsqa_delete(ip, &inode->i_writecount);
+	gfs2_rs_delete(ip, &inode->i_writecount);
 	return 0;
 }
 
@@ -700,7 +705,7 @@ static ssize_t gfs2_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	struct gfs2_inode *ip = GFS2_I(file_inode(file));
 	int ret;
 
-	ret = gfs2_rsqa_alloc(ip);
+	ret = gfs2_rs_alloc(ip);
 	if (ret)
 		return ret;
 
@@ -877,7 +882,7 @@ static long __gfs2_fallocate(struct file *file, int mode, loff_t offset, loff_t 
 			rblocks += data_blocks ? data_blocks : 1;
 
 		error = gfs2_trans_begin(sdp, rblocks,
-					 PAGE_SIZE/sdp->sd_sb.sb_bsize);
+					 PAGE_CACHE_SIZE/sdp->sd_sb.sb_bsize);
 		if (error)
 			goto out_trans_fail;
 
@@ -899,10 +904,7 @@ static long __gfs2_fallocate(struct file *file, int mode, loff_t offset, loff_t 
 		mark_inode_dirty(inode);
 	}
 
-	if ((file->f_flags & O_DSYNC) || IS_SYNC(file->f_mapping->host))
-		return vfs_fsync_range(file, pos, pos + count - 1,
-			       (file->f_flags & __O_SYNC) ? 0 : 1);
-	return 0;
+	return generic_write_sync(file, pos, count);
 
 out_trans_fail:
 	gfs2_inplace_release(ip);
@@ -921,7 +923,7 @@ static long gfs2_fallocate(struct file *file, int mode, loff_t offset, loff_t le
 	if ((mode & ~FALLOC_FL_KEEP_SIZE) || gfs2_is_jdata(ip))
 		return -EOPNOTSUPP;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 
 	gfs2_holder_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
 	ret = gfs2_glock_nq(&gh);
@@ -939,21 +941,20 @@ static long gfs2_fallocate(struct file *file, int mode, loff_t offset, loff_t le
 	if (ret)
 		goto out_unlock;
 
-	ret = gfs2_rsqa_alloc(ip);
+	ret = gfs2_rs_alloc(ip);
 	if (ret)
 		goto out_putw;
 
 	ret = __gfs2_fallocate(file, mode, offset, len);
 	if (ret)
-		gfs2_rs_deltree(&ip->i_res);
-
+		gfs2_rs_deltree(ip->i_res);
 out_putw:
 	put_write_access(inode);
 out_unlock:
 	gfs2_glock_dq(&gh);
 out_uninit:
 	gfs2_holder_uninit(&gh);
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	return ret;
 }
 
@@ -964,7 +965,7 @@ static ssize_t gfs2_file_splice_write(struct pipe_inode_info *pipe,
 	int error;
 	struct gfs2_inode *ip = GFS2_I(out->f_mapping->host);
 
-	error = gfs2_rsqa_alloc(ip);
+	error = gfs2_rs_alloc(ip);
 	if (error)
 		return (ssize_t)error;
 
@@ -1020,7 +1021,7 @@ static int do_flock(struct file *file, int cmd, struct file_lock *fl)
 	struct gfs2_inode *ip = GFS2_I(file_inode(file));
 	struct gfs2_glock *gl;
 	unsigned int state;
-	u16 flags;
+	int flags;
 	int error = 0;
 	int sleeptime;
 
@@ -1034,10 +1035,7 @@ static int do_flock(struct file *file, int cmd, struct file_lock *fl)
 		if (fl_gh->gh_state == state)
 			goto out;
 		locks_lock_file_wait(file,
-				     &(struct file_lock) {
-					     .fl_type = F_UNLCK,
-					     .fl_flags = FL_FLOCK
-				     });
+				     &(struct file_lock){.fl_type = F_UNLCK});
 		gfs2_glock_dq(fl_gh);
 		gfs2_holder_reinit(state, flags, fl_gh);
 	} else {
@@ -1077,7 +1075,7 @@ static void do_unflock(struct file *file, struct file_lock *fl)
 
 	mutex_lock(&fp->f_fl_mutex);
 	locks_lock_file_wait(file, fl);
-	if (gfs2_holder_initialized(fl_gh)) {
+	if (fl_gh->gh_gl) {
 		gfs2_glock_dq(fl_gh);
 		gfs2_holder_uninit(fl_gh);
 	}
@@ -1126,7 +1124,7 @@ const struct file_operations gfs2_file_fops = {
 };
 
 const struct file_operations gfs2_dir_fops = {
-	.iterate_shared	= gfs2_readdir,
+	.iterate	= gfs2_readdir,
 	.unlocked_ioctl	= gfs2_ioctl,
 	.open		= gfs2_open,
 	.release	= gfs2_release,
@@ -1154,7 +1152,7 @@ const struct file_operations gfs2_file_fops_nolock = {
 };
 
 const struct file_operations gfs2_dir_fops_nolock = {
-	.iterate_shared	= gfs2_readdir,
+	.iterate	= gfs2_readdir,
 	.unlocked_ioctl	= gfs2_ioctl,
 	.open		= gfs2_open,
 	.release	= gfs2_release,

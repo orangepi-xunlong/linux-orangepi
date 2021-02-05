@@ -15,11 +15,11 @@
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/delay.h>
+#include <linux/device.h>
 #include <linux/jiffies.h>
 #include <linux/smp.h>
 #include <linux/io.h>
 #include <linux/of_address.h>
-#include <linux/soc/samsung/exynos-regs-pmu.h>
 
 #include <asm/cacheflush.h>
 #include <asm/cp15.h>
@@ -30,6 +30,7 @@
 #include <mach/map.h>
 
 #include "common.h"
+#include "regs-pmu.h"
 
 extern void exynos4_secondary_startup(void);
 
@@ -264,7 +265,7 @@ int exynos_set_boot_addr(u32 core_id, unsigned long boot_addr)
 			ret = PTR_ERR(boot_reg);
 			goto fail;
 		}
-		writel_relaxed(boot_addr, boot_reg);
+		__raw_writel(boot_addr, boot_reg);
 		ret = 0;
 	}
 fail:
@@ -289,7 +290,7 @@ int exynos_get_boot_addr(u32 core_id, unsigned long *boot_addr)
 			ret = PTR_ERR(boot_reg);
 			goto fail;
 		}
-		*boot_addr = readl_relaxed(boot_reg);
+		*boot_addr = __raw_readl(boot_reg);
 		ret = 0;
 	}
 fail:
@@ -478,7 +479,7 @@ static void exynos_cpu_die(unsigned int cpu)
 }
 #endif /* CONFIG_HOTPLUG_CPU */
 
-const struct smp_operations exynos_smp_ops __initconst = {
+struct smp_operations exynos_smp_ops __initdata = {
 	.smp_init_cpus		= exynos_smp_init_cpus,
 	.smp_prepare_cpus	= exynos_smp_prepare_cpus,
 	.smp_secondary_init	= exynos_secondary_init,

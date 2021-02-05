@@ -152,7 +152,8 @@ static void octeon_cf_set_piomode(struct ata_port *ap, struct ata_device *dev)
 		div = 8;
 	T = (int)((1000000000000LL * div) / octeon_get_io_clock_rate());
 
-	BUG_ON(ata_timing_compute(dev, dev->pio_mode, &timing, T, T));
+	if (ata_timing_compute(dev, dev->pio_mode, &timing, T, T))
+		BUG();
 
 	t1 = timing.setup;
 	if (t1)

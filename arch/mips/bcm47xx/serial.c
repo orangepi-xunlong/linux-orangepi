@@ -1,7 +1,4 @@
 /*
- * 8250 UART probe driver for the BCM47XX platforms
- * Author: Aurelien Jarno
- *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
@@ -9,6 +6,7 @@
  * Copyright (C) 2007 Aurelien Jarno <aurelien@aurel32.net>
  */
 
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/serial.h>
 #include <linux/serial_8250.h>
@@ -90,4 +88,9 @@ static int __init uart8250_init(void)
 	}
 	return -EINVAL;
 }
-device_initcall(uart8250_init);
+
+module_init(uart8250_init);
+
+MODULE_AUTHOR("Aurelien Jarno <aurelien@aurel32.net>");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("8250 UART probe driver for the BCM47XX platforms");

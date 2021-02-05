@@ -42,6 +42,9 @@ static void of_get_regulation_constraints(struct device_node *np,
 	if (!of_property_read_u32(np, "regulator-max-microvolt", &pval))
 		constraints->max_uV = pval;
 
+	if (!of_property_read_u32(np, "regulator-early-min-microvolt", &pval))
+		constraints->early_min_uV = pval;
+
 	/* Voltage change possible? */
 	if (constraints->min_uV != constraints->max_uV)
 		constraints->valid_ops_mask |= REGULATOR_CHANGE_VOLTAGE;
@@ -84,6 +87,29 @@ static void of_get_regulation_constraints(struct device_node *np,
 			constraints->ramp_delay = pval;
 		else
 			constraints->ramp_disable = true;
+	}
+
+	ret = of_property_read_u32(np, "regulator-settling-time-us", &pval);
+	if (!ret)
+		constraints->settling_time = pval;
+
+	ret = of_property_read_u32(np, "regulator-settling-time-up-us", &pval);
+	if (!ret)
+		constraints->settling_time_up = pval;
+	if (constraints->settling_time_up && constraints->settling_time) {
+		pr_warn("%s: ambiguous configuration for settling time, ignoring 'regulator-settling-time-up-us'\n",
+			np->name);
+		constraints->settling_time_up = 0;
+	}
+
+	ret = of_property_read_u32(np, "regulator-settling-time-down-us",
+				   &pval);
+	if (!ret)
+		constraints->settling_time_down = pval;
+	if (constraints->settling_time_down && constraints->settling_time) {
+		pr_warn("%s: ambiguous configuration for settling time, ignoring 'regulator-settling-time-down-us'\n",
+			np->name);
+		constraints->settling_time_down = 0;
 	}
 
 	ret = of_property_read_u32(np, "regulator-enable-ramp-delay", &pval);
@@ -162,9 +188,6 @@ static void of_get_regulation_constraints(struct device_node *np,
 		if (!of_property_read_u32(suspend_np,
 					"regulator-suspend-microvolt", &pval))
 			suspend_state->uV = pval;
-
-		if (i == PM_SUSPEND_MEM)
-			constraints->initial_state = PM_SUSPEND_MEM;
 
 		of_node_put(suspend_np);
 		suspend_state = NULL;

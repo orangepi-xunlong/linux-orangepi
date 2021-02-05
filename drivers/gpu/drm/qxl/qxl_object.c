@@ -32,7 +32,7 @@ static void qxl_ttm_bo_destroy(struct ttm_buffer_object *tbo)
 	struct qxl_bo *bo;
 	struct qxl_device *qdev;
 
-	bo = to_qxl_bo(tbo);
+	bo = container_of(tbo, struct qxl_bo, tbo);
 	qdev = (struct qxl_device *)bo->gem_base.dev->dev_private;
 
 	qxl_surface_evict(qdev, bo, false);
@@ -61,7 +61,7 @@ void qxl_ttm_placement_from_domain(struct qxl_bo *qbo, u32 domain, bool pinned)
 	if (domain == QXL_GEM_DOMAIN_VRAM)
 		qbo->placements[c++].flags = TTM_PL_FLAG_CACHED | TTM_PL_FLAG_VRAM | pflag;
 	if (domain == QXL_GEM_DOMAIN_SURFACE)
-		qbo->placements[c++].flags = TTM_PL_FLAG_CACHED | TTM_PL_FLAG_PRIV | pflag;
+		qbo->placements[c++].flags = TTM_PL_FLAG_CACHED | TTM_PL_FLAG_PRIV0 | pflag;
 	if (domain == QXL_GEM_DOMAIN_CPU)
 		qbo->placements[c++].flags = TTM_PL_MASK_CACHING | TTM_PL_FLAG_SYSTEM | pflag;
 	if (!c)
@@ -151,7 +151,7 @@ void *qxl_bo_kmap_atomic_page(struct qxl_device *qdev,
 
 	if (bo->tbo.mem.mem_type == TTM_PL_VRAM)
 		map = qdev->vram_mapping;
-	else if (bo->tbo.mem.mem_type == TTM_PL_PRIV)
+	else if (bo->tbo.mem.mem_type == TTM_PL_PRIV0)
 		map = qdev->surface_mapping;
 	else
 		goto fallback;
@@ -191,7 +191,7 @@ void qxl_bo_kunmap_atomic_page(struct qxl_device *qdev,
 
 	if (bo->tbo.mem.mem_type == TTM_PL_VRAM)
 		map = qdev->vram_mapping;
-	else if (bo->tbo.mem.mem_type == TTM_PL_PRIV)
+	else if (bo->tbo.mem.mem_type == TTM_PL_PRIV0)
 		map = qdev->surface_mapping;
 	else
 		goto fallback;
@@ -311,7 +311,7 @@ int qxl_bo_check_id(struct qxl_device *qdev, struct qxl_bo *bo)
 
 int qxl_surf_evict(struct qxl_device *qdev)
 {
-	return ttm_bo_evict_mm(&qdev->mman.bdev, TTM_PL_PRIV);
+	return ttm_bo_evict_mm(&qdev->mman.bdev, TTM_PL_PRIV0);
 }
 
 int qxl_vram_evict(struct qxl_device *qdev)

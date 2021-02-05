@@ -177,7 +177,7 @@ Default is to monitor all CPUS.
 	between information loss and faster processing especially for
 	workloads that can have a very long callchain stack.
 
-	Default: /proc/sys/kernel/perf_event_max_stack when present, 127 otherwise.
+	Default: 127
 
 --ignore-callees=<regex>::
         Ignore callees of the function(s) matching the given regex.
@@ -229,12 +229,6 @@ Default is to monitor all CPUS.
 	is enabled for all the sampling events. The sampled branch type is the same for all events.
 	The various filters must be specified as a comma separated list: --branch-filter any_ret,u,k
 	Note that this feature may not be available on all processors.
-
---raw-trace::
-	When displaying traceevent output, do not use print fmt or plugins.
-
---hierarchy::
-	Enable hierarchy output.
 
 INTERACTIVE PROMPTING KEYS
 --------------------------

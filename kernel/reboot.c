@@ -185,6 +185,25 @@ void do_kernel_restart(char *cmd)
 	atomic_notifier_call_chain(&restart_handler_list, reboot_mode, cmd);
 }
 
+static ATOMIC_NOTIFIER_HEAD(i2c_restart_handler_list);
+
+int register_i2c_restart_handler(struct notifier_block *nb)
+{
+	return atomic_notifier_chain_register(&i2c_restart_handler_list, nb);
+}
+EXPORT_SYMBOL(register_i2c_restart_handler);
+
+int unregister_i2c_restart_handler(struct notifier_block *nb)
+{
+	return atomic_notifier_chain_unregister(&i2c_restart_handler_list, nb);
+}
+EXPORT_SYMBOL(unregister_i2c_restart_handler);
+
+void do_kernel_i2c_restart(char *cmd)
+{
+	atomic_notifier_call_chain(&i2c_restart_handler_list, reboot_mode, cmd);
+}
+
 void migrate_to_reboot_cpu(void)
 {
 	/* The boot cpu is always logical cpu 0 */
@@ -269,10 +288,6 @@ EXPORT_SYMBOL_GPL(kernel_power_off);
 
 static DEFINE_MUTEX(reboot_mutex);
 
-#if defined(CONFIG_SUNXI_FAKE_POWEROFF)
-extern void sunxi_bootup_extend_fix(unsigned int *cmd);
-#endif
-
 /*
  * Reboot system call: for obvious reasons only root may call it,
  * and even root needs to set up some magic numbers in the registers
@@ -316,11 +331,6 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		cmd = LINUX_REBOOT_CMD_HALT;
 
 	mutex_lock(&reboot_mutex);
-
-#if defined(CONFIG_SUNXI_FAKE_POWEROFF)
-	sunxi_bootup_extend_fix(&cmd);
-#endif
-
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
 		kernel_restart(NULL);

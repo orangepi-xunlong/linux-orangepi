@@ -567,7 +567,7 @@ static void fn_scroll_forw(struct vc_data *vc)
 
 static void fn_scroll_back(struct vc_data *vc)
 {
-	scrollback(vc);
+	scrollback(vc, 0);
 }
 
 static void fn_show_mem(struct vc_data *vc)
@@ -1694,12 +1694,16 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 			return -EINVAL;
 
 		if (ct) {
+			dia = kmalloc(sizeof(struct kbdiacr) * ct,
+								GFP_KERNEL);
+			if (!dia)
+				return -ENOMEM;
 
-			dia = memdup_user(a->kbdiacr,
-					sizeof(struct kbdiacr) * ct);
-			if (IS_ERR(dia))
-				return PTR_ERR(dia);
-
+			if (copy_from_user(dia, a->kbdiacr,
+					sizeof(struct kbdiacr) * ct)) {
+				kfree(dia);
+				return -EFAULT;
+			}
 		}
 
 		spin_lock_irqsave(&kbd_event_lock, flags);
@@ -1733,10 +1737,16 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 			return -EINVAL;
 
 		if (ct) {
-			buf = memdup_user(a->kbdiacruc,
-					  ct * sizeof(struct kbdiacruc));
-			if (IS_ERR(buf))
-				return PTR_ERR(buf);
+			buf = kmalloc(ct * sizeof(struct kbdiacruc),
+								GFP_KERNEL);
+			if (buf == NULL)
+				return -ENOMEM;
+
+			if (copy_from_user(buf, a->kbdiacruc,
+					ct * sizeof(struct kbdiacruc))) {
+				kfree(buf);
+				return -EFAULT;
+			}
 		} 
 		spin_lock_irqsave(&kbd_event_lock, flags);
 		if (ct)

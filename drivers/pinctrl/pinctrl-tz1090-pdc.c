@@ -947,8 +947,7 @@ static int tz1090_pdc_pinctrl_probe(struct platform_device *pdev)
 	if (IS_ERR(pmx->regs))
 		return PTR_ERR(pmx->regs);
 
-	pmx->pctl = devm_pinctrl_register(&pdev->dev, &tz1090_pdc_pinctrl_desc,
-					  pmx);
+	pmx->pctl = pinctrl_register(&tz1090_pdc_pinctrl_desc, &pdev->dev, pmx);
 	if (IS_ERR(pmx->pctl)) {
 		dev_err(&pdev->dev, "Couldn't register pinctrl driver\n");
 		return PTR_ERR(pmx->pctl);
@@ -957,6 +956,15 @@ static int tz1090_pdc_pinctrl_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, pmx);
 
 	dev_info(&pdev->dev, "TZ1090 PDC pinctrl driver initialised\n");
+
+	return 0;
+}
+
+static int tz1090_pdc_pinctrl_remove(struct platform_device *pdev)
+{
+	struct tz1090_pdc_pmx *pmx = platform_get_drvdata(pdev);
+
+	pinctrl_unregister(pmx->pctl);
 
 	return 0;
 }
@@ -972,6 +980,7 @@ static struct platform_driver tz1090_pdc_pinctrl_driver = {
 		.of_match_table	= tz1090_pdc_pinctrl_of_match,
 	},
 	.probe	= tz1090_pdc_pinctrl_probe,
+	.remove	= tz1090_pdc_pinctrl_remove,
 };
 
 static int __init tz1090_pdc_pinctrl_init(void)

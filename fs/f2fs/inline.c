@@ -87,9 +87,15 @@ int f2fs_read_inline_data(struct inode *inode, struct page *page)
 
 	if (trace_android_fs_dataread_start_enabled()) {
 		char *path, pathbuf[MAX_TRACE_PATHBUF_LEN];
-		path = android_fstrace_get_pathname(pathbuf, MAX_TRACE_PATHBUF_LEN, inode);
-		trace_android_fs_dataread_start(inode, page_offset(page), PAGE_SIZE, current->pid, path, current->comm);
+
+		path = android_fstrace_get_pathname(pathbuf,
+						    MAX_TRACE_PATHBUF_LEN,
+						    inode);
+		trace_android_fs_dataread_start(inode, page_offset(page),
+						PAGE_SIZE, current->pid,
+						path, current->comm);
 	}
+
 	ipage = f2fs_get_node_page(F2FS_I_SB(inode), inode->i_ino);
 	if (IS_ERR(ipage)) {
 		trace_android_fs_dataread_end(inode, page_offset(page),
@@ -126,7 +132,7 @@ int f2fs_convert_inline_page(struct dnode_of_data *dn, struct page *page)
 		.ino = dn->inode->i_ino,
 		.type = DATA,
 		.op = REQ_OP_WRITE,
-		.op_flags = REQ_SYNC | REQ_PRIO,
+		.op_flags = REQ_SYNC | REQ_NOIDLE | REQ_PRIO,
 		.page = page,
 		.encrypted_page = NULL,
 		.io_type = FS_DATA_IO,

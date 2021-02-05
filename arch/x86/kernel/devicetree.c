@@ -152,7 +152,7 @@ static void __init dtb_lapic_setup(void)
 		return;
 
 	/* Did the boot loader setup the local APIC ? */
-	if (!boot_cpu_has(X86_FEATURE_APIC)) {
+	if (!cpu_has_apic) {
 		if (apic_force_enable(r.start))
 			return;
 	}

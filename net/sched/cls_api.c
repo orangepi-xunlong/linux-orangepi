@@ -101,19 +101,8 @@ EXPORT_SYMBOL(unregister_tcf_proto_ops);
 
 static int tfilter_notify(struct net *net, struct sk_buff *oskb,
 			  struct nlmsghdr *n, struct tcf_proto *tp,
-			  unsigned long fh, int event, bool unicast);
+			  unsigned long fh, int event);
 
-static void tfilter_notify_chain(struct net *net, struct sk_buff *oskb,
-				 struct nlmsghdr *n,
-				 struct tcf_proto __rcu **chain, int event)
-{
-	struct tcf_proto __rcu **it_chain;
-	struct tcf_proto *tp;
-
-	for (it_chain = chain; (tp = rtnl_dereference(*it_chain)) != NULL;
-	     it_chain = &tp->next)
-		tfilter_notify(net, oskb, n, tp, 0, event, false);
-}
 
 /* Select new prio value from the range, managed by kernel. */
 
@@ -169,23 +158,11 @@ replay:
 	cl = 0;
 
 	if (prio == 0) {
-		switch (n->nlmsg_type) {
-		case RTM_DELTFILTER:
-			if (protocol || t->tcm_handle || tca[TCA_KIND])
-				return -ENOENT;
-			break;
-		case RTM_NEWTFILTER:
-			/* If no priority is provided by the user,
-			 * we allocate one.
-			 */
-			if (n->nlmsg_flags & NLM_F_CREATE) {
-				prio = TC_H_MAKE(0x80000000U, 0U);
-				break;
-			}
-			/* fall-through */
-		default:
+		/* If no priority is given, user wants we allocated it. */
+		if (n->nlmsg_type != RTM_NEWTFILTER ||
+		    !(n->nlmsg_flags & NLM_F_CREATE))
 			return -ENOENT;
-		}
+		prio = TC_H_MAKE(0x80000000U, 0U);
 	}
 
 	/* Find head of filter chain. */
@@ -225,12 +202,6 @@ replay:
 	err = -EINVAL;
 	if (chain == NULL)
 		goto errout;
-	if (n->nlmsg_type == RTM_DELTFILTER && prio == 0) {
-		tfilter_notify_chain(net, skb, n, chain, RTM_DELTFILTER);
-		tcf_destroy_chain(chain);
-		err = 0;
-		goto errout;
-	}
 
 	/* Check the chain for existence of proto-tcf with this priority */
 	for (back = chain;
@@ -321,8 +292,7 @@ replay:
 
 			RCU_INIT_POINTER(*back, next);
 
-			tfilter_notify(net, skb, n, tp, fh,
-				       RTM_DELTFILTER, false);
+			tfilter_notify(net, skb, n, tp, fh, RTM_DELTFILTER);
 			tcf_destroy(tp, true);
 			err = 0;
 			goto errout;
@@ -348,15 +318,13 @@ replay:
 				struct tcf_proto *next = rtnl_dereference(tp->next);
 
 				tfilter_notify(net, skb, n, tp,
-					       t->tcm_handle,
-					       RTM_DELTFILTER, false);
+					       t->tcm_handle, RTM_DELTFILTER);
 				if (tcf_destroy(tp, false))
 					RCU_INIT_POINTER(*back, next);
 			}
 			goto errout;
 		case RTM_GETTFILTER:
-			err = tfilter_notify(net, skb, n, tp, fh,
-					     RTM_NEWTFILTER, true);
+			err = tfilter_notify(net, skb, n, tp, fh, RTM_NEWTFILTER);
 			goto errout;
 		default:
 			err = -EINVAL;
@@ -371,7 +339,7 @@ replay:
 			RCU_INIT_POINTER(tp->next, rtnl_dereference(*back));
 			rcu_assign_pointer(*back, tp);
 		}
-		tfilter_notify(net, skb, n, tp, fh, RTM_NEWTFILTER, false);
+		tfilter_notify(net, skb, n, tp, fh, RTM_NEWTFILTER);
 	} else {
 		if (tp_created)
 			tcf_destroy(tp, true);
@@ -386,9 +354,8 @@ errout:
 	return err;
 }
 
-static int tcf_fill_node(struct net *net, struct sk_buff *skb,
-			 struct tcf_proto *tp, unsigned long fh, u32 portid,
-			 u32 seq, u16 flags, int event)
+static int tcf_fill_node(struct net *net, struct sk_buff *skb, struct tcf_proto *tp,
+			 unsigned long fh, u32 portid, u32 seq, u16 flags, int event)
 {
 	struct tcmsg *tcm;
 	struct nlmsghdr  *nlh;
@@ -423,7 +390,7 @@ nla_put_failure:
 
 static int tfilter_notify(struct net *net, struct sk_buff *oskb,
 			  struct nlmsghdr *n, struct tcf_proto *tp,
-			  unsigned long fh, int event, bool unicast)
+			  unsigned long fh, int event)
 {
 	struct sk_buff *skb;
 	u32 portid = oskb ? NETLINK_CB(oskb).portid : 0;
@@ -432,14 +399,10 @@ static int tfilter_notify(struct net *net, struct sk_buff *oskb,
 	if (!skb)
 		return -ENOBUFS;
 
-	if (tcf_fill_node(net, skb, tp, fh, portid, n->nlmsg_seq,
-			  n->nlmsg_flags, event) <= 0) {
+	if (tcf_fill_node(net, skb, tp, fh, portid, n->nlmsg_seq, 0, event) <= 0) {
 		kfree_skb(skb);
 		return -EINVAL;
 	}
-
-	if (unicast)
-		return netlink_unicast(net->rtnl, skb, portid, MSG_DONTWAIT);
 
 	return rtnetlink_send(skb, net, portid, RTNLGRP_TC,
 			      n->nlmsg_flags & NLM_F_ECHO);
@@ -458,8 +421,7 @@ static int tcf_node_dump(struct tcf_proto *tp, unsigned long n,
 	struct net *net = sock_net(a->skb->sk);
 
 	return tcf_fill_node(net, a->skb, tp, n, NETLINK_CB(a->cb->skb).portid,
-			     a->cb->nlh->nlmsg_seq, NLM_F_MULTI,
-			     RTM_NEWTFILTER);
+			     a->cb->nlh->nlmsg_seq, NLM_F_MULTI, RTM_NEWTFILTER);
 }
 
 /* called with RTNL */
@@ -515,11 +477,9 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 		    TC_H_MIN(tcm->tcm_info) != tp->protocol)
 			continue;
 		if (t > s_t)
-			memset(&cb->args[1], 0,
-			       sizeof(cb->args)-sizeof(cb->args[0]));
+			memset(&cb->args[1], 0, sizeof(cb->args)-sizeof(cb->args[0]));
 		if (cb->args[1] == 0) {
-			if (tcf_fill_node(net, skb, tp, 0,
-					  NETLINK_CB(cb->skb).portid,
+			if (tcf_fill_node(net, skb, tp, 0, NETLINK_CB(cb->skb).portid,
 					  cb->nlh->nlmsg_seq, NLM_F_MULTI,
 					  RTM_NEWTFILTER) <= 0)
 				break;
@@ -552,44 +512,36 @@ out:
 void tcf_exts_destroy(struct tcf_exts *exts)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	LIST_HEAD(actions);
-
-	tcf_exts_to_list(exts, &actions);
-	tcf_action_destroy(&actions, TCA_ACT_UNBIND);
-	kfree(exts->actions);
-	exts->nr_actions = 0;
+	tcf_action_destroy(&exts->actions, TCA_ACT_UNBIND);
+	INIT_LIST_HEAD(&exts->actions);
 #endif
 }
 EXPORT_SYMBOL(tcf_exts_destroy);
 
 int tcf_exts_validate(struct net *net, struct tcf_proto *tp, struct nlattr **tb,
-		      struct nlattr *rate_tlv, struct tcf_exts *exts, bool ovr)
+		  struct nlattr *rate_tlv, struct tcf_exts *exts, bool ovr)
 {
 #ifdef CONFIG_NET_CLS_ACT
 	{
 		struct tc_action *act;
 
+		INIT_LIST_HEAD(&exts->actions);
 		if (exts->police && tb[exts->police]) {
 			act = tcf_action_init_1(net, tb[exts->police], rate_tlv,
-						"police", ovr, TCA_ACT_BIND);
+						"police", ovr,
+						TCA_ACT_BIND);
 			if (IS_ERR(act))
 				return PTR_ERR(act);
 
 			act->type = exts->type = TCA_OLD_COMPAT;
-			exts->actions[0] = act;
-			exts->nr_actions = 1;
+			list_add(&act->list, &exts->actions);
 		} else if (exts->action && tb[exts->action]) {
-			LIST_HEAD(actions);
-			int err, i = 0;
-
+			int err;
 			err = tcf_action_init(net, tb[exts->action], rate_tlv,
-					      NULL, ovr, TCA_ACT_BIND,
-					      &actions);
+					      NULL, ovr,
+					      TCA_ACT_BIND, &exts->actions);
 			if (err)
 				return err;
-			list_for_each_entry(act, &actions, list)
-				exts->actions[i++] = act;
-			exts->nr_actions = i;
 		}
 	}
 #else
@@ -606,49 +558,37 @@ void tcf_exts_change(struct tcf_proto *tp, struct tcf_exts *dst,
 		     struct tcf_exts *src)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	struct tcf_exts old = *dst;
-
+	LIST_HEAD(tmp);
 	tcf_tree_lock(tp);
-	dst->nr_actions = src->nr_actions;
-	dst->actions = src->actions;
+	list_splice_init(&dst->actions, &tmp);
+	list_splice(&src->actions, &dst->actions);
 	dst->type = src->type;
 	tcf_tree_unlock(tp);
-
-	tcf_exts_destroy(&old);
+	tcf_action_destroy(&tmp, TCA_ACT_UNBIND);
 #endif
 }
 EXPORT_SYMBOL(tcf_exts_change);
 
-#ifdef CONFIG_NET_CLS_ACT
-static struct tc_action *tcf_exts_first_act(struct tcf_exts *exts)
-{
-	if (exts->nr_actions == 0)
-		return NULL;
-	else
-		return exts->actions[0];
-}
-#endif
+#define tcf_exts_first_act(ext)					\
+	list_first_entry_or_null(&(exts)->actions,		\
+				 struct tc_action, list)
 
 int tcf_exts_dump(struct sk_buff *skb, struct tcf_exts *exts)
 {
 #ifdef CONFIG_NET_CLS_ACT
 	struct nlattr *nest;
 
-	if (exts->action && exts->nr_actions) {
+	if (exts->action && !list_empty(&exts->actions)) {
 		/*
 		 * again for backward compatible mode - we want
 		 * to work with both old and new modes of entering
 		 * tc data even if iproute2  was newer - jhs
 		 */
 		if (exts->type != TCA_OLD_COMPAT) {
-			LIST_HEAD(actions);
-
 			nest = nla_nest_start(skb, exts->action);
 			if (nest == NULL)
 				goto nla_put_failure;
-
-			tcf_exts_to_list(exts, &actions);
-			if (tcf_action_dump(skb, &actions, 0, 0) < 0)
+			if (tcf_action_dump(skb, &exts->actions, 0, 0) < 0)
 				goto nla_put_failure;
 			nla_nest_end(skb, nest);
 		} else if (exts->police) {

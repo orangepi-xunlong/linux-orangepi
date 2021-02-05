@@ -13,7 +13,7 @@
 #include <linux/slab.h>
 #include "internal.h"
 
-static struct proc_dir_entry *proc_uid;
+struct proc_dir_entry *proc_uid;
 
 #define UID_HASH_BITS 10
 
@@ -84,7 +84,7 @@ struct uid_entry {
 }
 
 #ifdef CONFIG_CPU_FREQ_TIMES
-static const struct file_operations proc_uid_time_in_state_operations = {
+const struct file_operations proc_uid_time_in_state_operations = {
 	.open		= single_uid_time_in_state_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
@@ -98,11 +98,11 @@ static const struct uid_entry uid_base_stuff[] = {
 #endif
 };
 
-static const struct inode_operations proc_uid_def_inode_operations = {
+const struct inode_operations proc_uid_def_inode_operations = {
 	.setattr	= proc_setattr,
 };
 
-static struct inode *proc_uid_make_inode(struct super_block *sb, kuid_t kuid)
+struct inode *proc_uid_make_inode(struct super_block *sb, kuid_t kuid)
 {
 	struct inode *inode;
 

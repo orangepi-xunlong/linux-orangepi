@@ -1,14 +1,10 @@
-TEST_PROGS := gettimeofday context_switch mmap_bench futex_bench
+TEST_PROGS := gettimeofday
 
 CFLAGS += -O2
 
 all: $(TEST_PROGS)
 
 $(TEST_PROGS): ../harness.c
-
-context_switch: ../utils.c
-context_switch: CFLAGS += -maltivec -mvsx -mabi=altivec
-context_switch: LDLIBS += -lpthread
 
 include ../../lib.mk
 

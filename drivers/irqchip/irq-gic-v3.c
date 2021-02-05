@@ -15,14 +15,10 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define pr_fmt(fmt)	"GICv3: " fmt
-
-#include <linux/acpi.h>
 #include <linux/cpu.h>
 #include <linux/cpu_pm.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include <linux/irqdomain.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
@@ -30,7 +26,6 @@
 #include <linux/slab.h>
 
 #include <linux/irqchip.h>
-#include <linux/irqchip/arm-gic-common.h>
 #include <linux/irqchip/arm-gic-v3.h>
 #include <linux/irqchip/irq-partition-percpu.h>
 
@@ -44,7 +39,6 @@
 struct redist_region {
 	void __iomem		*redist_base;
 	phys_addr_t		phys_base;
-	bool			single_redist;
 };
 
 struct gic_chip_data {
@@ -61,8 +55,6 @@ struct gic_chip_data {
 
 static struct gic_chip_data gic_data __read_mostly;
 static struct static_key supports_deactivate = STATIC_KEY_INIT_TRUE;
-
-static struct gic_kvm_info gic_v3_kvm_info;
 
 #define gic_data_rdist()		(this_cpu_ptr(gic_data.rdists.rdist))
 #define gic_data_rdist_rd_base()	(gic_data_rdist()->rd_base)
@@ -120,10 +112,11 @@ static void gic_redist_wait_for_rwp(void)
 }
 
 #ifdef CONFIG_ARM64
+static DEFINE_STATIC_KEY_FALSE(is_cavium_thunderx);
 
 static u64 __maybe_unused gic_read_iar(void)
 {
-	if (cpus_have_const_cap(ARM64_WORKAROUND_CAVIUM_23154))
+	if (static_branch_unlikely(&is_cavium_thunderx))
 		return gic_read_iar_cavium_thunderx();
 	else
 		return gic_read_iar_common();
@@ -154,7 +147,7 @@ static void gic_enable_redist(bool enable)
 
 	while (--count) {
 		val = readl_relaxed(rbase + GICR_WAKER);
-		if (enable ^ (bool)(val & GICR_WAKER_ChildrenAsleep))
+		if (enable ^ (val & GICR_WAKER_ChildrenAsleep))
 			break;
 		cpu_relax();
 		udelay(1);
@@ -222,6 +215,15 @@ static void gic_unmask_irq(struct irq_data *d)
 {
 	gic_poke_irq(d, GICD_ISENABLER);
 }
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+static int gic_retrigger(struct irq_data *d)
+{
+	gic_poke_irq(d, GICD_ISPENDR);
+	/* the genirq layer expects 0 if we can't retrigger in hardware */
+	return 0;
+}
+#endif
 
 static int gic_irq_set_irqchip_state(struct irq_data *d,
 				     enum irqchip_irq_state which, bool val)
@@ -460,9 +462,6 @@ static int gic_populate_rdist(void)
 				return 0;
 			}
 
-			if (gic_data.redist_regions[i].single_redist)
-				break;
-
 			if (gic_data.redist_stride) {
 				ptr += gic_data.redist_stride;
 			} else {
@@ -493,14 +492,6 @@ static void gic_cpu_sys_reg_init(void)
 
 	/* Set priority mask register */
 	gic_write_pmr(DEFAULT_PMR_VALUE);
-
-	/*
-	 * Some firmwares hand over to the kernel with the BPR changed from
-	 * its reset value (and with a value large enough to prevent
-	 * any pre-emptive interrupts from working at all). Writing a zero
-	 * to BPR restores is reset value.
-	 */
-	gic_write_bpr1(0);
 
 	if (static_key_true(&supports_deactivate)) {
 		/* EOI drops priority only (mode 1) */
@@ -545,12 +536,22 @@ static void gic_cpu_init(void)
 }
 
 #ifdef CONFIG_SMP
-
-static int gic_starting_cpu(unsigned int cpu)
+static int gic_secondary_init(struct notifier_block *nfb,
+			      unsigned long action, void *hcpu)
 {
-	gic_cpu_init();
-	return 0;
+	if (action == CPU_STARTING || action == CPU_STARTING_FROZEN)
+		gic_cpu_init();
+	return NOTIFY_OK;
 }
+
+/*
+ * Notifier for enabling the GIC CPU interface. Set an arbitrarily high
+ * priority because the GIC needs to be up before the ARM generic timers.
+ */
+static struct notifier_block gic_cpu_notifier = {
+	.notifier_call = gic_secondary_init,
+	.priority = 100,
+};
 
 static u16 gic_compute_target_list(int *base_cpu, const struct cpumask *mask,
 				   unsigned long cluster_id)
@@ -632,9 +633,7 @@ static void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
 static void gic_smp_init(void)
 {
 	set_smp_cross_call(gic_raise_softirq);
-	cpuhp_setup_state_nocalls(CPUHP_AP_IRQ_GICV3_STARTING,
-				  "AP_IRQ_GICV3_STARTING", gic_starting_cpu,
-				  NULL);
+	register_cpu_notifier(&gic_cpu_notifier);
 }
 
 static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
@@ -670,7 +669,7 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	else
 		gic_dist_wait_for_rwp();
 
-	return IRQ_SET_MASK_OK_DONE;
+	return IRQ_SET_MASK_OK;
 }
 #else
 #define gic_set_affinity	NULL
@@ -678,20 +677,13 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 #endif
 
 #ifdef CONFIG_CPU_PM
-/* Check whether it's single security state view */
-static bool gic_dist_security_disabled(void)
-{
-	return readl_relaxed(gic_data.dist_base + GICD_CTLR) & GICD_CTLR_DS;
-}
-
 static int gic_cpu_pm_notifier(struct notifier_block *self,
 			       unsigned long cmd, void *v)
 {
 	if (cmd == CPU_PM_EXIT) {
-		if (gic_dist_security_disabled())
-			gic_enable_redist(true);
+		gic_enable_redist(true);
 		gic_cpu_sys_reg_init();
-	} else if (cmd == CPU_PM_ENTER && gic_dist_security_disabled()) {
+	} else if (cmd == CPU_PM_ENTER) {
 		gic_write_grpen1(0);
 		gic_enable_redist(false);
 	}
@@ -717,6 +709,9 @@ static struct irq_chip gic_chip = {
 	.irq_unmask		= gic_unmask_irq,
 	.irq_eoi		= gic_eoi_irq,
 	.irq_set_type		= gic_set_type,
+#ifdef CONFIG_ARCH_ROCKCHIP
+	.irq_retrigger		= gic_retrigger,
+#endif
 	.irq_set_affinity	= gic_set_affinity,
 	.irq_get_irqchip_state	= gic_irq_get_irqchip_state,
 	.irq_set_irqchip_state	= gic_irq_set_irqchip_state,
@@ -728,6 +723,9 @@ static struct irq_chip gic_eoimode1_chip = {
 	.irq_mask		= gic_eoimode1_mask_irq,
 	.irq_unmask		= gic_unmask_irq,
 	.irq_eoi		= gic_eoimode1_eoi_irq,
+#ifdef CONFIG_ARCH_ROCKCHIP
+	.irq_retrigger		= gic_retrigger,
+#endif
 	.irq_set_type		= gic_set_type,
 	.irq_set_affinity	= gic_set_affinity,
 	.irq_get_irqchip_state	= gic_irq_get_irqchip_state,
@@ -804,15 +802,6 @@ static int gic_irq_domain_translate(struct irq_domain *d,
 		}
 
 		*type = fwspec->param[2] & IRQ_TYPE_SENSE_MASK;
-		return 0;
-	}
-
-	if (is_fwnode_irqchip(fwspec->fwnode)) {
-		if(fwspec->param_count != 2)
-			return -EINVAL;
-
-		*hwirq = fwspec->param[0];
-		*type = fwspec->param[1];
 		return 0;
 	}
 
@@ -907,12 +896,21 @@ static const struct irq_domain_ops partition_domain_ops = {
 	.select = gic_irq_domain_select,
 };
 
+static void gicv3_enable_quirks(void)
+{
+#ifdef CONFIG_ARM64
+	if (cpus_have_cap(ARM64_WORKAROUND_CAVIUM_23154))
+		static_branch_enable(&is_cavium_thunderx);
+#endif
+}
+
 static int __init gic_init_bases(void __iomem *dist_base,
 				 struct redist_region *rdist_regs,
 				 u32 nr_redist_regions,
 				 u64 redist_stride,
 				 struct fwnode_handle *handle)
 {
+	struct device_node *node;
 	u32 typer;
 	int gic_irqs;
 	int err;
@@ -928,6 +926,8 @@ static int __init gic_init_bases(void __iomem *dist_base,
 	gic_data.redist_regions = rdist_regs;
 	gic_data.nr_redist_regions = nr_redist_regions;
 	gic_data.redist_stride = redist_stride;
+
+	gicv3_enable_quirks();
 
 	/*
 	 * Find out how many interrupts are supported.
@@ -951,8 +951,10 @@ static int __init gic_init_bases(void __iomem *dist_base,
 
 	set_handle_irq(gic_handle_irq);
 
-	if (IS_ENABLED(CONFIG_ARM_GIC_V3_ITS) && gic_dist_supports_lpis())
-		its_init(handle, &gic_data.rdists, gic_data.domain);
+	node = to_of_node(handle);
+	if (IS_ENABLED(CONFIG_ARM_GIC_V3_ITS) && gic_dist_supports_lpis() &&
+	    node) /* Temp hack to prevent ITS init for ACPI */
+		its_init(node, &gic_data.rdists, gic_data.domain);
 
 	gic_smp_init();
 	gic_dist_init();
@@ -1004,25 +1006,25 @@ static int get_cpu_number(struct device_node *dn)
 }
 
 /* Create all possible partitions at boot time */
-static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
+static void gic_populate_ppi_partitions(struct device_node *gic_node)
 {
 	struct device_node *parts_node, *child_part;
 	int part_idx = 0, i;
 	int nr_parts;
 	struct partition_affinity *parts;
 
-	parts_node = of_get_child_by_name(gic_node, "ppi-partitions");
+	parts_node = of_find_node_by_name(gic_node, "ppi-partitions");
 	if (!parts_node)
 		return;
 
 	nr_parts = of_get_child_count(parts_node);
 
 	if (!nr_parts)
-		goto out_put_node;
+		return;
 
 	parts = kzalloc(sizeof(*parts) * nr_parts, GFP_KERNEL);
 	if (WARN_ON(!parts))
-		goto out_put_node;
+		return;
 
 	for_each_child_of_node(parts_node, child_part) {
 		struct partition_affinity *part;
@@ -1089,33 +1091,6 @@ static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
 
 		gic_data.ppi_descs[i] = desc;
 	}
-
-out_put_node:
-	of_node_put(parts_node);
-}
-
-static void __init gic_of_setup_kvm_info(struct device_node *node)
-{
-	int ret;
-	struct resource r;
-	u32 gicv_idx;
-
-	gic_v3_kvm_info.type = GIC_V3;
-
-	gic_v3_kvm_info.maint_irq = irq_of_parse_and_map(node, 0);
-	if (!gic_v3_kvm_info.maint_irq)
-		return;
-
-	if (of_property_read_u32(node, "#redistributor-regions",
-				 &gicv_idx))
-		gicv_idx = 1;
-
-	gicv_idx += 3;	/* Also skip GICD, GICC, GICH */
-	ret = of_address_to_resource(node, gicv_idx, &r);
-	if (!ret)
-		gic_v3_kvm_info.vcpu = r;
-
-	gic_set_kvm_info(&gic_v3_kvm_info);
 }
 
 static int __init gic_of_init(struct device_node *node, struct device_node *parent)
@@ -1173,7 +1148,6 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		goto out_unmap_rdist;
 
 	gic_populate_ppi_partitions(node);
-	gic_of_setup_kvm_info(node);
 	return 0;
 
 out_unmap_rdist:
@@ -1187,313 +1161,3 @@ out_unmap_dist:
 }
 
 IRQCHIP_DECLARE(gic_v3, "arm,gic-v3", gic_of_init);
-
-#ifdef CONFIG_ACPI
-static struct
-{
-	void __iomem *dist_base;
-	struct redist_region *redist_regs;
-	u32 nr_redist_regions;
-	bool single_redist;
-	u32 maint_irq;
-	int maint_irq_mode;
-	phys_addr_t vcpu_base;
-} acpi_data __initdata;
-
-static void __init
-gic_acpi_register_redist(phys_addr_t phys_base, void __iomem *redist_base)
-{
-	static int count = 0;
-
-	acpi_data.redist_regs[count].phys_base = phys_base;
-	acpi_data.redist_regs[count].redist_base = redist_base;
-	acpi_data.redist_regs[count].single_redist = acpi_data.single_redist;
-	count++;
-}
-
-static int __init
-gic_acpi_parse_madt_redist(struct acpi_subtable_header *header,
-			   const unsigned long end)
-{
-	struct acpi_madt_generic_redistributor *redist =
-			(struct acpi_madt_generic_redistributor *)header;
-	void __iomem *redist_base;
-
-	redist_base = ioremap(redist->base_address, redist->length);
-	if (!redist_base) {
-		pr_err("Couldn't map GICR region @%llx\n", redist->base_address);
-		return -ENOMEM;
-	}
-
-	gic_acpi_register_redist(redist->base_address, redist_base);
-	return 0;
-}
-
-static int __init
-gic_acpi_parse_madt_gicc(struct acpi_subtable_header *header,
-			 const unsigned long end)
-{
-	struct acpi_madt_generic_interrupt *gicc =
-				(struct acpi_madt_generic_interrupt *)header;
-	u32 reg = readl_relaxed(acpi_data.dist_base + GICD_PIDR2) & GIC_PIDR2_ARCH_MASK;
-	u32 size = reg == GIC_PIDR2_ARCH_GICv4 ? SZ_64K * 4 : SZ_64K * 2;
-	void __iomem *redist_base;
-
-	/* GICC entry which has !ACPI_MADT_ENABLED is not unusable so skip */
-	if (!(gicc->flags & ACPI_MADT_ENABLED))
-		return 0;
-
-	redist_base = ioremap(gicc->gicr_base_address, size);
-	if (!redist_base)
-		return -ENOMEM;
-
-	gic_acpi_register_redist(gicc->gicr_base_address, redist_base);
-	return 0;
-}
-
-static int __init gic_acpi_collect_gicr_base(void)
-{
-	acpi_tbl_entry_handler redist_parser;
-	enum acpi_madt_type type;
-
-	if (acpi_data.single_redist) {
-		type = ACPI_MADT_TYPE_GENERIC_INTERRUPT;
-		redist_parser = gic_acpi_parse_madt_gicc;
-	} else {
-		type = ACPI_MADT_TYPE_GENERIC_REDISTRIBUTOR;
-		redist_parser = gic_acpi_parse_madt_redist;
-	}
-
-	/* Collect redistributor base addresses in GICR entries */
-	if (acpi_table_parse_madt(type, redist_parser, 0) > 0)
-		return 0;
-
-	pr_info("No valid GICR entries exist\n");
-	return -ENODEV;
-}
-
-static int __init gic_acpi_match_gicr(struct acpi_subtable_header *header,
-				  const unsigned long end)
-{
-	/* Subtable presence means that redist exists, that's it */
-	return 0;
-}
-
-static int __init gic_acpi_match_gicc(struct acpi_subtable_header *header,
-				      const unsigned long end)
-{
-	struct acpi_madt_generic_interrupt *gicc =
-				(struct acpi_madt_generic_interrupt *)header;
-
-	/*
-	 * If GICC is enabled and has valid gicr base address, then it means
-	 * GICR base is presented via GICC
-	 */
-	if ((gicc->flags & ACPI_MADT_ENABLED) && gicc->gicr_base_address)
-		return 0;
-
-	/*
-	 * It's perfectly valid firmware can pass disabled GICC entry, driver
-	 * should not treat as errors, skip the entry instead of probe fail.
-	 */
-	if (!(gicc->flags & ACPI_MADT_ENABLED))
-		return 0;
-
-	return -ENODEV;
-}
-
-static int __init gic_acpi_count_gicr_regions(void)
-{
-	int count;
-
-	/*
-	 * Count how many redistributor regions we have. It is not allowed
-	 * to mix redistributor description, GICR and GICC subtables have to be
-	 * mutually exclusive.
-	 */
-	count = acpi_table_parse_madt(ACPI_MADT_TYPE_GENERIC_REDISTRIBUTOR,
-				      gic_acpi_match_gicr, 0);
-	if (count > 0) {
-		acpi_data.single_redist = false;
-		return count;
-	}
-
-	count = acpi_table_parse_madt(ACPI_MADT_TYPE_GENERIC_INTERRUPT,
-				      gic_acpi_match_gicc, 0);
-	if (count > 0)
-		acpi_data.single_redist = true;
-
-	return count;
-}
-
-static bool __init acpi_validate_gic_table(struct acpi_subtable_header *header,
-					   struct acpi_probe_entry *ape)
-{
-	struct acpi_madt_generic_distributor *dist;
-	int count;
-
-	dist = (struct acpi_madt_generic_distributor *)header;
-	if (dist->version != ape->driver_data)
-		return false;
-
-	/* We need to do that exercise anyway, the sooner the better */
-	count = gic_acpi_count_gicr_regions();
-	if (count <= 0)
-		return false;
-
-	acpi_data.nr_redist_regions = count;
-	return true;
-}
-
-static int __init gic_acpi_parse_virt_madt_gicc(struct acpi_subtable_header *header,
-						const unsigned long end)
-{
-	struct acpi_madt_generic_interrupt *gicc =
-		(struct acpi_madt_generic_interrupt *)header;
-	int maint_irq_mode;
-	static int first_madt = true;
-
-	/* Skip unusable CPUs */
-	if (!(gicc->flags & ACPI_MADT_ENABLED))
-		return 0;
-
-	maint_irq_mode = (gicc->flags & ACPI_MADT_VGIC_IRQ_MODE) ?
-		ACPI_EDGE_SENSITIVE : ACPI_LEVEL_SENSITIVE;
-
-	if (first_madt) {
-		first_madt = false;
-
-		acpi_data.maint_irq = gicc->vgic_interrupt;
-		acpi_data.maint_irq_mode = maint_irq_mode;
-		acpi_data.vcpu_base = gicc->gicv_base_address;
-
-		return 0;
-	}
-
-	/*
-	 * The maintenance interrupt and GICV should be the same for every CPU
-	 */
-	if ((acpi_data.maint_irq != gicc->vgic_interrupt) ||
-	    (acpi_data.maint_irq_mode != maint_irq_mode) ||
-	    (acpi_data.vcpu_base != gicc->gicv_base_address))
-		return -EINVAL;
-
-	return 0;
-}
-
-static bool __init gic_acpi_collect_virt_info(void)
-{
-	int count;
-
-	count = acpi_table_parse_madt(ACPI_MADT_TYPE_GENERIC_INTERRUPT,
-				      gic_acpi_parse_virt_madt_gicc, 0);
-
-	return (count > 0);
-}
-
-#define ACPI_GICV3_DIST_MEM_SIZE (SZ_64K)
-#define ACPI_GICV2_VCTRL_MEM_SIZE	(SZ_4K)
-#define ACPI_GICV2_VCPU_MEM_SIZE	(SZ_8K)
-
-static void __init gic_acpi_setup_kvm_info(void)
-{
-	int irq;
-
-	if (!gic_acpi_collect_virt_info()) {
-		pr_warn("Unable to get hardware information used for virtualization\n");
-		return;
-	}
-
-	gic_v3_kvm_info.type = GIC_V3;
-
-	irq = acpi_register_gsi(NULL, acpi_data.maint_irq,
-				acpi_data.maint_irq_mode,
-				ACPI_ACTIVE_HIGH);
-	if (irq <= 0)
-		return;
-
-	gic_v3_kvm_info.maint_irq = irq;
-
-	if (acpi_data.vcpu_base) {
-		struct resource *vcpu = &gic_v3_kvm_info.vcpu;
-
-		vcpu->flags = IORESOURCE_MEM;
-		vcpu->start = acpi_data.vcpu_base;
-		vcpu->end = vcpu->start + ACPI_GICV2_VCPU_MEM_SIZE - 1;
-	}
-
-	gic_set_kvm_info(&gic_v3_kvm_info);
-}
-
-static int __init
-gic_acpi_init(struct acpi_subtable_header *header, const unsigned long end)
-{
-	struct acpi_madt_generic_distributor *dist;
-	struct fwnode_handle *domain_handle;
-	size_t size;
-	int i, err;
-
-	/* Get distributor base address */
-	dist = (struct acpi_madt_generic_distributor *)header;
-	acpi_data.dist_base = ioremap(dist->base_address,
-				      ACPI_GICV3_DIST_MEM_SIZE);
-	if (!acpi_data.dist_base) {
-		pr_err("Unable to map GICD registers\n");
-		return -ENOMEM;
-	}
-
-	err = gic_validate_dist_version(acpi_data.dist_base);
-	if (err) {
-		pr_err("No distributor detected at @%p, giving up",
-		       acpi_data.dist_base);
-		goto out_dist_unmap;
-	}
-
-	size = sizeof(*acpi_data.redist_regs) * acpi_data.nr_redist_regions;
-	acpi_data.redist_regs = kzalloc(size, GFP_KERNEL);
-	if (!acpi_data.redist_regs) {
-		err = -ENOMEM;
-		goto out_dist_unmap;
-	}
-
-	err = gic_acpi_collect_gicr_base();
-	if (err)
-		goto out_redist_unmap;
-
-	domain_handle = irq_domain_alloc_fwnode(acpi_data.dist_base);
-	if (!domain_handle) {
-		err = -ENOMEM;
-		goto out_redist_unmap;
-	}
-
-	err = gic_init_bases(acpi_data.dist_base, acpi_data.redist_regs,
-			     acpi_data.nr_redist_regions, 0, domain_handle);
-	if (err)
-		goto out_fwhandle_free;
-
-	acpi_set_irq_model(ACPI_IRQ_MODEL_GIC, domain_handle);
-	gic_acpi_setup_kvm_info();
-
-	return 0;
-
-out_fwhandle_free:
-	irq_domain_free_fwnode(domain_handle);
-out_redist_unmap:
-	for (i = 0; i < acpi_data.nr_redist_regions; i++)
-		if (acpi_data.redist_regs[i].redist_base)
-			iounmap(acpi_data.redist_regs[i].redist_base);
-	kfree(acpi_data.redist_regs);
-out_dist_unmap:
-	iounmap(acpi_data.dist_base);
-	return err;
-}
-IRQCHIP_ACPI_DECLARE(gic_v3, ACPI_MADT_TYPE_GENERIC_DISTRIBUTOR,
-		     acpi_validate_gic_table, ACPI_MADT_GIC_VERSION_V3,
-		     gic_acpi_init);
-IRQCHIP_ACPI_DECLARE(gic_v4, ACPI_MADT_TYPE_GENERIC_DISTRIBUTOR,
-		     acpi_validate_gic_table, ACPI_MADT_GIC_VERSION_V4,
-		     gic_acpi_init);
-IRQCHIP_ACPI_DECLARE(gic_v3_or_v4, ACPI_MADT_TYPE_GENERIC_DISTRIBUTOR,
-		     acpi_validate_gic_table, ACPI_MADT_GIC_VERSION_NONE,
-		     gic_acpi_init);
-#endif

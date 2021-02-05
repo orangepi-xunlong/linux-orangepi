@@ -22,6 +22,7 @@
 #ifndef __DVB_HORUS3A_H__
 #define __DVB_HORUS3A_H__
 
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 #include <linux/i2c.h>
 

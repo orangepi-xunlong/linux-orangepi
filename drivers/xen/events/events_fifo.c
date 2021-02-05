@@ -36,11 +36,11 @@
 #include <linux/linkage.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/module.h>
 #include <linux/smp.h>
 #include <linux/percpu.h>
 #include <linux/cpu.h>
 
-#include <asm/barrier.h>
 #include <asm/sync_bitops.h>
 #include <asm/xen/hypercall.h>
 #include <asm/xen/hypervisor.h>
@@ -113,7 +113,7 @@ static int init_control_block(int cpu,
 
 	init_control.control_gfn = virt_to_gfn(control_block);
 	init_control.offset      = 0;
-	init_control.vcpu        = xen_vcpu_nr(cpu);
+	init_control.vcpu        = cpu;
 
 	return HYPERVISOR_event_channel_op(EVTCHNOP_init_control, &init_control);
 }
@@ -296,7 +296,7 @@ static void consume_one_event(unsigned cpu,
 	 * control block.
 	 */
 	if (head == 0) {
-		virt_rmb(); /* Ensure word is up-to-date before reading head. */
+		rmb(); /* Ensure word is up-to-date before reading head. */
 		head = control_block->head[priority];
 	}
 
@@ -418,18 +418,30 @@ static int evtchn_fifo_alloc_control_block(unsigned cpu)
 	return ret;
 }
 
-static int xen_evtchn_cpu_prepare(unsigned int cpu)
+static int evtchn_fifo_cpu_notification(struct notifier_block *self,
+						  unsigned long action,
+						  void *hcpu)
 {
-	if (!per_cpu(cpu_control_block, cpu))
-		return evtchn_fifo_alloc_control_block(cpu);
-	return 0;
+	int cpu = (long)hcpu;
+	int ret = 0;
+
+	switch (action) {
+	case CPU_UP_PREPARE:
+		if (!per_cpu(cpu_control_block, cpu))
+			ret = evtchn_fifo_alloc_control_block(cpu);
+		break;
+	case CPU_DEAD:
+		__evtchn_fifo_handle_events(cpu, true);
+		break;
+	default:
+		break;
+	}
+	return ret < 0 ? NOTIFY_BAD : NOTIFY_OK;
 }
 
-static int xen_evtchn_cpu_dead(unsigned int cpu)
-{
-	__evtchn_fifo_handle_events(cpu, true);
-	return 0;
-}
+static struct notifier_block evtchn_fifo_cpu_notifier = {
+	.notifier_call	= evtchn_fifo_cpu_notification,
+};
 
 int __init xen_evtchn_fifo_init(void)
 {
@@ -444,9 +456,7 @@ int __init xen_evtchn_fifo_init(void)
 
 	evtchn_ops = &evtchn_ops_fifo;
 
-	cpuhp_setup_state_nocalls(CPUHP_XEN_EVTCHN_PREPARE,
-				  "CPUHP_XEN_EVTCHN_PREPARE",
-				  xen_evtchn_cpu_prepare, xen_evtchn_cpu_dead);
+	register_cpu_notifier(&evtchn_fifo_cpu_notifier);
 out:
 	put_cpu();
 	return ret;

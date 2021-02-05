@@ -80,13 +80,13 @@ static void EnableSRAM(THINKPAD_BD_DATA * pBDData)
 	WriteMsaCfg(DSP_GpioModeControl_15_8, MKWORD(rGpioMode));
 
 	MKWORD(rGpioDriverEnable) = 0;
-	rGpioDriverEnable.Enable10 = true;
-	rGpioDriverEnable.Mask10 = true;
+	rGpioDriverEnable.Enable10 = TRUE;
+	rGpioDriverEnable.Mask10 = TRUE;
 	WriteMsaCfg(DSP_GpioDriverEnable_15_8, MKWORD(rGpioDriverEnable));
 
 	MKWORD(rGpioOutputData) = 0;
 	rGpioOutputData.Latch10 = 0;
-	rGpioOutputData.Mask10 = true;
+	rGpioOutputData.Mask10 = TRUE;
 	WriteMsaCfg(DSP_GpioOutputData_15_8, MKWORD(rGpioOutputData));
 
 	PRINTK_1(TRACE_TP3780I, "tp3780i::EnableSRAM exit\n");
@@ -127,7 +127,7 @@ static irqreturn_t DspInterrupt(int irq, void *dev_id)
 				PRINTK_2(TRACE_TP3780I,
 					"tp3780i::DspInterrupt usIntCount %x\n",
 					pDrvData->IPCs[usPCNum - 1].usIntCount);
-				if (pDrvData->IPCs[usPCNum - 1].bIsEnabled == true) {
+				if (pDrvData->IPCs[usPCNum - 1].bIsEnabled == TRUE) {
 					PRINTK_2(TRACE_TP3780I,
 						"tp3780i::DspInterrupt, waking up usPCNum %x\n",
 						usPCNum - 1);
@@ -160,8 +160,8 @@ int tp3780I_InitializeBoardData(THINKPAD_BD_DATA * pBDData)
 
 	PRINTK_2(TRACE_TP3780I, "tp3780i::tp3780I_InitializeBoardData entry pBDData %p\n", pBDData);
 
-	pBDData->bDSPEnabled = false;
-	pSettings->bInterruptClaimed = false;
+	pBDData->bDSPEnabled = FALSE;
+	pSettings->bInterruptClaimed = FALSE;
 
 	retval = smapi_init();
 	if (retval) {
@@ -269,7 +269,7 @@ int tp3780I_ReleaseResources(THINKPAD_BD_DATA * pBDData)
 
 	if (pSettings->bInterruptClaimed) {
 		free_irq(pSettings->usDspIrq, NULL);
-		pSettings->bInterruptClaimed = false;
+		pSettings->bInterruptClaimed = FALSE;
 	}
 
 	PRINTK_2(TRACE_TP3780I,
@@ -283,7 +283,7 @@ int tp3780I_ReleaseResources(THINKPAD_BD_DATA * pBDData)
 int tp3780I_EnableDSP(THINKPAD_BD_DATA * pBDData)
 {
 	DSP_3780I_CONFIG_SETTINGS *pSettings = &pBDData->rDspSettings;
-	bool bDSPPoweredUp = false, bInterruptAllocated = false;
+	BOOLEAN bDSPPoweredUp = FALSE, bInterruptAllocated = FALSE;
 
 	PRINTK_2(TRACE_TP3780I, "tp3780i::tp3780I_EnableDSP entry pBDData %p\n", pBDData);
 
@@ -336,14 +336,14 @@ int tp3780I_EnableDSP(THINKPAD_BD_DATA * pBDData)
 		}
 	}
 
-	pSettings->bDspIrqActiveLow = pSettings->bDspIrqPulse = true;
-	pSettings->bUartIrqActiveLow = pSettings->bUartIrqPulse = true;
+	pSettings->bDspIrqActiveLow = pSettings->bDspIrqPulse = TRUE;
+	pSettings->bUartIrqActiveLow = pSettings->bUartIrqPulse = TRUE;
 
 	if (pBDData->bShareDspIrq) {
-		pSettings->bDspIrqActiveLow = false;
+		pSettings->bDspIrqActiveLow = FALSE;
 	}
 	if (pBDData->bShareUartIrq) {
-		pSettings->bUartIrqActiveLow = false;
+		pSettings->bUartIrqActiveLow = FALSE;
 	}
 
 	pSettings->usNumTransfers = TP_CFG_NumTransfers;
@@ -373,16 +373,16 @@ int tp3780I_EnableDSP(THINKPAD_BD_DATA * pBDData)
 		PRINTK_3(TRACE_TP3780I,
 			"tp3780i::tp3780I_EnableDSP, got interrupt %x bShareDspIrq %x\n",
 			pSettings->usDspIrq, pBDData->bShareDspIrq);
-		bInterruptAllocated = true;
-		pSettings->bInterruptClaimed = true;
+		bInterruptAllocated = TRUE;
+		pSettings->bInterruptClaimed = TRUE;
 	}
 
-	smapi_set_DSP_power_state(false);
-	if (smapi_set_DSP_power_state(true)) {
-		PRINTK_ERROR(KERN_ERR_MWAVE "tp3780i::tp3780I_EnableDSP: Error: smapi_set_DSP_power_state(true) failed\n");
+	smapi_set_DSP_power_state(FALSE);
+	if (smapi_set_DSP_power_state(TRUE)) {
+		PRINTK_ERROR(KERN_ERR_MWAVE "tp3780i::tp3780I_EnableDSP: Error: smapi_set_DSP_power_state(TRUE) failed\n");
 		goto exit_cleanup;
 	} else {
-		bDSPPoweredUp = true;
+		bDSPPoweredUp = TRUE;
 	}
 
 	if (dsp3780I_EnableDSP(pSettings, s_ausThinkpadIrqToField, s_ausThinkpadDmaToField)) {
@@ -392,7 +392,7 @@ int tp3780I_EnableDSP(THINKPAD_BD_DATA * pBDData)
 
 	EnableSRAM(pBDData);
 
-	pBDData->bDSPEnabled = true;
+	pBDData->bDSPEnabled = TRUE;
 
 	PRINTK_1(TRACE_TP3780I, "tp3780i::tp3780I_EnableDSP exit\n");
 
@@ -401,10 +401,10 @@ int tp3780I_EnableDSP(THINKPAD_BD_DATA * pBDData)
 exit_cleanup:
 	PRINTK_ERROR("tp3780i::tp3780I_EnableDSP: Cleaning up\n");
 	if (bDSPPoweredUp)
-		smapi_set_DSP_power_state(false);
+		smapi_set_DSP_power_state(FALSE);
 	if (bInterruptAllocated) {
 		free_irq(pSettings->usDspIrq, NULL);
-		pSettings->bInterruptClaimed = false;
+		pSettings->bInterruptClaimed = FALSE;
 	}
 	return -EIO;
 }
@@ -421,10 +421,10 @@ int tp3780I_DisableDSP(THINKPAD_BD_DATA * pBDData)
 		dsp3780I_DisableDSP(&pBDData->rDspSettings);
 		if (pSettings->bInterruptClaimed) {
 			free_irq(pSettings->usDspIrq, NULL);
-			pSettings->bInterruptClaimed = false;
+			pSettings->bInterruptClaimed = FALSE;
 		}
-		smapi_set_DSP_power_state(false);
-		pBDData->bDSPEnabled = false;
+		smapi_set_DSP_power_state(FALSE);
+		pBDData->bDSPEnabled = FALSE;
 	}
 
 	PRINTK_2(TRACE_TP3780I, "tp3780i::tp3780I_DisableDSP exit retval %x\n", retval);
@@ -516,7 +516,7 @@ int tp3780I_ReadWriteDspDStore(THINKPAD_BD_DATA * pBDData, unsigned int uOpcode,
 	int retval = 0;
 	DSP_3780I_CONFIG_SETTINGS *pSettings = &pBDData->rDspSettings;
 	unsigned short usDspBaseIO = pSettings->usDspBaseIO;
-	bool bRC = 0;
+	BOOLEAN bRC = 0;
 
 	PRINTK_6(TRACE_TP3780I,
 		"tp3780i::tp3780I_ReadWriteDspDStore entry pBDData %p, uOpcode %x, pvBuffer %p, uCount %x, ulDSPAddr %lx\n",
@@ -552,7 +552,7 @@ int tp3780I_ReadWriteDspIStore(THINKPAD_BD_DATA * pBDData, unsigned int uOpcode,
 	int retval = 0;
 	DSP_3780I_CONFIG_SETTINGS *pSettings = &pBDData->rDspSettings;
 	unsigned short usDspBaseIO = pSettings->usDspBaseIO;
-	bool bRC = 0;
+	BOOLEAN bRC = 0;
 
 	PRINTK_6(TRACE_TP3780I,
 		"tp3780i::tp3780I_ReadWriteDspIStore entry pBDData %p, uOpcode %x, pvBuffer %p, uCount %x, ulDSPAddr %lx\n",

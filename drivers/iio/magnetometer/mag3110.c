@@ -154,41 +154,34 @@ static int mag3110_read_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (iio_buffer_enabled(indio_dev))
+			return -EBUSY;
 
 		switch (chan->type) {
 		case IIO_MAGN: /* in 0.1 uT / LSB */
 			ret = mag3110_read(data, buffer);
 			if (ret < 0)
-				goto release;
+				return ret;
 			*val = sign_extend32(
 				be16_to_cpu(buffer[chan->scan_index]), 15);
-			ret = IIO_VAL_INT;
-			break;
+			return IIO_VAL_INT;
 		case IIO_TEMP: /* in 1 C / LSB */
 			mutex_lock(&data->lock);
 			ret = mag3110_request(data);
 			if (ret < 0) {
 				mutex_unlock(&data->lock);
-				goto release;
+				return ret;
 			}
 			ret = i2c_smbus_read_byte_data(data->client,
 				MAG3110_DIE_TEMP);
 			mutex_unlock(&data->lock);
 			if (ret < 0)
-				goto release;
+				return ret;
 			*val = sign_extend32(ret, 7);
-			ret = IIO_VAL_INT;
-			break;
+			return IIO_VAL_INT;
 		default:
-			ret = -EINVAL;
+			return -EINVAL;
 		}
-release:
-		iio_device_release_direct_mode(indio_dev);
-		return ret;
-
 	case IIO_CHAN_INFO_SCALE:
 		switch (chan->type) {
 		case IIO_MAGN:
@@ -222,39 +215,29 @@ static int mag3110_write_raw(struct iio_dev *indio_dev,
 			     int val, int val2, long mask)
 {
 	struct mag3110_data *data = iio_priv(indio_dev);
-	int rate, ret;
+	int rate;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
+	if (iio_buffer_enabled(indio_dev))
+		return -EBUSY;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		rate = mag3110_get_samp_freq_index(data, val, val2);
-		if (rate < 0) {
-			ret = -EINVAL;
-			break;
-		}
+		if (rate < 0)
+			return -EINVAL;
 
 		data->ctrl_reg1 &= ~MAG3110_CTRL_DR_MASK;
 		data->ctrl_reg1 |= rate << MAG3110_CTRL_DR_SHIFT;
-		ret = i2c_smbus_write_byte_data(data->client,
+		return i2c_smbus_write_byte_data(data->client,
 			MAG3110_CTRL_REG1, data->ctrl_reg1);
-		break;
 	case IIO_CHAN_INFO_CALIBBIAS:
-		if (val < -10000 || val > 10000) {
-			ret = -EINVAL;
-			break;
-		}
-		ret = i2c_smbus_write_word_swapped(data->client,
+		if (val < -10000 || val > 10000)
+			return -EINVAL;
+		return i2c_smbus_write_word_swapped(data->client,
 			MAG3110_OFF_X + 2 * chan->scan_index, val << 1);
-		break;
 	default:
-		ret = -EINVAL;
-		break;
+		return -EINVAL;
 	}
-	iio_device_release_direct_mode(indio_dev);
-	return ret;
 }
 
 static irqreturn_t mag3110_trigger_handler(int irq, void *p)
@@ -278,7 +261,7 @@ static irqreturn_t mag3110_trigger_handler(int irq, void *p)
 	}
 
 	iio_push_to_buffers_with_timestamp(indio_dev, buffer,
-		iio_get_time_ns(indio_dev));
+		iio_get_time_ns());
 
 done:
 	iio_trigger_notify_done(indio_dev->trig);

@@ -221,44 +221,6 @@ static int crypto_init_skcipher_ops_ablkcipher(struct crypto_tfm *tfm)
 	return 0;
 }
 
-static int skcipher_setkey_unaligned(struct crypto_skcipher *tfm,
-				     const u8 *key, unsigned int keylen)
-{
-	unsigned long alignmask = crypto_skcipher_alignmask(tfm);
-	struct skcipher_alg *cipher = crypto_skcipher_alg(tfm);
-	u8 *buffer, *alignbuffer;
-	unsigned long absize;
-	int ret;
-
-	absize = keylen + alignmask;
-	buffer = kmalloc(absize, GFP_ATOMIC);
-	if (!buffer)
-		return -ENOMEM;
-
-	alignbuffer = (u8 *)ALIGN((unsigned long)buffer, alignmask + 1);
-	memcpy(alignbuffer, key, keylen);
-	ret = cipher->setkey(tfm, alignbuffer, keylen);
-	kzfree(buffer);
-	return ret;
-}
-
-static int skcipher_setkey(struct crypto_skcipher *tfm, const u8 *key,
-			   unsigned int keylen)
-{
-	struct skcipher_alg *cipher = crypto_skcipher_alg(tfm);
-	unsigned long alignmask = crypto_skcipher_alignmask(tfm);
-
-	if (keylen < cipher->min_keysize || keylen > cipher->max_keysize) {
-		crypto_skcipher_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
-		return -EINVAL;
-	}
-
-	if ((unsigned long)key & alignmask)
-		return skcipher_setkey_unaligned(tfm, key, keylen);
-
-	return cipher->setkey(tfm, key, keylen);
-}
-
 static void crypto_skcipher_exit_tfm(struct crypto_tfm *tfm)
 {
 	struct crypto_skcipher *skcipher = __crypto_skcipher_cast(tfm);
@@ -279,7 +241,7 @@ static int crypto_skcipher_init_tfm(struct crypto_tfm *tfm)
 	    tfm->__crt_alg->cra_type == &crypto_givcipher_type)
 		return crypto_init_skcipher_ops_ablkcipher(tfm);
 
-	skcipher->setkey = skcipher_setkey;
+	skcipher->setkey = alg->setkey;
 	skcipher->encrypt = alg->encrypt;
 	skcipher->decrypt = alg->decrypt;
 	skcipher->ivsize = alg->ivsize;
@@ -363,13 +325,13 @@ static const struct crypto_type crypto_skcipher_type2 = {
 	.tfmsize = offsetof(struct crypto_skcipher, base),
 };
 
-int crypto_grab_skcipher(struct crypto_skcipher_spawn *spawn,
+int crypto_grab_skcipher2(struct crypto_skcipher_spawn *spawn,
 			  const char *name, u32 type, u32 mask)
 {
 	spawn->base.frontend = &crypto_skcipher_type2;
 	return crypto_grab_spawn(&spawn->base, name, type, mask);
 }
-EXPORT_SYMBOL_GPL(crypto_grab_skcipher);
+EXPORT_SYMBOL_GPL(crypto_grab_skcipher2);
 
 struct crypto_skcipher *crypto_alloc_skcipher(const char *alg_name,
 					      u32 type, u32 mask)

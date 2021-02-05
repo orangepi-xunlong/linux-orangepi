@@ -11,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
+ *
  ******************************************************************************/
 #define _RTL8188E_XMIT_C_
 #include <osdep_service.h>
@@ -21,7 +26,7 @@
 #include <usb_ops_linux.h>
 #include <rtl8188e_hal.h>
 
-s32 rtw_hal_init_xmit_priv(struct adapter *adapt)
+s32	rtl8188eu_init_xmit_priv(struct adapter *adapt)
 {
 	struct xmit_priv	*pxmitpriv = &adapt->xmitpriv;
 
@@ -33,7 +38,11 @@ s32 rtw_hal_init_xmit_priv(struct adapter *adapt)
 
 static u8 urb_zero_packet_chk(struct adapter *adapt, int sz)
 {
-	return !((sz + TXDESC_SIZE) % adapt->HalData->UsbBulkOutSize);
+	u8 set_tx_desc_offset;
+	struct hal_data_8188e	*haldata = GET_HAL_DATA(adapt);
+	set_tx_desc_offset = (((sz + TXDESC_SIZE) %  haldata->UsbBulkOutSize) == 0) ? 1 : 0;
+
+	return set_tx_desc_offset;
 }
 
 static void rtl8188eu_cal_txdesc_chksum(struct tx_desc	*ptxdesc)
@@ -171,7 +180,7 @@ static s32 update_txdesc(struct xmit_frame *pxmitframe, u8 *pmem, s32 sz, u8 bag
 	u8 data_rate, pwr_status, offset;
 	struct adapter		*adapt = pxmitframe->padapter;
 	struct pkt_attrib	*pattrib = &pxmitframe->attrib;
-	struct odm_dm_struct *odmpriv = &adapt->HalData->odmpriv;
+	struct hal_data_8188e	*haldata = GET_HAL_DATA(adapt);
 	struct tx_desc	*ptxdesc = (struct tx_desc *)pmem;
 	struct mlme_ext_priv	*pmlmeext = &adapt->mlmeextpriv;
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
@@ -255,12 +264,12 @@ static s32 update_txdesc(struct xmit_frame *pxmitframe, u8 *pmem, s32 sz, u8 bag
 			ptxdesc->txdw5 |= cpu_to_le32(0x0001ff00);/* DATA/RTS  Rate FB LMT */
 
 			if (pattrib->ht_en) {
-				if (ODM_RA_GetShortGI_8188E(odmpriv, pattrib->mac_id))
+				if (ODM_RA_GetShortGI_8188E(&haldata->odmpriv, pattrib->mac_id))
 					ptxdesc->txdw5 |= cpu_to_le32(SGI);/* SGI */
 			}
-			data_rate = ODM_RA_GetDecisionRate_8188E(odmpriv, pattrib->mac_id);
+			data_rate = ODM_RA_GetDecisionRate_8188E(&haldata->odmpriv, pattrib->mac_id);
 			ptxdesc->txdw5 |= cpu_to_le32(data_rate & 0x3F);
-			pwr_status = ODM_RA_GetHwPwrStatus_8188E(odmpriv, pattrib->mac_id);
+			pwr_status = ODM_RA_GetHwPwrStatus_8188E(&haldata->odmpriv, pattrib->mac_id);
 			ptxdesc->txdw4 |= cpu_to_le32((pwr_status & 0x7) << PWR_STATUS_SHT);
 		} else {
 			/*  EAP data packet and ARP packet and DHCP. */
@@ -328,7 +337,8 @@ static s32 update_txdesc(struct xmit_frame *pxmitframe, u8 *pmem, s32 sz, u8 bag
 		ptxdesc->txdw4 |= cpu_to_le32(HW_SSN);	/*  Hw set sequence number */
 	}
 
-	rtl88eu_dm_set_tx_ant_by_tx_info(odmpriv, pmem, pattrib->mac_id);
+	rtl88eu_dm_set_tx_ant_by_tx_info(&haldata->odmpriv, pmem,
+					 pattrib->mac_id);
 
 	rtl8188eu_cal_txdesc_chksum(ptxdesc);
 	_dbg_dump_tx_info(adapt, pxmitframe->frame_tag, ptxdesc);
@@ -382,7 +392,7 @@ static s32 rtw_dump_xframe(struct adapter *adapt, struct xmit_frame *pxmitframe)
 		}
 		ff_hwaddr = rtw_get_ff_hwaddr(pxmitframe);
 
-		inner_ret = usb_write_port(adapt, ff_hwaddr, w_sz, pxmitbuf);
+		inner_ret = usb_write_port(adapt, ff_hwaddr, w_sz, (unsigned char *)pxmitbuf);
 
 		rtw_count_tx_stats(adapt, pxmitframe, sz);
 
@@ -405,7 +415,7 @@ static u32 xmitframe_need_length(struct xmit_frame *pxmitframe)
 {
 	struct pkt_attrib *pattrib = &pxmitframe->attrib;
 
-	u32 len;
+	u32 len = 0;
 
 	/*  no consider fragement */
 	len = pattrib->hdrlen + pattrib->iv_len +
@@ -419,11 +429,11 @@ static u32 xmitframe_need_length(struct xmit_frame *pxmitframe)
 	return len;
 }
 
-s32 rtl8188eu_xmitframe_complete(struct adapter *adapt, struct xmit_priv *pxmitpriv)
+s32 rtl8188eu_xmitframe_complete(struct adapter *adapt, struct xmit_priv *pxmitpriv, struct xmit_buf *pxmitbuf)
 {
+	struct hal_data_8188e	*haldata = GET_HAL_DATA(adapt);
 	struct xmit_frame *pxmitframe = NULL;
 	struct xmit_frame *pfirstframe = NULL;
-	struct xmit_buf *pxmitbuf;
 
 	/*  aggregate variable */
 	struct hw_xmit *phwxmit;
@@ -436,7 +446,7 @@ s32 rtl8188eu_xmitframe_complete(struct adapter *adapt, struct xmit_priv *pxmitp
 	u32 pbuf_tail;	/*  last pkt tail */
 	u32 len;	/*  packet length, except TXDESC_SIZE and PKT_OFFSET */
 
-	u32 bulksize = adapt->HalData->UsbBulkOutSize;
+	u32 bulksize = haldata->UsbBulkOutSize;
 	u8 desc_cnt;
 	u32 bulkptr;
 
@@ -445,31 +455,38 @@ s32 rtl8188eu_xmitframe_complete(struct adapter *adapt, struct xmit_priv *pxmitp
 
 	RT_TRACE(_module_rtl8192c_xmit_c_, _drv_info_, ("+xmitframe_complete\n"));
 
-	pxmitbuf = rtw_alloc_xmitbuf(pxmitpriv);
-	if (pxmitbuf == NULL)
-		return false;
-
-	/* 3 1. pick up first frame */
-	rtw_free_xmitframe(pxmitpriv, pxmitframe);
-
-	pxmitframe = rtw_dequeue_xframe(pxmitpriv, pxmitpriv->hwxmits, pxmitpriv->hwxmit_entry);
-	if (pxmitframe == NULL) {
-		/*  no more xmit frame, release xmit buffer */
-		rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
-		return false;
+	/*  check xmitbuffer is ok */
+	if (pxmitbuf == NULL) {
+		pxmitbuf = rtw_alloc_xmitbuf(pxmitpriv);
+		if (pxmitbuf == NULL)
+			return false;
 	}
 
-	pxmitframe->pxmitbuf = pxmitbuf;
-	pxmitframe->buf_addr = pxmitbuf->pbuf;
-	pxmitbuf->priv_data = pxmitframe;
+	/* 3 1. pick up first frame */
+	do {
+		rtw_free_xmitframe(pxmitpriv, pxmitframe);
 
-	pxmitframe->agg_num = 1; /*  alloc xmitframe should assign to 1. */
-	pxmitframe->pkt_offset = 1; /*  first frame of aggregation, reserve offset */
+		pxmitframe = rtw_dequeue_xframe(pxmitpriv, pxmitpriv->hwxmits, pxmitpriv->hwxmit_entry);
+		if (pxmitframe == NULL) {
+			/*  no more xmit frame, release xmit buffer */
+			rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
+			return false;
+		}
 
-	rtw_xmitframe_coalesce(adapt, pxmitframe->pkt, pxmitframe);
+		pxmitframe->pxmitbuf = pxmitbuf;
+		pxmitframe->buf_addr = pxmitbuf->pbuf;
+		pxmitbuf->priv_data = pxmitframe;
 
-	/*  always return ndis_packet after rtw_xmitframe_coalesce */
-	rtw_os_xmit_complete(adapt, pxmitframe);
+		pxmitframe->agg_num = 1; /*  alloc xmitframe should assign to 1. */
+		pxmitframe->pkt_offset = 1; /*  first frame of aggregation, reserve offset */
+
+		rtw_xmitframe_coalesce(adapt, pxmitframe->pkt, pxmitframe);
+
+		/*  always return ndis_packet after rtw_xmitframe_coalesce */
+		rtw_os_xmit_complete(adapt, pxmitframe);
+
+		break;
+	} while (1);
 
 	/* 3 2. aggregate same priority and same DA(AP or STA) frames */
 	pfirstframe = pxmitframe;
@@ -557,7 +574,7 @@ s32 rtl8188eu_xmitframe_complete(struct adapter *adapt, struct xmit_priv *pxmitp
 
 		if (pbuf < bulkptr) {
 			desc_cnt++;
-			if (desc_cnt == adapt->HalData->UsbTxAggDescNum)
+			if (desc_cnt == haldata->UsbTxAggDescNum)
 				break;
 		} else {
 			desc_cnt = 0;
@@ -586,7 +603,7 @@ s32 rtl8188eu_xmitframe_complete(struct adapter *adapt, struct xmit_priv *pxmitp
 
 	/* 3 4. write xmit buffer to USB FIFO */
 	ff_hwaddr = rtw_get_ff_hwaddr(pfirstframe);
-	usb_write_port(adapt, ff_hwaddr, pbuf_tail, pxmitbuf);
+	usb_write_port(adapt, ff_hwaddr, pbuf_tail, (u8 *)pxmitbuf);
 
 	/* 3 5. update statisitc */
 	pbuf_tail -= (pfirstframe->agg_num * TXDESC_SIZE);
@@ -599,12 +616,24 @@ s32 rtl8188eu_xmitframe_complete(struct adapter *adapt, struct xmit_priv *pxmitp
 	return true;
 }
 
+static s32 xmitframe_direct(struct adapter *adapt, struct xmit_frame *pxmitframe)
+{
+	s32 res = _SUCCESS;
+
+	res = rtw_xmitframe_coalesce(adapt, pxmitframe->pkt, pxmitframe);
+	if (res == _SUCCESS)
+		rtw_dump_xframe(adapt, pxmitframe);
+	else
+		DBG_88E("==> %s xmitframe_coalsece failed\n", __func__);
+	return res;
+}
+
 /*
  * Return
  *	true	dump packet directly
  *	false	enqueue packet
  */
-s32 rtw_hal_xmit(struct adapter *adapt, struct xmit_frame *pxmitframe)
+static s32 pre_xmitframe(struct adapter *adapt, struct xmit_frame *pxmitframe)
 {
 	s32 res;
 	struct xmit_buf *pxmitbuf = NULL;
@@ -630,12 +659,7 @@ s32 rtw_hal_xmit(struct adapter *adapt, struct xmit_frame *pxmitframe)
 	pxmitframe->buf_addr = pxmitbuf->pbuf;
 	pxmitbuf->priv_data = pxmitframe;
 
-	res = rtw_xmitframe_coalesce(adapt, pxmitframe->pkt, pxmitframe);
-
-	if (res == _SUCCESS) {
-		rtw_dump_xframe(adapt, pxmitframe);
-	} else {
-		DBG_88E("==> %s xmitframe_coalsece failed\n", __func__);
+	if (xmitframe_direct(adapt, pxmitframe) != _SUCCESS) {
 		rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
 		rtw_free_xmitframe(pxmitpriv, pxmitframe);
 	}
@@ -659,10 +683,20 @@ enqueue:
 	return false;
 }
 
-s32 rtw_hal_mgnt_xmit(struct adapter *adapt, struct xmit_frame *pmgntframe)
+s32 rtl8188eu_mgnt_xmit(struct adapter *adapt, struct xmit_frame *pmgntframe)
 {
 	struct xmit_priv *xmitpriv = &adapt->xmitpriv;
 
 	rtl88eu_mon_xmit_hook(adapt->pmondev, pmgntframe, xmitpriv->frag_len);
 	return rtw_dump_xframe(adapt, pmgntframe);
+}
+
+/*
+ * Return
+ *	true	dump packet directly ok
+ *	false	temporary can't transmit packets to hardware
+ */
+s32 rtl8188eu_hal_xmit(struct adapter *adapt, struct xmit_frame *pxmitframe)
+{
+	return pre_xmitframe(adapt, pxmitframe);
 }

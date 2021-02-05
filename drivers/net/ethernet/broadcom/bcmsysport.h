@@ -671,6 +671,7 @@ struct bcm_sysport_priv {
 
 	/* PHY device */
 	struct device_node	*phy_dn;
+	struct phy_device	*phydev;
 	phy_interface_t		phy_interface;
 	int			old_pause;
 	int			old_link;

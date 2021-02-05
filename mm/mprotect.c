@@ -23,12 +23,10 @@
 #include <linux/mmu_notifier.h>
 #include <linux/migrate.h>
 #include <linux/perf_event.h>
-#include <linux/pkeys.h>
 #include <linux/ksm.h>
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
-#include <asm/mmu_context.h>
 #include <asm/tlbflush.h>
 
 #include "internal.h"
@@ -152,8 +150,7 @@ static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 		unsigned long this_pages;
 
 		next = pmd_addr_end(addr, end);
-		if (!pmd_trans_huge(*pmd) && !pmd_devmap(*pmd)
-				&& pmd_none_or_clear_bad(pmd))
+		if (!pmd_trans_huge(*pmd) && pmd_none_or_clear_bad(pmd))
 			continue;
 
 		/* invoke the mmu notifier if the pmd is populated */
@@ -162,12 +159,10 @@ static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 			mmu_notifier_invalidate_range_start(mm, mni_start, end);
 		}
 
-		if (pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
-			if (next - addr != HPAGE_PMD_SIZE) {
-				split_huge_pmd(vma, pmd, addr);
-				if (pmd_trans_unstable(pmd))
-					continue;
-			} else {
+		if (pmd_trans_huge(*pmd)) {
+			if (next - addr != HPAGE_PMD_SIZE)
+				split_huge_page_pmd(vma, addr, pmd);
+			else {
 				int nr_ptes = change_huge_pmd(vma, pmd, addr,
 						newprot, prot_numa);
 
@@ -333,10 +328,6 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	 * even if read-only so there is no need to account for them here
 	 */
 	if (newflags & VM_WRITE) {
-		/* Check space limits when area turns into data. */
-		if (!may_expand_vm(mm, newflags, nrpages) &&
-				may_expand_vm(mm, oldflags, nrpages))
-			return -ENOMEM;
 		if (!(oldflags & (VM_ACCOUNT|VM_WRITE|VM_HUGETLB|
 						VM_SHARED|VM_NORESERVE))) {
 			charged = nrpages;
@@ -355,7 +346,6 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 			   vma->vm_userfaultfd_ctx, vma_get_anon_name(vma));
 	if (*pprev) {
 		vma = *pprev;
-		VM_WARN_ON((vma->vm_flags ^ newflags) & ~VM_SOFTDIRTY);
 		goto success;
 	}
 
@@ -379,7 +369,7 @@ success:
 	 * held in write mode.
 	 */
 	vma->vm_flags = newflags;
-	dirty_accountable = vma_wants_writenotify(vma, vma->vm_page_prot);
+	dirty_accountable = vma_wants_writenotify(vma);
 	vma_set_page_prot(vma);
 
 	change_protection(vma, start, end, vma->vm_page_prot,
@@ -394,8 +384,8 @@ success:
 		populate_vma_page_range(vma, start, end, NULL);
 	}
 
-	vm_stat_account(mm, oldflags, -nrpages);
-	vm_stat_account(mm, newflags, nrpages);
+	vm_stat_account(mm, oldflags, vma->vm_file, -nrpages);
+	vm_stat_account(mm, newflags, vma->vm_file, nrpages);
 	perf_event_mmap(vma);
 	return 0;
 
@@ -404,19 +394,13 @@ fail:
 	return error;
 }
 
-/*
- * pkey==-1 when doing a legacy mprotect()
- */
-static int do_mprotect_pkey(unsigned long start, size_t len,
-		unsigned long prot, int pkey)
+SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
+		unsigned long, prot)
 {
-	unsigned long nstart, end, tmp, reqprot;
+	unsigned long vm_flags, nstart, end, tmp, reqprot;
 	struct vm_area_struct *vma, *prev;
 	int error = -EINVAL;
 	const int grows = prot & (PROT_GROWSDOWN|PROT_GROWSUP);
-	const bool rier = (current->personality & READ_IMPLIES_EXEC) &&
-				(prot & PROT_READ);
-
 	prot &= ~(PROT_GROWSDOWN|PROT_GROWSUP);
 	if (grows == (PROT_GROWSDOWN|PROT_GROWSUP)) /* can't be both */
 		return -EINVAL;
@@ -433,17 +417,15 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		return -EINVAL;
 
 	reqprot = prot;
-
-	if (down_write_killable(&current->mm->mmap_sem))
-		return -EINTR;
-
 	/*
-	 * If userspace did not allocate the pkey, do not let
-	 * them use it here.
+	 * Does the application expect PROT_READ to imply PROT_EXEC:
 	 */
-	error = -EINVAL;
-	if ((pkey != -1) && !mm_pkey_is_allocated(current->mm, pkey))
-		goto out;
+	if ((prot & PROT_READ) && (current->personality & READ_IMPLIES_EXEC))
+		prot |= PROT_EXEC;
+
+	vm_flags = calc_vm_prot_bits(prot);
+
+	down_write(&current->mm->mmap_sem);
 
 	vma = find_vma(current->mm, start);
 	error = -ENOMEM;
@@ -471,27 +453,12 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		prev = vma;
 
 	for (nstart = start ; ; ) {
-		unsigned long mask_off_old_flags;
 		unsigned long newflags;
-		int new_vma_pkey;
 
 		/* Here we know that vma->vm_start <= nstart < vma->vm_end. */
 
-		/* Does the application expect PROT_READ to imply PROT_EXEC */
-		if (rier && (vma->vm_flags & VM_MAYEXEC))
-			prot |= PROT_EXEC;
-
-		/*
-		 * Each mprotect() call explicitly passes r/w/x permissions.
-		 * If a permission is not passed to mprotect(), it must be
-		 * cleared from the VMA.
-		 */
-		mask_off_old_flags = VM_READ | VM_WRITE | VM_EXEC |
-					ARCH_VM_PKEY_FLAGS;
-
-		new_vma_pkey = arch_override_mprotect_pkey(vma, prot, pkey);
-		newflags = calc_vm_prot_bits(prot, new_vma_pkey);
-		newflags |= (vma->vm_flags & ~mask_off_old_flags);
+		newflags = vm_flags;
+		newflags |= (vma->vm_flags & ~(VM_READ | VM_WRITE | VM_EXEC));
 
 		/* newflags >> 4 shift VM_MAY% in place of VM_% */
 		if ((newflags & ~(newflags >> 4)) & (VM_READ | VM_WRITE | VM_EXEC)) {
@@ -521,66 +488,8 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 			error = -ENOMEM;
 			goto out;
 		}
-		prot = reqprot;
 	}
 out:
 	up_write(&current->mm->mmap_sem);
 	return error;
-}
-
-SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
-		unsigned long, prot)
-{
-	return do_mprotect_pkey(start, len, prot, -1);
-}
-
-SYSCALL_DEFINE4(pkey_mprotect, unsigned long, start, size_t, len,
-		unsigned long, prot, int, pkey)
-{
-	return do_mprotect_pkey(start, len, prot, pkey);
-}
-
-SYSCALL_DEFINE2(pkey_alloc, unsigned long, flags, unsigned long, init_val)
-{
-	int pkey;
-	int ret;
-
-	/* No flags supported yet. */
-	if (flags)
-		return -EINVAL;
-	/* check for unsupported init values */
-	if (init_val & ~PKEY_ACCESS_MASK)
-		return -EINVAL;
-
-	down_write(&current->mm->mmap_sem);
-	pkey = mm_pkey_alloc(current->mm);
-
-	ret = -ENOSPC;
-	if (pkey == -1)
-		goto out;
-
-	ret = arch_set_user_pkey_access(current, pkey, init_val);
-	if (ret) {
-		mm_pkey_free(current->mm, pkey);
-		goto out;
-	}
-	ret = pkey;
-out:
-	up_write(&current->mm->mmap_sem);
-	return ret;
-}
-
-SYSCALL_DEFINE1(pkey_free, int, pkey)
-{
-	int ret;
-
-	down_write(&current->mm->mmap_sem);
-	ret = mm_pkey_free(current->mm, pkey);
-	up_write(&current->mm->mmap_sem);
-
-	/*
-	 * We could provie warnings or errors if any VMA still
-	 * has the pkey set here.
-	 */
-	return ret;
 }

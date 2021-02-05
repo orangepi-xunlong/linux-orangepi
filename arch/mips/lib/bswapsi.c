@@ -1,5 +1,4 @@
-#include <linux/export.h>
-#include <linux/compiler.h>
+#include <linux/module.h>
 
 unsigned int notrace __bswapsi2(unsigned int u)
 {

@@ -11,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
+ *
  ******************************************************************************/
 #ifndef	__RTW_RF_H_
 #define __RTW_RF_H_
@@ -135,6 +140,7 @@ enum rt_rf_type_def {
 };
 
 u32 rtw_ch2freq(u32 ch);
+u32 rtw_freq2ch(u32 freq);
 
 
 #endif /* _RTL8711_RF_H_ */

@@ -22,18 +22,9 @@
 #include <asm/mach-types.h>
 #include <asm/mach/map.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #undef GPIO24_SSP1_SFRM
-#undef GPIO86_GPIO
-#undef GPIO87_GPIO
-#undef GPIO88_GPIO
-#undef GPIO89_GPIO
-#include "pxa27x.h"
-#undef GPIO24_SSP1_SFRM
-#undef GPIO86_GPIO
-#undef GPIO87_GPIO
-#undef GPIO88_GPIO
-#undef GPIO89_GPIO
+#include <mach/pxa27x.h>
 #include <mach/audio.h>
 #include <linux/platform_data/video-pxafb.h>
 #include <mach/smemc.h>

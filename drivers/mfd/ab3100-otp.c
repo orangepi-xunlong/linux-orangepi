@@ -188,9 +188,10 @@ static int __init ab3100_otp_probe(struct platform_device *pdev)
 	int i;
 
 	otp = devm_kzalloc(&pdev->dev, sizeof(struct ab3100_otp), GFP_KERNEL);
-	if (!otp)
+	if (!otp) {
+		dev_err(&pdev->dev, "could not allocate AB3100 OTP device\n");
 		return -ENOMEM;
-
+	}
 	otp->dev = &pdev->dev;
 
 	/* Replace platform data coming in with a local struct */

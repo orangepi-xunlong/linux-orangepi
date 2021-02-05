@@ -458,7 +458,7 @@
             .scan_type = {
               .sign = 's',
               .realbits = 12,
-              .storagebits = 16,
+              .storgebits = 16,
               .shift = 4,
               .endianness = IIO_LE,
             },
@@ -594,7 +594,7 @@
 
     irqreturn_t sensor_iio_pollfunc(int irq, void *p)
     {
-        pf->timestamp = iio_get_time_ns((struct indio_dev *)p);
+        pf->timestamp = iio_get_time_ns();
         return IRQ_WAKE_THREAD;
     }
 

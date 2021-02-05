@@ -32,8 +32,10 @@ extern int squashfs_init_read_wq(void);
 extern void squashfs_destroy_read_wq(void);
 extern int squashfs_read_data(struct super_block *, u64, int, u64 *,
 				struct squashfs_page_actor *);
+extern int squashfs_read_data(struct super_block *, u64, int, u64 *,
+	struct squashfs_page_actor *);
 extern int squashfs_read_data_async(struct super_block *, u64, int, u64 *,
-				struct squashfs_page_actor *);
+	struct squashfs_page_actor *);
 
 /* cache.c */
 extern struct squashfs_cache *squashfs_cache_init(char *, int, int);
@@ -71,7 +73,6 @@ extern __le64 *squashfs_read_fragment_index_table(struct super_block *,
 				u64, u64, unsigned int);
 
 /* file.c */
-void squashfs_fill_page(struct page *, struct squashfs_cache_entry *, int, int);
 void squashfs_copy_cache(struct page *, struct squashfs_cache_entry *, int,
 				int);
 

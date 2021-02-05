@@ -70,7 +70,7 @@ static int __test__sw_clock_freq(enum perf_sw_ids clock_id)
 
 		err = -errno;
 		pr_debug("Couldn't open evlist: %s\nHint: check %s, using %" PRIu64 " in this test.\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)),
+			 strerror_r(errno, sbuf, sizeof(sbuf)),
 			 knob, (u64)attr.sample_freq);
 		goto out_delete_evlist;
 	}
@@ -78,7 +78,7 @@ static int __test__sw_clock_freq(enum perf_sw_ids clock_id)
 	err = perf_evlist__mmap(evlist, 128, true);
 	if (err < 0) {
 		pr_debug("failed to mmap event: %d (%s)\n", errno,
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
 
@@ -122,7 +122,7 @@ out_delete_evlist:
 	return err;
 }
 
-int test__sw_clock_freq(int subtest __maybe_unused)
+int test__sw_clock_freq(void)
 {
 	int ret;
 

@@ -171,8 +171,8 @@ continue_block:
 	## branch into array
 	lea	jump_table(%rip), bufp
 	movzxw  (bufp, %rax, 2), len
-	lea	crc_array(%rip), bufp
-	lea     (bufp, len, 1), bufp
+	offset=crc_array-jump_table
+	lea     offset(bufp, len, 1), bufp
 	JMP_NOSPEC bufp
 
 	################################################################
@@ -311,9 +311,7 @@ do_return:
 	popq    %rdi
 	popq    %rbx
         ret
-ENDPROC(crc_pcl)
 
-.section	.rodata, "a", %progbits
         ################################################################
         ## jump table        Table is 129 entries x 2 bytes each
         ################################################################
@@ -327,11 +325,13 @@ JMPTBL_ENTRY %i
 	i=i+1
 .endr
 
+ENDPROC(crc_pcl)
 
 	################################################################
 	## PCLMULQDQ tables
 	## Table is 128 entries x 2 words (8 bytes) each
 	################################################################
+.section	.rodata, "a", %progbits
 .align 8
 K_table:
 	.long 0x493c7d27, 0x00000001

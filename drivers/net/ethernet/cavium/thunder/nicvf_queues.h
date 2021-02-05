@@ -57,7 +57,10 @@
 #define CMP_QUEUE_SIZE6		6ULL /* 64K entries */
 
 /* Default queue count per QS, its lengths and threshold values */
-#define DEFAULT_RBDR_CNT	1
+#define RBDR_CNT		1
+#define RCV_QUEUE_CNT		8
+#define SND_QUEUE_CNT		8
+#define CMP_QUEUE_CNT		8 /* Max of RCV and SND qcount */
 
 #define SND_QSIZE		SND_QUEUE_SIZE2
 #define SND_QUEUE_LEN		(1ULL << (SND_QSIZE + 10))
@@ -72,7 +75,7 @@
  */
 #define CMP_QSIZE		CMP_QUEUE_SIZE2
 #define CMP_QUEUE_LEN		(1ULL << (CMP_QSIZE + 10))
-#define CMP_QUEUE_CQE_THRESH	(NAPI_POLL_WEIGHT / 2)
+#define CMP_QUEUE_CQE_THRESH	0
 #define CMP_QUEUE_TIMER_THRESH	80 /* ~2usec */
 
 #define RBDR_SIZE		RBDR_SIZE0
@@ -80,8 +83,10 @@
 #define MAX_RCV_BUF_COUNT	(1ULL << (RBDR_SIZE6 + 13))
 #define RBDR_THRESH		(RCV_BUF_COUNT / 2)
 #define DMA_BUFFER_LEN		2048 /* In multiples of 128bytes */
-#define RCV_FRAG_LEN	 (SKB_DATA_ALIGN(DMA_BUFFER_LEN + NET_SKB_PAD) + \
-			 SKB_DATA_ALIGN(sizeof(struct skb_shared_info)))
+#define RCV_FRAG_LEN	(SKB_DATA_ALIGN(DMA_BUFFER_LEN + NET_SKB_PAD) + \
+			 SKB_DATA_ALIGN(sizeof(struct skb_shared_info)) + \
+			 (NICVF_RCV_BUF_ALIGN_BYTES * 2))
+#define RCV_DATA_OFFSET		NICVF_RCV_BUF_ALIGN_BYTES
 
 #define MAX_CQES_FOR_TX		((SND_QUEUE_LEN / MIN_SQ_DESC_PER_PKT_XMIT) * \
 				 MAX_CQE_PER_PKT_XMIT)
@@ -103,6 +108,10 @@
 #define NICVF_SQ_BASE_ALIGN_BYTES	128  /* 7 bits */
 
 #define NICVF_ALIGNED_ADDR(ADDR, ALIGN_BYTES)	ALIGN(ADDR, ALIGN_BYTES)
+#define NICVF_ADDR_ALIGN_LEN(ADDR, BYTES)\
+	(NICVF_ALIGNED_ADDR(ADDR, BYTES) - BYTES)
+#define NICVF_RCV_BUF_ALIGN_LEN(X)\
+	(NICVF_ALIGNED_ADDR(X, NICVF_RCV_BUF_ALIGN_BYTES) - X)
 
 /* Queue enable/disable */
 #define NICVF_SQ_EN		BIT_ULL(19)
@@ -158,7 +167,6 @@ enum CQ_TX_ERROP_E {
 	CQ_TX_ERROP_DESC_FAULT = 0x10,
 	CQ_TX_ERROP_HDR_CONS_ERR = 0x11,
 	CQ_TX_ERROP_SUBDC_ERR = 0x12,
-	CQ_TX_ERROP_MAX_SIZE_VIOL = 0x13,
 	CQ_TX_ERROP_IMM_SIZE_OFLOW = 0x80,
 	CQ_TX_ERROP_DATA_SEQUENCE_ERR = 0x81,
 	CQ_TX_ERROP_MEM_SEQUENCE_ERR = 0x82,
@@ -171,6 +179,25 @@ enum CQ_TX_ERROP_E {
 	CQ_TX_ERROP_CK_OFLOW = 0x89,
 	CQ_TX_ERROP_ENUM_LAST = 0x8a,
 };
+
+struct cmp_queue_stats {
+	struct tx_stats {
+		u64 good;
+		u64 desc_fault;
+		u64 hdr_cons_err;
+		u64 subdesc_err;
+		u64 imm_size_oflow;
+		u64 data_seq_err;
+		u64 mem_seq_err;
+		u64 lock_viol;
+		u64 data_fault;
+		u64 tstmp_conflict;
+		u64 tstmp_timeout;
+		u64 mem_fault;
+		u64 csum_overlap;
+		u64 csum_overflow;
+	} tx;
+} ____cacheline_aligned_in_smp;
 
 enum RQ_SQ_STATS {
 	RQ_SQ_STATS_OCTS,
@@ -223,6 +250,7 @@ struct cmp_queue {
 	spinlock_t	lock;  /* lock to serialize processing CQEs */
 	void		*desc;
 	struct q_desc_mem   dmem;
+	struct cmp_queue_stats	stats;
 	int		irq;
 } ____cacheline_aligned_in_smp;
 
@@ -317,5 +345,6 @@ u64  nicvf_queue_reg_read(struct nicvf *nic,
 void nicvf_update_rq_stats(struct nicvf *nic, int rq_idx);
 void nicvf_update_sq_stats(struct nicvf *nic, int sq_idx);
 int nicvf_check_cqe_rx_errs(struct nicvf *nic, struct cqe_rx_t *cqe_rx);
-int nicvf_check_cqe_tx_errs(struct nicvf *nic, struct cqe_send_t *cqe_tx);
+int nicvf_check_cqe_tx_errs(struct nicvf *nic,
+			    struct cmp_queue *cq, struct cqe_send_t *cqe_tx);
 #endif /* NICVF_QUEUES_H */

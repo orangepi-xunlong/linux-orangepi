@@ -75,8 +75,7 @@ int configfs_setattr(struct dentry * dentry, struct iattr * iattr)
 		sd_iattr->ia_mode = sd->s_mode;
 		sd_iattr->ia_uid = GLOBAL_ROOT_UID;
 		sd_iattr->ia_gid = GLOBAL_ROOT_GID;
-		sd_iattr->ia_atime = sd_iattr->ia_mtime =
-			sd_iattr->ia_ctime = current_time(inode);
+		sd_iattr->ia_atime = sd_iattr->ia_mtime = sd_iattr->ia_ctime = CURRENT_TIME;
 		sd->s_iattr = sd_iattr;
 	}
 	/* attributes were changed atleast once in past */
@@ -112,8 +111,7 @@ int configfs_setattr(struct dentry * dentry, struct iattr * iattr)
 static inline void set_default_inode_attr(struct inode * inode, umode_t mode)
 {
 	inode->i_mode = mode;
-	inode->i_atime = inode->i_mtime =
-		inode->i_ctime = current_time(inode);
+	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 }
 
 static inline void set_inode_attr(struct inode * inode, struct iattr * iattr)
@@ -156,7 +154,7 @@ static void configfs_set_inode_lock_class(struct configfs_dirent *sd,
 
 	if (depth > 0) {
 		if (depth <= ARRAY_SIZE(default_group_class)) {
-			lockdep_set_class(&inode->i_rwsem,
+			lockdep_set_class(&inode->i_mutex,
 					  &default_group_class[depth - 1]);
 		} else {
 			/*
@@ -197,21 +195,13 @@ int configfs_create(struct dentry * dentry, umode_t mode, void (*init)(struct in
 		return -ENOMEM;
 
 	p_inode = d_inode(dentry->d_parent);
-	p_inode->i_mtime = p_inode->i_ctime = current_time(p_inode);
+	p_inode->i_mtime = p_inode->i_ctime = CURRENT_TIME;
 	configfs_set_inode_lock_class(sd, inode);
 
 	init(inode);
-	if (S_ISDIR(mode) || S_ISLNK(mode)) {
-		/*
-		 * ->symlink(), ->mkdir(), configfs_register_subsystem() or
-		 * create_default_group() - already hashed.
-		 */
-		d_instantiate(dentry, inode);
+	d_instantiate(dentry, inode);
+	if (S_ISDIR(mode) || S_ISLNK(mode))
 		dget(dentry);  /* pin link and directory dentries in core */
-	} else {
-		/* ->lookup() */
-		d_add(dentry, inode);
-	}
 	return error;
 }
 
@@ -228,7 +218,7 @@ const unsigned char * configfs_get_name(struct configfs_dirent *sd)
 	if (sd->s_type & (CONFIGFS_DIR | CONFIGFS_ITEM_LINK))
 		return sd->s_dentry->d_name.name;
 
-	if (sd->s_type & (CONFIGFS_ITEM_ATTR | CONFIGFS_ITEM_BIN_ATTR)) {
+	if (sd->s_type & CONFIGFS_ITEM_ATTR) {
 		attr = sd->s_element;
 		return attr->ca_name;
 	}
@@ -265,7 +255,7 @@ void configfs_hash_and_remove(struct dentry * dir, const char * name)
 		/* no inode means this hasn't been made visible yet */
 		return;
 
-	inode_lock(d_inode(dir));
+	mutex_lock(&d_inode(dir)->i_mutex);
 	list_for_each_entry(sd, &parent_sd->s_children, s_sibling) {
 		if (!sd->s_element)
 			continue;
@@ -278,5 +268,5 @@ void configfs_hash_and_remove(struct dentry * dir, const char * name)
 			break;
 		}
 	}
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 }

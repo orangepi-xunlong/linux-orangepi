@@ -20,7 +20,9 @@
 
 #include <asm/debug-monitors.h>
 #include <asm/kvm_asm.h>
-#include <asm/kvm_hyp.h>
+#include <asm/kvm_mmu.h>
+
+#include "hyp.h"
 
 #define read_debug(r,n)		read_sysreg(r##n##_el1)
 #define write_debug(v,r,n)	write_sysreg(v, r##n##_el1)
@@ -131,7 +133,9 @@ void __hyp_text __debug_cond_restore_host_state(struct kvm_vcpu *vcpu)
 		vcpu->arch.debug_flags &= ~KVM_ARM64_DEBUG_DIRTY;
 }
 
-u32 __hyp_text __kvm_get_mdcr_el2(void)
+static u32 __hyp_text __debug_read_mdcr_el2(void)
 {
 	return read_sysreg(mdcr_el2);
 }
+
+__alias(__debug_read_mdcr_el2) u32 __kvm_get_mdcr_el2(void);

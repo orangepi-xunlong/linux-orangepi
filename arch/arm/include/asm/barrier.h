@@ -59,7 +59,9 @@ extern void arm_heavy_mb(void);
 #define __arm_heavy_mb(x...) dsb(x)
 #endif
 
-#if defined(CONFIG_ARM_DMA_MEM_BUFFERABLE) || defined(CONFIG_SMP)
+#ifdef CONFIG_ARCH_HAS_BARRIERS
+#include <mach/barriers.h>
+#elif defined(CONFIG_ARM_DMA_MEM_BUFFERABLE) || defined(CONFIG_SMP)
 #define mb()		__arm_heavy_mb()
 #define rmb()		dsb()
 #define wmb()		__arm_heavy_mb(st)
@@ -73,9 +75,38 @@ extern void arm_heavy_mb(void);
 #define dma_wmb()	barrier()
 #endif
 
-#define __smp_mb()	dmb(ish)
-#define __smp_rmb()	__smp_mb()
-#define __smp_wmb()	dmb(ishst)
+#ifndef CONFIG_SMP
+#define smp_mb()	barrier()
+#define smp_rmb()	barrier()
+#define smp_wmb()	barrier()
+#else
+#define smp_mb()	dmb(ish)
+#define smp_rmb()	smp_mb()
+#define smp_wmb()	dmb(ishst)
+#endif
+
+#define smp_store_release(p, v)						\
+do {									\
+	compiletime_assert_atomic_type(*p);				\
+	smp_mb();							\
+	WRITE_ONCE(*p, v);						\
+} while (0)
+
+#define smp_load_acquire(p)						\
+({									\
+	typeof(*p) ___p1 = READ_ONCE(*p);				\
+	compiletime_assert_atomic_type(*p);				\
+	smp_mb();							\
+	___p1;								\
+})
+
+#define read_barrier_depends()		do { } while(0)
+#define smp_read_barrier_depends()	do { } while(0)
+
+#define smp_store_mb(var, value)	do { WRITE_ONCE(var, value); smp_mb(); } while (0)
+
+#define smp_mb__before_atomic()	smp_mb()
+#define smp_mb__after_atomic()	smp_mb()
 
 #ifdef CONFIG_CPU_SPECTRE
 static inline unsigned long array_index_mask_nospec(unsigned long idx,
@@ -95,8 +126,6 @@ static inline unsigned long array_index_mask_nospec(unsigned long idx,
 }
 #define array_index_mask_nospec array_index_mask_nospec
 #endif
-
-#include <asm-generic/barrier.h>
 
 #endif /* !__ASSEMBLY__ */
 #endif /* __ASM_BARRIER_H */

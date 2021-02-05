@@ -108,14 +108,23 @@
 		regulator-always-on;
 		regulator-boot-on;
 	};
+
+	xin32k: xin32k {
+		compatible = "fixed-clock";
+		clock-frequency = <32768>;
+		clock-output-names = "xin32k";
+		#clock-cells = <0>;
+	};
 };
 
 &emmc {
 	status = "okay";
 	bus-width = <8>;
 	cap-mmc-highspeed;
+	mmc-hs200-1_8v;
 	clock-frequency = <150000000>;
 	disable-wp;
+	keep-power-in-suspend;
 	non-removable;
 	num-slots = <1>;
 	vmmc-supply = <&vcc_io>;
@@ -159,7 +168,7 @@
 		vcc10-supply = <&vcc_sys>;
 		vcc11-supply = <&vcc_sys>;
 		vcc12-supply = <&vcc_io>;
-		clock-output-names = "xin32k", "rk808-clkout2";
+		clock-output-names = "rk808-clkout1", "rk808-clkout2";
 		#clock-cells = <1>;
 
 		regulators {
@@ -257,6 +266,8 @@
 			};
 
 			vcc_sd: SWITCH_REG1 {
+				regulator-always-on;
+				regulator-boot-on;
 				regulator-name = "vcc_sd";
 			};
 

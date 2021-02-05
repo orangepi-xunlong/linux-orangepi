@@ -68,6 +68,32 @@ struct spi_st {
 	struct completion	done;
 };
 
+static int spi_st_clk_enable(struct spi_st *spi_st)
+{
+	/*
+	 * Current platforms use one of the core clocks for SPI and I2C.
+	 * If we attempt to disable the clock, the system will hang.
+	 *
+	 * TODO: Remove this when platform supports power domains.
+	 */
+	return 0;
+
+	return clk_prepare_enable(spi_st->clk);
+}
+
+static void spi_st_clk_disable(struct spi_st *spi_st)
+{
+	/*
+	 * Current platforms use one of the core clocks for SPI and I2C.
+	 * If we attempt to disable the clock, the system will hang.
+	 *
+	 * TODO: Remove this when platform supports power domains.
+	 */
+	return;
+
+	clk_disable_unprepare(spi_st->clk);
+}
+
 /* Load the TX FIFO */
 static void ssc_write_tx_fifo(struct spi_st *spi_st)
 {
@@ -175,7 +201,10 @@ static int spi_st_transfer_one(struct spi_master *master,
 
 static void spi_st_cleanup(struct spi_device *spi)
 {
-	gpio_free(spi->cs_gpio);
+	int cs = spi->cs_gpio;
+
+	if (gpio_is_valid(cs))
+		devm_gpio_free(&spi->dev, cs);
 }
 
 /* the spi->mode bits understood by this driver: */
@@ -198,15 +227,14 @@ static int spi_st_setup(struct spi_device *spi)
 		return -EINVAL;
 	}
 
-	ret = gpio_request(cs, dev_name(&spi->dev));
-	if (ret) {
+	if (devm_gpio_request(&spi->dev, cs, dev_name(&spi->dev))) {
 		dev_err(&spi->dev, "could not request gpio:%d\n", cs);
-		return ret;
+		return -EINVAL;
 	}
 
 	ret = gpio_direction_output(cs, spi->mode & SPI_CS_HIGH);
 	if (ret)
-		goto out_free_gpio;
+		return ret;
 
 	spi_st_clk = clk_get_rate(spi_st->clk);
 
@@ -215,8 +243,7 @@ static int spi_st_setup(struct spi_device *spi)
 	if (sscbrg < 0x07 || sscbrg > BIT(16)) {
 		dev_err(&spi->dev,
 			"baudrate %d outside valid range %d\n", sscbrg, hz);
-		ret = -EINVAL;
-		goto out_free_gpio;
+		return -EINVAL;
 	}
 
 	spi_st->baud = spi_st_clk / (2 * sscbrg);
@@ -265,10 +292,6 @@ static int spi_st_setup(struct spi_device *spi)
 	 readl_relaxed(spi_st->base + SSC_RBUF);
 
 	 return 0;
-
-out_free_gpio:
-	gpio_free(cs);
-	return ret;
 }
 
 /* Interrupt fired when TX shift register becomes empty */
@@ -322,13 +345,12 @@ static int spi_st_probe(struct platform_device *pdev)
 	spi_st->clk = devm_clk_get(&pdev->dev, "ssc");
 	if (IS_ERR(spi_st->clk)) {
 		dev_err(&pdev->dev, "Unable to request clock\n");
-		ret = PTR_ERR(spi_st->clk);
-		goto put_master;
+		return PTR_ERR(spi_st->clk);
 	}
 
-	ret = clk_prepare_enable(spi_st->clk);
+	ret = spi_st_clk_enable(spi_st);
 	if (ret)
-		goto put_master;
+		return ret;
 
 	init_completion(&spi_st->done);
 
@@ -385,9 +407,8 @@ static int spi_st_probe(struct platform_device *pdev)
 	return 0;
 
 clk_disable:
-	clk_disable_unprepare(spi_st->clk);
-put_master:
-	spi_master_put(master);
+	spi_st_clk_disable(spi_st);
+
 	return ret;
 }
 
@@ -396,7 +417,7 @@ static int spi_st_remove(struct platform_device *pdev)
 	struct spi_master *master = platform_get_drvdata(pdev);
 	struct spi_st *spi_st = spi_master_get_devdata(master);
 
-	clk_disable_unprepare(spi_st->clk);
+	spi_st_clk_disable(spi_st);
 
 	pinctrl_pm_select_sleep_state(&pdev->dev);
 
@@ -412,7 +433,7 @@ static int spi_st_runtime_suspend(struct device *dev)
 	writel_relaxed(0, spi_st->base + SSC_IEN);
 	pinctrl_pm_select_sleep_state(dev);
 
-	clk_disable_unprepare(spi_st->clk);
+	spi_st_clk_disable(spi_st);
 
 	return 0;
 }
@@ -423,7 +444,7 @@ static int spi_st_runtime_resume(struct device *dev)
 	struct spi_st *spi_st = spi_master_get_devdata(master);
 	int ret;
 
-	ret = clk_prepare_enable(spi_st->clk);
+	ret = spi_st_clk_enable(spi_st);
 	pinctrl_pm_select_default_state(dev);
 
 	return ret;

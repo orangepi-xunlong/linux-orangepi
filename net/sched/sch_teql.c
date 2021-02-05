@@ -77,7 +77,7 @@ struct teql_sched_data {
 /* "teql*" qdisc routines */
 
 static int
-teql_enqueue(struct sk_buff *skb, struct Qdisc *sch, struct sk_buff **to_free)
+teql_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct net_device *dev = qdisc_dev(sch);
 	struct teql_sched_data *q = qdisc_priv(sch);
@@ -87,7 +87,7 @@ teql_enqueue(struct sk_buff *skb, struct Qdisc *sch, struct sk_buff **to_free)
 		return NET_XMIT_SUCCESS;
 	}
 
-	return qdisc_drop(skb, sch, to_free);
+	return qdisc_drop(skb, sch);
 }
 
 static struct sk_buff *

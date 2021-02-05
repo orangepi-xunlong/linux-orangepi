@@ -98,7 +98,7 @@ rename_retry:
 		return end;
 	}
 	namelen = strlen(base);
-	if (*end == '/') {
+	if (flags & NFS_PATH_CANONICAL) {
 		/* Strip off excess slashes in base string */
 		while (namelen > 0 && base[namelen - 1] == '/')
 			namelen--;
@@ -226,7 +226,7 @@ static struct vfsmount *nfs_do_clone_mount(struct nfs_server *server,
 					   const char *devname,
 					   struct nfs_clone_mount *mountdata)
 {
-	return vfs_submount(mountdata->dentry, &nfs_xdev_fs_type, devname, mountdata);
+	return vfs_kern_mount(&nfs_xdev_fs_type, 0, devname, mountdata);
 }
 
 /**

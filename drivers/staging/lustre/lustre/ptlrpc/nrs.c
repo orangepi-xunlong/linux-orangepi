@@ -13,6 +13,10 @@
  * GNU General Public License version 2 for more details.  A copy is
  * included in the COPYING file that accompanied this code.
 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
  * GPL HEADER END
  */
 /*
@@ -43,6 +47,9 @@
 #include "../../include/linux/libcfs/libcfs.h"
 #include "ptlrpc_internal.h"
 
+/* XXX: This is just for liblustre. Remove the #if defined directive when the
+ * "cfs_" prefix is dropped from cfs_list_head. */
+
 /**
  * NRS core object.
  */
@@ -50,7 +57,7 @@ struct nrs_core nrs_core;
 
 static int nrs_policy_init(struct ptlrpc_nrs_policy *policy)
 {
-	return policy->pol_desc->pd_ops->op_policy_init ?
+	return policy->pol_desc->pd_ops->op_policy_init != NULL ?
 	       policy->pol_desc->pd_ops->op_policy_init(policy) : 0;
 }
 
@@ -59,7 +66,7 @@ static void nrs_policy_fini(struct ptlrpc_nrs_policy *policy)
 	LASSERT(policy->pol_ref == 0);
 	LASSERT(policy->pol_req_queued == 0);
 
-	if (policy->pol_desc->pd_ops->op_policy_fini)
+	if (policy->pol_desc->pd_ops->op_policy_fini != NULL)
 		policy->pol_desc->pd_ops->op_policy_fini(policy);
 }
 
@@ -75,7 +82,7 @@ static int nrs_policy_ctl_locked(struct ptlrpc_nrs_policy *policy,
 	if (policy->pol_state == NRS_POL_STATE_STOPPED)
 		return -ENODEV;
 
-	return policy->pol_desc->pd_ops->op_policy_ctl ?
+	return policy->pol_desc->pd_ops->op_policy_ctl != NULL ?
 	       policy->pol_desc->pd_ops->op_policy_ctl(policy, opc, arg) :
 	       -ENOSYS;
 }
@@ -84,7 +91,7 @@ static void nrs_policy_stop0(struct ptlrpc_nrs_policy *policy)
 {
 	struct ptlrpc_nrs *nrs = policy->pol_nrs;
 
-	if (policy->pol_desc->pd_ops->op_policy_stop) {
+	if (policy->pol_desc->pd_ops->op_policy_stop != NULL) {
 		spin_unlock(&nrs->nrs_lock);
 
 		policy->pol_desc->pd_ops->op_policy_stop(policy);
@@ -147,7 +154,7 @@ static void nrs_policy_stop_primary(struct ptlrpc_nrs *nrs)
 {
 	struct ptlrpc_nrs_policy *tmp = nrs->nrs_policy_primary;
 
-	if (!tmp)
+	if (tmp == NULL)
 		return;
 
 	nrs->nrs_policy_primary = NULL;
@@ -213,12 +220,12 @@ static int nrs_policy_start_locked(struct ptlrpc_nrs_policy *policy)
 		 * nrs_policy_flags::PTLRPC_NRS_FL_FALLBACK flag set can
 		 * register with NRS core.
 		 */
-		LASSERT(!nrs->nrs_policy_fallback);
+		LASSERT(nrs->nrs_policy_fallback == NULL);
 	} else {
 		/**
 		 * Shouldn't start primary policy if w/o fallback policy.
 		 */
-		if (!nrs->nrs_policy_fallback)
+		if (nrs->nrs_policy_fallback == NULL)
 			return -EPERM;
 
 		if (policy->pol_state == NRS_POL_STATE_STARTED)
@@ -304,7 +311,7 @@ static void nrs_policy_put_locked(struct ptlrpc_nrs_policy *policy)
 
 	policy->pol_ref--;
 	if (unlikely(policy->pol_ref == 0 &&
-		     policy->pol_state == NRS_POL_STATE_STOPPING))
+	    policy->pol_state == NRS_POL_STATE_STOPPING))
 		nrs_policy_stop0(policy);
 }
 
@@ -319,7 +326,7 @@ static void nrs_policy_put(struct ptlrpc_nrs_policy *policy)
  * Find and return a policy by name.
  */
 static struct ptlrpc_nrs_policy *nrs_policy_find_locked(struct ptlrpc_nrs *nrs,
-							char *name)
+							 char *name)
 {
 	struct ptlrpc_nrs_policy *tmp;
 
@@ -341,10 +348,10 @@ static void nrs_resource_put(struct ptlrpc_nrs_resource *res)
 {
 	struct ptlrpc_nrs_policy *policy = res->res_policy;
 
-	if (policy->pol_desc->pd_ops->op_res_put) {
+	if (policy->pol_desc->pd_ops->op_res_put != NULL) {
 		struct ptlrpc_nrs_resource *parent;
 
-		for (; res; res = parent) {
+		for (; res != NULL; res = parent) {
 			parent = res->res_parent;
 			policy->pol_desc->pd_ops->op_res_put(policy, res);
 		}
@@ -383,11 +390,12 @@ struct ptlrpc_nrs_resource *nrs_resource_get(struct ptlrpc_nrs_policy *policy,
 		rc = policy->pol_desc->pd_ops->op_res_get(policy, nrq, res,
 							  &tmp, moving_req);
 		if (rc < 0) {
-			if (res)
+			if (res != NULL)
 				nrs_resource_put(res);
 			return NULL;
 		}
 
+		LASSERT(tmp != NULL);
 		tmp->res_parent = res;
 		tmp->res_policy = policy;
 		res = tmp;
@@ -437,7 +445,7 @@ static void nrs_resource_get_safe(struct ptlrpc_nrs *nrs,
 	nrs_policy_get_locked(fallback);
 
 	primary = nrs->nrs_policy_primary;
-	if (primary)
+	if (primary != NULL)
 		nrs_policy_get_locked(primary);
 
 	spin_unlock(&nrs->nrs_lock);
@@ -446,9 +454,9 @@ static void nrs_resource_get_safe(struct ptlrpc_nrs *nrs,
 	 * Obtain resource hierarchy references.
 	 */
 	resp[NRS_RES_FALLBACK] = nrs_resource_get(fallback, nrq, moving_req);
-	LASSERT(resp[NRS_RES_FALLBACK]);
+	LASSERT(resp[NRS_RES_FALLBACK] != NULL);
 
-	if (primary) {
+	if (primary != NULL) {
 		resp[NRS_RES_PRIMARY] = nrs_resource_get(primary, nrq,
 							 moving_req);
 		/**
@@ -457,7 +465,7 @@ static void nrs_resource_get_safe(struct ptlrpc_nrs *nrs,
 		 * reference on the policy as it will not be used for this
 		 * request.
 		 */
-		if (!resp[NRS_RES_PRIMARY])
+		if (resp[NRS_RES_PRIMARY] == NULL)
 			nrs_policy_put(primary);
 	}
 }
@@ -474,10 +482,11 @@ static void nrs_resource_get_safe(struct ptlrpc_nrs *nrs,
 static void nrs_resource_put_safe(struct ptlrpc_nrs_resource **resp)
 {
 	struct ptlrpc_nrs_policy *pols[NRS_RES_MAX];
+	struct ptlrpc_nrs *nrs = NULL;
 	int i;
 
 	for (i = 0; i < NRS_RES_MAX; i++) {
-		if (resp[i]) {
+		if (resp[i] != NULL) {
 			pols[i] = resp[i]->res_policy;
 			nrs_resource_put(resp[i]);
 			resp[i] = NULL;
@@ -487,9 +496,18 @@ static void nrs_resource_put_safe(struct ptlrpc_nrs_resource **resp)
 	}
 
 	for (i = 0; i < NRS_RES_MAX; i++) {
-		if (pols[i])
-			nrs_policy_put(pols[i]);
+		if (pols[i] == NULL)
+			continue;
+
+		if (nrs == NULL) {
+			nrs = pols[i]->pol_nrs;
+			spin_lock(&nrs->nrs_lock);
+		}
+		nrs_policy_put_locked(pols[i]);
 	}
+
+	if (nrs != NULL)
+		spin_unlock(&nrs->nrs_lock);
 }
 
 /**
@@ -518,7 +536,7 @@ struct ptlrpc_nrs_request *nrs_request_get(struct ptlrpc_nrs_policy *policy,
 
 	nrq = policy->pol_desc->pd_ops->op_req_get(policy, peek, force);
 
-	LASSERT(ergo(nrq, nrs_request_policy(nrq) == policy));
+	LASSERT(ergo(nrq != NULL, nrs_request_policy(nrq) == policy));
 
 	return nrq;
 }
@@ -544,7 +562,7 @@ static inline void nrs_request_enqueue(struct ptlrpc_nrs_request *nrq)
 	 * the preferred choice.
 	 */
 	for (i = NRS_RES_MAX - 1; i >= 0; i--) {
-		if (!nrq->nr_res_ptrs[i])
+		if (nrq->nr_res_ptrs[i] == NULL)
 			continue;
 
 		nrq->nr_res_idx = i;
@@ -614,7 +632,7 @@ static int nrs_policy_ctl(struct ptlrpc_nrs *nrs, char *name,
 	spin_lock(&nrs->nrs_lock);
 
 	policy = nrs_policy_find_locked(nrs, name);
-	if (!policy) {
+	if (policy == NULL) {
 		rc = -ENOENT;
 		goto out;
 	}
@@ -636,7 +654,7 @@ static int nrs_policy_ctl(struct ptlrpc_nrs *nrs, char *name,
 		break;
 	}
 out:
-	if (policy)
+	if (policy != NULL)
 		nrs_policy_put_locked(policy);
 
 	spin_unlock(&nrs->nrs_lock);
@@ -661,7 +679,7 @@ static int nrs_policy_unregister(struct ptlrpc_nrs *nrs, char *name)
 	spin_lock(&nrs->nrs_lock);
 
 	policy = nrs_policy_find_locked(nrs, name);
-	if (!policy) {
+	if (policy == NULL) {
 		spin_unlock(&nrs->nrs_lock);
 
 		CERROR("Can't find NRS policy %s\n", name);
@@ -694,7 +712,7 @@ static int nrs_policy_unregister(struct ptlrpc_nrs *nrs, char *name)
 
 	nrs_policy_fini(policy);
 
-	LASSERT(!policy->pol_private);
+	LASSERT(policy->pol_private == NULL);
 	kfree(policy);
 
 	return 0;
@@ -718,16 +736,18 @@ static int nrs_policy_register(struct ptlrpc_nrs *nrs,
 	struct ptlrpc_service_part *svcpt = nrs->nrs_svcpt;
 	int rc;
 
-	LASSERT(desc->pd_ops->op_res_get);
-	LASSERT(desc->pd_ops->op_req_get);
-	LASSERT(desc->pd_ops->op_req_enqueue);
-	LASSERT(desc->pd_ops->op_req_dequeue);
-	LASSERT(desc->pd_compat);
+	LASSERT(svcpt != NULL);
+	LASSERT(desc->pd_ops != NULL);
+	LASSERT(desc->pd_ops->op_res_get != NULL);
+	LASSERT(desc->pd_ops->op_req_get != NULL);
+	LASSERT(desc->pd_ops->op_req_enqueue != NULL);
+	LASSERT(desc->pd_ops->op_req_dequeue != NULL);
+	LASSERT(desc->pd_compat != NULL);
 
 	policy = kzalloc_node(sizeof(*policy), GFP_NOFS,
 			cfs_cpt_spread_node(svcpt->scp_service->srv_cptable,
 					    svcpt->scp_cpt));
-	if (!policy)
+	if (policy == NULL)
 		return -ENOMEM;
 
 	policy->pol_nrs = nrs;
@@ -747,7 +767,7 @@ static int nrs_policy_register(struct ptlrpc_nrs *nrs,
 	spin_lock(&nrs->nrs_lock);
 
 	tmp = nrs_policy_find_locked(nrs, policy->pol_desc->pd_name);
-	if (tmp) {
+	if (tmp != NULL) {
 		CERROR("NRS policy %s has been registered, can't register it for %s\n",
 		       policy->pol_desc->pd_name,
 		       svcpt->scp_service->srv_name);
@@ -769,7 +789,7 @@ static int nrs_policy_register(struct ptlrpc_nrs *nrs,
 	spin_unlock(&nrs->nrs_lock);
 
 	if (rc != 0)
-		(void)nrs_policy_unregister(nrs, policy->pol_desc->pd_name);
+		(void) nrs_policy_unregister(nrs, policy->pol_desc->pd_name);
 
 	return rc;
 }
@@ -797,7 +817,7 @@ static void ptlrpc_nrs_req_add_nolock(struct ptlrpc_request *req)
 	 */
 	if (unlikely(list_empty(&policy->pol_list_queued)))
 		list_add_tail(&policy->pol_list_queued,
-			      &policy->pol_nrs->nrs_policy_queued);
+				  &policy->pol_nrs->nrs_policy_queued);
 }
 
 /**
@@ -937,14 +957,14 @@ static int nrs_svcpt_setup_locked(struct ptlrpc_service_part *svcpt)
 	/**
 	 * Optionally allocate a high-priority NRS head.
 	 */
-	if (!svcpt->scp_service->srv_ops.so_hpreq_handler)
+	if (svcpt->scp_service->srv_ops.so_hpreq_handler == NULL)
 		goto out;
 
 	svcpt->scp_nrs_hp =
 		kzalloc_node(sizeof(*svcpt->scp_nrs_hp), GFP_NOFS,
 			cfs_cpt_spread_node(svcpt->scp_service->srv_cptable,
 					    svcpt->scp_cpt));
-	if (!svcpt->scp_nrs_hp) {
+	if (svcpt->scp_nrs_hp == NULL) {
 		rc = -ENOMEM;
 		goto out;
 	}
@@ -975,14 +995,11 @@ static void nrs_svcpt_cleanup_locked(struct ptlrpc_service_part *svcpt)
 	LASSERT(mutex_is_locked(&nrs_core.nrs_mutex));
 
 again:
-	/* scp_nrs_hp could be NULL due to short of memory. */
-	nrs = hp ? svcpt->scp_nrs_hp : &svcpt->scp_nrs_reg;
-	/* check the nrs_svcpt to see if nrs is initialized. */
-	if (!nrs || !nrs->nrs_svcpt)
-		return;
+	nrs = nrs_svcpt2nrs(svcpt, hp);
 	nrs->nrs_stopping = 1;
 
-	list_for_each_entry_safe(policy, tmp, &nrs->nrs_policy_list, pol_list) {
+	list_for_each_entry_safe(policy, tmp, &nrs->nrs_policy_list,
+				     pol_list) {
 		rc = nrs_policy_unregister(nrs, policy->pol_desc->pd_name);
 		LASSERT(rc == 0);
 	}
@@ -1042,6 +1059,7 @@ static int nrs_policy_unregister_locked(struct ptlrpc_nrs_pol_desc *desc)
 	LASSERT(mutex_is_locked(&ptlrpc_all_services_mutex));
 
 	list_for_each_entry(svc, &ptlrpc_all_services, srv_list) {
+
 		if (!nrs_policy_compatible(svc, desc) ||
 		    unlikely(svc->srv_is_stopping))
 			continue;
@@ -1071,7 +1089,7 @@ again:
 			}
 		}
 
-		if (desc->pd_ops->op_lprocfs_fini)
+		if (desc->pd_ops->op_lprocfs_fini != NULL)
 			desc->pd_ops->op_lprocfs_fini(svc);
 	}
 
@@ -1097,15 +1115,15 @@ static int ptlrpc_nrs_policy_register(struct ptlrpc_nrs_pol_conf *conf)
 {
 	struct ptlrpc_service *svc;
 	struct ptlrpc_nrs_pol_desc *desc;
-	size_t len;
 	int rc = 0;
 
-	LASSERT(conf->nc_ops);
-	LASSERT(conf->nc_compat);
+	LASSERT(conf != NULL);
+	LASSERT(conf->nc_ops != NULL);
+	LASSERT(conf->nc_compat != NULL);
 	LASSERT(ergo(conf->nc_compat == nrs_policy_compat_one,
-		     conf->nc_compat_svc_name));
+		conf->nc_compat_svc_name != NULL));
 	LASSERT(ergo((conf->nc_flags & PTLRPC_NRS_FL_REG_EXTERN) != 0,
-		     conf->nc_owner));
+		     conf->nc_owner != NULL));
 
 	conf->nc_name[NRS_POL_NAME_MAX - 1] = '\0';
 
@@ -1128,7 +1146,7 @@ static int ptlrpc_nrs_policy_register(struct ptlrpc_nrs_pol_conf *conf)
 
 	mutex_lock(&nrs_core.nrs_mutex);
 
-	if (nrs_policy_find_desc_locked(conf->nc_name)) {
+	if (nrs_policy_find_desc_locked(conf->nc_name) != NULL) {
 		CERROR("NRS: failing to register policy %s which has already been registered with NRS core!\n",
 		       conf->nc_name);
 		rc = -EEXIST;
@@ -1141,12 +1159,7 @@ static int ptlrpc_nrs_policy_register(struct ptlrpc_nrs_pol_conf *conf)
 		goto fail;
 	}
 
-	len = strlcpy(desc->pd_name, conf->nc_name, sizeof(desc->pd_name));
-	if (len >= sizeof(desc->pd_name)) {
-		kfree(desc);
-		rc = -E2BIG;
-		goto fail;
-	}
+	strncpy(desc->pd_name, conf->nc_name, NRS_POL_NAME_MAX);
 	desc->pd_ops = conf->nc_ops;
 	desc->pd_compat = conf->nc_compat;
 	desc->pd_compat_svc_name = conf->nc_compat_svc_name;
@@ -1211,7 +1224,7 @@ again:
 		 * No need to take a reference to other modules here, as we
 		 * will be calling from the module's init() function.
 		 */
-		if (desc->pd_ops->op_lprocfs_init) {
+		if (desc->pd_ops->op_lprocfs_init != NULL) {
 			rc = desc->pd_ops->op_lprocfs_init(svc);
 			if (rc != 0) {
 				rc2 = nrs_policy_unregister_locked(desc);
@@ -1275,7 +1288,7 @@ int ptlrpc_service_nrs_setup(struct ptlrpc_service *svc)
 		if (!nrs_policy_compatible(svc, desc))
 			continue;
 
-		if (desc->pd_ops->op_lprocfs_init) {
+		if (desc->pd_ops->op_lprocfs_init != NULL) {
 			rc = desc->pd_ops->op_lprocfs_init(svc);
 			if (rc != 0)
 				goto failed;
@@ -1316,7 +1329,7 @@ void ptlrpc_service_nrs_cleanup(struct ptlrpc_service *svc)
 		if (!nrs_policy_compatible(svc, desc))
 			continue;
 
-		if (desc->pd_ops->op_lprocfs_fini)
+		if (desc->pd_ops->op_lprocfs_fini != NULL)
 			desc->pd_ops->op_lprocfs_fini(svc);
 	}
 
@@ -1363,8 +1376,7 @@ void ptlrpc_nrs_req_finalize(struct ptlrpc_request *req)
 	if (req->rq_nrq.nr_initialized) {
 		nrs_resource_put_safe(req->rq_nrq.nr_res_ptrs);
 		/* no protection on bit nr_initialized because no
-		 * contention at this late stage
-		 */
+		 * contention at this late stage */
 		req->rq_nrq.nr_finalized = 1;
 	}
 }
@@ -1422,7 +1434,7 @@ static void nrs_request_removed(struct ptlrpc_nrs_policy *policy)
 			policy->pol_nrs->nrs_req_queued);
 
 		list_move_tail(&policy->pol_list_queued,
-			       &policy->pol_nrs->nrs_policy_queued);
+				   &policy->pol_nrs->nrs_policy_queued);
 	}
 }
 
@@ -1454,9 +1466,10 @@ ptlrpc_nrs_req_get_nolock0(struct ptlrpc_service_part *svcpt, bool hp,
 	 * Always try to drain requests from all NRS polices even if they are
 	 * inactive, because the user can change policy status at runtime.
 	 */
-	list_for_each_entry(policy, &nrs->nrs_policy_queued, pol_list_queued) {
+	list_for_each_entry(policy, &nrs->nrs_policy_queued,
+				pol_list_queued) {
 		nrq = nrs_request_get(policy, peek, force);
-		if (nrq) {
+		if (nrq != NULL) {
 			if (likely(!peek)) {
 				nrq->nr_started = 1;
 
@@ -1606,7 +1619,8 @@ void ptlrpc_nrs_fini(void)
 	struct ptlrpc_nrs_pol_desc *desc;
 	struct ptlrpc_nrs_pol_desc *tmp;
 
-	list_for_each_entry_safe(desc, tmp, &nrs_core.nrs_policies, pd_list) {
+	list_for_each_entry_safe(desc, tmp, &nrs_core.nrs_policies,
+				     pd_list) {
 		list_del_init(&desc->pd_list);
 		kfree(desc);
 	}

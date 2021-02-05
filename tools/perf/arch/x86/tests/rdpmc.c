@@ -1,16 +1,12 @@
-#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <linux/types.h>
 #include "perf.h"
 #include "debug.h"
 #include "tests/tests.h"
 #include "cloexec.h"
-#include "util.h"
 #include "arch-tests.h"
 
 static u64 rdpmc(unsigned int counter)
@@ -63,7 +59,7 @@ static u64 mmap_read_self(void *addr)
 		u64 quot, rem;
 
 		quot = (cyc >> time_shift);
-		rem = cyc & (((u64)1 << time_shift) - 1);
+		rem = cyc & ((1 << time_shift) - 1);
 		delta = time_offset + quot * time_mult +
 			((rem * time_mult) >> time_shift);
 
@@ -107,7 +103,6 @@ static int __test__rdpmc(void)
 
 	sigfillset(&sa.sa_mask);
 	sa.sa_sigaction = segfault_handler;
-	sa.sa_flags = 0;
 	sigaction(SIGSEGV, &sa, NULL);
 
 	fd = sys_perf_event_open(&attr, 0, -1, -1,
@@ -115,14 +110,14 @@ static int __test__rdpmc(void)
 	if (fd < 0) {
 		pr_err("Error: sys_perf_event_open() syscall returned "
 		       "with %d (%s)\n", fd,
-		       str_error_r(errno, sbuf, sizeof(sbuf)));
+		       strerror_r(errno, sbuf, sizeof(sbuf)));
 		return -1;
 	}
 
 	addr = mmap(NULL, page_size, PROT_READ, MAP_SHARED, fd, 0);
 	if (addr == (void *)(-1)) {
 		pr_err("Error: mmap() syscall returned with (%s)\n",
-		       str_error_r(errno, sbuf, sizeof(sbuf)));
+		       strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_close;
 	}
 
@@ -154,7 +149,7 @@ out_close:
 	return 0;
 }
 
-int test__rdpmc(int subtest __maybe_unused)
+int test__rdpmc(void)
 {
 	int status = 0;
 	int wret = 0;

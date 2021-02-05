@@ -39,8 +39,8 @@ struct mcip_cmd {
 #define CMD_DEBUG_SET_MASK		0x34
 #define CMD_DEBUG_SET_SELECT		0x36
 
-#define CMD_GFRC_READ_LO		0x42
-#define CMD_GFRC_READ_HI		0x43
+#define CMD_GRTC_READ_LO		0x42
+#define CMD_GRTC_READ_HI		0x43
 
 #define CMD_IDU_ENABLE			0x71
 #define CMD_IDU_DISABLE			0x72
@@ -53,22 +53,6 @@ struct mcip_cmd {
 
 #define IDU_M_DISTRI_RR			0x0
 #define IDU_M_DISTRI_DEST		0x2
-};
-
-struct mcip_bcr {
-#ifdef CONFIG_CPU_BIG_ENDIAN
-		unsigned int pad3:8,
-			     idu:1, llm:1, num_cores:6,
-			     iocoh:1,  gfrc:1, dbg:1, pad2:1,
-			     msg:1, sem:1, ipi:1, pad:1,
-			     ver:8;
-#else
-		unsigned int ver:8,
-			     pad:1, ipi:1, sem:1, msg:1,
-			     pad2:1, dbg:1, gfrc:1, iocoh:1,
-			     num_cores:6, llm:1, idu:1,
-			     pad3:8;
-#endif
 };
 
 /*

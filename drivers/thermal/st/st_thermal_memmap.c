@@ -42,8 +42,7 @@ static irqreturn_t st_mmap_thermal_trip_handler(int irq, void *sdata)
 {
 	struct st_thermal_sensor *sensor = sdata;
 
-	thermal_zone_device_update(sensor->thermal_dev,
-				   THERMAL_EVENT_UNSPECIFIED);
+	thermal_zone_device_update(sensor->thermal_dev);
 
 	return IRQ_HANDLED;
 }

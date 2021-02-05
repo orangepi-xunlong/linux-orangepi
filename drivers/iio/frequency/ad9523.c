@@ -284,7 +284,7 @@ struct ad9523_state {
 	} data[2] ____cacheline_aligned;
 };
 
-static int ad9523_read(struct iio_dev *indio_dev, unsigned int addr)
+static int ad9523_read(struct iio_dev *indio_dev, unsigned addr)
 {
 	struct ad9523_state *st = iio_priv(indio_dev);
 	int ret;
@@ -318,8 +318,7 @@ static int ad9523_read(struct iio_dev *indio_dev, unsigned int addr)
 	return ret;
 };
 
-static int ad9523_write(struct iio_dev *indio_dev,
-		unsigned int addr, unsigned int val)
+static int ad9523_write(struct iio_dev *indio_dev, unsigned addr, unsigned val)
 {
 	struct ad9523_state *st = iio_priv(indio_dev);
 	int ret;
@@ -352,11 +351,11 @@ static int ad9523_io_update(struct iio_dev *indio_dev)
 }
 
 static int ad9523_vco_out_map(struct iio_dev *indio_dev,
-			      unsigned int ch, unsigned int out)
+			      unsigned ch, unsigned out)
 {
 	struct ad9523_state *st = iio_priv(indio_dev);
 	int ret;
-	unsigned int mask;
+	unsigned mask;
 
 	switch (ch) {
 	case 0 ... 3:
@@ -406,7 +405,7 @@ static int ad9523_vco_out_map(struct iio_dev *indio_dev,
 }
 
 static int ad9523_set_clock_provider(struct iio_dev *indio_dev,
-			      unsigned int ch, unsigned long freq)
+			      unsigned ch, unsigned long freq)
 {
 	struct ad9523_state *st = iio_priv(indio_dev);
 	long tmp1, tmp2;
@@ -620,7 +619,7 @@ static int ad9523_read_raw(struct iio_dev *indio_dev,
 			   long m)
 {
 	struct ad9523_state *st = iio_priv(indio_dev);
-	unsigned int code;
+	unsigned code;
 	int ret;
 
 	mutex_lock(&indio_dev->mlock);
@@ -656,7 +655,7 @@ static int ad9523_write_raw(struct iio_dev *indio_dev,
 			    long mask)
 {
 	struct ad9523_state *st = iio_priv(indio_dev);
-	unsigned int reg;
+	unsigned reg;
 	int ret, tmp, code;
 
 	mutex_lock(&indio_dev->mlock);
@@ -710,8 +709,8 @@ out:
 }
 
 static int ad9523_reg_access(struct iio_dev *indio_dev,
-			      unsigned int reg, unsigned int writeval,
-			      unsigned int *readval)
+			      unsigned reg, unsigned writeval,
+			      unsigned *readval)
 {
 	int ret;
 

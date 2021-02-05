@@ -42,10 +42,13 @@
 
 
 
-static const u8 mac_bcast[ETH_ALEN + 2] __long_aligned = {
+#ifndef __long_aligned
+#define __long_aligned __attribute__((aligned((sizeof(long)))))
+#endif
+static const u8 mac_bcast[ETH_ALEN] __long_aligned = {
 	0xff, 0xff, 0xff, 0xff, 0xff, 0xff
 };
-static const u8 mac_v6_allmcast[ETH_ALEN + 2] __long_aligned = {
+static const u8 mac_v6_allmcast[ETH_ALEN] __long_aligned = {
 	0x33, 0x33, 0x00, 0x00, 0x00, 0x01
 };
 static const int alb_delta_in_ticks = HZ / ALB_TIMER_TICKS_PER_SEC;
@@ -156,7 +159,7 @@ static int tlb_initialize(struct bonding *bond)
 
 	new_hashtbl = kzalloc(size, GFP_KERNEL);
 	if (!new_hashtbl)
-		return -ENOMEM;
+		return -1;
 
 	spin_lock_bh(&bond->mode_lock);
 
@@ -944,10 +947,6 @@ static void alb_send_lp_vid(struct slave *slave, u8 mac_addr[],
 	skb->priority = TC_PRIO_CONTROL;
 	skb->dev = slave->dev;
 
-	netdev_dbg(slave->bond->dev,
-		   "Send learning packet: dev %s mac %pM vlan %d\n",
-		   slave->dev->name, mac_addr, vid);
-
 	if (vid)
 		__vlan_hwaccel_put_tag(skb, vlan_proto, vid);
 
@@ -970,13 +969,14 @@ static void alb_send_learning_packets(struct slave *slave, u8 mac_addr[],
 	 */
 	rcu_read_lock();
 	netdev_for_each_all_upper_dev_rcu(bond->dev, upper, iter) {
-		if (is_vlan_dev(upper) &&
-		    bond->nest_level == vlan_get_encap_level(upper) - 1) {
-			if (upper->addr_assign_type == NET_ADDR_STOLEN) {
+		if (is_vlan_dev(upper) && vlan_get_encap_level(upper) == 0) {
+			if (strict_match &&
+			    ether_addr_equal_64bits(mac_addr,
+						    upper->dev_addr)) {
 				alb_send_lp_vid(slave, mac_addr,
 						vlan_dev_vlan_proto(upper),
 						vlan_dev_vlan_id(upper));
-			} else {
+			} else if (!strict_match) {
 				alb_send_lp_vid(slave, upper->dev_addr,
 						vlan_dev_vlan_proto(upper),
 						vlan_dev_vlan_id(upper));

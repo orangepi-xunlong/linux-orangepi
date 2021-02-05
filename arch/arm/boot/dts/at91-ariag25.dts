@@ -34,6 +34,15 @@
 	};
 
 	clocks {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		main_clock: clock@0 {
+			compatible = "atmel,osc", "fixed-clock";
+			clock-frequency = <12000000>;
+		};
+
 		slow_xtal {
 			clock-frequency = <32768>;
 		};
@@ -169,7 +178,7 @@
 
 	};
 
-	onewire {
+	onewire@0 {
 		compatible = "w1-gpio";
 		gpios = <&pioA 21 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";

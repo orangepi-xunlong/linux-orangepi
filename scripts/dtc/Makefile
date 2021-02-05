@@ -3,17 +3,13 @@
 hostprogs-y	:= dtc
 always		:= $(hostprogs-y)
 
-dtc-objs	:= dtc.o flattree.o fstree.o data.o livetree.o treesource.o updatetree.o\
-		   srcpos.o checks.o util.o \
-		   script_parser/iniparser.o \
-		   script_parser/dictionary.o \
-		   script_parser/script.o \
-		   script_parser/script_to_dts.o
+dtc-objs	:= dtc.o flattree.o fstree.o data.o livetree.o treesource.o \
+		   srcpos.o checks.o util.o
 dtc-objs	+= dtc-lexer.lex.o dtc-parser.tab.o
 
 # Source files need to get at the userspace version of libfdt_env.h to compile
 
-HOSTCFLAGS_DTC := -I$(src) -I$(src)/libfdt -I$(src)/script_parser
+HOSTCFLAGS_DTC := -I$(src) -I$(src)/libfdt
 
 HOSTCFLAGS_checks.o := $(HOSTCFLAGS_DTC)
 HOSTCFLAGS_data.o := $(HOSTCFLAGS_DTC)
@@ -23,12 +19,7 @@ HOSTCFLAGS_fstree.o := $(HOSTCFLAGS_DTC)
 HOSTCFLAGS_livetree.o := $(HOSTCFLAGS_DTC)
 HOSTCFLAGS_srcpos.o := $(HOSTCFLAGS_DTC)
 HOSTCFLAGS_treesource.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_updatetree.o := $(HOSTCFLAGS_DTC)
 HOSTCFLAGS_util.o := $(HOSTCFLAGS_DTC)
-HOSTCFLAGS_iniparser.o :=$(HOSTCFLAGS_DTC)
-HOSTCFLAGS_dictionary.o :=$(HOSTCFLAGS_DTC)
-HOSTCFLAGS_script.o :=$(HOSTCFLAGS_DTC)
-HOSTCFLAGS_script_to_dts.o :=$(HOSTCFLAGS_DTC)
 
 HOSTCFLAGS_dtc-lexer.lex.o := $(HOSTCFLAGS_DTC)
 HOSTCFLAGS_dtc-parser.tab.o := $(HOSTCFLAGS_DTC)

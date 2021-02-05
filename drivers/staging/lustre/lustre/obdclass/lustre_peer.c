@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -89,8 +93,7 @@ int lustre_uuid_to_peer(const char *uuid, lnet_nid_t *peer_nid, int index)
 EXPORT_SYMBOL(lustre_uuid_to_peer);
 
 /* Add a nid to a niduuid.  Multiple nids can be added to a single uuid;
- * LNET will choose the best one.
- */
+   LNET will choose the best one. */
 int class_add_uuid(const char *uuid, __u64 nid)
 {
 	struct uuid_nid_data *data, *entry;
@@ -139,16 +142,16 @@ int class_add_uuid(const char *uuid, __u64 nid)
 	}
 	return 0;
 }
+EXPORT_SYMBOL(class_add_uuid);
 
 /* Delete the nids for one uuid if specified, otherwise delete all */
 int class_del_uuid(const char *uuid)
 {
 	LIST_HEAD(deathrow);
 	struct uuid_nid_data *data;
-	struct uuid_nid_data *temp;
 
 	spin_lock(&g_uuid_lock);
-	if (uuid) {
+	if (uuid != NULL) {
 		struct obd_uuid tmp;
 
 		obd_str2uuid(&tmp, uuid);
@@ -158,17 +161,18 @@ int class_del_uuid(const char *uuid)
 				break;
 			}
 		}
-	} else {
+	} else
 		list_splice_init(&g_uuid_list, &deathrow);
-	}
 	spin_unlock(&g_uuid_lock);
 
-	if (uuid && list_empty(&deathrow)) {
+	if (uuid != NULL && list_empty(&deathrow)) {
 		CDEBUG(D_INFO, "Try to delete a non-existent uuid %s\n", uuid);
 		return -EINVAL;
 	}
 
-	list_for_each_entry_safe(data, temp, &deathrow, un_list) {
+	while (!list_empty(&deathrow)) {
+		data = list_entry(deathrow.next, struct uuid_nid_data,
+				      un_list);
 		list_del(&data->un_list);
 
 		CDEBUG(D_INFO, "del uuid %s %s/%d\n",

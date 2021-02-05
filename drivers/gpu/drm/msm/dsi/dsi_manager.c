@@ -198,13 +198,9 @@ static enum drm_connector_status dsi_mgr_connector_detect(
 
 static void dsi_mgr_connector_destroy(struct drm_connector *connector)
 {
-	struct dsi_connector *dsi_connector = to_dsi_connector(connector);
-
 	DBG("");
-
+	drm_connector_unregister(connector);
 	drm_connector_cleanup(connector);
-
-	kfree(dsi_connector);
 }
 
 static void dsi_dual_connector_fix_modes(struct drm_connector *connector)
@@ -542,9 +538,12 @@ struct drm_connector *msm_dsi_manager_connector_init(u8 id)
 	struct dsi_connector *dsi_connector;
 	int ret, i;
 
-	dsi_connector = kzalloc(sizeof(*dsi_connector), GFP_KERNEL);
-	if (!dsi_connector)
-		return ERR_PTR(-ENOMEM);
+	dsi_connector = devm_kzalloc(msm_dsi->dev->dev,
+				sizeof(*dsi_connector), GFP_KERNEL);
+	if (!dsi_connector) {
+		ret = -ENOMEM;
+		goto fail;
+	}
 
 	dsi_connector->id = id;
 
@@ -553,7 +552,7 @@ struct drm_connector *msm_dsi_manager_connector_init(u8 id)
 	ret = drm_connector_init(msm_dsi->dev, connector,
 			&dsi_mgr_connector_funcs, DRM_MODE_CONNECTOR_DSI);
 	if (ret)
-		return ERR_PTR(ret);
+		goto fail;
 
 	drm_connector_helper_add(connector, &dsi_mgr_conn_helper_funcs);
 
@@ -566,11 +565,21 @@ struct drm_connector *msm_dsi_manager_connector_init(u8 id)
 	connector->interlace_allowed = 0;
 	connector->doublescan_allowed = 0;
 
+	ret = drm_connector_register(connector);
+	if (ret)
+		goto fail;
+
 	for (i = 0; i < MSM_DSI_ENCODER_NUM; i++)
 		drm_mode_connector_attach_encoder(connector,
 						msm_dsi->encoders[i]);
 
 	return connector;
+
+fail:
+	if (connector)
+		dsi_mgr_connector_destroy(connector);
+
+	return ERR_PTR(ret);
 }
 
 /* initialize bridge */
@@ -765,7 +774,7 @@ restore_host0:
 	return ret;
 }
 
-bool msm_dsi_manager_cmd_xfer_trigger(int id, u32 dma_base, u32 len)
+bool msm_dsi_manager_cmd_xfer_trigger(int id, u32 iova, u32 len)
 {
 	struct msm_dsi *msm_dsi = dsi_mgr_get_dsi(id);
 	struct msm_dsi *msm_dsi0 = dsi_mgr_get_dsi(DSI_0);
@@ -775,9 +784,9 @@ bool msm_dsi_manager_cmd_xfer_trigger(int id, u32 dma_base, u32 len)
 		return false;
 
 	if (IS_SYNC_NEEDED() && msm_dsi0)
-		msm_dsi_host_cmd_xfer_commit(msm_dsi0->host, dma_base, len);
+		msm_dsi_host_cmd_xfer_commit(msm_dsi0->host, iova, len);
 
-	msm_dsi_host_cmd_xfer_commit(host, dma_base, len);
+	msm_dsi_host_cmd_xfer_commit(host, iova, len);
 
 	return true;
 }

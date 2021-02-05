@@ -41,9 +41,11 @@ static void
 mtk8250_set_termios(struct uart_port *port, struct ktermios *termios,
 			struct ktermios *old)
 {
-	struct uart_8250_port *up = up_to_u8250p(port);
 	unsigned long flags;
 	unsigned int baud, quot;
+
+	struct uart_8250_port *up =
+		container_of(port, struct uart_8250_port, port);
 
 	serial8250_do_set_termios(port, termios, old);
 
@@ -62,7 +64,7 @@ mtk8250_set_termios(struct uart_port *port, struct ktermios *termios,
 	 */
 	baud = uart_get_baud_rate(port, termios, old,
 				  port->uartclk / 16 / 0xffff,
-				  port->uartclk);
+				  port->uartclk / 16);
 
 	if (baud <= 115200) {
 		serial_port_out(port, UART_MTK_HIGHS, 0x0);
@@ -76,6 +78,10 @@ mtk8250_set_termios(struct uart_port *port, struct ktermios *termios,
 		quot = DIV_ROUND_UP(port->uartclk, 4 * baud);
 	} else {
 		serial_port_out(port, UART_MTK_HIGHS, 0x3);
+
+		/* Set to highest baudrate supported */
+		if (baud >= 1152000)
+			baud = 921600;
 		quot = DIV_ROUND_UP(port->uartclk, 256 * baud);
 	}
 
@@ -110,7 +116,7 @@ mtk8250_set_termios(struct uart_port *port, struct ktermios *termios,
 		tty_termios_encode_baud_rate(termios, baud, baud);
 }
 
-static int __maybe_unused mtk8250_runtime_suspend(struct device *dev)
+static int mtk8250_runtime_suspend(struct device *dev)
 {
 	struct mtk8250_data *data = dev_get_drvdata(dev);
 
@@ -120,7 +126,7 @@ static int __maybe_unused mtk8250_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused mtk8250_runtime_resume(struct device *dev)
+static int mtk8250_runtime_resume(struct device *dev)
 {
 	struct mtk8250_data *data = dev_get_drvdata(dev);
 	int err;
@@ -254,7 +260,8 @@ static int mtk8250_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused mtk8250_suspend(struct device *dev)
+#ifdef CONFIG_PM_SLEEP
+static int mtk8250_suspend(struct device *dev)
 {
 	struct mtk8250_data *data = dev_get_drvdata(dev);
 
@@ -263,7 +270,7 @@ static int __maybe_unused mtk8250_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused mtk8250_resume(struct device *dev)
+static int mtk8250_resume(struct device *dev)
 {
 	struct mtk8250_data *data = dev_get_drvdata(dev);
 
@@ -271,6 +278,7 @@ static int __maybe_unused mtk8250_resume(struct device *dev)
 
 	return 0;
 }
+#endif /* CONFIG_PM_SLEEP */
 
 static const struct dev_pm_ops mtk8250_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(mtk8250_suspend, mtk8250_resume)

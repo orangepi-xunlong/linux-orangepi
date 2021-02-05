@@ -173,7 +173,7 @@ struct comedi_subdevice {
 
 	void *lock;
 	void *busy;
-	unsigned int runflags;
+	unsigned runflags;
 	spinlock_t spin_lock;	/* generic spin-lock for COMEDI and drivers */
 
 	unsigned int io_bits;
@@ -566,7 +566,7 @@ struct comedi_device {
 
 void comedi_event(struct comedi_device *dev, struct comedi_subdevice *s);
 
-struct comedi_device *comedi_dev_get_from_minor(unsigned int minor);
+struct comedi_device *comedi_dev_get_from_minor(unsigned minor);
 int comedi_dev_put(struct comedi_device *dev);
 
 bool comedi_is_subdevice_running(struct comedi_subdevice *s);
@@ -984,8 +984,6 @@ int comedi_dio_insn_config(struct comedi_device *, struct comedi_subdevice *,
 			   unsigned int mask);
 unsigned int comedi_dio_update_state(struct comedi_subdevice *,
 				     unsigned int *data);
-unsigned int comedi_bytes_per_scan_cmd(struct comedi_subdevice *s,
-				       struct comedi_cmd *cmd);
 unsigned int comedi_bytes_per_scan(struct comedi_subdevice *s);
 unsigned int comedi_nscans_left(struct comedi_subdevice *s,
 				unsigned int nscans);

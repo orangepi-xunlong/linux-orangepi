@@ -30,7 +30,7 @@
  * access the metadata and fragment caches.
  *
  * To avoid out of memory and fragmentation issues with vmalloc the cache
- * uses sequences of kmalloced PAGE_SIZE buffers.
+ * uses sequences of kmalloced PAGE_CACHE_SIZE buffers.
  *
  * It should be noted that the cache is not used for file datablocks, these
  * are decompressed and cached in the page-cache in the normal way.  The
@@ -228,7 +228,7 @@ void squashfs_cache_delete(struct squashfs_cache *cache)
 /*
  * Initialise cache allocating the specified number of entries, each of
  * size block_size.  To avoid vmalloc fragmentation issues each entry
- * is allocated as a sequence of kmalloced PAGE_SIZE buffers.
+ * is allocated as a sequence of kmalloced PAGE_CACHE_SIZE buffers.
  */
 struct squashfs_cache *squashfs_cache_init(char *name, int entries,
 	int block_size)
@@ -252,7 +252,7 @@ struct squashfs_cache *squashfs_cache_init(char *name, int entries,
 	cache->unused = entries;
 	cache->entries = entries;
 	cache->block_size = block_size;
-	cache->pages = block_size >> PAGE_SHIFT;
+	cache->pages = block_size >> PAGE_CACHE_SHIFT;
 	cache->pages = cache->pages ? cache->pages : 1;
 	cache->name = name;
 	cache->num_waiters = 0;
@@ -302,10 +302,10 @@ int squashfs_copy_data(void *buffer, struct squashfs_cache_entry *entry,
 		return min(length, entry->length - offset);
 
 	while (offset < entry->length) {
-		void *buff = kmap_atomic(entry->page[offset / PAGE_SIZE])
-			     + (offset % PAGE_SIZE);
+		void *buff = kmap_atomic(entry->page[offset / PAGE_CACHE_SIZE])
+			     + (offset % PAGE_CACHE_SIZE);
 		int bytes = min_t(int, entry->length - offset,
-				PAGE_SIZE - (offset % PAGE_SIZE));
+				PAGE_CACHE_SIZE - (offset % PAGE_CACHE_SIZE));
 
 		if (bytes >= remaining) {
 			memcpy(buffer, buff, remaining);
@@ -408,7 +408,7 @@ struct squashfs_cache_entry *squashfs_get_datablock(struct super_block *sb,
  */
 void *squashfs_read_table(struct super_block *sb, u64 block, int length)
 {
-	int pages = (length + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	int pages = (length + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
 	struct page **page;
 	void *buff;
 	int res;

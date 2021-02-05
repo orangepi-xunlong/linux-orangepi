@@ -168,9 +168,8 @@ struct nvec_chip {
 int nvec_write_async(struct nvec_chip *nvec, const unsigned char *data,
 		     short size);
 
-int nvec_write_sync(struct nvec_chip *nvec,
-		    const unsigned char *data, short size,
-		    struct nvec_msg **msg);
+struct nvec_msg *nvec_write_sync(struct nvec_chip *nvec,
+				 const unsigned char *data, short size);
 
 int nvec_register_notifier(struct nvec_chip *nvec,
 			   struct notifier_block *nb,

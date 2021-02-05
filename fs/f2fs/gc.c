@@ -717,7 +717,7 @@ static int move_data_block(struct inode *inode, block_t bidx,
 		.type = DATA,
 		.temp = COLD,
 		.op = REQ_OP_READ,
-		.op_flags = 0,
+		.op_flags = REQ_SYNC,
 		.encrypted_page = NULL,
 		.in_list = false,
 		.retry = false,
@@ -841,7 +841,7 @@ write_page:
 	f2fs_wait_on_page_writeback(dn.node_page, NODE, true, true);
 
 	fio.op = REQ_OP_WRITE;
-	fio.op_flags = REQ_SYNC;
+	fio.op_flags = REQ_SYNC | REQ_NOIDLE;
 	fio.new_blkaddr = newaddr;
 	f2fs_submit_page_write(&fio);
 	if (fio.retry) {

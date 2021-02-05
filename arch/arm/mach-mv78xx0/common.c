@@ -18,13 +18,13 @@
 #include <asm/hardware/cache-feroceon-l2.h>
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
+#include <mach/mv78xx0.h>
+#include <mach/bridge-regs.h>
 #include <linux/platform_data/usb-ehci-orion.h>
 #include <linux/platform_data/mtd-orion_nand.h>
 #include <plat/time.h>
 #include <plat/common.h>
 #include <plat/addr-map.h>
-#include "mv78xx0.h"
-#include "bridge-regs.h"
 #include "common.h"
 
 static int get_tclk(void);
@@ -168,7 +168,8 @@ static struct clk *tclk;
 
 static void __init clk_init(void)
 {
-	tclk = clk_register_fixed_rate(NULL, "tclk", NULL, 0, get_tclk());
+	tclk = clk_register_fixed_rate(NULL, "tclk", NULL, CLK_IS_ROOT,
+				       get_tclk());
 
 	orion_clkdev_init(tclk);
 }
@@ -219,6 +220,7 @@ void __init mv78xx0_ge01_init(struct mv643xx_eth_platform_data *eth_data)
 {
 	orion_ge01_init(eth_data,
 			GE01_PHYS_BASE, IRQ_MV78XX0_GE01_SUM,
+			NO_IRQ,
 			MV643XX_TX_CSUM_DEFAULT_LIMIT);
 }
 
@@ -241,7 +243,9 @@ void __init mv78xx0_ge10_init(struct mv643xx_eth_platform_data *eth_data)
 		eth_data->duplex = DUPLEX_FULL;
 	}
 
-	orion_ge10_init(eth_data, GE10_PHYS_BASE, IRQ_MV78XX0_GE10_SUM);
+	orion_ge10_init(eth_data,
+			GE10_PHYS_BASE, IRQ_MV78XX0_GE10_SUM,
+			NO_IRQ);
 }
 
 
@@ -263,7 +267,9 @@ void __init mv78xx0_ge11_init(struct mv643xx_eth_platform_data *eth_data)
 		eth_data->duplex = DUPLEX_FULL;
 	}
 
-	orion_ge11_init(eth_data, GE11_PHYS_BASE, IRQ_MV78XX0_GE11_SUM);
+	orion_ge11_init(eth_data,
+			GE11_PHYS_BASE, IRQ_MV78XX0_GE11_SUM,
+			NO_IRQ);
 }
 
 /*****************************************************************************
@@ -338,7 +344,7 @@ void __init mv78xx0_init_early(void)
 				DDR_WINDOW_CPU1_BASE, DDR_WINDOW_CPU_SZ);
 }
 
-void __ref mv78xx0_timer_init(void)
+void __init_refok mv78xx0_timer_init(void)
 {
 	orion_time_init(BRIDGE_VIRT_BASE, BRIDGE_INT_TIMER1_CLR,
 			IRQ_MV78XX0_TIMER_1, get_tclk());
@@ -399,8 +405,9 @@ void __init mv78xx0_init(void)
 	printk("HCLK = %dMHz, ", (hclk + 499999) / 1000000);
 	printk("TCLK = %dMHz\n", (get_tclk() + 499999) / 1000000);
 
-	if (IS_ENABLED(CONFIG_CACHE_FEROCEON_L2))
-		feroceon_l2_init(is_l2_writethrough());
+#ifdef CONFIG_CACHE_FEROCEON_L2
+	feroceon_l2_init(is_l2_writethrough());
+#endif
 
 	/* Setup root of clk tree */
 	clk_init();

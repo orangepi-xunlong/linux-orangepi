@@ -24,21 +24,19 @@ static void ht_irqdispatch(void)
 	}
 }
 
-#define UNUSED_IPS (CAUSEF_IP5 | CAUSEF_IP4 | CAUSEF_IP1 | CAUSEF_IP0)
-
 void mach_irq_dispatch(unsigned int pending)
 {
 	if (pending & CAUSEF_IP7)
 		do_IRQ(LOONGSON_TIMER_IRQ);
 #if defined(CONFIG_SMP)
-	if (pending & CAUSEF_IP6)
+	else if (pending & CAUSEF_IP6)
 		loongson3_ipi_interrupt(NULL);
 #endif
-	if (pending & CAUSEF_IP3)
+	else if (pending & CAUSEF_IP3)
 		ht_irqdispatch();
-	if (pending & CAUSEF_IP2)
+	else if (pending & CAUSEF_IP2)
 		do_IRQ(LOONGSON_UART_IRQ);
-	if (pending & UNUSED_IPS) {
+	else {
 		pr_err("%s : spurious interrupt\n", __func__);
 		spurious_interrupt();
 	}

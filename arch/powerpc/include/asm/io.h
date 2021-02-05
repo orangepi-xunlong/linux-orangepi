@@ -241,35 +241,6 @@ static inline void out_be64(volatile u64 __iomem *addr, u64 val)
 #endif
 #endif /* __powerpc64__ */
 
-
-/*
- * Simple Cache inhibited accessors
- * Unlike the DEF_MMIO_* macros, these don't include any h/w memory
- * barriers, callers need to manage memory barriers on their own.
- * These can only be used in hypervisor real mode.
- */
-
-static inline u32 _lwzcix(unsigned long addr)
-{
-	u32 ret;
-
-	__asm__ __volatile__("lwzcix %0,0, %1"
-			     : "=r" (ret) : "r" (addr) : "memory");
-	return ret;
-}
-
-static inline void _stbcix(u64 addr, u8 val)
-{
-	__asm__ __volatile__("stbcix %0,0,%1"
-		: : "r" (val), "r" (addr) : "memory");
-}
-
-static inline void _stwcix(u64 addr, u32 val)
-{
-	__asm__ __volatile__("stwcix %0,0,%1"
-		: : "r" (val), "r" (addr) : "memory");
-}
-
 /*
  * Low level IO stream instructions are defined out of line for now
  */
@@ -329,17 +300,23 @@ extern void _memcpy_toio(volatile void __iomem *dest, const void *src,
  * When CONFIG_PPC_INDIRECT_MMIO is set, the platform can provide hooks
  * on all MMIOs. (Note that this is all 64 bits only for now)
  *
- * To help platforms who may need to differentiate MMIO addresses in
+ * To help platforms who may need to differenciate MMIO addresses in
  * their hooks, a bitfield is reserved for use by the platform near the
  * top of MMIO addresses (not PIO, those have to cope the hard way).
  *
- * The highest address in the kernel virtual space are:
+ * This bit field is 12 bits and is at the top of the IO virtual
+ * addresses PCI_IO_INDIRECT_TOKEN_MASK.
  *
- *  d0003fffffffffff	# with Hash MMU
- *  c00fffffffffffff	# with Radix MMU
+ * The kernel virtual space is thus:
  *
- * The top 4 bits are reserved as the region ID on hash, leaving us 8 bits
- * that can be used for the field.
+ *  0xD000000000000000		: vmalloc
+ *  0xD000080000000000		: PCI PHB IO space
+ *  0xD000080080000000		: ioremap
+ *  0xD0000fffffffffff		: end of ioremap region
+ *
+ * Since the top 4 bits are reserved as the region ID, we use thus
+ * the next 12 bits and keep 4 bits available for the future if the
+ * virtual address space is ever to be extended.
  *
  * The direct IO mapping operations will then mask off those bits
  * before doing the actual access, though that only happen when
@@ -351,8 +328,8 @@ extern void _memcpy_toio(volatile void __iomem *dest, const void *src,
  */
 
 #ifdef CONFIG_PPC_INDIRECT_MMIO
-#define PCI_IO_IND_TOKEN_SHIFT	52
-#define PCI_IO_IND_TOKEN_MASK	(0xfful << PCI_IO_IND_TOKEN_SHIFT)
+#define PCI_IO_IND_TOKEN_MASK	0x0fff000000000000ul
+#define PCI_IO_IND_TOKEN_SHIFT	48
 #define PCI_FIX_ADDR(addr)						\
 	((PCI_IO_ADDR)(((unsigned long)(addr)) & ~PCI_IO_IND_TOKEN_MASK))
 #define PCI_GET_ADDR_TOKEN(addr)					\
@@ -408,17 +385,6 @@ static inline void __raw_writeq(unsigned long v, volatile void __iomem *addr)
 {
 	*(volatile unsigned long __force *)PCI_FIX_ADDR(addr) = v;
 }
-
-/*
- * Real mode version of the above. stdcix is only supposed to be used
- * in hypervisor real mode as per the architecture spec.
- */
-static inline void __raw_rm_writeq(u64 val, volatile void __iomem *paddr)
-{
-	__asm__ __volatile__("stdcix %0,0,%1"
-		: : "r" (val), "r" (paddr) : "memory");
-}
-
 #endif /* __powerpc64__ */
 
 /*

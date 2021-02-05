@@ -6,14 +6,7 @@
 #include "tests.h"
 #include "debug.h"
 
-#ifndef O_DIRECTORY
-#define O_DIRECTORY    00200000
-#endif
-#ifndef AT_FDCWD
-#define AT_FDCWD       -100
-#endif
-
-int test__syscall_openat_tp_fields(int subtest __maybe_unused)
+int test__syscall_openat_tp_fields(void)
 {
 	struct record_opts opts = {
 		.target = {
@@ -51,21 +44,21 @@ int test__syscall_openat_tp_fields(int subtest __maybe_unused)
 		goto out_delete_evlist;
 	}
 
-	perf_evsel__config(evsel, &opts, NULL);
+	perf_evsel__config(evsel, &opts);
 
 	thread_map__set_pid(evlist->threads, 0, getpid());
 
 	err = perf_evlist__open(evlist);
 	if (err < 0) {
 		pr_debug("perf_evlist__open: %s\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
 
 	err = perf_evlist__mmap(evlist, UINT_MAX, false);
 	if (err < 0) {
 		pr_debug("perf_evlist__mmap: %s\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
 

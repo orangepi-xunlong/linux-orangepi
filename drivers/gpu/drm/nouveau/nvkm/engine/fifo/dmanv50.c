@@ -27,7 +27,6 @@
 #include <core/ramht.h>
 
 #include <nvif/class.h>
-#include <nvif/cl506e.h>
 #include <nvif/unpack.h>
 
 static int
@@ -40,10 +39,10 @@ nv50_fifo_dma_new(struct nvkm_fifo *base, const struct nvkm_oclass *oclass,
 	} *args = data;
 	struct nv50_fifo *fifo = nv50_fifo(base);
 	struct nv50_fifo_chan *chan;
-	int ret = -ENOSYS;
+	int ret;
 
 	nvif_ioctl(parent, "create channel dma size %d\n", size);
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
+	if (nvif_unpack(args->v0, 0, 0, false)) {
 		nvif_ioctl(parent, "create channel dma vers %d vm %llx "
 				   "pushbuf %llx offset %016llx\n",
 			   args->v0.version, args->v0.vm, args->v0.pushbuf,

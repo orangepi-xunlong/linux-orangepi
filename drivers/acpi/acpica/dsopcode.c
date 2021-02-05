@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -243,9 +243,8 @@ acpi_ds_init_buffer_field(u16 aml_opcode,
 	 * For field_flags, use LOCK_RULE = 0 (NO_LOCK),
 	 * UPDATE_RULE = 0 (UPDATE_PRESERVE)
 	 */
-	status =
-	    acpi_ex_prep_common_field_object(obj_desc, field_flags, 0,
-					     bit_offset, bit_count);
+	status = acpi_ex_prep_common_field_object(obj_desc, field_flags, 0,
+						  bit_offset, bit_count);
 	if (ACPI_FAILURE(status)) {
 		goto cleanup;
 	}
@@ -331,9 +330,8 @@ acpi_ds_eval_buffer_field_operands(struct acpi_walk_state *walk_state,
 
 	/* Resolve the operands */
 
-	status =
-	    acpi_ex_resolve_operands(op->common.aml_opcode, ACPI_WALK_OPERANDS,
-				     walk_state);
+	status = acpi_ex_resolve_operands(op->common.aml_opcode,
+					  ACPI_WALK_OPERANDS, walk_state);
 	if (ACPI_FAILURE(status)) {
 		ACPI_ERROR((AE_INFO, "(%s) bad operand(s), status 0x%X",
 			    acpi_ps_get_opcode_name(op->common.aml_opcode),
@@ -416,9 +414,8 @@ acpi_ds_eval_region_operands(struct acpi_walk_state *walk_state,
 
 	/* Resolve the length and address operands to numbers */
 
-	status =
-	    acpi_ex_resolve_operands(op->common.aml_opcode, ACPI_WALK_OPERANDS,
-				     walk_state);
+	status = acpi_ex_resolve_operands(op->common.aml_opcode,
+					  ACPI_WALK_OPERANDS, walk_state);
 	if (ACPI_FAILURE(status)) {
 		return_ACPI_STATUS(status);
 	}
@@ -455,6 +452,7 @@ acpi_ds_eval_region_operands(struct acpi_walk_state *walk_state,
 	/* Now the address and length are valid for this opregion */
 
 	obj_desc->region.flags |= AOPOBJ_DATA_VALID;
+
 	return_ACPI_STATUS(status);
 }
 
@@ -512,9 +510,8 @@ acpi_ds_eval_table_region_operands(struct acpi_walk_state *walk_state,
 	 * Resolve the Signature string, oem_id string,
 	 * and oem_table_id string operands
 	 */
-	status =
-	    acpi_ex_resolve_operands(op->common.aml_opcode, ACPI_WALK_OPERANDS,
-				     walk_state);
+	status = acpi_ex_resolve_operands(op->common.aml_opcode,
+					  ACPI_WALK_OPERANDS, walk_state);
 	if (ACPI_FAILURE(status)) {
 		goto cleanup;
 	}

@@ -302,8 +302,6 @@ xfs_attr3_node_inactive(
 						 &bp, XFS_ATTR_FORK);
 			if (error)
 				return error;
-			node = bp->b_addr;
-			btree = dp->d_ops->node_tree_p(node);
 			child_fsb = be32_to_cpu(btree[i + 1].before);
 			xfs_trans_brelse(*trans, bp);
 		}
@@ -324,7 +322,7 @@ xfs_attr3_node_inactive(
  * Recurse (gasp!) through the attribute nodes until we find leaves.
  * We're doing a depth-first traversal in order to invalidate everything.
  */
-static int
+int
 xfs_attr3_root_inactive(
 	struct xfs_trans	**trans,
 	struct xfs_inode	*dp)
@@ -407,11 +405,21 @@ xfs_attr_inactive(
 		goto out_destroy_fork;
 	xfs_iunlock(dp, lock_mode);
 
+	/*
+	 * Start our first transaction of the day.
+	 *
+	 * All future transactions during this code must be "chained" off
+	 * this one via the trans_dup() call.  All transactions will contain
+	 * the inode, and the inode will always be marked with trans_ihold().
+	 * Since the inode will be locked in all transactions, we must log
+	 * the inode in every transaction to let it float upward through
+	 * the log.
+	 */
 	lock_mode = 0;
-
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_attrinval, 0, 0, 0, &trans);
+	trans = xfs_trans_alloc(mp, XFS_TRANS_ATTRINVAL);
+	error = xfs_trans_reserve(trans, &M_RES(mp)->tr_attrinval, 0, 0);
 	if (error)
-		goto out_destroy_fork;
+		goto out_cancel;
 
 	lock_mode = XFS_ILOCK_EXCL;
 	xfs_ilock(dp, lock_mode);

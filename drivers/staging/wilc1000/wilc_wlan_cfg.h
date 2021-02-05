@@ -10,32 +10,30 @@
 #ifndef WILC_WLAN_CFG_H
 #define WILC_WLAN_CFG_H
 
-struct wilc_cfg_byte {
+typedef struct {
 	u16 id;
 	u16 val;
-};
+} wilc_cfg_byte_t;
 
-struct wilc_cfg_hword {
+typedef struct {
 	u16 id;
 	u16 val;
-};
+} wilc_cfg_hword_t;
 
-struct wilc_cfg_word {
+typedef struct {
 	u32 id;
 	u32 val;
-};
+} wilc_cfg_word_t;
 
-struct wilc_cfg_str {
+typedef struct {
 	u32 id;
 	u8 *str;
-};
+} wilc_cfg_str_t;
 
-struct wilc;
 int wilc_wlan_cfg_set_wid(u8 *frame, u32 offset, u16 id, u8 *buf, int size);
 int wilc_wlan_cfg_get_wid(u8 *frame, u32 offset, u16 id);
 int wilc_wlan_cfg_get_wid_value(u16 wid, u8 *buffer, u32 buffer_size);
-int wilc_wlan_cfg_indicate_rx(struct wilc *wilc, u8 *frame, int size,
-			      struct wilc_cfg_rsp *rsp);
-int wilc_wlan_cfg_init(void);
+int wilc_wlan_cfg_indicate_rx(u8 *frame, int size, wilc_cfg_rsp_t *rsp);
+int wilc_wlan_cfg_init(wilc_debug_func func);
 
 #endif

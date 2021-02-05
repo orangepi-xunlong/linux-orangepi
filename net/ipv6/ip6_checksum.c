@@ -6,7 +6,8 @@
 #ifndef _HAVE_ARCH_IPV6_CSUM
 __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 			const struct in6_addr *daddr,
-			__u32 len, __u8 proto, __wsum csum)
+			__u32 len, unsigned short proto,
+			__wsum csum)
 {
 
 	int carry;
@@ -83,28 +84,9 @@ int udp6_csum_init(struct sk_buff *skb, struct udphdr *uh, int proto)
 	 * we accept a checksum of zero here. When we find the socket
 	 * for the UDP packet we'll check if that socket allows zero checksum
 	 * for IPv6 (set by socket option).
-	 *
-	 * Note, we are only interested in != 0 or == 0, thus the
-	 * force to int.
 	 */
-	err = (__force int)skb_checksum_init_zero_check(skb, proto, uh->check,
-							ip6_compute_pseudo);
-	if (err)
-		return err;
-
-	if (skb->ip_summed == CHECKSUM_COMPLETE && !skb->csum_valid) {
-		/* If SW calculated the value, we know it's bad */
-		if (skb->csum_complete_sw)
-			return 1;
-
-		/* HW says the value is bad. Let's validate that.
-		 * skb->csum is no longer the full packet checksum,
-		 * so don't treat is as such.
-		 */
-		skb_checksum_complete_unset(skb);
-	}
-
-	return 0;
+	return skb_checksum_init_zero_check(skb, proto, uh->check,
+					   ip6_compute_pseudo);
 }
 EXPORT_SYMBOL(udp6_csum_init);
 
@@ -121,16 +103,27 @@ void udp6_set_csum(bool nocheck, struct sk_buff *skb,
 		uh->check = 0;
 	else if (skb_is_gso(skb))
 		uh->check = ~udp_v6_check(len, saddr, daddr, 0);
-	else if (skb->ip_summed == CHECKSUM_PARTIAL) {
-		uh->check = 0;
-		uh->check = udp_v6_check(len, saddr, daddr, lco_csum(skb));
-		if (uh->check == 0)
-			uh->check = CSUM_MANGLED_0;
-	} else {
+	else if (skb_dst(skb) && skb_dst(skb)->dev &&
+		 (skb_dst(skb)->dev->features & NETIF_F_IPV6_CSUM)) {
+
+		BUG_ON(skb->ip_summed == CHECKSUM_PARTIAL);
+
 		skb->ip_summed = CHECKSUM_PARTIAL;
 		skb->csum_start = skb_transport_header(skb) - skb->head;
 		skb->csum_offset = offsetof(struct udphdr, check);
 		uh->check = ~udp_v6_check(len, saddr, daddr, 0);
+	} else {
+		__wsum csum;
+
+		BUG_ON(skb->ip_summed == CHECKSUM_PARTIAL);
+
+		uh->check = 0;
+		csum = skb_checksum(skb, 0, len, 0);
+		uh->check = udp_v6_check(len, saddr, daddr, csum);
+		if (uh->check == 0)
+			uh->check = CSUM_MANGLED_0;
+
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
 	}
 }
 EXPORT_SYMBOL(udp6_set_csum);

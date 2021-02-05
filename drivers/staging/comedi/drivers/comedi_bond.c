@@ -55,16 +55,16 @@
 
 struct bonded_device {
 	struct comedi_device *dev;
-	unsigned int minor;
-	unsigned int subdev;
-	unsigned int nchans;
+	unsigned minor;
+	unsigned subdev;
+	unsigned nchans;
 };
 
 struct comedi_bond_private {
 	char name[256];
 	struct bonded_device **devs;
-	unsigned int ndevs;
-	unsigned int nchans;
+	unsigned ndevs;
+	unsigned nchans;
 };
 
 static int bonding_dio_insn_bits(struct comedi_device *dev,

@@ -40,7 +40,7 @@
 #include <asm/parisc-device.h>
 
 /* See comments in include/asm-parisc/pci.h */
-struct dma_map_ops *hppa_dma_ops __read_mostly;
+struct hppa_dma_ops *hppa_dma_ops __read_mostly;
 EXPORT_SYMBOL(hppa_dma_ops);
 
 static struct device root = {
@@ -877,11 +877,11 @@ static void print_parisc_device(struct parisc_device *dev)
 
 	if (dev->num_addrs) {
 		int k;
-		pr_cont(", additional addresses: ");
+		printk(", additional addresses: ");
 		for (k = 0; k < dev->num_addrs; k++)
-			pr_cont("0x%lx ", dev->addr[k]);
+			printk("0x%lx ", dev->addr[k]);
 	}
-	pr_cont("\n");
+	printk("\n");
 }
 
 /**

@@ -18,7 +18,6 @@
 
 #include <mach/hardware.h>
 #include <asm/hardware/sa1111.h>
-#include <asm/mach-types.h>
 #include <asm/irq.h>
 
 #include "sa1111_generic.h"
@@ -204,30 +203,19 @@ static int pcmcia_probe(struct sa1111_dev *dev)
 	sa1111_writel(PCSSR_S0_SLEEP | PCSSR_S1_SLEEP, base + PCSSR);
 	sa1111_writel(PCCR_S0_FLT | PCCR_S1_FLT, base + PCCR);
 
-	ret = -ENODEV;
 #ifdef CONFIG_SA1100_BADGE4
-	if (machine_is_badge4())
-		ret = pcmcia_badge4_init(dev);
+	pcmcia_badge4_init(dev);
 #endif
 #ifdef CONFIG_SA1100_JORNADA720
-	if (machine_is_jornada720())
-		ret = pcmcia_jornada720_init(dev);
+	pcmcia_jornada720_init(dev);
 #endif
 #ifdef CONFIG_ARCH_LUBBOCK
-	if (machine_is_lubbock())
-		ret = pcmcia_lubbock_init(dev);
+	pcmcia_lubbock_init(dev);
 #endif
 #ifdef CONFIG_ASSABET_NEPONSET
-	if (machine_is_assabet())
-		ret = pcmcia_neponset_init(dev);
+	pcmcia_neponset_init(dev);
 #endif
-
-	if (ret) {
-		release_mem_region(dev->res.start, 512);
-		sa1111_disable_device(dev);
-	}
-
-	return ret;
+	return 0;
 }
 
 static int pcmcia_remove(struct sa1111_dev *dev)

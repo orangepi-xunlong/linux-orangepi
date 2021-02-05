@@ -114,10 +114,11 @@ static struct device_node *find_dlpar_node(char *drc_name, int *node_type)
  */
 static struct slot *find_php_slot(struct device_node *dn)
 {
-	struct slot *slot, *next;
+	struct list_head *tmp, *n;
+	struct slot *slot;
 
-	list_for_each_entry_safe(slot, next, &rpaphp_slot_head,
-				 rpaphp_slot_list) {
+	list_for_each_safe(tmp, n, &rpaphp_slot_head) {
+		slot = list_entry(tmp, struct slot, rpaphp_slot_list);
 		if (slot->dn == dn)
 			return slot;
 	}
@@ -175,7 +176,7 @@ static int dlpar_add_pci_slot(char *drc_name, struct device_node *dn)
 	struct pci_dev *dev;
 	struct pci_controller *phb;
 
-	if (pci_find_bus_by_node(dn))
+	if (pcibios_find_pci_bus(dn))
 		return -EINVAL;
 
 	/* Add pci bus */
@@ -212,7 +213,7 @@ static int dlpar_remove_phb(char *drc_name, struct device_node *dn)
 	struct pci_dn *pdn;
 	int rc = 0;
 
-	if (!pci_find_bus_by_node(dn))
+	if (!pcibios_find_pci_bus(dn))
 		return -EINVAL;
 
 	/* If pci slot is hotpluggable, use hotplug to remove it */
@@ -364,7 +365,7 @@ int dlpar_remove_pci_slot(char *drc_name, struct device_node *dn)
 
 	pci_lock_rescan_remove();
 
-	bus = pci_find_bus_by_node(dn);
+	bus = pcibios_find_pci_bus(dn);
 	if (!bus) {
 		ret = -EINVAL;
 		goto out;
@@ -388,7 +389,7 @@ int dlpar_remove_pci_slot(char *drc_name, struct device_node *dn)
 	}
 
 	/* Remove all devices below slot */
-	pci_hp_remove_devices(bus);
+	pcibios_remove_pci_devices(bus);
 
 	/* Unmap PCI IO space */
 	if (pcibios_unmap_io_space(bus)) {

@@ -30,6 +30,7 @@
 
 struct socrates_nand_host {
 	struct nand_chip	nand_chip;
+	struct mtd_info		mtd;
 	void __iomem		*io_base;
 	struct device		*dev;
 };
@@ -44,8 +45,8 @@ static void socrates_nand_write_buf(struct mtd_info *mtd,
 		const uint8_t *buf, int len)
 {
 	int i;
-	struct nand_chip *this = mtd_to_nand(mtd);
-	struct socrates_nand_host *host = nand_get_controller_data(this);
+	struct nand_chip *this = mtd->priv;
+	struct socrates_nand_host *host = this->priv;
 
 	for (i = 0; i < len; i++) {
 		out_be32(host->io_base, FPGA_NAND_ENABLE |
@@ -63,8 +64,8 @@ static void socrates_nand_write_buf(struct mtd_info *mtd,
 static void socrates_nand_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
 {
 	int i;
-	struct nand_chip *this = mtd_to_nand(mtd);
-	struct socrates_nand_host *host = nand_get_controller_data(this);
+	struct nand_chip *this = mtd->priv;
+	struct socrates_nand_host *host = this->priv;
 	uint32_t val;
 
 	val = FPGA_NAND_ENABLE | FPGA_NAND_CMD_READ;
@@ -104,8 +105,8 @@ static uint16_t socrates_nand_read_word(struct mtd_info *mtd)
 static void socrates_nand_cmd_ctrl(struct mtd_info *mtd, int cmd,
 		unsigned int ctrl)
 {
-	struct nand_chip *nand_chip = mtd_to_nand(mtd);
-	struct socrates_nand_host *host = nand_get_controller_data(nand_chip);
+	struct nand_chip *nand_chip = mtd->priv;
+	struct socrates_nand_host *host = nand_chip->priv;
 	uint32_t val;
 
 	if (cmd == NAND_CMD_NONE)
@@ -129,8 +130,8 @@ static void socrates_nand_cmd_ctrl(struct mtd_info *mtd, int cmd,
  */
 static int socrates_nand_device_ready(struct mtd_info *mtd)
 {
-	struct nand_chip *nand_chip = mtd_to_nand(mtd);
-	struct socrates_nand_host *host = nand_get_controller_data(nand_chip);
+	struct nand_chip *nand_chip = mtd->priv;
+	struct socrates_nand_host *host = nand_chip->priv;
 
 	if (in_be32(host->io_base) & FPGA_NAND_BUSY)
 		return 0; /* busy */
@@ -146,6 +147,7 @@ static int socrates_nand_probe(struct platform_device *ofdev)
 	struct mtd_info *mtd;
 	struct nand_chip *nand_chip;
 	int res;
+	struct mtd_part_parser_data ppdata;
 
 	/* Allocate memory for the device structure (and zero it) */
 	host = devm_kzalloc(&ofdev->dev, sizeof(*host), GFP_KERNEL);
@@ -158,15 +160,15 @@ static int socrates_nand_probe(struct platform_device *ofdev)
 		return -EIO;
 	}
 
+	mtd = &host->mtd;
 	nand_chip = &host->nand_chip;
-	mtd = nand_to_mtd(nand_chip);
 	host->dev = &ofdev->dev;
 
-	/* link the private data structures */
-	nand_set_controller_data(nand_chip, host);
-	nand_set_flash_node(nand_chip, ofdev->dev.of_node);
+	nand_chip->priv = host;		/* link the private data structures */
+	mtd->priv = nand_chip;
 	mtd->name = "socrates_nand";
 	mtd->dev.parent = &ofdev->dev;
+	ppdata.of_node = ofdev->dev.of_node;
 
 	/*should never be accessed directly */
 	nand_chip->IO_ADDR_R = (void *)0xdeadbeef;
@@ -180,7 +182,6 @@ static int socrates_nand_probe(struct platform_device *ofdev)
 	nand_chip->dev_ready = socrates_nand_device_ready;
 
 	nand_chip->ecc.mode = NAND_ECC_SOFT;	/* enable ECC */
-	nand_chip->ecc.algo = NAND_ECC_HAMMING;
 
 	/* TODO: I have no idea what real delay is. */
 	nand_chip->chip_delay = 20;		/* 20us command delay time */
@@ -199,7 +200,7 @@ static int socrates_nand_probe(struct platform_device *ofdev)
 		goto out;
 	}
 
-	res = mtd_device_register(mtd, NULL, 0);
+	res = mtd_device_parse_register(mtd, NULL, &ppdata, NULL, 0);
 	if (!res)
 		return res;
 
@@ -216,7 +217,7 @@ out:
 static int socrates_nand_remove(struct platform_device *ofdev)
 {
 	struct socrates_nand_host *host = dev_get_drvdata(&ofdev->dev);
-	struct mtd_info *mtd = nand_to_mtd(&host->nand_chip);
+	struct mtd_info *mtd = &host->mtd;
 
 	nand_release(mtd);
 

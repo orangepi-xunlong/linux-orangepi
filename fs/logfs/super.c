@@ -48,7 +48,7 @@ void emergency_read_end(struct page *page)
 	if (page == emergency_page)
 		mutex_unlock(&emergency_mutex);
 	else
-		put_page(page);
+		page_cache_release(page);
 }
 
 static void dump_segfile(struct super_block *sb)
@@ -206,7 +206,7 @@ static int write_one_sb(struct super_block *sb,
 	logfs_set_segment_erased(sb, segno, ec, 0);
 	logfs_write_ds(sb, ds, segno, ec);
 	err = super->s_devops->write_sb(sb, page);
-	put_page(page);
+	page_cache_release(page);
 	return err;
 }
 
@@ -366,24 +366,24 @@ static struct page *find_super_block(struct super_block *sb)
 		return NULL;
 	last = super->s_devops->find_last_sb(sb, &super->s_sb_ofs[1]);
 	if (!last || IS_ERR(last)) {
-		put_page(first);
+		page_cache_release(first);
 		return NULL;
 	}
 
 	if (!logfs_check_ds(page_address(first))) {
-		put_page(last);
+		page_cache_release(last);
 		return first;
 	}
 
 	/* First one didn't work, try the second superblock */
 	if (!logfs_check_ds(page_address(last))) {
-		put_page(first);
+		page_cache_release(first);
 		return last;
 	}
 
 	/* Neither worked, sorry folks */
-	put_page(first);
-	put_page(last);
+	page_cache_release(first);
+	page_cache_release(last);
 	return NULL;
 }
 
@@ -425,7 +425,7 @@ static int __logfs_read_sb(struct super_block *sb)
 	super->s_data_levels = ds->ds_data_levels;
 	super->s_total_levels = super->s_ifile_levels + super->s_iblock_levels
 		+ super->s_data_levels;
-	put_page(page);
+	page_cache_release(page);
 	return 0;
 }
 

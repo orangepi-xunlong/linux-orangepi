@@ -584,13 +584,13 @@ static void temac_device_reset(struct net_device *ndev)
 		dev_err(&ndev->dev, "Error setting TEMAC options\n");
 
 	/* Init Driver variable */
-	netif_trans_update(ndev); /* prevent tx timeout */
+	ndev->trans_start = jiffies; /* prevent tx timeout */
 }
 
 static void temac_adjust_link(struct net_device *ndev)
 {
 	struct temac_local *lp = netdev_priv(ndev);
-	struct phy_device *phy = ndev->phydev;
+	struct phy_device *phy = lp->phy_dev;
 	u32 mii_speed;
 	int link_state;
 
@@ -843,20 +843,19 @@ static irqreturn_t ll_temac_rx_irq(int irq, void *_ndev)
 static int temac_open(struct net_device *ndev)
 {
 	struct temac_local *lp = netdev_priv(ndev);
-	struct phy_device *phydev = NULL;
 	int rc;
 
 	dev_dbg(&ndev->dev, "temac_open()\n");
 
 	if (lp->phy_node) {
-		phydev = of_phy_connect(lp->ndev, lp->phy_node,
-					temac_adjust_link, 0, 0);
-		if (!phydev) {
+		lp->phy_dev = of_phy_connect(lp->ndev, lp->phy_node,
+					     temac_adjust_link, 0, 0);
+		if (!lp->phy_dev) {
 			dev_err(lp->dev, "of_phy_connect() failed\n");
 			return -ENODEV;
 		}
 
-		phy_start(phydev);
+		phy_start(lp->phy_dev);
 	}
 
 	temac_device_reset(ndev);
@@ -873,8 +872,9 @@ static int temac_open(struct net_device *ndev)
  err_rx_irq:
 	free_irq(lp->tx_irq, ndev);
  err_tx_irq:
-	if (phydev)
-		phy_disconnect(phydev);
+	if (lp->phy_dev)
+		phy_disconnect(lp->phy_dev);
+	lp->phy_dev = NULL;
 	dev_err(lp->dev, "request_irq() failed\n");
 	return rc;
 }
@@ -882,15 +882,15 @@ static int temac_open(struct net_device *ndev)
 static int temac_stop(struct net_device *ndev)
 {
 	struct temac_local *lp = netdev_priv(ndev);
-	struct phy_device *phydev = ndev->phydev;
 
 	dev_dbg(&ndev->dev, "temac_close()\n");
 
 	free_irq(lp->tx_irq, ndev);
 	free_irq(lp->rx_irq, ndev);
 
-	if (phydev)
-		phy_disconnect(phydev);
+	if (lp->phy_dev)
+		phy_disconnect(lp->phy_dev);
+	lp->phy_dev = NULL;
 
 	temac_dma_bd_release(ndev);
 
@@ -916,13 +916,15 @@ temac_poll_controller(struct net_device *ndev)
 
 static int temac_ioctl(struct net_device *ndev, struct ifreq *rq, int cmd)
 {
+	struct temac_local *lp = netdev_priv(ndev);
+
 	if (!netif_running(ndev))
 		return -EINVAL;
 
-	if (!ndev->phydev)
+	if (!lp->phy_dev)
 		return -EINVAL;
 
-	return phy_mii_ioctl(ndev->phydev, rq, cmd);
+	return phy_mii_ioctl(lp->phy_dev, rq, cmd);
 }
 
 static const struct net_device_ops temac_netdev_ops = {
@@ -967,17 +969,30 @@ static const struct attribute_group temac_attr_group = {
 };
 
 /* ethtool support */
+static int temac_get_settings(struct net_device *ndev, struct ethtool_cmd *cmd)
+{
+	struct temac_local *lp = netdev_priv(ndev);
+	return phy_ethtool_gset(lp->phy_dev, cmd);
+}
+
+static int temac_set_settings(struct net_device *ndev, struct ethtool_cmd *cmd)
+{
+	struct temac_local *lp = netdev_priv(ndev);
+	return phy_ethtool_sset(lp->phy_dev, cmd);
+}
+
 static int temac_nway_reset(struct net_device *ndev)
 {
-	return phy_start_aneg(ndev->phydev);
+	struct temac_local *lp = netdev_priv(ndev);
+	return phy_start_aneg(lp->phy_dev);
 }
 
 static const struct ethtool_ops temac_ethtool_ops = {
+	.get_settings = temac_get_settings,
+	.set_settings = temac_set_settings,
 	.nway_reset = temac_nway_reset,
 	.get_link = ethtool_op_get_link,
 	.get_ts_info = ethtool_op_get_ts_info,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
 static int temac_of_probe(struct platform_device *op)

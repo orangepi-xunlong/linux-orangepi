@@ -27,15 +27,11 @@
 #include "../../util/auxtrace.h"
 #include "../../util/cpumap.h"
 #include "../../util/evlist.h"
-#include "../../util/evsel.h"
 #include "../../util/pmu.h"
 #include "../../util/thread_map.h"
 #include "../../util/cs-etm.h"
 
 #include <stdlib.h>
-
-#define ENABLE_SINK_MAX	128
-#define CS_BUS_DEVICE_PATH "/bus/coresight/devices/"
 
 struct cs_etm_recording {
 	struct auxtrace_record	itr;
@@ -83,7 +79,7 @@ static int cs_etm_recording_options(struct auxtrace_record *itr,
 	ptr->evlist = evlist;
 	ptr->snapshot_mode = opts->auxtrace_snapshot_mode;
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		if (evsel->attr.type == cs_etm_pmu->type) {
 			if (cs_etm_evsel) {
 				pr_err("There may be only one %s event\n",
@@ -247,7 +243,7 @@ static u64 cs_etm_get_config(struct auxtrace_record *itr)
 	struct perf_evlist *evlist = ptr->evlist;
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		if (evsel->attr.type == cs_etm_pmu->type) {
 			/*
 			 * Variable perf_event_attr::config is assigned to
@@ -478,7 +474,7 @@ static int cs_etm_snapshot_start(struct auxtrace_record *itr)
 			container_of(itr, struct cs_etm_recording, itr);
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(ptr->evlist, evsel) {
+	evlist__for_each(ptr->evlist, evsel) {
 		if (evsel->attr.type == ptr->cs_etm_pmu->type)
 			return perf_evsel__disable(evsel);
 	}
@@ -491,9 +487,13 @@ static int cs_etm_snapshot_finish(struct auxtrace_record *itr)
 			container_of(itr, struct cs_etm_recording, itr);
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(ptr->evlist, evsel) {
-		if (evsel->attr.type == ptr->cs_etm_pmu->type)
-			return perf_evsel__enable(evsel);
+	evlist__for_each(ptr->evlist, evsel) {
+		int nthreads = thread_map__nr(evsel->threads);
+		int ncpus = cpu_map__nr(evsel->cpus);
+
+		if (evsel->attr.type == ptr->cs_etm_pmu->type) {
+			return perf_evsel__enable(evsel, ncpus, nthreads);
+		}
 	}
 	return -EINVAL;
 }
@@ -517,7 +517,7 @@ static int cs_etm_read_finish(struct auxtrace_record *itr, int idx)
 			container_of(itr, struct cs_etm_recording, itr);
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(ptr->evlist, evsel) {
+	evlist__for_each(ptr->evlist, evsel) {
 		if (evsel->attr.type == ptr->cs_etm_pmu->type)
 			return perf_evlist__enable_event_idx(ptr->evlist,
 							     evsel, idx);
@@ -560,58 +560,4 @@ struct auxtrace_record *cs_etm_record_init(int *err)
 	return &ptr->itr;
 out:
 	return NULL;
-}
-
-static FILE *cs_device__open_file(const char *name)
-{
-	struct stat st;
-	char path[PATH_MAX];
-	const char *sysfs;
-
-	sysfs = sysfs__mountpoint();
-	if (!sysfs)
-		return NULL;
-
-	snprintf(path, PATH_MAX,
-		 "%s" CS_BUS_DEVICE_PATH "%s", sysfs, name);
-
-	printf("path: %s\n", path);
-
-	if (stat(path, &st) < 0)
-		return NULL;
-
-	return fopen(path, "w");
-
-}
-
-static __attribute__((format(printf, 2, 3)))
-int cs_device__print_file(const char *name, const char *fmt, ...)
-{
-	va_list args;
-	FILE *file;
-	int ret = -EINVAL;
-
-	va_start(args, fmt);
-	file = cs_device__open_file(name);
-	if (file) {
-		ret = vfprintf(file, fmt, args);
-		fclose(file);
-	}
-	va_end(args);
-	return ret;
-}
-
-int cs_etm_set_drv_config(struct perf_evsel_config_term *term)
-{
-	int ret;
-	char enable_sink[ENABLE_SINK_MAX];
-
-	snprintf(enable_sink, ENABLE_SINK_MAX, "%s/%s",
-		 term->val.drv_cfg, "enable_sink");
-
-	ret = cs_device__print_file(enable_sink, "%d", 1);
-	if (ret < 0)
-		return ret;
-
-	return 0;
 }

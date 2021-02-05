@@ -219,7 +219,7 @@ static int sco_connect(struct sock *sk)
 
 	BT_DBG("%pMR -> %pMR", &sco_pi(sk)->src, &sco_pi(sk)->dst);
 
-	hdev = hci_get_route(&sco_pi(sk)->dst, &sco_pi(sk)->src, BDADDR_BREDR);
+	hdev = hci_get_route(&sco_pi(sk)->dst, &sco_pi(sk)->src);
 	if (!hdev)
 		return -EHOSTUNREACH;
 

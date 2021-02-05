@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -79,6 +83,7 @@ LNetMEAttach(unsigned int portal,
 	struct lnet_me *me;
 	struct list_head *head;
 
+	LASSERT(the_lnet.ln_init);
 	LASSERT(the_lnet.ln_refcount > 0);
 
 	if ((int)portal >= the_lnet.ln_nportals)
@@ -86,11 +91,11 @@ LNetMEAttach(unsigned int portal,
 
 	mtable = lnet_mt_of_attach(portal, match_id,
 				   match_bits, ignore_bits, pos);
-	if (!mtable) /* can't match portal type */
+	if (mtable == NULL) /* can't match portal type */
 		return -EPERM;
 
 	me = lnet_me_alloc();
-	if (!me)
+	if (me == NULL)
 		return -ENOMEM;
 
 	lnet_res_lock(mtable->mt_cpt);
@@ -104,7 +109,7 @@ LNetMEAttach(unsigned int portal,
 
 	lnet_res_lh_initialize(the_lnet.ln_me_containers[mtable->mt_cpt],
 			       &me->me_lh);
-	if (ignore_bits)
+	if (ignore_bits != 0)
 		head = &mtable->mt_mhash[LNET_MT_HASH_IGNORE];
 	else
 		head = lnet_mt_match_head(mtable, match_id, match_bits);
@@ -151,13 +156,14 @@ LNetMEInsert(lnet_handle_me_t current_meh,
 	struct lnet_portal *ptl;
 	int cpt;
 
+	LASSERT(the_lnet.ln_init);
 	LASSERT(the_lnet.ln_refcount > 0);
 
 	if (pos == LNET_INS_LOCAL)
 		return -EPERM;
 
 	new_me = lnet_me_alloc();
-	if (!new_me)
+	if (new_me == NULL)
 		return -ENOMEM;
 
 	cpt = lnet_cpt_of_cookie(current_meh.cookie);
@@ -165,7 +171,7 @@ LNetMEInsert(lnet_handle_me_t current_meh,
 	lnet_res_lock(cpt);
 
 	current_me = lnet_handle2me(&current_meh);
-	if (!current_me) {
+	if (current_me == NULL) {
 		lnet_me_free(new_me);
 
 		lnet_res_unlock(cpt);
@@ -227,21 +233,22 @@ LNetMEUnlink(lnet_handle_me_t meh)
 	lnet_event_t ev;
 	int cpt;
 
+	LASSERT(the_lnet.ln_init);
 	LASSERT(the_lnet.ln_refcount > 0);
 
 	cpt = lnet_cpt_of_cookie(meh.cookie);
 	lnet_res_lock(cpt);
 
 	me = lnet_handle2me(&meh);
-	if (!me) {
+	if (me == NULL) {
 		lnet_res_unlock(cpt);
 		return -ENOENT;
 	}
 
 	md = me->me_md;
-	if (md) {
+	if (md != NULL) {
 		md->md_flags |= LNET_MD_FLAG_ABORTED;
-		if (md->md_eq && !md->md_refcount) {
+		if (md->md_eq != NULL && md->md_refcount == 0) {
 			lnet_build_unlink_event(md, &ev);
 			lnet_eq_enqueue_event(md->md_eq, &ev);
 		}
@@ -260,7 +267,7 @@ lnet_me_unlink(lnet_me_t *me)
 {
 	list_del(&me->me_list);
 
-	if (me->me_md) {
+	if (me->me_md != NULL) {
 		lnet_libmd_t *md = me->me_md;
 
 		/* detach MD from portal of this ME */

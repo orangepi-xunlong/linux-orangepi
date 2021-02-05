@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -23,7 +27,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -51,37 +55,8 @@
 #include "../include/lustre_disk.h"
 #include "../include/lustre_fid.h"
 #include "../include/lu_object.h"
-#include "../include/cl_object.h"
 #include "../include/lu_ref.h"
 #include <linux/list.h>
-
-enum {
-	LU_CACHE_PERCENT_MAX	 = 50,
-	LU_CACHE_PERCENT_DEFAULT = 20
-};
-
-#define LU_CACHE_NR_MAX_ADJUST		128
-#define LU_CACHE_NR_UNLIMITED		-1
-#define LU_CACHE_NR_DEFAULT		LU_CACHE_NR_UNLIMITED
-#define LU_CACHE_NR_LDISKFS_LIMIT	LU_CACHE_NR_UNLIMITED
-#define LU_CACHE_NR_ZFS_LIMIT		256
-
-#define LU_SITE_BITS_MIN	12
-#define LU_SITE_BITS_MAX	24
-/**
- * total 256 buckets, we don't want too many buckets because:
- * - consume too much memory
- * - avoid unbalanced LRU list
- */
-#define LU_SITE_BKT_BITS	8
-
-static unsigned int lu_cache_percent = LU_CACHE_PERCENT_DEFAULT;
-module_param(lu_cache_percent, int, 0644);
-MODULE_PARM_DESC(lu_cache_percent, "Percentage of memory to be used as lu_object cache");
-
-static long lu_cache_nr = LU_CACHE_NR_DEFAULT;
-module_param(lu_cache_nr, long, 0644);
-MODULE_PARM_DESC(lu_cache_nr, "Maximum number of objects in lu_object cache");
 
 static void lu_object_free(const struct lu_env *env, struct lu_object *o);
 static __u32 ls_stats_read(struct lprocfs_stats *stats, int idx);
@@ -111,12 +86,13 @@ void lu_object_put(const struct lu_env *env, struct lu_object *o)
 	 */
 	fid = lu_object_fid(o);
 	if (fid_is_zero(fid)) {
-		LASSERT(!top->loh_hash.next && !top->loh_hash.pprev);
+		LASSERT(top->loh_hash.next == NULL
+			&& top->loh_hash.pprev == NULL);
 		LASSERT(list_empty(&top->loh_lru));
 		if (!atomic_dec_and_test(&top->loh_ref))
 			return;
 		list_for_each_entry_reverse(o, &top->loh_layers, lo_linkage) {
-			if (o->lo_ops->loo_object_release)
+			if (o->lo_ops->loo_object_release != NULL)
 				o->lo_ops->loo_object_release(env, o);
 		}
 		lu_object_free(env, orig);
@@ -128,6 +104,7 @@ void lu_object_put(const struct lu_env *env, struct lu_object *o)
 
 	if (!cfs_hash_bd_dec_and_lock(site->ls_obj_hash, &bd, &top->loh_ref)) {
 		if (lu_object_is_dying(top)) {
+
 			/*
 			 * somebody may be waiting for this, currently only
 			 * used for cl_object, see cl_object_put_last().
@@ -142,7 +119,7 @@ void lu_object_put(const struct lu_env *env, struct lu_object *o)
 	 * layers, and notify them that object is no longer busy.
 	 */
 	list_for_each_entry_reverse(o, &top->loh_layers, lo_linkage) {
-		if (o->lo_ops->loo_object_release)
+		if (o->lo_ops->loo_object_release != NULL)
 			o->lo_ops->loo_object_release(env, o);
 	}
 
@@ -158,7 +135,7 @@ void lu_object_put(const struct lu_env *env, struct lu_object *o)
 	}
 
 	/*
-	 * If object is dying (will not be cached), then removed it
+	 * If object is dying (will not be cached), removed it
 	 * from hash table and LRU.
 	 *
 	 * This is done with hash table and LRU lists locked. As the only
@@ -233,7 +210,7 @@ static struct lu_object *lu_object_alloc(const struct lu_env *env,
 	 * lu_object_header.
 	 */
 	top = dev->ld_ops->ldo_object_alloc(env, NULL, dev);
-	if (!top)
+	if (top == NULL)
 		return ERR_PTR(-ENOMEM);
 	if (IS_ERR(top))
 		return top;
@@ -268,7 +245,7 @@ next:
 	} while (!clean);
 
 	list_for_each_entry_reverse(scan, layers, lo_linkage) {
-		if (scan->lo_ops->loo_object_start) {
+		if (scan->lo_ops->loo_object_start != NULL) {
 			result = scan->lo_ops->loo_object_start(env, scan);
 			if (result != 0) {
 				lu_object_free(env, top);
@@ -299,7 +276,7 @@ static void lu_object_free(const struct lu_env *env, struct lu_object *o)
 	 * First call ->loo_object_delete() method to release all resources.
 	 */
 	list_for_each_entry_reverse(scan, layers, lo_linkage) {
-		if (scan->lo_ops->loo_object_delete)
+		if (scan->lo_ops->loo_object_delete != NULL)
 			scan->lo_ops->loo_object_delete(env, scan);
 	}
 
@@ -319,6 +296,7 @@ static void lu_object_free(const struct lu_env *env, struct lu_object *o)
 		 */
 		o = container_of0(splice.prev, struct lu_object, lo_linkage);
 		list_del_init(&o->lo_linkage);
+		LASSERT(o->lo_ops->loo_object_free != NULL);
 		o->lo_ops->loo_object_free(env, o);
 	}
 
@@ -338,10 +316,10 @@ int lu_site_purge(const struct lu_env *env, struct lu_site *s, int nr)
 	struct cfs_hash_bd	    bd2;
 	struct list_head	       dispose;
 	int		      did_sth;
-	unsigned int start;
+	int		      start;
 	int		      count;
 	int		      bnr;
-	unsigned int i;
+	int		      i;
 
 	if (OBD_FAIL_CHECK(OBD_FAIL_OBD_NO_LRU))
 		return 0;
@@ -352,13 +330,8 @@ int lu_site_purge(const struct lu_env *env, struct lu_site *s, int nr)
 	 * the dispose list, removing them from LRU and hash table.
 	 */
 	start = s->ls_purge_start;
-	bnr = (nr == ~0) ? -1 : nr / (int)CFS_HASH_NBKT(s->ls_obj_hash) + 1;
+	bnr = (nr == ~0) ? -1 : nr / CFS_HASH_NBKT(s->ls_obj_hash) + 1;
  again:
-	/*
-	 * It doesn't make any sense to make purge threads parallel, that can
-	 * only bring troubles to us. See LU-5331.
-	 */
-	mutex_lock(&s->ls_purge_mutex);
 	did_sth = 0;
 	cfs_hash_for_each_bucket(s->ls_obj_hash, &bd, i) {
 		if (i < start)
@@ -386,6 +359,7 @@ int lu_site_purge(const struct lu_env *env, struct lu_site *s, int nr)
 
 			if (count > 0 && --count == 0)
 				break;
+
 		}
 		cfs_hash_bd_unlock(s->ls_obj_hash, &bd, 1);
 		cond_resched();
@@ -404,7 +378,6 @@ int lu_site_purge(const struct lu_env *env, struct lu_site *s, int nr)
 		if (nr == 0)
 			break;
 	}
-	mutex_unlock(&s->ls_purge_mutex);
 
 	if (nr != 0 && did_sth && start != 0) {
 		start = 0; /* restart from the first bucket */
@@ -478,6 +451,7 @@ int lu_cdebug_printer(const struct lu_env *env,
 	va_start(args, format);
 
 	key = lu_context_key_get(&env->le_ctx, &lu_global_key);
+	LASSERT(key != NULL);
 
 	used = strlen(key->lck_area);
 	complete = format[strlen(format) - 1] == '\n';
@@ -488,7 +462,7 @@ int lu_cdebug_printer(const struct lu_env *env,
 		  ARRAY_SIZE(key->lck_area) - used, format, args);
 	if (complete) {
 		if (cfs_cdebug_show(msgdata->msg_mask, msgdata->msg_subsys))
-			libcfs_debug_msg(msgdata, "%s\n", key->lck_area);
+			libcfs_debug_msg(msgdata, "%s", key->lck_area);
 		key->lck_area[0] = 0;
 	}
 	va_end(args);
@@ -534,7 +508,7 @@ void lu_object_print(const struct lu_env *env, void *cookie,
 		(*printer)(env, cookie, "%*.*s%s@%p", depth, depth, ruler,
 			   o->lo_dev->ld_type->ldt_name, o);
 
-		if (o->lo_ops->loo_object_print)
+		if (o->lo_ops->loo_object_print != NULL)
 			(*o->lo_ops->loo_object_print)(env, cookie, printer, o);
 
 		(*printer)(env, cookie, "\n");
@@ -561,10 +535,9 @@ static struct lu_object *htable_lookup(struct lu_site *s,
 	*version = ver;
 	bkt = cfs_hash_bd_extra_get(s->ls_obj_hash, bd);
 	/* cfs_hash_bd_peek_locked is a somehow "internal" function
-	 * of cfs_hash, it doesn't add refcount on object.
-	 */
+	 * of cfs_hash, it doesn't add refcount on object. */
 	hnode = cfs_hash_bd_peek_locked(s->ls_obj_hash, bd, (void *)f);
-	if (!hnode) {
+	if (hnode == NULL) {
 		lprocfs_counter_incr(s->ls_stats, LU_SS_CACHE_MISS);
 		return ERR_PTR(-ENOENT);
 	}
@@ -607,27 +580,6 @@ static struct lu_object *lu_object_find(const struct lu_env *env,
 	return lu_object_find_at(env, dev->ld_site->ls_top_dev, f, conf);
 }
 
-/*
- * Limit the lu_object cache to a maximum of lu_cache_nr objects.  Because
- * the calculation for the number of objects to reclaim is not covered by
- * a lock the maximum number of objects is capped by LU_CACHE_MAX_ADJUST.
- * This ensures that many concurrent threads will not accidentally purge
- * the entire cache.
- */
-static void lu_object_limit(const struct lu_env *env, struct lu_device *dev)
-{
-	__u64 size, nr;
-
-	if (lu_cache_nr == LU_CACHE_NR_UNLIMITED)
-		return;
-
-	size = cfs_hash_size_get(dev->ld_site->ls_obj_hash);
-	nr = (__u64)lu_cache_nr;
-	if (size > nr)
-		lu_site_purge(env, dev->ld_site,
-			      min_t(__u64, size - nr, LU_CACHE_NR_MAX_ADJUST));
-}
-
 static struct lu_object *lu_object_new(const struct lu_env *env,
 				       struct lu_device *dev,
 				       const struct lu_fid *f,
@@ -645,9 +597,6 @@ static struct lu_object *lu_object_new(const struct lu_env *env,
 	cfs_hash_bd_get_and_lock(hs, (void *)f, &bd, 1);
 	cfs_hash_bd_add_locked(hs, &bd, &o->lo_header->loh_hash);
 	cfs_hash_bd_unlock(hs, &bd, 1);
-
-	lu_object_limit(env, dev);
-
 	return o;
 }
 
@@ -687,7 +636,7 @@ static struct lu_object *lu_object_find_try(const struct lu_env *env,
 	 * If dying object is found during index search, add @waiter to the
 	 * site wait-queue and return ERR_PTR(-EAGAIN).
 	 */
-	if (conf && conf->loc_flags & LOC_F_NEW)
+	if (conf != NULL && conf->loc_flags & LOC_F_NEW)
 		return lu_object_new(env, dev, f, conf);
 
 	s  = dev->ld_site;
@@ -714,9 +663,6 @@ static struct lu_object *lu_object_find_try(const struct lu_env *env,
 	if (likely(PTR_ERR(shadow) == -ENOENT)) {
 		cfs_hash_bd_add_locked(hs, &bd, &o->lo_header->loh_hash);
 		cfs_hash_bd_unlock(hs, &bd, 1);
-
-		lu_object_limit(env, dev);
-
 		return o;
 	}
 
@@ -767,15 +713,12 @@ struct lu_object *lu_object_find_slice(const struct lu_env *env,
 	struct lu_object *obj;
 
 	top = lu_object_find(env, dev, f, conf);
-	if (IS_ERR(top))
-		return top;
-
-	obj = lu_object_locate(top->lo_header, dev->ld_type);
-	if (unlikely(!obj)) {
-		lu_object_put(env, top);
-		obj = ERR_PTR(-ENOENT);
-	}
-
+	if (!IS_ERR(top)) {
+		obj = lu_object_locate(top->lo_header, dev->ld_type);
+		if (obj == NULL)
+			lu_object_put(env, top);
+	} else
+		obj = top;
 	return obj;
 }
 EXPORT_SYMBOL(lu_object_find_slice);
@@ -789,30 +732,33 @@ int lu_device_type_init(struct lu_device_type *ldt)
 {
 	int result = 0;
 
-	atomic_set(&ldt->ldt_device_nr, 0);
 	INIT_LIST_HEAD(&ldt->ldt_linkage);
 	if (ldt->ldt_ops->ldto_init)
 		result = ldt->ldt_ops->ldto_init(ldt);
-
-	if (!result) {
-		spin_lock(&obd_types_lock);
+	if (result == 0)
 		list_add(&ldt->ldt_linkage, &lu_device_types);
-		spin_unlock(&obd_types_lock);
-	}
-
 	return result;
 }
 EXPORT_SYMBOL(lu_device_type_init);
 
 void lu_device_type_fini(struct lu_device_type *ldt)
 {
-	spin_lock(&obd_types_lock);
 	list_del_init(&ldt->ldt_linkage);
-	spin_unlock(&obd_types_lock);
 	if (ldt->ldt_ops->ldto_fini)
 		ldt->ldt_ops->ldto_fini(ldt);
 }
 EXPORT_SYMBOL(lu_device_type_fini);
+
+void lu_types_stop(void)
+{
+	struct lu_device_type *ldt;
+
+	list_for_each_entry(ldt, &lu_device_types, ldt_linkage) {
+		if (ldt->ldt_device_nr == 0 && ldt->ldt_ops->ldto_stop)
+			ldt->ldt_ops->ldto_stop(ldt);
+	}
+}
+EXPORT_SYMBOL(lu_types_stop);
 
 /**
  * Global list of all sites on this node
@@ -868,14 +814,22 @@ void lu_site_print(const struct lu_env *env, struct lu_site *s, void *cookie,
 }
 EXPORT_SYMBOL(lu_site_print);
 
+enum {
+	LU_CACHE_PERCENT_MAX     = 50,
+	LU_CACHE_PERCENT_DEFAULT = 20
+};
+
+static unsigned int lu_cache_percent = LU_CACHE_PERCENT_DEFAULT;
+module_param(lu_cache_percent, int, 0644);
+MODULE_PARM_DESC(lu_cache_percent, "Percentage of memory to be used as lu_object cache");
+
 /**
  * Return desired hash table order.
  */
-static unsigned long lu_htable_order(struct lu_device *top)
+static int lu_htable_order(void)
 {
-	unsigned long bits_max = LU_SITE_BITS_MAX;
 	unsigned long cache_size;
-	unsigned long bits;
+	int bits;
 
 	/*
 	 * Calculate hash table size, assuming that we want reasonable
@@ -888,8 +842,8 @@ static unsigned long lu_htable_order(struct lu_device *top)
 
 #if BITS_PER_LONG == 32
 	/* limit hashtable size for lowmem systems to low RAM */
-	if (cache_size > 1 << (30 - PAGE_SHIFT))
-		cache_size = 1 << (30 - PAGE_SHIFT) * 3 / 4;
+	if (cache_size > 1 << (30 - PAGE_CACHE_SHIFT))
+		cache_size = 1 << (30 - PAGE_CACHE_SHIFT) * 3 / 4;
 #endif
 
 	/* clear off unreasonable cache setting. */
@@ -901,12 +855,12 @@ static unsigned long lu_htable_order(struct lu_device *top)
 		lu_cache_percent = LU_CACHE_PERCENT_DEFAULT;
 	}
 	cache_size = cache_size / 100 * lu_cache_percent *
-		(PAGE_SIZE / 1024);
+		(PAGE_CACHE_SIZE / 1024);
 
 	for (bits = 1; (1 << bits) < cache_size; ++bits) {
 		;
 	}
-	return clamp_t(typeof(bits), bits, LU_SITE_BITS_MIN, bits_max);
+	return bits;
 }
 
 static unsigned lu_obj_hop_hash(struct cfs_hash *hs,
@@ -962,7 +916,7 @@ static void lu_obj_hop_put_locked(struct cfs_hash *hs, struct hlist_node *hnode)
 	LBUG(); /* we should never called it */
 }
 
-static struct cfs_hash_ops lu_site_hash_ops = {
+struct cfs_hash_ops lu_site_hash_ops = {
 	.hs_hash	= lu_obj_hop_hash,
 	.hs_key		= lu_obj_hop_key,
 	.hs_keycmp      = lu_obj_hop_keycmp,
@@ -982,18 +936,28 @@ static void lu_dev_add_linkage(struct lu_site *s, struct lu_device *d)
 /**
  * Initialize site \a s, with \a d as the top level device.
  */
+#define LU_SITE_BITS_MIN    12
+#define LU_SITE_BITS_MAX    24
+/**
+ * total 256 buckets, we don't want too many buckets because:
+ * - consume too much memory
+ * - avoid unbalanced LRU list
+ */
+#define LU_SITE_BKT_BITS    8
+
 int lu_site_init(struct lu_site *s, struct lu_device *top)
 {
 	struct lu_site_bkt_data *bkt;
 	struct cfs_hash_bd bd;
-	unsigned long bits;
-	unsigned long i;
 	char name[16];
+	int bits;
+	int i;
 
 	memset(s, 0, sizeof(*s));
-	mutex_init(&s->ls_purge_mutex);
-	snprintf(name, sizeof(name), "lu_site_%s", top->ld_type->ldt_name);
-	for (bits = lu_htable_order(top); bits >= LU_SITE_BITS_MIN; bits--) {
+	bits = lu_htable_order();
+	snprintf(name, 16, "lu_site_%s", top->ld_type->ldt_name);
+	for (bits = min(max(LU_SITE_BITS_MIN, bits), LU_SITE_BITS_MAX);
+	     bits >= LU_SITE_BITS_MIN; bits--) {
 		s->ls_obj_hash = cfs_hash_create(name, bits, bits,
 						 bits - LU_SITE_BKT_BITS,
 						 sizeof(*bkt), 0, 0,
@@ -1001,14 +965,13 @@ int lu_site_init(struct lu_site *s, struct lu_device *top)
 						 CFS_HASH_SPIN_BKTLOCK |
 						 CFS_HASH_NO_ITEMREF |
 						 CFS_HASH_DEPTH |
-						 CFS_HASH_ASSERT_EMPTY |
-						 CFS_HASH_COUNTER);
-		if (s->ls_obj_hash)
+						 CFS_HASH_ASSERT_EMPTY);
+		if (s->ls_obj_hash != NULL)
 			break;
 	}
 
-	if (!s->ls_obj_hash) {
-		CERROR("failed to create lu_site hash with bits: %lu\n", bits);
+	if (s->ls_obj_hash == NULL) {
+		CERROR("failed to create lu_site hash with bits: %d\n", bits);
 		return -ENOMEM;
 	}
 
@@ -1019,7 +982,7 @@ int lu_site_init(struct lu_site *s, struct lu_device *top)
 	}
 
 	s->ls_stats = lprocfs_alloc_stats(LU_SS_LAST_STAT, 0);
-	if (!s->ls_stats) {
+	if (s->ls_stats == NULL) {
 		cfs_hash_putref(s->ls_obj_hash);
 		s->ls_obj_hash = NULL;
 		return -ENOMEM;
@@ -1068,19 +1031,19 @@ void lu_site_fini(struct lu_site *s)
 	list_del_init(&s->ls_linkage);
 	mutex_unlock(&lu_sites_guard);
 
-	if (s->ls_obj_hash) {
+	if (s->ls_obj_hash != NULL) {
 		cfs_hash_putref(s->ls_obj_hash);
 		s->ls_obj_hash = NULL;
 	}
 
-	if (s->ls_top_dev) {
+	if (s->ls_top_dev != NULL) {
 		s->ls_top_dev->ld_site = NULL;
 		lu_ref_del(&s->ls_top_dev->ld_reference, "site-top", s);
 		lu_device_put(s->ls_top_dev);
 		s->ls_top_dev = NULL;
 	}
 
-	if (s->ls_stats)
+	if (s->ls_stats != NULL)
 		lprocfs_free_stats(&s->ls_stats);
 }
 EXPORT_SYMBOL(lu_site_fini);
@@ -1125,10 +1088,8 @@ EXPORT_SYMBOL(lu_device_put);
  */
 int lu_device_init(struct lu_device *d, struct lu_device_type *t)
 {
-	if (atomic_inc_return(&t->ldt_device_nr) == 1 &&
-	    t->ldt_ops->ldto_start)
+	if (t->ldt_device_nr++ == 0 && t->ldt_ops->ldto_start != NULL)
 		t->ldt_ops->ldto_start(t);
-
 	memset(d, 0, sizeof(*d));
 	atomic_set(&d->ld_ref, 0);
 	d->ld_type = t;
@@ -1143,9 +1104,10 @@ EXPORT_SYMBOL(lu_device_init);
  */
 void lu_device_fini(struct lu_device *d)
 {
-	struct lu_device_type *t = d->ld_type;
+	struct lu_device_type *t;
 
-	if (d->ld_obd) {
+	t = d->ld_type;
+	if (d->ld_obd != NULL) {
 		d->ld_obd->obd_lu_dev = NULL;
 		d->ld_obd = NULL;
 	}
@@ -1153,10 +1115,8 @@ void lu_device_fini(struct lu_device *d)
 	lu_ref_fini(&d->ld_reference);
 	LASSERTF(atomic_read(&d->ld_ref) == 0,
 		 "Refcount is %u\n", atomic_read(&d->ld_ref));
-	LASSERT(atomic_read(&t->ldt_device_nr) > 0);
-
-	if (atomic_dec_and_test(&t->ldt_device_nr) &&
-	    t->ldt_ops->ldto_stop)
+	LASSERT(t->ldt_device_nr > 0);
+	if (--t->ldt_device_nr == 0 && t->ldt_ops->ldto_stop != NULL)
 		t->ldt_ops->ldto_stop(t);
 }
 EXPORT_SYMBOL(lu_device_fini);
@@ -1188,7 +1148,7 @@ void lu_object_fini(struct lu_object *o)
 
 	LASSERT(list_empty(&o->lo_linkage));
 
-	if (dev) {
+	if (dev != NULL) {
 		lu_ref_del_at(&dev->ld_reference, &o->lo_dev_ref,
 			      "lu_object", o);
 		lu_device_put(dev);
@@ -1279,7 +1239,7 @@ void lu_stack_fini(const struct lu_env *env, struct lu_device *top)
 	struct lu_device *next;
 
 	lu_site_purge(env, site, ~0);
-	for (scan = top; scan; scan = next) {
+	for (scan = top; scan != NULL; scan = next) {
 		next = scan->ld_type->ldt_ops->ldto_device_fini(env, scan);
 		lu_ref_del(&scan->ld_reference, "lu-stack", &lu_site_init);
 		lu_device_put(scan);
@@ -1288,18 +1248,19 @@ void lu_stack_fini(const struct lu_env *env, struct lu_device *top)
 	/* purge again. */
 	lu_site_purge(env, site, ~0);
 
-	for (scan = top; scan; scan = next) {
+	for (scan = top; scan != NULL; scan = next) {
 		const struct lu_device_type *ldt = scan->ld_type;
 		struct obd_type	     *type;
 
 		next = ldt->ldt_ops->ldto_device_free(env, scan);
 		type = ldt->ldt_obd_type;
-		if (type) {
+		if (type != NULL) {
 			type->typ_refcnt--;
 			class_put_type(type);
 		}
 	}
 }
+EXPORT_SYMBOL(lu_stack_fini);
 
 enum {
 	/**
@@ -1326,16 +1287,16 @@ static unsigned key_set_version;
 int lu_context_key_register(struct lu_context_key *key)
 {
 	int result;
-	unsigned int i;
+	int i;
 
-	LASSERT(key->lct_init);
-	LASSERT(key->lct_fini);
+	LASSERT(key->lct_init != NULL);
+	LASSERT(key->lct_fini != NULL);
 	LASSERT(key->lct_tags != 0);
 
 	result = -ENFILE;
 	spin_lock(&lu_keys_guard);
 	for (i = 0; i < ARRAY_SIZE(lu_keys); ++i) {
-		if (!lu_keys[i]) {
+		if (lu_keys[i] == NULL) {
 			key->lct_index = i;
 			atomic_set(&key->lct_used, 1);
 			lu_keys[i] = key;
@@ -1352,10 +1313,12 @@ EXPORT_SYMBOL(lu_context_key_register);
 
 static void key_fini(struct lu_context *ctx, int index)
 {
-	if (ctx->lc_value && ctx->lc_value[index]) {
+	if (ctx->lc_value != NULL && ctx->lc_value[index] != NULL) {
 		struct lu_context_key *key;
 
 		key = lu_keys[index];
+		LASSERT(key != NULL);
+		LASSERT(key->lct_fini != NULL);
 		LASSERT(atomic_read(&key->lct_used) > 1);
 
 		key->lct_fini(ctx, key, ctx->lc_value[index]);
@@ -1413,7 +1376,7 @@ int lu_context_key_register_many(struct lu_context_key *k, ...)
 		if (result)
 			break;
 		key = va_arg(args, struct lu_context_key *);
-	} while (key);
+	} while (key != NULL);
 	va_end(args);
 
 	if (result != 0) {
@@ -1441,7 +1404,7 @@ void lu_context_key_degister_many(struct lu_context_key *k, ...)
 	do {
 		lu_context_key_degister(k);
 		k = va_arg(args, struct lu_context_key*);
-	} while (k);
+	} while (k != NULL);
 	va_end(args);
 }
 EXPORT_SYMBOL(lu_context_key_degister_many);
@@ -1457,7 +1420,7 @@ void lu_context_key_revive_many(struct lu_context_key *k, ...)
 	do {
 		lu_context_key_revive(k);
 		k = va_arg(args, struct lu_context_key*);
-	} while (k);
+	} while (k != NULL);
 	va_end(args);
 }
 EXPORT_SYMBOL(lu_context_key_revive_many);
@@ -1473,7 +1436,7 @@ void lu_context_key_quiesce_many(struct lu_context_key *k, ...)
 	do {
 		lu_context_key_quiesce(k);
 		k = va_arg(args, struct lu_context_key*);
-	} while (k);
+	} while (k != NULL);
 	va_end(args);
 }
 EXPORT_SYMBOL(lu_context_key_quiesce_many);
@@ -1509,30 +1472,32 @@ void lu_context_key_quiesce(struct lu_context_key *key)
 		/*
 		 * XXX layering violation.
 		 */
-		cl_env_cache_purge(~0);
 		key->lct_tags |= LCT_QUIESCENT;
 		/*
 		 * XXX memory barrier has to go here.
 		 */
 		spin_lock(&lu_keys_guard);
-		list_for_each_entry(ctx, &lu_context_remembered, lc_remember)
+		list_for_each_entry(ctx, &lu_context_remembered,
+					lc_remember)
 			key_fini(ctx, key->lct_index);
 		spin_unlock(&lu_keys_guard);
 		++key_set_version;
 	}
 }
+EXPORT_SYMBOL(lu_context_key_quiesce);
 
 void lu_context_key_revive(struct lu_context_key *key)
 {
 	key->lct_tags &= ~LCT_QUIESCENT;
 	++key_set_version;
 }
+EXPORT_SYMBOL(lu_context_key_revive);
 
 static void keys_fini(struct lu_context *ctx)
 {
-	unsigned int i;
+	int	i;
 
-	if (!ctx->lc_value)
+	if (ctx->lc_value == NULL)
 		return;
 
 	for (i = 0; i < ARRAY_SIZE(lu_keys); ++i)
@@ -1544,14 +1509,14 @@ static void keys_fini(struct lu_context *ctx)
 
 static int keys_fill(struct lu_context *ctx)
 {
-	unsigned int i;
+	int i;
 
-	LINVRNT(ctx->lc_value);
+	LINVRNT(ctx->lc_value != NULL);
 	for (i = 0; i < ARRAY_SIZE(lu_keys); ++i) {
 		struct lu_context_key *key;
 
 		key = lu_keys[i];
-		if (!ctx->lc_value[i] && key &&
+		if (ctx->lc_value[i] == NULL && key != NULL &&
 		    (key->lct_tags & ctx->lc_tags) &&
 		    /*
 		     * Don't create values for a LCT_QUIESCENT key, as this
@@ -1560,7 +1525,7 @@ static int keys_fill(struct lu_context *ctx)
 		    !(key->lct_tags & LCT_QUIESCENT)) {
 			void *value;
 
-			LINVRNT(key->lct_init);
+			LINVRNT(key->lct_init != NULL);
 			LINVRNT(key->lct_index == i);
 
 			value = key->lct_init(ctx, key);
@@ -1577,7 +1542,7 @@ static int keys_fill(struct lu_context *ctx)
 			 * value.
 			 */
 			ctx->lc_value[i] = value;
-			if (key->lct_exit)
+			if (key->lct_exit != NULL)
 				ctx->lc_tags |= LCT_HAS_EXIT;
 		}
 		ctx->lc_version = key_set_version;
@@ -1589,7 +1554,7 @@ static int keys_init(struct lu_context *ctx)
 {
 	ctx->lc_value = kcalloc(ARRAY_SIZE(lu_keys), sizeof(ctx->lc_value[0]),
 				GFP_NOFS);
-	if (likely(ctx->lc_value))
+	if (likely(ctx->lc_value != NULL))
 		return keys_fill(ctx);
 
 	return -ENOMEM;
@@ -1657,17 +1622,18 @@ EXPORT_SYMBOL(lu_context_enter);
  */
 void lu_context_exit(struct lu_context *ctx)
 {
-	unsigned int i;
+	int i;
 
 	LINVRNT(ctx->lc_state == LCS_ENTERED);
 	ctx->lc_state = LCS_LEFT;
-	if (ctx->lc_tags & LCT_HAS_EXIT && ctx->lc_value) {
+	if (ctx->lc_tags & LCT_HAS_EXIT && ctx->lc_value != NULL) {
 		for (i = 0; i < ARRAY_SIZE(lu_keys); ++i) {
-			if (ctx->lc_value[i]) {
+			if (ctx->lc_value[i] != NULL) {
 				struct lu_context_key *key;
 
 				key = lu_keys[i];
-				if (key->lct_exit)
+				LASSERT(key != NULL);
+				if (key->lct_exit != NULL)
 					key->lct_exit(ctx,
 						      key, ctx->lc_value[i]);
 			}
@@ -1685,6 +1651,7 @@ int lu_context_refill(struct lu_context *ctx)
 {
 	return likely(ctx->lc_version == key_set_version) ? 0 : keys_fill(ctx);
 }
+EXPORT_SYMBOL(lu_context_refill);
 
 /**
  * lu_ctx_tags/lu_ses_tags will be updated if there are new types of
@@ -1721,7 +1688,7 @@ int lu_env_refill(struct lu_env *env)
 	int result;
 
 	result = lu_context_refill(&env->le_ctx);
-	if (result == 0 && env->le_ses)
+	if (result == 0 && env->le_ses != NULL)
 		result = lu_context_refill(env->le_ses);
 	return result;
 }
@@ -1738,7 +1705,7 @@ static void lu_site_stats_get(struct cfs_hash *hs,
 			      struct lu_site_stats *stats, int populated)
 {
 	struct cfs_hash_bd bd;
-	unsigned int i;
+	int	   i;
 
 	cfs_hash_for_each_bucket(hs, &bd, i) {
 		struct lu_site_bkt_data *bkt = cfs_hash_bd_extra_get(hs, &bd);
@@ -1955,11 +1922,11 @@ int lu_kmem_init(struct lu_kmem_descr *caches)
 	int result;
 	struct lu_kmem_descr *iter = caches;
 
-	for (result = 0; iter->ckd_cache; ++iter) {
+	for (result = 0; iter->ckd_cache != NULL; ++iter) {
 		*iter->ckd_cache = kmem_cache_create(iter->ckd_name,
 							iter->ckd_size,
 							0, 0, NULL);
-		if (!*iter->ckd_cache) {
+		if (*iter->ckd_cache == NULL) {
 			result = -ENOMEM;
 			/* free all previously allocated caches */
 			lu_kmem_fini(caches);
@@ -1976,79 +1943,9 @@ EXPORT_SYMBOL(lu_kmem_init);
  */
 void lu_kmem_fini(struct lu_kmem_descr *caches)
 {
-	for (; caches->ckd_cache; ++caches) {
+	for (; caches->ckd_cache != NULL; ++caches) {
 		kmem_cache_destroy(*caches->ckd_cache);
 		*caches->ckd_cache = NULL;
 	}
 }
 EXPORT_SYMBOL(lu_kmem_fini);
-
-void lu_buf_free(struct lu_buf *buf)
-{
-	LASSERT(buf);
-	if (buf->lb_buf) {
-		LASSERT(buf->lb_len > 0);
-		kvfree(buf->lb_buf);
-		buf->lb_buf = NULL;
-		buf->lb_len = 0;
-	}
-}
-EXPORT_SYMBOL(lu_buf_free);
-
-void lu_buf_alloc(struct lu_buf *buf, size_t size)
-{
-	LASSERT(buf);
-	LASSERT(!buf->lb_buf);
-	LASSERT(!buf->lb_len);
-	buf->lb_buf = libcfs_kvzalloc(size, GFP_NOFS);
-	if (likely(buf->lb_buf))
-		buf->lb_len = size;
-}
-EXPORT_SYMBOL(lu_buf_alloc);
-
-void lu_buf_realloc(struct lu_buf *buf, size_t size)
-{
-	lu_buf_free(buf);
-	lu_buf_alloc(buf, size);
-}
-EXPORT_SYMBOL(lu_buf_realloc);
-
-struct lu_buf *lu_buf_check_and_alloc(struct lu_buf *buf, size_t len)
-{
-	if (!buf->lb_buf && !buf->lb_len)
-		lu_buf_alloc(buf, len);
-
-	if ((len > buf->lb_len) && buf->lb_buf)
-		lu_buf_realloc(buf, len);
-
-	return buf;
-}
-EXPORT_SYMBOL(lu_buf_check_and_alloc);
-
-/**
- * Increase the size of the \a buf.
- * preserves old data in buffer
- * old buffer remains unchanged on error
- * \retval 0 or -ENOMEM
- */
-int lu_buf_check_and_grow(struct lu_buf *buf, size_t len)
-{
-	char *ptr;
-
-	if (len <= buf->lb_len)
-		return 0;
-
-	ptr = libcfs_kvzalloc(len, GFP_NOFS);
-	if (!ptr)
-		return -ENOMEM;
-
-	/* Free the old buf */
-	if (buf->lb_buf) {
-		memcpy(ptr, buf->lb_buf, buf->lb_len);
-		kvfree(buf->lb_buf);
-	}
-
-	buf->lb_buf = ptr;
-	buf->lb_len = len;
-	return 0;
-}

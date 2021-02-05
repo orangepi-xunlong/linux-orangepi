@@ -70,12 +70,9 @@ static int dvb_dummy_fe_read_ucblocks(struct dvb_frontend* fe, u32* ucblocks)
 }
 
 /*
- * Should only be implemented if it actually reads something from the hardware.
- * Also, it should check for the locks, in order to avoid report wrong data
- * to userspace.
+ * Only needed if it actually reads something from the hardware
  */
-static int dvb_dummy_fe_get_frontend(struct dvb_frontend *fe,
-				     struct dtv_frontend_properties *p)
+static int dvb_dummy_fe_get_frontend(struct dvb_frontend *fe)
 {
 	return 0;
 }

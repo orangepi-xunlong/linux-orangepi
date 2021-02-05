@@ -10,7 +10,6 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -46,7 +45,6 @@ struct xwdt_device {
 	u32 wdt_interval;
 	spinlock_t spinlock;
 	struct watchdog_device xilinx_wdt_wdd;
-	struct clk		*clk;
 };
 
 static int xilinx_wdt_start(struct watchdog_device *wdd)
@@ -197,30 +195,16 @@ static int xwdt_probe(struct platform_device *pdev)
 	spin_lock_init(&xdev->spinlock);
 	watchdog_set_drvdata(xilinx_wdt_wdd, xdev);
 
-	xdev->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(xdev->clk)) {
-		if (PTR_ERR(xdev->clk) == -ENOENT)
-			xdev->clk = NULL;
-		else
-			return PTR_ERR(xdev->clk);
-	}
-
-	rc = clk_prepare_enable(xdev->clk);
-	if (rc) {
-		dev_err(&pdev->dev, "unable to enable clock\n");
-		return rc;
-	}
-
 	rc = xwdt_selftest(xdev);
 	if (rc == XWT_TIMER_FAILED) {
 		dev_err(&pdev->dev, "SelfTest routine error\n");
-		goto err_clk_disable;
+		return rc;
 	}
 
 	rc = watchdog_register_device(xilinx_wdt_wdd);
 	if (rc) {
 		dev_err(&pdev->dev, "Cannot register watchdog (err=%d)\n", rc);
-		goto err_clk_disable;
+		return rc;
 	}
 
 	dev_info(&pdev->dev, "Xilinx Watchdog Timer at %p with timeout %ds\n",
@@ -229,10 +213,6 @@ static int xwdt_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, xdev);
 
 	return 0;
-err_clk_disable:
-	clk_disable_unprepare(xdev->clk);
-
-	return rc;
 }
 
 static int xwdt_remove(struct platform_device *pdev)
@@ -240,7 +220,6 @@ static int xwdt_remove(struct platform_device *pdev)
 	struct xwdt_device *xdev = platform_get_drvdata(pdev);
 
 	watchdog_unregister_device(&xdev->xilinx_wdt_wdd);
-	clk_disable_unprepare(xdev->clk);
 
 	return 0;
 }

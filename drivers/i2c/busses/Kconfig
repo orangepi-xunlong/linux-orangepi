@@ -79,19 +79,18 @@ config I2C_AMD8111
 
 config I2C_HIX5HD2
 	tristate "Hix5hd2 high-speed I2C driver"
-	depends on ARCH_HISI || ARCH_HIX5HD2 || COMPILE_TEST
+	depends on ARCH_HIX5HD2 || COMPILE_TEST
 	help
-	  Say Y here to include support for the high-speed I2C controller
-	  used in HiSilicon hix5hd2 SoCs.
+	  Say Y here to include support for high-speed I2C controller in the
+	  Hisilicon based hix5hd2 SoCs.
 
-	  This driver can also be built as a module. If so, the module
+	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-hix5hd2.
 
 config I2C_I801
 	tristate "Intel 82801 (ICH/PCH)"
 	depends on PCI
 	select CHECK_SIGNATURE if X86 && DMI
-	select I2C_SMBUS
 	help
 	  If you say yes to this option, support will be included for the Intel
 	  801 family of mainboard I2C interfaces.  Specifically, the following
@@ -398,7 +397,7 @@ config I2C_BCM_KONA
 
 config I2C_BRCMSTB
 	tristate "BRCM Settop I2C controller"
-	depends on ARCH_BRCMSTB || BMIPS_GENERIC || COMPILE_TEST
+	depends on ARCH_BRCMSTB || COMPILE_TEST
 	default y
 	help
 	  If you say yes to this option, support will be included for the
@@ -491,9 +490,7 @@ config I2C_DESIGNWARE_PCI
 
 config I2C_DESIGNWARE_BAYTRAIL
 	bool "Intel Baytrail I2C semaphore support"
-	depends on ACPI
-	depends on (I2C_DESIGNWARE_PLATFORM=m && IOSF_MBI) || \
-		   (I2C_DESIGNWARE_PLATFORM=y && IOSF_MBI=y)
+	depends on I2C_DESIGNWARE_PLATFORM && IOSF_MBI=y && ACPI
 	help
 	  This driver enables managed host access to the PMIC I2C bus on select
 	  Intel BayTrail platforms using the X-Powers AXP288 PMIC. It allows
@@ -519,7 +516,7 @@ config I2C_EFM32
 
 config I2C_EG20T
 	tristate "Intel EG20T PCH/LAPIS Semicon IOH(ML7213/ML7223/ML7831) I2C"
-	depends on PCI && (X86_32 || MIPS || COMPILE_TEST)
+	depends on PCI && (X86_32 || COMPILE_TEST)
 	help
 	  This driver is for PCH(Platform controller Hub) I2C of EG20T which
 	  is an IOH(Input/Output Hub) for x86 embedded processor.
@@ -535,7 +532,6 @@ config I2C_EG20T
 config I2C_EMEV2
 	tristate "EMMA Mobile series I2C adapter"
 	depends on HAVE_CLK
-	select I2C_SLAVE
 	help
 	  If you say yes to this option, support will be included for the
 	  I2C interface on the Renesas Electronics EM/EV family of processors.
@@ -589,10 +585,10 @@ config I2C_IMG
 
 config I2C_IMX
 	tristate "IMX I2C interface"
-	depends on ARCH_MXC || ARCH_LAYERSCAPE || COLDFIRE
+	depends on ARCH_MXC || ARCH_LAYERSCAPE
 	help
 	  Say Y here if you want to use the IIC bus controller on
-	  the Freescale i.MX/MXC, Layerscape or ColdFire processors.
+	  the Freescale i.MX/MXC or Layerscape processors.
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-imx.
@@ -638,7 +634,7 @@ config I2C_LPC2K
 
 config I2C_MESON
 	tristate "Amlogic Meson I2C controller"
-	depends on ARCH_MESON || COMPILE_TEST
+	depends on ARCH_MESON
 	help
 	  If you say yes to this option, support will be included for the
 	  I2C interface on the Amlogic Meson family of SoCs.
@@ -666,7 +662,7 @@ config I2C_MT65XX
 
 config I2C_MV64XXX
 	tristate "Marvell mv64xxx I2C Controller"
-	depends on MV64X60 || PLAT_ORION || ARCH_SUNXI || ARCH_MVEBU
+	depends on MV64X60 || PLAT_ORION || ARCH_SUNXI
 	help
 	  If you say yes to this option, support will be included for the
 	  built-in I2C interface on the Marvell 64xxx line of host bridges.
@@ -713,24 +709,6 @@ config I2C_OMAP
 	  I2C interface on the Texas Instruments OMAP1/2 family of processors.
 	  Like OMAP1510/1610/1710/5912 and OMAP242x.
 	  For details see http://www.ti.com/omap.
-
-config I2C_SUNXI
-	tristate "SUNXI I2C controller"
-	depends on ARCH_SUNXI
-	default y if MACH_SUNXI
-	help
-	  If you say yes to this option, support will be included for the
-	  I2C interface from Allwinner Technology SUNXI platform.
-
-	  This driver can also be built as a module. If so, the module
-	  will be called i2c-sunxi.
-
-config I2C_SUNXI_TEST
-	tristate "SUNXI I2C controller test by EEPROM"
-	depends on I2C_SUNXI && (FPGA_V4_PLATFORM || FPGA_V7_PLATFORM)
-	default n
-	help
-	  It can Only be used in FPGA board.
 
 config I2C_PASEMI
 	tristate "PA Semi SMBus interface"
@@ -810,7 +788,7 @@ config I2C_QUP
 
 config I2C_RIIC
 	tristate "Renesas RIIC adapter"
-	depends on ARCH_RENESAS || COMPILE_TEST
+	depends on ARCH_SHMOBILE || COMPILE_TEST
 	help
 	  If you say yes to this option, support will be included for the
 	  Renesas RIIC I2C interface.
@@ -854,7 +832,7 @@ config I2C_SH7760
 config I2C_SH_MOBILE
 	tristate "SuperH Mobile I2C Controller"
 	depends on HAS_DMA
-	depends on ARCH_SHMOBILE || ARCH_RENESAS || COMPILE_TEST
+	depends on SUPERH || ARCH_SHMOBILE || COMPILE_TEST
 	help
 	  If you say yes to this option, support will be included for the
 	  built-in I2C interface on the Renesas SH-Mobile processor.
@@ -929,7 +907,7 @@ config I2C_TEGRA
 
 config I2C_UNIPHIER
 	tristate "UniPhier FIFO-less I2C controller"
-	depends on ARCH_UNIPHIER || COMPILE_TEST
+	depends on ARCH_UNIPHIER
 	help
 	  If you say yes to this option, support will be included for
 	  the UniPhier FIFO-less I2C interface embedded in PH1-LD4, PH1-sLD8,
@@ -937,7 +915,7 @@ config I2C_UNIPHIER
 
 config I2C_UNIPHIER_F
 	tristate "UniPhier FIFO-builtin I2C controller"
-	depends on ARCH_UNIPHIER || COMPILE_TEST
+	depends on ARCH_UNIPHIER
 	help
 	  If you say yes to this option, support will be included for
 	  the UniPhier FIFO-builtin I2C interface embedded in PH1-Pro4,
@@ -945,7 +923,7 @@ config I2C_UNIPHIER_F
 
 config I2C_VERSATILE
 	tristate "ARM Versatile/Realview I2C bus support"
-	depends on ARCH_VERSATILE || ARCH_REALVIEW || ARCH_VEXPRESS || COMPILE_TEST
+	depends on ARCH_VERSATILE || ARCH_REALVIEW || ARCH_VEXPRESS
 	select I2C_ALGOBIT
 	help
 	  Say yes if you want to support the I2C serial bus on ARMs Versatile
@@ -974,17 +952,6 @@ config I2C_OCTEON
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-octeon.
 
-config I2C_THUNDERX
-	tristate "Cavium ThunderX I2C bus support"
-	depends on 64BIT && PCI && (ARM64 || COMPILE_TEST)
-	select I2C_SMBUS
-	help
-	  Say yes if you want to support the I2C serial bus on Cavium
-	  ThunderX SOC.
-
-	  This driver can also be built as a module.  If so, the module
-	  will be called i2c-thunderx.
-
 config I2C_XILINX
 	tristate "Xilinx I2C Controller"
 	depends on HAS_IOMEM
@@ -996,29 +963,28 @@ config I2C_XILINX
 	  will be called xilinx_i2c.
 
 config I2C_XLR
-	tristate "Netlogic XLR and Sigma Designs I2C support"
-	depends on CPU_XLR || ARCH_TANGO
+	tristate "XLR I2C support"
+	depends on CPU_XLR
 	help
 	  This driver enables support for the on-chip I2C interface of
-	  the Netlogic XLR/XLS MIPS processors and Sigma Designs SOCs.
+	  the Netlogic XLR/XLS MIPS processors.
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-xlr.
 
 config I2C_XLP9XX
 	tristate "XLP9XX I2C support"
-	depends on CPU_XLP || ARCH_VULCAN || COMPILE_TEST
+	depends on CPU_XLP || COMPILE_TEST
 	help
 	  This driver enables support for the on-chip I2C interface of
-	  the Broadcom XLP9xx/XLP5xx MIPS and Vulcan ARM64 processors.
+	  the Broadcom XLP9xx/XLP5xx MIPS processors.
 
 	  This driver can also be built as a module.  If so, the module will
 	  be called i2c-xlp9xx.
 
 config I2C_RCAR
 	tristate "Renesas R-Car I2C Controller"
-	depends on HAS_DMA
-	depends on ARCH_RENESAS || COMPILE_TEST
+	depends on ARCH_SHMOBILE || COMPILE_TEST
 	select I2C_SLAVE
 	help
 	  If you say yes to this option, support will be included for the

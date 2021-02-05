@@ -63,7 +63,7 @@ EXPORT_SYMBOL_GPL(fsnotify_get_cookie);
 /* return true if the notify queue is empty, false otherwise */
 bool fsnotify_notify_queue_is_empty(struct fsnotify_group *group)
 {
-	assert_spin_locked(&group->notification_lock);
+	BUG_ON(!mutex_is_locked(&group->notification_mutex));
 	return list_empty(&group->notification_list) ? true : false;
 }
 
@@ -73,17 +73,8 @@ void fsnotify_destroy_event(struct fsnotify_group *group,
 	/* Overflow events are per-group and we don't want to free them */
 	if (!event || event->mask == FS_Q_OVERFLOW)
 		return;
-	/*
-	 * If the event is still queued, we have a problem... Do an unreliable
-	 * lockless check first to avoid locking in the common case. The
-	 * locking may be necessary for permission events which got removed
-	 * from the list by a different CPU than the one freeing the event.
-	 */
-	if (!list_empty(&event->list)) {
-		spin_lock(&group->notification_lock);
-		WARN_ON(!list_empty(&event->list));
-		spin_unlock(&group->notification_lock);
-	}
+	/* If the event is still queued, we have a problem... */
+	WARN_ON(!list_empty(&event->list));
 	group->ops->free_event(event);
 }
 
@@ -104,10 +95,10 @@ int fsnotify_add_event(struct fsnotify_group *group,
 
 	pr_debug("%s: group=%p event=%p\n", __func__, group, event);
 
-	spin_lock(&group->notification_lock);
+	mutex_lock(&group->notification_mutex);
 
 	if (group->shutdown) {
-		spin_unlock(&group->notification_lock);
+		mutex_unlock(&group->notification_mutex);
 		return 2;
 	}
 
@@ -115,7 +106,7 @@ int fsnotify_add_event(struct fsnotify_group *group,
 		ret = 2;
 		/* Queue overflow event only if it isn't already queued */
 		if (!list_empty(&group->overflow_event->list)) {
-			spin_unlock(&group->notification_lock);
+			mutex_unlock(&group->notification_mutex);
 			return ret;
 		}
 		event = group->overflow_event;
@@ -125,7 +116,7 @@ int fsnotify_add_event(struct fsnotify_group *group,
 	if (!list_empty(list) && merge) {
 		ret = merge(list, event);
 		if (ret) {
-			spin_unlock(&group->notification_lock);
+			mutex_unlock(&group->notification_mutex);
 			return ret;
 		}
 	}
@@ -133,7 +124,7 @@ int fsnotify_add_event(struct fsnotify_group *group,
 queue:
 	group->q_len++;
 	list_add_tail(&event->list, list);
-	spin_unlock(&group->notification_lock);
+	mutex_unlock(&group->notification_mutex);
 
 	wake_up(&group->notification_waitq);
 	kill_fasync(&group->fsn_fa, SIGIO, POLL_IN);
@@ -148,7 +139,7 @@ struct fsnotify_event *fsnotify_remove_first_event(struct fsnotify_group *group)
 {
 	struct fsnotify_event *event;
 
-	assert_spin_locked(&group->notification_lock);
+	BUG_ON(!mutex_is_locked(&group->notification_mutex));
 
 	pr_debug("%s: group=%p\n", __func__, group);
 
@@ -170,7 +161,7 @@ struct fsnotify_event *fsnotify_remove_first_event(struct fsnotify_group *group)
  */
 struct fsnotify_event *fsnotify_peek_first_event(struct fsnotify_group *group)
 {
-	assert_spin_locked(&group->notification_lock);
+	BUG_ON(!mutex_is_locked(&group->notification_mutex));
 
 	return list_first_entry(&group->notification_list,
 				struct fsnotify_event, list);
@@ -184,14 +175,12 @@ void fsnotify_flush_notify(struct fsnotify_group *group)
 {
 	struct fsnotify_event *event;
 
-	spin_lock(&group->notification_lock);
+	mutex_lock(&group->notification_mutex);
 	while (!fsnotify_notify_queue_is_empty(group)) {
 		event = fsnotify_remove_first_event(group);
-		spin_unlock(&group->notification_lock);
 		fsnotify_destroy_event(group, event);
-		spin_lock(&group->notification_lock);
 	}
-	spin_unlock(&group->notification_lock);
+	mutex_unlock(&group->notification_mutex);
 }
 
 /*

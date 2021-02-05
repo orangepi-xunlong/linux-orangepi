@@ -265,7 +265,7 @@ again:
 	lwtstate_put(dst->lwtstate);
 
 	if (dst->flags & DST_METADATA)
-		metadata_dst_free((struct metadata_dst *)dst);
+		kfree(dst);
 	else
 		kmem_cache_free(dst->ops->kmem_cachep, dst);
 
@@ -399,14 +399,6 @@ struct metadata_dst *metadata_dst_alloc(u8 optslen, gfp_t flags)
 	return md_dst;
 }
 EXPORT_SYMBOL_GPL(metadata_dst_alloc);
-
-void metadata_dst_free(struct metadata_dst *md_dst)
-{
-#ifdef CONFIG_DST_CACHE
-	dst_cache_destroy(&md_dst->u.tun_info.dst_cache);
-#endif
-	kfree(md_dst);
-}
 
 struct metadata_dst __percpu *metadata_dst_alloc_percpu(u8 optslen, gfp_t flags)
 {

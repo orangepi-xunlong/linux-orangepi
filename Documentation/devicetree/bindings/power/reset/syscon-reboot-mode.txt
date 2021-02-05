@@ -1,6 +1,6 @@
 SYSCON reboot mode driver
 
-This driver gets reboot mode magic value form reboot-mode driver
+This driver get reboot mode magic value form reboot-mode driver
 and stores it in a SYSCON mapped register. Then the bootloader
 can read it and take different action according to the magic
 value stored.
@@ -12,11 +12,10 @@ Required properties:
 - compatible: should be "syscon-reboot-mode"
 - offset: offset in the register map for the storage register (in bytes)
 
-Optional property:
-- mask: bits mask of the bits in the register to store the reboot mode magic value,
-  default set to 0xffffffff if missing.
+Optional properity:
+- mask: the mask bits of the mode magic value, default set to 0xffffffff if missing.
 
-The rest of the properties should follow the generic reboot-mode description
+The rest of the properties should follow the generic reboot-mode discription
 found in reboot-mode.txt
 
 Example:
@@ -29,7 +28,7 @@ Example:
 			offset = <0x40>;
 			mode-normal = <BOOT_NORMAL>;
 			mode-recovery = <BOOT_RECOVERY>;
-			mode-bootloader = <BOOT_FASTBOOT>;
-			mode-loader = <BOOT_BL_DOWNLOAD>;
+			mode-fastboot = <BOOT_FASTBOOT>;
+			mode-loader = <BOOT_LOADER>;
 		};
 	};

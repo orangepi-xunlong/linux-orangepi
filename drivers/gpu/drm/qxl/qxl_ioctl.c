@@ -107,14 +107,15 @@ apply_surf_reloc(struct qxl_device *qdev, struct qxl_reloc_info *info)
 }
 
 /* return holding the reference to this object */
-static int qxlhw_handle_to_bo(struct drm_file *file_priv, uint64_t handle,
+static int qxlhw_handle_to_bo(struct qxl_device *qdev,
+			      struct drm_file *file_priv, uint64_t handle,
 			      struct qxl_release *release, struct qxl_bo **qbo_p)
 {
 	struct drm_gem_object *gobj;
 	struct qxl_bo *qobj;
 	int ret;
 
-	gobj = drm_gem_object_lookup(file_priv, handle);
+	gobj = drm_gem_object_lookup(qdev->ddev, file_priv, handle);
 	if (!gobj)
 		return -EINVAL;
 
@@ -220,7 +221,7 @@ static int qxl_process_single_command(struct qxl_device *qdev,
 		reloc_info[i].type = reloc.reloc_type;
 
 		if (reloc.dst_handle) {
-			ret = qxlhw_handle_to_bo(file_priv, reloc.dst_handle, release,
+			ret = qxlhw_handle_to_bo(qdev, file_priv, reloc.dst_handle, release,
 						 &reloc_info[i].dst_bo);
 			if (ret)
 				goto out_free_bos;
@@ -233,7 +234,7 @@ static int qxl_process_single_command(struct qxl_device *qdev,
 
 		/* reserve and validate the reloc dst bo */
 		if (reloc.reloc_type == QXL_RELOC_TYPE_BO || reloc.src_handle) {
-			ret = qxlhw_handle_to_bo(file_priv, reloc.src_handle, release,
+			ret = qxlhw_handle_to_bo(qdev, file_priv, reloc.src_handle, release,
 						 &reloc_info[i].src_bo);
 			if (ret)
 				goto out_free_bos;
@@ -313,7 +314,7 @@ static int qxl_update_area_ioctl(struct drm_device *dev, void *data,
 	    update_area->top >= update_area->bottom)
 		return -EINVAL;
 
-	gobj = drm_gem_object_lookup(file, update_area->handle);
+	gobj = drm_gem_object_lookup(dev, file, update_area->handle);
 	if (gobj == NULL)
 		return -ENOENT;
 

@@ -145,12 +145,10 @@ fail:
 }
 EXPORT_SYMBOL_GPL(ping_get_port);
 
-int ping_hash(struct sock *sk)
+void ping_hash(struct sock *sk)
 {
 	pr_debug("ping_hash(sk->port=%u)\n", inet_sk(sk)->inet_num);
 	BUG(); /* "Please do not press this button again." */
-
-	return 0;
 }
 
 void ping_unhash(struct sock *sk)
@@ -259,7 +257,7 @@ int ping_init_sock(struct sock *sk)
 	struct net *net = sock_net(sk);
 	kgid_t group = current_egid();
 	struct group_info *group_info;
-	int i;
+	int i, j, count;
 	kgid_t low, high;
 	int ret = 0;
 
@@ -271,11 +269,16 @@ int ping_init_sock(struct sock *sk)
 		return 0;
 
 	group_info = get_current_groups();
-	for (i = 0; i < group_info->ngroups; i++) {
-		kgid_t gid = group_info->gid[i];
+	count = group_info->ngroups;
+	for (i = 0; i < group_info->nblocks; i++) {
+		int cp_count = min_t(int, NGROUPS_PER_BLOCK, count);
+		for (j = 0; j < cp_count; j++) {
+			kgid_t gid = group_info->blocks[i][j];
+			if (gid_lte(low, gid) && gid_lte(gid, high))
+				goto out_release_group;
+		}
 
-		if (gid_lte(low, gid) && gid_lte(gid, high))
-			goto out_release_group;
+		count -= cp_count;
 	}
 
 	ret = -EACCES;
@@ -739,7 +742,6 @@ static int ping_v4_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		/* no remote port */
 	}
 
-	ipc.sockc.tsflags = sk->sk_tsflags;
 	ipc.addr = inet->inet_saddr;
 	ipc.opt = NULL;
 	ipc.oif = sk->sk_bound_dev_if;
@@ -747,8 +749,10 @@ static int ping_v4_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	ipc.ttl = 0;
 	ipc.tos = -1;
 
+	sock_tx_timestamp(sk, &ipc.tx_flags);
+
 	if (msg->msg_controllen) {
-		err = ip_cmsg_send(sk, msg, &ipc, false);
+		err = ip_cmsg_send(sock_net(sk), msg, &ipc, false);
 		if (unlikely(err)) {
 			kfree(ipc.opt);
 			return err;
@@ -768,8 +772,6 @@ static int ping_v4_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		}
 		rcu_read_unlock();
 	}
-
-	sock_tx_timestamp(sk, ipc.sockc.tsflags, &ipc.tx_flags);
 
 	saddr = ipc.addr;
 	ipc.addr = faddr = daddr;
@@ -1005,7 +1007,7 @@ struct proto ping_prot = {
 	.init =		ping_init_sock,
 	.close =	ping_close,
 	.connect =	ip4_datagram_connect,
-	.disconnect =	__udp_disconnect,
+	.disconnect =	udp_disconnect,
 	.setsockopt =	ip_setsockopt,
 	.getsockopt =	ip_getsockopt,
 	.sendmsg =	ping_v4_sendmsg,
@@ -1074,7 +1076,6 @@ static struct sock *ping_get_idx(struct seq_file *seq, loff_t pos)
 }
 
 void *ping_seq_start(struct seq_file *seq, loff_t *pos, sa_family_t family)
-	__acquires(ping_table.lock)
 {
 	struct ping_iter_state *state = seq->private;
 	state->bucket = 0;
@@ -1106,7 +1107,6 @@ void *ping_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 EXPORT_SYMBOL_GPL(ping_seq_next);
 
 void ping_seq_stop(struct seq_file *seq, void *v)
-	__releases(ping_table.lock)
 {
 	read_unlock_bh(&ping_table.lock);
 }
@@ -1148,6 +1148,13 @@ static int ping_v4_seq_show(struct seq_file *seq, void *v)
 	seq_pad(seq, '\n');
 	return 0;
 }
+
+static const struct seq_operations ping_v4_seq_ops = {
+	.show		= ping_v4_seq_show,
+	.start		= ping_v4_seq_start,
+	.next		= ping_seq_next,
+	.stop		= ping_seq_stop,
+};
 
 static int ping_seq_open(struct inode *inode, struct file *file)
 {

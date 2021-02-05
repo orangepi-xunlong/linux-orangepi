@@ -75,8 +75,8 @@ static ssize_t vexpress_reset_active_store(struct device *dev,
 	return err ? err : count;
 }
 
-static DEVICE_ATTR(active, S_IRUGO | S_IWUSR, vexpress_reset_active_show,
-		   vexpress_reset_active_store);
+DEVICE_ATTR(active, S_IRUGO | S_IWUSR, vexpress_reset_active_show,
+		vexpress_reset_active_store);
 
 
 enum vexpress_reset_func { FUNC_RESET, FUNC_SHUTDOWN, FUNC_REBOOT };

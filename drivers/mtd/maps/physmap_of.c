@@ -24,7 +24,6 @@
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/slab.h>
-#include "physmap_of_versatile.h"
 
 struct of_flash_list {
 	struct mtd_info *mtd;
@@ -167,6 +166,7 @@ static int of_flash_probe(struct platform_device *dev)
 	int reg_tuple_size;
 	struct mtd_info **mtd_list = NULL;
 	resource_size_t res_size;
+	struct mtd_part_parser_data ppdata;
 	bool map_indirect;
 	const char *mtd_name = NULL;
 
@@ -186,7 +186,7 @@ static int of_flash_probe(struct platform_device *dev)
 	 * consists internally of 2 non-identical NOR chips on one die.
 	 */
 	p = of_get_property(dp, "reg", &count);
-	if (!p || count % reg_tuple_size != 0) {
+	if (count % reg_tuple_size != 0) {
 		dev_err(&dev->dev, "Malformed reg property on %s\n",
 				dev->dev.of_node->full_name);
 		err = -EINVAL;
@@ -241,11 +241,6 @@ static int of_flash_probe(struct platform_device *dev)
 		info->list[i].map.size = res_size;
 		info->list[i].map.bankwidth = be32_to_cpup(width);
 		info->list[i].map.device_node = dp;
-		err = of_flash_probe_versatile(dev, dp, &info->list[i].map);
-		if (err) {
-			dev_err(&dev->dev, "Can't probe Versatile VPP\n");
-			return err;
-		}
 
 		err = -ENOMEM;
 		info->list[i].map.virt = ioremap(info->list[i].map.phys,
@@ -315,14 +310,13 @@ static int of_flash_probe(struct platform_device *dev)
 	if (err)
 		goto err_out;
 
-	info->cmtd->dev.parent = &dev->dev;
-	mtd_set_of_node(info->cmtd, dp);
+	ppdata.of_node = dp;
 	part_probe_types = of_get_probes(dp);
 	if (!part_probe_types) {
 		err = -ENOMEM;
 		goto err_out;
 	}
-	mtd_device_parse_register(info->cmtd, part_probe_types, NULL,
+	mtd_device_parse_register(info->cmtd, part_probe_types, &ppdata,
 			NULL, 0);
 	of_free_probes(part_probe_types);
 

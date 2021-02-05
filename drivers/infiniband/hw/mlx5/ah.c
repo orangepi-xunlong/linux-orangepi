@@ -32,10 +32,8 @@
 
 #include "mlx5_ib.h"
 
-static struct ib_ah *create_ib_ah(struct mlx5_ib_dev *dev,
-				  struct mlx5_ib_ah *ah,
-				  struct ib_ah_attr *ah_attr,
-				  enum rdma_link_layer ll)
+struct ib_ah *create_ib_ah(struct ib_ah_attr *ah_attr,
+			   struct mlx5_ib_ah *ah)
 {
 	if (ah_attr->ah_flags & IB_AH_GRH) {
 		memcpy(ah->av.rgid, &ah_attr->grh.dgid, 16);
@@ -46,20 +44,9 @@ static struct ib_ah *create_ib_ah(struct mlx5_ib_dev *dev,
 		ah->av.tclass = ah_attr->grh.traffic_class;
 	}
 
-	ah->av.stat_rate_sl = (ah_attr->static_rate << 4);
-
-	if (ll == IB_LINK_LAYER_ETHERNET) {
-		memcpy(ah->av.rmac, ah_attr->dmac, sizeof(ah_attr->dmac));
-		ah->av.udp_sport =
-			mlx5_get_roce_udp_sport(dev,
-						ah_attr->port_num,
-						ah_attr->grh.sgid_index);
-		ah->av.stat_rate_sl |= (ah_attr->sl & 0x7) << 1;
-	} else {
-		ah->av.rlid = cpu_to_be16(ah_attr->dlid);
-		ah->av.fl_mlid = ah_attr->src_path_bits & 0x7f;
-		ah->av.stat_rate_sl |= (ah_attr->sl & 0xf);
-	}
+	ah->av.rlid = cpu_to_be16(ah_attr->dlid);
+	ah->av.fl_mlid = ah_attr->src_path_bits & 0x7f;
+	ah->av.stat_rate_sl = (ah_attr->static_rate << 4) | (ah_attr->sl & 0xf);
 
 	return &ah->ibah;
 }
@@ -67,19 +54,12 @@ static struct ib_ah *create_ib_ah(struct mlx5_ib_dev *dev,
 struct ib_ah *mlx5_ib_create_ah(struct ib_pd *pd, struct ib_ah_attr *ah_attr)
 {
 	struct mlx5_ib_ah *ah;
-	struct mlx5_ib_dev *dev = to_mdev(pd->device);
-	enum rdma_link_layer ll;
-
-	ll = pd->device->get_link_layer(pd->device, ah_attr->port_num);
-
-	if (ll == IB_LINK_LAYER_ETHERNET && !(ah_attr->ah_flags & IB_AH_GRH))
-		return ERR_PTR(-EINVAL);
 
 	ah = kzalloc(sizeof(*ah), GFP_ATOMIC);
 	if (!ah)
 		return ERR_PTR(-ENOMEM);
 
-	return create_ib_ah(dev, ah, ah_attr, ll); /* never fails */
+	return create_ib_ah(ah_attr, ah); /* never fails */
 }
 
 int mlx5_ib_query_ah(struct ib_ah *ibah, struct ib_ah_attr *ah_attr)

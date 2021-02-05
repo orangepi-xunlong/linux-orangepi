@@ -49,33 +49,28 @@ under development.
 
 Here's an example of how to use the API:
 
-	#include <crypto/ahash.h>
+	#include <linux/crypto.h>
 	#include <linux/err.h>
 	#include <linux/scatterlist.h>
 	
 	struct scatterlist sg[2];
 	char result[128];
-	struct crypto_ahash *tfm;
-	struct ahash_request *req;
+	struct crypto_hash *tfm;
+	struct hash_desc desc;
 	
-	tfm = crypto_alloc_ahash("md5", 0, CRYPTO_ALG_ASYNC);
+	tfm = crypto_alloc_hash("md5", 0, CRYPTO_ALG_ASYNC);
 	if (IS_ERR(tfm))
 		fail();
 		
 	/* ... set up the scatterlists ... */
 
-	req = ahash_request_alloc(tfm, GFP_ATOMIC);
-	if (!req)
-		fail();
-
-	ahash_request_set_callback(req, 0, NULL, NULL);
-	ahash_request_set_crypt(req, sg, result, 2);
+	desc.tfm = tfm;
+	desc.flags = 0;
 	
-	if (crypto_ahash_digest(req))
+	if (crypto_hash_digest(&desc, sg, 2, result))
 		fail();
-
-	ahash_request_free(req);
-	crypto_free_ahash(tfm);
+	
+	crypto_free_hash(tfm);
 
     
 Many real examples are available in the regression test module (tcrypt.c).

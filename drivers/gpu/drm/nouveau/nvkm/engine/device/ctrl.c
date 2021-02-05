@@ -27,7 +27,6 @@
 #include <subdev/clk.h>
 
 #include <nvif/class.h>
-#include <nvif/if0001.h>
 #include <nvif/ioctl.h>
 #include <nvif/unpack.h>
 
@@ -38,10 +37,10 @@ nvkm_control_mthd_pstate_info(struct nvkm_control *ctrl, void *data, u32 size)
 		struct nvif_control_pstate_info_v0 v0;
 	} *args = data;
 	struct nvkm_clk *clk = ctrl->device->clk;
-	int ret = -ENOSYS;
+	int ret;
 
 	nvif_ioctl(&ctrl->object, "control pstate info size %d\n", size);
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
+	if (nvif_unpack(args->v0, 0, 0, false)) {
 		nvif_ioctl(&ctrl->object, "control pstate info vers %d\n",
 			   args->v0.version);
 	} else
@@ -76,10 +75,10 @@ nvkm_control_mthd_pstate_attr(struct nvkm_control *ctrl, void *data, u32 size)
 	struct nvkm_cstate *cstate;
 	int i = 0, j = -1;
 	u32 lo, hi;
-	int ret = -ENOSYS;
+	int ret;
 
 	nvif_ioctl(&ctrl->object, "control pstate attr size %d\n", size);
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
+	if (nvif_unpack(args->v0, 0, 0, false)) {
 		nvif_ioctl(&ctrl->object,
 			   "control pstate attr vers %d state %d index %d\n",
 			   args->v0.version, args->v0.state, args->v0.index);
@@ -144,10 +143,10 @@ nvkm_control_mthd_pstate_user(struct nvkm_control *ctrl, void *data, u32 size)
 		struct nvif_control_pstate_user_v0 v0;
 	} *args = data;
 	struct nvkm_clk *clk = ctrl->device->clk;
-	int ret = -ENOSYS;
+	int ret;
 
 	nvif_ioctl(&ctrl->object, "control pstate user size %d\n", size);
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
+	if (nvif_unpack(args->v0, 0, 0, false)) {
 		nvif_ioctl(&ctrl->object,
 			   "control pstate user vers %d ustate %d pwrsrc %d\n",
 			   args->v0.version, args->v0.ustate, args->v0.pwrsrc);
@@ -205,7 +204,7 @@ nvkm_control_new(struct nvkm_device *device, const struct nvkm_oclass *oclass,
 
 const struct nvkm_device_oclass
 nvkm_control_oclass = {
-	.base.oclass = NVIF_CLASS_CONTROL,
+	.base.oclass = NVIF_IOCTL_NEW_V0_CONTROL,
 	.base.minver = -1,
 	.base.maxver = -1,
 	.ctor = nvkm_control_new,

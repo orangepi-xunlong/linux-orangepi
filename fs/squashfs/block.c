@@ -300,7 +300,7 @@ static int squashfs_bio_submit(struct squashfs_read_request *req)
 
 		/* Otherwise, submit the current BIO and create a new one */
 		if (bio)
-			submit_bio(bio);
+			submit_bio(READ, bio);
 		bio_req = kcalloc(1, sizeof(struct squashfs_bio_request),
 				  GFP_NOIO);
 		if (!bio_req)
@@ -312,7 +312,6 @@ static int squashfs_bio_submit(struct squashfs_read_request *req)
 		bio->bi_bdev = req->sb->s_bdev;
 		bio->bi_iter.bi_sector = (block + b)
 				       << (msblk->devblksize_log2 - 9);
-		bio_set_op_attrs(bio, REQ_OP_READ, 0);
 		bio->bi_private = bio_req;
 		bio->bi_end_io = squashfs_bio_end_io;
 
@@ -321,7 +320,7 @@ static int squashfs_bio_submit(struct squashfs_read_request *req)
 		prev_block = b;
 	}
 	if (bio)
-		submit_bio(bio);
+		submit_bio(READ, bio);
 
 	if (req->synchronous)
 		squashfs_process_blocks(req);

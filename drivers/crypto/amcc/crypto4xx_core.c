@@ -40,7 +40,6 @@
 #include "crypto4xx_reg_def.h"
 #include "crypto4xx_core.h"
 #include "crypto4xx_sa.h"
-#include "crypto4xx_trng.h"
 
 #define PPC4XX_SEC_VERSION_STR			"0.5"
 
@@ -646,6 +645,15 @@ static u32 crypto4xx_ablkcipher_done(struct crypto4xx_device *dev,
 		addr = dma_map_page(dev->core_dev->device, sg_page(dst),
 				    dst->offset, dst->length, DMA_FROM_DEVICE);
 	}
+
+	if (pd_uinfo->sa_va->sa_command_0.bf.save_iv == SA_SAVE_IV) {
+		struct crypto_skcipher *skcipher = crypto_skcipher_reqtfm(req);
+
+		crypto4xx_memcpy_from_le32((u32 *)req->iv,
+			pd_uinfo->sr_va->save_iv,
+			crypto_skcipher_ivsize(skcipher));
+	}
+
 	crypto4xx_ret_sg_desc(dev, pd_uinfo);
 	if (ablk_req->base.complete != NULL)
 		ablk_req->base.complete(&ablk_req->base, 0);
@@ -784,10 +792,6 @@ u32 crypto4xx_build_pd(struct crypto_async_request *req,
 
 	/* figure how many gd is needed */
 	num_gd = sg_nents_for_len(src, datalen);
-	if ((int)num_gd < 0) {
-		dev_err(dev->core_dev->device, "Invalid number of src SG.\n");
-		return -EINVAL;
-	}
 	if (num_gd == 1)
 		num_gd = 0;
 
@@ -1226,7 +1230,6 @@ static int crypto4xx_probe(struct platform_device *ofdev)
 	if (rc)
 		goto err_start_dev;
 
-	ppc4xx_trng_probe(core_dev);
 	return 0;
 
 err_start_dev:
@@ -1253,8 +1256,6 @@ static int crypto4xx_remove(struct platform_device *ofdev)
 	struct device *dev = &ofdev->dev;
 	struct crypto4xx_core_device *core_dev = dev_get_drvdata(dev);
 
-	ppc4xx_trng_remove(core_dev);
-
 	free_irq(core_dev->irq, dev);
 	irq_dispose_mapping(core_dev->irq);
 
@@ -1275,7 +1276,7 @@ MODULE_DEVICE_TABLE(of, crypto4xx_match);
 
 static struct platform_driver crypto4xx_driver = {
 	.driver = {
-		.name = MODULE_NAME,
+		.name = "crypto4xx",
 		.of_match_table = crypto4xx_match,
 	},
 	.probe		= crypto4xx_probe,
@@ -1287,3 +1288,4 @@ module_platform_driver(crypto4xx_driver);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("James Hsiao <jhsiao@amcc.com>");
 MODULE_DESCRIPTION("Driver for AMCC PPC4xx crypto accelerator");
+

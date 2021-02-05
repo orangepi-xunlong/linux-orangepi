@@ -1,14 +1,12 @@
 
-#ifndef REMOTE_UNWIND_LIBUNWIND
 #include <errno.h>
 #include <libunwind.h>
 #include "perf_regs.h"
 #include "../../util/unwind.h"
 #include "../../util/debug.h"
-#endif
 
 #ifdef HAVE_ARCH_X86_64_SUPPORT
-int LIBUNWIND__ARCH_REG_ID(int regnum)
+int libunwind__arch_reg_id(int regnum)
 {
 	int id;
 
@@ -72,7 +70,7 @@ int LIBUNWIND__ARCH_REG_ID(int regnum)
 	return id;
 }
 #else
-int LIBUNWIND__ARCH_REG_ID(int regnum)
+int libunwind__arch_reg_id(int regnum)
 {
 	int id;
 

@@ -1,16 +1,14 @@
 /*
- * Lantiq XRX200 PHY Firmware Loader
- * Author: John Crispin
- *
  *  This program is free software; you can redistribute it and/or modify it
  *  under the terms of the GNU General Public License version 2 as published
  *  by the Free Software Foundation.
  *
- *  Copyright (C) 2012 John Crispin <john@phrozen.org>
+ *  Copyright (C) 2012 John Crispin <blogic@openwrt.org>
  */
 
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
+#include <linux/module.h>
 #include <linux/firmware.h>
 #include <linux/of_platform.h>
 
@@ -102,6 +100,7 @@ static const struct of_device_id xway_phy_match[] = {
 	{ .compatible = "lantiq,phy-xrx200" },
 	{},
 };
+MODULE_DEVICE_TABLE(of, xway_phy_match);
 
 static struct platform_driver xway_phy_driver = {
 	.probe = xway_phy_fw_probe,
@@ -110,4 +109,9 @@ static struct platform_driver xway_phy_driver = {
 		.of_match_table = xway_phy_match,
 	},
 };
-builtin_platform_driver(xway_phy_driver);
+
+module_platform_driver(xway_phy_driver);
+
+MODULE_AUTHOR("John Crispin <blogic@openwrt.org>");
+MODULE_DESCRIPTION("Lantiq XRX200 PHY Firmware Loader");
+MODULE_LICENSE("GPL");

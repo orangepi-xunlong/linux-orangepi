@@ -21,9 +21,11 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/notifier.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/reboot.h>
 #include <linux/types.h>
 #include <linux/watchdog.h>
 
@@ -58,6 +60,7 @@ struct sunxi_wdt_dev {
 	struct watchdog_device wdt_dev;
 	void __iomem *wdt_base;
 	const struct sunxi_wdt_reg *wdt_regs;
+	struct notifier_block restart_handler;
 };
 
 /*
@@ -83,10 +86,12 @@ static const int wdt_timeout_map[] = {
 };
 
 
-static int sunxi_wdt_restart(struct watchdog_device *wdt_dev,
-			     unsigned long action, void *data)
+static int sunxi_restart_handle(struct notifier_block *this, unsigned long mode,
+				void *cmd)
 {
-	struct sunxi_wdt_dev *sunxi_wdt = watchdog_get_drvdata(wdt_dev);
+	struct sunxi_wdt_dev *sunxi_wdt = container_of(this,
+						       struct sunxi_wdt_dev,
+						       restart_handler);
 	void __iomem *wdt_base = sunxi_wdt->wdt_base;
 	const struct sunxi_wdt_reg *regs = sunxi_wdt->wdt_regs;
 	u32 val;
@@ -115,7 +120,7 @@ static int sunxi_wdt_restart(struct watchdog_device *wdt_dev,
 		val |= WDT_MODE_EN;
 		writel(val, wdt_base + regs->wdt_mode);
 	}
-	return 0;
+	return NOTIFY_DONE;
 }
 
 static int sunxi_wdt_ping(struct watchdog_device *wdt_dev)
@@ -190,32 +195,6 @@ static int sunxi_wdt_start(struct watchdog_device *wdt_dev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int sunxi_wdt_suspend(struct platform_device *pdev, pm_message_t state)
-
-{
-	struct sunxi_wdt_dev *sunxi_wdt = platform_get_drvdata(pdev);
-
-	if (watchdog_active(&sunxi_wdt->wdt_dev))
-		sunxi_wdt_stop(&sunxi_wdt->wdt_dev);
-
-	return 0;
-}
-
-static int sunxi_wdt_resume(struct platform_device *pdev)
-{
-	struct sunxi_wdt_dev *sunxi_wdt = platform_get_drvdata(pdev);
-
-	if (watchdog_active(&sunxi_wdt->wdt_dev)) {
-		sunxi_wdt_set_timeout(&sunxi_wdt->wdt_dev,
-				      sunxi_wdt->wdt_dev.timeout);
-		sunxi_wdt_start(&sunxi_wdt->wdt_dev);
-	}
-
-	return 0;
-}
-#endif /* CONFIG_PM */
-
 static const struct watchdog_info sunxi_wdt_info = {
 	.identity	= DRV_NAME,
 	.options	= WDIOF_SETTIMEOUT |
@@ -229,7 +208,6 @@ static const struct watchdog_ops sunxi_wdt_ops = {
 	.stop		= sunxi_wdt_stop,
 	.ping		= sunxi_wdt_ping,
 	.set_timeout	= sunxi_wdt_set_timeout,
-	.restart	= sunxi_wdt_restart,
 };
 
 static const struct sunxi_wdt_reg sun4i_wdt_reg = {
@@ -252,9 +230,7 @@ static const struct sunxi_wdt_reg sun6i_wdt_reg = {
 
 static const struct of_device_id sunxi_wdt_dt_ids[] = {
 	{ .compatible = "allwinner,sun4i-a10-wdt", .data = &sun4i_wdt_reg },
-	{ .compatible = "allwinner,sun4i-wdt", .data = &sun4i_wdt_reg },
 	{ .compatible = "allwinner,sun6i-a31-wdt", .data = &sun6i_wdt_reg },
-	{ .compatible = "allwinner,sun50i-wdt", .data = &sun6i_wdt_reg },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, sunxi_wdt_dt_ids);
@@ -292,7 +268,6 @@ static int sunxi_wdt_probe(struct platform_device *pdev)
 
 	watchdog_init_timeout(&sunxi_wdt->wdt_dev, timeout, &pdev->dev);
 	watchdog_set_nowayout(&sunxi_wdt->wdt_dev, nowayout);
-	watchdog_set_restart_priority(&sunxi_wdt->wdt_dev, 128);
 
 	watchdog_set_drvdata(&sunxi_wdt->wdt_dev, sunxi_wdt);
 
@@ -301,6 +276,13 @@ static int sunxi_wdt_probe(struct platform_device *pdev)
 	err = watchdog_register_device(&sunxi_wdt->wdt_dev);
 	if (unlikely(err))
 		return err;
+
+	sunxi_wdt->restart_handler.notifier_call = sunxi_restart_handle;
+	sunxi_wdt->restart_handler.priority = 128;
+	err = register_restart_handler(&sunxi_wdt->restart_handler);
+	if (err)
+		dev_err(&pdev->dev,
+			"cannot register restart handler (err=%d)\n", err);
 
 	dev_info(&pdev->dev, "Watchdog enabled (timeout=%d sec, nowayout=%d)",
 			sunxi_wdt->wdt_dev.timeout, nowayout);
@@ -311,6 +293,8 @@ static int sunxi_wdt_probe(struct platform_device *pdev)
 static int sunxi_wdt_remove(struct platform_device *pdev)
 {
 	struct sunxi_wdt_dev *sunxi_wdt = platform_get_drvdata(pdev);
+
+	unregister_restart_handler(&sunxi_wdt->restart_handler);
 
 	watchdog_unregister_device(&sunxi_wdt->wdt_dev);
 	watchdog_set_drvdata(&sunxi_wdt->wdt_dev, NULL);
@@ -329,10 +313,6 @@ static struct platform_driver sunxi_wdt_driver = {
 	.probe		= sunxi_wdt_probe,
 	.remove		= sunxi_wdt_remove,
 	.shutdown	= sunxi_wdt_shutdown,
-#ifdef CONFIG_PM
-	.suspend        = sunxi_wdt_suspend,
-	.resume         = sunxi_wdt_resume,
-#endif
 	.driver		= {
 		.name		= DRV_NAME,
 		.of_match_table	= sunxi_wdt_dt_ids,

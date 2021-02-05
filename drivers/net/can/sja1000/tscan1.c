@@ -203,4 +203,14 @@ static struct isa_driver tscan1_isa_driver = {
 	},
 };
 
-module_isa_driver(tscan1_isa_driver, TSCAN1_MAXDEV);
+static int __init tscan1_init(void)
+{
+	return isa_register_driver(&tscan1_isa_driver, TSCAN1_MAXDEV);
+}
+module_init(tscan1_init);
+
+static void __exit tscan1_exit(void)
+{
+	isa_unregister_driver(&tscan1_isa_driver);
+}
+module_exit(tscan1_exit);

@@ -19,14 +19,13 @@ static __u64 ptr_to_u64(void *ptr)
 }
 
 int bpf_create_map(enum bpf_map_type map_type, int key_size, int value_size,
-		   int max_entries, int map_flags)
+		   int max_entries)
 {
 	union bpf_attr attr = {
 		.map_type = map_type,
 		.key_size = key_size,
 		.value_size = value_size,
-		.max_entries = max_entries,
-		.map_flags = map_flags,
+		.max_entries = max_entries
 	};
 
 	return syscall(__NR_bpf, BPF_MAP_CREATE, &attr, sizeof(attr));
@@ -102,29 +101,6 @@ int bpf_prog_load(enum bpf_prog_type prog_type,
 	bpf_log_buf[0] = 0;
 
 	return syscall(__NR_bpf, BPF_PROG_LOAD, &attr, sizeof(attr));
-}
-
-int bpf_prog_attach(int prog_fd, int target_fd, enum bpf_attach_type type,
-		    unsigned int flags)
-{
-	union bpf_attr attr = {
-		.target_fd = target_fd,
-		.attach_bpf_fd = prog_fd,
-		.attach_type = type,
-		.attach_flags  = flags;
-	};
-
-	return syscall(__NR_bpf, BPF_PROG_ATTACH, &attr, sizeof(attr));
-}
-
-int bpf_prog_detach(int target_fd, enum bpf_attach_type type)
-{
-	union bpf_attr attr = {
-		.target_fd = target_fd,
-		.attach_type = type,
-	};
-
-	return syscall(__NR_bpf, BPF_PROG_DETACH, &attr, sizeof(attr));
 }
 
 int bpf_obj_pin(int fd, const char *pathname)

@@ -60,7 +60,7 @@ static int _fdt_nodename_eq(const void *fdt, int offset,
 {
 	const char *p = fdt_offset_ptr(fdt, offset + FDT_TAGSIZE, len+1);
 
-	if (! p)
+	if (!p)
 		/* short match */
 		return 0;
 
@@ -93,8 +93,7 @@ uint32_t fdt_get_max_phandle(const void *fdt)
 	uint32_t max_phandle = 0;
 	int offset;
 
-	for (offset = fdt_next_node(fdt, -1, NULL);
-		;
+	for (offset = fdt_next_node(fdt, -1, NULL);;
 	     offset = fdt_next_node(fdt, offset, NULL)) {
 		uint32_t phandle;
 
@@ -328,7 +327,7 @@ const void *fdt_getprop_namelen(const void *fdt, int nodeoffset,
 	const struct fdt_property *prop;
 
 	prop = fdt_get_property_namelen(fdt, nodeoffset, name, namelen, lenp);
-	if (! prop)
+	if (!prop)
 		return NULL;
 
 	return prop->data;

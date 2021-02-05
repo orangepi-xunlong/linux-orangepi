@@ -273,8 +273,9 @@ static int aic5_irq_domain_xlate(struct irq_domain *d,
 	irq_gc_lock_irqsave(bgc, flags);
 	irq_reg_writel(bgc, *out_hwirq, AT91_AIC5_SSR);
 	smr = irq_reg_readl(bgc, AT91_AIC5_SMR);
-	aic_common_set_priority(intspec[2], &smr);
-	irq_reg_writel(bgc, smr, AT91_AIC5_SMR);
+	ret = aic_common_set_priority(intspec[2], &smr);
+	if (!ret)
+		irq_reg_writel(bgc, intspec[2] | smr, AT91_AIC5_SMR);
 	irq_gc_unlock_irqrestore(bgc, flags);
 
 	return ret;
@@ -312,9 +313,11 @@ static int __init aic5_of_init(struct device_node *node,
 		return -EEXIST;
 
 	domain = aic_common_of_init(node, &aic5_irq_ops, "atmel-aic5",
-				    nirqs, aic5_irq_fixups);
+				    nirqs);
 	if (IS_ERR(domain))
 		return PTR_ERR(domain);
+
+	aic_common_irq_fixup(aic5_irq_fixups);
 
 	aic5_domain = domain;
 	nchips = aic5_domain->revmap_size / 32;

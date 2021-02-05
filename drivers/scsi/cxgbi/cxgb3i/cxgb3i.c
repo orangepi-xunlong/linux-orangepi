@@ -57,7 +57,7 @@ MODULE_PARM_DESC(cxgb3i_snd_win, "TCP send window in bytes (default=128KB)");
 
 static int cxgb3i_rx_credit_thres = 10 * 1024;
 module_param(cxgb3i_rx_credit_thres, int, 0644);
-MODULE_PARM_DESC(cxgb3i_rx_credit_thres,
+MODULE_PARM_DESC(rx_credit_thres,
 		 "RX credits return threshold in bytes (default=10KB)");
 
 static unsigned int cxgb3i_max_connect = 8 * 1024;
@@ -1028,7 +1028,7 @@ cxgb3_cpl_handler_func cxgb3i_cpl_handlers[NUM_CPL_CMDS] = {
  * cxgb3i_ofld_init - allocate and initialize resources for each adapter found
  * @cdev:	cxgbi adapter
  */
-static int cxgb3i_ofld_init(struct cxgbi_device *cdev)
+int cxgb3i_ofld_init(struct cxgbi_device *cdev)
 {
 	struct t3cdev *t3dev = (struct t3cdev *)cdev->lldev;
 	struct adap_ports port;
@@ -1076,69 +1076,64 @@ static inline void ulp_mem_io_set_hdr(struct sk_buff *skb, unsigned int addr)
 	req->wr.wr_hi = htonl(V_WR_OP(FW_WROPCODE_BYPASS));
 	req->cmd_lock_addr = htonl(V_ULP_MEMIO_ADDR(addr >> 5) |
 				   V_ULPTX_CMD(ULP_MEM_WRITE));
-	req->len = htonl(V_ULP_MEMIO_DATA_LEN(IPPOD_SIZE >> 5) |
-			 V_ULPTX_NFLITS((IPPOD_SIZE >> 3) + 1));
+	req->len = htonl(V_ULP_MEMIO_DATA_LEN(PPOD_SIZE >> 5) |
+			 V_ULPTX_NFLITS((PPOD_SIZE >> 3) + 1));
 }
 
-static struct cxgbi_ppm *cdev2ppm(struct cxgbi_device *cdev)
+static int ddp_set_map(struct cxgbi_sock *csk, struct cxgbi_pagepod_hdr *hdr,
+			unsigned int idx, unsigned int npods,
+				struct cxgbi_gather_list *gl)
 {
-	return ((struct t3cdev *)cdev->lldev)->ulp_iscsi;
-}
-
-static int ddp_set_map(struct cxgbi_ppm *ppm, struct cxgbi_sock *csk,
-		       struct cxgbi_task_tag_info *ttinfo)
-{
-	unsigned int idx = ttinfo->idx;
-	unsigned int npods = ttinfo->npods;
-	struct scatterlist *sg = ttinfo->sgl;
-	struct cxgbi_pagepod *ppod;
-	struct ulp_mem_io *req;
-	unsigned int sg_off;
-	unsigned int pm_addr = (idx << PPOD_SIZE_SHIFT) + ppm->llimit;
+	struct cxgbi_device *cdev = csk->cdev;
+	struct cxgbi_ddp_info *ddp = cdev->ddp;
+	unsigned int pm_addr = (idx << PPOD_SIZE_SHIFT) + ddp->llimit;
 	int i;
 
-	for (i = 0; i < npods; i++, idx++, pm_addr += IPPOD_SIZE) {
+	log_debug(1 << CXGBI_DBG_DDP,
+		"csk 0x%p, idx %u, npods %u, gl 0x%p.\n",
+		csk, idx, npods, gl);
+
+	for (i = 0; i < npods; i++, idx++, pm_addr += PPOD_SIZE) {
 		struct sk_buff *skb = alloc_wr(sizeof(struct ulp_mem_io) +
-					       IPPOD_SIZE, 0, GFP_ATOMIC);
+						PPOD_SIZE, 0, GFP_ATOMIC);
 
 		if (!skb)
 			return -ENOMEM;
+
 		ulp_mem_io_set_hdr(skb, pm_addr);
-		req = (struct ulp_mem_io *)skb->head;
-		ppod = (struct cxgbi_pagepod *)(req + 1);
-		sg_off = i * PPOD_PAGES_MAX;
-		cxgbi_ddp_set_one_ppod(ppod, ttinfo, &sg,
-				       &sg_off);
+		cxgbi_ddp_ppod_set((struct cxgbi_pagepod *)(skb->head +
+					sizeof(struct ulp_mem_io)),
+				   hdr, gl, i * PPOD_PAGES_MAX);
 		skb->priority = CPL_PRIORITY_CONTROL;
-		cxgb3_ofld_send(ppm->lldev, skb);
+		cxgb3_ofld_send(cdev->lldev, skb);
 	}
 	return 0;
 }
 
-static void ddp_clear_map(struct cxgbi_device *cdev, struct cxgbi_ppm *ppm,
-			  struct cxgbi_task_tag_info *ttinfo)
+static void ddp_clear_map(struct cxgbi_hba *chba, unsigned int tag,
+			  unsigned int idx, unsigned int npods)
 {
-	unsigned int idx = ttinfo->idx;
-	unsigned int pm_addr = (idx << PPOD_SIZE_SHIFT) + ppm->llimit;
-	unsigned int npods = ttinfo->npods;
+	struct cxgbi_device *cdev = chba->cdev;
+	struct cxgbi_ddp_info *ddp = cdev->ddp;
+	unsigned int pm_addr = (idx << PPOD_SIZE_SHIFT) + ddp->llimit;
 	int i;
 
 	log_debug(1 << CXGBI_DBG_DDP,
-		  "cdev 0x%p, clear idx %u, npods %u.\n",
-		  cdev, idx, npods);
+		"cdev 0x%p, idx %u, npods %u, tag 0x%x.\n",
+		cdev, idx, npods, tag);
 
-	for (i = 0; i < npods; i++, idx++, pm_addr += IPPOD_SIZE) {
+	for (i = 0; i < npods; i++, idx++, pm_addr += PPOD_SIZE) {
 		struct sk_buff *skb = alloc_wr(sizeof(struct ulp_mem_io) +
-					       IPPOD_SIZE, 0, GFP_ATOMIC);
+						PPOD_SIZE, 0, GFP_ATOMIC);
 
 		if (!skb) {
-			pr_err("cdev 0x%p, clear ddp, %u,%d/%u, skb OOM.\n",
-			       cdev, idx, i, npods);
+			pr_err("tag 0x%x, 0x%x, %d/%u, skb OOM.\n",
+				tag, idx, i, npods);
 			continue;
 		}
 		ulp_mem_io_set_hdr(skb, pm_addr);
 		skb->priority = CPL_PRIORITY_CONTROL;
-		cxgb3_ofld_send(ppm->lldev, skb);
+		cxgb3_ofld_send(cdev->lldev, skb);
 	}
 }
 
@@ -1208,68 +1203,82 @@ static int ddp_setup_conn_digest(struct cxgbi_sock *csk, unsigned int tid,
 }
 
 /**
- * cxgb3i_ddp_init - initialize the cxgb3 adapter's ddp resource
+ * t3_ddp_cleanup - release the cxgb3 adapter's ddp resource
+ * @cdev: cxgb3i adapter
+ * release all the resource held by the ddp pagepod manager for a given
+ * adapter if needed
+ */
+
+static void t3_ddp_cleanup(struct cxgbi_device *cdev)
+{
+	struct t3cdev *tdev = (struct t3cdev *)cdev->lldev;
+
+	if (cxgbi_ddp_cleanup(cdev)) {
+		pr_info("t3dev 0x%p, ulp_iscsi no more user.\n", tdev);
+		tdev->ulp_iscsi = NULL;
+	}
+}
+
+/**
+ * ddp_init - initialize the cxgb3 adapter's ddp resource
  * @cdev: cxgb3i adapter
  * initialize the ddp pagepod manager for a given adapter
  */
 static int cxgb3i_ddp_init(struct cxgbi_device *cdev)
 {
 	struct t3cdev *tdev = (struct t3cdev *)cdev->lldev;
-	struct net_device *ndev = cdev->ports[0];
-	struct cxgbi_tag_format tformat;
-	unsigned int ppmax, tagmask = 0;
+	struct cxgbi_ddp_info *ddp = tdev->ulp_iscsi;
 	struct ulp_iscsi_info uinfo;
+	unsigned int pgsz_factor[4];
 	int i, err;
+
+	if (ddp) {
+		kref_get(&ddp->refcnt);
+		pr_warn("t3dev 0x%p, ddp 0x%p already set up.\n",
+			tdev, tdev->ulp_iscsi);
+		cdev->ddp = ddp;
+		return -EALREADY;
+	}
 
 	err = tdev->ctl(tdev, ULP_ISCSI_GET_PARAMS, &uinfo);
 	if (err < 0) {
-		pr_err("%s, failed to get iscsi param %d.\n",
-		       ndev->name, err);
+		pr_err("%s, failed to get iscsi param err=%d.\n",
+			 tdev->name, err);
 		return err;
 	}
-	if (uinfo.llimit >= uinfo.ulimit) {
-		pr_warn("T3 %s, iscsi NOT enabled %u ~ %u!\n",
-			ndev->name, uinfo.llimit, uinfo.ulimit);
-		return -EACCES;
-	}
 
-	ppmax = (uinfo.ulimit - uinfo.llimit + 1) >> PPOD_SIZE_SHIFT;
-	tagmask = cxgbi_tagmask_set(ppmax);
+	err = cxgbi_ddp_init(cdev, uinfo.llimit, uinfo.ulimit,
+			uinfo.max_txsz, uinfo.max_rxsz);
+	if (err < 0)
+		return err;
 
-	pr_info("T3 %s: 0x%x~0x%x, 0x%x, tagmask 0x%x -> 0x%x.\n",
-		ndev->name, uinfo.llimit, uinfo.ulimit, ppmax, uinfo.tagmask,
-		tagmask);
+	ddp = cdev->ddp;
 
-	memset(&tformat, 0, sizeof(struct cxgbi_tag_format));
+	uinfo.tagmask = ddp->idx_mask << PPOD_IDX_SHIFT;
+	cxgbi_ddp_page_size_factor(pgsz_factor);
 	for (i = 0; i < 4; i++)
-		tformat.pgsz_order[i] = uinfo.pgsz_factor[i];
-	cxgbi_tagmask_check(tagmask, &tformat);
+		uinfo.pgsz_factor[i] = pgsz_factor[i];
+	uinfo.ulimit = uinfo.llimit + (ddp->nppods << PPOD_SIZE_SHIFT);
 
-	cxgbi_ddp_ppm_setup(&tdev->ulp_iscsi, cdev, &tformat, ppmax,
-			    uinfo.llimit, uinfo.llimit, 0);
-	if (!(cdev->flags & CXGBI_FLAG_DDP_OFF)) {
-		uinfo.tagmask = tagmask;
-		uinfo.ulimit = uinfo.llimit + (ppmax << PPOD_SIZE_SHIFT);
-
-		err = tdev->ctl(tdev, ULP_ISCSI_SET_PARAMS, &uinfo);
-		if (err < 0) {
-			pr_err("T3 %s fail to set iscsi param %d.\n",
-			       ndev->name, err);
-			cdev->flags |= CXGBI_FLAG_DDP_OFF;
-		}
-		err = 0;
+	err = tdev->ctl(tdev, ULP_ISCSI_SET_PARAMS, &uinfo);
+	if (err < 0) {
+		pr_warn("%s unable to set iscsi param err=%d, ddp disabled.\n",
+			tdev->name, err);
+		cxgbi_ddp_cleanup(cdev);
+		return err;
 	}
+	tdev->ulp_iscsi = ddp;
 
 	cdev->csk_ddp_setup_digest = ddp_setup_conn_digest;
 	cdev->csk_ddp_setup_pgidx = ddp_setup_conn_pgidx;
-	cdev->csk_ddp_set_map = ddp_set_map;
-	cdev->csk_ddp_clear_map = ddp_clear_map;
-	cdev->cdev2ppm = cdev2ppm;
-	cdev->tx_max_size = min_t(unsigned int, ULP2_MAX_PDU_PAYLOAD,
-				  uinfo.max_txsz - ISCSI_PDU_NONPAYLOAD_LEN);
-	cdev->rx_max_size = min_t(unsigned int, ULP2_MAX_PDU_PAYLOAD,
-				  uinfo.max_rxsz - ISCSI_PDU_NONPAYLOAD_LEN);
+	cdev->csk_ddp_set = ddp_set_map;
+	cdev->csk_ddp_clear = ddp_clear_map;
 
+	pr_info("tdev 0x%p, nppods %u, bits %u, mask 0x%x,0x%x pkt %u/%u, "
+		"%u/%u.\n",
+		tdev, ddp->nppods, ddp->idx_bits, ddp->idx_mask,
+		ddp->rsvd_tag_mask, ddp->max_txsz, uinfo.max_txsz,
+		ddp->max_rxsz, uinfo.max_rxsz);
 	return 0;
 }
 
@@ -1316,6 +1325,7 @@ static void cxgb3i_dev_open(struct t3cdev *t3dev)
 	cdev->rx_credit_thres = cxgb3i_rx_credit_thres;
 	cdev->skb_tx_rsvd = CXGB3I_TX_HEADER_LEN;
 	cdev->skb_rx_extra = sizeof(struct cpl_iscsi_hdr_norss);
+	cdev->dev_ddp_cleanup = t3_ddp_cleanup;
 	cdev->itp = &cxgb3i_iscsi_transport;
 
 	err = cxgb3i_ddp_init(cdev);

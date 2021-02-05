@@ -42,8 +42,6 @@ int pci_probe_reset_function(struct pci_dev *dev);
  *
  * @set_state: invokes the platform firmware to set the device's power state
  *
- * @get_state: queries the platform firmware for a device's current power state
- *
  * @choose_state: returns PCI power state of given device preferred by the
  *                platform; to be used during system-wide transitions from a
  *                sleeping state to the working state and vice versa
@@ -64,14 +62,13 @@ int pci_probe_reset_function(struct pci_dev *dev);
 struct pci_platform_pm_ops {
 	bool (*is_manageable)(struct pci_dev *dev);
 	int (*set_state)(struct pci_dev *dev, pci_power_t state);
-	pci_power_t (*get_state)(struct pci_dev *dev);
 	pci_power_t (*choose_state)(struct pci_dev *dev);
 	int (*sleep_wake)(struct pci_dev *dev, bool enable);
 	int (*run_wake)(struct pci_dev *dev, bool enable);
 	bool (*need_resume)(struct pci_dev *dev);
 };
 
-int pci_set_platform_pm(const struct pci_platform_pm_ops *ops);
+int pci_set_platform_pm(struct pci_platform_pm_ops *ops);
 void pci_update_current_state(struct pci_dev *dev, pci_power_t state);
 void pci_power_up(struct pci_dev *dev);
 void pci_disable_enabled_device(struct pci_dev *dev);
@@ -85,8 +82,6 @@ void pci_pm_init(struct pci_dev *dev);
 void pci_ea_init(struct pci_dev *dev);
 void pci_allocate_cap_save_buffers(struct pci_dev *dev);
 void pci_free_cap_save_buffers(struct pci_dev *dev);
-void pci_bridge_d3_device_changed(struct pci_dev *dev);
-void pci_bridge_d3_device_removed(struct pci_dev *dev);
 
 static inline void pci_wakeup_event(struct pci_dev *dev)
 {
@@ -99,34 +94,24 @@ static inline bool pci_has_subordinate(struct pci_dev *pci_dev)
 	return !!(pci_dev->subordinate);
 }
 
-static inline bool pci_power_manageable(struct pci_dev *pci_dev)
-{
-	/*
-	 * Currently we allow normal PCI devices and PCI bridges transition
-	 * into D3 if their bridge_d3 is set.
-	 */
-	return !pci_has_subordinate(pci_dev) || pci_dev->bridge_d3;
-}
-
 struct pci_vpd_ops {
 	ssize_t (*read)(struct pci_dev *dev, loff_t pos, size_t count, void *buf);
 	ssize_t (*write)(struct pci_dev *dev, loff_t pos, size_t count, const void *buf);
-	int (*set_size)(struct pci_dev *dev, size_t len);
+	void (*release)(struct pci_dev *dev);
 };
 
 struct pci_vpd {
+	unsigned int len;
 	const struct pci_vpd_ops *ops;
 	struct bin_attribute *attr; /* descriptor for sysfs VPD entry */
-	struct mutex	lock;
-	unsigned int	len;
-	u16		flag;
-	u8		cap;
-	u8		busy:1;
-	u8		valid:1;
 };
 
-int pci_vpd_init(struct pci_dev *dev);
-void pci_vpd_release(struct pci_dev *dev);
+int pci_vpd_pci22_init(struct pci_dev *dev);
+static inline void pci_vpd_release(struct pci_dev *dev)
+{
+	if (dev->vpd)
+		dev->vpd->ops->release(dev);
+}
 
 /* PCI /proc functions */
 #ifdef CONFIG_PROC_FS
@@ -159,8 +144,10 @@ extern unsigned int pci_pm_d3_delay;
 
 #ifdef CONFIG_PCI_MSI
 void pci_no_msi(void);
+void pci_msi_init_pci_dev(struct pci_dev *dev);
 #else
 static inline void pci_no_msi(void) { }
+static inline void pci_msi_init_pci_dev(struct pci_dev *dev) { }
 #endif
 
 static inline void pci_msi_set_enable(struct pci_dev *dev, int enable)
@@ -329,12 +316,6 @@ static inline resource_size_t pci_resource_alignment(struct pci_dev *dev,
 }
 
 void pci_enable_acs(struct pci_dev *dev);
-
-#ifdef CONFIG_PCIE_PTM
-void pci_ptm_init(struct pci_dev *dev);
-#else
-static inline void pci_ptm_init(struct pci_dev *dev) { }
-#endif
 
 struct pci_dev_reset_methods {
 	u16 vendor;

@@ -807,12 +807,10 @@ static ssize_t adp8870_bl_ambient_light_zone_store(struct device *dev,
 
 		/* Set user supplied ambient light zone */
 		mutex_lock(&data->lock);
-		ret = adp8870_read(data->client, ADP8870_CFGR, &reg_val);
-		if (!ret) {
-			reg_val &= ~(CFGR_BLV_MASK << CFGR_BLV_SHIFT);
-			reg_val |= (val - 1) << CFGR_BLV_SHIFT;
-			adp8870_write(data->client, ADP8870_CFGR, reg_val);
-		}
+		adp8870_read(data->client, ADP8870_CFGR, &reg_val);
+		reg_val &= ~(CFGR_BLV_MASK << CFGR_BLV_SHIFT);
+		reg_val |= (val - 1) << CFGR_BLV_SHIFT;
+		adp8870_write(data->client, ADP8870_CFGR, reg_val);
 		mutex_unlock(&data->lock);
 	}
 

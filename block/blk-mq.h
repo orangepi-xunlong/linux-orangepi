@@ -12,6 +12,8 @@ struct blk_mq_ctx {
 	unsigned int		cpu;
 	unsigned int		index_hw;
 
+	unsigned int		last_tag ____cacheline_aligned_in_smp;
+
 	/* incremented at dispatch time */
 	unsigned long		rq_dispatched[2];
 	unsigned long		rq_merged;
@@ -32,32 +34,42 @@ void blk_mq_wake_waiters(struct request_queue *q);
 /*
  * CPU hotplug helpers
  */
+struct blk_mq_cpu_notifier;
+void blk_mq_init_cpu_notifier(struct blk_mq_cpu_notifier *notifier,
+			      int (*fn)(void *, unsigned long, unsigned int),
+			      void *data);
+void blk_mq_register_cpu_notifier(struct blk_mq_cpu_notifier *notifier);
+void blk_mq_unregister_cpu_notifier(struct blk_mq_cpu_notifier *notifier);
+void blk_mq_cpu_init(void);
 void blk_mq_enable_hotplug(void);
 void blk_mq_disable_hotplug(void);
 
 /*
  * CPU -> queue mappings
  */
-int blk_mq_map_queues(struct blk_mq_tag_set *set);
+extern unsigned int *blk_mq_make_queue_map(struct blk_mq_tag_set *set);
+extern int blk_mq_update_queue_map(unsigned int *map, unsigned int nr_queues,
+				   const struct cpumask *online_mask);
 extern int blk_mq_hw_queue_to_node(unsigned int *map, unsigned int);
-
-static inline struct blk_mq_hw_ctx *blk_mq_map_queue(struct request_queue *q,
-		int cpu)
-{
-	return q->queue_hw_ctx[q->mq_map[cpu]];
-}
 
 /*
  * sysfs helpers
  */
-extern void blk_mq_sysfs_init(struct request_queue *q);
 extern int blk_mq_sysfs_register(struct request_queue *q);
 extern void blk_mq_sysfs_unregister(struct request_queue *q);
-extern void blk_mq_hctx_kobj_init(struct blk_mq_hw_ctx *hctx);
 
 extern void blk_mq_rq_timed_out(struct request *req, bool reserved);
 
 void blk_mq_release(struct request_queue *q);
+
+/*
+ * Basic implementation of sparser bitmap, allowing the user to spread
+ * the bits over more cachelines.
+ */
+struct blk_align_bitmap {
+	unsigned long word;
+	unsigned long depth;
+} ____cacheline_aligned_in_smp;
 
 static inline struct blk_mq_ctx *__blk_mq_get_ctx(struct request_queue *q,
 					   unsigned int cpu)
@@ -84,7 +96,8 @@ static inline void blk_mq_put_ctx(struct blk_mq_ctx *ctx)
 struct blk_mq_alloc_data {
 	/* input parameter */
 	struct request_queue *q;
-	unsigned int flags;
+	gfp_t gfp;
+	bool reserved;
 
 	/* input & output parameter */
 	struct blk_mq_ctx *ctx;
@@ -92,11 +105,13 @@ struct blk_mq_alloc_data {
 };
 
 static inline void blk_mq_set_alloc_data(struct blk_mq_alloc_data *data,
-		struct request_queue *q, unsigned int flags,
-		struct blk_mq_ctx *ctx, struct blk_mq_hw_ctx *hctx)
+		struct request_queue *q, gfp_t gfp, bool reserved,
+		struct blk_mq_ctx *ctx,
+		struct blk_mq_hw_ctx *hctx)
 {
 	data->q = q;
-	data->flags = flags;
+	data->gfp = gfp;
+	data->reserved = reserved;
 	data->ctx = ctx;
 	data->hctx = hctx;
 }

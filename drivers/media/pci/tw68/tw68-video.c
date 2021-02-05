@@ -376,27 +376,28 @@ static int tw68_buffer_count(unsigned int size, unsigned int count)
 /* ------------------------------------------------------------- */
 /* vb2 queue operations                                          */
 
-static int tw68_queue_setup(struct vb2_queue *q,
+static int tw68_queue_setup(struct vb2_queue *q, const void *parg,
 			   unsigned int *num_buffers, unsigned int *num_planes,
-			   unsigned int sizes[], struct device *alloc_devs[])
+			   unsigned int sizes[], void *alloc_ctxs[])
 {
+	const struct v4l2_format *fmt = parg;
 	struct tw68_dev *dev = vb2_get_drv_priv(q);
 	unsigned tot_bufs = q->num_buffers + *num_buffers;
-	unsigned size = (dev->fmt->depth * dev->width * dev->height) >> 3;
 
-	if (tot_bufs < 2)
-		tot_bufs = 2;
-	tot_bufs = tw68_buffer_count(size, tot_bufs);
-	*num_buffers = tot_bufs - q->num_buffers;
+	sizes[0] = (dev->fmt->depth * dev->width * dev->height) >> 3;
+	alloc_ctxs[0] = dev->alloc_ctx;
 	/*
-	 * We allow create_bufs, but only if the sizeimage is >= as the
+	 * We allow create_bufs, but only if the sizeimage is the same as the
 	 * current sizeimage. The tw68_buffer_count calculation becomes quite
 	 * difficult otherwise.
 	 */
-	if (*num_planes)
-		return sizes[0] < size ? -EINVAL : 0;
+	if (fmt && fmt->fmt.pix.sizeimage < sizes[0])
+		return -EINVAL;
 	*num_planes = 1;
-	sizes[0] = size;
+	if (tot_bufs < 2)
+		tot_bufs = 2;
+	tot_bufs = tw68_buffer_count(sizes[0], tot_bufs);
+	*num_buffers = tot_bufs - q->num_buffers;
 
 	return 0;
 }
@@ -535,7 +536,7 @@ static void tw68_stop_streaming(struct vb2_queue *q)
 	}
 }
 
-static const struct vb2_ops tw68_video_qops = {
+static struct vb2_ops tw68_video_qops = {
 	.queue_setup	= tw68_queue_setup,
 	.buf_queue	= tw68_buf_queue,
 	.buf_prepare	= tw68_buf_prepare,
@@ -982,7 +983,6 @@ int tw68_video_init2(struct tw68_dev *dev, int video_nr)
 	dev->vidq.buf_struct_size = sizeof(struct tw68_buf);
 	dev->vidq.lock = &dev->lock;
 	dev->vidq.min_buffers_needed = 2;
-	dev->vidq.dev = &dev->pci->dev;
 	ret = vb2_queue_init(&dev->vidq);
 	if (ret)
 		return ret;
@@ -1016,7 +1016,7 @@ void tw68_irq_video_done(struct tw68_dev *dev, unsigned long status)
 		buf = list_entry(dev->active.next, struct tw68_buf, list);
 		list_del(&buf->list);
 		spin_unlock(&dev->slock);
-		buf->vb.vb2_buf.timestamp = ktime_get_ns();
+		v4l2_get_timestamp(&buf->vb.timestamp);
 		buf->vb.field = dev->field;
 		buf->vb.sequence = dev->seqnr++;
 		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);

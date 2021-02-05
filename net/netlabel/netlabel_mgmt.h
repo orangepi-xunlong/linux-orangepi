@@ -58,10 +58,7 @@
  *
  *     NLBL_MGMT_A_CV4DOI
  *
- *   If using NETLBL_NLTYPE_UNLABELED no other attributes are required,
- *   however the following attribute may optionally be sent:
- *
- *     NLBL_MGMT_A_FAMILY
+ *   If using NETLBL_NLTYPE_UNLABELED no other attributes are required.
  *
  * o REMOVE:
  *   Sent by an application to remove a domain mapping from the NetLabel
@@ -80,7 +77,6 @@
  *   Required attributes:
  *
  *     NLBL_MGMT_A_DOMAIN
- *     NLBL_MGMT_A_FAMILY
  *
  *   If the IP address selectors are not used the following attribute is
  *   required:
@@ -112,10 +108,7 @@
  *
  *     NLBL_MGMT_A_CV4DOI
  *
- *   If using NETLBL_NLTYPE_UNLABELED no other attributes are required,
- *   however the following attribute may optionally be sent:
- *
- *     NLBL_MGMT_A_FAMILY
+ *   If using NETLBL_NLTYPE_UNLABELED no other attributes are required.
  *
  * o REMOVEDEF:
  *   Sent by an application to remove the default domain mapping from the
@@ -124,17 +117,13 @@
  * o LISTDEF:
  *   This message can be sent either from an application or by the kernel in
  *   response to an application generated LISTDEF message.  When sent by an
- *   application there may be an optional payload.
+ *   application there is no payload.  On success the kernel should send a
+ *   response using the following format.
  *
- *     NLBL_MGMT_A_FAMILY
- *
- *   On success the kernel should send a response using the following format:
- *
- *   If the IP address selectors are not used the following attributes are
+ *   If the IP address selectors are not used the following attribute is
  *   required:
  *
  *     NLBL_MGMT_A_PROTOCOL
- *     NLBL_MGMT_A_FAMILY
  *
  *   If the IP address selectors are used then the following attritbute is
  *   required:
@@ -220,12 +209,6 @@ enum {
 	/* (NLA_NESTED)
 	 * the selector list, there must be at least one
 	 * NLBL_MGMT_A_ADDRSELECTOR attribute */
-	NLBL_MGMT_A_FAMILY,
-	/* (NLA_U16)
-	 * The address family */
-	NLBL_MGMT_A_CLPDOI,
-	/* (NLA_U32)
-	 * the CALIPSO DOI value */
 	__NLBL_MGMT_A_MAX,
 };
 #define NLBL_MGMT_A_MAX (__NLBL_MGMT_A_MAX - 1)

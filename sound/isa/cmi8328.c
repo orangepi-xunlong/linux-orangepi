@@ -469,4 +469,15 @@ static struct isa_driver snd_cmi8328_driver = {
 	},
 };
 
-module_isa_driver(snd_cmi8328_driver, CMI8328_MAX);
+static int __init alsa_card_cmi8328_init(void)
+{
+	return isa_register_driver(&snd_cmi8328_driver, CMI8328_MAX);
+}
+
+static void __exit alsa_card_cmi8328_exit(void)
+{
+	isa_unregister_driver(&snd_cmi8328_driver);
+}
+
+module_init(alsa_card_cmi8328_init)
+module_exit(alsa_card_cmi8328_exit)

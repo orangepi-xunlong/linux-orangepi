@@ -972,7 +972,7 @@ static int qt2_write(struct tty_struct *tty,
 
 	data = write_urb->transfer_buffer;
 	spin_lock_irqsave(&port_priv->urb_lock, flags);
-	if (port_priv->urb_in_use) {
+	if (port_priv->urb_in_use == true) {
 		dev_err(&port->dev, "qt2_write - urb is in use\n");
 		goto write_out;
 	}

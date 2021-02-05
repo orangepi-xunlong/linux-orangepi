@@ -35,7 +35,6 @@
 
 #include <asm/processor.h>
 #include <asm/asmmacro.h>
-#include <asm/export.h>
 
 /*
  * Inputs:
@@ -95,4 +94,3 @@ GLOBAL_ENTRY(esi_call_phys)
 	mov gp=loc2
 	br.ret.sptk.many rp
 END(esi_call_phys)
-EXPORT_SYMBOL_GPL(esi_call_phys)

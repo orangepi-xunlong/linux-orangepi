@@ -64,9 +64,3 @@ void omap4_cpu_die(unsigned int cpu)
 		pr_debug("CPU%u: spurious wakeup call\n", cpu);
 	}
 }
-
-/* Needed by kexec and platform_can_cpu_hotplug() */
-int omap4_cpu_kill(unsigned int cpu)
-{
-	return 1;
-}

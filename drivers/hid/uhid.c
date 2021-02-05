@@ -415,7 +415,7 @@ struct uhid_create_req_compat {
 static int uhid_event_from_user(const char __user *buffer, size_t len,
 				struct uhid_event *event)
 {
-	if (in_compat_syscall()) {
+	if (is_compat_task()) {
 		u32 type;
 
 		if (get_user(type, buffer))
@@ -805,8 +805,19 @@ static struct miscdevice uhid_misc = {
 	.minor		= UHID_MINOR,
 	.name		= UHID_NAME,
 };
-module_misc_device(uhid_misc);
 
+static int __init uhid_init(void)
+{
+	return misc_register(&uhid_misc);
+}
+
+static void __exit uhid_exit(void)
+{
+	misc_deregister(&uhid_misc);
+}
+
+module_init(uhid_init);
+module_exit(uhid_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("David Herrmann <dh.herrmann@gmail.com>");
 MODULE_DESCRIPTION("User-space I/O driver support for HID subsystem");

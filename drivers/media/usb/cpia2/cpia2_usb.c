@@ -545,30 +545,18 @@ static void free_sbufs(struct camera_data *cam)
 static int write_packet(struct usb_device *udev,
 			u8 request, u8 * registers, u16 start, size_t size)
 {
-	unsigned char *buf;
-	int ret;
-
 	if (!registers || size <= 0)
 		return -EINVAL;
 
-	buf = kmalloc(size, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	memcpy(buf, registers, size);
-
-	ret = usb_control_msg(udev,
+	return usb_control_msg(udev,
 			       usb_sndctrlpipe(udev, 0),
 			       request,
 			       USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			       start,	/* value */
 			       0,	/* index */
-			       buf,	/* buffer */
+			       registers,	/* buffer */
 			       size,
 			       HZ);
-
-	kfree(buf);
-	return ret;
 }
 
 /****************************************************************************
@@ -579,32 +567,18 @@ static int write_packet(struct usb_device *udev,
 static int read_packet(struct usb_device *udev,
 		       u8 request, u8 * registers, u16 start, size_t size)
 {
-	unsigned char *buf;
-	int ret;
-
 	if (!registers || size <= 0)
 		return -EINVAL;
 
-	buf = kmalloc(size, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	ret = usb_control_msg(udev,
+	return usb_control_msg(udev,
 			       usb_rcvctrlpipe(udev, 0),
 			       request,
 			       USB_DIR_IN|USB_TYPE_VENDOR|USB_RECIP_DEVICE,
 			       start,	/* value */
 			       0,	/* index */
-			       buf,	/* buffer */
+			       registers,	/* buffer */
 			       size,
 			       HZ);
-
-	if (ret >= 0)
-		memcpy(registers, buf, size);
-
-	kfree(buf);
-
-	return ret;
 }
 
 /******************************************************************************
@@ -688,6 +662,7 @@ static int submit_urbs(struct camera_data *cam)
 		}
 		urb = usb_alloc_urb(FRAMES_PER_DESC, GFP_KERNEL);
 		if (!urb) {
+			ERR("%s: usb_alloc_urb error!\n", __func__);
 			for (j = 0; j < i; j++)
 				usb_free_urb(cam->sbuf[j].urb);
 			return -ENOMEM;
@@ -915,7 +890,8 @@ static void cpia2_usb_disconnect(struct usb_interface *intf)
 		DBG("Wakeup waiting processes\n");
 		cam->curbuff->status = FRAME_READY;
 		cam->curbuff->length = 0;
-		wake_up_interruptible(&cam->wq_stream);
+		if (waitqueue_active(&cam->wq_stream))
+			wake_up_interruptible(&cam->wq_stream);
 	}
 
 	DBG("Releasing interface\n");

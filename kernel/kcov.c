@@ -240,8 +240,7 @@ static void kcov_put(struct kcov *kcov)
 
 void kcov_task_init(struct task_struct *t)
 {
-	WRITE_ONCE(t->kcov_mode, KCOV_MODE_DISABLED);
-	barrier();
+	t->kcov_mode = KCOV_MODE_DISABLED;
 	t->kcov_size = 0;
 	t->kcov_area = NULL;
 	t->kcov = NULL;
@@ -358,6 +357,8 @@ static int kcov_ioctl_locked(struct kcov *kcov, unsigned int cmd,
 		 */
 		if (kcov->mode != KCOV_MODE_INIT || !kcov->area)
 			return -EINVAL;
+		if (kcov->t != NULL)
+			return -EBUSY;
 		if (arg == KCOV_TRACE_PC)
 			kcov->mode = KCOV_MODE_TRACE_PC;
 		else if (arg == KCOV_TRACE_CMP)
@@ -369,8 +370,6 @@ static int kcov_ioctl_locked(struct kcov *kcov, unsigned int cmd,
 		else
 			return -EINVAL;
 		t = current;
-		if (kcov->t != NULL || t->kcov != NULL)
-			return -EBUSY;
 		/* Cache in task struct for performance. */
 		t->kcov_size = kcov->size;
 		t->kcov_area = kcov->area;
@@ -422,12 +421,7 @@ static const struct file_operations kcov_fops = {
 
 static int __init kcov_init(void)
 {
-	/*
-	 * The kcov debugfs file won't ever get removed and thus,
-	 * there is no need to protect it against removal races. The
-	 * use of debugfs_create_file_unsafe() is actually safe here.
-	 */
-	if (!debugfs_create_file_unsafe("kcov", 0600, NULL, NULL, &kcov_fops)) {
+	if (!debugfs_create_file("kcov", 0600, NULL, NULL, &kcov_fops)) {
 		pr_err("failed to create kcov in debugfs\n");
 		return -ENOMEM;
 	}

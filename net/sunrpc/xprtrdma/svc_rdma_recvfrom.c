@@ -144,7 +144,6 @@ int rdma_read_chunk_lcl(struct svcxprt_rdma *xprt,
 
 		head->arg.pages[pg_no] = rqstp->rq_arg.pages[pg_no];
 		head->arg.page_len += len;
-
 		head->arg.len += len;
 		if (!pg_off)
 			head->count++;
@@ -159,9 +158,10 @@ int rdma_read_chunk_lcl(struct svcxprt_rdma *xprt,
 					   ctxt->sge[pno].addr);
 		if (ret)
 			goto err;
-		svc_rdma_count_mappings(xprt, ctxt);
+		atomic_inc(&xprt->sc_dma_used);
 
-		ctxt->sge[pno].lkey = xprt->sc_pd->local_dma_lkey;
+		/* The lkey here is either a local dma lkey or a dma_mr lkey */
+		ctxt->sge[pno].lkey = xprt->sc_dma_lkey;
 		ctxt->sge[pno].length = len;
 		ctxt->count++;
 
@@ -180,9 +180,9 @@ int rdma_read_chunk_lcl(struct svcxprt_rdma *xprt,
 		clear_bit(RDMACTXT_F_LAST_CTXT, &ctxt->flags);
 
 	memset(&read_wr, 0, sizeof(read_wr));
-	ctxt->cqe.done = svc_rdma_wc_read;
-	read_wr.wr.wr_cqe = &ctxt->cqe;
+	read_wr.wr.wr_id = (unsigned long)ctxt;
 	read_wr.wr.opcode = IB_WR_RDMA_READ;
+	ctxt->wr_op = read_wr.wr.opcode;
 	read_wr.wr.send_flags = IB_SEND_SIGNALED;
 	read_wr.rkey = rs_handle;
 	read_wr.remote_addr = rs_offset;
@@ -281,7 +281,7 @@ int rdma_read_chunk_frmr(struct svcxprt_rdma *xprt,
 	}
 	atomic_inc(&xprt->sc_dma_used);
 
-	n = ib_map_mr_sg(frmr->mr, frmr->sg, frmr->sg_nents, NULL, PAGE_SIZE);
+	n = ib_map_mr_sg(frmr->mr, frmr->sg, frmr->sg_nents, PAGE_SIZE);
 	if (unlikely(n != frmr->sg_nents)) {
 		pr_err("svcrdma: failed to map mr %p (%d/%d elements)\n",
 		       frmr->mr, n, frmr->sg_nents);
@@ -299,9 +299,8 @@ int rdma_read_chunk_frmr(struct svcxprt_rdma *xprt,
 	ctxt->read_hdr = head;
 
 	/* Prepare REG WR */
-	ctxt->reg_cqe.done = svc_rdma_wc_reg;
-	reg_wr.wr.wr_cqe = &ctxt->reg_cqe;
 	reg_wr.wr.opcode = IB_WR_REG_MR;
+	reg_wr.wr.wr_id = 0;
 	reg_wr.wr.send_flags = IB_SEND_SIGNALED;
 	reg_wr.wr.num_sge = 0;
 	reg_wr.mr = frmr->mr;
@@ -311,8 +310,6 @@ int rdma_read_chunk_frmr(struct svcxprt_rdma *xprt,
 
 	/* Prepare RDMA_READ */
 	memset(&read_wr, 0, sizeof(read_wr));
-	ctxt->cqe.done = svc_rdma_wc_read;
-	read_wr.wr.wr_cqe = &ctxt->cqe;
 	read_wr.wr.send_flags = IB_SEND_SIGNALED;
 	read_wr.rkey = rs_handle;
 	read_wr.remote_addr = rs_offset;
@@ -320,18 +317,19 @@ int rdma_read_chunk_frmr(struct svcxprt_rdma *xprt,
 	read_wr.wr.num_sge = 1;
 	if (xprt->sc_dev_caps & SVCRDMA_DEVCAP_READ_W_INV) {
 		read_wr.wr.opcode = IB_WR_RDMA_READ_WITH_INV;
+		read_wr.wr.wr_id = (unsigned long)ctxt;
 		read_wr.wr.ex.invalidate_rkey = ctxt->frmr->mr->lkey;
 	} else {
 		read_wr.wr.opcode = IB_WR_RDMA_READ;
 		read_wr.wr.next = &inv_wr;
 		/* Prepare invalidate */
 		memset(&inv_wr, 0, sizeof(inv_wr));
-		ctxt->inv_cqe.done = svc_rdma_wc_inv;
-		inv_wr.wr_cqe = &ctxt->inv_cqe;
+		inv_wr.wr_id = (unsigned long)ctxt;
 		inv_wr.opcode = IB_WR_LOCAL_INV;
 		inv_wr.send_flags = IB_SEND_SIGNALED | IB_SEND_FENCE;
 		inv_wr.ex.invalidate_rkey = frmr->mr->lkey;
 	}
+	ctxt->wr_op = read_wr.wr.opcode;
 
 	/* Post the chain */
 	ret = svc_rdma_send(xprt, &reg_wr.wr);
@@ -445,8 +443,10 @@ static int rdma_read_chunks(struct svcxprt_rdma *xprt,
 	head->arg.len = rqstp->rq_arg.len;
 	head->arg.buflen = rqstp->rq_arg.buflen;
 
-	/* RDMA_NOMSG: RDMA READ data should land just after RDMA RECV data */
+	ch = (struct rpcrdma_read_chunk *)&rmsgp->rm_body.rm_chunks[0];
 	position = be32_to_cpu(ch->rc_position);
+
+	/* RDMA_NOMSG: RDMA READ data should land just after RDMA RECV data */
 	if (position == 0) {
 		head->arg.pages = &head->pages[0];
 		page_offset = head->byte_len;
@@ -484,7 +484,7 @@ static int rdma_read_chunks(struct svcxprt_rdma *xprt,
 	if (page_offset & 3) {
 		u32 pad = 4 - (page_offset & 3);
 
-		head->arg.tail[0].iov_len += pad;
+		head->arg.page_len += pad;
 		head->arg.len += pad;
 		head->arg.buflen += pad;
 		page_offset += pad;
@@ -506,10 +506,11 @@ static int rdma_read_chunks(struct svcxprt_rdma *xprt,
 	return ret;
 }
 
-static void rdma_read_complete(struct svc_rqst *rqstp,
-			       struct svc_rdma_op_ctxt *head)
+static int rdma_read_complete(struct svc_rqst *rqstp,
+			      struct svc_rdma_op_ctxt *head)
 {
 	int page_no;
+	int ret;
 
 	/* Copy RPC pages */
 	for (page_no = 0; page_no < head->count; page_no++) {
@@ -545,38 +546,23 @@ static void rdma_read_complete(struct svc_rqst *rqstp,
 	rqstp->rq_arg.tail[0] = head->arg.tail[0];
 	rqstp->rq_arg.len = head->arg.len;
 	rqstp->rq_arg.buflen = head->arg.buflen;
-}
 
-/* By convention, backchannel calls arrive via rdma_msg type
- * messages, and never populate the chunk lists. This makes
- * the RPC/RDMA header small and fixed in size, so it is
- * straightforward to check the RPC header's direction field.
- */
-static bool
-svc_rdma_is_backchannel_reply(struct svc_xprt *xprt, struct rpcrdma_msg *rmsgp)
-{
-	__be32 *p = (__be32 *)rmsgp;
+	/* Free the context */
+	svc_rdma_put_context(head, 0);
 
-	if (!xprt->xpt_bc_xprt)
-		return false;
+	/* XXX: What should this be? */
+	rqstp->rq_prot = IPPROTO_MAX;
+	svc_xprt_copy_addrs(rqstp, rqstp->rq_xprt);
 
-	if (rmsgp->rm_type != rdma_msg)
-		return false;
-	if (rmsgp->rm_body.rm_chunks[0] != xdr_zero)
-		return false;
-	if (rmsgp->rm_body.rm_chunks[1] != xdr_zero)
-		return false;
-	if (rmsgp->rm_body.rm_chunks[2] != xdr_zero)
-		return false;
+	ret = rqstp->rq_arg.head[0].iov_len
+		+ rqstp->rq_arg.page_len
+		+ rqstp->rq_arg.tail[0].iov_len;
+	dprintk("svcrdma: deferred read ret=%d, rq_arg.len=%u, "
+		"rq_arg.head[0].iov_base=%p, rq_arg.head[0].iov_len=%zu\n",
+		ret, rqstp->rq_arg.len,	rqstp->rq_arg.head[0].iov_base,
+		rqstp->rq_arg.head[0].iov_len);
 
-	/* sanity */
-	if (p[7] != rmsgp->rm_xid)
-		return false;
-	/* call direction */
-	if (p[8] == cpu_to_be32(RPC_CALL))
-		return false;
-
-	return true;
+	return ret;
 }
 
 /*
@@ -592,6 +578,7 @@ int svc_rdma_recvfrom(struct svc_rqst *rqstp)
 	struct svc_rdma_op_ctxt *ctxt = NULL;
 	struct rpcrdma_msg *rmsgp;
 	int ret = 0;
+	int len;
 
 	dprintk("svcrdma: rqstp=%p\n", rqstp);
 
@@ -602,8 +589,7 @@ int svc_rdma_recvfrom(struct svc_rqst *rqstp)
 				  dto_q);
 		list_del_init(&ctxt->dto_q);
 		spin_unlock_bh(&rdma_xprt->sc_rq_dto_lock);
-		rdma_read_complete(rqstp, ctxt);
-		goto complete;
+		return rdma_read_complete(rqstp, ctxt);
 	} else if (!list_empty(&rdma_xprt->sc_rq_dto_q)) {
 		ctxt = list_entry(rdma_xprt->sc_rq_dto_q.next,
 				  struct svc_rdma_op_ctxt,
@@ -622,7 +608,8 @@ int svc_rdma_recvfrom(struct svc_rqst *rqstp)
 		 * transport list
 		 */
 		if (test_bit(XPT_CLOSE, &xprt->xpt_flags))
-			goto defer;
+			goto close_out;
+
 		goto out;
 	}
 	dprintk("svcrdma: processing ctxt=%p on xprt=%p, rqstp=%p, status=%d\n",
@@ -633,21 +620,14 @@ int svc_rdma_recvfrom(struct svc_rqst *rqstp)
 	rdma_build_arg_xdr(rqstp, ctxt, ctxt->byte_len);
 
 	/* Decode the RDMA header. */
-	rmsgp = (struct rpcrdma_msg *)rqstp->rq_arg.head[0].iov_base;
-	ret = svc_rdma_xdr_decode_req(&rqstp->rq_arg);
-	if (ret < 0)
-		goto out_err;
-	if (ret == 0)
-		goto out_drop;
-	rqstp->rq_xprt_hlen = ret;
+	len = svc_rdma_xdr_decode_req(&rmsgp, rqstp);
+	rqstp->rq_xprt_hlen = len;
 
-	if (svc_rdma_is_backchannel_reply(xprt, rmsgp)) {
-		ret = svc_rdma_handle_bc_reply(xprt->xpt_bc_xprt, rmsgp,
-					       &rqstp->rq_arg);
-		svc_rdma_put_context(ctxt, 0);
-		if (ret)
-			goto repost;
-		return ret;
+	/* If the request is invalid, reply with an error */
+	if (len < 0) {
+		if (len == -ENOSYS)
+			svc_rdma_send_error(rdma_xprt, rmsgp, ERR_VERS);
+		goto close_out;
 	}
 
 	/* Read read-list data. */
@@ -661,7 +641,6 @@ int svc_rdma_recvfrom(struct svc_rqst *rqstp)
 		return 0;
 	}
 
-complete:
 	ret = rqstp->rq_arg.head[0].iov_len
 		+ rqstp->rq_arg.page_len
 		+ rqstp->rq_arg.tail[0].iov_len;
@@ -676,16 +655,15 @@ complete:
 	svc_xprt_copy_addrs(rqstp, xprt);
 	return ret;
 
-out_err:
-	svc_rdma_send_error(rdma_xprt, rmsgp, ret);
-	svc_rdma_put_context(ctxt, 0);
-	return 0;
-
+ close_out:
+	if (ctxt)
+		svc_rdma_put_context(ctxt, 1);
+	dprintk("svcrdma: transport %p is closing\n", xprt);
+	/*
+	 * Set the close bit and enqueue it. svc_recv will see the
+	 * close bit and call svc_xprt_delete
+	 */
+	set_bit(XPT_CLOSE, &xprt->xpt_flags);
 defer:
 	return 0;
-
-out_drop:
-	svc_rdma_put_context(ctxt, 1);
-repost:
-	return svc_rdma_repost_recv(rdma_xprt, GFP_KERNEL);
 }

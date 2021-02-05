@@ -15,7 +15,7 @@
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
- */
+*/
 
 #include <linux/device.h>
 #include <linux/module.h>
@@ -390,13 +390,11 @@ unsigned int comedi_dio_update_state(struct comedi_subdevice *s,
 EXPORT_SYMBOL_GPL(comedi_dio_update_state);
 
 /**
- * comedi_bytes_per_scan_cmd() - Get length of asynchronous command "scan" in
- * bytes
+ * comedi_bytes_per_scan() - Get length of asynchronous command "scan" in bytes
  * @s: COMEDI subdevice.
- * @cmd: COMEDI command.
  *
  * Determines the overall scan length according to the subdevice type and the
- * number of channels in the scan for the specified command.
+ * number of channels in the scan.
  *
  * For digital input, output or input/output subdevices, samples for
  * multiple channels are assumed to be packed into one or more unsigned
@@ -406,9 +404,9 @@ EXPORT_SYMBOL_GPL(comedi_dio_update_state);
  *
  * Returns the overall scan length in bytes.
  */
-unsigned int comedi_bytes_per_scan_cmd(struct comedi_subdevice *s,
-				       struct comedi_cmd *cmd)
+unsigned int comedi_bytes_per_scan(struct comedi_subdevice *s)
 {
+	struct comedi_cmd *cmd = &s->async->cmd;
 	unsigned int num_samples;
 	unsigned int bits_per_sample;
 
@@ -424,29 +422,6 @@ unsigned int comedi_bytes_per_scan_cmd(struct comedi_subdevice *s,
 		break;
 	}
 	return comedi_samples_to_bytes(s, num_samples);
-}
-EXPORT_SYMBOL_GPL(comedi_bytes_per_scan_cmd);
-
-/**
- * comedi_bytes_per_scan() - Get length of asynchronous command "scan" in bytes
- * @s: COMEDI subdevice.
- *
- * Determines the overall scan length according to the subdevice type and the
- * number of channels in the scan for the current command.
- *
- * For digital input, output or input/output subdevices, samples for
- * multiple channels are assumed to be packed into one or more unsigned
- * short or unsigned int values according to the subdevice's %SDF_LSAMPL
- * flag.  For other types of subdevice, samples are assumed to occupy a
- * whole unsigned short or unsigned int according to the %SDF_LSAMPL flag.
- *
- * Returns the overall scan length in bytes.
- */
-unsigned int comedi_bytes_per_scan(struct comedi_subdevice *s)
-{
-	struct comedi_cmd *cmd = &s->async->cmd;
-
-	return comedi_bytes_per_scan_cmd(s, cmd);
 }
 EXPORT_SYMBOL_GPL(comedi_bytes_per_scan);
 
@@ -588,7 +563,7 @@ unsigned int comedi_handle_events(struct comedi_device *dev,
 	if (events == 0)
 		return events;
 
-	if ((events & COMEDI_CB_CANCEL_MASK) && s->cancel)
+	if (events & COMEDI_CB_CANCEL_MASK)
 		s->cancel(dev, s);
 
 	comedi_event(dev, s);
@@ -599,35 +574,38 @@ EXPORT_SYMBOL_GPL(comedi_handle_events);
 
 static int insn_rw_emulate_bits(struct comedi_device *dev,
 				struct comedi_subdevice *s,
-				struct comedi_insn *insn,
-				unsigned int *data)
+				struct comedi_insn *insn, unsigned int *data)
 {
-	struct comedi_insn _insn;
-	unsigned int chan = CR_CHAN(insn->chanspec);
-	unsigned int base_chan = (chan < 32) ? 0 : chan;
-	unsigned int _data[2];
+	struct comedi_insn new_insn;
 	int ret;
+	static const unsigned channels_per_bitfield = 32;
 
-	memset(_data, 0, sizeof(_data));
-	memset(&_insn, 0, sizeof(_insn));
-	_insn.insn = INSN_BITS;
-	_insn.chanspec = base_chan;
-	_insn.n = 2;
-	_insn.subdev = insn->subdev;
+	unsigned chan = CR_CHAN(insn->chanspec);
+	const unsigned base_bitfield_channel =
+	    (chan < channels_per_bitfield) ? 0 : chan;
+	unsigned int new_data[2];
+
+	memset(new_data, 0, sizeof(new_data));
+	memset(&new_insn, 0, sizeof(new_insn));
+	new_insn.insn = INSN_BITS;
+	new_insn.chanspec = base_bitfield_channel;
+	new_insn.n = 2;
+	new_insn.subdev = insn->subdev;
 
 	if (insn->insn == INSN_WRITE) {
 		if (!(s->subdev_flags & SDF_WRITABLE))
 			return -EINVAL;
-		_data[0] = 1 << (chan - base_chan);		    /* mask */
-		_data[1] = data[0] ? (1 << (chan - base_chan)) : 0; /* bits */
+		new_data[0] = 1 << (chan - base_bitfield_channel); /* mask */
+		new_data[1] = data[0] ? (1 << (chan - base_bitfield_channel))
+			      : 0; /* bits */
 	}
 
-	ret = s->insn_bits(dev, s, &_insn, _data);
+	ret = s->insn_bits(dev, s, &new_insn, new_data);
 	if (ret < 0)
 		return ret;
 
 	if (insn->insn == INSN_READ)
-		data[0] = (_data[1] >> (chan - base_chan)) & 1;
+		data[0] = (new_data[1] >> (chan - base_bitfield_channel)) & 1;
 
 	return 1;
 }
@@ -649,9 +627,6 @@ static int __comedi_device_postconfig_async(struct comedi_device *dev,
 			 "async subdevices must have a do_cmdtest() function\n");
 		return -EINVAL;
 	}
-	if (!s->cancel)
-		dev_warn(dev->class_dev,
-			 "async subdevices should have a cancel() function\n");
 
 	async = kzalloc(sizeof(*async), GFP_KERNEL);
 	if (!async)

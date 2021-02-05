@@ -161,7 +161,7 @@ int gpmi_init(struct gpmi_nand_data *this)
 
 	ret = gpmi_enable_clk(this);
 	if (ret)
-		return ret;
+		goto err_out;
 	ret = gpmi_reset_block(r->gpmi_regs, false);
 	if (ret)
 		goto err_out;
@@ -198,7 +198,6 @@ int gpmi_init(struct gpmi_nand_data *this)
 	gpmi_disable_clk(this);
 	return 0;
 err_out:
-	gpmi_disable_clk(this);
 	return ret;
 }
 
@@ -272,7 +271,7 @@ int bch_set_geometry(struct gpmi_nand_data *this)
 
 	ret = gpmi_enable_clk(this);
 	if (ret)
-		return ret;
+		goto err_out;
 
 	/*
 	* Due to erratum #2847 of the MX23, the BCH cannot be soft reset on this
@@ -308,7 +307,6 @@ int bch_set_geometry(struct gpmi_nand_data *this)
 	gpmi_disable_clk(this);
 	return 0;
 err_out:
-	gpmi_disable_clk(this);
 	return ret;
 }
 
@@ -920,7 +918,7 @@ static int enable_edo_mode(struct gpmi_nand_data *this, int mode)
 {
 	struct resources  *r = &this->resources;
 	struct nand_chip *nand = &this->nand;
-	struct mtd_info	 *mtd = nand_to_mtd(nand);
+	struct mtd_info	 *mtd = &this->mtd;
 	uint8_t *feature;
 	unsigned long rate;
 	int ret;

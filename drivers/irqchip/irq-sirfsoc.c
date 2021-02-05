@@ -29,11 +29,6 @@
 
 static struct irq_domain *sirfsoc_irqdomain;
 
-static void __iomem *sirfsoc_irq_get_regbase(void)
-{
-	return (void __iomem __force *)sirfsoc_irqdomain->host_data;
-}
-
 static __init void sirfsoc_alloc_gc(void __iomem *base)
 {
 	unsigned int clr = IRQ_NOREQUEST | IRQ_NOPROBE | IRQ_NOAUTOEN;
@@ -58,7 +53,7 @@ static __init void sirfsoc_alloc_gc(void __iomem *base)
 
 static void __exception_irq_entry sirfsoc_handle_irq(struct pt_regs *regs)
 {
-	void __iomem *base = sirfsoc_irq_get_regbase();
+	void __iomem *base = sirfsoc_irqdomain->host_data;
 	u32 irqstat;
 
 	irqstat = readl_relaxed(base + SIRFSOC_INIT_IRQ_ID);
@@ -99,7 +94,7 @@ static struct sirfsoc_irq_status sirfsoc_irq_st;
 
 static int sirfsoc_irq_suspend(void)
 {
-	void __iomem *base = sirfsoc_irq_get_regbase();
+	void __iomem *base = sirfsoc_irqdomain->host_data;
 
 	sirfsoc_irq_st.mask0 = readl_relaxed(base + SIRFSOC_INT_RISC_MASK0);
 	sirfsoc_irq_st.mask1 = readl_relaxed(base + SIRFSOC_INT_RISC_MASK1);
@@ -111,7 +106,7 @@ static int sirfsoc_irq_suspend(void)
 
 static void sirfsoc_irq_resume(void)
 {
-	void __iomem *base = sirfsoc_irq_get_regbase();
+	void __iomem *base = sirfsoc_irqdomain->host_data;
 
 	writel_relaxed(sirfsoc_irq_st.mask0, base + SIRFSOC_INT_RISC_MASK0);
 	writel_relaxed(sirfsoc_irq_st.mask1, base + SIRFSOC_INT_RISC_MASK1);

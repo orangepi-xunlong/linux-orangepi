@@ -89,7 +89,7 @@ static ssize_t mmio_nvram_write(char *buf, size_t count, loff_t *index)
 	return count;
 }
 
-static void mmio_nvram_write_val(int addr, unsigned char val)
+void mmio_nvram_write_val(int addr, unsigned char val)
 {
 	unsigned long flags;
 

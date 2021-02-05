@@ -65,8 +65,7 @@ struct bcm47xxsflash {
 
 	enum bcm47xxsflash_type type;
 
-	void __iomem *window;
-
+	u32 window;
 	u32 blocksize;
 	u16 numblocks;
 	u32 size;

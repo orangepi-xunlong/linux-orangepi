@@ -71,17 +71,11 @@ static struct dentry *__fh_to_dentry(struct super_block *sb, u64 ino)
 	inode = ceph_find_inode(sb, vino);
 	if (!inode) {
 		struct ceph_mds_request *req;
-		int mask;
 
 		req = ceph_mdsc_create_request(mdsc, CEPH_MDS_OP_LOOKUPINO,
 					       USE_ANY_MDS);
 		if (IS_ERR(req))
 			return ERR_CAST(req);
-
-		mask = CEPH_STAT_CAP_INODE;
-		if (ceph_security_xattr_wanted(d_inode(sb->s_root)))
-			mask |= CEPH_CAP_XATTR_SHARED;
-		req->r_args.getattr.mask = cpu_to_le32(mask);
 
 		req->r_ino1 = vino;
 		req->r_num_caps = 1;
@@ -95,8 +89,10 @@ static struct dentry *__fh_to_dentry(struct super_block *sb, u64 ino)
 	}
 
 	dentry = d_obtain_alias(inode);
-	if (IS_ERR(dentry))
+	if (IS_ERR(dentry)) {
+		iput(inode);
 		return dentry;
+	}
 	err = ceph_init_dentry(dentry);
 	if (err < 0) {
 		dput(dentry);
@@ -132,7 +128,6 @@ static struct dentry *__get_parent(struct super_block *sb,
 	struct ceph_mds_request *req;
 	struct inode *inode;
 	struct dentry *dentry;
-	int mask;
 	int err;
 
 	req = ceph_mdsc_create_request(mdsc, CEPH_MDS_OP_LOOKUPPARENT,
@@ -149,12 +144,6 @@ static struct dentry *__get_parent(struct super_block *sb,
 			.snap = CEPH_NOSNAP,
 		};
 	}
-
-	mask = CEPH_STAT_CAP_INODE;
-	if (ceph_security_xattr_wanted(d_inode(sb->s_root)))
-		mask |= CEPH_CAP_XATTR_SHARED;
-	req->r_args.getattr.mask = cpu_to_le32(mask);
-
 	req->r_num_caps = 1;
 	err = ceph_mdsc_do_request(mdsc, NULL, req);
 	inode = req->r_target_inode;
@@ -165,8 +154,10 @@ static struct dentry *__get_parent(struct super_block *sb,
 		return ERR_PTR(-ENOENT);
 
 	dentry = d_obtain_alias(inode);
-	if (IS_ERR(dentry))
+	if (IS_ERR(dentry)) {
+		iput(inode);
 		return dentry;
+	}
 	err = ceph_init_dentry(dentry);
 	if (err < 0) {
 		dput(dentry);
@@ -206,7 +197,7 @@ static struct dentry *ceph_fh_to_parent(struct super_block *sb,
 
 	dout("fh_to_parent %llx\n", cfh->parent_ino);
 	dentry = __get_parent(sb, NULL, cfh->ino);
-	if (unlikely(dentry == ERR_PTR(-ENOENT)))
+	if (IS_ERR(dentry) && PTR_ERR(dentry) == -ENOENT)
 		dentry = __fh_to_dentry(sb, cfh->parent_ino);
 	return dentry;
 }
@@ -224,7 +215,7 @@ static int ceph_get_name(struct dentry *parent, char *name,
 	if (IS_ERR(req))
 		return PTR_ERR(req);
 
-	inode_lock(d_inode(parent));
+	mutex_lock(&d_inode(parent)->i_mutex);
 
 	req->r_inode = d_inode(child);
 	ihold(d_inode(child));
@@ -233,7 +224,7 @@ static int ceph_get_name(struct dentry *parent, char *name,
 	req->r_num_caps = 2;
 	err = ceph_mdsc_do_request(mdsc, NULL, req);
 
-	inode_unlock(d_inode(parent));
+	mutex_unlock(&d_inode(parent)->i_mutex);
 
 	if (!err) {
 		struct ceph_mds_reply_info_parsed *rinfo = &req->r_reply_info;

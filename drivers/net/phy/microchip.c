@@ -55,7 +55,7 @@ static int lan88xx_phy_ack_interrupt(struct phy_device *phydev)
 	return rc < 0 ? rc : 0;
 }
 
-static int lan88xx_suspend(struct phy_device *phydev)
+int lan88xx_suspend(struct phy_device *phydev)
 {
 	struct lan88xx_priv *priv = phydev->priv;
 
@@ -68,7 +68,7 @@ static int lan88xx_suspend(struct phy_device *phydev)
 
 static int lan88xx_probe(struct phy_device *phydev)
 {
-	struct device *dev = &phydev->mdio.dev;
+	struct device *dev = &phydev->dev;
 	struct lan88xx_priv *priv;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -89,7 +89,7 @@ static int lan88xx_probe(struct phy_device *phydev)
 
 static void lan88xx_remove(struct phy_device *phydev)
 {
-	struct device *dev = &phydev->mdio.dev;
+	struct device *dev = &phydev->dev;
 	struct lan88xx_priv *priv = phydev->priv;
 
 	if (priv)
@@ -129,6 +129,8 @@ static struct phy_driver microchip_phy_driver[] = {
 	.suspend	= lan88xx_suspend,
 	.resume		= genphy_resume,
 	.set_wol	= lan88xx_set_wol,
+
+	.driver		= { .owner = THIS_MODULE, }
 } };
 
 module_phy_driver(microchip_phy_driver);

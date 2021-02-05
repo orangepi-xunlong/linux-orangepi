@@ -51,7 +51,6 @@ fman@500000 {
 		reg = <0xea000 0x1000>;
 		fsl,fman-ports = <&fman1_rx_0x0d &fman1_tx_0x2d>;
 		ptp-timer = <&ptp_timer1>;
-		pcsphy-handle = <&pcsphy13>;
 	};
 
 	mdio@eb000 {
@@ -59,9 +58,5 @@ fman@500000 {
 		#size-cells = <0>;
 		compatible = "fsl,fman-memac-mdio", "fsl,fman-xmdio";
 		reg = <0xeb000 0x1000>;
-
-		pcsphy13: ethernet-phy@0 {
-			reg = <0x0>;
-		};
 	};
 };

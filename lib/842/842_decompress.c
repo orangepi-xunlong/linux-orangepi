@@ -69,7 +69,7 @@ struct sw842_param {
 	((s) == 2 ? be16_to_cpu(get_unaligned((__be16 *)d)) :	\
 	 (s) == 4 ? be32_to_cpu(get_unaligned((__be32 *)d)) :	\
 	 (s) == 8 ? be64_to_cpu(get_unaligned((__be64 *)d)) :	\
-	 0)
+	 WARN(1, "pr_debug param err invalid size %x\n", s))
 
 static int next_bits(struct sw842_param *p, u64 *d, u8 n);
 
@@ -202,14 +202,10 @@ static int __do_index(struct sw842_param *p, u8 size, u8 bits, u64 fsize)
 		return -EINVAL;
 	}
 
-	if (size != 2 && size != 4 && size != 8)
-		WARN(1, "__do_index invalid size %x\n", size);
-	else
-		pr_debug("index%x to %lx off %lx adjoff %lx tot %lx data %lx\n",
-			 size, (unsigned long)index,
-			 (unsigned long)(index * size), (unsigned long)offset,
-			 (unsigned long)total,
-			 (unsigned long)beN_to_cpu(&p->ostart[offset], size));
+	pr_debug("index%x to %lx off %lx adjoff %lx tot %lx data %lx\n",
+		 size, (unsigned long)index, (unsigned long)(index * size),
+		 (unsigned long)offset, (unsigned long)total,
+		 (unsigned long)beN_to_cpu(&p->ostart[offset], size));
 
 	memcpy(p->out, &p->ostart[offset], size);
 	p->out += size;
@@ -254,7 +250,7 @@ static int do_op(struct sw842_param *p, u8 o)
 		case OP_ACTION_NOOP:
 			break;
 		default:
-			pr_err("Internal error, invalid op %x\n", op);
+			pr_err("Interal error, invalid op %x\n", op);
 			return -EINVAL;
 		}
 

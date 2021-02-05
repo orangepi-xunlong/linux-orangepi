@@ -65,7 +65,7 @@ static struct reset_control *rockchip_get_core_reset(int cpu)
 	if (dev)
 		np = dev->of_node;
 	else
-		np = of_get_cpu_node(cpu, NULL);
+		np = of_get_cpu_node(cpu, 0);
 
 	return of_reset_control_get(np, NULL);
 }
@@ -351,7 +351,7 @@ static void rockchip_cpu_die(unsigned int cpu)
 }
 #endif
 
-static const struct smp_operations rk3036_smp_ops __initconst = {
+static struct smp_operations rk3036_smp_ops __initdata = {
 	.smp_prepare_cpus	= rk3036_smp_prepare_cpus,
 	.smp_boot_secondary	= rockchip_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU
@@ -360,7 +360,7 @@ static const struct smp_operations rk3036_smp_ops __initconst = {
 #endif
 };
 
-static const struct smp_operations rockchip_smp_ops __initconst = {
+static struct smp_operations rockchip_smp_ops __initdata = {
 	.smp_prepare_cpus	= rockchip_smp_prepare_cpus,
 	.smp_boot_secondary	= rockchip_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU

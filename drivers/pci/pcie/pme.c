@@ -10,6 +10,7 @@
  * for more details.
  */
 
+#include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -398,7 +399,7 @@ static int pcie_pme_suspend(struct pcie_device *srv)
 {
 	struct pcie_pme_service_data *data = get_service_data(srv);
 	struct pci_dev *port = srv->port;
-	bool wakeup, wake_irq_enabled = false;
+	bool wakeup;
 	int ret;
 
 	if (device_may_wakeup(&port->dev)) {
@@ -411,12 +412,11 @@ static int pcie_pme_suspend(struct pcie_device *srv)
 	spin_lock_irq(&data->lock);
 	if (wakeup) {
 		ret = enable_irq_wake(srv->irq);
-		if (ret == 0) {
-			data->suspend_level = PME_SUSPEND_WAKEUP;
-			wake_irq_enabled = true;
-		}
+		data->suspend_level = PME_SUSPEND_WAKEUP;
 	}
-	if (!wake_irq_enabled) {
+	if (!wakeup || ret) {
+		struct pci_dev *port = srv->port;
+
 		pcie_pme_interrupt_enable(port, false);
 		pcie_clear_root_pme_status(port);
 		data->suspend_level = PME_SUSPEND_NOIRQ;
@@ -480,4 +480,5 @@ static int __init pcie_pme_service_init(void)
 {
 	return pcie_port_service_register(&pcie_pme_driver);
 }
-device_initcall(pcie_pme_service_init);
+
+module_init(pcie_pme_service_init);

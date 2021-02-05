@@ -22,7 +22,6 @@
  * Started by Ingo Molnar <mingo@elte.hu>
  */
 
-#include <linux/elf-randomize.h>
 #include <linux/personality.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
@@ -170,7 +169,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 
 int s390_mmap_check(unsigned long addr, unsigned long len, unsigned long flags)
 {
-	if (is_compat_task() || TASK_SIZE >= TASK_MAX_SIZE)
+	if (is_compat_task() || (TASK_SIZE >= (1UL << 53)))
 		return 0;
 	if (!(flags & MAP_FIXED))
 		addr = 0;
@@ -190,7 +189,7 @@ s390_get_unmapped_area(struct file *filp, unsigned long addr,
 	area = arch_get_unmapped_area(filp, addr, len, pgoff, flags);
 	if (!(area & ~PAGE_MASK))
 		return area;
-	if (area == -ENOMEM && !is_compat_task() && TASK_SIZE < TASK_MAX_SIZE) {
+	if (area == -ENOMEM && !is_compat_task() && TASK_SIZE < (1UL << 53)) {
 		/* Upgrade the page table to 4 levels and retry. */
 		rc = crst_table_upgrade(mm);
 		if (rc)
@@ -212,7 +211,7 @@ s390_get_unmapped_area_topdown(struct file *filp, const unsigned long addr,
 	area = arch_get_unmapped_area_topdown(filp, addr, len, pgoff, flags);
 	if (!(area & ~PAGE_MASK))
 		return area;
-	if (area == -ENOMEM && !is_compat_task() && TASK_SIZE < TASK_MAX_SIZE) {
+	if (area == -ENOMEM && !is_compat_task() && TASK_SIZE < (1UL << 53)) {
 		/* Upgrade the page table to 4 levels and retry. */
 		rc = crst_table_upgrade(mm);
 		if (rc)

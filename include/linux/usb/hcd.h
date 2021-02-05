@@ -23,7 +23,6 @@
 
 #include <linux/rwsem.h>
 #include <linux/interrupt.h>
-#include <linux/idr.h>
 
 #define MAX_TOPO_LEVEL		6
 
@@ -160,6 +159,7 @@ struct usb_hcd {
 	unsigned		tpl_support:1; /* OTG & EH TPL support */
 	unsigned		cant_recv_wakeups:1;
 			/* wakeup requests from downstream aren't received */
+	unsigned		rk3288_relinquish_port_quirk:1;
 
 	unsigned int		irq;		/* irq allocated */
 	void __iomem		*regs;		/* device memory/io */
@@ -632,8 +632,8 @@ extern void usb_set_device_state(struct usb_device *udev,
 
 /* exported only within usbcore */
 
-extern struct idr usb_bus_idr;
-extern struct mutex usb_bus_idr_lock;
+extern struct list_head usb_bus_list;
+extern struct mutex usb_bus_list_lock;
 extern wait_queue_head_t usb_kill_urb_queue;
 
 
@@ -662,7 +662,7 @@ struct usb_mon_operations {
 	/* void (*urb_unlink)(struct usb_bus *bus, struct urb *urb); */
 };
 
-extern const struct usb_mon_operations *mon_ops;
+extern struct usb_mon_operations *mon_ops;
 
 static inline void usbmon_urb_submit(struct usb_bus *bus, struct urb *urb)
 {
@@ -684,7 +684,7 @@ static inline void usbmon_urb_complete(struct usb_bus *bus, struct urb *urb,
 		(*mon_ops->urb_complete)(bus, urb, status);
 }
 
-int usb_mon_register(const struct usb_mon_operations *ops);
+int usb_mon_register(struct usb_mon_operations *ops);
 void usb_mon_deregister(void);
 
 #else

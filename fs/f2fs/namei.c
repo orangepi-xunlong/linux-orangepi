@@ -540,21 +540,17 @@ static int f2fs_unlink(struct inode *dir, struct dentry *dentry)
 
 	if (IS_DIRSYNC(dir))
 		f2fs_sync_fs(sbi->sb, 1);
-
 fail:
 	trace_f2fs_unlink_exit(inode, err);
 	return err;
 }
 
-static const char *f2fs_get_link(struct dentry *dentry,
-				 struct inode *inode,
-				 struct delayed_call *done)
+static const char *f2fs_follow_link(struct dentry *dentry, void **cookie)
 {
-	const char *link = page_get_link(dentry, inode, done);
+	const char *link = page_follow_link_light(dentry, cookie);
 	if (!IS_ERR(link) && !*link) {
 		/* this is broken symlink case */
-		do_delayed_call(done);
-		clear_delayed_call(done);
+		page_put_link(NULL, *cookie);
 		link = ERR_PTR(-ENOENT);
 	}
 	return link;
@@ -744,9 +740,6 @@ static int __f2fs_tmpfile(struct inode *dir, struct dentry *dentry,
 	struct f2fs_sb_info *sbi = F2FS_I_SB(dir);
 	struct inode *inode;
 	int err;
-
-	if (unlikely(f2fs_cp_error(sbi)))
-		return -EIO;
 
 	err = dquot_initialize(dir);
 	if (err)
@@ -1206,12 +1199,11 @@ static int f2fs_rename2(struct inode *old_dir, struct dentry *old_dentry,
 	return f2fs_rename(old_dir, old_dentry, new_dir, new_dentry, flags);
 }
 
-static const char *f2fs_encrypted_get_link(struct dentry *dentry,
-					   struct inode *inode,
-					   struct delayed_call *done)
+static const char *f2fs_encrypted_follow_link(struct dentry *dentry, void **cookie)
 {
+	struct inode *inode = d_inode(dentry);
 	struct page *page;
-	const char *target;
+	void *target;
 
 	if (!dentry)
 		return ERR_PTR(-ECHILD);
@@ -1221,18 +1213,22 @@ static const char *f2fs_encrypted_get_link(struct dentry *dentry,
 		return ERR_CAST(page);
 
 	target = fscrypt_get_symlink(inode, page_address(page),
-				     inode->i_sb->s_blocksize, done);
+				     inode->i_sb->s_blocksize);
 	put_page(page);
-	return target;
+	return *cookie = target;
 }
 
 const struct inode_operations f2fs_encrypted_symlink_inode_operations = {
 	.readlink       = generic_readlink,
-	.get_link       = f2fs_encrypted_get_link,
+	.follow_link	= f2fs_encrypted_follow_link,
+	.put_link	= kfree_put_link,
 	.getattr	= f2fs_getattr,
 	.setattr	= f2fs_setattr,
 #ifdef CONFIG_F2FS_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= f2fs_listxattr,
+	.removexattr	= generic_removexattr,
 #endif
 };
 
@@ -1245,24 +1241,31 @@ const struct inode_operations f2fs_dir_inode_operations = {
 	.mkdir		= f2fs_mkdir,
 	.rmdir		= f2fs_rmdir,
 	.mknod		= f2fs_mknod,
-	.rename		= f2fs_rename2,
+	.rename2	= f2fs_rename2,
 	.tmpfile	= f2fs_tmpfile,
 	.getattr	= f2fs_getattr,
 	.setattr	= f2fs_setattr,
 	.get_acl	= f2fs_get_acl,
 	.set_acl	= f2fs_set_acl,
 #ifdef CONFIG_F2FS_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= f2fs_listxattr,
+	.removexattr	= generic_removexattr,
 #endif
 };
 
 const struct inode_operations f2fs_symlink_inode_operations = {
 	.readlink       = generic_readlink,
-	.get_link       = f2fs_get_link,
+	.follow_link    = f2fs_follow_link,
+	.put_link       = page_put_link,
 	.getattr	= f2fs_getattr,
 	.setattr	= f2fs_setattr,
 #ifdef CONFIG_F2FS_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= f2fs_listxattr,
+	.removexattr	= generic_removexattr,
 #endif
 };
 
@@ -1272,6 +1275,9 @@ const struct inode_operations f2fs_special_inode_operations = {
 	.get_acl	= f2fs_get_acl,
 	.set_acl	= f2fs_set_acl,
 #ifdef CONFIG_F2FS_FS_XATTR
+	.setxattr       = generic_setxattr,
+	.getxattr       = generic_getxattr,
 	.listxattr	= f2fs_listxattr,
+	.removexattr    = generic_removexattr,
 #endif
 };

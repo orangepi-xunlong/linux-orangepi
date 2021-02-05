@@ -81,11 +81,11 @@ PHDRS {
 SECTIONS
 {
 #ifdef CONFIG_X86_32
-	. = LOAD_OFFSET + LOAD_PHYSICAL_ADDR;
-	phys_startup_32 = ABSOLUTE(startup_32 - LOAD_OFFSET);
+        . = LOAD_OFFSET + LOAD_PHYSICAL_ADDR;
+        phys_startup_32 = startup_32 - LOAD_OFFSET;
 #else
-	. = __START_KERNEL;
-	phys_startup_64 = ABSOLUTE(startup_64 - LOAD_OFFSET);
+        . = __START_KERNEL;
+        phys_startup_64 = startup_64 - LOAD_OFFSET;
 #endif
 
 	/* Text and read-only data */
@@ -97,7 +97,6 @@ SECTIONS
 		_stext = .;
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		ENTRY_TEXT
@@ -342,7 +341,6 @@ SECTIONS
 		__brk_limit = .;
 	}
 
-	. = ALIGN(PAGE_SIZE);		/* keep VO_INIT_SIZE page aligned */
 	_end = .;
 
         STABS_DEBUG
@@ -350,9 +348,7 @@ SECTIONS
 
 	/* Sections to be discarded */
 	DISCARDS
-	/DISCARD/ : {
-		*(.eh_frame)
-	}
+	/DISCARD/ : { *(.eh_frame) }
 }
 
 
@@ -367,7 +363,7 @@ SECTIONS
  * Per-cpu symbols which need to be offset from __per_cpu_load
  * for the boot processor.
  */
-#define INIT_PER_CPU(x) init_per_cpu__##x = x + __per_cpu_load
+#define INIT_PER_CPU(x) init_per_cpu__##x = ABSOLUTE(x) + __per_cpu_load
 INIT_PER_CPU(gdt_page);
 INIT_PER_CPU(irq_stack_union);
 

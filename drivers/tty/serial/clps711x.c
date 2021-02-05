@@ -450,7 +450,6 @@ static int uart_clps711x_probe(struct platform_device *pdev)
 	struct clps711x_port *s;
 	struct resource *res;
 	struct clk *uart_clk;
-	int irq;
 
 	if (index < 0 || index >= UART_CLPS711X_NR)
 		return -EINVAL;
@@ -468,13 +467,12 @@ static int uart_clps711x_probe(struct platform_device *pdev)
 	if (IS_ERR(s->port.membase))
 		return PTR_ERR(s->port.membase);
 
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
-		return irq;
-	s->port.irq = irq;
+	s->port.irq = platform_get_irq(pdev, 0);
+	if (IS_ERR_VALUE(s->port.irq))
+		return s->port.irq;
 
 	s->rx_irq = platform_get_irq(pdev, 1);
-	if (s->rx_irq < 0)
+	if (IS_ERR_VALUE(s->rx_irq))
 		return s->rx_irq;
 
 	if (!np) {
@@ -539,7 +537,7 @@ static int uart_clps711x_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id __maybe_unused clps711x_uart_dt_ids[] = {
-	{ .compatible = "cirrus,ep7209-uart", },
+	{ .compatible = "cirrus,clps711x-uart", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, clps711x_uart_dt_ids);

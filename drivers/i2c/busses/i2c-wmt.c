@@ -432,8 +432,10 @@ static int wmt_i2c_probe(struct platform_device *pdev)
 	}
 
 	err = i2c_add_adapter(adap);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "failed to add adapter\n");
 		return err;
+	}
 
 	platform_set_drvdata(pdev, i2c_dev);
 

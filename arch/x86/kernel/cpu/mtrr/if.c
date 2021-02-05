@@ -2,6 +2,7 @@
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>
+#include <linux/module.h>
 #include <linux/ctype.h>
 #include <linux/string.h>
 #include <linux/slab.h>
@@ -171,6 +172,8 @@ mtrr_ioctl(struct file *file, unsigned int cmd, unsigned long __arg)
 	struct mtrr_sentry sentry;
 	struct mtrr_gentry gentry;
 	void __user *arg = (void __user *) __arg;
+
+	memset(&gentry, 0, sizeof(gentry));
 
 	switch (cmd) {
 	case MTRRIOC_ADD_ENTRY:

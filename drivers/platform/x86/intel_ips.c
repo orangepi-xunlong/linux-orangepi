@@ -68,7 +68,6 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/sched.h>
-#include <linux/sched/loadavg.h>
 #include <linux/seq_file.h>
 #include <linux/string.h>
 #include <linux/tick.h>

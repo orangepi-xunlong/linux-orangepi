@@ -5,7 +5,6 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 #include <linux/types.h>
-#include <linux/compiler.h>
 #include <linux/perf_event.h>
 #include <asm/barrier.h>
 
@@ -20,6 +19,7 @@
 #endif
 
 #ifdef __powerpc__
+#include "../../arch/powerpc/include/uapi/asm/unistd.h"
 #define CPUINFO_PROC	{"cpu"}
 #endif
 

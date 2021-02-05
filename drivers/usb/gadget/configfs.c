@@ -1,10 +1,3 @@
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include <linux/configfs.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -39,90 +32,6 @@ struct device *create_function_device(char *name)
 		return ERR_PTR(-EINVAL);
 }
 EXPORT_SYMBOL_GPL(create_function_device);
-#endif
-
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-#include <linux/of_device.h>
-#define KEY_USB_SERIAL_UNIQUE			"usb_serial_unique"
-#define KEY_USB_SERIAL_NUMBER			"usb_serial_number"
-#define KEY_CMDLINE_SERIAL			"androidboot.serialno"
-
-u32 serial_unique;
-char g_usb_serial_number[64];
-
-static int get_para_from_cmdline(const char *cmdline,
-		const char *name, char *value, int maxsize)
-{
-	char *p = (char *)cmdline;
-	char *value_p = value;
-	int size = 0;
-
-	if (!cmdline || !name || !value)
-		return -1;
-
-	for (; *p != 0;) {
-		if (*p++ == ' ') {
-			if (strncmp(p, name, strlen(name)) == 0) {
-				p += strlen(name);
-				if (*p++ != '=')
-					continue;
-				while ((*p != 0) && (*p != ' ')
-						&& (++size < maxsize))
-					*value_p++ = *p++;
-				*value_p = '\0';
-				return value_p - value;
-			}
-		}
-	}
-
-	return 0;
-}
-
-static int get_android_usb_config(void)
-{
-	struct device_node *usbc0_np = NULL;
-
-	const char *usb_serial_number;
-	int ret = -1;
-
-	usbc0_np = of_find_node_by_type(NULL, "usbc0");
-
-	/* get serial unique */
-	ret = of_property_read_u32(usbc0_np, KEY_USB_SERIAL_UNIQUE,
-				&serial_unique);
-	if (ret)
-		pr_info("get serial_unique failed\n");
-
-	/* get usb serial number from boot command line*/
-	ret = get_para_from_cmdline(saved_command_line,
-				KEY_CMDLINE_SERIAL,
-				g_usb_serial_number,
-				sizeof(g_usb_serial_number));
-
-	if (serial_unique == 1 && ret > 0) {
-		pr_info("get usb_serial_number success from boot command line");
-	} else {
-		/* get serial number */
-		ret = of_property_read_string(usbc0_np, KEY_USB_SERIAL_NUMBER,
-					&usb_serial_number);
-		if (ret) {
-			pr_info("get usb_serial_number failed\n");
-			strncpy(g_usb_serial_number,
-				"20080411",
-				ARRAY_SIZE(g_usb_serial_number));
-		} else {
-			if (usb_serial_number != NULL) {
-				strncpy(g_usb_serial_number,
-					usb_serial_number,
-					ARRAY_SIZE(g_usb_serial_number));
-				pr_info("usb_serial_number:%s\n",
-						usb_serial_number);
-			}
-		}
-	}
-
-	return 0;
-}
 #endif
 
 int check_user_usb_string(const char *name,
@@ -165,12 +74,14 @@ struct gadget_info {
 	struct config_group configs_group;
 	struct config_group strings_group;
 	struct config_group os_desc_group;
+	struct config_group *default_groups[5];
 
 	struct mutex lock;
 	struct usb_gadget_strings *gstrings[MAX_USB_STRING_LANGS + 1];
 	struct list_head string_list;
 	struct list_head available_func;
 
+	const char *udc_name;
 	struct usb_composite_driver composite;
 	struct usb_composite_dev cdev;
 	bool use_os_desc;
@@ -192,6 +103,7 @@ static inline struct gadget_info *to_gadget_info(struct config_item *item)
 struct config_usb_cfg {
 	struct config_group group;
 	struct config_group strings_group;
+	struct config_group *default_groups[2];
 	struct list_head string_list;
 	struct usb_configuration c;
 	struct list_head func_list;
@@ -352,23 +264,21 @@ static ssize_t gadget_dev_desc_bcdUSB_store(struct config_item *item,
 
 static ssize_t gadget_dev_desc_UDC_show(struct config_item *item, char *page)
 {
-	char *udc_name = to_gadget_info(item)->composite.gadget_driver.udc_name;
-
-	return sprintf(page, "%s\n", udc_name ?: "");
+	return sprintf(page, "%s\n", to_gadget_info(item)->udc_name ?: "");
 }
 
 static int unregister_gadget(struct gadget_info *gi)
 {
 	int ret;
 
-	if (!gi->composite.gadget_driver.udc_name)
+	if (!gi->udc_name)
 		return -ENODEV;
 
 	ret = usb_gadget_unregister_driver(&gi->composite.gadget_driver);
 	if (ret)
 		return ret;
-	kfree(gi->composite.gadget_driver.udc_name);
-	gi->composite.gadget_driver.udc_name = NULL;
+	kfree(gi->udc_name);
+	gi->udc_name = NULL;
 	return 0;
 }
 
@@ -393,16 +303,14 @@ static ssize_t gadget_dev_desc_UDC_store(struct config_item *item,
 			goto err;
 		kfree(name);
 	} else {
-		if (gi->composite.gadget_driver.udc_name) {
+		if (gi->udc_name) {
 			ret = -EBUSY;
 			goto err;
 		}
-		gi->composite.gadget_driver.udc_name = name;
-		ret = usb_gadget_probe_driver(&gi->composite.gadget_driver);
-		if (ret) {
-			gi->composite.gadget_driver.udc_name = NULL;
+		ret = usb_udc_attach_driver(name, &gi->composite.gadget_driver);
+		if (ret)
 			goto err;
-		}
+		gi->udc_name = name;
 	}
 	mutex_unlock(&gi->lock);
 	return len;
@@ -551,9 +459,9 @@ static int config_usb_cfg_unlink(
 	 * remove the function.
 	 */
 	mutex_lock(&gi->lock);
-	if (gi->composite.gadget_driver.udc_name)
+	if (gi->udc_name)
 		unregister_gadget(gi);
-	WARN_ON(gi->composite.gadget_driver.udc_name);
+	WARN_ON(gi->udc_name);
 
 	list_for_each_entry(f, &cfg->func_list, list) {
 		if (f->fi == fi) {
@@ -787,12 +695,13 @@ static struct config_group *config_desc_make(
 	INIT_LIST_HEAD(&cfg->string_list);
 	INIT_LIST_HEAD(&cfg->func_list);
 
+	cfg->group.default_groups = cfg->default_groups;
+	cfg->default_groups[0] = &cfg->strings_group;
+
 	config_group_init_type_name(&cfg->group, name,
 				&gadget_config_type);
-
 	config_group_init_type_name(&cfg->strings_group, "strings",
 			&gadget_config_name_strings_type);
-	configfs_add_default_group(&cfg->strings_group, &cfg->group);
 
 	ret = usb_add_config_only(&gi->cdev, &cfg->c);
 	if (ret)
@@ -996,10 +905,10 @@ static int os_desc_unlink(struct config_item *os_desc_ci,
 	struct usb_composite_dev *cdev = &gi->cdev;
 
 	mutex_lock(&gi->lock);
-	if (gi->composite.gadget_driver.udc_name)
+	if (gi->udc_name)
 		unregister_gadget(gi);
 	cdev->os_desc_config = NULL;
-	WARN_ON(gi->composite.gadget_driver.udc_name);
+	WARN_ON(gi->udc_name);
 	mutex_unlock(&gi->lock);
 	return 0;
 }
@@ -1263,33 +1172,40 @@ static struct configfs_attribute *interf_grp_attrs[] = {
 	NULL
 };
 
-struct config_group *usb_os_desc_prepare_interf_dir(
-		struct config_group *parent,
-		int n_interf,
-		struct usb_os_desc **desc,
-		char **names,
-		struct module *owner)
+int usb_os_desc_prepare_interf_dir(struct config_group *parent,
+				   int n_interf,
+				   struct usb_os_desc **desc,
+				   char **names,
+				   struct module *owner)
 {
-	struct config_group *os_desc_group;
+	struct config_group **f_default_groups, *os_desc_group,
+				**interface_groups;
 	struct config_item_type *os_desc_type, *interface_type;
 
 	vla_group(data_chunk);
+	vla_item(data_chunk, struct config_group *, f_default_groups, 2);
 	vla_item(data_chunk, struct config_group, os_desc_group, 1);
+	vla_item(data_chunk, struct config_group *, interface_groups,
+		 n_interf + 1);
 	vla_item(data_chunk, struct config_item_type, os_desc_type, 1);
 	vla_item(data_chunk, struct config_item_type, interface_type, 1);
 
 	char *vlabuf = kzalloc(vla_group_size(data_chunk), GFP_KERNEL);
 	if (!vlabuf)
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
+	f_default_groups = vla_ptr(vlabuf, data_chunk, f_default_groups);
 	os_desc_group = vla_ptr(vlabuf, data_chunk, os_desc_group);
 	os_desc_type = vla_ptr(vlabuf, data_chunk, os_desc_type);
+	interface_groups = vla_ptr(vlabuf, data_chunk, interface_groups);
 	interface_type = vla_ptr(vlabuf, data_chunk, interface_type);
 
+	parent->default_groups = f_default_groups;
 	os_desc_type->ct_owner = owner;
 	config_group_init_type_name(os_desc_group, "os_desc", os_desc_type);
-	configfs_add_default_group(os_desc_group, parent);
+	f_default_groups[0] = os_desc_group;
 
+	os_desc_group->default_groups = interface_groups;
 	interface_type->ct_group_ops = &interf_grp_ops;
 	interface_type->ct_attrs = interf_grp_attrs;
 	interface_type->ct_owner = owner;
@@ -1302,10 +1218,10 @@ struct config_group *usb_os_desc_prepare_interf_dir(
 		config_group_init_type_name(&d->group, "", interface_type);
 		config_item_set_name(&d->group.cg_item, "interface.%s",
 				     names[n_interf]);
-		configfs_add_default_group(&d->group, os_desc_group);
+		interface_groups[n_interf] = &d->group;
 	}
 
-	return os_desc_group;
+	return 0;
 }
 EXPORT_SYMBOL(usb_os_desc_prepare_interf_dir);
 
@@ -1335,15 +1251,16 @@ static void purge_configs_funcs(struct gadget_info *gi)
 
 			list_move_tail(&f->list, &cfg->func_list);
 			if (f->unbind) {
-				dev_dbg(&gi->cdev.gadget->dev,
-				         "unbind function '%s'/%p\n",
-				         f->name, f);
+				dev_err(&gi->cdev.gadget->dev, "unbind function"
+						" '%s'/%p\n", f->name, f);
 				f->unbind(c, f);
 			}
+
+			if (f->bind_deactivated)
+				usb_function_activate(f);
 		}
 		c->next_interface_id = 0;
 		memset(c->interface, 0, sizeof(c->interface));
-		c->superspeed_plus = 0;
 		c->superspeed = 0;
 		c->highspeed = 0;
 		c->fullspeed = 0;
@@ -1402,17 +1319,6 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 			gs->strings[USB_GADGET_MANUFACTURER_IDX].s =
 				gs->manufacturer;
 			gs->strings[USB_GADGET_PRODUCT_IDX].s = gs->product;
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-			if (!gs->serialnumber) {
-				char *p_serial = kzalloc(sizeof(g_usb_serial_number), GFP_KERNEL);
-
-				if (!p_serial)
-					return -ENOMEM;
-				strncpy(p_serial, g_usb_serial_number,
-						sizeof(g_usb_serial_number) - 1);
-				gs->serialnumber = p_serial;
-			}
-#endif
 			gs->strings[USB_GADGET_SERIAL_IDX].s = gs->serialnumber;
 			i++;
 		}
@@ -1586,7 +1492,8 @@ static int android_setup(struct usb_gadget *gadget,
 	struct usb_function_instance *fi;
 
 	spin_lock_irqsave(&cdev->lock, flags);
-	if (!gi->connected) {
+	if (c->bRequest == USB_REQ_GET_DESCRIPTOR &&
+	    (c->wValue >> 8) == USB_DT_CONFIG && !gi->connected) {
 		gi->connected = 1;
 		schedule_work(&gi->work);
 	}
@@ -1666,9 +1573,8 @@ static const struct usb_gadget_driver configfs_driver_template = {
 	.max_speed	= USB_SPEED_SUPER,
 	.driver = {
 		.owner          = THIS_MODULE,
-		.name		    = "configfs-gadget",
+		.name		= "configfs-gadget",
 	},
-	.match_existing_only = 1,
 };
 
 #ifdef CONFIG_USB_CONFIGFS_UEVENT
@@ -1763,24 +1669,20 @@ static struct config_group *gadgets_make(
 	gi = kzalloc(sizeof(*gi), GFP_KERNEL);
 	if (!gi)
 		return ERR_PTR(-ENOMEM);
-
-	config_group_init_type_name(&gi->group, name, &gadget_root_type);
+	gi->group.default_groups = gi->default_groups;
+	gi->group.default_groups[0] = &gi->functions_group;
+	gi->group.default_groups[1] = &gi->configs_group;
+	gi->group.default_groups[2] = &gi->strings_group;
+	gi->group.default_groups[3] = &gi->os_desc_group;
 
 	config_group_init_type_name(&gi->functions_group, "functions",
 			&functions_type);
-	configfs_add_default_group(&gi->functions_group, &gi->group);
-
 	config_group_init_type_name(&gi->configs_group, "configs",
 			&config_desc_type);
-	configfs_add_default_group(&gi->configs_group, &gi->group);
-
 	config_group_init_type_name(&gi->strings_group, "strings",
 			&gadget_strings_strings_type);
-	configfs_add_default_group(&gi->strings_group, &gi->group);
-
 	config_group_init_type_name(&gi->os_desc_group, "os_desc",
 			&os_desc_type);
-	configfs_add_default_group(&gi->os_desc_group, &gi->group);
 
 	gi->composite.bind = configfs_do_nothing;
 	gi->composite.unbind = configfs_do_nothing;
@@ -1808,6 +1710,8 @@ static struct config_group *gadgets_make(
 	if (android_device_create(gi) < 0)
 		goto err;
 
+	config_group_init_type_name(&gi->group, name,
+				&gadget_root_type);
 	return &gi->group;
 
 err:
@@ -1854,10 +1758,6 @@ EXPORT_SYMBOL_GPL(unregister_gadget_item);
 static int __init gadget_cfs_init(void)
 {
 	int ret;
-
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-		get_android_usb_config();
-#endif
 
 	config_group_init(&gadget_subsys.su_group);
 

@@ -81,23 +81,15 @@ static int tegra_reset_usb_controller(struct platform_device *pdev)
 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
 	struct tegra_ehci_hcd *tegra =
 		(struct tegra_ehci_hcd *)hcd_to_ehci(hcd)->priv;
-	bool has_utmi_pad_registers = false;
 
 	phy_np = of_parse_phandle(pdev->dev.of_node, "nvidia,phy", 0);
 	if (!phy_np)
 		return -ENOENT;
 
-	if (of_property_read_bool(phy_np, "nvidia,has-utmi-pad-registers"))
-		has_utmi_pad_registers = true;
-
 	if (!usb1_reset_attempted) {
 		struct reset_control *usb1_reset;
 
-		if (!has_utmi_pad_registers)
-			usb1_reset = of_reset_control_get(phy_np, "utmi-pads");
-		else
-			usb1_reset = tegra->rst;
-
+		usb1_reset = of_reset_control_get(phy_np, "utmi-pads");
 		if (IS_ERR(usb1_reset)) {
 			dev_warn(&pdev->dev,
 				 "can't get utmi-pads reset from the PHY\n");
@@ -107,15 +99,13 @@ static int tegra_reset_usb_controller(struct platform_device *pdev)
 			reset_control_assert(usb1_reset);
 			udelay(1);
 			reset_control_deassert(usb1_reset);
-
-			if (!has_utmi_pad_registers)
-				reset_control_put(usb1_reset);
 		}
 
+		reset_control_put(usb1_reset);
 		usb1_reset_attempted = true;
 	}
 
-	if (!has_utmi_pad_registers) {
+	if (!of_property_read_bool(phy_np, "nvidia,has-utmi-pad-registers")) {
 		reset_control_assert(tegra->rst);
 		udelay(1);
 		reset_control_deassert(tegra->rst);

@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -33,10 +37,9 @@
 #define DEBUG_SUBSYSTEM S_LNET
 
 #include "selftest.h"
-#include "console.h"
 
 enum {
-	LST_INIT_NONE		= 0,
+	LST_INIT_NONE = 0,
 	LST_INIT_WI_SERIAL,
 	LST_INIT_WI_TEST,
 	LST_INIT_RPC,
@@ -44,13 +47,16 @@ enum {
 	LST_INIT_CONSOLE
 };
 
+extern int lstcon_console_init(void);
+extern int lstcon_console_fini(void);
+
 static int lst_init_step = LST_INIT_NONE;
 
 struct cfs_wi_sched *lst_sched_serial;
 struct cfs_wi_sched **lst_sched_test;
 
 static void
-lnet_selftest_exit(void)
+lnet_selftest_fini(void)
 {
 	int i;
 
@@ -64,7 +70,7 @@ lnet_selftest_exit(void)
 	case LST_INIT_WI_TEST:
 		for (i = 0;
 		     i < cfs_cpt_number(lnet_cpt_table()); i++) {
-			if (!lst_sched_test[i])
+			if (lst_sched_test[i] == NULL)
 				continue;
 			cfs_wi_sched_destroy(lst_sched_test[i]);
 		}
@@ -92,7 +98,7 @@ lnet_selftest_init(void)
 
 	rc = cfs_wi_sched_create("lst_s", lnet_cpt_table(), CFS_CPT_ANY,
 				 1, &lst_sched_serial);
-	if (rc) {
+	if (rc != 0) {
 		CERROR("Failed to create serial WI scheduler for LST\n");
 		return rc;
 	}
@@ -100,7 +106,7 @@ lnet_selftest_init(void)
 
 	nscheds = cfs_cpt_number(lnet_cpt_table());
 	LIBCFS_ALLOC(lst_sched_test, sizeof(lst_sched_test[0]) * nscheds);
-	if (!lst_sched_test)
+	if (lst_sched_test == NULL)
 		goto error;
 
 	lst_init_step = LST_INIT_WI_TEST;
@@ -111,42 +117,42 @@ lnet_selftest_init(void)
 		nthrs = max(nthrs - 1, 1);
 		rc = cfs_wi_sched_create("lst_t", lnet_cpt_table(), i,
 					 nthrs, &lst_sched_test[i]);
-		if (rc) {
-			CERROR("Failed to create CPT affinity WI scheduler %d for LST\n", i);
+		if (rc != 0) {
+			CERROR("Failed to create CPT affinity WI scheduler %d for LST\n",
+			       i);
 			goto error;
 		}
 	}
 
 	rc = srpc_startup();
-	if (rc) {
+	if (rc != 0) {
 		CERROR("LST can't startup rpc\n");
 		goto error;
 	}
 	lst_init_step = LST_INIT_RPC;
 
 	rc = sfw_startup();
-	if (rc) {
+	if (rc != 0) {
 		CERROR("LST can't startup framework\n");
 		goto error;
 	}
 	lst_init_step = LST_INIT_FW;
 
 	rc = lstcon_console_init();
-	if (rc) {
+	if (rc != 0) {
 		CERROR("LST can't startup console\n");
 		goto error;
 	}
 	lst_init_step = LST_INIT_CONSOLE;
 	return 0;
 error:
-	lnet_selftest_exit();
+	lnet_selftest_fini();
 	return rc;
 }
 
-MODULE_AUTHOR("OpenSFS, Inc. <http://www.lustre.org/>");
 MODULE_DESCRIPTION("LNet Selftest");
-MODULE_VERSION("2.7.0");
 MODULE_LICENSE("GPL");
+MODULE_VERSION("0.9.0");
 
 module_init(lnet_selftest_init);
-module_exit(lnet_selftest_exit);
+module_exit(lnet_selftest_fini);

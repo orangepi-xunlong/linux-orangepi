@@ -80,10 +80,16 @@ int aic_common_set_type(struct irq_data *d, unsigned type, unsigned *val)
 	return 0;
 }
 
-void aic_common_set_priority(int priority, unsigned *val)
+int aic_common_set_priority(int priority, unsigned *val)
 {
+	if (priority < AT91_AIC_IRQ_MIN_PRIORITY ||
+	    priority > AT91_AIC_IRQ_MAX_PRIORITY)
+		return -EINVAL;
+
 	*val &= ~AT91_AIC_PRIOR;
 	*val |= priority;
+
+	return 0;
 }
 
 int aic_common_irq_domain_xlate(struct irq_domain *d,
@@ -187,7 +193,7 @@ void __init aic_common_rtt_irq_fixup(struct device_node *root)
 	}
 }
 
-static void __init aic_common_irq_fixup(const struct of_device_id *matches)
+void __init aic_common_irq_fixup(const struct of_device_id *matches)
 {
 	struct device_node *root = of_find_node_by_path("/");
 	const struct of_device_id *match;
@@ -207,8 +213,7 @@ static void __init aic_common_irq_fixup(const struct of_device_id *matches)
 
 struct irq_domain *__init aic_common_of_init(struct device_node *node,
 					     const struct irq_domain_ops *ops,
-					     const char *name, int nirqs,
-					     const struct of_device_id *matches)
+					     const char *name, int nirqs)
 {
 	struct irq_chip_generic *gc;
 	struct irq_domain *domain;
@@ -258,7 +263,6 @@ struct irq_domain *__init aic_common_of_init(struct device_node *node,
 	}
 
 	aic_common_ext_irq_of_init(domain);
-	aic_common_irq_fixup(matches);
 
 	return domain;
 

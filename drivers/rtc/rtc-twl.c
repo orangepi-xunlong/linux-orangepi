@@ -462,7 +462,7 @@ out:
 	return ret;
 }
 
-static const struct rtc_class_ops twl_rtc_ops = {
+static struct rtc_class_ops twl_rtc_ops = {
 	.read_time	= twl_rtc_read_time,
 	.set_time	= twl_rtc_set_time,
 	.read_alarm	= twl_rtc_read_alarm,

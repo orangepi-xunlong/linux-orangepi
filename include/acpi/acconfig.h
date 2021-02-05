@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -122,7 +122,7 @@
 
 /* Maximum object reference count (detects object deletion issues) */
 
-#define ACPI_MAX_REFERENCE_COUNT        0x4000
+#define ACPI_MAX_REFERENCE_COUNT        0x1000
 
 /* Default page size for use in mapping memory for operation regions */
 
@@ -143,10 +143,6 @@
 /* Address Range lists are per-space_id (Memory and I/O only) */
 
 #define ACPI_ADDRESS_RANGE_MAX          2
-
-/* Maximum number of While() loops before abort */
-
-#define ACPI_MAX_LOOP_COUNT             0xFFFF
 
 /******************************************************************************
  *

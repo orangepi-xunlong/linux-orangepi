@@ -55,14 +55,12 @@ MODULE_PARM_DESC(debug, "Enable debugging output");
 /* low limit for RX carrier freq, Hz, 0 for no RX demodulation */
 static int rx_low_carrier_freq;
 module_param(rx_low_carrier_freq, int, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(rx_low_carrier_freq, "Override low RX carrier frequency, Hz, "
-		 "0 for no RX demodulation");
+MODULE_PARM_DESC(rx_low_carrier_freq, "Override low RX carrier frequency, Hz, 0 for no RX demodulation");
 
 /* high limit for RX carrier freq, Hz, 0 for no RX demodulation */
 static int rx_high_carrier_freq;
 module_param(rx_high_carrier_freq, int, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(rx_high_carrier_freq, "Override high RX carrier frequency, "
-		 "Hz, 0 for no RX demodulation");
+MODULE_PARM_DESC(rx_high_carrier_freq, "Override high RX carrier frequency, Hz, 0 for no RX demodulation");
 
 /* override tx carrier frequency */
 static int tx_carrier_freq;
@@ -180,7 +178,7 @@ static void ite_decode_bytes(struct ite_dev *dev, const u8 * data, int
 	u32 sample_period;
 	unsigned long *ldata;
 	unsigned int next_one, next_zero, size;
-	DEFINE_IR_RAW_EVENT(ev);
+	struct ir_raw_event ev = {};
 
 	if (length == 0)
 		return;
@@ -1472,7 +1470,7 @@ static int ite_probe(struct pnp_dev *pdev, const struct pnp_device_id
 		return ret;
 
 	/* input device for IR remote (and tx) */
-	rdev = rc_allocate_device();
+	rdev = rc_allocate_device(RC_DRIVER_IR_RAW);
 	if (!rdev)
 		goto exit_free_dev_rdev;
 	itdev->rdev = rdev;
@@ -1486,8 +1484,7 @@ static int ite_probe(struct pnp_dev *pdev, const struct pnp_device_id
 
 	if (model_number >= 0 && model_number < ARRAY_SIZE(ite_dev_descs)) {
 		model_no = model_number;
-		ite_pr(KERN_NOTICE, "The model has been fixed by a module "
-			"parameter.");
+		ite_pr(KERN_NOTICE, "The model has been fixed by a module parameter.");
 	}
 
 	ite_pr(KERN_NOTICE, "Using model: %s\n", ite_dev_descs[model_no].model);
@@ -1514,9 +1511,6 @@ static int ite_probe(struct pnp_dev *pdev, const struct pnp_device_id
 
 	/* initialize spinlocks */
 	spin_lock_init(&itdev->lock);
-
-	/* initialize raw event */
-	init_ir_raw_event(&itdev->rawir);
 
 	/* set driver data into the pnp device */
 	pnp_set_drvdata(pdev, itdev);
@@ -1564,8 +1558,7 @@ static int ite_probe(struct pnp_dev *pdev, const struct pnp_device_id
 
 	/* set up ir-core props */
 	rdev->priv = itdev;
-	rdev->driver_type = RC_DRIVER_IR_RAW;
-	rdev->allowed_protocols = RC_BIT_ALL;
+	rdev->allowed_protocols = RC_PROTO_BIT_ALL_IR_DECODER;
 	rdev->open = ite_open;
 	rdev->close = ite_close;
 	rdev->s_idle = ite_s_idle;
@@ -1585,7 +1578,7 @@ static int ite_probe(struct pnp_dev *pdev, const struct pnp_device_id
 		rdev->s_tx_duty_cycle = ite_set_tx_duty_cycle;
 	}
 
-	rdev->input_name = dev_desc->model;
+	rdev->device_name = dev_desc->model;
 	rdev->input_id.bustype = BUS_HOST;
 	rdev->input_id.vendor = PCI_VENDOR_ID_ITE;
 	rdev->input_id.product = 0;

@@ -25,6 +25,7 @@
 #ifndef AF9013_H
 #define AF9013_H
 
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 
 /* AF9013/5 GPIOs (mostly guessed)

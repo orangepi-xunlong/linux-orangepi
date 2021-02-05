@@ -30,7 +30,6 @@
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ctrls.h>
-#include <media/v4l2-mc.h>
 #include <linux/i2c.h>
 #include "dvb_frontend.h"
 #include "au8522.h"
@@ -51,7 +50,7 @@ struct au8522_state {
 	struct list_head hybrid_tuner_instance_list;
 
 	/* configuration settings */
-	struct au8522_config config;
+	const struct au8522_config *config;
 
 	struct dvb_frontend frontend;
 
@@ -69,10 +68,6 @@ struct au8522_state {
 	u32 id;
 	u32 rev;
 	struct v4l2_ctrl_handler hdl;
-
-#ifdef CONFIG_MEDIA_CONTROLLER
-	struct media_pad pads[DEMOD_NUM_PADS];
-#endif
 };
 
 /* These are routines shared by both the VSB/QAM demodulator and the analog

@@ -596,7 +596,7 @@ void rtl92c_set_min_space(struct ieee80211_hw *hw, bool is2T)
 
 /*==============================================================*/
 
-static u8 _rtl92c_query_rxpwrpercentage(s8 antpower)
+static u8 _rtl92c_query_rxpwrpercentage(char antpower)
 {
 	if ((antpower <= -100) || (antpower >= 20))
 		return 0;
@@ -606,9 +606,9 @@ static u8 _rtl92c_query_rxpwrpercentage(s8 antpower)
 		return 100 + antpower;
 }
 
-static u8 _rtl92c_evm_db_to_percentage(s8 value)
+static u8 _rtl92c_evm_db_to_percentage(char value)
 {
-	s8 ret_val;
+	char ret_val;
 
 	ret_val = value;
 	if (ret_val >= 0)

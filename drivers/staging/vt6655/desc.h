@@ -157,8 +157,7 @@
 
 /* TD_INFO flags control bit */
 #define TD_FLAGS_NETIF_SKB      0x01    /* check if need release skb */
-/* check if called from private skb (hostap) */
-#define TD_FLAGS_PRIV_SKB       0x02
+#define TD_FLAGS_PRIV_SKB       0x02    /* check if called from private skb (hostap) */
 #define TD_FLAGS_PS_RETRY       0x04    /* check if PS STA frame re-transmit */
 
 /*

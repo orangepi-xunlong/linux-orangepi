@@ -69,7 +69,6 @@ struct urb *pickup_urb_and_free_priv(struct vhci_device *vdev, __u32 seqnum)
 static void vhci_recv_ret_submit(struct vhci_device *vdev,
 				 struct usbip_header *pdu)
 {
-	struct vhci_hcd *vhci = vdev_to_vhci(vdev);
 	struct usbip_device *ud = &vdev->ud;
 	struct urb *urb;
 	unsigned long flags;
@@ -81,7 +80,7 @@ static void vhci_recv_ret_submit(struct vhci_device *vdev,
 	if (!urb) {
 		pr_err("cannot find a urb of seqnum %u max seqnum %d\n",
 			pdu->base.seqnum,
-			atomic_read(&vhci->seqnum));
+			atomic_read(&the_controller->seqnum));
 		usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
 		return;
 	}
@@ -105,11 +104,11 @@ static void vhci_recv_ret_submit(struct vhci_device *vdev,
 
 	usbip_dbg_vhci_rx("now giveback urb %u\n", pdu->base.seqnum);
 
-	spin_lock_irqsave(&vhci->lock, flags);
-	usb_hcd_unlink_urb_from_ep(vhci_to_hcd(vhci), urb);
-	spin_unlock_irqrestore(&vhci->lock, flags);
+	spin_lock_irqsave(&the_controller->lock, flags);
+	usb_hcd_unlink_urb_from_ep(vhci_to_hcd(the_controller), urb);
+	spin_unlock_irqrestore(&the_controller->lock, flags);
 
-	usb_hcd_giveback_urb(vhci_to_hcd(vhci), urb, urb->status);
+	usb_hcd_giveback_urb(vhci_to_hcd(the_controller), urb, urb->status);
 
 	usbip_dbg_vhci_rx("Leave\n");
 }
@@ -142,7 +141,6 @@ static struct vhci_unlink *dequeue_pending_unlink(struct vhci_device *vdev,
 static void vhci_recv_ret_unlink(struct vhci_device *vdev,
 				 struct usbip_header *pdu)
 {
-	struct vhci_hcd *vhci = vdev_to_vhci(vdev);
 	struct vhci_unlink *unlink;
 	struct urb *urb;
 	unsigned long flags;
@@ -175,11 +173,12 @@ static void vhci_recv_ret_unlink(struct vhci_device *vdev,
 		urb->status = pdu->u.ret_unlink.status;
 		pr_info("urb->status %d\n", urb->status);
 
-		spin_lock_irqsave(&vhci->lock, flags);
-		usb_hcd_unlink_urb_from_ep(vhci_to_hcd(vhci), urb);
-		spin_unlock_irqrestore(&vhci->lock, flags);
+		spin_lock_irqsave(&the_controller->lock, flags);
+		usb_hcd_unlink_urb_from_ep(vhci_to_hcd(the_controller), urb);
+		spin_unlock_irqrestore(&the_controller->lock, flags);
 
-		usb_hcd_giveback_urb(vhci_to_hcd(vhci), urb, urb->status);
+		usb_hcd_giveback_urb(vhci_to_hcd(the_controller), urb,
+				     urb->status);
 	}
 
 	kfree(unlink);

@@ -51,9 +51,11 @@ struct kvm_assigned_dev_kernel {
 static struct kvm_assigned_dev_kernel *kvm_find_assigned_dev(struct list_head *head,
 						      int assigned_dev_id)
 {
+	struct list_head *ptr;
 	struct kvm_assigned_dev_kernel *match;
 
-	list_for_each_entry(match, head, list) {
+	list_for_each(ptr, head) {
+		match = list_entry(ptr, struct kvm_assigned_dev_kernel, list);
 		if (match->assigned_dev_id == assigned_dev_id)
 			return match;
 	}
@@ -371,10 +373,14 @@ static void kvm_free_assigned_device(struct kvm *kvm,
 
 void kvm_free_all_assigned_devices(struct kvm *kvm)
 {
-	struct kvm_assigned_dev_kernel *assigned_dev, *tmp;
+	struct list_head *ptr, *ptr2;
+	struct kvm_assigned_dev_kernel *assigned_dev;
 
-	list_for_each_entry_safe(assigned_dev, tmp,
-				 &kvm->arch.assigned_dev_head, list) {
+	list_for_each_safe(ptr, ptr2, &kvm->arch.assigned_dev_head) {
+		assigned_dev = list_entry(ptr,
+					  struct kvm_assigned_dev_kernel,
+					  list);
+
 		kvm_free_assigned_device(kvm, assigned_dev);
 	}
 }

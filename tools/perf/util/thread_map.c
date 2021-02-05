@@ -13,7 +13,6 @@
 #include "thread_map.h"
 #include "util.h"
 #include "debug.h"
-#include "event.h"
 
 /* Skip "." and ".." directories */
 static int filter(const struct dirent *dir)
@@ -202,7 +201,7 @@ static struct thread_map *thread_map__new_by_pid_str(const char *pid_str)
 	if (!slist)
 		return NULL;
 
-	strlist__for_each_entry(pos, slist) {
+	strlist__for_each(pos, slist) {
 		pid = strtol(pos->s, &end_ptr, 10);
 
 		if (pid == INT_MIN || pid == INT_MAX ||
@@ -260,7 +259,7 @@ struct thread_map *thread_map__new_dummy(void)
 	return threads;
 }
 
-struct thread_map *thread_map__new_by_tid_str(const char *tid_str)
+static struct thread_map *thread_map__new_by_tid_str(const char *tid_str)
 {
 	struct thread_map *threads = NULL, *nt;
 	int ntasks = 0;
@@ -278,7 +277,7 @@ struct thread_map *thread_map__new_by_tid_str(const char *tid_str)
 	if (!slist)
 		return NULL;
 
-	strlist__for_each_entry(pos, slist) {
+	strlist__for_each(pos, slist) {
 		tid = strtol(pos->s, &end_ptr, 10);
 
 		if (tid == INT_MIN || tid == INT_MAX ||
@@ -305,7 +304,6 @@ out:
 
 out_free_threads:
 	zfree(&threads);
-	strlist__delete(slist);
 	goto out;
 }
 
@@ -409,42 +407,4 @@ void thread_map__read_comms(struct thread_map *threads)
 
 	for (i = 0; i < threads->nr; ++i)
 		comm_init(threads, i);
-}
-
-static void thread_map__copy_event(struct thread_map *threads,
-				   struct thread_map_event *event)
-{
-	unsigned i;
-
-	threads->nr = (int) event->nr;
-
-	for (i = 0; i < event->nr; i++) {
-		thread_map__set_pid(threads, i, (pid_t) event->entries[i].pid);
-		threads->map[i].comm = strndup(event->entries[i].comm, 16);
-	}
-
-	atomic_set(&threads->refcnt, 1);
-}
-
-struct thread_map *thread_map__new_event(struct thread_map_event *event)
-{
-	struct thread_map *threads;
-
-	threads = thread_map__alloc(event->nr);
-	if (threads)
-		thread_map__copy_event(threads, event);
-
-	return threads;
-}
-
-bool thread_map__has(struct thread_map *threads, pid_t pid)
-{
-	int i;
-
-	for (i = 0; i < threads->nr; ++i) {
-		if (threads->map[i].pid == pid)
-			return true;
-	}
-
-	return false;
 }

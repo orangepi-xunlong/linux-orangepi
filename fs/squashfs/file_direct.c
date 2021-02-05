@@ -21,6 +21,9 @@
 #include "squashfs.h"
 #include "page_actor.h"
 
+// Backported from 4.5
+#define lru_to_page(head) (list_entry((head)->prev, struct page, lru))
+
 static void release_actor_pages(struct page **page, int pages, int error)
 {
 	int i;
@@ -33,7 +36,7 @@ static void release_actor_pages(struct page **page, int pages, int error)
 			SetPageUptodate(page[i]);
 		else {
 			SetPageError(page[i]);
-			zero_user_segment(page[i], 0, PAGE_SIZE);
+			zero_user_segment(page[i], 0, PAGE_CACHE_SIZE);
 		}
 		unlock_page(page[i]);
 		put_page(page[i]);
@@ -112,7 +115,7 @@ int squashfs_readpages_block(struct page *target_page,
 	struct inode *inode = mapping->host;
 	struct squashfs_sb_info *msblk = inode->i_sb->s_fs_info;
 	int start_index, end_index, file_end, actor_pages, res;
-	int mask = (1 << (msblk->block_log - PAGE_SHIFT)) - 1;
+	int mask = (1 << (msblk->block_log - PAGE_CACHE_SHIFT)) - 1;
 
 	/*
 	 * If readpage() is called on an uncompressed datablock, we can just
@@ -128,15 +131,15 @@ int squashfs_readpages_block(struct page *target_page,
 	if (bsize && !SQUASHFS_COMPRESSED_BLOCK(bsize)) {
 		u64 block_end = block + msblk->block_size;
 
-		block += (page_index & mask) * PAGE_SIZE;
-		actor_pages = (block_end - block) / PAGE_SIZE;
+		block += (page_index & mask) * PAGE_CACHE_SIZE;
+		actor_pages = (block_end - block) / PAGE_CACHE_SIZE;
 		if (*nr_pages < actor_pages)
 			actor_pages = *nr_pages;
 		start_index = page_index;
-		bsize = min_t(int, bsize, (PAGE_SIZE * actor_pages)
+		bsize = min_t(int, bsize, (PAGE_CACHE_SIZE * actor_pages)
 					  | SQUASHFS_COMPRESSED_BIT_BLOCK);
 	} else {
-		file_end = (i_size_read(inode) - 1) >> PAGE_SHIFT;
+		file_end = (i_size_read(inode) - 1) >> PAGE_CACHE_SHIFT;
 		start_index = page_index & ~mask;
 		end_index = start_index | mask;
 		if (end_index > file_end)

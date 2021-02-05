@@ -22,7 +22,7 @@
 
 #include <asm/mach/map.h>
 
-#include "psc.h"
+#include <mach/psc.h>
 #include <mach/irqs.h>
 #include <mach/cputype.h>
 #include <mach/common.h>
@@ -33,6 +33,9 @@
 
 #include "clock.h"
 #include "mux.h"
+
+/* SoC specific clock flags */
+#define DA850_CLK_ASYNC3	BIT(16)
 
 #define DA850_PLL1_BASE		0x01e1a000
 #define DA850_TIMER64P2_BASE	0x01f0c000
@@ -158,32 +161,6 @@ static struct clk pll1_sysclk3 = {
 	.div_reg	= PLLDIV3,
 };
 
-static int da850_async3_set_parent(struct clk *clk, struct clk *parent)
-{
-	u32 val;
-
-	val = readl(DA8XX_SYSCFG0_VIRT(DA8XX_CFGCHIP3_REG));
-
-	if (parent == &pll0_sysclk2) {
-		val &= ~CFGCHIP3_ASYNC3_CLKSRC;
-	} else if (parent == &pll1_sysclk2) {
-		val |= CFGCHIP3_ASYNC3_CLKSRC;
-	} else {
-		pr_err("Bad parent on async3 clock mux\n");
-		return -EINVAL;
-	}
-
-	writel(val, DA8XX_SYSCFG0_VIRT(DA8XX_CFGCHIP3_REG));
-
-	return 0;
-}
-
-static struct clk async3_clk = {
-	.name		= "async3",
-	.parent		= &pll1_sysclk2,
-	.set_parent	= da850_async3_set_parent,
-};
-
 static struct clk i2c0_clk = {
 	.name		= "i2c0",
 	.parent		= &pll0_aux_clk,
@@ -257,16 +234,18 @@ static struct clk uart0_clk = {
 
 static struct clk uart1_clk = {
 	.name		= "uart1",
-	.parent		= &async3_clk,
+	.parent		= &pll0_sysclk2,
 	.lpsc		= DA8XX_LPSC1_UART1,
 	.gpsc		= 1,
+	.flags		= DA850_CLK_ASYNC3,
 };
 
 static struct clk uart2_clk = {
 	.name		= "uart2",
-	.parent		= &async3_clk,
+	.parent		= &pll0_sysclk2,
 	.lpsc		= DA8XX_LPSC1_UART2,
 	.gpsc		= 1,
+	.flags		= DA850_CLK_ASYNC3,
 };
 
 static struct clk aintc_clk = {
@@ -331,23 +310,10 @@ static struct clk mdio_clk = {
 
 static struct clk mcasp_clk = {
 	.name		= "mcasp",
-	.parent		= &async3_clk,
+	.parent		= &pll0_sysclk2,
 	.lpsc		= DA8XX_LPSC1_McASP0,
 	.gpsc		= 1,
-};
-
-static struct clk mcbsp0_clk = {
-	.name		= "mcbsp0",
-	.parent		= &async3_clk,
-	.lpsc		= DA850_LPSC1_McBSP0,
-	.gpsc		= 1,
-};
-
-static struct clk mcbsp1_clk = {
-	.name		= "mcbsp1",
-	.parent		= &async3_clk,
-	.lpsc		= DA850_LPSC1_McBSP1,
-	.gpsc		= 1,
+	.flags		= DA850_CLK_ASYNC3,
 };
 
 static struct clk lcdc_clk = {
@@ -399,9 +365,10 @@ static struct clk spi0_clk = {
 
 static struct clk spi1_clk = {
 	.name		= "spi1",
-	.parent		= &async3_clk,
+	.parent		= &pll0_sysclk2,
 	.lpsc		= DA8XX_LPSC1_SPI1,
 	.gpsc		= 1,
+	.flags		= DA850_CLK_ASYNC3,
 };
 
 static struct clk vpif_clk = {
@@ -429,9 +396,10 @@ static struct clk dsp_clk = {
 
 static struct clk ehrpwm_clk = {
 	.name		= "ehrpwm",
-	.parent		= &async3_clk,
+	.parent		= &pll0_sysclk2,
 	.lpsc		= DA8XX_LPSC1_PWM,
 	.gpsc		= 1,
+	.flags		= DA850_CLK_ASYNC3,
 };
 
 #define DA8XX_EHRPWM_TBCLKSYNC	BIT(12)
@@ -463,9 +431,10 @@ static struct clk ehrpwm_tbclk = {
 
 static struct clk ecap_clk = {
 	.name		= "ecap",
-	.parent		= &async3_clk,
+	.parent		= &pll0_sysclk2,
 	.lpsc		= DA8XX_LPSC1_ECAP,
 	.gpsc		= 1,
+	.flags		= DA850_CLK_ASYNC3,
 };
 
 static struct clk_lookup da850_clks[] = {
@@ -483,7 +452,6 @@ static struct clk_lookup da850_clks[] = {
 	CLK(NULL,		"pll1_aux",	&pll1_aux_clk),
 	CLK(NULL,		"pll1_sysclk2",	&pll1_sysclk2),
 	CLK(NULL,		"pll1_sysclk3",	&pll1_sysclk3),
-	CLK(NULL,		"async3",	&async3_clk),
 	CLK("i2c_davinci.1",	NULL,		&i2c0_clk),
 	CLK(NULL,		"timer0",	&timerp64_0_clk),
 	CLK("davinci-wdt",	NULL,		&timerp64_1_clk),
@@ -506,12 +474,9 @@ static struct clk_lookup da850_clks[] = {
 	CLK("davinci_emac.1",	NULL,		&emac_clk),
 	CLK("davinci_mdio.0",	"fck",		&mdio_clk),
 	CLK("davinci-mcasp.0",	NULL,		&mcasp_clk),
-	CLK("davinci-mcbsp.0",	NULL,		&mcbsp0_clk),
-	CLK("davinci-mcbsp.1",	NULL,		&mcbsp1_clk),
 	CLK("da8xx_lcdc.0",	"fck",		&lcdc_clk),
 	CLK("da830-mmc.0",	NULL,		&mmcsd0_clk),
 	CLK("da830-mmc.1",	NULL,		&mmcsd1_clk),
-	CLK("ti-aemif",		NULL,		&aemif_clk),
 	CLK(NULL,		"aemif",	&aemif_clk),
 	CLK(NULL,		"usb11",	&usb11_clk),
 	CLK(NULL,		"usb20",	&usb20_clk),
@@ -954,6 +919,30 @@ static struct davinci_timer_info da850_timer_info = {
 	.clocksource_id	= T0_TOP,
 };
 
+static void da850_set_async3_src(int pllnum)
+{
+	struct clk *clk, *newparent = pllnum ? &pll1_sysclk2 : &pll0_sysclk2;
+	struct clk_lookup *c;
+	unsigned int v;
+	int ret;
+
+	for (c = da850_clks; c->clk; c++) {
+		clk = c->clk;
+		if (clk->flags & DA850_CLK_ASYNC3) {
+			ret = clk_set_parent(clk, newparent);
+			WARN(ret, "DA850: unable to re-parent clock %s",
+								clk->name);
+		}
+       }
+
+	v = __raw_readl(DA8XX_SYSCFG0_VIRT(DA8XX_CFGCHIP3_REG));
+	if (pllnum)
+		v |= CFGCHIP3_ASYNC3_CLKSRC;
+	else
+		v &= ~CFGCHIP3_ASYNC3_CLKSRC;
+	__raw_writel(v, DA8XX_SYSCFG0_VIRT(DA8XX_CFGCHIP3_REG));
+}
+
 #ifdef CONFIG_CPU_FREQ
 /*
  * Notes:
@@ -1349,6 +1338,15 @@ void __init da850_init(void)
 	if (WARN(!da8xx_syscfg1_base, "Unable to map syscfg1 module"))
 		return;
 
+	/*
+	 * Move the clock source of Async3 domain to PLL1 SYSCLK2.
+	 * This helps keeping the peripherals on this domain insulated
+	 * from CPU frequency changes caused by DVFS. The firmware sets
+	 * both PLL0 and PLL1 to the same frequency so, there should not
+	 * be any noticeable change even in non-DVFS use cases.
+	 */
+	da850_set_async3_src(1);
+
 	/* Unlock writing to PLL0 registers */
 	v = __raw_readl(DA8XX_SYSCFG0_VIRT(DA8XX_CFGCHIP0_REG));
 	v &= ~CFGCHIP0_PLL_MASTER_LOCK;
@@ -1358,6 +1356,4 @@ void __init da850_init(void)
 	v = __raw_readl(DA8XX_SYSCFG0_VIRT(DA8XX_CFGCHIP3_REG));
 	v &= ~CFGCHIP3_PLL1_MASTER_LOCK;
 	__raw_writel(v, DA8XX_SYSCFG0_VIRT(DA8XX_CFGCHIP3_REG));
-
-	davinci_clk_init(davinci_soc_info_da850.cpu_clks);
 }

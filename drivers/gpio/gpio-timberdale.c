@@ -1,6 +1,5 @@
 /*
  * Timberdale FPGA GPIO driver
- * Author: Mocean Laboratories
  * Copyright (c) 2009 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
@@ -21,7 +20,7 @@
  * Timberdale FPGA GPIO
  */
 
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
 #include <linux/irq.h>
@@ -54,7 +53,7 @@ struct timbgpio {
 static int timbgpio_update_bit(struct gpio_chip *gpio, unsigned index,
 	unsigned offset, bool enabled)
 {
-	struct timbgpio *tgpio = gpiochip_get_data(gpio);
+	struct timbgpio *tgpio = container_of(gpio, struct timbgpio, gpio);
 	u32 reg;
 
 	spin_lock(&tgpio->lock);
@@ -78,7 +77,7 @@ static int timbgpio_gpio_direction_input(struct gpio_chip *gpio, unsigned nr)
 
 static int timbgpio_gpio_get(struct gpio_chip *gpio, unsigned nr)
 {
-	struct timbgpio *tgpio = gpiochip_get_data(gpio);
+	struct timbgpio *tgpio = container_of(gpio, struct timbgpio, gpio);
 	u32 value;
 
 	value = ioread32(tgpio->membase + TGPIOVAL);
@@ -99,7 +98,7 @@ static void timbgpio_gpio_set(struct gpio_chip *gpio,
 
 static int timbgpio_to_irq(struct gpio_chip *gpio, unsigned offset)
 {
-	struct timbgpio *tgpio = gpiochip_get_data(gpio);
+	struct timbgpio *tgpio = container_of(gpio, struct timbgpio, gpio);
 
 	if (tgpio->irq_base <= 0)
 		return -EINVAL;
@@ -238,6 +237,12 @@ static int timbgpio_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
+	iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!iomem) {
+		dev_err(dev, "Unable to get resource\n");
+		return -EINVAL;
+	}
+
 	tgpio = devm_kzalloc(dev, sizeof(struct timbgpio), GFP_KERNEL);
 	if (!tgpio) {
 		dev_err(dev, "Memory alloc failed\n");
@@ -247,10 +252,17 @@ static int timbgpio_probe(struct platform_device *pdev)
 
 	spin_lock_init(&tgpio->lock);
 
-	iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	tgpio->membase = devm_ioremap_resource(dev, iomem);
-	if (IS_ERR(tgpio->membase))
-		return PTR_ERR(tgpio->membase);
+	if (!devm_request_mem_region(dev, iomem->start, resource_size(iomem),
+				     DRIVER_NAME)) {
+		dev_err(dev, "Region already claimed\n");
+		return -EBUSY;
+	}
+
+	tgpio->membase = devm_ioremap(dev, iomem->start, resource_size(iomem));
+	if (!tgpio->membase) {
+		dev_err(dev, "Cannot ioremap\n");
+		return -ENOMEM;
+	}
 
 	gc = &tgpio->gpio;
 
@@ -267,7 +279,7 @@ static int timbgpio_probe(struct platform_device *pdev)
 	gc->ngpio = pdata->nr_pins;
 	gc->can_sleep = false;
 
-	err = devm_gpiochip_add_data(&pdev->dev, gc, tgpio);
+	err = gpiochip_add(gc);
 	if (err)
 		return err;
 
@@ -291,14 +303,42 @@ static int timbgpio_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int timbgpio_remove(struct platform_device *pdev)
+{
+	struct timbgpio_platform_data *pdata = dev_get_platdata(&pdev->dev);
+	struct timbgpio *tgpio = platform_get_drvdata(pdev);
+	int irq = platform_get_irq(pdev, 0);
+
+	if (irq >= 0 && tgpio->irq_base > 0) {
+		int i;
+		for (i = 0; i < pdata->nr_pins; i++) {
+			irq_set_chip(tgpio->irq_base + i, NULL);
+			irq_set_chip_data(tgpio->irq_base + i, NULL);
+		}
+
+		irq_set_handler(irq, NULL);
+		irq_set_handler_data(irq, NULL);
+	}
+
+	gpiochip_remove(&tgpio->gpio);
+
+	return 0;
+}
+
 static struct platform_driver timbgpio_platform_driver = {
 	.driver = {
-		.name			= DRIVER_NAME,
-		.suppress_bind_attrs	= true,
+		.name	= DRIVER_NAME,
 	},
 	.probe		= timbgpio_probe,
+	.remove		= timbgpio_remove,
 };
 
 /*--------------------------------------------------------------------------*/
 
-builtin_platform_driver(timbgpio_platform_driver);
+module_platform_driver(timbgpio_platform_driver);
+
+MODULE_DESCRIPTION("Timberdale GPIO driver");
+MODULE_LICENSE("GPL v2");
+MODULE_AUTHOR("Mocean Laboratories");
+MODULE_ALIAS("platform:"DRIVER_NAME);
+

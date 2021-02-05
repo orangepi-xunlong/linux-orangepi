@@ -29,8 +29,6 @@
 #include "cz_smumgr.h"
 #include "smu_ucode_xfer_cz.h"
 #include "amdgpu_ucode.h"
-#include "cz_dpm.h"
-#include "vi_dpm.h"
 
 #include "smu/smu_8_0_d.h"
 #include "smu/smu_8_0_sh_mask.h"
@@ -50,7 +48,7 @@ static struct cz_smu_private_data *cz_smu_get_priv(struct amdgpu_device *adev)
 	return priv;
 }
 
-static int cz_send_msg_to_smc_async(struct amdgpu_device *adev, u16 msg)
+int cz_send_msg_to_smc_async(struct amdgpu_device *adev, u16 msg)
 {
 	int i;
 	u32 content = 0, tmp;
@@ -101,6 +99,13 @@ int cz_send_msg_to_smc(struct amdgpu_device *adev, u16 msg)
 	return 0;
 }
 
+int cz_send_msg_to_smc_with_parameter_async(struct amdgpu_device *adev,
+						u16 msg, u32 parameter)
+{
+	WREG32(mmSMU_MP1_SRBM2P_ARG_0, parameter);
+	return cz_send_msg_to_smc_async(adev, msg);
+}
+
 int cz_send_msg_to_smc_with_parameter(struct amdgpu_device *adev,
 						u16 msg, u32 parameter)
 {
@@ -135,7 +140,7 @@ int cz_read_smc_sram_dword(struct amdgpu_device *adev, u32 smc_address,
 	return 0;
 }
 
-static int cz_write_smc_sram_dword(struct amdgpu_device *adev, u32 smc_address,
+int cz_write_smc_sram_dword(struct amdgpu_device *adev, u32 smc_address,
 						u32 value, u32 limit)
 {
 	int ret;

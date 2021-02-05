@@ -94,7 +94,7 @@ void __init init_IRQ(void)
 			outer_cache.write_sec = machine_desc->l2c_write_sec;
 		ret = l2x0_of_init(machine_desc->l2c_aux_val,
 				   machine_desc->l2c_aux_mask);
-		if (ret && ret != -ENODEV)
+		if (ret)
 			pr_err("L2C: failed to init: %d\n", ret);
 	}
 

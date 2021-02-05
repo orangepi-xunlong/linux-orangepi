@@ -13,6 +13,8 @@
 #include <asm/cache.h>
 #include <asm/io.h>
 
+#include <asm-generic/dma-coherent.h>
+
 #include <linux/mm.h>
 #include <linux/scatterlist.h>
 
@@ -27,6 +29,8 @@ static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 	else
 		return &xtensa_dma_map_ops;
 }
+
+#include <asm-generic/dma-mapping-common.h>
 
 void dma_cache_sync(struct device *dev, void *vaddr, size_t size,
 		    enum dma_data_direction direction);

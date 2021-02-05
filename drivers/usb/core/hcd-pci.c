@@ -28,6 +28,7 @@
 #ifdef CONFIG_PPC_PMAC
 #include <asm/machdep.h>
 #include <asm/pmac_feature.h>
+#include <asm/pci-bridge.h>
 #include <asm/prom.h>
 #endif
 

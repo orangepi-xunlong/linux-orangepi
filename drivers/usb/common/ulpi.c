@@ -21,13 +21,13 @@
 
 int ulpi_read(struct ulpi *ulpi, u8 addr)
 {
-	return ulpi->ops->read(ulpi->dev.parent, addr);
+	return ulpi->ops->read(ulpi->ops, addr);
 }
 EXPORT_SYMBOL_GPL(ulpi_read);
 
 int ulpi_write(struct ulpi *ulpi, u8 addr, u8 val)
 {
-	return ulpi->ops->write(ulpi->dev.parent, addr, val);
+	return ulpi->ops->write(ulpi->ops, addr, val);
 }
 EXPORT_SYMBOL_GPL(ulpi_write);
 
@@ -127,17 +127,16 @@ static struct device_type ulpi_dev_type = {
  *
  * Registers a driver with the ULPI bus.
  */
-int __ulpi_register_driver(struct ulpi_driver *drv, struct module *module)
+int ulpi_register_driver(struct ulpi_driver *drv)
 {
 	if (!drv->probe)
 		return -EINVAL;
 
-	drv->driver.owner = module;
 	drv->driver.bus = &ulpi_bus;
 
 	return driver_register(&drv->driver);
 }
-EXPORT_SYMBOL_GPL(__ulpi_register_driver);
+EXPORT_SYMBOL_GPL(ulpi_register_driver);
 
 /**
  * ulpi_unregister_driver - unregister a driver with the ULPI bus
@@ -157,8 +156,6 @@ static int ulpi_register(struct device *dev, struct ulpi *ulpi)
 {
 	int ret;
 
-	ulpi->dev.parent = dev; /* needed early for ops */
-
 	/* Test the interface */
 	ret = ulpi_write(ulpi, ULPI_SCRATCH, 0xaa);
 	if (ret < 0)
@@ -177,6 +174,7 @@ static int ulpi_register(struct device *dev, struct ulpi *ulpi)
 	ulpi->id.product = ulpi_read(ulpi, ULPI_PRODUCT_ID_LOW);
 	ulpi->id.product |= ulpi_read(ulpi, ULPI_PRODUCT_ID_HIGH) << 8;
 
+	ulpi->dev.parent = dev;
 	ulpi->dev.bus = &ulpi_bus;
 	ulpi->dev.type = &ulpi_dev_type;
 	dev_set_name(&ulpi->dev, "%s.ulpi", dev_name(dev));
@@ -203,8 +201,7 @@ static int ulpi_register(struct device *dev, struct ulpi *ulpi)
  * Allocates and registers a ULPI device and an interface for it. Called from
  * the USB controller that provides the ULPI interface.
  */
-struct ulpi *ulpi_register_interface(struct device *dev,
-				     const struct ulpi_ops *ops)
+struct ulpi *ulpi_register_interface(struct device *dev, struct ulpi_ops *ops)
 {
 	struct ulpi *ulpi;
 	int ret;
@@ -214,6 +211,7 @@ struct ulpi *ulpi_register_interface(struct device *dev,
 		return ERR_PTR(-ENOMEM);
 
 	ulpi->ops = ops;
+	ops->dev = dev;
 
 	ret = ulpi_register(dev, ulpi);
 	if (ret) {

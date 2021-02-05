@@ -158,16 +158,11 @@ void show_stack(struct task_struct *task, unsigned long *sp)
 	for(i=0; i < kstack_depth_to_print; i++) {
 		if (((long) stack & (THREAD_SIZE-1)) == 0)
 			break;
-		if ((i % 4) == 0) {
-			if (i)
-				pr_cont("\n");
-			printk("       ");
-		} else {
-			pr_cont(" ");
-		}
-		pr_cont("%016lx", *stack++);
+		if (i && ((i % 4) == 0))
+			printk("\n       ");
+		printk("%016lx ", *stack++);
 	}
-	pr_cont("\n");
+	printk("\n");
 	dik_show_trace(sp);
 }
 

@@ -2890,7 +2890,7 @@ bad_on_1710:
 	xceiv = NULL;
 	/* "udc" is now valid */
 	pullup_disable(udc);
-#if	IS_ENABLED(CONFIG_USB_OHCI_HCD)
+#if	defined(CONFIG_USB_OHCI_HCD) || defined(CONFIG_USB_OHCI_HCD_MODULE)
 	udc->gadget.is_otg = (config->otg != 0);
 #endif
 

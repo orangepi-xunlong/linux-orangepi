@@ -13,9 +13,9 @@
 #include <linux/kernel.h>
 #include <linux/of.h>
 #include <linux/smp.h>
-#include <linux/soc/renesas/rcar-sysc.h>
 #include <asm/io.h>
 #include "common.h"
+#include "pm-rcar.h"
 #include "rcar-gen2.h"
 
 /* RST */
@@ -26,7 +26,8 @@
 #define CA7RESCNT	0x0044
 
 /* On-chip RAM */
-#define ICRAM1		0xe63c0000	/* Inter Connect RAM1 (4 KiB) */
+#define MERAM		0xe8080000
+#define RAM		0xe6300000
 
 /* SYSC */
 #define SYSCIER 0x0c
@@ -36,7 +37,11 @@
 
 static void __init rcar_gen2_sysc_init(u32 syscier)
 {
-	rcar_sysc_init(0xe6180000, syscier);
+	void __iomem *base = rcar_sysc_init(0xe6180000);
+
+	/* enable all interrupt sources, but do not use interrupt handler */
+	iowrite32(syscier, base + SYSCIER);
+	iowrite32(0, base + SYSCIMR);
 }
 
 #else /* CONFIG_SMP */
@@ -53,7 +58,7 @@ void __init rcar_gen2_pm_init(void)
 	struct device_node *np, *cpus;
 	bool has_a7 = false;
 	bool has_a15 = false;
-	phys_addr_t boot_vector_addr = ICRAM1;
+	phys_addr_t boot_vector_addr = 0;
 	u32 syscier = 0;
 
 	if (once++)
@@ -70,10 +75,14 @@ void __init rcar_gen2_pm_init(void)
 			has_a7 = true;
 	}
 
-	if (of_machine_is_compatible("renesas,r8a7790"))
+	if (of_machine_is_compatible("renesas,r8a7790")) {
+		boot_vector_addr = MERAM;
 		syscier = 0x013111ef;
-	else if (of_machine_is_compatible("renesas,r8a7791"))
+
+	} else if (of_machine_is_compatible("renesas,r8a7791")) {
+		boot_vector_addr = RAM;
 		syscier = 0x00111003;
+	}
 
 	/* RAM for jump stub, because BAR requires 256KB aligned address */
 	p = ioremap_nocache(boot_vector_addr, shmobile_boot_size);

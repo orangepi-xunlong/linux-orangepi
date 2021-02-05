@@ -6,8 +6,7 @@
 
 #include <linux/sysfs.h>
 #include <linux/dm-ioctl.h>
-#include "dm-core.h"
-#include "dm-rq.h"
+#include "dm.h"
 
 struct dm_sysfs_attr {
 	struct attribute attr;

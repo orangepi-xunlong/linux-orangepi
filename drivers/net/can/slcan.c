@@ -354,7 +354,7 @@ static netdev_tx_t slc_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct slcan *sl = netdev_priv(dev);
 
-	if (skb->len != CAN_MTU)
+	if (skb->len != sizeof(struct can_frame))
 		goto out;
 
 	spin_lock(&sl->lock);
@@ -442,7 +442,7 @@ static void slc_setup(struct net_device *dev)
 	dev->addr_len		= 0;
 	dev->tx_queue_len	= 10;
 
-	dev->mtu		= CAN_MTU;
+	dev->mtu		= sizeof(struct can_frame);
 	dev->type		= ARPHRD_CAN;
 
 	/* New-style flags. */

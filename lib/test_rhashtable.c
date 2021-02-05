@@ -36,9 +36,9 @@ static int runs = 4;
 module_param(runs, int, 0);
 MODULE_PARM_DESC(runs, "Number of test runs per variant (default: 4)");
 
-static int max_size = 0;
+static int max_size = 65536;
 module_param(max_size, int, 0);
-MODULE_PARM_DESC(max_size, "Maximum table size (default: calculated)");
+MODULE_PARM_DESC(runs, "Maximum table size (default: 65536)");
 
 static bool shrinking = false;
 module_param(shrinking, bool, 0);
@@ -51,10 +51,6 @@ MODULE_PARM_DESC(size, "Initial size hint of table (default: 8)");
 static int tcount = 10;
 module_param(tcount, int, 0);
 MODULE_PARM_DESC(tcount, "Number of threads to spawn (default: 10)");
-
-static bool enomem_retry = false;
-module_param(enomem_retry, bool, 0);
-MODULE_PARM_DESC(enomem_retry, "Retry insert even if -ENOMEM was returned (default: off)");
 
 struct test_obj {
 	int			value;
@@ -79,28 +75,6 @@ static struct rhashtable_params test_rht_params = {
 
 static struct semaphore prestart_sem;
 static struct semaphore startup_sem = __SEMAPHORE_INITIALIZER(startup_sem, 0);
-
-static int insert_retry(struct rhashtable *ht, struct rhash_head *obj,
-                        const struct rhashtable_params params)
-{
-	int err, retries = -1, enomem_retries = 0;
-
-	do {
-		retries++;
-		cond_resched();
-		err = rhashtable_insert_fast(ht, obj, params);
-		if (err == -ENOMEM && enomem_retry) {
-			enomem_retries++;
-			err = -EBUSY;
-		}
-	} while (err == -EBUSY);
-
-	if (enomem_retries)
-		pr_info(" %u insertions retried after -ENOMEM\n",
-			enomem_retries);
-
-	return err ? : retries;
-}
 
 static int __init test_rht_lookup(struct rhashtable *ht)
 {
@@ -143,7 +117,7 @@ static void test_bucket_stats(struct rhashtable *ht)
 	struct rhashtable_iter hti;
 	struct rhash_head *pos;
 
-	err = rhashtable_walk_init(ht, &hti, GFP_KERNEL);
+	err = rhashtable_walk_init(ht, &hti);
 	if (err) {
 		pr_warn("Test failed: allocation error");
 		return;
@@ -183,7 +157,7 @@ static s64 __init test_rhashtable(struct rhashtable *ht)
 {
 	struct test_obj *obj;
 	int err;
-	unsigned int i, insert_retries = 0;
+	unsigned int i, insert_fails = 0;
 	s64 start, end;
 
 	/*
@@ -196,16 +170,22 @@ static s64 __init test_rhashtable(struct rhashtable *ht)
 		struct test_obj *obj = &array[i];
 
 		obj->value = i * 2;
-		err = insert_retry(ht, &obj->node, test_rht_params);
-		if (err > 0)
-			insert_retries += err;
-		else if (err)
+
+		err = rhashtable_insert_fast(ht, &obj->node, test_rht_params);
+		if (err == -ENOMEM || err == -EBUSY) {
+			/* Mark failed inserts but continue */
+			obj->value = TEST_INSERT_FAIL;
+			insert_fails++;
+		} else if (err) {
 			return err;
+		}
+
+		cond_resched();
 	}
 
-	if (insert_retries)
-		pr_info("  %u insertions retried due to memory pressure\n",
-			insert_retries);
+	if (insert_fails)
+		pr_info("  %u insertions failed due to memory pressure\n",
+			insert_fails);
 
 	test_bucket_stats(ht);
 	rcu_read_lock();
@@ -256,15 +236,13 @@ static int thread_lookup_test(struct thread_data *tdata)
 			       obj->value, key);
 			err++;
 		}
-
-		cond_resched();
 	}
 	return err;
 }
 
 static int threadfunc(void *data)
 {
-	int i, step, err = 0, insert_retries = 0;
+	int i, step, err = 0, insert_fails = 0;
 	struct thread_data *tdata = data;
 
 	up(&prestart_sem);
@@ -273,18 +251,20 @@ static int threadfunc(void *data)
 
 	for (i = 0; i < entries; i++) {
 		tdata->objs[i].value = (tdata->id << 16) | i;
-		err = insert_retry(&ht, &tdata->objs[i].node, test_rht_params);
-		if (err > 0) {
-			insert_retries += err;
+		err = rhashtable_insert_fast(&ht, &tdata->objs[i].node,
+		                             test_rht_params);
+		if (err == -ENOMEM || err == -EBUSY) {
+			tdata->objs[i].value = TEST_INSERT_FAIL;
+			insert_fails++;
 		} else if (err) {
 			pr_err("  thread[%d]: rhashtable_insert_fast failed\n",
 			       tdata->id);
 			goto out;
 		}
 	}
-	if (insert_retries)
-		pr_info("  thread[%d]: %u insertions retried due to memory pressure\n",
-			tdata->id, insert_retries);
+	if (insert_fails)
+		pr_info("  thread[%d]: %d insert failures\n",
+		        tdata->id, insert_fails);
 
 	err = thread_lookup_test(tdata);
 	if (err) {
@@ -305,8 +285,6 @@ static int threadfunc(void *data)
 				goto out;
 			}
 			tdata->objs[i].value = TEST_INSERT_FAIL;
-
-			cond_resched();
 		}
 		err = thread_lookup_test(tdata);
 		if (err) {
@@ -333,7 +311,7 @@ static int __init test_rht_init(void)
 	entries = min(entries, MAX_ENTRIES);
 
 	test_rht_params.automatic_shrinking = shrinking;
-	test_rht_params.max_size = max_size ? : roundup_pow_of_two(entries);
+	test_rht_params.max_size = max_size;
 	test_rht_params.nelem_hint = size;
 
 	pr_info("Running rhashtable test nelem=%d, max_size=%d, shrinking=%d\n",
@@ -379,8 +357,6 @@ static int __init test_rht_init(void)
 		return -ENOMEM;
 	}
 
-	test_rht_params.max_size = max_size ? :
-	                           roundup_pow_of_two(tcount * entries);
 	err = rhashtable_init(&ht, &test_rht_params);
 	if (err < 0) {
 		pr_warn("Test failed: Unable to initialize hashtable: %d\n",

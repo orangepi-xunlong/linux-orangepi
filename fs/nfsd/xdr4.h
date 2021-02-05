@@ -59,7 +59,6 @@ struct nfsd4_compound_state {
 	struct nfsd4_session	*session;
 	struct nfsd4_slot	*slot;
 	int			data_offset;
-	bool                    spo_must_allowed;
 	size_t			iovlen;
 	u32			minorversion;
 	__be32			status;
@@ -404,8 +403,6 @@ struct nfsd4_exchange_id {
 	clientid_t	clientid;
 	u32		seqid;
 	int		spa_how;
-	u32             spo_must_enforce[3];
-	u32             spo_must_allow[3];
 };
 
 struct nfsd4_sequence {
@@ -494,37 +491,6 @@ struct nfsd4_fallocate {
 	u64		falloc_length;
 };
 
-struct nfsd4_clone {
-	/* request */
-	stateid_t	cl_src_stateid;
-	stateid_t	cl_dst_stateid;
-	u64		cl_src_pos;
-	u64		cl_dst_pos;
-	u64		cl_count;
-};
-
-struct nfsd42_write_res {
-	u64			wr_bytes_written;
-	u32			wr_stable_how;
-	nfs4_verifier		wr_verifier;
-};
-
-struct nfsd4_copy {
-	/* request */
-	stateid_t	cp_src_stateid;
-	stateid_t	cp_dst_stateid;
-	u64		cp_src_pos;
-	u64		cp_dst_pos;
-	u64		cp_count;
-
-	/* both */
-	bool		cp_consecutive;
-	bool		cp_synchronous;
-
-	/* response */
-	struct nfsd42_write_res	cp_res;
-};
-
 struct nfsd4_seek {
 	/* request */
 	stateid_t	seek_stateid;
@@ -589,8 +555,6 @@ struct nfsd4_op {
 		/* NFSv4.2 */
 		struct nfsd4_fallocate		allocate;
 		struct nfsd4_fallocate		deallocate;
-		struct nfsd4_clone		clone;
-		struct nfsd4_copy		copy;
 		struct nfsd4_seek		seek;
 	} u;
 	struct nfs4_replay *			replay;
@@ -645,18 +609,9 @@ static inline bool nfsd4_is_solo_sequence(struct nfsd4_compoundres *resp)
 	return resp->opcnt == 1 && args->ops[0].opnum == OP_SEQUENCE;
 }
 
-/*
- * The session reply cache only needs to cache replies that the client
- * actually asked us to.  But it's almost free for us to cache compounds
- * consisting of only a SEQUENCE op, so we may as well cache those too.
- * Also, the protocol doesn't give us a convenient response in the case
- * of a replay of a solo SEQUENCE op that wasn't cached
- * (RETRY_UNCACHED_REP can only be returned in the second op of a
- * compound).
- */
-static inline bool nfsd4_cache_this(struct nfsd4_compoundres *resp)
+static inline bool nfsd4_not_cached(struct nfsd4_compoundres *resp)
 {
-	return (resp->cstate.slot->sl_flags & NFSD4_SLOT_CACHETHIS)
+	return !(resp->cstate.slot->sl_flags & NFSD4_SLOT_CACHETHIS)
 		|| nfsd4_is_solo_sequence(resp);
 }
 
@@ -689,8 +644,6 @@ set_change_info(struct nfsd4_change_info *cinfo, struct svc_fh *fhp)
 
 }
 
-
-bool nfsd4_mach_creds_match(struct nfs4_client *cl, struct svc_rqst *rqstp);
 int nfs4svc_encode_voidres(struct svc_rqst *, __be32 *, void *);
 int nfs4svc_decode_compoundargs(struct svc_rqst *, __be32 *,
 		struct nfsd4_compoundargs *);

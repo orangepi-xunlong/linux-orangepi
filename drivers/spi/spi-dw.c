@@ -286,6 +286,7 @@ static int dw_spi_transfer_one(struct spi_master *master,
 	struct chip_data *chip = spi_get_ctldata(spi);
 	u8 imask = 0;
 	u16 txlevel = 0;
+	u16 clk_div;
 	u32 cr0;
 	int ret;
 
@@ -300,13 +301,13 @@ static int dw_spi_transfer_one(struct spi_master *master,
 	spi_enable_chip(dws, 0);
 
 	/* Handle per transfer options for bpw and speed */
-	if (transfer->speed_hz != dws->current_freq) {
-		if (transfer->speed_hz != chip->speed_hz) {
-			/* clk_div doesn't support odd number */
-			chip->clk_div = (DIV_ROUND_UP(dws->max_freq, transfer->speed_hz) + 1) & 0xfffe;
-			chip->speed_hz = transfer->speed_hz;
-		}
-		dws->current_freq = transfer->speed_hz;
+	if (transfer->speed_hz != chip->speed_hz) {
+		/* clk_div doesn't support odd number */
+		clk_div = (dws->max_freq / transfer->speed_hz + 1) & 0xfffe;
+
+		chip->speed_hz = transfer->speed_hz;
+		chip->clk_div = clk_div;
+
 		spi_set_clk(dws, chip->clk_div);
 	}
 	if (transfer->bits_per_word == 8) {
@@ -427,7 +428,7 @@ static int dw_spi_setup(struct spi_device *spi)
 		chip->type = chip_info->type;
 	}
 
-	chip->tmode = SPI_TMOD_TR;
+	chip->tmode = 0; /* Tx & Rx */
 
 	if (gpio_is_valid(spi->cs_gpio)) {
 		ret = gpio_direction_output(spi->cs_gpio,

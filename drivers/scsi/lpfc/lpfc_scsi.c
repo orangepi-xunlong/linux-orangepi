@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2016 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2015 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  * Portions Copyright (C) 2004-2005 Christoph Hellwig              *
@@ -3335,11 +3335,8 @@ lpfc_scsi_prep_dma_buf_s4(struct lpfc_hba *phba, struct lpfc_scsi_buf *lpfc_cmd)
 	 * OAS, set the oas iocb related flags.
 	 */
 	if ((phba->cfg_fof) && ((struct lpfc_device_data *)
-		scsi_cmnd->device->hostdata)->oas_enabled) {
+		scsi_cmnd->device->hostdata)->oas_enabled)
 		lpfc_cmd->cur_iocbq.iocb_flag |= (LPFC_IO_OAS | LPFC_IO_FOF);
-		lpfc_cmd->cur_iocbq.priority = ((struct lpfc_device_data *)
-			scsi_cmnd->device->hostdata)->priority;
-	}
 	return 0;
 }
 
@@ -3679,7 +3676,6 @@ static void
 lpfc_handle_fcp_err(struct lpfc_vport *vport, struct lpfc_scsi_buf *lpfc_cmd,
 		    struct lpfc_iocbq *rsp_iocb)
 {
-	struct lpfc_hba *phba = vport->phba;
 	struct scsi_cmnd *cmnd = lpfc_cmd->pCmd;
 	struct fcp_cmnd *fcpcmd = lpfc_cmd->fcp_cmnd;
 	struct fcp_rsp *fcprsp = lpfc_cmd->fcp_rsp;
@@ -3689,7 +3685,6 @@ lpfc_handle_fcp_err(struct lpfc_vport *vport, struct lpfc_scsi_buf *lpfc_cmd,
 	uint32_t *lp;
 	uint32_t host_status = DID_OK;
 	uint32_t rsplen = 0;
-	uint32_t fcpDl;
 	uint32_t logit = LOG_FCP | LOG_FCP_ERROR;
 
 
@@ -3760,14 +3755,13 @@ lpfc_handle_fcp_err(struct lpfc_vport *vport, struct lpfc_scsi_buf *lpfc_cmd,
 			 fcprsp->rspInfo3);
 
 	scsi_set_resid(cmnd, 0);
-	fcpDl = be32_to_cpu(fcpcmd->fcpDl);
 	if (resp_info & RESID_UNDER) {
 		scsi_set_resid(cmnd, be32_to_cpu(fcprsp->rspResId));
 
 		lpfc_printf_vlog(vport, KERN_INFO, LOG_FCP_UNDER,
 				 "9025 FCP Read Underrun, expected %d, "
 				 "residual %d Data: x%x x%x x%x\n",
-				 fcpDl,
+				 be32_to_cpu(fcpcmd->fcpDl),
 				 scsi_get_resid(cmnd), fcpi_parm, cmnd->cmnd[0],
 				 cmnd->underflow);
 
@@ -3783,7 +3777,7 @@ lpfc_handle_fcp_err(struct lpfc_vport *vport, struct lpfc_scsi_buf *lpfc_cmd,
 					 LOG_FCP | LOG_FCP_ERROR,
 					 "9026 FCP Read Check Error "
 					 "and Underrun Data: x%x x%x x%x x%x\n",
-					 fcpDl,
+					 be32_to_cpu(fcpcmd->fcpDl),
 					 scsi_get_resid(cmnd), fcpi_parm,
 					 cmnd->cmnd[0]);
 			scsi_set_resid(cmnd, scsi_bufflen(cmnd));
@@ -3818,25 +3812,13 @@ lpfc_handle_fcp_err(struct lpfc_vport *vport, struct lpfc_scsi_buf *lpfc_cmd,
 	 * Check SLI validation that all the transfer was actually done
 	 * (fcpi_parm should be zero). Apply check only to reads.
 	 */
-	} else if (fcpi_parm) {
+	} else if (fcpi_parm && (cmnd->sc_data_direction == DMA_FROM_DEVICE)) {
 		lpfc_printf_vlog(vport, KERN_WARNING, LOG_FCP | LOG_FCP_ERROR,
-				 "9029 FCP %s Check Error xri x%x  Data: "
+				 "9029 FCP Read Check Error Data: "
 				 "x%x x%x x%x x%x x%x\n",
-				 ((cmnd->sc_data_direction == DMA_FROM_DEVICE) ?
-				 "Read" : "Write"),
-				 ((phba->sli_rev == LPFC_SLI_REV4) ?
-				 lpfc_cmd->cur_iocbq.sli4_xritag :
-				 rsp_iocb->iocb.ulpContext),
-				 fcpDl, be32_to_cpu(fcprsp->rspResId),
+				 be32_to_cpu(fcpcmd->fcpDl),
+				 be32_to_cpu(fcprsp->rspResId),
 				 fcpi_parm, cmnd->cmnd[0], scsi_status);
-
-		/* There is some issue with the LPe12000 that causes it
-		 * to miscalculate the fcpi_parm and falsely trip this
-		 * recovery logic.  Detect this case and don't error when true.
-		 */
-		if (fcpi_parm > fcpDl)
-			goto out;
-
 		switch (scsi_status) {
 		case SAM_STAT_GOOD:
 		case SAM_STAT_CHECK_CONDITION:
@@ -4141,6 +4123,23 @@ lpfc_scsi_cmd_iocb_cmpl(struct lpfc_hba *phba, struct lpfc_iocbq *pIocbIn,
 
 	/* The sdev is not guaranteed to be valid post scsi_done upcall. */
 	cmd->scsi_done(cmd);
+
+	if (phba->cfg_poll & ENABLE_FCP_RING_POLLING) {
+		spin_lock_irqsave(&phba->hbalock, flags);
+		lpfc_cmd->pCmd = NULL;
+		spin_unlock_irqrestore(&phba->hbalock, flags);
+
+		/*
+		 * If there is a thread waiting for command completion
+		 * wake up the thread.
+		 */
+		spin_lock_irqsave(shost->host_lock, flags);
+		if (lpfc_cmd->waitq)
+			wake_up(lpfc_cmd->waitq);
+		spin_unlock_irqrestore(shost->host_lock, flags);
+		lpfc_release_scsi_buf(phba, lpfc_cmd);
+		return;
+	}
 
 	spin_lock_irqsave(&phba->hbalock, flags);
 	lpfc_cmd->pCmd = NULL;
@@ -4447,7 +4446,15 @@ lpfc_info(struct Scsi_Host *host)
 				 phba->Port);
 		}
 		len = strlen(lpfcinfobuf);
-		link_speed = lpfc_sli_port_speed_get(phba);
+		if (phba->sli_rev <= LPFC_SLI_REV3) {
+			link_speed = lpfc_sli_port_speed_get(phba);
+		} else {
+			if (phba->sli4_hba.link_state.logical_speed)
+				link_speed =
+				      phba->sli4_hba.link_state.logical_speed;
+			else
+				link_speed = phba->sli4_hba.link_state.speed;
+		}
 		if (link_speed != 0)
 			snprintf(lpfcinfobuf + len, 384-len,
 				 " Logical Link Speed: %d Mbps", link_speed);
@@ -5610,7 +5617,6 @@ lpfc_create_device_data(struct lpfc_hba *phba, struct lpfc_name *vport_wwpn,
 	       sizeof(struct lpfc_name));
 	lun_info->device_id.lun = lun;
 	lun_info->oas_enabled = false;
-	lun_info->priority = phba->cfg_XLanePriority;
 	lun_info->available = false;
 	return lun_info;
 }
@@ -5802,7 +5808,7 @@ lpfc_find_next_oas_lun(struct lpfc_hba *phba, struct lpfc_name *vport_wwpn,
  **/
 bool
 lpfc_enable_oas_lun(struct lpfc_hba *phba, struct lpfc_name *vport_wwpn,
-		    struct lpfc_name *target_wwpn, uint64_t lun, uint8_t pri)
+		    struct lpfc_name *target_wwpn, uint64_t lun)
 {
 
 	struct lpfc_device_data *lun_info;
@@ -5829,7 +5835,6 @@ lpfc_enable_oas_lun(struct lpfc_hba *phba, struct lpfc_name *vport_wwpn,
 					   false);
 	if (lun_info) {
 		lun_info->oas_enabled = true;
-		lun_info->priority = pri;
 		lun_info->available = false;
 		list_add_tail(&lun_info->listentry, &phba->luns);
 		spin_unlock_irqrestore(&phba->devicelock, flags);
@@ -5891,7 +5896,6 @@ lpfc_disable_oas_lun(struct lpfc_hba *phba, struct lpfc_name *vport_wwpn,
 struct scsi_host_template lpfc_template_s3 = {
 	.module			= THIS_MODULE,
 	.name			= LPFC_DRIVER_NAME,
-	.proc_name		= LPFC_DRIVER_NAME,
 	.info			= lpfc_info,
 	.queuecommand		= lpfc_queuecommand,
 	.eh_abort_handler	= lpfc_abort_handler,
@@ -5916,7 +5920,6 @@ struct scsi_host_template lpfc_template_s3 = {
 struct scsi_host_template lpfc_template = {
 	.module			= THIS_MODULE,
 	.name			= LPFC_DRIVER_NAME,
-	.proc_name		= LPFC_DRIVER_NAME,
 	.info			= lpfc_info,
 	.queuecommand		= lpfc_queuecommand,
 	.eh_abort_handler	= lpfc_abort_handler,
@@ -5942,7 +5945,6 @@ struct scsi_host_template lpfc_template = {
 struct scsi_host_template lpfc_vport_template = {
 	.module			= THIS_MODULE,
 	.name			= LPFC_DRIVER_NAME,
-	.proc_name		= LPFC_DRIVER_NAME,
 	.info			= lpfc_info,
 	.queuecommand		= lpfc_queuecommand,
 	.eh_abort_handler	= lpfc_abort_handler,

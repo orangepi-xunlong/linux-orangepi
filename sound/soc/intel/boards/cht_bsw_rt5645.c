@@ -24,16 +24,12 @@
 #include <linux/acpi.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <asm/cpu_device_id.h>
-#include <asm/platform_sst_audio.h>
-#include <linux/clk.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/jack.h>
 #include "../../codecs/rt5645.h"
 #include "../atom/sst-atom-controls.h"
-#include "../common/sst-acpi.h"
 
 #define CHT_PLAT_CLK_3_HZ	19200000
 #define CHT_CODEC_DAI	"rt5645-aif1"
@@ -47,15 +43,16 @@ struct cht_acpi_card {
 struct cht_mc_private {
 	struct snd_soc_jack jack;
 	struct cht_acpi_card *acpi_card;
-	char codec_name[16];
-	struct clk *mclk;
 };
 
 static inline struct snd_soc_dai *cht_get_codec_dai(struct snd_soc_card *card)
 {
-	struct snd_soc_pcm_runtime *rtd;
+	int i;
 
-	list_for_each_entry(rtd, &card->rtd_list, list) {
+	for (i = 0; i < card->num_rtd; i++) {
+		struct snd_soc_pcm_runtime *rtd;
+
+		rtd = card->rtd + i;
 		if (!strncmp(rtd->codec_dai->name, CHT_CODEC_DAI,
 			     strlen(CHT_CODEC_DAI)))
 			return rtd->codec_dai;
@@ -69,7 +66,6 @@ static int platform_clock_control(struct snd_soc_dapm_widget *w,
 	struct snd_soc_dapm_context *dapm = w->dapm;
 	struct snd_soc_card *card = dapm->card;
 	struct snd_soc_dai *codec_dai;
-	struct cht_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	int ret;
 
 	codec_dai = cht_get_codec_dai(card);
@@ -78,30 +74,19 @@ static int platform_clock_control(struct snd_soc_dapm_widget *w,
 		return -EIO;
 	}
 
-	if (SND_SOC_DAPM_EVENT_ON(event)) {
-		if (ctx->mclk) {
-			ret = clk_prepare_enable(ctx->mclk);
-			if (ret < 0) {
-				dev_err(card->dev,
-					"could not configure MCLK state");
-				return ret;
-			}
-		}
-	} else {
-		/* Set codec sysclk source to its internal clock because codec PLL will
-		 * be off when idle and MCLK will also be off when codec is
-		 * runtime suspended. Codec needs clock for jack detection and button
-		 * press. MCLK is turned off with clock framework or ACPI.
-		 */
-		ret = snd_soc_dai_set_sysclk(codec_dai, RT5645_SCLK_S_RCCLK,
-					48000 * 512, SND_SOC_CLOCK_IN);
-		if (ret < 0) {
-			dev_err(card->dev, "can't set codec sysclk: %d\n", ret);
-			return ret;
-		}
+	if (!SND_SOC_DAPM_EVENT_OFF(event))
+		return 0;
 
-		if (ctx->mclk)
-			clk_disable_unprepare(ctx->mclk);
+	/* Set codec sysclk source to its internal clock because codec PLL will
+	 * be off when idle and MCLK will also be off by ACPI when codec is
+	 * runtime suspended. Codec needs clock for jack detection and button
+	 * press.
+	 */
+	ret = snd_soc_dai_set_sysclk(codec_dai, RT5645_SCLK_S_RCCLK,
+			0, SND_SOC_CLOCK_IN);
+	if (ret < 0) {
+		dev_err(card->dev, "can't set codec sysclk: %d\n", ret);
+		return ret;
 	}
 
 	return 0;
@@ -114,7 +99,7 @@ static const struct snd_soc_dapm_widget cht_dapm_widgets[] = {
 	SND_SOC_DAPM_MIC("Int Analog Mic", NULL),
 	SND_SOC_DAPM_SPK("Ext Spk", NULL),
 	SND_SOC_DAPM_SUPPLY("Platform Clock", SND_SOC_NOPM, 0, 0,
-			platform_clock_control, SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+			platform_clock_control, SND_SOC_DAPM_POST_PMD),
 };
 
 static const struct snd_soc_dapm_route cht_rt5645_audio_map[] = {
@@ -172,17 +157,6 @@ static const struct snd_kcontrol_new cht_mc_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Ext Spk"),
 };
 
-static struct snd_soc_jack_pin cht_bsw_jack_pins[] = {
-	{
-		.pin	= "Headphone",
-		.mask	= SND_JACK_HEADPHONE,
-	},
-	{
-		.pin	= "Headset Mic",
-		.mask	= SND_JACK_MICROPHONE,
-	},
-};
-
 static int cht_aif1_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params)
 {
@@ -238,9 +212,9 @@ static int cht_codec_init(struct snd_soc_pcm_runtime *runtime)
 	else
 		jack_type = SND_JACK_HEADPHONE | SND_JACK_MICROPHONE;
 
-	ret = snd_soc_card_jack_new(runtime->card, "Headset",
+	ret = snd_soc_card_jack_new(runtime->card, "Headset Jack",
 				    jack_type, &ctx->jack,
-				    cht_bsw_jack_pins, ARRAY_SIZE(cht_bsw_jack_pins));
+				    NULL, 0);
 	if (ret) {
 		dev_err(runtime->dev, "Headset jack creation failed %d\n", ret);
 		return ret;
@@ -248,26 +222,6 @@ static int cht_codec_init(struct snd_soc_pcm_runtime *runtime)
 
 	rt5645_set_jack_detect(codec, &ctx->jack, &ctx->jack, &ctx->jack);
 
-	if (ctx->mclk) {
-		/*
-		 * The firmware might enable the clock at
-		 * boot (this information may or may not
-		 * be reflected in the enable clock register).
-		 * To change the rate we must disable the clock
-		 * first to cover these cases. Due to common
-		 * clock framework restrictions that do not allow
-		 * to disable a clock that has not been enabled,
-		 * we need to enable the clock first.
-		 */
-		ret = clk_prepare_enable(ctx->mclk);
-		if (!ret)
-			clk_disable_unprepare(ctx->mclk);
-
-		ret = clk_set_rate(ctx->mclk, CHT_PLAT_CLK_3_HZ);
-
-		if (ret)
-			dev_err(runtime->dev, "unable to set MCLK rate\n");
-	}
 	return ret;
 }
 
@@ -316,18 +270,6 @@ static struct snd_soc_dai_link cht_dailink[] = {
 		.dpcm_capture = 1,
 		.ops = &cht_aif1_ops,
 	},
-	[MERR_DPCM_DEEP_BUFFER] = {
-		.name = "Deep-Buffer Audio Port",
-		.stream_name = "Deep-Buffer Audio",
-		.cpu_dai_name = "deepbuffer-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
-		.nonatomic = true,
-		.dynamic = 1,
-		.dpcm_playback = 1,
-		.ops = &cht_aif1_ops,
-	},
 	[MERR_DPCM_COMPR] = {
 		.name = "Compressed Port",
 		.stream_name = "Compress",
@@ -340,7 +282,7 @@ static struct snd_soc_dai_link cht_dailink[] = {
 	/* back ends */
 	{
 		.name = "SSP2-Codec",
-		.id = 1,
+		.be_id = 1,
 		.cpu_dai_name = "ssp2-port",
 		.platform_name = "sst-mfld-platform",
 		.no_pcm = 1,
@@ -385,23 +327,15 @@ static struct snd_soc_card snd_soc_card_chtrt5650 = {
 };
 
 static struct cht_acpi_card snd_soc_cards[] = {
-	{"10EC5640", CODEC_TYPE_RT5645, &snd_soc_card_chtrt5645},
 	{"10EC5645", CODEC_TYPE_RT5645, &snd_soc_card_chtrt5645},
 	{"10EC5650", CODEC_TYPE_RT5650, &snd_soc_card_chtrt5650},
 };
 
-static char cht_rt5640_codec_name[16]; /* i2c-<HID>:00 with HID being 8 chars */
-
-static bool is_valleyview(void)
+static acpi_status snd_acpi_codec_match(acpi_handle handle, u32 level,
+				       void *context, void **ret)
 {
-	static const struct x86_cpu_id cpu_ids[] = {
-		{ X86_VENDOR_INTEL, 6, 55 }, /* Valleyview, Bay Trail */
-		{}
-	};
-
-	if (!x86_match_cpu(cpu_ids))
-		return false;
-	return true;
+	*(bool *)context = true;
+	return AE_OK;
 }
 
 static int snd_cht_mc_probe(struct platform_device *pdev)
@@ -410,62 +344,29 @@ static int snd_cht_mc_probe(struct platform_device *pdev)
 	int i;
 	struct cht_mc_private *drv;
 	struct snd_soc_card *card = snd_soc_cards[0].soc_card;
-	struct sst_acpi_mach *mach;
-	const char *i2c_name = NULL;
-	int dai_index = 0;
 	bool found = false;
+	char codec_name[16];
 
 	drv = devm_kzalloc(&pdev->dev, sizeof(*drv), GFP_ATOMIC);
 	if (!drv)
 		return -ENOMEM;
 
-	mach = (&pdev->dev)->platform_data;
-
 	for (i = 0; i < ARRAY_SIZE(snd_soc_cards); i++) {
-		if (acpi_dev_found(snd_soc_cards[i].codec_id) &&
-			(!strncmp(snd_soc_cards[i].codec_id, mach->id, 8))) {
+		if (ACPI_SUCCESS(acpi_get_devices(
+						snd_soc_cards[i].codec_id,
+						snd_acpi_codec_match,
+						&found, NULL)) && found) {
 			dev_dbg(&pdev->dev,
 				"found codec %s\n", snd_soc_cards[i].codec_id);
 			card = snd_soc_cards[i].soc_card;
 			drv->acpi_card = &snd_soc_cards[i];
-			found = true;
 			break;
 		}
 	}
-
-	if (!found) {
-		dev_err(&pdev->dev, "No matching HID found in supported list\n");
-		return -ENODEV;
-	}
-
 	card->dev = &pdev->dev;
-	sprintf(drv->codec_name, "i2c-%s:00", drv->acpi_card->codec_id);
-
+	sprintf(codec_name, "i2c-%s:00", drv->acpi_card->codec_id);
 	/* set correct codec name */
-	for (i = 0; i < ARRAY_SIZE(cht_dailink); i++)
-		if (!strcmp(card->dai_link[i].codec_name, "i2c-10EC5645:00")) {
-			card->dai_link[i].codec_name = drv->codec_name;
-			dai_index = i;
-		}
-
-	/* fixup codec name based on HID */
-	i2c_name = sst_acpi_find_name_from_hid(mach->id);
-	if (i2c_name != NULL) {
-		snprintf(cht_rt5640_codec_name, sizeof(cht_rt5640_codec_name),
-			"%s%s", "i2c-", i2c_name);
-		cht_dailink[dai_index].codec_name = cht_rt5640_codec_name;
-	}
-
-	if (is_valleyview()) {
-		drv->mclk = devm_clk_get(&pdev->dev, "pmc_plt_clk_3");
-		if (IS_ERR(drv->mclk)) {
-			dev_err(&pdev->dev,
-				"Failed to get MCLK from pmc_plt_clk_3: %ld\n",
-				PTR_ERR(drv->mclk));
-			return PTR_ERR(drv->mclk);
-		}
-	}
-
+	strcpy((char *)card->dai_link[2].codec_name, codec_name);
 	snd_soc_card_set_drvdata(card, drv);
 	ret_val = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret_val) {

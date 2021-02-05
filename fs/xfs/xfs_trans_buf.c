@@ -155,7 +155,7 @@ xfs_trans_get_buf_map(
 		ASSERT(xfs_buf_islocked(bp));
 		if (XFS_FORCED_SHUTDOWN(tp->t_mountp)) {
 			xfs_buf_stale(bp);
-			bp->b_flags |= XBF_DONE;
+			XFS_BUF_DONE(bp);
 		}
 
 		ASSERT(bp->b_transp == tp);
@@ -356,7 +356,6 @@ xfs_trans_brelse(xfs_trans_t	*tp,
 		 xfs_buf_t	*bp)
 {
 	xfs_buf_log_item_t	*bip;
-	int			freed;
 
 	/*
 	 * Default to a normal brelse() call if the tp is NULL.
@@ -420,22 +419,16 @@ xfs_trans_brelse(xfs_trans_t	*tp,
 	/*
 	 * Drop our reference to the buf log item.
 	 */
-	freed = atomic_dec_and_test(&bip->bli_refcount);
+	atomic_dec(&bip->bli_refcount);
 
 	/*
-	 * If the buf item is not tracking data in the log, then we must free it
-	 * before releasing the buffer back to the free pool.
-	 *
-	 * If the fs has shutdown and we dropped the last reference, it may fall
-	 * on us to release a (possibly dirty) bli if it never made it to the
-	 * AIL (e.g., the aborted unpin already happened and didn't release it
-	 * due to our reference). Since we're already shutdown and need xa_lock,
-	 * just force remove from the AIL and release the bli here.
+	 * If the buf item is not tracking data in the log, then
+	 * we must free it before releasing the buffer back to the
+	 * free pool.  Before releasing the buffer to the free pool,
+	 * clear the transaction pointer in b_fsprivate2 to dissolve
+	 * its relation to this transaction.
 	 */
-	if (XFS_FORCED_SHUTDOWN(tp->t_mountp) && freed) {
-		xfs_trans_ail_remove(&bip->bli_item, SHUTDOWN_LOG_IO_ERROR);
-		xfs_buf_item_relse(bp);
-	} else if (!(bip->bli_flags & XFS_BLI_DIRTY)) {
+	if (!xfs_buf_item_dirty(bip)) {
 /***
 		ASSERT(bp->b_pincount == 0);
 ***/
@@ -493,17 +486,25 @@ xfs_trans_bhold_release(xfs_trans_t	*tp,
 }
 
 /*
- * Mark a buffer dirty in the transaction.
+ * This is called to mark bytes first through last inclusive of the given
+ * buffer as needing to be logged when the transaction is committed.
+ * The buffer must already be associated with the given transaction.
+ *
+ * First and last are numbers relative to the beginning of this buffer,
+ * so the first byte in the buffer is numbered 0 regardless of the
+ * value of b_blkno.
  */
 void
-xfs_trans_dirty_buf(
-	struct xfs_trans	*tp,
-	struct xfs_buf		*bp)
+xfs_trans_log_buf(xfs_trans_t	*tp,
+		  xfs_buf_t	*bp,
+		  uint		first,
+		  uint		last)
 {
-	struct xfs_buf_log_item	*bip = bp->b_fspriv;
+	xfs_buf_log_item_t	*bip = bp->b_fspriv;
 
 	ASSERT(bp->b_transp == tp);
 	ASSERT(bip != NULL);
+	ASSERT(first <= last && last < BBTOB(bp->b_length));
 	ASSERT(bp->b_iodone == NULL ||
 	       bp->b_iodone == xfs_buf_iodone_callbacks);
 
@@ -517,11 +518,13 @@ xfs_trans_dirty_buf(
 	 * inside the b_bdstrat callback so that this won't get written to
 	 * disk.
 	 */
-	bp->b_flags |= XBF_DONE;
+	XFS_BUF_DONE(bp);
 
 	ASSERT(atomic_read(&bip->bli_refcount) > 0);
 	bp->b_iodone = xfs_buf_iodone_callbacks;
 	bip->bli_item.li_cb = xfs_buf_iodone;
+
+	trace_xfs_trans_log_buf(bip);
 
 	/*
 	 * If we invalidated the buffer within this transaction, then
@@ -531,41 +534,21 @@ xfs_trans_dirty_buf(
 	 */
 	if (bip->bli_flags & XFS_BLI_STALE) {
 		bip->bli_flags &= ~XFS_BLI_STALE;
-		ASSERT(bp->b_flags & XBF_STALE);
-		bp->b_flags &= ~XBF_STALE;
+		ASSERT(XFS_BUF_ISSTALE(bp));
+		XFS_BUF_UNSTALE(bp);
 		bip->__bli_format.blf_flags &= ~XFS_BLF_CANCEL;
 	}
-	bip->bli_flags |= XFS_BLI_DIRTY | XFS_BLI_LOGGED;
 
 	tp->t_flags |= XFS_TRANS_DIRTY;
 	bip->bli_item.li_desc->lid_flags |= XFS_LID_DIRTY;
-}
 
-/*
- * This is called to mark bytes first through last inclusive of the given
- * buffer as needing to be logged when the transaction is committed.
- * The buffer must already be associated with the given transaction.
- *
- * First and last are numbers relative to the beginning of this buffer,
- * so the first byte in the buffer is numbered 0 regardless of the
- * value of b_blkno.
- */
-void
-xfs_trans_log_buf(
-	struct xfs_trans	*tp,
-	struct xfs_buf		*bp,
-	uint			first,
-	uint			last)
-{
-	struct xfs_buf_log_item	*bip = bp->b_fspriv;
-
-	ASSERT(first <= last && last < BBTOB(bp->b_length));
-	ASSERT(!(bip->bli_flags & XFS_BLI_ORDERED));
-
-	xfs_trans_dirty_buf(tp, bp);
-
-	trace_xfs_trans_log_buf(bip);
-	xfs_buf_item_log(bip, first, last);
+	/*
+	 * If we have an ordered buffer we are not logging any dirty range but
+	 * it still needs to be marked dirty and that it has been logged.
+	 */
+	bip->bli_flags |= XFS_BLI_DIRTY | XFS_BLI_LOGGED;
+	if (!(bip->bli_flags & XFS_BLI_ORDERED))
+		xfs_buf_item_log(bip, first, last);
 }
 
 
@@ -617,7 +600,7 @@ xfs_trans_binval(
 		 * If the buffer is already invalidated, then
 		 * just return.
 		 */
-		ASSERT(bp->b_flags & XBF_STALE);
+		ASSERT(XFS_BUF_ISSTALE(bp));
 		ASSERT(!(bip->bli_flags & (XFS_BLI_LOGGED | XFS_BLI_DIRTY)));
 		ASSERT(!(bip->__bli_format.blf_flags & XFS_BLF_INODE_BUF));
 		ASSERT(!(bip->__bli_format.blf_flags & XFS_BLFT_MASK));
@@ -718,13 +701,14 @@ xfs_trans_inode_alloc_buf(
 }
 
 /*
- * Mark the buffer as ordered for this transaction. This means that the contents
- * of the buffer are not recorded in the transaction but it is tracked in the
- * AIL as though it was. This allows us to record logical changes in
- * transactions rather than the physical changes we make to the buffer without
- * changing writeback ordering constraints of metadata buffers.
+ * Mark the buffer as ordered for this transaction. This means
+ * that the contents of the buffer are not recorded in the transaction
+ * but it is tracked in the AIL as though it was. This allows us
+ * to record logical changes in transactions rather than the physical
+ * changes we make to the buffer without changing writeback ordering
+ * constraints of metadata buffers.
  */
-bool
+void
 xfs_trans_ordered_buf(
 	struct xfs_trans	*tp,
 	struct xfs_buf		*bp)
@@ -735,18 +719,8 @@ xfs_trans_ordered_buf(
 	ASSERT(bip != NULL);
 	ASSERT(atomic_read(&bip->bli_refcount) > 0);
 
-	if (xfs_buf_item_dirty_format(bip))
-		return false;
-
 	bip->bli_flags |= XFS_BLI_ORDERED;
 	trace_xfs_buf_item_ordered(bip);
-
-	/*
-	 * We don't log a dirty range of an ordered buffer but it still needs
-	 * to be marked dirty and that it has been logged.
-	 */
-	xfs_trans_dirty_buf(tp, bp);
-	return true;
 }
 
 /*

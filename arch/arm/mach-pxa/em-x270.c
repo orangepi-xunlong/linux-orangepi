@@ -14,7 +14,7 @@
 #include <linux/delay.h>
 
 #include <linux/dm9000.h>
-#include <linux/platform_data/rtc-v3020.h>
+#include <linux/rtc-v3020.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/physmap.h>
@@ -39,14 +39,14 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include "pxa27x.h"
-#include "pxa27x-udc.h"
+#include <mach/pxa27x.h>
+#include <mach/pxa27x-udc.h>
 #include <mach/audio.h>
 #include <linux/platform_data/video-pxafb.h>
 #include <linux/platform_data/usb-ohci-pxa27x.h>
 #include <linux/platform_data/mmc-pxamci.h>
 #include <linux/platform_data/keypad-pxa27x.h>
-#include <linux/platform_data/media/camera-pxa.h>
+#include <linux/platform_data/camera-pxa.h>
 
 #include "generic.h"
 #include "devices.h"
@@ -289,7 +289,7 @@ static void nand_cs_off(void)
 static void em_x270_nand_cmd_ctl(struct mtd_info *mtd, int dat,
 				 unsigned int ctrl)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	unsigned long nandaddr = (unsigned long)this->IO_ADDR_W;
 
 	dsb();

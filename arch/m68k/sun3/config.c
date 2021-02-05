@@ -26,6 +26,7 @@
 #include <asm/pgalloc.h>
 #include <asm/sun3-head.h>
 #include <asm/sun3mmu.h>
+#include <asm/rtc.h>
 #include <asm/machdep.h>
 #include <asm/machines.h>
 #include <asm/idprom.h>
@@ -170,7 +171,7 @@ static void __init sun3_sched_init(irq_handler_t timer_routine)
         intersil_clear();
 }
 
-#if IS_ENABLED(CONFIG_SUN3_SCSI)
+#ifdef CONFIG_SUN3_SCSI
 
 static const struct resource sun3_scsi_vme_rsrc[] __initconst = {
 	{

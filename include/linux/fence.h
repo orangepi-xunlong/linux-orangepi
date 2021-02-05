@@ -47,7 +47,7 @@ struct fence_cb;
  * can be compared to decide which fence would be signaled later.
  * @flags: A mask of FENCE_FLAG_* defined below
  * @timestamp: Timestamp when the fence was signaled.
- * @error: Optional, only valid if < 0, must be set before calling
+ * @status: Optional, only valid if < 0, must be set before calling
  * fence_signal, indicates that the fence has completed with an error.
  *
  * the flags member must be manipulated and read using the appropriate
@@ -60,7 +60,7 @@ struct fence_cb;
  * implementer of the fence for its own purposes. Can be used in different
  * ways by different fence implementers, so do not rely on this.
  *
- * Since atomic bitops are used, this is not guaranteed to be the case.
+ * *) Since atomic bitops are used, this is not guaranteed to be the case.
  * Particularly, if the bit was set, but fence_signal was called right
  * before this bit was set, it would have been able to set the
  * FENCE_FLAG_SIGNALED_BIT, before enable_signaling was called.
@@ -75,11 +75,10 @@ struct fence {
 	struct rcu_head rcu;
 	struct list_head cb_list;
 	spinlock_t *lock;
-	u64 context;
-	unsigned seqno;
+	unsigned context, seqno;
 	unsigned long flags;
 	ktime_t timestamp;
-	int error;
+	int status;
 };
 
 enum fence_flag_bits {
@@ -133,7 +132,7 @@ struct fence_cb {
  * or some failure occurred that made it impossible to enable
  * signaling. True indicates successful enabling.
  *
- * fence->error may be set in enable_signaling, but only when false is
+ * fence->status may be set in enable_signaling, but only when false is
  * returned.
  *
  * Calling fence_signal before enable_signaling is called allows
@@ -145,7 +144,7 @@ struct fence_cb {
  * the second time will be a noop since it was already signaled.
  *
  * Notes on signaled:
- * May set fence->error if returning true.
+ * May set fence->status if returning true.
  *
  * Notes on wait:
  * Must not be NULL, set to fence_default_wait for default implementation.
@@ -179,20 +178,10 @@ struct fence_ops {
 };
 
 void fence_init(struct fence *fence, const struct fence_ops *ops,
-		spinlock_t *lock, u64 context, unsigned seqno);
+		spinlock_t *lock, unsigned context, unsigned seqno);
 
 void fence_release(struct kref *kref);
 void fence_free(struct fence *fence);
-
-/**
- * fence_put - decreases refcount of the fence
- * @fence:	[in]	fence to reduce refcount of
- */
-static inline void fence_put(struct fence *fence)
-{
-	if (fence)
-		kref_put(&fence->refcount, fence_release);
-}
 
 /**
  * fence_get - increases refcount of the fence
@@ -222,49 +211,13 @@ static inline struct fence *fence_get_rcu(struct fence *fence)
 }
 
 /**
- * fence_get_rcu_safe  - acquire a reference to an RCU tracked fence
- * @fence:	[in]	pointer to fence to increase refcount of
- *
- * Function returns NULL if no refcount could be obtained, or the fence.
- * This function handles acquiring a reference to a fence that may be
- * reallocated within the RCU grace period (such as with SLAB_DESTROY_BY_RCU),
- * so long as the caller is using RCU on the pointer to the fence.
- *
- * An alternative mechanism is to employ a seqlock to protect a bunch of
- * fences, such as used by struct reservation_object. When using a seqlock,
- * the seqlock must be taken before and checked after a reference to the
- * fence is acquired (as shown here).
- *
- * The caller is required to hold the RCU read lock.
+ * fence_put - decreases refcount of the fence
+ * @fence:	[in]	fence to reduce refcount of
  */
-static inline struct fence *fence_get_rcu_safe(struct fence * __rcu *fencep)
+static inline void fence_put(struct fence *fence)
 {
-	do {
-		struct fence *fence;
-
-		fence = rcu_dereference(*fencep);
-		if (!fence || !fence_get_rcu(fence))
-			return NULL;
-
-		/* The atomic_inc_not_zero() inside fence_get_rcu()
-		 * provides a full memory barrier upon success (such as now).
-		 * This is paired with the write barrier from assigning
-		 * to the __rcu protected fence pointer so that if that
-		 * pointer still matches the current fence, we know we
-		 * have successfully acquire a reference to it. If it no
-		 * longer matches, we are holding a reference to some other
-		 * reallocated pointer. This is possible if the allocator
-		 * is using a freelist like SLAB_DESTROY_BY_RCU where the
-		 * fence remains valid for the RCU grace period, but it
-		 * may be reallocated. When using such allocators, we are
-		 * responsible for ensuring the reference we get is to
-		 * the right fence, as below.
-		 */
-		if (fence == rcu_access_pointer(*fencep))
-			return rcu_pointer_handoff(fence);
-
-		fence_put(fence);
-	} while (1);
+	if (fence)
+		kref_put(&fence->refcount, fence_release);
 }
 
 int fence_signal(struct fence *fence);
@@ -329,19 +282,6 @@ fence_is_signaled(struct fence *fence)
 }
 
 /**
- * __fence_is_later - return if f1 is chronologically later than f2
- * @f1:	[in]	the first fence's seqno
- * @f2:	[in]	the second fence's seqno from the same context
- *
- * Returns true if f1 is chronologically later than f2. Both fences must be
- * from the same context, since a seqno is not common across contexts.
- */
-static inline bool __fence_is_later(u32 f1, u32 f2)
-{
-	return (int)(f1 - f2) > 0;
-}
-
-/**
  * fence_is_later - return if f1 is chronologically later than f2
  * @f1:	[in]	the first fence from the same context
  * @f2:	[in]	the second fence from the same context
@@ -354,7 +294,7 @@ static inline bool fence_is_later(struct fence *f1, struct fence *f2)
 	if (WARN_ON(f1->context != f2->context))
 		return false;
 
-	return __fence_is_later(f1->seqno, f2->seqno);
+	return f1->seqno - f2->seqno < INT_MAX;
 }
 
 /**
@@ -380,50 +320,6 @@ static inline struct fence *fence_later(struct fence *f1, struct fence *f2)
 		return fence_is_signaled(f1) ? NULL : f1;
 	else
 		return fence_is_signaled(f2) ? NULL : f2;
-}
-
-/**
- * fence_get_status_locked - returns the status upon completion
- * @fence: [in]	the fence to query
- *
- * Drivers can supply an optional error status condition before they signal
- * the fence (to indicate whether the fence was completed due to an error
- * rather than success). The value of the status condition is only valid
- * if the fence has been signaled, fence_get_status_locked() first checks
- * the signal state before reporting the error status.
- *
- * Returns 0 if the fence has not yet been signaled, 1 if the fence has
- * been signaled without an error condition, or a negative error code
- * if the fence has been completed in err.
- */
-static inline int fence_get_status_locked(struct fence *fence)
-{
-	if (fence_is_signaled_locked(fence))
-		return fence->error ?: 1;
-	else
-		return 0;
-}
-
-int fence_get_status(struct fence *fence);
-
-/**
- * fence_set_error - flag an error condition on the fence
- * @fence: [in]	the fence
- * @error: [in]	the error to store
- *
- * Drivers can supply an optional error status condition before they signal
- * the fence, to indicate that the fence was completed due to an error
- * rather than success. This must be set before signaling (so that the value
- * is visible before any waiters on the signal callback are woken). This
- * helper exists to help catching erroneous setting of #fence.error.
- */
-static inline void fence_set_error(struct fence *fence,
-				       int error)
-{
-	BUG_ON(test_bit(FENCE_FLAG_SIGNALED_BIT, &fence->flags));
-	BUG_ON(error >= 0 || error < -MAX_ERRNO);
-
-	fence->error = error;
 }
 
 signed long fence_wait_timeout(struct fence *, bool intr, signed long timeout);
@@ -456,27 +352,27 @@ static inline signed long fence_wait(struct fence *fence, bool intr)
 	return ret < 0 ? ret : 0;
 }
 
-u64 fence_context_alloc(unsigned num);
+unsigned fence_context_alloc(unsigned num);
 
 #define FENCE_TRACE(f, fmt, args...) \
 	do {								\
 		struct fence *__ff = (f);				\
-		if (IS_ENABLED(CONFIG_FENCE_TRACE))			\
-			pr_info("f %llu#%u: " fmt,			\
+		if (config_enabled(CONFIG_FENCE_TRACE))			\
+			pr_info("f %u#%u: " fmt,			\
 				__ff->context, __ff->seqno, ##args);	\
 	} while (0)
 
 #define FENCE_WARN(f, fmt, args...) \
 	do {								\
 		struct fence *__ff = (f);				\
-		pr_warn("f %llu#%u: " fmt, __ff->context, __ff->seqno,	\
+		pr_warn("f %u#%u: " fmt, __ff->context, __ff->seqno,	\
 			 ##args);					\
 	} while (0)
 
 #define FENCE_ERR(f, fmt, args...) \
 	do {								\
 		struct fence *__ff = (f);				\
-		pr_err("f %llu#%u: " fmt, __ff->context, __ff->seqno,	\
+		pr_err("f %u#%u: " fmt, __ff->context, __ff->seqno,	\
 			##args);					\
 	} while (0)
 

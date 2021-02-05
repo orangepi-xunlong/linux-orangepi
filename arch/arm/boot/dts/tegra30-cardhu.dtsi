@@ -35,10 +35,6 @@
 		serial1 = &uartc;
 	};
 
-	chosen {
-		stdout-path = "serial0:115200n8";
-	};
-
 	memory {
 		reg = <0x80000000 0x40000000>;
 	};
@@ -424,7 +420,7 @@
 
 		clk32k_in: clock@0 {
 			compatible = "fixed-clock";
-			reg = <0>;
+			reg=<0>;
 			#clock-cells = <0>;
 			clock-frequency = <32768>;
 		};
@@ -631,7 +627,7 @@
 			interrupts = <2 0>;
 			linux,code = <KEY_POWER>;
 			debounce-interval = <100>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 
 		volume-down {

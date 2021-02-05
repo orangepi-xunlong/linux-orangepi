@@ -173,10 +173,10 @@ struct uea_softc {
 	const struct firmware *dsp_firm;
 	struct urb *urb_int;
 
-	void (*dispatch_cmv)(struct uea_softc *, struct intr_pkt *);
-	void (*schedule_load_page)(struct uea_softc *, struct intr_pkt *);
-	int (*stat)(struct uea_softc *);
-	int (*send_cmvs)(struct uea_softc *);
+	void (*dispatch_cmv) (struct uea_softc *, struct intr_pkt *);
+	void (*schedule_load_page) (struct uea_softc *, struct intr_pkt *);
+	int (*stat) (struct uea_softc *);
+	int (*send_cmvs) (struct uea_softc *);
 
 	/* keep in sync with eaglectl */
 	struct uea_stats {
@@ -2196,12 +2196,17 @@ static int uea_boot(struct uea_softc *sc)
 		load_XILINX_firmware(sc);
 
 	intr = kmalloc(size, GFP_KERNEL);
-	if (!intr)
+	if (!intr) {
+		uea_err(INS_TO_USBDEV(sc),
+		       "cannot allocate interrupt package\n");
 		goto err0;
+	}
 
 	sc->urb_int = usb_alloc_urb(0, GFP_KERNEL);
-	if (!sc->urb_int)
+	if (!sc->urb_int) {
+		uea_err(INS_TO_USBDEV(sc), "cannot allocate interrupt URB\n");
 		goto err1;
+	}
 
 	usb_fill_int_urb(sc->urb_int, sc->usb_dev,
 			 usb_rcvintpipe(sc->usb_dev, UEA_INTR_PIPE),
@@ -2449,7 +2454,7 @@ UEA_ATTR(firmid, 0);
 
 /* Retrieve the device End System Identifier (MAC) */
 
-static int uea_getesi(struct uea_softc *sc, u_char *esi)
+static int uea_getesi(struct uea_softc *sc, u_char * esi)
 {
 	unsigned char mac_str[2 * ETH_ALEN + 1];
 	int i;
@@ -2556,8 +2561,10 @@ static int uea_bind(struct usbatm_data *usbatm, struct usb_interface *intf,
 	}
 
 	sc = kzalloc(sizeof(struct uea_softc), GFP_KERNEL);
-	if (!sc)
+	if (!sc) {
+		uea_err(usb, "uea_init: not enough memory !\n");
 		return -ENOMEM;
+	}
 
 	sc->usb_dev = usb;
 	usbatm->driver_data = sc;

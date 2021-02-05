@@ -9,11 +9,14 @@ config LEGACY_BOARDS
 	  kernel is booted without being provided with an FDT via the UHI
 	  boot protocol.
 
-config LEGACY_BOARD_SEAD3
-	bool "Support MIPS SEAD-3 boards"
-	select LEGACY_BOARDS
+config VIRT_BOARD_RANCHU
+	bool "Support Ranchu platform for Android emulator"
 	help
-	  Enable this to include support for booting on MIPS SEAD-3 FPGA-based
-	  development boards, which boot using a legacy boot protocol.
+	  This enables support for the platform used by Android emulator.
+
+	  Ranchu platform consists of a set of virtual devices. This platform
+	  enables emulation of variety of virtual configurations while using
+	  Android emulator. Android emulator is based on Qemu, and contains
+	  the support for the same set of virtual devices.
 
 endif

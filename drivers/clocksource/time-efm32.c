@@ -233,15 +233,10 @@ static int __init efm32_clockevent_init(struct device_node *np)
 					DIV_ROUND_CLOSEST(rate, 1024),
 					0xf, 0xffff);
 
-	ret = setup_irq(irq, &efm32_clock_event_irq);
-	if (ret) {
-		pr_err("Failed setup irq");
-		goto err_setup_irq;
-	}
+	setup_irq(irq, &efm32_clock_event_irq);
 
 	return 0;
 
-err_setup_irq:
 err_get_irq:
 
 	iounmap(base);
@@ -260,16 +255,16 @@ err_clk_get:
  * This function asserts that we have exactly one clocksource and one
  * clock_event_device in the end.
  */
-static int __init efm32_timer_init(struct device_node *np)
+static void __init efm32_timer_init(struct device_node *np)
 {
 	static int has_clocksource, has_clockevent;
-	int ret = 0;
+	int ret;
 
 	if (!has_clocksource) {
 		ret = efm32_clocksource_init(np);
 		if (!ret) {
 			has_clocksource = 1;
-			return 0;
+			return;
 		}
 	}
 
@@ -277,11 +272,9 @@ static int __init efm32_timer_init(struct device_node *np)
 		ret = efm32_clockevent_init(np);
 		if (!ret) {
 			has_clockevent = 1;
-			return 0;
+			return;
 		}
 	}
-
-	return ret;
 }
 CLOCKSOURCE_OF_DECLARE(efm32compat, "efm32,timer", efm32_timer_init);
 CLOCKSOURCE_OF_DECLARE(efm32, "energymicro,efm32-timer", efm32_timer_init);

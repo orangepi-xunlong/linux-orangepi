@@ -81,6 +81,7 @@ static int xilly_map_single_of(struct xilly_endpoint *ep,
 {
 	dma_addr_t addr;
 	struct xilly_mapping *this;
+	int rc;
 
 	this = kzalloc(sizeof(*this), GFP_KERNEL);
 	if (!this)
@@ -100,7 +101,15 @@ static int xilly_map_single_of(struct xilly_endpoint *ep,
 
 	*ret_dma_handle = addr;
 
-	return devm_add_action_or_reset(ep->dev, xilly_of_unmap, this);
+	rc = devm_add_action(ep->dev, xilly_of_unmap, this);
+
+	if (rc) {
+		dma_unmap_single(ep->dev, addr, size, direction);
+		kfree(this);
+		return rc;
+	}
+
+	return 0;
 }
 
 static struct xilly_endpoint_hardware of_hw = {

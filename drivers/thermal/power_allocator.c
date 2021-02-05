@@ -18,8 +18,10 @@
 #include <linux/rculist.h>
 #include <linux/slab.h>
 #include <linux/thermal.h>
-#include <linux/cpufreq.h>
 
+#ifdef CONFIG_ARCH_ROCKCHIP
+#include <soc/rockchip/rockchip_system_monitor.h>
+#endif
 #define CREATE_TRACE_POINTS
 #include <trace/events/thermal_power_allocator.h>
 
@@ -442,7 +444,6 @@ static int allocate_power(struct thermal_zone_device *tz,
 				      granted_power, total_granted_power,
 				      num_actors, power_range,
 				      max_allocatable_power, tz->temperature,
-				      num_online_cpus(), cpufreq_quick_get(0),
 				      control_temp - tz->temperature);
 
 	kfree(req_power);
@@ -532,9 +533,12 @@ static void allow_maximum_power(struct thermal_zone_device *tz)
 			continue;
 
 		instance->target = 0;
-		mutex_lock(&instance->cdev->lock);
+#ifdef CONFIG_ARCH_ROCKCHIP
+		rockchip_system_monitor_adjust_cdev_state(instance->cdev,
+							  tz->temperature,
+							  &instance->target);
+#endif
 		instance->cdev->updated = false;
-		mutex_unlock(&instance->cdev->lock);
 		thermal_cdev_update(instance->cdev);
 	}
 	mutex_unlock(&tz->lock);

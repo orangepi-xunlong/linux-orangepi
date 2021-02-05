@@ -15,7 +15,7 @@ struct ulpi_ops;
  */
 struct ulpi {
 	struct ulpi_device_id id;
-	const struct ulpi_ops *ops;
+	struct ulpi_ops *ops;
 	struct device dev;
 };
 
@@ -47,11 +47,7 @@ struct ulpi_driver {
 
 #define to_ulpi_driver(d) container_of(d, struct ulpi_driver, driver)
 
-/*
- * use a macro to avoid include chaining to get THIS_MODULE
- */
-#define ulpi_register_driver(drv) __ulpi_register_driver(drv, THIS_MODULE)
-int __ulpi_register_driver(struct ulpi_driver *drv, struct module *module);
+int ulpi_register_driver(struct ulpi_driver *drv);
 void ulpi_unregister_driver(struct ulpi_driver *drv);
 
 #define module_ulpi_driver(__ulpi_driver) \

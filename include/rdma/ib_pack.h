@@ -37,17 +37,12 @@
 #include <uapi/linux/if_ether.h>
 
 enum {
-	IB_LRH_BYTES		= 8,
-	IB_ETH_BYTES		= 14,
-	IB_VLAN_BYTES		= 4,
-	IB_GRH_BYTES		= 40,
-	IB_IP4_BYTES		= 20,
-	IB_UDP_BYTES		= 8,
-	IB_BTH_BYTES		= 12,
-	IB_DETH_BYTES		= 8,
-	IB_EXT_ATOMICETH_BYTES	= 28,
-	IB_EXT_XRC_BYTES	= 4,
-	IB_ICRC_BYTES		= 4
+	IB_LRH_BYTES  = 8,
+	IB_ETH_BYTES  = 14,
+	IB_VLAN_BYTES = 4,
+	IB_GRH_BYTES  = 40,
+	IB_BTH_BYTES  = 12,
+	IB_DETH_BYTES = 8
 };
 
 struct ib_field {
@@ -106,9 +101,6 @@ enum {
 	IB_OPCODE_ATOMIC_ACKNOWLEDGE                = 0x12,
 	IB_OPCODE_COMPARE_SWAP                      = 0x13,
 	IB_OPCODE_FETCH_ADD                         = 0x14,
-	/* opcode 0x15 is reserved */
-	IB_OPCODE_SEND_LAST_WITH_INVALIDATE         = 0x16,
-	IB_OPCODE_SEND_ONLY_WITH_INVALIDATE         = 0x17,
 
 	/* real constants follow -- see comment about above IB_OPCODE()
 	   macro for more details */
@@ -135,8 +127,6 @@ enum {
 	IB_OPCODE(RC, ATOMIC_ACKNOWLEDGE),
 	IB_OPCODE(RC, COMPARE_SWAP),
 	IB_OPCODE(RC, FETCH_ADD),
-	IB_OPCODE(RC, SEND_LAST_WITH_INVALIDATE),
-	IB_OPCODE(RC, SEND_ONLY_WITH_INVALIDATE),
 
 	/* UC */
 	IB_OPCODE(UC, SEND_FIRST),
@@ -233,27 +223,6 @@ struct ib_unpacked_eth {
 	__be16	type;
 };
 
-struct ib_unpacked_ip4 {
-	u8	ver;
-	u8	hdr_len;
-	u8	tos;
-	__be16	tot_len;
-	__be16	id;
-	__be16	frag_off;
-	u8	ttl;
-	u8	protocol;
-	__sum16	check;
-	__be32	saddr;
-	__be32	daddr;
-};
-
-struct ib_unpacked_udp {
-	__be16	sport;
-	__be16	dport;
-	__be16	length;
-	__be16	csum;
-};
-
 struct ib_unpacked_vlan {
 	__be16  tag;
 	__be16  type;
@@ -268,10 +237,6 @@ struct ib_ud_header {
 	struct ib_unpacked_vlan vlan;
 	int			grh_present;
 	struct ib_unpacked_grh	grh;
-	int			ipv4_present;
-	struct ib_unpacked_ip4	ip4;
-	int			udp_present;
-	struct ib_unpacked_udp	udp;
 	struct ib_unpacked_bth	bth;
 	struct ib_unpacked_deth deth;
 	int			immediate_present;
@@ -288,17 +253,13 @@ void ib_unpack(const struct ib_field        *desc,
 	       void                         *buf,
 	       void                         *structure);
 
-__sum16 ib_ud_ip4_csum(struct ib_ud_header *header);
-
-int ib_ud_header_init(int		    payload_bytes,
-		      int		    lrh_present,
-		      int		    eth_present,
-		      int		    vlan_present,
-		      int		    grh_present,
-		      int		    ip_version,
-		      int		    udp_present,
-		      int		    immediate_present,
-		      struct ib_ud_header *header);
+void ib_ud_header_init(int		    payload_bytes,
+		       int		    lrh_present,
+		       int		    eth_present,
+		       int		    vlan_present,
+		       int		    grh_present,
+		       int		    immediate_present,
+		       struct ib_ud_header *header);
 
 int ib_ud_header_pack(struct ib_ud_header *header,
 		      void                *buf);

@@ -549,8 +549,8 @@ static int  tiocmset(struct tty_struct *tty,
 			unsigned int set, unsigned int clear);
 static int  set_break(struct tty_struct *tty, int break_state);
 
-static int  add_device(SLMP_INFO *info);
-static int  device_init(int adapter_num, struct pci_dev *pdev);
+static void add_device(SLMP_INFO *info);
+static void device_init(int adapter_num, struct pci_dev *pdev);
 static int  claim_resources(SLMP_INFO *info);
 static void release_resources(SLMP_INFO *info);
 
@@ -812,7 +812,7 @@ static void close(struct tty_struct *tty, struct file *filp)
 		goto cleanup;
 
 	mutex_lock(&info->port.mutex);
-	if (tty_port_initialized(&info->port))
+ 	if (info->port.flags & ASYNC_INITIALIZED)
  		wait_until_sent(tty, info->timeout);
 
 	flush_buffer(tty);
@@ -849,9 +849,9 @@ static void hangup(struct tty_struct *tty)
 
 	spin_lock_irqsave(&info->port.lock, flags);
 	info->port.count = 0;
+	info->port.flags &= ~ASYNC_NORMAL_ACTIVE;
 	info->port.tty = NULL;
 	spin_unlock_irqrestore(&info->port.lock, flags);
-	tty_port_set_active(&info->port, 1);
 	mutex_unlock(&info->port.mutex);
 
 	wake_up_interruptible(&info->port.open_wait);
@@ -871,7 +871,8 @@ static void set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 	change_params(info);
 
 	/* Handle transition to B0 status */
-	if ((old_termios->c_cflag & CBAUD) && !C_BAUD(tty)) {
+	if (old_termios->c_cflag & CBAUD &&
+	    !(tty->termios.c_cflag & CBAUD)) {
 		info->serial_signals &= ~(SerialSignal_RTS | SerialSignal_DTR);
 		spin_lock_irqsave(&info->lock,flags);
 	 	set_signals(info);
@@ -879,17 +880,21 @@ static void set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 	}
 
 	/* Handle transition away from B0 status */
-	if (!(old_termios->c_cflag & CBAUD) && C_BAUD(tty)) {
+	if (!(old_termios->c_cflag & CBAUD) &&
+	    tty->termios.c_cflag & CBAUD) {
 		info->serial_signals |= SerialSignal_DTR;
-		if (!C_CRTSCTS(tty) || !tty_throttled(tty))
+ 		if (!(tty->termios.c_cflag & CRTSCTS) ||
+ 		    !test_bit(TTY_THROTTLED, &tty->flags)) {
 			info->serial_signals |= SerialSignal_RTS;
+ 		}
 		spin_lock_irqsave(&info->lock,flags);
 	 	set_signals(info);
 		spin_unlock_irqrestore(&info->lock,flags);
 	}
 
 	/* Handle turning off CRTSCTS */
-	if (old_termios->c_cflag & CRTSCTS && !C_CRTSCTS(tty)) {
+	if (old_termios->c_cflag & CRTSCTS &&
+	    !(tty->termios.c_cflag & CRTSCTS)) {
 		tty->hw_stopped = 0;
 		tx_release(tty);
 	}
@@ -1061,7 +1066,7 @@ static void wait_until_sent(struct tty_struct *tty, int timeout)
 	if (sanity_check(info, tty->name, "wait_until_sent"))
 		return;
 
-	if (!tty_port_initialized(&info->port))
+	if (!test_bit(ASYNCB_INITIALIZED, &info->port.flags))
 		goto exit;
 
 	orig_jiffies = jiffies;
@@ -1261,7 +1266,7 @@ static int ioctl(struct tty_struct *tty,
 
 	if ((cmd != TIOCGSERIAL) && (cmd != TIOCSSERIAL) &&
 	    (cmd != TIOCMIWAIT)) {
-		if (tty_io_error(tty))
+		if (tty->flags & (1 << TTY_IO_ERROR))
 		    return -EIO;
 	}
 
@@ -1467,7 +1472,7 @@ static void throttle(struct tty_struct * tty)
 	if (I_IXOFF(tty))
 		send_xchar(tty, STOP_CHAR(tty));
 
- 	if (C_CRTSCTS(tty)) {
+ 	if (tty->termios.c_cflag & CRTSCTS) {
 		spin_lock_irqsave(&info->lock,flags);
 		info->serial_signals &= ~SerialSignal_RTS;
 	 	set_signals(info);
@@ -1496,7 +1501,7 @@ static void unthrottle(struct tty_struct * tty)
 			send_xchar(tty, START_CHAR(tty));
 	}
 
- 	if (C_CRTSCTS(tty)) {
+ 	if (tty->termios.c_cflag & CRTSCTS) {
 		spin_lock_irqsave(&info->lock,flags);
 		info->serial_signals |= SerialSignal_RTS;
 	 	set_signals(info);
@@ -1612,7 +1617,7 @@ static netdev_tx_t hdlcdev_xmit(struct sk_buff *skb,
 	dev_kfree_skb(skb);
 
 	/* save start time for transmit timeout detection */
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 
 	/* start hardware transmitter if necessary */
 	spin_lock_irqsave(&info->lock,flags);
@@ -1668,7 +1673,7 @@ static int hdlcdev_open(struct net_device *dev)
 	program_hw(info);
 
 	/* enable network layer transmit */
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	netif_start_queue(dev);
 
 	/* inform generic HDLC layer of current DCD status */
@@ -2463,7 +2468,7 @@ static void isr_io_pin( SLMP_INFO *info, u16 status )
 		wake_up_interruptible(&info->status_event_wait_q);
 		wake_up_interruptible(&info->event_wait_q);
 
-		if (tty_port_check_carrier(&info->port) &&
+		if ( (info->port.flags & ASYNC_CHECK_CD) &&
 		     (status & MISCSTATUS_DCD_LATCHED) ) {
 			if ( debug_level >= DEBUG_LEVEL_ISR )
 				printk("%s CD now %s...", info->device_name,
@@ -2636,7 +2641,7 @@ static int startup(SLMP_INFO * info)
 	if ( debug_level >= DEBUG_LEVEL_INFO )
 		printk("%s(%d):%s tx_releaseup()\n",__FILE__,__LINE__,info->device_name);
 
-	if (tty_port_initialized(&info->port))
+	if (info->port.flags & ASYNC_INITIALIZED)
 		return 0;
 
 	if (!info->tx_buf) {
@@ -2662,7 +2667,7 @@ static int startup(SLMP_INFO * info)
 	if (info->port.tty)
 		clear_bit(TTY_IO_ERROR, &info->port.tty->flags);
 
-	tty_port_set_initialized(&info->port, 1);
+	info->port.flags |= ASYNC_INITIALIZED;
 
 	return 0;
 }
@@ -2673,7 +2678,7 @@ static void shutdown(SLMP_INFO * info)
 {
 	unsigned long flags;
 
-	if (!tty_port_initialized(&info->port))
+	if (!(info->port.flags & ASYNC_INITIALIZED))
 		return;
 
 	if (debug_level >= DEBUG_LEVEL_INFO)
@@ -2705,7 +2710,7 @@ static void shutdown(SLMP_INFO * info)
 	if (info->port.tty)
 		set_bit(TTY_IO_ERROR, &info->port.tty->flags);
 
-	tty_port_set_initialized(&info->port, 0);
+	info->port.flags &= ~ASYNC_INITIALIZED;
 }
 
 static void program_hw(SLMP_INFO *info)
@@ -2813,8 +2818,15 @@ static void change_params(SLMP_INFO *info)
 	}
 	info->timeout += HZ/50;		/* Add .02 seconds of slop */
 
-	tty_port_set_cts_flow(&info->port, cflag & CRTSCTS);
-	tty_port_set_check_carrier(&info->port, ~cflag & CLOCAL);
+	if (cflag & CRTSCTS)
+		info->port.flags |= ASYNC_CTS_FLOW;
+	else
+		info->port.flags &= ~ASYNC_CTS_FLOW;
+
+	if (cflag & CLOCAL)
+		info->port.flags &= ~ASYNC_CHECK_CD;
+	else
+		info->port.flags |= ASYNC_CHECK_CD;
 
 	/* process tty input control flags */
 
@@ -3278,14 +3290,14 @@ static int block_til_ready(struct tty_struct *tty, struct file *filp,
 		printk("%s(%d):%s block_til_ready()\n",
 			 __FILE__,__LINE__, tty->driver->name );
 
-	if (filp->f_flags & O_NONBLOCK || tty_io_error(tty)) {
+	if (filp->f_flags & O_NONBLOCK || tty->flags & (1 << TTY_IO_ERROR)){
 		/* nonblock mode is set or port is not enabled */
 		/* just verify that callout device is not active */
-		tty_port_set_active(port, 1);
+		port->flags |= ASYNC_NORMAL_ACTIVE;
 		return 0;
 	}
 
-	if (C_CLOCAL(tty))
+	if (tty->termios.c_cflag & CLOCAL)
 		do_clocal = true;
 
 	/* Wait for carrier detect and the line to become
@@ -3308,12 +3320,12 @@ static int block_til_ready(struct tty_struct *tty, struct file *filp,
 	port->blocked_open++;
 
 	while (1) {
-		if (C_BAUD(tty) && tty_port_initialized(port))
+		if (C_BAUD(tty) && test_bit(ASYNCB_INITIALIZED, &port->flags))
 			tty_port_raise_dtr_rts(port);
 
 		set_current_state(TASK_INTERRUPTIBLE);
 
-		if (tty_hung_up_p(filp) || !tty_port_initialized(port)) {
+		if (tty_hung_up_p(filp) || !(port->flags & ASYNC_INITIALIZED)){
 			retval = (port->flags & ASYNC_HUP_NOTIFY) ?
 					-EAGAIN : -ERESTARTSYS;
 			break;
@@ -3348,7 +3360,7 @@ static int block_til_ready(struct tty_struct *tty, struct file *filp,
 			 __FILE__,__LINE__, tty->driver->name, port->count );
 
 	if (!retval)
-		tty_port_set_active(port, 1);
+		port->flags |= ASYNC_NORMAL_ACTIVE;
 
 	return retval;
 }
@@ -3681,7 +3693,7 @@ static void release_resources(SLMP_INFO *info)
 /* Add the specified device instance data structure to the
  * global linked list of devices and increment the device count.
  */
-static int add_device(SLMP_INFO *info)
+static void add_device(SLMP_INFO *info)
 {
 	info->next_device = NULL;
 	info->line = synclinkmp_device_count;
@@ -3719,9 +3731,7 @@ static int add_device(SLMP_INFO *info)
 		info->max_frame_size );
 
 #if SYNCLINK_GENERIC_HDLC
-	return hdlcdev_init(info);
-#else
-	return 0;
+	hdlcdev_init(info);
 #endif
 }
 
@@ -3810,10 +3820,10 @@ static SLMP_INFO *alloc_dev(int adapter_num, int port_num, struct pci_dev *pdev)
 	return info;
 }
 
-static int device_init(int adapter_num, struct pci_dev *pdev)
+static void device_init(int adapter_num, struct pci_dev *pdev)
 {
 	SLMP_INFO *port_array[SCA_MAX_PORTS];
-	int port, rc;
+	int port;
 
 	/* allocate device instances for up to SCA_MAX_PORTS devices */
 	for ( port = 0; port < SCA_MAX_PORTS; ++port ) {
@@ -3823,16 +3833,14 @@ static int device_init(int adapter_num, struct pci_dev *pdev)
 				tty_port_destroy(&port_array[port]->port);
 				kfree(port_array[port]);
 			}
-			return -ENOMEM;
+			return;
 		}
 	}
 
 	/* give copy of port_array to all ports and add to device list  */
 	for ( port = 0; port < SCA_MAX_PORTS; ++port ) {
 		memcpy(port_array[port]->port_array,port_array,sizeof(port_array));
-		rc = add_device( port_array[port] );
-		if (rc)
-			goto err_add;
+		add_device( port_array[port] );
 		spin_lock_init(&port_array[port]->lock);
 	}
 
@@ -3852,30 +3860,21 @@ static int device_init(int adapter_num, struct pci_dev *pdev)
 			alloc_dma_bufs(port_array[port]);
 		}
 
-		rc = request_irq(port_array[0]->irq_level,
+		if ( request_irq(port_array[0]->irq_level,
 					synclinkmp_interrupt,
 					port_array[0]->irq_flags,
 					port_array[0]->device_name,
-					port_array[0]);
-		if ( rc ) {
+					port_array[0]) < 0 ) {
 			printk( "%s(%d):%s Can't request interrupt, IRQ=%d\n",
 				__FILE__,__LINE__,
 				port_array[0]->device_name,
 				port_array[0]->irq_level );
-			goto err_irq;
 		}
-		port_array[0]->irq_requested = true;
-		adapter_test(port_array[0]);
+		else {
+			port_array[0]->irq_requested = true;
+			adapter_test(port_array[0]);
+		}
 	}
-	return 0;
-err_irq:
-	release_resources( port_array[0] );
-err_add:
-	for ( port = 0; port < SCA_MAX_PORTS; ++port ) {
-		tty_port_destroy(&port_array[port]->port);
-		kfree(port_array[port]);
-	}
-	return rc;
 }
 
 static const struct tty_operations ops = {
@@ -5590,7 +5589,8 @@ static int synclinkmp_init_one (struct pci_dev *dev,
 		printk("error enabling pci device %p\n", dev);
 		return -EIO;
 	}
-	return device_init( ++synclinkmp_adapter_count, dev );
+	device_init( ++synclinkmp_adapter_count, dev );
+	return 0;
 }
 
 static void synclinkmp_remove_one (struct pci_dev *dev)

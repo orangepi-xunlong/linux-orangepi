@@ -13,19 +13,9 @@
 #include <uapi/asm/ptrace.h>
 
 #ifndef __ASSEMBLY__
-#include <linux/types.h>
-
 struct pt_regs {
 	unsigned long uregs[18];
 };
-
-struct svc_pt_regs {
-	struct pt_regs regs;
-	u32 dacr;
-	u32 addr_limit;
-};
-
-#define to_svc_pt_regs(r) container_of(r, struct svc_pt_regs, regs)
 
 #define user_mode(regs)	\
 	(((regs)->ARM_cpsr & 0xf) == 0)
@@ -131,7 +121,6 @@ extern unsigned long profile_pc(struct pt_regs *regs);
 #define MAX_REG_OFFSET (offsetof(struct pt_regs, ARM_ORIG_r0))
 
 extern int regs_query_register_offset(const char *name);
-extern const char *regs_query_register_name(unsigned int offset);
 extern bool regs_within_kernel_stack(struct pt_regs *regs, unsigned long addr);
 extern unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs,
 					       unsigned int n);

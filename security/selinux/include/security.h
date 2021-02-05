@@ -39,7 +39,11 @@
 
 /* Range of policy versions we understand*/
 #define POLICYDB_VERSION_MIN   POLICYDB_VERSION_BASE
+#ifdef CONFIG_SECURITY_SELINUX_POLICYDB_VERSION_MAX
+#define POLICYDB_VERSION_MAX	CONFIG_SECURITY_SELINUX_POLICYDB_VERSION_MAX_VALUE
+#else
 #define POLICYDB_VERSION_MAX	POLICYDB_VERSION_XPERMS_IOCTL
+#endif
 
 /* Mask for just the mount related flags */
 #define SE_MNTMASK	0x0f
@@ -182,9 +186,6 @@ int security_node_sid(u16 domain, void *addr, u32 addrlen,
 
 int security_validate_transition(u32 oldsid, u32 newsid, u32 tasksid,
 				 u16 tclass);
-
-int security_validate_transition_user(u32 oldsid, u32 newsid, u32 tasksid,
-				      u16 tclass);
 
 int security_bounded_transition(u32 oldsid, u32 newsid);
 

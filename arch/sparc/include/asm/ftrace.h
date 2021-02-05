@@ -9,10 +9,6 @@
 void _mcount(void);
 #endif
 
-#endif /* CONFIG_MCOUNT */
-
-#if defined(CONFIG_SPARC64) && !defined(CC_USE_FENTRY)
-#define HAVE_FUNCTION_GRAPH_FP_TEST
 #endif
 
 #ifdef CONFIG_DYNAMIC_FTRACE

@@ -163,6 +163,7 @@ MODULE_DEVICE_TABLE(i2c, tosa_bl_id);
 static struct i2c_driver tosa_bl_driver = {
 	.driver = {
 		.name		= "tosa-bl",
+		.owner		= THIS_MODULE,
 		.pm		= &tosa_bl_pm_ops,
 	},
 	.probe		= tosa_bl_probe,

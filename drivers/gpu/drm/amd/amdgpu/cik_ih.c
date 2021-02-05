@@ -103,6 +103,7 @@ static void cik_ih_disable_interrupts(struct amdgpu_device *adev)
  */
 static int cik_ih_irq_init(struct amdgpu_device *adev)
 {
+	int ret = 0;
 	int rb_bufsz;
 	u32 interrupt_cntl, ih_cntl, ih_rb_cntl;
 	u64 wptr_off;
@@ -155,7 +156,7 @@ static int cik_ih_irq_init(struct amdgpu_device *adev)
 	/* enable irqs */
 	cik_ih_enable_interrupts(adev);
 
-	return 0;
+	return ret;
 }
 
 /**
@@ -242,7 +243,7 @@ static void cik_ih_decode_iv(struct amdgpu_device *adev,
 	/* wptr/rptr are in bytes! */
 	u32 ring_index = adev->irq.ih.rptr >> 2;
 	uint32_t dw[4];
-
+	
 	dw[0] = le32_to_cpu(adev->irq.ih.ring[ring_index + 0]);
 	dw[1] = le32_to_cpu(adev->irq.ih.ring[ring_index + 1]);
 	dw[2] = le32_to_cpu(adev->irq.ih.ring[ring_index + 2]);
@@ -273,11 +274,6 @@ static void cik_ih_set_rptr(struct amdgpu_device *adev)
 static int cik_ih_early_init(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-	int ret;
-
-	ret = amdgpu_irq_add_domain(adev);
-	if (ret)
-		return ret;
 
 	cik_ih_set_interrupt_funcs(adev);
 
@@ -304,7 +300,6 @@ static int cik_ih_sw_fini(void *handle)
 
 	amdgpu_irq_fini(adev);
 	amdgpu_ih_ring_fini(adev);
-	amdgpu_irq_remove_domain(adev);
 
 	return 0;
 }
@@ -371,6 +366,35 @@ static int cik_ih_wait_for_idle(void *handle)
 	return -ETIMEDOUT;
 }
 
+static void cik_ih_print_status(void *handle)
+{
+	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+
+	dev_info(adev->dev, "CIK IH registers\n");
+	dev_info(adev->dev, "  SRBM_STATUS=0x%08X\n",
+		RREG32(mmSRBM_STATUS));
+	dev_info(adev->dev, "  SRBM_STATUS2=0x%08X\n",
+		RREG32(mmSRBM_STATUS2));
+	dev_info(adev->dev, "  INTERRUPT_CNTL=0x%08X\n",
+		 RREG32(mmINTERRUPT_CNTL));
+	dev_info(adev->dev, "  INTERRUPT_CNTL2=0x%08X\n",
+		 RREG32(mmINTERRUPT_CNTL2));
+	dev_info(adev->dev, "  IH_CNTL=0x%08X\n",
+		 RREG32(mmIH_CNTL));
+	dev_info(adev->dev, "  IH_RB_CNTL=0x%08X\n",
+		 RREG32(mmIH_RB_CNTL));
+	dev_info(adev->dev, "  IH_RB_BASE=0x%08X\n",
+		 RREG32(mmIH_RB_BASE));
+	dev_info(adev->dev, "  IH_RB_WPTR_ADDR_LO=0x%08X\n",
+		 RREG32(mmIH_RB_WPTR_ADDR_LO));
+	dev_info(adev->dev, "  IH_RB_WPTR_ADDR_HI=0x%08X\n",
+		 RREG32(mmIH_RB_WPTR_ADDR_HI));
+	dev_info(adev->dev, "  IH_RB_RPTR=0x%08X\n",
+		 RREG32(mmIH_RB_RPTR));
+	dev_info(adev->dev, "  IH_RB_WPTR=0x%08X\n",
+		 RREG32(mmIH_RB_WPTR));
+}
+
 static int cik_ih_soft_reset(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
@@ -382,6 +406,8 @@ static int cik_ih_soft_reset(void *handle)
 		srbm_soft_reset |= SRBM_SOFT_RESET__SOFT_RESET_IH_MASK;
 
 	if (srbm_soft_reset) {
+		cik_ih_print_status((void *)adev);
+
 		tmp = RREG32(mmSRBM_SOFT_RESET);
 		tmp |= srbm_soft_reset;
 		dev_info(adev->dev, "SRBM_SOFT_RESET=0x%08X\n", tmp);
@@ -396,6 +422,8 @@ static int cik_ih_soft_reset(void *handle)
 
 		/* Wait a little for things to settle down */
 		udelay(50);
+
+		cik_ih_print_status((void *)adev);
 	}
 
 	return 0;
@@ -414,7 +442,6 @@ static int cik_ih_set_powergating_state(void *handle,
 }
 
 const struct amd_ip_funcs cik_ih_ip_funcs = {
-	.name = "cik_ih",
 	.early_init = cik_ih_early_init,
 	.late_init = NULL,
 	.sw_init = cik_ih_sw_init,
@@ -426,6 +453,7 @@ const struct amd_ip_funcs cik_ih_ip_funcs = {
 	.is_idle = cik_ih_is_idle,
 	.wait_for_idle = cik_ih_wait_for_idle,
 	.soft_reset = cik_ih_soft_reset,
+	.print_status = cik_ih_print_status,
 	.set_clockgating_state = cik_ih_set_clockgating_state,
 	.set_powergating_state = cik_ih_set_powergating_state,
 };

@@ -23,15 +23,22 @@
 
 const struct inode_operations jfs_fast_symlink_inode_operations = {
 	.readlink	= generic_readlink,
-	.get_link	= simple_get_link,
+	.follow_link	= simple_follow_link,
 	.setattr	= jfs_setattr,
+	.setxattr	= jfs_setxattr,
+	.getxattr	= jfs_getxattr,
 	.listxattr	= jfs_listxattr,
+	.removexattr	= jfs_removexattr,
 };
 
 const struct inode_operations jfs_symlink_inode_operations = {
 	.readlink	= generic_readlink,
-	.get_link	= page_get_link,
+	.follow_link	= page_follow_link_light,
+	.put_link	= page_put_link,
 	.setattr	= jfs_setattr,
+	.setxattr	= jfs_setxattr,
+	.getxattr	= jfs_getxattr,
 	.listxattr	= jfs_listxattr,
+	.removexattr	= jfs_removexattr,
 };
 

@@ -44,15 +44,11 @@ struct xfrm_flo {
 	u8 flags;
 };
 
-static DEFINE_SPINLOCK(xfrm_if_cb_lock);
-static struct xfrm_if_cb const __rcu *xfrm_if_cb __read_mostly;
-
 static DEFINE_SPINLOCK(xfrm_policy_afinfo_lock);
 static struct xfrm_policy_afinfo __rcu *xfrm_policy_afinfo[NPROTO]
 						__read_mostly;
 
 static struct kmem_cache *xfrm_dst_cache __read_mostly;
-static __read_mostly seqcount_t xfrm_policy_hash_generation;
 
 static void xfrm_init_pmtu(struct dst_entry *dst);
 static int stale_bundle(struct dst_entry *dst);
@@ -62,11 +58,6 @@ static void xfrm_policy_queue_process(unsigned long arg);
 static void __xfrm_policy_link(struct xfrm_policy *pol, int dir);
 static struct xfrm_policy *__xfrm_policy_unlink(struct xfrm_policy *pol,
 						int dir);
-
-static inline bool xfrm_pol_hold_rcu(struct xfrm_policy *policy)
-{
-	return atomic_inc_not_zero(&policy->refcnt);
-}
 
 static inline bool
 __xfrm4_selector_match(const struct xfrm_selector *sel, const struct flowi *fl)
@@ -119,13 +110,7 @@ static struct xfrm_policy_afinfo *xfrm_policy_get_afinfo(unsigned short family)
 	return afinfo;
 }
 
-/* Called with rcu_read_lock(). */
-static const struct xfrm_if_cb *xfrm_if_get_cb(void)
-{
-	return rcu_dereference(xfrm_if_cb);
-}
-
-static void xfrm_policy_put_afinfo(const struct xfrm_policy_afinfo *afinfo)
+static void xfrm_policy_put_afinfo(struct xfrm_policy_afinfo *afinfo)
 {
 	rcu_read_unlock();
 }
@@ -400,11 +385,9 @@ static struct hlist_head *policy_hash_bysel(struct net *net,
 	__get_hash_thresh(net, family, dir, &dbits, &sbits);
 	hash = __sel_hash(sel, family, hmask, dbits, sbits);
 
-	if (hash == hmask + 1)
-		return &net->xfrm.policy_inexact[dir];
-
-	return rcu_dereference_check(net->xfrm.policy_bydst[dir].table,
-		     lockdep_is_held(&net->xfrm.xfrm_policy_lock)) + hash;
+	return (hash == hmask + 1 ?
+		&net->xfrm.policy_inexact[dir] :
+		net->xfrm.policy_bydst[dir].table + hash);
 }
 
 static struct hlist_head *policy_hash_direct(struct net *net,
@@ -420,8 +403,7 @@ static struct hlist_head *policy_hash_direct(struct net *net,
 	__get_hash_thresh(net, family, dir, &dbits, &sbits);
 	hash = __addr_hash(daddr, saddr, family, hmask, dbits, sbits);
 
-	return rcu_dereference_check(net->xfrm.policy_bydst[dir].table,
-		     lockdep_is_held(&net->xfrm.xfrm_policy_lock)) + hash;
+	return net->xfrm.policy_bydst[dir].table + hash;
 }
 
 static void xfrm_dst_hash_transfer(struct net *net,
@@ -444,14 +426,14 @@ redo:
 		h = __addr_hash(&pol->selector.daddr, &pol->selector.saddr,
 				pol->family, nhashmask, dbits, sbits);
 		if (!entry0) {
-			hlist_del_rcu(&pol->bydst);
-			hlist_add_head_rcu(&pol->bydst, ndsttable + h);
+			hlist_del(&pol->bydst);
+			hlist_add_head(&pol->bydst, ndsttable+h);
 			h0 = h;
 		} else {
 			if (h != h0)
 				continue;
-			hlist_del_rcu(&pol->bydst);
-			hlist_add_behind_rcu(&pol->bydst, entry0);
+			hlist_del(&pol->bydst);
+			hlist_add_behind(&pol->bydst, entry0);
 		}
 		entry0 = &pol->bydst;
 	}
@@ -486,32 +468,22 @@ static void xfrm_bydst_resize(struct net *net, int dir)
 	unsigned int hmask = net->xfrm.policy_bydst[dir].hmask;
 	unsigned int nhashmask = xfrm_new_hash_mask(hmask);
 	unsigned int nsize = (nhashmask + 1) * sizeof(struct hlist_head);
+	struct hlist_head *odst = net->xfrm.policy_bydst[dir].table;
 	struct hlist_head *ndst = xfrm_hash_alloc(nsize);
-	struct hlist_head *odst;
 	int i;
 
 	if (!ndst)
 		return;
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
-	write_seqcount_begin(&xfrm_policy_hash_generation);
-
-	odst = rcu_dereference_protected(net->xfrm.policy_bydst[dir].table,
-				lockdep_is_held(&net->xfrm.xfrm_policy_lock));
-
-	odst = rcu_dereference_protected(net->xfrm.policy_bydst[dir].table,
-				lockdep_is_held(&net->xfrm.xfrm_policy_lock));
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 
 	for (i = hmask; i >= 0; i--)
 		xfrm_dst_hash_transfer(net, odst + i, ndst, nhashmask, dir);
 
-	rcu_assign_pointer(net->xfrm.policy_bydst[dir].table, ndst);
+	net->xfrm.policy_bydst[dir].table = ndst;
 	net->xfrm.policy_bydst[dir].hmask = nhashmask;
 
-	write_seqcount_end(&xfrm_policy_hash_generation);
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
-
-	synchronize_rcu();
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	xfrm_hash_free(odst, (hmask + 1) * sizeof(struct hlist_head));
 }
@@ -528,7 +500,7 @@ static void xfrm_byidx_resize(struct net *net, int total)
 	if (!nidx)
 		return;
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 
 	for (i = hmask; i >= 0; i--)
 		xfrm_idx_hash_transfer(oidx + i, nidx, nhashmask);
@@ -536,7 +508,7 @@ static void xfrm_byidx_resize(struct net *net, int total)
 	net->xfrm.policy_byidx = nidx;
 	net->xfrm.policy_idx_hmask = nhashmask;
 
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	xfrm_hash_free(oidx, (hmask + 1) * sizeof(struct hlist_head));
 }
@@ -569,6 +541,7 @@ static inline int xfrm_byidx_should_resize(struct net *net, int total)
 
 void xfrm_spd_getinfo(struct net *net, struct xfrmk_spdinfo *si)
 {
+	read_lock_bh(&net->xfrm.xfrm_policy_lock);
 	si->incnt = net->xfrm.policy_count[XFRM_POLICY_IN];
 	si->outcnt = net->xfrm.policy_count[XFRM_POLICY_OUT];
 	si->fwdcnt = net->xfrm.policy_count[XFRM_POLICY_FWD];
@@ -577,6 +550,7 @@ void xfrm_spd_getinfo(struct net *net, struct xfrmk_spdinfo *si)
 	si->fwdscnt = net->xfrm.policy_count[XFRM_POLICY_FWD+XFRM_POLICY_MAX];
 	si->spdhcnt = net->xfrm.policy_idx_hmask;
 	si->spdhmcnt = xfrm_policy_hashmax;
+	read_unlock_bh(&net->xfrm.xfrm_policy_lock);
 }
 EXPORT_SYMBOL(xfrm_spd_getinfo);
 
@@ -626,7 +600,7 @@ static void xfrm_hash_rebuild(struct work_struct *work)
 		rbits6 = net->xfrm.policy_hthresh.rbits6;
 	} while (read_seqretry(&net->xfrm.policy_hthresh.lock, seq));
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 
 	/* reset the bydst and inexact table in all directions */
 	for (dir = 0; dir < XFRM_POLICY_MAX; dir++) {
@@ -668,12 +642,12 @@ static void xfrm_hash_rebuild(struct work_struct *work)
 				break;
 		}
 		if (newpos)
-			hlist_add_behind_rcu(&policy->bydst, newpos);
+			hlist_add_behind(&policy->bydst, newpos);
 		else
-			hlist_add_head_rcu(&policy->bydst, chain);
+			hlist_add_head(&policy->bydst, chain);
 	}
 
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	mutex_unlock(&hash_resize_mutex);
 }
@@ -784,19 +758,18 @@ int xfrm_policy_insert(int dir, struct xfrm_policy *policy, int excl)
 	struct hlist_head *chain;
 	struct hlist_node *newpos;
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 	chain = policy_hash_bysel(net, &policy->selector, policy->family, dir);
 	delpol = NULL;
 	newpos = NULL;
 	hlist_for_each_entry(pol, chain, bydst) {
 		if (pol->type == policy->type &&
-		    pol->if_id == policy->if_id &&
 		    !selector_cmp(&pol->selector, &policy->selector) &&
 		    xfrm_policy_mark_match(policy, pol) &&
 		    xfrm_sec_ctx_match(pol->security, policy->security) &&
 		    !WARN_ON(delpol)) {
 			if (excl) {
-				spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+				write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 				return -EEXIST;
 			}
 			delpol = pol;
@@ -810,9 +783,9 @@ int xfrm_policy_insert(int dir, struct xfrm_policy *policy, int excl)
 			break;
 	}
 	if (newpos)
-		hlist_add_behind_rcu(&policy->bydst, newpos);
+		hlist_add_behind(&policy->bydst, newpos);
 	else
-		hlist_add_head_rcu(&policy->bydst, chain);
+		hlist_add_head(&policy->bydst, chain);
 	__xfrm_policy_link(policy, dir);
 	atomic_inc(&net->xfrm.flow_cache_genid);
 
@@ -832,7 +805,7 @@ int xfrm_policy_insert(int dir, struct xfrm_policy *policy, int excl)
 	policy->curlft.use_time = 0;
 	if (!mod_timer(&policy->timer, jiffies + HZ))
 		xfrm_pol_hold(policy);
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	if (delpol)
 		xfrm_policy_kill(delpol);
@@ -843,9 +816,8 @@ int xfrm_policy_insert(int dir, struct xfrm_policy *policy, int excl)
 }
 EXPORT_SYMBOL(xfrm_policy_insert);
 
-struct xfrm_policy *xfrm_policy_bysel_ctx(struct net *net, u32 mark, u32 if_id,
-					  u8 type, int dir,
-					  struct xfrm_selector *sel,
+struct xfrm_policy *xfrm_policy_bysel_ctx(struct net *net, u32 mark, u8 type,
+					  int dir, struct xfrm_selector *sel,
 					  struct xfrm_sec_ctx *ctx, int delete,
 					  int *err)
 {
@@ -853,12 +825,11 @@ struct xfrm_policy *xfrm_policy_bysel_ctx(struct net *net, u32 mark, u32 if_id,
 	struct hlist_head *chain;
 
 	*err = 0;
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 	chain = policy_hash_bysel(net, sel, sel->family, dir);
 	ret = NULL;
 	hlist_for_each_entry(pol, chain, bydst) {
 		if (pol->type == type &&
-		    pol->if_id == if_id &&
 		    (mark & pol->mark.m) == pol->mark.v &&
 		    !selector_cmp(sel, &pol->selector) &&
 		    xfrm_sec_ctx_match(ctx, pol->security)) {
@@ -867,7 +838,7 @@ struct xfrm_policy *xfrm_policy_bysel_ctx(struct net *net, u32 mark, u32 if_id,
 				*err = security_xfrm_policy_delete(
 								pol->security);
 				if (*err) {
-					spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+					write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 					return pol;
 				}
 				__xfrm_policy_unlink(pol, dir);
@@ -876,7 +847,7 @@ struct xfrm_policy *xfrm_policy_bysel_ctx(struct net *net, u32 mark, u32 if_id,
 			break;
 		}
 	}
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	if (ret && delete)
 		xfrm_policy_kill(ret);
@@ -884,9 +855,8 @@ struct xfrm_policy *xfrm_policy_bysel_ctx(struct net *net, u32 mark, u32 if_id,
 }
 EXPORT_SYMBOL(xfrm_policy_bysel_ctx);
 
-struct xfrm_policy *xfrm_policy_byid(struct net *net, u32 mark, u32 if_id,
-				     u8 type, int dir, u32 id, int delete,
-				     int *err)
+struct xfrm_policy *xfrm_policy_byid(struct net *net, u32 mark, u8 type,
+				     int dir, u32 id, int delete, int *err)
 {
 	struct xfrm_policy *pol, *ret;
 	struct hlist_head *chain;
@@ -896,19 +866,18 @@ struct xfrm_policy *xfrm_policy_byid(struct net *net, u32 mark, u32 if_id,
 		return NULL;
 
 	*err = 0;
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 	chain = net->xfrm.policy_byidx + idx_hash(net, id);
 	ret = NULL;
 	hlist_for_each_entry(pol, chain, byidx) {
 		if (pol->type == type && pol->index == id &&
-		    pol->if_id == if_id &&
 		    (mark & pol->mark.m) == pol->mark.v) {
 			xfrm_pol_hold(pol);
 			if (delete) {
 				*err = security_xfrm_policy_delete(
 								pol->security);
 				if (*err) {
-					spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+					write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 					return pol;
 				}
 				__xfrm_policy_unlink(pol, dir);
@@ -917,7 +886,7 @@ struct xfrm_policy *xfrm_policy_byid(struct net *net, u32 mark, u32 if_id,
 			break;
 		}
 	}
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	if (ret && delete)
 		xfrm_policy_kill(ret);
@@ -975,7 +944,7 @@ int xfrm_policy_flush(struct net *net, u8 type, bool task_valid)
 {
 	int dir, err = 0, cnt = 0;
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 
 	err = xfrm_policy_flush_secctx_check(net, type, task_valid);
 	if (err)
@@ -991,14 +960,14 @@ int xfrm_policy_flush(struct net *net, u8 type, bool task_valid)
 			if (pol->type != type)
 				continue;
 			__xfrm_policy_unlink(pol, dir);
-			spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+			write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 			cnt++;
 
 			xfrm_audit_policy_delete(pol, 1, task_valid);
 
 			xfrm_policy_kill(pol);
 
-			spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+			write_lock_bh(&net->xfrm.xfrm_policy_lock);
 			goto again1;
 		}
 
@@ -1010,13 +979,13 @@ int xfrm_policy_flush(struct net *net, u8 type, bool task_valid)
 				if (pol->type != type)
 					continue;
 				__xfrm_policy_unlink(pol, dir);
-				spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+				write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 				cnt++;
 
 				xfrm_audit_policy_delete(pol, 1, task_valid);
 				xfrm_policy_kill(pol);
 
-				spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+				write_lock_bh(&net->xfrm.xfrm_policy_lock);
 				goto again2;
 			}
 		}
@@ -1025,7 +994,7 @@ int xfrm_policy_flush(struct net *net, u8 type, bool task_valid)
 	if (!cnt)
 		err = -ESRCH;
 out:
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 	return err;
 }
 EXPORT_SYMBOL(xfrm_policy_flush);
@@ -1045,7 +1014,7 @@ int xfrm_policy_walk(struct net *net, struct xfrm_policy_walk *walk,
 	if (list_empty(&walk->walk.all) && walk->seq != 0)
 		return 0;
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 	if (list_empty(&walk->walk.all))
 		x = list_first_entry(&net->xfrm.policy_all, struct xfrm_policy_walk_entry, all);
 	else
@@ -1073,7 +1042,7 @@ int xfrm_policy_walk(struct net *net, struct xfrm_policy_walk *walk,
 	}
 	list_del_init(&walk->walk.all);
 out:
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 	return error;
 }
 EXPORT_SYMBOL(xfrm_policy_walk);
@@ -1092,9 +1061,9 @@ void xfrm_policy_walk_done(struct xfrm_policy_walk *walk, struct net *net)
 	if (list_empty(&walk->walk.all))
 		return;
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock); /*FIXME where is net? */
+	write_lock_bh(&net->xfrm.xfrm_policy_lock); /*FIXME where is net? */
 	list_del(&walk->walk.all);
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 }
 EXPORT_SYMBOL(xfrm_policy_walk_done);
 
@@ -1112,7 +1081,6 @@ static int xfrm_policy_match(const struct xfrm_policy *pol,
 	bool match;
 
 	if (pol->family != family ||
-	    pol->if_id != fl->flowi_xfrm.if_id ||
 	    (fl->flowi_mark & pol->mark.m) != pol->mark.v ||
 	    pol->type != type)
 		return ret;
@@ -1133,24 +1101,17 @@ static struct xfrm_policy *xfrm_policy_lookup_bytype(struct net *net, u8 type,
 	struct xfrm_policy *pol, *ret;
 	const xfrm_address_t *daddr, *saddr;
 	struct hlist_head *chain;
-	unsigned int sequence;
-	u32 priority;
+	u32 priority = ~0U;
 
 	daddr = xfrm_flowi_daddr(fl, family);
 	saddr = xfrm_flowi_saddr(fl, family);
 	if (unlikely(!daddr || !saddr))
 		return NULL;
 
-	rcu_read_lock();
- retry:
-	do {
-		sequence = read_seqcount_begin(&xfrm_policy_hash_generation);
-		chain = policy_hash_direct(net, daddr, saddr, family, dir);
-	} while (read_seqcount_retry(&xfrm_policy_hash_generation, sequence));
-
-	priority = ~0U;
+	read_lock_bh(&net->xfrm.xfrm_policy_lock);
+	chain = policy_hash_direct(net, daddr, saddr, family, dir);
 	ret = NULL;
-	hlist_for_each_entry_rcu(pol, chain, bydst) {
+	hlist_for_each_entry(pol, chain, bydst) {
 		err = xfrm_policy_match(pol, fl, type, family, dir);
 		if (err) {
 			if (err == -ESRCH)
@@ -1166,7 +1127,7 @@ static struct xfrm_policy *xfrm_policy_lookup_bytype(struct net *net, u8 type,
 		}
 	}
 	chain = &net->xfrm.policy_inexact[dir];
-	hlist_for_each_entry_rcu(pol, chain, bydst) {
+	hlist_for_each_entry(pol, chain, bydst) {
 		if ((pol->priority >= priority) && ret)
 			break;
 
@@ -1184,13 +1145,9 @@ static struct xfrm_policy *xfrm_policy_lookup_bytype(struct net *net, u8 type,
 		}
 	}
 
-	if (read_seqcount_retry(&xfrm_policy_hash_generation, sequence))
-		goto retry;
-
-	if (ret && !xfrm_pol_hold_rcu(ret))
-		goto retry;
+	xfrm_pol_hold(ret);
 fail:
-	rcu_read_unlock();
+	read_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	return ret;
 }
@@ -1267,9 +1224,10 @@ static struct xfrm_policy *xfrm_sk_policy_lookup(const struct sock *sk, int dir,
 						 const struct flowi *fl, u16 family)
 {
 	struct xfrm_policy *pol;
+	struct net *net = sock_net(sk);
 
 	rcu_read_lock();
- again:
+	read_lock_bh(&net->xfrm.xfrm_policy_lock);
 	pol = rcu_dereference(sk->sk_policy[dir]);
 	if (pol != NULL) {
 		bool match;
@@ -1282,26 +1240,24 @@ static struct xfrm_policy *xfrm_sk_policy_lookup(const struct sock *sk, int dir,
 
 		match = xfrm_selector_match(&pol->selector, fl, family);
 		if (match) {
-			if ((sk->sk_mark & pol->mark.m) != pol->mark.v ||
-			    pol->if_id != fl->flowi_xfrm.if_id) {
+			if ((sk->sk_mark & pol->mark.m) != pol->mark.v) {
 				pol = NULL;
 				goto out;
 			}
 			err = security_xfrm_policy_lookup(pol->security,
 						      fl->flowi_secid,
 						      policy_to_flow_dir(dir));
-			if (!err) {
-				if (!xfrm_pol_hold_rcu(pol))
-					goto again;
-			} else if (err == -ESRCH) {
+			if (!err)
+				xfrm_pol_hold(pol);
+			else if (err == -ESRCH)
 				pol = NULL;
-			} else {
+			else
 				pol = ERR_PTR(err);
-			}
 		} else
 			pol = NULL;
 	}
 out:
+	read_unlock_bh(&net->xfrm.xfrm_policy_lock);
 	rcu_read_unlock();
 	return pol;
 }
@@ -1325,7 +1281,7 @@ static struct xfrm_policy *__xfrm_policy_unlink(struct xfrm_policy *pol,
 
 	/* Socket policies are not hashed. */
 	if (!hlist_unhashed(&pol->bydst)) {
-		hlist_del_rcu(&pol->bydst);
+		hlist_del(&pol->bydst);
 		hlist_del(&pol->byidx);
 	}
 
@@ -1349,9 +1305,9 @@ int xfrm_policy_delete(struct xfrm_policy *pol, int dir)
 {
 	struct net *net = xp_net(pol);
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 	pol = __xfrm_policy_unlink(pol, dir);
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 	if (pol) {
 		xfrm_policy_kill(pol);
 		return 0;
@@ -1370,7 +1326,7 @@ int xfrm_sk_policy_insert(struct sock *sk, int dir, struct xfrm_policy *pol)
 		return -EINVAL;
 #endif
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 	old_pol = rcu_dereference_protected(sk->sk_policy[dir],
 				lockdep_is_held(&net->xfrm.xfrm_policy_lock));
 	if (pol) {
@@ -1388,7 +1344,7 @@ int xfrm_sk_policy_insert(struct sock *sk, int dir, struct xfrm_policy *pol)
 		 */
 		xfrm_sk_policy_unlink(old_pol, dir);
 	}
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	if (old_pol) {
 		xfrm_policy_kill(old_pol);
@@ -1411,7 +1367,6 @@ static struct xfrm_policy *clone_policy(const struct xfrm_policy *old, int dir)
 		newp->lft = old->lft;
 		newp->curlft = old->curlft;
 		newp->mark = old->mark;
-		newp->if_id = old->if_id;
 		newp->action = old->action;
 		newp->flags = old->flags;
 		newp->xfrm_nr = old->xfrm_nr;
@@ -1420,9 +1375,9 @@ static struct xfrm_policy *clone_policy(const struct xfrm_policy *old, int dir)
 		newp->family = old->family;
 		memcpy(newp->xfrm_vec, old->xfrm_vec,
 		       newp->xfrm_nr*sizeof(struct xfrm_tmpl));
-		spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+		write_lock_bh(&net->xfrm.xfrm_policy_lock);
 		xfrm_sk_policy_link(newp, dir);
-		spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+		write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 		xfrm_pol_put(newp);
 	}
 	return newp;
@@ -1767,14 +1722,10 @@ static struct dst_entry *xfrm_bundle_create(struct xfrm_policy *policy,
 		dst_copy_metrics(dst1, dst);
 
 		if (xfrm[i]->props.mode != XFRM_MODE_TRANSPORT) {
-			__u32 mark = 0;
-
-			if (xfrm[i]->props.smark.v || xfrm[i]->props.smark.m)
-				mark = xfrm_smark_get(fl->flowi_mark, xfrm[i]);
-
 			family = xfrm[i]->props.family;
 			dst = xfrm_dst_lookup(xfrm[i], tos, fl->flowi_oif,
-					      &saddr, &daddr, family, mark);
+					      &saddr, &daddr, family,
+					      xfrm[i]->props.output_mark);
 			err = PTR_ERR(dst);
 			if (IS_ERR(dst))
 				goto put_states;
@@ -2144,10 +2095,6 @@ xfrm_bundle_lookup(struct net *net, const struct flowi *fl, u16 family, u8 dir,
 						  xflo->dst_orig);
 	if (IS_ERR(new_xdst)) {
 		err = PTR_ERR(new_xdst);
-		if (err == -EREMOTE) {
-			xfrm_pols_put(pols, num_pols);
-			return NULL;
-		}
 		if (err != -EAGAIN)
 			goto error;
 		if (oldflo == NULL)
@@ -2260,9 +2207,6 @@ struct dst_entry *xfrm_lookup(struct net *net, struct dst_entry *dst_orig,
 			if (IS_ERR(xdst)) {
 				xfrm_pols_put(pols, num_pols);
 				err = PTR_ERR(xdst);
-				if (err == -EREMOTE)
-					goto nopol;
-
 				goto dropdst;
 			} else if (xdst == NULL) {
 				num_xfrms = 0;
@@ -2461,21 +2405,13 @@ xfrm_policy_ok(const struct xfrm_tmpl *tmpl, const struct sec_path *sp, int star
 int __xfrm_decode_session(struct sk_buff *skb, struct flowi *fl,
 			  unsigned int family, int reverse)
 {
-	const struct xfrm_policy_afinfo *afinfo = xfrm_policy_get_afinfo(family);
-	const struct xfrm_if_cb *ifcb = xfrm_if_get_cb();
-	struct xfrm_if *xi;
+	struct xfrm_policy_afinfo *afinfo = xfrm_policy_get_afinfo(family);
 	int err;
 
 	if (unlikely(afinfo == NULL))
 		return -EAFNOSUPPORT;
 
 	afinfo->decode_session(skb, fl, reverse);
-	if (ifcb) {
-		xi = ifcb->decode_session(skb);
-		if (xi)
-			fl->flowi_xfrm.if_id = xi->p.if_id;
-	}
-
 	err = security_xfrm_decode_session(skb, &fl->flowi_secid);
 	xfrm_policy_put_afinfo(afinfo);
 	return err;
@@ -2940,20 +2876,6 @@ static int xfrm_dev_event(struct notifier_block *this, unsigned long event, void
 static struct notifier_block xfrm_dev_notifier = {
 	.notifier_call	= xfrm_dev_event,
 };
-void xfrm_if_register_cb(const struct xfrm_if_cb *ifcb)
-{
-	spin_lock(&xfrm_if_cb_lock);
-	rcu_assign_pointer(xfrm_if_cb, ifcb);
-	spin_unlock(&xfrm_if_cb_lock);
-}
-EXPORT_SYMBOL(xfrm_if_register_cb);
-
-void xfrm_if_unregister_cb(void)
-{
-	RCU_INIT_POINTER(xfrm_if_cb, NULL);
-	synchronize_rcu();
-}
-EXPORT_SYMBOL(xfrm_if_unregister_cb);
 
 #ifdef CONFIG_XFRM_STATISTICS
 static int __net_init xfrm_statistics_init(struct net *net)
@@ -3081,7 +3003,7 @@ static int __net_init xfrm_net_init(struct net *net)
 
 	/* Initialize the per-net locks here */
 	spin_lock_init(&net->xfrm.xfrm_state_lock);
-	spin_lock_init(&net->xfrm.xfrm_policy_lock);
+	rwlock_init(&net->xfrm.xfrm_policy_lock);
 	mutex_init(&net->xfrm.xfrm_cfg_mutex);
 
 	rv = xfrm_statistics_init(net);
@@ -3131,11 +3053,7 @@ static struct pernet_operations __net_initdata xfrm_net_ops = {
 void __init xfrm_init(void)
 {
 	register_pernet_subsys(&xfrm_net_ops);
-	seqcount_init(&xfrm_policy_hash_generation);
 	xfrm_input_init();
-
-	RCU_INIT_POINTER(xfrm_if_cb, NULL);
-	synchronize_rcu();
 }
 
 #ifdef CONFIG_AUDITSYSCALL
@@ -3232,7 +3150,7 @@ static struct xfrm_policy *xfrm_migrate_policy_find(const struct xfrm_selector *
 	struct hlist_head *chain;
 	u32 priority = ~0U;
 
-	spin_lock_bh(&net->xfrm.xfrm_policy_lock);
+	read_lock_bh(&net->xfrm.xfrm_policy_lock); /*FIXME*/
 	chain = policy_hash_direct(net, &sel->daddr, &sel->saddr, sel->family, dir);
 	hlist_for_each_entry(pol, chain, bydst) {
 		if (xfrm_migrate_selector_match(sel, &pol->selector) &&
@@ -3256,7 +3174,7 @@ static struct xfrm_policy *xfrm_migrate_policy_find(const struct xfrm_selector *
 
 	xfrm_pol_hold(ret);
 
-	spin_unlock_bh(&net->xfrm.xfrm_policy_lock);
+	read_unlock_bh(&net->xfrm.xfrm_policy_lock);
 
 	return ret;
 }

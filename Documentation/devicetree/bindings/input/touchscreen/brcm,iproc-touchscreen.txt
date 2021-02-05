@@ -2,17 +2,11 @@
 
 Required properties:
 - compatible: must be "brcm,iproc-touchscreen"
-- ts_syscon: handler of syscon node defining physical base
-  address of the controller and length of memory mapped region.
-  If this property is selected please make sure MFD_SYSCON config
-  is enabled in the defconfig file.
+- reg: physical base address of the controller and length of memory mapped
+  region.
 - clocks:  The clock provided by the SOC to driver the tsc
-- clock-names:  name for the clock
+- clock-name:  name for the clock
 - interrupts: The touchscreen controller's interrupt
-- address-cells: Specify the number of u32 entries needed in child nodes.
-  Should set to 1.
-- size-cells: Specify number of u32 entries needed to specify child nodes size
-  in reg property. Should set to 1.
 
 Optional properties:
 - scanning_period: Time between scans. Each step is 1024 us.  Valid 1-256.
@@ -59,18 +53,13 @@ Optional properties:
 - touchscreen-inverted-x: X axis is inverted (boolean)
 - touchscreen-inverted-y: Y axis is inverted (boolean)
 
-Example: An example of touchscreen node
+Example:
 
-	ts_adc_syscon: ts_adc_syscon@180a6000 {
-		compatible = "brcm,iproc-ts-adc-syscon","syscon";
-		reg = <0x180a6000 0xc30>;
-	};
-
-	touchscreen: touchscreen@180A6000 {
+	touchscreen: tsc@0x180A6000 {
 		compatible = "brcm,iproc-touchscreen";
 		#address-cells = <1>;
 		#size-cells = <1>;
-		ts_syscon = <&ts_adc_syscon>;
+		reg = <0x180A6000 0x40>;
 		clocks = <&adc_clk>;
 		clock-names = "tsc_clk";
 		interrupts = <GIC_SPI 164 IRQ_TYPE_LEVEL_HIGH>;

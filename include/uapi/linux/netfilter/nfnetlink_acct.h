@@ -29,7 +29,6 @@ enum nfnl_acct_type {
 	NFACCT_FLAGS,
 	NFACCT_QUOTA,
 	NFACCT_FILTER,
-	NFACCT_PAD,
 	__NFACCT_MAX
 };
 #define NFACCT_MAX (__NFACCT_MAX - 1)

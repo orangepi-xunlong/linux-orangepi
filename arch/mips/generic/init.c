@@ -30,18 +30,8 @@ static __initdata const void *mach_match_data;
 
 void __init prom_init(void)
 {
-	plat_get_fdt();
-	BUG_ON(!fdt);
-}
-
-void __init *plat_get_fdt(void)
-{
 	const struct mips_machine *check_mach;
 	const struct of_device_id *match;
-
-	if (fdt)
-		/* Already set up */
-		return (void *)fdt;
 
 	if ((fw_arg0 == -2) && !fdt_check_header((void *)fw_arg1)) {
 		/*
@@ -85,6 +75,12 @@ void __init *plat_get_fdt(void)
 		/* Retrieve the machine's FDT */
 		fdt = mach->fdt;
 	}
+
+	BUG_ON(!fdt);
+}
+
+void __init *plat_get_fdt(void)
+{
 	return (void *)fdt;
 }
 
@@ -159,7 +155,6 @@ void __init arch_init_irq(void)
 					    "mti,cpu-interrupt-controller");
 	if (!cpu_has_veic && !intc_node)
 		mips_cpu_irq_init();
-	of_node_put(intc_node);
 
 	irqchip_init();
 }

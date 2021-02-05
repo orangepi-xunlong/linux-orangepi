@@ -7,6 +7,3 @@
 #ifndef __NR_gettid
 # define __NR_gettid 224
 #endif
-#ifndef __NR_getcpu
-# define __NR_getcpu 318
-#endif

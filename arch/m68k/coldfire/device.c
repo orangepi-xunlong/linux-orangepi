@@ -89,7 +89,7 @@ static struct platform_device mcf_uart = {
 	.dev.platform_data	= mcf_uart_platform_data,
 };
 
-#if IS_ENABLED(CONFIG_FEC)
+#ifdef CONFIG_FEC
 
 #ifdef CONFIG_M5441x
 #define FEC_NAME	"enet-fec"
@@ -337,7 +337,7 @@ static struct platform_device mcf_qspi = {
 
 static struct platform_device *mcf_devices[] __initdata = {
 	&mcf_uart,
-#if IS_ENABLED(CONFIG_FEC)
+#ifdef CONFIG_FEC
 	&mcf_fec0,
 #ifdef MCFFEC_BASE1
 	&mcf_fec1,

@@ -6,7 +6,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/moduleparam.h>
+#include <linux/module.h>
 #include <linux/wait.h>
 #include <linux/bitops.h>
 #include <xen/events.h>
@@ -310,7 +310,7 @@ void xen_pcibk_test_and_schedule_op(struct xen_pcibk_device *pdev)
 	 * already processing a request */
 	if (test_bit(_XEN_PCIF_active, (unsigned long *)&pdev->sh_info->flags)
 	    && !test_and_set_bit(_PDEVF_op_active, &pdev->flags)) {
-		schedule_work(&pdev->op_work);
+		queue_work(xen_pcibk_wq, &pdev->op_work);
 	}
 	/*_XEN_PCIB_active should have been cleared by pcifront. And also make
 	sure xen_pcibk is waiting for ack by checking _PCIB_op_pending*/

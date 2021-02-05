@@ -1,5 +1,4 @@
-/*
- * Driver for USB Attached SCSI devices - Unusual Devices File
+/* Driver for USB Attached SCSI devices - Unusual Devices File
  *
  *   (c) 2013 Hans de Goede <hdegoede@redhat.com>
  *
@@ -57,6 +56,12 @@ UNUSUAL_DEV(0x0bc2, 0x2312, 0x0000, 0x9999,
 		"Expansion Desk",
 		USB_SC_DEVICE, USB_PR_DEVICE, NULL,
 		US_FL_NO_ATA_1X),
+
+UNUSUAL_DEV(0x0bc2, 0x2321, 0x0000, 0x9999,
+		"Seagate",
+		"Expansion HDD",
+		USB_SC_DEVICE, USB_PR_DEVICE, NULL,
+		US_FL_IGNORE_UAS),
 
 /* https://bbs.archlinux.org/viewtopic.php?id=183190 */
 UNUSUAL_DEV(0x0bc2, 0x3312, 0x0000, 0x9999,
@@ -149,6 +154,18 @@ UNUSUAL_DEV(0x152d, 0x0578, 0x0000, 0x9999,
 		USB_SC_DEVICE, USB_PR_DEVICE, NULL,
 		US_FL_BROKEN_FUA),
 
+UNUSUAL_DEV(0x152d, 0x0583, 0x0000, 0x9999,
+		"JMicron",
+		"JMS583",
+		USB_SC_DEVICE, USB_PR_DEVICE, NULL,
+		US_FL_BROKEN_FUA | US_FL_NO_REPORT_OPCODES),
+
+UNUSUAL_DEV(0x174c, 0x55aa, 0x0000, 0x9999,
+		"WINTOGO",
+		"CHIPFANCIER",
+		USB_SC_DEVICE, USB_PR_DEVICE, NULL,
+		US_FL_BROKEN_FUA | US_FL_NO_REPORT_OPCODES),
+
 /* Reported-by: Hans de Goede <hdegoede@redhat.com> */
 UNUSUAL_DEV(0x2109, 0x0711, 0x0000, 0x9999,
 		"VIA",
@@ -183,12 +200,3 @@ UNUSUAL_DEV(0x4971, 0x8017, 0x0000, 0x9999,
 		"External HDD",
 		USB_SC_DEVICE, USB_PR_DEVICE, NULL,
 		US_FL_NO_REPORT_OPCODES),
-
-/* "G-DRIVE" external HDD hangs on write without these.
- * Patch submitted by Alexander Kappner <agk@godking.net>
- */
-UNUSUAL_DEV(0x4971, 0x8024, 0x0000, 0x9999,
-		"SimpleTech",
-		"External HDD",
-		USB_SC_DEVICE, USB_PR_DEVICE, NULL,
-		US_FL_ALWAYS_SYNC),

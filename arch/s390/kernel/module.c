@@ -54,10 +54,6 @@ void *module_alloc(unsigned long size)
 
 void module_arch_freeing_init(struct module *mod)
 {
-	if (is_livepatch_module(mod) &&
-	    mod->state == MODULE_STATE_LIVE)
-		return;
-
 	vfree(mod->arch.syminfo);
 	mod->arch.syminfo = NULL;
 }
@@ -332,7 +328,7 @@ static int apply_rela(Elf_Rela *rela, Elf_Addr base, Elf_Sym *symtab,
 			ip[1] = 0x100a0004;	/* lg	1,10(1) */
 			if (IS_ENABLED(CONFIG_EXPOLINE) && !nospec_disable) {
 				unsigned int *ij;
-				ij = me->core_layout.base +
+				ij = me->module_core +
 					me->arch.plt_offset +
 					me->arch.plt_size - PLT_ENTRY_SIZE;
 				ip[2] = 0xa7f40000 +	/* j __jump_r1 */
@@ -454,7 +450,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 	    !nospec_disable && me->arch.plt_size) {
 		unsigned int *ij;
 
-		ij = me->core_layout.base + me->arch.plt_offset +
+		ij = me->module_core + me->arch.plt_offset +
 			me->arch.plt_size - PLT_ENTRY_SIZE;
 		if (test_facility(35)) {
 			ij[0] = 0xc6000000;	/* exrl	%r0,.+10	*/
@@ -462,7 +458,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 			ij[2] = 0x000007f1;	/* br	%r1		*/
 		} else {
 			ij[0] = 0x44000000 | (unsigned int)
-				offsetof(struct lowcore, br_r1_trampoline);
+				offsetof(struct _lowcore, br_r1_trampoline);
 			ij[1] = 0xa7f40000;	/* j	.		*/
 		}
 	}
@@ -486,5 +482,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 	}
 
 	jump_label_apply_nops(me);
+	vfree(me->arch.syminfo);
+	me->arch.syminfo = NULL;
 	return 0;
 }

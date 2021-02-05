@@ -497,15 +497,6 @@ static int lirc_thread(void *arg)
 	return 0;
 }
 
-static int set_use_inc(void *data)
-{
-	return 0;
-}
-
-static void set_use_dec(void *data)
-{
-}
-
 /* safe read of a uint32 (always network byte order) */
 static int read_uint32(unsigned char **data,
 				     unsigned char *endp, unsigned int *val)
@@ -1394,10 +1385,7 @@ static struct lirc_driver lirc_template = {
 	.minor		= -1,
 	.code_length	= 13,
 	.buffer_size	= BUFLEN / 2,
-	.sample_rate	= 0, /* tell lirc_dev to not start its own kthread */
 	.chunk_size	= 2,
-	.set_use_inc	= set_use_inc,
-	.set_use_dec	= set_use_dec,
 	.fops		= &lirc_fops,
 	.owner		= THIS_MODULE,
 };
@@ -1680,7 +1668,9 @@ module_init(zilog_init);
 module_exit(zilog_exit);
 
 MODULE_DESCRIPTION("Zilog/Hauppauge infrared transmitter driver (i2c stack)");
-MODULE_AUTHOR("Gerd Knorr, Michal Kochanowicz, Christoph Bartelmus, Ulrich Mueller, Stefan Jahn, Jerome Brock, Mark Weaver, Andy Walls");
+MODULE_AUTHOR("Gerd Knorr, Michal Kochanowicz, Christoph Bartelmus, "
+	      "Ulrich Mueller, Stefan Jahn, Jerome Brock, Mark Weaver, "
+	      "Andy Walls");
 MODULE_LICENSE("GPL");
 /* for compat with old name, which isn't all that accurate anymore */
 MODULE_ALIAS("lirc_pvr150");

@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -23,7 +27,7 @@
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -53,8 +57,6 @@ int ptlrpc_start_thread(struct ptlrpc_service_part *svcpt, int wait);
 int ptlrpcd_start(struct ptlrpcd_ctl *pc);
 
 /* client.c */
-void ptlrpc_at_adj_net_latency(struct ptlrpc_request *req,
-			       unsigned int service_time);
 struct ptlrpc_bulk_desc *ptlrpc_new_bulk(unsigned npages, unsigned max_brw,
 					 unsigned type, unsigned portal);
 int ptlrpc_request_cache_init(void);
@@ -62,11 +64,6 @@ void ptlrpc_request_cache_fini(void);
 struct ptlrpc_request *ptlrpc_request_cache_alloc(gfp_t flags);
 void ptlrpc_request_cache_free(struct ptlrpc_request *req);
 void ptlrpc_init_xid(void);
-void ptlrpc_set_add_new_req(struct ptlrpcd_ctl *pc,
-			    struct ptlrpc_request *req);
-int ptlrpc_expired_set(void *data);
-int ptlrpc_set_next_timeout(struct ptlrpc_request_set *);
-void ptlrpc_resend_req(struct ptlrpc_request *request);
 
 /* events.c */
 int ptlrpc_init_portals(void);
@@ -76,6 +73,7 @@ void ptlrpc_request_handle_notconn(struct ptlrpc_request *);
 void lustre_assert_wire_constants(void);
 int ptlrpc_import_in_recovery(struct obd_import *imp);
 int ptlrpc_set_import_discon(struct obd_import *imp, __u32 conn_cnt);
+void ptlrpc_handle_failed_import(struct obd_import *imp);
 int ptlrpc_replay_next(struct obd_import *imp, int *inflight);
 void ptlrpc_initiate_recovery(struct obd_import *imp);
 
@@ -90,6 +88,8 @@ void ptlrpc_ldebugfs_register_service(struct dentry *debugfs_entry,
 				      struct ptlrpc_service *svc);
 void ptlrpc_lprocfs_unregister_service(struct ptlrpc_service *svc);
 void ptlrpc_lprocfs_rpc_sent(struct ptlrpc_request *req, long amount);
+void ptlrpc_lprocfs_do_request_stat(struct ptlrpc_request *req,
+				     long q_usec, long work_usec);
 
 /* NRS */
 
@@ -104,6 +104,8 @@ struct nrs_core {
 	 * registration/unregistration, and NRS core lprocfs operations.
 	 */
 	struct mutex nrs_mutex;
+	/* XXX: This is just for liblustre. Remove the #if defined directive
+	 * when the * "cfs_" prefix is dropped from cfs_list_head. */
 	/**
 	 * List of all policy descriptors registered with NRS core; protected
 	 * by nrs_core::nrs_mutex.
@@ -275,7 +277,7 @@ void sptlrpc_conf_fini(void);
 int  sptlrpc_init(void);
 void sptlrpc_fini(void);
 
-static inline bool ptlrpc_recoverable_error(int rc)
+static inline int ll_rpc_recoverable_error(int rc)
 {
 	return (rc == -ENOTCONN || rc == -ENODEV);
 }
@@ -295,47 +297,4 @@ static inline void ptlrpc_reqset_put(struct ptlrpc_request_set *set)
 	if (atomic_dec_and_test(&set->set_refcount))
 		kfree(set);
 }
-
-/** initialise ptlrpc common fields */
-static inline void ptlrpc_req_comm_init(struct ptlrpc_request *req)
-{
-	spin_lock_init(&req->rq_lock);
-	atomic_set(&req->rq_refcount, 1);
-	INIT_LIST_HEAD(&req->rq_list);
-	INIT_LIST_HEAD(&req->rq_replay_list);
-}
-
-/** initialise client side ptlrpc request */
-static inline void ptlrpc_cli_req_init(struct ptlrpc_request *req)
-{
-	struct ptlrpc_cli_req *cr = &req->rq_cli;
-
-	ptlrpc_req_comm_init(req);
-
-	req->rq_receiving_reply = 0;
-	req->rq_req_unlinked = 1;
-	req->rq_reply_unlinked = 1;
-
-	req->rq_receiving_reply = 0;
-	req->rq_req_unlinked = 1;
-	req->rq_reply_unlinked = 1;
-
-	INIT_LIST_HEAD(&cr->cr_set_chain);
-	INIT_LIST_HEAD(&cr->cr_ctx_chain);
-	init_waitqueue_head(&cr->cr_reply_waitq);
-	init_waitqueue_head(&cr->cr_set_waitq);
-}
-
-/** initialise server side ptlrpc request */
-static inline void ptlrpc_srv_req_init(struct ptlrpc_request *req)
-{
-	struct ptlrpc_srv_req *sr = &req->rq_srv;
-
-	ptlrpc_req_comm_init(req);
-	req->rq_srv_req = 1;
-	INIT_LIST_HEAD(&sr->sr_exp_list);
-	INIT_LIST_HEAD(&sr->sr_timed_list);
-	INIT_LIST_HEAD(&sr->sr_hist_list);
-}
-
 #endif /* PTLRPC_INTERNAL_H */

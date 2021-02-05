@@ -778,6 +778,7 @@ static irqreturn_t hsw_irq_thread(int irq, void *context)
 	struct sst_hsw *hsw = sst_dsp_get_thread_context(sst);
 	struct sst_generic_ipc *ipc = &hsw->ipc;
 	u32 ipcx, ipcd;
+	int handled;
 	unsigned long flags;
 
 	spin_lock_irqsave(&sst->spinlock, flags);
@@ -789,36 +790,40 @@ static irqreturn_t hsw_irq_thread(int irq, void *context)
 	if (ipcx & SST_IPCX_DONE) {
 
 		/* Handle Immediate reply from DSP Core */
-		hsw_process_reply(hsw, ipcx);
+		handled = hsw_process_reply(hsw, ipcx);
 
-		/* clear DONE bit - tell DSP we have completed */
-		sst_dsp_shim_update_bits_unlocked(sst, SST_IPCX,
-			SST_IPCX_DONE, 0);
+		if (handled > 0) {
+			/* clear DONE bit - tell DSP we have completed */
+			sst_dsp_shim_update_bits_unlocked(sst, SST_IPCX,
+				SST_IPCX_DONE, 0);
 
-		/* unmask Done interrupt */
-		sst_dsp_shim_update_bits_unlocked(sst, SST_IMRX,
-			SST_IMRX_DONE, 0);
+			/* unmask Done interrupt */
+			sst_dsp_shim_update_bits_unlocked(sst, SST_IMRX,
+				SST_IMRX_DONE, 0);
+		}
 	}
 
 	/* new message from DSP */
 	if (ipcd & SST_IPCD_BUSY) {
 
 		/* Handle Notification and Delayed reply from DSP Core */
-		hsw_process_notification(hsw);
+		handled = hsw_process_notification(hsw);
 
 		/* clear BUSY bit and set DONE bit - accept new messages */
-		sst_dsp_shim_update_bits_unlocked(sst, SST_IPCD,
-			SST_IPCD_BUSY | SST_IPCD_DONE, SST_IPCD_DONE);
+		if (handled > 0) {
+			sst_dsp_shim_update_bits_unlocked(sst, SST_IPCD,
+				SST_IPCD_BUSY | SST_IPCD_DONE, SST_IPCD_DONE);
 
-		/* unmask busy interrupt */
-		sst_dsp_shim_update_bits_unlocked(sst, SST_IMRX,
-			SST_IMRX_BUSY, 0);
+			/* unmask busy interrupt */
+			sst_dsp_shim_update_bits_unlocked(sst, SST_IMRX,
+				SST_IMRX_BUSY, 0);
+		}
 	}
 
 	spin_unlock_irqrestore(&sst->spinlock, flags);
 
 	/* continue to send any remaining messages... */
-	kthread_queue_work(&ipc->kworker, &ipc->kwork);
+	queue_kthread_work(&ipc->kworker, &ipc->kwork);
 
 	return IRQ_HANDLED;
 }
@@ -1345,7 +1350,7 @@ int sst_hsw_stream_reset(struct sst_hsw *hsw, struct sst_hsw_stream *stream)
 		return 0;
 
 	/* wait for pause to complete before we reset the stream */
-	while (stream->running && --tries)
+	while (stream->running && tries--)
 		msleep(1);
 	if (!tries) {
 		dev_err(hsw->dev, "error: reset stream %d still running\n",

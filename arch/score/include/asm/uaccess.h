@@ -4,7 +4,6 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/thread_info.h>
-#include <asm/extable.h>
 
 #define VERIFY_READ		0
 #define VERIFY_WRITE		1
@@ -420,6 +419,13 @@ static inline long strnlen_user(const char __user *str, long len)
 	else		
 		return __strnlen_user(str, len);
 }
+
+struct exception_table_entry {
+	unsigned long insn;
+	unsigned long fixup;
+};
+
+extern int fixup_exception(struct pt_regs *regs);
 
 #endif /* __SCORE_UACCESS_H */
 

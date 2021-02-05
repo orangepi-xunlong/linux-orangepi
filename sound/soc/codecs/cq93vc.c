@@ -131,10 +131,8 @@ static struct regmap *cq93vc_get_regmap(struct device *dev)
 static struct snd_soc_codec_driver soc_codec_dev_cq93vc = {
 	.set_bias_level = cq93vc_set_bias_level,
 	.get_regmap = cq93vc_get_regmap,
-	.component_driver = {
-		.controls = cq93vc_snd_controls,
-		.num_controls = ARRAY_SIZE(cq93vc_snd_controls),
-	},
+	.controls = cq93vc_snd_controls,
+	.num_controls = ARRAY_SIZE(cq93vc_snd_controls),
 };
 
 static int cq93vc_platform_probe(struct platform_device *pdev)

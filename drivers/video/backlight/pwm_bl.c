@@ -54,11 +54,10 @@ static void pwm_backlight_power_on(struct pwm_bl_data *pb, int brightness)
 	if (err < 0)
 		dev_err(pb->dev, "failed to enable power supply\n");
 
-	pwm_enable(pb->pwm);
-
 	if (pb->enable_gpio)
-		gpiod_set_value_cansleep(pb->enable_gpio, 1);
+		gpiod_set_value(pb->enable_gpio, 1);
 
+	pwm_enable(pb->pwm);
 	pb->enabled = true;
 }
 
@@ -67,11 +66,11 @@ static void pwm_backlight_power_off(struct pwm_bl_data *pb)
 	if (!pb->enabled)
 		return;
 
-	if (pb->enable_gpio)
-		gpiod_set_value_cansleep(pb->enable_gpio, 0);
-
 	pwm_config(pb->pwm, 0, pb->period);
 	pwm_disable(pb->pwm);
+
+	if (pb->enable_gpio)
+		gpiod_set_value(pb->enable_gpio, 0);
 
 	regulator_disable(pb->power_supply);
 	pb->enabled = false;
@@ -311,12 +310,7 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 
 	dev_dbg(&pdev->dev, "got pwm for backlight\n");
 
-	/*
-	 * FIXME: pwm_apply_args() should be removed when switching to
-	 * the atomic PWM API.
-	 */
-	pwm_apply_args(pb->pwm);
-
+	pwm_adjust_config(pb->pwm);
 	/*
 	 * The DT case will set the pwm_period_ns field to 0 and store the
 	 * period, parsed from the DT, in the PWM device. For the non-DT case,

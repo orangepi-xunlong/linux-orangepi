@@ -21,7 +21,7 @@
  *
  * Authors: Ben Skeggs
  */
-#include "priv.h"
+#include <subdev/ibus.h>
 
 static void
 gk104_ibus_intr_hub(struct nvkm_subdev *ibus, int i)
@@ -56,7 +56,7 @@ gk104_ibus_intr_gpc(struct nvkm_subdev *ibus, int i)
 	nvkm_mask(device, 0x128128 + (i * 0x0800), 0x00000200, 0x00000000);
 }
 
-void
+static void
 gk104_ibus_intr(struct nvkm_subdev *ibus)
 {
 	struct nvkm_device *device = ibus->device;
@@ -120,6 +120,6 @@ gk104_ibus_new(struct nvkm_device *device, int index,
 	struct nvkm_subdev *ibus;
 	if (!(ibus = *pibus = kzalloc(sizeof(*ibus), GFP_KERNEL)))
 		return -ENOMEM;
-	nvkm_subdev_ctor(&gk104_ibus, device, index, ibus);
+	nvkm_subdev_ctor(&gk104_ibus, device, index, 0, ibus);
 	return 0;
 }

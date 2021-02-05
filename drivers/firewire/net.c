@@ -1042,7 +1042,7 @@ static int fwnet_send_packet(struct fwnet_packet_task *ptask)
 
 	spin_unlock_irqrestore(&dev->lock, flags);
 
-	netif_trans_update(dev->netdev);
+	dev->netdev->trans_start = jiffies;
  out:
 	if (free)
 		fwnet_free_ptask(ptask);

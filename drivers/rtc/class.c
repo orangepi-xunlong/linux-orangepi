@@ -141,6 +141,14 @@ static int rtc_resume(struct device *dev)
 	if (sleep_time.tv_sec >= 0)
 		timekeeping_inject_sleeptime64(&sleep_time);
 	rtc_hctosys_ret = 0;
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+	if (sleep_time.tv_sec >= 0)
+		printk("Suspended for %lu.%03lu seconds\n",
+			(unsigned long)sleep_time.tv_sec,
+			sleep_time.tv_nsec / NSEC_PER_MSEC);
+#endif
+
 	return 0;
 }
 
@@ -361,4 +369,17 @@ static int __init rtc_init(void)
 	rtc_dev_init();
 	return 0;
 }
+
+static void __exit rtc_exit(void)
+{
+	rtc_dev_exit();
+	class_destroy(rtc_class);
+	ida_destroy(&rtc_ida);
+}
+
 subsys_initcall(rtc_init);
+module_exit(rtc_exit);
+
+MODULE_AUTHOR("Alessandro Zummo <a.zummo@towertech.it>");
+MODULE_DESCRIPTION("RTC class support");
+MODULE_LICENSE("GPL");

@@ -2,9 +2,6 @@
 # Building vDSO images for x86.
 #
 
-# Prevents link failures: __sanitizer_cov_trace_pc() is not linked in.
-KCOV_INSTRUMENT                := n
-
 VDSO64-y		:= y
 
 vdso-install-$(VDSO64-y)	+= vdso.so

@@ -29,7 +29,7 @@
 
 #include <asm/io.h>
 #if IS_ENABLED(CONFIG_UCC_GETH)
-#include <soc/fsl/qe/ucc.h>
+#include <asm/ucc.h>	/* for ucc_set_qe_mux_mii_mng() */
 #endif
 
 #include "gianfar.h"
@@ -69,6 +69,7 @@ struct fsl_pq_mdio {
 struct fsl_pq_mdio_priv {
 	void __iomem *map;
 	struct fsl_pq_mii __iomem *regs;
+	int irqs[PHY_MAX_ADDR];
 };
 
 /*
@@ -195,7 +196,7 @@ static int fsl_pq_mdio_reset(struct mii_bus *bus)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_GIANFAR)
+#if defined(CONFIG_GIANFAR) || defined(CONFIG_GIANFAR_MODULE)
 /*
  * Return the TBIPA address, starting from the address
  * of the mapped GFAR MDIO registers (struct gfar)
@@ -228,7 +229,7 @@ static uint32_t __iomem *get_etsec_tbipa(void __iomem *p)
 }
 #endif
 
-#if IS_ENABLED(CONFIG_UCC_GETH)
+#if defined(CONFIG_UCC_GETH) || defined(CONFIG_UCC_GETH_MODULE)
 /*
  * Return the TBIPAR address for a QE MDIO node, starting from the address
  * of the mapped MII registers (struct fsl_pq_mii)
@@ -306,7 +307,7 @@ static void ucc_configure(phys_addr_t start, phys_addr_t end)
 #endif
 
 static const struct of_device_id fsl_pq_mdio_match[] = {
-#if IS_ENABLED(CONFIG_GIANFAR)
+#if defined(CONFIG_GIANFAR) || defined(CONFIG_GIANFAR_MODULE)
 	{
 		.compatible = "fsl,gianfar-tbi",
 		.data = &(struct fsl_pq_mdio_data) {
@@ -344,7 +345,7 @@ static const struct of_device_id fsl_pq_mdio_match[] = {
 		},
 	},
 #endif
-#if IS_ENABLED(CONFIG_UCC_GETH)
+#if defined(CONFIG_UCC_GETH) || defined(CONFIG_UCC_GETH_MODULE)
 	{
 		.compatible = "fsl,ucc-mdio",
 		.data = &(struct fsl_pq_mdio_data) {
@@ -407,6 +408,7 @@ static int fsl_pq_mdio_probe(struct platform_device *pdev)
 	new_bus->read = &fsl_pq_mdio_read;
 	new_bus->write = &fsl_pq_mdio_write;
 	new_bus->reset = &fsl_pq_mdio_reset;
+	new_bus->irq = priv->irqs;
 
 	err = of_address_to_resource(np, 0, &res);
 	if (err < 0) {

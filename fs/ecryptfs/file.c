@@ -184,7 +184,7 @@ static int ecryptfs_mmap(struct file *file, struct vm_area_struct *vma)
 
 /**
  * ecryptfs_open
- * @inode: inode specifying file to open
+ * @inode: inode speciying file to open
  * @file: Structure to return filled in
  *
  * Opens the file specified by inode.
@@ -253,7 +253,7 @@ out:
 
 /**
  * ecryptfs_dir_open
- * @inode: inode specifying file to open
+ * @inode: inode speciying file to open
  * @file: Structure to return filled in
  *
  * Opens the file specified by inode.
@@ -396,7 +396,7 @@ ecryptfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 #endif
 
 const struct file_operations ecryptfs_dir_fops = {
-	.iterate_shared = ecryptfs_readdir,
+	.iterate = ecryptfs_readdir,
 	.read = generic_read_dir,
 	.unlocked_ioctl = ecryptfs_unlocked_ioctl,
 #ifdef CONFIG_COMPAT

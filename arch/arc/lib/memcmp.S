@@ -16,7 +16,7 @@
 #define SHIFT r2
 #endif
 
-ENTRY_CFI(memcmp)
+ENTRY(memcmp)
 	or	r12,r0,r1
 	asl_s	r12,r12,30
 	sub	r3,r2,1
@@ -149,4 +149,4 @@ ENTRY_CFI(memcmp)
 .Lnil:
 	j_s.d	[blink]
 	mov	r0,0
-END_CFI(memcmp)
+END(memcmp)

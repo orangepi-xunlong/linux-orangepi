@@ -216,6 +216,28 @@ struct node *merge_nodes(struct node *old_node, struct node *new_node)
 	return old_node;
 }
 
+void add_orphan_node(struct node *dt, struct node *new_node, char *ref)
+{
+	static unsigned int next_orphan_fragment = 0;
+	struct node *node;
+	struct property *p;
+	struct data d = empty_data;
+	char *name;
+
+	d = data_add_marker(d, REF_PHANDLE, ref);
+	d = data_append_integer(d, 0xffffffff, 32);
+
+	p = build_property("target", d);
+
+	xasprintf(&name, "fragment@%u",
+			next_orphan_fragment++);
+	name_node(new_node, "__overlay__");
+	node = build_node(p, new_node);
+	name_node(node, name);
+
+	add_child(dt, node);
+}
+
 struct node *chain_node(struct node *first, struct node *list)
 {
 	assert(first->next_sibling == NULL);
@@ -242,7 +264,7 @@ void delete_property_by_name(struct node *node, char *name)
 	struct property *prop = node->proplist;
 
 	while (prop) {
-		if (!strcmp(prop->name, name)) {
+		if (streq(prop->name, name)) {
 			delete_property(prop);
 			return;
 		}
@@ -275,7 +297,7 @@ void delete_node_by_name(struct node *parent, char *name)
 	struct node *node = parent->children;
 
 	while (node) {
-		if (!strcmp(node->name, name)) {
+		if (streq(node->name, name)) {
 			delete_node(node);
 			return;
 		}
@@ -319,8 +341,8 @@ struct reserve_info *build_reserve_entry(uint64_t address, uint64_t size)
 
 	memset(new, 0, sizeof(*new));
 
-	new->re.address = address;
-	new->re.size = size;
+	new->address = address;
+	new->size = size;
 
 	return new;
 }
@@ -393,7 +415,13 @@ struct property *get_property(struct node *node, const char *propname)
 cell_t propval_cell(struct property *prop)
 {
 	assert(prop->val.len == sizeof(cell_t));
-	return fdt32_to_cpu(*((cell_t *)prop->val.val));
+	return fdt32_to_cpu(*((fdt32_t *)prop->val.val));
+}
+
+cell_t propval_cell_n(struct property *prop, int n)
+{
+	assert(prop->val.len / sizeof(cell_t) >= n);
+	return fdt32_to_cpu(*((fdt32_t *)prop->val.val + n));
 }
 
 struct property *get_property_by_label(struct node *tree, const char *label,
@@ -478,7 +506,8 @@ struct node *get_node_by_path(struct node *tree, const char *path)
 	p = strchr(path, '/');
 
 	for_each_child(tree, child) {
-		if (p && strneq(path, child->name, p-path))
+		if (p && (strlen(child->name) == p-path) &&
+				strneq(path, child->name, p-path))
 			return get_node_by_path(child, p+1);
 		else if (!p && streq(path, child->name))
 			return child;
@@ -507,30 +536,6 @@ struct node *get_node_by_label(struct node *tree, const char *label)
 	return NULL;
 }
 
-struct node *get_node_by_type(struct node *tree, const char *device_type)
-{
-	struct node *child, *node;
-	struct property *prop;
-
-	assert(device_type && (strlen(device_type) > 0));
-
-	for_each_property(tree, prop){
-		if(strcmp(prop->name, "device_type")){
-			continue;
-		}
-		if (!strncmp(prop->val.val, device_type, prop->val.len)){
-			return tree;
-		}
-	}
-	for_each_child(tree, child) {
-		node = get_node_by_type(child, device_type);
-		if (node)
-			return node;
-	}
-
-	return NULL;
-
-}
 struct node *get_node_by_phandle(struct node *tree, cell_t phandle)
 {
 	struct node *child, *node;
@@ -623,13 +628,13 @@ static int cmp_reserve_info(const void *ax, const void *bx)
 	a = *((const struct reserve_info * const *)ax);
 	b = *((const struct reserve_info * const *)bx);
 
-	if (a->re.address < b->re.address)
+	if (a->address < b->address)
 		return -1;
-	else if (a->re.address > b->re.address)
+	else if (a->address > b->address)
 		return 1;
-	else if (a->re.size < b->re.size)
+	else if (a->size < b->size)
 		return -1;
-	else if (a->re.size > b->re.size)
+	else if (a->size > b->size)
 		return 1;
 	else
 		return 0;
@@ -871,6 +876,8 @@ static void add_fixup_entry(struct dt_info *dti, struct node *fn,
 	xasprintf(&entry, "%s:%s:%u",
 			node->fullpath, prop->name, m->offset);
 	append_to_property(fn, m->ref, entry, strlen(entry) + 1);
+
+	free(entry);
 }
 
 static void generate_fixups_tree_internal(struct dt_info *dti,
@@ -924,7 +931,7 @@ static void add_local_fixup_entry(struct dt_info *dti,
 		struct node *refnode)
 {
 	struct node *wn, *nwn;	/* local fixup node, walk node, new */
-	uint32_t value_32;
+	fdt32_t value_32;
 	char **compp;
 	int i, depth;
 

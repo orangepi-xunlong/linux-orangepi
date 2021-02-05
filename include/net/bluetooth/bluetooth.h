@@ -29,9 +29,6 @@
 #include <net/sock.h>
 #include <linux/seq_file.h>
 
-#define BT_SUBSYS_VERSION	2
-#define BT_SUBSYS_REVISION	22
-
 #ifndef AF_BLUETOOTH
 #define AF_BLUETOOTH	31
 #define PF_BLUETOOTH	AF_BLUETOOTH
@@ -299,17 +296,12 @@ typedef void (*hci_req_complete_t)(struct hci_dev *hdev, u8 status, u16 opcode);
 typedef void (*hci_req_complete_skb_t)(struct hci_dev *hdev, u8 status,
 				       u16 opcode, struct sk_buff *skb);
 
-#define HCI_REQ_START	BIT(0)
-#define HCI_REQ_SKB	BIT(1)
-
 struct hci_ctrl {
 	__u16 opcode;
-	u8 req_flags;
+	bool req_start;
 	u8 req_event;
-	union {
-		hci_req_complete_t req_complete;
-		hci_req_complete_skb_t req_complete_skb;
-	};
+	hci_req_complete_t req_complete;
+	hci_req_complete_skb_t req_complete_skb;
 };
 
 struct bt_skb_cb {
@@ -324,17 +316,15 @@ struct bt_skb_cb {
 };
 #define bt_cb(skb) ((struct bt_skb_cb *)((skb)->cb))
 
-#define hci_skb_pkt_type(skb) bt_cb((skb))->pkt_type
-#define hci_skb_expect(skb) bt_cb((skb))->expect
-#define hci_skb_opcode(skb) bt_cb((skb))->hci.opcode
-
 static inline struct sk_buff *bt_skb_alloc(unsigned int len, gfp_t how)
 {
 	struct sk_buff *skb;
 
 	skb = alloc_skb(len + BT_SKB_RESERVE, how);
-	if (skb)
+	if (skb) {
 		skb_reserve(skb, BT_SKB_RESERVE);
+		bt_cb(skb)->incoming  = 0;
+	}
 	return skb;
 }
 
@@ -344,8 +334,10 @@ static inline struct sk_buff *bt_skb_send_alloc(struct sock *sk,
 	struct sk_buff *skb;
 
 	skb = sock_alloc_send_skb(sk, len + BT_SKB_RESERVE, nb, err);
-	if (skb)
+	if (skb) {
 		skb_reserve(skb, BT_SKB_RESERVE);
+		bt_cb(skb)->incoming  = 0;
+	}
 
 	if (!skb && *err)
 		return NULL;
@@ -372,7 +364,6 @@ void hci_sock_set_flag(struct sock *sk, int nr);
 void hci_sock_clear_flag(struct sock *sk, int nr);
 int hci_sock_test_flag(struct sock *sk, int nr);
 unsigned short hci_sock_get_channel(struct sock *sk);
-u32 hci_sock_get_cookie(struct sock *sk);
 
 int hci_sock_init(void);
 void hci_sock_cleanup(void);

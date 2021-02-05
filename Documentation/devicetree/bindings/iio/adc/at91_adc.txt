@@ -59,24 +59,28 @@ adc0: adc@fffb0000 {
 	atmel,adc-res-names = "lowres", "highres";
 	atmel,adc-use-res = "lowres";
 
-	trigger0 {
+	trigger@0 {
+		reg = <0>;
 		trigger-name = "external-rising";
 		trigger-value = <0x1>;
 		trigger-external;
 	};
-	trigger1 {
+	trigger@1 {
+		reg = <1>;
 		trigger-name = "external-falling";
 		trigger-value = <0x2>;
 		trigger-external;
 	};
 
-	trigger2 {
+	trigger@2 {
+		reg = <2>;
 		trigger-name = "external-any";
 		trigger-value = <0x3>;
 		trigger-external;
 	};
 
-	trigger3 {
+	trigger@3 {
+		reg = <3>;
 		trigger-name = "continuous";
 		trigger-value = <0x6>;
 	};

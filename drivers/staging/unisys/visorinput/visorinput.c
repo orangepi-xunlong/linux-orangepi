@@ -29,7 +29,9 @@
 #include <linux/kernel.h>
 #include <linux/uuid.h>
 
+#include "version.h"
 #include "visorbus.h"
+#include "channel.h"
 #include "ultrainputreport.h"
 
 /* Keyboard channel {c73416d0-b0b8-44af-b304-9d2ae99f1b3d} */
@@ -61,10 +63,9 @@ enum visorinput_device_type {
  */
 struct visorinput_devdata {
 	struct visor_device *dev;
-	struct mutex lock_visor_dev; /* lock for dev */
+	struct rw_semaphore lock_visor_dev; /* lock for dev */
 	struct input_dev *visorinput_dev;
 	bool paused;
-	bool interrupts_enabled;
 	unsigned int keycode_table_bytes; /* size of following array */
 	/* for keyboard devices: visorkbd_keycode[] + visorkbd_ext_keycode[] */
 	unsigned char keycode_table[0];
@@ -122,9 +123,9 @@ static const unsigned char visorkbd_keycode[KEYCODE_TABLE_BYTES] = {
 	[38] = KEY_L,
 	[39] = KEY_SEMICOLON,
 	[40] = KEY_APOSTROPHE,
-	[41] = KEY_GRAVE,
+	[41] = KEY_GRAVE,	/* FIXME, '#' */
 	[42] = KEY_LEFTSHIFT,
-	[43] = KEY_BACKSLASH,
+	[43] = KEY_BACKSLASH,	/* FIXME, '~' */
 	[44] = KEY_Z,
 	[45] = KEY_X,
 	[46] = KEY_C,
@@ -172,7 +173,7 @@ static const unsigned char visorkbd_keycode[KEYCODE_TABLE_BYTES] = {
 	[88] = KEY_F12,
 	[90] = KEY_KPLEFTPAREN,
 	[91] = KEY_KPRIGHTPAREN,
-	[92] = KEY_KPASTERISK,
+	[92] = KEY_KPASTERISK,	/* FIXME */
 	[93] = KEY_KPASTERISK,
 	[94] = KEY_KPPLUS,
 	[95] = KEY_HELP,
@@ -221,27 +222,12 @@ static int visorinput_open(struct input_dev *visorinput_dev)
 	struct visorinput_devdata *devdata = input_get_drvdata(visorinput_dev);
 
 	if (!devdata) {
-		dev_err(&visorinput_dev->dev,
-			"%s input_get_drvdata(%p) returned NULL\n",
-			__func__, visorinput_dev);
+		pr_err("%s input_get_drvdata(%p) returned NULL\n",
+		       __func__, visorinput_dev);
 		return -EINVAL;
 	}
 	dev_dbg(&visorinput_dev->dev, "%s opened\n", __func__);
-
-	/*
-	 * If we're not paused, really enable interrupts.
-	 * Regardless of whether we are paused, set a flag indicating
-	 * interrupts should be enabled so when we resume, interrupts
-	 * will really be enabled.
-	 */
-	mutex_lock(&devdata->lock_visor_dev);
-	devdata->interrupts_enabled = true;
-	if (devdata->paused)
-		goto out_unlock;
 	visorbus_enable_channel_interrupts(devdata->dev);
-
-out_unlock:
-	mutex_unlock(&devdata->lock_visor_dev);
 	return 0;
 }
 
@@ -250,41 +236,25 @@ static void visorinput_close(struct input_dev *visorinput_dev)
 	struct visorinput_devdata *devdata = input_get_drvdata(visorinput_dev);
 
 	if (!devdata) {
-		dev_err(&visorinput_dev->dev,
-			"%s input_get_drvdata(%p) returned NULL\n",
-			__func__, visorinput_dev);
+		pr_err("%s input_get_drvdata(%p) returned NULL\n",
+		       __func__, visorinput_dev);
 		return;
 	}
 	dev_dbg(&visorinput_dev->dev, "%s closed\n", __func__);
-
-	/*
-	 * If we're not paused, really disable interrupts.
-	 * Regardless of whether we are paused, set a flag indicating
-	 * interrupts should be disabled so when we resume we will
-	 * not re-enable them.
-	 */
-
-	mutex_lock(&devdata->lock_visor_dev);
-	devdata->interrupts_enabled = false;
-	if (devdata->paused)
-		goto out_unlock;
 	visorbus_disable_channel_interrupts(devdata->dev);
-
-out_unlock:
-	mutex_unlock(&devdata->lock_visor_dev);
 }
 
 /*
- * setup_client_keyboard() initializes and returns a Linux input node that
+ * register_client_keyboard() initializes and returns a Linux input node that
  * we can use to deliver keyboard inputs to Linux.  We of course do this when
  * we see keyboard inputs coming in on a keyboard channel.
  */
 static struct input_dev *
-setup_client_keyboard(void *devdata,  /* opaque on purpose */
-		      unsigned char *keycode_table)
+register_client_keyboard(void *devdata,  /* opaque on purpose */
+			 unsigned char *keycode_table)
 
 {
-	int i;
+	int i, error;
 	struct input_dev *visorinput_dev;
 
 	visorinput_dev = input_allocate_device();
@@ -318,12 +288,18 @@ setup_client_keyboard(void *devdata,  /* opaque on purpose */
 	visorinput_dev->close = visorinput_close;
 	input_set_drvdata(visorinput_dev, devdata); /* pre input_register! */
 
+	error = input_register_device(visorinput_dev);
+	if (error) {
+		input_free_device(visorinput_dev);
+		return NULL;
+	}
 	return visorinput_dev;
 }
 
 static struct input_dev *
-setup_client_mouse(void *devdata /* opaque on purpose */)
+register_client_mouse(void *devdata /* opaque on purpose */)
 {
+	int error;
 	struct input_dev *visorinput_dev = NULL;
 	int xres, yres;
 	struct fb_info *fb0;
@@ -358,6 +334,13 @@ setup_client_mouse(void *devdata /* opaque on purpose */)
 	visorinput_dev->open = visorinput_open;
 	visorinput_dev->close = visorinput_close;
 	input_set_drvdata(visorinput_dev, devdata); /* pre input_register! */
+
+	error = input_register_device(visorinput_dev);
+	if (error) {
+		input_free_device(visorinput_dev);
+		return NULL;
+	}
+
 	input_set_capability(visorinput_dev, EV_REL, REL_WHEEL);
 
 	return visorinput_dev;
@@ -375,17 +358,7 @@ devdata_create(struct visor_device *dev, enum visorinput_device_type devtype)
 	devdata = kzalloc(sizeof(*devdata) + extra_bytes, GFP_KERNEL);
 	if (!devdata)
 		return NULL;
-	mutex_init(&devdata->lock_visor_dev);
-	mutex_lock(&devdata->lock_visor_dev);
 	devdata->dev = dev;
-
-	/*
-	 * visorinput_open() can be called as soon as input_register_device()
-	 * happens, and that will enable channel interrupts.  Setting paused
-	 * prevents us from getting into visorinput_channel_interrupt() prior
-	 * to the device structure being totally initialized.
-	 */
-	devdata->paused = true;
 
 	/*
 	 * This is an input device in a client guest partition,
@@ -399,49 +372,23 @@ devdata_create(struct visor_device *dev, enum visorinput_device_type devtype)
 		       KEYCODE_TABLE_BYTES);
 		memcpy(devdata->keycode_table + KEYCODE_TABLE_BYTES,
 		       visorkbd_ext_keycode, KEYCODE_TABLE_BYTES);
-		devdata->visorinput_dev = setup_client_keyboard
+		devdata->visorinput_dev = register_client_keyboard
 			(devdata, devdata->keycode_table);
 		if (!devdata->visorinput_dev)
 			goto cleanups_register;
 		break;
 	case visorinput_mouse:
-		devdata->visorinput_dev = setup_client_mouse(devdata);
+		devdata->visorinput_dev = register_client_mouse(devdata);
 		if (!devdata->visorinput_dev)
 			goto cleanups_register;
 		break;
 	}
 
-	dev_set_drvdata(&dev->device, devdata);
-	mutex_unlock(&devdata->lock_visor_dev);
-
-	/*
-	 * Device struct is completely set up now, with the exception of
-	 * visorinput_dev being registered.
-	 * We need to unlock before we register the device, because this
-	 * can cause an on-stack call of visorinput_open(), which would
-	 * deadlock if we had the lock.
-	 */
-	if (input_register_device(devdata->visorinput_dev)) {
-		input_free_device(devdata->visorinput_dev);
-		goto err_kfree_devdata;
-	}
-
-	mutex_lock(&devdata->lock_visor_dev);
-	/*
-	 * Establish calls to visorinput_channel_interrupt() if that is
-	 * the desired state that we've kept track of in interrupts_enabled
-	 * while the device was being created.
-	 */
-	devdata->paused = false;
-	if (devdata->interrupts_enabled)
-		visorbus_enable_channel_interrupts(dev);
-	mutex_unlock(&devdata->lock_visor_dev);
+	init_rwsem(&devdata->lock_visor_dev);
 
 	return devdata;
 
 cleanups_register:
-	mutex_unlock(&devdata->lock_visor_dev);
-err_kfree_devdata:
 	kfree(devdata);
 	return NULL;
 }
@@ -449,6 +396,7 @@ err_kfree_devdata:
 static int
 visorinput_probe(struct visor_device *dev)
 {
+	struct visorinput_devdata *devdata = NULL;
 	uuid_le guid;
 	enum visorinput_device_type devtype;
 
@@ -459,9 +407,10 @@ visorinput_probe(struct visor_device *dev)
 		devtype = visorinput_keyboard;
 	else
 		return -ENODEV;
-	visorbus_disable_channel_interrupts(dev);
-	if (!devdata_create(dev, devtype))
+	devdata = devdata_create(dev, devtype);
+	if (!devdata)
 		return -ENOMEM;
+	dev_set_drvdata(&dev->device, devdata);
 	return 0;
 }
 
@@ -480,7 +429,6 @@ visorinput_remove(struct visor_device *dev)
 	if (!devdata)
 		return;
 
-	mutex_lock(&devdata->lock_visor_dev);
 	visorbus_disable_channel_interrupts(dev);
 
 	/*
@@ -488,10 +436,10 @@ visorinput_remove(struct visor_device *dev)
 	 * in visorinput_channel_interrupt()
 	 */
 
+	down_write(&devdata->lock_visor_dev);
 	dev_set_drvdata(&dev->device, NULL);
-	mutex_unlock(&devdata->lock_visor_dev);
-
 	unregister_client_input(devdata->visorinput_dev);
+	up_write(&devdata->lock_visor_dev);
 	kfree(devdata);
 }
 
@@ -517,14 +465,18 @@ handle_locking_key(struct input_dev *visorinput_dev,
 		break;
 	default:
 		led = -1;
-		return;
+		break;
 	}
-	if (test_bit(led, visorinput_dev->led) != desired_state) {
-		input_report_key(visorinput_dev, keycode, 1);
-		input_sync(visorinput_dev);
-		input_report_key(visorinput_dev, keycode, 0);
-		input_sync(visorinput_dev);
-		__change_bit(led, visorinput_dev->led);
+	if (led >= 0) {
+		int old_state = (test_bit(led, visorinput_dev->led) != 0);
+
+		if (old_state != desired_state) {
+			input_report_key(visorinput_dev, keycode, 1);
+			input_sync(visorinput_dev);
+			input_report_key(visorinput_dev, keycode, 0);
+			input_sync(visorinput_dev);
+			__change_bit(led, visorinput_dev->led);
+		}
 	}
 }
 
@@ -556,7 +508,7 @@ calc_button(int x)
 	case 3:
 		return BTN_RIGHT;
 	default:
-		return -EINVAL;
+		return -1;
 	}
 }
 
@@ -571,7 +523,7 @@ visorinput_channel_interrupt(struct visor_device *dev)
 	struct ultra_inputreport r;
 	int scancode, keycode;
 	struct input_dev *visorinput_dev;
-	int xmotion, ymotion, button;
+	int xmotion, ymotion, zmotion, button;
 	int i;
 
 	struct visorinput_devdata *devdata = dev_get_drvdata(&dev->device);
@@ -579,9 +531,15 @@ visorinput_channel_interrupt(struct visor_device *dev)
 	if (!devdata)
 		return;
 
-	visorinput_dev = devdata->visorinput_dev;
+	down_write(&devdata->lock_visor_dev);
+	if (devdata->paused) /* don't touch device/channel when paused */
+		goto out_locked;
 
-	while (!visorchannel_signalremove(dev->visorchannel, 0, &r)) {
+	visorinput_dev = devdata->visorinput_dev;
+	if (!visorinput_dev)
+		goto out_locked;
+
+	while (visorchannel_signalremove(dev->visorchannel, 0, &r)) {
 		scancode = r.activity.arg1;
 		keycode = scancode_to_keycode(scancode);
 		switch (r.activity.action) {
@@ -646,15 +604,19 @@ visorinput_channel_interrupt(struct visor_device *dev)
 			}
 			break;
 		case inputaction_wheel_rotate_away:
+			zmotion = r.activity.arg1;
 			input_report_rel(visorinput_dev, REL_WHEEL, 1);
 			input_sync(visorinput_dev);
 			break;
 		case inputaction_wheel_rotate_toward:
+			zmotion = r.activity.arg1;
 			input_report_rel(visorinput_dev, REL_WHEEL, -1);
 			input_sync(visorinput_dev);
 			break;
 		}
 	}
+out_locked:
+	up_write(&devdata->lock_visor_dev);
 }
 
 static int
@@ -669,24 +631,16 @@ visorinput_pause(struct visor_device *dev,
 		goto out;
 	}
 
-	mutex_lock(&devdata->lock_visor_dev);
+	down_write(&devdata->lock_visor_dev);
 	if (devdata->paused) {
 		rc = -EBUSY;
 		goto out_locked;
 	}
-	if (devdata->interrupts_enabled)
-		visorbus_disable_channel_interrupts(dev);
-
-	/*
-	 * due to above, at this time no thread of execution will be
-	 * in visorinput_channel_interrupt()
-	 */
-
 	devdata->paused = true;
 	complete_func(dev, 0);
 	rc = 0;
 out_locked:
-	mutex_unlock(&devdata->lock_visor_dev);
+	up_write(&devdata->lock_visor_dev);
 out:
 	return rc;
 }
@@ -702,25 +656,16 @@ visorinput_resume(struct visor_device *dev,
 		rc = -ENODEV;
 		goto out;
 	}
-	mutex_lock(&devdata->lock_visor_dev);
+	down_write(&devdata->lock_visor_dev);
 	if (!devdata->paused) {
 		rc = -EBUSY;
 		goto out_locked;
 	}
 	devdata->paused = false;
 	complete_func(dev, 0);
-
-	/*
-	 * Re-establish calls to visorinput_channel_interrupt() if that is
-	 * the desired state that we've kept track of in interrupts_enabled
-	 * while the device was paused.
-	 */
-	if (devdata->interrupts_enabled)
-		visorbus_enable_channel_interrupts(dev);
-
 	rc = 0;
 out_locked:
-	mutex_unlock(&devdata->lock_visor_dev);
+	up_write(&devdata->lock_visor_dev);
 out:
 	return rc;
 }
@@ -734,6 +679,7 @@ static struct visor_channeltype_descriptor visorinput_channel_types[] = {
 
 static struct visor_driver visorinput_driver = {
 	.name = "visorinput",
+	.vertag = NULL,
 	.owner = THIS_MODULE,
 	.channel_types = visorinput_channel_types,
 	.probe = visorinput_probe,
@@ -762,7 +708,8 @@ MODULE_DEVICE_TABLE(visorbus, visorinput_channel_types);
 
 MODULE_AUTHOR("Unisys");
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("s-Par human input driver for virtual keyboard/mouse");
+MODULE_DESCRIPTION("s-Par human input driver for guest Linux");
+MODULE_VERSION(VERSION);
 
 MODULE_ALIAS("visorbus:" SPAR_MOUSE_CHANNEL_PROTOCOL_UUID_STR);
 MODULE_ALIAS("visorbus:" SPAR_KEYBOARD_CHANNEL_PROTOCOL_UUID_STR);

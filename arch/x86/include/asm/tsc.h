@@ -22,20 +22,18 @@ extern void disable_TSC(void);
 static inline cycles_t get_cycles(void)
 {
 #ifndef CONFIG_X86_TSC
-	if (!boot_cpu_has(X86_FEATURE_TSC))
+	if (!cpu_has_tsc)
 		return 0;
 #endif
 
 	return rdtsc();
 }
 
-extern struct system_counterval_t convert_art_to_tsc(cycle_t art);
-
 extern void tsc_init(void);
 extern void mark_tsc_unstable(char *reason);
 extern int unsynchronized_tsc(void);
 extern int check_tsc_unstable(void);
-extern unsigned long native_calibrate_cpu(void);
+extern int check_tsc_disabled(void);
 extern unsigned long native_calibrate_tsc(void);
 extern unsigned long long native_sched_clock_from_tsc(u64 tsc);
 
@@ -52,6 +50,7 @@ extern int notsc_setup(char *);
 extern void tsc_save_sched_clock_state(void);
 extern void tsc_restore_sched_clock_state(void);
 
-unsigned long cpu_khz_from_msr(void);
+/* MSR based TSC calibration for Intel Atom SoC platforms */
+unsigned long try_msr_calibrate_tsc(void);
 
 #endif /* _ASM_X86_TSC_H */

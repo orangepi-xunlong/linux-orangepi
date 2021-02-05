@@ -85,8 +85,9 @@ static unsigned long irbar_read(void)
 }
 
 /* MPU initialisation functions */
-void __init adjust_lowmem_bounds_mpu(void)
+void __init sanity_check_meminfo_mpu(void)
 {
+	int i;
 	phys_addr_t phys_offset = PHYS_OFFSET;
 	phys_addr_t aligned_region_size, specified_mem_size, rounded_mem_size;
 	struct memblock_region *reg;
@@ -109,13 +110,11 @@ void __init adjust_lowmem_bounds_mpu(void)
 		} else {
 			/*
 			 * memblock auto merges contiguous blocks, remove
-			 * all blocks afterwards in one go (we can't remove
-			 * blocks separately while iterating)
+			 * all blocks afterwards
 			 */
 			pr_notice("Ignoring RAM after %pa, memory at %pa ignored\n",
-				  &mem_end, &reg->base);
-			memblock_remove(reg->base, 0 - reg->base);
-			break;
+				  &mem_start, &reg->base);
+			memblock_remove(reg->base, reg->size);
 		}
 	}
 
@@ -145,7 +144,7 @@ void __init adjust_lowmem_bounds_mpu(void)
 		pr_warn("Truncating memory from %pa to %pa (MPU region constraints)",
 				&specified_mem_size, &aligned_region_size);
 		memblock_remove(mem_start + aligned_region_size,
-				specified_mem_size - aligned_region_size);
+				specified_mem_size - aligned_round_size);
 
 		mem_end = mem_start + aligned_region_size;
 	}
@@ -262,7 +261,7 @@ void __init mpu_setup(void)
 		return;
 
 	region_err = mpu_setup_region(MPU_RAM_REGION, PHYS_OFFSET,
-					ilog2(memblock.memory.regions[0].size),
+					ilog2(meminfo.bank[0].size),
 					MPU_AP_PL1RW_PL0RW | MPU_RGN_NORMAL);
 	if (region_err) {
 		panic("MPU region initialization failure! %d", region_err);
@@ -274,7 +273,7 @@ void __init mpu_setup(void)
 	}
 }
 #else
-static void adjust_lowmem_bounds_mpu(void) {}
+static void sanity_check_meminfo_mpu(void) {}
 static void __init mpu_setup(void) {}
 #endif /* CONFIG_ARM_MPU */
 
@@ -286,7 +285,7 @@ void __init arm_mm_memblock_reserve(void)
 	 * some architectures which the DRAM is the exception vector to trap,
 	 * alloc_page breaks with error, although it is not NULL, but "0."
 	 */
-	memblock_reserve(CONFIG_VECTORS_BASE, 2 * PAGE_SIZE);
+	memblock_reserve(CONFIG_VECTORS_BASE, PAGE_SIZE);
 #else /* ifndef CONFIG_CPU_V7M */
 	/*
 	 * There is no dedicated vector page on V7-M. So nothing needs to be
@@ -295,10 +294,10 @@ void __init arm_mm_memblock_reserve(void)
 #endif
 }
 
-void __init adjust_lowmem_bounds(void)
+void __init sanity_check_meminfo(void)
 {
 	phys_addr_t end;
-	adjust_lowmem_bounds_mpu();
+	sanity_check_meminfo_mpu();
 	end = memblock_end_of_DRAM();
 	high_memory = __va(end - 1) + 1;
 	memblock_set_current_limit(end);
@@ -368,15 +367,11 @@ void __iomem *ioremap(resource_size_t res_cookie, size_t size)
 EXPORT_SYMBOL(ioremap);
 
 void __iomem *ioremap_cache(resource_size_t res_cookie, size_t size)
-	__alias(ioremap_cached);
-
-void __iomem *ioremap_cached(resource_size_t res_cookie, size_t size)
 {
 	return __arm_ioremap_caller(res_cookie, size, MT_DEVICE_CACHED,
 				    __builtin_return_address(0));
 }
 EXPORT_SYMBOL(ioremap_cache);
-EXPORT_SYMBOL(ioremap_cached);
 
 void __iomem *ioremap_wc(resource_size_t res_cookie, size_t size)
 {
@@ -384,11 +379,6 @@ void __iomem *ioremap_wc(resource_size_t res_cookie, size_t size)
 				    __builtin_return_address(0));
 }
 EXPORT_SYMBOL(ioremap_wc);
-
-void *arch_memremap_wb(phys_addr_t phys_addr, size_t size)
-{
-	return (void *)phys_addr;
-}
 
 void __iounmap(volatile void __iomem *addr)
 {

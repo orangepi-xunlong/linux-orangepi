@@ -15,6 +15,7 @@
 #include <sound/pcm_params.h>
 
 #include "../codecs/wm8994.h"
+#include "dma.h"
 #include "pcm.h"
 
 /*

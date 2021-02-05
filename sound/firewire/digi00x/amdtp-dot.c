@@ -64,7 +64,7 @@ struct amdtp_dot {
 #define BYTE_PER_SAMPLE (4)
 #define MAGIC_DOT_BYTE (2)
 #define MAGIC_BYTE_OFF(x) (((x) * BYTE_PER_SAMPLE) + MAGIC_DOT_BYTE)
-static u8 dot_scrt(const u8 idx, const unsigned int off)
+static const u8 dot_scrt(const u8 idx, const unsigned int off)
 {
 	/*
 	 * the length of the added pattern only depends on the lower nibble
@@ -440,7 +440,7 @@ int amdtp_dot_init(struct amdtp_stream *s, struct fw_unit *unit,
 
 	/* Use different mode between incoming/outgoing. */
 	if (dir == AMDTP_IN_STREAM) {
-		flags = CIP_NONBLOCKING;
+		flags = CIP_NONBLOCKING | CIP_SKIP_INIT_DBC_CHECK;
 		process_data_blocks = process_tx_data_blocks;
 	} else {
 		flags = CIP_BLOCKING;

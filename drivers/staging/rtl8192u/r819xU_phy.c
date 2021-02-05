@@ -38,6 +38,21 @@ static u32 RF_CHANNEL_TABLE_ZEBRA[] = {
 #define rtl819XAGCTAB_Array Rtl8192UsbAGCTAB_Array
 
 /******************************************************************************
+ * function: This function reads BB parameters from header file we generate,
+ *           and does register read/write
+ * input:    u32	bitmask  //taget bit pos in the addr to be modified
+ * output:   none
+ * return:   u32	return the shift bit position of the mask
+ ******************************************************************************/
+static u32 rtl8192_CalculateBitShift(u32 bitmask)
+{
+	u32 i;
+
+	i = ffs(bitmask) - 1;
+	return i;
+}
+
+/******************************************************************************
  * function:  This function checks different RF type to execute legal judgement.
  *            If RF Path is illegal, we will return false.
  * input:     net_device	 *dev
@@ -79,7 +94,7 @@ void rtl8192_setBBreg(struct net_device *dev, u32 reg_addr, u32 bitmask,
 
 	if (bitmask != bMaskDWord) {
 		read_nic_dword(dev, reg_addr, &reg);
-		bitshift = ffs(bitmask) - 1;
+		bitshift = rtl8192_CalculateBitShift(bitmask);
 		reg &= ~bitmask;
 		reg |= data << bitshift;
 		write_nic_dword(dev, reg_addr, reg);
@@ -102,7 +117,7 @@ u32 rtl8192_QueryBBReg(struct net_device *dev, u32 reg_addr, u32 bitmask)
 	u32 reg, bitshift;
 
 	read_nic_dword(dev, reg_addr, &reg);
-	bitshift = ffs(bitmask) - 1;
+	bitshift = rtl8192_CalculateBitShift(bitmask);
 
 	return (reg & bitmask) >> bitshift;
 }
@@ -291,7 +306,7 @@ void rtl8192_phy_SetRFReg(struct net_device *dev, RF90_RADIO_PATH_E eRFPath,
 		if (bitmask != bMask12Bits) {
 			/* RF data is 12 bits only */
 			reg = phy_FwRFSerialRead(dev, eRFPath, reg_addr);
-			bitshift =  ffs(bitmask) - 1;
+			bitshift =  rtl8192_CalculateBitShift(bitmask);
 			reg &= ~bitmask;
 			reg |= data << bitshift;
 
@@ -306,7 +321,7 @@ void rtl8192_phy_SetRFReg(struct net_device *dev, RF90_RADIO_PATH_E eRFPath,
 		if (bitmask != bMask12Bits) {
 			/* RF data is 12 bits only */
 			reg = rtl8192_phy_RFSerialRead(dev, eRFPath, reg_addr);
-			bitshift =  ffs(bitmask) - 1;
+			bitshift =  rtl8192_CalculateBitShift(bitmask);
 			reg &= ~bitmask;
 			reg |= data << bitshift;
 
@@ -341,7 +356,7 @@ u32 rtl8192_phy_QueryRFReg(struct net_device *dev, RF90_RADIO_PATH_E eRFPath,
 	} else {
 		reg = rtl8192_phy_RFSerialRead(dev, eRFPath, reg_addr);
 	}
-	bitshift =  ffs(bitmask) - 1;
+	bitshift =  rtl8192_CalculateBitShift(bitmask);
 	reg = (reg & bitmask) >> bitshift;
 	return reg;
 
@@ -1683,7 +1698,8 @@ void InitialGain819xUsb(struct net_device *dev,	u8 Operation)
 
 void InitialGainOperateWorkItemCallBack(struct work_struct *work)
 {
-	struct delayed_work *dwork = to_delayed_work(work);
+	struct delayed_work *dwork = container_of(work, struct delayed_work,
+						  work);
 	struct r8192_priv *priv = container_of(dwork, struct r8192_priv,
 					       initialgain_operate_wq);
 	struct net_device *dev = priv->ieee80211->dev;

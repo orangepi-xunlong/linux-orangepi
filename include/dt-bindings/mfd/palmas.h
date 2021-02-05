@@ -7,7 +7,7 @@
  *
  */
 
-#ifndef __DT_BINDINGS_PALMAS_H
+#ifndef __DT_BINDINGS_PALMAS_H__
 #define __DT_BINDINGS_PALMAS_H
 
 /* External control pins */

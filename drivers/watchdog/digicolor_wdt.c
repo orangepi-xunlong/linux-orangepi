@@ -15,6 +15,7 @@
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/watchdog.h>
+#include <linux/reboot.h>
 #include <linux/platform_device.h>
 #include <linux/of_address.h>
 
@@ -27,6 +28,7 @@
 struct dc_wdt {
 	void __iomem		*base;
 	struct clk		*clk;
+	struct notifier_block	restart_handler;
 	spinlock_t		lock;
 };
 
@@ -48,16 +50,16 @@ static void dc_wdt_set(struct dc_wdt *wdt, u32 ticks)
 	spin_unlock_irqrestore(&wdt->lock, flags);
 }
 
-static int dc_wdt_restart(struct watchdog_device *wdog, unsigned long action,
-			  void *data)
+static int dc_restart_handler(struct notifier_block *this, unsigned long mode,
+			      void *cmd)
 {
-	struct dc_wdt *wdt = watchdog_get_drvdata(wdog);
+	struct dc_wdt *wdt = container_of(this, struct dc_wdt, restart_handler);
 
 	dc_wdt_set(wdt, 1);
 	/* wait for reset to assert... */
 	mdelay(500);
 
-	return 0;
+	return NOTIFY_DONE;
 }
 
 static int dc_wdt_start(struct watchdog_device *wdog)
@@ -102,7 +104,6 @@ static struct watchdog_ops dc_wdt_ops = {
 	.stop		= dc_wdt_stop,
 	.set_timeout	= dc_wdt_set_timeout,
 	.get_timeleft	= dc_wdt_get_timeleft,
-	.restart        = dc_wdt_restart,
 };
 
 static struct watchdog_info dc_wdt_info = {
@@ -147,13 +148,18 @@ static int dc_wdt_probe(struct platform_device *pdev)
 	spin_lock_init(&wdt->lock);
 
 	watchdog_set_drvdata(&dc_wdt_wdd, wdt);
-	watchdog_set_restart_priority(&dc_wdt_wdd, 128);
 	watchdog_init_timeout(&dc_wdt_wdd, timeout, dev);
 	ret = watchdog_register_device(&dc_wdt_wdd);
 	if (ret) {
 		dev_err(dev, "Failed to register watchdog device");
 		goto err_iounmap;
 	}
+
+	wdt->restart_handler.notifier_call = dc_restart_handler;
+	wdt->restart_handler.priority = 128;
+	ret = register_restart_handler(&wdt->restart_handler);
+	if (ret)
+		dev_warn(&pdev->dev, "cannot register restart handler\n");
 
 	return 0;
 
@@ -166,6 +172,7 @@ static int dc_wdt_remove(struct platform_device *pdev)
 {
 	struct dc_wdt *wdt = platform_get_drvdata(pdev);
 
+	unregister_restart_handler(&wdt->restart_handler);
 	watchdog_unregister_device(&dc_wdt_wdd);
 	iounmap(wdt->base);
 

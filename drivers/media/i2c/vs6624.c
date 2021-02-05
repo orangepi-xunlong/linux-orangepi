@@ -863,6 +863,7 @@ MODULE_DEVICE_TABLE(i2c, vs6624_id);
 
 static struct i2c_driver vs6624_driver = {
 	.driver = {
+		.owner  = THIS_MODULE,
 		.name   = "vs6624",
 	},
 	.probe          = vs6624_probe,

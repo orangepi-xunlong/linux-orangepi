@@ -49,6 +49,7 @@
 struct tilcdc_drm_private {
 	void __iomem *mmio;
 
+	struct clk *disp_clk;    /* display dpll */
 	struct clk *clk;         /* functional clock */
 	int rev;                 /* IP revision */
 
@@ -65,15 +66,12 @@ struct tilcdc_drm_private {
 	 */
 	uint32_t max_width;
 
-	/* Supported pixel formats */
-	const uint32_t *pixelformats;
-	uint32_t num_pixelformats;
-
-	/* The context for pm susped/resume cycle is stored here */
-	struct drm_atomic_state *saved_state;
+	/* register contents saved across suspend/resume: */
+	u32 saved_register[12];
 
 #ifdef CONFIG_CPU_FREQ
 	struct notifier_block freq_transition;
+	unsigned int lcd_fck_rate;
 #endif
 
 	struct workqueue_struct *wq;
@@ -115,6 +113,7 @@ struct tilcdc_module {
 	const char *name;
 	struct list_head list;
 	const struct tilcdc_module_ops *funcs;
+	unsigned int preferred_bpp;
 };
 
 void tilcdc_module_init(struct tilcdc_module *mod, const char *name,
@@ -164,6 +163,7 @@ struct tilcdc_panel_info {
 #define DBG(fmt, ...) DRM_DEBUG(fmt"\n", ##__VA_ARGS__)
 
 struct drm_crtc *tilcdc_crtc_create(struct drm_device *dev);
+void tilcdc_crtc_cancel_page_flip(struct drm_crtc *crtc, struct drm_file *file);
 irqreturn_t tilcdc_crtc_irq(struct drm_crtc *crtc);
 void tilcdc_crtc_update_clk(struct drm_crtc *crtc);
 void tilcdc_crtc_set_panel_info(struct drm_crtc *crtc,
@@ -172,11 +172,5 @@ void tilcdc_crtc_set_simulate_vesa_sync(struct drm_crtc *crtc,
 					bool simulate_vesa_sync);
 int tilcdc_crtc_mode_valid(struct drm_crtc *crtc, struct drm_display_mode *mode);
 int tilcdc_crtc_max_width(struct drm_crtc *crtc);
-void tilcdc_crtc_disable(struct drm_crtc *crtc);
-int tilcdc_crtc_update_fb(struct drm_crtc *crtc,
-		struct drm_framebuffer *fb,
-		struct drm_pending_vblank_event *event);
-
-int tilcdc_plane_init(struct drm_device *dev, struct drm_plane *plane);
 
 #endif /* __TILCDC_DRV_H__ */

@@ -642,18 +642,6 @@ spc_emulate_evpd_b2(struct se_cmd *cmd, unsigned char *buf)
 	if (dev->dev_attrib.emulate_tpws != 0)
 		buf[5] |= 0x40 | 0x20;
 
-	/*
-	 * The unmap_zeroes_data set means that the underlying device supports
-	 * REQ_DISCARD and has the discard_zeroes_data bit set. This satisfies
-	 * the SBC requirements for LBPRZ, meaning that a subsequent read
-	 * will return zeroes after an UNMAP or WRITE SAME (16) to an LBA
-	 * See sbc4r36 6.6.4.
-	 */
-	if (((dev->dev_attrib.emulate_tpu != 0) ||
-	     (dev->dev_attrib.emulate_tpws != 0)) &&
-	     (dev->dev_attrib.unmap_zeroes_data != 0))
-		buf[5] |= 0x04;
-
 	return 0;
 }
 
@@ -1004,6 +992,7 @@ static sense_reason_t spc_emulate_modesense(struct se_cmd *cmd)
 	int length = 0;
 	int ret;
 	int i;
+	bool read_only = target_lun_is_rdonly(cmd);;
 
 	memset(buf, 0, SE_MODE_PAGE_BUF);
 
@@ -1014,7 +1003,7 @@ static sense_reason_t spc_emulate_modesense(struct se_cmd *cmd)
 	length = ten ? 3 : 2;
 
 	/* DEVICE-SPECIFIC PARAMETER */
-	if (cmd->se_lun->lun_access_ro || target_lun_is_rdonly(cmd))
+	if ((cmd->se_lun->lun_access & TRANSPORT_LUNFLAGS_READ_ONLY) || read_only)
 		spc_modesense_write_protect(&buf[length], type);
 
 	/*

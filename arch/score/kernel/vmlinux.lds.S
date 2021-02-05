@@ -40,7 +40,6 @@ SECTIONS
 		_text = .;	/* Text and read-only data */
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		*(.text.*)

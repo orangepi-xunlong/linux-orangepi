@@ -6,22 +6,22 @@ void ddk750_setDPMS(DPMS_t state)
 {
 	unsigned int value;
 
-	if (sm750_get_chip_type() == SM750LE) {
-		value = PEEK32(CRT_DISPLAY_CTRL) & ~CRT_DISPLAY_CTRL_DPMS_MASK;
-		value |= (state << CRT_DISPLAY_CTRL_DPMS_SHIFT);
-		POKE32(CRT_DISPLAY_CTRL, value);
+	if (getChipType() == SM750LE) {
+		value = PEEK32(CRT_DISPLAY_CTRL);
+		POKE32(CRT_DISPLAY_CTRL, FIELD_VALUE(value, CRT_DISPLAY_CTRL,
+						     DPMS, state));
 	} else {
 		value = PEEK32(SYSTEM_CTRL);
-		value = (value & ~SYSTEM_CTRL_DPMS_MASK) | state;
+		value = FIELD_VALUE(value, SYSTEM_CTRL, DPMS, state);
 		POKE32(SYSTEM_CTRL, value);
 	}
 }
 
 static unsigned int getPowerMode(void)
 {
-	if (sm750_get_chip_type() == SM750LE)
+	if (getChipType() == SM750LE)
 		return 0;
-	return PEEK32(POWER_MODE_CTRL) & POWER_MODE_CTRL_MODE_MASK;
+	return FIELD_GET(PEEK32(POWER_MODE_CTRL), POWER_MODE_CTRL, MODE);
 }
 
 
@@ -33,22 +33,25 @@ void setPowerMode(unsigned int powerMode)
 {
 	unsigned int control_value = 0;
 
-	control_value = PEEK32(POWER_MODE_CTRL) & ~POWER_MODE_CTRL_MODE_MASK;
+	control_value = PEEK32(POWER_MODE_CTRL);
 
-	if (sm750_get_chip_type() == SM750LE)
+	if (getChipType() == SM750LE)
 		return;
 
 	switch (powerMode) {
 	case POWER_MODE_CTRL_MODE_MODE0:
-		control_value |= POWER_MODE_CTRL_MODE_MODE0;
+		control_value = FIELD_SET(control_value, POWER_MODE_CTRL, MODE,
+					  MODE0);
 		break;
 
 	case POWER_MODE_CTRL_MODE_MODE1:
-		control_value |= POWER_MODE_CTRL_MODE_MODE1;
+		control_value = FIELD_SET(control_value, POWER_MODE_CTRL, MODE,
+					  MODE1);
 		break;
 
 	case POWER_MODE_CTRL_MODE_SLEEP:
-		control_value |= POWER_MODE_CTRL_MODE_SLEEP;
+		control_value = FIELD_SET(control_value, POWER_MODE_CTRL, MODE,
+					  SLEEP);
 		break;
 
 	default:
@@ -57,15 +60,17 @@ void setPowerMode(unsigned int powerMode)
 
 	/* Set up other fields in Power Control Register */
 	if (powerMode == POWER_MODE_CTRL_MODE_SLEEP) {
-		control_value &= ~POWER_MODE_CTRL_OSC_INPUT;
+		control_value =
 #ifdef VALIDATION_CHIP
-		control_value &= ~POWER_MODE_CTRL_336CLK;
+		FIELD_SET(control_value, POWER_MODE_CTRL, 336CLK, OFF) |
 #endif
+		FIELD_SET(control_value, POWER_MODE_CTRL, OSC_INPUT,  OFF);
 	} else {
-		control_value |= POWER_MODE_CTRL_OSC_INPUT;
+		control_value =
 #ifdef VALIDATION_CHIP
-		control_value |= POWER_MODE_CTRL_336CLK;
+		FIELD_SET(control_value, POWER_MODE_CTRL, 336CLK, ON) |
 #endif
+		FIELD_SET(control_value, POWER_MODE_CTRL, OSC_INPUT,  ON);
 	}
 
 	/* Program new power mode. */
@@ -106,10 +111,13 @@ void enable2DEngine(unsigned int enable)
 	u32 gate;
 
 	gate = PEEK32(CURRENT_GATE);
-	if (enable)
-		gate |= (CURRENT_GATE_DE | CURRENT_GATE_CSC);
-	else
-		gate &= ~(CURRENT_GATE_DE | CURRENT_GATE_CSC);
+	if (enable) {
+		gate = FIELD_SET(gate, CURRENT_GATE, DE,  ON);
+		gate = FIELD_SET(gate, CURRENT_GATE, CSC, ON);
+	} else {
+		gate = FIELD_SET(gate, CURRENT_GATE, DE,  OFF);
+		gate = FIELD_SET(gate, CURRENT_GATE, CSC, OFF);
+	}
 
 	setCurrentGate(gate);
 }
@@ -121,9 +129,9 @@ void enableDMA(unsigned int enable)
 	/* Enable DMA Gate */
 	gate = PEEK32(CURRENT_GATE);
 	if (enable)
-		gate |= CURRENT_GATE_DMA;
+		gate = FIELD_SET(gate, CURRENT_GATE, DMA, ON);
 	else
-		gate &= ~CURRENT_GATE_DMA;
+		gate = FIELD_SET(gate, CURRENT_GATE, DMA, OFF);
 
 	setCurrentGate(gate);
 }
@@ -138,9 +146,9 @@ void enableGPIO(unsigned int enable)
 	/* Enable GPIO Gate */
 	gate = PEEK32(CURRENT_GATE);
 	if (enable)
-		gate |= CURRENT_GATE_GPIO;
+		gate = FIELD_SET(gate, CURRENT_GATE, GPIO, ON);
 	else
-		gate &= ~CURRENT_GATE_GPIO;
+		gate = FIELD_SET(gate, CURRENT_GATE, GPIO, OFF);
 
 	setCurrentGate(gate);
 }
@@ -155,9 +163,9 @@ void enableI2C(unsigned int enable)
 	/* Enable I2C Gate */
 	gate = PEEK32(CURRENT_GATE);
 	if (enable)
-		gate |= CURRENT_GATE_I2C;
+		gate = FIELD_SET(gate, CURRENT_GATE, I2C, ON);
 	else
-		gate &= ~CURRENT_GATE_I2C;
+	gate = FIELD_SET(gate, CURRENT_GATE, I2C, OFF);
 
 	setCurrentGate(gate);
 }

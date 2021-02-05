@@ -1,5 +1,5 @@
-/* Intel(R) Ethernet Switch Host Interface Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+/* Intel Ethernet Switch Host Interface Driver
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -50,8 +50,8 @@ s32 fm10k_iov_event(struct fm10k_intfc *interface)
 	s64 vflre;
 	int i;
 
-	/* if there is no iov_data then there is no mailbox to process */
-	if (!READ_ONCE(interface->iov_data))
+	/* if there is no iov_data then there is no mailboxes to process */
+	if (!ACCESS_ONCE(interface->iov_data))
 		return 0;
 
 	rcu_read_lock();
@@ -98,8 +98,8 @@ s32 fm10k_iov_mbx(struct fm10k_intfc *interface)
 	struct fm10k_iov_data *iov_data;
 	int i;
 
-	/* if there is no iov_data then there is no mailbox to process */
-	if (!READ_ONCE(interface->iov_data))
+	/* if there is no iov_data then there is no mailboxes to process */
+	if (!ACCESS_ONCE(interface->iov_data))
 		return 0;
 
 	rcu_read_lock();
@@ -448,7 +448,7 @@ int fm10k_ndo_set_vf_mac(struct net_device *netdev, int vf_idx, u8 *mac)
 }
 
 int fm10k_ndo_set_vf_vlan(struct net_device *netdev, int vf_idx, u16 vid,
-			  u8 qos, __be16 vlan_proto)
+			  u8 qos)
 {
 	struct fm10k_intfc *interface = netdev_priv(netdev);
 	struct fm10k_iov_data *iov_data = interface->iov_data;
@@ -462,10 +462,6 @@ int fm10k_ndo_set_vf_vlan(struct net_device *netdev, int vf_idx, u16 vid,
 	/* QOS is unsupported and VLAN IDs accepted range 0-4094 */
 	if (qos || (vid > (VLAN_VID_MASK - 1)))
 		return -EINVAL;
-
-	/* VF VLAN Protocol part to default is unsupported */
-	if (vlan_proto != htons(ETH_P_8021Q))
-		return -EPROTONOSUPPORT;
 
 	vf_info = &iov_data->vf_info[vf_idx];
 
@@ -485,7 +481,7 @@ int fm10k_ndo_set_vf_vlan(struct net_device *netdev, int vf_idx, u16 vid,
 }
 
 int fm10k_ndo_set_vf_bw(struct net_device *netdev, int vf_idx,
-			int __always_unused min_rate, int max_rate)
+			int __always_unused unused, int rate)
 {
 	struct fm10k_intfc *interface = netdev_priv(netdev);
 	struct fm10k_iov_data *iov_data = interface->iov_data;
@@ -496,15 +492,14 @@ int fm10k_ndo_set_vf_bw(struct net_device *netdev, int vf_idx,
 		return -EINVAL;
 
 	/* rate limit cannot be less than 10Mbs or greater than link speed */
-	if (max_rate &&
-	    (max_rate < FM10K_VF_TC_MIN || max_rate > FM10K_VF_TC_MAX))
+	if (rate && ((rate < FM10K_VF_TC_MIN) || rate > FM10K_VF_TC_MAX))
 		return -EINVAL;
 
 	/* store values */
-	iov_data->vf_info[vf_idx].rate = max_rate;
+	iov_data->vf_info[vf_idx].rate = rate;
 
 	/* update hardware configuration */
-	hw->iov.ops.configure_tc(hw, vf_idx, max_rate);
+	hw->iov.ops.configure_tc(hw, vf_idx, rate);
 
 	return 0;
 }

@@ -37,7 +37,7 @@
 #include <linux/slab.h>
 
 #include "mlx4_ib.h"
-#include <rdma/mlx4-abi.h>
+#include "user.h"
 
 static void mlx4_ib_cq_comp(struct mlx4_cq *cq)
 {
@@ -291,7 +291,7 @@ static int mlx4_alloc_resize_buf(struct mlx4_ib_dev *dev, struct mlx4_ib_cq *cq,
 	if (cq->resize_buf)
 		return -EBUSY;
 
-	cq->resize_buf = kmalloc(sizeof *cq->resize_buf, GFP_KERNEL);
+	cq->resize_buf = kmalloc(sizeof *cq->resize_buf, GFP_ATOMIC);
 	if (!cq->resize_buf)
 		return -ENOMEM;
 
@@ -319,7 +319,7 @@ static int mlx4_alloc_resize_umem(struct mlx4_ib_dev *dev, struct mlx4_ib_cq *cq
 	if (ib_copy_from_udata(&ucmd, udata, sizeof ucmd))
 		return -EFAULT;
 
-	cq->resize_buf = kmalloc(sizeof *cq->resize_buf, GFP_KERNEL);
+	cq->resize_buf = kmalloc(sizeof *cq->resize_buf, GFP_ATOMIC);
 	if (!cq->resize_buf)
 		return -ENOMEM;
 
@@ -579,8 +579,8 @@ static int mlx4_ib_ipoib_csum_ok(__be16 status, __be16 checksum)
 		checksum == cpu_to_be16(0xffff);
 }
 
-static void use_tunnel_data(struct mlx4_ib_qp *qp, struct mlx4_ib_cq *cq, struct ib_wc *wc,
-			    unsigned tail, struct mlx4_cqe *cqe, int is_eth)
+static int use_tunnel_data(struct mlx4_ib_qp *qp, struct mlx4_ib_cq *cq, struct ib_wc *wc,
+			   unsigned tail, struct mlx4_cqe *cqe, int is_eth)
 {
 	struct mlx4_ib_proxy_sqp_hdr *hdr;
 
@@ -603,6 +603,8 @@ static void use_tunnel_data(struct mlx4_ib_qp *qp, struct mlx4_ib_cq *cq, struct
 		wc->slid        = be16_to_cpu(hdr->tun.slid_mac_47_32);
 		wc->sl          = (u8) (be16_to_cpu(hdr->tun.sl_vid) >> 12);
 	}
+
+	return 0;
 }
 
 static void mlx4_ib_qp_sw_comp(struct mlx4_ib_qp *qp, int num_entries,
@@ -690,6 +692,12 @@ repoll:
 	is_error = (cqe->owner_sr_opcode & MLX4_CQE_OPCODE_MASK) ==
 		MLX4_CQE_OPCODE_ERROR;
 
+	if (unlikely((cqe->owner_sr_opcode & MLX4_CQE_OPCODE_MASK) == MLX4_OPCODE_NOP &&
+		     is_send)) {
+		pr_warn("Completion for NOP opcode detected!\n");
+		return -EINVAL;
+	}
+
 	/* Resize CQ in progress */
 	if (unlikely((cqe->owner_sr_opcode & MLX4_CQE_OPCODE_MASK) == MLX4_CQE_OPCODE_RESIZE)) {
 		if (cq->resize_buf) {
@@ -715,6 +723,12 @@ repoll:
 		 */
 		mqp = __mlx4_qp_lookup(to_mdev(cq->ibcq.device)->dev,
 				       be32_to_cpu(cqe->vlan_my_qpn));
+		if (unlikely(!mqp)) {
+			pr_warn("CQ %06x with entry for unknown QPN %06x\n",
+			       cq->mcq.cqn, be32_to_cpu(cqe->vlan_my_qpn) & MLX4_CQE_QPN_MASK);
+			return -EINVAL;
+		}
+
 		*cur_qp = to_mibqp(mqp);
 	}
 
@@ -727,6 +741,11 @@ repoll:
 		/* SRQ is also in the radix tree */
 		msrq = mlx4_srq_lookup(to_mdev(cq->ibcq.device)->dev,
 				       srq_num);
+		if (unlikely(!msrq)) {
+			pr_warn("CQ %06x with entry for unknown SRQN %06x\n",
+				cq->mcq.cqn, srq_num);
+			return -EINVAL;
+		}
 	}
 
 	if (is_send) {
@@ -795,6 +814,9 @@ repoll:
 			wc->opcode    = IB_WC_MASKED_FETCH_ADD;
 			wc->byte_len  = 8;
 			break;
+		case MLX4_OPCODE_BIND_MW:
+			wc->opcode    = IB_WC_BIND_MW;
+			break;
 		case MLX4_OPCODE_LSO:
 			wc->opcode    = IB_WC_LSO;
 			break;
@@ -836,11 +858,9 @@ repoll:
 		if (mlx4_is_mfunc(to_mdev(cq->ibcq.device)->dev)) {
 			if ((*cur_qp)->mlx4_ib_qp_type &
 			    (MLX4_IB_QPT_PROXY_SMI_OWNER |
-			     MLX4_IB_QPT_PROXY_SMI | MLX4_IB_QPT_PROXY_GSI)) {
-				use_tunnel_data(*cur_qp, cq, wc, tail, cqe,
-						is_eth);
-				return 0;
-			}
+			     MLX4_IB_QPT_PROXY_SMI | MLX4_IB_QPT_PROXY_GSI))
+				return use_tunnel_data(*cur_qp, cq, wc, tail,
+						       cqe, is_eth);
 		}
 
 		wc->slid	   = be16_to_cpu(cqe->rlid);
@@ -877,6 +897,7 @@ int mlx4_ib_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 	struct mlx4_ib_qp *cur_qp = NULL;
 	unsigned long flags;
 	int npolled;
+	int err = 0;
 	struct mlx4_ib_dev *mdev = to_mdev(cq->ibcq.device);
 
 	spin_lock_irqsave(&cq->lock, flags);
@@ -886,7 +907,8 @@ int mlx4_ib_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 	}
 
 	for (npolled = 0; npolled < num_entries; ++npolled) {
-		if (mlx4_ib_poll_one(cq, &cur_qp, wc + npolled))
+		err = mlx4_ib_poll_one(cq, &cur_qp, wc + npolled);
+		if (err)
 			break;
 	}
 
@@ -895,7 +917,10 @@ int mlx4_ib_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 out:
 	spin_unlock_irqrestore(&cq->lock, flags);
 
-	return npolled;
+	if (err == 0 || err == -EAGAIN)
+		return npolled;
+	else
+		return err;
 }
 
 int mlx4_ib_arm_cq(struct ib_cq *ibcq, enum ib_cq_notify_flags flags)

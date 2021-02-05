@@ -28,7 +28,6 @@
 #include <asm/page.h>
 #include <asm/mmu.h>
 #include <asm/ppc_asm.h>
-#include <asm/head-64.h>
 #include <asm/asm-offsets.h>
 #include <asm/bug.h>
 #include <asm/cputable.h>
@@ -41,9 +40,6 @@
 #include <asm/kvm_book3s_asm.h>
 #include <asm/ptrace.h>
 #include <asm/hw_irq.h>
-#include <asm/cputhreads.h>
-#include <asm/ppc-opcode.h>
-#include <asm/export.h>
 
 /* The physical memory is laid out such that the secondary processor
  * spin code sits at 0x0000...0x00ff. On server, the vectors follow
@@ -67,14 +63,9 @@
  *   2. The kernel is entered at __start
  */
 
-OPEN_FIXED_SECTION(first_256B, 0x0, 0x100)
-USE_FIXED_SECTION(first_256B)
-	/*
-	 * Offsets are relative from the start of fixed section, and
-	 * first_256B starts at 0. Offsets are a bit easier to use here
-	 * than the fixed section entry macros.
-	 */
-	. = 0x0
+	.text
+	.globl  _stext
+_stext:
 _GLOBAL(__start)
 	/* NOP this out unconditionally */
 BEGIN_FTR_SECTION
@@ -111,7 +102,6 @@ __secondary_hold_acknowledge:
 	. = 0x5c
 	.globl	__run_at_load
 __run_at_load:
-DEFINE_FIXED_SYMBOL(__run_at_load)
 	.long	0x72756e30	/* "run0" -- relocate to 0 by default */
 #endif
 
@@ -141,7 +131,7 @@ __secondary_hold:
 	/* Tell the master cpu we're here */
 	/* Relocation is off & we are located at an address less */
 	/* than 0x100, so only need to grab low order offset.    */
-	std	r24,(ABS_ADDR(__secondary_hold_acknowledge))(0)
+	std	r24,__secondary_hold_acknowledge-_stext(0)
 	sync
 
 	li	r26,0
@@ -149,7 +139,7 @@ __secondary_hold:
 	tovirt(r26,r26)
 #endif
 	/* All secondary cpus wait here until told to start. */
-100:	ld	r12,(ABS_ADDR(__secondary_hold_spinloop))(r26)
+100:	ld	r12,__secondary_hold_spinloop-_stext(r26)
 	cmpdi	0,r12,0
 	beq	100b
 
@@ -174,13 +164,12 @@ __secondary_hold:
 #else
 	BUG_OPCODE
 #endif
-CLOSE_FIXED_SECTION(first_256B)
 
 /* This value is used to mark exception frames on the stack. */
 	.section ".toc","aw"
 exception_marker:
 	.tc	ID_72656773_68657265[TC],0x7265677368657265
-	.previous
+	.text
 
 /*
  * On server, we include the exception vectors code here as it
@@ -189,71 +178,9 @@ exception_marker:
  */
 #ifdef CONFIG_PPC_BOOK3S
 #include "exceptions-64s.S"
-#else
-OPEN_TEXT_SECTION(0x100)
 #endif
 
-USE_TEXT_SECTION()
-
 #ifdef CONFIG_PPC_BOOK3E
-/*
- * The booting_thread_hwid holds the thread id we want to boot in cpu
- * hotplug case. It is set by cpu hotplug code, and is invalid by default.
- * The thread id is the same as the initial value of SPRN_PIR[THREAD_ID]
- * bit field.
- */
-	.globl	booting_thread_hwid
-booting_thread_hwid:
-	.long  INVALID_THREAD_HWID
-	.align 3
-/*
- * start a thread in the same core
- * input parameters:
- * r3 = the thread physical id
- * r4 = the entry point where thread starts
- */
-_GLOBAL(book3e_start_thread)
-	LOAD_REG_IMMEDIATE(r5, MSR_KERNEL)
-	cmpwi	r3, 0
-	beq	10f
-	cmpwi	r3, 1
-	beq	11f
-	/* If the thread id is invalid, just exit. */
-	b	13f
-10:
-	MTTMR(TMRN_IMSR0, 5)
-	MTTMR(TMRN_INIA0, 4)
-	b	12f
-11:
-	MTTMR(TMRN_IMSR1, 5)
-	MTTMR(TMRN_INIA1, 4)
-12:
-	isync
-	li	r6, 1
-	sld	r6, r6, r3
-	mtspr	SPRN_TENS, r6
-13:
-	blr
-
-/*
- * stop a thread in the same core
- * input parameter:
- * r3 = the thread physical id
- */
-_GLOBAL(book3e_stop_thread)
-	cmpwi	r3, 0
-	beq	10f
-	cmpwi	r3, 1
-	beq	10f
-	/* If the thread id is invalid, just exit. */
-	b	13f
-10:
-	li	r4, 1
-	sld	r4, r4, r3
-	mtspr	SPRN_TENC, r4
-13:
-	blr
-
 _GLOBAL(fsl_secondary_thread_init)
 	mfspr	r4,SPRN_BUCSR
 
@@ -334,44 +261,6 @@ _GLOBAL(generic_secondary_smp_init)
 	mr	r3,r24
 	mr	r4,r25
 	bl	book3e_secondary_core_init
-
-/*
- * After common core init has finished, check if the current thread is the
- * one we wanted to boot. If not, start the specified thread and stop the
- * current thread.
- */
-	LOAD_REG_ADDR(r4, booting_thread_hwid)
-	lwz     r3, 0(r4)
-	li	r5, INVALID_THREAD_HWID
-	cmpw	r3, r5
-	beq	20f
-
-	/*
-	 * The value of booting_thread_hwid has been stored in r3,
-	 * so make it invalid.
-	 */
-	stw	r5, 0(r4)
-
-	/*
-	 * Get the current thread id and check if it is the one we wanted.
-	 * If not, start the one specified in booting_thread_hwid and stop
-	 * the current thread.
-	 */
-	mfspr	r8, SPRN_TIR
-	cmpw	r3, r8
-	beq	20f
-
-	/* start the specified thread */
-	LOAD_REG_ADDR(r5, fsl_secondary_thread_init)
-	ld	r4, 0(r5)
-	bl	book3e_start_thread
-
-	/* stop the current thread */
-	mr	r3, r8
-	bl	book3e_stop_thread
-10:
-	b	10b
-20:
 #endif
 
 generic_secondary_common_init:
@@ -414,7 +303,7 @@ generic_secondary_common_init:
 	ld	r12,CPU_SPEC_RESTORE(r23)
 	cmpdi	0,r12,0
 	beq	3f
-#ifdef PPC64_ELF_ABI_v1
+#if !defined(_CALL_ELF) || _CALL_ELF != 2
 	ld	r12,0(r12)
 #endif
 	mtctr	r12
@@ -571,7 +460,7 @@ __after_prom_start:
 #if defined(CONFIG_PPC_BOOK3E)
 	tovirt(r26,r26)		/* on booke, we already run at PAGE_OFFSET */
 #endif
-	lwz	r7,(FIXED_SYMBOL_ABS_ADDR(__run_at_load))(r26)
+	lwz	r7,__run_at_load-_stext(r26)
 #if defined(CONFIG_PPC_BOOK3E)
 	tophys(r26,r26)
 #endif
@@ -614,7 +503,7 @@ __after_prom_start:
 #if defined(CONFIG_PPC_BOOK3E)
 	tovirt(r26,r26)		/* on booke, we already run at PAGE_OFFSET */
 #endif
-	lwz	r7,(FIXED_SYMBOL_ABS_ADDR(__run_at_load))(r26)
+	lwz	r7,__run_at_load-_stext(r26)
 	cmplwi	cr0,r7,1
 	bne	3f
 
@@ -624,35 +513,28 @@ __after_prom_start:
 	sub	r5,r5,r11
 #else
 	/* just copy interrupts */
-	LOAD_REG_IMMEDIATE(r5, FIXED_SYMBOL_ABS_ADDR(__end_interrupts))
+	LOAD_REG_IMMEDIATE(r5, __end_interrupts - _stext)
 #endif
 	b	5f
 3:
 #endif
-	/* # bytes of memory to copy */
-	lis	r5,(ABS_ADDR(copy_to_here))@ha
-	addi	r5,r5,(ABS_ADDR(copy_to_here))@l
+	lis	r5,(copy_to_here - _stext)@ha
+	addi	r5,r5,(copy_to_here - _stext)@l /* # bytes of memory to copy */
 
 	bl	copy_and_flush		/* copy the first n bytes	 */
 					/* this includes the code being	 */
 					/* executed here.		 */
-	/* Jump to the copy of this code that we just made */
-	addis	r8,r3,(ABS_ADDR(4f))@ha
-	addi	r12,r8,(ABS_ADDR(4f))@l
+	addis	r8,r3,(4f - _stext)@ha	/* Jump to the copy of this code */
+	addi	r12,r8,(4f - _stext)@l	/* that we just made */
 	mtctr	r12
 	bctr
 
 .balign 8
-p_end: .llong _end - copy_to_here
+p_end:	.llong	_end - _stext
 
-4:
-	/*
-	 * Now copy the rest of the kernel up to _end, add
-	 * _end - copy_to_here to the copy limit and run again.
-	 */
-	addis   r8,r26,(ABS_ADDR(p_end))@ha
-	ld      r8,(ABS_ADDR(p_end))@l(r8)
-	add	r5,r5,r8
+4:	/* Now copy the rest of the kernel up to _end */
+	addis	r5,r26,(p_end - _stext)@ha
+	ld	r5,(p_end - _stext)@l(r5)	/* get _end */
 5:	bl	copy_and_flush		/* copy the rest */
 
 9:	b	start_here_multiplatform
@@ -961,7 +843,7 @@ start_here_multiplatform:
 	mtspr	SPRN_SRR1,r4
 	RFI
 	b	.	/* prevent speculative execution */
-
+	
 	/* This is where all platforms converge execution */
 
 start_here_common:
@@ -970,6 +852,9 @@ start_here_common:
 
 	/* Load the TOC (virtual address) */
 	ld	r2,PACATOC(r13)
+
+	/* Do more system initializations in virtual mode */
+	bl	setup_system
 
 	/* Mark interrupts soft and hard disabled (they might be enabled
 	 * in the PACA when doing hotplug)
@@ -990,17 +875,13 @@ start_here_common:
  * This stuff goes at the beginning of the bss, which is page-aligned.
  */
 	.section ".bss"
-/*
- * pgd dir should be aligned to PGD_TABLE_SIZE which is 64K.
- * We will need to find a better way to fix this
- */
-	.align	16
 
-	.globl	swapper_pg_dir
-swapper_pg_dir:
-	.space	PGD_TABLE_SIZE
+	.align	PAGE_SHIFT
 
 	.globl	empty_zero_page
 empty_zero_page:
 	.space	PAGE_SIZE
-EXPORT_SYMBOL(empty_zero_page)
+
+	.globl	swapper_pg_dir
+swapper_pg_dir:
+	.space	PGD_TABLE_SIZE

@@ -401,7 +401,7 @@ static struct platform_device lcd_device = {
 };
 
 /* MMC Card */
-#if IS_ENABLED(CONFIG_MMC_OMAP)
+#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
 static struct omap_mmc_platform_data htc_mmc1_data = {
 	.nr_slots                       = 1,
 	.switch_slot                    = NULL,
@@ -586,7 +586,7 @@ static void __init htcherald_init(void)
 
 	omap_register_i2c_bus(1, 100, NULL, 0);
 
-#if IS_ENABLED(CONFIG_MMC_OMAP)
+#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
 	htc_mmc_data[0] = &htc_mmc1_data;
 	omap1_init_mmc(htc_mmc_data, 1);
 #endif

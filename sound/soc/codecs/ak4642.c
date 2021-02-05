@@ -523,23 +523,15 @@ static struct snd_soc_dai_driver ak4642_dai = {
 	.symmetric_rates = 1,
 };
 
-static int ak4642_suspend(struct snd_soc_codec *codec)
-{
-	struct regmap *regmap = dev_get_regmap(codec->dev, NULL);
-
-	regcache_cache_only(regmap, true);
-	regcache_mark_dirty(regmap);
-	return 0;
-}
-
 static int ak4642_resume(struct snd_soc_codec *codec)
 {
 	struct regmap *regmap = dev_get_regmap(codec->dev, NULL);
 
-	regcache_cache_only(regmap, false);
+	regcache_mark_dirty(regmap);
 	regcache_sync(regmap);
 	return 0;
 }
+
 static int ak4642_probe(struct snd_soc_codec *codec)
 {
 	struct ak4642_priv *priv = snd_soc_codec_get_drvdata(codec);
@@ -552,17 +544,14 @@ static int ak4642_probe(struct snd_soc_codec *codec)
 
 static struct snd_soc_codec_driver soc_codec_dev_ak4642 = {
 	.probe			= ak4642_probe,
-	.suspend		= ak4642_suspend,
 	.resume			= ak4642_resume,
 	.set_bias_level		= ak4642_set_bias_level,
-	.component_driver = {
-		.controls		= ak4642_snd_controls,
-		.num_controls		= ARRAY_SIZE(ak4642_snd_controls),
-		.dapm_widgets		= ak4642_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(ak4642_dapm_widgets),
-		.dapm_routes		= ak4642_intercon,
-		.num_dapm_routes	= ARRAY_SIZE(ak4642_intercon),
-	},
+	.controls		= ak4642_snd_controls,
+	.num_controls		= ARRAY_SIZE(ak4642_snd_controls),
+	.dapm_widgets		= ak4642_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(ak4642_dapm_widgets),
+	.dapm_routes		= ak4642_intercon,
+	.num_dapm_routes	= ARRAY_SIZE(ak4642_intercon),
 };
 
 static const struct regmap_config ak4642_regmap = {
@@ -622,7 +611,9 @@ static struct clk *ak4642_of_parse_mcko(struct device *dev)
 
 	of_property_read_string(np, "clock-output-names", &clk_name);
 
-	clk = clk_register_fixed_rate(dev, clk_name, parent_clk_name, 0, rate);
+	clk = clk_register_fixed_rate(dev, clk_name, parent_clk_name,
+				      (parent_clk_name) ? 0 : CLK_IS_ROOT,
+				      rate);
 	if (!IS_ERR(clk))
 		of_clk_add_provider(np, of_clk_src_simple_get, clk);
 

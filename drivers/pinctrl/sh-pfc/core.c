@@ -1,7 +1,5 @@
 /*
- * Pin Control and GPIO driver for SuperH Pin Function Controller.
- *
- * Authors: Magnus Damm, Paul Mundt, Laurent Pinchart
+ * SuperH Pin Function Controller support.
  *
  * Copyright (C) 2008 Magnus Damm
  * Copyright (C) 2009 - 2012 Paul Mundt
@@ -19,7 +17,7 @@
 #include <linux/io.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/pinctrl/machine.h>
@@ -173,21 +171,6 @@ void sh_pfc_write_raw_reg(void __iomem *mapped_reg, unsigned int reg_width,
 	}
 
 	BUG();
-}
-
-u32 sh_pfc_read_reg(struct sh_pfc *pfc, u32 reg, unsigned int width)
-{
-	return sh_pfc_read_raw_reg(sh_pfc_phys_to_virt(pfc, reg), width);
-}
-
-void sh_pfc_write_reg(struct sh_pfc *pfc, u32 reg, unsigned int width, u32 data)
-{
-	if (pfc->info->unlock_reg)
-		sh_pfc_write_raw_reg(
-			sh_pfc_phys_to_virt(pfc, pfc->info->unlock_reg), 32,
-			~data);
-
-	sh_pfc_write_raw_reg(sh_pfc_phys_to_virt(pfc, reg), width, data);
 }
 
 static void sh_pfc_config_reg_helper(struct sh_pfc *pfc,
@@ -389,21 +372,6 @@ int sh_pfc_config_mux(struct sh_pfc *pfc, unsigned mark, int pinmux_type)
 	return 0;
 }
 
-const struct sh_pfc_bias_info *
-sh_pfc_pin_to_bias_info(const struct sh_pfc_bias_info *info,
-			unsigned int num, unsigned int pin)
-{
-	unsigned int i;
-
-	for (i = 0; i < num; i++)
-		if (info[i].pin == pin)
-			return &info[i];
-
-	WARN_ONCE(1, "Pin %u is not in bias info list\n", pin);
-
-	return NULL;
-}
-
 static int sh_pfc_init_ranges(struct sh_pfc *pfc)
 {
 	struct sh_pfc_pin_range *range;
@@ -509,12 +477,6 @@ static const struct of_device_id sh_pfc_of_table[] = {
 		.data = &r8a7791_pinmux_info,
 	},
 #endif
-#ifdef CONFIG_PINCTRL_PFC_R8A7792
-	{
-		.compatible = "renesas,pfc-r8a7792",
-		.data = &r8a7792_pinmux_info,
-	},
-#endif
 #ifdef CONFIG_PINCTRL_PFC_R8A7793
 	{
 		.compatible = "renesas,pfc-r8a7793",
@@ -533,12 +495,6 @@ static const struct of_device_id sh_pfc_of_table[] = {
 		.data = &r8a7795_pinmux_info,
 	},
 #endif
-#ifdef CONFIG_PINCTRL_PFC_R8A7796
-	{
-		.compatible = "renesas,pfc-r8a7796",
-		.data = &r8a7796_pinmux_info,
-	},
-#endif
 #ifdef CONFIG_PINCTRL_PFC_SH73A0
 	{
 		.compatible = "renesas,pfc-sh73a0",
@@ -547,6 +503,7 @@ static const struct of_device_id sh_pfc_of_table[] = {
 #endif
 	{ },
 };
+MODULE_DEVICE_TABLE(of, sh_pfc_of_table);
 #endif
 
 static int sh_pfc_probe(struct platform_device *pdev)
@@ -561,7 +518,7 @@ static int sh_pfc_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_OF
 	if (np)
-		info = of_device_get_match_data(&pdev->dev);
+		info = of_match_device(sh_pfc_of_table, &pdev->dev)->data;
 	else
 #endif
 		info = platid ? (const void *)platid->driver_data : NULL;
@@ -606,7 +563,7 @@ static int sh_pfc_probe(struct platform_device *pdev)
 	if (unlikely(ret != 0))
 		return ret;
 
-#ifdef CONFIG_PINCTRL_SH_PFC_GPIO
+#ifdef CONFIG_GPIO_SH_PFC
 	/*
 	 * Then the GPIO chip
 	 */
@@ -624,6 +581,18 @@ static int sh_pfc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, pfc);
 
 	dev_info(pfc->dev, "%s support registered\n", info->name);
+
+	return 0;
+}
+
+static int sh_pfc_remove(struct platform_device *pdev)
+{
+	struct sh_pfc *pfc = platform_get_drvdata(pdev);
+
+#ifdef CONFIG_GPIO_SH_PFC
+	sh_pfc_unregister_gpiochip(pfc);
+#endif
+	sh_pfc_unregister_pinctrl(pfc);
 
 	return 0;
 }
@@ -668,9 +637,11 @@ static const struct platform_device_id sh_pfc_id_table[] = {
 	{ "sh-pfc", 0 },
 	{ },
 };
+MODULE_DEVICE_TABLE(platform, sh_pfc_id_table);
 
 static struct platform_driver sh_pfc_driver = {
 	.probe		= sh_pfc_probe,
+	.remove		= sh_pfc_remove,
 	.id_table	= sh_pfc_id_table,
 	.driver		= {
 		.name	= DRV_NAME,
@@ -683,3 +654,13 @@ static int __init sh_pfc_init(void)
 	return platform_driver_register(&sh_pfc_driver);
 }
 postcore_initcall(sh_pfc_init);
+
+static void __exit sh_pfc_exit(void)
+{
+	platform_driver_unregister(&sh_pfc_driver);
+}
+module_exit(sh_pfc_exit);
+
+MODULE_AUTHOR("Magnus Damm, Paul Mundt, Laurent Pinchart");
+MODULE_DESCRIPTION("Pin Control and GPIO driver for SuperH pin function controller");
+MODULE_LICENSE("GPL v2");

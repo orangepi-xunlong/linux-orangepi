@@ -45,7 +45,37 @@ struct ttm_bo_device;
 
 struct drm_mm_node;
 
-struct ttm_placement;
+/**
+ * struct ttm_place
+ *
+ * @fpfn:	first valid page frame number to put the object
+ * @lpfn:	last valid page frame number to put the object
+ * @flags:	memory domain and caching flags for the object
+ *
+ * Structure indicating a possible place to put an object.
+ */
+struct ttm_place {
+	unsigned	fpfn;
+	unsigned	lpfn;
+	uint32_t	flags;
+};
+
+/**
+ * struct ttm_placement
+ *
+ * @num_placement:	number of preferred placements
+ * @placement:		preferred placements
+ * @num_busy_placement:	number of preferred placements when need to evict buffer
+ * @busy_placement:	preferred placements when need to evict buffer
+ *
+ * Structure indicating the placement you request for an object.
+ */
+struct ttm_placement {
+	unsigned		num_placement;
+	const struct ttm_place	*placement;
+	unsigned		num_busy_placement;
+	const struct ttm_place	*busy_placement;
+};
 
 /**
  * struct ttm_bus_placement
@@ -62,7 +92,7 @@ struct ttm_placement;
  */
 struct ttm_bus_placement {
 	void		*addr;
-	phys_addr_t	base;
+	unsigned long	base;
 	unsigned long	size;
 	unsigned long	offset;
 	bool		is_iomem;
@@ -143,7 +173,7 @@ struct ttm_tt;
  * @lru: List head for the lru list.
  * @ddestroy: List head for the delayed destroy list.
  * @swap: List head for swap LRU list.
- * @moving: Fence set when BO is moving
+ * @priv_flags: Flags describing buffer object internal state.
  * @vma_node: Address space manager node.
  * @offset: The current GPU offset, which can have different meanings
  * depending on the memory type. For SYSTEM type memory, it should be 0.
@@ -209,7 +239,7 @@ struct ttm_buffer_object {
 	 * Members protected by a bo reservation.
 	 */
 
-	struct fence *moving;
+	unsigned long priv_flags;
 
 	struct drm_vma_offset_node vma_node;
 
@@ -284,7 +314,7 @@ ttm_bo_reference(struct ttm_buffer_object *bo)
  * Returns -EBUSY if no_wait is true and the buffer is busy.
  * Returns -ERESTARTSYS if interrupted by a signal.
  */
-extern int ttm_bo_wait(struct ttm_buffer_object *bo,
+extern int ttm_bo_wait(struct ttm_buffer_object *bo, bool lazy,
 		       bool interruptible, bool no_wait);
 
 /**
@@ -367,16 +397,6 @@ extern void ttm_bo_add_to_lru(struct ttm_buffer_object *bo);
  */
 extern int ttm_bo_del_from_lru(struct ttm_buffer_object *bo);
 
-/**
- * ttm_bo_move_to_lru_tail
- *
- * @bo: The buffer object.
- *
- * Move this BO to the tail of all lru lists used to lookup and reserve an
- * object. This function must be called with struct ttm_bo_global::lru_lock
- * held, and is used to make a BO less likely to be considered for eviction.
- */
-extern void ttm_bo_move_to_lru_tail(struct ttm_buffer_object *bo);
 
 /**
  * ttm_bo_lock_delayed_workqueue

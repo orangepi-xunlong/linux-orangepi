@@ -12,7 +12,6 @@
 #ifndef _CRYPTO_PKCS7_H
 #define _CRYPTO_PKCS7_H
 
-#include <linux/verification.h>
 #include <crypto/public_key.h>
 
 struct key;
@@ -27,13 +26,14 @@ extern void pkcs7_free_message(struct pkcs7_message *pkcs7);
 
 extern int pkcs7_get_content_data(const struct pkcs7_message *pkcs7,
 				  const void **_data, size_t *_datalen,
-				  size_t *_headerlen);
+				  bool want_wrapper);
 
 /*
  * pkcs7_trust.c
  */
 extern int pkcs7_validate_trust(struct pkcs7_message *pkcs7,
-				struct key *trust_keyring);
+				struct key *trust_keyring,
+				bool *_trusted);
 
 /*
  * pkcs7_verify.c

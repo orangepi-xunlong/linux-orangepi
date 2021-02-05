@@ -18,7 +18,6 @@
 #include <unistd.h>
 #include <string.h>
 #include <linux/bitmap.h>
-#include <linux/time64.h>
 
 #include "perf.h"
 #include "svghelper.h"
@@ -275,14 +274,14 @@ static char *time_to_string(u64 duration)
 
 	text[0] = 0;
 
-	if (duration < NSEC_PER_USEC) /* less than 1 usec */
+	if (duration < 1000) /* less than 1 usec */
 		return text;
 
-	if (duration < NSEC_PER_MSEC) { /* less than 1 msec */
-		sprintf(text, "%.1f us", duration / (double)NSEC_PER_USEC);
+	if (duration < 1000 * 1000) { /* less than 1 msec */
+		sprintf(text, "%.1f us", duration / 1000.0);
 		return text;
 	}
-	sprintf(text, "%.1f ms", duration / (double)NSEC_PER_MSEC);
+	sprintf(text, "%.1f ms", duration / 1000.0 / 1000);
 
 	return text;
 }
@@ -298,7 +297,7 @@ void svg_waiting(int Yslot, int cpu, u64 start, u64 end, const char *backtrace)
 
 	style = "waiting";
 
-	if (end-start > 10 * NSEC_PER_MSEC) /* 10 msec */
+	if (end-start > 10 * 1000000) /* 10 msec */
 		style = "WAITING";
 
 	text = time_to_string(end-start);

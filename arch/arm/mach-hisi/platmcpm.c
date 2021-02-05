@@ -239,7 +239,7 @@ err:
 }
 #endif
 
-static const struct smp_operations hip04_smp_ops __initconst = {
+static struct smp_operations __initdata hip04_smp_ops = {
 	.smp_boot_secondary	= hip04_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU
 	.cpu_die		= hip04_cpu_die,

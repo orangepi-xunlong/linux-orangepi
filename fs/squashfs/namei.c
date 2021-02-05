@@ -247,5 +247,6 @@ failed:
 
 const struct inode_operations squashfs_dir_inode_ops = {
 	.lookup = squashfs_lookup,
+	.getxattr = generic_getxattr,
 	.listxattr = squashfs_listxattr
 };

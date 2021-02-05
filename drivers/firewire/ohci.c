@@ -2284,10 +2284,9 @@ static int ohci_enable(struct fw_card *card,
 	u32 lps, version, irqs;
 	int i, ret;
 
-	ret = software_reset(ohci);
-	if (ret < 0) {
+	if (software_reset(ohci)) {
 		ohci_err(ohci, "failed to reset ohci card\n");
-		return ret;
+		return -EBUSY;
 	}
 
 	/*

@@ -7,31 +7,55 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/user_namespace.h>
-#include <linux/vmalloc.h>
 #include <asm/uaccess.h>
 
 struct group_info *groups_alloc(int gidsetsize)
 {
-	struct group_info *gi;
-	unsigned int len;
+	struct group_info *group_info;
+	int nblocks;
+	int i;
 
-	len = sizeof(struct group_info) + sizeof(kgid_t) * gidsetsize;
-	gi = kmalloc(len, GFP_KERNEL_ACCOUNT|__GFP_NOWARN|__GFP_NORETRY);
-	if (!gi)
-		gi = __vmalloc(len, GFP_KERNEL_ACCOUNT|__GFP_HIGHMEM, PAGE_KERNEL);
-	if (!gi)
+	nblocks = (gidsetsize + NGROUPS_PER_BLOCK - 1) / NGROUPS_PER_BLOCK;
+	/* Make sure we always allocate at least one indirect block pointer */
+	nblocks = nblocks ? : 1;
+	group_info = kmalloc(sizeof(*group_info) + nblocks*sizeof(gid_t *), GFP_USER);
+	if (!group_info)
 		return NULL;
+	group_info->ngroups = gidsetsize;
+	group_info->nblocks = nblocks;
+	atomic_set(&group_info->usage, 1);
 
-	atomic_set(&gi->usage, 1);
-	gi->ngroups = gidsetsize;
-	return gi;
+	if (gidsetsize <= NGROUPS_SMALL)
+		group_info->blocks[0] = group_info->small_block;
+	else {
+		for (i = 0; i < nblocks; i++) {
+			kgid_t *b;
+			b = (void *)__get_free_page(GFP_USER);
+			if (!b)
+				goto out_undo_partial_alloc;
+			group_info->blocks[i] = b;
+		}
+	}
+	return group_info;
+
+out_undo_partial_alloc:
+	while (--i >= 0) {
+		free_page((unsigned long)group_info->blocks[i]);
+	}
+	kfree(group_info);
+	return NULL;
 }
 
 EXPORT_SYMBOL(groups_alloc);
 
 void groups_free(struct group_info *group_info)
 {
-	kvfree(group_info);
+	if (group_info->blocks[0] != group_info->small_block) {
+		int i;
+		for (i = 0; i < group_info->nblocks; i++)
+			free_page((unsigned long)group_info->blocks[i]);
+	}
+	kfree(group_info);
 }
 
 EXPORT_SYMBOL(groups_free);
@@ -46,7 +70,7 @@ static int groups_to_user(gid_t __user *grouplist,
 
 	for (i = 0; i < count; i++) {
 		gid_t gid;
-		gid = from_kgid_munged(user_ns, group_info->gid[i]);
+		gid = from_kgid_munged(user_ns, GROUP_AT(group_info, i));
 		if (put_user(gid, grouplist+i))
 			return -EFAULT;
 	}
@@ -71,7 +95,7 @@ static int groups_from_user(struct group_info *group_info,
 		if (!gid_valid(kgid))
 			return -EINVAL;
 
-		group_info->gid[i] = kgid;
+		GROUP_AT(group_info, i) = kgid;
 	}
 	return 0;
 }
@@ -91,14 +115,15 @@ void groups_sort(struct group_info *group_info)
 		for (base = 0; base < max; base++) {
 			int left = base;
 			int right = left + stride;
-			kgid_t tmp = group_info->gid[right];
+			kgid_t tmp = GROUP_AT(group_info, right);
 
-			while (left >= 0 && gid_gt(group_info->gid[left], tmp)) {
-				group_info->gid[right] = group_info->gid[left];
+			while (left >= 0 && gid_gt(GROUP_AT(group_info, left), tmp)) {
+				GROUP_AT(group_info, right) =
+				    GROUP_AT(group_info, left);
 				right = left;
 				left -= stride;
 			}
-			group_info->gid[right] = tmp;
+			GROUP_AT(group_info, right) = tmp;
 		}
 		stride /= 3;
 	}
@@ -117,9 +142,9 @@ int groups_search(const struct group_info *group_info, kgid_t grp)
 	right = group_info->ngroups;
 	while (left < right) {
 		unsigned int mid = (left+right)/2;
-		if (gid_gt(grp, group_info->gid[mid]))
+		if (gid_gt(grp, GROUP_AT(group_info, mid)))
 			left = mid + 1;
-		else if (gid_lt(grp, group_info->gid[mid]))
+		else if (gid_lt(grp, GROUP_AT(group_info, mid)))
 			right = mid;
 		else
 			return 1;

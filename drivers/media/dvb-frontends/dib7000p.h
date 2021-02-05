@@ -1,6 +1,8 @@
 #ifndef DIB7000P_H
 #define DIB7000P_H
 
+#include <linux/kconfig.h>
+
 #include "dibx000_common.h"
 
 struct dib7000p_config {

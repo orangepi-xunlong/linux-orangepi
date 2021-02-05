@@ -124,13 +124,10 @@ ssize_t vfio_pci_bar_rw(struct vfio_pci_device *vdev, char __user *buf,
 	void __iomem *io;
 	ssize_t done;
 
-	if (pci_resource_start(pdev, bar))
-		end = pci_resource_len(pdev, bar);
-	else if (bar == PCI_ROM_RESOURCE &&
-		 pdev->resource[bar].flags & IORESOURCE_ROM_SHADOW)
-		end = 0x20000;
-	else
+	if (!pci_resource_start(pdev, bar))
 		return -EINVAL;
+
+	end = pci_resource_len(pdev, bar);
 
 	if (pos >= end)
 		return -EINVAL;

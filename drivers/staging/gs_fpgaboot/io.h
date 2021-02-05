@@ -66,7 +66,9 @@ enum wbus {
 	bus_2byte	= 2,
 };
 
+
 #define MAX_WAIT_DONE	10000
+
 
 struct gpiobus {
 	int	ngpio;

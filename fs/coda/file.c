@@ -38,6 +38,27 @@ coda_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 }
 
 static ssize_t
+coda_file_splice_read(struct file *coda_file, loff_t *ppos,
+		      struct pipe_inode_info *pipe, size_t count,
+		      unsigned int flags)
+{
+	ssize_t (*splice_read)(struct file *, loff_t *,
+			       struct pipe_inode_info *, size_t, unsigned int);
+	struct coda_file_info *cfi;
+	struct file *host_file;
+
+	cfi = CODA_FTOC(coda_file);
+	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
+	host_file = cfi->cfi_container;
+
+	splice_read = host_file->f_op->splice_read;
+	if (!splice_read)
+		splice_read = default_file_splice_read;
+
+	return splice_read(host_file, ppos, pipe, count, flags);
+}
+
+static ssize_t
 coda_file_write_iter(struct kiocb *iocb, struct iov_iter *to)
 {
 	struct file *coda_file = iocb->ki_filp;
@@ -50,12 +71,12 @@ coda_file_write_iter(struct kiocb *iocb, struct iov_iter *to)
 
 	host_file = cfi->cfi_container;
 	file_start_write(host_file);
-	inode_lock(coda_inode);
+	mutex_lock(&coda_inode->i_mutex);
 	ret = vfs_iter_write(cfi->cfi_container, to, &iocb->ki_pos);
 	coda_inode->i_size = file_inode(host_file)->i_size;
 	coda_inode->i_blocks = (coda_inode->i_size + 511) >> 9;
-	coda_inode->i_mtime = coda_inode->i_ctime = current_time(coda_inode);
-	inode_unlock(coda_inode);
+	coda_inode->i_mtime = coda_inode->i_ctime = CURRENT_TIME_SEC;
+	mutex_unlock(&coda_inode->i_mutex);
 	file_end_write(host_file);
 	return ret;
 }
@@ -182,7 +203,7 @@ int coda_fsync(struct file *coda_file, loff_t start, loff_t end, int datasync)
 	err = filemap_write_and_wait_range(coda_inode->i_mapping, start, end);
 	if (err)
 		return err;
-	inode_lock(coda_inode);
+	mutex_lock(&coda_inode->i_mutex);
 
 	cfi = CODA_FTOC(coda_file);
 	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
@@ -191,7 +212,7 @@ int coda_fsync(struct file *coda_file, loff_t start, loff_t end, int datasync)
 	err = vfs_fsync(host_file, datasync);
 	if (!err && !datasync)
 		err = venus_fsync(coda_inode->i_sb, coda_i2f(coda_inode));
-	inode_unlock(coda_inode);
+	mutex_unlock(&coda_inode->i_mutex);
 
 	return err;
 }
@@ -204,6 +225,6 @@ const struct file_operations coda_file_operations = {
 	.open		= coda_open,
 	.release	= coda_release,
 	.fsync		= coda_fsync,
-	.splice_read	= generic_file_splice_read,
+	.splice_read	= coda_file_splice_read,
 };
 

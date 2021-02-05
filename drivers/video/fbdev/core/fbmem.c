@@ -28,6 +28,7 @@
 #include <linux/seq_file.h>
 #include <linux/console.h>
 #include <linux/kmod.h>
+#include <linux/dma-buf.h>
 #include <linux/err.h>
 #include <linux/device.h>
 #include <linux/efi.h>
@@ -1091,6 +1092,24 @@ fb_blank(struct fb_info *info, int blank)
 }
 EXPORT_SYMBOL(fb_blank);
 
+int fb_get_dmabuf(struct fb_info *info, int flags)
+{
+#ifdef CONFIG_DMA_SHARED_BUFFER
+	struct dma_buf *dmabuf;
+
+	if (!info->fbops->fb_dmabuf_export)
+		return -ENOTTY;
+
+	dmabuf = info->fbops->fb_dmabuf_export(info);
+	if (IS_ERR(dmabuf))
+		return PTR_ERR(dmabuf);
+
+	return dma_buf_fd(dmabuf, flags);
+#else
+	return -ENOTTY;
+#endif
+}
+
 static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			unsigned long arg)
 {
@@ -1101,6 +1120,7 @@ static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 	struct fb_cmap cmap_from;
 	struct fb_cmap_user cmap;
 	struct fb_event event;
+	struct fb_dmabuf_export dmaexp;
 	void __user *argp = (void __user *)arg;
 	long ret = 0;
 
@@ -1217,6 +1237,21 @@ static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		info->flags &= ~FBINFO_MISC_USEREVENT;
 		unlock_fb_info(info);
 		console_unlock();
+		break;
+	case FBIOGET_DMABUF:
+		if (copy_from_user(&dmaexp, argp, sizeof(dmaexp)))
+			return -EFAULT;
+
+		if (!lock_fb_info(info))
+			return -ENODEV;
+		ret = fb_get_dmabuf(info, dmaexp.flags);
+		unlock_fb_info(info);
+
+		if (ret < 0)
+			return ret;
+		dmaexp.fd = ret;
+
+		ret = copy_to_user(argp, &dmaexp, sizeof(dmaexp)) ? -EFAULT : 0;
 		break;
 	default:
 		if (!lock_fb_info(info))
@@ -1372,6 +1407,7 @@ static long fb_compat_ioctl(struct file *file, unsigned int cmd,
 	case FBIOPAN_DISPLAY:
 	case FBIOGET_CON2FBMAP:
 	case FBIOPUT_CON2FBMAP:
+	case FBIOGET_DMABUF:
 		arg = (unsigned long) compat_ptr(arg);
 	case FBIOBLANK:
 		ret = do_fb_ioctl(info, cmd, arg);
@@ -1615,11 +1651,6 @@ static int do_remove_conflicting_framebuffers(struct apertures_struct *a,
 	return 0;
 }
 
-static bool lockless_register_fb;
-module_param_named_unsafe(lockless_register_fb, lockless_register_fb, bool, 0400);
-MODULE_PARM_DESC(lockless_register_fb,
-	"Lockless framebuffer registration for debugging [default=off]");
-
 static int do_register_framebuffer(struct fb_info *fb_info)
 {
 	int i, ret;
@@ -1687,18 +1718,15 @@ static int do_register_framebuffer(struct fb_info *fb_info)
 	registered_fb[i] = fb_info;
 
 	event.info = fb_info;
-	if (!lockless_register_fb)
-		console_lock();
+	console_lock();
 	if (!lock_fb_info(fb_info)) {
-		if (!lockless_register_fb)
-			console_unlock();
+		console_unlock();
 		return -ENODEV;
 	}
 
 	fb_notifier_call_chain(FB_EVENT_FB_REGISTERED, &event);
 	unlock_fb_info(fb_info);
-	if (!lockless_register_fb)
-		console_unlock();
+	console_unlock();
 	return 0;
 }
 
@@ -1887,31 +1915,17 @@ EXPORT_SYMBOL(fb_set_suspend);
 static int __init
 fbmem_init(void)
 {
-	int ret;
+	proc_create("fb", 0, NULL, &fb_proc_fops);
 
-	if (!proc_create("fb", 0, NULL, &fb_proc_fops))
-		return -ENOMEM;
-
-	ret = register_chrdev(FB_MAJOR, "fb", &fb_fops);
-	if (ret) {
+	if (register_chrdev(FB_MAJOR,"fb",&fb_fops))
 		printk("unable to get major %d for fb devs\n", FB_MAJOR);
-		goto err_chrdev;
-	}
 
 	fb_class = class_create(THIS_MODULE, "graphics");
 	if (IS_ERR(fb_class)) {
-		ret = PTR_ERR(fb_class);
-		pr_warn("Unable to create fb class; errno = %d\n", ret);
+		printk(KERN_WARNING "Unable to create fb class; errno = %ld\n", PTR_ERR(fb_class));
 		fb_class = NULL;
-		goto err_class;
 	}
 	return 0;
-
-err_class:
-	unregister_chrdev(FB_MAJOR, "fb");
-err_chrdev:
-	remove_proc_entry("fb", NULL);
-	return ret;
 }
 
 #ifdef MODULE

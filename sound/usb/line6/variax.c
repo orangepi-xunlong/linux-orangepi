@@ -259,8 +259,7 @@ static const struct line6_properties variax_properties_table[] = {
 	[LINE6_PODXTLIVE_VARIAX] = {
 		.id = "PODxtLive",
 		.name = "PODxt Live",
-		.capabilities	= LINE6_CAP_CONTROL
-				| LINE6_CAP_CONTROL_MIDI,
+		.capabilities	= LINE6_CAP_CONTROL,
 		.altsetting = 1,
 		.ep_ctrl_r = 0x86,
 		.ep_ctrl_w = 0x05,
@@ -270,8 +269,7 @@ static const struct line6_properties variax_properties_table[] = {
 	[LINE6_VARIAX] = {
 		.id = "Variax",
 		.name = "Variax Workbench",
-		.capabilities	= LINE6_CAP_CONTROL
-				| LINE6_CAP_CONTROL_MIDI,
+		.capabilities	= LINE6_CAP_CONTROL,
 		.altsetting = 1,
 		.ep_ctrl_r = 0x82,
 		.ep_ctrl_w = 0x01,

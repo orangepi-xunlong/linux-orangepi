@@ -13,7 +13,6 @@
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/backlight.h>
-#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/of.h>
 #include <linux/platform_data/lp855x.h>
@@ -75,7 +74,6 @@ struct lp855x {
 	struct lp855x_platform_data *pdata;
 	struct pwm_device *pwm;
 	struct regulator *supply;	/* regulator for VDD input */
-	struct regulator *enable;	/* regulator for EN/VDDIO input */
 };
 
 static int lp855x_write_byte(struct lp855x *lp, u8 reg, u8 data)
@@ -248,12 +246,6 @@ static void lp855x_pwm_ctrl(struct lp855x *lp, int br, int max_br)
 			return;
 
 		lp->pwm = pwm;
-
-		/*
-		 * FIXME: pwm_apply_args() should be removed when switching to
-		 * the atomic PWM API.
-		 */
-		pwm_apply_args(pwm);
 	}
 
 	pwm_config(lp->pwm, duty, period);
@@ -435,39 +427,12 @@ static int lp855x_probe(struct i2c_client *cl, const struct i2c_device_id *id)
 		lp->supply = NULL;
 	}
 
-	lp->enable = devm_regulator_get_optional(lp->dev, "enable");
-	if (IS_ERR(lp->enable)) {
-		ret = PTR_ERR(lp->enable);
-		if (ret == -ENODEV) {
-			lp->enable = NULL;
-		} else {
-			if (ret != -EPROBE_DEFER)
-				dev_err(lp->dev, "error getting enable regulator: %d\n",
-					ret);
-			return ret;
-		}
-	}
-
 	if (lp->supply) {
 		ret = regulator_enable(lp->supply);
 		if (ret < 0) {
 			dev_err(&cl->dev, "failed to enable supply: %d\n", ret);
 			return ret;
 		}
-	}
-
-	if (lp->enable) {
-		ret = regulator_enable(lp->enable);
-		if (ret < 0) {
-			dev_err(lp->dev, "failed to enable vddio: %d\n", ret);
-			return ret;
-		}
-
-		/*
-		 * LP8555 datasheet says t_RESPONSE (time between VDDIO and
-		 * I2C) is 1ms.
-		 */
-		usleep_range(1000, 2000);
 	}
 
 	i2c_set_clientdata(cl, lp);

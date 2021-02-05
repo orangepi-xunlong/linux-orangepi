@@ -37,9 +37,6 @@ struct snd_dg00x {
 	struct mutex mutex;
 	spinlock_t lock;
 
-	bool registered;
-	struct delayed_work dwork;
-
 	struct amdtp_stream tx_stream;
 	struct fw_iso_resources tx_resources;
 
@@ -60,7 +57,6 @@ struct snd_dg00x {
 	/* For asynchronous MIDI controls. */
 	struct snd_rawmidi_substream *in_control;
 	struct snd_fw_async_midi_port out_control;
-	bool is_console;
 };
 
 #define DG00X_ADDR_BASE		0xffffe0000000ull

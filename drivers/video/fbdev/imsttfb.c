@@ -33,6 +33,7 @@
 #if defined(CONFIG_PPC)
 #include <linux/nvram.h>
 #include <asm/prom.h>
+#include <asm/pci-bridge.h>
 #include "macmodes.h"
 #endif
 

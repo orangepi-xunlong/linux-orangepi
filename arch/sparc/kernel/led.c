@@ -8,7 +8,6 @@
 #include <linux/jiffies.h>
 #include <linux/timer.h>
 #include <linux/uaccess.h>
-#include <linux/sched/loadavg.h>
 
 #include <asm/auxio.h>
 

@@ -797,9 +797,9 @@ __iscsi_conn_send_pdu(struct iscsi_conn *conn, struct iscsi_hdr *hdr,
 
 free_task:
 	/* regular RX path uses back_lock */
-	spin_lock(&session->back_lock);
+	spin_lock_bh(&session->back_lock);
 	__iscsi_put_task(task);
-	spin_unlock(&session->back_lock);
+	spin_unlock_bh(&session->back_lock);
 	return NULL;
 }
 
@@ -2178,7 +2178,7 @@ int iscsi_eh_abort(struct scsi_cmnd *sc)
 	struct iscsi_conn *conn;
 	struct iscsi_task *task;
 	struct iscsi_tm *hdr;
-	int age;
+	int rc, age;
 
 	cls_session = starget_to_session(scsi_target(sc->device));
 	session = cls_session->dd_data;
@@ -2239,8 +2239,10 @@ int iscsi_eh_abort(struct scsi_cmnd *sc)
 	hdr = &conn->tmhdr;
 	iscsi_prep_abort_task_pdu(task, hdr);
 
-	if (iscsi_exec_task_mgmt_fn(conn, hdr, age, session->abort_timeout))
+	if (iscsi_exec_task_mgmt_fn(conn, hdr, age, session->abort_timeout)) {
+		rc = FAILED;
 		goto failed;
+	}
 
 	switch (conn->tmf_state) {
 	case TMF_SUCCESS:
@@ -2472,7 +2474,7 @@ static void iscsi_prep_tgt_reset_pdu(struct scsi_cmnd *sc, struct iscsi_tm *hdr)
  *
  * This will attempt to send a warm target reset.
  */
-static int iscsi_eh_target_reset(struct scsi_cmnd *sc)
+int iscsi_eh_target_reset(struct scsi_cmnd *sc)
 {
 	struct iscsi_cls_session *cls_session;
 	struct iscsi_session *session;
@@ -2544,6 +2546,7 @@ done:
 	mutex_unlock(&session->eh_mutex);
 	return rc;
 }
+EXPORT_SYMBOL_GPL(iscsi_eh_target_reset);
 
 /**
  * iscsi_eh_recover_target - reset target and possibly the session

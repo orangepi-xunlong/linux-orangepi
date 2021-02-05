@@ -196,14 +196,7 @@
 	regulator-always-on;
 	regulator-min-microvolt = <3300000>;
 	regulator-max-microvolt = <3300000>;
-	regulator-name = "vcc-wifi1";
-};
-
-&reg_ldo4 {
-	regulator-always-on;
-	regulator-min-microvolt = <3300000>;
-	regulator-max-microvolt = <3300000>;
-	regulator-name = "vcc-wifi2";
+	regulator-name = "vcc-wifi";
 };
 
 &reg_usb1_vbus {

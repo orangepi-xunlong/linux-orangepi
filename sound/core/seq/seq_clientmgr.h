@@ -33,7 +33,6 @@
 struct snd_seq_user_client {
 	struct file *file;	/* file struct of client */
 	/* ... */
-	struct pid *owner;
 	
 	/* fifo */
 	struct snd_seq_fifo *fifo;	/* queue for incoming events */
@@ -42,7 +41,6 @@ struct snd_seq_user_client {
 
 struct snd_seq_kernel_client {
 	/* ... */
-	struct snd_card *card;
 };
 
 

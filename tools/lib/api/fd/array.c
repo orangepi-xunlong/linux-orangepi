@@ -85,8 +85,7 @@ int fdarray__add(struct fdarray *fda, int fd, short revents)
 }
 
 int fdarray__filter(struct fdarray *fda, short revents,
-		    void (*entry_destructor)(struct fdarray *fda, int fd, void *arg),
-		    void *arg)
+		    void (*entry_destructor)(struct fdarray *fda, int fd))
 {
 	int fd, nr = 0;
 
@@ -96,7 +95,7 @@ int fdarray__filter(struct fdarray *fda, short revents,
 	for (fd = 0; fd < fda->nr; ++fd) {
 		if (fda->entries[fd].revents & revents) {
 			if (entry_destructor)
-				entry_destructor(fda, fd, arg);
+				entry_destructor(fda, fd);
 
 			continue;
 		}

@@ -257,14 +257,14 @@ static int whc_probe(struct umc_dev *umc)
 
 	ret = whc_init(whc);
 	if (ret)
-		goto error_whc_init;
+		goto error;
 
 	wusbhc->dev = dev;
 	wusbhc->uwb_rc = uwb_rc_get_by_grandpa(umc->dev.parent);
 	if (!wusbhc->uwb_rc) {
 		ret = -ENODEV;
 		dev_err(dev, "cannot get radio controller\n");
-		goto error_uwb_rc;
+		goto error;
 	}
 
 	if (whc->n_devices > USB_MAXCHILDREN) {
@@ -311,9 +311,8 @@ error_usb_add_hcd:
 	wusbhc_destroy(wusbhc);
 error_wusbhc_create:
 	uwb_rc_put(wusbhc->uwb_rc);
-error_uwb_rc:
+error:
 	whc_clean_up(whc);
-error_whc_init:
 	usb_put_hcd(usb_hcd);
 	return ret;
 }

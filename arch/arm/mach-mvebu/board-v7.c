@@ -16,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/of_address.h>
 #include <linux/of_fdt.h>
+#include <linux/of_platform.h>
 #include <linux/io.h>
 #include <linux/clocksource.h>
 #include <linux/dma-mapping.h>
@@ -143,6 +144,8 @@ static void __init mvebu_dt_init(void)
 {
 	if (of_machine_is_compatible("marvell,armadaxp"))
 		i2c_quirk();
+
+	of_platform_populate(NULL, of_default_bus_match_table, NULL, NULL);
 }
 
 static const char * const armada_370_xp_dt_compat[] __initconst = {

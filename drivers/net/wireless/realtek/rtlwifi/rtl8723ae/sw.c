@@ -94,7 +94,6 @@ int rtl8723e_init_sw_vars(struct ieee80211_hw *hw)
 	struct rtl_pci *rtlpci = rtl_pcidev(rtl_pcipriv(hw));
 	struct rtl_hal *rtlhal = rtl_hal(rtl_priv(hw));
 	int err = 0;
-	char *fw_name = "rtlwifi/rtl8723fw.bin";
 
 	rtl8723e_bt_reg_init(hw);
 
@@ -177,12 +176,14 @@ int rtl8723e_init_sw_vars(struct ieee80211_hw *hw)
 		return 1;
 	}
 
-	if (IS_81xxC_VENDOR_UMC_B_CUT(rtlhal->version))
-		fw_name = "rtlwifi/rtl8723fw_B.bin";
+	if (IS_VENDOR_8723_A_CUT(rtlhal->version))
+		rtlpriv->cfg->fw_name = "rtlwifi/rtl8723fw.bin";
+	else if (IS_81xxC_VENDOR_UMC_B_CUT(rtlhal->version))
+		rtlpriv->cfg->fw_name = "rtlwifi/rtl8723fw_B.bin";
 
 	rtlpriv->max_fw_size = 0x6000;
-	pr_info("Using firmware %s\n", fw_name);
-	err = request_firmware_nowait(THIS_MODULE, 1, fw_name,
+	pr_info("Using firmware %s\n", rtlpriv->cfg->fw_name);
+	err = request_firmware_nowait(THIS_MODULE, 1, rtlpriv->cfg->fw_name,
 				      rtlpriv->io.dev, GFP_KERNEL, hw,
 				      rtl_fw_cb);
 	if (err) {
@@ -275,10 +276,11 @@ static struct rtl_mod_params rtl8723e_mod_params = {
 	.disable_watchdog = false,
 };
 
-static const struct rtl_hal_cfg rtl8723e_hal_cfg = {
+static struct rtl_hal_cfg rtl8723e_hal_cfg = {
 	.bar_id = 2,
 	.write_readback = true,
 	.name = "rtl8723e_pci",
+	.fw_name = "rtlwifi/rtl8723efw.bin",
 	.ops = &rtl8723e_hal_ops,
 	.mod_params = &rtl8723e_mod_params,
 	.maps[SYS_ISO_CTRL] = REG_SYS_ISO_CTRL,

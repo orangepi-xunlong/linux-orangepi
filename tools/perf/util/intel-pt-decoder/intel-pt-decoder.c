@@ -101,7 +101,6 @@ struct intel_pt_decoder {
 	int (*walk_insn)(struct intel_pt_insn *intel_pt_insn,
 			 uint64_t *insn_cnt_ptr, uint64_t *ip, uint64_t to_ip,
 			 uint64_t max_insn_cnt, void *data);
-	bool (*pgd_ip)(uint64_t ip, void *data);
 	void *data;
 	struct intel_pt_state state;
 	const unsigned char *buf;
@@ -213,7 +212,6 @@ struct intel_pt_decoder *intel_pt_decoder_new(struct intel_pt_params *params)
 
 	decoder->get_trace          = params->get_trace;
 	decoder->walk_insn          = params->walk_insn;
-	decoder->pgd_ip             = params->pgd_ip;
 	decoder->data               = params->data;
 	decoder->return_compression = params->return_compression;
 
@@ -377,7 +375,7 @@ static const char *intel_pt_err_msgs[] = {
 
 int intel_pt__strerror(int code, char *buf, size_t buflen)
 {
-	if (code < 1 || code >= INTEL_PT_ERR_MAX)
+	if (code < 1 || code > INTEL_PT_ERR_MAX)
 		code = INTEL_PT_ERR_UNK;
 	strlcpy(buf, intel_pt_err_msgs[code], buflen);
 	return 0;
@@ -1074,19 +1072,6 @@ static int intel_pt_walk_tip(struct intel_pt_decoder *decoder)
 	int err;
 
 	err = intel_pt_walk_insn(decoder, &intel_pt_insn, 0);
-	if (err == INTEL_PT_RETURN &&
-	    decoder->pgd_ip &&
-	    decoder->pkt_state == INTEL_PT_STATE_TIP_PGD &&
-	    (decoder->state.type & INTEL_PT_BRANCH) &&
-	    decoder->pgd_ip(decoder->state.to_ip, decoder->data)) {
-		/* Unconditional branch leaving filter region */
-		decoder->no_progress = 0;
-		decoder->pge = false;
-		decoder->continuous_period = false;
-		decoder->pkt_state = INTEL_PT_STATE_IN_SYNC;
-		decoder->state.to_ip = 0;
-		return 0;
-	}
 	if (err == INTEL_PT_RETURN)
 		return 0;
 	if (err)
@@ -1115,21 +1100,6 @@ static int intel_pt_walk_tip(struct intel_pt_decoder *decoder)
 	}
 
 	if (intel_pt_insn.branch == INTEL_PT_BR_CONDITIONAL) {
-		uint64_t to_ip = decoder->ip + intel_pt_insn.length +
-				 intel_pt_insn.rel;
-
-		if (decoder->pgd_ip &&
-		    decoder->pkt_state == INTEL_PT_STATE_TIP_PGD &&
-		    decoder->pgd_ip(to_ip, decoder->data)) {
-			/* Conditional branch leaving filter region */
-			decoder->pge = false;
-			decoder->continuous_period = false;
-			decoder->pkt_state = INTEL_PT_STATE_IN_SYNC;
-			decoder->ip = to_ip;
-			decoder->state.from_ip = decoder->ip;
-			decoder->state.to_ip = 0;
-			return 0;
-		}
 		intel_pt_log_at("ERROR: Conditional branch when expecting indirect branch",
 				decoder->ip);
 		decoder->pkt_state = INTEL_PT_STATE_ERR_RESYNC;

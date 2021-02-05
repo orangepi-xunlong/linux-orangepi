@@ -154,9 +154,9 @@ int ft_queue_data_in(struct se_cmd *se_cmd)
 			BUG_ON(!page);
 			from = kmap_atomic(page + (mem_off >> PAGE_SHIFT));
 			page_addr = from;
-			from += offset_in_page(mem_off);
+			from += mem_off & ~PAGE_MASK;
 			tlen = min(tlen, (size_t)(PAGE_SIZE -
-						offset_in_page(mem_off)));
+						(mem_off & ~PAGE_MASK)));
 			memcpy(to, from, tlen);
 			kunmap_atomic(page_addr);
 			to += tlen;
@@ -314,9 +314,9 @@ void ft_recv_write_data(struct ft_cmd *cmd, struct fc_frame *fp)
 
 		to = kmap_atomic(page + (mem_off >> PAGE_SHIFT));
 		page_addr = to;
-		to += offset_in_page(mem_off);
+		to += mem_off & ~PAGE_MASK;
 		tlen = min(tlen, (size_t)(PAGE_SIZE -
-					  offset_in_page(mem_off)));
+					  (mem_off & ~PAGE_MASK)));
 		memcpy(to, from, tlen);
 		kunmap_atomic(page_addr);
 

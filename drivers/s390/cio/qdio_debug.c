@@ -366,6 +366,8 @@ void qdio_debug_exit(void)
 {
 	qdio_clear_dbf_list();
 	debugfs_remove(debugfs_root);
-	debug_unregister(qdio_dbf_setup);
-	debug_unregister(qdio_dbf_error);
+	if (qdio_dbf_setup)
+		debug_unregister(qdio_dbf_setup);
+	if (qdio_dbf_error)
+		debug_unregister(qdio_dbf_error);
 }

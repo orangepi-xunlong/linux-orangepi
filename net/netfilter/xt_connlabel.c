@@ -9,7 +9,6 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <net/netfilter/nf_conntrack.h>
-#include <net/netfilter/nf_conntrack_ecache.h>
 #include <net/netfilter/nf_conntrack_labels.h>
 #include <linux/netfilter/x_tables.h>
 
@@ -24,7 +23,6 @@ connlabel_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
 	const struct xt_connlabel_mtinfo *info = par->matchinfo;
 	enum ip_conntrack_info ctinfo;
-	struct nf_conn_labels *labels;
 	struct nf_conn *ct;
 	bool invert = info->options & XT_CONNLABEL_OP_INVERT;
 
@@ -32,21 +30,10 @@ connlabel_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	if (ct == NULL || nf_ct_is_untracked(ct))
 		return invert;
 
-	labels = nf_ct_labels_find(ct);
-	if (!labels)
-		return invert;
+	if (info->options & XT_CONNLABEL_OP_SET)
+		return (nf_connlabel_set(ct, info->bit) == 0) ^ invert;
 
-	if (test_bit(info->bit, labels->bits))
-		return !invert;
-
-	if (info->options & XT_CONNLABEL_OP_SET) {
-		if (!test_and_set_bit(info->bit, labels->bits))
-			nf_conntrack_event_cache(IPCT_LABEL, ct);
-
-		return !invert;
-	}
-
-	return invert;
+	return nf_connlabel_match(ct, info->bit) ^ invert;
 }
 
 static int connlabel_mt_check(const struct xt_mtchk_param *par)
@@ -68,7 +55,7 @@ static int connlabel_mt_check(const struct xt_mtchk_param *par)
 		return ret;
 	}
 
-	ret = nf_connlabels_get(par->net, info->bit);
+	ret = nf_connlabels_get(par->net, info->bit + 1);
 	if (ret < 0)
 		nf_ct_l3proto_module_put(par->family);
 	return ret;

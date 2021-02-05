@@ -89,54 +89,29 @@ static inline void u64_stats_update_end(struct u64_stats_sync *syncp)
 #endif
 }
 
-static inline void u64_stats_update_begin_raw(struct u64_stats_sync *syncp)
-{
-#if BITS_PER_LONG==32 && defined(CONFIG_SMP)
-	raw_write_seqcount_begin(&syncp->seq);
-#endif
-}
-
-static inline void u64_stats_update_end_raw(struct u64_stats_sync *syncp)
-{
-#if BITS_PER_LONG==32 && defined(CONFIG_SMP)
-	raw_write_seqcount_end(&syncp->seq);
-#endif
-}
-
-static inline unsigned int __u64_stats_fetch_begin(const struct u64_stats_sync *syncp)
+static inline unsigned int u64_stats_fetch_begin(const struct u64_stats_sync *syncp)
 {
 #if BITS_PER_LONG==32 && defined(CONFIG_SMP)
 	return read_seqcount_begin(&syncp->seq);
 #else
-	return 0;
-#endif
-}
-
-static inline unsigned int u64_stats_fetch_begin(const struct u64_stats_sync *syncp)
-{
-#if BITS_PER_LONG==32 && !defined(CONFIG_SMP)
+#if BITS_PER_LONG==32
 	preempt_disable();
 #endif
-	return __u64_stats_fetch_begin(syncp);
-}
-
-static inline bool __u64_stats_fetch_retry(const struct u64_stats_sync *syncp,
-					 unsigned int start)
-{
-#if BITS_PER_LONG==32 && defined(CONFIG_SMP)
-	return read_seqcount_retry(&syncp->seq, start);
-#else
-	return false;
+	return 0;
 #endif
 }
 
 static inline bool u64_stats_fetch_retry(const struct u64_stats_sync *syncp,
 					 unsigned int start)
 {
-#if BITS_PER_LONG==32 && !defined(CONFIG_SMP)
+#if BITS_PER_LONG==32 && defined(CONFIG_SMP)
+	return read_seqcount_retry(&syncp->seq, start);
+#else
+#if BITS_PER_LONG==32
 	preempt_enable();
 #endif
-	return __u64_stats_fetch_retry(syncp, start);
+	return false;
+#endif
 }
 
 /*
@@ -147,19 +122,27 @@ static inline bool u64_stats_fetch_retry(const struct u64_stats_sync *syncp,
  */
 static inline unsigned int u64_stats_fetch_begin_irq(const struct u64_stats_sync *syncp)
 {
-#if BITS_PER_LONG==32 && !defined(CONFIG_SMP)
+#if BITS_PER_LONG==32 && defined(CONFIG_SMP)
+	return read_seqcount_begin(&syncp->seq);
+#else
+#if BITS_PER_LONG==32
 	local_irq_disable();
 #endif
-	return __u64_stats_fetch_begin(syncp);
+	return 0;
+#endif
 }
 
 static inline bool u64_stats_fetch_retry_irq(const struct u64_stats_sync *syncp,
-					     unsigned int start)
+					 unsigned int start)
 {
-#if BITS_PER_LONG==32 && !defined(CONFIG_SMP)
+#if BITS_PER_LONG==32 && defined(CONFIG_SMP)
+	return read_seqcount_retry(&syncp->seq, start);
+#else
+#if BITS_PER_LONG==32
 	local_irq_enable();
 #endif
-	return __u64_stats_fetch_retry(syncp, start);
+	return false;
+#endif
 }
 
 #endif /* _LINUX_U64_STATS_SYNC_H */

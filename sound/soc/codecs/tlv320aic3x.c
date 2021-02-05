@@ -1683,14 +1683,12 @@ static struct snd_soc_codec_driver soc_codec_dev_aic3x = {
 	.idle_bias_off = true,
 	.probe = aic3x_probe,
 	.remove = aic3x_remove,
-	.component_driver = {
-		.controls		= aic3x_snd_controls,
-		.num_controls		= ARRAY_SIZE(aic3x_snd_controls),
-		.dapm_widgets		= aic3x_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(aic3x_dapm_widgets),
-		.dapm_routes		= intercon,
-		.num_dapm_routes	= ARRAY_SIZE(intercon),
-	},
+	.controls = aic3x_snd_controls,
+	.num_controls = ARRAY_SIZE(aic3x_snd_controls),
+	.dapm_widgets = aic3x_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(aic3x_dapm_widgets),
+	.dapm_routes = intercon,
+	.num_dapm_routes = ARRAY_SIZE(intercon),
 };
 
 /*

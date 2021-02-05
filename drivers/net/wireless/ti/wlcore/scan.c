@@ -36,12 +36,9 @@ void wl1271_scan_complete_work(struct work_struct *work)
 	struct delayed_work *dwork;
 	struct wl1271 *wl;
 	struct wl12xx_vif *wlvif;
-	struct cfg80211_scan_info info = {
-		.aborted = false,
-	};
 	int ret;
 
-	dwork = to_delayed_work(work);
+	dwork = container_of(work, struct delayed_work, work);
 	wl = container_of(dwork, struct wl1271, scan_complete_work);
 
 	wl1271_debug(DEBUG_SCAN, "Scanning complete");
@@ -85,7 +82,7 @@ void wl1271_scan_complete_work(struct work_struct *work)
 
 	wlcore_cmd_regdomain_config_locked(wl);
 
-	ieee80211_scan_completed(wl->hw, &info);
+	ieee80211_scan_completed(wl->hw, false);
 
 out:
 	mutex_unlock(&wl->mutex);
@@ -167,7 +164,7 @@ wlcore_scan_get_channels(struct wl1271 *wl,
 		struct conf_sched_scan_settings *c = &wl->conf.sched_scan;
 		u32 delta_per_probe;
 
-		if (band == NL80211_BAND_5GHZ)
+		if (band == IEEE80211_BAND_5GHZ)
 			delta_per_probe = c->dwell_time_delta_per_probe_5;
 		else
 			delta_per_probe = c->dwell_time_delta_per_probe;
@@ -218,7 +215,7 @@ wlcore_scan_get_channels(struct wl1271 *wl,
 			channels[j].channel = req_channels[i]->hw_value;
 
 			if (n_pactive_ch &&
-			    (band == NL80211_BAND_2GHZ) &&
+			    (band == IEEE80211_BAND_2GHZ) &&
 			    (channels[j].channel >= 12) &&
 			    (channels[j].channel <= 14) &&
 			    (flags & IEEE80211_CHAN_NO_IR) &&
@@ -269,7 +266,7 @@ wlcore_set_scan_chan_params(struct wl1271 *wl,
 					 n_channels,
 					 n_ssids,
 					 cfg->channels_2,
-					 NL80211_BAND_2GHZ,
+					 IEEE80211_BAND_2GHZ,
 					 false, true, 0,
 					 MAX_CHANNELS_2GHZ,
 					 &n_pactive_ch,
@@ -280,7 +277,7 @@ wlcore_set_scan_chan_params(struct wl1271 *wl,
 					 n_channels,
 					 n_ssids,
 					 cfg->channels_2,
-					 NL80211_BAND_2GHZ,
+					 IEEE80211_BAND_2GHZ,
 					 false, false,
 					 cfg->passive[0],
 					 MAX_CHANNELS_2GHZ,
@@ -292,7 +289,7 @@ wlcore_set_scan_chan_params(struct wl1271 *wl,
 					 n_channels,
 					 n_ssids,
 					 cfg->channels_5,
-					 NL80211_BAND_5GHZ,
+					 IEEE80211_BAND_5GHZ,
 					 false, true, 0,
 					 wl->max_channels_5,
 					 &n_pactive_ch,
@@ -303,7 +300,7 @@ wlcore_set_scan_chan_params(struct wl1271 *wl,
 					 n_channels,
 					 n_ssids,
 					 cfg->channels_5,
-					 NL80211_BAND_5GHZ,
+					 IEEE80211_BAND_5GHZ,
 					 true, true,
 					 cfg->passive[1],
 					 wl->max_channels_5,
@@ -315,7 +312,7 @@ wlcore_set_scan_chan_params(struct wl1271 *wl,
 					 n_channels,
 					 n_ssids,
 					 cfg->channels_5,
-					 NL80211_BAND_5GHZ,
+					 IEEE80211_BAND_5GHZ,
 					 false, false,
 					 cfg->passive[1] + cfg->dfs,
 					 wl->max_channels_5,

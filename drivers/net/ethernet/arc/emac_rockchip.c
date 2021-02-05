@@ -222,11 +222,9 @@ static int emac_rockchip_probe(struct platform_device *pdev)
 
 		/* RMII TX/RX needs always a rate of 25MHz */
 		err = clk_set_rate(priv->macclk, 25000000);
-		if (err) {
+		if (err)
 			dev_err(dev,
 				"failed to change mac clock rate (%d)\n", err);
-			goto out_clk_disable_macclk;
-		}
 	}
 
 	err = arc_emac_probe(ndev, interface);
@@ -236,8 +234,7 @@ static int emac_rockchip_probe(struct platform_device *pdev)
 	}
 
 	return 0;
-out_clk_disable_macclk:
-	clk_disable_unprepare(priv->macclk);
+
 out_regulator_disable:
 	if (priv->regulator)
 		regulator_disable(priv->regulator);

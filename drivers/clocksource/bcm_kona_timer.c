@@ -20,6 +20,7 @@
 #include <linux/clk.h>
 
 #include <linux/io.h>
+#include <asm/mach/time.h>
 
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -66,10 +67,10 @@ static void kona_timer_disable_and_clear(void __iomem *base)
 
 }
 
-static int
+static void
 kona_timer_get_counter(void __iomem *timer_base, uint32_t *msw, uint32_t *lsw)
 {
-	int loop_limit = 3;
+	int loop_limit = 4;
 
 	/*
 	 * Read 64-bit free running counter
@@ -83,19 +84,18 @@ kona_timer_get_counter(void __iomem *timer_base, uint32_t *msw, uint32_t *lsw)
 	 *      if new hi-word is equal to previously read hi-word then stop.
 	 */
 
-	do {
+	while (--loop_limit) {
 		*msw = readl(timer_base + KONA_GPTIMER_STCHI_OFFSET);
 		*lsw = readl(timer_base + KONA_GPTIMER_STCLO_OFFSET);
 		if (*msw == readl(timer_base + KONA_GPTIMER_STCHI_OFFSET))
 			break;
-	} while (--loop_limit);
+	}
 	if (!loop_limit) {
 		pr_err("bcm_kona_timer: getting counter failed.\n");
 		pr_err(" Timer will be impacted\n");
-		return -ETIMEDOUT;
 	}
 
-	return 0;
+	return;
 }
 
 static int kona_timer_set_next_event(unsigned long clc,
@@ -113,11 +113,8 @@ static int kona_timer_set_next_event(unsigned long clc,
 
 	uint32_t lsw, msw;
 	uint32_t reg;
-	int ret;
 
-	ret = kona_timer_get_counter(timers.tmr_regs, &msw, &lsw);
-	if (ret)
-		return ret;
+	kona_timer_get_counter(timers.tmr_regs, &msw, &lsw);
 
 	/* Load the "next" event tick value */
 	writel(lsw + clc, timers.tmr_regs + KONA_GPTIMER_STCM0_OFFSET);
@@ -166,10 +163,15 @@ static struct irqaction kona_timer_irq = {
 	.handler = kona_timer_interrupt,
 };
 
-static int __init kona_timer_init(struct device_node *node)
+static void __init kona_timer_init(struct device_node *node)
 {
 	u32 freq;
 	struct clk *external_clk;
+
+	if (!of_device_is_available(node)) {
+		pr_info("Kona Timer v1 marked as disabled in device tree\n");
+		return;
+	}
 
 	external_clk = of_clk_get_by_name(node, NULL);
 
@@ -180,7 +182,7 @@ static int __init kona_timer_init(struct device_node *node)
 		arch_timer_rate = freq;
 	} else {
 		pr_err("Kona Timer v1 unable to determine clock-frequency");
-		return -EINVAL;
+		return;
 	}
 
 	/* Setup IRQ numbers */
@@ -194,8 +196,6 @@ static int __init kona_timer_init(struct device_node *node)
 	kona_timer_clockevents_init();
 	setup_irq(timers.tmr_irq, &kona_timer_irq);
 	kona_timer_set_next_event((arch_timer_rate / HZ), NULL);
-
-	return 0;
 }
 
 CLOCKSOURCE_OF_DECLARE(brcm_kona, "brcm,kona-timer", kona_timer_init);

@@ -297,14 +297,14 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_MCH_PC1,	pcie_r
  *
  * The standard boot ROM sequence for an x86 machine uses the BIOS
  * to select an initial video card for boot display. This boot video
- * card will have its BIOS copied to 0xC0000 in system RAM.
+ * card will have it's BIOS copied to C0000 in system RAM.
  * IORESOURCE_ROM_SHADOW is used to associate the boot video
  * card with this copy. On laptops this copy has to be used since
  * the main ROM may be compressed or combined with another image.
  * See pci_map_rom() for use of this flag. Before marking the device
  * with IORESOURCE_ROM_SHADOW check if a vga_default_device is already set
- * by either arch code or vga-arbitration; if so only apply the fixup to this
- * already-determined primary video card.
+ * by either arch cde or vga-arbitration, if so only apply the fixup to this
+ * already determined primary video card.
  */
 
 static void pci_fixup_video(struct pci_dev *pdev)
@@ -312,7 +312,6 @@ static void pci_fixup_video(struct pci_dev *pdev)
 	struct pci_dev *bridge;
 	struct pci_bus *bus;
 	u16 config;
-	struct resource *res;
 
 	/* Is VGA routed to us? */
 	bus = pdev->bus;
@@ -337,18 +336,8 @@ static void pci_fixup_video(struct pci_dev *pdev)
 	if (!vga_default_device() || pdev == vga_default_device()) {
 		pci_read_config_word(pdev, PCI_COMMAND, &config);
 		if (config & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) {
-			res = &pdev->resource[PCI_ROM_RESOURCE];
-
-			pci_disable_rom(pdev);
-			if (res->parent)
-				release_resource(res);
-
-			res->start = 0xC0000;
-			res->end = res->start + 0x20000 - 1;
-			res->flags = IORESOURCE_MEM | IORESOURCE_ROM_SHADOW |
-				     IORESOURCE_PCI_FIXED;
-			dev_info(&pdev->dev, "Video device with shadowed ROM at %pR\n",
-				 res);
+			pdev->resource[PCI_ROM_RESOURCE].flags |= IORESOURCE_ROM_SHADOW;
+			dev_printk(KERN_DEBUG, &pdev->dev, "Video device with shadowed ROM\n");
 		}
 	}
 }
@@ -553,53 +542,15 @@ static void twinhead_reserve_killing_zone(struct pci_dev *dev)
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x27B9, twinhead_reserve_killing_zone);
 
 /*
- * Device [8086:2fc0]
- * Erratum HSE43
- * CONFIG_TDP_NOMINAL CSR Implemented at Incorrect Offset
- * http://www.intel.com/content/www/us/en/processors/xeon/xeon-e5-v3-spec-update.html
+ * Broadwell EP Home Agent BARs erroneously return non-zero values when read.
  *
- * Devices [8086:6f60,6fa0,6fc0]
- * Erratum BDF2
- * PCI BARs in the Home Agent Will Return Non-Zero Values During Enumeration
- * http://www.intel.com/content/www/us/en/processors/xeon/xeon-e5-v4-spec-update.html
+ * See http://www.intel.com/content/www/us/en/processors/xeon/xeon-e5-v4-spec-update.html
+ * entry BDF2.
  */
-static void pci_invalid_bar(struct pci_dev *dev)
+static void pci_bdwep_bar(struct pci_dev *dev)
 {
 	dev->non_compliant_bars = 1;
 }
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x2fc0, pci_invalid_bar);
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6f60, pci_invalid_bar);
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6fa0, pci_invalid_bar);
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6fc0, pci_invalid_bar);
-
-/*
- * Apple MacBook Pro: Avoid [mem 0x7fa00000-0x7fbfffff]
- *
- * Using the [mem 0x7fa00000-0x7fbfffff] region, e.g., by assigning it to
- * the 00:1c.0 Root Port, causes a conflict with [io 0x1804], which is used
- * for soft poweroff and suspend-to-RAM.
- *
- * As far as we know, this is related to the address space, not to the Root
- * Port itself.  Attaching the quirk to the Root Port is a convenience, but
- * it could probably also be a standalone DMI quirk.
- *
- * https://bugzilla.kernel.org/show_bug.cgi?id=103211
- */
-static void quirk_apple_mbp_poweroff(struct pci_dev *pdev)
-{
-	struct device *dev = &pdev->dev;
-	struct resource *res;
-
-	if ((!dmi_match(DMI_PRODUCT_NAME, "MacBookPro11,4") &&
-	     !dmi_match(DMI_PRODUCT_NAME, "MacBookPro11,5")) ||
-	    pdev->bus->number != 0 || pdev->devfn != PCI_DEVFN(0x1c, 0))
-		return;
-
-	res = request_mem_region(0x7fa00000, 0x200000,
-				 "MacBook Pro poweroff workaround");
-	if (res)
-		dev_info(dev, "claimed %s %pR\n", res->name, res);
-	else
-		dev_info(dev, "can't work around MacBook Pro poweroff issue\n");
-}
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x8c10, quirk_apple_mbp_poweroff);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6f60, pci_bdwep_bar);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6fa0, pci_bdwep_bar);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6fc0, pci_bdwep_bar);

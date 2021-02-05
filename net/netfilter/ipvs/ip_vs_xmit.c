@@ -531,6 +531,8 @@ static inline int ip_vs_tunnel_xmit_prepare(struct sk_buff *skb,
 	if (ret == NF_ACCEPT) {
 		nf_reset(skb);
 		skb_forward_csum(skb);
+		if (!skb->sk)
+			skb_sender_cpu_clear(skb);
 	}
 	return ret;
 }
@@ -571,6 +573,8 @@ static inline int ip_vs_nat_send_or_cont(int pf, struct sk_buff *skb,
 
 	if (!local) {
 		skb_forward_csum(skb);
+		if (!skb->sk)
+			skb_sender_cpu_clear(skb);
 		NF_HOOK(pf, NF_INET_LOCAL_OUT, cp->ipvs->net, NULL, skb,
 			NULL, skb_dst(skb)->dev, dst_output);
 	} else
@@ -591,6 +595,8 @@ static inline int ip_vs_send_or_cont(int pf, struct sk_buff *skb,
 	if (!local) {
 		ip_vs_drop_early_demux_sk(skb);
 		skb_forward_csum(skb);
+		if (!skb->sk)
+			skb_sender_cpu_clear(skb);
 		NF_HOOK(pf, NF_INET_LOCAL_OUT, cp->ipvs->net, NULL, skb,
 			NULL, skb_dst(skb)->dev, dst_output);
 	} else
@@ -932,14 +938,17 @@ error:
 
 static inline int __tun_gso_type_mask(int encaps_af, int orig_af)
 {
-	switch (encaps_af) {
-	case AF_INET:
-		return SKB_GSO_IPXIP4;
-	case AF_INET6:
-		return SKB_GSO_IPXIP6;
-	default:
-		return 0;
+	if (encaps_af == AF_INET) {
+		if (orig_af == AF_INET)
+			return SKB_GSO_IPIP;
+
+		return SKB_GSO_SIT;
 	}
+
+	/* GSO: we need to provide proper SKB_GSO_ value for IPv6:
+	 * SKB_GSO_SIT/IPV6
+	 */
+	return 0;
 }
 
 /*
@@ -1010,7 +1019,9 @@ ip_vs_tunnel_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	if (IS_ERR(skb))
 		goto tx_error;
 
-	if (iptunnel_handle_offloads(skb, __tun_gso_type_mask(AF_INET, cp->af)))
+	skb = iptunnel_handle_offloads(
+		skb, false, __tun_gso_type_mask(AF_INET, cp->af));
+	if (IS_ERR(skb))
 		goto tx_error;
 
 	skb->transport_header = skb->network_header;
@@ -1101,7 +1112,9 @@ ip_vs_tunnel_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 	if (IS_ERR(skb))
 		goto tx_error;
 
-	if (iptunnel_handle_offloads(skb, __tun_gso_type_mask(AF_INET6, cp->af)))
+	skb = iptunnel_handle_offloads(
+		skb, false, __tun_gso_type_mask(AF_INET6, cp->af));
+	if (IS_ERR(skb))
 		goto tx_error;
 
 	skb->transport_header = skb->network_header;

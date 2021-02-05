@@ -23,20 +23,16 @@ LDFLAGS_vmlinux := -Ttext $(IMAGE_OFFSET) -estartup -T $(obj)/vmlinux.lds \
 
 $(obj)/vmlinux: $(OBJECTS) $(obj)/piggy.o $(LIBGCC) FORCE
 	$(call if_changed,ld)
+	@:
 
 $(obj)/vmlinux.bin: vmlinux FORCE
 	$(call if_changed,objcopy)
 
-suffix-$(CONFIG_KERNEL_GZIP)    := gzip
-suffix-$(CONFIG_KERNEL_LZO)     := lzo
-
-$(obj)/vmlinux.bin.$(suffix-y): $(obj)/vmlinux.bin FORCE
-	$(call if_changed,$(suffix-y))
+$(obj)/vmlinux.bin.gz: $(obj)/vmlinux.bin FORCE
+	$(call if_changed,gzip)
 
 LDFLAGS_piggy.o := -r --format binary --oformat elf32-h8300-linux -T
 OBJCOPYFLAGS := -O binary
 
-$(obj)/piggy.o: $(obj)/vmlinux.scr $(obj)/vmlinux.bin.$(suffix-y) FORCE
+$(obj)/piggy.o: $(obj)/vmlinux.scr $(obj)/vmlinux.bin.gz FORCE
 	$(call if_changed,ld)
-
-CFLAGS_misc.o = -O0

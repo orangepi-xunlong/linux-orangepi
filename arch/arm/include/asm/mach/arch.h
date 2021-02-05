@@ -18,7 +18,7 @@ struct pt_regs;
 struct smp_operations;
 #ifdef CONFIG_SMP
 #define smp_ops(ops) (&(ops))
-#define smp_init_ops(ops) ((void *)&(ops))
+#define smp_init_ops(ops) (&(ops))
 #else
 #define smp_ops(ops) (struct smp_operations *)NULL
 #define smp_init_ops(ops) (bool (*)(void))NULL

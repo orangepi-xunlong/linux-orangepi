@@ -365,7 +365,7 @@ static int snvs_rtc_suspend(struct device *dev)
 	struct snvs_rtc_data *data = dev_get_drvdata(dev);
 
 	if (device_may_wakeup(dev))
-		return enable_irq_wake(data->irq);
+		enable_irq_wake(data->irq);
 
 	return 0;
 }

@@ -162,7 +162,7 @@ void secondary_start_kernel(void)
 
 	complete(&cpu_running);
 
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_startup_entry(CPUHP_ONLINE);
 }
 
 static void mx_cpu_start(void *p)

@@ -263,7 +263,7 @@ xfs_da3_node_read(
 
 	err = xfs_da_read_buf(tp, dp, bno, mappedbno, bpp,
 					which_fork, &xfs_da3_node_buf_ops);
-	if (!err && tp && *bpp) {
+	if (!err && tp) {
 		struct xfs_da_blkinfo	*info = (*bpp)->b_addr;
 		int			type;
 
@@ -356,6 +356,7 @@ xfs_da3_split(
 	struct xfs_da_state_blk	*newblk;
 	struct xfs_da_state_blk	*addblk;
 	struct xfs_da_intnode	*node;
+	struct xfs_buf		*bp;
 	int			max;
 	int			action = 0;
 	int			error;
@@ -396,9 +397,7 @@ xfs_da3_split(
 				break;
 			}
 			/*
-			 * Entry wouldn't fit, split the leaf again. The new
-			 * extrablk will be consumed by xfs_da3_node_split if
-			 * the node is split.
+			 * Entry wouldn't fit, split the leaf again.
 			 */
 			state->extravalid = 1;
 			if (state->inleaf) {
@@ -447,14 +446,6 @@ xfs_da3_split(
 		return 0;
 
 	/*
-	 * xfs_da3_node_split() should have consumed any extra blocks we added
-	 * during a double leaf split in the attr fork. This is guaranteed as
-	 * we can't be here if the attr fork only has a single leaf block.
-	 */
-	ASSERT(state->extravalid == 0 ||
-	       state->path.blk[max].magic == XFS_DIR2_LEAFN_MAGIC);
-
-	/*
 	 * Split the root node.
 	 */
 	ASSERT(state->path.active == 0);
@@ -466,33 +457,43 @@ xfs_da3_split(
 	}
 
 	/*
-	 * Update pointers to the node which used to be block 0 and just got
-	 * bumped because of the addition of a new root node.  Note that the
-	 * original block 0 could be at any position in the list of blocks in
-	 * the tree.
+	 * Update pointers to the node which used to be block 0 and
+	 * just got bumped because of the addition of a new root node.
+	 * There might be three blocks involved if a double split occurred,
+	 * and the original block 0 could be at any position in the list.
 	 *
-	 * Note: the magic numbers and sibling pointers are in the same physical
-	 * place for both v2 and v3 headers (by design). Hence it doesn't matter
-	 * which version of the xfs_da_intnode structure we use here as the
-	 * result will be the same using either structure.
+	 * Note: the magic numbers and sibling pointers are in the same
+	 * physical place for both v2 and v3 headers (by design). Hence it
+	 * doesn't matter which version of the xfs_da_intnode structure we use
+	 * here as the result will be the same using either structure.
 	 */
 	node = oldblk->bp->b_addr;
 	if (node->hdr.info.forw) {
-		ASSERT(be32_to_cpu(node->hdr.info.forw) == addblk->blkno);
-		node = addblk->bp->b_addr;
+		if (be32_to_cpu(node->hdr.info.forw) == addblk->blkno) {
+			bp = addblk->bp;
+		} else {
+			ASSERT(state->extravalid);
+			bp = state->extrablk.bp;
+		}
+		node = bp->b_addr;
 		node->hdr.info.back = cpu_to_be32(oldblk->blkno);
-		xfs_trans_log_buf(state->args->trans, addblk->bp,
-				  XFS_DA_LOGRANGE(node, &node->hdr.info,
-				  sizeof(node->hdr.info)));
+		xfs_trans_log_buf(state->args->trans, bp,
+		    XFS_DA_LOGRANGE(node, &node->hdr.info,
+		    sizeof(node->hdr.info)));
 	}
 	node = oldblk->bp->b_addr;
 	if (node->hdr.info.back) {
-		ASSERT(be32_to_cpu(node->hdr.info.back) == addblk->blkno);
-		node = addblk->bp->b_addr;
+		if (be32_to_cpu(node->hdr.info.back) == addblk->blkno) {
+			bp = addblk->bp;
+		} else {
+			ASSERT(state->extravalid);
+			bp = state->extrablk.bp;
+		}
+		node = bp->b_addr;
 		node->hdr.info.forw = cpu_to_be32(oldblk->blkno);
-		xfs_trans_log_buf(state->args->trans, addblk->bp,
-				  XFS_DA_LOGRANGE(node, &node->hdr.info,
-				  sizeof(node->hdr.info)));
+		xfs_trans_log_buf(state->args->trans, bp,
+		    XFS_DA_LOGRANGE(node, &node->hdr.info,
+		    sizeof(node->hdr.info)));
 	}
 	addblk->bp = NULL;
 	return 0;
@@ -2029,7 +2030,7 @@ xfs_da_grow_inode_int(
 	error = xfs_bmapi_write(tp, dp, *bno, count,
 			xfs_bmapi_aflag(w)|XFS_BMAPI_METADATA|XFS_BMAPI_CONTIG,
 			args->firstblock, args->total, &map, &nmap,
-			args->dfops);
+			args->flist);
 	if (error)
 		return error;
 
@@ -2052,7 +2053,7 @@ xfs_da_grow_inode_int(
 			error = xfs_bmapi_write(tp, dp, b, c,
 					xfs_bmapi_aflag(w)|XFS_BMAPI_METADATA,
 					args->firstblock, args->total,
-					&mapp[mapi], &nmap, args->dfops);
+					&mapp[mapi], &nmap, args->flist);
 			if (error)
 				goto out_free_map;
 			if (nmap < 1)
@@ -2362,7 +2363,7 @@ xfs_da_shrink_inode(
 		 */
 		error = xfs_bunmapi(tp, dp, dead_blkno, count,
 				    xfs_bmapi_aflag(w), 0, args->firstblock,
-				    args->dfops, &done);
+				    args->flist, &done);
 		if (error == -ENOSPC) {
 			if (w != XFS_DATA_FORK)
 				break;
@@ -2633,7 +2634,7 @@ out_free:
 /*
  * Readahead the dir/attr block.
  */
-int
+xfs_daddr_t
 xfs_da_reada_buf(
 	struct xfs_inode	*dp,
 	xfs_dablk_t		bno,
@@ -2664,5 +2665,7 @@ out_free:
 	if (mapp != &map)
 		kmem_free(mapp);
 
-	return error;
+	if (error)
+		return -1;
+	return mappedbno;
 }

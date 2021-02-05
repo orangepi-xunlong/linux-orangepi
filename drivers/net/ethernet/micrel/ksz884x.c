@@ -4790,7 +4790,7 @@ static void transmit_cleanup(struct dev_info *hw_priv, int normal)
 
 	/* Notify the network subsystem that the packet has been sent. */
 	if (dev)
-		netif_trans_update(dev);
+		dev->trans_start = jiffies;
 }
 
 /**
@@ -4965,7 +4965,7 @@ static void netdev_tx_timeout(struct net_device *dev)
 		hw_ena_intr(hw);
 	}
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	netif_wake_queue(dev);
 }
 

@@ -1010,10 +1010,16 @@ int vt_ioctl(struct tty_struct *tty,
 		break;
 
 	case PIO_UNIMAPCLR:
+	      { struct unimapinit ui;
 		if (!perm)
 			return -EPERM;
-		con_clear_unimap(vc);
+		ret = copy_from_user(&ui, up, sizeof(struct unimapinit));
+		if (ret)
+			ret = -EFAULT;
+		else
+			con_clear_unimap(vc, &ui);
 		break;
+	      }
 
 	case PIO_UNIMAP:
 	case GIO_UNIMAP:

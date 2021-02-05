@@ -1,4 +1,4 @@
-config MCE_AMD_INJ
+config AMD_MCE_INJ
 	tristate "Simple MCE injection interface for AMD processors"
 	depends on RAS && EDAC_DECODE_MCE && DEBUG_FS && AMD_NB
 	default n

@@ -199,7 +199,7 @@ adfs_adfs2unix_time(struct timespec *tv, struct inode *inode)
 	return;
 
  cur_time:
-	*tv = current_time(inode);
+	*tv = CURRENT_TIME;
 	return;
 
  too_early:
@@ -303,7 +303,7 @@ adfs_notify_change(struct dentry *dentry, struct iattr *attr)
 	unsigned int ia_valid = attr->ia_valid;
 	int error;
 	
-	error = setattr_prepare(dentry, attr);
+	error = inode_change_ok(inode, attr);
 
 	/*
 	 * we can't change the UID or GID of any file -

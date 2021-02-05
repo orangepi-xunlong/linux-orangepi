@@ -15,14 +15,11 @@
 static inline int init_new_context(struct task_struct *tsk,
 				   struct mm_struct *mm)
 {
-	spin_lock_init(&mm->context.lock);
-	spin_lock_init(&mm->context.pgtable_lock);
+	spin_lock_init(&mm->context.list_lock);
 	INIT_LIST_HEAD(&mm->context.pgtable_list);
-	spin_lock_init(&mm->context.gmap_lock);
 	INIT_LIST_HEAD(&mm->context.gmap_list);
 	cpumask_clear(&mm->context.cpu_attach_mask);
-	atomic_set(&mm->context.flush_count, 0);
-	mm->context.gmap_asce = 0;
+	atomic_set(&mm->context.attach_count, 0);
 	mm->context.flush_mm = 0;
 #ifdef CONFIG_PGSTE
 	mm->context.alloc_pgste = page_table_allocate_pgste;
@@ -93,11 +90,15 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	S390_lowcore.user_asce = next->context.asce;
 	if (prev == next)
 		return;
-	cpumask_set_cpu(cpu, &next->context.cpu_attach_mask);
+	if (MACHINE_HAS_TLB_LC)
+		cpumask_set_cpu(cpu, &next->context.cpu_attach_mask);
 	/* Clear old ASCE by loading the kernel ASCE. */
 	__ctl_load(S390_lowcore.kernel_asce, 1, 1);
 	__ctl_load(S390_lowcore.kernel_asce, 7, 7);
-	cpumask_clear_cpu(cpu, &prev->context.cpu_attach_mask);
+	atomic_inc(&next->context.attach_count);
+	atomic_dec(&prev->context.attach_count);
+	if (MACHINE_HAS_TLB_LC)
+		cpumask_clear_cpu(cpu, &prev->context.cpu_attach_mask);
 }
 
 #define finish_arch_post_lock_switch finish_arch_post_lock_switch
@@ -109,10 +110,12 @@ static inline void finish_arch_post_lock_switch(void)
 	load_kernel_asce();
 	if (mm) {
 		preempt_disable();
-		while (atomic_read(&mm->context.flush_count))
+		while (atomic_read(&mm->context.attach_count) >> 16)
 			cpu_relax();
+
 		cpumask_set_cpu(smp_processor_id(), mm_cpumask(mm));
-		__tlb_flush_mm_lazy(mm);
+		if (mm->context.flush_mm)
+			__tlb_flush_mm(mm);
 		preempt_enable();
 	}
 	set_fs(current->thread.mm_segment);
@@ -149,16 +152,4 @@ static inline void arch_bprm_mm_init(struct mm_struct *mm,
 {
 }
 
-static inline bool arch_vma_access_permitted(struct vm_area_struct *vma,
-		bool write, bool execute, bool foreign)
-{
-	/* by default, allow everything */
-	return true;
-}
-
-static inline bool arch_pte_access_permitted(pte_t pte, bool write)
-{
-	/* by default, allow everything */
-	return true;
-}
 #endif /* __S390_MMU_CONTEXT_H */

@@ -31,6 +31,7 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
+#include <linux/platform_data/irq-renesas-intc-irqpin.h>
 #include <linux/pm_runtime.h>
 
 #define INTC_IRQPIN_MAX 8 /* maximum 8 interrupts per driver instance */
@@ -74,20 +75,18 @@ struct intc_irqpin_irq {
 struct intc_irqpin_priv {
 	struct intc_irqpin_iomem iomem[INTC_IRQPIN_REG_NR];
 	struct intc_irqpin_irq irq[INTC_IRQPIN_MAX];
-	unsigned int sense_bitfield_width;
+	struct renesas_intc_irqpin_config config;
+	unsigned int number_of_irqs;
 	struct platform_device *pdev;
 	struct irq_chip irq_chip;
 	struct irq_domain *irq_domain;
 	struct clk *clk;
-	unsigned shared_irqs:1;
-	unsigned needs_clk:1;
+	bool shared_irqs;
 	u8 shared_irq_mask;
 };
 
-struct intc_irqpin_config {
+struct intc_irqpin_irlm_config {
 	unsigned int irlm_bit;
-	unsigned needs_irlm:1;
-	unsigned needs_clk:1;
 };
 
 static unsigned long intc_irqpin_read32(void __iomem *iomem)
@@ -172,7 +171,7 @@ static void intc_irqpin_mask_unmask_prio(struct intc_irqpin_priv *p,
 static int intc_irqpin_set_sense(struct intc_irqpin_priv *p, int irq, int value)
 {
 	/* The SENSE register is assumed to be 32-bit. */
-	int bitfield_width = p->sense_bitfield_width;
+	int bitfield_width = p->config.sense_bitfield_width;
 	int shift = 32 - (irq + 1) * bitfield_width;
 
 	dev_dbg(&p->pdev->dev, "sense irq = %d, mode = %d\n", irq, value);
@@ -362,15 +361,8 @@ static const struct irq_domain_ops intc_irqpin_irq_domain_ops = {
 	.xlate  = irq_domain_xlate_twocell,
 };
 
-static const struct intc_irqpin_config intc_irqpin_irlm_r8a777x = {
+static const struct intc_irqpin_irlm_config intc_irqpin_irlm_r8a777x = {
 	.irlm_bit = 23, /* ICR0.IRLM0 */
-	.needs_irlm = 1,
-	.needs_clk = 0,
-};
-
-static const struct intc_irqpin_config intc_irqpin_rmobile = {
-	.needs_irlm = 0,
-	.needs_clk = 1,
 };
 
 static const struct of_device_id intc_irqpin_dt_ids[] = {
@@ -379,18 +371,14 @@ static const struct of_device_id intc_irqpin_dt_ids[] = {
 	  .data = &intc_irqpin_irlm_r8a777x },
 	{ .compatible = "renesas,intc-irqpin-r8a7779",
 	  .data = &intc_irqpin_irlm_r8a777x },
-	{ .compatible = "renesas,intc-irqpin-r8a7740",
-	  .data = &intc_irqpin_rmobile },
-	{ .compatible = "renesas,intc-irqpin-sh73a0",
-	  .data = &intc_irqpin_rmobile },
 	{},
 };
 MODULE_DEVICE_TABLE(of, intc_irqpin_dt_ids);
 
 static int intc_irqpin_probe(struct platform_device *pdev)
 {
-	const struct intc_irqpin_config *config = NULL;
 	struct device *dev = &pdev->dev;
+	struct renesas_intc_irqpin_config *pdata = dev->platform_data;
 	const struct of_device_id *of_id;
 	struct intc_irqpin_priv *p;
 	struct intc_irqpin_iomem *i;
@@ -400,8 +388,6 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	void (*enable_fn)(struct irq_data *d);
 	void (*disable_fn)(struct irq_data *d);
 	const char *name = dev_name(dev);
-	bool control_parent;
-	unsigned int nirqs;
 	int ref_irq;
 	int ret;
 	int k;
@@ -413,28 +399,23 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	}
 
 	/* deal with driver instance configuration */
-	of_property_read_u32(dev->of_node, "sense-bitfield-width",
-			     &p->sense_bitfield_width);
-	control_parent = of_property_read_bool(dev->of_node, "control-parent");
-	if (!p->sense_bitfield_width)
-		p->sense_bitfield_width = 4; /* default to 4 bits */
+	if (pdata) {
+		memcpy(&p->config, pdata, sizeof(*pdata));
+	} else {
+		of_property_read_u32(dev->of_node, "sense-bitfield-width",
+				     &p->config.sense_bitfield_width);
+		p->config.control_parent = of_property_read_bool(dev->of_node,
+								 "control-parent");
+	}
+	if (!p->config.sense_bitfield_width)
+		p->config.sense_bitfield_width = 4; /* default to 4 bits */
 
 	p->pdev = pdev;
 	platform_set_drvdata(pdev, p);
 
-	of_id = of_match_device(intc_irqpin_dt_ids, dev);
-	if (of_id && of_id->data) {
-		config = of_id->data;
-		p->needs_clk = config->needs_clk;
-	}
-
 	p->clk = devm_clk_get(dev, NULL);
 	if (IS_ERR(p->clk)) {
-		if (p->needs_clk) {
-			dev_err(dev, "unable to get clock\n");
-			ret = PTR_ERR(p->clk);
-			goto err0;
-		}
+		dev_warn(dev, "unable to get clock\n");
 		p->clk = NULL;
 	}
 
@@ -462,8 +443,8 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 		p->irq[k].requested_irq = irq->start;
 	}
 
-	nirqs = k;
-	if (nirqs < 1) {
+	p->number_of_irqs = k;
+	if (p->number_of_irqs < 1) {
 		dev_err(dev, "not enough IRQ resources\n");
 		ret = -EINVAL;
 		goto err0;
@@ -504,16 +485,20 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	}
 
 	/* configure "individual IRQ mode" where needed */
-	if (config && config->needs_irlm) {
+	of_id = of_match_device(intc_irqpin_dt_ids, dev);
+	if (of_id && of_id->data) {
+		const struct intc_irqpin_irlm_config *irlm_config = of_id->data;
+
 		if (io[INTC_IRQPIN_REG_IRLM])
 			intc_irqpin_read_modify_write(p, INTC_IRQPIN_REG_IRLM,
-						      config->irlm_bit, 1, 1);
+						      irlm_config->irlm_bit,
+						      1, 1);
 		else
 			dev_warn(dev, "unable to select IRLM mode\n");
 	}
 
 	/* mask all interrupts using priority */
-	for (k = 0; k < nirqs; k++)
+	for (k = 0; k < p->number_of_irqs; k++)
 		intc_irqpin_mask_unmask_prio(p, k, 1);
 
 	/* clear all pending interrupts */
@@ -521,16 +506,16 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 
 	/* scan for shared interrupt lines */
 	ref_irq = p->irq[0].requested_irq;
-	p->shared_irqs = 1;
-	for (k = 1; k < nirqs; k++) {
+	p->shared_irqs = true;
+	for (k = 1; k < p->number_of_irqs; k++) {
 		if (ref_irq != p->irq[k].requested_irq) {
-			p->shared_irqs = 0;
+			p->shared_irqs = false;
 			break;
 		}
 	}
 
 	/* use more severe masking method if requested */
-	if (control_parent) {
+	if (p->config.control_parent) {
 		enable_fn = intc_irqpin_irq_enable_force;
 		disable_fn = intc_irqpin_irq_disable_force;
 	} else if (!p->shared_irqs) {
@@ -549,7 +534,9 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	irq_chip->irq_set_wake = intc_irqpin_irq_set_wake;
 	irq_chip->flags	= IRQCHIP_MASK_ON_SUSPEND;
 
-	p->irq_domain = irq_domain_add_simple(dev->of_node, nirqs, 0,
+	p->irq_domain = irq_domain_add_simple(dev->of_node,
+					      p->number_of_irqs,
+					      p->config.irq_base,
 					      &intc_irqpin_irq_domain_ops, p);
 	if (!p->irq_domain) {
 		ret = -ENXIO;
@@ -568,7 +555,7 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 		}
 	} else {
 		/* request interrupts one by one */
-		for (k = 0; k < nirqs; k++) {
+		for (k = 0; k < p->number_of_irqs; k++) {
 			if (devm_request_irq(dev, p->irq[k].requested_irq,
 					     intc_irqpin_irq_handler, 0, name,
 					     &p->irq[k])) {
@@ -580,10 +567,17 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	}
 
 	/* unmask all interrupts on prio level */
-	for (k = 0; k < nirqs; k++)
+	for (k = 0; k < p->number_of_irqs; k++)
 		intc_irqpin_mask_unmask_prio(p, k, 0);
 
-	dev_info(dev, "driving %d irqs\n", nirqs);
+	dev_info(dev, "driving %d irqs\n", p->number_of_irqs);
+
+	/* warn in case of mismatch if irq base is specified */
+	if (p->config.irq_base) {
+		if (p->config.irq_base != p->irq[0].domain_irq)
+			dev_warn(dev, "irq base mismatch (%d/%d)\n",
+				 p->config.irq_base, p->irq[0].domain_irq);
+	}
 
 	return 0;
 

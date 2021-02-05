@@ -122,6 +122,7 @@
  * @phy_dev:		pointer to the PHY device
  * @phy_node:		pointer to the PHY device node
  * @mii_bus:		pointer to the MII bus
+ * @mdio_irqs:		IRQs table for MDIO bus
  * @last_link:		last link status
  * @has_mdio:		indicates whether MDIO is included in the HW
  */
@@ -142,6 +143,7 @@ struct net_local {
 	struct device_node *phy_node;
 
 	struct mii_bus *mii_bus;
+	int mdio_irqs[PHY_MAX_ADDR];
 
 	int last_link;
 	bool has_mdio;
@@ -543,7 +545,7 @@ static void xemaclite_tx_timeout(struct net_device *dev)
 	}
 
 	/* To exclude tx timeout */
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 
 	/* We're all ready to go. Start the queue */
 	netif_wake_queue(dev);
@@ -575,7 +577,7 @@ static void xemaclite_tx_handler(struct net_device *dev)
 			dev->stats.tx_bytes += lp->deferred_skb->len;
 			dev_kfree_skb_irq(lp->deferred_skb);
 			lp->deferred_skb = NULL;
-			netif_trans_update(dev); /* prevent tx timeout */
+			dev->trans_start = jiffies; /* prevent tx timeout */
 			netif_wake_queue(dev);
 		}
 	}
@@ -839,7 +841,7 @@ static int xemaclite_mdio_setup(struct net_local *lp, struct device *dev)
 			dev_info(dev,
 				 "MDIO of the phy is not registered yet\n");
 		else
-			put_device(&phydev->mdio.dev);
+			put_device(&phydev->dev);
 		return 0;
 	}
 
@@ -862,6 +864,7 @@ static int xemaclite_mdio_setup(struct net_local *lp, struct device *dev)
 	bus->read = xemaclite_mdio_read;
 	bus->write = xemaclite_mdio_write;
 	bus->parent = dev;
+	bus->irq = lp->mdio_irqs; /* preallocated IRQ table */
 
 	lp->mii_bus = bus;
 
@@ -1143,13 +1146,11 @@ static int xemaclite_of_probe(struct platform_device *ofdev)
 	lp->rx_ping_pong = get_bool(ofdev, "xlnx,rx-ping-pong");
 	mac_address = of_get_mac_address(ofdev->dev.of_node);
 
-	if (mac_address) {
+	if (mac_address)
 		/* Set the MAC address. */
 		memcpy(ndev->dev_addr, mac_address, ETH_ALEN);
-	} else {
-		dev_warn(dev, "No MAC address found, using random\n");
-		eth_hw_addr_random(ndev);
-	}
+	else
+		dev_warn(dev, "No MAC address found\n");
 
 	/* Clear the Tx CSR's in case this is a restart */
 	xemaclite_writel(0, lp->base_addr + XEL_TSR_OFFSET);
@@ -1207,6 +1208,7 @@ static int xemaclite_of_remove(struct platform_device *of_dev)
 	/* Un-register the mii_bus, if configured */
 	if (lp->has_mdio) {
 		mdiobus_unregister(lp->mii_bus);
+		kfree(lp->mii_bus->irq);
 		mdiobus_free(lp->mii_bus);
 		lp->mii_bus = NULL;
 	}

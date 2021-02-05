@@ -172,9 +172,9 @@ static struct irqaction sirfsoc_timer1_irq = {
 	.handler = sirfsoc_timer_interrupt,
 };
 
-static int sirfsoc_local_timer_starting_cpu(unsigned int cpu)
+static int sirfsoc_local_timer_setup(struct clock_event_device *ce)
 {
-	struct clock_event_device *ce = per_cpu_ptr(sirfsoc_clockevent, cpu);
+	int cpu = smp_processor_id();
 	struct irqaction *action;
 
 	if (cpu == 0)
@@ -203,31 +203,54 @@ static int sirfsoc_local_timer_starting_cpu(unsigned int cpu)
 	return 0;
 }
 
-static int sirfsoc_local_timer_dying_cpu(unsigned int cpu)
+static void sirfsoc_local_timer_stop(struct clock_event_device *ce)
 {
+	int cpu = smp_processor_id();
+
 	sirfsoc_timer_count_disable(1);
 
 	if (cpu == 0)
 		remove_irq(sirfsoc_timer_irq.irq, &sirfsoc_timer_irq);
 	else
 		remove_irq(sirfsoc_timer1_irq.irq, &sirfsoc_timer1_irq);
-	return 0;
 }
 
-static int __init sirfsoc_clockevent_init(void)
+static int sirfsoc_cpu_notify(struct notifier_block *self,
+			      unsigned long action, void *hcpu)
+{
+	/*
+	 * Grab cpu pointer in each case to avoid spurious
+	 * preemptible warnings
+	 */
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_STARTING:
+		sirfsoc_local_timer_setup(this_cpu_ptr(sirfsoc_clockevent));
+		break;
+	case CPU_DYING:
+		sirfsoc_local_timer_stop(this_cpu_ptr(sirfsoc_clockevent));
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block sirfsoc_cpu_nb = {
+	.notifier_call = sirfsoc_cpu_notify,
+};
+
+static void __init sirfsoc_clockevent_init(void)
 {
 	sirfsoc_clockevent = alloc_percpu(struct clock_event_device);
 	BUG_ON(!sirfsoc_clockevent);
 
-	/* Install and invoke hotplug callbacks */
-	return cpuhp_setup_state(CPUHP_AP_MARCO_TIMER_STARTING,
-				 "AP_MARCO_TIMER_STARTING",
-				 sirfsoc_local_timer_starting_cpu,
-				 sirfsoc_local_timer_dying_cpu);
+	BUG_ON(register_cpu_notifier(&sirfsoc_cpu_nb));
+
+	/* Immediately configure the timer on the boot CPU */
+	sirfsoc_local_timer_setup(this_cpu_ptr(sirfsoc_clockevent));
 }
 
 /* initialize the kernel jiffy timer source */
-static int __init sirfsoc_atlas7_timer_init(struct device_node *np)
+static void __init sirfsoc_atlas7_timer_init(struct device_node *np)
 {
 	struct clk *clk;
 
@@ -256,29 +279,23 @@ static int __init sirfsoc_atlas7_timer_init(struct device_node *np)
 
 	BUG_ON(clocksource_register_hz(&sirfsoc_clocksource, atlas7_timer_rate));
 
-	return sirfsoc_clockevent_init();
+	sirfsoc_clockevent_init();
 }
 
-static int __init sirfsoc_of_timer_init(struct device_node *np)
+static void __init sirfsoc_of_timer_init(struct device_node *np)
 {
 	sirfsoc_timer_base = of_iomap(np, 0);
-	if (!sirfsoc_timer_base) {
-		pr_err("unable to map timer cpu registers\n");
-		return -ENXIO;
-	}
+	if (!sirfsoc_timer_base)
+		panic("unable to map timer cpu registers\n");
 
 	sirfsoc_timer_irq.irq = irq_of_parse_and_map(np, 0);
-	if (!sirfsoc_timer_irq.irq) {
-		pr_err("No irq passed for timer0 via DT\n");
-		return -EINVAL;
-	}
+	if (!sirfsoc_timer_irq.irq)
+		panic("No irq passed for timer0 via DT\n");
 
 	sirfsoc_timer1_irq.irq = irq_of_parse_and_map(np, 1);
-	if (!sirfsoc_timer1_irq.irq) {
-		pr_err("No irq passed for timer1 via DT\n");
-		return -EINVAL;
-	}
+	if (!sirfsoc_timer1_irq.irq)
+		panic("No irq passed for timer1 via DT\n");
 
-	return sirfsoc_atlas7_timer_init(np);
+	sirfsoc_atlas7_timer_init(np);
 }
 CLOCKSOURCE_OF_DECLARE(sirfsoc_atlas7_timer, "sirf,atlas7-tick", sirfsoc_of_timer_init);

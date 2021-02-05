@@ -29,6 +29,7 @@
 struct bcm2835_pwm {
 	struct pwm_chip chip;
 	struct device *dev;
+	unsigned long scaler;
 	void __iomem *base;
 	struct clk *clk;
 };
@@ -65,15 +66,6 @@ static int bcm2835_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 			      int duty_ns, int period_ns)
 {
 	struct bcm2835_pwm *pc = to_bcm2835_pwm(chip);
-	unsigned long rate = clk_get_rate(pc->clk);
-	unsigned long scaler;
-
-	if (!rate) {
-		dev_err(pc->dev, "failed to get clock rate\n");
-		return -EINVAL;
-	}
-
-	scaler = NSEC_PER_SEC / rate;
 
 	if (period_ns <= MIN_PERIOD) {
 		dev_err(pc->dev, "period %d not supported, minimum %d\n",
@@ -81,8 +73,8 @@ static int bcm2835_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 		return -EINVAL;
 	}
 
-	writel(duty_ns / scaler, pc->base + DUTY(pwm->hwpwm));
-	writel(period_ns / scaler, pc->base + PERIOD(pwm->hwpwm));
+	writel(duty_ns / pc->scaler, pc->base + DUTY(pwm->hwpwm));
+	writel(period_ns / pc->scaler, pc->base + PERIOD(pwm->hwpwm));
 
 	return 0;
 }
@@ -164,6 +156,8 @@ static int bcm2835_pwm_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	pc->scaler = NSEC_PER_SEC / clk_get_rate(pc->clk);
+
 	pc->chip.dev = &pdev->dev;
 	pc->chip.ops = &bcm2835_pwm_ops;
 	pc->chip.npwm = 2;
@@ -206,6 +200,6 @@ static struct platform_driver bcm2835_pwm_driver = {
 };
 module_platform_driver(bcm2835_pwm_driver);
 
-MODULE_AUTHOR("Bart Tanghe <bart.tanghe@thomasmore.be>");
+MODULE_AUTHOR("Bart Tanghe <bart.tanghe@thomasmore.be");
 MODULE_DESCRIPTION("Broadcom BCM2835 PWM driver");
 MODULE_LICENSE("GPL v2");

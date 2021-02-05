@@ -4,16 +4,6 @@
 #include <linux/usb/composite.h>
 #include "storage_common.h"
 
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-#define DO_VFS_STAT              1
-#define DO_VFS_END               2
-
-extern atomic_t vfs_read_flag;
-extern atomic_t vfs_write_flag;
-extern unsigned int vfs_amount;
-extern loff_t vfs_file_offset;
-#endif
-
 struct fsg_module_parameters {
 	char		*file[FSG_MAX_LUNS];
 	bool		ro[FSG_MAX_LUNS];
@@ -99,7 +89,6 @@ struct fsg_lun_config {
 	char removable;
 	char cdrom;
 	char nofua;
-	char inquiry_string[INQUIRY_STRING_LEN];
 };
 
 struct fsg_config {

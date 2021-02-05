@@ -16,9 +16,7 @@ my $P = $0;
 my $V = '0.26';
 
 use Getopt::Long qw(:config no_auto_abbrev);
-use Cwd;
 
-my $cur_path = fastgetcwd() . '/';
 my $lk_path = "./";
 my $email = 1;
 my $email_usename = 1;
@@ -133,7 +131,6 @@ my %VCS_cmds_git = (
     "author_pattern" => "^GitAuthor: (.*)",
     "subject_pattern" => "^GitSubject: (.*)",
     "stat_pattern" => "^(\\d+)\\t(\\d+)\\t\$file\$",
-    "file_exists_cmd" => "git ls-files \$file",
 );
 
 my %VCS_cmds_hg = (
@@ -162,7 +159,6 @@ my %VCS_cmds_hg = (
     "author_pattern" => "^HgAuthor: (.*)",
     "subject_pattern" => "^HgSubject: (.*)",
     "stat_pattern" => "^(\\d+)\t(\\d+)\t\$file\$",
-    "file_exists_cmd" => "hg files \$file",
 );
 
 my $conf = which_conf(".get_maintainer.conf");
@@ -432,9 +428,7 @@ foreach my $file (@ARGV) {
 	    die "$P: file '${file}' not found\n";
 	}
     }
-    if ($from_filename || ($file ne "&STDIN" && vcs_file_exists($file))) {
-	$file =~ s/^\Q${cur_path}\E//;	#strip any absolute path
-	$file =~ s/^\Q${lk_path}\E//;	#or the path to the lk tree
+    if ($from_filename) {
 	push(@files, $file);
 	if ($file ne "MAINTAINERS" && -f $file && ($keywords || $file_emails)) {
 	    open(my $f, '<', $file)
@@ -2124,24 +2118,6 @@ sub vcs_file_blame {
 	}
 	vcs_assign("modified commits", $total_commits, @signers);
     }
-}
-
-sub vcs_file_exists {
-    my ($file) = @_;
-
-    my $exists;
-
-    my $vcs_used = vcs_exists();
-    return 0 if (!$vcs_used);
-
-    my $cmd = $VCS_cmds{"file_exists_cmd"};
-    $cmd =~ s/(\$\w+)/$1/eeg;		# interpolate $cmd
-    $cmd .= " 2>&1";
-    $exists = &{$VCS_cmds{"execute_cmd"}}($cmd);
-
-    return 0 if ($? != 0);
-
-    return $exists;
 }
 
 sub uniq {

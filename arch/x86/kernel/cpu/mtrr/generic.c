@@ -4,7 +4,7 @@
  */
 #define DEBUG
 
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/mm.h>
@@ -42,7 +42,7 @@ EXPORT_SYMBOL_GPL(mtrr_state);
  * "BIOS and Kernel Developer's Guide for the AMD Athlon 64 and AMD
  * Opteron Processors" (26094 Rev. 3.30 February 2006), section
  * "13.2.1.2 SYSCFG Register": "The MtrrFixDramModEn bit should be set
- * to 1 during BIOS initialization of the fixed MTRRs, then cleared to
+ * to 1 during BIOS initalization of the fixed MTRRs, then cleared to
  * 0 for operation."
  */
 static inline void k8_check_syscfg_dram_mod_en(void)
@@ -55,7 +55,7 @@ static inline void k8_check_syscfg_dram_mod_en(void)
 
 	rdmsr(MSR_K8_SYSCFG, lo, hi);
 	if (lo & K8_MTRRFIXRANGE_DRAM_MODIFY) {
-		pr_err(FW_WARN "MTRR: CPU %u: SYSCFG[MtrrFixDramModEn]"
+		printk(KERN_ERR FW_WARN "MTRR: CPU %u: SYSCFG[MtrrFixDramModEn]"
 		       " not cleared by BIOS, clearing this bit\n",
 		       smp_processor_id());
 		lo &= ~K8_MTRRFIXRANGE_DRAM_MODIFY;
@@ -505,14 +505,14 @@ void __init mtrr_state_warn(void)
 	if (!mask)
 		return;
 	if (mask & MTRR_CHANGE_MASK_FIXED)
-		pr_warn("mtrr: your CPUs had inconsistent fixed MTRR settings\n");
+		pr_warning("mtrr: your CPUs had inconsistent fixed MTRR settings\n");
 	if (mask & MTRR_CHANGE_MASK_VARIABLE)
-		pr_warn("mtrr: your CPUs had inconsistent variable MTRR settings\n");
+		pr_warning("mtrr: your CPUs had inconsistent variable MTRR settings\n");
 	if (mask & MTRR_CHANGE_MASK_DEFTYPE)
-		pr_warn("mtrr: your CPUs had inconsistent MTRRdefType settings\n");
+		pr_warning("mtrr: your CPUs had inconsistent MTRRdefType settings\n");
 
-	pr_info("mtrr: probably your BIOS does not setup all CPUs.\n");
-	pr_info("mtrr: corrected configuration.\n");
+	printk(KERN_INFO "mtrr: probably your BIOS does not setup all CPUs.\n");
+	printk(KERN_INFO "mtrr: corrected configuration.\n");
 }
 
 /*
@@ -523,7 +523,8 @@ void __init mtrr_state_warn(void)
 void mtrr_wrmsr(unsigned msr, unsigned a, unsigned b)
 {
 	if (wrmsr_safe(msr, a, b) < 0) {
-		pr_err("MTRR: CPU %u: Writing MSR %x to %x:%x failed\n",
+		printk(KERN_ERR
+			"MTRR: CPU %u: Writing MSR %x to %x:%x failed\n",
 			smp_processor_id(), msr, a, b);
 	}
 }
@@ -610,7 +611,7 @@ static void generic_get_mtrr(unsigned int reg, unsigned long *base,
 		tmp |= ~((1ULL<<(hi - 1)) - 1);
 
 		if (tmp != mask) {
-			pr_warn("mtrr: your BIOS has configured an incorrect mask, fixing it.\n");
+			printk(KERN_WARNING "mtrr: your BIOS has configured an incorrect mask, fixing it.\n");
 			add_taint(TAINT_FIRMWARE_WORKAROUND, LOCKDEP_STILL_OK);
 			mask = tmp;
 		}
@@ -745,7 +746,7 @@ static void prepare_set(void) __acquires(set_atomicity_lock)
 	wbinvd();
 
 	/* Save value of CR4 and clear Page Global Enable (bit 7) */
-	if (boot_cpu_has(X86_FEATURE_PGE)) {
+	if (cpu_has_pge) {
 		cr4 = __read_cr4();
 		__write_cr4(cr4 & ~X86_CR4_PGE);
 	}
@@ -775,7 +776,7 @@ static void post_set(void) __releases(set_atomicity_lock)
 	write_cr0(read_cr0() & ~X86_CR0_CD);
 
 	/* Restore value of CR4 */
-	if (boot_cpu_has(X86_FEATURE_PGE))
+	if (cpu_has_pge)
 		__write_cr4(cr4);
 	raw_spin_unlock(&set_atomicity_lock);
 }
@@ -859,15 +860,15 @@ int generic_validate_add_page(unsigned long base, unsigned long size,
 	 */
 	if (is_cpu(INTEL) && boot_cpu_data.x86 == 6 &&
 	    boot_cpu_data.x86_model == 1 &&
-	    boot_cpu_data.x86_stepping <= 7) {
+	    boot_cpu_data.x86_mask <= 7) {
 		if (base & ((1 << (22 - PAGE_SHIFT)) - 1)) {
-			pr_warn("mtrr: base(0x%lx000) is not 4 MiB aligned\n", base);
+			pr_warning("mtrr: base(0x%lx000) is not 4 MiB aligned\n", base);
 			return -EINVAL;
 		}
 		if (!(base + size < 0x70000 || base > 0x7003F) &&
 		    (type == MTRR_TYPE_WRCOMB
 		     || type == MTRR_TYPE_WRBACK)) {
-			pr_warn("mtrr: writable mtrr between 0x70000000 and 0x7003FFFF may hang the CPU.\n");
+			pr_warning("mtrr: writable mtrr between 0x70000000 and 0x7003FFFF may hang the CPU.\n");
 			return -EINVAL;
 		}
 	}
@@ -881,7 +882,7 @@ int generic_validate_add_page(unsigned long base, unsigned long size,
 	     lbase = lbase >> 1, last = last >> 1)
 		;
 	if (lbase != last) {
-		pr_warn("mtrr: base(0x%lx000) is not aligned on a size(0x%lx000) boundary\n", base, size);
+		pr_warning("mtrr: base(0x%lx000) is not aligned on a size(0x%lx000) boundary\n", base, size);
 		return -EINVAL;
 	}
 	return 0;

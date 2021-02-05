@@ -24,14 +24,13 @@
 #include "util/evlist.h"
 #include "util/evsel.h"
 #include <linux/rbtree.h>
-#include <linux/time64.h>
 #include "util/symbol.h"
 #include "util/callchain.h"
 #include "util/strlist.h"
 
 #include "perf.h"
 #include "util/header.h"
-#include <subcmd/parse-options.h>
+#include "util/parse-options.h"
 #include "util/parse-events.h"
 #include "util/event.h"
 #include "util/session.h"
@@ -490,7 +489,7 @@ static const char *cat_backtrace(union perf_event *event,
 	if (!chain)
 		goto exit;
 
-	if (machine__resolve(machine, &al, sample) < 0) {
+	if (perf_event__preprocess_sample(event, machine, &al, sample) < 0) {
 		fprintf(stderr, "problem processing %d event, skipping it.\n",
 			event->header.type);
 		goto exit;
@@ -1289,9 +1288,9 @@ static void draw_process_bars(struct timechart *tchart)
 			if (c->comm) {
 				char comm[256];
 				if (c->total_time > 5000000000) /* 5 seconds */
-					sprintf(comm, "%s:%i (%2.2fs)", c->comm, p->pid, c->total_time / (double)NSEC_PER_SEC);
+					sprintf(comm, "%s:%i (%2.2fs)", c->comm, p->pid, c->total_time / 1000000000.0);
 				else
-					sprintf(comm, "%s:%i (%3.1fms)", c->comm, p->pid, c->total_time / (double)NSEC_PER_MSEC);
+					sprintf(comm, "%s:%i (%3.1fms)", c->comm, p->pid, c->total_time / 1000000.0);
 
 				svg_text(Y, c->start_time, comm);
 			}
@@ -1638,7 +1637,7 @@ static int __cmd_timechart(struct timechart *tchart, const char *output_name)
 	write_svg_file(tchart, output_name);
 
 	pr_info("Written %2.1f seconds of trace to %s.\n",
-		(tchart->last_time - tchart->first_time) / (double)NSEC_PER_SEC, output_name);
+		(tchart->last_time - tchart->first_time) / 1000000000.0, output_name);
 out_delete:
 	perf_session__delete(session);
 	return ret;
@@ -1902,10 +1901,10 @@ parse_time(const struct option *opt, const char *arg, int __maybe_unused unset)
 	if (sscanf(arg, "%" PRIu64 "%cs", value, &unit) > 0) {
 		switch (unit) {
 		case 'm':
-			*value *= NSEC_PER_MSEC;
+			*value *= 1000000;
 			break;
 		case 'u':
-			*value *= NSEC_PER_USEC;
+			*value *= 1000;
 			break;
 		case 'n':
 			break;
@@ -1929,7 +1928,7 @@ int cmd_timechart(int argc, const char **argv,
 			.ordered_events	 = true,
 		},
 		.proc_num = 15,
-		.min_time = NSEC_PER_MSEC,
+		.min_time = 1000000,
 		.merge_dist = 1000,
 	};
 	const char *output_name = "output.svg";
@@ -1946,9 +1945,8 @@ int cmd_timechart(int argc, const char **argv,
 	OPT_CALLBACK('p', "process", NULL, "process",
 		      "process selector. Pass a pid or process name.",
 		       parse_process),
-	OPT_CALLBACK(0, "symfs", NULL, "directory",
-		     "Look for files with symbols relative to this directory",
-		     symbol__config_symfs),
+	OPT_STRING(0, "symfs", &symbol_conf.symfs, "directory",
+		    "Look for files with symbols relative to this directory"),
 	OPT_INTEGER('n', "proc-num", &tchart.proc_num,
 		    "min. number of tasks to print"),
 	OPT_BOOLEAN('t', "topology", &tchart.topology,

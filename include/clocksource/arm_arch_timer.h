@@ -49,16 +49,11 @@ enum arch_timer_reg {
 
 #define ARCH_TIMER_EVT_STREAM_FREQ	10000	/* 100us */
 
-struct arch_timer_kvm_info {
-	struct timecounter timecounter;
-	int virtual_irq;
-};
-
 #ifdef CONFIG_ARM_ARCH_TIMER
 
 extern u32 arch_timer_get_rate(void);
 extern u64 (*arch_timer_read_counter)(void);
-extern struct arch_timer_kvm_info *arch_timer_get_kvm_info(void);
+extern struct timecounter *arch_timer_get_timecounter(void);
 
 #else
 
@@ -70,6 +65,11 @@ static inline u32 arch_timer_get_rate(void)
 static inline u64 arch_timer_read_counter(void)
 {
 	return 0;
+}
+
+static inline struct timecounter *arch_timer_get_timecounter(void)
+{
+	return NULL;
 }
 
 #endif

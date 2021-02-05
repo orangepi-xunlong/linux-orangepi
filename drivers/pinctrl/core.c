@@ -225,14 +225,13 @@ static void pinctrl_free_pindescs(struct pinctrl_dev *pctldev,
 }
 
 static int pinctrl_register_one_pin(struct pinctrl_dev *pctldev,
-				    const struct pinctrl_pin_desc *pin)
+				    unsigned number, const char *name)
 {
 	struct pin_desc *pindesc;
 
-	pindesc = pin_desc_get(pctldev, pin->number);
+	pindesc = pin_desc_get(pctldev, number);
 	if (pindesc != NULL) {
-		dev_err(pctldev->dev, "pin %d already registered\n",
-			pin->number);
+		dev_err(pctldev->dev, "pin %d already registered\n", number);
 		return -EINVAL;
 	}
 
@@ -246,10 +245,10 @@ static int pinctrl_register_one_pin(struct pinctrl_dev *pctldev,
 	pindesc->pctldev = pctldev;
 
 	/* Copy basic pin info */
-	if (pin->name) {
-		pindesc->name = pin->name;
+	if (name) {
+		pindesc->name = name;
 	} else {
-		pindesc->name = kasprintf(GFP_KERNEL, "PIN%u", pin->number);
+		pindesc->name = kasprintf(GFP_KERNEL, "PIN%u", number);
 		if (pindesc->name == NULL) {
 			kfree(pindesc);
 			return -ENOMEM;
@@ -257,11 +256,9 @@ static int pinctrl_register_one_pin(struct pinctrl_dev *pctldev,
 		pindesc->dynamic_name = true;
 	}
 
-	pindesc->drv_data = pin->drv_data;
-
-	radix_tree_insert(&pctldev->pin_desc_tree, pin->number, pindesc);
+	radix_tree_insert(&pctldev->pin_desc_tree, number, pindesc);
 	pr_debug("registered pin %d (%s) on %s\n",
-		 pin->number, pindesc->name, pctldev->desc->name);
+		 number, pindesc->name, pctldev->desc->name);
 	return 0;
 }
 
@@ -273,7 +270,8 @@ static int pinctrl_register_pins(struct pinctrl_dev *pctldev,
 	int ret = 0;
 
 	for (i = 0; i < num_descs; i++) {
-		ret = pinctrl_register_one_pin(pctldev, &pins[i]);
+		ret = pinctrl_register_one_pin(pctldev,
+					       pins[i].number, pins[i].name);
 		if (ret)
 			return ret;
 	}
@@ -483,30 +481,6 @@ int pinctrl_get_group_pins(struct pinctrl_dev *pctldev, const char *pin_group,
 }
 EXPORT_SYMBOL_GPL(pinctrl_get_group_pins);
 
-struct pinctrl_gpio_range *
-pinctrl_find_gpio_range_from_pin_nolock(struct pinctrl_dev *pctldev,
-					unsigned int pin)
-{
-	struct pinctrl_gpio_range *range;
-
-	/* Loop over the ranges */
-	list_for_each_entry(range, &pctldev->gpio_ranges, node) {
-		/* Check if we're in the valid range */
-		if (range->pins) {
-			int a;
-			for (a = 0; a < range->npins; a++) {
-				if (range->pins[a] == pin)
-					return range;
-			}
-		} else if (pin >= range->pin_base &&
-			   pin < range->pin_base + range->npins)
-			return range;
-	}
-
-	return NULL;
-}
-EXPORT_SYMBOL_GPL(pinctrl_find_gpio_range_from_pin_nolock);
-
 /**
  * pinctrl_find_gpio_range_from_pin() - locate the GPIO range for a pin
  * @pctldev: the pin controller device to look in
@@ -519,9 +493,22 @@ pinctrl_find_gpio_range_from_pin(struct pinctrl_dev *pctldev,
 	struct pinctrl_gpio_range *range;
 
 	mutex_lock(&pctldev->mutex);
-	range = pinctrl_find_gpio_range_from_pin_nolock(pctldev, pin);
+	/* Loop over the ranges */
+	list_for_each_entry(range, &pctldev->gpio_ranges, node) {
+		/* Check if we're in the valid range */
+		if (range->pins) {
+			int a;
+			for (a = 0; a < range->npins; a++) {
+				if (range->pins[a] == pin)
+					goto out;
+			}
+		} else if (pin >= range->pin_base &&
+			   pin < range->pin_base + range->npins)
+			goto out;
+	}
+	range = NULL;
+out:
 	mutex_unlock(&pctldev->mutex);
-
 	return range;
 }
 EXPORT_SYMBOL_GPL(pinctrl_find_gpio_range_from_pin);
@@ -1379,7 +1366,8 @@ static int pinctrl_pins_show(struct seq_file *s, void *what)
 		if (desc == NULL)
 			continue;
 
-		seq_printf(s, "pin %d (%s) ", pin, desc->name);
+		seq_printf(s, "pin %d (%s) ", pin,
+			   desc->name ? desc->name : "unnamed");
 
 		/* Driver-specific info per pin */
 		if (ops->pin_dbg_show)

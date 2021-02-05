@@ -41,7 +41,6 @@
  */
 
 /dts-v1/;
-#include <dt-bindings/input/input.h>
 #include "rk3188.dtsi"
 
 / {
@@ -55,14 +54,16 @@
 
 	gpio-keys {
 		compatible = "gpio-keys";
+		#address-cells = <1>;
+		#size-cells = <0>;
 		autorepeat;
 
-		power {
+		button@0 {
 			gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
-			linux,code = <KEY_POWER>;
+			linux,code = <116>;
 			label = "GPIO Key Power";
 			linux,input-type = <1>;
-			wakeup-source;
+			gpio-key,wakeup = <1>;
 			debounce-interval = <100>;
 		};
 	};

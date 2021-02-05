@@ -9,7 +9,6 @@
  *
  *  This is the "shell" of the ARMv7 processor support.
  */
-#include <linux/arm-smccc.h>
 #include <linux/init.h>
 #include <linux/linkage.h>
 #include <asm/assembler.h>
@@ -17,7 +16,6 @@
 #include <asm/hwcap.h>
 #include <asm/pgtable-hwdef.h>
 #include <asm/pgtable.h>
-#include <asm/memory.h>
 
 #include "proc-macros.S"
 
@@ -89,37 +87,6 @@ ENTRY(cpu_v7_dcache_clean_area)
 	ret	lr
 ENDPROC(cpu_v7_dcache_clean_area)
 
-#ifdef CONFIG_ARM_PSCI
-	.arch_extension sec
-ENTRY(cpu_v7_smc_switch_mm)
-	stmfd	sp!, {r0 - r3}
-	movw	r0, #:lower16:ARM_SMCCC_ARCH_WORKAROUND_1
-	movt	r0, #:upper16:ARM_SMCCC_ARCH_WORKAROUND_1
-	smc	#0
-	ldmfd	sp!, {r0 - r3}
-	b	cpu_v7_switch_mm
-ENDPROC(cpu_v7_smc_switch_mm)
-	.arch_extension virt
-ENTRY(cpu_v7_hvc_switch_mm)
-	stmfd	sp!, {r0 - r3}
-	movw	r0, #:lower16:ARM_SMCCC_ARCH_WORKAROUND_1
-	movt	r0, #:upper16:ARM_SMCCC_ARCH_WORKAROUND_1
-	hvc	#0
-	ldmfd	sp!, {r0 - r3}
-	b	cpu_v7_switch_mm
-ENDPROC(cpu_v7_hvc_switch_mm)
-#endif
-ENTRY(cpu_v7_iciallu_switch_mm)
-	mov	r3, #0
-	mcr	p15, 0, r3, c7, c5, 0		@ ICIALLU
-	b	cpu_v7_switch_mm
-ENDPROC(cpu_v7_iciallu_switch_mm)
-ENTRY(cpu_v7_bpiall_switch_mm)
-	mov	r3, #0
-	mcr	p15, 0, r3, c7, c5, 6		@ flush BTAC/BTB
-	b	cpu_v7_switch_mm
-ENDPROC(cpu_v7_bpiall_switch_mm)
-
 	string	cpu_v7_name, "ARMv7 Processor"
 	.align
 
@@ -185,6 +152,31 @@ ENTRY(cpu_v7_do_resume)
 ENDPROC(cpu_v7_do_resume)
 #endif
 
+/*
+ * Cortex-A8/A12/A17 that require a BTB invalidation on switch_mm
+ */
+	globl_equ	cpu_v7_btbinv_proc_init,	cpu_v7_proc_init
+	globl_equ	cpu_v7_btbinv_proc_fin,		cpu_v7_proc_fin
+	globl_equ	cpu_v7_btbinv_reset,		cpu_v7_reset
+	globl_equ	cpu_v7_btbinv_do_idle,		cpu_v7_do_idle
+	globl_equ	cpu_v7_btbinv_dcache_clean_area, cpu_v7_dcache_clean_area
+	globl_equ	cpu_v7_btbinv_set_pte_ext,	cpu_v7_set_pte_ext
+	globl_equ	cpu_v7_btbinv_suspend_size,	cpu_v7_suspend_size
+#ifdef CONFIG_ARM_CPU_SUSPEND
+	globl_equ	cpu_v7_btbinv_do_suspend,	cpu_v7_do_suspend
+	globl_equ	cpu_v7_btbinv_do_resume,	cpu_v7_do_resume
+#endif
+
+/*
+ * Cortex-A9 processor functions
+ */
+	globl_equ	cpu_ca9mp_proc_init,	cpu_v7_proc_init
+	globl_equ	cpu_ca9mp_proc_fin,	cpu_v7_proc_fin
+	globl_equ	cpu_ca9mp_reset,	cpu_v7_reset
+	globl_equ	cpu_ca9mp_do_idle,	cpu_v7_do_idle
+	globl_equ	cpu_ca9mp_dcache_clean_area, cpu_v7_dcache_clean_area
+	globl_equ	cpu_ca9mp_switch_mm,	cpu_v7_btbinv_switch_mm
+	globl_equ	cpu_ca9mp_set_pte_ext,	cpu_v7_set_pte_ext
 .globl	cpu_ca9mp_suspend_size
 .equ	cpu_ca9mp_suspend_size, cpu_v7_suspend_size + 4 * 2
 #ifdef CONFIG_ARM_CPU_SUSPEND
@@ -282,19 +274,17 @@ __v7_ca15mp_setup:
 __v7_b15mp_setup:
 __v7_ca17mp_setup:
 	mov	r10, #0
-1:	adr	r0, __v7_setup_stack_ptr
-	ldr	r12, [r0]
-	add	r12, r12, r0			@ the local stack
-	stmia	r12, {r1-r6, lr}		@ v7_invalidate_l1 touches r0-r6
+1:	adr	r12, __v7_setup_stack		@ the local stack
+	stmia	r12, {r0-r5, lr}		@ v7_invalidate_l1 touches r0-r6
 	bl      v7_invalidate_l1
-	ldmia	r12, {r1-r6, lr}
+	ldmia	r12, {r0-r5, lr}
 #ifdef CONFIG_SMP
-	orr	r10, r10, #(1 << 6)		@ Enable SMP/nAMP mode
 	ALT_SMP(mrc	p15, 0, r0, c1, c0, 1)
-	ALT_UP(mov	r0, r10)		@ fake it for UP
-	orr	r10, r10, r0			@ Set required bits
-	teq	r10, r0				@ Were they already set?
-	mcrne	p15, 0, r10, c1, c0, 1		@ No, update register
+	ALT_UP(mov	r0, #(1 << 6))		@ fake it for UP
+	tst	r0, #(1 << 6)			@ SMP/nAMP mode enabled?
+	orreq	r0, r0, #(1 << 6)		@ Enable SMP/nAMP mode
+	orreq	r0, r0, r10			@ Enable CPU-specific SMP bits
+	mcreq	p15, 0, r0, c1, c0, 1
 #endif
 	b	__v7_setup_cont
 
@@ -370,39 +360,6 @@ __ca15_errata:
 #endif
 	b	__errata_finish
 
-__ca12_errata:
-#ifdef CONFIG_ARM_ERRATA_818325_852422
-	mrc	p15, 0, r10, c15, c0, 1		@ read diagnostic register
-	orr	r10, r10, #1 << 12		@ set bit #12
-	mcr	p15, 0, r10, c15, c0, 1		@ write diagnostic register
-#endif
-#ifdef CONFIG_ARM_ERRATA_821420
-	mrc	p15, 0, r10, c15, c0, 2		@ read internal feature reg
-	orr	r10, r10, #1 << 1		@ set bit #1
-	mcr	p15, 0, r10, c15, c0, 2		@ write internal feature reg
-#endif
-#ifdef CONFIG_ARM_ERRATA_825619
-	mrc	p15, 0, r10, c15, c0, 1		@ read diagnostic register
-	orr	r10, r10, #1 << 24		@ set bit #24
-	mcr	p15, 0, r10, c15, c0, 1		@ write diagnostic register
-#endif
-	b	__errata_finish
-
-__ca17_errata:
-#ifdef CONFIG_ARM_ERRATA_852421
-	cmp	r6, #0x12			@ only present up to r1p2
-	mrcle	p15, 0, r10, c15, c0, 1		@ read diagnostic register
-	orrle	r10, r10, #1 << 24		@ set bit #24
-	mcrle	p15, 0, r10, c15, c0, 1		@ write diagnostic register
-#endif
-#ifdef CONFIG_ARM_ERRATA_852423
-	cmp	r6, #0x12			@ only present up to r1p2
-	mrcle	p15, 0, r10, c15, c0, 1		@ read diagnostic register
-	orrle	r10, r10, #1 << 12		@ set bit #12
-	mcrle	p15, 0, r10, c15, c0, 1		@ write diagnostic register
-#endif
-	b	__errata_finish
-
 __v7_pj4b_setup:
 #ifdef CONFIG_CPU_PJ4B
 
@@ -458,12 +415,10 @@ __v7_pj4b_setup:
 #endif /* CONFIG_CPU_PJ4B */
 
 __v7_setup:
-	adr	r0, __v7_setup_stack_ptr
-	ldr	r12, [r0]
-	add	r12, r12, r0			@ the local stack
-	stmia	r12, {r1-r6, lr}		@ v7_invalidate_l1 touches r0-r6
+	adr	r12, __v7_setup_stack		@ the local stack
+	stmia	r12, {r0-r5, lr}		@ v7_invalidate_l1 touches r0-r6
 	bl      v7_invalidate_l1
-	ldmia	r12, {r1-r6, lr}
+	ldmia	r12, {r0-r5, lr}
 
 __v7_setup_cont:
 	and	r0, r9, #0xff000000		@ ARM?
@@ -483,16 +438,6 @@ __v7_setup_cont:
 	ldr	r10, =0x00000c09		@ Cortex-A9 primary part number
 	teq	r0, r10
 	beq	__ca9_errata
-
-	/* Cortex-A12 Errata */
-	ldr	r10, =0x00000c0d		@ Cortex-A12 primary part number
-	teq	r0, r10
-	beq	__ca12_errata
-
-	/* Cortex-A17 Errata */
-	ldr	r10, =0x00000c0e		@ Cortex-A17 primary part number
-	teq	r0, r10
-	beq	__ca17_errata
 
 	/* Cortex-A15 Errata */
 	ldr	r10, =0x00000c0f		@ Cortex-A15 primary part number
@@ -535,92 +480,20 @@ __errata_finish:
 	orr	r0, r0, r6			@ set them
  THUMB(	orr	r0, r0, #1 << 30	)	@ Thumb exceptions
 	ret	lr				@ return to head.S:__ret
-
-	.align	2
-__v7_setup_stack_ptr:
-	.word	PHYS_RELATIVE(__v7_setup_stack, .)
 ENDPROC(__v7_setup)
 
-	.bss
 	.align	2
 __v7_setup_stack:
-	.space	4 * 7				@ 7 registers
+	.space	4 * 7				@ 12 registers
 
 	__INITDATA
 
-	.weak cpu_v7_bugs_init
-
 	@ define struct processor (see <asm/proc-fns.h> and proc-macros.S)
-	define_processor_functions v7, dabort=v7_early_abort, pabort=v7_pabort, suspend=1, bugs=cpu_v7_bugs_init
-
-#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
-	@ generic v7 bpiall on context switch
-	globl_equ	cpu_v7_bpiall_proc_init,	cpu_v7_proc_init
-	globl_equ	cpu_v7_bpiall_proc_fin,		cpu_v7_proc_fin
-	globl_equ	cpu_v7_bpiall_reset,		cpu_v7_reset
-	globl_equ	cpu_v7_bpiall_do_idle,		cpu_v7_do_idle
-	globl_equ	cpu_v7_bpiall_dcache_clean_area, cpu_v7_dcache_clean_area
-	globl_equ	cpu_v7_bpiall_set_pte_ext,	cpu_v7_set_pte_ext
-	globl_equ	cpu_v7_bpiall_suspend_size,	cpu_v7_suspend_size
-#ifdef CONFIG_ARM_CPU_SUSPEND
-	globl_equ	cpu_v7_bpiall_do_suspend,	cpu_v7_do_suspend
-	globl_equ	cpu_v7_bpiall_do_resume,	cpu_v7_do_resume
-#endif
-	define_processor_functions v7_bpiall, dabort=v7_early_abort, pabort=v7_pabort, suspend=1, bugs=cpu_v7_bugs_init
-
-#define HARDENED_BPIALL_PROCESSOR_FUNCTIONS v7_bpiall_processor_functions
-#else
-#define HARDENED_BPIALL_PROCESSOR_FUNCTIONS v7_processor_functions
-#endif
-
+	define_processor_functions v7, dabort=v7_early_abort, pabort=v7_pabort, suspend=1
+	define_processor_functions v7_btbinv, dabort=v7_early_abort, pabort=v7_pabort, suspend=1
 #ifndef CONFIG_ARM_LPAE
-	@ Cortex-A8 - always needs bpiall switch_mm implementation
-	globl_equ	cpu_ca8_proc_init,	cpu_v7_proc_init
-	globl_equ	cpu_ca8_proc_fin,	cpu_v7_proc_fin
-	globl_equ	cpu_ca8_reset,		cpu_v7_reset
-	globl_equ	cpu_ca8_do_idle,	cpu_v7_do_idle
-	globl_equ	cpu_ca8_dcache_clean_area, cpu_v7_dcache_clean_area
-	globl_equ	cpu_ca8_set_pte_ext,	cpu_v7_set_pte_ext
-	globl_equ	cpu_ca8_switch_mm,	cpu_v7_bpiall_switch_mm
-	globl_equ	cpu_ca8_suspend_size,	cpu_v7_suspend_size
-#ifdef CONFIG_ARM_CPU_SUSPEND
-	globl_equ	cpu_ca8_do_suspend,	cpu_v7_do_suspend
-	globl_equ	cpu_ca8_do_resume,	cpu_v7_do_resume
+	define_processor_functions ca9mp, dabort=v7_early_abort, pabort=v7_pabort, suspend=1
 #endif
-	define_processor_functions ca8, dabort=v7_early_abort, pabort=v7_pabort, suspend=1, bugs=cpu_v7_ca8_ibe
-
-	@ Cortex-A9 - needs more registers preserved across suspend/resume
-	@ and bpiall switch_mm for hardening
-	globl_equ	cpu_ca9mp_proc_init,	cpu_v7_proc_init
-	globl_equ	cpu_ca9mp_proc_fin,	cpu_v7_proc_fin
-	globl_equ	cpu_ca9mp_reset,	cpu_v7_reset
-	globl_equ	cpu_ca9mp_do_idle,	cpu_v7_do_idle
-	globl_equ	cpu_ca9mp_dcache_clean_area, cpu_v7_dcache_clean_area
-#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
-	globl_equ	cpu_ca9mp_switch_mm,	cpu_v7_bpiall_switch_mm
-#else
-	globl_equ	cpu_ca9mp_switch_mm,	cpu_v7_switch_mm
-#endif
-	globl_equ	cpu_ca9mp_set_pte_ext,	cpu_v7_set_pte_ext
-	define_processor_functions ca9mp, dabort=v7_early_abort, pabort=v7_pabort, suspend=1, bugs=cpu_v7_bugs_init
-#endif
-
-	@ Cortex-A15 - needs iciallu switch_mm for hardening
-	globl_equ	cpu_ca15_proc_init,	cpu_v7_proc_init
-	globl_equ	cpu_ca15_proc_fin,	cpu_v7_proc_fin
-	globl_equ	cpu_ca15_reset,		cpu_v7_reset
-	globl_equ	cpu_ca15_do_idle,	cpu_v7_do_idle
-	globl_equ	cpu_ca15_dcache_clean_area, cpu_v7_dcache_clean_area
-#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
-	globl_equ	cpu_ca15_switch_mm,	cpu_v7_iciallu_switch_mm
-#else
-	globl_equ	cpu_ca15_switch_mm,	cpu_v7_switch_mm
-#endif
-	globl_equ	cpu_ca15_set_pte_ext,	cpu_v7_set_pte_ext
-	globl_equ	cpu_ca15_suspend_size,	cpu_v7_suspend_size
-	globl_equ	cpu_ca15_do_suspend,	cpu_v7_do_suspend
-	globl_equ	cpu_ca15_do_resume,	cpu_v7_do_resume
-	define_processor_functions ca15, dabort=v7_early_abort, pabort=v7_pabort, suspend=1, bugs=cpu_v7_ca15_ibe
 #ifdef CONFIG_CPU_PJ4B
 	define_processor_functions pj4b, dabort=v7_early_abort, pabort=v7_pabort, suspend=1
 #endif
@@ -683,7 +556,7 @@ __v7_ca9mp_proc_info:
 __v7_ca8_proc_info:
 	.long	0x410fc080
 	.long	0xff0ffff0
-	__v7_proc __v7_ca8_proc_info, __v7_setup, proc_fns = ca8_processor_functions
+	__v7_proc __v7_ca8_proc_info, __v7_setup, proc_fns = v7_btbinv_processor_functions
 	.size	__v7_ca8_proc_info, . - __v7_ca8_proc_info
 
 #endif	/* CONFIG_ARM_LPAE */
@@ -727,7 +600,7 @@ __v7_ca7mp_proc_info:
 __v7_ca12mp_proc_info:
 	.long	0x410fc0d0
 	.long	0xff0ffff0
-	__v7_proc __v7_ca12mp_proc_info, __v7_ca12mp_setup, proc_fns = HARDENED_BPIALL_PROCESSOR_FUNCTIONS
+	__v7_proc __v7_ca12mp_proc_info, __v7_ca12mp_setup, proc_fns = v7_btbinv_processor_functions
 	.size	__v7_ca12mp_proc_info, . - __v7_ca12mp_proc_info
 
 	/*
@@ -737,7 +610,7 @@ __v7_ca12mp_proc_info:
 __v7_ca15mp_proc_info:
 	.long	0x410fc0f0
 	.long	0xff0ffff0
-	__v7_proc __v7_ca15mp_proc_info, __v7_ca15mp_setup, proc_fns = ca15_processor_functions
+	__v7_proc __v7_ca15mp_proc_info, __v7_ca15mp_setup
 	.size	__v7_ca15mp_proc_info, . - __v7_ca15mp_proc_info
 
 	/*
@@ -747,7 +620,7 @@ __v7_ca15mp_proc_info:
 __v7_b15mp_proc_info:
 	.long	0x420f00f0
 	.long	0xff0ffff0
-	__v7_proc __v7_b15mp_proc_info, __v7_b15mp_setup, proc_fns = ca15_processor_functions
+	__v7_proc __v7_b15mp_proc_info, __v7_b15mp_setup
 	.size	__v7_b15mp_proc_info, . - __v7_b15mp_proc_info
 
 	/*
@@ -757,24 +630,8 @@ __v7_b15mp_proc_info:
 __v7_ca17mp_proc_info:
 	.long	0x410fc0e0
 	.long	0xff0ffff0
-	__v7_proc __v7_ca17mp_proc_info, __v7_ca17mp_setup, proc_fns = HARDENED_BPIALL_PROCESSOR_FUNCTIONS
+	__v7_proc __v7_ca17mp_proc_info, __v7_ca17mp_setup, proc_fns = v7_btbinv_processor_functions
 	.size	__v7_ca17mp_proc_info, . - __v7_ca17mp_proc_info
-
-	/* ARM Ltd. Cortex A73 processor */
-	.type	__v7_ca73_proc_info, #object
-__v7_ca73_proc_info:
-	.long	0x410fd090
-	.long	0xff0ffff0
-	__v7_proc __v7_ca73_proc_info, __v7_setup, proc_fns = HARDENED_BPIALL_PROCESSOR_FUNCTIONS
-	.size	__v7_ca73_proc_info, . - __v7_ca73_proc_info
-
-	/* ARM Ltd. Cortex A75 processor */
-	.type	__v7_ca75_proc_info, #object
-__v7_ca75_proc_info:
-	.long	0x410fd0a0
-	.long	0xff0ffff0
-	__v7_proc __v7_ca75_proc_info, __v7_setup, proc_fns = HARDENED_BPIALL_PROCESSOR_FUNCTIONS
-	.size	__v7_ca75_proc_info, . - __v7_ca75_proc_info
 
 	/*
 	 * Qualcomm Inc. Krait processors.

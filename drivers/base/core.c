@@ -430,7 +430,6 @@ static ssize_t online_show(struct device *dev, struct device_attribute *attr,
 	bool val;
 
 	device_lock(dev);
-	dev->offline = !(!!cpu_online(dev->id));
 	val = !dev->offline;
 	device_unlock(dev);
 	return sprintf(buf, "%u\n", val);
@@ -449,8 +448,6 @@ static ssize_t online_store(struct device *dev, struct device_attribute *attr,
 	ret = lock_device_hotplug_sysfs();
 	if (ret)
 		return ret;
-
-	dev->offline = !(!!cpu_online(dev->id));
 
 	ret = val ? device_online(dev) : device_offline(dev);
 	unlock_device_hotplug();
@@ -1294,7 +1291,6 @@ void device_del(struct device *dev)
 	bus_remove_device(dev);
 	device_pm_remove(dev);
 	driver_deferred_probe_del(dev);
-	device_remove_properties(dev);
 
 	/* Notify the platform of the removal, in case they
 	 * need to do anything...
@@ -2077,9 +2073,6 @@ void device_shutdown(void)
 {
 	struct device *dev, *parent;
 
-	wait_for_device_probe();
-	device_block_probing();
-
 	spin_lock(&devices_kset->list_lock);
 	/*
 	 * Walk the devices list backward, shutting down each in turn.
@@ -2303,10 +2296,7 @@ void set_primary_fwnode(struct device *dev, struct fwnode_handle *fwnode)
 		if (fwnode_is_primary(fn))
 			fn = fn->secondary;
 
-		if (fn) {
-			WARN_ON(fwnode->secondary);
-			fwnode->secondary = fn;
-		}
+		fwnode->secondary = fn;
 		dev->fwnode = fwnode;
 	} else {
 		dev->fwnode = fwnode_is_primary(dev->fwnode) ?

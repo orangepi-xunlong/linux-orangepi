@@ -84,7 +84,6 @@
 
 #ifndef __ASSEMBLY__
 
-#ifdef CONFIG_CPU_CP15_MMU
 static inline unsigned int get_domain(void)
 {
 	unsigned int domain;
@@ -104,16 +103,6 @@ static inline void set_domain(unsigned val)
 	  : : "r" (val) : "memory");
 	isb();
 }
-#else
-static inline unsigned int get_domain(void)
-{
-	return 0;
-}
-
-static inline void set_domain(unsigned val)
-{
-}
-#endif
 
 #ifdef CONFIG_CPU_USE_DOMAINS
 #define modify_domain(dom,type)					\

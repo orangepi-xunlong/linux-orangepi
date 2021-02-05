@@ -81,7 +81,7 @@ static __always_inline void __preempt_count_sub(int val)
  */
 static __always_inline bool __preempt_count_dec_and_test(void)
 {
-	GEN_UNARY_RMWcc("decl", __preempt_count, __percpu_arg(0), e);
+	GEN_UNARY_RMWcc("decl", __preempt_count, __percpu_arg(0), "e");
 }
 
 /*
@@ -94,14 +94,10 @@ static __always_inline bool should_resched(int preempt_offset)
 
 #ifdef CONFIG_PREEMPT
   extern asmlinkage void ___preempt_schedule(void);
-# define __preempt_schedule() \
-	asm volatile ("call ___preempt_schedule" : ASM_CALL_CONSTRAINT)
-
+# define __preempt_schedule() asm ("call ___preempt_schedule")
   extern asmlinkage void preempt_schedule(void);
   extern asmlinkage void ___preempt_schedule_notrace(void);
-# define __preempt_schedule_notrace() \
-	asm volatile ("call ___preempt_schedule_notrace" : ASM_CALL_CONSTRAINT)
-
+# define __preempt_schedule_notrace() asm ("call ___preempt_schedule_notrace")
   extern asmlinkage void preempt_schedule_notrace(void);
 #endif
 

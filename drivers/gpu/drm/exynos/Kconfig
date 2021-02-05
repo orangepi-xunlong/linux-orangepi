@@ -1,7 +1,11 @@
 config DRM_EXYNOS
 	tristate "DRM Support for Samsung SoC EXYNOS Series"
-	depends on OF && DRM && (ARCH_S3C64XX || ARCH_EXYNOS || ARCH_MULTIPLATFORM)
+	depends on OF && DRM && (PLAT_SAMSUNG || ARCH_MULTIPLATFORM)
 	select DRM_KMS_HELPER
+	select DRM_KMS_FB_HELPER
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
 	select VIDEOMODE_HELPERS
 	help
 	  Choose this option if you have a Samsung SoC EXYNOS chipset.
@@ -11,7 +15,7 @@ if DRM_EXYNOS
 
 config DRM_EXYNOS_IOMMU
 	bool
-	depends on EXYNOS_IOMMU
+	depends on EXYNOS_IOMMU && ARM_DMA_USE_IOMMU
 	default y
 
 comment "CRTCs"
@@ -38,6 +42,7 @@ config DRM_EXYNOS7_DECON
 
 config DRM_EXYNOS_MIXER
 	bool "Mixer"
+	depends on !VIDEO_SAMSUNG_S5P_TV
 	help
 	  Choose this option if you want to use Exynos Mixer for DRM.
 
@@ -76,7 +81,7 @@ config DRM_EXYNOS_DP
 
 config DRM_EXYNOS_HDMI
 	bool "HDMI"
-	depends on DRM_EXYNOS_MIXER || DRM_EXYNOS5433_DECON
+	depends on !VIDEO_SAMSUNG_S5P_TV && (DRM_EXYNOS_MIXER || DRM_EXYNOS5433_DECON)
 	help
 	  Choose this option if you want to use Exynos HDMI for DRM.
 
@@ -90,7 +95,7 @@ comment "Sub-drivers"
 
 config DRM_EXYNOS_G2D
 	bool "G2D"
-	depends on VIDEO_SAMSUNG_S5P_G2D=n
+	depends on !VIDEO_SAMSUNG_S5P_G2D
 	select FRAME_VECTOR
 	help
 	  Choose this option if you want to use Exynos G2D for DRM.
@@ -114,7 +119,7 @@ config DRM_EXYNOS_ROTATOR
 
 config DRM_EXYNOS_GSC
 	bool "GScaler"
-	depends on DRM_EXYNOS_IPP && ARCH_EXYNOS5 && !VIDEO_SAMSUNG_EXYNOS_GSC
+	depends on DRM_EXYNOS_IPP && ARCH_EXYNOS5 && !ARCH_MULTIPLATFORM
 	help
 	  Choose this option if you want to use Exynos GSC for DRM.
 

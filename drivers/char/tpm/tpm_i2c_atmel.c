@@ -51,7 +51,7 @@ struct priv_data {
 
 static int i2c_atmel_send(struct tpm_chip *chip, u8 *buf, size_t len)
 {
-	struct priv_data *priv = dev_get_drvdata(&chip->dev);
+	struct priv_data *priv = chip->vendor.priv;
 	struct i2c_client *client = to_i2c_client(chip->dev.parent);
 	s32 status;
 
@@ -65,12 +65,20 @@ static int i2c_atmel_send(struct tpm_chip *chip, u8 *buf, size_t len)
 	dev_dbg(&chip->dev,
 		"%s(buf=%*ph len=%0zx) -> sts=%d\n", __func__,
 		(int)min_t(size_t, 64, len), buf, len, status);
-	return status;
+
+	if (status < 0)
+		return status;
+
+	/* The upper layer does not support incomplete sends. */
+	if (status != len)
+		return -E2BIG;
+
+	return 0;
 }
 
 static int i2c_atmel_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 {
-	struct priv_data *priv = dev_get_drvdata(&chip->dev);
+	struct priv_data *priv = chip->vendor.priv;
 	struct i2c_client *client = to_i2c_client(chip->dev.parent);
 	struct tpm_output_header *hdr =
 		(struct tpm_output_header *)priv->buffer;
@@ -111,7 +119,7 @@ static void i2c_atmel_cancel(struct tpm_chip *chip)
 
 static u8 i2c_atmel_read_status(struct tpm_chip *chip)
 {
-	struct priv_data *priv = dev_get_drvdata(&chip->dev);
+	struct priv_data *priv = chip->vendor.priv;
 	struct i2c_client *client = to_i2c_client(chip->dev.parent);
 	int rc;
 
@@ -141,7 +149,6 @@ static bool i2c_atmel_req_canceled(struct tpm_chip *chip, u8 status)
 }
 
 static const struct tpm_class_ops i2c_atmel = {
-	.flags = TPM_OPS_AUTO_STARTUP,
 	.status = i2c_atmel_read_status,
 	.recv = i2c_atmel_recv,
 	.send = i2c_atmel_send,
@@ -156,7 +163,6 @@ static int i2c_atmel_probe(struct i2c_client *client,
 {
 	struct tpm_chip *chip;
 	struct device *dev = &client->dev;
-	struct priv_data *priv;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
 		return -ENODEV;
@@ -165,21 +171,26 @@ static int i2c_atmel_probe(struct i2c_client *client,
 	if (IS_ERR(chip))
 		return PTR_ERR(chip);
 
-	priv = devm_kzalloc(dev, sizeof(struct priv_data), GFP_KERNEL);
-	if (!priv)
+	chip->vendor.priv = devm_kzalloc(dev, sizeof(struct priv_data),
+					 GFP_KERNEL);
+	if (!chip->vendor.priv)
 		return -ENOMEM;
 
 	/* Default timeouts */
-	chip->timeout_a = msecs_to_jiffies(TPM_I2C_SHORT_TIMEOUT);
-	chip->timeout_b = msecs_to_jiffies(TPM_I2C_LONG_TIMEOUT);
-	chip->timeout_c = msecs_to_jiffies(TPM_I2C_SHORT_TIMEOUT);
-	chip->timeout_d = msecs_to_jiffies(TPM_I2C_SHORT_TIMEOUT);
-
-	dev_set_drvdata(&chip->dev, priv);
+	chip->vendor.timeout_a = msecs_to_jiffies(TPM_I2C_SHORT_TIMEOUT);
+	chip->vendor.timeout_b = msecs_to_jiffies(TPM_I2C_LONG_TIMEOUT);
+	chip->vendor.timeout_c = msecs_to_jiffies(TPM_I2C_SHORT_TIMEOUT);
+	chip->vendor.timeout_d = msecs_to_jiffies(TPM_I2C_SHORT_TIMEOUT);
+	chip->vendor.irq = 0;
 
 	/* There is no known way to probe for this device, and all version
 	 * information seems to be read via TPM commands. Thus we rely on the
 	 * TPM startup process in the common code to detect the device. */
+	if (tpm_get_timeouts(chip))
+		return -ENODEV;
+
+	if (tpm_do_selftest(chip))
+		return -ENODEV;
 
 	return tpm_chip_register(chip);
 }

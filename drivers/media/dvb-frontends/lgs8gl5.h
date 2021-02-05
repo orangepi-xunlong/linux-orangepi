@@ -23,6 +23,7 @@
 #ifndef LGS8GL5_H
 #define LGS8GL5_H
 
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 
 struct lgs8gl5_config {

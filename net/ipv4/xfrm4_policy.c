@@ -117,7 +117,7 @@ _decode_session4(struct sk_buff *skb, struct flowi *fl, int reverse)
 	int oif = 0;
 
 	if (skb_dst(skb))
-		oif = skb_dst(skb)->dev->ifindex;
+		oif = l3mdev_fib_oif(skb_dst(skb)->dev);
 
 	memset(fl4, 0, sizeof(struct flowi4));
 	fl4->flowi4_mark = skb->mark;
@@ -300,7 +300,7 @@ static struct ctl_table xfrm4_policy_table[] = {
 	{ }
 };
 
-static __net_init int xfrm4_net_sysctl_init(struct net *net)
+static int __net_init xfrm4_net_sysctl_init(struct net *net)
 {
 	struct ctl_table *table;
 	struct ctl_table_header *hdr;
@@ -328,7 +328,7 @@ err_alloc:
 	return -ENOMEM;
 }
 
-static __net_exit void xfrm4_net_sysctl_exit(struct net *net)
+static void __net_exit xfrm4_net_sysctl_exit(struct net *net)
 {
 	struct ctl_table *table;
 
@@ -341,12 +341,12 @@ static __net_exit void xfrm4_net_sysctl_exit(struct net *net)
 		kfree(table);
 }
 #else /* CONFIG_SYSCTL */
-static inline int xfrm4_net_sysctl_init(struct net *net)
+static int inline xfrm4_net_sysctl_init(struct net *net)
 {
 	return 0;
 }
 
-static inline void xfrm4_net_sysctl_exit(struct net *net)
+static void inline xfrm4_net_sysctl_exit(struct net *net)
 {
 }
 #endif

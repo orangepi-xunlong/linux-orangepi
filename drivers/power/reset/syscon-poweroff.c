@@ -30,7 +30,7 @@ static struct regmap *map;
 static u32 offset;
 static u32 mask;
 
-static void syscon_poweroff(void)
+void syscon_poweroff(void)
 {
 	/* Issue the poweroff */
 	regmap_write(map, offset, mask);

@@ -3,7 +3,7 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (C) 2013 by John Crispin <john@phrozen.org>
+ * Copyright (C) 2013 by John Crispin <blogic@openwrt.org>
  */
 
 #include <linux/clockchips.h>
@@ -117,13 +117,11 @@ static int systick_set_oneshot(struct clock_event_device *evt)
 	return 0;
 }
 
-static int __init ralink_systick_init(struct device_node *np)
+static void __init ralink_systick_init(struct device_node *np)
 {
-	int ret;
-
 	systick.membase = of_iomap(np, 0);
 	if (!systick.membase)
-		return -ENXIO;
+		return;
 
 	systick_irqaction.name = np->name;
 	systick.dev.name = np->name;
@@ -133,21 +131,16 @@ static int __init ralink_systick_init(struct device_node *np)
 	systick.dev.irq = irq_of_parse_and_map(np, 0);
 	if (!systick.dev.irq) {
 		pr_err("%s: request_irq failed", np->name);
-		return -EINVAL;
+		return;
 	}
 
-	ret = clocksource_mmio_init(systick.membase + SYSTICK_COUNT, np->name,
-				    SYSTICK_FREQ, 301, 16,
-				    clocksource_mmio_readl_up);
-	if (ret)
-		return ret;
+	clocksource_mmio_init(systick.membase + SYSTICK_COUNT, np->name,
+			SYSTICK_FREQ, 301, 16, clocksource_mmio_readl_up);
 
 	clockevents_register_device(&systick.dev);
 
 	pr_info("%s: running - mult: %d, shift: %d\n",
 			np->name, systick.dev.mult, systick.dev.shift);
-
-	return 0;
 }
 
 CLOCKSOURCE_OF_DECLARE(systick, "ralink,cevt-systick", ralink_systick_init);

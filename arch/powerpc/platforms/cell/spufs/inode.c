@@ -103,7 +103,7 @@ spufs_new_inode(struct super_block *sb, umode_t mode)
 	inode->i_mode = mode;
 	inode->i_uid = current_fsuid();
 	inode->i_gid = current_fsgid();
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 out:
 	return inode;
 }
@@ -163,7 +163,7 @@ static void spufs_prune_dir(struct dentry *dir)
 {
 	struct dentry *dentry, *tmp;
 
-	inode_lock(d_inode(dir));
+	mutex_lock(&d_inode(dir)->i_mutex);
 	list_for_each_entry_safe(dentry, tmp, &dir->d_subdirs, d_child) {
 		spin_lock(&dentry->d_lock);
 		if (simple_positive(dentry)) {
@@ -180,7 +180,7 @@ static void spufs_prune_dir(struct dentry *dir)
 		}
 	}
 	shrink_dcache_parent(dir);
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 }
 
 /* Caller must hold parent->i_mutex */
@@ -225,9 +225,9 @@ static int spufs_dir_close(struct inode *inode, struct file *file)
 	parent = d_inode(dir->d_parent);
 	ctx = SPUFS_I(d_inode(dir))->i_ctx;
 
-	inode_lock_nested(parent, I_MUTEX_PARENT);
+	mutex_lock_nested(&parent->i_mutex, I_MUTEX_PARENT);
 	ret = spufs_rmdir(parent, dir);
-	inode_unlock(parent);
+	mutex_unlock(&parent->i_mutex);
 	WARN_ON(ret);
 
 	return dcache_dir_close(inode, file);
@@ -238,7 +238,7 @@ const struct file_operations spufs_context_fops = {
 	.release	= spufs_dir_close,
 	.llseek		= dcache_dir_lseek,
 	.read		= generic_read_dir,
-	.iterate_shared	= dcache_readdir,
+	.iterate	= dcache_readdir,
 	.fsync		= noop_fsync,
 };
 EXPORT_SYMBOL_GPL(spufs_context_fops);
@@ -270,7 +270,7 @@ spufs_mkdir(struct inode *dir, struct dentry *dentry, unsigned int flags,
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 
 	dget(dentry);
 	inc_nlink(dir);
@@ -291,7 +291,7 @@ spufs_mkdir(struct inode *dir, struct dentry *dentry, unsigned int flags,
 	if (ret)
 		spufs_rmdir(dir, dentry);
 
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 
 	return ret;
 }
@@ -496,10 +496,8 @@ spufs_mkgang(struct inode *dir, struct dentry *dentry, umode_t mode)
 	gang = alloc_spu_gang();
 	SPUFS_I(inode)->i_ctx = NULL;
 	SPUFS_I(inode)->i_gang = gang;
-	if (!gang) {
-		ret = -ENOMEM;
+	if (!gang)
 		goto out_iput;
-	}
 
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
@@ -734,8 +732,8 @@ spufs_fill_super(struct super_block *sb, void *data, int silent)
 		return -ENOMEM;
 
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
-	sb->s_blocksize = PAGE_SIZE;
-	sb->s_blocksize_bits = PAGE_SHIFT;
+	sb->s_blocksize = PAGE_CACHE_SIZE;
+	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	sb->s_magic = SPUFS_MAGIC;
 	sb->s_op = &s_ops;
 	sb->s_fs_info = info;
@@ -769,7 +767,7 @@ static int __init spufs_init(void)
 	ret = -ENOMEM;
 	spufs_inode_cache = kmem_cache_create("spufs_inode_cache",
 			sizeof(struct spufs_inode_info), 0,
-			SLAB_HWCACHE_ALIGN|SLAB_ACCOUNT, spufs_init_once);
+			SLAB_HWCACHE_ALIGN, spufs_init_once);
 
 	if (!spufs_inode_cache)
 		goto out;

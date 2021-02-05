@@ -266,7 +266,7 @@ static int check_dir_item(struct btrfs_root *root,
 		}
 		if (name_len + data_len > BTRFS_MAX_XATTR_SIZE(root)) {
 			dir_item_err(root, leaf, slot,
-			"dir item name and data len too long, have %u max %u",
+			"dir item name and data len too long, have %u max %zu",
 				name_len + data_len,
 				BTRFS_MAX_XATTR_SIZE(root));
 			return -EUCLEAN;
@@ -399,7 +399,7 @@ static int check_block_group_item(struct btrfs_fs_info *fs_info,
 	    type != (BTRFS_BLOCK_GROUP_METADATA |
 			   BTRFS_BLOCK_GROUP_DATA)) {
 		block_group_err(fs_info, leaf, slot,
-"invalid type, have 0x%llx (%lu bits set) expect either 0x%llx, 0x%llx, 0x%llu or 0x%llx",
+"invalid type, have 0x%llx (%lu bits set) expect either 0x%llx, 0x%llx, 0x%llx or 0x%llx",
 			type, hweight64(type),
 			BTRFS_BLOCK_GROUP_DATA, BTRFS_BLOCK_GROUP_METADATA,
 			BTRFS_BLOCK_GROUP_SYSTEM,
@@ -608,7 +608,7 @@ int btrfs_check_node(struct btrfs_root *root, struct extent_buffer *node)
 	}
 	if (nr == 0 || nr > BTRFS_NODEPTRS_PER_BLOCK(root)) {
 		btrfs_crit(root->fs_info,
-"corrupt node: root=%llu block=%llu, nritems too %s, have %lu expect range [1,%u]",
+"corrupt node: root=%llu block=%llu, nritems too %s, have %lu expect range [1,%zu]",
 			   root->objectid, node->start,
 			   nr == 0 ? "small" : "large", nr,
 			   BTRFS_NODEPTRS_PER_BLOCK(root));

@@ -3,63 +3,54 @@
 
 #ifdef __KERNEL__
 
-#include <linux/types.h>
+#include <asm-generic/io.h>
 
 /* H8/300 internal I/O functions */
-
-#define __raw_readb __raw_readb
-static inline u8 __raw_readb(const volatile void __iomem *addr)
+static inline unsigned char ctrl_inb(unsigned long addr)
 {
-	return *(volatile u8 *)addr;
+	return *(volatile unsigned char *)addr;
 }
 
-#define __raw_readw __raw_readw
-static inline u16 __raw_readw(const volatile void __iomem *addr)
+static inline unsigned short ctrl_inw(unsigned long addr)
 {
-	return *(volatile u16 *)addr;
+	return *(volatile unsigned short *)addr;
 }
 
-#define __raw_readl __raw_readl
-static inline u32  __raw_readl(const volatile void __iomem *addr)
+static inline unsigned long ctrl_inl(unsigned long addr)
 {
-	return *(volatile u32 *)addr;
+	return *(volatile unsigned long *)addr;
 }
 
-#define __raw_writeb __raw_writeb
-static inline void __raw_writeb(u8 b, const volatile void __iomem *addr)
+static inline void ctrl_outb(unsigned char b, unsigned long addr)
 {
-	*(volatile u8 *)addr = b;
+	*(volatile unsigned char *)addr = b;
 }
 
-#define __raw_writew __raw_writew
-static inline void __raw_writew(u16 b, const volatile void __iomem *addr)
+static inline void ctrl_outw(unsigned short b, unsigned long addr)
 {
-	*(volatile u16 *)addr = b;
+	*(volatile unsigned short *)addr = b;
 }
 
-#define __raw_writel __raw_writel
-static inline void __raw_writel(u32 b, const volatile void __iomem *addr)
+static inline void ctrl_outl(unsigned long b, unsigned long addr)
 {
-	*(volatile u32 *)addr = b;
+	*(volatile unsigned long *)addr = b;
 }
 
-static inline void ctrl_bclr(int b, void __iomem *addr)
+static inline void ctrl_bclr(int b, unsigned char *addr)
 {
 	if (__builtin_constant_p(b))
-		__asm__("bclr %1,%0" : "+WU"(*(u8 *)addr): "i"(b));
+		__asm__("bclr %1,%0" : "+WU"(*addr): "i"(b));
 	else
-		__asm__("bclr %w1,%0" : "+WU"(*(u8 *)addr): "r"(b));
+		__asm__("bclr %w1,%0" : "+WU"(*addr): "r"(b));
 }
 
-static inline void ctrl_bset(int b, void __iomem *addr)
+static inline void ctrl_bset(int b, unsigned char *addr)
 {
 	if (__builtin_constant_p(b))
-		__asm__("bset %1,%0" : "+WU"(*(u8 *)addr): "i"(b));
+		__asm__("bset %1,%0" : "+WU"(*addr): "i"(b));
 	else
-		__asm__("bset %w1,%0" : "+WU"(*(u8 *)addr): "r"(b));
+		__asm__("bset %w1,%0" : "+WU"(*addr): "r"(b));
 }
-
-#include <asm-generic/io.h>
 
 #endif /* __KERNEL__ */
 

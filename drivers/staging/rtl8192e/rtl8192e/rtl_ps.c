@@ -63,8 +63,9 @@ void rtl92e_hw_wakeup(struct net_device *dev)
 		spin_unlock_irqrestore(&priv->rf_ps_lock, flags);
 		RT_TRACE(COMP_DBG,
 			 "rtl92e_hw_wakeup(): RF Change in progress!\n");
-		schedule_delayed_work(&priv->rtllib->hw_wakeup_wq,
-				      msecs_to_jiffies(10));
+		queue_delayed_work_rsl(priv->rtllib->wq,
+				       &priv->rtllib->hw_wakeup_wq,
+				       msecs_to_jiffies(10));
 		return;
 	}
 	spin_unlock_irqrestore(&priv->rf_ps_lock, flags);
@@ -110,8 +111,10 @@ void rtl92e_enter_sleep(struct net_device *dev, u64 time)
 		return;
 	}
 	tmp = time - jiffies;
-	schedule_delayed_work(&priv->rtllib->hw_wakeup_wq, tmp);
-	schedule_delayed_work(&priv->rtllib->hw_sleep_wq, 0);
+	queue_delayed_work_rsl(priv->rtllib->wq,
+			&priv->rtllib->hw_wakeup_wq, tmp);
+	queue_delayed_work_rsl(priv->rtllib->wq,
+			(void *)&priv->rtllib->hw_sleep_wq, 0);
 	spin_unlock_irqrestore(&priv->ps_lock, flags);
 }
 
@@ -179,9 +182,9 @@ void rtl92e_ips_leave_wq(void *data)
 	struct net_device *dev = ieee->dev;
 	struct r8192_priv *priv = (struct r8192_priv *)rtllib_priv(dev);
 
-	mutex_lock(&priv->rtllib->ips_mutex);
+	down(&priv->rtllib->ips_sem);
 	rtl92e_ips_leave(dev);
-	mutex_unlock(&priv->rtllib->ips_mutex);
+	up(&priv->rtllib->ips_sem);
 }
 
 void rtl92e_rtllib_ips_leave_wq(struct net_device *dev)
@@ -200,7 +203,8 @@ void rtl92e_rtllib_ips_leave_wq(struct net_device *dev)
 			}
 			netdev_info(dev, "=========>%s(): rtl92e_ips_leave\n",
 				    __func__);
-			schedule_work(&priv->rtllib->ips_leave_wq);
+			queue_work_rsl(priv->rtllib->wq,
+				       &priv->rtllib->ips_leave_wq);
 		}
 	}
 }
@@ -209,9 +213,9 @@ void rtl92e_rtllib_ips_leave(struct net_device *dev)
 {
 	struct r8192_priv *priv = (struct r8192_priv *)rtllib_priv(dev);
 
-	mutex_lock(&priv->rtllib->ips_mutex);
+	down(&priv->rtllib->ips_sem);
 	rtl92e_ips_leave(dev);
-	mutex_unlock(&priv->rtllib->ips_mutex);
+	up(&priv->rtllib->ips_sem);
 }
 
 static bool _rtl92e_ps_set_mode(struct net_device *dev, u8 rtPsMode)

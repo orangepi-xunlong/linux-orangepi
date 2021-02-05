@@ -11,6 +11,7 @@ LDFLAGS_vmlinux := -T
 
 $(obj)/vmlinux: $(obj)/vmlinux.lds $(OBJECTS) $(obj)/piggy.o FORCE
 	$(call if_changed,ld)
+	@:
 
 LDFLAGS_piggy.o := -r --format binary --oformat elf32-littlenios2 -T
 

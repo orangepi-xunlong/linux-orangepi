@@ -217,7 +217,8 @@ static inline void limit_reserve_root(struct f2fs_sb_info *sbi)
 
 	/* limit is 0.2% */
 	if (test_opt(sbi, RESERVE_ROOT) &&
-			F2FS_OPTION(sbi).root_reserved_blocks > limit) {
+			F2FS_OPTION(sbi).root_reserved_blocks > limit &&
+			F2FS_OPTION(sbi).root_reserved_blocks > MIN_ROOT_RESERVED_BLOCKS) {
 		F2FS_OPTION(sbi).root_reserved_blocks = limit;
 		f2fs_msg(sbi->sb, KERN_INFO,
 			"Reduce reserved blocks for root = %u",
@@ -1107,7 +1108,8 @@ static void f2fs_put_super(struct super_block *sb)
 	kvfree(sbi->raw_super);
 
 	destroy_device_list(sbi);
-	mempool_destroy(sbi->write_io_dummy);
+	if (sbi->write_io_dummy)
+		mempool_destroy(sbi->write_io_dummy);
 #ifdef CONFIG_QUOTA
 	for (i = 0; i < MAXQUOTAS; i++)
 		kvfree(F2FS_OPTION(sbi).s_qf_names[i]);
@@ -1138,6 +1140,7 @@ int f2fs_sync_fs(struct super_block *sb, int sync)
 
 		cpc.reason = __get_cp_reason(sbi);
 
+		atomic_set(&sbi->no_cp_fsync_pages, 0);
 		mutex_lock(&sbi->gc_mutex);
 		err = f2fs_write_checkpoint(sbi, &cpc);
 		mutex_unlock(&sbi->gc_mutex);
@@ -1223,7 +1226,8 @@ static int f2fs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_type = F2FS_SUPER_MAGIC;
 	buf->f_bsize = sbi->blocksize;
 
-	buf->f_blocks = total_count - start_count;
+	/* f_blocks should not include overhead of filesystem */
+	buf->f_blocks = user_block_count;
 	buf->f_bfree = user_block_count - valid_user_blocks(sbi) -
 						sbi->current_reserved_blocks;
 	if (unlikely(buf->f_bfree <= sbi->unusable_block_count))
@@ -2124,11 +2128,13 @@ static int f2fs_dquot_commit_info(struct super_block *sb, int type)
 	return ret;
 }
 
+#if 0
 static int f2fs_get_projid(struct inode *inode, kprojid_t *projid)
 {
 	*projid = F2FS_I(inode)->i_projid;
 	return 0;
 }
+#endif
 
 static const struct dquot_operations f2fs_quota_operations = {
 	.get_reserved_space = f2fs_get_reserved_space,
@@ -2139,8 +2145,10 @@ static const struct dquot_operations f2fs_quota_operations = {
 	.write_info	= f2fs_dquot_commit_info,
 	.alloc_dquot	= dquot_alloc,
 	.destroy_dquot	= dquot_destroy,
+#if 0
 	.get_projid	= f2fs_get_projid,
 	.get_next_id	= dquot_get_next_id,
+#endif
 };
 
 static const struct quotactl_ops f2fs_quotactl_ops = {
@@ -2151,7 +2159,6 @@ static const struct quotactl_ops f2fs_quotactl_ops = {
 	.set_info	= dquot_set_dqinfo,
 	.get_dqblk	= dquot_get_dqblk,
 	.set_dqblk	= dquot_set_dqblk,
-	.get_nextdqblk	= dquot_get_next_dqblk,
 };
 #else
 int f2fs_quota_sync(struct super_block *sb, int type)
@@ -2309,7 +2316,7 @@ static int __f2fs_commit_super(struct buffer_head *bh,
 	unlock_buffer(bh);
 
 	/* it's rare case, we can do fua all the time */
-	return __sync_dirty_buffer(bh, REQ_SYNC | REQ_PREFLUSH | REQ_FUA);
+	return __sync_dirty_buffer(bh, WRITE_FLUSH_FUA);
 }
 
 static inline bool sanity_check_area_boundary(struct f2fs_sb_info *sbi,
@@ -3162,7 +3169,7 @@ try_onemore:
 	sb->s_time_gran = 1;
 	sb->s_flags = (sb->s_flags & ~MS_POSIXACL) |
 		(test_opt(sbi, POSIX_ACL) ? MS_POSIXACL : 0);
-	memcpy(&sb->s_uuid, raw_super->uuid, sizeof(raw_super->uuid));
+	memcpy(sb->s_uuid, raw_super->uuid, sizeof(raw_super->uuid));
 	sb->s_iflags |= SB_I_CGROUPWB;
 
 	/* init f2fs-specific super block info */
@@ -3298,6 +3305,8 @@ try_onemore:
 			le64_to_cpu(seg_i->journal->info.kbytes_written);
 
 	f2fs_build_gc_manager(sbi);
+
+	atomic_set(&sbi->no_cp_fsync_pages, 0);
 
 	err = f2fs_build_stats(sbi);
 	if (err)
@@ -3545,7 +3554,7 @@ static int __init init_inodecache(void)
 {
 	f2fs_inode_cachep = kmem_cache_create("f2fs_inode_cache",
 			sizeof(struct f2fs_inode_info), 0,
-			SLAB_RECLAIM_ACCOUNT|SLAB_ACCOUNT, NULL);
+			SLAB_RECLAIM_ACCOUNT, NULL);
 	if (!f2fs_inode_cachep)
 		return -ENOMEM;
 	return 0;

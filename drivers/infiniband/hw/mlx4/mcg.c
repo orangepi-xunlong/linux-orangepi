@@ -96,7 +96,7 @@ struct ib_sa_mcmember_data {
 	u8		scope_join_state;
 	u8		proxy_join;
 	u8		reserved[2];
-} __packed __aligned(4);
+};
 
 struct mcast_group {
 	struct ib_sa_mcmember_data rec;
@@ -747,11 +747,14 @@ static struct mcast_group *search_relocate_mgid0_group(struct mlx4_ib_demux_ctx 
 						       __be64 tid,
 						       union ib_gid *new_mgid)
 {
-	struct mcast_group *group = NULL, *cur_group, *n;
+	struct mcast_group *group = NULL, *cur_group;
 	struct mcast_req *req;
+	struct list_head *pos;
+	struct list_head *n;
 
 	mutex_lock(&ctx->mcg_table_lock);
-	list_for_each_entry_safe(group, n, &ctx->mcg_mgid0_list, mgid0_list) {
+	list_for_each_safe(pos, n, &ctx->mcg_mgid0_list) {
+		group = list_entry(pos, struct mcast_group, mgid0_list);
 		mutex_lock(&group->lock);
 		if (group->last_req_tid == tid) {
 			if (memcmp(new_mgid, &mgid0, sizeof mgid0)) {
@@ -1045,7 +1048,7 @@ int mlx4_ib_mcg_port_init(struct mlx4_ib_demux_ctx *ctx)
 
 	atomic_set(&ctx->tid, 0);
 	sprintf(name, "mlx4_ib_mcg%d", ctx->port);
-	ctx->mcg_wq = alloc_ordered_workqueue(name, WQ_MEM_RECLAIM);
+	ctx->mcg_wq = create_singlethread_workqueue(name);
 	if (!ctx->mcg_wq)
 		return -ENOMEM;
 
@@ -1247,7 +1250,7 @@ void clean_vf_mcast(struct mlx4_ib_demux_ctx *ctx, int slave)
 
 int mlx4_ib_mcg_init(void)
 {
-	clean_wq = alloc_ordered_workqueue("mlx4_ib_mcg", WQ_MEM_RECLAIM);
+	clean_wq = create_singlethread_workqueue("mlx4_ib_mcg");
 	if (!clean_wq)
 		return -ENOMEM;
 

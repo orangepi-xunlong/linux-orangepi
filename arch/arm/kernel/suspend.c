@@ -1,7 +1,6 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 
-#include <asm/bugs.h>
 #include <asm/cacheflush.h>
 #include <asm/idmap.h>
 #include <asm/pgalloc.h>
@@ -35,7 +34,6 @@ int cpu_suspend(unsigned long arg, int (*fn)(unsigned long))
 		cpu_switch_mm(mm->pgd, mm);
 		local_flush_bp_all();
 		local_flush_tlb_all();
-		check_other_bugs();
 	}
 
 	return ret;

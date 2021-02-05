@@ -11,12 +11,15 @@
 #include <linux/init.h>
 #include <linux/pfn.h>
 #include <linux/slab.h>
+#include <linux/bootmem.h>
 #include <linux/export.h>
 #include <linux/kmemleak.h>
 #include <linux/range.h>
+#include <linux/memblock.h>
 #include <linux/bug.h>
 #include <linux/io.h>
-#include <linux/bootmem.h>
+
+#include <asm/processor.h>
 
 #include "internal.h"
 
@@ -30,7 +33,6 @@ EXPORT_SYMBOL(contig_page_data);
 unsigned long max_low_pfn;
 unsigned long min_low_pfn;
 unsigned long max_pfn;
-unsigned long long max_possible_pfn;
 
 bootmem_data_t bootmem_node_data[MAX_NUMNODES] __initdata;
 
@@ -47,7 +49,8 @@ early_param("bootmem_debug", bootmem_debug_setup);
 
 #define bdebug(fmt, args...) ({				\
 	if (unlikely(bootmem_debug))			\
-		pr_info("bootmem::%s " fmt,		\
+		printk(KERN_INFO			\
+			"bootmem::%s " fmt,		\
 			__func__, ## args);		\
 })
 
@@ -155,7 +158,7 @@ void __init free_bootmem_late(unsigned long physaddr, unsigned long size)
 {
 	unsigned long cursor, end;
 
-	kmemleak_free_part_phys(physaddr, size);
+	kmemleak_free_part(__va(physaddr), size);
 
 	cursor = PFN_UP(physaddr);
 	end = PFN_DOWN(physaddr + size);
@@ -399,7 +402,7 @@ void __init free_bootmem_node(pg_data_t *pgdat, unsigned long physaddr,
 {
 	unsigned long start, end;
 
-	kmemleak_free_part_phys(physaddr, size);
+	kmemleak_free_part(__va(physaddr), size);
 
 	start = PFN_UP(physaddr);
 	end = PFN_DOWN(physaddr + size);
@@ -420,7 +423,7 @@ void __init free_bootmem(unsigned long physaddr, unsigned long size)
 {
 	unsigned long start, end;
 
-	kmemleak_free_part_phys(physaddr, size);
+	kmemleak_free_part(__va(physaddr), size);
 
 	start = PFN_UP(physaddr);
 	end = PFN_DOWN(physaddr + size);
@@ -676,7 +679,7 @@ static void * __init ___alloc_bootmem(unsigned long size, unsigned long align,
 	/*
 	 * Whoops, we cannot satisfy the allocation request.
 	 */
-	pr_alert("bootmem alloc of %lu bytes failed!\n", size);
+	printk(KERN_ALERT "bootmem alloc of %lu bytes failed!\n", size);
 	panic("Out of memory");
 	return NULL;
 }
@@ -709,7 +712,7 @@ void * __init ___alloc_bootmem_node_nopanic(pg_data_t *pgdat,
 	void *ptr;
 
 	if (WARN_ON_ONCE(slab_is_available()))
-		return kzalloc_node(size, GFP_NOWAIT, pgdat->node_id);
+		return kzalloc(size, GFP_NOWAIT);
 again:
 
 	/* do not panic in alloc_bootmem_bdata() */
@@ -735,6 +738,9 @@ again:
 void * __init __alloc_bootmem_node_nopanic(pg_data_t *pgdat, unsigned long size,
 				   unsigned long align, unsigned long goal)
 {
+	if (WARN_ON_ONCE(slab_is_available()))
+		return kzalloc_node(size, GFP_NOWAIT, pgdat->node_id);
+
 	return ___alloc_bootmem_node_nopanic(pgdat, size, align, goal, 0);
 }
 
@@ -748,7 +754,7 @@ void * __init ___alloc_bootmem_node(pg_data_t *pgdat, unsigned long size,
 	if (ptr)
 		return ptr;
 
-	pr_alert("bootmem alloc of %lu bytes failed!\n", size);
+	printk(KERN_ALERT "bootmem alloc of %lu bytes failed!\n", size);
 	panic("Out of memory");
 	return NULL;
 }
@@ -805,6 +811,10 @@ void * __init __alloc_bootmem_node_high(pg_data_t *pgdat, unsigned long size,
 	return __alloc_bootmem_node(pgdat, size, align, goal);
 
 }
+
+#ifndef ARCH_LOW_ADDRESS_LIMIT
+#define ARCH_LOW_ADDRESS_LIMIT	0xffffffffUL
+#endif
 
 /**
  * __alloc_bootmem_low - allocate low boot memory

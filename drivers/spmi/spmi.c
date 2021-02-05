@@ -25,7 +25,6 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/spmi.h>
 
-static bool is_registered;
 static DEFINE_IDA(ctrl_ida);
 
 static void spmi_dev_release(struct device *dev)
@@ -520,7 +519,7 @@ int spmi_controller_add(struct spmi_controller *ctrl)
 	int ret;
 
 	/* Can't register until after driver model init */
-	if (WARN_ON(!is_registered))
+	if (WARN_ON(!spmi_bus_type.p))
 		return -EAGAIN;
 
 	ret = device_add(&ctrl->dev);
@@ -589,14 +588,7 @@ module_exit(spmi_exit);
 
 static int __init spmi_init(void)
 {
-	int ret;
-
-	ret = bus_register(&spmi_bus_type);
-	if (ret)
-		return ret;
-
-	is_registered = true;
-	return 0;
+	return bus_register(&spmi_bus_type);
 }
 postcore_initcall(spmi_init);
 

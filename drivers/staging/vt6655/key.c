@@ -31,6 +31,16 @@
 #include "key.h"
 #include "mac.h"
 
+int vnt_key_init_table(struct vnt_private *priv)
+{
+	u32 i;
+
+	for (i = 0; i < MAX_KEY_TABLE; i++)
+		MACvDisableKeyEntry(priv->PortOffset, i);
+
+	return 0;
+}
+
 static int vnt_set_keymode(struct ieee80211_hw *hw, u8 *mac_addr,
 	struct ieee80211_key_conf *key, u32 key_type, u32 mode,
 	bool onfly_latch)
@@ -94,7 +104,7 @@ static int vnt_set_keymode(struct ieee80211_hw *hw, u8 *mac_addr,
 			key->key[15] |= 0x80;
 	}
 
-	MACvSetKeyEntry(priv, key_mode, entry, key_inx,
+	MACvSetKeyEntry(priv->PortOffset, key_mode, entry, key_inx,
 			bssid, (u32 *)key->key, priv->byLocalID);
 
 	return 0;
@@ -116,13 +126,13 @@ int vnt_set_keys(struct ieee80211_hw *hw, struct ieee80211_sta *sta,
 	switch (key->cipher) {
 	case 0:
 		for (u = 0 ; u < MAX_KEY_TABLE; u++)
-			MACvDisableKeyEntry(priv, u);
+			MACvDisableKeyEntry(priv->PortOffset, u);
 		return ret;
 
 	case WLAN_CIPHER_SUITE_WEP40:
 	case WLAN_CIPHER_SUITE_WEP104:
 		for (u = 0; u < MAX_KEY_TABLE; u++)
-			MACvDisableKeyEntry(priv, u);
+			MACvDisableKeyEntry(priv->PortOffset, u);
 
 		vnt_set_keymode(hw, mac_addr,
 				key, VNT_KEY_DEFAULTKEY, KEY_CTL_WEP, true);

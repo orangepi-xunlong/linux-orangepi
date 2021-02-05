@@ -15,15 +15,17 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
- *
- * Copyright (c) 2013, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -97,6 +99,7 @@ static int lovsub_device_init(const struct lu_env *env, struct lu_device *d,
 
 	next->ld_site = d->ld_site;
 	ldt = next->ld_type;
+	LASSERT(ldt != NULL);
 	rc = ldt->ldt_ops->ldto_device_init(env, next, ldt->ldt_name, NULL);
 	if (rc) {
 		next->ld_site = NULL;
@@ -143,13 +146,12 @@ static int lovsub_req_init(const struct lu_env *env, struct cl_device *dev,
 	struct lovsub_req *lsr;
 	int result;
 
-	lsr = kmem_cache_zalloc(lovsub_req_kmem, GFP_NOFS);
-	if (lsr) {
+	lsr = kmem_cache_alloc(lovsub_req_kmem, GFP_NOFS | __GFP_ZERO);
+	if (lsr != NULL) {
 		cl_req_slice_add(req, &lsr->lsrq_cl, dev, &lovsub_req_ops);
 		result = 0;
-	} else {
+	} else
 		result = -ENOMEM;
-	}
 	return result;
 }
 
@@ -171,7 +173,7 @@ static struct lu_device *lovsub_device_alloc(const struct lu_env *env,
 	struct lovsub_device *lsd;
 
 	lsd = kzalloc(sizeof(*lsd), GFP_NOFS);
-	if (lsd) {
+	if (lsd != NULL) {
 		int result;
 
 		result = cl_device_init(&lsd->acid_cl, t);
@@ -179,12 +181,10 @@ static struct lu_device *lovsub_device_alloc(const struct lu_env *env,
 			d = lovsub2lu_dev(lsd);
 			d->ld_ops	 = &lovsub_lu_ops;
 			lsd->acid_cl.cd_ops = &lovsub_cl_ops;
-		} else {
+		} else
 			d = ERR_PTR(result);
-		}
-	} else {
+	} else
 		d = ERR_PTR(-ENOMEM);
-	}
 	return d;
 }
 

@@ -16,7 +16,6 @@
 #include <linux/of_irq.h>
 #include <linux/clk.h>
 #include <linux/reset.h>
-#include <linux/slab.h>
 
 #define TIM_CR1		0x00
 #define TIM_DIER	0x0c
@@ -99,17 +98,13 @@ static struct stm32_clock_event_ddata clock_event_ddata = {
 	},
 };
 
-static int __init stm32_clockevent_init(struct device_node *np)
+static void __init stm32_clockevent_init(struct device_node *np)
 {
 	struct stm32_clock_event_ddata *data = &clock_event_ddata;
 	struct clk *clk;
 	struct reset_control *rstc;
 	unsigned long rate, max_delta;
 	int irq, ret, bits, prescaler = 1;
-
-	data = kmemdup(&clock_event_ddata, sizeof(*data), GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
 
 	clk = of_clk_get(np, 0);
 	if (IS_ERR(clk)) {
@@ -135,14 +130,12 @@ static int __init stm32_clockevent_init(struct device_node *np)
 
 	data->base = of_iomap(np, 0);
 	if (!data->base) {
-		ret = -ENXIO;
 		pr_err("failed to map registers for clockevent\n");
 		goto err_iomap;
 	}
 
 	irq = irq_of_parse_and_map(np, 0);
 	if (!irq) {
-		ret = -EINVAL;
 		pr_err("%s: failed to get irq.\n", np->full_name);
 		goto err_get_irq;
 	}
@@ -161,8 +154,8 @@ static int __init stm32_clockevent_init(struct device_node *np)
 
 	writel_relaxed(prescaler - 1, data->base + TIM_PSC);
 	writel_relaxed(TIM_EGR_UG, data->base + TIM_EGR);
-	writel_relaxed(0, data->base + TIM_SR);
 	writel_relaxed(TIM_DIER_UIE, data->base + TIM_DIER);
+	writel_relaxed(0, data->base + TIM_SR);
 
 	data->periodic_top = DIV_ROUND_CLOSEST(rate, prescaler * HZ);
 
@@ -180,7 +173,7 @@ static int __init stm32_clockevent_init(struct device_node *np)
 	pr_info("%s: STM32 clockevent driver initialized (%d bits)\n",
 			np->full_name, bits);
 
-	return ret;
+	return;
 
 err_get_irq:
 	iounmap(data->base);
@@ -189,8 +182,7 @@ err_iomap:
 err_clk_enable:
 	clk_put(clk);
 err_clk_get:
-	kfree(data);
-	return ret;
+	return;
 }
 
 CLOCKSOURCE_OF_DECLARE(stm32, "st,stm32-timer", stm32_clockevent_init);

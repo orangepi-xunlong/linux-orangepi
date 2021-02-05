@@ -49,6 +49,7 @@ struct tz1090_pdc_gpio {
 	void __iomem *reg;
 	int irq[GPIO_PDC_NIRQ];
 };
+#define to_pdc(c)	container_of(c, struct tz1090_pdc_gpio, chip)
 
 /* Register accesses into the PDC MMIO area */
 
@@ -69,7 +70,7 @@ static inline unsigned int pdc_read(struct tz1090_pdc_gpio *priv,
 static int tz1090_pdc_gpio_direction_input(struct gpio_chip *chip,
 					   unsigned int offset)
 {
-	struct tz1090_pdc_gpio *priv = gpiochip_get_data(chip);
+	struct tz1090_pdc_gpio *priv = to_pdc(chip);
 	u32 value;
 	int lstat;
 
@@ -86,7 +87,7 @@ static int tz1090_pdc_gpio_direction_output(struct gpio_chip *chip,
 					    unsigned int offset,
 					    int output_value)
 {
-	struct tz1090_pdc_gpio *priv = gpiochip_get_data(chip);
+	struct tz1090_pdc_gpio *priv = to_pdc(chip);
 	u32 value;
 	int lstat;
 
@@ -111,14 +112,14 @@ static int tz1090_pdc_gpio_direction_output(struct gpio_chip *chip,
 
 static int tz1090_pdc_gpio_get(struct gpio_chip *chip, unsigned int offset)
 {
-	struct tz1090_pdc_gpio *priv = gpiochip_get_data(chip);
-	return !!(pdc_read(priv, REG_SOC_GPIO_STATUS) & BIT(offset));
+	struct tz1090_pdc_gpio *priv = to_pdc(chip);
+	return pdc_read(priv, REG_SOC_GPIO_STATUS) & BIT(offset);
 }
 
 static void tz1090_pdc_gpio_set(struct gpio_chip *chip, unsigned int offset,
 				int output_value)
 {
-	struct tz1090_pdc_gpio *priv = gpiochip_get_data(chip);
+	struct tz1090_pdc_gpio *priv = to_pdc(chip);
 	u32 value;
 	int lstat;
 
@@ -138,7 +139,7 @@ static void tz1090_pdc_gpio_set(struct gpio_chip *chip, unsigned int offset,
 
 static int tz1090_pdc_gpio_to_irq(struct gpio_chip *chip, unsigned int offset)
 {
-	struct tz1090_pdc_gpio *priv = gpiochip_get_data(chip);
+	struct tz1090_pdc_gpio *priv = to_pdc(chip);
 	unsigned int syswake = offset - GPIO_PDC_IRQ_FIRST;
 	int irq;
 
@@ -187,7 +188,7 @@ static int tz1090_pdc_gpio_probe(struct platform_device *pdev)
 
 	/* Set up GPIO chip */
 	priv->chip.label		= "tz1090-pdc-gpio";
-	priv->chip.parent		= &pdev->dev;
+	priv->chip.parent			= &pdev->dev;
 	priv->chip.direction_input	= tz1090_pdc_gpio_direction_input;
 	priv->chip.direction_output	= tz1090_pdc_gpio_direction_output;
 	priv->chip.get			= tz1090_pdc_gpio_get;
@@ -206,7 +207,7 @@ static int tz1090_pdc_gpio_probe(struct platform_device *pdev)
 		priv->irq[i] = irq_of_parse_and_map(np, i);
 
 	/* Add the GPIO bank */
-	gpiochip_add_data(&priv->chip, priv);
+	gpiochip_add(&priv->chip);
 
 	return 0;
 }

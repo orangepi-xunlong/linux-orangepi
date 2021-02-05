@@ -437,8 +437,7 @@ static int oprofile_cpu_notifier(struct notifier_block *b, unsigned long action,
 				 void *data)
 {
 	int cpu = (unsigned long)data;
-
-	switch (action & ~CPU_TASKS_FROZEN) {
+	switch (action) {
 	case CPU_DOWN_FAILED:
 	case CPU_ONLINE:
 		smp_call_function_single(cpu, nmi_cpu_up, NULL, 0);
@@ -615,7 +614,7 @@ enum __force_cpu_type {
 
 static int force_cpu_type;
 
-static int set_cpu_type(const char *str, const struct kernel_param *kp)
+static int set_cpu_type(const char *str, struct kernel_param *kp)
 {
 	if (!strcmp(str, "timer")) {
 		force_cpu_type = timer;
@@ -636,7 +635,7 @@ static int __init ppro_init(char **cpu_type)
 	__u8 cpu_model = boot_cpu_data.x86_model;
 	struct op_x86_model_spec *spec = &op_ppro_spec;	/* default */
 
-	if (force_cpu_type == arch_perfmon && boot_cpu_has(X86_FEATURE_ARCH_PERFMON))
+	if (force_cpu_type == arch_perfmon && cpu_has_arch_perfmon)
 		return 0;
 
 	/*
@@ -700,7 +699,7 @@ int __init op_nmi_init(struct oprofile_operations *ops)
 	char *cpu_type = NULL;
 	int ret = 0;
 
-	if (!boot_cpu_has(X86_FEATURE_APIC))
+	if (!cpu_has_apic)
 		return -ENODEV;
 
 	if (force_cpu_type == timer)
@@ -761,7 +760,7 @@ int __init op_nmi_init(struct oprofile_operations *ops)
 		if (cpu_type)
 			break;
 
-		if (!boot_cpu_has(X86_FEATURE_ARCH_PERFMON))
+		if (!cpu_has_arch_perfmon)
 			return -ENODEV;
 
 		/* use arch perfmon as fallback */

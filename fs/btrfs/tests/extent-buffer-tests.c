@@ -22,11 +22,10 @@
 #include "../extent_io.h"
 #include "../disk-io.h"
 
-static int test_btrfs_split_item(u32 sectorsize, u32 nodesize)
+static int test_btrfs_split_item(void)
 {
-	struct btrfs_fs_info *fs_info;
-	struct btrfs_path *path = NULL;
-	struct btrfs_root *root = NULL;
+	struct btrfs_path *path;
+	struct btrfs_root *root;
 	struct extent_buffer *eb;
 	struct btrfs_item *item;
 	char *value = "mary had a little lamb";
@@ -41,28 +40,20 @@ static int test_btrfs_split_item(u32 sectorsize, u32 nodesize)
 
 	test_msg("Running btrfs_split_item tests\n");
 
-	fs_info = btrfs_alloc_dummy_fs_info();
-	if (!fs_info) {
-		test_msg("Could not allocate fs_info\n");
-		return -ENOMEM;
-	}
-
-	root = btrfs_alloc_dummy_root(fs_info, sectorsize, nodesize);
+	root = btrfs_alloc_dummy_root();
 	if (IS_ERR(root)) {
 		test_msg("Could not allocate root\n");
-		ret = PTR_ERR(root);
-		goto out;
+		return PTR_ERR(root);
 	}
 
 	path = btrfs_alloc_path();
 	if (!path) {
 		test_msg("Could not allocate path\n");
-		ret = -ENOMEM;
-		goto out;
+		kfree(root);
+		return -ENOMEM;
 	}
 
-	path->nodes[0] = eb = alloc_dummy_extent_buffer(NULL, nodesize,
-							nodesize);
+	path->nodes[0] = eb = alloc_dummy_extent_buffer(NULL, 4096);
 	if (!eb) {
 		test_msg("Could not allocate dummy buffer\n");
 		ret = -ENOMEM;
@@ -227,13 +218,12 @@ static int test_btrfs_split_item(u32 sectorsize, u32 nodesize)
 	}
 out:
 	btrfs_free_path(path);
-	btrfs_free_dummy_root(root);
-	btrfs_free_dummy_fs_info(fs_info);
+	kfree(root);
 	return ret;
 }
 
-int btrfs_test_extent_buffer_operations(u32 sectorsize, u32 nodesize)
+int btrfs_test_extent_buffer_operations(void)
 {
-	test_msg("Running extent buffer operation tests\n");
-	return test_btrfs_split_item(sectorsize, nodesize);
+	test_msg("Running extent buffer operation tests");
+	return test_btrfs_split_item();
 }

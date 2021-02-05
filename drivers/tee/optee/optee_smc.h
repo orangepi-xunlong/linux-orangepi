@@ -304,10 +304,6 @@ struct optee_smc_disable_shm_cache_result {
 #define OPTEE_SMC_ENABLE_SHM_CACHE \
 	OPTEE_SMC_FAST_CALL_VAL(OPTEE_SMC_FUNCID_ENABLE_SHM_CACHE)
 
-#define OPTEE_SMC_FUNCID_GET_DRMINFO	15
-#define OPTEE_SMC_GET_DRM_INFO \
-	OPTEE_SMC_FAST_CALL_VAL(OPTEE_SMC_FUNCID_GET_DRMINFO)
-
 /*
  * Resume from RPC (for example after processing a foreign interrupt)
  *

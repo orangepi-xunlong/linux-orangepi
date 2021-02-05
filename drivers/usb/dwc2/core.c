@@ -313,7 +313,7 @@ static bool dwc2_iddig_filter_enabled(struct dwc2_hsotg *hsotg)
  * Do core a soft reset of the core.  Be careful with this because it
  * resets all the internal state machines of the core.
  */
-int dwc2_core_reset(struct dwc2_hsotg *hsotg)
+int dwc2_core_reset(struct dwc2_hsotg *hsotg, bool skip_wait)
 {
 	u32 greset;
 	int count = 0;
@@ -369,7 +369,7 @@ int dwc2_core_reset(struct dwc2_hsotg *hsotg)
 		}
 	} while (!(greset & GRSTCTL_AHBIDLE));
 
-	if (wait_for_host_mode)
+	if (wait_for_host_mode && !skip_wait)
 		dwc2_wait_for_mode(hsotg, true);
 
 	return 0;
@@ -450,12 +450,15 @@ static void dwc2_clear_force_mode(struct dwc2_hsotg *hsotg)
 	u32 gusbcfg;
 
 	gusbcfg = dwc2_readl(hsotg->regs + GUSBCFG);
-	gusbcfg &= ~GUSBCFG_FORCEHOSTMODE;
-	gusbcfg &= ~GUSBCFG_FORCEDEVMODE;
-	dwc2_writel(gusbcfg, hsotg->regs + GUSBCFG);
 
-	if (dwc2_iddig_filter_enabled(hsotg))
-		msleep(100);
+	if (gusbcfg & (GUSBCFG_FORCEHOSTMODE | GUSBCFG_FORCEDEVMODE)) {
+		gusbcfg &= ~GUSBCFG_FORCEHOSTMODE;
+		gusbcfg &= ~GUSBCFG_FORCEDEVMODE;
+		dwc2_writel(gusbcfg, hsotg->regs + GUSBCFG);
+
+		if (dwc2_iddig_filter_enabled(hsotg))
+			msleep(100);
+	}
 }
 
 /*
@@ -500,7 +503,7 @@ int dwc2_core_reset_and_force_dr_mode(struct dwc2_hsotg *hsotg)
 {
 	int retval;
 
-	retval = dwc2_core_reset(hsotg);
+	retval = dwc2_core_reset(hsotg, false);
 	if (retval)
 		return retval;
 

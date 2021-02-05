@@ -66,6 +66,7 @@ g98_sec = {
 	.code.size = sizeof(g98_sec_code),
 	.data.data = g98_sec_data,
 	.data.size = sizeof(g98_sec_data),
+	.pmc_enable = 0x00004000,
 	.intr = g98_sec_intr,
 	.sclass = {
 		{ -1, -1, G98_SEC },

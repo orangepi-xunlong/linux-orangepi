@@ -271,8 +271,11 @@ static int xgmac_mdio_probe(struct platform_device *pdev)
 		goto err_ioremap;
 	}
 
-	priv->is_little_endian = of_property_read_bool(pdev->dev.of_node,
-						       "little-endian");
+	if (of_get_property(pdev->dev.of_node,
+			    "little-endian", NULL))
+		priv->is_little_endian = true;
+	else
+		priv->is_little_endian = false;
 
 	ret = of_mdiobus_register(bus, np);
 	if (ret) {

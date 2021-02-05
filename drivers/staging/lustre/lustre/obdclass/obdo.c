@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -51,8 +55,7 @@ void obdo_set_parent_fid(struct obdo *dst, const struct lu_fid *parent)
 EXPORT_SYMBOL(obdo_set_parent_fid);
 
 /* WARNING: the file systems must take care not to tinker with
- * attributes they don't manage (such as blocks).
- */
+   attributes they don't manage (such as blocks). */
 void obdo_from_inode(struct obdo *dst, struct inode *src, u32 valid)
 {
 	u32 newvalid = 0;
@@ -112,21 +115,19 @@ void obdo_from_inode(struct obdo *dst, struct inode *src, u32 valid)
 }
 EXPORT_SYMBOL(obdo_from_inode);
 
-void obdo_to_ioobj(const struct obdo *oa, struct obd_ioobj *ioobj)
+void obdo_to_ioobj(struct obdo *oa, struct obd_ioobj *ioobj)
 {
 	ioobj->ioo_oid = oa->o_oi;
 	if (unlikely(!(oa->o_valid & OBD_MD_FLGROUP)))
 		ostid_set_seq_mdt0(&ioobj->ioo_oid);
 
 	/* Since 2.4 this does not contain o_mode in the low 16 bits.
-	 * Instead, it holds (bd_md_max_brw - 1) for multi-bulk BRW RPCs
-	 */
+	 * Instead, it holds (bd_md_max_brw - 1) for multi-bulk BRW RPCs */
 	ioobj->ioo_max_brw = 0;
 }
 EXPORT_SYMBOL(obdo_to_ioobj);
 
-static void iattr_from_obdo(struct iattr *attr, const struct obdo *oa,
-			    u32 valid)
+static void iattr_from_obdo(struct iattr *attr, struct obdo *oa, u32 valid)
 {
 	valid &= oa->o_valid;
 
@@ -153,14 +154,12 @@ static void iattr_from_obdo(struct iattr *attr, const struct obdo *oa,
 	}
 #if 0   /* you shouldn't be able to change a file's type with setattr */
 	if (valid & OBD_MD_FLTYPE) {
-		attr->ia_mode = (attr->ia_mode & ~S_IFMT) |
-				(oa->o_mode & S_IFMT);
+		attr->ia_mode = (attr->ia_mode & ~S_IFMT)|(oa->o_mode & S_IFMT);
 		attr->ia_valid |= ATTR_MODE;
 	}
 #endif
 	if (valid & OBD_MD_FLMODE) {
-		attr->ia_mode = (attr->ia_mode & S_IFMT) |
-				(oa->o_mode & ~S_IFMT);
+		attr->ia_mode = (attr->ia_mode & S_IFMT)|(oa->o_mode & ~S_IFMT);
 		attr->ia_valid |= ATTR_MODE;
 		if (!in_group_p(make_kgid(&init_user_ns, oa->o_gid)) &&
 		    !capable(CFS_CAP_FSETID))
@@ -176,7 +175,7 @@ static void iattr_from_obdo(struct iattr *attr, const struct obdo *oa,
 	}
 }
 
-void md_from_obdo(struct md_op_data *op_data, const struct obdo *oa, u32 valid)
+void md_from_obdo(struct md_op_data *op_data, struct obdo *oa, u32 valid)
 {
 	iattr_from_obdo(&op_data->op_attr, oa, valid);
 	if (valid & OBD_MD_FLBLOCKS) {
@@ -184,7 +183,8 @@ void md_from_obdo(struct md_op_data *op_data, const struct obdo *oa, u32 valid)
 		op_data->op_attr.ia_valid |= ATTR_BLOCKS;
 	}
 	if (valid & OBD_MD_FLFLAGS) {
-		op_data->op_attr_flags = oa->o_flags;
+		((struct ll_iattr *)&op_data->op_attr)->ia_attr_flags =
+			oa->o_flags;
 		op_data->op_attr.ia_valid |= ATTR_ATTR_FLAG;
 	}
 }

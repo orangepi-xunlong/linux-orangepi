@@ -302,6 +302,7 @@ static int do_remove_property(char *buf, size_t bufsize)
 {
 	struct device_node *np;
 	char *tmp;
+	struct property *prop;
 	buf = parse_node(buf, bufsize, &np);
 
 	if (!np)
@@ -314,7 +315,9 @@ static int do_remove_property(char *buf, size_t bufsize)
 	if (strlen(buf) == 0)
 		return -EINVAL;
 
-	return of_remove_property(np, of_find_property(np, buf, NULL));
+	prop = of_find_property(np, buf, NULL);
+
+	return of_remove_property(np, prop);
 }
 
 static int do_update_property(char *buf, size_t bufsize)

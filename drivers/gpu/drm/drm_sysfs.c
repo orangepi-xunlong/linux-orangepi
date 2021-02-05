@@ -18,10 +18,13 @@
 #include <linux/err.h>
 #include <linux/export.h>
 
+#include <drm/drm_edid.h>
 #include <drm/drm_sysfs.h>
+#include <drm/drm_core.h>
 #include <drm/drmP.h>
 #include "drm_internal.h"
 
+#include "drm_crtc_internal.h"
 #define to_drm_minor(d) dev_get_drvdata(d)
 #define to_drm_connector(d) dev_get_drvdata(d)
 
@@ -31,12 +34,104 @@ static struct device_type drm_sysfs_device_minor = {
 
 struct class *drm_class;
 
+static const char * const audioformatstr[] = {
+	"",
+	"LPCM",		/*AUDIO_LPCM = 1,*/
+	"AC3",		/*AUDIO_AC3,*/
+	"MPEG1",	/*AUDIO_MPEG1,*/
+	"MP3",		/*AUDIO_MP3,*/
+	"MPEG2",	/*AUDIO_MPEG2,*/
+	"AAC-LC",	/*AUDIO_AAC_LC, AAC*/
+	"DTS",		/*AUDIO_DTS,*/
+	"ATARC",	/*AUDIO_ATARC,*/
+	"DSD",		/*AUDIO_DSD, One bit Audio */
+	"E-AC3",	/*AUDIO_E_AC3,*/
+	"DTS-HD",	/*AUDIO_DTS_HD,*/
+	"MLP",		/*AUDIO_MLP,*/
+	"DST",		/*AUDIO_DST,*/
+	"WMA-PRO",	/*AUDIO_WMA_PRO*/
+};
+
+/**
+ * __drm_class_suspend - internal DRM class suspend routine
+ * @dev: Linux device to suspend
+ * @state: power state to enter
+ *
+ * Just figures out what the actual struct drm_device associated with
+ * @dev is and calls its suspend hook, if present.
+ */
+static int __drm_class_suspend(struct device *dev, pm_message_t state)
+{
+	if (dev->type == &drm_sysfs_device_minor) {
+		struct drm_minor *drm_minor = to_drm_minor(dev);
+		struct drm_device *drm_dev = drm_minor->dev;
+
+		if (drm_minor->type == DRM_MINOR_LEGACY &&
+		    !drm_core_check_feature(drm_dev, DRIVER_MODESET) &&
+		    drm_dev->driver->suspend)
+			return drm_dev->driver->suspend(drm_dev, state);
+	}
+	return 0;
+}
+
+/**
+ * drm_class_suspend - internal DRM class suspend hook. Simply calls
+ * __drm_class_suspend() with the correct pm state.
+ * @dev: Linux device to suspend
+ */
+static int drm_class_suspend(struct device *dev)
+{
+	return __drm_class_suspend(dev, PMSG_SUSPEND);
+}
+
+/**
+ * drm_class_freeze - internal DRM class freeze hook. Simply calls
+ * __drm_class_suspend() with the correct pm state.
+ * @dev: Linux device to freeze
+ */
+static int drm_class_freeze(struct device *dev)
+{
+	return __drm_class_suspend(dev, PMSG_FREEZE);
+}
+
+/**
+ * drm_class_resume - DRM class resume hook
+ * @dev: Linux device to resume
+ *
+ * Just figures out what the actual struct drm_device associated with
+ * @dev is and calls its resume hook, if present.
+ */
+static int drm_class_resume(struct device *dev)
+{
+	if (dev->type == &drm_sysfs_device_minor) {
+		struct drm_minor *drm_minor = to_drm_minor(dev);
+		struct drm_device *drm_dev = drm_minor->dev;
+
+		if (drm_minor->type == DRM_MINOR_LEGACY &&
+		    !drm_core_check_feature(drm_dev, DRIVER_MODESET) &&
+		    drm_dev->driver->resume)
+			return drm_dev->driver->resume(drm_dev);
+	}
+	return 0;
+}
+
+static const struct dev_pm_ops drm_class_dev_pm_ops = {
+	.suspend	= drm_class_suspend,
+	.resume		= drm_class_resume,
+	.freeze		= drm_class_freeze,
+};
+
 static char *drm_devnode(struct device *dev, umode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, "dri/%s", dev_name(dev));
 }
 
-static CLASS_ATTR_STRING(version, S_IRUGO, "drm 1.1.0 20060810");
+static CLASS_ATTR_STRING(version, S_IRUGO,
+		CORE_NAME " "
+		__stringify(CORE_MAJOR) "."
+		__stringify(CORE_MINOR) "."
+		__stringify(CORE_PATCHLEVEL) " "
+		CORE_DATE);
 
 /**
  * drm_sysfs_init - initialize sysfs helpers
@@ -55,6 +150,8 @@ int drm_sysfs_init(void)
 	drm_class = class_create(THIS_MODULE, "drm");
 	if (IS_ERR(drm_class))
 		return PTR_ERR(drm_class);
+
+	drm_class->pm = &drm_class_dev_pm_ops;
 
 	err = class_create_file(drm_class, &class_attr_version.attr);
 	if (err) {
@@ -90,35 +187,47 @@ static ssize_t status_store(struct device *device,
 {
 	struct drm_connector *connector = to_drm_connector(device);
 	struct drm_device *dev = connector->dev;
-	enum drm_connector_force old_force;
+	enum drm_connector_status old_status;
 	int ret;
 
 	ret = mutex_lock_interruptible(&dev->mode_config.mutex);
 	if (ret)
 		return ret;
 
-	old_force = connector->force;
+	old_status = connector->status;
 
-	if (sysfs_streq(buf, "detect"))
+	if (sysfs_streq(buf, "detect")) {
 		connector->force = 0;
-	else if (sysfs_streq(buf, "on"))
+		connector->status = connector->funcs->detect(connector, true);
+	} else if (sysfs_streq(buf, "on")) {
 		connector->force = DRM_FORCE_ON;
-	else if (sysfs_streq(buf, "on-digital"))
+	} else if (sysfs_streq(buf, "on-digital")) {
 		connector->force = DRM_FORCE_ON_DIGITAL;
-	else if (sysfs_streq(buf, "off"))
+	} else if (sysfs_streq(buf, "off")) {
 		connector->force = DRM_FORCE_OFF;
-	else
+	} else
 		ret = -EINVAL;
 
-	if (old_force != connector->force || !connector->force) {
-		DRM_DEBUG_KMS("[CONNECTOR:%d:%s] force updated from %d to %d or reprobing\n",
+	if (ret == 0 && connector->force) {
+		if (connector->force == DRM_FORCE_ON ||
+		    connector->force == DRM_FORCE_ON_DIGITAL)
+			connector->status = connector_status_connected;
+		else
+			connector->status = connector_status_disconnected;
+		if (connector->funcs->force)
+			connector->funcs->force(connector);
+	}
+
+	if (old_status != connector->status) {
+		DRM_DEBUG_KMS("[CONNECTOR:%d:%s] status updated from %d to %d\n",
 			      connector->base.id,
 			      connector->name,
-			      old_force, connector->force);
+			      old_status, connector->status);
 
-		connector->funcs->fill_modes(connector,
-					     dev->mode_config.max_width,
-					     dev->mode_config.max_height);
+		dev->mode_config.delayed_event = true;
+		if (dev->mode_config.poll_enabled)
+			schedule_delayed_work(&dev->mode_config.output_poll_work,
+					      0);
 	}
 
 	mutex_unlock(&dev->mode_config.mutex);
@@ -131,12 +240,9 @@ static ssize_t status_show(struct device *device,
 			   char *buf)
 {
 	struct drm_connector *connector = to_drm_connector(device);
-	enum drm_connector_status status;
-
-	status = READ_ONCE(connector->status);
 
 	return snprintf(buf, PAGE_SIZE, "%s\n",
-			drm_get_connector_status_name(status));
+			drm_get_connector_status_name(connector->status));
 }
 
 static ssize_t dpms_show(struct device *device,
@@ -157,44 +263,142 @@ static ssize_t enabled_show(struct device *device,
 			   char *buf)
 {
 	struct drm_connector *connector = to_drm_connector(device);
-	bool enabled;
 
-	enabled = READ_ONCE(connector->encoder);
+	return snprintf(buf, PAGE_SIZE, "%s\n", connector->encoder ? "enabled" :
+			"disabled");
+}
 
-	return snprintf(buf, PAGE_SIZE, enabled ? "enabled\n" : "disabled\n");
+static ssize_t content_protection_store(struct device *device,
+			   struct device_attribute *attr,
+			   const char *buf, size_t count)
+{
+	const int nms[] = {
+		DRM_MODE_CONTENT_PROTECTION_DESIRED,
+		DRM_MODE_CONTENT_PROTECTION_UNDESIRED
+	};
+	struct drm_connector *connector = to_drm_connector(device);
+	struct drm_device *dev = connector->dev;
+	struct drm_property *prop;
+	int ret, i, val = -1;
+
+	for (i = 0; i < ARRAY_SIZE(nms); i++) {
+		if (sysfs_streq(buf, drm_get_content_protection_name(nms[i])))
+			val = nms[i];
+	}
+	if (val < 0)
+		return -EINVAL;
+
+	drm_modeset_lock_all(dev);
+
+	prop = dev->mode_config.content_protection_property;
+	if (!prop) {
+		drm_modeset_unlock_all(dev);
+		return count;
+	}
+
+	ret = drm_mode_connector_set_obj_prop(&connector->base, prop, val);
+
+	drm_modeset_unlock_all(dev);
+	return ret ? ret : count;
+}
+
+static ssize_t content_protection_show(struct device *device,
+				       struct device_attribute *attr, char *buf)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+	struct drm_device *dev = connector->dev;
+	struct drm_property *prop;
+	uint64_t cp;
+	int ret;
+
+	drm_modeset_lock_all(dev);
+
+	prop = dev->mode_config.content_protection_property;
+	if (!prop) {
+		drm_modeset_unlock_all(dev);
+		return 0;
+	}
+
+	ret = drm_object_property_get_value(&connector->base, prop, &cp);
+	drm_modeset_unlock_all(dev);
+	if (ret)
+		return 0;
+
+	return snprintf(buf, PAGE_SIZE, "%s\n",
+			drm_get_content_protection_name((int)cp));
+}
+
+static int drm_get_audio_format(struct edid *edid,
+			       char *audioformat, int len)
+{
+	int i, size = 0, num = 0;
+	struct cea_sad *sads = NULL;
+
+	memset(audioformat, 0, len);
+	num = drm_edid_to_sad(edid, &sads);
+	if (num <= 0)
+		return 0;
+
+	for (i = 0; i < num; i++) {
+		if (sads[i].format < 1 || sads[i].format > 14) {
+			DRM_ERROR("audio type unsupported.\n");
+			continue;
+		}
+		size = strlen(audioformatstr[sads[i].format]);
+		memcpy(audioformat, audioformatstr[sads[i].format], size);
+		audioformat[size] = ',';
+		audioformat += (size + 1);
+	}
+	kfree(sads);
+
+	return num;
+}
+
+static ssize_t audioformat_show(struct device *device,
+				struct device_attribute *attr,
+				char *buf)
+{
+	char audioformat[200];
+	int ret = 0;
+	struct edid *edid;
+	struct drm_connector *connector = to_drm_connector(device);
+
+	if (!connector->edid_blob_ptr)
+		return 0;
+
+	edid = (struct edid *)connector->edid_blob_ptr->data;
+	ret = drm_get_audio_format(edid, audioformat, 200);
+	if (ret)
+		return snprintf(buf, PAGE_SIZE, "%s\n", audioformat);
+
+	return 0;
 }
 
 static ssize_t edid_show(struct file *filp, struct kobject *kobj,
 			 struct bin_attribute *attr, char *buf, loff_t off,
 			 size_t count)
 {
-	struct device *connector_dev = kobj_to_dev(kobj);
+	struct device *connector_dev = container_of(kobj, struct device, kobj);
 	struct drm_connector *connector = to_drm_connector(connector_dev);
 	unsigned char *edid;
 	size_t size;
-	ssize_t ret = 0;
 
-	mutex_lock(&connector->dev->mode_config.mutex);
 	if (!connector->edid_blob_ptr)
-		goto unlock;
+		return 0;
 
 	edid = connector->edid_blob_ptr->data;
 	size = connector->edid_blob_ptr->length;
 	if (!edid)
-		goto unlock;
+		return 0;
 
 	if (off >= size)
-		goto unlock;
+		return 0;
 
 	if (off + count > size)
 		count = size - off;
 	memcpy(buf, edid + off, count);
 
-	ret = count;
-unlock:
-	mutex_unlock(&connector->dev->mode_config.mutex);
-
-	return ret;
+	return count;
 }
 
 static ssize_t modes_show(struct device *device,
@@ -205,12 +409,44 @@ static ssize_t modes_show(struct device *device,
 	struct drm_display_mode *mode;
 	int written = 0;
 
-	mutex_lock(&connector->dev->mode_config.mutex);
 	list_for_each_entry(mode, &connector->modes, head) {
-		written += snprintf(buf + written, PAGE_SIZE - written, "%s\n",
-				    mode->name);
+		bool interlaced = !!(mode->flags & DRM_MODE_FLAG_INTERLACE);
+
+		written += snprintf(buf + written, PAGE_SIZE - written,
+				    "%dx%d%s%d\n",
+				    mode->hdisplay, mode->vdisplay,
+				    interlaced ? "i" : "p",
+				    drm_mode_vrefresh(mode));
 	}
-	mutex_unlock(&connector->dev->mode_config.mutex);
+
+	return written;
+}
+
+static ssize_t mode_show(struct device *device,
+			   struct device_attribute *attr,
+			   char *buf)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+	struct drm_display_mode *mode;
+	struct drm_crtc_state *crtc_state;
+	bool interlaced;
+	int written = 0;
+
+	if (!connector->state || !connector->state->crtc)
+		return written;
+
+	crtc_state = connector->state->crtc->state;
+	if (!crtc_state)
+		return written;
+
+	mode = &crtc_state->mode;
+
+	interlaced = !!(mode->flags & DRM_MODE_FLAG_INTERLACE);
+	written += snprintf(buf + written, PAGE_SIZE - written,
+			    "%dx%d%s%d\n",
+			    mode->hdisplay, mode->vdisplay,
+			    interlaced ? "i" : "p",
+			    drm_mode_vrefresh(mode));
 
 	return written;
 }
@@ -219,12 +455,18 @@ static DEVICE_ATTR_RW(status);
 static DEVICE_ATTR_RO(enabled);
 static DEVICE_ATTR_RO(dpms);
 static DEVICE_ATTR_RO(modes);
+static DEVICE_ATTR_RO(mode);
+static DEVICE_ATTR_RW(content_protection);
+static DEVICE_ATTR_RO(audioformat);
 
 static struct attribute *connector_dev_attrs[] = {
 	&dev_attr_status.attr,
 	&dev_attr_enabled.attr,
 	&dev_attr_dpms.attr,
 	&dev_attr_modes.attr,
+	&dev_attr_mode.attr,
+	&dev_attr_content_protection.attr,
+	&dev_attr_audioformat.attr,
 	NULL
 };
 

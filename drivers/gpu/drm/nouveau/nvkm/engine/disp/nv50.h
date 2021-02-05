@@ -27,7 +27,7 @@ struct nv50_disp {
 		u8 type[3];
 	} pior;
 
-	struct nv50_disp_chan *chan[21];
+	struct nv50_disp_chan *chan[17];
 };
 
 int nv50_disp_root_scanoutpos(NV50_DISP_MTHD_V0);
@@ -68,7 +68,6 @@ struct nv50_disp_func_outp {
 
 struct nv50_disp_func {
 	void (*intr)(struct nv50_disp *);
-	void (*intr_error)(struct nv50_disp *, int chid);
 
 	const struct nvkm_event_func *uevent;
 	void (*super)(struct work_struct *);
@@ -115,5 +114,4 @@ void gf119_disp_vblank_init(struct nv50_disp *, int);
 void gf119_disp_vblank_fini(struct nv50_disp *, int);
 void gf119_disp_intr(struct nv50_disp *);
 void gf119_disp_intr_supervisor(struct work_struct *);
-void gf119_disp_intr_error(struct nv50_disp *, int);
 #endif

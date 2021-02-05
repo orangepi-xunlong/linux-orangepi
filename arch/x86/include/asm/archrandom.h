@@ -25,6 +25,8 @@
 
 #include <asm/processor.h>
 #include <asm/cpufeature.h>
+#include <asm/alternative.h>
+#include <asm/nops.h>
 
 #define RDRAND_RETRY_LOOPS	10
 
@@ -38,91 +40,97 @@
 # define RDSEED_LONG	RDSEED_INT
 #endif
 
-/* Unconditional execution of RDRAND and RDSEED */
+#ifdef CONFIG_ARCH_RANDOM
 
-static inline bool rdrand_long(unsigned long *v)
+/* Instead of arch_get_random_long() when alternatives haven't run. */
+static inline int rdrand_long(unsigned long *v)
 {
-	bool ok;
-	unsigned int retry = RDRAND_RETRY_LOOPS;
-	do {
-		asm volatile(RDRAND_LONG "\n\t"
-			     CC_SET(c)
-			     : CC_OUT(c) (ok), "=a" (*v));
-		if (ok)
-			return true;
-	} while (--retry);
-	return false;
+	int ok;
+	asm volatile("1: " RDRAND_LONG "\n\t"
+		     "jc 2f\n\t"
+		     "decl %0\n\t"
+		     "jnz 1b\n\t"
+		     "2:"
+		     : "=r" (ok), "=a" (*v)
+		     : "0" (RDRAND_RETRY_LOOPS));
+	return ok;
 }
 
-static inline bool rdrand_int(unsigned int *v)
+/* A single attempt at RDSEED */
+static inline bool rdseed_long(unsigned long *v)
 {
-	bool ok;
-	unsigned int retry = RDRAND_RETRY_LOOPS;
-	do {
-		asm volatile(RDRAND_INT "\n\t"
-			     CC_SET(c)
-			     : CC_OUT(c) (ok), "=a" (*v));
-		if (ok)
-			return true;
-	} while (--retry);
-	return false;
+	unsigned char ok;
+	asm volatile(RDSEED_LONG "\n\t"
+		     "setc %0"
+		     : "=qm" (ok), "=a" (*v));
+	return ok;
+}
+
+#define GET_RANDOM(name, type, rdrand, nop)			\
+static inline int name(type *v)					\
+{								\
+	int ok;							\
+	alternative_io("movl $0, %0\n\t"			\
+		       nop,					\
+		       "\n1: " rdrand "\n\t"			\
+		       "jc 2f\n\t"				\
+		       "decl %0\n\t"                            \
+		       "jnz 1b\n\t"                             \
+		       "2:",                                    \
+		       X86_FEATURE_RDRAND,                      \
+		       ASM_OUTPUT2("=r" (ok), "=a" (*v)),       \
+		       "0" (RDRAND_RETRY_LOOPS));		\
+	return ok;						\
+}
+
+#define GET_SEED(name, type, rdseed, nop)			\
+static inline int name(type *v)					\
+{								\
+	unsigned char ok;					\
+	alternative_io("movb $0, %0\n\t"			\
+		       nop,					\
+		       rdseed "\n\t"				\
+		       "setc %0",				\
+		       X86_FEATURE_RDSEED,                      \
+		       ASM_OUTPUT2("=q" (ok), "=a" (*v)));	\
+	return ok;						\
+}
+
+#ifdef CONFIG_X86_64
+
+GET_RANDOM(arch_get_random_long, unsigned long, RDRAND_LONG, ASM_NOP5);
+GET_RANDOM(arch_get_random_int, unsigned int, RDRAND_INT, ASM_NOP4);
+
+GET_SEED(arch_get_random_seed_long, unsigned long, RDSEED_LONG, ASM_NOP5);
+GET_SEED(arch_get_random_seed_int, unsigned int, RDSEED_INT, ASM_NOP4);
+
+#else
+
+GET_RANDOM(arch_get_random_long, unsigned long, RDRAND_LONG, ASM_NOP3);
+GET_RANDOM(arch_get_random_int, unsigned int, RDRAND_INT, ASM_NOP3);
+
+GET_SEED(arch_get_random_seed_long, unsigned long, RDSEED_LONG, ASM_NOP4);
+GET_SEED(arch_get_random_seed_int, unsigned int, RDSEED_INT, ASM_NOP4);
+
+#endif /* CONFIG_X86_64 */
+
+#define arch_has_random()	static_cpu_has(X86_FEATURE_RDRAND)
+#define arch_has_random_seed()	static_cpu_has(X86_FEATURE_RDSEED)
+
+#else
+
+static inline int rdrand_long(unsigned long *v)
+{
+	return 0;
 }
 
 static inline bool rdseed_long(unsigned long *v)
 {
-	bool ok;
-	asm volatile(RDSEED_LONG "\n\t"
-		     CC_SET(c)
-		     : CC_OUT(c) (ok), "=a" (*v));
-	return ok;
+	return 0;
 }
 
-static inline bool rdseed_int(unsigned int *v)
-{
-	bool ok;
-	asm volatile(RDSEED_INT "\n\t"
-		     CC_SET(c)
-		     : CC_OUT(c) (ok), "=a" (*v));
-	return ok;
-}
-
-/* Conditional execution based on CPU type */
-#define arch_has_random()	static_cpu_has(X86_FEATURE_RDRAND)
-#define arch_has_random_seed()	static_cpu_has(X86_FEATURE_RDSEED)
-
-/*
- * These are the generic interfaces; they must not be declared if the
- * stubs in <linux/random.h> are to be invoked,
- * i.e. CONFIG_ARCH_RANDOM is not defined.
- */
-#ifdef CONFIG_ARCH_RANDOM
-
-static inline bool arch_get_random_long(unsigned long *v)
-{
-	return arch_has_random() ? rdrand_long(v) : false;
-}
-
-static inline bool arch_get_random_int(unsigned int *v)
-{
-	return arch_has_random() ? rdrand_int(v) : false;
-}
-
-static inline bool arch_get_random_seed_long(unsigned long *v)
-{
-	return arch_has_random_seed() ? rdseed_long(v) : false;
-}
-
-static inline bool arch_get_random_seed_int(unsigned int *v)
-{
-	return arch_has_random_seed() ? rdseed_int(v) : false;
-}
+#endif  /* CONFIG_ARCH_RANDOM */
 
 extern void x86_init_rdrand(struct cpuinfo_x86 *c);
-
-#else  /* !CONFIG_ARCH_RANDOM */
-
-static inline void x86_init_rdrand(struct cpuinfo_x86 *c) { }
-
-#endif  /* !CONFIG_ARCH_RANDOM */
 
 #endif /* ASM_X86_ARCHRANDOM_H */

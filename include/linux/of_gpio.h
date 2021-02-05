@@ -51,16 +51,12 @@ static inline struct of_mm_gpio_chip *to_of_mm_gpio_chip(struct gpio_chip *gc)
 extern int of_get_named_gpio_flags(struct device_node *np,
 		const char *list_name, int index, enum of_gpio_flags *flags);
 
-extern int of_mm_gpiochip_add_data(struct device_node *np,
-				   struct of_mm_gpio_chip *mm_gc,
-				   void *data);
-static inline int of_mm_gpiochip_add(struct device_node *np,
-				     struct of_mm_gpio_chip *mm_gc)
-{
-	return of_mm_gpiochip_add_data(np, mm_gc, NULL);
-}
+extern int of_mm_gpiochip_add(struct device_node *np,
+			      struct of_mm_gpio_chip *mm_gc);
 extern void of_mm_gpiochip_remove(struct of_mm_gpio_chip *mm_gc);
 
+extern int of_gpiochip_add(struct gpio_chip *gc);
+extern void of_gpiochip_remove(struct gpio_chip *gc);
 extern int of_gpio_simple_xlate(struct gpio_chip *gc,
 				const struct of_phandle_args *gpiospec,
 				u32 *flags);
@@ -71,9 +67,6 @@ extern int of_gpio_simple_xlate(struct gpio_chip *gc,
 static inline int of_get_named_gpio_flags(struct device_node *np,
 		const char *list_name, int index, enum of_gpio_flags *flags)
 {
-	if (flags)
-		*flags = 0;
-
 	return -ENOSYS;
 }
 
@@ -83,6 +76,9 @@ static inline int of_gpio_simple_xlate(struct gpio_chip *gc,
 {
 	return -ENOSYS;
 }
+
+static inline int of_gpiochip_add(struct gpio_chip *gc) { return 0; }
+static inline void of_gpiochip_remove(struct gpio_chip *gc) { }
 
 #endif /* CONFIG_OF_GPIO */
 

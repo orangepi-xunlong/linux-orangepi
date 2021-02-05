@@ -40,11 +40,10 @@ nv44_mc_init(struct nvkm_mc *mc)
 static const struct nvkm_mc_func
 nv44_mc = {
 	.init = nv44_mc_init,
-	.intr = nv17_mc_intr,
+	.intr = nv04_mc_intr,
 	.intr_unarm = nv04_mc_intr_unarm,
 	.intr_rearm = nv04_mc_intr_rearm,
-	.intr_stat = nv04_mc_intr_stat,
-	.reset = nv17_mc_reset,
+	.intr_mask = nv04_mc_intr_mask,
 };
 
 int

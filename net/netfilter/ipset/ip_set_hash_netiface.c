@@ -164,6 +164,8 @@ hash_netiface4_kadt(struct ip_set *set, const struct sk_buff *skb,
 	};
 	struct ip_set_ext ext = IP_SET_INIT_KEXT(skb, opt, set);
 
+	if (e.cidr == 0)
+		return -EINVAL;
 	if (adt == IPSET_TEST)
 		e.cidr = HOST_MASK;
 
@@ -375,6 +377,8 @@ hash_netiface6_kadt(struct ip_set *set, const struct sk_buff *skb,
 	};
 	struct ip_set_ext ext = IP_SET_INIT_KEXT(skb, opt, set);
 
+	if (e.cidr == 0)
+		return -EINVAL;
 	if (adt == IPSET_TEST)
 		e.cidr = HOST_MASK;
 

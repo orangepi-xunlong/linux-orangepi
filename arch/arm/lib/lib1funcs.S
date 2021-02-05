@@ -205,10 +205,6 @@ Boston, MA 02111-1307, USA.  */
 .endm
 
 
-#ifdef CONFIG_ARM_PATCH_IDIV
-	.align	3
-#endif
-
 ENTRY(__udivsi3)
 ENTRY(__aeabi_uidiv)
 UNWIND(.fnstart)
@@ -256,10 +252,6 @@ UNWIND(.fnstart)
 
 UNWIND(.fnend)
 ENDPROC(__umodsi3)
-
-#ifdef CONFIG_ARM_PATCH_IDIV
-	.align 3
-#endif
 
 ENTRY(__divsi3)
 ENTRY(__aeabi_idiv)

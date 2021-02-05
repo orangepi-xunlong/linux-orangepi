@@ -16,7 +16,6 @@
 #include <linux/kmod.h>
 #include <linux/ctype.h>
 #include <linux/genhd.h>
-#include <linux/dax.h>
 #include <linux/blktrace_api.h>
 
 #include "partitions/check.h"
@@ -496,6 +495,7 @@ rescan:
 	/* add partitions */
 	for (p = 1; p < state->limit; p++) {
 		sector_t size, from;
+		struct partition_meta_info *info = NULL;
 
 		size = state->parts[p].size;
 		if (!size)
@@ -530,6 +530,8 @@ rescan:
 			}
 		}
 
+		if (state->parts[p].has_info)
+			info = &state->parts[p].info;
 		part = add_partition(disk, p, from, size,
 				     state->parts[p].flags,
 				     &state->parts[p].info);
@@ -567,31 +569,20 @@ int invalidate_partitions(struct gendisk *disk, struct block_device *bdev)
 	return 0;
 }
 
-static struct page *read_pagecache_sector(struct block_device *bdev, sector_t n)
-{
-	struct address_space *mapping = bdev->bd_inode->i_mapping;
-
-	return read_mapping_page(mapping, (pgoff_t)(n >> (PAGE_SHIFT-9)),
-				 NULL);
-}
-
 unsigned char *read_dev_sector(struct block_device *bdev, sector_t n, Sector *p)
 {
+	struct address_space *mapping = bdev->bd_inode->i_mapping;
 	struct page *page;
 
-	/* don't populate page cache for dax capable devices */
-	if (IS_DAX(bdev->bd_inode))
-		page = read_dax_sector(bdev, n);
-	else
-		page = read_pagecache_sector(bdev, n);
-
+	page = read_mapping_page(mapping, (pgoff_t)(n >> (PAGE_CACHE_SHIFT-9)),
+				 NULL);
 	if (!IS_ERR(page)) {
 		if (PageError(page))
 			goto fail;
 		p->v = page;
-		return (unsigned char *)page_address(page) +  ((n & ((1 << (PAGE_SHIFT - 9)) - 1)) << 9);
+		return (unsigned char *)page_address(page) +  ((n & ((1 << (PAGE_CACHE_SHIFT - 9)) - 1)) << 9);
 fail:
-		put_page(page);
+		page_cache_release(page);
 	}
 	p->v = NULL;
 	return NULL;

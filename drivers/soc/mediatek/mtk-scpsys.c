@@ -15,13 +15,12 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/regmap.h>
 #include <linux/soc/mediatek/infracfg.h>
-#include <linux/regulator/consumer.h>
 #include <dt-bindings/power/mt8173-power.h>
 
 #define SPM_VDE_PWR_CON			0x0210
@@ -76,7 +75,7 @@ struct scp_domain_data {
 	bool active_wakeup;
 };
 
-static const struct scp_domain_data scp_domain_data[] = {
+static const struct scp_domain_data scp_domain_data[] __initconst = {
 	[MT8173_POWER_DOMAIN_VDEC] = {
 		.name = "vdec",
 		.sta_mask = PWR_STATUS_VDEC,
@@ -174,8 +173,12 @@ struct scp_domain {
 	struct generic_pm_domain genpd;
 	struct scp *scp;
 	struct clk *clk[MAX_CLKS];
-	const struct scp_domain_data *data;
-	struct regulator *supply;
+	u32 sta_mask;
+	void __iomem *ctl_addr;
+	u32 sram_pdn_bits;
+	u32 sram_pdn_ack_bits;
+	u32 bus_prot_mask;
+	bool active_wakeup;
 };
 
 struct scp {
@@ -190,9 +193,8 @@ static int scpsys_domain_is_on(struct scp_domain *scpd)
 {
 	struct scp *scp = scpd->scp;
 
-	u32 status = readl(scp->base + SPM_PWR_STATUS) & scpd->data->sta_mask;
-	u32 status2 = readl(scp->base + SPM_PWR_STATUS_2ND) &
-				scpd->data->sta_mask;
+	u32 status = readl(scp->base + SPM_PWR_STATUS) & scpd->sta_mask;
+	u32 status2 = readl(scp->base + SPM_PWR_STATUS_2ND) & scpd->sta_mask;
 
 	/*
 	 * A domain is on when both status bits are set. If only one is set
@@ -213,17 +215,11 @@ static int scpsys_power_on(struct generic_pm_domain *genpd)
 	struct scp *scp = scpd->scp;
 	unsigned long timeout;
 	bool expired;
-	void __iomem *ctl_addr = scp->base + scpd->data->ctl_offs;
-	u32 sram_pdn_ack = scpd->data->sram_pdn_ack_bits;
+	void __iomem *ctl_addr = scpd->ctl_addr;
+	u32 sram_pdn_ack = scpd->sram_pdn_ack_bits;
 	u32 val;
 	int ret;
 	int i;
-
-	if (scpd->supply) {
-		ret = regulator_enable(scpd->supply);
-		if (ret)
-			return ret;
-	}
 
 	for (i = 0; i < MAX_CLKS && scpd->clk[i]; i++) {
 		ret = clk_prepare_enable(scpd->clk[i]);
@@ -269,7 +265,7 @@ static int scpsys_power_on(struct generic_pm_domain *genpd)
 	val |= PWR_RST_B_BIT;
 	writel(val, ctl_addr);
 
-	val &= ~scpd->data->sram_pdn_bits;
+	val &= ~scpd->sram_pdn_bits;
 	writel(val, ctl_addr);
 
 	/* wait until SRAM_PDN_ACK all 0 */
@@ -288,9 +284,9 @@ static int scpsys_power_on(struct generic_pm_domain *genpd)
 			expired = true;
 	}
 
-	if (scpd->data->bus_prot_mask) {
+	if (scpd->bus_prot_mask) {
 		ret = mtk_infracfg_clear_bus_protection(scp->infracfg,
-				scpd->data->bus_prot_mask);
+				scpd->bus_prot_mask);
 		if (ret)
 			goto err_pwr_ack;
 	}
@@ -303,9 +299,6 @@ err_pwr_ack:
 			clk_disable_unprepare(scpd->clk[i]);
 	}
 err_clk:
-	if (scpd->supply)
-		regulator_disable(scpd->supply);
-
 	dev_err(scp->dev, "Failed to power on domain %s\n", genpd->name);
 
 	return ret;
@@ -317,21 +310,21 @@ static int scpsys_power_off(struct generic_pm_domain *genpd)
 	struct scp *scp = scpd->scp;
 	unsigned long timeout;
 	bool expired;
-	void __iomem *ctl_addr = scp->base + scpd->data->ctl_offs;
-	u32 pdn_ack = scpd->data->sram_pdn_ack_bits;
+	void __iomem *ctl_addr = scpd->ctl_addr;
+	u32 pdn_ack = scpd->sram_pdn_ack_bits;
 	u32 val;
 	int ret;
 	int i;
 
-	if (scpd->data->bus_prot_mask) {
+	if (scpd->bus_prot_mask) {
 		ret = mtk_infracfg_set_bus_protection(scp->infracfg,
-				scpd->data->bus_prot_mask);
+				scpd->bus_prot_mask);
 		if (ret)
 			goto out;
 	}
 
 	val = readl(ctl_addr);
-	val |= scpd->data->sram_pdn_bits;
+	val |= scpd->sram_pdn_bits;
 	writel(val, ctl_addr);
 
 	/* wait until SRAM_PDN_ACK all 1 */
@@ -386,9 +379,6 @@ static int scpsys_power_off(struct generic_pm_domain *genpd)
 	for (i = 0; i < MAX_CLKS && scpd->clk[i]; i++)
 		clk_disable_unprepare(scpd->clk[i]);
 
-	if (scpd->supply)
-		regulator_disable(scpd->supply);
-
 	return 0;
 
 out:
@@ -405,10 +395,10 @@ static bool scpsys_active_wakeup(struct device *dev)
 	genpd = pd_to_genpd(dev->pm_domain);
 	scpd = container_of(genpd, struct scp_domain, genpd);
 
-	return scpd->data->active_wakeup;
+	return scpd->active_wakeup;
 }
 
-static int scpsys_probe(struct platform_device *pdev)
+static int __init scpsys_probe(struct platform_device *pdev)
 {
 	struct genpd_onecell_data *pd_data;
 	struct resource *res;
@@ -458,19 +448,6 @@ static int scpsys_probe(struct platform_device *pdev)
 		return PTR_ERR(scp->infracfg);
 	}
 
-	for (i = 0; i < NUM_DOMAINS; i++) {
-		struct scp_domain *scpd = &scp->domains[i];
-		const struct scp_domain_data *data = &scp_domain_data[i];
-
-		scpd->supply = devm_regulator_get_optional(&pdev->dev, data->name);
-		if (IS_ERR(scpd->supply)) {
-			if (PTR_ERR(scpd->supply) == -ENODEV)
-				scpd->supply = NULL;
-			else
-				return PTR_ERR(scpd->supply);
-		}
-	}
-
 	pd_data->num_domains = NUM_DOMAINS;
 
 	for (i = 0; i < NUM_DOMAINS; i++) {
@@ -481,7 +458,12 @@ static int scpsys_probe(struct platform_device *pdev)
 		pd_data->domains[i] = genpd;
 		scpd->scp = scp;
 
-		scpd->data = data;
+		scpd->sta_mask = data->sta_mask;
+		scpd->ctl_addr = scp->base + data->ctl_offs;
+		scpd->sram_pdn_bits = data->sram_pdn_bits;
+		scpd->sram_pdn_ack_bits = data->sram_pdn_ack_bits;
+		scpd->bus_prot_mask = data->bus_prot_mask;
+		scpd->active_wakeup = data->active_wakeup;
 		for (j = 0; j < MAX_CLKS && data->clk_id[j]; j++)
 			scpd->clk[j] = clk[data->clk_id[j]];
 
@@ -533,12 +515,11 @@ static const struct of_device_id of_scpsys_match_tbl[] = {
 };
 
 static struct platform_driver scpsys_drv = {
-	.probe = scpsys_probe,
 	.driver = {
 		.name = "mtk-scpsys",
-		.suppress_bind_attrs = true,
 		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(of_scpsys_match_tbl),
 	},
 };
-builtin_platform_driver(scpsys_drv);
+
+module_platform_driver_probe(scpsys_drv, scpsys_probe);

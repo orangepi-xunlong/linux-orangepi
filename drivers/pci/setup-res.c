@@ -24,12 +24,7 @@
 #include <linux/cache.h>
 #include <linux/slab.h>
 #include "pci.h"
-#include "host/pcie-designware.h"
 
-#ifdef CONFIG_ARCH_SUN50IW6
-#define PCIE_MEM_BASE	0x05410000
-extern void __iomem *dbi_base;
-#endif
 static void pci_std_update_resource(struct pci_dev *dev, int resno)
 {
 	struct pci_bus_region region;
@@ -145,14 +140,6 @@ int pci_claim_resource(struct pci_dev *dev, int resource)
 			 resource, res);
 		return -EINVAL;
 	}
-
-	/*
-	 * If we have a shadow copy in RAM, the PCI device doesn't respond
-	 * to the shadow range, so we don't need to claim it, and upstream
-	 * bridges don't need to route the range to the device.
-	 */
-	if (res->flags & IORESOURCE_ROM_SHADOW)
-		return 0;
 
 	root = pci_find_parent_resource(dev, res);
 	if (!root) {
@@ -308,14 +295,6 @@ int pci_assign_resource(struct pci_dev *dev, int resno)
 	struct resource *res = dev->resource + resno;
 	resource_size_t align, size;
 	int ret;
-#ifdef CONFIG_ARCH_SUN50IW6
-	resource_size_t len;
-	u32 bardata, mem_base;
-	int i;
-#endif
-
-	if (res->flags & IORESOURCE_PCI_FIXED)
-		return 0;
 
 	res->flags |= IORESOURCE_UNSET;
 	align = pci_resource_alignment(dev, res);
@@ -327,6 +306,7 @@ int pci_assign_resource(struct pci_dev *dev, int resno)
 
 	size = resource_size(res);
 	ret = _pci_assign_resource(dev, resno, size, align);
+
 	/*
 	 * If we failed to assign anything, let's try the address
 	 * where firmware left it.  That at least has a chance of
@@ -349,25 +329,6 @@ int pci_assign_resource(struct pci_dev *dev, int resno)
 	if (resno < PCI_BRIDGE_RESOURCES)
 		pci_update_resource(dev, resno);
 
-#ifdef CONFIG_ARCH_SUN50IW6
-	if ((res->flags & IORESOURCE_MEM) && resno < PCIE_BAR_NUM) {
-		for (i = 0; i < 6; i++) {
-			pci_read_config_dword(dev, PCI_BASE_ADDRESS_0 + i*4,
-					&bardata);
-			mem_base = readl(dbi_base + PCI_MEMORY_BASE);
-			if (((bardata >> MEM_BASE_LEN) & MEM_BASE_MASK)
-					== (mem_base & MEM_BASE_MASK)) {
-				len = res->end - res->start;
-				res->start = PCIE_MEM_BASE;
-				res->end = res->start + len;
-				dev_info(&dev->dev, "REAL BAR %d: assigned \
-						%pR\n", resno, res);
-				break;
-			}
-		}
-	}
-#endif
-
 	return 0;
 }
 EXPORT_SYMBOL(pci_assign_resource);
@@ -379,9 +340,6 @@ int pci_reassign_resource(struct pci_dev *dev, int resno, resource_size_t addsiz
 	unsigned long flags;
 	resource_size_t new_size;
 	int ret;
-
-	if (res->flags & IORESOURCE_PCI_FIXED)
-		return 0;
 
 	flags = res->flags;
 	res->flags |= IORESOURCE_UNSET;

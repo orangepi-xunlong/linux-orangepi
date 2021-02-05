@@ -191,8 +191,8 @@ static int update_dt_node(__be32 phandle, s32 scope)
 				break;
 
 			case 0x80000000:
-				of_remove_property(dn, of_find_property(dn,
-							prop_name, NULL));
+				prop = of_find_property(dn, prop_name, NULL);
+				of_remove_property(dn, prop);
 				prop = NULL;
 				break;
 
@@ -313,9 +313,6 @@ void post_mobility_fixup(void)
 	if (rc)
 		printk(KERN_ERR "Post-mobility device tree update "
 			"failed: %d\n", rc);
-
-	/* Possibly switch to a new RFI flush type */
-	pseries_setup_rfi_flush();
 
 	return;
 }

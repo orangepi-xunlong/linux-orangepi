@@ -16,10 +16,9 @@
 
 #include <linux/delay.h>
 #include <linux/device.h>
-#include <linux/io.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/tee_drv.h>
-#include "optee_bench.h"
 #include "optee_private.h"
 #include "optee_smc.h"
 
@@ -349,50 +348,6 @@ static void handle_rpc_func_cmd_shm_free(struct tee_context *ctx,
 	arg->ret = TEEC_SUCCESS;
 }
 
-static void handle_rpc_func_cmd_bm_reg(struct optee_msg_arg *arg)
-{
-	u64 size;
-	u64 type;
-	u64 paddr;
-
-	if (arg->num_params != 1)
-		goto bad;
-
-	if ((arg->params[0].attr & OPTEE_MSG_ATTR_TYPE_MASK) !=
-			OPTEE_MSG_ATTR_TYPE_VALUE_INPUT)
-		goto bad;
-
-	type = arg->params[0].u.value.a;
-	switch (type) {
-	case OPTEE_MSG_RPC_CMD_BENCH_REG_NEW:
-		size = arg->params[0].u.value.c;
-		paddr = arg->params[0].u.value.b;
-		down_write(&optee_bench_ts_rwsem);
-		optee_bench_ts_global =
-			memremap(paddr, size, MEMREMAP_WB);
-		if (!optee_bench_ts_global) {
-			up_write(&optee_bench_ts_rwsem);
-			goto bad;
-		}
-		up_write(&optee_bench_ts_rwsem);
-		break;
-	case OPTEE_MSG_RPC_CMD_BENCH_REG_DEL:
-		down_write(&optee_bench_ts_rwsem);
-		if (optee_bench_ts_global)
-			memunmap(optee_bench_ts_global);
-		optee_bench_ts_global = NULL;
-		up_write(&optee_bench_ts_rwsem);
-		break;
-	default:
-		goto bad;
-	}
-
-	arg->ret = TEEC_SUCCESS;
-	return;
-bad:
-	arg->ret = TEEC_ERROR_BAD_PARAMETERS;
-}
-
 static void free_pages_list(struct optee_call_ctx *call_ctx)
 {
 	if (call_ctx->pages_list) {
@@ -436,9 +391,6 @@ static void handle_rpc_func_cmd(struct tee_context *ctx, struct optee *optee,
 		break;
 	case OPTEE_MSG_RPC_CMD_SHM_FREE:
 		handle_rpc_func_cmd_shm_free(ctx, arg);
-		break;
-	case OPTEE_MSG_RPC_CMD_BENCH_REG:
-		handle_rpc_func_cmd_bm_reg(arg);
 		break;
 	default:
 		handle_rpc_supp_cmd(ctx, arg);

@@ -1,6 +1,5 @@
 /*
- * da9211-regulator.h - Regulator definitions for DA9211/DA9212
- * /DA9213/DA9214/DA9215
+ * da9211-regulator.h - Regulator definitions for DA9211/DA9213/DA9215
  * Copyright (C) 2015  Dialog Semiconductor Ltd.
  *
  * This program is free software; you can redistribute it and/or

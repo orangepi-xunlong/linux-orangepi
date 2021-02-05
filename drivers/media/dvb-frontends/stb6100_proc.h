@@ -17,27 +17,27 @@
 	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
-#include <linux/dvb/frontend.h>
-#include "dvb_frontend.h"
-
 static int stb6100_get_freq(struct dvb_frontend *fe, u32 *frequency)
 {
 	struct dvb_frontend_ops	*frontend_ops = &fe->ops;
 	struct dvb_tuner_ops	*tuner_ops = &frontend_ops->tuner_ops;
+	struct tuner_state	state;
 	int err = 0;
 
-	if (tuner_ops->get_frequency) {
+	if (tuner_ops->get_state) {
 		if (frontend_ops->i2c_gate_ctrl)
 			frontend_ops->i2c_gate_ctrl(fe, 1);
 
-		err = tuner_ops->get_frequency(fe, frequency);
+		err = tuner_ops->get_state(fe, DVBFE_TUNER_FREQUENCY, &state);
 		if (err < 0) {
-			printk("%s: Invalid parameter\n", __func__);
+			printk(KERN_ERR "%s: Invalid parameter\n", __func__);
 			return err;
 		}
 
 		if (frontend_ops->i2c_gate_ctrl)
 			frontend_ops->i2c_gate_ctrl(fe, 0);
+
+		*frequency = state.frequency;
 	}
 
 	return 0;
@@ -47,21 +47,18 @@ static int stb6100_set_freq(struct dvb_frontend *fe, u32 frequency)
 {
 	struct dvb_frontend_ops	*frontend_ops = &fe->ops;
 	struct dvb_tuner_ops	*tuner_ops = &frontend_ops->tuner_ops;
-	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
-	u32 bw = c->bandwidth_hz;
+	struct tuner_state	state;
 	int err = 0;
 
-	c->frequency = frequency;
-	c->bandwidth_hz = 0;		/* Don't adjust the bandwidth */
+	state.frequency = frequency;
 
-	if (tuner_ops->set_params) {
+	if (tuner_ops->set_state) {
 		if (frontend_ops->i2c_gate_ctrl)
 			frontend_ops->i2c_gate_ctrl(fe, 1);
 
-		err = tuner_ops->set_params(fe);
-		c->bandwidth_hz = bw;
+		err = tuner_ops->set_state(fe, DVBFE_TUNER_FREQUENCY, &state);
 		if (err < 0) {
-			printk("%s: Invalid parameter\n", __func__);
+			printk(KERN_ERR "%s: Invalid parameter\n", __func__);
 			return err;
 		}
 
@@ -77,13 +74,14 @@ static int stb6100_get_bandw(struct dvb_frontend *fe, u32 *bandwidth)
 {
 	struct dvb_frontend_ops	*frontend_ops = &fe->ops;
 	struct dvb_tuner_ops	*tuner_ops = &frontend_ops->tuner_ops;
+	struct tuner_state	state;
 	int err = 0;
 
-	if (tuner_ops->get_bandwidth) {
+	if (tuner_ops->get_state) {
 		if (frontend_ops->i2c_gate_ctrl)
 			frontend_ops->i2c_gate_ctrl(fe, 1);
 
-		err = tuner_ops->get_bandwidth(fe, bandwidth);
+		err = tuner_ops->get_state(fe, DVBFE_TUNER_BANDWIDTH, &state);
 		if (err < 0) {
 			printk(KERN_ERR "%s: Invalid parameter\n", __func__);
 			return err;
@@ -91,6 +89,8 @@ static int stb6100_get_bandw(struct dvb_frontend *fe, u32 *bandwidth)
 
 		if (frontend_ops->i2c_gate_ctrl)
 			frontend_ops->i2c_gate_ctrl(fe, 0);
+
+		*bandwidth = state.bandwidth;
 	}
 
 	return 0;
@@ -100,19 +100,16 @@ static int stb6100_set_bandw(struct dvb_frontend *fe, u32 bandwidth)
 {
 	struct dvb_frontend_ops	*frontend_ops = &fe->ops;
 	struct dvb_tuner_ops	*tuner_ops = &frontend_ops->tuner_ops;
-	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
-	u32 freq = c->frequency;
+	struct tuner_state	state;
 	int err = 0;
 
-	c->bandwidth_hz = bandwidth;
-	c->frequency = 0;		/* Don't adjust the frequency */
+	state.bandwidth = bandwidth;
 
-	if (tuner_ops->set_params) {
+	if (tuner_ops->set_state) {
 		if (frontend_ops->i2c_gate_ctrl)
 			frontend_ops->i2c_gate_ctrl(fe, 1);
 
-		err = tuner_ops->set_params(fe);
-		c->frequency = freq;
+		err = tuner_ops->set_state(fe, DVBFE_TUNER_BANDWIDTH, &state);
 		if (err < 0) {
 			printk(KERN_ERR "%s: Invalid parameter\n", __func__);
 			return err;

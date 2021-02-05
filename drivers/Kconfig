@@ -104,6 +104,8 @@ source "drivers/memstick/Kconfig"
 
 source "drivers/leds/Kconfig"
 
+source "drivers/switch/Kconfig"
+
 source "drivers/accessibility/Kconfig"
 
 source "drivers/infiniband/Kconfig"
@@ -113,8 +115,6 @@ source "drivers/edac/Kconfig"
 source "drivers/rtc/Kconfig"
 
 source "drivers/dma/Kconfig"
-
-source "drivers/dma-buf/Kconfig"
 
 source "drivers/dca/Kconfig"
 
@@ -192,8 +192,6 @@ source "drivers/android/Kconfig"
 
 source "drivers/nvdimm/Kconfig"
 
-source "drivers/dax/Kconfig"
-
 source "drivers/nvmem/Kconfig"
 
 source "drivers/hwtracing/stm/Kconfig"
@@ -202,10 +200,12 @@ source "drivers/hwtracing/intel_th/Kconfig"
 
 source "drivers/fpga/Kconfig"
 
-source "drivers/mpp/Kconfig"
-
 source "drivers/tee/Kconfig"
 
-source "drivers/gator/Kconfig"
+source "drivers/rkflash/Kconfig"
+
+source "drivers/rk_nand/Kconfig"
+
+source "drivers/headset_observe/Kconfig"
 
 endmenu

@@ -62,9 +62,10 @@ static inline struct dentry *fault_create_debugfs_attr(const char *name,
 #endif /* CONFIG_FAULT_INJECTION */
 
 #ifdef CONFIG_FAILSLAB
-extern bool should_failslab(struct kmem_cache *s, gfp_t gfpflags);
+extern bool should_failslab(size_t size, gfp_t gfpflags, unsigned long flags);
 #else
-static inline bool should_failslab(struct kmem_cache *s, gfp_t gfpflags)
+static inline bool should_failslab(size_t size, gfp_t gfpflags,
+				unsigned long flags)
 {
 	return false;
 }

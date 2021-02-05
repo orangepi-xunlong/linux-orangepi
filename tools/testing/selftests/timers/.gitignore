@@ -16,4 +16,3 @@ set-timer-lat
 skew_consistency
 threadtest
 valid-adjtimex
-adjtick

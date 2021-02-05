@@ -73,9 +73,6 @@ static const char version[] =
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 
-#include <linux/dmaengine.h>
-#include <linux/dma/pxa-dma.h>
-
 #include <asm/io.h>
 
 #include "smc911x.h"
@@ -499,7 +496,7 @@ static void smc911x_hardware_send_pkt(struct net_device *dev)
 	/* DMA complete IRQ will free buffer and set jiffies */
 #else
 	SMC_PUSH_DATA(lp, buf, len);
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	dev_kfree_skb_irq(skb);
 #endif
 	if (!lp->tx_throttle) {
@@ -1177,19 +1174,21 @@ static irqreturn_t smc911x_interrupt(int irq, void *dev_id)
 
 #ifdef SMC_USE_DMA
 static void
-smc911x_tx_dma_irq(void *data)
+smc911x_tx_dma_irq(int dma, void *data)
 {
-	struct smc911x_local *lp = data;
-	struct net_device *dev = lp->netdev;
+	struct net_device *dev = (struct net_device *)data;
+	struct smc911x_local *lp = netdev_priv(dev);
 	struct sk_buff *skb = lp->current_tx_skb;
 	unsigned long flags;
 
 	DBG(SMC_DEBUG_FUNC, dev, "--> %s\n", __func__);
 
 	DBG(SMC_DEBUG_TX | SMC_DEBUG_DMA, dev, "TX DMA irq handler\n");
+	/* Clear the DMA interrupt sources */
+	SMC_DMA_ACK_IRQ(dev, dma);
 	BUG_ON(skb == NULL);
 	dma_unmap_single(NULL, tx_dmabuf, tx_dmalen, DMA_TO_DEVICE);
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	dev_kfree_skb_irq(skb);
 	lp->current_tx_skb = NULL;
 	if (lp->pending_tx_skb != NULL)
@@ -1209,16 +1208,18 @@ smc911x_tx_dma_irq(void *data)
 	    "TX DMA irq completed\n");
 }
 static void
-smc911x_rx_dma_irq(void *data)
+smc911x_rx_dma_irq(int dma, void *data)
 {
-	struct smc911x_local *lp = data;
-	struct net_device *dev = lp->netdev;
+	struct net_device *dev = (struct net_device *)data;
+	struct smc911x_local *lp = netdev_priv(dev);
 	struct sk_buff *skb = lp->current_rx_skb;
 	unsigned long flags;
 	unsigned int pkts;
 
 	DBG(SMC_DEBUG_FUNC, dev, "--> %s\n", __func__);
 	DBG(SMC_DEBUG_RX | SMC_DEBUG_DMA, dev, "RX DMA irq handler\n");
+	/* Clear the DMA interrupt sources */
+	SMC_DMA_ACK_IRQ(dev, dma);
 	dma_unmap_single(NULL, rx_dmabuf, rx_dmalen, DMA_FROM_DEVICE);
 	BUG_ON(skb == NULL);
 	lp->current_rx_skb = NULL;
@@ -1283,7 +1284,7 @@ static void smc911x_timeout(struct net_device *dev)
 		schedule_work(&lp->phy_configure);
 
 	/* We can accept TX packets again */
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue(dev);
 }
 
@@ -1791,11 +1792,6 @@ static int smc911x_probe(struct net_device *dev)
 	unsigned int val, chip_id, revision;
 	const char *version_string;
 	unsigned long irq_flags;
-#ifdef SMC_USE_DMA
-	struct dma_slave_config	config;
-	dma_cap_mask_t mask;
-	struct pxad_param param;
-#endif
 
 	DBG(SMC_DEBUG_FUNC, dev, "--> %s\n", __func__);
 
@@ -1967,40 +1963,11 @@ static int smc911x_probe(struct net_device *dev)
 		goto err_out;
 
 #ifdef SMC_USE_DMA
-
-	dma_cap_zero(mask);
-	dma_cap_set(DMA_SLAVE, mask);
-	param.prio = PXAD_PRIO_LOWEST;
-	param.drcmr = -1UL;
-
-	lp->rxdma =
-		dma_request_slave_channel_compat(mask, pxad_filter_fn,
-						 &param, &dev->dev, "rx");
-	lp->txdma =
-		dma_request_slave_channel_compat(mask, pxad_filter_fn,
-						 &param, &dev->dev, "tx");
+	lp->rxdma = SMC_DMA_REQUEST(dev, smc911x_rx_dma_irq);
+	lp->txdma = SMC_DMA_REQUEST(dev, smc911x_tx_dma_irq);
 	lp->rxdma_active = 0;
 	lp->txdma_active = 0;
-
-	memset(&config, 0, sizeof(config));
-	config.src_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
-	config.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
-	config.src_addr = lp->physaddr + RX_DATA_FIFO;
-	config.dst_addr = lp->physaddr + TX_DATA_FIFO;
-	config.src_maxburst = 32;
-	config.dst_maxburst = 32;
-	retval = dmaengine_slave_config(lp->rxdma, &config);
-	if (retval) {
-		dev_err(lp->dev, "dma rx channel configuration failed: %d\n",
-			retval);
-		goto err_out;
-	}
-	retval = dmaengine_slave_config(lp->txdma, &config);
-	if (retval) {
-		dev_err(lp->dev, "dma tx channel configuration failed: %d\n",
-			retval);
-		goto err_out;
-	}
+	dev->dma = lp->rxdma;
 #endif
 
 	retval = register_netdev(dev);
@@ -2011,11 +1978,11 @@ static int smc911x_probe(struct net_device *dev)
 			    dev->base_addr, dev->irq);
 
 #ifdef SMC_USE_DMA
-		if (lp->rxdma)
-			pr_cont(" RXDMA %p", lp->rxdma);
+		if (lp->rxdma != -1)
+			pr_cont(" RXDMA %d", lp->rxdma);
 
-		if (lp->txdma)
-			pr_cont(" TXDMA %p", lp->txdma);
+		if (lp->txdma != -1)
+			pr_cont(" TXDMA %d", lp->txdma);
 #endif
 		pr_cont("\n");
 		if (!is_valid_ether_addr(dev->dev_addr)) {
@@ -2038,10 +2005,12 @@ static int smc911x_probe(struct net_device *dev)
 err_out:
 #ifdef SMC_USE_DMA
 	if (retval) {
-		if (lp->rxdma)
-			dma_release_channel(lp->rxdma);
-		if (lp->txdma)
-			dma_release_channel(lp->txdma);
+		if (lp->rxdma != -1) {
+			SMC_DMA_FREE(dev, lp->rxdma);
+		}
+		if (lp->txdma != -1) {
+			SMC_DMA_FREE(dev, lp->txdma);
+		}
 	}
 #endif
 	return retval;
@@ -2143,10 +2112,12 @@ static int smc911x_drv_remove(struct platform_device *pdev)
 
 #ifdef SMC_USE_DMA
 	{
-		if (lp->rxdma)
-			dma_release_channel(lp->rxdma);
-		if (lp->txdma)
-			dma_release_channel(lp->txdma);
+		if (lp->rxdma != -1) {
+			SMC_DMA_FREE(dev, lp->rxdma);
+		}
+		if (lp->txdma != -1) {
+			SMC_DMA_FREE(dev, lp->txdma);
+		}
 	}
 #endif
 	iounmap(lp->base);

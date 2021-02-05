@@ -137,7 +137,7 @@ static int i2c_read_le16(struct i2c_client *client)
 
 static int pcf857x_input(struct gpio_chip *chip, unsigned offset)
 {
-	struct pcf857x	*gpio = gpiochip_get_data(chip);
+	struct pcf857x	*gpio = container_of(chip, struct pcf857x, chip);
 	int		status;
 
 	mutex_lock(&gpio->lock);
@@ -150,16 +150,16 @@ static int pcf857x_input(struct gpio_chip *chip, unsigned offset)
 
 static int pcf857x_get(struct gpio_chip *chip, unsigned offset)
 {
-	struct pcf857x	*gpio = gpiochip_get_data(chip);
+	struct pcf857x	*gpio = container_of(chip, struct pcf857x, chip);
 	int		value;
 
 	value = gpio->read(gpio->client);
-	return (value < 0) ? value : !!(value & (1 << offset));
+	return (value < 0) ? 0 : (value & (1 << offset));
 }
 
 static int pcf857x_output(struct gpio_chip *chip, unsigned offset, int value)
 {
-	struct pcf857x	*gpio = gpiochip_get_data(chip);
+	struct pcf857x	*gpio = container_of(chip, struct pcf857x, chip);
 	unsigned	bit = 1 << offset;
 	int		status;
 
@@ -293,7 +293,7 @@ static int pcf857x_probe(struct i2c_client *client,
 
 	gpio->chip.base			= pdata ? pdata->gpio_base : -1;
 	gpio->chip.can_sleep		= true;
-	gpio->chip.parent		= &client->dev;
+	gpio->chip.parent			= &client->dev;
 	gpio->chip.owner		= THIS_MODULE;
 	gpio->chip.get			= pcf857x_get;
 	gpio->chip.set			= pcf857x_set;
@@ -372,7 +372,7 @@ static int pcf857x_probe(struct i2c_client *client,
 	gpio->out = ~n_latch;
 	gpio->status = gpio->out;
 
-	status = devm_gpiochip_add_data(&client->dev, &gpio->chip, gpio);
+	status = gpiochip_add(&gpio->chip);
 	if (status < 0)
 		goto fail;
 
@@ -383,7 +383,7 @@ static int pcf857x_probe(struct i2c_client *client,
 					      IRQ_TYPE_NONE);
 		if (status) {
 			dev_err(&client->dev, "cannot add irqchip\n");
-			goto fail;
+			goto fail_irq;
 		}
 
 		status = devm_request_threaded_irq(&client->dev, client->irq,
@@ -391,7 +391,7 @@ static int pcf857x_probe(struct i2c_client *client,
 					IRQF_TRIGGER_FALLING | IRQF_SHARED,
 					dev_name(&client->dev), gpio);
 		if (status)
-			goto fail;
+			goto fail_irq;
 
 		gpiochip_set_chained_irqchip(&gpio->chip, &pcf857x_irq_chip,
 					     client->irq, NULL);
@@ -412,6 +412,9 @@ static int pcf857x_probe(struct i2c_client *client,
 	dev_info(&client->dev, "probed\n");
 
 	return 0;
+
+fail_irq:
+	gpiochip_remove(&gpio->chip);
 
 fail:
 	dev_dbg(&client->dev, "probe error %d for '%s'\n", status,
@@ -437,25 +440,18 @@ static int pcf857x_remove(struct i2c_client *client)
 		}
 	}
 
+	gpiochip_remove(&gpio->chip);
 	return status;
-}
-
-static void pcf857x_shutdown(struct i2c_client *client)
-{
-	struct pcf857x *gpio = i2c_get_clientdata(client);
-
-	/* Drive all the I/O lines high */
-	gpio->write(gpio->client, BIT(gpio->chip.ngpio) - 1);
 }
 
 static struct i2c_driver pcf857x_driver = {
 	.driver = {
 		.name	= "pcf857x",
+		.owner	= THIS_MODULE,
 		.of_match_table = of_match_ptr(pcf857x_of_table),
 	},
 	.probe	= pcf857x_probe,
 	.remove	= pcf857x_remove,
-	.shutdown = pcf857x_shutdown,
 	.id_table = pcf857x_id,
 };
 

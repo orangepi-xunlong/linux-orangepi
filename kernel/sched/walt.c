@@ -19,7 +19,6 @@
  *             and Todd Kjos
  */
 
-#include <linux/acpi.h>
 #include <linux/syscore_ops.h>
 #include <trace/events/sched.h>
 #include "sched.h"
@@ -56,7 +55,7 @@ __read_mostly unsigned int walt_ravg_window =
 
 static unsigned int sync_cpu;
 static ktime_t ktime_last;
-static __read_mostly bool walt_ktime_suspended;
+static bool walt_ktime_suspended;
 
 static unsigned int task_load(struct task_struct *p)
 {
@@ -148,7 +147,6 @@ static int __init walt_init_ops(void)
 }
 late_initcall(walt_init_ops);
 
-#ifdef CONFIG_CFS_BANDWIDTH
 void walt_inc_cfs_cumulative_runnable_avg(struct cfs_rq *cfs_rq,
 		struct task_struct *p)
 {
@@ -160,7 +158,6 @@ void walt_dec_cfs_cumulative_runnable_avg(struct cfs_rq *cfs_rq,
 {
 	cfs_rq->cumulative_runnable_avg -= p->ravg.demand;
 }
-#endif
 
 static int exiting_task(struct task_struct *p)
 {

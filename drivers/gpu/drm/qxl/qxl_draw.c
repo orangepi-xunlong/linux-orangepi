@@ -37,6 +37,7 @@ static int alloc_clips(struct qxl_device *qdev,
  * the qxl_clip_rects. This is *not* the same as the memory allocated
  * on the device, it is offset to qxl_clip_rects.chunk.data */
 static struct qxl_rect *drawable_set_clipping(struct qxl_device *qdev,
+					      struct qxl_drawable *drawable,
 					      unsigned num_clips,
 					      struct qxl_bo *clips_bo)
 {
@@ -57,8 +58,11 @@ static struct qxl_rect *drawable_set_clipping(struct qxl_device *qdev,
 static int
 alloc_drawable(struct qxl_device *qdev, struct qxl_release **release)
 {
-	return qxl_alloc_release_reserved(qdev, sizeof(struct qxl_drawable),
-					  QXL_RELEASE_DRAWABLE, release, NULL);
+	int ret;
+	ret = qxl_alloc_release_reserved(qdev, sizeof(struct qxl_drawable),
+					 QXL_RELEASE_DRAWABLE, release,
+					 NULL);
+	return ret;
 }
 
 static void
@@ -347,7 +351,7 @@ void qxl_draw_dirty_fb(struct qxl_device *qdev,
 	if (ret)
 		goto out_release_backoff;
 
-	rects = drawable_set_clipping(qdev, num_clips, clips_bo);
+	rects = drawable_set_clipping(qdev, drawable, num_clips, clips_bo);
 	if (!rects)
 		goto out_release_backoff;
 

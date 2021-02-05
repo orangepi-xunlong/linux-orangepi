@@ -156,11 +156,7 @@ check_stack(unsigned long ip, unsigned long *stack)
 		for (; p < top && i < stack_trace_max.nr_entries; p++) {
 			if (stack_dump_trace[i] == ULONG_MAX)
 				break;
-			/*
-			 * The READ_ONCE_NOCHECK is used to let KASAN know that
-			 * this is not a stack-out-of-bounds error.
-			 */
-			if ((READ_ONCE_NOCHECK(*p)) == stack_dump_trace[i]) {
+			if (*p == stack_dump_trace[i]) {
 				stack_dump_trace[x] = stack_dump_trace[i++];
 				this_size = stack_trace_index[x++] =
 					(top - p) * sizeof(unsigned long);

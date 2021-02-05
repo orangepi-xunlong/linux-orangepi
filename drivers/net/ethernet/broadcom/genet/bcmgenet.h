@@ -538,12 +538,6 @@ struct bcmgenet_hw_params {
 	u32		flags;
 };
 
-struct bcmgenet_skb_cb {
-	unsigned int bytes_sent;	/* bytes on the wire (no TSB) */
-};
-
-#define GENET_CB(skb)	((struct bcmgenet_skb_cb *)((skb)->cb))
-
 struct bcmgenet_tx_ring {
 	spinlock_t	lock;		/* ring lock */
 	struct napi_struct napi;	/* NAPI per tx queue */
@@ -626,12 +620,10 @@ struct bcmgenet_priv {
 	struct work_struct bcmgenet_irq_work;
 	int irq0;
 	int irq1;
+	unsigned int irq0_stat;
+	unsigned int irq1_stat;
 	int wol_irq;
 	bool wol_irq_disabled;
-
-	/* shared status */
-	spinlock_t lock;
-	unsigned int irq0_stat;
 
 	/* HW descriptors/checksum variables */
 	bool desc_64b_en;

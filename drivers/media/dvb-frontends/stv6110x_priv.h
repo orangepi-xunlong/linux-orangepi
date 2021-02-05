@@ -70,7 +70,7 @@ struct stv6110x_state {
 	const struct stv6110x_config	*config;
 	u8 				regs[8];
 
-	const struct stv6110x_devctl	*devctl;
+	struct stv6110x_devctl		*devctl;
 };
 
 #endif /* __STV6110x_PRIV_H */

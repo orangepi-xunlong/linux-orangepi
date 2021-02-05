@@ -129,8 +129,10 @@ static int tm6000_start_stream(struct tm6000_core *dev)
 	}
 
 	dvb->bulk_urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (dvb->bulk_urb == NULL)
+	if (dvb->bulk_urb == NULL) {
+		printk(KERN_ERR "tm6000: couldn't allocate urb\n");
 		return -ENOMEM;
+	}
 
 	pipe = usb_rcvbulkpipe(dev->udev, dev->bulk_in.endp->desc.bEndpointAddress
 							  & USB_ENDPOINT_NUMBER_MASK);

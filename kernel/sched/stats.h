@@ -29,13 +29,9 @@ rq_sched_info_dequeued(struct rq *rq, unsigned long long delta)
 	if (rq)
 		rq->rq_sched_info.run_delay += delta;
 }
-#define schedstat_enabled()		static_branch_unlikely(&sched_schedstats)
-#define schedstat_inc(var)		do { if (schedstat_enabled()) { var++; } } while (0)
-#define schedstat_add(var, amt)		do { if (schedstat_enabled()) { var += (amt); } } while (0)
-#define schedstat_set(var, val)		do { if (schedstat_enabled()) { var = (val); } } while (0)
-#define schedstat_val(var)		(var)
-#define schedstat_val_or_zero(var)	((schedstat_enabled()) ? (var) : 0)
-
+# define schedstat_inc(rq, field)	do { (rq)->field++; } while (0)
+# define schedstat_add(rq, field, amt)	do { (rq)->field += (amt); } while (0)
+# define schedstat_set(var, val)	do { var = (val); } while (0)
 #else /* !CONFIG_SCHEDSTATS */
 static inline void
 rq_sched_info_arrive(struct rq *rq, unsigned long long delta)
@@ -46,99 +42,10 @@ rq_sched_info_dequeued(struct rq *rq, unsigned long long delta)
 static inline void
 rq_sched_info_depart(struct rq *rq, unsigned long long delta)
 {}
-#define schedstat_enabled()		0
-#define schedstat_inc(var)		do { } while (0)
-#define schedstat_add(var, amt)		do { } while (0)
-#define schedstat_set(var, val)		do { } while (0)
-#define schedstat_val(var)		0
-#define schedstat_val_or_zero(var)	0
-#endif /* CONFIG_SCHEDSTATS */
-
-#ifdef CONFIG_PSI
-/*
- * PSI tracks state that persists across sleeps, such as iowaits and
- * memory stalls. As a result, it has to distinguish between sleeps,
- * where a task's runnable state changes, and requeues, where a task
- * and its state are being moved between CPUs and runqueues.
- */
-static inline void psi_enqueue(struct task_struct *p, bool wakeup)
-{
-	int clear = 0, set = TSK_RUNNING;
-
-	if (static_branch_likely(&psi_disabled))
-		return;
-
-	if (!wakeup || p->sched_psi_wake_requeue) {
-		if (p->flags & PF_MEMSTALL)
-			set |= TSK_MEMSTALL;
-		if (p->sched_psi_wake_requeue)
-			p->sched_psi_wake_requeue = 0;
-	} else {
-		if (p->in_iowait)
-			clear |= TSK_IOWAIT;
-	}
-
-	psi_task_change(p, clear, set);
-}
-
-static inline void psi_dequeue(struct task_struct *p, bool sleep)
-{
-	int clear = TSK_RUNNING, set = 0;
-
-	if (static_branch_likely(&psi_disabled))
-		return;
-
-	if (!sleep) {
-		if (p->flags & PF_MEMSTALL)
-			clear |= TSK_MEMSTALL;
-	} else {
-		if (p->in_iowait)
-			set |= TSK_IOWAIT;
-	}
-
-	psi_task_change(p, clear, set);
-}
-
-static inline void psi_ttwu_dequeue(struct task_struct *p)
-{
-	if (static_branch_likely(&psi_disabled))
-		return;
-	/*
-	 * Is the task being migrated during a wakeup? Make sure to
-	 * deregister its sleep-persistent psi states from the old
-	 * queue, and let psi_enqueue() know it has to requeue.
-	 */
-	if (unlikely(p->in_iowait || (p->flags & PF_MEMSTALL))) {
-		struct rq_flags rf;
-		struct rq *rq;
-		int clear = 0;
-
-		if (p->in_iowait)
-			clear |= TSK_IOWAIT;
-		if (p->flags & PF_MEMSTALL)
-			clear |= TSK_MEMSTALL;
-
-		rq = __task_rq_lock(p, &rf);
-		psi_task_change(p, clear, 0);
-		p->sched_psi_wake_requeue = 1;
-		__task_rq_unlock(rq, &rf);
-	}
-}
-
-static inline void psi_task_tick(struct rq *rq)
-{
-	if (static_branch_likely(&psi_disabled))
-		return;
-
-	if (unlikely(rq->curr->flags & PF_MEMSTALL))
-		psi_memstall_tick(rq->curr, cpu_of(rq));
-}
-#else /* CONFIG_PSI */
-static inline void psi_enqueue(struct task_struct *p, bool wakeup) {}
-static inline void psi_dequeue(struct task_struct *p, bool sleep) {}
-static inline void psi_ttwu_dequeue(struct task_struct *p) {}
-static inline void psi_task_tick(struct rq *rq) {}
-#endif /* CONFIG_PSI */
+# define schedstat_inc(rq, field)	do { } while (0)
+# define schedstat_add(rq, field, amt)	do { } while (0)
+# define schedstat_set(var, val)	do { } while (0)
+#endif
 
 #ifdef CONFIG_SCHED_INFO
 static inline void sched_info_reset_dequeued(struct task_struct *t)

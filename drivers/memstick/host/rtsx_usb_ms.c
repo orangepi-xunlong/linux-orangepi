@@ -712,7 +712,7 @@ poll_again:
 		if (host->eject)
 			break;
 
-		schedule_timeout_idle(HZ);
+		msleep(1000);
 	}
 
 	complete(&host->detect_ms_exit);

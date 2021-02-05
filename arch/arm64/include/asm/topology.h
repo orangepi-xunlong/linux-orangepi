@@ -22,23 +22,11 @@ void init_cpu_topology(void);
 void store_cpu_topology(unsigned int cpuid);
 const struct cpumask *cpu_coregroup_mask(int cpu);
 
-#ifdef CONFIG_NUMA
-
-struct pci_bus;
-int pcibus_to_node(struct pci_bus *bus);
-#define cpumask_of_pcibus(bus)	(pcibus_to_node(bus) == -1 ?		\
-				 cpu_all_mask :				\
-				 cpumask_of_node(pcibus_to_node(bus)))
-
-#endif /* CONFIG_NUMA */
 struct sched_domain;
 #ifdef CONFIG_CPU_FREQ
 #define arch_scale_freq_capacity cpufreq_scale_freq_capacity
 extern unsigned long cpufreq_scale_freq_capacity(struct sched_domain *sd, int cpu);
-#define arch_scale_max_freq_capacity cpufreq_scale_max_freq_capacity
-extern unsigned long cpufreq_scale_max_freq_capacity(struct sched_domain *sd, int cpu);
-#define arch_scale_min_freq_capacity cpufreq_scale_min_freq_capacity
-extern unsigned long cpufreq_scale_min_freq_capacity(struct sched_domain *sd, int cpu);
+extern unsigned long cpufreq_scale_max_freq_capacity(int cpu);
 #endif
 #define arch_scale_cpu_capacity scale_cpu_capacity
 extern unsigned long scale_cpu_capacity(struct sched_domain *sd, int cpu);

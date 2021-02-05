@@ -257,7 +257,7 @@ static int sproc_drv_remove(struct platform_device *pdev)
 	rproc_del(sproc->rproc);
 	dma_free_coherent(sproc->rproc->dev.parent, SPROC_FW_SIZE,
 			  sproc->fw_addr, sproc->fw_dma_addr);
-	rproc_free(sproc->rproc);
+	rproc_put(sproc->rproc);
 
 	mdev->drv_data = NULL;
 
@@ -325,7 +325,7 @@ free_mem:
 free_rproc:
 	/* Reset device data upon error */
 	mdev->drv_data = NULL;
-	rproc_free(rproc);
+	rproc_put(rproc);
 	return err;
 }
 

@@ -116,7 +116,7 @@ ENTRY(_startup)
 	movi	a0, 0
 
 #if XCHAL_HAVE_VECBASE
-	movi    a2, VECBASE_VADDR
+	movi    a2, VECBASE_RESET_VADDR
 	wsr	a2, vecbase
 #endif
 
@@ -199,6 +199,11 @@ ENTRY(_startup)
 					# WOE=1, INTLEVEL=LOCKLEVEL, UM=0
 	wsr	a2, ps			# (enable reg-windows; progmode stack)
 	rsync
+
+	/* Set up EXCSAVE[DEBUGLEVEL] to point to the Debug Exception Handler.*/
+
+	movi	a2, debug_exception
+	wsr	a2, SREG_EXCSAVE + XCHAL_DEBUGLEVEL
 
 #ifdef CONFIG_SMP
 	/*

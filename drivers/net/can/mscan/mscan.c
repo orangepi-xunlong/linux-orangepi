@@ -276,7 +276,7 @@ static netdev_tx_t mscan_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	out_8(&regs->cantflg, 1 << buf_id);
 
 	if (!test_bit(F_TX_PROGRESS, &priv->flags))
-		netif_trans_update(dev);
+		dev->trans_start = jiffies;
 
 	list_add_tail(&priv->tx_queue[buf_id].list, &priv->tx_head);
 
@@ -469,7 +469,7 @@ static irqreturn_t mscan_isr(int irq, void *dev_id)
 			clear_bit(F_TX_PROGRESS, &priv->flags);
 			priv->cur_pri = 0;
 		} else {
-			netif_trans_update(dev);
+			dev->trans_start = jiffies;
 		}
 
 		if (!test_bit(F_TX_WAIT_ALL, &priv->flags))

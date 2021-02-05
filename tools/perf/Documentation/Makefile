@@ -1,5 +1,5 @@
 include ../../scripts/Makefile.include
-include ../../scripts/utilities.mak
+include ../config/utilities.mak
 
 MAN1_TXT= \
 	$(filter-out $(addsuffix .txt, $(ARTICLES) $(SP_ARTICLES)), \

@@ -23,12 +23,10 @@ static ssize_t field##_show(struct device *dev,				\
 {									\
 	struct usb_device *udev;					\
 	struct usb_host_config *actconfig;				\
-	ssize_t rc;							\
+	ssize_t rc = 0;							\
 									\
 	udev = to_usb_device(dev);					\
-	rc = usb_lock_device_interruptible(udev);			\
-	if (rc < 0)							\
-		return -EINTR;						\
+	usb_lock_device(udev);						\
 	actconfig = udev->actconfig;					\
 	if (actconfig)							\
 		rc = sprintf(buf, format_string,			\
@@ -49,12 +47,10 @@ static ssize_t bMaxPower_show(struct device *dev,
 {
 	struct usb_device *udev;
 	struct usb_host_config *actconfig;
-	ssize_t rc;
+	ssize_t rc = 0;
 
 	udev = to_usb_device(dev);
-	rc = usb_lock_device_interruptible(udev);
-	if (rc < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 	actconfig = udev->actconfig;
 	if (actconfig)
 		rc = sprintf(buf, "%dmA\n", usb_get_max_power(udev, actconfig));
@@ -68,12 +64,10 @@ static ssize_t configuration_show(struct device *dev,
 {
 	struct usb_device *udev;
 	struct usb_host_config *actconfig;
-	ssize_t rc;
+	ssize_t rc = 0;
 
 	udev = to_usb_device(dev);
-	rc = usb_lock_device_interruptible(udev);
-	if (rc < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 	actconfig = udev->actconfig;
 	if (actconfig && actconfig->string)
 		rc = sprintf(buf, "%s\n", actconfig->string);
@@ -90,13 +84,11 @@ static ssize_t bConfigurationValue_store(struct device *dev,
 					 const char *buf, size_t count)
 {
 	struct usb_device	*udev = to_usb_device(dev);
-	int			config, value, rc;
+	int			config, value;
 
 	if (sscanf(buf, "%d", &config) != 1 || config < -1 || config > 255)
 		return -EINVAL;
-	rc = usb_lock_device_interruptible(udev);
-	if (rc < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 	value = usb_set_configuration(udev, config);
 	usb_unlock_device(udev);
 	return (value < 0) ? value : count;
@@ -113,9 +105,7 @@ static ssize_t  name##_show(struct device *dev,				\
 	int retval;							\
 									\
 	udev = to_usb_device(dev);					\
-	retval = usb_lock_device_interruptible(udev);			\
-	if (retval < 0)							\
-		return -EINTR;						\
+	usb_lock_device(udev);						\
 	retval = sprintf(buf, "%s\n", udev->name);			\
 	usb_unlock_device(udev);					\
 	return retval;							\
@@ -150,9 +140,6 @@ static ssize_t speed_show(struct device *dev, struct device_attribute *attr,
 		break;
 	case USB_SPEED_SUPER:
 		speed = "5000";
-		break;
-	case USB_SPEED_SUPER_PLUS:
-		speed = "10000";
 		break;
 	default:
 		speed = "unknown";
@@ -237,13 +224,11 @@ static ssize_t avoid_reset_quirk_store(struct device *dev,
 				      const char *buf, size_t count)
 {
 	struct usb_device	*udev = to_usb_device(dev);
-	int			val, rc;
+	int			val;
 
 	if (sscanf(buf, "%d", &val) != 1 || val < 0 || val > 1)
 		return -EINVAL;
-	rc = usb_lock_device_interruptible(udev);
-	if (rc < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 	if (val)
 		udev->quirks |= USB_QUIRK_RESET;
 	else
@@ -309,7 +294,7 @@ static ssize_t persist_store(struct device *dev, struct device_attribute *attr,
 			     const char *buf, size_t count)
 {
 	struct usb_device *udev = to_usb_device(dev);
-	int value, rc;
+	int value;
 
 	/* Hubs are always enabled for USB_PERSIST */
 	if (udev->descriptor.bDeviceClass == USB_CLASS_HUB)
@@ -318,9 +303,7 @@ static ssize_t persist_store(struct device *dev, struct device_attribute *attr,
 	if (sscanf(buf, "%d", &value) != 1)
 		return -EINVAL;
 
-	rc = usb_lock_device_interruptible(udev);
-	if (rc < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 	udev->persist_enabled = !!value;
 	usb_unlock_device(udev);
 	return count;
@@ -437,16 +420,13 @@ static ssize_t level_store(struct device *dev, struct device_attribute *attr,
 	int len = count;
 	char *cp;
 	int rc = count;
-	int rv;
 
 	warn_level();
 	cp = memchr(buf, '\n', count);
 	if (cp)
 		len = cp - buf;
 
-	rv = usb_lock_device_interruptible(udev);
-	if (rv < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 
 	if (len == sizeof on_string - 1 &&
 			strncmp(buf, on_string, len) == 0)
@@ -486,9 +466,7 @@ static ssize_t usb2_hardware_lpm_store(struct device *dev,
 	bool value;
 	int ret;
 
-	ret = usb_lock_device_interruptible(udev);
-	if (ret < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 
 	ret = strtobool(buf, &value);
 
@@ -558,11 +536,8 @@ static ssize_t usb3_hardware_lpm_u1_show(struct device *dev,
 {
 	struct usb_device *udev = to_usb_device(dev);
 	const char *p;
-	int rc;
 
-	rc = usb_lock_device_interruptible(udev);
-	if (rc < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 
 	if (udev->usb3_lpm_u1_enabled)
 		p = "enabled";
@@ -580,11 +555,8 @@ static ssize_t usb3_hardware_lpm_u2_show(struct device *dev,
 {
 	struct usb_device *udev = to_usb_device(dev);
 	const char *p;
-	int rc;
 
-	rc = usb_lock_device_interruptible(udev);
-	if (rc < 0)
-		return -EINTR;
+	usb_lock_device(udev);
 
 	if (udev->usb3_lpm_u2_enabled)
 		p = "enabled";
@@ -850,6 +822,7 @@ read_descriptors(struct file *filp, struct kobject *kobj,
 	 * Following that are the raw descriptor entries for all the
 	 * configurations (config plus subsidiary descriptors).
 	 */
+	usb_lock_device(udev);
 	for (cfgno = -1; cfgno < udev->descriptor.bNumConfigurations &&
 			nleft > 0; ++cfgno) {
 		if (cfgno < 0) {
@@ -870,6 +843,7 @@ read_descriptors(struct file *filp, struct kobject *kobj,
 			off -= srclen;
 		}
 	}
+	usb_unlock_device(udev);
 	return count - nleft;
 }
 
@@ -995,9 +969,7 @@ static ssize_t supports_autosuspend_show(struct device *dev,
 {
 	int s;
 
-	s = device_lock_interruptible(dev);
-	if (s < 0)
-		return -EINTR;
+	device_lock(dev);
 	/* Devices will be autosuspended even when an interface isn't claimed */
 	s = (!dev->driver || to_usb_driver(dev->driver)->supports_autosuspend);
 	device_unlock(dev);

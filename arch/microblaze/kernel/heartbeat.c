@@ -9,7 +9,6 @@
  */
 
 #include <linux/sched.h>
-#include <linux/sched/loadavg.h>
 #include <linux/io.h>
 
 #include <asm/setup.h>

@@ -16,6 +16,7 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/leds.h>
+#include <linux/workqueue.h>
 #include <linux/mfd/da903x.h>
 #include <linux/slab.h>
 
@@ -32,7 +33,9 @@
 
 struct da903x_led {
 	struct led_classdev	cdev;
+	struct work_struct	work;
 	struct device		*master;
+	enum led_brightness	new_brightness;
 	int			id;
 	int			flags;
 };
@@ -40,13 +43,11 @@ struct da903x_led {
 #define DA9030_LED_OFFSET(id)	((id) - DA9030_ID_LED_1)
 #define DA9034_LED_OFFSET(id)	((id) - DA9034_ID_LED_1)
 
-static int da903x_led_set(struct led_classdev *led_cdev,
-			   enum led_brightness value)
+static void da903x_led_work(struct work_struct *work)
 {
-	struct da903x_led *led =
-			container_of(led_cdev, struct da903x_led, cdev);
+	struct da903x_led *led = container_of(work, struct da903x_led, work);
 	uint8_t val;
-	int offset, ret = -EINVAL;
+	int offset;
 
 	switch (led->id) {
 	case DA9030_ID_LED_1:
@@ -56,31 +57,37 @@ static int da903x_led_set(struct led_classdev *led_cdev,
 	case DA9030_ID_LED_PC:
 		offset = DA9030_LED_OFFSET(led->id);
 		val = led->flags & ~0x87;
-		val |= value ? 0x80 : 0; /* EN bit */
-		val |= (0x7 - (value >> 5)) & 0x7; /* PWM<2:0> */
-		ret = da903x_write(led->master, DA9030_LED1_CONTROL + offset,
-				   val);
+		val |= (led->new_brightness) ? 0x80 : 0; /* EN bit */
+		val |= (0x7 - (led->new_brightness >> 5)) & 0x7; /* PWM<2:0> */
+		da903x_write(led->master, DA9030_LED1_CONTROL + offset, val);
 		break;
 	case DA9030_ID_VIBRA:
 		val = led->flags & ~0x80;
-		val |= value ? 0x80 : 0; /* EN bit */
-		ret = da903x_write(led->master, DA9030_MISC_CONTROL_A, val);
+		val |= (led->new_brightness) ? 0x80 : 0; /* EN bit */
+		da903x_write(led->master, DA9030_MISC_CONTROL_A, val);
 		break;
 	case DA9034_ID_LED_1:
 	case DA9034_ID_LED_2:
 		offset = DA9034_LED_OFFSET(led->id);
-		val = (value * 0x5f / LED_FULL) & 0x7f;
+		val = (led->new_brightness * 0x5f / LED_FULL) & 0x7f;
 		val |= (led->flags & DA9034_LED_RAMP) ? 0x80 : 0;
-		ret = da903x_write(led->master, DA9034_LED1_CONTROL + offset,
-				   val);
+		da903x_write(led->master, DA9034_LED1_CONTROL + offset, val);
 		break;
 	case DA9034_ID_VIBRA:
-		val = value & 0xfe;
-		ret = da903x_write(led->master, DA9034_VIBRA, val);
+		val = led->new_brightness & 0xfe;
+		da903x_write(led->master, DA9034_VIBRA, val);
 		break;
 	}
+}
 
-	return ret;
+static void da903x_led_set(struct led_classdev *led_cdev,
+			   enum led_brightness value)
+{
+	struct da903x_led *led;
+
+	led = container_of(led_cdev, struct da903x_led, cdev);
+	led->new_brightness = value;
+	schedule_work(&led->work);
 }
 
 static int da903x_led_probe(struct platform_device *pdev)
@@ -106,19 +113,31 @@ static int da903x_led_probe(struct platform_device *pdev)
 
 	led->cdev.name = pdata->name;
 	led->cdev.default_trigger = pdata->default_trigger;
-	led->cdev.brightness_set_blocking = da903x_led_set;
+	led->cdev.brightness_set = da903x_led_set;
 	led->cdev.brightness = LED_OFF;
 
 	led->id = id;
 	led->flags = pdata->flags;
 	led->master = pdev->dev.parent;
+	led->new_brightness = LED_OFF;
 
-	ret = devm_led_classdev_register(led->master, &led->cdev);
+	INIT_WORK(&led->work, da903x_led_work);
+
+	ret = led_classdev_register(led->master, &led->cdev);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register LED %d\n", id);
 		return ret;
 	}
 
+	platform_set_drvdata(pdev, led);
+	return 0;
+}
+
+static int da903x_led_remove(struct platform_device *pdev)
+{
+	struct da903x_led *led = platform_get_drvdata(pdev);
+
+	led_classdev_unregister(&led->cdev);
 	return 0;
 }
 
@@ -127,6 +146,7 @@ static struct platform_driver da903x_led_driver = {
 		.name	= "da903x-led",
 	},
 	.probe		= da903x_led_probe,
+	.remove		= da903x_led_remove,
 };
 
 module_platform_driver(da903x_led_driver);

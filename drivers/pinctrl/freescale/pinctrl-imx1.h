@@ -69,4 +69,5 @@ struct imx1_pinctrl_soc_info {
 
 int imx1_pinctrl_core_probe(struct platform_device *pdev,
 			struct imx1_pinctrl_soc_info *info);
+int imx1_pinctrl_core_remove(struct platform_device *pdev);
 #endif /* __DRIVERS_PINCTRL_IMX1_H */

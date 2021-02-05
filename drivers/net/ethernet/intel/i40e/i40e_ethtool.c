@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -88,10 +88,6 @@ static const struct i40e_stats i40e_gstrings_misc_stats[] = {
 	I40E_VSI_STAT("tx_broadcast", eth_stats.tx_broadcast),
 	I40E_VSI_STAT("rx_unknown_protocol", eth_stats.rx_unknown_protocol),
 	I40E_VSI_STAT("tx_linearize", tx_linearize),
-	I40E_VSI_STAT("tx_force_wb", tx_force_wb),
-	I40E_VSI_STAT("tx_lost_interrupt", tx_lost_interrupt),
-	I40E_VSI_STAT("rx_alloc_fail", rx_buf_failed),
-	I40E_VSI_STAT("rx_pg_alloc_fail", rx_page_failed),
 };
 
 /* These PF_STATs might look like duplicates of some NETDEV_STATs,
@@ -146,7 +142,6 @@ static struct i40e_stats i40e_gstrings_stats[] = {
 	I40E_PF_STAT("rx_oversize", stats.rx_oversize),
 	I40E_PF_STAT("rx_jabber", stats.rx_jabber),
 	I40E_PF_STAT("VF_admin_queue_requests", vf_aq_requests),
-	I40E_PF_STAT("arq_overflows", arq_overflows),
 	I40E_PF_STAT("rx_hwtstamp_cleared", rx_hwtstamp_cleared),
 	I40E_PF_STAT("fdir_flush_cnt", fd_flush_cnt),
 	I40E_PF_STAT("fdir_atr_match", stats.fd_atr_match),
@@ -230,23 +225,11 @@ static const char i40e_gstrings_test[][ETH_GSTRING_LEN] = {
 
 #define I40E_TEST_LEN (sizeof(i40e_gstrings_test) / ETH_GSTRING_LEN)
 
-static const char i40e_priv_flags_strings_gl[][ETH_GSTRING_LEN] = {
-	"MFP",
-	"LinkPolling",
-	"flow-director-atr",
-	"veb-stats",
-	"hw-atr-eviction",
-	"vf-true-promisc-support",
-};
-
-#define I40E_PRIV_FLAGS_GL_STR_LEN ARRAY_SIZE(i40e_priv_flags_strings_gl)
-
 static const char i40e_priv_flags_strings[][ETH_GSTRING_LEN] = {
 	"NPAR",
 	"LinkPolling",
 	"flow-director-atr",
 	"veb-stats",
-	"hw-atr-eviction",
 };
 
 #define I40E_PRIV_FLAGS_STR_LEN ARRAY_SIZE(i40e_priv_flags_strings)
@@ -259,118 +242,6 @@ static void i40e_partition_setting_complaint(struct i40e_pf *pf)
 {
 	dev_info(&pf->pdev->dev,
 		 "The link settings are allowed to be changed only from the first partition of a given port. Please switch to the first partition in order to change the setting.\n");
-}
-
-/**
- * i40e_phy_type_to_ethtool - convert the phy_types to ethtool link modes
- * @phy_types: PHY types to convert
- * @supported: pointer to the ethtool supported variable to fill in
- * @advertising: pointer to the ethtool advertising variable to fill in
- *
- **/
-static void i40e_phy_type_to_ethtool(struct i40e_pf *pf, u32 *supported,
-				     u32 *advertising)
-{
-	enum i40e_aq_capabilities_phy_type phy_types = pf->hw.phy.phy_types;
-	struct i40e_link_status *hw_link_info = &pf->hw.phy.link_info;
-	*supported = 0x0;
-	*advertising = 0x0;
-
-	if (phy_types & I40E_CAP_PHY_TYPE_SGMII) {
-		*supported |= SUPPORTED_Autoneg |
-			      SUPPORTED_1000baseT_Full;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
-			*advertising |= ADVERTISED_1000baseT_Full;
-		if (pf->flags & I40E_FLAG_100M_SGMII_CAPABLE) {
-			*supported |= SUPPORTED_100baseT_Full;
-			*advertising |= ADVERTISED_100baseT_Full;
-		}
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_XAUI ||
-	    phy_types & I40E_CAP_PHY_TYPE_XFI ||
-	    phy_types & I40E_CAP_PHY_TYPE_SFI ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SFPP_CU ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_AOC)
-		*supported |= SUPPORTED_10000baseT_Full;
-	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_T ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR) {
-		*supported |= SUPPORTED_Autoneg |
-			      SUPPORTED_10000baseT_Full;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			*advertising |= ADVERTISED_10000baseT_Full;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_XLAUI ||
-	    phy_types & I40E_CAP_PHY_TYPE_XLPPI ||
-	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_AOC)
-		*supported |= SUPPORTED_40000baseCR4_Full;
-	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_CR4_CU ||
-	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_CR4) {
-		*supported |= SUPPORTED_Autoneg |
-			      SUPPORTED_40000baseCR4_Full;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_40GB)
-			*advertising |= ADVERTISED_40000baseCR4_Full;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_100BASE_TX) {
-		*supported |= SUPPORTED_Autoneg |
-			      SUPPORTED_100baseT_Full;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
-			*advertising |= ADVERTISED_100baseT_Full;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_T ||
-	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
-	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_LX ||
-	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T_OPTICAL) {
-		*supported |= SUPPORTED_Autoneg |
-			      SUPPORTED_1000baseT_Full;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
-			*advertising |= ADVERTISED_1000baseT_Full;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_SR4)
-		*supported |= SUPPORTED_40000baseSR4_Full;
-	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_LR4)
-		*supported |= SUPPORTED_40000baseLR4_Full;
-	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_KR4) {
-		*supported |= SUPPORTED_40000baseKR4_Full |
-			      SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_40000baseKR4_Full |
-				ADVERTISED_Autoneg;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_20GBASE_KR2) {
-		*supported |= SUPPORTED_20000baseKR2_Full |
-			      SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_20GB)
-			*advertising |= ADVERTISED_20000baseKR2_Full;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_KR) {
-		*supported |= SUPPORTED_10000baseKR_Full |
-			      SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			*advertising |= ADVERTISED_10000baseKR_Full;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_KX4) {
-		*supported |= SUPPORTED_10000baseKX4_Full |
-			      SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			*advertising |= ADVERTISED_10000baseKX4_Full;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_KX) {
-		*supported |= SUPPORTED_1000baseKX_Full |
-			      SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
-			*advertising |= ADVERTISED_1000baseKX_Full;
-	}
 }
 
 /**
@@ -387,8 +258,6 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 {
 	struct i40e_link_status *hw_link_info = &hw->phy.link_info;
 	u32 link_speed = hw_link_info->link_speed;
-	u32 e_advertising = 0x0;
-	u32 e_supported = 0x0;
 
 	/* Initialize supported and advertised settings based on phy settings */
 	switch (hw_link_info->phy_type) {
@@ -429,24 +298,26 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 		break;
 	case I40E_PHY_TYPE_10GBASE_T:
 	case I40E_PHY_TYPE_1000BASE_T:
-	case I40E_PHY_TYPE_100BASE_TX:
 		ecmd->supported = SUPPORTED_Autoneg |
 				  SUPPORTED_10000baseT_Full |
-				  SUPPORTED_1000baseT_Full |
-				  SUPPORTED_100baseT_Full;
+				  SUPPORTED_1000baseT_Full;
 		ecmd->advertising = ADVERTISED_Autoneg;
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
 			ecmd->advertising |= ADVERTISED_10000baseT_Full;
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
 			ecmd->advertising |= ADVERTISED_1000baseT_Full;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
-			ecmd->advertising |= ADVERTISED_100baseT_Full;
 		break;
 	case I40E_PHY_TYPE_1000BASE_T_OPTICAL:
 		ecmd->supported = SUPPORTED_Autoneg |
 				  SUPPORTED_1000baseT_Full;
 		ecmd->advertising = ADVERTISED_Autoneg |
 				    ADVERTISED_1000baseT_Full;
+		break;
+	case I40E_PHY_TYPE_100BASE_TX:
+		ecmd->supported = SUPPORTED_Autoneg |
+				  SUPPORTED_100baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
+			ecmd->advertising |= ADVERTISED_100baseT_Full;
 		break;
 	case I40E_PHY_TYPE_10GBASE_CR1_CU:
 	case I40E_PHY_TYPE_10GBASE_CR1:
@@ -461,53 +332,33 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 	case I40E_PHY_TYPE_10GBASE_SFPP_CU:
 	case I40E_PHY_TYPE_10GBASE_AOC:
 		ecmd->supported = SUPPORTED_10000baseT_Full;
-		ecmd->advertising = SUPPORTED_10000baseT_Full;
 		break;
 	case I40E_PHY_TYPE_SGMII:
 		ecmd->supported = SUPPORTED_Autoneg |
 				  SUPPORTED_1000baseT_Full;
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
 			ecmd->advertising |= ADVERTISED_1000baseT_Full;
-		if (pf->flags & I40E_FLAG_100M_SGMII_CAPABLE) {
+		if (pf->hw.mac.type == I40E_MAC_X722) {
 			ecmd->supported |= SUPPORTED_100baseT_Full;
 			if (hw_link_info->requested_speeds &
 			    I40E_LINK_SPEED_100MB)
 				ecmd->advertising |= ADVERTISED_100baseT_Full;
 		}
 		break;
+	/* Backplane is set based on supported phy types in get_settings
+	 * so don't set anything here but don't warn either
+	 */
 	case I40E_PHY_TYPE_40GBASE_KR4:
 	case I40E_PHY_TYPE_20GBASE_KR2:
 	case I40E_PHY_TYPE_10GBASE_KR:
 	case I40E_PHY_TYPE_10GBASE_KX4:
 	case I40E_PHY_TYPE_1000BASE_KX:
-		ecmd->supported |= SUPPORTED_40000baseKR4_Full |
-				   SUPPORTED_20000baseKR2_Full |
-				   SUPPORTED_10000baseKR_Full |
-				   SUPPORTED_10000baseKX4_Full |
-				   SUPPORTED_1000baseKX_Full |
-				   SUPPORTED_Autoneg;
-		ecmd->advertising |= ADVERTISED_40000baseKR4_Full |
-				     ADVERTISED_20000baseKR2_Full |
-				     ADVERTISED_10000baseKR_Full |
-				     ADVERTISED_10000baseKX4_Full |
-				     ADVERTISED_1000baseKX_Full |
-				     ADVERTISED_Autoneg;
 		break;
 	default:
 		/* if we got here and link is up something bad is afoot */
 		netdev_info(netdev, "WARNING: Link is up but PHY type 0x%x is not recognized.\n",
 			    hw_link_info->phy_type);
 	}
-
-	/* Now that we've worked out everything that could be supported by the
-	 * current PHY type, get what is supported by the NVM and them to
-	 * get what is truly supported
-	 */
-	i40e_phy_type_to_ethtool(pf, &e_supported,
-				 &e_advertising);
-
-	ecmd->supported = ecmd->supported & e_supported;
-	ecmd->advertising = ecmd->advertising & e_advertising;
 
 	/* Set speed and duplex */
 	switch (link_speed) {
@@ -543,11 +394,70 @@ static void i40e_get_settings_link_down(struct i40e_hw *hw,
 					struct ethtool_cmd *ecmd,
 					struct i40e_pf *pf)
 {
+	enum i40e_aq_capabilities_phy_type phy_types = hw->phy.phy_types;
+
 	/* link is down and the driver needs to fall back on
 	 * supported phy types to figure out what info to display
 	 */
-	i40e_phy_type_to_ethtool(pf, &ecmd->supported,
-				 &ecmd->advertising);
+	ecmd->supported = 0x0;
+	ecmd->advertising = 0x0;
+	if (phy_types & I40E_CAP_PHY_TYPE_SGMII) {
+		ecmd->supported |= SUPPORTED_Autoneg |
+				   SUPPORTED_1000baseT_Full;
+		ecmd->advertising |= ADVERTISED_Autoneg |
+				     ADVERTISED_1000baseT_Full;
+		if (pf->hw.mac.type == I40E_MAC_X722) {
+			ecmd->supported |= SUPPORTED_100baseT_Full;
+			ecmd->advertising |= ADVERTISED_100baseT_Full;
+		}
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_XAUI ||
+	    phy_types & I40E_CAP_PHY_TYPE_XFI ||
+	    phy_types & I40E_CAP_PHY_TYPE_SFI ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SFPP_CU ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_AOC)
+		ecmd->supported |= SUPPORTED_10000baseT_Full;
+	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_T ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR) {
+		ecmd->supported |= SUPPORTED_Autoneg |
+				   SUPPORTED_10000baseT_Full;
+		ecmd->advertising |= ADVERTISED_Autoneg |
+				     ADVERTISED_10000baseT_Full;
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_XLAUI ||
+	    phy_types & I40E_CAP_PHY_TYPE_XLPPI ||
+	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_AOC)
+		ecmd->supported |= SUPPORTED_40000baseCR4_Full;
+	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_CR4_CU ||
+	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_CR4) {
+		ecmd->supported |= SUPPORTED_Autoneg |
+				  SUPPORTED_40000baseCR4_Full;
+		ecmd->advertising |= ADVERTISED_Autoneg |
+				    ADVERTISED_40000baseCR4_Full;
+	}
+	if ((phy_types & I40E_CAP_PHY_TYPE_100BASE_TX) &&
+	    !(phy_types & I40E_CAP_PHY_TYPE_1000BASE_T)) {
+		ecmd->supported |= SUPPORTED_Autoneg |
+				   SUPPORTED_100baseT_Full;
+		ecmd->advertising |= ADVERTISED_Autoneg |
+				     ADVERTISED_100baseT_Full;
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_T ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_LX ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T_OPTICAL) {
+		ecmd->supported |= SUPPORTED_Autoneg |
+				   SUPPORTED_1000baseT_Full;
+		ecmd->advertising |= ADVERTISED_Autoneg |
+				     ADVERTISED_1000baseT_Full;
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_SR4)
+		ecmd->supported |= SUPPORTED_40000baseSR4_Full;
+	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_LR4)
+		ecmd->supported |= SUPPORTED_40000baseLR4_Full;
 
 	/* With no link speed and duplex are unknown */
 	ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
@@ -576,6 +486,38 @@ static int i40e_get_settings(struct net_device *netdev,
 		i40e_get_settings_link_down(hw, ecmd, pf);
 
 	/* Now set the settings that don't rely on link being up/down */
+
+	/* For backplane, supported and advertised are only reliant on the
+	 * phy types the NVM specifies are supported.
+	 */
+	if (hw->device_id == I40E_DEV_ID_KX_B ||
+	    hw->device_id == I40E_DEV_ID_KX_C ||
+	    hw->device_id == I40E_DEV_ID_20G_KR2 ||
+	    hw->device_id ==  I40E_DEV_ID_20G_KR2_A) {
+		ecmd->supported = SUPPORTED_Autoneg;
+		ecmd->advertising = ADVERTISED_Autoneg;
+		if (hw->phy.phy_types & I40E_CAP_PHY_TYPE_40GBASE_KR4) {
+			ecmd->supported |= SUPPORTED_40000baseKR4_Full;
+			ecmd->advertising |= ADVERTISED_40000baseKR4_Full;
+		}
+		if (hw->phy.phy_types & I40E_CAP_PHY_TYPE_20GBASE_KR2) {
+			ecmd->supported |= SUPPORTED_20000baseKR2_Full;
+			ecmd->advertising |= ADVERTISED_20000baseKR2_Full;
+		}
+		if (hw->phy.phy_types & I40E_CAP_PHY_TYPE_10GBASE_KR) {
+			ecmd->supported |= SUPPORTED_10000baseKR_Full;
+			ecmd->advertising |= ADVERTISED_10000baseKR_Full;
+		}
+		if (hw->phy.phy_types & I40E_CAP_PHY_TYPE_10GBASE_KX4) {
+			ecmd->supported |= SUPPORTED_10000baseKX4_Full;
+			ecmd->advertising |= ADVERTISED_10000baseKX4_Full;
+		}
+		if (hw->phy.phy_types & I40E_CAP_PHY_TYPE_1000BASE_KX) {
+			ecmd->supported |= SUPPORTED_1000baseKX_Full;
+			ecmd->advertising |= ADVERTISED_1000baseKX_Full;
+		}
+	}
+
 	/* Set autoneg settings */
 	ecmd->autoneg = ((hw_link_info->an_info & I40E_AQ_AN_COMPLETED) ?
 			  AUTONEG_ENABLE : AUTONEG_DISABLE);
@@ -672,7 +614,6 @@ static int i40e_set_settings(struct net_device *netdev,
 	if (hw->phy.media_type != I40E_MEDIA_TYPE_BASET &&
 	    hw->phy.media_type != I40E_MEDIA_TYPE_FIBER &&
 	    hw->phy.media_type != I40E_MEDIA_TYPE_BACKPLANE &&
-	    hw->phy.media_type != I40E_MEDIA_TYPE_DA &&
 	    hw->phy.link_info.link_info & I40E_AQ_LINK_UP)
 		return -EOPNOTSUPP;
 
@@ -1053,19 +994,16 @@ static int i40e_get_eeprom(struct net_device *netdev,
 	/* check for NVMUpdate access method */
 	magic = hw->vendor_id | (hw->device_id << 16);
 	if (eeprom->magic && eeprom->magic != magic) {
-		struct i40e_nvm_access *cmd = (struct i40e_nvm_access *)eeprom;
-		int errno = 0;
+		struct i40e_nvm_access *cmd;
+		int errno;
 
 		/* make sure it is the right magic for NVMUpdate */
 		if ((eeprom->magic >> 16) != hw->device_id)
-			errno = -EINVAL;
-		else if (test_bit(__I40E_RESET_RECOVERY_PENDING, &pf->state) ||
-			 test_bit(__I40E_RESET_INTR_RECEIVED, &pf->state))
-			errno = -EBUSY;
-		else
-			ret_val = i40e_nvmupd_command(hw, cmd, bytes, &errno);
+			return -EINVAL;
 
-		if ((errno || ret_val) && (hw->debug_mask & I40E_DEBUG_NVM))
+		cmd = (struct i40e_nvm_access *)eeprom;
+		ret_val = i40e_nvmupd_command(hw, cmd, bytes, &errno);
+		if (ret_val && (hw->debug_mask & I40E_DEBUG_NVM))
 			dev_info(&pf->pdev->dev,
 				 "NVMUpdate read failed err=%d status=0x%x errno=%d module=%d offset=0x%x size=%d\n",
 				 ret_val, hw->aq.asq_last_status, errno,
@@ -1154,25 +1092,27 @@ static int i40e_set_eeprom(struct net_device *netdev,
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_hw *hw = &np->vsi->back->hw;
 	struct i40e_pf *pf = np->vsi->back;
-	struct i40e_nvm_access *cmd = (struct i40e_nvm_access *)eeprom;
+	struct i40e_nvm_access *cmd;
 	int ret_val = 0;
-	int errno = 0;
+	int errno;
 	u32 magic;
 
 	/* normal ethtool set_eeprom is not supported */
 	magic = hw->vendor_id | (hw->device_id << 16);
 	if (eeprom->magic == magic)
-		errno = -EOPNOTSUPP;
-	/* check for NVMUpdate access method */
-	else if (!eeprom->magic || (eeprom->magic >> 16) != hw->device_id)
-		errno = -EINVAL;
-	else if (test_bit(__I40E_RESET_RECOVERY_PENDING, &pf->state) ||
-		 test_bit(__I40E_RESET_INTR_RECEIVED, &pf->state))
-		errno = -EBUSY;
-	else
-		ret_val = i40e_nvmupd_command(hw, cmd, bytes, &errno);
+		return -EOPNOTSUPP;
 
-	if ((errno || ret_val) && (hw->debug_mask & I40E_DEBUG_NVM))
+	/* check for NVMUpdate access method */
+	if (!eeprom->magic || (eeprom->magic >> 16) != hw->device_id)
+		return -EINVAL;
+
+	if (test_bit(__I40E_RESET_RECOVERY_PENDING, &pf->state) ||
+	    test_bit(__I40E_RESET_INTR_RECEIVED, &pf->state))
+		return -EBUSY;
+
+	cmd = (struct i40e_nvm_access *)eeprom;
+	ret_val = i40e_nvmupd_command(hw, cmd, bytes, &errno);
+	if (ret_val && (hw->debug_mask & I40E_DEBUG_NVM))
 		dev_info(&pf->pdev->dev,
 			 "NVMUpdate write failed err=%d status=0x%x errno=%d module=%d offset=0x%x size=%d\n",
 			 ret_val, hw->aq.asq_last_status, errno,
@@ -1196,10 +1136,6 @@ static void i40e_get_drvinfo(struct net_device *netdev,
 		sizeof(drvinfo->fw_version));
 	strlcpy(drvinfo->bus_info, pci_name(pf->pdev),
 		sizeof(drvinfo->bus_info));
-	if (pf->hw.pf_id == 0)
-		drvinfo->n_priv_flags = I40E_PRIV_FLAGS_GL_STR_LEN;
-	else
-		drvinfo->n_priv_flags = I40E_PRIV_FLAGS_STR_LEN;
 }
 
 static void i40e_get_ringparam(struct net_device *netdev,
@@ -1316,13 +1252,6 @@ static int i40e_set_ringparam(struct net_device *netdev,
 		}
 
 		for (i = 0; i < vsi->num_queue_pairs; i++) {
-			/* this is to allow wr32 to have something to write to
-			 * during early allocation of Rx buffers
-			 */
-			u32 __iomem faketail = 0;
-			struct i40e_ring *ring;
-			u16 unused;
-
 			/* clone ring and setup updated count */
 			rx_rings[i] = *vsi->rx_rings[i];
 			rx_rings[i].count = new_rx_count;
@@ -1331,22 +1260,12 @@ static int i40e_set_ringparam(struct net_device *netdev,
 			 */
 			rx_rings[i].desc = NULL;
 			rx_rings[i].rx_bi = NULL;
-			rx_rings[i].tail = (u8 __iomem *)&faketail;
 			err = i40e_setup_rx_descriptors(&rx_rings[i]);
-			if (err)
-				goto rx_unwind;
-
-			/* now allocate the Rx buffers to make sure the OS
-			 * has enough memory, any failure here means abort
-			 */
-			ring = &rx_rings[i];
-			unused = I40E_DESC_UNUSED(ring);
-			err = i40e_alloc_rx_buffers(ring, unused);
-rx_unwind:
 			if (err) {
-				do {
+				while (i) {
+					i--;
 					i40e_free_rx_resources(&rx_rings[i]);
-				} while (i--);
+				}
 				kfree(rx_rings);
 				rx_rings = NULL;
 
@@ -1372,17 +1291,6 @@ rx_unwind:
 	if (rx_rings) {
 		for (i = 0; i < vsi->num_queue_pairs; i++) {
 			i40e_free_rx_resources(vsi->rx_rings[i]);
-			/* get the real tail offset */
-			rx_rings[i].tail = vsi->rx_rings[i]->tail;
-			/* this is to fake out the allocation routine
-			 * into thinking it has to realloc everything
-			 * but the recycling logic will let us re-use
-			 * the buffers allocated above
-			 */
-			rx_rings[i].next_to_use = 0;
-			rx_rings[i].next_to_clean = 0;
-			rx_rings[i].next_to_alloc = 0;
-			/* do a struct copy */
 			*vsi->rx_rings[i] = rx_rings[i];
 		}
 		kfree(rx_rings);
@@ -1427,10 +1335,7 @@ static int i40e_get_sset_count(struct net_device *netdev, int sset)
 			return I40E_VSI_STATS_LEN(netdev);
 		}
 	case ETH_SS_PRIV_FLAGS:
-		if (pf->hw.pf_id == 0)
-			return I40E_PRIV_FLAGS_GL_STR_LEN;
-		else
-			return I40E_PRIV_FLAGS_STR_LEN;
+		return I40E_PRIV_FLAGS_STR_LEN;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -1565,13 +1470,13 @@ static void i40e_get_strings(struct net_device *netdev, u32 stringset,
 		}
 #endif
 		for (i = 0; i < vsi->num_queue_pairs; i++) {
-			snprintf(p, ETH_GSTRING_LEN, "tx-%d.tx_packets", i);
+			snprintf(p, ETH_GSTRING_LEN, "tx-%u.tx_packets", i);
 			p += ETH_GSTRING_LEN;
-			snprintf(p, ETH_GSTRING_LEN, "tx-%d.tx_bytes", i);
+			snprintf(p, ETH_GSTRING_LEN, "tx-%u.tx_bytes", i);
 			p += ETH_GSTRING_LEN;
-			snprintf(p, ETH_GSTRING_LEN, "rx-%d.rx_packets", i);
+			snprintf(p, ETH_GSTRING_LEN, "rx-%u.rx_packets", i);
 			p += ETH_GSTRING_LEN;
-			snprintf(p, ETH_GSTRING_LEN, "rx-%d.rx_bytes", i);
+			snprintf(p, ETH_GSTRING_LEN, "rx-%u.rx_bytes", i);
 			p += ETH_GSTRING_LEN;
 		}
 		if (vsi != pf->vsi[pf->lan_vsi] || pf->hw.partition_id != 1)
@@ -1586,16 +1491,16 @@ static void i40e_get_strings(struct net_device *netdev, u32 stringset,
 			}
 			for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++) {
 				snprintf(p, ETH_GSTRING_LEN,
-					 "veb.tc_%d_tx_packets", i);
+					 "veb.tc_%u_tx_packets", i);
 				p += ETH_GSTRING_LEN;
 				snprintf(p, ETH_GSTRING_LEN,
-					 "veb.tc_%d_tx_bytes", i);
+					 "veb.tc_%u_tx_bytes", i);
 				p += ETH_GSTRING_LEN;
 				snprintf(p, ETH_GSTRING_LEN,
-					 "veb.tc_%d_rx_packets", i);
+					 "veb.tc_%u_rx_packets", i);
 				p += ETH_GSTRING_LEN;
 				snprintf(p, ETH_GSTRING_LEN,
-					 "veb.tc_%d_rx_bytes", i);
+					 "veb.tc_%u_rx_bytes", i);
 				p += ETH_GSTRING_LEN;
 			}
 		}
@@ -1606,40 +1511,32 @@ static void i40e_get_strings(struct net_device *netdev, u32 stringset,
 		}
 		for (i = 0; i < I40E_MAX_USER_PRIORITY; i++) {
 			snprintf(p, ETH_GSTRING_LEN,
-				 "port.tx_priority_%d_xon", i);
+				 "port.tx_priority_%u_xon", i);
 			p += ETH_GSTRING_LEN;
 			snprintf(p, ETH_GSTRING_LEN,
-				 "port.tx_priority_%d_xoff", i);
-			p += ETH_GSTRING_LEN;
-		}
-		for (i = 0; i < I40E_MAX_USER_PRIORITY; i++) {
-			snprintf(p, ETH_GSTRING_LEN,
-				 "port.rx_priority_%d_xon", i);
-			p += ETH_GSTRING_LEN;
-			snprintf(p, ETH_GSTRING_LEN,
-				 "port.rx_priority_%d_xoff", i);
+				 "port.tx_priority_%u_xoff", i);
 			p += ETH_GSTRING_LEN;
 		}
 		for (i = 0; i < I40E_MAX_USER_PRIORITY; i++) {
 			snprintf(p, ETH_GSTRING_LEN,
-				 "port.rx_priority_%d_xon_2_xoff", i);
+				 "port.rx_priority_%u_xon", i);
+			p += ETH_GSTRING_LEN;
+			snprintf(p, ETH_GSTRING_LEN,
+				 "port.rx_priority_%u_xoff", i);
+			p += ETH_GSTRING_LEN;
+		}
+		for (i = 0; i < I40E_MAX_USER_PRIORITY; i++) {
+			snprintf(p, ETH_GSTRING_LEN,
+				 "port.rx_priority_%u_xon_2_xoff", i);
 			p += ETH_GSTRING_LEN;
 		}
 		/* BUG_ON(p - data != I40E_STATS_LEN * ETH_GSTRING_LEN); */
 		break;
 	case ETH_SS_PRIV_FLAGS:
-		if (pf->hw.pf_id == 0) {
-			for (i = 0; i < I40E_PRIV_FLAGS_GL_STR_LEN; i++) {
-				memcpy(data, i40e_priv_flags_strings_gl[i],
-				       ETH_GSTRING_LEN);
-				data += ETH_GSTRING_LEN;
-			}
-		} else {
-			for (i = 0; i < I40E_PRIV_FLAGS_STR_LEN; i++) {
-				memcpy(data, i40e_priv_flags_strings[i],
-				       ETH_GSTRING_LEN);
-				data += ETH_GSTRING_LEN;
-			}
+		for (i = 0; i < I40E_PRIV_FLAGS_STR_LEN; i++) {
+			memcpy(data, i40e_priv_flags_strings[i],
+			       ETH_GSTRING_LEN);
+			data += ETH_GSTRING_LEN;
 		}
 		break;
 	default:
@@ -1810,7 +1707,7 @@ static void i40e_diag_test(struct net_device *netdev,
 		/* If the device is online then take it offline */
 		if (if_running)
 			/* indicate we're in test mode */
-			i40e_close(netdev);
+			dev_close(netdev);
 		else
 			/* This reset does not affect link - if it is
 			 * changed to a type of reset that does affect
@@ -1839,7 +1736,7 @@ static void i40e_diag_test(struct net_device *netdev,
 		i40e_do_reset(pf, BIT(__I40E_PF_RESET_REQUESTED));
 
 		if (if_running)
-			i40e_open(netdev);
+			dev_open(netdev);
 	} else {
 		/* Online tests */
 		netif_info(pf, drv, netdev, "online testing starting\n");
@@ -1922,52 +1819,28 @@ static int i40e_set_phys_id(struct net_device *netdev,
 			    enum ethtool_phys_id_state state)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
-	i40e_status ret = 0;
 	struct i40e_pf *pf = np->vsi->back;
 	struct i40e_hw *hw = &pf->hw;
 	int blink_freq = 2;
-	u16 temp_status;
 
 	switch (state) {
 	case ETHTOOL_ID_ACTIVE:
-		if (!(pf->flags & I40E_FLAG_HAVE_10GBASET_PHY)) {
-			pf->led_status = i40e_led_get(hw);
-		} else {
-			i40e_aq_set_phy_debug(hw, I40E_PHY_DEBUG_ALL, NULL);
-			ret = i40e_led_get_phy(hw, &temp_status,
-					       &pf->phy_led_val);
-			pf->led_status = temp_status;
-		}
+		pf->led_status = i40e_led_get(hw);
 		return blink_freq;
 	case ETHTOOL_ID_ON:
-		if (!(pf->flags & I40E_FLAG_HAVE_10GBASET_PHY))
-			i40e_led_set(hw, 0xf, false);
-		else
-			ret = i40e_led_set_phy(hw, true, pf->led_status, 0);
+		i40e_led_set(hw, 0xF, false);
 		break;
 	case ETHTOOL_ID_OFF:
-		if (!(pf->flags & I40E_FLAG_HAVE_10GBASET_PHY))
-			i40e_led_set(hw, 0x0, false);
-		else
-			ret = i40e_led_set_phy(hw, false, pf->led_status, 0);
+		i40e_led_set(hw, 0x0, false);
 		break;
 	case ETHTOOL_ID_INACTIVE:
-		if (!(pf->flags & I40E_FLAG_HAVE_10GBASET_PHY)) {
-			i40e_led_set(hw, false, pf->led_status);
-		} else {
-			ret = i40e_led_set_phy(hw, false, pf->led_status,
-					       (pf->phy_led_val |
-					       I40E_PHY_LED_MODE_ORIG));
-			i40e_aq_set_phy_debug(hw, 0, NULL);
-		}
+		i40e_led_set(hw, pf->led_status, false);
 		break;
 	default:
 		break;
 	}
-		if (ret)
-			return -ENOENT;
-		else
-			return 0;
+
+	return 0;
 }
 
 /* NOTE: i40e hardware uses a conversion factor of 2 for Interrupt
@@ -1975,49 +1848,23 @@ static int i40e_set_phys_id(struct net_device *netdev,
  * 125us (8000 interrupts per second) == ITR(62)
  */
 
-/**
- * __i40e_get_coalesce - get per-queue coalesce settings
- * @netdev: the netdev to check
- * @ec: ethtool coalesce data structure
- * @queue: which queue to pick
- *
- * Gets the per-queue settings for coalescence. Specifically Rx and Tx usecs
- * are per queue. If queue is <0 then we default to queue 0 as the
- * representative value.
- **/
-static int __i40e_get_coalesce(struct net_device *netdev,
-			       struct ethtool_coalesce *ec,
-			       int queue)
+static int i40e_get_coalesce(struct net_device *netdev,
+			     struct ethtool_coalesce *ec)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
-	struct i40e_ring *rx_ring, *tx_ring;
 	struct i40e_vsi *vsi = np->vsi;
 
 	ec->tx_max_coalesced_frames_irq = vsi->work_limit;
 	ec->rx_max_coalesced_frames_irq = vsi->work_limit;
 
-	/* rx and tx usecs has per queue value. If user doesn't specify the queue,
-	 * return queue 0's value to represent.
-	 */
-	if (queue < 0) {
-		queue = 0;
-	} else if (queue >= vsi->num_queue_pairs) {
-		return -EINVAL;
-	}
-
-	rx_ring = vsi->rx_rings[queue];
-	tx_ring = vsi->tx_rings[queue];
-
-	if (ITR_IS_DYNAMIC(rx_ring->rx_itr_setting))
+	if (ITR_IS_DYNAMIC(vsi->rx_itr_setting))
 		ec->use_adaptive_rx_coalesce = 1;
 
-	if (ITR_IS_DYNAMIC(tx_ring->tx_itr_setting))
+	if (ITR_IS_DYNAMIC(vsi->tx_itr_setting))
 		ec->use_adaptive_tx_coalesce = 1;
 
-	ec->rx_coalesce_usecs = rx_ring->rx_itr_setting & ~I40E_ITR_DYNAMIC;
-	ec->tx_coalesce_usecs = tx_ring->tx_itr_setting & ~I40E_ITR_DYNAMIC;
-
-
+	ec->rx_coalesce_usecs = vsi->rx_itr_setting & ~I40E_ITR_DYNAMIC;
+	ec->tx_coalesce_usecs = vsi->tx_itr_setting & ~I40E_ITR_DYNAMIC;
 	/* we use the _usecs_high to store/set the interrupt rate limit
 	 * that the hardware supports, that almost but not quite
 	 * fits the original intent of the ethtool variable,
@@ -2030,97 +1877,15 @@ static int __i40e_get_coalesce(struct net_device *netdev,
 	return 0;
 }
 
-/**
- * i40e_get_coalesce - get a netdev's coalesce settings
- * @netdev: the netdev to check
- * @ec: ethtool coalesce data structure
- *
- * Gets the coalesce settings for a particular netdev. Note that if user has
- * modified per-queue settings, this only guarantees to represent queue 0. See
- * __i40e_get_coalesce for more details.
- **/
-static int i40e_get_coalesce(struct net_device *netdev,
+static int i40e_set_coalesce(struct net_device *netdev,
 			     struct ethtool_coalesce *ec)
 {
-	return __i40e_get_coalesce(netdev, ec, -1);
-}
-
-/**
- * i40e_get_per_queue_coalesce - gets coalesce settings for particular queue
- * @netdev: netdev structure
- * @ec: ethtool's coalesce settings
- * @queue: the particular queue to read
- *
- * Will read a specific queue's coalesce settings
- **/
-static int i40e_get_per_queue_coalesce(struct net_device *netdev, u32 queue,
-				       struct ethtool_coalesce *ec)
-{
-	return __i40e_get_coalesce(netdev, ec, queue);
-}
-
-/**
- * i40e_set_itr_per_queue - set ITR values for specific queue
- * @vsi: the VSI to set values for
- * @ec: coalesce settings from ethtool
- * @queue: the queue to modify
- *
- * Change the ITR settings for a specific queue.
- **/
-
-static void i40e_set_itr_per_queue(struct i40e_vsi *vsi,
-				   struct ethtool_coalesce *ec,
-				   int queue)
-{
-	struct i40e_pf *pf = vsi->back;
-	struct i40e_hw *hw = &pf->hw;
-	struct i40e_q_vector *q_vector;
-	u16 vector, intrl;
-
-	intrl = INTRL_USEC_TO_REG(vsi->int_rate_limit);
-
-	vsi->rx_rings[queue]->rx_itr_setting = ec->rx_coalesce_usecs;
-	vsi->tx_rings[queue]->tx_itr_setting = ec->tx_coalesce_usecs;
-
-	if (ec->use_adaptive_rx_coalesce)
-		vsi->rx_rings[queue]->rx_itr_setting |= I40E_ITR_DYNAMIC;
-	else
-		vsi->rx_rings[queue]->rx_itr_setting &= ~I40E_ITR_DYNAMIC;
-
-	if (ec->use_adaptive_tx_coalesce)
-		vsi->tx_rings[queue]->tx_itr_setting |= I40E_ITR_DYNAMIC;
-	else
-		vsi->tx_rings[queue]->tx_itr_setting &= ~I40E_ITR_DYNAMIC;
-
-	q_vector = vsi->rx_rings[queue]->q_vector;
-	q_vector->rx.itr = ITR_TO_REG(vsi->rx_rings[queue]->rx_itr_setting);
-	vector = vsi->base_vector + q_vector->v_idx;
-	wr32(hw, I40E_PFINT_ITRN(I40E_RX_ITR, vector - 1), q_vector->rx.itr);
-
-	q_vector = vsi->tx_rings[queue]->q_vector;
-	q_vector->tx.itr = ITR_TO_REG(vsi->tx_rings[queue]->tx_itr_setting);
-	vector = vsi->base_vector + q_vector->v_idx;
-	wr32(hw, I40E_PFINT_ITRN(I40E_TX_ITR, vector - 1), q_vector->tx.itr);
-
-	wr32(hw, I40E_PFINT_RATEN(vector - 1), intrl);
-	i40e_flush(hw);
-}
-
-/**
- * __i40e_set_coalesce - set coalesce settings for particular queue
- * @netdev: the netdev to change
- * @ec: ethtool coalesce settings
- * @queue: the queue to change
- *
- * Sets the coalesce settings for a particular queue.
- **/
-static int __i40e_set_coalesce(struct net_device *netdev,
-			       struct ethtool_coalesce *ec,
-			       int queue)
-{
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_q_vector *q_vector;
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	u16 vector;
 	int i;
 
 	if (ec->tx_max_coalesced_frames_irq || ec->rx_max_coalesced_frames_irq)
@@ -2137,68 +1902,57 @@ static int __i40e_set_coalesce(struct net_device *netdev,
 		return -EINVAL;
 	}
 
-	if (ec->rx_coalesce_usecs == 0) {
+	vector = vsi->base_vector;
+	if ((ec->rx_coalesce_usecs >= (I40E_MIN_ITR << 1)) &&
+	    (ec->rx_coalesce_usecs <= (I40E_MAX_ITR << 1))) {
+		vsi->rx_itr_setting = ec->rx_coalesce_usecs;
+	} else if (ec->rx_coalesce_usecs == 0) {
+		vsi->rx_itr_setting = ec->rx_coalesce_usecs;
 		if (ec->use_adaptive_rx_coalesce)
 			netif_info(pf, drv, netdev, "rx-usecs=0, need to disable adaptive-rx for a complete disable\n");
-	} else if ((ec->rx_coalesce_usecs < (I40E_MIN_ITR << 1)) ||
-		   (ec->rx_coalesce_usecs > (I40E_MAX_ITR << 1))) {
-			netif_info(pf, drv, netdev, "Invalid value, rx-usecs range is 0-8160\n");
-			return -EINVAL;
+	} else {
+		netif_info(pf, drv, netdev, "Invalid value, rx-usecs range is 0-8160\n");
+		return -EINVAL;
 	}
 
 	vsi->int_rate_limit = ec->rx_coalesce_usecs_high;
 
-	if (ec->tx_coalesce_usecs == 0) {
+	if ((ec->tx_coalesce_usecs >= (I40E_MIN_ITR << 1)) &&
+	    (ec->tx_coalesce_usecs <= (I40E_MAX_ITR << 1))) {
+		vsi->tx_itr_setting = ec->tx_coalesce_usecs;
+	} else if (ec->tx_coalesce_usecs == 0) {
+		vsi->tx_itr_setting = ec->tx_coalesce_usecs;
 		if (ec->use_adaptive_tx_coalesce)
 			netif_info(pf, drv, netdev, "tx-usecs=0, need to disable adaptive-tx for a complete disable\n");
-	} else if ((ec->tx_coalesce_usecs < (I40E_MIN_ITR << 1)) ||
-		   (ec->tx_coalesce_usecs > (I40E_MAX_ITR << 1))) {
-			netif_info(pf, drv, netdev, "Invalid value, tx-usecs range is 0-8160\n");
-			return -EINVAL;
-	}
-
-	/* rx and tx usecs has per queue value. If user doesn't specify the queue,
-	 * apply to all queues.
-	 */
-	if (queue < 0) {
-		for (i = 0; i < vsi->num_queue_pairs; i++)
-			i40e_set_itr_per_queue(vsi, ec, i);
-	} else if (queue < vsi->num_queue_pairs) {
-		i40e_set_itr_per_queue(vsi, ec, queue);
 	} else {
-		netif_info(pf, drv, netdev, "Invalid queue value, queue range is 0 - %d\n",
-			   vsi->num_queue_pairs - 1);
+		netif_info(pf, drv, netdev,
+			   "Invalid value, tx-usecs range is 0-8160\n");
 		return -EINVAL;
 	}
 
+	if (ec->use_adaptive_rx_coalesce)
+		vsi->rx_itr_setting |= I40E_ITR_DYNAMIC;
+	else
+		vsi->rx_itr_setting &= ~I40E_ITR_DYNAMIC;
+
+	if (ec->use_adaptive_tx_coalesce)
+		vsi->tx_itr_setting |= I40E_ITR_DYNAMIC;
+	else
+		vsi->tx_itr_setting &= ~I40E_ITR_DYNAMIC;
+
+	for (i = 0; i < vsi->num_q_vectors; i++, vector++) {
+		u16 intrl = INTRL_USEC_TO_REG(vsi->int_rate_limit);
+
+		q_vector = vsi->q_vectors[i];
+		q_vector->rx.itr = ITR_TO_REG(vsi->rx_itr_setting);
+		wr32(hw, I40E_PFINT_ITRN(0, vector - 1), q_vector->rx.itr);
+		q_vector->tx.itr = ITR_TO_REG(vsi->tx_itr_setting);
+		wr32(hw, I40E_PFINT_ITRN(1, vector - 1), q_vector->tx.itr);
+		wr32(hw, I40E_PFINT_RATEN(vector - 1), intrl);
+		i40e_flush(hw);
+	}
+
 	return 0;
-}
-
-/**
- * i40e_set_coalesce - set coalesce settings for every queue on the netdev
- * @netdev: the netdev to change
- * @ec: ethtool coalesce settings
- *
- * This will set each queue to the same coalesce settings.
- **/
-static int i40e_set_coalesce(struct net_device *netdev,
-			     struct ethtool_coalesce *ec)
-{
-	return __i40e_set_coalesce(netdev, ec, -1);
-}
-
-/**
- * i40e_set_per_queue_coalesce - set specific queue's coalesce settings
- * @netdev: the netdev to change
- * @ec: ethtool's coalesce settings
- * @queue: the queue to change
- *
- * Sets the specified queue's coalesce settings.
- **/
-static int i40e_set_per_queue_coalesce(struct net_device *netdev, u32 queue,
-				       struct ethtool_coalesce *ec)
-{
-	return __i40e_set_coalesce(netdev, ec, queue);
 }
 
 /**
@@ -2210,70 +1964,39 @@ static int i40e_set_per_queue_coalesce(struct net_device *netdev, u32 queue,
  **/
 static int i40e_get_rss_hash_opts(struct i40e_pf *pf, struct ethtool_rxnfc *cmd)
 {
-	struct i40e_hw *hw = &pf->hw;
-	u8 flow_pctype = 0;
-	u64 i_set = 0;
-
 	cmd->data = 0;
 
+	if (pf->vsi[pf->lan_vsi]->rxnfc.data != 0) {
+		cmd->data = pf->vsi[pf->lan_vsi]->rxnfc.data;
+		cmd->flow_type = pf->vsi[pf->lan_vsi]->rxnfc.flow_type;
+		return 0;
+	}
+	/* Report default options for RSS on i40e */
 	switch (cmd->flow_type) {
 	case TCP_V4_FLOW:
-		flow_pctype = I40E_FILTER_PCTYPE_NONF_IPV4_TCP;
-		break;
 	case UDP_V4_FLOW:
-		flow_pctype = I40E_FILTER_PCTYPE_NONF_IPV4_UDP;
-		break;
-	case TCP_V6_FLOW:
-		flow_pctype = I40E_FILTER_PCTYPE_NONF_IPV6_TCP;
-		break;
-	case UDP_V6_FLOW:
-		flow_pctype = I40E_FILTER_PCTYPE_NONF_IPV6_UDP;
-		break;
+		cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+	/* fall through to add IP fields */
 	case SCTP_V4_FLOW:
 	case AH_ESP_V4_FLOW:
 	case AH_V4_FLOW:
 	case ESP_V4_FLOW:
 	case IPV4_FLOW:
+		cmd->data |= RXH_IP_SRC | RXH_IP_DST;
+		break;
+	case TCP_V6_FLOW:
+	case UDP_V6_FLOW:
+		cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+	/* fall through to add IP fields */
 	case SCTP_V6_FLOW:
 	case AH_ESP_V6_FLOW:
 	case AH_V6_FLOW:
 	case ESP_V6_FLOW:
 	case IPV6_FLOW:
-		/* Default is src/dest for IP, no matter the L4 hashing */
 		cmd->data |= RXH_IP_SRC | RXH_IP_DST;
 		break;
 	default:
 		return -EINVAL;
-	}
-
-	/* Read flow based hash input set register */
-	if (flow_pctype) {
-		i_set = (u64)i40e_read_rx_ctl(hw, I40E_GLQF_HASH_INSET(0,
-					      flow_pctype)) |
-			((u64)i40e_read_rx_ctl(hw, I40E_GLQF_HASH_INSET(1,
-					       flow_pctype)) << 32);
-	}
-
-	/* Process bits of hash input set */
-	if (i_set) {
-		if (i_set & I40E_L4_SRC_MASK)
-			cmd->data |= RXH_L4_B_0_1;
-		if (i_set & I40E_L4_DST_MASK)
-			cmd->data |= RXH_L4_B_2_3;
-
-		if (cmd->flow_type == TCP_V4_FLOW ||
-		    cmd->flow_type == UDP_V4_FLOW) {
-			if (i_set & I40E_L3_SRC_MASK)
-				cmd->data |= RXH_IP_SRC;
-			if (i_set & I40E_L3_DST_MASK)
-				cmd->data |= RXH_IP_DST;
-		} else if (cmd->flow_type == TCP_V6_FLOW ||
-			  cmd->flow_type == UDP_V6_FLOW) {
-			if (i_set & I40E_L3_V6_SRC_MASK)
-				cmd->data |= RXH_IP_SRC;
-			if (i_set & I40E_L3_V6_DST_MASK)
-				cmd->data |= RXH_IP_DST;
-		}
 	}
 
 	return 0;
@@ -2392,7 +2115,7 @@ static int i40e_get_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd,
 
 	switch (cmd->cmd) {
 	case ETHTOOL_GRXRINGS:
-		cmd->data = vsi->num_queue_pairs;
+		cmd->data = vsi->alloc_queue_pairs;
 		ret = 0;
 		break;
 	case ETHTOOL_GRXFH:
@@ -2418,51 +2141,6 @@ static int i40e_get_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd,
 }
 
 /**
- * i40e_get_rss_hash_bits - Read RSS Hash bits from register
- * @nfc: pointer to user request
- * @i_setc bits currently set
- *
- * Returns value of bits to be set per user request
- **/
-static u64 i40e_get_rss_hash_bits(struct ethtool_rxnfc *nfc, u64 i_setc)
-{
-	u64 i_set = i_setc;
-	u64 src_l3 = 0, dst_l3 = 0;
-
-	if (nfc->data & RXH_L4_B_0_1)
-		i_set |= I40E_L4_SRC_MASK;
-	else
-		i_set &= ~I40E_L4_SRC_MASK;
-	if (nfc->data & RXH_L4_B_2_3)
-		i_set |= I40E_L4_DST_MASK;
-	else
-		i_set &= ~I40E_L4_DST_MASK;
-
-	if (nfc->flow_type == TCP_V6_FLOW || nfc->flow_type == UDP_V6_FLOW) {
-		src_l3 = I40E_L3_V6_SRC_MASK;
-		dst_l3 = I40E_L3_V6_DST_MASK;
-	} else if (nfc->flow_type == TCP_V4_FLOW ||
-		  nfc->flow_type == UDP_V4_FLOW) {
-		src_l3 = I40E_L3_SRC_MASK;
-		dst_l3 = I40E_L3_DST_MASK;
-	} else {
-		/* Any other flow type are not supported here */
-		return i_set;
-	}
-
-	if (nfc->data & RXH_IP_SRC)
-		i_set |= src_l3;
-	else
-		i_set &= ~src_l3;
-	if (nfc->data & RXH_IP_DST)
-		i_set |= dst_l3;
-	else
-		i_set &= ~dst_l3;
-
-	return i_set;
-}
-
-/**
  * i40e_set_rss_hash_opt - Enable/Disable flow types for RSS hash
  * @pf: pointer to the physical function struct
  * @cmd: ethtool rxnfc command
@@ -2472,10 +2150,8 @@ static u64 i40e_get_rss_hash_bits(struct ethtool_rxnfc *nfc, u64 i_setc)
 static int i40e_set_rss_hash_opt(struct i40e_pf *pf, struct ethtool_rxnfc *nfc)
 {
 	struct i40e_hw *hw = &pf->hw;
-	u64 hena = (u64)i40e_read_rx_ctl(hw, I40E_PFQF_HENA(0)) |
-		   ((u64)i40e_read_rx_ctl(hw, I40E_PFQF_HENA(1)) << 32);
-	u8 flow_pctype = 0;
-	u64 i_set, i_setc;
+	u64 hena = (u64)rd32(hw, I40E_PFQF_HENA(0)) |
+		   ((u64)rd32(hw, I40E_PFQF_HENA(1)) << 32);
 
 	/* RSS does not support anything other than hashing
 	 * to queues on src and dst IPs and ports
@@ -2484,39 +2160,57 @@ static int i40e_set_rss_hash_opt(struct i40e_pf *pf, struct ethtool_rxnfc *nfc)
 			  RXH_L4_B_0_1 | RXH_L4_B_2_3))
 		return -EINVAL;
 
+	/* We need at least the IP SRC and DEST fields for hashing */
+	if (!(nfc->data & RXH_IP_SRC) ||
+	    !(nfc->data & RXH_IP_DST))
+		return -EINVAL;
+
 	switch (nfc->flow_type) {
 	case TCP_V4_FLOW:
-		flow_pctype = I40E_FILTER_PCTYPE_NONF_IPV4_TCP;
-		if (pf->flags & I40E_FLAG_MULTIPLE_TCP_UDP_RSS_PCTYPE)
-			hena |=
-			  BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV4_TCP_SYN_NO_ACK);
+		switch (nfc->data & (RXH_L4_B_0_1 | RXH_L4_B_2_3)) {
+		case 0:
+			return -EINVAL;
+		case (RXH_L4_B_0_1 | RXH_L4_B_2_3):
+			hena |= BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV4_TCP);
+			break;
+		default:
+			return -EINVAL;
+		}
 		break;
 	case TCP_V6_FLOW:
-		flow_pctype = I40E_FILTER_PCTYPE_NONF_IPV6_TCP;
-		if (pf->flags & I40E_FLAG_MULTIPLE_TCP_UDP_RSS_PCTYPE)
-			hena |=
-			  BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV4_TCP_SYN_NO_ACK);
-		if (pf->flags & I40E_FLAG_MULTIPLE_TCP_UDP_RSS_PCTYPE)
-			hena |=
-			  BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV6_TCP_SYN_NO_ACK);
+		switch (nfc->data & (RXH_L4_B_0_1 | RXH_L4_B_2_3)) {
+		case 0:
+			return -EINVAL;
+		case (RXH_L4_B_0_1 | RXH_L4_B_2_3):
+			hena |= BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV6_TCP);
+			break;
+		default:
+			return -EINVAL;
+		}
 		break;
 	case UDP_V4_FLOW:
-		flow_pctype = I40E_FILTER_PCTYPE_NONF_IPV4_UDP;
-		if (pf->flags & I40E_FLAG_MULTIPLE_TCP_UDP_RSS_PCTYPE)
-			hena |=
-			  BIT_ULL(I40E_FILTER_PCTYPE_NONF_UNICAST_IPV4_UDP) |
-			  BIT_ULL(I40E_FILTER_PCTYPE_NONF_MULTICAST_IPV4_UDP);
-
-		hena |= BIT_ULL(I40E_FILTER_PCTYPE_FRAG_IPV4);
+		switch (nfc->data & (RXH_L4_B_0_1 | RXH_L4_B_2_3)) {
+		case 0:
+			return -EINVAL;
+		case (RXH_L4_B_0_1 | RXH_L4_B_2_3):
+			hena |= (BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV4_UDP) |
+				 BIT_ULL(I40E_FILTER_PCTYPE_FRAG_IPV4));
+			break;
+		default:
+			return -EINVAL;
+		}
 		break;
 	case UDP_V6_FLOW:
-		flow_pctype = I40E_FILTER_PCTYPE_NONF_IPV6_UDP;
-		if (pf->flags & I40E_FLAG_MULTIPLE_TCP_UDP_RSS_PCTYPE)
-			hena |=
-			  BIT_ULL(I40E_FILTER_PCTYPE_NONF_UNICAST_IPV6_UDP) |
-			  BIT_ULL(I40E_FILTER_PCTYPE_NONF_MULTICAST_IPV6_UDP);
-
-		hena |= BIT_ULL(I40E_FILTER_PCTYPE_FRAG_IPV6);
+		switch (nfc->data & (RXH_L4_B_0_1 | RXH_L4_B_2_3)) {
+		case 0:
+			return -EINVAL;
+		case (RXH_L4_B_0_1 | RXH_L4_B_2_3):
+			hena |= (BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV6_UDP) |
+				 BIT_ULL(I40E_FILTER_PCTYPE_FRAG_IPV6));
+			break;
+		default:
+			return -EINVAL;
+		}
 		break;
 	case AH_ESP_V4_FLOW:
 	case AH_V4_FLOW:
@@ -2548,22 +2242,12 @@ static int i40e_set_rss_hash_opt(struct i40e_pf *pf, struct ethtool_rxnfc *nfc)
 		return -EINVAL;
 	}
 
-	if (flow_pctype) {
-		i_setc = (u64)i40e_read_rx_ctl(hw, I40E_GLQF_HASH_INSET(0,
-					       flow_pctype)) |
-			((u64)i40e_read_rx_ctl(hw, I40E_GLQF_HASH_INSET(1,
-					       flow_pctype)) << 32);
-		i_set = i40e_get_rss_hash_bits(nfc, i_setc);
-		i40e_write_rx_ctl(hw, I40E_GLQF_HASH_INSET(0, flow_pctype),
-				  (u32)i_set);
-		i40e_write_rx_ctl(hw, I40E_GLQF_HASH_INSET(1, flow_pctype),
-				  (u32)(i_set >> 32));
-		hena |= BIT_ULL(flow_pctype);
-	}
-
-	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(0), (u32)hena);
-	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(1), (u32)(hena >> 32));
+	wr32(hw, I40E_PFQF_HENA(0), (u32)hena);
+	wr32(hw, I40E_PFQF_HENA(1), (u32)(hena >> 32));
 	i40e_flush(hw);
+
+	/* Save setting for future output/update */
+	pf->vsi[pf->lan_vsi]->rxnfc = *nfc;
 
 	return 0;
 }
@@ -2702,6 +2386,7 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 
 	if (!vsi)
 		return -EINVAL;
+
 	pf = vsi->back;
 
 	if (!(pf->flags & I40E_FLAG_FD_SB_ENABLED))
@@ -2759,18 +2444,15 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	input->src_ip[0] = fsp->h_u.tcp_ip4_spec.ip4dst;
 
 	if (ntohl(fsp->m_ext.data[1])) {
-		vf_id = ntohl(fsp->h_ext.data[1]);
-		if (vf_id >= pf->num_alloc_vfs) {
-			netif_info(pf, drv, vsi->netdev,
-				   "Invalid VF id %d\n", vf_id);
+		if (ntohl(fsp->h_ext.data[1]) >= pf->num_alloc_vfs) {
+			netif_info(pf, drv, vsi->netdev, "Invalid VF id\n");
 			goto free_input;
 		}
+		vf_id = ntohl(fsp->h_ext.data[1]);
 		/* Find vsi id from vf id and override dest vsi */
 		input->dest_vsi = pf->vf[vf_id].lan_vsi_id;
 		if (input->q_index >= pf->vf[vf_id].num_queue_pairs) {
-			netif_info(pf, drv, vsi->netdev,
-				   "Invalid queue id %d for VF %d\n",
-				   input->q_index, vf_id);
+			netif_info(pf, drv, vsi->netdev, "Invalid queue id\n");
 			goto free_input;
 		}
 	}
@@ -2865,15 +2547,11 @@ static void i40e_get_channels(struct net_device *dev,
 static int i40e_set_channels(struct net_device *dev,
 			      struct ethtool_channels *ch)
 {
-	const u8 drop = I40E_FILTER_PROGRAM_DESC_DEST_DROP_PACKET;
 	struct i40e_netdev_priv *np = netdev_priv(dev);
 	unsigned int count = ch->combined_count;
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
-	struct i40e_fdir_filter *rule;
-	struct hlist_node *node2;
 	int new_count;
-	int err = 0;
 
 	/* We do not support setting channels for any other VSI at present */
 	if (vsi->type != I40E_VSI_MAIN)
@@ -2891,26 +2569,6 @@ static int i40e_set_channels(struct net_device *dev,
 	if (count > i40e_max_channels(vsi))
 		return -EINVAL;
 
-	/* verify that the number of channels does not invalidate any current
-	 * flow director rules
-	 */
-	hlist_for_each_entry_safe(rule, node2,
-				  &pf->fdir_filter_list, fdir_node) {
-		if (rule->dest_ctl != drop && count <= rule->q_index) {
-			dev_warn(&pf->pdev->dev,
-				 "Existing user defined filter %d assigns flow to queue %d\n",
-				 rule->fd_id, rule->q_index);
-			err = -EINVAL;
-		}
-	}
-
-	if (err) {
-		dev_err(&pf->pdev->dev,
-			"Existing filter rules must be deleted to reduce combined channel count to %d\n",
-			count);
-		return err;
-	}
-
 	/* update feature limits from largest to smallest supported values */
 	/* TODO: Flow director limit, DCB etc */
 
@@ -2924,6 +2582,7 @@ static int i40e_set_channels(struct net_device *dev,
 		return -EINVAL;
 }
 
+#define I40E_HLUT_ARRAY_SIZE ((I40E_PFQF_HLUT_MAX_INDEX + 1) * 4)
 /**
  * i40e_get_rxfh_key_size - get the RSS hash key size
  * @netdev: network interface device structure
@@ -2951,9 +2610,10 @@ static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key,
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_vsi *vsi = np->vsi;
-	u8 *lut, *seed = NULL;
-	int ret;
-	u16 i;
+	struct i40e_pf *pf = vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	u32 reg_val;
+	int i, j;
 
 	if (hfunc)
 		*hfunc = ETH_RSS_HASH_TOP;
@@ -2961,20 +2621,24 @@ static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key,
 	if (!indir)
 		return 0;
 
-	seed = key;
-	lut = kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
-	if (!lut)
-		return -ENOMEM;
-	ret = i40e_get_rss(vsi, seed, lut, I40E_HLUT_ARRAY_SIZE);
-	if (ret)
-		goto out;
-	for (i = 0; i < I40E_HLUT_ARRAY_SIZE; i++)
-		indir[i] = (u32)(lut[i]);
+	for (i = 0, j = 0; i <= I40E_PFQF_HLUT_MAX_INDEX; i++) {
+		reg_val = rd32(hw, I40E_PFQF_HLUT(i));
+		indir[j++] = reg_val & 0xff;
+		indir[j++] = (reg_val >> 8) & 0xff;
+		indir[j++] = (reg_val >> 16) & 0xff;
+		indir[j++] = (reg_val >> 24) & 0xff;
+	}
 
-out:
-	kfree(lut);
-
-	return ret;
+	if (key) {
+		for (i = 0, j = 0; i <= I40E_PFQF_HKEY_MAX_INDEX; i++) {
+			reg_val = rd32(hw, I40E_PFQF_HKEY(i));
+			key[j++] = (u8)(reg_val & 0xff);
+			key[j++] = (u8)((reg_val >> 8) & 0xff);
+			key[j++] = (u8)((reg_val >> 16) & 0xff);
+			key[j++] = (u8)((reg_val >> 24) & 0xff);
+		}
+	}
+	return 0;
 }
 
 /**
@@ -2992,38 +2656,34 @@ static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
-	u8 *seed = NULL;
-	u16 i;
+	struct i40e_hw *hw = &pf->hw;
+	u32 reg_val;
+	int i, j;
 
 	if (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP)
 		return -EOPNOTSUPP;
 
+	if (!indir)
+		return 0;
+
+	for (i = 0, j = 0; i <= I40E_PFQF_HLUT_MAX_INDEX; i++) {
+		reg_val = indir[j++];
+		reg_val |= indir[j++] << 8;
+		reg_val |= indir[j++] << 16;
+		reg_val |= indir[j++] << 24;
+		wr32(hw, I40E_PFQF_HLUT(i), reg_val);
+	}
+
 	if (key) {
-		if (!vsi->rss_hkey_user) {
-			vsi->rss_hkey_user = kzalloc(I40E_HKEY_ARRAY_SIZE,
-						     GFP_KERNEL);
-			if (!vsi->rss_hkey_user)
-				return -ENOMEM;
+		for (i = 0, j = 0; i <= I40E_PFQF_HKEY_MAX_INDEX; i++) {
+			reg_val = key[j++];
+			reg_val |= key[j++] << 8;
+			reg_val |= key[j++] << 16;
+			reg_val |= key[j++] << 24;
+			wr32(hw, I40E_PFQF_HKEY(i), reg_val);
 		}
-		memcpy(vsi->rss_hkey_user, key, I40E_HKEY_ARRAY_SIZE);
-		seed = vsi->rss_hkey_user;
 	}
-	if (!vsi->rss_lut_user) {
-		vsi->rss_lut_user = kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
-		if (!vsi->rss_lut_user)
-			return -ENOMEM;
-	}
-
-	/* Each 32 bits pointed by 'indir' is stored with a lut entry */
-	if (indir)
-		for (i = 0; i < I40E_HLUT_ARRAY_SIZE; i++)
-			vsi->rss_lut_user[i] = (u8)(indir[i]);
-	else
-		i40e_fill_rss_lut(pf, vsi->rss_lut_user, I40E_HLUT_ARRAY_SIZE,
-				  vsi->rss_size);
-
-	return i40e_config_rss(vsi, seed, vsi->rss_lut_user,
-			       I40E_HLUT_ARRAY_SIZE);
+	return 0;
 }
 
 /**
@@ -3043,18 +2703,14 @@ static u32 i40e_get_priv_flags(struct net_device *dev)
 	struct i40e_pf *pf = vsi->back;
 	u32 ret_flags = 0;
 
+	ret_flags |= pf->hw.func_caps.npar_enable ?
+		I40E_PRIV_FLAGS_NPAR_FLAG : 0;
 	ret_flags |= pf->flags & I40E_FLAG_LINK_POLLING_ENABLED ?
 		I40E_PRIV_FLAGS_LINKPOLL_FLAG : 0;
 	ret_flags |= pf->flags & I40E_FLAG_FD_ATR_ENABLED ?
 		I40E_PRIV_FLAGS_FD_ATR : 0;
 	ret_flags |= pf->flags & I40E_FLAG_VEB_STATS_ENABLED ?
 		I40E_PRIV_FLAGS_VEB_STATS : 0;
-	ret_flags |= pf->auto_disable_flags & I40E_FLAG_HW_ATR_EVICT_CAPABLE ?
-		0 : I40E_PRIV_FLAGS_HW_ATR_EVICT;
-	if (pf->hw.pf_id == 0) {
-		ret_flags |= pf->flags & I40E_FLAG_TRUE_PROMISC_SUPPORT ?
-			I40E_PRIV_FLAGS_TRUE_PROMISC_SUPPORT : 0;
-	}
 
 	return ret_flags;
 }
@@ -3069,12 +2725,6 @@ static int i40e_set_priv_flags(struct net_device *dev, u32 flags)
 	struct i40e_netdev_priv *np = netdev_priv(dev);
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
-	u16 sw_flags = 0, valid_flags = 0;
-	bool reset_required = false;
-	bool promisc_change = false;
-	int ret;
-
-	/* NOTE: MFP is not settable */
 
 	if (flags & I40E_PRIV_FLAGS_LINKPOLL_FLAG)
 		pf->flags |= I40E_FLAG_LINK_POLLING_ENABLED;
@@ -3090,57 +2740,12 @@ static int i40e_set_priv_flags(struct net_device *dev, u32 flags)
 	} else {
 		pf->flags &= ~I40E_FLAG_FD_ATR_ENABLED;
 		pf->auto_disable_flags |= I40E_FLAG_FD_ATR_ENABLED;
-
-		/* flush current ATR settings */
-		set_bit(__I40E_FD_FLUSH_REQUESTED, &pf->state);
 	}
 
-	if ((flags & I40E_PRIV_FLAGS_VEB_STATS) &&
-	    !(pf->flags & I40E_FLAG_VEB_STATS_ENABLED)) {
+	if (flags & I40E_PRIV_FLAGS_VEB_STATS)
 		pf->flags |= I40E_FLAG_VEB_STATS_ENABLED;
-		reset_required = true;
-	} else if (!(flags & I40E_PRIV_FLAGS_VEB_STATS) &&
-		   (pf->flags & I40E_FLAG_VEB_STATS_ENABLED)) {
-		pf->flags &= ~I40E_FLAG_VEB_STATS_ENABLED;
-		reset_required = true;
-	}
-
-	if (pf->hw.pf_id == 0) {
-		if ((flags & I40E_PRIV_FLAGS_TRUE_PROMISC_SUPPORT) &&
-		    !(pf->flags & I40E_FLAG_TRUE_PROMISC_SUPPORT)) {
-			pf->flags |= I40E_FLAG_TRUE_PROMISC_SUPPORT;
-			promisc_change = true;
-		} else if (!(flags & I40E_PRIV_FLAGS_TRUE_PROMISC_SUPPORT) &&
-			   (pf->flags & I40E_FLAG_TRUE_PROMISC_SUPPORT)) {
-			pf->flags &= ~I40E_FLAG_TRUE_PROMISC_SUPPORT;
-			promisc_change = true;
-		}
-	}
-	if (promisc_change) {
-		if (!(pf->flags & I40E_FLAG_TRUE_PROMISC_SUPPORT))
-			sw_flags = I40E_AQ_SET_SWITCH_CFG_PROMISC;
-		valid_flags = I40E_AQ_SET_SWITCH_CFG_PROMISC;
-		ret = i40e_aq_set_switch_config(&pf->hw, sw_flags, valid_flags,
-						NULL);
-		if (ret && pf->hw.aq.asq_last_status != I40E_AQ_RC_ESRCH) {
-			dev_info(&pf->pdev->dev,
-				 "couldn't set switch config bits, err %s aq_err %s\n",
-				 i40e_stat_str(&pf->hw, ret),
-				 i40e_aq_str(&pf->hw,
-					     pf->hw.aq.asq_last_status));
-			/* not a fatal problem, just keep going */
-		}
-	}
-
-	if ((flags & I40E_PRIV_FLAGS_HW_ATR_EVICT) &&
-	    (pf->flags & I40E_FLAG_HW_ATR_EVICT_CAPABLE))
-		pf->auto_disable_flags &= ~I40E_FLAG_HW_ATR_EVICT_CAPABLE;
 	else
-		pf->auto_disable_flags |= I40E_FLAG_HW_ATR_EVICT_CAPABLE;
-
-	/* if needed, issue reset to cause things to take effect */
-	if (reset_required)
-		i40e_do_reset(pf, BIT(__I40E_PF_RESET_REQUESTED));
+		pf->flags &= ~I40E_FLAG_VEB_STATS_ENABLED;
 
 	return 0;
 }
@@ -3182,8 +2787,6 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 	.get_ts_info		= i40e_get_ts_info,
 	.get_priv_flags		= i40e_get_priv_flags,
 	.set_priv_flags		= i40e_set_priv_flags,
-	.get_per_queue_coalesce	= i40e_get_per_queue_coalesce,
-	.set_per_queue_coalesce	= i40e_set_per_queue_coalesce,
 };
 
 void i40e_set_ethtool_ops(struct net_device *netdev)

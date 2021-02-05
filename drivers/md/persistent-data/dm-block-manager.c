@@ -97,6 +97,10 @@ static void __del_holder(struct block_lock *lock, struct task_struct *task)
 static int __check_holder(struct block_lock *lock)
 {
 	unsigned i;
+#ifdef CONFIG_DM_DEBUG_BLOCK_STACK_TRACING
+	static struct stack_trace t;
+	static stack_entries entries;
+#endif
 
 	for (i = 0; i < MAX_HOLDERS; i++) {
 		if (lock->holders[i] == current) {
@@ -106,7 +110,12 @@ static int __check_holder(struct block_lock *lock)
 			print_stack_trace(lock->traces + i, 4);
 
 			DMERR("subsequent acquisition attempted here:");
-			dump_stack();
+			t.nr_entries = 0;
+			t.max_entries = MAX_STACK;
+			t.entries = entries;
+			t.skip = 3;
+			save_stack_trace(&t);
+			print_stack_trace(&t, 4);
 #endif
 			return -EINVAL;
 		}

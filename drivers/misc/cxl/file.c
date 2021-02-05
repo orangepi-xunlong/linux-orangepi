@@ -26,7 +26,9 @@
 #include "trace.h"
 
 #define CXL_NUM_MINORS 256 /* Total to reserve */
+#define CXL_DEV_MINORS 13   /* 1 control + 4 AFUs * 3 (dedicated/master/shared) */
 
+#define CXL_CARD_MINOR(adapter) (adapter->adapter_num * CXL_DEV_MINORS)
 #define CXL_AFU_MINOR_D(afu) (CXL_CARD_MINOR(afu->adapter) + 1 + (3 * afu->slice))
 #define CXL_AFU_MINOR_M(afu) (CXL_AFU_MINOR_D(afu) + 1)
 #define CXL_AFU_MINOR_S(afu) (CXL_AFU_MINOR_D(afu) + 2)
@@ -34,6 +36,7 @@
 #define CXL_AFU_MKDEV_M(afu) MKDEV(MAJOR(cxl_dev), CXL_AFU_MINOR_M(afu))
 #define CXL_AFU_MKDEV_S(afu) MKDEV(MAJOR(cxl_dev), CXL_AFU_MINOR_S(afu))
 
+#define CXL_DEVT_ADAPTER(dev) (MINOR(dev) / CXL_DEV_MINORS)
 #define CXL_DEVT_AFU(dev) ((MINOR(dev) % CXL_DEV_MINORS - 1) / 3)
 
 #define CXL_DEVT_IS_CARD(dev) (MINOR(dev) % CXL_DEV_MINORS == 0)
@@ -76,7 +79,7 @@ static int __afu_open(struct inode *inode, struct file *file, bool master)
 	if (!afu->current_mode)
 		goto err_put_afu;
 
-	if (!cxl_ops->link_ok(adapter, afu)) {
+	if (!cxl_adapter_link_ok(adapter)) {
 		rc = -EIO;
 		goto err_put_afu;
 	}
@@ -190,16 +193,6 @@ static long afu_ioctl_start_work(struct cxl_context *ctx,
 	ctx->mmio_err_ff = !!(work.flags & CXL_START_WORK_ERR_FF);
 
 	/*
-	 * Increment the mapped context count for adapter. This also checks
-	 * if adapter_context_lock is taken.
-	 */
-	rc = cxl_adapter_context_get(ctx->afu->adapter);
-	if (rc) {
-		afu_release_irqs(ctx, ctx);
-		goto out;
-	}
-
-	/*
 	 * We grab the PID here and not in the file open to allow for the case
 	 * where a process (master, some daemon, etc) has opened the chardev on
 	 * behalf of another process, so the AFU's mm gets bound to the process
@@ -211,7 +204,6 @@ static long afu_ioctl_start_work(struct cxl_context *ctx,
 	ctx->pid = get_task_pid(current, PIDTYPE_PID);
 	ctx->glpid = get_task_pid(current->group_leader, PIDTYPE_PID);
 
-
 	/*
 	 * Increment driver use count. Enables global TLBIs for hash
 	 * and callbacks to handle the segment table
@@ -220,13 +212,9 @@ static long afu_ioctl_start_work(struct cxl_context *ctx,
 
 	trace_cxl_attach(ctx, work.work_element_descriptor, work.num_interrupts, amr);
 
-	if ((rc = cxl_ops->attach_process(ctx, false, work.work_element_descriptor,
-							amr))) {
+	if ((rc = cxl_attach_process(ctx, false, work.work_element_descriptor,
+				     amr))) {
 		afu_release_irqs(ctx, ctx);
-		cxl_adapter_context_put(ctx->afu->adapter);
-		put_pid(ctx->glpid);
-		put_pid(ctx->pid);
-		ctx->glpid = ctx->pid = NULL;
 		cxl_ctx_put();
 		goto out;
 	}
@@ -237,13 +225,12 @@ out:
 	mutex_unlock(&ctx->status_mutex);
 	return rc;
 }
-
 static long afu_ioctl_process_element(struct cxl_context *ctx,
 				      int __user *upe)
 {
 	pr_devel("%s: pe: %i\n", __func__, ctx->pe);
 
-	if (copy_to_user(upe, &ctx->external_pe, sizeof(__u32)))
+	if (copy_to_user(upe, &ctx->pe, sizeof(__u32)))
 		return -EFAULT;
 
 	return 0;
@@ -275,7 +262,7 @@ long afu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	if (ctx->status == CLOSED)
 		return -EIO;
 
-	if (!cxl_ops->link_ok(ctx->afu->adapter, ctx->afu))
+	if (!cxl_adapter_link_ok(ctx->afu->adapter))
 		return -EIO;
 
 	pr_devel("afu_ioctl\n");
@@ -305,21 +292,10 @@ int afu_mmap(struct file *file, struct vm_area_struct *vm)
 	if (ctx->status != STARTED)
 		return -EIO;
 
-	if (!cxl_ops->link_ok(ctx->afu->adapter, ctx->afu))
+	if (!cxl_adapter_link_ok(ctx->afu->adapter))
 		return -EIO;
 
 	return cxl_context_iomap(ctx, vm);
-}
-
-static inline bool ctx_event_pending(struct cxl_context *ctx)
-{
-	if (ctx->pending_irq || ctx->pending_fault || ctx->pending_afu_err)
-		return true;
-
-	if (ctx->afu_driver_ops && atomic_read(&ctx->afu_driver_events))
-		return true;
-
-	return false;
 }
 
 unsigned int afu_poll(struct file *file, struct poll_table_struct *poll)
@@ -334,7 +310,8 @@ unsigned int afu_poll(struct file *file, struct poll_table_struct *poll)
 	pr_devel("afu_poll wait done pe: %i\n", ctx->pe);
 
 	spin_lock_irqsave(&ctx->lock, flags);
-	if (ctx_event_pending(ctx))
+	if (ctx->pending_irq || ctx->pending_fault ||
+	    ctx->pending_afu_err)
 		mask |= POLLIN | POLLRDNORM;
 	else if (ctx->status == CLOSED)
 		/* Only error on closed when there are no futher events pending
@@ -347,52 +324,22 @@ unsigned int afu_poll(struct file *file, struct poll_table_struct *poll)
 	return mask;
 }
 
-static ssize_t afu_driver_event_copy(struct cxl_context *ctx,
-				     char __user *buf,
-				     struct cxl_event *event,
-				     struct cxl_event_afu_driver_reserved *pl)
+static inline int ctx_event_pending(struct cxl_context *ctx)
 {
-	/* Check event */
-	if (!pl) {
-		ctx->afu_driver_ops->event_delivered(ctx, pl, -EINVAL);
-		return -EFAULT;
-	}
-
-	/* Check event size */
-	event->header.size += pl->data_size;
-	if (event->header.size > CXL_READ_MIN_SIZE) {
-		ctx->afu_driver_ops->event_delivered(ctx, pl, -EINVAL);
-		return -EFAULT;
-	}
-
-	/* Copy event header */
-	if (copy_to_user(buf, event, sizeof(struct cxl_event_header))) {
-		ctx->afu_driver_ops->event_delivered(ctx, pl, -EFAULT);
-		return -EFAULT;
-	}
-
-	/* Copy event data */
-	buf += sizeof(struct cxl_event_header);
-	if (copy_to_user(buf, &pl->data, pl->data_size)) {
-		ctx->afu_driver_ops->event_delivered(ctx, pl, -EFAULT);
-		return -EFAULT;
-	}
-
-	ctx->afu_driver_ops->event_delivered(ctx, pl, 0); /* Success */
-	return event->header.size;
+	return (ctx->pending_irq || ctx->pending_fault ||
+	    ctx->pending_afu_err || (ctx->status == CLOSED));
 }
 
 ssize_t afu_read(struct file *file, char __user *buf, size_t count,
 			loff_t *off)
 {
 	struct cxl_context *ctx = file->private_data;
-	struct cxl_event_afu_driver_reserved *pl = NULL;
 	struct cxl_event event;
 	unsigned long flags;
 	int rc;
 	DEFINE_WAIT(wait);
 
-	if (!cxl_ops->link_ok(ctx->afu->adapter, ctx->afu))
+	if (!cxl_adapter_link_ok(ctx->afu->adapter))
 		return -EIO;
 
 	if (count < CXL_READ_MIN_SIZE)
@@ -402,10 +349,10 @@ ssize_t afu_read(struct file *file, char __user *buf, size_t count,
 
 	for (;;) {
 		prepare_to_wait(&ctx->wq, &wait, TASK_INTERRUPTIBLE);
-		if (ctx_event_pending(ctx) || (ctx->status == CLOSED))
+		if (ctx_event_pending(ctx))
 			break;
 
-		if (!cxl_ops->link_ok(ctx->afu->adapter, ctx->afu)) {
+		if (!cxl_adapter_link_ok(ctx->afu->adapter)) {
 			rc = -EIO;
 			goto out;
 		}
@@ -432,12 +379,7 @@ ssize_t afu_read(struct file *file, char __user *buf, size_t count,
 	memset(&event, 0, sizeof(event));
 	event.header.process_element = ctx->pe;
 	event.header.size = sizeof(struct cxl_event_header);
-	if (ctx->afu_driver_ops && atomic_read(&ctx->afu_driver_events)) {
-		pr_devel("afu_read delivering AFU driver specific event\n");
-		pl = ctx->afu_driver_ops->fetch_event(ctx);
-		atomic_dec(&ctx->afu_driver_events);
-		event.header.type = CXL_EVENT_AFU_DRIVER;
-	} else if (ctx->pending_irq) {
+	if (ctx->pending_irq) {
 		pr_devel("afu_read delivering AFU interrupt\n");
 		event.header.size += sizeof(struct cxl_event_afu_interrupt);
 		event.header.type = CXL_EVENT_AFU_INTERRUPT;
@@ -466,9 +408,6 @@ ssize_t afu_read(struct file *file, char __user *buf, size_t count,
 		WARN(1, "afu_read must be buggy\n");
 
 	spin_unlock_irqrestore(&ctx->lock, flags);
-
-	if (event.header.type == CXL_EVENT_AFU_DRIVER)
-		return afu_driver_event_copy(ctx, buf, &event, pl);
 
 	if (copy_to_user(buf, &event, event.header.size))
 		return -EFAULT;
@@ -509,8 +448,7 @@ static const struct file_operations afu_master_fops = {
 
 static char *cxl_devnode(struct device *dev, umode_t *mode)
 {
-	if (cpu_has_feature(CPU_FTR_HVMODE) &&
-	    CXL_DEVT_IS_CARD(dev->devt)) {
+	if (CXL_DEVT_IS_CARD(dev->devt)) {
 		/*
 		 * These minor numbers will eventually be used to program the
 		 * PSL and AFUs once we have dynamic reprogramming support
@@ -611,11 +549,6 @@ int cxl_register_adapter(struct cxl *adapter)
 	return device_register(&adapter->dev);
 }
 
-dev_t cxl_get_dev(void)
-{
-	return cxl_dev;
-}
-
 int __init cxl_file_init(void)
 {
 	int rc;
@@ -624,7 +557,7 @@ int __init cxl_file_init(void)
 	 * If these change we really need to update API.  Either change some
 	 * flags or update API version number CXL_API_VERSION.
 	 */
-	BUILD_BUG_ON(CXL_API_VERSION != 3);
+	BUILD_BUG_ON(CXL_API_VERSION != 2);
 	BUILD_BUG_ON(sizeof(struct cxl_ioctl_start_work) != 64);
 	BUILD_BUG_ON(sizeof(struct cxl_event_header) != 8);
 	BUILD_BUG_ON(sizeof(struct cxl_event_afu_interrupt) != 8);

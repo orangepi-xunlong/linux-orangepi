@@ -471,7 +471,7 @@ static void write_bulk_callback(struct urb *urb)
 	if (status)
 		dev_info(&urb->dev->dev, "%s: Tx status %d\n",
 			 dev->netdev->name, status);
-	netif_trans_update(dev->netdev);
+	dev->netdev->trans_start = jiffies;
 	netif_wake_queue(dev->netdev);
 }
 
@@ -714,7 +714,7 @@ static netdev_tx_t rtl8150_start_xmit(struct sk_buff *skb,
 	} else {
 		netdev->stats.tx_packets++;
 		netdev->stats.tx_bytes += skb->len;
-		netif_trans_update(netdev);
+		netdev->trans_start = jiffies;
 	}
 
 	return NETDEV_TX_OK;

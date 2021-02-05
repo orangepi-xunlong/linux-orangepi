@@ -24,7 +24,7 @@ EXPORT_SYMBOL(i8253_lock);
  * restarts the PIT, negating the shutdown. On platforms with the quirk,
  * platform specific code can set this to false.
  */
-bool i8253_clear_counter_on_shutdown __ro_after_init = true;
+bool i8253_clear_counter_on_shutdown = true;
 
 #ifdef CONFIG_CLKSRC_I8253
 /*

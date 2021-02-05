@@ -64,9 +64,6 @@ struct ipoib_mcast_iter {
 	unsigned int       send_only;
 };
 
-/* join state that allows creating mcg with sendonly member request */
-#define SENDONLY_FULLMEMBER_JOIN	8
-
 /*
  * This should be called with the priv->lock held
  */
@@ -109,7 +106,7 @@ static void __ipoib_mcast_schedule_join_thread(struct ipoib_dev_priv *priv,
 		queue_delayed_work(priv->wq, &priv->mcast_task, 0);
 }
 
-static void ipoib_mcast_free(struct ipoib_mcast *mcast)
+void ipoib_mcast_free(struct ipoib_mcast *mcast)
 {
 	struct net_device *dev = mcast->dev;
 	int tx_dropped = 0;
@@ -156,7 +153,7 @@ static struct ipoib_mcast *ipoib_mcast_alloc(struct net_device *dev,
 	return mcast;
 }
 
-static struct ipoib_mcast *__ipoib_mcast_find(struct net_device *dev, void *mgid)
+struct ipoib_mcast *__ipoib_mcast_find(struct net_device *dev, void *mgid)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	struct rb_node *n = priv->multicast_tree.rb_node;
@@ -329,23 +326,12 @@ void ipoib_mcast_carrier_on_task(struct work_struct *work)
 	struct ipoib_dev_priv *priv = container_of(work, struct ipoib_dev_priv,
 						   carrier_on_task);
 	struct ib_port_attr attr;
-	int ret;
 
 	if (ib_query_port(priv->ca, priv->port, &attr) ||
 	    attr.state != IB_PORT_ACTIVE) {
 		ipoib_dbg(priv, "Keeping carrier off until IB port is active\n");
 		return;
 	}
-	/*
-	 * Check if can send sendonly MCG's with sendonly-fullmember join state.
-	 * It done here after the successfully join to the broadcast group,
-	 * because the broadcast group must always be joined first and is always
-	 * re-joined if the SM changes substantially.
-	 */
-	ret = ipoib_check_sm_sendonly_fullmember_support(priv);
-	if (ret < 0)
-		pr_debug("%s failed query sm support for sendonly-fullmember (ret: %d)\n",
-			 priv->dev->name, ret);
 
 	/*
 	 * Take rtnl_lock to avoid racing with ipoib_stop() and
@@ -532,20 +518,22 @@ static int ipoib_mcast_join(struct net_device *dev, struct ipoib_mcast *mcast)
 		rec.hop_limit	  = priv->broadcast->mcmember.hop_limit;
 
 		/*
-		 * Send-only IB Multicast joins work at the core IB layer but
-		 * require specific SM support.
-		 * We can use such joins here only if the current SM supports that feature.
-		 * However, if not, we emulate an Ethernet multicast send,
-		 * which does not require a multicast subscription and will
-		 * still send properly. The most appropriate thing to
+		 * Send-only IB Multicast joins do not work at the core
+		 * IB layer yet, so we can't use them here.  However,
+		 * we are emulating an Ethernet multicast send, which
+		 * does not require a multicast subscription and will
+		 * still send properly.  The most appropriate thing to
 		 * do is to create the group if it doesn't exist as that
 		 * most closely emulates the behavior, from a user space
-		 * application perspective, of Ethernet multicast operation.
+		 * application perspecitive, of Ethernet multicast
+		 * operation.  For now, we do a full join, maybe later
+		 * when the core IB layers support send only joins we
+		 * will use them.
 		 */
-		if (test_bit(IPOIB_MCAST_FLAG_SENDONLY, &mcast->flags) &&
-		    priv->sm_fullmember_sendonly_support)
-			/* SM supports sendonly-fullmember, otherwise fallback to full-member */
-			rec.join_state = SENDONLY_FULLMEMBER_JOIN;
+#if 0
+		if (test_bit(IPOIB_MCAST_FLAG_SENDONLY, &mcast->flags))
+			rec.join_state = 4;
+#endif
 	}
 	spin_unlock_irq(&priv->lock);
 
@@ -588,13 +576,11 @@ void ipoib_mcast_join_task(struct work_struct *work)
 		return;
 	}
 	priv->local_lid = port_attr.lid;
-	netif_addr_lock_bh(dev);
 
-	if (!test_bit(IPOIB_FLAG_DEV_ADDR_SET, &priv->flags)) {
-		netif_addr_unlock_bh(dev);
-		return;
-	}
-	netif_addr_unlock_bh(dev);
+	if (ib_query_gid(priv->ca, priv->port, 0, &priv->local_gid, NULL))
+		ipoib_warn(priv, "ib_query_gid() failed\n");
+	else
+		memcpy(priv->dev->dev_addr + 4, priv->local_gid.raw, sizeof (union ib_gid));
 
 	spin_lock_irq(&priv->lock);
 	if (!test_bit(IPOIB_FLAG_OPER_UP, &priv->flags))
@@ -703,7 +689,7 @@ int ipoib_mcast_stop_thread(struct net_device *dev)
 	return 0;
 }
 
-static int ipoib_mcast_leave(struct net_device *dev, struct ipoib_mcast *mcast)
+int ipoib_mcast_leave(struct net_device *dev, struct ipoib_mcast *mcast)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	int ret = 0;
@@ -728,35 +714,6 @@ static int ipoib_mcast_leave(struct net_device *dev, struct ipoib_mcast *mcast)
 			  "SENDONLY join\n");
 
 	return 0;
-}
-
-/*
- * Check if the multicast group is sendonly. If so remove it from the maps
- * and add to the remove list
- */
-void ipoib_check_and_add_mcast_sendonly(struct ipoib_dev_priv *priv, u8 *mgid,
-				struct list_head *remove_list)
-{
-	/* Is this multicast ? */
-	if (*mgid == 0xff) {
-		struct ipoib_mcast *mcast = __ipoib_mcast_find(priv->dev, mgid);
-
-		if (mcast && test_bit(IPOIB_MCAST_FLAG_SENDONLY, &mcast->flags)) {
-			list_del(&mcast->list);
-			rb_erase(&mcast->rb_node, &priv->multicast_tree);
-			list_add_tail(&mcast->list, remove_list);
-		}
-	}
-}
-
-void ipoib_mcast_remove_list(struct list_head *remove_list)
-{
-	struct ipoib_mcast *mcast, *tmcast;
-
-	list_for_each_entry_safe(mcast, tmcast, remove_list, list) {
-		ipoib_mcast_leave(mcast->dev, mcast);
-		ipoib_mcast_free(mcast);
-	}
 }
 
 void ipoib_mcast_send(struct net_device *dev, u8 *daddr, struct sk_buff *skb)
@@ -870,7 +827,10 @@ void ipoib_mcast_dev_flush(struct net_device *dev)
 		if (test_bit(IPOIB_MCAST_FLAG_BUSY, &mcast->flags))
 			wait_for_completion(&mcast->done);
 
-	ipoib_mcast_remove_list(&remove_list);
+	list_for_each_entry_safe(mcast, tmcast, &remove_list, list) {
+		ipoib_mcast_leave(dev, mcast);
+		ipoib_mcast_free(mcast);
+	}
 }
 
 static int ipoib_mcast_addr_is_valid(const u8 *addr, const u8 *broadcast)
@@ -996,7 +956,10 @@ void ipoib_mcast_restart_task(struct work_struct *work)
 		if (test_bit(IPOIB_MCAST_FLAG_BUSY, &mcast->flags))
 			wait_for_completion(&mcast->done);
 
-	ipoib_mcast_remove_list(&remove_list);
+	list_for_each_entry_safe(mcast, tmcast, &remove_list, list) {
+		ipoib_mcast_leave(mcast->dev, mcast);
+		ipoib_mcast_free(mcast);
+	}
 
 	/*
 	 * Double check that we are still up

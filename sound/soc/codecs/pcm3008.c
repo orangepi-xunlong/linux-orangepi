@@ -99,12 +99,10 @@ static struct snd_soc_dai_driver pcm3008_dai = {
 };
 
 static struct snd_soc_codec_driver soc_codec_dev_pcm3008 = {
-	.component_driver = {
-		.dapm_widgets		= pcm3008_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(pcm3008_dapm_widgets),
-		.dapm_routes		= pcm3008_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(pcm3008_dapm_routes),
-	},
+	.dapm_widgets = pcm3008_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(pcm3008_dapm_widgets),
+	.dapm_routes = pcm3008_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(pcm3008_dapm_routes),
 };
 
 static int pcm3008_codec_probe(struct platform_device *pdev)

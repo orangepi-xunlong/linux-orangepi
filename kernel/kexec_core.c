@@ -38,7 +38,6 @@
 #include <linux/syscore_ops.h>
 #include <linux/compiler.h>
 #include <linux/hugetlb.h>
-#include <linux/frame.h>
 
 #include <asm/page.h>
 #include <asm/sections.h>
@@ -67,15 +66,13 @@ struct resource crashk_res = {
 	.name  = "Crash kernel",
 	.start = 0,
 	.end   = 0,
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
-	.desc  = IORES_DESC_CRASH_KERNEL
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM
 };
 struct resource crashk_low_res = {
 	.name  = "Crash kernel",
 	.start = 0,
 	.end   = 0,
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
-	.desc  = IORES_DESC_CRASH_KERNEL
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 int kexec_should_crash(struct task_struct *p)
@@ -95,12 +92,6 @@ int kexec_should_crash(struct task_struct *p)
 		return 1;
 	return 0;
 }
-
-int kexec_crash_loaded(void)
-{
-	return !!kexec_crash_image;
-}
-EXPORT_SYMBOL_GPL(kexec_crash_loaded);
 
 /*
  * When kexec transitions to the new kernel there is a one-to-one
@@ -147,7 +138,6 @@ EXPORT_SYMBOL_GPL(kexec_crash_loaded);
  * allocating pages whose destination address we do not care about.
  */
 #define KIMAGE_NO_DEST (-1UL)
-#define PAGE_COUNT(x) (((x) + PAGE_SIZE - 1) >> PAGE_SHIFT)
 
 static struct page *kimage_alloc_page(struct kimage *image,
 				       gfp_t gfp_mask,
@@ -155,9 +145,8 @@ static struct page *kimage_alloc_page(struct kimage *image,
 
 int sanity_check_segment_list(struct kimage *image)
 {
-	int i;
+	int result, i;
 	unsigned long nr_segments = image->nr_segments;
-	unsigned long total_pages = 0;
 
 	/*
 	 * Verify we have good destination addresses.  The caller is
@@ -172,17 +161,16 @@ int sanity_check_segment_list(struct kimage *image)
 	 * simply because addresses are changed to page size
 	 * granularity.
 	 */
+	result = -EADDRNOTAVAIL;
 	for (i = 0; i < nr_segments; i++) {
 		unsigned long mstart, mend;
 
 		mstart = image->segment[i].mem;
 		mend   = mstart + image->segment[i].memsz;
-		if (mstart > mend)
-			return -EADDRNOTAVAIL;
 		if ((mstart & ~PAGE_MASK) || (mend & ~PAGE_MASK))
-			return -EADDRNOTAVAIL;
+			return result;
 		if (mend >= KEXEC_DESTINATION_MEMORY_LIMIT)
-			return -EADDRNOTAVAIL;
+			return result;
 	}
 
 	/* Verify our destination addresses do not overlap.
@@ -190,6 +178,7 @@ int sanity_check_segment_list(struct kimage *image)
 	 * through very weird things can happen with no
 	 * easy explanation as one segment stops on another.
 	 */
+	result = -EINVAL;
 	for (i = 0; i < nr_segments; i++) {
 		unsigned long mstart, mend;
 		unsigned long j;
@@ -203,7 +192,7 @@ int sanity_check_segment_list(struct kimage *image)
 			pend   = pstart + image->segment[j].memsz;
 			/* Do the segments overlap ? */
 			if ((mend > pstart) && (mstart < pend))
-				return -EINVAL;
+				return result;
 		}
 	}
 
@@ -212,25 +201,11 @@ int sanity_check_segment_list(struct kimage *image)
 	 * and it is easier to check up front than to be surprised
 	 * later on.
 	 */
+	result = -EINVAL;
 	for (i = 0; i < nr_segments; i++) {
 		if (image->segment[i].bufsz > image->segment[i].memsz)
-			return -EINVAL;
+			return result;
 	}
-
-	/*
-	 * Verify that no more than half of memory will be consumed. If the
-	 * request from userspace is too large, a large amount of time will be
-	 * wasted allocating pages, which can cause a soft lockup.
-	 */
-	for (i = 0; i < nr_segments; i++) {
-		if (PAGE_COUNT(image->segment[i].memsz) > totalram_pages / 2)
-			return -EINVAL;
-
-		total_pages += PAGE_COUNT(image->segment[i].memsz);
-	}
-
-	if (total_pages > totalram_pages / 2)
-		return -EINVAL;
 
 	/*
 	 * Verify we have good destination addresses.  Normally
@@ -243,15 +218,16 @@ int sanity_check_segment_list(struct kimage *image)
 	 */
 
 	if (image->type == KEXEC_TYPE_CRASH) {
+		result = -EADDRNOTAVAIL;
 		for (i = 0; i < nr_segments; i++) {
 			unsigned long mstart, mend;
 
 			mstart = image->segment[i].mem;
 			mend = mstart + image->segment[i].memsz - 1;
 			/* Ensure we are within the crash kernel limits */
-			if ((mstart < phys_to_boot_phys(crashk_res.start)) ||
-			    (mend > phys_to_boot_phys(crashk_res.end)))
-				return -EADDRNOTAVAIL;
+			if ((mstart < crashk_res.start) ||
+			    (mend > crashk_res.end))
+				return result;
 		}
 	}
 
@@ -334,9 +310,12 @@ static void kimage_free_pages(struct page *page)
 
 void kimage_free_page_list(struct list_head *list)
 {
-	struct page *page, *next;
+	struct list_head *pos, *next;
 
-	list_for_each_entry_safe(page, next, list, lru) {
+	list_for_each_safe(pos, next, list) {
+		struct page *page;
+
+		page = list_entry(pos, struct page, lru);
 		list_del(&page->lru);
 		kimage_free_pages(page);
 	}
@@ -374,7 +353,7 @@ static struct page *kimage_alloc_normal_control_pages(struct kimage *image,
 		pages = kimage_alloc_pages(KEXEC_CONTROL_MEMORY_GFP, order);
 		if (!pages)
 			break;
-		pfn   = page_to_boot_pfn(pages);
+		pfn   = page_to_pfn(pages);
 		epfn  = pfn + count;
 		addr  = pfn << PAGE_SHIFT;
 		eaddr = epfn << PAGE_SHIFT;
@@ -500,7 +479,7 @@ static int kimage_add_entry(struct kimage *image, kimage_entry_t entry)
 			return -ENOMEM;
 
 		ind_page = page_address(page);
-		*image->entry = virt_to_boot_phys(ind_page) | IND_INDIRECTION;
+		*image->entry = virt_to_phys(ind_page) | IND_INDIRECTION;
 		image->entry = ind_page;
 		image->last_entry = ind_page +
 				      ((PAGE_SIZE/sizeof(kimage_entry_t)) - 1);
@@ -555,13 +534,13 @@ void kimage_terminate(struct kimage *image)
 #define for_each_kimage_entry(image, ptr, entry) \
 	for (ptr = &image->head; (entry = *ptr) && !(entry & IND_DONE); \
 		ptr = (entry & IND_INDIRECTION) ? \
-			boot_phys_to_virt((entry & PAGE_MASK)) : ptr + 1)
+			phys_to_virt((entry & PAGE_MASK)) : ptr + 1)
 
 static void kimage_free_entry(kimage_entry_t entry)
 {
 	struct page *page;
 
-	page = boot_pfn_to_page(entry >> PAGE_SHIFT);
+	page = pfn_to_page(entry >> PAGE_SHIFT);
 	kimage_free_pages(page);
 }
 
@@ -655,7 +634,7 @@ static struct page *kimage_alloc_page(struct kimage *image,
 	 * have a match.
 	 */
 	list_for_each_entry(page, &image->dest_pages, lru) {
-		addr = page_to_boot_pfn(page) << PAGE_SHIFT;
+		addr = page_to_pfn(page) << PAGE_SHIFT;
 		if (addr == destination) {
 			list_del(&page->lru);
 			return page;
@@ -670,12 +649,12 @@ static struct page *kimage_alloc_page(struct kimage *image,
 		if (!page)
 			return NULL;
 		/* If the page cannot be used file it away */
-		if (page_to_boot_pfn(page) >
+		if (page_to_pfn(page) >
 				(KEXEC_SOURCE_MEMORY_LIMIT >> PAGE_SHIFT)) {
 			list_add(&page->lru, &image->unusable_pages);
 			continue;
 		}
-		addr = page_to_boot_pfn(page) << PAGE_SHIFT;
+		addr = page_to_pfn(page) << PAGE_SHIFT;
 
 		/* If it is the destination page we want use it */
 		if (addr == destination)
@@ -698,7 +677,7 @@ static struct page *kimage_alloc_page(struct kimage *image,
 			struct page *old_page;
 
 			old_addr = *old & PAGE_MASK;
-			old_page = boot_pfn_to_page(old_addr >> PAGE_SHIFT);
+			old_page = pfn_to_page(old_addr >> PAGE_SHIFT);
 			copy_highpage(page, old_page);
 			*old = addr | (*old & ~PAGE_MASK);
 
@@ -754,7 +733,7 @@ static int kimage_load_normal_segment(struct kimage *image,
 			result  = -ENOMEM;
 			goto out;
 		}
-		result = kimage_add_page(image, page_to_boot_pfn(page)
+		result = kimage_add_page(image, page_to_pfn(page)
 								<< PAGE_SHIFT);
 		if (result < 0)
 			goto out;
@@ -815,7 +794,7 @@ static int kimage_load_crash_segment(struct kimage *image,
 		char *ptr;
 		size_t uchunk, mchunk;
 
-		page = boot_pfn_to_page(maddr >> PAGE_SHIFT);
+		page = pfn_to_page(maddr >> PAGE_SHIFT);
 		if (!page) {
 			result  = -ENOMEM;
 			goto out;
@@ -874,12 +853,7 @@ struct kimage *kexec_image;
 struct kimage *kexec_crash_image;
 int kexec_load_disabled;
 
-/*
- * No panic_cpu check version of crash_kexec().  This function is called
- * only when panic_cpu holds the current CPU number; this is the only CPU
- * which processes crash_kexec routines.
- */
-void __noclone __crash_kexec(struct pt_regs *regs)
+void crash_kexec(struct pt_regs *regs)
 {
 	/* Take the kexec_mutex here to prevent sys_kexec_load
 	 * running on one cpu from replacing the crash kernel
@@ -901,31 +875,6 @@ void __noclone __crash_kexec(struct pt_regs *regs)
 		mutex_unlock(&kexec_mutex);
 	}
 }
-STACK_FRAME_NON_STANDARD(__crash_kexec);
-
-void crash_kexec(struct pt_regs *regs)
-{
-	int old_cpu, this_cpu;
-
-	/*
-	 * Only one CPU is allowed to execute the crash_kexec() code as with
-	 * panic().  Otherwise parallel calls of panic() and crash_kexec()
-	 * may stop each other.  To exclude them, we use panic_cpu here too.
-	 */
-	this_cpu = raw_smp_processor_id();
-	old_cpu = atomic_cmpxchg(&panic_cpu, PANIC_CPU_INVALID, this_cpu);
-	if (old_cpu == PANIC_CPU_INVALID) {
-		/* This is the 1st CPU which comes here, so go ahead. */
-		printk_nmi_flush_on_panic();
-		__crash_kexec(regs);
-
-		/*
-		 * Reset panic_cpu to allow another panic()/crash_kexec()
-		 * call.
-		 */
-		atomic_set(&panic_cpu, PANIC_CPU_INVALID);
-	}
-}
 
 size_t crash_get_memory_size(void)
 {
@@ -944,7 +893,7 @@ void __weak crash_free_reserved_phys_range(unsigned long begin,
 	unsigned long addr;
 
 	for (addr = begin; addr < end; addr += PAGE_SIZE)
-		free_reserved_page(boot_pfn_to_page(addr >> PAGE_SHIFT));
+		free_reserved_page(pfn_to_page(addr >> PAGE_SHIFT));
 }
 
 int crash_shrink_memory(unsigned long new_size)
@@ -984,7 +933,7 @@ int crash_shrink_memory(unsigned long new_size)
 
 	ram_res->start = end;
 	ram_res->end = crashk_res.end;
-	ram_res->flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM;
+	ram_res->flags = IORESOURCE_BUSY | IORESOURCE_MEM;
 	ram_res->name = "System RAM";
 
 	crashk_res.end = end - 1;
@@ -1397,7 +1346,7 @@ void vmcoreinfo_append_str(const char *fmt, ...)
 void __weak arch_crash_save_vmcoreinfo(void)
 {}
 
-phys_addr_t __weak paddr_vmcoreinfo_note(void)
+unsigned long __weak paddr_vmcoreinfo_note(void)
 {
 	return __pa((unsigned long)(char *)&vmcoreinfo_note);
 }
@@ -1432,14 +1381,11 @@ static int __init crash_save_vmcoreinfo_init(void)
 	VMCOREINFO_STRUCT_SIZE(list_head);
 	VMCOREINFO_SIZE(nodemask_t);
 	VMCOREINFO_OFFSET(page, flags);
-	VMCOREINFO_OFFSET(page, _refcount);
+	VMCOREINFO_OFFSET(page, _count);
 	VMCOREINFO_OFFSET(page, mapping);
 	VMCOREINFO_OFFSET(page, lru);
 	VMCOREINFO_OFFSET(page, _mapcount);
 	VMCOREINFO_OFFSET(page, private);
-	VMCOREINFO_OFFSET(page, compound_dtor);
-	VMCOREINFO_OFFSET(page, compound_order);
-	VMCOREINFO_OFFSET(page, compound_head);
 	VMCOREINFO_OFFSET(pglist_data, node_zones);
 	VMCOREINFO_OFFSET(pglist_data, nr_zones);
 #ifdef CONFIG_FLAT_NODE_MEM_MAP
@@ -1472,8 +1418,8 @@ static int __init crash_save_vmcoreinfo_init(void)
 #ifdef CONFIG_X86
 	VMCOREINFO_NUMBER(KERNEL_IMAGE_SIZE);
 #endif
-#ifdef CONFIG_HUGETLB_PAGE
-	VMCOREINFO_NUMBER(HUGETLB_PAGE_DTOR);
+#ifdef CONFIG_HUGETLBFS
+	VMCOREINFO_SYMBOL(free_huge_page);
 #endif
 
 	arch_crash_save_vmcoreinfo();

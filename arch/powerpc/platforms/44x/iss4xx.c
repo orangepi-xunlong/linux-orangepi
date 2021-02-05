@@ -149,7 +149,9 @@ static void __init iss4xx_setup_arch(void)
  */
 static int __init iss4xx_probe(void)
 {
-	if (!of_machine_is_compatible("ibm,iss-4xx"))
+	unsigned long root = of_get_flat_dt_root();
+
+	if (!of_flat_dt_is_compatible(root, "ibm,iss-4xx"))
 		return 0;
 
 	return 1;

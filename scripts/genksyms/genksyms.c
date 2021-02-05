@@ -873,8 +873,5 @@ int main(int argc, char **argv)
 			(double)nsyms / (double)HASH_BUCKETS);
 	}
 
-	if (dumpfile)
-		fclose(dumpfile);
-
 	return errors != 0;
 }

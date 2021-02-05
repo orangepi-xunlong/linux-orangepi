@@ -181,7 +181,6 @@ gf119_gr = {
 	.mmio = gf119_gr_pack_mmio,
 	.fecs.ucode = &gf100_gr_fecs_ucode,
 	.gpccs.ucode = &gf100_gr_gpccs_ucode,
-	.rops = gf100_gr_rops,
 	.grctx = &gf119_grctx,
 	.sclass = {
 		{ -1, -1, FERMI_TWOD_A },

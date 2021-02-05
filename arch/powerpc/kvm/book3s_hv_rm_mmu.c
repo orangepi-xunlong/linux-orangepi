@@ -17,7 +17,7 @@
 #include <asm/tlbflush.h>
 #include <asm/kvm_ppc.h>
 #include <asm/kvm_book3s.h>
-#include <asm/book3s/64/mmu-hash.h>
+#include <asm/mmu-hash64.h>
 #include <asm/hvcall.h>
 #include <asm/synch.h>
 #include <asm/ppc-opcode.h>
@@ -175,7 +175,7 @@ long kvmppc_do_h_enter(struct kvm *kvm, unsigned long flags,
 	unsigned long g_ptel;
 	struct kvm_memory_slot *memslot;
 	unsigned hpage_shift;
-	bool is_ci;
+	unsigned long is_io;
 	unsigned long *rmap;
 	pte_t *ptep;
 	unsigned int writing;
@@ -199,7 +199,7 @@ long kvmppc_do_h_enter(struct kvm *kvm, unsigned long flags,
 	gfn = gpa >> PAGE_SHIFT;
 	memslot = __gfn_to_memslot(kvm_memslots_raw(kvm), gfn);
 	pa = 0;
-	is_ci = false;
+	is_io = ~0ul;
 	rmap = NULL;
 	if (!(memslot && !(memslot->flags & KVM_MEMSLOT_INVALID))) {
 		/* Emulated MMIO - mark this with key=31 */
@@ -250,7 +250,7 @@ long kvmppc_do_h_enter(struct kvm *kvm, unsigned long flags,
 			if (writing && !pte_write(pte))
 				/* make the actual HPTE be read-only */
 				ptel = hpte_make_readonly(ptel);
-			is_ci = pte_ci(pte);
+			is_io = hpte_cache_bits(pte_val(pte));
 			pa = pte_pfn(pte) << PAGE_SHIFT;
 			pa |= hva & (host_pte_size - 1);
 			pa |= gpa & ~PAGE_MASK;
@@ -267,9 +267,9 @@ long kvmppc_do_h_enter(struct kvm *kvm, unsigned long flags,
 	else
 		pteh |= HPTE_V_ABSENT;
 
-	/*If we had host pte mapping then  Check WIMG */
-	if (ptep && !hpte_cache_flags_ok(ptel, is_ci)) {
-		if (is_ci)
+	/* Check WIMG */
+	if (is_io != ~0ul && !hpte_cache_flags_ok(ptel, is_io)) {
+		if (is_io)
 			return H_PARAMETER;
 		/*
 		 * Allow guest to map emulated device memory as

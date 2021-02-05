@@ -24,14 +24,15 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio.h>
-#include <linux/gpio/consumer.h>
 #include <linux/module.h>
+#include <linux/of_gpio.h>
+#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/smiapp.h>
 #include <linux/v4l2-mediabus.h>
+#include <media/v4l2-fwnode.h>
 #include <media/v4l2-device.h>
-#include <media/v4l2-of.h>
 
 #include "smiapp.h"
 
@@ -188,8 +189,6 @@ static int smiapp_read_frame_fmt(struct smiapp_sensor *sensor)
 		embedded_end = 0;
 	}
 
-	sensor->image_start = image_start;
-
 	dev_dbg(&client->dev, "embedded data from lines %d to %d\n",
 		embedded_start, embedded_end);
 	dev_dbg(&client->dev, "image data starts at line %d\n", image_start);
@@ -328,14 +327,6 @@ static void __smiapp_update_exposure_limits(struct smiapp_sensor *sensor)
  *    orders must be defined.
  */
 static const struct smiapp_csi_data_format smiapp_csi_data_formats[] = {
-	{ MEDIA_BUS_FMT_SGRBG16_1X16, 16, 16, SMIAPP_PIXEL_ORDER_GRBG, },
-	{ MEDIA_BUS_FMT_SRGGB16_1X16, 16, 16, SMIAPP_PIXEL_ORDER_RGGB, },
-	{ MEDIA_BUS_FMT_SBGGR16_1X16, 16, 16, SMIAPP_PIXEL_ORDER_BGGR, },
-	{ MEDIA_BUS_FMT_SGBRG16_1X16, 16, 16, SMIAPP_PIXEL_ORDER_GBRG, },
-	{ MEDIA_BUS_FMT_SGRBG14_1X14, 14, 14, SMIAPP_PIXEL_ORDER_GRBG, },
-	{ MEDIA_BUS_FMT_SRGGB14_1X14, 14, 14, SMIAPP_PIXEL_ORDER_RGGB, },
-	{ MEDIA_BUS_FMT_SBGGR14_1X14, 14, 14, SMIAPP_PIXEL_ORDER_BGGR, },
-	{ MEDIA_BUS_FMT_SGBRG14_1X14, 14, 14, SMIAPP_PIXEL_ORDER_GBRG, },
 	{ MEDIA_BUS_FMT_SGRBG12_1X12, 12, 12, SMIAPP_PIXEL_ORDER_GRBG, },
 	{ MEDIA_BUS_FMT_SRGGB12_1X12, 12, 12, SMIAPP_PIXEL_ORDER_RGGB, },
 	{ MEDIA_BUS_FMT_SBGGR12_1X12, 12, 12, SMIAPP_PIXEL_ORDER_BGGR, },
@@ -633,12 +624,12 @@ static int smiapp_init_late_controls(struct smiapp_sensor *sensor)
 				0, max_value, 1, max_value);
 	}
 
-	for (max = 0; sensor->hwcfg->op_sys_clock[max + 1]; max++);
+	for (max = 0; sensor->platform_data->op_sys_clock[max + 1]; max++);
 
 	sensor->link_freq = v4l2_ctrl_new_int_menu(
 		&sensor->src->ctrl_handler, &smiapp_ctrl_ops,
 		V4L2_CID_LINK_FREQ, __fls(*valid_link_freqs),
-		__ffs(*valid_link_freqs), sensor->hwcfg->op_sys_clock);
+		__ffs(*valid_link_freqs), sensor->platform_data->op_sys_clock);
 
 	return sensor->src->ctrl_handler.error;
 }
@@ -841,8 +832,8 @@ static int smiapp_get_mbus_formats(struct smiapp_sensor *sensor)
 
 		pll->bits_per_pixel = f->compressed;
 
-		for (j = 0; sensor->hwcfg->op_sys_clock[j]; j++) {
-			pll->link_freq = sensor->hwcfg->op_sys_clock[j];
+		for (j = 0; sensor->platform_data->op_sys_clock[j]; j++) {
+			pll->link_freq = sensor->platform_data->op_sys_clock[j];
 
 			rval = smiapp_pll_try(sensor, pll);
 			dev_dbg(&client->dev, "link freq %u Hz, bpp %u %s\n",
@@ -1039,22 +1030,22 @@ static int smiapp_change_cci_addr(struct smiapp_sensor *sensor)
 	int rval;
 	u32 val;
 
-	client->addr = sensor->hwcfg->i2c_addr_dfl;
+	client->addr = sensor->platform_data->i2c_addr_dfl;
 
 	rval = smiapp_write(sensor,
 			    SMIAPP_REG_U8_CCI_ADDRESS_CONTROL,
-			    sensor->hwcfg->i2c_addr_alt << 1);
+			    sensor->platform_data->i2c_addr_alt << 1);
 	if (rval)
 		return rval;
 
-	client->addr = sensor->hwcfg->i2c_addr_alt;
+	client->addr = sensor->platform_data->i2c_addr_alt;
 
 	/* verify addr change went ok */
 	rval = smiapp_read(sensor, SMIAPP_REG_U8_CCI_ADDRESS_CONTROL, &val);
 	if (rval)
 		return rval;
 
-	if (val != sensor->hwcfg->i2c_addr_alt << 1)
+	if (val != sensor->platform_data->i2c_addr_alt << 1)
 		return -ENODEV;
 
 	return 0;
@@ -1068,13 +1059,13 @@ static int smiapp_change_cci_addr(struct smiapp_sensor *sensor)
 static int smiapp_setup_flash_strobe(struct smiapp_sensor *sensor)
 {
 	struct smiapp_flash_strobe_parms *strobe_setup;
-	unsigned int ext_freq = sensor->hwcfg->ext_clk;
+	unsigned int ext_freq = sensor->platform_data->ext_clk;
 	u32 tmp;
 	u32 strobe_adjustment;
 	u32 strobe_width_high_rs;
 	int rval;
 
-	strobe_setup = sensor->hwcfg->strobe_setup;
+	strobe_setup = sensor->platform_data->strobe_setup;
 
 	/*
 	 * How to calculate registers related to strobe length. Please
@@ -1186,7 +1177,7 @@ static int smiapp_setup_flash_strobe(struct smiapp_sensor *sensor)
 			    strobe_setup->trigger);
 
 out:
-	sensor->hwcfg->strobe_setup->trigger = 0;
+	sensor->platform_data->strobe_setup->trigger = 0;
 
 	return rval;
 }
@@ -1208,16 +1199,21 @@ static int smiapp_power_on(struct smiapp_sensor *sensor)
 	}
 	usleep_range(1000, 1000);
 
-	rval = clk_prepare_enable(sensor->ext_clk);
+	if (sensor->platform_data->set_xclk)
+		rval = sensor->platform_data->set_xclk(
+			&sensor->src->sd, sensor->platform_data->ext_clk);
+	else
+		rval = clk_prepare_enable(sensor->ext_clk);
 	if (rval < 0) {
 		dev_dbg(&client->dev, "failed to enable xclk\n");
 		goto out_xclk_fail;
 	}
 	usleep_range(1000, 1000);
 
-	gpiod_set_value(sensor->xshutdown, 1);
+	if (gpio_is_valid(sensor->platform_data->xshutdown))
+		gpio_set_value(sensor->platform_data->xshutdown, 1);
 
-	sleep = SMIAPP_RESET_DELAY(sensor->hwcfg->ext_clk);
+	sleep = SMIAPP_RESET_DELAY(sensor->platform_data->ext_clk);
 	usleep_range(sleep, sleep);
 
 	/*
@@ -1231,7 +1227,7 @@ static int smiapp_power_on(struct smiapp_sensor *sensor)
 	 * is found.
 	 */
 
-	if (sensor->hwcfg->i2c_addr_alt) {
+	if (sensor->platform_data->i2c_addr_alt) {
 		rval = smiapp_change_cci_addr(sensor);
 		if (rval) {
 			dev_err(&client->dev, "cci address change error\n");
@@ -1246,7 +1242,7 @@ static int smiapp_power_on(struct smiapp_sensor *sensor)
 		goto out_cci_addr_fail;
 	}
 
-	if (sensor->hwcfg->i2c_addr_alt) {
+	if (sensor->platform_data->i2c_addr_alt) {
 		rval = smiapp_change_cci_addr(sensor);
 		if (rval) {
 			dev_err(&client->dev, "cci address change error\n");
@@ -1263,14 +1259,14 @@ static int smiapp_power_on(struct smiapp_sensor *sensor)
 
 	rval = smiapp_write(
 		sensor, SMIAPP_REG_U16_EXTCLK_FREQUENCY_MHZ,
-		sensor->hwcfg->ext_clk / (1000000 / (1 << 8)));
+		sensor->platform_data->ext_clk / (1000000 / (1 << 8)));
 	if (rval) {
 		dev_err(&client->dev, "extclk frequency set failed\n");
 		goto out_cci_addr_fail;
 	}
 
 	rval = smiapp_write(sensor, SMIAPP_REG_U8_CSI_LANE_MODE,
-			    sensor->hwcfg->lanes - 1);
+			    sensor->platform_data->lanes - 1);
 	if (rval) {
 		dev_err(&client->dev, "csi lane mode set failed\n");
 		goto out_cci_addr_fail;
@@ -1284,7 +1280,7 @@ static int smiapp_power_on(struct smiapp_sensor *sensor)
 	}
 
 	rval = smiapp_write(sensor, SMIAPP_REG_U8_CSI_SIGNALLING_MODE,
-			    sensor->hwcfg->csi_signalling_mode);
+			    sensor->platform_data->csi_signalling_mode);
 	if (rval) {
 		dev_err(&client->dev, "csi signalling mode set failed\n");
 		goto out_cci_addr_fail;
@@ -1324,8 +1320,12 @@ static int smiapp_power_on(struct smiapp_sensor *sensor)
 	return 0;
 
 out_cci_addr_fail:
-	gpiod_set_value(sensor->xshutdown, 0);
-	clk_disable_unprepare(sensor->ext_clk);
+	if (gpio_is_valid(sensor->platform_data->xshutdown))
+		gpio_set_value(sensor->platform_data->xshutdown, 0);
+	if (sensor->platform_data->set_xclk)
+		sensor->platform_data->set_xclk(&sensor->src->sd, 0);
+	else
+		clk_disable_unprepare(sensor->ext_clk);
 
 out_xclk_fail:
 	regulator_disable(sensor->vana);
@@ -1341,13 +1341,17 @@ static void smiapp_power_off(struct smiapp_sensor *sensor)
 	 * really see a power off and next time the cci address change
 	 * will fail. So do a soft reset explicitly here.
 	 */
-	if (sensor->hwcfg->i2c_addr_alt)
+	if (sensor->platform_data->i2c_addr_alt)
 		smiapp_write(sensor,
 			     SMIAPP_REG_U8_SOFTWARE_RESET,
 			     SMIAPP_SOFTWARE_RESET);
 
-	gpiod_set_value(sensor->xshutdown, 0);
-	clk_disable_unprepare(sensor->ext_clk);
+	if (gpio_is_valid(sensor->platform_data->xshutdown))
+		gpio_set_value(sensor->platform_data->xshutdown, 0);
+	if (sensor->platform_data->set_xclk)
+		sensor->platform_data->set_xclk(&sensor->src->sd, 0);
+	else
+		clk_disable_unprepare(sensor->ext_clk);
 	usleep_range(5000, 5000);
 	regulator_disable(sensor->vana);
 	sensor->streaming = false;
@@ -1485,8 +1489,8 @@ static int smiapp_start_streaming(struct smiapp_sensor *sensor)
 	if ((sensor->limits[SMIAPP_LIMIT_FLASH_MODE_CAPABILITY] &
 	     (SMIAPP_FLASH_MODE_CAPABILITY_SINGLE_STROBE |
 	      SMIAPP_FLASH_MODE_CAPABILITY_MULTIPLE_STROBE)) &&
-	    sensor->hwcfg->strobe_setup != NULL &&
-	    sensor->hwcfg->strobe_setup->trigger != 0) {
+	    sensor->platform_data->strobe_setup != NULL &&
+	    sensor->platform_data->strobe_setup->trigger != 0) {
 		rval = smiapp_setup_flash_strobe(sensor);
 		if (rval)
 			goto out;
@@ -2276,15 +2280,6 @@ static int smiapp_get_skip_frames(struct v4l2_subdev *subdev, u32 *frames)
 	return 0;
 }
 
-static int smiapp_get_skip_top_lines(struct v4l2_subdev *subdev, u32 *lines)
-{
-	struct smiapp_sensor *sensor = to_smiapp_sensor(subdev);
-
-	*lines = sensor->image_start;
-
-	return 0;
-}
-
 /* -----------------------------------------------------------------------------
  * sysfs attributes
  */
@@ -2303,7 +2298,7 @@ smiapp_sysfs_nvm_read(struct device *dev, struct device_attribute *attr,
 
 	if (!sensor->nvm_size) {
 		/* NVM not read yet - read it now */
-		sensor->nvm_size = sensor->hwcfg->nvm_size;
+		sensor->nvm_size = sensor->platform_data->nvm_size;
 		if (smiapp_set_power(subdev, 1) < 0)
 			return -ENODEV;
 		if (smiapp_read_nvm(sensor, sensor->nvm)) {
@@ -2492,11 +2487,23 @@ static int smiapp_register_subdevs(struct smiapp_sensor *sensor)
 		if (!last)
 			continue;
 
-		rval = media_entity_pads_init(&this->sd.entity,
-					 this->npads, this->pads);
+		rval = media_entity_init(&this->sd.entity,
+					 this->npads, this->pads, 0);
 		if (rval) {
 			dev_err(&client->dev,
-				"media_entity_pads_init failed\n");
+				"media_entity_init failed\n");
+			return rval;
+		}
+
+		rval = media_entity_create_link(&this->sd.entity,
+						this->source_pad,
+						&last->sd.entity,
+						last->sink_pad,
+						MEDIA_LNK_FL_ENABLED |
+						MEDIA_LNK_FL_IMMUTABLE);
+		if (rval) {
+			dev_err(&client->dev,
+				"media_entity_create_link failed\n");
 			return rval;
 		}
 
@@ -2505,18 +2512,6 @@ static int smiapp_register_subdevs(struct smiapp_sensor *sensor)
 		if (rval) {
 			dev_err(&client->dev,
 				"v4l2_device_register_subdev failed\n");
-			return rval;
-		}
-
-		rval = media_create_pad_link(&this->sd.entity,
-					     this->source_pad,
-					     &last->sd.entity,
-					     last->sink_pad,
-					     MEDIA_LNK_FL_ENABLED |
-					     MEDIA_LNK_FL_IMMUTABLE);
-		if (rval) {
-			dev_err(&client->dev,
-				"media_create_pad_link failed\n");
 			return rval;
 		}
 	}
@@ -2548,26 +2543,34 @@ static int smiapp_init(struct smiapp_sensor *sensor)
 		return PTR_ERR(sensor->vana);
 	}
 
-	sensor->ext_clk = devm_clk_get(&client->dev, NULL);
-	if (IS_ERR(sensor->ext_clk)) {
-		dev_err(&client->dev, "could not get clock (%ld)\n",
-			PTR_ERR(sensor->ext_clk));
-		return -EPROBE_DEFER;
+	if (!sensor->platform_data->set_xclk) {
+		sensor->ext_clk = devm_clk_get(&client->dev, NULL);
+		if (IS_ERR(sensor->ext_clk)) {
+			dev_err(&client->dev, "could not get clock\n");
+			return PTR_ERR(sensor->ext_clk);
+		}
+
+		rval = clk_set_rate(sensor->ext_clk,
+				    sensor->platform_data->ext_clk);
+		if (rval < 0) {
+			dev_err(&client->dev,
+				"unable to set clock freq to %u\n",
+				sensor->platform_data->ext_clk);
+			return rval;
+		}
 	}
 
-	rval = clk_set_rate(sensor->ext_clk,
-			    sensor->hwcfg->ext_clk);
-	if (rval < 0) {
-		dev_err(&client->dev,
-			"unable to set clock freq to %u\n",
-			sensor->hwcfg->ext_clk);
-		return rval;
+	if (gpio_is_valid(sensor->platform_data->xshutdown)) {
+		rval = devm_gpio_request_one(
+			&client->dev, sensor->platform_data->xshutdown, 0,
+			"SMIA++ xshutdown");
+		if (rval < 0) {
+			dev_err(&client->dev,
+				"unable to acquire reset gpio %d\n",
+				sensor->platform_data->xshutdown);
+			return rval;
+		}
 	}
-
-	sensor->xshutdown = devm_gpiod_get_optional(&client->dev, "xshutdown",
-						    GPIOD_OUT_LOW);
-	if (IS_ERR(sensor->xshutdown))
-		return PTR_ERR(sensor->xshutdown);
 
 	rval = smiapp_power_on(sensor);
 	if (rval)
@@ -2598,7 +2601,7 @@ static int smiapp_init(struct smiapp_sensor *sensor)
 	 *
 	 * Rotation also changes the bayer pattern.
 	 */
-	if (sensor->hwcfg->module_board_orient ==
+	if (sensor->platform_data->module_board_orient ==
 	    SMIAPP_MODULE_BOARD_ORIENT_180)
 		sensor->hvflip_inv_mask = SMIAPP_IMAGE_ORIENTATION_HFLIP |
 					  SMIAPP_IMAGE_ORIENTATION_VFLIP;
@@ -2647,9 +2650,9 @@ static int smiapp_init(struct smiapp_sensor *sensor)
 	/* SMIA++ NVM initialization - it will be read from the sensor
 	 * when it is first requested by userspace.
 	 */
-	if (sensor->minfo.smiapp_version && sensor->hwcfg->nvm_size) {
+	if (sensor->minfo.smiapp_version && sensor->platform_data->nvm_size) {
 		sensor->nvm = devm_kzalloc(&client->dev,
-				sensor->hwcfg->nvm_size, GFP_KERNEL);
+				sensor->platform_data->nvm_size, GFP_KERNEL);
 		if (sensor->nvm == NULL) {
 			dev_err(&client->dev, "nvm buf allocation failed\n");
 			rval = -ENOMEM;
@@ -2692,8 +2695,8 @@ static int smiapp_init(struct smiapp_sensor *sensor)
 
 	/* prepare PLL configuration input values */
 	pll->bus_type = SMIAPP_PLL_BUS_TYPE_CSI2;
-	pll->csi2.lanes = sensor->hwcfg->lanes;
-	pll->ext_clk_freq_hz = sensor->hwcfg->ext_clk;
+	pll->csi2.lanes = sensor->platform_data->lanes;
+	pll->ext_clk_freq_hz = sensor->platform_data->ext_clk;
 	pll->scale_n = sensor->limits[SMIAPP_LIMIT_SCALER_N_MIN];
 	/* Profile 0 sensors have no separate OP clock branch. */
 	if (sensor->minfo.smiapp_profile == SMIAPP_PROFILE_0)
@@ -2760,7 +2763,7 @@ static int smiapp_init(struct smiapp_sensor *sensor)
 
 	dev_dbg(&client->dev, "profile %d\n", sensor->minfo.smiapp_profile);
 
-	sensor->pixel_array->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	sensor->pixel_array->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
 
 	/* final steps */
 	smiapp_read_frame_fmt(sensor);
@@ -2887,7 +2890,6 @@ static const struct v4l2_subdev_pad_ops smiapp_pad_ops = {
 
 static const struct v4l2_subdev_sensor_ops smiapp_sensor_ops = {
 	.g_skip_frames = smiapp_get_skip_frames,
-	.g_skip_top_lines = smiapp_get_skip_top_lines,
 };
 
 static const struct v4l2_subdev_ops smiapp_ops = {
@@ -2970,78 +2972,84 @@ static int smiapp_resume(struct device *dev)
 
 #endif /* CONFIG_PM */
 
-static struct smiapp_hwconfig *smiapp_get_hwconfig(struct device *dev)
+static struct smiapp_platform_data *smiapp_get_pdata(struct device *dev)
 {
-	struct smiapp_hwconfig *hwcfg;
-	struct v4l2_of_endpoint *bus_cfg;
-	struct device_node *ep;
+	struct smiapp_platform_data *pdata;
+	struct v4l2_fwnode_endpoint *bus_cfg;
+	struct fwnode_handle *ep;
+	struct fwnode_handle *fwnode = dev_fwnode(dev);
 	int i;
 	int rval;
 
-	if (!dev->of_node)
+	if (!fwnode)
 		return dev->platform_data;
 
-	ep = of_graph_get_next_endpoint(dev->of_node, NULL);
+	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
 	if (!ep)
 		return NULL;
 
-	bus_cfg = v4l2_of_alloc_parse_endpoint(ep);
+	bus_cfg = v4l2_fwnode_endpoint_alloc_parse(ep);
 	if (IS_ERR(bus_cfg))
 		goto out_err;
 
-	hwcfg = devm_kzalloc(dev, sizeof(*hwcfg), GFP_KERNEL);
-	if (!hwcfg)
+	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
+	if (!pdata)
 		goto out_err;
 
 	switch (bus_cfg->bus_type) {
 	case V4L2_MBUS_CSI2:
-		hwcfg->csi_signalling_mode = SMIAPP_CSI_SIGNALLING_MODE_CSI2;
+		pdata->csi_signalling_mode = SMIAPP_CSI_SIGNALLING_MODE_CSI2;
 		break;
 		/* FIXME: add CCP2 support. */
 	default:
 		goto out_err;
 	}
 
-	hwcfg->lanes = bus_cfg->bus.mipi_csi2.num_data_lanes;
-	dev_dbg(dev, "lanes %u\n", hwcfg->lanes);
+	pdata->lanes = bus_cfg->bus.mipi_csi2.num_data_lanes;
+	dev_dbg(dev, "lanes %u\n", pdata->lanes);
+
+	/* xshutdown GPIO is optional */
+	pdata->xshutdown = of_get_named_gpio(dev->of_node, "reset-gpios", 0);
 
 	/* NVM size is not mandatory */
 	of_property_read_u32(dev->of_node, "nokia,nvm-size",
-				    &hwcfg->nvm_size);
+				    &pdata->nvm_size);
 
 	rval = of_property_read_u32(dev->of_node, "clock-frequency",
-				    &hwcfg->ext_clk);
+				    &pdata->ext_clk);
 	if (rval) {
 		dev_warn(dev, "can't get clock-frequency\n");
 		goto out_err;
 	}
 
-	dev_dbg(dev, "nvm %d, clk %d, csi %d\n", hwcfg->nvm_size,
-		hwcfg->ext_clk, hwcfg->csi_signalling_mode);
+	dev_dbg(dev, "reset %d, nvm %d, clk %d, csi %d\n", pdata->xshutdown,
+		pdata->nvm_size, pdata->ext_clk, pdata->csi_signalling_mode);
 
 	if (!bus_cfg->nr_of_link_frequencies) {
 		dev_warn(dev, "no link frequencies defined\n");
 		goto out_err;
 	}
 
-	hwcfg->op_sys_clock = devm_kcalloc(
+	pdata->op_sys_clock = devm_kcalloc(
 		dev, bus_cfg->nr_of_link_frequencies + 1 /* guardian */,
-		sizeof(*hwcfg->op_sys_clock), GFP_KERNEL);
-	if (!hwcfg->op_sys_clock)
+		sizeof(*pdata->op_sys_clock), GFP_KERNEL);
+	if (!pdata->op_sys_clock) {
+		rval = -ENOMEM;
 		goto out_err;
-
-	for (i = 0; i < bus_cfg->nr_of_link_frequencies; i++) {
-		hwcfg->op_sys_clock[i] = bus_cfg->link_frequencies[i];
-		dev_dbg(dev, "freq %d: %lld\n", i, hwcfg->op_sys_clock[i]);
 	}
 
-	v4l2_of_free_endpoint(bus_cfg);
-	of_node_put(ep);
-	return hwcfg;
+	for (i = 0; i < bus_cfg->nr_of_link_frequencies; i++) {
+		pdata->op_sys_clock[i] = bus_cfg->link_frequencies[i];
+		dev_dbg(dev, "freq %d: %lld\n", i, pdata->op_sys_clock[i]);
+	}
+
+	v4l2_fwnode_endpoint_free(bus_cfg);
+	fwnode_handle_put(ep);
+	return pdata;
 
 out_err:
-	v4l2_of_free_endpoint(bus_cfg);
-	of_node_put(ep);
+	v4l2_fwnode_endpoint_free(bus_cfg);
+	fwnode_handle_put(ep);
 	return NULL;
 }
 
@@ -3049,17 +3057,17 @@ static int smiapp_probe(struct i2c_client *client,
 			const struct i2c_device_id *devid)
 {
 	struct smiapp_sensor *sensor;
-	struct smiapp_hwconfig *hwcfg = smiapp_get_hwconfig(&client->dev);
+	struct smiapp_platform_data *pdata = smiapp_get_pdata(&client->dev);
 	int rval;
 
-	if (hwcfg == NULL)
+	if (pdata == NULL)
 		return -ENODEV;
 
 	sensor = devm_kzalloc(&client->dev, sizeof(*sensor), GFP_KERNEL);
 	if (sensor == NULL)
 		return -ENOMEM;
 
-	sensor->hwcfg = hwcfg;
+	sensor->platform_data = pdata;
 	mutex_init(&sensor->mutex);
 	mutex_init(&sensor->power_mutex);
 	sensor->src = &sensor->ssds[sensor->ssds_used];
@@ -3070,8 +3078,8 @@ static int smiapp_probe(struct i2c_client *client,
 	sensor->src->sensor = sensor;
 
 	sensor->src->pads[0].flags = MEDIA_PAD_FL_SOURCE;
-	rval = media_entity_pads_init(&sensor->src->sd.entity, 2,
-				 sensor->src->pads);
+	rval = media_entity_init(&sensor->src->sd.entity, 2,
+				 sensor->src->pads, 0);
 	if (rval < 0)
 		return rval;
 
@@ -3102,8 +3110,12 @@ static int smiapp_remove(struct i2c_client *client)
 	v4l2_async_unregister_subdev(subdev);
 
 	if (sensor->power_count) {
-		gpiod_set_value(sensor->xshutdown, 0);
-		clk_disable_unprepare(sensor->ext_clk);
+		if (gpio_is_valid(sensor->platform_data->xshutdown))
+			gpio_set_value(sensor->platform_data->xshutdown, 0);
+		if (sensor->platform_data->set_xclk)
+			sensor->platform_data->set_xclk(&sensor->src->sd, 0);
+		else
+			clk_disable_unprepare(sensor->ext_clk);
 		sensor->power_count = 0;
 	}
 

@@ -1,6 +1,7 @@
 #include <linux/tty.h>
 #include <linux/sched.h>
 #include "dgnc_utils.h"
+#include "digi.h"
 
 /*
  * dgnc_ms_sleep()

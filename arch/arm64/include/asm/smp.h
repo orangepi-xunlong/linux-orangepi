@@ -84,7 +84,9 @@ asmlinkage void secondary_start_kernel(void);
  */
 struct secondary_data {
 	void *stack;
+#ifdef CONFIG_THREAD_INFO_IN_TASK
 	struct task_struct *task;
+#endif
 	long status;
 };
 
@@ -126,17 +128,6 @@ static inline void update_cpu_boot_status(int val)
 }
 
 /*
- * The calling secondary CPU has detected serious configuration mismatch,
- * which calls for a kernel panic. Update the boot status and park the calling
- * CPU.
- */
-static inline void cpu_panic_kernel(void)
-{
-	update_cpu_boot_status(CPU_PANIC_KERNEL);
-	cpu_park_loop();
-}
-
-/*
  * If a secondary CPU enters the kernel but fails to come online,
  * (e.g. due to mismatched features), and cannot exit the kernel,
  * we increment cpus_stuck_in_kernel and leave the CPU in a
@@ -147,6 +138,9 @@ static inline void cpu_panic_kernel(void)
  * This function is used to inhibit features like kexec and hibernate.
  */
 bool cpus_are_stuck_in_kernel(void);
+
+extern void smp_send_crash_stop(void);
+extern bool smp_crash_stop_failed(void);
 
 #endif /* ifndef __ASSEMBLY__ */
 

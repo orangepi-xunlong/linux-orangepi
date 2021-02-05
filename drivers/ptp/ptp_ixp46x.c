@@ -178,6 +178,7 @@ static int ptp_ixp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 static int ptp_ixp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 {
 	u64 ns;
+	u32 remainder;
 	unsigned long flags;
 	struct ixp_clock *ixp_clock = container_of(ptp, struct ixp_clock, caps);
 	struct ixp46x_ts_regs *regs = ixp_clock->regs;
@@ -188,7 +189,8 @@ static int ptp_ixp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 
 	spin_unlock_irqrestore(&register_lock, flags);
 
-	*ts = ns_to_timespec64(ns);
+	ts->tv_sec = div_u64_rem(ns, 1000000000, &remainder);
+	ts->tv_nsec = remainder;
 	return 0;
 }
 
@@ -200,7 +202,8 @@ static int ptp_ixp_settime(struct ptp_clock_info *ptp,
 	struct ixp_clock *ixp_clock = container_of(ptp, struct ixp_clock, caps);
 	struct ixp46x_ts_regs *regs = ixp_clock->regs;
 
-	ns = timespec64_to_ns(ts);
+	ns = ts->tv_sec * 1000000000ULL;
+	ns += ts->tv_nsec;
 
 	spin_lock_irqsave(&register_lock, flags);
 
@@ -268,19 +271,18 @@ static int setup_interrupt(int gpio)
 		return err;
 
 	irq = gpio_to_irq(gpio);
-	if (irq < 0)
-		return irq;
 
-	err = irq_set_irq_type(irq, IRQF_TRIGGER_FALLING);
-	if (err) {
+	if (NO_IRQ == irq)
+		return NO_IRQ;
+
+	if (irq_set_irq_type(irq, IRQF_TRIGGER_FALLING)) {
 		pr_err("cannot set trigger type for irq %d\n", irq);
-		return err;
+		return NO_IRQ;
 	}
 
-	err = request_irq(irq, isr, 0, DRIVER, &ixp_clock);
-	if (err) {
+	if (request_irq(irq, isr, 0, DRIVER, &ixp_clock)) {
 		pr_err("request_irq failed for irq %d\n", irq);
-		return err;
+		return NO_IRQ;
 	}
 
 	return irq;

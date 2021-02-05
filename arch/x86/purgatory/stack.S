@@ -8,7 +8,7 @@
  */
 
 	/* A stack for the loaded kernel.
-	 * Separate and in the data section so it can be prepopulated.
+	 * Seperate and in the data section so it can be prepopulated.
 	 */
 	.data
 	.balign 4096

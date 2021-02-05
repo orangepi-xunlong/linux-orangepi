@@ -679,11 +679,11 @@ EXPORT_SYMBOL(seq_puts);
 /*
  * A helper routine for putting decimal numbers without rich format of printf().
  * only 'unsigned long long' is supported.
- * This routine will put strlen(delimiter) + number into seq_file.
+ * This routine will put one byte delimiter + number into seq_file.
  * This routine is very quick when you show lots of numbers.
  * In usual cases, it will be better to use seq_printf(). It's easier to read.
  */
-void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
+void seq_put_decimal_ull(struct seq_file *m, char delimiter,
 			 unsigned long long num)
 {
 	int len;
@@ -691,15 +691,8 @@ void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
 	if (m->count + 2 >= m->size) /* we'll write 2 bytes at least */
 		goto overflow;
 
-	len = strlen(delimiter);
-	if (m->count + len >= m->size)
-		goto overflow;
-
-	memcpy(m->buf + m->count, delimiter, len);
-	m->count += len;
-
-	if (m->count + 1 >= m->size)
-		goto overflow;
+	if (delimiter)
+		m->buf[m->count++] = delimiter;
 
 	if (num < 10) {
 		m->buf[m->count++] = num + '0';
@@ -709,7 +702,6 @@ void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
 	len = num_to_str(m->buf + m->count, m->size - m->count, num);
 	if (!len)
 		goto overflow;
-
 	m->count += len;
 	return;
 
@@ -718,42 +710,19 @@ overflow:
 }
 EXPORT_SYMBOL(seq_put_decimal_ull);
 
-void seq_put_decimal_ll(struct seq_file *m, const char *delimiter, long long num)
+void seq_put_decimal_ll(struct seq_file *m, char delimiter, long long num)
 {
-	int len;
-
-	if (m->count + 3 >= m->size) /* we'll write 2 bytes at least */
-		goto overflow;
-
-	len = strlen(delimiter);
-	if (m->count + len >= m->size)
-		goto overflow;
-
-	memcpy(m->buf + m->count, delimiter, len);
-	m->count += len;
-
-	if (m->count + 2 >= m->size)
-		goto overflow;
-
 	if (num < 0) {
-		m->buf[m->count++] = '-';
+		if (m->count + 3 >= m->size) {
+			seq_set_overflow(m);
+			return;
+		}
+		if (delimiter)
+			m->buf[m->count++] = delimiter;
 		num = -num;
+		delimiter = '-';
 	}
-
-	if (num < 10) {
-		m->buf[m->count++] = num + '0';
-		return;
-	}
-
-	len = num_to_str(m->buf + m->count, m->size - m->count, num);
-	if (!len)
-		goto overflow;
-
-	m->count += len;
-	return;
-
-overflow:
-	seq_set_overflow(m);
+	seq_put_decimal_ull(m, delimiter, num);
 }
 EXPORT_SYMBOL(seq_put_decimal_ll);
 

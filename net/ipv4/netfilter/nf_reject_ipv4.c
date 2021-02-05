@@ -14,6 +14,7 @@
 #include <net/netfilter/ipv4/nf_reject.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_bridge.h>
+#include <net/netfilter/ipv4/nf_reject.h>
 
 const struct tcphdr *nf_reject_ip_tcphdr_get(struct sk_buff *oldskb,
 					     struct tcphdr *_oth, int hook)
@@ -22,9 +23,6 @@ const struct tcphdr *nf_reject_ip_tcphdr_get(struct sk_buff *oldskb,
 
 	/* IP header checks: fragment. */
 	if (ip_hdr(oldskb)->frag_off & htons(IP_OFFSET))
-		return NULL;
-
-	if (ip_hdr(oldskb)->protocol != IPPROTO_TCP)
 		return NULL;
 
 	oth = skb_header_pointer(oldskb, ip_hdrlen(oldskb),

@@ -177,9 +177,9 @@ static bool allocate_event_notification_slot(struct file *devkfd,
 	bool ret;
 
 	ret = allocate_free_slot(p, page, signal_slot_index);
-	if (!ret) {
+	if (ret == false) {
 		ret = allocate_signal_page(devkfd, p);
-		if (ret)
+		if (ret == true)
 			ret = allocate_free_slot(p, page, signal_slot_index);
 	}
 

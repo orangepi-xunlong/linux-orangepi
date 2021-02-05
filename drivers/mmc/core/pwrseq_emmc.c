@@ -9,9 +9,6 @@
  */
 #include <linux/delay.h>
 #include <linux/kernel.h>
-#include <linux/init.h>
-#include <linux/platform_device.h>
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/err.h>
@@ -28,8 +25,6 @@ struct mmc_pwrseq_emmc {
 	struct gpio_desc *reset_gpio;
 };
 
-#define to_pwrseq_emmc(p) container_of(p, struct mmc_pwrseq_emmc, pwrseq)
-
 static void __mmc_pwrseq_emmc_reset(struct mmc_pwrseq_emmc *pwrseq)
 {
 	gpiod_set_value(pwrseq->reset_gpio, 1);
@@ -40,10 +35,26 @@ static void __mmc_pwrseq_emmc_reset(struct mmc_pwrseq_emmc *pwrseq)
 
 static void mmc_pwrseq_emmc_reset(struct mmc_host *host)
 {
-	struct mmc_pwrseq_emmc *pwrseq =  to_pwrseq_emmc(host->pwrseq);
+	struct mmc_pwrseq_emmc *pwrseq = container_of(host->pwrseq,
+					struct mmc_pwrseq_emmc, pwrseq);
 
 	__mmc_pwrseq_emmc_reset(pwrseq);
 }
+
+static void mmc_pwrseq_emmc_free(struct mmc_host *host)
+{
+	struct mmc_pwrseq_emmc *pwrseq = container_of(host->pwrseq,
+					struct mmc_pwrseq_emmc, pwrseq);
+
+	unregister_restart_handler(&pwrseq->reset_nb);
+	gpiod_put(pwrseq->reset_gpio);
+	kfree(pwrseq);
+}
+
+static struct mmc_pwrseq_ops mmc_pwrseq_emmc_ops = {
+	.post_power_on = mmc_pwrseq_emmc_reset,
+	.free = mmc_pwrseq_emmc_free,
+};
 
 static int mmc_pwrseq_emmc_reset_nb(struct notifier_block *this,
 				    unsigned long mode, void *cmd)
@@ -55,22 +66,21 @@ static int mmc_pwrseq_emmc_reset_nb(struct notifier_block *this,
 	return NOTIFY_DONE;
 }
 
-static const struct mmc_pwrseq_ops mmc_pwrseq_emmc_ops = {
-	.post_power_on = mmc_pwrseq_emmc_reset,
-};
-
-static int mmc_pwrseq_emmc_probe(struct platform_device *pdev)
+struct mmc_pwrseq *mmc_pwrseq_emmc_alloc(struct mmc_host *host,
+					 struct device *dev)
 {
 	struct mmc_pwrseq_emmc *pwrseq;
-	struct device *dev = &pdev->dev;
+	int ret = 0;
 
-	pwrseq = devm_kzalloc(dev, sizeof(*pwrseq), GFP_KERNEL);
+	pwrseq = kzalloc(sizeof(struct mmc_pwrseq_emmc), GFP_KERNEL);
 	if (!pwrseq)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
-	pwrseq->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
-	if (IS_ERR(pwrseq->reset_gpio))
-		return PTR_ERR(pwrseq->reset_gpio);
+	pwrseq->reset_gpio = gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+	if (IS_ERR(pwrseq->reset_gpio)) {
+		ret = PTR_ERR(pwrseq->reset_gpio);
+		goto free;
+	}
 
 	/*
 	 * register reset handler to ensure emmc reset also from
@@ -82,38 +92,9 @@ static int mmc_pwrseq_emmc_probe(struct platform_device *pdev)
 	register_restart_handler(&pwrseq->reset_nb);
 
 	pwrseq->pwrseq.ops = &mmc_pwrseq_emmc_ops;
-	pwrseq->pwrseq.dev = dev;
-	pwrseq->pwrseq.owner = THIS_MODULE;
-	platform_set_drvdata(pdev, pwrseq);
 
-	return mmc_pwrseq_register(&pwrseq->pwrseq);
+	return &pwrseq->pwrseq;
+free:
+	kfree(pwrseq);
+	return ERR_PTR(ret);
 }
-
-static int mmc_pwrseq_emmc_remove(struct platform_device *pdev)
-{
-	struct mmc_pwrseq_emmc *pwrseq = platform_get_drvdata(pdev);
-
-	unregister_restart_handler(&pwrseq->reset_nb);
-	mmc_pwrseq_unregister(&pwrseq->pwrseq);
-
-	return 0;
-}
-
-static const struct of_device_id mmc_pwrseq_emmc_of_match[] = {
-	{ .compatible = "mmc-pwrseq-emmc",},
-	{/* sentinel */},
-};
-
-MODULE_DEVICE_TABLE(of, mmc_pwrseq_emmc_of_match);
-
-static struct platform_driver mmc_pwrseq_emmc_driver = {
-	.probe = mmc_pwrseq_emmc_probe,
-	.remove = mmc_pwrseq_emmc_remove,
-	.driver = {
-		.name = "pwrseq_emmc",
-		.of_match_table = mmc_pwrseq_emmc_of_match,
-	},
-};
-
-module_platform_driver(mmc_pwrseq_emmc_driver);
-MODULE_LICENSE("GPL v2");

@@ -1,7 +1,5 @@
 /*
  * Copyright (C) 2003-2008 Takahiro Hirofuchi
- * Copyright (C) 2015-2016 Samsung Electronics
- *               Krzysztof Opasiak <k.opasiak@samsung.com>
  *
  * This is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -319,7 +317,6 @@ int usbip_recv(struct socket *sock, void *buf, int size)
 	struct msghdr msg;
 	struct kvec iov;
 	int total = 0;
-
 	/* for blocks of if (usbip_dbg_flag_xmit) */
 	char *bp = buf;
 	int osize = size;
@@ -628,7 +625,7 @@ int usbip_recv_iso(struct usbip_device *ud, struct urb *urb)
 			ret);
 		kfree(buff);
 
-		if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC)
+		if (ud->side == USBIP_STUB)
 			usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
 		else
 			usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
@@ -650,7 +647,7 @@ int usbip_recv_iso(struct usbip_device *ud, struct urb *urb)
 			"total length of iso packets %d not equal to actual length of buffer %d\n",
 			total_length, urb->actual_length);
 
-		if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC)
+		if (ud->side == USBIP_STUB)
 			usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
 		else
 			usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
@@ -708,7 +705,7 @@ int usbip_recv_xbuff(struct usbip_device *ud, struct urb *urb)
 	int ret;
 	int size;
 
-	if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC) {
+	if (ud->side == USBIP_STUB) {
 		/* the direction of urb must be OUT. */
 		if (usb_pipein(urb->pipe))
 			return 0;
@@ -740,7 +737,7 @@ int usbip_recv_xbuff(struct usbip_device *ud, struct urb *urb)
 	ret = usbip_recv(ud->tcp_socket, urb->transfer_buffer, size);
 	if (ret != size) {
 		dev_err(&urb->dev->dev, "recv xbuf, %d\n", ret);
-		if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC) {
+		if (ud->side == USBIP_STUB) {
 			usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
 		} else {
 			usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
@@ -754,19 +751,12 @@ EXPORT_SYMBOL_GPL(usbip_recv_xbuff);
 
 static int __init usbip_core_init(void)
 {
-	int ret;
-
 	pr_info(DRIVER_DESC " v" USBIP_VERSION "\n");
-	ret = usbip_init_eh();
-	if (ret)
-		return ret;
-
 	return 0;
 }
 
 static void __exit usbip_core_exit(void)
 {
-	usbip_finish_eh();
 	return;
 }
 

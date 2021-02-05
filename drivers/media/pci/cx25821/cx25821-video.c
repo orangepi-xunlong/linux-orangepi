@@ -130,7 +130,7 @@ int cx25821_video_irq(struct cx25821_dev *dev, int chan_num, u32 status)
 			buf = list_entry(dmaq->active.next,
 					 struct cx25821_buffer, queue);
 
-			buf->vb.vb2_buf.timestamp = ktime_get_ns();
+			v4l2_get_timestamp(&buf->vb.timestamp);
 			buf->vb.sequence = dmaq->count++;
 			list_del(&buf->queue);
 			vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
@@ -141,18 +141,20 @@ int cx25821_video_irq(struct cx25821_dev *dev, int chan_num, u32 status)
 	return handled;
 }
 
-static int cx25821_queue_setup(struct vb2_queue *q,
+static int cx25821_queue_setup(struct vb2_queue *q, const void *parg,
 			   unsigned int *num_buffers, unsigned int *num_planes,
-			   unsigned int sizes[], struct device *alloc_devs[])
+			   unsigned int sizes[], void *alloc_ctxs[])
 {
+	const struct v4l2_format *fmt = parg;
 	struct cx25821_channel *chan = q->drv_priv;
 	unsigned size = (chan->fmt->depth * chan->width * chan->height) >> 3;
 
-	if (*num_planes)
-		return sizes[0] < size ? -EINVAL : 0;
+	if (fmt && fmt->fmt.pix.sizeimage < size)
+		return -EINVAL;
 
 	*num_planes = 1;
-	sizes[0] = size;
+	sizes[0] = fmt ? fmt->fmt.pix.sizeimage : size;
+	alloc_ctxs[0] = chan->dev->alloc_ctx;
 	return 0;
 }
 
@@ -307,7 +309,7 @@ static void cx25821_stop_streaming(struct vb2_queue *q)
 	spin_unlock_irqrestore(&dev->slock, flags);
 }
 
-static const struct vb2_ops cx25821_video_qops = {
+static struct vb2_ops cx25821_video_qops = {
 	.queue_setup    = cx25821_queue_setup,
 	.buf_prepare  = cx25821_buffer_prepare,
 	.buf_finish = cx25821_buffer_finish,
@@ -757,7 +759,6 @@ int cx25821_video_register(struct cx25821_dev *dev)
 		q->mem_ops = &vb2_dma_sg_memops;
 		q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 		q->lock = &dev->lock;
-		q->dev = &dev->pci->dev;
 
 		if (!is_output) {
 			err = vb2_queue_init(q);

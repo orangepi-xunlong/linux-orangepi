@@ -39,6 +39,6 @@ static int keystone_smp_boot_secondary(unsigned int cpu,
 	return error;
 }
 
-const struct smp_operations keystone_smp_ops __initconst = {
+struct smp_operations keystone_smp_ops __initdata = {
 	.smp_boot_secondary	= keystone_smp_boot_secondary,
 };

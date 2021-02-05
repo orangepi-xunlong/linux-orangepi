@@ -1048,25 +1048,29 @@
 				atmel,adc-res-names = "lowres", "highres";
 				atmel,adc-use-res = "highres";
 
-				trigger0 {
+				trigger@0 {
+					reg = <0>;
 					trigger-name = "external-rising";
 					trigger-value = <0x1>;
 					trigger-external;
 				};
 
-				trigger1 {
+				trigger@1 {
+					reg = <1>;
 					trigger-name = "external-falling";
 					trigger-value = <0x2>;
 					trigger-external;
 				};
 
-				trigger2 {
+				trigger@2 {
+					reg = <2>;
 					trigger-name = "external-any";
 					trigger-value = <0x3>;
 					trigger-external;
 				};
 
-				trigger3 {
+				trigger@3 {
+					reg = <3>;
 					trigger-name = "continuous";
 					trigger-value = <0x6>;
 				};
@@ -1115,13 +1119,13 @@
 				clock-names = "hclk", "pclk";
 				status = "disabled";
 
-				ep@0 {
+				ep0 {
 					reg = <0>;
 					atmel,fifo-size = <64>;
 					atmel,nb-banks = <1>;
 				};
 
-				ep@1 {
+				ep1 {
 					reg = <1>;
 					atmel,fifo-size = <1024>;
 					atmel,nb-banks = <2>;
@@ -1129,7 +1133,7 @@
 					atmel,can-isoc;
 				};
 
-				ep@2 {
+				ep2 {
 					reg = <2>;
 					atmel,fifo-size = <1024>;
 					atmel,nb-banks = <2>;
@@ -1137,21 +1141,21 @@
 					atmel,can-isoc;
 				};
 
-				ep@3 {
+				ep3 {
 					reg = <3>;
 					atmel,fifo-size = <1024>;
 					atmel,nb-banks = <3>;
 					atmel,can-dma;
 				};
 
-				ep@4 {
+				ep4 {
 					reg = <4>;
 					atmel,fifo-size = <1024>;
 					atmel,nb-banks = <3>;
 					atmel,can-dma;
 				};
 
-				ep@5 {
+				ep5 {
 					reg = <5>;
 					atmel,fifo-size = <1024>;
 					atmel,nb-banks = <3>;
@@ -1159,7 +1163,7 @@
 					atmel,can-isoc;
 				};
 
-				ep@6 {
+				ep6 {
 					reg = <6>;
 					atmel,fifo-size = <1024>;
 					atmel,nb-banks = <3>;
@@ -1238,7 +1242,7 @@
 		};
 	};
 
-	i2c-gpio-0 {
+	i2c@0 {
 		compatible = "i2c-gpio";
 		gpios = <&pioA 30 GPIO_ACTIVE_HIGH /* sda */
 			 &pioA 31 GPIO_ACTIVE_HIGH /* scl */
@@ -1253,7 +1257,7 @@
 		status = "disabled";
 	};
 
-	i2c-gpio-1 {
+	i2c@1 {
 		compatible = "i2c-gpio";
 		gpios = <&pioC 0 GPIO_ACTIVE_HIGH /* sda */
 			 &pioC 1 GPIO_ACTIVE_HIGH /* scl */
@@ -1268,7 +1272,7 @@
 		status = "disabled";
 	};
 
-	i2c-gpio-2 {
+	i2c@2 {
 		compatible = "i2c-gpio";
 		gpios = <&pioB 4 GPIO_ACTIVE_HIGH /* sda */
 			 &pioB 5 GPIO_ACTIVE_HIGH /* scl */

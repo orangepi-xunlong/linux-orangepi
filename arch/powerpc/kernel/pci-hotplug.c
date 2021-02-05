@@ -21,35 +21,6 @@
 #include <asm/firmware.h>
 #include <asm/eeh.h>
 
-static struct pci_bus *find_bus_among_children(struct pci_bus *bus,
-					       struct device_node *dn)
-{
-	struct pci_bus *child = NULL;
-	struct pci_bus *tmp;
-
-	if (pci_bus_to_OF_node(bus) == dn)
-		return bus;
-
-	list_for_each_entry(tmp, &bus->children, node) {
-		child = find_bus_among_children(tmp, dn);
-		if (child)
-			break;
-	}
-
-	return child;
-}
-
-struct pci_bus *pci_find_bus_by_node(struct device_node *dn)
-{
-	struct pci_dn *pdn = PCI_DN(dn);
-
-	if (!pdn  || !pdn->phb || !pdn->phb->bus)
-		return NULL;
-
-	return find_bus_among_children(pdn->phb->bus, dn);
-}
-EXPORT_SYMBOL_GPL(pci_find_bus_by_node);
-
 /**
  * pcibios_release_device - release PCI device
  * @dev: PCI device
@@ -67,32 +38,33 @@ void pcibios_release_device(struct pci_dev *dev)
 }
 
 /**
- * pci_hp_remove_devices - remove all devices under this bus
+ * pcibios_remove_pci_devices - remove all devices under this bus
  * @bus: the indicated PCI bus
  *
  * Remove all of the PCI devices under this bus both from the
  * linux pci device tree, and from the powerpc EEH address cache.
  */
-void pci_hp_remove_devices(struct pci_bus *bus)
+void pcibios_remove_pci_devices(struct pci_bus *bus)
 {
 	struct pci_dev *dev, *tmp;
 	struct pci_bus *child_bus;
 
 	/* First go down child busses */
 	list_for_each_entry(child_bus, &bus->children, node)
-		pci_hp_remove_devices(child_bus);
+		pcibios_remove_pci_devices(child_bus);
 
 	pr_debug("PCI: Removing devices on bus %04x:%02x\n",
 		 pci_domain_nr(bus),  bus->number);
-	list_for_each_entry_safe_reverse(dev, tmp, &bus->devices, bus_list) {
+	list_for_each_entry_safe(dev, tmp, &bus->devices, bus_list) {
 		pr_debug("   Removing %s...\n", pci_name(dev));
 		pci_stop_and_remove_bus_device(dev);
 	}
 }
-EXPORT_SYMBOL_GPL(pci_hp_remove_devices);
+
+EXPORT_SYMBOL_GPL(pcibios_remove_pci_devices);
 
 /**
- * pci_hp_add_devices - adds new pci devices to bus
+ * pcibios_add_pci_devices - adds new pci devices to bus
  * @bus: the indicated PCI bus
  *
  * This routine will find and fixup new pci devices under
@@ -102,7 +74,7 @@ EXPORT_SYMBOL_GPL(pci_hp_remove_devices);
  * is how this routine differs from other, similar pcibios
  * routines.)
  */
-void pci_hp_add_devices(struct pci_bus *bus)
+void pcibios_add_pci_devices(struct pci_bus * bus)
 {
 	int slotno, mode, pass, max;
 	struct pci_dev *dev;
@@ -120,8 +92,7 @@ void pci_hp_add_devices(struct pci_bus *bus)
 	if (mode == PCI_PROBE_DEVTREE) {
 		/* use ofdt-based probe */
 		of_rescan_bus(dn, bus);
-	} else if (mode == PCI_PROBE_NORMAL &&
-		   dn->child && PCI_DN(dn->child)) {
+	} else if (mode == PCI_PROBE_NORMAL) {
 		/*
 		 * Use legacy probe. In the partial hotplug case, we
 		 * probably have grandchildren devices unplugged. So
@@ -143,4 +114,4 @@ void pci_hp_add_devices(struct pci_bus *bus)
 	}
 	pcibios_finish_adding_to_bus(bus);
 }
-EXPORT_SYMBOL_GPL(pci_hp_add_devices);
+EXPORT_SYMBOL_GPL(pcibios_add_pci_devices);

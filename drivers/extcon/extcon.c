@@ -61,6 +61,11 @@ struct __extcon_info {
 		.id = EXTCON_USB_HOST,
 		.name = "USB_HOST",
 	},
+	[EXTCON_USB_VBUS_EN] = {
+		.type = EXTCON_TYPE_USB,
+		.id = EXTCON_USB_VBUS_EN,
+		.name = "USB_VBUS_EN",
+	},
 
 	/* Charging external connector */
 	[EXTCON_CHG_USB_SDP] = {
@@ -92,11 +97,6 @@ struct __extcon_info {
 		.type = EXTCON_TYPE_CHG | EXTCON_TYPE_USB,
 		.id = EXTCON_CHG_USB_SLOW,
 		.name = "SLOW-CHARGER",
-	},
-	[EXTCON_CHG_WPT] = {
-		.type = EXTCON_TYPE_CHG,
-		.id = EXTCON_CHG_WPT,
-		.name = "WPT",
 	},
 
 	/* Jack external connector */
@@ -166,26 +166,6 @@ struct __extcon_info {
 		.type = EXTCON_TYPE_DISP | EXTCON_TYPE_USB,
 		.id = EXTCON_DISP_DP,
 		.name = "DP",
-	},
-	[EXTCON_DISP_HMD] = {
-		.type = EXTCON_TYPE_DISP | EXTCON_TYPE_USB,
-		.id = EXTCON_DISP_HMD,
-		.name = "HMD",
-	},
-	[EXTCON_DISP_CVBS] = {
-		.type = EXTCON_TYPE_DISP,
-		.id = EXTCON_DISP_CVBS,
-		.name = "CVBS",
-	},
-	[EXTCON_DISP_TVD] = {
-		.type = EXTCON_TYPE_DISP,
-		.id = EXTCON_DISP_TVD,
-		.name = "TVD",
-	},
-	[EXTCON_DISP_EDP] = {
-		.type = EXTCON_TYPE_DISP,
-		.id = EXTCON_DISP_EDP,
-		.name = "EDP",
 	},
 
 	/* Miscellaneous external connector */
@@ -468,7 +448,7 @@ int extcon_sync(struct extcon_dev *edev, unsigned int id)
 		dev_err(&edev->dev, "out of memory in extcon_set_state\n");
 		kobject_uevent(&edev->dev.kobj, KOBJ_CHANGE);
 
-		return -ENOMEM;
+		return 0;
 	}
 
 	length = name_show(&edev->dev, NULL, prop_buf);
@@ -854,6 +834,7 @@ int extcon_set_property_capability(struct extcon_dev *edev, unsigned int id,
 	if (index < 0)
 		return index;
 
+	/* Check whether the property is supported or not. */
 	type = get_extcon_type(prop);
 	if (type < 0)
 		return type;
@@ -919,18 +900,37 @@ int extcon_register_notifier(struct extcon_dev *edev, unsigned int id,
 			     struct notifier_block *nb)
 {
 	unsigned long flags;
-	int ret, idx = -EINVAL;
+	int ret, idx;
 
-	if (!edev || !nb)
+	if (!nb)
 		return -EINVAL;
 
-	idx = find_cable_index_by_id(edev, id);
-	if (idx < 0)
-		return idx;
+	if (edev) {
+		idx = find_cable_index_by_id(edev, id);
+		if (idx < 0)
+			return idx;
 
-	spin_lock_irqsave(&edev->lock, flags);
-	ret = raw_notifier_chain_register(&edev->nh[idx], nb);
-	spin_unlock_irqrestore(&edev->lock, flags);
+		spin_lock_irqsave(&edev->lock, flags);
+		ret = raw_notifier_chain_register(&edev->nh[idx], nb);
+		spin_unlock_irqrestore(&edev->lock, flags);
+	} else {
+		struct extcon_dev *extd;
+
+		mutex_lock(&extcon_dev_list_lock);
+		list_for_each_entry(extd, &extcon_dev_list, entry) {
+			idx = find_cable_index_by_id(extd, id);
+			if (idx >= 0)
+				break;
+		}
+		mutex_unlock(&extcon_dev_list_lock);
+
+		if (idx >= 0) {
+			edev = extd;
+			return extcon_register_notifier(extd, id, nb);
+		} else {
+			ret = -ENODEV;
+		}
+	}
 
 	return ret;
 }
@@ -978,7 +978,7 @@ static int create_extcon_class(void)
 			return PTR_ERR(extcon_class);
 		extcon_class->dev_groups = extcon_groups;
 
-#if defined(CONFIG_ANDROID)
+#if defined(CONFIG_ANDROID) && !defined(CONFIG_SWITCH)
 		switch_class = class_compat_register("switch");
 		if (WARN(!switch_class, "cannot allocate"))
 			return -ENOMEM;
@@ -1071,18 +1071,14 @@ int extcon_dev_register(struct extcon_dev *edev)
 	edev->dev.class = extcon_class;
 	edev->dev.release = extcon_dev_release;
 
+	edev->name = dev_name(edev->dev.parent);
 	if (IS_ERR_OR_NULL(edev->name)) {
-		dev_set_name(&edev->dev, "extcon%lu",
-			     (unsigned long)atomic_inc_return(&edev_no));
-		edev->name = dev_name(edev->dev.parent);
-	} else {
-		dev_set_name(&edev->dev, edev->name);
-	}
-
-	if (IS_ERR_OR_NULL(edev->name)) {
-		dev_err(&edev->dev, "extcon device name is null\n");
+		dev_err(&edev->dev,
+			"extcon device name is null\n");
 		return -EINVAL;
 	}
+	dev_set_name(&edev->dev, "extcon%lu",
+			(unsigned long)atomic_inc_return(&edev_no));
 
 	if (edev->max_supported) {
 		char buf[10];

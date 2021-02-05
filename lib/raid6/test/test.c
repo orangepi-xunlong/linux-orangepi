@@ -21,13 +21,12 @@
 
 #define NDISKS		16	/* Including P and Q */
 
-const char raid6_empty_zero_page[PAGE_SIZE] __attribute__((aligned(PAGE_SIZE)));
+const char raid6_empty_zero_page[PAGE_SIZE] __attribute__((aligned(256)));
 struct raid6_calls raid6_call;
 
 char *dataptrs[NDISKS];
-char data[NDISKS][PAGE_SIZE] __attribute__((aligned(PAGE_SIZE)));
-char recovi[PAGE_SIZE] __attribute__((aligned(PAGE_SIZE)));
-char recovj[PAGE_SIZE] __attribute__((aligned(PAGE_SIZE)));
+char data[NDISKS][PAGE_SIZE];
+char recovi[PAGE_SIZE], recovj[PAGE_SIZE];
 
 static void makedata(int start, int stop)
 {

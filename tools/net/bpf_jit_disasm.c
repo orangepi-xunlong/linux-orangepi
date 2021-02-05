@@ -98,9 +98,6 @@ static char *get_klog_buff(unsigned int *klen)
 	char *buff;
 
 	len = klogctl(CMD_ACTION_SIZE_BUFFER, NULL, 0);
-	if (len < 0)
-		return NULL;
-
 	buff = malloc(len);
 	if (!buff)
 		return NULL;

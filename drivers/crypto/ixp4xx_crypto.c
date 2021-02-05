@@ -447,8 +447,9 @@ static int init_ixp_crypto(struct device *dev)
 
 	if (!npe_running(npe_c)) {
 		ret = npe_load_firmware(npe_c, npe_name(npe_c), dev);
-		if (ret)
-			goto npe_release;
+		if (ret) {
+			return ret;
+		}
 		if (npe_recv_message(npe_c, msg, "STATUS_MSG"))
 			goto npe_error;
 	} else {
@@ -472,8 +473,7 @@ static int init_ixp_crypto(struct device *dev)
 	default:
 		printk(KERN_ERR "Firmware of %s lacks crypto support\n",
 			npe_name(npe_c));
-		ret = -ENODEV;
-		goto npe_release;
+		return -ENODEV;
 	}
 	/* buffer_pool will also be used to sometimes store the hmac,
 	 * so assure it is large enough
@@ -510,9 +510,10 @@ npe_error:
 	printk(KERN_ERR "%s not responding\n", npe_name(npe_c));
 	ret = -EIO;
 err:
-	dma_pool_destroy(ctx_pool);
-	dma_pool_destroy(buffer_pool);
-npe_release:
+	if (ctx_pool)
+		dma_pool_destroy(ctx_pool);
+	if (buffer_pool)
+		dma_pool_destroy(buffer_pool);
 	npe_release(npe_c);
 	return ret;
 }
@@ -1032,18 +1033,6 @@ static int aead_perform(struct aead_request *req, int encrypt,
 	BUG_ON(ivsize && !req->iv);
 	memcpy(crypt->iv, req->iv, ivsize);
 
-	buf = chainup_buffers(dev, req->src, crypt->auth_len,
-			      &src_hook, flags, src_direction);
-	req_ctx->src = src_hook.next;
-	crypt->src_buf = src_hook.phys_next;
-	if (!buf)
-		goto free_buf_src;
-
-	lastlen = buf->buf_len;
-	if (lastlen >= authsize)
-		crypt->icv_rev_aes = buf->phys_addr +
-				     buf->buf_len - authsize;
-
 	req_ctx->dst = NULL;
 
 	if (req->src != req->dst) {
@@ -1068,13 +1057,27 @@ static int aead_perform(struct aead_request *req, int encrypt,
 		}
 	}
 
+	buf = chainup_buffers(dev, req->src, crypt->auth_len,
+			      &src_hook, flags, src_direction);
+	req_ctx->src = src_hook.next;
+	crypt->src_buf = src_hook.phys_next;
+	if (!buf)
+		goto free_buf_src;
+
+	if (!encrypt || !req_ctx->dst) {
+		lastlen = buf->buf_len;
+		if (lastlen >= authsize)
+			crypt->icv_rev_aes = buf->phys_addr +
+					     buf->buf_len - authsize;
+	}
+
 	if (unlikely(lastlen < authsize)) {
 		/* The 12 hmac bytes are scattered,
 		 * we need to copy them into a safe buffer */
 		req_ctx->hmac_virt = dma_pool_alloc(buffer_pool, flags,
 				&crypt->icv_rev_aes);
 		if (unlikely(!req_ctx->hmac_virt))
-			goto free_buf_dst;
+			goto free_buf_src;
 		if (!encrypt) {
 			scatterwalk_map_and_copy(req_ctx->hmac_virt,
 				req->src, cryptlen, authsize, 0);
@@ -1089,10 +1092,10 @@ static int aead_perform(struct aead_request *req, int encrypt,
 	BUG_ON(qmgr_stat_overflow(SEND_QID));
 	return -EINPROGRESS;
 
-free_buf_dst:
-	free_buf_chain(dev, req_ctx->dst, crypt->dst_buf);
 free_buf_src:
 	free_buf_chain(dev, req_ctx->src, crypt->src_buf);
+free_buf_dst:
+	free_buf_chain(dev, req_ctx->dst, crypt->dst_buf);
 	crypt->ctl_flags = CTL_FLAG_UNUSED;
 	return -ENOMEM;
 }

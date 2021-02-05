@@ -51,12 +51,10 @@ static const struct snd_soc_dapm_route intercon[] = {
 };
 
 static struct snd_soc_codec_driver soc_dmic = {
-	.component_driver = {
-		.dapm_widgets		= dmic_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(dmic_dapm_widgets),
-		.dapm_routes		= intercon,
-		.num_dapm_routes	= ARRAY_SIZE(intercon),
-	},
+	.dapm_widgets = dmic_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(dmic_dapm_widgets),
+	.dapm_routes = intercon,
+	.num_dapm_routes = ARRAY_SIZE(intercon),
 };
 
 static int dmic_dev_probe(struct platform_device *pdev)

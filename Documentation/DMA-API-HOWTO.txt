@@ -699,7 +699,7 @@ to use the dma_sync_*() interfaces.
 		dma_addr_t mapping;
 
 		mapping = dma_map_single(cp->dev, buffer, len, DMA_FROM_DEVICE);
-		if (dma_mapping_error(cp->dev, mapping)) {
+		if (dma_mapping_error(cp->dev, dma_handle)) {
 			/*
 			 * reduce current DMA mapping usage,
 			 * delay and try again later or
@@ -931,8 +931,10 @@ to "Closing".
 
 1) Struct scatterlist requirements.
 
-   You need to enable CONFIG_NEED_SG_DMA_LENGTH if the architecture
-   supports IOMMUs (including software IOMMU).
+   Don't invent the architecture specific struct scatterlist; just use
+   <asm-generic/scatterlist.h>. You need to enable
+   CONFIG_NEED_SG_DMA_LENGTH if the architecture supports IOMMUs
+   (including software IOMMU).
 
 2) ARCH_DMA_MINALIGN
 
@@ -948,6 +950,16 @@ to "Closing".
    constraints. You don't need to worry about the architecture data
    alignment constraints (e.g. the alignment constraints about 64-bit
    objects).
+
+3) Supporting multiple types of IOMMUs
+
+   If your architecture needs to support multiple types of IOMMUs, you
+   can use include/linux/asm-generic/dma-mapping-common.h. It's a
+   library to support the DMA API with multiple types of IOMMUs. Lots
+   of architectures (x86, powerpc, sh, alpha, ia64, microblaze and
+   sparc) use it. Choose one to see how it can be used. If you need to
+   support multiple types of IOMMUs in a single system, the example of
+   x86 or powerpc helps.
 
 			   Closing
 

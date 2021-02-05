@@ -212,8 +212,11 @@ static int puv3_i2c_probe(struct platform_device *pdev)
 
 	adapter->nr = pdev->id;
 	rc = i2c_add_numbered_adapter(adapter);
-	if (rc)
+	if (rc) {
+		dev_err(&pdev->dev, "Adapter '%s' registration failed\n",
+				adapter->name);
 		goto fail_add_adapter;
+	}
 
 	dev_info(&pdev->dev, "PKUnity v3 i2c bus adapter.\n");
 	return 0;

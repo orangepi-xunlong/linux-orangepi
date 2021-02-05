@@ -95,7 +95,7 @@ static int beyond_eof(struct inode *inode, loff_t bix)
  * of each character and pick a prime nearby, preferably a bit-sparse
  * one.
  */
-static u32 logfs_hash_32(const char *s, int len, u32 seed)
+static u32 hash_32(const char *s, int len, u32 seed)
 {
 	u32 hash = seed;
 	int i;
@@ -156,10 +156,10 @@ static pgoff_t hash_index(u32 hash, int round)
 
 static struct page *logfs_get_dd_page(struct inode *dir, struct dentry *dentry)
 {
-	const struct qstr *name = &dentry->d_name;
+	struct qstr *name = &dentry->d_name;
 	struct page *page;
 	struct logfs_disk_dentry *dd;
-	u32 hash = logfs_hash_32(name->name, name->len, 0);
+	u32 hash = hash_32(name->name, name->len, 0);
 	pgoff_t index;
 	int round;
 
@@ -174,7 +174,7 @@ static struct page *logfs_get_dd_page(struct inode *dir, struct dentry *dentry)
 		if (!logfs_exist_block(dir, index))
 			continue;
 		page = read_cache_page(dir->i_mapping, index,
-				logfs_readpage, NULL);
+				(filler_t *)logfs_readpage, NULL);
 		if (IS_ERR(page))
 			return page;
 		dd = kmap_atomic(page);
@@ -183,7 +183,7 @@ static struct page *logfs_get_dd_page(struct inode *dir, struct dentry *dentry)
 		if (name->len != be16_to_cpu(dd->namelen) ||
 				memcmp(name->name, dd->name, name->len)) {
 			kunmap_atomic(dd);
-			put_page(page);
+			page_cache_release(page);
 			continue;
 		}
 
@@ -226,7 +226,7 @@ static int logfs_unlink(struct inode *dir, struct dentry *dentry)
 	ta->state = UNLINK_1;
 	ta->ino = inode->i_ino;
 
-	inode->i_ctime = dir->i_ctime = dir->i_mtime = current_time(inode);
+	inode->i_ctime = dir->i_ctime = dir->i_mtime = CURRENT_TIME;
 
 	page = logfs_get_dd_page(dir, dentry);
 	if (!page) {
@@ -238,7 +238,7 @@ static int logfs_unlink(struct inode *dir, struct dentry *dentry)
 		return PTR_ERR(page);
 	}
 	index = page->index;
-	put_page(page);
+	page_cache_release(page);
 
 	mutex_lock(&super->s_dirop_mutex);
 	logfs_add_transaction(dir, ta);
@@ -306,7 +306,7 @@ static int logfs_readdir(struct file *file, struct dir_context *ctx)
 			continue;
 		}
 		page = read_cache_page(dir->i_mapping, pos,
-				logfs_readpage, NULL);
+				(filler_t *)logfs_readpage, NULL);
 		if (IS_ERR(page))
 			return PTR_ERR(page);
 		dd = kmap(page);
@@ -316,14 +316,14 @@ static int logfs_readdir(struct file *file, struct dir_context *ctx)
 				be16_to_cpu(dd->namelen),
 				be64_to_cpu(dd->ino), dd->type);
 		kunmap(page);
-		put_page(page);
+		page_cache_release(page);
 		if (full)
 			break;
 	}
 	return 0;
 }
 
-static void logfs_set_name(struct logfs_disk_dentry *dd, const struct qstr *name)
+static void logfs_set_name(struct logfs_disk_dentry *dd, struct qstr *name)
 {
 	dd->namelen = cpu_to_be16(name->len);
 	memcpy(dd->name, name->name, name->len);
@@ -349,7 +349,7 @@ static struct dentry *logfs_lookup(struct inode *dir, struct dentry *dentry,
 	dd = kmap_atomic(page);
 	ino = be64_to_cpu(dd->ino);
 	kunmap_atomic(dd);
-	put_page(page);
+	page_cache_release(page);
 
 	inode = logfs_iget(dir->i_sb, ino);
 	if (IS_ERR(inode))
@@ -370,7 +370,7 @@ static int logfs_write_dir(struct inode *dir, struct dentry *dentry,
 {
 	struct page *page;
 	struct logfs_disk_dentry *dd;
-	u32 hash = logfs_hash_32(dentry->d_name.name, dentry->d_name.len, 0);
+	u32 hash = hash_32(dentry->d_name.name, dentry->d_name.len, 0);
 	pgoff_t index;
 	int round, err;
 
@@ -392,7 +392,7 @@ static int logfs_write_dir(struct inode *dir, struct dentry *dentry,
 
 		err = logfs_write_buf(dir, page, WF_LOCK);
 		unlock_page(page);
-		put_page(page);
+		page_cache_release(page);
 		if (!err)
 			grow_dir(dir, index);
 		return err;
@@ -528,8 +528,7 @@ static int logfs_symlink(struct inode *dir, struct dentry *dentry,
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
 
-	inode->i_op = &page_symlink_inode_operations;
-	inode_nohighmem(inode);
+	inode->i_op = &logfs_symlink_iops;
 	inode->i_mapping->a_ops = &logfs_reg_aops;
 
 	return __logfs_create(dir, dentry, inode, target, destlen);
@@ -540,7 +539,7 @@ static int logfs_link(struct dentry *old_dentry, struct inode *dir,
 {
 	struct inode *inode = d_inode(old_dentry);
 
-	inode->i_ctime = dir->i_ctime = dir->i_mtime = current_time(inode);
+	inode->i_ctime = dir->i_ctime = dir->i_mtime = CURRENT_TIME;
 	ihold(inode);
 	inc_nlink(inode);
 	mark_inode_dirty_sync(inode);
@@ -561,7 +560,7 @@ static int logfs_get_dd(struct inode *dir, struct dentry *dentry,
 	map = kmap_atomic(page);
 	memcpy(dd, map, sizeof(*dd));
 	kunmap_atomic(map);
-	put_page(page);
+	page_cache_release(page);
 	return 0;
 }
 
@@ -573,7 +572,7 @@ static int logfs_delete_dd(struct inode *dir, loff_t pos)
 	 * (crc-protected) journal.
 	 */
 	BUG_ON(beyond_eof(dir, pos));
-	dir->i_ctime = dir->i_mtime = current_time(dir);
+	dir->i_ctime = dir->i_mtime = CURRENT_TIME;
 	log_dir(" Delete dentry (%lx, %llx)\n", dir->i_ino, pos);
 	return logfs_delete(dir, pos, NULL);
 }
@@ -718,12 +717,8 @@ out:
 }
 
 static int logfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-			struct inode *new_dir, struct dentry *new_dentry,
-			unsigned int flags)
+			struct inode *new_dir, struct dentry *new_dentry)
 {
-	if (flags & ~RENAME_NOREPLACE)
-		return -EINVAL;
-
 	if (d_really_is_positive(new_dentry))
 		return logfs_rename_target(old_dir, old_dentry,
 					   new_dir, new_dentry);
@@ -781,6 +776,12 @@ fail:
 	return -EIO;
 }
 
+const struct inode_operations logfs_symlink_iops = {
+	.readlink	= generic_readlink,
+	.follow_link	= page_follow_link_light,
+	.put_link	= page_put_link,
+};
+
 const struct inode_operations logfs_dir_iops = {
 	.create		= logfs_create,
 	.link		= logfs_link,
@@ -795,7 +796,7 @@ const struct inode_operations logfs_dir_iops = {
 const struct file_operations logfs_dir_fops = {
 	.fsync		= logfs_fsync,
 	.unlocked_ioctl	= logfs_ioctl,
-	.iterate_shared	= logfs_readdir,
+	.iterate	= logfs_readdir,
 	.read		= generic_read_dir,
-	.llseek		= generic_file_llseek,
+	.llseek		= default_llseek,
 };

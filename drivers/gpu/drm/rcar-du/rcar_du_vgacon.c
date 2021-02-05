@@ -28,6 +28,7 @@ static int rcar_du_vga_connector_get_modes(struct drm_connector *connector)
 
 static const struct drm_connector_helper_funcs connector_helper_funcs = {
 	.get_modes = rcar_du_vga_connector_get_modes,
+	.best_encoder = rcar_du_connector_best_encoder,
 };
 
 static enum drm_connector_status
@@ -77,6 +78,8 @@ int rcar_du_vga_connector_init(struct rcar_du_device *rcdu,
 	ret = drm_mode_connector_attach_encoder(connector, encoder);
 	if (ret < 0)
 		return ret;
+
+	rcon->encoder = renc;
 
 	return 0;
 }

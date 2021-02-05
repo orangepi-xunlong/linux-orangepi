@@ -147,7 +147,7 @@ static void da8xx_rproc_kick(struct rproc *rproc, int vqid)
 {
 	struct da8xx_rproc *drproc = (struct da8xx_rproc *)rproc->priv;
 
-	/* Interrupt remote proc */
+	/* Interupt remote proc */
 	writel(SYSCFG_CHIPSIG2, drproc->chipsig);
 }
 
@@ -261,7 +261,7 @@ static int da8xx_rproc_probe(struct platform_device *pdev)
 	return 0;
 
 free_rproc:
-	rproc_free(rproc);
+	rproc_put(rproc);
 
 	return ret;
 }
@@ -290,7 +290,7 @@ static int da8xx_rproc_remove(struct platform_device *pdev)
 	disable_irq(drproc->irq);
 
 	rproc_del(rproc);
-	rproc_free(rproc);
+	rproc_put(rproc);
 
 	return 0;
 }

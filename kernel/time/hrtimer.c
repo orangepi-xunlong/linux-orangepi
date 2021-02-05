@@ -103,6 +103,13 @@ static const int hrtimer_clock_to_base_table[MAX_CLOCKS] = {
 	[CLOCK_TAI]		= HRTIMER_BASE_TAI,
 };
 
+static inline int hrtimer_clockid_to_base(clockid_t clock_id)
+{
+	int base = hrtimer_clock_to_base_table[clock_id];
+	BUG_ON(base == HRTIMER_MAX_CLOCK_BASES);
+	return base;
+}
+
 /*
  * Functions and macros which are different for UP/SMP systems are kept in a
  * single place
@@ -175,7 +182,7 @@ hrtimer_check_target(struct hrtimer *timer, struct hrtimer_clock_base *new_base)
 #endif
 }
 
-#ifdef CONFIG_NO_HZ_COMMON
+#if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON)
 static inline
 struct hrtimer_cpu_base *get_target_base(struct hrtimer_cpu_base *base,
 					 int pinned)
@@ -332,7 +339,7 @@ static void *hrtimer_debug_hint(void *addr)
  * fixup_init is called when:
  * - an active object is initialized
  */
-static bool hrtimer_fixup_init(void *addr, enum debug_obj_state state)
+static int hrtimer_fixup_init(void *addr, enum debug_obj_state state)
 {
 	struct hrtimer *timer = addr;
 
@@ -340,25 +347,30 @@ static bool hrtimer_fixup_init(void *addr, enum debug_obj_state state)
 	case ODEBUG_STATE_ACTIVE:
 		hrtimer_cancel(timer);
 		debug_object_init(timer, &hrtimer_debug_descr);
-		return true;
+		return 1;
 	default:
-		return false;
+		return 0;
 	}
 }
 
 /*
  * fixup_activate is called when:
  * - an active object is activated
- * - an unknown non-static object is activated
+ * - an unknown object is activated (might be a statically initialized object)
  */
-static bool hrtimer_fixup_activate(void *addr, enum debug_obj_state state)
+static int hrtimer_fixup_activate(void *addr, enum debug_obj_state state)
 {
 	switch (state) {
+
+	case ODEBUG_STATE_NOTAVAILABLE:
+		WARN_ON_ONCE(1);
+		return 0;
+
 	case ODEBUG_STATE_ACTIVE:
 		WARN_ON(1);
 
 	default:
-		return false;
+		return 0;
 	}
 }
 
@@ -366,7 +378,7 @@ static bool hrtimer_fixup_activate(void *addr, enum debug_obj_state state)
  * fixup_free is called when:
  * - an active object is freed
  */
-static bool hrtimer_fixup_free(void *addr, enum debug_obj_state state)
+static int hrtimer_fixup_free(void *addr, enum debug_obj_state state)
 {
 	struct hrtimer *timer = addr;
 
@@ -374,9 +386,9 @@ static bool hrtimer_fixup_free(void *addr, enum debug_obj_state state)
 	case ODEBUG_STATE_ACTIVE:
 		hrtimer_cancel(timer);
 		debug_object_free(timer, &hrtimer_debug_descr);
-		return true;
+		return 1;
 	default:
-		return false;
+		return 0;
 	}
 }
 
@@ -509,7 +521,7 @@ static inline ktime_t hrtimer_update_base(struct hrtimer_cpu_base *base)
 /*
  * High resolution timer enabled ?
  */
-static bool hrtimer_hres_enabled __read_mostly  = true;
+static int hrtimer_hres_enabled __read_mostly  = 1;
 unsigned int hrtimer_resolution __read_mostly = LOW_RES_NSEC;
 EXPORT_SYMBOL_GPL(hrtimer_resolution);
 
@@ -518,7 +530,13 @@ EXPORT_SYMBOL_GPL(hrtimer_resolution);
  */
 static int __init setup_hrtimer_hres(char *str)
 {
-	return (kstrtobool(str, &hrtimer_hres_enabled) == 0);
+	if (!strcmp(str, "off"))
+		hrtimer_hres_enabled = 0;
+	else if (!strcmp(str, "on"))
+		hrtimer_hres_enabled = 1;
+	else
+		return 0;
+	return 1;
 }
 
 __setup("highres=", setup_hrtimer_hres);
@@ -703,7 +721,7 @@ static void clock_was_set_work(struct work_struct *work)
 static DECLARE_WORK(hrtimer_work, clock_was_set_work);
 
 /*
- * Called from timekeeping and resume code to reprogram the hrtimer
+ * Called from timekeeping and resume code to reprogramm the hrtimer
  * interrupt device on all cpus.
  */
 void clock_was_set_delayed(void)
@@ -1112,18 +1130,6 @@ u64 hrtimer_get_next_event(void)
 }
 #endif
 
-static inline int hrtimer_clockid_to_base(clockid_t clock_id)
-{
-	if (likely(clock_id < MAX_CLOCKS)) {
-		int base = hrtimer_clock_to_base_table[clock_id];
-
-		if (likely(base != HRTIMER_MAX_CLOCK_BASES))
-			return base;
-	}
-	WARN(1, "Invalid clockid %d. Using MONOTONIC\n", clock_id);
-	return HRTIMER_BASE_MONOTONIC;
-}
-
 static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 			   enum hrtimer_mode mode)
 {
@@ -1258,7 +1264,7 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 
 	/*
 	 * Note: We clear the running state after enqueue_hrtimer and
-	 * we do not reprogram the event hardware. Happens either in
+	 * we do not reprogramm the event hardware. Happens either in
 	 * hrtimer_start_range_ns() or in hrtimer_interrupt()
 	 *
 	 * Note: Because we dropped the cpu_base->lock above,
@@ -1607,7 +1613,7 @@ SYSCALL_DEFINE2(nanosleep, struct timespec __user *, rqtp,
 /*
  * Functions related to boot-time initialization:
  */
-int hrtimers_prepare_cpu(unsigned int cpu)
+static void init_hrtimers_cpu(int cpu)
 {
 	struct hrtimer_cpu_base *cpu_base = &per_cpu(hrtimer_bases, cpu);
 	int i;
@@ -1620,7 +1626,6 @@ int hrtimers_prepare_cpu(unsigned int cpu)
 	cpu_base->active_bases = 0;
 	cpu_base->cpu = cpu;
 	hrtimer_init_hres(cpu_base);
-	return 0;
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -1655,7 +1660,7 @@ static void migrate_hrtimer_list(struct hrtimer_clock_base *old_base,
 	}
 }
 
-int hrtimers_dead_cpu(unsigned int scpu)
+static void migrate_hrtimers(int scpu)
 {
 	struct hrtimer_cpu_base *old_base, *new_base;
 	int i;
@@ -1684,14 +1689,45 @@ int hrtimers_dead_cpu(unsigned int scpu)
 	/* Check, if we got expired work to do */
 	__hrtimer_peek_ahead_timers();
 	local_irq_enable();
-	return 0;
 }
 
 #endif /* CONFIG_HOTPLUG_CPU */
 
+static int hrtimer_cpu_notify(struct notifier_block *self,
+					unsigned long action, void *hcpu)
+{
+	int scpu = (long)hcpu;
+
+	switch (action) {
+
+	case CPU_UP_PREPARE:
+	case CPU_UP_PREPARE_FROZEN:
+		init_hrtimers_cpu(scpu);
+		break;
+
+#ifdef CONFIG_HOTPLUG_CPU
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
+		migrate_hrtimers(scpu);
+		break;
+#endif
+
+	default:
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block hrtimers_nb = {
+	.notifier_call = hrtimer_cpu_notify,
+};
+
 void __init hrtimers_init(void)
 {
-	hrtimers_prepare_cpu(smp_processor_id());
+	hrtimer_cpu_notify(&hrtimers_nb, (unsigned long)CPU_UP_PREPARE,
+			  (void *)(long)smp_processor_id());
+	register_cpu_notifier(&hrtimers_nb);
 }
 
 /**

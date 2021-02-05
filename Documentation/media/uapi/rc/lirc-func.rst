@@ -17,8 +17,8 @@ LIRC Function Reference
     lirc-get-rec-resolution
     lirc-set-send-duty-cycle
     lirc-get-timeout
+    lirc-get-rec-timeout
     lirc-set-rec-timeout
-    lirc-get-length
     lirc-set-rec-carrier
     lirc-set-rec-carrier-range
     lirc-set-send-carrier

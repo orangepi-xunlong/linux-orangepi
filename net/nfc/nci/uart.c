@@ -171,7 +171,14 @@ static int nci_uart_tty_open(struct tty_struct *tty)
 	tty->disc_data = NULL;
 	tty->receive_room = 65536;
 
-	/* Flush any pending characters in the driver */
+	/* Flush any pending characters in the driver and line discipline. */
+
+	/* FIXME: why is this needed. Note don't use ldisc_ref here as the
+	 * open path is before the ldisc is referencable.
+	 */
+
+	if (tty->ldisc->ops->flush_buffer)
+		tty->ldisc->ops->flush_buffer(tty);
 	tty_driver_flush_buffer(tty);
 
 	return 0;

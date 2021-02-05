@@ -155,11 +155,12 @@ static int control_write(struct usbnet *dev, unsigned char request,
 		   index, size);
 
 	if (data) {
-		buf = kmemdup(data, size, GFP_KERNEL);
+		buf = kmalloc(size, GFP_KERNEL);
 		if (!buf) {
 			err = -ENOMEM;
 			goto err_out;
 		}
+		memcpy(buf, data, size);
 	}
 
 	err = usb_control_msg(dev->udev,

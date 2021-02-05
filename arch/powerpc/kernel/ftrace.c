@@ -61,11 +61,8 @@ ftrace_modify_code(unsigned long ip, unsigned int old, unsigned int new)
 		return -EFAULT;
 
 	/* Make sure it is what we expect it to be */
-	if (replaced != old) {
-		pr_err("%p: replaced (%#x) != old (%#x)",
-		(void *)ip, replaced, old);
+	if (replaced != old)
 		return -EINVAL;
-	}
 
 	/* replace the text with the new text */
 	if (patch_instruction((unsigned int *)ip, new))
@@ -109,15 +106,14 @@ static int
 __ftrace_make_nop(struct module *mod,
 		  struct dyn_ftrace *rec, unsigned long addr)
 {
-	unsigned long entry, ptr, tramp;
+	unsigned int op;
+	unsigned long entry, ptr;
 	unsigned long ip = rec->ip;
-	unsigned int op, pop;
+	void *tramp;
 
 	/* read where this goes */
-	if (probe_kernel_read(&op, (void *)ip, sizeof(int))) {
-		pr_err("Fetching opcode failed.\n");
+	if (probe_kernel_read(&op, (void *)ip, sizeof(int)))
 		return -EFAULT;
-	}
 
 	/* Make sure that that this is still a 24bit jump */
 	if (!is_bl_op(op)) {
@@ -126,9 +122,14 @@ __ftrace_make_nop(struct module *mod,
 	}
 
 	/* lets find where the pointer goes */
-	tramp = find_bl_target(ip, op);
+	tramp = (void *)find_bl_target(ip, op);
 
-	pr_devel("ip:%lx jumps to %lx", ip, tramp);
+	pr_devel("ip:%lx jumps to %p", ip, tramp);
+
+	if (!is_module_trampoline(tramp)) {
+		pr_err("Not a trampoline\n");
+		return -EINVAL;
+	}
 
 	if (module_trampoline_target(mod, tramp, &ptr)) {
 		pr_err("Failed to get trampoline target\n");
@@ -144,21 +145,6 @@ __ftrace_make_nop(struct module *mod,
 		return -EINVAL;
 	}
 
-#ifdef CC_USING_MPROFILE_KERNEL
-	/* When using -mkernel_profile there is no load to jump over */
-	pop = PPC_INST_NOP;
-
-	if (probe_kernel_read(&op, (void *)(ip - 4), 4)) {
-		pr_err("Fetching instruction at %lx failed.\n", ip - 4);
-		return -EFAULT;
-	}
-
-	/* We expect either a mflr r0, or a std r0, LRSAVE(r1) */
-	if (op != PPC_INST_MFLR && op != PPC_INST_STD_LR) {
-		pr_err("Unexpected instruction %08x around bl _mcount\n", op);
-		return -EINVAL;
-	}
-#else
 	/*
 	 * Our original call site looks like:
 	 *
@@ -172,28 +158,10 @@ __ftrace_make_nop(struct module *mod,
 	 *
 	 * Use a b +8 to jump over the load.
 	 */
+	op = 0x48000008;	/* b +8 */
 
-	pop = PPC_INST_BRANCH | 8;	/* b +8 */
-
-	/*
-	 * Check what is in the next instruction. We can see ld r2,40(r1), but
-	 * on first pass after boot we will see mflr r0.
-	 */
-	if (probe_kernel_read(&op, (void *)(ip+4), MCOUNT_INSN_SIZE)) {
-		pr_err("Fetching op failed.\n");
-		return -EFAULT;
-	}
-
-	if (op != PPC_INST_LD_TOC) {
-		pr_err("Expected %08x found %08x\n", PPC_INST_LD_TOC, op);
-		return -EINVAL;
-	}
-#endif /* CC_USING_MPROFILE_KERNEL */
-
-	if (patch_instruction((unsigned int *)ip, pop)) {
-		pr_err("Patching NOP failed.\n");
+	if (patch_instruction((unsigned int *)ip, op))
 		return -EPERM;
-	}
 
 	return 0;
 }
@@ -319,39 +287,6 @@ int ftrace_make_nop(struct module *mod,
 
 #ifdef CONFIG_MODULES
 #ifdef CONFIG_PPC64
-/*
- * Examine the existing instructions for __ftrace_make_call.
- * They should effectively be a NOP, and follow formal constraints,
- * depending on the ABI. Return false if they don't.
- */
-#ifndef CC_USING_MPROFILE_KERNEL
-static int
-expected_nop_sequence(void *ip, unsigned int op0, unsigned int op1)
-{
-	/*
-	 * We expect to see:
-	 *
-	 * b +8
-	 * ld r2,XX(r1)
-	 *
-	 * The load offset is different depending on the ABI. For simplicity
-	 * just mask it out when doing the compare.
-	 */
-	if ((op0 != 0x48000008) || ((op1 & 0xffff0000) != 0xe8410000))
-		return 0;
-	return 1;
-}
-#else
-static int
-expected_nop_sequence(void *ip, unsigned int op0, unsigned int op1)
-{
-	/* look for patched "NOP" on ppc64 with -mprofile-kernel */
-	if (op0 != PPC_INST_NOP)
-		return 0;
-	return 1;
-}
-#endif
-
 static int
 __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 {
@@ -362,9 +297,17 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	if (probe_kernel_read(op, ip, sizeof(op)))
 		return -EFAULT;
 
-	if (!expected_nop_sequence(ip, op[0], op[1])) {
-		pr_err("Unexpected call sequence at %p: %x %x\n",
-		ip, op[0], op[1]);
+	/*
+	 * We expect to see:
+	 *
+	 * b +8
+	 * ld r2,XX(r1)
+	 *
+	 * The load offset is different depending on the ABI. For simplicity
+	 * just mask it out when doing the compare.
+	 */
+	if ((op[0] != 0x48000008) || ((op[1] & 0xffff0000) != 0xe8410000)) {
+		pr_err("Unexpected call sequence: %x %x\n", op[0], op[1]);
 		return -EINVAL;
 	}
 
@@ -387,16 +330,7 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 
 	return 0;
 }
-
-#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
-int ftrace_modify_call(struct dyn_ftrace *rec, unsigned long old_addr,
-			unsigned long addr)
-{
-	return ftrace_make_call(rec, addr);
-}
-#endif
-
-#else  /* !CONFIG_PPC64: */
+#else
 static int
 __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 {
@@ -521,13 +455,20 @@ void ftrace_replace_code(int enable)
 	}
 }
 
-/*
- * Use the default ftrace_modify_all_code, but without
- * stop_machine().
- */
 void arch_ftrace_update_code(int command)
 {
-	ftrace_modify_all_code(command);
+	if (command & FTRACE_UPDATE_CALLS)
+		ftrace_replace_code(1);
+	else if (command & FTRACE_DISABLE_CALLS)
+		ftrace_replace_code(0);
+
+	if (command & FTRACE_UPDATE_TRACE_FUNC)
+		ftrace_update_ftrace_func(ftrace_trace_function);
+
+	if (command & FTRACE_START_FUNC_RET)
+		ftrace_enable_ftrace_graph_caller();
+	else if (command & FTRACE_STOP_FUNC_RET)
+		ftrace_disable_ftrace_graph_caller();
 }
 
 int __init ftrace_dyn_arch_init(void)
@@ -593,8 +534,7 @@ unsigned long prepare_ftrace_return(unsigned long parent, unsigned long ip)
 	if (!ftrace_graph_entry(&trace))
 		goto out;
 
-	if (ftrace_push_return_trace(parent, ip, &trace.depth, 0,
-				     NULL) == -EBUSY)
+	if (ftrace_push_return_trace(parent, ip, &trace.depth, 0) == -EBUSY)
 		goto out;
 
 	parent = return_hooker;
@@ -609,13 +549,3 @@ unsigned long __init arch_syscall_addr(int nr)
 	return sys_call_table[nr*2];
 }
 #endif /* CONFIG_FTRACE_SYSCALLS && CONFIG_PPC64 */
-
-#ifdef PPC64_ELF_ABI_v1
-char *arch_ftrace_match_adjust(char *str, const char *search)
-{
-	if (str[0] == '.' && search[0] != '.')
-		return str + 1;
-	else
-		return str;
-}
-#endif /* PPC64_ELF_ABI_v1 */

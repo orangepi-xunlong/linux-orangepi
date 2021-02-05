@@ -21,9 +21,6 @@
 
 #include "../integrity.h"
 
-#define EVM_INIT_HMAC	0x0001
-#define EVM_INIT_X509	0x0002
-
 extern int evm_initialized;
 extern char *evm_hmac;
 extern char *evm_hash;
@@ -48,7 +45,7 @@ int evm_calc_hmac(struct dentry *dentry, const char *req_xattr_name,
 		  size_t req_xattr_value_len, char *digest);
 int evm_calc_hash(struct dentry *dentry, const char *req_xattr_name,
 		  const char *req_xattr_value,
-		  size_t req_xattr_value_len, char type, char *digest);
+		  size_t req_xattr_value_len, char *digest);
 int evm_init_hmac(struct inode *inode, const struct xattr *xattr,
 		  char *hmac_val);
 int evm_init_secfs(void);

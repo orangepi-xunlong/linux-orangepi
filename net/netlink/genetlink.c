@@ -185,7 +185,7 @@ static int genl_allocate_reserve_groups(int n_groups, int *first_id)
 			}
 		}
 
-		if (id + n_groups > mc_groups_longs * BITS_PER_LONG) {
+		if (id >= mc_groups_longs * BITS_PER_LONG) {
 			unsigned long new_longs = mc_groups_longs +
 						  BITS_TO_LONGS(n_groups);
 			size_t nlen = new_longs * sizeof(unsigned long);
@@ -404,7 +404,7 @@ int __genl_register_family(struct genl_family *family)
 
 	err = genl_validate_assign_mc_groups(family);
 	if (err)
-		goto errout_free;
+		goto errout_locked;
 
 	list_add_tail(&family->family_list, genl_family_chain(family->id));
 	genl_unlock_all();
@@ -417,8 +417,6 @@ int __genl_register_family(struct genl_family *family)
 
 	return 0;
 
-errout_free:
-	kfree(family->attrbuf);
 errout_locked:
 	genl_unlock_all();
 errout:
@@ -463,6 +461,26 @@ int genl_unregister_family(struct genl_family *family)
 	return -ENOENT;
 }
 EXPORT_SYMBOL(genl_unregister_family);
+
+/**
+ * genlmsg_new_unicast - Allocate generic netlink message for unicast
+ * @payload: size of the message payload
+ * @info: information on destination
+ * @flags: the type of memory to allocate
+ *
+ * Allocates a new sk_buff large enough to cover the specified payload
+ * plus required Netlink headers. Will check receiving socket for
+ * memory mapped i/o capability and use it if enabled. Will fall back
+ * to non-mapped skb if message size exceeds the frame size of the ring.
+ */
+struct sk_buff *genlmsg_new_unicast(size_t payload, struct genl_info *info,
+				    gfp_t flags)
+{
+	size_t len = nlmsg_total_size(genlmsg_total_size(payload));
+
+	return netlink_alloc_skb(info->dst_sk, len, info->snd_portid, flags);
+}
+EXPORT_SYMBOL_GPL(genlmsg_new_unicast);
 
 /**
  * genlmsg_put - Add generic netlink header to netlink message
@@ -562,10 +580,6 @@ static int genl_family_rcv_msg(struct genl_family *family,
 	    !netlink_capable(skb, CAP_NET_ADMIN))
 		return -EPERM;
 
-	if ((ops->flags & GENL_UNS_ADMIN_PERM) &&
-	    !netlink_ns_capable(skb, net->user_ns, CAP_NET_ADMIN))
-		return -EPERM;
-
 	if ((nlh->nlmsg_flags & NLM_F_DUMP) == NLM_F_DUMP) {
 		int rc;
 
@@ -624,6 +638,7 @@ static int genl_family_rcv_msg(struct genl_family *family,
 	info.genlhdr = nlmsg_data(nlh);
 	info.userhdr = nlmsg_data(nlh) + GENL_HDRLEN;
 	info.attrs = attrbuf;
+	info.dst_sk = skb->sk;
 	genl_info_net_set(&info, net);
 	memset(&info.user_ptr, 0, sizeof(info.user_ptr));
 
@@ -979,7 +994,7 @@ static int genl_ctrl_event(int event, struct genl_family *family,
 	return 0;
 }
 
-static const struct genl_ops genl_ctrl_ops[] = {
+static struct genl_ops genl_ctrl_ops[] = {
 	{
 		.cmd		= CTRL_CMD_GETFAMILY,
 		.doit		= ctrl_getfamily,
@@ -988,7 +1003,7 @@ static const struct genl_ops genl_ctrl_ops[] = {
 	},
 };
 
-static const struct genl_multicast_group genl_ctrl_groups[] = {
+static struct genl_multicast_group genl_ctrl_groups[] = {
 	{ .name = "notify", },
 };
 

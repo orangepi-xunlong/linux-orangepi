@@ -13,10 +13,6 @@
 		serial0 = &uarta;
 	};
 
-	chosen {
-		stdout-path = "serial0:115200n8";
-	};
-
 	memory {
 		reg = <0x00000000 0x40000000>;
 	};
@@ -383,7 +379,7 @@
 
 		clk32k_in: clock@0 {
 			compatible = "fixed-clock";
-			reg = <0>;
+			reg=<0>;
 			#clock-cells = <0>;
 			clock-frequency = <32768>;
 		};
@@ -396,7 +392,7 @@
 			label = "Power";
 			gpios = <&gpio TEGRA_GPIO(X, 6) GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_POWER>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
 

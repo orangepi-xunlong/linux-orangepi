@@ -17,6 +17,15 @@
 	};
 
 	clocks {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		main_clock: clock@0 {
+			compatible = "atmel,osc", "fixed-clock";
+			clock-frequency = <18432000>;
+		};
+
 		slow_xtal {
 			clock-frequency = <32768>;
 		};
@@ -52,7 +61,7 @@
 		};
 	};
 
-	i2c-gpio-0 {
+	i2c@0 {
 		status = "okay";
 	};
 

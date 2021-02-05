@@ -132,34 +132,35 @@ static const struct kfd2kgd_calls kfd2kgd = {
 
 static const struct kgd2kfd_calls *kgd2kfd;
 
-int radeon_kfd_init(void)
+bool radeon_kfd_init(void)
 {
-	int ret;
-
 #if defined(CONFIG_HSA_AMD_MODULE)
-	int (*kgd2kfd_init_p)(unsigned, const struct kgd2kfd_calls**);
+	bool (*kgd2kfd_init_p)(unsigned, const struct kgd2kfd_calls**);
 
 	kgd2kfd_init_p = symbol_request(kgd2kfd_init);
 
 	if (kgd2kfd_init_p == NULL)
-		return -ENOENT;
+		return false;
 
-	ret = kgd2kfd_init_p(KFD_INTERFACE_VERSION, &kgd2kfd);
-	if (ret) {
+	if (!kgd2kfd_init_p(KFD_INTERFACE_VERSION, &kgd2kfd)) {
 		symbol_put(kgd2kfd_init);
 		kgd2kfd = NULL;
+
+		return false;
 	}
 
+	return true;
 #elif defined(CONFIG_HSA_AMD)
-	ret = kgd2kfd_init(KFD_INTERFACE_VERSION, &kgd2kfd);
-	if (ret)
+	if (!kgd2kfd_init(KFD_INTERFACE_VERSION, &kgd2kfd)) {
 		kgd2kfd = NULL;
 
-#else
-	ret = -ENOENT;
-#endif
+		return false;
+	}
 
-	return ret;
+	return true;
+#else
+	return false;
+#endif
 }
 
 void radeon_kfd_fini(void)

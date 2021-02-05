@@ -17,6 +17,11 @@
 
 #include <linux/types.h>
 
+#ifdef	__cplusplus
+extern "C" {
+#endif
+
+
 struct dim2_regs {
 	/* 0x00 */ u32 MLBC0;
 	/* 0x01 */ u32 rsvd0[1];
@@ -62,7 +67,8 @@ struct dim2_regs {
 	/* 0xF7 */ u32 ACMR1;
 };
 
-#define DIM2_MASK(n)  (~((~(u32)0) << (n)))
+
+#define DIM2_MASK(n)  (~((~(u32)0)<<(n)))
 
 enum {
 	MLBC0_MLBLK_BIT = 7,
@@ -77,7 +83,13 @@ enum {
 
 	MLBC0_FCNT_SHIFT = 15,
 	MLBC0_FCNT_MASK = 7,
-	MLBC0_FCNT_MAX_VAL = 6,
+	MLBC0_FCNT_VAL_1FPSB = 0,
+	MLBC0_FCNT_VAL_2FPSB = 1,
+	MLBC0_FCNT_VAL_4FPSB = 2,
+	MLBC0_FCNT_VAL_8FPSB = 3,
+	MLBC0_FCNT_VAL_16FPSB = 4,
+	MLBC0_FCNT_VAL_32FPSB = 5,
+	MLBC0_FCNT_VAL_64FPSB = 6,
 
 	MLBC0_MLBEN_BIT = 0,
 
@@ -117,9 +129,6 @@ enum {
 };
 
 enum {
-	CDT0_RPC_SHIFT = 16 + 11,
-	CDT0_RPC_MASK = DIM2_MASK(5),
-
 	CDT1_BS_ISOC_SHIFT = 0,
 	CDT1_BS_ISOC_MASK = DIM2_MASK(9),
 
@@ -158,5 +167,10 @@ enum {
 	CAT_CL_SHIFT = 0,
 	CAT_CL_MASK = DIM2_MASK(6)
 };
+
+
+#ifdef	__cplusplus
+}
+#endif
 
 #endif	/* DIM2_OS62420_H */

@@ -19,11 +19,7 @@
  * (assembly) code simpler.  When this starts to grow then we'll have
  * to consider dynamic allocation.
  */
-#ifdef CONFIG_ARCH_SUN8IW17P1
-#define MAX_CPUS_PER_CLUSTER	3
-#else
 #define MAX_CPUS_PER_CLUSTER	4
-#endif
 
 #ifdef CONFIG_MCPM_QUAD_CLUSTER
 #define MAX_NR_CLUSTERS		4
@@ -280,7 +276,7 @@ int __init mcpm_sync_init(
  */
 int __init mcpm_loopback(void (*cache_disable)(void));
 
-extern void __init mcpm_smp_set_ops(void);
+void __init mcpm_smp_set_ops(void);
 
 /*
  * Synchronisation structures for coordinating safe cluster setup/teardown.

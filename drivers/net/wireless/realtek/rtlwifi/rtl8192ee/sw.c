@@ -91,7 +91,6 @@ int rtl92ee_init_sw_vars(struct ieee80211_hw *hw)
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rtl_pci *rtlpci = rtl_pcidev(rtl_pcipriv(hw));
 	int err = 0;
-	char *fw_name;
 
 	rtl92ee_bt_reg_init(hw);
 	rtlpci->msi_support = rtlpriv->cfg->mod_params->msi_support;
@@ -171,11 +170,11 @@ int rtl92ee_init_sw_vars(struct ieee80211_hw *hw)
 	}
 
 	/* request fw */
-	fw_name = "rtlwifi/rtl8192eefw.bin";
+	rtlpriv->cfg->fw_name = "rtlwifi/rtl8192eefw.bin";
 
 	rtlpriv->max_fw_size = 0x8000;
-	pr_info("Using firmware %s\n", fw_name);
-	err = request_firmware_nowait(THIS_MODULE, 1, fw_name,
+	pr_info("Using firmware %s\n", rtlpriv->cfg->fw_name);
+	err = request_firmware_nowait(THIS_MODULE, 1, rtlpriv->cfg->fw_name,
 				      rtlpriv->io.dev, GFP_KERNEL, hw,
 				      rtl_fw_cb);
 	if (err) {
@@ -263,10 +262,11 @@ static struct rtl_mod_params rtl92ee_mod_params = {
 	.debug = DBG_EMERG,
 };
 
-static const struct rtl_hal_cfg rtl92ee_hal_cfg = {
+static struct rtl_hal_cfg rtl92ee_hal_cfg = {
 	.bar_id = 2,
 	.write_readback = true,
 	.name = "rtl92ee_pci",
+	.fw_name = "rtlwifi/rtl8192eefw.bin",
 	.ops = &rtl8192ee_hal_ops,
 	.mod_params = &rtl92ee_mod_params,
 

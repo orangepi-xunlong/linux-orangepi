@@ -257,7 +257,7 @@ slow_irqon:
 		start += nr << PAGE_SHIFT;
 		pages += nr;
 
-		ret = get_user_pages_unlocked(start,
+		ret = get_user_pages_unlocked(current, mm, start,
 			(end - start) >> PAGE_SHIFT, pages,
 			write ? FOLL_WRITE : 0);
 

@@ -22,6 +22,7 @@
 #include <linux/vmalloc.h>
 
 #include <xen/xen.h>
+#include <asm/cacheflush.h>
 #include <asm/xen/hypervisor.h>
 
 #define DMA_ERROR_CODE	(~(dma_addr_t)0)
@@ -47,14 +48,17 @@ static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 		return __generic_dma_ops(dev);
 }
 
+static inline void arch_set_dma_ops(struct device *dev, struct dma_map_ops *ops)
+{
+	dev->archdata.dma_ops = ops;
+}
+
 void arch_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,
-			const struct iommu_ops *iommu, bool coherent);
+			struct iommu_ops *iommu, bool coherent);
 #define arch_setup_dma_ops	arch_setup_dma_ops
 
-#ifdef CONFIG_IOMMU_DMA
 void arch_teardown_dma_ops(struct device *dev);
 #define arch_teardown_dma_ops	arch_teardown_dma_ops
-#endif
 
 /* do not use this function in a driver */
 static inline bool is_device_dma_coherent(struct device *dev)
@@ -64,18 +68,16 @@ static inline bool is_device_dma_coherent(struct device *dev)
 	return dev->archdata.dma_coherent;
 }
 
+#include <asm-generic/dma-mapping-common.h>
+
 static inline dma_addr_t phys_to_dma(struct device *dev, phys_addr_t paddr)
 {
-	dma_addr_t dev_addr = (dma_addr_t)paddr;
-
-	return dev_addr - ((dma_addr_t)dev->dma_pfn_offset << PAGE_SHIFT);
+	return (dma_addr_t)paddr;
 }
 
 static inline phys_addr_t dma_to_phys(struct device *dev, dma_addr_t dev_addr)
 {
-	phys_addr_t paddr = (phys_addr_t)dev_addr;
-
-	return paddr + ((phys_addr_t)dev->dma_pfn_offset << PAGE_SHIFT);
+	return (phys_addr_t)dev_addr;
 }
 
 static inline bool dma_capable(struct device *dev, dma_addr_t addr, size_t size)
@@ -90,14 +92,36 @@ static inline void dma_mark_clean(void *addr, size_t size)
 {
 }
 
-/* Override for dma_max_pfn() */
-static inline unsigned long dma_max_pfn(struct device *dev)
+static inline void arch_flush_page(struct device *dev, const void *virt,
+				   phys_addr_t phys)
 {
-	dma_addr_t dma_max = (dma_addr_t)*dev->dma_mask;
-
-	return (ulong)dma_to_phys(dev, dma_max) >> PAGE_SHIFT;
+	__dma_flush_range(virt, virt + PAGE_SIZE);
 }
-#define dma_max_pfn(dev) dma_max_pfn(dev)
+
+static inline void arch_dma_map_area(phys_addr_t phys, size_t size,
+				     enum dma_data_direction dir)
+{
+	__dma_map_area(phys_to_virt(phys), size, dir);
+}
+
+static inline void arch_dma_unmap_area(phys_addr_t phys, size_t size,
+				       enum dma_data_direction dir)
+{
+	__dma_unmap_area(phys_to_virt(phys), size, dir);
+}
+
+static inline pgprot_t arch_get_dma_pgprot(struct dma_attrs *attrs,
+					pgprot_t prot, bool coherent)
+{
+	if (!coherent || dma_get_attr(DMA_ATTR_WRITE_COMBINE, attrs))
+		return pgprot_writecombine(prot);
+	return prot;
+}
+
+extern void *arch_alloc_from_atomic_pool(size_t size, struct page **ret_page,
+					 gfp_t flags);
+extern bool arch_in_atomic_pool(void *start, size_t size);
+extern int arch_free_from_atomic_pool(void *start, size_t size);
 
 #endif	/* __KERNEL__ */
 #endif	/* __ASM_DMA_MAPPING_H */

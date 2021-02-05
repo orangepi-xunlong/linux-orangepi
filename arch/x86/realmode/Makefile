@@ -6,9 +6,7 @@
 # for more details.
 #
 #
-KASAN_SANITIZE			:= n
-OBJECT_FILES_NON_STANDARD	:= y
-
+KASAN_SANITIZE := n
 subdir- := rm
 
 obj-y += init.o

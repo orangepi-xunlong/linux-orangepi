@@ -17,17 +17,7 @@
  *
  * Author: Anton Blanchard <anton@au.ibm.com>
  */
-
-/*
- * Sparse (as at v0.5.0) gets very, very confused by this file.
- * Make it a bit simpler for it.
- */
-#if !defined(__CHECKER__)
 #include <altivec.h>
-#else
-#define vec_xor(a, b) a ^ b
-#define vector __attribute__((vector_size(16)))
-#endif
 
 #include <linux/preempt.h>
 #include <linux/export.h>
@@ -84,7 +74,6 @@ void xor_altivec_2(unsigned long bytes, unsigned long *v1_in,
 		v2 += 4;
 	} while (--lines > 0);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 EXPORT_SYMBOL(xor_altivec_2);
@@ -113,7 +102,6 @@ void xor_altivec_3(unsigned long bytes, unsigned long *v1_in,
 		v3 += 4;
 	} while (--lines > 0);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 EXPORT_SYMBOL(xor_altivec_3);
@@ -147,7 +135,6 @@ void xor_altivec_4(unsigned long bytes, unsigned long *v1_in,
 		v4 += 4;
 	} while (--lines > 0);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 EXPORT_SYMBOL(xor_altivec_4);
@@ -185,7 +172,6 @@ void xor_altivec_5(unsigned long bytes, unsigned long *v1_in,
 		v5 += 4;
 	} while (--lines > 0);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 EXPORT_SYMBOL(xor_altivec_5);

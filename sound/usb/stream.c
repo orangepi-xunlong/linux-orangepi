@@ -125,9 +125,11 @@ static int usb_chmap_ctl_info(struct snd_kcontrol *kcontrol,
 static bool have_dup_chmap(struct snd_usb_substream *subs,
 			   struct audioformat *fp)
 {
-	struct audioformat *prev = fp;
+	struct list_head *p;
 
-	list_for_each_entry_continue_reverse(prev, &subs->fmt_list, list) {
+	for (p = fp->list.prev; p != &subs->fmt_list; p = p->prev) {
+		struct audioformat *prev;
+		prev = list_entry(p, struct audioformat, list);
 		if (prev->chmap &&
 		    !memcmp(prev->chmap, fp->chmap, sizeof(*fp->chmap)))
 			return true;
@@ -683,6 +685,9 @@ int snd_usb_parse_audio_interface(struct snd_usb_audio *chip, int iface_no)
 
 		switch (chip->usb_id) {
 		case USB_ID(0x0a92, 0x0053): /* AudioTrak Optoplay */
+#ifdef CONFIG_HID_RKVR
+		case USB_ID(0x071B, 0x3205): /* RockChip NanoC VR */
+#endif
 			/* Optoplay sets the sample rate attribute although
 			 * it seems not supporting it in fact.
 			 */

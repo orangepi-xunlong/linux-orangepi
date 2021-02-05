@@ -655,6 +655,7 @@ static long dst_ca_ioctl(struct file *file, unsigned int cmd, unsigned long ioct
 static int dst_ca_open(struct inode *inode, struct file *file)
 {
 	dprintk(verbose, DST_CA_DEBUG, 1, " Device opened [%p] ", file);
+	try_module_get(THIS_MODULE);
 
 	return 0;
 }
@@ -662,6 +663,7 @@ static int dst_ca_open(struct inode *inode, struct file *file)
 static int dst_ca_release(struct inode *inode, struct file *file)
 {
 	dprintk(verbose, DST_CA_DEBUG, 1, " Device closed.");
+	module_put(THIS_MODULE);
 
 	return 0;
 }
@@ -703,8 +705,7 @@ struct dvb_device *dst_ca_attach(struct dst_state *dst, struct dvb_adapter *dvb_
 	struct dvb_device *dvbdev;
 
 	dprintk(verbose, DST_CA_ERROR, 1, "registering DST-CA device");
-	if (dvb_register_device(dvb_adapter, &dvbdev, &dvbdev_ca, dst,
-				DVB_DEVICE_CA, 0) == 0) {
+	if (dvb_register_device(dvb_adapter, &dvbdev, &dvbdev_ca, dst, DVB_DEVICE_CA) == 0) {
 		dst->dst_ca = dvbdev;
 		return dst->dst_ca;
 	}

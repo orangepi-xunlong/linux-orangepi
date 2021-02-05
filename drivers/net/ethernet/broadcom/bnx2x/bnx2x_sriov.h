@@ -196,6 +196,7 @@ struct bnx2x_virtf {
 	int leading_rss;
 
 	/* MCAST object */
+	int mcast_list_len;
 	struct bnx2x_mcast_obj		mcast_obj;
 
 	/* RSS configuration object */

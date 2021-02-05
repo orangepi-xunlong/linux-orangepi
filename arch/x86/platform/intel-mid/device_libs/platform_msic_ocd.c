@@ -1,5 +1,5 @@
 /*
- * platform_msic_ocd.c: MSIC OCD platform data initialization file
+ * platform_msic_ocd.c: MSIC OCD platform data initilization file
  *
  * (C) Copyright 2013 Intel Corporation
  * Author: Sathyanarayanan Kuppuswamy <sathyanarayanan.kuppuswamy@intel.com>

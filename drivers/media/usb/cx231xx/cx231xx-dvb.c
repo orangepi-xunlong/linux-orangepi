@@ -25,7 +25,6 @@
 
 #include <media/v4l2-common.h>
 #include <media/videobuf-vmalloc.h>
-#include <media/tuner.h>
 
 #include "xc5000.h"
 #include "s5h1432.h"
@@ -65,7 +64,6 @@ struct cx231xx_dvb {
 	struct dmx_frontend fe_hw;
 	struct dmx_frontend fe_mem;
 	struct dvb_net net;
-	struct i2c_client *i2c_client_demod;
 	struct i2c_client *i2c_client_tuner;
 };
 
@@ -149,6 +147,18 @@ static struct tda18271_config pv_tda18271_config = {
 	.std_map = &mb86a20s_tda18271_config,
 	.gate    = TDA18271_GATE_DIGITAL,
 	.small_i2c = TDA18271_03_BYTE_CHUNK_INIT,
+};
+
+static const struct si2165_config hauppauge_930C_HD_1113xx_si2165_config = {
+	.i2c_addr	= 0x64,
+	.chip_mode	= SI2165_MODE_PLL_XTAL,
+	.ref_freq_Hz	= 16000000,
+};
+
+static const struct si2165_config pctv_quatro_stick_1114xx_si2165_config = {
+	.i2c_addr	= 0x64,
+	.chip_mode	= SI2165_MODE_PLL_EXT,
+	.ref_freq_Hz	= 24000000,
 };
 
 static struct lgdt3306a_config hauppauge_955q_lgdt3306a_config = {
@@ -541,15 +551,10 @@ static int register_dvb(struct cx231xx_dvb *dvb,
 
 	/* register network adapter */
 	dvb_net_init(&dvb->adapter, &dvb->net, &dvb->demux.dmx);
-	result = dvb_create_media_graph(&dvb->adapter,
-					dev->tuner_type == TUNER_ABSENT);
-	if (result < 0)
-		goto fail_create_graph;
+	dvb_create_media_graph(&dvb->adapter);
 
 	return 0;
 
-fail_create_graph:
-	dvb_net_release(&dvb->net);
 fail_fe_conn:
 	dvb->demux.dmx.remove_frontend(&dvb->demux.dmx, &dvb->fe_mem);
 fail_fe_mem:
@@ -575,14 +580,8 @@ static void unregister_dvb(struct cx231xx_dvb *dvb)
 	dvb->demux.dmx.remove_frontend(&dvb->demux.dmx, &dvb->fe_hw);
 	dvb_dmxdev_release(&dvb->dmxdev);
 	dvb_dmx_release(&dvb->demux);
-	/* remove I2C tuner */
 	client = dvb->i2c_client_tuner;
-	if (client) {
-		module_put(client->dev.driver->owner);
-		i2c_unregister_device(client);
-	}
-	/* remove I2C demod */
-	client = dvb->i2c_client_demod;
+	/* remove I2C tuner */
 	if (client) {
 		module_put(client->dev.driver->owner);
 		i2c_unregister_device(client);
@@ -726,7 +725,7 @@ static int dvb_init(struct cx231xx *dev)
 
 		dev->dvb->frontend = dvb_attach(lgdt3305_attach,
 						&hcw_lgdt3305_config,
-						demod_i2c);
+						tuner_i2c);
 
 		if (dev->dvb->frontend == NULL) {
 			dev_err(dev->dev,
@@ -744,37 +743,18 @@ static int dvb_init(struct cx231xx *dev)
 		break;
 
 	case CX231XX_BOARD_HAUPPAUGE_930C_HD_1113xx:
-	{
-		struct i2c_client *client;
-		struct i2c_board_info info;
-		struct si2165_platform_data si2165_pdata;
 
-		/* attach demod */
-		memset(&si2165_pdata, 0, sizeof(si2165_pdata));
-		si2165_pdata.fe = &dev->dvb->frontend;
-		si2165_pdata.chip_mode = SI2165_MODE_PLL_XTAL,
-		si2165_pdata.ref_freq_Hz = 16000000,
+		dev->dvb->frontend = dvb_attach(si2165_attach,
+			&hauppauge_930C_HD_1113xx_si2165_config,
+			tuner_i2c
+			);
 
-		memset(&info, 0, sizeof(struct i2c_board_info));
-		strlcpy(info.type, "si2165", I2C_NAME_SIZE);
-		info.addr = 0x64;
-		info.platform_data = &si2165_pdata;
-		request_module(info.type);
-		client = i2c_new_device(demod_i2c, &info);
-		if (client == NULL || client->dev.driver == NULL || dev->dvb->frontend == NULL) {
+		if (dev->dvb->frontend == NULL) {
 			dev_err(dev->dev,
 				"Failed to attach SI2165 front end\n");
 			result = -EINVAL;
 			goto out_free;
 		}
-
-		if (!try_module_get(client->dev.driver->owner)) {
-			i2c_unregister_device(client);
-			result = -ENODEV;
-			goto out_free;
-		}
-
-		dvb->i2c_client_demod = client;
 
 		dev->dvb->frontend->ops.i2c_gate_ctrl = NULL;
 
@@ -788,42 +768,26 @@ static int dvb_init(struct cx231xx *dev)
 
 		dev->cx231xx_reset_analog_tuner = NULL;
 		break;
-	}
+
 	case CX231XX_BOARD_HAUPPAUGE_930C_HD_1114xx:
 	{
 		struct i2c_client *client;
 		struct i2c_board_info info;
-		struct si2165_platform_data si2165_pdata;
 		struct si2157_config si2157_config;
 
-		/* attach demod */
-		memset(&si2165_pdata, 0, sizeof(si2165_pdata));
-		si2165_pdata.fe = &dev->dvb->frontend;
-		si2165_pdata.chip_mode = SI2165_MODE_PLL_EXT,
-		si2165_pdata.ref_freq_Hz = 24000000,
-
 		memset(&info, 0, sizeof(struct i2c_board_info));
-		strlcpy(info.type, "si2165", I2C_NAME_SIZE);
-		info.addr = 0x64;
-		info.platform_data = &si2165_pdata;
-		request_module(info.type);
-		client = i2c_new_device(demod_i2c, &info);
-		if (client == NULL || client->dev.driver == NULL || dev->dvb->frontend == NULL) {
+
+		dev->dvb->frontend = dvb_attach(si2165_attach,
+			&pctv_quatro_stick_1114xx_si2165_config,
+			tuner_i2c
+			);
+
+		if (dev->dvb->frontend == NULL) {
 			dev_err(dev->dev,
 				"Failed to attach SI2165 front end\n");
 			result = -EINVAL;
 			goto out_free;
 		}
-
-		if (!try_module_get(client->dev.driver->owner)) {
-			i2c_unregister_device(client);
-			result = -ENODEV;
-			goto out_free;
-		}
-
-		dvb->i2c_client_demod = client;
-
-		memset(&info, 0, sizeof(struct i2c_board_info));
 
 		dev->dvb->frontend->ops.i2c_gate_ctrl = NULL;
 
@@ -833,9 +797,6 @@ static int dvb_init(struct cx231xx *dev)
 		/* attach tuner */
 		memset(&si2157_config, 0, sizeof(si2157_config));
 		si2157_config.fe = dev->dvb->frontend;
-#ifdef CONFIG_MEDIA_CONTROLLER_DVB
-		si2157_config.mdev = dev->media_dev;
-#endif
 		si2157_config.if_port = 1;
 		si2157_config.inversion = true;
 		strlcpy(info.type, "si2157", I2C_NAME_SIZE);
@@ -874,7 +835,7 @@ static int dvb_init(struct cx231xx *dev)
 
 		dev->dvb->frontend = dvb_attach(lgdt3306a_attach,
 			&hauppauge_955q_lgdt3306a_config,
-			demod_i2c
+			tuner_i2c
 			);
 
 		if (dev->dvb->frontend == NULL) {
@@ -892,9 +853,6 @@ static int dvb_init(struct cx231xx *dev)
 		/* attach tuner */
 		memset(&si2157_config, 0, sizeof(si2157_config));
 		si2157_config.fe = dev->dvb->frontend;
-#ifdef CONFIG_MEDIA_CONTROLLER_DVB
-		si2157_config.mdev = dev->media_dev;
-#endif
 		si2157_config.if_port = 1;
 		si2157_config.inversion = true;
 		strlcpy(info.type, "si2157", I2C_NAME_SIZE);

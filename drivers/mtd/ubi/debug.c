@@ -352,8 +352,7 @@ static ssize_t dfs_file_write(struct file *file, const char __user *user_buf,
 	} else if (dent == d->dfs_emulate_power_cut) {
 		if (kstrtoint(buf, 0, &val) != 0)
 			count = -EINVAL;
-		else
-			d->emulate_power_cut = val;
+		d->emulate_power_cut = val;
 		goto out;
 	}
 

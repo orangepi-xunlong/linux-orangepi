@@ -5,16 +5,6 @@
 /* error code which can't be mistaken for valid address */
 #define EFI_ERROR	(~0UL)
 
-/*
- * __init annotations should not be used in the EFI stub, since the code is
- * either included in the decompressor (x86, ARM) where they have no effect,
- * or the whole stub is __init annotated at the section level (arm64), by
- * renaming the sections, in which case the __init annotation will be
- * redundant, and will result in section names like .init.init.text, and our
- * linker script does not expect that.
- */
-#undef __init
-
 extern int __pure nokaslr(void);
 
 void efi_char16_printk(efi_system_table_t *, efi_char16_t *);
@@ -31,6 +21,14 @@ efi_status_t efi_file_read(void *handle, unsigned long *size, void *addr);
 efi_status_t efi_file_close(void *handle);
 
 unsigned long get_dram_base(efi_system_table_t *sys_table_arg);
+
+efi_status_t update_fdt(efi_system_table_t *sys_table, void *orig_fdt,
+			unsigned long orig_fdt_size,
+			void *fdt, int new_fdt_size, char *cmdline_ptr,
+			u64 initrd_addr, u64 initrd_size,
+			efi_memory_desc_t *memory_map,
+			unsigned long map_size, unsigned long desc_size,
+			u32 desc_ver);
 
 efi_status_t allocate_new_fdt_and_exit_boot(efi_system_table_t *sys_table,
 					    void *handle,
@@ -53,7 +51,5 @@ efi_status_t efi_get_random_bytes(efi_system_table_t *sys_table,
 efi_status_t efi_random_alloc(efi_system_table_t *sys_table_arg,
 			      unsigned long size, unsigned long align,
 			      unsigned long *addr, unsigned long random_seed);
-
-efi_status_t check_platform_features(efi_system_table_t *sys_table_arg);
 
 #endif

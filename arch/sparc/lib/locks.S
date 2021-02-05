@@ -10,7 +10,6 @@
 #include <asm/psr.h>
 #include <asm/smp.h>
 #include <asm/spinlock.h>
-#include <asm/export.h>
 
 	.text
 	.align	4
@@ -49,7 +48,6 @@ ___rw_write_enter_spin_on_wlock:
 	 ld	[%g1], %g2
 
 	.globl	___rw_read_enter
-EXPORT_SYMBOL(___rw_read_enter)
 ___rw_read_enter:
 	orcc	%g2, 0x0, %g0
 	bne,a	___rw_read_enter_spin_on_wlock
@@ -61,7 +59,6 @@ ___rw_read_enter:
 	 mov	%g4, %o7
 
 	.globl	___rw_read_exit
-EXPORT_SYMBOL(___rw_read_exit)
 ___rw_read_exit:
 	orcc	%g2, 0x0, %g0
 	bne,a	___rw_read_exit_spin_on_wlock
@@ -73,7 +70,6 @@ ___rw_read_exit:
 	 mov	%g4, %o7
 
 	.globl	___rw_read_try
-EXPORT_SYMBOL(___rw_read_try)
 ___rw_read_try:
 	orcc	%g2, 0x0, %g0
 	bne	___rw_read_try_spin_on_wlock
@@ -85,7 +81,6 @@ ___rw_read_try:
 	 mov	%g4, %o7
 
 	.globl	___rw_write_enter
-EXPORT_SYMBOL(___rw_write_enter)
 ___rw_write_enter:
 	orcc	%g2, 0x0, %g0
 	bne	___rw_write_enter_spin_on_wlock

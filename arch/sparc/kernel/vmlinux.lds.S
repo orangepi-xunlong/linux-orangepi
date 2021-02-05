@@ -49,7 +49,6 @@ SECTIONS
 		HEAD_TEXT
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		IRQENTRY_TEXT
@@ -150,13 +149,6 @@ SECTIONS
 		__sun_m7_2insn_patch_end = .;
 	}
 	PERCPU_SECTION(SMP_CACHE_BYTES)
-
-#ifdef CONFIG_JUMP_LABEL
-	. = ALIGN(PAGE_SIZE);
-	.exit.text : {
-		EXIT_TEXT
-	}
-#endif
 
 	. = ALIGN(PAGE_SIZE);
 	__init_end = .;

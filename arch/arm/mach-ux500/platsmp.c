@@ -26,6 +26,7 @@
 #include "setup.h"
 
 #include "db8500-regs.h"
+#include "id.h"
 
 /* Magic triggers in backup RAM */
 #define UX500_CPU1_JUMPADDR_OFFSET 0x1FF4
@@ -97,7 +98,7 @@ static int ux500_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	return 0;
 }
 
-static const struct smp_operations ux500_smp_ops __initconst = {
+struct smp_operations ux500_smp_ops __initdata = {
 	.smp_prepare_cpus	= ux500_smp_prepare_cpus,
 	.smp_boot_secondary	= ux500_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU

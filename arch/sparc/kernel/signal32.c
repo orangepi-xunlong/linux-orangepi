@@ -156,7 +156,7 @@ void do_sigreturn32(struct pt_regs *regs)
 	compat_uptr_t fpu_save;
 	compat_uptr_t rwin_save;
 	unsigned int psr, ufp;
-	unsigned int pc, npc;
+	unsigned pc, npc;
 	sigset_t set;
 	compat_sigset_t seta;
 	int err, i;
@@ -268,7 +268,7 @@ asmlinkage void do_rt_sigreturn32(struct pt_regs *regs)
 	if (ufp & 0x7)
 		goto segv;
 
-	if (__get_user(pc, &sf->regs.pc) || 
+	if (__get_user(pc, &sf->regs.pc) ||
 	    __get_user(npc, &sf->regs.npc))
 		goto segv;
 

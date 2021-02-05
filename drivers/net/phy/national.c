@@ -140,6 +140,7 @@ static struct phy_driver dp83865_driver[] = { {
 	.read_status = genphy_read_status,
 	.ack_interrupt = ns_ack_interrupt,
 	.config_intr = ns_config_intr,
+	.driver = {.owner = THIS_MODULE,}
 } };
 
 module_phy_driver(dp83865_driver);

@@ -28,6 +28,7 @@ enum cpuid_leafs
 	CPUID_8000_000A_EDX,
 	CPUID_7_ECX,
 	CPUID_8000_0007_EBX,
+	CPUID_7_EDX,
 };
 
 #ifdef CONFIG_X86_FEATURE_NAMES
@@ -78,8 +79,9 @@ extern const char * const x86_bug_flags[NBUGINTS*32];
 	   CHECK_BIT_IN_MASK_WORD(REQUIRED_MASK, 15, feature_bit) ||	\
 	   CHECK_BIT_IN_MASK_WORD(REQUIRED_MASK, 16, feature_bit) ||	\
 	   CHECK_BIT_IN_MASK_WORD(REQUIRED_MASK, 17, feature_bit) ||	\
+	   CHECK_BIT_IN_MASK_WORD(REQUIRED_MASK, 18, feature_bit) ||	\
 	   REQUIRED_MASK_CHECK					  ||	\
-	   BUILD_BUG_ON_ZERO(NCAPINTS != 18))
+	   BUILD_BUG_ON_ZERO(NCAPINTS != 19))
 
 #define DISABLED_MASK_BIT_SET(feature_bit)				\
 	 ( CHECK_BIT_IN_MASK_WORD(DISABLED_MASK,  0, feature_bit) ||	\
@@ -100,8 +102,9 @@ extern const char * const x86_bug_flags[NBUGINTS*32];
 	   CHECK_BIT_IN_MASK_WORD(DISABLED_MASK, 15, feature_bit) ||	\
 	   CHECK_BIT_IN_MASK_WORD(DISABLED_MASK, 16, feature_bit) ||	\
 	   CHECK_BIT_IN_MASK_WORD(DISABLED_MASK, 17, feature_bit) ||	\
+	   CHECK_BIT_IN_MASK_WORD(DISABLED_MASK, 18, feature_bit) ||	\
 	   DISABLED_MASK_CHECK					  ||	\
-	   BUILD_BUG_ON_ZERO(NCAPINTS != 18))
+	   BUILD_BUG_ON_ZERO(NCAPINTS != 19))
 
 #define cpu_has(c, bit)							\
 	(__builtin_constant_p(bit) && REQUIRED_MASK_BIT_SET(bit) ? 1 :	\
@@ -136,6 +139,31 @@ extern const char * const x86_bug_flags[NBUGINTS*32];
 } while (0)
 
 #define setup_force_cpu_bug(bit) setup_force_cpu_cap(bit)
+
+#define cpu_has_fpu		boot_cpu_has(X86_FEATURE_FPU)
+#define cpu_has_pse		boot_cpu_has(X86_FEATURE_PSE)
+#define cpu_has_tsc		boot_cpu_has(X86_FEATURE_TSC)
+#define cpu_has_pge		boot_cpu_has(X86_FEATURE_PGE)
+#define cpu_has_apic		boot_cpu_has(X86_FEATURE_APIC)
+#define cpu_has_fxsr		boot_cpu_has(X86_FEATURE_FXSR)
+#define cpu_has_xmm		boot_cpu_has(X86_FEATURE_XMM)
+#define cpu_has_xmm2		boot_cpu_has(X86_FEATURE_XMM2)
+#define cpu_has_aes		boot_cpu_has(X86_FEATURE_AES)
+#define cpu_has_avx		boot_cpu_has(X86_FEATURE_AVX)
+#define cpu_has_avx2		boot_cpu_has(X86_FEATURE_AVX2)
+#define cpu_has_clflush		boot_cpu_has(X86_FEATURE_CLFLUSH)
+#define cpu_has_gbpages		boot_cpu_has(X86_FEATURE_GBPAGES)
+#define cpu_has_arch_perfmon	boot_cpu_has(X86_FEATURE_ARCH_PERFMON)
+#define cpu_has_pat		boot_cpu_has(X86_FEATURE_PAT)
+#define cpu_has_x2apic		boot_cpu_has(X86_FEATURE_X2APIC)
+#define cpu_has_xsave		boot_cpu_has(X86_FEATURE_XSAVE)
+#define cpu_has_xsaves		boot_cpu_has(X86_FEATURE_XSAVES)
+#define cpu_has_osxsave		boot_cpu_has(X86_FEATURE_OSXSAVE)
+#define cpu_has_hypervisor	boot_cpu_has(X86_FEATURE_HYPERVISOR)
+/*
+ * Do not add any more of those clumsy macros - use static_cpu_has() for
+ * fast paths and boot_cpu_has() otherwise!
+ */
 
 #if defined(CC_HAVE_ASM_GOTO) && defined(CONFIG_X86_FAST_FEATURE_TESTS)
 /*

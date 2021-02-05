@@ -114,7 +114,6 @@ static int musb_regdump_show(struct seq_file *s, void *unused)
 	unsigned		i;
 
 	seq_printf(s, "MUSB (M)HDRC Register Dump\n");
-	pm_runtime_get_sync(musb->controller);
 
 	for (i = 0; i < ARRAY_SIZE(musb_regmap); i++) {
 		switch (musb_regmap[i].size) {
@@ -133,8 +132,6 @@ static int musb_regdump_show(struct seq_file *s, void *unused)
 		}
 	}
 
-	pm_runtime_mark_last_busy(musb->controller);
-	pm_runtime_put_autosuspend(musb->controller);
 	return 0;
 }
 
@@ -148,10 +145,7 @@ static int musb_test_mode_show(struct seq_file *s, void *unused)
 	struct musb		*musb = s->private;
 	unsigned		test;
 
-	pm_runtime_get_sync(musb->controller);
 	test = musb_readb(musb->mregs, MUSB_TESTMODE);
-	pm_runtime_mark_last_busy(musb->controller);
-	pm_runtime_put_autosuspend(musb->controller);
 
 	if (test & MUSB_TEST_FORCE_HOST)
 		seq_printf(s, "force host\n");
@@ -200,12 +194,11 @@ static ssize_t musb_test_mode_write(struct file *file,
 	u8			test;
 	char			buf[18];
 
-	pm_runtime_get_sync(musb->controller);
 	test = musb_readb(musb->mregs, MUSB_TESTMODE);
 	if (test) {
 		dev_err(musb->controller, "Error: test mode is already set. "
 			"Please do USB Bus Reset to start a new test.\n");
-		goto ret;
+		return count;
 	}
 
 	memset(buf, 0x00, sizeof(buf));
@@ -241,9 +234,6 @@ static ssize_t musb_test_mode_write(struct file *file,
 
 	musb_writeb(musb->mregs, MUSB_TESTMODE, test);
 
-ret:
-	pm_runtime_mark_last_busy(musb->controller);
-	pm_runtime_put_autosuspend(musb->controller);
 	return count;
 }
 
@@ -264,13 +254,8 @@ static int musb_softconnect_show(struct seq_file *s, void *unused)
 	switch (musb->xceiv->otg->state) {
 	case OTG_STATE_A_HOST:
 	case OTG_STATE_A_WAIT_BCON:
-		pm_runtime_get_sync(musb->controller);
-
 		reg = musb_readb(musb->mregs, MUSB_DEVCTL);
 		connect = reg & MUSB_DEVCTL_SESSION ? 1 : 0;
-
-		pm_runtime_mark_last_busy(musb->controller);
-		pm_runtime_put_autosuspend(musb->controller);
 		break;
 	default:
 		connect = -1;
@@ -299,7 +284,6 @@ static ssize_t musb_softconnect_write(struct file *file,
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
 		return -EFAULT;
 
-	pm_runtime_get_sync(musb->controller);
 	if (!strncmp(buf, "0", 1)) {
 		switch (musb->xceiv->otg->state) {
 		case OTG_STATE_A_HOST:
@@ -330,8 +314,6 @@ static ssize_t musb_softconnect_write(struct file *file,
 		}
 	}
 
-	pm_runtime_mark_last_busy(musb->controller);
-	pm_runtime_put_autosuspend(musb->controller);
 	return count;
 }
 

@@ -22,7 +22,7 @@
     |        m68k: | TODO |
     |       metag: | TODO |
     |  microblaze: | TODO |
-    |        mips: |  ok  |
+    |        mips: | TODO |
     |     mn10300: | TODO |
     |       nios2: | TODO |
     |    openrisc: | TODO |

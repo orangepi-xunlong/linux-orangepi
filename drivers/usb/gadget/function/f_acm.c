@@ -687,7 +687,7 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 	acm_ss_out_desc.bEndpointAddress = acm_fs_out_desc.bEndpointAddress;
 
 	status = usb_assign_descriptors(f, acm_fs_function, acm_hs_function,
-			acm_ss_function, NULL);
+			acm_ss_function);
 	if (status)
 		goto fail;
 
@@ -779,10 +779,10 @@ static ssize_t f_acm_port_num_show(struct config_item *item, char *page)
 	return sprintf(page, "%u\n", to_f_serial_opts(item)->port_num);
 }
 
-CONFIGFS_ATTR_RO(f_acm_, port_num);
+CONFIGFS_ATTR_RO(f_acm_port_, num);
 
 static struct configfs_attribute *acm_attrs[] = {
-	&f_acm_attr_port_num,
+	&f_acm_port_attr_num,
 	NULL,
 };
 

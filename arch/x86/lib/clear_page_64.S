@@ -1,7 +1,6 @@
 #include <linux/linkage.h>
 #include <asm/cpufeatures.h>
 #include <asm/alternative-asm.h>
-#include <asm/export.h>
 
 /*
  * Most CPUs support enhanced REP MOVSB/STOSB instructions. It is
@@ -24,7 +23,6 @@ ENTRY(clear_page)
 	rep stosq
 	ret
 ENDPROC(clear_page)
-EXPORT_SYMBOL(clear_page)
 
 ENTRY(clear_page_orig)
 

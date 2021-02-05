@@ -1,5 +1,5 @@
 /*
- * Read-Copy Update tracing for hierarchical implementation.
+ * Read-Copy Update tracing for classic implementation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,7 +16,6 @@
  * http://www.gnu.org/licenses/gpl-2.0.html.
  *
  * Copyright IBM Corporation, 2008
- * Author: Paul E. McKenney
  *
  * Papers:  http://www.rdrop.com/users/paulmck/RCU
  *
@@ -34,7 +33,9 @@
 #include <linux/sched.h>
 #include <linux/atomic.h>
 #include <linux/bitops.h>
+#include <linux/module.h>
 #include <linux/completion.h>
+#include <linux/moduleparam.h>
 #include <linux/percpu.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
@@ -182,20 +183,14 @@ static const struct file_operations rcudata_fops = {
 
 static int show_rcuexp(struct seq_file *m, void *v)
 {
-	int cpu;
 	struct rcu_state *rsp = (struct rcu_state *)m->private;
-	struct rcu_data *rdp;
-	unsigned long s0 = 0, s1 = 0, s2 = 0, s3 = 0;
 
-	for_each_possible_cpu(cpu) {
-		rdp = per_cpu_ptr(rsp->rda, cpu);
-		s0 += atomic_long_read(&rdp->exp_workdone0);
-		s1 += atomic_long_read(&rdp->exp_workdone1);
-		s2 += atomic_long_read(&rdp->exp_workdone2);
-		s3 += atomic_long_read(&rdp->exp_workdone3);
-	}
 	seq_printf(m, "s=%lu wd0=%lu wd1=%lu wd2=%lu wd3=%lu n=%lu enq=%d sc=%lu\n",
-		   rsp->expedited_sequence, s0, s1, s2, s3,
+		   rsp->expedited_sequence,
+		   atomic_long_read(&rsp->expedited_workdone0),
+		   atomic_long_read(&rsp->expedited_workdone1),
+		   atomic_long_read(&rsp->expedited_workdone2),
+		   atomic_long_read(&rsp->expedited_workdone3),
 		   atomic_long_read(&rsp->expedited_normal),
 		   atomic_read(&rsp->expedited_need_qs),
 		   rsp->expedited_sequence / 2);
@@ -324,7 +319,7 @@ static void show_one_rcugp(struct seq_file *m, struct rcu_state *rsp)
 	unsigned long gpmax;
 	struct rcu_node *rnp = &rsp->node[0];
 
-	raw_spin_lock_irqsave_rcu_node(rnp, flags);
+	raw_spin_lock_irqsave(&rnp->lock, flags);
 	completed = READ_ONCE(rsp->completed);
 	gpnum = READ_ONCE(rsp->gpnum);
 	if (completed == gpnum)
@@ -492,4 +487,16 @@ free_out:
 	debugfs_remove_recursive(rcudir);
 	return 1;
 }
-device_initcall(rcutree_trace_init);
+
+static void __exit rcutree_trace_cleanup(void)
+{
+	debugfs_remove_recursive(rcudir);
+}
+
+
+module_init(rcutree_trace_init);
+module_exit(rcutree_trace_cleanup);
+
+MODULE_AUTHOR("Paul E. McKenney");
+MODULE_DESCRIPTION("Read-Copy Update tracing for hierarchical implementation");
+MODULE_LICENSE("GPL");

@@ -22,7 +22,6 @@
 #include <net/genetlink.h>
 #include "event.h"
 #include "scan.h"
-#include "conf.h"
 #include "../wlcore/cmd.h"
 #include "../wlcore/debug.h"
 #include "../wlcore/vendor_cmd.h"
@@ -65,13 +64,13 @@ static int wlcore_smart_config_sync_event(struct wl1271 *wl, u8 sync_channel,
 					  u8 sync_band)
 {
 	struct sk_buff *skb;
-	enum nl80211_band band;
+	enum ieee80211_band band;
 	int freq;
 
 	if (sync_band == WLCORE_BAND_5GHZ)
-		band = NL80211_BAND_5GHZ;
+		band = IEEE80211_BAND_5GHZ;
 	else
-		band = NL80211_BAND_2GHZ;
+		band = IEEE80211_BAND_2GHZ;
 
 	freq = ieee80211_channel_to_frequency(sync_channel, band);
 
@@ -113,18 +112,12 @@ static int wlcore_smart_config_decode_event(struct wl1271 *wl,
 	return 0;
 }
 
-static void wlcore_event_time_sync(struct wl1271 *wl,
-				   u16 tsf_high_msb, u16 tsf_high_lsb,
-				   u16 tsf_low_msb, u16 tsf_low_lsb)
+static void wlcore_event_time_sync(struct wl1271 *wl, u16 tsf_msb, u16 tsf_lsb)
 {
-	u32 clock_low;
-	u32 clock_high;
-
-	clock_high = (tsf_high_msb << 16) | tsf_high_lsb;
-	clock_low = (tsf_low_msb << 16) | tsf_low_lsb;
-
-	wl1271_info("TIME_SYNC_EVENT_ID: clock_high %u, clock low %u",
-		    clock_high, clock_low);
+	u32 clock;
+	/* convert the MSB+LSB to a u32 TSF value */
+	clock = (tsf_msb << 16) | tsf_lsb;
+	wl1271_info("TIME_SYNC_EVENT_ID: clock %u", clock);
 }
 
 int wl18xx_process_mailbox_events(struct wl1271 *wl)
@@ -145,18 +138,15 @@ int wl18xx_process_mailbox_events(struct wl1271 *wl)
 
 	if (vector & TIME_SYNC_EVENT_ID)
 		wlcore_event_time_sync(wl,
-			mbox->time_sync_tsf_high_msb,
-			mbox->time_sync_tsf_high_lsb,
-			mbox->time_sync_tsf_low_msb,
-			mbox->time_sync_tsf_low_lsb);
+				mbox->time_sync_tsf_msb,
+				mbox->time_sync_tsf_lsb);
 
 	if (vector & RADAR_DETECTED_EVENT_ID) {
 		wl1271_info("radar event: channel %d type %s",
 			    mbox->radar_channel,
 			    wl18xx_radar_type_decode(mbox->radar_type));
 
-		if (!wl->radar_debug_mode)
-			ieee80211_radar_detected(wl->hw);
+		ieee80211_radar_detected(wl->hw);
 	}
 
 	if (vector & PERIODIC_SCAN_REPORT_EVENT_ID) {
@@ -196,11 +186,11 @@ int wl18xx_process_mailbox_events(struct wl1271 *wl)
 	 */
 	if (vector & MAX_TX_FAILURE_EVENT_ID)
 		wlcore_event_max_tx_failure(wl,
-				le16_to_cpu(mbox->tx_retry_exceeded_bitmap));
+				le32_to_cpu(mbox->tx_retry_exceeded_bitmap));
 
 	if (vector & INACTIVE_STA_EVENT_ID)
 		wlcore_event_inactive_sta(wl,
-				le16_to_cpu(mbox->inactive_sta_bitmap));
+				le32_to_cpu(mbox->inactive_sta_bitmap));
 
 	if (vector & REMAIN_ON_CHANNEL_COMPLETE_EVENT_ID)
 		wlcore_event_roc_complete(wl);
@@ -215,8 +205,6 @@ int wl18xx_process_mailbox_events(struct wl1271 *wl)
 						 mbox->sc_ssid,
 						 mbox->sc_pwd_len,
 						 mbox->sc_pwd);
-	if (vector & FW_LOGGER_INDICATION)
-		wlcore_event_fw_logger(wl);
 
 	if (vector & RX_BA_WIN_SIZE_CHANGE_EVENT_ID) {
 		struct wl12xx_vif *wlvif;

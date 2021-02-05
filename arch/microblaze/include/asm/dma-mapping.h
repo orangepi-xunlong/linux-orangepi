@@ -25,6 +25,7 @@
 #include <linux/mm.h>
 #include <linux/scatterlist.h>
 #include <linux/dma-debug.h>
+#include <linux/dma-attrs.h>
 #include <asm/io.h>
 #include <asm/cacheflush.h>
 
@@ -42,6 +43,8 @@ static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 {
 	return &dma_direct_ops;
 }
+
+#include <asm-generic/dma-mapping-common.h>
 
 static inline void __dma_sync(unsigned long paddr,
 			      size_t size, enum dma_data_direction direction)

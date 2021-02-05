@@ -634,4 +634,15 @@ static struct isa_driver snd_galaxy_driver = {
 	}
 };
 
-module_isa_driver(snd_galaxy_driver, SNDRV_CARDS);
+static int __init alsa_card_galaxy_init(void)
+{
+	return isa_register_driver(&snd_galaxy_driver, SNDRV_CARDS);
+}
+
+static void __exit alsa_card_galaxy_exit(void)
+{
+	isa_unregister_driver(&snd_galaxy_driver);
+}
+
+module_init(alsa_card_galaxy_init);
+module_exit(alsa_card_galaxy_exit);

@@ -41,8 +41,13 @@ pmdval_t early_pmd_flags = __PAGE_KERNEL_LARGE & ~(_PAGE_GLOBAL | _PAGE_NX);
 /* Wipe all early page tables except for the kernel symbol map */
 static void __init reset_early_page_tables(void)
 {
-	memset(early_level4_pgt, 0, sizeof(pgd_t)*(PTRS_PER_PGD-1));
+	unsigned long i;
+
+	for (i = 0; i < PTRS_PER_PGD-1; i++)
+		early_level4_pgt[i].pgd = 0;
+
 	next_early_pgt = 0;
+
 	write_cr3(__pa_nodebug(early_level4_pgt));
 }
 
@@ -50,6 +55,7 @@ static void __init reset_early_page_tables(void)
 int __init early_make_pgtable(unsigned long address)
 {
 	unsigned long physaddr = address - __PAGE_OFFSET;
+	unsigned long i;
 	pgdval_t pgd, *pgd_p;
 	pudval_t pud, *pud_p;
 	pmdval_t pmd, *pmd_p;
@@ -76,7 +82,8 @@ again:
 		}
 
 		pud_p = (pudval_t *)early_dynamic_pgts[next_early_pgt++];
-		memset(pud_p, 0, sizeof(*pud_p) * PTRS_PER_PUD);
+		for (i = 0; i < PTRS_PER_PUD; i++)
+			pud_p[i] = 0;
 		*pgd_p = (pgdval_t)pud_p - __START_KERNEL_map + phys_base + _KERNPG_TABLE;
 	}
 	pud_p += pud_index(address);
@@ -91,7 +98,8 @@ again:
 		}
 
 		pmd_p = (pmdval_t *)early_dynamic_pgts[next_early_pgt++];
-		memset(pmd_p, 0, sizeof(*pmd_p) * PTRS_PER_PMD);
+		for (i = 0; i < PTRS_PER_PMD; i++)
+			pmd_p[i] = 0;
 		*pud_p = (pudval_t)pmd_p - __START_KERNEL_map + phys_base + _KERNPG_TABLE;
 	}
 	pmd = (physaddr & PMD_MASK) + early_pmd_flags;
@@ -183,15 +191,7 @@ void __init x86_64_start_reservations(char *real_mode_data)
 	if (!boot_params.hdr.version)
 		copy_bootdata(__va(real_mode_data));
 
-	x86_early_init_platform_quirks();
-
-	switch (boot_params.hdr.hardware_subarch) {
-	case X86_SUBARCH_INTEL_MID:
-		x86_intel_mid_early_setup();
-		break;
-	default:
-		break;
-	}
+	reserve_ebda_region();
 
 	start_kernel();
 }

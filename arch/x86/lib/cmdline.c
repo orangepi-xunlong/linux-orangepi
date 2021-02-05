@@ -25,9 +25,7 @@ static inline int myisspace(u8 c)
  * as an entire word in @cmdline.  For instance, if @option="car"
  * then a cmdline which contains "cart" will not match.
  */
-static int
-__cmdline_find_option_bool(const char *cmdline, int max_cmdline_size,
-			   const char *option)
+int cmdline_find_option_bool(const char *cmdline, const char *option)
 {
 	char c;
 	int pos = 0, wstart = 0;
@@ -41,11 +39,14 @@ __cmdline_find_option_bool(const char *cmdline, int max_cmdline_size,
 	if (!cmdline)
 		return -1;      /* No command line */
 
+	if (!strlen(cmdline))
+		return 0;
+
 	/*
 	 * This 'pos' check ensures we do not overrun
 	 * a non-NULL-terminated 'cmdline'
 	 */
-	while (pos < max_cmdline_size) {
+	while (pos < COMMAND_LINE_SIZE) {
 		c = *(char *)cmdline++;
 		pos++;
 
@@ -71,26 +72,18 @@ __cmdline_find_option_bool(const char *cmdline, int max_cmdline_size,
 				 */
 				if (!c || myisspace(c))
 					return wstart;
-				/*
-				 * We hit the end of the option, but _not_
-				 * the end of a word on the cmdline.  Not
-				 * a match.
-				 */
+				else
+					state = st_wordskip;
 			} else if (!c) {
 				/*
 				 * Hit the NULL terminator on the end of
 				 * cmdline.
 				 */
 				return 0;
-			} else if (c == *opptr++) {
-				/*
-				 * We are currently matching, so continue
-				 * to the next character on the cmdline.
-				 */
-				break;
+			} else if (c != *opptr++) {
+				state = st_wordskip;
 			}
-			state = st_wordskip;
-			/* fall through */
+			break;
 
 		case st_wordskip:
 			if (!c)
@@ -200,11 +193,6 @@ __cmdline_find_option(const char *cmdline, int max_cmdline_size,
 		*bufptr = '\0';
 
 	return len;
-}
-
-int cmdline_find_option_bool(const char *cmdline, const char *option)
-{
-	return __cmdline_find_option_bool(cmdline, COMMAND_LINE_SIZE, option);
 }
 
 int cmdline_find_option(const char *cmdline, const char *option, char *buffer,

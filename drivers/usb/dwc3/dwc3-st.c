@@ -31,7 +31,6 @@
 #include <linux/slab.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
-#include <linux/pinctrl/consumer.h>
 #include <linux/usb/of.h>
 
 #include "core.h"

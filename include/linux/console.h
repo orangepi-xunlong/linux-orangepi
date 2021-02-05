@@ -28,13 +28,6 @@ struct tty_struct;
 #define VT100ID "\033[?1;2c"
 #define VT102ID "\033[?6c"
 
-/**
- * struct consw - callbacks for consoles
- *
- * @con_set_palette: sets the palette of the console to @table (optional)
- * @con_scrolldelta: the contents of the console should be scrolled by @lines.
- *		     Invoked by user. (optional)
- */
 struct consw {
 	struct module *owner;
 	const char *(*con_startup)(void);
@@ -45,6 +38,7 @@ struct consw {
 	void	(*con_putcs)(struct vc_data *, const unsigned short *, int, int, int);
 	void	(*con_cursor)(struct vc_data *, int);
 	int	(*con_scroll)(struct vc_data *, int, int, int, int);
+	void	(*con_bmove)(struct vc_data *, int, int, int, int, int, int);
 	int	(*con_switch)(struct vc_data *);
 	int	(*con_blank)(struct vc_data *, int, int);
 	int	(*con_font_set)(struct vc_data *, struct console_font *, unsigned);
@@ -53,9 +47,8 @@ struct consw {
 	int	(*con_font_copy)(struct vc_data *, int);
 	int     (*con_resize)(struct vc_data *, unsigned int, unsigned int,
 			       unsigned int);
-	void	(*con_set_palette)(struct vc_data *,
-			const unsigned char *table);
-	void	(*con_scrolldelta)(struct vc_data *, int lines);
+	int	(*con_set_palette)(struct vc_data *, unsigned char *);
+	int	(*con_scrolldelta)(struct vc_data *, int);
 	int	(*con_set_origin)(struct vc_data *);
 	void	(*con_save_screen)(struct vc_data *);
 	u8	(*con_build_attr)(struct vc_data *, u8, u8, u8, u8, u8, u8);
@@ -123,6 +116,9 @@ static inline int con_debug_leave(void)
 #define CON_ANYTIME	(16) /* Safe to call when cpu is offline */
 #define CON_BRL		(32) /* Used for a braille device */
 #define CON_EXTENDED	(64) /* Use the extended output format a la /dev/kmsg */
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_PSTORE_CONSOLE)
+#define CON_PSTORE	(128) /* Print to pstore console anyway */
+#endif
 
 struct console {
 	char	name[16];
@@ -198,8 +194,6 @@ void vcs_remove_sysfs(int index);
 
 #ifdef CONFIG_VGA_CONSOLE
 extern bool vgacon_text_force(void);
-#else
-static inline bool vgacon_text_force(void) { return false; }
 #endif
 
 #endif /* _LINUX_CONSOLE_H */

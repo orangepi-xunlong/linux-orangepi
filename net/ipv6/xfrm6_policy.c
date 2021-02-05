@@ -137,7 +137,7 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 	nexthdr = nh[nhoff];
 
 	if (skb_dst(skb))
-		oif = skb_dst(skb)->dev->ifindex;
+		oif = l3mdev_fib_oif(skb_dst(skb)->dev);
 
 	memset(fl6, 0, sizeof(struct flowi6));
 	fl6->flowi6_mark = skb->mark;
@@ -369,12 +369,12 @@ static void __net_exit xfrm6_net_sysctl_exit(struct net *net)
 		kfree(table);
 }
 #else /* CONFIG_SYSCTL */
-static inline int xfrm6_net_sysctl_init(struct net *net)
+static int inline xfrm6_net_sysctl_init(struct net *net)
 {
 	return 0;
 }
 
-static inline void xfrm6_net_sysctl_exit(struct net *net)
+static void inline xfrm6_net_sysctl_exit(struct net *net)
 {
 }
 #endif

@@ -105,9 +105,6 @@ int snd_hdac_ext_bus_init(struct hdac_ext_bus *ebus, struct device *dev,
 	INIT_LIST_HEAD(&ebus->hlink_list);
 	ebus->idx = idx++;
 
-	mutex_init(&ebus->lock);
-	ebus->cmd_dma_state = true;
-
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_hdac_ext_bus_init);
@@ -147,7 +144,6 @@ int snd_hdac_ext_bus_device_init(struct hdac_ext_bus *ebus, int addr)
 	if (!edev)
 		return -ENOMEM;
 	hdev = &edev->hdac;
-	edev->ebus = ebus;
 
 	snprintf(name, sizeof(name), "ehdaudio%dD%d", ebus->idx, addr);
 

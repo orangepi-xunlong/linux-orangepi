@@ -310,12 +310,10 @@ int seq_buf_to_user(struct seq_buf *s, char __user *ubuf, int cnt)
 	if (!cnt)
 		return 0;
 
-	len = seq_buf_used(s);
-
-	if (len <= s->readpos)
+	if (s->len <= s->readpos)
 		return -EBUSY;
 
-	len -= s->readpos;
+	len = seq_buf_used(s) - s->readpos;
 	if (cnt > len)
 		cnt = len;
 	ret = copy_to_user(ubuf, s->buffer + s->readpos, cnt);

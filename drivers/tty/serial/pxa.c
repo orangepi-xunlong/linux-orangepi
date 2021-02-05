@@ -27,6 +27,7 @@
 #define SUPPORT_SYSRQ
 #endif
 
+#include <linux/module.h>
 #include <linux/ioport.h>
 #include <linux/init.h>
 #include <linux/console.h>
@@ -602,7 +603,7 @@ static struct uart_driver serial_pxa_reg;
 /*
  *	Wait for transmitter & holding register to empty
  */
-static void wait_for_xmitr(struct uart_pxa_port *up)
+static inline void wait_for_xmitr(struct uart_pxa_port *up)
 {
 	unsigned int status, tmout = 10000;
 
@@ -828,6 +829,7 @@ static const struct of_device_id serial_pxa_dt_ids[] = {
 	{ .compatible = "mrvl,mmp-uart", },
 	{}
 };
+MODULE_DEVICE_TABLE(of, serial_pxa_dt_ids);
 
 static int serial_pxa_probe_dt(struct platform_device *pdev,
 			       struct uart_pxa_port *sport)
@@ -912,15 +914,28 @@ static int serial_pxa_probe(struct platform_device *dev)
 	return ret;
 }
 
+static int serial_pxa_remove(struct platform_device *dev)
+{
+	struct uart_pxa_port *sport = platform_get_drvdata(dev);
+
+	uart_remove_one_port(&serial_pxa_reg, &sport->port);
+
+	clk_unprepare(sport->clk);
+	clk_put(sport->clk);
+	kfree(sport);
+
+	return 0;
+}
+
 static struct platform_driver serial_pxa_driver = {
         .probe          = serial_pxa_probe,
+        .remove         = serial_pxa_remove,
 
 	.driver		= {
 	        .name	= "pxa2xx-uart",
 #ifdef CONFIG_PM
 		.pm	= &serial_pxa_pm_ops,
 #endif
-		.suppress_bind_attrs = true,
 		.of_match_table = serial_pxa_dt_ids,
 	},
 };
@@ -939,4 +954,15 @@ static int __init serial_pxa_init(void)
 
 	return ret;
 }
-device_initcall(serial_pxa_init);
+
+static void __exit serial_pxa_exit(void)
+{
+	platform_driver_unregister(&serial_pxa_driver);
+	uart_unregister_driver(&serial_pxa_reg);
+}
+
+module_init(serial_pxa_init);
+module_exit(serial_pxa_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:pxa2xx-uart");
