@@ -207,6 +207,7 @@ struct rk8xx_register_bit {
 
 struct rk808_regulator_data {
 	struct gpio_desc *dvs_gpio[2];
+	unsigned max_buck_steps_per_change;
 };
 
 static const struct linear_range rk808_ldo3_voltage_ranges[] = {
@@ -419,7 +420,8 @@ static int rk808_buck1_2_get_voltage_sel_regmap(struct regulator_dev *rdev)
 }
 
 static int rk808_buck1_2_i2c_set_voltage_sel(struct regulator_dev *rdev,
-					     unsigned sel)
+					     unsigned sel,
+					     int max_steps)
 {
 	int ret, delta_sel;
 	unsigned int old_sel, tmp, val, mask = rdev->desc->vsel_mask;
@@ -438,8 +440,8 @@ static int rk808_buck1_2_i2c_set_voltage_sel(struct regulator_dev *rdev,
 	 * the risk of overshoot. Put it into a multi-step, can effectively
 	 * avoid this problem, a step is 100mv here.
 	 */
-	while (delta_sel > MAX_STEPS_ONE_TIME) {
-		old_sel += MAX_STEPS_ONE_TIME;
+	while (delta_sel > max_steps) {
+		old_sel += max_steps;
 		val = old_sel << (ffs(mask) - 1);
 		val |= tmp;
 
@@ -473,12 +475,13 @@ static int rk808_buck1_2_set_voltage_sel(struct regulator_dev *rdev,
 	struct rk808_regulator_data *pdata = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
 	struct gpio_desc *gpio = pdata->dvs_gpio[id];
+	int max_steps = pdata->max_buck_steps_per_change;
 	unsigned int reg = rdev->desc->vsel_reg;
 	unsigned old_sel;
 	int ret, gpio_level;
 
 	if (!gpio)
-		return rk808_buck1_2_i2c_set_voltage_sel(rdev, sel);
+		return rk808_buck1_2_i2c_set_voltage_sel(rdev, sel, max_steps);
 
 	gpio_level = gpiod_get_value(gpio);
 	if (gpio_level == 0) {
@@ -1859,6 +1862,12 @@ static int rk808_regulator_dt_parse_pdata(struct device *dev, struct regmap *map
 		ret = regmap_update_bits(map, RK808_IO_POL_REG, tmp,
 					 gpiod_is_active_low(pdata->dvs_gpio[i]) ? 0 : tmp);
 	}
+
+	tmp = of_property_read_u32(dev->of_node, "max-buck-steps-per-change", &pdata->max_buck_steps_per_change);
+	if (tmp) {
+		pdata->max_buck_steps_per_change = MAX_STEPS_ONE_TIME;
+	}
+	dev_info(dev, "max buck steps per change: %d\n", pdata->max_buck_steps_per_change);
 
 dt_parse_end:
 	of_node_put(np);
