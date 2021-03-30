@@ -3012,7 +3012,8 @@
 			pinctrl-names = "default", "sleep";
 			pinctrl-1 = <0x80>;
 			bus-width = <0x8>;
-			max-frequency = <0x8f0d180>;
+			//max-frequency = <0x8f0d180>;
+			max-frequency = <50000000>;
 			cap-sd-highspeed;
 			cap-mmc-highspeed;
 			cap-erase;
@@ -3037,7 +3038,7 @@
 			sunxi-dis-signal-vol-sw;
 			mmc-ddr-1_8v;
 			mmc-hs200-1_8v;
-			mmc-hs400-1_8v;
+			//mmc-hs400-1_8v;
 			vmmc = "vcc-emmcv";
 			vqmmc = "vcc-emmcvq18";
 			vdmmc = "none";
