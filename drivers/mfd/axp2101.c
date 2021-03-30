@@ -130,6 +130,7 @@ static const struct regmap_range axp806_writeable_ranges[] = {
 	regmap_reg_range(AXP806_PWR_OUT_CTRL1, AXP806_CLDO3_V_CTRL),
 	regmap_reg_range(AXP20X_IRQ1_EN, AXP20X_IRQ2_EN),
 	regmap_reg_range(AXP20X_IRQ1_STATE, AXP20X_IRQ2_STATE),
+	regmap_reg_range(AXP20X_OFF_CTRL, AXP20X_OFF_CTRL),
 	regmap_reg_range(AXP2202_TWI_ADDR_EXT, AXP2202_TWI_ADDR_EXT),
 };
 
