@@ -23,6 +23,7 @@
 #include "woble.h"
 #include "tty.h"
 
+#define CMD_TIMEOUT 5000
 #define MAX_WAKE_DEVICE_MAX_NUM 36
 #define CONFIG_FILE_PATH "/data/misc/bluedroid/bt_config.conf"
 
@@ -242,7 +243,10 @@ int hci_cmd_send_sync(unsigned short opcode, struct HC_BT_HDR *py,
 		pr_err("%s marlin_sdio_write fail", __func__);
 		return 0;
 	}
-	down(&hci_cmd.wait);
+
+	if (down_timeout(&hci_cmd.wait, msecs_to_jiffies(CMD_TIMEOUT))) {
+		pr_err("%s CMD_TIMEOUT for CMD: 0x%04X", __func__, opcode);
+	}
 	hci_cmd.opcode = 0;
 
 	return 0;

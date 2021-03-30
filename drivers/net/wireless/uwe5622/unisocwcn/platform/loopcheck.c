@@ -6,7 +6,6 @@
 #include "wcn_procfs.h"
 
 #define LOOPCHECK_TIMER_INTERVAL      5
-#define USERDEBUG	1
 #define WCN_LOOPCHECK_INIT	1
 #define WCN_LOOPCHECK_OPEN	2
 
@@ -19,7 +18,6 @@ struct wcn_loopcheck {
 };
 
 static struct wcn_loopcheck loopcheck;
-unsigned int (*cp_assert_cb_matrix[2])(unsigned int type) = {0};
 #endif
 static struct completion atcmd_completion;
 static struct mutex atcmd_lock;
@@ -53,16 +51,6 @@ int at_cmd_send(char *buf, unsigned int len)
 }
 
 #ifdef CONFIG_WCN_LOOPCHECK
-static void reset_cp(void)
-{
-	marlin_chip_en(0, 0);
-	if (cp_assert_cb_matrix[0])
-		cp_assert_cb_matrix[0](0);
-	if (cp_assert_cb_matrix[1])
-		cp_assert_cb_matrix[1](1);
-
-}
-
 static void loopcheck_work_queue(struct work_struct *work)
 {
 	int ret;
@@ -83,10 +71,7 @@ static void loopcheck_work_queue(struct work_struct *work)
 		stop_loopcheck();
 		WCN_ERR("didn't get loopcheck ack\n");
 		WCN_INFO("start dump CP2 mem\n");
-		if (USERDEBUG)
-			mdbg_assert_interface("loopcheck fail");
-		else
-			reset_cp();
+		mdbg_assert_interface("loopcheck fail");
 		return;
 	}
 

@@ -404,6 +404,11 @@ int sprdwl_intf_tx_list(struct sprdwl_intf *dev,
 	int tx_count_saved = tx_count;
 	int list_num;
 
+#ifdef CP2_RESET_SUPPORT
+	if (dev->cp_asserted == 1)
+		return 0;
+#endif
+
 	wl_debug("%s:%d tx_count is %d\n", __func__, __LINE__, tx_count);
 	list_num = get_list_num(tx_list);
 	if (list_num < tx_count) {
@@ -1367,16 +1372,27 @@ int sprdwl_suspend_resume_handle(int chn, int mode)
 					vif->ctx_id,
 					SPRDWL_SUSPEND_RESUME,
 					0);
-		if (ret == 0)
+		if (ret == 0) {
 			intf->suspend_mode = SPRDWL_PS_SUSPENDED;
+#ifdef UNISOC_WIFI_PS
+			sprdwcn_bus_allow_sleep(WIFI);
+			wl_info("sprdwcn bus allow sleep\n");
+#endif
+		}
 		else
 			intf->suspend_mode = SPRDWL_PS_RESUMED;
 		sprdwl_put_vif(vif);
-		wl_info("power save ret = %d\n", ret);
 		return ret;
 	} else if (mode == 1) {
+#ifdef UNISOC_WIFI_PS
+		sprdwcn_bus_sleep_wakeup(WIFI);
+		wl_info("sprdwcn bus wake up\n");
+#endif
 		intf->suspend_mode = SPRDWL_PS_RESUMING;
 		priv->wakeup_tracer.resume_flag = 1;
+#ifdef UNISOC_WIFI_PS
+		complete(&intf->suspend_completed);
+#endif
 		getnstimeofday(&time);
 		intf->sleep_time = timespec_to_ns(&time) - intf->sleep_time;
 		ret = sprdwl_power_save(priv,
@@ -1716,7 +1732,11 @@ int sprdwl_notifier_boost(struct notifier_block *nb, unsigned long event, void *
 	unsigned long min_freq;
 	unsigned long max_freq = policy->cpuinfo.max_freq;
 	struct sprdwl_intf *intf = get_intf();
-	u8 boost = intf->boost;
+	u8 boost;
+	if (NULL == intf)
+		return NOTIFY_DONE;
+
+	boost = intf->boost;
 
 	if (event != CPUFREQ_ADJUST)
 		return NOTIFY_DONE;
@@ -1835,6 +1855,9 @@ int sprdwl_intf_init(struct sprdwl_priv *priv, struct sprdwl_intf *intf)
 		intf->txnum_level = BOOST_TXNUM_LEVEL;
 		intf->rxnum_level = BOOST_RXNUM_LEVEL;
 		intf->boost = 0;
+#ifdef UNISOC_WIFI_PS
+		init_completion(&intf->suspend_completed);
+#endif
 	} else {
 err:
 		wl_err("%s: unregister %d ops\n",

@@ -458,7 +458,10 @@ static int sprdwl_vendor_get_llstat_handler(struct wiphy *wiphy,
 
 	struct sprdwl_priv *priv = wiphy_priv(wiphy);
 	struct sprdwl_vif *vif = container_of(wdev, struct sprdwl_vif, wdev);
-
+#ifdef CP2_RESET_SUPPORT
+	if (true == priv->sync.scan_not_allowed)
+		return 0;
+#endif
 	if (!priv || !vif)
 		return -EIO;
 	if (!(priv->fw_capa & SPRDWL_CAPA_LL_STATS))

@@ -28,6 +28,7 @@
 #include "rx_msg.h"
 #include "wl_core.h"
 #include "tcp_ack.h"
+#include "rnd_mac_addr.h"
 #ifdef DFS_MASTER
 #include "11h.h"
 #endif
@@ -397,6 +398,7 @@ static void sprdwl_tx_timeout(struct net_device *ndev)
 #define CMD_BTCOEXMODE           "BTCOEXMODE"
 #define CMD_WLS_BATCHING         "WLS_BATCHING"
 #define CMD_SET_AP_WPS_P2P_IE    "SET_AP_WPS_P2P_IE"
+#define CMD_GTK_REKEY_OFFLOAD    "GTK_REKEY_OFFLOAD"
 
 static int sprdwl_priv_cmd(struct net_device *ndev, struct ifreq *ifr)
 {
@@ -662,6 +664,9 @@ static int sprdwl_priv_cmd(struct net_device *ndev, struct ifreq *ifr)
 		else if (!strncasecmp(command, CMD_SET_AP_WPS_P2P_IE,
 					strlen(CMD_SET_AP_WPS_P2P_IE)))
 			ret = 0;
+		else if (!strncasecmp(command, CMD_GTK_REKEY_OFFLOAD,
+					strlen(CMD_GTK_REKEY_OFFLOAD)))
+			ret = 0;
 		else {
 			wl_ndev_log(L_ERR, ndev, "sprdbg: %s command(%s) not support\n", __func__, command);
 			ret = -ENOTSUPP;
@@ -911,11 +916,31 @@ static void sprdwl_set_multicast(struct net_device *ndev)
 
 static int sprdwl_set_mac(struct net_device *dev, void *addr)
 {
+	struct sprdwl_vif *vif = netdev_priv(dev);
+	struct sockaddr *sa = (struct sockaddr *)addr;
+
 	if (!dev) {
 		netdev_err(dev, "Invalid net device\n");
+	}
+
+	netdev_info(dev, "start set random mac: %pM\n", sa->sa_data);
+	if (is_multicast_ether_addr(sa->sa_data)) {
+		netdev_err(dev, "invalid, it is multicast addr: %pM\n", sa->sa_data);
 		return -EINVAL;
 	}
 
+	if (vif->mode == SPRDWL_MODE_STATION) {
+		if (!is_zero_ether_addr(sa->sa_data)) {
+			vif->has_rand_mac = true;
+			memcpy(vif->random_mac, sa->sa_data, ETH_ALEN);
+			memcpy(dev->dev_addr, sa->sa_data, ETH_ALEN);
+		} else {
+			vif->has_rand_mac = false;
+			netdev_info(dev, "need clear random mac for sta/softap mode\n");
+			memset(vif->random_mac, 0, ETH_ALEN);
+			memcpy(dev->dev_addr, vif->mac, ETH_ALEN);
+		}
+	}
 	/*return success to pass vts test*/
 	return 0;
 }
@@ -1137,7 +1162,6 @@ static void sprdwl_set_mac_addr(struct sprdwl_vif *vif, u8 *pending_addr,
 	if (!addr) {
 		return;
 	}
-
 #ifdef CONFIG_SUNXI_ADDR_MGT
 	ret = get_wifi_custom_mac_address(addr_str);
 	if (ret != -1) {

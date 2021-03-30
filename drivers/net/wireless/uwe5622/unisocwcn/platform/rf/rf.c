@@ -24,13 +24,13 @@
 
 #define SYSTEM_WIFI_CONFIG_FILE "/lib/firmware/connectivity_configure.ini"
 #define SYSTEM_WIFI_CALI_FILE "/lib/firmware/connectivity_calibration.ini"
-#define VENDOR_WIFI_CONFIG_FILE "/lib/firmware/connectivity_configure.ini"
-#define VENDOR_WIFI_CALI_FILE "/lib/firmware/connectivity_calibration.ini"
-#define VENDOR_WIFI_CONFIG_AD_FILE "/lib/firmware/connectivity_configure.ini"
-#define SYSTEM_WIFI_CONFIG_AD_FILE "/lib/firmware/connectivity_configure.ini"
-#define VENDOR_WIFI_CALI_AD_FILE "/lib/firmware/connectivity_calibration.ini"
-#define SYSTEM_WIFI_CALI_AD_FILE "/lib/firmware/connectivity_calibration.ini"
-#define WIFI_CALI_DUMP_FILE "/lib/firmware/connectivity_calibration_bak.ini"
+#define VENDOR_WIFI_CONFIG_FILE "/vendor/etc/connectivity_configure.ini"
+#define VENDOR_WIFI_CALI_FILE "/vendor/etc/connectivity_calibration.ini"
+#define VENDOR_WIFI_CONFIG_AD_FILE "/vendor/etc/wcn/connectivity_configure.ini"
+#define SYSTEM_WIFI_CONFIG_AD_FILE "/lib/firmware/wcn/connectivity_configure.ini"
+#define VENDOR_WIFI_CALI_AD_FILE "/lib/firmware/wcn/connectivity_calibration.ini"
+#define SYSTEM_WIFI_CALI_AD_FILE "/lib/firmware/wcn/connectivity_calibration.ini"
+#define WIFI_CALI_DUMP_FILE "/var/log/wcn/connectivity_calibration_bak.ini"
 
 #define CONF_TYPE 1
 #define CALI_TYPE 2

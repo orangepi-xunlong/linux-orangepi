@@ -55,7 +55,7 @@ struct sprdwl_cmd {
 	struct completion completed;
 };
 
-static struct sprdwl_cmd g_sprdwl_cmd;
+struct sprdwl_cmd g_sprdwl_cmd;
 
 const uint16_t CRC_table[] = {
 	0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00,
@@ -247,6 +247,7 @@ static const char *err2str(s8 error)
 	return str;
 }
 
+#define SPRDWL_CMD_EXIT_VAL 0x8000
 int sprdwl_cmd_init(void)
 {
 	struct sprdwl_cmd *cmd = &g_sprdwl_cmd;
@@ -262,6 +263,12 @@ int sprdwl_cmd_init(void)
 		wl_err("%s wakeup source register error.\n", __func__);
 		return -EINVAL;
 	}
+
+#ifdef CP2_RESET_SUPPORT
+	if (atomic_read(&cmd->refcnt) >= SPRDWL_CMD_EXIT_VAL)
+		atomic_set(&cmd->refcnt, 0);
+#endif
+
 	spin_lock_init(&cmd->lock);
 	mutex_init(&cmd->cmd_lock);
 	init_completion(&cmd->completed);
@@ -305,7 +312,6 @@ static void sprdwl_cmd_clean(struct sprdwl_cmd *cmd)
 	spin_unlock_bh(&cmd->lock);
 }
 
-#define SPRDWL_CMD_EXIT_VAL 0x8000
 void sprdwl_cmd_deinit(void)
 {
 	unsigned long timeout;
@@ -325,12 +331,20 @@ void sprdwl_cmd_deinit(void)
 	mutex_destroy(&cmd->cmd_lock);
 	if (cmd->wake_lock)
 		wakeup_source_unregister(cmd->wake_lock);
+#ifdef CP2_RESET_SUPPORT
+	cmd->init_ok = 0;
+#endif
 }
 
 extern struct sprdwl_intf_ops g_intf_ops;
 static int sprdwl_cmd_lock(struct sprdwl_cmd *cmd)
 {
 	struct sprdwl_intf *intf = (struct sprdwl_intf *)g_intf_ops.intf;
+
+#ifdef CP2_RESET_SUPPORT
+	if (!unlikely(cmd->init_ok))
+		return -1;
+#endif
 
 	if (atomic_inc_return(&cmd->refcnt) >= SPRDWL_CMD_EXIT_VAL) {
 		atomic_dec(&cmd->refcnt);
@@ -342,6 +356,15 @@ static int sprdwl_cmd_lock(struct sprdwl_cmd *cmd)
 	mutex_lock(&cmd->cmd_lock);
 	if (intf->priv->is_suspending == 0)
 		__pm_stay_awake(cmd->wake_lock);
+
+#ifdef UNISOC_WIFI_PS
+	if (SPRDWL_PS_SUSPENDED == intf->suspend_mode) {
+		reinit_completion(&intf->suspend_completed);
+		wait_for_completion(&intf->suspend_completed);
+		wl_info("wait for completion\n");
+	}
+#endif
+
 	wl_debug("cmd->refcnt=%x\n", atomic_read(&cmd->refcnt));
 
 	return 0;
@@ -350,6 +373,11 @@ static int sprdwl_cmd_lock(struct sprdwl_cmd *cmd)
 static void sprdwl_cmd_unlock(struct sprdwl_cmd *cmd)
 {
 	struct sprdwl_intf *intf = (struct sprdwl_intf *)g_intf_ops.intf;
+
+#ifdef CP2_RESET_SUPPORT
+	if (!unlikely(cmd->init_ok))
+		return;
+#endif
 
 	mutex_unlock(&cmd->cmd_lock);
 	atomic_dec(&cmd->refcnt);
@@ -374,6 +402,19 @@ struct sprdwl_msg_buf *__sprdwl_cmd_getbuf(struct sprdwl_priv *priv,
 
 	if (intf->cp_asserted == 1)
 		return NULL;
+
+#ifdef CP2_RESET_SUPPORT
+	if ((g_sprdwl_priv->sync.scan_not_allowed == true) &&
+		(g_sprdwl_priv->sync.cmd_not_allowed == false)) {
+		if ((cmd_id != WIFI_CMD_SYNC_VERSION) &&
+			(cmd_id != WIFI_CMD_DOWNLOAD_INI) &&
+			(cmd_id != WIFI_CMD_GET_INFO) &&
+			(cmd_id != WIFI_CMD_OPEN) &&
+			(cmd_id != WIFI_CMD_SET_REGDOM)) {
+			   return NULL;
+		}
+	}
+#endif
 
 	if (cmd_id >= WIFI_CMD_OPEN) {
 		vif = ctx_id_to_vif(priv, ctx_id);
@@ -547,6 +588,16 @@ int sprdwl_cmd_send_recv(struct sprdwl_priv *priv,
 	}
 
 	ret = sprdwl_timeout_recv_rsp(priv, timeout);
+
+#ifdef CP2_RESET_SUPPORT
+	if (true == priv->sync.cmd_not_allowed) {
+		if (unlikely(cmd->init_ok))
+			sprdwl_cmd_unlock(cmd);
+
+		return 0;
+	}
+#endif
+
 	if (ret != -1) {
 		if (rbuf && rlen && *rlen) {
 			hdr = (struct sprdwl_cmd_hdr *)cmd->data;

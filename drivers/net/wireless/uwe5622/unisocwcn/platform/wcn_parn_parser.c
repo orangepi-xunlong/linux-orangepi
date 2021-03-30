@@ -40,7 +40,7 @@
 
 #define ROOT_PATH "/"
 #define ETC_PATH "/etc"
-#define VENDOR_ETC_PATH "/lib/firmware"
+#define VENDOR_ETC_PATH "/etc"
 #define ETC_FSTAB "/etc/fstab"
 #define FSTAB_PATH_NUM 3
 #define CONF_COMMENT '#'

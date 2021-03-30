@@ -327,6 +327,7 @@ void sprdwl_init_npi(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
 	int ret = genl_register_family(&sprdwl_nl_genl_family);
+
 	if (ret)
 		wl_err("genl_register_family error: %d\n", ret);
 #else

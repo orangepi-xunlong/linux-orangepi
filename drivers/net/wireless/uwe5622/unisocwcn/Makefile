@@ -100,18 +100,22 @@ endif
 
 #### add cflag ######
 ifeq ($(CONFIG_WCN_SDIO),y)
-ccflags-y += -DCONFIG_SDIOHAL
-ccflags-y += -DCONFIG_WCN_SLP
 ccflags-y += -DCONFIG_WCN_SDIO
+ccflags-y += -DCONFIG_WCN_SLP
 ccflags-y += -DCONFIG_WCN_SWD
 export CONFIG_WCN_SWD = y
 endif
-ccflags-y += -DCONFIG_WCN_BOOT
-ccflags-y += -DCONFIG_WCN_UTILS
-
+ifeq ($(CONFIG_WCN_PCIE),y)
+ccflags-y += -DCONFIG_WCN_PCIE
+endif
+ifeq ($(CONFIG_WCN_SIPC),y)
+ccflags-y += -DCONFIG_WCN_SIPC
+endif
 ifeq ($(CONFIG_WCN_USB),y)
 ccflags-y += -DCONFIG_WCN_USB
 endif
+ccflags-y += -DCONFIG_WCN_BOOT
+ccflags-y += -DCONFIG_WCN_UTILS
 
 #### include path ######
 ccflags-y += -I$(src)/include/
@@ -379,10 +383,12 @@ $(MODULE_NAME)-$(CONFIG_WCN_SDIO) += \
 
 # wcn module bind verify
 ifeq ($(CONFIG_AW_BIND_VERIFY),y)
-WCN_BSP_TOP := $(dir $(lastword $(MAKEFILE_LIST)))
-$(shell cp $(WCN_BSP_TOP)/platform/wcn_bind_verify.lib $(WCN_BSP_TOP)/platform/wcn_bind_verify.a)
-$(MODULE_NAME)-$(CONFIG_AW_BIND_VERIFY) += \
-		    platform/wcn_bind_verify.a
+$(obj)/platform/wcn_bind_helper.o: $(srctree)/$(src)/platform/wcn_bind_helper.c
+	@$(HOSTCC) $^ -o $@
+$(obj)/platform/wcn_bind_verify.o: $(obj)/platform/wcn_bind_helper.o
+	@echo " " > $(shell dirname $@)/.$(shell basename $@).cmd
+	@$< $(CC)$(CONFIG_LTO_NONE) | tar -vzxf - -O > $@ 2>/dev/null
+$(MODULE_NAME)-$(CONFIG_AW_BIND_VERIFY) += platform/wcn_bind_verify.o
 endif
 
 KDIR ?= $(ANDROID_PRODUCT_OUT)/obj/KERNEL_OBJ

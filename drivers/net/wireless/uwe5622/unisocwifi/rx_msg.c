@@ -402,7 +402,7 @@ int sprdwl_pkt_log_save(struct sprdwl_intf *intf, void *data)
 	pkt_len = ((struct sprdwl_pktlog_hdr *)(data))->plen;
 	data += sizeof(struct sprdwl_pktlog_hdr);
 	while (m < pkt_len) {
-		data_len = *((unsigned char *)(data+2)) + 4;
+		data_len = *((unsigned char *)(data + 2)) + 4;
 		m += data_len;
 		temp_space = ' ';
 		temp_enter = '\n';
@@ -420,7 +420,7 @@ int sprdwl_pkt_log_save(struct sprdwl_intf *intf, void *data)
 				vfs_write(intf->pfile, tempdata,
 						  2, &intf->lp);
 				memset(tempdata, 0x00, 2);
-				if ((i != 0) && ((i+1)%16 == 0)) {
+				if ((i != 0) && ((i + 1)%16 == 0)) {
 					if (i < (data_len - 1)) {
 						vfs_write(intf->pfile, &temp_enter,
 								  sizeof(temp_enter), &intf->lp);
@@ -428,7 +428,7 @@ int sprdwl_pkt_log_save(struct sprdwl_intf *intf, void *data)
 						temp_pkt_line_num = pkt_line_num;
 						for (j = 0; j < 6; j++) {
 							temp = (temp_pkt_line_num >> (j*4)) & 0xf;
-							temphdr[5-j] = (temp < 10) ? (temp+'0') : (temp-10+'a');
+							temphdr[5 - j] = (temp < 10) ? (temp + '0') : (temp - 10 + 'a');
 						}
 						vfs_write(intf->pfile, temphdr,
 								  6, &intf->lp);

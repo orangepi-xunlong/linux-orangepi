@@ -149,7 +149,7 @@ static void mdbg_ring_rx_task(struct work_struct *work)
 	struct mdbg_ring_t *ring = NULL;
 	struct mbuf_t *mbuf_node;
 	int i;
-#ifdef CONFIG_SDIOHAL
+#ifdef CONFIG_WCN_SDIO
 	struct bus_puh_t *puh = NULL;
 #endif
 
@@ -175,7 +175,7 @@ static void mdbg_ring_rx_task(struct work_struct *work)
 
 	for (i = 0, mbuf_node = rx->head; i < rx->num; i++,
 		mbuf_node = mbuf_node->next) {
-#ifdef CONFIG_SDIOHAL
+#ifdef CONFIG_WCN_SDIO
 		rx->addr = mbuf_node->buf + PUB_HEAD_RSV;
 		puh = (struct bus_puh_t *)mbuf_node->buf;
 #ifdef CONFIG_WCND
